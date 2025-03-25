@@ -980,3 +980,23 @@ batch_load_twas_weights <- function(twas_weights_results, meta_data_df, max_memo
   names(batches) <- NULL
   return(batches)
 }
+
+
+#' Map data type for twas weight contexts based on provided data type table. 
+#' @param data_type_table A data frame contains three columns: type, context, subgroup 
+#' @param context_names A vector of contexts 
+#' @return A vector of mapped data type based on context names
+#' @export
+map_data_type <- function(data_type_table, context_names){
+        data_type <- lapply(context_names, function(context){
+             xqtl_type_table$type[apply(xqtl_type_table, 1, function(x) {
+                 if (! grepl("sQTL",context)) {
+                     grepl(x[2], context)
+                 } else {
+                     grepl(x[2], context) & grepl(x[3], context)
+                 }
+             })]
+        })
+        names(data_type) <- context_names
+        return(data_type)
+}
