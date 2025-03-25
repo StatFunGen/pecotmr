@@ -7,13 +7,12 @@
 load_rss_data(
   sumstat_path,
   column_file_path,
-  subset = TRUE,
   n_sample = 0,
   n_case = 0,
   n_control = 0,
-  target = "",
-  region = "",
-  target_column_index = "",
+  region = NULL,
+  extract_region_name = NULL,
+  region_name_col = NULL,
   comment_string = "#"
 )
 }
@@ -28,13 +27,13 @@ load_rss_data(
 
 \item{n_control}{User-specified number of controls.}
 
-\item{target}{User-specified gene/phenotype name used to further subset the phenotype data.}
-
 \item{region}{The region where tabix use to subset the input dataset.}
 
-\item{target_column_index}{Filter this specific column for the target.}
+\item{extract_region_name}{User-specified gene/phenotype name used to further subset the phenotype data.}
 
-\item{comment_string}{comment sign in the column_mapping file, default is #}
+\item{region_name_col}{Filter this specific column for the extract_region_name.}
+
+\item{comment_string}{Comment sign in the column_mapping file, default is #}
 }
 \value{
 A list of rss_input, including the column-name-formatted summary statistics,

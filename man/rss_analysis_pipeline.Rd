@@ -11,10 +11,10 @@ rss_analysis_pipeline(
   n_sample = 0,
   n_case = 0,
   n_control = 0,
-  target = "",
-  region = "",
-  target_column_index = "",
+  region = NULL,
   skip_region = NULL,
+  extract_region_name = NULL,
+  region_name_col = NULL,
   qc_method = c("rss_qc", "dentist", "slalom"),
   finemapping_method = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
   finemapping_opts = list(init_L = 5, max_L = 20, l_step = 5, coverage = c(0.95, 0.7,
@@ -39,8 +39,14 @@ rss_analysis_pipeline(
 
 \item{n_control}{User-specified number of controls.}
 
+\item{region}{The region where tabix use to subset the input dataset.}
+
 \item{skip_region}{A character vector specifying regions to be skipped in the analysis (optional).
 Each region should be in the format "chrom:start-end" (e.g., "1:1000000-2000000").}
+
+\item{extract_region_name}{User-specified gene/phenotype name used to further subset the phenotype data.}
+
+\item{region_name_col}{Filter this specific column for the extract_region_name.}
 
 \item{qc_method}{Quality control method to use. Options are "rss_qc", "dentist", or "slalom" (default: "rss_qc").}
 

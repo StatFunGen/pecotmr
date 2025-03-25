@@ -2,29 +2,29 @@
 % Please edit documentation in R/file_utils.R
 \name{load_tsv_region}
 \alias{load_tsv_region}
-\title{Load customized tsv data}
+\title{Load and filter tabular data with optional region subsetting}
 \usage{
 load_tsv_region(
-  sumstat_path,
-  region = "",
-  target = "",
-  target_column_index = ""
+  file_path,
+  region = NULL,
+  extract_region_name = NULL,
+  region_name_col = NULL
 )
 }
 \arguments{
-\item{sumstat_path}{File path to the summary statistics.}
+\item{file_path}{Path to the summary statistics file.}
 
-\item{region}{The region where tabix use to subset the input dataset. Format: chr:start-end (eg: 9:10000-50000)}
+\item{region}{Genomic region for subsetting tabix-indexed files. Format: chr:start-end (e.g., "9:10000-50000").}
 
-\item{target}{User-specified gene/phenotype name used to further subset the phenotype data.}
+\item{extract_region_name}{Value to filter for in the specified filter column.}
 
-\item{target_column_index}{Filter this specific column for the target.}
+\item{region_name_col}{Index of the column to apply the extract_region_name against.}
 }
 \value{
-A dataframe of the subsetted summary statistics,
+A dataframe containing the filtered summary statistics.
 }
 \description{
-This function load the input data. If the input sumstat data is .gz and tabixed, then can use the region parameter to subset the data
-and filter by target column
-Otherwise, it will only filter by target column since tabix command won't function (this apply to .tsv, .txt files)
+This function loads summary statistics data from tabular files (TSV, TXT).
+For compressed (.gz) and tabix-indexed files, it can subset data by genomic region.
+Additionally, it can filter results by a specified target value in a designated column.
 }

@@ -2,12 +2,11 @@
 % Please edit documentation in R/allele_qc.R
 \name{allele_qc}
 \alias{allele_qc}
-\title{Match alleles between target_variants and ref_variants}
+\title{Match alleles between target data and reference variants}
 \usage{
 allele_qc(
-  target_variants,
-  ref_variants,
   target_data,
+  ref_variants,
   col_to_flip = NULL,
   match_min_prop = 0.2,
   remove_dups = TRUE,
@@ -15,16 +14,14 @@ allele_qc(
   remove_strand_ambiguous = TRUE,
   flip_strand = FALSE,
   remove_unmatched = TRUE,
-  remove_same_vars = FALSE,
-  target_gwas = TRUE
+  remove_same_vars = FALSE
 )
 }
 \arguments{
-\item{target_variants}{A data frame with columns "chrom", "pos", "A1", "A2" or strings in the format of "chr:pos:A2:A1"/"chr:pos_A2_A1".}
+\item{target_data}{A data frame with columns "chrom", "pos", "A2", "A1" (and optionally other columns like "beta" or "z"),
+or a vector of strings in the format of "chr:pos:A2:A1"/"chr:pos_A2_A1". Can be automatically converted to a data frame if a vector.}
 
-\item{ref_variants}{A data frame with columns "chrom", "pos", "A1", "A2" or strings in the format of "chr:pos:A2:A1"/"chr:pos_A2_A1".}
-
-\item{target_data}{A data frame on which QC procedures will be applied.}
+\item{ref_variants}{A data frame with columns "chrom", "pos", "A2", "A1" or strings in the format of "chr:pos:A2:A1"/"chr:pos_A2_A1".}
 
 \item{col_to_flip}{The name of the column in target_data where flips are to be applied.}
 

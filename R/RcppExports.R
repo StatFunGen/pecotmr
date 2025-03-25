@@ -2,21 +2,22 @@
 # Generator token: 10BE3573-1514-4C36-9D1C-5A225CD40393
 
 dentist_iterative_impute <- function(LD_mat, nSample, zScore, pValueThreshold, propSVD, gcControl, nIter, gPvalueThreshold, ncpus, seed, correct_chen_et_al_bug, verbose = FALSE) {
-  .Call("_pecotmr_dentist_iterative_impute", PACKAGE = "pecotmr", LD_mat, nSample, zScore, pValueThreshold, propSVD, gcControl, nIter, gPvalueThreshold, ncpus, seed, correct_chen_et_al_bug, verbose)
+    .Call('_pecotmr_dentist_iterative_impute', PACKAGE = 'pecotmr', LD_mat, nSample, zScore, pValueThreshold, propSVD, gcControl, nIter, gPvalueThreshold, ncpus, seed, correct_chen_et_al_bug, verbose)
 }
 
 rcpp_mr_ash_rss <- function(bhat, shat, z, R, var_y, n, sigma2_e, s0, w0, mu1_init, tol = 1e-8, max_iter = 1e5L, update_w0 = TRUE, update_sigma = TRUE, compute_ELBO = TRUE, standardize = FALSE, ncpus = 1L) {
-  .Call("_pecotmr_rcpp_mr_ash_rss", PACKAGE = "pecotmr", bhat, shat, z, R, var_y, n, sigma2_e, s0, w0, mu1_init, tol, max_iter, update_w0, update_sigma, compute_ELBO, standardize, ncpus)
+    .Call('_pecotmr_rcpp_mr_ash_rss', PACKAGE = 'pecotmr', bhat, shat, z, R, var_y, n, sigma2_e, s0, w0, mu1_init, tol, max_iter, update_w0, update_sigma, compute_ELBO, standardize, ncpus)
 }
 
 prs_cs_rcpp <- function(a, b, phi, bhat, maf, n, ld_blk, n_iter, n_burnin, thin, verbose, seed) {
-  .Call("_pecotmr_prs_cs_rcpp", PACKAGE = "pecotmr", a, b, phi, bhat, maf, n, ld_blk, n_iter, n_burnin, thin, verbose, seed)
+    .Call('_pecotmr_prs_cs_rcpp', PACKAGE = 'pecotmr', a, b, phi, bhat, maf, n, ld_blk, n_iter, n_burnin, thin, verbose, seed)
 }
 
 qtl_enrichment_rcpp <- function(r_gwas_pip, r_qtl_susie_fit, pi_gwas = 0, pi_qtl = 0, ImpN = 25L, shrinkage_lambda = 1.0, num_threads = 1L) {
-  .Call("_pecotmr_qtl_enrichment_rcpp", PACKAGE = "pecotmr", r_gwas_pip, r_qtl_susie_fit, pi_gwas, pi_qtl, ImpN, shrinkage_lambda, num_threads)
+    .Call('_pecotmr_qtl_enrichment_rcpp', PACKAGE = 'pecotmr', r_gwas_pip, r_qtl_susie_fit, pi_gwas, pi_qtl, ImpN, shrinkage_lambda, num_threads)
 }
 
 sdpr_rcpp <- function(bhat, LD, n, per_variant_sample_size = NULL, array = NULL, a = 0.1, c = 1.0, M = 1000L, a0k = 0.5, b0k = 0.5, iter = 1000L, burn = 200L, thin = 5L, n_threads = 1L, opt_llk = 1L, verbose = TRUE) {
-  .Call("_pecotmr_sdpr_rcpp", PACKAGE = "pecotmr", bhat, LD, n, per_variant_sample_size, array, a, c, M, a0k, b0k, iter, burn, thin, n_threads, opt_llk, verbose)
+    .Call('_pecotmr_sdpr_rcpp', PACKAGE = 'pecotmr', bhat, LD, n, per_variant_sample_size, array, a, c, M, a0k, b0k, iter, burn, thin, n_threads, opt_llk, verbose)
 }
+

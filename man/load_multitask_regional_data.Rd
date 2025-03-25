@@ -30,12 +30,11 @@ load_multitask_regional_data(
   LD_meta_file_path_list = NULL,
   match_LD_sumstat = NULL,
   conditions_list_sumstat = NULL,
-  subset = TRUE,
   n_samples = 0,
   n_cases = 0,
   n_controls = 0,
-  target = "",
-  target_column_index = "",
+  extract_sumstats_region_name = NULL,
+  sumstats_region_name_col = NULL,
   comment_string = "#",
   extract_coordinates = NULL
 )
@@ -87,19 +86,19 @@ load_multitask_regional_data(
 
 \item{conditions_list_sumstat}{A vector of strings representing different sumstats.}
 
-\item{target}{User-specified gene/phenotype name used to further subset the phenotype data.}
+\item{n_samples}{User-specified sample size. If unknown, set as 0 to retrieve from the sumstat file.}
 
-\item{target_column_index}{Filter this specific column for the target.}
+\item{n_cases}{User-specified number of cases.}
+
+\item{n_controls}{User-specified number of controls.}
+
+\item{extract_sumstats_region_name}{User-specified gene/phenotype name used to further subset the phenotype data.}
+
+\item{sumstats_region_name_col}{Filter this specific column for the extract_sumstats_region_name.}
 
 \item{comment_string}{comment sign in the column_mapping file, default is #}
 
 \item{extract_coordinates}{Optional data frame with columns "chrom" and "pos" for specific coordinates extraction.}
-
-\item{n_sample}{User-specified sample size. If unknown, set as 0 to retrieve from the sumstat file.}
-
-\item{n_case}{User-specified number of cases.}
-
-\item{n_control}{User-specified number of controls.}
 }
 \value{
 A list containing the individual_data and sumstat_data:
