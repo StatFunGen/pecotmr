@@ -823,3 +823,43 @@ bayes_c_rss_weights <- function(sumstats, LD, ...) {
 bayes_r_rss_weights <- function(sumstats, LD, ...) {
   return(bayes_alphabet_rss_weights(sumstats, LD, method = "bayesR", ...))
 }
+
+#' @export
+susie_ash_weights <- function(susie_ash_fit, X = NULL, y = NULL, ...) {
+  # If the fit object is missing or NULL, try to recover it from the parent frame.
+  if (missing(susie_ash_fit) || is.null(susie_ash_fit)) {
+    susie_ash_fit <- get0("susie_ash_fit", envir = parent.frame())
+    if (is.null(susie_ash_fit)) {
+      stop("A susie_ash_fit object is required.")
+    }
+  }
+  if (!is.null(X)) {
+    if (length(susie_ash_fit$marginal_PIP) != ncol(X)) {
+      stop(paste0("Dimension mismatch on number of variants in susie_ash_fit ",
+                  length(susie_ash_fit$marginal_PIP), " and TWAS weights ", ncol(X), ". "))
+    }
+  }
+  # Calculate coefficients as per the provided formula.
+  weights <- rowSums(susie_ash_fit$mu * susie_ash_fit$PIP) + susie_ash_fit$theta
+  return(weights)
+}
+
+#' @export
+susie_inf_weights <- function(susie_inf_fit, X = NULL, y = NULL, ...) {
+  # If the fit object is missing or NULL, try to recover it from the parent frame.
+  if (missing(susie_inf_fit) || is.null(susie_inf_fit)) {
+    susie_inf_fit <- get0("susie_inf_fit", envir = parent.frame())
+    if (is.null(susie_inf_fit)) {
+      stop("A susie_inf_fit object is required.")
+    }
+  }
+  if (!is.null(X)) {
+    if (length(susie_inf_fit$marginal_PIP) != ncol(X)) {
+      stop(paste0("Dimension mismatch on number of variants in susie_inf_fit ",
+                  length(susie_inf_fit$marginal_PIP), " and TWAS weights ", ncol(X), ". "))
+    }
+  }
+  # Calculate coefficients as per the provided formula.
+  weights <- rowSums(susie_inf_fit$mu * susie_inf_fit$PIP) + susie_inf_fit$alpha
+  return(weights)
+}

@@ -96,43 +96,6 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
     stop("Data load error. Please make sure at least one data set (sumstat_path_list or genotype_list) exists.")
   }
 
-  # FIXME: hard_code: remove rare events
-  add_hoc_remove_rare_events <- function(events_name, rare_events_path) {
-    clean_events_name <- gsub(":ENSG[0-9]+", "", events_name)
-    rare_events <- read.table(rare_events_path, header = T)$ID
-    rare <- intersect(rare_events, clean_events_name)
-    if (length(rare) != 0 & length(rare) != length(clean_events_name)) {
-      message(paste("Remove", length(rare), "rare events out of", length(clean_events_name), "events"))
-      pp <- match(rare, clean_events_name)
-      return(events_name[-pp])
-    } else if (length(rare) == length(clean_events_name)) {
-      message(paste("Remove rare events for all", length(clean_events_name), "events"))
-      return(NULL)
-    } else {
-      message("No rare events")
-      return(events_name)
-    }
-  }
-  brain_region <- c("AC", "DLPFC", "PCC")
-  for (rr in brain_region) {
-    tmp <- paste0(rr, "_lf2_sQTL")
-    if (!(tmp %in% conditions_list_individual)) next
-    pos <- which(conditions_list_individual == tmp)
-    rare_events_path <- paste0(
-      "/home/xc2270/COLOCBoost/pipeline/ROSMAP_", rr,
-      "_perind.counts.noise_by_intron.QCed_minc1_mins10.NOTpass_rare_filtered_0.9.ID_list"
-    )
-    remain_events <- add_hoc_remove_rare_events(extract_region_name[[pos]], rare_events_path)
-    if (!is.null(remain_events)) {
-      extract_region_name[[pos]] <- remain_events
-    } else {
-      conditions_list_individual <- conditions_list_individual[-pos]
-      extract_region_name <- extract_region_name[-pos]
-      phenotype_list <- phenotype_list[-pos]
-      covariate_list <- covariate_list[-pos]
-    }
-  }
-
   # - if exist individual level data
   individual_data <- NULL
   if (!is.null(genotype_list)) {
