@@ -32,7 +32,7 @@ jobs:
     if: ${{ github.event.inputs.commit }} == "auto"
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           token: ${{ secrets.CI_TOKEN }}
           fetch-depth: 0
@@ -82,7 +82,7 @@ jobs:
           fi
 
       - name: Checkout HEAD
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ steps.determine-commit.outputs.commit }}
 
