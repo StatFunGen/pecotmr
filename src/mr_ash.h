@@ -1,4 +1,4 @@
-#include <armadillo>
+#include <current/armadillo>
 #include <cmath>
 #include <vector>
 #include <string>

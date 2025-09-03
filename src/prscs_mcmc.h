@@ -6,7 +6,7 @@
 #ifndef MCMC_HPP
 #define MCMC_HPP
 
-#include <armadillo>
+#include <current/armadillo>
 #include <vector>
 #include <string>
 #include <cmath>
