@@ -27,6 +27,9 @@ dependencies = {"r-base" = "4.4.*"}
 r43 = {features = ["r43"]}
 r44 = {features = ["r44"]}
 
+[target.linux-64.dependencies]
+"gcc" = "*"
+
 [dependencies]
 "gsl" = "*"
 "bioconductor-bioccheck" = "*"
@@ -35,6 +38,3 @@ r44 = {features = ["r44"]}
 "r-rcmdcheck" = "*"
 "r-covr" = "*"
 "r-tidyverse" = "*"
-
-[target.linux-64.dependencies]
-"gcc" = "*"
