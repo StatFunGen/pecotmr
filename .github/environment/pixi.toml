@@ -35,3 +35,6 @@ r44 = {features = ["r44"]}
 "r-rcmdcheck" = "*"
 "r-covr" = "*"
 "r-tidyverse" = "*"
+
+[target.linux-64.dependencies]
+"gcc" = "*"
