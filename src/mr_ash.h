@@ -151,7 +151,6 @@ unordered_map<string, mat> mr_ash_sufficient(const vec& XTy, const mat& XTX, dou
 		vec XTrbar = XTy - XTX * mu1_t;
 
 		// Loop through the variables
-		#pragma omp parallel for reduction(+:var_part_ERSS,neg_KL)
 		for (int j = 0; j < p; j++) {
 			// Remove j-th effect from expected residuals
 			vec XTrbar_j = XTrbar + XTX.col(j) * mu1_t[j];
