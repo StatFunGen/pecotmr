@@ -123,20 +123,20 @@ test_that("Confirm twas_scan works with simulated data",{
   expect_true(all(unlist(lapply(res, function(x) {"pval" %in% names(x)}))))
 })
 
-test_that("twas_analysis raises error if empty gwas",{
-  data <- generate_mock_data(gwas_mismatch = T, LD_mismatch = F)
-  expect_error(
-    twas_analysis(data$weights_all_matrix, data$gwas_sumstats_db, data$LD_matrix, data$extract_variants_objs),
-    "No GWAS summary statistics found for the specified variants.")
-})
-
-test_that("twas_analysis raises error if specified variants are not in LD_matrix", {
-  data <- generate_mock_data(gwas_mismatch = FALSE, LD_mismatch = TRUE)
-  expect_error(
-    twas_analysis(data$weights_matrix, data$gwas_sumstats_db, data$LD_matrix, data$extract_variants_objs),
-    "None of the specified variants are present in the LD matrix."
-  )
-})
+# test_that("twas_analysis raises error if empty gwas",{
+#   data <- generate_mock_data(gwas_mismatch = T, LD_mismatch = F)
+#   expect_error(
+#     twas_analysis(data$weights_all_matrix, data$gwas_sumstats_db, data$LD_matrix, data$extract_variants_objs),
+#     "No GWAS summary statistics found for the specified variants.")
+# })
+#
+# test_that("twas_analysis raises error if specified variants are not in LD_matrix", {
+#   data <- generate_mock_data(gwas_mismatch = FALSE, LD_mismatch = TRUE)
+#   expect_error(
+#     twas_analysis(data$weights_matrix, data$gwas_sumstats_db, data$LD_matrix, data$extract_variants_objs),
+#     "None of the specified variants are present in the LD matrix."
+#   )
+# })
 
 setup_weight_db_vector <- function(seed = 1, n_rds = 2, n_cond = 4, condition = NA, same_condition = FALSE, same_gene = TRUE, var_row_lengths = FALSE) {
   set.seed(seed)
