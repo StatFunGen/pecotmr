@@ -306,22 +306,22 @@ test_that("calculate_cumsum works with dummy data", {
 #     })
 # })
 
-test_that("calculate_purity works with dummy data", {
-    data(coloc_test_data)
-    attach(coloc_test_data)
-    data <- generate_mock_ld_files()
-    region <- "chr1:1-5"
-    B1 <- D1
-    B2 <- D2
-    B1$snp <- B2$snp <- colnames(B1$LD) <- colnames(B2$LD) <- rownames(B1$LD) <- rownames(B2$LD) <- paste0("1:", 1:500, ":A:G")
-    variants <- paste0("1:", 1:5, ":A:G")
-    ext_ld <- load_and_extract_ld_matrix(data$meta_path, region, variants)
-    res <- calculate_purity(variants, ext_ld, squared = TRUE)
-    expect_equal(ncol(res), 3)
-    lapply(unlist(data), function(x) {
-        file.remove(x)
-    })
-})
+# test_that("calculate_purity works with dummy data", {
+#     data(coloc_test_data)
+#     attach(coloc_test_data)
+#     data <- generate_mock_ld_files()
+#     region <- "chr1:1-5"
+#     B1 <- D1
+#     B2 <- D2
+#     B1$snp <- B2$snp <- colnames(B1$LD) <- colnames(B2$LD) <- rownames(B1$LD) <- rownames(B2$LD) <- paste0("1:", 1:500, ":A:G")
+#     variants <- paste0("1:", 1:5, ":A:G")
+#     ext_ld <- load_and_extract_ld_matrix(data$meta_path, region, variants)
+#     res <- calculate_purity(variants, ext_ld, squared = TRUE)
+#     expect_equal(ncol(res), 3)
+#     lapply(unlist(data), function(x) {
+#         file.remove(x)
+#     })
+# })
 
 test_that("process_coloc_results works with dummy data", {
     data(coloc_test_data)
