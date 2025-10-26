@@ -7,15 +7,15 @@ platforms = ["linux-64", "osx-64", "osx-arm64"]
 libc = { family="glibc", version="2.17" }
 
 [tasks]
-devtools_document = "R -e 'devtools::document()'"
-devtools_test = "R -e 'devtools::test()'"
-codecov = "R -e 'covr::codecov(quiet = FALSE)'"
-rcmdcheck = "R -e 'rcmdcheck::rcmdcheck()'"
-bioccheck_git_clone = "R -e 'BiocCheck::BiocCheckGitClone()'"
-bioccheck = "R -e 'BiocCheck::BiocCheck()'"
-use_major_version = "R -e 'usethis::use_version(which = \"major\", push = FALSE)'"
-use_minor_version = "R -e 'usethis::use_version(which = \"minor\", push = FALSE)'"
-use_patch_version = "R -e 'usethis::use_version(which = \"patch\", push = FALSE)'"
+devtools_document = "cd $GITHUB_WORKSPACE; R -e 'devtools::document()'"
+devtools_test = "cd $GITHUB_WORKSPACE; R -e 'devtools::test()'"
+codecov = "cd $GITHUB_WORKSPACE; R -e 'covr::codecov(quiet = FALSE)'"
+rcmdcheck = "cd $GITHUB_WORKSPACE; R -e 'rcmdcheck::rcmdcheck()'"
+bioccheck_git_clone = "cd $GITHUB_WORKSPACE; R -e 'BiocCheck::BiocCheckGitClone()'"
+bioccheck = "cd $GITHUB_WORKSPACE; R -e 'BiocCheck::BiocCheck()'"
+use_major_version = "cd $GITHUB_WORKSPACE; R -e 'usethis::use_version(which = \"major\", push = FALSE)'"
+use_minor_version = "cd $GITHUB_WORKSPACE; R -e 'usethis::use_version(which = \"minor\", push = FALSE)'"
+use_patch_version = "cd $GITHUB_WORKSPACE; R -e 'usethis::use_version(which = \"patch\", push = FALSE)'"
 
 [feature.r43]
 dependencies = {"r-base" = "4.3.*"}
