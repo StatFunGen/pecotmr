@@ -1,7 +1,7 @@
 [project]
 name = "r-pecotmr"
 channels = ["dnachun", "conda-forge", "bioconda"]
-platforms = ["linux-64", "osx-64", "osx-arm64"]
+platforms = ["linux-64", "osx-arm64"]
 
 [system-requirements]
 libc = { family="glibc", version="2.17" }
