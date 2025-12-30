@@ -514,14 +514,19 @@ colocboost_analysis_pipeline <- function(region_data,
         message("No individual data pass QC.")
       }
       if (!is.null(sumstat_data)) {
-        phenotypes$sumstat_studies <- names(sumstat_data$sumstats)
+        if (!is.null(sumstat_data$sumstats) && length(sumstat_data$sumstats) > 0) {
+          phenotypes$sumstat_studies <- names(sumstat_data$sumstats)
+        } else {
+          phenotypes$sumstat_studies <- character(0)
+        }
         sumstat_studies_init <- phenotypes_init$sumstat_studies
         if (length(sumstat_studies_init) == length(phenotypes$sumstat_studies)) {
           message("All sumstat studies pass QC steps.")
         } else {
+          skipped <- setdiff(sumstat_studies_init, phenotypes$sumstat_studies)
           message(paste(
             "Skipping follow-up analysis for sumstat studies",
-            paste(setdiff(sumstat_studies_init, phenotypes$sumstat_studies), collapse = ";"), "after QC."
+            paste(skipped, collapse = ";"), "after QC."
           ))
         }
       } else {
@@ -618,13 +623,18 @@ colocboost_analysis_pipeline <- function(region_data,
   if (!is.null(sumstat_data$sumstats)) {
     sumstats <- lapply(sumstat_data$sumstats, function(ss) {
       z <- ss$sumstats$z
-      variant <- paste0("chr", ss$sumstats$variant_id)
+      # Normalize variant IDs to ensure consistent format: chr{chrom}:{pos}:{A2}:{A1}
+      # This handles cases where variant_id might not be normalized or has build suffixes
+      variant <- normalize_variant_id(ss$sumstats$variant_id)
       n <- ss$n
       data.frame("z" = z, "n" = n, "variant" = variant)
     })
     names(sumstats) <- names(sumstat_data$sumstats)
     LD_mat <- lapply(sumstat_data$LD_mat, function(ld) {
-      colnames(ld) <- rownames(ld) <- paste0("chr", colnames(ld))
+      # Normalize LD matrix colnames/rownames to remove build suffixes (e.g., :b38)
+      # and ensure consistent format: chr{chrom}:{pos}:{A2}:{A1}
+      ld_colnames <- normalize_variant_id(colnames(ld))
+      colnames(ld) <- rownames(ld) <- ld_colnames
       return(ld)
     })
     LD_match <- sumstat_data$LD_match
@@ -664,12 +674,17 @@ colocboost_analysis_pipeline <- function(region_data,
     message(paste("====== Performing non-focaled version GWAS-xQTL ColocBoost on", length(Y), "contexts and", length(sumstats), "GWAS. ====="))
     t21 <- Sys.time()
     traits <- c(names(Y), names(sumstats))
-    res_gwas <- colocboost(
-      X = X, Y = Y, sumstat = sumstats, LD = LD_mat,
-      dict_YX = dict_YX, dict_sumstatLD = dict_sumstatLD,
-      outcome_names = traits, focal_outcome_idx = NULL, 
-      output_level = 2, ...
-    )
+    res_gwas <- tryCatch({
+      colocboost(
+        X = X, Y = Y, sumstat = sumstats, LD = LD_mat,
+        dict_YX = dict_YX, dict_sumstatLD = dict_sumstatLD,
+        outcome_names = traits, focal_outcome_idx = NULL, 
+        output_level = 2, ...
+      )
+    }, error = function(e) {
+      warning(paste("Error in joint GWAS ColocBoost:", conditionMessage(e)))
+      return(NULL)
+    })
     t22 <- Sys.time()
     analysis_results$joint_gwas <- res_gwas
     analysis_results$computing_time$Analysis$joint_gwas <- t22 - t21
@@ -691,9 +706,12 @@ colocboost_analysis_pipeline <- function(region_data,
           output_level = 2, ...
         )
       }, error = function(e) {
-        message(paste("Error in focaled ColocBoost for", current_study, ":", conditionMessage(e)))
+        warning(paste("Error in focaled ColocBoost for", current_study, ":", conditionMessage(e)))
         return(NULL)
       })
+      if (is.null(res_gwas_separate[[current_study]])) {
+        warning(paste("ColocBoost returned NULL for", current_study, "- likely due to data validation failure"))
+      }
     }
     t32 <- Sys.time()
     analysis_results$separate_gwas <- res_gwas_separate
@@ -872,61 +890,76 @@ qc_regional_data <- function(region_data,
                                          impute = TRUE,
                                          impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)) {
     n_LD <- length(sumstat_data$LD_info)
-    final_sumstats <- final_LD <- NULL
+    final_sumstats <- list()
+    final_LD <- list()
     LD_match <- c()
     for (i in 1:n_LD) {
       LD_data <- sumstat_data$LD_info[[i]]
       sumstats <- sumstat_data$sumstats[[i]]
       for (ii in 1:length(sumstats)) {
         sumstat <- sumstats[[ii]]
-        if (nrow(sumstat$sumstats) == 0) next
+        conditions_sumstat <- names(sumstats)[ii]
+        if (is.null(conditions_sumstat) || is.na(conditions_sumstat) || conditions_sumstat == "") {
+          next
+        }
+        if (nrow(sumstat$sumstats) == 0) {
+          next
+        }
         n <- sumstat$n
         var_y <- sumstat$var_y
-        conditions_sumstat <- names(sumstats)[ii]
         
-        # Wrap processing in try-catch to handle errors for individual sumstats
-        result <- tryCatch({
-          # Handle pip_cutoff_to_skip_sumstat: can be a single value, named vector, or unnamed vector
-          if (length(pip_cutoff_to_skip_sumstat) == 1 && is.null(names(pip_cutoff_to_skip_sumstat))) {
-            # Single value: use for all conditions
-            pip_cutoff_to_skip_ld <- as.numeric(pip_cutoff_to_skip_sumstat)
-          } else if (!is.null(names(pip_cutoff_to_skip_sumstat)) && conditions_sumstat %in% names(pip_cutoff_to_skip_sumstat)) {
-            # Named vector: lookup by condition name
-            pip_cutoff_to_skip_ld <- as.numeric(pip_cutoff_to_skip_sumstat[conditions_sumstat])
-          } else if (length(pip_cutoff_to_skip_sumstat) >= ii) {
-            # Unnamed vector: use positional indexing
-            pip_cutoff_to_skip_ld <- as.numeric(pip_cutoff_to_skip_sumstat[ii])
-          } else {
-            # Default to 0 if no match
-            pip_cutoff_to_skip_ld <- 0
-          }
-          
-          # Handle NA values (e.g., from failed lookup)
-          if (is.na(pip_cutoff_to_skip_ld)) {
-            pip_cutoff_to_skip_ld <- 0
-          }
+        # Handle pip_cutoff_to_skip_sumstat: can be a single value, named vector, or unnamed vector
+        if (length(pip_cutoff_to_skip_sumstat) == 1 && is.null(names(pip_cutoff_to_skip_sumstat))) {
+          # Single value: use for all conditions
+          pip_cutoff_to_skip_ld <- as.numeric(pip_cutoff_to_skip_sumstat)
+        } else if (!is.null(names(pip_cutoff_to_skip_sumstat)) && conditions_sumstat %in% names(pip_cutoff_to_skip_sumstat)) {
+          # Named vector: lookup by condition name
+          pip_cutoff_to_skip_ld <- as.numeric(pip_cutoff_to_skip_sumstat[conditions_sumstat])
+        } else if (length(pip_cutoff_to_skip_sumstat) >= ii) {
+          # Unnamed vector: use positional indexing
+          pip_cutoff_to_skip_ld <- as.numeric(pip_cutoff_to_skip_sumstat[ii])
+        } else {
+          # Default to 0 if no match
+          pip_cutoff_to_skip_ld <- 0
+        }
+        
+        # Handle NA values (e.g., from failed lookup)
+        if (is.na(pip_cutoff_to_skip_ld)) {
+          pip_cutoff_to_skip_ld <- 0
+        }
 
-          # Preprocess the input data
-          preprocess_results <- rss_basic_qc(sumstat$sumstats, LD_data, remove_indels = remove_indels)
-          sumstat$sumstats <- preprocess_results$sumstats
-          LD_mat <- preprocess_results$LD_mat
+        # Preprocess the input data
+        preprocess_results <- rss_basic_qc(sumstat$sumstats, LD_data, remove_indels = remove_indels)
+        sumstat$sumstats <- preprocess_results$sumstats
+        LD_mat <- preprocess_results$LD_mat
 
-          # initial PIP checking
-          if (pip_cutoff_to_skip_ld != 0) {
-            pip <- susie_rss_wrapper(z = sumstat$sumstats$z, R = LD_mat, L = 1, n = n, var_y = var_y)$pip
-            if (pip_cutoff_to_skip_ld < 0) {
-              # automatically determine the cutoff to use
-              pip_cutoff_to_skip_ld <- 3 * 1 / nrow(LD_mat)
-            }
+        # initial PIP checking
+        if (pip_cutoff_to_skip_ld != 0) {
+          pip <- susie_rss_wrapper(z = sumstat$sumstats$z, R = LD_mat, L = 1, n = n, var_y = var_y)$pip
+          if (pip_cutoff_to_skip_ld < 0) {
+            # automatically determine the cutoff to use
+            pip_cutoff_to_skip_ld <- 3 * 1 / nrow(LD_mat)
+          }
             if (!any(pip > pip_cutoff_to_skip_ld)) {
               message(paste(
                 "Skipping follow-up analysis for sumstat study", conditions_sumstat,
                 ". No signals above PIP threshold", pip_cutoff_to_skip_ld, "in initial model screening."
               ))
-              return(NULL)  # Skip this sumstat
-            } else {
-              message(paste("Keep summary study", conditions_sumstat, "."))
-            }
+              result <- NULL  # Skip this sumstat
+          } else {
+            message(paste("Keep summary study", conditions_sumstat, "."))
+            result <- list(sumstat = sumstat, LD_mat = LD_mat)
+          }
+        } else {
+          # Continue processing if pip_cutoff is 0
+          result <- NULL  # Will be set below after processing
+        }
+
+        # Only continue if not skipped by PIP check
+        if (!is.null(result) || pip_cutoff_to_skip_ld == 0) {
+          if (is.null(result)) {
+            # Need to create result structure
+            result <- list(sumstat = sumstat, LD_mat = LD_mat)
           }
 
           # Perform quality control - remove
@@ -936,9 +969,15 @@ qc_regional_data <- function(region_data,
             qc_results <- summary_stats_qc(sumstat$sumstats, LD_data_processed, n = n, var_y = var_y, method = qc_method)
             sumstat$sumstats <- qc_results$sumstats
             LD_mat <- qc_results$LD_mat
+            result$sumstat <- sumstat
+            result$LD_mat <- LD_mat
+            if (nrow(sumstat$sumstats) == 0) {
+              result <- NULL
+            }
           }
+          
           # Perform imputation
-          if (impute) {
+          if (impute && !is.null(result)) {
             # Normalize ref_panel variant IDs to match processed sumstats
             ref_panel_processed <- LD_data$ref_panel
             if (!is.null(ref_panel_processed) && "variant_id" %in% colnames(ref_panel_processed)) {
@@ -951,17 +990,23 @@ qc_regional_data <- function(region_data,
             )
             sumstat$sumstats <- impute_results$result_filter
             LD_mat <- impute_results$LD_mat
+            result$sumstat <- sumstat
+            result$LD_mat <- LD_mat
+            if (nrow(sumstat$sumstats) == 0) {
+              result <- NULL
+            }
           }
-
-          # Return processed sumstat and LD_mat
-          return(list(sumstat = sumstat, LD_mat = LD_mat))
-        }, error = function(e) {
-          message(paste("Error processing sumstat", conditions_sumstat, ":", conditionMessage(e)))
-          return(NULL)
-        })
+        }
         
         # Skip if processing failed
-        if (is.null(result)) next
+        if (is.null(result)) {
+          next
+        }
+        
+        # Check result structure
+        if (!is.list(result) || !("sumstat" %in% names(result)) || !("LD_mat" %in% names(result))) {
+          next
+        }
         
         sumstat <- result$sumstat
         LD_mat <- result$LD_mat
@@ -1006,3 +1051,4 @@ qc_regional_data <- function(region_data,
     sumstat_data = sumstat_data
   ))
 }
+
