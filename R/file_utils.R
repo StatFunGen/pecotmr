@@ -2,9 +2,9 @@
 #' @importFrom dplyr rename
 #' @importFrom data.table fread
 #' @importFrom tools file_path_sans_ext
-read_pvar <- function(pgen) {
+read_pvar <- function(pgen, num_threads = 1) {
   pvarf <- paste0(file_path_sans_ext(pgen), ".pvar")
-  pvardt <- fread(pvarf, skip = "#CHROM")
+  pvardt <- fread(pvarf, skip = "#CHROM", nThread = num_threads)
   pvardt <- rename(pvardt,
     "chrom" = "#CHROM", "pos" = "POS",
     "alt" = "ALT", "ref" = "REF", "id" = "ID"
@@ -15,27 +15,27 @@ read_pvar <- function(pgen) {
 
 #' @importFrom vroom vroom
 #' @importFrom tools file_path_sans_ext
-read_bim <- function(bed) {
+read_bim <- function(bed, num_threads = 1) {
   bimf <- paste0(file_path_sans_ext(bed), ".bim")
-  bim <- vroom(bimf, col_names = FALSE)
+  bim <- vroom(bimf, col_names = FALSE, num_threads = num_threads)
   colnames(bim) <- c("chrom", "id", "gpos", "pos", "a1", "a0")
   return(bim)
 }
 
 #' @importFrom vroom vroom
 #' @importFrom tools file_path_sans_ext
-read_psam <- function(pgen) {
+read_psam <- function(pgen, num_threads = 1) {
   psamf <- paste0(file_path_sans_ext(pgen), ".psam")
-  psam <- vroom(psamf)
+  psam <- vroom(psamf, num_threads = num_threads)
   colnames(psam)[1:2] <- c("FID", "IID")
   return(psam)
 }
 
 #' @importFrom vroom vroom
 #' @importFrom tools file_path_sans_ext
-read_fam <- function(bed) {
+read_fam <- function(bed, num_threads = 1) {
   famf <- paste0(file_path_sans_ext(bed), ".fam")
-  return(vroom(famf, col_names = FALSE))
+  return(vroom(famf, col_names = FALSE, num_threads = num_threads))
 }
 
 # open pgen/pvar PLINK 2 data format
@@ -48,12 +48,12 @@ open_pgen <- function(pgenf) {
 }
 
 # open bed/bim/fam: A PLINK 1 .bed is a valid .pgen
-open_bed <- function(bed) {
+open_bed <- function(bed, num_threads = 1) {
   # Make sure pgenlibr is installed
   if (!requireNamespace("pgenlibr", quietly = TRUE)) {
     stop("To use this function, please install pgenlibr: https://cran.r-project.org/web/packages/pgenlibr/index.html")
   }
-  raw_s_ct <- nrow(read_fam(bed))
+  raw_s_ct <- nrow(read_fam(bed, num_threads = num_threads))
   return(pgenlibr::NewPgen(bed, raw_sample_ct = raw_s_ct))
 }
 
@@ -78,10 +78,10 @@ read_pgen <- function(pgen, variantidx = NULL, meanimpute = F) {
 #' @importFrom magrittr %>%
 #' @importFrom stringr str_detect
 
-tabix_region <- function(file, region, tabix_header = "auto", target = "", target_column_index = "") {
+tabix_region <- function(file, region, tabix_header = "auto", target = "", target_column_index = "", num_threads = 1) {
   cmd_output <- tryCatch(
     {
-      fread(cmd = paste0("tabix -h ", file, " ", region), sep = "auto", header = tabix_header)
+      fread(cmd = paste0("tabix -h ", file, " ", region), sep = "auto", header = tabix_header, nThread = num_threads)
     },
     error = function(e) NULL
   )
@@ -129,7 +129,7 @@ NoSNPsError <- function(message) {
 #' @importFrom vroom vroom
 #' @importFrom magrittr %>%
 #' @export
-load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE, keep_variants_path = NULL) {
+load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE, keep_variants_path = NULL, num_threads = 1) {
   # Make sure snpStats is installed
   if (!requireNamespace("snpStats", quietly = TRUE)) {
     stop("To use this function, please install snpStats: https://bioconductor.org/packages/release/bioc/html/snpStats.html")
@@ -143,10 +143,10 @@ load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE, kee
     # 6 columns for bim file
     col_types <- list(col_character(), col_character(), col_guess(), col_integer(), col_guess(), col_guess())
     # Read a few lines of the bim file to check for 'chr' prefix
-    bim_sample <- vroom(paste0(genotype, ".bim"), n_max = 5, col_names = FALSE, col_types = col_types)
+    bim_sample <- vroom(paste0(genotype, ".bim"), n_max = 5, col_names = FALSE, col_types = col_types, num_threads = num_threads)
     chr_prefix_present <- any(grepl("^chr", bim_sample$X1))
     # Read the bim file and remove 'chr' prefix if present
-    bim_data <- vroom(paste0(genotype, ".bim"), col_names = FALSE, col_types = col_types)
+    bim_data <- vroom(paste0(genotype, ".bim"), col_names = FALSE, col_types = col_types, num_threads = num_threads)
     if (chr_prefix_present) {
       bim_data$X1 <- gsub("^chr", "", bim_data$X1)
     }
@@ -161,7 +161,6 @@ load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE, kee
   geno <- snpStats::read.plink(genotype, select.snps = snp_ids)
 
   # Remove indels if specified
-  # Remove indels if specified
   if (!keep_indel) {
     is_indel <- with(geno$map, grepl("[^ATCG]", allele.1) | grepl("[^ATCG]", allele.2) | nchar(allele.1) > 1 | nchar(allele.2) > 1)
     geno_bed <- geno$genotypes[, !is_indel]
@@ -171,7 +170,7 @@ load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE, kee
     geno_map <- geno$map
   }
   if (!is.null(keep_variants_path)) {
-    keep_variants <- vroom(keep_variants_path)
+    keep_variants <- vroom(keep_variants_path, num_threads = num_threads)
     if (!("chrom" %in% names(keep_variants)) | !("pos" %in% names(keep_variants))) {
       keep_variants <- do.call(rbind, lapply(strsplit(format_variant_id(keep_variants[[1]]), ":", fixed = TRUE), function(x) {
         data.frame(
@@ -198,8 +197,8 @@ load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE, kee
 #' @importFrom dplyr select mutate across everything
 #' @importFrom magrittr %>%
 #' @noRd
-load_covariate_data <- function(covariate_path) {
-  return(map(covariate_path, ~ read_delim(.x, "\t", col_types = cols()) %>%
+load_covariate_data <- function(covariate_path, num_threads = 1) {
+  return(map(covariate_path, ~ read_delim(.x, "\t", col_types = cols(), num_threads = num_threads) %>%
     select(-1) %>%
     mutate(across(everything(), as.numeric)) %>%
     t()))
@@ -214,7 +213,7 @@ NoPhenotypeError <- function(message) {
 #' @importFrom dplyr filter select mutate across everything
 #' @importFrom magrittr %>%
 #' @noRd
-load_phenotype_data <- function(phenotype_path, region, extract_region_name = NULL, region_name_col = NULL, tabix_header = TRUE) {
+load_phenotype_data <- function(phenotype_path, region, extract_region_name = NULL, region_name_col = NULL, tabix_header = TRUE, num_threads = 1) {
   if (is.null(extract_region_name)) {
     extract_region_name <- rep(list(NULL), length(phenotype_path))
   } else if (is.list(extract_region_name) && length(extract_region_name) != length(phenotype_path)) {
@@ -225,7 +224,7 @@ load_phenotype_data <- function(phenotype_path, region, extract_region_name = NU
 
   # Use `map2` to iterate over `phenotype_path` and `extract_region_name` simultaneously
   phenotype_data <- map2(phenotype_path, extract_region_name, ~ {
-    tabix_data <- if (!is.null(region)) tabix_region(.x, region, tabix_header = tabix_header) else read_delim(.x, "\t", col_types = cols())
+    tabix_data <- if (!is.null(region)) tabix_region(.x, region, tabix_header = tabix_header) else read_delim(.x, "\t", col_types = cols(), num_threads = num_threads)
     if (nrow(tabix_data) == 0) {
       message(paste("Phenotype file ", .x, " is empty for the specified region", if (!is.null(region)) "" else region))
       return(NULL)
@@ -361,9 +360,14 @@ prepare_X_matrix <- function(geno_bed, data_list, imiss_cutoff, maf_cutoff, mac_
 #' @noRd
 add_X_residuals <- function(data_list, scale_residuals = FALSE) {
   # Compute residuals for X and add them to data_list
+  n_conditions <- length(data_list$X)
+  lm_res_X_list <- list()
+  for (idx in seq_along(data_list$X)) {
+    lm_res_X_list[[idx]] <- .lm.fit(x = cbind(1, data_list$covar[[idx]]), y = data_list$X[[idx]])$residuals %>% as.matrix()
+  }
   data_list <- data_list %>%
     mutate(
-      lm_res_X = map2(X, covar, ~ .lm.fit(x = cbind(1, .y), y = .x)$residuals %>% as.matrix()),
+      lm_res_X = lm_res_X_list,
       X_resid_mean = map(lm_res_X, ~ apply(.x, 2, mean)),
       X_resid_sd = map(lm_res_X, ~ apply(.x, 2, sd)),
       X_resid = map(lm_res_X, ~ {
@@ -386,16 +390,20 @@ add_X_residuals <- function(data_list, scale_residuals = FALSE) {
 add_Y_residuals <- function(data_list, conditions, scale_residuals = FALSE) {
   # Compute residuals, their mean, and standard deviation, and add them to data_list
   # Preserve colnames from original Y (gene IDs) through the residual computation
+  n_conditions <- length(data_list$Y)
+  lm_res_list <- list()
+  for (idx in seq_along(data_list$Y)) {
+    y <- data_list$Y[[idx]]
+    res <- .lm.fit(x = cbind(1, data_list$covar[[idx]]), y = y)$residuals %>% as.matrix()
+    # Preserve colnames from original Y (gene IDs)
+    if (!is.null(colnames(y))) {
+      colnames(res) <- colnames(y)
+    }
+    lm_res_list[[idx]] <- res
+  }
   data_list <- data_list %>%
     mutate(
-      lm_res = map2(Y, covar, function(y, cov) {
-        res <- .lm.fit(x = cbind(1, cov), y = y)$residuals %>% as.matrix()
-        # Preserve colnames from original Y (gene IDs)
-        if (!is.null(colnames(y))) {
-          colnames(res) <- colnames(y)
-        }
-        return(res)
-      }),
+      lm_res = lm_res_list,
       Y_resid_mean = map(lm_res, ~ apply(.x, 2, mean)),
       Y_resid_sd = map(lm_res, ~ apply(.x, 2, sd)),
       Y_resid = map2(lm_res, Y, function(lm, y_orig) {
@@ -474,13 +482,13 @@ load_regional_association_data <- function(genotype, # PLINK file
                                            keep_variants = NULL,
                                            phenotype_header = 4, # skip first 4 rows of transposed phenotype for chr, start, end and ID
                                            scale_residuals = FALSE,
-                                           tabix_header = TRUE) {
+                                           tabix_header = TRUE, 
+                                           num_threads = 1) {
   ## Load genotype
-  geno <- load_genotype_region(genotype, association_window, keep_indel, keep_variants_path = keep_variants)
+  geno <- load_genotype_region(genotype, association_window, keep_indel, keep_variants_path = keep_variants, num_threads = num_threads)
   ## Load phenotype and covariates and perform some pre-processing
-  covar <- load_covariate_data(covariate)
-  pheno <- load_phenotype_data(phenotype, region, extract_region_name = extract_region_name, region_name_col = region_name_col, tabix_header = tabix_header)
-
+  covar <- load_covariate_data(covariate, num_threads = num_threads)
+  pheno <- load_phenotype_data(phenotype, region, extract_region_name = extract_region_name, region_name_col = region_name_col, tabix_header = tabix_header, num_threads = num_threads)
   # Keep covariates / conditions aligned with successfully loaded phenotypes.
   # load_phenotype_data() returns NULL for phenotype files that are empty in
   # the requested region; we must drop the corresponding covariate / condition
@@ -505,10 +513,13 @@ load_regional_association_data <- function(genotype, # PLINK file
     phenotype_header = phenotype_header, keep_samples = keep_samples
   )
   maf_list <- setNames(lapply(data_list$X, function(x) apply(x, 2, compute_maf)), colnames(data_list$X))
+  
   ## Get residue Y for each of condition and its mean and sd
   data_list <- add_Y_residuals(data_list, conditions, scale_residuals)
+  
   ## Get residue X for each of condition and its mean and sd
   data_list <- add_X_residuals(data_list, scale_residuals)
+  
   # Get X matrix for union of samples
   X <- prepare_X_matrix(geno, data_list, imiss_cutoff, maf_cutoff, mac_cutoff, xvar_cutoff)
   region <- if (!is.null(region)) unlist(strsplit(region, ":", fixed = TRUE))
@@ -540,8 +551,8 @@ load_regional_association_data <- function(genotype, # PLINK file
 #' @importFrom matrixStats colVars
 #' @return A list
 #' @export
-load_regional_univariate_data <- function(...) {
-  dat <- load_regional_association_data(...)
+load_regional_univariate_data <- function(..., num_threads = 1) {
+  dat <- load_regional_association_data(..., num_threads = num_threads)
   return(list(
     residual_Y = dat$residual_Y,
     residual_X = dat$residual_X,
@@ -563,8 +574,8 @@ load_regional_univariate_data <- function(...) {
 #'
 #' @return A list
 #' @export
-load_regional_regression_data <- function(...) {
-  dat <- load_regional_association_data(...)
+load_regional_regression_data <- function(..., num_threads = 1) {
+  dat <- load_regional_association_data(..., num_threads = num_threads)
   return(list(
     Y = dat$Y,
     X_data = dat$X_data,
@@ -605,8 +616,9 @@ pheno_list_to_mat <- function(data_list) {
 #' @return A list
 #' @export
 load_regional_multivariate_data <- function(matrix_y_min_complete = NULL, # when Y is saved as matrix, remove those with non-missing counts less than this cutoff
-                                            ...) {
-  dat <- pheno_list_to_mat(load_regional_association_data(...))
+                                            ..., 
+                                            num_threads = 1) {
+  dat <- pheno_list_to_mat(load_regional_association_data(..., num_threads = num_threads))
   if (!is.null(matrix_y_min_complete)) {
     Y <- filter_Y(dat$residual_Y, matrix_y_min_complete)
     if (length(Y$rm_rows) > 0) {
@@ -642,8 +654,8 @@ load_regional_multivariate_data <- function(matrix_y_min_complete = NULL, # when
 #'
 #' @return A list
 #' @export
-load_regional_functional_data <- function(...) {
-  dat <- load_regional_association_data(...)
+load_regional_functional_data <- function(..., num_threads = 1) {
+  dat <- load_regional_association_data(..., num_threads = num_threads)
   return(dat)
 }
 
@@ -840,7 +852,8 @@ load_twas_weights <- function(weight_db_files, conditions = NULL,
 #' @importFrom magrittr %>%
 #' @export
 load_rss_data <- function(sumstat_path, column_file_path, n_sample = 0, n_case = 0, n_control = 0, region = NULL,
-                          extract_region_name = NULL, region_name_col = NULL, comment_string = "#") {
+                          extract_region_name = NULL, region_name_col = NULL, comment_string = "#", num_threads = 1) {
+  message("Loading RSS data from ", sumstat_path, " with n_sample = ", n_sample, " n_case = ", n_case, " n_control = ", n_control)
   # Read and preprocess column mapping
   if (is.null(comment_string)) {
     column_data <- read.table(column_file_path,
@@ -860,7 +873,7 @@ load_rss_data <- function(sumstat_path, column_file_path, n_sample = 0, n_case =
   # Initialize sumstats variable
   sumstats <- NULL
   var_y <- NULL
-  sumstats <- load_tsv_region(file_path = sumstat_path, region = region, extract_region_name = extract_region_name, region_name_col = region_name_col)
+  sumstats <- load_tsv_region(file_path = sumstat_path, region = region, extract_region_name = extract_region_name, region_name_col = region_name_col, num_threads = num_threads)
   
   # To keep a log message
   n_variants <- nrow(sumstats)
@@ -932,7 +945,7 @@ load_rss_data <- function(sumstat_path, column_file_path, n_sample = 0, n_case =
 #' @importFrom data.table fread
 #' @importFrom vroom vroom
 #' @export
-load_tsv_region <- function(file_path, region = NULL, extract_region_name = NULL, region_name_col = NULL) {
+load_tsv_region <- function(file_path, region = NULL, extract_region_name = NULL, region_name_col = NULL, num_threads = 1) {
   sumstats <- NULL
   cmd <- NULL
 
@@ -973,7 +986,7 @@ load_tsv_region <- function(file_path, region = NULL, extract_region_name = NULL
     }
   } else {
     warning("Not a tabix-indexed gz file, loading the entire dataset.")
-    sumstats <- vroom(file_path)
+    sumstats <- vroom(file_path, num_threads = num_threads)
     # Apply filter if specified
     if (!is.null(extract_region_name) && !is.null(region_name_col)) {
       keep_index <- which(str_detect(sumstats[[region_name_col]], extract_region_name))
@@ -1097,9 +1110,9 @@ get_filter_lbf_index <- function(susie_obj, coverage = 0.5, size_factor = 0.5) {
 #' Function to load LD reference data variants
 #' @export
 #' @noRd
-load_ld_snp_info <- function(ld_meta_file_path, region_of_interest) {
+load_ld_snp_info <- function(ld_meta_file_path, region_of_interest, num_threads = 1) {
   bim_file_path <- get_regional_ld_meta(ld_meta_file_path, region_of_interest)$intersections$bim_file_paths
-  bim_data <- lapply(bim_file_path, function(bim_file) as.data.frame(vroom(bim_file, col_names = FALSE)))
+  bim_data <- lapply(bim_file_path, function(bim_file) as.data.frame(vroom(bim_file, col_names = FALSE, num_threads = num_threads)))
   snp_info <- setNames(lapply(bim_data, function(info_table) {
     # for TWAS and MR, the variance and allele_freq are not necessary
     if (ncol(info_table) >= 8) {

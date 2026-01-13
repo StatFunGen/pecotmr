@@ -89,6 +89,7 @@ mr_ash_rss <- function(bhat, shat, R, var_y, n,
 
   if (is.null(var_y)) var_y <- Inf
   if (identical(z, numeric(0))) z <- bhat / shat # rcpp_mr_ass_rss throws error at line 269 of mr_ash.h
+  
   result <- rcpp_mr_ash_rss(
     bhat = bhat, shat = shat, z = z, R = R,
     var_y = var_y, n = n, sigma2_e = sigma2_e,
@@ -98,7 +99,7 @@ mr_ash_rss <- function(bhat, shat, R, var_y, n,
     compute_ELBO = compute_ELBO, standardize = standardize,
     ncpus = ncpu
   )
-
+  
   return(result)
 }
 

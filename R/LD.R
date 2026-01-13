@@ -106,8 +106,8 @@ extract_file_paths <- function(genomic_data, intersection_rows, column_to_extrac
 #' @importFrom dplyr select
 #' @importFrom vroom vroom
 #' @noRd
-get_regional_ld_meta <- function(ld_reference_meta_file, region, complete_coverage_required = FALSE) {
-  genomic_data <- vroom(ld_reference_meta_file)
+get_regional_ld_meta <- function(ld_reference_meta_file, region, complete_coverage_required = FALSE, num_threads = 1) {
+  genomic_data <- vroom(ld_reference_meta_file, num_threads = num_threads)
   region <- parse_region(region)
   # Set column names
   names(genomic_data) <- c("chrom", "start", "end", "path")
@@ -318,9 +318,9 @@ create_combined_LD_matrix <- function(LD_matrices, variants) {
 #' further partitioning if needed.}
 #' }
 #' @export
-load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL) {
+load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL, num_threads = 1) {
   # Intersect LD metadata with specified regions using updated function
-  intersected_LD_files <- get_regional_ld_meta(LD_meta_file_path, region)
+  intersected_LD_files <- get_regional_ld_meta(LD_meta_file_path, region, num_threads = num_threads)
 
   # Extract file paths for LD and bim files
   LD_file_paths <- intersected_LD_files$intersections$LD_file_paths
@@ -403,7 +403,7 @@ load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL
 #' @importFrom dplyr select group_by summarise
 #' @importFrom vroom vroom
 #' @export
-filter_variants_by_ld_reference <- function(variant_ids, ld_reference_meta_file, keep_indel = TRUE) {
+filter_variants_by_ld_reference <- function(variant_ids, ld_reference_meta_file, keep_indel = TRUE, num_threads = 1) {
   # Step 1: Process variant IDs into a data frame and filter out non-standard nucleotides
   variants_df <- do.call(rbind, lapply(strsplit(variant_ids, ":"), function(x) {
     data.frame(chrom = x[1], pos = as.integer(x[2]), ref = x[3], alt = x[4])
@@ -418,11 +418,11 @@ filter_variants_by_ld_reference <- function(variant_ids, ld_reference_meta_file,
     group_by(chrom) %>%
     summarise(start = min(pos), end = max(pos))
   # Step 3: Call get_regional_ld_meta to get bim_file_paths
-  bim_file_paths <- get_regional_ld_meta(ld_reference_meta_file, region_df)$intersections$bim_file_paths
+  bim_file_paths <- get_regional_ld_meta(ld_reference_meta_file, region_df, num_threads = num_threads)$intersections$bim_file_paths
 
   # Step 4: Load bim files and consolidate into a single data frame
   bim_data <- lapply(bim_file_paths, function(path) {
-    bim_df <- vroom(path, col_names = FALSE)
+    bim_df <- vroom(path, col_names = FALSE, num_threads = num_threads)
     data.frame(chrom = bim_df$X1, pos = bim_df$X4, stringsAsFactors = FALSE)
   }) %>%
     do.call("rbind", .)

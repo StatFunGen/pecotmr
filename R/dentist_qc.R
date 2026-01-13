@@ -220,6 +220,7 @@ dentist_single_window <- function(zScore, LD_mat, nSample,
     },
     warning = warning_handler
   )
+  
   res <- as.data.frame(res)
   # Recover dups
   if (duprThreshold < 1.0) {

@@ -35,6 +35,7 @@
 #' @param sumstats_region_name_col Filter this specific column for the extract_sumstats_region_name.
 #' @param comment_string comment sign in the column_mapping file, default is #
 #' @param extract_coordinates Optional data frame with columns "chrom" and "pos" for specific coordinates extraction.
+#' @param num_threads Number of threads to use. Default to use OMP_NUM_THREADS if set, otherwise use parallel::detectCores().
 #'
 #' @return A list containing the individual_data and sumstat_data:
 #' individual_data contains the following components if exist
@@ -91,7 +92,21 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
                                          extract_sumstats_region_name = NULL,
                                          sumstats_region_name_col = NULL,
                                          comment_string = "#",
-                                         extract_coordinates = NULL) {
+                                         extract_coordinates = NULL,
+                                         num_threads = NULL) {
+  # Auto-detect number of cores if num_threads not specified
+  if (is.null(num_threads)) {
+    omp_threads <- Sys.getenv("OMP_NUM_THREADS")
+    if (omp_threads != "") {
+      num_threads <- as.integer(omp_threads)
+      message("num_threads not specified, using OMP_NUM_THREADS=", num_threads)
+    } else {
+      num_threads <- parallel::detectCores()
+      message("num_threads not specified, auto-detected ", num_threads, " cores")
+    }
+  }
+  message("num_threads is set to: ", num_threads)
+  
   if (is.null(genotype_list) & is.null(sumstat_path_list)) {
     stop("Data load error. Please make sure at least one data set (sumstat_path_list or genotype_list) exists.")
   }
@@ -169,7 +184,7 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
       # Helper function to check if phenotype file has data for the specific region
       # Note: The file may have data elsewhere, but we only care about this region
       # This is a pre-check; the actual loader will do the definitive check
-      check_phenotype_has_data <- function(pheno_file, region_str) {
+      check_phenotype_has_data <- function(pheno_file, region_str, num_threads = 1) {
         # File existence already checked above, so we can assume it exists here
         # Parse region to get chromosome and coordinates
         region_parts <- strsplit(region_str, ":", fixed = TRUE)[[1]]
@@ -198,7 +213,7 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
           cmd_output <- tryCatch(
             {
               data.table::fread(cmd = paste0("tabix -h ", pheno_file, " ", region_tabix), 
-                               sep = "auto", header = "auto")
+                               sep = "auto", header = "auto", nThread = num_threads)
             },
             error = function(e) NULL
           )
@@ -220,7 +235,7 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
       }
       
       # Filter to only phenotypes with data for this specific region
-      has_data <- vapply(phenotype, function(p) check_phenotype_has_data(p, region), logical(1))
+      has_data <- vapply(phenotype, function(p) check_phenotype_has_data(p, region, num_threads = num_threads), logical(1))
       valid_indices <- which(has_data)
       
       if (length(valid_indices) == 0) {
@@ -254,7 +269,8 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
         extract_region_name = extract_region_name,
         phenotype_header = phenotype_header,
         region_name_col = region_name_col,
-        scale_residuals = scale_residuals
+        scale_residuals = scale_residuals, 
+        num_threads = num_threads
       )
       
       if (is.null(individual_data)) {
@@ -329,7 +345,8 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
       
       LD_info <- load_LD_matrix(LD_meta_file_path,
         region = association_window,
-        extract_coordinates = extract_coordinates
+        extract_coordinates = extract_coordinates,
+        num_threads = num_threads
       )
       # extract sumstat information
       conditions <- match_LD_sumstat[[i_ld]]
@@ -350,7 +367,8 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
           sumstat_path = sumstat_path, column_file_path = column_file_path,
           n_sample = n_samples[ii], n_case = n_cases[ii], n_control = n_controls[ii],
           region = association_window, extract_region_name = extract_sumstats_region_name,
-          region_name_col = sumstats_region_name_col, comment_string = comment_string
+          region_name_col = sumstats_region_name_col, comment_string = comment_string, 
+          num_threads = num_threads
         )
         if (!("variant_id" %in% colnames(tmp$sumstats))) {
           tmp$sumstats <- tmp$sumstats %>%
@@ -579,6 +597,7 @@ colocboost_analysis_pipeline <- function(region_data,
 
   ####### ========= QC for the region_data ======== ########
   t01 <- Sys.time()
+  
   region_data <- qc_regional_data(region_data,
     maf_cutoff = maf_cutoff,
     pip_cutoff_to_skip_ind = pip_cutoff_to_skip_ind,
@@ -588,6 +607,7 @@ colocboost_analysis_pipeline <- function(region_data,
     impute = impute,
     impute_opts = impute_opts
   )
+  
   phenotypes_QC <- extract_contexts_studies(region_data, phenotypes_init = phenotypes_init)
   t02 <- Sys.time()
   analysis_results$computing_time$QC <- t02 - t01
@@ -682,10 +702,13 @@ colocboost_analysis_pipeline <- function(region_data,
         output_level = 2, ...
       )
     }, error = function(e) {
-      warning(paste("Error in joint GWAS ColocBoost:", conditionMessage(e)))
+      message(paste("Error in joint GWAS ColocBoost:", conditionMessage(e)))
       return(NULL)
     })
     t22 <- Sys.time()
+    if (is.null(res_gwas)) {
+      message("Joint GWAS ColocBoost returned NULL - no results stored")
+    }
     analysis_results$joint_gwas <- res_gwas
     analysis_results$computing_time$Analysis$joint_gwas <- t22 - t21
   }
@@ -706,11 +729,11 @@ colocboost_analysis_pipeline <- function(region_data,
           output_level = 2, ...
         )
       }, error = function(e) {
-        warning(paste("Error in focaled ColocBoost for", current_study, ":", conditionMessage(e)))
+        message(paste("Error in focaled ColocBoost for", current_study, ":", conditionMessage(e)))
         return(NULL)
       })
       if (is.null(res_gwas_separate[[current_study]])) {
-        warning(paste("ColocBoost returned NULL for", current_study, "- likely due to data validation failure"))
+        message(paste("ColocBoost returned NULL for", current_study, "- likely due to data validation failure"))
       }
     }
     t32 <- Sys.time()
@@ -795,7 +818,11 @@ qc_regional_data <- function(region_data,
         # automatically determine the cutoff to use
         pip_cutoff <- 3 * 1 / ncol(res_X)
       }
-      top_model_pip <- lapply(1:ncol(res_Y), function(i) susieR::susie(res_X, res_Y[, i], L = 1)$pip)
+      
+      top_model_pip <- lapply(1:ncol(res_Y), function(i) {
+        susieR::susie(res_X, res_Y[, i], L = 1)$pip
+      })
+      
       check_model_pip <- sapply(top_model_pip, function(pip) any(pip > pip_cutoff))
       include_idx <- which(check_model_pip)
       if (length(include_idx) == 0) {

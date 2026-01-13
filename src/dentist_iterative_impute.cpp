@@ -12,6 +12,8 @@
 #include <vector>
 #include <gsl/gsl_cdf.h>
 #include <unordered_set>
+#include <ctime>
+#include <cstdlib>
 
 // Enable C++11 via this plugin (Rcpp 0.10.3 or later)
 // [[Rcpp::depends(RcppArmadillo)]]
@@ -89,9 +91,26 @@ void oneIteration(const arma::mat& LD_mat, const std::vector<size_t>& idx, const
 		Rcpp::Rcout << "zScore_e size: " << zScore_e.size() << std::endl;
 	}
 
+	// DEBUG: Print thread information in oneIteration
+	time_t rawtime2;
+	struct tm * timeinfo2;
+	char buffer2[80];
+	time(&rawtime2);
+	timeinfo2 = localtime(&rawtime2);
+	strftime(buffer2, sizeof(buffer2), "%Y-%m-%d %H:%M:%S", timeinfo2);
+	
+	const char* omp_env2 = getenv("OMP_NUM_THREADS");
+	Rcpp::Rcout << "[DEBUG oneIteration " << buffer2 << "] Thread settings:" << std::endl;
+	Rcpp::Rcout << "  OMP_NUM_THREADS env var: " << (omp_env2 ? omp_env2 : "not set") << std::endl;
+	Rcpp::Rcout << "  ncpus parameter: " << ncpus << std::endl;
+	Rcpp::Rcout << "  omp_get_max_threads(): " << omp_get_max_threads() << std::endl;
+	
 	int nProcessors = omp_get_max_threads();
 	if (ncpus < nProcessors) nProcessors = ncpus;
 	omp_set_num_threads(nProcessors);
+	
+	Rcpp::Rcout << "  Setting omp_set_num_threads(" << nProcessors << ")" << std::endl;
+	Rcpp::Rcout << "  After setting, omp_get_num_threads(): " << omp_get_num_threads() << std::endl;
 
 	size_t K = std::min(static_cast<size_t>(idx.size()), nSample) * probSVD;
 
@@ -248,9 +267,26 @@ List dentist_iterative_impute(const arma::mat& LD_mat, size_t nSample, const arm
 	}
 
 	// Set number of threads for parallel processing
+	// DEBUG: Print thread information
+	time_t rawtime;
+	struct tm * timeinfo;
+	char buffer[80];
+	time(&rawtime);
+	timeinfo = localtime(&rawtime);
+	strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeinfo);
+	
+	const char* omp_env = getenv("OMP_NUM_THREADS");
+	Rcpp::Rcout << "[DEBUG dentist_iterative_impute " << buffer << "] Thread settings:" << std::endl;
+	Rcpp::Rcout << "  OMP_NUM_THREADS env var: " << (omp_env ? omp_env : "not set") << std::endl;
+	Rcpp::Rcout << "  ncpus parameter: " << ncpus << std::endl;
+	Rcpp::Rcout << "  omp_get_max_threads(): " << omp_get_max_threads() << std::endl;
+	
 	int nProcessors = omp_get_max_threads();
 	if (ncpus < nProcessors) nProcessors = ncpus;
 	omp_set_num_threads(nProcessors);
+	
+	Rcpp::Rcout << "  Setting omp_set_num_threads(" << nProcessors << ")" << std::endl;
+	Rcpp::Rcout << "  After setting, omp_get_num_threads(): " << omp_get_num_threads() << std::endl;
 
 	size_t markerSize = zScore.size();
 	std::vector<size_t> randOrder = generateSetOfNumbers(markerSize, seed);

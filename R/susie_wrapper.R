@@ -149,17 +149,20 @@ susie_wrapper <- function(X, y, init_L = 5, max_L = 30, l_step = 5, ...) {
 #' @export
 susie_rss_wrapper <- function(z, R, n = NULL, var_y = NULL, L = 10, max_L = 30, l_step = 5,
                               zR_discrepancy_correction = FALSE, coverage = 0.95, ...) {
+
   if (L == 1) {
-    return(susie_rss(
+    result <- susie_rss(
       z = z, R = R, var_y = var_y, n = n,
       L = 1, max_iter = 1, correct_zR_discrepancy = FALSE, coverage = coverage, ...
-    ))
+    )
+    return(result)
   }
   if (L == max_L) {
-    return(susie_rss(
+    result <- susie_rss(
       z = z, R = R, var_y = var_y, n = n, L = L,
       correct_zR_discrepancy = zR_discrepancy_correction, coverage = coverage, ...
-    ))
+    )
+    return(result)
   }
   while (TRUE) {
     st <- proc.time()

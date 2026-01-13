@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <unordered_map>
 #include <omp.h>
+#include <ctime>
+#include <cstdlib>
+#include <iostream>
 
 using namespace arma;
 using namespace std;
@@ -114,9 +117,26 @@ unordered_map<string, mat> mr_ash_sufficient(const vec& XTy, const mat& XTX, dou
                                              int max_iter = 1e5, bool update_w0 = true, bool update_sigma = true,
                                              bool compute_ELBO = true, bool verbose = false, int ncpus = 1) {
 	// Set the number of threads for OpenMP
+	// DEBUG: Print thread information
+	time_t rawtime;
+	struct tm * timeinfo;
+	char buffer[80];
+	time(&rawtime);
+	timeinfo = localtime(&rawtime);
+	strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeinfo);
+	
+	const char* omp_env = getenv("OMP_NUM_THREADS");
+	std::cout << "[DEBUG mr_ash_sufficient " << buffer << "] Thread settings:" << std::endl;
+	std::cout << "  OMP_NUM_THREADS env var: " << (omp_env ? omp_env : "not set") << std::endl;
+	std::cout << "  ncpus parameter: " << ncpus << std::endl;
+	std::cout << "  omp_get_max_threads(): " << omp_get_max_threads() << std::endl;
+	
 	int nProcessors = omp_get_max_threads();
 	if (ncpus < nProcessors) nProcessors = ncpus;
 	omp_set_num_threads(nProcessors);
+	
+	std::cout << "  Setting omp_set_num_threads(" << nProcessors << ")" << std::endl;
+	std::cout << "  After setting, omp_get_num_threads(): " << omp_get_num_threads() << std::endl;
 
 	// Initialize parameters
 	int p = XTX.n_cols;
