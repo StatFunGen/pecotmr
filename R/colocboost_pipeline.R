@@ -691,54 +691,64 @@ colocboost_analysis_pipeline <- function(region_data,
   }
   # - run joint GWAS no focaled version of ColocBoost
   if (joint_gwas & !is.null(sumstats)) {
-    message(paste("====== Performing non-focaled version GWAS-xQTL ColocBoost on", length(Y), "contexts and", length(sumstats), "GWAS. ====="))
-    t21 <- Sys.time()
-    traits <- c(names(Y), names(sumstats))
-    res_gwas <- tryCatch({
-      colocboost(
-        X = X, Y = Y, sumstat = sumstats, LD = LD_mat,
-        dict_YX = dict_YX, dict_sumstatLD = dict_sumstatLD,
-        outcome_names = traits, focal_outcome_idx = NULL, 
-        output_level = 2, ...
-      )
-    }, error = function(e) {
-      message(paste("Error in joint GWAS ColocBoost:", conditionMessage(e)))
-      return(NULL)
-    })
-    t22 <- Sys.time()
-    if (is.null(res_gwas)) {
-      message("Joint GWAS ColocBoost returned NULL - no results stored")
-    }
-    analysis_results$joint_gwas <- res_gwas
-    analysis_results$computing_time$Analysis$joint_gwas <- t22 - t21
-  }
-  # - run focaled version of ColocBoost for each GWAS
-  if (separate_gwas & !is.null(sumstats)) {
-    t31 <- Sys.time()
-    res_gwas_separate <- analysis_results$separate_gwas
-    for (i_gwas in 1:nrow(dict_sumstatLD)) {
-      current_study <- names(sumstats)[i_gwas]
-      message(paste("====== Performing focaled version GWAS-xQTL ColocBoost on", length(Y), "contexts and ", current_study, "GWAS. ====="))
-      dict <- dict_sumstatLD[i_gwas, ]
-      traits <- c(names(Y), current_study)
-      res_gwas_separate[[current_study]] <- tryCatch({
+    if (length(sumstats) == 0) {
+      message("All GWAS studies were skipped during QC. Skipping joint GWAS analysis.")
+      analysis_results$joint_gwas <- NULL
+    } else {
+      message(paste("====== Performing non-focaled version GWAS-xQTL ColocBoost on", length(Y), "contexts and", length(sumstats), "GWAS. ====="))
+      t21 <- Sys.time()
+      traits <- c(names(Y), names(sumstats))
+      res_gwas <- tryCatch({
         colocboost(
-          X = X, Y = Y, sumstat = sumstats[dict[1]],
-          LD = LD_mat[dict[2]], dict_YX = dict_YX,
-          outcome_names = traits, focal_outcome_idx = length(traits), 
+          X = X, Y = Y, sumstat = sumstats, LD = LD_mat,
+          dict_YX = dict_YX, dict_sumstatLD = dict_sumstatLD,
+          outcome_names = traits, focal_outcome_idx = NULL, 
           output_level = 2, ...
         )
       }, error = function(e) {
-        message(paste("Error in focaled ColocBoost for", current_study, ":", conditionMessage(e)))
+        message(paste("Error in joint GWAS ColocBoost:", conditionMessage(e)))
         return(NULL)
       })
-      if (is.null(res_gwas_separate[[current_study]])) {
-        message(paste("ColocBoost returned NULL for", current_study, "- likely due to data validation failure"))
+      t22 <- Sys.time()
+      if (is.null(res_gwas)) {
+        message("Joint GWAS ColocBoost returned NULL - no results stored")
       }
+      analysis_results$joint_gwas <- res_gwas
+      analysis_results$computing_time$Analysis$joint_gwas <- t22 - t21
     }
-    t32 <- Sys.time()
-    analysis_results$separate_gwas <- res_gwas_separate
-    analysis_results$computing_time$Analysis$separate_gwas <- list("total" = t32 - t31, "n_studies" = nrow(dict_sumstatLD), "average" = (t32 - t31) / nrow(dict_sumstatLD))
+  }
+  # - run focaled version of ColocBoost for each GWAS
+  if (separate_gwas & !is.null(sumstats)) {
+    if (is.null(dict_sumstatLD) || nrow(dict_sumstatLD) == 0) {
+      message("All GWAS studies were skipped during QC. Skipping separate GWAS analysis.")
+      analysis_results$separate_gwas <- NULL
+    } else {
+      t31 <- Sys.time()
+      res_gwas_separate <- analysis_results$separate_gwas
+      for (i_gwas in 1:nrow(dict_sumstatLD)) {
+        current_study <- names(sumstats)[i_gwas]
+        message(paste("====== Performing focaled version GWAS-xQTL ColocBoost on", length(Y), "contexts and ", current_study, "GWAS. ====="))
+        dict <- dict_sumstatLD[i_gwas, ]
+        traits <- c(names(Y), current_study)
+        res_gwas_separate[[current_study]] <- tryCatch({
+          colocboost(
+            X = X, Y = Y, sumstat = sumstats[dict[1]],
+            LD = LD_mat[dict[2]], dict_YX = dict_YX,
+            outcome_names = traits, focal_outcome_idx = length(traits), 
+            output_level = 2, ...
+          )
+        }, error = function(e) {
+          message(paste("Error in focaled ColocBoost for", current_study, ":", conditionMessage(e)))
+          return(NULL)
+        })
+        if (is.null(res_gwas_separate[[current_study]])) {
+          message(paste("ColocBoost returned NULL for", current_study, "- likely due to data validation failure"))
+        }
+      }
+      t32 <- Sys.time()
+      analysis_results$separate_gwas <- res_gwas_separate
+      analysis_results$computing_time$Analysis$separate_gwas <- list("total" = t32 - t31, "n_studies" = nrow(dict_sumstatLD), "average" = (t32 - t31) / nrow(dict_sumstatLD))
+    }
   }
 
   return(analysis_results)
