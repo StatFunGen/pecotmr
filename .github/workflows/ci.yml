@@ -22,7 +22,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [ubuntu-latest, macos-14]
-        environment: ["r43", "r44"]
+        environment: ["r44", "r45"]
         include:
           - runner: ubuntu-latest
             platform: linux-64

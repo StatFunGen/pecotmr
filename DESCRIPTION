@@ -70,4 +70,3 @@ LinkingTo:
 NeedsCompilation: yes
 VignetteBuilder: knitr
 RoxygenNote: 7.3.3
-
