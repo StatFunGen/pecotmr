@@ -95,10 +95,8 @@ jobs:
           tags: rattler-build:latest
 
       - name: Build conda packages
-        env:
-          platform: ${{ matrix.platform }}
         run: |
-          if [[ ${platform} == 'linux-64' ]]; then
+          if [[ '${{ matrix.platform }}' == 'linux-64' ]]; then
             docker run --rm --volume /tmp:/tmp  \
               --volume /etc/passwd:/etc/passwd:ro \
               --volume /etc/group:/etc/group:ro \
