@@ -26,10 +26,9 @@ jobs:
         with:
           ref: main
 
-      - name: Copy pixi manifest
+      - name: Create TOML from recipe
         run: |
-          mkdir /tmp/pixi
-          cp ${GITHUB_WORKSPACE}/pixi.toml /tmp/pixi
+          .github/workflows/create_toml_from_yaml.sh ${GITHUB_WORKSPACE}
 
       - name: Setup pixi
         uses: prefix-dev/setup-pixi@v0.9.4
@@ -37,7 +36,7 @@ jobs:
           manifest-path: /tmp/pixi/pixi.toml
 
       - name: Build pkgdown site
-        run: pixi run --environment r44 --manifest-path /tmp/pixi/pixi.toml pkgdown_build
+        run: pixi run --environment r44 pkgdown_build
 
       - name: Disable Jekyll
         run: touch docs/.nojekyll
