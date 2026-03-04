@@ -46,7 +46,7 @@ requirements:
     - r-magrittr
     - r-mashr
     - r-matrixstats
-    - r-mr.mash.alpha
+    - r-mr.mashr
     - r-mvsusier
     - r-pgenlibr
     - r-purrr
@@ -91,7 +91,7 @@ requirements:
     - r-magrittr
     - r-mashr
     - r-matrixstats
-    - r-mr.mash.alpha
+    - r-mr.mashr
     - r-mvsusier
     - r-pgenlibr
     - r-purrr
