@@ -16,7 +16,6 @@ jobs:
   build_package:
     name: Build conda package (${{ matrix.platform }} / ${{ matrix.environment }})
     runs-on: ${{ matrix.runner }}
-    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
