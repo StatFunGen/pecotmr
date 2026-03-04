@@ -32,7 +32,7 @@ r45 = {features = ["r45"]}
 "gcc" = "*"
 
 [dependencies]
-"bioconductor-bioccheck" = "*"
+# "bioconductor-bioccheck" = "*"
 "r-covr" = "*"
 "r-devtools" = "*"
 "r-knitr" = "*"
