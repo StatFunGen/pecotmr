@@ -39,7 +39,7 @@ jobs:
 
       - id: latest-version
         name: Get latest version
-        if: ${{ github.event.inputs.version }} == "latest"
+        if: ${{ github.event.inputs.version == 'latest' }}
         uses: pozetroninc/github-action-get-latest-release@v0.8.0
         with:
           repository: ${{ github.repository }}
@@ -82,20 +82,20 @@ jobs:
           sed -i "s/BUILD_PLACEHOLDER/${build}/g" /tmp/recipe/recipe.yaml
 
       - name: Setup up docker buildx
-        if: ${{ matrix.runner == 'ubuntu-latest' }}
+        if: ${{ contains(matrix.platform, 'linux' }}
         uses: docker/setup-buildx-action@v3
 
       - name: Build and export docker containers
-        if: ${{ matrix.runner == 'ubuntu-latest' }}
+        if: ${{ contains(matrix.platform, 'linux') }}
         uses: docker/build-push-action@v6
         with:
           load: true
           file: .github/rattler-build_container.df
           tags: rattler-build:latest
 
-      - name: Build conda packages
+      - name: Build conda packages (docker)
+        if: ${{ contains(matrix.platform, 'linux') }}
         run: |
-          if [[ '${{ matrix.platform }}' == 'linux-64' ]]; then
             docker run --rm --volume /tmp:/tmp  \
               --volume /etc/passwd:/etc/passwd:ro \
               --volume /etc/group:/etc/group:ro \
@@ -103,9 +103,11 @@ jobs:
               --user $(id -u) rattler-build \
                 rattler-build build -c dnachun -c conda-forge -c bioconda \
                 --output-dir /tmp/rattler-build --recipe-dir /tmp/recipe
-          else
-            rattler-build build -c dnachun -c conda-forge -c bioconda --output-dir /tmp/rattler-build --recipe-dir /tmp/recipe
-          fi
+
+      - name: Build conda packages
+        if: ${{ contains(matrix.platform, 'osx') }}
+        shell: pixi exec --spec rattler-build -- bash -e {0}
+        run: rattler-build build -c dnachun -c conda-forge -c bioconda --output-dir /tmp/rattler-build --recipe-dir /tmp/recipe
 
       - name: Upload package
         shell: pixi exec --spec rattler-build -- bash -e {0}
