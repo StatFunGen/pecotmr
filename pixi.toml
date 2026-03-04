@@ -1,0 +1,84 @@
+[project]
+name = "r-pecotmr"
+channels = ["dnachun", "conda-forge", "bioconda"]
+platforms = ["linux-64", "osx-arm64"]
+
+[system-requirements]
+libc = { family="glibc", version="2.17" }
+
+[tasks]
+devtools_document = "cd $GITHUB_WORKSPACE; R -e 'devtools::document()'"
+devtools_test = "cd $GITHUB_WORKSPACE; R -e 'devtools::test()'"
+codecov = "cd $GITHUB_WORKSPACE; R -e 'covr::codecov(quiet = FALSE)'"
+rcmdcheck = "cd $GITHUB_WORKSPACE; R -e 'rcmdcheck::rcmdcheck()'"
+bioccheck_git_clone = "cd $GITHUB_WORKSPACE; R -e 'BiocCheck::BiocCheckGitClone()'"
+bioccheck = "cd $GITHUB_WORKSPACE; R -e 'BiocCheck::BiocCheck()'"
+use_major_version = "cd $GITHUB_WORKSPACE; R -e 'usethis::use_version(which = \"major\", push = FALSE)'"
+use_minor_version = "cd $GITHUB_WORKSPACE; R -e 'usethis::use_version(which = \"minor\", push = FALSE)'"
+use_patch_version = "cd $GITHUB_WORKSPACE; R -e 'usethis::use_version(which = \"patch\", push = FALSE)'"
+pkgdown_build = "cd $GITHUB_WORKSPACE; R -e 'pkgdown::build_site_github_pages(new_process = FALSE, install = TRUE)'"
+
+[feature.r44]
+dependencies = {"r-base" = "4.4.*"}
+
+[feature.r45]
+dependencies = {"r-base" = "4.5.*"}
+
+[environments]
+r44 = {features = ["r44"]}
+r45 = {features = ["r45"]}
+
+[target.linux-64.dependencies]
+"gcc" = "*"
+
+[dependencies]
+# "bioconductor-bioccheck" = "*"
+"r-covr" = "*"
+"r-devtools" = "*"
+"r-knitr" = "*"
+"r-markdown" = "*"
+"r-pkgdown" = "*"
+"r-rcmdcheck" = "*"
+"r-testthat" = "*"
+"r-tidyverse" = "*"
+"bioconductor-iranges" = "*"
+"bioconductor-qvalue" = "*"
+"bioconductor-s4vectors" = "*"
+"bioconductor-snpstats" = "*"
+"r-base" = "*"
+"r-bigsnpr" = "*"
+"r-bigstatsr" = "*"
+"r-coda" = "*"
+"r-coloc" = "*"
+"r-colocboost" = "*"
+"r-dofuture" = "*"
+"r-dplyr" = "*"
+"r-flashier" = "*"
+"r-fsusier" = "*"
+"r-furrr" = "*"
+"r-future" = "*"
+"r-gbj" = "*"
+"r-glmnet" = "*"
+"r-harmonicmeanp" = "*"
+"r-magrittr" = "*"
+"r-mashr" = "*"
+"r-matrixstats" = "*"
+"r-mr.mashr" = "*"
+"r-mvsusier" = "*"
+"r-pgenlibr" = "*"
+"r-purrr" = "*"
+"r-qgg" = "*"
+"r-quadprog" = "*"
+"r-quantreg" = "*"
+"r-rcpp" = "*"
+"r-rcpparmadillo" = "*"
+"r-readr" = "*"
+"r-rfast" = "*"
+"r-rlang" = "*"
+"r-stringr" = "*"
+"r-susier" = "*"
+"r-tibble" = "*"
+"r-tidyr" = "*"
+"r-vctrs" = "*"
+"r-vroom" = "*"
+"r-xicor" = "*"
