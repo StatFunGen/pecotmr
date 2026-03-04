@@ -99,9 +99,9 @@ mrmash_wrapper <- function(X,
   if (!requireNamespace("glmnet", quietly = TRUE)) {
     stop("To use this function, please install glmnet: https://cran.r-project.org/web/packages/glmnet/index.html")
   }
-  # Make sure mr.mash.alpha is installed
-  if (!requireNamespace("mr.mash.alpha", quietly = TRUE)) {
-    stop("To use this function, please install mr.mash.alpha: https://github.com/stephenslab/mr.mash.alpha")
+  # Make sure mr.mashr is installed
+  if (!requireNamespace("mr.mashr", quietly = TRUE)) {
+    stop("To use this function, please install mr.mashr: https://github.com/stephenslab/mr.mashr")
   }
   # Check input data
   if (!exists(".Random.seed")) {
@@ -131,7 +131,7 @@ mrmash_wrapper <- function(X,
 
   # Compute summary statistics and prior_grids
   if (is.null(sumstats)) {
-    sumstats <- mr.mash.alpha::compute_univariate_sumstats(X, Y,
+    sumstats <- mr.mashr::compute_univariate_sumstats(X, Y,
       standardize = standardize,
       standardize.response = FALSE, mc.cores = nthreads
     )
@@ -141,7 +141,7 @@ mrmash_wrapper <- function(X,
 
   # Compute canonical matrices, if requested
   if (isTRUE(canonical_prior_matrices)) {
-    canonical_prior_matrices <- mr.mash.alpha::compute_canonical_covs(ncol(Y),
+    canonical_prior_matrices <- mr.mashr::compute_canonical_covs(ncol(Y),
       singletons = TRUE,
       hetgrid = c(0, 0.25, 0.5, 0.75, 1)
     )
@@ -155,7 +155,7 @@ mrmash_wrapper <- function(X,
   }
 
   # Compute prior covariance
-  S0 <- mr.mash.alpha::expand_covs(S0_raw, prior_grid, zeromat = TRUE)
+  S0 <- mr.mashr::expand_covs(S0_raw, prior_grid, zeromat = TRUE)
   time1 <- proc.time()
 
   if (B_init_method == "glasso") {
@@ -176,10 +176,10 @@ mrmash_wrapper <- function(X,
   # Robust initialization of V
   if (is.null(V)) {
     if (!Y_has_missing) {
-      V <- mr.mash.alpha:::compute_V_init(X, Y, matrix(0, nrow = ncol(X), ncol = ncol(Y)), rep(0, ncol(Y)), method = "cov")
+      V <- mr.mashr:::compute_V_init(X, Y, matrix(0, nrow = ncol(X), ncol = ncol(Y)), rep(0, ncol(Y)), method = "cov")
     } else {
       muy <- colMeans(Y, na.rm = TRUE)
-      V <- mr.mash.alpha:::compute_V_init(X, Y, matrix(0, nrow = ncol(X), ncol = ncol(Y)), muy, method = "flash")
+      V <- mr.mashr:::compute_V_init(X, Y, matrix(0, nrow = ncol(X), ncol = ncol(Y)), muy, method = "flash")
     }
     if (update_V_method == "diagonal") {
       V <- diag(diag(V))
@@ -192,7 +192,7 @@ mrmash_wrapper <- function(X,
   }
 
   # Fit mr.mash
-  fit_mrmash <- mr.mash.alpha::mr.mash(
+  fit_mrmash <- mr.mashr::mr.mash(
     X = X, Y = Y, V = V, S0 = S0, w0 = w0, update_w0 = update_w0, tol = tol,
     max_iter = max_iter, convergence_criterion = "ELBO", compute_ELBO = TRUE,
     standardize = standardize, verbose = verbose, update_V = update_V,

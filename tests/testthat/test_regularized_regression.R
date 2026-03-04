@@ -359,9 +359,9 @@ test_that("susie_inf_weights calls susie_wrapper when fit is NULL", {
 })
 
 # ---- mrmash_weights ----
-test_that("mrmash_weights errors when mr.mash.alpha package is not available", {
-  skip_if(requireNamespace("mr.mash.alpha", quietly = TRUE),
-          "mr.mash.alpha is installed; skipping missing-package test")
+test_that("mrmash_weights errors when mr.mashr package is not available", {
+  skip_if(requireNamespace("mr.mashr", quietly = TRUE),
+          "mr.mashr is installed; skipping missing-package test")
 
   expect_error(
     mrmash_weights(mrmash_fit = NULL, X = matrix(1, 10, 5), Y = matrix(1, 10, 3)),
@@ -370,8 +370,8 @@ test_that("mrmash_weights errors when mr.mash.alpha package is not available", {
 })
 
 test_that("mrmash_weights errors when X and Y are NULL and fit is NULL", {
-  skip_if_not(requireNamespace("mr.mash.alpha", quietly = TRUE),
-              "mr.mash.alpha not installed")
+  skip_if_not(requireNamespace("mr.mashr", quietly = TRUE),
+              "mr.mashr not installed")
   expect_error(mrmash_weights(mrmash_fit = NULL, X = NULL, Y = NULL),
                "Both X and Y must be provided")
 })

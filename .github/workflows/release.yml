@@ -1,9 +1,6 @@
 name: Upload new release
 
 on:
-  push:
-    branches: [main]
-    paths: [DESCRIPTION]
   workflow_dispatch:
     inputs:
       tag:
@@ -33,12 +30,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Only runs on manual dispatch to bump version in DESCRIPTION
   update_version:
     outputs:
       commit: ${{ steps.commit-changes.outputs.commit_long_sha }}
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.commit == 'auto'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -47,6 +42,9 @@ jobs:
           fetch-depth: 0
           repository: ${{ github.repository }}
           ref: main
+
+      - name: Create TOML from recipe
+        run: .github/workflows/create_toml_from_yaml.sh ${GITHUB_WORKSPACE}
 
       - name: Setup pixi
         uses: prefix-dev/setup-pixi@v0.9.4
@@ -73,8 +71,6 @@ jobs:
   # Creates tag + GitHub release — runs for both push and manual triggers
   create_release:
     needs: update_version
-    # Run when update_version succeeds (manual) or is skipped (push trigger)
-    if: always() && (needs.update_version.result == 'success' || needs.update_version.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -96,14 +92,10 @@ jobs:
           ref: ${{ steps.determine-commit.outputs.commit }}
           fetch-depth: 0
 
-      - name: Set tag from DESCRIPTION
+      - name: Set tag
         id: set-tag
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.tag }}" != "auto" ]]; then
-            tag="${{ github.event.inputs.tag }}"
-          else
-            tag=$(grep "^Version:" DESCRIPTION | sed 's/Version: *//')
-          fi
+          tag="${{ github.event.inputs.tag }}"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
       - name: Check if tag already exists

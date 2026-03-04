@@ -319,8 +319,8 @@ susie_inf_weights <- function(X = NULL, y = NULL, susie_inf_fit = NULL, ...) {
 
 #' @export
 mrmash_weights <- function(mrmash_fit = NULL, X = NULL, Y = NULL, ...) {
-  if (!requireNamespace("mr.mash.alpha", quietly = TRUE)) {
-    stop("Package 'mr.mash.alpha' is required. Install with: devtools::install_github('stephenslab/mr.mash.alpha')")
+  if (!requireNamespace("mr.mashr", quietly = TRUE)) {
+    stop("Package 'mr.mashr' is required. Install with: devtools::install_github('stephenslab/mr.mashr')")
   }
   if (is.null(mrmash_fit)) {
     message("mrmash_fit is not provided; fitting mr.mash now ...")
@@ -329,7 +329,7 @@ mrmash_weights <- function(mrmash_fit = NULL, X = NULL, Y = NULL, ...) {
     }
     mrmash_fit <- mrmash_wrapper(X, Y, ...)
   }
-  return(mr.mash.alpha::coef.mr.mash(mrmash_fit)[-1, ])
+  return(mr.mashr::coef.mr.mash(mrmash_fit)[-1, ])
 }
 
 #' @export
@@ -344,10 +344,10 @@ mvsusie_weights <- function(mvsusie_fit = NULL, X = NULL, Y = NULL, prior_varian
     }
     if (is.null(prior_variance)) prior_variance <- mvsusieR::create_mixture_prior(R = ncol(Y))
     if (is.null(residual_variance)) {
-      if (!requireNamespace("mr.mash.alpha", quietly = TRUE)) {
-        stop("Package 'mr.mash.alpha' is required for residual variance estimation. Install with: devtools::install_github('stephenslab/mr.mash.alpha')")
+      if (!requireNamespace("mr.mashr", quietly = TRUE)) {
+        stop("Package 'mr.mashr' is required for residual variance estimation. Install with: devtools::install_github('stephenslab/mr.mashr')")
       }
-      residual_variance <- mr.mash.alpha:::compute_cov_flash(Y)
+      residual_variance <- mr.mashr:::compute_cov_flash(Y)
     }
 
     mvsusie_fit <- mvsusieR::mvsusie(

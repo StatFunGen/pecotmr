@@ -46,7 +46,7 @@ Suggests:
     harmonicmeanp,
     knitr,
     mashr,
-    mr.mash.alpha,
+    mr.mashr,
     mvsusieR,
     pgenlibr,
     qgg,
@@ -60,7 +60,6 @@ Suggests:
     testthat
 Remotes:
     stephenslab/fsusieR,
-    stephenslab/mr.mash.alpha,
     stephenslab/mvsusieR,
     stephenslab/susieR,
     stephenslab/udr
