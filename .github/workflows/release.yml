@@ -34,7 +34,7 @@ jobs:
     outputs:
       commit: ${{ steps.commit-changes.outputs.commit_long_sha }}
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.commit == "auto" }}
+    if: ${{ github.event.inputs.commit == 'auto' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
