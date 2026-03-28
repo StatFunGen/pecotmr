@@ -7,7 +7,7 @@
 manhattan_plot(twas_results, gene_data)
 }
 \arguments{
-\item{twas_results}{a data frame of twas results with columns “gene_name", "gene_id","chr","susie_pval","lasso_pval","enet_pval" and "mrash_pval", where twas results are the output of the twas_scan function. "gene_name" is the ensemble ID and "gene_id" is the corresponding gene name,
+\item{twas_results}{a data frame of twas results with columns "gene_name", "gene_id","chr","susie_pval","lasso_pval","enet_pval" and "mrash_pval", where twas results are the output of the twas_scan function. "gene_name" is the ensemble ID and "gene_id" is the corresponding gene name,
 "susie_pval", "lasso_pval","enet_pval" and "mrash_pval" are the pvalues of susie and other three competing twas method.}
 
 \item{gene_data}{a data frame with columns "chr", "start", "end", and "ID", "chr" is the chromosome of gene, "start" and "end" are the position, "ID" is the gene name.}

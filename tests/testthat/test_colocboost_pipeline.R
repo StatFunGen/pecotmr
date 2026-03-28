@@ -213,8 +213,8 @@ make_sumstat_region_data <- function(n_variants = 5, n_studies = 2) {
   })
 
   LD_info <- list(list(
-    combined_LD_variants = ref_panel,
-    combined_LD_matrix   = LD_mat,
+    LD_variants = ref_panel,
+    LD_matrix   = LD_mat,
     ref_panel            = ref_panel
   ))
 
@@ -489,11 +489,11 @@ test_that("qc_regional_data handles named pip_cutoff_to_skip_sumstat vector", {
       list(target_data_qced = target_data)
     },
     rss_basic_qc = function(sumstats, LD_data, ...) {
-      LD_mat <- LD_data$combined_LD_matrix[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
+      LD_mat <- LD_data$LD_matrix[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
       list(sumstats = sumstats, LD_mat = LD_mat)
     },
     summary_stats_qc = function(sumstats, LD_data, ...) {
-      LD_mat <- LD_data$combined_LD_matrix[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
+      LD_mat <- LD_data$LD_matrix[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
       list(sumstats = sumstats, LD_mat = LD_mat, outlier_number = 0)
     },
     raiss = function(...) {
@@ -523,11 +523,11 @@ test_that("qc_regional_data fills missing study names with 0 for pip_cutoff_to_s
 
   local_mocked_bindings(
     rss_basic_qc = function(sumstats, LD_data, ...) {
-      LD_mat <- LD_data$combined_LD_matrix[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
+      LD_mat <- LD_data$LD_matrix[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
       list(sumstats = sumstats, LD_mat = LD_mat)
     },
     summary_stats_qc = function(sumstats, LD_data, ...) {
-      LD_mat <- LD_data$combined_LD_matrix[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
+      LD_mat <- LD_data$LD_matrix[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
       list(sumstats = sumstats, LD_mat = LD_mat, outlier_number = 0)
     },
     raiss = function(...) list(result_filter = data.frame(z = rnorm(5)), LD_mat = diag(5)),
@@ -794,8 +794,8 @@ make_sumstat_region_data <- function(n_variants = 5, n_studies = 2) {
   })
 
   LD_info <- list(list(
-    combined_LD_variants = ref_panel,
-    combined_LD_matrix = LD_mat,
+    LD_variants = ref_panel,
+    LD_matrix = LD_mat,
     ref_panel = ref_panel
   ))
 
@@ -1226,8 +1226,8 @@ test_that("pipeline sumstat block: normalizes variant IDs and processes LD matri
         ))
       ),
       LD_info = list(list(
-        combined_LD_variants = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G"),
-        combined_LD_matrix = LD_mat,
+        LD_variants = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G"),
+        LD_matrix = LD_mat,
         ref_panel = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G")
       ))
     )
@@ -1277,8 +1277,8 @@ test_that("pipeline sumstat block: single sumstat study initializes separate_gwa
         ))
       ),
       LD_info = list(list(
-        combined_LD_variants = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G"),
-        combined_LD_matrix = LD_mat,
+        LD_variants = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G"),
+        LD_matrix = LD_mat,
         ref_panel = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G")
       ))
     )
@@ -1331,8 +1331,8 @@ test_that("pipeline sumstat block: multiple sumstat studies initializes separate
         ))
       ),
       LD_info = list(list(
-        combined_LD_variants = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G"),
-        combined_LD_matrix = LD_mat,
+        LD_variants = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G"),
+        LD_matrix = LD_mat,
         ref_panel = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G")
       ))
     )
@@ -1388,8 +1388,8 @@ test_that("pipeline: all sumstats invalid after filter_valid_sumstats returns No
         ))
       ),
       LD_info = list(list(
-        combined_LD_variants = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G"),
-        combined_LD_matrix = LD_mat,
+        LD_variants = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G"),
+        LD_matrix = LD_mat,
         ref_panel = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G")
       ))
     )
@@ -1522,8 +1522,8 @@ test_that("pipeline: joint_gwas path is entered with both individual and sumstat
         ))
       ),
       LD_info = list(list(
-        combined_LD_variants = data.frame(chrom = 1, pos = seq_len(p) * 100, A2 = "A", A1 = "G"),
-        combined_LD_matrix = LD_mat,
+        LD_variants = data.frame(chrom = 1, pos = seq_len(p) * 100, A2 = "A", A1 = "G"),
+        LD_matrix = LD_mat,
         ref_panel = data.frame(chrom = 1, pos = seq_len(p) * 100, A2 = "A", A1 = "G")
       ))
     )
@@ -1586,8 +1586,8 @@ test_that("pipeline: separate_gwas path is entered for each GWAS study", {
         ))
       ),
       LD_info = list(list(
-        combined_LD_variants = data.frame(chrom = 1, pos = seq_len(p) * 100, A2 = "A", A1 = "G"),
-        combined_LD_matrix = LD_mat,
+        LD_variants = data.frame(chrom = 1, pos = seq_len(p) * 100, A2 = "A", A1 = "G"),
+        LD_matrix = LD_mat,
         ref_panel = data.frame(chrom = 1, pos = seq_len(p) * 100, A2 = "A", A1 = "G")
       ))
     )
@@ -1674,8 +1674,8 @@ test_that("pipeline: sumstat with all NA z-scores yields warning message (lines 
         ))
       ),
       LD_info = list(list(
-        combined_LD_variants = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G"),
-        combined_LD_matrix = LD_mat,
+        LD_variants = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G"),
+        LD_matrix = LD_mat,
         ref_panel = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G")
       ))
     )
@@ -1787,8 +1787,8 @@ test_that("pipeline sumstat processing handles all-NA z-scores with warning (lin
         ))
       ),
       LD_info = list(list(
-        combined_LD_variants = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G"),
-        combined_LD_matrix = LD_mat,
+        LD_variants = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G"),
+        LD_matrix = LD_mat,
         ref_panel = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G")
       ))
     )
@@ -1847,8 +1847,8 @@ test_that("pipeline: LD matrix dimnames are normalized to canonical format (line
         ))
       ),
       LD_info = list(list(
-        combined_LD_variants = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G"),
-        combined_LD_matrix = LD_mat,
+        LD_variants = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G"),
+        LD_matrix = LD_mat,
         ref_panel = data.frame(chrom = 1, pos = seq_len(n_variants) * 100, A2 = "A", A1 = "G")
       ))
     )
@@ -1892,11 +1892,11 @@ test_that("qc_regional_data: with only sumstat data processes correctly", {
 
   local_mocked_bindings(
     rss_basic_qc = function(sumstats, LD_data, ...) {
-      LD_mat <- LD_data$combined_LD_matrix
+      LD_mat <- LD_data$LD_matrix
       list(sumstats = sumstats, LD_mat = LD_mat)
     },
     summary_stats_qc = function(sumstats, LD_data, ...) {
-      LD_mat <- LD_data$combined_LD_matrix
+      LD_mat <- LD_data$LD_matrix
       list(sumstats = sumstats, LD_mat = LD_mat, outlier_number = 0)
     },
     raiss = function(...) {

@@ -194,17 +194,17 @@ get_modularity <- function(Weight, B) {
 
 #' Perform Grouped Integration for TWAS Weights
 #'
-#' This function integrates TWAS weights using two methods: correlation-based clustering and fixed tau intervals. The weights are clustered and averaged within each cluster, and the corresponding performance metrics (e.g., pseudo R²) are calculated.
+#' This function integrates TWAS weights using two methods: correlation-based clustering and fixed tau intervals. The weights are clustered and averaged within each cluster, and the corresponding performance metrics (e.g., pseudo R2) are calculated.
 #'
 #' @param twas_weight A matrix where rows represent variants and columns represent tau values. Each entry represents the TWAS weight for a specific variant and tau.
 #' @param tau_values A numeric vector representing the tau values (quantiles) corresponding to the columns of \code{twas_weight}. Default is a sequence from 0.01 to 0.99.
-#' @param pseudo_R2 A numeric vector of pseudo R² values corresponding to the tau values.
+#' @param pseudo_R2 A numeric vector of pseudo R2 values corresponding to the tau values.
 #' @param between_cluster A numeric value specifying the correlation threshold for clustering. If all correlations are greater than this threshold, the function will form a single cluster. Default is 0.8.
 #' @param num_intervals The number of fixed non-overlapping intervals to divide the tau values. Default is 3.
 #'
 #' @return A list containing:
 #' \item{weights}{A matrix of integrated TWAS weights for each cluster or interval.}
-#' \item{twas_weight_performance}{A list of performance metrics, including quantile ranges and average pseudo R² values for each cluster/interval.}
+#' \item{twas_weight_performance}{A list of performance metrics, including quantile ranges and average pseudo R2 values for each cluster/interval.}
 #'
 #' @examples
 #' # Example usage

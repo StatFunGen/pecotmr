@@ -22,7 +22,7 @@
 #' sumstat_data contains the following components if exist
 #' \itemize{
 #'   \item sumstats: A list of summary statistics f or the matched LD_info, each sublist contains sumstats, n, var_y from \code{load_rss_data}.
-#'   \item LD_info: A list of LD information, each sublist contains combined_LD_variants, combined_LD_matrix, ref_panel  \code{load_LD_matrix}.
+#'   \item LD_info: A list of LD information, each sublist contains LD_variants, LD_matrix, ref_panel  \code{load_LD_matrix}.
 #' }
 #'
 #' @export
@@ -185,7 +185,7 @@ colocboost_analysis_pipeline <- function(region_data,
   ####### ========= Filtering events before QC =========== #########
   if (!is.null(event_filters) & !is.null(region_data$individual_data)) {
     Y <- region_data$individual_data$residual_Y
-    Y <- lapply(1:length(Y), function(i) {
+    Y <- lapply(seq_along(Y), function(i) {
       y <- Y[[i]]
       events <- colnames(y)
       condition <- names(Y)[i]
@@ -227,7 +227,7 @@ colocboost_analysis_pipeline <- function(region_data,
       Y <- NULL
     }
     if (!is.null(Y)) {
-      Y <- lapply(1:length(Y), function(i) {
+      Y <- lapply(seq_along(Y), function(i) {
         y <- Y[[i]]
         lapply(seq_len(ncol(y)), function(j) y[, j, drop = FALSE] %>% setNames(colnames(y)[j]))
       })
@@ -444,7 +444,7 @@ filter_valid_sumstats <- function(sumstats, LD_mat, LD_match, min_variants = 2) 
 #' sumstat_data contains the following components if exist
 #' \itemize{
 #'   \item sumstats: A list of summary statistics for the matched LD_info, each sublist contains sumstats, n, var_y from \code{load_rss_data}.
-#'   \item LD_info: A list of LD information, each sublist contains combined_LD_variants, combined_LD_matrix, ref_panel  \code{load_LD_matrix}.
+#'   \item LD_info: A list of LD information, each sublist contains LD_variants, LD_matrix, ref_panel  \code{load_LD_matrix}.
 #' }
 #'
 #' @noRd
@@ -460,7 +460,7 @@ qc_regional_data <- function(region_data,
                              impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)) {
   qc_method <- match.arg(qc_method)
 
-  # Validate and recycle pip_cutoff_to_skip_ind: scalar → recycled to n_contexts
+  # Validate and recycle pip_cutoff_to_skip_ind: scalar -> recycled to n_contexts
   if (!is.null(region_data$individual_data)) {
     n_ind_contexts <- length(region_data$individual_data$residual_Y)
     if (length(pip_cutoff_to_skip_ind) == 1) {
@@ -470,7 +470,7 @@ qc_regional_data <- function(region_data,
     }
   }
 
-  # Validate pip_cutoff_to_skip_sumstat: scalar → named vector for all studies
+  # Validate pip_cutoff_to_skip_sumstat: scalar -> named vector for all studies
   if (!is.null(region_data$sumstat_data)) {
     all_study_names <- unlist(lapply(region_data$sumstat_data$sumstats, names))
     if (length(pip_cutoff_to_skip_sumstat) == 1 && is.null(names(pip_cutoff_to_skip_sumstat))) {
@@ -487,7 +487,7 @@ qc_regional_data <- function(region_data,
   #### related internal functions
   # Add context names to colname of Y if missing
   add_context_to_Y <- function(res_Y) {
-    res <- lapply(1:length(res_Y), function(iy) {
+    res <- lapply(seq_along(res_Y), function(iy) {
       y <- res_Y[[iy]]
       if (is.null(y)) {
         return(NULL)
@@ -611,7 +611,13 @@ qc_regional_data <- function(region_data,
     for (i in 1:n_LD) {
       LD_data <- sumstat_data$LD_info[[i]]
       sumstats <- sumstat_data$sumstats[[i]]
-      for (ii in 1:length(sumstats)) {
+
+      # Pre-compute LD partition once per block (shared across all GWAS studies)
+      if (impute) {
+        LD_matrix_partitioned <- partition_LD_matrix(LD_data)
+      }
+
+      for (ii in seq_along(sumstats)) {
         sumstat <- sumstats[[ii]]
         if (nrow(sumstat$sumstats) == 0) next
         n <- sumstat$n
@@ -652,10 +658,9 @@ qc_regional_data <- function(region_data,
           sumstat$sumstats <- qc_results$sumstats
           LD_mat <- qc_results$LD_mat
         }
-        # Perform imputation
+        # Perform imputation (LD_matrix_partitioned pre-computed above per LD block)
         if (impute) {
-          LD_matrix <- partition_LD_matrix(LD_data)
-          impute_results <- raiss(LD_data$ref_panel, sumstat$sumstats, LD_matrix,
+          impute_results <- raiss(LD_data$ref_panel, sumstat$sumstats, LD_matrix_partitioned,
             rcond = impute_opts$rcond,
             R2_threshold = impute_opts$R2_threshold, minimum_ld = impute_opts$minimum_ld, lamb = impute_opts$lamb
           )

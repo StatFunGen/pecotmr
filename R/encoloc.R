@@ -110,77 +110,17 @@ calculate_cumsum <- function(coloc_results) {
   cumsum(coloc_results[, 2])
 }
 
-#' Function to load and extract LD matrix
+#' Load LD matrix for a set of variants, narrowing the region and aligning names.
+#' @importFrom stringr str_split
 #' @noRd
-load_and_extract_ld_matrix <- function(ld_meta_file_path, analysis_region, variants, ld_ref = NULL, in_sample = NULL) {
-  # Extract variant positions
-  var_pos <- str_split(variants, ":", simplify = TRUE)[,2] %>% as.numeric()
-  min_var_pos <- min(var_pos)
-  max_var_pos <- max(var_pos)
-  chr <- str_split(analysis_region, ":", simplify = TRUE)[,1]
-  analysis_region_narrow <- paste0(chr, ":", min_var_pos, "-", max_var_pos)
-
-  # --- Determine mode if not explicitly provided ---
-  if (is.null(ld_ref) && is.null(in_sample)) {
-    ld_ref <- TRUE  # Default assumption
-    if (grepl("plink|genotype|\\.bed$|\\.bim$|\\.fam$", ld_meta_file_path)) {
-      ld_ref <- FALSE
-      in_sample <- TRUE
-    } else {
-      in_sample <- FALSE
-    }
-  }
-
-  # --- Enforce exclusivity ---
-  if (isTRUE(ld_ref)) in_sample <- FALSE
-  if (isTRUE(in_sample)) ld_ref <- FALSE
-
-  # --- LD reference mode ---
-  if (ld_ref) {
-    message("Using LD reference mode")
-    ld_ref_data <- load_LD_matrix(
-      LD_meta_file_path = ld_meta_file_path,
-      region = analysis_region_narrow
-    )
-    ext_ld <- ld_ref_data$combined_LD_matrix[variants, variants]
-    return(ext_ld)
-  }
-
-  # --- In-sample genotype mode ---
-  if (in_sample) {
-    message("Using in-sample genotype mode")
-
-    if (grepl("\\.txt$", ld_meta_file_path)) {
-      geno_meta <- read_tsv(ld_meta_file_path, comment = "#", col_names = c("id", "path"), show_col_types = FALSE)
-      chr_num <- gsub("^chr", "", chr)
-      geno_path <- geno_meta %>% filter(id == chr_num) %>% pull(path) %>% basename %>% paste0(dirname(ld_meta_file_path), "/", .)
-
-      if (length(geno_path) != 1) stop("No matching entry found in metadata for chromosome ", chr)
-
-      geno_prefix <- str_remove(geno_path, "\\.bed$")
-    } else if (grepl("\\.bed$", ld_meta_file_path)) {
-      geno_prefix <- str_remove(ld_meta_file_path, "\\.bed$")
-    } else {
-      stop("In in-sample mode, expected plink file or .txt genotype metadata file.")
-    }
-
-    # Load original genotype data 
-    ld_mat <- load_genotype_region(geno_prefix, region = analysis_region_narrow, keep_indel = TRUE, keep_variants_path = NULL )
-      
-    # Change colname format of genotype data
-    colnames(ld_mat) <- align_variant_names(colnames(ld_mat), variants)$aligned_variants
-    ld_mat <- ld_mat[, variants]  # subset target variants then get imputation and correlation
-    if(length(variants) > 1) {
-        # Mean imputation
-        ld_mat_imputed <- apply(ld_mat, 2, function(x) ifelse(is.na(x), mean(x, na.rm = TRUE), x))
-        ext_ld <- get_cormat(ld_mat_imputed)
-    } else {
-        ext_ld = as.matrix(1)
-    }
-    return(ext_ld)
-  }
-
-  stop("Neither LD mode was activated — check inputs.")
+extract_ld_for_variants <- function(ld_meta_file_path, analysis_region, variants) {
+  var_pos <- as.numeric(str_split(variants, ":", simplify = TRUE)[, 2])
+  chr <- str_split(analysis_region, ":", simplify = TRUE)[, 1]
+  region_narrow <- paste0(chr, ":", min(var_pos), "-", max(var_pos))
+  ld_data <- load_LD_matrix(ld_meta_file_path, region = region_narrow)
+  aligned <- align_variant_names(ld_data$LD_variants, variants)
+  colnames(ld_data$LD_matrix) <- rownames(ld_data$LD_matrix) <- aligned$aligned_variants
+  ld_data$LD_matrix[variants, variants]
 }
 
 #' Function to calculate purity
@@ -223,14 +163,14 @@ process_coloc_results <- function(coloc_result, LD_meta_file_path, analysis_regi
     cs <- list()
     purity <- NULL
 
-    for (n in 1:length(ordered_results)) {
+    for (n in seq_along(ordered_results)) {
       tmp_coloc_results_fil <- ordered_results[[n]]
       tmp_coloc_results_fil_csm <- calculate_cumsum(tmp_coloc_results_fil)
       cs[[n]] <- tmp_coloc_results_fil[, 1][1:(which(tmp_coloc_results_fil_csm > coverage) %>% min())]
       variants <- normalize_variant_id(cs[[n]])
 
-      # Load and extract LD matrix
-      ext_ld <- load_and_extract_ld_matrix(LD_meta_file_path, analysis_region, variants)
+      # Load LD for the region narrowed to actual variant positions
+      ext_ld <- extract_ld_for_variants(LD_meta_file_path, analysis_region, variants)
 
       # Calculate purity
       if (null_index > 0 && null_index %in% variants) {
@@ -298,17 +238,17 @@ coloc_wrapper <- function(xqtl_file, gwas_files,
     gwas_data <- if (!is.null(gwas_finemapping_obj)) get_nested_element(raw_data, gwas_finemapping_obj) else raw_data
     gwas_lbf_matrix <- as.data.frame(gwas_data$lbf_variable)
       # fsusie has a different structure
-    if(is.null(gwas_lbf_matrix) | nrow(gwas_lbf_matrix)==0){
+    if(is.null(gwas_lbf_matrix) || nrow(gwas_lbf_matrix)==0){
         gwas_lbf_matrix <- do.call(rbind, raw_data[[1]]$fsusie_result$lBF) %>% as.data.frame
         if(nrow(gwas_lbf_matrix) > 0) message("This is a fSuSiE case")
     }
     if (filter_lbf_cs & is.null(filter_lbf_cs_secondary)) {
-        gwas_lbf_matrix <- gwas_lbf_matrix[gwas_data$sets$cs_index,, drop = F]
+        gwas_lbf_matrix <- gwas_lbf_matrix[gwas_data$sets$cs_index,, drop = FALSE]
     } else if (!is.null(filter_lbf_cs_secondary)) {
         gwas_lbf_filter_index <- get_filter_lbf_index(gwas_data, coverage = filter_lbf_cs_secondary) 
-        gwas_lbf_matrix <- gwas_lbf_matrix[gwas_lbf_filter_index,, drop = F]
+        gwas_lbf_matrix <- gwas_lbf_matrix[gwas_lbf_filter_index,, drop = FALSE]
     } else {
-      gwas_lbf_matrix <- gwas_lbf_matrix[gwas_data$V > prior_tol,, drop = F]
+      gwas_lbf_matrix <- gwas_lbf_matrix[gwas_data$V > prior_tol,, drop = FALSE]
     }
     if (!is.null(gwas_varname_obj)) colnames(gwas_lbf_matrix) <- get_nested_element(raw_data, gwas_varname_obj)
     # fsusie could have NA in variant name
@@ -350,12 +290,12 @@ coloc_wrapper <- function(xqtl_file, gwas_files,
     }
     # fsusie data does not have V element in results
     if (filter_lbf_cs & is.null(filter_lbf_cs_secondary)) {
-        xqtl_lbf_matrix <- xqtl_lbf_matrix[xqtl_data$sets$cs_index, , drop = F]
+        xqtl_lbf_matrix <- xqtl_lbf_matrix[xqtl_data$sets$cs_index, , drop = FALSE]
     } else if (!is.null(filter_lbf_cs_secondary)) {
         xqtl_lbf_filter_index <- get_filter_lbf_index(xqtl_data, coverage = filter_lbf_cs_secondary) 
-        xqtl_lbf_matrix <- xqtl_lbf_matrix[xqtl_lbf_filter_index,, drop = F]
+        xqtl_lbf_matrix <- xqtl_lbf_matrix[xqtl_lbf_filter_index,, drop = FALSE]
     } else {
-      if ("V" %in% names(xqtl_data)) xqtl_lbf_matrix <- xqtl_lbf_matrix[xqtl_data$V > prior_tol, , drop = F] else (message("No V found in orginal data."))
+      if ("V" %in% names(xqtl_data)) xqtl_lbf_matrix <- xqtl_lbf_matrix[xqtl_data$V > prior_tol, , drop = FALSE] else (message("No V found in original data."))
     }
     if (nrow(combined_gwas_lbf_matrix) > 0 && nrow(xqtl_lbf_matrix) > 0) {
       if (!is.null(xqtl_varname_obj)) colnames(xqtl_lbf_matrix) <- get_nested_element(xqtl_raw_data, xqtl_varname_obj)

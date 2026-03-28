@@ -26,7 +26,7 @@ rss_basic_qc <- function(sumstats, LD_data, skip_region = NULL, remove_indels = 
     stop("Missing columns in sumstats: ", paste(missing_cols, collapse = ", "))
   }
 
-  ref_variants <- LD_data$combined_LD_variants
+  ref_variants <- LD_data$LD_variants
 
   allele_flip <- allele_qc(sumstats, ref_variants,
     col_to_flip = c("beta", "z"),
@@ -55,17 +55,15 @@ rss_basic_qc <- function(sumstats, LD_data, skip_region = NULL, remove_indels = 
   sumstats_processed <- allele_flip$target_data_qced %>% arrange(pos)
 
   # Align and subset LD by mapping core IDs (strip trailing build suffix) to exact LD IDs
-  ld_mat <- LD_data$combined_LD_matrix
+  ld_mat <- LD_data$LD_matrix
   ld_ids <- tryCatch(rownames(ld_mat), error = function(e) NULL)
   if (is.null(ld_ids)) {
     stop("LD matrix rownames are NULL; cannot align variant IDs.")
   }
   present <- sumstats_processed$variant_id %in% ld_ids
   if (sum(present) == 0) {
-    strip_build <- function(x) sub("(:|_)b[0-9]+$", "", x)
-    drop_chr <- function(x) sub("^chr", "", x)
-    ld_core <- drop_chr(strip_build(ld_ids))
-    ss_core <- drop_chr(strip_build(sumstats_processed$variant_id))
+    ld_core <- strip_chr_prefix(strip_build_suffix(ld_ids))
+    ss_core <- strip_chr_prefix(strip_build_suffix(sumstats_processed$variant_id))
     map_idx <- match(ss_core, ld_core)
     remap <- !is.na(map_idx)
     if (sum(remap) > 0) {
@@ -77,7 +75,7 @@ rss_basic_qc <- function(sumstats, LD_data, skip_region = NULL, remove_indels = 
     stop("No overlapping variants between sumstats and LD after alignment.")
   }
 
-  LD_mat_processed <- LD_data$combined_LD_matrix[sumstats_processed$variant_id, sumstats_processed$variant_id, drop = FALSE]
+  LD_mat_processed <- LD_data$LD_matrix[sumstats_processed$variant_id, sumstats_processed$variant_id, drop = FALSE]
 
   return(list(sumstats = sumstats_processed, LD_mat = LD_mat_processed))
 }
@@ -110,7 +108,7 @@ rss_basic_qc <- function(sumstats, LD_data, skip_region = NULL, remove_indels = 
 #' @export
 summary_stats_qc <- function(sumstats, LD_data, n = NULL, var_y = NULL, method = c("slalom", "dentist")) {
   # assuming sumstats has been allele QC-ed, using rss_basic_qc() function
-  LD_extract <- LD_data$combined_LD_matrix[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
+  LD_extract <- LD_data$LD_matrix[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
   if (method == "dentist") {
     qc_results <- dentist_single_window(sumstats$z, R = LD_extract, nSample = n, duprThreshold = 0.99)
     keep_index <- qc_results %>%

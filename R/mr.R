@@ -53,7 +53,7 @@ mr_format <- function(susie_result, condition, gwas_sumstats_db, coverage = "cs_
       susie_cs_result_formatted <- top_loci %>%
         mutate(gene_name = gene_name) %>%
         filter(coverage >= 1) %>%
-        mutate(variant = ifelse(grepl("^chr[0-9]+:", variant_id), gsub("^chr", "", variant_id), variant_id)) %>%
+        mutate(variant = strip_chr_prefix(variant_id)) %>%
         select(gene_name, variant, betahat, sebetahat, all_of(coverage), pip) %>%
         rename("bhat_x" = "betahat", "sbhat_x" = "sebetahat", "cs" = all_of(coverage))
       susie_pos <- sapply(susie_cs_result_formatted$variant, function(variant_id) strsplit(variant_id, "\\:")[[1]][2])
@@ -109,7 +109,7 @@ mr_format <- function(susie_result, condition, gwas_sumstats_db, coverage = "cs_
 #' @return A single data frame of output with columns "gene_name", "num_CS", "num_IV",
 #' "meta_eff", "se_meta_eff", "meta_pval", "Q", "Q_pval" and "I2". "gene_name" is ensemble ID. "num_CS" is the number of credible sets
 #' contained in each gene, "num_IV" is the number of variants contained in each gene. "meta_eff", "se_meta_eff" and "meta_pval" are the MR estimate, standard error and pvalue.
-#' "Q" is Cochran’s Q statistic, "I2" quantifies the heterogeneity, range from 0 to 1.
+#' "Q" is Cochran's Q statistic, "I2" quantifies the heterogeneity, range from 0 to 1.
 #' @importFrom dplyr mutate group_by filter ungroup distinct arrange select
 #' @importFrom magrittr %>%
 #' @importFrom stats pnorm pchisq
@@ -168,7 +168,7 @@ mr_analysis <- function(mr_formatted_input, cpip_cutoff = 0.5) {
         meta_pval = 2 * pnorm(abs(meta_eff) / se_meta_eff, lower.tail = FALSE),
         Q = sum(unique(wv) * (unique(composite_bhat) - unique(meta_eff))^2),
         I2 = calc_I2(Q, composite_bhat),
-        Q_pval = pchisq(Q, df = length(unique(composite_bhat)) - 1, lower = F)
+        Q_pval = pchisq(Q, df = length(unique(composite_bhat)) - 1, lower = FALSE)
       ) %>%
       ungroup() %>%
       distinct(gene_name, .keep_all = TRUE) %>%

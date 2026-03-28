@@ -125,7 +125,7 @@ Returns a list structure including
 \item{vg}{mean genomic variance}
 }
 \description{
-This function is adapted from those written by Peter Sørensen in the qgg package.
+This function is adapted from those written by Peter Sorensen in the qgg package.
 The following prior distributions are provided:
 
 Bayes N: Assigning a Gaussian prior to marker effects implies that the posterior means are the
@@ -138,7 +138,7 @@ Bayes A: similar to ridge regression but t-distribution prior (rather than Gauss
 for the marker effects ; variance comes from an inverse-chi-square distribution instead of being fixed. Estimation
 via Gibbs sampling.
 
-Bayes C: uses a “rounded spike” (low-variance Gaussian) at origin many small
+Bayes C: uses a "rounded spike" (low-variance Gaussian) at origin many small
 effects can contribute to polygenic component, reduces the dimensionality of
 the model (makes Gibbs sampling feasible).
 

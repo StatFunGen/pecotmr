@@ -254,7 +254,7 @@ multivariate_analysis_pipeline <- function(
   data_driven_prior_matrices$w <- data_driven_prior_matrices$w[names(w0_updated)]
 
   if (!is.null(data_driven_prior_matrices_cv)) {
-    for (fold in 1:length(data_driven_prior_matrices_cv)) {
+    for (fold in seq_along(data_driven_prior_matrices_cv)) {
       data_driven_prior_matrices_cv[[fold]] <- filter_mixture_components(
         colnames(Y), data_driven_prior_matrices_cv[[fold]]$U,
         data_driven_prior_matrices_cv[[fold]]$w, data_driven_prior_weights_cutoff

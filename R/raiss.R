@@ -221,7 +221,7 @@ raiss <- function(ref_panel, known_zscores, LD_matrix, lamb = 0.01, rcond = 0.01
 
   ld_filtered_list <- lapply(results_list, function(x) x$LD_mat)
   variant_list <- lapply(ld_filtered_list, function(ld) data.frame(variants = colnames(ld)))
-  combined_LD_matrix <- create_combined_LD_matrix(
+  LD_matrix <- create_LD_matrix(
     LD_matrices = ld_filtered_list,
     variants = variant_list
   )
@@ -229,7 +229,7 @@ raiss <- function(ref_panel, known_zscores, LD_matrix, lamb = 0.01, rcond = 0.01
   return(list(
     result_nofilter = combined_nofilter,
     result_filter = combined_filter,
-    LD_mat = combined_LD_matrix
+    LD_mat = LD_matrix
   ))
 }
 
@@ -251,10 +251,10 @@ raiss_model <- function(zt, sig_t, sig_i_t, lamb = 0.01, rcond = 0.01, batch = T
     stop("zt, sig_t, and sig_i_t must be numeric.")
   }
   if (batch) {
-    condition_number <- if (report_condition_number) rep(kappa(sig_t, exact = T, norm = "2"), nrow(sig_i_t)) else NA
+    condition_number <- if (report_condition_number) rep(kappa(sig_t, exact = TRUE, norm = "2"), nrow(sig_i_t)) else NA
     correct_inversion <- rep(check_inversion(sig_t, sig_t_inv), nrow(sig_i_t))
   } else {
-    condition_number <- if (report_condition_number) kappa(sig_t, exact = T, norm = "2") else NA
+    condition_number <- if (report_condition_number) kappa(sig_t, exact = TRUE, norm = "2") else NA
     correct_inversion <- check_inversion(sig_t, sig_t_inv)
   }
 

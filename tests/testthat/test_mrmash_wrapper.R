@@ -173,21 +173,21 @@ test_that("compute_grid handles NA and zero sbhat values", {
 
 test_that("mrmash_wrapper errors when X and Y are not matrices", {
   skip_if_not_installed("glmnet")
-  skip_if_not_installed("mr.mash.alpha")
+  skip_if_not_installed("mr.mashr")
   expect_error(mrmash_wrapper(data.frame(x = 1:3), matrix(1:6, nrow = 3, ncol = 2)),
                "matrices")
 })
 
 test_that("mrmash_wrapper errors when X and Y row counts differ", {
   skip_if_not_installed("glmnet")
-  skip_if_not_installed("mr.mash.alpha")
+  skip_if_not_installed("mr.mashr")
   expect_error(mrmash_wrapper(matrix(1:6, nrow = 3, ncol = 2), matrix(1:8, nrow = 4, ncol = 2)),
                "same number of rows")
 })
 
 test_that("mrmash_wrapper errors when prior_grid is not a vector", {
   skip_if_not_installed("glmnet")
-  skip_if_not_installed("mr.mash.alpha")
+  skip_if_not_installed("mr.mashr")
   X <- matrix(rnorm(12), nrow = 3, ncol = 4)
   Y <- matrix(rnorm(6), nrow = 3, ncol = 2)
   expect_error(mrmash_wrapper(X, Y, prior_grid = matrix(1:4, nrow = 2)),
@@ -196,7 +196,7 @@ test_that("mrmash_wrapper errors when prior_grid is not a vector", {
 
 test_that("mrmash_wrapper errors when no prior matrices and canonical_prior_matrices is FALSE", {
   skip_if_not_installed("glmnet")
-  skip_if_not_installed("mr.mash.alpha")
+  skip_if_not_installed("mr.mashr")
   X <- matrix(rnorm(12), nrow = 3, ncol = 4)
   Y <- matrix(rnorm(6), nrow = 3, ncol = 2)
   expect_error(mrmash_wrapper(X, Y, data_driven_prior_matrices = NULL,
@@ -206,7 +206,7 @@ test_that("mrmash_wrapper errors when no prior matrices and canonical_prior_matr
 
 test_that("mrmash_wrapper warns when Y has missing and B_init_method is glasso", {
   skip_if_not_installed("glmnet")
-  skip_if_not_installed("mr.mash.alpha")
+  skip_if_not_installed("mr.mashr")
   set.seed(42)
   n <- 20; p <- 5; r <- 2
   X <- matrix(rnorm(n * p), nrow = n, ncol = p)
@@ -215,7 +215,7 @@ test_that("mrmash_wrapper warns when Y has missing and B_init_method is glasso",
   colnames(Y) <- c("cond1", "cond2")
 
   # Should produce warning about glasso and NAs, then likely fail on the
-  # downstream mr.mash.alpha call, but the warning is what we test
+  # downstream mr.mashr call, but the warning is what we test
   expect_warning(
     tryCatch(
       mrmash_wrapper(X, Y, B_init_method = "glasso",

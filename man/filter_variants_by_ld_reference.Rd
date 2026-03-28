@@ -11,13 +11,18 @@ filter_variants_by_ld_reference(
 )
 }
 \arguments{
-\item{variant_ids}{variant names in the format chr:pos_ref_alt or chr:pos:ref:alt.}
+\item{variant_ids}{variant names in the format chr:pos:ref:alt.}
 
-\item{ld_reference_meta_file}{A data frame similar to 'genomic_data' in get_regional_ld_meta function.}
+\item{ld_reference_meta_file}{Path to LD metadata file or PLINK prefix.}
+
+\item{keep_indel}{Whether to keep indel variants. Default TRUE.}
 }
 \value{
-A subset of variants, filtered based on LD reference data.
+A list with:
+  \item{data}{Character vector of filtered variant IDs.}
+  \item{idx}{Integer vector of indices into the original variant_ids.}
 }
 \description{
-Filter variants by LD Reference
+Filters a vector of variant IDs to those present in the LD reference panel.
+Auto-detects the reference type (PLINK2, PLINK1, or pre-computed LD metadata).
 }

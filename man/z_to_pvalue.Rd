@@ -18,8 +18,8 @@ It supports vector input to process multiple z-scores simultaneously.
 }
 \details{
 The function uses the following formula to calculate p-values:
-p-value = 2 * Φ(-|z|)
-Where Φ is the cumulative distribution function of the standard normal distribution.
+p-value = 2 * Phi(-|z|)
+Where Phi is the cumulative distribution function of the standard normal distribution.
 }
 \note{
 This function assumes that the input z-scores are from a two-tailed test and

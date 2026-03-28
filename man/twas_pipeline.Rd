@@ -10,6 +10,7 @@ twas_pipeline(
   ld_meta_file_path,
   gwas_meta_file,
   region_block,
+  ld_reference_sample_size,
   rsq_cutoff = 0.01,
   rsq_pval_cutoff = 0.05,
   rsq_option = c("rsq", "adj_rsq"),

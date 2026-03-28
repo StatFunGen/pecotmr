@@ -859,7 +859,7 @@ test_that("harmonize_twas: errors when gwas_meta_file cannot be read", {
     )
   )
   expect_error(
-    harmonize_twas(twas_weights_data, "nonexistent_ld.tsv", "nonexistent_gwas.tsv"),
+    harmonize_twas(twas_weights_data, "nonexistent_ld.tsv", "nonexistent_gwas.tsv", ld_reference_sample_size = 17000),
     "does not exist"
   )
 })
@@ -874,7 +874,7 @@ test_that("harmonize_twas: requires proper variant names in weights", {
   )
   # Should error because the file does not exist (error occurs before variant parsing)
   expect_error(
-    harmonize_twas(twas_weights_data, "nonexistent_ld.tsv", "nonexistent_gwas.tsv"),
+    harmonize_twas(twas_weights_data, "nonexistent_ld.tsv", "nonexistent_gwas.tsv", ld_reference_sample_size = 17000),
     "does not exist"
   )
 })
@@ -909,6 +909,7 @@ test_that("twas_pipeline: event_filters that remove all events returns list(NULL
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_200",
+    ld_reference_sample_size = 17000,
     event_filters = aggressive_filter
   )
   expect_equal(result, list(NULL))
@@ -959,7 +960,8 @@ test_that("twas_pipeline: returns proper structure on successful mocked run", {
       twas_weights_data = twas_weights_data,
       ld_meta_file_path = "fake_ld.tsv",
       gwas_meta_file = "fake_gwas.tsv",
-      region_block = "chr1_100_500"
+      region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000
     )
   )
 })
@@ -1461,6 +1463,7 @@ test_that("twas_pipeline: event_filters that do not remove events proceeds past 
       ld_meta_file_path = "fake_ld.tsv",
       gwas_meta_file = "fake_gwas.tsv",
       region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
       event_filters = filter_spec
     )
   )
@@ -1505,7 +1508,7 @@ test_that("twas_pipeline: pick_best_model path is executed when rsq_cutoff > 0",
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -1515,6 +1518,7 @@ test_that("twas_pipeline: pick_best_model path is executed when rsq_cutoff > 0",
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     rsq_cutoff = 0.01,
     rsq_pval_cutoff = 0.05,
     rsq_pval_option = "pval"
@@ -1565,7 +1569,7 @@ test_that("twas_pipeline: pick_best_model selects model with best rsq", {
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -1574,6 +1578,7 @@ test_that("twas_pipeline: pick_best_model selects model with best rsq", {
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     rsq_cutoff = 0.01,
     rsq_pval_cutoff = 0.05,
     rsq_pval_option = "pval"
@@ -1627,7 +1632,7 @@ test_that("twas_pipeline: pick_best_model skips context when no model passes thr
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -1636,6 +1641,7 @@ test_that("twas_pipeline: pick_best_model skips context when no model passes thr
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     rsq_cutoff = 0.1,
     rsq_pval_cutoff = 0.05,
     rsq_pval_option = "pval"
@@ -1663,7 +1669,7 @@ test_that("twas_pipeline: handles harmonize_twas returning NULL for a gene", {
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -1671,7 +1677,8 @@ test_that("twas_pipeline: handles harmonize_twas returning NULL for a gene", {
     twas_weights_data = twas_weights_data,
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
-    region_block = "chr1_100_500"
+    region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000
   ))
 
   expect_equal(result, list(NULL))
@@ -1687,7 +1694,7 @@ test_that("twas_pipeline: handles harmonize_twas returning empty list for a gene
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -1695,7 +1702,8 @@ test_that("twas_pipeline: handles harmonize_twas returning empty list for a gene
     twas_weights_data = twas_weights_data,
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
-    region_block = "chr1_100_500"
+    region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000
   ))
 
   expect_equal(result, list(NULL))
@@ -1748,7 +1756,7 @@ test_that("twas_pipeline: full pipeline with mocked harmonize_twas produces twas
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -1757,6 +1765,7 @@ test_that("twas_pipeline: full pipeline with mocked harmonize_twas produces twas
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     rsq_cutoff = 0.01,
     rsq_pval_cutoff = 0.05,
     rsq_pval_option = "pval"
@@ -1819,7 +1828,7 @@ test_that("twas_pipeline: multiple genes processed correctly", {
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -1828,6 +1837,7 @@ test_that("twas_pipeline: multiple genes processed correctly", {
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     rsq_pval_option = "pval"
   ))
 
@@ -1873,7 +1883,7 @@ test_that("twas_pipeline: empty twas_variants intersection returns empty data fr
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -1882,6 +1892,7 @@ test_that("twas_pipeline: empty twas_variants intersection returns empty data fr
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     rsq_pval_option = "pval"
   )))
 
@@ -1942,7 +1953,7 @@ test_that("twas_pipeline: output_twas_data=TRUE triggers format_twas_data path",
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -1951,6 +1962,7 @@ test_that("twas_pipeline: output_twas_data=TRUE triggers format_twas_data path",
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     rsq_cutoff = 0.01,
     rsq_pval_cutoff = 0.05,
     rsq_pval_option = "pval",
@@ -2017,7 +2029,7 @@ test_that("twas_pipeline: multiple contexts are processed independently", {
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -2026,6 +2038,7 @@ test_that("twas_pipeline: multiple contexts are processed independently", {
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     rsq_cutoff = 0.01,
     rsq_pval_cutoff = 0.05,
     rsq_pval_option = "pval"
@@ -2079,7 +2092,7 @@ test_that("twas_pipeline: mr_result is returned in final result", {
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -2088,6 +2101,7 @@ test_that("twas_pipeline: mr_result is returned in final result", {
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     rsq_pval_option = "pval"
   ))
 
@@ -2141,7 +2155,7 @@ test_that("twas_pipeline: quantile_twas=TRUE sets rsq_cutoff to 0 and skips mode
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -2150,6 +2164,7 @@ test_that("twas_pipeline: quantile_twas=TRUE sets rsq_cutoff to 0 and skips mode
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     quantile_twas = TRUE
   ))
 
@@ -2200,7 +2215,7 @@ test_that("twas_pipeline: when TWAS analysis yields no results, returns NULL com
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -2209,6 +2224,7 @@ test_that("twas_pipeline: when TWAS analysis yields no results, returns NULL com
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     rsq_cutoff = 0.01,
     rsq_pval_option = "pval"
   )))
@@ -2445,7 +2461,7 @@ test_that("twas_pipeline: processes multiple GWAS studies correctly", {
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -2454,6 +2470,7 @@ test_that("twas_pipeline: processes multiple GWAS studies correctly", {
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     rsq_pval_option = "pval"
   ))
 
@@ -2511,7 +2528,7 @@ test_that("twas_pipeline: rsq_option='adj_rsq' uses adjusted R-squared", {
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -2520,6 +2537,7 @@ test_that("twas_pipeline: rsq_option='adj_rsq' uses adjusted R-squared", {
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     rsq_cutoff = 0.01,
     rsq_option = "adj_rsq",
     rsq_pval_option = "pval"
@@ -2577,7 +2595,7 @@ test_that("twas_pipeline: rsq_pval_option='adj_rsq_pval' uses the correct p-valu
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -2587,6 +2605,7 @@ test_that("twas_pipeline: rsq_pval_option='adj_rsq_pval' uses the correct p-valu
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     rsq_cutoff = 0.01,
     rsq_pval_option = "adj_rsq_pval"
   ))
@@ -2641,7 +2660,7 @@ test_that("twas_pipeline: quantile_twas with output_twas_data exercises quantile
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -2650,6 +2669,7 @@ test_that("twas_pipeline: quantile_twas with output_twas_data exercises quantile
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     quantile_twas = TRUE,
     output_twas_data = TRUE
   ))
@@ -2865,12 +2885,12 @@ test_that("harmonize_twas: group_contexts_by_region single context path (lines 4
   local_mocked_bindings(
     load_LD_matrix = function(...) {
       list(
-        combined_LD_matrix = mock_LD_matrix,
-        combined_LD_variants = mock_LD_variants,
+        LD_matrix = mock_LD_matrix,
+        LD_variants = mock_LD_variants,
         ref_panel = mock_ref_panel
       )
     },
-    load_ld_snp_info = function(...) mock_snp_info,
+    get_ref_variant_info = function(...) mock_snp_info,
     harmonize_gwas = function(...) mock_gwas_data,
     allele_qc = function(target_data, ref_data, ...) {
       if (is.data.frame(target_data)) {
@@ -2902,11 +2922,11 @@ test_that("harmonize_twas: group_contexts_by_region single context path (lines 4
 
   # This will exercise group_contexts_by_region with a single context (lines 43-52)
   # and the main loop of harmonize_twas (lines 109-137)
-  result <- harmonize_twas(twas_weights_data, "fake_ld.tsv", gwas_meta_file)
+  result <- harmonize_twas(twas_weights_data, "fake_ld.tsv", gwas_meta_file, ld_reference_sample_size = 17000)
 
   expect_true(is.list(result))
   expect_true("twas_data_qced" %in% names(result))
-  expect_true("snp_info" %in% names(result))
+  expect_true("ref_panel" %in% names(result))
   # The single-context path should have been exercised
   if (!is.null(result$twas_data_qced$gene1)) {
     expect_true("chrom" %in% names(result$twas_data_qced$gene1))
@@ -2976,13 +2996,13 @@ test_that("harmonize_twas: group_contexts_by_region multi-context clustering (li
   local_mocked_bindings(
     load_LD_matrix = function(...) {
       list(
-        combined_LD_matrix = mock_LD_matrix,
-        combined_LD_variants = all_variant_ids,
+        LD_matrix = mock_LD_matrix,
+        LD_variants = all_variant_ids,
         ref_panel = data.frame(chrom = 1, pos = as.integer(sapply(strsplit(all_variant_ids, ":"), `[`, 2)),
                                A2 = "A", A1 = "T", stringsAsFactors = FALSE)
       )
     },
-    load_ld_snp_info = function(...) mock_snp_info,
+    get_ref_variant_info = function(...) mock_snp_info,
     harmonize_gwas = function(...) mock_gwas_data,
     allele_qc = function(target_data, ref_data, ...) {
       if (is.data.frame(target_data)) {
@@ -3010,7 +3030,7 @@ test_that("harmonize_twas: group_contexts_by_region multi-context clustering (li
   on.exit(unlink(gwas_meta_file), add = TRUE)
 
   # This tests multi-context clustering in group_contexts_by_region (lines 55-95)
-  result <- harmonize_twas(twas_weights_data, "fake_ld.tsv", gwas_meta_file)
+  result <- harmonize_twas(twas_weights_data, "fake_ld.tsv", gwas_meta_file, ld_reference_sample_size = 17000)
 
   expect_true(is.list(result))
   expect_true("twas_data_qced" %in% names(result))
@@ -3064,7 +3084,7 @@ test_that("twas_pipeline: adj_rsq_pval option exercised in pick_best_model", {
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -3074,6 +3094,7 @@ test_that("twas_pipeline: adj_rsq_pval option exercised in pick_best_model", {
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     rsq_cutoff = 0.01,
     rsq_option = "adj_rsq",
     rsq_pval_cutoff = 0.05,
@@ -3134,7 +3155,7 @@ test_that("twas_pipeline: quantile_twas=TRUE with proper cv data triggers quanti
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -3143,6 +3164,7 @@ test_that("twas_pipeline: quantile_twas=TRUE with proper cv data triggers quanti
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     quantile_twas = TRUE
   ))
 
@@ -3204,7 +3226,7 @@ test_that("twas_pipeline: missing data_type triggers assignment check on line 61
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -3217,6 +3239,7 @@ test_that("twas_pipeline: missing data_type triggers assignment check on line 61
       ld_meta_file_path = "fake_ld.tsv",
       gwas_meta_file = "fake_gwas.tsv",
       region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
       rsq_cutoff = 0.01,
       rsq_pval_cutoff = 0.05,
       rsq_pval_option = "pval"
@@ -3272,7 +3295,7 @@ test_that("twas_pipeline: twas_analysis returning NULL yields empty rows (line 6
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -3281,6 +3304,7 @@ test_that("twas_pipeline: twas_analysis returning NULL yields empty rows (line 6
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     rsq_cutoff = 0.01,
     rsq_pval_cutoff = 0.05,
     rsq_pval_option = "pval"
@@ -3344,7 +3368,7 @@ test_that("twas_pipeline: MR path entered when susie_results and significant twa
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     }
   )
 
@@ -3355,6 +3379,7 @@ test_that("twas_pipeline: MR path entered when susie_results and significant twa
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     rsq_cutoff = 0.01,
     rsq_pval_cutoff = 0.05,
     rsq_pval_option = "pval"
@@ -3398,7 +3423,7 @@ test_that("twas_pipeline: event_filters filtering some but not all contexts", {
 
   local_mocked_bindings(
     harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, snp_info = list())
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
     },
     filter_molecular_events = function(contexts, filters, ...) {
       # Only keep brain_ctx
@@ -3411,6 +3436,7 @@ test_that("twas_pipeline: event_filters filtering some but not all contexts", {
     ld_meta_file_path = "fake_ld.tsv",
     gwas_meta_file = "fake_gwas.tsv",
     region_block = "chr1_100_500",
+    ld_reference_sample_size = 17000,
     rsq_cutoff = 0.01,
     rsq_pval_cutoff = 0.05,
     rsq_pval_option = "pval",

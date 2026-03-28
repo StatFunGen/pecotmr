@@ -11,4 +11,4 @@ c_stdlib:
   - if: osx
     then: macosx_deployment_target
 r_base:
-  - 4.3
+  - 4.5

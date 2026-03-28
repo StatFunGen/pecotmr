@@ -25,7 +25,7 @@
 allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
                      match_min_prop = 0.2, remove_dups = TRUE,
                      remove_indels = FALSE, remove_strand_ambiguous = TRUE,
-                     flip_strand = FALSE, remove_unmatched = TRUE, remove_same_vars = FALSE) {
+                     flip_strand = FALSE, remove_unmatched = TRUE, ...) {
 	strand_flip <- function(ref) {
 	# Define a mapping for complementary bases
 	base_mapping <- c("A" = "T", "T" = "A", "G" = "C", "C" = "G")
@@ -94,7 +94,7 @@ allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
   }
   ref_variants <- variant_id_to_df(ref_variants)
 
-  columns_to_remove <- c("chromosome", "position", "ref", "alt", "variant_id")
+  columns_to_remove <- c("chromosome", "position", "A2", "A1", "ref", "alt", "variant_id")
 
   # Check if any of the specified columns are present
   if (any(columns_to_remove %in% colnames(target_data))) {
@@ -113,8 +113,6 @@ allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
   match_result = match_result %>%
 	mutate(variants_id_original = format_variant_id(chrom, pos, A2.target, A1.target)) %>%
 	mutate(variants_id_qced = format_variant_id(chrom, pos, A2.ref, A1.ref)) %>%
-	# filter out totally same rows.
-	filter(duplicated(.) | !duplicated(.)) %>%
 	# upper case target/reference A1 A2
 	mutate(across(c(A1.target, A2.target, A1.ref, A2.ref), toupper)) %>%
 	mutate(flip1.ref = strand_flip(A1.ref), flip2.ref = strand_flip(A2.ref)) %>%
@@ -148,16 +146,16 @@ allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
   ))
 
   if (remove_indels) {
-	match_result <- match_result %>% mutate(keep = if_else(INDEL == FALSE, FALSE, TRUE))
+	match_result <- match_result %>% mutate(keep = if_else(INDEL, FALSE, keep))
   }
 
-  # flip the signs of the column col_to_flip if there is a sign flip
+  # Flip the signs of col_to_flip for sign-flipped variants
   if (!is.null(col_to_flip)) {
-	if (!is.null(match_result[, col_to_flip])) {
-	  match_result[match_result$sign_flip, col_to_flip] <- -1 * match_result[match_result$sign_flip, col_to_flip]
-	} else {
-	  stop("Column '", col_to_flip, "' not found in target_data.")
+	missing <- setdiff(col_to_flip, colnames(match_result))
+	if (length(missing) > 0) {
+	  stop("Column(s) '", paste(missing, collapse = "', '"), "' not found in target_data.")
 	}
+	match_result[match_result$sign_flip, col_to_flip] <- -1 * match_result[match_result$sign_flip, col_to_flip]
   }
   # flip the strands if there is a strand flip
   if (flip_strand) {
@@ -170,36 +168,24 @@ allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
   # Finally keep those variants with FLAG keep = TRUE
   result <- match_result[match_result$keep, , drop = FALSE]
 	
-  # FIXME: I think this parameter is confusing. I inheritated directly from our function, whose default setting is TRUE.
-  # It is removing all multi-allelic alleles which is unnecessary. I suggest remove this parameter directly.
-  # What we are trying to avoid is the SAME allele having diferent z score. I defined one parameter remove_same_vars later, but I can re-use this
-  # remove_dup name
   if (remove_dups) {
 	dups <- vec_duplicate_detect(result[, c("chrom", "pos", "variants_id_qced")])
 	if (any(dups)) {
 	  result <- result[!dups, , drop = FALSE]
-	  warning("Unexpected duplicates were removed.")
+	  warning("Duplicate variants were removed.")
 	}
   }
-	
-  result <- result %>%
-	select(-(flip1.ref:keep)) %>%
-	select(-A1.target, -A2.target) %>%
-	rename(A1 = A1.ref, A2 = A2.ref, variant_id = variants_id_qced)
 
-  # default FALSE, but if want to remove same variants having different z score, then set as TRUE
-  if (remove_same_vars) {
-	same_vars <- vec_duplicate_detect(result[, c("chrom", "pos", "variant_id")])
-	if (any(same_vars)) {
-	  result <- result[!same_vars, , drop = FALSE]
-	  message("Same variants with different z scores are removed.")
-	}
-  }
+  qc_cols <- c("flip1.ref", "flip2.ref", "strand_unambiguous", "non_ATCG",
+               "exact_match", "sign_flip", "strand_flip", "INDEL", "ID_match", "keep")
+  result <- result %>%
+	select(-any_of(qc_cols), -A1.target, -A2.target) %>%
+	rename(A1 = A1.ref, A2 = A2.ref, variant_id = variants_id_qced)
 
   if (!remove_unmatched) {
 	match_variant <- result %>% pull(variants_id_original)
-	match_result <- select(match_result, -(flip1.ref:keep)) %>%
-	  select(-variants_id_original, -A1.target, -A2.target) %>%
+	match_result <- match_result %>%
+	  select(-any_of(qc_cols), -variants_id_original, -A1.target, -A2.target) %>%
 	  rename(A1 = A1.ref, A2 = A2.ref, variant_id = variants_id_qced)
 	target_data <- target_data %>% mutate(variant_id = format_variant_id(chrom, pos, A2, A1))
 	if (length(setdiff(target_data %>% pull(variant_id), match_variant)) > 0) {
@@ -214,9 +200,9 @@ allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
 	stop("Not enough variants have been matched.")
   }
 
-  # throw an error if there are any variant_id that are duplicated (meaning that same variant having different other infos for example z score)
-  if (!remove_same_vars & any(duplicated(result$variant_id))) {
-	stop("In the input, there are duplicated variants with different z scores. Please check the data and determine which to keep.")
+  # Error if duplicated variant IDs remain (same variant with different values)
+  if (any(duplicated(result$variant_id))) {
+	stop("Duplicated variants with different values found. Please check the input data and determine which to keep.")
   }
 
   return(list(target_data_qced = result, qc_summary = match_result))

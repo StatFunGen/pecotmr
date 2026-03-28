@@ -51,7 +51,7 @@ test_that("Check that we correctly retrieve the names from the matrix",{
   variants <- unlist(
     c("chr1:1000:A:G", "chr1:1040:A:G", "chr1:1080:A:G", "chr1:1120:A:G", "chr1:1160:A:G"))
   expect_equal(
-    unlist(res$combined_LD_variants),
+    unlist(res$LD_variants),
     variants)
   file.remove(LD_meta_file_path)
 })
@@ -66,7 +66,7 @@ test_that("Check that the LD block contains the correct information",{
   variants <- unlist(
     c("chr1:1000:A:G", "chr1:1040:A:G", "chr1:1080:A:G", "chr1:1120:A:G", "chr1:1160:A:G"))
   # Check LD Block 1
-  ld_block_one <- res$combined_LD_matrix
+  ld_block_one <- res$LD_matrix
   ld_block_one_original <- as.matrix(
     read_delim(
       "test_data/LD_block_1.chr1_1000_1200.float16.txt.xz",
@@ -92,10 +92,10 @@ test_that("partition_LD_matrix correctly partitions a single block", {
 
   # Expectations for single block case
   expect_equal(length(partitioned$ld_matrices), 1)
-  expect_equal(nrow(partitioned$variant_indices), length(ld_data$combined_LD_variants))
+  expect_equal(nrow(partitioned$variant_indices), length(ld_data$LD_variants))
   expect_equal(unique(partitioned$variant_indices$block_id), 1)
-  expect_identical(rownames(partitioned$ld_matrices[[1]]), ld_data$combined_LD_variants)
-  expect_identical(colnames(partitioned$ld_matrices[[1]]), ld_data$combined_LD_variants)
+  expect_identical(rownames(partitioned$ld_matrices[[1]]), ld_data$LD_variants)
+  expect_identical(colnames(partitioned$ld_matrices[[1]]), ld_data$LD_variants)
 
   file.remove(LD_meta_file_path)
 })
@@ -118,7 +118,7 @@ test_that("partition_LD_matrix correctly partitions multiple blocks", {
   expect_equal(length(partitioned$ld_matrices), expected_block_count)
 
   # Check if all variants are assigned to blocks
-  expect_equal(nrow(partitioned$variant_indices), length(ld_data$combined_LD_variants))
+  expect_equal(nrow(partitioned$variant_indices), length(ld_data$LD_variants))
 
   # Check if block IDs are correct
   expect_setequal(unique(partitioned$variant_indices$block_id), 1:expected_block_count)
@@ -147,11 +147,11 @@ test_that("partition_LD_matrix properly merges small blocks", {
   expect_lt(length(partitioned$ld_matrices), 3)
 
   # Check if all variants are still assigned to blocks
-  expect_equal(nrow(partitioned$variant_indices), length(ld_data$combined_LD_variants))
+  expect_equal(nrow(partitioned$variant_indices), length(ld_data$LD_variants))
 
   # Check if merged blocks are larger than min_block_size
   block_sizes <- sapply(partitioned$ld_matrices, nrow)
-  expect_true(all(block_sizes >= min_block_size | block_sizes == length(ld_data$combined_LD_variants)))
+  expect_true(all(block_sizes >= min_block_size | block_sizes == length(ld_data$LD_variants)))
 
   file.remove(LD_meta_file_path)
 })
@@ -184,8 +184,8 @@ test_that("partition_LD_matrix respects max_merged_block_size", {
 test_that("partition_LD_matrix handles empty matrix gracefully", {
   # Create an empty LD data structure
   empty_ld_data <- list(
-    combined_LD_matrix = matrix(0, 0, 0),
-    combined_LD_variants = character(0),
+    LD_matrix = matrix(0, 0, 0),
+    LD_variants = character(0),
     block_metadata = data.frame(
       block_id = integer(0),
       chrom = character(0),
@@ -218,14 +218,14 @@ test_that("partition_LD_matrix validates block structure properly", {
     invalid_ld_data$block_metadata$end_idx[1] <- invalid_ld_data$block_metadata$end_idx[2]
 
     # Introduce non-zero elements between blocks to trigger validation error
-    if(length(invalid_ld_data$combined_LD_variants) >= 2) {
+    if(length(invalid_ld_data$LD_variants) >= 2) {
       idx1 <- invalid_ld_data$block_metadata$start_idx[1]
       idx2 <- invalid_ld_data$block_metadata$start_idx[2] + 1
-      if(idx1 <= length(invalid_ld_data$combined_LD_variants) &&
-         idx2 <= length(invalid_ld_data$combined_LD_variants)) {
-        var1 <- invalid_ld_data$combined_LD_variants[idx1]
-        var2 <- invalid_ld_data$combined_LD_variants[idx2]
-        invalid_ld_data$combined_LD_matrix[var1, var2] <- 0.5
+      if(idx1 <= length(invalid_ld_data$LD_variants) &&
+         idx2 <= length(invalid_ld_data$LD_variants)) {
+        var1 <- invalid_ld_data$LD_variants[idx1]
+        var2 <- invalid_ld_data$LD_variants[idx2]
+        invalid_ld_data$LD_matrix[var1, var2] <- 0.5
       }
     }
 
@@ -275,15 +275,15 @@ test_that("partition_LD_matrix handles row/column name mismatches", {
 
   # Create a version with mismatched rownames and colnames
   mismatched_ld_data <- ld_data
-  rownames(mismatched_ld_data$combined_LD_matrix) <- NULL
-  colnames(mismatched_ld_data$combined_LD_matrix) <- NULL
+  rownames(mismatched_ld_data$LD_matrix) <- NULL
+  colnames(mismatched_ld_data$LD_matrix) <- NULL
 
   # Should not error and should fix the names
   partitioned <- partition_LD_matrix(mismatched_ld_data)
 
   # Check if names are fixed
-  expect_identical(rownames(partitioned$ld_matrices[[1]]), ld_data$combined_LD_variants)
-  expect_identical(colnames(partitioned$ld_matrices[[1]]), ld_data$combined_LD_variants)
+  expect_identical(rownames(partitioned$ld_matrices[[1]]), ld_data$LD_variants)
+  expect_identical(colnames(partitioned$ld_matrices[[1]]), ld_data$LD_variants)
 
   file.remove(LD_meta_file_path)
 })
@@ -307,15 +307,15 @@ test_that("partition_LD_matrix correctly extracts blocks based on metadata", {
     end_idx <- block_info$end_idx
 
     # Skip if indices are invalid
-    if(start_idx > length(ld_data$combined_LD_variants) ||
-       end_idx > length(ld_data$combined_LD_variants) ||
+    if(start_idx > length(ld_data$LD_variants) ||
+       end_idx > length(ld_data$LD_variants) ||
        end_idx < start_idx) next
 
     # Get variants for this block
-    block_variants <- ld_data$combined_LD_variants[start_idx:end_idx]
+    block_variants <- ld_data$LD_variants[start_idx:end_idx]
 
     # Extract expected submatrix
-    expected_submatrix <- ld_data$combined_LD_matrix[block_variants, block_variants, drop = FALSE]
+    expected_submatrix <- ld_data$LD_matrix[block_variants, block_variants, drop = FALSE]
 
     # Compare with actual block matrix
     expect_equal(partitioned$ld_matrices[[i]], expected_submatrix)
@@ -333,8 +333,8 @@ test_that("partition_LD_matrix partitions correctly with synthetic data", {
   rownames(mat) <- colnames(mat) <- variant_ids
 
   ld_data <- list(
-    combined_LD_matrix = mat,
-    combined_LD_variants = variant_ids,
+    LD_matrix = mat,
+    LD_variants = variant_ids,
     block_metadata = data.frame(
       block_id = c(1, 2),
       chrom = c("1", "1"),
@@ -494,8 +494,8 @@ test_that("partition_LD_matrix handles blocks with different chromosomes", {
   )
 
   test_ld_data <- list(
-    combined_LD_matrix = test_matrix,
-    combined_LD_variants = c("1:100:A:G", "1:200:C:T", "2:100:G:A", "2:200:T:C"),
+    LD_matrix = test_matrix,
+    LD_variants = c("1:100:A:G", "1:200:C:T", "2:100:G:A", "2:200:T:C"),
     block_metadata = block_metadata
   )
 
@@ -535,8 +535,8 @@ test_that("partition_LD_matrix works with edge case block structures", {
   )
 
   test_ld_data <- list(
-    combined_LD_matrix = test_matrix,
-    combined_LD_variants = variant_names,
+    LD_matrix = test_matrix,
+    LD_variants = variant_names,
     block_metadata = block_metadata
   )
 
@@ -629,9 +629,9 @@ test_that("extract_LD_for_region works with extract_coordinates", {
   expect_equal(rownames(result$extracted_LD_matrix), c("1:100:A:G", "1:300:G:A"))
 })
 
-# ---- create_combined_LD_matrix ----
+# ---- create_LD_matrix ----
 
-test_that("create_combined_LD_matrix correctly combines matrices with overlapping variants", {
+test_that("create_LD_matrix correctly combines matrices with overlapping variants", {
   # Create two simple LD matrices with some overlapping variants
   matrix1 <- matrix(c(1, 0.5, 0.5, 1), 2, 2)
   rownames(matrix1) <- colnames(matrix1) <- c("1:100:A:G", "1:200:C:T")
@@ -644,7 +644,7 @@ test_that("create_combined_LD_matrix correctly combines matrices with overlappin
   variants2 <- data.frame(variants = c("1:200:C:T", "1:300:G:A"))
 
   # Combine matrices
-  combined <- create_combined_LD_matrix(
+  combined <- create_LD_matrix(
     LD_matrices = list(matrix1, matrix2),
     variants = list(variants1, variants2)
   )
@@ -663,7 +663,7 @@ test_that("create_combined_LD_matrix correctly combines matrices with overlappin
   expect_equal(combined[3,3], 1)
 })
 
-test_that("create_combined_LD_matrix merges non-overlapping blocks", {
+test_that("create_LD_matrix merges non-overlapping blocks", {
   m1 <- matrix(c(1, 0.5, 0.5, 1), 2, 2, dimnames = list(c("v1", "v2"), c("v1", "v2")))
   m2 <- matrix(c(1, 0.3, 0.3, 1), 2, 2, dimnames = list(c("v3", "v4"), c("v3", "v4")))
 
@@ -671,7 +671,7 @@ test_that("create_combined_LD_matrix merges non-overlapping blocks", {
     data.frame(variants = c("v1", "v2")),
     data.frame(variants = c("v3", "v4"))
   )
-  result <- pecotmr:::create_combined_LD_matrix(list(m1, m2), variants)
+  result <- pecotmr:::create_LD_matrix(list(m1, m2), variants)
 
   expect_equal(nrow(result), 4)
   expect_equal(ncol(result), 4)
@@ -680,7 +680,7 @@ test_that("create_combined_LD_matrix merges non-overlapping blocks", {
   expect_equal(result["v1", "v3"], 0)  # Cross-block should be 0
 })
 
-test_that("create_combined_LD_matrix handles overlapping boundary variant", {
+test_that("create_LD_matrix handles overlapping boundary variant", {
   m1 <- matrix(c(1, 0.5, 0.5, 1), 2, 2, dimnames = list(c("v1", "v2"), c("v1", "v2")))
   m2 <- matrix(c(1, 0.3, 0.3, 1), 2, 2, dimnames = list(c("v2", "v3"), c("v2", "v3")))
 
@@ -688,7 +688,7 @@ test_that("create_combined_LD_matrix handles overlapping boundary variant", {
     data.frame(variants = c("v1", "v2")),
     data.frame(variants = c("v2", "v3"))
   )
-  result <- pecotmr:::create_combined_LD_matrix(list(m1, m2), variants)
+  result <- pecotmr:::create_LD_matrix(list(m1, m2), variants)
 
   # v2 is shared, so total should be 3 variants
   expect_equal(nrow(result), 3)
@@ -755,8 +755,8 @@ test_that("merge_blocks properly handles blocks at chromosome boundaries", {
   )
 
   test_ld_data <- list(
-    combined_LD_matrix = test_matrix,
-    combined_LD_variants = variant_names,
+    LD_matrix = test_matrix,
+    LD_variants = variant_names,
     block_metadata = block_metadata
   )
 

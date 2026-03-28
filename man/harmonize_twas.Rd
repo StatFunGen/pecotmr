@@ -9,6 +9,7 @@ harmonize_twas(
   twas_weights_data,
   ld_meta_file_path,
   gwas_meta_file,
+  ld_reference_sample_size,
   column_file_path = NULL,
   comment_string = "#"
 )
@@ -16,13 +17,15 @@ harmonize_twas(
 \arguments{
 \item{twas_weights_data}{List of list of twas weights output from from generate_twas_db function.}
 
-\item{ld_meta_file_path}{A tab-delimited data frame with colname "#chrom", "start", "end", "path", where "path" column
-contains file paths for both LD matrix and bim file and is separated by ",". Bim file input would expect no headers, while the
-columns are aligned in the order of "chrom", "variants", "GD", "pos", "A1", "A2", "variance", "allele_freq", "n_nomiss".}
+\item{ld_meta_file_path}{Path to LD reference: either a PLINK2/PLINK1 prefix, or a tab-delimited
+metadata file with columns "#chrom", "start", "end", "path" (auto-detected).}
 
 \item{gwas_meta_file}{A file path for a dataframe table with column of "study_id", "chrom" (integer), "file_path",
 "column_mapping_file". Each file in "file_path" column is tab-delimited dataframe of GWAS summary statistics with column name
 "chrom" (or #chrom" if tabix-indexed), "pos", "A2", "A1".}
+
+\item{ld_reference_sample_size}{Sample size of the LD reference panel (integer). Required.
+Used to compute per-variant variance as 2*p*(1-p)*n/(n-1). For ADSP R4, use 17000.}
 }
 \value{
 A list of list for harmonized weights and dataframe of gwas summary statistics that is add to the original input of

@@ -9,11 +9,7 @@ on:
 
 jobs:
   update_documentation:
-    # Only run on internal PRs (not forks) to prevent code injection via pull_request_target
-    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
     steps:
       - name: Checkout pull request branch
         uses: actions/checkout@v6
@@ -23,14 +19,17 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
 
+      - name: Create TOML from recipe
+        run: .github/workflows/create_toml_from_yaml.sh ${GITHUB_WORKSPACE}
+
       - name: Setup pixi
         uses: prefix-dev/setup-pixi@v0.9.4
 
-      - name: Generate documentation
+      - name: Run unit tests
         run: pixi run devtools_document
 
       - name: Commit changes to documentation
-        uses: EndBug/add-and-commit@v9
+        uses: EndBug/add-and-commit@v10
         with:
           push: true
           message: Update documentation

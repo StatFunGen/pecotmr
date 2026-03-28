@@ -734,8 +734,9 @@ test_that("process_coloc_results handles null_index producing purity of (-9, -9,
   )
 
   local_mocked_bindings(
-    load_and_extract_ld_matrix = function(...) {
+    extract_ld_for_variants = function(...) {
       m <- matrix(c(1, 0.9, 0.9, 1), 2, 2)
+      rownames(m) <- colnames(m) <- c("100", "200")
       m
     },
     calculate_purity = function(...) matrix(c(0.9, 0.95, 0.92), 1, 3),
@@ -771,8 +772,9 @@ test_that("process_coloc_results returns cs when purity passes", {
   )
 
   local_mocked_bindings(
-    load_and_extract_ld_matrix = function(...) {
+    extract_ld_for_variants = function(...) {
       m <- matrix(c(1, 0.9, 0.9, 1), 2, 2)
+      rownames(m) <- colnames(m) <- c("100", "200")
       m
     },
     calculate_purity = function(...) matrix(c(0.9, 0.95, 0.92), 1, 3),
@@ -813,8 +815,10 @@ test_that("process_coloc_results filters impure credible sets", {
 
   purity_call_count <- 0
   local_mocked_bindings(
-    load_and_extract_ld_matrix = function(...) {
-      matrix(c(1, 0.9, 0.9, 1), 2, 2)
+    extract_ld_for_variants = function(ld_path, region, variants) {
+      m <- matrix(c(1, 0.9, 0.9, 1), 2, 2)
+      rownames(m) <- colnames(m) <- variants[1:2]
+      m
     },
     calculate_purity = function(...) {
       purity_call_count <<- purity_call_count + 1
@@ -840,170 +844,6 @@ test_that("process_coloc_results filters impure credible sets", {
   if (!is.null(result$sets$cs)) {
     expect_equal(length(result$sets$cs), 1)
   }
-})
-
-# ===========================================================================
-# load_and_extract_ld_matrix
-# ===========================================================================
-
-test_that("load_and_extract_ld_matrix defaults to ld_ref mode and calls load_LD_matrix", {
-  variants <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
-  ld_mat <- matrix(c(1, 0.5, 0.3, 0.5, 1, 0.4, 0.3, 0.4, 1), 3, 3)
-  rownames(ld_mat) <- colnames(ld_mat) <- variants
-
-  local_mocked_bindings(
-    load_LD_matrix = function(...) {
-      list(combined_LD_matrix = ld_mat)
-    }
-  )
-
-  result <- pecotmr:::load_and_extract_ld_matrix(
-    "/fake/ld_meta.txt",
-    "chr1:100-300",
-    variants,
-    ld_ref = TRUE
-  )
-  expect_true(is.matrix(result))
-  expect_equal(nrow(result), 3)
-  expect_equal(ncol(result), 3)
-})
-
-test_that("load_and_extract_ld_matrix in_sample mode with .bed file", {
-  variants <- c("chr1:100:A:G", "chr1:200:C:T")
-  geno_mat <- matrix(c(0, 1, 2, 1, 2, 0, 1, 1, 0, 2), nrow = 5, ncol = 2)
-  colnames(geno_mat) <- variants
-
-  local_mocked_bindings(
-    load_genotype_region = function(...) geno_mat,
-    align_variant_names = function(source, target, ...) {
-      list(aligned_variants = target)
-    },
-    get_cormat = function(...) {
-      m <- matrix(c(1, 0.8, 0.8, 1), 2, 2)
-      rownames(m) <- colnames(m) <- variants
-      m
-    }
-  )
-
-  result <- pecotmr:::load_and_extract_ld_matrix(
-    "/fake/geno.bed",
-    "chr1:100-200",
-    variants,
-    in_sample = TRUE
-  )
-  expect_true(is.matrix(result))
-  expect_equal(nrow(result), 2)
-})
-
-test_that("load_and_extract_ld_matrix in_sample mode with .txt metadata file triggers read_tsv path", {
-  meta_path <- tempfile(fileext = ".txt")
-  meta_df <- data.frame(id = "99", path = "geno_chr99.bed")
-  readr::write_tsv(meta_df, meta_path, col_names = FALSE)
-  on.exit(file.remove(meta_path), add = TRUE)
-
-  expect_error(
-    pecotmr:::load_and_extract_ld_matrix(
-      meta_path,
-      "chr1:100-200",
-      c("chr1:100:A:G"),
-      in_sample = TRUE
-    )
-  )
-})
-
-test_that("load_and_extract_ld_matrix in_sample mode with single variant returns 1x1 matrix", {
-  variants <- c("chr1:100:A:G")
-  geno_mat <- matrix(c(0, 1, 2, 1, 0), nrow = 5, ncol = 1)
-  colnames(geno_mat) <- variants
-
-  local_mocked_bindings(
-    load_genotype_region = function(...) geno_mat,
-    align_variant_names = function(source, target, ...) {
-      list(aligned_variants = target)
-    }
-  )
-
-  result <- pecotmr:::load_and_extract_ld_matrix(
-    "/fake/geno.bed",
-    "chr1:100-100",
-    variants,
-    in_sample = TRUE
-  )
-  expect_equal(result, as.matrix(1))
-})
-
-test_that("load_and_extract_ld_matrix auto-detects in_sample mode from .bed extension", {
-  variants <- c("chr1:100:A:G", "chr1:200:C:T")
-  geno_mat <- matrix(c(0, 1, 2, 1, 2, 0, 1, 1, 0, 2), nrow = 5, ncol = 2)
-  colnames(geno_mat) <- variants
-
-  local_mocked_bindings(
-    load_genotype_region = function(...) geno_mat,
-    align_variant_names = function(source, target, ...) {
-      list(aligned_variants = target)
-    },
-    get_cormat = function(...) {
-      m <- matrix(c(1, 0.7, 0.7, 1), 2, 2)
-      rownames(m) <- colnames(m) <- variants
-      m
-    }
-  )
-
-  result <- pecotmr:::load_and_extract_ld_matrix(
-    "/fake/geno.bed",
-    "chr1:100-200",
-    variants
-  )
-  expect_true(is.matrix(result))
-})
-
-test_that("load_and_extract_ld_matrix in_sample errors on unknown file format", {
-  expect_error(
-    pecotmr:::load_and_extract_ld_matrix(
-      "/fake/data.csv",
-      "chr1:100-200",
-      c("chr1:100:A:G"),
-      in_sample = TRUE
-    ),
-    "expected plink file"
-  )
-})
-
-test_that("load_and_extract_ld_matrix in_sample errors on .txt with mismatched chr", {
-  meta_path <- tempfile(fileext = ".txt")
-  meta_df <- data.frame(id = "2", path = "geno_chr2.bed")
-  readr::write_tsv(meta_df, meta_path, col_names = FALSE)
-  on.exit(file.remove(meta_path), add = TRUE)
-
-  expect_error(
-    pecotmr:::load_and_extract_ld_matrix(
-      meta_path,
-      "chr1:100-200",
-      c("chr1:100:A:G"),
-      in_sample = TRUE
-    )
-  )
-})
-
-test_that("load_and_extract_ld_matrix enforces exclusivity: ld_ref overrides in_sample", {
-  variants <- c("chr1:100:A:G")
-  ld_mat <- matrix(1, 1, 1)
-  rownames(ld_mat) <- colnames(ld_mat) <- variants
-
-  local_mocked_bindings(
-    load_LD_matrix = function(...) {
-      list(combined_LD_matrix = ld_mat)
-    }
-  )
-
-  result <- pecotmr:::load_and_extract_ld_matrix(
-    "/fake/ld_meta.txt",
-    "chr1:100-100",
-    variants,
-    ld_ref = TRUE,
-    in_sample = TRUE
-  )
-  expect_equal(result, 1)
 })
 
 # ===========================================================================

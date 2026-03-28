@@ -69,7 +69,7 @@ str(prior_matrices)
 
 ## Cross-Validation to Select Imputable Genes
 
-**Note:** The code below requires the `mr.mash.alpha` package. These chunks
+**Note:** The code below requires the `mr.mashr` package. These chunks
 are not executed during the vignette build but are shown for reference.
 
 A sample partition need to be provided if intend to perform cross-validation. We will first

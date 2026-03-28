@@ -19,7 +19,10 @@ quantile_twas_weight_pipeline(
   quantile_twas_tau_list = seq(0.01, 0.99, by = 0.01),
   screen_threshold = 0.05,
   xi_tau_range = seq(0.1, 0.9, by = 0.05),
-  keep_variants = NULL
+  keep_variants = NULL,
+  marginal_beta_calculate = TRUE,
+  twas_weight_calculate = TRUE,
+  qrank_screen_calculate = TRUE
 )
 }
 \arguments{

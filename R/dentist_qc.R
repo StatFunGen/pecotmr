@@ -942,7 +942,7 @@ dentist_from_files <- function(gwas_summary,
     X <- load_genotype_region(bfile, region = NULL)
   }
 
-  # Determine sample size — use reference panel size (nrow of genotype matrix),
+  # Determine sample size -- use reference panel size (nrow of genotype matrix),
   # NOT the GWAS sample size from the summary stats N column.
   # The original DENTIST software uses ref.N (number of samples in the .fam file)
   # for the K = min(idx.size(), nSample) * propSVD truncation.
@@ -995,7 +995,7 @@ dentist_from_files <- function(gwas_summary,
     LD_mat <- compute_LD(X_sub, method = "sample")
   }
 
-  # 7. Prepare sum_stat for dentist() — needs pos and z columns
+  # 7. Prepare sum_stat for dentist() -- needs pos and z columns
   dentist_input <- data.frame(
     SNP = aligned$SNP,
     pos = aligned$pos,

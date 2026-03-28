@@ -74,7 +74,7 @@ compute_qvalues <- function(pvalues) {
   )
 }
 
-pval_cauchy <- function(p, na.rm = T) {
+pval_cauchy <- function(p, na.rm = TRUE) {
   if (na.rm) {
     if (sum(is.na(p))) {
       p <- p[!is.na(p)]
@@ -87,7 +87,7 @@ pval_cauchy <- function(p, na.rm = T) {
   temp[is.small] <- 1 / p[is.small] / pi
   temp[is.regular] <- as.numeric(tan((0.5 - p[is.regular]) * pi))
 
-  cct.stat <- mean(temp, na.rm = T)
+  cct.stat <- mean(temp, na.rm = TRUE)
   if (is.na(cct.stat)) {
     return(NA)
   }
@@ -124,15 +124,15 @@ compute_all_missing_y <- function(y) {
 
 mean_impute <- function(geno) {
   f <- apply(geno, 2, function(x) mean(x, na.rm = TRUE))
-  for (i in 1:length(f)) geno[, i][which(is.na(geno[, i]))] <- f[i]
+  for (i in seq_along(f)) geno[, i][which(is.na(geno[, i]))] <- f[i]
   return(geno)
 }
 
 is_zero_variance <- function(x) {
   if (length(unique(x)) == 1) {
-    return(T)
+    return(TRUE)
   } else {
-    return(F)
+    return(FALSE)
   }
 }
 
@@ -248,7 +248,7 @@ filter_X <- function(X, missing_rate_thresh, maf_thresh, var_thresh = 0, maf = N
   tol_variants <- ncol(X)
   if (!is.null(missing_rate_thresh) && missing_rate_thresh < 1.0) {
     rm_col <- which(apply(X, 2, compute_missing) > missing_rate_thresh)
-    if (length(rm_col)) X <- X[, -rm_col, drop = F]
+    if (length(rm_col)) X <- X[, -rm_col, drop = FALSE]
   }
 
   # Check if non-NA values are valid genotypes before MAF filtering
@@ -260,18 +260,18 @@ filter_X <- function(X, missing_rate_thresh, maf_thresh, var_thresh = 0, maf = N
 
     if (valid_genotypes || !is.null(maf)) {
       rm_col <- if (!is.null(maf)) which(maf <= maf_thresh) else which(apply(X, 2, compute_maf) <= maf_thresh)
-      if (length(rm_col)) X <- X[, -rm_col, drop = F]
+      if (length(rm_col)) X <- X[, -rm_col, drop = FALSE]
     } else {
       message("Skipping MAF filtering as X does not appear to be 0/1/2 matrix, and no external MAF information is provided")
     }
   }
 
   rm_col <- which(apply(X, 2, is_zero_variance))
-  if (length(rm_col)) X <- X[, -rm_col, drop = F]
+  if (length(rm_col)) X <- X[, -rm_col, drop = FALSE]
   X <- mean_impute(X)
   if (var_thresh > 0) {
     rm_col <- if (!is.null(X_variance)) which(X_variance < var_thresh) else which(colVars(X) < var_thresh)
-    if (length(rm_col)) X <- X[, -rm_col, drop = F]
+    if (length(rm_col)) X <- X[, -rm_col, drop = FALSE]
   }
   message(paste0(tol_variants - ncol(X), " out of ", tol_variants, " total variants dropped due to quality control on X matrix."))
   return(X)
@@ -313,6 +313,31 @@ filter_Y <- function(Y, n_nonmiss) {
   return(list(Y = Y, rm_rows = rm_rows))
 }
 
+# ---------- Shared genomic utility helpers ----------
+
+#' Strip "chr" prefix from chromosome identifiers.
+#' @param x Character vector of chromosome identifiers (e.g., "chr1", "chrX").
+#' @return Character vector with "chr" prefix removed (e.g., "1", "X").
+#' @noRd
+strip_chr_prefix <- function(x) sub("^chr", "", x)
+
+#' Strip build suffix from variant IDs (e.g., ":b38" or "_b38").
+#' @param x Character vector of variant IDs.
+#' @return Character vector with build suffix removed.
+#' @noRd
+strip_build_suffix <- function(x) sub("(:|_)b[0-9]+$", "", x)
+
+#' Test whether allele pairs are single-nucleotide (SNP, not indel).
+#'
+#' Returns TRUE for each pair where both alleles are exactly one of A, T, C, G.
+#' @param a1 Character vector of first alleles.
+#' @param a2 Character vector of second alleles.
+#' @return Logical vector, TRUE if the variant is a SNP.
+#' @noRd
+is_snp_alleles <- function(a1, a2) {
+  nchar(a1) == 1L & nchar(a2) == 1L &
+    grepl("^[ATCG]$", a1) & grepl("^[ATCG]$", a2)
+}
 
 #' Detect the naming convention of variant IDs
 #'
@@ -346,8 +371,7 @@ detect_variant_convention <- function(ids) {
   has_chr <- grepl("^chr", first_id)
   # Detect build suffix like :b38 or _b38 at end
   has_build <- grepl("(:|_)b[0-9]+$", first_id)
-  # Strip build suffix for separator detection
-  id_clean <- gsub("(:|_)b[0-9]+$", "", first_id)
+  id_clean <- strip_build_suffix(first_id)
   # Detect allele separator: check if variant uses underscores between allele fields
   # This catches both full underscore ("1_100_A_G") and mixed ("chr1:100_A_G") formats
   allele_sep <- if (grepl("_[ATCGID*]+_[ATCGID*]+$", id_clean)) "_" else ":"
@@ -375,7 +399,7 @@ parse_variant_id <- function(ids) {
       # Already has correct column names
     } else if (all(c("chrom", "pos", "A1", "A2") %in% names(ids))) {
       # Has A1/A2 but need to check they're in the right semantic order
-      # (A2 = ref, A1 = alt/effect) — keep as-is since column names are explicit
+      # (A2 = ref, A1 = alt/effect) -- keep as-is since column names are explicit
     } else if (ncol(ids) >= 4) {
       # Assume positional: chrom, pos, A2, A1
       names(ids)[1:4] <- c("chrom", "pos", "A2", "A1")
@@ -385,10 +409,7 @@ parse_variant_id <- function(ids) {
       has_chr = any(grepl("^chr", as.character(ids$chrom))),
       allele_sep = ":", has_build = FALSE, example = NA_character_
     )
-    ids$chrom <- ifelse(grepl("^chr", as.character(ids$chrom)),
-      as.integer(sub("^chr", "", as.character(ids$chrom))),
-      as.integer(ids$chrom)
-    )
+    ids$chrom <- as.integer(strip_chr_prefix(as.character(ids$chrom)))
     ids$pos <- as.integer(ids$pos)
     attr(ids, "convention") <- conv
     return(ids)
@@ -399,7 +420,7 @@ parse_variant_id <- function(ids) {
 
   # Normalize: convert underscores to colons, strip build suffix
   normalized <- gsub("_", ":", ids)
-  normalized <- gsub("(:|_)b[0-9]+$", "", normalized)
+  normalized <- strip_build_suffix(normalized)
 
   # Split into parts
   parts <- strsplit(normalized, ":", fixed = TRUE)
@@ -409,11 +430,7 @@ parse_variant_id <- function(ids) {
   data <- data.frame(do.call(rbind, parts), stringsAsFactors = FALSE)
   colnames(data) <- c("chrom", "pos", "A2", "A1")
 
-  # Convert chrom to integer (strip chr prefix)
-  data$chrom <- ifelse(grepl("^chr", data$chrom),
-    as.integer(sub("^chr", "", data$chrom)),
-    as.integer(data$chrom)
-  )
+  data$chrom <- as.integer(strip_chr_prefix(data$chrom))
   data$pos <- as.integer(data$pos)
 
   attr(data, "convention") <- convention
@@ -455,7 +472,7 @@ format_variant_id <- function(chrom, pos, A2, A1, chr_prefix = TRUE, allele_sep 
     allele_sep <- if (!is.null(convention$allele_sep)) convention$allele_sep else ":"
   }
   # Strip any existing chr prefix to normalize, then re-add if requested
-  chrom_clean <- sub("^chr", "", as.character(chrom))
+  chrom_clean <- strip_chr_prefix(as.character(chrom))
   if (chr_prefix) {
     paste0("chr", chrom_clean, ":", pos, allele_sep, A2, allele_sep, A1)
   } else {
@@ -487,7 +504,7 @@ normalize_variant_id <- function(ids, chr_prefix = TRUE, convention = NULL) {
   }
 }
 
-# Backward-compatible alias used internally — delegates to parse_variant_id
+# Backward-compatible alias used internally -- delegates to parse_variant_id
 variant_id_to_df <- function(variant_id) {
   parse_variant_id(variant_id)
 }
@@ -504,7 +521,7 @@ parse_region <- function(region) {
   }
   parts <- str_split(region, "[:-]")[[1]]
   df <- data.frame(
-    chrom = gsub("^chr", "", parts[1]),
+    chrom = strip_chr_prefix(parts[1]),
     start = as.integer(parts[2]),
     end = as.integer(parts[3])
   )
@@ -538,7 +555,7 @@ get_nested_element <- function(nested_list, name_vector) {
 find_data <- function(x, depth_obj, show_path = FALSE, rm_null = TRUE, rm_dup = FALSE, docall = c, last_obj = NULL) {
   depth <- as.integer(depth_obj[1])
   list_name <- if (length(depth_obj) > 1) depth_obj[2:length(depth_obj)] else NULL
-  if (depth == 1 | depth == 0) {
+  if (depth == 1 || depth == 0) {
     if (!is.null(list_name)) {
       if (list_name[1] %in% names(x)) {
         if (any(grepl("^[0-9]+$", list_name))) { # list names, indx name, list names
@@ -593,7 +610,7 @@ find_data <- function(x, depth_obj, show_path = FALSE, rm_null = TRUE, rm_dup = 
     } else {
       flat_result <- do.call(docall, unname(result))
       if (length(shared_list_names) > 0 & depth == 2) {
-        names(result) <- paste0("unique_list_", 1:length(result))
+        names(result) <- paste0("unique_list_", seq_along(result))
         result$shared_list_names <- shared_list_names
         return(result)
       } else {
@@ -609,7 +626,7 @@ find_data <- function(x, depth_obj, show_path = FALSE, rm_null = TRUE, rm_dup = 
 #' @param ld_region_id A string of region in the format of chrom_start_end.
 #' @export
 region_to_df <- function(ld_region_id, colnames = c("chrom", "start", "end")) {
-  region_of_interest <- as.data.frame(do.call(rbind, lapply(strsplit(ld_region_id, "[_:-]"), function(x) as.integer(sub("chr", "", x)))))
+  region_of_interest <- as.data.frame(do.call(rbind, lapply(strsplit(ld_region_id, "[_:-]"), function(x) as.integer(strip_chr_prefix(x)))))
   colnames(region_of_interest) <- colnames
   return(region_of_interest)
 }
@@ -741,7 +758,7 @@ find_duplicate_variants <- function(z, LD, rThreshold) {
 
   # Filter z based on dupBearer
   filteredZ <- z[dupBearer == -1]
-  filteredLD <- LD[dupBearer == -1, dupBearer == -1, drop = F]
+  filteredLD <- LD[dupBearer == -1, dupBearer == -1, drop = FALSE]
 
   return(list(filteredZ = filteredZ, filteredLD = filteredLD, dupBearer = dupBearer, corABS = corABS, sign = sign, minValue = minValue))
 }
@@ -807,8 +824,8 @@ z_to_beta_se <- function(z, maf, n) {
 #'
 #' @details
 #' The function uses the following formula to calculate p-values:
-#' p-value = 2 * Φ(-|z|)
-#' Where Φ is the cumulative distribution function of the standard normal distribution.
+#' p-value = 2 * Phi(-|z|)
+#' Where Phi is the cumulative distribution function of the standard normal distribution.
 #'
 #' @examples
 #' z <- c(2.5, -1.8, 3.2, 0.7)

@@ -201,16 +201,29 @@ test_that("get_cs_info maps variants to CS numbers", {
   susie_cs <- list(L1 = c(1, 2), L3 = c(4, 5, 6))
   top_idx <- c(1, 3, 5)
   result <- pecotmr:::get_cs_info(susie_cs, top_idx)
-  expect_equal(result[1], 1)
-  expect_equal(result[2], 0)
-  expect_equal(result[3], 3)
+  # Now returns data.frame(variant_idx, cs_idx) with one row per (variant, CS) pair
+  expect_true(is.data.frame(result))
+  expect_equal(result$variant_idx, c(1, 3, 5))
+  expect_equal(result$cs_idx, c(1L, 0L, 3L))
 })
 
 test_that("get_cs_info handles all variants outside CS", {
   susie_cs <- list(L1 = c(1, 2))
   top_idx <- c(5, 6, 7)
   result <- pecotmr:::get_cs_info(susie_cs, top_idx)
-  expect_true(all(result == 0))
+  expect_true(is.data.frame(result))
+  expect_true(all(result$cs_idx == 0))
+})
+
+test_that("get_cs_info reports variant in multiple CSs as multiple rows", {
+  susie_cs <- list(L1 = c(1, 2, 3), L3 = c(2, 3, 4))
+  top_idx <- c(1, 2, 4)
+  result <- pecotmr:::get_cs_info(susie_cs, top_idx)
+  expect_true(is.data.frame(result))
+  # variant 2 is in both L1 and L3, so it gets two rows
+  expect_equal(nrow(result), 4)
+  expect_equal(sum(result$variant_idx == 2), 2)
+  expect_equal(sort(result$cs_idx[result$variant_idx == 2]), c(1L, 3L))
 })
 
 # =============================================================================

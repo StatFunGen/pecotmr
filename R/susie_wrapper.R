@@ -62,7 +62,7 @@ lbf_to_alpha <- function(lbf) {
 adjust_susie_weights <- function(twas_weights_results, keep_variants, allele_qc = TRUE,
                                  variable_name_obj = c("susie_results", context, "variant_names"),
                                  susie_obj = c("susie_results", context, "susie_result_trimmed"),
-                                 twas_weights_table = c("weights", context), combined_LD_variants, match_min_prop = 0.2) {
+                                 twas_weights_table = c("weights", context), LD_variants, match_min_prop = 0.2) {
   # Intersect the rownames of weights with keep_variants
   twas_weights_variants <- get_nested_element(twas_weights_results, variable_name_obj)
   # Normalize to canonical format (with chr prefix)
@@ -73,7 +73,7 @@ adjust_susie_weights <- function(twas_weights_results, keep_variants, allele_qc 
     if (!all(c("chrom", "pos", "A2", "A1") %in% colnames(weights_matrix))) {
       weights_matrix <- cbind(parse_variant_id(twas_weights_variants), weights_matrix)
     }
-    weights_matrix_qced <- allele_qc(weights_matrix, combined_LD_variants, colnames(weights_matrix)[!colnames(weights_matrix) %in% c(
+    weights_matrix_qced <- allele_qc(weights_matrix, LD_variants, colnames(weights_matrix)[!colnames(weights_matrix) %in% c(
       "chrom",
       "pos", "A2", "A1"
     )], match_min_prop = match_min_prop)
@@ -101,7 +101,7 @@ adjust_susie_weights <- function(twas_weights_results, keep_variants, allele_qc 
   # Convert lbf_matrix to alpha and calculate adjusted xQTL coefficients
   adjusted_xqtl_alpha <- lbf_to_alpha(lbf_matrix_subset)
   adjusted_xqtl_coef <- colSums(adjusted_xqtl_alpha * mu_subset) / x_column_scal_factors_subset
-  # allele_qc now outputs canonical variant_ids (with chr prefix) — no need to add chr
+  # allele_qc now outputs canonical variant_ids (with chr prefix) -- no need to add chr
   return(list(adjusted_susie_weights = adjusted_xqtl_coef, remained_variants_ids = weights_matrix_qced$target_data_qced$variant_id))
 }
 
@@ -152,38 +152,64 @@ susie_wrapper <- function(X, y, init_L = 5, max_L = 30, l_step = 5, ...) {
 #' @export
 susie_rss_wrapper <- function(z, R, n = NULL, var_y = NULL, L = 10, max_L = 30, l_step = 5,
                               coverage = 0.95, ...) {
+  original_n <- length(z)
+  keep_indices <- seq_len(original_n)
+
+  if (any(is.na(R))) {
+    na_variants <- rowSums(is.na(R)) > 0 | colSums(is.na(R)) > 0
+    if (all(na_variants)) {
+      stop("All variants have NAs in LD matrix. Cannot proceed with analysis.")
+    }
+    keep_variants <- !na_variants
+    keep_indices <- which(keep_variants)
+    R <- R[keep_variants, keep_variants, drop = FALSE]
+    z <- z[keep_variants]
+    warning(paste("Removed", sum(na_variants), "variants with NAs in LD matrix. Remaining:", length(z)))
+  }
+
+  if (!isSymmetric(R)) {
+    warning("R matrix is not symmetric; forcing symmetry with (R + t(R))/2")
+    R <- (R + t(R)) / 2
+  }
+
   if (L == 1) {
-    return(susie_rss(
+    result <- susie_rss(
       z = z, R = R, var_y = var_y, n = n,
       L = 1, max_iter = 1, coverage = coverage, ...
-    ))
-  }
-  if (L == max_L) {
-    return(susie_rss(
-      z = z, R = R, var_y = var_y, n = n, L = L,
-      coverage = coverage, ...
-    ))
-  }
-  while (TRUE) {
-    st <- proc.time()
-    susie_rss_result <- susie_rss(
+    )
+  } else if (L == max_L) {
+    result <- susie_rss(
       z = z, R = R, var_y = var_y, n = n, L = L,
       coverage = coverage, ...
     )
-    susie_rss_result$time_elapsed <- proc.time() - st
-    # Check for convergence and adjust L if necessary
-    if (!is.null(susie_rss_result$sets$cs)) {
-      if (length(susie_rss_result$sets$cs) >= L && L <= max_L) {
-        L <- L + l_step # Increase L for the next iteration
+  } else {
+    while (TRUE) {
+      st <- proc.time()
+      result <- susie_rss(
+        z = z, R = R, var_y = var_y, n = n, L = L,
+        coverage = coverage, ...
+      )
+      result$time_elapsed <- proc.time() - st
+      if (!is.null(result$sets$cs) && length(result$sets$cs) >= L && L <= max_L) {
+        L <- L + l_step
       } else {
         break
       }
-    } else {
-      break # Break the loop if no credible sets are found
     }
   }
 
-  return(susie_rss_result)
+  # Expand PIP back to original length if variants were dropped,
+  # and remap credible set indices to original positions.
+  if (length(keep_indices) < original_n) {
+    full_pip <- rep(0, original_n)
+    full_pip[keep_indices] <- result$pip
+    result$pip <- full_pip
+    if (!is.null(result$sets$cs)) {
+      result$sets$cs <- lapply(result$sets$cs, function(cs) keep_indices[cs])
+    }
+  }
+
+  return(result)
 }
 
 #' Run the SuSiE RSS pipeline
@@ -270,40 +296,10 @@ susie_rss_pipeline <- function(sumstats, LD_mat, n = NULL, var_y = NULL, L = 5, 
 
 #' @noRd
 get_cs_index <- function(snps_idx, susie_cs) {
-  # Use pmap to iterate over each vector in susie_cs
-  idx_lengths <- tryCatch(
-    {
-      pmap(list(x = susie_cs), function(x) {
-        # Check if snps_idx is in the CS and return the length of the CS if it is
-        if (snps_idx %in% x) {
-          return(length(x))
-        } else {
-          return(NA_integer_)
-        }
-      }) %>% unlist()
-    },
-    error = function(e) NA_integer_
-  )
-  idx <- which(!is.na(idx_lengths))
-  # idx length should be either 1 or 0
-  # But in some rare cases there will be a convergence issue resulting in a variant belong to multiple CS
-  # In which case we will keep one of them, with a warning
-  if (length(idx) > 0) {
-    if (length(idx) > 1) {
-      smallest_cs_idx <- which.min(idx_lengths[idx])
-      selected_cs <- idx[smallest_cs_idx]
-      selected_length <- idx_lengths[selected_cs]
-
-      warning(sprintf(
-        "Variable %d found in multiple CS: %s. Keeping smallest: CS %d (length %d).",
-        snps_idx, paste(idx, collapse = ", "), selected_cs, selected_length
-      ))
-      idx <- selected_cs # Keep index with smallest length
-    }
-    return(idx)
-  } else {
-    return(NA_integer_)
-  }
+  # Return ALL CS indices that contain this variant (not just one)
+  idx <- which(vapply(susie_cs, function(x) snps_idx %in% x, logical(1)))
+  if (length(idx) == 0) return(NA_integer_)
+  return(idx)
 }
 #' @noRd
 get_top_variants_idx <- function(susie_output, signal_cutoff) {
@@ -312,11 +308,21 @@ get_top_variants_idx <- function(susie_output, signal_cutoff) {
     sort()
 }
 #' @noRd
+#' Returns a data.frame(variant_idx, cs_idx) with one row per (variant, CS) pair.
+#' Variants in multiple CSs get multiple rows.
 get_cs_info <- function(susie_output_sets_cs, top_variants_idx) {
-  cs_info_pri <- map_int(top_variants_idx, ~ get_cs_index(.x, susie_output_sets_cs))
-  ifelse(is.na(cs_info_pri), 0, as.numeric(str_replace(names(susie_output_sets_cs)[cs_info_pri], "L", "")))
+  cs_names <- names(susie_output_sets_cs)
+  rows <- lapply(top_variants_idx, function(vi) {
+    idx <- get_cs_index(vi, susie_output_sets_cs)
+    if (length(idx) == 1 && is.na(idx)) {
+      data.frame(variant_idx = vi, cs_idx = 0L, stringsAsFactors = FALSE)
+    } else {
+      cs_nums <- as.integer(str_replace(cs_names[idx], "L", ""))
+      data.frame(variant_idx = rep(vi, length(cs_nums)), cs_idx = cs_nums, stringsAsFactors = FALSE)
+    }
+  })
+  do.call(rbind, rows)
 }
-
 #' @noRd
 get_cs_and_corr <- function(susie_output, coverage, data_x, mode = c("susie", "susie_rss", "mvsusie"), min_abs_corr = NULL) {
   if (mode %in% c("susie", "mvsusie")) {
@@ -408,30 +414,34 @@ susie_post_processor <- function(susie_output, data_x, data_y, X_scalar, y_scala
   if (length(eff_idx) > 0) {
     # Prepare for top loci table
     top_variants_idx_pri <- get_top_variants_idx(susie_output, signal_cutoff)
-    cs_pri <- get_cs_info(susie_output$sets$cs, top_variants_idx_pri)
+    # get_cs_info returns data.frame(variant_idx, cs_idx) with one row per (variant, CS) pair
+    top_loci_pri <- get_cs_info(susie_output$sets$cs, top_variants_idx_pri)
+    if (is.null(top_loci_pri)) top_loci_pri <- data.frame(variant_idx = integer(0), cs_idx = integer(0))
     susie_output$cs_corr <- if (mode %in% c("susie", "mvsusie")) get_cs_correlation(susie_output, X = data_x) else get_cs_correlation(susie_output, Xcorr = data_x)
-    top_loci_list <- list("coverage_0.95" = data.frame(variant_idx = top_variants_idx_pri, cs_idx = cs_pri, stringsAsFactors = FALSE))
+    top_loci_list <- list("coverage_0.95" = top_loci_pri)
 
-    ## Loop over each secondary coverage value
+    ## Loop over each secondary coverage value independently
     sets_secondary <- list()
     if (!is.null(secondary_coverage) && length(secondary_coverage)) {
       for (sec_cov in secondary_coverage) {
         sets_secondary[[paste0("coverage_", sec_cov)]] <- get_cs_and_corr(susie_output, sec_cov, data_x, mode, min_abs_corr)
         top_variants_idx_sec <- get_top_variants_idx(sets_secondary[[paste0("coverage_", sec_cov)]], signal_cutoff)
-        cs_sec <- get_cs_info(sets_secondary[[paste0("coverage_", sec_cov)]]$sets$cs, top_variants_idx_sec)
-        top_loci_list[[paste0("coverage_", sec_cov)]] <- data.frame(variant_idx = top_variants_idx_sec, cs_idx = cs_sec, stringsAsFactors = FALSE)
+        top_loci_sec <- get_cs_info(sets_secondary[[paste0("coverage_", sec_cov)]]$sets$cs, top_variants_idx_sec)
+        if (is.null(top_loci_sec)) top_loci_sec <- data.frame(variant_idx = integer(0), cs_idx = integer(0))
+        top_loci_list[[paste0("coverage_", sec_cov)]] <- top_loci_sec
       }
     }
 
-    # Iterate over the remaining tables, rename and merge them
+    # Merge coverage tables via full_join
     names(top_loci_list[[1]])[2] <- paste0("cs_", names(top_loci_list)[1])
     top_loci <- top_loci_list[[1]]
     if (length(top_loci_list) > 1) {
       for (i in 2:length(top_loci_list)) {
         names(top_loci_list[[i]])[2] <- paste0("cs_", names(top_loci_list)[i])
-        top_loci <- full_join(top_loci, top_loci_list[[i]], by = "variant_idx")
+        top_loci <- dplyr::full_join(top_loci, top_loci_list[[i]], by = "variant_idx")
       }
     }
+
     if (nrow(top_loci) > 0) {
       top_loci[is.na(top_loci)] <- 0
       variants <- res$variant_names[top_loci$variant_idx]

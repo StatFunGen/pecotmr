@@ -20,7 +20,7 @@
 cal_purity <- function(l_cs, X, method = "min") {
   tt <- list()
 
-  for (k in 1:length(l_cs)) {
+  for (k in seq_along(l_cs)) {
     cs_indices <- unlist(l_cs[[k]]) # Extract indices for the current credible set
     # Calculate purity based on the specified method
     if (method == "min") {
@@ -88,7 +88,7 @@ fsusie_get_cs <- function(fSuSiE.obj, X, requested_coverage = 0.95) {
   sets <- list(
     cs = cs_named,
     purity = purity_df,
-    cs_index = 1:length(fSuSiE.obj$cs),
+    cs_index = seq_along(fSuSiE.obj$cs),
     coverage = coverage_vector,
     requested_coverage = requested_coverage
   )

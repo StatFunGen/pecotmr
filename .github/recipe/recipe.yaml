@@ -42,11 +42,10 @@ requirements:
     - r-gbj
     - r-glmnet
     - r-harmonicmeanp
-    - r-knitr
     - r-magrittr
     - r-mashr
     - r-matrixstats
-    - r-mr.mash.alpha
+    - r-mr.mashr
     - r-mvsusier
     - r-pgenlibr
     - r-purrr
@@ -58,10 +57,8 @@ requirements:
     - r-readr
     - r-rfast
     - r-rlang
-    - r-rmarkdown
     - r-stringr
     - r-susier
-    - r-testthat
     - r-tibble
     - r-tidyr
     - r-vctrs
@@ -87,11 +84,10 @@ requirements:
     - r-gbj
     - r-glmnet
     - r-harmonicmeanp
-    - r-knitr
     - r-magrittr
     - r-mashr
     - r-matrixstats
-    - r-mr.mash.alpha
+    - r-mr.mashr
     - r-mvsusier
     - r-pgenlibr
     - r-purrr
@@ -103,10 +99,8 @@ requirements:
     - r-readr
     - r-rfast
     - r-rlang
-    - r-rmarkdown
     - r-stringr
     - r-susier
-    - r-testthat
     - r-tibble
     - r-tidyr
     - r-vctrs

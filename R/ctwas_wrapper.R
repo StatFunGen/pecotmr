@@ -11,9 +11,9 @@ ctwas_ld_loader <- function(ld_matrix_file_path) {
 ctwas_bimfile_loader <- function(bim_file_path) {
   snp_info <- as.data.frame(vroom(bim_file_path, col_names = FALSE))
   if (ncol(snp_info) == 9) {
-    colnames(snp_info) <- c("chrom", "id", "GD", "pos", "alt", "ref", "variance", "allele_freq", "n_nomiss")
+    colnames(snp_info) <- c("chrom", "id", "GD", "pos", "A1", "A2", "variance", "allele_freq", "n_nomiss")
   } else {
-    colnames(snp_info) <- c("chrom", "id", "GD", "pos", "alt", "ref")
+    colnames(snp_info) <- c("chrom", "id", "GD", "pos", "A1", "A2")
   }
   snp_info$id <- normalize_variant_id(snp_info$id)
   return(snp_info)
@@ -25,7 +25,7 @@ ctwas_bimfile_loader <- function(bim_file_path) {
 get_ctwas_meta_data <- function(ld_meta_data_file, subset_region_ids = NULL) {
   LD_info <- as.data.frame(vroom(ld_meta_data_file))
   colnames(LD_info)[1] <- "chrom"
-  LD_info$region_id <- paste(as.integer(sub("^chr", "", LD_info$chrom)), LD_info$start, LD_info$end, sep = "_")
+  LD_info$region_id <- paste(as.integer(strip_chr_prefix(LD_info$chrom)), LD_info$start, LD_info$end, sep = "_")
   LD_info$LD_file <- paste0(dirname(ld_meta_data_file), "/", gsub(",.*$", "", LD_info$path))
   LD_info$SNP_file <- paste0(LD_info$LD_file, ".bim")
   LD_info <- LD_info[, c("region_id", "LD_file", "SNP_file")]
@@ -55,7 +55,7 @@ trim_ctwas_variants <- function(region_data, twas_weight_cutoff = 1e-5, cs_min_c
 
     if ("cs_variants" %in% names(region_data$susie_weights_intermediate[[molecular_id]][[context]]) & length(region_data$susie_weights_intermediate[[molecular_id]][[context]][["cs_variants"]]) != 0) {
       cs_min_abs_cor <- region_data$susie_weights_intermediate[[molecular_id]][[context]]$cs_purity$min.abs.corr
-      for (L in 1:length(region_data$susie_weights_intermediate[[molecular_id]][[context]]$cs_variants)) {
+      for (L in seq_along(region_data$susie_weights_intermediate[[molecular_id]][[context]]$cs_variants)) {
         # we includ all variants in $cs_variant if min_abs_corr > cs_min_cor for the set
         if (cs_min_abs_cor[L] >= cs_min_cor) {
           cs_variants <- region_data$susie_weights_intermediate[[molecular_id]][[context]]$cs_variants[[L]]

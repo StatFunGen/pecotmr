@@ -14,7 +14,7 @@ allele_qc(
   remove_strand_ambiguous = TRUE,
   flip_strand = FALSE,
   remove_unmatched = TRUE,
-  remove_same_vars = FALSE
+  ...
 )
 }
 \arguments{

@@ -2,7 +2,7 @@
 % Please edit documentation in R/file_utils.R
 \name{load_genotype_region}
 \alias{load_genotype_region}
-\title{Load genotype data for a specific region using vroom for efficiency}
+\title{Load genotype data for a specific region}
 \usage{
 load_genotype_region(
   genotype,
@@ -17,14 +17,13 @@ load_genotype_region(
 \item{region}{The target region in the format "chr:start-end".}
 
 \item{keep_indel}{Whether to keep indel SNPs.}
+
+\item{keep_variants_path}{Path to a file listing variants to keep.}
 }
 \value{
-A vector of SNP IDs in the specified region.
+A numeric dosage matrix (rows=samples, cols=variants).
 }
 \description{
-By default, plink usage dosage of the *major* allele, since "effect allele" A1 is
-usually the minor allele and the code "1" refers to the "other allele" A2,
-so that "11" is A2/A2 or major/major. We always use effect allele dosage, to
-be more consistent with the minor allele based convention ie, plink --recodeA which used minor allele
-dosage by default.
+Auto-detects PLINK2 (.pgen/.pvar[.zst]/.psam) or PLINK1 (.bed/.bim/.fam) format
+and loads genotype data accordingly. Returns a numeric dosage matrix.
 }

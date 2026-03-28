@@ -181,7 +181,7 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
 
       # Remove columns with zero standard error
       valid_columns <- apply(X_train, 2, function(col) sd(col) != 0)
-      X_train <- X_train[, valid_columns, drop = F]
+      X_train <- X_train[, valid_columns, drop = FALSE]
       X_train <- filter_X_with_Y(X_train, Y_train, missing_rate_thresh = 1, maf_thresh = NULL)
       valid_columns <- colnames(X_train)
       # X_test <- X_test[, valid_columns, drop=FALSE]
@@ -237,7 +237,7 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
     # test set at some point, and therefore has predicted value.
     # The prediction matrix is therefore exactly the same dimension as input Y
     Y_pred <- setNames(lapply(weight_methods, function(x) `dimnames<-`(matrix(NA, nrow(Y), ncol(Y)), dimnames(Y))), names(weight_methods))
-    for (j in 1:length(fold_results)) {
+    for (j in seq_along(fold_results)) {
       for (method in names(weight_methods)) {
         Y_pred[[method]][rownames(fold_results[[j]][[method]]), ] <- fold_results[[j]][[method]]
       }
@@ -674,7 +674,7 @@ twas_multivariate_weights_pipeline <- function(
     res <- copy_twas_cv_results(res, twas_cv_result)
   }
   total_time_elapsed <- proc.time() - st
-  for (i in 1:length(res)) {
+  for (i in seq_along(res)) {
     res[[i]]$total_time_elapsed <- total_time_elapsed
   }
   return(res)

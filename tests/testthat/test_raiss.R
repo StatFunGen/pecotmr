@@ -552,7 +552,7 @@ generate_block_diagonal_test_data <- function(seed = 123, block_structure = "ove
     ld_matrices = block_matrices,
     variant_indices = variant_indices,
     block_metadata = block_metadata,
-    combined_LD_variants = all_variant_ids
+    LD_variants = all_variant_ids
   )
   
   return(list(
@@ -575,8 +575,8 @@ test_that("full matrix and block processing produce identical results", {
     
     # Prepare ld_data for partition_LD_matrix
     ld_data <- list(
-      combined_LD_matrix = test_data$LD_matrix_full,
-      combined_LD_variants = test_data$ref_panel$variant_id,
+      LD_matrix = test_data$LD_matrix_full,
+      LD_variants = test_data$ref_panel$variant_id,
       block_metadata = test_data$block_metadata
     )
     
@@ -856,8 +856,8 @@ test_that("partition_LD_matrix integrates correctly with RAISS", {
   test_data <- generate_block_diagonal_test_data(seed = 456, block_structure = "non_overlapping")
   
   ld_data <- list(
-    combined_LD_matrix = test_data$LD_matrix_full,
-    combined_LD_variants = test_data$ref_panel$variant_id,
+    LD_matrix = test_data$LD_matrix_full,
+    LD_variants = test_data$ref_panel$variant_id,
     block_metadata = test_data$block_metadata
   )
   
