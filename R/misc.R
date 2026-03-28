@@ -128,13 +128,7 @@ mean_impute <- function(geno) {
   return(geno)
 }
 
-is_zero_variance <- function(x) {
-  if (length(unique(x)) == 1) {
-    return(TRUE)
-  } else {
-    return(FALSE)
-  }
-}
+is_zero_variance <- function(x) length(unique(x)) == 1
 
 #' Compute LD (Linkage Disequilibrium) Correlation Matrix from Genotypes
 #'

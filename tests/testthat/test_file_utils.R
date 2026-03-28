@@ -1212,17 +1212,6 @@ test_that("batch_load_twas_weights splits when exceeding memory limit", {
 })
 
 # ===========================================================================
-# get_cormat
-# ===========================================================================
-
-test_that("get_cormat computes correlation matrix correctly", {
-  X <- matrix(c(1, 2, 3, 4, 5, 6), nrow = 2, ncol = 3)
-  result <- get_cormat(X)
-  expect_true(is.matrix(result))
-  expect_equal(diag(result), rep(1, ncol(X)), tolerance = 1e-10)
-})
-
-# ===========================================================================
 # load_rss_data
 # ===========================================================================
 

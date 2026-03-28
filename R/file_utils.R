@@ -1501,21 +1501,6 @@ batch_load_twas_weights <- function(twas_weights_results, meta_data_df, max_memo
   return(batches)
 }
 
-#' Compute genotype correlation 
-#' @export
-get_cormat <- function(X, intercepte = TRUE) {
-  X <- t(X)
-  # Center each variable
-  if (intercepte) {
-    X <- X - rowMeans(X)
-  }
-  # Standardize each variable
-  X <- X / sqrt(rowSums(X^2))
-  # Calculate correlations
-  cr <- tcrossprod(X)
-  return(cr)
-}
-
 # Function to filter a single credible set based on coverage and purity
 #' @importFrom susieR susie_get_cs
 #' @importFrom purrr map_lgl
