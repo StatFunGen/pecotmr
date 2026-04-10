@@ -36,10 +36,13 @@ Imports:
     vctrs,
     vroom
 Suggests:
+    BGLR,
     coda,
     colocboost,
     GBJ,
+    L0Learn,
     Rfast,
+    RcppDPR,
     flashier,
     fsusieR,
     glmnet,
@@ -48,6 +51,7 @@ Suggests:
     mashr,
     mr.mashr,
     mvsusieR,
+    ncvreg,
     pgenlibr,
     qgg,
     quadprog,

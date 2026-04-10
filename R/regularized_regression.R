@@ -377,6 +377,25 @@ init_prior_sd <- function(X, y, n = 30) {
   seq(0, smax, length.out = n)
 }
 
+# Identify zero-variance columns of X and warn the caller before they are
+# dropped. Returns a logical vector of length ncol(X) where TRUE indicates a
+# column to keep. The downstream solvers in pecotmr's regression wrappers
+# (glmnet, ncvreg, L0Learn, qgg, BGLR, RcppDPR) all either error or behave
+# poorly on constant columns, so wrappers should filter them out and zero-pad
+# their results back to length p.
+.drop_zero_variance <- function(X, fn_name) {
+  sds <- apply(X, 2, sd)
+  keep <- !is.na(sds) & sds != 0
+  if (!all(keep)) {
+    warning(sprintf(
+      "%s: dropping %d zero-variance column(s) from X (indices: %s)",
+      fn_name, sum(!keep),
+      paste(which(!keep), collapse = ", ")
+    ), call. = FALSE)
+  }
+  keep
+}
+
 #' @importFrom stats coef
 #' @export
 glmnet_weights <- function(X, y, alpha) {
@@ -385,9 +404,8 @@ glmnet_weights <- function(X, y, alpha) {
     stop("To use this function, please install glmnet: https://cran.r-project.org/web/packages/glmnet/index.html")
   }
   eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
-  sds <- apply(X, 2, sd)
-  keep <- sds != 0 & !is.na(sds)
-  enet <- glmnet::cv.glmnet(x = X[, keep], y = y, alpha = alpha, nfold = 5, intercept = TRUE, standardize = FALSE)
+  keep <- .drop_zero_variance(X, "glmnet_weights")
+  enet <- glmnet::cv.glmnet(x = X[, keep, drop = FALSE], y = y, alpha = alpha, nfold = 5, intercept = TRUE, standardize = FALSE)
   eff.wgt[keep] <- coef(enet, s = "lambda.min")[2:(sum(keep) + 1)]
   return(eff.wgt)
 }
@@ -410,12 +428,18 @@ lasso_weights <- function(X, y) glmnet_weights(X, y, 1)
 #' @importFrom stats predict
 #' @export
 mrash_weights <- function(X, y, init_prior_sd = TRUE, ...) {
+  eff.wgt <- rep(0, ncol(X))
+  keep <- .drop_zero_variance(X, "mrash_weights")
+  X_keep <- X[, keep, drop = FALSE]
   args_list <- list(...)
   if (!"beta.init" %in% names(args_list)) {
-    args_list$beta.init <- lasso_weights(X, y)
+    args_list$beta.init <- lasso_weights(X_keep, y)
+  } else if (length(args_list$beta.init) == ncol(X)) {
+    args_list$beta.init <- args_list$beta.init[keep]
   }
-  fit.mr.ash <- do.call(mr.ash, c(list(X = X, y = y, sa2 = if (init_prior_sd) init_prior_sd(X, y)^2 else NULL), args_list))
-  predict(fit.mr.ash, type = "coefficients")[-1]
+  fit.mr.ash <- do.call(mr.ash, c(list(X = X_keep, y = y, sa2 = if (init_prior_sd) init_prior_sd(X_keep, y)^2 else NULL), args_list))
+  eff.wgt[keep] <- predict(fit.mr.ash, type = "coefficients")[-1]
+  return(eff.wgt)
 }
 #' Extract Coefficients From Bayesian Linear Regression
 #'
@@ -458,9 +482,12 @@ bayes_alphabet_weights <- function(X, y, method, Z = NULL, nit = 5000, nburn = 1
     }
   }
 
+  eff.wgt <- rep(0, ncol(X))
+  keep <- .drop_zero_variance(X, "bayes_alphabet_weights")
+
   model <- qgg::gbayes(
     y = y,
-    W = X,
+    W = X[, keep, drop = FALSE],
     X = Z,
     method = method,
     nit = nit,
@@ -468,7 +495,8 @@ bayes_alphabet_weights <- function(X, y, method, Z = NULL, nit = 5000, nburn = 1
     ...
   )
 
-  return(model$bm)
+  eff.wgt[keep] <- model$bm
+  return(eff.wgt)
 }
 #' Use Gaussian distribution as prior. Posterior means will be BLUP, equivalent to Ridge Regression.
 #' @export
@@ -911,4 +939,231 @@ lassosum_rss_weights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0), ...) {
   }
 
   return(best_beta)
+
+#' Compute Weights Using ncvreg with SCAD or MCP Penalty
+#'
+#' Internal helper that fits an `ncvreg` model with the specified non-convex
+#' penalty using k-fold cross-validation, then returns the coefficients at
+#' `lambda.min`. Following the convention of `glmnet_weights`, columns of `X`
+#' with zero (or `NA`) standard deviation are dropped before fitting and their
+#' weights are set to zero.
+#'
+#' @param X A numeric matrix of predictors (no intercept column; `ncvreg`
+#'   standardizes internally and adds its own intercept).
+#' @param y A numeric response vector.
+#' @param penalty Either "SCAD" or "MCP".
+#' @param nfolds Number of cross-validation folds. Default is 5.
+#' @param ... Additional arguments passed through to `ncvreg::cv.ncvreg`.
+#' @return A numeric vector of length `ncol(X)` of variant weights.
+#' @importFrom stats coef
+#' @keywords internal
+ncvreg_weights <- function(X, y, penalty, nfolds = 5, ...) {
+  if (!requireNamespace("ncvreg", quietly = TRUE)) {
+    stop("To use this function, please install ncvreg: https://cran.r-project.org/package=ncvreg")
+  }
+  eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
+  keep <- .drop_zero_variance(X, "ncvreg_weights")
+  fit <- ncvreg::cv.ncvreg(X = X[, keep, drop = FALSE], y = y, penalty = penalty, nfolds = nfolds, ...)
+  eff.wgt[keep] <- coef(fit, lambda = fit$lambda.min)[-1]
+  return(eff.wgt)
+}
+
+#' Compute Weights Using SCAD-Penalized Regression
+#'
+#' Fits a SCAD-penalized linear regression model via `ncvreg::cv.ncvreg` and
+#' returns the coefficient vector at `lambda.min`.
+#'
+#' @param X A numeric matrix of predictors.
+#' @param y A numeric response vector.
+#' @param nfolds Number of cross-validation folds. Default is 5.
+#' @param ... Additional arguments passed through to `ncvreg::cv.ncvreg`.
+#' @return A numeric vector of length `ncol(X)` of variant weights.
+#' @export
+scad_weights <- function(X, y, nfolds = 5, ...) {
+  ncvreg_weights(X, y, penalty = "SCAD", nfolds = nfolds, ...)
+}
+
+#' Compute Weights Using MCP-Penalized Regression
+#'
+#' Fits an MCP-penalized linear regression model via `ncvreg::cv.ncvreg` and
+#' returns the coefficient vector at `lambda.min`.
+#'
+#' @param X A numeric matrix of predictors.
+#' @param y A numeric response vector.
+#' @param nfolds Number of cross-validation folds. Default is 5.
+#' @param ... Additional arguments passed through to `ncvreg::cv.ncvreg`.
+#' @return A numeric vector of length `ncol(X)` of variant weights.
+#' @export
+mcp_weights <- function(X, y, nfolds = 5, ...) {
+  ncvreg_weights(X, y, penalty = "MCP", nfolds = nfolds, ...)
+}
+
+#' Compute Weights Using L0Learn
+#'
+#' Fits an L0-regularized linear regression model via `L0Learn::L0Learn.cvfit`
+#' and returns the coefficient vector at the (lambda, gamma) pair minimizing
+#' the cross-validation error. Default penalty is "L0"; the user can switch to
+#' "L0L1" or "L0L2" (and tune the corresponding gamma grid) by passing the
+#' relevant arguments through `...`.
+#'
+#' @param X A numeric matrix of predictors.
+#' @param y A numeric response vector.
+#' @param penalty Type of regularization: "L0", "L0L1", or "L0L2". Default is "L0".
+#' @param nFolds Number of cross-validation folds. Default is 5.
+#' @param ... Additional arguments passed through to `L0Learn::L0Learn.cvfit`
+#'   (e.g. `nGamma`, `gammaMin`, `gammaMax`, `algorithm`, `maxSuppSize`).
+#' @return A numeric vector of length `ncol(X)` of variant weights.
+#' @export
+l0learn_weights <- function(X, y, penalty = "L0", nFolds = 5, ...) {
+  if (!requireNamespace("L0Learn", quietly = TRUE)) {
+    stop("To use this function, please install L0Learn: https://cran.r-project.org/package=L0Learn")
+  }
+  eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
+  keep <- .drop_zero_variance(X, "l0learn_weights")
+  fit <- L0Learn::L0Learn.cvfit(
+    x = X[, keep, drop = FALSE], y = y, penalty = penalty, nFolds = nFolds, ...
+  )
+  # Find (gamma, lambda) minimizing CV error across the entire path.
+  cv_mins <- vapply(fit$cvMeans, function(v) min(as.numeric(v)), numeric(1))
+  gamma_idx <- which.min(cv_mins)
+  lambda_idx <- which.min(as.numeric(fit$cvMeans[[gamma_idx]]))
+  best_gamma <- fit$fit$gamma[gamma_idx]
+  best_lambda <- fit$fit$lambda[[gamma_idx]][lambda_idx]
+  coefs <- as.numeric(coef(fit, lambda = best_lambda, gamma = best_gamma))
+  # If intercept was included, drop it (first row).
+  if (length(coefs) == sum(keep) + 1L) {
+    coefs <- coefs[-1L]
+  }
+  eff.wgt[keep] <- coefs
+  return(eff.wgt)
+}
+
+#' Compute Weights Using a BGLR Linear Regression Model
+#'
+#' Internal helper that fits a `BGLR::BGLR` linear regression with a single
+#' linear term whose `model` is one of BGLR's marker-effect priors (e.g.
+#' "BayesB", "BL"), then returns the posterior mean of the marker effects.
+#' BGLR writes per-call temporary files to disk; this helper sandboxes them in
+#' a fresh `tempdir()` that is cleaned up on exit.
+#'
+#' @param X A numeric matrix of predictors.
+#' @param y A numeric response vector.
+#' @param model A BGLR marker-effect model name (e.g. "BayesB" or "BL").
+#' @param nIter Number of MCMC iterations.
+#' @param burnIn Number of burn-in iterations.
+#' @param thin Thinning interval.
+#' @param eta_args Optional named list of additional arguments included in the
+#'   `ETA` linear-term specification (e.g. `list(probIn = 0.05)` for BayesB).
+#' @param ... Additional arguments passed through to `BGLR::BGLR`.
+#' @return A numeric vector of length `ncol(X)` of variant weights.
+#' @keywords internal
+bglr_weights <- function(X, y, model, nIter, burnIn, thin, eta_args = list(), ...) {
+  if (!requireNamespace("BGLR", quietly = TRUE)) {
+    stop("To use this function, please install BGLR: https://cran.r-project.org/package=BGLR")
+  }
+  eff.wgt <- rep(0, ncol(X))
+  keep <- .drop_zero_variance(X, "bglr_weights")
+
+  tmpdir <- tempfile("bglr_")
+  dir.create(tmpdir, recursive = TRUE, showWarnings = FALSE)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  saveAt <- paste0(tmpdir, .Platform$file.sep)
+
+  eta <- list(c(list(X = X[, keep, drop = FALSE], model = model), eta_args))
+  fit <- BGLR::BGLR(
+    y = y, ETA = eta,
+    nIter = nIter, burnIn = burnIn, thin = thin,
+    saveAt = saveAt, verbose = FALSE, ...
+  )
+  eff.wgt[keep] <- as.numeric(fit$ETA[[1]]$b)
+  return(eff.wgt)
+}
+
+#' Compute Weights Using BayesB
+#'
+#' Fits a BayesB linear regression model via `BGLR::BGLR` and returns the
+#' posterior mean of the marker effects. BayesB places a "spike-and-slab"
+#' mixture prior on each marker effect, with a scaled-t slab.
+#'
+#' Defaults for `nIter`, `burnIn`, and `thin` are larger than BGLR's package
+#' defaults to better accommodate the high LD typical of cis-eQTL windows; see
+#' Kim et al. (2022) which observed that the BGLR defaults can be inadequate
+#' under correlated predictors. Override these arguments to recover the
+#' package defaults if desired.
+#'
+#' @param X A numeric matrix of predictors.
+#' @param y A numeric response vector.
+#' @param nIter Number of MCMC iterations. Default is 10000.
+#' @param burnIn Number of burn-in iterations. Default is 2000.
+#' @param thin Thinning interval. Default is 5.
+#' @param probIn Prior inclusion probability for each marker. Default is 0.05.
+#' @param ... Additional arguments passed through to `BGLR::BGLR`.
+#' @return A numeric vector of length `ncol(X)` of variant weights.
+#' @export
+bayes_b_weights <- function(X, y, nIter = 10000, burnIn = 2000, thin = 5, probIn = 0.05, ...) {
+  bglr_weights(
+    X, y,
+    model = "BayesB", nIter = nIter, burnIn = burnIn, thin = thin,
+    eta_args = list(probIn = probIn), ...
+  )
+}
+
+#' Compute Weights Using the Bayesian LASSO (BGLR)
+#'
+#' Fits a Bayesian LASSO linear regression model via `BGLR::BGLR` (the "BL"
+#' model, Park & Casella 2008) and returns the posterior mean of the marker
+#' effects. This is the same "B-Lasso" implementation benchmarked in Kim et
+#' al. (2022). Note that this is distinct from `bayes_l_weights`, which uses a
+#' different Bayesian LASSO implementation backed by `qgg`.
+#'
+#' Defaults for `nIter`, `burnIn`, and `thin` are larger than BGLR's package
+#' defaults to better accommodate high-LD cis-eQTL windows; override to
+#' recover the package defaults.
+#'
+#' @param X A numeric matrix of predictors.
+#' @param y A numeric response vector.
+#' @param nIter Number of MCMC iterations. Default is 10000.
+#' @param burnIn Number of burn-in iterations. Default is 2000.
+#' @param thin Thinning interval. Default is 5.
+#' @param ... Additional arguments passed through to `BGLR::BGLR`.
+#' @return A numeric vector of length `ncol(X)` of variant weights.
+#' @export
+b_lasso_weights <- function(X, y, nIter = 10000, burnIn = 2000, thin = 5, ...) {
+  bglr_weights(
+    X, y,
+    model = "BL", nIter = nIter, burnIn = burnIn, thin = thin, ...
+  )
+}
+
+#' Compute Weights Using Dirichlet Process Regression (RcppDPR)
+#'
+#' Fits a Dirichlet Process Regression model via `RcppDPR::fit_model` and
+#' returns the per-variant weights, computed as `beta + alpha` (matching
+#' `RcppDPR:::predict.DPR_Model`, which uses `(beta + alpha) %*% x_new + pheno_mean`).
+#'
+#' By default the variational Bayes (`VB`) fitting method is used, which is
+#' fast and deterministic. The user may switch to `Gibbs` or `Adaptive_Gibbs`
+#' for full Bayesian MCMC inference. `rotate_variables` is held to `FALSE`
+#' under the assumption that any covariates have already been regressed out
+#' upstream; an intercept-only covariate matrix is supplied to `fit_model`.
+#'
+#' @param X A numeric matrix of predictors.
+#' @param y A numeric response vector.
+#' @param fitting_method One of "VB", "Gibbs", or "Adaptive_Gibbs". Default is "VB".
+#' @param ... Additional arguments passed through to `RcppDPR::fit_model`.
+#' @return A numeric vector of length `ncol(X)` of variant weights.
+#' @export
+dpr_weights <- function(X, y, fitting_method = "VB", ...) {
+  if (!requireNamespace("RcppDPR", quietly = TRUE)) {
+    stop("To use this function, please install RcppDPR: https://cran.r-project.org/package=RcppDPR")
+  }
+  eff.wgt <- rep(0, ncol(X))
+  keep <- .drop_zero_variance(X, "dpr_weights")
+  w <- matrix(1, nrow = nrow(X), ncol = 1)
+  fit <- RcppDPR::fit_model(
+    y = y, w = w, x = X[, keep, drop = FALSE],
+    rotate_variables = FALSE, fitting_method = fitting_method, ...
+  )
+  eff.wgt[keep] <- as.numeric(fit$beta + fit$alpha)
+  return(eff.wgt)
 }

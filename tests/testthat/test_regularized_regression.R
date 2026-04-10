@@ -494,7 +494,8 @@ test_that("glmnet_weights handles zero-variance columns", {
   X <- matrix(rnorm(n * p), nrow = n)
   X[, 3] <- 5
   y <- X[, 1] * 0.5 + rnorm(n)
-  result <- glmnet_weights(X, y, alpha = 1)
+  expect_warning(result <- glmnet_weights(X, y, alpha = 1),
+                 "glmnet_weights: dropping 1 zero-variance column")
   expect_equal(result[3, 1], 0)
 })
 
@@ -519,7 +520,8 @@ test_that("glmnet_weights handles NA-producing columns gracefully", {
 
   X[1, 4] <- NA
 
-  result <- glmnet_weights(X, y, alpha = 1)
+  expect_warning(result <- glmnet_weights(X, y, alpha = 1),
+                 "glmnet_weights: dropping 1 zero-variance column")
   expect_equal(nrow(result), p)
   expect_equal(ncol(result), 1)
   expect_equal(result[4, 1], 0)
@@ -927,4 +929,267 @@ test_that("lassosum_rss_weights calls lassosum_rss and returns beta_est", {
   result <- lassosum_rss_weights(stat = stat, LD = R)
   expect_equal(length(result), p)
   expect_true(is.numeric(result))
+
+test_that("mrash_weights warns and zero-pads when X has zero-variance columns", {
+  skip_if_not_installed("glmnet")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  X[, 3] <- 7
+  y <- X[, 1] * 0.5 + rnorm(n)
+  local_mocked_bindings(
+    lasso_weights = function(X, y) rep(0.01, ncol(X))
+  )
+  expect_warning(result <- mrash_weights(X, y),
+                 "mrash_weights: dropping 1 zero-variance column")
+  expect_equal(length(result), p)
+  expect_equal(result[3], 0)
+})
+
+# ---- bayes_alphabet_weights zero-variance handling ----
+test_that("bayes_alphabet_weights warns and zero-pads when X has zero-variance columns", {
+  skip_if_not_installed("qgg")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  X[, 4] <- 2
+  y <- X[, 1] * 0.5 + rnorm(n)
+  expect_warning(result <- bayes_alphabet_weights(X, y, method = "bayesN", nit = 50, nburn = 10),
+                 "bayes_alphabet_weights: dropping 1 zero-variance column")
+  expect_equal(length(result), p)
+  expect_equal(result[4], 0)
+  expect_true(all(is.finite(result)))
+})
+
+# ---- ncvreg_weights / scad_weights / mcp_weights ----
+test_that("ncvreg_weights computes weights with SCAD penalty", {
+  skip_if_not_installed("ncvreg")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+  result <- ncvreg_weights(X, y, penalty = "SCAD")
+  expect_equal(nrow(result), p)
+  expect_equal(ncol(result), 1)
+  expect_true(all(is.finite(result)))
+})
+
+test_that("ncvreg_weights warns and zero-pads when X has zero-variance columns", {
+  skip_if_not_installed("ncvreg")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  X[, 5] <- 3
+  y <- X[, 1] * 0.5 + rnorm(n)
+  expect_warning(result <- ncvreg_weights(X, y, penalty = "SCAD"),
+                 "ncvreg_weights: dropping 1 zero-variance column")
+  expect_equal(nrow(result), p)
+  expect_equal(result[5, 1], 0)
+})
+
+test_that("scad_weights computes weights and dispatches to ncvreg_weights", {
+  skip_if_not_installed("ncvreg")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+  result <- scad_weights(X, y)
+  expect_equal(nrow(result), p)
+  expect_equal(ncol(result), 1)
+  expect_true(all(is.finite(result)))
+})
+
+test_that("mcp_weights computes weights and dispatches to ncvreg_weights", {
+  skip_if_not_installed("ncvreg")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+  result <- mcp_weights(X, y)
+  expect_equal(nrow(result), p)
+  expect_equal(ncol(result), 1)
+  expect_true(all(is.finite(result)))
+})
+
+test_that("scad_weights passes nfolds through to cv.ncvreg", {
+  skip_if_not_installed("ncvreg")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+  # cv.ncvreg requires nfolds >= 2; passing 1 should error from inside ncvreg,
+  # which proves nfolds reached it.
+  expect_error(scad_weights(X, y, nfolds = 1))
+})
+
+# ---- l0learn_weights ----
+test_that("l0learn_weights computes weights with default L0 penalty", {
+  skip_if_not_installed("L0Learn")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+  result <- l0learn_weights(X, y)
+  expect_equal(nrow(result), p)
+  expect_equal(ncol(result), 1)
+  expect_true(all(is.finite(result)))
+})
+
+test_that("l0learn_weights computes weights with L0L2 penalty", {
+  skip_if_not_installed("L0Learn")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+  result <- l0learn_weights(X, y, penalty = "L0L2")
+  expect_equal(nrow(result), p)
+  expect_equal(ncol(result), 1)
+  expect_true(all(is.finite(result)))
+})
+
+test_that("l0learn_weights warns and zero-pads when X has zero-variance columns", {
+  skip_if_not_installed("L0Learn")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  X[, 6] <- 4
+  y <- X[, 1] * 0.5 + rnorm(n)
+  expect_warning(result <- l0learn_weights(X, y),
+                 "l0learn_weights: dropping 1 zero-variance column")
+  expect_equal(nrow(result), p)
+  expect_equal(result[6, 1], 0)
+})
+
+test_that("l0learn_weights passes nGamma through to L0Learn.cvfit", {
+  skip_if_not_installed("L0Learn")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+  # nGamma = 0 is invalid; the underlying function should reject it,
+  # proving the argument reached L0Learn.cvfit.
+  expect_error(l0learn_weights(X, y, penalty = "L0L2", nGamma = 0))
+})
+
+# ---- bglr_weights / bayes_b_weights / b_lasso_weights ----
+test_that("bglr_weights computes weights with BayesB model", {
+  skip_if_not_installed("BGLR")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+  result <- bglr_weights(X, y, model = "BayesB", nIter = 100, burnIn = 20, thin = 2,
+                         eta_args = list(probIn = 0.05))
+  expect_equal(length(result), p)
+  expect_true(is.numeric(result))
+  expect_true(all(is.finite(result)))
+})
+
+test_that("bayes_b_weights computes weights and dispatches to bglr_weights", {
+  skip_if_not_installed("BGLR")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+  result <- bayes_b_weights(X, y, nIter = 100, burnIn = 20, thin = 2)
+  expect_equal(length(result), p)
+  expect_true(all(is.finite(result)))
+})
+
+test_that("bayes_b_weights passes probIn through to BGLR ETA", {
+  skip_if_not_installed("BGLR")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    BGLR = function(y, ETA, ...) {
+      captured$eta <- ETA
+      list(ETA = list(list(b = rep(0, ncol(ETA[[1]]$X)))))
+    },
+    .package = "BGLR"
+  )
+
+  result <- bayes_b_weights(X, y, nIter = 100, burnIn = 20, thin = 2, probIn = 0.42)
+  expect_equal(length(result), p)
+  expect_equal(captured$eta[[1]]$model, "BayesB")
+  expect_equal(captured$eta[[1]]$probIn, 0.42)
+})
+
+test_that("b_lasso_weights computes weights with BL model", {
+  skip_if_not_installed("BGLR")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+  result <- b_lasso_weights(X, y, nIter = 100, burnIn = 20, thin = 2)
+  expect_equal(length(result), p)
+  expect_true(all(is.finite(result)))
+})
+
+test_that("bglr_weights warns and zero-pads when X has zero-variance columns", {
+  skip_if_not_installed("BGLR")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  X[, 7] <- 9
+  y <- X[, 1] * 0.5 + rnorm(n)
+  expect_warning(
+    result <- bayes_b_weights(X, y, nIter = 100, burnIn = 20, thin = 2),
+    "bglr_weights: dropping 1 zero-variance column"
+  )
+  expect_equal(length(result), p)
+  expect_equal(result[7], 0)
+})
+
+test_that("bglr_weights cleans up its tempdir on exit", {
+  skip_if_not_installed("BGLR")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+  before <- list.files(tempdir(), pattern = "^bglr_")
+  bayes_b_weights(X, y, nIter = 100, burnIn = 20, thin = 2)
+  after <- list.files(tempdir(), pattern = "^bglr_")
+  expect_setequal(before, after)
+})
+
+# ---- dpr_weights ----
+test_that("dpr_weights computes weights with VB fitting method", {
+  skip_if_not_installed("RcppDPR")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+  result <- dpr_weights(X, y, fitting_method = "VB")
+  expect_equal(length(result), p)
+  expect_true(is.numeric(result))
+  expect_true(all(is.finite(result)))
+})
+
+test_that("dpr_weights computes weights with Gibbs fitting method", {
+  skip_if_not_installed("RcppDPR")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+  result <- dpr_weights(X, y, fitting_method = "Gibbs")
+  expect_equal(length(result), p)
+  expect_true(is.numeric(result))
+  expect_true(all(is.finite(result)))
+})
+
+test_that("dpr_weights warns and zero-pads when X has zero-variance columns", {
+  skip_if_not_installed("RcppDPR")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  X[, 8] <- 6
+  y <- X[, 1] * 0.5 + rnorm(n)
+  expect_warning(result <- dpr_weights(X, y),
+                 "dpr_weights: dropping 1 zero-variance column")
+  expect_equal(length(result), p)
+  expect_equal(result[8], 0)
 })
