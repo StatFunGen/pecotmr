@@ -118,15 +118,16 @@ test_that("get_cs_index returns NA for variant not in any CS", {
   expect_true(is.na(idx))
 })
 
-test_that("get_cs_index warns on variant in multiple CS", {
+test_that("get_cs_index returns all CS indices when variant in multiple", {
   susie_cs <- list(L1 = c(1, 2, 3), L2 = c(2, 4, 5))
-  expect_warning(pecotmr:::get_cs_index(2, susie_cs), "found in multiple CS")
+  idx <- pecotmr:::get_cs_index(2, susie_cs)
+  expect_equal(unname(idx), c(1, 2))
 })
 
-test_that("get_cs_index returns smallest CS when variant in multiple", {
+test_that("get_cs_index returns all matching CS regardless of size", {
   susie_cs <- list(L1 = c(1, 2, 3, 4, 5), L2 = c(2, 3))
-  result <- suppressWarnings(pecotmr:::get_cs_index(2, susie_cs))
-  expect_equal(unname(result), 2)
+  result <- pecotmr:::get_cs_index(2, susie_cs)
+  expect_equal(unname(result), c(1, 2))
 })
 
 test_that("get_cs_index handles empty CS list", {
@@ -233,7 +234,7 @@ test_that("get_cs_info reports variant in multiple CSs as multiple rows", {
 test_that("susie_rss_pipeline errors on missing z and beta/se", {
   sumstats <- data.frame(x = 1)
   LD_mat <- matrix(1)
-  expect_error(susie_rss_pipeline(sumstats, LD_mat), "should have 'z'")
+  expect_error(susie_rss_pipeline(sumstats, LD_mat), "must have 'z'")
 })
 
 test_that("susie_rss_pipeline errors on invalid method", {

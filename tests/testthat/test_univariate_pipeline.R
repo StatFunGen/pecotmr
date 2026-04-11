@@ -1523,7 +1523,7 @@ test_that("rss: finemapping_opts are forwarded to susie_rss_pipeline", {
     rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
     susie_rss_pipeline = function(sumstats, LD_mat, n, var_y, L, max_L, l_step,
                                   analysis_method, coverage, secondary_coverage,
-                                  signal_cutoff, min_abs_corr) {
+                                  signal_cutoff, min_abs_corr, ...) {
       captured_L <<- L
       captured_coverage <<- coverage
       captured_signal_cutoff <<- signal_cutoff

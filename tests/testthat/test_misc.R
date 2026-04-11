@@ -312,8 +312,8 @@ test_that("pval_global with ACAT method returns valid combined p-value", {
   pvals <- c(0.01, 0.05, 0.5, 0.8)
   result <- pecotmr:::pval_global(pvals, comb_method = "ACAT", naive = FALSE)
   expect_true(is.numeric(result))
-  # ACAT = pcauchy(mean(qcauchy(pvals)), lower.tail=FALSE)
-  expected <- pcauchy(mean(qcauchy(pvals)), lower.tail = FALSE)
+  # ACAT statistic: T = mean(tan(pi*(0.5 - p_i))), p = P[Cauchy >= T]
+  expected <- pcauchy(mean(tan(pi * (0.5 - pvals))), lower.tail = FALSE)
   expect_equal(result, expected, tolerance = 1e-10)
 })
 
@@ -429,7 +429,7 @@ test_that("pval_acat with very small p-values does not return NA", {
 test_that("pval_acat with all large p-values returns large combined p-value", {
   result <- pecotmr:::pval_acat(c(0.8, 0.9, 0.95))
   expect_true(is.numeric(result))
-  expect_true(result > 0 && result < 0.5)
+  expect_true(result > 0.5 && result <= 1)
 })
 
 # =============================================================================

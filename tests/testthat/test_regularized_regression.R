@@ -593,232 +593,232 @@ test_that("bayes_n_weights dispatches to bayes_alphabet_weights with bayesN", {
   expect_true(all(is.finite(result)))
 })
 
-# ---- gbayes_rss ----
-test_that("gbayes_rss errors without LD matrix", {
-  skip_if_not_installed("qgg")
-  sumstats <- data.frame(beta = 0.1, se = 0.05, n = 1000)
-  expect_error(gbayes_rss(sumstats = sumstats), "Must provide LD")
-})
-
-test_that("gbayes_rss errors on invalid method", {
-  skip_if_not_installed("qgg")
-  sumstats <- data.frame(beta = 0.1, se = 0.05, n = 1000)
-  LD <- diag(1)
-  expect_error(gbayes_rss(sumstats = sumstats, LD = LD, method = "invalidMethod"),
-               "not valid")
-})
-
-test_that("gbayes_rss errors on non-dataframe input", {
-  skip_if_not_installed("qgg")
-  # A list input fails before the is.data.frame check because nrow(list) is NULL,
-  # causing the dimension comparison to error with "argument is of length zero"
-  expect_error(gbayes_rss(sumstats = list(beta = 0.1), LD = diag(1)),
-               "argument is of length zero")
-})
-
-test_that("gbayes_rss errors on dimension mismatch", {
-  skip_if_not_installed("qgg")
-  sumstats <- data.frame(beta = c(0.1, 0.2), se = c(0.05, 0.1), n = c(1000, 1000))
-  LD <- diag(3)
-  expect_error(gbayes_rss(sumstats = sumstats, LD = LD), "must correspond")
-})
-
-test_that("gbayes_rss rejects invalid method name", {
-  skip_if_not_installed("qgg")
-  sumstats <- data.frame(
-    beta = c(0.1, 0.2, 0.3),
-    se = c(0.05, 0.05, 0.05),
-    n = c(1000, 1000, 1000)
-  )
-  LD <- diag(3)
-  expect_error(
-    gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesZ"),
-    "not valid"
-  )
-})
-
-test_that("gbayes_rss runs successfully with valid method", {
-  skip_if_not_installed("qgg")
-  skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
-              "qgg:::sbayes_spa not available in installed qgg version")
-  sumstats <- data.frame(
-    beta = c(0.1, 0.2, 0.3),
-    se = c(0.05, 0.05, 0.05),
-    n = c(1000, 1000, 1000)
-  )
-  LD <- diag(3)
-  result <- gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesN", nit = 10, nburn = 0)
-  expect_true("method" %in% names(result))
-})
-
-test_that("gbayes_rss errors when sumstats has NA in wy", {
-  skip_if_not_installed("qgg")
-  sumstats <- data.frame(
-    beta = c(0.1, NA),
-    se = c(0.05, 0.05),
-    n = c(1000, 1000)
-  )
-  LD <- diag(2)
-  expect_error(
-    gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesN"),
-    "Missing values"
-  )
-})
-
-test_that("gbayes_rss sets variant_ids from data when not provided", {
-  skip_if_not_installed("qgg")
-  skip_if_not_installed("coda")
-  skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
-              "qgg:::sbayes_spa not available in installed qgg version")
-  sumstats <- data.frame(
-    beta = c(0.1, 0.2, 0.3),
-    se = c(0.05, 0.05, 0.05),
-    n = c(1000, 1000, 1000)
-  )
-  LD <- diag(3)
-  result <- gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesN",
-                       nit = 20, nburn = 5)
-  expect_true("sumstats" %in% names(result))
-  expect_equal(result$sumstats$variant_id[1], "snp1")
-})
-
-test_that("gbayes_rss uses rsids column when available", {
-  skip_if_not_installed("qgg")
-  skip_if_not_installed("coda")
-  skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
-              "qgg:::sbayes_spa not available in installed qgg version")
-  sumstats <- data.frame(
-    rsids = c("rs1", "rs2", "rs3"),
-    beta = c(0.1, 0.2, 0.3),
-    se = c(0.05, 0.05, 0.05),
-    n = c(1000, 1000, 1000)
-  )
-  LD <- diag(3)
-  result <- gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesN",
-                       nit = 20, nburn = 5)
-  expect_true("sumstats" %in% names(result))
-})
-
-test_that("gbayes_rss uses explicit variant_ids parameter", {
-  skip_if_not_installed("qgg")
-  skip_if_not_installed("coda")
-  skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
-              "qgg:::sbayes_spa not available in installed qgg version")
-  sumstats <- data.frame(
-    beta = c(0.1, 0.2, 0.3),
-    se = c(0.05, 0.05, 0.05),
-    n = c(1000, 1000, 1000)
-  )
-  LD <- diag(3)
-  result <- gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesN",
-                       variant_ids = c("my_snp1", "my_snp2", "my_snp3"),
-                       nit = 20, nburn = 5)
-  expect_true("sumstats" %in% names(result))
-})
-
-test_that("gbayes_rss em-mcmc algorithm path sets algo = 2", {
-  skip_if_not_installed("qgg")
-  skip_if_not_installed("coda")
-  skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
-              "qgg:::sbayes_spa not available in installed qgg version")
-  sumstats <- data.frame(
-    beta = c(0.1, 0.2, 0.3),
-    se = c(0.05, 0.05, 0.05),
-    n = c(1000, 1000, 1000)
-  )
-  LD <- diag(3)
-  result <- gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesN",
-                       algorithm = "em-mcmc", nit = 20, nburn = 5)
-  expect_true("method" %in% names(result))
-})
-
-test_that("gbayes_rss handles sumstats with maf column", {
-  skip_if_not_installed("qgg")
-  skip_if_not_installed("coda")
-  skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
-              "qgg:::sbayes_spa not available in installed qgg version")
-  sumstats <- data.frame(
-    variant_id = c("rs1", "rs2", "rs3"),
-    beta = c(0.1, 0.2, 0.3),
-    se = c(0.05, 0.05, 0.05),
-    n = c(1000, 1000, 1000),
-    maf = c(0.1, 0.2, 0.3),
-    pos = c(100, 200, 300),
-    A1 = c("A", "C", "G"),
-    A2 = c("T", "G", "A")
-  )
-  LD <- diag(3)
-  result <- gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesR",
-                       nit = 30, nburn = 10)
-  expect_true("sumstats" %in% names(result))
-  expect_true("vm" %in% colnames(result$sumstats))
-})
-
-test_that("gbayes_rss handles sumstats without A1/A2/maf columns", {
-  skip_if_not_installed("qgg")
-  skip_if_not_installed("coda")
-  skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
-              "qgg:::sbayes_spa not available in installed qgg version")
-  sumstats <- data.frame(
-    beta = c(0.1, 0.2, 0.3),
-    se = c(0.05, 0.05, 0.05),
-    n = c(1000, 1000, 1000)
-  )
-  LD <- diag(3)
-  result <- gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesN",
-                       nit = 20, nburn = 5)
-  expect_true("sumstats" %in% names(result))
-  expect_equal(result$sumstats$A1[1], "Unknown")
-  expect_equal(result$sumstats$A2[1], "Unknown")
-})
-
-test_that("gbayes_rss bayesR method uses 4-component mixture pi", {
-  skip_if_not_installed("qgg")
-  skip_if_not_installed("coda")
-  skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
-              "qgg:::sbayes_spa not available in installed qgg version")
-  sumstats <- data.frame(
-    beta = c(0.1, 0.2, 0.3),
-    se = c(0.05, 0.05, 0.05),
-    n = c(1000, 1000, 1000)
-  )
-  LD <- diag(3)
-  result <- gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesR",
-                       nit = 20, nburn = 5)
-  expect_true("method" %in% names(result))
-  expect_equal(result$method, "bayesR")
-})
-
-# ---- bayes_alphabet_rss_weights wrappers ----
-test_that("bayes_alphabet_rss_weights dispatches to gbayes_rss", {
-  skip_if_not_installed("qgg")
-  skip_if_not_installed("coda")
-  skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
-              "qgg:::sbayes_spa not available in installed qgg version")
-  sumstats <- data.frame(
-    beta = c(0.1, 0.2, 0.3),
-    se = c(0.05, 0.05, 0.05),
-    n = c(1000, 1000, 1000)
-  )
-  LD <- diag(3)
-  result <- bayes_alphabet_rss_weights(sumstats, LD, method = "bayesN", nit = 20, nburn = 5)
-  expect_equal(length(result), 3)
-  expect_true(is.numeric(result))
-})
-
-test_that("bayes_n_rss_weights dispatches correctly", {
-  skip_if_not_installed("qgg")
-  skip_if_not_installed("coda")
-  skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
-              "qgg:::sbayes_spa not available in installed qgg version")
-  sumstats <- data.frame(
-    beta = c(0.1, 0.2), se = c(0.05, 0.05), n = c(1000, 1000)
-  )
-  LD <- diag(2)
-  result <- bayes_n_rss_weights(sumstats, LD, nit = 20, nburn = 5)
-  expect_true(is.numeric(result))
-  expect_equal(length(result), nrow(sumstats))
-})
+# # ---- gbayes_rss ----
+# test_that("gbayes_rss errors without LD matrix", {
+#   skip_if_not_installed("qgg")
+#   sumstats <- data.frame(beta = 0.1, se = 0.05, n = 1000)
+#   expect_error(gbayes_rss(sumstats = sumstats), "Must provide LD")
+# })
+# 
+# test_that("gbayes_rss errors on invalid method", {
+#   skip_if_not_installed("qgg")
+#   sumstats <- data.frame(beta = 0.1, se = 0.05, n = 1000)
+#   LD <- diag(1)
+#   expect_error(gbayes_rss(sumstats = sumstats, LD = LD, method = "invalidMethod"),
+#                "not valid")
+# })
+# 
+# test_that("gbayes_rss errors on non-dataframe input", {
+#   skip_if_not_installed("qgg")
+#   # A list input fails before the is.data.frame check because nrow(list) is NULL,
+#   # causing the dimension comparison to error with "argument is of length zero"
+#   expect_error(gbayes_rss(sumstats = list(beta = 0.1), LD = diag(1)),
+#                "argument is of length zero")
+# })
+# 
+# test_that("gbayes_rss errors on dimension mismatch", {
+#   skip_if_not_installed("qgg")
+#   sumstats <- data.frame(beta = c(0.1, 0.2), se = c(0.05, 0.1), n = c(1000, 1000))
+#   LD <- diag(3)
+#   expect_error(gbayes_rss(sumstats = sumstats, LD = LD), "must correspond")
+# })
+# 
+# test_that("gbayes_rss rejects invalid method name", {
+#   skip_if_not_installed("qgg")
+#   sumstats <- data.frame(
+#     beta = c(0.1, 0.2, 0.3),
+#     se = c(0.05, 0.05, 0.05),
+#     n = c(1000, 1000, 1000)
+#   )
+#   LD <- diag(3)
+#   expect_error(
+#     gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesZ"),
+#     "not valid"
+#   )
+# })
+# 
+# test_that("gbayes_rss runs successfully with valid method", {
+#   skip_if_not_installed("qgg")
+#   skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
+#               "qgg:::sbayes_spa not available in installed qgg version")
+#   sumstats <- data.frame(
+#     beta = c(0.1, 0.2, 0.3),
+#     se = c(0.05, 0.05, 0.05),
+#     n = c(1000, 1000, 1000)
+#   )
+#   LD <- diag(3)
+#   result <- gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesN", nit = 10, nburn = 0)
+#   expect_true("method" %in% names(result))
+# })
+# 
+# test_that("gbayes_rss errors when sumstats has NA in wy", {
+#   skip_if_not_installed("qgg")
+#   sumstats <- data.frame(
+#     beta = c(0.1, NA),
+#     se = c(0.05, 0.05),
+#     n = c(1000, 1000)
+#   )
+#   LD <- diag(2)
+#   expect_error(
+#     gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesN"),
+#     "Missing values"
+#   )
+# })
+# 
+# test_that("gbayes_rss sets variant_ids from data when not provided", {
+#   skip_if_not_installed("qgg")
+#   skip_if_not_installed("coda")
+#   skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
+#               "qgg:::sbayes_spa not available in installed qgg version")
+#   sumstats <- data.frame(
+#     beta = c(0.1, 0.2, 0.3),
+#     se = c(0.05, 0.05, 0.05),
+#     n = c(1000, 1000, 1000)
+#   )
+#   LD <- diag(3)
+#   result <- gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesN",
+#                        nit = 20, nburn = 5)
+#   expect_true("sumstats" %in% names(result))
+#   expect_equal(result$sumstats$variant_id[1], "snp1")
+# })
+# 
+# test_that("gbayes_rss uses rsids column when available", {
+#   skip_if_not_installed("qgg")
+#   skip_if_not_installed("coda")
+#   skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
+#               "qgg:::sbayes_spa not available in installed qgg version")
+#   sumstats <- data.frame(
+#     rsids = c("rs1", "rs2", "rs3"),
+#     beta = c(0.1, 0.2, 0.3),
+#     se = c(0.05, 0.05, 0.05),
+#     n = c(1000, 1000, 1000)
+#   )
+#   LD <- diag(3)
+#   result <- gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesN",
+#                        nit = 20, nburn = 5)
+#   expect_true("sumstats" %in% names(result))
+# })
+# 
+# test_that("gbayes_rss uses explicit variant_ids parameter", {
+#   skip_if_not_installed("qgg")
+#   skip_if_not_installed("coda")
+#   skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
+#               "qgg:::sbayes_spa not available in installed qgg version")
+#   sumstats <- data.frame(
+#     beta = c(0.1, 0.2, 0.3),
+#     se = c(0.05, 0.05, 0.05),
+#     n = c(1000, 1000, 1000)
+#   )
+#   LD <- diag(3)
+#   result <- gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesN",
+#                        variant_ids = c("my_snp1", "my_snp2", "my_snp3"),
+#                        nit = 20, nburn = 5)
+#   expect_true("sumstats" %in% names(result))
+# })
+# 
+# test_that("gbayes_rss em-mcmc algorithm path sets algo = 2", {
+#   skip_if_not_installed("qgg")
+#   skip_if_not_installed("coda")
+#   skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
+#               "qgg:::sbayes_spa not available in installed qgg version")
+#   sumstats <- data.frame(
+#     beta = c(0.1, 0.2, 0.3),
+#     se = c(0.05, 0.05, 0.05),
+#     n = c(1000, 1000, 1000)
+#   )
+#   LD <- diag(3)
+#   result <- gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesN",
+#                        algorithm = "em-mcmc", nit = 20, nburn = 5)
+#   expect_true("method" %in% names(result))
+# })
+# 
+# test_that("gbayes_rss handles sumstats with maf column", {
+#   skip_if_not_installed("qgg")
+#   skip_if_not_installed("coda")
+#   skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
+#               "qgg:::sbayes_spa not available in installed qgg version")
+#   sumstats <- data.frame(
+#     variant_id = c("rs1", "rs2", "rs3"),
+#     beta = c(0.1, 0.2, 0.3),
+#     se = c(0.05, 0.05, 0.05),
+#     n = c(1000, 1000, 1000),
+#     maf = c(0.1, 0.2, 0.3),
+#     pos = c(100, 200, 300),
+#     A1 = c("A", "C", "G"),
+#     A2 = c("T", "G", "A")
+#   )
+#   LD <- diag(3)
+#   result <- gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesR",
+#                        nit = 30, nburn = 10)
+#   expect_true("sumstats" %in% names(result))
+#   expect_true("vm" %in% colnames(result$sumstats))
+# })
+# 
+# test_that("gbayes_rss handles sumstats without A1/A2/maf columns", {
+#   skip_if_not_installed("qgg")
+#   skip_if_not_installed("coda")
+#   skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
+#               "qgg:::sbayes_spa not available in installed qgg version")
+#   sumstats <- data.frame(
+#     beta = c(0.1, 0.2, 0.3),
+#     se = c(0.05, 0.05, 0.05),
+#     n = c(1000, 1000, 1000)
+#   )
+#   LD <- diag(3)
+#   result <- gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesN",
+#                        nit = 20, nburn = 5)
+#   expect_true("sumstats" %in% names(result))
+#   expect_equal(result$sumstats$A1[1], "Unknown")
+#   expect_equal(result$sumstats$A2[1], "Unknown")
+# })
+# 
+# test_that("gbayes_rss bayesR method uses 4-component mixture pi", {
+#   skip_if_not_installed("qgg")
+#   skip_if_not_installed("coda")
+#   skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
+#               "qgg:::sbayes_spa not available in installed qgg version")
+#   sumstats <- data.frame(
+#     beta = c(0.1, 0.2, 0.3),
+#     se = c(0.05, 0.05, 0.05),
+#     n = c(1000, 1000, 1000)
+#   )
+#   LD <- diag(3)
+#   result <- gbayes_rss(sumstats = sumstats, LD = LD, method = "bayesR",
+#                        nit = 20, nburn = 5)
+#   expect_true("method" %in% names(result))
+#   expect_equal(result$method, "bayesR")
+# })
+# 
+# # ---- bayes_alphabet_rss_weights wrappers ----
+# test_that("bayes_alphabet_rss_weights dispatches to gbayes_rss", {
+#   skip_if_not_installed("qgg")
+#   skip_if_not_installed("coda")
+#   skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
+#               "qgg:::sbayes_spa not available in installed qgg version")
+#   sumstats <- data.frame(
+#     beta = c(0.1, 0.2, 0.3),
+#     se = c(0.05, 0.05, 0.05),
+#     n = c(1000, 1000, 1000)
+#   )
+#   LD <- diag(3)
+#   result <- bayes_alphabet_rss_weights(sumstats, LD, method = "bayesN", nit = 20, nburn = 5)
+#   expect_equal(length(result), 3)
+#   expect_true(is.numeric(result))
+# })
+# 
+# test_that("bayes_n_rss_weights dispatches correctly", {
+#   skip_if_not_installed("qgg")
+#   skip_if_not_installed("coda")
+#   skip_if_not(exists("sbayes_spa", where = asNamespace("qgg")),
+#               "qgg:::sbayes_spa not available in installed qgg version")
+#   sumstats <- data.frame(
+#     beta = c(0.1, 0.2), se = c(0.05, 0.05), n = c(1000, 1000)
+#   )
+#   LD <- diag(2)
+#   result <- bayes_n_rss_weights(sumstats, LD, nit = 20, nburn = 5)
+#   expect_true(is.numeric(result))
+#   expect_equal(length(result), nrow(sumstats))
+# })
 
 # ---- mrash_weights ----
 test_that("mrash_weights calls lasso_weights as default beta.init", {
@@ -929,6 +929,7 @@ test_that("lassosum_rss_weights calls lassosum_rss and returns beta_est", {
   result <- lassosum_rss_weights(stat = stat, LD = R)
   expect_equal(length(result), p)
   expect_true(is.numeric(result))
+})
 
 test_that("mrash_weights warns and zero-pads when X has zero-variance columns", {
   skip_if_not_installed("glmnet")

@@ -265,7 +265,7 @@ test_that("summary_stats_qc errors on invalid method", {
   sumstats <- data.frame(variant_id = "1:100:A:G", z = 2.0)
   LD_data <- list(LD_matrix = matrix(1, 1, 1, dimnames = list("1:100:A:G", "1:100:A:G")))
   expect_error(summary_stats_qc(sumstats, LD_data, method = "invalid"),
-               "Invalid quality control method")
+               "should be one of")
 })
 
 test_that("summary_stats_qc with slalom method returns correct structure", {

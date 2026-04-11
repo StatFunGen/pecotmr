@@ -2856,6 +2856,8 @@ test_that("harmonize_twas: group_contexts_by_region single context path (lines 4
     pos = c(100, 200, 300),
     A2 = rep("A", p),
     A1 = rep("T", p),
+    variant_id = variant_ids,
+    variance = rep(1.0, p),
     stringsAsFactors = FALSE
   )
 
@@ -2999,7 +3001,10 @@ test_that("harmonize_twas: group_contexts_by_region multi-context clustering (li
         LD_matrix = mock_LD_matrix,
         LD_variants = all_variant_ids,
         ref_panel = data.frame(chrom = 1, pos = as.integer(sapply(strsplit(all_variant_ids, ":"), `[`, 2)),
-                               A2 = "A", A1 = "T", stringsAsFactors = FALSE)
+                               A2 = "A", A1 = "T",
+                               variant_id = all_variant_ids,
+                               variance = rep(1.0, length(all_variant_ids)),
+                               stringsAsFactors = FALSE)
       )
     },
     get_ref_variant_info = function(...) mock_snp_info,

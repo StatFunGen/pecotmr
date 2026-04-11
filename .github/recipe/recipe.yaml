@@ -28,6 +28,7 @@ requirements:
     - bioconductor-s4vectors
     - bioconductor-snpstats
     - r-base
+    - r-bglr
     - r-bigsnpr
     - r-bigstatsr
     - r-coda
@@ -42,11 +43,13 @@ requirements:
     - r-gbj
     - r-glmnet
     - r-harmonicmeanp
+    - r-l0learn
     - r-magrittr
     - r-mashr
     - r-matrixstats
     - r-mr.mashr
     - r-mvsusier
+    - r-ncvreg
     - r-pgenlibr
     - r-purrr
     - r-qgg
@@ -54,6 +57,7 @@ requirements:
     - r-quantreg
     - r-rcpp
     - r-rcpparmadillo
+    - r-rcppdpr
     - r-readr
     - r-rfast
     - r-rlang
@@ -70,6 +74,7 @@ requirements:
     - bioconductor-s4vectors
     - bioconductor-snpstats
     - r-base
+    - r-bglr
     - r-bigsnpr
     - r-bigstatsr
     - r-coda
@@ -84,11 +89,13 @@ requirements:
     - r-gbj
     - r-glmnet
     - r-harmonicmeanp
+    - r-l0learn
     - r-magrittr
     - r-mashr
     - r-matrixstats
     - r-mr.mashr
     - r-mvsusier
+    - r-ncvreg
     - r-pgenlibr
     - r-purrr
     - r-qgg
@@ -96,6 +103,7 @@ requirements:
     - r-quantreg
     - r-rcpp
     - r-rcpparmadillo
+    - r-rcppdpr
     - r-readr
     - r-rfast
     - r-rlang

@@ -230,7 +230,7 @@ test_that("partition_LD_matrix validates block structure properly", {
     }
 
     # Expect an error for invalid block structure
-    expect_error(partition_LD_matrix(invalid_ld_data), "Matrix does not have the expected block structure")
+    expect_error(partition_LD_matrix(invalid_ld_data), "Matrix lacks expected block structure")
   }
 
   file.remove(LD_meta_file_path)
