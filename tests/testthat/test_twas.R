@@ -383,7 +383,7 @@ test_that("twas_z: all-zero weights produce NaN z-score", {
   result <- twas_z(weights, z, R = R)
   # stat = 0, denom = 0, so zscore = 0/0 = NaN
 
-  expect_true(is.nan(as.numeric(result$z)) || as.numeric(result$z) == 0)
+  expect_true(is.nan(as.numeric(result$z)))
 })
 
 test_that("twas_z: very large z-scores still produce finite results", {

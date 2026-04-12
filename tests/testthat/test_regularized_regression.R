@@ -1327,113 +1327,54 @@ test_that("lassosum_rss_weights dispatches to lassosum_rss once per s value", {
   expect_false(identical(call_log$calls[[1]]$LD, call_log$calls[[2]]$LD))
 })
 
-test_that("bayes_n_weights dispatches to bayes_alphabet_weights with method 'bayesN'", {
+test_that("bayes_{n,l,a,c,r}_weights each dispatch to bayes_alphabet_weights with correct method", {
   set.seed(42)
   X <- matrix(rnorm(50), nrow = 10)
   y <- rnorm(10)
-  captured <- new.env(parent = emptyenv())
-  local_mocked_bindings(
-    bayes_alphabet_weights = function(X, y, method, ...) {
-      captured$method <- method
-      rep(0, ncol(X))
-    }
+  dispatchers <- list(
+    list(fn = bayes_n_weights, expected = "bayesN"),
+    list(fn = bayes_l_weights, expected = "bayesL"),
+    list(fn = bayes_a_weights, expected = "bayesA"),
+    list(fn = bayes_c_weights, expected = "bayesC"),
+    list(fn = bayes_r_weights, expected = "bayesR")
   )
-  bayes_n_weights(X, y)
-  expect_equal(captured$method, "bayesN")
+  for (d in dispatchers) {
+    captured <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+      bayes_alphabet_weights = function(X, y, method, ...) {
+        captured$method <- method
+        rep(0, ncol(X))
+      }
+    )
+    d$fn(X, y)
+    expect_equal(captured$method, d$expected,
+                 label = paste("dispatch for", d$expected))
+  }
 })
 
-test_that("bayes_l_weights dispatches to bayes_alphabet_weights with method 'bayesL'", {
+test_that("scad_weights and mcp_weights dispatch to ncvreg_weights with correct penalty", {
   set.seed(42)
   X <- matrix(rnorm(50), nrow = 10)
   y <- rnorm(10)
-  captured <- new.env(parent = emptyenv())
-  local_mocked_bindings(
-    bayes_alphabet_weights = function(X, y, method, ...) {
-      captured$method <- method
-      rep(0, ncol(X))
-    }
+  dispatchers <- list(
+    list(fn = scad_weights, expected_penalty = "SCAD", nfolds = 7),
+    list(fn = mcp_weights,  expected_penalty = "MCP",  nfolds = 9)
   )
-  bayes_l_weights(X, y)
-  expect_equal(captured$method, "bayesL")
-})
-
-test_that("bayes_a_weights dispatches to bayes_alphabet_weights with method 'bayesA'", {
-  set.seed(42)
-  X <- matrix(rnorm(50), nrow = 10)
-  y <- rnorm(10)
-  captured <- new.env(parent = emptyenv())
-  local_mocked_bindings(
-    bayes_alphabet_weights = function(X, y, method, ...) {
-      captured$method <- method
-      rep(0, ncol(X))
-    }
-  )
-  bayes_a_weights(X, y)
-  expect_equal(captured$method, "bayesA")
-})
-
-test_that("bayes_c_weights dispatches to bayes_alphabet_weights with method 'bayesC'", {
-  set.seed(42)
-  X <- matrix(rnorm(50), nrow = 10)
-  y <- rnorm(10)
-  captured <- new.env(parent = emptyenv())
-  local_mocked_bindings(
-    bayes_alphabet_weights = function(X, y, method, ...) {
-      captured$method <- method
-      rep(0, ncol(X))
-    }
-  )
-  bayes_c_weights(X, y)
-  expect_equal(captured$method, "bayesC")
-})
-
-test_that("bayes_r_weights dispatches to bayes_alphabet_weights with method 'bayesR'", {
-  set.seed(42)
-  X <- matrix(rnorm(50), nrow = 10)
-  y <- rnorm(10)
-  captured <- new.env(parent = emptyenv())
-  local_mocked_bindings(
-    bayes_alphabet_weights = function(X, y, method, ...) {
-      captured$method <- method
-      rep(0, ncol(X))
-    }
-  )
-  bayes_r_weights(X, y)
-  expect_equal(captured$method, "bayesR")
-})
-
-test_that("scad_weights dispatches to ncvreg_weights with penalty = 'SCAD'", {
-  set.seed(42)
-  X <- matrix(rnorm(50), nrow = 10)
-  y <- rnorm(10)
-  captured <- new.env(parent = emptyenv())
-  local_mocked_bindings(
-    ncvreg_weights = function(X, y, penalty, nfolds = 5, ...) {
-      captured$penalty <- penalty
-      captured$nfolds <- nfolds
-      matrix(0, nrow = ncol(X), ncol = 1)
-    }
-  )
-  scad_weights(X, y, nfolds = 7)
-  expect_equal(captured$penalty, "SCAD")
-  expect_equal(captured$nfolds, 7)
-})
-
-test_that("mcp_weights dispatches to ncvreg_weights with penalty = 'MCP'", {
-  set.seed(42)
-  X <- matrix(rnorm(50), nrow = 10)
-  y <- rnorm(10)
-  captured <- new.env(parent = emptyenv())
-  local_mocked_bindings(
-    ncvreg_weights = function(X, y, penalty, nfolds = 5, ...) {
-      captured$penalty <- penalty
-      captured$nfolds <- nfolds
-      matrix(0, nrow = ncol(X), ncol = 1)
-    }
-  )
-  mcp_weights(X, y, nfolds = 9)
-  expect_equal(captured$penalty, "MCP")
-  expect_equal(captured$nfolds, 9)
+  for (d in dispatchers) {
+    captured <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+      ncvreg_weights = function(X, y, penalty, nfolds = 5, ...) {
+        captured$penalty <- penalty
+        captured$nfolds <- nfolds
+        matrix(0, nrow = ncol(X), ncol = 1)
+      }
+    )
+    d$fn(X, y, nfolds = d$nfolds)
+    expect_equal(captured$penalty, d$expected_penalty,
+                 label = paste("penalty for", d$expected_penalty))
+    expect_equal(captured$nfolds, d$nfolds,
+                 label = paste("nfolds for", d$expected_penalty))
+  }
 })
 
 test_that("b_lasso_weights dispatches to bglr_weights with model = 'BL'", {
@@ -1474,34 +1415,26 @@ test_that("bayes_b_weights dispatches to bglr_weights with model = 'BayesB' and 
   expect_equal(captured$eta_args, list(probIn = 0.42))
 })
 
-test_that("lasso_weights dispatches to glmnet_weights with alpha = 1", {
+test_that("lasso_weights and enet_weights dispatch to glmnet_weights with correct alpha", {
   set.seed(42)
   X <- matrix(rnorm(50), nrow = 10)
   y <- rnorm(10)
-  captured <- new.env(parent = emptyenv())
-  local_mocked_bindings(
-    glmnet_weights = function(X, y, alpha) {
-      captured$alpha <- alpha
-      matrix(0, nrow = ncol(X), ncol = 1)
-    }
+  dispatchers <- list(
+    list(fn = lasso_weights, expected_alpha = 1),
+    list(fn = enet_weights,  expected_alpha = 0.5)
   )
-  lasso_weights(X, y)
-  expect_equal(captured$alpha, 1)
-})
-
-test_that("enet_weights dispatches to glmnet_weights with alpha = 0.5", {
-  set.seed(42)
-  X <- matrix(rnorm(50), nrow = 10)
-  y <- rnorm(10)
-  captured <- new.env(parent = emptyenv())
-  local_mocked_bindings(
-    glmnet_weights = function(X, y, alpha) {
-      captured$alpha <- alpha
-      matrix(0, nrow = ncol(X), ncol = 1)
-    }
-  )
-  enet_weights(X, y)
-  expect_equal(captured$alpha, 0.5)
+  for (d in dispatchers) {
+    captured <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+      glmnet_weights = function(X, y, alpha) {
+        captured$alpha <- alpha
+        matrix(0, nrow = ncol(X), ncol = 1)
+      }
+    )
+    d$fn(X, y)
+    expect_equal(captured$alpha, d$expected_alpha,
+                 label = paste("alpha for", d$expected_alpha))
+  }
 })
 
 test_that("susie_weights actually calls susie_wrapper when fit is NULL", {

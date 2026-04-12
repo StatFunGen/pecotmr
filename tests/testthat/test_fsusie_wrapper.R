@@ -17,7 +17,10 @@ test_that("cal_purity with min method and multi-element CS", {
 
   result <- pecotmr:::cal_purity(l_cs, X, method = "min")
   expect_length(result, 1)
-  expect_true(result[[1]] >= 0 && result[[1]] <= 1)
+  # Manually compute expected: min off-diagonal |cor|
+  cormat <- abs(cor(X[, c(1, 2, 3)]))
+  diag(cormat) <- NA
+  expect_equal(result[[1]], min(cormat, na.rm = TRUE))
 })
 
 test_that("cal_purity with non-min method returns three values", {
@@ -27,6 +30,16 @@ test_that("cal_purity with non-min method returns three values", {
 
   result <- pecotmr:::cal_purity(l_cs, X, method = "susie")
   expect_length(result[[1]], 3)  # min, mean, median
+  # Manually compute expected values
+  cormat <- abs(cor(X[, c(1, 2, 3)]))
+  diag(cormat) <- NA
+  vals <- cormat[!is.na(cormat)]
+  expect_equal(result[[1]][1], min(vals))
+  expect_equal(result[[1]][2], mean(vals))
+  expect_equal(result[[1]][3], median(vals))
+  # min <= mean and min <= median by definition
+  expect_true(result[[1]][1] <= result[[1]][2])
+  expect_true(result[[1]][1] <= result[[1]][3])
 })
 
 test_that("cal_purity with non-min method single element returns (1,1,1)", {
@@ -140,4 +153,12 @@ test_that("fsusie_get_cs creates susie-like sets", {
   expect_equal(result$requested_coverage, 0.95)
   expect_equal(length(result$cs), 2)
   expect_equal(names(result$cs), c("L1", "L2"))
+  # Purity should be a data.frame with min/mean/median columns
+  expect_true(is.data.frame(result$purity))
+  expect_equal(nrow(result$purity), 2)
+  # Coverage should be numeric and positive, one per CS
+  expect_length(result$coverage, 2)
+  expect_true(all(result$coverage > 0 & result$coverage <= 1))
+  # cs_index should identify which effects had credible sets
+  expect_length(result$cs_index, 2)
 })

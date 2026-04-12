@@ -283,16 +283,21 @@ test_that("univariate_analysis_pipeline respects X_scalar vector", {
   X <- matrix(rnorm(n * p), n, p)
   colnames(X) <- paste0("chr1:", seq_len(p), ":A:G")
   rownames(X) <- paste0("s", seq_len(n))
-  Y <- as.numeric(rnorm(n))
+  Y <- as.numeric(X[, 1] * 2 + rnorm(n))
   names(Y) <- rownames(X)
   maf <- runif(p, 0.1, 0.5)
-  X_scalar <- rep(2, p)
 
-  result <- univariate_analysis_pipeline(
-    X = X, Y = Y, maf = maf, X_scalar = X_scalar,
+  r_noscalar <- suppressMessages(univariate_analysis_pipeline(
+    X = X, Y = Y, maf = maf, X_scalar = rep(1, p),
     twas_weights = FALSE, init_L = 5, max_L = 5
-  )
-  expect_type(result, "list")
+  ))
+  r_scalar <- suppressMessages(univariate_analysis_pipeline(
+    X = X, Y = Y, maf = maf, X_scalar = rep(2, p),
+    twas_weights = FALSE, init_L = 5, max_L = 5
+  ))
+  # X_scalar divides betahat: scalar=2 should halve the estimates
+  ratio <- unname(r_noscalar$sumstats$betahat / r_scalar$sumstats$betahat)
+  expect_equal(ratio, rep(2, p), tolerance = 1e-10)
 })
 
 test_that("univariate_analysis_pipeline with cv_folds=0 skips CV", {

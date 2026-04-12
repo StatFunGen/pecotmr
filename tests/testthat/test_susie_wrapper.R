@@ -145,10 +145,11 @@ test_that("get_cs_index returns correct CS assignment with real susie fit", {
   beta <- c(2, 0, 0, 0, 0, 0, 0, 0, 0, 0)
   y <- X %*% beta + rnorm(n, sd = 0.5)
   fit <- susieR::susie(X, y, L = 5)
-  if (!is.null(fit$sets$cs)) {
-    idx <- pecotmr:::get_cs_index(fit$sets$cs, 1)
-    expect_true(is.numeric(unname(idx)))
-  }
+  # With beta[1]=2 and sd=0.5, susie should find a CS containing variant 1
+  expect_false(is.null(fit$sets$cs))
+  idx <- pecotmr:::get_cs_index(1, fit$sets$cs)
+  expect_true(is.numeric(unname(idx)))
+  expect_true(all(idx >= 1))
 })
 
 # =============================================================================
