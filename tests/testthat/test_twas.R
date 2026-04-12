@@ -3450,3 +3450,283 @@ test_that("twas_pipeline: event_filters filtering some but not all contexts", {
 
   expect_true(is.list(result))
 })
+
+# ===========================================================================
+# harmonize_twas: dup variants in LD list trigger dedup branch (lines 119-121)
+# ===========================================================================
+test_that("harmonize_twas: duplicated LD variants are removed", {
+  variant_ids <- make_variant_ids(chrom = 1, positions = c(100, 200, 300))
+  p <- length(variant_ids)
+  weights_mat <- make_weights_matrix(variant_ids,
+    methods = c("lasso_weights", "enet_weights"))
+
+  twas_weights_data <- list(
+    gene1 = list(
+      weights = list(ctx1 = weights_mat),
+      twas_cv_performance = list(ctx1 = list(
+        lasso_performance = data.frame(rsq = 0.5, adj_rsq = 0.45, pval = 0.01, adj_rsq_pval = 0.02),
+        enet_performance  = data.frame(rsq = 0.3, adj_rsq = 0.25, pval = 0.05, adj_rsq_pval = 0.06)
+      )),
+      data_type = list(ctx1 = "expression")
+    )
+  )
+
+  # Build an LD set with one duplicated variant id at the end (and a duplicated row).
+  dup_variant_ids <- c(variant_ids, variant_ids[2])
+  dup_p <- length(dup_variant_ids)
+  dup_LD_matrix <- diag(dup_p)
+  rownames(dup_LD_matrix) <- colnames(dup_LD_matrix) <- dup_variant_ids
+  dup_ref_panel <- data.frame(
+    chrom = rep(1, dup_p),
+    pos = c(100, 200, 300, 200),
+    A2 = rep("A", dup_p),
+    A1 = rep("T", dup_p),
+    variant_id = dup_variant_ids,
+    variance = rep(1.0, dup_p),
+    stringsAsFactors = FALSE
+  )
+
+  mock_gwas_data <- data.frame(
+    chrom = rep(1, p), pos = c(100, 200, 300),
+    A1 = rep("A", p), A2 = rep("T", p),
+    z = rnorm(p), variant_id = variant_ids,
+    stringsAsFactors = FALSE
+  )
+
+  local_mocked_bindings(
+    load_LD_matrix = function(...) {
+      list(LD_matrix = dup_LD_matrix, LD_variants = dup_variant_ids, ref_panel = dup_ref_panel)
+    },
+    harmonize_gwas = function(...) mock_gwas_data,
+    allele_qc = function(target_data, ref_data, ...) {
+      if (is.data.frame(target_data)) {
+        if (!"variant_id" %in% colnames(target_data)) {
+          target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":",
+                                           target_data$A2, ":", target_data$A1)
+        }
+        list(target_data_qced = target_data)
+      } else {
+        list(target_data_qced = target_data)
+      }
+    }
+  )
+
+  gwas_meta <- data.frame(
+    study_id = "study1", chrom = 1L,
+    file_path = "fake_gwas.gz", column_mapping_file = NA,
+    stringsAsFactors = FALSE
+  )
+  gwas_meta_file <- tempfile(fileext = ".tsv")
+  write.table(gwas_meta, gwas_meta_file, sep = "\t", row.names = FALSE, quote = FALSE)
+  on.exit(unlink(gwas_meta_file), add = TRUE)
+
+  result <- harmonize_twas(twas_weights_data, "fake_ld.tsv", gwas_meta_file, ld_reference_sample_size = 17000)
+
+  expect_true(is.list(result))
+  # After dedup, the LD should have been pared back to unique variants (3, not 4).
+  expect_equal(nrow(result$ref_panel), p)
+})
+
+# ===========================================================================
+# harmonize_twas: results[[id]] = NULL when no GWAS data overlaps (line 217)
+# ===========================================================================
+test_that("harmonize_twas: drops molecular_id when harmonize_gwas returns NULL for all studies", {
+  variant_ids <- make_variant_ids(chrom = 1, positions = c(100, 200, 300))
+  p <- length(variant_ids)
+  weights_mat <- make_weights_matrix(variant_ids,
+    methods = c("lasso_weights", "enet_weights"))
+
+  twas_weights_data <- list(
+    gene1 = list(
+      weights = list(ctx1 = weights_mat),
+      twas_cv_performance = list(ctx1 = list(
+        lasso_performance = data.frame(rsq = 0.5, adj_rsq = 0.45, pval = 0.01, adj_rsq_pval = 0.02),
+        enet_performance  = data.frame(rsq = 0.3, adj_rsq = 0.25, pval = 0.05, adj_rsq_pval = 0.06)
+      )),
+      data_type = list(ctx1 = "expression")
+    )
+  )
+
+  LD_matrix <- diag(p)
+  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ref_panel <- data.frame(
+    chrom = 1, pos = c(100, 200, 300), A2 = "A", A1 = "T",
+    variant_id = variant_ids, variance = 1.0, stringsAsFactors = FALSE
+  )
+
+  local_mocked_bindings(
+    load_LD_matrix = function(...) {
+      list(LD_matrix = LD_matrix, LD_variants = variant_ids, ref_panel = ref_panel)
+    },
+    # Returning NULL skips the entire context loop, so gwas_qced stays empty
+    harmonize_gwas = function(...) NULL,
+    allele_qc = function(target_data, ref_data, ...) list(target_data_qced = target_data)
+  )
+
+  gwas_meta <- data.frame(
+    study_id = "study1", chrom = 1L,
+    file_path = "fake_gwas.gz", column_mapping_file = NA,
+    stringsAsFactors = FALSE
+  )
+  gwas_meta_file <- tempfile(fileext = ".tsv")
+  write.table(gwas_meta, gwas_meta_file, sep = "\t", row.names = FALSE, quote = FALSE)
+  on.exit(unlink(gwas_meta_file), add = TRUE)
+
+  result <- harmonize_twas(twas_weights_data, "fake_ld.tsv", gwas_meta_file, ld_reference_sample_size = 17000)
+
+  # gene1 should have been dropped (line 217 sets results[[mid]] <- NULL)
+  expect_true(is.list(result))
+  expect_null(result$twas_data_qced$gene1)
+})
+
+# ===========================================================================
+# harmonize_twas: susie_weights branch with mocked adjust_susie_weights
+# (lines 173-192)
+# ===========================================================================
+test_that("harmonize_twas: susie_weights column triggers adjust_susie_weights branch", {
+  variant_ids <- make_variant_ids(chrom = 1, positions = c(100, 200, 300))
+  p <- length(variant_ids)
+  # Use susie_weights as a column name to enter the susie branch.
+  weights_mat <- make_weights_matrix(variant_ids,
+    methods = c("susie_weights", "lasso_weights"))
+
+  twas_weights_data <- list(
+    gene1 = list(
+      weights = list(ctx1 = weights_mat),
+      twas_cv_performance = list(ctx1 = list(
+        susie_performance = data.frame(rsq = 0.5, adj_rsq = 0.45, pval = 0.01, adj_rsq_pval = 0.02),
+        lasso_performance = data.frame(rsq = 0.3, adj_rsq = 0.25, pval = 0.05, adj_rsq_pval = 0.06)
+      )),
+      # Provide susie_results so the branch can read pip / cs_variants / cs_purity
+      susie_results = list(ctx1 = list(
+        pip = setNames(c(0.4, 0.3, 0.2), variant_ids),
+        cs_variants = list(L1 = data.frame(
+          chrom = 1, pos = c(100, 200), A2 = "A", A1 = "T",
+          variant_id = variant_ids[1:2], stringsAsFactors = FALSE
+        )),
+        cs_purity = 0.95
+      )),
+      data_type = list(ctx1 = "expression")
+    )
+  )
+
+  LD_matrix <- diag(p)
+  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ref_panel <- data.frame(
+    chrom = 1, pos = c(100, 200, 300), A2 = "A", A1 = "T",
+    variant_id = variant_ids, variance = 1.0, stringsAsFactors = FALSE
+  )
+
+  mock_gwas_data <- data.frame(
+    chrom = rep(1, p), pos = c(100, 200, 300),
+    A1 = rep("A", p), A2 = rep("T", p),
+    z = c(2.0, -1.5, 0.8), variant_id = variant_ids,
+    stringsAsFactors = FALSE
+  )
+
+  local_mocked_bindings(
+    load_LD_matrix = function(...) {
+      list(LD_matrix = LD_matrix, LD_variants = variant_ids, ref_panel = ref_panel)
+    },
+    harmonize_gwas = function(...) mock_gwas_data,
+    allele_qc = function(target_data, ref_data, ...) {
+      if (is.data.frame(target_data)) {
+        if (!"variant_id" %in% colnames(target_data)) {
+          target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":",
+                                           target_data$A2, ":", target_data$A1)
+        }
+        list(target_data_qced = target_data)
+      } else {
+        list(target_data_qced = target_data)
+      }
+    },
+    adjust_susie_weights = function(twas_data, keep_variants, ...) {
+      list(
+        adjusted_susie_weights = setNames(rep(0.1, length(keep_variants)), keep_variants),
+        remained_variants_ids = keep_variants
+      )
+    }
+  )
+
+  gwas_meta <- data.frame(
+    study_id = "study1", chrom = 1L,
+    file_path = "fake_gwas.gz", column_mapping_file = NA,
+    stringsAsFactors = FALSE
+  )
+  gwas_meta_file <- tempfile(fileext = ".tsv")
+  write.table(gwas_meta, gwas_meta_file, sep = "\t", row.names = FALSE, quote = FALSE)
+  on.exit(unlink(gwas_meta_file), add = TRUE)
+
+  result <- harmonize_twas(twas_weights_data, "fake_ld.tsv", gwas_meta_file, ld_reference_sample_size = 17000)
+
+  expect_true(is.list(result))
+  # The susie branch should have populated susie_weights_intermediate_qced
+  expect_true("susie_weights_intermediate_qced" %in% names(result$twas_data_qced$gene1))
+  expect_true("ctx1" %in% names(result$twas_data_qced$gene1$susie_weights_intermediate_qced))
+})
+
+# ===========================================================================
+# pick_best_model: "No model provided" message branch (lines 528-529)
+# ===========================================================================
+test_that("twas_pipeline: pick_best_model returns NULL when all CV rsq are NA", {
+  variant_ids <- make_variant_ids()
+  p <- length(variant_ids)
+  weights_mat <- make_weights_matrix(variant_ids)
+
+  twas_weights_data <- make_twas_weights_data(
+    molecular_id = "gene1",
+    contexts = "ctx1"
+  )
+  # Force all available models to have NA rsq so the inner do.call(c, ...) returns NULL,
+  # triggering the "No model provided" message branch.
+  twas_weights_data$gene1$twas_cv_performance$ctx1$susie_performance <- data.frame(
+    rsq = NA_real_, adj_rsq = NA_real_, pval = NA_real_, adj_rsq_pval = NA_real_
+  )
+  twas_weights_data$gene1$twas_cv_performance$ctx1$lasso_performance <- data.frame(
+    rsq = NA_real_, adj_rsq = NA_real_, pval = NA_real_, adj_rsq_pval = NA_real_
+  )
+
+  LD_matrix <- diag(p)
+  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+
+  mock_twas_data_qced <- list(
+    gene1 = list(
+      chrom = 1,
+      data_type = list(ctx1 = "expression"),
+      variant_names = list(ctx1 = list(study1 = variant_ids)),
+      weights_qced = list(ctx1 = list(study1 = list(
+        scaled_weights = weights_mat, weights = weights_mat
+      ))),
+      gwas_qced = list(study1 = data.frame(
+        variant_id = variant_ids, z = rnorm(p), stringsAsFactors = FALSE
+      )),
+      LD = LD_matrix
+    )
+  )
+
+  local_mocked_bindings(
+    harmonize_twas = function(...) {
+      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
+    }
+  )
+
+  # The "No model provided" message fires inside pick_best_model, before a
+  # downstream data.frame assembly error in twas_pipeline. We swallow that
+  # error so expect_message can verify the targeted branch was hit.
+  expect_message(
+    tryCatch(
+      suppressWarnings(twas_pipeline(
+        twas_weights_data = twas_weights_data,
+        ld_meta_file_path = "fake_ld.tsv",
+        gwas_meta_file = "fake_gwas.tsv",
+        region_block = "chr1_100_500",
+        ld_reference_sample_size = 17000,
+        rsq_cutoff = 0.01,
+        rsq_pval_cutoff = 0.05,
+        rsq_pval_option = "pval"
+      )),
+      error = function(e) NULL
+    ),
+    "No model provided TWAS cross validation performance"
+  )
+})

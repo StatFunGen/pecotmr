@@ -868,3 +868,199 @@ test_that("twas_weights_pipeline: weight dimensions match input", {
     expect_equal(ncol(w), 1)
   }
 })
+
+# ===========================================================================
+# twas_weights_cv: extra split_data / sample-name / variant-selection branches
+# ===========================================================================
+
+test_that("twas_weights_cv: split_data errors when a fold leaves train or test empty", {
+  d <- make_data(n = 10, p = 5)
+  # All samples in fold 1 -> with fold = 1, every sample is a "test" row and
+  # the train set has zero rows, hitting the split_data zero-row stop.
+  sp <- data.frame(
+    Sample = rownames(d$X),
+    Fold = rep(1L, nrow(d$X)),
+    stringsAsFactors = FALSE
+  )
+  local_mocked_bindings(
+    lasso_weights = function(X, y, ...) rep(0, ncol(X))
+  )
+  expect_error(
+    suppressMessages(twas_weights_cv(
+      d$X, d$Y,
+      sample_partitions = sp,
+      weight_methods = list(lasso_weights = list())
+    )),
+    "One of the datasets \\(train or test\\) has zero rows"
+  )
+})
+
+test_that("twas_weights_cv: rownames(X) get reassigned to rownames(Y) when they differ", {
+  d <- make_data(n = 20, p = 5)
+  rownames(d$X) <- paste0("xname_", seq_len(nrow(d$X)))  # differ from rownames(Y)
+  set.seed(42)
+  result <- twas_weights_cv(d$X, d$Y, fold = 2, weight_methods = NULL)
+  # sample_partition$Sample should now use rownames(Y), not rownames(X)
+  expect_true(all(result$sample_partition$Sample %in% rownames(d$Y)))
+  expect_false(any(grepl("^xname_", result$sample_partition$Sample)))
+})
+
+test_that("twas_weights_cv: sample_names taken from Y when only Y has rownames", {
+  set.seed(42)
+  n <- 20; p <- 5
+  X <- matrix(rnorm(n * p), nrow = n, ncol = p)
+  rownames(X) <- NULL
+  Y <- matrix(rnorm(n), ncol = 1)
+  rownames(Y) <- paste0("yonly_", seq_len(n))
+  result <- twas_weights_cv(X, Y, fold = 2, weight_methods = NULL)
+  expect_true(all(grepl("^yonly_", result$sample_partition$Sample)))
+})
+
+test_that("twas_weights_cv: variants_to_keep >= max_num_variants samples from variants_to_keep only", {
+  d <- make_data(n = 50, p = 20)
+  # 10 keep variants, max_num_variants = 5 => length(variants_to_keep) >= max_num_variants
+  keep_vars <- colnames(d$X)[1:10]
+  local_mocked_bindings(
+    lasso_weights = function(X, y, ...) rep(0, ncol(X))
+  )
+  set.seed(42)
+  expect_message(
+    result <- twas_weights_cv(
+      d$X, d$Y, fold = 2,
+      weight_methods = list(lasso_weights = list()),
+      max_num_variants = 5,
+      variants_to_keep = keep_vars
+    ),
+    "Randomly selecting 5 out of 10 input variants"
+  )
+  expect_true("prediction" %in% names(result))
+})
+
+test_that("twas_weights_cv: NA values in Y trigger NA-removal branch in metrics", {
+  set.seed(42)
+  n <- 30; p <- 5
+  X <- matrix(rnorm(n * p), nrow = n, ncol = p)
+  colnames(X) <- paste0("v", seq_len(p))
+  rownames(X) <- paste0("s", seq_len(n))
+  Y <- matrix(rnorm(n), ncol = 1)
+  rownames(Y) <- rownames(X); colnames(Y) <- "outcome"
+  Y[c(3, 11, 17), 1] <- NA  # introduce NAs
+
+  # Mock to return non-zero (so prediction has nonzero variance and lm_fit runs)
+  local_mocked_bindings(
+    lasso_weights = function(X, y, ...) {
+      w <- rep(0, ncol(X)); w[1] <- 0.5; w
+    }
+  )
+  set.seed(42)
+  result <- twas_weights_cv(
+    X, Y, fold = 2,
+    weight_methods = list(lasso_weights = list())
+  )
+  perf <- result$performance[["lasso_performance"]]
+  # NA-removal branch ran; metrics should be finite (not all-NA)
+  expect_true(is.finite(perf[1, "rsq"]))
+})
+
+test_that("twas_weights_cv: multivariate cv_args data_driven_prior_matrices_cv is plumbed through", {
+  set.seed(42)
+  n <- 20; p <- 4
+  X <- matrix(rnorm(n * p), nrow = n)
+  colnames(X) <- paste0("v", seq_len(p)); rownames(X) <- paste0("s", seq_len(n))
+  Y <- matrix(rnorm(n * 2), nrow = n)
+  colnames(Y) <- c("y1", "y2"); rownames(Y) <- rownames(X)
+
+  captured_args <- list()
+  local_mocked_bindings(
+    mrmash_weights = function(X, Y, ...) {
+      captured_args[[length(captured_args) + 1]] <<- list(...)
+      matrix(0, nrow = ncol(X), ncol = ncol(Y),
+             dimnames = list(colnames(X), colnames(Y)))
+    }
+  )
+  prior_cv <- list(matrix(1, 2, 2), matrix(2, 2, 2))
+  set.seed(42)
+  result <- twas_weights_cv(
+    X, Y, fold = 2,
+    weight_methods = list(mrmash_weights = list()),
+    data_driven_prior_matrices_cv = prior_cv
+  )
+  # mrmash_weights mock should have been called and received the per-fold prior matrix
+  expect_true(length(captured_args) >= 1)
+  expect_true(any(vapply(captured_args, function(a)
+    "data_driven_prior_matrices" %in% names(a), logical(1))))
+})
+
+# ===========================================================================
+# twas_weights_pipeline: removed_methods warning + max_cv_variants subsampling
+# ===========================================================================
+
+test_that("twas_weights_pipeline: warns when methods are removed because all weights are zero", {
+  d <- make_data(n = 30, p = 6)
+  local_mocked_bindings(
+    lasso_weights = function(X, y, ...) rep(0, ncol(X)),
+    enet_weights  = function(X, y, ...) rep(0, ncol(X))
+  )
+  set.seed(42)
+  expect_warning(
+    suppressMessages(twas_weights_pipeline(
+      d$X, d$Y, susie_fit = NULL, cv_folds = 2,
+      weight_methods = list(lasso_weights = list(), enet_weights = list())
+    )),
+    "are removed from CV because all their weights are zeros"
+  )
+})
+
+test_that("twas_weights_pipeline: max_cv_variants subsamples colnames of X", {
+  d <- make_data(n = 30, p = 20)
+  captured_keep <- NULL
+  local_mocked_bindings(
+    lasso_weights = function(X, y, ...) {
+      w <- rep(0, ncol(X)); w[1] <- 0.5; w
+    },
+    twas_weights_cv = function(X, y, fold, sample_partition, weight_methods,
+                               max_num_variants, num_threads, variants_to_keep, ...) {
+      captured_keep <<- variants_to_keep
+      list(sample_partition = data.frame(Sample = rownames(X), Fold = 1),
+           prediction = list(), performance = list(), time_elapsed = 0)
+    }
+  )
+  set.seed(42)
+  suppressMessages(suppressWarnings(twas_weights_pipeline(
+    d$X, d$Y, susie_fit = NULL, cv_folds = 2,
+    weight_methods = list(lasso_weights = list()),
+    max_cv_variants = 5
+  )))
+  expect_equal(length(captured_keep), 5)
+  expect_true(all(captured_keep %in% colnames(d$X)))
+})
+
+# ===========================================================================
+# twas_weights: dim-fix branch when nrow(weights_matrix) != length(valid_columns)
+# ===========================================================================
+
+test_that("twas_weights: multivariate weights_matrix is reduced to valid_columns when row counts mismatch", {
+  set.seed(42)
+  n <- 20; p <- 5
+  X <- matrix(rnorm(n * p), nrow = n, ncol = p)
+  colnames(X) <- paste0("v", seq_len(p))  # all columns valid (no zero variance)
+  Y <- matrix(rnorm(n * 2), nrow = n, ncol = 2)
+  colnames(Y) <- c("y1", "y2")
+
+  local_mocked_bindings(
+    mrmash_weights = function(X, Y, ...) {
+      # Return more rows than valid_columns (length p) so the dim-fix branch
+      # subsets the matrix back to names(valid_columns).
+      extra_rows <- p + 2
+      m <- matrix(seq_len(extra_rows * ncol(Y)), nrow = extra_rows, ncol = ncol(Y))
+      rownames(m) <- c(paste0("v", seq_len(p)), "extra1", "extra2")
+      colnames(m) <- colnames(Y)
+      m
+    }
+  )
+  result <- twas_weights(X, Y, weight_methods = list(mrmash_weights = list()))
+  # After the dim-fix, the weights matrix is restricted to v1..v5 -> shape p x ncol(Y)
+  expect_equal(nrow(result$mrmash_weights), p)
+  expect_equal(ncol(result$mrmash_weights), 2)
+  expect_equal(rownames(result$mrmash_weights), paste0("v", seq_len(p)))
+})

@@ -157,6 +157,13 @@ test_that("sdpr errors on non-positive sample size", {
   )
 })
 
+test_that("sdpr errors when M is less than 4", {
+  expect_error(
+    sdpr(bhat = rnorm(5), LD = list(blk1 = diag(5)), n = 100, M = 3),
+    "'M' must be at least 4"
+  )
+})
+
 test_that("sdpr errors on invalid per_variant_sample_size", {
   expect_error(
     sdpr(bhat = rnorm(5), LD = list(blk1 = diag(5)), n = 100,
@@ -931,6 +938,45 @@ test_that("lassosum_rss_weights calls lassosum_rss and returns beta_est", {
   expect_true(is.numeric(result))
 })
 
+test_that("lassosum_rss_weights rescales bhat when max(abs(bhat)) >= 1", {
+  set.seed(42)
+  p <- 5
+  n <- 100
+  # Construct bhat with max abs >= 1 to trigger the clamp branch
+  bhat <- c(1.5, -0.2, 0.1, 0.05, -0.3)
+  R <- diag(p)
+  stat <- list(b = bhat, n = rep(n, p))
+  captured <- NULL
+  local_mocked_bindings(
+    lassosum_rss = function(bhat, LD, n, ...) {
+      captured <<- bhat
+      list(beta_est = rep(0, length(bhat)), fbeta = 1)
+    }
+  )
+  result <- lassosum_rss_weights(stat = stat, LD = R, s = 0.5)
+  # Captured bhat should have been rescaled so max abs is just under 1
+  expect_true(max(abs(captured)) < 1)
+  expect_equal(max(abs(captured)), 0.9999, tolerance = 1e-9)
+  # Sign-preserving rescale
+  expect_true(all(sign(captured) == sign(bhat)))
+})
+
+test_that("mrash_weights subsets a user-supplied beta.init of length ncol(X) by keep", {
+  skip_if_not_installed("glmnet")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  X[, 5] <- 7  # zero-variance column to force subset by keep
+  y <- X[, 1] * 0.5 + rnorm(n)
+  user_beta_init <- seq(0.01, by = 0.01, length.out = p)
+  expect_warning(
+    result <- mrash_weights(X, y, beta.init = user_beta_init),
+    "mrash_weights: dropping 1 zero-variance column"
+  )
+  expect_equal(length(result), p)
+  expect_equal(result[5], 0)
+})
+
 test_that("mrash_weights warns and zero-pads when X has zero-variance columns", {
   skip_if_not_installed("glmnet")
   set.seed(42)
@@ -1193,4 +1239,694 @@ test_that("dpr_weights warns and zero-pads when X has zero-variance columns", {
                  "dpr_weights: dropping 1 zero-variance column")
   expect_equal(length(result), p)
   expect_equal(result[8], 0)
+})
+
+# ---- dispatch verification ----
+# These tests use local_mocked_bindings to replace the inner function with a
+# stub that captures its arguments, then assert the wrapper forwarded the
+# correct values. They catch silent dispatch bugs (wrong method, wrong penalty,
+# dropped argument) that the shape-only tests above would not.
+
+test_that("prs_cs_weights dispatches to prs_cs with correct arguments", {
+  set.seed(42)
+  p <- 10
+  bhat <- rnorm(p, sd = 0.1)
+  R <- diag(p)
+  # Heterogeneous n with median != mean: this lets the test catch a regression
+  # that swapped median(stat$n) for mean(stat$n) or sum(stat$n).
+  # sorted: 10, 20, 30, 40, 50, 60, 70, 80, 90, 1000 -> median = 55, mean = 145.
+  stat <- list(b = bhat, n = c(10, 20, 30, 40, 50, 60, 70, 80, 90, 1000))
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    prs_cs = function(bhat, LD, n, ...) {
+      captured$bhat <- bhat
+      captured$LD <- LD
+      captured$n <- n
+      captured$dots <- list(...)
+      list(beta_est = seq_len(length(bhat)) * 0.01)
+    }
+  )
+  result <- prs_cs_weights(stat = stat, LD = R, maf = rep(0.3, p), n_iter = 17)
+  expect_equal(captured$bhat, bhat)
+  expect_equal(captured$LD, list(blk1 = R))
+  expect_equal(captured$n, 55) # median of stat$n, NOT mean (145)
+  expect_equal(captured$dots$maf, rep(0.3, p))
+  expect_equal(captured$dots$n_iter, 17)
+  expect_equal(result, seq_len(p) * 0.01)
+})
+
+test_that("sdpr_weights dispatches to sdpr with correct arguments", {
+  set.seed(42)
+  p <- 10
+  bhat <- rnorm(p, sd = 0.1)
+  R <- diag(p)
+  stat <- list(b = bhat, n = rep(456, p))
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    sdpr = function(bhat, LD, n, ...) {
+      captured$bhat <- bhat
+      captured$LD <- LD
+      captured$n <- n
+      captured$dots <- list(...)
+      list(beta_est = seq_len(length(bhat)) * 0.02)
+    }
+  )
+  result <- sdpr_weights(stat = stat, LD = R, iter = 19, burn = 3)
+  expect_equal(captured$bhat, bhat)
+  expect_equal(captured$LD, list(blk1 = R))
+  expect_equal(captured$n, 456)
+  expect_equal(captured$dots$iter, 19)
+  expect_equal(captured$dots$burn, 3)
+  expect_equal(result, seq_len(p) * 0.02)
+})
+
+test_that("lassosum_rss_weights dispatches to lassosum_rss once per s value", {
+  set.seed(42)
+  p <- 10
+  bhat <- rnorm(p, sd = 0.1)
+  R <- diag(p)
+  for (i in 1:(p - 1)) {
+    R[i, i + 1] <- 0.4
+    R[i + 1, i] <- 0.4
+  }
+  stat <- list(b = bhat, n = rep(100, p))
+  call_log <- new.env(parent = emptyenv())
+  call_log$calls <- list()
+  local_mocked_bindings(
+    lassosum_rss = function(bhat, LD, n, ...) {
+      call_log$calls <- c(call_log$calls,
+                          list(list(bhat = bhat, LD = LD, n = n)))
+      list(beta_est = rep(0.05, length(bhat)), fbeta = c(1.0, 0.5))
+    }
+  )
+  lassosum_rss_weights(stat = stat, LD = R, s = c(0.2, 0.9))
+  expect_equal(length(call_log$calls), 2L)
+  expect_equal(call_log$calls[[1]]$n, 100)
+  expect_equal(length(call_log$calls[[1]]$bhat), p)
+  # LD should differ between calls because s is different
+  expect_false(identical(call_log$calls[[1]]$LD, call_log$calls[[2]]$LD))
+})
+
+test_that("bayes_n_weights dispatches to bayes_alphabet_weights with method 'bayesN'", {
+  set.seed(42)
+  X <- matrix(rnorm(50), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    bayes_alphabet_weights = function(X, y, method, ...) {
+      captured$method <- method
+      rep(0, ncol(X))
+    }
+  )
+  bayes_n_weights(X, y)
+  expect_equal(captured$method, "bayesN")
+})
+
+test_that("bayes_l_weights dispatches to bayes_alphabet_weights with method 'bayesL'", {
+  set.seed(42)
+  X <- matrix(rnorm(50), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    bayes_alphabet_weights = function(X, y, method, ...) {
+      captured$method <- method
+      rep(0, ncol(X))
+    }
+  )
+  bayes_l_weights(X, y)
+  expect_equal(captured$method, "bayesL")
+})
+
+test_that("bayes_a_weights dispatches to bayes_alphabet_weights with method 'bayesA'", {
+  set.seed(42)
+  X <- matrix(rnorm(50), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    bayes_alphabet_weights = function(X, y, method, ...) {
+      captured$method <- method
+      rep(0, ncol(X))
+    }
+  )
+  bayes_a_weights(X, y)
+  expect_equal(captured$method, "bayesA")
+})
+
+test_that("bayes_c_weights dispatches to bayes_alphabet_weights with method 'bayesC'", {
+  set.seed(42)
+  X <- matrix(rnorm(50), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    bayes_alphabet_weights = function(X, y, method, ...) {
+      captured$method <- method
+      rep(0, ncol(X))
+    }
+  )
+  bayes_c_weights(X, y)
+  expect_equal(captured$method, "bayesC")
+})
+
+test_that("bayes_r_weights dispatches to bayes_alphabet_weights with method 'bayesR'", {
+  set.seed(42)
+  X <- matrix(rnorm(50), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    bayes_alphabet_weights = function(X, y, method, ...) {
+      captured$method <- method
+      rep(0, ncol(X))
+    }
+  )
+  bayes_r_weights(X, y)
+  expect_equal(captured$method, "bayesR")
+})
+
+test_that("scad_weights dispatches to ncvreg_weights with penalty = 'SCAD'", {
+  set.seed(42)
+  X <- matrix(rnorm(50), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    ncvreg_weights = function(X, y, penalty, nfolds = 5, ...) {
+      captured$penalty <- penalty
+      captured$nfolds <- nfolds
+      matrix(0, nrow = ncol(X), ncol = 1)
+    }
+  )
+  scad_weights(X, y, nfolds = 7)
+  expect_equal(captured$penalty, "SCAD")
+  expect_equal(captured$nfolds, 7)
+})
+
+test_that("mcp_weights dispatches to ncvreg_weights with penalty = 'MCP'", {
+  set.seed(42)
+  X <- matrix(rnorm(50), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    ncvreg_weights = function(X, y, penalty, nfolds = 5, ...) {
+      captured$penalty <- penalty
+      captured$nfolds <- nfolds
+      matrix(0, nrow = ncol(X), ncol = 1)
+    }
+  )
+  mcp_weights(X, y, nfolds = 9)
+  expect_equal(captured$penalty, "MCP")
+  expect_equal(captured$nfolds, 9)
+})
+
+test_that("b_lasso_weights dispatches to bglr_weights with model = 'BL'", {
+  set.seed(42)
+  X <- matrix(rnorm(50), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    bglr_weights = function(X, y, model, nIter, burnIn, thin, ...) {
+      captured$model <- model
+      captured$nIter <- nIter
+      captured$burnIn <- burnIn
+      captured$thin <- thin
+      rep(0, ncol(X))
+    }
+  )
+  b_lasso_weights(X, y, nIter = 77, burnIn = 11, thin = 3)
+  expect_equal(captured$model, "BL")
+  expect_equal(captured$nIter, 77)
+  expect_equal(captured$burnIn, 11)
+  expect_equal(captured$thin, 3)
+})
+
+test_that("bayes_b_weights dispatches to bglr_weights with model = 'BayesB' and probIn", {
+  set.seed(42)
+  X <- matrix(rnorm(50), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    bglr_weights = function(X, y, model, nIter, burnIn, thin, eta_args = list(), ...) {
+      captured$model <- model
+      captured$eta_args <- eta_args
+      rep(0, ncol(X))
+    }
+  )
+  bayes_b_weights(X, y, nIter = 100, burnIn = 20, thin = 2, probIn = 0.42)
+  expect_equal(captured$model, "BayesB")
+  expect_equal(captured$eta_args, list(probIn = 0.42))
+})
+
+test_that("lasso_weights dispatches to glmnet_weights with alpha = 1", {
+  set.seed(42)
+  X <- matrix(rnorm(50), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    glmnet_weights = function(X, y, alpha) {
+      captured$alpha <- alpha
+      matrix(0, nrow = ncol(X), ncol = 1)
+    }
+  )
+  lasso_weights(X, y)
+  expect_equal(captured$alpha, 1)
+})
+
+test_that("enet_weights dispatches to glmnet_weights with alpha = 0.5", {
+  set.seed(42)
+  X <- matrix(rnorm(50), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    glmnet_weights = function(X, y, alpha) {
+      captured$alpha <- alpha
+      matrix(0, nrow = ncol(X), ncol = 1)
+    }
+  )
+  enet_weights(X, y)
+  expect_equal(captured$alpha, 0.5)
+})
+
+test_that("susie_weights actually calls susie_wrapper when fit is NULL", {
+  set.seed(42)
+  p <- 5
+  X <- matrix(rnorm(10 * p), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  captured$called <- FALSE
+  local_mocked_bindings(
+    susie_wrapper = function(X, y, ...) {
+      captured$called <- TRUE
+      captured$X <- X
+      captured$y <- y
+      list(pip = rep(0.1, ncol(X)))
+    }
+  )
+  susie_weights(X = X, y = y)
+  expect_true(captured$called)
+  expect_identical(captured$X, X)
+  expect_identical(captured$y, y)
+})
+
+test_that("susie_ash_weights calls susie_wrapper with ash dispatch arguments", {
+  set.seed(42)
+  p <- 5
+  X <- matrix(rnorm(10 * p), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  captured$called <- FALSE
+  local_mocked_bindings(
+    susie_wrapper = function(X, y, unmappable_effects = NULL, convergence_method = NULL, ...) {
+      captured$called <- TRUE
+      captured$unmappable_effects <- unmappable_effects
+      captured$convergence_method <- convergence_method
+      list(pip = rep(0.1, ncol(X)))
+    }
+  )
+  susie_ash_weights(X = X, y = y)
+  expect_true(captured$called)
+  expect_equal(captured$unmappable_effects, "ash")
+  expect_equal(captured$convergence_method, "pip")
+})
+
+test_that("susie_inf_weights calls susie_wrapper with inf dispatch arguments", {
+  set.seed(42)
+  p <- 5
+  X <- matrix(rnorm(10 * p), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  captured$called <- FALSE
+  local_mocked_bindings(
+    susie_wrapper = function(X, y, unmappable_effects = NULL, convergence_method = NULL, ...) {
+      captured$called <- TRUE
+      captured$unmappable_effects <- unmappable_effects
+      captured$convergence_method <- convergence_method
+      list(pip = rep(0.1, ncol(X)))
+    }
+  )
+  susie_inf_weights(X = X, y = y)
+  expect_true(captured$called)
+  expect_equal(captured$unmappable_effects, "inf")
+  expect_equal(captured$convergence_method, "pip")
+})
+
+test_that("mrash_weights actually calls lasso_weights for default beta.init", {
+  skip_if_not_installed("glmnet")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+  called <- new.env(parent = emptyenv())
+  called$lasso <- FALSE
+  local_mocked_bindings(
+    lasso_weights = function(X, y) {
+      called$lasso <- TRUE
+      rep(0.01, ncol(X))
+    },
+    init_prior_sd = function(X, y, n = 30) seq(0, 3, length.out = n)
+  )
+  mrash_weights(X, y)
+  expect_true(called$lasso)
+})
+
+test_that("mrash_weights calls init_prior_sd only when init_prior_sd = TRUE", {
+  skip_if_not_installed("glmnet")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+  called <- new.env(parent = emptyenv())
+
+  # init_prior_sd = TRUE: init_prior_sd should be called
+  called$init <- FALSE
+  local_mocked_bindings(
+    lasso_weights = function(X, y) rep(0.01, ncol(X)),
+    init_prior_sd = function(X, y, n = 30) {
+      called$init <- TRUE
+      seq(0, 3, length.out = n)
+    }
+  )
+  mrash_weights(X, y, init_prior_sd = TRUE)
+  expect_true(called$init)
+
+  # init_prior_sd = FALSE: init_prior_sd should NOT be called
+  called$init <- FALSE
+  mrash_weights(X, y, init_prior_sd = FALSE)
+  expect_false(called$init)
+})
+
+# ---- end-to-end solver verification ----
+# These tests mock the *external-package* solver and assert that the
+# user-facing wrapper forwards the correct dispatch parameter all the way
+# through the helper hop. This is the same pattern as the BGLR test at L1100,
+# applied to every method. Together with the dispatch verification tests
+# above, this gives full coverage of the parameter-passing chain
+# wrapper -> helper -> solver.
+#
+# Two patterns are used:
+#  - For solvers whose results are consumed via direct field access (BGLR,
+#    qgg::gbayes, RcppDPR::fit_model), the mock returns a minimal fake list.
+#  - For solvers whose results flow through S3 coef() dispatch (glmnet,
+#    ncvreg, L0Learn), faking the result is awkward, so the mock captures
+#    the parameter and then raises a sentinel error that the test catches.
+
+test_that("glmnet_weights forwards alpha to glmnet::cv.glmnet", {
+  skip_if_not_installed("glmnet")
+  set.seed(42)
+  X <- matrix(rnorm(50), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    cv.glmnet = function(x, y, alpha, ...) {
+      captured$alpha <- alpha
+      stop("STOP_AFTER_CAPTURE")
+    },
+    .package = "glmnet"
+  )
+  expect_error(lasso_weights(X, y), "STOP_AFTER_CAPTURE")
+  expect_equal(captured$alpha, 1)
+
+  expect_error(enet_weights(X, y), "STOP_AFTER_CAPTURE")
+  expect_equal(captured$alpha, 0.5)
+})
+
+test_that("ncvreg_weights forwards penalty to ncvreg::cv.ncvreg", {
+  skip_if_not_installed("ncvreg")
+  set.seed(42)
+  X <- matrix(rnorm(50), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    cv.ncvreg = function(X, y, penalty, nfolds = 5, ...) {
+      captured$penalty <- penalty
+      captured$nfolds <- nfolds
+      stop("STOP_AFTER_CAPTURE")
+    },
+    .package = "ncvreg"
+  )
+  expect_error(scad_weights(X, y, nfolds = 7), "STOP_AFTER_CAPTURE")
+  expect_equal(captured$penalty, "SCAD")
+  expect_equal(captured$nfolds, 7)
+
+  expect_error(mcp_weights(X, y, nfolds = 9), "STOP_AFTER_CAPTURE")
+  expect_equal(captured$penalty, "MCP")
+  expect_equal(captured$nfolds, 9)
+})
+
+test_that("l0learn_weights forwards penalty to L0Learn::L0Learn.cvfit", {
+  skip_if_not_installed("L0Learn")
+  set.seed(42)
+  X <- matrix(rnorm(50), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    L0Learn.cvfit = function(x, y, penalty, nFolds = 5, ...) {
+      captured$penalty <- penalty
+      captured$nFolds <- nFolds
+      stop("STOP_AFTER_CAPTURE")
+    },
+    .package = "L0Learn"
+  )
+  expect_error(l0learn_weights(X, y), "STOP_AFTER_CAPTURE")
+  expect_equal(captured$penalty, "L0")
+
+  expect_error(l0learn_weights(X, y, penalty = "L0L2", nFolds = 8),
+               "STOP_AFTER_CAPTURE")
+  expect_equal(captured$penalty, "L0L2")
+  expect_equal(captured$nFolds, 8)
+})
+
+test_that("b_lasso_weights forwards model = 'BL' all the way to BGLR::BGLR", {
+  skip_if_not_installed("BGLR")
+  set.seed(42)
+  X <- matrix(rnorm(50), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    BGLR = function(y, ETA, nIter, burnIn, thin, ...) {
+      captured$model <- ETA[[1]]$model
+      captured$nIter <- nIter
+      captured$burnIn <- burnIn
+      captured$thin <- thin
+      list(ETA = list(list(b = rep(0, ncol(ETA[[1]]$X)))))
+    },
+    .package = "BGLR"
+  )
+  b_lasso_weights(X, y, nIter = 77, burnIn = 11, thin = 3)
+  expect_equal(captured$model, "BL")
+  expect_equal(captured$nIter, 77)
+  expect_equal(captured$burnIn, 11)
+  expect_equal(captured$thin, 3)
+})
+
+test_that("bayes_alphabet_weights forwards method to qgg::gbayes for all alphabet variants", {
+  skip_if_not_installed("qgg")
+  set.seed(42)
+  X <- matrix(rnorm(50), nrow = 10)
+  y <- rnorm(10)
+  Z <- matrix(rnorm(20), nrow = 10)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    gbayes = function(y, W, X = NULL, method, nit, nburn, ...) {
+      captured$method <- method
+      captured$nit <- nit
+      captured$nburn <- nburn
+      captured$X <- X
+      list(bm = rep(0, ncol(W)))
+    },
+    .package = "qgg"
+  )
+  for (m in c("bayesN", "bayesL", "bayesA", "bayesC", "bayesR")) {
+    bayes_alphabet_weights(X, y, method = m, Z = Z, nit = 17, nburn = 4)
+    expect_equal(captured$method, m, info = paste("method =", m))
+    expect_equal(captured$nit, 17)
+    expect_equal(captured$nburn, 4)
+    # Z is forwarded to qgg::gbayes via the X argument.
+    expect_equal(captured$X, Z, info = paste("Z forwarding for method =", m))
+  }
+})
+
+test_that("dpr_weights forwards fitting_method to RcppDPR::fit_model", {
+  skip_if_not_installed("RcppDPR")
+  set.seed(42)
+  X <- matrix(rnorm(50), nrow = 10)
+  y <- rnorm(10)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    fit_model = function(y, w, x, rotate_variables, fitting_method, ...) {
+      captured$fitting_method <- fitting_method
+      captured$rotate_variables <- rotate_variables
+      list(beta = rep(0, ncol(x)), alpha = rep(0, ncol(x)))
+    },
+    .package = "RcppDPR"
+  )
+  dpr_weights(X, y, fitting_method = "VB")
+  expect_equal(captured$fitting_method, "VB")
+  expect_false(captured$rotate_variables)
+
+  dpr_weights(X, y, fitting_method = "Gibbs")
+  expect_equal(captured$fitting_method, "Gibbs")
+})
+
+# ============================================================================
+# Signal recovery tests for X-y wrappers
+#
+# These tests catch breaking regressions in the post-solver coefficient
+# extraction code (which the dispatch/end-to-end mocks short-circuit). They
+# simulate a small sparse linear model and assert that the returned weights
+# correlate with truth (or that the top-K nonzero indices overlap truth).
+# ============================================================================
+
+# Helper: simulate a small sparse linear model with binomial genotypes.
+.simulate_sparse_xy <- function(n = 200, p = 20,
+                                signal_idx = c(3, 10, 15),
+                                signal_beta = c(0.8, -0.6, 0.5),
+                                seed = 2024) {
+  set.seed(seed)
+  X <- matrix(rbinom(n * p, 2, 0.3), nrow = n)
+  beta_true <- rep(0, p)
+  beta_true[signal_idx] <- signal_beta
+  y <- as.numeric(X %*% beta_true) + rnorm(n, sd = 0.5)
+  list(X = X, y = y, beta_true = beta_true, signal_idx = signal_idx)
+}
+
+test_that("lasso_weights recovers signal direction on simulated data", {
+  skip_if_not_installed("glmnet")
+  sim <- .simulate_sparse_xy()
+  w <- lasso_weights(sim$X, sim$y)
+  expect_equal(length(w), ncol(sim$X))
+  expect_true(all(is.finite(w)))
+  expect_gt(cor(w, sim$beta_true), 0.5)
+})
+
+test_that("scad_weights recovers signal indices on simulated data", {
+  skip_if_not_installed("ncvreg")
+  sim <- .simulate_sparse_xy()
+  w <- scad_weights(sim$X, sim$y, nfolds = 5)
+  expect_equal(length(w), ncol(sim$X))
+  expect_true(all(is.finite(w)))
+  # SCAD is sparse: top-3 by absolute weight should heavily overlap truth.
+  top3 <- order(abs(w), decreasing = TRUE)[1:3]
+  expect_gte(length(intersect(top3, sim$signal_idx)), 2L)
+})
+
+test_that("l0learn_weights with default L0 penalty recovers signal indices", {
+  skip_if_not_installed("L0Learn")
+  sim <- .simulate_sparse_xy()
+  w <- l0learn_weights(sim$X, sim$y, penalty = "L0", nFolds = 5)
+  expect_equal(length(w), ncol(sim$X))
+  expect_true(all(is.finite(w)))
+  top3 <- order(abs(w), decreasing = TRUE)[1:3]
+  expect_gte(length(intersect(top3, sim$signal_idx)), 2L)
+})
+
+test_that("l0learn_weights with L0L2 penalty recovers signal direction", {
+  skip_if_not_installed("L0Learn")
+  sim <- .simulate_sparse_xy()
+  w <- l0learn_weights(sim$X, sim$y, penalty = "L0L2", nFolds = 5)
+  expect_equal(length(w), ncol(sim$X))
+  expect_true(all(is.finite(w)))
+  # L0L2 selects (gamma, lambda) over a 2D grid; correlation is the safer bet.
+  expect_gt(cor(w, sim$beta_true), 0.4)
+})
+
+test_that("dpr_weights with VB fitting recovers signal direction", {
+  skip_if_not_installed("RcppDPR")
+  sim <- .simulate_sparse_xy()
+  w <- dpr_weights(sim$X, sim$y, fitting_method = "VB")
+  expect_equal(length(w), ncol(sim$X))
+  expect_true(all(is.finite(w)))
+  expect_gt(cor(w, sim$beta_true), 0.4)
+})
+
+test_that("lassosum_rss_weights recovers signal direction on simulated data", {
+  skip_if_not_installed("Rcpp")
+  set.seed(2024)
+  n <- 500
+  p <- 20
+  X <- matrix(rbinom(n * p, 2, 0.3), nrow = n)
+  beta_true <- rep(0, p)
+  beta_true[c(3, 10, 15)] <- c(0.4, -0.3, 0.2)
+  y <- as.numeric(X %*% beta_true) + rnorm(n)
+  bhat <- as.vector(cor(y, X))
+  R <- cor(X)
+  # Heterogeneous n forces the median(stat$n) path; mean would be wrong.
+  stat <- list(b = bhat, n = c(rep(n, p - 1), 10 * n))
+  w <- lassosum_rss_weights(stat = stat, LD = R, s = c(0.2, 0.5, 0.9))
+  expect_equal(length(w), p)
+  expect_true(all(is.finite(w)))
+  expect_gt(cor(w, beta_true), 0.5)
+})
+
+# ============================================================================
+# mr_ash_rss_weights — dispatch + smoke test
+# ============================================================================
+
+test_that("mr_ash_rss_weights forwards arguments to susieR::mr.ash.rss", {
+  set.seed(42)
+  p <- 10
+  bhat <- rnorm(p, sd = 0.1)
+  shat <- rep(0.05, p)
+  R <- diag(p)
+  # Heterogeneous n with median != mean: median = 55, mean = 145.
+  stat <- list(
+    b = bhat,
+    seb = shat,
+    n = c(10, 20, 30, 40, 50, 60, 70, 80, 90, 1000)
+  )
+  z_vec <- bhat / shat
+  captured <- new.env(parent = emptyenv())
+  # mr.ash.rss is `@importFrom`'d into pecotmr's namespace, so mock the
+  # pecotmr binding (no .package argument), not the susieR binding.
+  local_mocked_bindings(
+    mr.ash.rss = function(bhat, shat, z, R, var_y, n, sigma2_e, s0, w0, ...) {
+      captured$bhat <- bhat
+      captured$shat <- shat
+      captured$z <- z
+      captured$R <- R
+      captured$var_y <- var_y
+      captured$n <- n
+      captured$sigma2_e <- sigma2_e
+      captured$s0 <- s0
+      captured$w0 <- w0
+      captured$dots <- list(...)
+      list(mu1 = seq_len(length(bhat)) * 0.01)
+    }
+  )
+  result <- mr_ash_rss_weights(
+    stat = stat, LD = R, var_y = 1.5, sigma2_e = 0.4,
+    s0 = c(0, 0.1, 0.2), w0 = c(0.5, 0.3, 0.2), z = z_vec,
+    tol = 1e-6
+  )
+  expect_equal(captured$bhat, bhat)
+  expect_equal(captured$shat, shat)
+  expect_equal(captured$z, z_vec)
+  expect_equal(captured$R, R)
+  expect_equal(captured$var_y, 1.5)
+  expect_equal(captured$n, 55) # median of stat$n, NOT mean (145)
+  expect_equal(captured$sigma2_e, 0.4)
+  expect_equal(captured$s0, c(0, 0.1, 0.2))
+  expect_equal(captured$w0, c(0.5, 0.3, 0.2))
+  expect_equal(captured$dots$tol, 1e-6)
+  expect_equal(result, seq_len(p) * 0.01)
+})
+
+test_that("mr_ash_rss_weights returns a numeric vector of expected length", {
+  skip_if_not_installed("susieR")
+  set.seed(2024)
+  n <- 500
+  p <- 10
+  X <- matrix(rbinom(n * p, 2, 0.3), nrow = n)
+  beta_true <- rep(0, p)
+  beta_true[c(3, 7)] <- c(0.4, -0.3)
+  y <- as.numeric(X %*% beta_true) + rnorm(n)
+  bhat <- as.vector(cor(y, X))
+  shat <- rep(1 / sqrt(n - 1), p)
+  R <- cor(X)
+  stat <- list(b = bhat, seb = shat, n = rep(n, p))
+  w <- mr_ash_rss_weights(
+    stat = stat, LD = R, var_y = var(y),
+    sigma2_e = NULL,
+    s0 = c(0, 0.01, 0.1, 0.5),
+    w0 = rep(1 / 4, 4)
+  )
+  expect_equal(length(w), p)
+  expect_true(all(is.finite(w)))
 })

@@ -302,3 +302,167 @@ test_that("multivariate_analysis_pipeline errors when maf is NULL", {
     "maf must be a numeric vector"
   )
 })
+
+# ===========================================================================
+# skip_conditions auto-cutoff (negative pip_cutoff_to_skip)
+# ===========================================================================
+
+test_that("skip_conditions with negative pip_cutoff_to_skip auto-computes threshold and skips all", {
+  skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
+          "mvsusieR not installed, cannot reach skip_conditions")
+  skip_if(!requireNamespace("susieR", quietly = TRUE),
+          "susieR not installed")
+  d <- make_mv_data()
+  # Mock susieR::susie to return all-low PIPs so the auto-cutoff branch
+  # filters out every condition. Pipeline should warn + return empty list.
+  # multivariate_pipeline.R imports susieR::susie via NAMESPACE, so mock the
+  # binding in the pecotmr namespace.
+  local_mocked_bindings(
+    susie = function(X, Y, ...) list(pip = rep(1e-6, ncol(X))),
+  )
+  result <- expect_warning(
+    multivariate_analysis_pipeline(
+      X = d$X, Y = d$Y, maf = d$maf, pip_cutoff_to_skip = -1
+    ),
+    "After filtering"
+  )
+  expect_true(is.list(result))
+  expect_equal(length(result), 0)
+})
+
+# ===========================================================================
+# LD reference filtering
+# ===========================================================================
+
+test_that("multivariate_pipeline filters X by LD reference variants and short-circuits on empty w0", {
+  skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
+          "mvsusieR not installed")
+  d <- make_mv_data()
+  filter_called <- FALSE
+  mrmash_called <- FALSE
+  # filter_variants_by_ld_reference: keep first half of variants
+  local_mocked_bindings(
+    filter_variants_by_ld_reference = function(variant_ids, ld_reference_meta_file, ...) {
+      filter_called <<- TRUE
+      kept <- seq_len(length(variant_ids) %/% 2)
+      list(data = variant_ids[kept], idx = kept)
+    },
+    # Short-circuit before mvSuSiE/mr.mash internals: return w0 of all "null"
+    # so rescale_cov_w0 yields length 0 -> pipeline returns list().
+    mrmash_wrapper = function(X, Y, ...) {
+      mrmash_called <<- TRUE
+      list(V = diag(ncol(Y)), w0 = c(null = 1.0), w1 = matrix(1, nrow = ncol(X), ncol = 1))
+    },
+  )
+  result <- multivariate_analysis_pipeline(
+    X = d$X, Y = d$Y, maf = d$maf,
+    ld_reference_meta_file = "fake_ld_meta.tsv",
+    pip_cutoff_to_skip = 0
+  )
+  expect_true(filter_called)
+  expect_true(mrmash_called)
+  expect_true(is.list(result))
+  expect_equal(length(result), 0)
+})
+
+# ===========================================================================
+# empty w0_updated returns empty list
+# ===========================================================================
+
+test_that("pipeline returns empty list when rescale_cov_w0 yields length 0", {
+  skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
+          "mvsusieR not installed")
+  d <- make_mv_data()
+  local_mocked_bindings(
+    mrmash_wrapper = function(X, Y, ...) {
+      # Only a "null" component -> rescale_cov_w0 strips it, length = 0.
+      list(V = diag(ncol(Y)), w0 = c(null = 1.0), w1 = matrix(1, nrow = ncol(X), ncol = 1))
+    },
+  )
+  result <- multivariate_analysis_pipeline(
+    X = d$X, Y = d$Y, maf = d$maf, pip_cutoff_to_skip = 0
+  )
+  expect_true(is.list(result))
+  expect_equal(length(result), 0)
+})
+
+# ===========================================================================
+# initialize_mvsusie_prior with provided data_driven_prior_matrices
+# ===========================================================================
+
+# ===========================================================================
+# skip_conditions keeps columns when PIP exceeds cutoff (Tier 1)
+# ===========================================================================
+
+test_that("skip_conditions keeps columns when top_model_pip exceeds cutoff", {
+  skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
+          "mvsusieR not installed, cannot reach skip_conditions")
+  d <- make_mv_data()
+  p <- ncol(d$X)
+  # Mock susie so that at least one PIP exceeds the cutoff for every condition
+  local_mocked_bindings(
+    susie = function(X, Y, ...) list(pip = c(0.9, rep(0.01, ncol(X) - 1)))
+  )
+  # Use tryCatch to catch the downstream mrmash_wrapper error
+  # The message from skip_conditions tells us both columns were kept
+  expect_message(
+    tryCatch(
+      suppressWarnings(multivariate_analysis_pipeline(
+        X = d$X, Y = d$Y, maf = d$maf, pip_cutoff_to_skip = 0.5
+      )),
+      error = function(e) NULL
+    ),
+    "After filtering by potential association signals, Y has 3 contexts left"
+  )
+})
+
+# ===========================================================================
+# initialize_mvsusie_prior with provided data_driven_prior_matrices
+# ===========================================================================
+
+test_that("initialize_mvsusie_prior runs with provided data_driven_prior_matrices", {
+  skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
+          "mvsusieR not installed")
+  d <- make_mv_data()
+  r <- ncol(d$Y)
+  # Build a non-NULL prior matrices spec keyed under a non-"null" group name
+  # so rescale_cov_w0 produces non-empty output.
+  prior_U <- list(
+    udd_1 = matrix(0.5, r, r) + 0.5 * diag(r),
+    udd_2 = diag(r)
+  )
+  for (k in seq_along(prior_U)) {
+    rownames(prior_U[[k]]) <- colnames(prior_U[[k]]) <- colnames(d$Y)
+  }
+  prior_mats <- list(U = prior_U, w = c(udd_1 = 0.5, udd_2 = 0.5))
+
+  # mrmash returns w0 with names matching "udd_1_<...>" so rescale_cov_w0
+  # group prefix "udd_1"/"udd_2" survives.
+  fake_w0 <- c("udd_1_a" = 0.4, "udd_2_a" = 0.4, "null" = 0.2)
+  local_mocked_bindings(
+    mrmash_wrapper = function(X, Y, ...) {
+      list(V = diag(ncol(Y)), w0 = fake_w0,
+           w1 = matrix(0.1, nrow = ncol(X), ncol = 1))
+    },
+    susie_post_processor = function(...) list(),
+  )
+  # Mock mvsusieR::mvsusie + create_mixture_prior to avoid heavy fits
+  local_mocked_bindings(
+    mvsusie = function(...) list(pip = rep(0.1, ncol(d$X)),
+                                 sets = list(cs = NULL)),
+    create_mixture_prior = function(...) list(matrices = prior_U, weights = c(0.5, 0.5)),
+    .package = "mvsusieR"
+  )
+
+  result <- multivariate_analysis_pipeline(
+    X = d$X, Y = d$Y, maf = d$maf,
+    pip_cutoff_to_skip = 0,
+    data_driven_prior_matrices = prior_mats,
+    twas_weights = FALSE
+  )
+  expect_true(is.list(result))
+  # initialize_mvsusie_prior path stores reweighted_mixture_prior
+  expect_true("reweighted_mixture_prior" %in% names(result))
+  expect_true("reweighted_mixture_prior_cv" %in% names(result))
+  expect_true("mvsusie_fitted" %in% names(result))
+})

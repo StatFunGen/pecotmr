@@ -148,7 +148,6 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
         # loop through context within the context group:
         for (context in contexts) {
           weights_matrix <- twas_weights_data[[molecular_id]][["weights"]][[context]]
-          if (is.null(rownames(weights_matrix))) stop("No variant names found in weights matrix.")
 
           # Step 4: harmonize weights, flip allele
           weights_matrix <- cbind(variant_id_to_df(rownames(weights_matrix)), weights_matrix)

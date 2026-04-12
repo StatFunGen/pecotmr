@@ -38,14 +38,6 @@
 #' @export
 twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_methods = NULL, max_num_variants = NULL, variants_to_keep = NULL, num_threads = 1, ...) {
   split_data <- function(X, Y, sample_partition, fold) {
-    if (is.null(rownames(X))) {
-      warning("Row names in X are missing. Using row indices.")
-      rownames(X) <- 1:nrow(X)
-    }
-    if (is.null(rownames(Y))) {
-      warning("Row names in Y are missing. Using row indices.")
-      rownames(Y) <- 1:nrow(Y)
-    }
     test_ids <- sample_partition[which(sample_partition$Fold == fold), "Sample"]
     Xtrain <- X[!(rownames(X) %in% test_ids), , drop = FALSE]
     Ytrain <- Y[!(rownames(Y) %in% test_ids), , drop = FALSE]

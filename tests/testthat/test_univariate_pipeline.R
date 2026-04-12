@@ -1849,3 +1849,142 @@ test_that("rss: diagnostics with high max_cs_corr_study_block triggers BCR+SER",
   expect_true(any(grepl("bayesian_conditional_regression", names(result))))
   expect_true(any(grepl("single_effect", names(result))))
 })
+
+# ========================================================================
+#  load_study_LD: single vs mixture LD panels
+# ========================================================================
+
+test_that("load_study_LD with single path returns load_LD_matrix output unchanged", {
+  fake_LD <- list(
+    LD_matrix = diag(4),
+    LD_variants = paste0("chr1:", 1:4, ":A:G"),
+    is_genotype = FALSE,
+    block_metadata = data.frame(chrom = 1, start = 1, end = 4)
+  )
+  captured_args <- NULL
+  local_mocked_bindings(
+    load_LD_matrix = function(LD_meta_file_path, region, ...) {
+      captured_args <<- list(path = LD_meta_file_path, region = region, ...)
+      fake_LD
+    },
+  )
+  out <- load_study_LD("ld_meta.tsv", "chr1:1-100")
+  expect_identical(out, fake_LD)
+  expect_equal(captured_args$path, "ld_meta.tsv")
+  expect_equal(captured_args$region, "chr1:1-100")
+  expect_equal(captured_args$return_genotype, "auto")
+})
+
+test_that("load_study_LD with comma-separated paths builds list of X panels", {
+  panel1 <- list(
+    LD_matrix = matrix(1:9, 3, 3),
+    LD_variants = paste0("chr1:", 1:3, ":A:G"),
+    is_genotype = TRUE,
+    block_metadata = data.frame(chrom = 1, start = 1, end = 3)
+  )
+  panel2 <- list(
+    LD_matrix = matrix(10:18, 3, 3),
+    LD_variants = paste0("chr1:", 1:3, ":A:G"),
+    is_genotype = TRUE,
+    block_metadata = data.frame(chrom = 1, start = 1, end = 3)
+  )
+  call_count <- 0
+  local_mocked_bindings(
+    load_LD_matrix = function(LD_meta_file_path, region, ...) {
+      call_count <<- call_count + 1
+      if (call_count == 1) panel1 else panel2
+    },
+  )
+  out <- load_study_LD("ld_eur.tsv,ld_afr.tsv", "chr1:1-100")
+  expect_equal(call_count, 2)
+  expect_true(is.list(out$LD_matrix))
+  expect_length(out$LD_matrix, 2)
+  expect_equal(out$LD_matrix[[1]], panel1$LD_matrix)
+  expect_equal(out$LD_matrix[[2]], panel2$LD_matrix)
+  # Other fields are preserved from base panel
+  expect_equal(out$LD_variants, panel1$LD_variants)
+})
+
+# ========================================================================
+#  rss_analysis_pipeline: X-as-LD path (genotype interface)
+# ========================================================================
+
+test_that("rss: is_genotype=TRUE path computes R from X and uses X for fine-mapping", {
+  ss <- make_rss_sumstats(5)
+  ld_mat <- make_rss_ld_mat(5)
+  X_geno <- matrix(rnorm(20 * 5), nrow = 20, ncol = 5)
+  colnames(X_geno) <- ss$variant_id
+  fake_result <- make_fake_post_result(5)
+
+  compute_LD_called <- FALSE
+  susie_X_arg <- NULL
+  susie_LD_arg <- "unset"
+
+  local_mocked_bindings(
+    compute_LD = function(X, method = "sample") {
+      compute_LD_called <<- TRUE
+      ld_mat
+    },
+    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
+    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
+    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0),
+    partition_LD_matrix = function(...) list(ld_matrices = list(ld_mat)),
+    raiss = function(...) list(result_filter = ss, LD_mat = ld_mat),
+    susie_rss_pipeline = function(sumstats, LD_mat = NULL, X_mat = NULL, ...) {
+      susie_X_arg <<- X_mat
+      susie_LD_arg <<- LD_mat
+      fake_result
+    },
+  )
+
+  result <- rss_analysis_pipeline(
+    sumstat_path = "/fake/sumstats.tsv",
+    column_file_path = "/fake/columns.yml",
+    LD_data = list(LD_matrix = X_geno, is_genotype = TRUE, ref_panel = ss),
+    qc_method = "slalom",
+    finemapping_method = "susie_rss"
+  )
+
+  expect_true(compute_LD_called)
+  expect_true(is.matrix(susie_X_arg))
+  expect_null(susie_LD_arg)
+  expect_true(any(grepl("susie_rss", names(result))))
+})
+
+test_that("rss: mixture LD_data (list of X panels) preserves list shape into susie_rss_pipeline", {
+  ss <- make_rss_sumstats(5)
+  ld_mat <- make_rss_ld_mat(5)
+  X1 <- matrix(rnorm(20 * 5), nrow = 20, ncol = 5)
+  X2 <- matrix(rnorm(20 * 5), nrow = 20, ncol = 5)
+  colnames(X1) <- colnames(X2) <- ss$variant_id
+  fake_result <- make_fake_post_result(5)
+
+  susie_X_arg <- NULL
+
+  local_mocked_bindings(
+    compute_LD = function(X, method = "sample") ld_mat,
+    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
+    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
+    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0),
+    partition_LD_matrix = function(...) list(ld_matrices = list(ld_mat)),
+    raiss = function(...) list(result_filter = ss, LD_mat = ld_mat),
+    susie_rss_pipeline = function(sumstats, LD_mat = NULL, X_mat = NULL, ...) {
+      susie_X_arg <<- X_mat
+      fake_result
+    },
+  )
+
+  result <- rss_analysis_pipeline(
+    sumstat_path = "/fake/sumstats.tsv",
+    column_file_path = "/fake/columns.yml",
+    LD_data = list(LD_matrix = list(X1, X2), ref_panel = ss),
+    qc_method = "slalom",
+    finemapping_method = "susie_rss"
+  )
+
+  # Mixture path => list of subset matrices passed to susie_rss_pipeline as X_mat
+  expect_true(is.list(susie_X_arg))
+  expect_length(susie_X_arg, 2)
+  expect_true(all(sapply(susie_X_arg, is.matrix)))
+  expect_true(any(grepl("susie_rss", names(result))))
+})

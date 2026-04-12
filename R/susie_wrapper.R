@@ -106,7 +106,12 @@ adjust_susie_weights <- function(twas_weights_results, keep_variants, run_allele
   adjusted_xqtl_alpha <- lbf_to_alpha(lbf_matrix_subset)
   adjusted_xqtl_coef <- colSums(adjusted_xqtl_alpha * mu_subset) / x_column_scal_factors_subset
   # allele_qc now outputs canonical variant_ids (with chr prefix) -- no need to add chr
-  return(list(adjusted_susie_weights = adjusted_xqtl_coef, remained_variants_ids = weights_matrix_qced$target_data_qced$variant_id))
+  remained_variants_ids <- if (run_allele_qc) {
+    weights_matrix_qced$target_data_qced$variant_id
+  } else {
+    intersected_variants
+  }
+  return(list(adjusted_susie_weights = adjusted_xqtl_coef, remained_variants_ids = remained_variants_ids))
 }
 
 
