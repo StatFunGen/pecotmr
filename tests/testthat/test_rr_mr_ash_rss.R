@@ -53,25 +53,25 @@ test_that("mr_ash_rss_weights forwards arguments to susieR::mr.ash.rss", {
   expect_equal(result, seq_len(p) * 0.01)
 })
 
-# test_that("mr_ash_rss_weights returns a numeric vector of expected length", {
-#   skip_if_not_installed("susieR")
-#   set.seed(2024)
-#   n <- 500
-#   p <- 10
-#   X <- matrix(rbinom(n * p, 2, 0.3), nrow = n)
-#   beta_true <- rep(0, p)
-#   beta_true[c(3, 7)] <- c(0.4, -0.3)
-#   y <- as.numeric(X %*% beta_true) + rnorm(n)
-#   bhat <- as.vector(cor(y, X))
-#   shat <- rep(1 / sqrt(n - 1), p)
-#   R <- cor(X)
-#   stat <- list(b = bhat, seb = shat, n = rep(n, p))
-#   w <- mr_ash_rss_weights(
-#     stat = stat, LD = R, var_y = var(y),
-#     sigma2_e = NULL,
-#     s0 = c(0, 0.01, 0.1, 0.5),
-#     w0 = rep(1 / 4, 4)
-#   )
-#   expect_equal(length(w), p)
-#   expect_true(all(is.finite(w)))
-# })
+test_that("mr_ash_rss_weights returns a numeric vector of expected length", {
+  skip_if_not_installed("susieR")
+  set.seed(2024)
+  n <- 500
+  p <- 10
+  X <- matrix(rbinom(n * p, 2, 0.3), nrow = n)
+  beta_true <- rep(0, p)
+  beta_true[c(3, 7)] <- c(0.4, -0.3)
+  y <- as.numeric(X %*% beta_true) + rnorm(n)
+  bhat <- as.vector(cor(y, X))
+  shat <- rep(1 / sqrt(n - 1), p)
+  R <- cor(X)
+  stat <- list(b = bhat, seb = shat, n = rep(n, p))
+  w <- mr_ash_rss_weights(
+    stat = stat, LD = R, var_y = var(y),
+    sigma2_e = NULL,
+    s0 = c(0, 0.01, 0.1, 0.5),
+    w0 = rep(1 / 4, 4)
+  )
+  expect_equal(length(w), p)
+  expect_true(all(is.finite(w)))
+})
