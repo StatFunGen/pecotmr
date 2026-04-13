@@ -13,19 +13,19 @@ test_that("ncvreg_weights computes weights with SCAD penalty", {
   expect_true(all(is.finite(result)))
 })
 
-# test_that("ncvreg_weights warns and zero-pads when X has zero-variance columns", {
-#   skip_if_not_installed("ncvreg")
-#   set.seed(42)
-#   n <- 50; p <- 10
-#   X <- matrix(rnorm(n * p), nrow = n)
-#   X[, 5] <- 3
-#   y <- X[, 1] * 0.5 + rnorm(n)
-#   expect_warning(result <- ncvreg_weights(X, y, penalty = "SCAD"),
-#                  "ncvreg_weights: dropping 1 zero-variance column")
-#   expect_equal(nrow(result), p)
-#   expect_equal(result[5, 1], 0)
-# })
-#
+test_that("ncvreg_weights warns and zero-pads when X has zero-variance columns", {
+  skip_if_not_installed("ncvreg")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  X[, 5] <- 3
+  y <- X[, 1] * 0.5 + rnorm(n)
+  expect_warning(result <- ncvreg_weights(X, y, penalty = "SCAD"),
+                 "ncvreg_weights: dropping 1 zero-variance column")
+  expect_equal(nrow(result), p)
+  expect_equal(result[5, 1], 0)
+})
+
 # test_that("scad_weights computes weights and dispatches to ncvreg_weights", {
 #   skip_if_not_installed("ncvreg")
 #   set.seed(42)
