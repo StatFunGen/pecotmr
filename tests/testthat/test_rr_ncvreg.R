@@ -26,18 +26,18 @@ test_that("ncvreg_weights warns and zero-pads when X has zero-variance columns",
   expect_equal(result[5, 1], 0)
 })
 
-# test_that("scad_weights computes weights and dispatches to ncvreg_weights", {
-#   skip_if_not_installed("ncvreg")
-#   set.seed(42)
-#   n <- 50; p <- 10
-#   X <- matrix(rnorm(n * p), nrow = n)
-#   y <- X[, 1] * 0.5 + rnorm(n)
-#   result <- scad_weights(X, y)
-#   expect_equal(nrow(result), p)
-#   expect_equal(ncol(result), 1)
-#   expect_true(all(is.finite(result)))
-# })
-#
+test_that("scad_weights computes weights and dispatches to ncvreg_weights", {
+  skip_if_not_installed("ncvreg")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+  result <- scad_weights(X, y)
+  expect_equal(nrow(result), p)
+  expect_equal(ncol(result), 1)
+  expect_true(all(is.finite(result)))
+})
+
 # test_that("mcp_weights computes weights and dispatches to ncvreg_weights", {
 #   skip_if_not_installed("ncvreg")
 #   set.seed(42)
