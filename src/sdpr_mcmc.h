@@ -126,7 +126,7 @@ std::vector<double> cluster_var;
 std::vector<unsigned> suff_stats;
 std::vector<double> sumsq;
 MCMC_state(size_t num_snp, size_t max_cluster, \
-           double a0, double b0, double sz) {
+           double a0, double b0, double sz, unsigned int seed) {
 	a0k = a0; b0k = b0; N = sz;
 	// Changed May 20 2021
 	// Now N (sz) is absorbed into A, B; so set to 1.
@@ -155,8 +155,7 @@ MCMC_state(size_t num_snp, size_t max_cluster, \
 	// Starting from null is standard MCMC practice and lets the sampler
 	// discover causal assignments organically.
 	cls_assgn.assign(num_snp, 0);
-	std::random_device rd;
-	r.seed(rd());
+	r.seed(seed);
 }
 
 void sample_sigma2();
@@ -255,5 +254,6 @@ std::unordered_map<std::string, arma::vec> mcmc(
 	int              thin,
 	unsigned         n_threads,
 	int              opt_llk,
-	bool             verbose
+	bool             verbose,
+	unsigned int     seed
 	);

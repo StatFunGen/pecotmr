@@ -50,3 +50,58 @@ test_that("compute_qtl_enrichment dummy data single thread and multi-threaded ar
   res_multi <- expect_warning(compute_qtl_enrichment(input_data$gwas_fit$pip, input_data$susie_fits, num_gwas=5000, pi_qtl=0.49819, lambda = 1, ImpN = 10, num_threads = 2))
   expect_equal(res_single, res_multi)
 })
+
+# ---- error paths (compute_qtl_enrichment.R lines 86, 87, 91) ----
+test_that("compute_qtl_enrichment errors when pi_gwas is zero", {
+  gwas_pip <- rep(0, 10)
+  names(gwas_pip) <- paste0("snp", 1:10)
+  susie_fits <- list(fit1 = list(pip = setNames(runif(10), paste0("snp", 1:10)),
+                                  alpha = matrix(1, 1, 10),
+                                  prior_variance = 1))
+  expect_error(
+    compute_qtl_enrichment(gwas_pip, susie_fits, pi_qtl = 0.5),
+    "No association signal found in GWAS data"
+  )
+})
+
+test_that("compute_qtl_enrichment errors when pi_qtl is zero", {
+  gwas_pip <- runif(10)
+  names(gwas_pip) <- paste0("snp", 1:10)
+  susie_fits <- list(fit1 = list(pip = setNames(rep(0, 10), paste0("snp", 1:10)),
+                                  alpha = matrix(1, 1, 10),
+                                  prior_variance = 1))
+  expect_error(
+    suppressWarnings(compute_qtl_enrichment(gwas_pip, susie_fits, num_gwas = 1000, pi_qtl = 0)),
+    "No QTL associated"
+  )
+})
+
+test_that("compute_qtl_enrichment errors when gwas_pip has no names", {
+  gwas_pip <- runif(10)  # no names
+  susie_fits <- list(fit1 = list(pip = setNames(runif(10), paste0("snp", 1:10)),
+                                  alpha = matrix(1, 1, 10),
+                                  prior_variance = 1))
+  expect_error(
+    suppressWarnings(compute_qtl_enrichment(gwas_pip, susie_fits, num_gwas = 1000, pi_qtl = 0.5)),
+    "Variant names are missing in gwas_pip"
+  )
+})
+
+# ---- unmatched variants tracking (compute_qtl_enrichment.R line 102) ----
+test_that("compute_qtl_enrichment tracks unmatched QTL variants", {
+  local_mocked_bindings(
+    qtl_enrichment_rcpp = function(...) TRUE
+  )
+  gwas_pip <- runif(10)
+  names(gwas_pip) <- paste0("1:", 1:10, ":A:G")
+  # QTL has some variants not in GWAS
+  qtl_pip <- runif(5)
+  names(qtl_pip) <- c(paste0("1:", 1:3, ":A:G"), "1:999:A:G", "1:998:A:G")
+  susie_fits <- list(fit1 = list(pip = qtl_pip,
+                                  alpha = matrix(runif(5), 1, 5),
+                                  prior_variance = 1))
+  res <- suppressWarnings(
+    compute_qtl_enrichment(gwas_pip, susie_fits, num_gwas = 1000, pi_qtl = 0.5)
+  )
+  expect_true("unused_xqtl_variants" %in% names(res))
+})

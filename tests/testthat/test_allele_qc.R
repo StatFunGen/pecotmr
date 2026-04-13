@@ -357,3 +357,71 @@ test_that("align_variant_names strips build suffix", {
   result <- align_variant_names(source, reference, remove_build_suffix = TRUE)
   expect_length(result$aligned_variants, 1)
 })
+
+# ---- sanitize_names edge cases (allele_qc.R lines 37, 42) ----
+test_that("allele_qc handles data frame with NULL colnames after merge", {
+  # Create a data frame where merge might produce empty names
+  # by giving target_data a column with NA name
+  target <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G")
+  ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G")
+  colnames(target)[1] <- ""
+  colnames(target) <- make.unique(colnames(target), sep = "_")
+  # Restore chrom for the join
+  colnames(target)[1] <- "chrom"
+  result <- allele_qc(target, ref, match_min_prop = 0)
+  expect_equal(nrow(result$target_data_qced), 1)
+})
+
+# ---- target_data with redundant columns (allele_qc.R line 75) ----
+test_that("allele_qc removes redundant columns from target_data before join", {
+  target <- data.frame(
+    chrom = 1, pos = 100, A2 = "A", A1 = "G",
+    variant_id = "1:100:A:G", chromosome = "chr1", position = 100
+  )
+  ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G")
+  result <- allele_qc(target, ref, match_min_prop = 0)
+  expect_equal(nrow(result$target_data_qced), 1)
+  # The redundant columns should have been removed before the join
+  expect_true("variant_id" %in% colnames(result$target_data_qced))
+})
+
+# ---- col_to_flip with nonexistent column (allele_qc.R line 130) ----
+test_that("allele_qc errors when col_to_flip column does not exist", {
+  target <- data.frame(chrom = 1, pos = 100, A2 = "G", A1 = "A")
+  ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G")
+  expect_error(
+    allele_qc(target, ref, col_to_flip = "nonexistent_col", match_min_prop = 0),
+    "not found in target_data"
+  )
+})
+
+# ---- duplicate removal warning (allele_qc.R lines 148-150) ----
+test_that("allele_qc warns and removes duplicate variants", {
+  # Two target rows at the same position will produce duplicates after join
+  target <- data.frame(
+    chrom = c(1, 1), pos = c(100, 100),
+    A2 = c("A", "A"), A1 = c("G", "G"),
+    beta = c(0.5, 0.6)
+  )
+  ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G")
+  expect_warning(
+    result <- allele_qc(target, ref, match_min_prop = 0, remove_dups = TRUE),
+    "duplicate variant"
+  )
+  expect_equal(nrow(result$target_data_qced), 1)
+})
+
+# ---- duplicated variant IDs error (allele_qc.R line 180) ----
+test_that("allele_qc errors on duplicated variant IDs with different values when remove_dups is FALSE", {
+  # Two rows at same position, same alleles, but different beta — when not removing dups
+  target <- data.frame(
+    chrom = c(1, 1), pos = c(100, 100),
+    A2 = c("A", "A"), A1 = c("G", "G"),
+    beta = c(0.5, 0.6)
+  )
+  ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G")
+  expect_error(
+    allele_qc(target, ref, match_min_prop = 0, remove_dups = FALSE),
+    "Duplicated variants"
+  )
+})

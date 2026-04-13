@@ -41,6 +41,7 @@ r45 = {features = ["r45"]}
 "r-rcmdcheck" = "*"
 "r-testthat" = "*"
 "r-tidyverse" = "*"
+"bioconductor-biostrings" = "*"
 "bioconductor-iranges" = "*"
 "bioconductor-qvalue" = "*"
 "bioconductor-s4vectors" = "*"

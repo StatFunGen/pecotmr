@@ -1,4 +1,5 @@
 #include <RcppArmadillo.h>
+#include <random>
 #include <unordered_map>
 #include "sdpr_mcmc.h"
 
@@ -20,7 +21,8 @@ Rcpp::List sdpr_rcpp(
 	int                                 thin = 5,
 	unsigned                            n_threads = 1,
 	int                                 opt_llk = 1,
-	bool                                verbose = true
+	bool                                verbose = true,
+	Rcpp::Nullable<unsigned int>        seed = R_NilValue
 	) {
 	// Convert Rcpp::List to std::vector<arma::mat>
 	std::vector<arma::mat> ref_ld_mat;
@@ -42,12 +44,20 @@ Rcpp::List sdpr_rcpp(
 		arr = std::vector<int>(bhat.size(), 1);
 	}
 
+	// Resolve seed
+	unsigned int seed_val = 0;
+	if (seed.isNotNull()) {
+		seed_val = Rcpp::as<unsigned int>(seed);
+	} else {
+		seed_val = std::random_device{}();
+	}
+
 	// Create mcmc_data object
 	mcmc_data data(bhat, ref_ld_mat, sz, arr);
 
 	// Call the mcmc function
 	std::unordered_map<std::string, arma::vec> results = mcmc(
-		data, n, a, c, M, a0k, b0k, iter, burn, thin, n_threads, opt_llk, verbose
+		data, n, a, c, M, a0k, b0k, iter, burn, thin, n_threads, opt_llk, verbose, seed_val
 		);
 
 	// Convert results to Rcpp::List

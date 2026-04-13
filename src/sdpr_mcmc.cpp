@@ -508,14 +508,15 @@ std::unordered_map<std::string, arma::vec> mcmc(
     int        thin,
     unsigned   n_threads,
     int        opt_llk,
-    bool       verbose
+    bool       verbose,
+    unsigned int seed
     ) {
 
     int n_pst = (iter - burn) / thin;
 
     ldmat_data ldmat_dat;
 
-    MCMC_state state(data.beta_mrg.size(), M, a0k, b0k, sz);
+    MCMC_state state(data.beta_mrg.size(), M, a0k, b0k, sz, seed);
 
     // Deflation correction
     for (size_t i = 0; i < data.beta_mrg.size(); i++) {

@@ -846,9 +846,122 @@ test_that("process_coloc_results filters impure credible sets", {
   }
 })
 
-# ===========================================================================
-# Commented out tests from original file (kept as-is)
-# ===========================================================================
+# ---- extract_ld_for_variants (encoloc.R lines 117-123) ----
+test_that("extract_ld_for_variants loads LD, aligns names, and subsets", {
+  # Mock load_LD_matrix to return a small LD matrix with variant names
+  variants <- c("chr1:10:A:G", "chr1:20:A:G", "chr1:30:A:G")
+  ld_variants <- c("chr1:10:A:G", "chr1:20:A:G", "chr1:30:A:G", "chr1:40:A:G")
+  ld_mat <- diag(4)
+  ld_mat[1, 2] <- ld_mat[2, 1] <- 0.5
+  colnames(ld_mat) <- rownames(ld_mat) <- ld_variants
+
+  local_mocked_bindings(
+    load_LD_matrix = function(meta_file, region) {
+      list(LD_matrix = ld_mat, LD_variants = ld_variants)
+    }
+  )
+
+  result <- extract_ld_for_variants("dummy_meta.txt", "chr1:1-50", variants)
+  expect_equal(nrow(result), 3)
+  expect_equal(ncol(result), 3)
+  expect_equal(colnames(result), variants)
+})
+
+# ---- coloc_wrapper with xqtl_finemapping_obj = NULL (encoloc.R line 282) ----
+test_that("coloc_wrapper passes through xqtl_raw_data when xqtl_finemapping_obj is NULL", {
+  data(coloc_test_data)
+  attach(coloc_test_data)
+  on.exit(detach(coloc_test_data))
+
+  gwas_file <- tempfile(fileext = ".rds")
+  xqtl_file <- tempfile(fileext = ".rds")
+  on.exit(file.remove(gwas_file, xqtl_file), add = TRUE)
+
+  p <- 50
+  variant_names <- paste0("chr1:", 1:p, ":A:G")
+
+  # GWAS file with standard susie structure
+  gwas_data <- list(list(
+    lbf_variable = matrix(rnorm(5 * p), nrow = 5),
+    V = rep(1, 5),
+    variant_names = variant_names
+  ))
+  saveRDS(gwas_data, gwas_file)
+
+  # xQTL file WITHOUT nesting — xqtl_finemapping_obj = NULL means use raw_data directly
+  xqtl_data <- list(list(
+    lbf_variable = matrix(rnorm(3 * p), nrow = 3),
+    V = rep(1, 3),
+    variant_names = variant_names
+  ))
+  saveRDS(xqtl_data, xqtl_file)
+
+  local_mocked_bindings(
+    coloc.bf_bf = function(...) {
+      list(summary = data.frame(PP.H4.abf = 0.9), results = data.frame())
+    },
+    .package = "coloc"
+  )
+
+  result <- coloc_wrapper(
+    xqtl_file, gwas_file,
+    xqtl_finemapping_obj = NULL,
+    xqtl_varname_obj = c("variant_names"),
+    gwas_varname_obj = c("variant_names")
+  )
+  expect_true(is.list(result))
+})
+
+# ---- coloc_wrapper with fsusie fallback (encoloc.R lines 242-243, 288-289) ----
+test_that("coloc_wrapper falls back to fsusie structure when lbf_variable is empty", {
+  gwas_file <- tempfile(fileext = ".rds")
+  xqtl_file <- tempfile(fileext = ".rds")
+  on.exit(file.remove(gwas_file, xqtl_file), add = TRUE)
+
+  p <- 20
+  variant_names <- paste0("chr1:", 1:p, ":A:G")
+
+  # GWAS: readRDS(file)[[1]] = raw_data, raw_data has lbf_variable (empty),
+  # and raw_data[[1]]$fsusie_result$lBF for the fallback path
+  fsusie_inner <- list(fsusie_result = list(lBF = list(rnorm(p), rnorm(p))))
+  gwas_raw <- list(
+    fsusie_inner,
+    lbf_variable = data.frame(),
+    V = numeric(0),
+    variant_names = variant_names
+  )
+  saveRDS(list(gwas_raw), gwas_file)
+
+  # xQTL: readRDS(file)[[1]] = xqtl_raw_data,
+  # xqtl_raw_data[[1]]$fsusie_result$lBF for the fallback path
+  xqtl_raw <- list(
+    list(fsusie_result = list(lBF = list(rnorm(p), rnorm(p)))),
+    susie_fit = list(
+      lbf_variable = data.frame(),
+      V = numeric(0),
+      variant_names = variant_names
+    )
+  )
+  saveRDS(list(xqtl_raw), xqtl_file)
+
+  local_mocked_bindings(
+    coloc.bf_bf = function(...) {
+      list(summary = data.frame(PP.H4.abf = 0.8), results = data.frame())
+    },
+    .package = "coloc"
+  )
+
+  expect_message(
+    result <- coloc_wrapper(
+      xqtl_file, gwas_file,
+      xqtl_finemapping_obj = c("susie_fit"),
+      xqtl_varname_obj = c("susie_fit", "variant_names"),
+      gwas_varname_obj = c("variant_names")
+    ),
+    "fSuSiE"
+  )
+  expect_true(is.list(result))
+})
 
 # test_that("load_and_extract_ld_matrix works with dummy data", {
 #     data(coloc_test_data)

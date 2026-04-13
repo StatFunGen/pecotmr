@@ -27,26 +27,8 @@ allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
                      remove_indels = FALSE, remove_strand_ambiguous = TRUE,
                      flip_strand = FALSE, remove_unmatched = TRUE, ...) {
 	strand_flip <- function(ref) {
-	# Define a mapping for complementary bases
-	base_mapping <- c("A" = "T", "T" = "A", "G" = "C", "C" = "G")
-
-	# Function to complement a single base
-	complement_base <- function(base) {
-	  complement <- base_mapping[base]
-	  return(complement)
+	  as.character(Biostrings::reverseComplement(Biostrings::DNAStringSet(ref)))
 	}
-
-	# Function to reverse and complement a DNA sequence
-	reverse_complement <- function(sequence) {
-	  reversed <- rev(strsplit(sequence, NULL)[[1]])
-	  complemented <- sapply(reversed, complement_base, USE.NAMES = FALSE)
-	  return(paste(complemented, collapse = ""))
-	}
-
-	complemented_sequence <- sapply(ref, reverse_complement, USE.NAMES = FALSE)
-
-	return(complemented_sequence)
-  }
 
   # helper to sanitize column names to avoid NA/empty names that break dplyr verbs
   sanitize_names <- function(df) {
@@ -67,15 +49,7 @@ allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
 
   # check if the pattern is ATCG/DI
   check_ATCG <- function(vec) {
-	pattern <- "^[ATCGDI]+$"
-
-	# Function to check if a single element matches the pattern
-	check_element <- function(element) {
-	  grepl(pattern, element)
-	}
-
-	result <- sapply(vec, check_element, USE.NAMES = FALSE)
-	return(result)
+	grepl("^[ATCGDI]+$", vec)
   }
 
   # transform all inputs to dataframe
@@ -100,7 +74,7 @@ allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
   if (any(columns_to_remove %in% colnames(target_data))) {
 	 target_data <- select(target_data, -any_of(columns_to_remove))
   }
-  match_result <- merge(target_data, ref_variants, by = c("chrom", "pos"), all = FALSE, suffixes = c(".target", ".ref")) %>% as.data.frame()
+  match_result <- inner_join(target_data, ref_variants, by = c("chrom", "pos"), suffix = c(".target", ".ref")) %>% as.data.frame()
 
   # sanitize names after merge as well (merge can introduce empty names in edge cases)
   match_result <- sanitize_names(match_result)
@@ -134,7 +108,7 @@ allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
   }
   # if all strand flip is un-ambigous, then we know ambigous cases are indeed a strand flip
   # not a sign flip, then we infer there is no ambigous in the whole dataset, and keep those ambigous ones
-  if (nrow(match_result %>% filter(strand_flip == TRUE) %>% filter(strand_unambiguous == TRUE)) == 0) {
+  if (!any(match_result$strand_flip & match_result$strand_unambiguous)) {
 	match_result <- match_result %>% mutate(strand_unambiguous = TRUE)
   }
 

@@ -23,6 +23,7 @@ requirements:
     - ${{ stdlib('c') }}
     - ${{ compiler('cxx') }}
   host:
+    - bioconductor-biostrings
     - bioconductor-iranges
     - bioconductor-qvalue
     - bioconductor-s4vectors
@@ -69,6 +70,7 @@ requirements:
     - r-vroom
     - r-xicor
   run:
+    - bioconductor-biostrings
     - bioconductor-iranges
     - bioconductor-qvalue
     - bioconductor-s4vectors

@@ -203,7 +203,7 @@ prs_cs_weights <- function(stat, LD, ...) {
 #' @export
 sdpr <- function(bhat, LD, n, per_variant_sample_size = NULL, array = NULL, a = 0.1, c = 1.0, M = 1000,
                  a0k = 0.5, b0k = 0.5, iter = 1000, burn = 200, thin = 5, n_threads = 1,
-                 opt_llk = 1, verbose = TRUE) {
+                 opt_llk = 1, verbose = TRUE, seed = NULL) {
   # Check if the sum of the rows in LD list is the same as length of bhat
   if (sum(sapply(LD, nrow)) != length(bhat)) {
     stop("The sum of the rows in LD list must be the same as the length of bhat.")
@@ -232,7 +232,7 @@ sdpr <- function(bhat, LD, n, per_variant_sample_size = NULL, array = NULL, a = 
   # Call the sdpr_rcpp function
   result <- sdpr_rcpp(
     bhat, LD, n, per_variant_sample_size, array, a, c, M, a0k, b0k, iter, burn, thin,
-    n_threads, opt_llk, verbose
+    n_threads, opt_llk, verbose, seed
   )
 
   return(result)

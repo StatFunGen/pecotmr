@@ -499,13 +499,14 @@ parse_variant_id <- function(ids) {
   normalized <- gsub("_", ":", ids)
   normalized <- strip_build_suffix(normalized)
 
-  # Split into parts
-  parts <- strsplit(normalized, ":", fixed = TRUE)
-  # Truncate any entries with more than 4 parts to just the first 4
-  parts <- lapply(parts, function(p) p[1:min(length(p), 4)])
-
-  data <- data.frame(do.call(rbind, parts), stringsAsFactors = FALSE)
-  colnames(data) <- c("chrom", "pos", "A2", "A1")
+  # Split into exactly 4 fields using strcapture (vectorized, no list overhead)
+  data <- strcapture(
+    "^([^:]+):([^:]+):([^:]+):([^:]+)",
+    normalized,
+    proto = data.frame(chrom = character(), pos = character(),
+                       A2 = character(), A1 = character(),
+                       stringsAsFactors = FALSE)
+  )
 
   data$chrom <- as.integer(strip_chr_prefix(data$chrom))
   data$pos <- as.integer(data$pos)
