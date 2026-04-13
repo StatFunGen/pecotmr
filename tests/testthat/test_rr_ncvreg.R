@@ -50,13 +50,20 @@ test_that("mcp_weights computes weights and dispatches to ncvreg_weights", {
   expect_true(all(is.finite(result)))
 })
 
-# test_that("scad_weights passes nfolds through to cv.ncvreg", {
-#   skip_if_not_installed("ncvreg")
-#   set.seed(42)
-#   n <- 50; p <- 10
-#   X <- matrix(rnorm(n * p), nrow = n)
-#   y <- X[, 1] * 0.5 + rnorm(n)
-#   # cv.ncvreg requires nfolds >= 2; passing 1 should error from inside ncvreg,
-#   # which proves nfolds reached it.
-#   expect_error(scad_weights(X, y, nfolds = 1))
-# })
+test_that("scad_weights passes nfolds through to cv.ncvreg", {
+  skip_if_not_installed("ncvreg")
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  y <- X[, 1] * 0.5 + rnorm(n)
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    cv.ncvreg = function(X, y, penalty, nfolds = 5, ...) {
+      captured$nfolds <- nfolds
+      stop("STOP_AFTER_CAPTURE")
+    },
+    .package = "ncvreg"
+  )
+  expect_error(scad_weights(X, y, nfolds = 7), "STOP_AFTER_CAPTURE")
+  expect_equal(captured$nfolds, 7)
+})
