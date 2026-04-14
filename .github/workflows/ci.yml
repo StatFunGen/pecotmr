@@ -38,7 +38,6 @@ jobs:
           .github/workflows/create_toml_from_yaml.sh ${GITHUB_WORKSPACE}
           mkdir -p /tmp/pixi
           mv ${GITHUB_WORKSPACE}/pixi.toml /tmp/pixi
-          pixi config set --local run-post-link-scripts insecure
 
       - name: Setup pixi
         uses: prefix-dev/setup-pixi@v0.9.5
@@ -46,7 +45,9 @@ jobs:
           manifest-path: /tmp/pixi/pixi.toml
 
       - name: Run unit tests
-        run: pixi run --environment ${{ matrix.environment }} --manifest-path /tmp/pixi/pixi.toml devtools_test
+        run:
+          pixi config set --local run-post-link-scripts insecure
+          pixi run --environment ${{ matrix.environment }} --manifest-path /tmp/pixi/pixi.toml devtools_test
 
       - name: Check unit test code coverage
         if: matrix.platform == 'linux-64' && matrix.environment == 'r44'
