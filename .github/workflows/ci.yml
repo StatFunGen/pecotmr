@@ -38,7 +38,7 @@ jobs:
           .github/workflows/create_toml_from_yaml.sh ${GITHUB_WORKSPACE}
           mkdir /tmp/pixi/.pixi
           mv ${GITHUB_WORKSPACE}/pixi.toml /tmp/pixi
-          cp .pixi/config.toml /tmp/pixi/.pixi
+          cp .github/environment/config.toml /tmp/pixi/.pixi
 
       - name: Setup pixi
         uses: prefix-dev/setup-pixi@v0.9.5
