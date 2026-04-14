@@ -102,6 +102,34 @@ test_that("prs_cs works without maf (maf = NULL)", {
   expect_equal(length(result$beta_est), p)
 })
 
+# ---- prs_cs verbose output ----
+test_that("prs_cs with verbose = TRUE produces output", {
+  set.seed(42)
+  p <- 10; n <- 100
+  bhat <- rnorm(p, sd = 0.1)
+  R <- diag(p)
+  # n_iter >= 100 triggers the verbose print inside the MCMC loop
+  result <- prs_cs(bhat = bhat, LD = list(blk1 = R), n = n,
+                   maf = rep(0.3, p), n_iter = 110, n_burnin = 10, thin = 2,
+                   verbose = TRUE, seed = 42L)
+  expect_type(result, "list")
+  expect_equal(length(result$beta_est), p)
+  expect_true(all(is.finite(result$beta_est)))
+})
+
+test_that("prs_cs verbose with phi = NULL shows estimated phi", {
+  set.seed(42)
+  p <- 10; n <- 100
+  bhat <- rnorm(p, sd = 0.1)
+  R <- diag(p)
+  result <- prs_cs(bhat = bhat, LD = list(blk1 = R), n = n,
+                   phi = NULL, maf = rep(0.3, p),
+                   n_iter = 110, n_burnin = 10, thin = 2,
+                   verbose = TRUE, seed = 42L)
+  expect_true("phi_est" %in% names(result))
+  expect_true(result$phi_est > 0)
+})
+
 # ---- prs_cs signal recovery ----
 test_that("prs_cs recovers signal direction on simulated genotype data", {
   set.seed(42)

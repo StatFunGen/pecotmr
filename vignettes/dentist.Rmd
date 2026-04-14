@@ -19,8 +19,8 @@ DENTIST (Detecting Errors iN analyses of summary staTISTics) performs quality co
 
 The `pecotmr` package provides a pure R implementation of DENTIST that can be used in two ways:
 
-1. **File-based input** via `dentist_from_files()` — takes PLINK binary files and a summary statistics file, matching the interface of the original DENTIST C++ binary.
-2. **Direct input** via `dentist_single_window()` — takes z-scores and an LD matrix (or genotype matrix) directly, suitable for integration into analysis pipelines.
+1. **Windowed QC** via `dentist()` — takes summary statistics and an LD matrix, runs windowed imputation with configurable window sizes.
+2. **Single-window QC** via `dentist_single_window()` — takes z-scores and an LD matrix (or genotype matrix) directly, suitable for integration into analysis pipelines.
 
 We also demonstrate how the alternative **SLALOM + RAISS** pipeline achieves comparable QC and imputation on the same data, giving users two complementary approaches for summary statistics quality control.
 
@@ -54,9 +54,7 @@ cat(sprintf("Full dataset: %d variants\n", nrow(sumstat)))
 head(sumstat, 3)
 ```
 
-## Case 1: File-Based DENTIST with Windowed QC
-
-The `dentist_from_files()` function mirrors the interface of the DENTIST C++ binary. It takes a summary statistics file path and a PLINK bfile prefix, then internally handles allele alignment, LD computation, and windowed imputation.
+## Case 1: Windowed DENTIST QC
 
 DENTIST supports two windowing strategies:
 
@@ -65,56 +63,107 @@ DENTIST supports two windowing strategies:
 
 Here we demonstrate count mode on the full dataset, which avoids the "<2000 variants" warning that distance mode produces on regions with sparse variant density.
 
-### Run with `min_dim = 2000`
+First, we load the genotype data and align alleles between the summary statistics and the reference panel.
 
-```{r write-full-sumstat}
-# Write the full summary statistics to a temp file for dentist_from_files
-full_sumstat <- tempfile(fileext = ".txt")
-readr::write_tsv(sumstat, full_sumstat)
+```{r prepare-data}
+# Load reference panel variant info
+bim <- as.data.frame(vroom(paste0(bfile, ".bim"),
+                           col_names = c("chrom", "variant_id", "gd", "pos", "A1", "A2"),
+                           show_col_types = FALSE))
+
+# Load genotype matrix
+X <- load_genotype_region(bfile)
+nSample <- nrow(X)
+cat(sprintf("Reference panel: %d samples, %d variants\n", nSample, ncol(X)))
+
+# Allele QC: align summary stats to reference panel
+target_df <- data.frame(
+  chrom = as.integer(bim$chrom[match(sumstat$SNP, bim$variant_id)]),
+  pos   = as.integer(bim$pos[match(sumstat$SNP, bim$variant_id)]),
+  A1    = sumstat$A1,
+  A2    = sumstat$A2,
+  z     = sumstat$z,
+  SNP   = sumstat$SNP,
+  stringsAsFactors = FALSE
+)
+target_df <- target_df[!is.na(target_df$chrom), ]
+
+ref_df <- data.frame(
+  chrom = as.integer(bim$chrom[match(target_df$SNP, bim$variant_id)]),
+  pos   = as.integer(bim$pos[match(target_df$SNP, bim$variant_id)]),
+  A1    = bim$A1[match(target_df$SNP, bim$variant_id)],
+  A2    = bim$A2[match(target_df$SNP, bim$variant_id)],
+  stringsAsFactors = FALSE
+)
+
+qc_result <- allele_qc(
+  target_data = target_df, ref_variants = ref_df,
+  col_to_flip = "z", match_min_prop = 0,
+  remove_dups = TRUE, remove_strand_ambiguous = TRUE
+)
+aligned <- qc_result$target_data_qced
+aligned <- aligned[order(aligned$pos), ]
+rownames(aligned) <- NULL
+cat(sprintf("After allele QC: %d variants\n", nrow(aligned)))
+
+# Subset genotypes to aligned variants and compute LD
+X_sub <- X[, aligned$SNP[aligned$SNP %in% colnames(X)], drop = FALSE]
+col_vars <- apply(X_sub, 2, function(x) length(unique(x[!is.na(x)])) > 1)
+X_sub <- X_sub[, col_vars, drop = FALSE]
+aligned <- aligned[aligned$SNP %in% colnames(X_sub), ]
+
+LD_mat <- compute_LD(X_sub, method = "sample")
+cat(sprintf("LD matrix: %d x %d\n", nrow(LD_mat), ncol(LD_mat)))
+
+# Prepare input for dentist()
+dentist_input <- data.frame(
+  SNP = aligned$SNP, pos = aligned$pos, z = aligned$z,
+  stringsAsFactors = FALSE
+)
 ```
+
+### Run with `min_dim = 2000`
 
 ```{r run-dentist-2000}
 # Run DENTIST with count-based windowing: 2000 variants per window
-result_2000 <- dentist_from_files(
-  gwas_summary = full_sumstat,
-  bfile        = bfile,
-  nSample      = NULL,
+result_2000 <- dentist(
+  sum_stat     = dentist_input,
+  R            = LD_mat,
+  nSample      = nSample,
   window_mode  = "count",
   min_dim      = 2000,
   nIter        = 8,
   pValueThreshold = 5.0369e-08,
   propSVD      = 0.4,
-  duprThreshold = 0.99,
-  verbose      = FALSE
+  duprThreshold = 0.99
 )
 
 cat(sprintf("min_dim = 2000: %d variants, %d outliers (%.1f%%)\n",
-            nrow(result_2000$result),
-            sum(result_2000$result$outlier),
-            100 * mean(result_2000$result$outlier)))
+            nrow(result_2000),
+            sum(result_2000$outlier),
+            100 * mean(result_2000$outlier)))
 ```
 
 ### Run with `min_dim = 6000`
 
 ```{r run-dentist-6000}
 # Run DENTIST with larger windows: 6000 variants per window
-result_6000 <- dentist_from_files(
-  gwas_summary = full_sumstat,
-  bfile        = bfile,
-  nSample      = NULL,
+result_6000 <- dentist(
+  sum_stat     = dentist_input,
+  R            = LD_mat,
+  nSample      = nSample,
   window_mode  = "count",
   min_dim      = 6000,
   nIter        = 8,
   pValueThreshold = 5.0369e-08,
   propSVD      = 0.4,
-  duprThreshold = 0.99,
-  verbose      = FALSE
+  duprThreshold = 0.99
 )
 
 cat(sprintf("min_dim = 6000: %d variants, %d outliers (%.1f%%)\n",
-            nrow(result_6000$result),
-            sum(result_6000$result$outlier),
-            100 * mean(result_6000$result$outlier)))
+            nrow(result_6000),
+            sum(result_6000$outlier),
+            100 * mean(result_6000$outlier)))
 ```
 
 ### Sensitivity to Window Size
@@ -122,21 +171,15 @@ cat(sprintf("min_dim = 6000: %d variants, %d outliers (%.1f%%)\n",
 ```{r compare-window-sizes}
 cat("=== DENTIST Outlier Detection by Window Size ===\n\n")
 cat(sprintf("  min_dim = 2000:  %d outliers (%.1f%%)\n",
-            sum(result_2000$result$outlier), 100 * mean(result_2000$result$outlier)))
+            sum(result_2000$outlier), 100 * mean(result_2000$outlier)))
 cat(sprintf("  min_dim = 6000:  %d outliers (%.1f%%)\n",
-            sum(result_6000$result$outlier), 100 * mean(result_6000$result$outlier)))
+            sum(result_6000$outlier), 100 * mean(result_6000$outlier)))
 cat("  min_dim = 20000: 97 outliers (0.6%) [not run here; ~4 min compute time]\n")
 ```
 
 The number of detected outliers varies substantially with window size: smaller windows detect more outliers (8.2% at 2000) while larger windows detect far fewer (1.5% at 6000, 0.6% at 20000). We do not run `min_dim = 20000` in this vignette because it takes approximately 4 minutes to compute on this dataset.
 
 This sensitivity to window size means that DENTIST outlier counts should be interpreted with caution. The windowed approach inherently couples QC results to the choice of window parameters, which is a known limitation. For a more robust QC approach, consider using **SLALOM** (demonstrated below), which does not depend on window size parameters.
-
-The `dentist_from_files()` return value is a list with three components:
-
-- `result` — data frame with outlier detection results (one row per input variant)
-- `sum_stat` — aligned summary statistics after allele QC
-- `LD_mat` — the LD correlation matrix used for imputation
 
 ## Case 2: Single-Window DENTIST vs SLALOM + RAISS
 
@@ -146,76 +189,45 @@ For pipeline integration, `dentist_single_window()` accepts z-scores and an LD m
 
 **SLALOM** computes the DENTIST-S statistic relative to the lead variant to flag outliers among variants in high LD. **RAISS** then imputes z-scores for a given set of variants using LD-based regression from the remaining variants.
 
-### Prepare aligned data
+### Prepare subset data
 
 We subset to a smaller region for the single-window comparison, since `dentist_single_window()` operates on a single LD matrix in memory.
 
 ```{r subset-data}
-# Load reference panel variant info
-bim <- as.data.frame(vroom(paste0(bfile, ".bim"), col_names = c("chrom", "variant_id", "gd", "pos", "A1", "A2"),
-                           show_col_types = FALSE))
-
 # Select ~500 variants from a contiguous region for fast execution
 region_start <- bim$pos[1]
 region_end   <- region_start + 2e6
 region_snps  <- bim$variant_id[bim$pos >= region_start & bim$pos <= region_end]
+common_ids   <- intersect(region_snps, aligned$SNP)
 cat(sprintf("Selected %d variants in %.1f Mb region (pos %s - %s)\n",
-            length(region_snps),
+            length(common_ids),
             (region_end - region_start) / 1e6,
             format(region_start, big.mark = ","),
             format(region_end, big.mark = ",")))
 ```
 
-```{r file-based-subset}
-# Subset summary statistics to the selected region and run DENTIST
-sumstat_sub <- sumstat[sumstat$SNP %in% region_snps, ]
-sub_sumstat <- tempfile(fileext = ".txt")
-readr::write_tsv(sumstat_sub, sub_sumstat)
-cat(sprintf("Subset: %d variants in summary stats\n", nrow(sumstat_sub)))
-
-# Run DENTIST on the subset (count mode, small windows for toy data)
-result_files <- dentist_from_files(
-  gwas_summary = sub_sumstat,
-  bfile        = bfile,
-  nSample      = NULL,
-  window_mode  = "count",
-  min_dim      = 500,
-  nIter        = 8,
-  pValueThreshold = 5.0369e-08,
-  propSVD      = 0.4,
-  duprThreshold = 0.99,
-  verbose      = FALSE
-)
-```
-
 ```{r prepare-aligned}
-# Use the aligned data from dentist_from_files for consistency
-# This ensures allele QC has already been applied
-aligned_sumstat <- result_files$sum_stat
-LD_mat <- result_files$LD_mat
-n_samples <- nrow(vroom(paste0(bfile, ".fam"), col_names = FALSE, show_col_types = FALSE))
+# Subset to the region and sort by position
+aligned_sub <- aligned[aligned$SNP %in% common_ids, ]
+aligned_sub <- aligned_sub[order(aligned_sub$pos), ]
 
-z_scores <- aligned_sumstat$z
-n_snps <- length(z_scores)
-cat(sprintf("Aligned data: %d variants, %d reference samples\n", n_snps, n_samples))
+# Subset LD matrix to the region
+LD_sub <- LD_mat[aligned_sub$SNP, aligned_sub$SNP, drop = FALSE]
 
 # Build a position-sorted variant info data frame for RAISS
-bim_full <- as.data.frame(vroom(paste0(bfile, ".bim"), col_names = c("chrom", "variant_id", "gd", "pos", "A1", "A2"),
-                              show_col_types = FALSE))
-bim_aligned <- bim_full[match(aligned_sumstat$SNP, bim_full$variant_id), ]
-
-# Sort everything by position (required by RAISS)
-pos_order <- order(bim_aligned$pos)
+bim_aligned <- bim[match(aligned_sub$SNP, bim$variant_id), ]
 ref_panel_df <- data.frame(
-  chrom      = bim_aligned$chrom[pos_order],
-  pos        = bim_aligned$pos[pos_order],
-  variant_id = bim_aligned$variant_id[pos_order],
-  A1         = bim_aligned$A1[pos_order],
-  A2         = bim_aligned$A2[pos_order],
+  chrom      = bim_aligned$chrom,
+  pos        = bim_aligned$pos,
+  variant_id = bim_aligned$variant_id,
+  A1         = bim_aligned$A1,
+  A2         = bim_aligned$A2,
   stringsAsFactors = FALSE
 )
-z_sorted <- z_scores[pos_order]
-LD_sorted <- LD_mat[pos_order, pos_order]
+z_sorted <- aligned_sub$z
+LD_sorted <- LD_sub
+n_snps <- length(z_sorted)
+cat(sprintf("Aligned data: %d variants, %d reference samples\n", n_snps, nSample))
 ```
 
 ### Run DENTIST (single-window)
@@ -224,7 +236,7 @@ LD_sorted <- LD_mat[pos_order, pos_order]
 dentist_sw <- dentist_single_window(
   zScore   = z_sorted,
   R        = LD_sorted,
-  nSample  = n_samples,
+  nSample  = nSample,
   pValueThreshold = 5.0369e-08,
   propSVD  = 0.4,
   nIter    = 8,
@@ -426,7 +438,7 @@ if (sum(dentist_outlier_flags) > 1) {
 
 The `pecotmr` package provides two complementary approaches for GWAS summary statistics QC:
 
-**DENTIST-based** (`dentist_from_files` / `dentist_single_window`):
+**DENTIST-based** (`dentist` / `dentist_single_window`):
 
 - Iterative SVD-truncated imputation across the full LD structure
 - Flags outliers via chi-squared test on `(z_obs - z_imp)^2 / (1 - r^2)`

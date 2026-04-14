@@ -879,6 +879,51 @@ test_that("compute_LD sample vs population differ but are close", {
   expect_true(max(abs(R_sample - R_pop)) < 0.1)
 })
 
+test_that("compute_LD gcta method produces valid correlation matrix", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 500, replace = TRUE), nrow = 100)
+  colnames(X) <- paste0("rs", 1:5)
+
+  R <- compute_LD(X, method = "gcta")
+  expect_equal(dim(R), c(5, 5))
+  expect_equal(unname(diag(R)), rep(1, 5), tolerance = 1e-10)
+  expect_true(isSymmetric(R, tol = 1e-10))
+  expect_true(all(abs(R) <= 1 + 1e-10))
+})
+
+test_that("compute_LD gcta method handles missing data", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 500, replace = TRUE), nrow = 100)
+  colnames(X) <- paste0("rs", 1:5)
+  X[sample(length(X), 50)] <- NA
+
+  R <- compute_LD(X, method = "gcta")
+  expect_equal(dim(R), c(5, 5))
+  expect_true(all(is.finite(R)))
+})
+
+test_that("compute_LD gcta agrees with sample method on complete data", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 500, replace = TRUE), nrow = 100)
+  colnames(X) <- paste0("rs", 1:5)
+
+  R_sample <- compute_LD(X, method = "sample")
+  R_gcta <- compute_LD(X, method = "gcta")
+
+  # With no missing data, GCTA and sample should be close (differ by N vs N-1 denom)
+  expect_true(max(abs(R_sample - R_gcta)) < 0.05)
+})
+
+test_that("compute_LD gcta preserves column names", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 300, replace = TRUE), nrow = 100)
+  colnames(X) <- c("snp_a", "snp_b", "snp_c")
+
+  R <- compute_LD(X, method = "gcta")
+  expect_equal(colnames(R), c("snp_a", "snp_b", "snp_c"))
+  expect_equal(rownames(R), c("snp_a", "snp_b", "snp_c"))
+})
+
 # =============================================================================
 # filter_X_with_Y
 # =============================================================================

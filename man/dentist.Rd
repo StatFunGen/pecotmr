@@ -19,7 +19,8 @@ dentist(
   duprThreshold = 0.99,
   ncpus = 1,
   correct_chen_et_al_bug = TRUE,
-  min_dim = 2000
+  min_dim = 2000,
+  ld_method = "sample"
 )
 }
 \arguments{
@@ -62,6 +63,11 @@ in distance mode (base pairs). Default is 2000000 (2 Mb). Only used when
 
 \item{min_dim}{In distance mode: minimum number of SNPs per block (default 2000).
 In count mode: the number of variants per window (i.e., the window size).}
+
+\item{ld_method}{Character string specifying the LD computation method when
+\code{X} is provided. Passed to \code{\link{compute_LD}}. One of
+\code{"sample"} (default), \code{"population"}, or \code{"gcta"}.
+Ignored when \code{R} is provided directly.}
 }
 \value{
 A data frame containing the imputed result and detected outliers.

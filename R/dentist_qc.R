@@ -16,7 +16,8 @@
 #'   \code{nSample} (integer or NULL).
 #'
 #' @noRd
-resolve_LD_input <- function(R = NULL, X = NULL, nSample = NULL, need_nSample = FALSE) {
+resolve_LD_input <- function(R = NULL, X = NULL, nSample = NULL, need_nSample = FALSE,
+                             ld_method = "sample") {
   if (is.null(R) && is.null(X)) {
     stop("Either R (LD matrix) or X (genotype matrix) must be provided.")
   }
@@ -26,7 +27,7 @@ resolve_LD_input <- function(R = NULL, X = NULL, nSample = NULL, need_nSample = 
   if (!is.null(X)) {
     if (!is.matrix(X)) X <- as.matrix(X)
     if (is.null(nSample)) nSample <- nrow(X)
-    R <- compute_LD(X, method = "sample")
+    R <- compute_LD(X, method = ld_method)
   }
   if (need_nSample && is.null(nSample)) {
     stop("nSample is required when providing an LD matrix R.")
@@ -67,6 +68,10 @@ resolve_LD_input <- function(R = NULL, X = NULL, nSample = NULL, need_nSample = 
 #' @param correct_chen_et_al_bug Logical indicating whether to correct the Chen et al. bug. Default is TRUE.
 #' @param min_dim In distance mode: minimum number of SNPs per block (default 2000).
 #'   In count mode: the number of variants per window (i.e., the window size).
+#' @param ld_method Character string specifying the LD computation method when
+#'   \code{X} is provided. Passed to \code{\link{compute_LD}}. One of
+#'   \code{"sample"} (default), \code{"population"}, or \code{"gcta"}.
+#'   Ignored when \code{R} is provided directly.
 #'
 #' @return A data frame containing the imputed result and detected outliers.
 #'
@@ -111,9 +116,11 @@ dentist <- function(sum_stat, R = NULL, X = NULL, nSample = NULL,
                     window_size = 2000000, window_mode = c("distance", "count"),
                     pValueThreshold = 5.0369e-8, propSVD = 0.4, gcControl = FALSE,
                     nIter = 10, gPvalueThreshold = 0.05, duprThreshold = 0.99, ncpus = 1,
-                    correct_chen_et_al_bug = TRUE, min_dim = 2000) {
+                    correct_chen_et_al_bug = TRUE, min_dim = 2000,
+                    ld_method = "sample") {
   # Resolve LD matrix and sample size from R or X
-  resolved <- resolve_LD_input(R = R, X = X, nSample = nSample, need_nSample = TRUE)
+  resolved <- resolve_LD_input(R = R, X = X, nSample = nSample, need_nSample = TRUE,
+                               ld_method = ld_method)
   LD_mat <- resolved$R
   nSample <- resolved$nSample
 
@@ -191,6 +198,10 @@ dentist <- function(sum_stat, R = NULL, X = NULL, nSample = NULL,
 #' @param duprThreshold Duplicate r-squared threshold. Default is 0.99.
 #' @param ncpus Number of CPU cores. Default is 1.
 #' @param correct_chen_et_al_bug Correct the original DENTIST operator! bug. Default is TRUE.
+#' @param ld_method Character string specifying the LD computation method when
+#'   \code{X} is provided. Passed to \code{\link{compute_LD}}. One of
+#'   \code{"sample"} (default), \code{"population"}, or \code{"gcta"}.
+#'   Ignored when \code{R} is provided directly.
 #'
 #' @return Data frame with columns: original_z, imputed_z, iter_to_correct, rsq,
 #'   is_duplicate, outlier_stat, outlier.
@@ -201,9 +212,11 @@ dentist <- function(sum_stat, R = NULL, X = NULL, nSample = NULL,
 dentist_single_window <- function(zScore, R = NULL, X = NULL, nSample = NULL,
                                   pValueThreshold = 5e-8, propSVD = 0.4, gcControl = FALSE,
                                   nIter = 10, gPvalueThreshold = 0.05, duprThreshold = 0.99,
-                                  ncpus = 1, correct_chen_et_al_bug = TRUE) {
+                                  ncpus = 1, correct_chen_et_al_bug = TRUE,
+                                  ld_method = "sample") {
   # Resolve LD matrix and sample size from R or X
-  LD_mat <- resolve_LD_input(R = R, X = X, nSample = nSample, need_nSample = TRUE)
+  LD_mat <- resolve_LD_input(R = R, X = X, nSample = nSample, need_nSample = TRUE,
+                             ld_method = ld_method)
   nSample <- LD_mat$nSample
   LD_mat <- LD_mat$R
 
@@ -740,355 +753,7 @@ merge_windows <- function(dentist_result_by_window, window_divided_res) {
   return(merged_results)
 }
 
-#' Read DENTIST-format Summary Statistics
-#'
-#' Reads a GWAS summary statistics file in the format expected by the DENTIST C++ binary
-#' and returns it as an R data frame with z-scores computed.
-#'
-#' @param gwas_summary Path to summary statistics file (tab/space-separated,
-#'   8 columns: SNP A1 A2 freq beta se p N). May be gzipped.
-#' @return A data frame with columns: SNP, A1, A2, freq, beta, se, p, N, z.
-#'
-#' @export
-read_dentist_sumstat <- function(gwas_summary) {
-  if (!file.exists(gwas_summary)) {
-    stop(paste0("Summary statistics file not found: ", gwas_summary))
-  }
-  # Handle gzipped files
-  if (grepl("\\.gz$", gwas_summary)) {
-    con <- gzfile(gwas_summary, "rt")
-    on.exit(close(con), add = TRUE)
-    ss <- read.table(con, header = TRUE, stringsAsFactors = FALSE)
-  } else {
-    ss <- read.table(gwas_summary, header = TRUE, stringsAsFactors = FALSE)
-  }
-  expected <- c("SNP", "A1", "A2", "freq", "beta", "se", "p", "N")
-  # Case-insensitive matching
-  matched <- sapply(expected, function(e) {
-    idx <- which(tolower(colnames(ss)) == tolower(e))
-    if (length(idx) == 0) return(NA_integer_)
-    idx[1]
-  })
-  if (any(is.na(matched))) {
-    missing <- expected[is.na(matched)]
-    stop(paste0("Missing columns in summary file: ", paste(missing, collapse = ", "),
-                ". Expected: ", paste(expected, collapse = ", ")))
-  }
-  ss <- ss[, matched, drop = FALSE]
-  colnames(ss) <- expected
-  ss$z <- ss$beta / ss$se
-  return(ss)
-}
-
-#' Run R DENTIST Implementation on DENTIST-format Input Files
-#'
-#' Takes the same file-based inputs as the DENTIST C++ binary (summary stats file +
-#' PLINK bfile) and runs the R \code{\link{dentist}} implementation. This allows
-#' direct comparison between the R implementation and the C++ binary on identical data.
-#'
-#' This function reuses existing package utilities for file I/O, allele QC, and LD
-#' computation: \code{\link{read_bim}} for PLINK bim files, \code{\link{allele_qc}}
-#' for allele matching/flipping, \code{\link{load_genotype_region}} for genotype loading,
-#' and \code{compute_LD} (from misc.R) for LD matrix computation with mean imputation
-#' and Rfast::cora when available.
-#'
-#' @param gwas_summary Path to the GWAS summary statistics file (DENTIST format:
-#'   tab-separated, 8 columns with header: SNP A1 A2 freq beta se p N). May be gzipped.
-#' @param bfile PLINK binary file prefix (expects .bed/.bim/.fam files).
-#' @param nSample Number of samples in the LD reference panel. If NULL (recommended),
-#'   uses the reference panel size from the genotype matrix. This controls the SVD
-#'   truncation rank K = min(idx_size, nSample) * propSVD. Note: this is the reference
-#'   panel size, NOT the GWAS sample size. Default is NULL.
-#' @param window_size Window size in base pairs for distance mode. Default is 2000000.
-#' @param window_mode Character string specifying the windowing strategy:
-#'   \code{"distance"} (default) or \code{"count"}. See \code{\link{dentist}}.
-#' @param pValueThreshold P-value threshold for outlier detection. Default is 5.0369e-8.
-#' @param propSVD SVD truncation proportion. Default is 0.4.
-#' @param gcControl Logical; apply genomic control. Default is FALSE.
-#' @param nIter Number of QC iterations. Default is 10.
-#' @param gPvalueThreshold GWAS p-value threshold for grouping. Default is 0.05.
-#' @param duprThreshold LD r-squared threshold for duplicate detection. Default is 0.99.
-#' @param ncpus Number of CPU threads. Default is 1.
-#' @param correct_chen_et_al_bug Logical; correct known bugs in original DENTIST. Default is TRUE.
-#' @param min_dim In distance mode: minimum number of SNPs per block (default 2000).
-#'   In count mode: the number of variants per window.
-#' @param use_gcta_LD Logical; use GCTA-style LD computation and raw B-allele
-#'   counts to match the DENTIST binary's exact floating-point behavior. Requires
-#'   snpStats. Default is FALSE; set to TRUE when comparing against the binary.
-#' @param verbose Logical; print progress messages. Default is TRUE.
-#'
-#' @return A list with components:
-#'   \describe{
-#'     \item{result}{Data frame from \code{\link{dentist}} with outlier detection results.}
-#'     \item{sum_stat}{Aligned summary statistics data frame (with SNP names and positions).}
-#'     \item{LD_mat}{The LD correlation matrix used.}
-#'   }
-#'
-#' @details
-#' This function performs the full pipeline:
-#' \enumerate{
-#'   \item Reads the summary statistics file via \code{\link{read_dentist_sumstat}}.
-#'   \item Reads the PLINK bim file via \code{read_bim} and matches SNPs by ID
-#'         to obtain chromosome and position information.
-#'   \item Aligns alleles using \code{\link{allele_qc}}, which handles strand flips,
-#'         allele swaps, and z-score sign flipping.
-#'   \item Loads genotype data via \code{\link{load_genotype_region}} and computes
-#'         the LD correlation matrix via \code{compute_LD} (mean imputation + Rfast::cora).
-#'   \item Calls \code{\link{dentist}} with the aligned data.
-#' }
-#'
-#' The result includes the aligned summary statistics and LD matrix so they can be
-#' reused for further analysis or debugging.
-#'
-#' @seealso \code{\link{dentist}}, \code{\link{read_dentist_sumstat}},
-#'   \code{\link{allele_qc}}, \code{\link{parse_dentist_output}}
-#'
-#' @export
-dentist_from_files <- function(gwas_summary,
-                                bfile,
-                                nSample = NULL,
-                                window_size = 2000000,
-                                window_mode = c("distance", "count"),
-                                pValueThreshold = 5.0369e-8,
-                                propSVD = 0.4,
-                                gcControl = FALSE,
-                                nIter = 10,
-                                gPvalueThreshold = 0.05,
-                                duprThreshold = 0.99,
-                                ncpus = 1,
-                                correct_chen_et_al_bug = TRUE,
-                                min_dim = 2000,
-                                use_gcta_LD = FALSE,
-                                verbose = TRUE) {
-  # 1. Read summary stats
-  if (verbose) message("Reading summary statistics...")
-  ss <- read_dentist_sumstat(gwas_summary)
-  if (verbose) message(sprintf("  %d variants read", nrow(ss)))
-
-  # 2. Read bim using existing utility (read_bim expects .bed path)
-  if (verbose) message("Reading reference panel bim...")
-  bim <- read_bim(paste0(bfile, ".bed"))
-  # bim columns: chrom, id, gpos, pos, a1, a0
-  if (verbose) message(sprintf("  %d variants in reference panel", nrow(bim)))
-
-  # 3. Match summary stats to bim by SNP ID to get chrom/pos
-  common_ids <- intersect(ss$SNP, bim$id)
-  if (length(common_ids) == 0) {
-    stop("No common SNPs between summary statistics and reference panel.")
-  }
-  if (verbose) message(sprintf("  %d SNPs in common", length(common_ids)))
-
-  ss_match <- ss[match(common_ids, ss$SNP), , drop = FALSE]
-  bim_match <- bim[match(common_ids, bim$id), , drop = FALSE]
-
-  # 4. Allele QC using existing allele_qc() utility
-  # Build target df: sumstats alleles + chrom/pos from bim + extra columns to carry through
-  target_df <- data.frame(
-    chrom = as.integer(bim_match$chrom),
-    pos = as.integer(bim_match$pos),
-    A1 = ss_match$A1,
-    A2 = ss_match$A2,
-    z = ss_match$z,
-    SNP = ss_match$SNP,
-    N = ss_match$N,
-    bim_id = bim_match$id,
-    stringsAsFactors = FALSE
-  )
-
-  # Build ref df: bim alleles (a1 = effect allele, a0 = other allele)
-  ref_df <- data.frame(
-    chrom = as.integer(bim_match$chrom),
-    pos = as.integer(bim_match$pos),
-    A1 = bim_match$a1,
-    A2 = bim_match$a0,
-    stringsAsFactors = FALSE
-  )
-
-  if (verbose) message("Aligning alleles via allele_qc()...")
-  qc_result <- allele_qc(
-    target_data = target_df,
-    ref_variants = ref_df,
-    col_to_flip = "z",
-    match_min_prop = 0,
-    remove_dups = TRUE,
-    remove_strand_ambiguous = TRUE
-  )
-  aligned <- qc_result$target_data_qced
-
-  if (nrow(aligned) == 0) {
-    stop("No variants remaining after allele QC.")
-  }
-
-  # Sort by position
-  aligned <- aligned[order(aligned$pos), , drop = FALSE]
-  rownames(aligned) <- NULL
-
-  if (verbose) {
-    message(sprintf("  %d variants after allele QC (from %d common)",
-                    nrow(aligned), length(common_ids)))
-  }
-
-  # 6. Load genotypes and compute LD
-  if (verbose) message("Loading genotype data...")
-  if (use_gcta_LD) {
-    # Load raw B-allele counts (as in the .bed file) to match the DENTIST
-    # binary's exact floating-point behavior via GCTA-style LD computation.
-    if (!requireNamespace("snpStats", quietly = TRUE)) {
-      stop("snpStats is required for use_gcta_LD = TRUE")
-    }
-    geno <- snpStats::read.plink(bfile)
-    X <- as(geno$genotypes, "numeric")  # B-allele counts, matching DENTIST software
-  } else {
-    X <- load_genotype_region(bfile, region = NULL)
-  }
-
-  # Determine sample size -- use reference panel size (nrow of genotype matrix),
-  # NOT the GWAS sample size from the summary stats N column.
-  # The original DENTIST software uses ref.N (number of samples in the .fam file)
-  # for the K = min(idx.size(), nSample) * propSVD truncation.
-  if (is.null(nSample)) {
-    nSample <- as.integer(nrow(X))
-    if (verbose) message(sprintf("Using reference panel sample size: N = %d", nSample))
-  }
-
-  # Subset to aligned SNPs using bim IDs
-  snp_ids_for_geno <- aligned$bim_id
-  missing_snps <- snp_ids_for_geno[!snp_ids_for_geno %in% colnames(X)]
-  if (length(missing_snps) > 0) {
-    warning(sprintf("%d aligned SNPs not found in genotype matrix; dropping them.",
-                    length(missing_snps)))
-    aligned <- aligned[snp_ids_for_geno %in% colnames(X), , drop = FALSE]
-    snp_ids_for_geno <- aligned$bim_id
-  }
-  X_sub <- X[, snp_ids_for_geno, drop = FALSE]
-
-  # Remove zero-variance columns (monomorphic SNPs) to avoid NaN correlations
-  # Check variance BEFORE handling missing (using non-missing values)
-  col_vars <- apply(X_sub, 2, function(x) {
-    vals <- x[!is.na(x)]
-    length(unique(vals)) > 1
-  })
-  if (any(!col_vars)) {
-    n_mono <- sum(!col_vars)
-    if (verbose) message(sprintf("  Removing %d monomorphic SNPs", n_mono))
-    X_sub <- X_sub[, col_vars, drop = FALSE]
-    aligned <- aligned[col_vars, , drop = FALSE]
-    snp_ids_for_geno <- aligned$bim_id
-  }
-
-  n_missing <- sum(is.na(X_sub))
-  if (verbose) message(sprintf("Computing LD for %d SNPs from %d samples (%d missing genotypes)...",
-                                ncol(X_sub), nrow(X_sub), n_missing))
-
-  # Compute LD matrix.
-  if (use_gcta_LD) {
-    # Use C++ GCTA-style computation matching the DENTIST software bfileOperations.cpp
-    # exactly: per-pair missing data handling, sequential sample accumulation,
-    # same floating-point operation order.
-    N_kept <- (nrow(X_sub) %/% 4L) * 4L
-    if (N_kept < nrow(X_sub)) {
-      X_sub <- X_sub[seq_len(N_kept), , drop = FALSE]
-    }
-    LD_mat <- compute_LD_gcta_cpp(X_sub, ncpus = 1L)
-    colnames(LD_mat) <- rownames(LD_mat) <- colnames(X_sub)
-  } else {
-    LD_mat <- compute_LD(X_sub, method = "sample")
-  }
-
-  # 7. Prepare sum_stat for dentist() -- needs pos and z columns
-  dentist_input <- data.frame(
-    SNP = aligned$SNP,
-    pos = aligned$pos,
-    z = aligned$z,
-    stringsAsFactors = FALSE
-  )
-
-  # 8. Run dentist
-  if (verbose) message("Running R DENTIST implementation...")
-  dentist_result <- dentist(
-    sum_stat = dentist_input,
-    R = LD_mat,
-    nSample = nSample,
-    window_size = window_size,
-    window_mode = window_mode,
-    pValueThreshold = pValueThreshold,
-    propSVD = propSVD,
-    gcControl = gcControl,
-    nIter = nIter,
-    gPvalueThreshold = gPvalueThreshold,
-    duprThreshold = duprThreshold,
-    ncpus = ncpus,
-    correct_chen_et_al_bug = correct_chen_et_al_bug,
-    min_dim = min_dim
-  )
-
-  # Attach SNP names to result using index_global when available (windowed mode),
-  # or directly when the result has the same number of rows as the input.
-  if ("index_global" %in% colnames(dentist_result)) {
-    dentist_result$SNP <- dentist_input$SNP[dentist_result$index_global]
-  } else if (nrow(dentist_result) == nrow(dentist_input)) {
-    dentist_result$SNP <- dentist_input$SNP
-  } else {
-    warning("Cannot assign SNP names: row count mismatch and no index_global column")
-  }
-
-  if (verbose) {
-    n_outlier <- sum(dentist_result$outlier, na.rm = TRUE)
-    message(sprintf("Done: %d variants tested, %d outliers detected (%.1f%%)",
-                    nrow(dentist_result), n_outlier,
-                    100 * n_outlier / nrow(dentist_result)))
-  }
-
-  return(list(
-    result = dentist_result,
-    sum_stat = aligned,
-    LD_mat = LD_mat
-  ))
-}
-
-#' Parse DENTIST Binary Output Files
-#'
-#' Reads the output files produced by the DENTIST C++ software and returns
-#' a structured data frame. Useful for comparing DENTIST output against
-#' \code{\link{dentist_from_files}} results.
-#'
-#' @param output_prefix The output prefix used when running the DENTIST software
-#'   (the \code{--out} argument).
-#' @param pValueThreshold P-value threshold used to determine outlier status.
-#'   Default is 5e-8.
-#' @return A data frame with columns: SNP, test_stat, neg_log10_p, is_duplicate, outlier.
-#'
-#' @details
-#' The DENTIST software (non-debug mode) writes a \code{.DENTIST.full.txt} file with
-#' 4 tab-separated columns (no header): rsID, stat/lambda, -log10(pvalue), isDuplicate.
-#' It also writes a \code{.DENTIST.short.txt} file listing outlier SNP IDs (one per line).
-#'
-#' @export
-parse_dentist_output <- function(output_prefix, pValueThreshold = 5e-8) {
-  full_file <- paste0(output_prefix, ".DENTIST.full.txt")
-  short_file <- paste0(output_prefix, ".DENTIST.short.txt")
-
-  if (!file.exists(full_file)) {
-    stop(paste0("DENTIST full output file not found: ", full_file))
-  }
-
-  full_df <- read.table(full_file, header = FALSE, sep = "\t",
-                         stringsAsFactors = FALSE,
-                         col.names = c("SNP", "test_stat", "neg_log10_p", "is_duplicate"))
-  full_df$is_duplicate <- as.logical(full_df$is_duplicate)
-  full_df$outlier <- full_df$neg_log10_p > -log10(pValueThreshold)
-
-  # Cross-check with short file if it exists
-  if (file.exists(short_file) && file.info(short_file)$size > 0) {
-    short_snps <- trimws(readLines(short_file))
-    short_snps <- short_snps[nchar(short_snps) > 0]
-    n_outlier_full <- sum(full_df$outlier)
-    n_outlier_short <- length(short_snps)
-    if (n_outlier_full != n_outlier_short) {
-      warning(paste0("Outlier count mismatch: full file has ", n_outlier_full,
-                      " outliers, short file has ", n_outlier_short, " outliers."))
-    }
-  }
-
-  return(full_df)
-}
+### File-I/O functions (dentist_from_files, read_dentist_sumstat, parse_dentist_output)
+### have been removed. Use the standard pipeline: load genotypes via
+### load_genotype_region(), compute LD via compute_LD(), then call dentist()
+### or ld_mismatch_qc() directly.

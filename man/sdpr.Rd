@@ -20,7 +20,8 @@ sdpr(
   thin = 5,
   n_threads = 1,
   opt_llk = 1,
-  verbose = TRUE
+  verbose = TRUE,
+  seed = NULL
 )
 }
 \arguments{

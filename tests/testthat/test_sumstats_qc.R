@@ -390,3 +390,33 @@ test_that("summary_stats_qc returns LD_mat matching filtered sumstats dimensions
   expect_equal(nrow(result$LD_mat), nrow(result$sumstats))
   expect_equal(ncol(result$LD_mat), nrow(result$sumstats))
 })
+
+# ===========================================================================
+# ld_mismatch_qc
+# ===========================================================================
+
+test_that("ld_mismatch_qc with dentist method returns data frame with outlier column", {
+  set.seed(42)
+  p <- 20
+  R <- diag(p)
+  z <- rnorm(p)
+  result <- ld_mismatch_qc(z, R = R, nSample = 1000, method = "dentist")
+  expect_true(is.data.frame(result) || is.list(result))
+  expect_true("outlier" %in% names(result))
+})
+
+test_that("ld_mismatch_qc with slalom method returns data frame with outlier column", {
+  set.seed(42)
+  p <- 20
+  R <- diag(p)
+  z <- rnorm(p)
+  result <- ld_mismatch_qc(z, R = R, method = "slalom")
+  expect_true(is.data.frame(result) || is.list(result))
+  expect_true("outlier" %in% names(result))
+})
+
+test_that("ld_mismatch_qc method argument is validated", {
+  z <- rnorm(5)
+  R <- diag(5)
+  expect_error(ld_mismatch_qc(z, R = R, method = "invalid"))
+})

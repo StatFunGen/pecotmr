@@ -12,7 +12,8 @@ slalom(
   abf_prior_variance = 0.04,
   nlog10p_dentist_s_threshold = 4,
   r2_threshold = 0.6,
-  lead_variant_choice = "pvalue"
+  lead_variant_choice = "pvalue",
+  ld_method = "sample"
 )
 }
 \arguments{
@@ -37,6 +38,11 @@ for prediction. Default is 0.6.}
 
 \item{lead_variant_choice}{Character, method to choose the lead variant, either
 "pvalue" or "abf", with default "pvalue".}
+
+\item{ld_method}{Character string specifying the LD computation method when
+\code{X} is provided. Passed to \code{\link{compute_LD}}. One of
+\code{"sample"} (default), \code{"population"}, or \code{"gcta"}.
+Ignored when \code{R} is provided directly.}
 }
 \value{
 A list containing the annotated LD matrix with ABF results, credible sets,

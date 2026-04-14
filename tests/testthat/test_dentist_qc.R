@@ -147,6 +147,35 @@ test_that("dentist_single_window with X matrix input returns exactly N rows", {
     expect_equal(nrow(res), n_snps)
 })
 
+test_that("dentist_single_window with correct_chen_et_al_bug = FALSE returns N rows", {
+    data <- generate_dentist_single_window_data()
+    expect_warning(res <- dentist_single_window(
+      data$z_scores, R = data$LD_mat, nSample = data$nSample,
+      correct_chen_et_al_bug = FALSE
+    ))
+    expect_equal(nrow(res), 100)
+    expect_true(all(c("original_z", "imputed_z", "outlier") %in% colnames(res)))
+})
+
+test_that("dentist_single_window with gcControl = TRUE returns N rows", {
+    data <- generate_dentist_single_window_data()
+    expect_warning(res <- dentist_single_window(
+      data$z_scores, R = data$LD_mat, nSample = data$nSample,
+      gcControl = TRUE
+    ))
+    expect_equal(nrow(res), 100)
+    expect_true(all(c("original_z", "imputed_z", "outlier") %in% colnames(res)))
+})
+
+test_that("dentist with gcControl = TRUE returns N rows", {
+    data <- generate_dentist_data(n_snps = 100)
+    expect_warning(res <- dentist(
+      data$sumstat, R = data$LD_mat, nSample = data$nSample,
+      gcControl = TRUE
+    ))
+    expect_equal(nrow(res), 100)
+})
+
 test_that("dentist_single_window dedup path with message for duplicates", {
   set.seed(42)
   n_snps <- 80
@@ -562,113 +591,6 @@ test_that("resolve_LD_input uses explicit nSample when X provided", {
   expect_equal(result$nSample, 999)
 })
 
-# ===========================================================================
-# read_dentist_sumstat (file-based)
-# ===========================================================================
-
-test_that("read_dentist_sumstat errors when file does not exist", {
-  expect_error(
-    read_dentist_sumstat("/nonexistent/file.txt"),
-    "not found"
-  )
-})
-
-test_that("read_dentist_sumstat reads a valid file and computes z = beta/se", {
-  tmp <- tempfile(fileext = ".txt")
-  on.exit(unlink(tmp), add = TRUE)
-  df <- data.frame(
-    SNP = paste0("rs", 1:3),
-    A1 = c("A", "C", "G"),
-    A2 = c("T", "G", "A"),
-    freq = c(0.1, 0.2, 0.3),
-    beta = c(0.5, -0.2, 0.8),
-    se = c(0.1, 0.05, 0.2),
-    p = c(1e-5, 0.01, 1e-4),
-    N = c(1000, 1000, 1000)
-  )
-  write.table(df, tmp, row.names = FALSE, quote = FALSE, sep = "\t")
-  result <- read_dentist_sumstat(tmp)
-  expect_equal(nrow(result), 3)
-  expect_equal(result$z, df$beta / df$se)
-  expect_true(all(c("SNP", "A1", "A2", "freq", "beta", "se", "p", "N", "z") %in% colnames(result)))
-})
-
-test_that("read_dentist_sumstat reads gzipped files", {
-  tmp <- tempfile(fileext = ".txt.gz")
-  on.exit(unlink(tmp), add = TRUE)
-  df <- data.frame(
-    SNP = paste0("rs", 1:3),
-    A1 = c("A", "C", "G"),
-    A2 = c("T", "G", "A"),
-    freq = c(0.1, 0.2, 0.3),
-    beta = c(0.5, -0.2, 0.8),
-    se = c(0.1, 0.05, 0.2),
-    p = c(1e-5, 0.01, 1e-4),
-    N = c(1000, 1000, 1000)
-  )
-  con <- gzfile(tmp, "wt")
-  write.table(df, con, row.names = FALSE, quote = FALSE, sep = "\t")
-  close(con)
-  result <- read_dentist_sumstat(tmp)
-  expect_equal(nrow(result), 3)
-  expect_equal(result$z, df$beta / df$se)
-})
-
-test_that("read_dentist_sumstat errors on missing columns", {
-  tmp <- tempfile(fileext = ".txt")
-  on.exit(unlink(tmp), add = TRUE)
-  df <- data.frame(SNP = "rs1", A1 = "A", A2 = "T")
-  write.table(df, tmp, row.names = FALSE, quote = FALSE, sep = "\t")
-  expect_error(read_dentist_sumstat(tmp), "Missing columns")
-})
-
-# ===========================================================================
-# parse_dentist_output (file-based)
-# ===========================================================================
-
-test_that("parse_dentist_output errors when file is missing", {
-  expect_error(
-    parse_dentist_output("/nonexistent/prefix"),
-    "not found"
-  )
-})
-
-test_that("parse_dentist_output reads valid full file", {
-  prefix <- tempfile()
-  full_file <- paste0(prefix, ".DENTIST.full.txt")
-  on.exit(unlink(c(full_file)), add = TRUE)
-  df <- data.frame(
-    V1 = c("rs1", "rs2", "rs3"),
-    V2 = c(1.5, 25.0, 0.3),
-    V3 = c(3.0, 10.0, 0.1),
-    V4 = c(0, 1, 0)
-  )
-  write.table(df, full_file, row.names = FALSE, col.names = FALSE, sep = "\t", quote = FALSE)
-  result <- parse_dentist_output(prefix, pValueThreshold = 5e-8)
-  expect_equal(nrow(result), 3)
-  expect_true("outlier" %in% colnames(result))
-  expect_true("is_duplicate" %in% colnames(result))
-  expect_true(is.logical(result$is_duplicate))
-})
-
-test_that("parse_dentist_output cross-checks short file and warns on mismatch", {
-  prefix <- tempfile()
-  full_file <- paste0(prefix, ".DENTIST.full.txt")
-  short_file <- paste0(prefix, ".DENTIST.short.txt")
-  on.exit(unlink(c(full_file, short_file)), add = TRUE)
-  df <- data.frame(
-    V1 = c("rs1", "rs2"),
-    V2 = c(1.5, 25.0),
-    V3 = c(3.0, 10.0),
-    V4 = c(0, 0)
-  )
-  write.table(df, full_file, row.names = FALSE, col.names = FALSE, sep = "\t", quote = FALSE)
-  writeLines(c("rs2", "rs3"), short_file)
-  expect_warning(
-    parse_dentist_output(prefix, pValueThreshold = 5e-8),
-    "mismatch"
-  )
-})
 
 # ===========================================================================
 # build_segment_result (internal)
@@ -717,49 +639,3 @@ test_that("sliding_window_loop errors on infinite loop", {
   )
 })
 
-# ===========================================================================
-# dentist_from_files (mocked I/O paths)
-# ===========================================================================
-
-test_that("dentist_from_files stops when no common SNPs", {
-  local_mocked_bindings(
-    read_dentist_sumstat = function(gwas_summary) {
-      data.frame(SNP = c("rs1", "rs2"), A1 = c("A", "C"), A2 = c("T", "G"),
-                 freq = c(0.1, 0.2), beta = c(0.5, -0.2), se = c(0.1, 0.05),
-                 p = c(1e-5, 0.01), N = c(1000, 1000), z = c(5, -4),
-                 stringsAsFactors = FALSE)
-    },
-    read_bim = function(path) {
-      data.frame(chrom = c(1, 1), id = c("rs99", "rs100"),
-                 gpos = c(0, 0), pos = c(100, 200),
-                 a1 = c("A", "C"), a0 = c("T", "G"),
-                 stringsAsFactors = FALSE)
-    }
-  )
-  expect_error(
-    dentist_from_files("fake_gwas.txt", "fake_bfile"),
-    "No common SNPs"
-  )
-})
-
-test_that("dentist_from_files stops when no variants remain after allele QC", {
-  local_mocked_bindings(
-    read_dentist_sumstat = function(gwas_summary) {
-      data.frame(SNP = "rs1", A1 = "A", A2 = "T",
-                 freq = 0.1, beta = 0.5, se = 0.1,
-                 p = 1e-5, N = 1000, z = 5,
-                 stringsAsFactors = FALSE)
-    },
-    read_bim = function(path) {
-      data.frame(chrom = 1, id = "rs1", gpos = 0, pos = 100,
-                 a1 = "A", a0 = "T", stringsAsFactors = FALSE)
-    },
-    allele_qc = function(...) {
-      list(target_data_qced = data.frame())
-    }
-  )
-  expect_error(
-    dentist_from_files("fake_gwas.txt", "fake_bfile"),
-    "No variants remaining"
-  )
-})

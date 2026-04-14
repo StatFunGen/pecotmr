@@ -1,35 +1,5 @@
-#' @importFrom vroom vroom
-#' @export
-ctwas_bimfile_loader <- function(bim_file_path) {
-  snp_info <- as.data.frame(vroom(bim_file_path, col_names = FALSE))
-  if (ncol(snp_info) == 9) {
-    colnames(snp_info) <- c("chrom", "id", "GD", "pos", "A1", "A2", "variance", "allele_freq", "n_nomiss")
-  } else {
-    colnames(snp_info) <- c("chrom", "id", "GD", "pos", "A1", "A2")
-  }
-  snp_info$id <- normalize_variant_id(snp_info$id)
-  return(snp_info)
-}
-
-#' Utility function to format meta data dataframe for cTWAS analyses
-#' @importFrom vroom vroom
-#' @export
-get_ctwas_meta_data <- function(ld_meta_data_file, subset_region_ids = NULL) {
-  LD_info <- as.data.frame(vroom(ld_meta_data_file))
-  colnames(LD_info)[1] <- "chrom"
-  LD_info$region_id <- paste(as.integer(strip_chr_prefix(LD_info$chrom)), LD_info$start, LD_info$end, sep = "_")
-  LD_info$LD_file <- paste0(dirname(ld_meta_data_file), "/", gsub(",.*$", "", LD_info$path))
-  LD_info$SNP_file <- paste0(LD_info$LD_file, ".bim")
-  LD_info <- LD_info[, c("region_id", "LD_file", "SNP_file")]
-  region_info <- LD_info[, "region_id", drop = FALSE]
-  region_info$chrom <- as.integer(gsub("\\_.*$", "", region_info$region_id))
-  region_info$start <- as.integer(gsub("\\_.*$", "", sub("^.*?\\_", "", region_info$region_id)))
-  region_info$stop <- as.integer(sub("^.*?\\_", "", sub("^.*?\\_", "", region_info$region_id)))
-  region_info$region_id <- paste0(region_info$chrom, "_", region_info$start, "_", region_info$stop)
-  region_info <- region_info[, c("chrom", "start", "stop", "region_id")]
-  if (!is.null(subset_region_ids)) region_info <- region_info[region_info$region_id %in% subset_region_ids, ]
-  return(list(LD_info = LD_info, region_info = region_info))
-}
+### File-I/O functions (ctwas_bimfile_loader, get_ctwas_meta_data) have been
+### removed. Use ld_loader() and read_bim() from the standard I/O path instead.
 
 #' Function to select variants for ctwas weights input
 #' @param region_data A list of list containing weights list and snp_info list data for multiple genes/events within a single LD block region.

@@ -114,6 +114,57 @@ test_that("sdpr accepts multiple LD blocks with realistic genotype data", {
   expect_true(all(is.finite(result$beta_est)))
 })
 
+# ---- sdpr verbose output ----
+test_that("sdpr with verbose = TRUE produces output", {
+  set.seed(42)
+  p <- 10
+  bhat <- rnorm(p, sd = 0.1)
+  R <- diag(p)
+  # iter >= 100 triggers the verbose print inside the MCMC loop
+  result <- sdpr(bhat = bhat, LD = list(blk1 = R), n = 100,
+                 iter = 110, burn = 10, thin = 2, verbose = TRUE, seed = 42L)
+  expect_type(result, "list")
+  expect_equal(length(result$beta_est), p)
+  expect_true(all(is.finite(result$beta_est)))
+})
+
+# ---- sdpr opt_llk = 2 (multi-array) ----
+test_that("sdpr runs with opt_llk = 2 and mixed array values", {
+  set.seed(42)
+  p <- 10
+  bhat <- rnorm(p, sd = 0.1)
+  R <- diag(p)
+  # Mixed array: some variants from array 1, some from array 2
+  arr <- c(rep(1, 5), rep(2, 5))
+  result <- sdpr(bhat = bhat, LD = list(blk1 = R), n = 100,
+                 per_variant_sample_size = rep(100, p),
+                 array = arr, opt_llk = 2,
+                 iter = 50, burn = 10, thin = 2, verbose = FALSE, seed = 42L)
+  expect_type(result, "list")
+  expect_equal(length(result$beta_est), p)
+  expect_true(all(is.finite(result$beta_est)))
+})
+
+test_that("sdpr opt_llk = 2 with realistic genotype data", {
+  set.seed(2024)
+  n <- 500
+  p <- 20
+  X <- matrix(rbinom(n * p, 2, 0.3), nrow = n)
+  beta_true <- rep(0, p)
+  beta_true[c(3, 15)] <- c(0.4, 0.2)
+  y <- X %*% beta_true + rnorm(n)
+  bhat <- as.vector(cor(y, X))
+  R <- cor(X)
+  # Mixed arrays with varying sample sizes
+  arr <- rep(c(1, 2), length.out = p)
+  per_n <- rep(c(400, 500), length.out = p)
+  result <- sdpr(bhat = bhat, LD = list(blk1 = R), n = n,
+                 per_variant_sample_size = per_n, array = arr, opt_llk = 2,
+                 iter = 100, burn = 30, thin = 5, verbose = FALSE, seed = 42L)
+  expect_equal(length(result$beta_est), p)
+  expect_true(all(is.finite(result$beta_est)))
+})
+
 # ---- sdpr_weights (wrapper) ----
 test_that("sdpr_weights calls sdpr and returns beta_est", {
   set.seed(42)

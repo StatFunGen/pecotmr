@@ -210,7 +210,7 @@ raiss_single_matrix_from_X <- function(ref_panel, known_zscores, X, lamb = 0.01,
   ))
 }
 
-#' Robust and accurate imputation from summary statistics
+#' Impute Summary Statistics Using LD (RAISS)
 #'
 #' This function is a part of the statistical library for SNP imputation from:
 #' https://gitlab.pasteur.fr/statistical-genetics/raiss/-/blob/master/raiss/stat_models.py

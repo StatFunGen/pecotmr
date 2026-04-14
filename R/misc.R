@@ -188,7 +188,7 @@ safe_svd <- function(mat, tol = 1e-8, max_rank = NULL) {
 #' Compute LD (Linkage Disequilibrium) Correlation Matrix from Genotypes
 #'
 #' Computes a pairwise Pearson correlation matrix from a genotype matrix.
-#' Supports two variance conventions:
+#' Supports three variance conventions:
 #' \describe{
 #'   \item{\code{"sample"}}{Standard sample variance with N-1 denominator (default).
 #'     Uses mean imputation for missing genotypes, then \code{Rfast::cora} (if available)
@@ -198,16 +198,22 @@ safe_svd <- function(mat, tol = 1e-8, max_rank = NULL) {
 #'     from non-missing values; missing entries are set to zero after centering so they
 #'     do not contribute to cross-products. Cross-products are normalized by the total
 #'     sample count N, not by pairwise non-missing counts.}
+#'   \item{\code{"gcta"}}{GCTA per-pair missing data correction. Like \code{"population"}
+#'     but applies a correction term for each SNP pair based on the number of jointly
+#'     non-missing samples. Matches the exact formula from the DENTIST C++ binary's
+#'     \code{calcLDFromBfile_gcta}. Use this when missingness varies substantially
+#'     across SNPs and accuracy of individual LD entries matters.}
 #' }
 #'
 #' @param X Numeric genotype matrix (samples x SNPs). May contain \code{NA}
 #'   for missing genotypes.
-#' @param method Character, either \code{"sample"} (default, N-1 denominator) or
-#'   \code{"population"} (N denominator, GCTA-style). Partial matching is supported.
-#' @param trim_samples Logical. If \code{TRUE} and \code{method = "population"},
-#'   drops trailing samples so that \code{nrow(X)} is a multiple of 4, matching
-#'   PLINK .bed file chunk processing. Ignored when \code{method = "sample"}.
-#'   Default is \code{FALSE}.
+#' @param method Character, one of \code{"sample"} (default, N-1 denominator),
+#'   \code{"population"} (N denominator, GCTA-style), or \code{"gcta"} (per-pair
+#'   missing data correction). Partial matching is supported.
+#' @param trim_samples Logical. If \code{TRUE} and \code{method} is
+#'   \code{"population"} or \code{"gcta"}, drops trailing samples so that
+#'   \code{nrow(X)} is a multiple of 4, matching PLINK .bed file chunk processing.
+#'   Ignored when \code{method = "sample"}. Default is \code{FALSE}.
 #' @param shrinkage Numeric in (0, 1]. Shrink the LD matrix toward the identity:
 #'   \code{R_s = (1 - shrinkage) * R + shrinkage * I}. Useful for regularizing
 #'   LD for summary-statistics-based methods such as lassosum (Mak et al 2017).
@@ -243,10 +249,13 @@ safe_svd <- function(mat, tol = 1e-8, max_rank = NULL) {
 #'
 #' # GCTA-style population variance
 #' R2 <- compute_LD(X, method = "population")
+#'
+#' # GCTA-style with per-pair missing data correction
+#' R3 <- compute_LD(X, method = "gcta")
 #' }
 #'
 #' @export
-compute_LD <- function(X, method = c("sample", "population"),
+compute_LD <- function(X, method = c("sample", "population", "gcta"),
                        trim_samples = FALSE, shrinkage = 0) {
   if (is.null(X)) {
     stop("X must be provided.")
@@ -269,7 +278,7 @@ compute_LD <- function(X, method = c("sample", "population"),
     } else {
       R <- cor(X_imp)
     }
-  } else {
+  } else if (method == "population") {
     # ---- Population variance (N denominator, GCTA-style) ----
     # Optionally trim trailing samples to a multiple of 4 (matches .bed processing)
     if (trim_samples) {
@@ -304,6 +313,58 @@ compute_LD <- function(X, method = c("sample", "population"),
     # Correlation
     sd_vec <- sqrt(col_vars)
     R <- cov_mat / outer(sd_vec, sd_vec)
+  } else {
+    # ---- GCTA per-pair missing data correction ----
+    # Matches the DENTIST binary's calcLDFromBfile_gcta formula exactly.
+    # Unlike "population" which divides by total N, this method tracks
+    # per-pair missing counts and applies a correction term.
+    if (trim_samples) {
+      N_kept <- (nrow(X) %/% 4L) * 4L
+      if (N_kept < nrow(X)) X <- X[seq_len(N_kept), , drop = FALSE]
+    }
+    N <- nrow(X)
+    p <- ncol(X)
+
+    # Marginal statistics from non-missing values
+    col_means <- colMeans(X, na.rm = TRUE)
+    col_mean_sq <- colMeans(X^2, na.rm = TRUE)
+    col_vars <- col_mean_sq - col_means^2
+
+    # Build indicator matrix for non-missing values
+    not_na <- !is.na(X)
+    # Replace NA with 0 for cross-product computation
+    X_zero <- X
+    X_zero[is.na(X_zero)] <- 0
+
+    # Per-pair non-missing counts: not_na'not_na gives count of jointly observed
+    pair_counts <- crossprod(not_na * 1.0)
+    n_missing <- N - pair_counts
+
+    # Per-pair sums: sum of X_i over samples where both i and j are observed
+    # For the correction term we need E_i2 = sum_i_pair / N (pair-specific mean)
+    # X_zero' %*% not_na gives, for each (i,j), sum of X_i where j is not missing
+    pair_sums <- crossprod(X_zero, not_na * 1.0)
+
+    # Cross-product sum: sum(X_i * X_j) over jointly non-missing samples
+    sum_XY <- crossprod(X_zero)
+
+    # GCTA correction formula:
+    # E_i2[i,j] = pair_sums[i,j] / N  (mean of SNP i restricted to non-missing-j samples, divided by N)
+    # cov = sum_XY/N + E[i]*E[j]*(N-m)/N - E[i]*E_j2 - E_i2*E[j]
+    E_i2 <- pair_sums / N  # p x p: row i, col j = sum of X_i where j non-missing, / N
+    E_j2 <- t(E_i2)        # transposed version
+
+    cov_mat <- sum_XY / N +
+      outer(col_means, col_means) * (pair_counts / N) -
+      col_means * E_j2 -
+      E_i2 * rep(col_means, each = p)
+
+    # Correlation
+    sd_vec <- sqrt(col_vars)
+    sd_outer <- outer(sd_vec, sd_vec)
+    R <- matrix(0.001, p, p)
+    valid <- sd_outer > 0
+    R[valid] <- cov_mat[valid] / sd_outer[valid]
   }
 
   # Ensure clean output

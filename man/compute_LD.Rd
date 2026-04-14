@@ -6,7 +6,7 @@
 \usage{
 compute_LD(
   X,
-  method = c("sample", "population"),
+  method = c("sample", "population", "gcta"),
   trim_samples = FALSE,
   shrinkage = 0
 )
@@ -15,13 +15,14 @@ compute_LD(
 \item{X}{Numeric genotype matrix (samples x SNPs). May contain \code{NA}
 for missing genotypes.}
 
-\item{method}{Character, either \code{"sample"} (default, N-1 denominator) or
-\code{"population"} (N denominator, GCTA-style). Partial matching is supported.}
+\item{method}{Character, one of \code{"sample"} (default, N-1 denominator),
+\code{"population"} (N denominator, GCTA-style), or \code{"gcta"} (per-pair
+missing data correction). Partial matching is supported.}
 
-\item{trim_samples}{Logical. If \code{TRUE} and \code{method = "population"},
-drops trailing samples so that \code{nrow(X)} is a multiple of 4, matching
-PLINK .bed file chunk processing. Ignored when \code{method = "sample"}.
-Default is \code{FALSE}.}
+\item{trim_samples}{Logical. If \code{TRUE} and \code{method} is
+\code{"population"} or \code{"gcta"}, drops trailing samples so that
+\code{nrow(X)} is a multiple of 4, matching PLINK .bed file chunk processing.
+Ignored when \code{method = "sample"}. Default is \code{FALSE}.}
 
 \item{shrinkage}{Numeric in (0, 1]. Shrink the LD matrix toward the identity:
 \code{R_s = (1 - shrinkage) * R + shrinkage * I}. Useful for regularizing
@@ -34,7 +35,7 @@ A symmetric correlation matrix with row and column names taken from
 }
 \description{
 Computes a pairwise Pearson correlation matrix from a genotype matrix.
-Supports two variance conventions:
+Supports three variance conventions:
 \describe{
   \item{\code{"sample"}}{Standard sample variance with N-1 denominator (default).
     Uses mean imputation for missing genotypes, then \code{Rfast::cora} (if available)
@@ -44,6 +45,11 @@ Supports two variance conventions:
     from non-missing values; missing entries are set to zero after centering so they
     do not contribute to cross-products. Cross-products are normalized by the total
     sample count N, not by pairwise non-missing counts.}
+  \item{\code{"gcta"}}{GCTA per-pair missing data correction. Like \code{"population"}
+    but applies a correction term for each SNP pair based on the number of jointly
+    non-missing samples. Matches the exact formula from the DENTIST C++ binary's
+    \code{calcLDFromBfile_gcta}. Use this when missingness varies substantially
+    across SNPs and accuracy of individual LD entries matters.}
 }
 }
 \details{
@@ -73,6 +79,9 @@ R1 <- compute_LD(X)
 
 # GCTA-style population variance
 R2 <- compute_LD(X, method = "population")
+
+# GCTA-style with per-pair missing data correction
+R3 <- compute_LD(X, method = "gcta")
 }
 
 }

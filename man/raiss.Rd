@@ -2,7 +2,7 @@
 % Please edit documentation in R/raiss.R
 \name{raiss}
 \alias{raiss}
-\title{Robust and accurate imputation from summary statistics}
+\title{Impute Summary Statistics Using LD (RAISS)}
 \usage{
 raiss(
   ref_panel,

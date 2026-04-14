@@ -11,18 +11,6 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
-// compute_LD_gcta_cpp
-arma::mat compute_LD_gcta_cpp(const Rcpp::NumericMatrix& X, int ncpus);
-RcppExport SEXP _pecotmr_compute_LD_gcta_cpp(SEXP XSEXP, SEXP ncpusSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< const Rcpp::NumericMatrix& >::type X(XSEXP);
-    Rcpp::traits::input_parameter< int >::type ncpus(ncpusSEXP);
-    rcpp_result_gen = Rcpp::wrap(compute_LD_gcta_cpp(X, ncpus));
-    return rcpp_result_gen;
-END_RCPP
-}
 // dentist_iterative_impute
 List dentist_iterative_impute(const arma::mat& LD_mat, size_t nSample, const arma::vec& zScore, double pValueThreshold, float propSVD, bool gcControl, int nIter, double gPvalueThreshold, int ncpus, bool correct_chen_et_al_bug, bool verbose);
 RcppExport SEXP _pecotmr_dentist_iterative_impute(SEXP LD_matSEXP, SEXP nSampleSEXP, SEXP zScoreSEXP, SEXP pValueThresholdSEXP, SEXP propSVDSEXP, SEXP gcControlSEXP, SEXP nIterSEXP, SEXP gPvalueThresholdSEXP, SEXP ncpusSEXP, SEXP correct_chen_et_al_bugSEXP, SEXP verboseSEXP) {
@@ -127,7 +115,6 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_pecotmr_compute_LD_gcta_cpp", (DL_FUNC) &_pecotmr_compute_LD_gcta_cpp, 2},
     {"_pecotmr_dentist_iterative_impute", (DL_FUNC) &_pecotmr_dentist_iterative_impute, 11},
     {"_pecotmr_lassosum_rss_rcpp", (DL_FUNC) &_pecotmr_lassosum_rss_rcpp, 5},
     {"_pecotmr_prs_cs_rcpp", (DL_FUNC) &_pecotmr_prs_cs_rcpp, 12},

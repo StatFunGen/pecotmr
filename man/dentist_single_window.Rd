@@ -16,7 +16,8 @@ dentist_single_window(
   gPvalueThreshold = 0.05,
   duprThreshold = 0.99,
   ncpus = 1,
-  correct_chen_et_al_bug = TRUE
+  correct_chen_et_al_bug = TRUE,
+  ld_method = "sample"
 )
 }
 \arguments{
@@ -46,6 +47,11 @@ inferred from \code{X} when \code{X} is provided.}
 \item{ncpus}{Number of CPU cores. Default is 1.}
 
 \item{correct_chen_et_al_bug}{Correct the original DENTIST operator! bug. Default is TRUE.}
+
+\item{ld_method}{Character string specifying the LD computation method when
+\code{X} is provided. Passed to \code{\link{compute_LD}}. One of
+\code{"sample"} (default), \code{"population"}, or \code{"gcta"}.
+Ignored when \code{R} is provided directly.}
 }
 \value{
 Data frame with columns: original_z, imputed_z, iter_to_correct, rsq,

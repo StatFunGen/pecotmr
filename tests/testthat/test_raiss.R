@@ -389,7 +389,201 @@ test_that("invert_mat_eigen handles matrices with negative eigenvalues", {
     expect_silent(invert_mat_eigen(mat))
 })
 
-# Block-Diagonal LD data generator for RAISS testing 
+# ===========================================================================
+# raiss_single_matrix edge cases
+# ===========================================================================
+
+test_that("raiss_single_matrix returns NULL when no known variants overlap", {
+  set.seed(42)
+  ref_panel <- data.frame(
+    chrom = rep(1, 10), pos = seq(10, 100, 10),
+    variant_id = paste0("rs", 1:10),
+    A1 = rep("A", 10), A2 = rep("G", 10),
+    stringsAsFactors = FALSE
+  )
+  # known_zscores has variant IDs that don't match ref_panel at all
+  known_zscores <- data.frame(
+    chrom = rep(1, 3), pos = c(200, 300, 400),
+    variant_id = paste0("other", 1:3),
+    A1 = rep("A", 3), A2 = rep("G", 3),
+    z = rnorm(3), stringsAsFactors = FALSE
+  )
+  LD_matrix <- diag(10)
+  result <- raiss_single_matrix(ref_panel, known_zscores, LD_matrix, verbose = FALSE)
+  expect_null(result)
+})
+
+test_that("raiss_single_matrix returns known zscores when no unknowns to impute", {
+  set.seed(42)
+  ref_panel <- data.frame(
+    chrom = rep(1, 5), pos = seq(10, 50, 10),
+    variant_id = paste0("rs", 1:5),
+    A1 = rep("A", 5), A2 = rep("G", 5),
+    stringsAsFactors = FALSE
+  )
+  # All ref_panel variants are known — nothing to impute
+  known_zscores <- data.frame(
+    chrom = rep(1, 5), pos = seq(10, 50, 10),
+    variant_id = paste0("rs", 1:5),
+    A1 = rep("A", 5), A2 = rep("G", 5),
+    z = rnorm(5), stringsAsFactors = FALSE
+  )
+  LD_matrix <- diag(5)
+  result <- raiss_single_matrix(ref_panel, known_zscores, LD_matrix, verbose = FALSE)
+  expect_true(is.list(result))
+  expect_equal(result$result_nofilter, known_zscores)
+  expect_equal(result$result_filter, known_zscores)
+  expect_equal(result$LD_mat, LD_matrix)
+})
+
+# ===========================================================================
+# raiss_single_matrix_from_X edge cases
+# ===========================================================================
+
+test_that("raiss_single_matrix_from_X returns NULL when no known variants overlap", {
+  set.seed(42)
+  n <- 50
+  p <- 10
+  ref_panel <- data.frame(
+    chrom = rep(1, p), pos = seq(10, p * 10, 10),
+    variant_id = paste0("rs", 1:p),
+    A1 = rep("A", p), A2 = rep("G", p),
+    stringsAsFactors = FALSE
+  )
+  known_zscores <- data.frame(
+    chrom = rep(1, 3), pos = c(200, 300, 400),
+    variant_id = paste0("other", 1:3),
+    A1 = rep("A", 3), A2 = rep("G", 3),
+    z = rnorm(3), stringsAsFactors = FALSE
+  )
+  X <- scale(matrix(sample(0:2, n * p, replace = TRUE), nrow = n))
+  X[is.na(X)] <- 0
+  colnames(X) <- ref_panel$variant_id
+  result <- raiss_single_matrix_from_X(ref_panel, known_zscores, X, verbose = FALSE)
+  expect_null(result)
+})
+
+test_that("raiss_single_matrix_from_X returns known zscores when no unknowns to impute", {
+  set.seed(42)
+  n <- 50
+  p <- 5
+  ref_panel <- data.frame(
+    chrom = rep(1, p), pos = seq(10, p * 10, 10),
+    variant_id = paste0("rs", 1:p),
+    A1 = rep("A", p), A2 = rep("G", p),
+    stringsAsFactors = FALSE
+  )
+  known_zscores <- data.frame(
+    chrom = rep(1, p), pos = seq(10, p * 10, 10),
+    variant_id = paste0("rs", 1:p),
+    A1 = rep("A", p), A2 = rep("G", p),
+    z = rnorm(p), stringsAsFactors = FALSE
+  )
+  X <- scale(matrix(sample(0:2, n * p, replace = TRUE), nrow = n))
+  X[is.na(X)] <- 0
+  colnames(X) <- ref_panel$variant_id
+  result <- raiss_single_matrix_from_X(ref_panel, known_zscores, X, verbose = FALSE)
+  expect_true(is.list(result))
+  expect_equal(result$result_nofilter, known_zscores)
+  expect_null(result$LD_mat)
+})
+
+# ===========================================================================
+# raiss() dispatch paths: single-matrix list and genotype_matrix list
+# ===========================================================================
+
+test_that("raiss with single-matrix LD list dispatches to single matrix path", {
+  set.seed(42)
+  n_variants <- 20
+  ref_panel <- data.frame(
+    chrom = rep(1, n_variants), pos = seq(10, n_variants * 10, 10),
+    variant_id = paste0("rs", 1:n_variants),
+    A1 = rep("A", n_variants), A2 = rep("G", n_variants),
+    stringsAsFactors = FALSE
+  )
+  n_known <- 10
+  known_idx <- sort(sample(seq_len(n_variants), n_known))
+  known_zscores <- data.frame(
+    chrom = rep(1, n_known), pos = ref_panel$pos[known_idx],
+    variant_id = ref_panel$variant_id[known_idx],
+    A1 = ref_panel$A1[known_idx], A2 = ref_panel$A2[known_idx],
+    z = rnorm(n_known), stringsAsFactors = FALSE
+  )
+  R <- diag(n_variants)
+  colnames(R) <- rownames(R) <- ref_panel$variant_id
+
+  # Wrap in list structure with ld_matrices
+  LD_list <- list(ld_matrices = list(R))
+
+  result <- raiss(ref_panel, known_zscores, LD_matrix = LD_list,
+                  R2_threshold = 0, minimum_ld = 0, verbose = FALSE)
+  expect_true(is.list(result))
+  expect_true("result_nofilter" %in% names(result))
+  expect_equal(nrow(result$result_nofilter), n_variants)
+})
+
+test_that("raiss with genotype_matrix list processes multiple blocks", {
+  set.seed(42)
+  n <- 50
+  p <- 20
+  # Each block has its own ref_panel subset matching the X columns
+  ref_panel <- data.frame(
+    chrom = rep(1, p), pos = seq(10, p * 10, 10),
+    variant_id = paste0("rs", 1:p),
+    A1 = rep("A", p), A2 = rep("G", p),
+    stringsAsFactors = FALSE
+  )
+  # Use only first block's variants as known (so second block has unknowns)
+  known_idx <- sort(sample(1:10, 5))
+  known_zscores <- data.frame(
+    chrom = rep(1, length(known_idx)), pos = ref_panel$pos[known_idx],
+    variant_id = ref_panel$variant_id[known_idx],
+    A1 = ref_panel$A1[known_idx], A2 = ref_panel$A2[known_idx],
+    z = rnorm(length(known_idx)), stringsAsFactors = FALSE
+  )
+  X <- scale(matrix(sample(0:2, n * p, replace = TRUE), nrow = n))
+  X[is.na(X)] <- 0
+  colnames(X) <- ref_panel$variant_id
+
+  # Use the full matrix as a single-element list — the simplest valid list input
+  X_list <- list(X)
+
+  result <- raiss(ref_panel, known_zscores, genotype_matrix = X_list,
+                  R2_threshold = 0, minimum_ld = 0, verbose = FALSE)
+  expect_true(is.list(result))
+  expect_true("result_nofilter" %in% names(result))
+  expect_true(nrow(result$result_nofilter) > 0)
+  expect_null(result$LD_mat)
+})
+
+test_that("raiss with genotype_matrix list returns NULL when all blocks fail", {
+  set.seed(42)
+  n <- 50
+  p <- 10
+  ref_panel <- data.frame(
+    chrom = rep(1, p), pos = seq(10, p * 10, 10),
+    variant_id = paste0("rs", 1:p),
+    A1 = rep("A", p), A2 = rep("G", p),
+    stringsAsFactors = FALSE
+  )
+  # known_zscores has no overlap with ref_panel
+  known_zscores <- data.frame(
+    chrom = rep(1, 3), pos = c(200, 300, 400),
+    variant_id = paste0("other", 1:3),
+    A1 = rep("A", 3), A2 = rep("G", 3),
+    z = rnorm(3), stringsAsFactors = FALSE
+  )
+  X <- scale(matrix(sample(0:2, n * p, replace = TRUE), nrow = n))
+  X[is.na(X)] <- 0
+  colnames(X) <- ref_panel$variant_id
+  X_list <- list(X[, 1:5, drop = FALSE], X[, 6:10, drop = FALSE])
+
+  result <- raiss(ref_panel, known_zscores, genotype_matrix = X_list,
+                  verbose = FALSE)
+  expect_null(result)
+})
+
+# Block-Diagonal LD data generator for RAISS testing
 # Corrected function to generate proper block-diagonal test data
 generate_block_diagonal_test_data <- function(seed = 123, block_structure = "overlapping", n_variants = 30) {
   set.seed(seed)
