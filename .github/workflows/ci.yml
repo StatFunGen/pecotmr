@@ -36,7 +36,7 @@ jobs:
       - name: Create TOML from recipe
         run: |
           .github/workflows/create_toml_from_yaml.sh ${GITHUB_WORKSPACE}
-          mkdir /tmp/pixi/.pixi
+          mkdir -p /tmp/pixi/.pixi
           mv ${GITHUB_WORKSPACE}/pixi.toml /tmp/pixi
           cp .github/environment/config.toml /tmp/pixi/.pixi
 
