@@ -45,7 +45,7 @@ jobs:
           manifest-path: /tmp/pixi/pixi.toml
 
       - name: Run unit tests
-        run:
+        run: |
           pixi config set --local run-post-link-scripts insecure
           pixi run --environment ${{ matrix.environment }} --manifest-path /tmp/pixi/pixi.toml devtools_test
 
