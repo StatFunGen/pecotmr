@@ -882,49 +882,6 @@ test_that("mash_rand_null_sample caps random sample at available rows", {
 test_that("mash_pipeline uses residual_correlation when null data is empty", {
   skip_if_not_installed("mashr")
   skip_if_not_installed("flashier")
-  skip_if_not_installed("udr")
-
-  mock_input <- list(
-    null.b = numeric(0),
-    null.s = numeric(0),
-    random.b = matrix(rnorm(6), 3, 2),
-    random.s = matrix(abs(rnorm(6)), 3, 2),
-    strong.b = matrix(rnorm(20), 10, 2),
-    strong.s = matrix(abs(rnorm(20)), 10, 2),
-    strong.z = matrix(rnorm(20), 10, 2)
-  )
-  custom_vhat <- matrix(c(1, 0.3, 0.3, 1), 2, 2)
-
-  result <- mash_pipeline(mock_input, alpha = 1, residual_correlation = custom_vhat)
-  expect_true(is.list(result))
-  # Verify it did not produce an error marker
-
-  expect_null(result$error)
-})
-
-test_that("mash_pipeline does not error about mashr when mashr is available", {
-  skip_if_not_installed("mashr")
-  skip_if_not_installed("flashier")
-  skip_if_not_installed("udr")
-
-  mock_input <- list(
-    null.b = numeric(0),
-    null.s = numeric(0),
-    random.b = matrix(rnorm(6), 3, 2),
-    random.s = matrix(abs(rnorm(6)) + 0.1, 3, 2),
-    strong.b = matrix(rnorm(20), 10, 2),
-    strong.s = matrix(abs(rnorm(20)) + 0.1, 10, 2),
-    strong.z = matrix(rnorm(20), 10, 2)
-  )
-  # Should not error about missing mashr since it is installed
-  result <- mash_pipeline(mock_input, alpha = 1)
-  expect_true(is.list(result))
-})
-
-test_that("mash_pipeline uses identity matrix when null data empty and no residual_correlation", {
-  skip_if_not_installed("mashr")
-  skip_if_not_installed("flashier")
-  skip_if_not_installed("udr")
 
   n_cond <- 3
   n_strong <- 15
@@ -934,13 +891,50 @@ test_that("mash_pipeline uses identity matrix when null data empty and no residu
     random.b = matrix(rnorm(n_strong * n_cond), n_strong, n_cond),
     random.s = matrix(abs(rnorm(n_strong * n_cond)) + 0.1, n_strong, n_cond),
     strong.b = matrix(rnorm(n_strong * n_cond), n_strong, n_cond),
-    strong.s = matrix(abs(rnorm(n_strong * n_cond)) + 0.1, n_strong, n_cond),
-    strong.z = matrix(rnorm(n_strong * n_cond), n_strong, n_cond)
+    strong.s = matrix(abs(rnorm(n_strong * n_cond)) + 0.1, n_strong, n_cond)
+  )
+  custom_vhat <- matrix(c(1, 0.3, 0.1, 0.3, 1, 0.2, 0.1, 0.2, 1), 3, 3)
+
+  result <- mash_pipeline(mock_input, alpha = 1, residual_correlation = custom_vhat)
+  expect_true(is.list(result))
+  expect_null(result$error)
+})
+
+test_that("mash_pipeline does not error about mashr when mashr is available", {
+  skip_if_not_installed("mashr")
+  skip_if_not_installed("flashier")
+
+  n_cond <- 3
+  n_strong <- 15
+  mock_input <- list(
+    null.b = numeric(0),
+    null.s = numeric(0),
+    random.b = matrix(rnorm(n_strong * n_cond), n_strong, n_cond),
+    random.s = matrix(abs(rnorm(n_strong * n_cond)) + 0.1, n_strong, n_cond),
+    strong.b = matrix(rnorm(n_strong * n_cond), n_strong, n_cond),
+    strong.s = matrix(abs(rnorm(n_strong * n_cond)) + 0.1, n_strong, n_cond)
+  )
+  result <- mash_pipeline(mock_input, alpha = 1)
+  expect_true(is.list(result))
+})
+
+test_that("mash_pipeline uses identity matrix when null data empty and no residual_correlation", {
+  skip_if_not_installed("mashr")
+  skip_if_not_installed("flashier")
+
+  n_cond <- 3
+  n_strong <- 15
+  mock_input <- list(
+    null.b = numeric(0),
+    null.s = numeric(0),
+    random.b = matrix(rnorm(n_strong * n_cond), n_strong, n_cond),
+    random.s = matrix(abs(rnorm(n_strong * n_cond)) + 0.1, n_strong, n_cond),
+    strong.b = matrix(rnorm(n_strong * n_cond), n_strong, n_cond),
+    strong.s = matrix(abs(rnorm(n_strong * n_cond)) + 0.1, n_strong, n_cond)
   )
 
   result <- mash_pipeline(mock_input, alpha = 1, residual_correlation = NULL)
   expect_true(is.list(result))
-  # Verify it did not produce an error marker
   expect_null(result$error)
 })
 

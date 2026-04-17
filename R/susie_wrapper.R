@@ -115,29 +115,37 @@ adjust_susie_weights <- function(twas_weights_results, keep_variants, run_allele
 }
 
 
+# Shared dynamic-L loop: repeatedly fits a SuSiE model, increasing L by
+# l_step whenever the number of credible sets saturates L, until max_L.
+# @param fit_fn A function(L) that runs SuSiE with a given L and returns a fit.
+# @param init_L Initial number of causal configurations.
+# @param max_L Maximum number of causal configurations.
+# @param l_step Step size for increasing L.
+# @return The final SuSiE fit object.
+# @noRd
+.dynamic_L_fit <- function(fit_fn, init_L, max_L, l_step) {
+  L <- init_L
+  while (TRUE) {
+    st <- proc.time()
+    result <- fit_fn(L)
+    result$time_elapsed <- proc.time() - st
+    if (!is.null(result$sets$cs) && length(result$sets$cs) >= L && L <= max_L) {
+      L <- L + l_step
+    } else {
+      break
+    }
+  }
+  result
+}
+
 #' @importFrom susieR susie
 #' @export
 susie_wrapper <- function(X, y, init_L = 5, max_L = 30, l_step = 5, ...) {
   if (init_L == max_L) {
     return(susie(X, y, L = init_L, ...))
   }
-  L <- init_L
-  # Perform SuSiE by dynamically increasing L
   gst <- proc.time()
-  while (TRUE) {
-    st <- proc.time()
-    res <- susie(X, y, L = L, ...)
-    res$time_elapsed <- proc.time() - st
-    if (!is.null(res$sets$cs)) {
-      if (length(res$sets$cs) >= L && L <= max_L) {
-        L <- L + l_step
-      } else {
-        break
-      }
-    } else {
-      break
-    }
-  }
+  res <- .dynamic_L_fit(function(L) susie(X, y, L = L, ...), init_L, max_L, l_step)
   message(paste("Total time elapsed for susie_wrapper:", (proc.time() - gst)[3]))
   return(res)
 }
@@ -175,25 +183,15 @@ susie_rss_wrapper <- function(z, R = NULL, X = NULL, n = NULL,
                     sketch_samples = sketch_samples, ...)
   if (!is.null(X)) base_args$X <- X else base_args$R <- R
 
-  run_susie <- function(args) do.call(susie_rss, args)
+  run_with_L <- function(L_val) do.call(susie_rss, c(base_args, list(L = L_val)))
 
   if (L == 1) {
     base_args$max_iter <- 1
-    result <- run_susie(base_args)
+    result <- do.call(susie_rss, c(base_args, list(L = 1)))
   } else if (L == max_L) {
-    result <- run_susie(base_args)
+    result <- run_with_L(L)
   } else {
-    while (TRUE) {
-      st <- proc.time()
-      base_args$L <- L
-      result <- run_susie(base_args)
-      result$time_elapsed <- proc.time() - st
-      if (!is.null(result$sets$cs) && length(result$sets$cs) >= L && L <= max_L) {
-        L <- L + l_step
-      } else {
-        break
-      }
-    }
+    result <- .dynamic_L_fit(run_with_L, L, max_L, l_step)
   }
 
   result
@@ -421,17 +419,20 @@ susie_post_processor <- function(susie_output, data_x, data_y, X_scalar, y_scala
 
     if (nrow(top_loci) > 0) {
       top_loci[is.na(top_loci)] <- 0
-      variants <- res$variant_names[top_loci$variant_idx]
-      pip <- susie_output$pip[top_loci$variant_idx]
-      top_loci_cols <- c("variant_id", if (!is.null(res$sumstats$betahat)) "betahat", if (!is.null(res$sumstats$sebetahat)) "sebetahat", if (!is.null(res$sumstats$z)) "z", if (!is.null(maf)) "maf", "pip", colnames(top_loci)[-1])
-      res$top_loci <- data.frame(variants, stringsAsFactors = FALSE)
-      res$top_loci$betahat <- if (!is.null(res$sumstats$betahat)) res$sumstats$betahat[top_loci$variant_idx] else NULL
-      res$top_loci$sebetahat <- if (!is.null(res$sumstats$sebetahat)) res$sumstats$sebetahat[top_loci$variant_idx] else NULL
-      res$top_loci$z <- if (!is.null(res$sumstats$z)) res$sumstats$z[top_loci$variant_idx] else NULL
-      res$top_loci$maf <- if (!is.null(maf)) maf[top_loci$variant_idx] else NULL
-      res$top_loci$pip <- pip
-      res$top_loci <- cbind(res$top_loci, top_loci[, -1])
-      colnames(res$top_loci) <- top_loci_cols
+      idx <- top_loci$variant_idx
+      optional_cols <- list(
+        betahat = if (!is.null(res$sumstats$betahat)) res$sumstats$betahat[idx],
+        sebetahat = if (!is.null(res$sumstats$sebetahat)) res$sumstats$sebetahat[idx],
+        z = if (!is.null(res$sumstats$z)) res$sumstats$z[idx],
+        maf = if (!is.null(maf)) maf[idx]
+      )
+      optional_cols <- Filter(Negate(is.null), optional_cols)
+      res$top_loci <- cbind(
+        data.frame(variant_id = res$variant_names[idx], stringsAsFactors = FALSE),
+        as.data.frame(optional_cols),
+        data.frame(pip = susie_output$pip[idx]),
+        top_loci[, -1, drop = FALSE]
+      )
       rownames(res$top_loci) <- NULL
     }
     names(susie_output$pip) <- NULL

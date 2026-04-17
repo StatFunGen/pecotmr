@@ -1,3 +1,11 @@
+# Filter rows of a z-score matrix by significance p-value cutoff.
+# Returns integer indices of rows where any |z| exceeds the threshold.
+# @noRd
+filter_by_significance <- function(z_matrix, sig_p_cutoff) {
+  z_threshold <- sqrt(qchisq(sig_p_cutoff, df = 1, lower.tail = FALSE))
+  which(apply(z_matrix, 1, function(row) any(abs(row) >= z_threshold)))
+}
+
 #' @importFrom vroom vroom
 #' @export
 filter_invalid_summary_stat <- function(dat_list, bhat = NULL, sbhat = NULL, z = NULL, btoz = FALSE, sig_p_cutoff = 1E-6, filter_by_missing_rate = 0.2) {
@@ -41,9 +49,7 @@ filter_invalid_summary_stat <- function(dat_list, bhat = NULL, sbhat = NULL, z =
     }
     if ("strong.z" %in% names(dat_list)) {
       if (!is.null(sig_p_cutoff)) {
-        chi_square_stat <- qchisq(sig_p_cutoff, df = 1, lower.tail = FALSE)
-        z_score <- sqrt(chi_square_stat)
-        keep_index <- which(apply(dat_list$strong.z, 1, function(row) any(abs(row) >= z_score)))
+        keep_index <- filter_by_significance(dat_list$strong.z, sig_p_cutoff)
         dat_list[["strong.z"]] <- dat_list$strong.z[keep_index, ]
         dat_list[["strong.b"]] <- dat_list$strong.b[keep_index, ]
         dat_list[["strong.s"]] <- dat_list$strong.s[keep_index, ]
@@ -64,23 +70,15 @@ filter_invalid_summary_stat <- function(dat_list, bhat = NULL, sbhat = NULL, z =
     }
 
     # Process each component if it exists
-    if (!is.null(dat_list$strong) && !is.null(dat_list$strong$z)) {
-      dat_list$strong$z <- process_z(dat_list$strong$z)
-    }
-
-    if (!is.null(dat_list$random) && !is.null(dat_list$random$z)) {
-      dat_list$random$z <- process_z(dat_list$random$z)
-    }
-
-    if (!is.null(dat_list$null) && !is.null(dat_list$null$z)) {
-      dat_list$null$z <- process_z(dat_list$null$z)
+    for (comp in c("strong", "random", "null")) {
+      if (!is.null(dat_list[[comp]]) && !is.null(dat_list[[comp]]$z)) {
+        dat_list[[comp]]$z <- process_z(dat_list[[comp]]$z)
+      }
     }
 
     # Apply significance cutoff to strong signals if applicable
     if (!is.null(dat_list$strong) && !is.null(dat_list$strong$z) && !is.null(sig_p_cutoff)) {
-      chi_square_stat <- qchisq(sig_p_cutoff, df = 1, lower.tail = FALSE)
-      z_score <- sqrt(chi_square_stat)
-      keep_index <- which(apply(dat_list$strong$z, 1, function(row) any(abs(row) >= z_score)))
+      keep_index <- filter_by_significance(dat_list$strong$z, sig_p_cutoff)
       dat_list$strong$z <- dat_list$strong$z[keep_index, , drop = FALSE]
     }
   }
@@ -106,20 +104,13 @@ filter_mixture_components <- function(conditions_to_keep, U, w = NULL, w_cutoff 
   }, conditions_to_keep)
 
   # Remove matrices where all values are zero or weight is below cutoff
-  for (mat_name in names(U)) {
-    if (all(U[[mat_name]] == 0)) {
-      U[[mat_name]] <- NULL
-      if (!is.null(w)) {
-        w <- w[!names(w) %in% mat_name]
-      }
-      next
-    }
-    if (!is.null(w)) {
-      if (w[mat_name] < w_cutoff) {
-        w <- w[!names(w) %in% mat_name]
-        U[[mat_name]] <- NULL
-      }
-    }
+  keep_names <- names(purrr::keep(U, function(mat) !all(mat == 0)))
+  if (!is.null(w)) {
+    keep_names <- intersect(keep_names, names(w[w >= w_cutoff]))
+  }
+  U <- U[keep_names]
+  if (!is.null(w)) {
+    w <- w[keep_names]
   }
 
   # Note: Matrices in U may contain very small values on the diagonal
@@ -329,169 +320,103 @@ merge_susie_cs <- function(susie_fit, coverage = "cs_coverage_0.95", complementa
     }
     return(overlap_sets)
   }
-  # Merge overlapping credible sets and update the credible sets in
-  # variants_list
+  # Merge overlapping credible sets using graph connected components
   merge_and_update_overlap_sets <- function(variants_sets_and_pips_list, overlap_sets) {
-    # Combine and identify unique combined sets
-    combined_sets <- unique(unlist(lapply(overlap_sets, function(x) {
-      paste(sort(x),
-        collapse = ","
-      )
-    })))
-    unique_combined_sets <- unique(combined_sets)
+    # Collect all unique set names from overlap_sets
+    all_sets <- unique(unlist(overlap_sets))
+    if (length(all_sets) == 0) return(list())
 
-    # Split each combined set into individual sets
-    split_sets <- lapply(unique_combined_sets, function(x) strsplit(x, ",")[[1]])
+    # Build edges: each overlap_sets entry links its sets together
+    edges <- unlist(lapply(overlap_sets, function(sets) {
+      if (length(sets) < 2) return(character(0))
+      pairs <- combn(sets, 2)
+      as.character(pairs)
+    }))
 
-    # Identify and merge overlapping credible sets
-    if (length(split_sets) != 1) {
-      for (i in 1:(length(split_sets) - 1)) {
-        for (j in (i + 1):length(split_sets)) {
-          if (!is.null(split_sets[[i]]) && !is.null(split_sets[[j]])) {
-            # Check both sets exist
-            if (length(intersect(split_sets[[i]], split_sets[[j]])) > 0) {
-              # Merge overlapping sets Update both i-th and j-th elements with
-              # the merged set
-              split_sets[[i]] <- unique(c(split_sets[[i]], split_sets[[j]]))
-              split_sets[[j]] <- unique(c(split_sets[[i]], split_sets[[j]]))
-            }
-          }
-        }
-      }
-    }
-    # Eliminate duplicates from the list of sets Convert each set into a string
-    # to facilitate comparison
-    set_strings <- sapply(split_sets, function(set) paste(sort(set), collapse = ","))
-    # Identify unique sets based on their string representation
-    unique_set_strings <- unique(set_strings)
-    # Retain only the largest combined sets
-    final_combined_sets <- character()
-    for (set in unique_set_strings) {
-      if (length(unique_set_strings) == 1) {
-        final_combined_sets <- unique_set_strings[[1]]
-      } else {
-        included_in_other_set <- FALSE
-        set_elements <- unlist(strsplit(set, ","))
-        for (other_set in unique_set_strings) {
-          if (set != other_set && all(set_elements %in% unlist(strsplit(
-            other_set,
-            ","
-          )))) {
-            included_in_other_set <- TRUE
-            break
-          }
-        }
-        if (!included_in_other_set) {
-          final_combined_sets <- c(final_combined_sets, set)
-        }
-      }
-    }
+    g <- igraph::make_graph(edges, directed = FALSE)
+    comp <- igraph::components(g)
 
-    # Create a mapping from original set names to combined set names
+    # Build mapping: each set name -> comma-separated merged component label
     set_name_map <- list()
-    for (combined_set in final_combined_sets) {
-      original_sets <- unlist(strsplit(combined_set, ","))
-      for (set in original_sets) {
-        set_name_map[[set]] <- combined_set
+    for (i in seq_len(comp$no)) {
+      members <- names(comp$membership[comp$membership == i])
+      label <- paste(sort(members), collapse = ",")
+      for (s in members) {
+        set_name_map[[s]] <- label
       }
     }
 
-    # Update the credible_set_names in variants_sets_and_pips_list for each
-    # variant_id
-    updated_credible_sets <- list()
-    for (variant_id in names(variants_sets_and_pips_list)) {
-      current_sets <- variants_sets_and_pips_list[[variant_id]][["sets"]] # All credible sets for the current variant_id
-      combined_set_found <- FALSE
-      # Check if any of the current variant_id's credible sets exist in the
-      # set_name_map
-      for (set_name in current_sets) {
-        if (set_name %in% names(set_name_map)) {
-          # If at least one credible set corresponds to a combined credible
-          # set, update accordingly
-          updated_credible_sets[[variant_id]] <- set_name_map[[set_name]]
-          combined_set_found <- TRUE
-          break # Exit the loop once the combined credible set is found
+    # Update each variant's credible set names
+    updated_credible_sets <- lapply(
+      stats::setNames(names(variants_sets_and_pips_list), names(variants_sets_and_pips_list)),
+      function(variant_id) {
+        current_sets <- variants_sets_and_pips_list[[variant_id]][["sets"]]
+        mapped <- intersect(current_sets, names(set_name_map))
+        if (length(mapped) > 0) {
+          set_name_map[[mapped[1]]]
+        } else {
+          paste(sort(unique(current_sets)), collapse = ",")
         }
       }
-      # If no combined credible set is found, keep the original credible sets
-      # unchanged
-      if (!combined_set_found) {
-        updated_credible_sets[[variant_id]] <- current_sets
-      }
-    }
+    )
     return(updated_credible_sets)
   }
   # Loop through each condition and their credible sets
   extract_top_loci <- function(susie_fit, complementary, coverage) {
-    results <- list()
-    for (i in seq_along(names(susie_fit[[1]]))) {
-      if (!is.null(susie_fit[[1]][[i]][["top_loci"]]) && nrow(susie_fit[[1]][[i]][["top_loci"]]) !=
-        0) {
-        if (!complementary) {
-          set_num <- unique(get_nested_element(susie_fit[[1]][[i]], c(
-            "top_loci",
-            coverage
-          )))
-          set_num <- set_num[set_num != 0]
-        } else {
-          set_num <- 0
-        }
-        num_cs <- length(set_num)
-        if (num_cs > 0) {
-          for (j in 1:num_cs) {
-            variants_df <- get_nested_element(susie_fit[[1]][[i]], c("top_loci")) %>%
-              filter(!!sym(coverage) == set_num[j]) %>%
-              select(variant_id, pip)
-            # Iterate through the rows of the variants_df
-            if (dim(variants_df)[1] != 0) {
-              for (row in 1:nrow(variants_df)) {
-                variant_id <- variants_df$variant_id[row]
-                variant_pip <- variants_df$pip[row]
+    # Build a flat data frame of (variant_id, pip, set_name) across all conditions
+    cond_names <- names(susie_fit[[1]])
+    rows <- purrr::map_dfr(seq_along(cond_names), function(i) {
+      cond_data <- susie_fit[[1]][[i]]
+      top_loci <- cond_data[["top_loci"]]
+      if (is.null(top_loci) || nrow(top_loci) == 0) return(NULL)
 
-                # Prepare the set name
-                set_name <- paste0("cs_", i, "_", set_num[j])
-
-                # If the variant_id is not in the results list, add it with the
-                # current set_name and pip
-                if (!variant_id %in% names(results)) {
-                  results[[variant_id]] <- list(sets = set_name, pips = variant_pip)
-                } else {
-                  # If the variant_id is already in the results, append the current
-                  # set_name and pip
-                  results[[variant_id]]$sets <- c(
-                    results[[variant_id]]$sets,
-                    set_name
-                  )
-                  results[[variant_id]]$pips <- c(
-                    results[[variant_id]]$pips,
-                    variant_pip
-                  )
-                }
-              }
-            }
-          }
-        }
+      if (!complementary) {
+        set_num <- unique(get_nested_element(cond_data, c("top_loci", coverage)))
+        set_num <- set_num[set_num != 0]
+      } else {
+        set_num <- 0
       }
-    }
-    return(results)
+      if (length(set_num) == 0) return(NULL)
+
+      purrr::map_dfr(set_num, function(sn) {
+        top_loci %>%
+          filter(!!sym(coverage) == sn) %>%
+          select(variant_id, pip) %>%
+          mutate(set_name = paste0("cs_", i, "_", sn))
+      })
+    })
+
+    if (is.null(rows) || nrow(rows) == 0) return(list())
+
+    # Aggregate by variant_id preserving first-seen order
+    seen_order <- unique(rows$variant_id)
+    split_rows <- split(rows, factor(rows$variant_id, levels = seen_order))
+    lapply(split_rows, function(df) {
+      list(sets = df$set_name, pips = df$pip)
+    })
   }
 
   combine_top_loci <- function(extracted_result) {
+    # Compute overlap sets once, outside the per-variant loop
+    overlap_sets <- identify_overlap_sets(extracted_result)
+    has_overlaps <- length(overlap_sets) != 0
+    merged_sets <- if (has_overlaps) {
+      merge_and_update_overlap_sets(extracted_result, overlap_sets = overlap_sets)
+    } else {
+      NULL
+    }
+
     top_loci_df <- do.call(rbind, lapply(names(extracted_result), function(variant_id) {
       max_pip <- max(unlist(extracted_result[[variant_id]]$pips))
       median_pip <- median(unlist(extracted_result[[variant_id]]$pips))
-      if (length(identify_overlap_sets(extracted_result)) != 0) {
-        credible_set_names <- merge_and_update_overlap_sets(extracted_result,
-          overlap_sets = identify_overlap_sets(extracted_result)
-        )[[variant_id]]
+      credible_set_names <- if (has_overlaps) {
+        merged_sets[[variant_id]]
       } else {
-        credible_set_names <- paste(sort(unique(unlist(extracted_result[[variant_id]]$sets))),
-          collapse = ","
-        )
+        paste(sort(unique(unlist(extracted_result[[variant_id]]$sets))), collapse = ",")
       }
       data.frame(
         variant_id = variant_id, credible_set_names = credible_set_names,
-        max_pip = max_pip, median_pip = median_pip, stringsAsFactors = FALSE # Avoid factors for strings
+        max_pip = max_pip, median_pip = median_pip, stringsAsFactors = FALSE
       )
     }))
     return(top_loci_df)
@@ -696,19 +621,12 @@ mash_rand_null_sample <- function(dat, n_random, n_null, exclude_condition, seed
   }
 
   if (length(exclude_condition) > 0) {
-    if ("z" %in% names(dat)) {
-      if (all(exclude_condition %in% colnames(dat$z))) {
-        dat$z <- dat$z[, -exclude_condition, drop = FALSE]
-      } else {
-        stop(paste("Error: exclude_condition are not present in", dat$region))
-      }
-    } else {
-      if (all(exclude_condition %in% colnames(dat$bhat))) {
-        dat$bhat <- dat$bhat[, -exclude_condition, drop = FALSE]
-        dat$sbhat <- dat$sbhat[, -exclude_condition, drop = FALSE]
-      } else {
-        stop(paste("Error: exclude_condition are not present in", dat$region))
-      }
+    cols_to_check <- if ("z" %in% names(dat)) "z" else "bhat"
+    if (!all(exclude_condition %in% colnames(dat[[cols_to_check]]))) {
+      stop(paste("Error: exclude_condition are not present in", dat$region))
+    }
+    for (key in intersect(names(dat), c("z", "bhat", "sbhat"))) {
+      dat[[key]] <- dat[[key]][, -exclude_condition, drop = FALSE]
     }
   }
 
@@ -718,59 +636,30 @@ mash_rand_null_sample <- function(dat, n_random, n_null, exclude_condition, seed
 
 #' @export
 merge_mash_data <- function(res_data, one_data) {
-  combined_data <- list()
-  if (length(res_data) == 0 | is.null(res_data)) {
-    return(one_data)
-  } else if (length(one_data) == 0 | is.null(one_data)) {
-    return(res_data)
-  } else {
-    for (d in names(one_data)) {
-      if (length(one_data[[d]]) == 0 | is.null(one_data[[d]])) {
-        combined_data[[d]] <- res_data[[d]] # Keep res_data[[d]] when one_data[[d]] is NULL or empty
-        next
-      } else {
-        # Check if the res_data is NULL
-        if (!is.null(res_data[[d]]) | length(res_data[[d]]) != 0) {
-          # Check if the number of columns matches
-          if (!identical(colnames(res_data[[d]]), colnames(one_data[[d]]))) {
-            # Get all column names from both data frames
-            all_cols <- union(colnames(res_data[[d]]), colnames(one_data[[d]]))
+  if (length(res_data) == 0 || is.null(res_data)) return(one_data)
+  if (length(one_data) == 0 || is.null(one_data)) return(res_data)
 
-            # Align res[[d]]
-            res_aligned <- setNames(as.data.frame(matrix(NaN,
-              nrow = nrow(res_data[[d]]),
-              ncol = length(all_cols)
-            )), all_cols)
-            rownames(res_aligned) <- rownames(res_data[[d]])
-            common_cols_res <- intersect(colnames(res_data[[d]]), all_cols)
-            res_aligned[common_cols_res] <- res_data[[d]][common_cols_res]
+  combined_data <- lapply(names(one_data), function(d) {
+    od <- one_data[[d]]
+    rd <- res_data[[d]]
+    if (length(od) == 0 || is.null(od)) return(rd)
+    if (is.null(rd) || length(rd) == 0) return(od)
 
-            # Align one_data[[d]]
-            one_data_aligned <- setNames(as.data.frame(matrix(NaN,
-              nrow = nrow(one_data[[d]]),
-              ncol = length(all_cols)
-            )), all_cols)
-            rownames(one_data_aligned) <- rownames(one_data[[d]])
-            common_cols_one_data <- intersect(colnames(one_data[[d]]), all_cols)
-            one_data_aligned[common_cols_one_data] <- one_data[[d]][common_cols_one_data]
-
-            # Now both have the same columns, we can rbind them
-            combined_data[[d]] <- rbind(res_aligned, one_data_aligned)
-          } else {
-            # If they already have the same number of columns, just rbind
-            combined_data[[d]] <- rbind(as.data.frame(res_data[[d]]), as.data.frame(one_data[[d]]))
-          }
-        } else {
-          combined_data[[d]] <- one_data[[d]]
-        }
-      }
-    }
-    return(combined_data)
-  }
+    # bind_rows auto-aligns columns, filling missing with NA; replace with NaN
+    rn_res <- rownames(as.data.frame(rd))
+    rn_one <- rownames(as.data.frame(od))
+    combined <- dplyr::bind_rows(as.data.frame(rd), as.data.frame(od))
+    combined[is.na(combined)] <- NaN
+    rn_all <- make.names(c(rn_res, rn_one), unique = TRUE)
+    rownames(combined) <- rn_all
+    combined
+  })
+  names(combined_data) <- names(one_data)
+  return(combined_data)
 }
 
 #' @export
-mash_pipeline <- function(mash_input, alpha, residual_correlation = NULL, unconstrained.update = "ted", set_seed = 999) {
+mash_pipeline <- function(mash_input, alpha, residual_correlation = NULL, n_pcs = NULL, set_seed = 999) {
   if (!requireNamespace("mashr", quietly = TRUE)) {
     stop("To use this function, please install mashr: https://cran.r-project.org/web/packages/mashr/index.html")
   }
@@ -792,35 +681,30 @@ mash_pipeline <- function(mash_input, alpha, residual_correlation = NULL, uncons
     ))
   }
 
-  # mash data Fit mixture model using udr package
   mash_data <- mashr::mash_set_data(mash_input$strong.b,
     Shat = mash_input$strong.s, V = vhat,
     alpha, zero_Bhat_Shat_reset = 1000
   )
-  # Canonical matrices
+
+  # Canonical covariance matrices
   U.can <- mashr::cov_canonical(mash_data)
-
-  # Penalty strength
-  lambda <- ncol(mash_input$strong.z)
-  # FIXME: Please change this to use flashier + ED instead of UDR
-  if (!requireNamespace("udr", quietly = TRUE)) {
-    stop("Package 'udr' is required. Install with: devtools::install_github('stephenslab/udr')")
+  # PCA-based covariance matrices
+  if (is.null(n_pcs)) {
+    n_pcs <- ncol(mash_data$Bhat) - 1
   }
-  # Initialize udr
-  fit0 <- udr::ud_init(mash_data, n_unconstrained = 50, U_scaled = U.can)
-  # Fit udr and use penalty as default as suggested by Yunqi penalty is
-  # necessary in small sample size case, and there won't be a difference in
-  # large sample size
-  fit2 <- udr::ud_fit(fit0, control = list(unconstrained.update,
-    scaled.update = "fa",
-    resid.update = "none", lambda = lambda, penalty.type = "iw", maxiter = 1000,
-    tol = 0.01, tol.lik = 0.01
-  ))
+  U.pca <- mashr::cov_pca(mash_data, npc = n_pcs)
+  # Flash-based covariance matrices (factor analysis)
+  U.flash <- mashr::cov_flash(mash_data)
+  # ED-based covariance matrices (initialized from all others)
+  U.ed <- mashr::cov_ed(mash_data, Ulist_init = c(U.can, U.pca, U.flash))
+  # Combine all covariance matrices
+  U.all <- c(U.can, U.pca, U.flash, U.ed)
 
-  # extract data-driven covariance from udr model. (A list of covariance
-  # matrices)
-  U.ud <- lapply(fit2$U, function(e) e[["mat"]])
-  return(mixture_prior = list(U = U.ud, w = fit2$w, loglik = fit2$loglik))
+  # Fit mash to estimate mixture weights
+  m <- mashr::mash(mash_data, Ulist = U.all, outputlevel = 1)
+  w <- mashr::get_estimated_pi(m)
+
+  return(list(U = U.all, w = w))
 }
 
 #' Merge a List of Matrices or Data Frames with Optional Allele Flipping
@@ -1003,19 +887,17 @@ load_multicontext_sumstats <- function(dat_list, signal_df, cond, region, extrac
 
             # Match context to tag
         df <- df %>%
-                  rowwise() %>%
-                  mutate(context_classify = {
-                            if (is.null(tag_patterns) || length(tag_patterns) == 0) {
-                                  context
-                            } else {
-                                  matched <- names(tag_patterns)[str_detect(context, tag_patterns)]
-                                  if (length(matched) == 0) NA_character_ else matched[1]
-                            }
-                  }) %>%
-                  ungroup()
+                  mutate(context_classify = if (is.null(tag_patterns) || length(tag_patterns) == 0) {
+                    context
+                  } else {
+                    purrr::map_chr(context, function(ctx) {
+                      matched <- names(tag_patterns)[str_detect(ctx, tag_patterns)]
+                      if (length(matched) == 0) NA_character_ else matched[1]
+                    })
+                  })
 
         numeric_col <- colnames(df)[2]
-    
+
          if (extract_inf == "z"){
                 # Make a copy to store added rows
               added_df <- data.frame()
@@ -1059,7 +941,7 @@ load_multicontext_sumstats <- function(dat_list, signal_df, cond, region, extrac
                   rename(!!numeric_col := !!sym(numeric_col))
                 event_ID_extracted <- sumstats_df[[extract_inf]]%>%pull(context)
              } else if (is.null(event_ID_extracted)){
-                    print("Please provide 'z-score'")
+                    warning("Please provide 'z-score'")
              } else {
                  sumstats_df[[extract_inf]] <- df %>% filter(context%in%event_ID_extracted)%>%
                                         rename(!!numeric_col := !!sym(numeric_col))
@@ -1073,7 +955,6 @@ load_multicontext_sumstats <- function(dat_list, signal_df, cond, region, extrac
                     gene_ID = region
                   ) %>%
                  select(variant_ID, gene_ID, everything())
-            print(result_df)
                  result_list_format[[cond]][[extract_inf]]  <- result_list_format[[cond]][[extract_inf]]%>% rows_update(result_df, by = c("variant_ID", "gene_ID"))
      }
   }
@@ -1109,16 +990,14 @@ load_multicontext_sumstats <- function(dat_list, signal_df, cond, region, extrac
 
               # Match context to tag
                df <- df %>%
-                   rowwise() %>%
-                   mutate(context_classify = {
-                            if (is.null(tag_patterns) || length(tag_patterns) == 0) {
-                                  context
-                            } else {
-                                  matched <- names(tag_patterns)[str_detect(context, tag_patterns)]
-                                  if (length(matched) == 0) NA_character_ else matched[1]
-                            }
-                  }) %>%
-                  ungroup()
+                   mutate(context_classify = if (is.null(tag_patterns) || length(tag_patterns) == 0) {
+                     context
+                   } else {
+                     purrr::map_chr(context, function(ctx) {
+                       matched <- names(tag_patterns)[str_detect(ctx, tag_patterns)]
+                       if (length(matched) == 0) NA_character_ else matched[1]
+                     })
+                   })
 
               numeric_col <- colnames(df)[2]
             if (extract_inf == "z"){
@@ -1155,7 +1034,7 @@ load_multicontext_sumstats <- function(dat_list, signal_df, cond, region, extrac
                 }
                 event_ID_extracted[[k]] <- sumstats_df[[extract_inf]]%>%pull(context)
             }  else if (is.null(event_ID_extracted)){
-                    print("Please provide 'z-score'")
+                    warning("Please provide 'z-score'")
             } else {
                 sumstats_df[[extract_inf]] <- df %>% filter(context%in%event_ID_extracted[[k]])%>%
                                         rename(!!numeric_col := !!sym(numeric_col))

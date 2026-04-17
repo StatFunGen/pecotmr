@@ -312,24 +312,40 @@ rss_analysis_pipeline <- function(
       res$outlier_number <- qc_results$outlier_number
     }
   }
-  if (impute & !is.null(qc_method)) {
-    method_name <- paste0(finemapping_method, "_", toupper(qc_method), "_RAISS_imputed")
-  } else if (!impute & !is.null(qc_method)) {
-    method_name <- paste0(finemapping_method, "_", toupper(qc_method))
-  } else {
-    method_name <- paste0(finemapping_method, "_", "NO_QC")
+  .make_method_name <- function(method, qc_method, impute) {
+    suffix <- if (!is.null(qc_method) && impute) {
+      paste0(toupper(qc_method), "_RAISS_imputed")
+    } else if (!is.null(qc_method)) {
+      toupper(qc_method)
+    } else {
+      "NO_QC"
+    }
+    paste0(method, "_", suffix)
   }
+
+  .run_reanalysis <- function(sumstats, LD_mat, method, finemapping_opts, pri_coverage, sec_coverage) {
+    susie_rss_pipeline(sumstats, LD_mat,
+      n = n, var_y = var_y,
+      L = finemapping_opts$init_L, max_L = finemapping_opts$max_L, l_step = finemapping_opts$l_step,
+      analysis_method = method,
+      coverage = pri_coverage,
+      secondary_coverage = sec_coverage,
+      signal_cutoff = finemapping_opts$signal_cutoff,
+      min_abs_corr = finemapping_opts$min_abs_corr
+    )
+  }
+
+  method_name <- .make_method_name(finemapping_method, qc_method, impute)
   result_list <- list()
   result_list[[method_name]] <- res
   result_list[["rss_data_analyzed"]] <- sumstats
-  
+
   block_cs_metrics <- list()
   if (diagnostics) {
-    if (length(res) > 0) { 
+    if (length(res) > 0) {
         bvsr_res = get_susie_result(res)
         bvsr_cs_num = if(!is.null(bvsr_res)) length(bvsr_res$sets$cs) else NULL
         if (isTRUE(bvsr_cs_num > 0)) { # have CS
-            # Get the names of the credible sets
             cs_names_bvsr = names(bvsr_res$sets$cs)
             block_cs_metrics = extract_cs_info(con_data = res, cs_names = cs_names_bvsr, top_loci_table = res$top_loci)
         } else { # no CS
@@ -350,57 +366,20 @@ rss_analysis_pipeline <- function(
             max(cs_corr_max, na.rm = TRUE)
           })
         if (any(block_cs_metrics$p_value > 1e-4 | block_cs_metrics$max_cs_corr_study_block > 0.5)) {
-          finemapping_method <- "bayesian_conditional_regression"
-          pri_coverage <- finemapping_opts$coverage[1]
-          sec_coverage <- if (length(finemapping_opts$coverage) > 1) finemapping_opts$coverage[-1] else NULL
-          bcr <- susie_rss_pipeline(sumstats, LD_mat,
-            n = n, var_y = var_y,
-            L = finemapping_opts$init_L, max_L = finemapping_opts$max_L, l_step = finemapping_opts$l_step,
-            analysis_method = finemapping_method,
-            coverage = pri_coverage,
-            secondary_coverage = sec_coverage,
-            signal_cutoff = finemapping_opts$signal_cutoff,
-            min_abs_corr = finemapping_opts$min_abs_corr
-          )
+          bcr <- .run_reanalysis(sumstats, LD_mat, "bayesian_conditional_regression",
+            finemapping_opts, pri_coverage, sec_coverage)
           if (!is.null(qc_method)) {
             bcr$outlier_number <- qc_results$outlier_number
           }
-          if (impute & !is.null(qc_method)) {
-              method_name <- paste0(finemapping_method, "_", toupper(qc_method), "_RAISS_imputed")
-          } else if (!impute & !is.null(qc_method)) {
-              method_name <- paste0(finemapping_method, "_", toupper(qc_method))
-          } else {
-              method_name <- paste0(finemapping_method, "_", "NO_QC")
-          }
-          result_list[[method_name]] <- bcr
-          finemapping_method <- "single_effect"
-          sumstats <- preprocess_results$sumstats
-          LD_mat <- preprocess_results$LD_mat
-          ser <- susie_rss_pipeline(sumstats, LD_mat,
-            n = n, var_y = var_y,
-            L = finemapping_opts$init_L, max_L = finemapping_opts$max_L, l_step = finemapping_opts$l_step,
-            analysis_method = finemapping_method,
-            coverage = pri_coverage,
-            secondary_coverage = sec_coverage,
-            signal_cutoff = finemapping_opts$signal_cutoff,
-            min_abs_corr = finemapping_opts$min_abs_corr
-          )
-          result_list[[paste0(finemapping_method, "_NO_QC")]] <- ser
+          result_list[[.make_method_name("bayesian_conditional_regression", qc_method, impute)]] <- bcr
+          ser <- .run_reanalysis(preprocess_results$sumstats, preprocess_results$LD_mat,
+            "single_effect", finemapping_opts, pri_coverage, sec_coverage)
+          result_list[["single_effect_NO_QC"]] <- ser
         }
       } else { # CS = 1 or NA
-        finemapping_method <- "single_effect"
-        sumstats <- preprocess_results$sumstats
-        LD_mat <- preprocess_results$LD_mat
-        ser <- susie_rss_pipeline(sumstats, LD_mat,
-          n = n, var_y = var_y,
-          L = finemapping_opts$init_L, max_L = finemapping_opts$max_L, l_step = finemapping_opts$l_step,
-          analysis_method = finemapping_method,
-          coverage = pri_coverage,
-          secondary_coverage = sec_coverage,
-          signal_cutoff = finemapping_opts$signal_cutoff,
-          min_abs_corr = finemapping_opts$min_abs_corr
-        )
-        result_list[[paste0(finemapping_method, "_NO_QC")]] <- ser
+        ser <- .run_reanalysis(preprocess_results$sumstats, preprocess_results$LD_mat,
+          "single_effect", finemapping_opts, pri_coverage, sec_coverage)
+        result_list[["single_effect_NO_QC"]] <- ser
       }
     result_list[["diagnostics"]] <- block_cs_metrics
     }

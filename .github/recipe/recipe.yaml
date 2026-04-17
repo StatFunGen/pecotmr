@@ -44,6 +44,7 @@ requirements:
     - r-gbj
     - r-glmnet
     - r-harmonicmeanp
+    - r-igraph
     - r-l0learn
     - r-magrittr
     - r-mashr
@@ -54,8 +55,6 @@ requirements:
     - r-pgenlibr
     - r-purrr
     - r-qgg
-    - r-quadprog
-    - r-quantreg
     - r-rcpp
     - r-rcpparmadillo
     - r-rcppdpr
@@ -68,7 +67,6 @@ requirements:
     - r-tidyr
     - r-vctrs
     - r-vroom
-    - r-xicor
   run:
     - bioconductor-biostrings
     - bioconductor-iranges
@@ -91,6 +89,7 @@ requirements:
     - r-gbj
     - r-glmnet
     - r-harmonicmeanp
+    - r-igraph
     - r-l0learn
     - r-magrittr
     - r-mashr

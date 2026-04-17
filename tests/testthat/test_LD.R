@@ -823,3 +823,108 @@ test_that("can_merge checks chromosome and size", {
   b3 <- data.frame(chrom = "2", size = 100)
   expect_false(pecotmr:::can_merge(b1, b3, max_size = 500))
 })
+
+# ===========================================================================
+# check_ld (regularize_ld)
+# ===========================================================================
+
+test_that("check_ld reports PD for identity matrix", {
+  R <- diag(5)
+  result <- check_ld(R)
+  expect_true(result$is_pd)
+  expect_true(result$is_psd)
+  expect_equal(result$method_applied, "none")
+  expect_equal(result$R, R)
+  expect_equal(result$condition_number, 1)
+})
+
+test_that("check_ld reports PD for well-conditioned correlation matrix", {
+  R <- matrix(0.3, 4, 4)
+  diag(R) <- 1
+  result <- check_ld(R)
+  expect_true(result$is_pd)
+  expect_true(result$is_psd)
+  expect_equal(result$n_negative, 0)
+  expect_equal(result$method_applied, "none")
+})
+
+test_that("check_ld detects non-PSD matrix", {
+  R <- matrix(0.9, 3, 3)
+  diag(R) <- 1
+  R[1, 3] <- R[3, 1] <- -0.5
+  result <- check_ld(R)
+  expect_false(result$is_psd)
+  expect_true(result$n_negative > 0)
+  expect_true(result$min_eigenvalue < 0)
+  expect_equal(result$method_applied, "none")
+})
+
+test_that("check_ld shrink method modifies non-PD matrix", {
+  R <- matrix(0.9, 3, 3)
+  diag(R) <- 1
+  R[1, 3] <- R[3, 1] <- -0.5
+  result <- check_ld(R, method = "shrink")
+  expect_equal(result$method_applied, "shrink")
+  expect_false(identical(result$R, R))
+  # With strong enough shrinkage, result should be PD
+  result2 <- check_ld(R, method = "shrink", shrinkage = 0.5)
+  eig <- eigen(result2$R, symmetric = TRUE)
+  expect_true(all(eig$values > 0))
+})
+
+test_that("check_ld eigenfix method improves non-PD matrix", {
+  R <- matrix(0.9, 3, 3)
+  diag(R) <- 1
+  R[1, 3] <- R[3, 1] <- -0.5
+  original_min_eval <- min(eigen(R, symmetric = TRUE)$values)
+  result <- check_ld(R, method = "eigenfix")
+  expect_equal(result$method_applied, "eigenfix")
+  # Eigenfix should improve the minimum eigenvalue
+  fixed_min_eval <- min(eigen(result$R, symmetric = TRUE)$values)
+  expect_true(fixed_min_eval > original_min_eval)
+  # Unit diagonal preserved
+  expect_equal(diag(result$R), rep(1, 3))
+  # Symmetry preserved
+  expect_equal(result$R, t(result$R))
+})
+
+test_that("check_ld shrink does nothing when matrix is already PD", {
+  R <- diag(3)
+  result <- check_ld(R, method = "shrink")
+  expect_equal(result$method_applied, "none")
+  expect_equal(result$R, R)
+})
+
+test_that("check_ld eigenfix does nothing when matrix is already PD", {
+  R <- diag(3)
+  result <- check_ld(R, method = "eigenfix")
+  expect_equal(result$method_applied, "none")
+  expect_equal(result$R, R)
+})
+
+# ===========================================================================
+# extract_block_matrices: out-of-range blocks
+# ===========================================================================
+
+test_that("extract_block_matrices warns and skips out-of-range blocks", {
+  mat <- diag(4)
+  vnames <- paste0("v", 1:4)
+  rownames(mat) <- colnames(mat) <- vnames
+  block_metadata <- data.frame(
+    block_id = c(1, 2),
+    start_idx = c(1, 10),
+    end_idx = c(2, 12),
+    chrom = c("1", "1"),
+    block_start = c(100, 500),
+    block_end = c(200, 600),
+    size = c(2, 3),
+    stringsAsFactors = FALSE
+  )
+  expect_warning(
+    result <- pecotmr:::extract_block_matrices(mat, block_metadata, vnames),
+    "outside the range"
+  )
+  valid_blocks <- result$ld_matrices[!sapply(result$ld_matrices, is.null)]
+  expect_equal(length(valid_blocks), 1)
+  expect_equal(nrow(valid_blocks[[1]]), 2)
+})

@@ -25,6 +25,7 @@ Imports:
     dplyr,
     furrr,
     future,
+    igraph,
     magrittr,
     matrixStats,
     purrr,
@@ -55,7 +56,6 @@ Suggests:
     ncvreg,
     pgenlibr,
     qgg,
-    udr,
     qvalue,
     rmarkdown,
     snpStats,
@@ -64,7 +64,6 @@ Remotes:
     stephenslab/fsusieR,
     stephenslab/mvsusieR,
     stephenslab/susieR,
-    stephenslab/udr
 LinkingTo:
     Rcpp,
     RcppArmadillo

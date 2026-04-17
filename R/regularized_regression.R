@@ -247,79 +247,51 @@ sdpr_weights <- function(stat, LD, ...) {
   return(model$beta_est)
 }
 
+# Shared helper for susie/susie_ash/susie_inf weight extraction.
+# @param fit A susie fit object (or NULL to fit from X, y).
+# @param X Genotype matrix (optional).
+# @param y Phenotype vector (optional).
+# @param required_fields Fields that must be present in the fit to extract weights.
+# @param fit_args Extra arguments passed to susie_wrapper when fit is NULL.
+# @param ... Additional arguments forwarded to susie_wrapper.
 #' @importFrom susieR coef.susie
+#' @noRd
+.susie_extract_weights <- function(fit, X, y, required_fields, fit_args = list(), ...) {
+  if (is.null(fit)) {
+    fit <- do.call(susie_wrapper, c(list(X = X, y = y), fit_args, list(...)))
+  }
+  if (!is.null(X) && length(fit$pip) != ncol(X)) {
+    stop(paste0(
+      "Dimension mismatch on number of variant in susie fit ", length(fit$pip),
+      " and TWAS weights ", ncol(X), ". "
+    ))
+  }
+  if (all(required_fields %in% names(fit))) {
+    fit$intercept <- 0
+    return(coef.susie(fit)[-1])
+  } else {
+    return(rep(0, length(fit$pip)))
+  }
+}
+
 #' @export
 susie_weights <- function(X = NULL, y = NULL, susie_fit = NULL, ...) {
-  if (is.null(susie_fit)) {
-    # get susie_fit object
-    susie_fit <- susie_wrapper(X, y, ...)
-  }
-  if (!is.null(X)) {
-    if (length(susie_fit$pip) != ncol(X)) {
-      stop(paste0(
-        "Dimension mismatch on number of variant in susie_fit ", length(susie_fit$pip),
-        " and TWAS weights ", ncol(X), ". "
-      ))
-    }
-  }
-  if ("alpha" %in% names(susie_fit) && "mu" %in% names(susie_fit) && "X_column_scale_factors" %in% names(susie_fit)) {
-    # This is designed to cope with output from pecotmr::susie_post_processor()
-    # We set intercept to 0 and later trim it off anyways
-    susie_fit$intercept <- 0
-    return(coef.susie(susie_fit)[-1])
-  } else {
-    return(rep(0, length(susie_fit$pip)))
-  }
+  .susie_extract_weights(susie_fit, X, y,
+    required_fields = c("alpha", "mu", "X_column_scale_factors"), ...)
 }
 
-#' @importFrom susieR coef.susie
 #' @export
 susie_ash_weights <- function(X = NULL, y = NULL, susie_ash_fit = NULL, ...) {
-  if (is.null(susie_ash_fit)) {
-    # get susie_ash_fit object
-    susie_ash_fit <- susie_wrapper(X, y, unmappable_effects = "ash", convergence_method = "pip", ...)
-  }
-  if (!is.null(X)) {
-    if (length(susie_ash_fit$pip) != ncol(X)) {
-      stop(paste0(
-        "Dimension mismatch on number of variant in susie_ash_fit ", length(susie_ash_fit$pip),
-        " and TWAS weights ", ncol(X), ". "
-      ))
-    }
-  }
-  if ("alpha" %in% names(susie_ash_fit) && "mu" %in% names(susie_ash_fit) && "theta" %in% names(susie_ash_fit) && "X_column_scale_factors" %in% names(susie_ash_fit)) {
-    # This is designed to cope with output from pecotmr::susie_post_processor()
-    # We set intercept to 0 and later trim it off anyways
-    susie_ash_fit$intercept <- 0
-    return(coef.susie(susie_ash_fit)[-1])
-  } else {
-    return(rep(0, length(susie_ash_fit$pip)))
-  }
+  .susie_extract_weights(susie_ash_fit, X, y,
+    required_fields = c("alpha", "mu", "theta", "X_column_scale_factors"),
+    fit_args = list(unmappable_effects = "ash", convergence_method = "pip"), ...)
 }
 
-#' @importFrom susieR coef.susie
 #' @export
 susie_inf_weights <- function(X = NULL, y = NULL, susie_inf_fit = NULL, ...) {
-  if (is.null(susie_inf_fit)) {
-    # get susie_inf_fit object
-    susie_inf_fit <- susie_wrapper(X, y, unmappable_effects = "inf", convergence_method = "pip", ...)
-  }
-  if (!is.null(X)) {
-    if (length(susie_inf_fit$pip) != ncol(X)) {
-      stop(paste0(
-        "Dimension mismatch on number of variant in susie_inf_fit ", length(susie_inf_fit$pip),
-        " and TWAS weights ", ncol(X), ". "
-      ))
-    }
-  }
-  if ("alpha" %in% names(susie_inf_fit) && "mu" %in% names(susie_inf_fit) && "theta" %in% names(susie_inf_fit) && "X_column_scale_factors" %in% names(susie_inf_fit)) {
-    # This is designed to cope with output from pecotmr::susie_post_processor()
-    # We set intercept to 0 and later trim it off anyways
-    susie_inf_fit$intercept <- 0
-    return(coef.susie(susie_inf_fit)[-1])
-  } else {
-    return(rep(0, length(susie_inf_fit$pip)))
-  }
+  .susie_extract_weights(susie_inf_fit, X, y,
+    required_fields = c("alpha", "mu", "theta", "X_column_scale_factors"),
+    fit_args = list(unmappable_effects = "inf", convergence_method = "pip"), ...)
 }
 
 #' @export
@@ -383,8 +355,9 @@ init_prior_sd <- function(X, y, n = 30) {
 # (glmnet, ncvreg, L0Learn, qgg, BGLR, RcppDPR) all either error or behave
 # poorly on constant columns, so wrappers should filter them out and zero-pad
 # their results back to length p.
+#' @importFrom matrixStats colSds
 .drop_zero_variance <- function(X, fn_name) {
-  sds <- apply(X, 2, sd)
+  sds <- matrixStats::colSds(X)
   keep <- !is.na(sds) & sds != 0
   if (!all(keep)) {
     warning(sprintf(

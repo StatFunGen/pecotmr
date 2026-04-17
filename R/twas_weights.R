@@ -1,3 +1,41 @@
+# Identify non-zero-variance columns of X. Returns a logical vector.
+#' @importFrom matrixStats colSds
+#' @noRd
+.nonzero_var_columns <- function(X) {
+  sds <- matrixStats::colSds(X, na.rm = TRUE)
+  !is.na(sds) & sds != 0
+}
+
+# Embed a smaller weights matrix into a full-sized zero matrix matching X and Y dimensions.
+# @param weights_matrix The fitted weights (nrow = number of valid columns).
+# @param valid_columns Logical or character vector identifying which columns of X were used.
+# @param X_colnames Column names of the original X.
+# @param Y_colnames Column names of Y.
+# @noRd
+.embed_weights <- function(weights_matrix, valid_columns, n_cols_X, n_cols_Y,
+                           X_colnames = NULL, Y_colnames = NULL) {
+  full <- matrix(0, nrow = n_cols_X, ncol = n_cols_Y)
+  if (!is.null(X_colnames)) rownames(full) <- X_colnames
+  if (!is.null(Y_colnames)) colnames(full) <- Y_colnames
+  full[valid_columns, ] <- weights_matrix
+  full
+}
+
+# Filter weight methods that produced all-zero weights from CV.
+# Returns filtered weight_methods list and warns about removed methods.
+# @noRd
+.filter_zero_weight_methods <- function(weight_methods, twas_weights_res) {
+  is_all_zero <- vapply(twas_weights_res, function(w) all(w == 0, na.rm = TRUE), logical(1))
+  removed <- names(weight_methods)[is_all_zero]
+  if (length(removed) > 0) {
+    warning(sprintf(
+      "Methods %s are removed from CV because all their weights are zeros.",
+      paste(removed, collapse = ", ")
+    ))
+  }
+  weight_methods[!is_all_zero]
+}
+
 #' Cross-Validation for weights selection in Transcriptome-Wide Association Studies (TWAS)
 #'
 #' Performs cross-validation for TWAS, supporting both univariate and multivariate methods.
@@ -171,8 +209,8 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
       X_test <- dat_split$Xtest
       Y_test <- dat_split$Ytest
 
-      # Remove columns with zero standard error
-      valid_columns <- apply(X_train, 2, function(col) sd(col) != 0)
+      # Remove columns with zero variance
+      valid_columns <- .nonzero_var_columns(X_train)
       X_train <- X_train[, valid_columns, drop = FALSE]
       X_train <- filter_X_with_Y(X_train, Y_train, missing_rate_thresh = 1, maf_thresh = NULL)
       valid_columns <- colnames(X_train)
@@ -193,11 +231,7 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
           }
           weights_matrix <- do.call(method, c(list(X = X_train, Y = Y_train), args))
           rownames(weights_matrix) <- colnames(X_train)
-          # Adjust the weights matrix to include zeros for invalid columns
-          full_weights_matrix <- matrix(0, nrow = ncol(X), ncol = ncol(Y))
-          rownames(full_weights_matrix) <- colnames(X)
-          colnames(full_weights_matrix) <- colnames(Y)
-          full_weights_matrix[valid_columns, ] <- weights_matrix[valid_columns, ]
+          full_weights_matrix <- .embed_weights(weights_matrix[valid_columns, , drop = FALSE], valid_columns, ncol(X), ncol(Y), colnames(X), colnames(Y))
           Y_pred <- X_test %*% full_weights_matrix
           rownames(Y_pred) <- rownames(X_test)
           return(Y_pred)
@@ -333,8 +367,8 @@ twas_weights <- function(X, Y, weight_methods, num_threads = 1) {
     multivariate_weight_methods <- c("mrmash_weights", "mvsusie_weights")
     args <- weight_methods[[method_name]]
 
-    # Remove columns with zero standard error
-    valid_columns <- apply(X, 2, function(col) sd(col) != 0)
+    # Remove columns with zero variance
+    valid_columns <- .nonzero_var_columns(X)
     X_filtered <- as.matrix(X[, valid_columns, drop = FALSE])
 
     if (method_name %in% multivariate_weight_methods) {
@@ -353,13 +387,7 @@ twas_weights <- function(X, Y, weight_methods, num_threads = 1) {
       }
     }
 
-    # Adjust the weights matrix to include zeros for invalid columns
-    full_weights_matrix <- matrix(0, nrow = ncol(X), ncol = ncol(Y))
-    rownames(full_weights_matrix) <- colnames(X)
-    colnames(full_weights_matrix) <- colnames(Y)
-    full_weights_matrix[valid_columns, ] <- weights_matrix
-
-    return(full_weights_matrix)
+    return(.embed_weights(weights_matrix, valid_columns, ncol(X), ncol(Y), colnames(X), colnames(Y)))
   }
 
   if (num_cores >= 2) {
@@ -471,21 +499,7 @@ twas_weights_pipeline <- function(X,
       weight_methods$susie_weights <- list(refine = FALSE, init_L = max_L, max_L = max_L)
     }
     if (is.null(cv_weight_methods)) {
-      # Filter function to exclude methods with all zero weights and track removed methods
-      is_all_zero <- sapply(res$twas_weights, function(weights) all(weights == 0, na.rm = TRUE))
-
-      # Identify removed methods
-      removed_methods <- names(weight_methods)[is_all_zero]
-
-      # Issue a warning if any methods have been removed
-      if (length(removed_methods) > 0) {
-        warning(sprintf(
-          "Methods %s are removed from CV because all their weights are zeros.",
-          paste(removed_methods, collapse = ", ")
-        ))
-      }
-      # Extract the filtered methods retaining their specific configurations
-      cv_weight_methods <- names(weight_methods)[!is_all_zero]
+      cv_weight_methods <- names(.filter_zero_weight_methods(weight_methods, res$twas_weights))
     }
 
     variants_for_cv <- c()
@@ -553,19 +567,17 @@ twas_multivariate_weights_pipeline <- function(
     cv_threads = 1,
     verbose = FALSE) {
   copy_twas_results <- function(context_names, variant_names, twas_weight, twas_predictions) {
-    res <- setNames(vector("list", length(context_names)), context_names)
-    for (i in names(res)) {
-      if (i %in% colnames(twas_weights_res[[1]])) {
-        res[[i]]$twas_weights <- lapply(twas_weight, function(wgts) {
-          wgts[, i]
-        })
-        res[[i]]$twas_predictions <- lapply(twas_predictions, function(pred) {
-          pred[, i]
-        })
-        res[[i]]$variant_names <- variant_names
+    setNames(lapply(context_names, function(ctx) {
+      if (ctx %in% colnames(twas_weight[[1]])) {
+        list(
+          twas_weights = lapply(twas_weight, function(wgts) wgts[, ctx]),
+          twas_predictions = lapply(twas_predictions, function(pred) pred[, ctx]),
+          variant_names = variant_names
+        )
+      } else {
+        NULL
       }
-    }
-    return(res)
+    }), context_names)
   }
 
   copy_twas_cv_results <- function(twas_result, twas_cv_result) {
@@ -630,22 +642,7 @@ twas_multivariate_weights_pipeline <- function(
       )
     )
 
-    # Filter function to exclude methods with all zero weights and track removed methods
-    is_all_zero <- sapply(twas_weights_res, function(weights) all(weights == 0, na.rm = TRUE))
-
-    # Identify removed methods
-    removed_methods <- names(weight_methods)[is_all_zero]
-
-    # Issue a warning if any methods have been removed
-    if (length(removed_methods) > 0) {
-      warning(sprintf(
-        "Methods %s are removed from CV because all their weights are zeros.",
-        paste(removed_methods, collapse = ", ")
-      ))
-    }
-
-    # Extract the filtered methods retaining their specific configurations
-    weight_methods <- weight_methods[!is_all_zero]
+    weight_methods <- .filter_zero_weight_methods(weight_methods, twas_weights_res)
 
     variants_for_cv <- c()
     if (max_cv_variants <= 0) max_cv_variants <- Inf

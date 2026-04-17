@@ -1537,3 +1537,63 @@ test_that("invert_minmax_scaling errors on mismatched lengths", {
   expect_error(invert_minmax_scaling(X, c(0, 0, 0), c(1, 1, 1)),
                "Length of u_min")
 })
+
+# ===========================================================================
+# batch_load_twas_weights
+# ===========================================================================
+
+test_that("batch_load_twas_weights returns empty list for empty input", {
+  expect_message(
+    result <- batch_load_twas_weights(list(), data.frame(region_id = character(), TSS = integer())),
+    "No genes"
+  )
+  expect_equal(length(result), 0)
+})
+
+test_that("batch_load_twas_weights returns single batch when total memory fits", {
+  twas <- list(
+    gene1 = list(a = 1:10),
+    gene2 = list(a = 1:10)
+  )
+  meta <- data.frame(region_id = c("gene1", "gene2"), TSS = c(100, 200))
+  expect_message(
+    result <- batch_load_twas_weights(twas, meta, max_memory_per_batch = 1000),
+    "No need to split"
+  )
+  expect_equal(length(result), 1)
+  expect_true(all(c("gene1", "gene2") %in% names(result[[1]])))
+})
+
+test_that("batch_load_twas_weights splits into multiple batches", {
+  # Create data large enough to require splitting
+  twas <- list(
+    gene1 = rnorm(1e5),
+    gene2 = rnorm(1e5),
+    gene3 = rnorm(1e5)
+  )
+  # Each gene is ~0.76 MB
+  gene_size_mb <- as.numeric(object.size(twas[[1]])) / (1024^2)
+  # Set limit so at most 2 genes fit per batch
+  max_mb <- gene_size_mb * 1.5
+  meta <- data.frame(region_id = c("gene1", "gene2", "gene3"), TSS = c(100, 200, 300))
+  result <- batch_load_twas_weights(twas, meta, max_memory_per_batch = max_mb)
+  expect_true(length(result) >= 2)
+  # All genes should be present across batches
+  all_genes <- unlist(lapply(result, names))
+  expect_true(all(c("gene1", "gene2", "gene3") %in% all_genes))
+})
+
+test_that("batch_load_twas_weights puts oversized gene in its own batch", {
+  twas <- list(
+    gene_small = list(a = 1:10),
+    gene_big = rnorm(1e6)
+  )
+  big_size_mb <- as.numeric(object.size(twas$gene_big)) / (1024^2)
+  small_size_mb <- as.numeric(object.size(twas$gene_small)) / (1024^2)
+  # Set limit between small and big
+  max_mb <- big_size_mb * 0.5
+  meta <- data.frame(region_id = c("gene_small", "gene_big"), TSS = c(100, 200))
+  result <- batch_load_twas_weights(twas, meta, max_memory_per_batch = max_mb)
+  # Big gene should be in its own batch
+  expect_true(length(result) >= 2)
+})

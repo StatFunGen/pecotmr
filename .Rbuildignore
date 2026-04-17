@@ -7,3 +7,4 @@
 ^pixi.lock
 ^\.pixi
 ^.covrignore
+^.claude

@@ -17,7 +17,6 @@ twas_pipeline(
   rsq_pval_option = c("pval", "adj_rsq_pval"),
   mr_pval_cutoff = 0.05,
   mr_coverage_column = "cs_coverage_0.95",
-  quantile_twas = FALSE,
   output_twas_data = FALSE,
   event_filters = NULL,
   column_file_path = NULL,

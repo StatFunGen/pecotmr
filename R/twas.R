@@ -32,15 +32,8 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
   # Function to group contexts based on start and end positions
   group_contexts_by_region <- function(twas_weights_data, molecular_id, chrom, tolerance = 5000) {
     region_info_df <- do.call(rbind, lapply(names(twas_weights_data$weights), function(context) {
-      wgt_range <- as.integer(sapply(
-        rownames(twas_weights_data[["weights"]][[context]]),
-        function(variant_id) {
-          strsplit(variant_id, "\\:")[[1]][2]
-        }
-      ))
-      min <- min(wgt_range)
-      max <- max(wgt_range)
-      data.frame(context = context, start = min, end = max)
+      wgt_range <- parse_variant_id(rownames(twas_weights_data[["weights"]][[context]]))$pos
+      data.frame(context = context, start = min(wgt_range), end = max(wgt_range))
     }))
     if (nrow(region_info_df) == 1) {
       # Handle case with only one context
@@ -123,31 +116,31 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
 
   # loop through genes/events:
   for (molecular_id in molecular_ids) {
-    results[[molecular_id]][["chrom"]] <- chrom
-    results[[molecular_id]][["data_type"]] <- if ("data_type" %in% names(twas_weights_data[[molecular_id]])) twas_weights_data[[molecular_id]]$data_type
-    results[[molecular_id]][["variant_names"]] <- list()
+    mol_data <- twas_weights_data[[molecular_id]]
+    mol_res <- list(chrom = chrom, variant_names = list())
+    mol_res[["data_type"]] <- if ("data_type" %in% names(mol_data)) mol_data$data_type
 
     # group contexts based on the variant position
-    context_clusters <- group_contexts_by_region(twas_weights_data[[molecular_id]], molecular_id, chrom, tolerance = 5000)
+    context_clusters <- group_contexts_by_region(mol_data, molecular_id, chrom, tolerance = 5000)
 
     # loop through contexts: grouping contexts can be useful during TWAS data harmonization to stratify variants for LD loading
     for (context_group in names(context_clusters)) {
-      contexts <- context_clusters[[context_group]]$contexts
-      query_region <- context_clusters[[context_group]]$query_region
+      cluster <- context_clusters[[context_group]]
+      contexts <- cluster$contexts
+      query_region <- cluster$query_region
       region_of_interest <- region_to_df(query_region)
-      all_variants <- context_clusters[[context_group]]$all_variants # all variants for this context group
-      all_variants <- variant_id_to_df(all_variants)
+      all_variants <- variant_id_to_df(cluster$all_variants)
 
       # Step 3: load GWAS data for clustered context groups
       for (study in names(gwas_files)) {
         gwas_file <- gwas_files[study]
-        gwas_data_sumstats <- harmonize_gwas(gwas_file, query_region=query_region,   
-                                              LD_list$LD_variants, c("beta", "z"),   
+        gwas_data_sumstats <- harmonize_gwas(gwas_file, query_region=query_region,
+                                              LD_list$LD_variants, c("beta", "z"),
                                               match_min_prop = 0, column_file_path = column_file_path, comment_string = comment_string)
         if(is.null(gwas_data_sumstats)) next
         # loop through context within the context group:
         for (context in contexts) {
-          weights_matrix <- twas_weights_data[[molecular_id]][["weights"]][[context]]
+          weights_matrix <- mol_data[["weights"]][[context]]
 
           # Step 4: harmonize weights, flip allele
           weights_matrix <- cbind(variant_id_to_df(rownames(weights_matrix)), weights_matrix)
@@ -155,11 +148,11 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
             colnames(weights_matrix)[!colnames(weights_matrix) %in% c("chrom", "pos", "A2", "A1")],
             match_min_prop = 0
           )
-          weights_matrix_subset <- as.matrix(weights_matrix_qced$target_data_qced[, !colnames(weights_matrix_qced$target_data_qced) %in% c(
-            "chrom",
-            "pos", "A2", "A1", "variant_id", "variants_id_original"
+          qced_data <- weights_matrix_qced$target_data_qced
+          weights_matrix_subset <- as.matrix(qced_data[, !colnames(qced_data) %in% c(
+            "chrom", "pos", "A2", "A1", "variant_id", "variants_id_original"
           ), drop = FALSE])
-          rownames(weights_matrix_subset) <- weights_matrix_qced$target_data_qced$variant_id # weight variant names are flipped/corrected
+          rownames(weights_matrix_subset) <- qced_data$variant_id
 
           # intersect post-qc gwas and post-qc weight variants (all now in canonical chr-prefix format)
           gwas_LD_variants <- intersect(gwas_data_sumstats$variant_id, LD_list$LD_variants)
@@ -168,8 +161,8 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
           postqc_weight_variants <- rownames(weights_matrix_subset)
 
           # Step 5: adjust SuSiE weights based on available variants
-          if ("susie_weights" %in% colnames(twas_weights_data[[molecular_id]][["weights"]][[context]])) {
-            adjusted_susie_weights <- adjust_susie_weights(twas_weights_data[[molecular_id]],
+          if ("susie_weights" %in% colnames(mol_data[["weights"]][[context]])) {
+            adjusted_susie_weights <- adjust_susie_weights(mol_data,
               keep_variants = postqc_weight_variants, run_allele_qc = TRUE,
               variable_name_obj = c("variant_names", context),
               susie_obj = c("susie_results", context),
@@ -179,16 +172,17 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
               susie_weights = setNames(adjusted_susie_weights$adjusted_susie_weights, adjusted_susie_weights$remained_variants_ids),
               weights_matrix_subset[adjusted_susie_weights$remained_variants_ids, !colnames(weights_matrix_subset) %in% "susie_weights", drop = FALSE]
             )
-            results[[molecular_id]][["susie_weights_intermediate_qced"]][[context]] <- twas_weights_data[[molecular_id]]$susie_results[[context]][c("pip", "cs_variants", "cs_purity")]
-            names(results[[molecular_id]][["susie_weights_intermediate_qced"]][[context]][["pip"]]) <- rownames(weights_matrix) # original variants that is not qced yet
-            pip <- results[[molecular_id]][["susie_weights_intermediate_qced"]][[context]][["pip"]]
+            susie_intermediate <- mol_data$susie_results[[context]][c("pip", "cs_variants", "cs_purity")]
+            names(susie_intermediate[["pip"]]) <- rownames(weights_matrix) # original variants that is not qced yet
+            pip <- susie_intermediate[["pip"]]
             pip_qced <- allele_qc(cbind(parse_variant_id(names(pip)), pip), LD_list$LD_variants, "pip", match_min_prop = 0)
-            results[[molecular_id]][["susie_weights_intermediate_qced"]][[context]][["pip"]] <- abs(pip_qced$target_data_qced$pip)
-            names(results[[molecular_id]][["susie_weights_intermediate_qced"]][[context]][["pip"]]) <- pip_qced$target_data_qced$variant_id
-            results[[molecular_id]][["susie_weights_intermediate_qced"]][[context]][["cs_variants"]] <- lapply(results[[molecular_id]][["susie_weights_intermediate_qced"]][[context]][["cs_variants"]], function(x) {
+            susie_intermediate[["pip"]] <- abs(pip_qced$target_data_qced$pip)
+            names(susie_intermediate[["pip"]]) <- pip_qced$target_data_qced$variant_id
+            susie_intermediate[["cs_variants"]] <- lapply(susie_intermediate[["cs_variants"]], function(x) {
               variant_qc <- allele_qc(x, LD_list$LD_variants, match_min_prop = 0)
               variant_qc$target_data_qced$variant_id[variant_qc$target_data_qced$variant_id %in% postqc_weight_variants]
             })
+            mol_res[["susie_weights_intermediate_qced"]][[context]] <- susie_intermediate
           }
           rm(weights_matrix) # context specific original weight matrix
           gc()
@@ -197,27 +191,29 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
               warning("weights_matrix_subset is empty. Skipping this context.")
               next
           }
-          results[[molecular_id]][["variant_names"]][[context]][[study]] <- rownames(weights_matrix_subset)
+          mol_res[["variant_names"]][[context]][[study]] <- rownames(weights_matrix_subset)
 
           # Step 6: scale weights by variance (from ref_panel, populated by load_LD_matrix)
           variance <- LD_list$ref_panel$variance[match(rownames(weights_matrix_subset), LD_list$ref_panel$variant_id)]
-          results[[molecular_id]][["weights_qced"]][[context]][[study]] <- list(scaled_weights = weights_matrix_subset * sqrt(variance), weights = weights_matrix_subset)
+          mol_res[["weights_qced"]][[context]][[study]] <- list(scaled_weights = weights_matrix_subset * sqrt(variance), weights = weights_matrix_subset)
         }
         # Combine gwas sumstat across different context for a single context group (all variant_ids now in canonical format)
-        gwas_data_sumstats <- gwas_data_sumstats[gwas_data_sumstats$variant_id %in% unique(find_data(results[[molecular_id]][["variant_names"]], c(2, study))), , drop = FALSE]
-        results[[molecular_id]][["gwas_qced"]][[study]] <- rbind(results[[molecular_id]][["gwas_qced"]][[study]], gwas_data_sumstats)
-        results[[molecular_id]][["gwas_qced"]][[study]] <- results[[molecular_id]][["gwas_qced"]][[study]][!duplicated(results[[molecular_id]][["gwas_qced"]][[study]][, c("variant_id", "z")]), ]
+        gwas_data_sumstats <- gwas_data_sumstats[gwas_data_sumstats$variant_id %in% unique(find_data(mol_res[["variant_names"]], c(2, study))), , drop = FALSE]
+        mol_res[["gwas_qced"]][[study]] <- rbind(mol_res[["gwas_qced"]][[study]], gwas_data_sumstats)
+        gwas_qced <- mol_res[["gwas_qced"]][[study]]
+        mol_res[["gwas_qced"]][[study]] <- gwas_qced[!duplicated(gwas_qced[, c("variant_id", "z")]), ]
       }
     }
     twas_weights_data[[molecular_id]] <- NULL
     # extract LD matrix for variants intersect with gwas and twas weights at molecular_id level
-    all_molecular_variants <- unique(find_data(results[[molecular_id]][["gwas_qced"]], c(2, "variant_id")))
+    all_molecular_variants <- unique(find_data(mol_res[["gwas_qced"]], c(2, "variant_id")))
     if (is.null(all_molecular_variants)) {
       results[[molecular_id]] <- NULL
     } else {
       # All variant IDs are now in canonical chr-prefix format
       var_indx <- match(all_molecular_variants, LD_list$LD_variants)
-      results[[molecular_id]][["LD"]] <- as.matrix(LD_list$LD_matrix[var_indx, var_indx])
+      mol_res[["LD"]] <- as.matrix(LD_list$LD_matrix[var_indx, var_indx])
+      results[[molecular_id]] <- mol_res
     }
   }
   # return results
@@ -250,9 +246,9 @@ harmonize_gwas <- function(gwas_file, query_region, ld_variants, col_to_flip=NUL
     }
     if (colnames(gwas_data_sumstats)[1] == "#chrom") colnames(gwas_data_sumstats)[1] <- "chrom" # colname update for tabix
     
-    # Check if sumstats has z-scores or (beta and se)  
-    if (!is.null(gwas_data_sumstats$z)) {  
-      gwas_data_sumstats$z <- gwas_data_sumstats$z  
+    # Check if sumstats has z-scores or (beta and se)
+    if (!is.null(gwas_data_sumstats$z)) {
+      # z-scores already present, nothing to do
     } else if (!is.null(gwas_data_sumstats$beta) && !is.null(gwas_data_sumstats$se)) {  
       gwas_data_sumstats$z <- gwas_data_sumstats$beta / gwas_data_sumstats$se  
     } else {  
@@ -294,47 +290,46 @@ twas_pipeline <- function(twas_weights_data,
                           comment_string="#") {
   # internal function to format TWAS output
   format_twas_data <- function(post_qc_twas_data, twas_table) {
-    weights_list <- do.call(c, lapply(names(post_qc_twas_data), function(molecular_id) {
-      contexts <- names(post_qc_twas_data[[molecular_id]][["weights_qced"]])
-      chrom <- post_qc_twas_data[[molecular_id]][["chrom"]]
-      do.call(c, lapply(contexts, function(context) {
-        weight <- list()
-        data_type <- post_qc_twas_data[[molecular_id]][["data_type"]][[context]]
-        if (!is.null(post_qc_twas_data[[molecular_id]][["model_selection"]]) &&
-          is.list(post_qc_twas_data[[molecular_id]][["model_selection"]]) &&
-          length(post_qc_twas_data[[molecular_id]][["model_selection"]]) > 0) {
-          is_imputable <- post_qc_twas_data[[molecular_id]][["model_selection"]][[context]]$is_imputable
-          if (isTRUE(is_imputable)) {
-            model_selected <- post_qc_twas_data[[molecular_id]][["model_selection"]][[context]]$selected_model
-          } else {
-            model_selected <- NA
-          }
+    weights_list <- purrr::map(names(post_qc_twas_data), function(molecular_id) {
+      mol <- post_qc_twas_data[[molecular_id]]
+      contexts <- names(mol[["weights_qced"]])
+      mol_chrom <- mol[["chrom"]]
+      model_sel <- mol[["model_selection"]]
+
+      purrr::map(contexts, function(context) {
+        data_type <- mol[["data_type"]][[context]]
+        if (!is.null(model_sel) && is.list(model_sel) && length(model_sel) > 0) {
+          is_imputable <- model_sel[[context]]$is_imputable
+          model_selected <- if (isTRUE(is_imputable)) model_sel[[context]]$selected_model else NA
         } else {
           model_selected <- NA
           is_imputable <- NA
         }
-        postqc_scaled_weight <- list()
-        gwas_studies <- names(post_qc_twas_data[[molecular_id]][["weights_qced"]][[context]]) # context-level gwas-studies
-        
-        if (!is.null(model_selected) & isTRUE(is_imputable)) {
-          # TWAS
-          for (study in gwas_studies) {
-            postqc_scaled_weight[[study]] <- post_qc_twas_data[[molecular_id]][["weights_qced"]][[context]][[study]][["scaled_weights"]][, paste0(model_selected, "_weights"), drop = FALSE]
-            colnames(postqc_scaled_weight[[study]]) <- "weight"
-            # variant IDs are in canonical chr-prefix format from allele_qc
-            context_variants <- rownames(post_qc_twas_data[[molecular_id]][["weights_qced"]][[context]][[study]][["scaled_weights"]])
-            context_range <- as.integer(sapply(context_variants, function(variant) strsplit(variant, "\\:")[[1]][2]))
-            weight[[paste0(molecular_id, "|", data_type, "_", context)]][[study]] <- list(
-              chrom = chrom, p0 = min(context_range), p1 = max(context_range),
-              wgt = postqc_scaled_weight[[study]], molecular_id = molecular_id, weight_name = paste0(data_type, "_", context), type = data_type,
-              context = context, n_wgt = length(context_variants)
-            )
-          }
-        }
-        return(weight)
-      }))
-    }))
-    weights <- weights_list[!sapply(weights_list, is.null)]
+        if (is.null(model_selected) || !isTRUE(is_imputable)) return(NULL)
+
+        gwas_studies <- names(mol[["weights_qced"]][[context]])
+        weight_key <- paste0(molecular_id, "|", data_type, "_", context)
+        study_entries <- purrr::map(gwas_studies, function(study) {
+          ctx_weights <- mol[["weights_qced"]][[context]][[study]]
+          scaled_wgt <- ctx_weights[["scaled_weights"]][, paste0(model_selected, "_weights"), drop = FALSE]
+          colnames(scaled_wgt) <- "weight"
+          context_variants <- rownames(ctx_weights[["scaled_weights"]])
+          context_range <- parse_variant_id(context_variants)$pos
+          entry <- list(list(
+            chrom = mol_chrom, p0 = min(context_range), p1 = max(context_range),
+            wgt = scaled_wgt, molecular_id = molecular_id,
+            weight_name = paste0(data_type, "_", context), type = data_type,
+            context = context, n_wgt = length(context_variants)
+          ))
+          names(entry) <- study
+          result <- list(entry)
+          names(result) <- weight_key
+          result
+        }) %>% purrr::list_flatten()
+        study_entries
+      }) %>% purrr::compact() %>% purrr::list_flatten()
+    }) %>% purrr::list_flatten()
+    weights <- purrr::compact(weights_list)
     # Optional susie_weights_intermediate_qced processing
     if ("susie_weights_intermediate_qced" %in% names(post_qc_twas_data[[1]])) {
       susie_weights_intermediate_qced <- setNames(lapply(
