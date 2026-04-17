@@ -553,3 +553,61 @@ test_that("mr_analysis with multiple credible sets", {
   expect_equal(nrow(result), 1)
   expect_equal(result$num_CS, 2)
 })
+
+# =============================================================================
+# .create_null_mr_df
+# =============================================================================
+
+test_that(".create_null_mr_df creates correct structure", {
+  spec <- c(x = "numeric", y = "character", z = "integer")
+  result <- pecotmr:::.create_null_mr_df("gene1", spec)
+  expect_s3_class(result, "data.frame")
+  expect_equal(nrow(result), 1)
+  expect_equal(result$gene_name, "gene1")
+  expect_true(is.numeric(result$x))
+  expect_true(is.character(result$y))
+  expect_true(is.integer(result$z))
+  expect_true(all(is.na(result[, -1])))
+})
+
+# =============================================================================
+# mr_format: tryCatch error path
+# =============================================================================
+
+test_that("mr_format returns null df when get_nested_element errors for top_loci", {
+  # susie_result has the gene_name path but top_loci path is broken
+  bad_susie <- list(susie_results = list(
+    condition1 = list(
+      region_info = list(region_name = "Gene_Test")
+      # no top_loci key — forces tryCatch error path
+    )
+  ))
+  result <- mr_format(
+    bad_susie, "condition1",
+    data.frame(variant_id = "chr1:1:A:G", pos = 1, z = 1, beta = 0.1, se = 0.05,
+               effect_allele_frequency = 0.3, n_case = 500, n_control = 500),
+    coverage = "cs_coverage_0.95"
+  )
+  expect_true(is.data.frame(result))
+  expect_true(all(is.na(result[, -1])))
+})
+
+# =============================================================================
+# mr_format: no overlapping positions
+# =============================================================================
+
+test_that("mr_format returns null df when no positions overlap", {
+  input_data <- generate_format_mock_data(seed = 42)
+  # Shift GWAS positions so they don't overlap with SuSiE positions
+  input_data$gwas_sumstats_db$pos <- input_data$gwas_sumstats_db$pos + 10000
+  input_data$gwas_sumstats_db$variant_id <- paste0(
+    "chr1:", input_data$gwas_sumstats_db$pos, ":",
+    sub("chr1:\\d+:", "", input_data$gwas_sumstats_db$variant_id)
+  )
+  result <- mr_format(
+    input_data$susie_result, "condition1", input_data$gwas_sumstats_db,
+    coverage = "cs_coverage_0.95", run_allele_qc = TRUE
+  )
+  expect_true(is.data.frame(result))
+  expect_true(all(is.na(result[, -1])))
+})

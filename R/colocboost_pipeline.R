@@ -14,6 +14,20 @@ build_ld_args <- function(ld_list, subset = NULL) {
   if (is_geno) list(X_ref = ld_list) else list(LD = ld_list)
 }
 
+# Run colocboost with tryCatch and timing.
+# @noRd
+.run_colocboost <- function(label, ...) {
+  t1 <- Sys.time()
+  res <- tryCatch(
+    colocboost(...),
+    error = function(e) {
+      message(label, " failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+  list(result = res, time = Sys.time() - t1)
+}
+
 #' Multi-trait colocalization analysis pipeline
 #'
 #' This function perform a multi-trait colocalization using ColocBoost
@@ -113,61 +127,54 @@ colocboost_analysis_pipeline <- function(region_data,
     return(filtered_events)
   }
 
-  # - extract contexts and studies from region data
+  # - extract contexts and studies from region data, handling both pre- and post-QC
   extract_contexts_studies <- function(region_data, phenotypes_init = NULL) {
     individual_data <- region_data$individual_data
     sumstat_data <- region_data$sumstat_data
+    phenotypes <- list("individual_contexts" = NULL, "sumstat_studies" = NULL)
 
-    if (is.null(phenotypes_init)) {
-      # - inital setup
-      phenotypes <- list("individual_contexts" = NULL, "sumstat_studies" = NULL)
-      if (!is.null(individual_data)) {
+    # Extract individual contexts
+    if (!is.null(individual_data)) {
+      if (is.null(phenotypes_init)) {
         phenotypes$individual_contexts <- names(individual_data$residual_Y)
       } else {
-        message("No individual data in this region!")
-      }
-      if (!is.null(sumstat_data)) {
-        phenotypes$sumstat_studies <- sapply(sumstat_data$sumstats, function(ss) names(ss)) %>%
-          unlist() %>%
-          as.vector()
-      } else {
-        message("No sumstat data in this region!")
-      }
-    } else {
-      # - after QC
-      phenotypes <- list("individual_contexts" = NULL, "sumstat_studies" = NULL)
-      if (!is.null(individual_data)) {
         null_Y <- which(sapply(individual_data$Y, is.null))
         if (length(null_Y) == 0) {
           message("All individual data pass QC steps.")
           phenotypes$individual_contexts <- names(individual_data$Y)
-        } else if (length(null_Y) != length(individual_data$Y)) {
+        } else if (length(null_Y) < length(individual_data$Y)) {
           message(paste(
             "Skipping follow-up analysis for individual traits",
             paste(names(individual_data$Y)[null_Y], collapse = ";"), "after QC."
           ))
           phenotypes$individual_contexts <- names(individual_data$Y)[-null_Y]
-        } else if (length(null_Y) == length(individual_data$Y)) {
+        } else {
           message("No individual data pass QC.")
         }
-      } else {
-        message("No individual data pass QC.")
       }
-      if (!is.null(sumstat_data)) {
+    } else {
+      message(if (is.null(phenotypes_init)) "No individual data in this region!" else "No individual data pass QC.")
+    }
+
+    # Extract sumstat studies
+    if (!is.null(sumstat_data)) {
+      if (is.null(phenotypes_init)) {
+        phenotypes$sumstat_studies <- unlist(sapply(sumstat_data$sumstats, names))
+      } else {
         phenotypes$sumstat_studies <- names(sumstat_data$sumstats)
-        sumstat_studies_init <- phenotypes_init$sumstat_studies
-        if (length(sumstat_studies_init) == length(phenotypes$sumstat_studies)) {
+        if (length(phenotypes_init$sumstat_studies) == length(phenotypes$sumstat_studies)) {
           message("All sumstat studies pass QC steps.")
         } else {
           message(paste(
             "Skipping follow-up analysis for sumstat studies",
-            paste(setdiff(sumstat_studies_init, phenotypes$sumstat_studies), collapse = ";"), "after QC."
+            paste(setdiff(phenotypes_init$sumstat_studies, phenotypes$sumstat_studies), collapse = ";"), "after QC."
           ))
         }
-      } else {
-        message("No sumstat data pass QC.")
       }
+    } else {
+      message(if (is.null(phenotypes_init)) "No sumstat data in this region!" else "No sumstat data pass QC.")
     }
+
     return(phenotypes)
   }
 
@@ -243,13 +250,12 @@ colocboost_analysis_pipeline <- function(region_data,
       Y <- NULL
     }
     if (!is.null(Y)) {
-      Y <- lapply(seq_along(Y), function(i) {
-        y <- Y[[i]]
-        lapply(seq_len(ncol(y)), function(j) y[, j, drop = FALSE] %>% setNames(colnames(y)[j]))
+      Y_split <- purrr::imap(Y, function(y, i) {
+        purrr::map(seq_len(ncol(y)), function(j) setNames(y[, j, drop = FALSE], colnames(y)[j]))
       })
-      dict_YX <- cbind(seq_along(Reduce("c", Y)), rep(seq_along(Y), sapply(Y, length)))
-      Y <- Reduce("c", Y)
-      Y <- Y %>% setNames(sapply(Y, colnames))
+      dict_YX <- cbind(seq_along(unlist(Y_split, recursive = FALSE)), rep(seq_along(Y_split), purrr::map_int(Y_split, length)))
+      Y <- unlist(Y_split, recursive = FALSE)
+      names(Y) <- sapply(Y, colnames)
     }
   } else {
     X <- Y <- dict_YX <- NULL
@@ -309,49 +315,28 @@ colocboost_analysis_pipeline <- function(region_data,
   # - run xQTL-only version of ColocBoost
   if (xqtl_coloc & !is.null(X)) {
     message(paste("====== Performing xQTL-only ColocBoost on", length(Y), "contexts. ====="))
-    t11 <- Sys.time()
     traits <- names(Y)
-    focal_outcome_idx <- NULL
-    if (!is.null(focal_trait)) {
-      if (focal_trait %in% traits) {
-        focal_outcome_idx <- which(traits == focal_trait)
-      }
-    }
-    res_xqtl <- tryCatch(
-      colocboost(
-        X = X, Y = Y, dict_YX = dict_YX,
-        outcome_names = traits, focal_outcome_idx = focal_outcome_idx,
-        output_level = 2, ...
-      ),
-      error = function(e) {
-        message("xQTL-only ColocBoost failed: ", conditionMessage(e))
-        return(NULL)
-      }
+    focal_outcome_idx <- if (!is.null(focal_trait) && focal_trait %in% traits) which(traits == focal_trait) else NULL
+    cb_res <- .run_colocboost("xQTL-only ColocBoost",
+      X = X, Y = Y, dict_YX = dict_YX,
+      outcome_names = traits, focal_outcome_idx = focal_outcome_idx,
+      output_level = 2, ...
     )
-    t12 <- Sys.time()
-    analysis_results$xqtl_coloc <- res_xqtl
-    analysis_results$computing_time$Analysis$xqtl_coloc <- t12 - t11
+    analysis_results$xqtl_coloc <- cb_res$result
+    analysis_results$computing_time$Analysis$xqtl_coloc <- cb_res$time
   }
   # - run joint GWAS no focaled version of ColocBoost
   if (joint_gwas & !is.null(sumstats)) {
     message(paste("====== Performing non-focaled version GWAS-xQTL ColocBoost on", length(Y), "contexts and", length(sumstats), "GWAS. ====="))
-    t21 <- Sys.time()
     traits <- c(names(Y), names(sumstats))
     ld_args <- build_ld_args(LD_mat)
-    res_gwas <- tryCatch(
-      do.call(colocboost, c(list(
-        X = X, Y = Y, sumstat = sumstats,
-        dict_YX = dict_YX, dict_sumstatLD = dict_sumstatLD,
-        outcome_names = traits, focal_outcome_idx = NULL,
-        output_level = 2), ld_args, list(...))),
-      error = function(e) {
-        message("Joint GWAS ColocBoost failed: ", conditionMessage(e))
-        return(NULL)
-      }
-    )
-    t22 <- Sys.time()
-    analysis_results$joint_gwas <- res_gwas
-    analysis_results$computing_time$Analysis$joint_gwas <- t22 - t21
+    cb_res <- do.call(.run_colocboost, c(list("Joint GWAS ColocBoost",
+      X = X, Y = Y, sumstat = sumstats,
+      dict_YX = dict_YX, dict_sumstatLD = dict_sumstatLD,
+      outcome_names = traits, focal_outcome_idx = NULL,
+      output_level = 2), ld_args, list(...)))
+    analysis_results$joint_gwas <- cb_res$result
+    analysis_results$computing_time$Analysis$joint_gwas <- cb_res$time
   }
   # - run focaled version of ColocBoost for each GWAS
   if (separate_gwas & !is.null(sumstats)) {
@@ -363,17 +348,13 @@ colocboost_analysis_pipeline <- function(region_data,
       dict <- dict_sumstatLD[i_gwas, ]
       traits <- c(names(Y), current_study)
       ld_args_sep <- build_ld_args(LD_mat, subset = dict[2])
-      res_gwas_separate[[current_study]] <- tryCatch(
-        do.call(colocboost, c(list(
+      cb_res <- do.call(.run_colocboost, c(
+        list(paste("Separate GWAS ColocBoost for", current_study),
           X = X, Y = Y, sumstat = sumstats[dict[1]],
           dict_YX = dict_YX,
           outcome_names = traits, focal_outcome_idx = length(traits),
-          output_level = 2), ld_args_sep, list(...))),
-        error = function(e) {
-          message("Separate GWAS ColocBoost failed for ", current_study, ": ", conditionMessage(e))
-          return(NULL)
-        }
-      )
+          output_level = 2), ld_args_sep, list(...)))
+      res_gwas_separate[[current_study]] <- cb_res$result
     }
     t32 <- Sys.time()
     analysis_results$separate_gwas <- res_gwas_separate
@@ -559,37 +540,27 @@ qc_regional_data <- function(region_data,
                                              pip_cutoff_to_skip_ind = 0) {
     # - add context to colname of Y
     Y <- add_context_to_Y(Y)
-    n_context <- length(X)
-    residual_X <- residual_Y <- list()
-    keep_contexts <- c()
-    for (i_context in 1:n_context) {
-      resX <- X[[i_context]]
-      resY <- Y[[i_context]]
-      maf <- MAF[[i_context]]
-      context <- names(Y)[i_context]
-      if (is.null(resY)) next
-      # - remove variants with maf < maf_cutoff
-      # tmp <- filter_resX_maf(resX, maf, maf_cutoff = maf_cutoff)
+    results <- purrr::imap(X, function(resX, context) {
+      resY <- Y[[context]]
+      maf <- MAF[[context]]
+      i_context <- match(context, names(X))
+      if (is.null(resY)) return(NULL)
       resX <- filter_X(resX, missing_rate_thresh = NULL, maf_thresh = maf_cutoff, maf = maf)
-      # Initial PIP check
       resY <- filter_resY_pip(resX, resY, pip_cutoff = pip_cutoff_to_skip_ind[i_context], context = context)
-      if (!is.null(resY)) {
-        residual_X <- c(residual_X, list(resX))
-        residual_Y <- c(residual_Y, list(resY))
-        keep_contexts <- c(keep_contexts, context)
-      }
-    }
-    if (length(keep_contexts) == 0) {
-      message(paste("Skipping follow-up analysis for all contexts."))
+      if (is.null(resY)) return(NULL)
+      list(X = resX, Y = resY)
+    }) %>% purrr::compact()
+
+    if (length(results) == 0) {
+      message("Skipping follow-up analysis for all contexts.")
       return(NULL)
-    } else {
-      message(paste("Region includes the following contexts after inital screening:", paste(keep_contexts, collapse = ";"), "."))
-      names(residual_X) <- names(residual_Y) <- keep_contexts
-      return(list(
-        X = residual_X,
-        Y = residual_Y
-      ))
     }
+    keep_contexts <- names(results)
+    message(paste("Region includes the following contexts after inital screening:", paste(keep_contexts, collapse = ";"), "."))
+    list(
+      X = purrr::map(results, "X"),
+      Y = purrr::map(results, "Y")
+    )
   }
 
   # - individual level data QC
@@ -622,8 +593,13 @@ qc_regional_data <- function(region_data,
                                          impute = TRUE,
                                          impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)) {
     n_LD <- length(sumstat_data$LD_info)
-    final_sumstats <- final_LD <- NULL
-    LD_match <- c()
+    # Collect results into lists and flatten at the end
+    collected_sumstats <- list()
+    collected_LD <- list()
+    collected_LD_match <- character()
+    # Track LD matrices by variant signature for O(1) deduplication
+    ld_variant_index <- list()
+
     for (i in 1:n_LD) {
       LD_data <- sumstat_data$LD_info[[i]]
       sumstats <- sumstat_data$sumstats[[i]]
@@ -710,27 +686,21 @@ qc_regional_data <- function(region_data,
           mat_to_store <- R_mat
         }
 
-        # Deduplicate: reuse existing matrix if variants match
-        if (length(final_LD) == 0) {
-          final_LD <- c(final_LD, list(mat_to_store) %>% setNames(conditions_sumstat))
-          final_sumstats <- c(final_sumstats, list(sumstat) %>% setNames(conditions_sumstat))
-          LD_match <- c(LD_match, conditions_sumstat)
+        # Collect sumstat
+        collected_sumstats[[conditions_sumstat]] <- sumstat
+
+        # Deduplicate LD using variant signature hash
+        variant_key <- paste(colnames(mat_to_store), collapse = ",")
+        if (variant_key %in% names(ld_variant_index)) {
+          collected_LD_match <- c(collected_LD_match, ld_variant_index[[variant_key]])
         } else {
-          variants <- colnames(mat_to_store)
-          final_sumstats <- c(final_sumstats, list(sumstat) %>% setNames(conditions_sumstat))
-          exist_variants <- lapply(final_LD, colnames)
-          if_exist <- sapply(exist_variants, function(v) all(variants == v))
-          pos <- which(if_exist)
-          if (length(pos) == 0) {
-            final_LD <- c(final_LD, list(mat_to_store) %>% setNames(conditions_sumstat))
-            LD_match <- c(LD_match, conditions_sumstat)
-          } else {
-            LD_match <- c(LD_match, names(final_LD)[pos[1]])
-          }
+          collected_LD[[conditions_sumstat]] <- mat_to_store
+          ld_variant_index[[variant_key]] <- conditions_sumstat
+          collected_LD_match <- c(collected_LD_match, conditions_sumstat)
         }
       }
     }
-    return(list(sumstats = final_sumstats, LD_mat = final_LD, LD_match = LD_match))
+    return(list(sumstats = collected_sumstats, LD_mat = collected_LD, LD_match = collected_LD_match))
   }
 
 

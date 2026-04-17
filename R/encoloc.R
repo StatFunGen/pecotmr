@@ -31,21 +31,20 @@ xqtl_enrichment_wrapper <- function(xqtl_files, gwas_files,
                                       xqtl_finemapping_obj = NULL, gwas_finemapping_obj = NULL,
                                       xqtl_varname_obj = NULL, gwas_varname_obj = NULL) {
     # Load and process GWAS data
-    gwas_pip <- list()
-    for (file in gwas_files) {
-      raw_data <- readRDS(file)[[1]] # changed
+    gwas_pip_list <- purrr::map(gwas_files, function(file) {
+      raw_data <- readRDS(file)[[1]]
       gwas_data <- if (!is.null(gwas_finemapping_obj)) get_nested_element(raw_data, gwas_finemapping_obj) else raw_data
       pip <- gwas_data$pip
       if (!is.null(gwas_varname_obj)) names(pip) <- get_nested_element(raw_data, gwas_varname_obj)
-      gwas_pip <- c(gwas_pip, list(pip))
-    }
+      pip
+    })
 
     # Check for unique variant names in GWAS pip vectors
-    all_variant_names <- unique(unlist(lapply(gwas_pip, names)))
+    all_variant_names <- unique(unlist(purrr::map(gwas_pip_list, names)))
     if (length(unique(all_variant_names)) != length(all_variant_names)) {
       stop("Non-unique variant names found in GWAS data with different pip values.")
     }
-    gwas_pip <- unlist(gwas_pip)
+    gwas_pip <- unlist(gwas_pip_list)
 
     # Process xQTL data
     xqtl_data <- lapply(xqtl_files, function(file) {
@@ -93,15 +92,9 @@ filter_and_order_coloc_results <- function(coloc_results_fil) {
   }
 
   cs_num <- ncol(coloc_results_fil) - 1
-  ordered_results <- list()
-
-  for (n in 1:cs_num) {
-    # Selecting relevant columns and ordering
-    tmp_coloc_results_fil <- coloc_results_fil[, c(1, n + 1)] %>% .[order(.[, 2], decreasing = TRUE), ]
-    ordered_results[[n]] <- tmp_coloc_results_fil
-  }
-
-  return(ordered_results)
+  purrr::map(seq_len(cs_num), function(n) {
+    coloc_results_fil[, c(1, n + 1)] %>% .[order(.[, 2], decreasing = TRUE), ]
+  })
 }
 
 #' Function to calculate cumulative sum
@@ -160,30 +153,21 @@ process_coloc_results <- function(coloc_result, LD_meta_file_path, analysis_regi
 
     # prepare to calculate purity
     ordered_results <- filter_and_order_coloc_results(coloc_results_fil)
-    cs <- list()
-    purity <- NULL
+    cs <- purrr::map(ordered_results, function(res) {
+      csm <- calculate_cumsum(res)
+      res[, 1][1:min(which(csm > coverage))]
+    })
 
-    for (n in seq_along(ordered_results)) {
-      tmp_coloc_results_fil <- ordered_results[[n]]
-      tmp_coloc_results_fil_csm <- calculate_cumsum(tmp_coloc_results_fil)
-      cs[[n]] <- tmp_coloc_results_fil[, 1][1:(which(tmp_coloc_results_fil_csm > coverage) %>% min())]
+    purity <- purrr::map_dfr(seq_along(cs), function(n) {
       variants <- normalize_variant_id(cs[[n]])
-
-      # Load LD for the region narrowed to actual variant positions
-      ext_ld <- extract_ld_for_variants(LD_meta_file_path, analysis_region, variants)
-
-      # Calculate purity
       if (null_index > 0 && null_index %in% variants) {
-        purity <- rbind(purity, c(-9, -9, -9))
+        data.frame(min.abs.corr = -9, mean.abs.corr = -9, median.abs.corr = -9)
       } else {
-        current_purity <- calculate_purity(variants, ext_ld)
-        purity <- rbind(purity, current_purity)
+        ext_ld <- extract_ld_for_variants(LD_meta_file_path, analysis_region, variants)
+        p <- calculate_purity(variants, ext_ld)
+        data.frame(min.abs.corr = p[1, 1], mean.abs.corr = p[1, 2], median.abs.corr = p[1, 3])
       }
-    }
-
-    # Process purity data
-    purity <- as.data.frame(purity)
-    colnames(purity) <- c("min.abs.corr", "mean.abs.corr", "median.abs.corr")
+    })
     is_pure <- which(purity[, 1] >= min_abs_corr)
 
     # Finalize the result
@@ -199,6 +183,49 @@ process_coloc_results <- function(coloc_result, LD_meta_file_path, analysis_regi
   }
 
   return(coloc_res)
+}
+
+# Extract and filter an LBF matrix from a finemapped data object.
+# @noRd
+.extract_lbf_matrix <- function(raw_data, finemapping_obj, varname_obj,
+                                filter_lbf_cs, filter_lbf_cs_secondary, prior_tol) {
+  fm_data <- if (!is.null(finemapping_obj)) {
+    tryCatch(get_nested_element(raw_data, finemapping_obj),
+      error = function(e) {
+        message(paste("no", finemapping_obj[2], "in", finemapping_obj[1]))
+        NULL
+      }
+    )
+  } else {
+    raw_data
+  }
+  if (is.null(fm_data)) return(NULL)
+
+  lbf_matrix <- as.data.frame(fm_data$lbf_variable)
+  # fSuSiE has a different structure
+  if (is.null(lbf_matrix) || nrow(lbf_matrix) == 0) {
+    lbf_matrix <- do.call(rbind, raw_data[[1]]$fsusie_result$lBF) %>% as.data.frame()
+    if (nrow(lbf_matrix) > 0) message("This is a fSuSiE case")
+  }
+
+  # Filter rows
+  if (filter_lbf_cs && is.null(filter_lbf_cs_secondary)) {
+    lbf_matrix <- lbf_matrix[fm_data$sets$cs_index, , drop = FALSE]
+  } else if (!is.null(filter_lbf_cs_secondary)) {
+    lbf_matrix <- lbf_matrix[get_filter_lbf_index(fm_data, coverage = filter_lbf_cs_secondary), , drop = FALSE]
+  } else {
+    if ("V" %in% names(fm_data)) {
+      lbf_matrix <- lbf_matrix[fm_data$V > prior_tol, , drop = FALSE]
+    } else {
+      message("No V found in original data.")
+    }
+  }
+
+  # Set variant names and remove NA columns
+  if (!is.null(varname_obj)) colnames(lbf_matrix) <- get_nested_element(raw_data, varname_obj)
+  lbf_matrix <- lbf_matrix[, !is.na(colnames(lbf_matrix))]
+
+  list(lbf_matrix = lbf_matrix, fm_data = fm_data)
 }
 
 #' Colocalization Analysis Wrapper
@@ -231,85 +258,35 @@ coloc_wrapper <- function(xqtl_file, gwas_files,
                           gwas_finemapping_obj = NULL, gwas_varname_obj = NULL, gwas_region_obj = NULL,
                           filter_lbf_cs = FALSE, filter_lbf_cs_secondary = NULL,
                           prior_tol = 1e-9, p1 = 1e-4, p2 = 1e-4, p12 = 5e-6, ...) {
-  region <- NULL # define first to avoid element can not be found
+  region <- NULL
   # Load and process GWAS data
-  gwas_lbf_matrices <- lapply(gwas_files, function(file) {
+  gwas_lbf_matrices <- purrr::map(gwas_files, function(file) {
     raw_data <- readRDS(file)[[1]]
-    gwas_data <- if (!is.null(gwas_finemapping_obj)) get_nested_element(raw_data, gwas_finemapping_obj) else raw_data
-    gwas_lbf_matrix <- as.data.frame(gwas_data$lbf_variable)
-      # fsusie has a different structure
-    if(is.null(gwas_lbf_matrix) || nrow(gwas_lbf_matrix)==0){
-        gwas_lbf_matrix <- do.call(rbind, raw_data[[1]]$fsusie_result$lBF) %>% as.data.frame
-        if(nrow(gwas_lbf_matrix) > 0) message("This is a fSuSiE case")
-    }
-    if (filter_lbf_cs & is.null(filter_lbf_cs_secondary)) {
-        gwas_lbf_matrix <- gwas_lbf_matrix[gwas_data$sets$cs_index,, drop = FALSE]
-    } else if (!is.null(filter_lbf_cs_secondary)) {
-        gwas_lbf_filter_index <- get_filter_lbf_index(gwas_data, coverage = filter_lbf_cs_secondary) 
-        gwas_lbf_matrix <- gwas_lbf_matrix[gwas_lbf_filter_index,, drop = FALSE]
-    } else {
-      gwas_lbf_matrix <- gwas_lbf_matrix[gwas_data$V > prior_tol,, drop = FALSE]
-    }
-    if (!is.null(gwas_varname_obj)) colnames(gwas_lbf_matrix) <- get_nested_element(raw_data, gwas_varname_obj)
-    # fsusie could have NA in variant name
-    gwas_lbf_matrix <- gwas_lbf_matrix[,!is.na(colnames(gwas_lbf_matrix))] 
-    return(gwas_lbf_matrix)
+    .extract_lbf_matrix(raw_data, gwas_finemapping_obj, gwas_varname_obj,
+                        filter_lbf_cs, filter_lbf_cs_secondary, prior_tol)$lbf_matrix
   })
 
-  # changed: need to remove this check, as the last variant of former block could overlapped with first variant of later block
-  # # Validate uniqueness of column names across GWAS matrices
-  # all_gwas_colnames <- unique(unlist(lapply(gwas_lbf_matrices, colnames)))
-  # if (length(all_gwas_colnames) != sum(sapply(gwas_lbf_matrices, ncol))) {
-  #   stop("Duplicate variant names found across GWAS regions analyzed. This is not expected.")
-  # }
   # Combine GWAS matrices and replace NAs with zeros
   combined_gwas_lbf_matrix <- bind_rows(gwas_lbf_matrices) %>%
     mutate(across(everything(), ~ replace_na(., 0)))
 
   # Process xQTL data
   xqtl_raw_data <- readRDS(xqtl_file)[[1]]
-  xqtl_data <- if (!is.null(xqtl_finemapping_obj)) {
-    tryCatch(
-      {
-        get_nested_element(xqtl_raw_data, xqtl_finemapping_obj)
-      },
-      error = function(e) {
-        message(paste("no", xqtl_finemapping_obj[2], "in", xqtl_finemapping_obj[1]))
-        NULL
-      }
-    )
-  } else {
-    xqtl_raw_data
-  }
-  if (!is.null(xqtl_data)) {
-    xqtl_lbf_matrix <- as.data.frame(xqtl_data$lbf_variable)
-    # fsusie has a different structure
-    if(is.null(xqtl_lbf_matrix) | nrow(xqtl_lbf_matrix)==0){
-        xqtl_lbf_matrix <- do.call(rbind, xqtl_raw_data[[1]]$fsusie_result$lBF) %>% as.data.frame
-        if(nrow(xqtl_lbf_matrix) > 0) message("This is a fSuSiE case")
-    }
-    # fsusie data does not have V element in results
-    if (filter_lbf_cs & is.null(filter_lbf_cs_secondary)) {
-        xqtl_lbf_matrix <- xqtl_lbf_matrix[xqtl_data$sets$cs_index, , drop = FALSE]
-    } else if (!is.null(filter_lbf_cs_secondary)) {
-        xqtl_lbf_filter_index <- get_filter_lbf_index(xqtl_data, coverage = filter_lbf_cs_secondary) 
-        xqtl_lbf_matrix <- xqtl_lbf_matrix[xqtl_lbf_filter_index,, drop = FALSE]
-    } else {
-      if ("V" %in% names(xqtl_data)) xqtl_lbf_matrix <- xqtl_lbf_matrix[xqtl_data$V > prior_tol, , drop = FALSE] else (message("No V found in original data."))
-    }
+  xqtl_extracted <- .extract_lbf_matrix(xqtl_raw_data, xqtl_finemapping_obj, xqtl_varname_obj,
+                                        filter_lbf_cs, filter_lbf_cs_secondary, prior_tol)
+
+  if (!is.null(xqtl_extracted)) {
+    xqtl_lbf_matrix <- xqtl_extracted$lbf_matrix
     if (nrow(combined_gwas_lbf_matrix) > 0 && nrow(xqtl_lbf_matrix) > 0) {
-      if (!is.null(xqtl_varname_obj)) colnames(xqtl_lbf_matrix) <- get_nested_element(xqtl_raw_data, xqtl_varname_obj)
-      # fsusie could have NA in variant name
-      xqtl_lbf_matrix <- xqtl_lbf_matrix[,!is.na(colnames(xqtl_lbf_matrix))] 
-        
       colnames(xqtl_lbf_matrix) <- align_variant_names(colnames(xqtl_lbf_matrix), colnames(combined_gwas_lbf_matrix))$aligned_variants
       common_colnames <- intersect(colnames(xqtl_lbf_matrix), colnames(combined_gwas_lbf_matrix))
+
+      # Report the number of dropped columns from xQTL matrix before subsetting
+      num_dropped_cols <- ncol(xqtl_lbf_matrix) - length(common_colnames)
+      message("Number of columns dropped from xQTL matrix: ", num_dropped_cols)
+
       xqtl_lbf_matrix <- xqtl_lbf_matrix[, common_colnames, drop = FALSE] %>% as.matrix()
       combined_gwas_lbf_matrix <- combined_gwas_lbf_matrix[, common_colnames, drop = FALSE] %>% as.matrix()
-
-      # Report the number of dropped columns from xQTL matrix
-      num_dropped_cols <- length(setdiff(colnames(xqtl_lbf_matrix), common_colnames))
-      message("Number of columns dropped from xQTL matrix: ", num_dropped_cols)
 
       # Function to convert region df to str
       convert_to_string <- function(df) paste0("chr", df$chrom, ":", df$start, "-", df$end)

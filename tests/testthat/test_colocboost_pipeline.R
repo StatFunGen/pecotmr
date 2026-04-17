@@ -1916,4 +1916,43 @@ test_that("qc_regional_data: with only sumstat data processes correctly", {
   expect_null(result$individual_data)
   expect_true(!is.null(result$sumstat_data))
 })
+
+# ===========================================================================
+# build_ld_args
+# ===========================================================================
+
+test_that("build_ld_args returns LD for square matrices", {
+  m <- matrix(1, 5, 5)
+  result <- pecotmr:::build_ld_args(list(m))
+  expect_true("LD" %in% names(result))
+  expect_null(result$X_ref)
+})
+
+test_that("build_ld_args returns X_ref for non-square (genotype) matrices", {
+  m <- matrix(1, 100, 5)  # samples x variants
+  result <- pecotmr:::build_ld_args(list(m))
+  expect_true("X_ref" %in% names(result))
+  expect_null(result$LD)
+})
+
+test_that("build_ld_args applies subset correctly", {
+  m1 <- matrix(1, 5, 5)
+  m2 <- matrix(2, 5, 5)
+  result <- pecotmr:::build_ld_args(list(m1, m2), subset = 2)
+  expect_length(result$LD, 1)
+  expect_equal(result$LD[[1]][1, 1], 2)
+})
+
+# ===========================================================================
+# .run_colocboost
+# ===========================================================================
+
+test_that(".run_colocboost returns NULL and message on error", {
+  expect_message(
+    result <- pecotmr:::.run_colocboost("test label", bad_arg = TRUE),
+    "test label failed"
+  )
+  expect_null(result$result)
+  expect_s3_class(result$time, "difftime")
+})
 NA
