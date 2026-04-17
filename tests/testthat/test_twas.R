@@ -1651,7 +1651,7 @@ test_that("twas_pipeline: pick_best_model skips context when no model passes thr
 })
 
 # NOTE: Removed test "twas_pipeline: rsq_cutoff=0 skips best model selection entirely"
-# When rsq_cutoff=0 in non-quantile mode, the source code assigns NA model_selection
+# When rsq_cutoff=0, the source code assigns NA model_selection
 # instead of a list structure, causing the is_imputable column to be missing in the
 # downstream data frame construction. This is a known source code issue.
 
@@ -1904,7 +1904,7 @@ test_that("twas_pipeline: empty twas_variants intersection returns empty data fr
 # ===========================================================================
 
 # NOTE: Removed test "twas_pipeline: missing data_type in twas_weights_data gets assigned NA"
-# When rsq_cutoff=0 in non-quantile mode, the source code assigns NA model_selection
+# When rsq_cutoff=0, the source code assigns NA model_selection
 # instead of a list structure, causing the is_imputable column to be missing in the
 # downstream data frame construction. This is a known source code issue.
 
@@ -2106,73 +2106,6 @@ test_that("twas_pipeline: mr_result is returned in final result", {
   ))
 
   expect_true("mr_result" %in% names(result))
-})
-
-# ===========================================================================
-# twas_pipeline: quantile_twas mode
-# ===========================================================================
-
-test_that("twas_pipeline: quantile_twas=TRUE sets rsq_cutoff to 0 and skips model selection", {
-  set.seed(501)
-  variant_ids <- make_variant_ids()
-  p <- length(variant_ids)
-  weights_mat <- make_weights_matrix(variant_ids)
-
-  twas_weights_data <- make_twas_weights_data(
-    molecular_id = "gene1",
-    contexts = "ctx1"
-  )
-  # Add quantile-specific performance data
-  twas_weights_data$gene1$twas_cv_performance$ctx1$susie_performance <- data.frame(
-    quantile_start = 0, quantile_end = 0.25, pseudo_R2_avg = 0.15,
-    rsq = 0.5, adj_rsq = 0.45, pval = 0.01, adj_rsq_pval = 0.02
-  )
-  twas_weights_data$gene1$twas_cv_performance$ctx1$lasso_performance <- data.frame(
-    quantile_start = 0, quantile_end = 0.25, pseudo_R2_avg = 0.12,
-    rsq = 0.3, adj_rsq = 0.25, pval = 0.05, adj_rsq_pval = 0.06
-  )
-
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
-
-  mock_twas_data_qced <- list(
-    gene1 = list(
-      chrom = 1,
-      data_type = list(ctx1 = "expression"),
-      variant_names = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat,
-        weights = weights_mat
-      ))),
-      gwas_qced = list(study1 = data.frame(
-        variant_id = variant_ids,
-        z = rnorm(p),
-        stringsAsFactors = FALSE
-      )),
-      LD = LD_matrix
-    )
-  )
-
-  local_mocked_bindings(
-    harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
-    }
-  )
-
-  result <- suppressMessages(twas_pipeline(
-    twas_weights_data = twas_weights_data,
-    ld_meta_file_path = "fake_ld.tsv",
-    gwas_meta_file = "fake_gwas.tsv",
-    region_block = "chr1_100_500",
-    ld_reference_sample_size = 17000,
-    quantile_twas = TRUE
-  ))
-
-  expect_true(is.list(result))
-  # In quantile mode the output should have twas_result
-  if (!is.null(result$twas_result)) {
-    expect_true("method" %in% colnames(result$twas_result))
-  }
 })
 
 # ===========================================================================
@@ -2615,72 +2548,6 @@ test_that("twas_pipeline: rsq_pval_option='adj_rsq_pval' uses the correct p-valu
 })
 
 # ===========================================================================
-# twas_pipeline: format_twas_data internal function -- quantile_twas path
-# ===========================================================================
-
-test_that("twas_pipeline: quantile_twas with output_twas_data exercises quantile format_twas_data", {
-  set.seed(1001)
-  variant_ids <- make_variant_ids()
-  p <- length(variant_ids)
-  weights_mat <- make_weights_matrix(variant_ids)
-
-  twas_weights_data <- make_twas_weights_data(
-    molecular_id = "gene1",
-    contexts = "ctx1"
-  )
-  twas_weights_data$gene1$twas_cv_performance$ctx1$susie_performance <- data.frame(
-    quantile_start = 0, quantile_end = 0.25, pseudo_R2_avg = 0.15,
-    rsq = 0.5, adj_rsq = 0.45, pval = 0.01, adj_rsq_pval = 0.02
-  )
-  twas_weights_data$gene1$twas_cv_performance$ctx1$lasso_performance <- data.frame(
-    quantile_start = 0, quantile_end = 0.25, pseudo_R2_avg = 0.12,
-    rsq = 0.3, adj_rsq = 0.25, pval = 0.05, adj_rsq_pval = 0.06
-  )
-
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
-
-  mock_twas_data_qced <- list(
-    gene1 = list(
-      chrom = 1,
-      data_type = list(ctx1 = "expression"),
-      variant_names = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat,
-        weights = weights_mat
-      ))),
-      gwas_qced = list(study1 = data.frame(
-        variant_id = variant_ids,
-        z = rnorm(p),
-        stringsAsFactors = FALSE
-      )),
-      LD = LD_matrix
-    )
-  )
-
-  local_mocked_bindings(
-    harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
-    }
-  )
-
-  result <- suppressMessages(twas_pipeline(
-    twas_weights_data = twas_weights_data,
-    ld_meta_file_path = "fake_ld.tsv",
-    gwas_meta_file = "fake_gwas.tsv",
-    region_block = "chr1_100_500",
-    ld_reference_sample_size = 17000,
-    quantile_twas = TRUE,
-    output_twas_data = TRUE
-  ))
-
-  expect_true(is.list(result))
-  if (!is.null(result$twas_result)) {
-    expect_true("method" %in% colnames(result$twas_result))
-  }
-})
-
-# ===========================================================================
 # Tests from test_twas_predict.R
 # ===========================================================================
 
@@ -3109,75 +2976,6 @@ test_that("twas_pipeline: adj_rsq_pval option exercised in pick_best_model", {
   expect_true(is.list(result))
   if (!is.null(result$twas_result)) {
     expect_true("twas_z" %in% colnames(result$twas_result))
-  }
-})
-
-# ===========================================================================
-# SECTION Q: twas_pipeline - quantile_twas code paths in Step 2 merge
-# ===========================================================================
-
-test_that("twas_pipeline: quantile_twas=TRUE with proper cv data triggers quantile merge path", {
-  set.seed(902)
-  variant_ids <- make_variant_ids()
-  p <- length(variant_ids)
-  weights_mat <- make_weights_matrix(variant_ids)
-
-  twas_weights_data <- make_twas_weights_data(
-    molecular_id = "gene1",
-    contexts = "ctx1",
-    methods = c("susie_weights", "lasso_weights")
-  )
-  # Add quantile-specific performance columns
-  twas_weights_data$gene1$twas_cv_performance$ctx1$susie_performance <- data.frame(
-    quantile_start = 0, quantile_end = 0.25, pseudo_R2_avg = 0.15,
-    rsq = 0.5, adj_rsq = 0.45, pval = 0.01, adj_rsq_pval = 0.02
-  )
-  twas_weights_data$gene1$twas_cv_performance$ctx1$lasso_performance <- data.frame(
-    quantile_start = 0, quantile_end = 0.25, pseudo_R2_avg = 0.12,
-    rsq = 0.3, adj_rsq = 0.25, pval = 0.05, adj_rsq_pval = 0.06
-  )
-
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
-
-  mock_twas_data_qced <- list(
-    gene1 = list(
-      chrom = 1,
-      data_type = list(ctx1 = "expression"),
-      variant_names = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat,
-        weights = weights_mat
-      ))),
-      gwas_qced = list(study1 = data.frame(
-        variant_id = variant_ids,
-        z = rnorm(p),
-        stringsAsFactors = FALSE
-      )),
-      LD = LD_matrix
-    )
-  )
-
-  local_mocked_bindings(
-    harmonize_twas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, ref_panel = data.frame())
-    }
-  )
-
-  result <- suppressMessages(twas_pipeline(
-    twas_weights_data = twas_weights_data,
-    ld_meta_file_path = "fake_ld.tsv",
-    gwas_meta_file = "fake_gwas.tsv",
-    region_block = "chr1_100_500",
-    ld_reference_sample_size = 17000,
-    quantile_twas = TRUE
-  ))
-
-  expect_true(is.list(result))
-  if (!is.null(result$twas_result)) {
-    # Quantile mode should have quantile_start/quantile_end columns
-    expect_true("quantile_start" %in% colnames(result$twas_result) ||
-                "method" %in% colnames(result$twas_result))
   }
 })
 
