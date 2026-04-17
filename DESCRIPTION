@@ -18,8 +18,6 @@ Imports:
     IRanges,
     Rcpp,
     S4Vectors,
-    bigsnpr,
-    bigstatsr,
     coloc,
     doFuture,
     dplyr,
