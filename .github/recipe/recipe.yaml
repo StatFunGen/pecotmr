@@ -30,6 +30,7 @@ requirements:
     - bioconductor-snpstats
     - r-base
     - r-bglr
+    - r-bigsnpr
     - r-coda
     - r-coloc
     - r-colocboost
@@ -73,6 +74,7 @@ requirements:
     - bioconductor-snpstats
     - r-base
     - r-bglr
+    - r-bigsnpr
     - r-coda
     - r-coloc
     - r-colocboost

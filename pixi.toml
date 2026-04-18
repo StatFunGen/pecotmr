@@ -48,6 +48,7 @@ r45 = {features = ["r45"]}
 "bioconductor-snpstats" = "*"
 "r-base" = "*"
 "r-bglr" = "*"
+"r-bigsnpr" = "*"
 "r-coda" = "*"
 "r-coloc" = "*"
 "r-colocboost" = "*"
