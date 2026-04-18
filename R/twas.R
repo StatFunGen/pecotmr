@@ -271,6 +271,19 @@ harmonize_gwas <- function(gwas_file, query_region, ld_variants, col_to_flip=NUL
 #'   \item{twas_table}{ A dataframe of twas results summary is generated for each gene-contexts-method pair of all methods for imputable genes.}
 #'   \item{twas_data}{ A list of list containing formatted TWAS data.}
 #' }
+# Shared shape for twas_analysis() result rows. Internal.
+build_twas_score_row <- function(twas_rs, weight_db, context, study) {
+  if (is.null(twas_rs)) return(data.frame())
+  data.frame(
+    gwas_study   = study,
+    method       = sub("_[^_]+$", "", names(twas_rs)),
+    twas_z       = find_data(twas_rs, c(2, "z")),
+    twas_pval    = find_data(twas_rs, c(2, "pval")),
+    context      = context,
+    molecular_id = weight_db
+  )
+}
+
 #' @importFrom stringr str_remove
 #' @export
 twas_pipeline <- function(twas_weights_data,
@@ -482,11 +495,8 @@ twas_pipeline <- function(twas_weights_data,
         )
         if (is.null(twas_rs)) {
           return(list(twas_rs_df = data.frame(), mr_rs_df = data.frame()))
-        }             
-        twas_rs_df <- data.frame(
-          gwas_study = study, method = sub("_[^_]+$", "", names(twas_rs)), twas_z = find_data(twas_rs, c(2, "z")),
-          twas_pval = find_data(twas_rs, c(2, "pval")), context = context, molecular_id = weight_db
-        )
+        }
+        twas_rs_df <- build_twas_score_row(twas_rs, weight_db, context, study)
         # MR analysis
         if (!is.null(twas_weights_data[[weight_db]]$susie_results) &&
           any(na.omit(twas_rs_df$twas_pval) < mr_pval_cutoff) &&
