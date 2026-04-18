@@ -914,3 +914,385 @@ check_ld <- function(R,
     method_applied = method_applied
   )
 }
+
+#' Prune columns by pairwise correlation (LD-style prune)
+#'
+#' Performs single-linkage hierarchical clustering on a correlation-distance
+#' matrix (1 - |cor(X)|) and keeps one representative column per cluster at the
+#' given correlation threshold. Uses \code{Rfast::cora} when available for a
+#' faster correlation computation on wide matrices.
+#'
+#' @param X Numeric matrix. Columns are the variables to prune (typically SNP
+#'   genotype dosages); rows are observations.
+#' @param cor_thres Numeric in (0, 1). Absolute correlation threshold.
+#'   Columns whose pairwise |cor| exceeds this are grouped; one survivor is
+#'   kept per group. Default 0.8.
+#' @param verbose Logical. If TRUE, print progress messages. Default FALSE.
+#'
+#' @return A list with:
+#'   \describe{
+#'     \item{X.new}{Matrix containing the retained columns of \code{X}.}
+#'     \item{filter.id}{Integer vector of the column indices of \code{X} that
+#'       were retained (in original order).}
+#'   }
+#'
+#' @examples
+#' set.seed(1)
+#' X <- matrix(rnorm(100 * 5), 100, 5)
+#' X[, 2] <- X[, 1] + rnorm(100, sd = 0.01)   # near-duplicate of col 1
+#' res <- ld_prune_by_correlation(X, cor_thres = 0.9)
+#' ncol(res$X.new)
+#'
+#' @importFrom stats as.dist hclust cutree cor
+#' @export
+ld_prune_by_correlation <- function(X, cor_thres = 0.8, verbose = FALSE) {
+  p <- ncol(X)
+
+  if (requireNamespace("Rfast", quietly = TRUE)) {
+    cor.X <- Rfast::cora(X, large = TRUE)
+  } else {
+    cor.X <- cor(X)
+  }
+  Sigma.distance <- as.dist(1 - abs(cor.X))
+  fit <- hclust(Sigma.distance, method = "single")
+  clusters <- cutree(fit, h = 1 - cor_thres)
+  groups <- unique(clusters)
+  ind.delete <- NULL
+  X.new <- X
+  filter.id <- seq_len(p)
+  for (ig in seq_along(groups)) {
+    temp.group <- which(clusters == groups[ig])
+    if (length(temp.group) > 1) {
+      ind.delete <- c(ind.delete, temp.group[-1])
+    }
+  }
+  ind.delete <- unique(ind.delete)
+  if (length(ind.delete) > 0) {
+    X.new <- as.matrix(X[, -ind.delete])
+    filter.id <- filter.id[-ind.delete]
+    if (verbose) {
+      message("ld_prune_by_correlation: pruned ", length(ind.delete),
+              " of ", p, " columns at |cor| > ", cor_thres)
+    }
+  } else if (verbose) {
+    message("ld_prune_by_correlation: no columns pruned at |cor| > ", cor_thres)
+  }
+
+  if (ncol(X.new) == 1) {
+    colnames(X.new) <- colnames(X)[-ind.delete]
+  }
+
+  list(X.new = X.new, filter.id = filter.id)
+}
+
+#' Drop collinear columns from a design matrix by a chosen strategy
+#'
+#' Given a numeric matrix \code{X} and a set of column names known to be
+#' involved in linear dependencies, remove one column using one of three
+#' strategies. Designed to be called iteratively by
+#' \code{\link{enforce_design_full_rank}}, but can be used standalone.
+#'
+#' @param X Numeric matrix. Must have column names covering
+#'   \code{problematic_cols}.
+#' @param problematic_cols Character vector of column names in \code{X} that
+#'   are candidates for removal. If empty, \code{X} is returned unchanged.
+#' @param strategy One of \code{"correlation"} (remove the column with the
+#'   largest sum of absolute pairwise correlations among the candidates;
+#'   when only two candidates, one is picked at random), \code{"variance"}
+#'   (remove the lowest-variance candidate), or \code{"response_correlation"}
+#'   (remove the candidate whose correlation with \code{response} has the
+#'   smallest magnitude).
+#' @param response Numeric vector required when \code{strategy =
+#'   "response_correlation"}; the outcome to correlate against.
+#' @param verbose Logical. If TRUE, print which column was removed. Default
+#'   FALSE.
+#'
+#' @return \code{X} with exactly one column removed (or unchanged if
+#'   \code{problematic_cols} is empty).
+#'
+#' @examples
+#' set.seed(1)
+#' X <- matrix(rnorm(100 * 3), 100, 3)
+#' X[, 3] <- X[, 1] + X[, 2]
+#' colnames(X) <- c("a", "b", "c")
+#' drop_collinear_columns(X, problematic_cols = c("a", "b", "c"),
+#'                        strategy = "variance")
+#'
+#' @importFrom stats var cor
+#' @keywords internal
+#' @noRd
+drop_collinear_columns <- function(X, problematic_cols,
+                                   strategy = c("correlation", "variance", "response_correlation"),
+                                   response = NULL, verbose = FALSE) {
+  strategy <- match.arg(strategy)
+
+  if (length(problematic_cols) == 0) {
+    return(X)
+  }
+
+  if (length(problematic_cols) == 1) {
+    col_to_remove <- problematic_cols[1]
+    if (verbose) message("drop_collinear_columns: removing single column ", col_to_remove)
+    X <- X[, !(colnames(X) %in% col_to_remove), drop = FALSE]
+    return(X)
+  }
+
+  if (strategy == "variance") {
+    variances <- apply(X[, problematic_cols, drop = FALSE], 2, var)
+    col_to_remove <- problematic_cols[which.min(variances)]
+    if (verbose) message("drop_collinear_columns: smallest variance -> removing ", col_to_remove)
+  } else if (strategy == "correlation") {
+    cor_matrix <- abs(cor(X[, problematic_cols, drop = FALSE]))
+    diag(cor_matrix) <- 0
+
+    if (length(problematic_cols) == 2) {
+      col_to_remove <- sample(problematic_cols, 1)
+      if (verbose) message("drop_collinear_columns: two candidates, randomly removing ", col_to_remove)
+    } else {
+      cor_sums <- colSums(cor_matrix)
+      col_to_remove <- problematic_cols[which.max(cor_sums)]
+      if (verbose) message("drop_collinear_columns: highest sum |cor| -> removing ", col_to_remove)
+    }
+  } else if (strategy == "response_correlation") {
+    if (is.null(response)) {
+      stop("response must be supplied for strategy = 'response_correlation'")
+    }
+    cor_with_response <- apply(X[, problematic_cols, drop = FALSE], 2,
+                               function(col) cor(col, response))
+    col_to_remove <- problematic_cols[which.min(abs(cor_with_response))]
+    if (verbose) message("drop_collinear_columns: smallest |cor| with response -> removing ", col_to_remove)
+  }
+
+  X[, !(colnames(X) %in% col_to_remove), drop = FALSE]
+}
+
+#' Iteratively enforce full column rank on a design matrix
+#'
+#' Given a candidate predictor matrix \code{X} and an optional unnamed
+#' covariate matrix \code{C}, builds the design \code{[1, X, C]} and removes
+#' rank-deficient columns from \code{X} until the design has full column rank.
+#' Rank-deficient columns are identified via the pivot of
+#' \code{qr([1, X, C])}. On each iteration, one problematic column is dropped
+#' using \code{\link{drop_collinear_columns}}. If iterative pruning does not
+#' achieve full rank, falls back to \code{\link{ld_prune_by_correlation}} at a
+#' descending sequence of correlation thresholds.
+#'
+#' @param X Numeric matrix with column names (the predictors subject to
+#'   pruning).
+#' @param C Numeric matrix of covariates (can be unnamed) that will be kept.
+#'   Pass \code{NULL} or a zero-column matrix when there are no covariates.
+#' @param strategy Passed through to \code{\link{drop_collinear_columns}}.
+#' @param response Passed through to \code{\link{drop_collinear_columns}}
+#'   when \code{strategy = "response_correlation"}.
+#' @param max_iterations Integer. Hard cap on the iterative-prune loop.
+#'   Default 300.
+#' @param corr_thresholds Numeric vector of |cor| thresholds used for the
+#'   \code{\link{ld_prune_by_correlation}} fallback, tried in order.
+#'   Default \code{seq(0.75, 0.5, by = -0.05)}.
+#' @param verbose Logical. If TRUE, print per-iteration progress. Default
+#'   FALSE.
+#'
+#' @return The pruned predictor matrix \code{X} (covariates \code{C} are not
+#'   modified).
+#'
+#' @examples
+#' set.seed(1)
+#' X <- matrix(rnorm(100 * 4), 100, 4)
+#' X[, 4] <- X[, 1] + X[, 2]          # rank-deficient
+#' colnames(X) <- c("a", "b", "c", "d")
+#' C <- matrix(rnorm(100), 100, 1)
+#' X2 <- enforce_design_full_rank(X, C, strategy = "variance")
+#' qr(cbind(1, X2, C))$rank == ncol(cbind(1, X2, C))
+#'
+#' @export
+enforce_design_full_rank <- function(X, C,
+                                     strategy = c("correlation", "variance", "response_correlation"),
+                                     response = NULL,
+                                     max_iterations = 300L,
+                                     corr_thresholds = seq(0.75, 0.5, by = -0.05),
+                                     verbose = FALSE) {
+  strategy <- match.arg(strategy)
+  original_colnames <- colnames(X)
+  initial_ncol <- ncol(X)
+  iteration <- 0L
+
+  build_design <- function(X) {
+    XD <- cbind(1, X, C)
+    colnames(XD)[seq_len(ncol(X) + 1L)] <- c("Intercept", colnames(X))
+    XD
+  }
+
+  X_design <- build_design(X)
+  matrix_rank <- qr(X_design)$rank
+  if (verbose) {
+    message("enforce_design_full_rank: initial rank ", matrix_rank,
+            " / ", ncol(X_design))
+  }
+
+  skip_iterative <- FALSE
+
+  # Fast path: try removing all QR-pivot-flagged columns at once.
+  if (matrix_rank < ncol(X_design)) {
+    qrd <- qr(X_design)
+    problematic_cols <- qrd$pivot[(qrd$rank + 1L):ncol(X_design)]
+    problematic_colnames <- colnames(X_design)[problematic_cols]
+    problematic_colnames <- problematic_colnames[problematic_colnames %in% colnames(X)]
+
+    if (length(problematic_colnames) > 0) {
+      X_temp <- X[, !(colnames(X) %in% problematic_colnames), drop = FALSE]
+      if (qr(build_design(X_temp))$rank == ncol(build_design(X_temp))) {
+        if (verbose) {
+          message("enforce_design_full_rank: full rank after batch-removing ",
+                  length(problematic_colnames), " column(s)")
+        }
+      } else {
+        skip_iterative <- TRUE
+        if (verbose) {
+          message("enforce_design_full_rank: batch removal insufficient, ",
+                  "skipping to correlation-pruning fallback")
+        }
+      }
+    }
+  }
+
+  # Iterative path.
+  if (!skip_iterative) {
+    while (matrix_rank < ncol(X_design) && iteration < max_iterations) {
+      qrd <- qr(X_design)
+      problematic_cols <- qrd$pivot[(qrd$rank + 1L):ncol(X_design)]
+      problematic_colnames <- colnames(X_design)[problematic_cols]
+      problematic_colnames <- problematic_colnames[problematic_colnames %in% colnames(X)]
+
+      if (length(problematic_colnames) == 0) break
+
+      X <- drop_collinear_columns(X, problematic_colnames, strategy = strategy,
+                                  response = response, verbose = verbose)
+
+      X_design <- build_design(X)
+      matrix_rank <- qr(X_design)$rank
+      iteration <- iteration + 1L
+      if (verbose) {
+        message("enforce_design_full_rank: iter ", iteration,
+                " rank ", matrix_rank, " / ", ncol(X_design))
+      }
+    }
+
+    if (iteration == max_iterations) {
+      warning("enforce_design_full_rank: max_iterations reached; design may still be rank-deficient")
+    }
+  }
+
+  # Correlation-threshold fallback.
+  X_design <- build_design(X)
+  matrix_rank <- qr(X_design)$rank
+  if (matrix_rank < ncol(X_design)) {
+    if (verbose) {
+      message("enforce_design_full_rank: applying ld_prune_by_correlation fallback")
+    }
+    for (threshold in corr_thresholds) {
+      filter_result <- ld_prune_by_correlation(X, cor_thres = threshold,
+                                               verbose = verbose)
+      X <- filter_result$X.new
+      X_design <- build_design(X)
+      matrix_rank <- qr(X_design)$rank
+      if (verbose) {
+        message("enforce_design_full_rank: threshold ", threshold,
+                " -> rank ", matrix_rank, " / ", ncol(X_design))
+      }
+      if (matrix_rank == ncol(X_design)) break
+    }
+  }
+
+  if (ncol(X) == 1L && initial_ncol == 1L) {
+    colnames(X) <- original_colnames
+  }
+  X
+}
+
+#' LD clumping by a per-variant score using bigsnpr
+#'
+#' Wraps \code{bigsnpr::snp_clumping} with the boilerplate of wrapping a
+#' numeric dosage matrix into a \code{bigstatsr::FBM.code256} object and of
+#' handling the common pitfall of a single-variant input.
+#'
+#' @param X Numeric matrix of 0/1/2 allele dosages, n rows by p variants.
+#'   Column names are expected to be variant IDs but are not required.
+#' @param score Numeric vector of length \code{ncol(X)}. Higher values favour
+#'   retention during clumping (e.g. -log10 p, |Z|, MAF). May be \code{NULL},
+#'   in which case bigsnpr falls back to minor allele frequency computed from
+#'   \code{X}.
+#' @param chr Integer or character vector of length \code{ncol(X)} giving the
+#'   chromosome for each variant.
+#' @param pos Integer vector of length \code{ncol(X)} giving the base-pair
+#'   position for each variant.
+#' @param r2 Numeric in (0, 1]. r-squared threshold for clumping (variants
+#'   within \code{window_kb} whose r2 exceeds \code{r2} and have lower
+#'   \code{score} are removed). Default 0.2.
+#' @param window_kb Numeric. Window size in kilobases. Default is
+#'   \code{100 / r2}, matching the common "ld-clump size = 100/r2" heuristic
+#'   used in many GWAS pipelines.
+#' @param verbose Logical. If TRUE, print the number of retained variants.
+#'   Default FALSE.
+#'
+#' @return An integer vector of indices (into \code{X} columns) kept after
+#'   clumping. For a single-column \code{X}, returns \code{1L}.
+#'
+#' @examples
+#' \dontrun{
+#'   set.seed(1)
+#'   n <- 500; p <- 20
+#'   X <- matrix(rbinom(n * p, 2, 0.3), n, p)
+#'   colnames(X) <- paste0("chr1:", seq_len(p) * 1000, ":A:G")
+#'   s <- runif(p)
+#'   chr <- rep(1L, p); pos <- seq_len(p) * 1000L
+#'   keep <- ld_clump_by_score(X, score = s, chr = chr, pos = pos, r2 = 0.2)
+#' }
+#'
+#' @export
+ld_clump_by_score <- function(X, score, chr, pos, r2 = 0.2,
+                              window_kb = 100 / r2, verbose = FALSE) {
+  if (!requireNamespace("bigsnpr", quietly = TRUE)) {
+    stop("Package 'bigsnpr' is required. Install from CRAN: install.packages('bigsnpr')")
+  }
+  if (!requireNamespace("bigstatsr", quietly = TRUE)) {
+    stop("Package 'bigstatsr' is required. Install from CRAN: install.packages('bigstatsr')")
+  }
+
+  if (ncol(X) < 1L) stop("ld_clump_by_score: X must have at least one column")
+  if (!is.null(score) && length(score) != ncol(X)) {
+    stop("ld_clump_by_score: length(score) must equal ncol(X)")
+  }
+  if (length(chr) != ncol(X) || length(pos) != ncol(X)) {
+    stop("ld_clump_by_score: chr and pos must have length equal to ncol(X)")
+  }
+
+  if (ncol(X) == 1L) {
+    if (verbose) message("ld_clump_by_score: single variant, skipping clumping")
+    return(1L)
+  }
+
+  if (inherits(X, "FBM")) {
+    G <- X
+  } else {
+    code_vec <- c(0, 1, 2, rep(NA, 256L - 3L))
+    G <- bigstatsr::FBM.code256(
+      nrow = nrow(X), ncol = ncol(X),
+      init = X, code = code_vec
+    )
+  }
+
+  keep <- bigsnpr::snp_clumping(
+    G = G,
+    infos.chr = as.integer(chr),
+    infos.pos = as.integer(pos),
+    S = score,
+    thr.r2 = r2,
+    size = window_kb
+  )
+
+  if (verbose) {
+    message("ld_clump_by_score: ", length(keep), " / ", ncol(X),
+            " variants retained at r2 <= ", r2)
+  }
+  keep
+}

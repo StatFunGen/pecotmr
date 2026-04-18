@@ -37,6 +37,8 @@ Imports:
     vroom
 Suggests:
     BGLR,
+    bigsnpr,
+    bigstatsr,
     coda,
     colocboost,
     GBJ,
