@@ -179,8 +179,8 @@ susie_rss_wrapper <- function(z, R = NULL, X = NULL, n = NULL,
   if (!is.null(R) && !is.null(X)) stop("Only one of R or X should be provided, not both.")
 
   # Build argument list for susie_rss
-  base_args <- list(z = z, n = n, L = L, coverage = coverage,
-                    sketch_samples = sketch_samples, ...)
+  base_args <- list(z = z, n = n, coverage = coverage,
+                    stochastic_ld_sample = sketch_samples, ...)
   if (!is.null(X)) base_args$X <- X else base_args$R <- R
 
   run_with_L <- function(L_val) do.call(susie_rss, c(base_args, list(L = L_val)))
