@@ -4,18 +4,19 @@
 // Objective: min_beta  beta'R beta - 2 beta'z + 2 lambda ||beta||_1
 // where R is a (possibly pre-shrunk) LD matrix and z = bhat / sqrt(n).
 
-#include <RcppArmadillo.h>
-// [[Rcpp::depends(RcppArmadillo)]]
+#include <cpp11.hpp>
+#include <cpp11armadillo.hpp>
 
-using namespace Rcpp;
+using namespace cpp11;
+using namespace arma;
 
 // Single-block coordinate descent — mirrors lassosum elnet()
 // Tracks Rbeta = R * beta as a running sum (analogous to yhat = X * beta
 // in the genotype version). This avoids recomputing the full dot product
 // each iteration and matches the original algorithm exactly.
-static int elnet_rss(double lambda1, const arma::vec& diag_R,
-                     const arma::mat& R, const arma::vec& z,
-                     double thr, arma::vec& beta, arma::vec& Rbeta,
+static int elnet_rss(double lambda1, const vec& diag_R,
+                     const mat& R, const vec& z,
+                     double thr, vec& beta, vec& Rbeta,
                      int maxiter) {
   int p = z.n_elem;
   double dlx, del, t, bj;
@@ -38,7 +39,7 @@ static int elnet_rss(double lambda1, const arma::vec& diag_R,
       // Update running Rbeta (analogous to yhat += del * X.col(j))
       Rbeta += del * R.col(j);
     }
-    Rcpp::checkUserInterrupt();
+    cpp11::check_user_interrupt();
     if (dlx < thr) {
       conv = 1;
       break;
@@ -47,47 +48,50 @@ static int elnet_rss(double lambda1, const arma::vec& diag_R,
   return conv;
 }
 
-// [[Rcpp::export]]
-Rcpp::List lassosum_rss_rcpp(const arma::vec& z,
-                              const Rcpp::List& LD,
-                              const arma::vec& lambda,
-                              double thr,
-                              int maxiter) {
+[[cpp11::register]]
+cpp11::writable::list lassosum_rss_rcpp(const doubles& z_r,
+                                        const list& LD,
+                                        const doubles& lambda_r,
+                                        double thr,
+                                        int maxiter) {
+  vec z = as_Col(z_r);
+  vec lambda = as_Col(lambda_r);
+
   // Cache LD blocks once (avoid re-copying from R on every lambda iteration)
   int n_blocks = LD.size();
-  std::vector<arma::mat> ld_blocks(n_blocks);
+  std::vector<mat> ld_blocks(n_blocks);
   std::vector<int> block_start(n_blocks), block_end(n_blocks);
   int p = 0;
   for (int b = 0; b < n_blocks; b++) {
-    ld_blocks[b] = Rcpp::as<arma::mat>(LD[b]);
+    ld_blocks[b] = as_Mat(doubles_matrix<>(LD[b]));
     block_start[b] = p;
     p += ld_blocks[b].n_rows;
     block_end[b] = p - 1;
   }
 
   if ((int)z.n_elem != p)
-    Rcpp::stop("Length of z must equal total rows across all LD blocks.");
+    cpp11::stop("Length of z must equal total rows across all LD blocks.");
 
   int nlambda = lambda.n_elem;
-  arma::mat beta_mat(p, nlambda, arma::fill::zeros);
-  arma::ivec conv_vec(nlambda, arma::fill::zeros);
-  arma::vec loss_vec(nlambda, arma::fill::zeros);
-  arma::vec fbeta_vec(nlambda, arma::fill::zeros);
+  mat beta_mat(p, nlambda, fill::zeros);
+  Col<int> conv_vec(nlambda, fill::zeros);
+  vec loss_vec(nlambda, fill::zeros);
+  vec fbeta_vec(nlambda, fill::zeros);
 
   // Working beta vector — warm-started across lambda path
-  arma::vec beta(p, arma::fill::zeros);
+  vec beta(p, fill::zeros);
 
   for (int i = 0; i < nlambda; i++) {
     // Block-wise coordinate descent — mirrors lassosum repelnet()
     int out = 1;
     for (int b = 0; b < n_blocks; b++) {
-      const arma::mat& Rb = ld_blocks[b];
+      const mat& Rb = ld_blocks[b];
       int s = block_start[b];
       int e = block_end[b];
-      arma::vec diag_R = Rb.diag();
-      arma::vec z_blk = z.subvec(s, e);
-      arma::vec beta_blk = beta.subvec(s, e);
-      arma::vec Rbeta_blk = Rb * beta_blk;
+      vec diag_R = Rb.diag();
+      vec z_blk = z.subvec(s, e);
+      vec beta_blk = beta.subvec(s, e);
+      vec Rbeta_blk = Rb * beta_blk;
 
       int conv_blk = elnet_rss(lambda(i), diag_R, Rb, z_blk,
                                 thr, beta_blk, Rbeta_blk, maxiter);
@@ -99,23 +103,26 @@ Rcpp::List lassosum_rss_rcpp(const arma::vec& z,
     conv_vec(i) = out;
 
     // Compute loss = beta'R beta - 2 z'beta (block-wise)
-    double loss = -2.0 * arma::dot(z, beta);
+    double loss = -2.0 * dot(z, beta);
     for (int b = 0; b < n_blocks; b++) {
-      const arma::mat& Rb = ld_blocks[b];
+      const mat& Rb = ld_blocks[b];
       int s = block_start[b];
       int e = block_end[b];
-      arma::vec beta_blk = beta.subvec(s, e);
-      loss += arma::as_scalar(beta_blk.t() * Rb * beta_blk);
+      vec beta_blk = beta.subvec(s, e);
+      loss += as_scalar(beta_blk.t() * Rb * beta_blk);
     }
     loss_vec(i) = loss;
-    fbeta_vec(i) = loss + 2.0 * lambda(i) * arma::sum(arma::abs(beta));
+    fbeta_vec(i) = loss + 2.0 * lambda(i) * sum(abs(beta));
   }
 
-  return List::create(
-    Named("beta") = beta_mat,
-    Named("lambda") = lambda,
-    Named("conv") = conv_vec,
-    Named("loss") = loss_vec,
-    Named("fbeta") = fbeta_vec
-  );
+  using namespace cpp11::literals;
+  writable::list result({
+    "beta"_nm = as_doubles_matrix(beta_mat),
+    "lambda"_nm = as_doubles(lambda),
+    "conv"_nm = as_integers(conv_vec),
+    "loss"_nm = as_doubles(loss_vec),
+    "fbeta"_nm = as_doubles(fbeta_vec)
+  });
+
+  return result;
 }

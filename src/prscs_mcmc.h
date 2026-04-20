@@ -6,12 +6,11 @@
 #ifndef MCMC_HPP
 #define MCMC_HPP
 
-#include <current/armadillo>
+#include <armadillo.hpp>
 #include <vector>
 #include <string>
 #include <cmath>
 #include <map>
-#include <iomanip>
 #include <random>
 
 /**
@@ -195,7 +194,7 @@ std::map<std::string, arma::vec> prs_cs_mcmc(double a, double b, double* phi,
                                              int n_iter, int n_burnin, int thin,
                                              bool verbose, unsigned int seed) {
 	if (verbose) {
-		std::cout << "Running Markov Chain Monte Carlo (MCMC) sampler..." << std::endl;
+		Rprintf("Running Markov Chain Monte Carlo (MCMC) sampler...\n");
 	}
 
 	// Derived statistics
@@ -229,7 +228,7 @@ std::map<std::string, arma::vec> prs_cs_mcmc(double a, double b, double* phi,
 	// MCMC
 	for (int itr = 1; itr <= n_iter; ++itr) {
 		if (verbose && itr % 100 == 0) {
-			std::cout << "Iteration " << std::setw(4) << itr << " of " << n_iter << std::endl;
+			Rprintf("Iteration %4d of %d\n", itr, n_iter);
 		}
 
 		int mm = 0;
@@ -313,11 +312,11 @@ std::map<std::string, arma::vec> prs_cs_mcmc(double a, double b, double* phi,
 
 	// Print estimated phi
 	if (verbose && phi_updt) {
-		std::cout << "Estimated global shrinkage parameter: " << phi_est << std::endl;
+		Rprintf("Estimated global shrinkage parameter: %g\n", phi_est);
 	}
 
 	if (verbose) {
-		std::cout << "MCMC sampling completed." << std::endl;
+		Rprintf("MCMC sampling completed.\n");
 	}
 
 	return output;

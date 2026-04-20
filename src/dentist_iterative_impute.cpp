@@ -1,20 +1,17 @@
-// Rcpp implementation of the DENTIST method (Chen et al.)
+// cpp11 implementation of the DENTIST method (Chen et al.)
 // https://github.com/Yves-CHEN/DENTIST/tree/master#Citations
 //
 // This code reproduces the original DENTIST binary's algorithm and logic,
 // using Armadillo (LAPACK) for eigendecomposition and GCTA-style LD computation.
-#include <RcppArmadillo.h>
+#include <cpp11.hpp>
+#include <cpp11armadillo.hpp>
 #include <omp.h>
 #include <algorithm>
 #include <random>
 #include <vector>
 #include <unordered_set>
 
-// [[Rcpp::depends(RcppArmadillo)]]
-// [[Rcpp::plugins(cpp11)]]
-// [[Rcpp::plugins(openmp)]]
-
-using namespace Rcpp;
+using namespace cpp11;
 using namespace arma;
 
 // DENTIST RNG: uses srand/rand + sort-by-random-values to produce a permutation.
@@ -94,19 +91,20 @@ double getQuantile2_chen_et_al(const std::vector<double> &dat, std::vector<size_
 // avoiding catastrophic cancellation from 1.0 - CDF for large stats.
 // This matches the original DENTIST binary's use of Boost complement().
 double minusLogPvalueChisq2(double stat) {
-	double p = R::pchisq(stat, 1.0, 0, 0);  // lower.tail=FALSE, log.p=FALSE
+	double p = Rf_pchisq(stat, 1.0, 0, 0);  // lower.tail=FALSE, log.p=FALSE
 	return -log10(p);
 }
 
 // Perform one iteration of the DENTIST algorithm using Armadillo's eig_sym
 // (LAPACK dsyevd) for eigendecomposition. Both Eigen and Armadillo return
 // eigenvalues in ascending order, so the logic is identical.
-void oneIteration(const arma::mat& LD_mat, const std::vector<size_t>& idx, const std::vector<size_t>& idx2,
-                  const arma::vec& zScore, arma::vec& imputedZ, arma::vec& rsqList, arma::vec& zScore_e,
+void oneIteration(const mat& LD_mat, const std::vector<size_t>& idx, const std::vector<size_t>& idx2,
+                  const vec& zScore, vec& imputedZ, vec& rsqList, vec& zScore_e,
                   size_t nSample, float probSVD, int ncpus, bool verbose) {
 	if (verbose) {
-		Rcpp::Rcout << "LD_mat: " << LD_mat.n_rows << "x" << LD_mat.n_cols
-		            << " idx: " << idx.size() << " idx2: " << idx2.size() << std::endl;
+		Rprintf("LD_mat: %lux%lu idx: %lu idx2: %lu\n",
+		        (unsigned long)LD_mat.n_rows, (unsigned long)LD_mat.n_cols,
+		        (unsigned long)idx.size(), (unsigned long)idx2.size());
 	}
 
 	int nProcessors = omp_get_max_threads();
@@ -117,28 +115,28 @@ void oneIteration(const arma::mat& LD_mat, const std::vector<size_t>& idx, const
 
 	// Validate dimensions
 	if (idx2.size() > LD_mat.n_rows || idx.size() > LD_mat.n_cols)
-		Rcpp::stop("Inconsistent dimensions between LD_mat and idx2/idx in oneIteration()");
+		cpp11::stop("Inconsistent dimensions between LD_mat and idx2/idx in oneIteration()");
 	for (size_t i = 0; i < idx.size(); ++i)
 		if (idx[i] >= zScore.size())
-			Rcpp::stop("Invalid index in idx: " + std::to_string(idx[i]));
+			cpp11::stop("Invalid index in idx: %d", (int)idx[i]);
 	for (size_t i = 0; i < idx2.size(); ++i)
 		if (idx2[i] >= zScore.size())
-			Rcpp::stop("Invalid index in idx2: " + std::to_string(idx2[i]));
+			cpp11::stop("Invalid index in idx2: %d", (int)idx2[i]);
 
 	// Convert to arma::uvec for idiomatic submatrix extraction
-	arma::uvec aidx(idx.size()), aidx2(idx2.size());
+	uvec aidx(idx.size()), aidx2(idx2.size());
 	for (size_t i = 0; i < idx.size(); i++) aidx(i) = idx[i];
 	for (size_t i = 0; i < idx2.size(); i++) aidx2(i) = idx2[i];
 
 	// Extract submatrices and z-score subset
-	arma::mat LD_it = LD_mat(aidx2, aidx);
-	arma::mat VV = LD_mat(aidx, aidx);
-	arma::vec zScore_sub = zScore(aidx);
+	mat LD_it = LD_mat(aidx2, aidx);
+	mat VV = LD_mat(aidx, aidx);
+	vec zScore_sub = zScore(aidx);
 
 	// Eigendecomposition (ascending order, same as Eigen's SelfAdjointEigenSolver)
-	arma::vec eigval;
-	arma::mat eigvec;
-	arma::eig_sym(eigval, eigvec, VV);
+	vec eigval;
+	mat eigvec;
+	eig_sym(eigval, eigvec, VV);
 
 	// Determine effective rank (eigenvalues >= 0.0001)
 	int n_eig = eigval.n_elem;
@@ -149,10 +147,10 @@ void oneIteration(const arma::mat& LD_mat, const std::vector<size_t>& idx, const
 	if (K > static_cast<size_t>(nRank)) K = nRank;
 
 	if (verbose)
-		Rcpp::Rcout << "Rank: " << nRank << ", Zeros: " << nZeros << ", K: " << K << std::endl;
+		Rprintf("Rank: %d, Zeros: %d, K: %lu\n", nRank, nZeros, (unsigned long)K);
 
 	if (K <= 1) {
-		Rcpp::warning("Rank of eigen matrix <= 1, skipping imputation for this partition");
+		cpp11::warning("Rank of eigen matrix <= 1, skipping imputation for this partition");
 		for (size_t i = 0; i < idx2.size(); ++i) {
 			imputedZ[idx2[i]] = 0.0;
 			rsqList[idx2[i]] = 0.0;
@@ -162,8 +160,8 @@ void oneIteration(const arma::mat& LD_mat, const std::vector<size_t>& idx, const
 	}
 
 	// Build ui (top K eigenvectors, largest first) and wi (inverse eigenvalues)
-	arma::mat ui(n_eig, K);
-	arma::vec wi(K);
+	mat ui(n_eig, K);
+	vec wi(K);
 	for (size_t m = 0; m < K; m++) {
 		int j = n_eig - m - 1;  // from largest eigenvalue
 		ui.col(m) = eigvec.col(j);
@@ -171,9 +169,9 @@ void oneIteration(const arma::mat& LD_mat, const std::vector<size_t>& idx, const
 	}
 
 	// Imputation: beta = LD_it * ui * diag(wi), then imputed_z = beta * ui' * z
-	arma::mat beta = LD_it * (ui.each_row() % wi.t());
-	arma::vec zScore_imp = beta * (ui.t() * zScore_sub);
-	arma::vec rsq_vec = arma::diagvec(beta * (ui.t() * LD_it.t()));
+	mat beta = LD_it * (ui.each_row() % wi.t());
+	vec zScore_imp = beta * (ui.t() * zScore_sub);
+	vec rsq_vec = diagvec(beta * (ui.t() * LD_it.t()));
 
 	// Store results
 	for (size_t i = 0; i < idx2.size(); ++i) {
@@ -181,7 +179,7 @@ void oneIteration(const arma::mat& LD_mat, const std::vector<size_t>& idx, const
 		rsqList[idx2[i]] = rsq_vec(i);
 		if (rsq_vec(i) >= 1) {
 			rsqList[idx2[i]] = std::min(rsq_vec(i), 1.0);
-			Rcpp::warning("Adjusted rsq value exceeding 1: " + std::to_string(rsq_vec(i)));
+			cpp11::warning("Adjusted rsq value exceeding 1: %g", rsq_vec(i));
 		}
 		size_t j = idx2[i];
 		double denom_sq = LD_mat(j, j) - rsqList[j];
@@ -198,15 +196,16 @@ void oneIteration(const arma::mat& LD_mat, const std::vector<size_t>& idx, const
  * information from a reference panel. It helps detect genotyping/imputation errors, allelic errors, and heterogeneity
  * between GWAS and LD reference samples, improving the reliability of subsequent analyses.
  *
- * @param LD_mat The linkage disequilibrium (LD) matrix from a reference panel, as an arma::mat object.
+ * @param LD_mat_r The linkage disequilibrium (LD) matrix from a reference panel.
  * @param nSample The sample size used in the GWAS whose summary statistics are being analyzed.
- * @param zScore A vector of Z-scores from GWAS summary statistics.
+ * @param zScore_r A vector of Z-scores from GWAS summary statistics.
  * @param pValueThreshold Threshold for the p-value below which variants are considered for quality control.
  * @param propSVD Proportion of singular value decomposition (SVD) components retained in the analysis.
  * @param gcControl A boolean flag to apply genetic control corrections.
  * @param nIter The number of iterations to run the DENTIST algorithm.
  * @param gPvalueThreshold P-value threshold for grouping variants into significant and null categories.
  * @param ncpus The number of CPU cores to use for parallel processing.
+ * @param correct_chen_et_al_bug Whether to correct the original DENTIST bug.
  * @param verbose A boolean flag to enable verbose output for debugging.
  *
  * @return A List object containing:
@@ -215,26 +214,27 @@ void oneIteration(const arma::mat& LD_mat, const std::vector<size_t>& idx, const
  * - z_diff: A vector of outlier test z-scores
  * - rsq: A vector of R-squared values for each marker, indicating goodness of fit.
  * - iter_to_correct: An integer vector indicating the iteration in which each marker passed the quality control.
- *
- * @note The function is designed for use in Rcpp and requires Armadillo for matrix operations and OpenMP for parallel processing.
  */
 
-// [[Rcpp::export]]
-List dentist_iterative_impute(const arma::mat& LD_mat, size_t nSample, const arma::vec& zScore,
-                              double pValueThreshold, float propSVD, bool gcControl, int nIter,
+[[cpp11::register]]
+cpp11::writable::list dentist_iterative_impute(const doubles_matrix<>& LD_mat_r, int nSample, const doubles& zScore_r,
+                              double pValueThreshold, double propSVD, bool gcControl, int nIter,
                               double gPvalueThreshold, int ncpus, bool correct_chen_et_al_bug,
-                              bool verbose = false) {
+                              bool verbose) {
+	mat LD_mat = as_Mat(LD_mat_r);
+	vec zScore = as_Col(zScore_r);
+
 	if (verbose) {
-		Rcpp::Rcout << "LD_mat dimensions: " << LD_mat.n_rows << " x " << LD_mat.n_cols << std::endl;
-		Rcpp::Rcout << "nSample: " << nSample << std::endl;
-		Rcpp::Rcout << "zScore size: " << zScore.size() << std::endl;
-		Rcpp::Rcout << "pValueThreshold: " << pValueThreshold << std::endl;
-		Rcpp::Rcout << "propSVD: " << propSVD << std::endl;
-		Rcpp::Rcout << "gcControl: " << gcControl << std::endl;
-		Rcpp::Rcout << "nIter: " << nIter << std::endl;
-		Rcpp::Rcout << "gPvalueThreshold: " << gPvalueThreshold << std::endl;
-		Rcpp::Rcout << "ncpus: " << ncpus << std::endl;
-		Rcpp::Rcout << "correct_chen_et_al_bug: " << correct_chen_et_al_bug << std::endl;
+		Rprintf("LD_mat dimensions: %lu x %lu\n", (unsigned long)LD_mat.n_rows, (unsigned long)LD_mat.n_cols);
+		Rprintf("nSample: %d\n", nSample);
+		Rprintf("zScore size: %lu\n", (unsigned long)zScore.size());
+		Rprintf("pValueThreshold: %g\n", pValueThreshold);
+		Rprintf("propSVD: %g\n", propSVD);
+		Rprintf("gcControl: %d\n", gcControl);
+		Rprintf("nIter: %d\n", nIter);
+		Rprintf("gPvalueThreshold: %g\n", gPvalueThreshold);
+		Rprintf("ncpus: %d\n", ncpus);
+		Rprintf("correct_chen_et_al_bug: %d\n", correct_chen_et_al_bug);
 	}
 
 	// Set number of threads for parallel processing
@@ -257,7 +257,7 @@ List dentist_iterative_impute(const arma::mat& LD_mat, size_t nSample, const arm
 	}
 
 	if (verbose) {
-		Rcpp::Rcout << "Indices partitioned" << std::endl;
+		Rprintf("Indices partitioned\n");
 	}
 
 	std::vector<size_t> groupingGWAS(markerSize, 0);
@@ -268,13 +268,13 @@ List dentist_iterative_impute(const arma::mat& LD_mat, size_t nSample, const arm
 	}
 
 	if (verbose) {
-		Rcpp::Rcout << "Grouping GWAS finished" << std::endl;
+		Rprintf("Grouping GWAS finished\n");
 	}
 
-	arma::vec imputedZ = arma::zeros<arma::vec>(markerSize);
-	arma::vec rsq = arma::zeros<arma::vec>(markerSize);
-	arma::vec zScore_e = arma::zeros<arma::vec>(markerSize);
-	arma::ivec iterID = arma::zeros<arma::ivec>(markerSize);
+	vec imputedZ = zeros<vec>(markerSize);
+	vec rsq = zeros<vec>(markerSize);
+	vec zScore_e = zeros<vec>(markerSize);
+	Col<int> iterID = zeros<Col<int>>(markerSize);
 
 	std::vector<double> diff(idx2.size());
 	std::vector<size_t> grouping_tmp(idx2.size());
@@ -282,10 +282,10 @@ List dentist_iterative_impute(const arma::mat& LD_mat, size_t nSample, const arm
 	for (int t = 0; t < nIter; ++t) {
 		// Perform iteration with current subsets
 		if (verbose) {
-			Rcpp::Rcout << "\n=== Iteration " << t << " ===" << std::endl;
-			Rcpp::Rcout << "idx.size()=" << idx.size() << " idx2.size()=" << idx2.size()
-			            << " fullIdx.size()=" << fullIdx.size() << std::endl;
-			Rcpp::Rcout << "Performing oneIteration()" << std::endl;
+			Rprintf("\n=== Iteration %d ===\n", t);
+			Rprintf("idx.size()=%lu idx2.size()=%lu fullIdx.size()=%lu\n",
+			        (unsigned long)idx.size(), (unsigned long)idx2.size(), (unsigned long)fullIdx.size());
+			Rprintf("Performing oneIteration()\n");
 		}
 
 		oneIteration(LD_mat, idx, idx2, zScore, imputedZ, rsq, zScore_e, nSample, propSVD, ncpus, verbose);
@@ -300,7 +300,7 @@ List dentist_iterative_impute(const arma::mat& LD_mat, size_t nSample, const arm
 		}
 
 		if (verbose) {
-			Rcpp::Rcout << "Assessing differences and grouping for thresholding" << std::endl;
+			Rprintf("Assessing differences and grouping for thresholding\n");
 		}
 
 		double threshold = getQuantile(diff, 0.995);
@@ -338,7 +338,7 @@ List dentist_iterative_impute(const arma::mat& LD_mat, size_t nSample, const arm
 			   and it will treat t (which is 0) no larger than nIter-2 (which is -1) which is wrong
 			   Thus if we correct the original DENTIST code, i.e., correct_chen_et_al_bug = TRUE, or when nIter - 2 >=0,
 			   it will compare t and nIter as we expect.
-			   and if we want to keep the original DENTIST code, i.e., correct_chen_et_al_bug = FALSE, then it will skip this if condition for t > nIter - 2
+			   and if we want to keep the original DENTIST code, i.e., correct_chen_et_al_bug = TRUE, then it will skip this if condition for t > nIter - 2
 			 */
 			if (t > nIter - 2) {
 				threshold0 = threshold;
@@ -347,8 +347,8 @@ List dentist_iterative_impute(const arma::mat& LD_mat, size_t nSample, const arm
 		}
 
 		if (verbose) {
-			Rcpp::Rcout << "Thresholds calculated: " << threshold << ", " << threshold1 << ", " << threshold0 << std::endl;
-			Rcpp::Rcout << "Applying threshold-based filtering for QC" << std::endl;
+			Rprintf("Thresholds calculated: %g, %g, %g\n", threshold, threshold1, threshold0);
+			Rprintf("Applying threshold-based filtering for QC\n");
 		}
 
 		// Apply threshold-based filtering for QC
@@ -362,14 +362,14 @@ List dentist_iterative_impute(const arma::mat& LD_mat, size_t nSample, const arm
 
 		// Perform another iteration with updated sets of indices (idx and idx2_QCed)
 		if (verbose) {
-			Rcpp::Rcout << "idx2_QCed.size()=" << idx2_QCed.size() << std::endl;
-			Rcpp::Rcout << "Performing oneIteration() with updated sets of indices" << std::endl;
+			Rprintf("idx2_QCed.size()=%lu\n", (unsigned long)idx2_QCed.size());
+			Rprintf("Performing oneIteration() with updated sets of indices\n");
 		}
 
 		oneIteration(LD_mat, idx2_QCed, idx, zScore, imputedZ, rsq, zScore_e, nSample, propSVD, ncpus, verbose);
 
 		if (verbose) {
-			Rcpp::Rcout << "Recalculating differences and groupings after the iteration" << std::endl;
+			Rprintf("Recalculating differences and groupings after the iteration\n");
 		}
 
 		// Recalculate differences and groupings after the iteration
@@ -382,7 +382,7 @@ List dentist_iterative_impute(const arma::mat& LD_mat, size_t nSample, const arm
 		}
 
 		if (verbose) {
-			Rcpp::Rcout << "Re-determining thresholds based on the recalculated differences and groupings" << std::endl;
+			Rprintf("Re-determining thresholds based on the recalculated differences and groupings\n");
 		}
 
 		// Re-determine thresholds based on the recalculated differences and groupings
@@ -412,8 +412,8 @@ List dentist_iterative_impute(const arma::mat& LD_mat, size_t nSample, const arm
 		}
 
 		if (verbose) {
-			Rcpp::Rcout << "Phase2 thresholds: " << threshold << ", " << threshold1 << ", " << threshold0 << std::endl;
-			Rcpp::Rcout << "Adjusting for genetic control and inflation factor if necessary" << std::endl;
+			Rprintf("Phase2 thresholds: %g, %g, %g\n", threshold, threshold1, threshold0);
+			Rprintf("Adjusting for genetic control and inflation factor if necessary\n");
 		}
 
 		// Adjust for genetic control and inflation factor if necessary
@@ -426,7 +426,7 @@ List dentist_iterative_impute(const arma::mat& LD_mat, size_t nSample, const arm
 		// We only need to guard against empty vectors to avoid undefined behavior.
 		if (chisq.empty()) {
 			if (verbose) {
-				Rcpp::Rcout << "chisq is empty, breaking out of iteration loop." << std::endl;
+				Rprintf("chisq is empty, breaking out of iteration loop.\n");
 			}
 			break;
 		}
@@ -466,15 +466,13 @@ List dentist_iterative_impute(const arma::mat& LD_mat, size_t nSample, const arm
 		// Update the indices for the next iteration based on filtering criteria
 		fullIdx = fullIdx_tmp;
 		if (verbose) {
-			Rcpp::Rcout << "Iter " << t << ": fullIdx=" << fullIdx.size()
-			            << " threshold=" << threshold
-			            << " threshold1=" << threshold1
-			            << " threshold0=" << threshold0 << std::endl;
+			Rprintf("Iter %d: fullIdx=%lu threshold=%g threshold1=%g threshold0=%g\n",
+			        t, (unsigned long)fullIdx.size(), threshold, threshold1, threshold0);
 		}
 		// Early exit if all variants were filtered out
 		if (fullIdx.empty()) {
 			if (verbose) {
-				Rcpp::Rcout << "All variants filtered out at iteration " << t << ", stopping early." << std::endl;
+				Rprintf("All variants filtered out at iteration %d, stopping early.\n", t);
 			}
 			break;
 		}
@@ -488,9 +486,14 @@ List dentist_iterative_impute(const arma::mat& LD_mat, size_t nSample, const arm
 		}
 	}
 
-	return List::create(Named("original_z") = zScore,
-	                    Named("imputed_z") = imputedZ,
-	                    Named("rsq") = rsq,
-	                    Named("z_diff") = zScore_e,
-	                    Named("iter_to_correct") = iterID);
+	using namespace cpp11::literals;
+	writable::list result({
+		"original_z"_nm = as_doubles(zScore),
+		"imputed_z"_nm = as_doubles(imputedZ),
+		"rsq"_nm = as_doubles(rsq),
+		"z_diff"_nm = as_doubles(zScore_e),
+		"iter_to_correct"_nm = as_integers(iterID)
+	});
+
+	return result;
 }

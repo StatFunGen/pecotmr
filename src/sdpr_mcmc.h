@@ -1,6 +1,6 @@
 #include <iostream>
 #include <vector>
-#include <current/armadillo>
+#include <armadillo.hpp>
 #include <cmath>
 #include <random>
 #include <unordered_map>

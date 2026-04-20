@@ -34,6 +34,9 @@ requirements:
     - r-coda
     - r-coloc
     - r-colocboost
+    - r-cpp11
+    - r-cpp11armadillo
+    - r-decor
     - r-dofuture
     - r-dplyr
     - r-flashier
@@ -54,8 +57,6 @@ requirements:
     - r-pgenlibr
     - r-purrr
     - r-qgg
-    - r-rcpp
-    - r-rcpparmadillo
     - r-rcppdpr
     - r-readr
     - r-rfast

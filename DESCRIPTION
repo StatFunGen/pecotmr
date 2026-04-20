@@ -16,7 +16,6 @@ License: MIT + file LICENSE
 Imports:
     Biostrings,
     IRanges,
-    Rcpp,
     S4Vectors,
     coloc,
     doFuture,
@@ -65,8 +64,8 @@ Remotes:
     stephenslab/mvsusieR,
     stephenslab/susieR,
 LinkingTo:
-    Rcpp,
-    RcppArmadillo
+    cpp11,
+    cpp11armadillo
 NeedsCompilation: yes
 VignetteBuilder: knitr
 RoxygenNote: 7.3.3

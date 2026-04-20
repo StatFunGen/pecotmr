@@ -58,6 +58,8 @@
 compute_qtl_enrichment <- function(gwas_pip, susie_qtl_regions,
                                    num_gwas = NULL, pi_qtl = NULL,
                                    lambda = 1.0, ImpN = 25,
+                                   double_shrinkage = FALSE,
+                                   bessel_correction = TRUE,
                                    num_threads = 1, verbose = TRUE) {
   if (is.null(num_gwas)) {
     warning("num_gwas is not provided. Estimating pi_gwas from the data. Note that this estimate may be biased if the input gwas_pip does not contain genome-wide variants.")
@@ -118,6 +120,8 @@ compute_qtl_enrichment <- function(gwas_pip, susie_qtl_regions,
     pi_qtl = pi_qtl,
     ImpN = ImpN,
     shrinkage_lambda = lambda,
+    double_shrinkage = double_shrinkage,
+    bessel_correction = bessel_correction,
     num_threads = num_threads
   )
 

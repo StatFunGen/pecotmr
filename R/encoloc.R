@@ -26,6 +26,8 @@ xqtl_enrichment_wrapper <- function(xqtl_files, gwas_files,
                                     xqtl_varname_obj = NULL, gwas_varname_obj = NULL,
                                     num_gwas = NULL, pi_qtl = NULL,
                                     lambda = 1.0, ImpN = 25,
+                                    double_shrinkage = FALSE,
+                                    bessel_correction = TRUE,
                                     num_threads = 1) {
   process_finemapped_data <- function(xqtl_files, gwas_files,
                                       xqtl_finemapping_obj = NULL, gwas_finemapping_obj = NULL,
@@ -79,6 +81,8 @@ xqtl_enrichment_wrapper <- function(xqtl_files, gwas_files,
     gwas_pip = dat$gwas_pip, susie_qtl_regions = dat$xqtl_data,
     num_gwas = num_gwas, pi_qtl = pi_qtl,
     lambda = lambda, ImpN = ImpN,
+    double_shrinkage = double_shrinkage,
+    bessel_correction = bessel_correction,
     num_threads = num_threads
   ))
 }

@@ -23,7 +23,8 @@
 // platform-optimal SIMD (NEON on ARM, SSE/AVX on x86) through the
 // underlying BLAS/compiler auto-vectorization.
 
-#include <RcppArmadillo.h>
+#include <cpp11.hpp>
+#include <cpp11armadillo.hpp>
 #include <algorithm>
 #include <cmath>
 #include <thread>
@@ -55,11 +56,11 @@ void MCMC_state::sample_sigma2() {
         cluster_var[i] = 1.0 / dist(r);
         if (std::isinf(cluster_var[i])) {
             cluster_var[i] = 1e5;
-            Rcpp::Rcerr << "Cluster variance is infinite." << std::endl;
+            REprintf("Cluster variance is infinite.\n");
         }
         else if (cluster_var[i] == 0) {
             cluster_var[i] = 1e-10;
-            Rcpp::Rcerr << "Cluster variance is zero." << std::endl;
+            REprintf("Cluster variance is zero.\n");
         }
     }
 }
@@ -569,16 +570,14 @@ std::unordered_map<std::string, arma::vec> mcmc(
 
         if (verbose && j % 100 == 0) {
             state.compute_h2(data);
-            Rcpp::Rcout << j << " iter. h2: "
-                        << state.h2 * square(state.eta)
-                        << " max beta: "
-                        << arma::max(state.beta) * state.eta << endl;
+            Rprintf("%d iter. h2: %g max beta: %g\n",
+                    j, state.h2 * square(state.eta),
+                    arma::max(state.beta) * state.eta);
         }
     }
 
     if (verbose) {
-        Rcpp::Rcout << "h2: " << samples.h2
-                    << " max: " << arma::max(samples.beta) << endl;
+        Rprintf("h2: %g max: %g\n", samples.h2, arma::max(samples.beta));
     }
 
     std::unordered_map<std::string, arma::vec> results;

@@ -1,6 +1,7 @@
 #ifndef QTL_ENRICHMENT_HPP
 #define QTL_ENRICHMENT_HPP
-#include <RcppArmadillo.h>
+#include <cpp11.hpp>
+#include <cpp11armadillo.hpp>
 #include <vector>
 #include <string>
 #include <map>
@@ -10,54 +11,56 @@
 #include <cmath>
 #include <cstdio>
 
-// Enable C++11
-// [[Rcpp::plugins(cpp11)]]
-// Enable openmp
-// [[Rcpp::plugins(openmp)]]
-// Import Armadillo
-// [[Rcpp::depends(RcppArmadillo)]]
+using namespace cpp11;
+using namespace arma;
 
 class SuSiEFit {
 public:
 std::vector<std::string> variable_names;
-arma::mat alpha;
+mat alpha;
 std::vector<double> prior_variance;
 
 SuSiEFit(SEXP r_susie_fit) {
-	Rcpp::List susie_fit(r_susie_fit);
+	list susie_fit(r_susie_fit);
 
-	Rcpp::NumericVector pip_vec = Rcpp::as<Rcpp::NumericVector>(susie_fit["pip"]);
-	// std::vector<double> pip = Rcpp::as<std::vector<double> >(pip_vec);
-	variable_names = Rcpp::as<std::vector<std::string> >(pip_vec.names());
-	alpha = Rcpp::as<arma::mat>(susie_fit["alpha"]);
-	prior_variance = Rcpp::as<std::vector<double> >(susie_fit["prior_variance"]);
+	doubles pip_vec(susie_fit["pip"]);
+	// Get names from the pip vector
+	cpp11::strings pip_names(pip_vec.attr("names"));
+	variable_names.reserve(pip_names.size());
+	for (int i = 0; i < pip_names.size(); ++i) {
+		variable_names.push_back(std::string(pip_names[i]));
+	}
+
+	alpha = as_Mat(doubles_matrix<>(susie_fit["alpha"]));
+	prior_variance = cpp11::as_cpp<std::vector<double>>(susie_fit["prior_variance"]);
 
 	if (alpha.n_rows != prior_variance.size()) {
-		Rcpp::stop("The number of rows in alpha must match the length of prior_variance.");
+		cpp11::stop("The number of rows in alpha must match the length of prior_variance.");
 	}
 
 	// Check if all elements in prior_variance are not greater than 0
 	if (std::all_of(prior_variance.begin(), prior_variance.end(), [](double x) {
 			return x <= 0;
 		})) {
-		Rcpp::stop("At least one element in prior_variance must be greater than 0.");
+		cpp11::stop("At least one element in prior_variance must be greater than 0.");
 	}
 
 	// Filter out rows with prior_variance = 0
-	std::vector<arma::uword> valid_rows;
+	std::vector<uword> valid_rows;
 	for (size_t i = 0; i < prior_variance.size(); ++i) {
 		if (prior_variance[i] > 0) {
 			valid_rows.push_back(i);
 		}
 	}
-	alpha = alpha.rows(arma::uvec(valid_rows));
+	alpha = alpha.rows(uvec(valid_rows));
 	prior_variance.erase(std::remove(prior_variance.begin(), prior_variance.end(), 0), prior_variance.end());
 
 	// Add a check to make sure each row of alpha sums to 1
-	for (arma::uword i = 0; i < alpha.n_rows; ++i) {
-		double row_sum = arma::sum(alpha.row(i));
+	for (uword i = 0; i < alpha.n_rows; ++i) {
+		double row_sum = sum(alpha.row(i));
 		if (std::abs(row_sum - 1.0) > 1e-6) {
-			Rcpp::stop("Row " + std::to_string(i + 1) + " of single effect PIP matrix (alpha) does not sum to 1. It is: " + std::to_string(row_sum));
+			cpp11::stop("Row %d of single effect PIP matrix (alpha) does not sum to 1. It is: %g",
+			            (int)(i + 1), row_sum);
 		}
 	}
 }
@@ -65,8 +68,9 @@ SuSiEFit(SEXP r_susie_fit) {
 std::vector<std::string> impute_qtn(std::mt19937 &gen) const {
 	std::vector<std::string> qtn_names;
 
-	for (arma::uword i = 0; i < alpha.n_rows; ++i) {
-		std::vector<double> alpha_row(alpha.colptr(i), alpha.colptr(i) + alpha.n_cols);
+	for (uword i = 0; i < alpha.n_rows; ++i) {
+		arma::rowvec row_i = alpha.row(i);
+		std::vector<double> alpha_row(row_i.begin(), row_i.end());
 		std::discrete_distribution<> dist(alpha_row.begin(), alpha_row.end());
 		int random_index = dist(gen);
 		qtn_names.push_back(variable_names[random_index]);
@@ -76,40 +80,43 @@ std::vector<std::string> impute_qtn(std::mt19937 &gen) const {
 }
 };
 
-std::vector<double> filter_outliers(
+std::vector<size_t> filter_outlier_indices(
     const std::vector<double>& estimates,
     const std::vector<double>& variances,
     double prior_variance,
-    double threshold = 3.0) 
+    bool bessel_correction = true,
+    double threshold = 3.0)
 {
+    size_t n = estimates.size();
     double mean = 0.0;
     double sd = 0.0;
     std::vector<double> shrinkage_ests;
 
     // Calculate shrinkage estimates and mean
-    for(size_t i = 0; i < estimates.size(); ++i) {
-        double shrinkage = (estimates[i] * prior_variance) / 
+    for(size_t i = 0; i < n; ++i) {
+        double shrinkage = (estimates[i] * prior_variance) /
                           (prior_variance + variances[i]);
         shrinkage_ests.push_back(shrinkage);
         mean += shrinkage;
     }
-    mean /= estimates.size();
+    mean /= n;
 
     // Calculate standard deviation
-    for(size_t i = 0; i < shrinkage_ests.size(); ++i) {
+    for(size_t i = 0; i < n; ++i) {
         sd += pow(shrinkage_ests[i] - mean, 2);
     }
-    sd = sqrt(sd / (shrinkage_ests.size() - 1));
+    double denom = bessel_correction ? (n - 1) : n;
+    sd = sqrt(sd / denom);
 
-    // Filter outliers
-    std::vector<double> filtered;
-    for(size_t i = 0; i < estimates.size(); ++i) {
+    // Return indices of non-outlier elements
+    std::vector<size_t> kept;
+    for(size_t i = 0; i < n; ++i) {
         if(fabs(shrinkage_ests[i] - mean) <= threshold * sd) {
-            filtered.push_back(estimates[i]);
+            kept.push_back(i);
         }
     }
 
-    return filtered;
+    return kept;
 }
 
 std::vector<double> run_EM(
@@ -166,22 +173,26 @@ std::vector<double> run_EM(
 		e0g0 += total_snp - (e0g0 + e0g1 + e1g0 + e1g1);
 
 		double a1_new = log(e1g1 * e0g0 / (e1g0 * e0g1));
-		a1 = a1_new;
-		a0 = log(e0g1 / e0g0); // a0 = log((e0g1+1)/(e0g0+1));
-		r0 = exp(a0);
-		r1 = exp(a0 + a1);
-		var1 = (1.0 / e0g0 + 1.0 / e1g0 + 1.0 / e1g1 + 1.0 / e0g1);
-		var0 = (1.0 / e0g1 + 1.0 / e0g0);
 
 		if (fabs(a1_new - a1) < a1_tol || iter >= max_iter) {
+			a1 = a1_new;
+			a0 = log(e0g1 / e0g0);
+			var1 = (1.0 / e0g0 + 1.0 / e1g0 + 1.0 / e1g1 + 1.0 / e0g1);
+			var0 = (1.0 / e0g1 + 1.0 / e0g0);
 			break;
 		}
+
+		a1 = a1_new;
+		a0 = log(e0g1 / e0g0);
+		r0 = exp(a0);
+		r1 = exp(a0 + a1);
+
 		if (iter % 100 == 0) {
-			Rcpp::Rcout << "EM Iteration " << iter << ": a0 = " << a0 << ", a1 = " << a1 << std::endl;
+			Rprintf("EM Iteration %d: a0 = %g, a1 = %g\n", iter, a0, a1);
 		}
 	}
 	if (iter == max_iter) {
-		Rcpp::Rcout << "WARNING: EM algorithm did not converge after " << iter << "iterations!" << std::endl;
+		Rprintf("WARNING: EM algorithm did not converge after %d iterations!\n", iter);
 	}
 
 	std::vector<double> av;
@@ -201,6 +212,8 @@ std::map<std::string, double> qtl_enrichment_workhorse(
 	double                          pi_qtl,
 	int                             ImpN,
 	double                          shrinkage_lambda,
+	bool                            double_shrinkage = false,
+	bool                            bessel_correction = true,
 	int                             num_threads = 4)
 {
 
@@ -218,7 +231,7 @@ std::map<std::string, double> qtl_enrichment_workhorse(
 	// pi_gwas = sum(gwas_pip) / total_snp
 	double total_snp = std::accumulate(gwas_pip.begin(), gwas_pip.end(), 0.0) / pi_gwas;
 
-	Rcpp::Rcout << "Fine-mapped GWAS and QTL data loaded successfully for enrichment analysis!" << std::endl;
+	Rprintf("Fine-mapped GWAS and QTL data loaded successfully for enrichment analysis!\n");
 
 	#pragma omp parallel for num_threads(num_threads)
 	for (int k = 0; k < ImpN; k++) {
@@ -228,7 +241,7 @@ std::map<std::string, double> qtl_enrichment_workhorse(
 
 		// Use QTL to annotate GWAS variants
 		std::vector<int> annotation_vector(gwas_pip.size(), 0);
-		int missing_qtl_count = 0; // Counter for xQTL not in gwas_variant_index
+		int missing_qtl_count = 0;
 		int total_qtl_count = 0;
 
 		for (size_t i = 0; i < qtl_susie_fits.size(); i++) {
@@ -236,7 +249,6 @@ std::map<std::string, double> qtl_enrichment_workhorse(
 			for (const auto &variant : variants) {
 				auto it = gwas_variant_index.find(variant);
 				if (it != gwas_variant_index.end()) {
-					// Update annotation_vector only if variant is found
 					annotation_vector[it->second] = 1;
 				} else {
 					++missing_qtl_count;
@@ -244,7 +256,6 @@ std::map<std::string, double> qtl_enrichment_workhorse(
 			}
 			total_qtl_count += variants.size();
 		}
-		// Calculate the proportion of missing variants
 		double missing_variant_proportion = static_cast<double>(missing_qtl_count) / total_qtl_count;
 		std::vector<double> rst = run_EM(gwas_pip, annotation_vector, pi_gwas, pi_qtl, total_snp);
 
@@ -254,63 +265,98 @@ std::map<std::string, double> qtl_enrichment_workhorse(
 			a1_vec[k] = rst[1];
 			v0_vec[k] = rst[2];
 			v1_vec[k] = rst[3];
-			Rcpp::Rcout << "Proportion of xQTL missing from GWAS variants: " << missing_variant_proportion << " in MI round " << k << std::endl;
+			Rprintf("Proportion of xQTL missing from GWAS variants: %g in MI round %d\n",
+			        missing_variant_proportion, k);
 		}
 	}
 
-	Rcpp::Rcout << "EM updates completed!" << std::endl;
+	Rprintf("EM updates completed!\n");
 
-	// Apply outlier filtering if shrinkage is specified
-	std::vector<double> filtered_a1;
-	std::vector<double> filtered_v1;
-	if (shrinkage_lambda > 0) {
-		filtered_a1 = filter_outliers(a1_vec, v1_vec, 1.0/shrinkage_lambda);
-		filtered_v1.reserve(filtered_a1.size());
-		for(size_t i = 0; i < a1_vec.size(); ++i) {
-			if(std::find(filtered_a1.begin(), filtered_a1.end(), a1_vec[i]) != filtered_a1.end()) {
-				filtered_v1.push_back(v1_vec[i]);
-			}
+	// Apply outlier filtering if shrinkage is specified.
+	// Use index-based filtering to keep all four vectors aligned.
+	double pv = (shrinkage_lambda == 0) ? -1.0 : 1.0 / shrinkage_lambda;
+	std::vector<size_t> kept_indices;
+	if (pv > 0) {
+		kept_indices = filter_outlier_indices(a1_vec, v1_vec, pv, bessel_correction);
+		if (kept_indices.size() < static_cast<size_t>(ImpN)) {
+			Rprintf("Outlier filtering removed %d MI round(s)\n",
+			        ImpN - static_cast<int>(kept_indices.size()));
 		}
 	} else {
-		filtered_a1 = a1_vec;
-		filtered_v1 = v1_vec;
+		kept_indices.resize(ImpN);
+		std::iota(kept_indices.begin(), kept_indices.end(), 0);
 	}
 
+	size_t m = kept_indices.size();
+
+	// MI combining using only surviving rounds
 	double a0_est = 0;
 	double a1_est = 0;
 	double var0 = 0;
 	double var1 = 0;
-	for (size_t k = 0; k < filtered_a1.size(); k++) {
+	for (size_t i = 0; i < m; i++) {
+		size_t k = kept_indices[i];
 		a0_est += a0_vec[k];
-		a1_est += filtered_a1[k];
+		a1_est += a1_vec[k];
 		var0 += v0_vec[k];
-		var1 += filtered_v1[k];
+		var1 += v1_vec[k];
 	}
-	a0_est /= filtered_a1.size();
-	a1_est /= filtered_a1.size();
+	a0_est /= m;
+	a1_est /= m;
 
 	double bv0 = 0;
 	double bv1 = 0;
-	for (size_t k = 0; k < filtered_a1.size(); k++) {
+	for (size_t i = 0; i < m; i++) {
+		size_t k = kept_indices[i];
 		bv0 += pow(a0_vec[k] - a0_est, 2.0);
-		bv1 += pow(filtered_a1[k] - a1_est, 2.0);
+		bv1 += pow(a1_vec[k] - a1_est, 2.0);
 	}
-	bv0 /= (filtered_a1.size() - 1);
-	bv1 /= (filtered_a1.size() - 1);
-	var0 /= filtered_a1.size();
-	var1 /= filtered_a1.size();
+	bv0 /= (m - 1);
+	bv1 /= (m - 1);
+	var0 /= m;
+	var1 /= m;
 
-	double sd0 = sqrt(var0 + bv0 * (filtered_a1.size() + 1) / filtered_a1.size());
-	double sd1 = sqrt(var1 + bv1 * (filtered_a1.size() + 1) / filtered_a1.size());
+	double sd0 = sqrt(var0 + bv0 * (m + 1.0) / m);
+	double sd1 = sqrt(var1 + bv1 * (m + 1.0) / m);
 
 	double a1_est_ns = a1_est;
 	double sd1_ns = sd1;
 
 	// Apply shrinkage
-	double pv = (shrinkage_lambda == 0) ? -1.0 : 1.0/shrinkage_lambda;
 	if (pv > 0) {
-		a1_est = (a1_est_ns * pv) / (pv + sd1_ns * sd1_ns);
-		sd1 = sqrt( 1.0 / (1.0 / pv + 1 / (sd1_ns * sd1_ns)) );
+		if (double_shrinkage) {
+			// Double shrinkage (matches upstream fastenloc):
+			// 1. Shrink each MI estimate individually
+			double a1_shrink_est = 0;
+			double var1_shrink = 0;
+			std::vector<double> a1_shrink_vec;
+			for (size_t i = 0; i < m; i++) {
+				size_t k = kept_indices[i];
+				double post_a1 = (a1_vec[k] * pv) / (pv + v1_vec[k]);
+				double post_var = 1.0 / (1.0 / pv + 1.0 / v1_vec[k]);
+				a1_shrink_vec.push_back(post_a1);
+				a1_shrink_est += post_a1;
+				var1_shrink += post_var;
+			}
+			a1_shrink_est /= m;
+			var1_shrink /= m;
+
+			// Between-imputation variance of shrunk estimates
+			double bv1_shrink = 0;
+			for (size_t i = 0; i < m; i++) {
+				bv1_shrink += pow(a1_shrink_vec[i] - a1_shrink_est, 2.0);
+			}
+			bv1_shrink /= (m - 1);
+			double sd1_shrink = sqrt(var1_shrink + bv1_shrink * (m + 1.0) / m);
+
+			// 2. Shrink the combined estimate again
+			a1_est = (a1_shrink_est * pv) / (pv + sd1_shrink * sd1_shrink);
+			sd1 = sqrt(1.0 / (1.0 / pv + 1.0 / (sd1_shrink * sd1_shrink)));
+		} else {
+			// Single shrinkage: shrink the MI-combined estimate once
+			a1_est = (a1_est_ns * pv) / (pv + sd1_ns * sd1_ns);
+			sd1 = sqrt(1.0 / (1.0 / pv + 1.0 / (sd1_ns * sd1_ns)));
+		}
 	}
 
 	a0_est = log(pi_gwas / (1 + pi_qtl * exp(a1_est) - pi_qtl - pi_gwas));
@@ -333,7 +379,7 @@ std::map<std::string, double> qtl_enrichment_workhorse(
 	output_map["Alternative (coloc) p1"] = p1;
 	output_map["Alternative (coloc) p2"] = p2;
 	output_map["Alternative (coloc) p12"] = p12;
-	output_map["Effective MI rounds"] = static_cast<double>(filtered_a1.size());
+	output_map["Effective MI rounds"] = static_cast<double>(m);
 
 	return output_map;
 }
