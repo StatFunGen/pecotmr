@@ -102,10 +102,11 @@ prs_cs <- function(bhat, LD, n,
   }
 
   # Run PRS-CS
+  # cpp11 requires exact integer types for int parameters
   result <- prs_cs_rcpp(
     a = a, b = b, phi = phi, bhat, maf,
-    n = n, ld_blk = LD,
-    n_iter = n_iter, n_burnin = n_burnin, thin = thin,
+    n = as.integer(n), ld_blk = LD,
+    n_iter = as.integer(n_iter), n_burnin = as.integer(n_burnin), thin = as.integer(thin),
     verbose = verbose, seed = seed
   )
 
@@ -229,10 +230,13 @@ sdpr <- function(bhat, LD, n, per_variant_sample_size = NULL, array = NULL, a = 
     stop("The 'array' vector must contain only 0, 1, or 2.")
   }
 
+  # cpp11 requires exact integer types for int parameters and sexp-wrapped vectors
+  if (!is.null(array)) array <- as.integer(array)
   # Call the sdpr_rcpp function
   result <- sdpr_rcpp(
-    bhat, LD, n, per_variant_sample_size, array, a, c, M, a0k, b0k, iter, burn, thin,
-    n_threads, opt_llk, verbose, seed
+    bhat, LD, as.integer(n), per_variant_sample_size, array, a, c, as.integer(M),
+    a0k, b0k, as.integer(iter), as.integer(burn), as.integer(thin),
+    as.integer(n_threads), as.integer(opt_llk), verbose, seed
   )
 
   return(result)
@@ -844,7 +848,8 @@ lassosum_rss <- function(bhat, LD, n,
 
   z <- bhat / sqrt(n)
   order <- order(lambda, decreasing = TRUE)
-  result <- lassosum_rss_rcpp(z, LD, lambda[order], thr, maxiter)
+  # cpp11 requires exact integer types for int parameters
+  result <- lassosum_rss_rcpp(z, LD, lambda[order], thr, as.integer(maxiter))
 
   # Reorder back to original lambda order.
   # Must use inverse permutation to unsort: if order[i]=j, then

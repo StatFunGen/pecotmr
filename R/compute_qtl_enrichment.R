@@ -113,16 +113,17 @@ compute_qtl_enrichment <- function(gwas_pip, susie_qtl_regions,
     x
   })
 
+  # cpp11 requires exact integer types for int parameters
   en <- qtl_enrichment_rcpp(
     r_gwas_pip = gwas_pip,
     r_qtl_susie_fit = susie_qtl_regions,
     pi_gwas = pi_gwas,
     pi_qtl = pi_qtl,
-    ImpN = ImpN,
+    ImpN = as.integer(ImpN),
     shrinkage_lambda = lambda,
     double_shrinkage = double_shrinkage,
     bessel_correction = bessel_correction,
-    num_threads = num_threads
+    num_threads = as.integer(num_threads)
   )
 
   # Add the unmatched variants to the output

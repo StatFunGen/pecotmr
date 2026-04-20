@@ -254,10 +254,11 @@ dentist_single_window <- function(zScore, R = NULL, X = NULL, nSample = NULL,
   }
   verbose_iter <- getOption("pecotmr.dentist.verbose", FALSE)
   res <- withCallingHandlers(
+    # cpp11 requires exact integer types for int parameters
     dentist_iterative_impute(
-      LD_mat, nSample, zScore,
-      pValueThreshold, propSVD, gcControl, nIter,
-      gPvalueThreshold, ncpus, correct_chen_et_al_bug,
+      LD_mat, as.integer(nSample), zScore,
+      pValueThreshold, propSVD, gcControl, as.integer(nIter),
+      gPvalueThreshold, as.integer(ncpus), correct_chen_et_al_bug,
       verbose_iter
     ),
     warning = warning_handler
