@@ -201,6 +201,129 @@ test_that("load_genotype_region errors on missing genotype files", {
   )
 })
 
+# --- find_stochastic_meta tests ---
+
+test_that("find_stochastic_meta finds generic sidecar from PLINK1 prefix", {
+  td <- test_path("test_data")
+  # test_harmonize_regions has .stochastic_meta.tsv alongside it
+  result <- pecotmr:::find_stochastic_meta(file.path(td, "test_harmonize_regions"))
+  expect_true(!is.null(result))
+  expect_true(grepl("\\.(afreq|stochastic_meta\\.tsv)$", result))
+})
+
+test_that("find_stochastic_meta finds sidecar from VCF path", {
+  td <- test_path("test_data")
+  result <- pecotmr:::find_stochastic_meta(file.path(td, "test_harmonize_regions.vcf.gz"))
+  expect_true(!is.null(result))
+  expect_true(grepl("\\.(afreq|stochastic_meta\\.tsv)$", result))
+})
+
+test_that("find_stochastic_meta finds sidecar from GDS path", {
+  td <- test_path("test_data")
+  result <- pecotmr:::find_stochastic_meta(file.path(td, "test_harmonize_regions.gds"))
+  expect_true(!is.null(result))
+  expect_true(grepl("\\.(afreq|stochastic_meta\\.tsv)$", result))
+})
+
+test_that("find_stochastic_meta returns NULL when no sidecar exists", {
+  td <- test_path("test_data")
+  result <- pecotmr:::find_stochastic_meta(file.path(td, "protocol_example.genotype"))
+  expect_null(result)
+})
+
+# --- read_stochastic_meta tests ---
+
+test_that("read_stochastic_meta reads generic format", {
+  td <- test_path("test_data")
+  path <- file.path(td, "test_harmonize_regions.stochastic_meta.tsv")
+  result <- pecotmr:::read_stochastic_meta(path)
+  expect_true(is.data.frame(result))
+  expect_equal(colnames(result), c("id", "u_min", "u_max"))
+  expect_equal(nrow(result), 8L)
+  expect_true(is.numeric(result$u_min))
+  expect_true(is.numeric(result$u_max))
+})
+
+test_that("read_stochastic_meta reads afreq format", {
+  td <- test_path("test_data")
+  path <- file.path(td, "test_harmonize_regions.afreq")
+  result <- pecotmr:::read_stochastic_meta(path)
+  expect_true(is.data.frame(result))
+  expect_equal(colnames(result), c("id", "u_min", "u_max"))
+  expect_equal(nrow(result), 8L)
+  expect_true(all(grepl("^chr21_", result$id)))
+})
+
+test_that("read_stochastic_meta auto-detects format from extension", {
+  td <- test_path("test_data")
+  # .afreq extension -> afreq parser
+  afreq_result <- pecotmr:::read_stochastic_meta(file.path(td, "test_harmonize_regions.afreq"))
+  # .tsv extension -> generic parser
+  generic_result <- pecotmr:::read_stochastic_meta(
+    file.path(td, "test_harmonize_regions.stochastic_meta.tsv"))
+  # Both should return the same u_min/u_max values
+  expect_equal(afreq_result$u_min, generic_result$u_min)
+  expect_equal(afreq_result$u_max, generic_result$u_max)
+  expect_equal(afreq_result$id, generic_result$id)
+})
+
+test_that("read_stochastic_meta respects format override", {
+  td <- test_path("test_data")
+  path <- file.path(td, "test_harmonize_regions.stochastic_meta.tsv")
+  # Explicit generic format should work
+  result <- pecotmr:::read_stochastic_meta(path, format = "generic")
+  expect_equal(nrow(result), 8L)
+  expect_equal(colnames(result), c("id", "u_min", "u_max"))
+})
+
+test_that("read_stochastic_meta returns NULL for afreq without U_MIN/U_MAX", {
+  td <- test_path("test_data")
+  # test_variants.afreq has no U_MIN/U_MAX columns
+  path <- file.path(td, "test_variants.afreq")
+  result <- pecotmr:::read_stochastic_meta(path)
+  expect_null(result)
+})
+
+test_that("read_stochastic_meta returns NULL for nonexistent file", {
+  result <- pecotmr:::read_stochastic_meta("/nonexistent/file.tsv")
+  expect_null(result)
+})
+
+# --- load_genotype_region stochastic inversion test ---
+
+test_that("load_genotype_region applies stochastic inversion with explicit sidecar", {
+  td <- test_path("test_data")
+  meta_path <- file.path(td, "test_harmonize_regions.stochastic_meta.tsv")
+  smeta <- pecotmr:::read_stochastic_meta(meta_path)
+
+  # Load with explicit sidecar — inversion transforms the integer dosages
+  res <- load_genotype_region(
+    file.path(td, "test_harmonize_regions"),
+    return_variant_info = TRUE,
+    stochastic_meta_path = meta_path
+  )
+
+  expect_equal(ncol(res$X), 8L)
+  # u_min/u_max should be attached to variant_info
+  expect_true("u_min" %in% colnames(res$variant_info))
+  expect_true("u_max" %in% colnames(res$variant_info))
+  expect_equal(res$variant_info$u_min, smeta$u_min)
+  expect_equal(res$variant_info$u_max, smeta$u_max)
+
+  # Verify inversion math: for a dosage value d with u_min/u_max,
+  # inverted = d * (u_max - u_min) / 2 + u_min
+  # Check the first variant's first sample manually
+  raw <- load_genotype_region(
+    file.path(td, "protocol_example.genotype"),
+    region = "chr22:20689453-20845958"
+  )
+  # protocol_example has no sidecar, so raw values are unchanged (integer dosages)
+  expect_true(all(raw == round(raw), na.rm = TRUE))
+
+  # The inverted matrix should NOT be all integers (u_min != 0 or u_max != 2)
+  expect_false(all(res$X == round(res$X), na.rm = TRUE))
+})
+
 test_that("Test load_covariate_data reads tab-delimited file", {
   # Create a temp covariate file: first column is sample ID, rest are numeric
   tmp <- tempfile(fileext = ".tsv")

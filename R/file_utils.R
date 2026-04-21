@@ -61,6 +61,74 @@ read_afreq <- function(prefix) {
   return(af)
 }
 
+#' Read stochastic genotype sidecar metadata (U_MIN/U_MAX).
+#'
+#' Reads per-variant min/max values used to invert min-max [0,2] scaling
+#' of stochastic genotype data. Supports two formats:
+#' \itemize{
+#'   \item \strong{afreq}: PLINK2 .afreq/.afreq.zst with U_MIN/U_MAX columns
+#'     (read via \code{read_afreq}, which also returns allele frequencies).
+#'   \item \strong{generic}: Tab-delimited file with columns id, u_min, u_max.
+#' }
+#'
+#' @param path Path to the sidecar metadata file.
+#' @param format One of \code{NULL} (auto-detect from extension), \code{"afreq"},
+#'   or \code{"generic"}. When \code{NULL}, files ending in \code{.afreq} or
+#'   \code{.afreq.zst} are parsed as afreq; all others as generic.
+#' @return A data.frame with columns \code{id}, \code{u_min}, \code{u_max},
+#'   or \code{NULL} if the file lacks U_MIN/U_MAX columns (afreq format) or
+#'   doesn't exist.
+#' @importFrom vroom vroom
+#' @noRd
+read_stochastic_meta <- function(path, format = NULL) {
+  if (!file.exists(path)) return(NULL)
+
+  if (is.null(format)) {
+    format <- if (grepl("\\.afreq(\\.zst)?$", path)) "afreq" else "generic"
+  }
+  format <- match.arg(format, c("afreq", "generic"))
+
+  if (format == "afreq") {
+    # read_afreq expects a prefix, not a full path — strip the .afreq[.zst] suffix
+    prefix <- sub("\\.afreq(\\.zst)?$", "", path)
+    af <- read_afreq(prefix)
+    if (is.null(af) || !all(c("u_min", "u_max") %in% colnames(af))) return(NULL)
+    return(af[, c("id", "u_min", "u_max"), drop = FALSE])
+  }
+
+  # Generic: expect tab-delimited with columns id, u_min, u_max
+  meta <- as.data.frame(vroom(path, delim = "\t", show_col_types = FALSE))
+  required <- c("id", "u_min", "u_max")
+  if (!all(required %in% colnames(meta))) {
+    stop("Stochastic metadata file '", path, "' must contain columns: ",
+         paste(required, collapse = ", "))
+  }
+  meta[, required, drop = FALSE]
+}
+
+#' Search for a stochastic genotype sidecar file alongside a genotype path.
+#'
+#' Looks for \code{.afreq}, \code{.afreq.zst}, and
+#' \code{.stochastic_meta.tsv} files next to the given genotype path.
+#' For extension-based paths (VCF, GDS), the extension is stripped first.
+#' For prefix-based paths (PLINK1/2), the prefix is used directly.
+#'
+#' @param genotype_path Path to the genotype data (prefix or file path).
+#' @return Path to the first sidecar file found, or \code{NULL}.
+#' @noRd
+find_stochastic_meta <- function(genotype_path) {
+  # Strip known genotype extensions to get the stem
+  stem <- sub("\\.(vcf|vcf\\.gz|bcf|gds|bed|bim|fam|pgen|pvar|psam)$", "",
+              genotype_path)
+  candidates <- c(
+    paste0(stem, ".afreq"),
+    paste0(stem, ".afreq.zst"),
+    paste0(stem, ".stochastic_meta.tsv")
+  )
+  found <- candidates[file.exists(candidates)]
+  if (length(found) > 0) found[1] else NULL
+}
+
 #' Load PLINK2 genotype data via pgenlibr
 #'
 #' Loads genotype data from PLINK2 format files using pgenlibr directly
@@ -123,26 +191,12 @@ load_plink2_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
   rownames(X) <- psam$IID
   colnames(X) <- variant_info$id
 
-  # --- Attach allele frequency and rescale stochastic genotypes ---
+  # --- Attach allele frequency from .afreq sidecar ---
   afreq <- read_afreq(prefix)
   if (!is.null(afreq)) {
-    afreq_cols <- intersect(c("id", "alt_freq", "obs_ct", "u_min", "u_max"), colnames(afreq))
+    afreq_cols <- intersect(c("id", "alt_freq", "obs_ct"), colnames(afreq))
     variant_info <- merge(variant_info, afreq[, afreq_cols, drop = FALSE],
                           by = "id", all.x = TRUE, sort = FALSE)
-  }
-  # Detect stochastic genotype (non-integer dosage, e.g., from rss_ld_sketch).
-  # If U_MIN/U_MAX are in .afreq, invert the [0,2] min-max scaling exactly.
-  is_stochastic <- !all(X == round(X), na.rm = TRUE)
-  if (is_stochastic) {
-    if ("u_min" %in% colnames(variant_info) && "u_max" %in% colnames(variant_info)) {
-      idx <- match(colnames(X), variant_info$id)
-      X <- invert_minmax_scaling(X, variant_info$u_min[idx], variant_info$u_max[idx])
-      message("Stochastic genotype detected: restored original scale via U_MIN/U_MAX from .afreq")
-    } else {
-      warning("Non-integer genotype values detected (possible stochastic genotype from rss_ld_sketch). ",
-              "Provide a .afreq file with U_MIN/U_MAX columns to restore original scale. ",
-              "Without inversion, correlation structure is preserved but U'U/B may not approximate R.")
-    }
   }
 
   # --- Post-filters: indels and variant whitelist ---
@@ -162,10 +216,11 @@ load_plink2_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
 
 #' Invert min-max [0,2] scaling to recover the original U matrix.
 #'
-#' Stochastic genotype data (from rss_ld_sketch) is stored in PLINK2 pgen
-#' format after min-max scaling: U_scaled = 2 * (U - u_min) / (u_max - u_min).
+#' Stochastic genotype data is stored after min-max scaling:
+#' U_scaled = 2 * (U - u_min) / (u_max - u_min).
 #' This function exactly inverts that transform using the stored per-variant
-#' u_min and u_max values from the companion .afreq file.
+#' u_min and u_max values from a companion sidecar file (.afreq or
+#' .stochastic_meta.tsv).
 #'
 #' The recovered U satisfies U'U/B ~ Wishart(B, R)/B, the correct distributional
 #' property for LD-based fine-mapping with dynamic variance tracking.
@@ -674,7 +729,9 @@ load_gds_data <- function(path, region = NULL, keep_indel = TRUE,
 #'
 #' Auto-detects PLINK2 (.pgen/.pvar[.zst]/.psam), PLINK1 (.bed/.bim/.fam),
 #' VCF (.vcf/.vcf.gz/.bcf), or GDS (.gds) format and loads genotype data
-#' accordingly.
+#' accordingly. If a stochastic genotype sidecar file (.afreq or
+#' .stochastic_meta.tsv) is found alongside the genotype file, non-integer
+#' dosages are automatically rescaled using the stored U_MIN/U_MAX values.
 #'
 #' @param genotype Path to the genotype data file (without extension).
 #' @param region The target region in the format "chr:start-end".
@@ -682,13 +739,20 @@ load_gds_data <- function(path, region = NULL, keep_indel = TRUE,
 #' @param keep_variants_path Path to a file listing variants to keep.
 #' @param return_variant_info If TRUE, return a list with X (dosage matrix) and
 #'   variant_info (data.frame). If FALSE (default), return only the dosage matrix.
+#' @param stochastic_meta_path Optional explicit path to a stochastic genotype
+#'   sidecar file. If NULL (default), auto-detected via \code{find_stochastic_meta}.
+#' @param stochastic_meta_format Optional format override for the sidecar file:
+#'   \code{"afreq"} or \code{"generic"}. If NULL (default), auto-detected from
+#'   file extension.
 #' @return If return_variant_info is FALSE, a numeric dosage matrix (rows=samples,
 #'   cols=variants). If TRUE, a list with elements X and variant_info.
 #'
 #' @export
 load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE,
                                  keep_variants_path = NULL,
-                                 return_variant_info = FALSE) {
+                                 return_variant_info = FALSE,
+                                 stochastic_meta_path = NULL,
+                                 stochastic_meta_format = NULL) {
   result <- NULL
   # VCF and GDS: detect by file extension on the path itself
   if (grepl("\\.(vcf|vcf\\.gz|bcf)$", genotype)) {
@@ -708,6 +772,34 @@ load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE,
     stop("Genotype files not found at: ", genotype,
          "\n  Expected: .vcf/.vcf.gz/.bcf, .gds, or PLINK prefix (.pgen/.pvar[.zst]/.psam or .bed/.bim/.fam)")
   }
+
+  # --- Detect and invert stochastic genotype scaling ---
+  meta_path <- stochastic_meta_path %||% find_stochastic_meta(genotype)
+  if (!is.null(meta_path)) {
+    smeta <- read_stochastic_meta(meta_path, format = stochastic_meta_format)
+    if (!is.null(smeta)) {
+      idx <- match(colnames(result$X), smeta$id)
+      matched <- !is.na(idx)
+      if (any(matched)) {
+        result$X[, matched] <- invert_minmax_scaling(
+          result$X[, matched, drop = FALSE],
+          smeta$u_min[idx[matched]],
+          smeta$u_max[idx[matched]]
+        )
+        result$variant_info$u_min <- smeta$u_min[idx]
+        result$variant_info$u_max <- smeta$u_max[idx]
+        message("Stochastic genotype detected: restored original scale via ", basename(meta_path))
+      }
+    }
+  } else {
+    is_stochastic <- !all(result$X == round(result$X), na.rm = TRUE)
+    if (is_stochastic) {
+      warning("Non-integer genotype values detected but no stochastic metadata sidecar found. ",
+              "Place a .afreq or .stochastic_meta.tsv file with u_min/u_max columns ",
+              "alongside the genotype files to restore the original scale.")
+    }
+  }
+
   if (return_variant_info) result else result$X
 }
 
