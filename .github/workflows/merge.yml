@@ -1,8 +1,8 @@
 name: Post-merge actions
 
 on:
-  pull_request:
-    types: [closed]
+  push:
+    branches: [main]
     paths-ignore:
       - .github/*
       - .gitignore
@@ -10,7 +10,6 @@ on:
 
 jobs:
   update_coverage_badge:
-    if: github.event.pull_request.merged == true && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -20,8 +19,6 @@ jobs:
     steps:
       - name: Checkout main
         uses: actions/checkout@v6
-        with:
-          ref: main
 
       - name: Create TOML from recipe
         run: .github/workflows/create_toml_from_yaml.sh ${GITHUB_WORKSPACE}
