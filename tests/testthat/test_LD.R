@@ -928,3 +928,245 @@ test_that("extract_block_matrices warns and skips out-of-range blocks", {
   expect_equal(length(valid_blocks), 1)
   expect_equal(nrow(valid_blocks[[1]]), 2)
 })
+
+# ===========================================================================
+# resolve_ld_source: type detection with real fixtures
+# ===========================================================================
+
+geno_test_data_dir <- test_path("test_data")
+geno_region_all <- "chr21:5049649-5225647"
+
+test_that("resolve_ld_source detects PLINK2 from metadata", {
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_resolve_p2_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("21", "0", "0", "test_variants", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  result <- pecotmr:::resolve_ld_source(meta_file)
+  expect_equal(result$type, "plink2")
+  expect_equal(result$meta_path, meta_file)
+})
+
+test_that("resolve_ld_source detects VCF from metadata", {
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_resolve_vcf_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("21", "0", "0", "test_variants.vcf.gz", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  result <- pecotmr:::resolve_ld_source(meta_file)
+  expect_equal(result$type, "vcf")
+})
+
+test_that("resolve_ld_source detects GDS from metadata", {
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_resolve_gds_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("21", "0", "0", "test_variants.gds", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  result <- pecotmr:::resolve_ld_source(meta_file)
+  expect_equal(result$type, "gds")
+})
+
+test_that("resolve_ld_source detects precomputed from metadata", {
+  # Existing LD block metadata with non-zero start/end
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_resolve_pre_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("chr1", "1000", "1200",
+            "LD_block_1.chr1_1000_1200.float16.txt.xz,LD_block_1.chr1_1000_1200.float16.bim",
+            sep = "\t"), "\n", file = meta_file, append = TRUE)
+  result <- pecotmr:::resolve_ld_source(meta_file)
+  expect_equal(result$type, "precomputed")
+})
+
+test_that("resolve_ld_source errors on missing file", {
+  expect_error(pecotmr:::resolve_ld_source("/nonexistent/file.tsv"), "not found")
+})
+
+test_that("resolve_ld_source errors on 0:0 sentinel with non-genotype path", {
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_resolve_bad_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("21", "0", "0", "nonexistent_prefix", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  expect_error(pecotmr:::resolve_ld_source(meta_file), "0:0 sentinel")
+})
+
+# ===========================================================================
+# resolve_genotype_path_for_region
+# ===========================================================================
+
+test_that("resolve_genotype_path_for_region resolves correct chromosome path", {
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_resolve_path_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("21", "0", "0", "test_variants", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  result <- pecotmr:::resolve_genotype_path_for_region(meta_file, geno_region_all)
+  expect_equal(result, file.path(geno_test_data_dir, "test_variants"))
+})
+
+test_that("resolve_genotype_path_for_region errors on missing chromosome", {
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_resolve_nochr_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("1", "0", "0", "test_variants", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  expect_error(
+    pecotmr:::resolve_genotype_path_for_region(meta_file, geno_region_all),
+    "No entry for chromosome"
+  )
+})
+
+# ===========================================================================
+# load_LD_from_genotype with real fixtures
+# ===========================================================================
+
+test_that("load_LD_from_genotype returns LD matrix with .afreq", {
+  skip_if_not_installed("pgenlibr")
+  plink_prefix <- file.path(geno_test_data_dir, "test_variants")
+  result <- pecotmr:::load_LD_from_genotype(plink_prefix, geno_region_all)
+  expect_true(is.list(result))
+  expect_true(is.matrix(result$LD_matrix))
+  expect_equal(nrow(result$LD_matrix), 100L)
+  expect_true(isSymmetric(result$LD_matrix))
+  expect_false(result$is_genotype)
+  # ref_panel should have allele_freq from .afreq file
+  expect_true("allele_freq" %in% names(result$ref_panel))
+  expect_true(all(result$ref_panel$allele_freq > 0))
+  expect_true(all(result$ref_panel$allele_freq < 1))
+  # block_metadata
+  expect_true(is.data.frame(result$block_metadata))
+  expect_equal(nrow(result$block_metadata), 1L)
+})
+
+test_that("load_LD_from_genotype returns genotype matrix when requested", {
+  skip_if_not_installed("pgenlibr")
+  plink_prefix <- file.path(geno_test_data_dir, "test_variants")
+  result <- pecotmr:::load_LD_from_genotype(plink_prefix, geno_region_all,
+                                             return_genotype = TRUE)
+  expect_true(result$is_genotype)
+  expect_equal(nrow(result$LD_matrix), 100L)  # samples
+  expect_equal(ncol(result$LD_matrix), 100L)  # variants
+})
+
+test_that("load_LD_from_genotype computes variance with n_sample", {
+  skip_if_not_installed("pgenlibr")
+  plink_prefix <- file.path(geno_test_data_dir, "test_variants")
+  result <- pecotmr:::load_LD_from_genotype(plink_prefix, geno_region_all,
+                                             n_sample = 100L)
+  expect_true("variance" %in% names(result$ref_panel))
+  expect_true("n_nomiss" %in% names(result$ref_panel))
+  expect_equal(result$ref_panel$n_nomiss[1], 100L)
+  expect_true(all(result$ref_panel$variance > 0))
+})
+
+test_that("load_LD_from_genotype falls back to computed AF without .afreq", {
+  skip_if_not_installed("VariantAnnotation")
+  vcf_path <- file.path(geno_test_data_dir, "test_variants.vcf.gz")
+  result <- suppressWarnings(
+    pecotmr:::load_LD_from_genotype(vcf_path, geno_region_all)
+  )
+  expect_true(is.matrix(result$LD_matrix))
+  expect_equal(nrow(result$LD_matrix), 100L)
+  expect_true(isSymmetric(result$LD_matrix))
+  # Allele frequencies computed from genotypes
+  expect_true("allele_freq" %in% names(result$ref_panel))
+  expect_true(all(result$ref_panel$allele_freq > 0))
+  expect_true(all(result$ref_panel$allele_freq < 1))
+})
+
+test_that("load_LD_from_genotype works with GDS files", {
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  gds_path <- file.path(geno_test_data_dir, "test_variants.gds")
+  result <- pecotmr:::load_LD_from_genotype(gds_path, geno_region_all)
+  expect_true(is.matrix(result$LD_matrix))
+  expect_equal(nrow(result$LD_matrix), 100L)
+  expect_true(isSymmetric(result$LD_matrix))
+})
+
+test_that("load_LD_from_genotype .afreq and computed AF are consistent", {
+  skip_if_not_installed("pgenlibr")
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  plink_prefix <- file.path(geno_test_data_dir, "test_variants")
+  gds_path <- file.path(geno_test_data_dir, "test_variants.gds")
+  res_afreq <- pecotmr:::load_LD_from_genotype(plink_prefix, geno_region_all)
+  res_computed <- pecotmr:::load_LD_from_genotype(gds_path, geno_region_all)
+  # Allele frequencies should be close (same data, different source)
+  expect_true(max(abs(res_afreq$ref_panel$allele_freq - res_computed$ref_panel$allele_freq)) < 0.01)
+})
+
+# ===========================================================================
+# load_LD_matrix with real genotype fixtures via metadata
+# ===========================================================================
+
+test_that("load_LD_matrix dispatches to PLINK2 genotype source", {
+  skip_if_not_installed("pgenlibr")
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_ldmat_p2_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("21", "0", "0", "test_variants", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  result <- load_LD_matrix(meta_file, geno_region_all)
+  expect_true(is.matrix(result$LD_matrix))
+  expect_equal(nrow(result$LD_matrix), 100L)
+  expect_false(result$is_genotype)
+})
+
+test_that("load_LD_matrix dispatches to VCF genotype source", {
+  skip_if_not_installed("VariantAnnotation")
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_ldmat_vcf_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("21", "0", "0", "test_variants.vcf.gz", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  result <- suppressWarnings(load_LD_matrix(meta_file, geno_region_all))
+  expect_true(is.matrix(result$LD_matrix))
+  expect_equal(nrow(result$LD_matrix), 100L)
+})
+
+test_that("load_LD_matrix dispatches to GDS genotype source", {
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_ldmat_gds_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("21", "0", "0", "test_variants.gds", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  result <- load_LD_matrix(meta_file, geno_region_all)
+  expect_true(is.matrix(result$LD_matrix))
+  expect_equal(nrow(result$LD_matrix), 100L)
+})
+
+test_that("load_LD_matrix return_genotype='auto' returns X for genotype source", {
+  skip_if_not_installed("pgenlibr")
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_ldmat_auto_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("21", "0", "0", "test_variants", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  result <- load_LD_matrix(meta_file, geno_region_all, return_genotype = "auto")
+  expect_true(result$is_genotype)
+  expect_equal(nrow(result$LD_matrix), 100L)  # samples
+  expect_equal(ncol(result$LD_matrix), 100L)  # variants
+})
+
+test_that("load_LD_matrix return_genotype=TRUE errors for precomputed", {
+  meta_file <- gsub("//", "/", tempfile(pattern = "ld_meta_file", tmpdir = tempdir(), fileext = ".tsv"))
+  on.exit(unlink(meta_file), add = TRUE)
+  meta_df <- data.frame(
+    chrom = "chr1", start = 1000, end = 1200,
+    path = paste0(
+      "./test_data/LD_block_1.chr1_1000_1200.float16.txt.xz,",
+      "./test_data/LD_block_1.chr1_1000_1200.float16.bim"
+    )
+  )
+  write_delim(meta_df, meta_file, delim = "\t")
+  region <- data.frame(chrom = "chr1", start = 1000, end = 1190)
+  expect_error(
+    load_LD_matrix(meta_file, region, return_genotype = TRUE),
+    "genotype files"
+  )
+})

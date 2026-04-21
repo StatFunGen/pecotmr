@@ -36,7 +36,7 @@ rss_basic_qc <- function(sumstats, LD_data, skip_region = NULL, keep_indel = TRU
 
   ref_variants <- LD_data$LD_variants
 
-  allele_flip <- allele_qc(sumstats, ref_variants,
+  allele_flip <- match_ref_panel(sumstats, ref_variants,
     col_to_flip = col_to_flip,
     match_min_prop = 0, remove_dups = TRUE, remove_indels = !keep_indel,
     remove_strand_ambiguous = TRUE

@@ -77,11 +77,11 @@ adjust_susie_weights <- function(twas_weights_results, keep_variants, run_allele
     if (!all(c("chrom", "pos", "A2", "A1") %in% colnames(weights_matrix))) {
       weights_matrix <- cbind(parse_variant_id(twas_weights_variants), weights_matrix)
     }
-    weights_matrix_qced <- allele_qc(weights_matrix, LD_variants, colnames(weights_matrix)[!colnames(weights_matrix) %in% c(
+    weights_matrix_qced <- match_ref_panel(weights_matrix, LD_variants, colnames(weights_matrix)[!colnames(weights_matrix) %in% c(
       "chrom",
       "pos", "A2", "A1"
     )], match_min_prop = match_min_prop)
-    # allele_qc now outputs canonical variant_ids (with chr prefix)
+    # match_ref_panel outputs canonical variant_ids (with chr prefix)
     original_idx <- match(weights_matrix_qced$qc_summary$variants_id_original, twas_weights_variants)
     intersected_indices <- original_idx[weights_matrix_qced$qc_summary$keep == TRUE]
   } else {

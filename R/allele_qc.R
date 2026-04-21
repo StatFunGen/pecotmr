@@ -1,7 +1,8 @@
-#' Match alleles between target data and reference variants
+#' Match target data alleles against a reference panel
 #'
 #' Match by ("chrom", "A1", "A2" and "pos"), accounting for possible
 #' strand flips and major/minor allele flips (opposite effects and zscores).
+#' Flips specified columns when alleles are swapped relative to the reference.
 #'
 #' @param target_data A data frame with columns "chrom", "pos", "A2", "A1" (and optionally other columns like "beta" or "z"),
 #'   or a vector of strings in the format of "chr:pos:A2:A1"/"chr:pos_A2_A1". Can be automatically converted to a data frame if a vector.
@@ -22,7 +23,7 @@
 #' @importFrom vctrs vec_duplicate_detect
 #' @importFrom tidyr separate
 #' @export
-allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
+match_ref_panel <- function(target_data, ref_variants, col_to_flip = NULL,
                      match_min_prop = 0.2, remove_dups = TRUE,
                      remove_indels = FALSE, remove_strand_ambiguous = TRUE,
                      flip_strand = FALSE, remove_unmatched = TRUE, ...) {
@@ -183,6 +184,10 @@ allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
   return(list(target_data_qced = result, qc_summary = match_result))
 }
 
+#' @rdname match_ref_panel
+#' @export
+allele_qc <- match_ref_panel
+
 #' Align Variant Names
 #'
 #' This function aligns variant names from two strings containing variant names in the format of
@@ -228,7 +233,7 @@ align_variant_names <- function(source, reference, remove_indels = FALSE, remove
   source_df <- parse_variant_id(source)
   reference_df <- parse_variant_id(reference)
 
-  qc_result <- allele_qc(
+  qc_result <- match_ref_panel(
     target_data = source_df,
     ref_variants = reference_df,
     col_to_flip = NULL,

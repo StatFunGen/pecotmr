@@ -120,3 +120,123 @@ test_that("ld_loader with LD_info errors when missing LD_file column", {
     "LD_info must be a data.frame with column 'LD_file'"
   )
 })
+
+# ===========================================================================
+# ld_loader: LD_info branch with real genotype fixtures
+# ===========================================================================
+
+test_data_dir <- test_path("test_data")
+
+test_that("ld_loader LD_info loads LD from PLINK2 files", {
+  skip_if_not_installed("pgenlibr")
+  plink_prefix <- file.path(test_data_dir, "test_variants")
+  loader <- ld_loader(LD_info = data.frame(LD_file = plink_prefix))
+  mat <- loader(1)
+  expect_true(is.matrix(mat))
+  expect_equal(nrow(mat), 100L)
+  expect_equal(ncol(mat), 100L)
+  expect_true(isSymmetric(mat))
+  expect_true(all(abs(diag(mat) - 1) < 1e-10))
+})
+
+test_that("ld_loader LD_info loads LD from VCF file", {
+  skip_if_not_installed("VariantAnnotation")
+  vcf_path <- file.path(test_data_dir, "test_variants.vcf.gz")
+  loader <- ld_loader(LD_info = data.frame(LD_file = vcf_path))
+  mat <- suppressWarnings(loader(1))
+  expect_true(is.matrix(mat))
+  expect_equal(nrow(mat), 100L)
+  expect_true(isSymmetric(mat))
+})
+
+test_that("ld_loader LD_info loads LD from GDS file", {
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  gds_path <- file.path(test_data_dir, "test_variants.gds")
+  loader <- ld_loader(LD_info = data.frame(LD_file = gds_path))
+  mat <- loader(1)
+  expect_true(is.matrix(mat))
+  expect_equal(nrow(mat), 100L)
+  expect_true(isSymmetric(mat))
+})
+
+test_that("ld_loader LD_info loads LD from PLINK1 files", {
+  skip_if_not_installed("snpStats")
+  plink1_prefix <- file.path(test_data_dir, "protocol_example.genotype")
+  loader <- ld_loader(LD_info = data.frame(LD_file = plink1_prefix))
+  mat <- loader(1)
+  expect_true(is.matrix(mat))
+  expect_true(isSymmetric(mat))
+})
+
+test_that("ld_loader LD_info loads pre-computed .cor.xz blocks", {
+  ld_file <- file.path(test_data_dir, "LD_block_1.chr1_1000_1200.float16.txt.xz")
+  bim_file <- file.path(test_data_dir, "LD_block_1.chr1_1000_1200.float16.bim")
+  loader <- ld_loader(LD_info = data.frame(LD_file = ld_file, SNP_file = bim_file))
+  mat <- loader(1)
+  expect_true(is.matrix(mat))
+  expect_true(isSymmetric(mat))
+  expect_true(nrow(mat) > 0)
+})
+
+test_that("ld_loader LD_info with max_variants subsamples", {
+  skip_if_not_installed("pgenlibr")
+  plink_prefix <- file.path(test_data_dir, "test_variants")
+  set.seed(42)
+  loader <- ld_loader(LD_info = data.frame(LD_file = plink_prefix), max_variants = 20)
+  mat <- loader(1)
+  expect_equal(nrow(mat), 20L)
+  expect_equal(ncol(mat), 20L)
+})
+
+test_that("ld_loader LD_info returns consistent LD across formats", {
+  skip_if_not_installed("pgenlibr")
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  plink_prefix <- file.path(test_data_dir, "test_variants")
+  gds_path <- file.path(test_data_dir, "test_variants.gds")
+  loader_plink <- ld_loader(LD_info = data.frame(LD_file = plink_prefix))
+  loader_gds <- ld_loader(LD_info = data.frame(LD_file = gds_path))
+  mat_plink <- loader_plink(1)
+  mat_gds <- loader_gds(1)
+  expect_equal(dim(mat_plink), dim(mat_gds))
+})
+
+# ===========================================================================
+# ld_loader: ld_meta_path branch with real genotype fixtures
+# ===========================================================================
+
+test_that("ld_loader ld_meta_path loads LD from PLINK2 metadata", {
+  skip_if_not_installed("pgenlibr")
+  meta_file <- file.path(test_data_dir, "ld_meta_plink2_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(
+    paste("chrom", "start", "end", "path", sep = "\t"),
+    meta_file
+  )
+  cat(paste("21", "0", "0", "test_variants", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  region <- "chr21:5049649-5225647"
+  loader <- ld_loader(ld_meta_path = meta_file, regions = region)
+  mat <- loader(1)
+  expect_true(is.matrix(mat))
+  expect_equal(nrow(mat), 100L)
+  expect_equal(ncol(mat), 100L)
+})
+
+test_that("ld_loader ld_meta_path loads LD from VCF metadata", {
+  skip_if_not_installed("VariantAnnotation")
+  meta_file <- file.path(test_data_dir, "ld_meta_vcf_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(
+    paste("chrom", "start", "end", "path", sep = "\t"),
+    meta_file
+  )
+  cat(paste("21", "0", "0", "test_variants.vcf.gz", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  region <- "chr21:5049649-5225647"
+  loader <- ld_loader(ld_meta_path = meta_file, regions = region)
+  mat <- suppressWarnings(loader(1))
+  expect_true(is.matrix(mat))
+  expect_equal(nrow(mat), 100L)
+})

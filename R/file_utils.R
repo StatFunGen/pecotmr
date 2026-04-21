@@ -97,7 +97,7 @@ load_plink2_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
   paths <- resolve_plink2_paths(prefix)
 
   # --- Read variant info from .pvar as text (pgenlibr::NewPvar is unreliable) ---
-  all_variant_info <- read_pvar_text(paths$pvar)
+  all_variant_info <- read_pvar(paths$pvar)
 
   variant_idx <- seq_len(nrow(all_variant_info))
   if (!is.null(region)) {
@@ -212,47 +212,40 @@ resolve_plink2_paths <- function(prefix) {
   list(pgen = pgen, pvar = pvar, psam = psam)
 }
 
-#' Read .pvar or .pvar.zst as text into a data.frame.
+#' Read .pvar or .pvar.zst into a data.frame via pgenlibr.
 #'
-#' Note: pgenlibr::NewPvar is unreliable (empty error messages in v0.5.4-0.6.0
-#' due to an errbuf offset bug in the C++ wrapper). This text-based reader is
-#' used instead. It handles both plain text and zstd-compressed pvar files.
-#' Performance is comparable (~0.03s for 200K variants via vroom).
-#'
-#' For .pvar.zst without the archive R package, falls back to zstd CLI.
+#' Uses pgenlibr::NewPvar() to parse the file (handles both plain .pvar and
+#' zstd-compressed .pvar.zst natively, no external CLI required).
 #'
 #' @param pvar_path Path to .pvar or .pvar.zst file.
 #' @return data.frame with columns: chrom, id, pos, A2 (REF), A1 (ALT).
-#' @importFrom vroom vroom
 #' @noRd
-read_pvar_text <- function(pvar_path) {
-  # For .zst files, decompress to temp if archive package unavailable
-  if (grepl("\\.zst$", pvar_path) && !requireNamespace("archive", quietly = TRUE)) {
-    tmp <- tempfile(fileext = ".pvar")
-    on.exit(unlink(tmp), add = TRUE)
-    ret <- system2("zstd", c("-dq", shQuote(pvar_path), "-o", shQuote(tmp)))
-    if (ret != 0) stop("Failed to decompress ", pvar_path, ". Install the 'archive' R package or 'zstd' CLI.")
-    pvar_path <- tmp
+read_pvar <- function(pvar_path) {
+  if (!requireNamespace("pgenlibr", quietly = TRUE)) {
+    stop("pgenlibr is required. Install from https://cran.r-project.org/web/packages/pgenlibr/index.html")
   }
-  df <- as.data.frame(vroom(pvar_path, comment = "##", show_col_types = FALSE))
-  colnames(df)[1] <- "chrom"
+  pvar <- pgenlibr::NewPvar(pvar_path)
+  on.exit(pgenlibr::ClosePvar(pvar), add = TRUE)
+  n <- pgenlibr::GetVariantCt(pvar)
+  idx <- seq_len(n)
   data.frame(
-    chrom = as.character(df$chrom),
-    id    = as.character(df$ID),
-    pos   = as.integer(df$POS),
-    A2    = as.character(df$REF),
-    A1    = as.character(df$ALT),
+    chrom = vapply(idx, function(i) pgenlibr::GetVariantChrom(pvar, i), character(1)),
+    id    = vapply(idx, function(i) pgenlibr::GetVariantId(pvar, i), character(1)),
+    pos   = vapply(idx, function(i) pgenlibr::GetVariantPos(pvar, i), integer(1)),
+    A2    = vapply(idx, function(i) pgenlibr::GetAlleleCode(pvar, i, 1L), character(1)),
+    A1    = vapply(idx, function(i) pgenlibr::GetAlleleCode(pvar, i, 2L), character(1)),
     stringsAsFactors = FALSE
   )
 }
 
-#' Get variant information from any LD reference source without loading genotypes.
+#' Get variant information from any LD reference source.
 #'
-#' Auto-detects the source type (PLINK2, PLINK1, or pre-computed LD metadata)
-#' and returns variant metadata. For PLINK2, opens only the .pvar file.
-#' For PLINK1, reads only the .bim file. No genotype data is loaded.
+#' Auto-detects the source type (PLINK2, PLINK1, VCF, GDS, or pre-computed
+#' LD metadata) and returns variant metadata. For PLINK2, opens only the
+#' .pvar file. For PLINK1, reads only the .bim file. For VCF and GDS,
+#' loads the full file and extracts variant info.
 #'
-#' @param source PLINK prefix or LD metadata file path.
+#' @param source Genotype file path/prefix or LD metadata file path.
 #' @param region Region of interest: "chr:start-end" string or data.frame with
 #'   chrom/start/end. If NULL, returns all variants.
 #' @return A data.frame with columns: chrom, id, pos, A2, A1.
@@ -263,16 +256,16 @@ read_pvar_text <- function(pvar_path) {
 get_ref_variant_info <- function(source, region = NULL) {
   resolved <- resolve_ld_source(source)
 
-  # For PLINK via metadata, resolve per-chromosome prefix
-  if (resolved$type %in% c("plink2", "plink1") && !is.null(resolved$meta_path) && !is.null(region)) {
-    data_path <- resolve_plink_prefix_for_region(resolved$meta_path, region, resolved$type)
+  # For genotype sources via metadata, resolve per-chromosome path
+  if (resolved$type %in% c("plink2", "plink1", "vcf", "gds") && !is.null(resolved$meta_path) && !is.null(region)) {
+    data_path <- resolve_genotype_path_for_region(resolved$meta_path, region)
   } else {
     data_path <- resolved$data_path
   }
 
   if (resolved$type == "plink2") {
     paths <- resolve_plink2_paths(data_path)
-    info <- read_pvar_text(paths$pvar)
+    info <- read_pvar(paths$pvar)
     afreq <- read_afreq(data_path)
     if (!is.null(afreq)) {
       info$allele_freq <- afreq$alt_freq[match(info$id, afreq$id)]
@@ -284,6 +277,14 @@ get_ref_variant_info <- function(source, region = NULL) {
       A2 = bim$a0, A1 = bim$a1,
       stringsAsFactors = FALSE
     )
+  } else if (resolved$type %in% c("vcf", "gds")) {
+    # VCF/GDS: load via the genotype loader and extract variant_info
+    result <- load_genotype_region(data_path, region = region,
+                                   return_variant_info = TRUE)
+    info <- result$variant_info
+    # Compute allele frequency from the genotype matrix
+    info$allele_freq <- colMeans(result$X, na.rm = TRUE) / 2
+    return(info)  # Already region-filtered by the loader
   } else {
     # Pre-computed LD: read bim files via metadata
     bim_paths <- get_regional_ld_meta(resolved$meta_path, region)$intersections$bim_file_paths
@@ -343,16 +344,53 @@ match_variants_to_keep <- function(variant_info, keep_variants_path) {
 #' @importFrom magrittr %>%
 #' @importFrom stringr str_detect
 
+# Internal helper: read a region from a tabix-indexed file via Rsamtools
+read_tabix_region <- function(file, region, use_col_names) {
+  tbx <- Rsamtools::TabixFile(file)
+  parsed <- parse_region(region)
+  # Match chromosome naming convention in the tabix index
+  chrom <- as.character(parsed$chrom)
+  tbx_seqnames <- Rsamtools::seqnamesTabix(tbx)
+  if (any(grepl("^chr", tbx_seqnames))) {
+    chrom <- paste0("chr", chrom)
+  }
+  gr <- GenomicRanges::GRanges(
+    seqnames = chrom,
+    ranges = IRanges::IRanges(start = parsed$start, end = parsed$end)
+  )
+  lines <- Rsamtools::scanTabix(tbx, param = gr)[[1]]
+  if (length(lines) == 0) return(NULL)
+
+  # Get header for column names
+  col_names_vec <- NULL
+  if (use_col_names) {
+    hdr <- Rsamtools::headerTabix(tbx)$header
+    if (length(hdr) > 0) {
+      last_hdr <- hdr[length(hdr)]
+      col_names_vec <- strsplit(sub("^#", "", last_hdr), "\t")[[1]]
+    }
+  }
+
+  # Parse tab-delimited lines
+  txt <- paste(lines, collapse = "\n")
+  if (!is.null(col_names_vec)) {
+    as.data.frame(vroom::vroom(I(txt), delim = "\t", col_names = col_names_vec,
+                               show_col_types = FALSE))
+  } else {
+    as.data.frame(vroom::vroom(I(txt), delim = "\t", col_names = use_col_names,
+                               show_col_types = FALSE))
+  }
+}
+
 tabix_region <- function(file, region, tabix_header = "auto", target = "", target_column_index = "") {
   if (!file.exists(file)) {
     stop("Input file does not exist: ", file)
   }
+
+  use_col_names <- if (identical(tabix_header, FALSE)) FALSE else TRUE
+
   cmd_output <- tryCatch(
-    {
-      use_col_names <- if (identical(tabix_header, FALSE)) FALSE else TRUE
-      as.data.frame(vroom(pipe(paste0("tabix -h ", file, " ", region)),
-                          delim = "\t", col_names = use_col_names, show_col_types = FALSE))
-    },
+    read_tabix_region(file, region, use_col_names),
     error = function(e) NULL
   )
 
@@ -465,30 +503,212 @@ load_plink1_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
   return(list(X = X, variant_info = variant_info))
 }
 
+#' Load genotype data from a VCF file via VariantAnnotation
+#'
+#' Reads biallelic SNP genotypes from a VCF (or VCF.gz/BCF) file using
+#' VariantAnnotation::readVcf(). Extracts GT field and converts to 0/1/2
+#' ALT dosage. Returns the same structure as load_plink2_data().
+#'
+#' @param path Path to VCF file (.vcf, .vcf.gz, or .bcf).
+#' @param region Target region in format "chr:start-end". If NULL, loads all.
+#' @param keep_indel Whether to keep indel variants. Default TRUE.
+#' @param keep_variants_path Path to a file listing variants to keep.
+#' @return A list with X (dosage matrix) and variant_info (data.frame).
+#' @noRd
+load_vcf_data <- function(path, region = NULL, keep_indel = TRUE,
+                          keep_variants_path = NULL) {
+  if (!requireNamespace("VariantAnnotation", quietly = TRUE)) {
+    stop("VariantAnnotation is required for VCF loading. ",
+         "Install from Bioconductor: BiocManager::install('VariantAnnotation')")
+  }
+
+  # Build scan parameters
+  param <- if (!is.null(region)) {
+    parsed <- parse_region(region)
+    chrom_name <- as.character(parsed$chrom)
+    # Match chromosome naming convention in the VCF header
+    vcf_seqnames <- Rsamtools::seqnamesTabix(Rsamtools::TabixFile(path))
+    if (any(grepl("^chr", vcf_seqnames))) {
+      chrom_name <- paste0("chr", chrom_name)
+    }
+    gr <- GenomicRanges::GRanges(
+      seqnames = chrom_name,
+      ranges = IRanges::IRanges(start = parsed$start, end = parsed$end)
+    )
+    VariantAnnotation::ScanVcfParam(which = gr, geno = "GT")
+  } else {
+    VariantAnnotation::ScanVcfParam(geno = "GT")
+  }
+
+  # Read VCF
+  vcf <- VariantAnnotation::readVcf(path, param = param)
+  if (length(vcf) == 0) {
+    stop(NoSNPsError(paste("No variants found in VCF", path,
+                           if (!is.null(region)) paste("for region", region))))
+  }
+
+  # Extract GT matrix and convert to ALT dosage (0/1/2)
+  gt <- VariantAnnotation::geno(vcf)$GT
+  # GT is a character matrix: "0/0", "0/1", "1/1", "0|0", "0|1", "1|0", "1|1"
+  dosage <- matrix(NA_real_, nrow = ncol(gt), ncol = nrow(gt))
+  rownames(dosage) <- colnames(gt)
+  for (j in seq_len(nrow(gt))) {
+    g <- gt[j, ]
+    alleles <- strsplit(g, "[/|]")
+    dosage[, j] <- vapply(alleles, function(a) {
+      a <- as.integer(a)
+      if (any(is.na(a))) NA_real_ else sum(a)
+    }, numeric(1))
+  }
+
+  # Build variant_info from rowRanges
+  rr <- SummarizedExperiment::rowRanges(vcf)
+  variant_info <- data.frame(
+    chrom = as.character(GenomicRanges::seqnames(rr)),
+    id    = names(rr),
+    pos   = as.integer(GenomicRanges::start(rr)),
+    A2    = as.character(VariantAnnotation::ref(vcf)),
+    A1    = vapply(VariantAnnotation::alt(vcf),
+                   function(x) as.character(x)[1], character(1)),
+    stringsAsFactors = FALSE
+  )
+  colnames(dosage) <- variant_info$id
+
+  # Post-filters
+  if (!keep_indel) {
+    snp_mask <- is_snp_alleles(variant_info$A1, variant_info$A2)
+    dosage <- dosage[, snp_mask, drop = FALSE]
+    variant_info <- variant_info[snp_mask, , drop = FALSE]
+  }
+  if (!is.null(keep_variants_path)) {
+    keep_idx <- match_variants_to_keep(variant_info, keep_variants_path)
+    dosage <- dosage[, keep_idx, drop = FALSE]
+    variant_info <- variant_info[keep_idx, , drop = FALSE]
+  }
+
+  list(X = dosage, variant_info = variant_info)
+}
+
+#' Load genotype data from a GDS file via SNPRelate
+#'
+#' Reads genotype data from a CoreArray GDS file using SNPRelate.
+#' Returns the same structure as load_plink2_data().
+#'
+#' @param path Path to GDS file (.gds).
+#' @param region Target region in format "chr:start-end". If NULL, loads all.
+#' @param keep_indel Whether to keep indel variants. Default TRUE.
+#' @param keep_variants_path Path to a file listing variants to keep.
+#' @return A list with X (dosage matrix) and variant_info (data.frame).
+#' @noRd
+load_gds_data <- function(path, region = NULL, keep_indel = TRUE,
+                          keep_variants_path = NULL) {
+  if (!requireNamespace("SNPRelate", quietly = TRUE)) {
+    stop("SNPRelate is required for GDS loading. ",
+         "Install from Bioconductor: BiocManager::install('SNPRelate')")
+  }
+
+  gds <- SNPRelate::snpgdsOpen(path, readonly = TRUE, allow.duplicate = TRUE)
+  on.exit(SNPRelate::snpgdsClose(gds), add = TRUE)
+
+  # Read variant metadata
+  snp_chrom <- gdsfmt::read.gdsn(gdsfmt::index.gdsn(gds, "snp.chromosome"))
+  snp_pos <- gdsfmt::read.gdsn(gdsfmt::index.gdsn(gds, "snp.position"))
+  snp_id <- gdsfmt::read.gdsn(gdsfmt::index.gdsn(gds, "snp.id"))
+  snp_allele <- gdsfmt::read.gdsn(gdsfmt::index.gdsn(gds, "snp.allele"))
+
+  # Parse alleles: "REF/ALT" format
+  allele_split <- strsplit(snp_allele, "/")
+  a2 <- vapply(allele_split, `[`, character(1), 1L)  # REF
+  a1 <- vapply(allele_split, `[`, character(1), 2L)  # ALT
+
+  # Region filter
+  snp_subset <- NULL
+  if (!is.null(region)) {
+    parsed <- parse_region(region)
+    in_region <- strip_chr_prefix(as.character(snp_chrom)) == parsed$chrom &
+                 snp_pos >= parsed$start & snp_pos <= parsed$end
+    if (!any(in_region)) {
+      stop(NoSNPsError(paste("No variants found in region", region)))
+    }
+    snp_subset <- snp_id[in_region]
+  }
+
+  # Read genotype matrix (samples × variants, ALT dosage 0/1/2)
+  geno <- SNPRelate::snpgdsGetGeno(gds, snp.id = snp_subset,
+                                    with.id = TRUE, verbose = FALSE)
+  X <- geno$genotype
+  rownames(X) <- geno$sample.id
+
+  # Build variant_info for the subset
+  if (!is.null(snp_subset)) {
+    idx <- match(geno$snp.id, snp_id)
+  } else {
+    idx <- seq_along(snp_id)
+  }
+  variant_info <- data.frame(
+    chrom = as.character(snp_chrom[idx]),
+    id    = as.character(snp_id[idx]),
+    pos   = as.integer(snp_pos[idx]),
+    A2    = a2[idx],
+    A1    = a1[idx],
+    stringsAsFactors = FALSE
+  )
+  colnames(X) <- variant_info$id
+
+  # Post-filters
+  if (!keep_indel) {
+    snp_mask <- is_snp_alleles(variant_info$A1, variant_info$A2)
+    X <- X[, snp_mask, drop = FALSE]
+    variant_info <- variant_info[snp_mask, , drop = FALSE]
+  }
+  if (!is.null(keep_variants_path)) {
+    keep_idx <- match_variants_to_keep(variant_info, keep_variants_path)
+    X <- X[, keep_idx, drop = FALSE]
+    variant_info <- variant_info[keep_idx, , drop = FALSE]
+  }
+
+  list(X = X, variant_info = variant_info)
+}
+
 #' Load genotype data for a specific region
 #'
-#' Auto-detects PLINK2 (.pgen/.pvar[.zst]/.psam) or PLINK1 (.bed/.bim/.fam) format
-#' and loads genotype data accordingly. Returns a numeric dosage matrix.
+#' Auto-detects PLINK2 (.pgen/.pvar[.zst]/.psam), PLINK1 (.bed/.bim/.fam),
+#' VCF (.vcf/.vcf.gz/.bcf), or GDS (.gds) format and loads genotype data
+#' accordingly.
 #'
 #' @param genotype Path to the genotype data file (without extension).
 #' @param region The target region in the format "chr:start-end".
 #' @param keep_indel Whether to keep indel SNPs.
 #' @param keep_variants_path Path to a file listing variants to keep.
-#' @return A numeric dosage matrix (rows=samples, cols=variants).
+#' @param return_variant_info If TRUE, return a list with X (dosage matrix) and
+#'   variant_info (data.frame). If FALSE (default), return only the dosage matrix.
+#' @return If return_variant_info is FALSE, a numeric dosage matrix (rows=samples,
+#'   cols=variants). If TRUE, a list with elements X and variant_info.
 #'
 #' @export
-load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE, keep_variants_path = NULL) {
-  # Direct PLINK prefix detection (no metadata TSV required)
-  if (has_plink2_files(genotype)) {
-    return(load_plink2_data(genotype, region = region, keep_indel = keep_indel,
-                            keep_variants_path = keep_variants_path)$X)
+load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE,
+                                 keep_variants_path = NULL,
+                                 return_variant_info = FALSE) {
+  result <- NULL
+  # VCF and GDS: detect by file extension on the path itself
+  if (grepl("\\.(vcf|vcf\\.gz|bcf)$", genotype)) {
+    result <- load_vcf_data(genotype, region = region, keep_indel = keep_indel,
+                            keep_variants_path = keep_variants_path)
+  } else if (grepl("\\.gds$", genotype)) {
+    result <- load_gds_data(genotype, region = region, keep_indel = keep_indel,
+                            keep_variants_path = keep_variants_path)
+  } else if (has_plink2_files(genotype)) {
+    # PLINK prefix detection (no extension on the path)
+    result <- load_plink2_data(genotype, region = region, keep_indel = keep_indel,
+                               keep_variants_path = keep_variants_path)
+  } else if (has_plink1_files(genotype)) {
+    result <- load_plink1_data(genotype, region = region, keep_indel = keep_indel,
+                               keep_variants_path = keep_variants_path)
+  } else {
+    stop("Genotype files not found at: ", genotype,
+         "\n  Expected: .vcf/.vcf.gz/.bcf, .gds, or PLINK prefix (.pgen/.pvar[.zst]/.psam or .bed/.bim/.fam)")
   }
-  if (has_plink1_files(genotype)) {
-    return(load_plink1_data(genotype, region = region, keep_indel = keep_indel,
-                            keep_variants_path = keep_variants_path)$X)
-  }
-  stop("Genotype files not found at prefix: ", genotype,
-       "\n  Expected: .pgen/.pvar[.zst]/.psam or .bed/.bim/.fam")
+  if (return_variant_info) result else result$X
 }
 
 #' @importFrom purrr map
@@ -1119,15 +1339,73 @@ load_twas_weights <- function(weight_db_files, conditions = NULL,
   )
 }
 
+#' Standardize GWAS summary statistics column names
+#'
+#' Uses MungeSumstats' comprehensive column name mapping to standardize
+#' column names from various GWAS formats, then renames to pecotmr conventions.
+#' Optionally applies an additional custom column mapping file.
+#'
+#' @param sumstats A data frame of summary statistics.
+#' @param column_file_path Optional file path to a custom column mapping file
+#'   (format: standard_name:original_name, one per line). Applied after
+#'   MungeSumstats standardization.
+#' @param comment_string Comment character in column_file_path. Default is "#".
+#' @return A data frame with standardized column names.
+#' @export
+standardise_sumstats_columns <- function(sumstats, column_file_path = NULL, comment_string = "#") {
+  # MungeSumstats standard names -> pecotmr conventions
+  ms_to_pecotmr <- c(
+    CHR = "chrom", BP = "pos", SNP = "variant_id",
+    BETA = "beta", SE = "se", Z = "z", P = "p",
+    N = "n_sample", N_CAS = "n_case", N_CON = "n_control",
+    FRQ = "maf"
+  )
+  # Make a copy to avoid in-place modification by MungeSumstats
+  sumstats_copy <- data.frame(sumstats, check.names = FALSE)
+  # Use MungeSumstats for comprehensive column standardization
+  sumstats_copy <- MungeSumstats::standardise_header(
+    sumstats_copy, return_list = FALSE, uppercase_unmapped = FALSE
+  )
+  # Rename MungeSumstats standard names to pecotmr conventions
+  for (ms_name in names(ms_to_pecotmr)) {
+    idx <- which(colnames(sumstats_copy) == ms_name)
+    if (length(idx) > 0) {
+      colnames(sumstats_copy)[idx] <- ms_to_pecotmr[ms_name]
+    }
+  }
+  # Apply additional custom column mapping if provided
+  if (!is.null(column_file_path)) {
+    if (!file.exists(column_file_path)) {
+      stop("Column mapping file not found: ", column_file_path)
+    }
+    column_data <- read.table(column_file_path,
+      header = FALSE, sep = ":",
+      comment.char = if (is.null(comment_string)) "" else comment_string,
+      stringsAsFactors = FALSE
+    )
+    colnames(column_data) <- c("standard", "original")
+    for (i in seq_len(nrow(column_data))) {
+      idx <- which(colnames(sumstats_copy) == column_data$original[i])
+      if (length(idx) > 0) {
+        colnames(sumstats_copy)[idx] <- column_data$standard[i]
+      }
+    }
+  }
+  as.data.frame(sumstats_copy)
+}
+
 #' Load summary statistic data
 #'
 #' This function formats the input summary statistics dataframe with uniform column names
-#' to fit into the SuSiE pipeline. The mapping is performed through the specified column file.
+#' to fit into the SuSiE pipeline. Column standardization is performed via
+#' MungeSumstats::standardise_header(), with an optional custom column mapping file
+#' for additional non-standard names.
 #' Additionally, it extracts sample size, case number, control number, and variance of Y.
 #' Missing values in n_sample, n_case, and n_control are backfilled with median values.
 #'
 #' @param sumstat_path File path to the summary statistics.
-#' @param column_file_path File path to the column file for mapping.
+#' @param column_file_path Optional file path to a custom column mapping file for
+#'   non-standard column names not recognized by MungeSumstats.
 #' @param n_sample User-specified sample size. If unknown, set as 0 to retrieve from the sumstat file.
 #' @param n_case User-specified number of cases.
 #' @param n_control User-specified number of controls.
@@ -1141,52 +1419,29 @@ load_twas_weights <- function(weight_db_files, conditions = NULL,
 #' @importFrom dplyr mutate group_by summarise
 #' @importFrom magrittr %>%
 #' @export
-load_rss_data <- function(sumstat_path, column_file_path, n_sample = 0, n_case = 0, n_control = 0, region = NULL,
+load_rss_data <- function(sumstat_path, column_file_path = NULL, n_sample = 0, n_case = 0, n_control = 0, region = NULL,
                           extract_region_name = NULL, region_name_col = NULL, comment_string = "#") {
   # Validate input files exist
   if (!file.exists(sumstat_path)) {
     stop("Summary statistics file not found: ", sumstat_path)
   }
-  if (!file.exists(column_file_path)) {
+  if (!is.null(column_file_path) && !file.exists(column_file_path)) {
     stop("Column mapping file not found: ", column_file_path)
   }
-  # Read and preprocess column mapping
-  if (is.null(comment_string)) {
-    column_data <- read.table(column_file_path,
-      header = FALSE, sep = ":",
-      comment.char = "", # This tells R not to treat any character as comment
-      stringsAsFactors = FALSE
-    ) %>%
-      rename(standard = V1, original = V2)
-  } else {
-    column_data <- read.table(column_file_path,
-      header = FALSE, sep = ":",
-      comment.char = comment_string,
-      stringsAsFactors = FALSE
-    ) %>%
-      rename(standard = V1, original = V2)
-  }
-  # Initialize sumstats variable
-  sumstats <- NULL
   var_y <- NULL
   sumstats <- load_tsv_region(file_path = sumstat_path, region = region, extract_region_name = extract_region_name, region_name_col = region_name_col)
-  
+
   # To keep a log message
   n_variants <- nrow(sumstats)
-  if (n_variants == 0){
-      message(paste0("No variants in region ", region, "."))
-      return(list(sumstats = sumstats, n = NULL, var_y = NULL))
+  if (n_variants == 0) {
+    message(paste0("No variants in region ", region, "."))
+    return(list(sumstats = sumstats, n = NULL, var_y = NULL))
   } else {
-      message(paste0("Region ", region, " include ", n_variants, " in input sumstats."))
+    message(paste0("Region ", region, " include ", n_variants, " in input sumstats."))
   }
-  
-  # Standardize column names based on mapping
-  for (name in colnames(sumstats)) {
-    if (name %in% column_data$original) {
-      index <- which(column_data$original == name)
-      colnames(sumstats)[colnames(sumstats) == name] <- column_data$standard[index]
-    }
-  }
+
+  # Standardize column names via MungeSumstats + optional custom mapping
+  sumstats <- standardise_sumstats_columns(sumstats, column_file_path, comment_string)
   if (!"z" %in% colnames(sumstats) && all(c("beta", "se") %in%
     colnames(sumstats))) {
     sumstats$z <- sumstats$beta / sumstats$se
@@ -1443,55 +1698,58 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
 #' @export
 load_tsv_region <- function(file_path, region = NULL, extract_region_name = NULL, region_name_col = NULL) {
   sumstats <- NULL
-  cmd <- NULL
-
-  if (!is.null(region)) {
-    if (grepl("^chr", region)) {
-      region <- strip_chr_prefix(region)
-    }
-  }
 
   if (grepl("\\.gz$", file_path)) {
-    if (is.null(sumstats) || nrow(sumstats) == 0) {
-      # Determine the appropriate command based on provided parameters
-      if (!is.null(extract_region_name) && !is.null(region) && !is.null(region_name_col)) {
-        # Both region and filter specified
-        cmd <- paste0(
-          "zcat ", file_path, " | head -1 && tabix ", file_path, " ", region,
-          " | awk '$", region_name_col, " ~ /", extract_region_name, "/'"
-        )
-      } else if (!is.null(extract_region_name) && is.null(region) && !is.null(region_name_col)) {
-        # Only filter specified, no region
-        cmd <- paste0("zcat ", file_path, " | awk '$", region_name_col, " ~ /", extract_region_name, "/'")
-      } else if (!is.null(region) && (is.null(region_name_col) || is.null(extract_region_name))) {
-        # Only region specified, no filter
-        cmd <- paste0("zcat ", file_path, " | head -1 && tabix ", file_path, " ", region)
-      } else {
-        # Neither region nor filter specified - read gz directly
-        cmd <- NULL
-      }
-
-      sumstats <- tryCatch(
-        {
-          if (is.null(cmd)) {
-            as.data.frame(vroom(file_path, show_col_types = FALSE))
-          } else {
-            as.data.frame(vroom(pipe(cmd), delim = "\t", show_col_types = FALSE))
-          }
-        },
-        error = function(e) {
-          stop("Data read error. Please make sure this gz file is tabix-indexed and the specified filter column exists.")
+    if (!is.null(region)) {
+      # Use Rsamtools to query the tabix-indexed file by region
+      sumstats <- tryCatch({
+        tbx <- Rsamtools::TabixFile(file_path)
+        parsed <- parse_region(region)
+        # Match chromosome naming convention in the tabix index
+        chrom <- as.character(parsed$chrom)
+        tbx_seqnames <- Rsamtools::seqnamesTabix(tbx)
+        if (any(grepl("^chr", tbx_seqnames))) {
+          chrom <- paste0("chr", chrom)
         }
-      )
+        gr <- GenomicRanges::GRanges(
+          seqnames = chrom,
+          ranges = IRanges::IRanges(start = parsed$start, end = parsed$end)
+        )
+        lines <- Rsamtools::scanTabix(tbx, param = gr)[[1]]
+        if (length(lines) == 0) return(NULL)
+
+        # Get header for column names
+        hdr <- Rsamtools::headerTabix(tbx)$header
+        col_names_vec <- NULL
+        if (length(hdr) > 0) {
+          last_hdr <- hdr[length(hdr)]
+          col_names_vec <- strsplit(sub("^#", "", last_hdr), "\t")[[1]]
+        }
+
+        txt <- paste(lines, collapse = "\n")
+        if (!is.null(col_names_vec)) {
+          as.data.frame(vroom::vroom(I(txt), delim = "\t", col_names = col_names_vec,
+                                     show_col_types = FALSE))
+        } else {
+          as.data.frame(vroom::vroom(I(txt), delim = "\t", col_names = TRUE,
+                                     show_col_types = FALSE))
+        }
+      }, error = function(e) {
+        stop("Data read error. Please make sure this gz file is tabix-indexed and the specified filter column exists.")
+      })
+    } else {
+      # No region specified - read the whole gz file
+      sumstats <- as.data.frame(vroom::vroom(file_path, show_col_types = FALSE))
     }
   } else {
     warning("Not a tabix-indexed gz file, loading the entire dataset.")
-    sumstats <- as.data.frame(vroom(file_path, show_col_types = FALSE))
-    # Apply filter if specified
-    if (!is.null(extract_region_name) && !is.null(region_name_col)) {
-      keep_index <- which(str_detect(sumstats[[region_name_col]], extract_region_name))
-      sumstats <- sumstats[keep_index, ]
-    }
+    sumstats <- as.data.frame(vroom::vroom(file_path, show_col_types = FALSE))
+  }
+
+  # Apply name-based filter if specified
+  if (!is.null(sumstats) && !is.null(extract_region_name) && !is.null(region_name_col)) {
+    keep_index <- which(str_detect(sumstats[[region_name_col]], extract_region_name))
+    sumstats <- sumstats[keep_index, ]
   }
 
   return(sumstats)

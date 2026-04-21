@@ -767,7 +767,7 @@ merge_sumstats_matrices <- function(matrix_list, value_column, ref_panel = NULL,
               ld_bim_file <- vroom(bim_file_path)
 
               # Perform allele quality control
-              flipped_data <- allele_qc(data, ld_bim_file$V2,
+              flipped_data <- match_ref_panel(data, ld_bim_file$V2,
                 col_to_flip = c(value_column),
                 match_min_prop = 0, remove_dups = FALSE,
                 remove_indels = FALSE, remove_strand_ambiguous = FALSE,
@@ -790,7 +790,7 @@ merge_sumstats_matrices <- function(matrix_list, value_column, ref_panel = NULL,
             # Step 3: Combine extracted chromosomal info with value column
             cohort_df <- cbind(cohort_variants_df, value = df2[, value_column, drop = FALSE])
           
-            flipped_data <- allele_qc(cohort_df, ref_panel, col_to_flip = c(value_column),
+            flipped_data <- match_ref_panel(cohort_df, ref_panel, col_to_flip = c(value_column),
                 match_min_prop = 0, remove_dups = FALSE,
                 remove_indels = FALSE, remove_strand_ambiguous = FALSE,
                 flip_strand = FALSE, remove_unmatched = TRUE, remove_same_vars = FALSE)$target_data_qced

@@ -27,10 +27,11 @@ ld_loader(
 is used.}
 
 \item{LD_info}{A data.frame with column \code{LD_file} (paths to
-\code{.cor.xz} LD matrix files) and optionally \code{SNP_file}
-(paths to companion \code{.bim} files; defaults to
-\code{paste0(LD_file, ".bim")} if absent). As returned by
-cTWAS meta-data utilities.}
+genotype files or \code{.cor.xz} LD matrix files) and optionally
+\code{SNP_file} (paths to companion \code{.bim} files for pre-computed
+blocks; defaults to \code{paste0(LD_file, ".bim")} if absent).
+Genotype paths can be PLINK2 prefixes, PLINK1 prefixes, VCF files,
+or GDS files. As returned by cTWAS meta-data utilities.}
 
 \item{return_genotype}{Logical. When using region mode, return the
 genotype matrix X (\code{TRUE}) or LD correlation R (\code{FALSE},

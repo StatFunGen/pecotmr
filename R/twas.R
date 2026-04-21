@@ -144,7 +144,7 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
 
           # Step 4: harmonize weights, flip allele
           weights_matrix <- cbind(variant_id_to_df(rownames(weights_matrix)), weights_matrix)
-          weights_matrix_qced <- allele_qc(weights_matrix, LD_list$LD_variants,
+          weights_matrix_qced <- match_ref_panel(weights_matrix, LD_list$LD_variants,
             colnames(weights_matrix)[!colnames(weights_matrix) %in% c("chrom", "pos", "A2", "A1")],
             match_min_prop = 0
           )
@@ -175,11 +175,11 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
             susie_intermediate <- mol_data$susie_results[[context]][c("pip", "cs_variants", "cs_purity")]
             names(susie_intermediate[["pip"]]) <- rownames(weights_matrix) # original variants that is not qced yet
             pip <- susie_intermediate[["pip"]]
-            pip_qced <- allele_qc(cbind(parse_variant_id(names(pip)), pip), LD_list$LD_variants, "pip", match_min_prop = 0)
+            pip_qced <- match_ref_panel(cbind(parse_variant_id(names(pip)), pip), LD_list$LD_variants, "pip", match_min_prop = 0)
             susie_intermediate[["pip"]] <- abs(pip_qced$target_data_qced$pip)
             names(susie_intermediate[["pip"]]) <- pip_qced$target_data_qced$variant_id
             susie_intermediate[["cs_variants"]] <- lapply(susie_intermediate[["cs_variants"]], function(x) {
-              variant_qc <- allele_qc(x, LD_list$LD_variants, match_min_prop = 0)
+              variant_qc <- match_ref_panel(x, LD_list$LD_variants, match_min_prop = 0)
               variant_qc$target_data_qced$variant_id[variant_qc$target_data_qced$variant_id %in% postqc_weight_variants]
             })
             mol_res[["susie_weights_intermediate_qced"]][[context]] <- susie_intermediate
@@ -228,35 +228,36 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
 #' @export
 harmonize_gwas <- function(gwas_file, query_region, ld_variants, col_to_flip=NULL, match_min_prop=0, column_file_path=NULL, comment_string="#"){
     if(is.null(gwas_file)| is.na(gwas_file)) stop("No GWAS file path provided. ")
-    if (!is.null(column_file_path)) {  
-      rss_result <- load_rss_data(  
-        sumstat_path = gwas_file,  
-        column_file_path = column_file_path,  
+    if (!is.null(column_file_path)) {
+      rss_result <- load_rss_data(
+        sumstat_path = gwas_file,
+        column_file_path = column_file_path,
         region = query_region,
         comment_string = comment_string
-      )  
-      gwas_data_sumstats <- rss_result$sumstats  
-    } else {  
-      gwas_data_sumstats <- as.data.frame(tabix_region(gwas_file, query_region))  
+      )
+      gwas_data_sumstats <- rss_result$sumstats
+    } else {
+      gwas_data_sumstats <- as.data.frame(tabix_region(gwas_file, query_region))
+      if (nrow(gwas_data_sumstats) > 0) {
+        gwas_data_sumstats <- standardise_sumstats_columns(gwas_data_sumstats)
+      }
     }
     if (nrow(gwas_data_sumstats) == 0) {
         if (length(names(gwas_file))==0) names(gwas_file) <- gwas_file
         warning(paste0("No GWAS summary statistics found for the region of ", query_region, " in ", names(gwas_file), ". "))
         return(NULL)
     }
-    if (colnames(gwas_data_sumstats)[1] == "#chrom") colnames(gwas_data_sumstats)[1] <- "chrom" # colname update for tabix
-    
     # Check if sumstats has z-scores or (beta and se)
     if (!is.null(gwas_data_sumstats$z)) {
       # z-scores already present, nothing to do
-    } else if (!is.null(gwas_data_sumstats$beta) && !is.null(gwas_data_sumstats$se)) {  
-      gwas_data_sumstats$z <- gwas_data_sumstats$beta / gwas_data_sumstats$se  
-    } else {  
-      stop("gwas_data_sumstats should have 'z' or ('beta' and 'se') columns")  
+    } else if (!is.null(gwas_data_sumstats$beta) && !is.null(gwas_data_sumstats$se)) {
+      gwas_data_sumstats$z <- gwas_data_sumstats$beta / gwas_data_sumstats$se
+    } else {
+      stop("gwas_data_sumstats should have 'z' or ('beta' and 'se') columns")
     }
     # check for overlapping variants
     if (!any(gwas_data_sumstats$pos %in% gsub("\\:.*$", "", sub("^.*?\\:", "", ld_variants)))) return(NULL)
-    gwas_allele_flip <- allele_qc(gwas_data_sumstats, ld_variants, col_to_flip=col_to_flip, match_min_prop = match_min_prop)
+    gwas_allele_flip <- match_ref_panel(gwas_data_sumstats, ld_variants, col_to_flip=col_to_flip, match_min_prop = match_min_prop)
     gwas_data_sumstats <- gwas_allele_flip$target_data_qced # post-qc gwas data that is flipped and corrected - gwas study level
     gwas_data_sumstats <- gwas_data_sumstats[!is.na(gwas_data_sumstats$z) & !is.infinite(gwas_data_sumstats$z), ]
     return(gwas_data_sumstats)

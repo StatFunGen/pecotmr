@@ -6,7 +6,7 @@
 \usage{
 load_rss_data(
   sumstat_path,
-  column_file_path,
+  column_file_path = NULL,
   n_sample = 0,
   n_case = 0,
   n_control = 0,
@@ -19,7 +19,8 @@ load_rss_data(
 \arguments{
 \item{sumstat_path}{File path to the summary statistics.}
 
-\item{column_file_path}{File path to the column file for mapping.}
+\item{column_file_path}{Optional file path to a custom column mapping file for
+non-standard column names not recognized by MungeSumstats.}
 
 \item{n_sample}{User-specified sample size. If unknown, set as 0 to retrieve from the sumstat file.}
 
@@ -41,7 +42,9 @@ sample size (n), and var_y.
 }
 \description{
 This function formats the input summary statistics dataframe with uniform column names
-to fit into the SuSiE pipeline. The mapping is performed through the specified column file.
+to fit into the SuSiE pipeline. Column standardization is performed via
+MungeSumstats::standardise_header(), with an optional custom column mapping file
+for additional non-standard names.
 Additionally, it extracts sample size, case number, control number, and variance of Y.
 Missing values in n_sample, n_case, and n_control are backfilled with median values.
 }

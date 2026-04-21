@@ -763,7 +763,7 @@ test_that("harmonize_gwas: computes z from beta and se when z is absent", {
         stringsAsFactors = FALSE
       )
     },
-    allele_qc = function(target_data, ref_data, ...) {
+    match_ref_panel = function(target_data, ref_data, ...) {
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
       list(target_data_qced = target_data)
     }
@@ -810,7 +810,7 @@ test_that("harmonize_gwas: renames #chrom to chrom in tabix output", {
       colnames(df)[1] <- "#chrom"
       df
     },
-    allele_qc = function(target_data, ref_data, ...) {
+    match_ref_panel = function(target_data, ref_data, ...) {
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
       list(target_data_qced = target_data)
     }
@@ -836,7 +836,7 @@ test_that("harmonize_gwas: uses load_rss_data when column_file_path is provided"
         stringsAsFactors = FALSE
       ))
     },
-    allele_qc = function(target_data, ref_data, ...) {
+    match_ref_panel = function(target_data, ref_data, ...) {
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
       list(target_data_qced = target_data)
     }
@@ -1079,7 +1079,7 @@ test_that("harmonize_gwas: rows with NA or Inf z are removed from output", {
         stringsAsFactors = FALSE
       )
     },
-    allele_qc = function(target_data, ref_data, ...) {
+    match_ref_panel = function(target_data, ref_data, ...) {
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
       list(target_data_qced = target_data)
     }
@@ -1162,7 +1162,7 @@ test_that("harmonize_gwas: gwas_file with named path uses the name in the warnin
   expect_null(result)
 })
 
-test_that("harmonize_gwas: col_to_flip parameter is passed through to allele_qc", {
+test_that("harmonize_gwas: col_to_flip parameter is passed through to match_ref_panel", {
   received_col_to_flip <- NULL
   local_mocked_bindings(
     tabix_region = function(file, region, ...) {
@@ -1176,7 +1176,8 @@ test_that("harmonize_gwas: col_to_flip parameter is passed through to allele_qc"
         stringsAsFactors = FALSE
       )
     },
-    allele_qc = function(target_data, ref_data, col_to_flip = NULL, ...) {
+    standardise_sumstats_columns = function(sumstats, ...) sumstats,
+    match_ref_panel = function(target_data, ref_data, col_to_flip = NULL, ...) {
       received_col_to_flip <<- col_to_flip
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
       list(target_data_qced = target_data)
@@ -1189,7 +1190,7 @@ test_that("harmonize_gwas: col_to_flip parameter is passed through to allele_qc"
   expect_equal(received_col_to_flip, c("beta", "z"))
 })
 
-test_that("harmonize_gwas: match_min_prop parameter is passed to allele_qc", {
+test_that("harmonize_gwas: match_min_prop parameter is passed to match_ref_panel", {
   received_match_min_prop <- NULL
   local_mocked_bindings(
     tabix_region = function(file, region, ...) {
@@ -1202,7 +1203,8 @@ test_that("harmonize_gwas: match_min_prop parameter is passed to allele_qc", {
         stringsAsFactors = FALSE
       )
     },
-    allele_qc = function(target_data, ref_data, col_to_flip = NULL, match_min_prop = 0.2, ...) {
+    standardise_sumstats_columns = function(sumstats, ...) sumstats,
+    match_ref_panel = function(target_data, ref_data, col_to_flip = NULL, match_min_prop = 0.2, ...) {
       received_match_min_prop <<- match_min_prop
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
       list(target_data_qced = target_data)
@@ -1228,7 +1230,7 @@ test_that("harmonize_gwas: z computed from beta/se has correct values", {
         stringsAsFactors = FALSE
       )
     },
-    allele_qc = function(target_data, ref_data, ...) {
+    match_ref_panel = function(target_data, ref_data, ...) {
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
       list(target_data_qced = target_data)
     }
@@ -1250,7 +1252,7 @@ test_that("harmonize_gwas: only keeps rows with finite non-NA z after allele_qc"
         stringsAsFactors = FALSE
       )
     },
-    allele_qc = function(target_data, ref_data, ...) {
+    match_ref_panel = function(target_data, ref_data, ...) {
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
       list(target_data_qced = target_data)
     }
@@ -1336,7 +1338,7 @@ test_that("harmonize_gwas: existing z column is used directly", {
         stringsAsFactors = FALSE
       )
     },
-    allele_qc = function(target_data, ref_data, ...) {
+    match_ref_panel = function(target_data, ref_data, ...) {
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
       list(target_data_qced = target_data)
     }
@@ -2335,7 +2337,7 @@ test_that("harmonize_gwas: complete flow with beta/se produces correct z-scores 
         stringsAsFactors = FALSE
       )
     },
-    allele_qc = function(target_data, ref_data, ...) {
+    match_ref_panel = function(target_data, ref_data, ...) {
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
       list(target_data_qced = target_data)
     }
@@ -2761,7 +2763,7 @@ test_that("harmonize_twas: group_contexts_by_region single context path (lines 4
     },
     get_ref_variant_info = function(...) mock_snp_info,
     harmonize_gwas = function(...) mock_gwas_data,
-    allele_qc = function(target_data, ref_data, ...) {
+    match_ref_panel = function(target_data, ref_data, ...) {
       if (is.data.frame(target_data)) {
         if (!"variant_id" %in% colnames(target_data)) {
           target_data$variant_id <- if ("pos" %in% colnames(target_data)) {
@@ -2876,7 +2878,7 @@ test_that("harmonize_twas: group_contexts_by_region multi-context clustering (li
     },
     get_ref_variant_info = function(...) mock_snp_info,
     harmonize_gwas = function(...) mock_gwas_data,
-    allele_qc = function(target_data, ref_data, ...) {
+    match_ref_panel = function(target_data, ref_data, ...) {
       if (is.data.frame(target_data)) {
         if (!"variant_id" %in% colnames(target_data)) {
           target_data$variant_id <- if ("pos" %in% colnames(target_data)) {
@@ -3296,7 +3298,7 @@ test_that("harmonize_twas: duplicated LD variants are removed", {
       list(LD_matrix = dup_LD_matrix, LD_variants = dup_variant_ids, ref_panel = dup_ref_panel)
     },
     harmonize_gwas = function(...) mock_gwas_data,
-    allele_qc = function(target_data, ref_data, ...) {
+    match_ref_panel = function(target_data, ref_data, ...) {
       if (is.data.frame(target_data)) {
         if (!"variant_id" %in% colnames(target_data)) {
           target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":",
@@ -3358,7 +3360,7 @@ test_that("harmonize_twas: drops molecular_id when harmonize_gwas returns NULL f
     },
     # Returning NULL skips the entire context loop, so gwas_qced stays empty
     harmonize_gwas = function(...) NULL,
-    allele_qc = function(target_data, ref_data, ...) list(target_data_qced = target_data)
+    match_ref_panel = function(target_data, ref_data, ...) list(target_data_qced = target_data)
   )
 
   gwas_meta <- data.frame(
@@ -3427,7 +3429,7 @@ test_that("harmonize_twas: susie_weights column triggers adjust_susie_weights br
       list(LD_matrix = LD_matrix, LD_variants = variant_ids, ref_panel = ref_panel)
     },
     harmonize_gwas = function(...) mock_gwas_data,
-    allele_qc = function(target_data, ref_data, ...) {
+    match_ref_panel = function(target_data, ref_data, ...) {
       if (is.data.frame(target_data)) {
         if (!"variant_id" %in% colnames(target_data)) {
           target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":",

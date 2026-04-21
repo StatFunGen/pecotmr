@@ -52,7 +52,7 @@
 #' en <- compute_qtl_enrichment(gwas_fit, susie_fits, lambda = lambda, ImpN = ImpN, num_threads = num_threads)
 #'
 #' @seealso \code{\link[susieR]{susie}}
-#' @useDynLib pecotmr
+#' @useDynLib pecotmr, .registration = TRUE
 #' @export
 #'
 compute_qtl_enrichment <- function(gwas_pip, susie_qtl_regions,

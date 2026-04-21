@@ -27,7 +27,10 @@ requirements:
     - bioconductor-iranges
     - bioconductor-qvalue
     - bioconductor-s4vectors
+    - bioconductor-snprelate
     - bioconductor-snpstats
+    - bioconductor-mungesumstats
+    - bioconductor-rsamtools
     - r-base
     - r-bglr
     - r-bigsnpr

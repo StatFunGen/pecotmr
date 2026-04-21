@@ -27,10 +27,11 @@
 #'   \code{"chr22:17238266-19744294"}). Required when \code{ld_meta_path}
 #'   is used.
 #' @param LD_info A data.frame with column \code{LD_file} (paths to
-#'   \code{.cor.xz} LD matrix files) and optionally \code{SNP_file}
-#'   (paths to companion \code{.bim} files; defaults to
-#'   \code{paste0(LD_file, ".bim")} if absent). As returned by
-#'   cTWAS meta-data utilities.
+#'   genotype files or \code{.cor.xz} LD matrix files) and optionally
+#'   \code{SNP_file} (paths to companion \code{.bim} files for pre-computed
+#'   blocks; defaults to \code{paste0(LD_file, ".bim")} if absent).
+#'   Genotype paths can be PLINK2 prefixes, PLINK1 prefixes, VCF files,
+#'   or GDS files. As returned by cTWAS meta-data utilities.
 #' @param return_genotype Logical. When using region mode, return the
 #'   genotype matrix X (\code{TRUE}) or LD correlation R (\code{FALSE},
 #'   default).
@@ -106,23 +107,16 @@ ld_loader <- function(R_list = NULL, X_list = NULL,
     }
   } else {
     # LD_info mode: load LD blocks by index from file paths
-    # Supports all three formats:
-    #   1. Pre-computed .cor.xz + .bim/.pvar (custom block format)
-    #   2. PLINK1 prefix (.bed/.bim/.fam) — LD computed on the fly
-    #   3. PLINK2 prefix (.pgen/.pvar/.psam) — LD computed on the fly
+    # Supports all genotype formats (PLINK2, PLINK1, VCF, GDS) and
+    # pre-computed .cor.xz + .bim/.pvar blocks
     if (!is.data.frame(LD_info) || !"LD_file" %in% colnames(LD_info))
       stop("LD_info must be a data.frame with column 'LD_file'.")
 
     loader <- function(g) {
       ld_path <- LD_info$LD_file[g]
 
-      # Auto-detect format by checking what files exist
-      if (has_plink2_files(ld_path)) {
-        # PLINK2: load genotypes and compute LD
-        geno <- load_genotype_region(ld_path)
-        mat <- compute_LD(geno)
-      } else if (has_plink1_files(ld_path)) {
-        # PLINK1: load genotypes and compute LD
+      # Auto-detect format: genotype source or pre-computed block
+      if (is_genotype_source(ld_path)) {
         geno <- load_genotype_region(ld_path)
         mat <- compute_LD(geno)
       } else {

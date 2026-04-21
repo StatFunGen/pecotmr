@@ -152,9 +152,9 @@ process_LD_matrix <- function(LD_file_path, snp_file_path = NULL) {
   }
 
   if (is_pvar) {
-    # PLINK2 .pvar format: read via existing read_pvar_text()
-    LD_variants <- read_pvar_text(snp_file_path)
-    # read_pvar_text returns: chrom, id, pos, A2 (REF), A1 (ALT)
+    # PLINK2 .pvar format: read via existing read_pvar()
+    LD_variants <- read_pvar(snp_file_path)
+    # read_pvar returns: chrom, id, pos, A2 (REF), A1 (ALT)
     LD_variants <- LD_variants %>%
       mutate(chrom = as.character(as.integer(strip_chr_prefix(chrom))),
              variants = normalize_variant_id(id)) %>%
@@ -286,21 +286,21 @@ create_LD_matrix <- function(LD_matrices, variants) {
 load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL,
                            return_genotype = FALSE, n_sample = NULL) {
   source <- resolve_ld_source(LD_meta_file_path)
-  is_plink <- source$type %in% c("plink2", "plink1")
+  is_geno <- source$type %in% c("plink2", "plink1", "vcf", "gds")
 
-  # "auto": return X for PLINK, R for pre-computed
-  if (identical(return_genotype, "auto")) return_genotype <- is_plink
+  # "auto": return X for genotype sources, R for pre-computed
+  if (identical(return_genotype, "auto")) return_genotype <- is_geno
 
-  if (is_plink) {
-    prefix <- resolve_plink_prefix_for_region(source$meta_path, region, source$type)
-    return(load_LD_from_genotype(prefix, region, source$type,
+  if (is_geno) {
+    geno_path <- resolve_genotype_path_for_region(source$meta_path, region)
+    return(load_LD_from_genotype(geno_path, region,
                                  return_genotype = return_genotype,
                                  n_sample = n_sample))
   }
 
   # Pre-computed LD blocks (.cor.xz)
   if (return_genotype) {
-    stop("return_genotype=TRUE requires PLINK genotype files, not pre-computed LD matrices.")
+    stop("return_genotype=TRUE requires genotype files, not pre-computed LD matrices.")
   }
   load_LD_from_blocks(source$meta_path, region, extract_coordinates, n_sample = n_sample)
 }
@@ -321,26 +321,43 @@ has_plink1_files <- function(prefix) {
     file.exists(paste0(prefix, ".fam"))
 }
 
+#' @noRd
+is_vcf_path <- function(path) {
+  grepl("\\.(vcf|vcf\\.gz|bcf)$", path) && file.exists(path)
+}
+
+#' @noRd
+is_gds_path <- function(path) {
+  grepl("\\.gds$", path) && file.exists(path)
+}
+
+#' Check whether a path points to a genotype source (PLINK, VCF, or GDS).
+#' @noRd
+is_genotype_source <- function(path) {
+  has_plink2_files(path) || has_plink1_files(path) || is_vcf_path(path) || is_gds_path(path)
+}
+
 #' Resolve an LD source metadata TSV to its actual data type.
 #'
-#' The metadata TSV has columns: chrom, start, end, path. Two formats are supported:
+#' The metadata TSV has columns: chrom, start, end, path. Three categories are
+#' supported:
 #' \itemize{
 #'   \item Pre-computed LD blocks (.cor.xz): many rows per chromosome, each with
 #'     specific start/end block boundaries and path pointing to .cor.xz files.
-#'   \item PLINK genotype files: one row per chromosome with start=0, end=0,
-#'     and path pointing to a per-chromosome PLINK prefix. The actual region
-#'     filter is applied by the PLINK loader, not by block boundaries.
+#'   \item Genotype files (PLINK2, PLINK1, VCF, or GDS): one row per chromosome
+#'     with start=0, end=0, and path pointing to a per-chromosome genotype file
+#'     or prefix. The actual region filter is applied by the genotype loader.
 #' }
 #'
 #' This function peeks at the first row to determine the data type.
-#' The actual per-chromosome PLINK prefix is resolved later by
-#' \code{resolve_plink_prefix_for_region()} at load time.
+#' The actual per-chromosome path is resolved later by
+#' \code{resolve_genotype_path_for_region()} at load time.
 #'
 #' @param path Path to a metadata TSV file with columns chrom, start, end, path.
 #' @return A list with:
-#'   \item{type}{"plink2", "plink1", or "precomputed"}
-#'   \item{data_path}{PLINK prefix from first row (for type detection only; actual
-#'     per-chromosome prefix is resolved at load time)}
+#'   \item{type}{"plink2", "plink1", "vcf", "gds", or "precomputed"}
+#'   \item{data_path}{Genotype path from first row (for type detection only; actual
+#'     per-chromosome path is resolved at load time)}
 #'   \item{meta_path}{The metadata TSV path (always set)}
 #' @importFrom vroom vroom
 #' @noRd
@@ -359,22 +376,24 @@ resolve_ld_source <- function(path) {
 
   if (has_plink2_files(resolved)) return(list(type = "plink2", data_path = resolved, meta_path = path))
   if (has_plink1_files(resolved)) return(list(type = "plink1", data_path = resolved, meta_path = path))
+  if (is_vcf_path(resolved)) return(list(type = "vcf", data_path = resolved, meta_path = path))
+  if (is_gds_path(resolved)) return(list(type = "gds", data_path = resolved, meta_path = path))
 
   # Pre-computed .cor.xz blocks — verify not using 0:0 sentinel
   if (!is.na(meta$start) && !is.na(meta$end) && meta$start == 0 && meta$end == 0) {
-    stop("Metadata has start=0, end=0 but path does not resolve to PLINK files: ", resolved,
-         "\n  The 0:0 sentinel is only valid for whole-chromosome PLINK genotype files.")
+    stop("Metadata has start=0, end=0 but path does not resolve to genotype files: ", resolved,
+         "\n  The 0:0 sentinel is only valid for whole-chromosome genotype files.")
   }
 
   list(type = "precomputed", meta_path = path)
 }
 
-#' Resolve the correct PLINK prefix for a given region from a metadata TSV.
+#' Resolve the correct genotype path for a given region from a metadata TSV.
 #' Reads the TSV, finds the row matching the query region's chromosome,
-#' and returns the resolved PLINK prefix path.
+#' and returns the resolved genotype file path or prefix.
 #' @importFrom vroom vroom
 #' @noRd
-resolve_plink_prefix_for_region <- function(meta_path, region, source_type) {
+resolve_genotype_path_for_region <- function(meta_path, region) {
   parsed <- parse_region(region)
   meta <- as.data.frame(vroom(meta_path, show_col_types = FALSE))
   colnames(meta) <- c("chrom", "start", "end", "path")
@@ -391,17 +410,13 @@ resolve_plink_prefix_for_region <- function(meta_path, region, source_type) {
 
 # ---------- Internal: load LD from genotype files ----------
 
-#' Load genotype data from PLINK files and compute LD or return genotype matrix.
-#' @param source_type Character, "plink1" or "plink2" (from resolve_ld_source).
+#' Load genotype data and compute LD or return genotype matrix.
 #' @noRd
-load_LD_from_genotype <- function(prefix, region, source_type,
+load_LD_from_genotype <- function(genotype_path, region,
                                   return_genotype = FALSE, n_sample = NULL) {
-  # Load genotype matrix and variant info
-  result <- if (source_type == "plink2") {
-    load_plink2_data(prefix, region = region)
-  } else {
-    load_plink1_data(prefix, region = region)
-  }
+  # Load genotype matrix and variant info via the unified loader
+  result <- load_genotype_region(genotype_path, region = region,
+                                 return_variant_info = TRUE)
   X <- result$X
   variant_info <- result$variant_info
 
@@ -415,19 +430,20 @@ load_LD_from_genotype <- function(prefix, region, source_type,
   ref_panel <- parse_variant_id(variant_ids)
   ref_panel$variant_id <- variant_ids
 
-  # Load allele frequency from .afreq file (required for PLINK sources)
-  afreq <- read_afreq(prefix)
-  if (is.null(afreq)) {
-    stop("Allele frequency file (.afreq or .afreq.zst) not found at prefix: ", prefix,
-         "\n  The .afreq file is required for PLINK genotype LD sources.")
+  # Load allele frequency from .afreq file if available, otherwise compute from genotypes
+  afreq <- read_afreq(genotype_path)
+  if (!is.null(afreq)) {
+    freq_match <- match(variant_info$id, afreq$id)
+    n_unmatched <- sum(is.na(freq_match))
+    if (n_unmatched > 0) {
+      warning(n_unmatched, " out of ", length(freq_match),
+              " variants have no allele frequency in .afreq file.")
+    }
+    ref_panel$allele_freq <- afreq$alt_freq[freq_match]
+  } else {
+    # Compute ALT allele frequency directly from the dosage matrix
+    ref_panel$allele_freq <- colMeans(X, na.rm = TRUE) / 2
   }
-  freq_match <- match(variant_info$id, afreq$id)
-  n_unmatched <- sum(is.na(freq_match))
-  if (n_unmatched > 0) {
-    warning(n_unmatched, " out of ", length(freq_match),
-            " variants have no allele frequency in .afreq file.")
-  }
-  ref_panel$allele_freq <- afreq$alt_freq[freq_match]
 
   # Compute variance if sample size provided
   if (!is.null(n_sample)) {

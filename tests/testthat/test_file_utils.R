@@ -1013,7 +1013,7 @@ test_that("tabix_region returns empty tibble on NULL cmd_output (error path)", {
   tmp <- tempfile()
   writeLines("dummy", tmp)
   local_mocked_bindings(
-    vroom = function(...) stop("mock error")
+    read_tabix_region = function(...) stop("mock error")
   )
   result <- tabix_region(tmp, "chr1:1-100")
   expect_true(nrow(result) == 0)
@@ -1030,7 +1030,7 @@ test_that("tabix_region filters with target and target_column_index", {
   tmp <- tempfile()
   writeLines("dummy", tmp)
   local_mocked_bindings(
-    vroom = function(...) mock_df
+    read_tabix_region = function(...) mock_df
   )
   result <- tabix_region(tmp, "chr1:1-500", target = "BRCA1", target_column_index = 3)
   expect_equal(nrow(result), 2)
@@ -1047,7 +1047,7 @@ test_that("tabix_region filters with target but no target_column_index (text pat
   tmp <- tempfile()
   writeLines("dummy", tmp)
   local_mocked_bindings(
-    vroom = function(...) mock_df
+    read_tabix_region = function(...) mock_df
   )
   result <- tabix_region(tmp, "chr1:1-500", target = "ABC")
   expect_equal(nrow(result), 1)
@@ -1596,4 +1596,442 @@ test_that("batch_load_twas_weights puts oversized gene in its own batch", {
   result <- batch_load_twas_weights(twas, meta, max_memory_per_batch = max_mb)
   # Big gene should be in its own batch
   expect_true(length(result) >= 2)
+})
+
+# ===========================================================================
+# load_covariate_data with real fixture
+# ===========================================================================
+
+test_that("load_covariate_data reads and transposes covariate file", {
+  covar_path <- file.path(test_path("test_data"), "test_covariates.tsv")
+  result <- pecotmr:::load_covariate_data(covar_path)
+  expect_true(is.list(result))
+  expect_equal(length(result), 1L)
+  mat <- result[[1]]
+  expect_true(is.matrix(mat))
+  # Original: 100 rows (samples) x 9 cols (sample + PC1-PC8)
+  # After drop col 1 + transpose: 8 rows (PCs) x 100 cols (samples)
+  expect_equal(nrow(mat), 8L)
+  expect_equal(ncol(mat), 100L)
+  expect_true(is.numeric(mat))
+  expect_false(any(is.na(mat)))
+})
+
+test_that("load_covariate_data errors on missing file", {
+  expect_error(
+    pecotmr:::load_covariate_data("/nonexistent/covariate.tsv"),
+    "not found"
+  )
+})
+
+# ===========================================================================
+# load_tsv_region with real tabix-indexed fixture
+# ===========================================================================
+
+test_that("load_tsv_region reads full gz file without region", {
+  skip_if_not_installed("Rsamtools")
+  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  result <- load_tsv_region(sumstat_path)
+  expect_true(is.data.frame(result))
+  expect_equal(nrow(result), 8L)
+  expect_true("BETA" %in% names(result) || "beta" %in% names(result))
+})
+
+test_that("load_tsv_region queries region via tabix", {
+  skip_if_not_installed("Rsamtools")
+  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  result <- load_tsv_region(sumstat_path, region = "chr21:17014042-45433269")
+  expect_true(is.data.frame(result))
+  expect_equal(nrow(result), 8L)
+})
+
+test_that("load_tsv_region errors for non-overlapping region", {
+  skip_if_not_installed("Rsamtools")
+  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  expect_error(load_tsv_region(sumstat_path, region = "chr1:1-2"), "tabix-indexed")
+})
+
+test_that("load_tsv_region queries subregion correctly", {
+  skip_if_not_installed("Rsamtools")
+  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  # Only first 2 variants: pos 17014042 and 18759786
+  result <- load_tsv_region(sumstat_path, region = "chr21:17014042-18759786")
+  expect_true(is.data.frame(result))
+  expect_equal(nrow(result), 2L)
+})
+
+# ===========================================================================
+# load_rss_data with real tabix-indexed fixture
+# ===========================================================================
+
+test_that("load_rss_data reads summary statistics without region", {
+  skip_if_not_installed("MungeSumstats")
+  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  result <- suppressMessages(load_rss_data(sumstat_path))
+  expect_true(is.list(result))
+  expect_true(is.data.frame(result$sumstats))
+  expect_equal(nrow(result$sumstats), 8L)
+  # Should have standardized column names including z
+  expect_true("beta" %in% names(result$sumstats))
+  expect_true("se" %in% names(result$sumstats))
+  expect_true("z" %in% names(result$sumstats))
+  # z should be beta / se
+  expect_equal(result$sumstats$z, result$sumstats$beta / result$sumstats$se)
+})
+
+test_that("load_rss_data reads summary statistics with region", {
+  skip_if_not_installed("MungeSumstats")
+  skip_if_not_installed("Rsamtools")
+  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  result <- suppressMessages(
+    load_rss_data(sumstat_path, region = "chr21:17014042-45433269")
+  )
+  expect_true(is.data.frame(result$sumstats))
+  expect_equal(nrow(result$sumstats), 8L)
+})
+
+test_that("load_rss_data with n_sample returns sample size", {
+  skip_if_not_installed("MungeSumstats")
+  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  result <- suppressMessages(load_rss_data(sumstat_path, n_sample = 500))
+  expect_equal(result$n, 500)
+  expect_null(result$var_y)
+})
+
+test_that("load_rss_data with n_case and n_control computes var_y", {
+  skip_if_not_installed("MungeSumstats")
+  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  result <- suppressMessages(load_rss_data(sumstat_path, n_case = 200, n_control = 300))
+  expect_equal(result$n, 500)
+  expect_true(!is.null(result$var_y))
+  # var_y = 1 / (phi * (1 - phi)) where phi = 200/500 = 0.4
+  expect_equal(result$var_y, 1 / (0.4 * 0.6))
+})
+
+test_that("load_rss_data extracts n from sumstats N column", {
+  skip_if_not_installed("MungeSumstats")
+  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  # n_sample=0 means "get from file"
+  result <- suppressMessages(load_rss_data(sumstat_path))
+  # The fixture has N column with per-variant sample sizes; median should be used
+  expect_true(!is.null(result$n))
+  expect_true(result$n > 0)
+})
+
+test_that("load_rss_data errors on missing file", {
+  expect_error(load_rss_data("/nonexistent/sumstats.tsv.gz"), "not found")
+})
+
+test_that("load_rss_data errors for non-overlapping region", {
+  skip_if_not_installed("MungeSumstats")
+  skip_if_not_installed("Rsamtools")
+  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  expect_error(
+    suppressMessages(load_rss_data(sumstat_path, region = "chr1:1-2")),
+    "tabix-indexed"
+  )
+})
+
+# ===========================================================================
+# get_ref_variant_info with PLINK2 fixture
+# ===========================================================================
+
+test_that("get_ref_variant_info returns variant info for PLINK2 source", {
+  skip_if_not_installed("pgenlibr")
+  meta_file <- file.path(test_path("test_data"), "ld_meta_refinfo_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("21", "0", "0", "test_variants", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  result <- get_ref_variant_info(meta_file, region = "chr21:5049649-5225647")
+  expect_true(is.data.frame(result))
+  expect_equal(nrow(result), 100L)
+  expect_true(all(c("chrom", "id", "pos", "A2", "A1") %in% names(result)))
+  # .afreq is present, so allele_freq should be populated
+  expect_true("allele_freq" %in% names(result))
+  expect_true(all(result$allele_freq > 0 & result$allele_freq < 1))
+})
+
+test_that("get_ref_variant_info filters by subregion", {
+  skip_if_not_installed("pgenlibr")
+  meta_file <- file.path(test_path("test_data"), "ld_meta_refinfo_sub_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("21", "0", "0", "test_variants", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  result <- get_ref_variant_info(meta_file, region = "chr21:5049649-5218151")
+  expect_true(nrow(result) < 100L)
+  expect_true(all(result$pos >= 5049649 & result$pos <= 5218151))
+})
+
+test_that("get_ref_variant_info returns variant info for VCF source", {
+  skip_if_not_installed("VariantAnnotation")
+  meta_file <- file.path(test_path("test_data"), "ld_meta_refinfo_vcf_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("21", "0", "0", "test_variants.vcf.gz", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  result <- suppressWarnings(
+    get_ref_variant_info(meta_file, region = "chr21:5049649-5225647")
+  )
+  expect_true(is.data.frame(result))
+  expect_equal(nrow(result), 100L)
+  expect_true(all(c("chrom", "id", "pos", "A2", "A1") %in% names(result)))
+  expect_true("allele_freq" %in% names(result))
+  expect_true(all(result$allele_freq > 0 & result$allele_freq < 1))
+})
+
+test_that("get_ref_variant_info returns variant info for GDS source", {
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  meta_file <- file.path(test_path("test_data"), "ld_meta_refinfo_gds_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("21", "0", "0", "test_variants.gds", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  result <- get_ref_variant_info(meta_file, region = "chr21:5049649-5225647")
+  expect_true(is.data.frame(result))
+  expect_equal(nrow(result), 100L)
+  expect_true(all(c("chrom", "id", "pos", "A2", "A1") %in% names(result)))
+  expect_true("allele_freq" %in% names(result))
+})
+
+test_that("get_ref_variant_info VCF filters by subregion", {
+  skip_if_not_installed("VariantAnnotation")
+  skip_if_not_installed("Rsamtools")
+  meta_file <- file.path(test_path("test_data"), "ld_meta_refinfo_vcf_sub_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("21", "0", "0", "test_variants.vcf.gz", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  result <- suppressWarnings(
+    get_ref_variant_info(meta_file, region = "chr21:5049649-5218151")
+  )
+  expect_true(nrow(result) < 100L)
+  expect_true(all(result$pos >= 5049649 & result$pos <= 5218151))
+})
+
+test_that("get_ref_variant_info returns consistent results across formats", {
+  skip_if_not_installed("pgenlibr")
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  region <- "chr21:5049649-5225647"
+  td <- test_path("test_data")
+
+  meta_plink <- file.path(td, "ld_meta_refinfo_cmp_p2_tmp.tsv")
+  meta_gds <- file.path(td, "ld_meta_refinfo_cmp_gds_tmp.tsv")
+  on.exit({unlink(meta_plink); unlink(meta_gds)}, add = TRUE)
+
+  for (f in c(meta_plink, meta_gds)) {
+    writeLines(paste("chrom", "start", "end", "path", sep = "\t"), f)
+  }
+  cat(paste("21", "0", "0", "test_variants", sep = "\t"), "\n",
+      file = meta_plink, append = TRUE)
+  cat(paste("21", "0", "0", "test_variants.gds", sep = "\t"), "\n",
+      file = meta_gds, append = TRUE)
+
+  info_plink <- get_ref_variant_info(meta_plink, region = region)
+  info_gds <- get_ref_variant_info(meta_gds, region = region)
+
+  expect_equal(nrow(info_plink), nrow(info_gds))
+  expect_equal(info_plink$pos, info_gds$pos)
+})
+
+# ===========================================================================
+# read_afreq
+# ===========================================================================
+
+test_that("read_afreq returns correct structure from .afreq file", {
+  td <- test_path("test_data")
+  af <- read_afreq(file.path(td, "test_variants"))
+  expect_true(is.data.frame(af))
+  expect_equal(nrow(af), 100L)
+  expect_true(all(c("chrom", "id", "A2", "A1", "alt_freq", "obs_ct") %in% colnames(af)))
+})
+
+test_that("read_afreq returns correct types", {
+  td <- test_path("test_data")
+  af <- read_afreq(file.path(td, "test_variants"))
+  expect_type(af$alt_freq, "double")
+  expect_true(all(af$alt_freq >= 0 & af$alt_freq <= 1))
+  expect_true(all(af$obs_ct > 0))
+})
+
+test_that("read_afreq returns NULL when no afreq file exists", {
+  af <- read_afreq(file.path(tempdir(), "nonexistent_prefix"))
+  expect_null(af)
+})
+
+test_that("read_afreq IDs match pvar IDs", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  af <- read_afreq(file.path(td, "test_variants"))
+  pvar <- read_pvar(file.path(td, "test_variants.pvar"))
+  expect_equal(af$id, pvar$id)
+})
+
+# ===========================================================================
+# match_variants_to_keep
+# ===========================================================================
+
+test_that("match_variants_to_keep filters to specified variants", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  result <- load_plink2_data(file.path(td, "test_variants"))
+  vi <- result$variant_info
+
+  # Write a keep file as tab-delimited with chrom/pos columns
+  keep_file <- tempfile(fileext = ".tsv")
+  on.exit(unlink(keep_file), add = TRUE)
+  keep_df <- vi[c(1, 5, 10), c("chrom", "pos", "A2", "A1")]
+  vroom::vroom_write(keep_df, keep_file, delim = "\t")
+
+  mask <- match_variants_to_keep(vi, keep_file)
+  expect_type(mask, "logical")
+  expect_equal(sum(mask), 3L)
+  expect_true(mask[1])
+  expect_true(mask[5])
+  expect_true(mask[10])
+})
+
+test_that("match_variants_to_keep returns all FALSE for non-matching variants", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  result <- load_plink2_data(file.path(td, "test_variants"))
+  vi <- result$variant_info
+
+  keep_file <- tempfile(fileext = ".tsv")
+  on.exit(unlink(keep_file), add = TRUE)
+  keep_df <- data.frame(chrom = c(1L, 2L), pos = c(999L, 888L),
+                        A2 = c("A", "C"), A1 = c("T", "G"))
+  vroom::vroom_write(keep_df, keep_file, delim = "\t")
+
+  mask <- match_variants_to_keep(vi, keep_file)
+  expect_true(all(!mask))
+})
+
+# ===========================================================================
+# standardise_sumstats_columns
+# ===========================================================================
+
+test_that("standardise_sumstats_columns renames standard headers", {
+  skip_if_not_installed("MungeSumstats")
+  df <- data.frame(
+    SNPID = "rs1", CHR = 1, POS = 100,
+    EFFECT_ALLELE = "A", OTHER_ALLELE = "G",
+    BETA = 0.5, SE = 0.1, P = 0.01,
+    stringsAsFactors = FALSE
+  )
+  result <- standardise_sumstats_columns(df)
+  expect_true("chrom" %in% colnames(result))
+  expect_true("pos" %in% colnames(result))
+  expect_true("beta" %in% colnames(result))
+  expect_true("se" %in% colnames(result))
+  expect_true("p" %in% colnames(result))
+})
+
+test_that("standardise_sumstats_columns applies custom column mapping", {
+  skip_if_not_installed("MungeSumstats")
+  df <- data.frame(
+    SNP = "rs1", CHR = 1, BP = 100,
+    A1 = "A", A2 = "G",
+    BETA = 0.5, SE = 0.1, P = 0.01,
+    MY_FREQ = 0.3,
+    stringsAsFactors = FALSE
+  )
+  col_file <- tempfile(fileext = ".txt")
+  on.exit(unlink(col_file), add = TRUE)
+  writeLines("maf:MY_FREQ", col_file)
+
+  result <- standardise_sumstats_columns(df, column_file_path = col_file)
+  expect_true("maf" %in% colnames(result))
+})
+
+test_that("standardise_sumstats_columns errors on missing column file", {
+  skip_if_not_installed("MungeSumstats")
+  df <- data.frame(SNP = "rs1", CHR = 1, BP = 100, A1 = "A", A2 = "G",
+                   BETA = 0.5, SE = 0.1, P = 0.01, stringsAsFactors = FALSE)
+  expect_error(
+    standardise_sumstats_columns(df, column_file_path = "/no/such/file.txt"),
+    "Column mapping file not found"
+  )
+})
+
+# ===========================================================================
+# load_plink2_data: direct tests
+# ===========================================================================
+
+test_that("load_plink2_data loads all variants without region", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  result <- load_plink2_data(file.path(td, "test_variants"))
+  expect_true(is.matrix(result$X))
+  expect_equal(nrow(result$X), 100L)
+  expect_equal(ncol(result$X), 100L)
+  expect_true(is.data.frame(result$variant_info))
+  expect_equal(nrow(result$variant_info), 100L)
+})
+
+test_that("load_plink2_data filters by region", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  region <- "chr21:5049649-5100000"
+  result <- load_plink2_data(file.path(td, "test_variants"), region = region)
+  expect_true(ncol(result$X) < 100L)
+  expect_true(all(result$variant_info$pos >= 5049649))
+  expect_true(all(result$variant_info$pos <= 5100000))
+  expect_equal(ncol(result$X), nrow(result$variant_info))
+})
+
+test_that("load_plink2_data errors on empty region", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  expect_error(
+    load_plink2_data(file.path(td, "test_variants"), region = "chr21:1-2"),
+    "No variants found"
+  )
+})
+
+test_that("load_plink2_data removes indels with keep_indel=FALSE", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  full <- load_plink2_data(file.path(td, "test_variants"))
+  filtered <- load_plink2_data(file.path(td, "test_variants"), keep_indel = FALSE)
+  # test data has 2 indels
+  expect_equal(ncol(filtered$X), ncol(full$X) - 2L)
+  # all remaining alleles should be single characters
+  expect_true(all(nchar(filtered$variant_info$A1) == 1))
+  expect_true(all(nchar(filtered$variant_info$A2) == 1))
+})
+
+test_that("load_plink2_data filters by keep_variants_path", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  full <- load_plink2_data(file.path(td, "test_variants"))
+
+  keep_file <- tempfile(fileext = ".tsv")
+  on.exit(unlink(keep_file), add = TRUE)
+  keep_df <- full$variant_info[c(1, 3, 7), c("chrom", "pos", "A2", "A1")]
+  vroom::vroom_write(keep_df, keep_file, delim = "\t")
+
+  result <- load_plink2_data(file.path(td, "test_variants"), keep_variants_path = keep_file)
+  expect_equal(ncol(result$X), 3L)
+  expect_equal(nrow(result$variant_info), 3L)
+})
+
+test_that("load_plink2_data attaches afreq info to variant_info", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  result <- load_plink2_data(file.path(td, "test_variants"))
+  expect_true("alt_freq" %in% colnames(result$variant_info))
+  expect_true("obs_ct" %in% colnames(result$variant_info))
+  expect_true(all(result$variant_info$alt_freq >= 0 & result$variant_info$alt_freq <= 1))
+})
+
+test_that("load_plink2_data sample names match psam IIDs", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  result <- load_plink2_data(file.path(td, "test_variants"))
+  expect_true(all(grepl("^(HG|NA)\\d+", rownames(result$X))))
+  expect_equal(length(unique(rownames(result$X))), 100L)
 })

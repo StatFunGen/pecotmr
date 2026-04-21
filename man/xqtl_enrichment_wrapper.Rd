@@ -15,6 +15,8 @@ xqtl_enrichment_wrapper(
   pi_qtl = NULL,
   lambda = 1,
   ImpN = 25,
+  double_shrinkage = FALSE,
+  bessel_correction = TRUE,
   num_threads = 1
 )
 }
