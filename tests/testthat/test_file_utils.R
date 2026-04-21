@@ -254,6 +254,25 @@ test_that("read_stochastic_meta reads afreq format", {
   expect_true(all(grepl("^chr21_", result$id)))
 })
 
+test_that("read_stochastic_meta reads afreq.zst format", {
+  td <- test_path("test_data")
+  path <- file.path(td, "test_harmonize_regions.afreq.zst")
+  result <- pecotmr:::read_stochastic_meta(path)
+  expect_true(is.data.frame(result))
+  expect_equal(colnames(result), c("id", "u_min", "u_max"))
+  expect_equal(nrow(result), 8L)
+  # Should produce identical results to the plain afreq
+  plain <- pecotmr:::read_stochastic_meta(file.path(td, "test_harmonize_regions.afreq"))
+  expect_equal(result, plain)
+})
+
+test_that("find_stochastic_meta prefers afreq over afreq.zst", {
+  td <- test_path("test_data")
+  # Both .afreq and .afreq.zst exist; find_stochastic_meta should return .afreq first
+  result <- pecotmr:::find_stochastic_meta(file.path(td, "test_harmonize_regions"))
+  expect_true(grepl("\\.afreq$", result))
+})
+
 test_that("read_stochastic_meta auto-detects format from extension", {
   td <- test_path("test_data")
   # .afreq extension -> afreq parser
@@ -2023,6 +2042,31 @@ test_that("read_afreq returns correct types", {
 test_that("read_afreq returns NULL when no afreq file exists", {
   af <- read_afreq(file.path(tempdir(), "nonexistent_prefix"))
   expect_null(af)
+})
+
+test_that("read_afreq reads .afreq.zst file", {
+  td <- test_path("test_data")
+  # test_harmonize_regions has both .afreq and .afreq.zst; read_afreq prefers .zst
+  af <- read_afreq(file.path(td, "test_harmonize_regions"))
+  expect_true(is.data.frame(af))
+  expect_true(all(c("id", "A2", "A1", "alt_freq", "obs_ct") %in% colnames(af)))
+  # This afreq has U_MIN/U_MAX columns
+  expect_true(all(c("u_min", "u_max") %in% colnames(af)))
+  expect_equal(nrow(af), 8L)
+})
+
+test_that("read_afreq reads plain .afreq with U_MIN/U_MAX", {
+  td <- test_path("test_data")
+  # Temporarily hide the .zst so read_afreq falls through to plain .afreq
+  zst_path <- file.path(td, "test_harmonize_regions.afreq.zst")
+  tmp_path <- paste0(zst_path, ".bak")
+  file.rename(zst_path, tmp_path)
+  on.exit(file.rename(tmp_path, zst_path), add = TRUE)
+
+  af <- read_afreq(file.path(td, "test_harmonize_regions"))
+  expect_true(is.data.frame(af))
+  expect_true(all(c("u_min", "u_max") %in% colnames(af)))
+  expect_equal(nrow(af), 8L)
 })
 
 test_that("read_afreq IDs match pvar IDs", {
