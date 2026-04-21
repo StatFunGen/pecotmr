@@ -2,17 +2,17 @@
 #   load_plink1_data, load_plink2_data, load_vcf_data, load_gds_data,
 #   load_genotype_region
 
-# Fixtures: 100 samples x 100 biallelic polymorphic variants on chr21:5049649-5225647
+# Fixtures: 100 samples x 349 variants on chr21:17513228-17592874
 test_data_dir <- test_path("test_data")
 plink_prefix <- file.path(test_data_dir, "test_variants")
 vcf_path <- file.path(test_data_dir, "test_variants.vcf.gz")
 gds_path <- file.path(test_data_dir, "test_variants.gds")
-region_all <- "chr21:5049649-5225647"
-region_sub <- "chr21:5049649-5218151"
+region_all <- "chr21:17513228-17592874"
+region_sub <- "chr21:17513228-17550000"
 
 # Expected dimensions
 n_samples <- 100L
-n_variants <- 100L
+n_variants <- 349L
 
 # Shared helper: validate the output structure from any loader
 check_genotype_result <- function(result, expected_nrow = n_samples, expected_ncol = n_variants,
@@ -46,8 +46,8 @@ test_that("load_plink1_data loads all variants", {
 test_that("load_plink1_data filters by region", {
   skip_if_not_installed("snpStats")
   result <- load_plink1_data(plink_prefix, region = region_sub)
-  check_genotype_result(result, expected_ncol = 40L, label = "plink1 region")
-  expect_true(all(result$variant_info$pos >= 5049649 & result$variant_info$pos <= 5218151))
+  check_genotype_result(result, expected_ncol = 134L, label = "plink1 region")
+  expect_true(all(result$variant_info$pos >= 17513228 & result$variant_info$pos <= 17550000))
 })
 
 test_that("load_plink1_data filters indels", {
@@ -81,8 +81,8 @@ test_that("load_plink2_data loads all variants", {
 test_that("load_plink2_data filters by region", {
   skip_if_not_installed("pgenlibr")
   result <- load_plink2_data(plink_prefix, region = region_sub)
-  check_genotype_result(result, expected_ncol = 40L, label = "plink2 region")
-  expect_true(all(result$variant_info$pos >= 5049649 & result$variant_info$pos <= 5218151))
+  check_genotype_result(result, expected_ncol = 134L, label = "plink2 region")
+  expect_true(all(result$variant_info$pos >= 17513228 & result$variant_info$pos <= 17550000))
 })
 
 test_that("load_plink2_data filters indels", {
@@ -115,8 +115,8 @@ test_that("load_vcf_data filters by region", {
   skip_if_not_installed("VariantAnnotation")
   skip_if_not_installed("Rsamtools")
   result <- suppressWarnings(load_vcf_data(vcf_path, region = region_sub))
-  check_genotype_result(result, expected_ncol = 40L, label = "vcf region")
-  expect_true(all(result$variant_info$pos >= 5049649 & result$variant_info$pos <= 5218151))
+  check_genotype_result(result, expected_ncol = 134L, label = "vcf region")
+  expect_true(all(result$variant_info$pos >= 17513228 & result$variant_info$pos <= 17550000))
 })
 
 test_that("load_vcf_data filters indels", {
@@ -146,8 +146,8 @@ test_that("load_gds_data filters by region", {
   skip_if_not_installed("SNPRelate")
   skip_if_not_installed("gdsfmt")
   result <- load_gds_data(gds_path, region = region_sub)
-  check_genotype_result(result, expected_ncol = 40L, label = "gds region")
-  expect_true(all(result$variant_info$pos >= 5049649 & result$variant_info$pos <= 5218151))
+  check_genotype_result(result, expected_ncol = 134L, label = "gds region")
+  expect_true(all(result$variant_info$pos >= 17513228 & result$variant_info$pos <= 17550000))
 })
 
 test_that("load_gds_data filters indels", {
@@ -233,7 +233,7 @@ test_that("load_genotype_region returns matrix when return_variant_info=FALSE", 
 test_that("load_genotype_region applies region filter", {
   skip_if_not_installed("pgenlibr")
   result <- load_genotype_region(plink_prefix, region = region_sub, return_variant_info = TRUE)
-  expect_equal(ncol(result$X), 40L)
+  expect_equal(ncol(result$X), 134L)
 })
 
 test_that("load_genotype_region errors on unrecognized format", {

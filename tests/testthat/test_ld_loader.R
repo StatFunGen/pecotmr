@@ -133,8 +133,8 @@ test_that("ld_loader LD_info loads LD from PLINK2 files", {
   loader <- ld_loader(LD_info = data.frame(LD_file = plink_prefix))
   mat <- loader(1)
   expect_true(is.matrix(mat))
-  expect_equal(nrow(mat), 100L)
-  expect_equal(ncol(mat), 100L)
+  expect_equal(nrow(mat), 349L)
+  expect_equal(ncol(mat), 349L)
   expect_true(isSymmetric(mat))
   expect_true(all(abs(diag(mat) - 1) < 1e-10))
 })
@@ -145,7 +145,7 @@ test_that("ld_loader LD_info loads LD from VCF file", {
   loader <- ld_loader(LD_info = data.frame(LD_file = vcf_path))
   mat <- suppressWarnings(loader(1))
   expect_true(is.matrix(mat))
-  expect_equal(nrow(mat), 100L)
+  expect_equal(nrow(mat), 349L)
   expect_true(isSymmetric(mat))
 })
 
@@ -156,7 +156,7 @@ test_that("ld_loader LD_info loads LD from GDS file", {
   loader <- ld_loader(LD_info = data.frame(LD_file = gds_path))
   mat <- loader(1)
   expect_true(is.matrix(mat))
-  expect_equal(nrow(mat), 100L)
+  expect_equal(nrow(mat), 349L)
   expect_true(isSymmetric(mat))
 })
 
@@ -216,12 +216,12 @@ test_that("ld_loader ld_meta_path loads LD from PLINK2 metadata", {
   )
   cat(paste("21", "0", "0", "test_variants", sep = "\t"), "\n",
       file = meta_file, append = TRUE)
-  region <- "chr21:5049649-5225647"
+  region <- "chr21:17513228-17592874"
   loader <- ld_loader(ld_meta_path = meta_file, regions = region)
   mat <- loader(1)
   expect_true(is.matrix(mat))
-  expect_equal(nrow(mat), 100L)
-  expect_equal(ncol(mat), 100L)
+  expect_equal(nrow(mat), 349L)
+  expect_equal(ncol(mat), 349L)
 })
 
 test_that("ld_loader ld_meta_path loads LD from VCF metadata", {
@@ -234,9 +234,9 @@ test_that("ld_loader ld_meta_path loads LD from VCF metadata", {
   )
   cat(paste("21", "0", "0", "test_variants.vcf.gz", sep = "\t"), "\n",
       file = meta_file, append = TRUE)
-  region <- "chr21:5049649-5225647"
+  region <- "chr21:17513228-17592874"
   loader <- ld_loader(ld_meta_path = meta_file, regions = region)
   mat <- suppressWarnings(loader(1))
   expect_true(is.matrix(mat))
-  expect_equal(nrow(mat), 100L)
+  expect_equal(nrow(mat), 349L)
 })

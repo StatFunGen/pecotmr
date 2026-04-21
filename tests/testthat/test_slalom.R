@@ -12,7 +12,7 @@ make_synthetic_ld <- function(n_samples, n_snps, seed = 1) {
   L <- matrix(runif(n_factors * n_snps, -1, 1), nrow = n_factors)
   X_raw <- Z %*% L + matrix(rnorm(n_samples * n_snps, sd = 0.5), nrow = n_samples)
   # Discretise to genotype-like values (0, 1, 2)
-  X <- matrix(as.integer(cut(X_raw, breaks = c(-Inf, -0.5, 0.5, Inf)) - 1L),
+  X <- matrix(as.integer(cut(X_raw, breaks = c(-Inf, -0.5, 0.5, Inf))) - 1L,
               nrow = n_samples, ncol = n_snps)
   colnames(X) <- paste0("snp", seq_len(n_snps))
   R <- cor(X)

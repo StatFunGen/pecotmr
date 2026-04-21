@@ -148,9 +148,11 @@ test_that("multivariate_analysis_pipeline accepts maf of all ones past validatio
     ),
     error = function(e) e
   )
-  # If it errors, the error should NOT be about maf validation
+  # Whether it succeeds or errors, the error should NOT be about maf validation
   if (inherits(result, "error")) {
     expect_false(grepl("maf values must be between", result$message))
+  } else {
+    expect_true(is.list(result))
   }
 })
 
@@ -236,9 +238,11 @@ test_that("pipeline with pip_cutoff_to_skip vector matching ncol(Y) is accepted"
     ),
     error = function(e) e
   )
-  # If it errors, the error should not be about pip_cutoff_to_skip
+  # Whether it succeeds or errors, the error should not be about pip_cutoff_to_skip
   if (inherits(result, "error")) {
     expect_false(grepl("pip_cutoff_to_skip", result$message))
+  } else {
+    expect_true(is.list(result))
   }
 })
 
