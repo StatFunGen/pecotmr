@@ -17,10 +17,11 @@ invert_minmax_scaling(X, u_min, u_max)
 Matrix of original U values with same dimensions.
 }
 \description{
-Stochastic genotype data (from rss_ld_sketch) is stored in PLINK2 pgen
-format after min-max scaling: U_scaled = 2 * (U - u_min) / (u_max - u_min).
+Stochastic genotype data is stored after min-max scaling:
+U_scaled = 2 * (U - u_min) / (u_max - u_min).
 This function exactly inverts that transform using the stored per-variant
-u_min and u_max values from the companion .afreq file.
+u_min and u_max values from a companion sidecar file (.afreq or
+.stochastic_meta.tsv).
 }
 \details{
 The recovered U satisfies U'U/B ~ Wishart(B, R)/B, the correct distributional
