@@ -23,7 +23,6 @@ requirements:
     - ${{ stdlib('c') }}
     - ${{ compiler('cxx') }}
   host:
-    - bioconductor-biostrings
     - bioconductor-iranges
     - bioconductor-qvalue
     - bioconductor-s4vectors

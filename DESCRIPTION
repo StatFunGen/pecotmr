@@ -14,7 +14,6 @@ Authors@R: c(person("Gao Wang",role = c("cre","aut"),
                   person("StatFunGen Lab", role = "ctb"))
 License: MIT + file LICENSE
 Imports:
-    Biostrings,
     GenomicRanges,
     IRanges,
     MungeSumstats,

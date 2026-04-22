@@ -66,6 +66,9 @@ Here we demonstrate count mode on the full dataset, which avoids the "<2000 vari
 First, we load the genotype data and align alleles between the summary statistics and the reference panel.
 
 ```{r prepare-data}
+# Compute z-scores from beta/se
+sumstat$z <- sumstat$beta / sumstat$se
+
 # Load reference panel variant info
 bim <- as.data.frame(vroom(paste0(bfile, ".bim"),
                            col_names = c("chrom", "variant_id", "gd", "pos", "A1", "A2"),
@@ -99,7 +102,7 @@ ref_df <- data.frame(
 qc_result <- allele_qc(
   target_data = target_df, ref_variants = ref_df,
   col_to_flip = "z", match_min_prop = 0,
-  remove_dups = TRUE, remove_strand_ambiguous = TRUE
+  remove_dups = TRUE, remove_indels = TRUE, remove_strand_ambiguous = TRUE
 )
 aligned <- qc_result$target_data_qced
 aligned <- aligned[order(aligned$pos), ]

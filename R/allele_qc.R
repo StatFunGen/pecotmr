@@ -28,7 +28,7 @@ match_ref_panel <- function(target_data, ref_variants, col_to_flip = NULL,
                      remove_indels = FALSE, remove_strand_ambiguous = TRUE,
                      flip_strand = FALSE, remove_unmatched = TRUE, ...) {
 	strand_flip <- function(ref) {
-	  as.character(Biostrings::reverseComplement(Biostrings::DNAStringSet(ref)))
+	  chartr("ATCG", "TAGC", ref)
 	}
 
   # helper to sanitize column names to avoid NA/empty names that break dplyr verbs
