@@ -34,7 +34,9 @@ jobs:
         uses: prefix-dev/setup-pixi@v0.9.5
 
       - name: Build pkgdown site
-        run: pixi run --environment r44 pkgdown_build
+        run: |
+          pixi config set --local run-post-link-scripts insecure
+          pixi run pkgdown_build
 
       - name: Disable Jekyll
         run: touch docs/.nojekyll
