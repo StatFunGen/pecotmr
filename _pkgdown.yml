@@ -56,6 +56,7 @@ articles:
     contents:
     - colocboost-pipeline
     - multicontext-twas-weights
+    - otters-pipeline
   - title: "Quality Control"
     desc: >
       Tools for summary statistics quality control.
