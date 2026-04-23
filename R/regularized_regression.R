@@ -865,58 +865,362 @@ lassosum_rss <- function(bhat, LD, n,
   result
 }
 
+.lassosum_cor_from_stat <- function(stat, n, p) {
+  cor_input <- if (!is.null(stat$cor)) {
+    as.numeric(stat$cor)
+  } else if (!is.null(stat$z)) {
+    as.numeric(stat$z) / sqrt(n)
+  } else if (!is.null(stat$b)) {
+    as.numeric(stat$b)
+  } else {
+    stop("stat must contain one of 'cor', 'z', or 'b' for lassosum selection.")
+  }
+  if (length(cor_input) != p) {
+    stop("The length of lassosum input statistics (", length(cor_input),
+         ") must equal nrow(LD) (", p, ").")
+  }
+  cor_input
+}
+
+.lassosum_clamp_cor <- function(cor_input) {
+  max_abs_cor <- max(abs(cor_input), na.rm = TRUE)
+  if (is.finite(max_abs_cor) && max_abs_cor >= 1) {
+    cor_input <- cor_input / (max_abs_cor / 0.9999)
+  }
+  cor_input
+}
+
+.lassosum_prepare_variant_info <- function(variant_info, expected_n = NULL) {
+  if (is.null(variant_info)) {
+    return(NULL)
+  }
+  parsed <- parse_variant_id(variant_info)
+  info <- data.frame(
+    chrom = as.integer(parsed$chrom),
+    pos = as.integer(parsed$pos),
+    A1 = as.character(parsed$A1),
+    A2 = as.character(parsed$A2),
+    stringsAsFactors = FALSE
+  )
+  if (!is.null(expected_n) && nrow(info) != expected_n) {
+    stop("variant_info has ", nrow(info), " rows but expected ", expected_n, ".")
+  }
+  info
+}
+
+.lassosum_filter_source_info <- function(info, region = NULL) {
+  if (is.null(region)) {
+    return(info)
+  }
+  parsed <- parse_region(region)
+  keep <- strip_chr_prefix(as.character(info$chrom)) == parsed$chrom &
+    as.integer(info$pos) >= parsed$start &
+    as.integer(info$pos) <= parsed$end
+  info[keep, , drop = FALSE]
+}
+
+.lassosum_read_source_info <- function(genotype_source, genotype_type, region = NULL) {
+  if (genotype_type == "plink1") {
+    bim <- read_bim(paste0(genotype_source, ".bed"))
+    info <- data.frame(
+      id = as.character(bim$id),
+      chrom = as.character(bim$chrom),
+      pos = as.integer(bim$pos),
+      A1 = as.character(bim$a1),
+      A2 = as.character(bim$a0),
+      stringsAsFactors = FALSE
+    )
+  } else if (genotype_type == "plink2") {
+    paths <- resolve_plink2_paths(genotype_source)
+    pvar <- read_pvar_text(paths$pvar)
+    info <- data.frame(
+      id = as.character(pvar$id),
+      chrom = as.character(pvar$chrom),
+      pos = as.integer(pvar$pos),
+      A1 = as.character(pvar$A1),
+      A2 = as.character(pvar$A2),
+      stringsAsFactors = FALSE
+    )
+  } else {
+    stop("Unsupported genotype_type for lassosum source info: ", genotype_type)
+  }
+  .lassosum_filter_source_info(info, region = region)
+}
+
+.lassosum_match_variants <- function(variant_info, source_info) {
+  target <- .lassosum_prepare_variant_info(variant_info)
+  source <- source_info
+  if (is.null(target) || !nrow(target) || !nrow(source)) {
+    return(data.frame())
+  }
+
+  target$old_idx <- seq_len(nrow(target))
+  source$source_idx <- seq_len(nrow(source))
+  source$chrom <- as.integer(strip_chr_prefix(as.character(source$chrom)))
+  source$pos <- as.integer(source$pos)
+  source$source_A1 <- as.character(source$A1)
+  source$source_A2 <- as.character(source$A2)
+
+  same_source <- source[, c("source_idx", "id", "chrom", "pos", "source_A1", "source_A2"), drop = FALSE]
+  names(same_source) <- c("source_idx", "source_id", "chrom", "pos", "A1", "A2")
+  same <- merge(target, same_source, by = c("chrom", "pos", "A1", "A2"), all = FALSE)
+  same$orientation <- 1L
+
+  flip_source <- source[, c("source_idx", "id", "chrom", "pos", "source_A2", "source_A1"), drop = FALSE]
+  names(flip_source) <- c("source_idx", "source_id", "chrom", "pos", "A1", "A2")
+  flip <- merge(target, flip_source, by = c("chrom", "pos", "A1", "A2"), all = FALSE)
+  flip$orientation <- -1L
+
+  matched <- rbind(same, flip)
+  if (!nrow(matched)) {
+    return(data.frame())
+  }
+
+  matched$orientation_rank <- ifelse(matched$orientation == 1L, 0L, 1L)
+  matched <- matched[order(matched$old_idx, matched$orientation_rank, matched$source_idx), , drop = FALSE]
+  matched <- matched[!duplicated(matched$old_idx), , drop = FALSE]
+  matched <- matched[order(matched$source_idx, matched$orientation_rank, matched$old_idx), , drop = FALSE]
+  matched <- matched[!duplicated(matched$source_idx), , drop = FALSE]
+  matched <- matched[order(matched$source_idx), , drop = FALSE]
+  matched[, c("old_idx", "source_idx", "source_id", "orientation"), drop = FALSE]
+}
+
+.lassosum_first_max <- function(x) {
+  which(x == max(x, na.rm = TRUE))[1]
+}
+
+.lassosum_select_min_fbeta <- function(candidate_beta, candidate_meta) {
+  idx <- which.min(candidate_meta$fbeta)
+  list(
+    beta = candidate_beta[, idx],
+    index = idx,
+    mode = "min_fbeta"
+  )
+}
+
+.lassosum_score_candidates_with_bfile <- function(genotype_source, region, variant_info,
+                                                  candidate_beta, cor_input) {
+  if (!requireNamespace("lassosum", quietly = TRUE)) {
+    stop("The 'lassosum' package is required for PLINK1 pseudovalidation.")
+  }
+  source_info <- .lassosum_read_source_info(genotype_source, "plink1", region = region)
+  matched <- .lassosum_match_variants(variant_info, source_info)
+  if (!nrow(matched)) {
+    stop("No overlapping variants between variant_info and PLINK1 genotype source.")
+  }
+
+  beta_oriented <- sweep(candidate_beta[matched$old_idx, , drop = FALSE], 1, matched$orientation, "*")
+  cor_oriented <- cor_input[matched$old_idx] * matched$orientation
+  extract_ids <- matched$source_id
+  sd_vec <- lassosum:::sd.bfile(bfile = genotype_source, extract = extract_ids, trace = 0)
+  scores <- lassosum:::pseudovalidation(
+    bfile = genotype_source,
+    beta = beta_oriented,
+    cor = cor_oriented,
+    extract = extract_ids,
+    sd = sd_vec
+  )
+  scores[is.na(scores)] <- -Inf
+  idx <- .lassosum_first_max(scores)
+  list(
+    beta = candidate_beta[, idx],
+    index = idx,
+    mode = "plink1_pseudovalidation"
+  )
+}
+
+.lassosum_score_candidates_with_sketch <- function(genotype_source, region, variant_info,
+                                                   candidate_beta, cor_input) {
+  sketch <- load_plink2_data(genotype_source, region = region)
+  source_info <- data.frame(
+    id = as.character(sketch$variant_info$id),
+    chrom = as.character(sketch$variant_info$chrom),
+    pos = as.integer(sketch$variant_info$pos),
+    A1 = as.character(sketch$variant_info$A1),
+    A2 = as.character(sketch$variant_info$A2),
+    stringsAsFactors = FALSE
+  )
+  matched <- .lassosum_match_variants(variant_info, source_info)
+  if (!nrow(matched)) {
+    stop("No overlapping variants between variant_info and PLINK2 genotype source.")
+  }
+
+  X <- sketch$X[, matched$source_idx, drop = FALSE]
+  X <- mean_impute(X)
+  beta_oriented <- sweep(candidate_beta[matched$old_idx, , drop = FALSE], 1, matched$orientation, "*")
+  cor_oriented <- cor_input[matched$old_idx] * matched$orientation
+  sd_vec <- apply(X, 2, stats::sd)
+  sd_vec[!is.finite(sd_vec) | sd_vec <= 0] <- Inf
+  scaled_beta <- sweep(beta_oriented, 1, sd_vec, "/")
+  scaled_beta[!is.finite(scaled_beta)] <- 0
+  pred <- X %*% scaled_beta
+  pred_centered <- scale(pred, scale = FALSE)
+  bxxb <- colSums(pred_centered^2) / nrow(pred_centered)
+  bxy <- as.numeric(crossprod(cor_oriented, beta_oriented))
+  scores <- as.numeric(bxy / sqrt(bxxb))
+  scores[!is.finite(scores)] <- -Inf
+  idx <- .lassosum_first_max(scores)
+  list(
+    beta = candidate_beta[, idx],
+    index = idx,
+    mode = "plink2_sketch_pseudovalidation"
+  )
+}
+
+.lassosum_resolve_selection_mode <- function(selection, genotype_source, genotype_type) {
+  if (selection == "min_fbeta") {
+    return("min_fbeta")
+  }
+
+  if (genotype_type == "auto") {
+    if (is.null(genotype_source) || identical(genotype_source, "")) {
+      return("min_fbeta")
+    }
+    if (has_plink1_files(genotype_source)) {
+      return("plink1")
+    }
+    if (has_plink2_files(genotype_source)) {
+      return("plink2")
+    }
+    return("min_fbeta")
+  }
+
+  if (genotype_type %in% c("plink1", "plink2")) {
+    return(genotype_type)
+  }
+
+  "min_fbeta"
+}
+
 #' Extract weights from lassosum_rss with shrinkage grid search
 #'
 #' Searches over a grid of shrinkage parameters \code{s} (default:
 #' \code{c(0.2, 0.5, 0.9, 1.0)}, matching the original lassosum and OTTERS).
 #' For each \code{s}, the LD matrix is shrunk as \code{(1-s)*R + s*I}, then
-#' \code{lassosum_rss()} is called across the lambda path. The best
-#' \code{(s, lambda)} combination is selected by the lowest objective value.
+#' \code{lassosum_rss()} is called across the lambda path. Candidate selection
+#' depends on the available source:
+#' \itemize{
+#'   \item PLINK1 \code{.bed/.bim/.fam}: published \code{lassosum} pseudovalidation
+#'   \item PLINK2 sketch \code{.pgen/.pvar/.psam}: sketch-genotype pseudovalidation
+#'   \item no genotype-backed source: fallback to \code{min(fbeta)} with warning
+#' }
 #'
 #' @details
-#' Model selection uses \code{min(fbeta)} (penalized objective) rather than
-#' the pseudovalidation approach from the original lassosum R package. Empirical
-#' comparison over 20 random trials (n=300, p=50, 3 causal) shows no systematic
-#' advantage for either method: pseudovalidation won 4/20, min(fbeta) won 6/20,
-#' tied 10/20. The shrinkage grid over \code{s} provides the primary regularization;
-#' lambda selection within each \code{s} has minimal impact.
+#' OTTERS compatibility requires source-aware model selection. When a PLINK1
+#' genotype source is available, this wrapper reproduces the old
+#' genotype-backed pseudovalidation selector. For PLINK2 sketch inputs, it
+#' performs pseudovalidation on the restored \code{U} matrix using
+#' \code{U_MIN/U_MAX}. If no genotype-backed source is provided, the function
+#' warns and falls back to \code{min(fbeta)}.
 #'
 #' @param stat A list with \code{$b} (effect sizes) and \code{$n} (per-variant sample sizes).
 #' @param LD LD correlation matrix R (single matrix, NOT pre-shrunk).
 #' @param s Numeric vector of shrinkage parameters to search over. Default:
 #'   \code{c(0.2, 0.5, 0.9, 1.0)} following Mak et al (2017) and OTTERS.
+#' @param selection Selection strategy. Default \code{"auto"} uses
+#'   source-aware pseudovalidation when possible and falls back to
+#'   \code{"min_fbeta"} otherwise.
+#' @param genotype_source Optional PLINK prefix for genotype-backed or
+#'   sketch-genotype selection.
+#' @param genotype_type Source type for \code{genotype_source}: \code{"auto"},
+#'   \code{"plink1"}, \code{"plink2"}, or \code{"none"}.
+#' @param region Optional region string \code{"chr:start-end"} used to filter
+#'   genotype source variants.
+#' @param variant_info Optional variant annotation aligned to \code{stat} and
+#'   \code{LD}; must identify \code{chrom}, \code{pos}, \code{A1}, \code{A2}.
 #' @param ... Additional arguments passed to \code{lassosum_rss()}.
 #'
 #' @return A numeric vector of the posterior SNP coefficients at the best (s, lambda).
 #' @export
-lassosum_rss_weights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0), ...) {
+lassosum_rss_weights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
+                                 selection = c("auto", "min_fbeta"),
+                                 genotype_source = NULL,
+                                 genotype_type = c("auto", "plink1", "plink2", "none"),
+                                 region = NULL,
+                                 variant_info = NULL,
+                                 ...) {
+  selection <- match.arg(selection)
+  genotype_type <- match.arg(genotype_type)
   n <- median(stat$n)
   p <- nrow(LD)
-  best_fbeta <- Inf
-  best_beta  <- rep(0, p)
-
-  # Clamp marginal correlations to (-1, 1) as required by lassosum.
-  # This is lassosum-specific — other methods (PRS-CS, SDPR) handle
-  # their own regularization and should not be globally rescaled.
-  # Matches OTTERS shrink_factor logic (PRSmodels/lassosum.R lines 71-77).
-  bhat <- stat$b
-  max_abs_b <- max(abs(bhat))
-  if (max_abs_b >= 1) {
-    bhat <- bhat / (max_abs_b / 0.9999)
-  }
+  cor_input <- .lassosum_clamp_cor(.lassosum_cor_from_stat(stat, n = n, p = p))
+  solver_input <- cor_input * sqrt(n)
+  candidate_beta <- NULL
+  candidate_meta <- list()
 
   for (s_val in s) {
-    # Shrink LD: R_s = (1 - s) * R + s * I
     LD_s <- (1 - s_val) * LD + s_val * diag(p)
-    model <- lassosum_rss(bhat = bhat, LD = list(blk1 = LD_s), n = n, ...)
-    min_fbeta <- min(model$fbeta)
-    if (min_fbeta < best_fbeta) {
-      best_fbeta <- min_fbeta
-      best_beta  <- model$beta_est
-    }
+    model <- lassosum_rss(bhat = solver_input, LD = list(blk1 = LD_s), n = n, ...)
+    candidate_beta <- cbind(candidate_beta, model$beta)
+    candidate_meta[[length(candidate_meta) + 1L]] <- data.frame(
+      s = rep(s_val, length(model$lambda)),
+      lambda = model$lambda,
+      fbeta = model$fbeta,
+      stringsAsFactors = FALSE
+    )
+  }
+  candidate_meta <- do.call(rbind, candidate_meta)
+
+  mode <- .lassosum_resolve_selection_mode(selection, genotype_source, genotype_type)
+  variant_info_prepped <- .lassosum_prepare_variant_info(variant_info, expected_n = p)
+  selector_result <- NULL
+
+  if (mode == "plink1" || mode == "plink2") {
+    selector_result <- tryCatch(
+      {
+        if (is.null(variant_info_prepped)) {
+          stop("variant_info is required for genotype-backed lassosum selection.")
+        }
+        if (is.null(genotype_source) || identical(genotype_source, "")) {
+          stop("genotype_source is required for genotype-backed lassosum selection.")
+        }
+        if (mode == "plink1") {
+          .lassosum_score_candidates_with_bfile(
+            genotype_source = genotype_source,
+            region = region,
+            variant_info = variant_info_prepped,
+            candidate_beta = candidate_beta,
+            cor_input = cor_input
+          )
+        } else {
+          .lassosum_score_candidates_with_sketch(
+            genotype_source = genotype_source,
+            region = region,
+            variant_info = variant_info_prepped,
+            candidate_beta = candidate_beta,
+            cor_input = cor_input
+          )
+        }
+      },
+      error = function(e) {
+        warning(
+          "lassosum_rss_weights could not use source-aware pseudovalidation (",
+          conditionMessage(e),
+          "); falling back to min(fbeta), which is not old-OTTERS-compatible."
+        )
+        NULL
+      }
+    )
   }
 
-  return(best_beta)
+  if (is.null(selector_result)) {
+    if (mode == "min_fbeta" && selection == "auto") {
+      warning(
+        "lassosum_rss_weights has no genotype-backed source for pseudovalidation; ",
+        "falling back to min(fbeta), which is not old-OTTERS-compatible."
+      )
+    }
+    selector_result <- .lassosum_select_min_fbeta(candidate_beta, candidate_meta)
+  }
+
+  best_beta <- as.numeric(selector_result$beta)
+  attr(best_beta, "lassosum_selection") <- c(
+    mode = selector_result$mode,
+    index = selector_result$index,
+    s = candidate_meta$s[selector_result$index],
+    lambda = candidate_meta$lambda[selector_result$index]
+  )
+  best_beta
 }
 
 #' Compute Weights Using ncvreg with SCAD or MCP Penalty

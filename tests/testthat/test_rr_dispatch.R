@@ -75,15 +75,123 @@ test_that("lassosum_rss_weights dispatches to lassosum_rss once per s value", {
     lassosum_rss = function(bhat, LD, n, ...) {
       call_log$calls <- c(call_log$calls,
                           list(list(bhat = bhat, LD = LD, n = n)))
-      list(beta_est = rep(0.05, length(bhat)), fbeta = c(1.0, 0.5))
+      list(
+        beta = cbind(rep(0, length(bhat)), rep(0.05, length(bhat))),
+        lambda = c(0.05, 0.01),
+        fbeta = c(1.0, 0.5)
+      )
     }
   )
-  lassosum_rss_weights(stat = stat, LD = R, s = c(0.2, 0.9))
+  lassosum_rss_weights(stat = stat, LD = R, s = c(0.2, 0.9), selection = "min_fbeta")
   expect_equal(length(call_log$calls), 2L)
   expect_equal(call_log$calls[[1]]$n, 100)
   expect_equal(length(call_log$calls[[1]]$bhat), p)
   # LD should differ between calls because s is different
   expect_false(identical(call_log$calls[[1]]$LD, call_log$calls[[2]]$LD))
+})
+
+test_that("lassosum_rss_weights auto mode dispatches to PLINK1 pseudovalidation", {
+  p <- 4
+  stat <- list(b = c(0.1, -0.2, 0.05, 0.03), n = rep(100, p))
+  R <- diag(p)
+  variant_info <- data.frame(
+    chrom = 1,
+    pos = 1:p,
+    A1 = c("A", "C", "G", "T"),
+    A2 = c("G", "T", "A", "C"),
+    stringsAsFactors = FALSE
+  )
+
+  local_mocked_bindings(
+    has_plink1_files = function(prefix) TRUE,
+    has_plink2_files = function(prefix) FALSE,
+    lassosum_rss = function(bhat, LD, n, ...) {
+      list(
+        beta = matrix(seq_len(length(bhat) * 2), nrow = length(bhat)),
+        lambda = c(0.05, 0.01),
+        fbeta = c(2, 1)
+      )
+    },
+    .lassosum_score_candidates_with_bfile = function(...) {
+      list(beta = rep(0.7, p), index = 2L, mode = "plink1_pseudovalidation")
+    }
+  )
+
+  result <- lassosum_rss_weights(
+    stat = stat,
+    LD = R,
+    s = 0.5,
+    selection = "auto",
+    genotype_source = "/fake/plink1",
+    variant_info = variant_info
+  )
+
+  expect_equal(c(result), rep(0.7, p))
+  expect_equal(unname(attr(result, "lassosum_selection")["mode"]), "plink1_pseudovalidation")
+})
+
+test_that("lassosum_rss_weights auto mode dispatches to PLINK2 sketch pseudovalidation", {
+  p <- 4
+  stat <- list(b = c(0.1, -0.2, 0.05, 0.03), n = rep(100, p))
+  R <- diag(p)
+  variant_info <- data.frame(
+    chrom = 1,
+    pos = 1:p,
+    A1 = c("A", "C", "G", "T"),
+    A2 = c("G", "T", "A", "C"),
+    stringsAsFactors = FALSE
+  )
+
+  local_mocked_bindings(
+    has_plink1_files = function(prefix) FALSE,
+    has_plink2_files = function(prefix) TRUE,
+    lassosum_rss = function(bhat, LD, n, ...) {
+      list(
+        beta = matrix(seq_len(length(bhat) * 2), nrow = length(bhat)),
+        lambda = c(0.05, 0.01),
+        fbeta = c(2, 1)
+      )
+    },
+    .lassosum_score_candidates_with_sketch = function(...) {
+      list(beta = rep(0.4, p), index = 1L, mode = "plink2_sketch_pseudovalidation")
+    }
+  )
+
+  result <- lassosum_rss_weights(
+    stat = stat,
+    LD = R,
+    s = 0.5,
+    selection = "auto",
+    genotype_source = "/fake/plink2",
+    variant_info = variant_info
+  )
+
+  expect_equal(c(result), rep(0.4, p))
+  expect_equal(unname(attr(result, "lassosum_selection")["mode"]), "plink2_sketch_pseudovalidation")
+})
+
+test_that("lassosum_rss_weights warns and falls back to min(fbeta) without genotype source", {
+  p <- 4
+  stat <- list(b = c(0.1, -0.2, 0.05, 0.03), n = rep(100, p))
+  R <- diag(p)
+  expected <- rep(0.2, p)
+
+  local_mocked_bindings(
+    lassosum_rss = function(bhat, LD, n, ...) {
+      list(
+        beta = cbind(rep(0, length(bhat)), expected),
+        lambda = c(0.05, 0.01),
+        fbeta = c(5, 1)
+      )
+    }
+  )
+
+  result <- expect_warning(
+    lassosum_rss_weights(stat = stat, LD = R, s = 0.5, selection = "auto"),
+    "not old-OTTERS-compatible"
+  )
+  expect_equal(c(result), expected)
+  expect_equal(unname(attr(result, "lassosum_selection")["mode"]), "min_fbeta")
 })
 
 test_that("bayes_{n,l,a,c,r}_weights each dispatch to bayes_alphabet_weights with correct method", {

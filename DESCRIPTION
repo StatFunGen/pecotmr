@@ -51,6 +51,7 @@ Suggests:
     glmnet,
     harmonicmeanp,
     knitr,
+    lassosum,
     mashr,
     mr.mashr,
     mvsusieR,
