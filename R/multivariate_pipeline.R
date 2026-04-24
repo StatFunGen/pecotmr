@@ -286,9 +286,8 @@ multivariate_analysis_pipeline <- function(
   message("Fitting mvSuSiE model on input data ...")
   res$mvsusie_fitted <- mvsusieR::mvsusie(X, Y,
     L = max_L, prior_variance = mvsusie_reweighted_mixture_prior$data_driven_prior_matrices,
-    residual_variance = resid_Y, precompute_covariances = FALSE, compute_objective = TRUE,
-    estimate_residual_variance = FALSE, estimate_prior_variance = TRUE, estimate_prior_method = "EM",
-    max_iter = mvsusie_max_iter, n_thread = 1, approximate = FALSE, verbosity = verbose, coverage = coverage[1]
+    residual_variance = resid_Y,
+    max_iter = mvsusie_max_iter, coverage = coverage[1]
   )
 
   # Process mvSuSiE results

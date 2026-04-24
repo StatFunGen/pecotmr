@@ -180,7 +180,7 @@ susie_rss_wrapper <- function(z, R = NULL, X = NULL, n = NULL,
 
   # Build argument list for susie_rss
   base_args <- list(z = z, n = n, coverage = coverage,
-                    stochastic_ld_sample = sketch_samples, ...)
+                    sketch_samples = sketch_samples, ...)
   if (!is.null(X)) base_args$X <- X else base_args$R <- R
 
   run_with_L <- function(L_val) do.call(susie_rss, c(base_args, list(L = L_val)))
@@ -354,7 +354,7 @@ susie_post_processor <- function(susie_output, data_x, data_y, X_scalar, y_scala
   if (analysis_script != "") res$analysis_script <- analysis_script
   if (!is.null(other_quantities)) res$other_quantities <- other_quantities
   if (mode == "mvsusie") {
-    res$context_names <- susie_output$condition_names
+    res$context_names <- susie_output$outcome_names
   }
   if (!is.null(data_y)) {
     # Mode-specific processing
@@ -453,14 +453,17 @@ susie_post_processor <- function(susie_output, data_x, data_y, X_scalar, y_scala
       res$susie_result_trimmed$mu2 <- susie_output$mu2[eff_idx, , drop = FALSE]
     }
     if (mode == "mvsusie") {
-      # res$susie_result_trimmed$b1 = susie_output$b1[eff_idx, , , drop = FALSE]
-      # res$susie_result_trimmed$b2 = susie_output$b2[eff_idx, , , drop = FALSE]
-      res$susie_result_trimmed$b1_rescaled <- susie_output$b1_rescaled[eff_idx, , , drop = FALSE]
-      res$susie_result_trimmed$coef <- susie_output$coef
+      res$susie_result_trimmed$coef <- mvsusieR::coef.mvsusie(susie_output)
       res$susie_result_trimmed$clfsr <- susie_output$conditional_lfsr[eff_idx, , , drop = FALSE]
-      # other lfsr can be computed:
-      # se_lfsr <- mvsusie_single_effect_lfsr(clfsr, alpha)
-      # lfsr <- mvsusie_get_lfsr(clfsr, alpha)
+      # b1_rescaled (per-effect posterior mean on the original X scale, L x J x R or L x J)
+      # is not stored: it is trivially derivable from alpha, mu, and X_column_scale_factors.
+      # To reconstruct from a fit `s`:
+      #   csd <- s$X_column_scale_factors
+      #   if (length(dim(s$mu)) == 3) {
+      #     b1_rescaled <- sweep(sweep(s$mu, c(1,2), s$alpha, "*"), 2, csd, "/")
+      #   } else {
+      #     b1_rescaled <- sweep(s$alpha * s$mu, 2, csd, "/")
+      #   }
     }
     class(res$susie_result_trimmed) <- "susie"
   }

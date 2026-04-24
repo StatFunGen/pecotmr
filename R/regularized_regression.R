@@ -324,18 +324,10 @@ mvsusie_weights <- function(mvsusie_fit = NULL, X = NULL, Y = NULL, prior_varian
       stop("Both X and Y must be provided if mvsusie_fit is NULL.")
     }
     if (is.null(prior_variance)) prior_variance <- mvsusieR::create_mixture_prior(R = ncol(Y))
-    if (is.null(residual_variance)) {
-      if (!requireNamespace("mr.mashr", quietly = TRUE)) {
-        stop("Package 'mr.mashr' is required for residual variance estimation. Install with: devtools::install_github('stephenslab/mr.mashr')")
-      }
-      residual_variance <- mr.mashr:::compute_cov_flash(Y)
-    }
 
     mvsusie_fit <- mvsusieR::mvsusie(
       X = X, Y = Y, L = L, prior_variance = prior_variance,
-      residual_variance = residual_variance, precompute_covariances = FALSE,
-      compute_objective = TRUE, estimate_residual_variance = FALSE, estimate_prior_variance = TRUE,
-      estimate_prior_method = "EM", approximate = FALSE, ...
+      residual_variance = residual_variance, ...
     )
   }
   return(mvsusieR::coef.mvsusie(mvsusie_fit)[-1, ])
