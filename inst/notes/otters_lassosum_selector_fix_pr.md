@@ -71,44 +71,43 @@ this PR.
 
 ## Validation
 
-We ran the LD-quadratic score directly against genotype-backed pseudovalidation
-on the same candidate matrix.
+We validated the LD-quadratic score against the corresponding source-matched
+sample-matrix pseudovalidation on the same candidate matrix.
 
-### PLINK1-derived LD
+### PLINK1 source: genotype matrix vs LD-quadratic
 
-The LD-quadratic score matches genotype pseudovalidation essentially exactly.
+The LD-quadratic score from PLINK1-derived LD matches PLINK1 genotype
+pseudovalidation essentially exactly.
 
 - Fixture `161`:
-  - genotype best: `soft_lambda=0.041050213`
-  - LD-quadratic PLINK1 best: `soft_lambda=0.041050213`
+  - PLINK1 genotype best: `soft_lambda=0.041050213`
+  - PLINK1 LD-quadratic best: `soft_lambda=0.041050213`
   - Pearson `0.9999999`
   - same best candidate `TRUE`
 - Fixture `206`:
-  - genotype best: `soft_lambda=0.029906976`
-  - LD-quadratic PLINK1 best: `soft_lambda=0.029906976`
+  - PLINK1 genotype best: `soft_lambda=0.029906976`
+  - PLINK1 LD-quadratic best: `soft_lambda=0.029906976`
   - Pearson `1.0000000`
   - same best candidate `TRUE`
 
 This validates the selector formula itself.
 
-### Sketch-derived LD
+### Sketch source: sample matrix vs LD-quadratic
 
-The same LD-quadratic selector applied to the current sketch-derived `R` gives:
+For the sketch source, the sample-matrix pseudovalidation and the LD-quadratic
+score are the same numeric object once both are built from the same restored
+sketch matrix and the same column standardization.
 
 - Fixture `161`:
-  - sketch-LD quadratic best: `soft_lambda=0.021788613`
-  - Pearson vs genotype pseudovalidation `0.9971044`
-  - same best candidate `FALSE`
-- Fixture `206`:
-  - sketch-LD quadratic best: `soft_lambda=0.029906976`
-  - Pearson vs genotype pseudovalidation `0.9999503`
+  - sketch sample-matrix best: `soft_lambda=0.021788613`
+  - sketch LD-quadratic best: `soft_lambda=0.021788613`
+  - Pearson `1.0`
+  - max absolute difference `< 1e-15`
   - same best candidate `TRUE`
 
-That result is consistent with the sketch sample-matrix diagnostic: the same
-winner shift appears there too. So the remaining mismatch is not between
-"sample-matrix pseudovalidation" and "quadratic LD scoring". It is between the
-current sketch representation and the PLINK1/genotype-backed standardized LD
-path.
+So the remaining mismatch is not between "sample-matrix pseudovalidation" and
+"quadratic LD scoring". It is between the current sketch representation and the
+PLINK1/genotype-backed standardized LD path.
 
 ## What This PR Changes
 
