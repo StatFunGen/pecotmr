@@ -9,7 +9,7 @@ test_that("otters_weights returns named list of weight vectors", {
   R <- diag(p)
   sumstats <- data.frame(z = z)
   result <- otters_weights(sumstats, R, n,
-    methods = list(lassosum_rss = list(selection = "min_fbeta")),
+    methods = list(lassosum_rss = list()),
     p_thresholds = c(0.05)
   )
   expect_type(result, "list")
@@ -26,7 +26,7 @@ test_that("otters_weights computes z from beta/se if z missing", {
   sumstats <- data.frame(beta = rnorm(p, sd = 0.1), se = rep(0.05, p))
   R <- diag(p)
   result <- otters_weights(sumstats, R, n,
-    methods = list(lassosum_rss = list(selection = "min_fbeta")),
+    methods = list(lassosum_rss = list()),
     p_thresholds = c(0.05)
   )
   expect_true("lassosum_rss" %in% names(result))
@@ -75,7 +75,7 @@ test_that("otters_weights with multiple methods returns all", {
   sumstats <- data.frame(z = z)
   result <- otters_weights(sumstats, R, n,
     methods = list(
-      lassosum_rss = list(selection = "min_fbeta"),
+      lassosum_rss = list(),
       prs_cs = list(n_iter = 50, n_burnin = 10, thin = 2, seed = 42)
     ),
     p_thresholds = c(0.001, 0.05)
@@ -87,23 +87,16 @@ test_that("otters_weights with multiple methods returns all", {
   }
 })
 
-test_that("otters_weights forwards variant_info only to lassosum", {
+test_that("otters_weights passes correlation-scale stat fields to lassosum", {
   p <- 5
   n <- 100
   z <- rnorm(p)
   R <- diag(p)
-  sumstats <- data.frame(
-    chrom = rep(1, p),
-    pos = seq_len(p),
-    A1 = c("A", "C", "G", "T", "A"),
-    A2 = c("G", "T", "A", "C", "G"),
-    z = z,
-    stringsAsFactors = FALSE
-  )
+  sumstats <- data.frame(z = z)
   captured <- new.env(parent = emptyenv())
   local_mocked_bindings(
-    lassosum_rss_weights = function(stat, LD, variant_info = NULL, ...) {
-      captured$lassosum_variant_info <- variant_info
+    lassosum_rss_weights = function(stat, LD, ...) {
+      captured$lassosum_stat <- stat
       captured$lassosum_dots <- list(...)
       rep(0.1, nrow(LD))
     },
@@ -116,7 +109,7 @@ test_that("otters_weights forwards variant_info only to lassosum", {
   result <- otters_weights(
     sumstats, R, n,
     methods = list(
-      lassosum_rss = list(selection = "min_fbeta"),
+      lassosum_rss = list(),
       prs_cs = list(phi = 1e-4)
     ),
     p_thresholds = NULL,
@@ -125,8 +118,9 @@ test_that("otters_weights forwards variant_info only to lassosum", {
 
   expect_equal(result$lassosum_rss, rep(0.1, p))
   expect_equal(result$prs_cs, rep(0.2, p))
-  expect_equal(captured$lassosum_variant_info, sumstats[, c("chrom", "pos", "A1", "A2")])
-  expect_null(captured$prs_cs_dots$variant_info)
+  expect_equal(captured$lassosum_stat$cor, z / sqrt(n))
+  expect_equal(captured$lassosum_stat$z, z)
+  expect_equal(captured$lassosum_stat$b, z / sqrt(n))
 })
 
 # ---- otters_association ----
@@ -201,7 +195,7 @@ test_that("otters_weights + otters_association end-to-end on simulated data", {
   # Stage I: train weights
   sumstats <- data.frame(z = eqtl_z)
   weights <- otters_weights(sumstats, R, n_eqtl,
-    methods = list(lassosum_rss = list(selection = "min_fbeta")),
+    methods = list(lassosum_rss = list()),
     p_thresholds = c(0.05)
   )
   expect_true(length(weights) >= 2)

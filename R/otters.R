@@ -50,7 +50,7 @@
 #' R <- diag(p)
 #' sumstats <- data.frame(z = z)
 #' weights <- otters_weights(sumstats, R, n,
-#'   methods = list(lassosum_rss = list(selection = "min_fbeta")),
+#'   methods = list(lassosum_rss = list()),
 #'   p_thresholds = c(0.05))
 #'
 #' @export
@@ -87,24 +87,6 @@ otters_weights <- function(sumstats, LD, n,
 
   p <- nrow(sumstats)
   z <- sumstats$z
-  chrom_col <- intersect(c("chrom", "CHROM"), names(sumstats))
-  pos_col <- intersect(c("pos", "POS"), names(sumstats))
-  a1_col <- intersect(c("A1", "a1"), names(sumstats))
-  a2_col <- intersect(c("A2", "a2"), names(sumstats))
-  variant_info <- if (length(chrom_col) &&
-                      length(pos_col) &&
-                      length(a1_col) &&
-                      length(a2_col)) {
-    data.frame(
-      chrom = sumstats[[chrom_col[[1]]]],
-      pos = sumstats[[pos_col[[1]]]],
-      A1 = sumstats[[a1_col[[1]]]],
-      A2 = sumstats[[a2_col[[1]]]],
-      stringsAsFactors = FALSE
-    )
-  } else {
-    NULL
-  }
 
   # Build stat object for _weights() convention
   b <- z / sqrt(n)
@@ -132,13 +114,7 @@ otters_weights <- function(sumstats, LD, n,
       next
     }
     tryCatch({
-      method_args <- methods[[method_name]]
-      if (identical(method_name, "lassosum_rss") &&
-          !is.null(variant_info) &&
-          is.null(method_args$variant_info)) {
-        method_args$variant_info <- variant_info
-      }
-      w <- do.call(fn_name, c(list(stat = stat, LD = LD), method_args))
+      w <- do.call(fn_name, c(list(stat = stat, LD = LD), methods[[method_name]]))
       results[[method_name]] <- as.numeric(w)
     }, error = function(e) {
       warning(sprintf("Method '%s' failed: %s", method_name, e$message))

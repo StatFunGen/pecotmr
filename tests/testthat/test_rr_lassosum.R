@@ -86,11 +86,11 @@ test_that("lassosum_rss_weights calls lassosum_rss and returns beta_est", {
       )
     }
   )
-  result <- lassosum_rss_weights(stat = stat, LD = R, s = 0.5, selection = "min_fbeta")
+  result <- lassosum_rss_weights(stat = stat, LD = R, s = 0.5)
   expect_equal(length(result), p)
   expect_true(is.numeric(result))
   expect_equal(c(result), expected)
-  expect_equal(unname(attr(result, "lassosum_selection")["mode"]), "min_fbeta")
+  expect_equal(unname(attr(result, "lassosum_selection")["mode"]), "ld_quadratic")
 })
 
 test_that("lassosum_rss_weights clamps correlation input before scaling", {

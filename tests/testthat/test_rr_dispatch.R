@@ -90,106 +90,66 @@ test_that("lassosum_rss_weights dispatches to lassosum_rss once per s value", {
   expect_false(identical(call_log$calls[[1]]$LD, call_log$calls[[2]]$LD))
 })
 
-test_that("lassosum_rss_weights auto mode dispatches to PLINK1 pseudovalidation", {
+test_that("lassosum_rss_weights defaults to LD-quadratic selection", {
   p <- 4
-  stat <- list(b = c(0.1, -0.2, 0.05, 0.03), n = rep(100, p))
+  stat <- list(cor = c(0.4, 0.1, 0, 0), n = rep(100, p))
   R <- diag(p)
-  variant_info <- data.frame(
-    chrom = 1,
-    pos = 1:p,
-    A1 = c("A", "C", "G", "T"),
-    A2 = c("G", "T", "A", "C"),
-    stringsAsFactors = FALSE
-  )
-
-  local_mocked_bindings(
-    has_plink1_files = function(prefix) TRUE,
-    has_plink2_files = function(prefix) FALSE,
-    lassosum_rss = function(bhat, LD, n, ...) {
-      list(
-        beta = matrix(seq_len(length(bhat) * 2), nrow = length(bhat)),
-        lambda = c(0.05, 0.01),
-        fbeta = c(2, 1)
-      )
-    },
-    .lassosum_score_candidates_with_bfile = function(...) {
-      list(beta = rep(0.7, p), index = 2L, mode = "plink1_pseudovalidation")
-    }
-  )
-
-  result <- lassosum_rss_weights(
-    stat = stat,
-    LD = R,
-    s = 0.5,
-    selection = "auto",
-    genotype_source = "/fake/plink1",
-    variant_info = variant_info
-  )
-
-  expect_equal(c(result), rep(0.7, p))
-  expect_equal(unname(attr(result, "lassosum_selection")["mode"]), "plink1_pseudovalidation")
-})
-
-test_that("lassosum_rss_weights auto mode dispatches to PLINK2 sketch pseudovalidation", {
-  p <- 4
-  stat <- list(b = c(0.1, -0.2, 0.05, 0.03), n = rep(100, p))
-  R <- diag(p)
-  variant_info <- data.frame(
-    chrom = 1,
-    pos = 1:p,
-    A1 = c("A", "C", "G", "T"),
-    A2 = c("G", "T", "A", "C"),
-    stringsAsFactors = FALSE
-  )
-
-  local_mocked_bindings(
-    has_plink1_files = function(prefix) FALSE,
-    has_plink2_files = function(prefix) TRUE,
-    lassosum_rss = function(bhat, LD, n, ...) {
-      list(
-        beta = matrix(seq_len(length(bhat) * 2), nrow = length(bhat)),
-        lambda = c(0.05, 0.01),
-        fbeta = c(2, 1)
-      )
-    },
-    .lassosum_score_candidates_with_sketch = function(...) {
-      list(beta = rep(0.4, p), index = 1L, mode = "plink2_sketch_pseudovalidation")
-    }
-  )
-
-  result <- lassosum_rss_weights(
-    stat = stat,
-    LD = R,
-    s = 0.5,
-    selection = "auto",
-    genotype_source = "/fake/plink2",
-    variant_info = variant_info
-  )
-
-  expect_equal(c(result), rep(0.4, p))
-  expect_equal(unname(attr(result, "lassosum_selection")["mode"]), "plink2_sketch_pseudovalidation")
-})
-
-test_that("lassosum_rss_weights warns and falls back to min(fbeta) without genotype source", {
-  p <- 4
-  stat <- list(b = c(0.1, -0.2, 0.05, 0.03), n = rep(100, p))
-  R <- diag(p)
-  expected <- rep(0.2, p)
+  R[1, 2] <- 0.5
+  R[2, 1] <- 0.5
+  expected <- c(1, 0, 0, 0)
 
   local_mocked_bindings(
     lassosum_rss = function(bhat, LD, n, ...) {
       list(
-        beta = cbind(rep(0, length(bhat)), expected),
+        beta = cbind(expected, c(1, 1, 0, 0)),
         lambda = c(0.05, 0.01),
         fbeta = c(5, 1)
       )
     }
   )
 
-  result <- expect_warning(
-    lassosum_rss_weights(stat = stat, LD = R, s = 0.5, selection = "auto"),
-    "not old-OTTERS-compatible"
+  result <- lassosum_rss_weights(stat = stat, LD = R, s = 0.5)
+  expect_equal(c(result), expected)
+  expect_equal(unname(attr(result, "lassosum_selection")["mode"]), "ld_quadratic")
+})
+
+test_that("lassosum_rss_weights uses first-max tie behavior for LD-quadratic selection", {
+  p <- 3
+  stat <- list(cor = c(0.3, 0.3, 0), n = rep(100, p))
+  R <- diag(p)
+
+  local_mocked_bindings(
+    lassosum_rss = function(bhat, LD, n, ...) {
+      list(
+        beta = cbind(c(1, 0, 0), c(0, 1, 0)),
+        lambda = c(0.05, 0.01),
+        fbeta = c(2, 1)
+      )
+    }
   )
+
+  result <- lassosum_rss_weights(stat = stat, LD = R, s = 0.5)
+  expect_equal(c(result), c(1, 0, 0))
+  expect_equal(unname(attr(result, "lassosum_selection")["mode"]), "ld_quadratic")
+})
+
+test_that("lassosum_rss_weights still supports explicit min(fbeta)", {
+  p <- 4
+  stat <- list(cor = c(0.4, 0.1, 0, 0), n = rep(100, p))
+  R <- diag(p)
+  expected <- c(1, 1, 0, 0)
+
+  local_mocked_bindings(
+    lassosum_rss = function(bhat, LD, n, ...) {
+      list(
+        beta = cbind(c(1, 0, 0, 0), expected),
+        lambda = c(0.05, 0.01),
+        fbeta = c(5, 1)
+      )
+    }
+  )
+
+  result <- lassosum_rss_weights(stat = stat, LD = R, s = 0.5, selection = "min_fbeta")
   expect_equal(c(result), expected)
   expect_equal(unname(attr(result, "lassosum_selection")["mode"]), "min_fbeta")
 })
