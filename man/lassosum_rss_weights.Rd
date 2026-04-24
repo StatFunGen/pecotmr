@@ -4,7 +4,13 @@
 \alias{lassosum_rss_weights}
 \title{Extract weights from lassosum_rss with shrinkage grid search}
 \usage{
-lassosum_rss_weights(stat, LD, s = c(0.2, 0.5, 0.9, 1), ...)
+lassosum_rss_weights(
+  stat,
+  LD,
+  s = c(0.2, 0.5, 0.9, 1),
+  selection = c("ld_quadratic", "min_fbeta"),
+  ...
+)
 }
 \arguments{
 \item{stat}{A list with \code{$b} (effect sizes) and \code{$n} (per-variant sample sizes).}
@@ -13,6 +19,10 @@ lassosum_rss_weights(stat, LD, s = c(0.2, 0.5, 0.9, 1), ...)
 
 \item{s}{Numeric vector of shrinkage parameters to search over. Default:
 \code{c(0.2, 0.5, 0.9, 1.0)} following Mak et al (2017) and OTTERS.}
+
+\item{selection}{Selection strategy. Default \code{"ld_quadratic"} uses
+\eqn{c^T \beta / \sqrt{\beta^T R \beta}} on the supplied LD matrix.
+\code{"min_fbeta"} is retained as an explicit alternative for debugging.}
 
 \item{...}{Additional arguments passed to \code{lassosum_rss()}.}
 }
@@ -23,14 +33,18 @@ A numeric vector of the posterior SNP coefficients at the best (s, lambda).
 Searches over a grid of shrinkage parameters \code{s} (default:
 \code{c(0.2, 0.5, 0.9, 1.0)}, matching the original lassosum and OTTERS).
 For each \code{s}, the LD matrix is shrunk as \code{(1-s)*R + s*I}, then
-\code{lassosum_rss()} is called across the lambda path. The best
-\code{(s, lambda)} combination is selected by the lowest objective value.
+\code{lassosum_rss()} is called across the lambda path. Candidate selection
+defaults to the LD-only quadratic pseudovalidation score
+\deqn{\frac{c^T \beta}{\sqrt{\beta^T R \beta}}}
+evaluated on the supplied LD matrix \code{R}. This uses the same candidate
+beta path as \code{lassosum_rss()}, but scores each candidate directly from
+summary-statistics correlation \code{c} and LD, without requiring genotype.
 }
 \details{
-Model selection uses \code{min(fbeta)} (penalized objective) rather than
-the pseudovalidation approach from the original lassosum R package. Empirical
-comparison over 20 random trials (n=300, p=50, 3 causal) shows no systematic
-advantage for either method: pseudovalidation won 4/20, min(fbeta) won 6/20,
-tied 10/20. The shrinkage grid over \code{s} provides the primary regularization;
-lambda selection within each \code{s} has minimal impact.
+The original lassosum pseudovalidation can be written as an LD quadratic
+score after centering and standardizing the reference matrix columns by the
+same per-variant scale:
+\deqn{\mathrm{score}(\beta) = \frac{c^T \beta}{\sqrt{\beta^T R \beta}}.}
+This implementation therefore uses the supplied LD matrix directly for
+selection. \code{min(fbeta)} is retained only as an explicit debug option.
 }
