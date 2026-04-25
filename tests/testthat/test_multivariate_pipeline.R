@@ -470,3 +470,65 @@ test_that("initialize_mvsusie_prior runs with provided data_driven_prior_matrice
   expect_true("reweighted_mixture_prior_cv" %in% names(result))
   expect_true("mvsusie_fitted" %in% names(result))
 })
+
+test_that("pipeline propagates outcome_names from mvsusie through susie_post_processor", {
+  skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
+          "mvsusieR not installed")
+  skip_if(!requireNamespace("susieR", quietly = TRUE),
+          "susieR not installed")
+  d <- make_mv_data()
+  r <- ncol(d$Y)
+  p <- ncol(d$X)
+  L <- 5
+  vnames <- colnames(d$X)
+  cnames <- colnames(d$Y)
+  fake_coef <- matrix(rnorm((p + 1) * r), nrow = p + 1, ncol = r)
+
+  prior_U <- list(
+    udd_1 = matrix(0.5, r, r) + 0.5 * diag(r),
+    udd_2 = diag(r)
+  )
+  for (k in seq_along(prior_U)) {
+    rownames(prior_U[[k]]) <- colnames(prior_U[[k]]) <- cnames
+  }
+  prior_mats <- list(U = prior_U, w = c(udd_1 = 0.5, udd_2 = 0.5))
+  fake_w0 <- c("udd_1_a" = 0.4, "udd_2_a" = 0.4, "null" = 0.2)
+
+  local_mocked_bindings(
+    mrmash_wrapper = function(X, Y, ...) {
+      list(V = diag(ncol(Y)), w0 = fake_w0,
+           w1 = matrix(0.1, nrow = ncol(X), ncol = 1))
+    },
+  )
+  # Mock mvsusie to return outcome_names (the new field name)
+  local_mocked_bindings(
+    mvsusie = function(...) {
+      list(
+        pip = setNames(rep(0.1, p), vnames),
+        alpha = matrix(1 / p, nrow = L, ncol = p),
+        lbf_variable = matrix(0, nrow = L, ncol = p),
+        V = rep(1, L),
+        sets = list(cs = NULL, requested_coverage = 0.95),
+        niter = 10,
+        outcome_names = cnames,
+        conditional_lfsr = array(0.5, dim = c(L, p, r))
+      )
+    },
+    create_mixture_prior = function(...) list(matrices = prior_U, weights = c(0.5, 0.5)),
+    coef.mvsusie = function(...) fake_coef,
+    .package = "mvsusieR"
+  )
+
+  result <- multivariate_analysis_pipeline(
+    X = d$X, Y = d$Y, maf = d$maf,
+    pip_cutoff_to_skip = 0,
+    data_driven_prior_matrices = prior_mats,
+    twas_weights = FALSE
+  )
+  expect_true(is.list(result))
+  # outcome_names should propagate as context_names
+  expect_equal(result$context_names, cnames)
+  # coef and clfsr should be present in susie_result_trimmed
+  expect_equal(result$susie_result_trimmed$coef, fake_coef)
+  expect_equal(dim(result$susie_result_trimmed$clfsr), c(L, p, r))
+})

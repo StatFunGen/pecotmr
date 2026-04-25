@@ -603,6 +603,56 @@ test_that("susie_post_processor uses 1:max_L for eff_idx when V is NULL (fSuSiE)
 })
 
 # =============================================================================
+# susie_post_processor: mvsusie mode (outcome_names, coef, clfsr)
+# =============================================================================
+
+test_that("susie_post_processor stores outcome_names, coef, and clfsr in mvsusie mode", {
+  skip_if_not_installed("susieR")
+  skip_if_not_installed("mvsusieR")
+  p <- 5
+  L <- 3
+  R <- 2
+  vnames <- paste0("chr1:", 1:p, ":A:G")
+  cnames <- paste0("cond_", 1:R)
+  fake_coef <- matrix(rnorm((p + 1) * R), nrow = p + 1, ncol = R)
+
+  fake_output <- list(
+    pip = setNames(rep(0.01, p), vnames),
+    alpha = matrix(1 / p, nrow = L, ncol = p),
+    lbf_variable = matrix(0, nrow = L, ncol = p),
+    sets = list(cs = NULL, requested_coverage = 0.95),
+    niter = 10,
+    V = rep(1, L),
+    outcome_names = cnames,
+    conditional_lfsr = array(0.5, dim = c(L, p, R))
+  )
+
+  n <- 20
+  X <- matrix(rnorm(n * p), n, p)
+  colnames(X) <- vnames
+
+  local_mocked_bindings(
+    coef.mvsusie = function(...) fake_coef,
+    .package = "mvsusieR"
+  )
+
+  result <- susie_post_processor(
+    fake_output,
+    data_x = X,
+    data_y = NULL,
+    X_scalar = 1, y_scalar = 1,
+    mode = "mvsusie"
+  )
+
+  # outcome_names should be stored as context_names
+  expect_equal(result$context_names, cnames)
+  # coef should come from mvsusieR::coef.mvsusie
+  expect_equal(result$susie_result_trimmed$coef, fake_coef)
+  # conditional_lfsr should be trimmed to eff_idx
+  expect_equal(dim(result$susie_result_trimmed$clfsr), c(L, p, R))
+})
+
+# =============================================================================
 # susie_wrapper: dynamic-L break when cs is NULL (Tier 2)
 # =============================================================================
 
