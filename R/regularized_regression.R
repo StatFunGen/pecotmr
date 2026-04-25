@@ -148,11 +148,17 @@ prs_cs_weights <- function(stat, LD, ...) {
 #' @param iter Number of iterations for MCMC. Default is 1000.
 #' @param burn Number of burn-in iterations for MCMC. Default is 200.
 #' @param thin Thinning interval for MCMC. Default is 5.
+#' @param init Initialization mode for cluster assignments. Use `"legacy_random"`
+#'   to restore the original SDPR-style random initialization, or `"null"` to
+#'   start all SNPs in the null cluster. Default is `"legacy_random"`.
 #' @param n_threads Number of threads to use. Default is 1.
 #' @param opt_llk Which likelihood to evaluate. 1 for equation 6 (slightly shrink the correlation of SNPs)
 #'                and 2 for equation 5 (SNPs genotyped on different arrays in a separate cohort).
 #'                Default is 1.
 #' @param verbose Whether to print verbose output. Default is true.
+#' @param seed Optional unsigned integer seed for the C++ SDPR sampler. When
+#'   \code{NULL}, the sampler uses \code{std::random_device} and is not
+#'   reproducible.
 #'
 #' @return A list containing the estimated effect sizes (beta) and heritability (h2).
 #' @examples
@@ -203,8 +209,10 @@ prs_cs_weights <- function(stat, LD, ...) {
 #'
 #' @export
 sdpr <- function(bhat, LD, n, per_variant_sample_size = NULL, array = NULL, a = 0.1, c = 1.0, M = 1000,
-                 a0k = 0.5, b0k = 0.5, iter = 1000, burn = 200, thin = 5, n_threads = 1,
+                 a0k = 0.5, b0k = 0.5, iter = 1000, burn = 200, thin = 5, init = c("legacy_random", "null"), n_threads = 1,
                  opt_llk = 1, verbose = TRUE, seed = NULL) {
+  init <- match.arg(init)
+
   # Check if the sum of the rows in LD list is the same as length of bhat
   if (sum(sapply(LD, nrow)) != length(bhat)) {
     stop("The sum of the rows in LD list must be the same as the length of bhat.")
@@ -236,7 +244,8 @@ sdpr <- function(bhat, LD, n, per_variant_sample_size = NULL, array = NULL, a = 
   result <- sdpr_rcpp(
     bhat, LD, as.integer(n), per_variant_sample_size, array, a, c, as.integer(M),
     a0k, b0k, as.integer(iter), as.integer(burn), as.integer(thin),
-    as.integer(n_threads), as.integer(opt_llk), verbose, seed
+    as.integer(n_threads), as.integer(opt_llk), verbose, seed,
+    identical(init, "legacy_random")
   )
 
   return(result)

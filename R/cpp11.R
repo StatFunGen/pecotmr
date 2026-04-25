@@ -16,6 +16,6 @@ qtl_enrichment_rcpp <- function(r_gwas_pip, r_qtl_susie_fit, pi_gwas, pi_qtl, Im
   .Call(`_pecotmr_qtl_enrichment_rcpp`, r_gwas_pip, r_qtl_susie_fit, pi_gwas, pi_qtl, ImpN, shrinkage_lambda, double_shrinkage, bessel_correction, num_threads)
 }
 
-sdpr_rcpp <- function(bhat_r, LD, n, per_variant_sample_size, array, a, c, M, a0k, b0k, iter, burn, thin, n_threads, opt_llk, verbose, seed) {
-  .Call(`_pecotmr_sdpr_rcpp`, bhat_r, LD, n, per_variant_sample_size, array, a, c, M, a0k, b0k, iter, burn, thin, n_threads, opt_llk, verbose, seed)
+sdpr_rcpp <- function(bhat_r, LD, n, per_variant_sample_size, array, a, c, M, a0k, b0k, iter, burn, thin, n_threads, opt_llk, verbose, seed, legacy_random_init) {
+  .Call(`_pecotmr_sdpr_rcpp`, bhat_r, LD, n, per_variant_sample_size, array, a, c, M, a0k, b0k, iter, burn, thin, n_threads, opt_llk, verbose, seed, legacy_random_init)
 }

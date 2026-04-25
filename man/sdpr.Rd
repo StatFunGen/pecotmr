@@ -18,6 +18,7 @@ sdpr(
   iter = 1000,
   burn = 200,
   thin = 5,
+  init = c("legacy_random", "null"),
   n_threads = 1,
   opt_llk = 1,
   verbose = TRUE,
@@ -53,6 +54,10 @@ initialized to a vector of 1's with length equal to `bhat`.}
 
 \item{thin}{Thinning interval for MCMC. Default is 5.}
 
+\item{init}{Initialization mode for cluster assignments. Use `"legacy_random"`
+to restore the original SDPR-style random initialization, or `"null"` to
+start all SNPs in the null cluster. Default is `"legacy_random"`.}
+
 \item{n_threads}{Number of threads to use. Default is 1.}
 
 \item{opt_llk}{Which likelihood to evaluate. 1 for equation 6 (slightly shrink the correlation of SNPs)
@@ -60,6 +65,10 @@ and 2 for equation 5 (SNPs genotyped on different arrays in a separate cohort).
 Default is 1.}
 
 \item{verbose}{Whether to print verbose output. Default is true.}
+
+\item{seed}{Optional unsigned integer seed for the C++ SDPR sampler. When
+\code{NULL}, the sampler uses \code{std::random_device} and is not
+reproducible.}
 }
 \value{
 A list containing the estimated effect sizes (beta) and heritability (h2).

@@ -26,7 +26,8 @@ cpp11::writable::list sdpr_rcpp(
 	int n_threads = 1,
 	int opt_llk = 1,
 	bool verbose = true,
-	sexp seed = R_NilValue
+	sexp seed = R_NilValue,
+	bool legacy_random_init = true
 	) {
 	// Convert inputs to C++ types
 	std::vector<double> bhat = cpp11::as_cpp<std::vector<double>>(bhat_r);
@@ -64,7 +65,7 @@ cpp11::writable::list sdpr_rcpp(
 
 	// Call the mcmc function
 	std::unordered_map<std::string, vec> results = mcmc(
-		data, n, a, c, M, a0k, b0k, iter, burn, thin, n_threads, opt_llk, verbose, seed_val
+		data, n, a, c, M, a0k, b0k, iter, burn, thin, n_threads, opt_llk, verbose, seed_val, legacy_random_init
 		);
 
 	// Convert results to list

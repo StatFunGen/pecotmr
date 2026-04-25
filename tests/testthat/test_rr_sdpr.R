@@ -38,6 +38,13 @@ test_that("sdpr errors on invalid array values", {
   )
 })
 
+test_that("sdpr errors on invalid init mode", {
+  expect_error(
+    sdpr(bhat = rnorm(5), LD = list(blk1 = diag(5)), n = 100, init = "bogus"),
+    "should be one of"
+  )
+})
+
 test_that("sdpr runs successfully", {
   set.seed(42)
   p <- 10
@@ -71,6 +78,39 @@ test_that("sdpr with valid array parameter", {
   result <- sdpr(bhat = bhat, LD = list(blk1 = R), n = 100,
                  array = rep(1, p),
                  iter = 50, burn = 10, thin = 2, verbose = FALSE)
+  expect_equal(length(result$beta_est), p)
+  expect_true(all(is.finite(result$beta_est)))
+})
+
+test_that("sdpr fixed-seed runs are reproducible with n_threads = 1 and legacy_random init", {
+  set.seed(42)
+  p <- 10
+  bhat <- rnorm(p, sd = 0.1)
+  R <- diag(p)
+  out1 <- sdpr(
+    bhat = bhat, LD = list(blk1 = R), n = 100,
+    iter = 50, burn = 10, thin = 2, verbose = FALSE,
+    seed = 42L, init = "legacy_random", n_threads = 1
+  )
+  out2 <- sdpr(
+    bhat = bhat, LD = list(blk1 = R), n = 100,
+    iter = 50, burn = 10, thin = 2, verbose = FALSE,
+    seed = 42L, init = "legacy_random", n_threads = 1
+  )
+  expect_equal(out1$beta_est, out2$beta_est)
+  expect_equal(out1$h2, out2$h2)
+})
+
+test_that("sdpr supports null initialization explicitly", {
+  set.seed(42)
+  p <- 10
+  bhat <- rnorm(p, sd = 0.1)
+  R <- diag(p)
+  result <- sdpr(
+    bhat = bhat, LD = list(blk1 = R), n = 100,
+    iter = 50, burn = 10, thin = 2, verbose = FALSE,
+    seed = 42L, init = "null"
+  )
   expect_equal(length(result$beta_est), p)
   expect_true(all(is.finite(result$beta_est)))
 })

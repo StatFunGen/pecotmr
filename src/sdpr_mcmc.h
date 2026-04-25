@@ -126,7 +126,8 @@ std::vector<double> cluster_var;
 std::vector<unsigned> suff_stats;
 std::vector<double> sumsq;
 MCMC_state(size_t num_snp, size_t max_cluster, \
-           double a0, double b0, double sz, unsigned int seed) {
+           double a0, double b0, double sz, unsigned int seed,
+           bool legacy_random_init = false) {
 	a0k = a0; b0k = b0; N = sz;
 	// Changed May 20 2021
 	// Now N (sz) is absorbed into A, B; so set to 1.
@@ -148,14 +149,16 @@ MCMC_state(size_t num_snp, size_t max_cluster, \
 	suff_stats.assign(max_cluster, 0);
 	sumsq.assign(max_cluster, 0.0);
 	V.assign(max_cluster, 0.0);
-	// Initialize all SNPs to the null cluster (k=0). The original SDPR
-	// used random initialization (uniform over 0..M-1), but this causes
-	// the first sample_beta() call to allocate an enormous dense matrix
-	// (nearly all SNPs are "causal"), crashing with "Mat::init() too large".
-	// Starting from null is standard MCMC practice and lets the sampler
-	// discover causal assignments organically.
-	cls_assgn.assign(num_snp, 0);
 	r.seed(seed);
+	if (legacy_random_init) {
+		std::uniform_int_distribution<size_t> init_dist(0, M - 1);
+		cls_assgn.resize(num_snp);
+		for (size_t i = 0; i < num_snp; i++) {
+			cls_assgn[i] = static_cast<int>(init_dist(r));
+		}
+	} else {
+		cls_assgn.assign(num_snp, 0);
+	}
 }
 
 void sample_sigma2();
@@ -255,5 +258,6 @@ std::unordered_map<std::string, arma::vec> mcmc(
 	unsigned         n_threads,
 	int              opt_llk,
 	bool             verbose,
-	unsigned int     seed
+	unsigned int     seed,
+	bool             legacy_random_init = false
 	);

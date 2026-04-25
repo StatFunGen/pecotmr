@@ -59,6 +59,22 @@ test_that("sdpr_weights dispatches to sdpr with correct arguments", {
   expect_equal(result, seq_len(p) * 0.02)
 })
 
+test_that("sdpr_weights forwards init mode", {
+  p <- 5
+  bhat <- rnorm(p, sd = 0.1)
+  R <- diag(p)
+  stat <- list(b = bhat, n = rep(321, p))
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    sdpr = function(bhat, LD, n, ...) {
+      captured$dots <- list(...)
+      list(beta_est = rep(0, length(bhat)))
+    }
+  )
+  sdpr_weights(stat = stat, LD = R, init = "null", iter = 10, burn = 2)
+  expect_equal(captured$dots$init, "null")
+})
+
 test_that("lassosum_rss_weights dispatches to lassosum_rss once per s value", {
   set.seed(42)
   p <- 10

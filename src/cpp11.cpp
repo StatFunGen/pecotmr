@@ -34,10 +34,10 @@ extern "C" SEXP _pecotmr_qtl_enrichment_rcpp(SEXP r_gwas_pip, SEXP r_qtl_susie_f
   END_CPP11
 }
 // sdpr.cpp
-cpp11::writable::list sdpr_rcpp(const doubles& bhat_r, const list& LD, int n, sexp per_variant_sample_size, sexp array, double a, double c, int M, double a0k, double b0k, int iter, int burn, int thin, int n_threads, int opt_llk, bool verbose, sexp seed);
-extern "C" SEXP _pecotmr_sdpr_rcpp(SEXP bhat_r, SEXP LD, SEXP n, SEXP per_variant_sample_size, SEXP array, SEXP a, SEXP c, SEXP M, SEXP a0k, SEXP b0k, SEXP iter, SEXP burn, SEXP thin, SEXP n_threads, SEXP opt_llk, SEXP verbose, SEXP seed) {
+cpp11::writable::list sdpr_rcpp(const doubles& bhat_r, const list& LD, int n, sexp per_variant_sample_size, sexp array, double a, double c, int M, double a0k, double b0k, int iter, int burn, int thin, int n_threads, int opt_llk, bool verbose, sexp seed, bool legacy_random_init);
+extern "C" SEXP _pecotmr_sdpr_rcpp(SEXP bhat_r, SEXP LD, SEXP n, SEXP per_variant_sample_size, SEXP array, SEXP a, SEXP c, SEXP M, SEXP a0k, SEXP b0k, SEXP iter, SEXP burn, SEXP thin, SEXP n_threads, SEXP opt_llk, SEXP verbose, SEXP seed, SEXP legacy_random_init) {
   BEGIN_CPP11
-    return cpp11::as_sexp(sdpr_rcpp(cpp11::as_cpp<cpp11::decay_t<const doubles&>>(bhat_r), cpp11::as_cpp<cpp11::decay_t<const list&>>(LD), cpp11::as_cpp<cpp11::decay_t<int>>(n), cpp11::as_cpp<cpp11::decay_t<sexp>>(per_variant_sample_size), cpp11::as_cpp<cpp11::decay_t<sexp>>(array), cpp11::as_cpp<cpp11::decay_t<double>>(a), cpp11::as_cpp<cpp11::decay_t<double>>(c), cpp11::as_cpp<cpp11::decay_t<int>>(M), cpp11::as_cpp<cpp11::decay_t<double>>(a0k), cpp11::as_cpp<cpp11::decay_t<double>>(b0k), cpp11::as_cpp<cpp11::decay_t<int>>(iter), cpp11::as_cpp<cpp11::decay_t<int>>(burn), cpp11::as_cpp<cpp11::decay_t<int>>(thin), cpp11::as_cpp<cpp11::decay_t<int>>(n_threads), cpp11::as_cpp<cpp11::decay_t<int>>(opt_llk), cpp11::as_cpp<cpp11::decay_t<bool>>(verbose), cpp11::as_cpp<cpp11::decay_t<sexp>>(seed)));
+    return cpp11::as_sexp(sdpr_rcpp(cpp11::as_cpp<cpp11::decay_t<const doubles&>>(bhat_r), cpp11::as_cpp<cpp11::decay_t<const list&>>(LD), cpp11::as_cpp<cpp11::decay_t<int>>(n), cpp11::as_cpp<cpp11::decay_t<sexp>>(per_variant_sample_size), cpp11::as_cpp<cpp11::decay_t<sexp>>(array), cpp11::as_cpp<cpp11::decay_t<double>>(a), cpp11::as_cpp<cpp11::decay_t<double>>(c), cpp11::as_cpp<cpp11::decay_t<int>>(M), cpp11::as_cpp<cpp11::decay_t<double>>(a0k), cpp11::as_cpp<cpp11::decay_t<double>>(b0k), cpp11::as_cpp<cpp11::decay_t<int>>(iter), cpp11::as_cpp<cpp11::decay_t<int>>(burn), cpp11::as_cpp<cpp11::decay_t<int>>(thin), cpp11::as_cpp<cpp11::decay_t<int>>(n_threads), cpp11::as_cpp<cpp11::decay_t<int>>(opt_llk), cpp11::as_cpp<cpp11::decay_t<bool>>(verbose), cpp11::as_cpp<cpp11::decay_t<sexp>>(seed), cpp11::as_cpp<cpp11::decay_t<bool>>(legacy_random_init)));
   END_CPP11
 }
 
@@ -47,7 +47,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_pecotmr_lassosum_rss_rcpp",        (DL_FUNC) &_pecotmr_lassosum_rss_rcpp,         5},
     {"_pecotmr_prs_cs_rcpp",              (DL_FUNC) &_pecotmr_prs_cs_rcpp,              12},
     {"_pecotmr_qtl_enrichment_rcpp",      (DL_FUNC) &_pecotmr_qtl_enrichment_rcpp,       9},
-    {"_pecotmr_sdpr_rcpp",                (DL_FUNC) &_pecotmr_sdpr_rcpp,                17},
+    {"_pecotmr_sdpr_rcpp",                (DL_FUNC) &_pecotmr_sdpr_rcpp,                18},
     {NULL, NULL, 0}
 };
 }
