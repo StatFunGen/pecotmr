@@ -182,7 +182,7 @@ load_plink2_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
 
   # --- Read samples from .psam ---
   psam <- as.data.frame(vroom(paths$psam, delim = "\t", show_col_types = FALSE))
-  colnames(psam)[1:2] <- c("FID", "IID")
+  names(psam) <- sub("^#", "", names(psam))
 
   # --- Read genotype dosage via pgenlibr ---
   pgen <- pgenlibr::NewPgen(paths$pgen)
@@ -293,6 +293,41 @@ read_pvar <- function(pvar_path) {
   )
 }
 
+#' Read variant metadata from either .bim or .pvar/.pvar.zst file.
+#'
+#' Auto-detects the format by extension and header, then returns a
+#' standardized data.frame. For PLINK1 .bim files, assigns column names
+#' based on the number of columns (6 or 9). For PLINK2 .pvar files,
+#' delegates to \code{read_pvar()}.
+#'
+#' @param snp_file_path Path to .bim, .pvar, or .pvar.zst file.
+#' @return data.frame with at minimum columns: chrom, id, pos, A2, A1.
+#'   Extended .bim files (9 columns) also include: variance, allele_freq, n_nomiss.
+#' @importFrom utils read.table
+#' @noRd
+read_variant_metadata <- function(snp_file_path) {
+  is_pvar <- grepl("\\.(pvar|pvar\\.zst)$", snp_file_path)
+  if (!is_pvar) {
+    first_line <- readLines(snp_file_path, n = 1)
+    is_pvar <- grepl("^#CHROM", first_line)
+  }
+
+  if (is_pvar) {
+    read_pvar(snp_file_path)
+  } else {
+    df <- read.table(snp_file_path, stringsAsFactors = FALSE)
+    n <- ncol(df)
+    if (n == 6) {
+      names(df) <- c("chrom", "id", "gpos", "pos", "A1", "A2")
+    } else if (n == 9) {
+      names(df) <- c("chrom", "id", "gpos", "pos", "A1", "A2", "variance", "allele_freq", "n_nomiss")
+    } else {
+      stop("Unexpected number of columns (", n, ") in variant file: ", snp_file_path)
+    }
+    df
+  }
+}
+
 #' Get variant information from any LD reference source.
 #'
 #' Auto-detects the source type (PLINK2, PLINK1, VCF, GDS, or pre-computed
@@ -341,17 +376,18 @@ get_ref_variant_info <- function(source, region = NULL) {
     info$allele_freq <- colMeans(result$X, na.rm = TRUE) / 2
     return(info)  # Already region-filtered by the loader
   } else {
-    # Pre-computed LD: read bim files via metadata
+    # Pre-computed LD: read bim/pvar files via metadata
     bim_paths <- get_regional_ld_meta(resolved$meta_path, region)$intersections$bim_file_paths
     info <- do.call(rbind, lapply(bim_paths, function(path) {
-      df <- as.data.frame(vroom(path, col_names = FALSE, show_col_types = FALSE))
+      df <- read_variant_metadata(path)
       out <- data.frame(
-        chrom = df$X1, id = df$X2, pos = df$X4,
-        A2 = df$X5, A1 = df$X6,
+        chrom = df$chrom, id = df$id, pos = df$pos,
+        A2 = df$A2, A1 = df$A1,
         stringsAsFactors = FALSE
       )
-      if (ncol(df) >= 8) { out$variance <- df$X7; out$allele_freq <- df$X8 }
-      if (ncol(df) >= 9) { out$n_nomiss <- df$X9 }
+      if ("variance" %in% names(df)) out$variance <- df$variance
+      if ("allele_freq" %in% names(df)) out$allele_freq <- df$allele_freq
+      if ("n_nomiss" %in% names(df)) out$n_nomiss <- df$n_nomiss
       out
     }))
     info$id <- normalize_variant_id(info$id)
@@ -384,13 +420,23 @@ get_ref_variant_info <- function(source, region = NULL) {
 #' @noRd
 match_variants_to_keep <- function(variant_info, keep_variants_path) {
   keep_raw <- as.data.frame(vroom(keep_variants_path, show_col_types = FALSE))
-  # parse_variant_id handles chr prefix, underscore/colon formats, build suffixes,
-  # and returns data.frame with integer chrom/pos and character A2/A1
-  keep_variants <- parse_variant_id(
-    if ("chrom" %in% names(keep_raw) & "pos" %in% names(keep_raw)) keep_raw else keep_raw[[1]]
-  )
+  if ("chrom" %in% names(keep_raw) & "pos" %in% names(keep_raw)) {
+    keep_variants <- parse_variant_id(keep_raw)
+  } else if (ncol(keep_raw) == 1) {
+    keep_variants <- parse_variant_id(keep_raw[[1]])
+  } else {
+    stop("keep_variants file must contain either: (1) a single column of variant IDs, ",
+         "or (2) columns named 'chrom' and 'pos' (optionally 'A1' and 'A2').")
+  }
   vi_chrom <- as.integer(strip_chr_prefix(variant_info$chrom))
-  paste0(vi_chrom, ":", variant_info$pos) %in% paste0(keep_variants$chrom, ":", keep_variants$pos)
+  has_alleles <- !any(is.na(keep_variants$A1)) && !any(is.na(keep_variants$A2))
+  if (has_alleles) {
+    paste0(vi_chrom, ":", variant_info$pos, ":", variant_info$A2, ":", variant_info$A1) %in%
+      paste0(keep_variants$chrom, ":", keep_variants$pos, ":", keep_variants$A2, ":", keep_variants$A1)
+  } else {
+    paste0(vi_chrom, ":", variant_info$pos) %in%
+      paste0(keep_variants$chrom, ":", keep_variants$pos)
+  }
 }
 
 #' @importFrom vroom vroom
@@ -511,12 +557,11 @@ load_plink1_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
   # --- Region filter via bim ---
   if (!is.null(region)) {
     parsed <- parse_region(region)
-    col_types <- list(col_character(), col_character(), col_guess(), col_integer(), col_guess(), col_guess())
-    bim_data <- vroom(bim_file, col_names = FALSE, col_types = col_types)
-    bim_data$X1 <- strip_chr_prefix(bim_data$X1)
-    snp_ids <- bim_data$X2[bim_data$X1 == parsed$chrom &
-                            bim_data$X4 >= parsed$start &
-                            bim_data$X4 <= parsed$end]
+    bim_data <- read_bim(bed_file)
+    bim_data$chrom <- strip_chr_prefix(bim_data$chrom)
+    snp_ids <- bim_data$id[bim_data$chrom == parsed$chrom &
+                            bim_data$pos >= parsed$start &
+                            bim_data$pos <= parsed$end]
     if (length(snp_ids) == 0) {
       stop(NoSNPsError(paste("No SNPs found in the specified region", region)))
     }
@@ -808,16 +853,25 @@ load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE,
 #' @importFrom dplyr select mutate across everything
 #' @importFrom magrittr %>%
 #' @noRd
+read_single_covariate <- function(path) {
+  df <- read_delim(path, "\t", col_types = cols()) %>% select(-1)
+  non_numeric <- names(df)[!sapply(df, is.numeric)]
+  if (length(non_numeric) > 0) {
+    stop("Non-numeric columns found in covariate file ", path, ": ",
+         paste(non_numeric, collapse = ", "),
+         ". All columns except the first (sample ID) must be numeric.")
+  }
+  df %>% mutate(across(everything(), as.numeric)) %>% t()
+}
+
+#' @noRd
 load_covariate_data <- function(covariate_path) {
   # Validate all covariate files exist
   missing <- covariate_path[!file.exists(covariate_path)]
   if (length(missing) > 0) {
     stop("Covariate file(s) not found: ", paste(missing, collapse = ", "))
   }
-  return(map(covariate_path, ~ read_delim(.x, "\t", col_types = cols()) %>%
-    select(-1) %>%
-    mutate(across(everything(), as.numeric)) %>%
-    t()))
+  return(map(covariate_path, read_single_covariate))
 }
 
 NoPhenotypeError <- function(message) {
@@ -945,6 +999,7 @@ prepare_data_list <- function(geno_bed, phenotype, covariate, imiss_cutoff, maf_
 
 #' @importFrom purrr map
 #' @importFrom dplyr intersect
+#' @importFrom stringr str_split_fixed
 #' @importFrom magrittr %>%
 #' @noRd
 prepare_X_matrix <- function(geno_bed, data_list, imiss_cutoff, maf_cutoff, mac_cutoff, xvar_cutoff) {
@@ -963,7 +1018,7 @@ prepare_X_matrix <- function(geno_bed, data_list, imiss_cutoff, maf_cutoff, mac_
   colnames(X_filtered) <- normalize_variant_id(colnames(X_filtered))
 
   # To keep a log message
-  variants <- as.data.frame(do.call(rbind, lapply(colnames(X_filtered), function(x) strsplit(x, ":")[[1]][1:2])), stringsAsFactors = FALSE)
+  variants <- str_split_fixed(colnames(X_filtered), ":", 3)
   message(paste0("Dimension of input genotype data is ", nrow(X_filtered), " rows and ", ncol(X_filtered), " columns for genomic region of ", variants[1, 1], ":", min(as.integer(variants[, 2])), "-", max(as.integer(variants[, 2]))))
   return(X_filtered)
 }
@@ -1104,7 +1159,7 @@ load_regional_association_data <- function(genotype, # PLINK file
   data_list <- add_X_residuals(data_list, scale_residuals)
   # Get X matrix for union of samples
   X <- prepare_X_matrix(geno, data_list, imiss_cutoff, maf_cutoff, mac_cutoff, xvar_cutoff)
-  region <- if (!is.null(region)) unlist(strsplit(region, ":", fixed = TRUE))
+  parsed_region <- if (!is.null(region)) parse_region(region) else NULL
   ## residual_Y: a list of y either vector or matrix (CpG for example), and they need to match with residual_X in terms of which samples are missing.
   ## residual_X: is a list of R conditions each is a matrix, with list names being the names of conditions, column names being SNP names and row names being sample names.
   ## X: is the somewhat original genotype matrix output from `filter_X`, with column names being SNP names and row names being sample names. Sample names of X should match example sample names of residual_Y matrix form (not list); but the matrices inside residual_X would be subsets of sample name of residual_Y matrix form (not list).
@@ -1119,8 +1174,8 @@ load_regional_association_data <- function(genotype, # PLINK file
     X_data = data_list$X,
     X = X,
     maf = maf_list,
-    chrom = region[1],
-    grange = if (!is.null(region)) unlist(strsplit(region[2], "-", fixed = TRUE)) else NULL,
+    chrom = if (!is.null(parsed_region)) paste0("chr", parsed_region$chrom) else NULL,
+    grange = if (!is.null(parsed_region)) as.character(c(parsed_region$start, parsed_region$end)) else NULL,
     Y_coordinates = if (!is.null(region)) extract_phenotype_coordinates(pheno) else NULL
   ))
 }
@@ -1693,7 +1748,8 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
       conditions <- conditions_list_individual[pos]
       dat <- load_regional_univariate_data(
         genotype = genotype, phenotype = phenotype,
-        covariate = covariate, region = region,
+        covariate = covariate,
+        region = region,
         association_window = association_window,
         conditions = conditions, xvar_cutoff = xvar_cutoff,
         maf_cutoff = maf_cutoff, mac_cutoff = mac_cutoff,

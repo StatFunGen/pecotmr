@@ -355,6 +355,16 @@ test_that("Test load_covariate_data reads tab-delimited file", {
   file.remove(tmp)
 })
 
+test_that("load_covariate_data errors on non-numeric columns", {
+  tmp <- tempfile(fileext = ".tsv")
+  writeLines(c("SampleID\tPC1\tLabel", "S1\t0.1\tabc", "S2\t0.3\tdef"), tmp)
+  expect_error(
+    load_covariate_data(tmp),
+    "Non-numeric columns found in covariate file.*Label.*must be numeric"
+  )
+  file.remove(tmp)
+})
+
 test_that("load_covariate_data errors on missing file", {
   expect_error(
     load_covariate_data("/nonexistent/covar.tsv"),
