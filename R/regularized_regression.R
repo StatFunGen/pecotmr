@@ -148,9 +148,10 @@ prs_cs_weights <- function(stat, LD, ...) {
 #' @param iter Number of iterations for MCMC. Default is 1000.
 #' @param burn Number of burn-in iterations for MCMC. Default is 200.
 #' @param thin Thinning interval for MCMC. Default is 5.
-#' @param init Initialization mode for cluster assignments. Use `"legacy_random"`
-#'   to restore the original SDPR-style random initialization, or `"null"` to
-#'   start all SNPs in the null cluster. Default is `"legacy_random"`.
+#' @param init Initialization mode for latent cluster assignments. Use `"random"`
+#'   to initialize SNPs uniformly across SDPR mixture components, matching the
+#'   original SDPR implementation, or `"null"` to start all SNPs in the null
+#'   cluster. Default is `"random"`.
 #' @param n_threads Number of threads to use. Default is 1.
 #' @param opt_llk Which likelihood to evaluate. 1 for equation 6 (slightly shrink the correlation of SNPs)
 #'                and 2 for equation 5 (SNPs genotyped on different arrays in a separate cohort).
@@ -209,7 +210,7 @@ prs_cs_weights <- function(stat, LD, ...) {
 #'
 #' @export
 sdpr <- function(bhat, LD, n, per_variant_sample_size = NULL, array = NULL, a = 0.1, c = 1.0, M = 1000,
-                 a0k = 0.5, b0k = 0.5, iter = 1000, burn = 200, thin = 5, init = c("legacy_random", "null"), n_threads = 1,
+                 a0k = 0.5, b0k = 0.5, iter = 1000, burn = 200, thin = 5, init = c("random", "null"), n_threads = 1,
                  opt_llk = 1, verbose = TRUE, seed = NULL) {
   init <- match.arg(init)
 
@@ -245,7 +246,7 @@ sdpr <- function(bhat, LD, n, per_variant_sample_size = NULL, array = NULL, a = 
     bhat, LD, as.integer(n), per_variant_sample_size, array, a, c, as.integer(M),
     a0k, b0k, as.integer(iter), as.integer(burn), as.integer(thin),
     as.integer(n_threads), as.integer(opt_llk), verbose, seed,
-    identical(init, "legacy_random")
+    identical(init, "random")
   )
 
   return(result)

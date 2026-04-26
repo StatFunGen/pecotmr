@@ -127,7 +127,7 @@ std::vector<unsigned> suff_stats;
 std::vector<double> sumsq;
 MCMC_state(size_t num_snp, size_t max_cluster, \
            double a0, double b0, double sz, unsigned int seed,
-           bool legacy_random_init = false) {
+           bool random_init = false) {
 	a0k = a0; b0k = b0; N = sz;
 	// Changed May 20 2021
 	// Now N (sz) is absorbed into A, B; so set to 1.
@@ -150,7 +150,7 @@ MCMC_state(size_t num_snp, size_t max_cluster, \
 	sumsq.assign(max_cluster, 0.0);
 	V.assign(max_cluster, 0.0);
 	r.seed(seed);
-	if (legacy_random_init) {
+	if (random_init) {
 		std::uniform_int_distribution<size_t> init_dist(0, M - 1);
 		cls_assgn.resize(num_snp);
 		for (size_t i = 0; i < num_snp; i++) {
@@ -259,5 +259,5 @@ std::unordered_map<std::string, arma::vec> mcmc(
 	int              opt_llk,
 	bool             verbose,
 	unsigned int     seed,
-	bool             legacy_random_init = false
+	bool             random_init = false
 	);

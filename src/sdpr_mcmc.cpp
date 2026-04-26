@@ -144,13 +144,13 @@ void MCMC_state::sample_assignment(size_t j, const mcmc_data &dat,
         // Log-sum-exp for numerical stability (replaces SSE _mm_max_ps + exp_ps + _mm_hadd_ps)
         float max_elem    = prob.max();
         float log_exp_sum = max_elem
-            + std::log(arma::accu(arma::exp(prob - max_elem)));
+            + std::logf(arma::accu(arma::exp(prob - max_elem)));
 
         // Categorical sampling via inverse CDF
         // Original: mcmc.cpp lines 155-163
         cls_assgn[i + start_i] = M - 1;
         for (size_t k = 0; k < M - 1; k++) {
-            rnd_i -= std::exp(prob(k) - log_exp_sum);
+            rnd_i -= std::expf(prob(k) - log_exp_sum);
             if (rnd_i < 0) {
                 cls_assgn[i + start_i] = k;
                 break;
@@ -217,7 +217,7 @@ void MCMC_state::update_p() {
     p[M - 1] = (1 - sum > 0) ? (1 - sum) : 0;
 
     for (size_t i = 0; i < M; i++) {
-        log_p[i] = std::log(static_cast<float>(p[i]) + 1e-40f);
+        log_p[i] = std::logf(static_cast<float>(p[i]) + 1e-40f);
     }
 }
 
@@ -511,14 +511,14 @@ std::unordered_map<std::string, arma::vec> mcmc(
     int        opt_llk,
     bool       verbose,
     unsigned int seed,
-    bool       legacy_random_init
+    bool       random_init
     ) {
 
     int n_pst = (iter - burn) / thin;
 
     ldmat_data ldmat_dat;
 
-    MCMC_state state(data.beta_mrg.size(), M, a0k, b0k, sz, seed, legacy_random_init);
+    MCMC_state state(data.beta_mrg.size(), M, a0k, b0k, sz, seed, random_init);
 
     // Deflation correction
     for (size_t i = 0; i < data.beta_mrg.size(); i++) {

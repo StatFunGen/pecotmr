@@ -18,7 +18,7 @@ sdpr(
   iter = 1000,
   burn = 200,
   thin = 5,
-  init = c("legacy_random", "null"),
+  init = c("random", "null"),
   n_threads = 1,
   opt_llk = 1,
   verbose = TRUE,
@@ -54,9 +54,10 @@ initialized to a vector of 1's with length equal to `bhat`.}
 
 \item{thin}{Thinning interval for MCMC. Default is 5.}
 
-\item{init}{Initialization mode for cluster assignments. Use `"legacy_random"`
-to restore the original SDPR-style random initialization, or `"null"` to
-start all SNPs in the null cluster. Default is `"legacy_random"`.}
+\item{init}{Initialization mode for latent cluster assignments. Use `"random"`
+to initialize SNPs uniformly across SDPR mixture components, matching the
+original SDPR implementation, or `"null"` to start all SNPs in the null
+cluster. Default is `"random"`.}
 
 \item{n_threads}{Number of threads to use. Default is 1.}
 
