@@ -2761,3 +2761,80 @@ test_that("load_regional_multivariate_data returns correct fields", {
   expect_true(is.matrix(result$residual_Y))
   expect_equal(nrow(result$X), 100L)
 })
+
+# =============================================================================
+# load_twas_weights file pre-validation
+# =============================================================================
+
+test_that("load_twas_weights skips non-existent files with warning", {
+  expect_warning(
+    tryCatch(
+      load_twas_weights(c("/nonexistent/path/fake.rds")),
+      error = function(e) NULL
+    ),
+    "does not exist"
+  )
+})
+
+test_that("load_twas_weights skips too-small files with warning", {
+  tmp <- tempfile(fileext = ".rds")
+  writeLines("x", tmp)  # tiny file, not valid RDS
+  on.exit(unlink(tmp))
+  expect_warning(
+    tryCatch(
+      load_twas_weights(tmp),
+      error = function(e) NULL
+    ),
+    "too small"
+  )
+})
+
+test_that("load_twas_weights skips corrupt RDS files with warning", {
+  tmp <- tempfile(fileext = ".rds")
+  writeBin(as.raw(rep(0L, 500)), tmp)  # 500 bytes of garbage
+  on.exit(unlink(tmp))
+  expect_warning(
+    tryCatch(
+      load_twas_weights(tmp),
+      error = function(e) NULL
+    ),
+    "failed to read RDS"
+  )
+})
+
+test_that("load_twas_weights skips non-list RDS with warning", {
+  tmp <- tempfile(fileext = ".rds")
+  saveRDS(paste0("x", seq_len(10000)), tmp)  # valid RDS but not a list; large enough to pass size check
+  on.exit(unlink(tmp))
+  expect_warning(
+    tryCatch(
+      load_twas_weights(tmp),
+      error = function(e) NULL
+    ),
+    "unexpected structure"
+  )
+})
+
+# =============================================================================
+# load_rss_data sample size validation
+# =============================================================================
+
+test_that("load_rss_data rejects negative sample size", {
+  skip_if_not_installed("MungeSumstats")
+  sumstat_file <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  skip_if_not(file.exists(sumstat_file), "test sumstat file not found")
+  expect_error(
+    suppressMessages(load_rss_data(sumstat_file, n_sample = -100)),
+    "Invalid sample size"
+  )
+})
+
+test_that("load_rss_data rejects Inf sample size", {
+  skip_if_not_installed("MungeSumstats")
+  sumstat_file <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  skip_if_not(file.exists(sumstat_file), "test sumstat file not found")
+  expect_error(
+    suppressMessages(load_rss_data(sumstat_file, n_sample = Inf)),
+    "Invalid sample size"
+  )
+})

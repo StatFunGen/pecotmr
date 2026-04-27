@@ -1926,3 +1926,124 @@ test_that("find_data with numeric indices in list_name path", {
   result <- find_data(x, c(1, "results", "2", "val"))
   expect_equal(result, c(10, 20))
 })
+
+# =============================================================================
+# regions_overlap
+# =============================================================================
+
+test_that("regions_overlap detects overlapping regions on same chromosome", {
+  expect_true(regions_overlap("chr1:100-300", "chr1:200-400"))
+})
+
+test_that("regions_overlap returns FALSE for non-overlapping same-chr regions", {
+  expect_false(regions_overlap("chr1:100-200", "chr1:300-400"))
+})
+
+test_that("regions_overlap returns FALSE for different chromosomes", {
+  expect_false(regions_overlap("chr1:100-300", "chr2:100-300"))
+})
+
+test_that("regions_overlap detects touching boundaries", {
+  expect_true(regions_overlap("chr1:100-200", "chr1:200-300"))
+})
+
+test_that("regions_overlap works with underscore-separated IDs", {
+  expect_true(regions_overlap("1_100_300", "1_200_400"))
+  expect_false(regions_overlap("1_100_200", "2_100_200"))
+})
+
+test_that("regions_overlap works with data.frame input", {
+  df_a <- data.frame(chrom = 1, start = 100, end = 300)
+  df_b <- data.frame(chrom = 1, start = 200, end = 400)
+  expect_true(regions_overlap(df_a, df_b))
+})
+
+# =============================================================================
+# find_overlapping_regions
+# =============================================================================
+
+test_that("find_overlapping_regions returns correct indices", {
+  query <- "chr1:100-300"
+  targets <- c("chr1:200-400", "chr2:100-200", "chr1:50-150")
+  result <- find_overlapping_regions(query, targets)
+  expect_true(1 %in% result)
+  expect_true(3 %in% result)
+  expect_false(2 %in% result)
+})
+
+test_that("find_overlapping_regions returns empty vector for no matches", {
+  query <- "chr1:100-200"
+  targets <- c("chr2:100-200", "chr3:100-200")
+  result <- find_overlapping_regions(query, targets)
+  expect_length(result, 0)
+})
+
+test_that("find_overlapping_regions works with data.frame targets", {
+  query <- "chr1:100-300"
+  targets <- data.frame(chrom = c(1, 2, 1), start = c(200, 100, 50), end = c(400, 200, 150))
+  result <- find_overlapping_regions(query, targets)
+  expect_true(1 %in% result)
+  expect_true(3 %in% result)
+  expect_false(2 %in% result)
+})
+
+# =============================================================================
+# classify_variant_type
+# =============================================================================
+
+test_that("classify_variant_type identifies SNPs", {
+  expect_equal(classify_variant_type("chr1:100:A:G"), "SNP")
+})
+
+test_that("classify_variant_type identifies insertions", {
+  expect_equal(classify_variant_type("chr1:100:A:ATG"), "insertion")
+})
+
+test_that("classify_variant_type identifies deletions", {
+  expect_equal(classify_variant_type("chr1:100:ATG:A"), "deletion")
+})
+
+test_that("classify_variant_type identifies MNPs", {
+  expect_equal(classify_variant_type("chr1:100:AT:GC"), "MNP")
+})
+
+test_that("classify_variant_type handles vector input", {
+  ids <- c("chr1:100:A:G", "chr1:200:ATG:A", "chr1:300:A:ATG", "chr1:400:AT:GC")
+  result <- classify_variant_type(ids)
+  expect_equal(result, c("SNP", "deletion", "insertion", "MNP"))
+})
+
+test_that("classify_variant_type accepts data.frame input", {
+  df <- data.frame(A2 = c("A", "ATG"), A1 = c("G", "A"))
+  result <- classify_variant_type(df)
+  expect_equal(result, c("SNP", "deletion"))
+})
+
+# =============================================================================
+# ensure_chr_match
+# =============================================================================
+
+test_that("ensure_chr_match returns unchanged when both have chr prefix", {
+  ids_a <- c("chr1:100:A:G", "chr1:200:C:T")
+  ids_b <- c("chr1:150:A:G", "chr1:250:C:T")
+  result <- pecotmr:::ensure_chr_match(ids_a, ids_b)
+  expect_equal(result$ids_a, ids_a)
+  expect_equal(result$ids_b, ids_b)
+})
+
+test_that("ensure_chr_match normalizes when prefixes mismatch", {
+  ids_a <- c("chr1:100:A:G", "chr1:200:C:T")
+  ids_b <- c("1:150:A:G", "1:250:C:T")
+  result <- pecotmr:::ensure_chr_match(ids_a, ids_b)
+  expect_true(all(grepl("^chr", result$ids_a)))
+  expect_true(all(grepl("^chr", result$ids_b)))
+})
+
+test_that("ensure_chr_match returns unchanged when both lack chr prefix", {
+  ids_a <- c("1:100:A:G", "1:200:C:T")
+  ids_b <- c("1:150:A:G", "1:250:C:T")
+  result <- pecotmr:::ensure_chr_match(ids_a, ids_b)
+  # Both already match (no prefix), so returned unchanged
+  expect_equal(result$ids_a, ids_a)
+  expect_equal(result$ids_b, ids_b)
+})

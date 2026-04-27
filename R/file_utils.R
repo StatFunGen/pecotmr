@@ -1154,7 +1154,23 @@ load_twas_weights <- function(weight_db_files, conditions = NULL,
   ## Internal function to load and validate data from RDS files
   load_and_validate_data <- function(weight_db_files, conditions, variable_name_obj) {
     all_data <- do.call(c, lapply(unname(weight_db_files), function(rds_file) {
-      db <- readRDS(rds_file)
+      # Validate file before loading
+      if (!file.exists(rds_file)) {
+        warning(paste0("Skipping weight file '", rds_file, "': file does not exist."))
+        return(NULL)
+      }
+      if (file.size(rds_file) <= 200) {
+        warning(paste0("Skipping weight file '", rds_file, "': file too small (", file.size(rds_file), " bytes), likely empty or corrupt."))
+        return(NULL)
+      }
+      db <- tryCatch(readRDS(rds_file), error = function(e) {
+        warning(paste0("Skipping weight file '", rds_file, "': failed to read RDS — ", conditionMessage(e)))
+        return(NULL)
+      })
+      if (!is.list(db) || length(db) == 0) {
+        warning(paste0("Skipping weight file '", rds_file, "': unexpected structure (not a non-empty list)."))
+        return(NULL)
+      }
       gene <- names(db)
       # Filter by conditions if specified
       if (!is.null(conditions)) {
@@ -1445,6 +1461,18 @@ load_rss_data <- function(sumstat_path, column_file_path = NULL, n_sample = 0, n
     } else {
       warning("Sample size and variance of Y could not be determined from the summary statistics.")
       n <- NULL
+    }
+  }
+  # Validate determined sample size
+  if (!is.null(n)) {
+    if (length(n) != 1) {
+      stop("Sample size must be a single value, got length ", length(n), ".")
+    }
+    if (is.na(n) || !is.finite(n) || n <= 0) {
+      stop("Invalid sample size determined: ", n,
+           ". Sample size must be a positive finite number.",
+           "\n  Hint: check n_sample, n_case, n_control parameters or the ",
+           "n_sample/n_case/n_control columns in your summary statistics.")
     }
   }
   return(list(sumstats = sumstats, n = n, var_y = var_y))

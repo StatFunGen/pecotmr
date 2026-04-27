@@ -289,6 +289,37 @@ build_twas_score_row <- function(twas_rs, weight_db, context, study) {
   )
 }
 
+# Internal: for each gene-context-study group, if the selected method produced
+# NA/Inf TWAS z-scores, fall back to the next best method by rsq_cv.
+apply_method_fallback <- function(df) {
+  if (nrow(df) == 0 || !all(c("molecular_id", "context", "gwas_study", "is_selected_method", "twas_z", "rsq_cv", "is_imputable") %in% names(df))) {
+    return(df)
+  }
+  groups <- split(seq_len(nrow(df)), list(df$molecular_id, df$context, df$gwas_study), drop = TRUE)
+  for (idxs in groups) {
+    sel_idx <- idxs[df$is_selected_method[idxs]]
+    if (length(sel_idx) != 1) next
+    z_val <- df$twas_z[sel_idx]
+    if (!is.na(z_val) && is.finite(z_val)) next
+    # Selected method has invalid z — try fallback
+    other_idxs <- setdiff(idxs, sel_idx)
+    valid_mask <- !is.na(df$twas_z[other_idxs]) & is.finite(df$twas_z[other_idxs])
+    if (any(valid_mask)) {
+      candidates <- other_idxs[valid_mask]
+      best <- candidates[which.max(df$rsq_cv[candidates])]
+      df$is_selected_method[sel_idx] <- FALSE
+      df$is_selected_method[best] <- TRUE
+      message(paste0("TWAS method fallback for ", df$molecular_id[sel_idx],
+                     " / ", df$context[sel_idx], " / ", df$gwas_study[sel_idx],
+                     ": ", df$method[sel_idx], " -> ", df$method[best]))
+    } else {
+      # No method has valid z — mark group as non-imputable
+      df$is_imputable[idxs] <- FALSE
+    }
+  }
+  df
+}
+
 #' @importFrom stringr str_remove
 #' @importFrom purrr list_flatten
 #' @export
@@ -593,6 +624,7 @@ twas_pipeline <- function(twas_weights_data,
     return(list(twas_result = NULL, twas_data = NULL, mr_result = NULL))
   }
   twas_table <- merge(twas_table, twas_results_table, by = c("molecular_id", "context", "method"))
+  twas_table <- apply_method_fallback(twas_table)
   twas_table <- twas_table[twas_table$is_imputable, , drop = FALSE]
   if (output_twas_data & nrow(twas_table) > 0) {
     twas_data_subset <- format_twas_data(twas_data, twas_table)

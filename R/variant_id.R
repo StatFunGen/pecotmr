@@ -228,3 +228,121 @@ region_to_df <- function(ld_region_id, colnames = c("chrom", "start", "end")) {
   colnames(region_of_interest) <- colnames
   return(region_of_interest)
 }
+
+#' Ensure two sets of variant IDs use matching chr prefix convention
+#'
+#' Detects whether \code{ids_a} and \code{ids_b} have mismatched chr prefixes.
+#' If mismatched, normalizes both to canonical format (with "chr" prefix) using
+#' \code{\link{normalize_variant_id}}. If already matching, returns inputs
+#' unchanged.
+#'
+#' @param ids_a Character vector of variant IDs.
+#' @param ids_b Character vector of variant IDs.
+#' @return A list with components \code{ids_a} and \code{ids_b}, both normalized
+#'   to canonical chr-prefix format if they were mismatched.
+#' @noRd
+ensure_chr_match <- function(ids_a, ids_b) {
+  has_chr_a <- any(grepl("^chr", ids_a[!is.na(ids_a)][1:min(5, sum(!is.na(ids_a)))]))
+  has_chr_b <- any(grepl("^chr", ids_b[!is.na(ids_b)][1:min(5, sum(!is.na(ids_b)))]))
+  if (has_chr_a == has_chr_b) {
+    return(list(ids_a = ids_a, ids_b = ids_b))
+  }
+  list(
+    ids_a = normalize_variant_id(ids_a, chr_prefix = TRUE),
+    ids_b = normalize_variant_id(ids_b, chr_prefix = TRUE)
+  )
+}
+
+#' Convert region specifications to a GRanges object
+#'
+#' Accepts region strings ("chr1:100-200", "1_100_200"), character vectors of
+#' such strings, or data.frames with chrom/start/end columns. Returns a
+#' \code{\link[GenomicRanges]{GRanges}} object.
+#'
+#' @param regions A region string, character vector, or data.frame with
+#'   chrom/start/end columns.
+#' @return A \code{GRanges} object.
+#' @noRd
+as_granges <- function(regions) {
+  if (is.character(regions)) {
+    df <- region_to_df(regions)
+  } else if (is.data.frame(regions)) {
+    if (!all(c("chrom", "start", "end") %in% names(regions))) {
+      stop("data.frame must have columns: chrom, start, end")
+    }
+    df <- regions
+  } else {
+    stop("regions must be a character vector or data.frame with chrom/start/end columns")
+  }
+  # GRanges expects character seqnames; prefix with "chr" if numeric
+  seqnames <- as.character(df$chrom)
+  if (!any(grepl("^chr", seqnames))) {
+    seqnames <- paste0("chr", seqnames)
+  }
+  GenomicRanges::GRanges(
+    seqnames = seqnames,
+    ranges = IRanges::IRanges(start = as.integer(df$start), end = as.integer(df$end))
+  )
+}
+
+#' Test whether two genomic regions overlap
+#'
+#' @param region_a A region string ("chr1:100-200" or "1_100_200") or a
+#'   single-row data.frame with chrom/start/end columns.
+#' @param region_b A region string or single-row data.frame.
+#' @return Logical scalar: TRUE if the regions share at least one base pair.
+#' @importFrom GenomicRanges GRanges
+#' @importFrom IRanges IRanges findOverlaps
+#' @export
+regions_overlap <- function(region_a, region_b) {
+  gr_a <- as_granges(region_a)
+  gr_b <- as_granges(region_b)
+  length(IRanges::findOverlaps(gr_a, gr_b)) > 0
+}
+
+#' Find which target regions overlap a query region
+#'
+#' @param query A single region string or single-row data.frame with
+#'   chrom/start/end columns.
+#' @param targets A character vector of region strings, or a multi-row
+#'   data.frame with chrom/start/end columns.
+#' @return Integer vector of 1-based indices into \code{targets} that overlap
+#'   the query. Empty integer vector if no overlaps.
+#' @importFrom GenomicRanges GRanges
+#' @importFrom IRanges IRanges findOverlaps
+#' @importFrom S4Vectors subjectHits
+#' @export
+find_overlapping_regions <- function(query, targets) {
+  gr_query <- as_granges(query)
+  gr_targets <- as_granges(targets)
+  hits <- IRanges::findOverlaps(gr_query, gr_targets)
+  unique(S4Vectors::subjectHits(hits))
+}
+
+#' Classify variant type from allele strings
+#'
+#' Determines whether each variant is a SNP, insertion, deletion, or
+#' multi-nucleotide polymorphism (MNP) based on the allele lengths.
+#'
+#' @param ids A character vector of variant IDs in "chr:pos:ref:alt" format,
+#'   or a data.frame with A2 (ref) and A1 (alt) columns (e.g., from
+#'   \code{\link{parse_variant_id}}).
+#' @return A character vector with one of "SNP", "insertion", "deletion", or
+#'   "MNP" for each variant.
+#' @export
+classify_variant_type <- function(ids) {
+  if (is.character(ids)) {
+    ids <- parse_variant_id(ids)
+  }
+  if (!is.data.frame(ids) || !all(c("A2", "A1") %in% names(ids))) {
+    stop("Input must be a character vector of variant IDs or a data.frame with A2 and A1 columns.")
+  }
+  len_ref <- nchar(ids$A2)
+  len_alt <- nchar(ids$A1)
+  type <- character(nrow(ids))
+  type[len_ref == 1L & len_alt == 1L & grepl("^[ATCG]$", ids$A2) & grepl("^[ATCG]$", ids$A1)] <- "SNP"
+  type[len_ref == len_alt & (len_ref > 1L | !grepl("^[ATCG]$", ids$A2) | !grepl("^[ATCG]$", ids$A1)) & type == ""] <- "MNP"
+  type[len_ref > len_alt] <- "deletion"
+  type[len_alt > len_ref] <- "insertion"
+  type
+}

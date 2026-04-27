@@ -272,16 +272,30 @@ load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL
 
   if (is_geno) {
     geno_path <- resolve_genotype_path_for_region(source$meta_path, region)
-    return(load_LD_from_genotype(geno_path, region,
-                                 return_genotype = return_genotype,
-                                 n_sample = n_sample))
+    result <- load_LD_from_genotype(geno_path, region,
+                                    return_genotype = return_genotype,
+                                    n_sample = n_sample)
+  } else {
+    # Pre-computed LD blocks (.cor.xz)
+    if (return_genotype) {
+      stop("return_genotype=TRUE requires genotype files, not pre-computed LD matrices.")
+    }
+    result <- load_LD_from_blocks(source$meta_path, region, extract_coordinates, n_sample = n_sample)
   }
 
-  # Pre-computed LD blocks (.cor.xz)
-  if (return_genotype) {
-    stop("return_genotype=TRUE requires genotype files, not pre-computed LD matrices.")
+  # Remove any duplicate variant IDs (safety net for boundary overlaps)
+  if (!is.null(result$LD_variants)) {
+    dup_idx <- which(duplicated(result$LD_variants))
+    if (length(dup_idx) > 0) {
+      result$LD_variants <- result$LD_variants[-dup_idx]
+      result$LD_matrix <- result$LD_matrix[-dup_idx, -dup_idx, drop = FALSE]
+      if (!is.null(result$ref_panel)) {
+        result$ref_panel <- result$ref_panel[-dup_idx, , drop = FALSE]
+      }
+    }
   }
-  load_LD_from_blocks(source$meta_path, region, extract_coordinates, n_sample = n_sample)
+
+  result
 }
 
 # ---------- Internal: resolve LD source type ----------
