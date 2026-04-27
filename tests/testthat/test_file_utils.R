@@ -2128,6 +2128,88 @@ test_that("match_variants_to_keep returns all FALSE for non-matching variants", 
 })
 
 # ===========================================================================
+# read_variant_metadata
+# ===========================================================================
+
+test_that("read_variant_metadata reads 6-column bim file", {
+  tmp <- tempfile(fileext = ".bim")
+  on.exit(unlink(tmp), add = TRUE)
+  writeLines(c(
+    "1\trs1\t0\t100\tA\tG",
+    "1\trs2\t0\t200\tC\tT"
+  ), tmp)
+  res <- read_variant_metadata(tmp)
+  expect_equal(nrow(res), 2)
+  expect_true("gpos" %in% names(res))
+  expect_equal(as.character(res$chrom), c("1", "1"))
+  expect_equal(res$pos, c(100L, 200L))
+})
+
+test_that("read_variant_metadata reads 9-column bim file", {
+  tmp <- tempfile(fileext = ".bim")
+  on.exit(unlink(tmp), add = TRUE)
+  writeLines(c(
+    "1\trs1\t0\t100\tA\tG\t0.5\t0.3\t100",
+    "1\trs2\t0\t200\tC\tT\t0.4\t0.2\t99"
+  ), tmp)
+  res <- read_variant_metadata(tmp)
+  expect_equal(nrow(res), 2)
+  expect_true(all(c("variance", "allele_freq", "n_nomiss") %in% names(res)))
+})
+
+test_that("read_variant_metadata delegates to read_pvar for .pvar files", {
+  pvar_path <- test_path("test_data", "test_variants.pvar")
+  res <- read_variant_metadata(pvar_path)
+  expect_true(all(c("chrom", "id", "pos", "A1", "A2") %in% names(res)))
+  expect_false("gpos" %in% names(res))
+})
+
+test_that("read_variant_metadata errors on unexpected column count", {
+  tmp <- tempfile(fileext = ".bim")
+  on.exit(unlink(tmp), add = TRUE)
+  writeLines(c("1\trs1\t0\t100\tA"), tmp)
+  expect_error(read_variant_metadata(tmp), "Unexpected number of columns")
+})
+
+# ===========================================================================
+# match_variants_to_keep (additional coverage)
+# ===========================================================================
+
+test_that("match_variants_to_keep works with single-column variant ID file", {
+  vi <- data.frame(chrom = c("1", "1", "1"), pos = c(100L, 200L, 300L),
+                   A2 = c("A", "C", "G"), A1 = c("G", "T", "A"),
+                   stringsAsFactors = FALSE)
+  keep_file <- tempfile(fileext = ".txt")
+  on.exit(unlink(keep_file), add = TRUE)
+  writeLines(c("1:100:A:G", "1:300:G:A"), keep_file)
+
+  mask <- match_variants_to_keep(vi, keep_file)
+  expect_type(mask, "logical")
+  expect_equal(sum(mask), 2L)
+  expect_true(mask[1])
+  expect_true(mask[3])
+})
+
+test_that("match_variants_to_keep uses position-only matching when no alleles", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  result <- load_plink2_data(file.path(td, "test_variants"))
+  vi <- result$variant_info
+
+  keep_file <- tempfile(fileext = ".tsv")
+  on.exit(unlink(keep_file), add = TRUE)
+  # Write keep file with chrom/pos only (no alleles)
+  keep_df <- vi[c(1, 5), c("chrom", "pos")]
+  vroom::vroom_write(keep_df, keep_file, delim = "\t")
+
+  mask <- match_variants_to_keep(vi, keep_file)
+  expect_type(mask, "logical")
+  expect_equal(sum(mask), 2L)
+  expect_true(mask[1])
+  expect_true(mask[5])
+})
+
+# ===========================================================================
 # standardise_sumstats_columns
 # ===========================================================================
 

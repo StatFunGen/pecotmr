@@ -417,19 +417,23 @@ get_ref_variant_info <- function(source, region = NULL) {
 #' Match variant_info against a whitelist file, returning logical index.
 #' Uses parse_variant_id() from misc.R to handle all variant ID formats.
 #' @importFrom vroom vroom
+#' @importFrom readr read_lines
 #' @noRd
 match_variants_to_keep <- function(variant_info, keep_variants_path) {
-  keep_raw <- as.data.frame(vroom(keep_variants_path, show_col_types = FALSE))
-  if ("chrom" %in% names(keep_raw) & "pos" %in% names(keep_raw)) {
+  keep_raw <- tryCatch(
+    as.data.frame(vroom(keep_variants_path, show_col_types = FALSE)),
+    error = function(e) NULL
+  )
+  if (!is.null(keep_raw) && "chrom" %in% names(keep_raw) && "pos" %in% names(keep_raw)) {
     keep_variants <- parse_variant_id(keep_raw)
-  } else if (ncol(keep_raw) == 1) {
-    keep_variants <- parse_variant_id(keep_raw[[1]])
   } else {
-    stop("keep_variants file must contain either: (1) a single column of variant IDs, ",
-         "or (2) columns named 'chrom' and 'pos' (optionally 'A1' and 'A2').")
+    # Fall back to reading as single-column variant IDs
+    ids <- read_lines(keep_variants_path)
+    keep_variants <- parse_variant_id(ids)
   }
   vi_chrom <- as.integer(strip_chr_prefix(variant_info$chrom))
-  has_alleles <- !any(is.na(keep_variants$A1)) && !any(is.na(keep_variants$A2))
+  has_alleles <- "A1" %in% names(keep_variants) && "A2" %in% names(keep_variants) &&
+    !any(is.na(keep_variants$A1)) && !any(is.na(keep_variants$A2))
   if (has_alleles) {
     paste0(vi_chrom, ":", variant_info$pos, ":", variant_info$A2, ":", variant_info$A1) %in%
       paste0(keep_variants$chrom, ":", keep_variants$pos, ":", keep_variants$A2, ":", keep_variants$A1)
