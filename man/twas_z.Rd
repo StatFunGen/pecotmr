@@ -4,7 +4,7 @@
 \alias{twas_z}
 \title{Calculate TWAS z-score and p-value}
 \usage{
-twas_z(weights, z, R = NULL, X = NULL)
+twas_z(weights, z, R = NULL, X = NULL, V = NULL, D = NULL, n_sketch = NULL)
 }
 \arguments{
 \item{weights}{A numeric vector of weights.}

@@ -1504,7 +1504,10 @@ test_that("twas_pipeline: pick_best_model path is executed when rsq_cutoff > 0",
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   )
 
@@ -1565,7 +1568,10 @@ test_that("twas_pipeline: pick_best_model selects model with best rsq", {
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   )
 
@@ -1628,7 +1634,10 @@ test_that("twas_pipeline: pick_best_model skips context when no model passes thr
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   )
 
@@ -1752,7 +1761,10 @@ test_that("twas_pipeline: full pipeline with mocked harmonize_twas produces twas
         z = gwas_z,
         stringsAsFactors = FALSE
       )),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   )
 
@@ -1824,7 +1836,10 @@ test_that("twas_pipeline: multiple genes processed correctly", {
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   }
 
@@ -1879,7 +1894,10 @@ test_that("twas_pipeline: empty twas_variants intersection returns empty data fr
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   )
 
@@ -1948,7 +1966,10 @@ test_that("twas_pipeline: output_twas_data=TRUE triggers format_twas_data path",
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      LD = LD_matrix,
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix),
       model_selection = list(ctx1 = list(selected_model = "susie", is_imputable = TRUE))
     )
   )
@@ -2025,7 +2046,10 @@ test_that("twas_pipeline: multiple contexts are processed independently", {
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   )
 
@@ -2088,7 +2112,10 @@ test_that("twas_pipeline: mr_result is returned in final result", {
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   )
 
@@ -2144,7 +2171,10 @@ test_that("twas_pipeline: when TWAS analysis yields no results, returns NULL com
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   )
 
@@ -2390,7 +2420,10 @@ test_that("twas_pipeline: processes multiple GWAS studies correctly", {
         studyA = data.frame(variant_id = variant_ids, z = rnorm(p), stringsAsFactors = FALSE),
         studyB = data.frame(variant_id = variant_ids, z = rnorm(p), stringsAsFactors = FALSE)
       ),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   )
 
@@ -2457,7 +2490,10 @@ test_that("twas_pipeline: rsq_option='adj_rsq' uses adjusted R-squared", {
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   )
 
@@ -2524,7 +2560,10 @@ test_that("twas_pipeline: rsq_pval_option='adj_rsq_pval' uses the correct p-valu
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   )
 
@@ -2726,6 +2765,7 @@ test_that("harmonize_twas: group_contexts_by_region single context path (lines 4
     A2 = rep("A", p),
     A1 = rep("T", p),
     variant_id = variant_ids,
+    allele_freq = rep(0.3, p),
     variance = rep(1.0, p),
     stringsAsFactors = FALSE
   )
@@ -2754,11 +2794,16 @@ test_that("harmonize_twas: group_contexts_by_region single context path (lines 4
   skip_if_not_installed("readr")
 
   local_mocked_bindings(
-    load_LD_matrix = function(...) {
+    load_ld_sketch = function(...) {
+      n_sketch <- 50L
+      p_sketch <- length(mock_LD_variants)
+      set.seed(123)
+      X <- matrix(rbinom(n_sketch * p_sketch, 2, 0.3), nrow = n_sketch, ncol = p_sketch)
       list(
-        LD_matrix = mock_LD_matrix,
-        LD_variants = mock_LD_variants,
-        ref_panel = mock_ref_panel
+        X = X,
+        n_sketch = n_sketch,
+        ref_panel = mock_ref_panel,
+        variant_ids = mock_LD_variants
       )
     },
     get_ref_variant_info = function(...) mock_snp_info,
@@ -2865,15 +2910,21 @@ test_that("harmonize_twas: group_contexts_by_region multi-context clustering (li
   ))
 
   local_mocked_bindings(
-    load_LD_matrix = function(...) {
+    load_ld_sketch = function(...) {
+      n_sketch <- 50L
+      p_sketch <- length(all_variant_ids)
+      set.seed(123)
+      X <- matrix(rbinom(n_sketch * p_sketch, 2, 0.3), nrow = n_sketch, ncol = p_sketch)
       list(
-        LD_matrix = mock_LD_matrix,
-        LD_variants = all_variant_ids,
+        X = X,
+        n_sketch = n_sketch,
         ref_panel = data.frame(chrom = 1, pos = as.integer(sapply(strsplit(all_variant_ids, ":"), `[`, 2)),
                                A2 = "A", A1 = "T",
                                variant_id = all_variant_ids,
+                               allele_freq = rep(0.3, length(all_variant_ids)),
                                variance = rep(1.0, length(all_variant_ids)),
-                               stringsAsFactors = FALSE)
+                               stringsAsFactors = FALSE),
+        variant_ids = all_variant_ids
       )
     },
     get_ref_variant_info = function(...) mock_snp_info,
@@ -2952,7 +3003,10 @@ test_that("twas_pipeline: adj_rsq_pval option exercised in pick_best_model", {
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   )
 
@@ -3025,7 +3079,10 @@ test_that("twas_pipeline: missing data_type triggers assignment check on line 61
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   )
 
@@ -3094,7 +3151,10 @@ test_that("twas_pipeline: twas_analysis returning NULL yields empty rows (line 6
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   )
 
@@ -3167,7 +3227,10 @@ test_that("twas_pipeline: MR path entered when susie_results and significant twa
         z = c(10.0, 8.0, 1.0, 0.5, 0.2),  # Large z to get small pval for MR trigger
         stringsAsFactors = FALSE
       )),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   )
 
@@ -3222,7 +3285,10 @@ test_that("twas_pipeline: event_filters filtering some but not all contexts", {
       gwas_qced = list(study1 = data.frame(
         variant_id = variant_ids, z = rnorm(p), stringsAsFactors = FALSE
       )),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   )
 
@@ -3293,9 +3359,26 @@ test_that("harmonize_twas: duplicated LD variants are removed", {
     stringsAsFactors = FALSE
   )
 
+  # Dedup now happens inside load_LD_matrix (called by load_ld_sketch).
+  # Mock load_ld_sketch to return already-deduped data (3 unique variants).
   local_mocked_bindings(
-    load_LD_matrix = function(...) {
-      list(LD_matrix = dup_LD_matrix, LD_variants = dup_variant_ids, ref_panel = dup_ref_panel)
+    load_ld_sketch = function(...) {
+      n_sketch <- 50L
+      set.seed(123)
+      X <- matrix(rbinom(n_sketch * p, 2, 0.3), nrow = n_sketch, ncol = p)
+      list(
+        X = X,
+        n_sketch = n_sketch,
+        ref_panel = data.frame(
+          chrom = rep(1, p), pos = c(100, 200, 300),
+          A2 = rep("A", p), A1 = rep("T", p),
+          variant_id = variant_ids,
+          allele_freq = rep(0.3, p),
+          variance = rep(1.0, p),
+          stringsAsFactors = FALSE
+        ),
+        variant_ids = variant_ids
+      )
     },
     harmonize_gwas = function(...) mock_gwas_data,
     match_ref_panel = function(target_data, ref_data, ...) {
@@ -3323,7 +3406,7 @@ test_that("harmonize_twas: duplicated LD variants are removed", {
   result <- harmonize_twas(twas_weights_data, "fake_ld.tsv", gwas_meta_file, ld_reference_sample_size = 17000)
 
   expect_true(is.list(result))
-  # After dedup, the LD should have been pared back to unique variants (3, not 4).
+  # ref_panel should have the 3 unique variants
   expect_equal(nrow(result$ref_panel), p)
 })
 
@@ -3351,12 +3434,18 @@ test_that("harmonize_twas: drops molecular_id when harmonize_gwas returns NULL f
   rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
   ref_panel <- data.frame(
     chrom = 1, pos = c(100, 200, 300), A2 = "A", A1 = "T",
-    variant_id = variant_ids, variance = 1.0, stringsAsFactors = FALSE
+    variant_id = variant_ids, allele_freq = 0.3, variance = 1.0, stringsAsFactors = FALSE
   )
 
   local_mocked_bindings(
-    load_LD_matrix = function(...) {
-      list(LD_matrix = LD_matrix, LD_variants = variant_ids, ref_panel = ref_panel)
+    load_ld_sketch = function(...) {
+      n_sketch <- 50L
+      set.seed(123)
+      X <- matrix(rbinom(n_sketch * p, 2, 0.3), nrow = n_sketch, ncol = p)
+      list(
+        X = X, n_sketch = n_sketch,
+        ref_panel = ref_panel, variant_ids = variant_ids
+      )
     },
     # Returning NULL skips the entire context loop, so gwas_qced stays empty
     harmonize_gwas = function(...) NULL,
@@ -3374,7 +3463,7 @@ test_that("harmonize_twas: drops molecular_id when harmonize_gwas returns NULL f
 
   result <- harmonize_twas(twas_weights_data, "fake_ld.tsv", gwas_meta_file, ld_reference_sample_size = 17000)
 
-  # gene1 should have been dropped (line 217 sets results[[mid]] <- NULL)
+  # gene1 should have been dropped (gwas_qced is empty)
   expect_true(is.list(result))
   expect_null(result$twas_data_qced$gene1)
 })
@@ -3414,7 +3503,7 @@ test_that("harmonize_twas: susie_weights column triggers adjust_susie_weights br
   rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
   ref_panel <- data.frame(
     chrom = 1, pos = c(100, 200, 300), A2 = "A", A1 = "T",
-    variant_id = variant_ids, variance = 1.0, stringsAsFactors = FALSE
+    variant_id = variant_ids, allele_freq = 0.3, variance = 1.0, stringsAsFactors = FALSE
   )
 
   mock_gwas_data <- data.frame(
@@ -3425,8 +3514,14 @@ test_that("harmonize_twas: susie_weights column triggers adjust_susie_weights br
   )
 
   local_mocked_bindings(
-    load_LD_matrix = function(...) {
-      list(LD_matrix = LD_matrix, LD_variants = variant_ids, ref_panel = ref_panel)
+    load_ld_sketch = function(...) {
+      n_sketch <- 50L
+      set.seed(123)
+      X <- matrix(rbinom(n_sketch * p, 2, 0.3), nrow = n_sketch, ncol = p)
+      list(
+        X = X, n_sketch = n_sketch,
+        ref_panel = ref_panel, variant_ids = variant_ids
+      )
     },
     harmonize_gwas = function(...) mock_gwas_data,
     match_ref_panel = function(target_data, ref_data, ...) {
@@ -3500,7 +3595,10 @@ test_that("twas_pipeline: pick_best_model returns NULL when all CV rsq are NA", 
       gwas_qced = list(study1 = data.frame(
         variant_id = variant_ids, z = rnorm(p), stringsAsFactors = FALSE
       )),
-      LD = LD_matrix
+      svd_V = diag(nrow(LD_matrix)),
+      svd_D = rep(sqrt(49), nrow(LD_matrix)),
+      n_sketch = 50L,
+      ld_variant_ids = rownames(LD_matrix)
     )
   )
 

@@ -763,6 +763,8 @@ merge_sumstats_matrices <- function(matrix_list, value_column, ref_panel = NULL,
             cohort_df <- cbind(cohort_variants_df, value = df2[, value_column, drop = FALSE])
 
             # Step 4: Merge with LD reference and filter
+            # Normalize ld_meta_file chrom to integer to match parse_variant_id output
+            ld_meta_file$chrom <- as.integer(strip_chr_prefix(as.character(ld_meta_file$chrom)))
             variants_ld_block_match <- merge(cohort_df, ld_meta_file, by = "chrom", allow.cartesian = TRUE) %>%
               filter(pos > start & pos < end) %>%
               select(-path)

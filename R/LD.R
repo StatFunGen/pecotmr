@@ -487,6 +487,67 @@ load_LD_from_genotype <- function(genotype_path, region,
   )
 }
 
+# ---------- LD sketch: genotype loading ----------
+
+#' HWE-based standardization of a genotype matrix
+#'
+#' Centers by 2*allele_freq, scales by sqrt(2*allele_freq*(1-allele_freq)).
+#' Assumes monomorphic variants have already been removed.
+#'
+#' @param X Numeric genotype matrix (n x p).
+#' @param allele_freq Numeric vector of allele frequencies (length p).
+#' @return Standardized matrix (n x p).
+#' @noRd
+standardize_genotype_hwe <- function(X, allele_freq) {
+  X_std <- sweep(X, 2, 2 * allele_freq)
+  sweep(X_std, 2, sqrt(2 * allele_freq * (1 - allele_freq)), "/")
+}
+
+#' Load LD sketch genotypes for a region
+#'
+#' Loads genotype data for a region via \code{load_LD_matrix(return_genotype=TRUE)}
+#' and removes monomorphic variants. Returns the raw genotype matrix and metadata,
+#' which callers can use to derive either a correlation matrix R (for summary-based
+#' weight training or fine-mapping) or an SVD (for TWAS z-score computation).
+#'
+#' @param ld_meta_file_path Path to the LD metadata TSV file.
+#' @param region Region of interest: "chr:start-end" string or data.frame with chrom/start/end.
+#' @param n_sample Optional original panel sample size for computing variance
+#'   (= 2*p*(1-p)*n/(n-1)). Passed through to \code{load_LD_matrix()}.
+#'
+#' @return A list with:
+#' \describe{
+#'   \item{X}{Raw genotype matrix (n_sketch x p) after removing monomorphic variants.}
+#'   \item{n_sketch}{Number of rows (samples) in the sketch genotype matrix.}
+#'   \item{ref_panel}{Data.frame with variant metadata (chrom, pos, A2, A1, variant_id,
+#'     allele_freq, and optionally variance, n_nomiss).}
+#'   \item{variant_ids}{Character vector of variant IDs (canonical format) after
+#'     removing monomorphic variants.}
+#' }
+#' @export
+load_ld_sketch <- function(ld_meta_file_path, region, n_sample = NULL) {
+  result <- load_LD_matrix(ld_meta_file_path, region, return_genotype = TRUE, n_sample = n_sample)
+  X <- result$LD_matrix
+  variant_ids <- result$LD_variants
+  ref_panel <- result$ref_panel
+
+  # Remove monomorphic variants (zero variance under HWE)
+  p <- ref_panel$allele_freq
+  polymorphic <- p > 0 & p < 1
+  if (!all(polymorphic)) {
+    X <- X[, polymorphic, drop = FALSE]
+    variant_ids <- variant_ids[polymorphic]
+    ref_panel <- ref_panel[polymorphic, , drop = FALSE]
+  }
+
+  list(
+    X = X,
+    n_sketch = nrow(X),
+    ref_panel = ref_panel,
+    variant_ids = variant_ids
+  )
+}
+
 # ---------- Internal: load LD from pre-computed blocks ----------
 
 #' Load pre-computed LD from block-based metadata files.

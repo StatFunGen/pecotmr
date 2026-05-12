@@ -7,8 +7,12 @@
 twas_analysis(
   weights_matrix,
   gwas_sumstats_db,
-  LD_matrix,
-  extract_variants_objs
+  LD_matrix = NULL,
+  extract_variants_objs,
+  V = NULL,
+  D = NULL,
+  n_sketch = NULL,
+  ld_variant_ids = NULL
 )
 }
 \arguments{

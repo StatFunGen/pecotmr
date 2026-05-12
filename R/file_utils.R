@@ -1230,12 +1230,18 @@ load_twas_weights <- function(weight_db_files, conditions = NULL,
       multi_variants <- unique(find_data(combined_all_data$mnm_rs, c(2, variable_name_obj)))
       for (context in overl_contexts) {
         uni_variants <- get_nested_element(combined_all_data[[gene]][[context]], variable_name_obj)
-        multi_weights <- setNames(rep(0, length(uni_variants)), uni_variants)
+        # Harmonize chr prefix convention between multivariate and univariate variant IDs
+        chr_matched <- ensure_chr_match(multi_variants, uni_variants)
+        multi_variants_h <- chr_matched$ids_a
+        uni_variants_h <- chr_matched$ids_b
+        multi_weights <- setNames(rep(0, length(uni_variants_h)), uni_variants_h)
         multi_weights <- lapply(combined_all_data[["mnm_rs"]][[context]]$twas_weights, function(weight_list) {
-          aligned_weights <- setNames(rep(0, length(uni_variants)), uni_variants)
-          method_weight_variants <- names(unlist(weight_list))
-          overlap_variants <- method_weight_variants[method_weight_variants %in% multi_variants[multi_variants %in% uni_variants]] # overlapping variants from method, multivariate, univariate
-          aligned_weights[overlap_variants] <- unlist(weight_list)[overlap_variants]
+          aligned_weights <- setNames(rep(0, length(uni_variants_h)), uni_variants_h)
+          weight_vals <- unlist(weight_list)
+          names(weight_vals) <- ensure_chr_match(names(weight_vals), uni_variants_h)$ids_a
+          method_weight_variants <- names(weight_vals)
+          overlap_variants <- method_weight_variants[method_weight_variants %in% multi_variants_h[multi_variants_h %in% uni_variants_h]]
+          aligned_weights[overlap_variants] <- weight_vals[overlap_variants]
           aligned_weights <- as.matrix(aligned_weights)
         })
         combined_all_data[[gene]][[context]]$twas_weights <- c(combined_all_data[[gene]][[context]]$twas_weights, multi_weights)

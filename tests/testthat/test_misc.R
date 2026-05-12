@@ -6,15 +6,15 @@ library(tidyverse)
 # =============================================================================
 
 test_that("Test compute_maf freq 0.5",{
-    expect_equal(compute_maf(rep(1, 20)), 0.5)
+    expect_equal(pecotmr:::compute_maf(rep(1, 20)), 0.5)
 })
 
 test_that("Test compute_maf freq 0.6",{
-    expect_equal(compute_maf(rep(1.2, 20)), 0.4)
+    expect_equal(pecotmr:::compute_maf(rep(1.2, 20)), 0.4)
 })
 
 test_that("Test compute_maf freq 0.3",{
-    expect_equal(compute_maf(rep(0.6, 20)), 0.3)
+    expect_equal(pecotmr:::compute_maf(rep(0.6, 20)), 0.3)
 })
 
 test_that("Test compute_maf with NA",{
@@ -23,11 +23,11 @@ test_that("Test compute_maf with NA",{
         vals <- c(1.2, NA)
         return(sample(vals, sample_size, replace = TRUE))
     }
-    expect_equal(compute_maf(generate_small_dataset()), 0.4)
+    expect_equal(pecotmr:::compute_maf(generate_small_dataset()), 0.4)
 })
 
 test_that("compute_maf returns 0 for monomorphic (all 0)", {
-  expect_equal(compute_maf(rep(0, 10)), 0)
+  expect_equal(pecotmr:::compute_maf(rep(0, 10)), 0)
 })
 
 # =============================================================================
@@ -36,7 +36,7 @@ test_that("compute_maf returns 0 for monomorphic (all 0)", {
 
 test_that("test compute_missing",{
     small_dataset <- c(rep(NA, 20), rep(1, 80))
-    expect_equal(compute_missing(small_dataset), 0.2)
+    expect_equal(pecotmr:::compute_missing(small_dataset), 0.2)
 })
 
 # =============================================================================
@@ -45,12 +45,12 @@ test_that("test compute_missing",{
 
 test_that("Test compute_non_missing_y",{
     small_dataset <- c(rep(NA, 20), rep(1, 80))
-    expect_equal(compute_non_missing_y(small_dataset), 80)
+    expect_equal(pecotmr:::compute_non_missing_y(small_dataset), 80)
 })
 
 test_that("Test compute_all_missing_y",{
     small_dataset <- c(rep(NA, 20), rep(1, 80))
-    expect_equal(compute_all_missing_y(small_dataset), F)
+    expect_equal(pecotmr:::compute_all_missing_y(small_dataset), F)
 })
 
 test_that("compute_all_missing_y returns TRUE for all-NA vector", {
@@ -67,7 +67,7 @@ test_that("compute_all_missing_y returns FALSE for partially NA vector", {
 
 test_that("Test mean_impute",{
     dummy_data <- matrix(c(1,2,NA,1,2,3), nrow=3, ncol=2)
-    expect_equal(mean_impute(dummy_data)[3,1], 1.5)
+    expect_equal(pecotmr:::mean_impute(dummy_data)[3,1], 1.5)
 })
 
 test_that("mean_impute with all NAs in a column imputes NaN", {
@@ -83,7 +83,7 @@ test_that("mean_impute with all NAs in a column imputes NaN", {
 
 test_that("Test is_zero_variance",{
     dummy_data <- matrix(c(1,2,3,1,1,1), nrow=3, ncol=2)
-    col <- which(apply(dummy_data, 2, is_zero_variance))
+    col <- which(apply(dummy_data, 2, pecotmr:::is_zero_variance))
     expect_equal(col, 2)
 })
 
