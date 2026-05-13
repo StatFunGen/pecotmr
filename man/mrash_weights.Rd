@@ -4,7 +4,7 @@
 \alias{mrash_weights}
 \title{Compute Weights Using mr.ash Shrinkage}
 \usage{
-mrash_weights(X, y, init_prior_sd = TRUE, ...)
+mrash_weights(X, y, init_prior_sd = TRUE, retain_fit = FALSE, ...)
 }
 \description{
 This function fits the `mr.ash` model (adaptive shrinkage regression) to estimate weights

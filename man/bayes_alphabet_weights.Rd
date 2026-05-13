@@ -9,6 +9,7 @@ bayes_alphabet_weights(
   y,
   method,
   Z = NULL,
+  h2 = NULL,
   nit = 5000,
   nburn = 1000,
   nthin = 5,

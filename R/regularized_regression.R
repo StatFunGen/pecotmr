@@ -260,7 +260,7 @@ sdpr_weights <- function(stat, LD, ...) {
 # @param ... Additional arguments forwarded to susie_wrapper.
 #' @importFrom susieR coef.susie
 #' @noRd
-.susie_extract_weights <- function(fit, X, y, required_fields, fit_args = list(), ...) {
+.susie_extract_weights <- function(fit, X, y, required_fields, fit_args = list(), retain_fit = FALSE, ...) {
   if (is.null(fit)) {
     fit <- do.call(susie_wrapper, c(list(X = X, y = y), fit_args, list(...)))
   }
@@ -272,30 +272,35 @@ sdpr_weights <- function(stat, LD, ...) {
   }
   if (all(required_fields %in% names(fit))) {
     fit$intercept <- 0
-    return(coef.susie(fit)[-1])
+    weights <- coef.susie(fit)[-1]
   } else {
-    return(rep(0, length(fit$pip)))
+    weights <- rep(0, length(fit$pip))
   }
+  if (retain_fit) attr(weights, "fit") <- fit
+  return(weights)
 }
 
 #' @export
-susie_weights <- function(X = NULL, y = NULL, susie_fit = NULL, ...) {
+susie_weights <- function(X = NULL, y = NULL, susie_fit = NULL, retain_fit = FALSE, ...) {
   .susie_extract_weights(susie_fit, X, y,
-    required_fields = c("alpha", "mu", "X_column_scale_factors"), ...)
+    required_fields = c("alpha", "mu", "X_column_scale_factors"),
+    retain_fit = retain_fit, ...)
 }
 
 #' @export
-susie_ash_weights <- function(X = NULL, y = NULL, susie_ash_fit = NULL, ...) {
+susie_ash_weights <- function(X = NULL, y = NULL, susie_ash_fit = NULL, retain_fit = FALSE, ...) {
   .susie_extract_weights(susie_ash_fit, X, y,
     required_fields = c("alpha", "mu", "theta", "X_column_scale_factors"),
-    fit_args = list(unmappable_effects = "ash", convergence_method = "pip"), ...)
+    fit_args = list(unmappable_effects = "ash", convergence_method = "pip"),
+    retain_fit = retain_fit, ...)
 }
 
 #' @export
-susie_inf_weights <- function(X = NULL, y = NULL, susie_inf_fit = NULL, ...) {
+susie_inf_weights <- function(X = NULL, y = NULL, susie_inf_fit = NULL, retain_fit = FALSE, ...) {
   .susie_extract_weights(susie_inf_fit, X, y,
     required_fields = c("alpha", "mu", "theta", "X_column_scale_factors"),
-    fit_args = list(unmappable_effects = "inf", convergence_method = "pip"), ...)
+    fit_args = list(unmappable_effects = "inf", convergence_method = "pip"),
+    retain_fit = retain_fit, ...)
 }
 
 #' @export
@@ -396,7 +401,7 @@ lasso_weights <- function(X, y) glmnet_weights(X, y, 1)
 #' @importFrom susieR mr.ash
 #' @importFrom stats predict
 #' @export
-mrash_weights <- function(X, y, init_prior_sd = TRUE, ...) {
+mrash_weights <- function(X, y, init_prior_sd = TRUE, retain_fit = FALSE, ...) {
   eff.wgt <- rep(0, ncol(X))
   keep <- .drop_zero_variance(X, "mrash_weights")
   X_keep <- X[, keep, drop = FALSE]
@@ -408,6 +413,7 @@ mrash_weights <- function(X, y, init_prior_sd = TRUE, ...) {
   }
   fit.mr.ash <- do.call(mr.ash, c(list(X = X_keep, y = y, sa2 = if (init_prior_sd) init_prior_sd(X_keep, y)^2 else NULL), args_list))
   eff.wgt[keep] <- predict(fit.mr.ash, type = "coefficients")[-1]
+  if (retain_fit) attr(eff.wgt, "fit") <- fit.mr.ash
   return(eff.wgt)
 }
 #' Extract Coefficients From Bayesian Linear Regression
@@ -435,7 +441,7 @@ mrash_weights <- function(X, y, init_prior_sd = TRUE, ...) {
 #' bayes_l_weights(y = y, X = X, Z = Z)
 #' bayes_r_weights(y = y, X = X, Z = Z)
 #' @export
-bayes_alphabet_weights <- function(X, y, method, Z = NULL, nit = 5000, nburn = 1000, nthin = 5, ...) {
+bayes_alphabet_weights <- function(X, y, method, Z = NULL, h2 = NULL, nit = 5000, nburn = 1000, nthin = 5, ...) {
   # Make sure qgg is installed
   if (!requireNamespace("qgg", quietly = TRUE)) {
     stop("To use this function, please install qgg: https://cran.r-project.org/web/packages/qgg/index.html")
@@ -459,6 +465,7 @@ bayes_alphabet_weights <- function(X, y, method, Z = NULL, nit = 5000, nburn = 1
     W = X[, keep, drop = FALSE],
     X = Z,
     method = method,
+    h2 = h2,
     nit = nit,
     nburn = nburn,
     ...
@@ -484,8 +491,8 @@ bayes_a_weights <- function(X, y, Z = NULL, ...) {
 }
 #' Use a rounded spike prior (low-variance Gaussian).
 #' @export
-bayes_c_weights <- function(X, y, Z = NULL, ...) {
-  return(bayes_alphabet_weights(X, y, method = "bayesC", Z, ...))
+bayes_c_weights <- function(X, y, Z = NULL, pi = 0.1, ...) {
+  return(bayes_alphabet_weights(X, y, method = "bayesC", Z, pi = pi, ...))
 }
 #' Use a hierarchical Bayesian mixture model with four Gaussian components. Variances are scaled
 #' by 0, 0.0001 , 0.001 , and 0.01 .
@@ -1137,11 +1144,11 @@ bglr_weights <- function(X, y, model, nIter, burnIn, thin, eta_args = list(), ..
 #' @param nIter Number of MCMC iterations. Default is 10000.
 #' @param burnIn Number of burn-in iterations. Default is 2000.
 #' @param thin Thinning interval. Default is 5.
-#' @param probIn Prior inclusion probability for each marker. Default is 0.05.
+#' @param probIn Prior inclusion probability for each marker. Default is 0.2.
 #' @param ... Additional arguments passed through to `BGLR::BGLR`.
 #' @return A numeric vector of length `ncol(X)` of variant weights.
 #' @export
-bayes_b_weights <- function(X, y, nIter = 10000, burnIn = 2000, thin = 5, probIn = 0.05, ...) {
+bayes_b_weights <- function(X, y, nIter = 10000, burnIn = 2000, thin = 5, probIn = 0.2, ...) {
   bglr_weights(
     X, y,
     model = "BayesB", nIter = nIter, burnIn = burnIn, thin = thin,
@@ -1194,7 +1201,7 @@ b_lasso_weights <- function(X, y, nIter = 10000, burnIn = 2000, thin = 5, ...) {
 #' @param ... Additional arguments passed through to `RcppDPR::fit_model`.
 #' @return A numeric vector of length `ncol(X)` of variant weights.
 #' @export
-dpr_weights <- function(X, y, fitting_method = "VB", ...) {
+dpr_weights <- function(X, y, fitting_method = "VB", retain_fit = FALSE, ...) {
   if (!requireNamespace("RcppDPR", quietly = TRUE)) {
     stop("To use this function, please install RcppDPR: https://cran.r-project.org/package=RcppDPR")
   }
@@ -1206,17 +1213,18 @@ dpr_weights <- function(X, y, fitting_method = "VB", ...) {
     rotate_variables = FALSE, fitting_method = fitting_method, ...
   )
   eff.wgt[keep] <- as.numeric(fit$beta + fit$alpha)
+  if (retain_fit) attr(eff.wgt, "fit") <- fit
   return(eff.wgt)
 }
 
 #' @rdname dpr_weights
 #' @export
-dpr_vb_weights <- function(X, y, ...) dpr_weights(X, y, fitting_method = "VB", ...)
+dpr_vb_weights <- function(X, y, n_k = 8, retain_fit = FALSE, ...) dpr_weights(X, y, fitting_method = "VB", n_k = n_k, retain_fit = retain_fit, ...)
 
 #' @rdname dpr_weights
 #' @export
-dpr_gibbs_weights <- function(X, y, ...) dpr_weights(X, y, fitting_method = "Gibbs", ...)
+dpr_gibbs_weights <- function(X, y, s_step = 5000, retain_fit = FALSE, ...) dpr_weights(X, y, fitting_method = "Gibbs", s_step = s_step, retain_fit = retain_fit, ...)
 
 #' @rdname dpr_weights
 #' @export
-dpr_adaptive_gibbs_weights <- function(X, y, ...) dpr_weights(X, y, fitting_method = "Adaptive_Gibbs", ...)
+dpr_adaptive_gibbs_weights <- function(X, y, retain_fit = FALSE, ...) dpr_weights(X, y, fitting_method = "Adaptive_Gibbs", retain_fit = retain_fit, ...)

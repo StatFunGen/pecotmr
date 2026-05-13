@@ -10,7 +10,7 @@ bayes_b_weights(
   nIter = 10000,
   burnIn = 2000,
   thin = 5,
-  probIn = 0.05,
+  probIn = 0.2,
   ...
 )
 }
@@ -25,7 +25,7 @@ bayes_b_weights(
 
 \item{thin}{Thinning interval. Default is 5.}
 
-\item{probIn}{Prior inclusion probability for each marker. Default is 0.05.}
+\item{probIn}{Prior inclusion probability for each marker. Default is 0.2.}
 
 \item{...}{Additional arguments passed through to `BGLR::BGLR`.}
 }

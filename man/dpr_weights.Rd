@@ -7,13 +7,13 @@
 \alias{dpr_adaptive_gibbs_weights}
 \title{Compute Weights Using Dirichlet Process Regression (RcppDPR)}
 \usage{
-dpr_weights(X, y, fitting_method = "VB", ...)
+dpr_weights(X, y, fitting_method = "VB", retain_fit = FALSE, ...)
 
-dpr_vb_weights(X, y, ...)
+dpr_vb_weights(X, y, n_k = 8, retain_fit = FALSE, ...)
 
-dpr_gibbs_weights(X, y, ...)
+dpr_gibbs_weights(X, y, s_step = 5000, retain_fit = FALSE, ...)
 
-dpr_adaptive_gibbs_weights(X, y, ...)
+dpr_adaptive_gibbs_weights(X, y, retain_fit = FALSE, ...)
 }
 \arguments{
 \item{X}{A numeric matrix of predictors.}

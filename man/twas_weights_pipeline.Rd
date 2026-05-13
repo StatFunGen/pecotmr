@@ -17,7 +17,9 @@ twas_weights_pipeline(
   ensemble = FALSE,
   ensemble_r2_threshold = 0.01,
   ensemble_solver = "quadprog",
-  ensemble_alpha = 1
+  ensemble_alpha = 1,
+  estimate_pi_methods = c("susie"),
+  pi_aggregation = "median"
 )
 }
 \arguments{
@@ -52,6 +54,18 @@ for ensemble learning. One of \code{"quadprog"}, \code{"nnls"},
 
 \item{ensemble_alpha}{Elastic net mixing parameter, used only when
 \code{ensemble_solver = "glmnet"}. Defaults to 1 (lasso).}
+
+\item{estimate_pi_methods}{Character vector of short method names to
+use for empirical sparsity estimation. The estimated sparsity is
+used as the \code{pi} prior for bayesC and the \code{probIn} prior
+for BayesB, unless the user provides explicit values in
+\code{weight_methods}. Set to \code{NULL} to disable empirical
+estimation. Defaults to \code{c("susie")}. See
+\code{\link{estimate_sparsity}} for allowed method names.}
+
+\item{pi_aggregation}{How to combine sparsity estimates when
+multiple estimation methods are used: \code{"median"} (default)
+or \code{"mean"}.}
 }
 \value{
 A list containing results from the TWAS pipeline, including TWAS weights, predictions, and optionally cross-validation results.

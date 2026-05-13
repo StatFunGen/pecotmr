@@ -39,5 +39,6 @@ r45 = {features = ["r45"]}
 "r-markdown" = "*"
 "r-pkgdown" = "*"
 "r-rcmdcheck" = "*"
+"r-simxqtl" = "*"
 "r-testthat" = "*"
 "r-tidyverse" = "*"

@@ -53,6 +53,7 @@ requirements:
     - r-magrittr
     - r-mashr
     - r-matrixstats
+    - r-mr.ash.alpha
     - r-mr.mashr
     - r-mvsusier
     - r-ncvreg
@@ -97,6 +98,7 @@ requirements:
     - r-magrittr
     - r-mashr
     - r-matrixstats
+    - r-mr.ash.alpha
     - r-mr.mashr
     - r-mvsusier
     - r-ncvreg
