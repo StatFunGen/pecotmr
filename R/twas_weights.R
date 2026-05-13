@@ -634,7 +634,7 @@ twas_multivariate_weights_pipeline <- function(
         residual_variance = mnm_fit$mrmash_fitted$V,
         L = max_L,
         max_iter = mvsusie_max_iter,
-        verbosity = verbose
+        verbose = verbose
       )
     )
 

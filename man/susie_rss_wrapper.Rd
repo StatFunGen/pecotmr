@@ -13,7 +13,7 @@ susie_rss_wrapper(
   max_L = 30,
   l_step = 5,
   coverage = 0.95,
-  stochastic_ld_sample = NULL,
+  R_finite = NULL,
   ...
 )
 }
@@ -33,9 +33,8 @@ When provided, susie_rss uses the low-rank X interface.}
 
 \item{l_step}{Step size for increasing L when the limit is reached.}
 
-\item{stochastic_ld_sample}{Stochastic LD parameter passed to susie_rss.
-NULL (default): no variance inflation. TRUE: infer sketch size from X
-(requires X, not R). Integer: explicit sketch size (for R only).}
+\item{R_finite}{Controls variance inflation to account for finite reference LD.
+Passed to \code{susieR::susie_rss()}.}
 
 \item{...}{Extra parameters passed to susie_rss (e.g., var_y, coverage).}
 }

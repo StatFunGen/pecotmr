@@ -150,9 +150,8 @@ susie_wrapper <- function(X, y, init_L = 5, max_L = 30, l_step = 5, ...) {
 #' @param L Initial number of causal configurations.
 #' @param max_L Maximum number of causal configurations.
 #' @param l_step Step size for increasing L when the limit is reached.
-#' @param stochastic_ld_sample Stochastic LD parameter passed to susie_rss.
-#'   NULL (default): no variance inflation. TRUE: infer sketch size from X
-#'   (requires X, not R). Integer: explicit sketch size (for R only).
+#' @param R_finite Controls variance inflation to account for finite reference LD.
+#'   Passed to \code{susieR::susie_rss()}.
 #' @param ... Extra parameters passed to susie_rss (e.g., var_y, coverage).
 #' @return SuSiE RSS fit object after dynamic L adjustment
 #' @importFrom susieR susie_rss
@@ -160,14 +159,14 @@ susie_wrapper <- function(X, y, init_L = 5, max_L = 30, l_step = 5, ...) {
 susie_rss_wrapper <- function(z, R = NULL, X = NULL, n = NULL,
                               L = 10, max_L = 30, l_step = 5,
                               coverage = 0.95,
-                              stochastic_ld_sample = NULL, ...) {
+                              R_finite = NULL, ...) {
   # Validate: exactly one of R or X
   if (is.null(R) && is.null(X)) stop("Either R or X must be provided.")
   if (!is.null(R) && !is.null(X)) stop("Only one of R or X should be provided, not both.")
 
   # Build argument list for susie_rss
   base_args <- list(z = z, n = n, L = L, coverage = coverage,
-                    stochastic_ld_sample = stochastic_ld_sample, ...)
+                    R_finite = R_finite, ...)
   if (!is.null(X)) base_args$X <- X else base_args$R <- R
 
   run_susie <- function(args) do.call(susie_rss, args)
@@ -211,7 +210,8 @@ susie_rss_wrapper <- function(z, R = NULL, X = NULL, n = NULL,
 #' @param secondary_coverage Secondary coverage levels (default: c(0.7, 0.5)).
 #' @param signal_cutoff PIP cutoff for susie_post_processor (default: 0.1).
 #' @param min_abs_corr Minimum absolute correlation for CS purity (default: 0.8).
-#' @param stochastic_ld_sample Passed to susie_rss. NULL, TRUE, or integer.
+#' @param R_finite Controls variance inflation to account for finite reference LD.
+#'   Passed to \code{susieR::susie_rss()}.
 #' @param ... Additional parameters passed to susie_rss (e.g., var_y).
 #' @return A list with post-processed SuSiE RSS results.
 #' @importFrom magrittr %>%
@@ -224,7 +224,7 @@ susie_rss_pipeline <- function(sumstats, LD_mat = NULL, X_mat = NULL, n = NULL,
                                secondary_coverage = c(0.7, 0.5),
                                signal_cutoff = 0.1,
                                min_abs_corr = 0.8,
-                               stochastic_ld_sample = NULL, ...) {
+                               R_finite = NULL, ...) {
   analysis_method <- match.arg(analysis_method)
 
   if (!is.null(sumstats$z)) {
@@ -237,7 +237,7 @@ susie_rss_pipeline <- function(sumstats, LD_mat = NULL, X_mat = NULL, n = NULL,
 
   # Common args for susie_rss_wrapper
   common <- list(z = z, n = n, coverage = coverage,
-                 stochastic_ld_sample = stochastic_ld_sample, ...)
+                 R_finite = R_finite, ...)
   if (!is.null(X_mat)) common$X <- X_mat else common$R <- LD_mat
 
   if (analysis_method == "single_effect") {
@@ -351,7 +351,7 @@ susie_post_processor <- function(susie_output, data_x, data_y, X_scalar, y_scala
   if (analysis_script != "") res$analysis_script <- analysis_script
   if (!is.null(other_quantities)) res$other_quantities <- other_quantities
   if (mode == "mvsusie") {
-    res$context_names <- susie_output$condition_names
+    res$context_names <- susie_output$outcome_names
   }
   if (!is.null(data_y)) {
     # Mode-specific processing
@@ -447,10 +447,10 @@ susie_post_processor <- function(susie_output, data_x, data_y, X_scalar, y_scala
       res$susie_result_trimmed$mu2 <- susie_output$mu2[eff_idx, , drop = FALSE]
     }
     if (mode == "mvsusie") {
-      # res$susie_result_trimmed$b1 = susie_output$b1[eff_idx, , , drop = FALSE]
-      # res$susie_result_trimmed$b2 = susie_output$b2[eff_idx, , , drop = FALSE]
-      res$susie_result_trimmed$b1_rescaled <- susie_output$b1_rescaled[eff_idx, , , drop = FALSE]
-      res$susie_result_trimmed$coef <- susie_output$coef
+      res$susie_result_trimmed$mu <- susie_output$mu[eff_idx, , , drop = FALSE]
+      res$susie_result_trimmed$mu2_diag <- susie_output$mu2_diag[eff_idx, , , drop = FALSE]
+      res$susie_result_trimmed$X_column_scale_factors <- susie_output$X_column_scale_factors
+      res$susie_result_trimmed$coef <- mvsusieR::coef.mvsusie(susie_output)[-1, , drop = FALSE]
       res$susie_result_trimmed$clfsr <- susie_output$conditional_lfsr[eff_idx, , , drop = FALSE]
       # other lfsr can be computed:
       # se_lfsr <- mvsusie_single_effect_lfsr(clfsr, alpha)

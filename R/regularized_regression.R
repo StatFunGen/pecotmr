@@ -338,7 +338,9 @@ mrmash_weights <- function(mrmash_fit = NULL, X = NULL, Y = NULL, ...) {
 }
 
 #' @export
-mvsusie_weights <- function(mvsusie_fit = NULL, X = NULL, Y = NULL, prior_variance = NULL, residual_variance = NULL, L = 30, ...) {
+mvsusie_weights <- function(mvsusie_fit = NULL, X = NULL, Y = NULL,
+                            prior_variance = NULL, residual_variance = NULL,
+                            L = 30, verbose = FALSE, ...) {
   if (!requireNamespace("mvsusieR", quietly = TRUE)) {
     stop("Package 'mvsusieR' is required. Install with: devtools::install_github('stephenslab/mvsusieR')")
   }
@@ -357,9 +359,9 @@ mvsusie_weights <- function(mvsusie_fit = NULL, X = NULL, Y = NULL, prior_varian
 
     mvsusie_fit <- mvsusieR::mvsusie(
       X = X, Y = Y, L = L, prior_variance = prior_variance,
-      residual_variance = residual_variance, precompute_covariances = FALSE,
-      compute_objective = TRUE, estimate_residual_variance = FALSE, estimate_prior_variance = TRUE,
-      estimate_prior_method = "EM", approximate = FALSE, ...
+      residual_variance = residual_variance,
+      estimate_residual_variance = FALSE,
+      verbose = verbose, ...
     )
   }
   return(mvsusieR::coef.mvsusie(mvsusie_fit)[-1, ])
