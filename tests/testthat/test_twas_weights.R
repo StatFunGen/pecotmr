@@ -732,12 +732,17 @@ test_that("twas_weights_pipeline: returns list with expected structure (mocked)"
     enet_weights  = function(X, y, ...) rep(0.1, ncol(X)),
     lasso_weights = function(X, y, ...) rep(0.2, ncol(X)),
     bayes_r_weights = function(X, y, ...) rep(0, ncol(X)),
-    dpr_gibbs_weights = function(X, y, ...) rep(0, ncol(X)),
+    bayes_c_weights = function(X, y, ...) rep(0, ncol(X)),
     mrash_weights = function(X, y, ...) rep(0, ncol(X)),
-    susie_weights = function(X, y, ...) rep(0, ncol(X))
+    mcp_weights   = function(X, y, ...) rep(0, ncol(X)),
+    scad_weights  = function(X, y, ...) rep(0, ncol(X)),
+    l0learn_weights = function(X, y, ...) rep(0, ncol(X)),
+    susie_weights = function(X, y, ...) rep(0, ncol(X)),
+    susie_inf_weights = function(X, y, ...) rep(0, ncol(X))
   )
 
-  result <- twas_weights_pipeline(d$X, y_vec, susie_fit = NULL, cv_folds = 0)
+  result <- twas_weights_pipeline(d$X, y_vec, susie_fit = NULL, cv_folds = 0,
+                                  estimate_pi = FALSE)
 
   expect_true(is.list(result))
   expect_true("twas_weights" %in% names(result))
@@ -748,8 +753,8 @@ test_that("twas_weights_pipeline: returns list with expected structure (mocked)"
   expect_true(all(enet_w[, 1] == 0.1))
   lasso_w <- result$twas_weights[["lasso_weights"]]
   expect_true(all(lasso_w[, 1] == 0.2))
-  # The number of weight methods should equal the 6 default methods
-  expect_equal(length(result$twas_weights), 6)
+  # The number of weight methods should equal the 10 default methods
+  expect_equal(length(result$twas_weights), 10)
 })
 
 test_that("twas_weights_pipeline: twas_weights contains all default methods", {
@@ -760,16 +765,23 @@ test_that("twas_weights_pipeline: twas_weights contains all default methods", {
     enet_weights  = function(X, y, ...) rep(0.1, ncol(X)),
     lasso_weights = function(X, y, ...) rep(0.2, ncol(X)),
     bayes_r_weights = function(X, y, ...) rep(0, ncol(X)),
-    dpr_gibbs_weights = function(X, y, ...) rep(0, ncol(X)),
+    bayes_c_weights = function(X, y, ...) rep(0, ncol(X)),
     mrash_weights = function(X, y, ...) rep(0, ncol(X)),
-    susie_weights = function(X, y, ...) rep(0, ncol(X))
+    mcp_weights   = function(X, y, ...) rep(0, ncol(X)),
+    scad_weights  = function(X, y, ...) rep(0, ncol(X)),
+    l0learn_weights = function(X, y, ...) rep(0, ncol(X)),
+    susie_weights = function(X, y, ...) rep(0, ncol(X)),
+    susie_inf_weights = function(X, y, ...) rep(0, ncol(X))
   )
 
-  result <- twas_weights_pipeline(d$X, y_vec, susie_fit = NULL, cv_folds = 0)
+  result <- twas_weights_pipeline(d$X, y_vec, susie_fit = NULL, cv_folds = 0,
+                                  estimate_pi = FALSE)
 
   expected_methods <- c(
     "enet_weights", "lasso_weights", "bayes_r_weights",
-    "dpr_gibbs_weights", "mrash_weights", "susie_weights"
+    "bayes_c_weights", "mrash_weights", "mcp_weights",
+    "scad_weights", "l0learn_weights", "susie_weights",
+    "susie_inf_weights"
   )
   expect_true(all(expected_methods %in% names(result$twas_weights)))
 })
@@ -782,16 +794,23 @@ test_that("twas_weights_pipeline: predictions have _predicted suffix", {
     enet_weights  = function(X, y, ...) rep(0, ncol(X)),
     lasso_weights = function(X, y, ...) rep(0, ncol(X)),
     bayes_r_weights = function(X, y, ...) rep(0, ncol(X)),
-    dpr_gibbs_weights = function(X, y, ...) rep(0, ncol(X)),
+    bayes_c_weights = function(X, y, ...) rep(0, ncol(X)),
     mrash_weights = function(X, y, ...) rep(0, ncol(X)),
-    susie_weights = function(X, y, ...) rep(0, ncol(X))
+    mcp_weights   = function(X, y, ...) rep(0, ncol(X)),
+    scad_weights  = function(X, y, ...) rep(0, ncol(X)),
+    l0learn_weights = function(X, y, ...) rep(0, ncol(X)),
+    susie_weights = function(X, y, ...) rep(0, ncol(X)),
+    susie_inf_weights = function(X, y, ...) rep(0, ncol(X))
   )
 
-  result <- twas_weights_pipeline(d$X, y_vec, susie_fit = NULL, cv_folds = 0)
+  result <- twas_weights_pipeline(d$X, y_vec, susie_fit = NULL, cv_folds = 0,
+                                  estimate_pi = FALSE)
 
   expected_pred_names <- c(
     "enet_predicted", "lasso_predicted", "bayes_r_predicted",
-    "dpr_gibbs_predicted", "mrash_predicted", "susie_predicted"
+    "bayes_c_predicted", "mrash_predicted", "mcp_predicted",
+    "scad_predicted", "l0learn_predicted", "susie_predicted",
+    "susie_inf_predicted"
   )
   expect_true(all(expected_pred_names %in% names(result$twas_predictions)))
 })
@@ -804,12 +823,17 @@ test_that("twas_weights_pipeline: cv_folds=0 skips cross-validation", {
     enet_weights  = function(X, y, ...) rep(0, ncol(X)),
     lasso_weights = function(X, y, ...) rep(0, ncol(X)),
     bayes_r_weights = function(X, y, ...) rep(0, ncol(X)),
-    dpr_gibbs_weights = function(X, y, ...) rep(0, ncol(X)),
+    bayes_c_weights = function(X, y, ...) rep(0, ncol(X)),
     mrash_weights = function(X, y, ...) rep(0, ncol(X)),
-    susie_weights = function(X, y, ...) rep(0, ncol(X))
+    mcp_weights   = function(X, y, ...) rep(0, ncol(X)),
+    scad_weights  = function(X, y, ...) rep(0, ncol(X)),
+    l0learn_weights = function(X, y, ...) rep(0, ncol(X)),
+    susie_weights = function(X, y, ...) rep(0, ncol(X)),
+    susie_inf_weights = function(X, y, ...) rep(0, ncol(X))
   )
 
-  result <- twas_weights_pipeline(d$X, y_vec, susie_fit = NULL, cv_folds = 0)
+  result <- twas_weights_pipeline(d$X, y_vec, susie_fit = NULL, cv_folds = 0,
+                                  estimate_pi = FALSE)
 
   expect_false("twas_cv_result" %in% names(result))
   # All mock weights were zero, so all predictions should be zero
@@ -849,7 +873,11 @@ test_that("twas_weights_pipeline: accepts 'fast_default' preset string", {
     enet_weights  = function(X, y, ...) rep(0, ncol(X)),
     lasso_weights = function(X, y, ...) rep(0, ncol(X)),
     mrash_weights = function(X, y, ...) rep(0, ncol(X)),
-    susie_weights = function(X, y, ...) rep(0, ncol(X))
+    mcp_weights   = function(X, y, ...) rep(0, ncol(X)),
+    scad_weights  = function(X, y, ...) rep(0, ncol(X)),
+    l0learn_weights = function(X, y, ...) rep(0, ncol(X)),
+    susie_weights = function(X, y, ...) rep(0, ncol(X)),
+    susie_inf_weights = function(X, y, ...) rep(0, ncol(X))
   )
 
   result <- twas_weights_pipeline(
@@ -857,7 +885,9 @@ test_that("twas_weights_pipeline: accepts 'fast_default' preset string", {
     weight_methods = "fast_default"
   )
 
-  expected_methods <- c("susie_weights", "mrash_weights", "enet_weights", "lasso_weights")
+  expected_methods <- c("susie_weights", "susie_inf_weights", "mrash_weights",
+                        "enet_weights", "lasso_weights", "mcp_weights",
+                        "scad_weights", "l0learn_weights")
   expect_equal(sort(names(result$twas_weights)), sort(expected_methods))
 })
 
@@ -896,12 +926,17 @@ test_that("twas_weights_pipeline: with susie_fit stores intermediate results", {
     enet_weights  = function(X, y, ...) rep(0, ncol(X)),
     lasso_weights = function(X, y, ...) rep(0, ncol(X)),
     bayes_r_weights = function(X, y, ...) rep(0, ncol(X)),
-    dpr_gibbs_weights = function(X, y, ...) rep(0, ncol(X)),
+    bayes_c_weights = function(X, y, ...) rep(0, ncol(X)),
     mrash_weights = function(X, y, ...) rep(0, ncol(X)),
-    susie_weights = function(X, y, ...) rep(0, ncol(X))
+    mcp_weights   = function(X, y, ...) rep(0, ncol(X)),
+    scad_weights  = function(X, y, ...) rep(0, ncol(X)),
+    l0learn_weights = function(X, y, ...) rep(0, ncol(X)),
+    susie_weights = function(X, y, ...) rep(0, ncol(X)),
+    susie_inf_weights = function(X, y, ...) rep(0, ncol(X))
   )
 
-  result <- twas_weights_pipeline(d$X, y_vec, susie_fit = fake_susie, cv_folds = 0)
+  result <- twas_weights_pipeline(d$X, y_vec, susie_fit = fake_susie, cv_folds = 0,
+                                  estimate_pi = FALSE)
 
   expect_true("susie_weights_intermediate" %in% names(result))
   expect_true("mu" %in% names(result$susie_weights_intermediate))
@@ -928,8 +963,12 @@ test_that("twas_weights_pipeline: with susie_fit, susie_weights gets susie_fit a
     enet_weights  = function(X, y, ...) rep(0, ncol(X)),
     lasso_weights = function(X, y, ...) rep(0, ncol(X)),
     bayes_r_weights = function(X, y, ...) rep(0, ncol(X)),
-    dpr_gibbs_weights = function(X, y, ...) rep(0, ncol(X)),
+    bayes_c_weights = function(X, y, ...) rep(0, ncol(X)),
     mrash_weights = function(X, y, ...) rep(0, ncol(X)),
+    mcp_weights   = function(X, y, ...) rep(0, ncol(X)),
+    scad_weights  = function(X, y, ...) rep(0, ncol(X)),
+    l0learn_weights = function(X, y, ...) rep(0, ncol(X)),
+    susie_inf_weights = function(X, y, ...) rep(0, ncol(X)),
     susie_weights = function(X, y, ...) {
       args <- list(...)
       # The pipeline should pass susie_fit as an argument
@@ -940,7 +979,8 @@ test_that("twas_weights_pipeline: with susie_fit, susie_weights gets susie_fit a
     }
   )
 
-  result <- twas_weights_pipeline(d$X, y_vec, susie_fit = fake_susie, cv_folds = 0)
+  result <- twas_weights_pipeline(d$X, y_vec, susie_fit = fake_susie, cv_folds = 0,
+                                  estimate_pi = FALSE)
   expect_true(susie_received_fit)
 })
 
