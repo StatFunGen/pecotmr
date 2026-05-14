@@ -191,7 +191,9 @@ load_study_LD <- function(ld_path, region) {
 #' @param impute Whether to impute missing variants via RAISS (default TRUE).
 #' @param impute_opts List of imputation options (rcond, R2_threshold, minimum_ld, lamb).
 #' @param pip_cutoff_to_skip PIP threshold for early stopping (default 0, no skip).
-#' @param sketch_samples Passed to susie_rss. NULL (default), TRUE, or integer.
+#' @param R_finite Controls variance inflation to account for estimating
+#'   the R matrix from a finite reference panel. NULL (default): no
+#'   variance inflation. Passed directly to susie_rss.
 #' @param keep_indel Whether to keep indel variants (default TRUE).
 #' @param comment_string Comment character for sumstat file (default "#").
 #' @param diagnostics Whether to include diagnostic info (default FALSE).
@@ -211,7 +213,7 @@ rss_analysis_pipeline <- function(
       min_abs_corr = 0.8
     ),
     impute = TRUE, impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
-    pip_cutoff_to_skip = 0, sketch_samples = NULL,
+    pip_cutoff_to_skip = 0, R_finite = NULL,
     keep_indel = TRUE, comment_string = "#", diagnostics = FALSE) {
   # Detect genotype input: single X matrix or list of X matrices (mixture panel).
   # susie_rss accepts X=list(X1, X2, ...) for multi-panel mixture.
@@ -306,7 +308,7 @@ rss_analysis_pipeline <- function(
       secondary_coverage = sec_coverage,
       signal_cutoff = finemapping_opts$signal_cutoff,
       min_abs_corr = finemapping_opts$min_abs_corr,
-      sketch_samples = sketch_samples
+      R_finite = R_finite
     )
     if (!is.null(qc_method)) {
       res$outlier_number <- qc_results$outlier_number

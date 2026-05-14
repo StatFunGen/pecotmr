@@ -17,7 +17,7 @@ susie_rss_pipeline(
   secondary_coverage = c(0.7, 0.5),
   signal_cutoff = 0.1,
   min_abs_corr = 0.8,
-  sketch_samples = NULL,
+  R_finite = NULL,
   ...
 )
 }
@@ -46,7 +46,9 @@ susie_rss_pipeline(
 
 \item{min_abs_corr}{Minimum absolute correlation for CS purity (default: 0.8).}
 
-\item{sketch_samples}{Passed to susie_rss. NULL, TRUE, or integer.}
+\item{R_finite}{Controls variance inflation to account for estimating
+the R matrix from a finite reference panel. NULL (default): no
+variance inflation. Passed directly to susie_rss.}
 
 \item{...}{Additional parameters passed to susie_rss (e.g., var_y).}
 }
