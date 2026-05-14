@@ -2,48 +2,28 @@
 % Please edit documentation in R/twas_weights.R
 \name{estimate_sparsity}
 \alias{estimate_sparsity}
-\title{Estimate Sparsity from Non-Bayesian TWAS Weight Methods}
+\title{Estimate Sparsity from mr.ash Mixture Proportions}
 \usage{
-estimate_sparsity(
-  weight_results,
-  methods = "susie",
-  aggregation = c("median", "mean"),
-  pip_threshold = 0.5
-)
+estimate_sparsity(weight_results, methods = "mrash")
 }
 \arguments{
 \item{weight_results}{Named list of weight vectors or matrices as
-returned by \code{\link{twas_weights}}. Elements corresponding to
-SuSiE or mr.ash methods should have a \code{"fit"} attribute
-containing the model fit object (set \code{retain_fits = TRUE} in
-\code{twas_weights} to obtain these).}
+returned by \code{\link{twas_weights}}. The mr.ash element should
+have a \code{"fit"} attribute containing the model fit object
+(set \code{retain_fits = TRUE} in \code{twas_weights} to obtain this).}
 
-\item{methods}{Character vector of short method names to use for
-estimation. Must be a subset of the allowed non-full-Bayesian
-methods: \code{"susie"}, \code{"susie_ash"}, \code{"susie_inf"},
-\code{"mrash"}, \code{"enet"}, \code{"lasso"}, \code{"scad"},
-\code{"mcp"}, \code{"l0learn"}, \code{"dpr_vb"}.}
-
-\item{aggregation}{How to combine estimates across methods:
-\code{"median"} (default) or \code{"mean"}.}
-
-\item{pip_threshold}{PIP threshold for SuSiE methods. Default 0.5.}
+\item{methods}{Must be \code{"mrash"}.}
 }
 \value{
-A scalar sparsity estimate (proportion of non-zero effects),
-  with a \code{"per_method"} attribute containing per-method estimates.
+A scalar sparsity estimate (proportion of non-zero effects).
 }
 \description{
 Computes an empirical estimate of the proportion of non-zero effects
-(sparsity) from the results of non-full-Bayesian weight methods.
-This estimate can be used as a data-driven prior for the inclusion
-probability parameters (`pi` for bayesC, `probIn` for BayesB) of
-spike-and-slab Bayesian methods.
-}
-\details{
-For penalized regression methods (LASSO, elastic net, SCAD, MCP,
-L0Learn, DPR VB), sparsity is estimated as the proportion of
-non-zero coefficients. For SuSiE variants, posterior inclusion
-probabilities (PIPs) are thresholded. For mr.ash, the estimated
-mixture weight on the spike (zero) component is used.
+(sparsity) from the mr.ash fit. mr.ash fits a mixture model with a
+point mass at zero (spike) plus continuous components (slab), and
+learns the mixture proportions via variational EM. The sparsity
+estimate \code{1 - pi[1]} is the empirical Bayes estimate of the
+non-null proportion, which can be used as a data-driven prior for
+the inclusion probability parameters (\code{pi} for bayesC,
+\code{probIn} for BayesB) of spike-and-slab Bayesian methods.
 }

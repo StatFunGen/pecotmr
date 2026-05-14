@@ -18,8 +18,7 @@ twas_weights_pipeline(
   ensemble_r2_threshold = 0.01,
   ensemble_solver = "quadprog",
   ensemble_alpha = 1,
-  estimate_pi_methods = c("susie"),
-  pi_aggregation = "median"
+  estimate_pi_methods = c("mrash")
 )
 }
 \arguments{
@@ -60,12 +59,8 @@ use for empirical sparsity estimation. The estimated sparsity is
 used as the \code{pi} prior for bayesC and the \code{probIn} prior
 for BayesB, unless the user provides explicit values in
 \code{weight_methods}. Set to \code{NULL} to disable empirical
-estimation. Defaults to \code{c("susie")}. See
+estimation. Defaults to \code{c("mrash")}. See
 \code{\link{estimate_sparsity}} for allowed method names.}
-
-\item{pi_aggregation}{How to combine sparsity estimates when
-multiple estimation methods are used: \code{"median"} (default)
-or \code{"mean"}.}
 }
 \value{
 A list containing results from the TWAS pipeline, including TWAS weights, predictions, and optionally cross-validation results.
