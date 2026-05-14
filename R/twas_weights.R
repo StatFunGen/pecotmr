@@ -33,7 +33,7 @@
     if (methods == "fast_default") {
       methods <- c("susie", "mrash", "enet", "lasso")
     } else if (methods == "default") {
-      methods <- c("susie", "mrash", "enet", "lasso", "bayes_r", "dpr_gibbs")
+      methods <- c("susie", "mrash", "enet", "lasso", "bayes_r", "bayes_c")
     }
   }
 
