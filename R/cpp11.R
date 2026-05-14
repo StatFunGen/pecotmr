@@ -8,6 +8,10 @@ lassosum_rss_rcpp <- function(z_r, LD, lambda_r, thr, maxiter) {
   .Call(`_pecotmr_lassosum_rss_rcpp`, z_r, LD, lambda_r, thr, maxiter)
 }
 
+penalized_rss_rcpp <- function(z_r, LD, lambda_r, penalty_str, gamma, alpha, lambda0, lambda2, thr, maxiter, max_swaps) {
+  .Call(`_pecotmr_penalized_rss_rcpp`, z_r, LD, lambda_r, penalty_str, gamma, alpha, lambda0, lambda2, thr, maxiter, max_swaps)
+}
+
 prs_cs_rcpp <- function(a, b, phi, bhat, maf, n, ld_blk, n_iter, n_burnin, thin, verbose, seed) {
   .Call(`_pecotmr_prs_cs_rcpp`, a, b, phi, bhat, maf, n, ld_blk, n_iter, n_burnin, thin, verbose, seed)
 }

@@ -19,6 +19,13 @@ extern "C" SEXP _pecotmr_lassosum_rss_rcpp(SEXP z_r, SEXP LD, SEXP lambda_r, SEX
     return cpp11::as_sexp(lassosum_rss_rcpp(cpp11::as_cpp<cpp11::decay_t<const doubles&>>(z_r), cpp11::as_cpp<cpp11::decay_t<const list&>>(LD), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(lambda_r), cpp11::as_cpp<cpp11::decay_t<double>>(thr), cpp11::as_cpp<cpp11::decay_t<int>>(maxiter)));
   END_CPP11
 }
+// penalized_rss.cpp
+cpp11::writable::list penalized_rss_rcpp(const doubles& z_r, const list& LD, const doubles& lambda_r, const std::string& penalty_str, double gamma, double alpha, double lambda0, double lambda2, double thr, int maxiter, int max_swaps);
+extern "C" SEXP _pecotmr_penalized_rss_rcpp(SEXP z_r, SEXP LD, SEXP lambda_r, SEXP penalty_str, SEXP gamma, SEXP alpha, SEXP lambda0, SEXP lambda2, SEXP thr, SEXP maxiter, SEXP max_swaps) {
+  BEGIN_CPP11
+    return cpp11::as_sexp(penalized_rss_rcpp(cpp11::as_cpp<cpp11::decay_t<const doubles&>>(z_r), cpp11::as_cpp<cpp11::decay_t<const list&>>(LD), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(lambda_r), cpp11::as_cpp<cpp11::decay_t<const std::string&>>(penalty_str), cpp11::as_cpp<cpp11::decay_t<double>>(gamma), cpp11::as_cpp<cpp11::decay_t<double>>(alpha), cpp11::as_cpp<cpp11::decay_t<double>>(lambda0), cpp11::as_cpp<cpp11::decay_t<double>>(lambda2), cpp11::as_cpp<cpp11::decay_t<double>>(thr), cpp11::as_cpp<cpp11::decay_t<int>>(maxiter), cpp11::as_cpp<cpp11::decay_t<int>>(max_swaps)));
+  END_CPP11
+}
 // prscs_mcmc.cpp
 cpp11::writable::list prs_cs_rcpp(double a, double b, sexp phi, doubles bhat, sexp maf, int n, list ld_blk, int n_iter, int n_burnin, int thin, bool verbose, sexp seed);
 extern "C" SEXP _pecotmr_prs_cs_rcpp(SEXP a, SEXP b, SEXP phi, SEXP bhat, SEXP maf, SEXP n, SEXP ld_blk, SEXP n_iter, SEXP n_burnin, SEXP thin, SEXP verbose, SEXP seed) {
@@ -45,6 +52,7 @@ extern "C" {
 static const R_CallMethodDef CallEntries[] = {
     {"_pecotmr_dentist_iterative_impute", (DL_FUNC) &_pecotmr_dentist_iterative_impute, 11},
     {"_pecotmr_lassosum_rss_rcpp",        (DL_FUNC) &_pecotmr_lassosum_rss_rcpp,         5},
+    {"_pecotmr_penalized_rss_rcpp",       (DL_FUNC) &_pecotmr_penalized_rss_rcpp,       11},
     {"_pecotmr_prs_cs_rcpp",              (DL_FUNC) &_pecotmr_prs_cs_rcpp,              12},
     {"_pecotmr_qtl_enrichment_rcpp",      (DL_FUNC) &_pecotmr_qtl_enrichment_rcpp,       9},
     {"_pecotmr_sdpr_rcpp",                (DL_FUNC) &_pecotmr_sdpr_rcpp,                17},
