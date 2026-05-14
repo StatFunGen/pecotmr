@@ -32,19 +32,21 @@ make_data <- function(n = 50, p = 10, seed = 42, add_zero_var_col = FALSE) {
 #
 # ===========================================================================
 
-test_that(".twas_method_lookup: 'default' preset returns 6 methods", {
+test_that(".twas_method_lookup: 'default' preset returns 10 methods", {
   result <- pecotmr:::.twas_method_lookup("default")
   expected_names <- c(
-    "susie_weights", "mrash_weights", "enet_weights",
-    "lasso_weights", "bayes_r_weights", "dpr_gibbs_weights"
+    "susie_weights", "susie_inf_weights", "mrash_weights", "enet_weights",
+    "lasso_weights", "mcp_weights", "scad_weights", "l0learn_weights",
+    "bayes_r_weights", "bayes_c_weights"
   )
   expect_equal(sort(names(result)), sort(expected_names))
 })
 
-test_that(".twas_method_lookup: 'fast_default' preset returns 4 methods", {
+test_that(".twas_method_lookup: 'fast_default' preset returns 8 methods", {
   result <- pecotmr:::.twas_method_lookup("fast_default")
   expected_names <- c(
-    "susie_weights", "mrash_weights", "enet_weights", "lasso_weights"
+    "susie_weights", "susie_inf_weights", "mrash_weights", "enet_weights",
+    "lasso_weights", "mcp_weights", "scad_weights", "l0learn_weights"
   )
   expect_equal(sort(names(result)), sort(expected_names))
 })

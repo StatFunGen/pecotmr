@@ -4,15 +4,13 @@
 \alias{estimate_sparsity}
 \title{Estimate Sparsity from mr.ash Mixture Proportions}
 \usage{
-estimate_sparsity(weight_results, methods = "mrash")
+estimate_sparsity(weight_results)
 }
 \arguments{
 \item{weight_results}{Named list of weight vectors or matrices as
 returned by \code{\link{twas_weights}}. The mr.ash element should
 have a \code{"fit"} attribute containing the model fit object
 (set \code{retain_fits = TRUE} in \code{twas_weights} to obtain this).}
-
-\item{methods}{Must be \code{"mrash"}.}
 }
 \value{
 A scalar sparsity estimate (proportion of non-zero effects).

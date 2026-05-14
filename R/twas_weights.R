@@ -29,11 +29,12 @@
   )
 
   # Handle presets
+  fast_default <- c("susie", "susie_inf", "mrash", "enet", "lasso", "mcp", "scad", "l0learn")
   if (length(methods) == 1) {
     if (methods == "fast_default") {
-      methods <- c("susie", "mrash", "enet", "lasso")
+      methods <- fast_default
     } else if (methods == "default") {
-      methods <- c("susie", "mrash", "enet", "lasso", "bayes_r", "bayes_c")
+      methods <- c(fast_default, "bayes_r", "bayes_c")
     }
   }
 
@@ -514,14 +515,6 @@ twas_predict <- function(X, weights_list) {
   setNames(lapply(weights_list, function(w) X %*% w), gsub("_weights", "_predicted", names(weights_list)))
 }
 
-# Short method names allowed for sparsity estimation (non-full-Bayesian methods).
-# @noRd
-.sparsity_estimation_methods <- "mrash"
-
-# Map short method names to weight function names for sparsity estimation.
-# @noRd
-.sparsity_method_fn_map <- c(mrash = "mrash_weights")
-
 #' Estimate Sparsity from mr.ash Mixture Proportions
 #'
 #' Computes an empirical estimate of the proportion of non-zero effects
@@ -537,19 +530,11 @@ twas_predict <- function(X, weights_list) {
 #'   returned by \code{\link{twas_weights}}. The mr.ash element should
 #'   have a \code{"fit"} attribute containing the model fit object
 #'   (set \code{retain_fits = TRUE} in \code{twas_weights} to obtain this).
-#' @param methods Must be \code{"mrash"}.
 #'
 #' @return A scalar sparsity estimate (proportion of non-zero effects).
 #' @export
-estimate_sparsity <- function(weight_results, methods = "mrash") {
-  invalid <- setdiff(methods, .sparsity_estimation_methods)
-  if (length(invalid) > 0) {
-    stop("Invalid sparsity estimation method(s): ", paste(invalid, collapse = ", "),
-         ". Allowed: ", paste(.sparsity_estimation_methods, collapse = ", "))
-  }
-
-  fn_name <- .sparsity_method_fn_map["mrash"]
-  w <- weight_results[[fn_name]]
+estimate_sparsity <- function(weight_results) {
+  w <- weight_results[["mrash_weights"]]
   if (is.null(w)) {
     stop("mr.ash weights ('mrash_weights') not found in weight_results.")
   }
@@ -591,13 +576,6 @@ estimate_sparsity <- function(weight_results, methods = "mrash") {
 #'   \code{\link{ensemble_weights}}. Defaults to \code{"quadprog"}.
 #' @param ensemble_alpha Elastic net mixing parameter, used only when
 #'   \code{ensemble_solver = "glmnet"}. Defaults to 1 (lasso).
-#' @param estimate_pi_methods Character vector of short method names to
-#'   use for empirical sparsity estimation. The estimated sparsity is
-#'   used as the \code{pi} prior for bayesC and the \code{probIn} prior
-#'   for BayesB, unless the user provides explicit values in
-#'   \code{weight_methods}. Set to \code{NULL} to disable empirical
-#'   estimation. Defaults to \code{c("mrash")}. See
-#'   \code{\link{estimate_sparsity}} for allowed method names.
 #'
 #' @return A list containing results from the TWAS pipeline, including TWAS weights, predictions, and optionally cross-validation results.
 #' @export
@@ -618,7 +596,7 @@ twas_weights_pipeline <- function(X,
                                   ensemble_r2_threshold = 0.01,
                                   ensemble_solver = "quadprog",
                                   ensemble_alpha = 1,
-                                  estimate_pi_methods = c("mrash")) {
+                                  estimate_pi = TRUE) {
   if (is.character(weight_methods)) {
     weight_methods <- .twas_method_lookup(weight_methods)
   }
@@ -641,29 +619,16 @@ twas_weights_pipeline <- function(X,
     !"pi" %in% names(weight_methods$bayes_c_weights)
   bayes_b_needs_pi <- "bayes_b_weights" %in% names(weight_methods) &&
     !"probIn" %in% names(weight_methods$bayes_b_weights)
-  needs_pi_estimation <- (bayes_c_needs_pi || bayes_b_needs_pi) && !is.null(estimate_pi_methods)
+  needs_pi_estimation <- (bayes_c_needs_pi || bayes_b_needs_pi) && estimate_pi
 
   if (needs_pi_estimation) {
-    # Identify which estimation methods are already in the pipeline
-    est_fn_names <- .sparsity_method_fn_map[estimate_pi_methods]
-    phase1_methods <- weight_methods[names(weight_methods) %in% est_fn_names]
+    # Run mr.ash first to estimate sparsity
+    mrash_methods <- list(mrash_weights = weight_methods[["mrash_weights"]] %||% list())
 
-    # Add any requested estimation methods not already in weight_methods
-    missing <- setdiff(est_fn_names, names(weight_methods))
-    for (m in missing) phase1_methods[[m]] <- list()
+    message("  Estimating sparsity from mr.ash ...")
+    mrash_weights <- twas_weights(X, y, weight_methods = mrash_methods, retain_fits = TRUE)
 
-    # Pass susie_fit to phase 1 if SuSiE is an estimation method
-    if (!is.null(susie_fit) && "susie_weights" %in% names(phase1_methods)) {
-      phase1_methods$susie_weights <- c(
-        list(susie_fit = susie_fit),
-        weight_methods[["susie_weights"]][setdiff(names(weight_methods[["susie_weights"]]), "susie_fit")]
-      )
-    }
-
-    message("  Estimating sparsity from: ", paste(estimate_pi_methods, collapse = ", "), " ...")
-    phase1_weights <- twas_weights(X, y, weight_methods = phase1_methods, retain_fits = TRUE)
-
-    empirical_pi <- estimate_sparsity(phase1_weights, methods = estimate_pi_methods)
+    empirical_pi <- estimate_sparsity(mrash_weights)
     message(sprintf("  Empirical sparsity estimate: %.4f", empirical_pi))
     res$empirical_pi <- empirical_pi
 
@@ -671,31 +636,30 @@ twas_weights_pipeline <- function(X,
     if (bayes_c_needs_pi) weight_methods$bayes_c_weights$pi <- as.numeric(empirical_pi)
     if (bayes_b_needs_pi) weight_methods$bayes_b_weights$probIn <- as.numeric(empirical_pi)
 
-    # Phase 2: run remaining methods (those not already computed in phase 1)
-    phase2_fn_names <- setdiff(names(weight_methods), names(phase1_methods))
+    # Run remaining methods (those not already computed)
+    remaining_fn_names <- setdiff(names(weight_methods), "mrash_weights")
 
-    # Pass susie_fit for phase 2 if SuSiE is NOT an estimation method but is in weight_methods
-    if (!is.null(susie_fit) && "susie_weights" %in% phase2_fn_names) {
+    if (!is.null(susie_fit) && "susie_weights" %in% remaining_fn_names) {
       weight_methods$susie_weights <- list(susie_fit = susie_fit)
     }
 
-    if (length(phase2_fn_names) > 0) {
-      phase2_methods <- weight_methods[phase2_fn_names]
-      phase2_weights <- twas_weights(X, y, weight_methods = phase2_methods)
-      res$twas_weights <- c(phase1_weights, phase2_weights)
+    if (length(remaining_fn_names) > 0) {
+      remaining_methods <- weight_methods[remaining_fn_names]
+      remaining_weights <- twas_weights(X, y, weight_methods = remaining_methods)
+      res$twas_weights <- c(mrash_weights, remaining_weights)
     } else {
-      res$twas_weights <- phase1_weights
+      res$twas_weights <- mrash_weights
     }
 
     # Clean up fit attributes from final weight results
     res$twas_weights <- lapply(res$twas_weights, function(w) { attr(w, "fit") <- NULL; w })
 
-    # Remove any estimation-only methods that were not in the original weight_methods
-    if (length(missing) > 0) {
-      res$twas_weights <- res$twas_weights[setdiff(names(res$twas_weights), missing)]
+    # Remove mr.ash if it was not in the original weight_methods
+    if (!"mrash_weights" %in% names(weight_methods)) {
+      res$twas_weights[["mrash_weights"]] <- NULL
     }
   } else {
-    # Original flow: run all methods at once
+    # Run all methods at once
     if (!is.null(susie_fit) && !is.null(weight_methods$susie_weights)) {
       weight_methods$susie_weights <- list(susie_fit = susie_fit)
     }
