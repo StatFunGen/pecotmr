@@ -782,6 +782,10 @@ twas_weights_pipeline <- function(X,
     )
 
     # Ensemble learning: learn optimal method combination via stacked regression
+    if (isTRUE(ensemble) && length(cv_weight_methods) <= 1) {
+      message("Ensemble model skipped: only ", length(cv_weight_methods),
+              " weight method provided (need >= 2 for ensemble learning).")
+    }
     if (isTRUE(ensemble) && length(cv_weight_methods) > 1) {
       if (!is.null(res$twas_cv_result$performance)) {
         # Extract R-squared for each method from CV performance table

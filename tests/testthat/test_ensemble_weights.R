@@ -355,8 +355,8 @@ test_that("pipeline: ensemble=TRUE with only 1 method prints skip message", {
     )
   )
 
-  # With only 1 method, ensemble is silently skipped (length(cv_weight_methods) <= 1)
-  # Just verify no ensemble output is produced (checked below)
+  # Should see the skip message
+  expect_true(any(grepl("Ensemble model skipped.*only 1 weight method provided", msgs)))
 
   # No ensemble result should be present
   expect_null(res$ensemble)
