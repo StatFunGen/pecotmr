@@ -38,6 +38,7 @@ Imports:
     vctrs,
     vroom
 Suggests:
+    aSPU,
     BGLR,
     bigsnpr,
     bigstatsr,
@@ -59,6 +60,7 @@ Suggests:
     ncvreg,
     nnls,
     pgenlibr,
+    poolr,
     qgg,
     qvalue,
     rmarkdown,

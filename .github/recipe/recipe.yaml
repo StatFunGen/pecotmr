@@ -30,6 +30,7 @@ requirements:
     - bioconductor-snpstats
     - bioconductor-mungesumstats
     - bioconductor-rsamtools
+    - r-aspu
     - r-base
     - r-bglr
     - r-bigsnpr
@@ -59,6 +60,7 @@ requirements:
     - r-ncvreg
     - r-nnls
     - r-pgenlibr
+    - r-poolr
     - r-purrr
     - r-qgg
     - r-quadprog
@@ -74,17 +76,23 @@ requirements:
     - r-vctrs
     - r-vroom
   run:
-    - bioconductor-biostrings
     - bioconductor-iranges
     - bioconductor-qvalue
     - bioconductor-s4vectors
+    - bioconductor-snprelate
     - bioconductor-snpstats
+    - bioconductor-mungesumstats
+    - bioconductor-rsamtools
+    - r-apsu
     - r-base
     - r-bglr
     - r-bigsnpr
     - r-coda
     - r-coloc
     - r-colocboost
+    - r-cpp11
+    - r-cpp11armadillo
+    - r-decor
     - r-dofuture
     - r-dplyr
     - r-flashier
@@ -105,10 +113,10 @@ requirements:
     - r-ncvreg
     - r-nnls
     - r-pgenlibr
+    - r-poolr
     - r-purrr
     - r-qgg
-    - r-rcpp
-    - r-rcpparmadillo
+    - r-quadprog
     - r-rcppdpr
     - r-readr
     - r-rfast

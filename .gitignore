@@ -9,6 +9,7 @@ src/Makevars
 pecotmr.Rproj
 /pixi.lock
 /.pixi
+dev
 docs
 .claude
 dev

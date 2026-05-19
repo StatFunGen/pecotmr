@@ -101,6 +101,80 @@ pval_cauchy <- function(p, na.rm = TRUE) {
   }
 }
 
+# Compute null correlation matrix of TWAS z-scores across methods.
+# z_k = w_k' z / sqrt(w_k' R w_k), so under H0 (z ~ N(0, R)):
+# cor(z_k, z_j) = w_k' R w_j / sqrt(w_k' R w_k * w_j' R w_j)
+twas_method_cor <- function(weights_list, LD) {
+  K <- length(weights_list)
+  cor_mat <- diag(K)
+  Rw <- lapply(weights_list, function(w) as.numeric(LD %*% w))
+  var_w <- vapply(seq_len(K), function(i) sum(weights_list[[i]] * Rw[[i]]), numeric(1))
+  for (i in seq_len(K - 1)) {
+    for (j in (i + 1):K) {
+      if (var_w[i] > 0 && var_w[j] > 0) {
+        rho <- sum(weights_list[[i]] * Rw[[j]]) / sqrt(var_w[i] * var_w[j])
+        cor_mat[i, j] <- rho
+        cor_mat[j, i] <- rho
+      }
+    }
+  }
+  cor_mat
+}
+
+pval_poolr <- function(pvals, method, R) {
+  if (!requireNamespace("poolr", quietly = TRUE)) {
+    stop("To use this method, please install poolr: install.packages('poolr')")
+  }
+  fn <- switch(method,
+    fisher = poolr::fisher,
+    stouffer = poolr::stouffer,
+    invchisq = poolr::invchisq,
+    stop(sprintf("Unknown poolr method: '%s'", method))
+  )
+  fn(pvals, adjust = "generalized", R = R)$p
+}
+
+pval_gbj <- function(z_scores, R, method) {
+  if (!requireNamespace("GBJ", quietly = TRUE)) {
+    stop("To use this method, please install GBJ: install.packages('GBJ')")
+  }
+  result <- switch(method,
+    gbj = GBJ::GBJ(test_stats = z_scores, cor_mat = R),
+    bj = GBJ::BJ(test_stats = z_scores, cor_mat = R),
+    hc = GBJ::HC(test_stats = z_scores, cor_mat = R),
+    ghc = GBJ::GHC(test_stats = z_scores, cor_mat = R),
+    minp = GBJ::minP(test_stats = z_scores, cor_mat = R),
+    gbj_omni = GBJ::OMNI_ss(test_stats = z_scores, cor_mat = R),
+    stop(sprintf("Unknown GBJ method: '%s'", method))
+  )
+  pval_name <- switch(method,
+    gbj = "GBJ_pvalue",
+    bj = "BJ_pvalue",
+    hc = "HC_pvalue",
+    ghc = "GHC_pvalue",
+    minp = "minP_pvalue",
+    gbj_omni = "OMNI_pvalue"
+  )
+  result[[pval_name]]
+}
+
+pval_aspu <- function(z_scores = NULL, pvals = NULL, R, method) {
+  if (!requireNamespace("aSPU", quietly = TRUE)) {
+    stop("To use this method, please install aSPU: install.packages('aSPU')")
+  }
+  switch(method,
+    aspu = {
+      result <- aSPU::aSPUs(Zs = z_scores, corSNP = R)
+      result$pvs["aSPUs"]
+    },
+    gates = {
+      result <- aSPU::GATES2(ldmatrix = R, p = pvals)
+      result[["Pg"]]
+    },
+    stop(sprintf("Unknown aSPU method: '%s'", method))
+  )
+}
+
 matxMax <- function(mtx) {
   return(arrayInd(which.max(mtx), dim(mtx)))
 }

@@ -4,7 +4,13 @@
 \alias{otters_association}
 \title{TWAS association testing with omnibus combination (OTTERS Stage II)}
 \usage{
-otters_association(weights, gwas_z, LD, combine_method = c("acat", "hmp"))
+otters_association(
+  weights,
+  gwas_z,
+  LD,
+  combine_method = c("acat", "hmp", "fisher", "stouffer", "invchisq", "gbj", "bj", "hc",
+    "ghc", "minp", "gbj_omni", "aspu", "gates")
+)
 }
 \arguments{
 \item{weights}{Named list of weight vectors (output from \code{\link{otters_weights}}
@@ -18,8 +24,20 @@ as the weights and LD matrix. Use \code{\link{allele_qc}} or
 \item{LD}{LD correlation matrix R, aligned to the same variants as weights
 and gwas_z.}
 
-\item{combine_method}{Method to combine p-values across methods: \code{"acat"}
-(default) or \code{"hmp"}.}
+\item{combine_method}{Method to combine p-values across methods.
+Correlation-free (valid under arbitrary dependence):
+\code{"acat"} (default), \code{"hmp"}.
+Correlation-adjusted via poolr (generalized multivariate theory):
+\code{"fisher"} (Brown's method), \code{"stouffer"} (Strube's method),
+\code{"invchisq"}.
+Set-based tests via GBJ (uses TWAS z-scores and inter-method correlation):
+\code{"gbj"}, \code{"bj"}, \code{"hc"}, \code{"ghc"}, \code{"minp"},
+\code{"gbj_omni"}.
+Adaptive and Simes-type tests via aSPU:
+\code{"aspu"} (adaptive sum of powered scores),
+\code{"gates"} (extended Simes / GATES).
+The poolr, GBJ, and aSPU methods automatically compute the inter-method
+TWAS z-score correlation from the weight vectors and LD matrix.}
 }
 \value{
 A data.frame with columns:
