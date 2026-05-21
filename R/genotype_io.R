@@ -1,8 +1,7 @@
 #' @title Genotype I/O via GenotypeHandle
 #' @description Read genotype data from various formats (VCF, plink1,
 #'   plink2, GDS) and provide block-level genotype extraction without
-#'   requiring format conversion. Ported from h2tools, adapted to
-#'   pecotmr allele conventions (A1 = ALT/effect allele).
+#'   requiring format conversion.
 #' @importFrom SummarizedExperiment SummarizedExperiment rowRanges
 #' @importFrom GenomicRanges GRanges seqnames
 #' @importFrom S4Vectors DataFrame mcols mcols<-

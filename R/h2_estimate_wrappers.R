@@ -13,7 +13,7 @@ NULL
 #' @rdname estimateH2
 #' @export
 setMethod("estimateH2",
-  signature(sumstats = "GWASSumStats", ld_ref = "LDReference"),
+  signature(sumstats = "GWASSumStats", ld_ref = "LDStatistic"),
   function(sumstats, ld_ref, method = "lder", annotations = NULL,
            local = FALSE, ...) {
 
@@ -57,12 +57,12 @@ setMethod("estimateH2",
 
 #' @keywords internal
 .validate_method_ref <- function(method, ld_ref) {
-  if (method %in% c("lder", "hdl") && !is(ld_ref, "LDEigenRef")) {
-    stop("Method '", method, "' requires an LDEigenRef object, ",
+  if (method %in% c("lder", "hdl") && !is(ld_ref, "LDEigen")) {
+    stop("Method '", method, "' requires an LDEigen object, ",
          "got ", class(ld_ref))
   }
-  if (method == "gldsc" && !is(ld_ref, "LDScoreRef")) {
-    stop("Method 'gldsc' requires an LDScoreRef object, ",
+  if (method == "gldsc" && !is(ld_ref, "LDScore")) {
+    stop("Method 'gldsc' requires an LDScore object, ",
          "got ", class(ld_ref))
   }
   invisible(TRUE)
@@ -75,7 +75,7 @@ setMethod("estimateH2",
 #' @rdname computeLdScores
 #' @export
 setMethod("computeLdScores",
-  signature(ld_ref = "LDEigenRef"),
+  signature(ld_ref = "LDEigen"),
   function(ld_ref, annotations = NULL, ...) {
     # Reconstruct LD scores from eigendecompositions
     # l2[j] = sum_k r^2_{jk} = sum_b sum_{eigenvalues in b} V[j,.]^2 * d
@@ -135,7 +135,7 @@ setMethod("computeLdScores",
 #' @rdname computeLdScores
 #' @export
 setMethod("computeLdScores",
-  signature(ld_ref = "LDScoreRef"),
+  signature(ld_ref = "LDScore"),
   function(ld_ref, annotations = NULL, ...) {
     if (is.null(annotations)) {
       return(ld_ref@ld_scores)
@@ -143,7 +143,7 @@ setMethod("computeLdScores",
 
     # Compute annotation-stratified LD scores using LD matrices
     if (length(ld_ref@ld_matrix_list) == 0) {
-      stop("Annotation-stratified LD scores require ld_matrix_list in LDScoreRef. ",
+      stop("Annotation-stratified LD scores require ld_matrix_list in LDScore. ",
            "Recompute the LD reference with full LD matrices.")
     }
 

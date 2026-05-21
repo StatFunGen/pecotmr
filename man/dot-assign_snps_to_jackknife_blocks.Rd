@@ -7,7 +7,7 @@
 .assign_snps_to_jackknife_blocks(ld_ref, n_blocks = 200)
 }
 \arguments{
-\item{ld_ref}{An \code{LDScoreRef} object.}
+\item{ld_ref}{An \code{LDScore} object.}
 
 \item{n_blocks}{Integer, number of jackknife blocks (default 200).}
 }

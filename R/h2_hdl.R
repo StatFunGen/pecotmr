@@ -1,7 +1,7 @@
 #' @title HDL/sHDL: High-Definition Likelihood
 #' @description Estimate heritability using eigenvalue-based likelihood
 #'   maximization (Ning et al. 2020) with stratified extensions (sHDL,
-#'   Kim et al. 2023). Ported from h2tools.
+#'   Kim et al. 2023).
 #' @references
 #'   Ning Z, Pawitan Y, Shen X (2020). High-definition likelihood
 #'   inference of genetic correlations across human complex traits.
@@ -21,7 +21,7 @@ NULL
 #' @description Estimate h2 via HDL likelihood.
 #' @param z Numeric vector of z-scores.
 #' @param n Numeric, GWAS sample size.
-#' @param eigen_ref An \code{LDEigenRef} object.
+#' @param eigen_ref An \code{LDEigen} object.
 #' @param annotations An \code{AnnotationMatrix}, or NULL.
 #' @param local Logical, return per-block estimates.
 #' @param lambda Numeric, L2 penalty on tau (default 0).

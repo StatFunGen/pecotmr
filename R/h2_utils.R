@@ -1,7 +1,6 @@
 #' @title Shared Utilities for Heritability Estimation
 #' @description Internal helper functions for block operations, regression,
-#'   jackknife SE, enrichment computation, and meta-analysis. Ported from
-#'   h2tools, with additions for sldsc_wrapper integration.
+#'   jackknife SE, enrichment computation, and meta-analysis.
 #' @importFrom GenomicRanges GRanges
 #' @importFrom BiocParallel bplapply bpparam
 NULL
@@ -240,7 +239,7 @@ checkGenomeBuild <- function(...) {
   objects <- list(...)
   genomes <- vapply(objects, function(x) {
     if (is(x, "GWASSumStats")) x@genome
-    else if (is(x, "LDReference")) x@genome
+    else if (is(x, "LDStatistic")) x@genome
     else if (is(x, "AnnotationMatrix")) x@genome
     else if (is(x, "LDBlocks")) x@genome
     else stop("Unknown object type for genome build check")

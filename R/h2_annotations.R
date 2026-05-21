@@ -1,7 +1,6 @@
 #' @title Annotation Handling for Stratified Heritability
 #' @description Read and manage genomic annotations for stratified
 #'   heritability analysis. Supports BED, BigWig, and LDSC .annot formats.
-#'   Ported from h2tools.
 #' @importFrom tools file_ext
 #' @importFrom GenomicRanges GRanges
 #' @include AllGenerics.R

@@ -195,8 +195,6 @@ compute_sldsc_annot_sd <- function(target_anno_dir, frqfile_dir = NULL,
 #'   `target_anno_dir` is a fallback only, used when no `.frq` directory is
 #'   given; that fallback counts `.l2.ldscore` rows and is WRONG when the target
 #'   was HM3-subsetted (it then yields the regression SNP count, not M_ref).
-#'   Previously this made `allm + snplist` runs report a ~8x too-small M_ref and
-#'   hence a ~8x too-small tau*.
 #'
 #' @param target_anno_dir Character or NULL. Fallback only - directory of
 #'   `.l2.ldscore` files. Used only when `frqfile_dir` is unavailable.

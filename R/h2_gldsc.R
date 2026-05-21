@@ -1,7 +1,6 @@
 #' @title g-LDSC: Generalized LD Score Regression
 #' @description Estimate heritability and enrichment using feasible
 #'   generalized least squares on LD scores (Xiong et al. 2024).
-#'   Ported from h2tools.
 #' @references
 #'   Xiong Z, Thach TQ, Zhang YD, Sham PC (2024). Improved estimation
 #'   of functional enrichment in SNP heritability using feasible
@@ -16,7 +15,7 @@ NULL
 #' @description Estimate h2 using g-LDSC with FGLS estimation.
 #' @param z Numeric vector of z-scores.
 #' @param n Numeric, GWAS sample size.
-#' @param ld_ref An \code{LDScoreRef} object.
+#' @param ld_ref An \code{LDScore} object.
 #' @param annotations An \code{AnnotationMatrix}, or NULL.
 #' @param local Logical, return per-block estimates.
 #' @param lambda Numeric, ridge penalty (default 0).
@@ -236,7 +235,7 @@ gldsc_univariate <- function(z, n, ld_ref, annotations = NULL,
 #' Assign SNPs to jackknife blocks
 #'
 #' @description Divide SNPs into approximately equal-sized jackknife blocks.
-#' @param ld_ref An \code{LDScoreRef} object.
+#' @param ld_ref An \code{LDScore} object.
 #' @param n_blocks Integer, number of jackknife blocks (default 200).
 #' @return Integer vector of block assignments.
 #' @keywords internal
@@ -289,7 +288,7 @@ gldsc_univariate <- function(z, n, ld_ref, annotations = NULL,
 #'   g-LDSC intercept and LD scores.
 #' @param z Numeric vector of z-scores.
 #' @param n Numeric, GWAS sample size.
-#' @param ld_ref An \code{LDScoreRef} object.
+#' @param ld_ref An \code{LDScore} object.
 #' @param h2 Numeric, global h2 estimate.
 #' @param intercept Numeric, g-LDSC intercept estimate.
 #' @return A data.frame with block_id, h2_local, h2_local_se.
@@ -349,7 +348,7 @@ gldsc_univariate <- function(z, n, ld_ref, annotations = NULL,
 #'   for candidate annotations not included in the baseline model.
 #' @param z Numeric vector of z-scores.
 #' @param n Numeric, GWAS sample size.
-#' @param ld_ref An \code{LDScoreRef} object.
+#' @param ld_ref An \code{LDScore} object.
 #' @param annotations An \code{AnnotationMatrix} object.
 #' @param coef Numeric vector, fitted coefficients from the baseline model.
 #' @param w Numeric vector, regression weights.

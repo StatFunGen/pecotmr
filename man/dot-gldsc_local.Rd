@@ -11,7 +11,7 @@
 
 \item{n}{Numeric, GWAS sample size.}
 
-\item{ld_ref}{An \code{LDScoreRef} object.}
+\item{ld_ref}{An \code{LDScore} object.}
 
 \item{h2}{Numeric, global h2 estimate.}
 

@@ -51,8 +51,8 @@ simulate_h2_data <- function(n_snps = 100, n_blocks = 2, n_gwas = 50000,
   signal_var <- h2_true / n_snps
   z <- rnorm(n_snps) * sqrt(n_gwas * signal_var) + rnorm(n_snps)
 
-  # LDEigenRef
-  eigen_ref <- new("LDEigenRef",
+  # LDEigen
+  eigen_ref <- new("LDEigen",
     ld_blocks = ld_blocks, snp_info = snp_info,
     n_ref = 1000L, in_sample = FALSE, genome = "hg19",
     eigen_list = eigen_list, eigenvalue_truncation = 1.0
@@ -66,7 +66,7 @@ simulate_h2_data <- function(n_snps = 100, n_blocks = 2, n_gwas = 50000,
     ld_scores_vec[idx] <- rowSums(R^2)
   }
 
-  ld_score_ref <- new("LDScoreRef",
+  ld_score_ref <- new("LDScore",
     ld_blocks = ld_blocks, snp_info = snp_info,
     n_ref = 1000L, in_sample = FALSE, genome = "hg19",
     ld_scores = matrix(ld_scores_vec, ncol = 1,

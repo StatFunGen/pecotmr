@@ -34,7 +34,7 @@ make_test_eigen_ref <- function(n_snps = 20, n_blocks = 2) {
     list(values = e$values, vectors = e$vectors, snp_idx = as.integer(idx))
   })
 
-  new("LDEigenRef",
+  new("LDEigen",
     ld_blocks = ld_blocks,
     snp_info = snp_info,
     n_ref = 1000L,
@@ -83,7 +83,7 @@ make_test_score_ref <- function(n_snps = 20, n_blocks = 2,
     list()
   }
 
-  new("LDScoreRef",
+  new("LDScore",
     ld_blocks = ld_blocks,
     snp_info = snp_info,
     n_ref = 1000L,
@@ -156,27 +156,27 @@ make_test_h2estimate <- function(with_enrichment = TRUE) {
 # .validate_method_ref (internal)
 # ===========================================================================
 
-test_that(".validate_method_ref errors when method='lder' but ref is LDScoreRef", {
+test_that(".validate_method_ref errors when method='lder' but ref is LDScore", {
   score_ref <- make_test_score_ref()
   expect_error(
     pecotmr:::.validate_method_ref("lder", score_ref),
-    "requires an LDEigenRef"
+    "requires an LDEigen"
   )
 })
 
-test_that(".validate_method_ref errors when method='hdl' but ref is LDScoreRef", {
+test_that(".validate_method_ref errors when method='hdl' but ref is LDScore", {
   score_ref <- make_test_score_ref()
   expect_error(
     pecotmr:::.validate_method_ref("hdl", score_ref),
-    "requires an LDEigenRef"
+    "requires an LDEigen"
   )
 })
 
-test_that(".validate_method_ref errors when method='gldsc' but ref is LDEigenRef", {
+test_that(".validate_method_ref errors when method='gldsc' but ref is LDEigen", {
   eigen_ref <- make_test_eigen_ref()
   expect_error(
     pecotmr:::.validate_method_ref("gldsc", eigen_ref),
-    "requires an LDScoreRef"
+    "requires an LDScore"
   )
 })
 
@@ -190,10 +190,10 @@ test_that(".validate_method_ref returns TRUE for valid combinations", {
 })
 
 # ===========================================================================
-# computeLdScores for LDEigenRef
+# computeLdScores for LDEigen
 # ===========================================================================
 
-test_that("computeLdScores LDEigenRef returns matrix with base_l2 column", {
+test_that("computeLdScores LDEigen returns matrix with base_l2 column", {
   eigen_ref <- make_test_eigen_ref()
   result <- computeLdScores(eigen_ref)
   expect_true(is.matrix(result))
@@ -202,13 +202,13 @@ test_that("computeLdScores LDEigenRef returns matrix with base_l2 column", {
   expect_equal(nrow(result), nrow(eigen_ref@snp_info))
 })
 
-test_that("computeLdScores LDEigenRef base LD scores are non-negative", {
+test_that("computeLdScores LDEigen base LD scores are non-negative", {
   eigen_ref <- make_test_eigen_ref()
   result <- computeLdScores(eigen_ref)
   expect_true(all(result[, "base_l2"] >= 0))
 })
 
-test_that("computeLdScores LDEigenRef with annotations returns base + annotation columns", {
+test_that("computeLdScores LDEigen with annotations returns base + annotation columns", {
   eigen_ref <- make_test_eigen_ref()
   annot <- make_test_annotations()
   result <- computeLdScores(eigen_ref, annotations = annot)
@@ -219,7 +219,7 @@ test_that("computeLdScores LDEigenRef with annotations returns base + annotation
   expect_equal(nrow(result), nrow(eigen_ref@snp_info))
 })
 
-test_that("computeLdScores LDEigenRef annotation column names match", {
+test_that("computeLdScores LDEigen annotation column names match", {
   eigen_ref <- make_test_eigen_ref()
   annot <- make_test_annotations()
   result <- computeLdScores(eigen_ref, annotations = annot)
@@ -227,16 +227,16 @@ test_that("computeLdScores LDEigenRef annotation column names match", {
 })
 
 # ===========================================================================
-# computeLdScores for LDScoreRef
+# computeLdScores for LDScore
 # ===========================================================================
 
-test_that("computeLdScores LDScoreRef without annotations returns stored ld_scores", {
+test_that("computeLdScores LDScore without annotations returns stored ld_scores", {
   score_ref <- make_test_score_ref()
   result <- computeLdScores(score_ref)
   expect_identical(result, score_ref@ld_scores)
 })
 
-test_that("computeLdScores LDScoreRef with annotations but no ld_matrix_list errors", {
+test_that("computeLdScores LDScore with annotations but no ld_matrix_list errors", {
   score_ref <- make_test_score_ref(with_ld_matrices = FALSE)
   annot <- make_test_annotations()
   expect_error(
@@ -437,10 +437,10 @@ test_that("estimateH2 with method='hdl' returns H2Estimate", {
 })
 
 # ===========================================================================
-# computeLdScores for LDScoreRef WITH annotations
+# computeLdScores for LDScore WITH annotations
 # ===========================================================================
 
-test_that("computeLdScores LDScoreRef with annotations and ld_matrix_list returns correct matrix", {
+test_that("computeLdScores LDScore with annotations and ld_matrix_list returns correct matrix", {
   score_ref <- make_test_score_ref(with_ld_matrices = TRUE)
   annot <- make_test_annotations()
   result <- computeLdScores(score_ref, annotations = annot)

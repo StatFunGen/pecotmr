@@ -12,7 +12,7 @@ NULL
 #' @description Estimate SNP heritability from GWAS summary statistics using
 #'   one of three methods: LDER, g-LDSC, or HDL/sHDL.
 #' @param sumstats A \code{GWASSumStats} object.
-#' @param ld_ref An \code{LDReference} object (method-appropriate subclass).
+#' @param ld_ref An \code{LDStatistic} object (method-appropriate subclass).
 #' @param method Character, one of "lder", "gldsc", "hdl".
 #' @param annotations An \code{AnnotationMatrix} object, or NULL for
 #'   unstratified estimation.
@@ -33,7 +33,7 @@ setGeneric("estimateH2",
 #' @title Compute LD Scores
 #' @description Compute LD scores from an LD reference, optionally
 #'   stratified by annotations.
-#' @param ld_ref An \code{LDReference} object.
+#' @param ld_ref An \code{LDStatistic} object.
 #' @param annotations An \code{AnnotationMatrix} object, or NULL.
 #' @param ... Additional arguments.
 #' @return A numeric matrix of LD scores (SNPs x annotations+1).

@@ -2,18 +2,18 @@
 % Please edit documentation in R/AllGenerics.R, R/h2_estimate_wrappers.R
 \name{computeLdScores}
 \alias{computeLdScores}
-\alias{computeLdScores,LDEigenRef-method}
-\alias{computeLdScores,LDScoreRef-method}
+\alias{computeLdScores,LDEigen-method}
+\alias{computeLdScores,LDScore-method}
 \title{Compute LD Scores}
 \usage{
 computeLdScores(ld_ref, annotations = NULL, ...)
 
-\S4method{computeLdScores}{LDEigenRef}(ld_ref, annotations = NULL, ...)
+\S4method{computeLdScores}{LDEigen}(ld_ref, annotations = NULL, ...)
 
-\S4method{computeLdScores}{LDScoreRef}(ld_ref, annotations = NULL, ...)
+\S4method{computeLdScores}{LDScore}(ld_ref, annotations = NULL, ...)
 }
 \arguments{
-\item{ld_ref}{An \code{LDReference} object.}
+\item{ld_ref}{An \code{LDStatistic} object.}
 
 \item{annotations}{An \code{AnnotationMatrix} object, or NULL.}
 

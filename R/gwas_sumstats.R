@@ -1,7 +1,6 @@
 #' @title Summary Statistics Handling
 #' @description Functions for reading, validating, and constructing
-#'   \code{GWASSumStats} objects from various input formats. Ported from
-#'   h2tools, extended with \code{var_y} support for case-control studies.
+#'   \code{GWASSumStats} objects from various input formats.
 #' @importFrom GenomicRanges GRanges seqnames start
 #' @importFrom S4Vectors DataFrame mcols mcols<-
 #' @importFrom MungeSumstats format_sumstats

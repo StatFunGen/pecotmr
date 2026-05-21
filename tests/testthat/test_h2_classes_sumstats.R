@@ -213,7 +213,7 @@ test_that("AnnotationMatrix rejects invalid type values", {
   )
 })
 
-test_that("LDEigenRef constructs and validates correctly", {
+test_that("LDEigen constructs and validates correctly", {
   ldblocks <- make_test_ldblocks()
   snp_info <- make_test_snp_info()
   eigen_list <- list(
@@ -223,7 +223,7 @@ test_that("LDEigenRef constructs and validates correctly", {
          snp_idx = 1:10)
   )
 
-  obj <- new("LDEigenRef",
+  obj <- new("LDEigen",
     ld_blocks = ldblocks,
     snp_info = snp_info,
     n_ref = 500L,
@@ -232,16 +232,16 @@ test_that("LDEigenRef constructs and validates correctly", {
     eigen_list = eigen_list,
     eigenvalue_truncation = 0.9
   )
-  expect_s4_class(obj, "LDEigenRef")
+  expect_s4_class(obj, "LDEigen")
   expect_true(methods::validObject(obj))
 })
 
-test_that("LDEigenRef rejects eigen_list length mismatch", {
+test_that("LDEigen rejects eigen_list length mismatch", {
   ldblocks <- make_test_ldblocks()  # 2 blocks
   # Only 1 element in eigen_list
   expect_error(
     methods::validObject(
-      new("LDEigenRef",
+      new("LDEigen",
         ld_blocks = ldblocks,
         snp_info = make_test_snp_info(),
         n_ref = 500L,
@@ -255,11 +255,11 @@ test_that("LDEigenRef rejects eigen_list length mismatch", {
   )
 })
 
-test_that("LDEigenRef rejects invalid eigenvalue_truncation", {
+test_that("LDEigen rejects invalid eigenvalue_truncation", {
   ldblocks <- make_test_ldblocks()
   expect_error(
     methods::validObject(
-      new("LDEigenRef",
+      new("LDEigen",
         ld_blocks = ldblocks,
         snp_info = make_test_snp_info(),
         n_ref = 500L,
@@ -273,12 +273,12 @@ test_that("LDEigenRef rejects invalid eigenvalue_truncation", {
   )
 })
 
-test_that("LDScoreRef constructs and validates correctly", {
+test_that("LDScore constructs and validates correctly", {
   ldblocks <- make_test_ldblocks()
   n <- 10
   snp_info <- make_test_snp_info(n)
 
-  obj <- new("LDScoreRef",
+  obj <- new("LDScore",
     ld_blocks = ldblocks,
     snp_info = snp_info,
     n_ref = 500L,
@@ -288,17 +288,17 @@ test_that("LDScoreRef constructs and validates correctly", {
     ld_score_weights = runif(n),
     ld_matrix_list = list()
   )
-  expect_s4_class(obj, "LDScoreRef")
+  expect_s4_class(obj, "LDScore")
   expect_true(methods::validObject(obj))
 })
 
-test_that("LDScoreRef rejects ld_scores row mismatch with snp_info", {
+test_that("LDScore rejects ld_scores row mismatch with snp_info", {
   ldblocks <- make_test_ldblocks()
   snp_info <- make_test_snp_info(10)
 
   expect_error(
     methods::validObject(
-      new("LDScoreRef",
+      new("LDScore",
         ld_blocks = ldblocks,
         snp_info = snp_info,
         n_ref = 500L,
@@ -360,9 +360,9 @@ test_that("show() methods do not error", {
   )
   expect_output(show(am), "AnnotationMatrix")
 
-  # LDEigenRef
+  # LDEigen
   ldblocks <- make_test_ldblocks()
-  eig <- new("LDEigenRef",
+  eig <- new("LDEigen",
     ld_blocks = ldblocks,
     snp_info = make_test_snp_info(),
     n_ref = 500L,
@@ -371,11 +371,11 @@ test_that("show() methods do not error", {
     eigen_list = list(list(), list()),
     eigenvalue_truncation = 0.9
   )
-  expect_output(show(eig), "LDEigenRef")
+  expect_output(show(eig), "LDEigen")
 
-  # LDScoreRef
+  # LDScore
   n <- 10
-  lsr <- new("LDScoreRef",
+  lsr <- new("LDScore",
     ld_blocks = ldblocks,
     snp_info = make_test_snp_info(n),
     n_ref = 500L,
@@ -385,7 +385,7 @@ test_that("show() methods do not error", {
     ld_score_weights = rep(1, n),
     ld_matrix_list = list()
   )
-  expect_output(show(lsr), "LDScoreRef")
+  expect_output(show(lsr), "LDScore")
 
   # H2Estimate
   h2 <- new("H2Estimate",

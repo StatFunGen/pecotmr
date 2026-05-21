@@ -1,7 +1,7 @@
 #' @title LDER: LD Eigenvalue Regression
 #' @description Estimate heritability using LD eigenvalue regression
 #'   (Song et al. 2022). Supports univariate global and local estimation,
-#'   with optional annotation stratification. Ported from h2tools.
+#'   with optional annotation stratification.
 #' @references
 #'   Song S, Jiang W, Zhang Y, Hou L, Zhao H (2022). Leveraging LD
 #'   eigenvalue regression to improve the estimation of SNP heritability
@@ -16,7 +16,7 @@ NULL
 #' @description Estimate SNP heritability using LD eigenvalue regression.
 #' @param z Numeric vector of z-scores.
 #' @param n Numeric, GWAS sample size.
-#' @param eigen_ref An \code{LDEigenRef} object.
+#' @param eigen_ref An \code{LDEigen} object.
 #' @param annotations An \code{AnnotationMatrix}, or NULL.
 #' @param local Logical, return per-block estimates.
 #' @param lambda Numeric, ridge penalty (default 0).
@@ -221,7 +221,7 @@ lder_univariate <- function(z, n, eigen_ref, annotations = NULL,
 #'   for candidate annotations.
 #' @param z Numeric vector of z-scores.
 #' @param n Numeric, GWAS sample size.
-#' @param eigen_ref An \code{LDEigenRef} object.
+#' @param eigen_ref An \code{LDEigen} object.
 #' @param annotations An \code{AnnotationMatrix}, or NULL.
 #' @param tau Numeric vector of annotation coefficients.
 #' @param a Numeric, intercept.

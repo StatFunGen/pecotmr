@@ -169,13 +169,13 @@ setClass("AnnotationMatrix",
 )
 
 # =============================================================================
-# LD Reference Classes (Virtual + Concrete Subclasses)
+# LD Statistic Classes (Virtual + Concrete Subclasses)
 # =============================================================================
 
-#' @title LD Reference (Virtual Base Class)
-#' @description Abstract container for LD reference data. Subclasses provide
-#'   method-specific representations: eigendecompositions (for LDER/HDL/sHDL)
-#'   and LD score matrices (for S-LDSC/g-LDSC).
+#' @title LD Statistic (Virtual Base Class)
+#' @description Abstract container for pre-computed LD statistics. Subclasses
+#'   provide method-specific representations: eigendecompositions (for
+#'   LDER/HDL/sHDL) and LD score matrices (for S-LDSC/g-LDSC).
 #' @slot ld_blocks An \code{LDBlocks} object defining the block structure.
 #' @slot snp_info A \code{data.frame} with columns \code{SNP}, \code{CHR},
 #'   \code{BP}, \code{A1}, \code{A2}, and optionally \code{MAF}.
@@ -184,7 +184,7 @@ setClass("AnnotationMatrix",
 #'   cohort as the GWAS (affects bias correction).
 #' @slot genome Character string for genome build.
 #' @export
-setClass("LDReference",
+setClass("LDStatistic",
   contains = "VIRTUAL",
   representation(
     ld_blocks = "LDBlocks",
@@ -195,9 +195,9 @@ setClass("LDReference",
   )
 )
 
-#' @title Eigendecomposition-Based LD Reference
-#' @description LD reference stored as per-block eigendecompositions of the
-#'   LD correlation matrix. Used by LDER, HDL, and sHDL.
+#' @title Eigendecomposition-Based LD Statistic
+#' @description Pre-computed per-block eigendecompositions of the LD
+#'   correlation matrix. Used by LDER, HDL, and sHDL.
 #' @slot eigen_list A list of length \code{n_blocks}, each element a list
 #'   with components:
 #'   \describe{
@@ -208,8 +208,8 @@ setClass("LDReference",
 #' @slot eigenvalue_truncation Numeric, proportion of variance retained
 #'   (e.g., 0.9 for HDL's default). If 1.0, no truncation.
 #' @export
-setClass("LDEigenRef",
-  contains = "LDReference",
+setClass("LDEigen",
+  contains = "LDStatistic",
   representation(
     eigen_list = "list",
     eigenvalue_truncation = "numeric"
@@ -229,10 +229,10 @@ setClass("LDEigenRef",
   }
 )
 
-#' @title LD Score-Based LD Reference
-#' @description LD reference stored as pre-computed LD scores for each SNP.
-#'   Used by S-LDSC and g-LDSC. Supports both standard LD scores and
-#'   annotation-stratified LD scores.
+#' @title LD Score-Based LD Statistic
+#' @description Pre-computed LD scores for each SNP. Used by S-LDSC and
+#'   g-LDSC. Supports both standard LD scores and annotation-stratified
+#'   LD scores.
 #' @slot ld_scores A numeric matrix (SNPs x annotations+1). The first
 #'   column is the base LD score (sum of r^2). Additional columns are
 #'   annotation-stratified LD scores if annotations are provided.
@@ -240,8 +240,8 @@ setClass("LDEigenRef",
 #' @slot ld_matrix_list For g-LDSC: a list of per-block LD (R^2) matrices
 #'   used to compute the FGLS residual covariance. NULL for S-LDSC.
 #' @export
-setClass("LDScoreRef",
-  contains = "LDReference",
+setClass("LDScore",
+  contains = "LDStatistic",
   representation(
     ld_scores = "matrix",
     ld_score_weights = "numeric",
@@ -314,11 +314,9 @@ setClass("H2Estimate",
 # =============================================================================
 
 #' @title LD Data Container
-#' @description S4 container for LD information, replacing the ad-hoc list
-#'   returned by \code{load_LD_matrix()}. Stores either a pre-computed
+#' @description S4 container for LD information. Stores either a pre-computed
 #'   correlation matrix or a \code{GenotypeHandle} (or list of handles for
-#'   mixture panels) for lazy genotype/correlation access. Eliminates the
-#'   \code{is_genotype} flag duality.
+#'   mixture panels) for lazy genotype/correlation access.
 #'
 #' @slot correlation A correlation matrix, a list of per-block matrices
 #'   (block-diagonal LD), or NULL if genotypes are available and R should
@@ -359,8 +357,7 @@ setClass("LDData",
 # =============================================================================
 
 #' @title Fine-Mapping Result
-#' @description S4 container for fine-mapping output, replacing the ad-hoc
-#'   list from \code{postprocess_finemapping_fit()}. Stores variant names,
+#' @description S4 container for fine-mapping output. Stores variant names,
 #'   the trimmed model fit, and a long-format table of credible sets and PIPs.
 #' @slot variant_names Character vector of variant IDs.
 #' @slot trimmed_fit List containing the method-specific trimmed fit.
@@ -398,8 +395,7 @@ setClass("FineMappingResult",
 # =============================================================================
 
 #' @title TWAS Weights
-#' @description S4 container for TWAS weight matrices, replacing the
-#'   fragile attribute-based list from \code{twas_weights()}.
+#' @description S4 container for TWAS weight matrices.
 #' @slot weights Named list of numeric matrices (variants x outcomes).
 #' @slot variant_ids Character vector of variant IDs (row names for all
 #'   weight matrices).
@@ -439,8 +435,7 @@ setClass("TWASWeights",
 # =============================================================================
 
 #' @title Regional Association Data
-#' @description S4 container for regional genotype/phenotype/covariate data,
-#'   replacing the 13-element list from \code{load_regional_association_data()}.
+#' @description S4 container for regional genotype/phenotype/covariate data.
 #'   Residualized genotypes and phenotypes are computed lazily via accessors.
 #' @slot genotype_matrix Numeric matrix (samples x variants) of genotype
 #'   dosages, with colnames as variant IDs and rownames as sample IDs.
@@ -519,8 +514,8 @@ setMethod("show", "AnnotationMatrix", function(object) {
 })
 
 #' @export
-setMethod("show", "LDEigenRef", function(object) {
-  cat(sprintf("LDEigenRef: %d SNPs across %d blocks\n",
+setMethod("show", "LDEigen", function(object) {
+  cat(sprintf("LDEigen: %d SNPs across %d blocks\n",
               nrow(object@snp_info), length(object@eigen_list)))
   cat(sprintf("  Eigenvalue truncation: %.2f\n",
               object@eigenvalue_truncation))
@@ -529,10 +524,10 @@ setMethod("show", "LDEigenRef", function(object) {
 })
 
 #' @export
-setMethod("show", "LDScoreRef", function(object) {
+setMethod("show", "LDScore", function(object) {
   n_scores <- ncol(object@ld_scores)
   has_matrix <- length(object@ld_matrix_list) > 0
-  cat(sprintf("LDScoreRef: %d SNPs, %d LD score columns\n",
+  cat(sprintf("LDScore: %d SNPs, %d LD score columns\n",
               nrow(object@snp_info), n_scores))
   cat(sprintf("  Full LD matrices: %s (needed for g-LDSC)\n", has_matrix))
   cat(sprintf("  Reference N: %d, In-sample: %s\n",

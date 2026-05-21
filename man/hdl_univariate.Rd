@@ -11,7 +11,7 @@ hdl_univariate(z, n, eigen_ref, annotations = NULL, local = FALSE, lambda = 0)
 
 \item{n}{Numeric, GWAS sample size.}
 
-\item{eigen_ref}{An \code{LDEigenRef} object.}
+\item{eigen_ref}{An \code{LDEigen} object.}
 
 \item{annotations}{An \code{AnnotationMatrix}, or NULL.}
 

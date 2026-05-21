@@ -11,7 +11,7 @@ gldsc_univariate(z, n, ld_ref, annotations = NULL, local = FALSE, lambda = 0)
 
 \item{n}{Numeric, GWAS sample size.}
 
-\item{ld_ref}{An \code{LDScoreRef} object.}
+\item{ld_ref}{An \code{LDScore} object.}
 
 \item{annotations}{An \code{AnnotationMatrix}, or NULL.}
 
