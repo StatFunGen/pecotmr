@@ -35,6 +35,7 @@ requirements:
     - bioconductor-rsamtools
     - bioconductor-rtracklayer
     - bioconductor-summarizedexperiment
+    - r-arrow
     - r-aspu
     - r-base
     - r-bglr
@@ -92,6 +93,7 @@ requirements:
     - bioconductor-rsamtools
     - bioconductor-rtracklayer
     - bioconductor-summarizedexperiment
+    - r-arrow
     - r-aspu
     - r-base
     - r-bglr

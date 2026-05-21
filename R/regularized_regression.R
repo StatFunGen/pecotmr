@@ -431,7 +431,7 @@ init_prior_sd <- function(X, y, n = 30) {
 # their results back to length p.
 #' @importFrom matrixStats colSds
 .drop_zero_variance <- function(X, fn_name) {
-  sds <- matrixStats::colSds(X)
+  sds <- colSds(X)
   keep <- !is.na(sds) & sds != 0
   if (!all(keep)) {
     warning(sprintf(

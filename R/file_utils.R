@@ -2,6 +2,10 @@
 
 #' @importFrom vroom vroom
 #' @importFrom tools file_path_sans_ext
+#' @importFrom Rsamtools TabixFile seqnamesTabix scanTabix headerTabix
+#' @importFrom GenomicRanges GRanges seqnames
+#' @importFrom SummarizedExperiment assay
+#' @importFrom MungeSumstats standardise_header
 read_bim <- function(bed) {
   bimf <- paste0(file_path_sans_ext(bed), ".bim")
   bim <- vroom(bimf, col_names = FALSE)
@@ -367,25 +371,25 @@ match_variants_to_keep <- function(variant_info, keep_variants_path) {
 
 # Internal helper: read a region from a tabix-indexed file via Rsamtools
 read_tabix_region <- function(file, region, use_col_names) {
-  tbx <- Rsamtools::TabixFile(file)
+  tbx <- TabixFile(file)
   parsed <- parse_region(region)
   # Match chromosome naming convention in the tabix index
   chrom <- as.character(parsed$chrom)
-  tbx_seqnames <- Rsamtools::seqnamesTabix(tbx)
+  tbx_seqnames <- seqnamesTabix(tbx)
   if (any(grepl("^chr", tbx_seqnames))) {
     chrom <- paste0("chr", chrom)
   }
-  gr <- GenomicRanges::GRanges(
+  gr <- GRanges(
     seqnames = chrom,
-    ranges = IRanges::IRanges(start = parsed$start, end = parsed$end)
+    ranges = IRanges(start = parsed$start, end = parsed$end)
   )
-  lines <- Rsamtools::scanTabix(tbx, param = gr)[[1]]
+  lines <- scanTabix(tbx, param = gr)[[1]]
   if (length(lines) == 0) return(NULL)
 
   # Get header for column names
   col_names_vec <- NULL
   if (use_col_names) {
-    hdr <- Rsamtools::headerTabix(tbx)$header
+    hdr <- headerTabix(tbx)$header
     if (length(hdr) > 0) {
       last_hdr <- hdr[length(hdr)]
       col_names_vec <- strsplit(sub("^#", "", last_hdr), "\t")[[1]]
@@ -395,10 +399,10 @@ read_tabix_region <- function(file, region, use_col_names) {
   # Parse tab-delimited lines
   txt <- paste(lines, collapse = "\n")
   if (!is.null(col_names_vec)) {
-    as.data.frame(vroom::vroom(I(txt), delim = "\t", col_names = col_names_vec,
+    as.data.frame(vroom(I(txt), delim = "\t", col_names = col_names_vec,
                                show_col_types = FALSE))
   } else {
-    as.data.frame(vroom::vroom(I(txt), delim = "\t", col_names = use_col_names,
+    as.data.frame(vroom(I(txt), delim = "\t", col_names = use_col_names,
                                show_col_types = FALSE))
   }
 }
@@ -501,7 +505,7 @@ load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE,
   # --- Extract genotypes (no mean imputation — callers handle missing) ---
   rse <- extractBlockGenotypes(handle, snp_idx, mean_impute = FALSE)
   # Convert RSE to samples x variants matrix for pecotmr convention
-  X <- t(SummarizedExperiment::assay(rse, "dosage"))
+  X <- t(assay(rse, "dosage"))
   variant_info <- .snp_info_to_variant_info(
     handle@snp_info[snp_idx, , drop = FALSE])
 
@@ -900,9 +904,9 @@ load_regional_association_data <- function(genotype, # PLINK file
   }
   parsed_region <- if (!is.null(region)) parse_region(region) else NULL
   region_gr <- if (!is.null(parsed_region)) {
-    GenomicRanges::GRanges(
+    GRanges(
       seqnames = paste0("chr", parsed_region$chrom),
-      ranges = IRanges::IRanges(
+      ranges = IRanges(
         start = as.integer(parsed_region$start),
         end = as.integer(parsed_region$end)
       )
@@ -957,8 +961,8 @@ load_regional_univariate_data <- function(...) {
     dropped_sample = dat@dropped_samples,
     maf = dat@maf,
     X = dat@genotype_matrix,
-    chrom = if (!is.null(region_gr)) as.character(GenomicRanges::seqnames(region_gr))[1] else NULL,
-    grange = if (!is.null(region_gr)) as.character(c(GenomicRanges::start(region_gr), GenomicRanges::end(region_gr))) else NULL,
+    chrom = if (!is.null(region_gr)) as.character(seqnames(region_gr))[1] else NULL,
+    grange = if (!is.null(region_gr)) as.character(c(start(region_gr), end(region_gr))) else NULL,
     X_variance = lapply(residual_X, function(x) colVars(x))
   ))
 }
@@ -984,8 +988,8 @@ load_regional_regression_data <- function(...) {
     covar = dat@covariates,
     dropped_sample = dat@dropped_samples,
     maf = dat@maf,
-    chrom = if (!is.null(region_gr)) as.character(GenomicRanges::seqnames(region_gr))[1] else NULL,
-    grange = if (!is.null(region_gr)) as.character(c(GenomicRanges::start(region_gr), GenomicRanges::end(region_gr))) else NULL
+    chrom = if (!is.null(region_gr)) as.character(seqnames(region_gr))[1] else NULL,
+    grange = if (!is.null(region_gr)) as.character(c(start(region_gr), end(region_gr))) else NULL
   ))
 }
 
@@ -1053,8 +1057,8 @@ load_regional_multivariate_data <- function(matrix_y_min_complete = NULL, # when
     dropped_sample = dropped_sample,
     X = X,
     maf = apply(X, 2, compute_maf),
-    chrom = if (!is.null(region_gr)) as.character(GenomicRanges::seqnames(region_gr))[1] else NULL,
-    grange = if (!is.null(region_gr)) as.character(c(GenomicRanges::start(region_gr), GenomicRanges::end(region_gr))) else NULL,
+    chrom = if (!is.null(region_gr)) as.character(seqnames(region_gr))[1] else NULL,
+    grange = if (!is.null(region_gr)) as.character(c(start(region_gr), end(region_gr))) else NULL,
     X_variance = colVars(X)
   ))
 }
@@ -1087,8 +1091,8 @@ load_regional_functional_data <- function(..., min_markers = NULL) {
     Y = rd@phenotypes,
     X = rd@genotype_matrix,
     maf = rd@maf,
-    chrom = if (!is.null(region_gr)) as.character(GenomicRanges::seqnames(region_gr))[1] else NULL,
-    grange = if (!is.null(region_gr)) as.character(c(GenomicRanges::start(region_gr), GenomicRanges::end(region_gr))) else NULL,
+    chrom = if (!is.null(region_gr)) as.character(seqnames(region_gr))[1] else NULL,
+    grange = if (!is.null(region_gr)) as.character(c(start(region_gr), end(region_gr))) else NULL,
     Y_coordinates = rd@Y_coordinates
   )
   if (!is.null(min_markers)) {
@@ -1323,7 +1327,7 @@ standardise_sumstats_columns <- function(sumstats, column_file_path = NULL, comm
   # Make a copy to avoid in-place modification by MungeSumstats
   sumstats_copy <- data.frame(sumstats, check.names = FALSE)
   # Use MungeSumstats for comprehensive column standardization
-  sumstats_copy <- MungeSumstats::standardise_header(
+  sumstats_copy <- standardise_header(
     sumstats_copy, return_list = FALSE, uppercase_unmapped = FALSE
   )
   # Rename MungeSumstats standard names to pecotmr conventions
@@ -1899,23 +1903,23 @@ load_tsv_region <- function(file_path, region = NULL, extract_region_name = NULL
     if (!is.null(region)) {
       # Use Rsamtools to query the tabix-indexed file by region
       sumstats <- tryCatch({
-        tbx <- Rsamtools::TabixFile(file_path)
+        tbx <- TabixFile(file_path)
         parsed <- parse_region(region)
         # Match chromosome naming convention in the tabix index
         chrom <- as.character(parsed$chrom)
-        tbx_seqnames <- Rsamtools::seqnamesTabix(tbx)
+        tbx_seqnames <- seqnamesTabix(tbx)
         if (any(grepl("^chr", tbx_seqnames))) {
           chrom <- paste0("chr", chrom)
         }
-        gr <- GenomicRanges::GRanges(
+        gr <- GRanges(
           seqnames = chrom,
-          ranges = IRanges::IRanges(start = parsed$start, end = parsed$end)
+          ranges = IRanges(start = parsed$start, end = parsed$end)
         )
-        lines <- Rsamtools::scanTabix(tbx, param = gr)[[1]]
+        lines <- scanTabix(tbx, param = gr)[[1]]
         if (length(lines) == 0) return(NULL)
 
         # Get header for column names
-        hdr <- Rsamtools::headerTabix(tbx)$header
+        hdr <- headerTabix(tbx)$header
         col_names_vec <- NULL
         if (length(hdr) > 0) {
           last_hdr <- hdr[length(hdr)]
@@ -1935,10 +1939,10 @@ load_tsv_region <- function(file_path, region = NULL, extract_region_name = NULL
 
         txt <- paste(lines, collapse = "\n")
         if (!is.null(col_names_vec)) {
-          as.data.frame(vroom::vroom(I(txt), delim = "\t", col_names = col_names_vec,
+          as.data.frame(vroom(I(txt), delim = "\t", col_names = col_names_vec,
                                      show_col_types = FALSE))
         } else {
-          as.data.frame(vroom::vroom(I(txt), delim = "\t", col_names = TRUE,
+          as.data.frame(vroom(I(txt), delim = "\t", col_names = TRUE,
                                      show_col_types = FALSE))
         }
       }, error = function(e) {
@@ -1946,11 +1950,11 @@ load_tsv_region <- function(file_path, region = NULL, extract_region_name = NULL
       })
     } else {
       # No region specified - read the whole gz file
-      sumstats <- as.data.frame(vroom::vroom(file_path, show_col_types = FALSE))
+      sumstats <- as.data.frame(vroom(file_path, show_col_types = FALSE))
     }
   } else {
     warning("Not a tabix-indexed gz file, loading the entire dataset.")
-    sumstats <- as.data.frame(vroom::vroom(file_path, show_col_types = FALSE))
+    sumstats <- as.data.frame(vroom(file_path, show_col_types = FALSE))
   }
 
   # Apply name-based filter if specified

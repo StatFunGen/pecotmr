@@ -131,6 +131,20 @@ safe_svd <- function(mat, tol = 1e-8, max_rank = NULL) {
 #' @param method Character, one of \code{"sample"} (default, N-1 denominator),
 #'   \code{"population"} (N denominator, GCTA-style), or \code{"gcta"} (per-pair
 #'   missing data correction). Partial matching is supported.
+#' @param backend Character, one of \code{"internal"} (default), \code{"snprelate"},
+#'   or \code{"snpstats"}. Controls which library computes the correlation matrix
+#'   when \code{method = "sample"}:
+#'   \describe{
+#'     \item{\code{"internal"}}{Uses \code{Rfast::cora} if available, otherwise
+#'       base \code{cor()}.}
+#'     \item{\code{"snprelate"}}{Requires a temporary GDS file; uses
+#'       \code{SNPRelate::snpgdsLDMat(method = "corr")}.}
+#'     \item{\code{"snpstats"}}{Converts to \code{SnpMatrix}; uses
+#'       \code{snpStats::ld(, stat = "R")}.}
+#'   }
+#'   The \code{"snprelate"} and \code{"snpstats"} backends are only supported
+#'   with \code{method = "sample"}; combining them with other methods will
+#'   raise an error.
 #' @param trim_samples Logical. If \code{TRUE} and \code{method} is
 #'   \code{"population"} or \code{"gcta"}, drops trailing samples so that
 #'   \code{nrow(X)} is a multiple of 4, matching PLINK .bed file chunk processing.
@@ -177,29 +191,41 @@ safe_svd <- function(mat, tol = 1e-8, max_rank = NULL) {
 #'
 #' @export
 compute_LD <- function(X, method = c("sample", "population", "gcta"),
+                       backend = c("internal", "snprelate", "snpstats"),
                        trim_samples = FALSE, shrinkage = 0) {
   if (is.null(X)) {
     stop("X must be provided.")
   }
   method <- match.arg(method)
+  backend <- match.arg(backend)
   nms <- colnames(X)
 
   if (method == "sample") {
     # ---- Standard sample correlation (N-1 denominator) ----
-    # Mean impute only if NAs exist (PLINK2 data typically has none)
-    X_imp <- X
-    if (anyNA(X_imp)) {
-      col_means <- colMeans(X_imp, na.rm = TRUE)
-      na_pos <- which(is.na(X_imp), arr.ind = TRUE)
-      X_imp[na_pos] <- col_means[na_pos[, 2]]
-    }
-    if (requireNamespace("Rfast", quietly = TRUE)) {
-      # large=FALSE uses tcrossprod internally, ~40x faster than large=TRUE
-      R <- Rfast::cora(X_imp, large = FALSE)
+    if (backend == "snprelate") {
+      R <- .compute_ld_snprelate(X)
+    } else if (backend == "snpstats") {
+      R <- .compute_ld_snpstats(X)
     } else {
-      R <- cor(X_imp)
+      # internal backend: Rfast::cora if available, else base cor()
+      # Mean impute only if NAs exist (PLINK2 data typically has none)
+      X_imp <- X
+      if (anyNA(X_imp)) {
+        col_means <- colMeans(X_imp, na.rm = TRUE)
+        na_pos <- which(is.na(X_imp), arr.ind = TRUE)
+        X_imp[na_pos] <- col_means[na_pos[, 2]]
+      }
+      if (requireNamespace("Rfast", quietly = TRUE)) {
+        # large=FALSE uses tcrossprod internally, ~40x faster than large=TRUE
+        R <- Rfast::cora(X_imp, large = FALSE)
+      } else {
+        R <- cor(X_imp)
+      }
     }
   } else if (method == "population") {
+    if (backend != "internal") {
+      stop("backend '", backend, "' is only supported with method='sample'.")
+    }
     # ---- Population variance (N denominator, GCTA-style) ----
     # Optionally trim trailing samples to a multiple of 4 (matches .bed processing)
     if (trim_samples) {
@@ -235,6 +261,9 @@ compute_LD <- function(X, method = c("sample", "population", "gcta"),
     sd_vec <- sqrt(col_vars)
     R <- cov_mat / outer(sd_vec, sd_vec)
   } else {
+    if (backend != "internal") {
+      stop("backend '", backend, "' is only supported with method='sample'.")
+    }
     # ---- GCTA per-pair missing data correction ----
     # Matches the DENTIST binary's calcLDFromBfile_gcta formula exactly.
     # Unlike "population" which divides by total N, this method tracks
@@ -299,6 +328,67 @@ compute_LD <- function(X, method = c("sample", "population", "gcta"),
   }
 
   colnames(R) <- rownames(R) <- nms
+  R
+}
+
+#' Compute LD via SNPRelate (creates a temporary GDS file from the dosage matrix).
+#' @param X Numeric genotype matrix (samples x SNPs).
+#' @return Correlation matrix.
+#' @noRd
+.compute_ld_snprelate <- function(X) {
+  if (!requireNamespace("SNPRelate", quietly = TRUE))
+    stop("Package 'SNPRelate' is required for backend='snprelate'")
+  if (!requireNamespace("gdsfmt", quietly = TRUE))
+    stop("Package 'gdsfmt' is required for backend='snprelate'")
+
+  tmp_gds <- tempfile(fileext = ".gds")
+  on.exit(unlink(tmp_gds), add = TRUE)
+
+  # Round to integer dosage for GDS (0/1/2)
+  X_int <- round(X)
+  storage.mode(X_int) <- "integer"
+  X_int[is.na(X_int)] <- 3L  # GDS missing code
+
+  snp_ids <- colnames(X) %||% seq_len(ncol(X))
+  sample_ids <- rownames(X) %||% seq_len(nrow(X))
+
+  SNPRelate::snpgdsCreateGeno(tmp_gds,
+    genmat = X_int,
+    sample.id = sample_ids,
+    snp.id = snp_ids,
+    snp.chromosome = rep(1L, ncol(X)),
+    snp.position = seq_len(ncol(X)),
+    snpfirstdim = FALSE
+  )
+
+  gds <- SNPRelate::snpgdsOpen(tmp_gds, readonly = TRUE)
+  on.exit(SNPRelate::snpgdsClose(gds), add = TRUE)
+
+  ld_obj <- SNPRelate::snpgdsLDMat(gds, method = "corr",
+                                    slide = -1, verbose = FALSE)
+  ld_obj$LD
+}
+
+#' Compute LD via snpStats (converts dosage matrix to SnpMatrix).
+#' @param X Numeric genotype matrix (samples x SNPs).
+#' @return Correlation matrix (r, not r²).
+#' @noRd
+.compute_ld_snpstats <- function(X) {
+  if (!requireNamespace("snpStats", quietly = TRUE))
+    stop("Package 'snpStats' is required for backend='snpstats'")
+
+  # snpStats expects counts of the B allele as raw codes: 1=AA, 2=AB, 3=BB, 0=NA
+  # pecotmr dosage is ALT count (0/1/2), so map: 0->1, 1->2, 2->3, NA->0
+  X_raw <- round(X) + 1L
+  X_raw[is.na(X) | X_raw < 1L] <- 0L
+  X_raw[X_raw > 3L] <- 3L
+  storage.mode(X_raw) <- "raw"
+  sm <- new("SnpMatrix", X_raw)
+
+  R <- as.matrix(snpStats::ld(sm, stats = "R", depth = ncol(X) - 1L))
+  # snpStats::ld returns a sparse-like matrix; ensure full dense
+  R[is.na(R)] <- 0
+  diag(R) <- 1
   R
 }
 
@@ -778,6 +868,7 @@ filter_molecular_events <- function(events, filters, condition = NULL, remove_al
 #' @param verbose Logical, print progress (default TRUE).
 #' @return The imputed matrix with the same dimensions as the input (minus
 #'   any all-NA columns).
+#' @importFrom BiocParallel MulticoreParam SerialParam bplapply
 #' @export
 xgboost_imputation <- function(data, maxiter = 10L, max_depth = 2L,
                                 nrounds = 50L, decreasing = FALSE,
@@ -818,9 +909,9 @@ xgboost_imputation <- function(data, maxiter = 10L, max_depth = 2L,
 
   # Set up BiocParallel
   if (num_workers > 1L) {
-    BPPARAM <- BiocParallel::MulticoreParam(workers = num_workers)
+    BPPARAM <- MulticoreParam(workers = num_workers)
   } else {
-    BPPARAM <- BiocParallel::SerialParam()
+    BPPARAM <- SerialParam()
   }
 
   iter <- 0L
@@ -850,7 +941,7 @@ xgboost_imputation <- function(data, maxiter = 10L, max_depth = 2L,
       list(var_idx = var_idx, predicted = predict(model, xgb_pred))
     }
 
-    results <- BiocParallel::bplapply(nzsort_j, impute_one, BPPARAM = BPPARAM)
+    results <- bplapply(nzsort_j, impute_one, BPPARAM = BPPARAM)
 
     for (res in results) {
       misi <- NAloc[, res$var_idx]
@@ -880,21 +971,21 @@ xgboost_imputation <- function(data, maxiter = 10L, max_depth = 2L,
 #' @param cov Covariance matrix. If \code{NULL}, computed from \code{x}.
 #' @param inverted Logical; if \code{TRUE}, \code{cov} is already inverted.
 #' @return Named numeric vector of Mahalanobis distances.
+#' @importFrom MASS ginv
+#' @importFrom stats cov quantile
 #' @export
 robust_mahalanobis <- function(x, center = NULL, cov = NULL,
                                inverted = FALSE) {
   x <- if (is.vector(x)) matrix(x, ncol = length(x)) else as.matrix(x)
   if (is.null(center)) center <- colMeans(x)
-  if (is.null(cov)) cov <- stats::cov(x)
+  if (is.null(cov)) cov <- cov(x)
   x <- sweep(x, 2L, center)
   if (!inverted) {
     cov <- tryCatch(solve(cov), error = function(cond) {
-      if (!requireNamespace("MASS", quietly = TRUE))
-        stop("Package 'MASS' is required for robust_mahalanobis with singular covariance")
-      MASS::ginv(cov)
+      ginv(cov)
     })
   }
-  stats::setNames(rowSums(x %*% cov * x), rownames(x))
+  setNames(rowSums(x %*% cov * x), rownames(x))
 }
 
 #' Detect Outliers via Mahalanobis Distance
@@ -924,11 +1015,11 @@ detect_outliers_mahalanobis <- function(x, prob = 0.99,
   x <- as.matrix(x)
   sample_ids <- rownames(x) %||% as.character(seq_len(nrow(x)))
   center <- colMeans(x)
-  cov_mat <- stats::cov(x)
+  cov_mat <- cov(x)
   d <- robust_mahalanobis(x, center, cov_mat)
   p <- ncol(x)
-  pvals <- stats::pchisq(d, df = p, lower.tail = FALSE)
-  cutoff <- stats::quantile(d, probs = prob)
+  pvals <- pchisq(d, df = p, lower.tail = FALSE)
+  cutoff <- quantile(d, probs = prob)
   data.frame(
     sample_id = sample_ids,
     mahal = as.numeric(d),

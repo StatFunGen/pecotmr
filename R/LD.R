@@ -935,16 +935,27 @@ check_ld <- function(R,
 
 #' Prune columns by pairwise correlation (LD-style prune)
 #'
-#' Performs single-linkage hierarchical clustering on a correlation-distance
-#' matrix (1 - |cor(X)|) and keeps one representative column per cluster at the
-#' given correlation threshold. Uses \code{Rfast::cora} when available for a
-#' faster correlation computation on wide matrices.
+#' Performs LD pruning using one of two backends. The default \code{"hclust"}
+#' backend computes the full correlation matrix, builds a single-linkage
+#' hierarchical clustering on the distance (1 - |cor|), and keeps one
+#' representative column per cluster. The \code{"snprelate"} backend delegates
+#' to \code{SNPRelate::snpgdsLDpruning}, which performs a sliding-window
+#' greedy prune directly on a temporary GDS file.
 #'
 #' @param X Numeric matrix. Columns are the variables to prune (typically SNP
 #'   genotype dosages); rows are observations.
 #' @param cor_thres Numeric in (0, 1). Absolute correlation threshold.
 #'   Columns whose pairwise |cor| exceeds this are grouped; one survivor is
 #'   kept per group. Default 0.8.
+#' @param backend Character, one of \code{"hclust"} (default) or
+#'   \code{"snprelate"}. Controls the pruning algorithm:
+#'   \describe{
+#'     \item{\code{"hclust"}}{Uses the internal hierarchical-clustering approach
+#'       with \code{Rfast::cora} (if available) or base \code{cor()}.}
+#'     \item{\code{"snprelate"}}{Requires \pkg{SNPRelate} and \pkg{gdsfmt}.
+#'       Creates a temporary GDS file and runs
+#'       \code{SNPRelate::snpgdsLDpruning(method = "corr")}.}
+#'   }
 #' @param verbose Logical. If TRUE, print progress messages. Default FALSE.
 #'
 #' @return A list with:
@@ -963,9 +974,17 @@ check_ld <- function(R,
 #'
 #' @importFrom stats as.dist hclust cutree cor
 #' @export
-ld_prune_by_correlation <- function(X, cor_thres = 0.8, verbose = FALSE) {
+ld_prune_by_correlation <- function(X, cor_thres = 0.8,
+                                    backend = c("hclust", "snprelate"),
+                                    verbose = FALSE) {
+  backend <- match.arg(backend)
   p <- ncol(X)
 
+  if (backend == "snprelate") {
+    return(.ld_prune_snprelate(X, cor_thres = cor_thres, verbose = verbose))
+  }
+
+  # ---- hclust backend (default) ----
   if (requireNamespace("Rfast", quietly = TRUE)) {
     cor.X <- Rfast::cora(X, large = TRUE)
   } else {
@@ -998,6 +1017,56 @@ ld_prune_by_correlation <- function(X, cor_thres = 0.8, verbose = FALSE) {
 
   if (ncol(X.new) == 1) {
     colnames(X.new) <- colnames(X)[-ind.delete]
+  }
+
+  list(X.new = X.new, filter.id = filter.id)
+}
+
+#' SNPRelate-based LD pruning helper
+#' @noRd
+.ld_prune_snprelate <- function(X, cor_thres, verbose) {
+  if (!requireNamespace("SNPRelate", quietly = TRUE) ||
+      !requireNamespace("gdsfmt", quietly = TRUE)) {
+    stop("Packages 'SNPRelate' and 'gdsfmt' are required for backend='snprelate'.")
+  }
+  p <- ncol(X)
+  snp_names <- colnames(X) %||% paste0("snp", seq_len(p))
+
+  # Round dosages to integer genotype codes for GDS
+  geno_int <- round(X)
+  storage.mode(geno_int) <- "integer"
+
+  tmp_gds <- tempfile(fileext = ".gds")
+  on.exit(unlink(tmp_gds), add = TRUE)
+
+  SNPRelate::snpgdsCreateGeno(
+    gds.fn = tmp_gds,
+    genmat = t(geno_int),
+    sample.id = seq_len(nrow(X)),
+    snp.id = seq_len(p),
+    snp.rs.id = snp_names,
+    snp.chromosome = rep(1L, p),
+    snp.position = seq_len(p),
+    snpfirstdim = TRUE
+  )
+
+  gds <- SNPRelate::snpgdsOpen(tmp_gds, allow.duplicate = TRUE)
+  on.exit(SNPRelate::snpgdsClose(gds), add = TRUE)
+
+  keep_list <- SNPRelate::snpgdsLDpruning(
+    gds,
+    method = "corr",
+    ld.threshold = cor_thres,
+    verbose = verbose
+  )
+
+  keep_ids <- sort(unlist(keep_list, use.names = FALSE))
+  filter.id <- keep_ids
+  X.new <- X[, keep_ids, drop = FALSE]
+
+  if (verbose) {
+    message("ld_prune_by_correlation (snprelate): kept ", length(keep_ids),
+            " of ", p, " columns at |cor| > ", cor_thres)
   }
 
   list(X.new = X.new, filter.id = filter.id)

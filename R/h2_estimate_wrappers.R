@@ -3,6 +3,7 @@
 #'   LD score computation methods, H2Estimate accessors, and a converter
 #'   to bridge H2Estimate into the sldsc_wrapper.R postprocessing pipeline.
 #' @include AllGenerics.R
+#' @importFrom stats median
 NULL
 
 # =============================================================================
@@ -20,7 +21,7 @@ setMethod("estimateH2",
     .validate_method_ref(method, ld_ref)
 
     z <- getZ(sumstats)
-    n <- stats::median(getN(sumstats))
+    n <- median(getN(sumstats))
     M <- nSnps(sumstats)
 
     # Apply var_y correction for case-control studies
@@ -56,11 +57,11 @@ setMethod("estimateH2",
 
 #' @keywords internal
 .validate_method_ref <- function(method, ld_ref) {
-  if (method %in% c("lder", "hdl") && !methods::is(ld_ref, "LDEigenRef")) {
+  if (method %in% c("lder", "hdl") && !is(ld_ref, "LDEigenRef")) {
     stop("Method '", method, "' requires an LDEigenRef object, ",
          "got ", class(ld_ref))
   }
-  if (method == "gldsc" && !methods::is(ld_ref, "LDScoreRef")) {
+  if (method == "gldsc" && !is(ld_ref, "LDScoreRef")) {
     stop("Method 'gldsc' requires an LDScoreRef object, ",
          "got ", class(ld_ref))
   }
@@ -220,7 +221,7 @@ setMethod("getScoreStats", "H2Estimate", function(object) {
 #'   }
 #' @export
 h2estimate_to_sldsc_trait <- function(h2_est) {
-  if (!methods::is(h2_est, "H2Estimate")) {
+  if (!is(h2_est, "H2Estimate")) {
     stop("h2_est must be an H2Estimate object")
   }
 
@@ -248,13 +249,13 @@ h2estimate_to_sldsc_trait <- function(h2_est) {
 
   list(
     categories    = cats,
-    tau           = stats::setNames(enrich_df$tau, cats),
-    tau_se        = stats::setNames(enrich_df$tau_se, cats),
-    enrichment    = stats::setNames(enrich_df$enrichment, cats),
-    enrichment_se = stats::setNames(enrich_df$enrichment_se, cats),
-    enrichment_p  = stats::setNames(enrich_df$enrichment_p, cats),
-    prop_h2       = stats::setNames(enrich_df$prop_h2, cats),
-    prop_snps     = stats::setNames(enrich_df$prop_snps, cats),
+    tau           = setNames(enrich_df$tau, cats),
+    tau_se        = setNames(enrich_df$tau_se, cats),
+    enrichment    = setNames(enrich_df$enrichment, cats),
+    enrichment_se = setNames(enrich_df$enrichment_se, cats),
+    enrichment_p  = setNames(enrich_df$enrichment_p, cats),
+    prop_h2       = setNames(enrich_df$prop_h2, cats),
+    prop_snps     = setNames(enrich_df$prop_snps, cats),
     h2g           = h2_est@h2,
     tau_blocks    = tau_blocks,
     n_blocks      = n_blocks

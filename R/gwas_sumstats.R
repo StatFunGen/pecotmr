@@ -2,6 +2,9 @@
 #' @description Functions for reading, validating, and constructing
 #'   \code{GWASSumStats} objects from various input formats. Ported from
 #'   h2tools, extended with \code{var_y} support for case-control studies.
+#' @importFrom GenomicRanges GRanges seqnames start
+#' @importFrom S4Vectors DataFrame mcols mcols<-
+#' @importFrom MungeSumstats format_sumstats
 #' @include AllGenerics.R
 NULL
 
@@ -49,9 +52,9 @@ GWASSumStats <- function(data, trait_name = "trait", genome = "hg19",
   chr <- sub("^chr", "", chr, ignore.case = TRUE)
   chr <- paste0("chr", chr)
 
-  gr <- GenomicRanges::GRanges(
+  gr <- GRanges(
     seqnames = chr,
-    ranges = IRanges::IRanges(start = data$BP, width = 1L)
+    ranges = IRanges(start = data$BP, width = 1L)
   )
 
   mcols_data <- data[, c("SNP", "A1", "A2", "Z", "N")]
@@ -61,7 +64,7 @@ GWASSumStats <- function(data, trait_name = "trait", genome = "hg19",
       mcols_data[[col]] <- as.numeric(data[[col]])
     }
   }
-  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(mcols_data)
+  mcols(gr) <- DataFrame(mcols_data)
 
   new("GWASSumStats",
     sumstats = gr,
@@ -84,7 +87,7 @@ setMethod("readSumstats",
 
     if (use_mungesumstats && requireNamespace("MungeSumstats", quietly = TRUE)) {
       message("Standardizing summary statistics with MungeSumStats...")
-      reformatted <- MungeSumstats::format_sumstats(
+      reformatted <- format_sumstats(
         path = path,
         ref_genome = genome,
         return_data = TRUE,
@@ -116,7 +119,7 @@ setMethod("readSumstats",
     }
 
     message("Reading summary statistics directly (no MungeSumStats)...")
-    dt <- as.data.frame(vroom::vroom(path, show_col_types = FALSE, ...))
+    dt <- as.data.frame(vroom(path, show_col_types = FALSE, ...))
 
     if (!is.null(n) && !"N" %in% colnames(dt)) {
       dt$N <- n
@@ -135,19 +138,19 @@ setMethod("readSumstats",
 #' @rdname getZ
 #' @export
 setMethod("getZ", "GWASSumStats", function(x) {
-  S4Vectors::mcols(x@sumstats)$Z
+  mcols(x@sumstats)$Z
 })
 
 #' @rdname getN
 #' @export
 setMethod("getN", "GWASSumStats", function(x) {
-  S4Vectors::mcols(x@sumstats)$N
+  mcols(x@sumstats)$N
 })
 
 #' @rdname getMaf
 #' @export
 setMethod("getMaf", "GWASSumStats", function(x) {
-  mc <- S4Vectors::mcols(x@sumstats)
+  mc <- mcols(x@sumstats)
   if ("MAF" %in% colnames(mc)) mc$MAF else NULL
 })
 
@@ -161,7 +164,7 @@ setMethod("nSnps", "GWASSumStats", function(x) {
 #' @export
 setMethod("subsetChr", "GWASSumStats", function(x, chr) {
   chr_name <- paste0("chr", sub("^chr", "", as.character(chr)))
-  idx <- as.character(GenomicRanges::seqnames(x@sumstats)) == chr_name
+  idx <- as.character(seqnames(x@sumstats)) == chr_name
   new("GWASSumStats",
     sumstats = x@sumstats[idx],
     genome = x@genome,
@@ -193,9 +196,9 @@ setMethod("getVarY", "GWASSumStats", function(x) {
 #' @export
 as.data.frame.GWASSumStats <- function(x, row.names = NULL, optional = FALSE, ...) {
   gr <- x@sumstats
-  mc <- as.data.frame(S4Vectors::mcols(gr))
-  mc$CHR <- as.character(GenomicRanges::seqnames(gr))
-  mc$BP  <- GenomicRanges::start(gr)
+  mc <- as.data.frame(mcols(gr))
+  mc$CHR <- as.character(seqnames(gr))
+  mc$BP  <- start(gr)
   # Reorder: SNP, CHR, BP first, then remaining columns
   first_cols <- c("SNP", "CHR", "BP")
   rest_cols  <- setdiff(names(mc), first_cols)

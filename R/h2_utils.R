@@ -2,6 +2,8 @@
 #' @description Internal helper functions for block operations, regression,
 #'   jackknife SE, enrichment computation, and meta-analysis. Ported from
 #'   h2tools, with additions for sldsc_wrapper integration.
+#' @importFrom GenomicRanges GRanges
+#' @importFrom BiocParallel bplapply bpparam
 NULL
 
 # =============================================================================
@@ -17,12 +19,12 @@ NULL
 #' @keywords internal
 snpsPerBlock <- function(snp_info, ld_blocks) {
   blocks_gr <- ld_blocks@blocks
-  snp_gr <- GenomicRanges::GRanges(
+  snp_gr <- GRanges(
     seqnames = snp_info$CHR,
-    ranges = IRanges::IRanges(start = snp_info$BP, width = 1L)
+    ranges = IRanges(start = snp_info$BP, width = 1L)
   )
-  hits <- GenomicRanges::findOverlaps(snp_gr, blocks_gr)
-  split(S4Vectors::queryHits(hits), S4Vectors::subjectHits(hits))
+  hits <- findOverlaps(snp_gr, blocks_gr)
+  split(queryHits(hits), subjectHits(hits))
 }
 
 #' @title Apply Function Per Block with BiocParallel
@@ -35,9 +37,9 @@ snpsPerBlock <- function(snp_info, ld_blocks) {
 #' @keywords internal
 bplapplyBlocks <- function(block_indices, FUN, BPPARAM = NULL, ...) {
   if (is.null(BPPARAM)) {
-    BPPARAM <- BiocParallel::bpparam()
+    BPPARAM <- bpparam()
   }
-  BiocParallel::bplapply(block_indices, FUN, BPPARAM = BPPARAM, ...)
+  bplapply(block_indices, FUN, BPPARAM = BPPARAM, ...)
 }
 
 # =============================================================================
@@ -237,10 +239,10 @@ shrinkLd <- function(R, n_ref, shrinkage_type = "wen_stephens",
 checkGenomeBuild <- function(...) {
   objects <- list(...)
   genomes <- vapply(objects, function(x) {
-    if (methods::is(x, "GWASSumStats")) x@genome
-    else if (methods::is(x, "LDReference")) x@genome
-    else if (methods::is(x, "AnnotationMatrix")) x@genome
-    else if (methods::is(x, "LDBlocks")) x@genome
+    if (is(x, "GWASSumStats")) x@genome
+    else if (is(x, "LDReference")) x@genome
+    else if (is(x, "AnnotationMatrix")) x@genome
+    else if (is(x, "LDBlocks")) x@genome
     else stop("Unknown object type for genome build check")
   }, character(1))
   if (length(unique(genomes)) > 1) {

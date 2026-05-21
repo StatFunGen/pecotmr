@@ -15,8 +15,10 @@ Authors@R: c(person("Gao Wang",role = c("cre","aut"),
 License: MIT + file LICENSE
 Imports:
     BiocParallel,
+    Biostrings,
     GenomicRanges,
     IRanges,
+    MASS,
     Matrix,
     MungeSumstats,
     Rsamtools,
@@ -40,22 +42,21 @@ Imports:
     vroom
 Suggests:
     aSPU,
+    arrow,
     BGLR,
-    Biostrings,
     bigsnpr,
     bigstatsr,
     coda,
     colocboost,
-    GBJ,
-    igraph,
-    L0Learn,
-    Rfast,
-    RcppDPR,
     flashier,
     fsusieR,
+    GBJ,
+    gdsfmt,
     glmnet,
     harmonicmeanp,
+    igraph,
     knitr,
+    L0Learn,
     lassosum,
     mashr,
     mr.mashr,
@@ -67,9 +68,10 @@ Suggests:
     poolr,
     qgg,
     qvalue,
+    Rfast,
+    RcppDPR,
     rmarkdown,
     rtracklayer,
-    gdsfmt,
     SNPRelate,
     snpStats,
     testthat,
@@ -89,25 +91,25 @@ RoxygenNote: 7.3.3
 Collate:
     'AllClasses.R'
     'AllGenerics.R'
+    'AllMethods.R'
     'LD.R'
     'allele_qc.R'
     'colocboost_pipeline.R'
     'compute_qtl_enrichment.R'
     'cpp11.R'
     'ctwas_wrapper.R'
-    'AllMethods.R'
     'dentist_qc.R'
     'encoloc.R'
     'example_data.R'
     'file_utils.R'
     'fsusie_wrapper.R'
+    'genotype_io.R'
+    'gwas_sumstats.R'
     'h2_annotations.R'
     'h2_estimate_wrappers.R'
-    'h2_genotype_io.R'
     'h2_gldsc.R'
     'h2_hdl.R'
     'h2_lder.R'
-    'h2_sumstats.R'
     'h2_utils.R'
     'ld_loader.R'
     'mash_wrapper.R'

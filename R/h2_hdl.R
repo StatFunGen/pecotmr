@@ -10,6 +10,7 @@
 #'   Kim SS, Dey KK, Weissbrod O, et al. (2023). Leveraging LD
 #'   eigenvalue regression to improve the estimation of SNP heritability
 #'   and functional enrichment. medRxiv.
+#' @importFrom stats optimize
 NULL
 
 # =============================================================================
@@ -102,7 +103,7 @@ hdl_univariate <- function(z, n, eigen_ref, annotations = NULL,
     # Initialize with uniform h2 across annotations
     tau_init <- rep(0.5 / n_tau, n_tau)
 
-    opt <- stats::optim(tau_init, nll, gr = nll_grad, method = "BFGS",
+    opt <- optim(tau_init, nll, gr = nll_grad, method = "BFGS",
                         control = list(maxit = 200, reltol = 1e-8))
     tau <- opt$par
 
@@ -119,7 +120,7 @@ hdl_univariate <- function(z, n, eigen_ref, annotations = NULL,
       val
     }
 
-    opt <- stats::optimize(nll, interval = c(-0.5, 1.5), tol = 1e-8)
+    opt <- optimize(nll, interval = c(-0.5, 1.5), tol = 1e-8)
     h2 <- opt$minimum
     tau <- h2  # scalar, used by downstream functions
   }
@@ -302,7 +303,7 @@ hdl_univariate <- function(z, n, eigen_ref, annotations = NULL,
       if (any(sigma2 <= 0)) return(1e10)
       0.5 * sum(log(sigma2) + bd$z_rot^2 / sigma2)
     }
-    opt <- stats::optimize(nll_local, interval = c(-0.5, 0.5), tol = 1e-8)
+    opt <- optimize(nll_local, interval = c(-0.5, 0.5), tol = 1e-8)
     delta_h2 <- opt$minimum
 
     # Total local h2 = global baseline contribution + local deviation

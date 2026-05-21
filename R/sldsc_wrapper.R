@@ -28,7 +28,7 @@
 }
 
 .sldsc_detect_annot_cols <- function(file_path) {
-  sample <- vroom::vroom(file_path, n_max = 5L, show_col_types = FALSE)
+  sample <- vroom(file_path, n_max = 5L, show_col_types = FALSE)
   setdiff(names(sample), .sldsc_std_cols)
 }
 
@@ -52,7 +52,9 @@
 #' run$tau["my_target_annotation"]
 #' }
 #'
-#' @importFrom stats setNames var
+#' @importFrom stats setNames var na.omit
+#' @importFrom utils head
+#' @importFrom vroom vroom
 #' @export
 read_sldsc_trait <- function(prefix) {
   results_file <- paste0(prefix, ".results")
@@ -63,7 +65,7 @@ read_sldsc_trait <- function(prefix) {
     if (!file.exists(f)) stop("read_sldsc_trait: missing file: ", f)
   }
 
-  results <- vroom::vroom(results_file, show_col_types = FALSE)
+  results <- vroom(results_file, show_col_types = FALSE)
   cats <- as.character(results$Category)
 
   log_lines <- readLines(log_file, warn = FALSE)
@@ -74,7 +76,7 @@ read_sldsc_trait <- function(prefix) {
   if (is.na(h2g))
     stop("read_sldsc_trait: failed to parse h2g numeric from log line: ", h2_line[1])
 
-  delete_values <- as.matrix(vroom::vroom(delete_file, show_col_types = FALSE))
+  delete_values <- as.matrix(vroom(delete_file, show_col_types = FALSE))
   if (ncol(delete_values) != length(cats)) {
     stop("read_sldsc_trait: .part_delete has ", ncol(delete_values),
          " columns but .results has ", length(cats), " categories.")
@@ -83,13 +85,13 @@ read_sldsc_trait <- function(prefix) {
 
   list(
     categories     = cats,
-    tau            = stats::setNames(as.numeric(results$Coefficient),                 cats),
-    tau_se         = stats::setNames(as.numeric(results[["Coefficient_std_error"]]),  cats),
-    enrichment     = stats::setNames(as.numeric(results$Enrichment),                  cats),
-    enrichment_se  = stats::setNames(as.numeric(results[["Enrichment_std_error"]]),   cats),
-    enrichment_p   = stats::setNames(as.numeric(results[["Enrichment_p"]]),           cats),
-    prop_h2        = stats::setNames(as.numeric(results[["Prop._h2"]]),               cats),
-    prop_snps      = stats::setNames(as.numeric(results[["Prop._SNPs"]]),             cats),
+    tau            = setNames(as.numeric(results$Coefficient),                 cats),
+    tau_se         = setNames(as.numeric(results[["Coefficient_std_error"]]),  cats),
+    enrichment     = setNames(as.numeric(results$Enrichment),                  cats),
+    enrichment_se  = setNames(as.numeric(results[["Enrichment_std_error"]]),   cats),
+    enrichment_p   = setNames(as.numeric(results[["Enrichment_p"]]),           cats),
+    prop_h2        = setNames(as.numeric(results[["Prop._h2"]]),               cats),
+    prop_snps      = setNames(as.numeric(results[["Prop._SNPs"]]),             cats),
     h2g            = h2g,
     tau_blocks     = delete_values,
     n_blocks       = nrow(delete_values)
@@ -145,11 +147,11 @@ compute_sldsc_annot_sd <- function(target_anno_dir, frqfile_dir = NULL,
   if (length(cols_use) == 0L)
     stop("compute_sldsc_annot_sd: no annotation columns to process.")
 
-  num <- stats::setNames(numeric(length(cols_use)), cols_use)
+  num <- setNames(numeric(length(cols_use)), cols_use)
   den <- 0
 
   for (anno_file in anno_files) {
-    dat <- vroom::vroom(anno_file, show_col_types = FALSE)
+    dat <- vroom(anno_file, show_col_types = FALSE)
     if (maf_cutoff > 0) {
       chrom <- .sldsc_chrom_from_filename(anno_file)
       if (is.na(chrom))
@@ -157,7 +159,7 @@ compute_sldsc_annot_sd <- function(target_anno_dir, frqfile_dir = NULL,
       frq_file <- file.path(frqfile_dir, paste0(plink_name, chrom, ".frq"))
       if (!file.exists(frq_file))
         stop("compute_sldsc_annot_sd: .frq file not found: ", frq_file)
-      frq <- vroom::vroom(frq_file, col_select = c("SNP", "MAF"), show_col_types = FALSE)
+      frq <- vroom(frq_file, col_select = c("SNP", "MAF"), show_col_types = FALSE)
       dat <- merge(dat, frq, by = "SNP", all.x = FALSE, all.y = FALSE)
       dat <- dat[!is.na(dat$MAF) & dat$MAF > maf_cutoff, ]
     }
@@ -165,7 +167,7 @@ compute_sldsc_annot_sd <- function(target_anno_dir, frqfile_dir = NULL,
     n_minus_1 <- nrow(dat) - 1L
     for (col in cols_use) {
       vals <- as.numeric(dat[[col]])
-      v <- stats::var(vals, na.rm = TRUE)
+      v <- var(vals, na.rm = TRUE)
       if (!is.na(v)) num[col] <- num[col] + n_minus_1 * v
     }
     den <- den + n_minus_1
@@ -217,7 +219,7 @@ compute_sldsc_M_ref <- function(target_anno_dir = NULL, frqfile_dir = NULL,
     if (length(frq_files) > 0L) {
       total <- 0L
       for (f in frq_files) {
-        frq <- vroom::vroom(f, col_select = "MAF", show_col_types = FALSE)
+        frq <- vroom(f, col_select = "MAF", show_col_types = FALSE)
         total <- total + if (maf_cutoff > 0)
           sum(!is.na(frq$MAF) & frq$MAF > maf_cutoff) else nrow(frq)
       }
@@ -246,7 +248,7 @@ compute_sldsc_M_ref <- function(target_anno_dir = NULL, frqfile_dir = NULL,
         stop("compute_sldsc_M_ref: install 'arrow' to read .parquet files.")
       total <- total + nrow(arrow::read_parquet(f))
     } else {
-      total <- total + nrow(vroom::vroom(f, show_col_types = FALSE))
+      total <- total + nrow(vroom(f, show_col_types = FALSE))
     }
   }
   as.integer(total)
@@ -280,13 +282,13 @@ is_binary_sldsc_annot <- function(target_anno_dir, annot_cols = NULL) {
     cols_use <- annot_cols
   }
 
-  is_binary <- stats::setNames(rep(TRUE, length(cols_use)), cols_use)
+  is_binary <- setNames(rep(TRUE, length(cols_use)), cols_use)
 
   for (f in anno_files) {
-    dat <- vroom::vroom(f, col_select = dplyr::all_of(cols_use), show_col_types = FALSE)
+    dat <- vroom(f, col_select = all_of(cols_use), show_col_types = FALSE)
     for (col in cols_use) {
       if (!is_binary[[col]]) next
-      vals <- unique(stats::na.omit(as.numeric(dat[[col]])))
+      vals <- unique(na.omit(as.numeric(dat[[col]])))
       if (any(!(vals %in% c(0, 1)))) is_binary[[col]] <- FALSE
     }
     if (!any(is_binary)) break
@@ -364,7 +366,7 @@ standardize_sldsc_trait <- function(trait_data, sd_annot, M_ref,
     diff_ratio  <- (p_h2 / p_M) - (1 - p_h2) / (1 - p_M)
     enrichstat  <- (h2g / M_ref) * diff_ratio
 
-    abs_z <- stats::qnorm(1 - enrich_p / 2)
+    abs_z <- qnorm(1 - enrich_p / 2)
     enrichstat_se <- abs(enrichstat) / abs_z
     enrichstat_se[!is.finite(abs_z) | abs_z <= 0] <- NA_real_
 
@@ -438,7 +440,7 @@ meta_sldsc_random <- function(per_trait_estimates, category,
   }
   meta <- meta_random_effects(means, ses)
   z    <- meta$mean / meta$se
-  p    <- 2 * stats::pnorm(-abs(z))
+  p    <- 2 * pnorm(-abs(z))
   list(
     mean        = meta$mean,
     se          = meta$se,
@@ -599,7 +601,7 @@ sldsc_postprocessing_pipeline <- function(trait_single_prefixes,
       names(sd_annot_full)  <- target_categories
       names(is_binary_full) <- target_categories
       baseline_preview <- if (n_baseline > 0L)
-        paste(utils::head(pivot_run$categories[-seq_len(n_target)], 3), collapse = ", ")
+        paste(head(pivot_run$categories[-seq_len(n_target)], 3), collapse = ", ")
       else "(none)"
       message(sprintf(paste0(
         "[sldsc] sd_annot/is_binary names did not match polyfun .results categories;\n",
@@ -625,7 +627,7 @@ sldsc_postprocessing_pipeline <- function(trait_single_prefixes,
     }
   }
   if (length(baseline_categories) > 0L) {
-    msg_head <- paste(utils::head(baseline_categories, 5), collapse = ", ")
+    msg_head <- paste(head(baseline_categories, 5), collapse = ", ")
     msg_tail <- if (length(baseline_categories) > 5) ", ..." else ""
     message(sprintf("[sldsc] Detected %d baseline annotations: %s%s",
                     length(baseline_categories), msg_head, msg_tail))
@@ -635,7 +637,7 @@ sldsc_postprocessing_pipeline <- function(trait_single_prefixes,
 
   sd_annot <- sd_annot_full[target_categories]
   is_binary <- if (length(is_binary_full) > 0L) is_binary_full[target_categories] else
-               stats::setNames(rep(FALSE, length(target_categories)), target_categories)
+               setNames(rep(FALSE, length(target_categories)), target_categories)
 
   message(sprintf("[sldsc] Standardizing %d traits...", length(trait_names)))
   per_trait <- list()
@@ -788,7 +790,7 @@ sldsc_postprocessing_pipeline <- function(trait_single_prefixes,
                           "there are %d target categories (%s)."),
                    length(target_labels), length(target_categories),
                    paste(target_categories, collapse = ", ")))
-    relab     <- stats::setNames(target_labels, target_categories)
+    relab     <- setNames(target_labels, target_categories)
     relab_vec <- function(x) { y <- unname(relab[x]); y[is.na(y)] <- x[is.na(y)]; y }
 
     for (t in names(res$per_trait)) {

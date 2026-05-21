@@ -2,6 +2,9 @@
 #' @description Constructors and accessor method implementations for all
 #'   S4 classes: LDData, RegionalData, FineMappingResult, TWASWeights.
 #' @include AllGenerics.R
+#' @importFrom SummarizedExperiment assay
+#' @importFrom S4Vectors DataFrame mcols mcols<-
+#' @importFrom GenomicRanges seqnames GRanges
 NULL
 
 # =============================================================================
@@ -44,10 +47,10 @@ setMethod("getCorrelation", "LDData", function(x) {
   if (is.list(x@genotype_handle)) {
     # Multi-panel: compute from first handle
     geno <- extractBlockGenotypes(x@genotype_handle[[1]], x@snp_idx)
-    X <- t(SummarizedExperiment::assay(geno, "dosage"))
+    X <- t(assay(geno, "dosage"))
   } else {
     geno <- extractBlockGenotypes(x@genotype_handle, x@snp_idx)
-    X <- t(SummarizedExperiment::assay(geno, "dosage"))
+    X <- t(assay(geno, "dosage"))
   }
   compute_LD(X, method = "sample")
 })
@@ -59,11 +62,11 @@ setMethod("getGenotypes", "LDData", function(x) {
   if (is.list(x@genotype_handle)) {
     lapply(x@genotype_handle, function(h) {
       geno <- extractBlockGenotypes(h, x@snp_idx)
-      t(SummarizedExperiment::assay(geno, "dosage"))
+      t(assay(geno, "dosage"))
     })
   } else {
     geno <- extractBlockGenotypes(x@genotype_handle, x@snp_idx)
-    t(SummarizedExperiment::assay(geno, "dosage"))
+    t(assay(geno, "dosage"))
   }
 })
 
@@ -76,7 +79,7 @@ setMethod("hasGenotypes", "LDData", function(x) {
 #' @rdname getVariantIds
 #' @export
 setMethod("getVariantIds", "LDData", function(x) {
-  S4Vectors::mcols(x@variants)$variant_id
+  mcols(x@variants)$variant_id
 })
 
 #' @rdname getVariantInfo
@@ -101,9 +104,9 @@ setMethod("getBlockMetadata", "LDData", function(x) {
 #' @keywords internal
 #' @noRd
 ld_data_to_list <- function(x) {
-  mc <- as.data.frame(S4Vectors::mcols(x@variants))
-  mc$chrom <- as.character(GenomicRanges::seqnames(x@variants))
-  mc$pos <- GenomicRanges::start(x@variants)
+  mc <- as.data.frame(mcols(x@variants))
+  mc$chrom <- as.character(seqnames(x@variants))
+  mc$pos <- start(x@variants)
   ref_panel <- mc
 
   bm <- x@block_metadata
@@ -138,12 +141,12 @@ ld_data_to_list <- function(x) {
   chr <- paste0("chr", chr)
   pos <- as.integer(ref_panel$pos)
 
-  gr <- GenomicRanges::GRanges(
+  gr <- GRanges(
     seqnames = chr,
-    ranges = IRanges::IRanges(start = pos, width = 1L)
+    ranges = IRanges(start = pos, width = 1L)
   )
 
-  mcols_data <- S4Vectors::DataFrame(
+  mcols_data <- DataFrame(
     variant_id = ref_panel$variant_id,
     A1 = ref_panel$A1,
     A2 = ref_panel$A2
@@ -155,7 +158,7 @@ ld_data_to_list <- function(x) {
       mcols_data[[col]] <- ref_panel[[col]]
     }
   }
-  S4Vectors::mcols(gr) <- mcols_data
+  mcols(gr) <- mcols_data
   gr
 }
 
@@ -232,7 +235,7 @@ setMethod("getResidualY", "RegionalData", function(x, condition = 1L) {
 setMethod("getResidualXScalar", "RegionalData", function(x, condition = 1L) {
   if (!x@scale_residuals) return(rep(1, ncol(x@genotype_matrix)))
   res <- getResidualX(x, condition)
-  apply(res, 2, stats::sd)
+  apply(res, 2, sd)
 })
 
 #' @rdname getResidualYScalar
@@ -240,7 +243,7 @@ setMethod("getResidualXScalar", "RegionalData", function(x, condition = 1L) {
 setMethod("getResidualYScalar", "RegionalData", function(x, condition = 1L) {
   if (!x@scale_residuals) return(1)
   res <- getResidualY(x, condition)
-  apply(res, 2, stats::sd)
+  apply(res, 2, sd)
 })
 
 #' @rdname getVariantInfo
@@ -278,7 +281,7 @@ FineMappingResult <- function(variant_names, trimmed_fit, top_loci,
 setMethod("getPIP", "FineMappingResult", function(x) {
   tl <- x@top_loci
   if (nrow(tl) == 0 || !"pip" %in% names(tl)) return(numeric(0))
-  stats::setNames(tl$pip, tl$variant_id)
+  setNames(tl$pip, tl$variant_id)
 })
 
 #' @rdname getCS
@@ -422,14 +425,14 @@ setMethod("getWeights", "TWASWeights", function(x, method = NULL) {
 #' @export
 top_loci_to_granges <- function(top_loci) {
   if (is.null(top_loci) || nrow(top_loci) == 0) {
-    return(GenomicRanges::GRanges())
+    return(GRanges())
   }
   parsed <- parse_variant_id(top_loci$variant_id)
   chr <- paste0("chr", parsed$chrom)
-  gr <- GenomicRanges::GRanges(
+  gr <- GRanges(
     seqnames = chr,
-    ranges = IRanges::IRanges(start = parsed$pos, width = 1L)
+    ranges = IRanges(start = parsed$pos, width = 1L)
   )
-  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(top_loci)
+  mcols(gr) <- DataFrame(top_loci)
   gr
 }

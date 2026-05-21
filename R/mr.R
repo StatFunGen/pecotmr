@@ -11,7 +11,7 @@ calc_I2 <- function(Q, Est) {
 # @noRd
 .create_null_mr_df <- function(gene_name, col_spec) {
   n <- length(gene_name)
-  cols <- purrr::map(col_spec, function(type) {
+  cols <- map(col_spec, function(type) {
     switch(type,
       character = as.character(rep(NA, n)),
       integer = as.integer(rep(NA, n)),
@@ -35,7 +35,7 @@ calc_I2 <- function(Q, Est) {
 #' @param coverage_level Numeric credible set coverage used when \code{coverage}
 #'   is NULL.
 #' @return A data frame formatted for MR analysis or NULL if cs_list is empty.
-#' @importFrom stringr str_remove
+#' @importFrom stringr str_remove str_split_i
 #' @export
 mr_format <- function(susie_result, condition, gwas_sumstats_db, coverage = NULL,
                       run_allele_qc = TRUE, method = "susie", coverage_level = 0.95,
@@ -72,8 +72,8 @@ mr_format <- function(susie_result, condition, gwas_sumstats_db, coverage = NULL
     select(gene_name, variant_id, variant, betahat, sebetahat, all_of(coverage), all_of(pip_col)) %>%
     rename("bhat_x" = "betahat", "sbhat_x" = "sebetahat", "cs" = all_of(coverage), "pip" = all_of(pip_col))
 
-  susie_pos <- stringr::str_split_i(susie_cs_result_formatted$variant, ":", 2)
-  gwas_pos <- stringr::str_split_i(gwas_sumstats_db$variant_id, ":", 2)
+  susie_pos <- str_split_i(susie_cs_result_formatted$variant, ":", 2)
+  gwas_pos <- str_split_i(gwas_sumstats_db$variant_id, ":", 2)
   if (!any(susie_pos %in% gwas_pos)) return(.create_null_mr_df(gene_name, mr_format_spec))
 
   gwas_sumstats_db_extracted <- gwas_sumstats_db %>%
@@ -213,50 +213,50 @@ fine_mr <- function(formatted_input, cpip_cutoff = 0.5) {
                    "composite_sbhat", "meta_eff", "se_meta_eff", "Q", "I2")
 
   filtered <- formatted_input %>%
-    dplyr::mutate(
+    mutate(
       bhat_x = bhat_x / sbhat_x,
       sbhat_x = 1) %>%
-    dplyr::group_by(X_ID, cs) %>%
-    dplyr::mutate(cpip = sum(pip)) %>%
-    dplyr::filter(cpip >= cpip_cutoff)
+    group_by(X_ID, cs) %>%
+    mutate(cpip = sum(pip)) %>%
+    filter(cpip >= cpip_cutoff)
 
   if (nrow(filtered) == 0) {
-    return(tibble::tibble(!!!stats::setNames(
+    return(tibble(!!!setNames(
       rep(list(logical(0)), length(result_cols)), result_cols)))
   }
 
   filtered %>%
-    dplyr::group_by(X_ID, cs) %>%
-    dplyr::mutate(
+    group_by(X_ID, cs) %>%
+    mutate(
       beta_yx = bhat_y / bhat_x,
       se_yx = sqrt(
         (sbhat_y^2 / bhat_x^2) + ((bhat_y^2 * sbhat_x^2) / bhat_x^4)),
       composite_bhat = sum((beta_yx * pip) / cpip),
       composite_sbhat = sum((beta_yx^2 + se_yx^2) * pip / cpip)) %>%
-    dplyr::mutate(
+    mutate(
       composite_sbhat = sqrt(composite_sbhat - composite_bhat^2),
       wv = composite_sbhat^-2) %>%
-    dplyr::ungroup() %>%
-    dplyr::group_by(X_ID) %>%
-    dplyr::mutate(
+    ungroup() %>%
+    group_by(X_ID) %>%
+    mutate(
       meta_eff = sum(unique(wv) * unique(composite_bhat)),
       sum_w = sum(unique(wv)),
       se_meta_eff = sqrt(sum_w^-1),
       num_CS = length(unique(cs))) %>%
-    dplyr::mutate(
+    mutate(
       num_IV = length(snp),
       meta_eff = meta_eff / sum_w,
       Q = sum(unique(wv) * (unique(composite_bhat) - unique(meta_eff))^2),
       I2 = calc_I2(Q, composite_bhat)) %>%
-    dplyr::ungroup() %>%
-    dplyr::distinct(X_ID, .keep_all = TRUE) %>%
-    dplyr::mutate(
+    ungroup() %>%
+    distinct(X_ID, .keep_all = TRUE) %>%
+    mutate(
       cpip = round(cpip, 3),
       composite_bhat = round(composite_bhat, 3),
       meta_eff = round(meta_eff, 3),
       se_meta_eff = round(se_meta_eff, 3),
       Q = round(Q, 3),
       I2 = round(I2, 3)) %>%
-    dplyr::select(X_ID, num_CS, num_IV, cpip, composite_bhat, composite_sbhat,
+    select(X_ID, num_CS, num_IV, cpip, composite_bhat, composite_sbhat,
                   meta_eff, se_meta_eff, Q, I2)
 }

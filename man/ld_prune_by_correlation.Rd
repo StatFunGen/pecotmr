@@ -4,7 +4,12 @@
 \alias{ld_prune_by_correlation}
 \title{Prune columns by pairwise correlation (LD-style prune)}
 \usage{
-ld_prune_by_correlation(X, cor_thres = 0.8, verbose = FALSE)
+ld_prune_by_correlation(
+  X,
+  cor_thres = 0.8,
+  backend = c("hclust", "snprelate"),
+  verbose = FALSE
+)
 }
 \arguments{
 \item{X}{Numeric matrix. Columns are the variables to prune (typically SNP
@@ -13,6 +18,16 @@ genotype dosages); rows are observations.}
 \item{cor_thres}{Numeric in (0, 1). Absolute correlation threshold.
 Columns whose pairwise |cor| exceeds this are grouped; one survivor is
 kept per group. Default 0.8.}
+
+\item{backend}{Character, one of \code{"hclust"} (default) or
+\code{"snprelate"}. Controls the pruning algorithm:
+\describe{
+  \item{\code{"hclust"}}{Uses the internal hierarchical-clustering approach
+    with \code{Rfast::cora} (if available) or base \code{cor()}.}
+  \item{\code{"snprelate"}}{Requires \pkg{SNPRelate} and \pkg{gdsfmt}.
+    Creates a temporary GDS file and runs
+    \code{SNPRelate::snpgdsLDpruning(method = "corr")}.}
+}}
 
 \item{verbose}{Logical. If TRUE, print progress messages. Default FALSE.}
 }
@@ -25,10 +40,12 @@ A list with:
   }
 }
 \description{
-Performs single-linkage hierarchical clustering on a correlation-distance
-matrix (1 - |cor(X)|) and keeps one representative column per cluster at the
-given correlation threshold. Uses \code{Rfast::cora} when available for a
-faster correlation computation on wide matrices.
+Performs LD pruning using one of two backends. The default \code{"hclust"}
+backend computes the full correlation matrix, builds a single-linkage
+hierarchical clustering on the distance (1 - |cor|), and keeps one
+representative column per cluster. The \code{"snprelate"} backend delegates
+to \code{SNPRelate::snpgdsLDpruning}, which performs a sliding-window
+greedy prune directly on a temporary GDS file.
 }
 \examples{
 set.seed(1)

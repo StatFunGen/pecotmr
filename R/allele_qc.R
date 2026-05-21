@@ -1,3 +1,7 @@
+#' @importFrom GenomicRanges seqnames
+#' @importFrom S4Vectors mcols
+NULL
+
 #' Match target data alleles against a reference panel
 #'
 #' Match by ("chrom", "A1", "A2" and "pos"), accounting for possible
@@ -43,7 +47,7 @@ match_ref_panel <- function(target_data, ref_variants, col_to_flip = NULL,
 	   nm[empty_idx] <- paste0("unnamed_", seq_len(sum(empty_idx)))
 	 }
 	 # ensure names are unique and syntactic
-	 nm <- base::make.unique(nm, sep = "_")
+	 nm <- make.unique(nm, sep = "_")
 	 colnames(df) <- nm
 	 df
   }
@@ -284,9 +288,9 @@ merge_variant_info <- function(variants1, variants2, all = TRUE) {
   # Convert GRanges to data.frame if needed
   to_df <- function(x) {
     if (is(x, "GRanges")) {
-      mc <- as.data.frame(S4Vectors::mcols(x))
-      mc$chrom <- as.character(GenomicRanges::seqnames(x))
-      mc$pos <- GenomicRanges::start(x)
+      mc <- as.data.frame(mcols(x))
+      mc$chrom <- as.character(seqnames(x))
+      mc$pos <- start(x)
       mc[, c("chrom", "pos", "alt", "ref")]
     } else {
       as.data.frame(x)[, c("chrom", "pos", "alt", "ref")]

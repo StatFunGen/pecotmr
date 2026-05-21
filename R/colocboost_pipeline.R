@@ -362,6 +362,7 @@ colocboost_analysis <- function(...,
 #' }
 #'
 #' @importFrom susieR susie_rss
+#' @importFrom purrr imap map_int
 #' @export
 colocboost_pipeline <- function(
   region_data,

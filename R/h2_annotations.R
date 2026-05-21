@@ -2,6 +2,8 @@
 #' @description Read and manage genomic annotations for stratified
 #'   heritability analysis. Supports BED, BigWig, and LDSC .annot formats.
 #'   Ported from h2tools.
+#' @importFrom tools file_ext
+#' @importFrom GenomicRanges GRanges
 #' @include AllGenerics.R
 NULL
 
@@ -31,7 +33,7 @@ AnnotationMatrix <- function(annotations, snp_ranges, annotation_meta,
   if (is.null(colnames(annotations)))
     colnames(annotations) <- annotation_meta$name
 
-  methods::new("AnnotationMatrix",
+  new("AnnotationMatrix",
     snp_ranges = snp_ranges,
     annotations = annotations,
     annotation_meta = annotation_meta,
@@ -45,7 +47,7 @@ AnnotationMatrix <- function(annotations, snp_ranges, annotation_meta,
 
 #' @rdname readAnnotations
 #' @export
-methods::setMethod("readAnnotations",
+setMethod("readAnnotations",
   signature(paths = "character"),
   function(paths, snp_ranges, annotation_meta = NULL, genome = "hg19", ...) {
 
@@ -113,7 +115,7 @@ methods::setMethod("readAnnotations",
   if (grepl("\\.annot\\.gz$", lpath))
     return("ldsc_annot")
 
-  ext <- tolower(tools::file_ext(path))
+  ext <- tolower(file_ext(path))
   switch(ext,
     "bw" = , "bigwig" = "bigwig",
     "annot" = "ldsc_annot",
@@ -144,9 +146,9 @@ methods::setMethod("readAnnotations",
 #' @keywords internal
 .read_bed_annotation <- function(bed_path, snp_ranges) {
   regions <- rtracklayer::import(bed_path)
-  hits <- GenomicRanges::findOverlaps(snp_ranges, regions)
+  hits <- findOverlaps(snp_ranges, regions)
   result <- rep(0L, length(snp_ranges))
-  result[S4Vectors::queryHits(hits)] <- 1L
+  result[queryHits(hits)] <- 1L
   as.numeric(result)
 }
 
@@ -160,7 +162,7 @@ methods::setMethod("readAnnotations",
 #' @keywords internal
 .read_ldsc_annot <- function(annot_path, snp_ranges, annot_name) {
   # S-LDSC .annot files are tab-separated with columns: CHR, BP, SNP, CM, ...
-  dt <- as.data.frame(vroom::vroom(annot_path, show_col_types = FALSE))
+  dt <- as.data.frame(vroom(annot_path, show_col_types = FALSE))
 
   if (!annot_name %in% colnames(dt))
     stop("Annotation column '", annot_name, "' not found in ", annot_path)
@@ -169,18 +171,18 @@ methods::setMethod("readAnnotations",
     stop("LDSC annot file must contain CHR and BP columns")
 
   # Build GRanges from the annot file positions
-  annot_gr <- GenomicRanges::GRanges(
+  annot_gr <- GRanges(
     seqnames = paste0("chr", sub("^chr", "", dt$CHR)),
-    ranges = IRanges::IRanges(start = dt$BP, width = 1L)
+    ranges = IRanges(start = dt$BP, width = 1L)
   )
 
   # Match SNPs by genomic position
-  hits <- GenomicRanges::findOverlaps(snp_ranges, annot_gr)
+  hits <- findOverlaps(snp_ranges, annot_gr)
 
   # Initialize result with default 0
   result <- rep(0, length(snp_ranges))
-  result[S4Vectors::queryHits(hits)] <-
-    as.numeric(dt[[annot_name]][S4Vectors::subjectHits(hits)])
+  result[queryHits(hits)] <-
+    as.numeric(dt[[annot_name]][subjectHits(hits)])
 
   result
 }

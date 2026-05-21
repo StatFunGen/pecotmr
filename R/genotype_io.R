@@ -3,6 +3,11 @@
 #'   plink2, GDS) and provide block-level genotype extraction without
 #'   requiring format conversion. Ported from h2tools, adapted to
 #'   pecotmr allele conventions (A1 = ALT/effect allele).
+#' @importFrom SummarizedExperiment SummarizedExperiment rowRanges
+#' @importFrom GenomicRanges GRanges seqnames
+#' @importFrom S4Vectors DataFrame mcols mcols<-
+#' @importFrom tools file_ext
+#' @importFrom methods as
 #' @include AllGenerics.R
 NULL
 
@@ -73,13 +78,13 @@ setMethod("readGenotypes",
   param <- VariantAnnotation::ScanVcfParam(fixed = c("ALT"), info = NA,
                                             geno = NA)
   vcf <- VariantAnnotation::readVcf(path, param = param, ...)
-  rd <- SummarizedExperiment::rowRanges(vcf)
+  rd <- rowRanges(vcf)
 
   # pecotmr convention: A1 = ALT (effect), A2 = REF
   snp_info <- data.frame(
     SNP = names(rd),
-    CHR = as.character(GenomicRanges::seqnames(rd)),
-    BP = as.integer(BiocGenerics::start(rd)),
+    CHR = as.character(seqnames(rd)),
+    BP = as.integer(start(rd)),
     A1 = vapply(rd$ALT, function(x) as.character(x)[1], character(1)),
     A2 = as.character(rd$REF),
     stringsAsFactors = FALSE
@@ -110,10 +115,10 @@ setMethod("readGenotypes",
       stop("Plink file not found: ", f)
   }
 
-  bim <- utils::read.table(bim_file, header = FALSE,
+  bim <- read.table(bim_file, header = FALSE,
                             stringsAsFactors = FALSE,
                             col.names = c("CHR", "SNP", "CM", "BP", "A1", "A2"))
-  fam <- utils::read.table(fam_file, header = FALSE, stringsAsFactors = FALSE)
+  fam <- read.table(fam_file, header = FALSE, stringsAsFactors = FALSE)
   sample_ids <- as.character(fam[, 2])  # IID column
   n_samples <- nrow(fam)
 
@@ -161,7 +166,7 @@ setMethod("readGenotypes",
   )
 
   # Read sample IDs from .psam
-  psam <- as.data.frame(vroom::vroom(paths$psam, delim = "\t",
+  psam <- as.data.frame(vroom(paths$psam, delim = "\t",
                                       show_col_types = FALSE))
   names(psam) <- sub("^#", "", names(psam))
   sample_ids <- as.character(psam$IID)
@@ -218,15 +223,15 @@ extractBlockGenotypes <- function(handle, snp_idx, mean_impute = TRUE) {
   chr <- sub("^chr", "", chr, ignore.case = TRUE)
   chr <- paste0("chr", chr)
 
-  row_ranges <- GenomicRanges::GRanges(
+  row_ranges <- GRanges(
     seqnames = chr,
-    ranges = IRanges::IRanges(start = as.integer(si$BP), width = 1L)
+    ranges = IRanges(start = as.integer(si$BP), width = 1L)
   )
-  S4Vectors::mcols(row_ranges) <- S4Vectors::DataFrame(
+  mcols(row_ranges) <- DataFrame(
     SNP = si$SNP, A1 = si$A1, A2 = si$A2
   )
 
-  col_data <- S4Vectors::DataFrame(
+  col_data <- DataFrame(
     sample_id = handle@sample_ids,
     row.names = handle@sample_ids
   )
@@ -236,7 +241,7 @@ extractBlockGenotypes <- function(handle, snp_idx, mean_impute = TRUE) {
   rownames(dosage) <- si$SNP
   colnames(dosage) <- handle@sample_ids
 
-  SummarizedExperiment::SummarizedExperiment(
+  SummarizedExperiment(
     assays = list(dosage = dosage),
     rowRanges = row_ranges,
     colData = col_data
@@ -264,9 +269,9 @@ extractBlockGenotypes <- function(handle, snp_idx, mean_impute = TRUE) {
 #' @keywords internal
 .extract_block_vcf <- function(handle, snp_idx) {
   si <- handle@snp_info[snp_idx, ]
-  gr <- GenomicRanges::GRanges(
+  gr <- GRanges(
     seqnames = si$CHR,
-    ranges = IRanges::IRanges(start = si$BP, end = si$BP)
+    ranges = IRanges(start = si$BP, end = si$BP)
   )
   param <- VariantAnnotation::ScanVcfParam(which = gr, fixed = NA,
                                             info = NA, geno = "GT")
@@ -298,7 +303,7 @@ extractBlockGenotypes <- function(handle, snp_idx, mean_impute = TRUE) {
   )
   # snpStats as(x, "numeric") gives count of B allele (A2/bim col 6).
   # Flip to count A1 (bim col 5 / effect allele).
-  geno <- 2 - methods::as(plink_data$genotypes, "numeric")
+  geno <- 2 - as(plink_data$genotypes, "numeric")
   storage.mode(geno) <- "double"
   geno
 }
@@ -318,26 +323,37 @@ extractBlockGenotypes <- function(handle, snp_idx, mean_impute = TRUE) {
 
 #' @title Compute Block LD Correlation
 #' @description Compute the LD correlation matrix for a block of SNPs.
+#'   Delegates to \code{\link{compute_LD}} for the actual computation,
+#'   with automatic backend selection based on file format unless
+#'   overridden.
 #' @param handle A \code{GenotypeHandle} object.
 #' @param snp_idx Integer vector of 1-based SNP indices.
+#' @param backend Character, one of \code{"internal"} (default),
+#'   \code{"snprelate"}, or \code{"snpstats"}. When \code{"internal"},
+#'   GDS-format handles automatically use \code{SNPRelate::snpgdsLDMat}
+#'   via the native GDS path; other formats use the internal correlator.
+#' @param method Character, LD computation method passed to
+#'   \code{\link{compute_LD}}. Default \code{"sample"}.
+#' @param ... Additional arguments passed to \code{\link{compute_LD}}
+#'   (e.g., \code{shrinkage}, \code{trim_samples}).
 #' @return Numeric correlation matrix (p x p).
 #' @export
-computeBlockLdCor <- function(handle, snp_idx) {
-  if (handle@format == "gds") {
-    .compute_block_ld_gds(handle, snp_idx)
-  } else {
-    geno <- extractBlockGenotypes(handle, snp_idx)
-    if (is.null(geno) || ncol(geno) < 2) {
-      return(diag(length(snp_idx)))
-    }
-    if (requireNamespace("Rfast", quietly = TRUE)) {
-      R <- Rfast::cora(geno)
-    } else {
-      R <- stats::cor(geno, use = "pairwise.complete.obs")
-    }
-    R[is.na(R)] <- 0
-    R
+computeBlockLdCor <- function(handle, snp_idx, backend = "internal",
+                              method = "sample", ...) {
+  # For GDS format with internal backend, use the native SNPRelate path
+  # which avoids extracting genotypes into memory
+  if (handle@format == "gds" && backend == "internal") {
+    return(.compute_block_ld_gds(handle, snp_idx))
   }
+
+  # Extract genotypes via the unified GenotypeHandle pipeline
+  rse <- extractBlockGenotypes(handle, snp_idx)
+  if (is.null(rse)) return(diag(length(snp_idx)))
+  geno <- t(SummarizedExperiment::assay(rse, "dosage"))
+  if (ncol(geno) < 2) return(diag(length(snp_idx)))
+
+  # Delegate to compute_LD for all computation
+  compute_LD(geno, method = method, backend = backend, ...)
 }
 
 #' @keywords internal
@@ -443,7 +459,7 @@ computeBlockLdCor <- function(handle, snp_idx) {
   if (grepl("\\.annot\\.gz$", lpath))
     return("ldsc_annot")
 
-  ext <- tolower(tools::file_ext(path))
+  ext <- tolower(file_ext(path))
   if (nzchar(ext)) {
     return(switch(ext,
       "vcf" = "vcf",
@@ -481,10 +497,10 @@ computeBlockLdCor <- function(handle, snp_idx) {
 .plink_stem <- function(path) {
   # Only strip known plink extensions; leave other paths as-is (they may
   # already be the stem, e.g. "prefix.genotype" -> "prefix.genotype.bed")
-  ext <- tools::file_ext(path)
+  ext <- file_ext(path)
   plink_exts <- c("bed", "bim", "fam", "pgen", "pvar", "psam")
   if (tolower(ext) %in% plink_exts) {
-    tools::file_path_sans_ext(path)
+    file_path_sans_ext(path)
   } else {
     path
   }

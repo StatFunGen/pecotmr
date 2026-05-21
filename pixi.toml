@@ -54,6 +54,7 @@ r45 = {features = ["r45"]}
 "bioconductor-rsamtools" = "*"
 "bioconductor-rtracklayer" = "*"
 "bioconductor-summarizedexperiment" = "*"
+"r-arrow" = "*"
 "r-aspu" = "*"
 "r-base" = "*"
 "r-bglr" = "*"

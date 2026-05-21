@@ -81,7 +81,7 @@
 #' @importFrom matrixStats colSds
 #' @noRd
 .nonzero_var_columns <- function(X) {
-  sds <- matrixStats::colSds(X, na.rm = TRUE)
+  sds <- colSds(X, na.rm = TRUE)
   !is.na(sds) & sds != 0
 }
 
@@ -211,6 +211,8 @@
 #'   \item `time_elapsed`: The time taken to complete the cross-validation process.
 #' }
 #' @importFrom purrr map
+#' @importFrom BiocParallel bplapply bpworkers MulticoreParam
+#' @importFrom quadprog solve.QP
 #' @export
 twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_methods = NULL, max_num_variants = NULL, variants_to_keep = NULL, num_threads = 1, verbose = 1, ...) {
   split_data <- function(X, Y, sample_partition, fold) {
@@ -335,10 +337,10 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
 
     # Determine the number of cores to use
     num_cores <- ifelse(num_threads == -1,
-      BiocParallel::bpworkers(BiocParallel::MulticoreParam()),
+      bpworkers(MulticoreParam()),
       num_threads)
     num_cores <- min(num_cores,
-      BiocParallel::bpworkers(BiocParallel::MulticoreParam()))
+      bpworkers(MulticoreParam()))
 
     cv_args <- list(...)
 
@@ -411,9 +413,9 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
     }
 
     if (num_cores >= 2) {
-      bp_param <- BiocParallel::MulticoreParam(workers = num_cores,
-                                                RNGseed = 1L)
-      fold_results <- BiocParallel::bplapply(1:fold,
+      bp_param <- MulticoreParam(workers = num_cores,
+                                  RNGseed = 1L)
+      fold_results <- bplapply(1:fold,
         compute_method_predictions, BPPARAM = bp_param)
     } else {
       fold_results <- map(1:fold, compute_method_predictions)
@@ -527,10 +529,10 @@ twas_weights <- function(X, Y, weight_methods, num_threads = 1,
 
   # Determine number of cores to use
   num_cores <- ifelse(num_threads == -1,
-    BiocParallel::bpworkers(BiocParallel::MulticoreParam()),
+    bpworkers(MulticoreParam()),
     num_threads)
   num_cores <- min(num_cores,
-    BiocParallel::bpworkers(BiocParallel::MulticoreParam()))
+    bpworkers(MulticoreParam()))
 
   valid_columns <- .nonzero_var_columns(X)
   X_filtered <- as.matrix(X[, valid_columns, drop = FALSE])
@@ -593,9 +595,9 @@ twas_weights <- function(X, Y, weight_methods, num_threads = 1,
   }
 
   if (num_cores >= 2) {
-    bp_param <- BiocParallel::MulticoreParam(workers = num_cores,
-                                              RNGseed = 1L)
-    weights_list <- BiocParallel::bplapply(names(weight_methods),
+    bp_param <- MulticoreParam(workers = num_cores,
+                                RNGseed = 1L)
+    weights_list <- bplapply(names(weight_methods),
       compute_method_weights, weight_methods, BPPARAM = bp_param)
   } else {
     weights_list <- names(weight_methods) %>% map(compute_method_weights, weight_methods)
@@ -1152,7 +1154,7 @@ twas_multivariate_weights_pipeline <- function(
   bvec <- c(1, rep(0, K_valid))
 
   qp_sol <- tryCatch(
-    quadprog::solve.QP(Dmat = Dmat, dvec = dvec, Amat = Amat, bvec = bvec, meq = 1),
+    solve.QP(Dmat = Dmat, dvec = dvec, Amat = Amat, bvec = bvec, meq = 1),
     error = function(e) {
       warning("QP solver failed: ", conditionMessage(e),
               ". Falling back to equal weights among valid methods.")

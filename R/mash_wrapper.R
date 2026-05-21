@@ -104,7 +104,7 @@ filter_mixture_components <- function(conditions_to_keep, U, w = NULL, w_cutoff 
   }, conditions_to_keep)
 
   # Remove matrices where all values are zero or weight is below cutoff
-  keep_names <- names(purrr::keep(U, function(mat) !all(mat == 0)))
+  keep_names <- names(keep(U, function(mat) !all(mat == 0)))
   if (!is.null(w)) {
     keep_names <- intersect(keep_names, names(w[w >= w_cutoff]))
   }
@@ -324,7 +324,7 @@ merge_susie_cs <- function(susie_fit, coverage = "CS_95_susie", method = NULL) {
     all_sets <- unique(unlist(overlap_sets))
     if (length(all_sets) == 0) return(list())
 
-    parent <- stats::setNames(all_sets, all_sets)
+    parent <- setNames(all_sets, all_sets)
     find_root <- function(x) {
       while (!identical(parent[[x]], x)) x <- parent[[x]]
       x
@@ -352,7 +352,7 @@ merge_susie_cs <- function(susie_fit, coverage = "CS_95_susie", method = NULL) {
 
     # Update each variant's credible set names
     updated_credible_sets <- lapply(
-      stats::setNames(names(variants_sets_and_pips_list), names(variants_sets_and_pips_list)),
+      setNames(names(variants_sets_and_pips_list), names(variants_sets_and_pips_list)),
       function(variant_id) {
         current_sets <- variants_sets_and_pips_list[[variant_id]][["sets"]]
         mapped <- intersect(current_sets, names(set_name_map))
@@ -369,7 +369,7 @@ merge_susie_cs <- function(susie_fit, coverage = "CS_95_susie", method = NULL) {
   extract_top_loci <- function(susie_fit, coverage) {
     # Build a flat data frame of (variant_id, pip, set_name) across all conditions
     cond_names <- names(susie_fit[[1]])
-    rows <- purrr::map_dfr(seq_along(cond_names), function(i) {
+    rows <- map_dfr(seq_along(cond_names), function(i) {
       cond_data <- susie_fit[[1]][[i]]
       top_loci <- .translate_legacy_top_loci_cs_columns(cond_data[["top_loci"]])
       if (is.null(top_loci) || nrow(top_loci) == 0) return(NULL)
@@ -380,7 +380,7 @@ merge_susie_cs <- function(susie_fit, coverage = "CS_95_susie", method = NULL) {
       set_num <- set_num[!is.na(set_num) & set_num != 0]
       if (length(set_num) == 0) return(NULL)
 
-      purrr::map_dfr(set_num, function(sn) {
+      map_dfr(set_num, function(sn) {
         rows <- top_loci[top_loci[[coverage]] == sn & !is.na(top_loci[[coverage]]),
                          c("variant_id", pip_col), drop = FALSE]
         names(rows)[names(rows) == pip_col] <- "pip"
@@ -851,9 +851,11 @@ merge_sumstats_matrices <- function(matrix_list, value_column, ref_panel = NULL,
 #' @param tag_patterns Optional named pattern list used to classify context.
 #' @param result_list_format A nested list used as a running result container.
 #'
-#' @importFrom stringr str_detect
+#' @importFrom stringr str_detect str_remove_all
 #' @importFrom rlang .data sym
-#' @import dplyr tidyr tibble                
+#' @importFrom purrr keep map_dfr map_chr
+#' @importFrom utils combn
+#' @import dplyr tidyr tibble
 #' @return The updated `result_list_format` with processed results for the specified gene and condition.
 #' @export
 load_multicontext_sumstats <- function(dat_list, signal_df, cond, region, extract_infs = "z", tag_patterns = NULL, result_list_format) {
@@ -898,7 +900,7 @@ load_multicontext_sumstats <- function(dat_list, signal_df, cond, region, extrac
                   mutate(context_classify = if (is.null(tag_patterns) || length(tag_patterns) == 0) {
                     context
                   } else {
-                    purrr::map_chr(context, function(ctx) {
+                    map_chr(context, function(ctx) {
                       matched <- names(tag_patterns)[str_detect(ctx, tag_patterns)]
                       if (length(matched) == 0) NA_character_ else matched[1]
                     })
@@ -1001,7 +1003,7 @@ load_multicontext_sumstats <- function(dat_list, signal_df, cond, region, extrac
                    mutate(context_classify = if (is.null(tag_patterns) || length(tag_patterns) == 0) {
                      context
                    } else {
-                     purrr::map_chr(context, function(ctx) {
+                     map_chr(context, function(ctx) {
                        matched <- names(tag_patterns)[str_detect(ctx, tag_patterns)]
                        if (length(matched) == 0) NA_character_ else matched[1]
                      })
@@ -1203,7 +1205,7 @@ fit_mash_contrast <- function(index, orig_mean, posterior_mean, posterior_vcov,
                                grouping = NULL) {
   population_names <- colnames(posterior_mean)
   if (!is.null(population_names))
-    population_names <- stringr::str_remove_all(population_names, "BETA_")
+    population_names <- str_remove_all(population_names, "BETA_")
 
   orig_mean_vector <- orig_mean[index, ]
   names(orig_mean_vector) <- population_names
@@ -1212,12 +1214,12 @@ fit_mash_contrast <- function(index, orig_mean, posterior_mean, posterior_vcov,
   if (length(tested) < 2) return(NULL)
 
   n_pop <- length(tested)
-  pairwise_vector <- stats::setNames(rep(0, n_pop), tested)
+  pairwise_vector <- setNames(rep(0, n_pop), tested)
 
   # Default grouping: all independent
 
   if (is.null(grouping)) {
-    grouping <- stats::setNames(rep(0L, n_pop), tested)
+    grouping <- setNames(rep(0L, n_pop), tested)
   } else {
     grouping <- grouping[tested]
   }
@@ -1238,7 +1240,7 @@ fit_mash_contrast <- function(index, orig_mean, posterior_mean, posterior_vcov,
     colnames(dev) <- paste0(tested, "_deviation")
 
     # 2. Pairwise contrasts
-    two_combn <- utils::combn(tested, 2)
+    two_combn <- combn(tested, 2)
     pw_names <- apply(two_combn, 2, paste, collapse = "_vs_")
     pw <- apply(two_combn, 2, make_pairwise_contrast_col, pairwise_vector)
     colnames(pw) <- pw_names
@@ -1275,7 +1277,7 @@ fit_mash_contrast <- function(index, orig_mean, posterior_mean, posterior_vcov,
   contrast_diff <- drop(t(contrast_design) %*% pm)
   contrast_vcov <- t(contrast_design) %*% pv %*% contrast_design
   contrast_se <- sqrt(diag(contrast_vcov))
-  contrast_p <- 2 * (1 - stats::pnorm(abs(contrast_diff) / contrast_se))
+  contrast_p <- 2 * (1 - pnorm(abs(contrast_diff) / contrast_se))
 
   # Build output data.frame
   cnames <- colnames(contrast_design)
@@ -1442,11 +1444,11 @@ meta_analysis_per_cell <- function(effect_sizes, se_values,
       se <- se[keep]
 
       if (length(es) < 2) {
-        results[[length(results) + 1]] <- tibble::tibble(
+        results[[length(results) + 1]] <- tibble(
           cell = cell,
           condition = cell_conditions[i],
           meta_pvalue = if (length(es) == 1) {
-            2 * stats::pnorm(abs(es / se), lower.tail = FALSE)
+            2 * pnorm(abs(es / se), lower.tail = FALSE)
           } else NA_real_,
           meta_effect = if (length(es) == 1) es else NA_real_,
           meta_se = if (length(es) == 1) se else NA_real_,
@@ -1458,10 +1460,10 @@ meta_analysis_per_cell <- function(effect_sizes, se_values,
 
       ma <- meta_random_effects(es, se)
       z <- ma$mean / ma$se
-      results[[length(results) + 1]] <- tibble::tibble(
+      results[[length(results) + 1]] <- tibble(
         cell = cell,
         condition = cell_conditions[i],
-        meta_pvalue = 2 * stats::pnorm(abs(z), lower.tail = FALSE),
+        meta_pvalue = 2 * pnorm(abs(z), lower.tail = FALSE),
         meta_effect = ma$mean,
         meta_se = ma$se,
         tau2 = ma$tau2,
@@ -1470,5 +1472,5 @@ meta_analysis_per_cell <- function(effect_sizes, se_values,
     }
   }
 
-  dplyr::bind_rows(results)
+  bind_rows(results)
 }

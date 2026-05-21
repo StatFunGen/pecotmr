@@ -3,7 +3,7 @@
 #'   summary statistics, LD references, annotations, fine-mapping results,
 #'   TWAS weights, regional data, and heritability estimates.
 #' @importFrom methods setClass setMethod new is validObject
-#' @importFrom S4Vectors mcols
+#' @importFrom S4Vectors mcols mcols<-
 NULL
 
 # =============================================================================
@@ -102,7 +102,7 @@ setClass("GWASSumStats",
   validity = function(object) {
     errors <- character()
     required_cols <- c("SNP", "A1", "A2", "Z", "N")
-    mcols_names <- colnames(S4Vectors::mcols(object@sumstats))
+    mcols_names <- colnames(mcols(object@sumstats))
     missing <- setdiff(required_cols, mcols_names)
     if (length(missing) > 0)
       errors <- c(errors, paste("Missing required columns:",

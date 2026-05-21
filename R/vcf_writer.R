@@ -1,4 +1,10 @@
 #' @include AllGenerics.R
+#' @importFrom S4Vectors DataFrame SimpleList mcols
+#' @importFrom GenomicRanges GRanges seqnames
+#' @importFrom IRanges DataFrameList
+#' @importFrom Biostrings DNAStringSet DNAStringSetList
+#' @importFrom Rsamtools asBcf
+#' @importFrom tools file_ext
 NULL
 
 #' @rdname writeSumstatsVcf
@@ -6,11 +12,9 @@ NULL
 setMethod("writeSumstatsVcf", signature("GWASSumStats"), function(x, output_path, sample_name = NULL, ...) {
   if (!requireNamespace("VariantAnnotation", quietly = TRUE))
     stop("Package 'VariantAnnotation' is required for writeSumstatsVcf")
-  if (!requireNamespace("Biostrings", quietly = TRUE))
-    stop("Package 'Biostrings' is required for writeSumstatsVcf")
 
   ss <- x@sumstats
-  mc <- S4Vectors::mcols(ss)
+  mc <- mcols(ss)
   sample_name <- sample_name %||% x@trait_name
 
   # Build GENO fields from GWASSumStats metadata
@@ -23,7 +27,7 @@ setMethod("writeSumstatsVcf", signature("GWASSumStats"), function(x, output_path
   if ("MAF" %in% colnames(mc))
     geno[["AF"]] <- matrix(mc$MAF, n_snps)
 
-  geno_header <- S4Vectors::DataFrame(
+  geno_header <- DataFrame(
     Number = c("A", "A", "A"),
     Type = c("Float", "Integer", "Float"),
     Description = c(
@@ -33,8 +37,8 @@ setMethod("writeSumstatsVcf", signature("GWASSumStats"), function(x, output_path
     row.names = c("ES", "SS", "AF"))
 
   .write_vcf_impl(
-    chrom = as.character(GenomicRanges::seqnames(ss)),
-    pos = GenomicRanges::start(ss),
+    chrom = as.character(seqnames(ss)),
+    pos = start(ss),
     ref = mc$A2,
     alt = mc$A1,
     snp_ids = mc$SNP,
@@ -49,8 +53,6 @@ setMethod("writeSumstatsVcf", signature("GWASSumStats"), function(x, output_path
 setMethod("writeSumstatsVcf", signature("FineMappingResult"), function(x, output_path, sample_name = NULL, ...) {
   if (!requireNamespace("VariantAnnotation", quietly = TRUE))
     stop("Package 'VariantAnnotation' is required for writeSumstatsVcf")
-  if (!requireNamespace("Biostrings", quietly = TRUE))
-    stop("Package 'Biostrings' is required for writeSumstatsVcf")
 
   sample_name <- sample_name %||% x@method
   tl <- x@top_loci
@@ -109,7 +111,7 @@ setMethod("writeSumstatsVcf", signature("FineMappingResult"), function(x, output
     geno_desc <- c(geno_desc, "-log10 p-value for effect estimate")
   }
 
-  geno_header <- S4Vectors::DataFrame(
+  geno_header <- DataFrame(
     Number = geno_number,
     Type = geno_type,
     Description = geno_desc,
@@ -138,19 +140,19 @@ setMethod("writeSumstatsVcf", signature("FineMappingResult"), function(x, output
     chrom <- paste0("chr", chrom)
 
   # Build GRanges for row ranges
-  gr <- GenomicRanges::GRanges(
+  gr <- GRanges(
     chrom,
-    IRanges::IRanges(
+    IRanges(
       start = as.integer(pos),
       end = as.integer(pos) + pmax(nchar(ref), nchar(alt)) - 1L,
       names = snp_ids))
 
   # Build VCF header
-  coldata <- S4Vectors::DataFrame(Samples = sample_name, row.names = sample_name)
+  coldata <- DataFrame(Samples = sample_name, row.names = sample_name)
 
   hdr <- VariantAnnotation::VCFHeader(
-    header = IRanges::DataFrameList(
-      fileformat = S4Vectors::DataFrame(
+    header = DataFrameList(
+      fileformat = DataFrame(
         Value = "VCFv4.2", row.names = "fileformat")),
     sample = sample_name)
 
@@ -159,22 +161,22 @@ setMethod("writeSumstatsVcf", signature("FineMappingResult"), function(x, output
   VariantAnnotation::geno(hdr) <- geno_header
 
   # Build VCF object
-  geno_sl <- S4Vectors::SimpleList(geno)
+  geno_sl <- SimpleList(geno)
   vcf <- VariantAnnotation::VCF(
     rowRanges = gr,
     colData = coldata,
     exptData = list(header = hdr),
     geno = geno_sl)
 
-  VariantAnnotation::ref(vcf) <- Biostrings::DNAStringSet(ref)
-  VariantAnnotation::alt(vcf) <- Biostrings::DNAStringSetList(as.list(alt))
+  VariantAnnotation::ref(vcf) <- DNAStringSet(ref)
+  VariantAnnotation::alt(vcf) <- DNAStringSetList(as.list(alt))
   VariantAnnotation::fixed(vcf)$FILTER <- "PASS"
   vcf <- sort(vcf)
 
   # Write based on output format
   # Note: VariantAnnotation::writeVcf appends ".bgz" to the path when
   # index = TRUE, so we must pass the path *without* the .bgz/.gz suffix.
-  ext <- tools::file_ext(output_path)
+  ext <- file_ext(output_path)
   if (ext == "bcf") {
     # Write temporary bgzipped VCF, then convert to BCF
     tmp_vcf_stem <- tempfile(fileext = ".vcf")
@@ -185,7 +187,7 @@ setMethod("writeSumstatsVcf", signature("FineMappingResult"), function(x, output
     # asBcf appends ".bcf" to destination, so strip the extension
     bcf_stem <- sub("\\.bcf$", "", output_path)
     dict <- unique(chrom)
-    Rsamtools::asBcf(tmp_vcf_bgz, dictionary = dict,
+    asBcf(tmp_vcf_bgz, dictionary = dict,
                      destination = bcf_stem)
   } else if (ext == "gz" || ext == "bgz") {
     # writeVcf will append .bgz, so strip it from the path
