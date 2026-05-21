@@ -1919,17 +1919,25 @@ test_that("load_study_LD with single path returns load_LD_matrix output unchange
 })
 
 test_that("load_study_LD with comma-separated paths builds list of X panels", {
-  panel1 <- list(
-    LD_matrix = matrix(1:9, 3, 3),
-    LD_variants = paste0("chr1:", 1:3, ":A:G"),
-    is_genotype = TRUE,
-    block_metadata = data.frame(chrom = 1, start = 1, end = 3)
+  # Build mock LDData objects with fake genotype handles
+  gr <- GenomicRanges::GRanges(
+    seqnames = rep("chr1", 3),
+    ranges = IRanges::IRanges(start = 1:3, width = 1L)
   )
-  panel2 <- list(
-    LD_matrix = matrix(10:18, 3, 3),
-    LD_variants = paste0("chr1:", 1:3, ":A:G"),
-    is_genotype = TRUE,
-    block_metadata = data.frame(chrom = 1, start = 1, end = 3)
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    variant_id = paste0("chr1:", 1:3, ":A:G"),
+    A1 = rep("G", 3), A2 = rep("A", 3)
+  )
+  bm <- data.frame(chrom = 1, start = 1, end = 3)
+  fake_handle1 <- "handle1"
+  fake_handle2 <- "handle2"
+  panel1 <- LDData(
+    correlation = NULL, genotype_handle = fake_handle1, snp_idx = 1:3,
+    variants = gr, block_metadata = bm, n_ref = 10L
+  )
+  panel2 <- LDData(
+    correlation = NULL, genotype_handle = fake_handle2, snp_idx = 1:3,
+    variants = gr, block_metadata = bm, n_ref = 10L
   )
   call_count <- 0
   local_mocked_bindings(
@@ -1940,12 +1948,15 @@ test_that("load_study_LD with comma-separated paths builds list of X panels", {
   )
   out <- load_study_LD("ld_eur.tsv,ld_afr.tsv", "chr1:1-100")
   expect_equal(call_count, 2)
-  expect_true(is.list(out$LD_matrix))
-  expect_length(out$LD_matrix, 2)
-  expect_equal(out$LD_matrix[[1]], panel1$LD_matrix)
-  expect_equal(out$LD_matrix[[2]], panel2$LD_matrix)
-  # Other fields are preserved from base panel
-  expect_equal(out$LD_variants, panel1$LD_variants)
+  expect_s4_class(out, "LDData")
+  expect_true(hasGenotypes(out))
+  # Mixture: genotype_handle should be a list of handles
+  expect_true(is.list(out@genotype_handle))
+  expect_length(out@genotype_handle, 2)
+  expect_equal(out@genotype_handle[[1]], "handle1")
+  expect_equal(out@genotype_handle[[2]], "handle2")
+  # Variants preserved from base panel
+  expect_equal(getVariantIds(out), paste0("chr1:", 1:3, ":A:G"))
 })
 
 # ========================================================================

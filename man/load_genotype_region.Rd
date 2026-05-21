@@ -40,7 +40,8 @@ If return_variant_info is FALSE, a numeric dosage matrix (rows=samples,
 \description{
 Auto-detects PLINK2 (.pgen/.pvar[.zst]/.psam), PLINK1 (.bed/.bim/.fam),
 VCF (.vcf/.vcf.gz/.bcf), or GDS (.gds) format and loads genotype data
-accordingly. If a stochastic genotype sidecar file (.afreq or
+via \code{\link{readGenotypes}} and \code{\link{extractBlockGenotypes}}.
+If a stochastic genotype sidecar file (.afreq or
 .stochastic_meta.tsv) is found alongside the genotype file, non-integer
 dosages are automatically rescaled using the stored U_MIN/U_MAX values.
 }

@@ -611,3 +611,308 @@ test_that("mr_format returns null df when no positions overlap", {
   expect_true(is.data.frame(result))
   expect_true(all(is.na(result[, -1])))
 })
+
+# =============================================================================
+# mr_format: coverage = NULL path (line 57)
+# =============================================================================
+
+test_that("mr_format derives coverage from coverage_level and method when coverage is NULL", {
+  input_data <- generate_format_mock_data(seed = 10)
+  # The default method is "susie" and coverage_level is 0.95 which gives "CS_95_susie"
+  result <- mr_format(
+    input_data$susie_result, "condition1", input_data$gwas_sumstats_db,
+    coverage = NULL, run_allele_qc = TRUE,
+    method = "susie", coverage_level = 0.95
+  )
+  expect_true(is.data.frame(result))
+  # Result should be the same as explicitly passing "CS_95_susie"
+  result_explicit <- mr_format(
+    input_data$susie_result, "condition1", input_data$gwas_sumstats_db,
+    coverage = "CS_95_susie", run_allele_qc = TRUE
+  )
+  expect_equal(result, result_explicit)
+})
+
+# =============================================================================
+# mr_format: pip column not found (line 64)
+# =============================================================================
+
+test_that("mr_format returns null df when pip column is not found", {
+  input_data <- generate_format_mock_data(seed = 20)
+  # Remove the pip column from top_loci so resolve_pip_column returns NULL
+  tl <- input_data$susie_result$susie_results$condition1$top_loci
+  tl$pip <- NULL
+  # Also rename any pip_* columns if they exist
+  names(tl) <- gsub("^pip_.*", "removed", names(tl))
+  input_data$susie_result$susie_results$condition1$top_loci <- tl
+  result <- mr_format(
+    input_data$susie_result, "condition1", input_data$gwas_sumstats_db,
+    coverage = "CS_95_susie", run_allele_qc = TRUE,
+    method = "nonexistent_method"
+  )
+  expect_true(is.data.frame(result))
+  expect_true(all(is.na(result[, -1])))
+})
+
+# =============================================================================
+# mr_format: impute missing effect_allele_frequency (line 85)
+# =============================================================================
+
+test_that("mr_format imputes missing effect_allele_frequency from ld_meta_df", {
+  set.seed(30)
+  num_variants <- 5
+  ref_alleles <- c("A", "T", "G", "C")
+  allele_pairs <- paste0(
+    sample(ref_alleles, num_variants, replace = TRUE), ":",
+    sample(ref_alleles, num_variants, replace = TRUE)
+  )
+  # Ensure ref != alt
+  while (any(sapply(strsplit(allele_pairs, ":"), function(x) x[1] == x[2]))) {
+    allele_pairs <- paste0(
+      sample(ref_alleles, num_variants, replace = TRUE), ":",
+      sample(ref_alleles, num_variants, replace = TRUE)
+    )
+  }
+  variant_ids <- paste0("chr1:", 1:num_variants, ":", allele_pairs)
+
+  top_loci <- data.frame(
+    variant_id = variant_ids,
+    betahat = rnorm(num_variants),
+    sebetahat = runif(num_variants, 0.05, 0.1),
+    pip = runif(num_variants, 0.5, 1),
+    CS_95_susie = rep(1L, num_variants),
+    stringsAsFactors = FALSE
+  )
+  susie_result <- list(
+    susie_results = list(
+      condition1 = list(
+        top_loci = top_loci,
+        region_info = list(region_name = "Gene_Impute")
+      )
+    )
+  )
+  gwas_sumstats_db <- data.frame(
+    variant_id = variant_ids,
+    beta = rnorm(num_variants),
+    se = runif(num_variants, 0.05, 0.1),
+    pos = 1:num_variants,
+    effect_allele_frequency = c(NA, 0.3, NA, 0.4, NA),
+    n_case = rep(1000, num_variants),
+    n_control = rep(1000, num_variants),
+    stringsAsFactors = FALSE
+  ) %>%
+    mutate(n_sample = n_case + n_control, z = beta / se)
+  ld_meta_df <- data.frame(
+    pos = 1:num_variants,
+    allele_freq = runif(num_variants, 0.1, 0.5),
+    stringsAsFactors = FALSE
+  )
+  result <- mr_format(
+    susie_result, "condition1", gwas_sumstats_db,
+    coverage = "CS_95_susie", run_allele_qc = FALSE,
+    ld_meta_df = ld_meta_df
+  )
+  expect_true(is.data.frame(result))
+  # Should have some rows if matching worked
+  expect_true("bhat_y" %in% names(result))
+})
+
+# =============================================================================
+# mr_format: no common variants after allele QC (line 103)
+# =============================================================================
+
+test_that("mr_format returns null df when allele QC removes all variants", {
+  set.seed(40)
+  num_variants <- 3
+  # Create SuSiE variants with one set of alleles
+  top_loci <- data.frame(
+    variant_id = paste0("chr1:", 1:num_variants, ":A:G"),
+    betahat = rnorm(num_variants),
+    sebetahat = runif(num_variants, 0.05, 0.1),
+    pip = runif(num_variants, 0.5, 1),
+    CS_95_susie = rep(1L, num_variants),
+    stringsAsFactors = FALSE
+  )
+  susie_result <- list(
+    susie_results = list(
+      condition1 = list(
+        top_loci = top_loci,
+        region_info = list(region_name = "Gene_NoCommon")
+      )
+    )
+  )
+  # GWAS has same positions but incompatible alleles (G:T is not a strand
+
+  # complement or flip of A:G)
+  gwas_sumstats_db <- data.frame(
+    variant_id = paste0("chr1:", 1:num_variants, ":G:T"),
+    beta = rnorm(num_variants),
+    se = runif(num_variants, 0.05, 0.1),
+    pos = 1:num_variants,
+    effect_allele_frequency = runif(num_variants, 0.1, 0.5),
+    n_case = rep(1000, num_variants),
+    n_control = rep(1000, num_variants),
+    stringsAsFactors = FALSE
+  ) %>%
+    mutate(n_sample = n_case + n_control, z = beta / se)
+  result <- mr_format(
+    susie_result, "condition1", gwas_sumstats_db,
+    coverage = "CS_95_susie", run_allele_qc = TRUE
+  )
+  expect_true(is.data.frame(result))
+  expect_true(all(is.na(result[, -1])))
+})
+
+# =============================================================================
+# fine_mr
+# =============================================================================
+
+test_that("fine_mr returns expected columns and reasonable values with multi-gene input", {
+  set.seed(100)
+  # Gene A: 2 credible sets, 3 variants in CS1, 2 variants in CS2
+  # Gene B: 2 credible sets, 2 variants in CS1, 3 variants in CS2
+  formatted_input <- tibble::tibble(
+    X_ID = c(rep("GeneA", 5), rep("GeneB", 5)),
+    cs = c(1, 1, 1, 2, 2, 1, 1, 2, 2, 2),
+    pip = c(0.4, 0.3, 0.3, 0.6, 0.4, 0.5, 0.5, 0.3, 0.4, 0.3),
+    bhat_x = c(0.5, 0.3, 0.4, 0.6, 0.35, 0.7, 0.45, 0.5, 0.6, 0.4),
+    sbhat_x = c(0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1),
+    bhat_y = c(0.2, 0.15, 0.18, 0.3, 0.2, 0.35, 0.2, 0.25, 0.3, 0.22),
+    sbhat_y = c(0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05),
+    snp = paste0("rs", 1:10)
+  )
+
+  result <- fine_mr(formatted_input, cpip_cutoff = 0.5)
+
+  # Check output structure
+  expected_cols <- c("X_ID", "num_CS", "num_IV", "cpip", "composite_bhat",
+                     "composite_sbhat", "meta_eff", "se_meta_eff", "Q", "I2")
+  expect_true(all(expected_cols %in% names(result)))
+  # One row per gene
+  expect_equal(nrow(result), 2)
+  expect_setequal(result$X_ID, c("GeneA", "GeneB"))
+  # Both genes have 2 CS
+  expect_true(all(result$num_CS == 2))
+  # num_IV should be 5 for each gene
+  expect_true(all(result$num_IV == 5))
+  # se_meta_eff should be positive
+  expect_true(all(result$se_meta_eff > 0))
+  # I2 should be between 0 and 1
+  expect_true(all(result$I2 >= 0 & result$I2 <= 1))
+  # Numeric columns should be rounded to 3 decimal places
+  for (col in c("cpip", "composite_bhat", "meta_eff", "se_meta_eff", "Q", "I2")) {
+    expect_equal(round(result[[col]], 3), result[[col]],
+                 info = paste("Column", col, "should be rounded to 3 decimal places"))
+  }
+})
+
+test_that("fine_mr filters out CS with cpip below cutoff", {
+  set.seed(101)
+  formatted_input <- tibble::tibble(
+    X_ID = rep("GeneC", 4),
+    cs = c(1, 1, 2, 2),
+    pip = c(0.4, 0.4, 0.05, 0.05),
+    bhat_x = c(0.5, 0.3, 0.4, 0.6),
+    sbhat_x = c(0.1, 0.1, 0.1, 0.1),
+    bhat_y = c(0.2, 0.15, 0.3, 0.25),
+    sbhat_y = c(0.05, 0.05, 0.05, 0.05),
+    snp = paste0("rs", 1:4)
+  )
+
+  result <- fine_mr(formatted_input, cpip_cutoff = 0.5)
+  # CS 2 has cpip = 0.10 which is below 0.5, so only CS 1 passes
+  expect_equal(nrow(result), 1)
+  expect_equal(result$num_CS, 1L)
+  expect_equal(result$num_IV, 2L)
+})
+
+test_that("fine_mr returns empty result when all CS are below cpip cutoff", {
+  set.seed(102)
+  formatted_input <- tibble::tibble(
+    X_ID = rep("GeneD", 4),
+    cs = c(1, 1, 2, 2),
+    pip = c(0.1, 0.1, 0.1, 0.1),
+    bhat_x = c(0.5, 0.3, 0.4, 0.6),
+    sbhat_x = c(0.1, 0.1, 0.1, 0.1),
+    bhat_y = c(0.2, 0.15, 0.3, 0.25),
+    sbhat_y = c(0.05, 0.05, 0.05, 0.05),
+    snp = paste0("rs", 1:4)
+  )
+
+  result <- fine_mr(formatted_input, cpip_cutoff = 0.5)
+  # All CS have cpip = 0.2 which is below cutoff; result should be empty
+  expect_equal(nrow(result), 0)
+})
+
+test_that("fine_mr with single variant single CS returns correct Wald ratio", {
+  set.seed(103)
+  bx <- 0.8
+  sx <- 0.1
+  by <- 0.3
+  sy <- 0.06
+
+  formatted_input <- tibble::tibble(
+    X_ID = "GeneE",
+    cs = 1,
+    pip = 1.0,
+    bhat_x = bx,
+    sbhat_x = sx,
+    bhat_y = by,
+    sbhat_y = sy,
+    snp = "rs1"
+  )
+
+  result <- fine_mr(formatted_input, cpip_cutoff = 0.5)
+  expect_equal(nrow(result), 1)
+  expect_equal(result$num_CS, 1L)
+  expect_equal(result$num_IV, 1L)
+
+  # Verify the Wald ratio calculation
+  bhat_x_norm <- bx / sx
+  beta_yx <- by / bhat_x_norm
+  expected_bhat <- round(beta_yx, 3)
+  expect_equal(result$composite_bhat, expected_bhat)
+  # With single CS, meta_eff should equal composite_bhat
+  expect_equal(result$meta_eff, expected_bhat)
+  # Q and I2 should be 0 with single CS
+  expect_equal(result$Q, 0)
+  expect_equal(result$I2, 0)
+})
+
+test_that("fine_mr handles negative effect sizes", {
+  set.seed(104)
+  formatted_input <- tibble::tibble(
+    X_ID = rep("GeneF", 4),
+    cs = c(1, 1, 2, 2),
+    pip = c(0.6, 0.4, 0.5, 0.5),
+    bhat_x = c(-0.5, -0.3, -0.4, -0.6),
+    sbhat_x = c(0.1, 0.1, 0.1, 0.1),
+    bhat_y = c(-0.2, -0.15, -0.3, -0.25),
+    sbhat_y = c(0.05, 0.05, 0.05, 0.05),
+    snp = paste0("rs", 1:4)
+  )
+
+  result <- fine_mr(formatted_input, cpip_cutoff = 0.5)
+  expect_equal(nrow(result), 1)
+  expect_true(is.finite(result$meta_eff))
+  expect_true(result$se_meta_eff > 0)
+})
+
+test_that("fine_mr with cpip_cutoff = 0 includes all credible sets", {
+  set.seed(105)
+  formatted_input <- tibble::tibble(
+    X_ID = rep("GeneG", 3),
+    cs = c(1, 2, 3),
+    pip = c(0.01, 0.01, 0.01),
+    bhat_x = c(0.5, 0.3, 0.4),
+    sbhat_x = c(0.1, 0.1, 0.1),
+    bhat_y = c(0.2, 0.15, 0.18),
+    sbhat_y = c(0.05, 0.05, 0.05),
+    snp = paste0("rs", 1:3)
+  )
+
+  result <- fine_mr(formatted_input, cpip_cutoff = 0)
+  expect_equal(nrow(result), 1)
+  expect_equal(result$num_CS, 3L)
+  expect_equal(result$num_IV, 3L)
+})

@@ -473,6 +473,152 @@ test_that("pval_cauchy with na.rm=FALSE and NA present still computes result", {
   expect_true(is.numeric(result))
 })
 
+test_that("pval_cauchy with extremely small p-values triggers large-stat branch", {
+  # cct.stat > 1e+15 triggers the 1/(cct.stat*pi) return path
+  result <- pecotmr:::pval_cauchy(c(1e-300, 1e-290))
+  expect_true(is.numeric(result))
+  expect_true(result > 0 && result < 1)
+  expect_false(is.na(result))
+})
+
+test_that("pval_acat uses asymptotic approximation for p < 1e-15", {
+  # p-values below 1e-15 use 1/(p*pi) instead of tan()
+  result <- pecotmr:::pval_acat(c(1e-20, 1e-18, 0.01))
+  expect_true(is.numeric(result))
+  expect_true(result > 0 && result < 1)
+  expect_false(is.na(result))
+})
+
+# =============================================================================
+# pval_poolr
+# =============================================================================
+
+test_that("pval_poolr fisher method returns valid p-value", {
+  skip_if_not_installed("poolr")
+  pvals <- c(0.01, 0.05, 0.1)
+  R <- diag(3)
+  result <- pecotmr:::pval_poolr(pvals, method = "fisher", R = R)
+  expect_true(is.numeric(result))
+  expect_true(result > 0 && result < 1)
+})
+
+test_that("pval_poolr stouffer method returns valid p-value", {
+  skip_if_not_installed("poolr")
+  pvals <- c(0.01, 0.05, 0.1)
+  R <- diag(3)
+  result <- pecotmr:::pval_poolr(pvals, method = "stouffer", R = R)
+  expect_true(is.numeric(result))
+  expect_true(result > 0 && result < 1)
+})
+
+test_that("pval_poolr invchisq method returns valid p-value", {
+  skip_if_not_installed("poolr")
+  pvals <- c(0.01, 0.05, 0.1)
+  R <- diag(3)
+  result <- pecotmr:::pval_poolr(pvals, method = "invchisq", R = R)
+  expect_true(is.numeric(result))
+  expect_true(result > 0 && result < 1)
+})
+
+test_that("pval_poolr errors on unknown method", {
+  skip_if_not_installed("poolr")
+  expect_error(pecotmr:::pval_poolr(c(0.01, 0.05), method = "bogus", R = diag(2)),
+               "Unknown poolr method")
+})
+
+# =============================================================================
+# pval_gbj
+# =============================================================================
+
+test_that("pval_gbj gbj method returns valid p-value", {
+  skip_if_not_installed("GBJ")
+  z <- c(2.5, 1.8, 3.0)
+  R <- diag(3)
+  result <- pecotmr:::pval_gbj(z, R, method = "gbj")
+  expect_true(is.numeric(result))
+  expect_true(result >= 0 && result <= 1)
+})
+
+test_that("pval_gbj hc method returns valid p-value", {
+  skip_if_not_installed("GBJ")
+  z <- c(2.5, 1.8, 3.0)
+  R <- diag(3)
+  result <- pecotmr:::pval_gbj(z, R, method = "hc")
+  expect_true(is.numeric(result))
+  expect_true(result >= 0 && result <= 1)
+})
+
+test_that("pval_gbj minp method returns valid p-value", {
+  skip_if_not_installed("GBJ")
+  z <- c(2.5, 1.8, 3.0)
+  R <- diag(3)
+  result <- pecotmr:::pval_gbj(z, R, method = "minp")
+  expect_true(is.numeric(result))
+  expect_true(result >= 0 && result <= 1)
+})
+
+test_that("pval_gbj bj method returns valid p-value", {
+  skip_if_not_installed("GBJ")
+  z <- c(2.5, 1.8, 3.0)
+  R <- diag(3)
+  result <- pecotmr:::pval_gbj(z, R, method = "bj")
+  expect_true(is.numeric(result))
+  expect_true(result >= 0 && result <= 1)
+})
+
+test_that("pval_gbj ghc method returns valid p-value", {
+  skip_if_not_installed("GBJ")
+  z <- c(2.5, 1.8, 3.0)
+  R <- diag(3)
+  result <- pecotmr:::pval_gbj(z, R, method = "ghc")
+  expect_true(is.numeric(result))
+  expect_true(result >= 0 && result <= 1)
+})
+
+test_that("pval_gbj gbj_omni method returns valid p-value", {
+  skip_if_not_installed("GBJ")
+  z <- c(2.5, 1.8, 3.0)
+  R <- diag(3)
+  result <- pecotmr:::pval_gbj(z, R, method = "gbj_omni")
+  expect_true(is.numeric(result))
+  expect_true(result >= 0 && result <= 1)
+})
+
+test_that("pval_gbj errors on unknown method", {
+  skip_if_not_installed("GBJ")
+  expect_error(pecotmr:::pval_gbj(c(2.5, 1.8), diag(2), method = "bogus"),
+               "Unknown GBJ method")
+})
+
+# =============================================================================
+# pval_aspu
+# =============================================================================
+
+test_that("pval_aspu aspu method returns valid p-value", {
+  skip_if_not_installed("aSPU")
+  set.seed(42)
+  z <- c(2.5, 1.8, 3.0)
+  R <- diag(3)
+  result <- pecotmr:::pval_aspu(z_scores = z, R = R, method = "aspu")
+  expect_true(is.numeric(result))
+  expect_true(result >= 0 && result <= 1)
+})
+
+test_that("pval_aspu gates method returns valid p-value", {
+  skip_if_not_installed("aSPU")
+  pvals <- c(0.01, 0.05, 0.1)
+  R <- diag(3)
+  result <- pecotmr:::pval_aspu(pvals = pvals, R = R, method = "gates")
+  expect_true(is.numeric(result))
+  expect_true(result >= 0 && result <= 1)
+})
+
+test_that("pval_aspu errors on unknown method", {
+  skip_if_not_installed("aSPU")
+  expect_error(pecotmr:::pval_aspu(z_scores = c(1, 2), R = diag(2), method = "bogus"),
+               "Unknown aSPU method")
+})
+
 # =============================================================================
 # compute_qvalues
 # =============================================================================
@@ -1407,4 +1553,376 @@ test_that("find_data with docall=list preserves list structure", {
   expect_type(result, "list")
   expect_equal(result[[1]], c(1, 2))
   expect_equal(result[[2]], c(3, 4))
+})
+
+# =============================================================================
+# robust_mahalanobis
+# =============================================================================
+
+test_that("robust_mahalanobis works with non-singular covariance", {
+  set.seed(42)
+  x <- matrix(rnorm(100), ncol = 2)
+  d <- robust_mahalanobis(x)
+  expect_length(d, 50)
+  expect_true(all(d >= 0))
+  expect_true(is.numeric(d))
+})
+
+test_that("robust_mahalanobis works with singular covariance (falls back to ginv)", {
+  # Create a matrix where columns are linearly dependent -> singular cov
+  set.seed(42)
+  col1 <- rnorm(20)
+  col2 <- rnorm(20)
+  col3 <- col1 + col2  # linearly dependent
+  x <- cbind(col1, col2, col3)
+  d <- robust_mahalanobis(x)
+  expect_length(d, 20)
+  expect_true(all(d >= 0))
+})
+
+test_that("robust_mahalanobis with pre-inverted covariance", {
+  set.seed(42)
+  x <- matrix(rnorm(60), ncol = 2)
+  center <- colMeans(x)
+  cov_mat <- stats::cov(x)
+  inv_cov <- solve(cov_mat)
+  d <- robust_mahalanobis(x, center = center, cov = inv_cov, inverted = TRUE)
+  expect_length(d, 30)
+  expect_true(all(d >= 0))
+})
+
+test_that("robust_mahalanobis with vector input", {
+  # Single observation as a vector
+  x <- c(1.0, 2.0, 3.0)
+  d <- robust_mahalanobis(x, center = c(1, 2, 3), cov = diag(3), inverted = TRUE)
+  expect_length(d, 1)
+  expect_equal(as.numeric(d), 0)
+})
+
+test_that("robust_mahalanobis auto-computes center and cov when NULL", {
+  set.seed(42)
+  x <- matrix(rnorm(40), ncol = 2)
+  d1 <- robust_mahalanobis(x)
+  d2 <- robust_mahalanobis(x, center = colMeans(x), cov = stats::cov(x))
+  expect_equal(d1, d2)
+})
+
+# =============================================================================
+# detect_outliers_mahalanobis
+# =============================================================================
+
+test_that("detect_outliers_mahalanobis returns correct structure", {
+  set.seed(42)
+  x <- matrix(rnorm(200), ncol = 2)
+  rownames(x) <- paste0("sample", 1:100)
+  result <- detect_outliers_mahalanobis(x)
+  expect_s3_class(result, "data.frame")
+  expect_true(all(c("sample_id", "mahal", "pvalue", "is_outlier") %in% names(result)))
+  expect_equal(nrow(result), 100)
+  expect_equal(result$sample_id[1], "sample1")
+})
+
+test_that("detect_outliers_mahalanobis detects clear outliers", {
+  set.seed(42)
+  x <- matrix(rnorm(200), ncol = 2)
+  # Add a clear outlier far from the center
+  x <- rbind(x, c(50, 50))
+  rownames(x) <- paste0("s", 1:101)
+  result <- detect_outliers_mahalanobis(x)
+  # The extreme point should be an outlier
+  expect_true(result$is_outlier[101])
+})
+
+test_that("detect_outliers_mahalanobis with unnamed rows uses indices", {
+  set.seed(42)
+  x <- matrix(rnorm(40), ncol = 2)
+  result <- detect_outliers_mahalanobis(x)
+  expect_equal(result$sample_id, as.character(1:20))
+})
+
+test_that("detect_outliers_mahalanobis threshold sensitivity", {
+  set.seed(42)
+  x <- matrix(rnorm(200), ncol = 2)
+  # With very strict threshold, fewer outliers
+  r_strict <- detect_outliers_mahalanobis(x, prob = 0.999, pval_threshold = 0.001)
+  # With lenient threshold, more possible outliers
+  r_lenient <- detect_outliers_mahalanobis(x, prob = 0.90, pval_threshold = 0.10)
+  expect_true(sum(r_strict$is_outlier) <= sum(r_lenient$is_outlier))
+})
+
+# =============================================================================
+# twas_method_cor
+# =============================================================================
+
+test_that("twas_method_cor with identity LD", {
+  LD <- diag(3)
+  w1 <- c(1, 0, 0)
+  w2 <- c(0, 1, 0)
+  w3 <- c(0, 0, 1)
+  result <- twas_method_cor(list(w1, w2, w3), LD)
+  # With identity LD and orthogonal weights, off-diag should be 0
+  expect_equal(dim(result), c(3, 3))
+  expect_equal(diag(result), c(1, 1, 1))
+  expect_equal(result[1, 2], 0)
+  expect_equal(result[1, 3], 0)
+  expect_equal(result[2, 3], 0)
+})
+
+test_that("twas_method_cor with identical weights gives correlation 1", {
+  LD <- matrix(c(1, 0.5, 0.5, 1), 2, 2)
+  w <- c(1, 1)
+  result <- twas_method_cor(list(w, w), LD)
+  expect_equal(result[1, 2], 1)
+  expect_equal(result[2, 1], 1)
+})
+
+test_that("twas_method_cor with diagonal LD", {
+  LD <- diag(c(2, 3, 1))
+  w1 <- c(1, 0, 0)
+  w2 <- c(0, 1, 0)
+  result <- twas_method_cor(list(w1, w2), LD)
+  expect_equal(result[1, 2], 0)
+})
+
+# =============================================================================
+# xgboost_imputation
+# =============================================================================
+
+test_that("xgboost_imputation works on simple matrix", {
+  skip_if_not_installed("xgboost")
+  set.seed(42)
+  mat <- matrix(rnorm(100), nrow = 20, ncol = 5)
+  colnames(mat) <- paste0("V", 1:5)
+  # Introduce some missing values
+  mat[1, 1] <- NA
+  mat[5, 3] <- NA
+  mat[10, 2] <- NA
+  result <- xgboost_imputation(mat, maxiter = 2, nrounds = 10, verbose = FALSE)
+  expect_equal(dim(result), dim(mat))
+  expect_false(anyNA(result))
+})
+
+test_that("xgboost_imputation removes all-NA columns", {
+  skip_if_not_installed("xgboost")
+  set.seed(42)
+  mat <- matrix(rnorm(80), nrow = 20, ncol = 4)
+  colnames(mat) <- paste0("V", 1:4)
+  mat[, 3] <- NA  # entirely missing column
+  mat[1, 1] <- NA
+  result <- expect_message(
+    xgboost_imputation(mat, maxiter = 2, nrounds = 10, verbose = TRUE),
+    "Removed 1 column"
+  )
+  expect_equal(ncol(result), 3)
+  expect_false(anyNA(result))
+})
+
+test_that("xgboost_imputation with no missing returns data unchanged", {
+  skip_if_not_installed("xgboost")
+  set.seed(42)
+  mat <- matrix(rnorm(60), nrow = 10, ncol = 6)
+  result <- expect_message(
+    xgboost_imputation(mat, maxiter = 2, verbose = TRUE),
+    "No missing values"
+  )
+  expect_equal(result, mat)
+})
+
+# =============================================================================
+# compute_qvalues — uncovered branches
+# =============================================================================
+
+test_that("compute_qvalues returns NA vector when all pvalues are NA", {
+  skip_if_not_installed("qvalue")
+  result <- expect_message(
+    compute_qvalues(rep(NA_real_, 5)),
+    "All p-values are NA"
+  )
+  expect_equal(result, rep(NA_real_, 5))
+})
+
+test_that("compute_qvalues falls back to BH when qvalue fails", {
+  skip_if_not_installed("qvalue")
+  # Very few unique p-values can cause qvalue() to fail with an error
+  # Use only 2 identical p-values to trigger the tryCatch error path
+  pvals <- rep(0.5, 3)
+  result <- expect_message(
+    compute_qvalues(pvals),
+    "Too few p-values|fall back to BH"
+  )
+  expect_length(result, 3)
+  expect_true(all(!is.na(result)))
+})
+
+# =============================================================================
+# safe_svd — uncovered branches
+# =============================================================================
+
+test_that("safe_svd with tol=0 keeps all singular values", {
+  mat <- matrix(c(1, 0, 0, 1e-12), nrow = 2)
+  result <- safe_svd(mat, tol = 0)
+  expect_length(result$d, 2)
+  expect_equal(ncol(result$u), 2)
+  expect_equal(ncol(result$v), 2)
+})
+
+test_that("safe_svd errors when all singular values below tolerance", {
+  # A matrix with very small singular values
+  mat <- matrix(c(1e-15, 0, 0, 1e-15), nrow = 2)
+  expect_error(safe_svd(mat, tol = 1), "All singular values are below the tolerance threshold")
+})
+
+# =============================================================================
+# compute_LD — uncovered branches
+# =============================================================================
+
+test_that("compute_LD sample method without Rfast falls back to cor", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 100, replace = TRUE), nrow = 20, ncol = 5)
+  colnames(X) <- paste0("snp", 1:5)
+  R <- compute_LD(X, method = "sample")
+  expect_equal(dim(R), c(5, 5))
+  expect_equal(as.numeric(diag(R)), rep(1, 5))
+  expect_true(all(abs(R) <= 1))
+})
+
+test_that("compute_LD with gcta method and trim_samples", {
+  set.seed(42)
+  # 21 samples -> trimmed to 20 (multiple of 4)
+  X <- matrix(sample(0:2, 105, replace = TRUE), nrow = 21, ncol = 5)
+  colnames(X) <- paste0("snp", 1:5)
+  R <- compute_LD(X, method = "gcta", trim_samples = TRUE)
+  expect_equal(dim(R), c(5, 5))
+  expect_equal(as.numeric(diag(R)), rep(1, 5))
+})
+
+test_that("compute_LD population method with trim_samples", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 105, replace = TRUE), nrow = 21, ncol = 5)
+  colnames(X) <- paste0("snp", 1:5)
+  R <- compute_LD(X, method = "population", trim_samples = TRUE)
+  expect_equal(dim(R), c(5, 5))
+  expect_equal(as.numeric(diag(R)), rep(1, 5))
+})
+
+test_that("compute_LD with shrinkage > 0", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 100, replace = TRUE), nrow = 20, ncol = 5)
+  colnames(X) <- paste0("snp", 1:5)
+  R_no_shrink <- compute_LD(X, method = "sample", shrinkage = 0)
+  R_shrink <- compute_LD(X, method = "sample", shrinkage = 0.1)
+  # Shrunk matrix should be closer to identity
+  expect_equal(as.numeric(diag(R_shrink)), rep(1, 5))
+  # Off-diagonal elements should be shrunk toward 0
+  off_diag_no <- R_no_shrink[1, 2]
+  off_diag_s <- R_shrink[1, 2]
+  expect_equal(off_diag_s, 0.9 * off_diag_no)
+})
+
+# =============================================================================
+# filter_X_with_Y — uncovered lines 513-515
+# =============================================================================
+
+test_that("filter_X_with_Y drops variants that become monomorphic due to Y NAs", {
+  # Create X where some columns become monomorphic when Y NA rows are removed
+  set.seed(42)
+  X <- matrix(0, nrow = 10, ncol = 3)
+  rownames(X) <- paste0("subj", 1:10)
+  colnames(X) <- paste0("var", 1:3)
+  # var1: all 0 except subject 1 has 1 -> monomorphic without subj1
+  X[1, 1] <- 1
+  X[, 2] <- sample(0:2, 10, replace = TRUE)
+  X[, 3] <- sample(0:2, 10, replace = TRUE)
+  # Y where subject 1 has NA -> removing subj1 makes var1 monomorphic
+  Y <- matrix(rnorm(10), nrow = 10, ncol = 1)
+  rownames(Y) <- paste0("subj", 1:10)
+  colnames(Y) <- "context1"
+  Y[1, 1] <- NA
+  result <- expect_message(
+    filter_X_with_Y(X, Y, missing_rate_thresh = 1.0, maf_thresh = 0),
+    "Additional.*variants dropped"
+  )
+  # var1 should be dropped since it becomes monomorphic without subj1
+  expect_true(ncol(result) < 3)
+})
+
+# =============================================================================
+# detect_variant_convention — uncovered line 586
+# =============================================================================
+
+test_that("detect_variant_convention returns defaults for all-NA input", {
+  result <- detect_variant_convention(c(NA, NA, NA))
+  expect_false(result$has_chr)
+  expect_equal(result$allele_sep, ":")
+  expect_false(result$has_build)
+  expect_true(is.na(result$example))
+})
+
+# =============================================================================
+# parse_variant_id — uncovered line 622
+# =============================================================================
+
+test_that("parse_variant_id handles data.frame with generic column names", {
+  df <- data.frame(
+    col1 = c("chr1", "chr2"),
+    col2 = c(100, 200),
+    col3 = c("A", "T"),
+    col4 = c("G", "C"),
+    stringsAsFactors = FALSE
+  )
+  result <- parse_variant_id(df)
+  expect_equal(names(result)[1:4], c("chrom", "pos", "A2", "A1"))
+  expect_equal(result$chrom, c(1L, 2L))
+  expect_equal(result$pos, c(100L, 200L))
+  expect_equal(result$A2, c("A", "T"))
+  expect_equal(result$A1, c("G", "C"))
+})
+
+# =============================================================================
+# filter_molecular_events — uncovered lines 1116-1128 (remove_all_group)
+# =============================================================================
+
+test_that("filter_molecular_events with remove_all_group=TRUE removes entire group", {
+  events <- c(
+    "gene1_tissue_brain",
+    "gene1_tissue_liver",
+    "gene2_tissue_brain",
+    "gene2_tissue_liver"
+  )
+  filters <- list(
+    list(
+      type_pattern = "(.*)_tissue_.*",
+      exclude_pattern = "brain"
+    )
+  )
+  result <- expect_message(
+    filter_molecular_events(events, filters, condition = "test", remove_all_group = TRUE),
+    "removed"
+  )
+  # With remove_all_group=TRUE, events from groups that had a brain entry removed
+  # should also be removed
+  expect_true(is.character(result))
+})
+
+# =============================================================================
+# find_data — uncovered lines 780-786 (numeric index path)
+# =============================================================================
+
+test_that("find_data with numeric indices in list_name path", {
+  # When list_name contains a numeric string like "2", find_data splits the path
+  # at that numeric index: it navigates to "results" first, then treats "2" as
+  # the new depth and "val" as the new list_name, recursing into each sub-list.
+  x <- list(
+    results = list(
+      a = list(val = 10),
+      b = list(val = 20)
+    )
+  )
+  # depth=1, list_name = c("results", "2", "val")
+  # -> second_depth at index 2 ("2" is numeric)
+  # -> data = get_nested_element(x, "results") = x$results
+  # -> remaining_path = c("2", "val") -> find_data(x$results, c("2","val"))
+  # -> depth=2, list_name="val" -> recurse into a and b at depth 1 looking for "val"
+  result <- find_data(x, c(1, "results", "2", "val"))
+  expect_equal(result, c(10, 20))
 })

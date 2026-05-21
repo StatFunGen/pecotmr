@@ -23,6 +23,9 @@ requirements:
     - ${{ stdlib('c') }}
     - ${{ compiler('cxx') }}
   host:
+    - bioconductor-biocparallel
+    - bioconductor-biostrings
+    - bioconductor-genomicranges
     - bioconductor-iranges
     - bioconductor-qvalue
     - bioconductor-s4vectors
@@ -30,6 +33,8 @@ requirements:
     - bioconductor-snpstats
     - bioconductor-mungesumstats
     - bioconductor-rsamtools
+    - bioconductor-rtracklayer
+    - bioconductor-summarizedexperiment
     - r-aspu
     - r-base
     - r-bglr
@@ -40,12 +45,9 @@ requirements:
     - r-cpp11
     - r-cpp11armadillo
     - r-decor
-    - r-dofuture
     - r-dplyr
     - r-flashier
     - r-fsusier
-    - r-furrr
-    - r-future
     - r-gbj
     - r-glmnet
     - r-harmonicmeanp
@@ -53,6 +55,7 @@ requirements:
     - r-l0learn
     - r-magrittr
     - r-mashr
+    - r-matrix
     - r-matrixstats
     - r-mr.ash.alpha
     - r-mr.mashr
@@ -60,6 +63,7 @@ requirements:
     - r-ncvreg
     - r-nnls
     - r-pgenlibr
+    - r-plinkqc
     - r-poolr
     - r-purrr
     - r-qgg
@@ -75,7 +79,10 @@ requirements:
     - r-tidyr
     - r-vctrs
     - r-vroom
+    - r-xgboost
   run:
+    - bioconductor-biocparallel
+    - bioconductor-genomicranges
     - bioconductor-iranges
     - bioconductor-qvalue
     - bioconductor-s4vectors
@@ -83,7 +90,9 @@ requirements:
     - bioconductor-snpstats
     - bioconductor-mungesumstats
     - bioconductor-rsamtools
-    - r-apsu
+    - bioconductor-rtracklayer
+    - bioconductor-summarizedexperiment
+    - r-aspu
     - r-base
     - r-bglr
     - r-bigsnpr
@@ -93,12 +102,9 @@ requirements:
     - r-cpp11
     - r-cpp11armadillo
     - r-decor
-    - r-dofuture
     - r-dplyr
     - r-flashier
     - r-fsusier
-    - r-furrr
-    - r-future
     - r-gbj
     - r-glmnet
     - r-harmonicmeanp
@@ -106,6 +112,7 @@ requirements:
     - r-l0learn
     - r-magrittr
     - r-mashr
+    - r-matrix
     - r-matrixstats
     - r-mr.ash.alpha
     - r-mr.mashr
@@ -113,6 +120,7 @@ requirements:
     - r-ncvreg
     - r-nnls
     - r-pgenlibr
+    - r-plinkqc
     - r-poolr
     - r-purrr
     - r-qgg
@@ -128,6 +136,7 @@ requirements:
     - r-tidyr
     - r-vctrs
     - r-vroom
+    - r-xgboost
 
 tests:
   - script:

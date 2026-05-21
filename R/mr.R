@@ -191,3 +191,72 @@ mr_analysis <- function(mr_formatted_input, cpip_cutoff = 0.5) {
     arrange(meta_pval) %>%
     select(gene_name, num_CS, num_IV, cpip, meta_eff, se_meta_eff, meta_pval, Q, Q_pval, I2)
 }
+
+#' Fine-mapping-based Mendelian Randomization
+#'
+#' Performs MR using fine-mapping credible sets. For each exposure gene,
+#' computes PIP-weighted composite Wald ratio estimates within each credible
+#' set, then meta-analyzes across credible sets with inverse-variance weighting.
+#' Reports Cochran's Q and I-squared heterogeneity statistics.
+#'
+#' @param formatted_input A data.frame/tibble with columns: X_ID (gene ID),
+#'   cs (credible set index), pip (posterior inclusion probability),
+#'   bhat_x (exposure effect), sbhat_x (exposure SE), bhat_y (outcome effect),
+#'   sbhat_y (outcome SE), snp (variant ID).
+#' @param cpip_cutoff Minimum cumulative PIP to retain a credible set
+#'   (default 0.5).
+#' @return A tibble with columns: X_ID, num_CS, num_IV, cpip,
+#'   composite_bhat, composite_sbhat, meta_eff, se_meta_eff, Q, I2.
+#' @export
+fine_mr <- function(formatted_input, cpip_cutoff = 0.5) {
+  result_cols <- c("X_ID", "num_CS", "num_IV", "cpip", "composite_bhat",
+                   "composite_sbhat", "meta_eff", "se_meta_eff", "Q", "I2")
+
+  filtered <- formatted_input %>%
+    dplyr::mutate(
+      bhat_x = bhat_x / sbhat_x,
+      sbhat_x = 1) %>%
+    dplyr::group_by(X_ID, cs) %>%
+    dplyr::mutate(cpip = sum(pip)) %>%
+    dplyr::filter(cpip >= cpip_cutoff)
+
+  if (nrow(filtered) == 0) {
+    return(tibble::tibble(!!!stats::setNames(
+      rep(list(logical(0)), length(result_cols)), result_cols)))
+  }
+
+  filtered %>%
+    dplyr::group_by(X_ID, cs) %>%
+    dplyr::mutate(
+      beta_yx = bhat_y / bhat_x,
+      se_yx = sqrt(
+        (sbhat_y^2 / bhat_x^2) + ((bhat_y^2 * sbhat_x^2) / bhat_x^4)),
+      composite_bhat = sum((beta_yx * pip) / cpip),
+      composite_sbhat = sum((beta_yx^2 + se_yx^2) * pip / cpip)) %>%
+    dplyr::mutate(
+      composite_sbhat = sqrt(composite_sbhat - composite_bhat^2),
+      wv = composite_sbhat^-2) %>%
+    dplyr::ungroup() %>%
+    dplyr::group_by(X_ID) %>%
+    dplyr::mutate(
+      meta_eff = sum(unique(wv) * unique(composite_bhat)),
+      sum_w = sum(unique(wv)),
+      se_meta_eff = sqrt(sum_w^-1),
+      num_CS = length(unique(cs))) %>%
+    dplyr::mutate(
+      num_IV = length(snp),
+      meta_eff = meta_eff / sum_w,
+      Q = sum(unique(wv) * (unique(composite_bhat) - unique(meta_eff))^2),
+      I2 = calc_I2(Q, composite_bhat)) %>%
+    dplyr::ungroup() %>%
+    dplyr::distinct(X_ID, .keep_all = TRUE) %>%
+    dplyr::mutate(
+      cpip = round(cpip, 3),
+      composite_bhat = round(composite_bhat, 3),
+      meta_eff = round(meta_eff, 3),
+      se_meta_eff = round(se_meta_eff, 3),
+      Q = round(Q, 3),
+      I2 = round(I2, 3)) %>%
+    dplyr::select(X_ID, num_CS, num_IV, cpip, composite_bhat, composite_sbhat,
+                  meta_eff, se_meta_eff, Q, I2)
+}

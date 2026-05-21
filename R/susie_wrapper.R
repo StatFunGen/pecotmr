@@ -266,10 +266,27 @@ postprocess_finemapping_fit.susiF <- function(fit, method = "fsusie", ...) {
     maf = maf, method = method, signal_cutoff = signal_cutoff
   )
 
+  trimmed <- trim_finemapping_fit(fit, effect_idx, method, cs_tables)
+
+  # Build FineMappingResult S4 object
+  fm_result <- FineMappingResult(
+    variant_names = variant_names,
+    trimmed_fit = trimmed,
+    top_loci = if (is.null(top_loci_long) || nrow(top_loci_long) == 0) {
+      data.frame(variant_id = character(0), method = character(0))
+    } else {
+      top_loci_long
+    },
+    method = method,
+    sumstats = sumstats
+  )
+
+  # Also return as list for backwards compatibility with existing consumers
   res <- list(
     variant_names = variant_names,
-    result_trimmed = trim_finemapping_fit(fit, effect_idx, method, cs_tables),
-    top_loci_long = top_loci_long
+    result_trimmed = trimmed,
+    top_loci_long = top_loci_long,
+    finemapping_result = fm_result
   )
   if (!is.null(sumstats)) res$sumstats <- sumstats
   sample_names <- .sample_names_from_data_y(data_y)

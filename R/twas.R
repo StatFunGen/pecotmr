@@ -106,6 +106,10 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
   region_of_interest <- data.frame(chrom = chrom, start = min(region_variants$pos), end = max(region_variants$pos))
   LD_list <- load_LD_matrix(ld_meta_file_path, region_of_interest, region_variants,
                             n_sample = ld_reference_sample_size)
+  # Convert LDData S4 object to legacy list format if needed
+  if (is(LD_list, "LDData")) {
+    LD_list <- ld_data_to_list(LD_list)
+  }
   # remove duplicate variants
   dup_idx <- which(duplicated(LD_list$LD_variants))
   if (length(dup_idx) >= 1) {

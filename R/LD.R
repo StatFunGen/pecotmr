@@ -444,24 +444,32 @@ load_LD_from_genotype <- function(genotype_path, region,
     stringsAsFactors = FALSE
   )
 
+  # Build variant GRanges for LDData
+  variants_gr <- .ref_panel_to_granges(ref_panel)
+
   if (return_genotype) {
-    return(list(
-      LD_variants = variant_ids,
-      LD_matrix = X,
-      ref_panel = ref_panel,
+    # Store genotype handle + snp_idx for lazy access
+    handle <- readGenotypes(genotype_path)
+    snp_idx <- .region_to_snp_idx(handle@snp_info, region)
+    return(LDData(
+      correlation = NULL,
+      genotype_handle = handle,
+      snp_idx = snp_idx,
+      variants = variants_gr,
       block_metadata = block_metadata,
-      is_genotype = TRUE
+      n_ref = as.integer(nrow(X))
     ))
   }
 
   R <- compute_LD(X, method = "sample")
 
-  list(
-    LD_variants = variant_ids,
-    LD_matrix = R,
-    ref_panel = ref_panel,
+  LDData(
+    correlation = R,
+    genotype_handle = NULL,
+    snp_idx = NULL,
+    variants = variants_gr,
     block_metadata = block_metadata,
-    is_genotype = FALSE
+    n_ref = as.integer(nrow(X))
   )
 }
 
@@ -556,12 +564,15 @@ load_LD_from_blocks <- function(LD_meta_file_path, region, extract_coordinates =
     }
   }
 
-  list(
-    LD_variants = LD_variants,
-    LD_matrix = LD_matrix,
-    ref_panel = ref_panel,
+  variants_gr <- .ref_panel_to_granges(ref_panel)
+
+  LDData(
+    correlation = LD_matrix,
+    genotype_handle = NULL,
+    snp_idx = NULL,
+    variants = variants_gr,
     block_metadata = block_metadata,
-    is_genotype = FALSE
+    n_ref = 0L
   )
 }
 
@@ -631,10 +642,19 @@ filter_variants_by_ld_reference <- function(variant_ids, ld_reference_meta_file,
 #' @noRd
 partition_LD_matrix <- function(ld_data, merge_small_blocks = TRUE,
                                 min_merged_block_size = 500, max_merged_block_size = 10000) {
-  # Extract components from ld_data
-  combined_matrix <- ld_data$LD_matrix
-  block_metadata <- ld_data$block_metadata
-  variant_ids <- ld_data$LD_variants
+  # Extract components from ld_data (support both LDData S4 and legacy list)
+  if (is(ld_data, "LDData")) {
+    combined_matrix <- getCorrelation(ld_data)
+    block_metadata <- ld_data@block_metadata
+    if (is(block_metadata, "LDBlocks")) {
+      block_metadata <- as.data.frame(block_metadata@blocks)
+    }
+    variant_ids <- getVariantIds(ld_data)
+  } else {
+    combined_matrix <- ld_data$LD_matrix
+    block_metadata <- ld_data$block_metadata
+    variant_ids <- ld_data$LD_variants
+  }
 
   # Error if matrix is empty
   if (is.null(combined_matrix) || nrow(combined_matrix) == 0 || ncol(combined_matrix) == 0) {

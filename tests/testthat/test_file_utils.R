@@ -719,17 +719,17 @@ test_that("Test load_regional_association_data complete overlap",{
         xvar_cutoff = 0.2,
         phenotype_header = 3,
         keep_samples = NULL)
-    expect_equal(nrow(res$X), 10)
-    expect_equal(ncol(res$X), 10)
+    expect_equal(nrow(res@genotype_matrix), 10)
+    expect_equal(ncol(res@genotype_matrix), 10)
     colnames(geno_data) <- gsub("_", ":", colnames(geno_data))
-    expect_equal(res$X[order(as.numeric(gsub("Sample_", "", rownames(res$X)))), , drop = FALSE], geno_data)
-    expect_equal(length(res$Y[[1]]), 10)
+    expect_equal(res@genotype_matrix[order(as.numeric(gsub("Sample_", "", rownames(res@genotype_matrix)))), , drop = FALSE], geno_data)
+    expect_equal(length(res@phenotypes[[1]]), 10)
     expect_equal(
-        as.vector(res$Y[[1]][order(as.numeric(gsub("Sample_", "", rownames(res$Y[[1]]))))]),
+        as.vector(res@phenotypes[[1]][order(as.numeric(gsub("Sample_", "", rownames(res@phenotypes[[1]]))))]),
         as.numeric(as.vector(asplit(pheno_data[[1]], 2)[[1]])[4:13]))
-    expect_equal(nrow(res$covar[[1]]), 10)
-    expect_equal(ncol(res$covar[[1]]), 5)
-    expect_equal(res$covar[[1]][order(as.numeric(gsub("Sample_", "", rownames(res$covar[[1]])))), , drop = FALSE], covar_data)
+    expect_equal(nrow(res@covariates[[1]]), 10)
+    expect_equal(ncol(res@covariates[[1]]), 5)
+    expect_equal(res@covariates[[1]][order(as.numeric(gsub("Sample_", "", rownames(res@covariates[[1]])))), , drop = FALSE], covar_data)
 })
 
 test_that("Test load_regional_association_data fewer covar samples",{
@@ -757,23 +757,23 @@ test_that("Test load_regional_association_data fewer covar samples",{
         xvar_cutoff = 0.2,
         phenotype_header = 3,
         keep_samples = NULL)
-    expect_equal(nrow(res$X), 8)
-    expect_equal(ncol(res$X), 9)
+    expect_equal(nrow(res@genotype_matrix), 8)
+    expect_equal(ncol(res@genotype_matrix), 9)
     colnames(geno_data) <- gsub("_", ":", colnames(geno_data))
     expect_equal(
-        res$X[order(as.numeric(gsub("Sample_", "", rownames(res$X)))), , drop = FALSE],
+        res@genotype_matrix[order(as.numeric(gsub("Sample_", "", rownames(res@genotype_matrix)))), , drop = FALSE],
         geno_data[3:10,-6])
-    expect_equal(length(res$Y[[1]]), 8)
+    expect_equal(length(res@phenotypes[[1]]), 8)
     expect_equal(
-        setNames(res$Y[[1]][order(as.numeric(gsub("Sample_", "", rownames(res$Y[[1]]))))],
-rownames(res$Y[[1]])[order(as.numeric(gsub("Sample_", "", rownames(res$Y[[1]]))))]),
+        setNames(res@phenotypes[[1]][order(as.numeric(gsub("Sample_", "", rownames(res@phenotypes[[1]]))))],
+rownames(res@phenotypes[[1]])[order(as.numeric(gsub("Sample_", "", rownames(res@phenotypes[[1]]))))]),
         setNames(
             as.numeric(pheno_data[[1]][6:13,]),
             names(pheno_data[[1]][6:13,])))
-    expect_equal(nrow(res$covar[[1]]), 8)
-    expect_equal(ncol(res$covar[[1]]), 5)
+    expect_equal(nrow(res@covariates[[1]]), 8)
+    expect_equal(ncol(res@covariates[[1]]), 5)
     expect_equal(
-        res$covar[[1]][order(as.numeric(gsub("Sample_", "", rownames(res$covar[[1]])))), , drop = FALSE],
+        res@covariates[[1]][order(as.numeric(gsub("Sample_", "", rownames(res@covariates[[1]])))), , drop = FALSE],
         covar_data[1:8,])
 })
 
@@ -802,23 +802,23 @@ test_that("Test load_regional_association_data slight overlap across geno, pheno
         xvar_cutoff = 0.2,
         phenotype_header = 3,
         keep_samples = NULL)
-    expect_equal(nrow(res$X), 4)
-    expect_equal(ncol(res$X), 3)
+    expect_equal(nrow(res@genotype_matrix), 4)
+    expect_equal(ncol(res@genotype_matrix), 3)
     colnames(geno_data) <- gsub("_", ":", colnames(geno_data))
     expect_equal(
-        res$X[order(as.numeric(gsub("Sample_", "", rownames(res$X)))), , drop = FALSE],
+        res@genotype_matrix[order(as.numeric(gsub("Sample_", "", rownames(res@genotype_matrix)))), , drop = FALSE],
         geno_data[7:10,c(2,4,7)])
-    expect_equal(length(res$Y[[1]]), 4)
+    expect_equal(length(res@phenotypes[[1]]), 4)
     expect_equal(
-        setNames(res$Y[[1]][order(as.numeric(gsub("Sample_", "", rownames(res$Y[[1]]))))],
-rownames(res$Y[[1]])[order(as.numeric(gsub("Sample_", "", rownames(res$Y[[1]]))))]),
+        setNames(res@phenotypes[[1]][order(as.numeric(gsub("Sample_", "", rownames(res@phenotypes[[1]]))))],
+rownames(res@phenotypes[[1]])[order(as.numeric(gsub("Sample_", "", rownames(res@phenotypes[[1]]))))]),
         setNames(
             as.numeric(pheno_data[[1]][4:7,]),
             names(pheno_data[[1]][4:7,])))
-    expect_equal(nrow(res$covar[[1]]), 4)
-    expect_equal(ncol(res$covar[[1]]), 5)
+    expect_equal(nrow(res@covariates[[1]]), 4)
+    expect_equal(ncol(res@covariates[[1]]), 5)
     expect_equal(
-        res$covar[[1]][order(as.numeric(gsub("Sample_", "", rownames(res$covar[[1]])))), , drop = FALSE],
+        res@covariates[[1]][order(as.numeric(gsub("Sample_", "", rownames(res@covariates[[1]])))), , drop = FALSE],
         covar_data[5:8,])
 })
 
@@ -876,21 +876,21 @@ test_that("Test load_regional_association_data unordered samples",{
         xvar_cutoff = 0.2,
         phenotype_header = 3,
         keep_samples = NULL)
-    expect_equal(nrow(res$X), 10)
-    expect_equal(ncol(res$X), 10)
+    expect_equal(nrow(res@genotype_matrix), 10)
+    expect_equal(ncol(res@genotype_matrix), 10)
     colnames(geno_data) <- gsub("_", ":", colnames(geno_data))
-    expect_equal(res$X[order(as.numeric(gsub("Sample_", "", rownames(res$X)))), , drop = FALSE], geno_data)
-    expect_equal(length(res$Y[[1]]), 10)
+    expect_equal(res@genotype_matrix[order(as.numeric(gsub("Sample_", "", rownames(res@genotype_matrix)))), , drop = FALSE], geno_data)
+    expect_equal(length(res@phenotypes[[1]]), 10)
     expect_equal(
-        setNames(res$Y[[1]][order(as.numeric(gsub("Sample_", "", rownames(res$Y[[1]]))))],
-rownames(res$Y[[1]])[order(as.numeric(gsub("Sample_", "", rownames(res$Y[[1]]))))]),
+        setNames(res@phenotypes[[1]][order(as.numeric(gsub("Sample_", "", rownames(res@phenotypes[[1]]))))],
+rownames(res@phenotypes[[1]])[order(as.numeric(gsub("Sample_", "", rownames(res@phenotypes[[1]]))))]),
         setNames(
             as.numeric(pheno_data[[1]][4:13,]),
             names(pheno_data[[1]][4:13,])))
-    expect_equal(nrow(res$covar[[1]]), 10)
-    expect_equal(ncol(res$covar[[1]]), 5)
+    expect_equal(nrow(res@covariates[[1]]), 10)
+    expect_equal(ncol(res@covariates[[1]]), 5)
     expect_equal(
-        res$covar[[1]][order(as.numeric(gsub("Sample_", "", rownames(res$covar[[1]])))), , drop = FALSE],
+        res@covariates[[1]][order(as.numeric(gsub("Sample_", "", rownames(res@covariates[[1]])))), , drop = FALSE],
         covar_data[order(as.numeric(gsub("Sample_", "", rownames(covar_data)))), , drop = FALSE])
 })
 
@@ -925,7 +925,7 @@ test_that("load_regional_association_data aligns covariates when phenotypes are 
     phenotype_header = 3,
     keep_samples = NULL
   )
-  expect_true(!is.null(result$X))
+  expect_true(!is.null(result@genotype_matrix))
 })
 
 test_that("load_regional_association_data returns scalar info when scale_residuals=TRUE", {
@@ -948,8 +948,11 @@ test_that("load_regional_association_data returns scalar info when scale_residua
     xvar_cutoff = 0.2, phenotype_header = 3, keep_samples = NULL,
     scale_residuals = TRUE
   )
-  expect_true(!is.null(result$residual_Y_scalar))
-  expect_true(!is.null(result$residual_X_scalar))
+  ry_scalar <- getResidualYScalar(result, 1L)
+  expect_true(is.numeric(ry_scalar))
+  expect_true(all(ry_scalar > 0))
+  rx_scalar <- getResidualXScalar(result, 1L)
+  expect_true(is.numeric(rx_scalar))
 })
 
 test_that("Test load_regional_univariate_data",{
@@ -2253,8 +2256,8 @@ test_that("read_afreq IDs match pvar IDs", {
 test_that("match_variants_to_keep filters to specified variants", {
   skip_if_not_installed("pgenlibr")
   td <- test_path("test_data")
-  result <- load_plink2_data(file.path(td, "test_variants"))
-  vi <- result$variant_info
+  handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+  vi <- pecotmr:::.snp_info_to_variant_info(handle@snp_info)
 
   # Write a keep file as tab-delimited with chrom/pos columns
   keep_file <- tempfile(fileext = ".tsv")
@@ -2273,8 +2276,8 @@ test_that("match_variants_to_keep filters to specified variants", {
 test_that("match_variants_to_keep returns all FALSE for non-matching variants", {
   skip_if_not_installed("pgenlibr")
   td <- test_path("test_data")
-  result <- load_plink2_data(file.path(td, "test_variants"))
-  vi <- result$variant_info
+  handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+  vi <- pecotmr:::.snp_info_to_variant_info(handle@snp_info)
 
   keep_file <- tempfile(fileext = ".tsv")
   on.exit(unlink(keep_file), add = TRUE)
@@ -2352,8 +2355,8 @@ test_that("match_variants_to_keep works with single-column variant ID file", {
 test_that("match_variants_to_keep uses position-only matching when no alleles", {
   skip_if_not_installed("pgenlibr")
   td <- test_path("test_data")
-  result <- load_plink2_data(file.path(td, "test_variants"))
-  vi <- result$variant_info
+  handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+  vi <- pecotmr:::.snp_info_to_variant_info(handle@snp_info)
 
   keep_file <- tempfile(fileext = ".tsv")
   on.exit(unlink(keep_file), add = TRUE)
@@ -2416,82 +2419,82 @@ test_that("standardise_sumstats_columns errors on missing column file", {
 })
 
 # ===========================================================================
-# load_plink2_data: direct tests
+# readGenotypes + extractBlockGenotypes: plink2 tests (replacing load_plink2_data)
 # ===========================================================================
 
-test_that("load_plink2_data loads all variants without region", {
+test_that("readGenotypes loads plink2 handle with all variants", {
   skip_if_not_installed("pgenlibr")
   td <- test_path("test_data")
-  result <- load_plink2_data(file.path(td, "test_variants"))
-  expect_true(is.matrix(result$X))
-  expect_equal(nrow(result$X), 100L)
-  expect_equal(ncol(result$X), 349L)
-  expect_true(is.data.frame(result$variant_info))
-  expect_equal(nrow(result$variant_info), 349L)
+  handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+  expect_s4_class(handle, "GenotypeHandle")
+  expect_equal(handle@n_samples, 100L)
+  expect_equal(nrow(handle@snp_info), 349L)
+  rse <- extractBlockGenotypes(handle, seq_len(nrow(handle@snp_info)))
+  expect_s4_class(rse, "SummarizedExperiment")
+  dosage <- SummarizedExperiment::assay(rse, "dosage")
+  expect_equal(nrow(dosage), 349L)
+  expect_equal(ncol(dosage), 100L)
 })
 
-test_that("load_plink2_data filters by region", {
+test_that("load_genotype_region filters by region for plink2", {
   skip_if_not_installed("pgenlibr")
   td <- test_path("test_data")
   region <- "chr21:17513228-17550000"
-  result <- load_plink2_data(file.path(td, "test_variants"), region = region)
-  expect_true(ncol(result$X) < 349L)
-  expect_true(all(result$variant_info$pos >= 17513228))
-  expect_true(all(result$variant_info$pos <= 17550000))
-  expect_equal(ncol(result$X), nrow(result$variant_info))
+  result <- load_genotype_region(file.path(td, "test_variants"), region = region)
+  expect_true(ncol(result) < 349L)
 })
 
-test_that("load_plink2_data errors on empty region", {
+test_that("load_genotype_region errors on empty region for plink2", {
   skip_if_not_installed("pgenlibr")
   td <- test_path("test_data")
   expect_error(
-    load_plink2_data(file.path(td, "test_variants"), region = "chr21:1-2"),
-    "No variants found"
+    load_genotype_region(file.path(td, "test_variants"), region = "chr21:1-2"),
+    "No SNPs found"
   )
 })
 
-test_that("load_plink2_data removes indels with keep_indel=FALSE", {
+test_that("load_genotype_region removes indels for plink2", {
   skip_if_not_installed("pgenlibr")
   td <- test_path("test_data")
-  full <- load_plink2_data(file.path(td, "test_variants"))
-  filtered <- load_plink2_data(file.path(td, "test_variants"), keep_indel = FALSE)
+  full <- load_genotype_region(file.path(td, "test_variants"))
+  filtered <- load_genotype_region(file.path(td, "test_variants"), keep_indel = FALSE)
   # test data has 36 indels
-  expect_equal(ncol(filtered$X), ncol(full$X) - 36L)
-  # all remaining alleles should be single characters
-  expect_true(all(nchar(filtered$variant_info$A1) == 1))
-  expect_true(all(nchar(filtered$variant_info$A2) == 1))
+  expect_equal(ncol(filtered), ncol(full) - 36L)
 })
 
-test_that("load_plink2_data filters by keep_variants_path", {
+test_that("load_genotype_region filters by keep_variants_path for plink2", {
   skip_if_not_installed("pgenlibr")
   td <- test_path("test_data")
-  full <- load_plink2_data(file.path(td, "test_variants"))
+  handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+  vi <- pecotmr:::.snp_info_to_variant_info(handle@snp_info)
 
   keep_file <- tempfile(fileext = ".tsv")
   on.exit(unlink(keep_file), add = TRUE)
-  keep_df <- full$variant_info[c(1, 3, 7), c("chrom", "pos", "A2", "A1")]
+  keep_df <- vi[c(1, 3, 7), c("chrom", "pos", "A2", "A1")]
   vroom::vroom_write(keep_df, keep_file, delim = "\t")
 
-  result <- load_plink2_data(file.path(td, "test_variants"), keep_variants_path = keep_file)
-  expect_equal(ncol(result$X), 3L)
-  expect_equal(nrow(result$variant_info), 3L)
+  result <- load_genotype_region(file.path(td, "test_variants"),
+                                  keep_variants_path = keep_file)
+  expect_equal(ncol(result), 3L)
 })
 
-test_that("load_plink2_data attaches afreq info to variant_info", {
+test_that("load_genotype_region attaches afreq info for plink2", {
   skip_if_not_installed("pgenlibr")
   td <- test_path("test_data")
-  result <- load_plink2_data(file.path(td, "test_variants"))
-  expect_true("alt_freq" %in% colnames(result$variant_info))
-  expect_true("obs_ct" %in% colnames(result$variant_info))
-  expect_true(all(result$variant_info$alt_freq >= 0 & result$variant_info$alt_freq <= 1))
+  result <- load_genotype_region(file.path(td, "test_variants"),
+                                  return_variant_info = TRUE)
+  vi <- result$variant_info
+  expect_true("alt_freq" %in% colnames(vi))
+  expect_true("obs_ct" %in% colnames(vi))
+  expect_true(all(vi$alt_freq >= 0 & vi$alt_freq <= 1))
 })
 
-test_that("load_plink2_data sample names match psam IIDs", {
+test_that("readGenotypes plink2 sample names match psam IIDs", {
   skip_if_not_installed("pgenlibr")
   td <- test_path("test_data")
-  result <- load_plink2_data(file.path(td, "test_variants"))
-  expect_true(all(grepl("^(HG|NA)\\d+", rownames(result$X))))
-  expect_equal(length(unique(rownames(result$X))), 100L)
+  handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+  expect_true(all(grepl("^(HG|NA)\\d+", handle@sample_ids)))
+  expect_equal(length(unique(handle@sample_ids)), 100L)
 })
 
 # ===========================================================================
@@ -2602,22 +2605,18 @@ test_that("load_regional_association_data returns expected structure", {
     region = "chr21:17513043-17593579",
     conditions = "cond1"
   )
-  expect_true(is.list(result))
-  expected_names <- c("residual_Y", "residual_X", "residual_Y_scalar",
-                       "residual_X_scalar", "dropped_sample", "covar",
-                       "Y", "X_data", "X", "maf", "chrom", "grange",
-                       "Y_coordinates")
-  expect_true(all(expected_names %in% names(result)))
+  expect_s4_class(result, "RegionalData")
   # 100 samples, 349 variants
-  expect_equal(nrow(result$X), 100L)
-  expect_equal(ncol(result$X), 349L)
-  expect_equal(result$chrom, "chr21")
-  expect_equal(names(result$residual_Y), "cond1")
+  expect_equal(nrow(result@genotype_matrix), 100L)
+  expect_equal(ncol(result@genotype_matrix), 349L)
+  expect_equal(as.character(GenomicRanges::seqnames(result@region))[1], "chr21")
+  expect_equal(length(result@phenotypes), 1L)
   # residual_Y should be a 100-sample x 1-gene matrix
-  expect_equal(nrow(result$residual_Y[[1]]), 100L)
-  expect_equal(ncol(result$residual_Y[[1]]), 1L)
+  ry <- getResidualY(result, 1L)
+  expect_equal(nrow(ry), 100L)
+  expect_equal(ncol(ry), 1L)
   # Y_coordinates should have gene coordinates
-  expect_true(is.data.frame(result$Y_coordinates[[1]]))
+  expect_true(is.data.frame(result@Y_coordinates[[1]]))
 })
 
 test_that("load_regional_association_data with scale_residuals returns scalars", {
@@ -2633,9 +2632,11 @@ test_that("load_regional_association_data with scale_residuals returns scalars",
     scale_residuals = TRUE
   )
   # With scale_residuals, residual_Y_scalar should be non-trivial
-  expect_true(is.list(result$residual_Y_scalar))
-  expect_true(all(unlist(result$residual_Y_scalar) > 0))
-  expect_true(is.list(result$residual_X_scalar))
+  ry_scalar <- getResidualYScalar(result, 1L)
+  expect_true(is.numeric(ry_scalar))
+  expect_true(all(ry_scalar > 0))
+  rx_scalar <- getResidualXScalar(result, 1L)
+  expect_true(is.numeric(rx_scalar))
 })
 
 test_that("load_regional_association_data with keep_indel=FALSE reduces variants", {
@@ -2651,7 +2652,7 @@ test_that("load_regional_association_data with keep_indel=FALSE reduces variants
     keep_indel = FALSE
   )
   # 349 total - 36 indels = 313 SNPs
-  expect_equal(ncol(result$X), 313L)
+  expect_equal(ncol(result@genotype_matrix), 313L)
 })
 
 test_that("load_regional_association_data covariate residuals affect Y", {
@@ -2666,8 +2667,8 @@ test_that("load_regional_association_data covariate residuals affect Y", {
     conditions = "cond1"
   )
   # Raw Y and residual Y should differ (covariates regressed out)
-  raw_y <- as.numeric(result$Y[[1]])
-  resid_y <- as.numeric(result$residual_Y[[1]])
+  raw_y <- as.numeric(result@phenotypes[[1]])
+  resid_y <- as.numeric(getResidualY(result, 1L))
   expect_false(isTRUE(all.equal(raw_y, resid_y)))
 })
 

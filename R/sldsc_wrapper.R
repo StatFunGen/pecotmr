@@ -28,7 +28,7 @@
 }
 
 .sldsc_detect_annot_cols <- function(file_path) {
-  sample <- data.table::fread(file_path, nrows = 5L)
+  sample <- vroom::vroom(file_path, n_max = 5L, show_col_types = FALSE)
   setdiff(names(sample), .sldsc_std_cols)
 }
 
@@ -52,7 +52,6 @@
 #' run$tau["my_target_annotation"]
 #' }
 #'
-#' @importFrom data.table fread
 #' @importFrom stats setNames var
 #' @export
 read_sldsc_trait <- function(prefix) {
@@ -64,7 +63,7 @@ read_sldsc_trait <- function(prefix) {
     if (!file.exists(f)) stop("read_sldsc_trait: missing file: ", f)
   }
 
-  results <- data.table::fread(results_file)
+  results <- vroom::vroom(results_file, show_col_types = FALSE)
   cats <- as.character(results$Category)
 
   log_lines <- readLines(log_file, warn = FALSE)
@@ -75,7 +74,7 @@ read_sldsc_trait <- function(prefix) {
   if (is.na(h2g))
     stop("read_sldsc_trait: failed to parse h2g numeric from log line: ", h2_line[1])
 
-  delete_values <- as.matrix(data.table::fread(delete_file))
+  delete_values <- as.matrix(vroom::vroom(delete_file, show_col_types = FALSE))
   if (ncol(delete_values) != length(cats)) {
     stop("read_sldsc_trait: .part_delete has ", ncol(delete_values),
          " columns but .results has ", length(cats), " categories.")
@@ -118,7 +117,6 @@ read_sldsc_trait <- function(prefix) {
 #'
 #' @return Named numeric vector of \eqn{sd_C} values, one per annotation.
 #'
-#' @importFrom data.table fread
 #' @importFrom stats setNames var
 #' @export
 compute_sldsc_annot_sd <- function(target_anno_dir, frqfile_dir = NULL,
@@ -151,7 +149,7 @@ compute_sldsc_annot_sd <- function(target_anno_dir, frqfile_dir = NULL,
   den <- 0
 
   for (anno_file in anno_files) {
-    dat <- data.table::fread(anno_file)
+    dat <- vroom::vroom(anno_file, show_col_types = FALSE)
     if (maf_cutoff > 0) {
       chrom <- .sldsc_chrom_from_filename(anno_file)
       if (is.na(chrom))
@@ -159,7 +157,7 @@ compute_sldsc_annot_sd <- function(target_anno_dir, frqfile_dir = NULL,
       frq_file <- file.path(frqfile_dir, paste0(plink_name, chrom, ".frq"))
       if (!file.exists(frq_file))
         stop("compute_sldsc_annot_sd: .frq file not found: ", frq_file)
-      frq <- data.table::fread(frq_file, select = c("SNP", "MAF"))
+      frq <- vroom::vroom(frq_file, col_select = c("SNP", "MAF"), show_col_types = FALSE)
       dat <- merge(dat, frq, by = "SNP", all.x = FALSE, all.y = FALSE)
       dat <- dat[!is.na(dat$MAF) & dat$MAF > maf_cutoff, ]
     }
@@ -207,7 +205,6 @@ compute_sldsc_annot_sd <- function(target_anno_dir, frqfile_dir = NULL,
 #'
 #' @return Scalar integer.
 #'
-#' @importFrom data.table fread
 #' @export
 compute_sldsc_M_ref <- function(target_anno_dir = NULL, frqfile_dir = NULL,
                                 plink_name = "ADSP_chr", maf_cutoff = 0.05) {
@@ -220,7 +217,7 @@ compute_sldsc_M_ref <- function(target_anno_dir = NULL, frqfile_dir = NULL,
     if (length(frq_files) > 0L) {
       total <- 0L
       for (f in frq_files) {
-        frq <- data.table::fread(f, select = "MAF")
+        frq <- vroom::vroom(f, col_select = "MAF", show_col_types = FALSE)
         total <- total + if (maf_cutoff > 0)
           sum(!is.na(frq$MAF) & frq$MAF > maf_cutoff) else nrow(frq)
       }
@@ -249,7 +246,7 @@ compute_sldsc_M_ref <- function(target_anno_dir = NULL, frqfile_dir = NULL,
         stop("compute_sldsc_M_ref: install 'arrow' to read .parquet files.")
       total <- total + nrow(arrow::read_parquet(f))
     } else {
-      total <- total + nrow(data.table::fread(f))
+      total <- total + nrow(vroom::vroom(f, show_col_types = FALSE))
     }
   }
   as.integer(total)
@@ -267,7 +264,6 @@ compute_sldsc_M_ref <- function(target_anno_dir = NULL, frqfile_dir = NULL,
 #'
 #' @return Named logical vector: TRUE for binary, FALSE for continuous.
 #'
-#' @importFrom data.table fread
 #' @importFrom stats setNames
 #' @export
 is_binary_sldsc_annot <- function(target_anno_dir, annot_cols = NULL) {
@@ -287,7 +283,7 @@ is_binary_sldsc_annot <- function(target_anno_dir, annot_cols = NULL) {
   is_binary <- stats::setNames(rep(TRUE, length(cols_use)), cols_use)
 
   for (f in anno_files) {
-    dat <- data.table::fread(f, select = cols_use)
+    dat <- vroom::vroom(f, col_select = dplyr::all_of(cols_use), show_col_types = FALSE)
     for (col in cols_use) {
       if (!is_binary[[col]]) next
       vals <- unique(stats::na.omit(as.numeric(dat[[col]])))
@@ -339,17 +335,15 @@ standardize_sldsc_trait <- function(trait_data, sd_annot, M_ref,
   if (any(is.na(sd_target) | sd_target == 0))
     warning("standardize_sldsc_trait: zero/NA sd for some targets; tau* will be NA/0.")
 
-  coef       <- sd_target * M_ref / h2g
   tau        <- as.numeric(trait_data$tau[target_categories])
   tau_se     <- as.numeric(trait_data$tau_se[target_categories])
-  tau_star   <- tau * coef
-
   blocks_target   <- trait_data$tau_blocks[, target_idx, drop = FALSE]
-  tau_star_blocks <- sweep(blocks_target, 2L, coef, FUN = "*")
 
-  B <- trait_data$n_blocks
-  jk_var <- apply(tau_star_blocks, 2L, function(x) stats::var(x, na.rm = TRUE))
-  tau_star_se <- sqrt((B - 1)^2 / B * jk_var)
+  ts <- standardize_tau_star(tau, blocks_target, sd_target, M_ref, h2g)
+  tau_star    <- ts$tau_star
+  tau_star_se <- ts$tau_star_se
+
+  tau_star_blocks <- sweep(blocks_target, 2L, sd_target * M_ref / h2g, FUN = "*")
 
   summary_df <- data.frame(
     target      = target_categories,
@@ -385,7 +379,7 @@ standardize_sldsc_trait <- function(trait_data, sd_annot, M_ref,
     summary         = summary_df,
     tau_star_blocks = tau_star_blocks,
     h2g             = h2g,
-    n_blocks        = B,
+    n_blocks        = nrow(blocks_target),
     mode            = mode
   )
 }
@@ -442,19 +436,16 @@ meta_sldsc_random <- function(per_trait_estimates, category,
                 n_traits = length(means), traits_used = used,
                 tau2 = NA_real_))
   }
-  if (!requireNamespace("rmeta", quietly = TRUE))
-    stop("meta_sldsc_random: install the 'rmeta' package.")
-
-  meta <- rmeta::meta.summaries(means, ses, method = "random")
-  z    <- meta$summary / meta$se.summary
+  meta <- meta_random_effects(means, ses)
+  z    <- meta$mean / meta$se
   p    <- 2 * stats::pnorm(-abs(z))
   list(
-    mean        = as.numeric(meta$summary),
-    se          = as.numeric(meta$se.summary),
+    mean        = meta$mean,
+    se          = meta$se,
     p           = as.numeric(p),
     n_traits    = length(means),
     traits_used = used,
-    tau2        = as.numeric(meta$tau2)
+    tau2        = meta$tau2
   )
 }
 

@@ -263,3 +263,72 @@ align_variant_names <- function(source, reference, remove_indels = FALSE, remove
     unmatched_indices = unmatched_indices
   )
 }
+
+#' Merge variant info from two sources with allele-flip-aware matching
+#'
+#' Merges variant metadata (chromosome, position, ref, alt) from two sources,
+#' detecting and correcting allele flips (where alt/ref are swapped). Creates
+#' a canonical key from sorted alleles to match across datasets.
+#'
+#' @param variants1 A data.frame with columns \code{chrom}, \code{pos},
+#'   \code{alt}, \code{ref}, or a \code{GRanges} with corresponding metadata
+#'   columns.
+#' @param variants2 A data.frame or \code{GRanges} with the same columns.
+#' @param all Logical. If TRUE (default), returns the union of both sets.
+#'   If FALSE, returns only variants from \code{variants2} (flipped to match
+#'   \code{variants1}'s allele orientation).
+#' @return A data.frame with columns \code{chrom}, \code{pos}, \code{alt},
+#'   \code{ref}, deduplicated by position and alleles.
+#' @export
+merge_variant_info <- function(variants1, variants2, all = TRUE) {
+  # Convert GRanges to data.frame if needed
+  to_df <- function(x) {
+    if (is(x, "GRanges")) {
+      mc <- as.data.frame(S4Vectors::mcols(x))
+      mc$chrom <- as.character(GenomicRanges::seqnames(x))
+      mc$pos <- GenomicRanges::start(x)
+      mc[, c("chrom", "pos", "alt", "ref")]
+    } else {
+      as.data.frame(x)[, c("chrom", "pos", "alt", "ref")]
+    }
+  }
+
+  df1 <- to_df(variants1)
+  df2 <- to_df(variants2)
+
+  # Create a canonical key from sorted alleles so flipped pairs match
+  make_key <- function(df) {
+    a_min <- pmin(df$alt, df$ref)
+    a_max <- pmax(df$alt, df$ref)
+    paste(df$chrom, df$pos, a_min, a_max)
+  }
+
+  key1 <- make_key(df1)
+  key2 <- make_key(df2)
+
+  # Detect flips: where df2's alt matches df1's ref at the same key
+  match_idx <- match(key2, key1)
+  has_match <- !is.na(match_idx)
+
+  flip <- has_match &
+    df2$alt[has_match] == df1$ref[match_idx[has_match]] &
+    df2$ref[has_match] == df1$alt[match_idx[has_match]]
+
+  # Apply flips to df2
+  flip_rows <- which(has_match)[flip[has_match]]
+  if (length(flip_rows) > 0) {
+    tmp <- df2$alt[flip_rows]
+    df2$alt[flip_rows] <- df2$ref[flip_rows]
+    df2$ref[flip_rows] <- tmp
+  }
+
+  if (all) {
+    combined <- rbind(
+      df1[, c("chrom", "pos", "alt", "ref")],
+      df2[, c("chrom", "pos", "alt", "ref")])
+    combined[!duplicated(paste(combined$chrom, combined$pos,
+                               combined$alt, combined$ref)), ]
+  } else {
+    df2[, c("chrom", "pos", "alt", "ref")]
+  }
+}

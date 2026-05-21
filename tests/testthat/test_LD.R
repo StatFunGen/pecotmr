@@ -51,7 +51,7 @@ test_that("Check that we correctly retrieve the names from the matrix",{
   variants <- unlist(
     c("chr1:1000:A:G", "chr1:1040:A:G", "chr1:1080:A:G", "chr1:1120:A:G", "chr1:1160:A:G"))
   expect_equal(
-    unlist(res$LD_variants),
+    unlist(getVariantIds(res)),
     variants)
   file.remove(LD_meta_file_path)
 })
@@ -66,7 +66,7 @@ test_that("Check that the LD block contains the correct information",{
   variants <- unlist(
     c("chr1:1000:A:G", "chr1:1040:A:G", "chr1:1080:A:G", "chr1:1120:A:G", "chr1:1160:A:G"))
   # Check LD Block 1
-  ld_block_one <- res$LD_matrix
+  ld_block_one <- getCorrelation(res)
   ld_block_one_original <- as.matrix(
     read_delim(
       "test_data/LD_block_1.chr1_1000_1200.float16.txt.xz",
@@ -92,10 +92,10 @@ test_that("partition_LD_matrix correctly partitions a single block", {
 
   # Expectations for single block case
   expect_equal(length(partitioned$ld_matrices), 1)
-  expect_equal(nrow(partitioned$variant_indices), length(ld_data$LD_variants))
+  expect_equal(nrow(partitioned$variant_indices), length(getVariantIds(ld_data)))
   expect_equal(unique(partitioned$variant_indices$block_id), 1)
-  expect_identical(rownames(partitioned$ld_matrices[[1]]), ld_data$LD_variants)
-  expect_identical(colnames(partitioned$ld_matrices[[1]]), ld_data$LD_variants)
+  expect_identical(rownames(partitioned$ld_matrices[[1]]), getVariantIds(ld_data))
+  expect_identical(colnames(partitioned$ld_matrices[[1]]), getVariantIds(ld_data))
 
   file.remove(LD_meta_file_path)
 })
@@ -118,7 +118,7 @@ test_that("partition_LD_matrix correctly partitions multiple blocks", {
   expect_equal(length(partitioned$ld_matrices), expected_block_count)
 
   # Check if all variants are assigned to blocks
-  expect_equal(nrow(partitioned$variant_indices), length(ld_data$LD_variants))
+  expect_equal(nrow(partitioned$variant_indices), length(getVariantIds(ld_data)))
 
   # Check if block IDs are correct
   expect_setequal(unique(partitioned$variant_indices$block_id), 1:expected_block_count)
@@ -147,11 +147,11 @@ test_that("partition_LD_matrix properly merges small blocks", {
   expect_lt(length(partitioned$ld_matrices), 3)
 
   # Check if all variants are still assigned to blocks
-  expect_equal(nrow(partitioned$variant_indices), length(ld_data$LD_variants))
+  expect_equal(nrow(partitioned$variant_indices), length(getVariantIds(ld_data)))
 
   # Check if merged blocks are larger than min_block_size
   block_sizes <- sapply(partitioned$ld_matrices, nrow)
-  expect_true(all(block_sizes >= min_block_size | block_sizes == length(ld_data$LD_variants)))
+  expect_true(all(block_sizes >= min_block_size | block_sizes == length(getVariantIds(ld_data))))
 
   file.remove(LD_meta_file_path)
 })
@@ -208,8 +208,15 @@ test_that("partition_LD_matrix validates block structure properly", {
   # Load the LD matrix that spans multiple blocks
   ld_data <- load_LD_matrix(LD_meta_file_path, region)
 
-  # Create an invalid block structure by modifying the block_metadata
-  invalid_ld_data <- ld_data
+  # Create an invalid block structure by converting to a plain list and modifying
+  bm <- getBlockMetadata(ld_data)
+  vids <- getVariantIds(ld_data)
+  ldmat <- getCorrelation(ld_data)
+  invalid_ld_data <- list(
+    LD_matrix = ldmat,
+    LD_variants = vids,
+    block_metadata = bm
+  )
 
   # Assuming we have at least 2 blocks:
   if(nrow(invalid_ld_data$block_metadata) >= 2) {
@@ -273,17 +280,23 @@ test_that("partition_LD_matrix handles row/column name mismatches", {
   # Load the LD matrix
   ld_data <- load_LD_matrix(LD_meta_file_path, region)
 
-  # Create a version with mismatched rownames and colnames
-  mismatched_ld_data <- ld_data
-  rownames(mismatched_ld_data$LD_matrix) <- NULL
-  colnames(mismatched_ld_data$LD_matrix) <- NULL
+  # Create a plain list version with mismatched rownames and colnames
+  ldmat <- getCorrelation(ld_data)
+  vids <- getVariantIds(ld_data)
+  rownames(ldmat) <- NULL
+  colnames(ldmat) <- NULL
+  mismatched_ld_data <- list(
+    LD_matrix = ldmat,
+    LD_variants = vids,
+    block_metadata = getBlockMetadata(ld_data)
+  )
 
   # Should not error and should fix the names
   partitioned <- partition_LD_matrix(mismatched_ld_data)
 
   # Check if names are fixed
-  expect_identical(rownames(partitioned$ld_matrices[[1]]), ld_data$LD_variants)
-  expect_identical(colnames(partitioned$ld_matrices[[1]]), ld_data$LD_variants)
+  expect_identical(rownames(partitioned$ld_matrices[[1]]), getVariantIds(ld_data))
+  expect_identical(colnames(partitioned$ld_matrices[[1]]), getVariantIds(ld_data))
 
   file.remove(LD_meta_file_path)
 })
@@ -301,21 +314,23 @@ test_that("partition_LD_matrix correctly extracts blocks based on metadata", {
   partitioned <- partition_LD_matrix(ld_data, merge_small_blocks = FALSE)
 
   # For each block, check if the extracted matrix matches the expected submatrix
+  ld_variants <- getVariantIds(ld_data)
+  ld_matrix <- getCorrelation(ld_data)
   for(i in seq_along(partitioned$ld_matrices)) {
     block_info <- partitioned$block_metadata[i, ]
     start_idx <- block_info$start_idx
     end_idx <- block_info$end_idx
 
     # Skip if indices are invalid
-    if(start_idx > length(ld_data$LD_variants) ||
-       end_idx > length(ld_data$LD_variants) ||
+    if(start_idx > length(ld_variants) ||
+       end_idx > length(ld_variants) ||
        end_idx < start_idx) next
 
     # Get variants for this block
-    block_variants <- ld_data$LD_variants[start_idx:end_idx]
+    block_variants <- ld_variants[start_idx:end_idx]
 
     # Extract expected submatrix
-    expected_submatrix <- ld_data$LD_matrix[block_variants, block_variants, drop = FALSE]
+    expected_submatrix <- ld_matrix[block_variants, block_variants, drop = FALSE]
 
     # Compare with actual block matrix
     expect_equal(partitioned$ld_matrices[[i]], expected_submatrix)
@@ -1026,18 +1041,18 @@ test_that("load_LD_from_genotype returns LD matrix with .afreq", {
   skip_if_not_installed("pgenlibr")
   plink_prefix <- file.path(geno_test_data_dir, "test_variants")
   result <- pecotmr:::load_LD_from_genotype(plink_prefix, geno_region_all)
-  expect_true(is.list(result))
-  expect_true(is.matrix(result$LD_matrix))
-  expect_equal(nrow(result$LD_matrix), 349L)
-  expect_true(isSymmetric(result$LD_matrix))
-  expect_false(result$is_genotype)
+  expect_true(is(result, "LDData"))
+  expect_true(is.matrix(getCorrelation(result)))
+  expect_equal(nrow(getCorrelation(result)), 349L)
+  expect_true(isSymmetric(getCorrelation(result)))
+  expect_false(hasGenotypes(result))
   # ref_panel should have allele_freq from .afreq file
-  expect_true("allele_freq" %in% names(result$ref_panel))
-  expect_true(all(result$ref_panel$allele_freq > 0))
-  expect_true(all(result$ref_panel$allele_freq < 1))
+  expect_true("allele_freq" %in% names(S4Vectors::mcols(getVariantInfo(result))))
+  expect_true(all(S4Vectors::mcols(getVariantInfo(result))$allele_freq > 0))
+  expect_true(all(S4Vectors::mcols(getVariantInfo(result))$allele_freq < 1))
   # block_metadata
-  expect_true(is.data.frame(result$block_metadata))
-  expect_equal(nrow(result$block_metadata), 1L)
+  expect_true(is.data.frame(getBlockMetadata(result)))
+  expect_equal(nrow(getBlockMetadata(result)), 1L)
 })
 
 test_that("load_LD_from_genotype returns genotype matrix when requested", {
@@ -1045,9 +1060,10 @@ test_that("load_LD_from_genotype returns genotype matrix when requested", {
   plink_prefix <- file.path(geno_test_data_dir, "test_variants")
   result <- pecotmr:::load_LD_from_genotype(plink_prefix, geno_region_all,
                                              return_genotype = TRUE)
-  expect_true(result$is_genotype)
-  expect_equal(nrow(result$LD_matrix), 100L)  # samples
-  expect_equal(ncol(result$LD_matrix), 349L)  # variants
+  expect_true(hasGenotypes(result))
+  X <- getGenotypes(result)
+  expect_equal(nrow(X), 100L)  # samples
+  expect_equal(ncol(X), 349L)  # variants
 })
 
 test_that("load_LD_from_genotype computes variance with n_sample", {
@@ -1055,10 +1071,10 @@ test_that("load_LD_from_genotype computes variance with n_sample", {
   plink_prefix <- file.path(geno_test_data_dir, "test_variants")
   result <- pecotmr:::load_LD_from_genotype(plink_prefix, geno_region_all,
                                              n_sample = 100L)
-  expect_true("variance" %in% names(result$ref_panel))
-  expect_true("n_nomiss" %in% names(result$ref_panel))
-  expect_equal(result$ref_panel$n_nomiss[1], 100L)
-  expect_true(all(result$ref_panel$variance > 0))
+  expect_true("variance" %in% names(S4Vectors::mcols(getVariantInfo(result))))
+  expect_true("n_nomiss" %in% names(S4Vectors::mcols(getVariantInfo(result))))
+  expect_equal(S4Vectors::mcols(getVariantInfo(result))$n_nomiss[1], 100L)
+  expect_true(all(S4Vectors::mcols(getVariantInfo(result))$variance > 0))
 })
 
 test_that("load_LD_from_genotype falls back to computed AF without .afreq", {
@@ -1067,13 +1083,13 @@ test_that("load_LD_from_genotype falls back to computed AF without .afreq", {
   result <- suppressWarnings(
     pecotmr:::load_LD_from_genotype(vcf_path, geno_region_all)
   )
-  expect_true(is.matrix(result$LD_matrix))
-  expect_equal(nrow(result$LD_matrix), 349L)
-  expect_true(isSymmetric(result$LD_matrix))
+  expect_true(is.matrix(getCorrelation(result)))
+  expect_equal(nrow(getCorrelation(result)), 349L)
+  expect_true(isSymmetric(getCorrelation(result)))
   # Allele frequencies computed from genotypes
-  expect_true("allele_freq" %in% names(result$ref_panel))
-  expect_true(all(result$ref_panel$allele_freq > 0))
-  expect_true(all(result$ref_panel$allele_freq < 1))
+  expect_true("allele_freq" %in% names(S4Vectors::mcols(getVariantInfo(result))))
+  expect_true(all(S4Vectors::mcols(getVariantInfo(result))$allele_freq > 0))
+  expect_true(all(S4Vectors::mcols(getVariantInfo(result))$allele_freq < 1))
 })
 
 test_that("load_LD_from_genotype works with GDS files", {
@@ -1081,9 +1097,9 @@ test_that("load_LD_from_genotype works with GDS files", {
   skip_if_not_installed("gdsfmt")
   gds_path <- file.path(geno_test_data_dir, "test_variants.gds")
   result <- pecotmr:::load_LD_from_genotype(gds_path, geno_region_all)
-  expect_true(is.matrix(result$LD_matrix))
-  expect_equal(nrow(result$LD_matrix), 349L)
-  expect_true(isSymmetric(result$LD_matrix))
+  expect_true(is.matrix(getCorrelation(result)))
+  expect_equal(nrow(getCorrelation(result)), 349L)
+  expect_true(isSymmetric(getCorrelation(result)))
 })
 
 test_that("load_LD_from_genotype .afreq and computed AF are consistent", {
@@ -1095,7 +1111,7 @@ test_that("load_LD_from_genotype .afreq and computed AF are consistent", {
   res_afreq <- pecotmr:::load_LD_from_genotype(plink_prefix, geno_region_all)
   res_computed <- pecotmr:::load_LD_from_genotype(gds_path, geno_region_all)
   # Allele frequencies should be close (same data, different source)
-  expect_true(max(abs(res_afreq$ref_panel$allele_freq - res_computed$ref_panel$allele_freq)) < 0.01)
+  expect_true(max(abs(S4Vectors::mcols(getVariantInfo(res_afreq))$allele_freq - S4Vectors::mcols(getVariantInfo(res_computed))$allele_freq)) < 0.01)
 })
 
 # ===========================================================================
@@ -1110,9 +1126,9 @@ test_that("load_LD_matrix dispatches to PLINK2 genotype source", {
   cat(paste("21", "0", "0", "test_variants", sep = "\t"), "\n",
       file = meta_file, append = TRUE)
   result <- load_LD_matrix(meta_file, geno_region_all)
-  expect_true(is.matrix(result$LD_matrix))
-  expect_equal(nrow(result$LD_matrix), 349L)
-  expect_false(result$is_genotype)
+  expect_true(is.matrix(getCorrelation(result)))
+  expect_equal(nrow(getCorrelation(result)), 349L)
+  expect_false(hasGenotypes(result))
 })
 
 test_that("load_LD_matrix dispatches to VCF genotype source", {
@@ -1123,8 +1139,8 @@ test_that("load_LD_matrix dispatches to VCF genotype source", {
   cat(paste("21", "0", "0", "test_variants.vcf.gz", sep = "\t"), "\n",
       file = meta_file, append = TRUE)
   result <- suppressWarnings(load_LD_matrix(meta_file, geno_region_all))
-  expect_true(is.matrix(result$LD_matrix))
-  expect_equal(nrow(result$LD_matrix), 349L)
+  expect_true(is.matrix(getCorrelation(result)))
+  expect_equal(nrow(getCorrelation(result)), 349L)
 })
 
 test_that("load_LD_matrix dispatches to GDS genotype source", {
@@ -1136,8 +1152,8 @@ test_that("load_LD_matrix dispatches to GDS genotype source", {
   cat(paste("21", "0", "0", "test_variants.gds", sep = "\t"), "\n",
       file = meta_file, append = TRUE)
   result <- load_LD_matrix(meta_file, geno_region_all)
-  expect_true(is.matrix(result$LD_matrix))
-  expect_equal(nrow(result$LD_matrix), 349L)
+  expect_true(is.matrix(getCorrelation(result)))
+  expect_equal(nrow(getCorrelation(result)), 349L)
 })
 
 test_that("load_LD_matrix return_genotype='auto' returns X for genotype source", {
@@ -1148,9 +1164,10 @@ test_that("load_LD_matrix return_genotype='auto' returns X for genotype source",
   cat(paste("21", "0", "0", "test_variants", sep = "\t"), "\n",
       file = meta_file, append = TRUE)
   result <- load_LD_matrix(meta_file, geno_region_all, return_genotype = "auto")
-  expect_true(result$is_genotype)
-  expect_equal(nrow(result$LD_matrix), 100L)  # samples
-  expect_equal(ncol(result$LD_matrix), 349L)  # variants
+  expect_true(hasGenotypes(result))
+  X <- getGenotypes(result)
+  expect_equal(nrow(X), 100L)  # samples
+  expect_equal(ncol(X), 349L)  # variants
 })
 
 test_that("load_LD_matrix return_genotype=TRUE errors for precomputed", {
@@ -1198,17 +1215,17 @@ test_that("load_LD_matrix loads single precomputed block", {
             "LD_block_1.chr1_1000_1200.float16.txt.xz,LD_block_1.chr1_1000_1200.float16.bim",
             sep = "\t"), "\n", file = meta_file, append = TRUE)
   result <- load_LD_matrix(meta_file, "chr1:1000-1190")
-  expect_true(is.matrix(result$LD_matrix))
-  expect_equal(nrow(result$LD_matrix), 5L)
-  expect_true(isSymmetric(result$LD_matrix))
-  expect_equal(length(result$LD_variants), 5L)
-  expect_true(all(grepl("^chr1:", result$LD_variants)))
-  expect_false(result$is_genotype)
+  expect_true(is.matrix(getCorrelation(result)))
+  expect_equal(nrow(getCorrelation(result)), 5L)
+  expect_true(isSymmetric(getCorrelation(result)))
+  expect_equal(length(getVariantIds(result)), 5L)
+  expect_true(all(grepl("^chr1:", getVariantIds(result))))
+  expect_false(hasGenotypes(result))
   # block_metadata should have one block
-  expect_equal(nrow(result$block_metadata), 1L)
-  # ref_panel should have variant info
-  expect_true("chrom" %in% names(result$ref_panel))
-  expect_true("pos" %in% names(result$ref_panel))
+  expect_equal(nrow(getBlockMetadata(result)), 1L)
+  # ref_panel (now GRanges) should have variant info via mcols
+  ref_mcols <- S4Vectors::mcols(getVariantInfo(result))
+  expect_true("variant_id" %in% names(ref_mcols))
 })
 
 test_that("load_LD_matrix loads multiple precomputed blocks", {
@@ -1228,11 +1245,11 @@ test_that("load_LD_matrix loads multiple precomputed blocks", {
   )
   writeLines(lines, meta_file)
   result <- load_LD_matrix(meta_file, "chr1:1000-1500")
-  expect_true(is.matrix(result$LD_matrix))
+  expect_true(is.matrix(getCorrelation(result)))
   # Should span blocks 1-3: 5 + 5 + 5 = 15 unique variants (no overlap in variant IDs)
-  expect_true(nrow(result$LD_matrix) >= 10)
-  expect_true(isSymmetric(result$LD_matrix))
-  expect_true(nrow(result$block_metadata) >= 2)
+  expect_true(nrow(getCorrelation(result)) >= 10)
+  expect_true(isSymmetric(getCorrelation(result)))
+  expect_true(nrow(getBlockMetadata(result)) >= 2)
 })
 
 test_that("load_LD_matrix with n_sample for precomputed blocks with freq data", {
@@ -1246,10 +1263,11 @@ test_that("load_LD_matrix with n_sample for precomputed blocks with freq data", 
             "LD_block_1.chr1_1000_1200.float16.txt.xz,LD_block_1.chr1_1000_1200.float16.bim",
             sep = "\t"), "\n", file = meta_file, append = TRUE)
   result <- load_LD_matrix(meta_file, "chr1:1000-1190", n_sample = 500L)
-  # ref_panel should always have basic variant info
-  expect_true(all(c("chrom", "pos", "A2", "A1", "variant_id") %in% names(result$ref_panel)))
+  # ref_panel (GRanges) should always have basic variant info in mcols
+  ref_mcols <- S4Vectors::mcols(getVariantInfo(result))
+  expect_true(all(c("A2", "A1", "variant_id") %in% names(ref_mcols)))
   # 6-col bim lacks allele_freq so variance computation is skipped
-  expect_false("variance" %in% names(result$ref_panel))
+  expect_false("variance" %in% names(ref_mcols))
 })
 
 # ===========================================================================
@@ -1308,12 +1326,13 @@ test_that("load_LD_matrix propagates allele_freq/variance/n_nomiss from 9-col bi
             "LD_block_1.chr1_1000_1200.float16.txt.xz,LD_block_1.chr1_1000_1200.float16.9col.bim",
             sep = "\t"), "\n", file = meta_file, append = TRUE)
   result <- load_LD_matrix(meta_file, "chr1:1000-1190")
-  # ref_panel should carry the extra columns from the 9-col bim
-  expect_true("allele_freq" %in% names(result$ref_panel))
-  expect_true("variance" %in% names(result$ref_panel))
-  expect_true("n_nomiss" %in% names(result$ref_panel))
-  expect_equal(result$ref_panel$allele_freq, c(0.3, 0.4, 0.2, 0.5, 0.15))
-  expect_equal(result$ref_panel$n_nomiss, rep(500, 5))
+  # ref_panel (GRanges) should carry the extra columns from the 9-col bim
+  ref_mcols <- S4Vectors::mcols(getVariantInfo(result))
+  expect_true("allele_freq" %in% names(ref_mcols))
+  expect_true("variance" %in% names(ref_mcols))
+  expect_true("n_nomiss" %in% names(ref_mcols))
+  expect_equal(ref_mcols$allele_freq, c(0.3, 0.4, 0.2, 0.5, 0.15))
+  expect_equal(ref_mcols$n_nomiss, rep(500, 5))
 })
 
 # ===========================================================================

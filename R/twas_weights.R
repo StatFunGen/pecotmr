@@ -210,8 +210,6 @@
 #'     }
 #'   \item `time_elapsed`: The time taken to complete the cross-validation process.
 #' }
-#' @importFrom future plan multicore availableCores
-#' @importFrom furrr future_map furrr_options
 #' @importFrom purrr map
 #' @export
 twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_methods = NULL, max_num_variants = NULL, variants_to_keep = NULL, num_threads = 1, verbose = 1, ...) {
@@ -336,8 +334,11 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
     multivariate_weight_methods <- c("mrmash_weights", "mvsusie_weights")
 
     # Determine the number of cores to use
-    num_cores <- ifelse(num_threads == -1, availableCores(), num_threads)
-    num_cores <- min(num_cores, availableCores())
+    num_cores <- ifelse(num_threads == -1,
+      BiocParallel::bpworkers(BiocParallel::MulticoreParam()),
+      num_threads)
+    num_cores <- min(num_cores,
+      BiocParallel::bpworkers(BiocParallel::MulticoreParam()))
 
     cv_args <- list(...)
 
@@ -410,8 +411,10 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
     }
 
     if (num_cores >= 2) {
-      plan(multicore, workers = num_cores)
-      fold_results <- future_map(1:fold, compute_method_predictions, .options = furrr_options(seed = TRUE, globals = c("sample_partition", "weight_methods", "args", "cv_args")))
+      bp_param <- BiocParallel::MulticoreParam(workers = num_cores,
+                                                RNGseed = 1L)
+      fold_results <- BiocParallel::bplapply(1:fold,
+        compute_method_predictions, BPPARAM = bp_param)
     } else {
       fold_results <- map(1:fold, compute_method_predictions)
     }
@@ -501,8 +504,6 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
 #' @return A list where each element is named after a method and contains the weight matrix produced by that method.
 #'
 #' @export
-#' @importFrom future plan multicore availableCores
-#' @importFrom furrr future_map furrr_options
 #' @importFrom purrr map exec
 #' @importFrom rlang !!!
 #' @importFrom tictoc tic toc
@@ -525,8 +526,11 @@ twas_weights <- function(X, Y, weight_methods, num_threads = 1,
   }
 
   # Determine number of cores to use
-  num_cores <- ifelse(num_threads == -1, availableCores(), num_threads)
-  num_cores <- min(num_cores, availableCores())
+  num_cores <- ifelse(num_threads == -1,
+    BiocParallel::bpworkers(BiocParallel::MulticoreParam()),
+    num_threads)
+  num_cores <- min(num_cores,
+    BiocParallel::bpworkers(BiocParallel::MulticoreParam()))
 
   valid_columns <- .nonzero_var_columns(X)
   X_filtered <- as.matrix(X[, valid_columns, drop = FALSE])
@@ -589,9 +593,10 @@ twas_weights <- function(X, Y, weight_methods, num_threads = 1,
   }
 
   if (num_cores >= 2) {
-    # Set up parallel backend to use multiple cores
-    plan(multicore, workers = num_cores)
-    weights_list <- names(weight_methods) %>% future_map(compute_method_weights, weight_methods, .options = furrr_options(seed = TRUE))
+    bp_param <- BiocParallel::MulticoreParam(workers = num_cores,
+                                              RNGseed = 1L)
+    weights_list <- BiocParallel::bplapply(names(weight_methods),
+      compute_method_weights, weight_methods, BPPARAM = bp_param)
   } else {
     weights_list <- names(weight_methods) %>% map(compute_method_weights, weight_methods)
   }
@@ -605,6 +610,19 @@ twas_weights <- function(X, Y, weight_methods, num_threads = 1,
       return(x)
     })
   }
+  # Wrap in TWASWeights S4 object
+  variant_ids <- if (!is.null(colnames(X))) colnames(X) else paste0("variant_", seq_len(ncol(X)))
+  fits_list <- lapply(weights_list, function(w) attr(w, "fit"))
+  has_any_fit <- any(!sapply(fits_list, is.null))
+
+  twas_result <- TWASWeights(
+    weights = weights_list,
+    variant_ids = variant_ids,
+    fits = if (has_any_fit) fits_list else NULL,
+    cv_performance = NULL
+  )
+  # Attach the S4 object alongside the legacy list for backwards compatibility
+  attr(weights_list, "twas_weights_s4") <- twas_result
   return(weights_list)
 }
 

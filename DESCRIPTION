@@ -14,18 +14,19 @@ Authors@R: c(person("Gao Wang",role = c("cre","aut"),
                   person("StatFunGen Lab", role = "ctb"))
 License: MIT + file LICENSE
 Imports:
+    BiocParallel,
     GenomicRanges,
     IRanges,
+    Matrix,
     MungeSumstats,
     Rsamtools,
     S4Vectors,
+    SummarizedExperiment,
     coloc,
-    doFuture,
     dplyr,
-    furrr,
-    future,
     magrittr,
     matrixStats,
+    methods,
     purrr,
     quadprog,
     readr,
@@ -40,11 +41,13 @@ Imports:
 Suggests:
     aSPU,
     BGLR,
+    Biostrings,
     bigsnpr,
     bigstatsr,
     coda,
     colocboost,
     GBJ,
+    igraph,
     L0Learn,
     Rfast,
     RcppDPR,
@@ -60,15 +63,18 @@ Suggests:
     ncvreg,
     nnls,
     pgenlibr,
+    plinkQC,
     poolr,
     qgg,
     qvalue,
     rmarkdown,
+    rtracklayer,
     gdsfmt,
     SNPRelate,
     snpStats,
     testthat,
-    VariantAnnotation
+    VariantAnnotation,
+    xgboost
 Remotes:
     stephenslab/fsusieR,
     stephenslab/mvsusieR,
@@ -80,3 +86,48 @@ NeedsCompilation: yes
 VignetteBuilder: knitr
 Config/roxygen2/version: 8.0.0
 RoxygenNote: 7.3.3
+Collate:
+    'AllClasses.R'
+    'AllGenerics.R'
+    'LD.R'
+    'allele_qc.R'
+    'colocboost_pipeline.R'
+    'compute_qtl_enrichment.R'
+    'cpp11.R'
+    'ctwas_wrapper.R'
+    'AllMethods.R'
+    'dentist_qc.R'
+    'encoloc.R'
+    'example_data.R'
+    'file_utils.R'
+    'fsusie_wrapper.R'
+    'h2_annotations.R'
+    'h2_estimate_wrappers.R'
+    'h2_genotype_io.R'
+    'h2_gldsc.R'
+    'h2_hdl.R'
+    'h2_lder.R'
+    'h2_sumstats.R'
+    'h2_utils.R'
+    'ld_loader.R'
+    'mash_wrapper.R'
+    'misc.R'
+    'mr.R'
+    'mrmash_wrapper.R'
+    'multitrait_data.R'
+    'multivariate_pipeline.R'
+    'otters.R'
+    'pval_combine.R'
+    'raiss.R'
+    'regularized_regression.R'
+    'relatedness_qc.R'
+    'slalom.R'
+    'sldsc_wrapper.R'
+    'sumstats_qc.R'
+    'susie_wrapper.R'
+    'twas.R'
+    'twas_weights.R'
+    'univariate_pipeline.R'
+    'univariate_rss_diagnostics.R'
+    'variant_id.R'
+    'vcf_writer.R'
