@@ -66,14 +66,14 @@ This function applies the specified quality control method to the
   processed summary statistics via \code{\link{ld_mismatch_qc}}, then subsets
   the summary statistics and LD matrix to keep only non-outlier variants.
 
-As an additional workflow for ColocBoost/RSS pipelines, callers may supply
-\code{rss_input} or combined-QC controls. That path first runs
-\code{rss_basic_qc()}, optional PIP screening, optional LD-mismatch QC through
-this same function, and optional RAISS imputation. The combined path normalizes
-one or many RSS records to the same loop internally; only true single-record
-input is unwrapped on return.
-\code{qc_method = NULL} and \code{"none"} mean basic-only summary-stat
-preprocessing without SLALOM/DENTIST outlier QC.
+  As an additional workflow for ColocBoost/RSS pipelines, callers may supply
+  \code{rss_input} or combined-QC controls. That path first runs
+  \code{rss_basic_qc()}, optional PIP screening, optional LD-mismatch QC
+  through this same function, and optional RAISS imputation. The combined
+  path normalizes one or many RSS records to the same loop internally; only
+  true single-record input is unwrapped on return.
+  \code{qc_method = NULL} and \code{"none"} mean basic-only summary-stat
+  preprocessing without SLALOM/DENTIST outlier QC.
 
   When the combined path receives genotype-backed reference data
   (\code{X_ref}), basic harmonization avoids constructing an LD matrix. PIP
