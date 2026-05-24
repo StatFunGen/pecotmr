@@ -10,7 +10,8 @@ twas_weights(
   weight_methods,
   num_threads = 1,
   fitted_models = NULL,
-  retain_fits = FALSE
+  retain_fits = FALSE,
+  verbose = 1
 )
 }
 \arguments{
@@ -30,6 +31,10 @@ If set to 2 or more, parallel processing is enabled with that many threads.}
 
 \item{retain_fits}{If TRUE, retain fitted model objects as attributes on
 returned weight matrices when supported by the weight method.}
+
+\item{verbose}{Integer controlling verbosity level: 0 = suppress all messages,
+1 = suppress external package messages (default),
+2 = show all messages including those from external packages.}
 }
 \value{
 A list where each element is named after a method and contains the weight matrix produced by that method.

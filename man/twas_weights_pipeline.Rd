@@ -19,7 +19,8 @@ twas_weights_pipeline(
   ensemble_r2_threshold = 0.01,
   ensemble_solver = "quadprog",
   ensemble_alpha = 1,
-  estimate_pi = TRUE
+  estimate_pi = TRUE,
+  verbose = 1
 )
 }
 \arguments{
@@ -62,6 +63,10 @@ for ensemble learning. One of \code{"quadprog"}, \code{"nnls"},
 
 \item{estimate_pi}{If TRUE, estimate spike-and-slab sparsity from mr.ash
 before running Bayesian alphabet methods that need inclusion probabilities.}
+
+\item{verbose}{Integer controlling verbosity level: 0 = suppress all messages,
+1 = show pecotmr messages but suppress external package messages (default),
+2 = show all messages including those from external packages.}
 }
 \value{
 A list containing results from the TWAS pipeline, including TWAS weights, predictions, and optionally cross-validation results.

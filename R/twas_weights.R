@@ -1,3 +1,16 @@
+# Evaluate an expression while suppressing external package output.
+# Catches both message() output (susieR, qgg) and Rprintf/cat stdout (mr.ash.alpha).
+# @param expr An expression to evaluate.
+# @return The result of evaluating expr.
+# @noRd
+.quiet_eval <- function(expr) {
+  invisible(capture.output(
+    result <- suppressMessages(expr),
+    type = "output"
+  ))
+  result
+}
+
 # Map short method names and presets to weight_methods lists.
 # @param methods A character vector of short method names, or a preset string
 #   ("default" or "fast_default").
@@ -180,6 +193,9 @@
 #'        If set to -1, the function uses all available cores.
 #'        If set to 0 or 1, no parallel processing is performed.
 #'        If set to 2 or more, parallel processing is enabled with that many threads.
+#' @param verbose Integer controlling verbosity level: 0 = suppress all messages,
+#'   1 = suppress external package messages (default),
+#'   2 = show all messages including those from external packages.
 #' @return A list with the following components:
 #' \itemize{
 #'   \item `sample_partition`: A dataframe showing the sample partitioning used in the cross-validation.
@@ -198,7 +214,7 @@
 #' @importFrom furrr future_map furrr_options
 #' @importFrom purrr map
 #' @export
-twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_methods = NULL, max_num_variants = NULL, variants_to_keep = NULL, num_threads = 1, ...) {
+twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_methods = NULL, max_num_variants = NULL, variants_to_keep = NULL, num_threads = 1, verbose = 1, ...) {
   split_data <- function(X, Y, sample_partition, fold) {
     test_ids <- sample_partition[which(sample_partition$Fold == fold), "Sample"]
     Xtrain <- X[!(rownames(X) %in% test_ids), , drop = FALSE]
@@ -222,7 +238,7 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
 
   if (is.vector(Y)) {
     Y <- matrix(Y, ncol = 1)
-    message(paste("Y converted to matrix of", nrow(Y), "rows and", ncol(Y), "columns."))
+    if (verbose >= 1) message(paste("Y converted to matrix of", nrow(Y), "rows and", ncol(Y), "columns."))
   }
 
   if (nrow(X) != nrow(Y)) {
@@ -259,7 +275,7 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
   }
 
   if (!exists(".Random.seed")) {
-    message("! No seed has been set. Please set seed for reproducable result. ")
+    if (verbose >= 1) message("! No seed has been set. Please set seed for reproducable result. ")
   }
 
   # Select variants if necessary
@@ -270,17 +286,17 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
       if (length(variants_to_keep) < max_num_variants) {
         additional_columns <- sample(remaining_columns, max_num_variants - length(variants_to_keep), replace = FALSE)
         selected_columns <- union(variants_to_keep, additional_columns)
-        message(sprintf(
+        if (verbose >= 1) message(sprintf(
           "Including %d specified variants and randomly selecting %d additional variants, for a total of %d variants out of %d for cross-validation purpose.",
           length(variants_to_keep), length(additional_columns), length(selected_columns), ncol(X)
         ))
       } else {
         selected_columns <- sample(variants_to_keep, max_num_variants, replace = FALSE)
-        message(paste("Randomly selecting", length(selected_columns), "out of", length(variants_to_keep), "input variants for cross validation purpose."))
+        if (verbose >= 1) message(paste("Randomly selecting", length(selected_columns), "out of", length(variants_to_keep), "input variants for cross validation purpose."))
       }
     } else {
       selected_columns <- sort(sample(ncol(X), max_num_variants, replace = FALSE))
-      message(paste("Randomly selecting", length(selected_columns), "out of", ncol(X), "variants for cross validation purpose."))
+      if (verbose >= 1) message(paste("Randomly selecting", length(selected_columns), "out of", ncol(X), "variants for cross validation purpose."))
     }
     X <- X[, selected_columns, drop = FALSE]
   }
@@ -289,7 +305,7 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
   if (!is.null(fold)) {
     if (!is.null(sample_partitions)) {
       if (fold != length(unique(sample_partitions$Fold))) {
-        message(paste0(
+        if (verbose >= 1) message(paste0(
           "fold number provided does not match with sample partition, performing ", length(unique(sample_partitions$Fold)),
           " fold cross validation based on provided sample partition. "
         ))
@@ -327,6 +343,10 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
 
     # Perform CV with parallel processing
     compute_method_predictions <- function(j) {
+      if (verbose >= 1) {
+        message(sprintf("  CV fold %d/%d ...", j, fold))
+        tic()
+      }
       dat_split <- split_data(X, Y, sample_partition = sample_partition, fold = j)
       X_train <- dat_split$Xtrain
       Y_train <- dat_split$Ytrain
@@ -341,7 +361,7 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
       # X_test <- X_test[, valid_columns, drop=FALSE]
       fold_weight_methods <- .prepare_susie_weight_methods(X_train, Y_train, weight_methods)
 
-      setNames(lapply(names(fold_weight_methods), function(method) {
+      fold_preds <- setNames(lapply(names(fold_weight_methods), function(method) {
         args <- fold_weight_methods[[method]]
 
         if (method %in% multivariate_weight_methods) {
@@ -354,7 +374,11 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
               args$prior_variance <- cv_args$reweighted_mixture_prior_cv[[j]]
             }
           }
-          weights_matrix <- do.call(method, c(list(X = X_train, Y = Y_train), args))
+          weights_matrix <- if (verbose < 2) {
+            .quiet_eval(do.call(method, c(list(X = X_train, Y = Y_train), args)))
+          } else {
+            do.call(method, c(list(X = X_train, Y = Y_train), args))
+          }
           rownames(weights_matrix) <- colnames(X_train)
           full_weights_matrix <- .embed_weights(weights_matrix[valid_columns, , drop = FALSE], valid_columns, ncol(X), ncol(Y), colnames(X), colnames(Y))
           Y_pred <- X_test %*% full_weights_matrix
@@ -362,7 +386,11 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
           return(Y_pred)
         } else {
           Y_pred <- sapply(1:ncol(Y_train), function(k) {
-            weights <- do.call(method, c(list(X = X_train, y = Y_train[, k]), args))
+            weights <- if (verbose < 2) {
+              .quiet_eval(do.call(method, c(list(X = X_train, y = Y_train[, k]), args)))
+            } else {
+              do.call(method, c(list(X = X_train, y = Y_train[, k]), args))
+            }
             full_weights <- rep(0, ncol(X))
             names(full_weights) <- colnames(X)
             full_weights[valid_columns] <- weights
@@ -374,6 +402,11 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
           return(Y_pred)
         }
       }), names(fold_weight_methods))
+      if (verbose >= 1) {
+        elapsed <- toc(quiet = TRUE)
+        message(sprintf("  CV fold %d/%d done in %.1fs", j, fold, elapsed$toc - elapsed$tic))
+      }
+      fold_preds
     }
 
     if (num_cores >= 2) {
@@ -433,7 +466,7 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
           metrics_table[[m]][r, "MAE"] <- mean(abs(residuals))
         } else {
           metrics_table[[m]][r, ] <- NA
-          message(paste0(
+          if (verbose >= 1) message(paste0(
             "Predicted values for condition ", r, " using ", m,
             " have zero variance. Filling performance metric with NAs"
           ))
@@ -462,6 +495,9 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
 #' @param fitted_models Optional named list of fitted SuSiE-family models.
 #' @param retain_fits If TRUE, retain fitted model objects as attributes on
 #'   returned weight matrices when supported by the weight method.
+#' @param verbose Integer controlling verbosity level: 0 = suppress all messages,
+#'   1 = suppress external package messages (default),
+#'   2 = show all messages including those from external packages.
 #' @return A list where each element is named after a method and contains the weight matrix produced by that method.
 #'
 #' @export
@@ -469,8 +505,9 @@ twas_weights_cv <- function(X, Y, fold = NULL, sample_partitions = NULL, weight_
 #' @importFrom furrr future_map furrr_options
 #' @importFrom purrr map exec
 #' @importFrom rlang !!!
+#' @importFrom tictoc tic toc
 twas_weights <- function(X, Y, weight_methods, num_threads = 1,
-                         fitted_models = NULL, retain_fits = FALSE) {
+                         fitted_models = NULL, retain_fits = FALSE, verbose = 1) {
   if (!is.matrix(X) || (!is.matrix(Y) && !is.vector(Y))) {
     stop("X must be a matrix and Y must be a matrix or a vector.")
   }
@@ -498,6 +535,12 @@ twas_weights <- function(X, Y, weight_methods, num_threads = 1,
   )
 
   compute_method_weights <- function(method_name, weight_methods) {
+    short_name <- sub("_weights$", "", method_name)
+    if (verbose >= 1) {
+      message(sprintf("  Fitting %s ...", short_name))
+      tic()
+    }
+
     # Hardcoded vector of multivariate methods
     multivariate_weight_methods <- c("mrmash_weights", "mvsusie_weights")
     args <- weight_methods[[method_name]]
@@ -510,7 +553,11 @@ twas_weights <- function(X, Y, weight_methods, num_threads = 1,
     method_fit <- NULL
     if (method_name %in% multivariate_weight_methods) {
       # Apply multivariate method
-      weights_matrix <- do.call(method_name, c(list(X = X_filtered, Y = Y), args))
+      weights_matrix <- if (verbose < 2) {
+        .quiet_eval(do.call(method_name, c(list(X = X_filtered, Y = Y), args)))
+      } else {
+        do.call(method_name, c(list(X = X_filtered, Y = Y), args))
+      }
       if (retain_fits) method_fit <- attr(weights_matrix, "fit")
       if (nrow(weights_matrix) != length(valid_columns)) weights_matrix <- weights_matrix[names(valid_columns), , drop = FALSE]
     } else {
@@ -519,7 +566,11 @@ twas_weights <- function(X, Y, weight_methods, num_threads = 1,
       weights_matrix <- matrix(0, nrow = ncol(X_filtered), ncol = ncol(Y))
 
       for (k in 1:ncol(Y)) {
-        weights_vector <- do.call(method_name, c(list(X = X_filtered, y = Y[, k]), args))
+        weights_vector <- if (verbose < 2) {
+          .quiet_eval(do.call(method_name, c(list(X = X_filtered, y = Y[, k]), args)))
+        } else {
+          do.call(method_name, c(list(X = X_filtered, y = Y[, k]), args))
+        }
         if (retain_fits && is.null(method_fit)) {
           method_fit <- attr(weights_vector, "fit")
         }
@@ -530,6 +581,10 @@ twas_weights <- function(X, Y, weight_methods, num_threads = 1,
 
     result <- .embed_weights(weights_matrix, valid_columns, ncol(X), ncol(Y), colnames(X), colnames(Y))
     if (!is.null(method_fit)) attr(result, "fit") <- method_fit
+    if (verbose >= 1) {
+      elapsed <- toc(quiet = TRUE)
+      message(sprintf("  Fitting %s done in %.1fs", short_name, elapsed$toc - elapsed$tic))
+    }
     return(result)
   }
 
@@ -646,6 +701,9 @@ estimate_sparsity <- function(weight_results) {
 #'   \code{ensemble_solver = "glmnet"}. Defaults to 1 (lasso).
 #' @param estimate_pi If TRUE, estimate spike-and-slab sparsity from mr.ash
 #'   before running Bayesian alphabet methods that need inclusion probabilities.
+#' @param verbose Integer controlling verbosity level: 0 = suppress all messages,
+#'   1 = show pecotmr messages but suppress external package messages (default),
+#'   2 = show all messages including those from external packages.
 #'
 #' @return A list containing results from the TWAS pipeline, including TWAS weights, predictions, and optionally cross-validation results.
 #' @export
@@ -667,7 +725,8 @@ twas_weights_pipeline <- function(X,
                                   ensemble_r2_threshold = 0.01,
                                   ensemble_solver = "quadprog",
                                   ensemble_alpha = 1,
-                                  estimate_pi = TRUE) {
+                                  estimate_pi = TRUE,
+                                  verbose = 1) {
   if (is.character(weight_methods)) {
     weight_methods <- .twas_method_lookup(weight_methods)
   }
@@ -676,7 +735,10 @@ twas_weights_pipeline <- function(X,
 
   res <- list()
   st <- proc.time()
-  message("Performing TWAS weights computation for univariate analysis methods ...")
+  if (verbose >= 1) {
+    message("Performing TWAS weights computation for univariate analysis methods ...")
+    tic()
+  }
 
   if (!is.null(fitted_models[["susie"]]) && !is.null(weight_methods$susie_weights)) {
     res$susie_weights_intermediate <- .susie_weight_intermediate(fitted_models[["susie"]], X)
@@ -693,11 +755,11 @@ twas_weights_pipeline <- function(X,
     # Run mr.ash first to estimate sparsity
     mrash_methods <- list(mrash_weights = weight_methods[["mrash_weights"]] %||% list())
 
-    message("  Estimating sparsity from mr.ash ...")
-    mrash_weights <- twas_weights(X, y, weight_methods = mrash_methods, retain_fits = TRUE)
+    if (verbose >= 1) message("  Estimating sparsity from mr.ash ...")
+    mrash_weights <- twas_weights(X, y, weight_methods = mrash_methods, retain_fits = TRUE, verbose = verbose)
 
     empirical_pi <- estimate_sparsity(mrash_weights)
-    message(sprintf("  Empirical sparsity estimate: %.4f", empirical_pi))
+    if (verbose >= 1) message(sprintf("  Empirical sparsity estimate: %.4f", empirical_pi))
     res$empirical_pi <- empirical_pi
 
     # Inject into spike-and-slab methods that need it
@@ -713,7 +775,8 @@ twas_weights_pipeline <- function(X,
         X,
         y,
         weight_methods = remaining_methods,
-        fitted_models = fitted_models
+        fitted_models = fitted_models,
+        verbose = verbose
       )
       res$twas_weights <- c(mrash_weights, remaining_weights)
     } else {
@@ -730,8 +793,13 @@ twas_weights_pipeline <- function(X,
       X,
       y,
       weight_methods = weight_methods,
-      fitted_models = fitted_models
+      fitted_models = fitted_models,
+      verbose = verbose
     )
+  }
+  if (verbose >= 1) {
+    elapsed <- toc(quiet = TRUE)
+    message(sprintf("TWAS weights fitting done in %.1fs", elapsed$toc - elapsed$tic))
   }
   res$twas_weights <- lapply(res$twas_weights, function(w) {
     attr(w, "fit") <- NULL
@@ -769,7 +837,10 @@ twas_weights_pipeline <- function(X,
       variants_for_cv <- sample(colnames(X), max_cv_variants, replace = FALSE)
     }
 
-    message("Performing cross-validation to assess TWAS weights ...")
+    if (verbose >= 1) {
+      message("Performing cross-validation to assess TWAS weights ...")
+      tic()
+    }
     res$twas_cv_result <- twas_weights_cv(
       X,
       y,
@@ -778,12 +849,17 @@ twas_weights_pipeline <- function(X,
       weight_methods = cv_weight_methods,
       max_num_variants = max_cv_variants,
       num_threads = cv_threads,
+      verbose = verbose,
       variants_to_keep = if (length(variants_for_cv) > 0) variants_for_cv else NULL
     )
+    if (verbose >= 1) {
+      elapsed <- toc(quiet = TRUE)
+      message(sprintf("Cross-validation done in %.1fs", elapsed$toc - elapsed$tic))
+    }
 
     # Ensemble learning: learn optimal method combination via stacked regression
     if (isTRUE(ensemble) && length(cv_weight_methods) <= 1) {
-      message("Ensemble model skipped: only ", length(cv_weight_methods),
+      if (verbose >= 1) message("Ensemble model skipped: only ", length(cv_weight_methods),
               " weight method provided (need >= 2 for ensemble learning).")
     }
     if (isTRUE(ensemble) && length(cv_weight_methods) > 1) {
@@ -817,7 +893,7 @@ twas_weights_pipeline <- function(X,
             paste0(" Use the surviving method's weights directly: ",
                    names(method_rsq)[passing], ".")
           } else ""
-          message("Ensemble TWAS skipped: ", n_passing, " of ", length(method_rsq),
+          if (verbose >= 1) message("Ensemble TWAS skipped: ", n_passing, " of ", length(method_rsq),
                   " methods passed the R-squared cutoff of ", ensemble_r2_threshold,
                   " (need >= 2).", surviving, "\n",
                   "Method R-squared values:\n",
@@ -834,9 +910,12 @@ twas_weights_pipeline <- function(X,
           # Subset twas_weights to passing methods
           filtered_weights <- res$twas_weights[passing_weight_names]
 
-          message("Computing ensemble TWAS weights via stacked regression ",
-                  "using ", n_passing, " methods: ",
-                  paste(passing_base, collapse = ", "), " ...")
+          if (verbose >= 1) {
+            message("Computing ensemble TWAS weights via stacked regression ",
+                    "using ", n_passing, " methods: ",
+                    paste(passing_base, collapse = ", "), " ...")
+            tic()
+          }
           ens_result <- ensemble_weights(
             cv_results = filtered_cv,
             Y = y,
@@ -844,6 +923,10 @@ twas_weights_pipeline <- function(X,
             solver = ensemble_solver,
             alpha = ensemble_alpha
           )
+          if (verbose >= 1) {
+            elapsed <- toc(quiet = TRUE)
+            message(sprintf("Ensemble learning done in %.1fs", elapsed$toc - elapsed$tic))
+          }
 
           # Add ensemble weights alongside individual method weights
           if (!is.null(ens_result$ensemble_twas_weights)) {
@@ -883,7 +966,9 @@ twas_weights_pipeline <- function(X,
 #' @param mrmash_max_iter The maximum number of iterations for mr.mash. Defaults to 5000.
 #' @param max_cv_variants The maximum number of variants to be included in cross-validation. Defaults to -1 which means no limit.
 #' @param cv_threads The number of threads to use for parallel computation in cross-validation. Defaults to 1.
-#' @param verbose If TRUE, provides more detailed output during execution. Defaults to FALSE.
+#' @param verbose Integer controlling verbosity level: 0 = suppress all messages,
+#'   1 = show pecotmr messages but suppress external package messages (default),
+#'   2 = show all messages including those from external packages.
 #'
 #' @return A list containing results from the TWAS pipeline, including TWAS weights, predictions, and optionally cross-validation results.
 #' @export
@@ -905,7 +990,7 @@ twas_multivariate_weights_pipeline <- function(
     mrmash_max_iter = 5000,
     max_cv_variants = -1,
     cv_threads = 1,
-    verbose = FALSE) {
+    verbose = 1) {
   copy_twas_results <- function(context_names, variant_names, twas_weight, twas_predictions) {
     setNames(lapply(context_names, function(ctx) {
       if (ctx %in% colnames(twas_weight[[1]])) {
@@ -952,9 +1037,16 @@ twas_multivariate_weights_pipeline <- function(
     )
   )
   st <- proc.time()
-  message("Extracting TWAS weights for multivariate analysis methods ...")
+  if (verbose >= 1) {
+    message("Extracting TWAS weights for multivariate analysis methods ...")
+    tic()
+  }
   # get TWAS weights
-  twas_weights_res <- twas_weights(X = X, Y = Y, weight_methods = weight_methods)
+  twas_weights_res <- twas_weights(X = X, Y = Y, weight_methods = weight_methods, verbose = verbose)
+  if (verbose >= 1) {
+    elapsed <- toc(quiet = TRUE)
+    message(sprintf("Multivariate TWAS weights fitting done in %.1fs", elapsed$toc - elapsed$tic))
+  }
   # get TWAS predictions for possible next steps such as computing correlations between predicted expression values
   twas_predictions <- twas_predict(X, twas_weights_res)
 
@@ -965,12 +1057,13 @@ twas_multivariate_weights_pipeline <- function(
   if (cv_folds > 1) {
     if (is.null(L)) L <- length(mnm_fit$mvsusie_fitted$V)
     if (!is.null(L_greedy)) L_greedy <- min(L_greedy, L)
+    sub_verbose <- verbose >= 2
     weight_methods <- list(
       mrmash_weights = list(
         data_driven_prior_matrices = data_driven_prior_matrices,
         canonical_prior_matrices = canonical_prior_matrices,
         max_iter = mrmash_max_iter,
-        verbose = verbose
+        verbose = sub_verbose
       ),
       mvsusie_weights = list(
         prior_variance = mnm_fit$reweighted_mixture_prior,
@@ -978,7 +1071,7 @@ twas_multivariate_weights_pipeline <- function(
         L = L,
         L_greedy = L_greedy,
         max_iter = mvsusie_max_iter,
-        verbose = verbose
+        verbose = sub_verbose
       )
     )
 
@@ -989,17 +1082,25 @@ twas_multivariate_weights_pipeline <- function(
     if (ncol(X) > max_cv_variants) {
       variants_for_cv <- sample(colnames(X), max_cv_variants, replace = FALSE)
     }
-    message("Performing cross-validation to assess TWAS weights ...")
+    if (verbose >= 1) {
+      message("Performing cross-validation to assess TWAS weights ...")
+      tic()
+    }
     twas_cv_result <- twas_weights_cv(
       X = X, Y = Y, fold = cv_folds,
       weight_methods = weight_methods,
       sample_partitions = sample_partition,
       num_threads = cv_threads,
       max_num_variants = max_cv_variants,
+      verbose = verbose,
       variants_to_keep = if (length(variants_for_cv) > 0) variants_for_cv else NULL,
       data_driven_prior_matrices_cv = data_driven_prior_matrices_cv,
       reweighted_mixture_prior_cv = mnm_fit$reweighted_mixture_prior_cv
     )
+    if (verbose >= 1) {
+      elapsed <- toc(quiet = TRUE)
+      message(sprintf("Cross-validation done in %.1fs", elapsed$toc - elapsed$tic))
+    }
     res <- copy_twas_cv_results(res, twas_cv_result)
   }
   total_time_elapsed <- proc.time() - st

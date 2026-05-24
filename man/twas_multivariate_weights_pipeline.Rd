@@ -19,7 +19,7 @@ twas_multivariate_weights_pipeline(
   mrmash_max_iter = 5000,
   max_cv_variants = -1,
   cv_threads = 1,
-  verbose = FALSE
+  verbose = 1
 )
 }
 \arguments{
@@ -52,7 +52,9 @@ components in the fitted mvSuSiE object is used.}
 
 \item{cv_threads}{The number of threads to use for parallel computation in cross-validation. Defaults to 1.}
 
-\item{verbose}{If TRUE, provides more detailed output during execution. Defaults to FALSE.}
+\item{verbose}{Integer controlling verbosity level: 0 = suppress all messages,
+1 = show pecotmr messages but suppress external package messages (default),
+2 = show all messages including those from external packages.}
 }
 \value{
 A list containing results from the TWAS pipeline, including TWAS weights, predictions, and optionally cross-validation results.
