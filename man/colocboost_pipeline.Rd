@@ -34,18 +34,26 @@ colocboost_pipeline(
 
 \item{pip_cutoff_to_skip_sumstat}{A vector of cutoff values for skipping analysis based on PIP values for each sumstat Default is 0.}
 
-\item{qc_method}{Quality control method to use. Options are "none", "rss_qc", "slalom", or "dentist". \code{NULL} and \code{"rss_qc"} are treated as \code{"none"} for basic-only summary-stat preprocessing.}
+\item{qc_method}{Quality control method to use. Options are "none",
+"rss_qc", "slalom", or "dentist". \code{NULL} and \code{"rss_qc"}
+are treated as \code{"none"} for basic-only summary-stat preprocessing.}
 
 \item{impute}{Logical; if TRUE, performs imputation for outliers identified in the analysis (default: TRUE).}
 
 \item{impute_opts}{A list of imputation options including rcond, R2_threshold, and minimum_ld (default: list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5)).}
-
-\item{...}{Additional arguments passed to the ColocBoost analysis calls.}
 }
 \value{
-A list containing \code{xqtl_coloc}, \code{joint_gwas}, \code{separate_gwas},
-and \code{computing_time}. Analyses that are not requested or cannot be run
-return \code{NULL} in their corresponding result slot.
+A list containing the individual_data and sumstat_data after QC:
+individual_data contains the following components if exist
+\itemize{
+  \item Y: A list of residualized phenotype values for all tasks.
+  \item X: A list of residualized genotype matrices all tasks.
+}
+sumstat_data contains the following components if exist
+\itemize{
+  \item sumstats: A list of summary statistics f or the matched LD_info, each sublist contains sumstats, n, var_y from \code{load_rss_data}.
+  \item LD_info: A list of LD information, each sublist contains LD_variants, LD_matrix, ref_panel  \code{load_LD_matrix}.
+}
 }
 \description{
 This function performs protocol-level multi-trait colocalization using

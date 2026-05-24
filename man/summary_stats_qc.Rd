@@ -40,21 +40,21 @@ combined RSS/ColocBoost QC workflow. A single RSS record is detected by
 structure, not by the name \code{sumstats}, so a multi-study list may safely
 include a study named \code{"sumstats"}.}
 
-\item{keep_indel, skip_region, pip_cutoff_to_skip, qc_method, impute, impute_opts, study, var_y, return_on_skip, R_finite, R_mismatch}{Additional controls for the combined RSS/ColocBoost QC workflow.
-They are ignored by the historical LD-mismatch-only call unless
-\code{rss_input} or combined-QC options are supplied.}
+\item{keep_indel, skip_region, pip_cutoff_to_skip, qc_method, impute, impute_opts, study, var_y, return_on_skip, R_finite, R_mismatch}{Additional controls for the combined RSS/ColocBoost QC workflow. They are
+ignored by the historical LD-mismatch-only call unless \code{rss_input} or
+combined-QC options are supplied.}
 }
 \value{
-A list containing the quality-controlled summary statistics and updated LD
-matrix for the historical call:
-\itemize{
-  \item sumstats: The quality-controlled summary statistics data frame.
-  \item LD_mat: The updated LD matrix after quality control.
-  \item outlier_number: The number of outlier variants removed.
-}
-When \code{rss_input} or combined-QC controls are supplied, returns a cleaned
-RSS/LD record for one RSS record, or a named list of records for a list of RSS
-records.
+A list containing the quality-controlled summary statistics and
+  updated LD matrix for the historical call:
+  \itemize{
+    \item sumstats: The quality-controlled summary statistics data frame.
+    \item LD_mat: The updated LD matrix after quality control.
+    \item outlier_number: The number of outlier variants removed.
+  }
+  When \code{rss_input} or combined-QC controls are supplied, returns a
+  cleaned RSS/LD record for one RSS record, or a named list of records for a
+  list of RSS records.
 }
 \description{
 This function performs quality control on the processed summary statistics
@@ -62,29 +62,29 @@ using the specified method. It wraps \code{\link{ld_mismatch_qc}} and handles
 subsetting of the summary statistics and LD matrix.
 }
 \details{
-This function applies the specified quality control method to the processed
-summary statistics via \code{\link{ld_mismatch_qc}}, then subsets the summary
-statistics and LD matrix to keep only non-outlier variants.
+This function applies the specified quality control method to the
+  processed summary statistics via \code{\link{ld_mismatch_qc}}, then subsets
+  the summary statistics and LD matrix to keep only non-outlier variants.
 
-As an additional workflow for ColocBoost/RSS pipelines, callers may supply
-\code{rss_input} or combined-QC controls. That path first runs
-\code{rss_basic_qc()}, optional PIP screening, optional LD-mismatch QC through
-this same function, and optional RAISS imputation. The combined path normalizes
-one or many RSS records to the same loop internally; only true single-record
-input is unwrapped on return.
-\code{qc_method = NULL}, \code{"none"}, and \code{"rss_qc"} all mean
-basic-only summary-stat preprocessing without SLALOM/DENTIST outlier QC.
+  As an additional workflow for ColocBoost/RSS pipelines, callers may supply
+  \code{rss_input} or combined-QC controls. That path first runs
+  \code{rss_basic_qc()}, optional PIP screening, optional LD-mismatch QC
+  through this same function, and optional RAISS imputation. The combined
+  path normalizes one or many RSS records to the same loop internally; only
+  true single-record input is unwrapped on return.
+  \code{qc_method = NULL}, \code{"none"}, and \code{"rss_qc"} all mean
+  basic-only summary-stat preprocessing without SLALOM/DENTIST outlier QC.
 
-When the combined path receives genotype-backed reference data
-(\code{X_ref}), basic harmonization avoids constructing an LD matrix. PIP
-screening uses an LD-independent single-effect screen with
-\code{susie_rss(R = diag(p), L = 1, max_iter = 1)}, and LD-mismatch QC
-computes only the filtered local correlation matrix required by
-SLALOM/DENTIST. RAISS imputation temporarily centers/scales genotype-backed
-\code{X_ref} before using the whole-region genotype/SVD path. This avoids
-LD-block partition artifacts while matching the LD scale used by
-\code{compute_LD(X_ref)}. Final ColocBoost calls still keep the original
-\code{X_ref} as the reference input.
+  When the combined path receives genotype-backed reference data
+  (\code{X_ref}), basic harmonization avoids constructing an LD matrix. PIP
+  screening uses an LD-independent single-effect screen with
+  \code{susie_rss(R = diag(p), L = 1, max_iter = 1)}, and LD-mismatch QC
+  computes only the filtered local correlation matrix required by
+  SLALOM/DENTIST. RAISS imputation temporarily centers/scales
+  genotype-backed \code{X_ref} before using the whole-region genotype/SVD
+  path. This avoids LD-block partition artifacts while matching the LD scale
+  used by \code{compute_LD(X_ref)}. Final ColocBoost calls still keep the
+  original \code{X_ref} as the reference input.
 }
 \examples{
 # Perform SLALOM quality control (default)
