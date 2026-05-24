@@ -435,9 +435,9 @@ test_that("summary_stats_qc PIP screening uses LD-independent SER", {
 
   local_mocked_bindings(
     compute_LD = function(...) stop("compute_LD should not be called"),
-    susie_rss = function(z, R = NULL, X = NULL, ...) {
-      expect_null(X)
-      expect_equal(R, diag(length(z)))
+    susie_ser = function(z, n = NULL, coverage = 0.95, ...) {
+      expect_equal(n, rss_input$n)
+      expect_null(coverage)
       list(pip = rep(1, length(z)))
     }
   )

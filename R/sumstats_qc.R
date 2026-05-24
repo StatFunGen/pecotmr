@@ -200,8 +200,8 @@ ld_mismatch_qc <- function(zScore, R = NULL, X = NULL, nSample = NULL,
 #'
 #'   When the combined path receives genotype-backed reference data
 #'   (\code{X_ref}), basic harmonization avoids constructing an LD matrix. PIP
-#'   screening uses an LD-independent single-effect screen with
-#'   \code{susie_rss(R = diag(p), L = 1, max_iter = 1)}, and LD-mismatch QC
+#'   screening uses the LD-independent single-effect summary-statistic model
+#'   \code{susie_ser(coverage = NULL)}, and LD-mismatch QC
 #'   computes only the filtered local correlation matrix required by
 #'   SLALOM/DENTIST. RAISS imputation temporarily centers/scales
 #'   genotype-backed \code{X_ref} before using the whole-region genotype/SVD
@@ -218,6 +218,7 @@ ld_mismatch_qc <- function(zScore, R = NULL, X = NULL, nSample = NULL,
 #'                                qc_method = "none")
 #'
 #' @importFrom dplyr mutate row_number filter pull
+#' @importFrom susieR susie_ser
 #' @export
 summary_stats_qc <- function(sumstats, LD_data, n = NULL,
                              method = c("slalom", "dentist"),
@@ -505,9 +506,7 @@ summary_stats_qc <- function(sumstats, LD_data, n = NULL,
     if (cutoff < 0) cutoff <- 3 / nrow(sumstats)
     message("QC track: running LD-independent single-effect initial screen for summary-stat study ",
             study, ".")
-    pip_args <- list(z = sumstats$z, R = diag(nrow(sumstats)),
-                     L = 1, max_iter = 1, n = n)
-    pip <- do.call(susie_rss, pip_args)$pip
+    pip <- susie_ser(z = sumstats$z, n = n, coverage = NULL)$pip
     if (!any(pip > cutoff)) {
       message("Skipping follow-up analysis: No signals above PIP threshold ", cutoff)
       message("QC track: skipping summary-stat study ", study,

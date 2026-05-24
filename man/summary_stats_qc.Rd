@@ -77,8 +77,8 @@ This function applies the specified quality control method to the
 
   When the combined path receives genotype-backed reference data
   (\code{X_ref}), basic harmonization avoids constructing an LD matrix. PIP
-  screening uses an LD-independent single-effect screen with
-  \code{susie_rss(R = diag(p), L = 1, max_iter = 1)}, and LD-mismatch QC
+  screening uses the LD-independent single-effect summary-statistic model
+  \code{susie_ser(coverage = NULL)}, and LD-mismatch QC
   computes only the filtered local correlation matrix required by
   SLALOM/DENTIST. RAISS imputation temporarily centers/scales
   genotype-backed \code{X_ref} before using the whole-region genotype/SVD
