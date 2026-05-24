@@ -15,7 +15,7 @@ rss_analysis_pipeline(
   skip_region = NULL,
   extract_region_name = NULL,
   region_name_col = NULL,
-  qc_method = c("slalom", "dentist", "rss_qc", "none"),
+  qc_method = c("slalom", "dentist", "none"),
   finemapping_method = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
   finemapping_opts = list(L = 20, L_greedy = 5, coverage = c(0.95, 0.7, 0.5),
     signal_cutoff = 0.025, min_abs_corr = 0.8),
@@ -56,7 +56,7 @@ require a correlation matrix.}
 
 \item{qc_method}{Summary-statistic QC method. \code{"slalom"} and
 \code{"dentist"} run basic allele harmonization plus LD-mismatch QC;
-\code{"rss_qc"} and \code{"none"} run basic allele harmonization only.}
+\code{"none"} runs basic allele harmonization only.}
 
 \item{finemapping_method}{One of "susie_rss", "single_effect", "bayesian_conditional_regression".}
 

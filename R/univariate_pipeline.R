@@ -204,7 +204,7 @@ load_study_LD <- function(ld_path, region) {
 #' @param region_name_col Column to filter for extract_region_name.
 #' @param qc_method Summary-statistic QC method. \code{"slalom"} and
 #'   \code{"dentist"} run basic allele harmonization plus LD-mismatch QC;
-#'   \code{"rss_qc"} and \code{"none"} run basic allele harmonization only.
+#'   \code{"none"} runs basic allele harmonization only.
 #' @param finemapping_method One of "susie_rss", "single_effect", "bayesian_conditional_regression".
 #' @param finemapping_opts List of fine-mapping options (L, L_greedy, coverage,
 #'   signal_cutoff, min_abs_corr).
@@ -227,7 +227,7 @@ rss_analysis_pipeline <- function(
     sumstat_path, column_file_path, LD_data,
     n_sample = 0, n_case = 0, n_control = 0, region = NULL, skip_region = NULL,
     extract_region_name = NULL, region_name_col = NULL,
-    qc_method = c("slalom", "dentist", "rss_qc", "none"),
+    qc_method = c("slalom", "dentist", "none"),
     finemapping_method = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
     finemapping_opts = list(
       L = 20, L_greedy = 5,

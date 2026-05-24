@@ -149,8 +149,7 @@ ld_mismatch_qc <- function(zScore, R = NULL, X = NULL, nSample = NULL,
 
 .resolve_summary_qc_method <- function(qc_method) {
   if (is.null(qc_method)) return("none")
-  qc_method <- match.arg(qc_method, c("none", "rss_qc", "slalom", "dentist"))
-  if (identical(qc_method, "rss_qc")) "none" else qc_method
+  match.arg(qc_method, c("none", "slalom", "dentist"))
 }
 
 #' Perform Quality Control on Summary Statistics
@@ -196,8 +195,8 @@ ld_mismatch_qc <- function(zScore, R = NULL, X = NULL, nSample = NULL,
 #'   through this same function, and optional RAISS imputation. The combined
 #'   path normalizes one or many RSS records to the same loop internally; only
 #'   true single-record input is unwrapped on return.
-#'   \code{qc_method = NULL}, \code{"none"}, and \code{"rss_qc"} all mean
-#'   basic-only summary-stat preprocessing without SLALOM/DENTIST outlier QC.
+#'   \code{qc_method = NULL} and \code{"none"} mean basic-only summary-stat
+#'   preprocessing without SLALOM/DENTIST outlier QC.
 #'
 #'   When the combined path receives genotype-backed reference data
 #'   (\code{X_ref}), basic harmonization avoids constructing an LD matrix. PIP
@@ -520,7 +519,7 @@ summary_stats_qc <- function(sumstats, LD_data, n = NULL,
   }
 
   outlier_number <- 0L
-  if (!is.null(qc_method) && !qc_method %in% c("none", "rss_qc")) {
+  if (!is.null(qc_method) && !identical(qc_method, "none")) {
     message("QC track: running ", qc_method, " LD-mismatch QC for summary-stat study ", study, ".")
     qc <- summary_stats_qc(sumstats = sumstats, LD_data = ld_data_with_local_R(sumstats),
                             n = n, method = qc_method)

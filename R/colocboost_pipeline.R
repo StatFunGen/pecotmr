@@ -116,8 +116,8 @@ region_data_to_colocboost_input <- function(region_data) {
 #' \code{pip_cutoff_to_skip_sumstat}, \code{impute = TRUE}, or
 #' \code{LD_reference_info} is supplied and named \code{sumstat} plus either
 #' \code{LD}, \code{X_ref}, or \code{LD_reference_info} are available.
-#' \code{qc_method = "none"} and \code{qc_method = "rss_qc"} mean run basic
-#' allele/variant harmonization only; they do not run SLALOM/DENTIST
+#' \code{qc_method = "none"} means run basic allele/variant harmonization
+#' only; it does not run SLALOM/DENTIST
 #' LD-mismatch QC. RAISS imputation is controlled separately by
 #' \code{impute = TRUE}.
 #'
@@ -137,8 +137,8 @@ region_data_to_colocboost_input <- function(region_data) {
 #'   Individual-level QC controls. If all are \code{NULL}, individual-level QC
 #'   is not run.
 #' @param keep_indel,pip_cutoff_to_skip_sumstat,qc_method,impute,impute_opts
-#'   Summary-statistic QC controls. \code{qc_method = "none"} and
-#'   \code{qc_method = "rss_qc"} run basic allele harmonization without
+#'   Summary-statistic QC controls. \code{qc_method = "none"} runs
+#'   basic allele harmonization without
 #'   LD-mismatch outlier detection. Imputation is only run when
 #'   \code{impute = TRUE}.
 #' @param LD_reference_info Optional LD reference information for
@@ -343,8 +343,8 @@ colocboost_analysis <- function(...,
 #' @param pip_cutoff_to_skip_ind A vector of cutoff values for skipping analysis based on PIP values for each context. Default is 0.
 #' @param pip_cutoff_to_skip_sumstat A vector of cutoff values for skipping analysis based on PIP values for each sumstat Default is 0.
 #' @param qc_method Quality control method to use. Options are "none",
-#'   "rss_qc", "slalom", or "dentist". \code{NULL} and \code{"rss_qc"}
-#'   are treated as \code{"none"} for basic-only summary-stat preprocessing.
+#'   "slalom", or "dentist". \code{NULL} is treated as \code{"none"} for
+#'   basic-only summary-stat preprocessing.
 #' @param impute Logical; if TRUE, performs imputation for outliers identified in the analysis (default: TRUE).
 #' @param impute_opts A list of imputation options including rcond, R2_threshold, and minimum_ld (default: list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5)).
 #'
@@ -640,8 +640,8 @@ colocboost_pipeline <- function(
 #' @param pip_cutoff_to_skip_ind A vector of cutoff values for skipping individual contexts.
 #' @param pip_cutoff_to_skip_sumstat A vector of cutoff values for skipping summary-stat studies.
 #' @param qc_method Quality control method to use. Options are "none",
-#'   "rss_qc", "slalom", or "dentist". \code{NULL} and \code{"rss_qc"}
-#'   are treated as \code{"none"} for basic-only summary-stat preprocessing.
+#'   "slalom", or "dentist". \code{NULL} is treated as \code{"none"} for
+#'   basic-only summary-stat preprocessing.
 #' @param impute Logical; if TRUE, performs imputation when required metadata are available.
 #' @param impute_opts A list of imputation options.
 #' @return A list containing post-QC \code{individual_data} and \code{sumstat_data}.

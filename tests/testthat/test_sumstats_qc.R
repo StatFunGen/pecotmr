@@ -472,6 +472,20 @@ test_that("summary_stats_qc treats NULL qc_method as basic-only none", {
   expect_equal(nrow(result$rss_input$sumstats), nrow(td$sumstats))
 })
 
+test_that("summary_stats_qc rejects invalid qc_method values", {
+  td <- make_test_sumstats_ld(n_variants = 5)
+  rss_input <- list(sumstats = td$sumstats, n = 1000, var_y = 1)
+
+  expect_error(
+    summary_stats_qc(
+      rss_input = rss_input,
+      LD_data = td$LD_data,
+      qc_method = "bad_method"
+    ),
+    "should be one of"
+  )
+})
+
 test_that("summary_stats_qc LD-mismatch QC computes only filtered local LD from X_ref", {
   td <- make_test_sumstats_ld(n_variants = 5)
   X_ref <- matrix(rnorm(50), 10, 5)

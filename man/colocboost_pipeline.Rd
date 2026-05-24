@@ -34,9 +34,7 @@ colocboost_pipeline(
 
 \item{pip_cutoff_to_skip_sumstat}{A vector of cutoff values for skipping analysis based on PIP values for each sumstat Default is 0.}
 
-\item{qc_method}{Quality control method to use. Options are "none",
-"rss_qc", "slalom", or "dentist". \code{NULL} and \code{"rss_qc"}
-are treated as \code{"none"} for basic-only summary-stat preprocessing.}
+\item{qc_method}{Quality control method to use. Options are "none", "slalom", or "dentist". \code{NULL} is treated as \code{"none"} for basic-only summary-stat preprocessing.}
 
 \item{impute}{Logical; if TRUE, performs imputation for outliers identified in the analysis (default: TRUE).}
 

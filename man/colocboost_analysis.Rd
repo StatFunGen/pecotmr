@@ -30,10 +30,10 @@ QC can only inspect inputs that are supplied by name.}
 \item{missing_rate_thresh, maf_cutoff, xvar_cutoff, ld_reference_meta_file, pip_cutoff_to_skip_ind}{Individual-level QC controls. If all are \code{NULL}, individual-level QC
 is not run.}
 
-\item{keep_indel, pip_cutoff_to_skip_sumstat, qc_method, impute, impute_opts}{Summary-statistic QC controls. \code{qc_method = "none"} and
-\code{qc_method = "rss_qc"} run basic allele harmonization without
-LD-mismatch outlier detection. Imputation is only run when
-\code{impute = TRUE}.}
+\item{keep_indel, pip_cutoff_to_skip_sumstat, qc_method, impute, impute_opts}{Summary-statistic QC controls.
+\code{qc_method = "none"} runs basic allele harmonization without LD-mismatch
+outlier detection. Imputation is only run
+when \code{impute = TRUE}.}
 
 \item{LD_reference_info}{Optional LD reference information for
 summary-statistic QC. This is only needed when the native \code{LD} matrix
@@ -78,8 +78,8 @@ is non-\code{NULL} and named \code{X} and \code{Y} inputs are available in
 \code{pip_cutoff_to_skip_sumstat}, \code{impute = TRUE}, or
 \code{LD_reference_info} is supplied and named \code{sumstat} plus either
 \code{LD}, \code{X_ref}, or \code{LD_reference_info} are available.
-\code{qc_method = "none"} and \code{qc_method = "rss_qc"} mean run basic
-allele/variant harmonization only; they do not run SLALOM/DENTIST
+\code{qc_method = "none"} means run basic allele/variant harmonization only;
+it does not run SLALOM/DENTIST
 LD-mismatch QC. RAISS imputation is controlled separately by
 \code{impute = TRUE}.
 
