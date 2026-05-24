@@ -971,7 +971,10 @@ test_that("rss: pip_cutoff_to_skip > 0, signal detected => continues", {
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
     rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
     susie_rss = function(...) list(pip = c(0.9, 0.01, 0.01, 0.01, 0.01)),
-    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0),
+    summary_stats_qc = function(...) {
+      message("Follow-up on region: signals above PIP threshold 0.5 detected.")
+      list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0)
+    },
     partition_LD_matrix = function(...) ld_mat,
     raiss = function(...) list(result_filter = ss, LD_mat = ld_mat),
     susie_rss_pipeline = function(...) fake_rss_result,
@@ -1179,7 +1182,7 @@ test_that("rss: finemapping_method = NULL skips fine-mapping", {
 #  SECTION 14: rss_analysis_pipeline - QC = NULL skips QC
 # ========================================================================
 
-test_that("rss: qc_method = NULL skips quality control", {
+test_that("rss: qc_method = NULL uses combined basic QC without LD-mismatch method", {
   ss <- make_rss_sumstats(5)
   ld_mat <- make_rss_ld_mat(5)
   fake_result <- make_fake_post_result(5)
@@ -1204,7 +1207,7 @@ test_that("rss: qc_method = NULL skips quality control", {
     finemapping_method = "susie_rss"
   )
 
-  expect_false(qc_called)
+  expect_true(qc_called)
 })
 
 # ========================================================================
@@ -1947,7 +1950,7 @@ test_that("load_study_LD with comma-separated paths builds list of X panels", {
 #  rss_analysis_pipeline: X-as-LD path (genotype interface)
 # ========================================================================
 
-test_that("rss: is_genotype=TRUE path computes R from X and uses X for fine-mapping", {
+test_that("rss: is_genotype=TRUE path does not precompute R and uses X for fine-mapping", {
   ss <- make_rss_sumstats(5)
   ld_mat <- make_rss_ld_mat(5)
   X_geno <- matrix(rnorm(20 * 5), nrow = 20, ncol = 5)
@@ -1961,7 +1964,7 @@ test_that("rss: is_genotype=TRUE path computes R from X and uses X for fine-mapp
   local_mocked_bindings(
     compute_LD = function(X, method = "sample") {
       compute_LD_called <<- TRUE
-      ld_mat
+      stop("rss_analysis_pipeline should not precompute LD from X")
     },
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
     rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
@@ -1983,7 +1986,7 @@ test_that("rss: is_genotype=TRUE path computes R from X and uses X for fine-mapp
     finemapping_method = "susie_rss"
   )
 
-  expect_true(compute_LD_called)
+  expect_false(compute_LD_called)
   expect_true(is.matrix(susie_X_arg))
   expect_null(susie_LD_arg)
   expect_true(any(grepl("susie_rss", names(result))))
@@ -1998,9 +2001,13 @@ test_that("rss: mixture LD_data (list of X panels) preserves list shape into sus
   fake_result <- make_fake_post_result(5)
 
   susie_X_arg <- NULL
+  compute_LD_called <- FALSE
 
   local_mocked_bindings(
-    compute_LD = function(X, method = "sample") ld_mat,
+    compute_LD = function(X, method = "sample") {
+      compute_LD_called <<- TRUE
+      stop("rss_analysis_pipeline should not precompute LD from mixture X")
+    },
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
     rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
     summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0),
@@ -2021,6 +2028,7 @@ test_that("rss: mixture LD_data (list of X panels) preserves list shape into sus
   )
 
   # Mixture path => list of subset matrices passed to susie_rss_pipeline as X_mat
+  expect_false(compute_LD_called)
   expect_true(is.list(susie_X_arg))
   expect_length(susie_X_arg, 2)
   expect_true(all(sapply(susie_X_arg, is.matrix)))
