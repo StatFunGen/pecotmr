@@ -1390,6 +1390,68 @@ test_that("X path R2 filtering matches R path", {
                info = "Same variants should pass R2/LD filtering")
 })
 
+test_that("raw genotype_matrix path is not equivalent to LD path used by legacy pipeline", {
+  set.seed(1)
+  n <- 80
+  p <- 40
+  n_known <- 20
+  X_raw <- matrix(sample(0:2, n * p, replace = TRUE,
+                         prob = c(0.35, 0.45, 0.20)),
+                  nrow = n, ncol = p)
+  ref_panel <- data.frame(
+    chrom = rep(1, p),
+    pos = seq_len(p) * 100,
+    variant_id = paste0("rs", seq_len(p)),
+    A1 = rep("A", p),
+    A2 = rep("G", p),
+    stringsAsFactors = FALSE
+  )
+  colnames(X_raw) <- ref_panel$variant_id
+
+  known_idx <- sort(sample(seq_len(p), n_known))
+  known_zscores <- data.frame(
+    chrom = rep(1, n_known),
+    pos = ref_panel$pos[known_idx],
+    variant_id = ref_panel$variant_id[known_idx],
+    A1 = ref_panel$A1[known_idx],
+    A2 = ref_panel$A2[known_idx],
+    z = rnorm(n_known),
+    stringsAsFactors = FALSE
+  )
+
+  R <- compute_LD(X_raw, method = "sample")
+  rownames(R) <- colnames(R) <- ref_panel$variant_id
+  X_scaled <- scale(X_raw)
+  X_scaled[is.na(X_scaled)] <- 0
+  colnames(X_scaled) <- ref_panel$variant_id
+
+  result_LD <- raiss(ref_panel, known_zscores, LD_matrix = R,
+                     lamb = 0.01, rcond = 0.01,
+                     R2_threshold = 0.6, minimum_ld = 0,
+                     verbose = FALSE)
+  result_raw_X <- raiss(ref_panel, known_zscores, genotype_matrix = X_raw,
+                        lamb = 0.01, svd_tol = 1e-8,
+                        R2_threshold = 0.6, minimum_ld = 0,
+                        verbose = FALSE)
+  result_scaled_X <- raiss(ref_panel, known_zscores, genotype_matrix = X_scaled,
+                           lamb = 0.01, svd_tol = 1e-12,
+                           R2_threshold = 0.6, minimum_ld = 0,
+                           verbose = FALSE)
+
+  ld_ids <- sort(result_LD$result_filter$variant_id)
+  raw_x_ids <- sort(result_raw_X$result_filter$variant_id)
+  scaled_x_ids <- sort(result_scaled_X$result_filter$variant_id)
+
+  expect_false(identical(ld_ids, raw_x_ids))
+  expect_gt(nrow(result_raw_X$result_filter), nrow(result_LD$result_filter))
+  expect_equal(scaled_x_ids, ld_ids)
+
+  ld_sorted <- result_LD$result_nofilter %>% arrange(variant_id)
+  scaled_sorted <- result_scaled_X$result_nofilter %>% arrange(variant_id)
+  expect_equal(ld_sorted$z, scaled_sorted$z, tolerance = 1e-10)
+  expect_equal(ld_sorted$raiss_R2, scaled_sorted$raiss_R2, tolerance = 1e-10)
+})
+
 test_that("raiss rejects both LD_matrix and genotype_matrix", {
   data <- generate_X_test_data(n = 50, p = 20, n_known = 10, seed = 1)
   expect_error(

@@ -193,7 +193,8 @@ load_study_LD <- function(ld_path, region) {
 #' @param LD_data A list from load_LD_matrix containing LD_matrix, LD_variants,
 #'   ref_panel, block_metadata, and is_genotype flag. When is_genotype=TRUE
 #'   (from return_genotype=TRUE), LD_matrix contains genotype X and susie_rss
-#'   uses the z+X interface. R is computed internally for QC/imputation.
+#'   uses the z+X interface. Local R is computed only for QC stages that
+#'   require a correlation matrix.
 #' @param n_sample Sample size. If 0, retrieved from the sumstat file.
 #' @param n_case Number of cases (for case-control studies).
 #' @param n_control Number of controls (for case-control studies).
@@ -201,7 +202,9 @@ load_study_LD <- function(ld_path, region) {
 #' @param skip_region Character vector of regions to skip (format "chrom:start-end").
 #' @param extract_region_name Gene/phenotype name to subset.
 #' @param region_name_col Column to filter for extract_region_name.
-#' @param qc_method QC method: "slalom" or "dentist".
+#' @param qc_method Summary-statistic QC method. \code{"slalom"} and
+#'   \code{"dentist"} run basic allele harmonization plus LD-mismatch QC;
+#'   \code{"none"} runs basic allele harmonization only.
 #' @param finemapping_method One of "susie_rss", "single_effect", "bayesian_conditional_regression".
 #' @param finemapping_opts List of fine-mapping options (L, L_greedy, coverage,
 #'   signal_cutoff, min_abs_corr).
@@ -224,7 +227,7 @@ rss_analysis_pipeline <- function(
     sumstat_path, column_file_path, LD_data,
     n_sample = 0, n_case = 0, n_control = 0, region = NULL, skip_region = NULL,
     extract_region_name = NULL, region_name_col = NULL,
-    qc_method = c("slalom", "dentist"),
+    qc_method = c("slalom", "dentist", "none"),
     finemapping_method = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
     finemapping_opts = list(
       L = 20, L_greedy = 5,
@@ -240,10 +243,15 @@ rss_analysis_pipeline <- function(
   use_X <- isTRUE(LD_data$is_genotype) || is_X_list
   if (use_X) {
     X_data <- LD_data$LD_matrix
-    # Compute R from first panel (or single panel) for QC/imputation
-    X_for_R <- if (is_X_list) X_data[[1]] else X_data
-    LD_data$LD_matrix <- compute_LD(X_for_R, method = "sample")
-    LD_data$is_genotype <- FALSE
+    LD_data$is_genotype <- TRUE
+  }
+  subset_X_data <- function(variants) {
+    if (!use_X) return(NULL)
+    if (is_X_list) {
+      lapply(X_data, function(Xk) Xk[, variants, drop = FALSE])
+    } else {
+      X_data[, variants, drop = FALSE]
+    }
   }
   res <- list()
   rss_input <- load_rss_data(
@@ -261,44 +269,52 @@ rss_analysis_pipeline <- function(
     return(list(rss_data_analyzed = sumstats))
   }
 
-  # Preprocess: QC and imputation require LD_data with correlation matrix R.
-  # When using X path, compute R from X for QC/imputation, then pass X to susie_rss.
-  preprocess_results <- rss_basic_qc(sumstats, LD_data, skip_region = skip_region, keep_indel = keep_indel)
-  sumstats <- preprocess_results$sumstats
-  LD_mat <- preprocess_results$LD_mat
+  qc_method_arg <- if (is.null(qc_method)) NULL else match.arg(qc_method)
+  qc_method <- qc_method_arg
+  qc_record <- summary_stats_qc(
+    rss_input = rss_input,
+    LD_data = LD_data,
+    keep_indel = keep_indel,
+    skip_region = skip_region,
+    pip_cutoff_to_skip = pip_cutoff_to_skip,
+    qc_method = if (is.null(qc_method_arg)) "none" else qc_method_arg,
+    impute = impute,
+    impute_opts = impute_opts,
+    return_on_skip = "preprocess",
+    R_finite = R_finite,
+    R_mismatch = R_mismatch
+  )
+  if (!is.null(qc_record$rss_input)) {
+    preprocess_results <- qc_record$preprocess
+    sumstats <- qc_record$rss_input$sumstats
+    LD_mat <- qc_record$LD_matrix
+    qc_results <- list(outlier_number = qc_record$outlier_number)
+  } else {
+    # Compatibility for tests or callers that mock the historical
+    # LD-mismatch-only summary_stats_qc() return shape.
+    preprocess_results <- list(sumstats = qc_record$sumstats, LD_mat = qc_record$LD_mat)
+    sumstats <- qc_record$sumstats
+    LD_mat <- qc_record$LD_mat
+    qc_results <- qc_record
+    if (isTRUE(impute)) {
+      LD_matrix <- partition_LD_matrix(LD_data)
+      impute_results <- raiss(LD_data$ref_panel, sumstats, LD_matrix,
+                              rcond = impute_opts$rcond,
+                              R2_threshold = impute_opts$R2_threshold,
+                              minimum_ld = impute_opts$minimum_ld,
+                              lamb = impute_opts$lamb)
+      sumstats <- impute_results$result_filter
+      LD_mat <- impute_results$LD_mat
+    }
+    qc_record$skipped <- FALSE
+  }
 
   if (nrow(sumstats) == 0) {
     message("No variants left after preprocessing. Returning empty results.")
     return(list(rss_data_analyzed = sumstats))
   }
-
-  # PIP screening (always uses R)
-  if (pip_cutoff_to_skip != 0) {
-    if (pip_cutoff_to_skip < 0) pip_cutoff_to_skip <- 3 / nrow(sumstats)
-    top_model_pip <- susie_rss(z = sumstats$z, R = LD_mat, L = 1, L_greedy = NULL, max_iter = 1,
-      n = n, var_y = var_y, R_finite = R_finite, R_mismatch = R_mismatch)$pip
-    if (!any(top_model_pip > pip_cutoff_to_skip)) {
-      message("Skipping follow-up analysis: No signals above PIP threshold ", pip_cutoff_to_skip)
-      return(list(rss_data_analyzed = sumstats))
-    }
-    message("Follow-up on region: signals above PIP threshold ", pip_cutoff_to_skip, " detected.")
-  }
-
-  # Quality control (always uses R)
-  if (!is.null(qc_method)) {
-    qc_results <- summary_stats_qc(sumstats, LD_data, n = n, method = qc_method)
-    sumstats <- qc_results$sumstats
-    LD_mat <- qc_results$LD_mat
-  }
-
-  # Imputation (always uses R)
-  if (impute) {
-    LD_matrix <- partition_LD_matrix(LD_data)
-    impute_results <- raiss(LD_data$ref_panel, sumstats, LD_matrix,
-                            rcond = impute_opts$rcond, R2_threshold = impute_opts$R2_threshold,
-                            minimum_ld = impute_opts$minimum_ld, lamb = impute_opts$lamb)
-    sumstats <- impute_results$result_filter
-    LD_mat <- impute_results$LD_mat
+  if (isTRUE(qc_record$skipped)) {
+    return(list(rss_data_analyzed = sumstats))
   }
 
   # Fine-mapping: use X_mat if available, otherwise R
@@ -306,17 +322,7 @@ rss_analysis_pipeline <- function(
     pri_coverage <- finemapping_opts$coverage[1]
     sec_coverage <- if (length(finemapping_opts$coverage) > 1) finemapping_opts$coverage[-1] else NULL
 
-    # When using X path, subset X to QCed/imputed variants.
-    # For mixture panels (list), subset each panel; susie_rss accepts X=list().
-    if (use_X) {
-      if (is_X_list) {
-        X_mat_sub <- lapply(X_data, function(Xk) Xk[, sumstats$variant_id, drop = FALSE])
-      } else {
-        X_mat_sub <- X_data[, sumstats$variant_id, drop = FALSE]
-      }
-    } else {
-      X_mat_sub <- NULL
-    }
+    X_mat_sub <- subset_X_data(sumstats$variant_id)
 
     res <- susie_rss_pipeline(sumstats,
       LD_mat = if (use_X) NULL else LD_mat,
@@ -347,7 +353,9 @@ rss_analysis_pipeline <- function(
   }
 
   .run_reanalysis <- function(sumstats, LD_mat, method, finemapping_opts, pri_coverage, sec_coverage) {
-    susie_rss_pipeline(sumstats, LD_mat,
+    susie_rss_pipeline(sumstats,
+      LD_mat = if (use_X) NULL else LD_mat,
+      X_mat = subset_X_data(sumstats$variant_id),
       n = n, var_y = var_y,
       L = finemapping_opts$L, L_greedy = finemapping_opts$L_greedy,
       analysis_method = method,

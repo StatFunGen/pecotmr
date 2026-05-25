@@ -88,7 +88,6 @@ r45 = {features = ["r45"]}
 "r-stringr" = "*"
 "r-susier" = "*"
 "r-tibble" = "*"
-"r-tictoc" = "*"
 "r-tidyr" = "*"
 "r-vctrs" = "*"
 "r-vroom" = "*"

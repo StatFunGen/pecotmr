@@ -25,7 +25,7 @@ This vignette demonstrates how to use the bioinformatics pipeline for ColocBoost
 
 Acknowledgment: Thanks to Kate (Kathryn) Lawrence (GitHub:@kal26) for her contributions to this vignette.
 
-# 1. Loading Data using `colocboost_analysis_pipeline` function
+# 1. Loading Data using `colocboost_pipeline` function
 
 This function harmonizes the input data and prepares it for colocalization analysis. 
 
@@ -34,7 +34,7 @@ In this section, we introduce how to load the regional data required for the Col
 This function loads mixed datasets for a specific region, including individual-level data (genotype, phenotype, covariate data), summary statistics 
 (sumstats, LD), or a combination of both. It runs `load_regional_univariate_data` for each individual-level dataset and `load_rss_data` for each summary statistics dataset.
 The output is a list with `individual_data` and `sumstat_data` components, where `individual_data` is a list of individual-level data and `sumstat_data` is a list of summary statistics data. 
-This list is then passed to the `colocboost_analysis_pipeline` function for the colocalization analysis.
+This list is then passed to the `colocboost_pipeline` function for the colocalization analysis.
 
 
 Below are the input parameters for this function for loading individual-level data:
@@ -201,9 +201,9 @@ The LD metadata file is a tab-separated file with the following columns:
 ```
 
 
-# 2. Perform ColocBoost using `colocboost_analysis_pipeline` function
+# 2. Perform ColocBoost using `colocboost_pipeline` function
 
-In this section, we load region data for a combination of individual-level and summary statistics data, then perform the colocalization analysis using the `colocboost_analysis_pipeline` function. 
+In this section, we load region data for a combination of individual-level and summary statistics data, then perform the colocalization analysis using the `colocboost_pipeline` function.
 The colocalization analysis can be run in any one of three modes, or in a combination of these modes (names assume that individual-level data is xQTL data and summary statistics data is GWAS data):
 
 - **`xQTL-only mode`**: Only perform colocalization analysis on the individual-level data. Summary statistics data is not used.
@@ -228,7 +228,7 @@ Example: for sQTL, `list(type_pattern = ".*clu_(\\d+_[+-?]).*", valid_pattern = 
 
 Outputs:
 
-- **`colocboost_results`**: List of colocboost objects (with `xqtl_coloc`, `joint_gwas`, `separate_gwas`); Output of the `colocboost_analysis_pipeline` function. If the mode is not run, the corresponding element will be `NULL`.
+- **`colocboost_results`**: List of colocboost objects (with `xqtl_coloc`, `joint_gwas`, `separate_gwas`); Output of the `colocboost_pipeline` function. If the mode is not run, the corresponding element will be `NULL`.
 
 ```{r, colocboost-analysis, eval = FALSE}
 #### Please check the example code below ####
@@ -265,7 +265,7 @@ pip_cutoff_to_skip_sumstat = rep(0, length(sumstat_path_list))
 qc_method = "slalom"
 
 # run colocboost analysis
-colocboost_results <- colocboost_analysis_pipeline(
+colocboost_results <- colocboost_pipeline(
     region_data_combined,
     maf_cutoff = maf_cutoff, 
     pip_cutoff_to_skip_ind = pip_cutoff_to_skip_ind,

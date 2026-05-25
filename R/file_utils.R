@@ -858,8 +858,19 @@ load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE,
 #' @importFrom magrittr %>%
 #' @noRd
 read_single_covariate <- function(path) {
-  df <- read_delim(path, "\t", col_types = cols()) %>% select(-1)
-  non_numeric <- names(df)[!sapply(df, is.numeric)]
+  raw_df <- read_delim(path, "\t", col_types = cols(.default = "c")) %>% select(-1)
+  df <- raw_df
+  non_numeric <- character()
+  for (nm in names(df)) {
+    values <- trimws(as.character(df[[nm]]))
+    converted <- suppressWarnings(as.numeric(values))
+    bad <- !is.na(values) & values != "" & is.na(converted)
+    if (any(bad)) {
+      non_numeric <- c(non_numeric, nm)
+    } else {
+      df[[nm]] <- converted
+    }
+  }
   if (length(non_numeric) > 0) {
     stop("Non-numeric columns found in covariate file ", path, ": ",
          paste(non_numeric, collapse = ", "),
@@ -1766,16 +1777,34 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
   # - if exist individual level data
   individual_data <- NULL
   if (!is.null(genotype_list)) {
+    if (length(phenotype_list) != length(covariate_list)) {
+      stop("Data load error. 'phenotype_list' and 'covariate_list' must have the same length.")
+    }
+    if (is.null(conditions_list_individual)) {
+      conditions_list_individual <- paste0("condition", seq_along(phenotype_list))
+      warning("Data load warning. 'conditions_list_individual' is not supplied; using default condition names. ",
+              "Provide 'conditions_list_individual' to preserve cohort or cell-type labels.")
+    }
+    if (length(conditions_list_individual) != length(phenotype_list)) {
+      stop("Data load error. 'conditions_list_individual' must have the same length as 'phenotype_list'.")
+    }
     #### FIXME: later if we have mulitple genotype list
     if (length(genotype_list) != 1 & is.null(match_geno_pheno)) {
       stop("Data load error. Please make sure 'match_geno_pheno' exists if you load data from multiple individual-level data.")
     } else if (length(genotype_list) == 1 & is.null(match_geno_pheno)) {
       match_geno_pheno <- rep(1, length(phenotype_list))
     }
+    if (length(match_geno_pheno) != length(phenotype_list)) {
+      stop("Data load error. 'match_geno_pheno' must have the same length as 'phenotype_list'.")
+    }
+    if (any(is.na(match_geno_pheno)) ||
+        any(match_geno_pheno < 1 | match_geno_pheno > length(genotype_list))) {
+      stop("Data load error. 'match_geno_pheno' must contain valid indices into 'genotype_list'.")
+    }
 
     # - load individual data from multiple datasets
-    n_dataset <- unique(match_geno_pheno) ### FIXME
-    for (i_data in 1:n_dataset) {
+    n_dataset <- unique(match_geno_pheno)
+    for (i_data in n_dataset) {
       # extract genotype file name
       genotype <- genotype_list[i_data]
       # extract phenotype and covariate file names
@@ -1783,6 +1812,10 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
       phenotype <- phenotype_list[pos]
       covariate <- covariate_list[pos]
       conditions <- conditions_list_individual[pos]
+      extract_region_name_i <- extract_region_name
+      if (is.list(extract_region_name) && length(extract_region_name) == length(phenotype_list)) {
+        extract_region_name_i <- extract_region_name[pos]
+      }
       dat <- load_regional_univariate_data(
         genotype = genotype, phenotype = phenotype,
         covariate = covariate,
@@ -1792,7 +1825,7 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
         maf_cutoff = maf_cutoff, mac_cutoff = mac_cutoff,
         imiss_cutoff = imiss_cutoff, keep_indel = keep_indel,
         keep_samples = keep_samples, keep_variants = keep_variants,
-        extract_region_name = extract_region_name,
+        extract_region_name = extract_region_name_i,
         phenotype_header = phenotype_header,
         region_name_col = region_name_col,
         scale_residuals = scale_residuals
@@ -1800,9 +1833,9 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
       if (is.null(individual_data)) {
         individual_data <- dat
       } else {
-        individual_data <- lapply(names(dat), function(k) {
+        individual_data <- stats::setNames(lapply(names(dat), function(k) {
           c(individual_data[[k]], dat[[k]])
-        })
+        }), names(dat))
         individual_data$chrom <- dat$chrom
         individual_data$grange <- dat$grange
       }
@@ -1866,6 +1899,219 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
   ))
 }
 
+#' Convert loaded regional data to individual-level inputs
+#'
+#' @param region_data A list returned by \code{load_multitask_regional_data()}.
+#' @return A list containing \code{X}, \code{Y}, \code{maf},
+#'   \code{X_variance}, and source information.
+#' @export
+region_data_to_ind_input <- function(region_data) {
+  first_non_null <- function(...) {
+    values <- list(...)
+    for (value in values) {
+      if (!is.null(value)) return(value)
+    }
+    NULL
+  }
+
+  align_individual_contexts <- function(X, Y) {
+    cbind_y <- function(Y, fallback_names) {
+      keep <- !vapply(Y, is.null, logical(1))
+      if (!any(keep)) return(NULL)
+      Y <- Y[keep]
+      fallback_names <- fallback_names[keep]
+      mats <- Map(function(y, nm) {
+        if (is.null(dim(y))) y <- matrix(y, ncol = 1)
+        if (is.null(colnames(y))) colnames(y) <- nm
+        y
+      }, Y, fallback_names)
+      do.call(cbind, mats)
+    }
+
+    if (!is.list(X) || is.matrix(X) || is.data.frame(X) ||
+        !is.list(Y) || is.matrix(Y) || is.data.frame(Y) ||
+        is.null(names(X)) || is.null(names(Y)) ||
+        length(intersect(names(X), names(Y))) > 0) {
+      return(list(X = X, Y = Y))
+    }
+    x_names <- names(X)
+    y_names <- names(Y)
+    grouped <- list()
+    for (context in x_names) {
+      matched <- y_names[y_names == context | startsWith(y_names, paste0(context, "_"))]
+      if (length(matched) > 0) {
+        y_group <- cbind_y(Y[matched], matched)
+        if (!is.null(y_group)) grouped[[context]] <- y_group
+      }
+    }
+    if (length(grouped) == 0 && length(X) == 1 && length(Y) > 0) {
+      y_group <- cbind_y(Y, y_names)
+      if (!is.null(y_group)) grouped[[x_names[[1]]]] <- y_group
+    }
+    if (length(grouped) == 0) {
+      return(list(X = X, Y = Y))
+    }
+    list(X = X[names(grouped)], Y = grouped)
+  }
+
+  individual_data <- region_data$individual_data
+  if (is.null(individual_data)) {
+    return(list(X = NULL, Y = NULL, maf = NULL, X_variance = NULL,
+                source_info = list(has_individual = FALSE, contexts = character())))
+  }
+
+  X <- first_non_null(individual_data$residual_X, individual_data$X)
+  Y <- first_non_null(individual_data$residual_Y, individual_data$Y)
+  if (is.list(X) && !is.matrix(X) && !is.data.frame(X) &&
+      is.null(names(X)) && !is.null(names(Y)) && length(X) == length(Y)) {
+    names(X) <- names(Y)
+  }
+  if (is.list(Y) && !is.matrix(Y) && !is.data.frame(Y) &&
+      is.null(names(Y)) && !is.null(names(X)) && length(Y) == length(X)) {
+    names(Y) <- names(X)
+  }
+  if (is.matrix(X) && is.list(Y) && !is.null(names(Y))) {
+    X <- stats::setNames(rep(list(X), length(Y)), names(Y))
+  }
+  aligned <- align_individual_contexts(X, Y)
+  X <- aligned$X
+  Y <- aligned$Y
+  maf <- individual_data$maf
+  X_variance <- individual_data$X_variance
+  if (is.list(maf) && is.null(names(maf)) && !is.null(names(X)) && length(maf) == length(X)) {
+    names(maf) <- names(X)
+  }
+  if (is.list(X_variance) && is.null(names(X_variance)) && !is.null(names(X)) &&
+      length(X_variance) == length(X)) {
+    names(X_variance) <- names(X)
+  }
+  contexts <- unique(c(names(X), names(Y)))
+  list(
+    X = X,
+    Y = Y,
+    maf = maf,
+    X_variance = X_variance,
+    source_info = list(has_individual = !is.null(X) && !is.null(Y),
+                       contexts = contexts)
+  )
+}
+
+#' Convert loaded regional data to RSS inputs
+#'
+#' @param region_data A list returned by \code{load_multitask_regional_data()}.
+#' @return A list containing named RSS inputs, matched LD data, and source
+#'   information.
+#' @export
+region_data_to_rss_input <- function(region_data) {
+  make_ld_data_from_matrix <- function(ld, variant_ids = NULL) {
+    is_genotype <- is.matrix(ld) && nrow(ld) != ncol(ld)
+    if (!is.null(variant_ids) && is.matrix(ld)) {
+      if (is.null(colnames(ld)) && length(variant_ids) == ncol(ld)) {
+        colnames(ld) <- variant_ids
+      }
+      if (!is_genotype && is.null(rownames(ld)) && length(variant_ids) == nrow(ld)) {
+        rownames(ld) <- variant_ids
+      }
+    }
+    ids <- if (is.matrix(ld) && !is_genotype) rownames(ld) else colnames(ld)
+    parsed <- NULL
+    if (!is.null(ids) && length(ids) > 0) {
+      parsed <- tryCatch(parse_variant_id(ids), error = function(e) NULL)
+      if (!is.null(parsed)) {
+        ids <- format_variant_id(parsed$chrom, parsed$pos, parsed$A2, parsed$A1)
+        if (!is_genotype && is.matrix(ld)) rownames(ld) <- colnames(ld) <- ids
+        if (is_genotype && is.matrix(ld)) colnames(ld) <- ids
+        parsed$variant_id <- ids
+      }
+    }
+    list(
+      LD_matrix = ld,
+      LD_variants = ids,
+      ref_panel = parsed,
+      block_metadata = if (!is_genotype && !is.null(parsed)) .infer_single_ld_block_metadata(parsed) else NULL,
+      is_genotype = isTRUE(is_genotype)
+    )
+  }
+
+  rss_input_from_qced_sumstat <- function(sumstat_data) {
+    variant_ids_from_rss <- function(rss) {
+      ss <- rss$sumstats
+      if (is.null(ss)) return(character())
+      if ("variant_id" %in% colnames(ss)) return(normalize_variant_id(as.character(ss$variant_id)))
+      if (all(c("chrom", "pos", "A2", "A1") %in% colnames(ss))) {
+        return(format_variant_id(ss$chrom, ss$pos, ss$A2, ss$A1))
+      }
+      character()
+    }
+
+    rss_input <- sumstat_data$sumstats
+    LD_mat <- sumstat_data$LD_mat
+    LD_match <- sumstat_data$LD_match
+    studies <- names(rss_input)
+    LD_data <- list()
+    ld_group <- character()
+    for (i in seq_along(studies)) {
+      study <- studies[[i]]
+      ld_name <- if (!is.null(LD_match) && length(LD_match) >= i) LD_match[[i]] else study
+      if (is.null(ld_name) || is.na(ld_name) || !ld_name %in% names(LD_mat)) {
+        ld_name <- names(LD_mat)[min(i, length(LD_mat))]
+      }
+      ld <- LD_mat[[ld_name]]
+      rss <- rss_input[[study]]
+      variant_ids <- variant_ids_from_rss(rss)
+      LD_data[[study]] <- make_ld_data_from_matrix(ld, variant_ids)
+      ld_group[[study]] <- ld_name
+    }
+    list(
+      rss_input = rss_input,
+      LD_data = LD_data,
+      source_info = list(has_sumstat = length(rss_input) > 0,
+                         studies = names(rss_input),
+                         ld_group = ld_group)
+    )
+  }
+
+  sumstat_data <- region_data$sumstat_data
+  if (is.null(sumstat_data) || is.null(sumstat_data$sumstats)) {
+    return(list(rss_input = list(), LD_data = list(),
+                source_info = list(has_sumstat = FALSE, studies = character(),
+                                   ld_group = character())))
+  }
+  if (!is.null(sumstat_data$LD_mat)) {
+    return(rss_input_from_qced_sumstat(sumstat_data))
+  }
+
+  rss_input <- list()
+  LD_data <- list()
+  ld_group <- character()
+
+  for (i in seq_along(sumstat_data$sumstats)) {
+    studies <- sumstat_data$sumstats[[i]]
+    ld_index <- min(i, length(sumstat_data$LD_info))
+    group_name <- names(sumstat_data$LD_info)[ld_index]
+    if (is.null(group_name) || is.na(group_name) || group_name == "") {
+      group_name <- paste0("LD", ld_index)
+    }
+    for (study in names(studies)) {
+      output_name <- study
+      if (output_name %in% names(rss_input)) {
+        output_name <- make.unique(c(names(rss_input), output_name))[length(rss_input) + 1]
+      }
+      rss_input[[output_name]] <- studies[[study]]
+      LD_data[[output_name]] <- sumstat_data$LD_info[[ld_index]]
+      ld_group[[output_name]] <- group_name
+    }
+  }
+
+  list(
+    rss_input = rss_input,
+    LD_data = LD_data,
+    source_info = list(has_sumstat = length(rss_input) > 0,
+                       studies = names(rss_input),
+                       ld_group = ld_group)
+  )
+}
+
 #' Load and filter tabular data with optional region subsetting
 #'
 #' This function loads summary statistics data from tabular files (TSV, TXT).
@@ -1909,6 +2155,17 @@ load_tsv_region <- function(file_path, region = NULL, extract_region_name = NULL
         if (length(hdr) > 0) {
           last_hdr <- hdr[length(hdr)]
           col_names_vec <- strsplit(sub("^#", "", last_hdr), "\t")[[1]]
+        } else {
+          header_con <- gzfile(file_path, "rt")
+          first_line <- readLines(header_con, n = 1)
+          close(header_con)
+          first_fields <- strsplit(sub("^#", "", first_line), "\t")[[1]]
+          header_tokens <- c("chrom", "chr", "#chrom", "pos", "bp", "snp",
+                             "variant_id", "a1", "a2", "beta", "se", "z",
+                             "p", "pvalue")
+          if (any(tolower(first_fields) %in% header_tokens)) {
+            col_names_vec <- first_fields
+          }
         }
 
         txt <- paste(lines, collapse = "\n")

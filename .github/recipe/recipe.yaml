@@ -69,7 +69,6 @@ requirements:
     - r-stringr
     - r-susier
     - r-tibble
-    - r-tictoc
     - r-tidyr
     - r-vctrs
     - r-vroom
@@ -116,7 +115,6 @@ requirements:
     - r-stringr
     - r-susier
     - r-tibble
-    - r-tictoc
     - r-tidyr
     - r-vctrs
     - r-vroom

@@ -15,7 +15,7 @@ rss_analysis_pipeline(
   skip_region = NULL,
   extract_region_name = NULL,
   region_name_col = NULL,
-  qc_method = c("slalom", "dentist"),
+  qc_method = c("slalom", "dentist", "none"),
   finemapping_method = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
   finemapping_opts = list(L = 20, L_greedy = 5, coverage = c(0.95, 0.7, 0.5),
     signal_cutoff = 0.025, min_abs_corr = 0.8),
@@ -37,7 +37,8 @@ rss_analysis_pipeline(
 \item{LD_data}{A list from load_LD_matrix containing LD_matrix, LD_variants,
 ref_panel, block_metadata, and is_genotype flag. When is_genotype=TRUE
 (from return_genotype=TRUE), LD_matrix contains genotype X and susie_rss
-uses the z+X interface. R is computed internally for QC/imputation.}
+uses the z+X interface. Local R is computed only for QC stages that
+require a correlation matrix.}
 
 \item{n_sample}{Sample size. If 0, retrieved from the sumstat file.}
 
@@ -53,7 +54,9 @@ uses the z+X interface. R is computed internally for QC/imputation.}
 
 \item{region_name_col}{Column to filter for extract_region_name.}
 
-\item{qc_method}{QC method: "slalom" or "dentist".}
+\item{qc_method}{Summary-statistic QC method. \code{"slalom"} and
+\code{"dentist"} run basic allele harmonization plus LD-mismatch QC;
+\code{"none"} runs basic allele harmonization only.}
 
 \item{finemapping_method}{One of "susie_rss", "single_effect", "bayesian_conditional_regression".}
 

@@ -4,7 +4,13 @@
 \alias{rss_basic_qc}
 \title{Preprocess input data for RSS analysis}
 \usage{
-rss_basic_qc(sumstats, LD_data, skip_region = NULL, keep_indel = TRUE)
+rss_basic_qc(
+  sumstats,
+  LD_data,
+  skip_region = NULL,
+  keep_indel = TRUE,
+  return_LD_mat = TRUE
+)
 }
 \arguments{
 \item{sumstats}{A data frame containing summary statistics with columns "chrom", "pos", "A1", and "A2".}
@@ -13,6 +19,11 @@ rss_basic_qc(sumstats, LD_data, skip_region = NULL, keep_indel = TRUE)
 
 \item{skip_region}{A character vector specifying regions to be skipped in the analysis (optional).
 Each region should be in the format "chrom:start-end" (e.g., "1:1000000-2000000").}
+
+\item{return_LD_mat}{Logical; if \code{FALSE}, return only harmonized
+summary statistics and skip LD-matrix subsetting. This is useful when the
+reference input is genotype-backed \code{X_ref}. Defaults to \code{TRUE}
+for backwards compatibility.}
 }
 \value{
 A list containing the processed summary statistics and LD matrix.

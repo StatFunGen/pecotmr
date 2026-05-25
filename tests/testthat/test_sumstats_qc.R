@@ -257,6 +257,19 @@ test_that("rss_basic_qc handles multiple skip regions", {
   expect_true(500 %in% remaining_pos)
 })
 
+test_that("rss_basic_qc can skip LD matrix subsetting for genotype references", {
+  td <- make_test_sumstats_ld(n_variants = 3)
+  X_ref <- matrix(rnorm(30), 10, 3)
+  colnames(X_ref) <- td$variant_ids
+  td$LD_data$LD_matrix <- X_ref
+  td$LD_data$is_genotype <- TRUE
+
+  result <- rss_basic_qc(td$sumstats, td$LD_data, return_LD_mat = FALSE)
+
+  expect_true(nrow(result$sumstats) > 0)
+  expect_null(result$LD_mat)
+})
+
 # ===========================================================================
 # summary_stats_qc
 # ===========================================================================
@@ -389,6 +402,124 @@ test_that("summary_stats_qc returns LD_mat matching filtered sumstats dimensions
   )
   expect_equal(nrow(result$LD_mat), nrow(result$sumstats))
   expect_equal(ncol(result$LD_mat), nrow(result$sumstats))
+})
+
+test_that("summary_stats_qc basic genotype-backed path does not compute LD", {
+  td <- make_test_sumstats_ld(n_variants = 5)
+  X_ref <- matrix(rnorm(50), 10, 5)
+  colnames(X_ref) <- td$variant_ids
+  td$LD_data$LD_matrix <- X_ref
+  td$LD_data$is_genotype <- TRUE
+  rss_input <- list(sumstats = td$sumstats, n = 1000, var_y = 1)
+
+  local_mocked_bindings(
+    compute_LD = function(...) stop("compute_LD should not be called")
+  )
+
+  expect_message(
+    result <- summary_stats_qc(rss_input = rss_input, LD_data = td$LD_data,
+                               qc_method = "none", impute = FALSE),
+    "basic harmonization retained"
+  )
+  expect_equal(nrow(result$LD_matrix), nrow(X_ref))
+  expect_equal(ncol(result$LD_matrix), nrow(result$rss_input$sumstats))
+})
+
+test_that("summary_stats_qc PIP screening uses LD-independent SER", {
+  td <- make_test_sumstats_ld(n_variants = 5)
+  X_ref <- matrix(rnorm(50), 10, 5)
+  colnames(X_ref) <- td$variant_ids
+  td$LD_data$LD_matrix <- X_ref
+  td$LD_data$is_genotype <- TRUE
+  rss_input <- list(sumstats = td$sumstats, n = 1000, var_y = 1)
+
+  local_mocked_bindings(
+    compute_LD = function(...) stop("compute_LD should not be called"),
+    susie_rss = function(z, R = NULL, X = NULL, ...) {
+      expect_null(X)
+      expect_equal(R, diag(length(z)))
+      list(pip = rep(1, length(z)))
+    }
+  )
+
+  result <- suppressMessages(summary_stats_qc(
+    rss_input = rss_input,
+    LD_data = td$LD_data,
+    qc_method = "none",
+    pip_cutoff_to_skip = 0.1,
+    impute = FALSE
+  ))
+  expect_equal(ncol(result$LD_matrix), nrow(result$rss_input$sumstats))
+})
+
+test_that("summary_stats_qc treats NULL qc_method as basic-only none", {
+  td <- make_test_sumstats_ld(n_variants = 5)
+  rss_input <- list(sumstats = td$sumstats, n = 1000, var_y = 1)
+
+  local_mocked_bindings(
+    ld_mismatch_qc = function(...) stop("ld_mismatch_qc should not be called")
+  )
+
+  expect_message(
+    result <- summary_stats_qc(
+      rss_input = rss_input,
+      LD_data = td$LD_data,
+      qc_method = NULL,
+      impute = FALSE
+    ),
+    "basic harmonization retained"
+  )
+  expect_equal(nrow(result$rss_input$sumstats), nrow(td$sumstats))
+})
+
+test_that("summary_stats_qc rejects invalid qc_method values", {
+  td <- make_test_sumstats_ld(n_variants = 5)
+  rss_input <- list(sumstats = td$sumstats, n = 1000, var_y = 1)
+
+  expect_error(
+    summary_stats_qc(
+      rss_input = rss_input,
+      LD_data = td$LD_data,
+      qc_method = "bad_method"
+    ),
+    "should be one of"
+  )
+})
+
+test_that("summary_stats_qc LD-mismatch QC computes only filtered local LD from X_ref", {
+  td <- make_test_sumstats_ld(n_variants = 5)
+  X_ref <- matrix(rnorm(50), 10, 5)
+  colnames(X_ref) <- td$variant_ids
+  td$LD_data$LD_matrix <- X_ref
+  td$LD_data$is_genotype <- TRUE
+  rss_input <- list(sumstats = td$sumstats, n = 1000, var_y = 1)
+  compute_calls <- 0
+
+  local_mocked_bindings(
+    compute_LD = function(X, ...) {
+      compute_calls <<- compute_calls + 1
+      expect_equal(ncol(X), 3)
+      R <- diag(ncol(X))
+      rownames(R) <- colnames(R) <- colnames(X)
+      R
+    },
+    ld_mismatch_qc = function(zScore, R, nSample = NULL, method = NULL, ...) {
+      expect_equal(nrow(R), length(zScore))
+      expect_equal(ncol(R), length(zScore))
+      data.frame(outlier = rep(FALSE, length(zScore)))
+    }
+  )
+
+  result <- suppressMessages(summary_stats_qc(
+    rss_input = rss_input,
+    LD_data = td$LD_data,
+    qc_method = "slalom",
+    skip_region = "1:150-350",
+    impute = FALSE
+  ))
+  expect_equal(compute_calls, 1)
+  expect_equal(ncol(result$LD_matrix), nrow(result$rss_input$sumstats))
+  expect_equal(ncol(result$LD_matrix), 3)
 })
 
 # ===========================================================================

@@ -1543,7 +1543,8 @@ test_that("load_multitask_regional_data errors with multiple genotypes and no ma
       region = "chr1:1-1000",
       genotype_list = c("geno1.bed", "geno2.bed"),
       phenotype_list = c("pheno1.gz"),
-      covariate_list = c("covar1.gz")
+      covariate_list = c("covar1.gz"),
+      conditions_list_individual = "cond1"
     ),
     "match_geno_pheno"
   )
@@ -1568,6 +1569,164 @@ test_that("load_multitask_regional_data individual-level path returns expected s
   expect_true("residual_Y" %in% names(result$individual_data))
   expect_true("X" %in% names(result$individual_data))
   expect_true("chrom" %in% names(result$individual_data))
+})
+
+test_that("load_multitask_regional_data loads and merges multiple genotype groups", {
+  calls <- list()
+  make_mock_dat <- function(conditions) {
+    x <- setNames(lapply(conditions, function(nm) {
+      matrix(1, nrow = 2, ncol = 2,
+             dimnames = list(c("s1", "s2"), paste0(nm, "_v", 1:2)))
+    }), conditions)
+    y <- setNames(lapply(conditions, function(nm) {
+      matrix(1, nrow = 2, ncol = 1,
+             dimnames = list(c("s1", "s2"), nm))
+    }), conditions)
+    list(
+      residual_Y = y,
+      residual_X = x,
+      residual_Y_scalar = setNames(as.list(rep(1, length(conditions))), conditions),
+      residual_X_scalar = setNames(as.list(rep(1, length(conditions))), conditions),
+      dropped_sample = list(X = list(), Y = list(), covar = list()),
+      covar = list(),
+      Y = y,
+      X_data = x,
+      X = do.call(cbind, x),
+      maf = setNames(lapply(x, function(mat) rep(0.1, ncol(mat))), conditions),
+      chrom = "chr1",
+      grange = c("1", "100"),
+      Y_coordinates = list()
+    )
+  }
+
+  local_mocked_bindings(
+    load_regional_univariate_data = function(genotype, phenotype, covariate,
+                                             conditions, extract_region_name, ...) {
+      calls[[length(calls) + 1]] <<- list(
+        genotype = genotype,
+        phenotype = phenotype,
+        covariate = covariate,
+        conditions = conditions,
+        extract_region_name = extract_region_name
+      )
+      make_mock_dat(conditions)
+    }
+  )
+
+  result <- expect_warning(
+    load_multitask_regional_data(
+      region = "chr1:1-100",
+      genotype_list = c("geno1", "geno2"),
+      phenotype_list = paste0("pheno", 1:4),
+      covariate_list = paste0("covar", 1:4),
+      conditions_list_individual = paste0("cond", 1:4),
+      match_geno_pheno = c(1, 1, 2, 2),
+      extract_region_name = as.list(paste0("gene", 1:4)),
+      region_name_col = 4
+    ),
+    NA
+  )
+
+  expect_equal(length(calls), 2L)
+  expect_equal(vapply(calls, `[[`, character(1), "genotype"), c("geno1", "geno2"))
+  expect_equal(calls[[1]]$phenotype, paste0("pheno", 1:2))
+  expect_equal(calls[[2]]$phenotype, paste0("pheno", 3:4))
+  expect_equal(calls[[1]]$extract_region_name, as.list(paste0("gene", 1:2)))
+  expect_equal(calls[[2]]$extract_region_name, as.list(paste0("gene", 3:4)))
+  expect_true("residual_X" %in% names(result$individual_data))
+  expect_equal(names(result$individual_data$residual_X), paste0("cond", 1:4))
+})
+
+test_that("load_multitask_regional_data defaults missing individual condition names", {
+  calls <- list()
+  make_mock_dat <- function(conditions) {
+    x <- setNames(lapply(conditions, function(nm) {
+      matrix(1, nrow = 2, ncol = 2,
+             dimnames = list(c("s1", "s2"), paste0(nm, "_v", 1:2)))
+    }), conditions)
+    y <- setNames(lapply(conditions, function(nm) {
+      matrix(1, nrow = 2, ncol = 1,
+             dimnames = list(c("s1", "s2"), nm))
+    }), conditions)
+    list(
+      residual_Y = y,
+      residual_X = x,
+      residual_Y_scalar = setNames(as.list(rep(1, length(conditions))), conditions),
+      residual_X_scalar = setNames(as.list(rep(1, length(conditions))), conditions),
+      dropped_sample = list(X = list(), Y = list(), covar = list()),
+      covar = list(),
+      Y = y,
+      X_data = x,
+      X = do.call(cbind, x),
+      maf = setNames(lapply(x, function(mat) rep(0.1, ncol(mat))), conditions),
+      chrom = "chr1",
+      grange = c("1", "100"),
+      Y_coordinates = list()
+    )
+  }
+
+  local_mocked_bindings(
+    load_regional_univariate_data = function(genotype, phenotype, covariate,
+                                             conditions, ...) {
+      calls[[length(calls) + 1]] <<- list(
+        genotype = genotype,
+        phenotype = phenotype,
+        covariate = covariate,
+        conditions = conditions
+      )
+      make_mock_dat(conditions)
+    }
+  )
+
+  result <- expect_warning(
+    load_multitask_regional_data(
+      region = "chr1:1-100",
+      genotype_list = c("geno1", "geno2"),
+      phenotype_list = paste0("pheno", 1:4),
+      covariate_list = paste0("covar", 1:4),
+      match_geno_pheno = c(1, 1, 2, 2)
+    ),
+    "conditions_list_individual"
+  )
+
+  expect_equal(length(calls), 2L)
+  expect_equal(calls[[1]]$conditions, paste0("condition", 1:2))
+  expect_equal(calls[[2]]$conditions, paste0("condition", 3:4))
+  expect_equal(names(result$individual_data$residual_X), paste0("condition", 1:4))
+})
+
+test_that("load_multitask_regional_data validates individual input vector lengths", {
+  expect_error(
+    load_multitask_regional_data(
+      region = "chr1:1-100",
+      genotype_list = "geno",
+      phenotype_list = paste0("pheno", 1:2),
+      covariate_list = "covar",
+      conditions_list_individual = paste0("cond", 1:2)
+    ),
+    "phenotype_list"
+  )
+  expect_error(
+    load_multitask_regional_data(
+      region = "chr1:1-100",
+      genotype_list = "geno",
+      phenotype_list = paste0("pheno", 1:2),
+      covariate_list = paste0("covar", 1:2),
+      conditions_list_individual = "cond"
+    ),
+    "conditions_list_individual"
+  )
+  expect_error(
+    load_multitask_regional_data(
+      region = "chr1:1-100",
+      genotype_list = c("geno1", "geno2"),
+      phenotype_list = paste0("pheno", 1:2),
+      covariate_list = paste0("covar", 1:2),
+      conditions_list_individual = paste0("cond", 1:2),
+      match_geno_pheno = c(1, 3)
+    ),
+    "match_geno_pheno"
+  )
 })
 
 test_that("load_multitask_regional_data sumstat path returns expected structure", {
