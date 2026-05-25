@@ -431,7 +431,7 @@ init_prior_sd <- function(X, y, n = 30) {
 # their results back to length p.
 #' @importFrom matrixStats colSds
 .drop_zero_variance <- function(X, fn_name) {
-  sds <- matrixStats::colSds(X)
+  sds <- colSds(X)
   keep <- !is.na(sds) & sds != 0
   if (!all(keep)) {
     warning(sprintf(
@@ -1056,6 +1056,304 @@ lassosum_rss_weights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
     mode = selector_result$mode,
     index = selector_result$index,
     s = candidate_meta$s[selector_result$index],
+    lambda = candidate_meta$lambda[selector_result$index]
+  )
+  best_beta
+}
+
+#' Penalized Regression on RSS (Summary Statistics) Objective
+#'
+#' Generalizes \code{lassosum_rss()} to support LASSO, MCP, SCAD, L0, L0L1,
+#' and L0L2 penalties.  Uses coordinate descent on the objective
+#' \deqn{\beta^T R \beta - 2 \beta^T z + \mathrm{penalty}(\beta)}
+#' where \eqn{R} is a (possibly pre-shrunk) LD matrix and \eqn{z = \hat\beta / \sqrt{n}}.
+#'
+#' @param bhat Numeric vector of marginal effect estimates (length p).
+#' @param LD A list of LD correlation matrices (one per block), as in
+#'   \code{lassosum_rss()}.
+#' @param n GWAS sample size (positive scalar).
+#' @param penalty Penalty type: \code{"lasso"}, \code{"MCP"}, \code{"SCAD"},
+#'   \code{"L0"}, \code{"L0L1"}, or \code{"L0L2"}.
+#' @param lambda Numeric vector of regularization parameter values along which
+#'   to trace a solution path (warm-started, largest-first).  For LASSO/MCP/SCAD
+#'   this is the primary penalty strength; for L0 variants it controls the L1
+#'   component.
+#' @param gamma Concavity parameter for MCP (default 3) or SCAD (default 3.7).
+#'   Ignored for LASSO and L0 variants.
+#' @param alpha Elastic-net mixing for MCP/SCAD: \eqn{l_1 = \lambda \alpha},
+#'   \eqn{l_2 = \lambda (1-\alpha)}.  Default 1 (pure L1, no ridge).
+#' @param lambda0 L0 penalty weight (number of non-zeros).  Required for L0
+#'   variants; ignored otherwise.  Default 0.
+#' @param lambda2 L2 penalty weight for L0L2 variant.  Default 0.
+#' @param thr Convergence threshold.  Default 1e-4.
+#' @param maxiter Maximum coordinate descent iterations per lambda.  Default 10000.
+#' @param max_swaps Maximum swap rounds for L0 variants.  Default 100.
+#'   Set to 0 to disable swaps.
+#'
+#' @return A list with components:
+#' \describe{
+#'   \item{beta}{p x length(lambda) matrix of coefficient estimates.}
+#'   \item{lambda}{The lambda values used.}
+#'   \item{conv}{Convergence indicators (1 = converged).}
+#'   \item{loss}{Quadratic loss at each lambda.}
+#'   \item{fbeta}{Full penalized objective at each lambda.}
+#'   \item{nparams}{Number of non-zero coefficients at each lambda.}
+#'   \item{beta_est}{Coefficient vector at the lambda minimizing fbeta.}
+#' }
+#'
+#' @examples
+#' \dontrun{
+#' set.seed(42)
+#' p <- 10; n <- 100
+#' bhat <- rnorm(p, sd = 0.1)
+#' R <- diag(p)
+#' # MCP
+#' penalized_rss(bhat, list(blk1 = R), n, penalty = "MCP")
+#' # SCAD
+#' penalized_rss(bhat, list(blk1 = R), n, penalty = "SCAD")
+#' # L0
+#' penalized_rss(bhat, list(blk1 = R), n, penalty = "L0", lambda0 = 0.01,
+#'               lambda = c(0))
+#' }
+#' @export
+penalized_rss <- function(bhat, LD, n,
+                          penalty = c("lasso", "MCP", "SCAD", "L0", "L0L1", "L0L2"),
+                          lambda = exp(seq(log(0.0001), log(0.1), length.out = 20)),
+                          gamma = NULL, alpha = 1.0,
+                          lambda0 = 0, lambda2 = 0,
+                          thr = 1e-4, maxiter = 10000, max_swaps = 100) {
+  penalty <- match.arg(penalty)
+  if (!is.list(LD)) {
+    stop("Please provide a valid list of LD blocks using 'LD'.")
+  }
+  if (missing(n) || n <= 0) {
+    stop("Please provide a valid sample size using 'n'.")
+  }
+  total_rows_in_LD <- sum(sapply(LD, nrow))
+  if (length(bhat) != total_rows_in_LD) {
+    stop("The length of 'bhat' must be the same as the sum of the number of rows of all elements in the 'LD' list.")
+  }
+
+  # Default gamma per penalty
+  if (is.null(gamma)) {
+    gamma <- switch(penalty,
+                    SCAD = 3.7,
+                    MCP  = 3.0,
+                    0.0)
+  }
+
+  z <- bhat / sqrt(n)
+  order <- order(lambda, decreasing = TRUE)
+
+  result <- penalized_rss_rcpp(z, LD, lambda[order], penalty,
+                               gamma, alpha, lambda0, lambda2,
+                               thr, as.integer(maxiter), as.integer(max_swaps))
+
+  # Reorder back to original lambda order
+  inv_order <- order(order)
+  result$beta   <- result$beta[, inv_order, drop = FALSE]
+  result$conv   <- result$conv[inv_order]
+  result$loss   <- result$loss[inv_order]
+  result$fbeta  <- result$fbeta[inv_order]
+  result$lambda <- lambda
+  result$nparams <- as.integer(colSums(result$beta != 0))
+  result$beta_est <- as.numeric(result$beta[, which.min(result$fbeta)])
+  result
+}
+
+#' RSS Weights Helper for Penalized Methods
+#'
+#' Shared implementation for \code{scad_rss_weights()}, \code{mcp_rss_weights()},
+#' and \code{l0learn_rss_weights()}.  Searches over a shrinkage grid \code{s}
+#' (LD matrix shrinkage \code{(1-s)R + sI}) and selects the best candidate via
+#' LD-quadratic pseudovalidation or minimum penalized objective.
+#'
+#' @param stat,LD,s,selection,penalty,gamma,alpha,lambda0,lambda2,...
+#'   See the public wrappers for details.
+#' @return Numeric weight vector of length \code{nrow(LD)}.
+#' @keywords internal
+.penalized_rss_weights <- function(stat, LD, penalty,
+                                   s = c(0.2, 0.5, 0.9, 1.0),
+                                   gamma = NULL, alpha = 1.0,
+                                   lambda0 = 0, lambda2 = 0,
+                                   selection = c("ld_quadratic", "min_fbeta"),
+                                   ...) {
+  selection <- match.arg(selection)
+  n <- median(stat$n)
+  p <- nrow(LD)
+  cor_input <- .lassosum_clamp_cor(.lassosum_cor_from_stat(stat, n = n, p = p))
+  solver_input <- cor_input * sqrt(n)
+  candidate_beta <- NULL
+  candidate_meta <- list()
+
+  for (s_val in s) {
+    LD_s <- (1 - s_val) * LD + s_val * diag(p)
+    model <- penalized_rss(bhat = solver_input, LD = list(blk1 = LD_s), n = n,
+                           penalty = penalty, gamma = gamma, alpha = alpha,
+                           lambda0 = lambda0, lambda2 = lambda2, ...)
+    candidate_beta <- cbind(candidate_beta, model$beta)
+    candidate_meta[[length(candidate_meta) + 1L]] <- data.frame(
+      s = rep(s_val, length(model$lambda)),
+      lambda = model$lambda,
+      fbeta = model$fbeta,
+      stringsAsFactors = FALSE
+    )
+  }
+  candidate_meta <- do.call(rbind, candidate_meta)
+
+  selector_result <- if (selection == "ld_quadratic") {
+    .lassosum_select_ld_quadratic(candidate_beta, cor_input, LD)
+  } else {
+    .lassosum_select_min_fbeta(candidate_beta, candidate_meta)
+  }
+
+  best_beta <- as.numeric(selector_result$beta)
+  attr(best_beta, "penalized_rss_selection") <- c(
+    mode = selector_result$mode,
+    index = selector_result$index,
+    penalty = penalty,
+    s = candidate_meta$s[selector_result$index],
+    lambda = candidate_meta$lambda[selector_result$index]
+  )
+  best_beta
+}
+
+#' Compute SCAD-Penalized Weights from Summary Statistics
+#'
+#' Fits SCAD-penalized regression on the RSS objective, searching over a
+#' shrinkage grid \code{s} and lambda path.  Model selection uses LD-quadratic
+#' pseudovalidation by default.
+#'
+#' @param stat A list with \code{$b} (effect sizes) and \code{$n} (per-variant sample sizes).
+#' @param LD LD correlation matrix R (single matrix, NOT pre-shrunk).
+#' @param s Numeric vector of LD shrinkage parameters.  Default:
+#'   \code{c(0.2, 0.5, 0.9, 1.0)}.
+#' @param gamma SCAD concavity parameter.  Default 3.7.
+#' @param alpha Elastic-net mixing (1 = pure L1).  Default 1.
+#' @param selection Selection strategy: \code{"ld_quadratic"} (default) or
+#'   \code{"min_fbeta"}.
+#' @param ... Additional arguments passed to \code{penalized_rss()}.
+#' @return A numeric vector of SNP coefficient weights.
+#' @export
+scad_rss_weights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
+                             gamma = 3.7, alpha = 1.0,
+                             selection = c("ld_quadratic", "min_fbeta"), ...) {
+  .penalized_rss_weights(stat = stat, LD = LD, penalty = "SCAD",
+                         s = s, gamma = gamma, alpha = alpha,
+                         selection = selection, ...)
+}
+
+#' Compute MCP-Penalized Weights from Summary Statistics
+#'
+#' Fits MCP-penalized regression on the RSS objective, searching over a
+#' shrinkage grid \code{s} and lambda path.  Model selection uses LD-quadratic
+#' pseudovalidation by default.
+#'
+#' @param stat A list with \code{$b} (effect sizes) and \code{$n} (per-variant sample sizes).
+#' @param LD LD correlation matrix R (single matrix, NOT pre-shrunk).
+#' @param s Numeric vector of LD shrinkage parameters.  Default:
+#'   \code{c(0.2, 0.5, 0.9, 1.0)}.
+#' @param gamma MCP concavity parameter.  Default 3.
+#' @param alpha Elastic-net mixing (1 = pure L1).  Default 1.
+#' @param selection Selection strategy: \code{"ld_quadratic"} (default) or
+#'   \code{"min_fbeta"}.
+#' @param ... Additional arguments passed to \code{penalized_rss()}.
+#' @return A numeric vector of SNP coefficient weights.
+#' @export
+mcp_rss_weights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
+                            gamma = 3.0, alpha = 1.0,
+                            selection = c("ld_quadratic", "min_fbeta"), ...) {
+  .penalized_rss_weights(stat = stat, LD = LD, penalty = "MCP",
+                         s = s, gamma = gamma, alpha = alpha,
+                         selection = selection, ...)
+}
+
+#' Compute L0-Penalized Weights from Summary Statistics
+#'
+#' Fits L0-penalized regression (with optional L1/L2 components) on the RSS
+#' objective, searching over a shrinkage grid \code{s} and lambda0 path.
+#' Model selection uses LD-quadratic pseudovalidation by default.
+#'
+#' The swap optimization from L0Learn is included: after coordinate descent
+#' converges, non-zero coefficients are tested for swaps with zero ones to
+#' escape local optima.
+#'
+#' @param stat A list with \code{$b} (effect sizes) and \code{$n} (per-variant sample sizes).
+#' @param LD LD correlation matrix R (single matrix, NOT pre-shrunk).
+#' @param penalty L0 variant: \code{"L0"}, \code{"L0L1"}, or \code{"L0L2"}.
+#'   Default \code{"L0"}.
+#' @param s Numeric vector of LD shrinkage parameters.  Default:
+#'   \code{c(0.2, 0.5, 0.9, 1.0)}.
+#' @param lambda0 Numeric vector of L0 penalty values to search over.
+#'   Default: \code{exp(seq(log(0.001), log(1), length.out = 10))}.
+#' @param lambda Numeric vector of L1 penalty values (for L0L1).  Default:
+#'   \code{c(0)} (no L1 unless L0L1 is used).
+#' @param lambda2 L2 penalty weight (for L0L2).  Default 0.
+#' @param selection Selection strategy: \code{"ld_quadratic"} (default) or
+#'   \code{"min_fbeta"}.
+#' @param max_swaps Maximum swap rounds per lambda.  Default 100.
+#' @param ... Additional arguments passed to \code{penalized_rss()}.
+#' @return A numeric vector of SNP coefficient weights.
+#' @export
+l0learn_rss_weights <- function(stat, LD,
+                                penalty = c("L0", "L0L1", "L0L2"),
+                                s = c(0.2, 0.5, 0.9, 1.0),
+                                lambda0 = exp(seq(log(0.001), log(1), length.out = 10)),
+                                lambda = NULL, lambda2 = 0,
+                                selection = c("ld_quadratic", "min_fbeta"),
+                                max_swaps = 100, ...) {
+  penalty <- match.arg(penalty)
+  selection <- match.arg(selection)
+
+  # Default lambda (L1 component) depends on variant
+  if (is.null(lambda)) {
+    lambda <- if (penalty == "L0L1") {
+      exp(seq(log(0.0001), log(0.1), length.out = 10))
+    } else {
+      c(0)
+    }
+  }
+
+  n <- median(stat$n)
+  p <- nrow(LD)
+  cor_input <- .lassosum_clamp_cor(.lassosum_cor_from_stat(stat, n = n, p = p))
+  solver_input <- cor_input * sqrt(n)
+  candidate_beta <- NULL
+  candidate_meta <- list()
+
+  # Grid search over s and lambda0
+  for (s_val in s) {
+    LD_s <- (1 - s_val) * LD + s_val * diag(p)
+    for (l0_val in lambda0) {
+      model <- penalized_rss(bhat = solver_input, LD = list(blk1 = LD_s), n = n,
+                             penalty = penalty, lambda = lambda,
+                             lambda0 = l0_val, lambda2 = lambda2,
+                             max_swaps = max_swaps, ...)
+      candidate_beta <- cbind(candidate_beta, model$beta)
+      candidate_meta[[length(candidate_meta) + 1L]] <- data.frame(
+        s = rep(s_val, length(model$lambda)),
+        lambda0 = rep(l0_val, length(model$lambda)),
+        lambda = model$lambda,
+        fbeta = model$fbeta,
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  candidate_meta <- do.call(rbind, candidate_meta)
+
+  selector_result <- if (selection == "ld_quadratic") {
+    .lassosum_select_ld_quadratic(candidate_beta, cor_input, LD)
+  } else {
+    .lassosum_select_min_fbeta(candidate_beta, candidate_meta)
+  }
+
+  best_beta <- as.numeric(selector_result$beta)
+  attr(best_beta, "penalized_rss_selection") <- c(
+    mode = selector_result$mode,
+    index = selector_result$index,
+    penalty = penalty,
+    s = candidate_meta$s[selector_result$index],
+    lambda0 = candidate_meta$lambda0[selector_result$index],
     lambda = candidate_meta$lambda[selector_result$index]
   )
   best_beta

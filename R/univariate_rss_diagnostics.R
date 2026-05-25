@@ -85,7 +85,7 @@ extract_cs_info <- function(con_data, cs_names, top_loci_table) {
     }
     
     # Return results for this CS as a one-row data.frame
-    result = tibble::tibble(
+    result = tibble(
       cs_name = cs_name,
       variants_per_cs = length(cs_variants),
       top_variant = top_variant,

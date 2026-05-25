@@ -23,7 +23,7 @@ jobs:
         run: .github/workflows/create_toml_from_yaml.sh ${GITHUB_WORKSPACE}
 
       - name: Setup pixi
-        uses: prefix-dev/setup-pixi@v0.9.5
+        uses: prefix-dev/setup-pixi@v0.9.6
 
       - name: Run unit tests
         run: pixi run devtools_document

@@ -7,6 +7,7 @@
 compute_LD(
   X,
   method = c("sample", "population", "gcta"),
+  backend = c("internal", "snprelate", "snpstats"),
   trim_samples = FALSE,
   shrinkage = 0
 )
@@ -18,6 +19,21 @@ for missing genotypes.}
 \item{method}{Character, one of \code{"sample"} (default, N-1 denominator),
 \code{"population"} (N denominator, GCTA-style), or \code{"gcta"} (per-pair
 missing data correction). Partial matching is supported.}
+
+\item{backend}{Character, one of \code{"internal"} (default), \code{"snprelate"},
+or \code{"snpstats"}. Controls which library computes the correlation matrix
+when \code{method = "sample"}:
+\describe{
+  \item{\code{"internal"}}{Uses \code{Rfast::cora} if available, otherwise
+    base \code{cor()}.}
+  \item{\code{"snprelate"}}{Requires a temporary GDS file; uses
+    \code{SNPRelate::snpgdsLDMat(method = "corr")}.}
+  \item{\code{"snpstats"}}{Converts to \code{SnpMatrix}; uses
+    \code{snpStats::ld(, stat = "R")}.}
+}
+The \code{"snprelate"} and \code{"snpstats"} backends are only supported
+with \code{method = "sample"}; combining them with other methods will
+raise an error.}
 
 \item{trim_samples}{Logical. If \code{TRUE} and \code{method} is
 \code{"population"} or \code{"gcta"}, drops trailing samples so that

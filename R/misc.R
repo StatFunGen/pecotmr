@@ -1,58 +1,3 @@
-#' @export
-wald_test_pval <- function(beta, se, n) {
-  # Calculate the t statistic
-  t_value <- beta / se
-  # Degrees of freedom
-  df <- n - 2
-  # Calculate two-tailed p-value
-  p_value <- 2 * pt(-abs(t_value), df = df, lower.tail = TRUE)
-
-  return(p_value)
-}
-
-pval_acat <- function(pvals) {
-  if (length(pvals) == 1) {
-    return(pvals[1])
-  }
-  # ACAT statistic: T = mean(tan(pi*(0.5 - p_i)))
-  # Liu & Xie (2020) "Cauchy combination test"
-  #
-  # For very small p, tan(pi*(0.5-p)) overflows due to floating-point
-  # precision loss in pi*0.5. Use the asymptotic approximation
-  # tan(pi*(0.5-p)) ~ 1/(pi*p) for p < 1e-15 to avoid Inf/NaN.
-  cauchy_vals <- ifelse(pvals < 1e-15,
-                        1 / (pvals * pi),
-                        tan(pi * (0.5 - pvals)))
-  stat <- mean(cauchy_vals)
-  return(pcauchy(stat, lower.tail = FALSE))
-}
-
-pval_hmp <- function(pvals) {
-  # Make sure harmonicmeanp is installed
-  if (!requireNamespace("harmonicmeanp", quietly = TRUE)) {
-    stop("To use this function, please install harmonicmeanp: https://cran.r-project.org/web/packages/harmonicmeanp/index.html")
-  }
-  # https://search.r-project.org/CRAN/refmans/harmonicmeanp/html/pLandau.html
-  L <- length(pvals)
-  HMP <- L / sum(pvals^-1)
-
-  LOC_L1 <- 0.874367040387922
-  SCALE <- 1.5707963267949
-
-  return(harmonicmeanp::pLandau(1 / HMP, mu = log(L) + LOC_L1, sigma = SCALE, lower.tail = FALSE))
-}
-
-pval_global <- function(pvals, comb_method = "HMP", naive = FALSE) {
-  # assuming sstats has tissues as columns and rows as pvals
-  min_pval <- min(pvals)
-  n_total_tests <- pvals %>%
-    unique() %>%
-    length() # There should be one unique pval per tissue
-  global_pval <- if (comb_method == "HMP") pval_hmp(pvals) else pval_acat(pvals) # pval vector
-  naive_pval <- min(n_total_tests * min_pval, 1.0)
-  return(if (naive) naive_pval else global_pval) # global_pval and naive_pval
-}
-
 compute_qvalues <- function(pvalues) {
   # Make sure qvalue is installed
   if (!requireNamespace("qvalue", quietly = TRUE)) {
@@ -75,30 +20,6 @@ compute_qvalues <- function(pvalues) {
       qvalue::qvalue(pvalues, pi0 = 1)$qvalues
     }
   )
-}
-
-pval_cauchy <- function(p, na.rm = TRUE) {
-  if (na.rm) {
-    if (sum(is.na(p))) {
-      p <- p[!is.na(p)]
-    }
-  }
-  p[p > 0.99] <- 0.99
-  is.small <- (p < 1e-16) & !is.na(p)
-  is.regular <- (p >= 1e-16) & !is.na(p)
-  temp <- rep(NA, length(p))
-  temp[is.small] <- 1 / p[is.small] / pi
-  temp[is.regular] <- as.numeric(tan((0.5 - p[is.regular]) * pi))
-
-  cct.stat <- mean(temp, na.rm = TRUE)
-  if (is.na(cct.stat)) {
-    return(NA)
-  }
-  if (cct.stat > 1e+15) {
-    return((1 / cct.stat) / pi)
-  } else {
-    return(1 - pcauchy(cct.stat))
-  }
 }
 
 matxMax <- function(mtx) {
@@ -210,6 +131,20 @@ safe_svd <- function(mat, tol = 1e-8, max_rank = NULL) {
 #' @param method Character, one of \code{"sample"} (default, N-1 denominator),
 #'   \code{"population"} (N denominator, GCTA-style), or \code{"gcta"} (per-pair
 #'   missing data correction). Partial matching is supported.
+#' @param backend Character, one of \code{"internal"} (default), \code{"snprelate"},
+#'   or \code{"snpstats"}. Controls which library computes the correlation matrix
+#'   when \code{method = "sample"}:
+#'   \describe{
+#'     \item{\code{"internal"}}{Uses \code{Rfast::cora} if available, otherwise
+#'       base \code{cor()}.}
+#'     \item{\code{"snprelate"}}{Requires a temporary GDS file; uses
+#'       \code{SNPRelate::snpgdsLDMat(method = "corr")}.}
+#'     \item{\code{"snpstats"}}{Converts to \code{SnpMatrix}; uses
+#'       \code{snpStats::ld(, stat = "R")}.}
+#'   }
+#'   The \code{"snprelate"} and \code{"snpstats"} backends are only supported
+#'   with \code{method = "sample"}; combining them with other methods will
+#'   raise an error.
 #' @param trim_samples Logical. If \code{TRUE} and \code{method} is
 #'   \code{"population"} or \code{"gcta"}, drops trailing samples so that
 #'   \code{nrow(X)} is a multiple of 4, matching PLINK .bed file chunk processing.
@@ -256,29 +191,41 @@ safe_svd <- function(mat, tol = 1e-8, max_rank = NULL) {
 #'
 #' @export
 compute_LD <- function(X, method = c("sample", "population", "gcta"),
+                       backend = c("internal", "snprelate", "snpstats"),
                        trim_samples = FALSE, shrinkage = 0) {
   if (is.null(X)) {
     stop("X must be provided.")
   }
   method <- match.arg(method)
+  backend <- match.arg(backend)
   nms <- colnames(X)
 
   if (method == "sample") {
     # ---- Standard sample correlation (N-1 denominator) ----
-    # Mean impute only if NAs exist (PLINK2 data typically has none)
-    X_imp <- X
-    if (anyNA(X_imp)) {
-      col_means <- colMeans(X_imp, na.rm = TRUE)
-      na_pos <- which(is.na(X_imp), arr.ind = TRUE)
-      X_imp[na_pos] <- col_means[na_pos[, 2]]
-    }
-    if (requireNamespace("Rfast", quietly = TRUE)) {
-      # large=FALSE uses tcrossprod internally, ~40x faster than large=TRUE
-      R <- Rfast::cora(X_imp, large = FALSE)
+    if (backend == "snprelate") {
+      R <- .compute_ld_snprelate(X)
+    } else if (backend == "snpstats") {
+      R <- .compute_ld_snpstats(X)
     } else {
-      R <- cor(X_imp)
+      # internal backend: Rfast::cora if available, else base cor()
+      # Mean impute only if NAs exist (PLINK2 data typically has none)
+      X_imp <- X
+      if (anyNA(X_imp)) {
+        col_means <- colMeans(X_imp, na.rm = TRUE)
+        na_pos <- which(is.na(X_imp), arr.ind = TRUE)
+        X_imp[na_pos] <- col_means[na_pos[, 2]]
+      }
+      if (requireNamespace("Rfast", quietly = TRUE)) {
+        # large=FALSE uses tcrossprod internally, ~40x faster than large=TRUE
+        R <- Rfast::cora(X_imp, large = FALSE)
+      } else {
+        R <- cor(X_imp)
+      }
     }
   } else if (method == "population") {
+    if (backend != "internal") {
+      stop("backend '", backend, "' is only supported with method='sample'.")
+    }
     # ---- Population variance (N denominator, GCTA-style) ----
     # Optionally trim trailing samples to a multiple of 4 (matches .bed processing)
     if (trim_samples) {
@@ -314,6 +261,9 @@ compute_LD <- function(X, method = c("sample", "population", "gcta"),
     sd_vec <- sqrt(col_vars)
     R <- cov_mat / outer(sd_vec, sd_vec)
   } else {
+    if (backend != "internal") {
+      stop("backend '", backend, "' is only supported with method='sample'.")
+    }
     # ---- GCTA per-pair missing data correction ----
     # Matches the DENTIST binary's calcLDFromBfile_gcta formula exactly.
     # Unlike "population" which divides by total N, this method tracks
@@ -378,6 +328,67 @@ compute_LD <- function(X, method = c("sample", "population", "gcta"),
   }
 
   colnames(R) <- rownames(R) <- nms
+  R
+}
+
+#' Compute LD via SNPRelate (creates a temporary GDS file from the dosage matrix).
+#' @param X Numeric genotype matrix (samples x SNPs).
+#' @return Correlation matrix.
+#' @noRd
+.compute_ld_snprelate <- function(X) {
+  if (!requireNamespace("SNPRelate", quietly = TRUE))
+    stop("Package 'SNPRelate' is required for backend='snprelate'")
+  if (!requireNamespace("gdsfmt", quietly = TRUE))
+    stop("Package 'gdsfmt' is required for backend='snprelate'")
+
+  tmp_gds <- tempfile(fileext = ".gds")
+  on.exit(unlink(tmp_gds), add = TRUE)
+
+  # Round to integer dosage for GDS (0/1/2)
+  X_int <- round(X)
+  storage.mode(X_int) <- "integer"
+  X_int[is.na(X_int)] <- 3L  # GDS missing code
+
+  snp_ids <- colnames(X) %||% seq_len(ncol(X))
+  sample_ids <- rownames(X) %||% seq_len(nrow(X))
+
+  SNPRelate::snpgdsCreateGeno(tmp_gds,
+    genmat = X_int,
+    sample.id = sample_ids,
+    snp.id = snp_ids,
+    snp.chromosome = rep(1L, ncol(X)),
+    snp.position = seq_len(ncol(X)),
+    snpfirstdim = FALSE
+  )
+
+  gds <- SNPRelate::snpgdsOpen(tmp_gds, readonly = TRUE)
+  on.exit(SNPRelate::snpgdsClose(gds), add = TRUE)
+
+  ld_obj <- SNPRelate::snpgdsLDMat(gds, method = "corr",
+                                    slide = -1, verbose = FALSE)
+  ld_obj$LD
+}
+
+#' Compute LD via snpStats (converts dosage matrix to SnpMatrix).
+#' @param X Numeric genotype matrix (samples x SNPs).
+#' @return Correlation matrix (r, not r²).
+#' @noRd
+.compute_ld_snpstats <- function(X) {
+  if (!requireNamespace("snpStats", quietly = TRUE))
+    stop("Package 'snpStats' is required for backend='snpstats'")
+
+  # snpStats expects counts of the B allele as raw codes: 1=AA, 2=AB, 3=BB, 0=NA
+  # pecotmr dosage is ALT count (0/1/2), so map: 0->1, 1->2, 2->3, NA->0
+  X_raw <- round(X) + 1L
+  X_raw[is.na(X) | X_raw < 1L] <- 0L
+  X_raw[X_raw > 3L] <- 3L
+  storage.mode(X_raw) <- "raw"
+  sm <- new("SnpMatrix", X_raw)
+
+  R <- as.matrix(snpStats::ld(sm, stats = "R", depth = ncol(X) - 1L))
+  # snpStats::ld returns a sparse-like matrix; ensure full dense
+  R[is.na(R)] <- 0
+  diag(R) <- 1
   R
 }
 
@@ -455,224 +466,6 @@ filter_Y <- function(Y, n_nonmiss) {
   }
   return(list(Y = Y, rm_rows = rm_rows))
 }
-
-# ---------- Shared genomic utility helpers ----------
-
-#' Strip "chr" prefix from chromosome identifiers.
-#' @param x Character vector of chromosome identifiers (e.g., "chr1", "chrX").
-#' @return Character vector with "chr" prefix removed (e.g., "1", "X").
-#' @noRd
-strip_chr_prefix <- function(x) sub("^chr", "", x)
-
-#' Strip build suffix from variant IDs (e.g., ":b38" or "_b38").
-#' @param x Character vector of variant IDs.
-#' @return Character vector with build suffix removed.
-#' @noRd
-strip_build_suffix <- function(x) sub("(:|_)b[0-9]+$", "", x)
-
-#' Test whether allele pairs are single-nucleotide (SNP, not indel).
-#'
-#' Returns TRUE for each pair where both alleles are exactly one of A, T, C, G.
-#' @param a1 Character vector of first alleles.
-#' @param a2 Character vector of second alleles.
-#' @return Logical vector, TRUE if the variant is a SNP.
-#' @noRd
-is_snp_alleles <- function(a1, a2) {
-  nchar(a1) == 1L & nchar(a2) == 1L &
-    grepl("^[ATCG]$", a1) & grepl("^[ATCG]$", a2)
-}
-
-#' Detect the naming convention of variant IDs
-#'
-#' Examines variant ID strings to detect their format: whether they have a "chr"
-#' prefix, what separator is used between allele fields, and whether they include
-#' a genome build suffix (e.g., ":b38" or "_b38").
-#'
-#' Supported formats:
-#' \itemize{
-#'   \item All colons: \code{"chr1:100:A:G"} or \code{"1:100:A:G"}
-#'   \item Mixed colon/underscore: \code{"chr1:100_A_G"} or \code{"1:100_A_G"}
-#'   \item All underscores (PLINK BIM): \code{"chr1_100_A_G"} or \code{"1_100_A_G"}
-#' }
-#'
-#' @param ids A character vector of variant IDs.
-#' @return A list with components:
-#'   \describe{
-#'     \item{has_chr}{Logical, whether the IDs have a "chr" prefix.}
-#'     \item{allele_sep}{Character, the separator between allele fields (":" or "_").
-#'       For mixed format \code{"chr1:100_A_G"}, this is \code{"_"}.}
-#'     \item{has_build}{Logical, whether a build suffix is present.}
-#'     \item{example}{Character, the first non-NA ID for reference.}
-#'   }
-#' @noRd
-detect_variant_convention <- function(ids) {
-  # Find first non-NA element
-  first_id <- ids[!is.na(ids)][1]
-  if (is.na(first_id) || length(first_id) == 0) {
-    return(list(has_chr = FALSE, allele_sep = ":", has_build = FALSE, example = NA_character_))
-  }
-  has_chr <- grepl("^chr", first_id)
-  # Detect build suffix like :b38 or _b38 at end
-  has_build <- grepl("(:|_)b[0-9]+$", first_id)
-  id_clean <- strip_build_suffix(first_id)
-  # Detect allele separator: check if variant uses underscores between allele fields
-  # This catches both full underscore ("1_100_A_G") and mixed ("chr1:100_A_G") formats
-  allele_sep <- if (grepl("_[ATCGID*]+_[ATCGID*]+$", id_clean)) "_" else ":"
-  list(has_chr = has_chr, allele_sep = allele_sep, has_build = has_build, example = first_id)
-}
-
-#' Parse variant IDs into a data frame
-#'
-#' Converts variant IDs from any supported string format or data.frame into a
-#' standardized data.frame with integer chrom, integer pos, and character allele
-#' columns (A2, A1). Supports colon-separated ("chr1:100:A:G"), underscore-separated
-#' ("1_100_A_G"), with or without "chr" prefix, and with optional build suffix
-#' (":b38" or "_b38"). The detected input convention is stored as an attribute.
-#'
-#' @param ids A character vector of variant IDs, or a data.frame with columns
-#'   "chrom", "pos", and allele columns (A2/A1 or ref/alt or any 4-column layout).
-#' @return A data.frame with columns "chrom" (integer), "pos" (integer), "A2"
-#'   (character), "A1" (character). The detected convention is stored as
-#'   \code{attr(result, "convention")}.
-#' @export
-parse_variant_id <- function(ids) {
-  # Handle data.frame input
-  if (is.data.frame(ids)) {
-    if (all(c("chrom", "pos", "A2", "A1") %in% names(ids))) {
-      # Already has correct column names
-    } else if (all(c("chrom", "pos", "A1", "A2") %in% names(ids))) {
-      # Has A1/A2 but need to check they're in the right semantic order
-      # (A2 = ref, A1 = alt/effect) -- keep as-is since column names are explicit
-    } else if (ncol(ids) >= 4) {
-      # Assume positional: chrom, pos, A2, A1
-      names(ids)[1:4] <- c("chrom", "pos", "A2", "A1")
-    }
-    # Detect convention from chrom column before converting
-    conv <- list(
-      has_chr = any(grepl("^chr", as.character(ids$chrom))),
-      allele_sep = ":", has_build = FALSE, example = NA_character_
-    )
-    ids$chrom <- as.integer(strip_chr_prefix(as.character(ids$chrom)))
-    ids$pos <- as.integer(ids$pos)
-    attr(ids, "convention") <- conv
-    return(ids)
-  }
-
-  # Detect convention before parsing
-  convention <- detect_variant_convention(ids)
-
-  # Normalize: convert underscores to colons, strip build suffix
-  normalized <- gsub("_", ":", ids)
-  normalized <- strip_build_suffix(normalized)
-
-  # Split into exactly 4 fields using strcapture (vectorized, no list overhead)
-  data <- strcapture(
-    "^([^:]+):([^:]+):([^:]+):([^:]+)",
-    normalized,
-    proto = data.frame(chrom = character(), pos = character(),
-                       A2 = character(), A1 = character(),
-                       stringsAsFactors = FALSE)
-  )
-
-  data$chrom <- as.integer(strip_chr_prefix(data$chrom))
-  data$pos <- as.integer(data$pos)
-
-  attr(data, "convention") <- convention
-  return(data)
-}
-
-#' Format variant ID strings from component columns
-#'
-#' Constructs variant ID strings from chrom, pos, A2, A1 columns.
-#' The chrom:pos separator is always a colon. The allele separator can be
-#' either colon (canonical: \code{"chr1:100:A:G"}) or underscore
-#' (mixed: \code{"chr1:100_A_G"}).
-#'
-#' When a \code{convention} object (from \code{detect_variant_convention}) is
-#' provided, the output format is driven automatically by the detected
-#' convention, so callers do not need to specify \code{chr_prefix} or
-#' \code{allele_sep} manually.
-#'
-#' @param chrom Integer or character chromosome (e.g., 1 or "chr1").
-#' @param pos Integer position.
-#' @param A2 Character reference allele.
-#' @param A1 Character alternate/effect allele.
-#' @param chr_prefix Logical, whether to add "chr" prefix. Default TRUE.
-#'   Ignored if \code{convention} is provided.
-#' @param allele_sep Character, separator between pos/A2 and A2/A1 fields.
-#'   Default \code{":"} produces canonical \code{"chr1:100:A:G"};
-#'   \code{"_"} produces mixed \code{"chr1:100_A_G"}.
-#'   Ignored if \code{convention} is provided.
-#' @param convention Optional list from \code{detect_variant_convention}.
-#'   When provided, \code{has_chr} and \code{allele_sep} are read from the
-#'   convention automatically. This is the preferred way to preserve the
-#'   user's input format.
-#' @return A character vector of formatted variant IDs.
-#' @noRd
-format_variant_id <- function(chrom, pos, A2, A1, chr_prefix = TRUE, allele_sep = ":", convention = NULL) {
-  # If convention is provided, use it to determine format automatically
-  if (!is.null(convention)) {
-    chr_prefix <- convention$has_chr
-    allele_sep <- if (!is.null(convention$allele_sep)) convention$allele_sep else ":"
-  }
-  # Strip any existing chr prefix to normalize, then re-add if requested
-  chrom_clean <- strip_chr_prefix(as.character(chrom))
-  if (chr_prefix) {
-    paste0("chr", chrom_clean, ":", pos, allele_sep, A2, allele_sep, A1)
-  } else {
-    paste0(chrom_clean, ":", pos, allele_sep, A2, allele_sep, A1)
-  }
-}
-
-#' Normalize variant IDs to canonical format
-#'
-#' One-step convenience function: parses variant IDs in any supported format
-#' and re-formats them. By default, outputs the canonical format
-#' (\code{"chr{N}:{pos}:{A2}:{A1}"}). When a \code{convention} object is
-#' provided, the output preserves the user's original format automatically.
-#'
-#' @param ids A character vector of variant IDs in any supported format.
-#' @param chr_prefix Logical, whether to include "chr" prefix. Default TRUE.
-#'   Ignored if \code{convention} is provided.
-#' @param convention Optional list from \code{detect_variant_convention} or
-#'   \code{attr(parse_variant_id(ids), "convention")}. When provided, the
-#'   output format is driven automatically by the detected convention.
-#' @return A character vector of normalized variant IDs.
-#' @export
-normalize_variant_id <- function(ids, chr_prefix = TRUE, convention = NULL) {
-  parsed <- parse_variant_id(ids)
-  if (!is.null(convention)) {
-    format_variant_id(parsed$chrom, parsed$pos, parsed$A2, parsed$A1, convention = convention)
-  } else {
-    format_variant_id(parsed$chrom, parsed$pos, parsed$A2, parsed$A1, chr_prefix = chr_prefix)
-  }
-}
-
-# Internal convenience wrapper around parse_variant_id.
-variant_id_to_df <- function(variant_id) {
-  parse_variant_id(variant_id)
-}
-
-#' @importFrom stringr str_split
-#' @export
-parse_region <- function(region) {
-  if (!is.character(region) || length(region) != 1) {
-    return(region)
-  }
-
-  if (!grepl("^chr[0-9XY]+:[0-9]+-[0-9]+$", region)) {
-    stop("Input string format must be 'chr:start-end'.")
-  }
-  parts <- str_split(region, "[:-]")[[1]]
-  df <- data.frame(
-    chrom = strip_chr_prefix(parts[1]),
-    start = as.integer(parts[2]),
-    end = as.integer(parts[3])
-  )
-
-  return(df)
-}
-
 
 # Retrieve a nested element from a list structure
 #' @export
@@ -766,14 +559,6 @@ find_data <- function(x, depth_obj, show_path = FALSE, rm_null = TRUE, rm_dup = 
   }
 }
 
-#' Utility function to convert LD region_ids to `region of interest` dataframe
-#' @param ld_region_id A string of region in the format of chrom_start_end.
-#' @export
-region_to_df <- function(ld_region_id, colnames = c("chrom", "start", "end")) {
-  region_of_interest <- as.data.frame(do.call(rbind, lapply(strsplit(ld_region_id, "[_:-]"), function(x) as.integer(strip_chr_prefix(x)))))
-  colnames(region_of_interest) <- colnames
-  return(region_of_interest)
-}
 
 thisFile <- function() {
   cmdArgs <- commandArgs(trailingOnly = FALSE)
@@ -1063,4 +848,184 @@ filter_molecular_events <- function(events, filters, condition = NULL, remove_al
   }
 
   return(filtered_events)
+}
+
+#' XGBoost-based iterative imputation of missing values
+#'
+#' Imputes missing values in a numeric matrix by iteratively training
+#' per-column XGBoost models on observed entries and predicting missing ones.
+#' Columns that are entirely missing are removed. Initial imputation uses
+#' column means.
+#'
+#' @param data Numeric matrix with missing values (NA).
+#' @param maxiter Maximum number of imputation iterations (default 10).
+#' @param max_depth Maximum tree depth for XGBoost (default 2).
+#' @param nrounds Number of boosting rounds per variable (default 50).
+#' @param decreasing Logical. If TRUE, impute variables with most missing
+#'   values first. Default FALSE (fewest missing first).
+#' @param num_workers Number of parallel workers for BiocParallel. Default 1
+#'   (sequential).
+#' @param verbose Logical, print progress (default TRUE).
+#' @return The imputed matrix with the same dimensions as the input (minus
+#'   any all-NA columns).
+#' @importFrom BiocParallel MulticoreParam SerialParam bplapply
+#' @export
+xgboost_imputation <- function(data, maxiter = 10L, max_depth = 2L,
+                                nrounds = 50L, decreasing = FALSE,
+                                num_workers = 1L, verbose = TRUE) {
+  if (!requireNamespace("xgboost", quietly = TRUE))
+    stop("Package 'xgboost' is required for xgboost_imputation")
+
+  xmis <- as.matrix(data)
+  n <- nrow(xmis)
+  p <- ncol(xmis)
+
+  # Remove completely missing columns
+  all_na <- colSums(is.na(xmis)) == n
+  if (any(all_na)) {
+    if (verbose)
+      message("Removed ", sum(all_na), " column(s) with all entries missing.")
+    xmis <- xmis[, !all_na, drop = FALSE]
+    p <- ncol(xmis)
+  }
+
+  # Initial mean imputation
+  ximp <- xmis
+  col_means <- colMeans(xmis, na.rm = TRUE)
+  for (j in seq_len(p)) {
+    ximp[is.na(xmis[, j]), j] <- col_means[j]
+  }
+
+  # Missing value locations
+  NAloc <- is.na(xmis)
+  noNAvar <- colSums(NAloc)
+  sort_j <- order(noNAvar, decreasing = decreasing)
+  nzsort_j <- sort_j[noNAvar[sort_j] > 0]
+
+  if (length(nzsort_j) == 0) {
+    if (verbose) message("No missing values to impute.")
+    return(ximp)
+  }
+
+  # Set up BiocParallel
+  if (num_workers > 1L) {
+    BPPARAM <- MulticoreParam(workers = num_workers)
+  } else {
+    BPPARAM <- SerialParam()
+  }
+
+  iter <- 0L
+  conv_new <- 0
+  conv_old <- Inf
+  ximp_history <- vector("list", maxiter)
+
+  while (conv_new < conv_old && iter < maxiter) {
+    if (iter > 0) conv_old <- conv_new
+    if (verbose) message("  XGBoost iteration ", iter + 1L, " in progress...")
+
+    ximp_old <- ximp
+
+    # Impute each variable with missing values
+    impute_one <- function(var_idx) {
+      obsi <- !NAloc[, var_idx]
+      misi <- NAloc[, var_idx]
+      obsY <- ximp[obsi, var_idx]
+      obsX <- ximp[obsi, -var_idx, drop = FALSE]
+      misX <- ximp[misi, -var_idx, drop = FALSE]
+
+      xgb_train <- xgboost::xgb.DMatrix(data = obsX, label = obsY)
+      xgb_pred <- xgboost::xgb.DMatrix(data = misX)
+      model <- xgboost::xgb.train(
+        params = list(max_depth = max_depth, verbosity = 0),
+        data = xgb_train, nrounds = nrounds)
+      list(var_idx = var_idx, predicted = predict(model, xgb_pred))
+    }
+
+    results <- bplapply(nzsort_j, impute_one, BPPARAM = BPPARAM)
+
+    for (res in results) {
+      misi <- NAloc[, res$var_idx]
+      ximp[misi, res$var_idx] <- res$predicted
+    }
+
+    iter <- iter + 1L
+    ximp_history[[iter]] <- ximp
+
+    # Convergence: relative change in imputed values
+    conv_new <- sum((ximp - ximp_old)^2) / sum(ximp^2)
+  }
+
+  # Return last improving iteration
+  if (iter == maxiter) ximp_history[[iter]] else ximp_history[[max(iter - 1L, 1L)]]
+}
+
+#' Robust Mahalanobis Distance
+#'
+#' Drop-in replacement for \code{\link[stats]{mahalanobis}} that handles
+#' singular (rank-deficient) covariance matrices by falling back to the
+#' Moore–Penrose pseudoinverse via \code{MASS::ginv}.
+#'
+#' @param x Numeric matrix (samples x features) or vector.
+#' @param center Numeric vector of column means (length = number of features).
+#'   If \code{NULL}, computed from \code{x}.
+#' @param cov Covariance matrix. If \code{NULL}, computed from \code{x}.
+#' @param inverted Logical; if \code{TRUE}, \code{cov} is already inverted.
+#' @return Named numeric vector of Mahalanobis distances.
+#' @importFrom MASS ginv
+#' @importFrom stats cov quantile
+#' @export
+robust_mahalanobis <- function(x, center = NULL, cov = NULL,
+                               inverted = FALSE) {
+  x <- if (is.vector(x)) matrix(x, ncol = length(x)) else as.matrix(x)
+  if (is.null(center)) center <- colMeans(x)
+  if (is.null(cov)) cov <- cov(x)
+  x <- sweep(x, 2L, center)
+  if (!inverted) {
+    cov <- tryCatch(solve(cov), error = function(cond) {
+      ginv(cov)
+    })
+  }
+  setNames(rowSums(x %*% cov * x), rownames(x))
+}
+
+#' Detect Outliers via Mahalanobis Distance
+#'
+#' Identifies outlier samples in a numeric matrix (e.g., PCA scores) using
+#' Mahalanobis distance with chi-squared-based p-values. Useful for QC
+#' in genotype PCA or expression PCA workflows.
+#'
+#' @param x Numeric matrix (samples x features). Rownames are used as
+#'   sample IDs in the output.
+#' @param prob Numeric in (0, 1); quantile threshold for the Mahalanobis
+#'   distance cutoff (default 0.99).
+#' @param pval_threshold P-value threshold for outlier classification
+#'   (default 0.05). A sample is flagged only if its distance exceeds
+#'   the quantile cutoff \emph{and} its p-value is below this threshold.
+#' @return A data.frame with columns:
+#'   \describe{
+#'     \item{sample_id}{Row names from \code{x}, or row indices if unnamed.}
+#'     \item{mahal}{Mahalanobis distance.}
+#'     \item{pvalue}{Chi-squared p-value (df = number of features).}
+#'     \item{is_outlier}{Logical; TRUE if distance > quantile cutoff and
+#'       p-value < \code{pval_threshold}.}
+#'   }
+#' @export
+detect_outliers_mahalanobis <- function(x, prob = 0.99,
+                                        pval_threshold = 0.05) {
+  x <- as.matrix(x)
+  sample_ids <- rownames(x) %||% as.character(seq_len(nrow(x)))
+  center <- colMeans(x)
+  cov_mat <- cov(x)
+  d <- robust_mahalanobis(x, center, cov_mat)
+  p <- ncol(x)
+  pvals <- pchisq(d, df = p, lower.tail = FALSE)
+  cutoff <- quantile(d, probs = prob)
+  data.frame(
+    sample_id = sample_ids,
+    mahal = as.numeric(d),
+    pvalue = pvals,
+    is_outlier = (d > cutoff) & (pvals < pval_threshold),
+    row.names = NULL,
+    stringsAsFactors = FALSE
+  )
 }

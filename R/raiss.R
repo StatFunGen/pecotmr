@@ -10,6 +10,7 @@
 #' @param verbose Logical indicating whether to print progress information.
 #'
 #' @return A list containing filtered and unfiltered results, and filtered LD matrix.
+#' @importFrom MASS ginv
 #' @importFrom dplyr arrange
 #' @noRd
 raiss_single_matrix <- function(ref_panel, known_zscores, LD_matrix, lamb = 0.01, rcond = 0.01,
@@ -588,13 +589,13 @@ invert_mat <- function(mat, lamb, rcond) {
       # Modify the diagonal elements of mat
       diag(mat) <- 1 + lamb
       # Compute the pseudo-inverse
-      mat_inv <- MASS::ginv(mat, tol = rcond)
+      mat_inv <- ginv(mat, tol = rcond)
       return(mat_inv)
     },
     error = function(e) {
       # Second attempt with updated lamb and rcond in case of an error
       diag(mat) <- 1 + lamb * 1.1
-      mat_inv <- MASS::ginv(mat, tol = rcond * 1.1)
+      mat_inv <- ginv(mat, tol = rcond * 1.1)
       return(mat_inv)
     }
   )
@@ -606,7 +607,7 @@ invert_mat_recursive <- function(mat, lamb, rcond) {
       # Modify the diagonal elements of mat
       diag(mat) <- 1 + lamb
       # Compute the pseudo-inverse
-      mat_inv <- MASS::ginv(mat, tol = rcond)
+      mat_inv <- ginv(mat, tol = rcond)
       return(mat_inv)
     },
     error = function(e) {

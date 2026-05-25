@@ -106,6 +106,10 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
   region_of_interest <- data.frame(chrom = chrom, start = min(region_variants$pos), end = max(region_variants$pos))
   LD_list <- load_LD_matrix(ld_meta_file_path, region_of_interest, region_variants,
                             n_sample = ld_reference_sample_size)
+  # Convert LDData S4 object to legacy list format if needed
+  if (is(LD_list, "LDData")) {
+    LD_list <- ld_data_to_list(LD_list)
+  }
   # remove duplicate variants
   dup_idx <- which(duplicated(LD_list$LD_variants))
   if (length(dup_idx) >= 1) {
@@ -286,6 +290,7 @@ build_twas_score_row <- function(twas_rs, weight_db, context, study) {
 }
 
 #' @importFrom stringr str_remove
+#' @importFrom purrr list_flatten
 #' @export
 twas_pipeline <- function(twas_weights_data,
                           ld_meta_file_path,
@@ -306,13 +311,13 @@ twas_pipeline <- function(twas_weights_data,
                           comment_string="#") {
   # internal function to format TWAS output
   format_twas_data <- function(post_qc_twas_data, twas_table) {
-    weights_list <- purrr::map(names(post_qc_twas_data), function(molecular_id) {
+    weights_list <- map(names(post_qc_twas_data), function(molecular_id) {
       mol <- post_qc_twas_data[[molecular_id]]
       contexts <- names(mol[["weights_qced"]])
       mol_chrom <- mol[["chrom"]]
       model_sel <- mol[["model_selection"]]
 
-      purrr::map(contexts, function(context) {
+      map(contexts, function(context) {
         data_type <- mol[["data_type"]][[context]]
         if (!is.null(model_sel) && is.list(model_sel) && length(model_sel) > 0) {
           is_imputable <- model_sel[[context]]$is_imputable
@@ -325,7 +330,7 @@ twas_pipeline <- function(twas_weights_data,
 
         gwas_studies <- names(mol[["weights_qced"]][[context]])
         weight_key <- paste0(molecular_id, "|", data_type, "_", context)
-        study_entries <- purrr::map(gwas_studies, function(study) {
+        study_entries <- map(gwas_studies, function(study) {
           ctx_weights <- mol[["weights_qced"]][[context]][[study]]
           scaled_wgt <- ctx_weights[["scaled_weights"]][, paste0(model_selected, "_weights"), drop = FALSE]
           colnames(scaled_wgt) <- "weight"
@@ -341,11 +346,11 @@ twas_pipeline <- function(twas_weights_data,
           result <- list(entry)
           names(result) <- weight_key
           result
-        }) %>% purrr::list_flatten()
+        }) %>% list_flatten()
         study_entries
-      }) %>% purrr::compact() %>% purrr::list_flatten()
-    }) %>% purrr::list_flatten()
-    weights <- purrr::compact(weights_list)
+      }) %>% compact() %>% list_flatten()
+    }) %>% list_flatten()
+    weights <- compact(weights_list)
     # Optional susie_weights_intermediate_qced processing
     if ("susie_weights_intermediate_qced" %in% names(post_qc_twas_data[[1]])) {
       susie_weights_intermediate_qced <- setNames(lapply(

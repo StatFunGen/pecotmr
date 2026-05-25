@@ -11,7 +11,7 @@ calc_I2 <- function(Q, Est) {
 # @noRd
 .create_null_mr_df <- function(gene_name, col_spec) {
   n <- length(gene_name)
-  cols <- purrr::map(col_spec, function(type) {
+  cols <- map(col_spec, function(type) {
     switch(type,
       character = as.character(rep(NA, n)),
       integer = as.integer(rep(NA, n)),
@@ -35,7 +35,7 @@ calc_I2 <- function(Q, Est) {
 #' @param coverage_level Numeric credible set coverage used when \code{coverage}
 #'   is NULL.
 #' @return A data frame formatted for MR analysis or NULL if cs_list is empty.
-#' @importFrom stringr str_remove
+#' @importFrom stringr str_remove str_split_i
 #' @export
 mr_format <- function(susie_result, condition, gwas_sumstats_db, coverage = NULL,
                       run_allele_qc = TRUE, method = "susie", coverage_level = 0.95,
@@ -72,8 +72,8 @@ mr_format <- function(susie_result, condition, gwas_sumstats_db, coverage = NULL
     select(gene_name, variant_id, variant, betahat, sebetahat, all_of(coverage), all_of(pip_col)) %>%
     rename("bhat_x" = "betahat", "sbhat_x" = "sebetahat", "cs" = all_of(coverage), "pip" = all_of(pip_col))
 
-  susie_pos <- stringr::str_split_i(susie_cs_result_formatted$variant, ":", 2)
-  gwas_pos <- stringr::str_split_i(gwas_sumstats_db$variant_id, ":", 2)
+  susie_pos <- str_split_i(susie_cs_result_formatted$variant, ":", 2)
+  gwas_pos <- str_split_i(gwas_sumstats_db$variant_id, ":", 2)
   if (!any(susie_pos %in% gwas_pos)) return(.create_null_mr_df(gene_name, mr_format_spec))
 
   gwas_sumstats_db_extracted <- gwas_sumstats_db %>%
@@ -190,4 +190,73 @@ mr_analysis <- function(mr_formatted_input, cpip_cutoff = 0.5) {
     ) %>%
     arrange(meta_pval) %>%
     select(gene_name, num_CS, num_IV, cpip, meta_eff, se_meta_eff, meta_pval, Q, Q_pval, I2)
+}
+
+#' Fine-mapping-based Mendelian Randomization
+#'
+#' Performs MR using fine-mapping credible sets. For each exposure gene,
+#' computes PIP-weighted composite Wald ratio estimates within each credible
+#' set, then meta-analyzes across credible sets with inverse-variance weighting.
+#' Reports Cochran's Q and I-squared heterogeneity statistics.
+#'
+#' @param formatted_input A data.frame/tibble with columns: X_ID (gene ID),
+#'   cs (credible set index), pip (posterior inclusion probability),
+#'   bhat_x (exposure effect), sbhat_x (exposure SE), bhat_y (outcome effect),
+#'   sbhat_y (outcome SE), snp (variant ID).
+#' @param cpip_cutoff Minimum cumulative PIP to retain a credible set
+#'   (default 0.5).
+#' @return A tibble with columns: X_ID, num_CS, num_IV, cpip,
+#'   composite_bhat, composite_sbhat, meta_eff, se_meta_eff, Q, I2.
+#' @export
+fine_mr <- function(formatted_input, cpip_cutoff = 0.5) {
+  result_cols <- c("X_ID", "num_CS", "num_IV", "cpip", "composite_bhat",
+                   "composite_sbhat", "meta_eff", "se_meta_eff", "Q", "I2")
+
+  filtered <- formatted_input %>%
+    mutate(
+      bhat_x = bhat_x / sbhat_x,
+      sbhat_x = 1) %>%
+    group_by(X_ID, cs) %>%
+    mutate(cpip = sum(pip)) %>%
+    filter(cpip >= cpip_cutoff)
+
+  if (nrow(filtered) == 0) {
+    return(tibble(!!!setNames(
+      rep(list(logical(0)), length(result_cols)), result_cols)))
+  }
+
+  filtered %>%
+    group_by(X_ID, cs) %>%
+    mutate(
+      beta_yx = bhat_y / bhat_x,
+      se_yx = sqrt(
+        (sbhat_y^2 / bhat_x^2) + ((bhat_y^2 * sbhat_x^2) / bhat_x^4)),
+      composite_bhat = sum((beta_yx * pip) / cpip),
+      composite_sbhat = sum((beta_yx^2 + se_yx^2) * pip / cpip)) %>%
+    mutate(
+      composite_sbhat = sqrt(composite_sbhat - composite_bhat^2),
+      wv = composite_sbhat^-2) %>%
+    ungroup() %>%
+    group_by(X_ID) %>%
+    mutate(
+      meta_eff = sum(unique(wv) * unique(composite_bhat)),
+      sum_w = sum(unique(wv)),
+      se_meta_eff = sqrt(sum_w^-1),
+      num_CS = length(unique(cs))) %>%
+    mutate(
+      num_IV = length(snp),
+      meta_eff = meta_eff / sum_w,
+      Q = sum(unique(wv) * (unique(composite_bhat) - unique(meta_eff))^2),
+      I2 = calc_I2(Q, composite_bhat)) %>%
+    ungroup() %>%
+    distinct(X_ID, .keep_all = TRUE) %>%
+    mutate(
+      cpip = round(cpip, 3),
+      composite_bhat = round(composite_bhat, 3),
+      meta_eff = round(meta_eff, 3),
+      se_meta_eff = round(se_meta_eff, 3),
+      Q = round(Q, 3),
+      I2 = round(I2, 3)) %>%
+    select(X_ID, num_CS, num_IV, cpip, composite_bhat, composite_sbhat,
+                  meta_eff, se_meta_eff, Q, I2)
 }

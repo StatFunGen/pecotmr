@@ -33,7 +33,7 @@ xqtl_enrichment_wrapper <- function(xqtl_files, gwas_files,
                                       xqtl_finemapping_obj = NULL, gwas_finemapping_obj = NULL,
                                       xqtl_varname_obj = NULL, gwas_varname_obj = NULL) {
     # Load and process GWAS data
-    gwas_pip_list <- purrr::map(gwas_files, function(file) {
+    gwas_pip_list <- map(gwas_files, function(file) {
       raw_data <- readRDS(file)[[1]]
       gwas_data <- if (!is.null(gwas_finemapping_obj)) get_nested_element(raw_data, gwas_finemapping_obj) else raw_data
       pip <- gwas_data$pip
@@ -42,7 +42,7 @@ xqtl_enrichment_wrapper <- function(xqtl_files, gwas_files,
     })
 
     # Check for unique variant names in GWAS pip vectors
-    all_variant_names <- unique(unlist(purrr::map(gwas_pip_list, names)))
+    all_variant_names <- unique(unlist(map(gwas_pip_list, names)))
     if (length(unique(all_variant_names)) != length(all_variant_names)) {
       stop("Non-unique variant names found in GWAS data with different pip values.")
     }
@@ -96,7 +96,7 @@ filter_and_order_coloc_results <- function(coloc_results_fil) {
   }
 
   cs_num <- ncol(coloc_results_fil) - 1
-  purrr::map(seq_len(cs_num), function(n) {
+  map(seq_len(cs_num), function(n) {
     coloc_results_fil[, c(1, n + 1)] %>% .[order(.[, 2], decreasing = TRUE), ]
   })
 }
@@ -115,9 +115,17 @@ extract_ld_for_variants <- function(ld_meta_file_path, analysis_region, variants
   chr <- str_split(analysis_region, ":", simplify = TRUE)[, 1]
   region_narrow <- paste0(chr, ":", min(var_pos), "-", max(var_pos))
   ld_data <- load_LD_matrix(ld_meta_file_path, region = region_narrow)
-  aligned <- align_variant_names(ld_data$LD_variants, variants)
-  colnames(ld_data$LD_matrix) <- rownames(ld_data$LD_matrix) <- aligned$aligned_variants
-  ld_data$LD_matrix[variants, variants]
+  # Support both LDData S4 objects and legacy lists
+  if (is(ld_data, "LDData")) {
+    ld_variants <- getVariantIds(ld_data)
+    ld_matrix <- getCorrelation(ld_data)
+  } else {
+    ld_variants <- ld_data$LD_variants
+    ld_matrix <- ld_data$LD_matrix
+  }
+  aligned <- align_variant_names(ld_variants, variants)
+  colnames(ld_matrix) <- rownames(ld_matrix) <- aligned$aligned_variants
+  ld_matrix[variants, variants]
 }
 
 #' Function to calculate purity
@@ -157,12 +165,12 @@ process_coloc_results <- function(coloc_result, LD_meta_file_path, analysis_regi
 
     # prepare to calculate purity
     ordered_results <- filter_and_order_coloc_results(coloc_results_fil)
-    cs <- purrr::map(ordered_results, function(res) {
+    cs <- map(ordered_results, function(res) {
       csm <- calculate_cumsum(res)
       res[, 1][1:min(which(csm > coverage))]
     })
 
-    purity <- purrr::map_dfr(seq_along(cs), function(n) {
+    purity <- map_dfr(seq_along(cs), function(n) {
       variants <- normalize_variant_id(cs[[n]])
       if (null_index > 0 && null_index %in% variants) {
         data.frame(min.abs.corr = -9, mean.abs.corr = -9, median.abs.corr = -9)
@@ -256,6 +264,7 @@ process_coloc_results <- function(coloc_result, LD_meta_file_path, analysis_regi
 #' @importFrom dplyr bind_rows
 #' @importFrom tidyr replace_na
 #' @importFrom coloc coloc.bf_bf
+#' @importFrom purrr map_dfr
 #' @export
 coloc_wrapper <- function(xqtl_file, gwas_files,
                           xqtl_finemapping_obj = NULL, xqtl_varname_obj = NULL, xqtl_region_obj = NULL,
@@ -264,7 +273,7 @@ coloc_wrapper <- function(xqtl_file, gwas_files,
                           prior_tol = 1e-9, p1 = 1e-4, p2 = 1e-4, p12 = 5e-6, ...) {
   region <- NULL
   # Load and process GWAS data
-  gwas_lbf_matrices <- purrr::map(gwas_files, function(file) {
+  gwas_lbf_matrices <- map(gwas_files, function(file) {
     raw_data <- readRDS(file)[[1]]
     .extract_lbf_matrix(raw_data, gwas_finemapping_obj, gwas_varname_obj,
                         filter_lbf_cs, filter_lbf_cs_secondary, prior_tol)$lbf_matrix

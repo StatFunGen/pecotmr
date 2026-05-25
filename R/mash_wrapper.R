@@ -104,7 +104,7 @@ filter_mixture_components <- function(conditions_to_keep, U, w = NULL, w_cutoff 
   }, conditions_to_keep)
 
   # Remove matrices where all values are zero or weight is below cutoff
-  keep_names <- names(purrr::keep(U, function(mat) !all(mat == 0)))
+  keep_names <- names(keep(U, function(mat) !all(mat == 0)))
   if (!is.null(w)) {
     keep_names <- intersect(keep_names, names(w[w >= w_cutoff]))
   }
@@ -324,7 +324,7 @@ merge_susie_cs <- function(susie_fit, coverage = "CS_95_susie", method = NULL) {
     all_sets <- unique(unlist(overlap_sets))
     if (length(all_sets) == 0) return(list())
 
-    parent <- stats::setNames(all_sets, all_sets)
+    parent <- setNames(all_sets, all_sets)
     find_root <- function(x) {
       while (!identical(parent[[x]], x)) x <- parent[[x]]
       x
@@ -352,7 +352,7 @@ merge_susie_cs <- function(susie_fit, coverage = "CS_95_susie", method = NULL) {
 
     # Update each variant's credible set names
     updated_credible_sets <- lapply(
-      stats::setNames(names(variants_sets_and_pips_list), names(variants_sets_and_pips_list)),
+      setNames(names(variants_sets_and_pips_list), names(variants_sets_and_pips_list)),
       function(variant_id) {
         current_sets <- variants_sets_and_pips_list[[variant_id]][["sets"]]
         mapped <- intersect(current_sets, names(set_name_map))
@@ -369,7 +369,7 @@ merge_susie_cs <- function(susie_fit, coverage = "CS_95_susie", method = NULL) {
   extract_top_loci <- function(susie_fit, coverage) {
     # Build a flat data frame of (variant_id, pip, set_name) across all conditions
     cond_names <- names(susie_fit[[1]])
-    rows <- purrr::map_dfr(seq_along(cond_names), function(i) {
+    rows <- map_dfr(seq_along(cond_names), function(i) {
       cond_data <- susie_fit[[1]][[i]]
       top_loci <- .translate_legacy_top_loci_cs_columns(cond_data[["top_loci"]])
       if (is.null(top_loci) || nrow(top_loci) == 0) return(NULL)
@@ -380,7 +380,7 @@ merge_susie_cs <- function(susie_fit, coverage = "CS_95_susie", method = NULL) {
       set_num <- set_num[!is.na(set_num) & set_num != 0]
       if (length(set_num) == 0) return(NULL)
 
-      purrr::map_dfr(set_num, function(sn) {
+      map_dfr(set_num, function(sn) {
         rows <- top_loci[top_loci[[coverage]] == sn & !is.na(top_loci[[coverage]]),
                          c("variant_id", pip_col), drop = FALSE]
         names(rows)[names(rows) == pip_col] <- "pip"
@@ -851,9 +851,11 @@ merge_sumstats_matrices <- function(matrix_list, value_column, ref_panel = NULL,
 #' @param tag_patterns Optional named pattern list used to classify context.
 #' @param result_list_format A nested list used as a running result container.
 #'
-#' @importFrom stringr str_detect
+#' @importFrom stringr str_detect str_remove_all
 #' @importFrom rlang .data sym
-#' @import dplyr tidyr tibble                
+#' @importFrom purrr keep map_dfr map_chr
+#' @importFrom utils combn
+#' @import dplyr tidyr tibble
 #' @return The updated `result_list_format` with processed results for the specified gene and condition.
 #' @export
 load_multicontext_sumstats <- function(dat_list, signal_df, cond, region, extract_infs = "z", tag_patterns = NULL, result_list_format) {
@@ -898,7 +900,7 @@ load_multicontext_sumstats <- function(dat_list, signal_df, cond, region, extrac
                   mutate(context_classify = if (is.null(tag_patterns) || length(tag_patterns) == 0) {
                     context
                   } else {
-                    purrr::map_chr(context, function(ctx) {
+                    map_chr(context, function(ctx) {
                       matched <- names(tag_patterns)[str_detect(ctx, tag_patterns)]
                       if (length(matched) == 0) NA_character_ else matched[1]
                     })
@@ -1001,7 +1003,7 @@ load_multicontext_sumstats <- function(dat_list, signal_df, cond, region, extrac
                    mutate(context_classify = if (is.null(tag_patterns) || length(tag_patterns) == 0) {
                      context
                    } else {
-                     purrr::map_chr(context, function(ctx) {
+                     map_chr(context, function(ctx) {
                        matched <- names(tag_patterns)[str_detect(ctx, tag_patterns)]
                        if (length(matched) == 0) NA_character_ else matched[1]
                      })
@@ -1155,4 +1157,320 @@ extract_flatten_sumstats_from_nested <- function(data, extract_inf = "z", max_de
 
   # Start search
   return(find_nested(data))
+}
+
+# =============================================================================
+# Mash pairwise contrast functions
+# =============================================================================
+
+#' Create a pairwise contrast column
+#'
+#' Sets +1 for the first condition and -1 for the second in a zero vector.
+#' Used as a building block for contrast design matrices.
+#'
+#' @param pair A length-2 character vector naming the two conditions to contrast.
+#' @param template A named numeric vector of zeros with names matching all
+#'   conditions.
+#' @return The template vector with +1 at \code{pair[1]} and -1 at
+#'   \code{pair[2]}.
+#' @export
+make_pairwise_contrast_col <- function(pair, template) {
+  template[pair[1]] <- 1
+  template[pair[2]] <- -1
+  template
+}
+
+#' Compute pairwise contrasts from mash posterior
+#'
+#' For a single variant (row index), computes deviation contrasts (each
+#' condition vs grand mean) and all pairwise contrasts from the mash posterior
+#' mean and covariance. Supports condition grouping for weighted contrasts.
+#'
+#' @param index Integer row index of the variant in the posterior matrices.
+#' @param orig_mean Matrix of original effect sizes (variants x conditions).
+#'   Used to determine which conditions are "tested" (non-zero).
+#' @param posterior_mean Matrix of mash posterior means (variants x conditions).
+#' @param posterior_vcov 3D array of posterior covariance matrices
+#'   (conditions x conditions x variants).
+#' @param grouping Named integer vector mapping condition names to group IDs.
+#'   Conditions with the same positive group ID are treated as replicates
+#'   (e.g., multiple datasets for the same cell type). Use 0 for ungrouped.
+#'   If NULL (default), all conditions are treated independently.
+#' @return A single-row data.frame with columns
+#'   \code{mean_contrast_*}, \code{se_contrast_*}, \code{p_contrast_*} for
+#'   both deviation and pairwise contrasts. Returns NULL if fewer than 2
+#'   tested conditions.
+#' @export
+fit_mash_contrast <- function(index, orig_mean, posterior_mean, posterior_vcov,
+                               grouping = NULL) {
+  population_names <- colnames(posterior_mean)
+  if (!is.null(population_names))
+    population_names <- str_remove_all(population_names, "BETA_")
+
+  orig_mean_vector <- orig_mean[index, ]
+  names(orig_mean_vector) <- population_names
+  tested <- names(orig_mean_vector[orig_mean_vector != 0])
+
+  if (length(tested) < 2) return(NULL)
+
+  n_pop <- length(tested)
+  pairwise_vector <- setNames(rep(0, n_pop), tested)
+
+  # Default grouping: all independent
+
+  if (is.null(grouping)) {
+    grouping <- setNames(rep(0L, n_pop), tested)
+  } else {
+    grouping <- grouping[tested]
+  }
+
+  if (n_pop > 2) {
+    # 1. Deviation contrasts
+    dev <- matrix(-1, n_pop, n_pop, dimnames = list(tested, tested))
+    diag(dev) <- n_pop - 1
+
+    # Adjust for grouped conditions
+    unique_groups <- unique(grouping)
+    for (grp in unique_groups[unique_groups > 0]) {
+      grp_mask <- grouping == grp
+      grp_size <- sum(grp_mask)
+      diag(dev)[grp_mask] <- (n_pop - 1) / grp_size
+      dev[grp_mask, grp_mask] <- (n_pop - 1) / grp_size
+    }
+    colnames(dev) <- paste0(tested, "_deviation")
+
+    # 2. Pairwise contrasts
+    two_combn <- combn(tested, 2)
+    pw_names <- apply(two_combn, 2, paste, collapse = "_vs_")
+    pw <- apply(two_combn, 2, make_pairwise_contrast_col, pairwise_vector)
+    colnames(pw) <- pw_names
+
+    # Adjust pairwise contrasts for grouped conditions
+    pw_adj <- pw
+    for (col in colnames(pw)) {
+      groups <- strsplit(col, "_vs_")[[1]]
+      group_values <- grouping[names(grouping) %in% groups]
+      relevant <- names(group_values[group_values > 0])
+      if (length(unique(group_values)) > 1 && length(relevant) > 0) {
+        for (dg in unique(group_values[group_values > 0])) {
+          rows_in_group <- names(grouping[grouping == dg])
+          matched_row <- rows_in_group[rows_in_group %in% groups]
+          if (length(matched_row) > 0)
+            pw_adj[rows_in_group, col] <- pw[matched_row, col] / length(rows_in_group)
+        }
+      }
+    }
+
+    contrast_design <- cbind(dev / (n_pop - 1), pw_adj)
+  } else {
+    pairwise_vector[tested[1]] <- 1
+    pairwise_vector[tested[2]] <- -1
+    contrast_design <- matrix(pairwise_vector, ncol = 1,
+                              dimnames = list(tested, paste0(tested[1], "_vs_", tested[2])))
+  }
+
+  # Subset posterior to tested conditions
+  pm <- posterior_mean[index, tested]
+  pv <- posterior_vcov[tested, tested, index]
+
+  # Compute contrasts
+  contrast_diff <- drop(t(contrast_design) %*% pm)
+  contrast_vcov <- t(contrast_design) %*% pv %*% contrast_design
+  contrast_se <- sqrt(diag(contrast_vcov))
+  contrast_p <- 2 * (1 - pnorm(abs(contrast_diff) / contrast_se))
+
+  # Build output data.frame
+  cnames <- colnames(contrast_design)
+  df <- data.frame(
+    row.names = rownames(posterior_mean)[index],
+    stringsAsFactors = FALSE)
+  for (i in seq_along(cnames)) {
+    df[[paste0("mean_contrast_", cnames[i])]] <- contrast_diff[i]
+    df[[paste0("se_contrast_", cnames[i])]] <- contrast_se[i]
+    df[[paste0("p_contrast_", cnames[i])]] <- contrast_p[i]
+  }
+  df
+}
+
+# =============================================================================
+# Mash model subsetting functions
+# =============================================================================
+
+#' Subset a fitted mash model to a subset of conditions
+#'
+#' Updates the prior covariance matrices (\code{Ulist}) and mixture weights
+#' (\code{pi}) in a fitted \code{mashr} model to match a reduced set of
+#' conditions. Handles condition-specific, identity, and data-driven
+#' covariance components.
+#'
+#' @param mash_model A fitted mash model object (from \code{mashr::mash}).
+#' @param all_samples Character vector of all original condition names.
+#' @param samples Character vector of the conditions to retain.
+#' @return The updated mash model with resized covariance matrices and
+#'   pruned mixture weights.
+#' @export
+update_mash_model_cov <- function(mash_model, all_samples, samples) {
+  cov <- mash_model$fitted_g$Ulist
+
+  # Remove matrices for dropped conditions
+  unwanted <- setdiff(all_samples, samples)
+  for (d in names(cov)) {
+    if (d %in% unwanted || d %in% paste0("ED_", unwanted))
+      cov[[d]] <- NULL
+  }
+
+  # Resize remaining matrices to match retained conditions
+  for (d in names(cov)) {
+    if (d %in% samples) {
+      # Condition-specific: single 1 on diagonal
+      m <- matrix(0, length(samples), length(samples))
+      m[which(samples == d), which(samples == d)] <- 1
+      cov[[d]] <- m
+    } else if (d == "identity") {
+      m <- matrix(0, length(samples), length(samples))
+      m[1, 1] <- 1
+      cov[[d]] <- m
+    } else if (is.null(colnames(cov[[d]]))) {
+      cov[[d]] <- cov[[d]][seq_len(length(samples)), seq_len(length(samples))]
+    } else {
+      cov[[d]] <- cov[[d]][samples, samples]
+    }
+    cov[[d]] <- as.matrix(cov[[d]])
+  }
+
+  mash_model$fitted_g$Ulist <- cov
+
+  # Prune mixture weights for removed conditions
+  for (s in unwanted) {
+    drop_idx <- grep(s, names(mash_model$fitted_g$pi), fixed = TRUE)
+    if (length(drop_idx) > 0)
+      mash_model$fitted_g$pi <- mash_model$fitted_g$pi[-drop_idx]
+  }
+
+  mash_model
+}
+
+#' Subset mash data matrices to specific SNPs and conditions
+#'
+#' Slices the \code{bhat}, \code{sbhat}, and \code{Z} matrices by row (SNPs)
+#' and column (samples/conditions), and correspondingly subsets the \code{vhat}
+#' covariance matrix.
+#'
+#' @param data A mash data list with elements \code{bhat}, \code{sbhat},
+#'   \code{Z} (matrices), and \code{snp} (character vector).
+#' @param vhat A square covariance matrix (conditions x conditions).
+#' @param snps Character vector of SNP IDs to retain (row names).
+#' @param samples Character vector of condition names to retain (column names).
+#' @return A list with \code{data} (sliced data list) and \code{vhat}
+#'   (sliced covariance matrix).
+#' @export
+slice_mash_data <- function(data, vhat, snps, samples) {
+  data$bhat <- as.matrix(data$bhat[snps, samples])
+  data$sbhat <- as.matrix(data$sbhat[snps, samples])
+  data$Z <- as.matrix(data$Z[snps, samples])
+  vhat <- as.matrix(vhat[samples, samples])
+  data$snp <- data$snp[data$snp %in% snps]
+  colnames(data$bhat) <- colnames(data$sbhat) <- colnames(data$Z) <- colnames(vhat) <- samples
+  list(data = data, vhat = vhat)
+}
+
+#' Sanitize NaN/Inf values in mash data
+#'
+#' Replaces NaN in \code{bhat} with 0 and NaN/Inf in \code{sbhat} with 1e3
+#' (indicating high uncertainty).
+#'
+#' @param data A mash data list with \code{bhat} and \code{sbhat} matrices.
+#' @return The data list with sanitized values.
+#' @export
+sanitize_mash_data <- function(data) {
+  data$bhat[is.nan(data$bhat)] <- 0
+  data$sbhat[is.nan(data$sbhat) | is.infinite(data$sbhat)] <- 1e3
+  data
+}
+
+#' Random-Effects Meta-Analysis of Mash Pairwise Contrasts
+#'
+#' For each cell type (condition), gathers all pairwise contrast effect
+#' sizes and standard errors involving that cell, then runs a
+#' DerSimonian–Laird random-effects meta-analysis per condition.
+#' Intended to be run on the output of \code{\link{fit_mash_contrast}}.
+#'
+#' @param effect_sizes Numeric matrix (features x conditions) of contrast
+#'   effect sizes. Column names must follow the pattern
+#'   \code{mean_contrast_<cellA>_vs_<cellB>}.
+#' @param se_values Numeric matrix (features x conditions) of contrast
+#'   standard errors. Must have the same dimensions and column names as
+#'   \code{effect_sizes}.
+#' @param se_cutoff Numeric; minimum SE below which a condition is excluded
+#'   from the meta-analysis for a given feature (default 0).
+#' @return A tibble with columns:
+#'   \describe{
+#'     \item{cell}{Cell type name.}
+#'     \item{condition}{Original pairwise contrast name (without prefix).}
+#'     \item{meta_pvalue}{P-value from the random-effects meta-analysis.}
+#'     \item{meta_effect}{Pooled absolute effect size estimate.}
+#'     \item{meta_se}{Standard error of the pooled estimate.}
+#'     \item{tau2}{Between-study variance estimate.}
+#'     \item{I2}{Heterogeneity measure (proportion of variance due to
+#'       between-study variance), in [0, 1].}
+#'   }
+#' @export
+meta_analysis_per_cell <- function(effect_sizes, se_values,
+                                   se_cutoff = 0) {
+  stopifnot(identical(dim(effect_sizes), dim(se_values)))
+  stopifnot(identical(colnames(effect_sizes), colnames(se_values)))
+
+  conditions <- sub("^mean_contrast_", "", colnames(effect_sizes))
+  cells <- unique(c(sub("_vs_.*", "", conditions),
+                     sub(".*_vs_", "", conditions)))
+
+  results <- list()
+  for (cell in cells) {
+    # Columns involving this cell
+    cell_idx <- grep(cell, colnames(effect_sizes))
+    if (length(cell_idx) == 0) next
+
+    cell_effects <- effect_sizes[, cell_idx, drop = FALSE]
+    cell_ses <- se_values[, cell_idx, drop = FALSE]
+    cell_conditions <- conditions[cell_idx]
+
+    for (i in seq_along(cell_conditions)) {
+      es <- abs(as.numeric(cell_effects[, i]))
+      se <- as.numeric(cell_ses[, i])
+
+      # Filter by SE cutoff
+      keep <- se > se_cutoff & is.finite(es) & is.finite(se)
+      es <- es[keep]
+      se <- se[keep]
+
+      if (length(es) < 2) {
+        results[[length(results) + 1]] <- tibble(
+          cell = cell,
+          condition = cell_conditions[i],
+          meta_pvalue = if (length(es) == 1) {
+            2 * pnorm(abs(es / se), lower.tail = FALSE)
+          } else NA_real_,
+          meta_effect = if (length(es) == 1) es else NA_real_,
+          meta_se = if (length(es) == 1) se else NA_real_,
+          tau2 = NA_real_,
+          I2 = NA_real_
+        )
+        next
+      }
+
+      ma <- meta_random_effects(es, se)
+      z <- ma$mean / ma$se
+      results[[length(results) + 1]] <- tibble(
+        cell = cell,
+        condition = cell_conditions[i],
+        meta_pvalue = 2 * pnorm(abs(z), lower.tail = FALSE),
+        meta_effect = ma$mean,
+        meta_se = ma$se,
+        tau2 = ma$tau2,
+        I2 = ma$I2
+      )
+    }
+  }
+
+  bind_rows(results)
 }

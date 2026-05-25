@@ -13,6 +13,7 @@ twas_weights_cv(
   max_num_variants = NULL,
   variants_to_keep = NULL,
   num_threads = 1,
+  verbose = 1,
   ...
 )
 }
@@ -38,6 +39,10 @@ methods in the list can be either univariate (applied to each column of Y) or mu
 If set to -1, the function uses all available cores.
 If set to 0 or 1, no parallel processing is performed.
 If set to 2 or more, parallel processing is enabled with that many threads.}
+
+\item{verbose}{Integer controlling verbosity level: 0 = suppress all messages,
+1 = suppress external package messages (default),
+2 = show all messages including those from external packages.}
 }
 \value{
 A list with the following components:

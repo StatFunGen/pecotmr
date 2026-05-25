@@ -145,8 +145,20 @@ otters_weights <- function(sumstats, LD, n,
 #'   \code{\link{rss_basic_qc}} for harmonization before calling this function.
 #' @param LD LD correlation matrix R, aligned to the same variants as weights
 #'   and gwas_z.
-#' @param combine_method Method to combine p-values across methods: \code{"acat"}
-#'   (default) or \code{"hmp"}.
+#' @param combine_method Method to combine p-values across methods.
+#'   Correlation-free (valid under arbitrary dependence):
+#'   \code{"acat"} (default), \code{"hmp"}.
+#'   Correlation-adjusted via poolr (generalized multivariate theory):
+#'   \code{"fisher"} (Brown's method), \code{"stouffer"} (Strube's method),
+#'   \code{"invchisq"}.
+#'   Set-based tests via GBJ (uses TWAS z-scores and inter-method correlation):
+#'   \code{"gbj"}, \code{"bj"}, \code{"hc"}, \code{"ghc"}, \code{"minp"},
+#'   \code{"gbj_omni"}.
+#'   Adaptive and Simes-type tests via aSPU:
+#'   \code{"aspu"} (adaptive sum of powered scores),
+#'   \code{"gates"} (extended Simes / GATES).
+#'   The poolr, GBJ, and aSPU methods automatically compute the inter-method
+#'   TWAS z-score correlation from the weight vectors and LD matrix.
 #'
 #' @return A data.frame with columns:
 #' \describe{
@@ -166,7 +178,11 @@ otters_weights <- function(sumstats, LD, n,
 #'
 #' @export
 otters_association <- function(weights, gwas_z, LD,
-                               combine_method = c("acat", "hmp")) {
+                               combine_method = c("acat", "hmp",
+                                                   "fisher", "stouffer", "invchisq",
+                                                   "gbj", "bj", "hc", "ghc",
+                                                   "minp", "gbj_omni",
+                                                   "aspu", "gates")) {
   combine_method <- match.arg(combine_method)
 
   # Validate dimensions
@@ -191,6 +207,8 @@ otters_association <- function(weights, gwas_z, LD,
   )
 
   valid_pvals <- c()
+  valid_zscores <- c()
+  valid_weights <- list()
 
   for (method_name in names(weights)) {
     w <- weights[[method_name]]
@@ -223,16 +241,36 @@ otters_association <- function(weights, gwas_z, LD,
 
     if (!is.na(p_val) && is.finite(p_val) && p_val > 0 && p_val < 1) {
       valid_pvals <- c(valid_pvals, p_val)
+      valid_zscores <- c(valid_zscores, z_val)
+      valid_weights[[length(valid_weights) + 1]] <- w
     }
   }
 
   # Combine p-values across methods
   if (length(valid_pvals) >= 2) {
+    poolr_methods <- c("fisher", "stouffer", "invchisq")
+    gbj_methods <- c("gbj", "bj", "hc", "ghc", "minp", "gbj_omni")
+    aspu_methods <- c("aspu", "gates")
+    needs_cor <- combine_method %in% c(poolr_methods, gbj_methods, aspu_methods)
+
+    method_cor <- NULL
+    if (needs_cor) {
+      method_cor <- twas_method_cor(valid_weights, LD)
+    }
+
     combined_pval <- if (combine_method == "acat") {
       pval_acat(valid_pvals)
-    } else {
+    } else if (combine_method == "hmp") {
       pval_hmp(valid_pvals)
+    } else if (combine_method %in% poolr_methods) {
+      pval_poolr(valid_pvals, combine_method, R = method_cor)
+    } else if (combine_method %in% gbj_methods) {
+      pval_gbj(valid_zscores, method_cor, combine_method)
+    } else if (combine_method %in% aspu_methods) {
+      pval_aspu(z_scores = valid_zscores, pvals = valid_pvals,
+                R = method_cor, method = combine_method)
     }
+
     results <- rbind(results, data.frame(
       method = paste0(toupper(combine_method), "_combined"),
       twas_z = NA_real_,

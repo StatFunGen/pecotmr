@@ -1,3 +1,19 @@
+#' Extract the LD or genotype matrix from an LDData S4 object or legacy list.
+#' @param ld An LDData object or a list with element \code{LD_matrix}.
+#' @param want_genotype Logical; if TRUE, extract the genotype matrix from an
+#'   LDData object (via \code{getGenotypes()}).
+#' @return A matrix.
+#' @noRd
+extract_ld_matrix <- function(ld, want_genotype = FALSE) {
+  if (is(ld, "LDData")) {
+    if (want_genotype && hasGenotypes(ld)) {
+      return(getGenotypes(ld))
+    }
+    return(getCorrelation(ld))
+  }
+  ld$LD_matrix
+}
+
 #' Create an LD loader for on-demand block-wise LD retrieval
 #'
 #' Constructs a loader function that retrieves per-block LD matrices on
@@ -89,7 +105,7 @@ ld_loader <- function(R_list = NULL, X_list = NULL,
     loader <- function(g) {
       ld <- load_LD_matrix(ld_meta_path, region = regions[g],
                            return_genotype = return_genotype)
-      mat <- ld$LD_matrix
+      mat <- extract_ld_matrix(ld, want_genotype = return_genotype)
       if (!is.null(max_variants) && ncol(mat) > max_variants) {
         keep <- sort(sample(ncol(mat), max_variants))
         if (return_genotype || nrow(mat) > ncol(mat)) {
@@ -127,7 +143,7 @@ ld_loader <- function(R_list = NULL, X_list = NULL,
           NULL  # let process_LD_matrix auto-detect .bim/.pvar/.pvar.zst
         }
         ld <- process_LD_matrix(ld_path, snp_file)
-        mat <- ld$LD_matrix
+        mat <- extract_ld_matrix(ld)
       }
 
       if (!is.null(max_variants) && ncol(mat) > max_variants) {

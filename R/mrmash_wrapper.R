@@ -75,8 +75,6 @@
 #'   prior_grid = prior_grid
 #' )
 #'
-#' @importFrom doFuture registerDoFuture
-#' @importFrom future plan multicore
 #' @export
 mrmash_wrapper <- function(X,
                            Y,
@@ -369,4 +367,60 @@ autoselect_mixsd <- function(gmin, gmax, mult = 2) {
     npoint <- ceiling(log2(gmax / gmin) / log2(mult))
     return(mult^((-npoint):0) * gmax)
   }
+}
+
+#' Compute covariance matrix using FLASH
+#'
+#' Estimates a covariance matrix from a data matrix Y using empirical Bayes
+#' matrix factorization (flashier). Falls back to an identity matrix on failure
+#' if error_cache is provided.
+#'
+#' @param Y Numeric matrix (samples x conditions).
+#' @param error_cache Optional file path to save diagnostics on FLASH failure.
+#'   When NULL (default), errors propagate; when set, saves a list with data
+#'   and message to this path and falls back to the identity matrix.
+#' @return A covariance matrix of dimension ncol(Y) x ncol(Y), rescaled by
+#'   column standard deviations.
+#' @export
+compute_cov_flash <- function(Y, error_cache = NULL) {
+  covar <- diag(ncol(Y))
+  tryCatch({
+    fl <- flashier::flash(Y, var.type = 2,
+      prior.family = c(flashier::prior.normal(),
+                       flashier::prior.normal.scale.mix()),
+      backfit = TRUE, verbose.lvl = 0)
+    if (fl$n.factors == 0) {
+      covar <- diag(fl$residuals.sd^2)
+    } else {
+      fsd <- sapply(fl$fitted.g[[1]], "[[", "sd")
+      covar <- diag(fl$residuals.sd^2) + crossprod(t(fl$flash.fit$EF[[2]]) * fsd)
+    }
+    if (nrow(covar) == 0) {
+      covar <- diag(ncol(Y))
+      stop("Computed covariance matrix has zero rows")
+    }
+  }, error = function(e) {
+    if (!is.null(error_cache)) {
+      saveRDS(list(data = Y, message = warning(e)), error_cache)
+      warning("FLASH failed. Using Identity matrix instead.")
+      warning(e)
+    } else {
+      stop(e)
+    }
+  })
+  s <- apply(Y, 2, sd, na.rm = TRUE)
+  if (length(s) > 1) s <- diag(s) else s <- matrix(s, 1, 1)
+  covar <- s %*% cov2cor(covar) %*% s
+  return(covar)
+}
+
+#' Compute diagonal covariance matrix
+#'
+#' Returns a diagonal covariance matrix from the column-wise variances of Y.
+#'
+#' @param Y Numeric matrix (samples x conditions).
+#' @return A diagonal covariance matrix of dimension ncol(Y) x ncol(Y).
+#' @export
+compute_cov_diag <- function(Y) {
+  diag(apply(Y, 2, var, na.rm = TRUE))
 }

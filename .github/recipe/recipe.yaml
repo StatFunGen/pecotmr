@@ -23,6 +23,9 @@ requirements:
     - ${{ stdlib('c') }}
     - ${{ compiler('cxx') }}
   host:
+    - bioconductor-biocparallel
+    - bioconductor-biostrings
+    - bioconductor-genomicranges
     - bioconductor-iranges
     - bioconductor-qvalue
     - bioconductor-s4vectors
@@ -30,6 +33,10 @@ requirements:
     - bioconductor-snpstats
     - bioconductor-mungesumstats
     - bioconductor-rsamtools
+    - bioconductor-rtracklayer
+    - bioconductor-summarizedexperiment
+    - r-arrow
+    - r-aspu
     - r-base
     - r-bglr
     - r-bigsnpr
@@ -39,12 +46,9 @@ requirements:
     - r-cpp11
     - r-cpp11armadillo
     - r-decor
-    - r-dofuture
     - r-dplyr
     - r-flashier
     - r-fsusier
-    - r-furrr
-    - r-future
     - r-gbj
     - r-glmnet
     - r-harmonicmeanp
@@ -52,6 +56,7 @@ requirements:
     - r-l0learn
     - r-magrittr
     - r-mashr
+    - r-matrix
     - r-matrixstats
     - r-mr.ash.alpha
     - r-mr.mashr
@@ -59,6 +64,8 @@ requirements:
     - r-ncvreg
     - r-nnls
     - r-pgenlibr
+    - r-plinkqc
+    - r-poolr
     - r-purrr
     - r-qgg
     - r-quadprog
@@ -69,27 +76,37 @@ requirements:
     - r-stringr
     - r-susier
     - r-tibble
+    - r-tictoc
     - r-tidyr
     - r-vctrs
     - r-vroom
+    - r-xgboost
   run:
-    - bioconductor-biostrings
+    - bioconductor-biocparallel
+    - bioconductor-genomicranges
     - bioconductor-iranges
     - bioconductor-qvalue
     - bioconductor-s4vectors
+    - bioconductor-snprelate
     - bioconductor-snpstats
+    - bioconductor-mungesumstats
+    - bioconductor-rsamtools
+    - bioconductor-rtracklayer
+    - bioconductor-summarizedexperiment
+    - r-arrow
+    - r-aspu
     - r-base
     - r-bglr
     - r-bigsnpr
     - r-coda
     - r-coloc
     - r-colocboost
-    - r-dofuture
+    - r-cpp11
+    - r-cpp11armadillo
+    - r-decor
     - r-dplyr
     - r-flashier
     - r-fsusier
-    - r-furrr
-    - r-future
     - r-gbj
     - r-glmnet
     - r-harmonicmeanp
@@ -97,6 +114,7 @@ requirements:
     - r-l0learn
     - r-magrittr
     - r-mashr
+    - r-matrix
     - r-matrixstats
     - r-mr.ash.alpha
     - r-mr.mashr
@@ -104,10 +122,11 @@ requirements:
     - r-ncvreg
     - r-nnls
     - r-pgenlibr
+    - r-plinkqc
+    - r-poolr
     - r-purrr
     - r-qgg
-    - r-rcpp
-    - r-rcpparmadillo
+    - r-quadprog
     - r-rcppdpr
     - r-readr
     - r-rfast
@@ -115,9 +134,11 @@ requirements:
     - r-stringr
     - r-susier
     - r-tibble
+    - r-tictoc
     - r-tidyr
     - r-vctrs
     - r-vroom
+    - r-xgboost
 
 tests:
   - script:
