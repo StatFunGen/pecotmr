@@ -947,7 +947,7 @@ test_that("rss: pip_cutoff_to_skip > 0, no signal => early return", {
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
     rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    susie_rss = function(...) list(pip = rep(0.01, 5)),
+    susie_ser = function(...) list(pip = rep(0.01, 5)),
   )
 
   result <- expect_message(
@@ -1004,7 +1004,7 @@ test_that("rss: negative pip_cutoff_to_skip auto-computes threshold", {
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
     rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    susie_rss = function(...) list(pip = rep(0.01, 5)),
+    susie_ser = function(...) list(pip = rep(0.01, 5)),
   )
 
   # auto threshold = 3 * 1/5 = 0.6, all PIPs are 0.01 so skip
