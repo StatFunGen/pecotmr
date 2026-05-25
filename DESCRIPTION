@@ -33,6 +33,7 @@ Imports:
     stringr,
     susieR,
     tibble,
+    tictoc,
     tidyr,
     vctrs,
     vroom
