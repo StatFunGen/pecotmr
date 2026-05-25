@@ -955,7 +955,8 @@ test_that("rss: pip_cutoff_to_skip > 0, no signal => early return", {
       sumstat_path = "/fake/sumstats.tsv",
       column_file_path = "/fake/columns.yml",
       LD_data = list(),
-      pip_cutoff_to_skip = 0.5
+      pip_cutoff_to_skip = 0.5,
+      qc_method = "none"
     ),
     "Skipping follow-up"
   )
@@ -1012,7 +1013,8 @@ test_that("rss: negative pip_cutoff_to_skip auto-computes threshold", {
       sumstat_path = "/fake/sumstats.tsv",
       column_file_path = "/fake/columns.yml",
       LD_data = list(),
-      pip_cutoff_to_skip = -1
+      pip_cutoff_to_skip = -1,
+      qc_method = "none"
     ),
     "Skipping follow-up"
   )
