@@ -5,8 +5,7 @@
 \alias{TWASWeights-class}
 \title{TWAS Weights}
 \description{
-S4 container for TWAS weight matrices, replacing the
-  fragile attribute-based list from \code{twas_weights()}.
+S4 container for TWAS weight matrices.
 }
 \section{Slots}{
 

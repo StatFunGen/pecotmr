@@ -5,8 +5,7 @@
 \alias{FineMappingResult-class}
 \title{Fine-Mapping Result}
 \description{
-S4 container for fine-mapping output, replacing the ad-hoc
-  list from \code{postprocess_finemapping_fit()}. Stores variant names,
+S4 container for fine-mapping output. Stores variant names,
   the trimmed model fit, and a long-format table of credible sets and PIPs.
 }
 \section{Slots}{

@@ -32,8 +32,8 @@ when \code{method = "sample"}:
     \code{snpStats::ld(, stat = "R")}.}
 }
 The \code{"snprelate"} and \code{"snpstats"} backends are only supported
-with \code{method = "sample"}; other methods always use the internal
-implementation.}
+with \code{method = "sample"}; combining them with other methods will
+raise an error.}
 
 \item{trim_samples}{Logical. If \code{TRUE} and \code{method} is
 \code{"population"} or \code{"gcta"}, drops trailing samples so that

@@ -5,11 +5,9 @@
 \alias{LDData-class}
 \title{LD Data Container}
 \description{
-S4 container for LD information, replacing the ad-hoc list
-  returned by \code{load_LD_matrix()}. Stores either a pre-computed
+S4 container for LD information. Stores either a pre-computed
   correlation matrix or a \code{GenotypeHandle} (or list of handles for
-  mixture panels) for lazy genotype/correlation access. Eliminates the
-  \code{is_genotype} flag duality.
+  mixture panels) for lazy genotype/correlation access.
 }
 \section{Slots}{
 

@@ -5,8 +5,7 @@
 \alias{RegionalData-class}
 \title{Regional Association Data}
 \description{
-S4 container for regional genotype/phenotype/covariate data,
-  replacing the 13-element list from \code{load_regional_association_data()}.
+S4 container for regional genotype/phenotype/covariate data.
   Residualized genotypes and phenotypes are computed lazily via accessors.
 }
 \section{Slots}{
