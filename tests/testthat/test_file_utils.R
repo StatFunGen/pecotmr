@@ -1435,6 +1435,25 @@ test_that("load_rss_data returns empty sumstats message for zero-row region", {
   file.remove(tmp_sumstat, tmp_col)
 })
 
+test_that("load_rss_data handles tabix regions with no records", {
+  tmp_sumstat <- tempfile(fileext = ".tsv")
+  writeLines("chrom\tpos\tb\ts", tmp_sumstat)
+  tmp_col <- tempfile(fileext = ".txt")
+  writeLines(c("beta:b", "se:s"), tmp_col)
+
+  local_mocked_bindings(
+    load_tsv_region = function(...) NULL
+  )
+  expect_message(
+    result <- suppressWarnings(load_rss_data(tmp_sumstat, tmp_col, region = "chr21:1-2")),
+    "No variants in region chr21:1-2."
+  )
+  expect_true(is.data.frame(result$sumstats))
+  expect_equal(nrow(result$sumstats), 0)
+  expect_null(result$n)
+  file.remove(tmp_sumstat, tmp_col)
+})
+
 test_that("load_rss_data extracts n from n_sample column in sumstats", {
   tmp_sumstat <- tempfile(fileext = ".tsv")
   df <- data.frame(
