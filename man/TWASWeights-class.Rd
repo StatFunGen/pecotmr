@@ -22,5 +22,10 @@ list).}
 
 \item{\code{cv_performance}}{Named list of cross-validation performance
 metrics, or NULL.}
+
+\item{\code{standardized}}{Logical, whether weights are on standardized
+(correlation) scale. If TRUE, \code{harmonize_twas} skips the
+\code{sqrt(variance)} scaling step. Individual-level weights use
+FALSE (raw genotype scale); RSS weights use TRUE.}
 }}
 

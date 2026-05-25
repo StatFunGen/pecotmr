@@ -2076,7 +2076,8 @@ test_that("rss: mixture LD_data (list of X panels) preserves list shape into sus
     column_file_path = "/fake/columns.yml",
     LD_data = list(LD_matrix = list(X1, X2), ref_panel = ss),
     qc_method = "slalom",
-    finemapping_method = "susie_rss"
+    finemapping_method = "susie_rss",
+    impute = FALSE
   )
 
   # Mixture path => list of subset matrices passed to susie_rss_pipeline as X_mat

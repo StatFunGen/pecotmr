@@ -612,8 +612,8 @@ test_that("susie_rss_pipeline X-mode passes X to susie_rss and computes LD from 
   expect_true("X" %in% names(captured_susie_args))
   expect_null(captured_susie_args$R)
   expect_equal(captured_susie_args$R_mismatch, "eb")
-  # Post-processor should have received a p x p matrix (LD computed from X)
-  expect_equal(dim(captured_pp_data_x), c(p, p))
+  # Post-processor receives raw X matrix (n x p), not cor(X)
+  expect_equal(dim(captured_pp_data_x), c(n, p))
 })
 
 # =============================================================================
@@ -652,10 +652,8 @@ test_that("susie_rss_pipeline computes LD from first panel when X_mat is a list"
     format_finemapping_output = function(post, primary_method) list(variant_names = vnames)
   )
   result <- susie_rss_pipeline(list(z = z), X_mat = X_list)
-  # data_x should be a p x p correlation matrix computed from X1 (first panel)
-  expect_equal(dim(captured_pp_data_x), c(p, p))
-  # It should be a symmetric matrix (correlation/LD)
-  expect_equal(captured_pp_data_x, t(captured_pp_data_x), tolerance = 1e-10)
+  # data_x should be the first panel's X matrix (n1 x p), not cor(X)
+  expect_equal(dim(captured_pp_data_x), c(n1, p))
 })
 
 # =============================================================================

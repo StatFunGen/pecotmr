@@ -4,7 +4,15 @@
 \alias{twas_joint_z}
 \title{Multi-condition TWAS joint test}
 \usage{
-twas_joint_z(weights, z, R = NULL, X = NULL)
+twas_joint_z(
+  weights,
+  z,
+  R = NULL,
+  X = NULL,
+  V = NULL,
+  D_svd = NULL,
+  n_sketch = NULL
+)
 }
 \arguments{
 \item{weights}{A matrix of weights, where each column corresponds to a different condition.}
@@ -14,6 +22,13 @@ twas_joint_z(weights, z, R = NULL, X = NULL)
 \item{R}{An optional correlation matrix. If not provided, it will be calculated from the genotype matrix X.}
 
 \item{X}{An optional genotype matrix. If R is not provided, X must be supplied to calculate the correlation matrix.}
+
+\item{V}{Optional SVD right-singular vectors (variants x components) from an LD sketch.
+When provided with \code{D_svd} and \code{n_sketch}, avoids forming the full LD matrix.}
+
+\item{D_svd}{Optional SVD singular values (vector) from an LD sketch.}
+
+\item{n_sketch}{Optional sample size of the LD sketch.}
 }
 \value{
 A list containing the following elements:

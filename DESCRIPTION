@@ -118,7 +118,6 @@ Collate:
     'mrmash_wrapper.R'
     'multitrait_data.R'
     'multivariate_pipeline.R'
-    'otters.R'
     'pval_combine.R'
     'raiss.R'
     'regularized_regression.R'

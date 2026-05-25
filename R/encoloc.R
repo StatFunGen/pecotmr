@@ -114,18 +114,37 @@ extract_ld_for_variants <- function(ld_meta_file_path, analysis_region, variants
   var_pos <- as.numeric(str_split(variants, ":", simplify = TRUE)[, 2])
   chr <- str_split(analysis_region, ":", simplify = TRUE)[, 1]
   region_narrow <- paste0(chr, ":", min(var_pos), "-", max(var_pos))
-  ld_data <- load_LD_matrix(ld_meta_file_path, region = region_narrow)
+  ld_data <- load_LD_matrix(ld_meta_file_path, region = region_narrow,
+                            return_genotype = "auto")
   # Support both LDData S4 objects and legacy lists
   if (is(ld_data, "LDData")) {
     ld_variants <- getVariantIds(ld_data)
-    ld_matrix <- getCorrelation(ld_data)
+    has_geno <- hasGenotypes(ld_data)
   } else {
     ld_variants <- ld_data$LD_variants
-    ld_matrix <- ld_data$LD_matrix
+    has_geno <- isTRUE(ld_data$is_genotype)
   }
   aligned <- align_variant_names(ld_variants, variants)
-  colnames(ld_matrix) <- rownames(ld_matrix) <- aligned$aligned_variants
-  ld_matrix[variants, variants]
+  # When genotypes available, compute R only for the needed variant subset
+  if (has_geno) {
+    if (is(ld_data, "LDData")) {
+      X <- getGenotypes(ld_data)
+    } else {
+      X <- ld_data$LD_matrix
+    }
+    colnames(X) <- aligned$aligned_variants
+    X_sub <- X[, variants, drop = FALSE]
+    ld_matrix <- compute_LD(X_sub, method = "sample")
+  } else {
+    if (is(ld_data, "LDData")) {
+      ld_matrix <- getCorrelation(ld_data)
+    } else {
+      ld_matrix <- ld_data$LD_matrix
+    }
+    colnames(ld_matrix) <- rownames(ld_matrix) <- aligned$aligned_variants
+    ld_matrix <- ld_matrix[variants, variants]
+  }
+  ld_matrix
 }
 
 #' Function to calculate purity

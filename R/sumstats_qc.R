@@ -250,9 +250,18 @@ summary_stats_qc <- function(sumstats, LD_data, n = NULL,
   if (is.null(rss_input) && is.data.frame(sumstats) && is.null(qc_method) &&
       isFALSE(impute) && identical(pip_cutoff_to_skip, 0) && is.null(skip_region)) {
     method <- match.arg(method)
-    # Extract LD matrix from either LDData S4 object or legacy list
-    LD_mat <- if (is(LD_data, "LDData")) getCorrelation(LD_data) else LD_data$LD_matrix
-    LD_extract <- LD_mat[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
+    # When genotypes are available, compute R only for the needed variant subset
+    if (is(LD_data, "LDData") && hasGenotypes(LD_data)) {
+      X <- getGenotypes(LD_data)
+      vid <- getVariantIds(LD_data)
+      idx <- match(sumstats$variant_id, vid)
+      X_sub <- X[, idx[!is.na(idx)], drop = FALSE]
+      colnames(X_sub) <- sumstats$variant_id[!is.na(idx)]
+      LD_extract <- compute_LD(X_sub, method = "sample")
+    } else {
+      LD_mat <- if (is(LD_data, "LDData")) getCorrelation(LD_data) else LD_data$LD_matrix
+      LD_extract <- LD_mat[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
+    }
     qc_results <- ld_mismatch_qc(zScore = sumstats$z, R = LD_extract,
                                  nSample = n, method = method)
     keep_index <- which(!qc_results$outlier)

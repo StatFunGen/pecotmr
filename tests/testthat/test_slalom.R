@@ -53,7 +53,7 @@ test_that("slalom basic output structure", {
 test_that("slalom errors on non-square R", {
   z <- rnorm(10)
   R <- matrix(rnorm(50), nrow = 5, ncol = 10)
-  expect_error(slalom(zScore = z, R = R), "LD_mat must be a square matrix")
+  expect_error(slalom(zScore = z, R = R), "R must be a square matrix")
 })
 
 test_that("slalom accepts X matrix instead of R", {
@@ -411,7 +411,7 @@ test_that("edge case: mismatched dimensions error", {
   z <- rnorm(10)
   R <- diag(5)
   expect_error(slalom(zScore = z, R = R),
-               "LD_mat must be a square matrix matching the length of zScore")
+               "R must be a square matrix matching the length of zScore")
 })
 
 test_that("edge case: no R and no X provided errors", {

@@ -4,7 +4,13 @@
 \alias{TWASWeights}
 \title{Create a TWASWeights Object}
 \usage{
-TWASWeights(weights, variant_ids, fits = NULL, cv_performance = NULL)
+TWASWeights(
+  weights,
+  variant_ids,
+  fits = NULL,
+  cv_performance = NULL,
+  standardized = FALSE
+)
 }
 \arguments{
 \item{weights}{Named list of matrices.}
@@ -14,6 +20,10 @@ TWASWeights(weights, variant_ids, fits = NULL, cv_performance = NULL)
 \item{fits}{Named list or NULL.}
 
 \item{cv_performance}{Named list or NULL.}
+
+\item{standardized}{Logical. If TRUE, weights are on the standardized
+(correlation) scale and do not need variance scaling in harmonize_twas.
+Defaults to FALSE (individual-level / raw genotype scale).}
 }
 \value{
 A \code{TWASWeights} object.

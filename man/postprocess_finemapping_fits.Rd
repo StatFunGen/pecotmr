@@ -17,7 +17,8 @@ postprocess_finemapping_fits(
   other_quantities = NULL,
   region = NULL,
   prior_eff_tol = 1e-09,
-  min_abs_corr = 0.8
+  min_abs_corr = 0.8,
+  cs_input = NULL
 )
 }
 \arguments{

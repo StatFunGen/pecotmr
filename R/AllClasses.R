@@ -404,6 +404,10 @@ setClass("FineMappingResult",
 #' @slot fits Named list of model fit objects, or NULL.
 #' @slot cv_performance Named list of cross-validation performance
 #'   metrics, or NULL.
+#' @slot standardized Logical, whether weights are on standardized
+#'   (correlation) scale. If TRUE, \code{harmonize_twas} skips the
+#'   \code{sqrt(variance)} scaling step. Individual-level weights use
+#'   FALSE (raw genotype scale); RSS weights use TRUE.
 #' @export
 setClass("TWASWeights",
   representation(
@@ -411,10 +415,13 @@ setClass("TWASWeights",
     variant_ids = "character",
     methods = "character",
     fits = "ANY",           # list or NULL
-    cv_performance = "ANY"  # list or NULL
+    cv_performance = "ANY", # list or NULL
+    standardized = "logical"
   ),
   validity = function(object) {
     errors <- character()
+    if (length(object@standardized) != 1L)
+      errors <- c(errors, "'standardized' must be a single logical value")
     if (length(object@methods) != length(object@weights))
       errors <- c(errors,
         "Length of 'methods' must match length of 'weights'")
@@ -576,6 +583,7 @@ setMethod("show", "TWASWeights", function(object) {
   cat(sprintf("TWASWeights: %d methods, %d variants\n",
               length(object@methods), length(object@variant_ids)))
   cat(sprintf("  Methods: %s\n", paste(object@methods, collapse = ", ")))
+  cat(sprintf("  Standardized: %s\n", object@standardized))
   has_cv <- !is.null(object@cv_performance)
   cat(sprintf("  CV performance: %s\n", has_cv))
 })

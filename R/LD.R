@@ -284,14 +284,24 @@ load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL
   }
 
   # Remove any duplicate variant IDs (safety net for boundary overlaps)
-  if (!is.null(result$LD_variants)) {
-    dup_idx <- which(duplicated(result$LD_variants))
+  variant_ids <- getVariantIds(result)
+  if (!is.null(variant_ids)) {
+    dup_idx <- which(duplicated(variant_ids))
     if (length(dup_idx) > 0) {
-      result$LD_variants <- result$LD_variants[-dup_idx]
-      result$LD_matrix <- result$LD_matrix[-dup_idx, -dup_idx, drop = FALSE]
-      if (!is.null(result$ref_panel)) {
-        result$ref_panel <- result$ref_panel[-dup_idx, , drop = FALSE]
+      variant_ids_clean <- variant_ids[-dup_idx]
+      corr <- getCorrelation(result)
+      if (!is.null(corr)) {
+        corr <- corr[-dup_idx, -dup_idx, drop = FALSE]
       }
+      variants_gr <- result@variants[-dup_idx]
+      result <- LDData(
+        correlation = corr,
+        genotype_handle = result@genotype_handle,
+        snp_idx = result@snp_idx,
+        variants = variants_gr,
+        block_metadata = result@block_metadata,
+        n_ref = result@n_ref
+      )
     }
   }
 
@@ -527,9 +537,17 @@ standardize_genotype_hwe <- function(X, allele_freq) {
 #' @export
 load_ld_sketch <- function(ld_meta_file_path, region, n_sample = NULL) {
   result <- load_LD_matrix(ld_meta_file_path, region, return_genotype = TRUE, n_sample = n_sample)
-  X <- result$LD_matrix
-  variant_ids <- result$LD_variants
-  ref_panel <- result$ref_panel
+  if (is(result, "LDData")) {
+    X <- getGenotypes(result)
+    variant_ids <- getVariantIds(result)
+    ref_panel <- as.data.frame(S4Vectors::mcols(getVariantInfo(result)))
+    ref_panel$chrom <- as.character(GenomicRanges::seqnames(getVariantInfo(result)))
+    ref_panel$pos <- GenomicRanges::start(getVariantInfo(result))
+  } else {
+    X <- result$LD_matrix
+    variant_ids <- result$LD_variants
+    ref_panel <- result$ref_panel
+  }
 
   # Remove monomorphic variants (zero variance under HWE)
   p <- ref_panel$allele_freq

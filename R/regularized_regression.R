@@ -347,6 +347,92 @@ susie_inf_weights <- function(X = NULL, y = NULL, susie_inf_fit = NULL, retain_f
     retain_fit = retain_fit, ...)
 }
 
+# =============================================================================
+# SuSiE-RSS weight functions
+# =============================================================================
+
+# Internal helper: extract weights from a susie_rss fit.
+# Mirrors .susie_extract_weights but uses the RSS interface.
+#' @importFrom susieR coef.susie susie_rss
+#' @noRd
+.susie_rss_extract_weights <- function(fit, z, R, n,
+                                       required_fields, fit_args = list(),
+                                       retain_fit = FALSE) {
+  if (is.null(fit)) {
+    fit <- do.call(susie_rss, c(list(z = z, R = R, n = n), fit_args))
+  }
+  if (length(fit$pip) != nrow(R)) {
+    stop(paste0(
+      "Dimension mismatch: susie_rss fit has ", length(fit$pip),
+      " variants but R has ", nrow(R), " rows."))
+  }
+  if (all(required_fields %in% names(fit))) {
+    fit$intercept <- 0
+    weights <- coef.susie(fit)[-1]
+  } else {
+    weights <- rep(0, length(fit$pip))
+  }
+  if (retain_fit) attr(weights, "fit") <- fit
+  return(weights)
+}
+
+#' Compute SuSiE-RSS TWAS weights
+#'
+#' Extracts coefficients from an existing SuSiE-RSS fit or fits
+#' \code{susieR::susie_rss()} from summary statistics and LD.
+#'
+#' @param stat List with components \code{z} (z-scores), \code{n} (sample sizes).
+#' @param LD LD correlation matrix.
+#' @param susie_rss_fit Optional pre-fitted SuSiE-RSS object.
+#' @param retain_fit If TRUE, stores the fitted object as an attribute.
+#' @param method_args Named list of additional arguments passed to
+#'   \code{susieR::susie_rss()}. Use this instead of \code{...} to avoid
+#'   partial matching of short argument names (e.g. \code{L}) to the
+#'   \code{LD} parameter.
+#' @return Numeric vector of variant weights.
+#' @export
+susie_rss_weights <- function(stat, LD, susie_rss_fit = NULL, retain_fit = TRUE,
+                              method_args = list()) {
+  .susie_rss_extract_weights(fit = susie_rss_fit, z = stat$z, R = LD, n = median(stat$n),
+    required_fields = c("alpha", "mu", "X_column_scale_factors"),
+    fit_args = method_args,
+    retain_fit = retain_fit)
+}
+
+#' Compute SuSiE-inf-RSS TWAS weights
+#'
+#' Extracts coefficients from an existing SuSiE-inf-RSS fit or fits
+#' \code{susieR::susie_rss()} with \code{unmappable_effects = "inf"}.
+#'
+#' @inheritParams susie_rss_weights
+#' @param susie_inf_rss_fit Optional pre-fitted SuSiE-inf-RSS object.
+#' @return Numeric vector of variant weights.
+#' @export
+susie_inf_rss_weights <- function(stat, LD, susie_inf_rss_fit = NULL, retain_fit = TRUE,
+                                  method_args = list()) {
+  .susie_rss_extract_weights(fit = susie_inf_rss_fit, z = stat$z, R = LD, n = median(stat$n),
+    required_fields = c("alpha", "mu", "theta", "X_column_scale_factors"),
+    fit_args = c(list(unmappable_effects = "inf", convergence_method = "pip"), method_args),
+    retain_fit = retain_fit)
+}
+
+#' Compute SuSiE-ASH-RSS TWAS weights
+#'
+#' Extracts coefficients from an existing SuSiE-ASH-RSS fit or fits
+#' \code{susieR::susie_rss()} with \code{unmappable_effects = "ash"}.
+#'
+#' @inheritParams susie_rss_weights
+#' @param susie_ash_rss_fit Optional pre-fitted SuSiE-ASH-RSS object.
+#' @return Numeric vector of variant weights.
+#' @export
+susie_ash_rss_weights <- function(stat, LD, susie_ash_rss_fit = NULL, retain_fit = TRUE,
+                                  method_args = list()) {
+  .susie_rss_extract_weights(fit = susie_ash_rss_fit, z = stat$z, R = LD, n = median(stat$n),
+    required_fields = c("alpha", "mu", "theta", "X_column_scale_factors"),
+    fit_args = c(list(unmappable_effects = "ash", convergence_method = "pip"), method_args),
+    retain_fit = retain_fit)
+}
+
 #' Compute mr.mash TWAS weights
 #'
 #' Extracts coefficients from an existing mr.mash fit or fits mr.mash from `X` and `Y`.

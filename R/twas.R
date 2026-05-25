@@ -119,8 +119,16 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
         mol_res[["variant_names"]][[context]][[study]] <- rownames(weights_matrix_subset)
 
         # Step 6: scale weights by variance (from sketch ref_panel)
-        variance <- sketch$ref_panel$variance[match(rownames(weights_matrix_subset), sketch$ref_panel$variant_id)]
-        mol_res[["weights_qced"]][[context]][[study]] <- list(scaled_weights = weights_matrix_subset * sqrt(variance), weights = weights_matrix_subset)
+        # RSS/standardized weights are already on the correlation scale and
+        # do not need sqrt(variance) scaling.
+        is_standardized <- isTRUE(mol_data[["standardized"]])
+        if (is_standardized) {
+          scaled <- weights_matrix_subset
+        } else {
+          variance <- sketch$ref_panel$variance[match(rownames(weights_matrix_subset), sketch$ref_panel$variant_id)]
+          scaled <- weights_matrix_subset * sqrt(variance)
+        }
+        mol_res[["weights_qced"]][[context]][[study]] <- list(scaled_weights = scaled, weights = weights_matrix_subset)
       }
       # Combine GWAS sumstats for this study (filter to variants used by any context)
       used_variants <- unique(find_data(mol_res[["variant_names"]], c(2, study)))
@@ -344,6 +352,15 @@ twas_pipeline <- function(twas_weights_data,
   }
   pick_best_model <- function(twas_data_combined, rsq_cutoff, rsq_pval_cutoff, rsq_option, rsq_pval_option) {
     best_rsq <- rsq_cutoff
+    # SS-TWAS path: no CV performance, all methods are valid
+    if (is.null(twas_data_combined$twas_cv_performance) ||
+        length(twas_data_combined$twas_cv_performance) == 0) {
+      model_selection <- lapply(names(twas_data_combined$weights), function(context) {
+        list(selected_model = NA, is_imputable = TRUE, all_methods = TRUE)
+      })
+      names(model_selection) <- names(twas_data_combined$weights)
+      return(model_selection)
+    }
     # Determine if a gene/region is imputable and select the best model
     model_selection <- lapply(names(twas_data_combined$weights), function(context) {
       selected_model <- NULL
@@ -450,7 +467,9 @@ twas_pipeline <- function(twas_weights_data,
         if (length(twas_variants) == 0) {
           return(list(twas_rs_df = data.frame(), mr_rs_df = data.frame()))
         }
-        # twas analysis
+        # twas analysis -- enable omnibus when no CV performance available
+        has_cv <- !is.null(twas_weights_data[[weight_db]]$twas_cv_performance) &&
+                  length(twas_weights_data[[weight_db]]$twas_cv_performance) > 0
         twas_rs <- twas_analysis(
           twas_data_qced[[weight_db]][["weights_qced"]][[context]][[study]][["weights"]],
           twas_data_qced[[weight_db]][["gwas_qced"]][[study]],
@@ -458,7 +477,8 @@ twas_pipeline <- function(twas_weights_data,
           V = twas_data_qced[[weight_db]][["svd_V"]],
           D = twas_data_qced[[weight_db]][["svd_D"]],
           n_sketch = twas_data_qced[[weight_db]][["n_sketch"]],
-          ld_variant_ids = twas_data_qced[[weight_db]][["ld_variant_ids"]]
+          ld_variant_ids = twas_data_qced[[weight_db]][["ld_variant_ids"]],
+          combine_if_no_cv = !has_cv
         )
         if (is.null(twas_rs)) {
           return(list(twas_rs_df = data.frame(), mr_rs_df = data.frame()))
@@ -525,22 +545,39 @@ twas_pipeline <- function(twas_weights_data,
     contexts <- names(twas_weights_data[[molecular_id]]$weights)
     # merge twas_cv information for same gene across all weight db files, loop through each context for all methods
     gene_table <- do.call(rbind, lapply(contexts, function(context) {
-      methods <- sub("_[^_]+$", "", names(twas_weights_data[[molecular_id]]$twas_cv_performance[[context]]))
-      is_imputable <- twas_data[[molecular_id]][["model_selection"]][[context]]$is_imputable
-      selected_method <- twas_data[[molecular_id]][["model_selection"]][[context]]$selected_model
-      if (is.null(selected_method)) selected_method <- NA
-      is_selected_method <- ifelse(methods == selected_method, TRUE, FALSE)
+      cv_perf <- twas_weights_data[[molecular_id]]$twas_cv_performance[[context]]
+      model_sel <- twas_data[[molecular_id]][["model_selection"]][[context]]
+      is_imputable <- if (!is.null(model_sel)) model_sel$is_imputable else TRUE
 
-      cv_rsqs <- sapply(twas_weights_data[[molecular_id]]$twas_cv_performance[[context]], function(x) x[, rsq_option])
-      cv_pvals <- sapply(twas_weights_data[[molecular_id]]$twas_cv_performance[[context]], function(x) x[, colnames(x)[which(colnames(x) %in% rsq_pval_option)]])
+      if (is.null(cv_perf) || length(cv_perf) == 0) {
+        # SS-TWAS path: no CV, derive methods from weight matrix columns
+        wt_mat <- twas_weights_data[[molecular_id]]$weights[[context]]
+        methods <- if (is.matrix(wt_mat)) colnames(wt_mat) else names(wt_mat)
+        if (is.null(methods)) methods <- "unknown"
+        context_table <- data.frame(
+          context = context, method = methods,
+          is_imputable = is_imputable,
+          is_selected_method = FALSE,
+          rsq_cv = NA_real_, pval_cv = NA_real_,
+          type = twas_weights_data[[molecular_id]][["data_type"]][[context]]
+        )
+      } else {
+        methods <- sub("_[^_]+$", "", names(cv_perf))
+        selected_method <- if (!is.null(model_sel)) model_sel$selected_model else NA
+        if (is.null(selected_method)) selected_method <- NA
+        is_selected_method <- ifelse(methods == selected_method, TRUE, FALSE)
 
-      context_table <- data.frame(
-        context = context, method = methods,
-        is_imputable = is_imputable,
-        is_selected_method = is_selected_method,
-        rsq_cv = cv_rsqs, pval_cv = cv_pvals,
-        type = twas_weights_data[[molecular_id]][["data_type"]][[context]]
-      )
+        cv_rsqs <- sapply(cv_perf, function(x) x[, rsq_option])
+        cv_pvals <- sapply(cv_perf, function(x) x[, colnames(x)[which(colnames(x) %in% rsq_pval_option)]])
+
+        context_table <- data.frame(
+          context = context, method = methods,
+          is_imputable = is_imputable,
+          is_selected_method = is_selected_method,
+          rsq_cv = cv_rsqs, pval_cv = cv_pvals,
+          type = twas_weights_data[[molecular_id]][["data_type"]][[context]]
+        )
+      }
       return(context_table)
     }))
     gene_table$molecular_id <- molecular_id
@@ -616,6 +653,10 @@ twas_z <- function(weights, z, R = NULL, X = NULL, V = NULL, D = NULL, n_sketch 
 #'
 #' @param R An optional correlation matrix. If not provided, it will be calculated from the genotype matrix X.
 #' @param X An optional genotype matrix. If R is not provided, X must be supplied to calculate the correlation matrix.
+#' @param V Optional SVD right-singular vectors (variants x components) from an LD sketch.
+#'   When provided with \code{D_svd} and \code{n_sketch}, avoids forming the full LD matrix.
+#' @param D_svd Optional SVD singular values (vector) from an LD sketch.
+#' @param n_sketch Optional sample size of the LD sketch.
 #' @param weights A matrix of weights, where each column corresponds to a different condition.
 #' @param z A vector of GWAS z-scores.
 #'
@@ -627,7 +668,8 @@ twas_z <- function(weights, z, R = NULL, X = NULL, V = NULL, D = NULL, n_sketch 
 #'
 #' @importFrom stats cor pnorm
 #' @export
-twas_joint_z <- function(weights, z, R = NULL, X = NULL) {
+twas_joint_z <- function(weights, z, R = NULL, X = NULL,
+                         V = NULL, D_svd = NULL, n_sketch = NULL) {
   # Make sure GBJ is installed
   if (!requireNamespace("GBJ", quietly = TRUE)) {
     stop("To use this function, please install GBJ: https://cran.r-project.org/web/packages/GBJ/index.html")
@@ -636,10 +678,24 @@ twas_joint_z <- function(weights, z, R = NULL, X = NULL) {
   if (nrow(weights) != length(z)) {
     stop("Number of rows in weights must match the length of z-scores.")
   }
-  if (is.null(R)) R <- compute_LD(X)
-  idx <- which(rownames(R) %in% rownames(weights))
-  D <- R[idx, idx]
-  cov_y <- crossprod(weights, D) %*% weights
+
+  use_svd <- !is.null(V) && !is.null(D_svd) && !is.null(n_sketch)
+
+  if (use_svd) {
+    # SVD path: R ≈ V diag(Lambda) V' where Lambda = D_svd²/(n_sketch-1)
+    Lambda <- D_svd^2 / (n_sketch - 1)
+    idx <- which(rownames(V) %in% rownames(weights))
+    V_sub <- V[idx, , drop = FALSE]
+    # cov_y = weights' R_sub weights = weights' V_sub diag(Lambda) V_sub' weights
+    VtW <- crossprod(V_sub, weights)  # r x k
+    cov_y <- crossprod(VtW * sqrt(Lambda))  # k x k
+  } else {
+    if (is.null(R)) R <- compute_LD(X)
+    idx <- which(rownames(R) %in% rownames(weights))
+    D <- R[idx, idx]
+    cov_y <- crossprod(weights, D) %*% weights
+  }
+
   y_sd <- sqrt(diag(cov_y))
   x_sd <- rep(1, nrow(weights)) # Assuming X is standardized
 
@@ -667,7 +723,15 @@ twas_joint_z <- function(weights, z, R = NULL, X = NULL) {
     la <- as.matrix(weights[, p] %*% g[[p]])
     lam[p, ] <- la
   }
-  sig <- tcrossprod((lam %*% D), lam)
+
+  if (use_svd) {
+    # sig = lam R_sub lam' = lam V_sub diag(Lambda) V_sub' lam'
+    LV <- lam %*% V_sub  # k x r
+    sig <- tcrossprod(sweep(LV, 2, Lambda, "*"), LV)  # k x k
+  } else {
+    sig <- tcrossprod((lam %*% D), lam)
+  }
+
   gbj <- GBJ::GBJ(test_stats = z_matrix[, 1], cor_mat = sig)
 
   rs <- list("Z" = z_matrix, "GBJ" = gbj)
@@ -680,16 +744,35 @@ twas_joint_z <- function(weights, z, R = NULL, X = NULL) {
 #' and LD matrix. It extracts the necessary GWAS summary statistics and LD matrix based on the
 #' specified variants and computes the z-score and p-value for each gene.
 #'
+#' When \code{combine_if_no_cv = TRUE} and there are at least two methods with
+#' valid p-values, an omnibus p-value is computed via the method specified in
+#' \code{combine_method} and appended as an \code{"omnibus"} entry. This is
+#' intended for summary-statistics TWAS where cross-validation performance is
+#' not available for model selection.
+#'
 #' @param weights_matrix A matrix containing weights for all methods.
 #' @param gwas_sumstats_db A data frame containing the GWAS summary statistics.
 #' @param LD_matrix A matrix representing linkage disequilibrium between variants.
 #' @param extract_variants_objs A vector of variant identifiers to extract from the GWAS and LD matrix.
+#' @param V SVD right-singular vectors from LD sketch (optional).
+#' @param D SVD singular values from LD sketch (optional).
+#' @param n_sketch Sample size of LD sketch (optional).
+#' @param ld_variant_ids Variant IDs in the LD sketch (optional).
+#' @param combine_method P-value combination method: \code{"acat"} (default),
+#'   \code{"hmp"}, \code{"fisher"}, \code{"stouffer"}, \code{"invchisq"},
+#'   \code{"gbj"}, \code{"aspu"}, or \code{"gates"}.
+#' @param combine_if_no_cv Logical. If TRUE and no CV performance is available,
+#'   combine per-method p-values into an omnibus result.
 #'
-#' @return A list with TWAS z-scores and p-values across four methods for each gene.
+#' @return A list with TWAS z-scores and p-values across methods for each gene.
+#'   When omnibus combination is enabled, includes an additional \code{"omnibus"}
+#'   entry.
 #' @export
 twas_analysis <- function(weights_matrix, gwas_sumstats_db, LD_matrix = NULL,
                           extract_variants_objs, V = NULL, D = NULL,
-                          n_sketch = NULL, ld_variant_ids = NULL) {
+                          n_sketch = NULL, ld_variant_ids = NULL,
+                          combine_method = "acat",
+                          combine_if_no_cv = FALSE) {
   # Extract gwas_sumstats
   gwas_sumstats_subset <- gwas_sumstats_db[match(extract_variants_objs, gwas_sumstats_db$variant_id), ]
   # Validate that the GWAS subset is not empty
@@ -715,7 +798,8 @@ twas_analysis <- function(weights_matrix, gwas_sumstats_db, LD_matrix = NULL,
       as.matrix(weights_matrix), 2,
       function(x) twas_z(x, gwas_sumstats_subset$z, V = V_subset, D = D, n_sketch = n_sketch)
     )
-    return(twas_z_pval)
+    return(.maybe_add_omnibus(twas_z_pval, weights_matrix, LD_matrix,
+                              combine_method, combine_if_no_cv))
   }
 
   # LD matrix path
@@ -732,5 +816,53 @@ twas_analysis <- function(weights_matrix, gwas_sumstats_db, LD_matrix = NULL,
     as.matrix(weights_matrix), 2,
     function(x) twas_z(x, gwas_sumstats_subset$z, R = LD_matrix_subset)
   )
-  return(twas_z_pval)
+  return(.maybe_add_omnibus(twas_z_pval, weights_matrix, LD_matrix_subset,
+                            combine_method, combine_if_no_cv))
+}
+
+#' Add omnibus p-value combination to TWAS results
+#' @noRd
+.maybe_add_omnibus <- function(twas_z_pval, weights_matrix, LD_matrix,
+                               combine_method, combine_if_no_cv) {
+  if (!isTRUE(combine_if_no_cv) || length(twas_z_pval) < 2) {
+    return(twas_z_pval)
+  }
+
+  pvals <- vapply(twas_z_pval, function(x) as.numeric(x$pval), numeric(1))
+  zscores <- vapply(twas_z_pval, function(x) as.numeric(x$z), numeric(1))
+  valid <- !is.na(pvals) & is.finite(pvals) & pvals > 0 & pvals < 1
+
+  if (sum(valid) < 2) return(twas_z_pval)
+
+  combined_pval <- tryCatch({
+    switch(combine_method,
+      acat = pval_acat(pvals[valid]),
+      hmp = pval_hmp(pvals[valid]),
+      fisher = , stouffer = , invchisq = {
+        method_cor <- twas_method_cor(
+          lapply(which(valid), function(i) weights_matrix[, i]),
+          LD_matrix)
+        pval_poolr(pvals[valid], method = combine_method, R = method_cor)
+      },
+      gbj = {
+        method_cor <- twas_method_cor(
+          lapply(which(valid), function(i) weights_matrix[, i]),
+          LD_matrix)
+        pval_gbj(zscores[valid], R = method_cor, method = combine_method)
+      },
+      aspu = , gates = {
+        method_cor <- twas_method_cor(
+          lapply(which(valid), function(i) weights_matrix[, i]),
+          LD_matrix)
+        pval_aspu(zscores[valid], pvals[valid], R = method_cor, method = combine_method)
+      },
+      pval_acat(pvals[valid])  # fallback
+    )
+  }, error = function(e) {
+    warning(sprintf("Omnibus combination (%s) failed: %s", combine_method, e$message))
+    NA_real_
+  })
+
+  twas_z_pval[["omnibus"]] <- list(z = NA_real_, pval = combined_pval)
+  twas_z_pval
 }

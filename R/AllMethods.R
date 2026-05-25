@@ -103,7 +103,7 @@ setMethod("getBlockMetadata", "LDData", function(x) {
 #'   is_genotype.
 #' @keywords internal
 #' @noRd
-ld_data_to_list <- function(x) {
+ld_data_to_list <- function(x, skip_correlation = FALSE) {
   mc <- as.data.frame(mcols(x@variants))
   mc$chrom <- as.character(seqnames(x@variants))
   mc$pos <- start(x@variants)
@@ -114,9 +114,17 @@ ld_data_to_list <- function(x) {
     bm <- as.data.frame(bm@blocks)
   }
 
+  LD_matrix <- if (skip_correlation) {
+    NULL
+  } else if (!is.null(x@correlation)) {
+    x@correlation
+  } else {
+    getCorrelation(x)
+  }
+
   list(
     LD_variants = getVariantIds(x),
-    LD_matrix = if (!is.null(x@correlation)) x@correlation else getCorrelation(x),
+    LD_matrix = LD_matrix,
     ref_panel = ref_panel,
     block_metadata = bm,
     is_genotype = FALSE
@@ -389,16 +397,20 @@ setMethod("getEffects", "FineMappingResult", function(x) {
 #' @param variant_ids Character vector.
 #' @param fits Named list or NULL.
 #' @param cv_performance Named list or NULL.
+#' @param standardized Logical. If TRUE, weights are on the standardized
+#'   (correlation) scale and do not need variance scaling in harmonize_twas.
+#'   Defaults to FALSE (individual-level / raw genotype scale).
 #' @return A \code{TWASWeights} object.
 #' @export
 TWASWeights <- function(weights, variant_ids, fits = NULL,
-                        cv_performance = NULL) {
+                        cv_performance = NULL, standardized = FALSE) {
   new("TWASWeights",
     weights = weights,
     variant_ids = variant_ids,
     methods = names(weights),
     fits = fits,
-    cv_performance = cv_performance
+    cv_performance = cv_performance,
+    standardized = standardized
   )
 }
 

@@ -856,7 +856,7 @@ test_that("extract_ld_for_variants loads LD, aligns names, and subsets", {
   colnames(ld_mat) <- rownames(ld_mat) <- ld_variants
 
   local_mocked_bindings(
-    load_LD_matrix = function(meta_file, region) {
+    load_LD_matrix = function(meta_file, region, ...) {
       list(LD_matrix = ld_mat, LD_variants = ld_variants)
     }
   )

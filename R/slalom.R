@@ -36,13 +36,11 @@ slalom <- function(zScore, R = NULL, X = NULL, standard_error = rep(1, length(zS
                    abf_prior_variance = 0.04, nlog10p_dentist_s_threshold = 4.0,
                    r2_threshold = 0.6, lead_variant_choice = "pvalue",
                    ld_method = "sample") {
-  # Resolve LD matrix from R or X
-  ld_resolved <- resolve_LD_input(R = R, X = X, need_nSample = FALSE,
-                                  ld_method = ld_method)
-  LD_mat <- ld_resolved$R
-
-  if (!is.matrix(LD_mat) || nrow(LD_mat) != ncol(LD_mat) || nrow(LD_mat) != length(zScore)) {
-    stop("LD_mat must be a square matrix matching the length of zScore.")
+  if (is.null(R) && is.null(X)) {
+    stop("Either R (LD matrix) or X (genotype matrix) must be provided.")
+  }
+  if (!is.null(R) && !is.null(X)) {
+    stop("Provide either R or X, not both.")
   }
 
   # One-sided p-value matching the original Python implementation (stats.norm.cdf).
@@ -85,13 +83,25 @@ slalom <- function(zScore, R = NULL, X = NULL, standard_error = rep(1, length(zS
     which.max(prob)
   }
 
-  r2 <- LD_mat^2
-  t_dentist_s <- (zScore - LD_mat[, lead_idx] * zScore[lead_idx])^2 / (1 - r2[, lead_idx])
+  # Only the lead column of R is needed for DENTIST-S.
+  # When X is provided, compute just that column instead of the full p x p matrix.
+  if (!is.null(X)) {
+    if (!is.matrix(X)) X <- as.matrix(X)
+    r_lead <- as.numeric(cor(X, X[, lead_idx]))
+  } else {
+    if (!is.matrix(R) || nrow(R) != ncol(R) || nrow(R) != length(zScore)) {
+      stop("R must be a square matrix matching the length of zScore.")
+    }
+    r_lead <- R[, lead_idx]
+  }
+
+  r2_lead <- r_lead^2
+  t_dentist_s <- (zScore - r_lead * zScore[lead_idx])^2 / (1 - r2_lead)
   t_dentist_s[t_dentist_s < 0] <- Inf
   nlog10p_dentist_s <- -log10(pchisq(t_dentist_s, df = 1, lower.tail = FALSE))
-  outliers <- (r2[, lead_idx] > r2_threshold) & (nlog10p_dentist_s > nlog10p_dentist_s_threshold)
+  outliers <- (r2_lead > r2_threshold) & (nlog10p_dentist_s > nlog10p_dentist_s_threshold)
 
-  n_r2 <- sum(r2[, lead_idx] > r2_threshold)
+  n_r2 <- sum(r2_lead > r2_threshold)
   n_dentist_s_outlier <- sum(outliers, na.rm = TRUE)
   max_pip <- max(prob)
 
