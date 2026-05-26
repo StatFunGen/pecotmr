@@ -525,15 +525,10 @@ standardize_genotype_hwe <- function(X, allele_freq) {
 #' @param n_sample Optional original panel sample size for computing variance
 #'   (= 2*p*(1-p)*n/(n-1)). Passed through to \code{load_LD_matrix()}.
 #'
-#' @return A list with:
-#' \describe{
-#'   \item{X}{Raw genotype matrix (n_sketch x p) after removing monomorphic variants.}
-#'   \item{n_sketch}{Number of rows (samples) in the sketch genotype matrix.}
-#'   \item{ref_panel}{Data.frame with variant metadata (chrom, pos, A2, A1, variant_id,
-#'     allele_freq, and optionally variance, n_nomiss).}
-#'   \item{variant_ids}{Character vector of variant IDs (canonical format) after
-#'     removing monomorphic variants.}
-#' }
+#' @return An \code{LDData} S4 object with monomorphic variants removed.
+#'   Consumers should use S4 accessors: \code{getGenotypes()}, \code{getRefPanel()},
+#'   \code{getVariantIds()}. The number of sketch samples is
+#'   \code{nrow(getGenotypes(result))}.
 #' @export
 load_ld_sketch <- function(ld_meta_file_path, region, n_sample = NULL) {
   result <- load_LD_matrix(ld_meta_file_path, region, return_genotype = TRUE, n_sample = n_sample)
@@ -541,7 +536,6 @@ load_ld_sketch <- function(ld_meta_file_path, region, n_sample = NULL) {
     stop("load_LD_matrix must return an LDData object")
   }
   X <- getGenotypes(result)
-  variant_ids <- getVariantIds(result)
   ref_panel <- getRefPanel(result)
 
   # Remove monomorphic variants (zero variance under HWE)
@@ -549,15 +543,20 @@ load_ld_sketch <- function(ld_meta_file_path, region, n_sample = NULL) {
   polymorphic <- p > 0 & p < 1
   if (!all(polymorphic)) {
     X <- X[, polymorphic, drop = FALSE]
-    variant_ids <- variant_ids[polymorphic]
     ref_panel <- ref_panel[polymorphic, , drop = FALSE]
   }
 
-  list(
-    X = X,
-    n_sketch = nrow(X),
-    ref_panel = ref_panel,
-    variant_ids = variant_ids
+  # Rebuild LDData with the extracted (and filtered) genotype matrix stored
+  # directly in genotype_handle so getGenotypes() returns it without needing
+  # the original file handle.
+  variants_gr <- .ref_panel_to_granges(ref_panel)
+  LDData(
+    correlation = NULL,
+    genotype_handle = X,
+    snp_idx = NULL,
+    variants = variants_gr,
+    block_metadata = getBlockMetadata(result),
+    n_ref = result@n_ref
   )
 }
 

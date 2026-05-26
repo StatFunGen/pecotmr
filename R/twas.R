@@ -29,16 +29,21 @@
 #' @export
 harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
                            ld_reference_sample_size, column_file_path = NULL, comment_string = "#") {
-  # Step 1: load TWAS weights data
+  # Step 1: Normalize twas_weights_data -- accept bare TWASWeights or wrapper lists
   molecular_ids <- names(twas_weights_data)
-  # Each element is either a TWASWeights S4 or a list with $twas_weights (TWASWeights S4)
-  .get_tw <- function(mol_data) {
-    if (is(mol_data, "TWASWeights")) return(mol_data)
-    if (is.list(mol_data) && is(mol_data$twas_weights, "TWASWeights")) return(mol_data$twas_weights)
-    stop("Each element of twas_weights_data must be a TWASWeights S4 object ",
-         "or a list with a $twas_weights TWASWeights element")
+  for (mol_id in molecular_ids) {
+    entry <- twas_weights_data[[mol_id]]
+    if (is(entry, "TWASWeights")) {
+      # Already a bare TWASWeights, use directly
+    } else if (is.list(entry) && is(entry$twas_weights, "TWASWeights")) {
+      # Wrapper list -- extract the TWASWeights
+      twas_weights_data[[mol_id]] <- entry$twas_weights
+    } else {
+      stop("Each element of twas_weights_data must be a TWASWeights S4 object ",
+           "or a list with a $twas_weights TWASWeights element")
+    }
   }
-  first_tw <- .get_tw(twas_weights_data[[1]])
+  first_tw <- twas_weights_data[[1]]
   chrom <- as.integer(parse_number(gsub(":.*$", "", getVariantIds(first_tw)[1])))
   gwas_meta_df <- as.data.frame(vroom(gwas_meta_file))
   gwas_files <- unique(gwas_meta_df$file_path[gwas_meta_df$chrom == chrom])
@@ -47,10 +52,9 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
 
   # Per-gene loop: each gene loads its own LD sketch independently
   for (molecular_id in molecular_ids) {
-    mol_entry <- twas_weights_data[[molecular_id]]
-    tw <- .get_tw(mol_entry)
+    tw <- twas_weights_data[[molecular_id]]
     mol_res <- list(chrom = chrom, variant_names = list())
-    mol_res[["data_type"]] <- if (is.list(mol_entry) && "data_type" %in% names(mol_entry)) mol_entry$data_type
+    mol_res[["data_type"]] <- getDataType(tw)
     contexts <- getMethodNames(tw)
 
     # Step 2: Build gene window from all contexts' variant positions
@@ -60,14 +64,18 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
 
     # Step 3: Load LD sketch for this gene's window and compute SVD
     sketch <- load_ld_sketch(ld_meta_file_path, gene_region, n_sample = ld_reference_sample_size)
-    X_std <- standardize_genotype_hwe(sketch$X, sketch$ref_panel$allele_freq)
+    sketch_X <- getGenotypes(sketch)
+    sketch_ref_panel <- getRefPanel(sketch)
+    sketch_variant_ids <- getVariantIds(sketch)
+    sketch_n <- nrow(sketch_X)
+    X_std <- standardize_genotype_hwe(sketch_X, sketch_ref_panel$allele_freq)
     svd_result <- safe_svd(X_std, tol = 0)
 
     # Step 4: Harmonize GWAS and weights against sketch variants
     for (study in names(gwas_files)) {
       gwas_file <- gwas_files[study]
       gwas_data_sumstats <- harmonize_gwas(gwas_file, query_region = gene_region,
-                                            sketch$variant_ids, c("beta", "z"),
+                                            sketch_variant_ids, c("beta", "z"),
                                             match_min_prop = 0, column_file_path = column_file_path,
                                             comment_string = comment_string)
       if (is.null(gwas_data_sumstats)) next
@@ -78,7 +86,7 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
 
         # Harmonize weights against sketch reference
         weights_matrix <- cbind(variant_id_to_df(rownames(weights_matrix)), weights_matrix)
-        weights_matrix_qced <- match_ref_panel(weights_matrix, sketch$variant_ids,
+        weights_matrix_qced <- match_ref_panel(weights_matrix, sketch_variant_ids,
           colnames(weights_matrix)[!colnames(weights_matrix) %in% c("chrom", "pos", "A2", "A1")],
           match_min_prop = 0
         )
@@ -89,7 +97,7 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
         rownames(weights_matrix_subset) <- qced_data$variant_id
 
         # Ensure consistent chr prefix convention before intersecting
-        chr_matched <- ensure_chr_match(gwas_data_sumstats$variant_id, sketch$variant_ids)
+        chr_matched <- ensure_chr_match(gwas_data_sumstats$variant_id, sketch_variant_ids)
         gwas_data_sumstats$variant_id <- chr_matched$ids_a
         rownames(weights_matrix_subset) <- ensure_chr_match(rownames(weights_matrix_subset), gwas_data_sumstats$variant_id)$ids_a
         weights_matrix_subset <- weights_matrix_subset[rownames(weights_matrix_subset) %in% gwas_data_sumstats$variant_id, , drop = FALSE]
@@ -99,8 +107,12 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
         # Step 5: adjust SuSiE weights based on available variants
         tw_weights_ctx <- getWeights(tw, context)
         if ("susie_weights" %in% colnames(tw_weights_ctx)) {
-          # For adjust_susie_weights, we need the fits (susie_results)
-          mol_data_for_adjust <- if (is.list(mol_entry) && !is(mol_entry, "TWASWeights")) mol_entry else list(twas_weights = tw)
+          # For adjust_susie_weights, wrap TWASWeights in the list format it expects
+          mol_data_for_adjust <- list(
+            susie_results = getFits(tw),
+            weights = getWeights(tw),
+            variant_names = lapply(getWeights(tw), function(w) if (is.matrix(w)) rownames(w) else names(w))
+          )
           adjusted_susie_weights <- adjust_susie_weights(mol_data_for_adjust,
             keep_variants = postqc_weight_variants, run_allele_qc = TRUE,
             variable_name_obj = c("variant_names", context),
@@ -111,19 +123,15 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
             susie_weights = setNames(adjusted_susie_weights$adjusted_susie_weights, adjusted_susie_weights$remained_variants_ids),
             weights_matrix_subset[adjusted_susie_weights$remained_variants_ids, !colnames(weights_matrix_subset) %in% "susie_weights", drop = FALSE]
           )
-          susie_results <- if (is.list(mol_entry) && "susie_results" %in% names(mol_entry)) {
-            mol_entry$susie_results[[context]]
-          } else {
-            getFits(tw, context)
-          }
+          susie_results <- getFits(tw, context)
           susie_intermediate <- susie_results[c("pip", "cs_variants", "cs_purity")]
           names(susie_intermediate[["pip"]]) <- original_weight_variants # original variants not yet qced
           pip <- susie_intermediate[["pip"]]
-          pip_qced <- match_ref_panel(cbind(parse_variant_id(names(pip)), pip), sketch$variant_ids, "pip", match_min_prop = 0)
+          pip_qced <- match_ref_panel(cbind(parse_variant_id(names(pip)), pip), sketch_variant_ids, "pip", match_min_prop = 0)
           susie_intermediate[["pip"]] <- abs(pip_qced$target_data_qced$pip)
           names(susie_intermediate[["pip"]]) <- pip_qced$target_data_qced$variant_id
           susie_intermediate[["cs_variants"]] <- lapply(susie_intermediate[["cs_variants"]], function(x) {
-            variant_qc <- match_ref_panel(x, sketch$variant_ids, match_min_prop = 0)
+            variant_qc <- match_ref_panel(x, sketch_variant_ids, match_min_prop = 0)
             variant_qc$target_data_qced$variant_id[variant_qc$target_data_qced$variant_id %in% postqc_weight_variants]
           })
           mol_res[["susie_weights_intermediate_qced"]][[context]] <- susie_intermediate
@@ -143,7 +151,7 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
         if (is_standardized) {
           scaled <- weights_matrix_subset
         } else {
-          variance <- sketch$ref_panel$variance[match(rownames(weights_matrix_subset), sketch$ref_panel$variant_id)]
+          variance <- sketch_ref_panel$variance[match(rownames(weights_matrix_subset), sketch_ref_panel$variant_id)]
           scaled <- weights_matrix_subset * sqrt(variance)
         }
         mol_res[["weights_qced"]][[context]][[study]] <- list(scaled_weights = scaled, weights = weights_matrix_subset)
@@ -165,12 +173,12 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
     } else {
       mol_res[["svd_V"]] <- svd_result$v
       mol_res[["svd_D"]] <- svd_result$d
-      mol_res[["n_sketch"]] <- sketch$n_sketch
-      mol_res[["ld_variant_ids"]] <- sketch$variant_ids
+      mol_res[["n_sketch"]] <- sketch_n
+      mol_res[["ld_variant_ids"]] <- sketch_variant_ids
       results[[molecular_id]] <- mol_res
     }
   }
-  return(list(twas_data_qced = results, ref_panel = sketch$ref_panel))
+  return(list(twas_data_qced = results, ref_panel = sketch_ref_panel))
 }
 
 #' Harmonize GWAS Summary Statistics 
@@ -368,22 +376,23 @@ twas_pipeline <- function(twas_weights_data,
       return(NULL)
     }
   }
-  pick_best_model <- function(twas_data_combined, rsq_cutoff, rsq_pval_cutoff, rsq_option, rsq_pval_option) {
+  pick_best_model <- function(tw, molecular_id, rsq_cutoff, rsq_pval_cutoff, rsq_option, rsq_pval_option) {
     best_rsq <- rsq_cutoff
+    cv_perf <- getCVPerformance(tw)
+    method_names <- getMethodNames(tw)
     # SS-TWAS path: no CV performance, all methods are valid
-    if (is.null(twas_data_combined$twas_cv_performance) ||
-        length(twas_data_combined$twas_cv_performance) == 0) {
-      model_selection <- lapply(names(twas_data_combined$weights), function(context) {
+    if (is.null(cv_perf) || length(cv_perf) == 0) {
+      model_selection <- lapply(method_names, function(context) {
         list(selected_model = NA, is_imputable = TRUE, all_methods = TRUE)
       })
-      names(model_selection) <- names(twas_data_combined$weights)
+      names(model_selection) <- method_names
       return(model_selection)
     }
     # Determine if a gene/region is imputable and select the best model
-    model_selection <- lapply(names(twas_data_combined$weights), function(context) {
+    model_selection <- lapply(method_names, function(context) {
       selected_model <- NULL
-      available_models <- do.call(c, lapply(names(twas_data_combined$twas_cv_performance[[context]]), function(model) {
-        if (!is.na(twas_data_combined$twas_cv_performance[[context]][[model]][, rsq_option])) {
+      available_models <- do.call(c, lapply(names(cv_perf[[context]]), function(model) {
+        if (!is.na(cv_perf[[context]][[model]][, rsq_option])) {
           return(model)
         }
       }))
@@ -392,7 +401,7 @@ twas_pipeline <- function(twas_weights_data,
         return(NULL)
       }
       for (model in available_models) {
-        model_data <- twas_data_combined$twas_cv_performance[[context]][[model]]
+        model_data <- cv_perf[[context]][[model]]
         if (model_data[, rsq_option] >= best_rsq & model_data[, colnames(model_data)[which(colnames(model_data) %in% rsq_pval_option)]] < rsq_pval_cutoff) {
           best_rsq <- model_data[, rsq_option]
           selected_model <- model
@@ -401,32 +410,74 @@ twas_pipeline <- function(twas_weights_data,
       if (is.null(selected_model)) {
         message(paste0(
           "No model has p-value < ", rsq_pval_cutoff, " and r2 >= ", rsq_cutoff, ", skipping context ", context,
-          " at region ", unique(twas_data_combined$molecular_id), ". "
+          " at region ", molecular_id, ". "
         ))
         return(list(selected_model = c("context_non_imputable"), is_imputable = FALSE)) # No significant model found
       } else {
         selected_model <- unlist(strsplit(selected_model, "_performance"))
-        message(paste0("The selected best performing model for context ", context, " at region ", twas_data_combined$molecular_id, " is ", selected_model, ". "))
+        message(paste0("The selected best performing model for context ", context, " at region ", molecular_id, " is ", selected_model, ". "))
         return(list(selected_model = selected_model, is_imputable = TRUE))
       }
     })
-    names(model_selection) <- names(twas_data_combined$weights)
+    names(model_selection) <- method_names
     return(model_selection)
   }
 
   # Step 1: TWAS and MR analysis for all methods for imputable gene
   rsq_option <- match.arg(rsq_option)
-  # filter events 
-  if (!is.null(event_filters)){
-    for (weight_db in names(twas_weights_data)){
-      contexts <- names(twas_weights_data[[weight_db]]$weights)
-      filtered_events <- filter_molecular_events(contexts, event_filters, remove_all_group=TRUE)
-      if (length(filtered_events!=0)){
-          for (db in names(twas_weights_data[[weight_db]])){
-             twas_weights_data[[weight_db]][[db]] <- twas_weights_data[[weight_db]][[db]][filtered_events]
-          }   
+
+  # Normalize twas_weights_data entries to TWASWeights S4
+  for (wdb in names(twas_weights_data)) {
+    entry <- twas_weights_data[[wdb]]
+    if (is(entry, "TWASWeights")) next
+    if (is.list(entry) && is(entry[["twas_weights"]], "TWASWeights")) {
+      # Wrapper list with $twas_weights — unwrap but merge metadata into S4
+      tw_inner <- entry[["twas_weights"]]
+      twas_weights_data[[wdb]] <- TWASWeights(
+        weights = getWeights(tw_inner),
+        variant_ids = getVariantIds(tw_inner),
+        fits = getFits(tw_inner),
+        cv_performance = getCVPerformance(tw_inner),
+        standardized = getStandardized(tw_inner),
+        molecular_id = if (!is.null(entry[["molecular_id"]])) entry[["molecular_id"]] else getMolecularId(tw_inner),
+        data_type = if (!is.null(entry[["data_type"]])) entry[["data_type"]] else getDataType(tw_inner)
+      )
+    } else if (is.list(entry) && !is.null(entry[["weights"]])) {
+      # Legacy list from load_twas_weights or test fixtures
+      wts <- entry[["weights"]]
+      vid <- if (!is.null(names(wts)) && length(wts) > 0 && !is.null(rownames(wts[[1]]))) {
+        Reduce(union, lapply(wts, rownames))
+      } else character(0)
+      twas_weights_data[[wdb]] <- TWASWeights(
+        weights = wts,
+        variant_ids = vid,
+        fits = entry[["susie_results"]],
+        cv_performance = entry[["twas_cv_performance"]],
+        molecular_id = if (!is.null(entry[["molecular_id"]])) entry[["molecular_id"]] else character(0),
+        data_type = entry[["data_type"]]
+      )
+    }
+  }
+
+  # filter events
+  if (!is.null(event_filters)) {
+    for (weight_db in names(twas_weights_data)) {
+      tw <- twas_weights_data[[weight_db]]
+      contexts <- getMethodNames(tw)
+      filtered_events <- filter_molecular_events(contexts, event_filters, remove_all_group = TRUE)
+      if (length(filtered_events) != 0) {
+        # Rebuild TWASWeights with only the filtered contexts
+        twas_weights_data[[weight_db]] <- TWASWeights(
+          weights = getWeights(tw)[filtered_events],
+          variant_ids = getVariantIds(tw),
+          fits = if (!is.null(getFits(tw))) getFits(tw)[intersect(filtered_events, names(getFits(tw)))] else NULL,
+          cv_performance = if (!is.null(getCVPerformance(tw))) getCVPerformance(tw)[intersect(filtered_events, names(getCVPerformance(tw)))] else NULL,
+          standardized = getStandardized(tw),
+          molecular_id = getMolecularId(tw),
+          data_type = getDataType(tw)
+        )
       } else {
-          twas_weights_data[[weight_db]] <- NULL
+        twas_weights_data[[weight_db]] <- NULL
       }
     }
   }
@@ -439,7 +490,10 @@ twas_pipeline <- function(twas_weights_data,
                                           ld_reference_sample_size = ld_reference_sample_size,
                                           column_file_path = column_file_path, comment_string = comment_string)
   twas_results_db <- lapply(names(twas_weights_data), function(weight_db) {
-    twas_weights_data[[weight_db]][["molecular_id"]] <- weight_db
+    tw <- twas_weights_data[[weight_db]]
+    tw_methods <- getMethodNames(tw)
+    tw_cv <- getCVPerformance(tw)
+    tw_fits <- getFits(tw)
     twas_data_qced <- twas_data_qced_result$twas_data_qced
     if (length(twas_data_qced[[weight_db]]) == 0 | is.null(twas_data_qced[[weight_db]])) {
       warning(paste0("No data harmonized for ", weight_db, ". Returning NULL for TWAS result for this region."))
@@ -448,25 +502,24 @@ twas_pipeline <- function(twas_weights_data,
     if (rsq_cutoff > 0) {
       message("Selecting the best model based on criteria...")
       best_model_selection <- pick_best_model(
-        twas_weights_data[[weight_db]],
+        tw, molecular_id = weight_db,
         rsq_cutoff = rsq_cutoff,
         rsq_pval_cutoff = rsq_pval_cutoff,
         rsq_option = rsq_option,
         rsq_pval_option = rsq_pval_option
       )
-      twas_data_qced[[weight_db]][["model_selection"]] <- setNames(best_model_selection, names(twas_weights_data[[weight_db]]$weights))
+      twas_data_qced[[weight_db]][["model_selection"]] <- setNames(best_model_selection, tw_methods)
     } else {
       message("Skipping best model selection. Assigning NA of model_selection to all weights.")
       twas_data_qced[[weight_db]][["model_selection"]] <- setNames(
-        rep(NA, length(names(twas_weights_data[[weight_db]]$weights))),
-        names(twas_weights_data[[weight_db]]$weights)
+        rep(NA, length(tw_methods)), tw_methods
       )
     }
-    if (!"data_type" %in% names(twas_weights_data[[weight_db]])) {
-      twas_data_qced[[weight_db]][["data_type"]] <- setNames(rep(
-        list(NA),
-        length(names(twas_weights_data[[weight_db]]$weights))
-      ), names(twas_weights_data[[weight_db]]$weights))
+    dt <- getDataType(tw)
+    if (is.null(dt)) {
+      twas_data_qced[[weight_db]][["data_type"]] <- setNames(
+        rep(list(NA), length(tw_methods)), tw_methods
+      )
     }
     if (length(weight_db) < 1) stop(paste0("No data harmonized for ", weight_db, ". "))
     contexts <- names(twas_data_qced[[weight_db]][["weights_qced"]])
@@ -478,7 +531,7 @@ twas_pipeline <- function(twas_weights_data,
     # Nested lapply for contexts and gwas studies
     twas_gene_results <- lapply(contexts, function(context) {
       study_results <- lapply(gwas_studies, function(study) {
-        twas_variants <- Reduce(intersect, list(rownames(twas_data_qced[[weight_db]][["weights_qced"]][[context]][[study]][["weights"]]), 
+        twas_variants <- Reduce(intersect, list(rownames(twas_data_qced[[weight_db]][["weights_qced"]][[context]][[study]][["weights"]]),
           twas_data_qced[[weight_db]][["variant_names"]][[context]][[study]],
           twas_data_qced[[weight_db]][["gwas_qced"]][[study]]$variant_id)
         )
@@ -486,8 +539,7 @@ twas_pipeline <- function(twas_weights_data,
           return(list(twas_rs_df = data.frame(), mr_rs_df = data.frame()))
         }
         # twas analysis -- enable omnibus when no CV performance available
-        has_cv <- !is.null(twas_weights_data[[weight_db]]$twas_cv_performance) &&
-                  length(twas_weights_data[[weight_db]]$twas_cv_performance) > 0
+        has_cv <- !is.null(tw_cv) && length(tw_cv) > 0
         twas_rs <- twas_analysis(
           twas_data_qced[[weight_db]][["weights_qced"]][[context]][[study]][["weights"]],
           twas_data_qced[[weight_db]][["gwas_qced"]][[study]],
@@ -503,15 +555,17 @@ twas_pipeline <- function(twas_weights_data,
         }
         twas_rs_df <- build_twas_score_row(twas_rs, weight_db, context, study)
         # MR analysis
-        if (!is.null(twas_weights_data[[weight_db]]$susie_results) &&
+        if (!is.null(tw_fits) &&
           any(na.omit(twas_rs_df$twas_pval) < mr_pval_cutoff) &&
-          "top_loci" %in% names(twas_weights_data[[weight_db]]$susie_results[[context]])) {
+          !is.null(tw_fits[[context]]) && "top_loci" %in% names(tw_fits[[context]])) {
           if (!"effect_allele_frequency" %in% colnames(twas_data_qced[[weight_db]][["gwas_qced"]][[study]])) {
             warning(paste0("skip MR for ", weight_db, " for ", study, ", the effect_allele_frequency information is not available."))
             return(list(twas_rs_df = twas_rs_df, mr_rs_df = data.frame()))
           }
           combined_ld_meta_df <- twas_data_qced_result$ref_panel
-          mr_formatted_input <- mr_format(twas_weights_data[[weight_db]], context, twas_data_qced[[weight_db]][["gwas_qced"]][[study]],
+          # mr_format expects a nested list with $molecular_id and $susie_results
+          mr_input <- list(molecular_id = weight_db, susie_results = tw_fits)
+          mr_formatted_input <- mr_format(mr_input, context, twas_data_qced[[weight_db]][["gwas_qced"]][[study]],
             coverage = mr_coverage_column, run_allele_qc = TRUE, method = mr_method,
             coverage_level = mr_coverage, molecular_name_obj = c("molecular_id"),
             ld_meta_df = combined_ld_meta_df
@@ -560,24 +614,28 @@ twas_pipeline <- function(twas_weights_data,
 
   # Step 2: Summarize and merge twas cv results and region information for all methods for all contexts for imputable genes.
   twas_table <- do.call(rbind, lapply(names(twas_data), function(molecular_id) {
-    contexts <- names(twas_weights_data[[molecular_id]]$weights)
+    tw_mol <- twas_weights_data[[molecular_id]]
+    contexts <- getMethodNames(tw_mol)
+    tw_mol_cv <- getCVPerformance(tw_mol)
+    tw_mol_dt <- getDataType(tw_mol)
     # merge twas_cv information for same gene across all weight db files, loop through each context for all methods
     gene_table <- do.call(rbind, lapply(contexts, function(context) {
-      cv_perf <- twas_weights_data[[molecular_id]]$twas_cv_performance[[context]]
+      cv_perf <- if (!is.null(tw_mol_cv)) tw_mol_cv[[context]] else NULL
       model_sel <- twas_data[[molecular_id]][["model_selection"]][[context]]
       is_imputable <- if (!is.null(model_sel)) model_sel$is_imputable else TRUE
 
       if (is.null(cv_perf) || length(cv_perf) == 0) {
         # SS-TWAS path: no CV, derive methods from weight matrix columns
-        wt_mat <- twas_weights_data[[molecular_id]]$weights[[context]]
+        wt_mat <- getWeights(tw_mol, context)
         methods <- if (is.matrix(wt_mat)) colnames(wt_mat) else names(wt_mat)
         if (is.null(methods)) methods <- "unknown"
+        dt_val <- if (!is.null(tw_mol_dt)) tw_mol_dt[[context]] else NA
         context_table <- data.frame(
           context = context, method = methods,
           is_imputable = is_imputable,
           is_selected_method = FALSE,
           rsq_cv = NA_real_, pval_cv = NA_real_,
-          type = twas_weights_data[[molecular_id]][["data_type"]][[context]]
+          type = dt_val
         )
       } else {
         methods <- sub("_[^_]+$", "", names(cv_perf))
@@ -588,12 +646,13 @@ twas_pipeline <- function(twas_weights_data,
         cv_rsqs <- sapply(cv_perf, function(x) x[, rsq_option])
         cv_pvals <- sapply(cv_perf, function(x) x[, colnames(x)[which(colnames(x) %in% rsq_pval_option)]])
 
+        dt_val <- if (!is.null(tw_mol_dt)) tw_mol_dt[[context]] else NA
         context_table <- data.frame(
           context = context, method = methods,
           is_imputable = is_imputable,
           is_selected_method = is_selected_method,
           rsq_cv = cv_rsqs, pval_cv = cv_pvals,
-          type = twas_weights_data[[molecular_id]][["data_type"]][[context]]
+          type = dt_val
         )
       }
       return(context_table)

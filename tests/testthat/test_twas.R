@@ -89,6 +89,23 @@ make_twas_weights_data <- function(
   data
 }
 
+# Build a mock LDData S4 object with a genotype matrix stored directly
+# (mimics the output of load_ld_sketch after the S4 refactor).
+make_mock_ld_sketch <- function(X, ref_panel, variant_ids) {
+  variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+  block_metadata <- S4Vectors::DataFrame(
+    region = "mock", start = 1L, end = 1L, chrom = "chr1"
+  )
+  LDData(
+    correlation = NULL,
+    genotype_handle = X,
+    snp_idx = NULL,
+    variants = variants_gr,
+    block_metadata = block_metadata,
+    n_ref = 0L
+  )
+}
+
 generate_twas_joint_z_data <- function(num_samples=10, num_snps=10, num_conditions = 5) {
   X <- matrix(sample(0:2, num_samples * num_snps, replace = TRUE), nrow = num_snps, ncol = num_samples)
   rownames(X) <- paste0("Sample", 1:num_samples)
@@ -2696,7 +2713,9 @@ test_that("load_twas_weights works with null condition", {
   weight_db <- setup_weight_db_vector(n_rds = 2, n_cond = 4)
   res <- load_twas_weights(weight_db$weight_paths, conditions = NULL, variable_name_obj = c("preset_variants_result", "variant_names"),
                           susie_obj =c("preset_variants_result", "susie_result_trimmed"),twas_weights_table = "twas_weights")
-  expect_true(all(c("susie_results", "weights") %in% names(res)))
+  expect_true(is(res, "TWASWeights"))
+  expect_true(length(getMethodNames(res)) > 0)
+  expect_false(is.null(getFits(res)))
   cleanup_weight_db_vector(weight_db$weight_paths)
 })
 
@@ -2705,7 +2724,9 @@ test_that("load_twas_weights works with specified condition", {
   weight_db <- setup_weight_db_vector(n_rds = 2, n_cond = 4, same_condition = TRUE, condition = "cond_1_joe_eQTL")
   res <- load_twas_weights(weight_db$weight_paths, conditions = "cond_1_joe_eQTL", variable_name_obj = c("preset_variants_result", "variant_names"),
                           susie_obj =c("preset_variants_result", "susie_result_trimmed"),twas_weights_table = "twas_weights")
-  expect_true(all(c("susie_results", "weights") %in% names(res)))
+  expect_true(is(res, "TWASWeights"))
+  expect_true(length(getMethodNames(res)) > 0)
+  expect_false(is.null(getFits(res)))
   cleanup_weight_db_vector(weight_db$weight_paths)
 })
 
@@ -2805,11 +2826,7 @@ test_that("harmonize_twas: group_contexts_by_region single context path (lines 4
       p_sketch <- length(mock_LD_variants)
       set.seed(123)
       X <- matrix(rbinom(n_sketch * p_sketch, 2, 0.3), nrow = n_sketch, ncol = p_sketch)
-      list(
-        X = X,
-        n_sketch = n_sketch,
-        ref_panel = mock_ref_panel,
-        variant_ids = mock_LD_variants
+      make_mock_ld_sketch(X, mock_ref_panel, mock_LD_variants
       )
     },
     get_ref_variant_info = function(...) mock_snp_info,
@@ -2935,17 +2952,13 @@ test_that("harmonize_twas: group_contexts_by_region multi-context clustering (li
       p_sketch <- length(all_variant_ids)
       set.seed(123)
       X <- matrix(rbinom(n_sketch * p_sketch, 2, 0.3), nrow = n_sketch, ncol = p_sketch)
-      list(
-        X = X,
-        n_sketch = n_sketch,
-        ref_panel = data.frame(chrom = 1, pos = as.integer(sapply(strsplit(all_variant_ids, ":"), `[`, 2)),
-                               A2 = "A", A1 = "T",
-                               variant_id = all_variant_ids,
-                               allele_freq = rep(0.3, length(all_variant_ids)),
-                               variance = rep(1.0, length(all_variant_ids)),
-                               stringsAsFactors = FALSE),
-        variant_ids = all_variant_ids
-      )
+      ref_panel <- data.frame(chrom = 1, pos = as.integer(sapply(strsplit(all_variant_ids, ":"), `[`, 2)),
+                              A2 = "A", A1 = "T",
+                              variant_id = all_variant_ids,
+                              allele_freq = rep(0.3, length(all_variant_ids)),
+                              variance = rep(1.0, length(all_variant_ids)),
+                              stringsAsFactors = FALSE)
+      make_mock_ld_sketch(X, ref_panel, all_variant_ids)
     },
     get_ref_variant_info = function(...) mock_snp_info,
     harmonize_gwas = function(...) mock_gwas_data,
@@ -3112,22 +3125,19 @@ test_that("twas_pipeline: missing data_type triggers assignment check on line 61
     }
   )
 
-  # Lines 614-618 are exercised: the function checks data_type, assigns NA list.
-  # But line 748 reads data_type from original twas_weights_data (where it's NULL),
-  # causing a data.frame dimension mismatch.
-  expect_error(
-    suppressMessages(twas_pipeline(
-      twas_weights_data = twas_weights_data,
-      ld_meta_file_path = "fake_ld.tsv",
-      gwas_meta_file = "fake_gwas.tsv",
-      region_block = "chr1_100_500",
+  # With S4 normalization, NULL data_type is handled cleanly (defaults to NA per context).
+  # The pipeline should complete without the previous dimension mismatch error.
+  result <- suppressMessages(twas_pipeline(
+    twas_weights_data = twas_weights_data,
+    ld_meta_file_path = "fake_ld.tsv",
+    gwas_meta_file = "fake_gwas.tsv",
+    region_block = "chr1_100_500",
     ld_reference_sample_size = 17000,
-      rsq_cutoff = 0.01,
-      rsq_pval_cutoff = 0.05,
-      rsq_pval_option = "pval"
-    )),
-    "differing number of rows"
-  )
+    rsq_cutoff = 0.01,
+    rsq_pval_cutoff = 0.05,
+    rsq_pval_option = "pval"
+  ))
+  expect_true(is.list(result))
 })
 
 # ===========================================================================
@@ -3390,19 +3400,15 @@ test_that("harmonize_twas: duplicated LD variants are removed", {
       n_sketch <- 50L
       set.seed(123)
       X <- matrix(rbinom(n_sketch * p, 2, 0.3), nrow = n_sketch, ncol = p)
-      list(
-        X = X,
-        n_sketch = n_sketch,
-        ref_panel = data.frame(
-          chrom = rep(1, p), pos = c(100, 200, 300),
-          A2 = rep("A", p), A1 = rep("T", p),
-          variant_id = variant_ids,
-          allele_freq = rep(0.3, p),
-          variance = rep(1.0, p),
-          stringsAsFactors = FALSE
-        ),
-        variant_ids = variant_ids
+      rp <- data.frame(
+        chrom = rep(1, p), pos = c(100, 200, 300),
+        A2 = rep("A", p), A1 = rep("T", p),
+        variant_id = variant_ids,
+        allele_freq = rep(0.3, p),
+        variance = rep(1.0, p),
+        stringsAsFactors = FALSE
       )
+      make_mock_ld_sketch(X, rp, variant_ids)
     },
     harmonize_gwas = function(...) mock_gwas_data,
     match_ref_panel = function(target_data, ref_data, ...) {
@@ -3470,10 +3476,7 @@ test_that("harmonize_twas: drops molecular_id when harmonize_gwas returns NULL f
       n_sketch <- 50L
       set.seed(123)
       X <- matrix(rbinom(n_sketch * p, 2, 0.3), nrow = n_sketch, ncol = p)
-      list(
-        X = X, n_sketch = n_sketch,
-        ref_panel = ref_panel, variant_ids = variant_ids
-      )
+      make_mock_ld_sketch(X, ref_panel, variant_ids)
     },
     # Returning NULL skips the entire context loop, so gwas_qced stays empty
     harmonize_gwas = function(...) NULL,
@@ -3551,10 +3554,7 @@ test_that("harmonize_twas: susie_weights column triggers adjust_susie_weights br
       n_sketch <- 50L
       set.seed(123)
       X <- matrix(rbinom(n_sketch * p, 2, 0.3), nrow = n_sketch, ncol = p)
-      list(
-        X = X, n_sketch = n_sketch,
-        ref_panel = ref_panel, variant_ids = variant_ids
-      )
+      make_mock_ld_sketch(X, ref_panel, variant_ids)
     },
     harmonize_gwas = function(...) mock_gwas_data,
     match_ref_panel = function(target_data, ref_data, ...) {

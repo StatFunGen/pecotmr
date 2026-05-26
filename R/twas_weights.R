@@ -1927,19 +1927,8 @@ twas_weights_sumstat_pipeline <- function(
         signal_cutoff = 0.025,
         cs_input = "Xcorr"
       )
-      if (!is.null(fm_output$finemapping_results$susie_rss)) {
-        fm_res <- fm_output$finemapping_results$susie_rss
-        # Use top_loci from the per-method result (has 'method' column)
-        # rather than the wide format from postprocess_finemapping_fits
-        tl <- fm_res$top_loci
-        if (is.null(tl) || nrow(tl) == 0) tl <- data.frame()
-        finemapping_result <- FineMappingResult(
-          variant_names = variant_ids,
-          trimmed_fit = fm_res$result_trimmed,
-          top_loci = tl,
-          method = "susie_rss",
-          sumstats = list(z = z, n = n)
-        )
+      if (!is.null(fm_output$finemapping_results$susie_rss$finemapping_result)) {
+        finemapping_result <- fm_output$finemapping_results$susie_rss$finemapping_result
       }
     }, error = function(e) {
       warning(sprintf("Fine-mapping post-processing failed: %s", e$message))

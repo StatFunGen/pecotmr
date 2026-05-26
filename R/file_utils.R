@@ -1319,7 +1319,30 @@ load_twas_weights <- function(weight_db_files, conditions = NULL,
         get_nested_element(combined_all_data, c(condition, "twas_cv_result", "performance"))
       })
       names(performance_tables) <- conditions
-      return(list(susie_results = combined_susie_result, weights = weights, twas_cv_performance = performance_tables))
+      # Extract variant_ids from weight matrices (union across all contexts)
+      all_variant_ids <- Reduce(union, lapply(weights, function(w) {
+        if (is.matrix(w)) rownames(w) else names(w)
+      }))
+      if (is.null(all_variant_ids)) all_variant_ids <- character(0)
+      # Pad weight matrices to common variant set
+      if (length(all_variant_ids) > 0) {
+        weights <- lapply(weights, function(w) {
+          if (!is.matrix(w)) return(w)
+          missing <- setdiff(all_variant_ids, rownames(w))
+          if (length(missing) > 0) {
+            pad <- matrix(0, nrow = length(missing), ncol = ncol(w),
+                          dimnames = list(missing, colnames(w)))
+            w <- rbind(w, pad)[all_variant_ids, , drop = FALSE]
+          }
+          w
+        })
+      }
+      return(TWASWeights(
+        weights = weights,
+        variant_ids = all_variant_ids,
+        fits = combined_susie_result,
+        cv_performance = performance_tables
+      ))
     },
     silent = FALSE
   )

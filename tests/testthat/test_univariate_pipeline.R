@@ -45,18 +45,29 @@ make_fake_susie_fit <- function(p) {
 # Helper: build a fake protocol-facing post-processing return value
 # ===========================================================================
 make_fake_post_result <- function(p) {
+  vnames <- paste0("chr1:", seq_len(p), ":A:G")
+  trimmed <- list(
+    pip = runif(p),
+    sets = list(cs = list(L1 = c(1L, 2L)), requested_coverage = 0.95),
+    cs_corr = matrix(c(1, 0.1, 0.1, 1), nrow = 2),
+    alpha = matrix(runif(2 * p), 2, p),
+    lbf_variable = matrix(rnorm(2 * p), 2, p),
+    V = c(0.5, 0.01),
+    niter = 10,
+    n_effects = 2
+  )
+  fm <- FineMappingResult(
+    variant_names = vnames,
+    trimmed_fit = trimmed,
+    top_loci = data.frame(variant_id = character(0), method = character(0)),
+    method = "susie"
+  )
   list(
-    variant_names = paste0("chr1:", seq_len(p), ":A:G"),
-    susie_result_trimmed = list(
-      pip = runif(p),
-      sets = list(cs = list(L1 = c(1L, 2L)), requested_coverage = 0.95),
-      cs_corr = matrix(c(1, 0.1, 0.1, 1), nrow = 2),
-      alpha = matrix(runif(2 * p), 2, p),
-      lbf_variable = matrix(rnorm(2 * p), 2, p),
-      V = c(0.5, 0.01),
-      niter = 10,
-      n_effects = 2
-    ),
+    finemapping_result = fm,
+    # Legacy keys retained for diagnostics tests that mock get_susie_result
+    # to return res$susie_result_trimmed directly.
+    susie_result_trimmed = trimmed,
+    variant_names = vnames,
     top_loci = data.frame(
       variant_id = paste0("chr1:1:A:G"),
       betahat = 1.5, sebetahat = 0.3, z = 5.0, maf = 0.25,
@@ -675,10 +686,15 @@ test_that("uap: ordinary susie can run without susie-inf initialization", {
 test_that("uap: post-processing output is merged into result", {
   inp <- make_uap_inputs()
   fake_fit <- make_fake_susie_fit(inp$p)
-  fake_post <- list(
+  fake_fm <- FineMappingResult(
     variant_names = paste0("v", seq_len(inp$p)),
-    top_loci = data.frame(variant_id = "v1", pip = 0.9, stringsAsFactors = FALSE),
-    susie_result_trimmed = list(pip = runif(inp$p))
+    trimmed_fit = list(pip = runif(inp$p)),
+    top_loci = data.frame(variant_id = character(0), method = character(0)),
+    method = "susie"
+  )
+  fake_post <- list(
+    finemapping_result = fake_fm,
+    top_loci = data.frame(variant_id = "v1", pip = 0.9, stringsAsFactors = FALSE)
   )
 
   local_mocked_bindings(
@@ -694,7 +710,7 @@ test_that("uap: post-processing output is merged into result", {
     X = inp$X, Y = inp$Y, maf = inp$maf,
     twas_weights = FALSE, L = 5, L_greedy = 5
   )
-  expect_true("variant_names" %in% names(result))
+  expect_true("finemapping_result" %in% names(result))
   expect_true("top_loci" %in% names(result))
   expect_true("total_time_elapsed" %in% names(result))
 })

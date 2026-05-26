@@ -349,10 +349,7 @@ postprocess_finemapping_fit.susiF <- function(fit, method = "fsusie", cs_input =
     sumstats = sumstats
   )
 
-  # Also return as list for backwards compatibility with existing consumers
   res <- list(
-    variant_names = variant_names,
-    result_trimmed = trimmed,
     top_loci = top_loci,
     finemapping_result = fm_result
   )
@@ -786,25 +783,24 @@ trim_finemapping_fit <- function(fit, effect_idx, method, cs_tables) {
 #' Format Fine-mapping Post-processing for Protocol Output
 #'
 #' Converts method-aware fine-mapping post-processing output into the root-level
-#' fields consumed by protocol RDS files. Exposes the single 22-column unified
-#' \code{top_loci} table alongside \code{susie_result_trimmed},
-#' \code{variant_names}, and method-specific intermediates.
+#' fields consumed by protocol RDS files. The primary method's
+#' \code{FineMappingResult} S4 object is promoted to the \code{finemapping_result}
+#' field; use its accessors (\code{getTrimmedFit}, \code{getVariantNames},
+#' \code{getTopLoci}, etc.) instead of legacy list keys.
 #'
 #' @param post Output from \code{\link{postprocess_finemapping_fits}}.
 #' @param primary_method Method whose result should populate root-level fields.
-#' @return A list with root-level fields including \code{variant_names},
-#'   \code{susie_result_trimmed}, and \code{top_loci}.
+#' @return A list with root-level fields including \code{finemapping_result}
+#'   and \code{top_loci}.
 #' @export
 format_finemapping_output <- function(post, primary_method) {
   method_post <- post$finemapping_results[[primary_method]]
   if (is.null(method_post)) {
     stop("primary_method was not found in finemapping_results: ", primary_method)
   }
-  keep_names <- setdiff(names(method_post), c("result_trimmed", "top_loci"))
   c(
-    method_post[keep_names],
+    method_post,
     list(
-      susie_result_trimmed = method_post$result_trimmed,
       top_loci = post$top_loci
     )
   )

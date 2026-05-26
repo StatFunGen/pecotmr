@@ -164,9 +164,8 @@ univariate_analysis_pipeline <- function(
     region = region
   )
   res <- c(res, format_finemapping_output(susie_post, primary_method = "susie"))
-  if (!is.null(susie_post$finemapping_results$susie_inf)) {
-    res$susie_inf_result_trimmed <- susie_post$finemapping_results$susie_inf$result_trimmed
-  }
+  susie_inf_fm <- susie_post$finemapping_results$susie_inf$finemapping_result
+  res$susie_inf_result_trimmed <- if (!is.null(susie_inf_fm)) getTrimmedFit(susie_inf_fm) else NULL
   res$total_time_elapsed <- proc.time() - st
 
   # TWAS weights and cross-validation

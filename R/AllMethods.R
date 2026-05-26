@@ -57,6 +57,8 @@ setMethod("getCorrelation", "LDData", function(x) {
 #' @export
 setMethod("getGenotypes", "LDData", function(x) {
   if (is.null(x@genotype_handle)) return(NULL)
+  # Plain matrix stored directly (e.g. from load_ld_sketch after filtering)
+  if (is.matrix(x@genotype_handle)) return(x@genotype_handle)
   if (is.list(x@genotype_handle)) {
     lapply(x@genotype_handle, function(h) {
       geno <- extractBlockGenotypes(h, x@snp_idx)
@@ -373,14 +375,17 @@ setMethod("getEffects", "FineMappingResult", function(x) {
 #' @return A \code{TWASWeights} object.
 #' @export
 TWASWeights <- function(weights, variant_ids, fits = NULL,
-                        cv_performance = NULL, standardized = FALSE) {
+                        cv_performance = NULL, standardized = FALSE,
+                        molecular_id = character(0), data_type = NULL) {
   new("TWASWeights",
     weights = weights,
     variant_ids = variant_ids,
     methods = names(weights),
     fits = fits,
     cv_performance = cv_performance,
-    standardized = standardized
+    standardized = standardized,
+    molecular_id = molecular_id,
+    data_type = data_type
   )
 }
 
@@ -419,6 +424,14 @@ setMethod("getMethodNames", "TWASWeights", function(x) x@methods)
 #' @rdname getVariantIds
 #' @export
 setMethod("getVariantIds", "TWASWeights", function(x) x@variant_ids)
+
+#' @rdname getMolecularId
+#' @export
+setMethod("getMolecularId", "TWASWeights", function(x) x@molecular_id)
+
+#' @rdname getDataType
+#' @export
+setMethod("getDataType", "TWASWeights", function(x) x@data_type)
 
 # =============================================================================
 # FineMappingResult additional accessors

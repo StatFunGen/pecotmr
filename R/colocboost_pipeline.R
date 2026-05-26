@@ -66,21 +66,12 @@ region_data_to_colocboost_input <- function(region_data) {
   ind_records <- ind_records_from_input(ind_input)
   ind_args <- .cb_format_individual(ind_records)
 
-  # Build sumstat_records using original LD_info to preserve genotype vs LD
-  # distinction. region_data_to_rss_input converts to LDData S4 (computing R),
-  # but colocboost needs the original matrix for X_ref/LD formatting.
-  orig_ld_info <- region_data$sumstat_data$LD_info
-  sumstat_records <- lapply(seq_along(rss_input$rss_input), function(i) {
-    study <- names(rss_input$rss_input)[i]
-    ld_idx <- min(i, length(orig_ld_info))
-    orig_ld <- orig_ld_info[[ld_idx]]
-    ld_mat <- if (is(orig_ld, "LDData")) {
-      getCorrelation(orig_ld)
-    } else {
-      getCorrelation(rss_input$LD_data[[study]])
-    }
+  # Build sumstat_records from rss_input which already contains LDData S4
+  # objects (region_data_to_rss_input converts any legacy lists).
+  sumstat_records <- lapply(names(rss_input$rss_input), function(study) {
+    ld_data <- rss_input$LD_data[[study]]
     list(rss_input = rss_input$rss_input[[study]],
-         LD_matrix = ld_mat)
+         LD_matrix = getCorrelation(ld_data))
   })
   names(sumstat_records) <- names(rss_input$rss_input)
   sumstat_args <- .cb_format_sumstat(sumstat_records)
@@ -1222,7 +1213,7 @@ qc_individual_data <- function(X, Y, maf = NULL, X_variance = NULL,
       message("QC track: LD/X_ref names are parseable for summary-stat study ", study, ".")
     } else if (is_ld_data(ref_info)) {
       message("QC track: using supplied LD_reference_info LD data for summary-stat study ", study, ".")
-      ld_data <- if (is(ref_info, "LDData")) ref_info else .legacy_list_to_LDData(ref_info)
+      ld_data <- ref_info
     } else {
       message("QC track: using supplied LD_reference_info variant metadata for summary-stat study ", study, ".")
       ld_data <- .cb_make_ld_data(

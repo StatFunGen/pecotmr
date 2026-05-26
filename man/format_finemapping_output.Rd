@@ -12,12 +12,13 @@ format_finemapping_output(post, primary_method)
 \item{primary_method}{Method whose result should populate root-level fields.}
 }
 \value{
-A list with root-level fields including \code{variant_names},
-  \code{susie_result_trimmed}, and \code{top_loci}.
+A list with root-level fields including \code{finemapping_result}
+  and \code{top_loci}.
 }
 \description{
 Converts method-aware fine-mapping post-processing output into the root-level
-fields consumed by protocol RDS files. Exposes the single 22-column unified
-\code{top_loci} table alongside \code{susie_result_trimmed},
-\code{variant_names}, and method-specific intermediates.
+fields consumed by protocol RDS files. The primary method's
+\code{FineMappingResult} S4 object is promoted to the \code{finemapping_result}
+field; use its accessors (\code{getTrimmedFit}, \code{getVariantNames},
+\code{getTopLoci}, etc.) instead of legacy list keys.
 }

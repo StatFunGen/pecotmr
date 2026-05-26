@@ -1100,8 +1100,12 @@ extract_flatten_sumstats_from_nested <- function(data, extract_inf = "z", max_de
     }
 
     if (is.list(element)) {
-      if (all(c("variant_names", "sumstats") %in% names(element))) {
-        variant_names <- element$variant_names
+      # Extract variant_names from FineMappingResult S4 or legacy list key
+      has_fm <- !is.null(element$finemapping_result) && is(element$finemapping_result, "FineMappingResult")
+      has_legacy_vn <- "variant_names" %in% names(element)
+      has_sumstats <- "sumstats" %in% names(element)
+      if (has_sumstats && (has_fm || has_legacy_vn)) {
+        variant_names <- if (has_fm) getVariantNames(element$finemapping_result) else element$variant_names
         sumstats <- element$sumstats
 
         # Extract based on type

@@ -379,6 +379,20 @@ setGeneric("getFits",
 #' @export
 setGeneric("getMethodNames", function(x) standardGeneric("getMethodNames"))
 
+#' @title Get Molecular ID
+#' @description Extract molecular/gene identifier from a TWASWeights object.
+#' @param x A \code{TWASWeights} object.
+#' @return Character string (length 0 or 1).
+#' @export
+setGeneric("getMolecularId", function(x) standardGeneric("getMolecularId"))
+
+#' @title Get Data Type
+#' @description Extract data type metadata from a TWASWeights object.
+#' @param x A \code{TWASWeights} object.
+#' @return A named list of data types per context, or NULL.
+#' @export
+setGeneric("getDataType", function(x) standardGeneric("getDataType"))
+
 # =============================================================================
 # VCF/BCF writer generic
 # =============================================================================

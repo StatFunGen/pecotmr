@@ -179,7 +179,7 @@ test_that("standardize_genotype_hwe: centers by 2p and scales by sqrt(2p(1-p))",
   expect_equal(X_std, expected, tolerance = 1e-14)
 })
 
-test_that("load_ld_sketch: returns raw genotypes and metadata", {
+test_that("load_ld_sketch: returns LDData with raw genotypes and metadata", {
   set.seed(55)
   n <- 30
   p <- 12
@@ -202,11 +202,12 @@ test_that("load_ld_sketch: returns raw genotypes and metadata", {
   block_metadata <- S4Vectors::DataFrame(
     region = "chr1:1000-2100", start = 1000L, end = 2100L, chrom = "chr1"
   )
+  # Store genotype matrix directly in genotype_handle (matching load_ld_sketch output)
   mock_ld_data <- new("LDData",
-    correlation = cor(X),
-    genotype_handle = NULL,
+    correlation = NULL,
+    genotype_handle = X,
     variants = variants_gr,
-    snp_idx = seq_len(p),
+    snp_idx = NULL,
     block_metadata = block_metadata
   )
 
@@ -214,23 +215,22 @@ test_that("load_ld_sketch: returns raw genotypes and metadata", {
     load_LD_matrix = function(ld_meta_file_path, region, return_genotype = FALSE, n_sample = NULL, ...) {
       mock_ld_data
     },
-    getGenotypes = function(x) X,
     .package = "pecotmr"
   )
 
   result <- pecotmr::load_ld_sketch("fake_path.tsv", "chr1:1000-2100")
 
-  # Check structure — returns raw X, not SVD
-  expect_true(all(c("X", "n_sketch", "ref_panel", "variant_ids") %in% names(result)))
-  expect_null(result$V)
-  expect_null(result$D)
-  expect_equal(result$n_sketch, n)
-  expect_equal(nrow(result$X), n)
-  expect_equal(ncol(result$X), p)
-  expect_equal(length(result$variant_ids), p)
+  # Check structure -- returns an LDData S4 object
+  expect_true(is(result, "LDData"))
+  result_X <- getGenotypes(result)
+  result_ref <- getRefPanel(result)
+  result_ids <- getVariantIds(result)
+  expect_equal(nrow(result_X), n)
+  expect_equal(ncol(result_X), p)
+  expect_equal(length(result_ids), p)
 
   # Raw genotype matrix is returned unchanged
-  expect_equal(result$X, X)
+  expect_equal(result_X, X)
 })
 
 test_that("load_ld_sketch: removes monomorphic variants", {
@@ -255,11 +255,12 @@ test_that("load_ld_sketch: removes monomorphic variants", {
   block_metadata <- S4Vectors::DataFrame(
     region = "chr1:1-5", start = 1L, end = 5L, chrom = "chr1"
   )
+  # Store genotype matrix directly in genotype_handle
   mock_ld_data <- new("LDData",
-    correlation = cor(X),
-    genotype_handle = NULL,
+    correlation = NULL,
+    genotype_handle = X,
     variants = variants_gr,
-    snp_idx = seq_len(p),
+    snp_idx = NULL,
     block_metadata = block_metadata
   )
 
@@ -267,17 +268,20 @@ test_that("load_ld_sketch: removes monomorphic variants", {
     load_LD_matrix = function(ld_meta_file_path, region, return_genotype = FALSE, n_sample = NULL, ...) {
       mock_ld_data
     },
-    getGenotypes = function(x) X,
     .package = "pecotmr"
   )
 
   result <- pecotmr::load_ld_sketch("fake_path.tsv", "chr1:1-5")
 
-  # Monomorphic variant removed
-  expect_equal(length(result$variant_ids), p - 1)
-  expect_false(variant_ids[3] %in% result$variant_ids)
-  expect_equal(nrow(result$ref_panel), p - 1)
-  expect_equal(ncol(result$X), p - 1)
+  # Returns LDData with monomorphic variant removed
+  expect_true(is(result, "LDData"))
+  result_ids <- getVariantIds(result)
+  result_ref <- getRefPanel(result)
+  result_X <- getGenotypes(result)
+  expect_equal(length(result_ids), p - 1)
+  expect_false(variant_ids[3] %in% result_ids)
+  expect_equal(nrow(result_ref), p - 1)
+  expect_equal(ncol(result_X), p - 1)
 })
 
 test_that("SVD from raw sketch matches direct computation", {

@@ -416,7 +416,9 @@ setClass("TWASWeights",
     methods = "character",
     fits = "ANY",           # list or NULL
     cv_performance = "ANY", # list or NULL
-    standardized = "logical"
+    standardized = "logical",
+    molecular_id = "character",  # gene/molecule name (length 0 or 1)
+    data_type = "ANY"            # named list of data types per context, or NULL
   ),
   validity = function(object) {
     errors <- character()
@@ -582,6 +584,8 @@ setMethod("show", "FineMappingResult", function(object) {
 setMethod("show", "TWASWeights", function(object) {
   cat(sprintf("TWASWeights: %d methods, %d variants\n",
               length(object@methods), length(object@variant_ids)))
+  if (length(object@molecular_id) > 0)
+    cat(sprintf("  Molecular ID: %s\n", object@molecular_id))
   cat(sprintf("  Methods: %s\n", paste(object@methods, collapse = ", ")))
   cat(sprintf("  Standardized: %s\n", object@standardized))
   has_cv <- !is.null(object@cv_performance)

@@ -9,7 +9,9 @@ TWASWeights(
   variant_ids,
   fits = NULL,
   cv_performance = NULL,
-  standardized = FALSE
+  standardized = FALSE,
+  molecular_id = character(0),
+  data_type = NULL
 )
 }
 \arguments{

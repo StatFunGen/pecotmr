@@ -536,9 +536,10 @@ test_that("pipeline propagates outcome_names from mvsusie through post-processin
   expect_true(is.list(result))
   # outcome_names should propagate as context_names
   expect_equal(result$context_names, cnames)
-  # coef and clfsr should be present in susie_result_trimmed
+  # coef and clfsr should be present in the FineMappingResult trimmed fit
   # coef.mvsusie returns a (p + 1) x r matrix (first row is the intercept);
   # trim_finemapping_fit strips that intercept row before storing.
-  expect_equal(result$susie_result_trimmed$coef, fake_coef[-1, , drop = FALSE])
-  expect_equal(dim(result$susie_result_trimmed$clfsr), c(L, p, r))
+  trimmed <- getTrimmedFit(result$finemapping_result)
+  expect_equal(trimmed$coef, fake_coef[-1, , drop = FALSE])
+  expect_equal(dim(trimmed$clfsr), c(L, p, r))
 })
