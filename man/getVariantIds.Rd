@@ -3,11 +3,14 @@
 \name{getVariantIds}
 \alias{getVariantIds}
 \alias{getVariantIds,LDData-method}
+\alias{getVariantIds,TWASWeights-method}
 \title{Get Variant IDs}
 \usage{
 getVariantIds(x)
 
 \S4method{getVariantIds}{LDData}(x)
+
+\S4method{getVariantIds}{TWASWeights}(x)
 }
 \arguments{
 \item{x}{An \code{LDData} object.}

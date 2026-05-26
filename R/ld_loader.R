@@ -1,17 +1,15 @@
-#' Extract the LD or genotype matrix from an LDData S4 object or legacy list.
-#' @param ld An LDData object or a list with element \code{LD_matrix}.
-#' @param want_genotype Logical; if TRUE, extract the genotype matrix from an
-#'   LDData object (via \code{getGenotypes()}).
+#' Extract the LD or genotype matrix from an LDData S4 object.
+#' @param ld An LDData object.
+#' @param want_genotype Logical; if TRUE, extract the genotype matrix
+#'   (via \code{getGenotypes()}).
 #' @return A matrix.
 #' @noRd
 extract_ld_matrix <- function(ld, want_genotype = FALSE) {
-  if (is(ld, "LDData")) {
-    if (want_genotype && hasGenotypes(ld)) {
-      return(getGenotypes(ld))
-    }
-    return(getCorrelation(ld))
+  if (!is(ld, "LDData")) stop("ld must be an LDData object")
+  if (want_genotype && hasGenotypes(ld)) {
+    return(getGenotypes(ld))
   }
-  ld$LD_matrix
+  getCorrelation(ld)
 }
 
 #' Create an LD loader for on-demand block-wise LD retrieval

@@ -116,31 +116,20 @@ extract_ld_for_variants <- function(ld_meta_file_path, analysis_region, variants
   region_narrow <- paste0(chr, ":", min(var_pos), "-", max(var_pos))
   ld_data <- load_LD_matrix(ld_meta_file_path, region = region_narrow,
                             return_genotype = "auto")
-  # Support both LDData S4 objects and legacy lists
-  if (is(ld_data, "LDData")) {
-    ld_variants <- getVariantIds(ld_data)
-    has_geno <- hasGenotypes(ld_data)
-  } else {
-    ld_variants <- ld_data$LD_variants
-    has_geno <- isTRUE(ld_data$is_genotype)
+  if (!is(ld_data, "LDData")) {
+    stop("load_LD_matrix must return an LDData object")
   }
+  ld_variants <- getVariantIds(ld_data)
+  has_geno <- hasGenotypes(ld_data)
   aligned <- align_variant_names(ld_variants, variants)
   # When genotypes available, compute R only for the needed variant subset
   if (has_geno) {
-    if (is(ld_data, "LDData")) {
-      X <- getGenotypes(ld_data)
-    } else {
-      X <- ld_data$LD_matrix
-    }
+    X <- getGenotypes(ld_data)
     colnames(X) <- aligned$aligned_variants
     X_sub <- X[, variants, drop = FALSE]
     ld_matrix <- compute_LD(X_sub, method = "sample")
   } else {
-    if (is(ld_data, "LDData")) {
-      ld_matrix <- getCorrelation(ld_data)
-    } else {
-      ld_matrix <- ld_data$LD_matrix
-    }
+    ld_matrix <- getCorrelation(ld_data)
     colnames(ld_matrix) <- rownames(ld_matrix) <- aligned$aligned_variants
     ld_matrix <- ld_matrix[variants, variants]
   }
@@ -259,48 +248,199 @@ process_coloc_results <- function(coloc_result, LD_meta_file_path, analysis_regi
   list(lbf_matrix = lbf_matrix, fm_data = fm_data)
 }
 
+# Extract LBF matrix from an rss_analysis_pipeline result object.
+# Unlike .extract_lbf_matrix which navigates RDS-loaded nested lists,
+# this works directly with the in-memory pipeline output structure.
+# @noRd
+.extract_lbf_from_pipeline_result <- function(pipeline_result,
+                                               filter_lbf_cs, filter_lbf_cs_secondary,
+                                               prior_tol) {
+  method_names <- setdiff(names(pipeline_result), "rss_data_analyzed")
+  if (length(method_names) == 0) return(NULL)
+
+  method_result <- pipeline_result[[method_names[1]]]
+  fm_result <- method_result$finemapping_result
+  if (!is.null(fm_result) && is(fm_result, "FineMappingResult")) {
+    fm_data <- getTrimmedFit(fm_result)
+    variant_names <- getVariantNames(fm_result)
+  } else {
+    fm_data <- method_result$susie_result_trimmed
+    variant_names <- method_result$variant_names
+  }
+  if (is.null(fm_data) || is.null(fm_data$lbf_variable)) return(NULL)
+
+  lbf_matrix <- as.data.frame(fm_data$lbf_variable)
+
+  # Row filtering — same logic as .extract_lbf_matrix
+  if (filter_lbf_cs && is.null(filter_lbf_cs_secondary)) {
+    lbf_matrix <- lbf_matrix[fm_data$sets$cs_index, , drop = FALSE]
+  } else if (!is.null(filter_lbf_cs_secondary)) {
+    lbf_matrix <- lbf_matrix[get_filter_lbf_index(fm_data, coverage = filter_lbf_cs_secondary), , drop = FALSE]
+  } else if ("V" %in% names(fm_data)) {
+    lbf_matrix <- lbf_matrix[fm_data$V > prior_tol, , drop = FALSE]
+  }
+
+  if (!is.null(variant_names) && length(variant_names) == ncol(lbf_matrix)) {
+    colnames(lbf_matrix) <- variant_names
+  }
+  lbf_matrix <- lbf_matrix[, !is.na(colnames(lbf_matrix))]
+  list(lbf_matrix = lbf_matrix, fm_data = fm_data)
+}
+
+# Save inline fine-mapping result to disk in a format compatible with the
+# file-based reading path (readRDS(file)[[1]] + gwas_finemapping_obj/gwas_varname_obj).
+# @noRd
+.save_finemapping_result <- function(pipeline_result, save_path) {
+  if (is.null(save_path) || is.null(pipeline_result)) return(invisible(NULL))
+  method_names <- setdiff(names(pipeline_result), "rss_data_analyzed")
+  if (length(method_names) == 0) return(invisible(NULL))
+  method_result <- pipeline_result[[method_names[1]]]
+  fm_result <- method_result$finemapping_result
+  if (!is.null(fm_result) && is(fm_result, "FineMappingResult")) {
+    save_data <- list(
+      susie_fit = getTrimmedFit(fm_result),
+      variant_names = getVariantNames(fm_result)
+    )
+  } else {
+    save_data <- list(
+      susie_fit = method_result$susie_result_trimmed,
+      variant_names = method_result$variant_names
+    )
+  }
+  saveRDS(list(save_data), save_path)
+  message("Fine-mapping result saved to: ", save_path,
+          "\n  Reuse with: gwas_files = '", save_path,
+          "', gwas_finemapping_obj = 'susie_fit', gwas_varname_obj = 'variant_names'")
+  invisible(save_path)
+}
+
 #' Colocalization Analysis Wrapper
 #'
-#' This function processes xQTL and multiple GWAS finemapped data files for colocalization analysis.
+#' Processes xQTL and GWAS finemapped data for colocalization analysis.
+#' GWAS data can come from pre-computed RDS files or from inline fine-mapping
+#' via \code{\link{rss_analysis_pipeline}}.
 #'
 #' @param xqtl_file Path to the xQTL RDS file.
-#' @param gwas_files Vector of paths to GWAS RDS files.
-#' @param xqtl_finemapping_obj Optional table name in xQTL RDS files (default 'susie_fit').
-#' @param gwas_finemapping_obj Optional table name in GWAS RDS files (default 'susie_fit').
-#' @param xqtl_varname_obj Optional table name in xQTL RDS files (default 'susie_fit').
-#' @param gwas_varname_obj Optional table name in GWAS RDS files (default 'susie_fit').
-#' @param xqtl_region_obj Optional table name in xQTL RDS files (default 'susie_fit').
-#' @param gwas_region_obj Optional table name in GWAS RDS files (default 'susie_fit').
-#' @param region_obj Optional table name of region info in susie_twas output filess (default 'region_info').
-#' @param p1, p2, and p12 are results from xqtl_enrichment_wrapper (default 'p1=1e-4, p2=1e-4, p12=5e-6', same as coloc.bf_bf).
-#' @param prior_tol When the prior variance is estimated, compare the estimated value to \code{prior_tol} at the end of the computation,
-#'   and exclude a single effect from PIP computation if the estimated prior variance is smaller than this tolerance value.
+#' @param gwas_files Vector of paths to GWAS RDS files. Required when
+#'   \code{run_finemapping = FALSE}. Ignored when \code{run_finemapping = TRUE}.
+#' @param xqtl_finemapping_obj Optional path in xQTL RDS to the finemapping object.
+#' @param gwas_finemapping_obj Optional path in GWAS RDS to the finemapping object.
+#' @param xqtl_varname_obj Optional path in xQTL RDS to variant names.
+#' @param gwas_varname_obj Optional path in GWAS RDS to variant names.
+#' @param xqtl_region_obj Optional path in xQTL RDS to region info.
+#' @param gwas_region_obj Optional path in GWAS RDS to region info.
+#' @param filter_lbf_cs Logical. Filter LBF rows by credible set index.
+#' @param filter_lbf_cs_secondary Coverage for secondary LBF filtering.
+#' @param prior_tol Minimum prior variance to retain an effect (default 1e-9).
+#' @param p1 Prior probability a SNP is associated with trait 1 (default 1e-4).
+#' @param p2 Prior probability a SNP is associated with trait 2 (default 1e-4).
+#' @param p12 Prior probability a SNP is associated with both traits (default 5e-6).
+#' @param run_finemapping Logical. If TRUE, run GWAS fine-mapping inline via
+#'   \code{\link{rss_analysis_pipeline}}. Default FALSE.
+#' @param sumstat_path Path to GWAS summary statistics file. Required when
+#'   \code{run_finemapping = TRUE}.
+#' @param column_file_path Path to column mapping file for summary statistics.
+#' @param LD_data LD reference data (LDData object or list). Required when
+#'   \code{run_finemapping = TRUE}.
+#' @param n_sample Sample size for GWAS.
+#' @param n_case Number of cases for binary traits.
+#' @param n_control Number of controls for binary traits.
+#' @param region Genomic region string (e.g., "chr1:1000-2000").
+#' @param qc_method QC method: "slalom", "dentist", or "none". Default "slalom".
+#' @param finemapping_method Fine-mapping method. Default "susie_rss".
+#' @param finemapping_opts List of fine-mapping options passed to
+#'   \code{\link{rss_analysis_pipeline}}.
+#' @param impute Logical. Run RAISS imputation. Default TRUE.
+#' @param impute_opts List of imputation options.
+#' @param save_finemapping_path Path to save fine-mapping result as RDS. The
+#'   saved file can be reused via \code{gwas_files} with
+#'   \code{gwas_finemapping_obj = "susie_fit"} and
+#'   \code{gwas_varname_obj = "variant_names"}.
+#' @param return_finemapping Logical. If TRUE and \code{run_finemapping = TRUE},
+#'   include full fine-mapping result under \code{$gwas_finemapping}.
+#' @param ... Additional arguments (currently unused).
 #' @return A list containing the coloc results and the summarized sets.
-#' @examples
-#' xqtl_file <- "xqtl_file.rds"
-#' gwas_files <- c("gwas_file1.rds", "gwas_file2.rds")
-#' result <- coloc_wrapper(xqtl_file, gwas_files, LD_meta_file_path)
-#' @importFrom dplyr bind_rows
+#' @seealso \code{\link{rss_analysis_pipeline}}, \code{\link{coloc_post_processor}}
+#' @importFrom dplyr bind_rows mutate across
 #' @importFrom tidyr replace_na
 #' @importFrom coloc coloc.bf_bf
-#' @importFrom purrr map_dfr
+#' @importFrom purrr map map_dfr
 #' @export
-coloc_wrapper <- function(xqtl_file, gwas_files,
+coloc_wrapper <- function(xqtl_file, gwas_files = NULL,
                           xqtl_finemapping_obj = NULL, xqtl_varname_obj = NULL, xqtl_region_obj = NULL,
                           gwas_finemapping_obj = NULL, gwas_varname_obj = NULL, gwas_region_obj = NULL,
                           filter_lbf_cs = FALSE, filter_lbf_cs_secondary = NULL,
-                          prior_tol = 1e-9, p1 = 1e-4, p2 = 1e-4, p12 = 5e-6, ...) {
-  region <- NULL
-  # Load and process GWAS data
-  gwas_lbf_matrices <- map(gwas_files, function(file) {
-    raw_data <- readRDS(file)[[1]]
-    .extract_lbf_matrix(raw_data, gwas_finemapping_obj, gwas_varname_obj,
-                        filter_lbf_cs, filter_lbf_cs_secondary, prior_tol)$lbf_matrix
-  })
+                          prior_tol = 1e-9, p1 = 1e-4, p2 = 1e-4, p12 = 5e-6,
+                          run_finemapping = FALSE,
+                          sumstat_path = NULL, column_file_path = NULL,
+                          LD_data = NULL,
+                          n_sample = 0, n_case = 0, n_control = 0,
+                          region = NULL,
+                          qc_method = "slalom",
+                          finemapping_method = "susie_rss",
+                          finemapping_opts = list(
+                            L = 20, L_greedy = 5,
+                            coverage = c(0.95, 0.7, 0.5),
+                            signal_cutoff = 0.025,
+                            min_abs_corr = 0.8
+                          ),
+                          impute = TRUE,
+                          impute_opts = list(rcond = 0.01, R2_threshold = 0.6,
+                                             minimum_ld = 5, lamb = 0.01),
+                          save_finemapping_path = NULL,
+                          return_finemapping = FALSE,
+                          ...) {
+  # --- Input validation ---
+  if (!run_finemapping && is.null(gwas_files)) {
+    stop("Either set run_finemapping = TRUE with GWAS sumstat inputs, or provide gwas_files paths to pre-computed results.")
+  }
+  if (run_finemapping && !is.null(gwas_files)) {
+    warning("Both run_finemapping = TRUE and gwas_files provided. Inline fine-mapping will be used; gwas_files ignored.")
+    gwas_files <- NULL
+  }
+  if (run_finemapping) {
+    if (is.null(sumstat_path)) stop("sumstat_path is required when run_finemapping = TRUE.")
+    if (is.null(LD_data)) stop("LD_data is required when run_finemapping = TRUE.")
+  }
 
-  # Combine GWAS matrices and replace NAs with zeros
-  combined_gwas_lbf_matrix <- bind_rows(gwas_lbf_matrices) %>%
-    mutate(across(everything(), ~ replace_na(., 0)))
+  gwas_pipeline_result <- NULL
+
+  if (run_finemapping) {
+    # --- Inline fine-mapping path: QC runs inside rss_analysis_pipeline ---
+    gwas_pipeline_result <- rss_analysis_pipeline(
+      sumstat_path = sumstat_path, column_file_path = column_file_path,
+      LD_data = LD_data,
+      n_sample = n_sample, n_case = n_case, n_control = n_control,
+      region = region,
+      qc_method = qc_method, finemapping_method = finemapping_method,
+      finemapping_opts = finemapping_opts,
+      impute = impute, impute_opts = impute_opts
+    )
+
+    # Save to disk before extraction (useful even if extraction fails)
+    .save_finemapping_result(gwas_pipeline_result, save_finemapping_path)
+
+    gwas_extracted <- .extract_lbf_from_pipeline_result(
+      gwas_pipeline_result, filter_lbf_cs, filter_lbf_cs_secondary, prior_tol
+    )
+    if (is.null(gwas_extracted)) {
+      coloc_res <- list("No GWAS fine-mapping results produced by inline pipeline.")
+      result <- c(coloc_res, analysis_region = region)
+      if (return_finemapping) result$gwas_finemapping <- gwas_pipeline_result
+      return(result)
+    }
+    combined_gwas_lbf_matrix <- gwas_extracted$lbf_matrix %>%
+      as.data.frame() %>% mutate(across(everything(), ~ replace_na(., 0)))
+  } else {
+    # --- File-based path (unchanged) ---
+    gwas_lbf_matrices <- map(gwas_files, function(file) {
+      raw_data <- readRDS(file)[[1]]
+      .extract_lbf_matrix(raw_data, gwas_finemapping_obj, gwas_varname_obj,
+                          filter_lbf_cs, filter_lbf_cs_secondary, prior_tol)$lbf_matrix
+    })
+    combined_gwas_lbf_matrix <- bind_rows(gwas_lbf_matrices) %>%
+      mutate(across(everything(), ~ replace_na(., 0)))
+  }
 
   # Process xQTL data
   xqtl_raw_data <- readRDS(xqtl_file)[[1]]
@@ -313,7 +453,6 @@ coloc_wrapper <- function(xqtl_file, gwas_files,
       colnames(xqtl_lbf_matrix) <- align_variant_names(colnames(xqtl_lbf_matrix), colnames(combined_gwas_lbf_matrix))$aligned_variants
       common_colnames <- intersect(colnames(xqtl_lbf_matrix), colnames(combined_gwas_lbf_matrix))
 
-      # Report the number of dropped columns from xQTL matrix before subsetting
       num_dropped_cols <- ncol(xqtl_lbf_matrix) - length(common_colnames)
       if (num_dropped_cols > 0) {
         message("Number of columns dropped from xQTL matrix: ", num_dropped_cols)
@@ -322,19 +461,28 @@ coloc_wrapper <- function(xqtl_file, gwas_files,
       xqtl_lbf_matrix <- xqtl_lbf_matrix[, common_colnames, drop = FALSE] %>% as.matrix()
       combined_gwas_lbf_matrix <- combined_gwas_lbf_matrix[, common_colnames, drop = FALSE] %>% as.matrix()
 
-      # Function to convert region df to str
       convert_to_string <- function(df) paste0("chr", df$chrom, ":", df$start, "-", df$end)
-      region <- if (!is.null(xqtl_region_obj)) get_nested_element(xqtl_raw_data, xqtl_region_obj) %>% convert_to_string() else NULL
+      analysis_region_out <- if (!is.null(xqtl_region_obj)) {
+        get_nested_element(xqtl_raw_data, xqtl_region_obj) %>% convert_to_string()
+      } else {
+        region
+      }
 
-      # COLOC function
       coloc_res <- coloc.bf_bf(xqtl_lbf_matrix, combined_gwas_lbf_matrix, p1 = p1, p2 = p2, p12 = p12)
     } else {
       coloc_res <- list("No coloc results due to the absence of a GWAS log Bayes factor matrix filtered by prior tolerance.")
+      analysis_region_out <- region
     }
   } else {
     coloc_res <- list(paste("no", xqtl_finemapping_obj[2], "in", xqtl_finemapping_obj[1]))
+    analysis_region_out <- region
   }
-  return(c(coloc_res, analysis_region = region))
+
+  result <- c(coloc_res, analysis_region = analysis_region_out)
+  if (return_finemapping && !is.null(gwas_pipeline_result)) {
+    result$gwas_finemapping <- gwas_pipeline_result
+  }
+  return(result)
 }
 
 #' coloc_post_processor function

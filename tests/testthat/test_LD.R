@@ -208,33 +208,36 @@ test_that("partition_LD_matrix validates block structure properly", {
   # Load the LD matrix that spans multiple blocks
   ld_data <- load_LD_matrix(LD_meta_file_path, region)
 
-  # Create an invalid block structure by converting to a plain list and modifying
+  # Create an invalid block structure by modifying block_metadata
   bm <- getBlockMetadata(ld_data)
   vids <- getVariantIds(ld_data)
   ldmat <- getCorrelation(ld_data)
-  invalid_ld_data <- list(
-    LD_matrix = ldmat,
-    LD_variants = vids,
-    block_metadata = bm
-  )
 
   # Assuming we have at least 2 blocks:
-  if(nrow(invalid_ld_data$block_metadata) >= 2) {
+  if(nrow(bm) >= 2) {
     # Create overlapping blocks with invalid start/end indices
-    invalid_ld_data$block_metadata$start_idx[2] <- invalid_ld_data$block_metadata$start_idx[1]
-    invalid_ld_data$block_metadata$end_idx[1] <- invalid_ld_data$block_metadata$end_idx[2]
+    bm$start_idx[2] <- bm$start_idx[1]
+    bm$end_idx[1] <- bm$end_idx[2]
 
     # Introduce non-zero elements between blocks to trigger validation error
-    if(length(invalid_ld_data$LD_variants) >= 2) {
-      idx1 <- invalid_ld_data$block_metadata$start_idx[1]
-      idx2 <- invalid_ld_data$block_metadata$start_idx[2] + 1
-      if(idx1 <= length(invalid_ld_data$LD_variants) &&
-         idx2 <= length(invalid_ld_data$LD_variants)) {
-        var1 <- invalid_ld_data$LD_variants[idx1]
-        var2 <- invalid_ld_data$LD_variants[idx2]
-        invalid_ld_data$LD_matrix[var1, var2] <- 0.5
+    if(length(vids) >= 2) {
+      idx1 <- bm$start_idx[1]
+      idx2 <- bm$start_idx[2] + 1
+      if(idx1 <= length(vids) && idx2 <= length(vids)) {
+        var1 <- vids[idx1]
+        var2 <- vids[idx2]
+        ldmat[var1, var2] <- 0.5
       }
     }
+
+    # Rebuild LDData with modified matrix and block metadata
+    invalid_ld_data <- new("LDData",
+      correlation = ldmat,
+      genotype_handle = NULL,
+      variants = ld_data@variants,
+      snp_idx = ld_data@snp_idx,
+      block_metadata = bm
+    )
 
     # Expect an error for invalid block structure
     expect_error(partition_LD_matrix(invalid_ld_data), "Matrix lacks expected block structure")

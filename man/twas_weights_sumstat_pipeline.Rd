@@ -16,7 +16,7 @@ twas_weights_sumstat_pipeline(
   qc_method = NULL,
   keep_indel = TRUE,
   pip_cutoff_to_skip = 0,
-  impute = FALSE,
+  impute = TRUE,
   impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
   var_y = 1,
   verbose = 1

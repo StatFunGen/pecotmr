@@ -25,14 +25,11 @@
 #' @export
 rss_basic_qc <- function(sumstats, LD_data, skip_region = NULL, keep_indel = TRUE,
                          return_LD_mat = TRUE) {
-  # Extract LD components from either LDData S4 object or legacy list
-  if (is(LD_data, "LDData")) {
-    LD_variants <- getVariantIds(LD_data)
-    LD_matrix <- getCorrelation(LD_data)
-  } else {
-    LD_variants <- LD_data$LD_variants
-    LD_matrix <- LD_data$LD_matrix
+  if (!is(LD_data, "LDData")) {
+    stop("LD_data must be an LDData object")
   }
+  LD_variants <- getVariantIds(LD_data)
+  LD_matrix <- if (return_LD_mat) getCorrelation(LD_data) else NULL
 
   # Check if required columns are present in sumstats
   required_cols <- c("chrom", "pos", "A1", "A2")
@@ -259,7 +256,7 @@ summary_stats_qc <- function(sumstats, LD_data, n = NULL,
       colnames(X_sub) <- sumstats$variant_id[!is.na(idx)]
       LD_extract <- compute_LD(X_sub, method = "sample")
     } else {
-      LD_mat <- if (is(LD_data, "LDData")) getCorrelation(LD_data) else LD_data$LD_matrix
+      LD_mat <- getCorrelation(LD_data)
       LD_extract <- LD_mat[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
     }
     qc_results <- ld_mismatch_qc(zScore = sumstats$z, R = LD_extract,
@@ -286,8 +283,7 @@ summary_stats_qc <- function(sumstats, LD_data, n = NULL,
     is.list(x) && is.data.frame(x$sumstats)
   }
   is_ld_record <- function(x) {
-    methods::is(x, "LDData") || is.matrix(x) ||
-      (is.list(x) && !is.null(x$LD_matrix))
+    is(x, "LDData")
   }
   first_ld_record <- function(x, study_name = NULL) {
     if (is_ld_record(x)) return(x)
@@ -381,71 +377,8 @@ summary_stats_qc <- function(sumstats, LD_data, n = NULL,
 
 .normalize_ld_data_for_qc <- function(LD_data) {
   if (is.null(LD_data)) return(NULL)
-  if (methods::is(LD_data, "LDData")) {
-    variant_info <- getVariantInfo(LD_data)
-    ref_panel <- as.data.frame(S4Vectors::mcols(variant_info))
-    ref_panel$chrom <- as.character(GenomicRanges::seqnames(variant_info))
-    ref_panel$pos <- GenomicRanges::start(variant_info)
-    if (!"variant_id" %in% colnames(ref_panel)) {
-      ref_panel$variant_id <- getVariantIds(LD_data)
-    }
-
-    is_genotype <- hasGenotypes(LD_data)
-    LD_matrix <- if (is_genotype) getGenotypes(LD_data) else getCorrelation(LD_data)
-    LD_variants <- getVariantIds(LD_data)
-    if (is.matrix(LD_matrix)) {
-      if (is_genotype && length(LD_variants) == ncol(LD_matrix)) {
-        colnames(LD_matrix) <- LD_variants
-      } else if (!is_genotype && length(LD_variants) == nrow(LD_matrix)) {
-        rownames(LD_matrix) <- colnames(LD_matrix) <- LD_variants
-      }
-    }
-
-    return(list(
-      LD_matrix = LD_matrix,
-      LD_variants = LD_variants,
-      ref_panel = ref_panel,
-      block_metadata = getBlockMetadata(LD_data),
-      is_genotype = is_genotype
-    ))
-  }
-  if (is.matrix(LD_data)) {
-    ids <- if (nrow(LD_data) == ncol(LD_data)) rownames(LD_data) else colnames(LD_data)
-    LD_data <- list(LD_matrix = LD_data, LD_variants = ids)
-  }
-  if (is.data.frame(LD_data$LD_variants)) {
-    variant_ids <- if ("variant_id" %in% colnames(LD_data$LD_variants)) {
-      as.character(LD_data$LD_variants$variant_id)
-    } else {
-      format_variant_id(LD_data$LD_variants$chrom, LD_data$LD_variants$pos,
-                        LD_data$LD_variants$A2, LD_data$LD_variants$A1)
-    }
-    LD_data$LD_variants <- variant_ids
-  }
-  if (is.data.frame(LD_data$ref_panel) && !"variant_id" %in% colnames(LD_data$ref_panel)) {
-    LD_data$ref_panel$variant_id <- format_variant_id(
-      LD_data$ref_panel$chrom, LD_data$ref_panel$pos,
-      LD_data$ref_panel$A2, LD_data$ref_panel$A1
-    )
-  }
-  if (is.null(LD_data$LD_variants) && is.data.frame(LD_data$ref_panel) &&
-      "variant_id" %in% colnames(LD_data$ref_panel)) {
-    LD_data$LD_variants <- as.character(LD_data$ref_panel$variant_id)
-  }
-  if (is.null(LD_data$ref_panel) && !is.null(LD_data$LD_variants)) {
-    parsed <- tryCatch(parse_variant_id(LD_data$LD_variants), error = function(e) NULL)
-    if (!is.null(parsed)) {
-      LD_data$ref_panel <- parsed
-      LD_data$ref_panel$variant_id <- LD_data$LD_variants
-    }
-  }
-  if (!is.null(LD_data$LD_variants) && is.matrix(LD_data$LD_matrix)) {
-    if (nrow(LD_data$LD_matrix) == ncol(LD_data$LD_matrix) &&
-        length(LD_data$LD_variants) == nrow(LD_data$LD_matrix)) {
-      rownames(LD_data$LD_matrix) <- colnames(LD_data$LD_matrix) <- LD_data$LD_variants
-    } else if (length(LD_data$LD_variants) == ncol(LD_data$LD_matrix)) {
-      colnames(LD_data$LD_matrix) <- LD_data$LD_variants
-    }
+  if (!is(LD_data, "LDData")) {
+    stop("LD_data must be an LDData object")
   }
   LD_data
 }
@@ -468,26 +401,12 @@ summary_stats_qc <- function(sumstats, LD_data, n = NULL,
 
   if (is.null(rss_input) || is.null(LD_data)) return(NULL)
   message("QC track: starting basic allele harmonization for summary-stat study ", study, ".")
-  message("QC track: basic summary-stat QC requires sumstat$variant and LD_data$LD_variants ",
-          "or LD/X_ref variant names for study ", study, ".")
+  message("QC track: basic summary-stat QC requires sumstat$variant and LD_data variant IDs ",
+          "for study ", study, ".")
   LD_data_for_qc <- .normalize_ld_data_for_qc(LD_data)
-  has_genotype <- isTRUE(LD_data_for_qc$is_genotype) ||
-    (is.matrix(LD_data_for_qc$LD_matrix) &&
-       nrow(LD_data_for_qc$LD_matrix) != ncol(LD_data_for_qc$LD_matrix))
-  if (has_genotype && is.data.frame(LD_data_for_qc$ref_panel) &&
-      all(c("chrom", "pos", "A2", "A1") %in% colnames(LD_data_for_qc$ref_panel))) {
-    canonical_ids <- format_variant_id(LD_data_for_qc$ref_panel$chrom,
-                                       LD_data_for_qc$ref_panel$pos,
-                                       LD_data_for_qc$ref_panel$A2,
-                                       LD_data_for_qc$ref_panel$A1)
-    LD_data_for_qc$ref_panel$variant_id <- canonical_ids
-    LD_data_for_qc$LD_variants <- canonical_ids
-    if (is.matrix(LD_data_for_qc$LD_matrix) &&
-        length(canonical_ids) == ncol(LD_data_for_qc$LD_matrix)) {
-      colnames(LD_data_for_qc$LD_matrix) <- canonical_ids
-    }
-  }
-  X_ref <- if (has_genotype) LD_data_for_qc$LD_matrix else NULL
+  has_genotype <- hasGenotypes(LD_data_for_qc)
+  ref_panel <- getRefPanel(LD_data_for_qc)
+  X_ref <- if (has_genotype) getGenotypes(LD_data_for_qc) else NULL
   basic <- rss_basic_qc(rss_input$sumstats, LD_data_for_qc,
                         skip_region = skip_region, keep_indel = keep_indel,
                         return_LD_mat = !has_genotype)
@@ -521,27 +440,21 @@ summary_stats_qc <- function(sumstats, LD_data, n = NULL,
     X_local <- reference_for_variants(variants)
     R_local <- compute_LD(X_local, method = "sample")
     rownames(R_local) <- colnames(R_local) <- variants
-    ref_panel <- LD_data_for_qc$ref_panel
-    if (is.data.frame(ref_panel) && "variant_id" %in% colnames(ref_panel)) {
-      ref_idx <- match(variants, ref_panel$variant_id)
-      if (anyNA(ref_idx)) {
-        ref_panel <- parse_variant_id(variants)
-        ref_panel$variant_id <- variants
-      } else {
-        ref_panel <- ref_panel[ref_idx, , drop = FALSE]
-      }
+    ref_idx <- match(variants, ref_panel$variant_id)
+    if (anyNA(ref_idx)) {
+      ref_panel_sub <- parse_variant_id(variants)
+      ref_panel_sub$variant_id <- variants
     } else {
-      ref_panel <- parse_variant_id(variants)
-      ref_panel$variant_id <- variants
+      ref_panel_sub <- ref_panel[ref_idx, , drop = FALSE]
     }
-    ld_data <- LD_data_for_qc
-    ld_data$LD_matrix <- R_local
-    ld_data$LD_variants <- variants
-    ld_data$ref_panel <- ref_panel
-    ld_data$block_metadata <- .infer_single_ld_block_metadata(ref_panel)
-    ld_data$is_genotype <- FALSE
+    variants_gr <- .ref_panel_to_granges(ref_panel_sub)
     R_mat <<- R_local
-    ld_data
+    LDData(
+      correlation = R_local,
+      variants = variants_gr,
+      block_metadata = .infer_single_ld_block_metadata(ref_panel_sub),
+      n_ref = LD_data_for_qc@n_ref
+    )
   }
   message("QC track: basic harmonization retained ", nrow(sumstats),
           " variants for summary-stat study ", study, ".")
@@ -579,34 +492,26 @@ summary_stats_qc <- function(sumstats, LD_data, n = NULL,
             " LD-mismatch outlier(s) for summary-stat study ", study, ".")
   }
   if (isTRUE(impute)) {
-    if (is.null(LD_data_for_qc$ref_panel)) {
-      warning("Skipping imputation for summary-stat study ", study,
-              ": LD_data does not include ref_panel.")
+    message("QC track: running imputation for summary-stat study ", study, ".")
+    imputed <- if (has_genotype) {
+      X_ref_scaled <- scale(X_ref)
+      X_ref_scaled[is.na(X_ref_scaled)] <- 0
+      colnames(X_ref_scaled) <- colnames(X_ref)
+      raiss(ref_panel, sumstats,
+            genotype_matrix = X_ref_scaled,
+            svd_tol = if (is.null(impute_opts$svd_tol)) 1e-12 else impute_opts$svd_tol,
+            R2_threshold = impute_opts$R2_threshold,
+            minimum_ld = impute_opts$minimum_ld,
+            lamb = impute_opts$lamb)
     } else {
-      message("QC track: running imputation for summary-stat study ", study, ".")
-      imputed <- if (has_genotype) {
-        X_ref_scaled <- scale(X_ref)
-        X_ref_scaled[is.na(X_ref_scaled)] <- 0
-        colnames(X_ref_scaled) <- colnames(X_ref)
-        raiss(LD_data_for_qc$ref_panel, sumstats,
-              genotype_matrix = X_ref_scaled,
-              svd_tol = if (is.null(impute_opts$svd_tol)) 1e-12 else impute_opts$svd_tol,
-              R2_threshold = impute_opts$R2_threshold,
-              minimum_ld = impute_opts$minimum_ld,
-              lamb = impute_opts$lamb)
-      } else {
-        if (is.null(LD_data_for_qc$block_metadata)) {
-          LD_data_for_qc$block_metadata <- .infer_single_ld_block_metadata(LD_data_for_qc$ref_panel)
-        }
-        raiss(LD_data_for_qc$ref_panel, sumstats, partition_LD_matrix(LD_data_for_qc),
-              rcond = impute_opts$rcond,
-              R2_threshold = impute_opts$R2_threshold,
-              minimum_ld = impute_opts$minimum_ld,
-              lamb = impute_opts$lamb)
-      }
-      sumstats <- imputed$result_filter
-      if (!is.null(imputed$LD_mat)) R_mat <- imputed$LD_mat
+      raiss(ref_panel, sumstats, partition_LD_matrix(LD_data_for_qc),
+            rcond = impute_opts$rcond,
+            R2_threshold = impute_opts$R2_threshold,
+            minimum_ld = impute_opts$minimum_ld,
+            lamb = impute_opts$lamb)
     }
+    sumstats <- imputed$result_filter
+    if (!is.null(imputed$LD_mat)) R_mat <- imputed$LD_mat
   }
   final_vars <- sumstats$variant_id
   list(

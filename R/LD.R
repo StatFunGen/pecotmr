@@ -537,17 +537,12 @@ standardize_genotype_hwe <- function(X, allele_freq) {
 #' @export
 load_ld_sketch <- function(ld_meta_file_path, region, n_sample = NULL) {
   result <- load_LD_matrix(ld_meta_file_path, region, return_genotype = TRUE, n_sample = n_sample)
-  if (is(result, "LDData")) {
-    X <- getGenotypes(result)
-    variant_ids <- getVariantIds(result)
-    ref_panel <- as.data.frame(S4Vectors::mcols(getVariantInfo(result)))
-    ref_panel$chrom <- as.character(GenomicRanges::seqnames(getVariantInfo(result)))
-    ref_panel$pos <- GenomicRanges::start(getVariantInfo(result))
-  } else {
-    X <- result$LD_matrix
-    variant_ids <- result$LD_variants
-    ref_panel <- result$ref_panel
+  if (!is(result, "LDData")) {
+    stop("load_LD_matrix must return an LDData object")
   }
+  X <- getGenotypes(result)
+  variant_ids <- getVariantIds(result)
+  ref_panel <- getRefPanel(result)
 
   # Remove monomorphic variants (zero variance under HWE)
   p <- ref_panel$allele_freq
@@ -735,19 +730,15 @@ filter_variants_by_ld_reference <- function(variant_ids, ld_reference_meta_file,
 #' @noRd
 partition_LD_matrix <- function(ld_data, merge_small_blocks = TRUE,
                                 min_merged_block_size = 500, max_merged_block_size = 10000) {
-  # Extract components from ld_data (support both LDData S4 and legacy list)
-  if (is(ld_data, "LDData")) {
-    combined_matrix <- getCorrelation(ld_data)
-    block_metadata <- ld_data@block_metadata
-    if (is(block_metadata, "LDBlocks")) {
-      block_metadata <- as.data.frame(block_metadata@blocks)
-    }
-    variant_ids <- getVariantIds(ld_data)
-  } else {
-    combined_matrix <- ld_data$LD_matrix
-    block_metadata <- ld_data$block_metadata
-    variant_ids <- ld_data$LD_variants
+  if (!is(ld_data, "LDData")) {
+    stop("ld_data must be an LDData object")
   }
+  combined_matrix <- getCorrelation(ld_data)
+  block_metadata <- ld_data@block_metadata
+  if (is(block_metadata, "LDBlocks")) {
+    block_metadata <- as.data.frame(block_metadata@blocks)
+  }
+  variant_ids <- getVariantIds(ld_data)
 
   # Error if matrix is empty
   if (is.null(combined_matrix) || nrow(combined_matrix) == 0 || ncol(combined_matrix) == 0) {

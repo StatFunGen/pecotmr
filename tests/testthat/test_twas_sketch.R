@@ -198,15 +198,23 @@ test_that("load_ld_sketch: returns raw genotypes and metadata", {
     stringsAsFactors = FALSE
   )
 
+  variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+  block_metadata <- S4Vectors::DataFrame(
+    region = "chr1:1000-2100", start = 1000L, end = 2100L, chrom = "chr1"
+  )
+  mock_ld_data <- new("LDData",
+    correlation = cor(X),
+    genotype_handle = NULL,
+    variants = variants_gr,
+    snp_idx = seq_len(p),
+    block_metadata = block_metadata
+  )
+
   local_mocked_bindings(
     load_LD_matrix = function(ld_meta_file_path, region, return_genotype = FALSE, n_sample = NULL, ...) {
-      list(
-        LD_matrix = X,
-        LD_variants = variant_ids,
-        ref_panel = ref_panel,
-        is_genotype = TRUE
-      )
+      mock_ld_data
     },
+    getGenotypes = function(x) X,
     .package = "pecotmr"
   )
 
@@ -243,15 +251,23 @@ test_that("load_ld_sketch: removes monomorphic variants", {
     stringsAsFactors = FALSE
   )
 
+  variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+  block_metadata <- S4Vectors::DataFrame(
+    region = "chr1:1-5", start = 1L, end = 5L, chrom = "chr1"
+  )
+  mock_ld_data <- new("LDData",
+    correlation = cor(X),
+    genotype_handle = NULL,
+    variants = variants_gr,
+    snp_idx = seq_len(p),
+    block_metadata = block_metadata
+  )
+
   local_mocked_bindings(
     load_LD_matrix = function(ld_meta_file_path, region, return_genotype = FALSE, n_sample = NULL, ...) {
-      list(
-        LD_matrix = X,
-        LD_variants = variant_ids,
-        ref_panel = ref_panel,
-        is_genotype = TRUE
-      )
+      mock_ld_data
     },
+    getGenotypes = function(x) X,
     .package = "pecotmr"
   )
 

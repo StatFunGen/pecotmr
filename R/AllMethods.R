@@ -43,15 +43,13 @@ setMethod("getCorrelation", "LDData", function(x) {
   if (is.null(x@genotype_handle)) {
     stop("No correlation matrix or genotype handle available")
   }
-  # Recompute from genotype handle
   if (is.list(x@genotype_handle)) {
-    # Multi-panel: compute from first handle
-    geno <- extractBlockGenotypes(x@genotype_handle[[1]], x@snp_idx)
-    X <- t(assay(geno, "dosage"))
-  } else {
-    geno <- extractBlockGenotypes(x@genotype_handle, x@snp_idx)
-    X <- t(assay(geno, "dosage"))
+    stop("Cannot compute single correlation matrix from mixture panels. ",
+         "Use getGenotypes() and compute LD per-panel, or pass X directly ",
+         "to susie_rss().")
   }
+  geno <- extractBlockGenotypes(x@genotype_handle, x@snp_idx)
+  X <- t(assay(geno, "dosage"))
   compute_LD(X, method = "sample")
 })
 
@@ -94,42 +92,14 @@ setMethod("getBlockMetadata", "LDData", function(x) {
   x@block_metadata
 })
 
-#' @title Convert LDData to Legacy List
-#' @description Convert an \code{LDData} object to the legacy list format
-#'   for backwards compatibility with internal functions that still expect
-#'   the old format.
-#' @param x An \code{LDData} object.
-#' @return A list with LD_variants, LD_matrix, ref_panel, block_metadata,
-#'   is_genotype.
-#' @keywords internal
-#' @noRd
-ld_data_to_list <- function(x, skip_correlation = FALSE) {
+#' @rdname getRefPanel
+#' @export
+setMethod("getRefPanel", "LDData", function(x) {
   mc <- as.data.frame(mcols(x@variants))
   mc$chrom <- as.character(seqnames(x@variants))
   mc$pos <- start(x@variants)
-  ref_panel <- mc
-
-  bm <- x@block_metadata
-  if (is(bm, "LDBlocks")) {
-    bm <- as.data.frame(bm@blocks)
-  }
-
-  LD_matrix <- if (skip_correlation) {
-    NULL
-  } else if (!is.null(x@correlation)) {
-    x@correlation
-  } else {
-    getCorrelation(x)
-  }
-
-  list(
-    LD_variants = getVariantIds(x),
-    LD_matrix = LD_matrix,
-    ref_panel = ref_panel,
-    block_metadata = bm,
-    is_genotype = FALSE
-  )
-}
+  mc
+})
 
 # =============================================================================
 # Helper: build variant GRanges from ref_panel data.frame
@@ -423,6 +393,48 @@ setMethod("getWeights", "TWASWeights", function(x, method = NULL) {
          paste(x@methods, collapse = ", "))
   x@weights[[method]]
 })
+
+#' @rdname getStandardized
+#' @export
+setMethod("getStandardized", "TWASWeights", function(x) x@standardized)
+
+#' @rdname getCVPerformance
+#' @export
+setMethod("getCVPerformance", "TWASWeights", function(x, method = NULL) {
+  if (is.null(method)) return(x@cv_performance)
+  x@cv_performance[[method]]
+})
+
+#' @rdname getFits
+#' @export
+setMethod("getFits", "TWASWeights", function(x, method = NULL) {
+  if (is.null(method)) return(x@fits)
+  x@fits[[method]]
+})
+
+#' @rdname getMethodNames
+#' @export
+setMethod("getMethodNames", "TWASWeights", function(x) x@methods)
+
+#' @rdname getVariantIds
+#' @export
+setMethod("getVariantIds", "TWASWeights", function(x) x@variant_ids)
+
+# =============================================================================
+# FineMappingResult additional accessors
+# =============================================================================
+
+#' @rdname getTrimmedFit
+#' @export
+setMethod("getTrimmedFit", "FineMappingResult", function(x) x@trimmed_fit)
+
+#' @rdname getVariantNames
+#' @export
+setMethod("getVariantNames", "FineMappingResult", function(x) x@variant_names)
+
+#' @rdname getTopLoci
+#' @export
+setMethod("getTopLoci", "FineMappingResult", function(x) x@top_loci)
 
 # =============================================================================
 # top_loci GRanges conversion

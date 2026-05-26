@@ -218,6 +218,14 @@ setGeneric("getVariantIds", function(x) standardGeneric("getVariantIds"))
 #' @export
 setGeneric("getVariantInfo", function(x) standardGeneric("getVariantInfo"))
 
+#' @title Get Reference Panel
+#' @description Extract reference panel metadata as a data.frame from
+#'   an \code{LDData} object, including chrom and pos columns.
+#' @param x An \code{LDData} object.
+#' @return A data.frame with variant metadata including chrom, pos, A1, A2.
+#' @export
+setGeneric("getRefPanel", function(x) standardGeneric("getRefPanel"))
+
 #' @title Get Block Metadata
 #' @description Extract block metadata from an \code{LDData} object.
 #' @param x An \code{LDData} object.
@@ -279,6 +287,27 @@ setGeneric("getResidualYScalar",
 #' @export
 setGeneric("getPIP", function(x) standardGeneric("getPIP"))
 
+#' @title Get Trimmed Fit
+#' @description Extract the trimmed SuSiE fit from a FineMappingResult.
+#' @param x A \code{FineMappingResult} object.
+#' @return A list (trimmed SuSiE fit).
+#' @export
+setGeneric("getTrimmedFit", function(x) standardGeneric("getTrimmedFit"))
+
+#' @title Get Variant Names
+#' @description Extract variant names from a FineMappingResult.
+#' @param x A \code{FineMappingResult} object.
+#' @return Character vector of variant names.
+#' @export
+setGeneric("getVariantNames", function(x) standardGeneric("getVariantNames"))
+
+#' @title Get Top Loci
+#' @description Extract top loci data.frame from a FineMappingResult.
+#' @param x A \code{FineMappingResult} object.
+#' @return A data.frame of top loci.
+#' @export
+setGeneric("getTopLoci", function(x) standardGeneric("getTopLoci"))
+
 #' @title Get Credible Sets
 #' @description Extract credible set assignments.
 #' @param x A \code{FineMappingResult} object.
@@ -317,6 +346,38 @@ setGeneric("getEffects", function(x) standardGeneric("getEffects"))
 #' @export
 setGeneric("getWeights",
   function(x, method = NULL) standardGeneric("getWeights"))
+
+#' @title Get Standardized Flag
+#' @description Check whether weights are on the standardized (correlation) scale.
+#' @param x A \code{TWASWeights} object.
+#' @return Logical.
+#' @export
+setGeneric("getStandardized", function(x) standardGeneric("getStandardized"))
+
+#' @title Get CV Performance
+#' @description Extract cross-validation performance metrics.
+#' @param x A \code{TWASWeights} object.
+#' @param method Character, specific method name. If NULL, returns all.
+#' @return A list or single element.
+#' @export
+setGeneric("getCVPerformance",
+  function(x, method = NULL) standardGeneric("getCVPerformance"))
+
+#' @title Get Model Fits
+#' @description Extract fitted model objects from a TWASWeights object.
+#' @param x A \code{TWASWeights} object.
+#' @param method Character, specific method name. If NULL, returns all.
+#' @return A list or single element.
+#' @export
+setGeneric("getFits",
+  function(x, method = NULL) standardGeneric("getFits"))
+
+#' @title Get Method Names
+#' @description Extract method names from a TWASWeights object.
+#' @param x A \code{TWASWeights} object.
+#' @return Character vector.
+#' @export
+setGeneric("getMethodNames", function(x) standardGeneric("getMethodNames"))
 
 # =============================================================================
 # VCF/BCF writer generic

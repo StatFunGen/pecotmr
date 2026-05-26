@@ -1811,6 +1811,43 @@ region_data_to_ind_input <- function(region_data) {
 #' @return A list containing named RSS inputs, matched LD data, and source
 #'   information.
 #' @export
+.legacy_list_to_LDData <- function(ld_list) {
+  # Convert legacy LD list to LDData S4 object
+  if (is(ld_list, "LDData")) return(ld_list)
+  ld_mat <- ld_list$LD_matrix
+  ref_panel <- ld_list$ref_panel
+  ld_variants <- ld_list$LD_variants
+  # Build ref_panel if missing
+  if (is.null(ref_panel) && !is.null(ld_variants)) {
+    if (is.data.frame(ld_variants)) {
+      ref_panel <- ld_variants
+    } else {
+      parsed <- tryCatch(parse_variant_id(ld_variants), error = function(e) NULL)
+      if (!is.null(parsed)) {
+        ref_panel <- parsed
+        ref_panel$variant_id <- ld_variants
+      }
+    }
+  }
+  if (is.null(ref_panel)) return(ld_list)  # cannot convert
+  if (is.data.frame(ref_panel) && !"variant_id" %in% names(ref_panel)) {
+    ref_panel$variant_id <- format_variant_id(ref_panel$chrom, ref_panel$pos, ref_panel$A2, ref_panel$A1)
+  }
+  if (!"chrom" %in% names(ref_panel)) ref_panel$chrom <- "1"
+  ref_panel$chrom <- as.character(ref_panel$chrom)
+  variants_gr <- .ref_panel_to_granges(ref_panel)
+  is_genotype <- isTRUE(ld_list$is_genotype) || (is.matrix(ld_mat) && nrow(ld_mat) != ncol(ld_mat))
+  corr <- if (is_genotype) cor(ld_mat) else ld_mat
+  bm <- ld_list$block_metadata
+  if (is.null(bm)) bm <- .infer_single_ld_block_metadata(ref_panel)
+  if (is.null(bm)) bm <- data.frame()
+  LDData(
+    correlation = corr,
+    variants = variants_gr,
+    block_metadata = bm
+  )
+}
+
 region_data_to_rss_input <- function(region_data) {
   make_ld_data_from_matrix <- function(ld, variant_ids = NULL) {
     is_genotype <- is.matrix(ld) && nrow(ld) != ncol(ld)
@@ -1833,13 +1870,28 @@ region_data_to_rss_input <- function(region_data) {
         parsed$variant_id <- ids
       }
     }
-    list(
-      LD_matrix = ld,
-      LD_variants = ids,
-      ref_panel = parsed,
-      block_metadata = if (!is_genotype && !is.null(parsed)) .infer_single_ld_block_metadata(parsed) else NULL,
-      is_genotype = isTRUE(is_genotype)
-    )
+    # Build LDData S4 object
+    if (!is.null(parsed)) {
+      ref_panel_df <- parsed
+      ref_panel_df$chrom <- as.character(ref_panel_df$chrom)
+      variants_gr <- .ref_panel_to_granges(ref_panel_df)
+      corr <- if (is_genotype) cor(ld) else ld
+      bm <- .infer_single_ld_block_metadata(ref_panel_df)
+      LDData(
+        correlation = corr,
+        variants = variants_gr,
+        block_metadata = bm
+      )
+    } else {
+      # Cannot parse variant IDs — fall back to legacy list
+      list(
+        LD_matrix = ld,
+        LD_variants = ids,
+        ref_panel = parsed,
+        block_metadata = NULL,
+        is_genotype = isTRUE(is_genotype)
+      )
+    }
   }
 
   rss_input_from_qced_sumstat <- function(sumstat_data) {
@@ -1907,7 +1959,11 @@ region_data_to_rss_input <- function(region_data) {
         output_name <- make.unique(c(names(rss_input), output_name))[length(rss_input) + 1]
       }
       rss_input[[output_name]] <- studies[[study]]
-      LD_data[[output_name]] <- sumstat_data$LD_info[[ld_index]]
+      ld_entry <- sumstat_data$LD_info[[ld_index]]
+      if (!is(ld_entry, "LDData") && is.list(ld_entry)) {
+        ld_entry <- .legacy_list_to_LDData(ld_entry)
+      }
+      LD_data[[output_name]] <- ld_entry
       ld_group[[output_name]] <- group_name
     }
   }

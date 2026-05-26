@@ -360,7 +360,7 @@ test_that("pipeline: ensemble=TRUE with only 1 method prints skip message", {
 
   # No ensemble result should be present
   expect_null(res$ensemble)
-  expect_null(res$twas_weights$ensemble_weights)
+  expect_false("ensemble_weights" %in% getMethodNames(res$twas_weights))
 })
 
 test_that("pipeline: ensemble=TRUE skips when methods fail R^2 cutoff", {
@@ -388,7 +388,7 @@ test_that("pipeline: ensemble=TRUE skips when methods fail R^2 cutoff", {
 
   expect_true(any(grepl("Ensemble TWAS skipped", msgs)))
   expect_null(res$ensemble)
-  expect_null(res$twas_weights$ensemble_weights)
+  expect_false("ensemble_weights" %in% getMethodNames(res$twas_weights))
 })
 
 test_that("pipeline: ensemble=TRUE succeeds and adds ensemble_weights", {
@@ -415,9 +415,9 @@ test_that("pipeline: ensemble=TRUE succeeds and adds ensemble_weights", {
   expect_true(any(grepl("Computing ensemble TWAS weights", msgs)))
 
   # Ensemble weights added alongside individual methods
-  expect_true("ensemble_weights" %in% names(res$twas_weights))
-  expect_true("lasso_weights" %in% names(res$twas_weights))
-  expect_true("enet_weights" %in% names(res$twas_weights))
+  expect_true("ensemble_weights" %in% getMethodNames(res$twas_weights))
+  expect_true("lasso_weights" %in% getMethodNames(res$twas_weights))
+  expect_true("enet_weights" %in% getMethodNames(res$twas_weights))
 
   # Ensemble predictions added
   expect_true("ensemble_predicted" %in% names(res$twas_predictions))
@@ -428,8 +428,8 @@ test_that("pipeline: ensemble=TRUE succeeds and adds ensemble_weights", {
   expect_equal(sum(res$ensemble$method_coef), 1, tolerance = 1e-6)
 
   # Ensemble weights should have same length as individual weights
-  expect_equal(length(res$twas_weights$ensemble_weights),
-               length(res$twas_weights$lasso_weights))
+  expect_equal(length(getWeights(res$twas_weights, "ensemble_weights")),
+               length(getWeights(res$twas_weights, "lasso_weights")))
 })
 
 test_that("pipeline: ensemble=FALSE does not run ensemble", {
@@ -452,7 +452,7 @@ test_that("pipeline: ensemble=FALSE does not run ensemble", {
   ))
 
   expect_null(res$ensemble)
-  expect_null(res$twas_weights$ensemble_weights)
+  expect_false("ensemble_weights" %in% getMethodNames(res$twas_weights))
 })
 
 test_that("pipeline: ensemble_r2_threshold filters methods for ensemble", {
@@ -574,7 +574,7 @@ test_that("pipeline: ensemble_solver='nnls' works end-to-end", {
   )
 
   expect_true(any(grepl("Computing ensemble TWAS weights", msgs)))
-  expect_true("ensemble_weights" %in% names(res$twas_weights))
+  expect_true("ensemble_weights" %in% getMethodNames(res$twas_weights))
   expect_true(all(res$ensemble$method_coef >= 0))
   expect_equal(sum(res$ensemble$method_coef), 1, tolerance = 1e-6)
 })
@@ -602,7 +602,7 @@ test_that("pipeline: ensemble_solver='lbfgsb' works end-to-end", {
   )
 
   expect_true(any(grepl("Computing ensemble TWAS weights", msgs)))
-  expect_true("ensemble_weights" %in% names(res$twas_weights))
+  expect_true("ensemble_weights" %in% getMethodNames(res$twas_weights))
   expect_true(all(res$ensemble$method_coef >= 0))
   expect_equal(sum(res$ensemble$method_coef), 1, tolerance = 1e-6)
 })
@@ -630,7 +630,7 @@ test_that("pipeline: ensemble_solver='glmnet' works end-to-end", {
   )
 
   expect_true(any(grepl("Computing ensemble TWAS weights", msgs)))
-  expect_true("ensemble_weights" %in% names(res$twas_weights))
+  expect_true("ensemble_weights" %in% getMethodNames(res$twas_weights))
   expect_true(all(res$ensemble$method_coef >= 0))
   expect_equal(sum(res$ensemble$method_coef), 1, tolerance = 1e-6)
 })

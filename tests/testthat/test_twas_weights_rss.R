@@ -177,9 +177,31 @@ test_that("twas_weights_sumstat_pipeline produces TWASWeights with standardized 
     z = z
   )
 
+  ref_panel <- data.frame(
+    chrom = "1",
+    pos = 1000 + seq_len(p),
+    variant_id = rownames(R),
+    A1 = "T",
+    A2 = "A",
+    stringsAsFactors = FALSE
+  )
+  variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+  block_metadata <- S4Vectors::DataFrame(
+    region = paste0("chr1:", 1001, "-", 1000 + p),
+    start = 1001L, end = as.integer(1000 + p), chrom = "chr1",
+    start_idx = 1L, end_idx = as.integer(p), size = as.integer(p)
+  )
+  ld_data <- new("LDData",
+    correlation = R,
+    genotype_handle = NULL,
+    variants = variants_gr,
+    snp_idx = seq_len(p),
+    block_metadata = block_metadata
+  )
+
   result <- twas_weights_sumstat_pipeline(
     sumstats = sumstats,
-    LD_data = R,
+    LD_data = ld_data,
     n = n,
     methods = list(susie_rss = list(L = 5)),
     p_thresholds = c(0.05),

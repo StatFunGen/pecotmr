@@ -270,31 +270,12 @@ rss_analysis_pipeline <- function(
     impute = TRUE, impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
     pip_cutoff_to_skip = 0, R_finite = NULL, R_mismatch = NULL,
     keep_indel = TRUE, comment_string = "#", diagnostics = FALSE) {
-  # Convert LDData to legacy list for compatibility with downstream functions.
-  # When genotypes are available, pass the genotype matrix directly instead of
-  # computing the full p x p correlation matrix — downstream QC and fine-mapping
-  # functions already handle genotype data and compute R on demand.
-  if (is(LD_data, "LDData")) {
-    use_X <- hasGenotypes(LD_data)
-    X_data <- if (use_X) getGenotypes(LD_data) else NULL
-    is_X_list <- use_X && is.list(X_data)
-    if (use_X) {
-      LD_data <- ld_data_to_list(LD_data, skip_correlation = TRUE)
-      LD_data$LD_matrix <- X_data
-      LD_data$is_genotype <- TRUE
-    } else {
-      LD_data <- ld_data_to_list(LD_data)
-    }
-  } else {
-    # Detect genotype input: single X matrix or list of X matrices (mixture panel).
-    # susie_rss accepts X=list(X1, X2, ...) for multi-panel mixture.
-    is_X_list <- is.list(LD_data$LD_matrix) && !is.matrix(LD_data$LD_matrix)
-    use_X <- isTRUE(LD_data$is_genotype) || is_X_list
-    if (use_X) {
-      X_data <- LD_data$LD_matrix
-      LD_data$is_genotype <- TRUE
-    }
+  if (!is(LD_data, "LDData")) {
+    stop("LD_data must be an LDData object")
   }
+  use_X <- hasGenotypes(LD_data)
+  X_data <- if (use_X) getGenotypes(LD_data) else NULL
+  is_X_list <- use_X && is.list(X_data)
   subset_X_data <- function(variants) {
     if (!use_X) return(NULL)
     if (is_X_list) {
@@ -347,17 +328,23 @@ rss_analysis_pipeline <- function(
     LD_mat <- qc_record$LD_mat
     qc_results <- qc_record
     if (isTRUE(impute)) {
+      ref_panel <- getRefPanel(LD_data)
       if (use_X) {
-        X_scaled <- scale(subset_X_data(LD_data$LD_variants))
-        X_scaled[is.na(X_scaled)] <- 0
-        impute_results <- raiss(LD_data$ref_panel, sumstats,
+        X_sub <- subset_X_data(getVariantIds(LD_data))
+        if (is_X_list) {
+          X_scaled <- lapply(X_sub, function(Xk) { Xk <- scale(Xk); Xk[is.na(Xk)] <- 0; Xk })
+        } else {
+          X_scaled <- scale(X_sub)
+          X_scaled[is.na(X_scaled)] <- 0
+        }
+        impute_results <- raiss(ref_panel, sumstats,
                                 genotype_matrix = X_scaled,
                                 R2_threshold = impute_opts$R2_threshold,
                                 minimum_ld = impute_opts$minimum_ld,
                                 lamb = impute_opts$lamb)
       } else {
         LD_matrix <- partition_LD_matrix(LD_data)
-        impute_results <- raiss(LD_data$ref_panel, sumstats, LD_matrix,
+        impute_results <- raiss(ref_panel, sumstats, LD_matrix,
                                 rcond = impute_opts$rcond,
                                 R2_threshold = impute_opts$R2_threshold,
                                 minimum_ld = impute_opts$minimum_ld,

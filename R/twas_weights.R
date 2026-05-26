@@ -104,7 +104,8 @@
 # Returns filtered weight_methods list and warns about removed methods.
 # @noRd
 .filter_zero_weight_methods <- function(weight_methods, twas_weights_res) {
-  is_all_zero <- vapply(twas_weights_res, function(w) all(w == 0, na.rm = TRUE), logical(1))
+  wl <- if (is(twas_weights_res, "TWASWeights")) getWeights(twas_weights_res) else twas_weights_res
+  is_all_zero <- vapply(wl, function(w) all(w == 0, na.rm = TRUE), logical(1))
   removed <- names(weight_methods)[is_all_zero]
   if (length(removed) > 0) {
     warning(sprintf(
@@ -612,20 +613,20 @@ twas_weights <- function(X, Y, weight_methods, num_threads = 1,
       return(x)
     })
   }
-  # Wrap in TWASWeights S4 object
+  # Create TWASWeights S4 object
   variant_ids <- if (!is.null(colnames(X))) colnames(X) else paste0("variant_", seq_len(ncol(X)))
   fits_list <- lapply(weights_list, function(w) attr(w, "fit"))
   has_any_fit <- any(!sapply(fits_list, is.null))
 
-  twas_result <- TWASWeights(
-    weights = weights_list,
+  # Strip fit attributes from weight matrices before storing in S4
+  clean_weights <- lapply(weights_list, function(w) { attr(w, "fit") <- NULL; w })
+
+  TWASWeights(
+    weights = clean_weights,
     variant_ids = variant_ids,
     fits = if (has_any_fit) fits_list else NULL,
     cv_performance = NULL
   )
-  # Attach the S4 object alongside the legacy list for backwards compatibility
-  attr(weights_list, "twas_weights_s4") <- twas_result
-  return(weights_list)
 }
 
 #' Predict outcomes using TWAS weights
@@ -652,7 +653,12 @@ twas_weights <- function(X, Y, weight_methods, num_threads = 1,
 #' predicted_outcomes <- twas_predict(X, weights_list)
 #' print(predicted_outcomes)
 twas_predict <- function(X, weights_list) {
-  setNames(lapply(weights_list, function(w) X %*% w), gsub("_weights", "_predicted", names(weights_list)))
+  if (is(weights_list, "TWASWeights")) {
+    wl <- getWeights(weights_list)
+  } else {
+    wl <- weights_list
+  }
+  setNames(lapply(wl, function(w) X %*% w), gsub("_weights", "_predicted", names(wl)))
 }
 
 #' Estimate Sparsity from mr.ash Mixture Proportions
@@ -674,15 +680,22 @@ twas_predict <- function(X, weights_list) {
 #' @return A scalar sparsity estimate (proportion of non-zero effects).
 #' @export
 estimate_sparsity <- function(weight_results) {
-  w <- weight_results[["mrash_weights"]]
-  if (is.null(w)) {
-    stop("mr.ash weights ('mrash_weights') not found in weight_results.")
-  }
-
-  fit <- attr(w, "fit")
-  if (is.null(fit) || is.null(fit$pi)) {
-    stop("mr.ash fit object not found. Run twas_weights() with retain_fits = TRUE ",
-         "and ensure mrash_weights is included.")
+  if (is(weight_results, "TWASWeights")) {
+    fit <- getFits(weight_results, "mrash_weights")
+    if (is.null(fit) || is.null(fit$pi)) {
+      stop("mr.ash fit object not found. Run twas_weights() with retain_fits = TRUE ",
+           "and ensure mrash_weights is included.")
+    }
+  } else {
+    w <- weight_results[["mrash_weights"]]
+    if (is.null(w)) {
+      stop("mr.ash weights ('mrash_weights') not found in weight_results.")
+    }
+    fit <- attr(w, "fit")
+    if (is.null(fit) || is.null(fit$pi)) {
+      stop("mr.ash fit object not found. Run twas_weights() with retain_fits = TRUE ",
+           "and ensure mrash_weights is included.")
+    }
   }
 
   # fit$pi[1] is the weight on the spike (sa2[1] = 0); 1 - pi[1] = non-null proportion
@@ -791,21 +804,36 @@ twas_weights_pipeline <- function(X,
 
     if (length(remaining_fn_names) > 0) {
       remaining_methods <- weight_methods[remaining_fn_names]
-      remaining_weights <- twas_weights(
+      remaining_tw <- twas_weights(
         X,
         y,
         weight_methods = remaining_methods,
         fitted_models = fitted_models,
         verbose = verbose
       )
-      res$twas_weights <- c(mrash_weights, remaining_weights)
+      # Combine two TWASWeights objects
+      combined_weights <- c(getWeights(mrash_weights), getWeights(remaining_tw))
+      combined_fits <- c(getFits(mrash_weights), getFits(remaining_tw))
+      res$twas_weights <- TWASWeights(
+        weights = combined_weights,
+        variant_ids = getVariantIds(mrash_weights),
+        fits = combined_fits
+      )
     } else {
       res$twas_weights <- mrash_weights
     }
 
     # Remove mr.ash if it was not in the original weight_methods
     if (!"mrash_weights" %in% names(weight_methods)) {
-      res$twas_weights[["mrash_weights"]] <- NULL
+      w_list <- getWeights(res$twas_weights)
+      f_list <- getFits(res$twas_weights)
+      w_list[["mrash_weights"]] <- NULL
+      if (!is.null(f_list)) f_list[["mrash_weights"]] <- NULL
+      res$twas_weights <- TWASWeights(
+        weights = w_list,
+        variant_ids = getVariantIds(res$twas_weights),
+        fits = if (length(f_list) > 0) f_list else NULL
+      )
     }
   } else {
     # Run all methods at once
@@ -821,11 +849,6 @@ twas_weights_pipeline <- function(X,
     elapsed <- toc(quiet = TRUE)
     message(sprintf("TWAS weights fitting done in %.1fs", elapsed$toc - elapsed$tic))
   }
-  res$twas_weights <- lapply(res$twas_weights, function(w) {
-    attr(w, "fit") <- NULL
-    w
-  })
-
   res$twas_predictions <- twas_predict(X, res$twas_weights)
 
   if (cv_folds > 1) {
@@ -928,7 +951,12 @@ twas_weights_pipeline <- function(X,
           filtered_cv$prediction <- filtered_cv$prediction[passing_pred_names]
 
           # Subset twas_weights to passing methods
-          filtered_weights <- res$twas_weights[passing_weight_names]
+          if (is(res$twas_weights, "TWASWeights")) {
+            wl <- getWeights(res$twas_weights)
+            filtered_weights <- wl[passing_weight_names]
+          } else {
+            filtered_weights <- res$twas_weights[passing_weight_names]
+          }
 
           if (verbose >= 1) {
             message("Computing ensemble TWAS weights via stacked regression ",
@@ -950,9 +978,19 @@ twas_weights_pipeline <- function(X,
 
           # Add ensemble weights alongside individual method weights
           if (!is.null(ens_result$ensemble_twas_weights)) {
-            res$twas_weights$ensemble_weights <- ens_result$ensemble_twas_weights
             ens_wt <- ens_result$ensemble_twas_weights
             if (!is.matrix(ens_wt)) ens_wt <- matrix(ens_wt, ncol = 1)
+            # Rebuild TWASWeights S4 with ensemble method added
+            tw <- res$twas_weights
+            new_weights <- c(getWeights(tw), list(ensemble_weights = ens_wt))
+            res$twas_weights <- new("TWASWeights",
+              weights = new_weights,
+              variant_ids = getVariantIds(tw),
+              methods = c(getMethodNames(tw), "ensemble_weights"),
+              fits = getFits(tw),
+              cv_performance = getCVPerformance(tw),
+              standardized = getStandardized(tw)
+            )
             res$twas_predictions$ensemble_predicted <- X %*% ens_wt
           }
           res$ensemble <- ens_result
@@ -1012,10 +1050,11 @@ twas_multivariate_weights_pipeline <- function(
     cv_threads = 1,
     verbose = 1) {
   copy_twas_results <- function(context_names, variant_names, twas_weight, twas_predictions) {
+    wl <- if (is(twas_weight, "TWASWeights")) getWeights(twas_weight) else twas_weight
     setNames(lapply(context_names, function(ctx) {
-      if (ctx %in% colnames(twas_weight[[1]])) {
+      if (ctx %in% colnames(wl[[1]])) {
         list(
-          twas_weights = lapply(twas_weight, function(wgts) wgts[, ctx]),
+          twas_weights = lapply(wl, function(wgts) wgts[, ctx]),
           twas_predictions = lapply(twas_predictions, function(pred) pred[, ctx]),
           variant_names = variant_names
         )
@@ -1703,7 +1742,7 @@ twas_weights_sumstat_pipeline <- function(
     qc_method = NULL,
     keep_indel = TRUE,
     pip_cutoff_to_skip = 0,
-    impute = FALSE,
+    impute = TRUE,
     impute_opts = list(rcond = 0.01, R2_threshold = 0.6,
                        minimum_ld = 5, lamb = 0.01),
     var_y = 1, verbose = 1) {
@@ -1736,10 +1775,8 @@ twas_weights_sumstat_pipeline <- function(
       LD_mat <- LD_data
     } else if (is(LD_data, "LDData")) {
       LD_mat <- getCorrelation(LD_data)
-    } else if (is.list(LD_data) && !is.null(LD_data$LD_matrix)) {
-      LD_mat <- LD_data$LD_matrix
     } else {
-      stop("LD_data must be a matrix, LDData object, or list with LD_matrix.")
+      stop("LD_data must be a matrix or LDData object.")
     }
     outlier_number <- 0L
   }

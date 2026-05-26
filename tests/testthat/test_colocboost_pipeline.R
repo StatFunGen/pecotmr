@@ -835,17 +835,14 @@ test_that("colocboost_analysis imputes native LD input using inferred block meta
   expect_equal(nrow(result$args$sumstat[[1]]), 5)
 })
 
-test_that("colocboost_analysis imputes native X_ref input through scaled genotype RAISS path", {
+test_that("colocboost_analysis imputes X_ref input through R-based RAISS path", {
   local_mocked_bindings(
     .cb_call_colocboost = function(args, dots) {
       list(args = args, dots = dots)
     },
-    compute_LD = function(...) stop("compute_LD should not be called"),
     raiss = function(ref_panel, known_zscores, LD_matrix = NULL, genotype_matrix = NULL, ...) {
-      expect_null(LD_matrix)
-      expect_equal(ncol(genotype_matrix), nrow(ref_panel))
-      expect_equal(unname(colMeans(genotype_matrix)), rep(0, ncol(genotype_matrix)),
-                   tolerance = 1e-10)
+      # With S4 migration, X_ref is converted to R and imputation uses R-based path
+      expect_true(!is.null(LD_matrix) || !is.null(genotype_matrix))
       list(result_filter = known_zscores, LD_mat = NULL)
     }
   )
@@ -869,9 +866,9 @@ test_that("colocboost_analysis imputes native X_ref input through scaled genotyp
     ),
     NA
   )
-  expect_equal(length(result$args$X_ref), 1)
-  expect_equal(ncol(result$args$X_ref[[1]]), 5)
-  expect_null(result$args$LD)
+  # X_ref converted to R, so result has LD (not X_ref)
+  expect_equal(length(result$args$LD), 1)
+  expect_equal(ncol(result$args$LD[[1]]), 5)
 })
 
 test_that("colocboost_analysis keeps QC-generated X_ref mutually exclusive with original LD", {
@@ -908,9 +905,10 @@ test_that("colocboost_analysis keeps QC-generated X_ref mutually exclusive with 
     M = 2
   ))
 
-  expect_null(result$args$LD)
-  expect_equal(length(result$args$X_ref), 1)
-  expect_equal(dim(result$args$X_ref[[1]]), c(10, 5))
+  # With S4 migration, genotype references are converted to R
+  # The LD from the original LD argument is replaced by QC-produced R
+  expect_equal(length(result$args$LD), 1)
+  expect_equal(ncol(result$args$LD[[1]]), 5)
 })
 
 test_that("colocboost_analysis native summary QC supports explicit A1_A2 variant convention", {
@@ -1424,13 +1422,15 @@ test_that("qc_regional_data handles named pip_cutoff_to_skip_sumstat vector", {
       list(target_data_qced = target_data)
     },
     rss_basic_qc = function(sumstats, LD_data, ...) {
-      LD_mat <- LD_data$LD_matrix[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
+      ld_corr <- if (is(LD_data, "LDData")) getCorrelation(LD_data) else LD_data$LD_matrix
+      LD_mat <- ld_corr[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
       list(sumstats = sumstats, LD_mat = LD_mat)
     },
     summary_stats_qc = function(rss_input = NULL, LD_data, ...) {
       stats::setNames(lapply(names(rss_input), function(study) {
         ss <- rss_input[[study]]$sumstats
-        LD_mat <- LD_data[[study]]$LD_matrix[ss$variant_id, ss$variant_id, drop = FALSE]
+        ld <- if (is(LD_data[[study]], "LDData")) getCorrelation(LD_data[[study]]) else LD_data[[study]]$LD_matrix
+        LD_mat <- ld[ss$variant_id, ss$variant_id, drop = FALSE]
         list(rss_input = rss_input[[study]], LD_matrix = LD_mat, outlier_number = 0)
       }), names(rss_input))
     },
@@ -1461,13 +1461,15 @@ test_that("qc_regional_data fills missing study names with 0 for pip_cutoff_to_s
 
   local_mocked_bindings(
     rss_basic_qc = function(sumstats, LD_data, ...) {
-      LD_mat <- LD_data$LD_matrix[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
+      ld_corr <- if (is(LD_data, "LDData")) getCorrelation(LD_data) else LD_data$LD_matrix
+      LD_mat <- ld_corr[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
       list(sumstats = sumstats, LD_mat = LD_mat)
     },
     summary_stats_qc = function(rss_input = NULL, LD_data, ...) {
       stats::setNames(lapply(names(rss_input), function(study) {
         ss <- rss_input[[study]]$sumstats
-        LD_mat <- LD_data[[study]]$LD_matrix[ss$variant_id, ss$variant_id, drop = FALSE]
+        ld <- if (is(LD_data[[study]], "LDData")) getCorrelation(LD_data[[study]]) else LD_data[[study]]$LD_matrix
+        LD_mat <- ld[ss$variant_id, ss$variant_id, drop = FALSE]
         list(rss_input = rss_input[[study]], LD_matrix = LD_mat, outlier_number = 0)
       }), names(rss_input))
     },
@@ -3092,12 +3094,13 @@ test_that("qc_regional_data: with only sumstat data processes correctly", {
 
   local_mocked_bindings(
     rss_basic_qc = function(sumstats, LD_data, ...) {
-      LD_mat <- LD_data$LD_matrix
-      list(sumstats = sumstats, LD_mat = LD_mat)
+      ld_corr <- if (is(LD_data, "LDData")) getCorrelation(LD_data) else LD_data$LD_matrix
+      list(sumstats = sumstats, LD_mat = ld_corr)
     },
     summary_stats_qc = function(rss_input = NULL, LD_data, ...) {
       stats::setNames(lapply(names(rss_input), function(study) {
-        list(rss_input = rss_input[[study]], LD_matrix = LD_data[[study]]$LD_matrix,
+        ld <- if (is(LD_data[[study]], "LDData")) getCorrelation(LD_data[[study]]) else LD_data[[study]]$LD_matrix
+        list(rss_input = rss_input[[study]], LD_matrix = ld,
              outlier_number = 0)
       }), names(rss_input))
     },

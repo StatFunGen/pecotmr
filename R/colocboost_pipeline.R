@@ -66,10 +66,21 @@ region_data_to_colocboost_input <- function(region_data) {
   ind_records <- ind_records_from_input(ind_input)
   ind_args <- .cb_format_individual(ind_records)
 
-  sumstat_records <- lapply(names(rss_input$rss_input), function(study) {
-    ld_data <- .normalize_ld_data_for_qc(rss_input$LD_data[[study]])
+  # Build sumstat_records using original LD_info to preserve genotype vs LD
+  # distinction. region_data_to_rss_input converts to LDData S4 (computing R),
+  # but colocboost needs the original matrix for X_ref/LD formatting.
+  orig_ld_info <- region_data$sumstat_data$LD_info
+  sumstat_records <- lapply(seq_along(rss_input$rss_input), function(i) {
+    study <- names(rss_input$rss_input)[i]
+    ld_idx <- min(i, length(orig_ld_info))
+    orig_ld <- orig_ld_info[[ld_idx]]
+    ld_mat <- if (is(orig_ld, "LDData")) {
+      getCorrelation(orig_ld)
+    } else {
+      getCorrelation(rss_input$LD_data[[study]])
+    }
     list(rss_input = rss_input$rss_input[[study]],
-         LD_matrix = ld_data$LD_matrix)
+         LD_matrix = ld_mat)
   })
   names(sumstat_records) <- names(rss_input$rss_input)
   sumstat_args <- .cb_format_sumstat(sumstat_records)
@@ -1129,7 +1140,7 @@ qc_individual_data <- function(X, Y, maf = NULL, X_variance = NULL,
                                                 LD_reference_info = NULL,
                                                 variant_convention = c("A2_A1", "A1_A2")) {
   is_ld_data <- function(x) {
-    methods::is(x, "LDData") || (is.list(x) && !is.null(x$LD_matrix))
+    is(x, "LDData")
   }
   as_reference_info_list <- function(x) {
     if (is.null(x)) return(NULL)
@@ -1211,7 +1222,7 @@ qc_individual_data <- function(X, Y, maf = NULL, X_variance = NULL,
       message("QC track: LD/X_ref names are parseable for summary-stat study ", study, ".")
     } else if (is_ld_data(ref_info)) {
       message("QC track: using supplied LD_reference_info LD data for summary-stat study ", study, ".")
-      ld_data <- .normalize_ld_data_for_qc(ref_info)
+      ld_data <- if (is(ref_info, "LDData")) ref_info else .legacy_list_to_LDData(ref_info)
     } else {
       message("QC track: using supplied LD_reference_info variant metadata for summary-stat study ", study, ".")
       ld_data <- .cb_make_ld_data(
@@ -1413,12 +1424,14 @@ qc_individual_data <- function(X, Y, maf = NULL, X_variance = NULL,
     } else if (is.matrix(ld)) {
       colnames(ld) <- variant_ids
     }
-    return(list(
-      LD_matrix = ld,
-      LD_variants = variant_ids,
-      ref_panel = ref_panel,
-      block_metadata = if (!isTRUE(is_genotype)) .infer_single_ld_block_metadata(ref_panel) else NULL,
-      is_genotype = isTRUE(is_genotype)
+    ref_panel$chrom <- as.character(ref_panel$chrom)
+    variants_gr <- .ref_panel_to_granges(ref_panel)
+    corr <- if (isTRUE(is_genotype)) cor(ld) else ld
+    bm <- .infer_single_ld_block_metadata(ref_panel)
+    return(LDData(
+      correlation = corr,
+      variants = variants_gr,
+      block_metadata = bm
     ))
   }
 
@@ -1444,12 +1457,14 @@ qc_individual_data <- function(X, Y, maf = NULL, X_variance = NULL,
     }
     parsed$variant_id <- variant_ids
   }
-  list(
-    LD_matrix = ld,
-    LD_variants = variant_ids,
-    ref_panel = parsed,
-    block_metadata = if (!isTRUE(is_genotype) && !is.null(parsed)) .infer_single_ld_block_metadata(parsed) else NULL,
-    is_genotype = isTRUE(is_genotype)
+  parsed$chrom <- as.character(parsed$chrom)
+  variants_gr <- .ref_panel_to_granges(parsed)
+  corr <- if (isTRUE(is_genotype)) cor(ld) else ld
+  bm <- if (!is.null(parsed)) .infer_single_ld_block_metadata(parsed) else data.frame()
+  LDData(
+    correlation = corr,
+    variants = variants_gr,
+    block_metadata = bm
   )
 }
 

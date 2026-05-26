@@ -6,7 +6,7 @@
 \usage{
 coloc_wrapper(
   xqtl_file,
-  gwas_files,
+  gwas_files = NULL,
   xqtl_finemapping_obj = NULL,
   xqtl_varname_obj = NULL,
   xqtl_region_obj = NULL,
@@ -19,41 +19,103 @@ coloc_wrapper(
   p1 = 1e-04,
   p2 = 1e-04,
   p12 = 5e-06,
+  run_finemapping = FALSE,
+  sumstat_path = NULL,
+  column_file_path = NULL,
+  LD_data = NULL,
+  n_sample = 0,
+  n_case = 0,
+  n_control = 0,
+  region = NULL,
+  qc_method = "slalom",
+  finemapping_method = "susie_rss",
+  finemapping_opts = list(L = 20, L_greedy = 5, coverage = c(0.95, 0.7, 0.5),
+    signal_cutoff = 0.025, min_abs_corr = 0.8),
+  impute = TRUE,
+  impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
+  save_finemapping_path = NULL,
+  return_finemapping = FALSE,
   ...
 )
 }
 \arguments{
 \item{xqtl_file}{Path to the xQTL RDS file.}
 
-\item{gwas_files}{Vector of paths to GWAS RDS files.}
+\item{gwas_files}{Vector of paths to GWAS RDS files. Required when
+\code{run_finemapping = FALSE}. Ignored when \code{run_finemapping = TRUE}.}
 
-\item{xqtl_finemapping_obj}{Optional table name in xQTL RDS files (default 'susie_fit').}
+\item{xqtl_finemapping_obj}{Optional path in xQTL RDS to the finemapping object.}
 
-\item{xqtl_varname_obj}{Optional table name in xQTL RDS files (default 'susie_fit').}
+\item{xqtl_varname_obj}{Optional path in xQTL RDS to variant names.}
 
-\item{xqtl_region_obj}{Optional table name in xQTL RDS files (default 'susie_fit').}
+\item{xqtl_region_obj}{Optional path in xQTL RDS to region info.}
 
-\item{gwas_finemapping_obj}{Optional table name in GWAS RDS files (default 'susie_fit').}
+\item{gwas_finemapping_obj}{Optional path in GWAS RDS to the finemapping object.}
 
-\item{gwas_varname_obj}{Optional table name in GWAS RDS files (default 'susie_fit').}
+\item{gwas_varname_obj}{Optional path in GWAS RDS to variant names.}
 
-\item{gwas_region_obj}{Optional table name in GWAS RDS files (default 'susie_fit').}
+\item{gwas_region_obj}{Optional path in GWAS RDS to region info.}
 
-\item{prior_tol}{When the prior variance is estimated, compare the estimated value to \code{prior_tol} at the end of the computation,
-and exclude a single effect from PIP computation if the estimated prior variance is smaller than this tolerance value.}
+\item{filter_lbf_cs}{Logical. Filter LBF rows by credible set index.}
 
-\item{p1, }{p2, and p12 are results from xqtl_enrichment_wrapper (default 'p1=1e-4, p2=1e-4, p12=5e-6', same as coloc.bf_bf).}
+\item{filter_lbf_cs_secondary}{Coverage for secondary LBF filtering.}
 
-\item{region_obj}{Optional table name of region info in susie_twas output filess (default 'region_info').}
+\item{prior_tol}{Minimum prior variance to retain an effect (default 1e-9).}
+
+\item{p1}{Prior probability a SNP is associated with trait 1 (default 1e-4).}
+
+\item{p2}{Prior probability a SNP is associated with trait 2 (default 1e-4).}
+
+\item{p12}{Prior probability a SNP is associated with both traits (default 5e-6).}
+
+\item{run_finemapping}{Logical. If TRUE, run GWAS fine-mapping inline via
+\code{\link{rss_analysis_pipeline}}. Default FALSE.}
+
+\item{sumstat_path}{Path to GWAS summary statistics file. Required when
+\code{run_finemapping = TRUE}.}
+
+\item{column_file_path}{Path to column mapping file for summary statistics.}
+
+\item{LD_data}{LD reference data (LDData object or list). Required when
+\code{run_finemapping = TRUE}.}
+
+\item{n_sample}{Sample size for GWAS.}
+
+\item{n_case}{Number of cases for binary traits.}
+
+\item{n_control}{Number of controls for binary traits.}
+
+\item{region}{Genomic region string (e.g., "chr1:1000-2000").}
+
+\item{qc_method}{QC method: "slalom", "dentist", or "none". Default "slalom".}
+
+\item{finemapping_method}{Fine-mapping method. Default "susie_rss".}
+
+\item{finemapping_opts}{List of fine-mapping options passed to
+\code{\link{rss_analysis_pipeline}}.}
+
+\item{impute}{Logical. Run RAISS imputation. Default TRUE.}
+
+\item{impute_opts}{List of imputation options.}
+
+\item{save_finemapping_path}{Path to save fine-mapping result as RDS. The
+saved file can be reused via \code{gwas_files} with
+\code{gwas_finemapping_obj = "susie_fit"} and
+\code{gwas_varname_obj = "variant_names"}.}
+
+\item{return_finemapping}{Logical. If TRUE and \code{run_finemapping = TRUE},
+include full fine-mapping result under \code{$gwas_finemapping}.}
+
+\item{...}{Additional arguments (currently unused).}
 }
 \value{
 A list containing the coloc results and the summarized sets.
 }
 \description{
-This function processes xQTL and multiple GWAS finemapped data files for colocalization analysis.
+Processes xQTL and GWAS finemapped data for colocalization analysis.
+GWAS data can come from pre-computed RDS files or from inline fine-mapping
+via \code{\link{rss_analysis_pipeline}}.
 }
-\examples{
-xqtl_file <- "xqtl_file.rds"
-gwas_files <- c("gwas_file1.rds", "gwas_file2.rds")
-result <- coloc_wrapper(xqtl_file, gwas_files, LD_meta_file_path)
+\seealso{
+\code{\link{rss_analysis_pipeline}}, \code{\link{coloc_post_processor}}
 }

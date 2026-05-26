@@ -1,6 +1,30 @@
 context("sumstats_qc")
 
 # ===========================================================================
+# Helper: build an LDData S4 object from a correlation matrix and variant info
+# ===========================================================================
+make_ld_data_s4 <- function(R_mat, variant_ids, chrom_val = 1, positions = NULL) {
+  ref_panel <- parse_variant_id(variant_ids)
+  ref_panel$variant_id <- variant_ids
+  ref_panel$chrom <- as.character(ref_panel$chrom)
+  if (!is.null(positions)) {
+    ref_panel$pos <- positions
+  }
+  variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+  bm <- data.frame(
+    block_id = 1L,
+    chrom = ref_panel$chrom[1],
+    block_start = min(ref_panel$pos),
+    block_end = max(ref_panel$pos),
+    size = length(variant_ids),
+    start_idx = 1L,
+    end_idx = length(variant_ids),
+    stringsAsFactors = FALSE
+  )
+  LDData(correlation = R_mat, variants = variants_gr, block_metadata = bm)
+}
+
+# ===========================================================================
 # Helper: build matching sumstats and LD_data
 # ===========================================================================
 make_test_sumstats_ld <- function(n_variants = 5, chrom_val = 1, with_indels = FALSE) {
@@ -32,19 +56,8 @@ make_test_sumstats_ld <- function(n_variants = 5, chrom_val = 1, with_indels = F
   diag(LD_mat) <- 1
   rownames(LD_mat) <- colnames(LD_mat) <- variant_ids
 
-  ref_panel <- data.frame(
-    chrom = rep(chrom_val, n_variants),
-    pos   = positions,
-    A2    = a2,
-    A1    = a1,
-    stringsAsFactors = FALSE
-  )
-
-  LD_data <- list(
-    LD_variants = ref_panel,
-    LD_matrix   = LD_mat,
-    ref_panel            = ref_panel
-  )
+  LD_data <- make_ld_data_s4(LD_mat, variant_ids, chrom_val = chrom_val,
+                             positions = positions)
 
   list(sumstats = sumstats, LD_data = LD_data, variant_ids = variant_ids)
 }
@@ -55,7 +68,8 @@ make_test_sumstats_ld <- function(n_variants = 5, chrom_val = 1, with_indels = F
 
 test_that("rss_basic_qc requires correct columns", {
   sumstats <- data.frame(beta = 1, se = 0.5)
-  LD_data <- list(LD_variants = data.frame())
+  R_mat <- matrix(1, 1, 1, dimnames = list("1:100:A:G", "1:100:A:G"))
+  LD_data <- make_ld_data_s4(R_mat, "1:100:A:G")
   expect_error(rss_basic_qc(sumstats, LD_data), "Missing columns")
 })
 
@@ -76,18 +90,7 @@ test_that("rss_basic_qc processes matching variants correctly", {
   LD_mat <- diag(3)
   rownames(LD_mat) <- colnames(LD_mat) <- variant_ids
 
-  ref_panel <- data.frame(
-    chrom = c(1, 1, 1),
-    pos = c(100, 200, 300),
-    A2 = c("A", "C", "G"),
-    A1 = c("G", "T", "A"),
-    stringsAsFactors = FALSE
-  )
-
-  LD_data <- list(
-    LD_variants = ref_panel,
-    LD_matrix = LD_mat
-  )
+  LD_data <- make_ld_data_s4(LD_mat, variant_ids)
 
   result <- rss_basic_qc(sumstats, LD_data)
   expect_type(result, "list")
@@ -141,18 +144,7 @@ test_that("rss_basic_qc errors when no variants overlap", {
   LD_mat <- diag(2)
   rownames(LD_mat) <- colnames(LD_mat) <- ld_ids
 
-  ref_panel <- data.frame(
-    chrom = c(1, 1),
-    pos   = c(50000, 60000),
-    A2    = c("A", "C"),
-    A1    = c("G", "T"),
-    stringsAsFactors = FALSE
-  )
-
-  LD_data <- list(
-    LD_variants = ref_panel,
-    LD_matrix   = LD_mat
-  )
+  LD_data <- make_ld_data_s4(LD_mat, ld_ids)
 
   expect_error(rss_basic_qc(sumstats, LD_data), "No overlapping|No matching")
 })
@@ -175,18 +167,11 @@ test_that("rss_basic_qc aligns variant IDs by stripping build suffix", {
   diag(LD_mat) <- 1
   rownames(LD_mat) <- colnames(LD_mat) <- ld_ids
 
-  ref_panel <- data.frame(
-    chrom = c(1, 1, 1),
-    pos   = c(100, 200, 300),
-    A2    = c("A", "C", "G"),
-    A1    = c("G", "T", "A"),
-    stringsAsFactors = FALSE
-  )
-
-  LD_data <- list(
-    LD_variants = ref_panel,
-    LD_matrix   = LD_mat
-  )
+  # For the build-suffix variant IDs, construct the LDData with the
+  # base IDs (without suffix) for variant metadata so parse_variant_id works,
+  # while the correlation matrix retains the suffixed rownames.
+  base_ids <- c("1:100:A:G", "1:200:C:T", "1:300:G:A")
+  LD_data <- make_ld_data_s4(LD_mat, base_ids)
 
   result <- rss_basic_qc(sumstats, LD_data)
   expect_type(result, "list")
@@ -210,18 +195,10 @@ test_that("rss_basic_qc handles chr prefix differences during alignment", {
   LD_mat <- diag(2)
   rownames(LD_mat) <- colnames(LD_mat) <- ld_ids
 
-  ref_panel <- data.frame(
-    chrom = c(1, 1),
-    pos   = c(100, 200),
-    A2    = c("A", "C"),
-    A1    = c("G", "T"),
-    stringsAsFactors = FALSE
-  )
-
-  LD_data <- list(
-    LD_variants = ref_panel,
-    LD_matrix   = LD_mat
-  )
+  # Use base IDs (without chr prefix) for variant metadata, while
+  # the correlation matrix has chr-prefixed rownames.
+  base_ids <- c("1:100:A:G", "1:200:C:T")
+  LD_data <- make_ld_data_s4(LD_mat, base_ids)
 
   result <- rss_basic_qc(sumstats, LD_data)
   expect_type(result, "list")
@@ -237,12 +214,17 @@ test_that("rss_basic_qc output LD_mat has same dimension as sumstats rows", {
 
 test_that("rss_basic_qc errors when LD matrix has NULL rownames", {
   td <- make_test_sumstats_ld(n_variants = 3)
-  ld_mat <- td$LD_data$LD_matrix
+  ld_mat <- getCorrelation(td$LD_data)
   rownames(ld_mat) <- NULL
   colnames(ld_mat) <- NULL
-  td$LD_data$LD_matrix <- ld_mat
+  # Rebuild the LDData with a NULL-rownames correlation matrix
+  LD_data_bad <- LDData(
+    correlation = ld_mat,
+    variants = getVariantInfo(td$LD_data),
+    block_metadata = getBlockMetadata(td$LD_data)
+  )
 
-  expect_error(rss_basic_qc(td$sumstats, td$LD_data), "rownames are NULL|cannot align")
+  expect_error(rss_basic_qc(td$sumstats, LD_data_bad), "rownames are NULL|cannot align")
 })
 
 test_that("rss_basic_qc handles multiple skip regions", {
@@ -261,10 +243,14 @@ test_that("rss_basic_qc can skip LD matrix subsetting for genotype references", 
   td <- make_test_sumstats_ld(n_variants = 3)
   X_ref <- matrix(rnorm(30), 10, 3)
   colnames(X_ref) <- td$variant_ids
-  td$LD_data$LD_matrix <- X_ref
-  td$LD_data$is_genotype <- TRUE
+  # Store X_ref as correlation; with return_LD_mat=FALSE the matrix is not subsetted
+  LD_data_geno <- LDData(
+    correlation = X_ref,
+    variants = getVariantInfo(td$LD_data),
+    block_metadata = getBlockMetadata(td$LD_data)
+  )
 
-  result <- rss_basic_qc(td$sumstats, td$LD_data, return_LD_mat = FALSE)
+  result <- rss_basic_qc(td$sumstats, LD_data_geno, return_LD_mat = FALSE)
 
   expect_true(nrow(result$sumstats) > 0)
   expect_null(result$LD_mat)
@@ -276,7 +262,8 @@ test_that("rss_basic_qc can skip LD matrix subsetting for genotype references", 
 
 test_that("summary_stats_qc errors on invalid method", {
   sumstats <- data.frame(variant_id = "1:100:A:G", z = 2.0)
-  LD_data <- list(LD_matrix = matrix(1, 1, 1, dimnames = list("1:100:A:G", "1:100:A:G")))
+  R_mat <- matrix(1, 1, 1, dimnames = list("1:100:A:G", "1:100:A:G"))
+  LD_data <- make_ld_data_s4(R_mat, "1:100:A:G")
   expect_error(summary_stats_qc(sumstats, LD_data, method = "invalid"),
                "should be one of")
 })
@@ -408,16 +395,18 @@ test_that("summary_stats_qc basic genotype-backed path does not compute LD", {
   td <- make_test_sumstats_ld(n_variants = 5)
   X_ref <- matrix(rnorm(50), 10, 5)
   colnames(X_ref) <- td$variant_ids
-  td$LD_data$LD_matrix <- X_ref
-  td$LD_data$is_genotype <- TRUE
+  LD_data_geno <- make_ld_data_s4(cor(X_ref), td$variant_ids)
   rss_input <- list(sumstats = td$sumstats, n = 1000, var_y = 1)
 
   local_mocked_bindings(
-    compute_LD = function(...) stop("compute_LD should not be called")
+    compute_LD = function(...) stop("compute_LD should not be called"),
+    hasGenotypes = function(x) TRUE,
+    getGenotypes = function(x) X_ref,
+    .package = "pecotmr"
   )
 
   expect_message(
-    result <- summary_stats_qc(rss_input = rss_input, LD_data = td$LD_data,
+    result <- summary_stats_qc(rss_input = rss_input, LD_data = LD_data_geno,
                                qc_method = "none", impute = FALSE),
     "basic harmonization retained"
   )
@@ -486,8 +475,7 @@ test_that("summary_stats_qc PIP screening uses LD-independent SER", {
   td <- make_test_sumstats_ld(n_variants = 5)
   X_ref <- matrix(rnorm(50), 10, 5)
   colnames(X_ref) <- td$variant_ids
-  td$LD_data$LD_matrix <- X_ref
-  td$LD_data$is_genotype <- TRUE
+  LD_data_geno <- make_ld_data_s4(cor(X_ref), td$variant_ids)
   rss_input <- list(sumstats = td$sumstats, n = 1000, var_y = 1)
 
   local_mocked_bindings(
@@ -496,12 +484,13 @@ test_that("summary_stats_qc PIP screening uses LD-independent SER", {
       expect_equal(n, rss_input$n)
       expect_null(coverage)
       list(pip = rep(1, length(z)))
-    }
+    },
+    .package = "pecotmr"
   )
 
   result <- suppressMessages(summary_stats_qc(
     rss_input = rss_input,
-    LD_data = td$LD_data,
+    LD_data = LD_data_geno,
     qc_method = "none",
     pip_cutoff_to_skip = 0.1,
     impute = FALSE
@@ -547,8 +536,7 @@ test_that("summary_stats_qc LD-mismatch QC computes only filtered local LD from 
   td <- make_test_sumstats_ld(n_variants = 5)
   X_ref <- matrix(rnorm(50), 10, 5)
   colnames(X_ref) <- td$variant_ids
-  td$LD_data$LD_matrix <- X_ref
-  td$LD_data$is_genotype <- TRUE
+  LD_data_geno <- make_ld_data_s4(cor(X_ref), td$variant_ids)
   rss_input <- list(sumstats = td$sumstats, n = 1000, var_y = 1)
   compute_calls <- 0
 
@@ -560,16 +548,19 @@ test_that("summary_stats_qc LD-mismatch QC computes only filtered local LD from 
       rownames(R) <- colnames(R) <- colnames(X)
       R
     },
+    hasGenotypes = function(x) TRUE,
+    getGenotypes = function(x) X_ref,
     ld_mismatch_qc = function(zScore, R, nSample = NULL, method = NULL, ...) {
       expect_equal(nrow(R), length(zScore))
       expect_equal(ncol(R), length(zScore))
       data.frame(outlier = rep(FALSE, length(zScore)))
-    }
+    },
+    .package = "pecotmr"
   )
 
   result <- suppressMessages(summary_stats_qc(
     rss_input = rss_input,
-    LD_data = td$LD_data,
+    LD_data = LD_data_geno,
     qc_method = "slalom",
     skip_region = "1:150-350",
     impute = FALSE

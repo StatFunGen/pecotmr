@@ -31,7 +31,15 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
                            ld_reference_sample_size, column_file_path = NULL, comment_string = "#") {
   # Step 1: load TWAS weights data
   molecular_ids <- names(twas_weights_data)
-  chrom <- as.integer(parse_number(gsub(":.*$", "", rownames(twas_weights_data[[1]]$weights[[1]])[1])))
+  # Each element is either a TWASWeights S4 or a list with $twas_weights (TWASWeights S4)
+  .get_tw <- function(mol_data) {
+    if (is(mol_data, "TWASWeights")) return(mol_data)
+    if (is.list(mol_data) && is(mol_data$twas_weights, "TWASWeights")) return(mol_data$twas_weights)
+    stop("Each element of twas_weights_data must be a TWASWeights S4 object ",
+         "or a list with a $twas_weights TWASWeights element")
+  }
+  first_tw <- .get_tw(twas_weights_data[[1]])
+  chrom <- as.integer(parse_number(gsub(":.*$", "", getVariantIds(first_tw)[1])))
   gwas_meta_df <- as.data.frame(vroom(gwas_meta_file))
   gwas_files <- unique(gwas_meta_df$file_path[gwas_meta_df$chrom == chrom])
   names(gwas_files) <- unique(gwas_meta_df$study_id[gwas_meta_df$chrom == chrom])
@@ -39,13 +47,14 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
 
   # Per-gene loop: each gene loads its own LD sketch independently
   for (molecular_id in molecular_ids) {
-    mol_data <- twas_weights_data[[molecular_id]]
+    mol_entry <- twas_weights_data[[molecular_id]]
+    tw <- .get_tw(mol_entry)
     mol_res <- list(chrom = chrom, variant_names = list())
-    mol_res[["data_type"]] <- if ("data_type" %in% names(mol_data)) mol_data$data_type
-    contexts <- names(mol_data$weights)
+    mol_res[["data_type"]] <- if (is.list(mol_entry) && "data_type" %in% names(mol_entry)) mol_entry$data_type
+    contexts <- getMethodNames(tw)
 
     # Step 2: Build gene window from all contexts' variant positions
-    all_weight_variants <- unique(do.call(c, lapply(contexts, function(ctx) rownames(mol_data$weights[[ctx]]))))
+    all_weight_variants <- getVariantIds(tw)
     variant_positions <- parse_variant_id(all_weight_variants)$pos
     gene_region <- paste0(chrom, ":", min(variant_positions), "-", max(variant_positions))
 
@@ -64,7 +73,8 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
       if (is.null(gwas_data_sumstats)) next
 
       for (context in contexts) {
-        weights_matrix <- mol_data[["weights"]][[context]]
+        weights_matrix <- getWeights(tw, context)
+        original_weight_variants <- rownames(weights_matrix)
 
         # Harmonize weights against sketch reference
         weights_matrix <- cbind(variant_id_to_df(rownames(weights_matrix)), weights_matrix)
@@ -87,8 +97,11 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
         postqc_weight_variants <- rownames(weights_matrix_subset)
 
         # Step 5: adjust SuSiE weights based on available variants
-        if ("susie_weights" %in% colnames(mol_data[["weights"]][[context]])) {
-          adjusted_susie_weights <- adjust_susie_weights(mol_data,
+        tw_weights_ctx <- getWeights(tw, context)
+        if ("susie_weights" %in% colnames(tw_weights_ctx)) {
+          # For adjust_susie_weights, we need the fits (susie_results)
+          mol_data_for_adjust <- if (is.list(mol_entry) && !is(mol_entry, "TWASWeights")) mol_entry else list(twas_weights = tw)
+          adjusted_susie_weights <- adjust_susie_weights(mol_data_for_adjust,
             keep_variants = postqc_weight_variants, run_allele_qc = TRUE,
             variable_name_obj = c("variant_names", context),
             susie_obj = c("susie_results", context),
@@ -98,8 +111,13 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
             susie_weights = setNames(adjusted_susie_weights$adjusted_susie_weights, adjusted_susie_weights$remained_variants_ids),
             weights_matrix_subset[adjusted_susie_weights$remained_variants_ids, !colnames(weights_matrix_subset) %in% "susie_weights", drop = FALSE]
           )
-          susie_intermediate <- mol_data$susie_results[[context]][c("pip", "cs_variants", "cs_purity")]
-          names(susie_intermediate[["pip"]]) <- rownames(weights_matrix) # original variants not yet qced
+          susie_results <- if (is.list(mol_entry) && "susie_results" %in% names(mol_entry)) {
+            mol_entry$susie_results[[context]]
+          } else {
+            getFits(tw, context)
+          }
+          susie_intermediate <- susie_results[c("pip", "cs_variants", "cs_purity")]
+          names(susie_intermediate[["pip"]]) <- original_weight_variants # original variants not yet qced
           pip <- susie_intermediate[["pip"]]
           pip_qced <- match_ref_panel(cbind(parse_variant_id(names(pip)), pip), sketch$variant_ids, "pip", match_min_prop = 0)
           susie_intermediate[["pip"]] <- abs(pip_qced$target_data_qced$pip)
@@ -121,7 +139,7 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
         # Step 6: scale weights by variance (from sketch ref_panel)
         # RSS/standardized weights are already on the correlation scale and
         # do not need sqrt(variance) scaling.
-        is_standardized <- isTRUE(mol_data[["standardized"]])
+        is_standardized <- isTRUE(getStandardized(tw))
         if (is_standardized) {
           scaled <- weights_matrix_subset
         } else {

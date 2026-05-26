@@ -951,7 +951,7 @@ susie_rss_pipeline <- function(sumstats, LD_mat = NULL, X_mat = NULL, n = NULL,
     data_x <- LD_mat
     pp_cs_input <- "Xcorr"
   } else if (is.list(X_mat) && !is.matrix(X_mat)) {
-    data_x <- X_mat[[1]][, seq_along(z), drop = FALSE]
+    data_x <- do.call(rbind, X_mat)[, seq_along(z), drop = FALSE]
     pp_cs_input <- "X"
   } else {
     data_x <- X_mat[, seq_along(z), drop = FALSE]

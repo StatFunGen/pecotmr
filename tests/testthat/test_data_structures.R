@@ -84,7 +84,7 @@ test_that("LDData supports block-diagonal correlation", {
   expect_equal(length(corr), 2)
 })
 
-test_that("ld_data_to_list converts LDData to legacy format", {
+test_that("LDData S4 accessors return correct data", {
   R <- diag(2)
   gr <- GenomicRanges::GRanges(
     seqnames = c("chr1", "chr1"),
@@ -95,13 +95,13 @@ test_that("ld_data_to_list converts LDData to legacy format", {
   )
   ld <- LDData(correlation = R, variants = gr,
                block_metadata = data.frame(block_id = 1L))
-  legacy <- pecotmr:::ld_data_to_list(ld)
-  expect_true(is.list(legacy))
-  expect_true("LD_matrix" %in% names(legacy))
-  expect_true("LD_variants" %in% names(legacy))
-  expect_true("ref_panel" %in% names(legacy))
-  expect_false(legacy$is_genotype)
-  expect_equal(legacy$LD_variants, c("v1", "v2"))
+  expect_equal(getCorrelation(ld), R)
+  expect_equal(getVariantIds(ld), c("v1", "v2"))
+  expect_false(hasGenotypes(ld))
+  rp <- getRefPanel(ld)
+  expect_true(is.data.frame(rp))
+  expect_true("variant_id" %in% names(rp))
+  expect_equal(rp$variant_id, c("v1", "v2"))
 })
 
 test_that(".ref_panel_to_granges builds GRanges from data.frame", {
