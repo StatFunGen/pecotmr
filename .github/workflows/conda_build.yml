@@ -32,11 +32,6 @@ jobs:
       ANACONDA_OWNER: ${{ vars.ANACONDA_OWNER }}
 
     steps:
-      - name: Checkout pull request branch
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
       - id: latest-version
         name: Get latest version
         if: ${{ github.event.inputs.version == 'latest' }}
@@ -54,6 +49,12 @@ jobs:
             version=${{ steps.latest-version.outputs.release }}
           fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.set-version.outputs.version }}
+          fetch-depth: 0
 
       - name: Download release
         uses: robinraju/release-downloader@v1
