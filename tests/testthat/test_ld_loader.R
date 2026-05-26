@@ -172,6 +172,29 @@ test_that("ld_loader LD_info loads LD from PLINK1 files", {
 test_that("ld_loader LD_info loads pre-computed .cor.xz blocks", {
   ld_file <- file.path(test_data_dir, "LD_block_1.chr1_1000_1200.float16.txt.xz")
   bim_file <- file.path(test_data_dir, "LD_block_1.chr1_1000_1200.float16.bim")
+
+  # Mock process_LD_matrix to wrap its result in an LDData S4 object,
+  # since extract_ld_matrix now requires an LDData.
+  real_process <- pecotmr:::process_LD_matrix
+  local_mocked_bindings(
+    process_LD_matrix = function(LD_file_path, snp_file_path = NULL) {
+      result <- real_process(LD_file_path, snp_file_path)
+      mat <- result$LD_matrix
+      variant_ids <- result$LD_variants$variants
+      ref_panel <- pecotmr:::parse_variant_id(variant_ids)
+      ref_panel$variant_id <- variant_ids
+      variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+      bm <- data.frame(
+        block_id = 1L, chrom = as.character(ref_panel$chrom[1]),
+        block_start = min(ref_panel$pos), block_end = max(ref_panel$pos),
+        size = length(variant_ids), start_idx = 1L,
+        end_idx = length(variant_ids), stringsAsFactors = FALSE
+      )
+      LDData(correlation = mat, variants = variants_gr, block_metadata = bm)
+    },
+    .package = "pecotmr"
+  )
+
   loader <- ld_loader(LD_info = data.frame(LD_file = ld_file, SNP_file = bim_file))
   mat <- loader(1)
   expect_true(is.matrix(mat))

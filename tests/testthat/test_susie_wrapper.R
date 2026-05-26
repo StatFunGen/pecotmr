@@ -652,8 +652,8 @@ test_that("susie_rss_pipeline computes LD from first panel when X_mat is a list"
     format_finemapping_output = function(post, primary_method) list(variant_names = vnames)
   )
   result <- susie_rss_pipeline(list(z = z), X_mat = X_list)
-  # data_x should be the first panel's X matrix (n1 x p), not cor(X)
-  expect_equal(dim(captured_pp_data_x), c(n1, p))
+  # data_x should be all panels stacked (rbind), not cor(X)
+  expect_equal(dim(captured_pp_data_x), c(n1 + n2, p))
 })
 
 # =============================================================================

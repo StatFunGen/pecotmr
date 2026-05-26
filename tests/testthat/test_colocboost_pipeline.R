@@ -371,7 +371,7 @@ test_that("region_data_to_colocboost_input returns core and QC inputs", {
   expect_equal(nrow(converted$colocboost_input$dict_YX), 2)
 })
 
-test_that("region_data_to_colocboost_input preserves loaded X_ref instead of precomputing LD", {
+test_that("region_data_to_colocboost_input converts genotype X_ref to LD correlation", {
   region_data <- make_sumstat_region_data(n_variants = 5, n_studies = 1)
   variants <- region_data$sumstat_data$sumstats[[1]][[1]]$sumstats$variant_id
   X_ref <- matrix(rnorm(50), 10, 5)
@@ -381,10 +381,11 @@ test_that("region_data_to_colocboost_input preserves loaded X_ref instead of pre
 
   converted <- region_data_to_colocboost_input(region_data)
 
-  expect_null(converted$colocboost_input$LD)
-  expect_equal(length(converted$colocboost_input$X_ref), 1)
-  expect_equal(dim(converted$colocboost_input$X_ref[[1]]), c(10, 5))
-  expect_equal(colnames(converted$colocboost_input$X_ref[[1]]), variants)
+  # With S4 migration, genotype data is converted to correlation in LD
+  expect_null(converted$colocboost_input$X_ref)
+  expect_equal(length(converted$colocboost_input$LD), 1)
+  expect_equal(dim(converted$colocboost_input$LD[[1]]), c(5, 5))
+  expect_equal(colnames(converted$colocboost_input$LD[[1]]), variants)
 })
 
 test_that("region_data_to_colocboost_input preserves duplicated outcome names across contexts", {
@@ -886,16 +887,10 @@ test_that("colocboost_analysis keeps QC-generated X_ref mutually exclusive with 
   )
   LD <- diag(5)
   rownames(LD) <- colnames(LD) <- variants
-  X_ref <- matrix(rnorm(50), 10, 5)
-  colnames(X_ref) <- variants
   ref_panel <- parse_variant_id(variants)
   ref_panel$variant_id <- variants
-  LD_reference_info <- list(
-    LD_matrix = X_ref,
-    LD_variants = variants,
-    ref_panel = ref_panel,
-    is_genotype = TRUE
-  )
+  # Use a data.frame as LD_reference_info (the production code accepts this format)
+  LD_reference_info <- ref_panel
 
   result <- suppressMessages(colocboost_analysis(
     sumstat = sumstat,
@@ -905,8 +900,7 @@ test_that("colocboost_analysis keeps QC-generated X_ref mutually exclusive with 
     M = 2
   ))
 
-  # With S4 migration, genotype references are converted to R
-  # The LD from the original LD argument is replaced by QC-produced R
+  # QC produces an LD correlation matrix from the reference info
   expect_equal(length(result$args$LD), 1)
   expect_equal(ncol(result$args$LD[[1]]), 5)
 })

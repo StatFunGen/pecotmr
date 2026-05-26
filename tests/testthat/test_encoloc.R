@@ -1060,7 +1060,16 @@ test_that("extract_ld_for_variants loads LD, aligns names, and subsets", {
 
   local_mocked_bindings(
     load_LD_matrix = function(meta_file, region, ...) {
-      list(LD_matrix = ld_mat, LD_variants = ld_variants)
+      ref_panel <- parse_variant_id(ld_variants)
+      ref_panel$variant_id <- ld_variants
+      variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+      bm <- data.frame(
+        block_id = 1L, chrom = as.character(ref_panel$chrom[1]),
+        block_start = min(ref_panel$pos), block_end = max(ref_panel$pos),
+        size = length(ld_variants), start_idx = 1L, end_idx = length(ld_variants),
+        stringsAsFactors = FALSE
+      )
+      LDData(correlation = ld_mat, variants = variants_gr, block_metadata = bm)
     }
   )
 

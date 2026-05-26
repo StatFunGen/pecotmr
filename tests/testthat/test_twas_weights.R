@@ -224,11 +224,11 @@ test_that("twas_weights: Y as vector gets converted to matrix internally", {
     lasso_weights = function(X, y, ...) rep(0, ncol(X))
   )
   result <- twas_weights(d$X, y_vec, weight_methods = list(lasso_weights = list()))
-  expect_true(is.list(result))
-  expect_equal(length(result), 1)
-  expect_equal(nrow(result[[1]]), ncol(d$X))
+  expect_true(is(result, "TWASWeights"))
+  expect_equal(length(getMethodNames(result)), 1)
+  expect_equal(nrow(getWeights(result, "lasso_weights")), ncol(d$X))
   # Weight vector length must equal number of predictors and be numeric/finite
-  w <- result[[1]][, 1]
+  w <- getWeights(result, "lasso_weights")[, 1]
   expect_equal(length(w), ncol(d$X))
   expect_true(is.numeric(w))
   expect_true(all(is.finite(w)))
@@ -250,8 +250,8 @@ test_that("twas_weights: character weight_methods input is accepted", {
   )
   # Short name should be resolved via .twas_method_lookup
   result <- twas_weights(d$X, d$Y, weight_methods = c("lasso"))
-  expect_true(is.list(result))
-  expect_equal(names(result), "lasso_weights")
+  expect_true(is(result, "TWASWeights"))
+  expect_equal(getMethodNames(result), "lasso_weights")
 })
 
 test_that("twas_weights: zero variance columns are filtered and padded back with zeros", {
@@ -268,9 +268,9 @@ test_that("twas_weights: zero variance columns are filtered and padded back with
   result <- twas_weights(d$X, d$Y, weight_methods = list(lasso_weights = list()))
 
   # The returned weight matrix should have rows equal to total columns (including zero-var)
-  expect_equal(nrow(result[["lasso_weights"]]), p_with_extra)
+  expect_equal(nrow(getWeights(result, "lasso_weights")), p_with_extra)
   # The zero-var column weight should be 0 (padded back)
-  expect_equal(result[["lasso_weights"]]["zero_var", 1], 0)
+  expect_equal(getWeights(result, "lasso_weights")["zero_var", 1], 0)
 })
 
 test_that("twas_weights: rownames of result match colnames of X", {
@@ -279,7 +279,7 @@ test_that("twas_weights: rownames of result match colnames of X", {
     enet_weights = function(X, y, ...) rep(0.1, ncol(X))
   )
   result <- twas_weights(d$X, d$Y, weight_methods = list(enet_weights = list()))
-  expect_equal(rownames(result[["enet_weights"]]), colnames(d$X))
+  expect_equal(rownames(getWeights(result, "enet_weights")), colnames(d$X))
 })
 
 test_that("twas_weights: result dimensions match ncol(X) x ncol(Y)", {
@@ -288,7 +288,7 @@ test_that("twas_weights: result dimensions match ncol(X) x ncol(Y)", {
     enet_weights = function(X, y, ...) rep(0, ncol(X))
   )
   result <- twas_weights(d$X, d$Y, weight_methods = list(enet_weights = list()))
-  expect_equal(dim(result[["enet_weights"]]), c(ncol(d$X), ncol(d$Y)))
+  expect_equal(dim(getWeights(result, "enet_weights")), c(ncol(d$X), ncol(d$Y)))
 })
 
 test_that("twas_weights: multiple methods return named list with one entry per method", {
@@ -301,9 +301,9 @@ test_that("twas_weights: multiple methods return named list with one entry per m
     d$X, d$Y,
     weight_methods = list(lasso_weights = list(), enet_weights = list())
   )
-  expect_equal(length(result), 2)
-  expect_true("lasso_weights" %in% names(result))
-  expect_true("enet_weights" %in% names(result))
+  expect_equal(length(getMethodNames(result)), 2)
+  expect_true("lasso_weights" %in% getMethodNames(result))
+  expect_true("enet_weights" %in% getMethodNames(result))
 })
 
 # ===========================================================================
@@ -317,12 +317,12 @@ test_that("twas_weights: lasso_weights produces correct structure with real glmn
   d <- make_data(n = 50, p = 10)
   result <- twas_weights(d$X, d$Y, weight_methods = list(lasso_weights = list()))
 
-  expect_true(is.list(result))
-  expect_equal(names(result), "lasso_weights")
-  expect_equal(nrow(result[["lasso_weights"]]), ncol(d$X))
-  expect_equal(ncol(result[["lasso_weights"]]), 1)
+  expect_true(is(result, "TWASWeights"))
+  expect_equal(getMethodNames(result), "lasso_weights")
+  expect_equal(nrow(getWeights(result, "lasso_weights")), ncol(d$X))
+  expect_equal(ncol(getWeights(result, "lasso_weights")), 1)
   # At least some weights should be non-zero for this strong signal
-  expect_true(any(result[["lasso_weights"]] != 0))
+  expect_true(any(getWeights(result, "lasso_weights") != 0))
 })
 
 test_that("twas_weights: enet_weights produces correct structure with real glmnet", {
@@ -330,9 +330,9 @@ test_that("twas_weights: enet_weights produces correct structure with real glmne
   d <- make_data(n = 50, p = 10)
   result <- twas_weights(d$X, d$Y, weight_methods = list(enet_weights = list()))
 
-  expect_true(is.list(result))
-  expect_equal(names(result), "enet_weights")
-  expect_equal(nrow(result[["enet_weights"]]), ncol(d$X))
+  expect_true(is(result, "TWASWeights"))
+  expect_equal(getMethodNames(result), "enet_weights")
+  expect_equal(nrow(getWeights(result, "enet_weights")), ncol(d$X))
 })
 
 # ===========================================================================
@@ -770,12 +770,12 @@ test_that("twas_weights_pipeline: returns list with expected structure (mocked)"
   expect_true("twas_predictions" %in% names(result))
   expect_true("total_time_elapsed" %in% names(result))
   # Verify that mock values appear in the weight matrices
-  enet_w <- result$twas_weights[["enet_weights"]]
+  enet_w <- getWeights(result$twas_weights, "enet_weights")
   expect_true(all(enet_w[, 1] == 0.1))
-  lasso_w <- result$twas_weights[["lasso_weights"]]
+  lasso_w <- getWeights(result$twas_weights, "lasso_weights")
   expect_true(all(lasso_w[, 1] == 0.2))
   # The number of weight methods should equal the 10 default methods
-  expect_equal(length(result$twas_weights), 10)
+  expect_equal(length(getMethodNames(result$twas_weights)), 10)
 })
 
 test_that("twas_weights_pipeline: twas_weights contains all default methods", {
@@ -805,7 +805,7 @@ test_that("twas_weights_pipeline: twas_weights contains all default methods", {
     "scad_weights", "l0learn_weights", "susie_weights",
     "susie_inf_weights"
   )
-  expect_true(all(expected_methods %in% names(result$twas_weights)))
+  expect_true(all(expected_methods %in% getMethodNames(result$twas_weights)))
 })
 
 test_that("twas_weights_pipeline: stores ensemble weights when ensemble is fitted", {
@@ -849,7 +849,7 @@ test_that("twas_weights_pipeline: stores ensemble weights when ensemble is fitte
     estimate_pi = FALSE
   )
 
-  expect_true("ensemble_weights" %in% names(result$twas_weights))
+  expect_true("ensemble_weights" %in% getMethodNames(result$twas_weights))
   expect_true("ensemble_predicted" %in% names(result$twas_predictions))
   expect_true("ensemble" %in% names(result))
 })
@@ -912,8 +912,8 @@ test_that("twas_weights_pipeline: cv_folds=0 skips cross-validation", {
                 info = paste("Non-zero prediction in", pred_name))
   }
   # Weight dimensions should match ncol(X)
-  for (w_name in names(result$twas_weights)) {
-    expect_equal(nrow(result$twas_weights[[w_name]]), ncol(d$X),
+  for (w_name in getMethodNames(result$twas_weights)) {
+    expect_equal(nrow(getWeights(result$twas_weights, w_name)), ncol(d$X),
                  info = paste("Wrong nrow for", w_name))
   }
 })
@@ -932,7 +932,7 @@ test_that("twas_weights_pipeline: custom weight_methods are respected", {
     weight_methods = list(lasso_weights = list(), enet_weights = list())
   )
 
-  expect_equal(sort(names(result$twas_weights)), sort(c("lasso_weights", "enet_weights")))
+  expect_equal(sort(getMethodNames(result$twas_weights)), sort(c("lasso_weights", "enet_weights")))
 })
 
 test_that("twas_weights_pipeline: accepts 'fast_default' preset string", {
@@ -959,7 +959,7 @@ test_that("twas_weights_pipeline: accepts 'fast_default' preset string", {
   expected_methods <- c("susie_weights", "susie_inf_weights", "mrash_weights",
                         "enet_weights", "lasso_weights", "mcp_weights",
                         "scad_weights", "l0learn_weights")
-  expect_equal(sort(names(result$twas_weights)), sort(expected_methods))
+  expect_equal(sort(getMethodNames(result$twas_weights)), sort(expected_methods))
 })
 
 test_that("twas_weights_pipeline: accepts custom short-name vector", {
@@ -976,7 +976,7 @@ test_that("twas_weights_pipeline: accepts custom short-name vector", {
     weight_methods = c("lasso", "enet")
   )
 
-  expect_equal(sort(names(result$twas_weights)), sort(c("lasso_weights", "enet_weights")))
+  expect_equal(sort(getMethodNames(result$twas_weights)), sort(c("lasso_weights", "enet_weights")))
 })
 
 test_that("twas_weights_pipeline: with fitted_models stores SuSiE intermediates", {
@@ -1082,7 +1082,7 @@ test_that("twas_weights: SuSiE-inf is fitted before and initializes ordinary SuS
     )
   )
 
-  expect_equal(names(result), c("susie_weights", "susie_inf_weights"))
+  expect_equal(getMethodNames(result), c("susie_weights", "susie_inf_weights"))
   expect_length(susie_calls, 2)
   expect_equal(susie_calls[[1]]$unmappable_effects, "inf")
   expect_equal(susie_calls[[1]]$convergence_method, "pip")
@@ -1105,8 +1105,8 @@ test_that("twas_weights_pipeline: weight dimensions match input", {
     weight_methods = list(lasso_weights = list(), enet_weights = list())
   )
 
-  for (method_name in names(result$twas_weights)) {
-    w <- result$twas_weights[[method_name]]
+  for (method_name in getMethodNames(result$twas_weights)) {
+    w <- getWeights(result$twas_weights, method_name)
     expect_equal(nrow(w), ncol(d$X))
     expect_equal(ncol(w), 1)
   }
@@ -1303,7 +1303,7 @@ test_that("twas_weights: multivariate weights_matrix is reduced to valid_columns
   )
   result <- twas_weights(X, Y, weight_methods = list(mrmash_weights = list()))
   # After the dim-fix, the weights matrix is restricted to v1..v5 -> shape p x ncol(Y)
-  expect_equal(nrow(result$mrmash_weights), p)
-  expect_equal(ncol(result$mrmash_weights), 2)
-  expect_equal(rownames(result$mrmash_weights), paste0("v", seq_len(p)))
+  expect_equal(nrow(getWeights(result, "mrmash_weights")), p)
+  expect_equal(ncol(getWeights(result, "mrmash_weights")), 2)
+  expect_equal(rownames(getWeights(result, "mrmash_weights")), paste0("v", seq_len(p)))
 })

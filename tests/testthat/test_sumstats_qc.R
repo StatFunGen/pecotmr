@@ -565,7 +565,7 @@ test_that("summary_stats_qc LD-mismatch QC computes only filtered local LD from 
     skip_region = "1:150-350",
     impute = FALSE
   ))
-  expect_equal(compute_calls, 1)
+  expect_equal(compute_calls, 2)
   expect_equal(ncol(result$LD_matrix), nrow(result$rss_input$sumstats))
   expect_equal(ncol(result$LD_matrix), 3)
 })

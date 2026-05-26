@@ -853,11 +853,12 @@ test_that("harmonize_gwas: uses load_rss_data when column_file_path is provided"
 # ===========================================================================
 
 test_that("harmonize_twas: errors when gwas_meta_file cannot be read", {
-  twas_weights_data <- list(
-    gene1 = list(
-      weights = list(context1 = matrix(1:4, nrow = 2, dimnames = list(c("chr1:100:A:T", "chr1:200:G:C"), c("w1", "w2"))))
-    )
+  variant_ids <- c("chr1:100:A:T", "chr1:200:G:C")
+  tw <- TWASWeights(
+    weights = list(context1 = matrix(1:4, nrow = 2, dimnames = list(variant_ids, c("w1", "w2")))),
+    variant_ids = variant_ids
   )
+  twas_weights_data <- list(gene1 = tw)
   expect_error(
     harmonize_twas(twas_weights_data, "nonexistent_ld.tsv", "nonexistent_gwas.tsv", ld_reference_sample_size = 17000),
     "does not exist"
@@ -867,11 +868,12 @@ test_that("harmonize_twas: errors when gwas_meta_file cannot be read", {
 test_that("harmonize_twas: requires proper variant names in weights", {
   # This test verifies the function expects the variant_id format chr:pos:A1:A2
   # The function accesses variant positions from rownames, so invalid format would fail
-  twas_weights_data <- list(
-    gene1 = list(
-      weights = list(context1 = matrix(1:4, nrow = 2, dimnames = list(c("invalid_name_1", "invalid_name_2"), c("w1", "w2"))))
-    )
+  variant_ids <- c("invalid_name_1", "invalid_name_2")
+  tw <- TWASWeights(
+    weights = list(context1 = matrix(1:4, nrow = 2, dimnames = list(variant_ids, c("w1", "w2")))),
+    variant_ids = variant_ids
   )
+  twas_weights_data <- list(gene1 = tw)
   # Should error because the file does not exist (error occurs before variant parsing)
   expect_error(
     harmonize_twas(twas_weights_data, "nonexistent_ld.tsv", "nonexistent_gwas.tsv", ld_reference_sample_size = 17000),
@@ -2743,13 +2745,17 @@ test_that("harmonize_twas: group_contexts_by_region single context path (lines 4
   # Use non-susie weight names to avoid the adjust_susie_weights path (line 181)
   weights_mat <- make_weights_matrix(variant_ids, methods = c("lasso_weights", "enet_weights"))
 
+  tw <- TWASWeights(
+    weights = list(ctx1 = weights_mat),
+    variant_ids = variant_ids,
+    cv_performance = list(ctx1 = list(
+      lasso_performance = data.frame(rsq = 0.5, adj_rsq = 0.45, pval = 0.01, adj_rsq_pval = 0.02),
+      enet_performance = data.frame(rsq = 0.3, adj_rsq = 0.25, pval = 0.05, adj_rsq_pval = 0.06)
+    ))
+  )
   twas_weights_data <- list(
     gene1 = list(
-      weights = list(ctx1 = weights_mat),
-      twas_cv_performance = list(ctx1 = list(
-        lasso_performance = data.frame(rsq = 0.5, adj_rsq = 0.45, pval = 0.01, adj_rsq_pval = 0.02),
-        enet_performance = data.frame(rsq = 0.3, adj_rsq = 0.25, pval = 0.05, adj_rsq_pval = 0.06)
-      )),
+      twas_weights = tw,
       data_type = list(ctx1 = "expression")
     )
   )
@@ -2866,22 +2872,36 @@ test_that("harmonize_twas: group_contexts_by_region multi-context clustering (li
   p_all <- length(all_variant_ids)
 
   # Use non-susie weight names to avoid the adjust_susie_weights path
-  weights_mat_ctx1 <- make_weights_matrix(variant_ids_ctx1, methods = c("lasso_weights", "enet_weights"), seed = 10)
-  weights_mat_ctx2 <- make_weights_matrix(variant_ids_ctx2, methods = c("lasso_weights", "enet_weights"), seed = 20)
+  weights_mat_ctx1_raw <- make_weights_matrix(variant_ids_ctx1, methods = c("lasso_weights", "enet_weights"), seed = 10)
+  weights_mat_ctx2_raw <- make_weights_matrix(variant_ids_ctx2, methods = c("lasso_weights", "enet_weights"), seed = 20)
 
+  # Pad each context's matrix to cover all variant_ids (required by TWASWeights S4)
+  pad_matrix <- function(mat, all_ids) {
+    full <- matrix(0, nrow = length(all_ids), ncol = ncol(mat),
+                   dimnames = list(all_ids, colnames(mat)))
+    full[rownames(mat), ] <- mat
+    full
+  }
+  weights_mat_ctx1 <- pad_matrix(weights_mat_ctx1_raw, all_variant_ids)
+  weights_mat_ctx2 <- pad_matrix(weights_mat_ctx2_raw, all_variant_ids)
+
+  tw <- TWASWeights(
+    weights = list(ctx1 = weights_mat_ctx1, ctx2 = weights_mat_ctx2),
+    variant_ids = all_variant_ids,
+    cv_performance = list(
+      ctx1 = list(
+        lasso_performance = data.frame(rsq = 0.5, adj_rsq = 0.45, pval = 0.01, adj_rsq_pval = 0.02),
+        enet_performance = data.frame(rsq = 0.3, adj_rsq = 0.25, pval = 0.05, adj_rsq_pval = 0.06)
+      ),
+      ctx2 = list(
+        lasso_performance = data.frame(rsq = 0.4, adj_rsq = 0.35, pval = 0.02, adj_rsq_pval = 0.03),
+        enet_performance = data.frame(rsq = 0.2, adj_rsq = 0.15, pval = 0.08, adj_rsq_pval = 0.09)
+      )
+    )
+  )
   twas_weights_data <- list(
     gene1 = list(
-      weights = list(ctx1 = weights_mat_ctx1, ctx2 = weights_mat_ctx2),
-      twas_cv_performance = list(
-        ctx1 = list(
-          lasso_performance = data.frame(rsq = 0.5, adj_rsq = 0.45, pval = 0.01, adj_rsq_pval = 0.02),
-          enet_performance = data.frame(rsq = 0.3, adj_rsq = 0.25, pval = 0.05, adj_rsq_pval = 0.06)
-        ),
-        ctx2 = list(
-          lasso_performance = data.frame(rsq = 0.4, adj_rsq = 0.35, pval = 0.02, adj_rsq_pval = 0.03),
-          enet_performance = data.frame(rsq = 0.2, adj_rsq = 0.15, pval = 0.08, adj_rsq_pval = 0.09)
-        )
-      ),
+      twas_weights = tw,
       data_type = list(ctx1 = "expression", ctx2 = "splicing")
     )
   )
@@ -3326,13 +3346,17 @@ test_that("harmonize_twas: duplicated LD variants are removed", {
   weights_mat <- make_weights_matrix(variant_ids,
     methods = c("lasso_weights", "enet_weights"))
 
+  tw <- TWASWeights(
+    weights = list(ctx1 = weights_mat),
+    variant_ids = variant_ids,
+    cv_performance = list(ctx1 = list(
+      lasso_performance = data.frame(rsq = 0.5, adj_rsq = 0.45, pval = 0.01, adj_rsq_pval = 0.02),
+      enet_performance  = data.frame(rsq = 0.3, adj_rsq = 0.25, pval = 0.05, adj_rsq_pval = 0.06)
+    ))
+  )
   twas_weights_data <- list(
     gene1 = list(
-      weights = list(ctx1 = weights_mat),
-      twas_cv_performance = list(ctx1 = list(
-        lasso_performance = data.frame(rsq = 0.5, adj_rsq = 0.45, pval = 0.01, adj_rsq_pval = 0.02),
-        enet_performance  = data.frame(rsq = 0.3, adj_rsq = 0.25, pval = 0.05, adj_rsq_pval = 0.06)
-      )),
+      twas_weights = tw,
       data_type = list(ctx1 = "expression")
     )
   )
@@ -3419,13 +3443,17 @@ test_that("harmonize_twas: drops molecular_id when harmonize_gwas returns NULL f
   weights_mat <- make_weights_matrix(variant_ids,
     methods = c("lasso_weights", "enet_weights"))
 
+  tw <- TWASWeights(
+    weights = list(ctx1 = weights_mat),
+    variant_ids = variant_ids,
+    cv_performance = list(ctx1 = list(
+      lasso_performance = data.frame(rsq = 0.5, adj_rsq = 0.45, pval = 0.01, adj_rsq_pval = 0.02),
+      enet_performance  = data.frame(rsq = 0.3, adj_rsq = 0.25, pval = 0.05, adj_rsq_pval = 0.06)
+    ))
+  )
   twas_weights_data <- list(
     gene1 = list(
-      weights = list(ctx1 = weights_mat),
-      twas_cv_performance = list(ctx1 = list(
-        lasso_performance = data.frame(rsq = 0.5, adj_rsq = 0.45, pval = 0.01, adj_rsq_pval = 0.02),
-        enet_performance  = data.frame(rsq = 0.3, adj_rsq = 0.25, pval = 0.05, adj_rsq_pval = 0.06)
-      )),
+      twas_weights = tw,
       data_type = list(ctx1 = "expression")
     )
   )
@@ -3479,22 +3507,27 @@ test_that("harmonize_twas: susie_weights column triggers adjust_susie_weights br
   weights_mat <- make_weights_matrix(variant_ids,
     methods = c("susie_weights", "lasso_weights"))
 
+  susie_results_ctx1 <- list(
+    pip = setNames(c(0.4, 0.3, 0.2), variant_ids),
+    cs_variants = list(L1 = data.frame(
+      chrom = 1, pos = c(100, 200), A2 = "A", A1 = "T",
+      variant_id = variant_ids[1:2], stringsAsFactors = FALSE
+    )),
+    cs_purity = 0.95
+  )
+  tw <- TWASWeights(
+    weights = list(ctx1 = weights_mat),
+    variant_ids = variant_ids,
+    fits = list(ctx1 = susie_results_ctx1),
+    cv_performance = list(ctx1 = list(
+      susie_performance = data.frame(rsq = 0.5, adj_rsq = 0.45, pval = 0.01, adj_rsq_pval = 0.02),
+      lasso_performance = data.frame(rsq = 0.3, adj_rsq = 0.25, pval = 0.05, adj_rsq_pval = 0.06)
+    ))
+  )
   twas_weights_data <- list(
     gene1 = list(
-      weights = list(ctx1 = weights_mat),
-      twas_cv_performance = list(ctx1 = list(
-        susie_performance = data.frame(rsq = 0.5, adj_rsq = 0.45, pval = 0.01, adj_rsq_pval = 0.02),
-        lasso_performance = data.frame(rsq = 0.3, adj_rsq = 0.25, pval = 0.05, adj_rsq_pval = 0.06)
-      )),
-      # Provide susie_results so the branch can read pip / cs_variants / cs_purity
-      susie_results = list(ctx1 = list(
-        pip = setNames(c(0.4, 0.3, 0.2), variant_ids),
-        cs_variants = list(L1 = data.frame(
-          chrom = 1, pos = c(100, 200), A2 = "A", A1 = "T",
-          variant_id = variant_ids[1:2], stringsAsFactors = FALSE
-        )),
-        cs_purity = 0.95
-      )),
+      twas_weights = tw,
+      susie_results = list(ctx1 = susie_results_ctx1),
       data_type = list(ctx1 = "expression")
     )
   )

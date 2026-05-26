@@ -69,6 +69,24 @@ make_fake_post_result <- function(p) {
 # ===========================================================================
 # Helper: fake twas_weights_pipeline return value
 # ===========================================================================
+make_test_ld_data <- function(variant_ids, R = NULL) {
+  if (is.null(R)) {
+    p <- length(variant_ids)
+    R <- diag(p)
+    rownames(R) <- colnames(R) <- variant_ids
+  }
+  ref_panel <- pecotmr:::parse_variant_id(variant_ids)
+  ref_panel$variant_id <- variant_ids
+  variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+  bm <- data.frame(
+    block_id = 1L, chrom = as.character(ref_panel$chrom[1]),
+    block_start = min(ref_panel$pos), block_end = max(ref_panel$pos),
+    size = length(variant_ids), start_idx = 1L, end_idx = length(variant_ids),
+    stringsAsFactors = FALSE
+  )
+  LDData(correlation = R, variants = variants_gr, block_metadata = bm)
+}
+
 make_fake_twas_result <- function(p) {
   list(
     twas_weights = setNames(rep(0.1, p), paste0("chr1:", seq_len(p), ":A:G")),
@@ -315,11 +333,12 @@ test_that("univariate_analysis_pipeline with cv_folds=0 skips CV", {
 
 test_that("rss_analysis_pipeline requires file inputs", {
   # rss_analysis_pipeline calls load_rss_data which requires valid file paths
+  dummy_ld <- make_test_ld_data(paste0("1:", 1:5, ":A:G"))
   expect_error(
     rss_analysis_pipeline(
       sumstat_path = "/nonexistent/file.tsv",
       column_file_path = "/nonexistent/columns.yml",
-      LD_data = list()
+      LD_data = dummy_ld
     )
   )
 })
@@ -909,6 +928,7 @@ test_that("uap: both LD filtering and filter_X applied in sequence", {
 # ========================================================================
 
 test_that("rss: empty sumstats from load_rss_data => early return", {
+  dummy_ld <- make_test_ld_data(paste0("1:", 1:5, ":A:G"))
   local_mocked_bindings(
     load_rss_data = function(...) {
       list(sumstats = data.frame(), n = NULL, var_y = NULL)
@@ -918,7 +938,7 @@ test_that("rss: empty sumstats from load_rss_data => early return", {
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list()
+    LD_data = dummy_ld
   )
   expect_true("rss_data_analyzed" %in% names(result))
   expect_equal(nrow(result$rss_data_analyzed), 0)
@@ -929,6 +949,7 @@ test_that("rss: empty sumstats from load_rss_data => early return", {
 # ========================================================================
 
 test_that("rss: empty sumstats after rss_basic_qc => early return", {
+  dummy_ld <- make_test_ld_data(c("1:100:A:G"))
   local_mocked_bindings(
     load_rss_data = function(...) {
       list(
@@ -946,7 +967,7 @@ test_that("rss: empty sumstats after rss_basic_qc => early return", {
     rss_analysis_pipeline(
       sumstat_path = "/fake/sumstats.tsv",
       column_file_path = "/fake/columns.yml",
-      LD_data = list()
+      LD_data = dummy_ld
     ),
     "No variants left after preprocessing"
   )
@@ -993,7 +1014,7 @@ test_that("rss: pip_cutoff_to_skip > 0, no signal => early return", {
     rss_analysis_pipeline(
       sumstat_path = "/fake/sumstats.tsv",
       column_file_path = "/fake/columns.yml",
-      LD_data = list(),
+      LD_data = make_test_ld_data(ss$variant_id),
       pip_cutoff_to_skip = 0.5,
       qc_method = "none"
     ),
@@ -1024,7 +1045,7 @@ test_that("rss: pip_cutoff_to_skip > 0, signal detected => continues", {
     rss_analysis_pipeline(
       sumstat_path = "/fake/sumstats.tsv",
       column_file_path = "/fake/columns.yml",
-      LD_data = list(ref_panel = ss),
+      LD_data = make_test_ld_data(ss$variant_id),
       pip_cutoff_to_skip = 0.5,
       qc_method = "slalom",
       finemapping_method = "susie_rss"
@@ -1051,7 +1072,7 @@ test_that("rss: negative pip_cutoff_to_skip auto-computes threshold", {
     rss_analysis_pipeline(
       sumstat_path = "/fake/sumstats.tsv",
       column_file_path = "/fake/columns.yml",
-      LD_data = list(),
+      LD_data = make_test_ld_data(ss$variant_id),
       pip_cutoff_to_skip = -1,
       qc_method = "none"
     ),
@@ -1094,7 +1115,7 @@ test_that("rss: full pipeline with QC, imputation, and fine-mapping", {
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(ref_panel = ss),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = "slalom",
     impute = TRUE,
     finemapping_method = "susie_rss"
@@ -1123,7 +1144,7 @@ test_that("rss: method name is correct for no-impute with QC", {
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = "slalom",
     impute = FALSE,
     finemapping_method = "susie_rss"
@@ -1148,7 +1169,7 @@ test_that("rss: method name is correct for no QC", {
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(ref_panel = ss),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = NULL,
     impute = TRUE,
     finemapping_method = "susie_rss"
@@ -1176,7 +1197,7 @@ test_that("rss: outlier_number is stored in result when QC is active", {
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = "dentist",
     impute = FALSE,
     finemapping_method = "susie_rss"
@@ -1209,7 +1230,7 @@ test_that("rss: finemapping_method = NULL skips fine-mapping", {
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = NULL,
     impute = FALSE,
     finemapping_method = NULL
@@ -1242,7 +1263,7 @@ test_that("rss: qc_method = NULL uses combined basic QC without LD-mismatch meth
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = NULL,
     impute = FALSE,
     finemapping_method = "susie_rss"
@@ -1275,7 +1296,7 @@ test_that("rss: impute = FALSE skips raiss imputation", {
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = "slalom",
     impute = FALSE,
     finemapping_method = "susie_rss"
@@ -1302,7 +1323,7 @@ test_that("rss: diagnostics = TRUE with empty fine-mapping result skips diagnost
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
@@ -1379,7 +1400,7 @@ test_that("rss: diagnostics with 2+ CS and high p-value/corr triggers BCR and SE
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
@@ -1453,7 +1474,7 @@ test_that("rss: diagnostics with 1 CS triggers SER reanalysis only", {
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
@@ -1524,7 +1545,7 @@ test_that("rss: diagnostics with no CS but high PIP calls extract_top_pip_info",
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
@@ -1564,7 +1585,7 @@ test_that("rss: diagnostics with no CS and no high PIP => diagnostics empty", {
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
@@ -1612,7 +1633,7 @@ test_that("rss: finemapping_opts are forwarded to susie_rss_pipeline", {
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = NULL,
     impute = FALSE,
     finemapping_method = "susie_rss",
@@ -1652,7 +1673,7 @@ test_that("rss: dentist QC method generates correct method name", {
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(ref_panel = ss),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = "dentist",
     impute = TRUE,
     finemapping_method = "susie_rss"
@@ -1713,7 +1734,7 @@ test_that("rss: diagnostics with get_susie_result returning NULL => diagnostics 
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
@@ -1760,7 +1781,7 @@ test_that("rss: diagnostics with null/empty block_cs_metrics => no additional an
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
@@ -1845,7 +1866,7 @@ test_that("rss: diagnostics with 2 CS but low p-value and low corr => no extra a
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
@@ -1919,7 +1940,7 @@ test_that("rss: diagnostics with high max_cs_corr_study_block triggers BCR+SER",
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(),
+    LD_data = make_test_ld_data(ss$variant_id),
     qc_method = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
@@ -2009,11 +2030,34 @@ test_that("rss: is_genotype=TRUE path does not precompute R and uses X for fine-
   colnames(X_geno) <- ss$variant_id
   fake_result <- make_fake_post_result(5)
 
+  # Create LDData with genotype_handle to trigger the genotype path
+  ref_panel <- pecotmr:::parse_variant_id(ss$variant_id)
+  ref_panel$variant_id <- ss$variant_id
+  variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+  bm <- data.frame(
+    block_id = 1L, chrom = as.character(ref_panel$chrom[1]),
+    block_start = min(ref_panel$pos), block_end = max(ref_panel$pos),
+    size = 5L, start_idx = 1L, end_idx = 5L, stringsAsFactors = FALSE
+  )
+  geno_ld <- LDData(
+    correlation = NULL, genotype_handle = "fake_handle", snp_idx = 1:5,
+    variants = variants_gr, block_metadata = bm, n_ref = 20L
+  )
+
   compute_LD_called <- FALSE
   susie_X_arg <- NULL
   susie_LD_arg <- "unset"
 
+  # Mock extractBlockGenotypes to return a fake SummarizedExperiment-like object
+  # that getGenotypes can use. We mock getGenotypes directly at package level.
   local_mocked_bindings(
+    extractBlockGenotypes = function(handle, snp_idx, ...) {
+      # Return a fake object that assay() can handle
+      se <- SummarizedExperiment::SummarizedExperiment(
+        assays = list(dosage = t(X_geno))
+      )
+      se
+    },
     compute_LD = function(X, method = "sample") {
       compute_LD_called <<- TRUE
       stop("rss_analysis_pipeline should not precompute LD from X")
@@ -2033,7 +2077,7 @@ test_that("rss: is_genotype=TRUE path does not precompute R and uses X for fine-
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(LD_matrix = X_geno, is_genotype = TRUE, ref_panel = ss),
+    LD_data = geno_ld,
     qc_method = "slalom",
     finemapping_method = "susie_rss"
   )
@@ -2052,10 +2096,33 @@ test_that("rss: mixture LD_data (list of X panels) preserves list shape into sus
   colnames(X1) <- colnames(X2) <- ss$variant_id
   fake_result <- make_fake_post_result(5)
 
+  # Create LDData with list of genotype handles (mixture path)
+  ref_panel <- pecotmr:::parse_variant_id(ss$variant_id)
+  ref_panel$variant_id <- ss$variant_id
+  variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+  bm <- data.frame(
+    block_id = 1L, chrom = as.character(ref_panel$chrom[1]),
+    block_start = min(ref_panel$pos), block_end = max(ref_panel$pos),
+    size = 5L, start_idx = 1L, end_idx = 5L, stringsAsFactors = FALSE
+  )
+  mixture_ld <- LDData(
+    correlation = NULL, genotype_handle = list("fake_handle1", "fake_handle2"),
+    snp_idx = 1:5, variants = variants_gr, block_metadata = bm, n_ref = 20L
+  )
+
   susie_X_arg <- NULL
   compute_LD_called <- FALSE
+  extract_call_count <- 0
 
   local_mocked_bindings(
+    extractBlockGenotypes = function(handle, snp_idx, ...) {
+      extract_call_count <<- extract_call_count + 1
+      # Return appropriate X matrix based on which handle
+      X_mat <- if (extract_call_count == 1) X1 else X2
+      SummarizedExperiment::SummarizedExperiment(
+        assays = list(dosage = t(X_mat))
+      )
+    },
     compute_LD = function(X, method = "sample") {
       compute_LD_called <<- TRUE
       stop("rss_analysis_pipeline should not precompute LD from mixture X")
@@ -2074,7 +2141,7 @@ test_that("rss: mixture LD_data (list of X panels) preserves list shape into sus
   result <- rss_analysis_pipeline(
     sumstat_path = "/fake/sumstats.tsv",
     column_file_path = "/fake/columns.yml",
-    LD_data = list(LD_matrix = list(X1, X2), ref_panel = ss),
+    LD_data = mixture_ld,
     qc_method = "slalom",
     finemapping_method = "susie_rss",
     impute = FALSE

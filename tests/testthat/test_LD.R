@@ -1,6 +1,27 @@
 context("LD")
 library(tidyverse)
 
+# Helper: build an LDData S4 object from variant IDs and optional correlation matrix
+make_test_ld_data <- function(variant_ids, R = NULL, block_metadata = NULL) {
+  if (is.null(R)) {
+    p <- length(variant_ids)
+    R <- diag(p)
+    rownames(R) <- colnames(R) <- variant_ids
+  }
+  ref_panel <- pecotmr:::parse_variant_id(variant_ids)
+  ref_panel$variant_id <- variant_ids
+  variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+  if (is.null(block_metadata)) {
+    block_metadata <- data.frame(
+      block_id = 1L, chrom = as.character(ref_panel$chrom[1]),
+      block_start = min(ref_panel$pos), block_end = max(ref_panel$pos),
+      size = length(variant_ids), start_idx = 1L, end_idx = length(variant_ids),
+      stringsAsFactors = FALSE
+    )
+  }
+  LDData(correlation = R, variants = variants_gr, block_metadata = block_metadata)
+}
+
 generate_dummy_data <- function() {
   region <- data.frame(
     chrom = "chr1",
@@ -182,7 +203,7 @@ test_that("partition_LD_matrix respects max_merged_block_size", {
 })
 
 test_that("partition_LD_matrix handles empty matrix gracefully", {
-  # Create an empty LD data structure
+  # A plain list (legacy format) is no longer accepted; the S4 check fires first.
   empty_ld_data <- list(
     LD_matrix = matrix(0, 0, 0),
     LD_variants = character(0),
@@ -195,8 +216,8 @@ test_that("partition_LD_matrix handles empty matrix gracefully", {
     )
   )
 
-  # Expect an error for empty matrix
-  expect_error(partition_LD_matrix(empty_ld_data), "Empty or NULL LD matrix provided")
+  # Expect the S4 type-check error
+  expect_error(partition_LD_matrix(empty_ld_data), "ld_data must be an LDData object")
 })
 
 test_that("partition_LD_matrix validates block structure properly", {
@@ -283,14 +304,14 @@ test_that("partition_LD_matrix handles row/column name mismatches", {
   # Load the LD matrix
   ld_data <- load_LD_matrix(LD_meta_file_path, region)
 
-  # Create a plain list version with mismatched rownames and colnames
+  # Create an LDData with mismatched rownames and colnames on the correlation matrix
   ldmat <- getCorrelation(ld_data)
   vids <- getVariantIds(ld_data)
   rownames(ldmat) <- NULL
   colnames(ldmat) <- NULL
-  mismatched_ld_data <- list(
-    LD_matrix = ldmat,
-    LD_variants = vids,
+  mismatched_ld_data <- LDData(
+    correlation = ldmat,
+    variants = ld_data@variants,
     block_metadata = getBlockMetadata(ld_data)
   )
 
@@ -347,20 +368,22 @@ test_that("partition_LD_matrix partitions correctly with synthetic data", {
   mat[1:3, 1:3] <- 0.5
   mat[4:6, 4:6] <- 0.5
   diag(mat) <- 1
-  variant_ids <- paste0("v", 1:6)
+  variant_ids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A",
+                   "chr1:400:T:C", "chr1:500:A:G", "chr1:600:C:T")
   rownames(mat) <- colnames(mat) <- variant_ids
 
-  ld_data <- list(
-    LD_matrix = mat,
-    LD_variants = variant_ids,
-    block_metadata = data.frame(
-      block_id = c(1, 2),
-      chrom = c("1", "1"),
-      size = c(3, 3),
-      start_idx = c(1, 4),
-      end_idx = c(3, 6)
-    )
+  bm <- data.frame(
+    block_id = c(1L, 2L),
+    chrom = c("1", "1"),
+    block_start = c(100L, 400L),
+    block_end = c(300L, 600L),
+    size = c(3L, 3L),
+    start_idx = c(1L, 4L),
+    end_idx = c(3L, 6L),
+    stringsAsFactors = FALSE
   )
+
+  ld_data <- make_test_ld_data(variant_ids, R = mat, block_metadata = bm)
 
   result <- pecotmr:::partition_LD_matrix(ld_data, merge_small_blocks = FALSE)
 
@@ -501,21 +524,22 @@ test_that("partition_LD_matrix handles blocks with different chromosomes", {
   # Create test data with blocks on different chromosomes
   test_matrix <- matrix(0, 4, 4)
   diag(test_matrix) <- 1  # Set diagonal to 1
-  rownames(test_matrix) <- colnames(test_matrix) <- c("1:100:A:G", "1:200:C:T", "2:100:G:A", "2:200:T:C")
+  variant_ids <- c("chr1:100:A:G", "chr1:200:C:T", "chr2:100:G:A", "chr2:200:T:C")
+  rownames(test_matrix) <- colnames(test_matrix) <- variant_ids
 
   block_metadata <- data.frame(
-    block_id = 1:2,
-    chrom = c(1, 2),
-    size = c(2, 2),
-    start_idx = c(1, 3),
-    end_idx = c(2, 4)
+    block_id = c(1L, 2L),
+    chrom = c("1", "2"),
+    block_start = c(100L, 100L),
+    block_end = c(200L, 200L),
+    size = c(2L, 2L),
+    start_idx = c(1L, 3L),
+    end_idx = c(2L, 4L),
+    stringsAsFactors = FALSE
   )
 
-  test_ld_data <- list(
-    LD_matrix = test_matrix,
-    LD_variants = c("1:100:A:G", "1:200:C:T", "2:100:G:A", "2:200:T:C"),
-    block_metadata = block_metadata
-  )
+  test_ld_data <- make_test_ld_data(variant_ids, R = test_matrix,
+                                     block_metadata = block_metadata)
 
   # Partition the matrix
   partitioned <- partition_LD_matrix(test_ld_data)
@@ -524,8 +548,8 @@ test_that("partition_LD_matrix handles blocks with different chromosomes", {
   expect_equal(length(partitioned$ld_matrices), 2)
 
   # Each block should have the correct variants
-  expect_equal(rownames(partitioned$ld_matrices[[1]]), c("1:100:A:G", "1:200:C:T"))
-  expect_equal(rownames(partitioned$ld_matrices[[2]]), c("2:100:G:A", "2:200:T:C"))
+  expect_equal(rownames(partitioned$ld_matrices[[1]]), c("chr1:100:A:G", "chr1:200:C:T"))
+  expect_equal(rownames(partitioned$ld_matrices[[2]]), c("chr2:100:G:A", "chr2:200:T:C"))
 })
 
 test_that("partition_LD_matrix works with edge case block structures", {
@@ -539,24 +563,34 @@ test_that("partition_LD_matrix works with edge case block structures", {
   # Set diagonal to 1
   diag(test_matrix) <- 1
 
-  # Generate variant names
-  variant_names <- paste0("1:", 100:(100+n_variants-1), ":A:G")
+  # Generate variant names in chr:pos:A2:A1 format
+  variant_names <- paste0("chr1:", 100:(100+n_variants-1), ":A:G")
   rownames(test_matrix) <- colnames(test_matrix) <- variant_names
 
   # Create block metadata
   block_metadata <- data.frame(
     block_id = 1:4,
-    chrom = rep(1, 4),
+    chrom = rep("1", 4),
+    block_start = c(100L, as.integer(100+large_block_size),
+                    as.integer(100+large_block_size+small_block_size),
+                    as.integer(100+large_block_size+small_block_size*2)),
+    block_end = c(as.integer(100+large_block_size-1),
+                  as.integer(100+large_block_size+small_block_size-1),
+                  as.integer(100+large_block_size+small_block_size*2-1),
+                  as.integer(100+n_variants-1)),
     size = c(large_block_size, small_block_size, small_block_size, small_block_size),
-    start_idx = c(1, large_block_size+1, large_block_size+small_block_size+1, large_block_size+small_block_size*2+1),
-    end_idx = c(large_block_size, large_block_size+small_block_size, large_block_size+small_block_size*2, n_variants)
+    start_idx = c(1L, as.integer(large_block_size+1),
+                  as.integer(large_block_size+small_block_size+1),
+                  as.integer(large_block_size+small_block_size*2+1)),
+    end_idx = c(as.integer(large_block_size),
+                as.integer(large_block_size+small_block_size),
+                as.integer(large_block_size+small_block_size*2),
+                as.integer(n_variants)),
+    stringsAsFactors = FALSE
   )
 
-  test_ld_data <- list(
-    LD_matrix = test_matrix,
-    LD_variants = variant_names,
-    block_metadata = block_metadata
-  )
+  test_ld_data <- make_test_ld_data(variant_names, R = test_matrix,
+                                     block_metadata = block_metadata)
 
   # Set minimum block size to force merging of small blocks
   min_merged_size <- small_block_size + 1
@@ -760,23 +794,24 @@ test_that("merge_blocks properly handles blocks at chromosome boundaries", {
   # Create test data with small blocks at chromosome boundaries
   test_matrix <- matrix(0, 6, 6)
   diag(test_matrix) <- 1
-  variant_names <- c("1:900:A:G", "1:950:C:T", "2:100:G:A", "2:150:T:C", "3:100:A:G", "3:150:C:T")
+  variant_names <- c("chr1:900:A:G", "chr1:950:C:T", "chr2:100:G:A",
+                     "chr2:150:T:C", "chr3:100:A:G", "chr3:150:C:T")
   rownames(test_matrix) <- colnames(test_matrix) <- variant_names
 
   # Create block metadata with small blocks at chromosome boundaries
   block_metadata <- data.frame(
-    block_id = 1:3,
-    chrom = c(1, 2, 3),
-    size = c(2, 2, 2),
-    start_idx = c(1, 3, 5),
-    end_idx = c(2, 4, 6)
+    block_id = c(1L, 2L, 3L),
+    chrom = c("1", "2", "3"),
+    block_start = c(900L, 100L, 100L),
+    block_end = c(950L, 150L, 150L),
+    size = c(2L, 2L, 2L),
+    start_idx = c(1L, 3L, 5L),
+    end_idx = c(2L, 4L, 6L),
+    stringsAsFactors = FALSE
   )
 
-  test_ld_data <- list(
-    LD_matrix = test_matrix,
-    LD_variants = variant_names,
-    block_metadata = block_metadata
-  )
+  test_ld_data <- make_test_ld_data(variant_names, R = test_matrix,
+                                     block_metadata = block_metadata)
 
   # Set min block size to force merging attempts
   min_block_size <- 3
@@ -791,7 +826,8 @@ test_that("merge_blocks properly handles blocks at chromosome boundaries", {
   # Each block should match its chromosome
   for (i in 1:3) {
     block_variants <- rownames(partitioned$ld_matrices[[i]])
-    chrom_from_variants <- unique(as.integer(sub(":.*", "", block_variants)))
+    # Strip "chr" prefix before extracting chromosome number
+    chrom_from_variants <- unique(as.integer(sub("chr([0-9]+):.*", "\\1", block_variants)))
     expect_equal(length(chrom_from_variants), 1)  # Should only have one chromosome per block
     expect_equal(chrom_from_variants, i)  # Should match the expected chromosome
   }

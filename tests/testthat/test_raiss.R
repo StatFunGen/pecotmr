@@ -2,6 +2,14 @@ context("raiss")
 library(tidyverse)
 library(MASS)
 
+# Helper: build LDData S4 from a ref_panel data.frame, correlation matrix, and block_metadata
+make_ld_data_from_ref_panel <- function(R_mat, ref_panel, block_metadata) {
+  ref_panel$chrom <- as.character(ref_panel$chrom)
+  ref_panel$variant_id <- as.character(ref_panel$variant_id)
+  variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+  LDData(correlation = R_mat, variants = variants_gr, block_metadata = block_metadata)
+}
+
 generate_dummy_data <- function(seed=1, ref_panel_ordered=TRUE, known_zscores_ordered=TRUE) {
     set.seed(seed)
 
@@ -767,11 +775,9 @@ test_that("full matrix and block processing produce identical results", {
   for (structure in block_structures) {
     test_data <- generate_block_diagonal_test_data(seed = 123, block_structure = structure)
 
-    # Prepare ld_data for partition_LD_matrix
-    ld_data <- list(
-      LD_matrix = test_data$LD_matrix_full,
-      LD_variants = test_data$ref_panel$variant_id,
-      block_metadata = test_data$block_metadata
+    # Prepare ld_data as LDData S4 for partition_LD_matrix
+    ld_data <- make_ld_data_from_ref_panel(
+      test_data$LD_matrix_full, test_data$ref_panel, test_data$block_metadata
     )
 
     # For non-overlapping structures, use partition_LD_matrix
@@ -1049,10 +1055,8 @@ test_that("raiss handles block boundaries correctly", {
 test_that("partition_LD_matrix integrates correctly with RAISS", {
   test_data <- generate_block_diagonal_test_data(seed = 456, block_structure = "non_overlapping")
 
-  ld_data <- list(
-    LD_matrix = test_data$LD_matrix_full,
-    LD_variants = test_data$ref_panel$variant_id,
-    block_metadata = test_data$block_metadata
+  ld_data <- make_ld_data_from_ref_panel(
+    test_data$LD_matrix_full, test_data$ref_panel, test_data$block_metadata
   )
 
   partitioned <- partition_LD_matrix(
