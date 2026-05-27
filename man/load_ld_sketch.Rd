@@ -15,15 +15,10 @@ load_ld_sketch(ld_meta_file_path, region, n_sample = NULL)
 (= 2*p*(1-p)*n/(n-1)). Passed through to \code{load_LD_matrix()}.}
 }
 \value{
-A list with:
-\describe{
-  \item{X}{Raw genotype matrix (n_sketch x p) after removing monomorphic variants.}
-  \item{n_sketch}{Number of rows (samples) in the sketch genotype matrix.}
-  \item{ref_panel}{Data.frame with variant metadata (chrom, pos, A2, A1, variant_id,
-    allele_freq, and optionally variance, n_nomiss).}
-  \item{variant_ids}{Character vector of variant IDs (canonical format) after
-    removing monomorphic variants.}
-}
+An \code{LDData} S4 object with monomorphic variants removed.
+  Consumers should use S4 accessors: \code{getGenotypes()}, \code{getRefPanel()},
+  \code{getVariantIds()}. The number of sketch samples is
+  \code{nrow(getGenotypes(result))}.
 }
 \description{
 Loads genotype data for a region via \code{load_LD_matrix(return_genotype=TRUE)}

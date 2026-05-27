@@ -17,7 +17,7 @@ mr_format(
 )
 }
 \arguments{
-\item{susie_result}{A list containing the results of SuSiE analysis. This list should include nested elements such as 'susie_results', 'susie_result_trimmed', and 'top_loci', containing details about the statistical analysis of genetic variants.}
+\item{susie_result}{A list containing the results of SuSiE analysis. This list should include nested elements such as 'susie_results', 'finemapping_result' (a FineMappingResult S4 object), and 'top_loci', containing details about the statistical analysis of genetic variants.}
 
 \item{condition}{A character string specifying the conditions. This is used to select the corresponding subset of results within 'susie_result'.}
 
