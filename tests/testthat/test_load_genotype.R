@@ -13,6 +13,15 @@ region_sub <- "chr21:17513228-17550000"
 n_samples <- 100L
 n_variants <- 349L
 
+test_that("format detection supports dotted PLINK2 prefixes", {
+  tmp <- tempfile("plink2_dotted_prefix_")
+  prefix <- file.path(dirname(tmp), "ADSP.R4.EUR.chr21")
+  file.create(paste0(prefix, ".pgen"), paste0(prefix, ".pvar"), paste0(prefix, ".psam"))
+  on.exit(unlink(paste0(prefix, c(".pgen", ".pvar", ".psam"))), add = TRUE)
+
+  expect_equal(pecotmr:::.h2_detect_format(prefix), "plink2")
+})
+
 # Shared helper: validate the output structure from load_genotype_region
 # (with return_variant_info=TRUE)
 check_genotype_result <- function(result, expected_nrow = n_samples, expected_ncol = n_variants,

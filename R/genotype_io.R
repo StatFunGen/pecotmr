@@ -460,7 +460,7 @@ computeBlockLdCor <- function(handle, snp_idx, backend = "internal",
 
   ext <- tolower(file_ext(path))
   if (nzchar(ext)) {
-    return(switch(ext,
+    detected <- switch(ext,
       "vcf" = "vcf",
       "bcf" = "vcf",
       "bed" = "plink1",
@@ -475,16 +475,19 @@ computeBlockLdCor <- function(handle, snp_idx, backend = "internal",
       "annot" = "ldsc_annot",
       "bw" = "bigwig",
       "bigwig" = "bigwig",
-      stop("Cannot detect format from extension: ", ext)
-    ))
+      NULL
+    )
+    if (!is.null(detected)) return(detected)
   }
-  # No extension — check for plink stem files
+  # Check for file stems, including dotted prefixes such as sample.EUR.chr21.
   if (file.exists(paste0(path, ".pgen")) || file.exists(paste0(path, ".pvar")))
     return("plink2")
   if (file.exists(paste0(path, ".bed")) || file.exists(paste0(path, ".bim")))
     return("plink1")
   if (file.exists(paste0(path, ".gds")))
     return("gds")
+  if (nzchar(ext))
+    stop("Cannot detect format from extension: ", ext)
   stop("Cannot detect genotype format for path: ", path)
 }
 
