@@ -425,6 +425,63 @@ test_that("summary_stats_qc basic genotype-backed path does not compute LD", {
   expect_equal(ncol(result$LD_matrix), nrow(result$rss_input$sumstats))
 })
 
+test_that("summary_stats_qc accepts genotype-backed LDData", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  tmp <- tempfile("lddata_qc_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+
+  prefix <- "test_variants"
+  for (ext in c("pgen", "pvar", "psam", "afreq")) {
+    file.copy(file.path(td, paste0(prefix, ".", ext)),
+              file.path(tmp, paste0(prefix, ".", ext)))
+  }
+  meta_file <- file.path(tmp, "ld_meta.tsv")
+  writeLines(c("chrom\tstart\tend\tpath", "21\t0\t0\ttest_variants"), meta_file)
+
+  ld_data <- suppressWarnings(suppressMessages(load_LD_matrix(
+    meta_file,
+    region = "chr21:17513228-17550000",
+    return_genotype = TRUE
+  )))
+  variant_info <- getVariantInfo(ld_data)
+  ref_panel <- as.data.frame(S4Vectors::mcols(variant_info))
+  ref_panel$chrom <- as.character(GenomicRanges::seqnames(variant_info))
+  ref_panel$pos <- GenomicRanges::start(variant_info)
+  is_snp <- nchar(ref_panel$A1) == 1 & nchar(ref_panel$A2) == 1
+  allele_pair <- apply(cbind(ref_panel$A1, ref_panel$A2), 1, function(x) {
+    paste(sort(x), collapse = "")
+  })
+  ref_panel <- ref_panel[is_snp & !allele_pair %in% c("AT", "CG"), , drop = FALSE]
+  ref_panel <- utils::head(ref_panel, 5)
+
+  sumstats <- data.frame(
+    chrom = ref_panel$chrom,
+    pos = ref_panel$pos,
+    A1 = ref_panel$A1,
+    A2 = ref_panel$A2,
+    beta = seq_len(nrow(ref_panel)) / 10,
+    se = rep(0.1, nrow(ref_panel)),
+    z = seq_len(nrow(ref_panel)),
+    stringsAsFactors = FALSE
+  )
+  rss_input <- list(sumstats = sumstats, n = 1000, var_y = 1)
+
+  local_mocked_bindings(
+    compute_LD = function(...) stop("compute_LD should not be called")
+  )
+  result <- suppressMessages(summary_stats_qc(
+    rss_input = rss_input,
+    LD_data = ld_data,
+    qc_method = "none",
+    impute = FALSE
+  ))
+
+  expect_equal(nrow(result$LD_matrix), 100L)
+  expect_equal(ncol(result$LD_matrix), nrow(result$rss_input$sumstats))
+})
+
 test_that("summary_stats_qc PIP screening uses LD-independent SER", {
   td <- make_test_sumstats_ld(n_variants = 5)
   X_ref <- matrix(rnorm(50), 10, 5)

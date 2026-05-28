@@ -227,6 +227,83 @@ test_that("RegionalData adapters expose individual and RSS inputs", {
   expect_true(all(names(rss_input$rss_input) %in% names(rss_input$LD_data)))
 })
 
+test_that("ColocBoost adapters accept genotype-backed LDData", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  tmp <- tempfile("cb_lddata_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+
+  prefix <- "test_variants"
+  for (ext in c("pgen", "pvar", "psam", "afreq")) {
+    file.copy(file.path(td, paste0(prefix, ".", ext)),
+              file.path(tmp, paste0(prefix, ".", ext)))
+  }
+  meta_file <- file.path(tmp, "ld_meta.tsv")
+  writeLines(c("chrom\tstart\tend\tpath", "21\t0\t0\ttest_variants"), meta_file)
+  ld_data <- suppressWarnings(suppressMessages(load_LD_matrix(
+    meta_file,
+    region = "chr21:17513228-17550000",
+    return_genotype = TRUE
+  )))
+
+  variant_info <- getVariantInfo(ld_data)
+  ref_panel <- as.data.frame(S4Vectors::mcols(variant_info))
+  ref_panel$chrom <- as.character(GenomicRanges::seqnames(variant_info))
+  ref_panel$pos <- GenomicRanges::start(variant_info)
+  allele_pair <- apply(cbind(ref_panel$A1, ref_panel$A2), 1, function(x) {
+    paste(sort(x), collapse = "")
+  })
+  ref_panel <- ref_panel[nchar(ref_panel$A1) == 1 &
+                           nchar(ref_panel$A2) == 1 &
+                           !allele_pair %in% c("AT", "CG"), , drop = FALSE]
+  ref_panel <- utils::head(ref_panel, 5)
+  variant_id <- format_variant_id(ref_panel$chrom, ref_panel$pos,
+                                  ref_panel$A2, ref_panel$A1)
+  rss_record <- list(
+    sumstats = data.frame(
+      chrom = ref_panel$chrom,
+      pos = ref_panel$pos,
+      A1 = ref_panel$A1,
+      A2 = ref_panel$A2,
+      z = seq_len(nrow(ref_panel)),
+      variant_id = variant_id,
+      stringsAsFactors = FALSE
+    ),
+    n = 1000,
+    var_y = 1
+  )
+  region_data <- list(
+    individual_data = NULL,
+    sumstat_data = list(
+      sumstats = list(ldgrp = list(study = rss_record)),
+      LD_info = list(ldgrp = ld_data)
+    )
+  )
+
+  converted <- region_data_to_colocboost_input(region_data)
+  expect_null(converted$colocboost_input$LD)
+  expect_equal(length(converted$colocboost_input$X_ref), 1)
+  expect_equal(nrow(converted$colocboost_input$X_ref[[1]]), 100L)
+  expect_equal(ncol(converted$colocboost_input$X_ref[[1]]), length(getVariantIds(ld_data)))
+
+  local_mocked_bindings(
+    .cb_call_colocboost = function(args, dots) list(args = args, dots = dots)
+  )
+  X_ref <- getGenotypes(ld_data)[, match(variant_id, getVariantIds(ld_data)), drop = FALSE]
+  colnames(X_ref) <- variant_id
+  result <- suppressMessages(colocboost_analysis(
+    sumstat = data.frame(variant = variant_id, z = seq_along(variant_id), n = 1000),
+    X_ref = X_ref,
+    LD_reference_info = ld_data,
+    qc_method = "none",
+    M = 2
+  ))
+  expect_null(result$args$LD)
+  expect_equal(length(result$args$X_ref), 1)
+  expect_equal(result$args$M, 2)
+})
+
 test_that("RegionalData individual adapter restores context names from residual_Y", {
   ind_region <- make_individual_region_data(n = 12, p = 5, n_contexts = 2, n_events = 1)
   names(ind_region$individual_data$residual_X) <- NULL

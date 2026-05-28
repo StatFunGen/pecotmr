@@ -277,7 +277,8 @@ summary_stats_qc <- function(sumstats, LD_data, n = NULL,
     is.list(x) && is.data.frame(x$sumstats)
   }
   is_ld_record <- function(x) {
-    is.matrix(x) || (is.list(x) && !is.null(x$LD_matrix))
+    methods::is(x, "LDData") || is.matrix(x) ||
+      (is.list(x) && !is.null(x$LD_matrix))
   }
   first_ld_record <- function(x, study_name = NULL) {
     if (is_ld_record(x)) return(x)
@@ -371,6 +372,34 @@ summary_stats_qc <- function(sumstats, LD_data, n = NULL,
 
 .normalize_ld_data_for_qc <- function(LD_data) {
   if (is.null(LD_data)) return(NULL)
+  if (methods::is(LD_data, "LDData")) {
+    variant_info <- getVariantInfo(LD_data)
+    ref_panel <- as.data.frame(S4Vectors::mcols(variant_info))
+    ref_panel$chrom <- as.character(GenomicRanges::seqnames(variant_info))
+    ref_panel$pos <- GenomicRanges::start(variant_info)
+    if (!"variant_id" %in% colnames(ref_panel)) {
+      ref_panel$variant_id <- getVariantIds(LD_data)
+    }
+
+    is_genotype <- hasGenotypes(LD_data)
+    LD_matrix <- if (is_genotype) getGenotypes(LD_data) else getCorrelation(LD_data)
+    LD_variants <- getVariantIds(LD_data)
+    if (is.matrix(LD_matrix)) {
+      if (is_genotype && length(LD_variants) == ncol(LD_matrix)) {
+        colnames(LD_matrix) <- LD_variants
+      } else if (!is_genotype && length(LD_variants) == nrow(LD_matrix)) {
+        rownames(LD_matrix) <- colnames(LD_matrix) <- LD_variants
+      }
+    }
+
+    return(list(
+      LD_matrix = LD_matrix,
+      LD_variants = LD_variants,
+      ref_panel = ref_panel,
+      block_metadata = getBlockMetadata(LD_data),
+      is_genotype = is_genotype
+    ))
+  }
   if (is.matrix(LD_data)) {
     ids <- if (nrow(LD_data) == ncol(LD_data)) rownames(LD_data) else colnames(LD_data)
     LD_data <- list(LD_matrix = LD_data, LD_variants = ids)

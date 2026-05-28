@@ -66,8 +66,9 @@ region_data_to_colocboost_input <- function(region_data) {
   ind_args <- .cb_format_individual(ind_records)
 
   sumstat_records <- lapply(names(rss_input$rss_input), function(study) {
+    ld_data <- .normalize_ld_data_for_qc(rss_input$LD_data[[study]])
     list(rss_input = rss_input$rss_input[[study]],
-         LD_matrix = rss_input$LD_data[[study]]$LD_matrix)
+         LD_matrix = ld_data$LD_matrix)
   })
   names(sumstat_records) <- names(rss_input$rss_input)
   sumstat_args <- .cb_format_sumstat(sumstat_records)
@@ -1127,7 +1128,7 @@ qc_individual_data <- function(X, Y, maf = NULL, X_variance = NULL,
                                                 LD_reference_info = NULL,
                                                 variant_convention = c("A2_A1", "A1_A2")) {
   is_ld_data <- function(x) {
-    is.list(x) && !is.null(x$LD_matrix)
+    methods::is(x, "LDData") || (is.list(x) && !is.null(x$LD_matrix))
   }
   as_reference_info_list <- function(x) {
     if (is.null(x)) return(NULL)
