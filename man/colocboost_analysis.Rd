@@ -21,7 +21,7 @@ colocboost_analysis(
 )
 }
 \arguments{
-\item{...}{Arguments passed to \code{colocboost::colocboost()}, including
+\item{...}{Arguments passed to \code{colocboost()}, including
 data inputs such as \code{X}, \code{Y}, \code{sumstat}, \code{LD},
 \code{X_ref}, \code{dict_YX}, \code{dict_sumstatLD},
 \code{outcome_names}, and all ColocBoost model/post-processing options.
@@ -41,7 +41,7 @@ row/column names or \code{X_ref} column names are missing or are not
 parseable genomic variant IDs. It can be a .bim/.pvar/.pvar.zst file path,
 a data.frame with variant metadata, or a \code{load_LD_matrix()} result.
 This is a QC-only argument and is not passed to
-\code{colocboost::colocboost()}.}
+\code{colocboost()}.}
 
 \item{variant_convention}{Allele order used by native ColocBoost-style
 \code{sumstat$variant} and LD/X_ref names when deriving QC inputs:
@@ -49,13 +49,13 @@ This is a QC-only argument and is not passed to
 \code{"A1_A2"} for \code{chr:pos:A1:A2}.}
 }
 \value{
-The object returned by \code{colocboost::colocboost()}.
+The object returned by \code{colocboost()}.
 }
 \description{
 This wrapper keeps the direct \code{colocboost()} argument surface. All
 ColocBoost inputs and model parameters are supplied through \code{...}. When
 no QC options are requested, the call is passed directly to
-\code{colocboost::colocboost()}. When QC options are requested, the wrapper
+\code{colocboost()}. When QC options are requested, the wrapper
 inspects named \code{X}/\code{Y} and/or \code{sumstat}/\code{LD}/\code{X_ref}
 arguments in \code{...}, runs the relevant reusable QC step, and then calls
 ColocBoost on the cleaned inputs. If the required named inputs are not
@@ -64,7 +64,7 @@ used.
 }
 \details{
 Use \code{colocboost_analysis()} the same way you would use
-\code{colocboost::colocboost()}: pass the native ColocBoost arguments by
+\code{colocboost()}: pass the native ColocBoost arguments by
 name, for example \code{X}, \code{Y}, \code{sumstat}, \code{LD},
 \code{X_ref}, \code{dict_YX}, \code{dict_sumstatLD},
 \code{outcome_names}, \code{focal_outcome_idx}, \code{effect_est},
@@ -84,7 +84,7 @@ LD-mismatch QC. RAISS imputation is controlled separately by
 \code{impute = TRUE}.
 
 If no QC controls are supplied, this function is a thin direct call to
-\code{colocboost::colocboost(...)}.
+\code{colocboost(...)}.
 When QC removes outcomes, \code{outcome_names} and \code{focal_outcome_idx}
 are updated to match the post-QC outcome order. If the requested focal outcome
 is removed by QC, \code{focal_outcome_idx} is set to \code{NULL} with a
