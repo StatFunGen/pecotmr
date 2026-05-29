@@ -36,7 +36,7 @@ build_ld_args <- function(ld_list, subset = NULL) {
   if (!requireNamespace("colocboost", quietly = TRUE)) {
     stop("The colocboost package is required for colocboost_analysis().")
   }
-  do.call(colocboost::colocboost, c(args, dots))
+  do.call(colocboost, c(args, dots))
 }
 
 #' Convert loaded regional data to ColocBoost inputs
