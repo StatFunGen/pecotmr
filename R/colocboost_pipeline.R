@@ -17,7 +17,6 @@ build_ld_args <- function(ld_list, subset = NULL) {
 # Run colocboost with tryCatch and timing.
 # @noRd
 .run_colocboost <- function(label, ...) {
-  message("==> ", label, " | colocboost call starting")
   t1 <- Sys.time()
   res <- tryCatch(
     colocboost_analysis(...),
@@ -26,10 +25,7 @@ build_ld_args <- function(ld_list, subset = NULL) {
       NULL
     }
   )
-  elapsed <- Sys.time() - t1
-  message("==> ", label, " | colocboost call returned in ",
-          format(elapsed, digits = 3))
-  list(result = res, time = elapsed)
+  list(result = res, time = Sys.time() - t1)
 }
 
 .cb_call_colocboost <- function(args, dots) {
