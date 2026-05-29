@@ -14,8 +14,9 @@ build_ld_args <- function(ld_list, subset = NULL) {
   if (is_geno) list(X_ref = ld_list) else list(LD = ld_list)
 }
 
-# Run colocboost with tryCatch and timing.
-# @noRd
+#' Run colocboost with tryCatch and timing.
+#' @importFrom colocboost colocboost
+#' @noRd
 .run_colocboost <- function(label, ...) {
   t1 <- Sys.time()
   res <- tryCatch(
