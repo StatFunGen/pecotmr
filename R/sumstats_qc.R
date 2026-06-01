@@ -407,6 +407,13 @@ summary_stats_qc <- function(sumstats, LD_data, n = NULL,
   has_genotype <- hasGenotypes(LD_data_for_qc)
   ref_panel <- getRefPanel(LD_data_for_qc)
   X_ref <- if (has_genotype) getGenotypes(LD_data_for_qc) else NULL
+  # getGenotypes() preserves the source variant ID convention (often
+  # underscore-separated from PLINK), but sumstats$variant_id is colon-
+  # separated canonical form. Canonicalize so downstream matching works.
+  if (!is.null(X_ref)) {
+    canonical_ids <- getVariantIds(LD_data_for_qc)
+    if (length(canonical_ids) == ncol(X_ref)) colnames(X_ref) <- canonical_ids
+  }
   basic <- rss_basic_qc(rss_input$sumstats, LD_data_for_qc,
                         skip_region = skip_region, keep_indel = keep_indel,
                         return_LD_mat = !has_genotype)

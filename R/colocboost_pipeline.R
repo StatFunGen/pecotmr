@@ -67,11 +67,14 @@ region_data_to_colocboost_input <- function(region_data) {
   ind_args <- .cb_format_individual(ind_records)
 
   # Build sumstat_records from rss_input which already contains LDData S4
-  # objects (region_data_to_rss_input converts any legacy lists).
+  # objects (region_data_to_rss_input converts any legacy lists). When the
+  # LDData carries genotypes, pass them through so build_ld_args routes them
+  # to X_ref; otherwise pass the correlation matrix as LD.
   sumstat_records <- lapply(names(rss_input$rss_input), function(study) {
     ld_data <- rss_input$LD_data[[study]]
+    ld_mat <- if (hasGenotypes(ld_data)) getGenotypes(ld_data) else getCorrelation(ld_data)
     list(rss_input = rss_input$rss_input[[study]],
-         LD_matrix = getCorrelation(ld_data))
+         LD_matrix = ld_mat)
   })
   names(sumstat_records) <- names(rss_input$rss_input)
   sumstat_args <- .cb_format_sumstat(sumstat_records)
