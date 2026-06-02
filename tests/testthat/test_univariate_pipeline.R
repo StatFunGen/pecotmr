@@ -98,6 +98,44 @@ make_test_ld_data <- function(variant_ids, R = NULL) {
   LDData(correlation = R, variants = variants_gr, block_metadata = bm)
 }
 
+# ===========================================================================
+# Helper: build an LDData S4 object from a matrix for QCResult mocks.
+# When is_genotype = FALSE, the matrix is the correlation R (variants on row
+# and column names). When is_genotype = TRUE, the matrix is a genotype matrix
+# (samples x variants) and colnames are variant IDs.
+# ===========================================================================
+.test_lddata_from_matrix <- function(mat, is_genotype = FALSE) {
+  vids <- if (is_genotype) colnames(mat) else rownames(mat)
+  if (is.null(vids)) vids <- colnames(mat)
+  ref_panel <- cbind(pecotmr:::parse_variant_id(vids), variant_id = vids)
+  ref_panel$chrom <- as.character(ref_panel$chrom)
+  variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+  bm <- pecotmr:::.infer_single_ld_block_metadata(ref_panel)
+  if (is_genotype) {
+    LDData(correlation = NULL, genotype_handle = mat,
+           variants = variants_gr, block_metadata = bm,
+           n_ref = as.integer(nrow(mat)))
+  } else {
+    LDData(correlation = mat, variants = variants_gr, block_metadata = bm)
+  }
+}
+
+# ===========================================================================
+# Helper: build a QCResult mock from a sumstats data.frame and LD matrix.
+# ===========================================================================
+.test_qcresult <- function(sumstats, ld_mat, n = 1000, var_y = 1,
+                           outlier_number = 0L, skipped = FALSE,
+                           is_genotype = FALSE) {
+  ld <- .test_lddata_from_matrix(ld_mat, is_genotype = is_genotype)
+  QCResult(
+    ld_data = ld,
+    rss_input = list(sumstats = sumstats, n = n, var_y = var_y),
+    preprocess = list(sumstats = sumstats, ld_data = ld),
+    outlier_number = as.integer(outlier_number),
+    skipped = skipped
+  )
+}
+
 make_fake_twas_result <- function(p) {
   list(
     twas_weights = setNames(rep(0.1, p), paste0("chr1:", seq_len(p), ":A:G")),
@@ -975,7 +1013,13 @@ test_that("rss: empty sumstats after rss_basic_qc => early return", {
       )
     },
     rss_basic_qc = function(...) {
-      list(sumstats = data.frame(), LD_mat = matrix(nrow = 0, ncol = 0))
+      QCResult(
+        ld_data = NULL,
+        rss_input = list(sumstats = data.frame(), n = NA_real_, var_y = NA_real_),
+        preprocess = list(),
+        outlier_number = 0L,
+        skipped = FALSE
+      )
     },
   )
 
@@ -1022,7 +1066,13 @@ test_that("rss: pip_cutoff_to_skip > 0, no signal => early return", {
 
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
     susie_ser = function(...) list(pip = rep(0.01, 5)),
   )
 
@@ -1046,11 +1096,17 @@ test_that("rss: pip_cutoff_to_skip > 0, signal detected => continues", {
 
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
     susie_rss = function(...) list(pip = c(0.9, 0.01, 0.01, 0.01, 0.01)),
     summary_stats_qc = function(...) {
       message("Follow-up on region: signals above PIP threshold 0.5 detected.")
-      list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0)
+      .test_qcresult(ss, ld_mat, outlier_number = 0)
     },
     partition_LD_matrix = function(...) ld_mat,
     raiss = function(...) list(result_filter = ss, LD_mat = ld_mat),
@@ -1079,7 +1135,13 @@ test_that("rss: negative pip_cutoff_to_skip auto-computes threshold", {
 
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
     susie_ser = function(...) list(pip = rep(0.01, 5)),
   )
 
@@ -1112,10 +1174,19 @@ test_that("rss: full pipeline with QC, imputation, and fine-mapping", {
 
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    summary_stats_qc = function(...) {
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
+    summary_stats_qc = function(..., impute = FALSE) {
       qc_called <<- TRUE
-      list(sumstats = ss, LD_mat = ld_mat, outlier_number = 1)
+      # Imputation now happens inside summary_stats_qc, so simulate that
+      # branch in the mock to keep the raiss call observable.
+      if (isTRUE(impute)) raiss()
+      .test_qcresult(ss, ld_mat, outlier_number = 1)
     },
     partition_LD_matrix = function(...) list(ld_matrices = list(ld_mat)),
     raiss = function(...) {
@@ -1152,8 +1223,14 @@ test_that("rss: method name is correct for no-impute with QC", {
 
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
+    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
     susie_rss_pipeline = function(...) fake_result,
   )
 
@@ -1176,7 +1253,13 @@ test_that("rss: method name is correct for no QC", {
 
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
     partition_LD_matrix = function(...) list(ld_matrices = list(ld_mat)),
     raiss = function(...) list(result_filter = ss, LD_mat = ld_mat),
     susie_rss_pipeline = function(...) fake_result,
@@ -1205,8 +1288,14 @@ test_that("rss: outlier_number is stored in result when QC is active", {
 
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 3),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
+    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 3),
     susie_rss_pipeline = function(...) fake_result,
   )
 
@@ -1235,7 +1324,13 @@ test_that("rss: finemapping_method = NULL skips fine-mapping", {
   finemapping_called <- FALSE
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
     susie_rss_pipeline = function(...) {
       finemapping_called <<- TRUE
       list()
@@ -1268,10 +1363,16 @@ test_that("rss: qc_method = NULL uses combined basic QC without LD-mismatch meth
   qc_called <- FALSE
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
     summary_stats_qc = function(...) {
       qc_called <<- TRUE
-      list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0)
+      .test_qcresult(ss, ld_mat, outlier_number = 0)
     },
     susie_rss_pipeline = function(...) fake_result,
   )
@@ -1300,8 +1401,14 @@ test_that("rss: impute = FALSE skips raiss imputation", {
   raiss_called <- FALSE
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
+    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
     raiss = function(...) {
       raiss_called <<- TRUE
       list(result_filter = ss, LD_mat = ld_mat)
@@ -1331,8 +1438,14 @@ test_that("rss: diagnostics = TRUE with empty fine-mapping result skips diagnost
 
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
+    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
     susie_rss_pipeline = function(...) list(),  # empty result
   )
 
@@ -1402,8 +1515,14 @@ test_that("rss: diagnostics with 2+ CS and high p-value/corr triggers BCR and SE
   susie_rss_pipeline_call_count <- 0
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
+    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
     susie_rss_pipeline = function(...) {
       susie_rss_pipeline_call_count <<- susie_rss_pipeline_call_count + 1
       fake_result
@@ -1476,8 +1595,14 @@ test_that("rss: diagnostics with 1 CS triggers SER reanalysis only", {
   susie_rss_pipeline_call_count <- 0
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
+    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
     susie_rss_pipeline = function(...) {
       susie_rss_pipeline_call_count <<- susie_rss_pipeline_call_count + 1
       fake_result
@@ -1542,8 +1667,14 @@ test_that("rss: diagnostics with no CS but high PIP calls extract_top_pip_info",
 
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
+    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
     susie_rss_pipeline = function(...) fake_result,
     get_susie_result = function(res) res$susie_result_trimmed,
     extract_top_pip_info = function(...) {
@@ -1592,8 +1723,14 @@ test_that("rss: diagnostics with no CS and no high PIP => diagnostics empty", {
 
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
+    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
     susie_rss_pipeline = function(...) fake_result,
     get_susie_result = function(res) res$susie_result_trimmed,
   )
@@ -1633,7 +1770,13 @@ test_that("rss: finemapping_opts are forwarded to susie_rss_pipeline", {
   captured_R_mismatch <- NULL
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
     susie_rss_pipeline = function(sumstats, LD_mat, n, var_y, L, L_greedy,
                                   analysis_method, coverage, secondary_coverage,
                                   signal_cutoff, min_abs_corr, ...) {
@@ -1679,8 +1822,14 @@ test_that("rss: dentist QC method generates correct method name", {
 
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 2),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
+    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 2),
     partition_LD_matrix = function(...) list(ld_matrices = list(ld_mat)),
     raiss = function(...) list(result_filter = ss, LD_mat = ld_mat),
     susie_rss_pipeline = function(...) fake_result,
@@ -1741,8 +1890,14 @@ test_that("rss: diagnostics with get_susie_result returning NULL => diagnostics 
 
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
+    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
     susie_rss_pipeline = function(...) fake_result,
     get_susie_result = function(res) NULL,
   )
@@ -1785,8 +1940,14 @@ test_that("rss: diagnostics with null/empty block_cs_metrics => no additional an
   susie_rss_call_count <- 0
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
+    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
     susie_rss_pipeline = function(...) {
       susie_rss_call_count <<- susie_rss_call_count + 1
       fake_result
@@ -1868,8 +2029,14 @@ test_that("rss: diagnostics with 2 CS but low p-value and low corr => no extra a
   susie_rss_call_count <- 0
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
+    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
     susie_rss_pipeline = function(...) {
       susie_rss_call_count <<- susie_rss_call_count + 1
       fake_result
@@ -1942,8 +2109,14 @@ test_that("rss: diagnostics with high max_cs_corr_study_block triggers BCR+SER",
   susie_rss_call_count <- 0
   local_mocked_bindings(
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
+    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
     susie_rss_pipeline = function(...) {
       susie_rss_call_count <<- susie_rss_call_count + 1
       fake_result
@@ -2079,8 +2252,14 @@ test_that("rss: is_genotype=TRUE path does not precompute R and uses X for fine-
       stop("rss_analysis_pipeline should not precompute LD from X")
     },
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
+    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
     partition_LD_matrix = function(...) list(ld_matrices = list(ld_mat)),
     raiss = function(...) list(result_filter = ss, LD_mat = ld_mat),
     susie_rss_pipeline = function(sumstats, LD_mat = NULL, X_mat = NULL, ...) {
@@ -2144,8 +2323,14 @@ test_that("rss: mixture LD_data (list of X panels) preserves list shape into sus
       stop("rss_analysis_pipeline should not precompute LD from mixture X")
     },
     load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) list(sumstats = ss, LD_mat = ld_mat),
-    summary_stats_qc = function(...) list(sumstats = ss, LD_mat = ld_mat, outlier_number = 0),
+    rss_basic_qc = function(...) QCResult(
+      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
+    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
     partition_LD_matrix = function(...) list(ld_matrices = list(ld_mat)),
     raiss = function(...) list(result_filter = ss, LD_mat = ld_mat),
     susie_rss_pipeline = function(sumstats, LD_mat = NULL, X_mat = NULL, ...) {

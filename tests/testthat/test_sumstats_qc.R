@@ -93,9 +93,9 @@ test_that("rss_basic_qc processes matching variants correctly", {
   LD_data <- make_ld_data_s4(LD_mat, variant_ids)
 
   result <- rss_basic_qc(sumstats, LD_data)
-  expect_type(result, "list")
-  expect_true("sumstats" %in% names(result))
-  expect_true("LD_mat" %in% names(result))
+  expect_true(is(result, "QCResult"))
+  expect_true(!is.null(getRSSInput(result)$sumstats))
+  expect_true(!is.null(getLDData(result)))
 })
 
 test_that("rss_basic_qc skips variants in specified region", {
@@ -103,10 +103,10 @@ test_that("rss_basic_qc skips variants in specified region", {
 
   result <- rss_basic_qc(td$sumstats, td$LD_data, skip_region = "1:150-350")
 
-  expect_type(result, "list")
-  expect_true("sumstats" %in% names(result))
-  expect_true("LD_mat" %in% names(result))
-  remaining_pos <- result$sumstats$pos
+  expect_true(is(result, "QCResult"))
+  expect_true(!is.null(getRSSInput(result)$sumstats))
+  expect_true(!is.null(getLDData(result)))
+  remaining_pos <- getRSSInput(result)$sumstats$pos
   expect_false(200 %in% remaining_pos)
   expect_false(300 %in% remaining_pos)
 })
@@ -114,7 +114,7 @@ test_that("rss_basic_qc skips variants in specified region", {
 test_that("rss_basic_qc with skip_region preserves non-skipped variants", {
   td <- make_test_sumstats_ld(n_variants = 5)
   result <- rss_basic_qc(td$sumstats, td$LD_data, skip_region = "1:150-250")
-  remaining_pos <- result$sumstats$pos
+  remaining_pos <- getRSSInput(result)$sumstats$pos
   expect_false(200 %in% remaining_pos)
   expect_true(100 %in% remaining_pos)
   expect_true(300 %in% remaining_pos)
@@ -123,8 +123,8 @@ test_that("rss_basic_qc with skip_region preserves non-skipped variants", {
 test_that("rss_basic_qc with keep_indel=FALSE removes indel variants", {
   td <- make_test_sumstats_ld(n_variants = 5, with_indels = TRUE)
   result <- rss_basic_qc(td$sumstats, td$LD_data, keep_indel = FALSE)
-  expect_type(result, "list")
-  expect_lte(nrow(result$sumstats), nrow(td$sumstats))
+  expect_true(is(result, "QCResult"))
+  expect_lte(nrow(getRSSInput(result)$sumstats), nrow(td$sumstats))
 })
 
 test_that("rss_basic_qc errors when no variants overlap", {
@@ -174,8 +174,8 @@ test_that("rss_basic_qc aligns variant IDs by stripping build suffix", {
   LD_data <- make_ld_data_s4(LD_mat, base_ids)
 
   result <- rss_basic_qc(sumstats, LD_data)
-  expect_type(result, "list")
-  expect_true(nrow(result$sumstats) > 0)
+  expect_true(is(result, "QCResult"))
+  expect_true(nrow(getRSSInput(result)$sumstats) > 0)
 })
 
 test_that("rss_basic_qc handles chr prefix differences during alignment", {
@@ -201,15 +201,17 @@ test_that("rss_basic_qc handles chr prefix differences during alignment", {
   LD_data <- make_ld_data_s4(LD_mat, base_ids)
 
   result <- rss_basic_qc(sumstats, LD_data)
-  expect_type(result, "list")
-  expect_true(nrow(result$sumstats) > 0)
+  expect_true(is(result, "QCResult"))
+  expect_true(nrow(getRSSInput(result)$sumstats) > 0)
 })
 
 test_that("rss_basic_qc output LD_mat has same dimension as sumstats rows", {
   td <- make_test_sumstats_ld(n_variants = 6)
   result <- rss_basic_qc(td$sumstats, td$LD_data)
-  expect_equal(nrow(result$LD_mat), nrow(result$sumstats))
-  expect_equal(ncol(result$LD_mat), nrow(result$sumstats))
+  result_ld_mat <- getCorrelation(getLDData(result))
+  result_sumstats <- getRSSInput(result)$sumstats
+  expect_equal(nrow(result_ld_mat), nrow(result_sumstats))
+  expect_equal(ncol(result_ld_mat), nrow(result_sumstats))
 })
 
 test_that("rss_basic_qc errors when LD matrix has NULL rownames", {
@@ -231,7 +233,7 @@ test_that("rss_basic_qc handles multiple skip regions", {
   td <- make_test_sumstats_ld(n_variants = 10)
   result <- rss_basic_qc(td$sumstats, td$LD_data,
                           skip_region = c("1:099-250", "1:650-850"))
-  remaining_pos <- result$sumstats$pos
+  remaining_pos <- getRSSInput(result)$sumstats$pos
   expect_false(100 %in% remaining_pos)
   expect_false(200 %in% remaining_pos)
   expect_false(700 %in% remaining_pos)
@@ -252,8 +254,8 @@ test_that("rss_basic_qc can skip LD matrix subsetting for genotype references", 
 
   result <- rss_basic_qc(td$sumstats, LD_data_geno, return_LD_mat = FALSE)
 
-  expect_true(nrow(result$sumstats) > 0)
-  expect_null(result$LD_mat)
+  expect_true(nrow(getRSSInput(result)$sumstats) > 0)
+  expect_null(getLDData(result))
 })
 
 # ===========================================================================
@@ -285,16 +287,16 @@ test_that("summary_stats_qc with slalom method returns correct structure", {
   )
 
   result <- summary_stats_qc(
-    basic_result$sumstats, td$LD_data,
+    getRSSInput(basic_result)$sumstats, td$LD_data,
     n = 10000, method = "slalom"
   )
 
-  expect_type(result, "list")
-  expect_true("sumstats" %in% names(result))
-  expect_true("LD_mat" %in% names(result))
-  expect_true("outlier_number" %in% names(result))
-  expect_equal(result$outlier_number, 1)
-  expect_equal(nrow(result$sumstats), nrow(basic_result$sumstats) - 1)
+  expect_true(is(result, "QCResult"))
+  expect_true(!is.null(getRSSInput(result)$sumstats))
+  expect_true(!is.null(getLDData(result)))
+  expect_equal(getOutlierNumber(result), 1)
+  expect_equal(nrow(getRSSInput(result)$sumstats),
+               nrow(getRSSInput(basic_result)$sumstats) - 1)
 })
 
 test_that("summary_stats_qc with slalom and no outliers keeps all variants", {
@@ -314,11 +316,12 @@ test_that("summary_stats_qc with slalom and no outliers keeps all variants", {
   )
 
   result <- summary_stats_qc(
-    basic_result$sumstats, td$LD_data,
+    getRSSInput(basic_result)$sumstats, td$LD_data,
     n = 10000, method = "slalom"
   )
-  expect_equal(result$outlier_number, 0)
-  expect_equal(nrow(result$sumstats), nrow(basic_result$sumstats))
+  expect_equal(getOutlierNumber(result), 0)
+  expect_equal(nrow(getRSSInput(result)$sumstats),
+               nrow(getRSSInput(basic_result)$sumstats))
 })
 
 test_that("summary_stats_qc with dentist method returns correct structure", {
@@ -336,16 +339,16 @@ test_that("summary_stats_qc with dentist method returns correct structure", {
   )
 
   result <- summary_stats_qc(
-    basic_result$sumstats, td$LD_data,
+    getRSSInput(basic_result)$sumstats, td$LD_data,
     n = 10000, method = "dentist"
   )
 
-  expect_type(result, "list")
-  expect_true("sumstats" %in% names(result))
-  expect_true("LD_mat" %in% names(result))
-  expect_true("outlier_number" %in% names(result))
-  expect_equal(result$outlier_number, 1)
-  expect_equal(nrow(result$sumstats), nrow(basic_result$sumstats) - 1)
+  expect_true(is(result, "QCResult"))
+  expect_true(!is.null(getRSSInput(result)$sumstats))
+  expect_true(!is.null(getLDData(result)))
+  expect_equal(getOutlierNumber(result), 1)
+  expect_equal(nrow(getRSSInput(result)$sumstats),
+               nrow(getRSSInput(basic_result)$sumstats) - 1)
 })
 
 test_that("summary_stats_qc with dentist and all outliers returns empty", {
@@ -363,11 +366,12 @@ test_that("summary_stats_qc with dentist and all outliers returns empty", {
   )
 
   result <- summary_stats_qc(
-    basic_result$sumstats, td$LD_data,
+    getRSSInput(basic_result)$sumstats, td$LD_data,
     n = 10000, method = "dentist"
   )
-  expect_equal(nrow(result$sumstats), 0)
-  expect_equal(result$outlier_number, nrow(basic_result$sumstats))
+  expect_equal(nrow(getRSSInput(result)$sumstats), 0)
+  expect_equal(getOutlierNumber(result),
+               nrow(getRSSInput(basic_result)$sumstats))
 })
 
 test_that("summary_stats_qc returns LD_mat matching filtered sumstats dimensions", {
@@ -384,11 +388,13 @@ test_that("summary_stats_qc returns LD_mat matching filtered sumstats dimensions
   )
 
   result <- summary_stats_qc(
-    basic_result$sumstats, td$LD_data,
+    getRSSInput(basic_result)$sumstats, td$LD_data,
     n = 10000, method = "slalom"
   )
-  expect_equal(nrow(result$LD_mat), nrow(result$sumstats))
-  expect_equal(ncol(result$LD_mat), nrow(result$sumstats))
+  result_ld_mat <- getCorrelation(getLDData(result))
+  result_sumstats <- getRSSInput(result)$sumstats
+  expect_equal(nrow(result_ld_mat), nrow(result_sumstats))
+  expect_equal(ncol(result_ld_mat), nrow(result_sumstats))
 })
 
 test_that("summary_stats_qc basic genotype-backed path does not compute LD", {
@@ -410,8 +416,10 @@ test_that("summary_stats_qc basic genotype-backed path does not compute LD", {
                                qc_method = "none", impute = FALSE),
     "basic harmonization retained"
   )
-  expect_equal(nrow(result$LD_matrix), nrow(X_ref))
-  expect_equal(ncol(result$LD_matrix), nrow(result$rss_input$sumstats))
+  result_ld <- getLDData(result)
+  result_geno <- getGenotypes(result_ld)
+  expect_equal(nrow(result_geno), nrow(X_ref))
+  expect_equal(ncol(result_geno), nrow(getRSSInput(result)$sumstats))
 })
 
 test_that("summary_stats_qc accepts genotype-backed LDData", {
@@ -467,8 +475,10 @@ test_that("summary_stats_qc accepts genotype-backed LDData", {
     impute = FALSE
   ))
 
-  expect_equal(nrow(result$LD_matrix), 100L)
-  expect_equal(ncol(result$LD_matrix), nrow(result$rss_input$sumstats))
+  result_ld <- getLDData(result)
+  result_geno <- getGenotypes(result_ld)
+  expect_equal(nrow(result_geno), 100L)
+  expect_equal(ncol(result_geno), nrow(getRSSInput(result)$sumstats))
 })
 
 test_that("summary_stats_qc PIP screening uses LD-independent SER", {
@@ -495,7 +505,9 @@ test_that("summary_stats_qc PIP screening uses LD-independent SER", {
     pip_cutoff_to_skip = 0.1,
     impute = FALSE
   ))
-  expect_equal(ncol(result$LD_matrix), nrow(result$rss_input$sumstats))
+  result_ld <- getLDData(result)
+  result_R <- getCorrelation(result_ld)
+  expect_equal(ncol(result_R), nrow(getRSSInput(result)$sumstats))
 })
 
 test_that("summary_stats_qc treats NULL qc_method as basic-only none", {
@@ -515,7 +527,7 @@ test_that("summary_stats_qc treats NULL qc_method as basic-only none", {
     ),
     "basic harmonization retained"
   )
-  expect_equal(nrow(result$rss_input$sumstats), nrow(td$sumstats))
+  expect_equal(nrow(getRSSInput(result)$sumstats), nrow(td$sumstats))
 })
 
 test_that("summary_stats_qc rejects invalid qc_method values", {
@@ -566,8 +578,12 @@ test_that("summary_stats_qc LD-mismatch QC computes only filtered local LD from 
     impute = FALSE
   ))
   expect_equal(compute_calls, 2)
-  expect_equal(ncol(result$LD_matrix), nrow(result$rss_input$sumstats))
-  expect_equal(ncol(result$LD_matrix), 3)
+  result_ld <- getLDData(result)
+  # getGenotypes is mocked above to always return full X_ref, so read the
+  # subsetted handle stored in the LDData slot directly to verify subsetting.
+  result_geno <- result_ld@genotype_handle
+  expect_equal(ncol(result_geno), nrow(getRSSInput(result)$sumstats))
+  expect_equal(ncol(result_geno), 3)
 })
 
 # ===========================================================================

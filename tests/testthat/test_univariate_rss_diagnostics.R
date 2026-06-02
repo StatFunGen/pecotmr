@@ -1,5 +1,17 @@
 context("univariate_rss_diagnostics")
 
+.test_fm_result <- function(variant_names, trimmed_fit = list(),
+                            top_loci = data.frame(variant_id = character(0),
+                                                  method = character(0),
+                                                  stringsAsFactors = FALSE)) {
+  FineMappingResult(
+    variant_names = variant_names,
+    trimmed_fit = trimmed_fit,
+    top_loci = top_loci,
+    method = "susie"
+  )
+}
+
 # ===========================================================================
 # get_susie_result
 # ===========================================================================
@@ -9,14 +21,17 @@ test_that("get_susie_result returns NULL for empty input", {
   expect_null(result)
 })
 
-test_that("get_susie_result returns NULL when susie_result_trimmed missing", {
+test_that("get_susie_result returns NULL when finemapping_result missing", {
   result <- get_susie_result(list(some_data = 42))
   expect_null(result)
 })
 
 test_that("get_susie_result returns trimmed result when present", {
   mock_result <- list(pip = c(0.1, 0.5, 0.3), sets = list(cs = list()))
-  con_data <- list(susie_result_trimmed = mock_result)
+  con_data <- list(finemapping_result = .test_fm_result(
+    variant_names = character(0),
+    trimmed_fit = mock_result
+  ))
   result <- get_susie_result(con_data)
   expect_equal(result, mock_result)
 })
@@ -27,8 +42,10 @@ test_that("get_susie_result returns trimmed result when present", {
 
 test_that("extract_top_pip_info finds top PIP variant", {
   con_data <- list(
-    susie_result_trimmed = list(pip = c(0.1, 0.7, 0.2)),
-    variant_names = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
+    finemapping_result = .test_fm_result(
+      variant_names = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
+      trimmed_fit = list(pip = c(0.1, 0.7, 0.2))
+    ),
     sumstats = list(z = c(1.0, 3.5, -0.5))
   )
   result <- extract_top_pip_info(con_data)
@@ -42,8 +59,10 @@ test_that("extract_top_pip_info finds top PIP variant", {
 
 test_that("extract_top_pip_info computes p_value from z", {
   con_data <- list(
-    susie_result_trimmed = list(pip = c(0.9, 0.05, 0.05)),
-    variant_names = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
+    finemapping_result = .test_fm_result(
+      variant_names = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
+      trimmed_fit = list(pip = c(0.9, 0.05, 0.05))
+    ),
     sumstats = list(z = c(5.0, 0.5, -0.3))
   )
   result <- extract_top_pip_info(con_data)
@@ -53,8 +72,10 @@ test_that("extract_top_pip_info computes p_value from z", {
 
 test_that("extract_top_pip_info handles ties by taking first max", {
   con_data <- list(
-    susie_result_trimmed = list(pip = c(0.5, 0.5, 0.5)),
-    variant_names = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
+    finemapping_result = .test_fm_result(
+      variant_names = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
+      trimmed_fit = list(pip = c(0.5, 0.5, 0.5))
+    ),
     sumstats = list(z = c(1.0, 2.0, 3.0))
   )
   result <- extract_top_pip_info(con_data)
@@ -68,10 +89,12 @@ test_that("extract_top_pip_info handles ties by taking first max", {
 
 test_that("extract_cs_info extracts single CS correctly", {
   con_data <- list(
-    variant_names = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
-    susie_result_trimmed = list(
-      sets = list(cs = list(L_1 = c(1, 2))),
-      cs_corr = NULL
+    finemapping_result = .test_fm_result(
+      variant_names = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
+      trimmed_fit = list(
+        sets = list(cs = list(L_1 = c(1, 2))),
+        cs_corr = NULL
+      )
     )
   )
   top_loci_table <- data.frame(
@@ -91,12 +114,14 @@ test_that("extract_cs_info extracts single CS correctly", {
 
 test_that("extract_cs_info extracts multiple CSs with cs_corr", {
   con_data <- list(
-    variant_names = c("1:100:A:G", "1:200:C:T", "1:300:G:A", "1:400:T:C"),
-    susie_result_trimmed = list(
-      sets = list(
-        cs = list(L_1 = c(1, 2), L_2 = c(3, 4))
-      ),
-      cs_corr = matrix(c(1, 0.3, 0.3, 1), nrow = 2)
+    finemapping_result = .test_fm_result(
+      variant_names = c("1:100:A:G", "1:200:C:T", "1:300:G:A", "1:400:T:C"),
+      trimmed_fit = list(
+        sets = list(
+          cs = list(L_1 = c(1, 2), L_2 = c(3, 4))
+        ),
+        cs_corr = matrix(c(1, 0.3, 0.3, 1), nrow = 2)
+      )
     )
   )
   top_loci_table <- data.frame(
@@ -116,10 +141,12 @@ test_that("extract_cs_info extracts multiple CSs with cs_corr", {
 
 test_that("extract_cs_info computes p_value from z-score", {
   con_data <- list(
-    variant_names = c("1:100:A:G", "1:200:C:T"),
-    susie_result_trimmed = list(
-      sets = list(cs = list(L_1 = c(1, 2))),
-      cs_corr = NULL
+    finemapping_result = .test_fm_result(
+      variant_names = c("1:100:A:G", "1:200:C:T"),
+      trimmed_fit = list(
+        sets = list(cs = list(L_1 = c(1, 2))),
+        cs_corr = NULL
+      )
     )
   )
   top_loci_table <- data.frame(

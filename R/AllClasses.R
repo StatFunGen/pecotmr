@@ -192,7 +192,19 @@ setClass("LDStatistic",
     n_ref = "integer",
     in_sample = "logical",
     genome = "character"
-  )
+  ),
+  validity = function(object) {
+    errors <- character()
+    if (length(object@n_ref) != 1L || object@n_ref <= 0L)
+      errors <- c(errors, "'n_ref' must be a single positive integer")
+    if (length(object@in_sample) != 1L)
+      errors <- c(errors, "'in_sample' must be a single logical value")
+    if (length(object@genome) != 1L || !nzchar(object@genome))
+      errors <- c(errors, "'genome' must be a single non-empty character string")
+    if (nrow(object@snp_info) == 0L)
+      errors <- c(errors, "'snp_info' must have at least one row")
+    if (length(errors) == 0) TRUE else errors
+  }
 )
 
 #' @title Eigendecomposition-Based LD Statistic
@@ -215,7 +227,8 @@ setClass("LDEigen",
     eigenvalue_truncation = "numeric"
   ),
   validity = function(object) {
-    errors <- character()
+    parent_check <- getValidity(getClass("LDStatistic"))(object)
+    errors <- if (isTRUE(parent_check)) character() else parent_check
     n_blocks <- length(object@ld_blocks@blocks)
     if (length(object@eigen_list) != n_blocks)
       errors <- c(errors,
@@ -248,7 +261,8 @@ setClass("LDScore",
     ld_matrix_list = "list"  # for g-LDSC; empty list for S-LDSC
   ),
   validity = function(object) {
-    errors <- character()
+    parent_check <- getValidity(getClass("LDStatistic"))(object)
+    errors <- if (isTRUE(parent_check)) character() else parent_check
     if (nrow(object@ld_scores) != nrow(object@snp_info))
       errors <- c(errors,
         "Number of rows in 'ld_scores' must match 'snp_info'")
@@ -440,6 +454,93 @@ setClass("TWASWeights",
 )
 
 # =============================================================================
+# Allele QC Result
+# =============================================================================
+
+#' @title Allele QC Result
+#' @description S4 container for the output of \code{match_ref_panel} /
+#'   \code{allele_qc}. Carries the post-QC target variants alongside the full
+#'   merge / flip / strand diagnostics needed by downstream callers that
+#'   inspect what QC did.
+#' @slot harmonized_data A \code{data.frame} of variants retained after
+#'   allele harmonization, with reference-aligned A1/A2 and (when requested)
+#'   sign-flipped effect columns.
+#' @slot qc_summary A \code{data.frame} carrying per-variant QC diagnostics
+#'   from the full merge: \code{variants_id_original}, \code{variants_id_qced},
+#'   \code{exact_match}, \code{sign_flip}, \code{strand_flip}, \code{INDEL},
+#'   \code{ID_match}, \code{keep}, etc.
+#' @export
+setClass("AlleleQCResult",
+  representation(
+    harmonized_data = "data.frame",
+    qc_summary = "data.frame"
+  )
+)
+
+# =============================================================================
+# Summary-Statistics QC Result
+# =============================================================================
+
+#' @title Summary-Statistics QC Result
+#' @description S4 container holding the output of \code{summary_stats_qc} and
+#'   \code{.summary_stats_qc_single_study}. Carries the post-QC LD reference
+#'   plus harmonized sumstats, a pre-imputation snapshot, and QC process
+#'   metadata. Replaces the legacy list-of-named-fields return shape.
+#' @slot ld_data An \code{LDData} S4 object containing the post-QC LD
+#'   reference (correlation and/or genotype), or NULL when QC produced no LD.
+#' @slot rss_input List with \code{sumstats} (post-QC data.frame), \code{n},
+#'   and \code{var_y}.
+#' @slot preprocess List with \code{sumstats} and \code{ld_data} fields
+#'   capturing the pre-imputation snapshot for downstream re-runs.
+#' @slot outlier_number Integer count of LD-mismatch outliers removed.
+#' @slot skipped Single logical; TRUE when QC short-circuited.
+#' @slot skip_reason Character string explaining a skip; empty otherwise.
+#' @export
+setClass("QCResult",
+  representation(
+    ld_data = "ANY",                  # LDData or NULL
+    rss_input = "list",
+    preprocess = "list",
+    outlier_number = "integer",
+    skipped = "logical",
+    skip_reason = "character"
+  ),
+  validity = function(object) {
+    errors <- character()
+    if (!is.null(object@ld_data) && !is(object@ld_data, "LDData"))
+      errors <- c(errors, "'ld_data' must be an LDData object or NULL")
+    if (length(object@skipped) != 1L)
+      errors <- c(errors, "'skipped' must be a single logical value")
+    if (length(object@outlier_number) != 1L)
+      errors <- c(errors, "'outlier_number' must be a single integer")
+    if (length(object@skip_reason) > 1L)
+      errors <- c(errors, "'skip_reason' must be a single character string (or empty)")
+    if (length(object@rss_input) > 0L) {
+      required <- c("sumstats", "n", "var_y")
+      missing_keys <- setdiff(required, names(object@rss_input))
+      if (length(missing_keys) > 0L)
+        errors <- c(errors, paste0(
+          "'rss_input' is missing key(s): ", paste(missing_keys, collapse = ", ")))
+      if (!is.null(object@rss_input$sumstats) &&
+          !is.data.frame(object@rss_input$sumstats))
+        errors <- c(errors,
+          "'rss_input$sumstats' must be a data.frame")
+    }
+    if (length(object@preprocess) > 0L) {
+      pp_keys <- names(object@preprocess)
+      if (!all(pp_keys %in% c("sumstats", "ld_data")))
+        errors <- c(errors,
+          "'preprocess' may only contain 'sumstats' and 'ld_data' keys")
+      if (!is.null(object@preprocess$ld_data) &&
+          !is(object@preprocess$ld_data, "LDData"))
+        errors <- c(errors,
+          "'preprocess$ld_data' must be an LDData or NULL")
+    }
+    if (length(errors) == 0) TRUE else errors
+  }
+)
+
+# =============================================================================
 # Regional Data (pipeline input)
 # =============================================================================
 
@@ -474,6 +575,49 @@ setClass("RegionalData",
     if (length(object@covariates) != length(object@phenotypes))
       errors <- c(errors,
         "'covariates' and 'phenotypes' must have the same length")
+    if (length(errors) == 0) TRUE else errors
+  }
+)
+
+# =============================================================================
+# Multivariate Regional Data
+# =============================================================================
+
+#' @title Multivariate Regional Association Data
+#' @description S4 container for regional association data prepared for
+#'   multivariate (joint-across-conditions) modeling. Unlike
+#'   \code{RegionalData}, which carries a per-condition list of phenotype
+#'   matrices, this class assumes all conditions are jointly observed in the
+#'   same samples and packs the phenotypes into a single multivariate matrix
+#'   (samples x conditions).
+#' @slot genotype_matrix Numeric matrix (samples x variants), rownames are
+#'   sample IDs, colnames are variant IDs.
+#' @slot Y_matrix Numeric matrix (samples x conditions) of residualized
+#'   phenotypes after joining conditions and (optionally) filtering rows by
+#'   minimum non-missing count.
+#' @slot Y_scalar Numeric vector of per-condition scaling factors
+#'   (length = ncol(Y_matrix)).
+#' @slot dropped_samples Character or list capturing sample IDs dropped
+#'   during multivariate filtering.
+#' @slot region A \code{GRanges} (single range) or NULL.
+#' @slot Y_coordinates A data.frame of phenotype coordinates, or NULL.
+#' @export
+setClass("MultivariateRegionalData",
+  representation(
+    genotype_matrix = "matrix",
+    Y_matrix = "matrix",
+    Y_scalar = "numeric",
+    dropped_samples = "ANY",
+    region = "ANY",
+    Y_coordinates = "ANY"
+  ),
+  validity = function(object) {
+    errors <- character()
+    if (nrow(object@genotype_matrix) != nrow(object@Y_matrix))
+      errors <- c(errors,
+        "genotype_matrix and Y_matrix must have the same number of rows")
+    if (length(object@Y_scalar) != ncol(object@Y_matrix))
+      errors <- c(errors, "length(Y_scalar) must equal ncol(Y_matrix)")
     if (length(errors) == 0) TRUE else errors
   }
 )
@@ -600,4 +744,38 @@ setMethod("show", "RegionalData", function(object) {
   cat(sprintf("RegionalData: %d conditions, %d variants, %d samples\n",
               n_cond, n_var, n_samp))
   cat(sprintf("  Scale residuals: %s\n", object@scale_residuals))
+})
+
+#' @export
+setMethod("show", "MultivariateRegionalData", function(object) {
+  cat(sprintf("MultivariateRegionalData: %d conditions, %d variants, %d samples\n",
+              ncol(object@Y_matrix), ncol(object@genotype_matrix),
+              nrow(object@genotype_matrix)))
+  if (!is.null(object@region))
+    cat(sprintf("  Region: %s:%d-%d\n",
+                as.character(GenomicRanges::seqnames(object@region))[1],
+                GenomicRanges::start(object@region),
+                GenomicRanges::end(object@region)))
+})
+
+#' @export
+setMethod("show", "AlleleQCResult", function(object) {
+  cat(sprintf("AlleleQCResult: %d harmonized variants (from %d scanned)\n",
+              nrow(object@harmonized_data), nrow(object@qc_summary)))
+})
+
+#' @export
+setMethod("show", "QCResult", function(object) {
+  cat(sprintf("QCResult: %s\n",
+              if (object@skipped) sprintf("skipped (%s)", object@skip_reason) else "completed"))
+  if (length(object@rss_input) > 0 && !is.null(object@rss_input$sumstats)) {
+    cat(sprintf("  Sumstats: %d variants\n",
+                nrow(object@rss_input$sumstats)))
+  }
+  if (!is.null(object@ld_data)) {
+    cat(sprintf("  LD: %d variants%s\n",
+                length(getVariantIds(object@ld_data)),
+                if (hasGenotypes(object@ld_data)) " (genotype-backed)" else " (correlation)"))
+  }
+  cat(sprintf("  Outliers removed: %d\n", object@outlier_number))
 })

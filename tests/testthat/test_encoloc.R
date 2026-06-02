@@ -1,4 +1,17 @@
 context("encoloc")
+
+.test_fm_result <- function(variant_names, trimmed_fit = list(),
+                            top_loci = data.frame(variant_id = character(0),
+                                                  method = character(0),
+                                                  stringsAsFactors = FALSE)) {
+  FineMappingResult(
+    variant_names = variant_names,
+    trimmed_fit = trimmed_fit,
+    top_loci = top_loci,
+    method = "susie"
+  )
+}
+
 library(tidyverse)
 library(coloc)
 
@@ -475,12 +488,14 @@ test_that("coloc_wrapper with run_finemapping = TRUE uses rss_analysis_pipeline"
   # Build mock pipeline result matching rss_analysis_pipeline output structure
   mock_pipeline <- list(
     "susie_rss_SLALOM_RAISS_imputed" = list(
-      variant_names = xqtl_fit$variant_names,
-      susie_result_trimmed = list(
-        lbf_variable = xqtl_fit$lbf_variable,
-        V = xqtl_fit$V,
-        pip = xqtl_fit$pip,
-        sets = list(cs_index = seq_len(nrow(xqtl_fit$lbf_variable)))
+      finemapping_result = .test_fm_result(
+        variant_names = xqtl_fit$variant_names,
+        trimmed_fit = list(
+          lbf_variable = xqtl_fit$lbf_variable,
+          V = xqtl_fit$V,
+          pip = xqtl_fit$pip,
+          sets = list(cs_index = seq_len(nrow(xqtl_fit$lbf_variable)))
+        )
       )
     ),
     rss_data_analyzed = data.frame(
@@ -514,12 +529,14 @@ test_that("coloc_wrapper with return_finemapping includes pipeline result", {
 
   mock_pipeline <- list(
     "susie_rss_SLALOM" = list(
-      variant_names = xqtl_fit$variant_names,
-      susie_result_trimmed = list(
-        lbf_variable = xqtl_fit$lbf_variable,
-        V = xqtl_fit$V,
-        pip = xqtl_fit$pip,
-        sets = list(cs_index = seq_len(nrow(xqtl_fit$lbf_variable)))
+      finemapping_result = .test_fm_result(
+        variant_names = xqtl_fit$variant_names,
+        trimmed_fit = list(
+          lbf_variable = xqtl_fit$lbf_variable,
+          V = xqtl_fit$V,
+          pip = xqtl_fit$pip,
+          sets = list(cs_index = seq_len(nrow(xqtl_fit$lbf_variable)))
+        )
       )
     ),
     rss_data_analyzed = data.frame(
@@ -555,12 +572,14 @@ test_that("coloc_wrapper save_finemapping_path saves reusable RDS", {
 
   mock_pipeline <- list(
     "susie_rss_SLALOM" = list(
-      variant_names = xqtl_fit$variant_names,
-      susie_result_trimmed = list(
-        lbf_variable = xqtl_fit$lbf_variable,
-        V = xqtl_fit$V,
-        pip = xqtl_fit$pip,
-        sets = list(cs_index = seq_len(nrow(xqtl_fit$lbf_variable)))
+      finemapping_result = .test_fm_result(
+        variant_names = xqtl_fit$variant_names,
+        trimmed_fit = list(
+          lbf_variable = xqtl_fit$lbf_variable,
+          V = xqtl_fit$V,
+          pip = xqtl_fit$pip,
+          sets = list(cs_index = seq_len(nrow(xqtl_fit$lbf_variable)))
+        )
       )
     ),
     rss_data_analyzed = data.frame(

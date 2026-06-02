@@ -1,5 +1,16 @@
 context("mash_wrapper")
 
+# Build a minimal FineMappingResult for unit-testing find_nested / extract_flatten_sumstats_from_nested
+.test_fm_result <- function(variant_names) {
+    FineMappingResult(
+        variant_names = variant_names,
+        trimmed_fit = list(pip = rep(0.5, length(variant_names))),
+        top_loci = data.frame(variant_id = character(0), method = character(0),
+                              stringsAsFactors = FALSE),
+        method = "susie"
+    )
+}
+
 # ===========================================================================
 # merge_susie_cs
 # ===========================================================================
@@ -995,7 +1006,7 @@ test_that("merge_sumstats_matrices with single valid dataset returns properly", 
 
 test_that("extract_flatten_sumstats_from_nested computes z from betahat/sebetahat", {
   data <- list(
-    variant_names = c("1:100:A:G", "1:200:C:T"),
+    finemapping_result = .test_fm_result(c("1:100:A:G", "1:200:C:T")),
     sumstats = list(
       betahat = c(0.5, -0.3),
       sebetahat = c(0.1, 0.15)
@@ -1011,7 +1022,7 @@ test_that("extract_flatten_sumstats_from_nested computes z from betahat/sebetaha
 
 test_that("extract_flatten_sumstats_from_nested uses z directly when available", {
   data <- list(
-    variant_names = c("1:100:A:G"),
+    finemapping_result = .test_fm_result(c("1:100:A:G")),
     sumstats = list(z = c(3.5))
   )
   result <- extract_flatten_sumstats_from_nested(data, extract_inf = "z")
@@ -1020,7 +1031,7 @@ test_that("extract_flatten_sumstats_from_nested uses z directly when available",
 
 test_that("extract_flatten_sumstats_from_nested extracts beta from direct sumstats", {
   data <- list(
-    variant_names = c("chr1:100:A:G", "chr1:200:C:T"),
+    finemapping_result = .test_fm_result(c("chr1:100:A:G", "chr1:200:C:T")),
     sumstats = list(
       betahat = c(0.5, -0.3),
       sebetahat = c(0.1, 0.15)
@@ -1032,7 +1043,7 @@ test_that("extract_flatten_sumstats_from_nested extracts beta from direct sumsta
 
 test_that("extract_flatten_sumstats_from_nested extracts se from direct sumstats", {
   data <- list(
-    variant_names = c("chr1:100:A:G", "chr1:200:C:T"),
+    finemapping_result = .test_fm_result(c("chr1:100:A:G", "chr1:200:C:T")),
     sumstats = list(
       betahat = c(0.5, -0.3),
       sebetahat = c(0.1, 0.15)
@@ -1044,7 +1055,7 @@ test_that("extract_flatten_sumstats_from_nested extracts se from direct sumstats
 
 test_that("extract_flatten_sumstats_from_nested reaches max_depth and returns NULL", {
   data <- list(level1 = list(level2 = list(level3 = list(level4 = list(
-    variant_names = c("1:100:A:G"),
+    finemapping_result = .test_fm_result(c("1:100:A:G")),
     sumstats = list(z = c(2.0))
   )))))
   result <- extract_flatten_sumstats_from_nested(data, extract_inf = "z", max_depth = 2)
@@ -1053,7 +1064,7 @@ test_that("extract_flatten_sumstats_from_nested reaches max_depth and returns NU
 
 test_that("extract_flatten_sumstats_from_nested handles missing betahat for z", {
   data <- list(
-    variant_names = c("1:100:A:G"),
+    finemapping_result = .test_fm_result(c("1:100:A:G")),
     sumstats = list(something_else = c(1.0))
   )
   result <- expect_message(
@@ -1065,7 +1076,7 @@ test_that("extract_flatten_sumstats_from_nested handles missing betahat for z", 
 
 test_that("extract_flatten_sumstats_from_nested handles missing betahat for beta", {
   data <- list(
-    variant_names = c("1:100:A:G"),
+    finemapping_result = .test_fm_result(c("1:100:A:G")),
     sumstats = list(z = c(2.0))
   )
   result <- expect_message(
@@ -1077,7 +1088,7 @@ test_that("extract_flatten_sumstats_from_nested handles missing betahat for beta
 
 test_that("extract_flatten_sumstats_from_nested handles missing sebetahat for se", {
   data <- list(
-    variant_names = c("1:100:A:G"),
+    finemapping_result = .test_fm_result(c("1:100:A:G")),
     sumstats = list(betahat = c(0.5))
   )
   result <- expect_message(
@@ -1089,7 +1100,7 @@ test_that("extract_flatten_sumstats_from_nested handles missing sebetahat for se
 
 test_that("extract_flatten_sumstats_from_nested rejects invalid extract_inf values", {
   data <- list(
-    variant_names = c("1:100:A:G"),
+    finemapping_result = .test_fm_result(c("1:100:A:G")),
     sumstats = list(z = c(1.0))
   )
   expect_error(
@@ -1100,7 +1111,7 @@ test_that("extract_flatten_sumstats_from_nested rejects invalid extract_inf valu
 
 test_that("extract_flatten_sumstats_from_nested normalizes variant IDs to chr prefix", {
   data <- list(
-    variant_names = c("1:100:A:G", "2:200:C:T"),
+    finemapping_result = .test_fm_result(c("1:100:A:G", "2:200:C:T")),
     sumstats = list(z = c(1.0, 2.0))
   )
   result <- extract_flatten_sumstats_from_nested(data, extract_inf = "z")
@@ -1110,7 +1121,7 @@ test_that("extract_flatten_sumstats_from_nested normalizes variant IDs to chr pr
 test_that("extract_flatten_sumstats_from_nested normalizes variant IDs from nested search", {
   data <- list(
     nested = list(
-      variant_names = c("1:100:A:G"),
+      finemapping_result = .test_fm_result(c("1:100:A:G")),
       sumstats = list(z = c(3.0))
     )
   )
@@ -1122,7 +1133,7 @@ test_that("extract_flatten_sumstats_from_nested recurses through multiple nestin
   data <- list(
     level1 = list(
       level2 = list(
-        variant_names = c("chr1:100:A:G", "chr1:200:C:T"),
+        finemapping_result = .test_fm_result(c("chr1:100:A:G", "chr1:200:C:T")),
         sumstats = list(
           betahat = c(0.5, -0.3),
           sebetahat = c(0.1, 0.15)
@@ -1141,7 +1152,7 @@ test_that("extract_flatten_sumstats_from_nested returns NULL for deeply nested b
     a = list(
       b = list(
         c = list(
-          variant_names = c("1:100:A:G"),
+          finemapping_result = .test_fm_result(c("1:100:A:G")),
           sumstats = list(z = c(2.0))
         )
       )

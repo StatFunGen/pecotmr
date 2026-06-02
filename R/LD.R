@@ -659,7 +659,7 @@ load_LD_from_blocks <- function(LD_meta_file_path, region, extract_coordinates =
     snp_idx = NULL,
     variants = variants_gr,
     block_metadata = block_metadata,
-    n_ref = 0L
+    n_ref = if (is.null(n_sample)) 0L else as.integer(n_sample)
   )
 }
 
@@ -714,8 +714,7 @@ filter_variants_by_ld_reference <- function(variant_ids, ld_reference_meta_file,
 #' into a list of smaller matrices based on the block_indices, making it easier to work with
 #' large LD matrices that span multiple blocks.
 #'
-#' @param ld_data A list as returned by load_LD_matrix, containing LD_matrix,
-#'                LD_variants, ref_panel, and block_metadata.
+#' @param ld_data An \code{LDData} S4 object as returned by \code{load_LD_matrix()}.
 #' @param merge_small_blocks Logical, whether to merge blocks smaller than min_merged_block_size (default: TRUE).
 #' @param min_merged_block_size Integer, minimum number of variants for a block after merging (default: 500).
 #' @param max_merged_block_size Integer, maximum number of variants in a block after merging (default: 10000).

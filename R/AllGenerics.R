@@ -276,6 +276,71 @@ setGeneric("getResidualXScalar",
 setGeneric("getResidualYScalar",
   function(x, condition = 1L) standardGeneric("getResidualYScalar"))
 
+#' @title Get Per-Variant Variance
+#' @description Per-variant variance of residualized genotypes for a
+#'   condition.
+#' @param x A \code{RegionalData} object.
+#' @param condition Integer index of the condition.
+#' @return A numeric vector (length = number of variants).
+#' @export
+setGeneric("getXVariance",
+  function(x, condition = 1L) standardGeneric("getXVariance"))
+
+#' @title Get Phenotype List
+#' @description Extract the per-condition phenotype list from a
+#'   \code{RegionalData}.
+#' @param x A \code{RegionalData} object.
+#' @return A named list of phenotype matrices.
+#' @export
+setGeneric("getPhenotypes", function(x) standardGeneric("getPhenotypes"))
+
+#' @title Get Covariate List
+#' @description Extract the per-condition covariate list from a
+#'   \code{RegionalData}.
+#' @param x A \code{RegionalData} object.
+#' @return A named list of covariate matrices.
+#' @export
+setGeneric("getCovariates", function(x) standardGeneric("getCovariates"))
+
+#' @title Get Genotype Matrix
+#' @description Extract the raw genotype matrix from a
+#'   \code{RegionalData} or \code{MultivariateRegionalData}.
+#' @param x The object.
+#' @return A numeric matrix (samples x variants).
+#' @export
+setGeneric("getGenotypeMatrix", function(x) standardGeneric("getGenotypeMatrix"))
+
+#' @title Get Region Chromosome
+#' @description Extract the chromosome name from a region-bearing S4 object.
+#' @param x The object.
+#' @return A single character string, or NULL.
+#' @export
+setGeneric("getChrom", function(x) standardGeneric("getChrom"))
+
+#' @title Get Region Range
+#' @description Extract the start/end positions from a region-bearing S4
+#'   object as a character vector \code{c(start, end)}.
+#' @param x The object.
+#' @return A character vector of length 2, or NULL.
+#' @export
+setGeneric("getGrange", function(x) standardGeneric("getGrange"))
+
+#' @title Get Multivariate Y Matrix
+#' @description Extract the multivariate phenotype matrix from a
+#'   \code{MultivariateRegionalData}.
+#' @param x A \code{MultivariateRegionalData} object.
+#' @return A numeric matrix (samples x conditions).
+#' @export
+setGeneric("getYMatrix", function(x) standardGeneric("getYMatrix"))
+
+#' @title Get Y Scaling Factors
+#' @description Per-condition scaling factors used for residualized
+#'   multivariate phenotypes.
+#' @param x A \code{MultivariateRegionalData} object.
+#' @return A numeric vector (length = number of conditions).
+#' @export
+setGeneric("getYScalar", function(x) standardGeneric("getYScalar"))
+
 # =============================================================================
 # FineMappingResult accessor generics
 # =============================================================================
@@ -392,6 +457,73 @@ setGeneric("getMolecularId", function(x) standardGeneric("getMolecularId"))
 #' @return A named list of data types per context, or NULL.
 #' @export
 setGeneric("getDataType", function(x) standardGeneric("getDataType"))
+
+# =============================================================================
+# AlleleQCResult accessor generics
+# =============================================================================
+
+#' @title Get Harmonized Variant Data
+#' @description Extract the post-QC, reference-harmonized variants from an
+#'   \code{AlleleQCResult}.
+#' @param x An \code{AlleleQCResult} object.
+#' @return A \code{data.frame} of harmonized variants.
+#' @export
+setGeneric("getHarmonizedData", function(x) standardGeneric("getHarmonizedData"))
+
+#' @title Get Allele QC Summary
+#' @description Extract the full per-variant merge/flip/strand diagnostics
+#'   produced by allele QC.
+#' @param x An \code{AlleleQCResult} object.
+#' @return A \code{data.frame} with the diagnostic columns.
+#' @export
+setGeneric("getQCSummary", function(x) standardGeneric("getQCSummary"))
+
+# =============================================================================
+# QCResult accessor generics
+# =============================================================================
+
+#' @title Get LD Data
+#' @description Extract the post-QC LDData payload from a QCResult.
+#' @param x A \code{QCResult} object.
+#' @return An \code{LDData} object, or NULL when QC produced no LD reference.
+#' @export
+setGeneric("getLDData", function(x) standardGeneric("getLDData"))
+
+#' @title Get RSS Input
+#' @description Extract the post-QC summary-statistic record (sumstats, n, var_y).
+#' @param x A \code{QCResult} object.
+#' @return A list with \code{sumstats}, \code{n}, \code{var_y}.
+#' @export
+setGeneric("getRSSInput", function(x) standardGeneric("getRSSInput"))
+
+#' @title Get Preprocess Snapshot
+#' @description Extract the pre-imputation snapshot (\code{sumstats},
+#'   \code{ld_data}) captured before any LD-mismatch QC or RAISS imputation.
+#' @param x A \code{QCResult} object.
+#' @return A list with \code{sumstats} and \code{ld_data}.
+#' @export
+setGeneric("getPreprocess", function(x) standardGeneric("getPreprocess"))
+
+#' @title Get Outlier Number
+#' @description Number of LD-mismatch outliers removed during QC.
+#' @param x A \code{QCResult} object.
+#' @return Integer count.
+#' @export
+setGeneric("getOutlierNumber", function(x) standardGeneric("getOutlierNumber"))
+
+#' @title Is Skipped
+#' @description Whether QC short-circuited (e.g. no signals, too few variants).
+#' @param x A \code{QCResult} object.
+#' @return Single logical.
+#' @export
+setGeneric("isSkipped", function(x) standardGeneric("isSkipped"))
+
+#' @title Get Skip Reason
+#' @description Why QC short-circuited; empty string if not skipped.
+#' @param x A \code{QCResult} object.
+#' @return Character scalar.
+#' @export
+setGeneric("getSkipReason", function(x) standardGeneric("getSkipReason"))
 
 # =============================================================================
 # VCF/BCF writer generic

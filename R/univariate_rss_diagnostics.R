@@ -1,33 +1,21 @@
-#' Extract SuSiE Results from Finemapping Data
+#' Extract the trimmed SuSiE fit from a finemapping pipeline result
 #'
-#' This function extracts the trimmed SuSiE results from a finemapping data object,
-#' typically obtained from a finemapping RDS file. It's designed to work with
-#' the method layer of these files, often named as 'method_RAISS_imputed', 'method',
-#' or 'method_NO_QC'. This layer is right under the study layer.
+#' Returns the trimmed model fit underlying \code{con_data$finemapping_result}
+#' (a \code{FineMappingResult} S4 object), or NULL if no fine-mapping result
+#' is attached.
 #'
-#' @param con_data List. The method layer data from a finemapping RDS file.
-#'
-#' @return The trimmed SuSiE results (`$susie_result_trimmed`) if available,
-#' otherwise NULL.
-#'
-#' @details
-#' The function checks if the input data is empty or if the `$susie_result_trimmed`
-#' element is missing. It returns NULL in these cases. If `$susie_result_trimmed`
-#' exists and is not empty, it returns this element.
-#'
-#' @note
-#' This function is particularly useful when working with large datasets
-#' where not all method layers may contain valid SuSiE results or method layer.
-#'
+#' @param con_data List. The method-layer entry from a finemapping pipeline
+#'   result, expected to carry \code{$finemapping_result} as a
+#'   \code{FineMappingResult} object.
+#' @return The trimmed fit (a list with \code{pip}, \code{sets}, etc.) or NULL.
 #' @export
 get_susie_result <- function(con_data) {
-    if (length(con_data) == 0) return(NULL)
-    if (length(con_data$susie_result_trimmed) == 0) {
-        return(NULL)
-        print(paste("$susie_result_trimmed is null for", con_data))
-    } else {
-        return(con_data$susie_result_trimmed)
-    }
+  if (length(con_data) == 0) return(NULL)
+  fm <- con_data$finemapping_result
+  if (is.null(fm) || !is(fm, "FineMappingResult")) return(NULL)
+  trimmed <- getTrimmedFit(fm)
+  if (length(trimmed) == 0) return(NULL)
+  trimmed
 }
 
 #' Process Credible Sets (CS) from Finemapping Results
@@ -60,26 +48,29 @@ get_susie_result <- function(con_data) {
 #' @importFrom dplyr bind_rows
 #'
 #' @export
-extract_cs_info <- function(con_data, cs_names, top_loci_table) {  
+extract_cs_info <- function(con_data, cs_names, top_loci_table) {
+  fm <- con_data$finemapping_result
+  trimmed <- getTrimmedFit(fm)
+  variant_names <- getVariantNames(fm)
   results <- map(seq_along(cs_names), function(i) {
     cs_name <- cs_names[i]
-    indices <- con_data$susie_result_trimmed$sets$cs[[cs_name]]
-    
+    indices <- trimmed$sets$cs[[cs_name]]
+
     # Get variants for this CS using the full variant_names list
-    cs_variants <- con_data$variant_names[indices]
+    cs_variants <- variant_names[indices]
     cs_data <- top_loci_table[top_loci_table$variant_id %in% cs_variants, ]
     top_row <- which.max(cs_data$pip)
-    
+
     top_variant <- cs_data$variant_id[top_row]
     # Find the global index of the top variant
-    top_variant_global_index = which(con_data$variant_names == top_variant)
+    top_variant_global_index = which(variant_names == top_variant)
     top_pip <- cs_data$pip[top_row]
     top_z <- cs_data$z[top_row]
     p_value <- z_to_pvalue(top_z)
-    
+
     # Extract cs_corr
     cs_corr <- if (length(cs_names) > 1) {
-      con_data$susie_result_trimmed$cs_corr[i,]
+      trimmed$cs_corr[i,]
     } else {
       NA  # Use NA for the second CS or when there's only one CS
     }
@@ -137,10 +128,13 @@ extract_cs_info <- function(con_data, cs_names, top_loci_table) {
 #'
 #' @export
 extract_top_pip_info <- function(con_data) {
+  fm <- con_data$finemapping_result
+  trimmed <- getTrimmedFit(fm)
+  variant_names <- getVariantNames(fm)
   # Find the variant with the highest PIP
-  top_pip_index <- which.max(con_data$susie_result_trimmed$pip)
-  top_pip <- con_data$susie_result_trimmed$pip[top_pip_index]
-  top_variant <- con_data$variant_names[top_pip_index]
+  top_pip_index <- which.max(trimmed$pip)
+  top_pip <- trimmed$pip[top_pip_index]
+  top_variant <- variant_names[top_pip_index]
   top_z <- con_data$sumstats$z[top_pip_index]
   p_value <- z_to_pvalue(top_z)
   

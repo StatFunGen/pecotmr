@@ -21,7 +21,10 @@ NULL
 #' @param remove_strand_ambiguous Whether to remove strand SNPs (if any). Default is `TRUE`.
 #' @param flip_strand Whether to output the variants after strand flip. Default is `FALSE`.
 #' @param remove_unmatched Whether to remove unmatched variants. Default is `TRUE`.
-#' @return A single data frame with matched variants.
+#' @return An \code{AlleleQCResult} S4 object. Use
+#'   \code{getHarmonizedData()} to recover the post-QC variant
+#'   data.frame and \code{getQCSummary()} to inspect the per-variant
+#'   merge/flip/strand diagnostics.
 #' @importFrom magrittr %>%
 #' @importFrom dplyr mutate inner_join filter pull select everything row_number if_else any_of all_of rename
 #' @importFrom vctrs vec_duplicate_detect
@@ -86,7 +89,7 @@ match_ref_panel <- function(target_data, ref_variants, col_to_flip = NULL,
 
   if (nrow(match_result) == 0) {
 	warning("No matching variants found between target data and reference variants.")
-	return(list(target_data_qced = match_result, qc_summary = match_result))
+	return(AlleleQCResult(harmonized_data = match_result, qc_summary = match_result))
   }
     # match target & ref by chrom and position
   match_result = match_result %>%
@@ -185,7 +188,7 @@ match_ref_panel <- function(target_data, ref_variants, col_to_flip = NULL,
 	stop("Duplicated variants with different values found. Please check the input data and determine which to keep.")
   }
 
-  return(list(target_data_qced = result, qc_summary = match_result))
+  return(AlleleQCResult(harmonized_data = result, qc_summary = match_result))
 }
 
 #' @rdname match_ref_panel
@@ -249,7 +252,7 @@ align_variant_names <- function(source, reference, remove_indels = FALSE, remove
     remove_unmatched = FALSE
   )
 
-  aligned_df <- qc_result$target_data_qced
+  aligned_df <- getHarmonizedData(qc_result)
 
   # Format output using reference convention (preserving user's format automatically)
   aligned_variants <- format_variant_id(

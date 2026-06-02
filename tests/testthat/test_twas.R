@@ -782,7 +782,7 @@ test_that("harmonize_gwas: computes z from beta and se when z is absent", {
     },
     match_ref_panel = function(target_data, ref_data, ...) {
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
-      list(target_data_qced = target_data)
+      AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
     }
   )
   result <- harmonize_gwas(
@@ -829,7 +829,7 @@ test_that("harmonize_gwas: renames #chrom to chrom in tabix output", {
     },
     match_ref_panel = function(target_data, ref_data, ...) {
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
-      list(target_data_qced = target_data)
+      AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
     }
   )
   ld_variants <- c("chr1:100:T:A", "chr1:200:C:G")
@@ -855,7 +855,7 @@ test_that("harmonize_gwas: uses load_rss_data when column_file_path is provided"
     },
     match_ref_panel = function(target_data, ref_data, ...) {
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
-      list(target_data_qced = target_data)
+      AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
     }
   )
   ld_variants <- c("chr1:100:T:A", "chr1:200:C:G")
@@ -1100,7 +1100,7 @@ test_that("harmonize_gwas: rows with NA or Inf z are removed from output", {
     },
     match_ref_panel = function(target_data, ref_data, ...) {
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
-      list(target_data_qced = target_data)
+      AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
     }
   )
   ld_variants <- paste0("chr1:", c(100, 200, 300, 400), ":", c("T", "C", "A", "G"), ":", c("A", "G", "T", "C"))
@@ -1199,7 +1199,7 @@ test_that("harmonize_gwas: col_to_flip parameter is passed through to match_ref_
     match_ref_panel = function(target_data, ref_data, col_to_flip = NULL, ...) {
       received_col_to_flip <<- col_to_flip
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
-      list(target_data_qced = target_data)
+      AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
     }
   )
   ld_variants <- c("chr1:100:T:A", "chr1:200:C:G")
@@ -1226,7 +1226,7 @@ test_that("harmonize_gwas: match_min_prop parameter is passed to match_ref_panel
     match_ref_panel = function(target_data, ref_data, col_to_flip = NULL, match_min_prop = 0.2, ...) {
       received_match_min_prop <<- match_min_prop
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
-      list(target_data_qced = target_data)
+      AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
     }
   )
   ld_variants <- c("chr1:100:T:A", "chr1:200:C:G")
@@ -1251,7 +1251,7 @@ test_that("harmonize_gwas: z computed from beta/se has correct values", {
     },
     match_ref_panel = function(target_data, ref_data, ...) {
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
-      list(target_data_qced = target_data)
+      AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
     }
   )
   ld_variants <- c("chr1:100:T:A", "chr1:200:C:G", "chr1:300:A:T")
@@ -1273,7 +1273,7 @@ test_that("harmonize_gwas: only keeps rows with finite non-NA z after allele_qc"
     },
     match_ref_panel = function(target_data, ref_data, ...) {
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
-      list(target_data_qced = target_data)
+      AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
     }
   )
   ld_variants <- paste0("chr1:", c(100, 200, 300, 400, 500), ":T:A")
@@ -1359,7 +1359,7 @@ test_that("harmonize_gwas: existing z column is used directly", {
     },
     match_ref_panel = function(target_data, ref_data, ...) {
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
-      list(target_data_qced = target_data)
+      AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
     }
   )
   ld_variants <- c("chr1:100:T:A", "chr1:200:C:G")
@@ -2388,7 +2388,7 @@ test_that("harmonize_gwas: complete flow with beta/se produces correct z-scores 
     },
     match_ref_panel = function(target_data, ref_data, ...) {
       target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":", target_data$A2, ":", target_data$A1)
-      list(target_data_qced = target_data)
+      AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
     }
   )
   ld_variants <- paste0("chr1:", c(100, 200, 300, 400), ":", c("T", "C", "A", "G"), ":", c("A", "G", "T", "C"))
@@ -2840,9 +2840,9 @@ test_that("harmonize_twas: group_contexts_by_region single context path (lines 4
             rownames(target_data)
           }
         }
-        list(target_data_qced = target_data)
+        AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
       } else {
-        list(target_data_qced = target_data)
+        AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
       }
     }
   )
@@ -2971,9 +2971,9 @@ test_that("harmonize_twas: group_contexts_by_region multi-context clustering (li
             rownames(target_data)
           }
         }
-        list(target_data_qced = target_data)
+        AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
       } else {
-        list(target_data_qced = target_data)
+        AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
       }
     }
   )
@@ -3417,9 +3417,9 @@ test_that("harmonize_twas: duplicated LD variants are removed", {
           target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":",
                                            target_data$A2, ":", target_data$A1)
         }
-        list(target_data_qced = target_data)
+        AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
       } else {
-        list(target_data_qced = target_data)
+        AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
       }
     }
   )
@@ -3480,7 +3480,7 @@ test_that("harmonize_twas: drops molecular_id when harmonize_gwas returns NULL f
     },
     # Returning NULL skips the entire context loop, so gwas_qced stays empty
     harmonize_gwas = function(...) NULL,
-    match_ref_panel = function(target_data, ref_data, ...) list(target_data_qced = target_data)
+    match_ref_panel = function(target_data, ref_data, ...) AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
   )
 
   gwas_meta <- data.frame(
@@ -3563,9 +3563,9 @@ test_that("harmonize_twas: susie_weights column triggers adjust_susie_weights br
           target_data$variant_id <- paste0("chr", target_data$chrom, ":", target_data$pos, ":",
                                            target_data$A2, ":", target_data$A1)
         }
-        list(target_data_qced = target_data)
+        AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
       } else {
-        list(target_data_qced = target_data)
+        AlleleQCResult(harmonized_data = target_data, qc_summary = target_data)
       }
     },
     adjust_susie_weights = function(twas_data, keep_variants, ...) {

@@ -95,7 +95,7 @@ mr_format <- function(susie_result, condition, gwas_sumstats_db, coverage = NULL
       gwas_sumstats_db_extracted$variant_id, c("bhat_x"),
       match_min_prop = 0
     )
-    susie_cs_result_formatted <- susie_cs_result_formatted$target_data_qced[, c("gene_name", "variant_id", "bhat_x", "sbhat_x", "cs", "pip")]
+    susie_cs_result_formatted <- getHarmonizedData(susie_cs_result_formatted)[, c("gene_name", "variant_id", "bhat_x", "sbhat_x", "cs", "pip")]
   }
   # Ensure consistent chr prefix convention before intersecting
   if (nrow(susie_cs_result_formatted) == 0) return(.create_null_mr_df(gene_name, mr_format_spec))

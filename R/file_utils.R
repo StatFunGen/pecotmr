@@ -825,22 +825,12 @@ add_Y_residuals <- function(data_list, conditions, scale_residuals = FALSE) {
 #' @param scale_residuals Logical indicating whether to scale residuals. Default is FALSE.
 #' @param tabix_header Logical indicating whether the tabix file has a header. Default is TRUE.
 #'
-#' @return A list containing the following components:
-#' \itemize{
-#'   \item residual_Y: A list of residualized phenotype values (either a vector or a matrix).
-#'   \item residual_X: A list of residualized genotype matrices for each condition.
-#'   \item residual_Y_scalar: Scaling factor for residualized phenotype values.
-#'   \item residual_X_scalar: Scaling factor for residualized genotype values.
-#'   \item dropped_sample: A list of dropped samples for X, Y, and covariates.
-#'   \item covar: Covariate data.
-#'   \item Y: Original phenotype data.
-#'   \item X_data: Original genotype data.
-#'   \item X: Filtered genotype matrix.
-#'   \item maf: Minor allele frequency (MAF) for each variant.
-#'   \item chrom: Chromosome of the region.
-#'   \item grange: Genomic range of the region (start and end positions).
-#'   \item Y_coordinates: Phenotype coordinates if a region is specified.
-#' }
+#' @return A \code{RegionalData} S4 object. Per-condition residualized
+#'   phenotypes, residualized genotypes, and their scaling factors are
+#'   computed on demand via accessors (\code{getResidualX()},
+#'   \code{getResidualY()}, \code{getResidualXScalar()},
+#'   \code{getResidualYScalar()}, \code{getXVariance()}). Region metadata is
+#'   available via \code{getChrom()} and \code{getGrange()}.
 #'
 #' @export
 load_regional_association_data <- function(genotype, # PLINK file
@@ -937,60 +927,31 @@ load_regional_association_data <- function(genotype, # PLINK file
 
 #' Load Regional Univariate Association Data
 #'
-#' This function loads regional association data for univariate analysis.
-#' It includes residual matrices, original genotype data, and additional metadata.
+#' Loads regional association data for univariate analysis. Returns a
+#' \code{RegionalData} S4 object; derived quantities (residuals, scalars,
+#' per-variant variance) are computed lazily via accessors
+#' (\code{getResidualX}, \code{getResidualY}, \code{getResidualXScalar},
+#' \code{getResidualYScalar}, \code{getXVariance}, \code{getChrom},
+#' \code{getGrange}).
 #'
-#' @importFrom matrixStats colVars
-#' @return A list
+#' @return A \code{RegionalData} object.
 #' @export
 load_regional_univariate_data <- function(...) {
-  dat <- load_regional_association_data(...)
-  n_cond <- length(dat@phenotypes)
-  residual_X <- lapply(seq_len(n_cond), function(i) getResidualX(dat, i))
-  residual_Y <- lapply(seq_len(n_cond), function(i) getResidualY(dat, i))
-  names(residual_X) <- names(dat@phenotypes)
-  names(residual_Y) <- names(dat@phenotypes)
-  residual_X_scalar <- lapply(seq_len(n_cond), function(i) getResidualXScalar(dat, i))
-  residual_Y_scalar <- lapply(seq_len(n_cond), function(i) getResidualYScalar(dat, i))
-  region_gr <- dat@region
-  return(list(
-    residual_Y = residual_Y,
-    residual_X = residual_X,
-    residual_Y_scalar = residual_Y_scalar,
-    residual_X_scalar = residual_X_scalar,
-    dropped_sample = dat@dropped_samples,
-    maf = dat@maf,
-    X = dat@genotype_matrix,
-    chrom = if (!is.null(region_gr)) as.character(seqnames(region_gr))[1] else NULL,
-    grange = if (!is.null(region_gr)) as.character(c(start(region_gr), end(region_gr))) else NULL,
-    X_variance = lapply(residual_X, function(x) colVars(x))
-  ))
+  load_regional_association_data(...)
 }
 
 #' Load Regional Data for Regression Modeling
 #'
-#' This function loads regional association data formatted for regression modeling.
-#' It includes phenotype, genotype, and covariate matrices along with metadata.
+#' Loads regional association data formatted for regression modeling.
+#' Returns a \code{RegionalData} S4 object; the per-condition \code{X_data}
+#' previously returned in a list is available as
+#' \code{getResidualX(rd, i)} (residualized) or by subsetting
+#' \code{rd@@genotype_matrix} by condition rownames.
 #'
-#' @return A list
+#' @return A \code{RegionalData} object.
 #' @export
 load_regional_regression_data <- function(...) {
-  dat <- load_regional_association_data(...)
-  region_gr <- dat@region
-  # Build per-condition X_data by subsetting genotype_matrix to each condition's samples
-  X_data <- lapply(dat@phenotypes, function(Y_cond) {
-    common <- intersect(rownames(dat@genotype_matrix), rownames(Y_cond))
-    dat@genotype_matrix[common, , drop = FALSE]
-  })
-  return(list(
-    Y = dat@phenotypes,
-    X_data = X_data,
-    covar = dat@covariates,
-    dropped_sample = dat@dropped_samples,
-    maf = dat@maf,
-    chrom = if (!is.null(region_gr)) as.character(seqnames(region_gr))[1] else NULL,
-    grange = if (!is.null(region_gr)) as.character(c(start(region_gr), end(region_gr))) else NULL
-  ))
+  load_regional_association_data(...)
 }
 
 # return matrix of R conditions, with column names being the names of the conditions (phenotypes) and row names being sample names. Even for one condition it has to be a matrix with just one column.
@@ -1015,16 +976,19 @@ pheno_list_to_mat <- function(data_list) {
 
 #' Load and Preprocess Regional Multivariate Data
 #'
-#' This function loads regional association data and processes it into a multivariate format.
-#' It optionally filters out samples based on missingness thresholds in the response matrix.
+#' Loads regional association data and packages it for multivariate modeling.
+#' Phenotypes across conditions are joined into a single multivariate matrix
+#' (samples x conditions). When \code{matrix_y_min_complete} is supplied,
+#' samples with fewer than that many non-missing condition values are dropped.
+#' Per-variant MAF and variance are computed on the (post-filter) genotype
+#' matrix and exposed via \code{getMAF()} / \code{getXVariance()} on the
+#' returned object.
 #'
-#' @importFrom matrixStats colVars
-#' @return A list
+#' @return A \code{MultivariateRegionalData} object.
 #' @export
-load_regional_multivariate_data <- function(matrix_y_min_complete = NULL, # when Y is saved as matrix, remove those with non-missing counts less than this cutoff
+load_regional_multivariate_data <- function(matrix_y_min_complete = NULL,
                                             ...) {
   rd <- load_regional_association_data(...)
-  # Compute residuals for all conditions and combine into univariate-style list
   n_cond <- length(rd@phenotypes)
   residual_Y_list <- lapply(seq_len(n_cond), function(i) getResidualY(rd, i))
   names(residual_Y_list) <- names(rd@phenotypes)
@@ -1033,83 +997,65 @@ load_regional_multivariate_data <- function(matrix_y_min_complete = NULL, # when
   dat <- pheno_list_to_mat(dat)
 
   X <- rd@genotype_matrix
-  Y_scalar <- residual_Y_scalar_list
+  Y_scalar <- unlist(residual_Y_scalar_list)
   dropped_sample <- rd@dropped_samples
   region_gr <- rd@region
+  Y <- dat$residual_Y
 
   if (!is.null(matrix_y_min_complete)) {
-    Y <- filter_Y(dat$residual_Y, matrix_y_min_complete)
-    if (length(Y$rm_rows) > 0) {
-      X <- X[-Y$rm_rows, ]
-      Y_scalar <- unlist(Y_scalar)[-Y$rm_rows]
-      dropped_sample <- rownames(dat$residual_Y)[Y$rm_rows]
-    } else {
-      Y <- dat$residual_Y
-      Y_scalar <- unlist(Y_scalar)
+    filt <- filter_Y(Y, matrix_y_min_complete)
+    if (length(filt$rm_rows) > 0) {
+      X <- X[-filt$rm_rows, , drop = FALSE]
+      Y <- filt$Y
+      dropped_sample <- rownames(dat$residual_Y)[filt$rm_rows]
     }
-  } else {
-    Y <- dat$residual_Y
-    Y_scalar <- unlist(Y_scalar)
   }
-  return(list(
-    residual_Y = Y,
-    residual_Y_scalar = Y_scalar,
-    dropped_sample = dropped_sample,
-    X = X,
-    maf = apply(X, 2, compute_maf),
-    chrom = if (!is.null(region_gr)) as.character(seqnames(region_gr))[1] else NULL,
-    grange = if (!is.null(region_gr)) as.character(c(start(region_gr), end(region_gr))) else NULL,
-    X_variance = colVars(X)
-  ))
+
+  MultivariateRegionalData(
+    genotype_matrix = X,
+    Y_matrix = as.matrix(Y),
+    Y_scalar = Y_scalar,
+    dropped_samples = dropped_sample,
+    region = region_gr,
+    Y_coordinates = rd@Y_coordinates
+  )
 }
 
 #' Load Regional Functional Association Data
 #'
-#' This function loads precomputed regional functional association data.
+#' Loads precomputed regional functional association data. Returns a
+#' \code{RegionalData} S4 object; derived quantities are computed lazily
+#' via accessors. When \code{min_markers} is supplied, conditions whose
+#' \code{Y_coordinates} have fewer than \code{min_markers} rows are
+#' dropped from the returned \code{RegionalData}.
 #'
 #' @param min_markers Minimum number of phenotype markers required for a study.
 #'   If \code{NULL}, no marker-count filtering is applied.
-#' @return A list
+#' @return A \code{RegionalData} object.
 #' @export
 load_regional_functional_data <- function(..., min_markers = NULL) {
   rd <- load_regional_association_data(...)
-  n_cond <- length(rd@phenotypes)
-  residual_Y <- lapply(seq_len(n_cond), function(i) getResidualY(rd, i))
-  residual_X <- lapply(seq_len(n_cond), function(i) getResidualX(rd, i))
-  residual_Y_scalar <- lapply(seq_len(n_cond), function(i) getResidualYScalar(rd, i))
-  residual_X_scalar <- lapply(seq_len(n_cond), function(i) getResidualXScalar(rd, i))
-  names(residual_Y) <- names(residual_X) <- names(rd@phenotypes)
-  names(residual_Y_scalar) <- names(residual_X_scalar) <- names(rd@phenotypes)
-  region_gr <- rd@region
-  dat <- list(
-    residual_Y = residual_Y,
-    residual_X = residual_X,
-    residual_Y_scalar = residual_Y_scalar,
-    residual_X_scalar = residual_X_scalar,
-    dropped_sample = rd@dropped_samples,
-    covar = rd@covariates,
-    Y = rd@phenotypes,
-    X = rd@genotype_matrix,
-    maf = rd@maf,
-    chrom = if (!is.null(region_gr)) as.character(seqnames(region_gr))[1] else NULL,
-    grange = if (!is.null(region_gr)) as.character(c(start(region_gr), end(region_gr))) else NULL,
-    Y_coordinates = rd@Y_coordinates
-  )
-  if (!is.null(min_markers)) {
-    dat <- .filter_functional_data_by_marker_count(dat, min_markers)
-  }
-  dat
+  if (!is.null(min_markers)) rd <- .filter_regional_data_by_marker_count(rd, min_markers)
+  rd
 }
 
-.filter_functional_data_by_marker_count <- function(fdat, min_markers,
-                                                    always_keep = c("dropped_sample", "dropped_samples", "X", "chrom", "grange")) {
-  if (is.null(fdat$Y_coordinates)) return(fdat)
-  keep <- vapply(fdat$Y_coordinates, function(x) nrow(x) >= min_markers, logical(1))
-  filter_names <- setdiff(names(fdat), always_keep)
-  fdat[filter_names] <- lapply(fdat[filter_names], function(x) {
-    if (length(x) == length(keep)) x[keep] else x
-  })
-  fdat
+# Subset per-condition slots of a RegionalData by the marker counts in
+# Y_coordinates. The genotype_matrix, region, and dropped_samples are
+# preserved (those are not per-condition or are panel-wide).
+.filter_regional_data_by_marker_count <- function(rd, min_markers) {
+  if (is.null(rd@Y_coordinates)) return(rd)
+  keep <- vapply(rd@Y_coordinates, function(x) nrow(x) >= min_markers, logical(1))
+  if (all(keep)) return(rd)
+  RegionalData(
+    genotype_matrix = rd@genotype_matrix,
+    phenotypes = rd@phenotypes[keep],
+    covariates = rd@covariates[keep],
+    scale_residuals = rd@scale_residuals,
+    maf = if (length(rd@maf) == length(keep)) rd@maf[keep] else rd@maf,
+    region = rd@region,
+    dropped_samples = rd@dropped_samples,
+    Y_coordinates = rd@Y_coordinates[keep]
+  )
 }
 
 
@@ -1566,7 +1512,7 @@ load_rss_data <- function(sumstat_path, column_file_path = NULL, n_sample = 0, n
 #' sumstat_data contains the following components if exist
 #' \itemize{
 #'   \item sumstats: A list of summary statistics for the matched LD_info, each sublist contains sumstats, n, var_y from \code{load_rss_data}.
-#'   \item LD_info: A list of LD information, each sublist contains LD_variants, LD_matrix, ref_panel  \code{load_LD_matrix}.
+#'   \item LD_info: A list of \code{LDData} S4 objects (one per LD reference), as returned by \code{load_LD_matrix}.
 #' }
 #'
 #' @export
@@ -1665,11 +1611,7 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
       if (is.null(individual_data)) {
         individual_data <- dat
       } else {
-        individual_data <- stats::setNames(lapply(names(dat), function(k) {
-          c(individual_data[[k]], dat[[k]])
-        }), names(dat))
-        individual_data$chrom <- dat$chrom
-        individual_data$grange <- dat$grange
+        individual_data <- c(individual_data, dat)
       }
     }
   }
@@ -1792,40 +1734,57 @@ region_data_to_ind_input <- function(region_data) {
                 source_info = list(has_individual = FALSE, contexts = character())))
   }
 
-  X <- first_non_null(individual_data$residual_X, individual_data$X)
-  Y <- first_non_null(individual_data$residual_Y, individual_data$Y)
-  if (is.list(X) && !is.matrix(X) && !is.data.frame(X) &&
-      is.null(names(X)) && !is.null(names(Y)) && length(X) == length(Y)) {
-    names(X) <- names(Y)
+  if (is(individual_data, "RegionalData")) {
+    contexts <- names(individual_data@phenotypes)
+    n_cond <- length(contexts)
+    X <- stats::setNames(
+      lapply(seq_len(n_cond), function(i) getResidualX(individual_data, i)),
+      contexts
+    )
+    Y <- stats::setNames(
+      lapply(seq_len(n_cond), function(i) getResidualY(individual_data, i)),
+      contexts
+    )
+    aligned <- align_individual_contexts(X, Y)
+    X <- aligned$X
+    Y <- aligned$Y
+    maf <- individual_data@maf
+    X_variance <- stats::setNames(
+      lapply(seq_len(n_cond), function(i) getXVariance(individual_data, i)),
+      contexts
+    )
+    return(list(
+      X = X,
+      Y = Y,
+      maf = maf,
+      X_variance = X_variance,
+      source_info = list(has_individual = !is.null(X) && !is.null(Y),
+                         contexts = contexts)
+    ))
   }
-  if (is.list(Y) && !is.matrix(Y) && !is.data.frame(Y) &&
-      is.null(names(Y)) && !is.null(names(X)) && length(Y) == length(X)) {
-    names(Y) <- names(X)
+
+  # Post-QC shape: list(X = list_of_matrices, Y = list_of_matrices, ...)
+  if (is.list(individual_data) &&
+      (!is.null(individual_data$X) || !is.null(individual_data$Y))) {
+    X <- individual_data$X
+    Y <- individual_data$Y
+    aligned <- align_individual_contexts(X, Y)
+    X <- aligned$X
+    Y <- aligned$Y
+    maf <- individual_data$maf
+    X_variance <- individual_data$X_variance
+    contexts <- if (!is.null(X) && is.list(X) && !is.matrix(X)) names(X) else character()
+    return(list(
+      X = X,
+      Y = Y,
+      maf = maf,
+      X_variance = X_variance,
+      source_info = list(has_individual = !is.null(X) && !is.null(Y),
+                         contexts = contexts)
+    ))
   }
-  if (is.matrix(X) && is.list(Y) && !is.null(names(Y))) {
-    X <- stats::setNames(rep(list(X), length(Y)), names(Y))
-  }
-  aligned <- align_individual_contexts(X, Y)
-  X <- aligned$X
-  Y <- aligned$Y
-  maf <- individual_data$maf
-  X_variance <- individual_data$X_variance
-  if (is.list(maf) && is.null(names(maf)) && !is.null(names(X)) && length(maf) == length(X)) {
-    names(maf) <- names(X)
-  }
-  if (is.list(X_variance) && is.null(names(X_variance)) && !is.null(names(X)) &&
-      length(X_variance) == length(X)) {
-    names(X_variance) <- names(X)
-  }
-  contexts <- unique(c(names(X), names(Y)))
-  list(
-    X = X,
-    Y = Y,
-    maf = maf,
-    X_variance = X_variance,
-    source_info = list(has_individual = !is.null(X) && !is.null(Y),
-                       contexts = contexts)
-  )
+
+  stop("region_data$individual_data must be a RegionalData object or a post-QC list with X/Y entries")
 }
 
 #' Convert loaded regional data to RSS inputs
@@ -1834,102 +1793,10 @@ region_data_to_ind_input <- function(region_data) {
 #' @return A list containing named RSS inputs, matched LD data, and source
 #'   information.
 #' @export
-.legacy_list_to_LDData <- function(ld_list) {
-  # Convert legacy LD list to LDData S4 object
-  if (is(ld_list, "LDData")) return(ld_list)
-  ld_mat <- ld_list$LD_matrix
-  ref_panel <- ld_list$ref_panel
-  ld_variants <- ld_list$LD_variants
-  # Build ref_panel if missing
-  if (is.null(ref_panel) && !is.null(ld_variants)) {
-    if (is.data.frame(ld_variants)) {
-      ref_panel <- ld_variants
-    } else {
-      parsed <- tryCatch(parse_variant_id(ld_variants), error = function(e) NULL)
-      if (!is.null(parsed)) {
-        ref_panel <- parsed
-        ref_panel$variant_id <- ld_variants
-      }
-    }
-  }
-  if (is.null(ref_panel)) return(ld_list)  # cannot convert
-  if (is.data.frame(ref_panel) && !"variant_id" %in% names(ref_panel)) {
-    ref_panel$variant_id <- format_variant_id(ref_panel$chrom, ref_panel$pos, ref_panel$A2, ref_panel$A1)
-  }
-  if (!"chrom" %in% names(ref_panel)) ref_panel$chrom <- "1"
-  ref_panel$chrom <- as.character(ref_panel$chrom)
-  variants_gr <- .ref_panel_to_granges(ref_panel)
-  is_genotype <- isTRUE(ld_list$is_genotype) || (is.matrix(ld_mat) && nrow(ld_mat) != ncol(ld_mat))
-  corr <- if (is_genotype) cor(ld_mat) else ld_mat
-  bm <- ld_list$block_metadata
-  if (is.null(bm)) bm <- .infer_single_ld_block_metadata(ref_panel)
-  if (is.null(bm)) bm <- data.frame()
-  LDData(
-    correlation = corr,
-    variants = variants_gr,
-    block_metadata = bm
-  )
-}
-
 region_data_to_rss_input <- function(region_data) {
-  make_ld_data_from_matrix <- function(ld, variant_ids = NULL) {
-    is_genotype <- is.matrix(ld) && nrow(ld) != ncol(ld)
-    if (!is.null(variant_ids) && is.matrix(ld)) {
-      if (is.null(colnames(ld)) && length(variant_ids) == ncol(ld)) {
-        colnames(ld) <- variant_ids
-      }
-      if (!is_genotype && is.null(rownames(ld)) && length(variant_ids) == nrow(ld)) {
-        rownames(ld) <- variant_ids
-      }
-    }
-    ids <- if (is.matrix(ld) && !is_genotype) rownames(ld) else colnames(ld)
-    parsed <- NULL
-    if (!is.null(ids) && length(ids) > 0) {
-      parsed <- tryCatch(parse_variant_id(ids), error = function(e) NULL)
-      if (!is.null(parsed)) {
-        ids <- format_variant_id(parsed$chrom, parsed$pos, parsed$A2, parsed$A1)
-        if (!is_genotype && is.matrix(ld)) rownames(ld) <- colnames(ld) <- ids
-        if (is_genotype && is.matrix(ld)) colnames(ld) <- ids
-        parsed$variant_id <- ids
-      }
-    }
-    # Build LDData S4 object
-    if (!is.null(parsed)) {
-      ref_panel_df <- parsed
-      ref_panel_df$chrom <- as.character(ref_panel_df$chrom)
-      variants_gr <- .ref_panel_to_granges(ref_panel_df)
-      corr <- if (is_genotype) cor(ld) else ld
-      bm <- .infer_single_ld_block_metadata(ref_panel_df)
-      LDData(
-        correlation = corr,
-        variants = variants_gr,
-        block_metadata = bm
-      )
-    } else {
-      # Cannot parse variant IDs — fall back to legacy list
-      list(
-        LD_matrix = ld,
-        LD_variants = ids,
-        ref_panel = parsed,
-        block_metadata = NULL,
-        is_genotype = isTRUE(is_genotype)
-      )
-    }
-  }
-
   rss_input_from_qced_sumstat <- function(sumstat_data) {
-    variant_ids_from_rss <- function(rss) {
-      ss <- rss$sumstats
-      if (is.null(ss)) return(character())
-      if ("variant_id" %in% colnames(ss)) return(normalize_variant_id(as.character(ss$variant_id)))
-      if (all(c("chrom", "pos", "A2", "A1") %in% colnames(ss))) {
-        return(format_variant_id(ss$chrom, ss$pos, ss$A2, ss$A1))
-      }
-      character()
-    }
-
     rss_input <- sumstat_data$sumstats
-    LD_mat <- sumstat_data$LD_mat
+    LD_data_in <- sumstat_data$LD_data
     LD_match <- sumstat_data$LD_match
     studies <- names(rss_input)
     LD_data <- list()
@@ -1937,13 +1804,14 @@ region_data_to_rss_input <- function(region_data) {
     for (i in seq_along(studies)) {
       study <- studies[[i]]
       ld_name <- if (!is.null(LD_match) && length(LD_match) >= i) LD_match[[i]] else study
-      if (is.null(ld_name) || is.na(ld_name) || !ld_name %in% names(LD_mat)) {
-        ld_name <- names(LD_mat)[min(i, length(LD_mat))]
+      if (is.null(ld_name) || is.na(ld_name) || !ld_name %in% names(LD_data_in)) {
+        ld_name <- names(LD_data_in)[min(i, length(LD_data_in))]
       }
-      ld <- LD_mat[[ld_name]]
-      rss <- rss_input[[study]]
-      variant_ids <- variant_ids_from_rss(rss)
-      LD_data[[study]] <- make_ld_data_from_matrix(ld, variant_ids)
+      ld <- LD_data_in[[ld_name]]
+      if (!is.null(ld) && !is(ld, "LDData")) {
+        stop("region_data$sumstat_data$LD_data entries must be LDData objects.")
+      }
+      LD_data[[study]] <- ld
       ld_group[[study]] <- ld_name
     }
     list(
@@ -1961,7 +1829,7 @@ region_data_to_rss_input <- function(region_data) {
                 source_info = list(has_sumstat = FALSE, studies = character(),
                                    ld_group = character())))
   }
-  if (!is.null(sumstat_data$LD_mat)) {
+  if (!is.null(sumstat_data$LD_data)) {
     return(rss_input_from_qced_sumstat(sumstat_data))
   }
 
@@ -1976,16 +1844,16 @@ region_data_to_rss_input <- function(region_data) {
     if (is.null(group_name) || is.na(group_name) || group_name == "") {
       group_name <- paste0("LD", ld_index)
     }
+    ld_entry <- sumstat_data$LD_info[[ld_index]]
+    if (!is.null(ld_entry) && !is(ld_entry, "LDData")) {
+      stop("region_data$sumstat_data$LD_info entries must be LDData objects.")
+    }
     for (study in names(studies)) {
       output_name <- study
       if (output_name %in% names(rss_input)) {
         output_name <- make.unique(c(names(rss_input), output_name))[length(rss_input) + 1]
       }
       rss_input[[output_name]] <- studies[[study]]
-      ld_entry <- sumstat_data$LD_info[[ld_index]]
-      if (!is(ld_entry, "LDData") && is.list(ld_entry)) {
-        ld_entry <- .legacy_list_to_LDData(ld_entry)
-      }
       LD_data[[output_name]] <- ld_entry
       ld_group[[output_name]] <- group_name
     }

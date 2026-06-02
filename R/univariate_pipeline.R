@@ -190,8 +190,9 @@ univariate_analysis_pipeline <- function(
 #' @param ld_path A single LD metadata TSV path, or comma-separated paths for
 #'   mixture panels (e.g., "ld_EUR.tsv,ld_AFR.tsv").
 #' @param region Region string "chr:start-end".
-#' @return An LD_data list from load_LD_matrix. For single panels, returns as-is.
-#'   For mixture panels, LD_matrix is a list of X matrices (one per panel).
+#' @return An \code{LDData} S4 object. For single panels, returns the result of
+#'   \code{load_LD_matrix()} unchanged. For mixture panels, \code{genotype_handle}
+#'   is a list of per-panel genotype handles sharing the first panel's variants.
 #' @export
 load_study_LD <- function(ld_path, region) {
   paths <- strsplit(ld_path, ",")[[1]]
@@ -222,11 +223,10 @@ load_study_LD <- function(ld_path, region) {
 #'
 #' @param sumstat_path File path to the summary statistics.
 #' @param column_file_path File path to the column mapping file.
-#' @param LD_data A list from load_LD_matrix containing LD_matrix, LD_variants,
-#'   ref_panel, block_metadata, and is_genotype flag. When is_genotype=TRUE
-#'   (from return_genotype=TRUE), LD_matrix contains genotype X and susie_rss
-#'   uses the z+X interface. Local R is computed only for QC stages that
-#'   require a correlation matrix.
+#' @param LD_data An \code{LDData} S4 object from \code{load_LD_matrix()}. When
+#'   \code{hasGenotypes(LD_data)} is TRUE (from \code{return_genotype=TRUE}),
+#'   susie_rss uses the z+X interface via \code{getGenotypes()}. Local R is
+#'   computed only for QC stages that require a correlation matrix.
 #' @param n_sample Sample size. If 0, retrieved from the sumstat file.
 #' @param n_case Number of cases (for case-control studies).
 #' @param n_control Number of controls (for case-control studies).
@@ -314,52 +314,26 @@ rss_analysis_pipeline <- function(
     R_finite = R_finite,
     R_mismatch = R_mismatch
   )
-  if (!is.null(qc_record$rss_input)) {
-    preprocess_results <- qc_record$preprocess
-    sumstats <- qc_record$rss_input$sumstats
-    LD_mat <- qc_record$LD_matrix
-    qc_results <- list(outlier_number = qc_record$outlier_number)
-  } else {
-    # Compatibility for tests or callers that mock the historical
-    # LD-mismatch-only summary_stats_qc() return shape.
-    preprocess_results <- list(sumstats = qc_record$sumstats, LD_mat = qc_record$LD_mat)
-    sumstats <- qc_record$sumstats
-    LD_mat <- qc_record$LD_mat
-    qc_results <- qc_record
-    if (isTRUE(impute)) {
-      ref_panel <- getRefPanel(LD_data)
-      if (use_X) {
-        X_sub <- subset_X_data(getVariantIds(LD_data))
-        if (is_X_list) {
-          X_scaled <- lapply(X_sub, function(Xk) { Xk <- scale(Xk); Xk[is.na(Xk)] <- 0; Xk })
-        } else {
-          X_scaled <- scale(X_sub)
-          X_scaled[is.na(X_scaled)] <- 0
-        }
-        impute_results <- raiss(ref_panel, sumstats,
-                                genotype_matrix = X_scaled,
-                                R2_threshold = impute_opts$R2_threshold,
-                                minimum_ld = impute_opts$minimum_ld,
-                                lamb = impute_opts$lamb)
-      } else {
-        LD_matrix <- partition_LD_matrix(LD_data)
-        impute_results <- raiss(ref_panel, sumstats, LD_matrix,
-                                rcond = impute_opts$rcond,
-                                R2_threshold = impute_opts$R2_threshold,
-                                minimum_ld = impute_opts$minimum_ld,
-                                lamb = impute_opts$lamb)
-      }
-      sumstats <- impute_results$result_filter
-      LD_mat <- impute_results$LD_mat
-    }
-    qc_record$skipped <- FALSE
+  if (!is(qc_record, "QCResult")) {
+    stop("summary_stats_qc must return a QCResult object.")
   }
+  rss_record <- getRSSInput(qc_record)
+  sumstats <- rss_record$sumstats
+  qc_ld <- getLDData(qc_record)
+  LD_mat <- if (is.null(qc_ld)) NULL else if (hasGenotypes(qc_ld)) getGenotypes(qc_ld) else getCorrelation(qc_ld)
+  preprocess_snapshot <- getPreprocess(qc_record)
+  preprocess_ld <- preprocess_snapshot$ld_data
+  preprocess_results <- list(
+    sumstats = preprocess_snapshot$sumstats,
+    LD_mat = if (is.null(preprocess_ld)) NULL else if (hasGenotypes(preprocess_ld)) getGenotypes(preprocess_ld) else getCorrelation(preprocess_ld)
+  )
+  qc_results <- list(outlier_number = getOutlierNumber(qc_record))
 
   if (nrow(sumstats) == 0) {
     message("No variants left after preprocessing. Returning empty results.")
     return(list(rss_data_analyzed = sumstats))
   }
-  if (isTRUE(qc_record$skipped)) {
+  if (isSkipped(qc_record)) {
     return(list(rss_data_analyzed = sumstats))
   }
 

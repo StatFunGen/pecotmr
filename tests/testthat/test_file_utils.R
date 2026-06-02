@@ -980,8 +980,9 @@ test_that("Test load_regional_univariate_data",{
         xvar_cutoff = 0.2,
         phenotype_header = 3,
         keep_samples = NULL)
-    expect_true("residual_X" %in% names(res))
-    expect_true("residual_Y" %in% names(res))
+    expect_true(is(res, "RegionalData"))
+    expect_true(is.matrix(getResidualX(res, 1L)))
+    expect_true(is.matrix(getResidualY(res, 1L)))
 })
 
 test_that("Test load_regional_regression_data",{
@@ -1009,20 +1010,24 @@ test_that("Test load_regional_regression_data",{
         xvar_cutoff = 0.2,
         phenotype_header = 3,
         keep_samples = NULL)
-    expect_equal(nrow(res$X_data[[1]]), 10)
-    expect_equal(ncol(res$X_data[[1]]), 10)
+    expect_true(is(res, "RegionalData"))
+    X_mat <- res@genotype_matrix
+    expect_equal(nrow(X_mat), 10)
+    expect_equal(ncol(X_mat), 10)
     colnames(geno_data) <- gsub("_", ":", colnames(geno_data))
-    expect_equal(res$X_data[[1]][order(as.numeric(gsub("Sample_", "", rownames(res$X_data[[1]])))), , drop = FALSE], geno_data)
-    expect_equal(length(res$Y[[1]]), 10)
+    expect_equal(X_mat[order(as.numeric(gsub("Sample_", "", rownames(X_mat)))), , drop = FALSE], geno_data)
+    Y_mat <- res@phenotypes[[1]]
+    expect_equal(nrow(Y_mat), 10)
     expect_equal(
-        setNames(res$Y[[1]][order(as.numeric(gsub("Sample_", "", rownames(res$Y[[1]]))))],
-rownames(res$Y[[1]])[order(as.numeric(gsub("Sample_", "", rownames(res$Y[[1]]))))]),
+        setNames(as.numeric(Y_mat[order(as.numeric(gsub("Sample_", "", rownames(Y_mat)))), 1]),
+                 rownames(Y_mat)[order(as.numeric(gsub("Sample_", "", rownames(Y_mat))))]),
         setNames(
             as.numeric(pheno_data[[1]][4:13,]),
             names(pheno_data[[1]][4:13,])))
-    expect_equal(nrow(res$covar[[1]]), 10)
-    expect_equal(ncol(res$covar[[1]]), 5)
-    expect_equal(res$covar[[1]][order(as.numeric(gsub("Sample_", "", rownames(res$covar[[1]])))), , drop = FALSE], covar_data)
+    covar_mat <- res@covariates[[1]]
+    expect_equal(nrow(covar_mat), 10)
+    expect_equal(ncol(covar_mat), 5)
+    expect_equal(covar_mat[order(as.numeric(gsub("Sample_", "", rownames(covar_mat)))), , drop = FALSE], covar_data)
 })
 
 test_that("load_regional_multivariate_data filters Y by min completeness", {
@@ -1048,9 +1053,10 @@ test_that("load_regional_multivariate_data filters Y by min completeness", {
     imiss_cutoff = 0.70, maf_cutoff = 0.1, mac_cutoff = (0.1 * 10 * 2),
     xvar_cutoff = 0.2, phenotype_header = 3, keep_samples = NULL
   )
-  expect_true(!is.null(result$X))
-  expect_true(!is.null(result$maf))
-  expect_true(!is.null(result$X_variance))
+  expect_true(is(result, "MultivariateRegionalData"))
+  expect_true(is.matrix(result@genotype_matrix))
+  expect_true(is.numeric(getMaf(result)))
+  expect_true(is.numeric(getXVariance(result)))
 })
 
 test_that("load_regional_functional_data returns full association data", {
@@ -1073,8 +1079,9 @@ test_that("load_regional_functional_data returns full association data", {
     imiss_cutoff = 0.70, maf_cutoff = 0.1, mac_cutoff = (0.1 * 10 * 2),
     xvar_cutoff = 0.2, phenotype_header = 3, keep_samples = NULL
   )
-  expect_true("residual_Y" %in% names(result))
-  expect_true("X" %in% names(result))
+  expect_true(is(result, "RegionalData"))
+  expect_true(is.matrix(getResidualY(result, 1L)))
+  expect_true(is.matrix(result@genotype_matrix))
 })
 
 # ===========================================================================
@@ -1587,10 +1594,11 @@ test_that("load_multitask_regional_data individual-level path returns expected s
   expect_named(result, c("individual_data", "sumstat_data"))
   expect_false(is.null(result$individual_data))
   expect_true(is.null(result$sumstat_data))
-  # Individual data should have standard fields
-  expect_true("residual_Y" %in% names(result$individual_data))
-  expect_true("X" %in% names(result$individual_data))
-  expect_true("chrom" %in% names(result$individual_data))
+  # Individual data should be a RegionalData
+  expect_true(is(result$individual_data, "RegionalData"))
+  expect_true(is.matrix(getResidualY(result$individual_data, 1L)))
+  expect_true(is.matrix(result$individual_data@genotype_matrix))
+  expect_true(!is.null(getChrom(result$individual_data)))
 })
 
 test_that("load_multitask_regional_data loads and merges multiple genotype groups", {
@@ -1604,20 +1612,19 @@ test_that("load_multitask_regional_data loads and merges multiple genotype group
       matrix(1, nrow = 2, ncol = 1,
              dimnames = list(c("s1", "s2"), nm))
     }), conditions)
-    list(
-      residual_Y = y,
-      residual_X = x,
-      residual_Y_scalar = setNames(as.list(rep(1, length(conditions))), conditions),
-      residual_X_scalar = setNames(as.list(rep(1, length(conditions))), conditions),
-      dropped_sample = list(X = list(), Y = list(), covar = list()),
-      covar = list(),
-      Y = y,
-      X_data = x,
-      X = do.call(cbind, x),
-      maf = setNames(lapply(x, function(mat) rep(0.1, ncol(mat))), conditions),
-      chrom = "chr1",
-      grange = c("1", "100"),
-      Y_coordinates = list()
+    covar_list <- setNames(lapply(conditions, function(nm) {
+      matrix(numeric(0), nrow = 2, ncol = 0, dimnames = list(c("s1", "s2"), NULL))
+    }), conditions)
+    maf_list <- setNames(lapply(x, function(mat) rep(0.1, ncol(mat))), conditions)
+    RegionalData(
+      genotype_matrix = do.call(cbind, x),
+      phenotypes = y,
+      covariates = covar_list,
+      scale_residuals = FALSE,
+      maf = maf_list,
+      region = NULL,
+      dropped_samples = list(X = list(), Y = list(), covar = list()),
+      Y_coordinates = NULL
     )
   }
 
@@ -1655,8 +1662,8 @@ test_that("load_multitask_regional_data loads and merges multiple genotype group
   expect_equal(calls[[2]]$phenotype, paste0("pheno", 3:4))
   expect_equal(calls[[1]]$extract_region_name, as.list(paste0("gene", 1:2)))
   expect_equal(calls[[2]]$extract_region_name, as.list(paste0("gene", 3:4)))
-  expect_true("residual_X" %in% names(result$individual_data))
-  expect_equal(names(result$individual_data$residual_X), paste0("cond", 1:4))
+  expect_true(is(result$individual_data, "RegionalData"))
+  expect_equal(names(result$individual_data@phenotypes), paste0("cond", 1:4))
 })
 
 test_that("load_multitask_regional_data defaults missing individual condition names", {
@@ -1670,20 +1677,19 @@ test_that("load_multitask_regional_data defaults missing individual condition na
       matrix(1, nrow = 2, ncol = 1,
              dimnames = list(c("s1", "s2"), nm))
     }), conditions)
-    list(
-      residual_Y = y,
-      residual_X = x,
-      residual_Y_scalar = setNames(as.list(rep(1, length(conditions))), conditions),
-      residual_X_scalar = setNames(as.list(rep(1, length(conditions))), conditions),
-      dropped_sample = list(X = list(), Y = list(), covar = list()),
-      covar = list(),
-      Y = y,
-      X_data = x,
-      X = do.call(cbind, x),
-      maf = setNames(lapply(x, function(mat) rep(0.1, ncol(mat))), conditions),
-      chrom = "chr1",
-      grange = c("1", "100"),
-      Y_coordinates = list()
+    covar_list <- setNames(lapply(conditions, function(nm) {
+      matrix(numeric(0), nrow = 2, ncol = 0, dimnames = list(c("s1", "s2"), NULL))
+    }), conditions)
+    maf_list <- setNames(lapply(x, function(mat) rep(0.1, ncol(mat))), conditions)
+    RegionalData(
+      genotype_matrix = do.call(cbind, x),
+      phenotypes = y,
+      covariates = covar_list,
+      scale_residuals = FALSE,
+      maf = maf_list,
+      region = NULL,
+      dropped_samples = list(X = list(), Y = list(), covar = list()),
+      Y_coordinates = NULL
     )
   }
 
@@ -1714,7 +1720,7 @@ test_that("load_multitask_regional_data defaults missing individual condition na
   expect_equal(length(calls), 2L)
   expect_equal(calls[[1]]$conditions, paste0("condition", 1:2))
   expect_equal(calls[[2]]$conditions, paste0("condition", 3:4))
-  expect_equal(names(result$individual_data$residual_X), paste0("condition", 1:4))
+  expect_equal(names(result$individual_data@phenotypes), paste0("condition", 1:4))
 })
 
 test_that("load_multitask_regional_data validates individual input vector lengths", {
@@ -1831,7 +1837,8 @@ test_that("load_multitask_regional_data both paths simultaneously", {
   expect_false(is.null(result$individual_data))
   expect_false(is.null(result$sumstat_data))
   # Both paths should produce valid data
-  expect_true("X" %in% names(result$individual_data))
+  expect_true(is(result$individual_data, "RegionalData"))
+  expect_true(is.matrix(result$individual_data@genotype_matrix))
   expect_true(is.data.frame(result$sumstat_data$sumstats[[1]][["ss_cond1"]]$sumstats))
 })
 
@@ -2706,14 +2713,17 @@ test_that("load_regional_univariate_data returns correct fields", {
     region = "chr21:17513043-17593579",
     conditions = "cond1"
   )
-  expected_names <- c("residual_Y", "residual_X", "residual_Y_scalar",
-                       "residual_X_scalar", "dropped_sample", "maf",
-                       "X", "chrom", "grange", "X_variance")
-  expect_true(all(expected_names %in% names(result)))
-  expect_equal(nrow(result$X), 100L)
-  # X_variance should be a list with one entry per condition
-  expect_true(is.list(result$X_variance))
-  expect_equal(length(result$X_variance[[1]]), ncol(result$X))
+  expect_true(is(result, "RegionalData"))
+  expect_equal(nrow(result@genotype_matrix), 100L)
+  # Per-condition accessors should return valid data
+  expect_true(is.matrix(getResidualX(result, 1L)))
+  expect_true(is.matrix(getResidualY(result, 1L)))
+  x_var <- getXVariance(result, 1L)
+  expect_true(is.numeric(x_var))
+  expect_equal(length(x_var), ncol(result@genotype_matrix))
+  # Chrom and grange accessors should work
+  expect_true(!is.null(getChrom(result)))
+  expect_true(!is.null(getGrange(result)))
 })
 
 # ===========================================================================
@@ -2731,12 +2741,12 @@ test_that("load_regional_regression_data returns correct fields", {
     region = "chr21:17513043-17593579",
     conditions = "cond1"
   )
-  expected_names <- c("Y", "X_data", "covar", "dropped_sample",
-                       "maf", "chrom", "grange")
-  expect_true(all(expected_names %in% names(result)))
-  expect_true(is.list(result$Y))
-  expect_true(is.list(result$X_data))
-  expect_true(is.list(result$covar))
+  expect_true(is(result, "RegionalData"))
+  expect_true(is.list(result@phenotypes))
+  expect_true(is.matrix(result@phenotypes[[1]]))
+  expect_true(is.matrix(result@genotype_matrix))
+  expect_true(is.list(result@covariates))
+  expect_true(is.matrix(result@covariates[[1]]))
 })
 
 # ===========================================================================
@@ -2754,12 +2764,12 @@ test_that("load_regional_multivariate_data returns correct fields", {
     region = "chr21:17513043-17593579",
     conditions = "cond1"
   )
-  expected_names <- c("residual_Y", "residual_Y_scalar", "dropped_sample",
-                       "X", "maf", "chrom", "grange", "X_variance")
-  expect_true(all(expected_names %in% names(result)))
-  # residual_Y should be a matrix (not list) after pheno_list_to_mat
-  expect_true(is.matrix(result$residual_Y))
-  expect_equal(nrow(result$X), 100L)
+  expect_true(is(result, "MultivariateRegionalData"))
+  expect_true(is.matrix(getYMatrix(result)))
+  expect_equal(nrow(result@genotype_matrix), 100L)
+  expect_true(is.numeric(getYScalar(result)))
+  expect_true(is.numeric(getMaf(result)))
+  expect_true(is.numeric(getXVariance(result)))
 })
 
 # =============================================================================

@@ -1762,13 +1762,14 @@ twas_weights_sumstat_pipeline <- function(
       impute_opts = impute_opts,
       return_on_skip = "null"
     )
-    if (is.null(qc_result) || isTRUE(qc_result$skipped)) {
+    if (is.null(qc_result) || isSkipped(qc_result)) {
       return(list(twas_weights = NULL, finemapping_result = NULL,
                   qc_summary = list(skipped = TRUE)))
     }
-    sumstats <- qc_result$rss_input$sumstats
-    LD_mat <- qc_result$LD_matrix
-    outlier_number <- qc_result$outlier_number
+    sumstats <- getRSSInput(qc_result)$sumstats
+    qc_ld <- getLDData(qc_result)
+    LD_mat <- if (is.null(qc_ld)) NULL else if (hasGenotypes(qc_ld)) getGenotypes(qc_ld) else getCorrelation(qc_ld)
+    outlier_number <- getOutlierNumber(qc_result)
   } else {
     # No QC requested: extract LD matrix directly
     if (is.matrix(LD_data)) {

@@ -90,7 +90,7 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
           colnames(weights_matrix)[!colnames(weights_matrix) %in% c("chrom", "pos", "A2", "A1")],
           match_min_prop = 0
         )
-        qced_data <- weights_matrix_qced$target_data_qced
+        qced_data <- getHarmonizedData(weights_matrix_qced)
         weights_matrix_subset <- as.matrix(qced_data[, !colnames(qced_data) %in% c(
           "chrom", "pos", "A2", "A1", "variant_id", "variants_id_original"
         ), drop = FALSE])
@@ -128,11 +128,13 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
           names(susie_intermediate[["pip"]]) <- original_weight_variants # original variants not yet qced
           pip <- susie_intermediate[["pip"]]
           pip_qced <- match_ref_panel(cbind(parse_variant_id(names(pip)), pip), sketch_variant_ids, "pip", match_min_prop = 0)
-          susie_intermediate[["pip"]] <- abs(pip_qced$target_data_qced$pip)
-          names(susie_intermediate[["pip"]]) <- pip_qced$target_data_qced$variant_id
+          pip_qced_df <- getHarmonizedData(pip_qced)
+          susie_intermediate[["pip"]] <- abs(pip_qced_df$pip)
+          names(susie_intermediate[["pip"]]) <- pip_qced_df$variant_id
           susie_intermediate[["cs_variants"]] <- lapply(susie_intermediate[["cs_variants"]], function(x) {
             variant_qc <- match_ref_panel(x, sketch_variant_ids, match_min_prop = 0)
-            variant_qc$target_data_qced$variant_id[variant_qc$target_data_qced$variant_id %in% postqc_weight_variants]
+            variant_qc_df <- getHarmonizedData(variant_qc)
+            variant_qc_df$variant_id[variant_qc_df$variant_id %in% postqc_weight_variants]
           })
           mol_res[["susie_weights_intermediate_qced"]][[context]] <- susie_intermediate
         }
@@ -219,7 +221,7 @@ harmonize_gwas <- function(gwas_file, query_region, ld_variants, col_to_flip=NUL
     # check for overlapping variants
     if (!any(gwas_data_sumstats$pos %in% gsub("\\:.*$", "", sub("^.*?\\:", "", ld_variants)))) return(NULL)
     gwas_allele_flip <- match_ref_panel(gwas_data_sumstats, ld_variants, col_to_flip=col_to_flip, match_min_prop = match_min_prop)
-    gwas_data_sumstats <- gwas_allele_flip$target_data_qced # post-qc gwas data that is flipped and corrected - gwas study level
+    gwas_data_sumstats <- getHarmonizedData(gwas_allele_flip) # post-qc gwas data that is flipped and corrected - gwas study level
     gwas_data_sumstats <- gwas_data_sumstats[!is.na(gwas_data_sumstats$z) & !is.infinite(gwas_data_sumstats$z), ]
     return(gwas_data_sumstats)
 }

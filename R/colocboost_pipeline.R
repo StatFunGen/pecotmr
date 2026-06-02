@@ -66,15 +66,18 @@ region_data_to_colocboost_input <- function(region_data) {
   ind_records <- ind_records_from_input(ind_input)
   ind_args <- .cb_format_individual(ind_records)
 
-  # Build sumstat_records from rss_input which already contains LDData S4
-  # objects (region_data_to_rss_input converts any legacy lists). When the
-  # LDData carries genotypes, pass them through so build_ld_args routes them
-  # to X_ref; otherwise pass the correlation matrix as LD.
+  # Wrap each (rss_input, LD_data) pair as a QCResult (with no QC applied)
+  # so .cb_format_sumstat consumes a uniform shape regardless of whether the
+  # records came from summary_stats_qc or directly from region_data.
   sumstat_records <- lapply(names(rss_input$rss_input), function(study) {
-    ld_data <- rss_input$LD_data[[study]]
-    ld_mat <- if (hasGenotypes(ld_data)) getGenotypes(ld_data) else getCorrelation(ld_data)
-    list(rss_input = rss_input$rss_input[[study]],
-         LD_matrix = ld_mat)
+    QCResult(
+      ld_data = rss_input$LD_data[[study]],
+      rss_input = rss_input$rss_input[[study]],
+      preprocess = list(),
+      outlier_number = 0L,
+      skipped = FALSE,
+      skip_reason = ""
+    )
   })
   names(sumstat_records) <- names(rss_input$rss_input)
   sumstat_args <- .cb_format_sumstat(sumstat_records)
@@ -456,7 +459,8 @@ colocboost_pipeline <- function(
     # Extract individual contexts
     if (!is.null(individual_data)) {
       if (is.null(phenotypes_init)) {
-        phenotypes$individual_contexts <- names(individual_data$residual_Y)
+        # Pre-QC: individual_data is a RegionalData (S4)
+        phenotypes$individual_contexts <- names(getPhenotypes(individual_data))
       } else {
         null_Y <- which(sapply(individual_data$Y, is.null))
         if (length(null_Y) == 0) {
@@ -536,18 +540,46 @@ colocboost_pipeline <- function(
 
   ####### ========= Filtering events before QC =========== #########
   if (!is.null(event_filters) & !is.null(region_data$individual_data)) {
-    Y <- region_data$individual_data$residual_Y
-    Y <- lapply(seq_along(Y), function(i) {
-      y <- Y[[i]]
+    ind_data <- region_data$individual_data
+    Y_list <- getPhenotypes(ind_data)
+    Y_names <- names(Y_list)
+    Y_filtered <- lapply(seq_along(Y_list), function(i) {
+      y <- Y_list[[i]]
       events <- colnames(y)
-      condition <- names(Y)[i]
+      condition <- Y_names[i]
       filtered_events <- filter_events(events, event_filters, condition)
       if (is.null(filtered_events)) {
         return(NULL)
       }
       y[, filtered_events, drop = FALSE]
-    }) %>% setNames(names(region_data$individual_data$residual_Y))
-    region_data$individual_data$residual_Y <- Y
+    }) %>% setNames(Y_names)
+    # Drop conditions whose events were entirely filtered out so the
+    # RegionalData validity is preserved; ones to drop are remembered for
+    # downstream QC messaging via a synthetic NULL-Y list.
+    keep_cond <- !vapply(Y_filtered, is.null, logical(1))
+    if (!any(keep_cond)) {
+      region_data$individual_data <- NULL
+    } else {
+      Y_clean <- Y_filtered[keep_cond]
+      # Attach a record of dropped conditions for extract_contexts_studies()
+      # to surface the post-QC "Skipping follow-up analysis" message.
+      dropped_names <- names(Y_filtered)[!keep_cond]
+      maf_list <- ind_data@maf
+      Y_coords <- ind_data@Y_coordinates
+      region_data$individual_data <- RegionalData(
+        genotype_matrix = getGenotypeMatrix(ind_data),
+        phenotypes = Y_clean,
+        covariates = getCovariates(ind_data)[keep_cond],
+        scale_residuals = ind_data@scale_residuals,
+        maf = if (length(maf_list) == length(keep_cond)) maf_list[keep_cond] else maf_list,
+        region = ind_data@region,
+        dropped_samples = ind_data@dropped_samples,
+        Y_coordinates = if (!is.null(Y_coords)) Y_coords[keep_cond] else NULL
+      )
+      if (length(dropped_names) > 0) {
+        attr(region_data$individual_data, "filtered_out_contexts") <- dropped_names
+      }
+    }
   }
 
   ####### ========= QC for the region_data ======== ########
@@ -674,25 +706,25 @@ qc_regional_data <- function(region_data,
   }
   qced_sumstat_to_region_data <- function(sumstat_qc) {
     if (is.null(sumstat_qc) || length(sumstat_qc) == 0) return(NULL)
-    if (!is.null(sumstat_qc$rss_input) && !is.null(sumstat_qc$LD_matrix)) {
+    if (is(sumstat_qc, "QCResult")) {
       sumstat_qc <- list(study1 = sumstat_qc)
     }
-    sumstats <- lapply(sumstat_qc, `[[`, "rss_input")
-    LD_mat <- list()
+    sumstats <- lapply(sumstat_qc, getRSSInput)
+    LD_data <- list()
     LD_match <- character()
     ld_variant_index <- list()
     for (study in names(sumstat_qc)) {
-      ld <- sumstat_qc[[study]]$LD_matrix
-      variant_key <- paste(colnames(ld), collapse = ",")
+      ld_obj <- getLDData(sumstat_qc[[study]])
+      variant_key <- paste(if (is.null(ld_obj)) "" else getVariantIds(ld_obj), collapse = ",")
       if (variant_key %in% names(ld_variant_index)) {
         LD_match <- c(LD_match, ld_variant_index[[variant_key]])
       } else {
-        LD_mat[[study]] <- ld
+        LD_data[[study]] <- ld_obj
         ld_variant_index[[variant_key]] <- study
         LD_match <- c(LD_match, study)
       }
     }
-    list(sumstats = sumstats, LD_mat = LD_mat, LD_match = LD_match)
+    list(sumstats = sumstats, LD_data = LD_data, LD_match = LD_match)
   }
 
   individual_data <- NULL
@@ -707,6 +739,25 @@ qc_regional_data <- function(region_data,
       pip_cutoff_to_skip = pip_cutoff_to_skip_ind
     )
     individual_data <- qced_individual_to_region_data(ind_qc)
+    # If event_filters dropped any pre-QC contexts entirely, surface them as
+    # NULL-Y entries so downstream extract_contexts_studies() emits the
+    # "Skipping follow-up analysis for individual traits ..." message.
+    dropped_ctx <- attr(region_data$individual_data, "filtered_out_contexts")
+    if (!is.null(dropped_ctx) && length(dropped_ctx) > 0 && !is.null(individual_data)) {
+      for (ctx in dropped_ctx) {
+        individual_data$X[[ctx]] <- NULL
+        individual_data$Y[[ctx]] <- list(NULL)[[1]]
+      }
+      # NULL inserts via [[ removed entries; re-insert as explicit NULL.
+      for (ctx in dropped_ctx) {
+        if (!ctx %in% names(individual_data$Y)) {
+          individual_data$Y <- c(individual_data$Y, stats::setNames(list(NULL), ctx))
+        }
+        if (!ctx %in% names(individual_data$X)) {
+          individual_data$X <- c(individual_data$X, stats::setNames(list(NULL), ctx))
+        }
+      }
+    }
   }
 
   sumstat_data <- NULL
@@ -1296,21 +1347,25 @@ qc_individual_data <- function(X, Y, maf = NULL, X_variance = NULL,
          dict_sumstatLD = dict_sumstatLD)
   }
   if (length(sumstat_qc) == 0) return(list())
-  if (!is.null(sumstat_qc$rss_input) && !is.null(sumstat_qc$LD_matrix)) {
+  if (is(sumstat_qc, "QCResult")) {
     sumstat_qc <- list(sumstat = sumstat_qc)
   }
   sumstat <- lapply(sumstat_qc, function(x) {
-    ss <- x$rss_input$sumstats
+    ss <- getRSSInput(x)$sumstats
     variant_id <- if ("variant_id" %in% colnames(ss)) {
       ss$variant_id
     } else {
       format_variant_id(ss$chrom, ss$pos, ss$A2, ss$A1)
     }
-    data.frame(z = ss$z, n = x$rss_input$n,
+    data.frame(z = ss$z, n = getRSSInput(x)$n,
                variant = normalize_variant_id(variant_id),
                stringsAsFactors = FALSE)
   })
-  LD_mat <- lapply(sumstat_qc, `[[`, "LD_matrix")
+  LD_mat <- lapply(sumstat_qc, function(x) {
+    ld <- getLDData(x)
+    if (is.null(ld)) return(NULL)
+    if (hasGenotypes(ld)) getGenotypes(ld) else getCorrelation(ld)
+  })
   filtered <- filter_valid_sumstats(sumstat, LD_mat)
   if (is.null(filtered)) return(list())
   c(

@@ -840,8 +840,9 @@ adjust_susie_weights <- function(twas_weights_results, keep_variants, run_allele
       "pos", "A2", "A1"
     )], match_min_prop = match_min_prop)
     # match_ref_panel outputs canonical variant_ids (with chr prefix)
-    original_idx <- match(weights_matrix_qced$qc_summary$variants_id_original, twas_weights_variants)
-    intersected_indices <- original_idx[weights_matrix_qced$qc_summary$keep == TRUE]
+    qc_summary_df <- getQCSummary(weights_matrix_qced)
+    original_idx <- match(qc_summary_df$variants_id_original, twas_weights_variants)
+    intersected_indices <- original_idx[qc_summary_df$keep == TRUE]
   } else {
     # Normalize keep_variants to canonical format for matching
     keep_variants_normalized <- normalize_variant_id(keep_variants)
@@ -865,7 +866,7 @@ adjust_susie_weights <- function(twas_weights_results, keep_variants, run_allele
   adjusted_xqtl_coef <- colSums(adjusted_xqtl_alpha * mu_subset) / x_column_scal_factors_subset
   # allele_qc now outputs canonical variant_ids (with chr prefix) -- no need to add chr
   remained_variants_ids <- if (run_allele_qc) {
-    weights_matrix_qced$target_data_qced$variant_id
+    getHarmonizedData(weights_matrix_qced)$variant_id
   } else {
     intersected_variants
   }

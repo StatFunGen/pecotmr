@@ -116,7 +116,7 @@ test_that("Check that we correctly remove stand ambiguous SNPs",{
   output <- allele_qc(
     res$target_data, res$ref_variants, "beta", match_min_prop = 0.2,
     TRUE, FALSE, TRUE)
-  expect_equal(nrow(output$target_data_qced), 80)
+  expect_equal(nrow(getHarmonizedData(output)), 80)
 })
 
 test_that("Check that we correctly remove non-ACTG coding SNPs",{
@@ -124,7 +124,7 @@ test_that("Check that we correctly remove non-ACTG coding SNPs",{
   output <- allele_qc(
     res$target_data, res$ref_variants, "beta", match_min_prop = 0.2,
     TRUE, FALSE, TRUE)
-  expect_equal(nrow(output$target_data_qced), 40)
+  expect_equal(nrow(getHarmonizedData(output)), 40)
 })
 
 test_that("Check that execution stops if not enough variants are matched",{
@@ -144,7 +144,7 @@ test_that("allele_qc matches exact alleles", {
     A2 = c("A", "C"), A1 = c("G", "T")
   )
   result <- allele_qc(target, ref, match_min_prop = 0)
-  expect_equal(nrow(result$target_data_qced), 2)
+  expect_equal(nrow(getHarmonizedData(result)), 2)
 })
 
 test_that("allele_qc detects sign flips", {
@@ -158,23 +158,23 @@ test_that("allele_qc detects sign flips", {
     A2 = "G", A1 = "A"
   )
   result <- allele_qc(target, ref, col_to_flip = "z", match_min_prop = 0)
-  expect_equal(nrow(result$target_data_qced), 1)
+  expect_equal(nrow(getHarmonizedData(result)), 1)
   # z should be flipped
-  expect_equal(result$target_data_qced$z, -2.5)
+  expect_equal(getHarmonizedData(result)$z, -2.5)
 })
 
 test_that("allele_qc handles string input format", {
   target <- c("1:100:A:G", "1:200:C:T")
   ref <- c("1:100:A:G", "1:200:C:T")
   result <- allele_qc(target, ref, match_min_prop = 0)
-  expect_equal(nrow(result$target_data_qced), 2)
+  expect_equal(nrow(getHarmonizedData(result)), 2)
 })
 
 test_that("allele_qc with chr prefix", {
   target <- c("chr1:100:A:G", "chr1:200:C:T")
   ref <- c("chr1:100:A:G", "chr1:200:C:T")
   result <- allele_qc(target, ref, match_min_prop = 0)
-  expect_equal(nrow(result$target_data_qced), 2)
+  expect_equal(nrow(getHarmonizedData(result)), 2)
 })
 
 test_that("allele_qc warns when too few matches", {
@@ -196,7 +196,7 @@ test_that("allele_qc with no matching positions returns empty", {
     result <- allele_qc(target, ref, match_min_prop = 0),
     "No matching variants"
   )
-  expect_equal(nrow(result$target_data_qced), 0)
+  expect_equal(nrow(getHarmonizedData(result)), 0)
 })
 
 test_that("allele_qc preserves extra columns", {
@@ -210,8 +210,8 @@ test_that("allele_qc preserves extra columns", {
     A2 = "A", A1 = "G"
   )
   result <- allele_qc(target, ref, match_min_prop = 0)
-  expect_true("beta" %in% colnames(result$target_data_qced))
-  expect_true("se" %in% colnames(result$target_data_qced))
+  expect_true("beta" %in% colnames(getHarmonizedData(result)))
+  expect_true("se" %in% colnames(getHarmonizedData(result)))
 })
 
 test_that("allele_qc with lowercase alleles", {
@@ -224,7 +224,7 @@ test_that("allele_qc with lowercase alleles", {
     A2 = "A", A1 = "G"
   )
   result <- allele_qc(target, ref, match_min_prop = 0)
-  expect_equal(nrow(result$target_data_qced), 1)
+  expect_equal(nrow(getHarmonizedData(result)), 1)
 })
 
 test_that("align_variant_names correctly aligns variant names", {
@@ -369,7 +369,7 @@ test_that("allele_qc handles data frame with NULL colnames after merge", {
   # Restore chrom for the join
   colnames(target)[1] <- "chrom"
   result <- allele_qc(target, ref, match_min_prop = 0)
-  expect_equal(nrow(result$target_data_qced), 1)
+  expect_equal(nrow(getHarmonizedData(result)), 1)
 })
 
 # ---- target_data with redundant columns (allele_qc.R line 75) ----
@@ -380,9 +380,9 @@ test_that("allele_qc removes redundant columns from target_data before join", {
   )
   ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G")
   result <- allele_qc(target, ref, match_min_prop = 0)
-  expect_equal(nrow(result$target_data_qced), 1)
+  expect_equal(nrow(getHarmonizedData(result)), 1)
   # The redundant columns should have been removed before the join
-  expect_true("variant_id" %in% colnames(result$target_data_qced))
+  expect_true("variant_id" %in% colnames(getHarmonizedData(result)))
 })
 
 # ---- col_to_flip with nonexistent column (allele_qc.R line 130) ----
@@ -408,7 +408,7 @@ test_that("allele_qc warns and removes duplicate variants", {
     result <- allele_qc(target, ref, match_min_prop = 0, remove_dups = TRUE),
     "duplicate variant"
   )
-  expect_equal(nrow(result$target_data_qced), 1)
+  expect_equal(nrow(getHarmonizedData(result)), 1)
 })
 
 # ---- duplicated variant IDs error (allele_qc.R line 180) ----

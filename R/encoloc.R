@@ -260,13 +260,9 @@ process_coloc_results <- function(coloc_result, LD_meta_file_path, analysis_regi
 
   method_result <- pipeline_result[[method_names[1]]]
   fm_result <- method_result$finemapping_result
-  if (!is.null(fm_result) && is(fm_result, "FineMappingResult")) {
-    fm_data <- getTrimmedFit(fm_result)
-    variant_names <- getVariantNames(fm_result)
-  } else {
-    fm_data <- method_result$susie_result_trimmed
-    variant_names <- method_result$variant_names
-  }
+  if (is.null(fm_result) || !is(fm_result, "FineMappingResult")) return(NULL)
+  fm_data <- getTrimmedFit(fm_result)
+  variant_names <- getVariantNames(fm_result)
   if (is.null(fm_data) || is.null(fm_data$lbf_variable)) return(NULL)
 
   lbf_matrix <- as.data.frame(fm_data$lbf_variable)
@@ -296,17 +292,11 @@ process_coloc_results <- function(coloc_result, LD_meta_file_path, analysis_regi
   if (length(method_names) == 0) return(invisible(NULL))
   method_result <- pipeline_result[[method_names[1]]]
   fm_result <- method_result$finemapping_result
-  if (!is.null(fm_result) && is(fm_result, "FineMappingResult")) {
-    save_data <- list(
-      susie_fit = getTrimmedFit(fm_result),
-      variant_names = getVariantNames(fm_result)
-    )
-  } else {
-    save_data <- list(
-      susie_fit = method_result$susie_result_trimmed,
-      variant_names = method_result$variant_names
-    )
-  }
+  if (is.null(fm_result) || !is(fm_result, "FineMappingResult")) return(invisible(NULL))
+  save_data <- list(
+    susie_fit = getTrimmedFit(fm_result),
+    variant_names = getVariantNames(fm_result)
+  )
   saveRDS(list(save_data), save_path)
   message("Fine-mapping result saved to: ", save_path,
           "\n  Reuse with: gwas_files = '", save_path,
