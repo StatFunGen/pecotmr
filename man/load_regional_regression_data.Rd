@@ -7,9 +7,12 @@
 load_regional_regression_data(...)
 }
 \value{
-A list
+A \code{RegionalData} object.
 }
 \description{
-This function loads regional association data formatted for regression modeling.
-It includes phenotype, genotype, and covariate matrices along with metadata.
+Loads regional association data formatted for regression modeling.
+Returns a \code{RegionalData} S4 object; the per-condition \code{X_data}
+previously returned in a list is available as
+\code{getResidualX(rd, i)} (residualized) or by subsetting
+\code{rd@genotype_matrix} by condition rownames.
 }

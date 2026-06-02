@@ -56,7 +56,10 @@ to be matched, otherwise stops with an error. Default is 20%.}
 corresponding `col_to_flip` are multiplied by -1. Default is `TRUE`.}
 }
 \value{
-A single data frame with matched variants.
+An \code{AlleleQCResult} S4 object. Use
+  \code{getHarmonizedData()} to recover the post-QC variant
+  data.frame and \code{getQCSummary()} to inspect the per-variant
+  merge/flip/strand diagnostics.
 }
 \description{
 Match by ("chrom", "A1", "A2" and "pos"), accounting for possible

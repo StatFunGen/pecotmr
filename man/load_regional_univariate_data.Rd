@@ -7,9 +7,13 @@
 load_regional_univariate_data(...)
 }
 \value{
-A list
+A \code{RegionalData} object.
 }
 \description{
-This function loads regional association data for univariate analysis.
-It includes residual matrices, original genotype data, and additional metadata.
+Loads regional association data for univariate analysis. Returns a
+\code{RegionalData} S4 object; derived quantities (residuals, scalars,
+per-variant variance) are computed lazily via accessors
+(\code{getResidualX}, \code{getResidualY}, \code{getResidualXScalar},
+\code{getResidualYScalar}, \code{getXVariance}, \code{getChrom},
+\code{getGrange}).
 }

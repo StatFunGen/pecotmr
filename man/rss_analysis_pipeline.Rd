@@ -34,11 +34,10 @@ rss_analysis_pipeline(
 
 \item{column_file_path}{File path to the column mapping file.}
 
-\item{LD_data}{A list from load_LD_matrix containing LD_matrix, LD_variants,
-ref_panel, block_metadata, and is_genotype flag. When is_genotype=TRUE
-(from return_genotype=TRUE), LD_matrix contains genotype X and susie_rss
-uses the z+X interface. Local R is computed only for QC stages that
-require a correlation matrix.}
+\item{LD_data}{An \code{LDData} S4 object from \code{load_LD_matrix()}. When
+\code{hasGenotypes(LD_data)} is TRUE (from \code{return_genotype=TRUE}),
+susie_rss uses the z+X interface via \code{getGenotypes()}. Local R is
+computed only for QC stages that require a correlation matrix.}
 
 \item{n_sample}{Sample size. If 0, retrieved from the sumstat file.}
 

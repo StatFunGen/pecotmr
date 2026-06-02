@@ -7,9 +7,14 @@
 load_regional_multivariate_data(matrix_y_min_complete = NULL, ...)
 }
 \value{
-A list
+A \code{MultivariateRegionalData} object.
 }
 \description{
-This function loads regional association data and processes it into a multivariate format.
-It optionally filters out samples based on missingness thresholds in the response matrix.
+Loads regional association data and packages it for multivariate modeling.
+Phenotypes across conditions are joined into a single multivariate matrix
+(samples x conditions). When \code{matrix_y_min_complete} is supplied,
+samples with fewer than that many non-missing condition values are dropped.
+Per-variant MAF and variance are computed on the (post-filter) genotype
+matrix and exposed via \code{getMAF()} / \code{getXVariance()} on the
+returned object.
 }

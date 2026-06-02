@@ -2,29 +2,20 @@
 % Please edit documentation in R/univariate_rss_diagnostics.R
 \name{get_susie_result}
 \alias{get_susie_result}
-\title{Extract SuSiE Results from Finemapping Data}
+\title{Extract the trimmed SuSiE fit from a finemapping pipeline result}
 \usage{
 get_susie_result(con_data)
 }
 \arguments{
-\item{con_data}{List. The method layer data from a finemapping RDS file.}
+\item{con_data}{List. The method-layer entry from a finemapping pipeline
+result, expected to carry \code{$finemapping_result} as a
+\code{FineMappingResult} object.}
 }
 \value{
-The trimmed SuSiE results (`$susie_result_trimmed`) if available,
-otherwise NULL.
+The trimmed fit (a list with \code{pip}, \code{sets}, etc.) or NULL.
 }
 \description{
-This function extracts the trimmed SuSiE results from a finemapping data object,
-typically obtained from a finemapping RDS file. It's designed to work with
-the method layer of these files, often named as 'method_RAISS_imputed', 'method',
-or 'method_NO_QC'. This layer is right under the study layer.
-}
-\details{
-The function checks if the input data is empty or if the `$susie_result_trimmed`
-element is missing. It returns NULL in these cases. If `$susie_result_trimmed`
-exists and is not empty, it returns this element.
-}
-\note{
-This function is particularly useful when working with large datasets
-where not all method layers may contain valid SuSiE results or method layer.
+Returns the trimmed model fit underlying \code{con_data$finemapping_result}
+(a \code{FineMappingResult} S4 object), or NULL if no fine-mapping result
+is attached.
 }

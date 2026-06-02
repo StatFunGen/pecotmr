@@ -61,22 +61,12 @@ load_regional_association_data(
 \item{tabix_header}{Logical indicating whether the tabix file has a header. Default is TRUE.}
 }
 \value{
-A list containing the following components:
-\itemize{
-  \item residual_Y: A list of residualized phenotype values (either a vector or a matrix).
-  \item residual_X: A list of residualized genotype matrices for each condition.
-  \item residual_Y_scalar: Scaling factor for residualized phenotype values.
-  \item residual_X_scalar: Scaling factor for residualized genotype values.
-  \item dropped_sample: A list of dropped samples for X, Y, and covariates.
-  \item covar: Covariate data.
-  \item Y: Original phenotype data.
-  \item X_data: Original genotype data.
-  \item X: Filtered genotype matrix.
-  \item maf: Minor allele frequency (MAF) for each variant.
-  \item chrom: Chromosome of the region.
-  \item grange: Genomic range of the region (start and end positions).
-  \item Y_coordinates: Phenotype coordinates if a region is specified.
-}
+A \code{RegionalData} S4 object. Per-condition residualized
+  phenotypes, residualized genotypes, and their scaling factors are
+  computed on demand via accessors (\code{getResidualX()},
+  \code{getResidualY()}, \code{getResidualXScalar()},
+  \code{getResidualYScalar()}, \code{getXVariance()}). Region metadata is
+  available via \code{getChrom()} and \code{getGrange()}.
 }
 \description{
 This function loads genotype, phenotype, and covariate data for a specific region and performs data preprocessing.

@@ -11,8 +11,12 @@ load_regional_functional_data(..., min_markers = NULL)
 If \code{NULL}, no marker-count filtering is applied.}
 }
 \value{
-A list
+A \code{RegionalData} object.
 }
 \description{
-This function loads precomputed regional functional association data.
+Loads precomputed regional functional association data. Returns a
+\code{RegionalData} S4 object; derived quantities are computed lazily
+via accessors. When \code{min_markers} is supplied, conditions whose
+\code{Y_coordinates} have fewer than \code{min_markers} rows are
+dropped from the returned \code{RegionalData}.
 }

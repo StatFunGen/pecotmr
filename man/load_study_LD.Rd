@@ -13,8 +13,9 @@ mixture panels (e.g., "ld_EUR.tsv,ld_AFR.tsv").}
 \item{region}{Region string "chr:start-end".}
 }
 \value{
-An LD_data list from load_LD_matrix. For single panels, returns as-is.
-  For mixture panels, LD_matrix is a list of X matrices (one per panel).
+An \code{LDData} S4 object. For single panels, returns the result of
+  \code{load_LD_matrix()} unchanged. For mixture panels, \code{genotype_handle}
+  is a list of per-panel genotype handles sharing the first panel's variants.
 }
 \description{
 Load LD for a study, supporting single or mixture panels.

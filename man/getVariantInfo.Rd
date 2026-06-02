@@ -4,6 +4,7 @@
 \alias{getVariantInfo}
 \alias{getVariantInfo,LDData-method}
 \alias{getVariantInfo,RegionalData-method}
+\alias{getVariantInfo,MultivariateRegionalData-method}
 \title{Get Variant GRanges}
 \usage{
 getVariantInfo(x)
@@ -11,6 +12,8 @@ getVariantInfo(x)
 \S4method{getVariantInfo}{LDData}(x)
 
 \S4method{getVariantInfo}{RegionalData}(x)
+
+\S4method{getVariantInfo}{MultivariateRegionalData}(x)
 }
 \arguments{
 \item{x}{An object with variant metadata.}

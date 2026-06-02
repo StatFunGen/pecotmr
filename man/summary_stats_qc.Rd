@@ -45,16 +45,13 @@ ignored by the historical LD-mismatch-only call unless \code{rss_input} or
 combined-QC options are supplied.}
 }
 \value{
-A list containing the quality-controlled summary statistics and
-  updated LD matrix for the historical call:
-  \itemize{
-    \item sumstats: The quality-controlled summary statistics data frame.
-    \item LD_mat: The updated LD matrix after quality control.
-    \item outlier_number: The number of outlier variants removed.
-  }
-  When \code{rss_input} or combined-QC controls are supplied, returns a
-  cleaned RSS/LD record for one RSS record, or a named list of records for a
-  list of RSS records.
+A \code{QCResult} S4 object for the historical LD-mismatch-only
+  call (use \code{getRSSInput()$sumstats}, \code{getCorrelation(getLDData())},
+  and \code{getOutlierNumber()} to recover the harmonized sumstats, post-QC
+  LD matrix, and outlier count). When \code{rss_input} or combined-QC
+  controls are supplied, returns either a single \code{QCResult} (for one
+  RSS record) or a named list of \code{QCResult} objects (for a list of
+  RSS records).
 }
 \description{
 This function performs quality control on the processed summary statistics
