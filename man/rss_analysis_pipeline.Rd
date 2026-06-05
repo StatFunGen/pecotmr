@@ -69,13 +69,13 @@ variants to fit. Any subset of \code{c("susie_rss", "susie_inf_rss",
 "susie_ash_rss")}. Default \code{NULL} preserves legacy single-method
 behavior via \code{finemapping_method}. When set explicitly, every
 requested method contributes rows to the unified \code{top_loci}; when
-both \code{"susie_inf_rss"} and \code{"susie_rss"} are requested and
-\code{add_susie_inf = TRUE}, SuSiE-RSS is initialised from the
-SuSiE-inf-RSS result.}
+\code{"susie_inf_rss"} is paired with \code{"susie_rss"} or
+\code{"susie_ash_rss"} (or both) and \code{add_susie_inf = TRUE}, the
+SuSiE-inf-RSS fit initialises the chained downstream method(s).}
 
-\item{add_susie_inf}{Logical controlling chained init when both
-\code{"susie_inf_rss"} and \code{"susie_rss"} are in \code{methods}.
-Default \code{TRUE}.}
+\item{add_susie_inf}{Logical controlling chained init when
+\code{"susie_inf_rss"} is in \code{methods} alongside
+\code{"susie_rss"} and/or \code{"susie_ash_rss"}. Default \code{TRUE}.}
 
 \item{finemapping_opts}{List of fine-mapping options (L, L_greedy, coverage,
 signal_cutoff, min_abs_corr).}

@@ -111,12 +111,21 @@ format_cs_column <- function(coverage, method) {
   fit
 }
 
-prepare_susie_from_inf_args <- function(args, susie_inf_fit, refine_default = NULL) {
+# Build the argument list for a SuSiE / SuSiE-ash fit initialised from a
+# prior SuSiE-inf fit. `unmappable_effects` controls which branch the
+# downstream fit takes: "none" yields the standard SuSiE-inf-initialised
+# SuSiE; "ash" yields SuSiE-ash with the SuSiE-inf warm start.
+prepare_susie_from_inf_args <- function(args, susie_inf_fit, refine_default = NULL,
+                                        unmappable_effects = c("none", "ash")) {
+  unmappable_effects <- match.arg(unmappable_effects)
   L <- args[["L"]]
   if (is.null(L)) L <- length(susie_inf_fit$V)
   if (is.null(args[["refine"]]) && !is.null(refine_default)) args[["refine"]] <- refine_default
-  args[["unmappable_effects"]] <- "none"
+  args[["unmappable_effects"]] <- unmappable_effects
   args[["model_init"]] <- susie_inf_fit
+  if (unmappable_effects == "ash") {
+    args[["convergence_method"]] <- args[["convergence_method"]] %||% "pip"
+  }
   if (!is.null(args[["L_greedy"]])) args[["L_greedy"]] <- min(length(susie_inf_fit$V), L)
   args
 }
@@ -893,14 +902,15 @@ adjust_susie_weights <- function(twas_weights_results, keep_variants, run_allele
 #'   fit. Any subset of \code{c("susie_rss", "susie_inf_rss",
 #'   "susie_ash_rss")}. Default \code{NULL} falls back to a single-method fit
 #'   driven by \code{analysis_method} (backward-compatible behavior). When
-#'   \code{methods} is passed explicitly, each requested method is fitted; if
-#'   both \code{"susie_inf_rss"} and \code{"susie_rss"} are present and
-#'   \code{add_susie_inf = TRUE}, SuSiE-RSS is initialised from the
-#'   SuSiE-inf-RSS result.
-#' @param add_susie_inf Logical. When \code{methods} contains both
-#'   \code{"susie_inf_rss"} and \code{"susie_rss"}, controls whether the
-#'   SuSiE-RSS fit uses the SuSiE-inf-RSS result as initialisation. Default
-#'   \code{TRUE}.
+#'   \code{methods} is passed explicitly, each requested method is fitted;
+#'   if \code{"susie_inf_rss"} is paired with \code{"susie_rss"} or
+#'   \code{"susie_ash_rss"} (or both) and \code{add_susie_inf = TRUE}, the
+#'   SuSiE-inf-RSS fit initialises the downstream method. This exposes five
+#'   distinct fitting modes mirroring the individual-level pipeline.
+#' @param add_susie_inf Logical. When \code{methods} contains
+#'   \code{"susie_inf_rss"} alongside \code{"susie_rss"} and/or
+#'   \code{"susie_ash_rss"}, controls whether SuSiE-inf-RSS is chained into
+#'   the downstream method(s) as initialisation. Default \code{TRUE}.
 #' @param coverage Coverage level (default: 0.95).
 #' @param secondary_coverage Secondary coverage levels (default: c(0.7, 0.5)).
 #' @param signal_cutoff PIP cutoff for selecting top loci (default: 0.1).
@@ -949,8 +959,11 @@ susie_rss_pipeline <- function(sumstats, LD_mat = NULL, X_mat = NULL, n = NULL,
     }
     fit_methods <- unique(methods)
   }
-  chain_inf_to_susie_rss <- isTRUE(add_susie_inf) &&
+  chain_inf_to_susie_rss     <- isTRUE(add_susie_inf) &&
     all(c("susie_inf_rss", "susie_rss") %in% fit_methods)
+  chain_inf_to_susie_ash_rss <- isTRUE(add_susie_inf) &&
+    all(c("susie_inf_rss", "susie_ash_rss") %in% fit_methods)
+  any_chained_init_rss <- chain_inf_to_susie_rss || chain_inf_to_susie_ash_rss
 
   if (!is.null(sumstats$z)) {
     z <- sumstats$z
@@ -992,7 +1005,7 @@ susie_rss_pipeline <- function(sumstats, LD_mat = NULL, X_mat = NULL, n = NULL,
   }
 
   fitted_models <- list()
-  if ("susie_inf_rss" %in% fit_methods || chain_inf_to_susie_rss) {
+  if ("susie_inf_rss" %in% fit_methods || any_chained_init_rss) {
     inf_fit <- fit_one_susie_inf_rss()
     fitted_models[["susie_inf_rss"]] <- .set_finemapping_fit_class(inf_fit, "susie_inf_rss")
   }
@@ -1002,7 +1015,8 @@ susie_rss_pipeline <- function(sumstats, LD_mat = NULL, X_mat = NULL, n = NULL,
     if (chain_inf_to_susie_rss) {
       chained_args <- prepare_susie_from_inf_args(
         list(L = L, L_greedy = L_greedy),
-        fitted_models[["susie_inf_rss"]], refine_default = TRUE
+        fitted_models[["susie_inf_rss"]], refine_default = TRUE,
+        unmappable_effects = "none"
       )
       rss_fit <- do.call(susie_rss, c(common, chained_args))
     } else {
@@ -1013,12 +1027,21 @@ susie_rss_pipeline <- function(sumstats, LD_mat = NULL, X_mat = NULL, n = NULL,
     fitted_models[[rss_label]] <- .set_finemapping_fit_class(rss_fit, rss_label)
   }
   if ("susie_ash_rss" %in% fit_methods) {
-    ash_fit <- fit_one_susie_ash_rss()
+    if (chain_inf_to_susie_ash_rss) {
+      chained_args <- prepare_susie_from_inf_args(
+        list(L = L, L_greedy = L_greedy),
+        fitted_models[["susie_inf_rss"]], refine_default = NULL,
+        unmappable_effects = "ash"
+      )
+      ash_fit <- do.call(susie_rss, c(common, chained_args))
+    } else {
+      ash_fit <- fit_one_susie_ash_rss()
+    }
     fitted_models[["susie_ash_rss"]] <- .set_finemapping_fit_class(ash_fit, "susie_ash_rss")
   }
 
   # Drop SuSiE-inf-RSS from post-processing if it was only fit for init
-  if (chain_inf_to_susie_rss && !("susie_inf_rss" %in% fit_methods)) {
+  if (any_chained_init_rss && !("susie_inf_rss" %in% fit_methods)) {
     fitted_models[["susie_inf_rss"]] <- NULL
   }
 

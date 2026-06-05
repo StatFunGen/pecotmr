@@ -46,15 +46,16 @@ method; ignored for \code{"susie_inf_rss"} and \code{"susie_ash_rss"}.}
 fit. Any subset of \code{c("susie_rss", "susie_inf_rss",
 "susie_ash_rss")}. Default \code{NULL} falls back to a single-method fit
 driven by \code{analysis_method} (backward-compatible behavior). When
-\code{methods} is passed explicitly, each requested method is fitted; if
-both \code{"susie_inf_rss"} and \code{"susie_rss"} are present and
-\code{add_susie_inf = TRUE}, SuSiE-RSS is initialised from the
-SuSiE-inf-RSS result.}
+\code{methods} is passed explicitly, each requested method is fitted;
+if \code{"susie_inf_rss"} is paired with \code{"susie_rss"} or
+\code{"susie_ash_rss"} (or both) and \code{add_susie_inf = TRUE}, the
+SuSiE-inf-RSS fit initialises the downstream method. This exposes five
+distinct fitting modes mirroring the individual-level pipeline.}
 
-\item{add_susie_inf}{Logical. When \code{methods} contains both
-\code{"susie_inf_rss"} and \code{"susie_rss"}, controls whether the
-SuSiE-RSS fit uses the SuSiE-inf-RSS result as initialisation. Default
-\code{TRUE}.}
+\item{add_susie_inf}{Logical. When \code{methods} contains
+\code{"susie_inf_rss"} alongside \code{"susie_rss"} and/or
+\code{"susie_ash_rss"}, controls whether SuSiE-inf-RSS is chained into
+the downstream method(s) as initialisation. Default \code{TRUE}.}
 
 \item{coverage}{Coverage level (default: 0.95).}
 

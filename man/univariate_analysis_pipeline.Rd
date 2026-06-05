@@ -89,7 +89,9 @@ SuSiE fit as initialization; \code{add_susie_inf = FALSE} maps to
 passed explicitly, each requested method is fitted; if
 \code{"susie_inf"} is paired with \code{"susie"} or \code{"susie_ash"}
 (or both) and \code{add_susie_inf = TRUE}, the SuSiE-inf fit
-initialises each chained downstream method.}
+initialises each chained downstream method. This gives five distinct
+fitting modes: SuSiE alone, SuSiE with SuSiE-inf init, SuSiE-inf alone,
+SuSiE-ash alone, and SuSiE-ash with SuSiE-inf init.}
 
 \item{add_susie_inf}{When \code{methods} is \code{NULL}, controls whether
 SuSiE-inf is fitted and chained into SuSiE. When \code{methods} is set

@@ -95,8 +95,8 @@ rows are useful as a sanity check on inferred non-sparse effects.
 
 ## Choosing among SuSiE variants
 
-`pecotmr` exposes four SuSiE-family fine-mapping variants. Pick which to
-fit via the `methods` parameter on `univariate_analysis_pipeline()`
+`pecotmr` exposes five SuSiE-family fine-mapping variants. Pick which
+to fit via the `methods` parameter on `univariate_analysis_pipeline()`
 (individual-level) or `rss_analysis_pipeline()` / `susie_rss_pipeline()`
 (summary statistics):
 
@@ -106,6 +106,7 @@ fit via the `methods` parameter on `univariate_analysis_pipeline()`
 | **SuSiE with SuSiE-inf init** (default) | `methods = c("susie_inf", "susie")` + `add_susie_inf = TRUE` | `methods = c("susie_inf_rss", "susie_rss")` + `add_susie_inf = TRUE` | Two-stage: SuSiE-inf absorbs background polygenicity first, SuSiE then refines sparse signals from that initialisation. Recommended default for most QTL and GWAS fine-mapping. |
 | **SuSiE-inf alone** | `methods = "susie_inf"` | `methods = "susie_inf_rss"` | Sparse + infinitesimal joint fit. Useful for regions with strong polygenic background where the SuSiE refinement step is undesired. |
 | **SuSiE-ash alone** | `methods = "susie_ash"` | `methods = "susie_ash_rss"` | Sparse + adaptive shrinkage (ASH) mixture. Useful when you suspect a mix of medium-effect and small-effect variants beyond a small handful of large ones. |
+| **SuSiE-ash with SuSiE-inf init** | `methods = c("susie_inf", "susie_ash")` + `add_susie_inf = TRUE` | `methods = c("susie_inf_rss", "susie_ash_rss")` + `add_susie_inf = TRUE` | Same chained two-stage idea as the SuSiE variant but with ASH on the downstream fit: SuSiE-inf absorbs polygenic background first, then SuSiE-ash refines using the mixture prior. |
 
 The chained SuSiE-inf → SuSiE two-stage is the default both for
 backward compatibility and because it produces clean credible sets in
@@ -113,9 +114,25 @@ most settings: SuSiE alone can fold polygenic background into noisy
 "extra" credible sets; SuSiE-inf absorbs that background first so the
 SuSiE refinement concentrates on sparse signals.
 
-All four populate the same 22-column `top_loci` table. When you fit
+`add_susie_inf = TRUE` chains SuSiE-inf into **any** of `"susie"` or
+`"susie_ash"` that appear in `methods`. Listing all three
+(`methods = c("susie_inf", "susie", "susie_ash")` with
+`add_susie_inf = TRUE`) fits SuSiE-inf once, then both SuSiE and
+SuSiE-ash initialised from it — useful for direct head-to-head
+comparison on the same warm start.
+
+All five populate the same 22-column `top_loci` table. When you fit
 multiple methods in one call, the rows are row-bound and labelled by
 the `method` column.
+
+> Note: SuSiE-inf chain init only carries information when the
+> SuSiE-inf fit finds non-zero mappable effects. On a region where
+> SuSiE-inf explains everything via its infinitesimal component (all
+> `V == 0`, all `mu == 0`), upstream `susieR` correctly treats the
+> init as empty, and the chained downstream fit collapses to the
+> independent run. This is the right behaviour, not a bug — but it
+> means head-to-head differences only show up on regions with at
+> least one sparse signal.
 
 ### Backward compatibility with `add_susie_inf`
 
@@ -127,10 +144,10 @@ when `methods` is `NULL` (the default):
 - `add_susie_inf = FALSE` → plain SuSiE alone. Equivalent to
   `methods = "susie"`.
 
-When `methods` is set explicitly, `add_susie_inf` only controls whether
-the chained-init shortcut is applied to a `c("susie_inf", "susie")`
-pair. Set `add_susie_inf = FALSE` with both methods present to fit
-SuSiE-inf and SuSiE independently rather than chained.
+When `methods` is set explicitly, `add_susie_inf` controls whether the
+chained-init shortcut is applied to any `"susie"` or `"susie_ash"`
+method that appears alongside `"susie_inf"`. Set `add_susie_inf = FALSE`
+to fit each requested method independently rather than chained.
 
 ### Fitting multiple variants in one call
 

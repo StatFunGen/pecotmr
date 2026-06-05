@@ -37,7 +37,9 @@
 #'   passed explicitly, each requested method is fitted; if
 #'   \code{"susie_inf"} is paired with \code{"susie"} or \code{"susie_ash"}
 #'   (or both) and \code{add_susie_inf = TRUE}, the SuSiE-inf fit
-#'   initialises each chained downstream method.
+#'   initialises each chained downstream method. This gives five distinct
+#'   fitting modes: SuSiE alone, SuSiE with SuSiE-inf init, SuSiE-inf alone,
+#'   SuSiE-ash alone, and SuSiE-ash with SuSiE-inf init.
 #' @param add_susie_inf When \code{methods} is \code{NULL}, controls whether
 #'   SuSiE-inf is fitted and chained into SuSiE. When \code{methods} is set
 #'   explicitly, controls whether the chained-init shortcut is applied to
@@ -116,8 +118,13 @@ univariate_analysis_pipeline <- function(
     }
     methods <- unique(methods)
   }
-  chain_inf_to_susie <- isTRUE(add_susie_inf) &&
+  # SuSiE-inf initialisation chains into SuSiE and/or SuSiE-ash whenever
+  # either of them is requested alongside SuSiE-inf and add_susie_inf is TRUE.
+  chain_inf_to_susie     <- isTRUE(add_susie_inf) &&
     all(c("susie_inf", "susie") %in% methods)
+  chain_inf_to_susie_ash <- isTRUE(add_susie_inf) &&
+    all(c("susie_inf", "susie_ash") %in% methods)
+  any_chained_init <- chain_inf_to_susie || chain_inf_to_susie_ash
   if (isTRUE(twas_weights) && !("susie" %in% methods)) {
     stop("twas_weights = TRUE requires \"susie\" to be in methods.")
   }
@@ -169,7 +176,7 @@ univariate_analysis_pipeline <- function(
   )
   fitted_models <- list()
 
-  if ("susie_inf" %in% methods || chain_inf_to_susie) {
+  if ("susie_inf" %in% methods || any_chained_init) {
     message("Fitting SuSiE-inf model on input data ...")
     inf_args <- modifyList(susie_args, list(
       X = X, y = Y,
@@ -186,7 +193,8 @@ univariate_analysis_pipeline <- function(
       message("Fitting SuSiE model initialized by SuSiE-inf ...")
       su_args <- prepare_susie_from_inf_args(susie_args,
                                              fitted_models[["susie_inf"]],
-                                             refine_default = TRUE)
+                                             refine_default = TRUE,
+                                             unmappable_effects = "none")
       su_fit <- do.call(susie, c(list(X = X, y = Y), su_args))
     } else {
       message("Fitting SuSiE model on input data ...")
@@ -196,19 +204,28 @@ univariate_analysis_pipeline <- function(
   }
 
   if ("susie_ash" %in% methods) {
-    message("Fitting SuSiE-ash model on input data ...")
-    ash_args <- modifyList(susie_args, list(
-      X = X, y = Y,
-      unmappable_effects = "ash",
-      convergence_method = "pip"
-    ))
-    ash_fit <- do.call(susie, ash_args)
+    if (chain_inf_to_susie_ash) {
+      message("Fitting SuSiE-ash model initialized by SuSiE-inf ...")
+      ash_args <- prepare_susie_from_inf_args(susie_args,
+                                              fitted_models[["susie_inf"]],
+                                              refine_default = NULL,
+                                              unmappable_effects = "ash")
+      ash_fit <- do.call(susie, c(list(X = X, y = Y), ash_args))
+    } else {
+      message("Fitting SuSiE-ash model on input data ...")
+      ash_args <- modifyList(susie_args, list(
+        X = X, y = Y,
+        unmappable_effects = "ash",
+        convergence_method = "pip"
+      ))
+      ash_fit <- do.call(susie, ash_args)
+    }
     fitted_models[["susie_ash"]] <- .set_finemapping_fit_class(ash_fit, "susie_ash")
   }
 
-  # Drop susie_inf from post-processing if it was only fit to provide init for SuSiE
-  # (i.e. caller did not request "susie_inf" in methods)
-  if (chain_inf_to_susie && !("susie_inf" %in% methods)) {
+  # Drop susie_inf from post-processing if it was only fit to provide init for
+  # SuSiE / SuSiE-ash (i.e. caller did not request "susie_inf" in methods).
+  if (any_chained_init && !("susie_inf" %in% methods)) {
     fitted_models[["susie_inf"]] <- NULL
   }
 
@@ -321,12 +338,12 @@ load_study_LD <- function(ld_path, region) {
 #'   "susie_ash_rss")}. Default \code{NULL} preserves legacy single-method
 #'   behavior via \code{finemapping_method}. When set explicitly, every
 #'   requested method contributes rows to the unified \code{top_loci}; when
-#'   both \code{"susie_inf_rss"} and \code{"susie_rss"} are requested and
-#'   \code{add_susie_inf = TRUE}, SuSiE-RSS is initialised from the
-#'   SuSiE-inf-RSS result.
-#' @param add_susie_inf Logical controlling chained init when both
-#'   \code{"susie_inf_rss"} and \code{"susie_rss"} are in \code{methods}.
-#'   Default \code{TRUE}.
+#'   \code{"susie_inf_rss"} is paired with \code{"susie_rss"} or
+#'   \code{"susie_ash_rss"} (or both) and \code{add_susie_inf = TRUE}, the
+#'   SuSiE-inf-RSS fit initialises the chained downstream method(s).
+#' @param add_susie_inf Logical controlling chained init when
+#'   \code{"susie_inf_rss"} is in \code{methods} alongside
+#'   \code{"susie_rss"} and/or \code{"susie_ash_rss"}. Default \code{TRUE}.
 #' @param finemapping_opts List of fine-mapping options (L, L_greedy, coverage,
 #'   signal_cutoff, min_abs_corr).
 #' @param impute Whether to impute missing variants via RAISS (default TRUE).

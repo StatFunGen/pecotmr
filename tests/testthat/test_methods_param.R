@@ -108,6 +108,102 @@ test_that("univariate_analysis_pipeline: unknown method rejected", {
   )
 })
 
+# Fifth fitting mode: SuSiE-ash with SuSiE-inf init -----------------------
+
+# Helper: signal-rich synthetic data where SuSiE-inf finds non-zero mappable
+# effects, so model_init genuinely carries information into SuSiE / SuSiE-ash.
+# (The shipped eqtl_region_example is too weak: SuSiE-inf converges with all V=0
+# / mu=0, which susieR's extract_model_init_fields correctly returns NULL for,
+# collapsing chained and independent runs to identical results.)
+.make_strong_signal_inputs <- function(seed = 1) {
+  set.seed(seed)
+  n <- 400; p <- 200
+  X <- matrix(rnorm(n * p), n, p)
+  colnames(X) <- paste0("chr1:", seq_len(p) * 1000, ":A:T")
+  rownames(X) <- paste0("S", seq_len(n))
+  beta_sparse <- rep(0, p); beta_sparse[c(20, 70, 130)] <- 2
+  beta_poly   <- rnorm(p, sd = 0.05)
+  y <- as.numeric(X %*% (beta_sparse + beta_poly) + rnorm(n))
+  maf <- rep(0.3, p)
+  list(X = X, y = y, maf = maf)
+}
+
+test_that("univariate_analysis_pipeline: chained SuSiE-inf -> SuSiE-ash differs from independent susie_ash", {
+  skip_if_not_installed("susieR")
+  inp <- .make_strong_signal_inputs()
+  chained <- univariate_analysis_pipeline(
+    X = inp$X, Y = inp$y, maf = inp$maf,
+    methods = c("susie_inf", "susie_ash"), add_susie_inf = TRUE,
+    twas_weights = FALSE,
+    finemapping_extra_opts = list(refine = FALSE),
+    signal_cutoff = 0, verbose = 0
+  )
+  indep <- univariate_analysis_pipeline(
+    X = inp$X, Y = inp$y, maf = inp$maf,
+    methods = c("susie_inf", "susie_ash"), add_susie_inf = FALSE,
+    twas_weights = FALSE,
+    finemapping_extra_opts = list(refine = FALSE),
+    signal_cutoff = 0, verbose = 0
+  )
+  expect_true(all(c("susie_inf", "susie_ash") %in% unique(chained$top_loci$method)))
+  expect_true(all(c("susie_inf", "susie_ash") %in% unique(indep$top_loci$method)))
+  expect_false(is.null(chained$susie_inf_fitted))
+  expect_false(is.null(chained$susie_ash_fitted))
+  # SuSiE-inf must have non-trivial mappable effects for model_init to matter
+  expect_true(any(chained$susie_inf_fitted$V > 0))
+  # With non-trivial init, chained SuSiE-ash PIPs differ from independent run
+  pip_chained <- chained$susie_ash_fitted$pip
+  pip_indep   <- indep$susie_ash_fitted$pip
+  expect_equal(length(pip_chained), length(pip_indep))
+  expect_true(max(abs(pip_chained - pip_indep)) > 1e-3)
+})
+
+test_that("univariate_analysis_pipeline: chain dispatch emits the chained-init message", {
+  skip_if_not_installed("susieR")
+  inp <- .make_strong_signal_inputs()
+  expect_message(
+    univariate_analysis_pipeline(
+      X = inp$X, Y = inp$y, maf = inp$maf,
+      methods = c("susie_inf", "susie_ash"), add_susie_inf = TRUE,
+      twas_weights = FALSE,
+      finemapping_extra_opts = list(refine = FALSE),
+      signal_cutoff = 0, verbose = 0
+    ),
+    "SuSiE-ash model initialized by SuSiE-inf"
+  )
+})
+
+test_that("univariate_analysis_pipeline: add_susie_inf=FALSE fits SuSiE-ash without chained init", {
+  skip_if_not_installed("susieR")
+  inp <- .make_strong_signal_inputs()
+  expect_message(
+    univariate_analysis_pipeline(
+      X = inp$X, Y = inp$y, maf = inp$maf,
+      methods = c("susie_inf", "susie_ash"), add_susie_inf = FALSE,
+      twas_weights = FALSE,
+      finemapping_extra_opts = list(refine = FALSE),
+      signal_cutoff = 0, verbose = 0
+    ),
+    "Fitting SuSiE-ash model on input data"
+  )
+})
+
+test_that("univariate_analysis_pipeline: all three methods + chain initialises both susie and susie_ash", {
+  skip_if_not_installed("susieR")
+  inp <- .make_strong_signal_inputs()
+  r <- univariate_analysis_pipeline(
+    X = inp$X, Y = inp$y, maf = inp$maf,
+    methods = c("susie_inf", "susie", "susie_ash"), add_susie_inf = TRUE,
+    twas_weights = FALSE,
+    finemapping_extra_opts = list(refine = FALSE),
+    signal_cutoff = 0, verbose = 0
+  )
+  expect_false(is.null(r$susie_inf_fitted))
+  expect_false(is.null(r$susie_fitted))
+  expect_false(is.null(r$susie_ash_fitted))
+  expect_true(all(c("susie_inf", "susie", "susie_ash") %in% unique(r$top_loci$method)))
+})
+
 test_that("univariate_analysis_pipeline: twas_weights = TRUE requires chained two-stage", {
   skip_if_not_installed("susieR")
   inp <- .make_uvp_inputs()
