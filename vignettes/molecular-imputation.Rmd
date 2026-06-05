@@ -1,0 +1,185 @@
+---
+title: "Imputing Missing Values in Molecular Trait Matrices"
+author: "pecotmr authors"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Imputing Missing Values in Molecular Trait Matrices}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 4.5)
+```
+
+## Overview
+
+Real molecular trait data (expression, splicing, protein abundance,
+chromatin accessibility) almost always has missing values: low-coverage
+samples, transcripts below detection in some tissues, batch dropouts.
+Many downstream pecotmr workflows expect a complete matrix:
+
+- [Fine-mapping](fine-mapping.html) — `univariate_analysis_pipeline()`
+  requires a numeric `Y` vector with no NAs.
+- [TWAS weights](twas-weights.html) — `twas_weights_pipeline()` and
+  `twas_multivariate_weights_pipeline()` require complete `Y`.
+- Multivariate fits — `mrmash_wrapper()` and `multivariate_analysis_pipeline()`
+  reject NA in `Y`.
+
+`pecotmr` provides three imputation methods plus a unified pipeline.
+The methods differ in what they assume about the data:
+
+| Method | Function | Assumption | When to use |
+|---|---|---|---|
+| **XGBoost** | `xgboost_imputation()` | None — fits arbitrary nonlinear per-column models | Heterogeneous matrices where columns have different relationships. Slowest but most flexible. |
+| **softImpute** | `softimpute_imputation()` | Low-rank smooth signal | Expression matrices with a small number of dominant axes of variation. Fastest. |
+| **flashier** | `flashier_imputation()` | Sparse + scale-mixture EBMF factors | Matrices with sparse + diffuse signal mixtures. Good middle ground; reuses the same prior families as `compute_cov_flash()` for mr.mash priors. |
+
+All three are exposed through `molecular_trait_imputation_pipeline()`,
+which can fit multiple methods in one call and evaluate them on a
+held-out random mask of observed entries.
+
+```{r load-packages}
+library(pecotmr)
+```
+
+## Quick start: one method on a synthetic matrix
+
+A low-rank synthetic example illustrates the contract. We build a
+60 × 15 matrix with rank-3 truth + Gaussian noise, then mask 10% of
+entries.
+
+```{r make-synthetic}
+set.seed(1)
+n <- 60; p <- 15; rank_true <- 3
+U <- matrix(rnorm(n * rank_true), n, rank_true)
+V <- matrix(rnorm(p * rank_true), p, rank_true)
+truth <- U %*% t(V) + matrix(rnorm(n * p, sd = 0.1), n, p)
+rownames(truth) <- paste0("S", seq_len(n))
+colnames(truth) <- paste0("F", seq_len(p))
+
+# Mask 10% of entries
+na_mask <- matrix(runif(n * p) < 0.1, n, p)
+X <- truth
+X[na_mask] <- NA
+sprintf("Missingness: %.1f%%", 100 * mean(is.na(X)))
+```
+
+Run the three methods individually:
+
+```{r single-method-runs}
+Xi_softimpute <- softimpute_imputation(X)
+Xi_flashier   <- flashier_imputation(X, verbose = 0)
+# XGBoost can be slow; reduce iterations for the vignette.
+Xi_xgboost    <- xgboost_imputation(X, maxiter = 3, nrounds = 20,
+                                     verbose = FALSE)
+
+# RMSE against the truth on the masked cells
+rmse <- function(Xi) sqrt(mean((Xi[na_mask] - truth[na_mask])^2))
+cat(sprintf("softImpute RMSE: %.3f\n", rmse(Xi_softimpute)))
+cat(sprintf("flashier   RMSE: %.3f\n", rmse(Xi_flashier)))
+cat(sprintf("xgboost    RMSE: %.3f\n", rmse(Xi_xgboost)))
+```
+
+On rank-3 truth, flashier and softImpute both exploit the low-rank
+structure; XGBoost has no structural assumption and pays for that on
+this kind of input. Real expression matrices tend to be closer to the
+low-rank regime, so softImpute and flashier are usually competitive.
+
+## The pipeline: multi-method + held-out CV
+
+For real data you typically want to compare methods before picking one.
+`molecular_trait_imputation_pipeline()` does this in a single call.
+With `evaluate = TRUE` it holds out a random fraction of observed cells,
+fits each method against the masked matrix, and reports RMSE on the
+masked cells.
+
+```{r pipeline-multi}
+res <- molecular_trait_imputation_pipeline(
+  X,
+  methods       = c("xgboost", "softimpute", "flashier"),
+  method_args   = list(
+    xgboost = list(maxiter = 3, nrounds = 20, verbose = FALSE)
+  ),
+  evaluate      = TRUE,
+  eval_fraction = 0.05,
+  eval_seed     = 7
+)
+
+res$missingness$fraction          # overall missingness
+res$evaluation                     # per-method RMSE + time
+str(res$imputed, max.level = 1)    # final imputed matrices, one per method
+```
+
+The pipeline reports three things:
+
+- **`imputed`** — named list of imputed matrices, one per requested
+  method. These were fit on the **full** input (including the cells
+  that were held out for CV), so they are what you would use
+  downstream.
+- **`missingness`** — per-column NA counts and overall NA fraction.
+- **`evaluation`** — when `evaluate = TRUE`, a data.frame with one row
+  per method: `method`, `rmse`, `n_held_out`, `time_seconds`. Use it to
+  pick the method that best handles your data's structure.
+
+## Choosing a method
+
+| Method | Typical RMSE behaviour | Cost | Notes |
+|---|---|---|---|
+| **softimpute** | Best on smooth low-rank matrices. Sensitive to the choice of `lambda`; the default `0.5 * lambda0(x)` is a reasonable starting point. | Very fast (seconds). | Tune `lambda` and `rank.max` if RMSE is poor on your data. |
+| **flashier** | Best on mixed sparse + diffuse signal. Default priors (`ebnm_normal` + `ebnm_normal_scale_mixture`) work well for most expression-like matrices. | Moderate (seconds-to-minutes). | Reuses the same FLASH defaults as `compute_cov_flash()` (mr.mash prior step). |
+| **xgboost** | Robust to non-linear column relationships. Can overfit on small matrices. | Slowest (minutes-to-hours for large matrices). | Set `num_workers > 1` for parallel per-column fits. Tune `max_depth` and `nrounds`. |
+
+A simple rule of thumb: run all three with `evaluate = TRUE` on a
+small subset of your data, then use the best for the full matrix.
+
+## Integration with the rest of pecotmr
+
+The imputed matrix slots directly into the downstream pipelines:
+
+```{r downstream, eval=FALSE}
+# Imputed phenotype matrix from the pipeline
+Y_complete <- res$imputed[["flashier"]]
+
+# Fit fine-mapping on a single context (one column of Y)
+fit <- univariate_analysis_pipeline(
+  X = genotype_matrix, Y = Y_complete[, "F1"], maf = maf_vector,
+  twas_weights = TRUE
+)
+
+# Or fit multivariate models on the full matrix
+mnm_fit <- multivariate_analysis_pipeline(
+  X = genotype_matrix, Y = Y_complete,
+  data_driven_prior_matrices = prior_matrices
+)
+mt <- twas_multivariate_weights_pipeline(
+  X = genotype_matrix, Y = Y_complete, mnm_fit = mnm_fit
+)
+```
+
+Imputation happens once, upstream of fine-mapping and TWAS weight
+training, on the full phenotype matrix across contexts. The pipelines
+do not re-impute internally.
+
+## Caveats
+
+1. **Don't over-impute.** A column that's missing in most samples won't
+   recover useful structure no matter which method you use. Drop
+   columns with high missingness (`> 50%` is a common cutoff) before
+   imputing.
+2. **All-NA columns are dropped.** Each method removes columns where
+   every entry is missing and emits a one-line message. The returned
+   matrix has fewer columns than the input in that case.
+3. **CV evaluation uses one random mask.** For more stable RMSE
+   estimates, run the pipeline a few times with different `eval_seed`
+   values and average.
+4. **softImpute lambda tuning matters.** The default
+   `0.5 * lambda0(x)` is a starting point. If softImpute looks
+   uncompetitive on your data, sweep `lambda` over a grid (e.g.
+   `lambda = lambda0(x) * c(0.1, 0.25, 0.5, 1, 2)`).
+
+```{r session-info}
+sessionInfo()
+```
