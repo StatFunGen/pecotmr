@@ -241,6 +241,10 @@ test_that("RegionalData supports legacy dollar access while remaining S4", {
   expect_true(is.matrix(rd$residual_X[[1]]))
   expect_named(rd$dropped_sample,
                c("dropped_samples_X", "dropped_samples_Y", "dropped_samples_covar"))
+
+  expect_no_error(rd$residual_X[[1]] <- NA)
+  expect_no_error(rd$residual_Y[[1]] <- NA)
+  expect_s4_class(rd, "RegionalData")
 })
 
 
@@ -262,6 +266,9 @@ test_that("MultivariateRegionalData supports legacy dollar access while remainin
   expect_identical(md$residual_Y, Y)
   expect_equal(length(md$maf), ncol(X))
   expect_equal(length(md$X_variance), ncol(X))
+
+  expect_no_error(md$residual_Y <- NA)
+  expect_s4_class(md, "MultivariateRegionalData")
 })
 
 # =============================================================================

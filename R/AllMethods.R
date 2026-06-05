@@ -301,6 +301,63 @@ setMethod("$", "MultivariateRegionalData", function(x, name) {
   )
 })
 
+
+#' @export
+setMethod("$<-", "RegionalData", function(x, name, value) {
+  if (name %in% c("residual_X", "residual_Y", "residual_X_scalar",
+                  "residual_Y_scalar", "X_variance")) {
+    return(x)
+  }
+  switch(name,
+    X = {
+      x@genotype_matrix <- value
+      methods::validObject(x)
+      x
+    },
+    maf = {
+      x@maf <- value
+      methods::validObject(x)
+      x
+    },
+    dropped_samples = {
+      x@dropped_samples <- value
+      methods::validObject(x)
+      x
+    },
+    Y_coordinates = , phenotype_coordinates = , phenotype_coordiates = {
+      x@Y_coordinates <- value
+      methods::validObject(x)
+      x
+    },
+    stop("Unsupported RegionalData legacy replacement field: ", name, call. = FALSE)
+  )
+})
+
+#' @export
+setMethod("$<-", "MultivariateRegionalData", function(x, name, value) {
+  if (name %in% c("residual_Y", "residual_Y_scalar", "maf", "X_variance")) {
+    return(x)
+  }
+  switch(name,
+    X = {
+      x@genotype_matrix <- value
+      methods::validObject(x)
+      x
+    },
+    dropped_samples = {
+      x@dropped_samples <- value
+      methods::validObject(x)
+      x
+    },
+    Y_coordinates = , phenotype_coordinates = , phenotype_coordiates = {
+      x@Y_coordinates <- value
+      methods::validObject(x)
+      x
+    },
+    stop("Unsupported MultivariateRegionalData legacy replacement field: ", name, call. = FALSE)
+  )
+})
+
 # ----- MultivariateRegionalData constructor and accessors -----
 
 #' @title Construct a MultivariateRegionalData object
