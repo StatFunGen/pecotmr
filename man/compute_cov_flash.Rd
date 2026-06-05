@@ -4,21 +4,20 @@
 \alias{compute_cov_flash}
 \title{Compute covariance matrix using FLASH}
 \usage{
-compute_cov_flash(Y, error_cache = NULL)
+compute_cov_flash(Y)
 }
 \arguments{
 \item{Y}{Numeric matrix (samples x conditions).}
-
-\item{error_cache}{Optional file path to save diagnostics on FLASH failure.
-When NULL (default), errors propagate; when set, saves a list with data
-and message to this path and falls back to the identity matrix.}
 }
 \value{
 A covariance matrix of dimension ncol(Y) x ncol(Y), rescaled by
-  column standard deviations.
+  the column standard deviations of Y.
 }
 \description{
 Estimates a covariance matrix from a data matrix Y using empirical Bayes
-matrix factorization (flashier). Falls back to an identity matrix on failure
-if error_cache is provided.
+matrix factorization (\code{flashier::flash}). When the FLASH fit finds
+no shared factors, the returned covariance is diagonal with entries
+\code{residuals_sd^2}; otherwise the factor contribution is added.
+FLASH errors are not caught; callers should handle them explicitly or
+supply a pre-computed prior covariance instead.
 }

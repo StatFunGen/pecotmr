@@ -21,6 +21,7 @@
 #' @param sample_partition Optional data frame with Sample and Fold columns for cross-validation.
 #' @param mrmash_max_iter The maximum number of iterations for mr.mash. Default is 5000.
 #' @param mvsusie_max_iter The maximum number of iterations for mvSuSiE. Default is 200.
+#' @param estimate_residual_variance Passed to \code{mvsusieR::mvsusie()}. Default is TRUE.
 #' @param min_cv_maf The minimum minor allele frequency for variants to be included in cross-validation. Default is 0.05.
 #' @param max_cv_variants The maximum number of variants to be included in cross-validation. Defaults to -1 which means no limit.
 #' @param cv_folds The number of folds to use for cross-validation. Set to 0 to skip cross-validation. Default is 5.
@@ -87,6 +88,7 @@ multivariate_analysis_pipeline <- function(
     canonical_prior_matrices = TRUE,
     mrmash_max_iter = 5000,
     mvsusie_max_iter = 200,
+    estimate_residual_variance = TRUE,
     # fine-mapping results summary
     signal_cutoff = 0.025,
     coverage = c(0.95, 0.7, 0.5),
@@ -287,7 +289,7 @@ multivariate_analysis_pipeline <- function(
   res$mvsusie_fitted <- mvsusieR::mvsusie(X, Y,
     L = L, L_greedy = L_greedy,
     prior_variance = mvsusie_reweighted_mixture_prior$data_driven_prior_matrices,
-    residual_variance = resid_Y, estimate_residual_variance = TRUE,
+    residual_variance = resid_Y, estimate_residual_variance = estimate_residual_variance,
     max_iter = mvsusie_max_iter,
     verbose = verbose, coverage = coverage[1]
   )

@@ -738,7 +738,9 @@ test_that("uap: post-processing output is merged into result", {
   local_mocked_bindings(
     susie = function(...) fake_fit,
     postprocess_finemapping_fits = function(fits, ...) {
-      expect_named(fits, c("susie", "susie_inf"))
+      # SuSiE-inf is fitted first because chained SuSiE / SuSiE-ash
+      # warm-start from it; the list-name order reflects fit order.
+      expect_named(fits, c("susie_inf", "susie"))
       fake_post
     },
     format_finemapping_output = function(post, primary_method) post,

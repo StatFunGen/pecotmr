@@ -1,3 +1,60 @@
+# Internal: RAISS-impute GWAS z-scores for LD-sketch variants missing from
+# the harmonized GWAS subset. Returns the (possibly widened) sumstats data
+# frame. Imputed rows fill `z` from RAISS; `beta` becomes the imputed z and
+# `se` becomes 1 when those columns are present in the input. Other columns
+# are filled with NA. Imputed variants with R^2 below the threshold are
+# dropped by RAISS's internal filter.
+impute_missing_gwas_for_sketch <- function(gwas_data_sumstats, sketch_ref_panel,
+                                           sketch_X, impute_opts, context_label = "") {
+  missing_ids <- setdiff(sketch_ref_panel$variant_id, gwas_data_sumstats$variant_id)
+  if (length(missing_ids) == 0) return(gwas_data_sumstats)
+
+  ref_cols <- c("chrom", "pos", "variant_id", "A1", "A2")
+  if (!all(ref_cols %in% colnames(sketch_ref_panel))) {
+    warning("impute_missing_gwas_for_sketch: sketch ref_panel missing required columns; skipping imputation.")
+    return(gwas_data_sumstats)
+  }
+  if (!all(ref_cols %in% colnames(gwas_data_sumstats)) || !"z" %in% colnames(gwas_data_sumstats)) {
+    warning("impute_missing_gwas_for_sketch: gwas sumstats missing required columns; skipping imputation.")
+    return(gwas_data_sumstats)
+  }
+
+  # RAISS requires inputs sorted by position (within each chromosome)
+  ref_sorted <- sketch_ref_panel[order(sketch_ref_panel$chrom, sketch_ref_panel$pos), ref_cols, drop = FALSE]
+  known_sorted <- gwas_data_sumstats[order(gwas_data_sumstats$chrom, gwas_data_sumstats$pos), c(ref_cols, "z"), drop = FALSE]
+  # Reorder genotype matrix columns to match the sorted ref_panel
+  vid_order <- match(ref_sorted$variant_id, colnames(sketch_X))
+  vid_order <- vid_order[!is.na(vid_order)]
+  sketch_X_sorted <- sketch_X[, vid_order, drop = FALSE]
+  raiss_args <- c(list(
+    ref_panel = ref_sorted,
+    known_zscores = known_sorted,
+    genotype_matrix = sketch_X_sorted,
+    verbose = FALSE
+  ), impute_opts)
+  raiss_out <- tryCatch(do.call(raiss, raiss_args),
+                        error = function(e) {
+                          warning(sprintf("RAISS missing-variant imputation failed (%s): %s",
+                                          context_label, e$message))
+                          NULL
+                        })
+  if (is.null(raiss_out) || is.null(raiss_out$result_filter)) return(gwas_data_sumstats)
+
+  imputed_df <- raiss_out$result_filter
+  new_rows <- imputed_df[!imputed_df$variant_id %in% gwas_data_sumstats$variant_id, , drop = FALSE]
+  if (nrow(new_rows) == 0) return(gwas_data_sumstats)
+
+  added <- new_rows[, c("variant_id", "chrom", "pos", "A1", "A2", "z"), drop = FALSE]
+  if ("beta" %in% colnames(gwas_data_sumstats)) added$beta <- new_rows$z
+  if ("se"   %in% colnames(gwas_data_sumstats)) added$se   <- 1
+  for (col in setdiff(colnames(gwas_data_sumstats), colnames(added))) {
+    added[[col]] <- NA
+  }
+  added <- added[, colnames(gwas_data_sumstats), drop = FALSE]
+  message(sprintf("RAISS imputed %d missing GWAS variants (%s).", nrow(added), context_label))
+  rbind(gwas_data_sumstats, added)
+}
+
 #' Function to perform allele flip QC and harmonization on the weights and GWAS against LD for a region.
 #' FIXME: GWAS loading function from Haochen for both tabix & column-mapping yml application
 #'
@@ -20,6 +77,15 @@
 #'   metadata file with columns "#chrom", "start", "end", "path" (auto-detected).
 #' @param ld_reference_sample_size Sample size of the LD reference panel (integer). Required.
 #'   Used to compute per-variant variance as 2*p*(1-p)*n/(n-1). For ADSP R4, use 17000.
+#' @param impute_missing Logical. When \code{TRUE}, RAISS imputes GWAS z-scores
+#'   for variants that are present in the LD sketch but missing from the GWAS
+#'   summary statistics. This widens GWAS coverage so weight variants with LD
+#'   neighbors but no GWAS hit are no longer silently dropped at the
+#'   weight-vs-GWAS intersection. Default \code{FALSE}.
+#' @param impute_opts Named list of RAISS imputation parameters. Used when
+#'   \code{impute_missing = TRUE}. Defaults:
+#'   \code{list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)}.
+#'   Imputed variants with \code{R2 < R2_threshold} are dropped.
 #' @return A list of list for harmonized weights and dataframe of gwas summary statistics that is add to the original input of
 #' twas_weights_data under each context.
 #' @importFrom vroom vroom
@@ -28,7 +94,10 @@
 #' @importFrom IRanges IRanges findOverlaps start end reduce
 #' @export
 harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
-                           ld_reference_sample_size, column_file_path = NULL, comment_string = "#") {
+                           ld_reference_sample_size, column_file_path = NULL, comment_string = "#",
+                           impute_missing = FALSE,
+                           impute_opts = list(rcond = 0.01, R2_threshold = 0.6,
+                                              minimum_ld = 5, lamb = 0.01)) {
   # Step 1: Normalize twas_weights_data -- accept bare TWASWeights or wrapper lists
   molecular_ids <- names(twas_weights_data)
   for (mol_id in molecular_ids) {
@@ -71,6 +140,16 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
     X_std <- standardize_genotype_hwe(sketch_X, sketch_ref_panel$allele_freq)
     svd_result <- safe_svd(X_std, tol = 0)
 
+    # Warn when weight variants have no LD-reference counterpart at all
+    # (cannot be imputed by RAISS; will be dropped at the weights-vs-sketch step).
+    weight_no_ld <- setdiff(all_weight_variants, sketch_variant_ids)
+    if (length(weight_no_ld) > 0) {
+      warning(sprintf(
+        "harmonize_twas: %d of %d weight variants for %s have no LD-reference counterpart and will be dropped.",
+        length(weight_no_ld), length(all_weight_variants), molecular_id
+      ))
+    }
+
     # Step 4: Harmonize GWAS and weights against sketch variants
     for (study in names(gwas_files)) {
       gwas_file <- gwas_files[study]
@@ -79,6 +158,20 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
                                             match_min_prop = 0, column_file_path = column_file_path,
                                             comment_string = comment_string)
       if (is.null(gwas_data_sumstats)) next
+
+      # Optional RAISS imputation: fill GWAS z-scores for sketch variants
+      # absent from the harmonized GWAS. Widens GWAS so the downstream
+      # weight-vs-GWAS intersection no longer drops weight variants that
+      # have LD neighbors but no observed GWAS hit.
+      if (isTRUE(impute_missing)) {
+        gwas_data_sumstats <- impute_missing_gwas_for_sketch(
+          gwas_data_sumstats = gwas_data_sumstats,
+          sketch_ref_panel = sketch_ref_panel,
+          sketch_X = sketch_X,
+          impute_opts = impute_opts,
+          context_label = sprintf("study=%s, gene=%s", study, molecular_id)
+        )
+      }
 
       for (context in contexts) {
         weights_matrix <- getWeights(tw, context)
@@ -230,6 +323,15 @@ harmonize_gwas <- function(gwas_file, query_region, ld_variants, col_to_flip=NUL
 #' This function peforms TWAS analysis for multiple contexts for imputable genes within an LD region and summarize the twas results.
 #' @param twas_weights_data List of list of twas weights output from generate_twas_db function.
 #' @param region_block A string with LD region informaiton of chromosome number, star and end position of LD block conneced with "_".
+#' @param impute_missing Logical. Passed to \code{\link{harmonize_twas}}. When
+#'   \code{TRUE}, RAISS imputes GWAS z-scores for variants present in the LD
+#'   sketch but missing from the GWAS summary statistics, so weight variants
+#'   with LD neighbors but no observed GWAS hit are not silently dropped at
+#'   the weight-vs-GWAS intersection. Default \code{FALSE}.
+#' @param impute_opts Named list of RAISS imputation parameters used when
+#'   \code{impute_missing = TRUE}. Defaults to
+#'   \code{list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)};
+#'   imputed variants with \code{R2 < R2_threshold} are dropped.
 #' @return A list of list containing twas result table and formatted TWAS data compatible with ctwas_sumstats() function.
 #' \itemize{
 #'   \item{twas_table}{ A dataframe of twas results summary is generated for each gene-contexts-method pair of all methods for imputable genes.}
@@ -298,7 +400,10 @@ twas_pipeline <- function(twas_weights_data,
                           output_twas_data = FALSE,
                           event_filters=NULL,
                           column_file_path = NULL,
-                          comment_string="#") {
+                          comment_string="#",
+                          impute_missing = FALSE,
+                          impute_opts = list(rcond = 0.01, R2_threshold = 0.6,
+                                             minimum_ld = 5, lamb = 0.01)) {
   # internal function to format TWAS output
   format_twas_data <- function(post_qc_twas_data, twas_table) {
     weights_list <- map(names(post_qc_twas_data), function(molecular_id) {
@@ -490,7 +595,9 @@ twas_pipeline <- function(twas_weights_data,
   # harmonize twas weights and gwas sumstats against LD
   twas_data_qced_result <- harmonize_twas(twas_weights_data, ld_meta_file_path, gwas_meta_file,
                                           ld_reference_sample_size = ld_reference_sample_size,
-                                          column_file_path = column_file_path, comment_string = comment_string)
+                                          column_file_path = column_file_path, comment_string = comment_string,
+                                          impute_missing = impute_missing,
+                                          impute_opts = impute_opts)
   twas_results_db <- lapply(names(twas_weights_data), function(weight_db) {
     tw <- twas_weights_data[[weight_db]]
     tw_methods <- getMethodNames(tw)
@@ -727,33 +834,47 @@ twas_z <- function(weights, z, R = NULL, X = NULL, V = NULL, D = NULL, n_sketch 
 
 #' Multi-condition TWAS joint test
 #'
-#' This function performs a multi-condition TWAS joint test using the GBJ method.
-#' It assumes that the input genotype matrix (X) is standardized.
+#' Computes per-condition TWAS z-scores from a variants x conditions weight
+#' matrix and an LD sketch (eigenvalues / eigenvectors), and combines them
+#' into a joint p-value across conditions using any of the p-value
+#' combination methods supported elsewhere in the package.
 #'
-#' @param R An optional correlation matrix. If not provided, it will be calculated from the genotype matrix X.
-#' @param X An optional genotype matrix. If R is not provided, X must be supplied to calculate the correlation matrix.
-#' @param V Optional SVD right-singular vectors (variants x components) from an LD sketch.
-#'   When provided with \code{D_svd} and \code{n_sketch}, avoids forming the full LD matrix.
-#' @param D_svd Optional SVD singular values (vector) from an LD sketch.
-#' @param n_sketch Optional sample size of the LD sketch.
-#' @param weights A matrix of weights, where each column corresponds to a different condition.
-#' @param z A vector of GWAS z-scores.
+#' Per-condition test statistics use the cross-condition correlation
+#' matrix induced by the weights and LD sketch; methods that need the
+#' correlation (\code{"fisher"}, \code{"stouffer"}, \code{"invchisq"},
+#' \code{"gbj"}, \code{"aspu"}, \code{"gates"}) consume it directly.
 #'
-#' @return A list containing the following elements:
-#' \itemize{
-#'   \item Z: A matrix of TWAS z-scores and p-values for each condition.
-#'   \item GBJ: The result of the GBJ test.
+#' @param weights A matrix of weights, one column per condition.
+#' @param z A numeric vector of GWAS z-scores aligned to the rows of
+#'   \code{weights}.
+#' @param V SVD right-singular vectors (variants x components) of the
+#'   LD sketch.
+#' @param D_svd SVD singular values (vector) of the LD sketch.
+#' @param n_sketch Sample size of the LD sketch.
+#' @param combine_method Cross-condition p-value combination method. One
+#'   of \code{"acat"} (default), \code{"hmp"}, \code{"fisher"},
+#'   \code{"stouffer"}, \code{"invchisq"}, \code{"gbj"}, \code{"aspu"},
+#'   or \code{"gates"}.
+#' @param R,X Legacy alternatives to the LD sketch SVD path; supplying
+#'   either still works but is no longer recommended. Documented
+#'   workflows use \code{V}, \code{D_svd}, \code{n_sketch}.
+#'
+#' @return A list with:
+#' \describe{
+#'   \item{Z}{Per-condition Z-score and p-value matrix
+#'     (one row per condition).}
+#'   \item{combined}{List with \code{method} (the requested
+#'     \code{combine_method}) and \code{pval} (the joint p-value).}
 #' }
 #'
-#' @importFrom stats cor pnorm
+#' @importFrom stats pnorm
 #' @export
 twas_joint_z <- function(weights, z, R = NULL, X = NULL,
-                         V = NULL, D_svd = NULL, n_sketch = NULL) {
-  # Make sure GBJ is installed
-  if (!requireNamespace("GBJ", quietly = TRUE)) {
-    stop("To use this function, please install GBJ: https://cran.r-project.org/web/packages/GBJ/index.html")
-  }
-  # Check that weights and z-scores have the same number of rows
+                         V = NULL, D_svd = NULL, n_sketch = NULL,
+                         combine_method = c("acat", "hmp", "fisher",
+                                            "stouffer", "invchisq",
+                                            "gbj", "aspu", "gates")) {
+  combine_method <- match.arg(combine_method)
   if (nrow(weights) != length(z)) {
     stop("Number of rows in weights must match the length of z-scores.")
   }
@@ -761,60 +882,81 @@ twas_joint_z <- function(weights, z, R = NULL, X = NULL,
   use_svd <- !is.null(V) && !is.null(D_svd) && !is.null(n_sketch)
 
   if (use_svd) {
-    # SVD path: R ≈ V diag(Lambda) V' where Lambda = D_svd²/(n_sketch-1)
+    # Eigendecomposition path: R = V diag(Lambda) V' with
+    # Lambda_i = D_svd_i^2 / (n_sketch - 1). Avoid ever forming R.
     Lambda <- D_svd^2 / (n_sketch - 1)
     idx <- which(rownames(V) %in% rownames(weights))
     V_sub <- V[idx, , drop = FALSE]
-    # cov_y = weights' R_sub weights = weights' V_sub diag(Lambda) V_sub' weights
     VtW <- crossprod(V_sub, weights)  # r x k
     cov_y <- crossprod(VtW * sqrt(Lambda))  # k x k
   } else {
+    # Legacy R / X path (kept for backwards compatibility).
     if (is.null(R)) R <- compute_LD(X)
     idx <- which(rownames(R) %in% rownames(weights))
-    D <- R[idx, idx]
-    cov_y <- crossprod(weights, D) %*% weights
+    R_sub <- R[idx, idx]
+    cov_y <- crossprod(weights, R_sub) %*% weights
   }
 
   y_sd <- sqrt(diag(cov_y))
-  x_sd <- rep(1, nrow(weights)) # Assuming X is standardized
+  x_sd <- rep(1, nrow(weights))  # standardized genotype scale
 
-  # Get gamma matrix MxM (snp x snp)
-  g <- lapply(colnames(weights), function(x) {
-    gm <- diag(x_sd / y_sd[x], length(x_sd), length(x_sd))
-    return(gm)
-  })
-  names(g) <- colnames(weights)
+  # Gamma scaling per condition: gamma_k = diag(x_sd / y_sd[k])
+  g <- setNames(lapply(colnames(weights), function(cond) {
+    diag(x_sd / y_sd[cond], length(x_sd), length(x_sd))
+  }), colnames(weights))
 
-  ######### Get TWAS - Z statistics & P-value, GBJ test ########
-  z_matrix <- do.call(rbind, lapply(colnames(weights), function(x) {
-    Zi <- crossprod(weights[, x], g[[x]]) %*% as.numeric(z)
+  # Per-condition Z-score and two-sided p-value
+  z_matrix <- do.call(rbind, lapply(colnames(weights), function(cond) {
+    Zi <- crossprod(weights[, cond], g[[cond]]) %*% as.numeric(z)
     pval <- 2 * pnorm(abs(Zi), lower.tail = FALSE)
-    Zp <- c(Zi, pval)
-    names(Zp) <- c("Z", "pval")
-    return(Zp)
+    setNames(c(Zi, pval), c("Z", "pval"))
   }))
   rownames(z_matrix) <- colnames(weights)
 
-  # GBJ test
-  lam <- matrix(rep(NA, ncol(weights) * nrow(weights)), nrow = ncol(weights))
-  rownames(lam) <- colnames(weights)
-  for (p in colnames(weights)) {
-    la <- as.matrix(weights[, p] %*% g[[p]])
-    lam[p, ] <- la
+  # Cross-condition correlation sig[i,j] from weighted LD sketch.
+  lam <- matrix(NA_real_, nrow = ncol(weights), ncol = nrow(weights),
+                dimnames = list(colnames(weights), NULL))
+  for (cond in colnames(weights)) {
+    lam[cond, ] <- as.numeric(weights[, cond] %*% g[[cond]])
   }
-
   if (use_svd) {
-    # sig = lam R_sub lam' = lam V_sub diag(Lambda) V_sub' lam'
-    LV <- lam %*% V_sub  # k x r
-    sig <- tcrossprod(sweep(LV, 2, Lambda, "*"), LV)  # k x k
+    LV <- lam %*% V_sub                              # k x r
+    sig <- tcrossprod(sweep(LV, 2, Lambda, "*"), LV) # k x k
   } else {
-    sig <- tcrossprod((lam %*% D), lam)
+    sig <- tcrossprod((lam %*% R_sub), lam)
   }
 
-  gbj <- GBJ::GBJ(test_stats = z_matrix[, 1], cor_mat = sig)
+  # Dispatch to the requested combination method. Methods reuse the same
+  # helpers as twas_analysis's cross-method omnibus.
+  zscores <- as.numeric(z_matrix[, "Z"])
+  pvals   <- as.numeric(z_matrix[, "pval"])
+  valid <- is.finite(pvals) & pvals > 0 & pvals < 1
+  combined_pval <- if (sum(valid) < 2L) {
+    NA_real_
+  } else {
+    sig_sub <- sig[valid, valid, drop = FALSE]
+    tryCatch(
+      switch(combine_method,
+        acat     = pval_acat(pvals[valid]),
+        hmp      = pval_hmp(pvals[valid]),
+        fisher   = ,
+        stouffer = ,
+        invchisq = pval_poolr(pvals[valid], method = combine_method, R = sig_sub),
+        gbj      = pval_gbj(zscores[valid], R = sig_sub, method = combine_method),
+        aspu     = ,
+        gates    = pval_aspu(zscores[valid], pvals[valid],
+                              R = sig_sub, method = combine_method)
+      ),
+      error = function(e) {
+        warning(sprintf("twas_joint_z combine_method = '%s' failed: %s",
+                        combine_method, e$message))
+        NA_real_
+      }
+    )
+  }
 
-  rs <- list("Z" = z_matrix, "GBJ" = gbj)
-  return(rs)
+  list(Z = z_matrix,
+       combined = list(method = combine_method, pval = combined_pval))
 }
 
 #' TWAS Analysis

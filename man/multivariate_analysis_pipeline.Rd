@@ -24,6 +24,7 @@ multivariate_analysis_pipeline(
   canonical_prior_matrices = TRUE,
   mrmash_max_iter = 5000,
   mvsusie_max_iter = 200,
+  estimate_residual_variance = TRUE,
   signal_cutoff = 0.025,
   coverage = c(0.95, 0.7, 0.5),
   min_abs_corr = 0.8,
@@ -61,6 +62,8 @@ multivariate_analysis_pipeline(
 \item{mrmash_max_iter}{The maximum number of iterations for mr.mash. Default is 5000.}
 
 \item{mvsusie_max_iter}{The maximum number of iterations for mvSuSiE. Default is 200.}
+
+\item{estimate_residual_variance}{Passed to \code{mvsusieR::mvsusie()}. Default is TRUE.}
 
 \item{signal_cutoff}{Cutoff value for signal identification in PIP values. Default is 0.025.}
 

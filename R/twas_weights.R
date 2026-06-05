@@ -1686,6 +1686,69 @@ ensemble_weights <- function(cv_results, Y, twas_weight_list = NULL,
 # Summary-statistics TWAS weight training pipeline
 # =============================================================================
 
+# Internal: RAISS-impute QTL z-scores for LD-panel variants missing from the
+# QTL summary statistics. Used by twas_weights_sumstat_pipeline() when
+# impute_missing = TRUE. Returns the (possibly widened) sumstats data frame
+# with new rows for imputed variants. Imputed variants with R^2 below the
+# threshold are dropped by RAISS's internal filter.
+impute_missing_sumstats_for_LD <- function(sumstats, LD_mat, LD_data,
+                                           impute_opts, verbose = 1) {
+  ld_ids <- rownames(LD_mat)
+  missing_ids <- setdiff(ld_ids, sumstats$variant_id)
+  if (length(missing_ids) == 0) return(sumstats)
+
+  # Build ref_panel covering all LD variants
+  if (is(LD_data, "LDData")) {
+    ld_ref_panel <- getRefPanel(LD_data)
+  } else {
+    ld_ref_panel <- parse_variant_id(ld_ids)
+    ld_ref_panel$variant_id <- ld_ids
+  }
+  ref_cols <- c("chrom", "pos", "variant_id", "A1", "A2")
+  if (!all(ref_cols %in% colnames(ld_ref_panel))) {
+    warning("impute_missing_sumstats_for_LD: LD ref_panel missing required columns; skipping imputation.")
+    return(sumstats)
+  }
+  if (!all(ref_cols %in% colnames(sumstats)) || !"z" %in% colnames(sumstats)) {
+    warning("impute_missing_sumstats_for_LD: sumstats missing required columns; skipping imputation.")
+    return(sumstats)
+  }
+
+  # RAISS requires inputs sorted by position (within each chromosome)
+  ref_sorted <- ld_ref_panel[order(ld_ref_panel$chrom, ld_ref_panel$pos), ref_cols, drop = FALSE]
+  known_sorted <- sumstats[order(sumstats$chrom, sumstats$pos), c(ref_cols, "z"), drop = FALSE]
+  raiss_args <- c(list(
+    ref_panel = ref_sorted,
+    known_zscores = known_sorted,
+    LD_matrix = LD_mat,
+    verbose = (verbose >= 2)
+  ), impute_opts)
+  raiss_out <- tryCatch(do.call(raiss, raiss_args),
+                        error = function(e) {
+                          warning(sprintf("RAISS missing-sumstat imputation failed: %s", e$message))
+                          NULL
+                        })
+  if (is.null(raiss_out) || is.null(raiss_out$result_filter)) return(sumstats)
+
+  new_rows <- raiss_out$result_filter[
+    !raiss_out$result_filter$variant_id %in% sumstats$variant_id, , drop = FALSE
+  ]
+  if (nrow(new_rows) == 0) return(sumstats)
+
+  added <- new_rows[, c("variant_id", "chrom", "pos", "A1", "A2", "z"), drop = FALSE]
+  if ("beta" %in% colnames(sumstats)) added$beta <- new_rows$z
+  if ("se"   %in% colnames(sumstats)) added$se   <- 1
+  for (col in setdiff(colnames(sumstats), colnames(added))) {
+    added[[col]] <- NA
+  }
+  added <- added[, colnames(sumstats), drop = FALSE]
+  if (verbose >= 1) {
+    message(sprintf("RAISS imputed %d missing QTL sumstat variants from LD reference.",
+                    nrow(added)))
+  }
+  rbind(sumstats, added)
+}
+
 #' Train TWAS weights from summary statistics and LD reference
 #'
 #' Replaces the OTTERS pipeline with a properly integrated workflow that:
@@ -1713,8 +1776,17 @@ ensemble_weights <- function(cv_results, Y, twas_weight_list = NULL,
 #'   \code{"dentist"}, or NULL/\code{"none"} to skip.
 #' @param keep_indel Whether to keep indels during QC. Default TRUE.
 #' @param pip_cutoff_to_skip PIP threshold for early stopping. Default 0 (off).
-#' @param impute Whether to run RAISS imputation. Default FALSE.
-#' @param impute_opts RAISS imputation parameters.
+#' @param impute Whether to run RAISS imputation of LD-inconsistent variants
+#'   flagged by QC (the QC re-imputation path). Default FALSE.
+#' @param impute_missing Logical. When \code{TRUE}, RAISS imputes QTL z-scores
+#'   for variants present in the LD reference but absent from the QTL
+#'   summary statistics, after QC and before LD/sumstats intersection. This
+#'   widens the sumstats panel available to the weight-learning methods so a
+#'   richer set of weights can later be applied to GWAS. Independent of
+#'   \code{impute}; both can be enabled together. Default \code{FALSE}.
+#' @param impute_opts RAISS imputation parameters; shared by the \code{impute}
+#'   QC re-imputation and the \code{impute_missing} missing-variant path.
+#'   Imputed variants with \code{R2 < R2_threshold} are dropped.
 #' @param var_y Phenotype variance. Default 1.
 #' @param verbose Verbosity level.
 #'
@@ -1743,6 +1815,7 @@ twas_weights_sumstat_pipeline <- function(
     keep_indel = TRUE,
     pip_cutoff_to_skip = 0,
     impute = TRUE,
+    impute_missing = FALSE,
     impute_opts = list(rcond = 0.01, R2_threshold = 0.6,
                        minimum_ld = 5, lamb = 0.01),
     var_y = 1, verbose = 1) {
@@ -1803,6 +1876,25 @@ twas_weights_sumstat_pipeline <- function(
   variant_ids <- sumstats$variant_id
   b <- z / sqrt(n)
   stat <- list(b = b, cor = b, z = z, n = rep(n, p))
+
+  # Optional RAISS imputation: fill QTL z-scores for LD-panel variants absent
+  # from the QTL summary statistics. Widens the sumstats panel so weight
+  # learners have access to a richer variant set; downstream intersection
+  # with LD becomes a near-identity after this step.
+  if (isTRUE(impute_missing) && !is.null(LD_mat) && !is.null(rownames(LD_mat))) {
+    sumstats <- impute_missing_sumstats_for_LD(
+      sumstats = sumstats,
+      LD_mat = LD_mat,
+      LD_data = LD_data,
+      impute_opts = impute_opts,
+      verbose = verbose
+    )
+    p <- nrow(sumstats)
+    z <- sumstats$z
+    variant_ids <- sumstats$variant_id
+    b <- z / sqrt(n)
+    stat <- list(b = b, cor = b, z = z, n = rep(n, p))
+  }
 
   # Align LD matrix to sumstats variant order
   if (!is.null(rownames(LD_mat)) && !is.null(variant_ids)) {
@@ -1960,5 +2052,239 @@ twas_weights_sumstat_pipeline <- function(
       outlier_number = outlier_number,
       methods_succeeded = names(results)
     )
+  )
+}
+
+# =============================================================================
+# Multivariate summary-statistics TWAS weight training pipeline
+# =============================================================================
+
+#' Train multi-context TWAS weights from per-context summary statistics
+#'
+#' Multi-context summary-statistics analog of
+#' \code{\link{twas_multivariate_weights_pipeline}}. Bundles per-context RSS
+#' QC, cross-context variant alignment, optional RAISS missing-variant
+#' imputation, data-driven prior construction (reusing
+#' \code{\link{build_mrmash_prior_matrices}} and the same FLASH / diagonal
+#' covariance helpers as the individual-level pipeline), and multi-context
+#' weight training via \code{\link{mrmash_rss_weights}} and/or
+#' \code{\link{mvsusie_rss_weights}}.
+#'
+#' @param sumstats_list Named list of per-context sumstats data.frames. Each
+#'   data.frame must contain \code{variant_id}, \code{chrom}, \code{pos},
+#'   \code{A1}, \code{A2}, and either \code{z} or \code{beta}/\code{se}.
+#'   List names become condition labels.
+#' @param LD_data Shared \code{LDData} S4 object covering the union of
+#'   variants. Each per-context sumstats is QC'd against this same LD panel.
+#' @param n Per-context sample sizes; either a named numeric vector matching
+#'   \code{names(sumstats_list)} or a single scalar to broadcast.
+#' @param methods Named list of multivariate RSS weight methods to fit.
+#'   Function names must match \code{<name>_weights}. Defaults to mr.mash-RSS
+#'   and mvSuSiE-RSS with default arguments.
+#' @param qc_method Per-context QC method passed to
+#'   \code{\link{summary_stats_qc}}; one of \code{"slalom"}, \code{"dentist"},
+#'   or NULL/\code{"none"}. Default \code{NULL} (basic harmonization only).
+#' @param keep_indel Passed through to QC. Default TRUE.
+#' @param impute Logical. If TRUE, run per-context RAISS re-imputation of
+#'   LD-mismatch outliers (QC re-imputation). Default FALSE.
+#' @param impute_missing Logical. If TRUE, after per-context QC and before
+#'   cross-context alignment, RAISS imputes per-context z-scores for
+#'   LD-reference variants absent from each context's sumstats. Widens the
+#'   intersection used downstream. Default FALSE.
+#' @param impute_opts Named list of RAISS parameters shared by both
+#'   \code{impute} and \code{impute_missing}.
+#' @param data_driven_prior_matrices Optional list of pre-computed prior
+#'   matrices (with element \code{U}) passed to
+#'   \code{\link{build_mrmash_prior_matrices}}. When NULL and
+#'   \code{estimate_priors_from_sumstats = TRUE}, the pipeline estimates a
+#'   data-driven covariance from the cross-context \code{Bhat} matrix via
+#'   \code{\link{compute_cov_flash}}. If FLASH fails the error is allowed
+#'   to propagate; supply \code{data_driven_prior_matrices} explicitly or
+#'   set \code{estimate_priors_from_sumstats = FALSE} to bypass.
+#' @param canonical_prior_matrices Passed to
+#'   \code{\link{build_mrmash_prior_matrices}}. Default TRUE.
+#' @param estimate_priors_from_sumstats Logical. When TRUE (default) and
+#'   \code{data_driven_prior_matrices} is NULL, estimate data-driven priors
+#'   from the cross-context Bhat matrix using
+#'   \code{\link{compute_cov_flash}}. FLASH errors are not swallowed; see
+#'   \code{data_driven_prior_matrices} for the explicit-prior path.
+#' @param verbose Integer verbosity level.
+#'
+#' @return A list with
+#' \describe{
+#'   \item{twas_weights}{A \code{TWASWeights} S4 object with per-context
+#'     weight matrices (variants x conditions).}
+#'   \item{qc_summary}{Per-context QC and alignment counts.}
+#'   \item{Z}{The aligned z-score matrix (variants x conditions) fed to the
+#'     weight learners.}
+#' }
+#' @export
+twas_multivariate_weights_sumstat_pipeline <- function(
+    sumstats_list, LD_data, n,
+    methods = list(mrmash_rss = list(), mvsusie_rss = list()),
+    qc_method = NULL,
+    keep_indel = TRUE,
+    impute = FALSE,
+    impute_missing = FALSE,
+    impute_opts = list(rcond = 0.01, R2_threshold = 0.6,
+                       minimum_ld = 5, lamb = 0.01),
+    data_driven_prior_matrices = NULL,
+    canonical_prior_matrices = TRUE,
+    estimate_priors_from_sumstats = TRUE,
+    verbose = 1) {
+
+  # ----- 1. Validate inputs and normalise per-context n -----
+  if (!is.list(sumstats_list) || length(sumstats_list) == 0L) {
+    stop("sumstats_list must be a non-empty named list of sumstats data.frames.")
+  }
+  if (is.null(names(sumstats_list)) || any(names(sumstats_list) == "")) {
+    stop("sumstats_list must be a named list; names become condition labels.")
+  }
+  conditions <- names(sumstats_list)
+  K <- length(conditions)
+  if (length(n) == 1L) n <- setNames(rep(as.numeric(n), K), conditions)
+  if (is.null(names(n))) names(n) <- conditions
+  missing_n <- setdiff(conditions, names(n))
+  if (length(missing_n) > 0) {
+    stop("n vector missing entries for conditions: ", paste(missing_n, collapse = ", "))
+  }
+
+  # ----- 2. Per-context QC + optional missing-variant imputation -----
+  per_context_qc <- list()
+  for (cond in conditions) {
+    ss_c <- sumstats_list[[cond]]
+    if (!is.null(ss_c$z) || (!is.null(ss_c$beta) && !is.null(ss_c$se))) {
+      if (is.null(ss_c$z)) ss_c$z <- ss_c$beta / ss_c$se
+    } else {
+      stop(sprintf("Context %s: sumstats must contain z or (beta, se).", cond))
+    }
+    qc_record <- summary_stats_qc(
+      rss_input = list(sumstats = ss_c, n = n[[cond]], var_y = 1),
+      LD_data = LD_data,
+      keep_indel = keep_indel,
+      qc_method = if (is.null(qc_method)) "none" else qc_method,
+      impute = impute, impute_opts = impute_opts,
+      return_on_skip = "preprocess",
+      study = cond
+    )
+    ss_qced <- getRSSInput(qc_record)$sumstats
+    if (isTRUE(impute_missing) && nrow(ss_qced) > 0) {
+      qc_ld <- getLDData(qc_record)
+      LD_for_impute <- if (is.null(qc_ld)) {
+        if (hasGenotypes(LD_data)) getGenotypes(LD_data) else getCorrelation(LD_data)
+      } else if (hasGenotypes(qc_ld)) getGenotypes(qc_ld) else getCorrelation(qc_ld)
+      if (!is.null(LD_for_impute) && !is.null(rownames(LD_for_impute))) {
+        ss_qced <- impute_missing_sumstats_for_LD(
+          sumstats = ss_qced, LD_mat = LD_for_impute,
+          LD_data = LD_data, impute_opts = impute_opts, verbose = verbose
+        )
+      }
+    }
+    per_context_qc[[cond]] <- ss_qced
+  }
+
+  # ----- 3. Cross-context alignment (intersection on variant_id) -----
+  variant_sets <- lapply(per_context_qc, function(df) df$variant_id)
+  common_variants <- Reduce(intersect, variant_sets)
+  if (length(common_variants) < 2) {
+    return(list(twas_weights = NULL,
+                qc_summary = list(skipped = TRUE,
+                                  reason = "fewer than 2 shared variants across contexts"),
+                Z = NULL))
+  }
+
+  # Use LD reference order for the common set
+  ld_ids <- if (is(LD_data, "LDData")) getVariantIds(LD_data) else rownames(getCorrelation(LD_data))
+  common_variants <- intersect(ld_ids, common_variants)
+
+  # ----- 4. Build Z and Bhat/Shat matrices -----
+  Z <- matrix(NA_real_, nrow = length(common_variants), ncol = K,
+              dimnames = list(common_variants, conditions))
+  Bhat <- Z; Shat <- Z
+  n_vec <- as.numeric(n[conditions])
+  for (k in seq_len(K)) {
+    df <- per_context_qc[[conditions[k]]]
+    df <- df[df$variant_id %in% common_variants, , drop = FALSE]
+    idx <- match(common_variants, df$variant_id)
+    Z[, k] <- df$z[idx]
+    Bhat[, k] <- Z[, k] / sqrt(n_vec[k])
+    Shat[, k] <- 1 / sqrt(n_vec[k])
+  }
+
+  # ----- 5. LD subset to common variants -----
+  LD_full <- if (is(LD_data, "LDData")) getCorrelation(LD_data) else LD_data
+  if (is.null(LD_full)) {
+    if (is(LD_data, "LDData") && hasGenotypes(LD_data)) {
+      X_ref <- getGenotypes(LD_data)
+      LD_full <- compute_LD(X_ref[, common_variants, drop = FALSE], method = "sample")
+    } else {
+      stop("LD_data must provide either a correlation matrix or a genotype handle.")
+    }
+  }
+  LD_mat <- LD_full[common_variants, common_variants, drop = FALSE]
+
+  # ----- 6. Data-driven prior matrices from the aligned Bhat -----
+  prior_input <- data_driven_prior_matrices
+  if (is.null(prior_input) && isTRUE(estimate_priors_from_sumstats) && K >= 2) {
+    if (verbose >= 1) message("Estimating data-driven prior matrices from Bhat ...")
+    # Let FLASH errors propagate; callers can supply data_driven_prior_matrices
+    # explicitly or set estimate_priors_from_sumstats = FALSE to bypass.
+    prior_input <- list(U = list(flash = compute_cov_flash(Bhat)))
+  }
+
+  # ----- 7. Build stat object and dispatch weight methods -----
+  stat <- list(z = Z, Bhat = Bhat, Shat = Shat, n = n_vec)
+  results <- list()
+  for (method_name in names(methods)) {
+    fn_name <- paste0(method_name, "_weights")
+    if (!exists(fn_name, mode = "function")) {
+      warning(sprintf("Method '%s' not found (looking for function '%s'). Skipping.",
+                      method_name, fn_name))
+      next
+    }
+    method_args <- methods[[method_name]] %||% list()
+    if (method_name == "mrmash_rss") {
+      method_args$data_driven_prior_matrices <- method_args$data_driven_prior_matrices %||% prior_input
+      method_args$canonical_prior_matrices  <- method_args$canonical_prior_matrices  %||% canonical_prior_matrices
+    }
+    fn <- get(fn_name, mode = "function")
+    if (verbose >= 1) message("Fitting ", method_name, " ...")
+    w <- tryCatch(
+      do.call(fn, c(list(stat = stat, LD = LD_mat), method_args)),
+      error = function(e) {
+        warning(sprintf("Method '%s' failed: %s", method_name, e$message))
+        NULL
+      }
+    )
+    if (!is.null(w)) {
+      if (!is.matrix(w)) w <- matrix(w, nrow = length(common_variants), ncol = K,
+                                     dimnames = list(common_variants, conditions))
+      results[[paste0(method_name, "_weights")]] <- w
+    }
+  }
+
+  # ----- 8. Package into TWASWeights S4 -----
+  if (length(results) == 0) {
+    return(list(twas_weights = NULL,
+                qc_summary = list(skipped = TRUE,
+                                  reason = "all methods failed"),
+                Z = Z))
+  }
+  twas_wt <- TWASWeights(
+    weights = results,
+    variant_ids = common_variants,
+    standardized = TRUE,
+    cv_performance = NULL
+  )
+  list(
+    twas_weights = twas_wt,
+    qc_summary = list(
+      skipped = FALSE,
+      n_per_context = vapply(per_context_qc, nrow, integer(1)),
+      n_common = length(common_variants),
+      conditions = conditions,
+      methods_succeeded = names(results)
+    ),
+    Z = Z
   )
 }

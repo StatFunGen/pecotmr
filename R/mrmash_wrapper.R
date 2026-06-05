@@ -135,25 +135,16 @@ mrmash_wrapper <- function(X,
     )
   }
 
-  prior_grid <- compute_grid(bhat = sumstats$Bhat, sbhat = sumstats$Shat)
-
-  # Compute canonical matrices, if requested
-  if (isTRUE(canonical_prior_matrices)) {
-    canonical_prior_matrices <- mr.mashr::compute_canonical_covs(ncol(Y),
-      singletons = TRUE,
-      hetgrid = c(0, 0.25, 0.5, 0.75, 1)
-    )
-    if (!is.null(data_driven_prior_matrices)) {
-      S0_raw <- c(canonical_prior_matrices, data_driven_prior_matrices$U)
-    } else {
-      S0_raw <- canonical_prior_matrices
-    }
-  } else {
-    S0_raw <- data_driven_prior_matrices$U
-  }
-
-  # Compute prior covariance
-  S0 <- mr.mashr::expand_covs(S0_raw, prior_grid, zeromat = TRUE)
+  # Build prior covariance via shared helper (also used by mrmash_rss_weights)
+  prior_built <- build_mrmash_prior_matrices(
+    Bhat = sumstats$Bhat, Shat = sumstats$Shat,
+    K = ncol(Y),
+    data_driven_prior_matrices = data_driven_prior_matrices,
+    canonical_prior_matrices = canonical_prior_matrices,
+    prior_grid = prior_grid
+  )
+  S0 <- prior_built$S0
+  prior_grid <- prior_built$prior_grid
   time1 <- proc.time()
 
   if (B_init_method == "glasso") {
@@ -372,46 +363,36 @@ autoselect_mixsd <- function(gmin, gmax, mult = 2) {
 #' Compute covariance matrix using FLASH
 #'
 #' Estimates a covariance matrix from a data matrix Y using empirical Bayes
-#' matrix factorization (flashier). Falls back to an identity matrix on failure
-#' if error_cache is provided.
+#' matrix factorization (\code{flashier::flash}). When the FLASH fit finds
+#' no shared factors, the returned covariance is diagonal with entries
+#' \code{residuals_sd^2}; otherwise the factor contribution is added.
+#' FLASH errors are not caught; callers should handle them explicitly or
+#' supply a pre-computed prior covariance instead.
 #'
 #' @param Y Numeric matrix (samples x conditions).
-#' @param error_cache Optional file path to save diagnostics on FLASH failure.
-#'   When NULL (default), errors propagate; when set, saves a list with data
-#'   and message to this path and falls back to the identity matrix.
 #' @return A covariance matrix of dimension ncol(Y) x ncol(Y), rescaled by
-#'   column standard deviations.
+#'   the column standard deviations of Y.
 #' @export
-compute_cov_flash <- function(Y, error_cache = NULL) {
-  covar <- diag(ncol(Y))
-  tryCatch({
-    fl <- flashier::flash(Y, var.type = 2,
-      prior.family = c(flashier::prior.normal(),
-                       flashier::prior.normal.scale.mix()),
-      backfit = TRUE, verbose.lvl = 0)
-    if (fl$n.factors == 0) {
-      covar <- diag(fl$residuals.sd^2)
-    } else {
-      fsd <- sapply(fl$fitted.g[[1]], "[[", "sd")
-      covar <- diag(fl$residuals.sd^2) + crossprod(t(fl$flash.fit$EF[[2]]) * fsd)
-    }
-    if (nrow(covar) == 0) {
-      covar <- diag(ncol(Y))
-      stop("Computed covariance matrix has zero rows")
-    }
-  }, error = function(e) {
-    if (!is.null(error_cache)) {
-      saveRDS(list(data = Y, message = warning(e)), error_cache)
-      warning("FLASH failed. Using Identity matrix instead.")
-      warning(e)
-    } else {
-      stop(e)
-    }
-  })
+compute_cov_flash <- function(Y) {
+  # flashier >= 1.0 API: var_type / ebnm_fn / verbose (renamed from var.type
+  # / prior.family / verbose.lvl). Prior families now come from `ebnm`.
+  fl <- flashier::flash(Y, var_type = 2,
+    ebnm_fn = c(ebnm::ebnm_normal, ebnm::ebnm_normal_scale_mixture),
+    backfit = TRUE, verbose = 0)
+  if (fl$n_factors == 0) {
+    covar <- diag(fl$residuals_sd^2)
+  } else {
+    # For each factor's right-side prior, marginal variance for a
+    # mean-zero scale-mixture-of-normals is sum(pi * sd^2).
+    fsd <- vapply(fl$F_ghat, function(g) sqrt(sum(g$pi * g$sd^2)), numeric(1))
+    covar <- diag(fl$residuals_sd^2) + crossprod(t(fl$F_pm) * fsd)
+  }
+  if (nrow(covar) == 0) {
+    stop("compute_cov_flash: FLASH produced an empty covariance matrix.")
+  }
   s <- apply(Y, 2, sd, na.rm = TRUE)
   if (length(s) > 1) s <- diag(s) else s <- matrix(s, 1, 1)
-  covar <- s %*% cov2cor(covar) %*% s
-  return(covar)
+  s %*% cov2cor(covar) %*% s
 }
 
 #' Compute diagonal covariance matrix
@@ -423,4 +404,66 @@ compute_cov_flash <- function(Y, error_cache = NULL) {
 #' @export
 compute_cov_diag <- function(Y) {
   diag(apply(Y, 2, var, na.rm = TRUE))
+}
+
+#' Build mr.mash prior covariance matrices
+#'
+#' Shared helper used by both \code{\link{mrmash_wrapper}} (individual-level)
+#' and \code{\link{mrmash_rss_weights}} (summary statistics). Constructs the
+#' \code{S0} list of prior covariance matrices via the canonical mixture
+#' (\code{mr.mashr::compute_canonical_covs}) and optional data-driven
+#' matrices, expanded over a scaling grid via
+#' \code{mr.mashr::expand_covs}. The prior grid is derived from \code{Bhat}
+#' and \code{Shat} via \code{\link{compute_grid}} when not supplied.
+#'
+#' @param Bhat Numeric matrix of effect-size estimates (variants x conditions).
+#' @param Shat Numeric matrix of standard errors (variants x conditions).
+#' @param K Number of conditions. When NULL, inferred from \code{ncol(Bhat)}.
+#' @param data_driven_prior_matrices Optional list with element \code{U}
+#'   (list of raw covariance matrices) computed e.g. by
+#'   \code{\link{compute_cov_flash}} / \code{\link{compute_cov_diag}}.
+#' @param canonical_prior_matrices Logical. When TRUE (default for RSS),
+#'   include the standard canonical mixture from
+#'   \code{mr.mashr::compute_canonical_covs()}. When FALSE,
+#'   \code{data_driven_prior_matrices} must be supplied.
+#' @param prior_grid Optional pre-computed scaling grid (numeric vector).
+#'   When NULL, derived from \code{Bhat}, \code{Shat} via
+#'   \code{compute_grid()}.
+#' @param hetgrid Heterogeneity grid passed to
+#'   \code{mr.mashr::compute_canonical_covs()}. Default
+#'   \code{c(0, 0.25, 0.5, 0.75, 1)}, matching the individual-level wrapper.
+#' @param singletons Whether to include single-condition prior components.
+#'   Default TRUE.
+#' @return A list with components \code{S0} (the expanded list of prior
+#'   covariance matrices) and \code{prior_grid} (the scaling grid that was
+#'   used).
+#' @export
+build_mrmash_prior_matrices <- function(Bhat, Shat, K = NULL,
+                                         data_driven_prior_matrices = NULL,
+                                         canonical_prior_matrices = TRUE,
+                                         prior_grid = NULL,
+                                         hetgrid = c(0, 0.25, 0.5, 0.75, 1),
+                                         singletons = TRUE) {
+  if (!requireNamespace("mr.mashr", quietly = TRUE)) {
+    stop("Package 'mr.mashr' is required.")
+  }
+  if (is.null(data_driven_prior_matrices) && !isTRUE(canonical_prior_matrices)) {
+    stop("Supply data_driven_prior_matrices or set canonical_prior_matrices = TRUE.")
+  }
+  if (is.null(K)) K <- ncol(Bhat)
+  if (is.null(prior_grid)) prior_grid <- compute_grid(bhat = Bhat, sbhat = Shat)
+
+  if (isTRUE(canonical_prior_matrices)) {
+    canonical <- mr.mashr::compute_canonical_covs(K, singletons = singletons, hetgrid = hetgrid)
+    S0_raw <- if (!is.null(data_driven_prior_matrices)) {
+      c(canonical, data_driven_prior_matrices$U)
+    } else {
+      canonical
+    }
+  } else {
+    S0_raw <- data_driven_prior_matrices$U
+  }
+
+  S0 <- mr.mashr::expand_covs(S0_raw, prior_grid, zeromat = TRUE)
+  list(S0 = S0, prior_grid = prior_grid)
 }

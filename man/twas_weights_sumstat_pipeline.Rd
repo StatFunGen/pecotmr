@@ -17,6 +17,7 @@ twas_weights_sumstat_pipeline(
   keep_indel = TRUE,
   pip_cutoff_to_skip = 0,
   impute = TRUE,
+  impute_missing = FALSE,
   impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
   var_y = 1,
   verbose = 1
@@ -51,9 +52,19 @@ Set to NULL to skip.}
 
 \item{pip_cutoff_to_skip}{PIP threshold for early stopping. Default 0 (off).}
 
-\item{impute}{Whether to run RAISS imputation. Default FALSE.}
+\item{impute}{Whether to run RAISS imputation of LD-inconsistent variants
+flagged by QC (the QC re-imputation path). Default FALSE.}
 
-\item{impute_opts}{RAISS imputation parameters.}
+\item{impute_missing}{Logical. When \code{TRUE}, RAISS imputes QTL z-scores
+for variants present in the LD reference but absent from the QTL
+summary statistics, after QC and before LD/sumstats intersection. This
+widens the sumstats panel available to the weight-learning methods so a
+richer set of weights can later be applied to GWAS. Independent of
+\code{impute}; both can be enabled together. Default \code{FALSE}.}
+
+\item{impute_opts}{RAISS imputation parameters; shared by the \code{impute}
+QC re-imputation and the \code{impute_missing} missing-variant path.
+Imputed variants with \code{R2 < R2_threshold} are dropped.}
 
 \item{var_y}{Phenotype variance. Default 1.}
 

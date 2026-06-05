@@ -129,10 +129,10 @@ This function loads a mixture data sets for a specific region, including individ
 or summary statistics (sumstats, LD). Run \code{load_regional_univariate_data} and \code{load_rss_data} multiple times for different datasets
 }
 \section{Loading individual level data from multiple corhorts}{
-NA
+
 }
 
 \section{Loading summary statistics from multiple corhorts or data set}{
-NA
+
 }
 

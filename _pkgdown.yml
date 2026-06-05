@@ -27,7 +27,7 @@ navbar:
   intro:
    icon: fa fa-play-circle
    text: Get Started
-   href: articles/cis-analysis.html
+   href: articles/fine-mapping.html
    aria-label: Get started with pecotmr
   reference:
    icon: fa fa-file-code
@@ -45,23 +45,31 @@ navbar:
    aria-label: View source on GitHub
 
 articles:
-  - title: "Getting Started"
-    navbar: ~
-    contents:
-    - cis-analysis
-  - title: "Analysis Pipelines"
-    desc: >
-      Detailed tutorials for colocalization, multivariate analysis,
-      and GWAS-QTL integration pipelines.
-    contents:
-    - colocboost-pipeline
-    - multicontext-twas-weights
-    - otters-pipeline
   - title: "Quality Control"
     desc: >
-      Tools for summary statistics quality control.
+      Allele alignment and LD-mismatch QC for GWAS and QTL summary
+      statistics.
     contents:
-    - dentist
+    - rss-qc
+  - title: "Fine-mapping"
+    desc: >
+      SuSiE-family fine-mapping for individual-level QTL data, QTL
+      summary statistics, and GWAS summary statistics.
+    contents:
+    - fine-mapping
+  - title: "TWAS"
+    desc: >
+      Training TWAS weights from QTL data (individual-level and
+      summary-statistics, single and multi-context) and computing
+      per-gene TWAS Z-scores from GWAS summary statistics.
+    contents:
+    - twas-weights
+    - twas-zscore
+  - title: "Colocalization"
+    desc: >
+      Multi-task colocalization with ColocBoost.
+    contents:
+    - colocboost-pipeline
   - title: "Enrichment Analysis"
     contents:
     - xqtl-enrichment
