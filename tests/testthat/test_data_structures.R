@@ -216,6 +216,54 @@ test_that("RegionalData show method works", {
   expect_output(show(rd), "RegionalData: 1 conditions")
 })
 
+
+test_that("RegionalData supports legacy dollar access while remaining S4", {
+  set.seed(11)
+  X <- matrix(rnorm(20), 5, 4)
+  colnames(X) <- paste0("v", 1:4)
+  rownames(X) <- paste0("s", 1:5)
+  Y <- matrix(rnorm(5), 5, 1, dimnames = list(paste0("s", 1:5), "y"))
+  C <- matrix(rnorm(10), 5, 2)
+  rownames(C) <- paste0("s", 1:5)
+
+  rd <- RegionalData(
+    genotype_matrix = X,
+    phenotypes = list(cond1 = Y),
+    covariates = list(cond1 = C),
+    maf = list(cond1 = runif(4)),
+    dropped_samples = list(X = list(character()), Y = list(character()), covar = list(character()))
+  )
+
+  expect_s4_class(rd, "RegionalData")
+  expect_identical(rd$X, X)
+  expect_named(rd$residual_Y, "cond1")
+  expect_true(is.matrix(rd$residual_Y[[1]]))
+  expect_true(is.matrix(rd$residual_X[[1]]))
+  expect_named(rd$dropped_sample,
+               c("dropped_samples_X", "dropped_samples_Y", "dropped_samples_covar"))
+})
+
+
+test_that("MultivariateRegionalData supports legacy dollar access while remaining S4", {
+  set.seed(12)
+  X <- matrix(rbinom(20, 2, 0.4), 5, 4)
+  colnames(X) <- paste0("v", 1:4)
+  rownames(X) <- paste0("s", 1:5)
+  Y <- matrix(rnorm(10), 5, 2, dimnames = list(paste0("s", 1:5), c("c1", "c2")))
+  md <- MultivariateRegionalData(
+    genotype_matrix = X,
+    Y_matrix = Y,
+    Y_scalar = c(1, 1),
+    dropped_samples = character()
+  )
+
+  expect_s4_class(md, "MultivariateRegionalData")
+  expect_identical(md$X, X)
+  expect_identical(md$residual_Y, Y)
+  expect_equal(length(md$maf), ncol(X))
+  expect_equal(length(md$X_variance), ncol(X))
+})
+
 # =============================================================================
 # FineMappingResult
 # =============================================================================

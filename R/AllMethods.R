@@ -252,6 +252,55 @@ setMethod("getGenotypeMatrix", "RegionalData", function(x) x@genotype_matrix)
 #' @export
 setMethod("getGenotypeMatrix", "MultivariateRegionalData", function(x) x@genotype_matrix)
 
+#' @export
+setMethod("$", "RegionalData", function(x, name) {
+  contexts <- names(x@phenotypes)
+  n_cond <- length(contexts)
+  switch(name,
+    X = x@genotype_matrix,
+    residual_X = stats::setNames(
+      lapply(seq_len(n_cond), function(i) getResidualX(x, i)), contexts),
+    residual_Y = stats::setNames(
+      lapply(seq_len(n_cond), function(i) getResidualY(x, i)), contexts),
+    residual_X_scalar = stats::setNames(
+      lapply(seq_len(n_cond), function(i) getResidualXScalar(x, i)), contexts),
+    residual_Y_scalar = stats::setNames(
+      lapply(seq_len(n_cond), function(i) getResidualYScalar(x, i)), contexts),
+    maf = x@maf,
+    X_variance = stats::setNames(
+      lapply(seq_len(n_cond), function(i) getXVariance(x, i)), contexts),
+    dropped_sample = {
+      dropped <- x@dropped_samples
+      list(
+        dropped_samples_X = dropped$X,
+        dropped_samples_Y = dropped$Y,
+        dropped_samples_covar = dropped$covar
+      )
+    },
+    dropped_samples = x@dropped_samples,
+    Y_coordinates = x@Y_coordinates,
+    phenotype_coordinates = x@Y_coordinates,
+    phenotype_coordiates = x@Y_coordinates,
+    stop("Unsupported RegionalData legacy field: ", name, call. = FALSE)
+  )
+})
+
+#' @export
+setMethod("$", "MultivariateRegionalData", function(x, name) {
+  switch(name,
+    X = x@genotype_matrix,
+    residual_Y = x@Y_matrix,
+    residual_Y_scalar = x@Y_scalar,
+    maf = getMaf(x),
+    X_variance = getXVariance(x),
+    dropped_samples = x@dropped_samples,
+    Y_coordinates = x@Y_coordinates,
+    phenotype_coordinates = x@Y_coordinates,
+    phenotype_coordiates = x@Y_coordinates,
+    stop("Unsupported MultivariateRegionalData legacy field: ", name, call. = FALSE)
+  )
+})
+
 # ----- MultivariateRegionalData constructor and accessors -----
 
 #' @title Construct a MultivariateRegionalData object
