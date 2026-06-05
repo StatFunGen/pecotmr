@@ -128,7 +128,7 @@ The pipeline reports three things:
 
 | Method | Typical RMSE behaviour | Cost | Notes |
 |---|---|---|---|
-| **softimpute** | Best on smooth low-rank matrices. Sensitive to the choice of `lambda`; the default `0.5 * lambda0(x)` is a reasonable starting point. | Very fast (seconds). | Tune `lambda` and `rank.max` if RMSE is poor on your data. |
+| **softimpute** | Best on smooth low-rank matrices. `lambda` is auto-tuned by held-out CV by default. | Very fast (seconds) plus the lambda-grid pass. | Pass a scalar `lambda` to skip tuning; pass a vector to restrict the CV grid. |
 | **flashier** | Best on mixed sparse + diffuse signal. Default priors (`ebnm_normal` + `ebnm_normal_scale_mixture`) work well for most expression-like matrices. | Moderate (seconds-to-minutes). | Reuses the same FLASH defaults as `compute_cov_flash()` (mr.mash prior step). |
 | **xgboost** | Robust to non-linear column relationships. Can overfit on small matrices. | Slowest (minutes-to-hours for large matrices). | Set `num_workers > 1` for parallel per-column fits. Tune `max_depth` and `nrounds`. |
 
@@ -175,10 +175,14 @@ do not re-impute internally.
 3. **CV evaluation uses one random mask.** For more stable RMSE
    estimates, run the pipeline a few times with different `eval_seed`
    values and average.
-4. **softImpute lambda tuning matters.** The default
-   `0.5 * lambda0(x)` is a starting point. If softImpute looks
-   uncompetitive on your data, sweep `lambda` over a grid (e.g.
-   `lambda = lambda0(x) * c(0.1, 0.25, 0.5, 1, 2)`).
+4. **softImpute `lambda` is auto-tuned by default.** A random
+   fraction of observed cells (default 5%) is held out, softImpute is
+   fit across a geometric grid of lambdas via warm-start, and the
+   lambda with the lowest held-out RMSE wins. Pass `lambda = <scalar>`
+   to skip tuning; pass `lambda = <vector>` to restrict the grid.
+   The chosen lambda and the full grid scores are attached to the
+   returned matrix as the `"softimpute_lambda"` and
+   `"softimpute_lambda_cv"` attributes.
 
 ```{r session-info}
 sessionInfo()

@@ -40,6 +40,51 @@ test_that("softimpute_imputation: handles all-NA columns by removing them", {
   expect_equal(ncol(Xi), ncol(X) - 1L)
 })
 
+test_that("softimpute_imputation: default tunes lambda via CV and attaches grid", {
+  skip_if_not_installed("softImpute")
+  inp <- .make_imputation_inputs()
+  Xi <- softimpute_imputation(inp$X)  # default lambda = NULL -> tune
+  expect_false(is.null(attr(Xi, "softimpute_lambda")))
+  grid <- attr(Xi, "softimpute_lambda_cv")
+  expect_s3_class(grid, "data.frame")
+  expect_named(grid, c("lambda", "rmse"))
+  expect_true(all(diff(grid$lambda) <= 0))  # grid sorted descending
+  expect_true(any(is.finite(grid$rmse)))
+  # The chosen lambda must be one of the grid points
+  expect_true(attr(Xi, "softimpute_lambda") %in% grid$lambda)
+})
+
+test_that("softimpute_imputation: scalar lambda bypasses tuning", {
+  skip_if_not_installed("softImpute")
+  inp <- .make_imputation_inputs()
+  l0 <- softImpute::lambda0(inp$X)
+  Xi <- softimpute_imputation(inp$X, lambda = 0.3 * l0)
+  expect_equal(attr(Xi, "softimpute_lambda"), 0.3 * l0)
+  expect_null(attr(Xi, "softimpute_lambda_cv"))
+})
+
+test_that("softimpute_imputation: vector lambda restricts tuning to that grid", {
+  skip_if_not_installed("softImpute")
+  inp <- .make_imputation_inputs()
+  l0 <- softImpute::lambda0(inp$X)
+  custom_grid <- l0 * c(0.05, 0.1, 0.25, 0.5)
+  Xi <- softimpute_imputation(inp$X, lambda = custom_grid)
+  grid <- attr(Xi, "softimpute_lambda_cv")
+  expect_setequal(grid$lambda, custom_grid)
+  expect_true(attr(Xi, "softimpute_lambda") %in% custom_grid)
+})
+
+test_that("softimpute_imputation: chosen lambda minimises CV RMSE on the grid", {
+  skip_if_not_installed("softImpute")
+  inp <- .make_imputation_inputs(n = 80, p = 20, rank = 3, seed = 11)
+  Xi <- softimpute_imputation(inp$X)
+  grid <- attr(Xi, "softimpute_lambda_cv")
+  chosen <- attr(Xi, "softimpute_lambda")
+  ok <- which(is.finite(grid$rmse))
+  best_idx <- ok[which.min(grid$rmse[ok])]
+  expect_equal(chosen, grid$lambda[best_idx])
+})
+
 # =============================================================================
 # flashier_imputation
 # =============================================================================
