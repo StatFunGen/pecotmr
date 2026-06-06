@@ -1685,50 +1685,6 @@ test_that("twas_method_cor with diagonal LD", {
 })
 
 # =============================================================================
-# xgboost_imputation
-# =============================================================================
-
-test_that("xgboost_imputation works on simple matrix", {
-  skip_if_not_installed("xgboost")
-  set.seed(42)
-  mat <- matrix(rnorm(100), nrow = 20, ncol = 5)
-  colnames(mat) <- paste0("V", 1:5)
-  # Introduce some missing values
-  mat[1, 1] <- NA
-  mat[5, 3] <- NA
-  mat[10, 2] <- NA
-  result <- xgboost_imputation(mat, maxiter = 2, nrounds = 10, verbose = FALSE)
-  expect_equal(dim(result), dim(mat))
-  expect_false(anyNA(result))
-})
-
-test_that("xgboost_imputation removes all-NA columns", {
-  skip_if_not_installed("xgboost")
-  set.seed(42)
-  mat <- matrix(rnorm(80), nrow = 20, ncol = 4)
-  colnames(mat) <- paste0("V", 1:4)
-  mat[, 3] <- NA  # entirely missing column
-  mat[1, 1] <- NA
-  result <- expect_message(
-    xgboost_imputation(mat, maxiter = 2, nrounds = 10, verbose = TRUE),
-    "Removed 1 column"
-  )
-  expect_equal(ncol(result), 3)
-  expect_false(anyNA(result))
-})
-
-test_that("xgboost_imputation with no missing returns data unchanged", {
-  skip_if_not_installed("xgboost")
-  set.seed(42)
-  mat <- matrix(rnorm(60), nrow = 10, ncol = 6)
-  result <- expect_message(
-    xgboost_imputation(mat, maxiter = 2, verbose = TRUE),
-    "No missing values"
-  )
-  expect_equal(result, mat)
-})
-
-# =============================================================================
 # compute_qvalues — uncovered branches
 # =============================================================================
 

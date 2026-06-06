@@ -45,12 +45,6 @@ navbar:
    aria-label: View source on GitHub
 
 articles:
-  - title: "Data Preparation"
-    desc: >
-      Imputing missing values in molecular trait matrices before
-      fine-mapping and TWAS weight training.
-    contents:
-    - molecular-imputation
   - title: "Quality Control"
     desc: >
       Allele alignment and LD-mismatch QC for GWAS and QTL summary

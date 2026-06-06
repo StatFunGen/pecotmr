@@ -74,10 +74,8 @@ Suggests:
     rtracklayer,
     SNPRelate,
     snpStats,
-    softImpute,
     testthat,
-    VariantAnnotation,
-    xgboost
+    VariantAnnotation
 Remotes:
     stephenslab/fsusieR,
     stephenslab/mvsusieR,
@@ -112,7 +110,6 @@ Collate:
     'h2_hdl.R'
     'h2_lder.R'
     'h2_utils.R'
-    'imputation.R'
     'ld_loader.R'
     'mash_wrapper.R'
     'misc.R'
