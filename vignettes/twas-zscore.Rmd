@@ -80,7 +80,7 @@ We use this form for two practical reasons:
   costs `O(r p)` for `V^\top w` plus `O(r)` for the weighted sum,
   versus `O(p^2)` to multiply against an explicit `R`.
 - When the LD sketch has `n_\text{sketch} \le p`, `R` is rank-deficient
-  (rank `r \le n_\text{sketch}`). Working in the `r`-dimensional
+  (rank `r`, with `n_\text{sketch} \ge r`). Working in the `r`-dimensional
   eigenbasis represents exactly the information the sketch carries and
   avoids forming a singular `p \times p` matrix.
 
