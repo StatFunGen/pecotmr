@@ -111,12 +111,21 @@ format_cs_column <- function(coverage, method) {
   fit
 }
 
-prepare_susie_from_inf_args <- function(args, susie_inf_fit, refine_default = NULL) {
+# Build the argument list for a SuSiE / SuSiE-ash fit initialised from a
+# prior SuSiE-inf fit. `unmappable_effects` controls which branch the
+# downstream fit takes: "none" yields the standard SuSiE-inf-initialised
+# SuSiE; "ash" yields SuSiE-ash with the SuSiE-inf warm start.
+prepare_susie_from_inf_args <- function(args, susie_inf_fit, refine_default = NULL,
+                                        unmappable_effects = c("none", "ash")) {
+  unmappable_effects <- match.arg(unmappable_effects)
   L <- args[["L"]]
   if (is.null(L)) L <- length(susie_inf_fit$V)
   if (is.null(args[["refine"]]) && !is.null(refine_default)) args[["refine"]] <- refine_default
-  args[["unmappable_effects"]] <- "none"
+  args[["unmappable_effects"]] <- unmappable_effects
   args[["model_init"]] <- susie_inf_fit
+  if (unmappable_effects == "ash") {
+    args[["convergence_method"]] <- args[["convergence_method"]] %||% "pip"
+  }
   if (!is.null(args[["L_greedy"]])) args[["L_greedy"]] <- min(length(susie_inf_fit$V), L)
   args
 }
@@ -875,8 +884,8 @@ adjust_susie_weights <- function(twas_weights_results, keep_variants, run_allele
 
 #' Run the SuSiE RSS pipeline
 #'
-#' Runs SuSiE RSS analysis with the specified method. Supports both z+R
-#' (correlation matrix) and z+X (genotype matrix) interfaces.
+#' Runs SuSiE RSS analysis with one or more SuSiE-family variants. Supports
+#' both z+R (correlation matrix) and z+X (genotype matrix) interfaces.
 #'
 #' @param sumstats Data frame with 'z' or ('beta' and 'se') columns.
 #' @param LD_mat LD correlation matrix. Mutually exclusive with X_mat.
@@ -884,7 +893,24 @@ adjust_susie_weights <- function(twas_weights_results, keep_variants, run_allele
 #' @param n Sample size.
 #' @param L Maximum number of causal configurations (default: 30).
 #' @param L_greedy Initial greedy number of causal configurations (default: 5).
-#' @param analysis_method One of "susie_rss", "single_effect", "bayesian_conditional_regression".
+#' @param analysis_method Iteration mode for the \code{"susie_rss"} fit:
+#'   \code{"susie_rss"} (default, normal IBSS), \code{"single_effect"} (L=1,
+#'   single iteration), or \code{"bayesian_conditional_regression"}
+#'   (full L, single iteration). Only affects the \code{"susie_rss"}
+#'   method; ignored for \code{"susie_inf_rss"} and \code{"susie_ash_rss"}.
+#' @param methods Optional character vector selecting which RSS variants to
+#'   fit. Any subset of \code{c("susie_rss", "susie_inf_rss",
+#'   "susie_ash_rss")}. Default \code{NULL} falls back to a single-method fit
+#'   driven by \code{analysis_method} (backward-compatible behavior). When
+#'   \code{methods} is passed explicitly, each requested method is fitted;
+#'   if \code{"susie_inf_rss"} is paired with \code{"susie_rss"} or
+#'   \code{"susie_ash_rss"} (or both) and \code{add_susie_inf = TRUE}, the
+#'   SuSiE-inf-RSS fit initialises the downstream method. This exposes five
+#'   distinct fitting modes mirroring the individual-level pipeline.
+#' @param add_susie_inf Logical. When \code{methods} contains
+#'   \code{"susie_inf_rss"} alongside \code{"susie_rss"} and/or
+#'   \code{"susie_ash_rss"}, controls whether SuSiE-inf-RSS is chained into
+#'   the downstream method(s) as initialisation. Default \code{TRUE}.
 #' @param coverage Coverage level (default: 0.95).
 #' @param secondary_coverage Secondary coverage levels (default: c(0.7, 0.5)).
 #' @param signal_cutoff PIP cutoff for selecting top loci (default: 0.1).
@@ -895,9 +921,9 @@ adjust_susie_weights <- function(twas_weights_results, keep_variants, run_allele
 #' @param R_mismatch LD mismatch correction method passed directly to susie_rss.
 #'   Default NULL disables mismatch correction.
 #' @param ... Additional parameters passed to susie_rss (e.g., var_y).
-#' @return A list with post-processed SuSiE RSS results. Method-specific
-#'   \code{top_loci} columns use the selected \code{analysis_method}, for
-#'   example \code{pip_susie_rss} or \code{pip_single_effect}.
+#' @return A list with post-processed SuSiE RSS results. The unified
+#'   \code{top_loci} table contains rows from every requested method,
+#'   distinguished by the \code{method} column.
 #' @importFrom susieR susie_rss
 #' @importFrom magrittr %>%
 #' @importFrom dplyr arrange select
@@ -905,6 +931,8 @@ adjust_susie_weights <- function(twas_weights_results, keep_variants, run_allele
 susie_rss_pipeline <- function(sumstats, LD_mat = NULL, X_mat = NULL, n = NULL,
                                L = 30, L_greedy = 5,
                                analysis_method = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
+                               methods = NULL,
+                               add_susie_inf = TRUE,
                                coverage = 0.95,
                                secondary_coverage = c(0.7, 0.5),
                                signal_cutoff = 0.1,
@@ -914,6 +942,28 @@ susie_rss_pipeline <- function(sumstats, LD_mat = NULL, X_mat = NULL, n = NULL,
   if (is.null(LD_mat) && is.null(X_mat)) stop("Either LD_mat or X_mat must be provided.")
   if (!is.null(LD_mat) && !is.null(X_mat)) stop("Only one of LD_mat or X_mat should be provided, not both.")
   if (!is.null(L_greedy)) L_greedy <- min(L_greedy, L)
+
+  # Resolve effective methods. NULL => legacy single-method via analysis_method.
+  valid_rss_methods <- c("susie_rss", "susie_inf_rss", "susie_ash_rss")
+  if (is.null(methods)) {
+    # Backward-compatible: single fit using analysis_method, labeled accordingly.
+    fit_methods <- analysis_method
+  } else {
+    if (!is.character(methods) || length(methods) == 0L) {
+      stop("methods must be a non-empty character vector of method names.")
+    }
+    bad <- setdiff(methods, valid_rss_methods)
+    if (length(bad) > 0) {
+      stop("Unknown RSS method(s): ", paste(bad, collapse = ", "),
+           ". Valid options: ", paste(valid_rss_methods, collapse = ", "))
+    }
+    fit_methods <- unique(methods)
+  }
+  chain_inf_to_susie_rss     <- isTRUE(add_susie_inf) &&
+    all(c("susie_inf_rss", "susie_rss") %in% fit_methods)
+  chain_inf_to_susie_ash_rss <- isTRUE(add_susie_inf) &&
+    all(c("susie_inf_rss", "susie_ash_rss") %in% fit_methods)
+  any_chained_init_rss <- chain_inf_to_susie_rss || chain_inf_to_susie_ash_rss
 
   if (!is.null(sumstats$z)) {
     z <- sumstats$z
@@ -933,17 +983,69 @@ susie_rss_pipeline <- function(sumstats, LD_mat = NULL, X_mat = NULL, n = NULL,
                  R_finite = R_finite, R_mismatch = R_mismatch, ...)
   if (!is.null(X_mat)) common$X <- X_mat else common$R <- LD_mat
 
-  if (analysis_method == "single_effect") {
-    res <- do.call(susie_rss, c(common, list(L = 1, L_greedy = NULL, max_iter = 1)))
-  } else if (analysis_method == "bayesian_conditional_regression") {
-    res <- do.call(susie_rss, c(common, list(L = L, L_greedy = L_greedy, max_iter = 1)))
-  } else {
-    res <- do.call(susie_rss, c(common, list(L = L, L_greedy = L_greedy)))
+  fit_one_susie_rss <- function() {
+    if (analysis_method == "single_effect") {
+      do.call(susie_rss, c(common, list(L = 1, L_greedy = NULL, max_iter = 1)))
+    } else if (analysis_method == "bayesian_conditional_regression") {
+      do.call(susie_rss, c(common, list(L = L, L_greedy = L_greedy, max_iter = 1)))
+    } else {
+      do.call(susie_rss, c(common, list(L = L, L_greedy = L_greedy)))
+    }
+  }
+  fit_one_susie_inf_rss <- function() {
+    do.call(susie_rss, c(common, list(L = L, L_greedy = L_greedy,
+                                       unmappable_effects = "inf",
+                                       convergence_method = "pip",
+                                       refine = FALSE, model_init = NULL)))
+  }
+  fit_one_susie_ash_rss <- function() {
+    do.call(susie_rss, c(common, list(L = L, L_greedy = L_greedy,
+                                       unmappable_effects = "ash",
+                                       convergence_method = "pip")))
+  }
+
+  fitted_models <- list()
+  if ("susie_inf_rss" %in% fit_methods || any_chained_init_rss) {
+    inf_fit <- fit_one_susie_inf_rss()
+    fitted_models[["susie_inf_rss"]] <- .set_finemapping_fit_class(inf_fit, "susie_inf_rss")
+  }
+  if ("susie_rss" %in% fit_methods ||
+      identical(fit_methods, "single_effect") ||
+      identical(fit_methods, "bayesian_conditional_regression")) {
+    if (chain_inf_to_susie_rss) {
+      chained_args <- prepare_susie_from_inf_args(
+        list(L = L, L_greedy = L_greedy),
+        fitted_models[["susie_inf_rss"]], refine_default = TRUE,
+        unmappable_effects = "none"
+      )
+      rss_fit <- do.call(susie_rss, c(common, chained_args))
+    } else {
+      rss_fit <- fit_one_susie_rss()
+    }
+    # Label by analysis_method when in legacy single-method mode, else "susie_rss"
+    rss_label <- if (is.null(methods)) analysis_method else "susie_rss"
+    fitted_models[[rss_label]] <- .set_finemapping_fit_class(rss_fit, rss_label)
+  }
+  if ("susie_ash_rss" %in% fit_methods) {
+    if (chain_inf_to_susie_ash_rss) {
+      chained_args <- prepare_susie_from_inf_args(
+        list(L = L, L_greedy = L_greedy),
+        fitted_models[["susie_inf_rss"]], refine_default = NULL,
+        unmappable_effects = "ash"
+      )
+      ash_fit <- do.call(susie_rss, c(common, chained_args))
+    } else {
+      ash_fit <- fit_one_susie_ash_rss()
+    }
+    fitted_models[["susie_ash_rss"]] <- .set_finemapping_fit_class(ash_fit, "susie_ash_rss")
+  }
+
+  # Drop SuSiE-inf-RSS from post-processing if it was only fit for init
+  if (any_chained_init_rss && !("susie_inf_rss" %in% fit_methods)) {
+    fitted_models[["susie_inf_rss"]] <- NULL
   }
 
   # For post-processing, pass genotype matrix X directly when available.
-  # susie_get_cs(fit, X=...) computes correlations only for CS variants,
-  # avoiding the full p x p R matrix.
   if (!is.null(LD_mat)) {
     data_x <- LD_mat
     pp_cs_input <- "Xcorr"
@@ -955,10 +1057,8 @@ susie_rss_pipeline <- function(sumstats, LD_mat = NULL, X_mat = NULL, n = NULL,
     pp_cs_input <- "X"
   }
 
-  rss_method <- analysis_method
-  rss_fit <- .set_finemapping_fit_class(res, rss_method)
   post <- postprocess_finemapping_fits(
-    fits = setNames(list(rss_fit), rss_method),
+    fits = fitted_models,
     data_x = data_x,
     data_y = list(z = z),
     coverage = coverage,
@@ -967,7 +1067,9 @@ susie_rss_pipeline <- function(sumstats, LD_mat = NULL, X_mat = NULL, n = NULL,
     min_abs_corr = min_abs_corr,
     cs_input = pp_cs_input
   )
-  format_finemapping_output(post, primary_method = rss_method)
+  # Primary method preference: "susie_rss" > other names > first fit
+  primary <- if ("susie_rss" %in% names(fitted_models)) "susie_rss" else names(fitted_models)[1]
+  format_finemapping_output(post, primary_method = primary)
 }
 
 #' @noRd

@@ -497,6 +497,162 @@ mvsusie_weights <- function(mvsusie_fit = NULL, X = NULL, Y = NULL,
   return(mvsusieR::coef.mvsusie(mvsusie_fit)[-1, ])
 }
 
+#' Compute mr.mash-RSS TWAS weights from summary statistics
+#'
+#' Multi-context summary-statistics analog of \code{\link{mrmash_weights}}:
+#' extracts coefficients from an existing \code{mr.mashr::mr.mash.rss} fit,
+#' or fits one from \code{stat} (variants x conditions) and \code{LD}.
+#'
+#' Follows the \code{*_rss_weights(stat, LD, ...)} contract. Expects
+#' \code{stat$z} to be a numeric matrix (variants x conditions) and
+#' \code{stat$n} a per-context numeric vector or scalar. \code{stat$Bhat}
+#' and \code{stat$Shat} are used if present; otherwise derived from Z and
+#' n.
+#'
+#' Prior construction reuses the same infrastructure as the individual-level
+#' \code{\link{mrmash_wrapper}}: \code{\link{compute_grid}} +
+#' \code{mr.mashr::compute_canonical_covs()} +
+#' \code{mr.mashr::expand_covs()} for \code{S0}, and
+#' \code{\link{compute_w0}} for the mixture weights. Supply
+#' \code{data_driven_prior_matrices} (e.g. from
+#' \code{\link{compute_cov_flash}} / \code{\link{compute_cov_diag}}) to add
+#' data-driven covariance components alongside the canonical mixture.
+#'
+#' @param stat A list with \code{z} (variants x conditions matrix) and
+#'   \code{n} (per-context numeric vector or scalar). May also include
+#'   \code{Bhat}, \code{Shat} matrices.
+#' @param LD LD correlation matrix.
+#' @param mrmash_rss_fit Optional pre-fitted \code{mr.mash.rss} object;
+#'   skips fitting when supplied.
+#' @param data_driven_prior_matrices Optional list with element \code{U}
+#'   (list of raw covariance matrices). Passed directly to
+#'   \code{mr.mashr::expand_covs()} alongside the canonical mixture.
+#' @param canonical_prior_matrices Logical. When TRUE (default), include
+#'   the standard canonical mixture from
+#'   \code{mr.mashr::compute_canonical_covs()}. When FALSE,
+#'   \code{data_driven_prior_matrices} must be supplied.
+#' @param S0 Optional pre-built list of prior covariance matrices,
+#'   bypassing the canonical / data-driven construction.
+#' @param w0 Optional prior mixture weights; defaults to
+#'   \code{\link{compute_w0}(Bhat, length(S0))}.
+#' @param V Optional residual covariance matrix (K x K). When NULL,
+#'   defaults to the identity matrix of size K.
+#' @param covY Optional response covariance matrix (K x K). When NULL,
+#'   defaults to the identity matrix of size K.
+#' @param retain_fit If TRUE, attaches the fitted object as the
+#'   \code{"fit"} attribute on the returned weights.
+#' @param ... Additional arguments forwarded to
+#'   \code{mr.mashr::mr.mash.rss}.
+#'
+#' @return A numeric matrix of per-variant per-context weights
+#'   (variants x conditions).
+#' @export
+mrmash_rss_weights <- function(stat, LD, mrmash_rss_fit = NULL,
+                                data_driven_prior_matrices = NULL,
+                                canonical_prior_matrices = TRUE,
+                                S0 = NULL, w0 = NULL, V = NULL, covY = NULL,
+                                retain_fit = FALSE, ...) {
+  if (!requireNamespace("mr.mashr", quietly = TRUE)) {
+    stop("Package 'mr.mashr' is required. ",
+         "Install with: devtools::install_github('stephenslab/mr.mash.alpha')")
+  }
+  if (is.null(mrmash_rss_fit)) {
+    Z <- if (is.matrix(stat$z)) stat$z else as.matrix(stat$z)
+    if (ncol(Z) < 2) {
+      stop("mrmash_rss_weights expects stat$z to have >= 2 columns ",
+           "(one per context). For single-context use mr_ash_rss_weights().")
+    }
+    K <- ncol(Z)
+    n_vec <- if (length(stat$n) > 1) stat$n else rep(stat$n, K)
+    Bhat <- if (!is.null(stat$Bhat)) stat$Bhat else sweep(Z, 2, sqrt(n_vec), "/")
+    Shat <- if (!is.null(stat$Shat)) stat$Shat else matrix(1 / sqrt(rep(n_vec, each = nrow(Z))),
+                                                            nrow = nrow(Z), ncol = K)
+    # Reuse the same prior-building helper as mrmash_wrapper()
+    if (is.null(S0)) {
+      prior_built <- build_mrmash_prior_matrices(
+        Bhat = Bhat, Shat = Shat, K = K,
+        data_driven_prior_matrices = data_driven_prior_matrices,
+        canonical_prior_matrices = canonical_prior_matrices
+      )
+      S0 <- prior_built$S0
+    }
+    if (is.null(w0)) {
+      w0 <- compute_w0(Bhat, length(S0))
+    }
+    if (is.null(V))    V    <- diag(K)
+    if (is.null(covY)) covY <- diag(K)
+    # mr.mash.rss expects either Z or (Bhat, Shat) but not both; prefer Bhat/Shat.
+    # n must be a scalar (per the mr.mash.rss contract); use the median.
+    n_scalar <- as.numeric(stats::median(n_vec))
+    mrmash_rss_fit <- mr.mashr::mr.mash.rss(
+      Bhat = Bhat, Shat = Shat, R = LD, n = n_scalar,
+      covY = covY, V = V, S0 = S0, w0 = w0, ...
+    )
+  }
+  # coef.mr.mash.rss returns nrow(Bhat) rows (no intercept). Do not strip.
+  weights <- mr.mashr::coef.mr.mash.rss(mrmash_rss_fit)
+  if (retain_fit) attr(weights, "fit") <- mrmash_rss_fit
+  weights
+}
+
+#' Compute mvSuSiE-RSS TWAS weights from summary statistics
+#'
+#' Multi-context summary-statistics analog of \code{\link{mvsusie_weights}}:
+#' extracts coefficients from an existing \code{mvsusieR::mvsusie_rss} fit,
+#' or fits one from \code{stat$z} (variants x conditions) and \code{LD}.
+#'
+#' Follows the \code{*_rss_weights(stat, LD, ...)} contract. Expects
+#' \code{stat$z} to be a numeric matrix (variants x conditions) and
+#' \code{stat$n} a per-context vector or scalar.
+#'
+#' @param stat A list with \code{z} (matrix variants x conditions) and
+#'   \code{n} (numeric vector or scalar).
+#' @param LD LD correlation matrix.
+#' @param mvsusie_rss_fit Optional pre-fitted \code{mvsusie_rss} object.
+#' @param prior_variance Optional mvSuSiE prior variance specification.
+#'   When NULL, \code{mvsusieR::create_mixture_prior()} is used with
+#'   \code{R = ncol(stat$z)}.
+#' @param residual_variance Optional residual covariance matrix.
+#' @param L Maximum number of single effects (default 30).
+#' @param L_greedy Initial greedy effect count (default 5).
+#' @param retain_fit If TRUE, attaches the fitted object as an attribute.
+#' @param ... Additional arguments forwarded to \code{mvsusieR::mvsusie_rss}.
+#'
+#' @return A numeric matrix of per-variant per-context weights
+#'   (variants x conditions).
+#' @export
+mvsusie_rss_weights <- function(stat, LD, mvsusie_rss_fit = NULL,
+                                 prior_variance = NULL,
+                                 residual_variance = NULL,
+                                 L = 30, L_greedy = 5,
+                                 retain_fit = FALSE, ...) {
+  if (!requireNamespace("mvsusieR", quietly = TRUE)) {
+    stop("Package 'mvsusieR' is required. ",
+         "Install with: devtools::install_github('stephenslab/mvsusieR')")
+  }
+  if (is.null(mvsusie_rss_fit)) {
+    Z <- if (is.matrix(stat$z)) stat$z else as.matrix(stat$z)
+    if (ncol(Z) < 2) {
+      stop("mvsusie_rss_weights expects stat$z to have >= 2 columns ",
+           "(one per context). For single-context use susie_rss_weights().")
+    }
+    # mvsusieR::mvsusie_rss expects N to be a single scalar
+    N_scalar <- as.numeric(stats::median(stat$n))
+    if (is.null(prior_variance)) {
+      prior_variance <- mvsusieR::create_mixture_prior(R = ncol(Z))
+    }
+    if (!is.null(L_greedy)) L_greedy <- min(L_greedy, L)
+    mvsusie_rss_fit <- mvsusieR::mvsusie_rss(
+      Z = Z, R = LD, N = N_scalar,
+      prior_variance = prior_variance,
+      residual_variance = residual_variance, ...
+    )
+  }
+  weights <- mvsusieR::coef.mvsusie(mvsusie_rss_fit)[-1, , drop = FALSE]
+  if (retain_fit) attr(weights, "fit") <- mvsusie_rss_fit
+  weights
+}
+
 # Get a reasonable setting for the standard deviations of the mixture
 # components in the mixture-of-normals prior based on the data (X, y).
 # Input se is an estimate of the residual *variance*, and n is the

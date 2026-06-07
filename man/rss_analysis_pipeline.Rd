@@ -17,6 +17,8 @@ rss_analysis_pipeline(
   region_name_col = NULL,
   qc_method = c("slalom", "dentist", "none"),
   finemapping_method = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
+  methods = NULL,
+  add_susie_inf = TRUE,
   finemapping_opts = list(L = 20, L_greedy = 5, coverage = c(0.95, 0.7, 0.5),
     signal_cutoff = 0.025, min_abs_corr = 0.8),
   impute = TRUE,
@@ -57,7 +59,23 @@ computed only for QC stages that require a correlation matrix.}
 \code{"dentist"} run basic allele harmonization plus LD-mismatch QC;
 \code{"none"} runs basic allele harmonization only.}
 
-\item{finemapping_method}{One of "susie_rss", "single_effect", "bayesian_conditional_regression".}
+\item{finemapping_method}{Iteration mode for the SuSiE-RSS fit (when
+\code{"susie_rss"} is among \code{methods}). One of \code{"susie_rss"}
+(default normal IBSS), \code{"single_effect"} (L=1, single iteration),
+or \code{"bayesian_conditional_regression"} (full L, single iteration).}
+
+\item{methods}{Optional character vector selecting which SuSiE-RSS
+variants to fit. Any subset of \code{c("susie_rss", "susie_inf_rss",
+"susie_ash_rss")}. Default \code{NULL} preserves legacy single-method
+behavior via \code{finemapping_method}. When set explicitly, every
+requested method contributes rows to the unified \code{top_loci}; when
+\code{"susie_inf_rss"} is paired with \code{"susie_rss"} or
+\code{"susie_ash_rss"} (or both) and \code{add_susie_inf = TRUE}, the
+SuSiE-inf-RSS fit initialises the chained downstream method(s).}
+
+\item{add_susie_inf}{Logical controlling chained init when
+\code{"susie_inf_rss"} is in \code{methods} alongside
+\code{"susie_rss"} and/or \code{"susie_ash_rss"}. Default \code{TRUE}.}
 
 \item{finemapping_opts}{List of fine-mapping options (L, L_greedy, coverage,
 signal_cutoff, min_abs_corr).}

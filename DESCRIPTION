@@ -75,8 +75,7 @@ Suggests:
     SNPRelate,
     snpStats,
     testthat,
-    VariantAnnotation,
-    xgboost
+    VariantAnnotation
 Remotes:
     stephenslab/fsusieR,
     stephenslab/mvsusieR,

@@ -11,33 +11,51 @@ twas_joint_z(
   X = NULL,
   V = NULL,
   D_svd = NULL,
-  n_sketch = NULL
+  n_sketch = NULL,
+  combine_method = c("acat", "hmp", "fisher", "stouffer", "invchisq", "gbj", "aspu",
+    "gates")
 )
 }
 \arguments{
-\item{weights}{A matrix of weights, where each column corresponds to a different condition.}
+\item{weights}{A matrix of weights, one column per condition.}
 
-\item{z}{A vector of GWAS z-scores.}
+\item{z}{A numeric vector of GWAS z-scores aligned to the rows of
+\code{weights}.}
 
-\item{R}{An optional correlation matrix. If not provided, it will be calculated from the genotype matrix X.}
+\item{R, X}{Legacy alternatives to the LD sketch SVD path; supplying
+either still works but is no longer recommended. Documented
+workflows use \code{V}, \code{D_svd}, \code{n_sketch}.}
 
-\item{X}{An optional genotype matrix. If R is not provided, X must be supplied to calculate the correlation matrix.}
+\item{V}{SVD right-singular vectors (variants x components) of the
+LD sketch.}
 
-\item{V}{Optional SVD right-singular vectors (variants x components) from an LD sketch.
-When provided with \code{D_svd} and \code{n_sketch}, avoids forming the full LD matrix.}
+\item{D_svd}{SVD singular values (vector) of the LD sketch.}
 
-\item{D_svd}{Optional SVD singular values (vector) from an LD sketch.}
+\item{n_sketch}{Sample size of the LD sketch.}
 
-\item{n_sketch}{Optional sample size of the LD sketch.}
+\item{combine_method}{Cross-condition p-value combination method. One
+of \code{"acat"} (default), \code{"hmp"}, \code{"fisher"},
+\code{"stouffer"}, \code{"invchisq"}, \code{"gbj"}, \code{"aspu"},
+or \code{"gates"}.}
 }
 \value{
-A list containing the following elements:
-\itemize{
-  \item Z: A matrix of TWAS z-scores and p-values for each condition.
-  \item GBJ: The result of the GBJ test.
+A list with:
+\describe{
+  \item{Z}{Per-condition Z-score and p-value matrix
+    (one row per condition).}
+  \item{combined}{List with \code{method} (the requested
+    \code{combine_method}) and \code{pval} (the joint p-value).}
 }
 }
 \description{
-This function performs a multi-condition TWAS joint test using the GBJ method.
-It assumes that the input genotype matrix (X) is standardized.
+Computes per-condition TWAS z-scores from a variants x conditions weight
+matrix and an LD sketch (eigenvalues / eigenvectors), and combines them
+into a joint p-value across conditions using any of the p-value
+combination methods supported elsewhere in the package.
+}
+\details{
+Per-condition test statistics use the cross-condition correlation
+matrix induced by the weights and LD sketch; methods that need the
+correlation (\code{"fisher"}, \code{"stouffer"}, \code{"invchisq"},
+\code{"gbj"}, \code{"aspu"}, \code{"gates"}) consume it directly.
 }

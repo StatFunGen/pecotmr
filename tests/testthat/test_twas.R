@@ -511,7 +511,7 @@ test_that("twas_joint_z: single condition returns 1-row Z matrix", {
   result <- twas_joint_z(weights, z, R = R)
   expect_equal(nrow(result$Z), 1)
   expect_equal(rownames(result$Z), "Cond1")
-  expect_true(!is.null(result$GBJ))
+  expect_true(!is.null(result$combined))
 })
 
 test_that("twas_joint_z: many conditions (8) produces correct Z matrix dimensions", {
@@ -578,8 +578,11 @@ test_that("twas_joint_z: zero weight column produces NaN Z-score for that condit
   expect_true(is.nan(zero_cond_z) || zero_cond_z == 0)
 })
 
-test_that("twas_joint_z: GBJ package missing triggers informative error", {
-  # Mock requireNamespace to return FALSE for GBJ
+test_that("twas_joint_z: combine_method = 'gbj' surfaces GBJ-missing as a warning + NA pval", {
+  # GBJ is only required when combine_method = "gbj"; other methods do not
+  # depend on it. When GBJ is unavailable and gbj is requested, the
+  # combination tryCatch turns the failure into a warning and returns
+  # NA for the joint p-value.
   local_mocked_bindings(
     requireNamespace = function(pkg, ...) {
       if (pkg == "GBJ") return(FALSE)
@@ -593,7 +596,12 @@ test_that("twas_joint_z: GBJ package missing triggers informative error", {
   z <- rnorm(5)
   R <- diag(5)
   rownames(R) <- colnames(R) <- paste0("SNP", 1:5)
-  expect_error(twas_joint_z(weights, z, R = R), "GBJ")
+  expect_warning(
+    out <- twas_joint_z(weights, z, R = R, combine_method = "gbj"),
+    "gbj"
+  )
+  expect_equal(out$combined$method, "gbj")
+  expect_true(is.na(out$combined$pval))
 })
 
 test_that("twas_joint_z: mismatched rows in weights vs length of z errors", {
@@ -2267,7 +2275,7 @@ test_that("twas_joint_z: uses X to compute R when R is not provided", {
   result <- twas_joint_z(weights, z, X = X)
   expect_true(is.list(result))
   expect_true("Z" %in% names(result))
-  expect_true("GBJ" %in% names(result))
+  expect_true("combined" %in% names(result))
   expect_equal(nrow(result$Z), k)
 })
 

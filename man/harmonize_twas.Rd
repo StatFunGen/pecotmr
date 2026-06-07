@@ -11,7 +11,9 @@ harmonize_twas(
   gwas_meta_file,
   ld_reference_sample_size,
   column_file_path = NULL,
-  comment_string = "#"
+  comment_string = "#",
+  impute_missing = FALSE,
+  impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)
 )
 }
 \arguments{
@@ -26,6 +28,17 @@ metadata file with columns "#chrom", "start", "end", "path" (auto-detected).}
 
 \item{ld_reference_sample_size}{Sample size of the LD reference panel (integer). Required.
 Used to compute per-variant variance as 2*p*(1-p)*n/(n-1). For ADSP R4, use 17000.}
+
+\item{impute_missing}{Logical. When \code{TRUE}, RAISS imputes GWAS z-scores
+for variants that are present in the LD sketch but missing from the GWAS
+summary statistics. This widens GWAS coverage so weight variants with LD
+neighbors but no GWAS hit are no longer silently dropped at the
+weight-vs-GWAS intersection. Default \code{FALSE}.}
+
+\item{impute_opts}{Named list of RAISS imputation parameters. Used when
+\code{impute_missing = TRUE}. Defaults:
+\code{list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)}.
+Imputed variants with \code{R2 < R2_threshold} are dropped.}
 }
 \value{
 A list of list for harmonized weights and dataframe of gwas summary statistics that is add to the original input of

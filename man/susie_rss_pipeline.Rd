@@ -12,6 +12,8 @@ susie_rss_pipeline(
   L = 30,
   L_greedy = 5,
   analysis_method = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
+  methods = NULL,
+  add_susie_inf = TRUE,
   coverage = 0.95,
   secondary_coverage = c(0.7, 0.5),
   signal_cutoff = 0.1,
@@ -34,7 +36,26 @@ susie_rss_pipeline(
 
 \item{L_greedy}{Initial greedy number of causal configurations (default: 5).}
 
-\item{analysis_method}{One of "susie_rss", "single_effect", "bayesian_conditional_regression".}
+\item{analysis_method}{Iteration mode for the \code{"susie_rss"} fit:
+\code{"susie_rss"} (default, normal IBSS), \code{"single_effect"} (L=1,
+single iteration), or \code{"bayesian_conditional_regression"}
+(full L, single iteration). Only affects the \code{"susie_rss"}
+method; ignored for \code{"susie_inf_rss"} and \code{"susie_ash_rss"}.}
+
+\item{methods}{Optional character vector selecting which RSS variants to
+fit. Any subset of \code{c("susie_rss", "susie_inf_rss",
+"susie_ash_rss")}. Default \code{NULL} falls back to a single-method fit
+driven by \code{analysis_method} (backward-compatible behavior). When
+\code{methods} is passed explicitly, each requested method is fitted;
+if \code{"susie_inf_rss"} is paired with \code{"susie_rss"} or
+\code{"susie_ash_rss"} (or both) and \code{add_susie_inf = TRUE}, the
+SuSiE-inf-RSS fit initialises the downstream method. This exposes five
+distinct fitting modes mirroring the individual-level pipeline.}
+
+\item{add_susie_inf}{Logical. When \code{methods} contains
+\code{"susie_inf_rss"} alongside \code{"susie_rss"} and/or
+\code{"susie_ash_rss"}, controls whether SuSiE-inf-RSS is chained into
+the downstream method(s) as initialisation. Default \code{TRUE}.}
 
 \item{coverage}{Coverage level (default: 0.95).}
 
@@ -54,11 +75,11 @@ Default NULL disables mismatch correction.}
 \item{...}{Additional parameters passed to susie_rss (e.g., var_y).}
 }
 \value{
-A list with post-processed SuSiE RSS results. Method-specific
-  \code{top_loci} columns use the selected \code{analysis_method}, for
-  example \code{pip_susie_rss} or \code{pip_single_effect}.
+A list with post-processed SuSiE RSS results. The unified
+  \code{top_loci} table contains rows from every requested method,
+  distinguished by the \code{method} column.
 }
 \description{
-Runs SuSiE RSS analysis with the specified method. Supports both z+R
-(correlation matrix) and z+X (genotype matrix) interfaces.
+Runs SuSiE RSS analysis with one or more SuSiE-family variants. Supports
+both z+R (correlation matrix) and z+X (genotype matrix) interfaces.
 }

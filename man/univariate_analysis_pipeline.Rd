@@ -25,6 +25,7 @@ univariate_analysis_pipeline(
   min_abs_corr = 0.8,
   finemapping_extra_opts = list(refine = TRUE),
   estimate_residual_variance = TRUE,
+  methods = NULL,
   add_susie_inf = TRUE,
   twas_weights = TRUE,
   sample_partition = NULL,
@@ -78,9 +79,25 @@ fit keeps these options and is initialized with \code{model_init}.}
 
 \item{estimate_residual_variance}{Passed to \code{susieR::susie()}. Default is TRUE.}
 
-\item{add_susie_inf}{Whether to fit SuSiE-inf before ordinary SuSiE. Default
-is TRUE for existing pipeline compatibility. If FALSE, ordinary SuSiE is
-fitted directly and SuSiE-inf fitted objects/results are not returned.}
+\item{methods}{Optional character vector selecting which SuSiE variants to
+fit. Any subset of \code{c("susie", "susie_inf", "susie_ash")}. Default
+\code{NULL} falls back to the legacy \code{add_susie_inf} behavior:
+\code{add_susie_inf = TRUE} (default) maps to
+\code{methods = c("susie_inf", "susie")} with SuSiE-inf chained into the
+SuSiE fit as initialization; \code{add_susie_inf = FALSE} maps to
+\code{methods = "susie"} (plain SuSiE alone). When \code{methods} is
+passed explicitly, each requested method is fitted; if
+\code{"susie_inf"} is paired with \code{"susie"} or \code{"susie_ash"}
+(or both) and \code{add_susie_inf = TRUE}, the SuSiE-inf fit
+initialises each chained downstream method. This gives five distinct
+fitting modes: SuSiE alone, SuSiE with SuSiE-inf init, SuSiE-inf alone,
+SuSiE-ash alone, and SuSiE-ash with SuSiE-inf init.}
+
+\item{add_susie_inf}{When \code{methods} is \code{NULL}, controls whether
+SuSiE-inf is fitted and chained into SuSiE. When \code{methods} is set
+explicitly, controls whether the chained-init shortcut is applied to
+any \code{"susie"} or \code{"susie_ash"} method present alongside
+\code{"susie_inf"}. Default \code{TRUE}.}
 
 \item{twas_weights}{Whether to compute TWAS weights. Default is TRUE.}
 

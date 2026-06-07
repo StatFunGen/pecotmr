@@ -27,9 +27,24 @@
 #'   SuSiE-inf is always fitted with \code{refine = FALSE}; the ordinary SuSiE
 #'   fit keeps these options and is initialized with \code{model_init}.
 #' @param estimate_residual_variance Passed to \code{susieR::susie()}. Default is TRUE.
-#' @param add_susie_inf Whether to fit SuSiE-inf before ordinary SuSiE. Default
-#'   is TRUE for existing pipeline compatibility. If FALSE, ordinary SuSiE is
-#'   fitted directly and SuSiE-inf fitted objects/results are not returned.
+#' @param methods Optional character vector selecting which SuSiE variants to
+#'   fit. Any subset of \code{c("susie", "susie_inf", "susie_ash")}. Default
+#'   \code{NULL} falls back to the legacy \code{add_susie_inf} behavior:
+#'   \code{add_susie_inf = TRUE} (default) maps to
+#'   \code{methods = c("susie_inf", "susie")} with SuSiE-inf chained into the
+#'   SuSiE fit as initialization; \code{add_susie_inf = FALSE} maps to
+#'   \code{methods = "susie"} (plain SuSiE alone). When \code{methods} is
+#'   passed explicitly, each requested method is fitted; if
+#'   \code{"susie_inf"} is paired with \code{"susie"} or \code{"susie_ash"}
+#'   (or both) and \code{add_susie_inf = TRUE}, the SuSiE-inf fit
+#'   initialises each chained downstream method. This gives five distinct
+#'   fitting modes: SuSiE alone, SuSiE with SuSiE-inf init, SuSiE-inf alone,
+#'   SuSiE-ash alone, and SuSiE-ash with SuSiE-inf init.
+#' @param add_susie_inf When \code{methods} is \code{NULL}, controls whether
+#'   SuSiE-inf is fitted and chained into SuSiE. When \code{methods} is set
+#'   explicitly, controls whether the chained-init shortcut is applied to
+#'   any \code{"susie"} or \code{"susie_ash"} method present alongside
+#'   \code{"susie_inf"}. Default \code{TRUE}.
 #' @param twas_weights Whether to compute TWAS weights. Default is TRUE.
 #' @param sample_partition Optional data frame with Sample and Fold columns for cross-validation. Default is NULL.
 #' @param max_cv_variants The maximum number of variants to be included in cross-validation. Default is -1 (no limit).
@@ -65,6 +80,7 @@ univariate_analysis_pipeline <- function(
     min_abs_corr = 0.8,
     finemapping_extra_opts = list(refine = TRUE),
     estimate_residual_variance = TRUE,
+    methods = NULL,
     add_susie_inf = TRUE,
     # TWAS weights and CV for TWAS weights
     twas_weights = TRUE,
@@ -86,8 +102,35 @@ univariate_analysis_pipeline <- function(
   if (!is.logical(add_susie_inf) || length(add_susie_inf) != 1 || is.na(add_susie_inf)) {
     stop("add_susie_inf must be TRUE or FALSE")
   }
-  if (!isTRUE(add_susie_inf) && isTRUE(twas_weights)) {
-    stop("add_susie_inf = FALSE is not compatible with twas_weights = TRUE")
+
+  # Resolve effective methods. NULL => backward-compat via add_susie_inf.
+  valid_methods <- c("susie", "susie_inf", "susie_ash")
+  if (is.null(methods)) {
+    methods <- if (isTRUE(add_susie_inf)) c("susie_inf", "susie") else "susie"
+  } else {
+    if (!is.character(methods) || length(methods) == 0L) {
+      stop("methods must be a non-empty character vector of method names.")
+    }
+    bad <- setdiff(methods, valid_methods)
+    if (length(bad) > 0) {
+      stop("Unknown method(s): ", paste(bad, collapse = ", "),
+           ". Valid options: ", paste(valid_methods, collapse = ", "))
+    }
+    methods <- unique(methods)
+  }
+  # SuSiE-inf initialisation chains into SuSiE and/or SuSiE-ash whenever
+  # either of them is requested alongside SuSiE-inf and add_susie_inf is TRUE.
+  chain_inf_to_susie     <- isTRUE(add_susie_inf) &&
+    all(c("susie_inf", "susie") %in% methods)
+  chain_inf_to_susie_ash <- isTRUE(add_susie_inf) &&
+    all(c("susie_inf", "susie_ash") %in% methods)
+  any_chained_init <- chain_inf_to_susie || chain_inf_to_susie_ash
+  if (isTRUE(twas_weights) && !("susie" %in% methods)) {
+    stop("twas_weights = TRUE requires \"susie\" to be in methods.")
+  }
+  if (isTRUE(twas_weights) && !chain_inf_to_susie) {
+    stop("twas_weights = TRUE requires SuSiE to be initialised from SuSiE-inf; ",
+         "set methods = c(\"susie_inf\", \"susie\") and add_susie_inf = TRUE.")
   }
 
   # Initial PIP check
@@ -131,25 +174,65 @@ univariate_analysis_pipeline <- function(
     list(L = L, L_greedy = L_greedy, coverage = coverage[1],
          estimate_residual_variance = estimate_residual_variance)
   )
-  if (isTRUE(add_susie_inf)) {
+  fitted_models <- list()
+
+  if ("susie_inf" %in% methods || any_chained_init) {
     message("Fitting SuSiE-inf model on input data ...")
-    message("Fitting SuSiE model initialized by SuSiE-inf ...")
-    fitted_models <- fit_susie_inf_then_susie(
-      X,
-      Y,
-      args = susie_args
-    )
-    res$susie_inf_fitted <- fitted_models[["susie_inf"]]
-  } else {
-    message("Fitting SuSiE model on input data ...")
-    fitted_models <- list(
-      susie = .set_finemapping_fit_class(
-        do.call(susie, c(list(X = X, y = Y), susie_args)),
-        "susie"
-      )
-    )
+    inf_args <- modifyList(susie_args, list(
+      X = X, y = Y,
+      unmappable_effects = "inf",
+      convergence_method = "pip",
+      refine = FALSE, model_init = NULL
+    ))
+    inf_fit <- do.call(susie, inf_args)
+    fitted_models[["susie_inf"]] <- .set_finemapping_fit_class(inf_fit, "susie_inf")
   }
-  res$susie_fitted <- fitted_models[["susie"]]
+
+  if ("susie" %in% methods) {
+    if (chain_inf_to_susie) {
+      message("Fitting SuSiE model initialized by SuSiE-inf ...")
+      su_args <- prepare_susie_from_inf_args(susie_args,
+                                             fitted_models[["susie_inf"]],
+                                             refine_default = TRUE,
+                                             unmappable_effects = "none")
+      su_fit <- do.call(susie, c(list(X = X, y = Y), su_args))
+    } else {
+      message("Fitting SuSiE model on input data ...")
+      su_fit <- do.call(susie, c(list(X = X, y = Y), susie_args))
+    }
+    fitted_models[["susie"]] <- .set_finemapping_fit_class(su_fit, "susie")
+  }
+
+  if ("susie_ash" %in% methods) {
+    if (chain_inf_to_susie_ash) {
+      message("Fitting SuSiE-ash model initialized by SuSiE-inf ...")
+      ash_args <- prepare_susie_from_inf_args(susie_args,
+                                              fitted_models[["susie_inf"]],
+                                              refine_default = NULL,
+                                              unmappable_effects = "ash")
+      ash_fit <- do.call(susie, c(list(X = X, y = Y), ash_args))
+    } else {
+      message("Fitting SuSiE-ash model on input data ...")
+      ash_args <- modifyList(susie_args, list(
+        X = X, y = Y,
+        unmappable_effects = "ash",
+        convergence_method = "pip"
+      ))
+      ash_fit <- do.call(susie, ash_args)
+    }
+    fitted_models[["susie_ash"]] <- .set_finemapping_fit_class(ash_fit, "susie_ash")
+  }
+
+  # Drop susie_inf from post-processing if it was only fit to provide init for
+  # SuSiE / SuSiE-ash (i.e. caller did not request "susie_inf" in methods).
+  if (any_chained_init && !("susie_inf" %in% methods)) {
+    fitted_models[["susie_inf"]] <- NULL
+  }
+
+  # Back-compat slots for the most common methods
+  res$susie_inf_fitted <- fitted_models[["susie_inf"]]
+  res$susie_fitted     <- fitted_models[["susie"]]
+  res$susie_ash_fitted <- fitted_models[["susie_ash"]]
 
   # Process SuSiE results
   susie_post <- postprocess_finemapping_fits(
@@ -166,9 +249,15 @@ univariate_analysis_pipeline <- function(
     other_quantities = other_quantities,
     region = region
   )
-  res <- c(res, format_finemapping_output(susie_post, primary_method = "susie"))
+  # Primary method drives root-level finemapping_result / sumstats / etc.
+  # Preference order favors "susie" for backward compatibility, then
+  # falls back to the first requested method actually fitted.
+  primary_method <- if ("susie" %in% names(fitted_models)) "susie" else names(fitted_models)[1]
+  res <- c(res, format_finemapping_output(susie_post, primary_method = primary_method))
   susie_inf_fm <- susie_post$finemapping_results$susie_inf$finemapping_result
   res$susie_inf_result_trimmed <- if (!is.null(susie_inf_fm)) getTrimmedFit(susie_inf_fm) else NULL
+  susie_ash_fm <- susie_post$finemapping_results$susie_ash$finemapping_result
+  res$susie_ash_result_trimmed <- if (!is.null(susie_ash_fm)) getTrimmedFit(susie_ash_fm) else NULL
   res$total_time_elapsed <- proc.time() - st
 
   # TWAS weights and cross-validation
@@ -240,7 +329,21 @@ load_study_LD <- function(ld_path, region) {
 #' @param qc_method Summary-statistic QC method. \code{"slalom"} and
 #'   \code{"dentist"} run basic allele harmonization plus LD-mismatch QC;
 #'   \code{"none"} runs basic allele harmonization only.
-#' @param finemapping_method One of "susie_rss", "single_effect", "bayesian_conditional_regression".
+#' @param finemapping_method Iteration mode for the SuSiE-RSS fit (when
+#'   \code{"susie_rss"} is among \code{methods}). One of \code{"susie_rss"}
+#'   (default normal IBSS), \code{"single_effect"} (L=1, single iteration),
+#'   or \code{"bayesian_conditional_regression"} (full L, single iteration).
+#' @param methods Optional character vector selecting which SuSiE-RSS
+#'   variants to fit. Any subset of \code{c("susie_rss", "susie_inf_rss",
+#'   "susie_ash_rss")}. Default \code{NULL} preserves legacy single-method
+#'   behavior via \code{finemapping_method}. When set explicitly, every
+#'   requested method contributes rows to the unified \code{top_loci}; when
+#'   \code{"susie_inf_rss"} is paired with \code{"susie_rss"} or
+#'   \code{"susie_ash_rss"} (or both) and \code{add_susie_inf = TRUE}, the
+#'   SuSiE-inf-RSS fit initialises the chained downstream method(s).
+#' @param add_susie_inf Logical controlling chained init when
+#'   \code{"susie_inf_rss"} is in \code{methods} alongside
+#'   \code{"susie_rss"} and/or \code{"susie_ash_rss"}. Default \code{TRUE}.
 #' @param finemapping_opts List of fine-mapping options (L, L_greedy, coverage,
 #'   signal_cutoff, min_abs_corr).
 #' @param impute Whether to impute missing variants via RAISS (default TRUE).
@@ -264,6 +367,8 @@ rss_analysis_pipeline <- function(
     extract_region_name = NULL, region_name_col = NULL,
     qc_method = c("slalom", "dentist", "none"),
     finemapping_method = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
+    methods = NULL,
+    add_susie_inf = TRUE,
     finemapping_opts = list(
       L = 20, L_greedy = 5,
       coverage = c(0.95, 0.7, 0.5), signal_cutoff = 0.025,
@@ -353,6 +458,8 @@ rss_analysis_pipeline <- function(
       n = n, var_y = var_y,
       L = finemapping_opts$L, L_greedy = finemapping_opts$L_greedy,
       analysis_method = finemapping_method,
+      methods = methods,
+      add_susie_inf = add_susie_inf,
       coverage = pri_coverage,
       secondary_coverage = sec_coverage,
       signal_cutoff = finemapping_opts$signal_cutoff,

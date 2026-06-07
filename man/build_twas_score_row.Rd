@@ -11,6 +11,17 @@ build_twas_score_row(twas_rs, weight_db, context, study)
 \item{twas_weights_data}{List of list of twas weights output from generate_twas_db function.}
 
 \item{region_block}{A string with LD region informaiton of chromosome number, star and end position of LD block conneced with "_".}
+
+\item{impute_missing}{Logical. Passed to \code{\link{harmonize_twas}}. When
+\code{TRUE}, RAISS imputes GWAS z-scores for variants present in the LD
+sketch but missing from the GWAS summary statistics, so weight variants
+with LD neighbors but no observed GWAS hit are not silently dropped at
+the weight-vs-GWAS intersection. Default \code{FALSE}.}
+
+\item{impute_opts}{Named list of RAISS imputation parameters used when
+\code{impute_missing = TRUE}. Defaults to
+\code{list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)};
+imputed variants with \code{R2 < R2_threshold} are dropped.}
 }
 \value{
 A list of list containing twas result table and formatted TWAS data compatible with ctwas_sumstats() function.
