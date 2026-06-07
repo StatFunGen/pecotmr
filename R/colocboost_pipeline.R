@@ -694,7 +694,7 @@ qc_regional_data <- function(region_data,
                              keep_indel = TRUE,
                              pip_cutoff_to_skip_sumstat = 0,
                              qc_method = NULL,
-                             impute = TRUE,
+                             impute = FALSE,
                              impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)) {
   qc_method <- .resolve_summary_qc_method(qc_method)
   qced_individual_to_region_data <- function(ind_qc) {
