@@ -82,16 +82,21 @@ context("colocboost_pipeline")
 
 
 # ---- qc_method match.arg ----
+test_that("qc_regional_data is exported for downstream use", {
+  expect_true("qc_regional_data" %in% getNamespaceExports("pecotmr"))
+  expect_identical(getExportedValue("pecotmr", "qc_regional_data"), qc_regional_data)
+})
+
 test_that("qc_regional_data accepts explicit qc_method = 'slalom'", {
   region_data <- list(individual_data = NULL, sumstat_data = NULL)
-  result <- pecotmr:::qc_regional_data(region_data, qc_method = "slalom")
+  result <- qc_regional_data(region_data, qc_method = "slalom")
   expect_type(result, "list")
 })
 
 test_that("qc_regional_data rejects invalid qc_method", {
   region_data <- list(individual_data = NULL, sumstat_data = NULL)
   expect_error(
-    pecotmr:::qc_regional_data(region_data, qc_method = "invalid"),
+    qc_regional_data(region_data, qc_method = "invalid"),
     "arg"
   )
 })
@@ -117,7 +122,7 @@ test_that("pip_cutoff scalar is recycled for individual contexts", {
   region_data <- list(individual_data = individual_data, sumstat_data = NULL)
 
   # Scalar 0 (no PIP check) should be recycled and run without error
-  result <- pecotmr:::qc_regional_data(region_data, pip_cutoff_to_skip_ind = 0)
+  result <- qc_regional_data(region_data, pip_cutoff_to_skip_ind = 0)
   expect_type(result, "list")
 })
 
@@ -136,7 +141,7 @@ test_that("pip_cutoff wrong length errors for individual contexts", {
   region_data <- list(individual_data = individual_data, sumstat_data = NULL)
 
   expect_error(
-    pecotmr:::qc_regional_data(region_data, pip_cutoff_to_skip_ind = c(0, 0)),
+    qc_regional_data(region_data, pip_cutoff_to_skip_ind = c(0, 0)),
     "pip_cutoff_to_skip_ind"
   )
 })
@@ -156,7 +161,7 @@ test_that("pip_cutoff correct length vector works", {
   region_data <- list(individual_data = individual_data, sumstat_data = NULL)
 
   # Length-2 vector for 2 contexts should work
-  result <- pecotmr:::qc_regional_data(region_data, pip_cutoff_to_skip_ind = c(0, 0))
+  result <- qc_regional_data(region_data, pip_cutoff_to_skip_ind = c(0, 0))
   expect_type(result, "list")
 })
 
@@ -287,7 +292,7 @@ test_that("qc_regional_data treats NULL qc_method as basic-only none", {
     }
   )
 
-  result <- pecotmr:::qc_regional_data(region_data, qc_method = NULL, impute = FALSE)
+  result <- qc_regional_data(region_data, qc_method = NULL, impute = FALSE)
   expect_equal(captured_qc_method, "none")
   expect_type(result, "list")
 })
@@ -543,35 +548,32 @@ test_that("region_data_to_colocboost_input combines individual and RSS inputs", 
   expect_true(converted$source_info$sumstat$has_sumstat)
 })
 
-test_that("qc_individual_data uses existing genotype filtering helpers", {
+test_that("qc_regional_data applies individual genotype filtering helpers", {
   region_data <- make_individual_region_data(n = 12, p = 5, n_contexts = 1, n_events = 2)
-  ind_input <- region_data_to_ind_input(region_data)
-  X <- ind_input$X
-  Y <- ind_input$Y
-  maf <- ind_input$maf
   expect_message(
-    result <- qc_individual_data(X, Y, maf = maf, maf_cutoff = 0),
+    result <- qc_regional_data(region_data, maf_cutoff = 0),
     "QC track"
   )
-  expect_equal(names(result), "ctx1")
-  expect_equal(ncol(result$ctx1$Y), 2)
+  expect_equal(names(result$individual_data$Y), "ctx1")
+  expect_equal(ncol(result$individual_data$Y$ctx1), 2)
 })
 
-test_that("qc_individual_data supports direct matrix inputs and keeps context labels", {
+test_that("qc_regional_data keeps individual context labels after filtering", {
   region_data <- make_individual_region_data(n = 12, p = 5, n_contexts = 1, n_events = 2)
-  ind_input <- region_data_to_ind_input(region_data)
-  X <- ind_input$X$ctx1
-  Y <- ind_input$Y$ctx1
-  maf <- stats::setNames(rep(0.2, ncol(X)), colnames(X))
-  maf[1] <- 0.001
+  region_data$individual_data@maf$ctx1 <- stats::setNames(
+    rep(0.2, ncol(region_data$individual_data@genotype_matrix)),
+    colnames(region_data$individual_data@genotype_matrix)
+  )
+  region_data$individual_data@maf$ctx1[1] <- 0.001
 
   expect_message(
-    result <- qc_individual_data(X, Y, maf = maf, maf_cutoff = 0.05, context = "ctx1"),
+    result <- qc_regional_data(region_data, maf_cutoff = 0.05),
     "retained"
   )
-  expect_false(names(maf)[1] %in% colnames(result$X))
-  expect_true(all(startsWith(colnames(result$Y), "ctx1_")))
-  expect_equal(ncol(result$Y), ncol(Y))
+  dropped_variant <- names(region_data$individual_data@maf$ctx1)[1]
+  expect_false(dropped_variant %in% colnames(result$individual_data$X$ctx1))
+  expect_true(all(startsWith(colnames(result$individual_data$Y$ctx1), "ctx1_")))
+  expect_equal(ncol(result$individual_data$Y$ctx1), ncol(region_data$individual_data@phenotypes$ctx1))
 })
 
 test_that("summary_stats_qc runs combined basic harmonization when qc_method is none", {
@@ -1559,7 +1561,7 @@ test_that("qc_regional_data handles named pip_cutoff_to_skip_sumstat vector", {
   # Named vector: only specify cutoff for study1
   pip_named <- c("study1" = 0, "study2" = 0)
   result <- suppressMessages(
-    pecotmr:::qc_regional_data(
+    qc_regional_data(
       region_data,
       pip_cutoff_to_skip_sumstat = pip_named,
       qc_method = "slalom",
@@ -1598,7 +1600,7 @@ test_that("qc_regional_data fills missing study names with 0 for pip_cutoff_to_s
   pip_partial <- c("study1" = 0.05)
   result <- withCallingHandlers(
     suppressMessages(
-      pecotmr:::qc_regional_data(
+      qc_regional_data(
         region_data,
         pip_cutoff_to_skip_sumstat = pip_partial,
         qc_method = "slalom",
@@ -2988,7 +2990,7 @@ test_that("qc_regional_data: mismatched pip_cutoff_to_skip_ind length errors", {
   region_data <- make_individual_region_data(n = 20, p = 8, n_contexts = 2, n_events = 2)
 
   expect_error(
-    pecotmr:::qc_regional_data(
+    qc_regional_data(
       region_data,
       pip_cutoff_to_skip_ind = c(0.1, 0.2, 0.3),  # 3 values but only 2 contexts
       qc_method = "slalom"
@@ -3001,7 +3003,7 @@ test_that("qc_regional_data: named pip_cutoff_to_skip_ind works with context nam
   region_data <- make_individual_region_data(n = 20, p = 8, n_contexts = 2, n_events = 2)
 
   # Named vector matching context names
-  result <- pecotmr:::qc_regional_data(
+  result <- qc_regional_data(
     region_data,
     pip_cutoff_to_skip_ind = c(ctx1 = 0, ctx2 = 0),
     qc_method = "slalom"
@@ -3013,7 +3015,7 @@ test_that("qc_regional_data: named pip_cutoff_to_skip_ind fills missing contexts
   region_data <- make_individual_region_data(n = 20, p = 8, n_contexts = 3, n_events = 2)
 
   # Only specify cutoff for ctx1 - ctx2 and ctx3 should default to 0
-  result <- pecotmr:::qc_regional_data(
+  result <- qc_regional_data(
     region_data,
     pip_cutoff_to_skip_ind = c(ctx1 = 0),
     qc_method = "slalom"
@@ -3025,7 +3027,7 @@ test_that("qc_regional_data: scalar pip_cutoff_to_skip_ind becomes named vector"
   region_data <- make_individual_region_data(n = 20, p = 8, n_contexts = 2, n_events = 2)
 
   # This exercises the scalar -> named vector recycling path
-  result <- pecotmr:::qc_regional_data(
+  result <- qc_regional_data(
     region_data,
     pip_cutoff_to_skip_ind = 0,
     qc_method = "slalom"
@@ -3061,7 +3063,7 @@ test_that("qc_regional_data: pip_cutoff_to_skip_ind lookup works when X and Y ha
   )
 
   # Should not error - ctx3 in X has no pip_cutoff entry, defaults to 0
-  result <- pecotmr:::qc_regional_data(
+  result <- qc_regional_data(
     region_data,
     pip_cutoff_to_skip_ind = 0,
     qc_method = "slalom"
@@ -3201,7 +3203,7 @@ test_that("qc_regional_data: with only sumstat data processes correctly", {
   )
 
   result <- suppressMessages(
-    pecotmr:::qc_regional_data(
+    qc_regional_data(
       region_data,
       qc_method = "slalom",
       impute = FALSE
