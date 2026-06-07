@@ -308,6 +308,123 @@ load_study_LD <- function(ld_path, region) {
   )
 }
 
+.rss_variant_ids <- function(sumstats) {
+  if ("variant_id" %in% names(sumstats)) return(as.character(sumstats$variant_id))
+  if ("variant" %in% names(sumstats)) return(as.character(sumstats$variant))
+  rn <- rownames(sumstats)
+  if (!is.null(rn) && length(rn) == nrow(sumstats) &&
+      !all(grepl("^[0-9]+$", rn))) {
+    return(rn)
+  }
+  stop("RSS sumstats must contain a variant_id or variant column.")
+}
+
+.rss_sumstats_with_variant_id <- function(sumstats) {
+  if (!"variant_id" %in% names(sumstats)) {
+    sumstats$variant_id <- .rss_variant_ids(sumstats)
+  }
+  sumstats$variant_id <- as.character(sumstats$variant_id)
+  sumstats
+}
+
+.match_rss_variants <- function(variants, reference_ids, reference_name) {
+  idx <- match(variants, reference_ids)
+  if (anyNA(idx)) {
+    idx <- match(strip_chr_prefix(strip_build_suffix(variants)),
+                 strip_chr_prefix(strip_build_suffix(reference_ids)))
+  }
+  if (anyNA(idx)) {
+    missing <- variants[is.na(idx)]
+    stop(reference_name, " is missing ", length(missing),
+         " variant(s): ", paste(utils::head(missing, 3), collapse = ", "))
+  }
+  idx
+}
+
+.subset_rss_matrix_columns <- function(X, variants, reference_ids, reference_name) {
+  if (is.null(colnames(X)) && length(reference_ids) == ncol(X)) {
+    colnames(X) <- reference_ids
+  }
+  idx <- .match_rss_variants(variants, colnames(X), reference_name)
+  X_out <- X[, idx, drop = FALSE]
+  colnames(X_out) <- variants
+  X_out
+}
+
+.subset_rss_ld_matrix <- function(R, variants, reference_ids) {
+  if (is.null(rownames(R)) && length(reference_ids) == nrow(R)) {
+    rownames(R) <- reference_ids
+  }
+  if (is.null(colnames(R)) && length(reference_ids) == ncol(R)) {
+    colnames(R) <- reference_ids
+  }
+  idx <- .match_rss_variants(variants, rownames(R), "LD matrix")
+  R_out <- R[idx, idx, drop = FALSE]
+  rownames(R_out) <- colnames(R_out) <- variants
+  R_out
+}
+
+#' Convert one loaded RSS record to direct SuSiE RSS input
+#'
+#' @param rss_input A single loaded RSS record, usually one element of
+#'   \code{qced_regional_data$sumstat_data$sumstats}. It must contain
+#'   \code{sumstats}, \code{n}, and \code{var_y}.
+#' @param LD_data A matching \code{LDData} object for the same study.
+#' @return A list with \code{susie_rss_input}, ready to pass to
+#'   \code{\link{susie_rss_pipeline}}, and \code{source_info}.
+#' @export
+region_data_to_susie_rss_input <- function(rss_input, LD_data) {
+  if (!is.list(rss_input) || is.null(rss_input$sumstats)) {
+    stop("rss_input must be a single RSS record with a sumstats element.")
+  }
+  if (is.null(LD_data) || !is(LD_data, "LDData")) {
+    stop("LD_data must be an LDData object.")
+  }
+
+  sumstats <- .rss_sumstats_with_variant_id(rss_input$sumstats)
+  variants <- sumstats$variant_id
+  if (length(variants) == 0L) {
+    stop("rss_input$sumstats contains no variants.")
+  }
+
+  reference_ids <- getVariantIds(LD_data)
+  if (hasGenotypes(LD_data)) {
+    X <- getGenotypes(LD_data)
+    X_mat <- if (is.list(X) && !is.matrix(X)) {
+      lapply(X, .subset_rss_matrix_columns, variants = variants,
+             reference_ids = reference_ids,
+             reference_name = "genotype reference panel")
+    } else {
+      .subset_rss_matrix_columns(X, variants, reference_ids,
+                                 reference_name = "genotype reference panel")
+    }
+    LD_mat <- NULL
+  } else {
+    R <- LD_data@correlation
+    if (is.null(R) || (is.list(R) && !is.matrix(R))) {
+      stop("LD_data must contain one correlation matrix or genotype data.")
+    }
+    LD_mat <- .subset_rss_ld_matrix(R, variants, reference_ids)
+    X_mat <- NULL
+  }
+
+  list(
+    susie_rss_input = list(
+      sumstats = sumstats,
+      LD_mat = LD_mat,
+      X_mat = X_mat,
+      n = rss_input$n,
+      var_y = rss_input$var_y
+    ),
+    source_info = list(
+      n_variants = length(variants),
+      variants = variants,
+      uses_X_ref = !is.null(X_mat),
+      has_LD = !is.null(LD_mat)
+    )
+  )
+}
+
 #' RSS Analysis Pipeline
 #'
 #' End-to-end pipeline for summary statistics fine-mapping via SuSiE RSS.
@@ -380,17 +497,6 @@ rss_analysis_pipeline <- function(
   if (!is(LD_data, "LDData")) {
     stop("LD_data must be an LDData object")
   }
-  use_X <- hasGenotypes(LD_data)
-  X_data <- if (use_X) getGenotypes(LD_data) else NULL
-  is_X_list <- use_X && is.list(X_data)
-  subset_X_data <- function(variants) {
-    if (!use_X) return(NULL)
-    if (is_X_list) {
-      lapply(X_data, function(Xk) Xk[, variants, drop = FALSE])
-    } else {
-      X_data[, variants, drop = FALSE]
-    }
-  }
   res <- list()
   rss_input <- load_rss_data(
     sumstat_path = sumstat_path, column_file_path = column_file_path,
@@ -427,13 +533,12 @@ rss_analysis_pipeline <- function(
   }
   rss_record <- getRSSInput(qc_record)
   sumstats <- rss_record$sumstats
-  qc_ld <- getLDData(qc_record)
-  LD_mat <- if (is.null(qc_ld)) NULL else if (hasGenotypes(qc_ld)) getGenotypes(qc_ld) else getCorrelation(qc_ld)
+  n <- rss_record$n
+  var_y <- rss_record$var_y
   preprocess_snapshot <- getPreprocess(qc_record)
   preprocess_ld <- preprocess_snapshot$ld_data
   preprocess_results <- list(
-    sumstats = preprocess_snapshot$sumstats,
-    LD_mat = if (is.null(preprocess_ld)) NULL else if (hasGenotypes(preprocess_ld)) getGenotypes(preprocess_ld) else getCorrelation(preprocess_ld)
+    sumstats = preprocess_snapshot$sumstats
   )
   qc_results <- list(outlier_number = getOutlierNumber(qc_record))
 
@@ -445,17 +550,15 @@ rss_analysis_pipeline <- function(
     return(list(rss_data_analyzed = sumstats))
   }
 
+  qc_ld <- getLDData(qc_record)
+  susie_ready <- region_data_to_susie_rss_input(rss_record, qc_ld)$susie_rss_input
+
   # Fine-mapping: use X_mat if available, otherwise R
   if (!is.null(finemapping_method)) {
     pri_coverage <- finemapping_opts$coverage[1]
     sec_coverage <- if (length(finemapping_opts$coverage) > 1) finemapping_opts$coverage[-1] else NULL
 
-    X_mat_sub <- subset_X_data(sumstats$variant_id)
-
-    res <- susie_rss_pipeline(sumstats,
-      LD_mat = if (use_X) NULL else LD_mat,
-      X_mat = X_mat_sub,
-      n = n, var_y = var_y,
+    res <- do.call(susie_rss_pipeline, c(susie_ready, list(
       L = finemapping_opts$L, L_greedy = finemapping_opts$L_greedy,
       analysis_method = finemapping_method,
       methods = methods,
@@ -466,7 +569,7 @@ rss_analysis_pipeline <- function(
       min_abs_corr = finemapping_opts$min_abs_corr,
       R_finite = R_finite,
       R_mismatch = R_mismatch
-    )
+    )))
     if (!is.null(qc_method)) {
       res$outlier_number <- qc_results$outlier_number
     }
@@ -482,11 +585,12 @@ rss_analysis_pipeline <- function(
     paste0(method, "_", suffix)
   }
 
-  .run_reanalysis <- function(sumstats, LD_mat, method, finemapping_opts, pri_coverage, sec_coverage) {
-    susie_rss_pipeline(sumstats,
-      LD_mat = if (use_X) NULL else LD_mat,
-      X_mat = subset_X_data(sumstats$variant_id),
-      n = n, var_y = var_y,
+  .run_reanalysis <- function(sumstats, ld_data, method, finemapping_opts, pri_coverage, sec_coverage) {
+    reanalysis_input <- region_data_to_susie_rss_input(
+      list(sumstats = sumstats, n = n, var_y = var_y),
+      ld_data
+    )$susie_rss_input
+    do.call(susie_rss_pipeline, c(reanalysis_input, list(
       L = finemapping_opts$L, L_greedy = finemapping_opts$L_greedy,
       analysis_method = method,
       coverage = pri_coverage,
@@ -495,7 +599,7 @@ rss_analysis_pipeline <- function(
       min_abs_corr = finemapping_opts$min_abs_corr,
       R_finite = R_finite,
       R_mismatch = R_mismatch
-    )
+    )))
   }
 
   method_name <- .make_method_name(finemapping_method, qc_method, impute)
@@ -529,18 +633,18 @@ rss_analysis_pipeline <- function(
             max(cs_corr_max, na.rm = TRUE)
           })
         if (any(block_cs_metrics$p_value > 1e-4 | block_cs_metrics$max_cs_corr_study_block > 0.5)) {
-          bcr <- .run_reanalysis(sumstats, LD_mat, "bayesian_conditional_regression",
+          bcr <- .run_reanalysis(sumstats, qc_ld, "bayesian_conditional_regression",
             finemapping_opts, pri_coverage, sec_coverage)
           if (!is.null(qc_method)) {
             bcr$outlier_number <- qc_results$outlier_number
           }
           result_list[[.make_method_name("bayesian_conditional_regression", qc_method, impute)]] <- bcr
-          ser <- .run_reanalysis(preprocess_results$sumstats, preprocess_results$LD_mat,
+          ser <- .run_reanalysis(preprocess_results$sumstats, preprocess_ld,
             "single_effect", finemapping_opts, pri_coverage, sec_coverage)
           result_list[["single_effect_NO_QC"]] <- ser
         }
       } else { # CS = 1 or NA
-        ser <- .run_reanalysis(preprocess_results$sumstats, preprocess_results$LD_mat,
+        ser <- .run_reanalysis(preprocess_results$sumstats, preprocess_ld,
           "single_effect", finemapping_opts, pri_coverage, sec_coverage)
         result_list[["single_effect_NO_QC"]] <- ser
       }

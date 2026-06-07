@@ -1062,6 +1062,55 @@ make_rss_ld_mat <- function(n_variants = 5) {
   m
 }
 
+test_that("region_data_to_susie_rss_input prepares correlation-backed RSS input", {
+  ss <- make_rss_sumstats(5)
+  ss_sub <- ss[c(2, 4, 5), , drop = FALSE]
+  ld <- .test_lddata_from_matrix(make_rss_ld_mat(5))
+
+  out <- region_data_to_susie_rss_input(
+    list(sumstats = ss_sub, n = 1000, var_y = 1.5),
+    ld
+  )
+
+  expect_equal(out$source_info$n_variants, 3)
+  expect_false(out$source_info$uses_X_ref)
+  expect_equal(out$susie_rss_input$n, 1000)
+  expect_equal(out$susie_rss_input$var_y, 1.5)
+  expect_null(out$susie_rss_input$X_mat)
+  expect_equal(rownames(out$susie_rss_input$LD_mat), ss_sub$variant_id)
+  expect_equal(colnames(out$susie_rss_input$LD_mat), ss_sub$variant_id)
+})
+
+test_that("region_data_to_susie_rss_input prepares genotype-backed RSS input", {
+  ss <- make_rss_sumstats(5)
+  ss_sub <- ss[c(1, 3, 5), , drop = FALSE]
+  X_ref <- matrix(rnorm(20 * 5), nrow = 20, ncol = 5)
+  colnames(X_ref) <- ss$variant_id
+  ld <- .test_lddata_from_matrix(X_ref, is_genotype = TRUE)
+
+  out <- region_data_to_susie_rss_input(
+    list(sumstats = ss_sub, n = 1000, var_y = 1),
+    ld
+  )
+
+  expect_true(out$source_info$uses_X_ref)
+  expect_false(out$source_info$has_LD)
+  expect_null(out$susie_rss_input$LD_mat)
+  expect_equal(dim(out$susie_rss_input$X_mat), c(20, 3))
+  expect_equal(colnames(out$susie_rss_input$X_mat), ss_sub$variant_id)
+})
+
+test_that("region_data_to_susie_rss_input rejects default row names as variant IDs", {
+  ss <- make_rss_sumstats(5)[c(2, 4, 5), , drop = FALSE]
+  ss$variant_id <- NULL
+  ld <- .test_lddata_from_matrix(make_rss_ld_mat(3))
+
+  expect_error(
+    region_data_to_susie_rss_input(list(sumstats = ss, n = 1000, var_y = 1), ld),
+    "variant_id or variant"
+  )
+})
+
 test_that("rss: pip_cutoff_to_skip > 0, no signal => early return", {
   ss <- make_rss_sumstats(5)
   ld_mat <- make_rss_ld_mat(5)
@@ -2261,7 +2310,9 @@ test_that("rss: is_genotype=TRUE path does not precompute R and uses X for fine-
       outlier_number = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
+    summary_stats_qc = function(...) .test_qcresult(
+      ss, X_geno, outlier_number = 0, is_genotype = TRUE
+    ),
     partition_LD_matrix = function(...) list(ld_matrices = list(ld_mat)),
     raiss = function(...) list(result_filter = ss, LD_mat = ld_mat),
     susie_rss_pipeline = function(sumstats, LD_mat = NULL, X_mat = NULL, ...) {
@@ -2332,7 +2383,13 @@ test_that("rss: mixture LD_data (list of X panels) preserves list shape into sus
       outlier_number = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
+    summary_stats_qc = function(...) QCResult(
+      ld_data = mixture_ld,
+      rss_input = list(sumstats = ss, n = 1000, var_y = 1),
+      preprocess = list(sumstats = ss, ld_data = mixture_ld),
+      outlier_number = 0L,
+      skipped = FALSE
+    ),
     partition_LD_matrix = function(...) list(ld_matrices = list(ld_mat)),
     raiss = function(...) list(result_filter = ss, LD_mat = ld_mat),
     susie_rss_pipeline = function(sumstats, LD_mat = NULL, X_mat = NULL, ...) {
