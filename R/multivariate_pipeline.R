@@ -3,10 +3,9 @@
 #' @param sumstat_data The \code{sumstat_data} component from a QC'ed regional
 #'   object, typically \code{qced_regional_data$sumstat_data}.
 #' @param ld_name Optional name of the LD reference to use. If \code{NULL}, a
-#'   unique \code{LD_match} entry is used. When no \code{LD_match} is available,
-#'   the first LD reference containing all shared variants is used. If
-#'   \code{LD_match} points to multiple references, set \code{ld_name}
-#'   explicitly.
+#'   unique \code{LD_match} entry is used. If \code{LD_match} points to multiple
+#'   references, the first one is used with a message. When no \code{LD_match}
+#'   is available, the first LD reference containing all shared variants is used.
 #' @return A list with \code{mvsusie_rss_input}, ready for
 #'   \code{mvsusieR::mvsusie_rss()}, and \code{source_info}.
 #' @export
@@ -76,7 +75,9 @@ region_data_to_mvsusie_rss_input <- function(sumstat_data, ld_name = NULL) {
     selected_ld_name <- matched_ld_names
   }
   if (is.null(selected_ld_name) && length(matched_ld_names) > 1L) {
-    stop("mvSuSiE RSS input requires one LD reference. Multiple LD_match entries were found; provide ld_name explicitly.")
+    selected_ld_name <- matched_ld_names[[1]]
+    message("mvSuSiE RSS input: multiple LD_match references were found; using the first reference '",
+            selected_ld_name, "'. Provide ld_name to choose a different reference.")
   }
   if (is.null(selected_ld_name)) {
     contains_overlap <- vapply(LD_data, function(ld) {

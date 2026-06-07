@@ -11,10 +11,9 @@ region_data_to_mvsusie_rss_input(sumstat_data, ld_name = NULL)
 object, typically \code{qced_regional_data$sumstat_data}.}
 
 \item{ld_name}{Optional name of the LD reference to use. If \code{NULL}, a
-unique \code{LD_match} entry is used. When no \code{LD_match} is available,
-the first LD reference containing all shared variants is used. If
-\code{LD_match} points to multiple references, set \code{ld_name}
-explicitly.}
+unique \code{LD_match} entry is used. If \code{LD_match} points to multiple
+references, the first one is used with a message. When no \code{LD_match}
+is available, the first LD reference containing all shared variants is used.}
 }
 \value{
 A list with \code{mvsusie_rss_input}, ready for

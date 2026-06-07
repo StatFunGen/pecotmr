@@ -66,7 +66,7 @@ test_that("region_data_to_mvsusie_rss_input builds shared-variant Z and R", {
   expect_equal(out$source_info$n, c(study1 = 100, study2 = 120))
 })
 
-test_that("region_data_to_mvsusie_rss_input requires explicit LD for multiple LD matches", {
+test_that("region_data_to_mvsusie_rss_input reports first LD for multiple LD matches", {
   ss1 <- make_mv_rss_sumstats(5)
   ss2 <- make_mv_rss_sumstats(5)
   X_ref1 <- matrix(rnorm(25 * 5), nrow = 25, ncol = 5)
@@ -84,10 +84,11 @@ test_that("region_data_to_mvsusie_rss_input requires explicit LD for multiple LD
     LD_match = c(study1 = "ld1", study2 = "ld2")
   )
 
-  expect_error(
-    region_data_to_mvsusie_rss_input(input),
-    "requires one LD reference"
+  expect_message(
+    out_default <- region_data_to_mvsusie_rss_input(input),
+    "using the first reference 'ld1'"
   )
+  expect_equal(out_default$source_info$ld_name, "ld1")
   out <- region_data_to_mvsusie_rss_input(input, ld_name = "ld2")
   expect_equal(out$source_info$ld_name, "ld2")
 })
