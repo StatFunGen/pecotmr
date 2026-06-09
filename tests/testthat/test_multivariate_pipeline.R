@@ -16,6 +16,83 @@ make_mv_data <- function(n = 30, p = 10, r = 3, seed = 42) {
   list(X = X, Y = Y, maf = maf)
 }
 
+make_mv_rss_sumstats <- function(n_variants = 5) {
+  data.frame(
+    chrom = rep(1, n_variants),
+    pos = seq(100, by = 100, length.out = n_variants),
+    A1 = rep("A", n_variants),
+    A2 = rep("G", n_variants),
+    z = rnorm(n_variants, 0, 2),
+    variant_id = paste0("1:", seq(100, by = 100, length.out = n_variants), ":A:G"),
+    stringsAsFactors = FALSE
+  )
+}
+
+.test_mv_lddata_from_genotype <- function(X) {
+  ids <- colnames(X)
+  ref_panel <- cbind(pecotmr:::parse_variant_id(ids), variant_id = ids)
+  ref_panel$chrom <- as.character(ref_panel$chrom)
+  LDData(
+    correlation = NULL,
+    genotype_handle = X,
+    variants = pecotmr:::.ref_panel_to_granges(ref_panel),
+    block_metadata = pecotmr:::.infer_single_ld_block_metadata(ref_panel),
+    n_ref = as.integer(nrow(X))
+  )
+}
+
+test_that("region_data_to_mvsusie_rss_input builds shared-variant Z and R", {
+  ss1 <- make_mv_rss_sumstats(5)
+  ss2 <- make_mv_rss_sumstats(5)[2:5, , drop = FALSE]
+  ss2$z <- ss2$z + 1
+  X_ref <- matrix(rnorm(25 * 5), nrow = 25, ncol = 5)
+  colnames(X_ref) <- ss1$variant_id
+  ld <- .test_mv_lddata_from_genotype(X_ref)
+
+  out <- region_data_to_mvsusie_rss_input(list(
+    sumstats = list(
+      study1 = list(sumstats = ss1, n = 100, var_y = 1),
+      study2 = list(sumstats = ss2, n = 120, var_y = 1)
+    ),
+    LD_data = list(study1 = ld),
+    LD_match = c(study1 = "study1", study2 = "study1")
+  ))
+
+  overlap <- ss2$variant_id
+  expect_equal(rownames(out$mvsusie_rss_input$Z), overlap)
+  expect_equal(colnames(out$mvsusie_rss_input$Z), c("study1", "study2"))
+  expect_equal(dim(out$mvsusie_rss_input$R), c(length(overlap), length(overlap)))
+  expect_equal(out$mvsusie_rss_input$N, 120)
+  expect_equal(out$source_info$n, c(study1 = 100, study2 = 120))
+})
+
+test_that("region_data_to_mvsusie_rss_input reports first LD for multiple LD matches", {
+  ss1 <- make_mv_rss_sumstats(5)
+  ss2 <- make_mv_rss_sumstats(5)
+  X_ref1 <- matrix(rnorm(25 * 5), nrow = 25, ncol = 5)
+  X_ref2 <- matrix(rnorm(25 * 5), nrow = 25, ncol = 5)
+  colnames(X_ref1) <- ss1$variant_id
+  colnames(X_ref2) <- ss1$variant_id
+  ld1 <- .test_mv_lddata_from_genotype(X_ref1)
+  ld2 <- .test_mv_lddata_from_genotype(X_ref2)
+  input <- list(
+    sumstats = list(
+      study1 = list(sumstats = ss1, n = 100, var_y = 1),
+      study2 = list(sumstats = ss2, n = 120, var_y = 1)
+    ),
+    LD_data = list(ld1 = ld1, ld2 = ld2),
+    LD_match = c(study1 = "ld1", study2 = "ld2")
+  )
+
+  expect_message(
+    out_default <- region_data_to_mvsusie_rss_input(input),
+    "using the first reference 'ld1'"
+  )
+  expect_equal(out_default$source_info$ld_name, "ld1")
+  out <- region_data_to_mvsusie_rss_input(input, ld_name = "ld2")
+  expect_equal(out$source_info$ld_name, "ld2")
+})
+
 # NOTE: In multivariate_analysis_pipeline, the mvsusieR check (requireNamespace)
 # runs BEFORE input validation. So when mvsusieR is not installed, the function
 # stops with "please install mvsusieR" before ever reaching the X/Y/maf checks.

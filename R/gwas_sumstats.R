@@ -1,6 +1,8 @@
 #' @title Summary Statistics Handling
 #' @description Functions for reading, validating, and constructing
 #'   \code{GWASSumStats} objects from various input formats.
+#' @name pecotmr-gwas-sumstats
+#' @keywords internal
 #' @importFrom GenomicRanges GRanges seqnames start
 #' @importFrom S4Vectors DataFrame mcols mcols<-
 #' @importFrom MungeSumstats format_sumstats

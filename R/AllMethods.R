@@ -1,6 +1,8 @@
 #' @title S4 Method Implementations
 #' @description Constructors and accessor method implementations for all
 #'   S4 classes: LDData, RegionalData, FineMappingResult, TWASWeights.
+#' @name pecotmr-methods
+#' @keywords internal
 #' @include AllGenerics.R
 #' @importFrom SummarizedExperiment assay
 #' @importFrom S4Vectors DataFrame mcols mcols<-

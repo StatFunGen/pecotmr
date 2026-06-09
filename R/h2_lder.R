@@ -2,6 +2,8 @@
 #' @description Estimate heritability using LD eigenvalue regression
 #'   (Song et al. 2022). Supports univariate global and local estimation,
 #'   with optional annotation stratification.
+#' @name pecotmr-h2-lder
+#' @keywords internal
 #' @references
 #'   Song S, Jiang W, Zhang Y, Hou L, Zhao H (2022). Leveraging LD
 #'   eigenvalue regression to improve the estimation of SNP heritability

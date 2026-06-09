@@ -1,3 +1,134 @@
+#' Convert QC'ed regional summary-statistic data to mvSuSiE RSS input
+#'
+#' @param sumstat_data The \code{sumstat_data} component from a QC'ed regional
+#'   object, typically \code{qced_regional_data$sumstat_data}.
+#' @param ld_name Optional name of the LD reference to use. If \code{NULL}, a
+#'   unique \code{LD_match} entry is used. If \code{LD_match} points to multiple
+#'   references, the first one is used with a message. When no \code{LD_match}
+#'   is available, the first LD reference containing all shared variants is used.
+#' @return A list with \code{mvsusie_rss_input}, ready for
+#'   \code{mvsusieR::mvsusie_rss()}, and \code{source_info}.
+#' @export
+region_data_to_mvsusie_rss_input <- function(sumstat_data, ld_name = NULL) {
+  if (is.null(sumstat_data) || is.null(sumstat_data$sumstats) ||
+      is.null(sumstat_data$LD_data)) {
+    stop("sumstat_data must contain post-QC sumstats and LD_data entries.")
+  }
+
+  sumstats <- sumstat_data$sumstats
+  if (length(sumstats) < 2L) {
+    stop("mvSuSiE RSS input requires at least two summary-statistic studies.")
+  }
+
+  study_names <- names(sumstats)
+  if (is.null(study_names) || any(!nzchar(study_names))) {
+    study_names <- paste0("study", seq_along(sumstats))
+    names(sumstats) <- study_names
+  }
+
+  sumstats <- lapply(sumstats, function(record) {
+    record$sumstats <- .rss_sumstats_with_variant_id(record$sumstats)
+    record
+  })
+  overlap <- Reduce(intersect, lapply(sumstats, function(record) record$sumstats$variant_id))
+  if (length(overlap) < 2L) {
+    stop("mvSuSiE RSS input requires at least two shared variants across studies.")
+  }
+
+  Z <- do.call(cbind, lapply(sumstats, function(record) {
+    record$sumstats$z[match(overlap, record$sumstats$variant_id)]
+  }))
+  rownames(Z) <- overlap
+  colnames(Z) <- study_names
+
+  n_vec <- vapply(sumstats, function(record) {
+    n <- record$n
+    if (is.null(n) || length(n) == 0L) return(NA_real_)
+    stats::median(as.numeric(n), na.rm = TRUE)
+  }, numeric(1))
+  names(n_vec) <- study_names
+
+  LD_data <- sumstat_data$LD_data
+  ld_names <- names(LD_data)
+  if (is.null(ld_names) || any(!nzchar(ld_names))) {
+    ld_names <- paste0("LD", seq_along(LD_data))
+    names(LD_data) <- ld_names
+  }
+
+  LD_match <- sumstat_data$LD_match
+  matched_ld_names <- character()
+  if (!is.null(LD_match)) {
+    LD_match <- as.character(LD_match)
+    if (!is.null(names(LD_match)) && all(study_names %in% names(LD_match))) {
+      matched_ld_names <- LD_match[study_names]
+    } else if (length(LD_match) >= length(study_names)) {
+      matched_ld_names <- LD_match[seq_along(study_names)]
+    }
+    matched_ld_names <- unique(matched_ld_names[!is.na(matched_ld_names) & nzchar(matched_ld_names)])
+  }
+
+  selected_ld_name <- ld_name
+  if (is.null(selected_ld_name) && length(matched_ld_names) == 1L) {
+    if (!matched_ld_names %in% ld_names) {
+      stop("LD_match points to an LD reference that is not present in sumstat_data$LD_data.")
+    }
+    selected_ld_name <- matched_ld_names
+  }
+  if (is.null(selected_ld_name) && length(matched_ld_names) > 1L) {
+    selected_ld_name <- matched_ld_names[[1]]
+    message("mvSuSiE RSS input: multiple LD_match references were found; using the first reference '",
+            selected_ld_name, "'. Provide ld_name to choose a different reference.")
+  }
+  if (is.null(selected_ld_name)) {
+    contains_overlap <- vapply(LD_data, function(ld) {
+      is(ld, "LDData") && all(overlap %in% getVariantIds(ld))
+    }, logical(1))
+    if (!any(contains_overlap)) {
+      stop("No LD_data entry contains all shared variants.")
+    }
+    selected_ld_name <- ld_names[which(contains_overlap)[1]]
+  }
+  if (!selected_ld_name %in% ld_names) {
+    stop("ld_name is not present in sumstat_data$LD_data.")
+  }
+
+  ld <- LD_data[[selected_ld_name]]
+  if (!is(ld, "LDData")) stop("Selected LD_data entry must be an LDData object.")
+
+  reference_ids <- getVariantIds(ld)
+  if (hasGenotypes(ld)) {
+    X <- getGenotypes(ld)
+    if (is.list(X) && !is.matrix(X)) {
+      stop("region_data_to_mvsusie_rss_input requires a single genotype reference, not mixture panels.")
+    }
+    X_overlap <- .subset_rss_matrix_columns(
+      X, overlap, reference_ids, "genotype reference panel"
+    )
+    R <- compute_LD(X_overlap, method = "sample")
+    rownames(R) <- colnames(R) <- overlap
+  } else {
+    R <- ld@correlation
+    if (is.null(R) || (is.list(R) && !is.matrix(R))) {
+      stop("region_data_to_mvsusie_rss_input requires one correlation matrix or one genotype matrix.")
+    }
+    R <- .subset_rss_ld_matrix(R, overlap, reference_ids)
+  }
+
+  list(
+    mvsusie_rss_input = list(
+      Z = Z,
+      R = R,
+      N = if (all(is.na(n_vec))) NA_real_ else max(n_vec, na.rm = TRUE)
+    ),
+    source_info = list(
+      studies = study_names,
+      variants = overlap,
+      n = n_vec,
+      ld_name = selected_ld_name
+    )
+  )
+}
+
 #' Multivariate Analysis Pipeline
 #'
 #' This function performs weights computation for Transcriptome-Wide Association Study (TWAS) with fitting
@@ -49,7 +180,6 @@
 #'   X = multitrait_data$X,
 #'   Y = multitrait_data$Y,
 #'   maf = colMeans(multitrait_data$X),
-#'   X_variance = multitrait_data$X_variance,
 #'   L = 10,
 #'   L_greedy = 5,
 #'   ld_reference_meta_file = NULL,

@@ -1,6 +1,8 @@
 #' @title Shared Utilities for Heritability Estimation
 #' @description Internal helper functions for block operations, regression,
 #'   jackknife SE, enrichment computation, and meta-analysis.
+#' @name pecotmr-h2-utils
+#' @keywords internal
 #' @importFrom GenomicRanges GRanges
 #' @importFrom BiocParallel bplapply bpparam
 NULL

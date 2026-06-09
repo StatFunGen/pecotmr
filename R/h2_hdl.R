@@ -2,6 +2,8 @@
 #' @description Estimate heritability using eigenvalue-based likelihood
 #'   maximization (Ning et al. 2020) with stratified extensions (sHDL,
 #'   Kim et al. 2023).
+#' @name pecotmr-h2-hdl
+#' @keywords internal
 #' @references
 #'   Ning Z, Pawitan Y, Shen X (2020). High-definition likelihood
 #'   inference of genetic correlations across human complex traits.

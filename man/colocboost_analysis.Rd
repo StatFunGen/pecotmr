@@ -106,7 +106,7 @@ fit <- colocboost_analysis(sumstat = sumstat, LD = LD,
 # Use richer LD metadata from load_LD_matrix() for QC, while still passing
 # ColocBoost's native LD input.
 ld_data <- load_LD_matrix(ld_meta_file, region)
-fit <- colocboost_analysis(sumstat = sumstat, LD = ld_data$LD_matrix,
+fit <- colocboost_analysis(sumstat = sumstat, LD = getCorrelation(ld_data),
                            LD_reference_info = ld_data, qc_method = "none")
 
 # Individual-level input with explicit genotype QC thresholds.

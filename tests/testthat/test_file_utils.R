@@ -1478,6 +1478,25 @@ test_that("load_rss_data extracts n from n_sample column in sumstats", {
   file.remove(tmp_sumstat, tmp_col)
 })
 
+test_that("load_rss_data treats NA sample-size arguments as unspecified", {
+  tmp_sumstat <- tempfile(fileext = ".tsv")
+  df <- data.frame(
+    chrom = c("chr1", "chr1"), pos = c(100, 200),
+    b = c(0.5, 0.3), s = c(0.1, 0.1),
+    ns = c(1000, 1200),
+    stringsAsFactors = FALSE
+  )
+  readr::write_tsv(df, tmp_sumstat)
+  tmp_col <- tempfile(fileext = ".txt")
+  writeLines(c("beta:b", "se:s", "n_sample:ns"), tmp_col)
+
+  result <- suppressWarnings(load_rss_data(
+    tmp_sumstat, tmp_col, n_sample = NA_real_, n_case = NA_real_,
+    n_control = NA_real_))
+  expect_equal(result$n, median(c(1000, 1200)))
+  file.remove(tmp_sumstat, tmp_col)
+})
+
 test_that("load_rss_data extracts n from n_case and n_control columns", {
   tmp_sumstat <- tempfile(fileext = ".tsv")
   df <- data.frame(

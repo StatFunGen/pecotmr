@@ -1376,6 +1376,9 @@ standardise_sumstats_columns <- function(sumstats, column_file_path = NULL, comm
 #' @export
 load_rss_data <- function(sumstat_path, column_file_path = NULL, n_sample = 0, n_case = 0, n_control = 0, region = NULL,
                           extract_region_name = NULL, region_name_col = NULL, comment_string = "#") {
+  n_sample <- if (length(n_sample) == 1L && is.na(n_sample)) 0 else n_sample
+  n_case <- if (length(n_case) == 1L && is.na(n_case)) 0 else n_case
+  n_control <- if (length(n_control) == 1L && is.na(n_control)) 0 else n_control
   # Validate input files exist
   if (!file.exists(sumstat_path)) {
     stop("Summary statistics file not found: ", sumstat_path)

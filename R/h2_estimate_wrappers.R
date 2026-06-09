@@ -2,6 +2,8 @@
 #' @description Top-level entry point for heritability estimation,
 #'   LD score computation methods, H2Estimate accessors, and a converter
 #'   to bridge H2Estimate into the sldsc_wrapper.R postprocessing pipeline.
+#' @name pecotmr-h2-wrappers
+#' @keywords internal
 #' @include AllGenerics.R
 #' @importFrom stats median
 NULL

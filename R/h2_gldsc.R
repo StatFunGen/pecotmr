@@ -1,6 +1,8 @@
 #' @title g-LDSC: Generalized LD Score Regression
 #' @description Estimate heritability and enrichment using feasible
 #'   generalized least squares on LD scores (Xiong et al. 2024).
+#' @name pecotmr-h2-gldsc
+#' @keywords internal
 #' @references
 #'   Xiong Z, Thach TQ, Zhang YD, Sham PC (2024). Improved estimation
 #'   of functional enrichment in SNP heritability using feasible

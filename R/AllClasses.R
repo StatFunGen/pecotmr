@@ -2,6 +2,8 @@
 #' @description All S4 class definitions for pecotmr: genotype handles,
 #'   summary statistics, LD references, annotations, fine-mapping results,
 #'   TWAS weights, regional data, and heritability estimates.
+#' @name pecotmr-classes
+#' @keywords internal
 #' @importFrom methods setClass setMethod new is validObject
 #' @importFrom S4Vectors mcols mcols<-
 NULL

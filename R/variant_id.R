@@ -2,6 +2,8 @@
 #' @description Functions for parsing, formatting, normalizing, and detecting
 #'   the naming conventions of variant IDs (e.g., "chr1:100:A:G") and genomic
 #'   region strings (e.g., "chr1:100-200").
+#' @name pecotmr-variant-id
+#' @keywords internal
 #' @importFrom stringr str_split
 NULL
 

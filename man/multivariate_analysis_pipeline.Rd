@@ -111,7 +111,6 @@ result <- multivariate_analysis_pipeline(
   X = multitrait_data$X,
   Y = multitrait_data$Y,
   maf = colMeans(multitrait_data$X),
-  X_variance = multitrait_data$X_variance,
   L = 10,
   L_greedy = 5,
   ld_reference_meta_file = NULL,

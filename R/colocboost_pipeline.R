@@ -179,7 +179,7 @@ region_data_to_colocboost_input <- function(region_data) {
 #' # Use richer LD metadata from load_LD_matrix() for QC, while still passing
 #' # ColocBoost's native LD input.
 #' ld_data <- load_LD_matrix(ld_meta_file, region)
-#' fit <- colocboost_analysis(sumstat = sumstat, LD = ld_data$LD_matrix,
+#' fit <- colocboost_analysis(sumstat = sumstat, LD = getCorrelation(ld_data),
 #'                            LD_reference_info = ld_data, qc_method = "none")
 #'
 #' # Individual-level input with explicit genotype QC thresholds.
@@ -678,6 +678,8 @@ colocboost_pipeline <- function(
 #' @param region_data A region data loaded from \code{load_regional_data}.
 #' @param maf_cutoff A scalar to remove variants with maf < maf_cutoff.
 #' @param pip_cutoff_to_skip_ind A vector of cutoff values for skipping individual contexts.
+#' @param keep_indel Logical; if \code{FALSE}, remove indel variants during
+#'   summary-statistic allele harmonization.
 #' @param pip_cutoff_to_skip_sumstat A vector of cutoff values for skipping summary-stat studies.
 #' @param qc_method Quality control method to use. Options are "none",
 #'   "slalom", or "dentist". \code{NULL} is treated as \code{"none"} for
@@ -685,7 +687,7 @@ colocboost_pipeline <- function(
 #' @param impute Logical; if TRUE, performs imputation when required metadata are available.
 #' @param impute_opts A list of imputation options.
 #' @return A list containing post-QC \code{individual_data} and \code{sumstat_data}.
-#' @noRd
+#' @export
 qc_regional_data <- function(region_data,
                              # - individual
                              maf_cutoff = 0.0005,
@@ -694,7 +696,7 @@ qc_regional_data <- function(region_data,
                              keep_indel = TRUE,
                              pip_cutoff_to_skip_sumstat = 0,
                              qc_method = NULL,
-                             impute = TRUE,
+                             impute = FALSE,
                              impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)) {
   qc_method <- .resolve_summary_qc_method(qc_method)
   qced_individual_to_region_data <- function(ind_qc) {
@@ -793,7 +795,7 @@ qc_regional_data <- function(region_data,
 #' @param pip_cutoff_to_skip Optional single-effect PIP cutoff.
 #' @return A named list of cleaned context-level \code{X}/\code{Y} records, or
 #'   one cleaned record for matrix inputs.
-#' @export
+#' @noRd
 qc_individual_data <- function(X, Y, maf = NULL, X_variance = NULL,
                                missing_rate_thresh = NULL,
                                maf_cutoff = 0.0005,

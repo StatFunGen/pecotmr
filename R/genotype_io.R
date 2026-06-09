@@ -2,6 +2,8 @@
 #' @description Read genotype data from various formats (VCF, plink1,
 #'   plink2, GDS) and provide block-level genotype extraction without
 #'   requiring format conversion.
+#' @name pecotmr-genotype-io
+#' @keywords internal
 #' @importFrom SummarizedExperiment SummarizedExperiment rowRanges
 #' @importFrom GenomicRanges GRanges seqnames
 #' @importFrom S4Vectors DataFrame mcols mcols<-

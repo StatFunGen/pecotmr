@@ -1,5 +1,7 @@
 #' @title S4 Generic Function Definitions
 #' @description All S4 generic function definitions for pecotmr.
+#' @name pecotmr-generics
+#' @keywords internal
 #' @include AllClasses.R
 #' @importFrom methods setGeneric
 NULL

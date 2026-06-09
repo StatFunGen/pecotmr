@@ -3,6 +3,8 @@
 #'   methods: Cauchy combination (ACAT), harmonic mean p-value (HMP),
 #'   poolr, GBJ, and aSPU methods. Also includes the null correlation
 #'   matrix for TWAS z-scores used by correlation-adjusted methods.
+#' @name pecotmr-pval-combine
+#' @keywords internal
 #' @importFrom magrittr %>%
 NULL
 
