@@ -1649,8 +1649,8 @@ test_that("loadRssData extracts n from n_case and n_control columns", {
   result <- suppressWarnings(loadRssData(tmp_sumstat, tmp_col))
   expect_equal(result$n, 1000)
   expect_null(result$var_y)
-  result_ols <- suppressWarnings(load_rss_data(
-    tmp_sumstat, tmp_col, binary_trait_model = "ols"))
+  result_ols <- suppressWarnings(loadRssData(
+    tmp_sumstat, tmp_col, binaryTraitModel = "ols"))
   expect_equal(result_ols$var_y, 1000 / 999 * 0.5 * 0.5)
   file.remove(tmp_sumstat, tmp_col)
 })

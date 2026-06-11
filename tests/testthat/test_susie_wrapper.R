@@ -345,7 +345,7 @@ test_that("susieRssPipeline uses beta/se when z not provided", {
   }
 })
 
-test_that("susie_rss_pipeline defaults to z interface when var_y is absent", {
+test_that("susieRssPipeline defaults to z interface when varY is absent", {
   p <- 4
   vnames <- paste0("chr1:", seq_len(p), ":A:G")
   z <- setNames(rnorm(p), vnames)
@@ -360,13 +360,13 @@ test_that("susie_rss_pipeline defaults to z interface when var_y is absent", {
            lbf_variable = matrix(0, nrow = 1, ncol = p),
            V = 1, sets = list(cs = NULL), niter = 1)
     },
-    postprocess_finemapping_fits = function(...) list(),
-    format_finemapping_output = function(post, primary_method) list()
+    postprocessFinemappingFits = function(...) list(),
+    formatFinemappingOutput = function(post, primaryMethod) list()
   )
 
-  susie_rss_pipeline(
+  susieRssPipeline(
     data.frame(variant_id = vnames, z = z, beta = z * 0.1, se = 0.1),
-    LD_mat = R, n = 1000)
+    ldMat = R, n = 1000)
 
   expect_true("z" %in% names(captured_susie_args))
   expect_false("var_y" %in% names(captured_susie_args))
@@ -374,7 +374,7 @@ test_that("susie_rss_pipeline defaults to z interface when var_y is absent", {
   expect_false("shat" %in% names(captured_susie_args))
 })
 
-test_that("susie_rss_pipeline var_y in dots selects bhat shat interface", {
+test_that("susieRssPipeline varY in dots selects bhat shat interface", {
   p <- 4
   vnames <- paste0("chr1:", seq_len(p), ":A:G")
   beta <- setNames(rnorm(p, sd = 0.1), vnames)
@@ -390,13 +390,13 @@ test_that("susie_rss_pipeline var_y in dots selects bhat shat interface", {
            lbf_variable = matrix(0, nrow = 1, ncol = p),
            V = 1, sets = list(cs = NULL), niter = 1)
     },
-    postprocess_finemapping_fits = function(...) list(),
-    format_finemapping_output = function(post, primary_method) list()
+    postprocessFinemappingFits = function(...) list(),
+    formatFinemappingOutput = function(post, primaryMethod) list()
   )
 
-  susie_rss_pipeline(
+  susieRssPipeline(
     data.frame(variant_id = vnames, beta = beta, se = se),
-    LD_mat = R, n = 1000, var_y = 1000 / 999 * 0.25)
+    ldMat = R, n = 1000, varY = 1000 / 999 * 0.25)
 
   expect_false("z" %in% names(captured_susie_args))
   expect_equal(captured_susie_args$bhat, beta)
@@ -404,7 +404,7 @@ test_that("susie_rss_pipeline var_y in dots selects bhat shat interface", {
   expect_equal(captured_susie_args$var_y, 1000 / 999 * 0.25)
 })
 
-test_that("susie_rss_pipeline rejects var_y with beta se placeholders from z", {
+test_that("susieRssPipeline rejects varY with beta se placeholders from z", {
   p <- 4
   vnames <- paste0("chr1:", seq_len(p), ":A:G")
   sumstats <- data.frame(variant_id = vnames, z = rnorm(p))
@@ -415,7 +415,7 @@ test_that("susie_rss_pipeline rejects var_y with beta se placeholders from z", {
   colnames(R) <- rownames(R) <- vnames
 
   expect_error(
-    susie_rss_pipeline(sumstats, LD_mat = R, n = 1000, var_y = 0.25),
+    susieRssPipeline(sumstats, ldMat = R, n = 1000, varY = 0.25),
     "placeholders derived from z-scores"
   )
 })
@@ -1049,7 +1049,7 @@ test_that("buildTopLoci emits 22 columns in the fixed order on a non-empty fit",
                              sumstats = list(betahat = c(0.2, -0.1),
                                              sebetahat = c(0.05, 0.04)),
                              af = c(0.10, 0.25),
-                             other_quantities = other_q,
+                             otherQuantities = other_q,
                              region = "chr10:10823338-14348298")
   expect_equal(names(out), .UNIFIED_TOP_LOCI_COLS)
   expect_equal(unique(out$gene), "ENSG00000179403")
@@ -1274,7 +1274,7 @@ test_that("missing region produces NA grange columns rather than silent omission
                     "0.5"  = list(1L))
   inp <- .fake_fit_and_cs(variant_ids, cs_at_cov, pip = 0.9)
   out <- .runBuildTopLoci(inp, method = "susie",
-                             other_quantities = list(condition_id = "ctx"))
+                             otherQuantities = list(condition_id = "ctx"))
   # grange_* must still be present columns of the 22-col schema, with NA values.
   expect_true(all(c("grange_start", "grange_end") %in% names(out)))
   expect_true(all(is.na(out$grange_start)))

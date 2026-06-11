@@ -138,10 +138,10 @@ regionDataToMvsusieRssInput <- function(sumstatData, ldName = NULL) {
 #' @param X A matrix of genotype data where rows represent samples and columns represent genetic variants.
 #' @param Y A matrix of phenotype measurements, representing samples and columns represent conditions.
 #' @param maf Optional vector of minor allele frequencies for each variant in X,
-#'   used ONLY for \code{maf_cutoff} filtering and never exported. When \code{af}
+#'   used ONLY for \code{mafCutoff} filtering and never exported. When \code{af}
 #'   is supplied the filtering MAF is derived from it (\code{min(af, 1 - af)}) and
 #'   a supplied \code{maf} is ignored (with a warning if they disagree). Default
-#'   NULL; if neither \code{maf} nor \code{af} is supplied and \code{maf_cutoff}
+#'   NULL; if neither \code{maf} nor \code{af} is supplied and \code{mafCutoff}
 #'   is set, the call errors.
 #' @param af Optional vector of directional effect-allele frequencies (frequency
 #'   of \code{a1}) aligned to the columns of X. When supplied it is exported as
