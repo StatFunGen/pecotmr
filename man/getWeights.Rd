@@ -2,15 +2,15 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{getWeights}
 \alias{getWeights}
-\alias{getWeights,TWASWeights-method}
+\alias{getWeights,TwasWeights-method}
 \title{Get TWAS Weight Matrices}
 \usage{
 getWeights(x, method = NULL)
 
-\S4method{getWeights}{TWASWeights}(x, method = NULL)
+\S4method{getWeights}{TwasWeights}(x, method = NULL)
 }
 \arguments{
-\item{x}{A \code{TWASWeights} object.}
+\item{x}{A \code{TwasWeights} object.}
 
 \item{method}{Character, specific method name. If NULL, returns all.}
 }
@@ -18,5 +18,5 @@ getWeights(x, method = NULL)
 A matrix or named list of matrices.
 }
 \description{
-Extract weight matrices from a TWASWeights object.
+Extract weight matrices from a TwasWeights object.
 }

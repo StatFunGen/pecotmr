@@ -14,14 +14,14 @@
 # Create a single .annot.gz file for one chromosome
 # Real polyfun .annot.gz files have CHR, SNP, BP, CM + annotation columns only
 # (no MAF/A1/A2 — those come from the .frq / PLINK files).
-.make_annot_gz <- function(dir, chrom, n_snps = 50) {
+.make_annot_gz <- function(dir, chrom, nSnps = 50) {
   df <- data.frame(
     CHR = chrom,
-    SNP = paste0("rs", (chrom - 1L) * 100L + seq_len(n_snps)),
-    BP  = seq_len(n_snps) * 1000L,
-    CM  = seq_len(n_snps) * 0.01,
-    annot_A = sample(c(0L, 1L), n_snps, replace = TRUE),
-    annot_B = rnorm(n_snps, 2, 0.5),
+    SNP = paste0("rs", (chrom - 1L) * 100L + seq_len(nSnps)),
+    BP  = seq_len(nSnps) * 1000L,
+    CM  = seq_len(nSnps) * 0.01,
+    annot_A = sample(c(0L, 1L), nSnps, replace = TRUE),
+    annot_B = rnorm(nSnps, 2, 0.5),
     stringsAsFactors = FALSE
   )
   path <- file.path(dir, sprintf("target.%d.annot.gz", chrom))
@@ -32,17 +32,17 @@
 }
 
 # Create a PLINK .frq file for one chromosome
-.make_frq <- function(dir, chrom, plink_name = "ref_chr", n_snps = 50) {
+.make_frq <- function(dir, chrom, plinkName ="ref_chr", nSnps = 50) {
   df <- data.frame(
     CHR = chrom,
-    SNP = paste0("rs", (chrom - 1L) * 100L + seq_len(n_snps)),
+    SNP = paste0("rs", (chrom - 1L) * 100L + seq_len(nSnps)),
     A1  = "A",
     A2  = "G",
-    MAF = runif(n_snps, 0.01, 0.49),
+    MAF = runif(nSnps, 0.01, 0.49),
     NCHROBS = 200L,
     stringsAsFactors = FALSE
   )
-  path <- file.path(dir, sprintf("%s%d.frq", plink_name, chrom))
+  path <- file.path(dir, sprintf("%s%d.frq", plinkName, chrom))
   vroom::vroom_write(df, path, delim = "\t")
   invisible(df)
 }
@@ -146,7 +146,7 @@
   # Annotation + freq files for 2 chromosomes
   for (chr in 1:2) {
     .make_annot_gz(anno_dir, chr)
-    .make_frq(frq_dir, chr, plink_name = plink_name)
+    .make_frq(frq_dir, chr, plinkName =plink_name)
   }
 
   targets <- c("annot_A", "annot_B")
@@ -171,7 +171,7 @@
     anno_dir   = anno_dir,
     frq_dir    = frq_dir,
     out_dir    = out_dir,
-    plink_name = plink_name,
+    plinkName =plink_name,
     targets    = targets,
     trait_names = c("traitX", "traitY")
   )
@@ -179,11 +179,11 @@
 
 
 # =============================================================================
-# .sldsc_chrom_from_filename
+# .sldscChromFromFilename
 # =============================================================================
 
-test_that(".sldsc_chrom_from_filename parses chromosome number", {
-  fn <- pecotmr:::.sldsc_chrom_from_filename
+test_that(".sldscChromFromFilename parses chromosome number", {
+  fn <- pecotmr:::.sldscChromFromFilename
   expect_equal(fn("target.1.annot.gz"), 1L)
   expect_equal(fn("target.22.annot.gz"), 22L)
   expect_true(is.na(fn("no_chrom_here.txt")))
@@ -192,14 +192,14 @@ test_that(".sldsc_chrom_from_filename parses chromosome number", {
 
 
 # =============================================================================
-# .sldsc_detect_annot_cols
+# .sldscDetectAnnotCols
 # =============================================================================
 
-test_that(".sldsc_detect_annot_cols finds non-standard columns", {
+test_that(".sldscDetectAnnotCols finds non-standard columns", {
   dir <- withr::local_tempdir()
   .make_annot_gz(dir, 1)
   f <- file.path(dir, "target.1.annot.gz")
-  cols <- pecotmr:::.sldsc_detect_annot_cols(f)
+  cols <- pecotmr:::.sldscDetectAnnotCols(f)
   expect_true("annot_A" %in% cols)
   expect_true("annot_B" %in% cols)
   expect_false("CHR" %in% cols)
@@ -208,15 +208,15 @@ test_that(".sldsc_detect_annot_cols finds non-standard columns", {
 
 
 # =============================================================================
-# read_sldsc_trait
+# readSldscTrait
 # =============================================================================
 
-test_that("read_sldsc_trait reads polyfun outputs correctly", {
+test_that("readSldscTrait reads polyfun outputs correctly", {
   dir <- withr::local_tempdir()
   prefix <- file.path(dir, "test_trait")
   .make_polyfun_single(dir, prefix, "myannot", n_blocks = 5, h2g = 0.25)
 
-  result <- read_sldsc_trait(prefix)
+  result <- readSldscTrait(prefix)
   expect_true(is.list(result))
   # 1 target + 2 baseline categories
   expect_true("myannot_0" %in% result$categories)
@@ -229,35 +229,35 @@ test_that("read_sldsc_trait reads polyfun outputs correctly", {
   expect_equal(ncol(result$tau_blocks), 3L)
 })
 
-test_that("read_sldsc_trait errors on missing files", {
-  expect_error(read_sldsc_trait("/nonexistent/prefix"), "missing file")
+test_that("readSldscTrait errors on missing files", {
+  expect_error(readSldscTrait("/nonexistent/prefix"), "missing file")
 })
 
-test_that("read_sldsc_trait errors when h2 not in log", {
+test_that("readSldscTrait errors when h2 not in log", {
   dir <- withr::local_tempdir()
   prefix <- file.path(dir, "bad_log")
   .make_polyfun_single(dir, prefix, "a", n_blocks = 3)
   # Overwrite the log with no h2 line
   writeLines("No heritability here", paste0(prefix, ".log"))
-  expect_error(read_sldsc_trait(prefix), "Total Observed scale h2")
+  expect_error(readSldscTrait(prefix), "Total Observed scale h2")
 })
 
-test_that("read_sldsc_trait errors on column mismatch in part_delete", {
+test_that("readSldscTrait errors on column mismatch in part_delete", {
   dir <- withr::local_tempdir()
   prefix <- file.path(dir, "bad_delete")
   .make_polyfun_single(dir, prefix, "a", n_blocks = 3)
   # Overwrite part_delete with wrong number of columns (need != 3)
   vroom::vroom_write(data.frame(x = 1:3, y = 4:6, z = 7:9, w = 10:12),
                      paste0(prefix, ".part_delete"), delim = "\t")
-  expect_error(read_sldsc_trait(prefix), "part_delete")
+  expect_error(readSldscTrait(prefix), "part_delete")
 })
 
 
 # =============================================================================
-# compute_sldsc_annot_sd
+# computeSldscAnnotSd
 # =============================================================================
 
-test_that("compute_sldsc_annot_sd computes SDs with MAF filtering", {
+test_that("computeSldscAnnotSd computes SDs with MAF filtering", {
   dir <- withr::local_tempdir()
   anno_dir <- file.path(dir, "annot")
   frq_dir  <- file.path(dir, "frq")
@@ -265,72 +265,72 @@ test_that("compute_sldsc_annot_sd computes SDs with MAF filtering", {
   dir.create(frq_dir)
   for (chr in 1:2) {
     .make_annot_gz(anno_dir, chr)
-    .make_frq(frq_dir, chr, plink_name = "ref_chr")
+    .make_frq(frq_dir, chr, plinkName ="ref_chr")
   }
 
-  sds <- compute_sldsc_annot_sd(anno_dir, frqfile_dir = frq_dir,
-                                 plink_name = "ref_chr", maf_cutoff = 0.05)
+  sds <- computeSldscAnnotSd(anno_dir, frqfileDir =frq_dir,
+                                 plinkName ="ref_chr", mafCutoff =0.05)
   expect_true(is.numeric(sds))
   expect_equal(length(sds), 2L)
   expect_named(sds, c("annot_A", "annot_B"))
   expect_true(all(sds > 0))
 })
 
-test_that("compute_sldsc_annot_sd works with maf_cutoff = 0", {
+test_that("computeSldscAnnotSd works with mafCutoff =0", {
   dir <- withr::local_tempdir()
   anno_dir <- file.path(dir, "annot")
   dir.create(anno_dir)
   for (chr in 1:2) .make_annot_gz(anno_dir, chr)
 
-  sds <- compute_sldsc_annot_sd(anno_dir, maf_cutoff = 0)
+  sds <- computeSldscAnnotSd(anno_dir, mafCutoff =0)
   expect_true(all(sds > 0))
 })
 
-test_that("compute_sldsc_annot_sd respects annot_cols argument (character)", {
+test_that("computeSldscAnnotSd respects annot_cols argument (character)", {
   dir <- withr::local_tempdir()
   anno_dir <- file.path(dir, "annot")
   dir.create(anno_dir)
   for (chr in 1:2) .make_annot_gz(anno_dir, chr)
 
-  sds <- compute_sldsc_annot_sd(anno_dir, maf_cutoff = 0,
-                                 annot_cols = "annot_A")
+  sds <- computeSldscAnnotSd(anno_dir, mafCutoff =0,
+                                 annotCols ="annot_A")
   expect_equal(length(sds), 1L)
   expect_named(sds, "annot_A")
 })
 
-test_that("compute_sldsc_annot_sd respects annot_cols argument (numeric)", {
+test_that("computeSldscAnnotSd respects annot_cols argument (numeric)", {
   dir <- withr::local_tempdir()
   anno_dir <- file.path(dir, "annot")
   dir.create(anno_dir)
   for (chr in 1:2) .make_annot_gz(anno_dir, chr)
 
-  sds <- compute_sldsc_annot_sd(anno_dir, maf_cutoff = 0, annot_cols = 2L)
+  sds <- computeSldscAnnotSd(anno_dir, mafCutoff =0, annotCols =2L)
   expect_equal(length(sds), 1L)
   expect_named(sds, "annot_B")
 })
 
-test_that("compute_sldsc_annot_sd errors on missing frqfile_dir when maf > 0", {
+test_that("computeSldscAnnotSd errors on missing frqfile_dir when maf > 0", {
   dir <- withr::local_tempdir()
   anno_dir <- file.path(dir, "annot")
   dir.create(anno_dir)
   .make_annot_gz(anno_dir, 1)
-  expect_error(compute_sldsc_annot_sd(anno_dir, frqfile_dir = NULL, maf_cutoff = 0.05),
-               "frqfile_dir")
+  expect_error(computeSldscAnnotSd(anno_dir, frqfileDir =NULL, mafCutoff =0.05),
+               "frqfileDir")
 })
 
-test_that("compute_sldsc_annot_sd errors on missing anno dir", {
-  expect_error(compute_sldsc_annot_sd("/nonexistent/dir", maf_cutoff = 0),
+test_that("computeSldscAnnotSd errors on missing anno dir", {
+  expect_error(computeSldscAnnotSd("/nonexistent/dir", mafCutoff =0),
                "does not exist")
 })
 
-test_that("compute_sldsc_annot_sd errors on empty anno dir", {
+test_that("computeSldscAnnotSd errors on empty anno dir", {
   dir <- withr::local_tempdir()
   anno_dir <- file.path(dir, "empty")
   dir.create(anno_dir)
-  expect_error(compute_sldsc_annot_sd(anno_dir, maf_cutoff = 0), "no .annot.gz")
+  expect_error(computeSldscAnnotSd(anno_dir, mafCutoff =0), "no .annot.gz")
 })
 
-test_that("compute_sldsc_annot_sd errors on missing .frq file", {
+test_that("computeSldscAnnotSd errors on missing .frq file", {
   dir <- withr::local_tempdir()
   anno_dir <- file.path(dir, "annot")
   frq_dir  <- file.path(dir, "frq")
@@ -338,41 +338,41 @@ test_that("compute_sldsc_annot_sd errors on missing .frq file", {
   dir.create(frq_dir)
   .make_annot_gz(anno_dir, 1)
   # No .frq file for chr1
-  expect_error(compute_sldsc_annot_sd(anno_dir, frqfile_dir = frq_dir,
-                                       plink_name = "ref_chr", maf_cutoff = 0.05),
+  expect_error(computeSldscAnnotSd(anno_dir, frqfileDir =frq_dir,
+                                       plinkName ="ref_chr", mafCutoff =0.05),
                "frq file not found")
 })
 
 
 # =============================================================================
-# compute_sldsc_M_ref
+# computeSldscMRef
 # =============================================================================
 
-test_that("compute_sldsc_M_ref counts SNPs from .frq files with MAF cutoff", {
+test_that("computeSldscMRef counts SNPs from .frq files with MAF cutoff", {
   dir <- withr::local_tempdir()
   frq_dir <- file.path(dir, "frq")
   dir.create(frq_dir)
-  for (chr in 1:2) .make_frq(frq_dir, chr, plink_name = "ref_chr")
+  for (chr in 1:2) .make_frq(frq_dir, chr, plinkName ="ref_chr")
 
-  M <- compute_sldsc_M_ref(frqfile_dir = frq_dir, plink_name = "ref_chr",
-                            maf_cutoff = 0.05)
+  M <- computeSldscMRef(frqfileDir =frq_dir, plinkName ="ref_chr",
+                            mafCutoff =0.05)
   expect_true(is.integer(M))
   expect_true(M > 0)
   expect_true(M <= 100L)  # 2 chroms x 50 SNPs max
 })
 
-test_that("compute_sldsc_M_ref counts all SNPs when maf_cutoff = 0", {
+test_that("computeSldscMRef counts all SNPs when mafCutoff =0", {
   dir <- withr::local_tempdir()
   frq_dir <- file.path(dir, "frq")
   dir.create(frq_dir)
-  for (chr in 1:2) .make_frq(frq_dir, chr, plink_name = "ref_chr")
+  for (chr in 1:2) .make_frq(frq_dir, chr, plinkName ="ref_chr")
 
-  M <- compute_sldsc_M_ref(frqfile_dir = frq_dir, plink_name = "ref_chr",
-                            maf_cutoff = 0)
+  M <- computeSldscMRef(frqfileDir =frq_dir, plinkName ="ref_chr",
+                            mafCutoff =0)
   expect_equal(M, 100L)
 })
 
-test_that("compute_sldsc_M_ref falls back to .l2.ldscore with maf_cutoff = 0", {
+test_that("computeSldscMRef falls back to .l2.ldscore with mafCutoff =0", {
   dir <- withr::local_tempdir()
   anno_dir <- file.path(dir, "annot")
   dir.create(anno_dir)
@@ -382,19 +382,19 @@ test_that("compute_sldsc_M_ref falls back to .l2.ldscore with maf_cutoff = 0", {
   vroom::vroom_write(df, gz, delim = "\t")
   close(gz)
 
-  M <- compute_sldsc_M_ref(target_anno_dir = anno_dir, maf_cutoff = 0)
+  M <- computeSldscMRef(targetAnnoDir =anno_dir, mafCutoff =0)
   expect_equal(M, 40L)
 })
 
-test_that("compute_sldsc_M_ref errors when maf > 0 and no frq dir", {
-  expect_error(compute_sldsc_M_ref(maf_cutoff = 0.05), "frqfile_dir")
+test_that("computeSldscMRef errors when maf > 0 and no frq dir", {
+  expect_error(computeSldscMRef(mafCutoff =0.05), "frqfileDir")
 })
 
-test_that("compute_sldsc_M_ref errors with no dirs at all", {
-  expect_error(compute_sldsc_M_ref(maf_cutoff = 0), "need frqfile_dir")
+test_that("computeSldscMRef errors with no dirs at all", {
+  expect_error(computeSldscMRef(mafCutoff =0), "need frqfileDir")
 })
 
-test_that("compute_sldsc_M_ref warns on l2.ldscore fallback", {
+test_that("computeSldscMRef warns on l2.ldscore fallback", {
   dir <- withr::local_tempdir()
   anno_dir <- file.path(dir, "annot")
   dir.create(anno_dir)
@@ -404,74 +404,74 @@ test_that("compute_sldsc_M_ref warns on l2.ldscore fallback", {
   close(gz)
 
   expect_warning(
-    compute_sldsc_M_ref(target_anno_dir = anno_dir, maf_cutoff = 0),
+    computeSldscMRef(targetAnnoDir =anno_dir, mafCutoff =0),
     "UNDERCOUNTS"
   )
 })
 
-test_that("compute_sldsc_M_ref uses generic .frq glob when plink_name pattern fails", {
+test_that("computeSldscMRef uses generic .frq glob when plink_name pattern fails", {
   dir <- withr::local_tempdir()
   frq_dir <- file.path(dir, "frq")
   dir.create(frq_dir)
   # Name doesn't match the plink_name pattern
-  for (chr in 1:2) .make_frq(frq_dir, chr, plink_name = "other_chr")
+  for (chr in 1:2) .make_frq(frq_dir, chr, plinkName ="other_chr")
 
-  M <- compute_sldsc_M_ref(frqfile_dir = frq_dir, plink_name = "nomatch_chr",
-                            maf_cutoff = 0)
+  M <- computeSldscMRef(frqfileDir =frq_dir, plinkName ="nomatch_chr",
+                            mafCutoff =0)
   expect_equal(M, 100L)
 })
 
 
 # =============================================================================
-# is_binary_sldsc_annot
+# isBinarySldscAnnot
 # =============================================================================
 
-test_that("is_binary_sldsc_annot detects binary and continuous annotations", {
+test_that("isBinarySldscAnnot detects binary and continuous annotations", {
   dir <- withr::local_tempdir()
   anno_dir <- file.path(dir, "annot")
   dir.create(anno_dir)
   for (chr in 1:2) .make_annot_gz(anno_dir, chr)
 
-  result <- is_binary_sldsc_annot(anno_dir)
+  result <- isBinarySldscAnnot(anno_dir)
   expect_true(is.logical(result))
   expect_named(result, c("annot_A", "annot_B"))
   expect_true(result[["annot_A"]])   # binary (0/1)
   expect_false(result[["annot_B"]])  # continuous
 })
 
-test_that("is_binary_sldsc_annot respects annot_cols (character)", {
+test_that("isBinarySldscAnnot respects annot_cols (character)", {
   dir <- withr::local_tempdir()
   anno_dir <- file.path(dir, "annot")
   dir.create(anno_dir)
   for (chr in 1:2) .make_annot_gz(anno_dir, chr)
 
-  result <- is_binary_sldsc_annot(anno_dir, annot_cols = "annot_A")
+  result <- isBinarySldscAnnot(anno_dir, annotCols ="annot_A")
   expect_equal(length(result), 1L)
   expect_true(result[["annot_A"]])
 })
 
-test_that("is_binary_sldsc_annot respects annot_cols (numeric)", {
+test_that("isBinarySldscAnnot respects annot_cols (numeric)", {
   dir <- withr::local_tempdir()
   anno_dir <- file.path(dir, "annot")
   dir.create(anno_dir)
   for (chr in 1:2) .make_annot_gz(anno_dir, chr)
 
-  result <- is_binary_sldsc_annot(anno_dir, annot_cols = 2L)
+  result <- isBinarySldscAnnot(anno_dir, annotCols =2L)
   expect_equal(length(result), 1L)
   expect_named(result, "annot_B")
 })
 
-test_that("is_binary_sldsc_annot errors on empty dir", {
+test_that("isBinarySldscAnnot errors on empty dir", {
   dir <- withr::local_tempdir()
-  expect_error(is_binary_sldsc_annot(dir), "no .annot.gz")
+  expect_error(isBinarySldscAnnot(dir), "no .annot.gz")
 })
 
 
 # =============================================================================
-# standardize_sldsc_trait
+# standardizeSldscTrait
 # =============================================================================
 
-# Helper to build a trait_data list (as from read_sldsc_trait)
+# Helper to build a trait_data list (as from readSldscTrait)
 .make_trait_data <- function(cats = c("A_0", "B_0"), n_blocks = 10, h2g = 0.3) {
   n <- length(cats)
   taus <- rep(1e-7, n)
@@ -495,12 +495,12 @@ test_that("is_binary_sldsc_annot errors on empty dir", {
   )
 }
 
-test_that("standardize_sldsc_trait works in single mode", {
+test_that("standardizeSldscTrait works in single mode", {
   td <- .make_trait_data()
   sd_annot <- c(A_0 = 0.5, B_0 = 1.2)
   M_ref <- 1000L
 
-  result <- standardize_sldsc_trait(td, sd_annot, M_ref, mode = "single")
+  result <- standardizeSldscTrait(td, sd_annot, M_ref, mode = "single")
   expect_true(is.list(result))
   expect_equal(result$mode, "single")
   expect_equal(result$h2g, 0.3)
@@ -521,12 +521,12 @@ test_that("standardize_sldsc_trait works in single mode", {
   expect_equal(dim(result$tau_star_blocks), c(10L, 2L))
 })
 
-test_that("standardize_sldsc_trait works in joint mode", {
+test_that("standardizeSldscTrait works in joint mode", {
   td <- .make_trait_data()
   sd_annot <- c(A_0 = 0.5, B_0 = 1.2)
   M_ref <- 1000L
 
-  result <- standardize_sldsc_trait(td, sd_annot, M_ref, mode = "joint")
+  result <- standardizeSldscTrait(td, sd_annot, M_ref, mode = "joint")
   expect_equal(result$mode, "joint")
   s <- result$summary
   # joint mode should NOT have enrichment columns
@@ -534,56 +534,56 @@ test_that("standardize_sldsc_trait works in joint mode", {
   expect_true("tau_star" %in% names(s))
 })
 
-test_that("standardize_sldsc_trait auto-detects target categories", {
+test_that("standardizeSldscTrait auto-detects target categories", {
   td <- .make_trait_data()
   sd_annot <- c(A_0 = 0.5)  # only one overlaps
 
-  result <- standardize_sldsc_trait(td, sd_annot, 1000L, mode = "joint")
+  result <- standardizeSldscTrait(td, sd_annot, 1000L, mode = "joint")
   expect_equal(nrow(result$summary), 1L)
   expect_equal(result$summary$target, "A_0")
 })
 
-test_that("standardize_sldsc_trait errors on empty categories", {
+test_that("standardizeSldscTrait errors on empty categories", {
   td <- .make_trait_data()
   sd_annot <- c(X_0 = 0.5)  # no overlap
-  expect_error(standardize_sldsc_trait(td, sd_annot, 1000L), "no target categories")
+  expect_error(standardizeSldscTrait(td, sd_annot, 1000L), "no target categories")
 })
 
-test_that("standardize_sldsc_trait errors on missing categories", {
+test_that("standardizeSldscTrait errors on missing categories", {
   td <- .make_trait_data(cats = c("A_0"))
   sd_annot <- c(A_0 = 0.5, B_0 = 1.0)
   expect_error(
-    standardize_sldsc_trait(td, sd_annot, 1000L,
-                            target_categories = c("A_0", "B_0")),
+    standardizeSldscTrait(td, sd_annot, 1000L,
+                            targetCategories =c("A_0", "B_0")),
     "missing categories"
   )
 })
 
-test_that("standardize_sldsc_trait warns on zero sd", {
+test_that("standardizeSldscTrait warns on zero sd", {
   td <- .make_trait_data(cats = "A_0")
   sd_annot <- c(A_0 = 0)
   expect_warning(
-    standardize_sldsc_trait(td, sd_annot, 1000L, mode = "joint"),
+    standardizeSldscTrait(td, sd_annot, 1000L, mode = "joint"),
     "zero/NA sd"
   )
 })
 
-test_that("standardize_sldsc_trait enrichstat_se handles p = 0", {
+test_that("standardizeSldscTrait enrichstat_se handles p = 0", {
   td <- .make_trait_data(cats = "A_0")
   td$enrichment_p <- c(A_0 = 0)  # p = 0 → abs_z = Inf → se = 0
   sd_annot <- c(A_0 = 0.5)
 
-  result <- standardize_sldsc_trait(td, sd_annot, 1000L, mode = "single")
+  result <- standardizeSldscTrait(td, sd_annot, 1000L, mode = "single")
   # enrichstat_se should be NA when abs_z is infinite
   expect_true(is.na(result$summary$enrichstat_se))
 })
 
 
 # =============================================================================
-# meta_sldsc_random
+# metaSldscRandom
 # =============================================================================
 
-# Helper to build per_trait_estimates for meta_sldsc_random
+# Helper to build per_trait_estimates for metaSldscRandom
 .make_per_trait_meta <- function(n_traits = 3, category = "A_0",
                                  means = NULL, ses = NULL) {
   if (is.null(means)) means <- rnorm(n_traits, 1e-5, 1e-6)
@@ -606,9 +606,9 @@ test_that("standardize_sldsc_trait enrichstat_se handles p = 0", {
   per_trait
 }
 
-test_that("meta_sldsc_random works for tau_star", {
+test_that("metaSldscRandom works for tau_star", {
   pt <- .make_per_trait_meta(n_traits = 4)
-  result <- meta_sldsc_random(pt, "A_0", quantity = "tau_star")
+  result <- metaSldscRandom(pt, "A_0", quantity = "tau_star")
   expect_true(is.list(result))
   expect_equal(result$n_traits, 4L)
   expect_true(is.numeric(result$mean))
@@ -618,68 +618,68 @@ test_that("meta_sldsc_random works for tau_star", {
   expect_equal(length(result$traits_used), 4L)
 })
 
-test_that("meta_sldsc_random works for enrichment", {
+test_that("metaSldscRandom works for enrichment", {
   pt <- .make_per_trait_meta(n_traits = 3)
-  result <- meta_sldsc_random(pt, "A_0", quantity = "enrichment")
+  result <- metaSldscRandom(pt, "A_0", quantity = "enrichment")
   expect_equal(result$n_traits, 3L)
   expect_true(is.finite(result$mean))
 })
 
-test_that("meta_sldsc_random works for enrichstat", {
+test_that("metaSldscRandom works for enrichstat", {
   pt <- .make_per_trait_meta(n_traits = 3)
-  result <- meta_sldsc_random(pt, "A_0", quantity = "enrichstat")
+  result <- metaSldscRandom(pt, "A_0", quantity = "enrichstat")
   expect_equal(result$n_traits, 3L)
   expect_true(is.finite(result$mean))
 })
 
-test_that("meta_sldsc_random returns NA with < 2 traits", {
+test_that("metaSldscRandom returns NA with < 2 traits", {
   pt <- .make_per_trait_meta(n_traits = 1)
-  result <- meta_sldsc_random(pt, "A_0", "tau_star")
+  result <- metaSldscRandom(pt, "A_0", "tau_star")
   expect_true(is.na(result$mean))
   expect_true(is.na(result$se))
   expect_true(is.na(result$p))
   expect_equal(result$n_traits, 1L)
 })
 
-test_that("meta_sldsc_random skips traits with missing category", {
+test_that("metaSldscRandom skips traits with missing category", {
   pt <- .make_per_trait_meta(n_traits = 3)
   # Change category in trait2
   pt$trait2$summary$target <- "other"
-  result <- meta_sldsc_random(pt, "A_0", "tau_star")
+  result <- metaSldscRandom(pt, "A_0", "tau_star")
   expect_equal(result$n_traits, 2L)
   expect_equal(result$traits_used, c("trait1", "trait3"))
 })
 
-test_that("meta_sldsc_random skips traits with NA or zero SE", {
+test_that("metaSldscRandom skips traits with NA or zero SE", {
   pt <- .make_per_trait_meta(n_traits = 3)
   pt$trait2$summary$tau_star_se <- NA
   pt$trait3$summary$tau_star_se <- 0
-  result <- meta_sldsc_random(pt, "A_0", "tau_star")
+  result <- metaSldscRandom(pt, "A_0", "tau_star")
   expect_equal(result$n_traits, 1L)
   expect_true(is.na(result$mean))  # < 2 valid
 })
 
-test_that("meta_sldsc_random skips NULL entries", {
+test_that("metaSldscRandom skips NULL entries", {
   pt <- .make_per_trait_meta(n_traits = 3)
   pt$trait2 <- NULL
-  result <- meta_sldsc_random(pt, "A_0", "tau_star")
+  result <- metaSldscRandom(pt, "A_0", "tau_star")
   expect_equal(result$n_traits, 2L)
 })
 
-test_that("meta_sldsc_random generates names for unnamed list", {
+test_that("metaSldscRandom generates names for unnamed list", {
   pt <- .make_per_trait_meta(n_traits = 2)
   names(pt) <- NULL
-  result <- meta_sldsc_random(pt, "A_0", "tau_star")
+  result <- metaSldscRandom(pt, "A_0", "tau_star")
   expect_equal(result$traits_used, c("1", "2"))
 })
 
 
 # =============================================================================
-# .sldsc_assemble_trait_summary
+# .sldscAssembleTraitSummary
 # =============================================================================
 
-test_that(".sldsc_assemble_trait_summary combines single and joint", {
-  fn <- pecotmr:::.sldsc_assemble_trait_summary
+test_that(".sldscAssembleTraitSummary combines single and joint", {
+  fn <- pecotmr:::.sldscAssembleTraitSummary
   targets <- c("A_0", "B_0")
   is_bin <- c(A_0 = TRUE, B_0 = FALSE)
 
@@ -711,8 +711,8 @@ test_that(".sldsc_assemble_trait_summary combines single and joint", {
   expect_equal(result$tau_star_joint, c(0.011, 0.021))
 })
 
-test_that(".sldsc_assemble_trait_summary handles NULL single", {
-  fn <- pecotmr:::.sldsc_assemble_trait_summary
+test_that(".sldscAssembleTraitSummary handles NULL single", {
+  fn <- pecotmr:::.sldscAssembleTraitSummary
   joint_df <- data.frame(target = "A_0", tau_star = 0.01, tau_star_se = 0.003,
                           stringsAsFactors = FALSE)
   is_bin <- c(A_0 = TRUE)
@@ -722,8 +722,8 @@ test_that(".sldsc_assemble_trait_summary handles NULL single", {
   expect_equal(result$tau_star_joint, 0.01)
 })
 
-test_that(".sldsc_assemble_trait_summary handles NULL joint", {
-  fn <- pecotmr:::.sldsc_assemble_trait_summary
+test_that(".sldscAssembleTraitSummary handles NULL joint", {
+  fn <- pecotmr:::.sldscAssembleTraitSummary
   single_df <- data.frame(target = "A_0", tau_star = 0.01, tau_star_se = 0.003,
                            enrichment = 2.0, enrichment_se = 0.4,
                            enrichment_p = 0.01, enrichstat = 0.001,
@@ -735,8 +735,8 @@ test_that(".sldsc_assemble_trait_summary handles NULL joint", {
   expect_true(all(is.na(result$tau_star_joint)))
 })
 
-test_that(".sldsc_assemble_trait_summary handles both NULL", {
-  fn <- pecotmr:::.sldsc_assemble_trait_summary
+test_that(".sldscAssembleTraitSummary handles both NULL", {
+  fn <- pecotmr:::.sldscAssembleTraitSummary
   is_bin <- c(A_0 = TRUE)
   result <- fn(NULL, NULL, "A_0", is_bin)
   expect_equal(nrow(result), 1L)
@@ -745,11 +745,11 @@ test_that(".sldsc_assemble_trait_summary handles both NULL", {
 
 
 # =============================================================================
-# .sldsc_view_for_meta
+# .sldscViewForMeta
 # =============================================================================
 
-test_that(".sldsc_view_for_meta extracts single-mode columns", {
-  fn <- pecotmr:::.sldsc_view_for_meta
+test_that(".sldscViewForMeta extracts single-mode columns", {
+  fn <- pecotmr:::.sldscViewForMeta
   per_trait <- list(
     traitX = list(summary = data.frame(
       target = "A_0",
@@ -767,15 +767,15 @@ test_that(".sldsc_view_for_meta extracts single-mode columns", {
   expect_equal(s$tau_star, 0.01)
 })
 
-test_that(".sldsc_view_for_meta returns NULL for missing summary", {
-  fn <- pecotmr:::.sldsc_view_for_meta
+test_that(".sldscViewForMeta returns NULL for missing summary", {
+  fn <- pecotmr:::.sldscViewForMeta
   per_trait <- list(traitX = list(summary = NULL))
   view <- fn(per_trait, "single")
   expect_null(view$traitX)
 })
 
-test_that(".sldsc_view_for_meta returns NULL when no matching columns", {
-  fn <- pecotmr:::.sldsc_view_for_meta
+test_that(".sldscViewForMeta returns NULL when no matching columns", {
+  fn <- pecotmr:::.sldscViewForMeta
   per_trait <- list(
     traitX = list(summary = data.frame(target = "A_0", other_col = 1,
                                         stringsAsFactors = FALSE))
@@ -786,10 +786,10 @@ test_that(".sldsc_view_for_meta returns NULL when no matching columns", {
 
 
 # =============================================================================
-# sldsc_postprocessing_pipeline (integration)
+# sldscPostprocessingPipeline (integration)
 # =============================================================================
 
-test_that("sldsc_postprocessing_pipeline runs end-to-end", {
+test_that("sldscPostprocessingPipeline runs end-to-end", {
   fix <- .make_sldsc_fixtures()
 
   trait_single_prefixes <- list(
@@ -807,13 +807,13 @@ test_that("sldsc_postprocessing_pipeline runs end-to-end", {
     traitY = file.path(fix$out_dir, "traitY_joint")
   )
 
-  result <- suppressMessages(sldsc_postprocessing_pipeline(
-    trait_single_prefixes = trait_single_prefixes,
-    trait_joint_prefix    = trait_joint_prefix,
-    target_anno_dir       = fix$anno_dir,
-    frqfile_dir           = fix$frq_dir,
-    plink_name            = fix$plink_name,
-    maf_cutoff            = 0.05
+  result <- suppressMessages(sldscPostprocessingPipeline(
+    traitSinglePrefixes =trait_single_prefixes,
+    traitJointPrefix    = trait_joint_prefix,
+    targetAnnoDir       =fix$anno_dir,
+    frqfileDir           =fix$frq_dir,
+    plinkName            =fix$plinkName,
+    mafCutoff            =0.05
   ))
 
   expect_true(is.list(result))
@@ -844,7 +844,7 @@ test_that("sldsc_postprocessing_pipeline runs end-to-end", {
   expect_equal(result$params$trait_names, c("traitX", "traitY"))
 })
 
-test_that("sldsc_postprocessing_pipeline works without joint runs", {
+test_that("sldscPostprocessingPipeline works without joint runs", {
   fix <- .make_sldsc_fixtures()
 
   trait_single_prefixes <- list(
@@ -859,20 +859,20 @@ test_that("sldsc_postprocessing_pipeline works without joint runs", {
   )
 
   # No joint prefix
-  result <- suppressMessages(sldsc_postprocessing_pipeline(
-    trait_single_prefixes = trait_single_prefixes,
-    trait_joint_prefix    = NULL,
-    target_anno_dir       = fix$anno_dir,
-    frqfile_dir           = fix$frq_dir,
-    plink_name            = fix$plink_name,
-    maf_cutoff            = 0.05
+  result <- suppressMessages(sldscPostprocessingPipeline(
+    traitSinglePrefixes =trait_single_prefixes,
+    traitJointPrefix    = NULL,
+    targetAnnoDir       =fix$anno_dir,
+    frqfileDir           =fix$frq_dir,
+    plinkName            =fix$plinkName,
+    mafCutoff            =0.05
   ))
 
   expect_true(is.list(result))
   expect_true(all(is.na(result$meta$tau_star$joint_mean)))
 })
 
-test_that("sldsc_postprocessing_pipeline applies target_labels", {
+test_that("sldscPostprocessingPipeline applies target_labels", {
   fix <- .make_sldsc_fixtures()
 
   trait_single_prefixes <- list(
@@ -890,14 +890,14 @@ test_that("sldsc_postprocessing_pipeline applies target_labels", {
     traitY = file.path(fix$out_dir, "traitY_joint")
   )
 
-  result <- suppressMessages(sldsc_postprocessing_pipeline(
-    trait_single_prefixes = trait_single_prefixes,
-    trait_joint_prefix    = trait_joint_prefix,
-    target_anno_dir       = fix$anno_dir,
-    frqfile_dir           = fix$frq_dir,
-    plink_name            = fix$plink_name,
-    maf_cutoff            = 0.05,
-    target_labels         = c("Pretty_A", "Pretty_B")
+  result <- suppressMessages(sldscPostprocessingPipeline(
+    traitSinglePrefixes =trait_single_prefixes,
+    traitJointPrefix    = trait_joint_prefix,
+    targetAnnoDir       =fix$anno_dir,
+    frqfileDir           =fix$frq_dir,
+    plinkName            =fix$plinkName,
+    mafCutoff            =0.05,
+    targetLabels         =c("Pretty_A", "Pretty_B")
   ))
 
   # Check relabeling
@@ -907,7 +907,7 @@ test_that("sldsc_postprocessing_pipeline applies target_labels", {
   expect_true(all(result$per_trait$traitX$summary$target %in% c("Pretty_A", "Pretty_B")))
 })
 
-test_that("sldsc_postprocessing_pipeline errors on wrong target_labels length", {
+test_that("sldscPostprocessingPipeline errors on wrong target_labels length", {
   fix <- .make_sldsc_fixtures()
 
   trait_single_prefixes <- list(
@@ -921,24 +921,24 @@ test_that("sldsc_postprocessing_pipeline errors on wrong target_labels length", 
   )
 
   expect_error(
-    suppressMessages(sldsc_postprocessing_pipeline(
-      trait_single_prefixes = trait_single_prefixes,
-      trait_joint_prefix    = trait_joint_prefix,
-      target_anno_dir       = fix$anno_dir,
-      frqfile_dir           = fix$frq_dir,
-      plink_name            = fix$plink_name,
-      target_labels         = c("only_one")
+    suppressMessages(sldscPostprocessingPipeline(
+      traitSinglePrefixes =trait_single_prefixes,
+      traitJointPrefix    = trait_joint_prefix,
+      targetAnnoDir       =fix$anno_dir,
+      frqfileDir           =fix$frq_dir,
+      plinkName            =fix$plinkName,
+      targetLabels         =c("only_one")
     )),
-    "target_labels"
+    "targetLabels"
   )
 })
 
-test_that("sldsc_postprocessing_pipeline errors on unnamed prefixes", {
+test_that("sldscPostprocessingPipeline errors on unnamed prefixes", {
   expect_error(
-    sldsc_postprocessing_pipeline(
-      trait_single_prefixes = list(c("a", "b")),
-      trait_joint_prefix    = NULL,
-      target_anno_dir       = "."
+    sldscPostprocessingPipeline(
+      traitSinglePrefixes =list(c("a", "b")),
+      traitJointPrefix    = NULL,
+      targetAnnoDir       ="."
     ),
     "named list"
   )

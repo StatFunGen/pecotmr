@@ -5,6 +5,6 @@
 \title{Summary Statistics Handling}
 \description{
 Functions for reading, validating, and constructing
-  \code{GWASSumStats} objects from various input formats.
+  \code{GwasSumStats} objects from various input formats.
 }
 \keyword{internal}

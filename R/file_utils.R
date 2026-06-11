@@ -6,7 +6,7 @@
 #' @importFrom GenomicRanges GRanges seqnames
 #' @importFrom SummarizedExperiment assay
 #' @importFrom MungeSumstats standardise_header
-read_bim <- function(bed) {
+readBim <- function(bed) {
   bimf <- paste0(file_path_sans_ext(bed), ".bim")
   bim <- vroom(bimf, col_names = FALSE)
   colnames(bim) <- c("chrom", "id", "gpos", "pos", "a1", "a0")
@@ -15,18 +15,18 @@ read_bim <- function(bed) {
 
 #' @importFrom vroom vroom
 #' @importFrom tools file_path_sans_ext
-read_fam <- function(bed) {
+readFam <- function(bed) {
   famf <- paste0(file_path_sans_ext(bed), ".fam")
   return(vroom(famf, col_names = FALSE))
 }
 
 # open bed/bim/fam: A PLINK 1 .bed is a valid .pgen
-open_bed <- function(bed) {
+openBed <- function(bed) {
   if (!requireNamespace("pgenlibr", quietly = TRUE)) {
     stop("To use this function, please install pgenlibr: https://cran.r-project.org/web/packages/pgenlibr/index.html")
   }
-  raw_s_ct <- nrow(read_fam(bed))
-  return(pgenlibr::NewPgen(bed, raw_sample_ct = raw_s_ct))
+  rawSCt <- nrow(readFam(bed))
+  return(pgenlibr::NewPgen(bed, raw_sample_ct = rawSCt))
 }
 
 #' Read a PLINK2 allele frequency file (.afreq or .afreq.zst)
@@ -37,15 +37,15 @@ open_bed <- function(bed) {
 #' @importFrom vroom vroom
 #' @importFrom dplyr rename select
 #' @export
-read_afreq <- function(prefix) {
-  afreq_zst <- paste0(prefix, ".afreq.zst")
-  afreq_plain <- paste0(prefix, ".afreq")
-  if (file.exists(afreq_zst)) {
+readAfreq <- function(prefix) {
+  afreqZst <- paste0(prefix, ".afreq.zst")
+  afreqPlain <- paste0(prefix, ".afreq")
+  if (file.exists(afreqZst)) {
     if (Sys.which("zstd") == "") stop("zstd CLI is required to read .afreq.zst files")
-    af <- as.data.frame(vroom(pipe(paste0("zstd -dcq ", shQuote(afreq_zst))),
+    af <- as.data.frame(vroom(pipe(paste0("zstd -dcq ", shQuote(afreqZst))),
                               delim = "\t", show_col_types = FALSE))
-  } else if (file.exists(afreq_plain)) {
-    af <- as.data.frame(vroom(afreq_plain, delim = "\t", show_col_types = FALSE))
+  } else if (file.exists(afreqPlain)) {
+    af <- as.data.frame(vroom(afreqPlain, delim = "\t", show_col_types = FALSE))
   } else {
     return(NULL)
   }
@@ -71,7 +71,7 @@ read_afreq <- function(prefix) {
 #' of stochastic genotype data. Supports two formats:
 #' \itemize{
 #'   \item \strong{afreq}: PLINK2 .afreq/.afreq.zst with U_MIN/U_MAX columns
-#'     (read via \code{read_afreq}, which also returns allele frequencies).
+#'     (read via \code{readAfreq}, which also returns allele frequencies).
 #'   \item \strong{generic}: Tab-delimited file with columns id, u_min, u_max.
 #' }
 #'
@@ -84,7 +84,7 @@ read_afreq <- function(prefix) {
 #'   doesn't exist.
 #' @importFrom vroom vroom
 #' @noRd
-read_stochastic_meta <- function(path, format = NULL) {
+readStochasticMeta <- function(path, format = NULL) {
   if (!file.exists(path)) return(NULL)
 
   if (is.null(format)) {
@@ -93,9 +93,9 @@ read_stochastic_meta <- function(path, format = NULL) {
   format <- match.arg(format, c("afreq", "generic"))
 
   if (format == "afreq") {
-    # read_afreq expects a prefix, not a full path - strip the .afreq[.zst] suffix
+    # readAfreq expects a prefix, not a full path - strip the .afreq[.zst] suffix
     prefix <- sub("\\.afreq(\\.zst)?$", "", path)
-    af <- read_afreq(prefix)
+    af <- readAfreq(prefix)
     if (is.null(af) || !all(c("u_min", "u_max") %in% colnames(af))) return(NULL)
     return(af[, c("id", "u_min", "u_max"), drop = FALSE])
   }
@@ -117,13 +117,13 @@ read_stochastic_meta <- function(path, format = NULL) {
 #' For extension-based paths (VCF, GDS), the extension is stripped first.
 #' For prefix-based paths (PLINK1/2), the prefix is used directly.
 #'
-#' @param genotype_path Path to the genotype data (prefix or file path).
+#' @param genotypePath Path to the genotype data (prefix or file path).
 #' @return Path to the first sidecar file found, or \code{NULL}.
 #' @noRd
-find_stochastic_meta <- function(genotype_path) {
+findStochasticMeta <- function(genotypePath) {
   # Strip known genotype extensions to get the stem
   stem <- sub("\\.(vcf|vcf\\.gz|bcf|gds|bed|bim|fam|pgen|pvar|psam)$", "",
-              genotype_path)
+              genotypePath)
   candidates <- c(
     paste0(stem, ".afreq"),
     paste0(stem, ".afreq.zst"),
@@ -146,18 +146,18 @@ find_stochastic_meta <- function(genotype_path) {
 #' property for LD-based fine-mapping with dynamic variance tracking.
 #'
 #' @param X Numeric matrix (B x p) of min-max scaled values in [0, 2].
-#' @param u_min Numeric vector of per-variant minimum values before scaling.
-#' @param u_max Numeric vector of per-variant maximum values before scaling.
+#' @param uMin Numeric vector of per-variant minimum values before scaling.
+#' @param uMax Numeric vector of per-variant maximum values before scaling.
 #' @return Matrix of original U values with same dimensions.
 #' @export
-invert_minmax_scaling <- function(X, u_min, u_max) {
-  if (length(u_min) != ncol(X) || length(u_max) != ncol(X)) {
-    stop("Length of u_min/u_max (", length(u_min), ") must equal ncol(X) (", ncol(X), ")")
+invertMinmaxScaling <- function(X, uMin, uMax) {
+  if (length(uMin) != ncol(X) || length(uMax) != ncol(X)) {
+    stop("Length of u_min/u_max (", length(uMin), ") must equal ncol(X) (", ncol(X), ")")
   }
-  denom <- u_max - u_min
+  denom <- uMax - uMin
   denom[denom == 0] <- 1  # monomorphic: scaling was identity
   # Invert: U_original = U_scaled * (u_max - u_min) / 2 + u_min
-  sweep(sweep(X, 2, denom / 2, "*"), 2, u_min, "+")
+  sweep(sweep(X, 2, denom / 2, "*"), 2, uMin, "+")
 }
 
 # ---------- Internal helpers for PLINK2 format ----------
@@ -165,7 +165,7 @@ invert_minmax_scaling <- function(X, u_min, u_max) {
 #' Resolve and validate PLINK2 file paths for a given prefix.
 #' @return Named list with pgen, pvar, psam paths.
 #' @noRd
-resolve_plink2_paths <- function(prefix) {
+resolvePlink2Paths <- function(prefix) {
   pgen <- paste0(prefix, ".pgen")
   if (!file.exists(pgen)) {
     stop("PLINK2 .pgen file not found at: ", pgen,
@@ -192,14 +192,14 @@ resolve_plink2_paths <- function(prefix) {
 #' Uses pgenlibr::NewPvar() to parse the file (handles both plain .pvar and
 #' zstd-compressed .pvar.zst natively, no external CLI required).
 #'
-#' @param pvar_path Path to .pvar or .pvar.zst file.
+#' @param pvarPath Path to .pvar or .pvar.zst file.
 #' @return data.frame with columns: chrom, id, pos, A2 (REF), A1 (ALT).
 #' @noRd
-read_pvar <- function(pvar_path) {
+readPvar <- function(pvarPath) {
   if (!requireNamespace("pgenlibr", quietly = TRUE)) {
     stop("pgenlibr is required. Install from https://cran.r-project.org/web/packages/pgenlibr/index.html")
   }
-  pvar <- pgenlibr::NewPvar(pvar_path)
+  pvar <- pgenlibr::NewPvar(pvarPath)
   on.exit(pgenlibr::ClosePvar(pvar), add = TRUE)
   n <- pgenlibr::GetVariantCt(pvar)
   idx <- seq_len(n)
@@ -218,31 +218,31 @@ read_pvar <- function(pvar_path) {
 #' Auto-detects the format by extension and header, then returns a
 #' standardized data.frame. For PLINK1 .bim files, assigns column names
 #' based on the number of columns (6 or 9). For PLINK2 .pvar files,
-#' delegates to \code{read_pvar()}.
+#' delegates to \code{readPvar()}.
 #'
-#' @param snp_file_path Path to .bim, .pvar, or .pvar.zst file.
+#' @param snpFilePath Path to .bim, .pvar, or .pvar.zst file.
 #' @return data.frame with at minimum columns: chrom, id, pos, A2, A1.
 #'   Extended .bim files (9 columns) also include: variance, allele_freq, n_nomiss.
 #' @importFrom utils read.table
 #' @noRd
-read_variant_metadata <- function(snp_file_path) {
-  is_pvar <- grepl("\\.(pvar|pvar\\.zst)$", snp_file_path)
-  if (!is_pvar) {
-    first_line <- readLines(snp_file_path, n = 1)
-    is_pvar <- grepl("^#CHROM", first_line)
+readVariantMetadata <- function(snpFilePath) {
+  isPvar <- grepl("\\.(pvar|pvar\\.zst)$", snpFilePath)
+  if (!isPvar) {
+    firstLine <- readLines(snpFilePath, n = 1)
+    isPvar <- grepl("^#CHROM", firstLine)
   }
 
-  if (is_pvar) {
-    read_pvar(snp_file_path)
+  if (isPvar) {
+    readPvar(snpFilePath)
   } else {
-    df <- read.table(snp_file_path, stringsAsFactors = FALSE)
+    df <- read.table(snpFilePath, stringsAsFactors = FALSE)
     n <- ncol(df)
     if (n == 6) {
       names(df) <- c("chrom", "id", "gpos", "pos", "A1", "A2")
     } else if (n == 9) {
       names(df) <- c("chrom", "id", "gpos", "pos", "A1", "A2", "variance", "allele_freq", "n_nomiss")
     } else {
-      stop("Unexpected number of columns (", n, ") in variant file: ", snp_file_path)
+      stop("Unexpected number of columns (", n, ") in variant file: ", snpFilePath)
     }
     df
   }
@@ -263,25 +263,25 @@ read_variant_metadata <- function(snp_file_path) {
 #'
 #' @importFrom vroom vroom
 #' @export
-get_ref_variant_info <- function(source, region = NULL) {
-  resolved <- resolve_ld_source(source)
+getRefVariantInfo <- function(source, region = NULL) {
+  resolved <- resolveLdSource(source)
 
   # For genotype sources via metadata, resolve per-chromosome path
   if (resolved$type %in% c("plink2", "plink1", "vcf", "gds") && !is.null(resolved$meta_path) && !is.null(region)) {
-    data_path <- resolve_genotype_path_for_region(resolved$meta_path, region)
+    dataPath <- resolveGenotypePathForRegion(resolved$meta_path, region)
   } else {
-    data_path <- resolved$data_path
+    dataPath <- resolved$data_path
   }
 
   if (resolved$type == "plink2") {
-    paths <- resolve_plink2_paths(data_path)
-    info <- read_pvar(paths$pvar)
-    afreq <- read_afreq(data_path)
+    paths <- resolvePlink2Paths(dataPath)
+    info <- readPvar(paths$pvar)
+    afreq <- readAfreq(dataPath)
     if (!is.null(afreq)) {
       info$allele_freq <- afreq$alt_freq[match(info$id, afreq$id)]
     }
   } else if (resolved$type == "plink1") {
-    bim <- read_bim(paste0(data_path, ".bed"))
+    bim <- readBim(paste0(dataPath, ".bed"))
     info <- data.frame(
       chrom = bim$chrom, id = bim$id, pos = bim$pos,
       A2 = bim$a0, A1 = bim$a1,
@@ -289,17 +289,17 @@ get_ref_variant_info <- function(source, region = NULL) {
     )
   } else if (resolved$type %in% c("vcf", "gds")) {
     # VCF/GDS: load via the genotype loader and extract variant_info
-    result <- load_genotype_region(data_path, region = region,
-                                   return_variant_info = TRUE)
+    result <- loadGenotypeRegion(dataPath, region = region,
+                                 returnVariantInfo = TRUE)
     info <- result$variant_info
     # Compute allele frequency from the genotype matrix
     info$allele_freq <- colMeans(result$X, na.rm = TRUE) / 2
     return(info)  # Already region-filtered by the loader
   } else {
     # Pre-computed LD: read bim/pvar files via metadata
-    bim_paths <- get_regional_ld_meta(resolved$meta_path, region)$intersections$bim_file_paths
-    info <- do.call(rbind, lapply(bim_paths, function(path) {
-      df <- read_variant_metadata(path)
+    bimPaths <- getRegionalLdMeta(resolved$meta_path, region)$intersections$bim_file_paths
+    info <- do.call(rbind, lapply(bimPaths, function(path) {
+      df <- readVariantMetadata(path)
       out <- data.frame(
         chrom = df$chrom, id = df$id, pos = df$pos,
         A2 = df$A2, A1 = df$A1,
@@ -310,26 +310,26 @@ get_ref_variant_info <- function(source, region = NULL) {
       if ("n_nomiss" %in% names(df)) out$n_nomiss <- df$n_nomiss
       out
     }))
-    info$id <- normalize_variant_id(info$id)
-    return(info)  # Already region-filtered by get_regional_ld_meta
+    info$id <- normalizeVariantId(info$id)
+    return(info)  # Already region-filtered by getRegionalLdMeta
   }
 
   # Region filter for plink2/plink1
   if (!is.null(region)) {
-    parsed <- parse_region(region)
-    info_chrom <- strip_chr_prefix(info$chrom)
+    parsed <- parseRegion(region)
+    infoChrom <- stripChrPrefix(info$chrom)
     # Handle multi-row region data.frame (one row per chrom)
     if (is.data.frame(parsed) && nrow(parsed) > 1) {
-      in_region <- rep(FALSE, nrow(info))
+      inRegion <- rep(FALSE, nrow(info))
       for (r in seq_len(nrow(parsed))) {
-        in_region <- in_region | (info_chrom == as.character(parsed$chrom[r]) &
-                                  info$pos >= parsed$start[r] & info$pos <= parsed$end[r])
+        inRegion <- inRegion | (infoChrom == as.character(parsed$chrom[r]) &
+                                info$pos >= parsed$start[r] & info$pos <= parsed$end[r])
       }
     } else {
-      in_region <- info_chrom == as.character(parsed$chrom) &
-                   info$pos >= parsed$start & info$pos <= parsed$end
+      inRegion <- infoChrom == as.character(parsed$chrom) &
+                  info$pos >= parsed$start & info$pos <= parsed$end
     }
-    info <- info[in_region, , drop = FALSE]
+    info <- info[inRegion, , drop = FALSE]
   }
   info
 }
@@ -339,27 +339,27 @@ get_ref_variant_info <- function(source, region = NULL) {
 #' @importFrom vroom vroom
 #' @importFrom readr read_lines
 #' @noRd
-match_variants_to_keep <- function(variant_info, keep_variants_path) {
-  keep_raw <- tryCatch(
-    as.data.frame(vroom(keep_variants_path, show_col_types = FALSE)),
+matchVariantsToKeep <- function(variantInfo, keepVariantsPath) {
+  keepRaw <- tryCatch(
+    as.data.frame(vroom(keepVariantsPath, show_col_types = FALSE)),
     error = function(e) NULL
   )
-  if (!is.null(keep_raw) && "chrom" %in% names(keep_raw) && "pos" %in% names(keep_raw)) {
-    keep_variants <- parse_variant_id(keep_raw)
+  if (!is.null(keepRaw) && "chrom" %in% names(keepRaw) && "pos" %in% names(keepRaw)) {
+    keepVariants <- parseVariantId(keepRaw)
   } else {
     # Fall back to reading as single-column variant IDs
-    ids <- read_lines(keep_variants_path)
-    keep_variants <- parse_variant_id(ids)
+    ids <- read_lines(keepVariantsPath)
+    keepVariants <- parseVariantId(ids)
   }
-  vi_chrom <- as.integer(strip_chr_prefix(variant_info$chrom))
-  has_alleles <- "A1" %in% names(keep_variants) && "A2" %in% names(keep_variants) &&
-    !any(is.na(keep_variants$A1)) && !any(is.na(keep_variants$A2))
-  if (has_alleles) {
-    paste0(vi_chrom, ":", variant_info$pos, ":", variant_info$A2, ":", variant_info$A1) %in%
-      paste0(keep_variants$chrom, ":", keep_variants$pos, ":", keep_variants$A2, ":", keep_variants$A1)
+  viChrom <- as.integer(stripChrPrefix(variantInfo$chrom))
+  hasAlleles <- "A1" %in% names(keepVariants) && "A2" %in% names(keepVariants) &&
+    !any(is.na(keepVariants$A1)) && !any(is.na(keepVariants$A2))
+  if (hasAlleles) {
+    paste0(viChrom, ":", variantInfo$pos, ":", variantInfo$A2, ":", variantInfo$A1) %in%
+      paste0(keepVariants$chrom, ":", keepVariants$pos, ":", keepVariants$A2, ":", keepVariants$A1)
   } else {
-    paste0(vi_chrom, ":", variant_info$pos) %in%
-      paste0(keep_variants$chrom, ":", keep_variants$pos)
+    paste0(viChrom, ":", variantInfo$pos) %in%
+      paste0(keepVariants$chrom, ":", keepVariants$pos)
   }
 }
 
@@ -370,13 +370,13 @@ match_variants_to_keep <- function(variant_info, keep_variants_path) {
 #' @importFrom stringr str_detect
 
 # Internal helper: read a region from a tabix-indexed file via Rsamtools
-read_tabix_region <- function(file, region, use_col_names) {
+readTabixRegion <- function(file, region, useColNames) {
   tbx <- TabixFile(file)
-  parsed <- parse_region(region)
+  parsed <- parseRegion(region)
   # Match chromosome naming convention in the tabix index
   chrom <- as.character(parsed$chrom)
-  tbx_seqnames <- seqnamesTabix(tbx)
-  if (any(grepl("^chr", tbx_seqnames))) {
+  tbxSeqnames <- seqnamesTabix(tbx)
+  if (any(grepl("^chr", tbxSeqnames))) {
     chrom <- paste0("chr", chrom)
   }
   gr <- GRanges(
@@ -387,53 +387,53 @@ read_tabix_region <- function(file, region, use_col_names) {
   if (length(lines) == 0) return(NULL)
 
   # Get header for column names
-  col_names_vec <- NULL
-  if (use_col_names) {
+  colNamesVec <- NULL
+  if (useColNames) {
     hdr <- headerTabix(tbx)$header
     if (length(hdr) > 0) {
-      last_hdr <- hdr[length(hdr)]
-      col_names_vec <- strsplit(sub("^#", "", last_hdr), "\t")[[1]]
+      lastHdr <- hdr[length(hdr)]
+      colNamesVec <- strsplit(sub("^#", "", lastHdr), "\t")[[1]]
     }
   }
 
   # Parse tab-delimited lines
   txt <- paste(lines, collapse = "\n")
-  if (!is.null(col_names_vec)) {
-    as.data.frame(vroom(I(txt), delim = "\t", col_names = col_names_vec,
+  if (!is.null(colNamesVec)) {
+    as.data.frame(vroom(I(txt), delim = "\t", col_names = colNamesVec,
                                show_col_types = FALSE))
   } else {
-    as.data.frame(vroom(I(txt), delim = "\t", col_names = use_col_names,
+    as.data.frame(vroom(I(txt), delim = "\t", col_names = useColNames,
                                show_col_types = FALSE))
   }
 }
 
-tabix_region <- function(file, region, tabix_header = "auto", target = "", target_column_index = "") {
+tabixRegion <- function(file, region, tabixHeader = "auto", target = "", targetColumnIndex = "") {
   if (!file.exists(file)) {
     stop("Input file does not exist: ", file)
   }
 
-  use_col_names <- if (identical(tabix_header, FALSE)) FALSE else TRUE
+  useColNames <- if (identical(tabixHeader, FALSE)) FALSE else TRUE
 
-  cmd_output <- tryCatch(
-    read_tabix_region(file, region, use_col_names),
+  cmdOutput <- tryCatch(
+    readTabixRegion(file, region, useColNames),
     error = function(e) NULL
   )
 
-  if (!is.null(cmd_output) && target != "" && target_column_index != "") {
-    cmd_output <- cmd_output %>%
-      filter(str_detect(.[[target_column_index]], target))
-  } else if (!is.null(cmd_output) && target != "") {
-    cmd_output <- cmd_output %>%
+  if (!is.null(cmdOutput) && target != "" && targetColumnIndex != "") {
+    cmdOutput <- cmdOutput %>%
+      filter(str_detect(.[[targetColumnIndex]], target))
+  } else if (!is.null(cmdOutput) && target != "") {
+    cmdOutput <- cmdOutput %>%
       mutate(text = apply(., 1, function(row) paste(row, collapse = "_"))) %>%
       filter(str_detect(text, target)) %>%
       select(-text)
   }
 
-  if (is.null(cmd_output) || nrow(cmd_output) == 0) {
+  if (is.null(cmdOutput) || nrow(cmdOutput) == 0) {
     return(tibble())
   }
 
-  cmd_output %>%
+  cmdOutput %>%
     as_tibble() %>%
     mutate(
       !!names(.)[1] := as.character(.[[1]]),
@@ -465,7 +465,7 @@ NoSNPsError <- function(message) {
 #' @param return_variant_info If TRUE, return a list with X (dosage matrix) and
 #'   variant_info (data.frame). If FALSE (default), return only the dosage matrix.
 #' @param stochastic_meta_path Optional explicit path to a stochastic genotype
-#'   sidecar file. If NULL (default), auto-detected via \code{find_stochastic_meta}.
+#'   sidecar file. If NULL (default), auto-detected via \code{findStochasticMeta}.
 #' @param stochastic_meta_format Optional format override for the sidecar file:
 #'   \code{"afreq"} or \code{"generic"}. If NULL (default), auto-detected from
 #'   file extension.
@@ -473,19 +473,19 @@ NoSNPsError <- function(message) {
 #'   cols=variants). If TRUE, a list with elements X and variant_info.
 #'
 #' @export
-load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE,
-                                 keep_variants_path = NULL,
-                                 return_variant_info = FALSE,
-                                 stochastic_meta_path = NULL,
-                                 stochastic_meta_format = NULL) {
+loadGenotypeRegion <- function(genotype, region = NULL, keepIndel = TRUE,
+                               keepVariantsPath = NULL,
+                               returnVariantInfo = FALSE,
+                               stochasticMetaPath = NULL,
+                               stochasticMetaFormat = NULL) {
   # --- Detect format and create GenotypeHandle ---
   if (grepl("\\.(vcf|vcf\\.gz|bcf)$", genotype)) {
     handle <- readGenotypes(genotype, format = "vcf")
   } else if (grepl("\\.gds$", genotype)) {
     handle <- readGenotypes(genotype, format = "gds")
-  } else if (has_plink2_files(genotype)) {
+  } else if (hasPlink2Files(genotype)) {
     handle <- readGenotypes(genotype, format = "plink2")
-  } else if (has_plink1_files(genotype)) {
+  } else if (hasPlink1Files(genotype)) {
     handle <- readGenotypes(genotype, format = "plink1")
   } else {
     stop("Genotype files not found at: ", genotype,
@@ -494,73 +494,73 @@ load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE,
 
   # --- Region filter ---
   if (!is.null(region)) {
-    snp_idx <- .region_to_snp_idx(handle@snp_info, region)
-    if (length(snp_idx) == 0) {
+    snpIdx <- .regionToSnpIdx(handle@snpInfo, region)
+    if (length(snpIdx) == 0) {
       stop(NoSNPsError(paste("No SNPs found in the specified region", region)))
     }
   } else {
-    snp_idx <- seq_len(nrow(handle@snp_info))
+    snpIdx <- seq_len(nrow(handle@snpInfo))
   }
 
   # --- Extract genotypes (no mean imputation — callers handle missing) ---
-  rse <- extractBlockGenotypes(handle, snp_idx, mean_impute = FALSE)
+  rse <- extractBlockGenotypes(handle, snpIdx, meanImpute = FALSE)
   # Convert RSE to samples x variants matrix for pecotmr convention
   X <- t(assay(rse, "dosage"))
-  variant_info <- .snp_info_to_variant_info(
-    handle@snp_info[snp_idx, , drop = FALSE])
+  variantInfo <- .snpInfoToVariantInfo(
+    handle@snpInfo[snpIdx, , drop = FALSE])
 
   # --- Attach allele frequency from .afreq sidecar (plink2 only) ---
   if (handle@format == "plink2") {
-    afreq <- read_afreq(handle@path)
+    afreq <- readAfreq(handle@path)
     if (!is.null(afreq)) {
-      afreq_cols <- intersect(c("id", "alt_freq", "obs_ct"), colnames(afreq))
-      variant_info <- merge(variant_info, afreq[, afreq_cols, drop = FALSE],
-                            by = "id", all.x = TRUE, sort = FALSE)
+      afreqCols <- intersect(c("id", "alt_freq", "obs_ct"), colnames(afreq))
+      variantInfo <- merge(variantInfo, afreq[, afreqCols, drop = FALSE],
+                           by = "id", all.x = TRUE, sort = FALSE)
     }
   }
 
-  result <- list(X = X, variant_info = variant_info)
+  result <- list(X = X, variant_info = variantInfo)
 
   # --- Post-filters: indels and variant whitelist ---
-  if (!keep_indel) {
-    snp_mask <- is_snp_alleles(result$variant_info$A1, result$variant_info$A2)
-    result$X <- result$X[, snp_mask, drop = FALSE]
-    result$variant_info <- result$variant_info[snp_mask, , drop = FALSE]
+  if (!keepIndel) {
+    snpMask <- isSnpAlleles(result$variant_info$A1, result$variant_info$A2)
+    result$X <- result$X[, snpMask, drop = FALSE]
+    result$variant_info <- result$variant_info[snpMask, , drop = FALSE]
   }
-  if (!is.null(keep_variants_path)) {
-    keep_idx <- match_variants_to_keep(result$variant_info, keep_variants_path)
-    result$X <- result$X[, keep_idx, drop = FALSE]
-    result$variant_info <- result$variant_info[keep_idx, , drop = FALSE]
+  if (!is.null(keepVariantsPath)) {
+    keepIdx <- matchVariantsToKeep(result$variant_info, keepVariantsPath)
+    result$X <- result$X[, keepIdx, drop = FALSE]
+    result$variant_info <- result$variant_info[keepIdx, , drop = FALSE]
   }
 
   # --- Detect and invert stochastic genotype scaling ---
-  meta_path <- stochastic_meta_path %||% find_stochastic_meta(genotype)
-  if (!is.null(meta_path)) {
-    smeta <- read_stochastic_meta(meta_path, format = stochastic_meta_format)
+  metaPath <- stochasticMetaPath %||% findStochasticMeta(genotype)
+  if (!is.null(metaPath)) {
+    smeta <- readStochasticMeta(metaPath, format = stochasticMetaFormat)
     if (!is.null(smeta)) {
       idx <- match(colnames(result$X), smeta$id)
       matched <- !is.na(idx)
       if (any(matched)) {
-        result$X[, matched] <- invert_minmax_scaling(
+        result$X[, matched] <- invertMinmaxScaling(
           result$X[, matched, drop = FALSE],
           smeta$u_min[idx[matched]],
           smeta$u_max[idx[matched]]
         )
         result$variant_info$u_min <- smeta$u_min[idx]
         result$variant_info$u_max <- smeta$u_max[idx]
-        message("Stochastic genotype detected: restored original scale via ", basename(meta_path))
+        message("Stochastic genotype detected: restored original scale via ", basename(metaPath))
       }
     }
   } else {
-    is_stochastic <- !all(result$X == round(result$X), na.rm = TRUE)
-    if (is_stochastic) {
+    isStochastic <- !all(result$X == round(result$X), na.rm = TRUE)
+    if (isStochastic) {
       warning("Non-integer genotype values detected but no stochastic metadata sidecar found. ",
               "Place a .afreq or .stochastic_meta.tsv file with u_min/u_max columns ",
               "alongside the genotype files to restore the original scale.")
     }
   }
 
-  if (return_variant_info) result else result$X
+  if (returnVariantInfo) result else result$X
 }
 
 #' @importFrom purrr map
@@ -568,36 +568,36 @@ load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE,
 #' @importFrom dplyr select mutate across everything
 #' @importFrom magrittr %>%
 #' @noRd
-read_single_covariate <- function(path) {
-  raw_df <- read_delim(path, "\t", col_types = cols(.default = "c")) %>% select(-1)
-  df <- raw_df
-  non_numeric <- character()
+readSingleCovariate <- function(path) {
+  rawDf <- read_delim(path, "\t", col_types = cols(.default = "c")) %>% select(-1)
+  df <- rawDf
+  nonNumeric <- character()
   for (nm in names(df)) {
     values <- trimws(as.character(df[[nm]]))
     converted <- suppressWarnings(as.numeric(values))
     bad <- !is.na(values) & values != "" & is.na(converted)
     if (any(bad)) {
-      non_numeric <- c(non_numeric, nm)
+      nonNumeric <- c(nonNumeric, nm)
     } else {
       df[[nm]] <- converted
     }
   }
-  if (length(non_numeric) > 0) {
+  if (length(nonNumeric) > 0) {
     stop("Non-numeric columns found in covariate file ", path, ": ",
-         paste(non_numeric, collapse = ", "),
+         paste(nonNumeric, collapse = ", "),
          ". All columns except the first (sample ID) must be numeric.")
   }
   df %>% mutate(across(everything(), as.numeric)) %>% t()
 }
 
 #' @noRd
-load_covariate_data <- function(covariate_path) {
+loadCovariateData <- function(covariatePath) {
   # Validate all covariate files exist
-  missing <- covariate_path[!file.exists(covariate_path)]
+  missing <- covariatePath[!file.exists(covariatePath)]
   if (length(missing) > 0) {
     stop("Covariate file(s) not found: ", paste(missing, collapse = ", "))
   }
-  return(map(covariate_path, read_single_covariate))
+  return(map(covariatePath, readSingleCovariate))
 }
 
 NoPhenotypeError <- function(message) {
@@ -609,54 +609,54 @@ NoPhenotypeError <- function(message) {
 #' @importFrom dplyr filter select mutate across everything
 #' @importFrom magrittr %>%
 #' @noRd
-load_phenotype_data <- function(phenotype_path, region, extract_region_name = NULL, region_name_col = NULL, tabix_header = TRUE) {
-  if (is.null(extract_region_name)) {
-    extract_region_name <- rep(list(NULL), length(phenotype_path))
-  } else if (is.list(extract_region_name) && length(extract_region_name) != length(phenotype_path)) {
+loadPhenotypeData <- function(phenotypePath, region, extractRegionName = NULL, regionNameCol = NULL, tabixHeader = TRUE) {
+  if (is.null(extractRegionName)) {
+    extractRegionName <- rep(list(NULL), length(phenotypePath))
+  } else if (is.list(extractRegionName) && length(extractRegionName) != length(phenotypePath)) {
     stop("extract_region_name must be NULL or a list with the same length as phenotype_path.")
-  } else if (!is.null(extract_region_name) && !is.list(extract_region_name)) {
+  } else if (!is.null(extractRegionName) && !is.list(extractRegionName)) {
     stop("extract_region_name must be NULL or a list.")
   }
 
   # Use `map2` to iterate over `phenotype_path` and `extract_region_name` simultaneously
-  phenotype_data_raw <- map2(phenotype_path, extract_region_name, ~ {
-    tabix_data <- if (!is.null(region)) tabix_region(.x, region, tabix_header = tabix_header) else read_delim(.x, "\t", col_types = cols())
-    if (nrow(tabix_data) == 0) {
+  phenotypeDataRaw <- map2(phenotypePath, extractRegionName, ~ {
+    tabixData <- if (!is.null(region)) tabixRegion(.x, region, tabixHeader = tabixHeader) else read_delim(.x, "\t", col_types = cols())
+    if (nrow(tabixData) == 0) {
       message(paste("Phenotype file ", .x, " is empty for the specified region", if (is.null(region)) "" else region))
       return(NULL)
     }
-    if (!is.null(.y) && is.vector(.y) && !is.null(region_name_col) && (region_name_col %% 1 == 0)) {
-      if (region_name_col <= ncol(tabix_data)) {
-        region_col_name <- colnames(tabix_data)[region_name_col]
-        tabix_data <- tabix_data %>%
-          filter(.data[[region_col_name]] %in% .y) %>%
+    if (!is.null(.y) && is.vector(.y) && !is.null(regionNameCol) && (regionNameCol %% 1 == 0)) {
+      if (regionNameCol <= ncol(tabixData)) {
+        regionColName <- colnames(tabixData)[regionNameCol]
+        tabixData <- tabixData %>%
+          filter(.data[[regionColName]] %in% .y) %>%
           t()
-        colnames(tabix_data) <- tabix_data[region_name_col, ]
-        return(tabix_data)
+        colnames(tabixData) <- tabixData[regionNameCol, ]
+        return(tabixData)
       } else {
         stop("region_name_col is out of bounds for the number of columns in tabix_data.")
       }
     } else {
-      result <- tabix_data %>% t()
+      result <- tabixData %>% t()
       # Assign region names from region_name_col if available
-      if (!is.null(region_name_col) && (region_name_col %% 1 == 0) && region_name_col <= ncol(tabix_data)) {
-        colnames(result) <- tabix_data[[region_name_col]]
+      if (!is.null(regionNameCol) && (regionNameCol %% 1 == 0) && regionNameCol <= ncol(tabixData)) {
+        colnames(result) <- tabixData[[regionNameCol]]
       }
       return(result)
     }
   })
 
   # Track which indices had non-NULL data, then remove NULLs
-  kept_indices <- which(vapply(phenotype_data_raw, Negate(is.null), logical(1)))
-  phenotype_data <- phenotype_data_raw[kept_indices]
+  keptIndices <- which(vapply(phenotypeDataRaw, Negate(is.null), logical(1)))
+  phenotypeData <- phenotypeDataRaw[keptIndices]
 
   # Check if all phenotype files are empty
-  if (length(phenotype_data) == 0) {
+  if (length(phenotypeData) == 0) {
     stop(NoPhenotypeError(paste("All phenotype files are empty for the specified region", if (!is.null(region)) "" else region)))
   }
   # Store kept indices as attribute so callers can align covariates/conditions
-  attr(phenotype_data, "kept_indices") <- kept_indices
-  return(phenotype_data)
+  attr(phenotypeData, "kept_indices") <- keptIndices
+  return(phenotypeData)
 }
 
 #' @importFrom purrr map
@@ -664,16 +664,16 @@ load_phenotype_data <- function(phenotype_path, region, extract_region_name = NU
 #' @importFrom dplyr mutate
 #' @importFrom magrittr %>%
 #' @noRd
-extract_phenotype_coordinates <- function(phenotype_list) {
-  return(map(phenotype_list, ~ t(.x[1:3, ]) %>%
+extractPhenotypeCoordinates <- function(phenotypeList) {
+  return(map(phenotypeList, ~ t(.x[1:3, ]) %>%
     as_tibble() %>%
     mutate(start = as.numeric(start), end = as.numeric(end))))
 }
 
 #' @importFrom magrittr %>%
 #' @noRd
-filter_by_common_samples <- function(dat, common_samples) {
-  dat[common_samples, , drop = FALSE] %>% .[order(rownames(.)), , drop = FALSE]
+filterByCommonSamples <- function(dat, commonSamples) {
+  dat[commonSamples, , drop = FALSE] %>% .[order(rownames(.)), , drop = FALSE]
 }
 
 #' @importFrom tibble tibble
@@ -681,46 +681,46 @@ filter_by_common_samples <- function(dat, common_samples) {
 #' @importFrom purrr map map2
 #' @importFrom magrittr %>%
 #' @noRd
-prepare_data_list <- function(geno_bed, phenotype, covariate, imiss_cutoff, maf_cutoff, mac_cutoff, xvar_cutoff, phenotype_header = 4, keep_samples = NULL) {
-  data_list <- tibble(
+prepareDataList <- function(genoBed, phenotype, covariate, imissCutoff, mafCutoff, macCutoff, xvarCutoff, phenotypeHeader = 4, keepSamples = NULL) {
+  dataList <- tibble(
     covar = covariate,
-    Y = lapply(phenotype, function(x) apply(x[-c(1:phenotype_header), , drop = FALSE], c(1, 2), as.numeric))
+    Y = lapply(phenotype, function(x) apply(x[-c(1:phenotypeHeader), , drop = FALSE], c(1, 2), as.numeric))
   ) %>%
     mutate(
       # Determine common complete samples across Y, covar, and geno_bed, considering missing values
       common_complete_samples = map2(covar, Y, ~ {
         covar_non_na <- rownames(.x)[!apply(.x, 1, function(row) all(is.na(row)))]
         y_non_na <- rownames(.y)[!apply(.y, 1, function(row) all(is.na(row)))]
-        if (length(intersect(intersect(covar_non_na, y_non_na), rownames(geno_bed))) == 0) {
+        if (length(intersect(intersect(covar_non_na, y_non_na), rownames(genoBed))) == 0) {
           stop("No common complete samples between genotype and phenotype/covariate data")
         }
-        intersect(intersect(covar_non_na, y_non_na), rownames(geno_bed))
+        intersect(intersect(covar_non_na, y_non_na), rownames(genoBed))
       }),
       # Further intersect with keep_samples if provided
-      common_complete_samples = if (!is.null(keep_samples) && length(keep_samples) > 0) {
-        map(common_complete_samples, ~ intersect(.x, keep_samples))
+      common_complete_samples = if (!is.null(keepSamples) && length(keepSamples) > 0) {
+        map(common_complete_samples, ~ intersect(.x, keepSamples))
       } else {
         common_complete_samples
       },
       # Determine dropped samples before filtering
       dropped_samples_covar = map2(covar, common_complete_samples, ~ setdiff(rownames(.x), .y)),
       dropped_samples_Y = map2(Y, common_complete_samples, ~ setdiff(rownames(.x), .y)),
-      dropped_samples_X = map(common_complete_samples, ~ setdiff(rownames(geno_bed), .x)),
+      dropped_samples_X = map(common_complete_samples, ~ setdiff(rownames(genoBed), .x)),
       # Filter data based on common complete samples
-      Y = map2(Y, common_complete_samples, ~ filter_by_common_samples(.x, .y)),
-      covar = map2(covar, common_complete_samples, ~ filter_by_common_samples(.x, .y)),
+      Y = map2(Y, common_complete_samples, ~ filterByCommonSamples(.x, .y)),
+      covar = map2(covar, common_complete_samples, ~ filterByCommonSamples(.x, .y)),
       # Apply filter_X on the geno_bed data filtered by common complete samples and then format column names
       X = map(common_complete_samples, ~ {
-        filtered_geno_bed <- filter_by_common_samples(geno_bed, .x)
-        mac_val <- if (nrow(filtered_geno_bed) == 0) 0 else (mac_cutoff / (2 * nrow(filtered_geno_bed)))
-        maf_val <- max(maf_cutoff, mac_val)
-        filtered_data <- filter_X(filtered_geno_bed, imiss_cutoff, maf_val, var_thresh = xvar_cutoff)
-        colnames(filtered_data) <- normalize_variant_id(colnames(filtered_data)) # Normalize to canonical format
-        filtered_data
+        filteredGenoBed <- filterByCommonSamples(genoBed, .x)
+        macVal <- if (nrow(filteredGenoBed) == 0) 0 else (macCutoff / (2 * nrow(filteredGenoBed)))
+        mafVal <- max(mafCutoff, macVal)
+        filteredData <- filterX(filteredGenoBed, imissCutoff, mafVal, varThresh = xvarCutoff)
+        colnames(filteredData) <- normalizeVariantId(colnames(filteredData)) # Normalize to canonical format
+        filteredData
       })
     ) %>%
     select(covar, Y, X, dropped_samples_Y, dropped_samples_X, dropped_samples_covar)
-  return(data_list)
+  return(dataList)
 }
 
 #' @importFrom purrr map
@@ -728,25 +728,25 @@ prepare_data_list <- function(geno_bed, phenotype, covariate, imiss_cutoff, maf_
 #' @importFrom stringr str_split_fixed
 #' @importFrom magrittr %>%
 #' @noRd
-prepare_X_matrix <- function(geno_bed, data_list, imiss_cutoff, maf_cutoff, mac_cutoff, xvar_cutoff) {
+prepareXMatrix <- function(genoBed, dataList, imissCutoff, mafCutoff, macCutoff, xvarCutoff) {
   # Calculate the union of all samples from data_list: any of X, covar and Y would do
-  all_samples_union <- map(data_list$covar, ~ rownames(.x)) %>%
+  allSamplesUnion <- map(dataList$covar, ~ rownames(.x)) %>%
     unlist() %>%
     unique()
   # Find the intersection of these samples with the samples in geno_bed
-  common_samples <- intersect(all_samples_union, rownames(geno_bed))
+  commonSamples <- intersect(allSamplesUnion, rownames(genoBed))
   # Filter geno_bed using common_samples
-  X_filtered <- filter_by_common_samples(geno_bed, common_samples)
+  XFiltered <- filterByCommonSamples(genoBed, commonSamples)
   # Calculate MAF cutoff considering the number of common samples
-  maf_val <- max(maf_cutoff, mac_cutoff / (2 * length(common_samples)))
+  mafVal <- max(mafCutoff, macCutoff / (2 * length(commonSamples)))
   # Apply further filtering on X
-  X_filtered <- filter_X(X_filtered, imiss_cutoff, maf_val, xvar_cutoff)
-  colnames(X_filtered) <- normalize_variant_id(colnames(X_filtered))
+  XFiltered <- filterX(XFiltered, imissCutoff, mafVal, xvarCutoff)
+  colnames(XFiltered) <- normalizeVariantId(colnames(XFiltered))
 
   # To keep a log message
-  variants <- str_split_fixed(colnames(X_filtered), ":", 3)
-  message(paste0("Dimension of input genotype data is ", nrow(X_filtered), " rows and ", ncol(X_filtered), " columns for genomic region of ", variants[1, 1], ":", min(as.integer(variants[, 2])), "-", max(as.integer(variants[, 2]))))
-  return(X_filtered)
+  variants <- str_split_fixed(colnames(XFiltered), ":", 3)
+  message(paste0("Dimension of input genotype data is ", nrow(XFiltered), " rows and ", ncol(XFiltered), " columns for genomic region of ", variants[1, 1], ":", min(as.integer(variants[, 2])), "-", max(as.integer(variants[, 2]))))
+  return(XFiltered)
 }
 
 #' @importFrom purrr map map2
@@ -754,15 +754,15 @@ prepare_X_matrix <- function(geno_bed, data_list, imiss_cutoff, maf_cutoff, mac_
 #' @importFrom stats lm.fit sd
 #' @importFrom magrittr %>%
 #' @noRd
-add_X_residuals <- function(data_list, scale_residuals = FALSE) {
+addXResiduals <- function(dataList, scaleResiduals = FALSE) {
   # Compute residuals for X and add them to data_list
-  data_list <- data_list %>%
+  dataList <- dataList %>%
     mutate(
       lm_res_X = map2(X, covar, ~ .lm.fit(x = cbind(1, .y), y = .x)$residuals %>% as.matrix()),
       X_resid_mean = map(lm_res_X, ~ apply(.x, 2, mean)),
       X_resid_sd = map(lm_res_X, ~ apply(.x, 2, sd)),
       X_resid = map(lm_res_X, ~ {
-        if (scale_residuals) {
+        if (scaleResiduals) {
           scale(.x)
         } else {
           .x
@@ -770,7 +770,7 @@ add_X_residuals <- function(data_list, scale_residuals = FALSE) {
       })
     )
 
-  return(data_list)
+  return(dataList)
 }
 
 #' @importFrom purrr map map2
@@ -778,9 +778,9 @@ add_X_residuals <- function(data_list, scale_residuals = FALSE) {
 #' @importFrom stats lm.fit sd
 #' @importFrom magrittr %>%
 #' @noRd
-add_Y_residuals <- function(data_list, conditions, scale_residuals = FALSE) {
+addYResiduals <- function(dataList, conditions, scaleResiduals = FALSE) {
   # Compute residuals, their mean, and standard deviation, and add them to data_list
-  data_list <- data_list %>%
+  dataList <- dataList %>%
     mutate(
       lm_res = map2(Y, covar, ~ {
         res <- .lm.fit(x = cbind(1, .y), y = .x)$residuals %>% as.matrix()
@@ -790,7 +790,7 @@ add_Y_residuals <- function(data_list, conditions, scale_residuals = FALSE) {
       Y_resid_mean = map(lm_res, ~ apply(.x, 2, mean)),
       Y_resid_sd = map(lm_res, ~ apply(.x, 2, sd)),
       Y_resid = map(lm_res, ~ {
-        if (scale_residuals) {
+        if (scaleResiduals) {
           scale(.x)
         } else {
           .x
@@ -798,9 +798,9 @@ add_Y_residuals <- function(data_list, conditions, scale_residuals = FALSE) {
       })
     )
 
-  names(data_list$Y_resid) <- conditions
+  names(dataList$Y_resid) <- conditions
 
-  return(data_list)
+  return(dataList)
 }
 
 #' Load regional association data
@@ -833,55 +833,55 @@ add_Y_residuals <- function(data_list, conditions, scale_residuals = FALSE) {
 #'   available via \code{getChrom()} and \code{getGrange()}.
 #'
 #' @export
-load_regional_association_data <- function(genotype, # PLINK file
-                                           phenotype, # a vector of phenotype file names
-                                           covariate, # a vector of covariate file names corresponding to the phenotype file vector
-                                           region, # a string of chr:start-end for phenotype region
-                                           conditions, # a vector of strings
-                                           maf_cutoff = 0,
-                                           mac_cutoff = 0,
-                                           xvar_cutoff = 0,
-                                           imiss_cutoff = 0,
-                                           association_window = NULL,
-                                           extract_region_name = NULL,
-                                           region_name_col = NULL,
-                                           keep_indel = TRUE,
-                                           keep_samples = NULL,
-                                           keep_variants = NULL,
-                                           phenotype_header = 4, # skip first 4 rows of transposed phenotype for chr, start, end and ID
-                                           scale_residuals = FALSE,
-                                           tabix_header = TRUE) {
+loadRegionalAssociationData <- function(genotype, # PLINK file
+                                        phenotype, # a vector of phenotype file names
+                                        covariate, # a vector of covariate file names corresponding to the phenotype file vector
+                                        region, # a string of chr:start-end for phenotype region
+                                        conditions, # a vector of strings
+                                        mafCutoff = 0,
+                                        macCutoff = 0,
+                                        xvarCutoff = 0,
+                                        imissCutoff = 0,
+                                        associationWindow = NULL,
+                                        extractRegionName = NULL,
+                                        regionNameCol = NULL,
+                                        keepIndel = TRUE,
+                                        keepSamples = NULL,
+                                        keepVariants = NULL,
+                                        phenotypeHeader = 4, # skip first 4 rows of transposed phenotype for chr, start, end and ID
+                                        scaleResiduals = FALSE,
+                                        tabixHeader = TRUE) {
   ## Load genotype
-  geno <- load_genotype_region(genotype, association_window, keep_indel, keep_variants_path = keep_variants)
+  geno <- loadGenotypeRegion(genotype, associationWindow, keepIndel, keepVariantsPath = keepVariants)
   ## Load phenotype and covariates and perform some pre-processing
-  covar <- load_covariate_data(covariate)
-  pheno <- load_phenotype_data(phenotype, region, extract_region_name = extract_region_name, region_name_col = region_name_col, tabix_header = tabix_header)
+  covar <- loadCovariateData(covariate)
+  pheno <- loadPhenotypeData(phenotype, region, extractRegionName = extractRegionName, regionNameCol = regionNameCol, tabixHeader = tabixHeader)
   # Align covariates and conditions with phenotypes after filtering
-  # load_phenotype_data removes empty phenotypes and stores which indices survived
-  kept_idx <- attr(pheno, "kept_indices")
-  if (!is.null(kept_idx) && length(kept_idx) < length(covar)) {
-    covar <- covar[kept_idx]
-    if (!is.null(conditions)) conditions <- conditions[kept_idx]
+  # loadPhenotypeData removes empty phenotypes and stores which indices survived
+  keptIdx <- attr(pheno, "kept_indices")
+  if (!is.null(keptIdx) && length(keptIdx) < length(covar)) {
+    covar <- covar[keptIdx]
+    if (!is.null(conditions)) conditions <- conditions[keptIdx]
   }
   ### including Y ( cov ) and specific X and covar match, filter X variants based on the overlapped samples.
-  data_list <- prepare_data_list(geno, pheno, covar, imiss_cutoff,
-    maf_cutoff, mac_cutoff, xvar_cutoff,
-    phenotype_header = phenotype_header, keep_samples = keep_samples
+  dataList <- prepareDataList(geno, pheno, covar, imissCutoff,
+    mafCutoff, macCutoff, xvarCutoff,
+    phenotypeHeader = phenotypeHeader, keepSamples = keepSamples
   )
-  maf_list <- setNames(lapply(data_list$X, function(x) apply(x, 2, compute_maf)), conditions)
+  mafList <- setNames(lapply(dataList$X, function(x) apply(x, 2, computeMaf)), conditions)
   ## Get residue Y for each of condition and its mean and sd
-  data_list <- add_Y_residuals(data_list, conditions, scale_residuals)
+  dataList <- addYResiduals(dataList, conditions, scaleResiduals)
   ## Get residue X for each of condition and its mean and sd
-  data_list <- add_X_residuals(data_list, scale_residuals)
+  dataList <- addXResiduals(dataList, scaleResiduals)
   # Get X matrix for union of samples.
   # Short-circuit when there's only one condition: the per-condition X computed in
-  # prepare_data_list already operates on the same sample set (the single condition's
+  # prepareDataList already operates on the same sample set (the single condition's
   # common_complete_samples, which is itself a subset of rownames(geno)) and applies
   # the same MAF/imiss/var thresholds with the same MAC cutoff scaling, so the union
   # X is bit-equivalent to data_list$X[[1]]. Skipping the redundant filter_X call saves
   # work and avoids a duplicate "N out of M total variants dropped" log line.
-  if (length(data_list$X) == 1) {
-    X <- data_list$X[[1]]
+  if (length(dataList$X) == 1) {
+    X <- dataList$X[[1]]
     variants <- str_split_fixed(colnames(X), ":", 3)
     message(paste0(
       "Dimension of input genotype data is ", nrow(X), " rows and ",
@@ -890,38 +890,38 @@ load_regional_association_data <- function(genotype, # PLINK file
       max(as.integer(variants[, 2]))
     ))
   } else {
-    X <- prepare_X_matrix(geno, data_list, imiss_cutoff, maf_cutoff, mac_cutoff, xvar_cutoff)
+    X <- prepareXMatrix(geno, dataList, imissCutoff, mafCutoff, macCutoff, xvarCutoff)
   }
-  parsed_region <- if (!is.null(region)) parse_region(region) else NULL
-  region_gr <- if (!is.null(parsed_region)) {
+  parsedRegion <- if (!is.null(region)) parseRegion(region) else NULL
+  regionGr <- if (!is.null(parsedRegion)) {
     GRanges(
-      seqnames = paste0("chr", parsed_region$chrom),
+      seqnames = paste0("chr", parsedRegion$chrom),
       ranges = IRanges(
-        start = as.integer(parsed_region$start),
-        end = as.integer(parsed_region$end)
+        start = as.integer(parsedRegion$start),
+        end = as.integer(parsedRegion$end)
       )
     )
   } else NULL
 
-  pheno_list <- data_list$Y
-  covar_list <- data_list$covar
+  phenoList <- dataList$Y
+  covarList <- dataList$covar
   if (!is.null(conditions)) {
-    names(pheno_list) <- conditions
-    names(covar_list) <- conditions
+    names(phenoList) <- conditions
+    names(covarList) <- conditions
   }
   RegionalData(
-    genotype_matrix = X,
-    phenotypes = pheno_list,
-    covariates = covar_list,
-    scale_residuals = scale_residuals,
-    maf = maf_list,
-    region = region_gr,
-    dropped_samples = list(
-      X = data_list$dropped_samples_X,
-      Y = data_list$dropped_samples_Y,
-      covar = data_list$dropped_samples_covar
+    genotypeMatrix = X,
+    phenotypes = phenoList,
+    covariates = covarList,
+    scaleResiduals = scaleResiduals,
+    maf = mafList,
+    region = regionGr,
+    droppedSamples = list(
+      X = dataList$dropped_samples_X,
+      Y = dataList$dropped_samples_Y,
+      covar = dataList$dropped_samples_covar
     ),
-    Y_coordinates = if (!is.null(region)) extract_phenotype_coordinates(pheno) else NULL
+    coordinates = if (!is.null(region)) extractPhenotypeCoordinates(pheno) else NULL
   )
 }
 
@@ -936,8 +936,8 @@ load_regional_association_data <- function(genotype, # PLINK file
 #'
 #' @return A \code{RegionalData} object.
 #' @export
-load_regional_univariate_data <- function(...) {
-  load_regional_association_data(...)
+loadRegionalUnivariateData <- function(...) {
+  loadRegionalAssociationData(...)
 }
 
 #' Load Regional Data for Regression Modeling
@@ -946,32 +946,32 @@ load_regional_univariate_data <- function(...) {
 #' Returns a \code{RegionalData} S4 object; the per-condition \code{X_data}
 #' previously returned in a list is available as
 #' \code{getResidualX(rd, i)} (residualized) or by subsetting
-#' \code{rd@@genotype_matrix} by condition rownames.
+#' \code{rd@@genotypeMatrix} by condition rownames.
 #'
 #' @return A \code{RegionalData} object.
 #' @export
-load_regional_regression_data <- function(...) {
-  load_regional_association_data(...)
+loadRegionalRegressionData <- function(...) {
+  loadRegionalAssociationData(...)
 }
 
 # return matrix of R conditions, with column names being the names of the conditions (phenotypes) and row names being sample names. Even for one condition it has to be a matrix with just one column.
 #' @noRd
-pheno_list_to_mat <- function(data_list) {
-  all_row_names <- unique(unlist(lapply(data_list$residual_Y, rownames)))
+phenoListToMat <- function(dataList) {
+  allRowNames <- unique(unlist(lapply(dataList$residual_Y, rownames)))
   # Step 2: Align matrices and fill with NA where necessary
-  aligned_mats <- lapply(data_list$residual_Y, function(mat) {
+  alignedMats <- lapply(dataList$residual_Y, function(mat) {
     ### change the ncol of each matrix
-    expanded_mat <- matrix(NA, nrow = length(all_row_names), ncol = ncol(mat), dimnames = list(all_row_names, colnames(mat)))
-    common_rows <- intersect(rownames(mat), all_row_names)
-    expanded_mat[common_rows, ] <- mat[common_rows, ]
-    return(expanded_mat)
+    expandedMat <- matrix(NA, nrow = length(allRowNames), ncol = ncol(mat), dimnames = list(allRowNames, colnames(mat)))
+    commonRows <- intersect(rownames(mat), allRowNames)
+    expandedMat[commonRows, ] <- mat[commonRows, ]
+    return(expandedMat)
   })
-  Y_resid_matrix <- do.call(cbind, aligned_mats)
-  if (!is.null(names(data_list$residual_Y))) {
-    colnames(Y_resid_matrix) <- names(data_list$residual_Y)
+  YResidMatrix <- do.call(cbind, alignedMats)
+  if (!is.null(names(dataList$residual_Y))) {
+    colnames(YResidMatrix) <- names(dataList$residual_Y)
   }
-  data_list$residual_Y <- Y_resid_matrix
-  return(data_list)
+  dataList$residual_Y <- YResidMatrix
+  return(dataList)
 }
 
 #' Load and Preprocess Regional Multivariate Data
@@ -986,38 +986,38 @@ pheno_list_to_mat <- function(data_list) {
 #'
 #' @return A \code{MultivariateRegionalData} object.
 #' @export
-load_regional_multivariate_data <- function(matrix_y_min_complete = NULL,
-                                            ...) {
-  rd <- load_regional_association_data(...)
-  n_cond <- length(rd@phenotypes)
-  residual_Y_list <- lapply(seq_len(n_cond), function(i) getResidualY(rd, i))
-  names(residual_Y_list) <- names(rd@phenotypes)
-  residual_Y_scalar_list <- lapply(seq_len(n_cond), function(i) getResidualYScalar(rd, i))
-  dat <- list(residual_Y = residual_Y_list)
-  dat <- pheno_list_to_mat(dat)
+loadRegionalMultivariateData <- function(matrixYMinComplete = NULL,
+                                         ...) {
+  rd <- loadRegionalAssociationData(...)
+  nCond <- length(rd@phenotypes)
+  residualYList <- lapply(seq_len(nCond), function(i) getResidualY(rd, i))
+  names(residualYList) <- names(rd@phenotypes)
+  residualYScalarList <- lapply(seq_len(nCond), function(i) getResidualYScalar(rd, i))
+  dat <- list(residual_Y = residualYList)
+  dat <- phenoListToMat(dat)
 
-  X <- rd@genotype_matrix
-  Y_scalar <- unlist(residual_Y_scalar_list)
-  dropped_sample <- rd@dropped_samples
-  region_gr <- rd@region
+  X <- rd@genotypeMatrix
+  YScalar <- unlist(residualYScalarList)
+  droppedSample <- rd@droppedSamples
+  regionGr <- rd@region
   Y <- dat$residual_Y
 
-  if (!is.null(matrix_y_min_complete)) {
-    filt <- filter_Y(Y, matrix_y_min_complete)
+  if (!is.null(matrixYMinComplete)) {
+    filt <- filterY(Y, matrixYMinComplete)
     if (length(filt$rm_rows) > 0) {
       X <- X[-filt$rm_rows, , drop = FALSE]
       Y <- filt$Y
-      dropped_sample <- rownames(dat$residual_Y)[filt$rm_rows]
+      droppedSample <- rownames(dat$residual_Y)[filt$rm_rows]
     }
   }
 
   MultivariateRegionalData(
-    genotype_matrix = X,
-    Y_matrix = as.matrix(Y),
-    Y_scalar = Y_scalar,
-    dropped_samples = dropped_sample,
-    region = region_gr,
-    Y_coordinates = rd@Y_coordinates
+    genotypeMatrix = X,
+    Y = as.matrix(Y),
+    scaling = YScalar,
+    droppedSamples = droppedSample,
+    region = regionGr,
+    coordinates = rd@coordinates
   )
 }
 
@@ -1029,32 +1029,32 @@ load_regional_multivariate_data <- function(matrix_y_min_complete = NULL,
 #' \code{Y_coordinates} have fewer than \code{min_markers} rows are
 #' dropped from the returned \code{RegionalData}.
 #'
-#' @param min_markers Minimum number of phenotype markers required for a study.
+#' @param minMarkers Minimum number of phenotype markers required for a study.
 #'   If \code{NULL}, no marker-count filtering is applied.
 #' @return A \code{RegionalData} object.
 #' @export
-load_regional_functional_data <- function(..., min_markers = NULL) {
-  rd <- load_regional_association_data(...)
-  if (!is.null(min_markers)) rd <- .filter_regional_data_by_marker_count(rd, min_markers)
+loadRegionalFunctionalData <- function(..., minMarkers = NULL) {
+  rd <- loadRegionalAssociationData(...)
+  if (!is.null(minMarkers)) rd <- .filterRegionalDataByMarkerCount(rd, minMarkers)
   rd
 }
 
 # Subset per-condition slots of a RegionalData by the marker counts in
 # Y_coordinates. The genotype_matrix, region, and dropped_samples are
 # preserved (those are not per-condition or are panel-wide).
-.filter_regional_data_by_marker_count <- function(rd, min_markers) {
-  if (is.null(rd@Y_coordinates)) return(rd)
-  keep <- vapply(rd@Y_coordinates, function(x) nrow(x) >= min_markers, logical(1))
+.filterRegionalDataByMarkerCount <- function(rd, minMarkers) {
+  if (is.null(rd@coordinates)) return(rd)
+  keep <- vapply(rd@coordinates, function(x) nrow(x) >= minMarkers, logical(1))
   if (all(keep)) return(rd)
   RegionalData(
-    genotype_matrix = rd@genotype_matrix,
+    genotypeMatrix = rd@genotypeMatrix,
     phenotypes = rd@phenotypes[keep],
     covariates = rd@covariates[keep],
-    scale_residuals = rd@scale_residuals,
+    scaleResiduals = rd@scaleResiduals,
     maf = if (length(rd@maf) == length(keep)) rd@maf[keep] else rd@maf,
     region = rd@region,
-    dropped_samples = rd@dropped_samples,
-    Y_coordinates = rd@Y_coordinates[keep]
+    droppedSamples = rd@droppedSamples,
+    coordinates = rd@coordinates[keep]
   )
 }
 
@@ -1062,11 +1062,11 @@ load_regional_functional_data <- function(..., min_markers = NULL) {
 
 # Function to remove gene name at the end of context name
 #' @export
-clean_context_names <- function(context, gene) {
+cleanContextNames <- function(context, gene) {
   # Remove gene name if it matches the last part of the context
   gene <- gene[order(-nchar(unique(gene)))]
-  for (gene_id in gene) {
-    context <- gsub(paste0("_", gene_id), "", context)
+  for (geneId in gene) {
+    context <- gsub(paste0("_", geneId), "", context)
   }
   return(context)
 }
@@ -1090,31 +1090,31 @@ clean_context_names <- function(context, gene) {
 #' condition <- "example_condition"
 #' region <- "example_region"
 #' variable_name_obj <- "example_variable" # or NULL for standard processing
-#' consolidated_weights <- load_twas_weights(weight_db_files, condition, region, variable_name_obj)
+#' consolidated_weights <- loadTwasWeights(weight_db_files, condition, region, variable_name_obj)
 #' print(consolidated_weights)
 #' @export
-load_twas_weights <- function(weight_db_files, conditions = NULL,
-                              variable_name_obj = c("preset_variants_result", "variant_names"),
-                              susie_obj = c("preset_variants_result", "susie_result_trimmed"),
-                              twas_weights_table = "twas_weights") {
+loadTwasWeights <- function(weightDbFiles, conditions = NULL,
+                            variableNameObj = c("preset_variants_result", "variant_names"),
+                            susieObj = c("preset_variants_result", "susie_result_trimmed"),
+                            twasWeightsTable = "twas_weights") {
   ## Internal function to load and validate data from RDS files
-  load_and_validate_data <- function(weight_db_files, conditions, variable_name_obj) {
-    all_data <- do.call(c, lapply(unname(weight_db_files), function(rds_file) {
+  loadAndValidateData <- function(weightDbFiles, conditions, variableNameObj) {
+    allData <- do.call(c, lapply(unname(weightDbFiles), function(rdsFile) {
       # Validate file before loading
-      if (!file.exists(rds_file)) {
-        warning(paste0("Skipping weight file '", rds_file, "': file does not exist."))
+      if (!file.exists(rdsFile)) {
+        warning(paste0("Skipping weight file '", rdsFile, "': file does not exist."))
         return(NULL)
       }
-      if (file.size(rds_file) <= 200) {
-        warning(paste0("Skipping weight file '", rds_file, "': file too small (", file.size(rds_file), " bytes), likely empty or corrupt."))
+      if (file.size(rdsFile) <= 200) {
+        warning(paste0("Skipping weight file '", rdsFile, "': file too small (", file.size(rdsFile), " bytes), likely empty or corrupt."))
         return(NULL)
       }
-      db <- tryCatch(readRDS(rds_file), error = function(e) {
-        warning(paste0("Skipping weight file '", rds_file, "': failed to read RDS — ", conditionMessage(e)))
+      db <- tryCatch(readRDS(rdsFile), error = function(e) {
+        warning(paste0("Skipping weight file '", rdsFile, "': failed to read RDS — ", conditionMessage(e)))
         return(NULL)
       })
       if (!is.list(db) || length(db) == 0) {
-        warning(paste0("Skipping weight file '", rds_file, "': unexpected structure (not a non-empty list)."))
+        warning(paste0("Skipping weight file '", rdsFile, "': unexpected structure (not a non-empty list)."))
         return(NULL)
       }
       gene <- names(db)
@@ -1125,42 +1125,42 @@ load_twas_weights <- function(weight_db_files, conditions = NULL,
 
         # Filter the gene's data to only include specified context layers
         if (length(gene) == 1 && gene != "mnm_rs") { # Need check
-          available_contexts <- names(db[[gene]])
-          matching_contexts <- available_contexts[available_contexts %in% paste0(conditions, "_", gene)]
-          if (length(matching_contexts) == 0) {
-            warning(paste0("No matching context layers found in ", rds_file, ". Skipping this file."))
+          availableContexts <- names(db[[gene]])
+          matchingContexts <- availableContexts[availableContexts %in% paste0(conditions, "_", gene)]
+          if (length(matchingContexts) == 0) {
+            warning(paste0("No matching context layers found in ", rdsFile, ". Skipping this file."))
             return(NULL)
           }
 
-          db[[gene]] <- db[[gene]][matching_contexts]
+          db[[gene]] <- db[[gene]][matchingContexts]
         }
       } else {
         # Set default for 'conditions' if they are not specified
         conditions <- names(db[[gene]])
       }
-      if (any(unique(names(find_data(db, c(3, "twas_weights")))) %in% c("mrmash_weights", "mvsusie_weights"))) {
-        names(db[[1]]) <- clean_context_names(names(db[[1]]), gene = gene)
+      if (any(unique(names(findData(db, c(3, "twas_weights")))) %in% c("mrmash_weights", "mvsusie_weights"))) {
+        names(db[[1]]) <- cleanContextNames(names(db[[1]]), gene = gene)
         db <- list(mnm_rs = db[[1]])
       } else {
         # Check if region from all RDS files are the same
         if (length(gene) != 1) {
           stop("More than one region provided in the RDS file. ")
         } else {
-          names(db[[gene]]) <- clean_context_names(names(db[[gene]]), gene = gene)
+          names(db[[gene]]) <- cleanContextNames(names(db[[gene]]), gene = gene)
         }
       }
       return(db)
     }))
     # Remove NULL entries (from files that had no matching context layers)
-    all_data <- all_data[!sapply(all_data, is.null)]
+    allData <- allData[!sapply(allData, is.null)]
 
-    if (length(all_data) == 0) {
+    if (length(allData) == 0) {
       stop("No data loaded. Check that conditions match available context layers in the RDS files.")
     }
     # Combine the lists with the same region name
-    gene <- unique(names(all_data)[!names(all_data) %in% "mnm_rs"])
+    gene <- unique(names(allData)[!names(allData) %in% "mnm_rs"])
     if (length(gene) > 1) stop("More than one region of twas weights data provided. ")
-    combined_all_data <- lapply(split(all_data, names(all_data)), function(lst) {
+    combinedAllData <- lapply(split(allData, names(allData)), function(lst) {
       if (length(lst) > 1) {
         lst <- do.call(c, unname(lst))
       }
@@ -1170,81 +1170,81 @@ load_twas_weights <- function(weight_db_files, conditions = NULL,
     })
 
     # merge univariate and multivariate results for same gene-context pair
-    if ("mnm_rs" %in% names(combined_all_data)) {
-      # gene <- names(combined_all_data)[!names(combined_all_data) %in% "mnm_rs"]
-      overl_contexts <- names(combined_all_data[["mnm_rs"]])[names(combined_all_data[["mnm_rs"]]) %in% names(combined_all_data[[gene]])]
-      multi_variants <- unique(find_data(combined_all_data$mnm_rs, c(2, variable_name_obj)))
-      for (context in overl_contexts) {
-        uni_variants <- get_nested_element(combined_all_data[[gene]][[context]], variable_name_obj)
+    if ("mnm_rs" %in% names(combinedAllData)) {
+      # gene <- names(combinedAllData)[!names(combinedAllData) %in% "mnm_rs"]
+      overlContexts <- names(combinedAllData[["mnm_rs"]])[names(combinedAllData[["mnm_rs"]]) %in% names(combinedAllData[[gene]])]
+      multiVariants <- unique(findData(combinedAllData$mnm_rs, c(2, variableNameObj)))
+      for (context in overlContexts) {
+        uniVariants <- getNestedElement(combinedAllData[[gene]][[context]], variableNameObj)
         # Harmonize chr prefix convention between multivariate and univariate variant IDs
-        chr_matched <- ensure_chr_match(multi_variants, uni_variants)
-        multi_variants_h <- chr_matched$ids_a
-        uni_variants_h <- chr_matched$ids_b
-        multi_weights <- setNames(rep(0, length(uni_variants_h)), uni_variants_h)
-        multi_weights <- lapply(combined_all_data[["mnm_rs"]][[context]]$twas_weights, function(weight_list) {
-          aligned_weights <- setNames(rep(0, length(uni_variants_h)), uni_variants_h)
-          weight_vals <- unlist(weight_list)
-          names(weight_vals) <- ensure_chr_match(names(weight_vals), uni_variants_h)$ids_a
-          method_weight_variants <- names(weight_vals)
-          overlap_variants <- method_weight_variants[method_weight_variants %in% multi_variants_h[multi_variants_h %in% uni_variants_h]]
-          aligned_weights[overlap_variants] <- weight_vals[overlap_variants]
-          aligned_weights <- as.matrix(aligned_weights)
+        chrMatched <- ensureChrMatch(multiVariants, uniVariants)
+        multiVariantsH <- chrMatched$ids_a
+        uniVariantsH <- chrMatched$ids_b
+        multiWeights <- setNames(rep(0, length(uniVariantsH)), uniVariantsH)
+        multiWeights <- lapply(combinedAllData[["mnm_rs"]][[context]]$twas_weights, function(weightList) {
+          alignedWeights <- setNames(rep(0, length(uniVariantsH)), uniVariantsH)
+          weightVals <- unlist(weightList)
+          names(weightVals) <- ensureChrMatch(names(weightVals), uniVariantsH)$ids_a
+          methodWeightVariants <- names(weightVals)
+          overlapVariants <- methodWeightVariants[methodWeightVariants %in% multiVariantsH[multiVariantsH %in% uniVariantsH]]
+          alignedWeights[overlapVariants] <- weightVals[overlapVariants]
+          alignedWeights <- as.matrix(alignedWeights)
         })
-        combined_all_data[[gene]][[context]]$twas_weights <- c(combined_all_data[[gene]][[context]]$twas_weights, multi_weights)
-        combined_all_data[[gene]][[context]]$twas_cv_result$performance <- c(
-          combined_all_data[[gene]][[context]]$twas_cv_result$performance,
-          combined_all_data[["mnm_rs"]][[context]]$twas_cv_result$performance
+        combinedAllData[[gene]][[context]]$twas_weights <- c(combinedAllData[[gene]][[context]]$twas_weights, multiWeights)
+        combinedAllData[[gene]][[context]]$twas_cv_result$performance <- c(
+          combinedAllData[[gene]][[context]]$twas_cv_result$performance,
+          combinedAllData[["mnm_rs"]][[context]]$twas_cv_result$performance
         )
       }
-      combined_all_data[["mnm_rs"]] <- NULL
+      combinedAllData[["mnm_rs"]] <- NULL
     }
-    if (gene %in% names(combined_all_data)) combined_all_data <- do.call(c, unname(combined_all_data))
-    if (gene %in% names(combined_all_data)) combined_all_data <- combined_all_data[[1]]
+    if (gene %in% names(combinedAllData)) combinedAllData <- do.call(c, unname(combinedAllData))
+    if (gene %in% names(combinedAllData)) combinedAllData <- combinedAllData[[1]]
 
     # ## Check if the specified condition and variable_name_obj are available in all files
-    # if (!all(conditions %in% names(combined_all_data))) {
+    # if (!all(conditions %in% names(combinedAllData))) {
     #   stop("The specified condition is not available in all RDS files.")
     # }
-    return(combined_all_data)
+    return(combinedAllData)
   }
 
   # Internal function to align and merge weight matrices
-  align_and_merge <- function(weights_list, variable_objs) {
-    if (length(weights_list) != length(variable_objs)) {
+  alignAndMerge <- function(weightsList, variableObjs) {
+    if (length(weightsList) != length(variableObjs)) {
       stop("The length of the weights_list and variable_objs must be the same.")
     }
     # Loop through each weight matrix and assign variant names as rownames
-    for (i in seq_along(weights_list)) {
+    for (i in seq_along(weightsList)) {
       # Ensure dimensions match
-      if (nrow(weights_list[[i]]) != length(variable_objs[[i]])) {
+      if (nrow(weightsList[[i]]) != length(variableObjs[[i]])) {
         stop(paste("Number of rows in weights_list[[", i, "]] does not match the length of variable_objs[[", i, "]]", sep = ""))
       }
       # Apply variant names to the row names of the weight matrix
-      rownames(weights_list[[i]]) <- variable_objs[[i]]
+      rownames(weightsList[[i]]) <- variableObjs[[i]]
     }
-    return(weights_list)
+    return(weightsList)
   }
 
   # Internal function to consolidate weights for given condition
-  consolidate_weights_list <- function(combined_all_data, conditions, variable_name_obj, twas_weights_table) {
-    combined_weights_by_condition <- lapply(conditions, function(condition) {
-      temp_list <- get_nested_element(combined_all_data, c(condition, twas_weights_table))
-      sapply(temp_list, cbind)
+  consolidateWeightsList <- function(combinedAllData, conditions, variableNameObj, twasWeightsTable) {
+    combinedWeightsByCondition <- lapply(conditions, function(condition) {
+      tempList <- getNestedElement(combinedAllData, c(condition, twasWeightsTable))
+      sapply(tempList, cbind)
     })
-    names(combined_weights_by_condition) <- conditions
-    if (is.null(variable_name_obj)) {
+    names(combinedWeightsByCondition) <- conditions
+    if (is.null(variableNameObj)) {
       # Standard processing: Check for identical row numbers and consolidate
-      row_numbers <- sapply(combined_weights_by_condition, function(data) nrow(data))
-      if (length(unique(row_numbers)) > 1) {
+      rowNumbers <- sapply(combinedWeightsByCondition, function(data) nrow(data))
+      if (length(unique(rowNumbers)) > 1) {
         stop("Not all files have the same number of rows for the specified condition.")
       }
-      weights <- combined_weights_by_condition
+      weights <- combinedWeightsByCondition
     } else {
       # Processing with variable_name_obj: Align and merge data, fill missing with zeros
-      variable_objs <- lapply(conditions, function(condition) {
-        get_nested_element(combined_all_data, c(condition, variable_name_obj))
+      variableObjs <- lapply(conditions, function(condition) {
+        getNestedElement(combinedAllData, c(condition, variableNameObj))
       })
-      weights <- align_and_merge(combined_weights_by_condition, variable_objs)
+      weights <- alignAndMerge(combinedWeightsByCondition, variableObjs)
     }
     names(weights) <- conditions
     return(weights)
@@ -1253,41 +1253,41 @@ load_twas_weights <- function(weight_db_files, conditions = NULL,
   ## Load, validate, and consolidate data
   try(
     {
-      combined_all_data <- load_and_validate_data(weight_db_files, conditions, variable_name_obj)
-      if (is.null(combined_all_data)) {
+      combinedAllData <- loadAndValidateData(weightDbFiles, conditions, variableNameObj)
+      if (is.null(combinedAllData)) {
         return(NULL)
       }
       # update condition in case of merging rds files
-      conditions <- names(combined_all_data)
-      weights <- consolidate_weights_list(combined_all_data, conditions, variable_name_obj, twas_weights_table)
-      combined_susie_result <- lapply(combined_all_data, function(context) get_nested_element(context, susie_obj))
-      performance_tables <- lapply(conditions, function(condition) {
-        get_nested_element(combined_all_data, c(condition, "twas_cv_result", "performance"))
+      conditions <- names(combinedAllData)
+      weights <- consolidateWeightsList(combinedAllData, conditions, variableNameObj, twasWeightsTable)
+      combinedSusieResult <- lapply(combinedAllData, function(context) getNestedElement(context, susieObj))
+      performanceTables <- lapply(conditions, function(condition) {
+        getNestedElement(combinedAllData, c(condition, "twas_cv_result", "performance"))
       })
-      names(performance_tables) <- conditions
+      names(performanceTables) <- conditions
       # Extract variant_ids from weight matrices (union across all contexts)
-      all_variant_ids <- Reduce(union, lapply(weights, function(w) {
+      allVariantIds <- Reduce(union, lapply(weights, function(w) {
         if (is.matrix(w)) rownames(w) else names(w)
       }))
-      if (is.null(all_variant_ids)) all_variant_ids <- character(0)
+      if (is.null(allVariantIds)) allVariantIds <- character(0)
       # Pad weight matrices to common variant set
-      if (length(all_variant_ids) > 0) {
+      if (length(allVariantIds) > 0) {
         weights <- lapply(weights, function(w) {
           if (!is.matrix(w)) return(w)
-          missing <- setdiff(all_variant_ids, rownames(w))
+          missing <- setdiff(allVariantIds, rownames(w))
           if (length(missing) > 0) {
             pad <- matrix(0, nrow = length(missing), ncol = ncol(w),
                           dimnames = list(missing, colnames(w)))
-            w <- rbind(w, pad)[all_variant_ids, , drop = FALSE]
+            w <- rbind(w, pad)[allVariantIds, , drop = FALSE]
           }
           w
         })
       }
-      return(TWASWeights(
+      return(TwasWeights(
         weights = weights,
-        variant_ids = all_variant_ids,
-        fits = combined_susie_result,
-        cv_performance = performance_tables
+        variantIds = allVariantIds,
+        fits = combinedSusieResult,
+        cvPerformance = performanceTables
       ))
     },
     silent = FALSE
@@ -1301,22 +1301,22 @@ load_twas_weights <- function(weight_db_files, conditions = NULL,
 #' Optionally applies an additional custom column mapping file.
 #'
 #' @param sumstats A data frame of summary statistics.
-#' @param column_file_path Optional file path to a custom column mapping file
+#' @param columnFilePath Optional file path to a custom column mapping file
 #'   (format: standard_name:original_name, one per line). Applied after
 #'   MungeSumstats standardization.
-#' @param comment_string Comment character in column_file_path. Default is "#".
+#' @param commentString Comment character in column_file_path. Default is "#".
 #' @return A data frame with standardized column names.
 #' @export
-standardise_sumstats_columns <- function(sumstats, column_file_path = NULL, comment_string = "#") {
+standardiseSumstatsColumns <- function(sumstats, columnFilePath = NULL, commentString = "#") {
   # MungeSumstats standard names -> pecotmr conventions
-  ms_to_pecotmr <- c(
+  msToPecotmr <- c(
     CHR = "chrom", BP = "pos", SNP = "variant_id",
     BETA = "beta", SE = "se", Z = "z", P = "p",
     N = "n_sample", N_CAS = "n_case", N_CON = "n_control",
     FRQ = "maf"
   )
   # Make a copy to avoid in-place modification by MungeSumstats
-  sumstats_copy <- data.frame(sumstats, check.names = FALSE)
+  sumstatsCopy <- data.frame(sumstats, check.names = FALSE)
 
   # Read the explicit user column mapping first. User declarations are
   # AUTHORITATIVE: a column the user mapped (e.g. `af:effect_allele_frequency`)
@@ -1326,46 +1326,46 @@ standardise_sumstats_columns <- function(sumstats, column_file_path = NULL, comm
   # placeholder, let MungeSumstats standardize everything else, then restore the
   # declared columns to their requested standard names last.
   placeholders <- character(0)
-  if (!is.null(column_file_path)) {
-    if (!file.exists(column_file_path)) {
-      stop("Column mapping file not found: ", column_file_path)
+  if (!is.null(columnFilePath)) {
+    if (!file.exists(columnFilePath)) {
+      stop("Column mapping file not found: ", columnFilePath)
     }
-    column_data <- read.table(column_file_path,
+    columnData <- read.table(columnFilePath,
       header = FALSE, sep = ":",
-      comment.char = if (is.null(comment_string)) "" else comment_string,
+      comment.char = if (is.null(commentString)) "" else commentString,
       stringsAsFactors = FALSE
     )
-    colnames(column_data) <- c("standard", "original")
-    for (i in seq_len(nrow(column_data))) {
-      idx <- which(colnames(sumstats_copy) == column_data$original[i])
+    colnames(columnData) <- c("standard", "original")
+    for (i in seq_len(nrow(columnData))) {
+      idx <- which(colnames(sumstatsCopy) == columnData$original[i])
       if (length(idx) > 0) {
         ph <- paste0(".pecotmr_decl_", i)
-        colnames(sumstats_copy)[idx] <- ph
-        placeholders[[ph]] <- column_data$standard[i]
+        colnames(sumstatsCopy)[idx] <- ph
+        placeholders[[ph]] <- columnData$standard[i]
       }
     }
   }
 
   # Use MungeSumstats for comprehensive column standardization (shielded
   # declared columns pass through untouched as unmapped placeholders).
-  sumstats_copy <- standardise_header(
-    sumstats_copy, return_list = FALSE, uppercase_unmapped = FALSE
+  sumstatsCopy <- standardise_header(
+    sumstatsCopy, return_list = FALSE, uppercase_unmapped = FALSE
   )
   # Rename MungeSumstats standard names to pecotmr conventions
-  for (ms_name in names(ms_to_pecotmr)) {
-    idx <- which(colnames(sumstats_copy) == ms_name)
+  for (msName in names(msToPecotmr)) {
+    idx <- which(colnames(sumstatsCopy) == msName)
     if (length(idx) > 0) {
-      colnames(sumstats_copy)[idx] <- ms_to_pecotmr[ms_name]
+      colnames(sumstatsCopy)[idx] <- msToPecotmr[msName]
     }
   }
   # Restore user-declared columns to their requested standard names (last word).
   for (ph in names(placeholders)) {
-    idx <- which(colnames(sumstats_copy) == ph)
+    idx <- which(colnames(sumstatsCopy) == ph)
     if (length(idx) > 0) {
-      colnames(sumstats_copy)[idx] <- placeholders[[ph]]
+      colnames(sumstatsCopy)[idx] <- placeholders[[ph]]
     }
   }
-  as.data.frame(sumstats_copy)
+  as.data.frame(sumstatsCopy)
 }
 
 #' Load summary statistic data
@@ -1404,40 +1404,40 @@ standardise_sumstats_columns <- function(sumstats, column_file_path = NULL, comm
 #' @importFrom dplyr mutate group_by summarise
 #' @importFrom magrittr %>%
 #' @export
-load_rss_data <- function(sumstat_path, column_file_path = NULL, n_sample = 0, n_case = 0, n_control = 0, region = NULL,
-                          extract_region_name = NULL, region_name_col = NULL, comment_string = "#",
-                          binary_trait_model = c("rss", "ols")) {
-  binary_trait_model <- match.arg(binary_trait_model)
-  n_sample <- if (length(n_sample) == 1L && is.na(n_sample)) 0 else n_sample
-  n_case <- if (length(n_case) == 1L && is.na(n_case)) 0 else n_case
-  n_control <- if (length(n_control) == 1L && is.na(n_control)) 0 else n_control
+loadRssData <- function(sumstatPath, columnFilePath = NULL, nSample = 0, nCase = 0, nControl = 0, region = NULL,
+                        extractRegionName = NULL, regionNameCol = NULL, commentString = "#",
+                        binaryTraitModel = c("rss", "ols")) {
+  binaryTraitModel <- match.arg(binaryTraitModel)
+  nSample <- if (length(nSample) == 1L && is.na(nSample)) 0 else nSample
+  nCase <- if (length(nCase) == 1L && is.na(nCase)) 0 else nCase
+  nControl <- if (length(nControl) == 1L && is.na(nControl)) 0 else nControl
   # Validate input files exist
-  if (!file.exists(sumstat_path)) {
-    stop("Summary statistics file not found: ", sumstat_path)
+  if (!file.exists(sumstatPath)) {
+    stop("Summary statistics file not found: ", sumstatPath)
   }
-  if (!is.null(column_file_path) && !file.exists(column_file_path)) {
-    stop("Column mapping file not found: ", column_file_path)
+  if (!is.null(columnFilePath) && !file.exists(columnFilePath)) {
+    stop("Column mapping file not found: ", columnFilePath)
   }
-  var_y <- NULL
-  sumstats <- load_tsv_region(file_path = sumstat_path, region = region, extract_region_name = extract_region_name, region_name_col = region_name_col)
+  varY <- NULL
+  sumstats <- loadTsvRegion(filePath = sumstatPath, region = region, extractRegionName = extractRegionName, regionNameCol = regionNameCol)
 
   # To keep a log message
-  n_variants <- if (is.null(sumstats)) 0L else nrow(sumstats)
-  if (length(n_variants) == 0 || is.na(n_variants)) {
-    n_variants <- 0L
+  nVariants <- if (is.null(sumstats)) 0L else nrow(sumstats)
+  if (length(nVariants) == 0 || is.na(nVariants)) {
+    nVariants <- 0L
   }
-  if (n_variants == 0) {
+  if (nVariants == 0) {
     message(paste0("No variants in region ", region, "."))
     if (is.null(sumstats)) {
       sumstats <- data.frame()
     }
     return(list(sumstats = sumstats, n = NULL, var_y = NULL))
   } else {
-    message(paste0("Region ", region, " include ", n_variants, " in input sumstats."))
+    message(paste0("Region ", region, " include ", nVariants, " in input sumstats."))
   }
 
   # Standardize column names via MungeSumstats + optional custom mapping
-  sumstats <- standardise_sumstats_columns(sumstats, column_file_path, comment_string)
+  sumstats <- standardiseSumstatsColumns(sumstats, columnFilePath, commentString)
 
   # ---- Effect-allele frequency (af) propagation -------------------------------
   # `af` is the frequency of the effect allele / A1 and is exported (after
@@ -1447,10 +1447,10 @@ load_rss_data <- function(sumstat_path, column_file_path = NULL, n_sample = 0, n
   # frequency headers therefore never silently become `af`. The effect allele
   # must also be resolvable (an A1 column or an allele-bearing variant id), or
   # the declared frequency cannot be tied to a direction and is not exported.
-  af_declared <- "af" %in% colnames(sumstats)
-  has_effect_allele <- "A1" %in% colnames(sumstats) ||
+  afDeclared <- "af" %in% colnames(sumstats)
+  hasEffectAllele <- "A1" %in% colnames(sumstats) ||
     any(c("variant_id", "variant") %in% colnames(sumstats))
-  if (af_declared && has_effect_allele) {
+  if (afDeclared && hasEffectAllele) {
     sumstats$af <- suppressWarnings(as.numeric(sumstats$af))
     if (all(is.na(sumstats$af))) {
       warning("Effect-allele frequency column 'af' was declared but its values ",
@@ -1458,7 +1458,7 @@ load_rss_data <- function(sumstat_path, column_file_path = NULL, n_sample = 0, n
               "will be skipped.")
     }
   } else {
-    if (af_declared && !has_effect_allele) {
+    if (afDeclared && !hasEffectAllele) {
       warning("Effect-allele frequency 'af' was declared but no effect allele ",
               "(A1 / allele-bearing variant id) is available to tie it to a ",
               "direction; it will not be exported. top_loci$af will be NA and ",
@@ -1473,11 +1473,11 @@ load_rss_data <- function(sumstat_path, column_file_path = NULL, n_sample = 0, n
   }
   # ----------------------------------------------------------------------------
 
-  has_observed_beta_se <- all(c("beta", "se") %in% colnames(sumstats))
-  if (binary_trait_model == "ols" && !has_observed_beta_se) {
-    stop("binary_trait_model = 'ols' requires observed beta and se columns ",
+  hasObservedBetaSe <- all(c("beta", "se") %in% colnames(sumstats))
+  if (binaryTraitModel == "ols" && !hasObservedBetaSe) {
+    stop("binaryTraitModel = 'ols' requires observed beta and se columns ",
          "from ordinary least squares on a 0/1 phenotype; z-only summary ",
-         "statistics should use binary_trait_model = 'rss'.")
+         "statistics should use binaryTraitModel = 'rss'.")
   }
   if (!"z" %in% colnames(sumstats) && all(c("beta", "se") %in%
     colnames(sumstats))) {
@@ -1497,37 +1497,37 @@ load_rss_data <- function(sumstat_path, column_file_path = NULL, n_sample = 0, n
       )
     }
   }
-  binary_var_y <- function(phi, n) {
+  binaryVarY <- function(phi, n) {
     if (length(phi) != 1 || is.na(phi) || !is.finite(phi) ||
         phi <= 0 || phi >= 1) {
-      stop("Invalid case fraction for binary_trait_model = 'ols': ", phi,
-           ". Expected 0 < n_case / n < 1.")
+      stop("Invalid case fraction for binaryTraitModel = 'ols': ", phi,
+           ". Expected 0 < nCase / n < 1.")
     }
     if (is.null(n) || length(n) != 1 || is.na(n) || !is.finite(n) || n <= 1) {
-      stop("Invalid sample size for binary_trait_model = 'ols': ", n,
+      stop("Invalid sample size for binaryTraitModel = 'ols': ", n,
            ". Expected n > 1.")
     }
     n / (n - 1) * phi * (1 - phi)
   }
-  if (n_sample != 0 && (n_case + n_control) != 0) {
+  if (nSample != 0 && (nCase + nControl) != 0) {
     stop("Please provide sample size, or case number with control number, but not both")
-  } else if (n_sample != 0) {
-    n <- n_sample
-  } else if ((n_case + n_control) != 0) {
-    n <- n_case + n_control
-    if (binary_trait_model == "ols") {
-      phi <- n_case / n
-      var_y <- binary_var_y(phi, n)
+  } else if (nSample != 0) {
+    n <- nSample
+  } else if ((nCase + nControl) != 0) {
+    n <- nCase + nControl
+    if (binaryTraitModel == "ols") {
+      phi <- nCase / n
+      varY <- binaryVarY(phi, n)
     }
   } else {
     if ("n_sample" %in% colnames(sumstats)) {
       n <- median(sumstats$n_sample)
     } else if (all(c("n_case", "n_control") %in% colnames(sumstats))) {
-      n_by_variant <- sumstats$n_case + sumstats$n_control
-      n <- median(n_by_variant)
-      if (binary_trait_model == "ols") {
-        phi <- median(sumstats$n_case / n_by_variant)
-        var_y <- binary_var_y(phi, n)
+      nByVariant <- sumstats$n_case + sumstats$n_control
+      n <- median(nByVariant)
+      if (binaryTraitModel == "ols") {
+        phi <- median(sumstats$n_case / nByVariant)
+        varY <- binaryVarY(phi, n)
       }
     } else {
       warning("Sample size could not be determined from the summary statistics.")
@@ -1546,12 +1546,12 @@ load_rss_data <- function(sumstat_path, column_file_path = NULL, n_sample = 0, n
            "n_sample/n_case/n_control columns in your summary statistics.")
     }
   }
-  return(list(sumstats = sumstats, n = n, var_y = var_y))
+  return(list(sumstats = sumstats, n = n, var_y = varY))
 }
 
 
 #' This function loads a mixture data sets for a specific region, including individual-level data (genotype, phenotype, covariate data)
-#' or summary statistics (sumstats, LD). Run \code{load_regional_univariate_data} and \code{load_rss_data} multiple times for different datasets
+#' or summary statistics (sumstats, LD). Run \code{loadRegionalUnivariateData} and \code{loadRssData} multiple times for different datasets
 #'
 #' @section Loading individual level data from multiple corhorts
 #' @param region A string of chr:start-end for the phenotype region.
@@ -1612,179 +1612,179 @@ load_rss_data <- function(sumstat_path, column_file_path = NULL, n_sample = 0, n
 #' }
 #' sumstat_data contains the following components if exist
 #' \itemize{
-#'   \item sumstats: A list of summary statistics for the matched LD_info, each sublist contains sumstats, n, var_y from \code{load_rss_data}.
-#'   \item LD_info: A list of \code{LDData} S4 objects (one per LD reference), as returned by \code{load_LD_matrix}.
+#'   \item sumstats: A list of summary statistics for the matched LD_info, each sublist contains sumstats, n, var_y from \code{loadRssData}.
+#'   \item LD_info: A list of \code{LdData} S4 objects (one per LD reference), as returned by \code{load_LD_matrix}.
 #' }
 #'
 #' @export
-load_multitask_regional_data <- function(region, # a string of chr:start-end for phenotype region
-                                         genotype_list = NULL, # PLINK file
-                                         phenotype_list = NULL, # a vector of phenotype file names
-                                         covariate_list = NULL, # a vector of covariate file names corresponding to the phenotype file vector
-                                         conditions_list_individual = NULL, # a vector of strings
-                                         match_geno_pheno = NULL, # a vector of index of phentoypes matched to genotype if mulitple genotype files
-                                         maf_cutoff = 0,
-                                         mac_cutoff = 0,
-                                         xvar_cutoff = 0,
-                                         imiss_cutoff = 0,
-                                         association_window = NULL,
-                                         extract_region_name = NULL,
-                                         region_name_col = NULL,
-                                         keep_indel = TRUE,
-                                         keep_samples = NULL,
-                                         keep_variants = NULL,
-                                         phenotype_header = 4, # skip first 4 rows of transposed phenotype for chr, start, end and ID
-                                         scale_residuals = FALSE,
-                                         tabix_header = TRUE,
-                                         # sumstat if need
-                                         sumstat_path_list = NULL,
-                                         column_file_path_list = NULL,
-                                         LD_meta_file_path_list = NULL,
-                                         match_LD_sumstat = NULL, # a vector of index of sumstat matched to LD if mulitple sumstat files
-                                         conditions_list_sumstat = NULL,
-                                         n_samples = 0,
-                                         n_cases = 0,
-                                         n_controls = 0,
-                                         binary_trait_model = c("rss", "ols"),
-                                         extract_sumstats_region_name = NULL,
-                                         sumstats_region_name_col = NULL,
-                                         comment_string = "#",
-                                         extract_coordinates = NULL) {
-  binary_trait_model <- match.arg(binary_trait_model)
-  if (is.null(genotype_list) & is.null(sumstat_path_list)) {
+loadMultitaskRegionalData <- function(region, # a string of chr:start-end for phenotype region
+                                      genotypeList = NULL, # PLINK file
+                                      phenotypeList = NULL, # a vector of phenotype file names
+                                      covariateList = NULL, # a vector of covariate file names corresponding to the phenotype file vector
+                                      conditionsListIndividual = NULL, # a vector of strings
+                                      matchGenoPheno = NULL, # a vector of index of phentoypes matched to genotype if mulitple genotype files
+                                      mafCutoff = 0,
+                                      macCutoff = 0,
+                                      xvarCutoff = 0,
+                                      imissCutoff = 0,
+                                      associationWindow = NULL,
+                                      extractRegionName = NULL,
+                                      regionNameCol = NULL,
+                                      keepIndel = TRUE,
+                                      keepSamples = NULL,
+                                      keepVariants = NULL,
+                                      phenotypeHeader = 4, # skip first 4 rows of transposed phenotype for chr, start, end and ID
+                                      scaleResiduals = FALSE,
+                                      tabixHeader = TRUE,
+                                      # sumstat if need
+                                      sumstatPathList = NULL,
+                                      columnFilePathList = NULL,
+                                      ldMetaFilePathList = NULL,
+                                      matchLdSumstat = NULL, # a vector of index of sumstat matched to LD if mulitple sumstat files
+                                      conditionsListSumstat = NULL,
+                                      nSamples = 0,
+                                      nCases = 0,
+                                      nControls = 0,
+                                      binaryTraitModel = c("rss", "ols"),
+                                      extractSumstatsRegionName = NULL,
+                                      sumstatsRegionNameCol = NULL,
+                                      commentString = "#",
+                                      extractCoordinates = NULL) {
+  binaryTraitModel <- match.arg(binaryTraitModel)
+  if (is.null(genotypeList) & is.null(sumstatPathList)) {
     stop("Data load error. Please make sure at least one data set (sumstat_path_list or genotype_list) exists.")
   }
 
   # - if exist individual level data
-  individual_data <- NULL
-  if (!is.null(genotype_list)) {
-    if (length(phenotype_list) != length(covariate_list)) {
+  individualData <- NULL
+  if (!is.null(genotypeList)) {
+    if (length(phenotypeList) != length(covariateList)) {
       stop("Data load error. 'phenotype_list' and 'covariate_list' must have the same length.")
     }
-    if (is.null(conditions_list_individual)) {
-      conditions_list_individual <- paste0("condition", seq_along(phenotype_list))
+    if (is.null(conditionsListIndividual)) {
+      conditionsListIndividual <- paste0("condition", seq_along(phenotypeList))
       warning("Data load warning. 'conditions_list_individual' is not supplied; using default condition names. ",
               "Provide 'conditions_list_individual' to preserve cohort or cell-type labels.")
     }
-    if (length(conditions_list_individual) != length(phenotype_list)) {
+    if (length(conditionsListIndividual) != length(phenotypeList)) {
       stop("Data load error. 'conditions_list_individual' must have the same length as 'phenotype_list'.")
     }
     #### FIXME: later if we have mulitple genotype list
-    if (length(genotype_list) != 1 & is.null(match_geno_pheno)) {
+    if (length(genotypeList) != 1 & is.null(matchGenoPheno)) {
       stop("Data load error. Please make sure 'match_geno_pheno' exists if you load data from multiple individual-level data.")
-    } else if (length(genotype_list) == 1 & is.null(match_geno_pheno)) {
-      match_geno_pheno <- rep(1, length(phenotype_list))
+    } else if (length(genotypeList) == 1 & is.null(matchGenoPheno)) {
+      matchGenoPheno <- rep(1, length(phenotypeList))
     }
-    if (length(match_geno_pheno) != length(phenotype_list)) {
+    if (length(matchGenoPheno) != length(phenotypeList)) {
       stop("Data load error. 'match_geno_pheno' must have the same length as 'phenotype_list'.")
     }
-    if (any(is.na(match_geno_pheno)) ||
-        any(match_geno_pheno < 1 | match_geno_pheno > length(genotype_list))) {
+    if (any(is.na(matchGenoPheno)) ||
+        any(matchGenoPheno < 1 | matchGenoPheno > length(genotypeList))) {
       stop("Data load error. 'match_geno_pheno' must contain valid indices into 'genotype_list'.")
     }
 
     # - load individual data from multiple datasets
-    n_dataset <- unique(match_geno_pheno)
-    for (i_data in n_dataset) {
+    nDataset <- unique(matchGenoPheno)
+    for (iData in nDataset) {
       # extract genotype file name
-      genotype <- genotype_list[i_data]
+      genotype <- genotypeList[iData]
       # extract phenotype and covariate file names
-      pos <- which(match_geno_pheno == i_data)
-      phenotype <- phenotype_list[pos]
-      covariate <- covariate_list[pos]
-      conditions <- conditions_list_individual[pos]
-      extract_region_name_i <- extract_region_name
-      if (is.list(extract_region_name) && length(extract_region_name) == length(phenotype_list)) {
-        extract_region_name_i <- extract_region_name[pos]
+      pos <- which(matchGenoPheno == iData)
+      phenotype <- phenotypeList[pos]
+      covariate <- covariateList[pos]
+      conditions <- conditionsListIndividual[pos]
+      extractRegionNameI <- extractRegionName
+      if (is.list(extractRegionName) && length(extractRegionName) == length(phenotypeList)) {
+        extractRegionNameI <- extractRegionName[pos]
       }
-      dat <- load_regional_univariate_data(
+      dat <- loadRegionalUnivariateData(
         genotype = genotype, phenotype = phenotype,
         covariate = covariate,
         region = region,
-        association_window = association_window,
-        conditions = conditions, xvar_cutoff = xvar_cutoff,
-        maf_cutoff = maf_cutoff, mac_cutoff = mac_cutoff,
-        imiss_cutoff = imiss_cutoff, keep_indel = keep_indel,
-        keep_samples = keep_samples, keep_variants = keep_variants,
-        extract_region_name = extract_region_name_i,
-        phenotype_header = phenotype_header,
-        region_name_col = region_name_col,
-        scale_residuals = scale_residuals
+        associationWindow = associationWindow,
+        conditions = conditions, xvarCutoff = xvarCutoff,
+        mafCutoff = mafCutoff, macCutoff = macCutoff,
+        imissCutoff = imissCutoff, keepIndel = keepIndel,
+        keepSamples = keepSamples, keepVariants = keepVariants,
+        extractRegionName = extractRegionNameI,
+        phenotypeHeader = phenotypeHeader,
+        regionNameCol = regionNameCol,
+        scaleResiduals = scaleResiduals
       )
-      if (is.null(individual_data)) {
-        individual_data <- dat
+      if (is.null(individualData)) {
+        individualData <- dat
       } else {
-        individual_data <- c(individual_data, dat)
+        individualData <- c(individualData, dat)
       }
     }
   }
 
   # - if exist summstat data
-  sumstat_data <- NULL
-  if (!is.null(sumstat_path_list)) {
-    if (length(match_LD_sumstat) == 0) {
-      match_LD_sumstat[[1]] <- conditions_list_sumstat
+  sumstatData <- NULL
+  if (!is.null(sumstatPathList)) {
+    if (length(matchLdSumstat) == 0) {
+      matchLdSumstat[[1]] <- conditionsListSumstat
     }
-    if (length(match_LD_sumstat) != length(LD_meta_file_path_list)) {
+    if (length(matchLdSumstat) != length(ldMetaFilePathList)) {
       stop("Please make sure 'match_LD_sumstat' matched 'LD_meta_file_path_list' if you load data from multiple sumstats.")
     }
     # - load sumstat data from multiple datasets
-    n_LD <- length(match_LD_sumstat)
-    for (i_ld in 1:n_LD) {
+    nLd <- length(matchLdSumstat)
+    for (iLd in 1:nLd) {
       # extract LD meta file path name
-      LD_meta_file_path <- LD_meta_file_path_list[i_ld]
-      LD_info <- load_LD_matrix(LD_meta_file_path,
-        region = association_window,
-        extract_coordinates = extract_coordinates,
-        return_genotype = "auto"
+      ldMetaFilePath <- ldMetaFilePathList[iLd]
+      ldInfo <- loadLdMatrix(ldMetaFilePath,
+        region = associationWindow,
+        extractCoordinates = extractCoordinates,
+        returnGenotype = "auto"
       )
       # extract sumstat information
-      conditions <- match_LD_sumstat[[i_ld]]
-      pos <- match(conditions, conditions_list_sumstat)
+      conditions <- matchLdSumstat[[iLd]]
+      pos <- match(conditions, conditionsListSumstat)
       sumstats <- lapply(pos, function(ii) {
-        sumstat_path <- sumstat_path_list[ii]
-        column_file_path <- column_file_path_list[ii]
+        sumstatPath <- sumstatPathList[ii]
+        columnFilePath <- columnFilePathList[ii]
         # Load sumstat for this study (multiple LD references handled by outer loop)
-        tmp <- load_rss_data(
-          sumstat_path = sumstat_path, column_file_path = column_file_path,
-          n_sample = n_samples[ii], n_case = n_cases[ii], n_control = n_controls[ii],
-          region = association_window, extract_region_name = extract_sumstats_region_name,
-          region_name_col = sumstats_region_name_col, comment_string = comment_string,
-          binary_trait_model = binary_trait_model
+        tmp <- loadRssData(
+          sumstatPath = sumstatPath, columnFilePath = columnFilePath,
+          nSample = nSamples[ii], nCase = nCases[ii], nControl = nControls[ii],
+          region = associationWindow, extractRegionName = extractSumstatsRegionName,
+          regionNameCol = sumstatsRegionNameCol, commentString = commentString,
+          binaryTraitModel = binaryTraitModel
         )
         if (nrow(tmp$sumstats) == 0){ return(NULL) }
         if (!("variant_id" %in% colnames(tmp$sumstats))) {
           tmp$sumstats <- tmp$sumstats %>%
-            mutate(variant_id = format_variant_id(chrom, pos, A2, A1))
+            mutate(variant_id = formatVariantId(chrom, pos, A2, A1))
         }
         return(tmp)
       })
       names(sumstats) <- conditions
-      if_no_variants <- sapply(sumstats, is.null)
-      if (sum(if_no_variants)!=0){
-        pos_no_variants <- which(if_no_variants)
-        sumstats <- sumstats[-pos_no_variants]
+      ifNoVariants <- sapply(sumstats, is.null)
+      if (sum(ifNoVariants)!=0){
+        posNoVariants <- which(ifNoVariants)
+        sumstats <- sumstats[-posNoVariants]
       }
-      sumstat_data$sumstats <- c(sumstat_data$sumstats, list(sumstats))
-      sumstat_data$LD_info <- c(sumstat_data$LD_info, list(LD_info))
+      sumstatData$sumstats <- c(sumstatData$sumstats, list(sumstats))
+      sumstatData$LD_info <- c(sumstatData$LD_info, list(ldInfo))
     }
-    names(sumstat_data$sumstats) <- names(sumstat_data$LD_info) <- names(match_LD_sumstat)
+    names(sumstatData$sumstats) <- names(sumstatData$LD_info) <- names(matchLdSumstat)
   }
 
   return(list(
-    individual_data = individual_data,
-    sumstat_data = sumstat_data
+    individual_data = individualData,
+    sumstat_data = sumstatData
   ))
 }
 
 #' Convert loaded regional data to individual-level inputs
 #'
-#' @param region_data A list returned by \code{load_multitask_regional_data()}.
+#' @param regionData A list returned by \code{loadMultitaskRegionalData()}.
 #' @return A list containing \code{X}, \code{Y}, \code{maf},
 #'   \code{X_variance}, and source information.
 #' @export
-region_data_to_ind_input <- function(region_data) {
-  first_non_null <- function(...) {
+regionDataToIndInput <- function(regionData) {
+  firstNonNull <- function(...) {
     values <- list(...)
     for (value in values) {
       if (!is.null(value)) return(value)
@@ -1792,17 +1792,17 @@ region_data_to_ind_input <- function(region_data) {
     NULL
   }
 
-  align_individual_contexts <- function(X, Y) {
-    cbind_y <- function(Y, fallback_names) {
+  alignIndividualContexts <- function(X, Y) {
+    cbindY <- function(Y, fallbackNames) {
       keep <- !vapply(Y, is.null, logical(1))
       if (!any(keep)) return(NULL)
       Y <- Y[keep]
-      fallback_names <- fallback_names[keep]
+      fallbackNames <- fallbackNames[keep]
       mats <- Map(function(y, nm) {
         if (is.null(dim(y))) y <- matrix(y, ncol = 1)
         if (is.null(colnames(y))) colnames(y) <- nm
         y
-      }, Y, fallback_names)
+      }, Y, fallbackNames)
       do.call(cbind, mats)
     }
 
@@ -1812,19 +1812,19 @@ region_data_to_ind_input <- function(region_data) {
         length(intersect(names(X), names(Y))) > 0) {
       return(list(X = X, Y = Y))
     }
-    x_names <- names(X)
-    y_names <- names(Y)
+    xNames <- names(X)
+    yNames <- names(Y)
     grouped <- list()
-    for (context in x_names) {
-      matched <- y_names[y_names == context | startsWith(y_names, paste0(context, "_"))]
+    for (context in xNames) {
+      matched <- yNames[yNames == context | startsWith(yNames, paste0(context, "_"))]
       if (length(matched) > 0) {
-        y_group <- cbind_y(Y[matched], matched)
-        if (!is.null(y_group)) grouped[[context]] <- y_group
+        yGroup <- cbindY(Y[matched], matched)
+        if (!is.null(yGroup)) grouped[[context]] <- yGroup
       }
     }
     if (length(grouped) == 0 && length(X) == 1 && length(Y) > 0) {
-      y_group <- cbind_y(Y, y_names)
-      if (!is.null(y_group)) grouped[[x_names[[1]]]] <- y_group
+      yGroup <- cbindY(Y, yNames)
+      if (!is.null(yGroup)) grouped[[xNames[[1]]]] <- yGroup
     }
     if (length(grouped) == 0) {
       return(list(X = X, Y = Y))
@@ -1832,57 +1832,57 @@ region_data_to_ind_input <- function(region_data) {
     list(X = X[names(grouped)], Y = grouped)
   }
 
-  individual_data <- region_data$individual_data
-  if (is.null(individual_data)) {
+  individualData <- regionData$individual_data
+  if (is.null(individualData)) {
     return(list(X = NULL, Y = NULL, maf = NULL, X_variance = NULL,
                 source_info = list(has_individual = FALSE, contexts = character())))
   }
 
-  if (is(individual_data, "RegionalData")) {
-    contexts <- names(individual_data@phenotypes)
-    n_cond <- length(contexts)
+  if (is(individualData, "RegionalData")) {
+    contexts <- names(individualData@phenotypes)
+    nCond <- length(contexts)
     X <- stats::setNames(
-      lapply(seq_len(n_cond), function(i) getResidualX(individual_data, i)),
+      lapply(seq_len(nCond), function(i) getResidualX(individualData, i)),
       contexts
     )
     Y <- stats::setNames(
-      lapply(seq_len(n_cond), function(i) getResidualY(individual_data, i)),
+      lapply(seq_len(nCond), function(i) getResidualY(individualData, i)),
       contexts
     )
-    aligned <- align_individual_contexts(X, Y)
+    aligned <- alignIndividualContexts(X, Y)
     X <- aligned$X
     Y <- aligned$Y
-    maf <- individual_data@maf
-    X_variance <- stats::setNames(
-      lapply(seq_len(n_cond), function(i) getXVariance(individual_data, i)),
+    maf <- individualData@maf
+    XVariance <- stats::setNames(
+      lapply(seq_len(nCond), function(i) getXVariance(individualData, i)),
       contexts
     )
     return(list(
       X = X,
       Y = Y,
       maf = maf,
-      X_variance = X_variance,
+      X_variance = XVariance,
       source_info = list(has_individual = !is.null(X) && !is.null(Y),
                          contexts = contexts)
     ))
   }
 
   # Post-QC shape: list(X = list_of_matrices, Y = list_of_matrices, ...)
-  if (is.list(individual_data) &&
-      (!is.null(individual_data$X) || !is.null(individual_data$Y))) {
-    X <- individual_data$X
-    Y <- individual_data$Y
-    aligned <- align_individual_contexts(X, Y)
+  if (is.list(individualData) &&
+      (!is.null(individualData$X) || !is.null(individualData$Y))) {
+    X <- individualData$X
+    Y <- individualData$Y
+    aligned <- alignIndividualContexts(X, Y)
     X <- aligned$X
     Y <- aligned$Y
-    maf <- individual_data$maf
-    X_variance <- individual_data$X_variance
+    maf <- individualData$maf
+    XVariance <- individualData$X_variance
     contexts <- if (!is.null(X) && is.list(X) && !is.matrix(X)) names(X) else character()
     return(list(
       X = X,
       Y = Y,
       maf = maf,
-      X_variance = X_variance,
+      X_variance = XVariance,
       source_info = list(has_individual = !is.null(X) && !is.null(Y),
                          contexts = contexts)
     ))
@@ -1893,82 +1893,82 @@ region_data_to_ind_input <- function(region_data) {
 
 #' Convert loaded regional data to RSS inputs
 #'
-#' @param region_data A list returned by \code{load_multitask_regional_data()}.
+#' @param regionData A list returned by \code{loadMultitaskRegionalData()}.
 #' @return A list containing named RSS inputs, matched LD data, and source
 #'   information.
 #' @export
-region_data_to_rss_input <- function(region_data) {
-  rss_input_from_qced_sumstat <- function(sumstat_data) {
-    rss_input <- sumstat_data$sumstats
-    LD_data_in <- sumstat_data$LD_data
-    LD_match <- sumstat_data$LD_match
-    studies <- names(rss_input)
-    LD_data <- list()
-    ld_group <- character()
+regionDataToRssInput <- function(regionData) {
+  rssInputFromQcedSumstat <- function(sumstatData) {
+    rssInput <- sumstatData$sumstats
+    ldDataIn <- sumstatData$LD_data
+    ldMatch <- sumstatData$LD_match
+    studies <- names(rssInput)
+    ldData <- list()
+    ldGroup <- character()
     for (i in seq_along(studies)) {
       study <- studies[[i]]
-      ld_name <- if (!is.null(LD_match) && length(LD_match) >= i) LD_match[[i]] else study
-      if (is.null(ld_name) || is.na(ld_name) || !ld_name %in% names(LD_data_in)) {
-        ld_name <- names(LD_data_in)[min(i, length(LD_data_in))]
+      ldName <- if (!is.null(ldMatch) && length(ldMatch) >= i) ldMatch[[i]] else study
+      if (is.null(ldName) || is.na(ldName) || !ldName %in% names(ldDataIn)) {
+        ldName <- names(ldDataIn)[min(i, length(ldDataIn))]
       }
-      ld <- LD_data_in[[ld_name]]
-      if (!is.null(ld) && !is(ld, "LDData")) {
-        stop("region_data$sumstat_data$LD_data entries must be LDData objects.")
+      ld <- ldDataIn[[ldName]]
+      if (!is.null(ld) && !is(ld, "LdData")) {
+        stop("region_data$sumstat_data$LD_data entries must be LdData objects.")
       }
-      LD_data[[study]] <- ld
-      ld_group[[study]] <- ld_name
+      ldData[[study]] <- ld
+      ldGroup[[study]] <- ldName
     }
     list(
-      rss_input = rss_input,
-      LD_data = LD_data,
-      source_info = list(has_sumstat = length(rss_input) > 0,
-                         studies = names(rss_input),
-                         ld_group = ld_group)
+      rss_input = rssInput,
+      LD_data = ldData,
+      source_info = list(has_sumstat = length(rssInput) > 0,
+                         studies = names(rssInput),
+                         ld_group = ldGroup)
     )
   }
 
-  sumstat_data <- region_data$sumstat_data
-  if (is.null(sumstat_data) || is.null(sumstat_data$sumstats)) {
+  sumstatData <- regionData$sumstat_data
+  if (is.null(sumstatData) || is.null(sumstatData$sumstats)) {
     return(list(rss_input = list(), LD_data = list(),
                 source_info = list(has_sumstat = FALSE, studies = character(),
                                    ld_group = character())))
   }
-  if (!is.null(sumstat_data$LD_data)) {
-    return(rss_input_from_qced_sumstat(sumstat_data))
+  if (!is.null(sumstatData$LD_data)) {
+    return(rssInputFromQcedSumstat(sumstatData))
   }
 
-  rss_input <- list()
-  LD_data <- list()
-  ld_group <- character()
+  rssInput <- list()
+  ldData <- list()
+  ldGroup <- character()
 
-  for (i in seq_along(sumstat_data$sumstats)) {
-    studies <- sumstat_data$sumstats[[i]]
-    ld_index <- min(i, length(sumstat_data$LD_info))
-    group_name <- names(sumstat_data$LD_info)[ld_index]
-    if (is.null(group_name) || is.na(group_name) || group_name == "") {
-      group_name <- paste0("LD", ld_index)
+  for (i in seq_along(sumstatData$sumstats)) {
+    studies <- sumstatData$sumstats[[i]]
+    ldIndex <- min(i, length(sumstatData$LD_info))
+    groupName <- names(sumstatData$LD_info)[ldIndex]
+    if (is.null(groupName) || is.na(groupName) || groupName == "") {
+      groupName <- paste0("LD", ldIndex)
     }
-    ld_entry <- sumstat_data$LD_info[[ld_index]]
-    if (!is.null(ld_entry) && !is(ld_entry, "LDData")) {
-      stop("region_data$sumstat_data$LD_info entries must be LDData objects.")
+    ldEntry <- sumstatData$LD_info[[ldIndex]]
+    if (!is.null(ldEntry) && !is(ldEntry, "LdData")) {
+      stop("region_data$sumstat_data$LD_info entries must be LdData objects.")
     }
     for (study in names(studies)) {
-      output_name <- study
-      if (output_name %in% names(rss_input)) {
-        output_name <- make.unique(c(names(rss_input), output_name))[length(rss_input) + 1]
+      outputName <- study
+      if (outputName %in% names(rssInput)) {
+        outputName <- make.unique(c(names(rssInput), outputName))[length(rssInput) + 1]
       }
-      rss_input[[output_name]] <- studies[[study]]
-      LD_data[[output_name]] <- ld_entry
-      ld_group[[output_name]] <- group_name
+      rssInput[[outputName]] <- studies[[study]]
+      ldData[[outputName]] <- ldEntry
+      ldGroup[[outputName]] <- groupName
     }
   }
 
   list(
-    rss_input = rss_input,
-    LD_data = LD_data,
-    source_info = list(has_sumstat = length(rss_input) > 0,
-                       studies = names(rss_input),
-                       ld_group = ld_group)
+    rss_input = rssInput,
+    LD_data = ldData,
+    source_info = list(has_sumstat = length(rssInput) > 0,
+                       studies = names(rssInput),
+                       ld_group = ldGroup)
   )
 }
 
@@ -1978,28 +1978,28 @@ region_data_to_rss_input <- function(region_data) {
 #' For compressed (.gz) and tabix-indexed files, it can subset data by genomic region.
 #' Additionally, it can filter results by a specified target value in a designated column.
 #'
-#' @param file_path Path to the summary statistics file.
+#' @param filePath Path to the summary statistics file.
 #' @param region Genomic region for subsetting tabix-indexed files. Format: chr:start-end (e.g., "9:10000-50000").
-#' @param extract_region_name Value to filter for in the specified filter column.
-#' @param region_name_col Index of the column to apply the extract_region_name against.
+#' @param extractRegionName Value to filter for in the specified filter column.
+#' @param regionNameCol Index of the column to apply the extract_region_name against.
 #'
 #' @return A dataframe containing the filtered summary statistics.
 #'
 #' @importFrom vroom vroom
 #' @export
-load_tsv_region <- function(file_path, region = NULL, extract_region_name = NULL, region_name_col = NULL) {
+loadTsvRegion <- function(filePath, region = NULL, extractRegionName = NULL, regionNameCol = NULL) {
   sumstats <- NULL
 
-  if (grepl("\\.gz$", file_path)) {
+  if (grepl("\\.gz$", filePath)) {
     if (!is.null(region)) {
       # Use Rsamtools to query the tabix-indexed file by region
       sumstats <- tryCatch({
-        tbx <- TabixFile(file_path)
-        parsed <- parse_region(region)
+        tbx <- TabixFile(filePath)
+        parsed <- parseRegion(region)
         # Match chromosome naming convention in the tabix index
         chrom <- as.character(parsed$chrom)
-        tbx_seqnames <- seqnamesTabix(tbx)
-        if (any(grepl("^chr", tbx_seqnames))) {
+        tbxSeqnames <- seqnamesTabix(tbx)
+        if (any(grepl("^chr", tbxSeqnames))) {
           chrom <- paste0("chr", chrom)
         }
         gr <- GRanges(
@@ -2011,26 +2011,26 @@ load_tsv_region <- function(file_path, region = NULL, extract_region_name = NULL
 
         # Get header for column names
         hdr <- headerTabix(tbx)$header
-        col_names_vec <- NULL
+        colNamesVec <- NULL
         if (length(hdr) > 0) {
-          last_hdr <- hdr[length(hdr)]
-          col_names_vec <- strsplit(sub("^#", "", last_hdr), "\t")[[1]]
+          lastHdr <- hdr[length(hdr)]
+          colNamesVec <- strsplit(sub("^#", "", lastHdr), "\t")[[1]]
         } else {
-          header_con <- gzfile(file_path, "rt")
-          first_line <- readLines(header_con, n = 1)
-          close(header_con)
-          first_fields <- strsplit(sub("^#", "", first_line), "\t")[[1]]
-          header_tokens <- c("chrom", "chr", "#chrom", "pos", "bp", "snp",
-                             "variant_id", "a1", "a2", "beta", "se", "z",
-                             "p", "pvalue")
-          if (any(tolower(first_fields) %in% header_tokens)) {
-            col_names_vec <- first_fields
+          headerCon <- gzfile(filePath, "rt")
+          firstLine <- readLines(headerCon, n = 1)
+          close(headerCon)
+          firstFields <- strsplit(sub("^#", "", firstLine), "\t")[[1]]
+          headerTokens <- c("chrom", "chr", "#chrom", "pos", "bp", "snp",
+                            "variant_id", "a1", "a2", "beta", "se", "z",
+                            "p", "pvalue")
+          if (any(tolower(firstFields) %in% headerTokens)) {
+            colNamesVec <- firstFields
           }
         }
 
         txt <- paste(lines, collapse = "\n")
-        if (!is.null(col_names_vec)) {
-          as.data.frame(vroom(I(txt), delim = "\t", col_names = col_names_vec,
+        if (!is.null(colNamesVec)) {
+          as.data.frame(vroom(I(txt), delim = "\t", col_names = colNamesVec,
                                      show_col_types = FALSE))
         } else {
           as.data.frame(vroom(I(txt), delim = "\t", col_names = TRUE,
@@ -2041,17 +2041,17 @@ load_tsv_region <- function(file_path, region = NULL, extract_region_name = NULL
       })
     } else {
       # No region specified - read the whole gz file
-      sumstats <- as.data.frame(vroom(file_path, show_col_types = FALSE))
+      sumstats <- as.data.frame(vroom(filePath, show_col_types = FALSE))
     }
   } else {
     warning("Not a tabix-indexed gz file, loading the entire dataset.")
-    sumstats <- as.data.frame(vroom(file_path, show_col_types = FALSE))
+    sumstats <- as.data.frame(vroom(filePath, show_col_types = FALSE))
   }
 
   # Apply name-based filter if specified
-  if (!is.null(sumstats) && !is.null(extract_region_name) && !is.null(region_name_col)) {
-    keep_index <- which(str_detect(sumstats[[region_name_col]], extract_region_name))
-    sumstats <- sumstats[keep_index, ]
+  if (!is.null(sumstats) && !is.null(extractRegionName) && !is.null(regionNameCol)) {
+    keepIndex <- which(str_detect(sumstats[[regionNameCol]], extractRegionName))
+    sumstats <- sumstats[keepIndex, ]
   }
 
   return(sumstats)
@@ -2059,68 +2059,68 @@ load_tsv_region <- function(file_path, region = NULL, extract_region_name = NULL
 
 #' Split loaded twas_weights_results into batches based on maximum memory usage
 #'
-#' @param twas_weights_results List of loaded gene data by load_twas_weights()
-#' @param meta_data_df Dataframe containing gene metadata with region_id and TSS columns
-#' @param max_memory_per_batch Maximum memory per batch in MB (default: 750)
+#' @param twasWeightsResults List of loaded gene data by loadTwasWeights()
+#' @param metaDataDf Dataframe containing gene metadata with region_id and TSS columns
+#' @param maxMemoryPerBatch Maximum memory per batch in MB (default: 750)
 #' @return List of batches, where each batch contains a subset of twas_weights_results
 #' @export
-batch_load_twas_weights <- function(twas_weights_results, meta_data_df, max_memory_per_batch = 750) {
-  gene_names <- names(twas_weights_results)
-  if (length(gene_names) == 0) {
+batchLoadTwasWeights <- function(twasWeightsResults, metaDataDf, maxMemoryPerBatch = 750) {
+  geneNames <- names(twasWeightsResults)
+  if (length(geneNames) == 0) {
     message("No genes in twas_weights_results.")
     return(list())
   }
 
-  gene_memory_df <- data.frame(
-    gene_name = gene_names, memory_mb = sapply(gene_names, function(gene) {
-      as.numeric(object.size(twas_weights_results[[gene]])) / (1024^2) # Get object size in bytes and convert to MB
+  geneMemoryDf <- data.frame(
+    gene_name = geneNames, memory_mb = sapply(geneNames, function(gene) {
+      as.numeric(object.size(twasWeightsResults[[gene]])) / (1024^2) # Get object size in bytes and convert to MB
     })
   )
 
   # Merge with meta_data_df to get TSS information
-  meta_data_df <- meta_data_df[!duplicated(meta_data_df[, c("region_id", "TSS")]), ]
-  gene_memory_df <- merge(gene_memory_df, meta_data_df[, c("region_id", "TSS")],
+  metaDataDf <- metaDataDf[!duplicated(metaDataDf[, c("region_id", "TSS")]), ]
+  geneMemoryDf <- merge(geneMemoryDf, metaDataDf[, c("region_id", "TSS")],
     by.x = "gene_name",
     by.y = "region_id", all.x = TRUE
   )
-  gene_memory_df <- gene_memory_df[order(gene_memory_df$TSS), ]
+  geneMemoryDf <- geneMemoryDf[order(geneMemoryDf$TSS), ]
 
   # Check if we need to split into batches
-  total_memory_mb <- sum(gene_memory_df$memory_mb)
-  message("Total memory usage: ", round(total_memory_mb, 2), " MB")
-  if (total_memory_mb <= max_memory_per_batch) {
+  totalMemoryMb <- sum(geneMemoryDf$memory_mb)
+  message("Total memory usage: ", round(totalMemoryMb, 2), " MB")
+  if (totalMemoryMb <= maxMemoryPerBatch) {
     message("All genes fit within the memory limit. No need to split into batches.")
-    return(list(all_genes = twas_weights_results))
+    return(list(all_genes = twasWeightsResults))
   }
 
   # Create batches by adding genes until we reach the memory limit
   batches <- list()
-  current_batch_genes <- character(0)
-  current_batch_memory <- 0
-  batch_index <- 1
+  currentBatchGenes <- character(0)
+  currentBatchMemory <- 0
+  batchIndex <- 1
 
-  for (i in 1:nrow(gene_memory_df)) {
-    gene <- gene_memory_df$gene_name[i]
-    gene_memory <- gene_memory_df$memory_mb[i]
+  for (i in 1:nrow(geneMemoryDf)) {
+    gene <- geneMemoryDf$gene_name[i]
+    geneMemory <- geneMemoryDf$memory_mb[i]
     # If a single gene exceeds the memory limit, include it in its own batch
-    if (gene_memory > max_memory_per_batch) {
-      batches[[paste0("batch_", batch_index)]] <- twas_weights_results[gene]
-      batch_index <- batch_index + 1
+    if (geneMemory > maxMemoryPerBatch) {
+      batches[[paste0("batch_", batchIndex)]] <- twasWeightsResults[gene]
+      batchIndex <- batchIndex + 1
       next
     }
     # If adding this gene would exceed the memory limit, start a new batch
-    if (current_batch_memory + gene_memory > max_memory_per_batch && length(current_batch_genes) > 0) {
-      batches[[paste0("batch_", batch_index)]] <- twas_weights_results[current_batch_genes]
-      current_batch_genes <- character(0)
-      current_batch_memory <- 0
-      batch_index <- batch_index + 1
+    if (currentBatchMemory + geneMemory > maxMemoryPerBatch && length(currentBatchGenes) > 0) {
+      batches[[paste0("batch_", batchIndex)]] <- twasWeightsResults[currentBatchGenes]
+      currentBatchGenes <- character(0)
+      currentBatchMemory <- 0
+      batchIndex <- batchIndex + 1
     }
-    current_batch_genes <- c(current_batch_genes, gene)
-    current_batch_memory <- current_batch_memory + gene_memory
+    currentBatchGenes <- c(currentBatchGenes, gene)
+    currentBatchMemory <- currentBatchMemory + geneMemory
   }
   # Add the last batch if not empty
-  if (length(current_batch_genes) > 0) {
-    batches[[batch_index]] <- twas_weights_results[current_batch_genes]
+  if (length(currentBatchGenes) > 0) {
+    batches[[batchIndex]] <- twasWeightsResults[currentBatchGenes]
   }
   message("Split into ", length(batches), " batches")
   names(batches) <- NULL
@@ -2131,24 +2131,24 @@ batch_load_twas_weights <- function(twas_weights_results, meta_data_df, max_memo
 #' @importFrom susieR susie_get_cs
 #' @importFrom purrr map_lgl
 #' @export
-get_filter_lbf_index <- function(susie_obj, coverage = 0.5, size_factor = 0.5) {
-  susie_obj$V <- NULL  # ensure no filtering by estimated prior
+getFilterLbfIndex <- function(susieObj, coverage = 0.5, sizeFactor = 0.5) {
+  susieObj$V <- NULL  # ensure no filtering by estimated prior
 
   # Get CS list with coverage
-  cs_list <- susie_get_cs(susie_obj, coverage = coverage, dedup = FALSE)
+  csList <- susie_get_cs(susieObj, coverage = coverage, dedup = FALSE)
 
   # Total number of variants
-  total_variants <- ncol(susie_obj$alpha)
+  totalVariants <- ncol(susieObj$alpha)
 
   # Maximum allowed CS size to be considered 'concentrated'
-  max_size <- total_variants * coverage * size_factor
+  maxSize <- totalVariants * coverage * sizeFactor
 
   # Identify which CSs are 'concentrated enough'
-  keep_idx <- map_lgl(cs_list$cs, ~ length(.x) < max_size)
+  keepIdx <- map_lgl(csList$cs, ~ length(.x) < maxSize)
 
   # Extract the CS indices that pass the filter
-  cs_index <- which(keep_idx) %>% names %>% gsub("L","", .) %>% as.numeric
+  csIndex <- which(keepIdx) %>% names %>% gsub("L","", .) %>% as.numeric
 
   # Return filtered lbf_variable rows (one per CS)
-  return(cs_index)
+  return(csIndex)
 }

@@ -69,30 +69,30 @@
 #'   data_driven_prior_matrices[[i]] <- cov
 #' }
 #'
-#' res <- mrmash_wrapper(
+#' res <- mrmashWrapper(
 #'   X = X, Y = Y,
-#'   data_driven_prior_matrices = data_driven_prior_matrices,
-#'   prior_grid = prior_grid
+#'   dataDrivenPriorMatrices = dataDrivenPriorMatrices,
+#'   priorGrid = priorGrid
 #' )
 #'
 #' @export
-mrmash_wrapper <- function(X,
-                           Y,
-                           V = NULL,
-                           sumstats = NULL,
-                           data_driven_prior_matrices = NULL,
-                           prior_grid = NULL,
-                           nthreads = 1,
-                           canonical_prior_matrices = FALSE,
-                           standardize = FALSE,
-                           update_w0 = TRUE,
-                           w0_threshold = 1e-8,
-                           update_V = TRUE,
-                           update_V_method = "full",
-                           B_init_method = "enet",
-                           max_iter = 5000,
-                           tol = 0.01,
-                           verbose = FALSE, ...) {
+mrmashWrapper <- function(X,
+                          Y,
+                          V = NULL,
+                          sumstats = NULL,
+                          dataDrivenPriorMatrices = NULL,
+                          priorGrid = NULL,
+                          nthreads = 1,
+                          canonicalPriorMatrices = FALSE,
+                          standardize = FALSE,
+                          updateW0 = TRUE,
+                          w0Threshold = 1e-8,
+                          updateV = TRUE,
+                          updateVMethod = "full",
+                          bInitMethod = "enet",
+                          maxIter = 5000,
+                          tol = 0.01,
+                          verbose = FALSE, ...) {
   # Make sure glmnet is installed
   if (!requireNamespace("glmnet", quietly = TRUE)) {
     stop("To use this function, please install glmnet: https://cran.r-project.org/web/packages/glmnet/index.html")
@@ -113,18 +113,18 @@ mrmash_wrapper <- function(X,
   if (nrow(X) != nrow(Y)) {
     stop("X and Y must have the same number of rows.")
   }
-  if (!is.null(prior_grid) && !is.vector(prior_grid)) {
-    stop("prior_grid must be a vector.")
+  if (!is.null(priorGrid) && !is.vector(priorGrid)) {
+    stop("priorGrid must be a vector.")
   }
-  if (is.null(data_driven_prior_matrices) && !isTRUE(canonical_prior_matrices)) {
-    stop("Please provide data_driven_prior_matrices or set canonical_prior_matrices = TRUE.")
+  if (is.null(dataDrivenPriorMatrices) && !isTRUE(canonicalPriorMatrices)) {
+    stop("Please provide dataDrivenPriorMatrices or set canonicalPriorMatrices = TRUE.")
   }
 
-  Y_has_missing <- any(is.na(Y))
+  yHasMissing <- any(is.na(Y))
 
-  if (Y_has_missing && B_init_method == "glasso") {
-    warning("B_init_method = 'glasso' can only be used without missing values in Y. Setting it to 'enet' instead")
-    B_init_method <- "enet"
+  if (yHasMissing && bInitMethod == "glasso") {
+    warning("bInitMethod = 'glasso' can only be used without missing values in Y. Setting it to 'enet' instead")
+    bInitMethod <- "enet"
   }
 
   # Compute summary statistics and prior_grids
@@ -135,121 +135,124 @@ mrmash_wrapper <- function(X,
     )
   }
 
-  # Build prior covariance via shared helper (also used by mrmash_rss_weights)
-  prior_built <- build_mrmash_prior_matrices(
+  # Build prior covariance via shared helper (also used by mrmashRssWeights)
+  priorBuilt <- buildMrmashPriorMatrices(
     Bhat = sumstats$Bhat, Shat = sumstats$Shat,
     K = ncol(Y),
-    data_driven_prior_matrices = data_driven_prior_matrices,
-    canonical_prior_matrices = canonical_prior_matrices,
-    prior_grid = prior_grid
+    dataDrivenPriorMatrices = dataDrivenPriorMatrices,
+    canonicalPriorMatrices = canonicalPriorMatrices,
+    priorGrid = priorGrid
   )
-  S0 <- prior_built$S0
-  prior_grid <- prior_built$prior_grid
+  S0 <- priorBuilt$S0
+  priorGrid <- priorBuilt$priorGrid
   time1 <- proc.time()
 
-  if (B_init_method == "glasso") {
-    out <- compute_coefficients_glasso(X, Y,
+  if (bInitMethod == "glasso") {
+    out <- computeCoefficientsGlasso(X, Y,
       standardize = standardize,
       nthreads = nthreads, Xnew = NULL
     )
   } else {
-    out <- compute_coefficients_univ_glmnet(X, Y,
+    out <- computeCoefficientsUnivGlmnet(X, Y,
       alpha = 0.5, standardize = standardize,
       nthreads = nthreads, Xnew = NULL
     )
   }
 
   B_init <- as.matrix(out$Bhat)
-  w0 <- compute_w0(B_init, length(S0))
+  w0 <- computeW0(B_init, length(S0))
 
   # Robust initialization of V
   if (is.null(V)) {
-    if (!Y_has_missing) {
+    if (!yHasMissing) {
       V <- mr.mashr:::compute_V_init(X, Y, matrix(0, nrow = ncol(X), ncol = ncol(Y)), rep(0, ncol(Y)), method = "cov")
     } else {
       muy <- colMeans(Y, na.rm = TRUE)
       V <- mr.mashr:::compute_V_init(X, Y, matrix(0, nrow = ncol(X), ncol = ncol(Y)), muy, method = "flash")
     }
-    if (update_V_method == "diagonal") {
+    if (updateVMethod == "diagonal") {
       V <- diag(diag(V))
     } else {
       if (any(eigen(V)$values < 1e-8)) {
         V <- V + diag(1e-8, nrow(V))
-        update_V <- FALSE
+        updateV <- FALSE
       }
     }
   }
 
   # Fit mr.mash
-  fit_mrmash <- mr.mashr::mr.mash(
-    X = X, Y = Y, V = V, S0 = S0, w0 = w0, update_w0 = update_w0, tol = tol,
-    max_iter = max_iter, convergence_criterion = "ELBO", compute_ELBO = TRUE,
-    standardize = standardize, verbose = verbose, update_V = update_V,
-    update_V_method = update_V_method, w0_threshold = w0_threshold,
+  fitMrmash <- mr.mashr::mr.mash(
+    X = X, Y = Y, V = V, S0 = S0, w0 = w0, update_w0 = updateW0, tol = tol,
+    max_iter = maxIter, convergence_criterion = "ELBO", compute_ELBO = TRUE,
+    standardize = standardize, verbose = verbose, update_V = updateV,
+    update_V_method = updateVMethod, w0_threshold = w0Threshold,
     nthreads = nthreads, mu1_init = B_init
   )
 
   time2 <- proc.time()
-  elapsed_time <- time2["elapsed"] - time1["elapsed"]
-  fit_mrmash$analysis_time <- elapsed_time
+  elapsedTime <- time2["elapsed"] - time1["elapsed"]
+  fitMrmash$analysis_time <- elapsedTime
 
-  return(fit_mrmash)
+  return(fitMrmash)
 }
 
+#' @export
+
 ### Function to compute initial estimates of the coefficients from group-lasso
-compute_coefficients_glasso <- function(X, Y, standardize, nthreads, Xnew = NULL) {
+computeCoefficientsGlasso <- function(X, Y, standardize, nthreads, Xnew = NULL) {
   n <- nrow(X)
   p <- ncol(X)
   r <- ncol(Y)
-  condition_names <- colnames(Y)
+  conditionNames <- colnames(Y)
 
   # Fit group-lasso
-  cvfit_glmnet <- glmnet::cv.glmnet(
+  cvfitGlmnet <- glmnet::cv.glmnet(
     x = X, y = Y, family = "mgaussian", alpha = 1,
     standardize = standardize, parallel = FALSE
   )
-  coeff_glmnet <- coef(cvfit_glmnet, s = "lambda.min")
+  coeffGlmnet <- coef(cvfitGlmnet, s = "lambda.min")
 
   # Build matrix of initial estimates for mr.mash
   B <- matrix(as.numeric(NA), nrow = p, ncol = r)
 
-  for (i in seq_along(coeff_glmnet)) {
-    B[, i] <- as.vector(coeff_glmnet[[i]])[-1]
+  for (i in seq_along(coeffGlmnet)) {
+    B[, i] <- as.vector(coeffGlmnet[[i]])[-1]
   }
 
   # Make predictions if requested.
   if (!is.null(Xnew)) {
-    Yhat_glmnet <- drop(predict(cvfit_glmnet, newx = Xnew, s = "lambda.min"))
-    colnames(Yhat_glmnet) <- condition_names
-    res <- list(Bhat = B, Ytrain = Y, Yhat_new = Yhat_glmnet)
+    YhatGlmnet <- drop(predict(cvfitGlmnet, newx = Xnew, s = "lambda.min"))
+    colnames(YhatGlmnet) <- conditionNames
+    res <- list(Bhat = B, Ytrain = Y, Yhat_new = YhatGlmnet)
   } else {
     res <- list(Bhat = B, Ytrain = Y)
   }
   return(res)
 }
 
+
 ### Function to compute coefficients for univariate glmnet
-compute_coefficients_univ_glmnet <- function(X, Y, alpha, standardize, nthreads, Xnew = NULL) {
+computeCoefficientsUnivGlmnet <- function(X, Y, alpha, standardize, nthreads, Xnew = NULL) {
   r <- ncol(Y)
 
   linreg <- function(i, X, Y, alpha, standardize, nthreads, Xnew) {
-    samples_kept <- which(!is.na(Y[, i]))
-    Ynomiss <- Y[samples_kept, i, drop = FALSE]
-    Xnomiss <- X[samples_kept, , drop = FALSE]
+    samplesKept <- which(!is.na(Y[, i]))
+    Ynomiss <- Y[samplesKept, i, drop = FALSE]
+    Xnomiss <- X[samplesKept, , drop = FALSE]
 
     cvfit <- glmnet::cv.glmnet(
       x = Xnomiss, y = Ynomiss, family = "gaussian", alpha = alpha,
       standardize = standardize, parallel = FALSE
     )
     coeffic <- as.vector(coef(cvfit, s = "lambda.min"))
-    lambda_seq <- cvfit$lambda
+    lambdaSeq <- cvfit$lambda
 
     # Make predictions if requested
     if (!is.null(Xnew)) {
-      yhat_glmnet <- drop(predict(cvfit, newx = Xnew, s = "lambda.min"))
-      res <- list(bhat = coeffic, lambda_seq = lambda_seq, yhat_new = yhat_glmnet)
+      yhatGlmnet <- drop(predict(cvfit, newx = Xnew, s = "lambda.min"))
+      res <- list(bhat = coeffic, lambda_seq = lambdaSeq, yhat_new = yhatGlmnet)
     } else {
-      res <- list(bhat = coeffic, lambda_seq = lambda_seq)
+      res <- list(bhat = coeffic, lambda_seq = lambdaSeq)
     }
 
     return(res)
@@ -260,21 +263,22 @@ compute_coefficients_univ_glmnet <- function(X, Y, alpha, standardize, nthreads,
   Bhat <- sapply(out, "[[", "bhat")
 
   if (!is.null(Xnew)) {
-    Yhat_new <- sapply(out, "[[", "yhat_new")
-    colnames(Yhat_new) <- colnames(Y)
-    results <- list(Bhat = Bhat[-1, ], intercept = Bhat[1, ], Yhat_new = Yhat_new)
+    YhatNew <- sapply(out, "[[", "yhat_new")
+    colnames(YhatNew) <- colnames(Y)
+    results <- list(Bhat = Bhat[-1, ], intercept = Bhat[1, ], Yhat_new = YhatNew)
   } else {
     results <- list(Bhat = Bhat[-1, ], intercept = Bhat[1, ])
   }
   return(results)
 }
 
+
 ### Compute prior weights from coefficients estimates
-compute_w0 <- function(Bhat, ncomps) {
-  prop_nonzero <- sum(rowSums(abs(Bhat)) > 0) / nrow(Bhat)
+computeW0 <- function(Bhat, ncomps) {
+  propNonzero <- sum(rowSums(abs(Bhat)) > 0) / nrow(Bhat)
 
   if (ncomps > 1) {
-    w0 <- c((1 - prop_nonzero), rep(prop_nonzero / (ncomps - 1), (ncomps - 1)))
+    w0 <- c((1 - propNonzero), rep(propNonzero / (ncomps - 1), (ncomps - 1)))
   } else {
     w0 <- 1
   }
@@ -286,72 +290,78 @@ compute_w0 <- function(Bhat, ncomps) {
   return(w0)
 }
 
+compute_w0 <- computeW0
+
 #' Re-normalize mrmash weight w0 to have total weight sum to 1
 #' @param w0 is the weight of mr.mash prior matrices that was generated from mr.mash() function.
-rescale_cov_w0 <- function(w0) {
+rescaleCovW0 <- function(w0) {
   # remove null component
   w0 <- w0[names(w0) != "null"]
 
   # split by prior group
   groups <- sub("_[^_]+$", "", names(w0))
-  group_list <- split(w0, groups)
+  groupList <- split(w0, groups)
 
   # get per group sum
-  group_weight <- lapply(group_list, sum)
+  groupWeight <- lapply(groupList, sum)
 
   # Renormalize values within each group
-  weights_list <- unlist(group_weight)
-  sum_weights <- sum(weights_list)
-  if (sum_weights > 0) {
-    weights_list <- weights_list / sum_weights
+  weightsList <- unlist(groupWeight)
+  sumWeights <- sum(weightsList)
+  if (sumWeights > 0) {
+    weightsList <- weightsList / sumWeights
   } else {
     # Use equal weights if all non null weights are zeros
-    weights_list <- setNames(rep(1 / length(weights_list), length(weights_list)), names(weights_list))
+    weightsList <- setNames(rep(1 / length(weightsList), length(weightsList)), names(weightsList))
   }
   # vector to store updated group w0
-  updated_w0 <- rep(NA, length(unique(groups)))
-  names(updated_w0) <- unique(groups)
+  updatedW0 <- rep(NA, length(unique(groups)))
+  names(updatedW0) <- unique(groups)
 
   # replace with updated values
-  updated_w0[names(weights_list)] <- weights_list
-  return(updated_w0)
+  updatedW0[names(weightsList)] <- weightsList
+  return(updatedW0)
 }
 
+rescale_cov_w0 <- rescaleCovW0
 
 ### Function to compute grids
-compute_grid <- function(bhat, sbhat) {
-  grid_mins <- c()
-  grid_maxs <- c()
+computeGrid <- function(bhat, sbhat) {
+  gridMins <- c()
+  gridMaxs <- c()
 
   include <- !(sbhat == 0 | !is.finite(sbhat) | is.na(sbhat) | is.na(bhat))
-  gmax <- grid_max(bhat[include], sbhat[include])
-  gmin <- grid_min(bhat[include], sbhat[include])
-  grid_mins <- c(grid_mins, gmin)
-  grid_maxs <- c(grid_maxs, gmax)
+  gmax <- gridMax(bhat[include], sbhat[include])
+  gmin <- gridMin(bhat[include], sbhat[include])
+  gridMins <- c(gridMins, gmin)
+  gridMaxs <- c(gridMaxs, gmax)
 
-  gmin_tot <- min(grid_mins)
-  gmax_tot <- max(grid_maxs)
-  grid <- autoselect_mixsd(gmin_tot, gmax_tot, mult = sqrt(2))^2
+  gminTot <- min(gridMins)
+  gmaxTot <- max(gridMaxs)
+  grid <- autoselectMixsd(gminTot, gmaxTot, mult = sqrt(2))^2
 
   return(grid)
 }
 
+
 ### Compute the minimum value for the grid
-grid_min <- function(bhat, sbhat) {
+gridMin <- function(bhat, sbhat) {
   min(sbhat)
 }
 
+
 ### Compute the maximum value for the grid
-grid_max <- function(bhat, sbhat) {
+gridMax <- function(bhat, sbhat) {
   if (all(bhat^2 <= sbhat^2)) {
-    8 * grid_min(bhat, sbhat) # the unusual case where we don't need much grid
+    8 * gridMin(bhat, sbhat) # the unusual case where we don't need much grid
   } else {
     2 * sqrt(max(bhat^2 - sbhat^2))
   }
 }
 
+
 ### Function to compute the grid
-autoselect_mixsd <- function(gmin, gmax, mult = 2) {
+autoselectMixsd <- function(gmin, gmax, mult = 2) {
   if (mult == 0) {
     return(c(0, gmax / 2))
   } else {
@@ -359,6 +369,7 @@ autoselect_mixsd <- function(gmin, gmax, mult = 2) {
     return(mult^((-npoint):0) * gmax)
   }
 }
+
 
 #' Compute covariance matrix using FLASH
 #'
@@ -373,7 +384,7 @@ autoselect_mixsd <- function(gmin, gmax, mult = 2) {
 #' @return A covariance matrix of dimension ncol(Y) x ncol(Y), rescaled by
 #'   the column standard deviations of Y.
 #' @export
-compute_cov_flash <- function(Y) {
+computeCovFlash <- function(Y) {
   # flashier >= 1.0 API: var_type / ebnm_fn / verbose (renamed from var.type
   # / prior.family / verbose.lvl). Prior families now come from `ebnm`.
   fl <- flashier::flash(Y, var_type = 2,
@@ -388,7 +399,7 @@ compute_cov_flash <- function(Y) {
     covar <- diag(fl$residuals_sd^2) + crossprod(t(fl$F_pm) * fsd)
   }
   if (nrow(covar) == 0) {
-    stop("compute_cov_flash: FLASH produced an empty covariance matrix.")
+    stop("computeCovFlash: FLASH produced an empty covariance matrix.")
   }
   s <- apply(Y, 2, sd, na.rm = TRUE)
   if (length(s) > 1) s <- diag(s) else s <- matrix(s, 1, 1)
@@ -402,33 +413,33 @@ compute_cov_flash <- function(Y) {
 #' @param Y Numeric matrix (samples x conditions).
 #' @return A diagonal covariance matrix of dimension ncol(Y) x ncol(Y).
 #' @export
-compute_cov_diag <- function(Y) {
+computeCovDiag <- function(Y) {
   diag(apply(Y, 2, var, na.rm = TRUE))
 }
 
 #' Build mr.mash prior covariance matrices
 #'
-#' Shared helper used by both \code{\link{mrmash_wrapper}} (individual-level)
-#' and \code{\link{mrmash_rss_weights}} (summary statistics). Constructs the
+#' Shared helper used by both \code{\link{mrmashWrapper}} (individual-level)
+#' and \code{\link{mrmashRssWeights}} (summary statistics). Constructs the
 #' \code{S0} list of prior covariance matrices via the canonical mixture
 #' (\code{mr.mashr::compute_canonical_covs}) and optional data-driven
 #' matrices, expanded over a scaling grid via
 #' \code{mr.mashr::expand_covs}. The prior grid is derived from \code{Bhat}
-#' and \code{Shat} via \code{\link{compute_grid}} when not supplied.
+#' and \code{Shat} via \code{\link{computeGrid}} when not supplied.
 #'
 #' @param Bhat Numeric matrix of effect-size estimates (variants x conditions).
 #' @param Shat Numeric matrix of standard errors (variants x conditions).
 #' @param K Number of conditions. When NULL, inferred from \code{ncol(Bhat)}.
-#' @param data_driven_prior_matrices Optional list with element \code{U}
+#' @param dataDrivenPriorMatrices Optional list with element \code{U}
 #'   (list of raw covariance matrices) computed e.g. by
-#'   \code{\link{compute_cov_flash}} / \code{\link{compute_cov_diag}}.
-#' @param canonical_prior_matrices Logical. When TRUE (default for RSS),
+#'   \code{\link{computeCovFlash}} / \code{\link{computeCovDiag}}.
+#' @param canonicalPriorMatrices Logical. When TRUE (default for RSS),
 #'   include the standard canonical mixture from
 #'   \code{mr.mashr::compute_canonical_covs()}. When FALSE,
-#'   \code{data_driven_prior_matrices} must be supplied.
-#' @param prior_grid Optional pre-computed scaling grid (numeric vector).
+#'   \code{dataDrivenPriorMatrices} must be supplied.
+#' @param priorGrid Optional pre-computed scaling grid (numeric vector).
 #'   When NULL, derived from \code{Bhat}, \code{Shat} via
-#'   \code{compute_grid()}.
+#'   \code{computeGrid()}.
 #' @param hetgrid Heterogeneity grid passed to
 #'   \code{mr.mashr::compute_canonical_covs()}. Default
 #'   \code{c(0, 0.25, 0.5, 0.75, 1)}, matching the individual-level wrapper.
@@ -438,32 +449,33 @@ compute_cov_diag <- function(Y) {
 #'   covariance matrices) and \code{prior_grid} (the scaling grid that was
 #'   used).
 #' @export
-build_mrmash_prior_matrices <- function(Bhat, Shat, K = NULL,
-                                         data_driven_prior_matrices = NULL,
-                                         canonical_prior_matrices = TRUE,
-                                         prior_grid = NULL,
-                                         hetgrid = c(0, 0.25, 0.5, 0.75, 1),
-                                         singletons = TRUE) {
+buildMrmashPriorMatrices <- function(Bhat, Shat, K = NULL,
+                                     dataDrivenPriorMatrices = NULL,
+                                     canonicalPriorMatrices = TRUE,
+                                     priorGrid = NULL,
+                                     hetgrid = c(0, 0.25, 0.5, 0.75, 1),
+                                     singletons = TRUE) {
   if (!requireNamespace("mr.mashr", quietly = TRUE)) {
     stop("Package 'mr.mashr' is required.")
   }
-  if (is.null(data_driven_prior_matrices) && !isTRUE(canonical_prior_matrices)) {
-    stop("Supply data_driven_prior_matrices or set canonical_prior_matrices = TRUE.")
+  if (is.null(dataDrivenPriorMatrices) && !isTRUE(canonicalPriorMatrices)) {
+    stop("Supply dataDrivenPriorMatrices or set canonicalPriorMatrices = TRUE.")
   }
   if (is.null(K)) K <- ncol(Bhat)
-  if (is.null(prior_grid)) prior_grid <- compute_grid(bhat = Bhat, sbhat = Shat)
+  if (is.null(priorGrid)) priorGrid <- computeGrid(bhat = Bhat, sbhat = Shat)
 
-  if (isTRUE(canonical_prior_matrices)) {
+  if (isTRUE(canonicalPriorMatrices)) {
     canonical <- mr.mashr::compute_canonical_covs(K, singletons = singletons, hetgrid = hetgrid)
-    S0_raw <- if (!is.null(data_driven_prior_matrices)) {
-      c(canonical, data_driven_prior_matrices$U)
+    S0_raw <- if (!is.null(dataDrivenPriorMatrices)) {
+      c(canonical, dataDrivenPriorMatrices$U)
     } else {
       canonical
     }
   } else {
-    S0_raw <- data_driven_prior_matrices$U
+    S0_raw <- dataDrivenPriorMatrices$U
   }
 
-  S0 <- mr.mashr::expand_covs(S0_raw, prior_grid, zeromat = TRUE)
-  list(S0 = S0, prior_grid = prior_grid)
+  S0 <- mr.mashr::expand_covs(S0_raw, priorGrid, zeromat = TRUE)
+  list(S0 = S0, priorGrid = priorGrid)
 }
+

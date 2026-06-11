@@ -2,20 +2,20 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{getPreprocess}
 \alias{getPreprocess}
-\alias{getPreprocess,QCResult-method}
+\alias{getPreprocess,QcResult-method}
 \title{Get Preprocess Snapshot}
 \usage{
 getPreprocess(x)
 
-\S4method{getPreprocess}{QCResult}(x)
+\S4method{getPreprocess}{QcResult}(x)
 }
 \arguments{
-\item{x}{A \code{QCResult} object.}
+\item{x}{A \code{QcResult} object.}
 }
 \value{
-A list with \code{sumstats} and \code{ld_data}.
+A list with \code{sumstats} and \code{ldData}.
 }
 \description{
 Extract the pre-imputation snapshot (\code{sumstats},
-  \code{ld_data}) captured before any LD-mismatch QC or RAISS imputation.
+  \code{ldData}) captured before any LD-mismatch QC or RAISS imputation.
 }

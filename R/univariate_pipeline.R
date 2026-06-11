@@ -65,46 +65,46 @@
 #' @return A list containing the univariate analysis results.
 #' @importFrom susieR susie
 #' @export
-univariate_analysis_pipeline <- function(
+univariateAnalysisPipeline <- function(
     # input data
     X,
     Y,
     maf = NULL,
     af = NULL,
-    X_scalar = 1,
-    Y_scalar = 1,
-    X_variance = NULL,
-    other_quantities = list(),
+    xScalar = 1,
+    yScalar = 1,
+    xVariance = NULL,
+    otherQuantities = list(),
     region = NULL,
     # filters
-    imiss_cutoff = 1.0,
-    maf_cutoff = NULL,
-    xvar_cutoff = 0,
-    ld_reference_meta_file = NULL,
-    pip_cutoff_to_skip = 0,
+    imissCutoff = 1.0,
+    mafCutoff = NULL,
+    xvarCutoff = 0,
+    ldReferenceMetaFile = NULL,
+    pipCutoffToSkip = 0,
     # methods parameter configuration
     L = 20,
-    L_greedy = 5,
+    lGreedy = 5,
     # fine-mapping results summary
-    signal_cutoff = 0.025,
+    signalCutoff = 0.025,
     coverage = c(0.95, 0.7, 0.5),
-    min_abs_corr = 0.8,
-    finemapping_extra_opts = list(refine = TRUE),
-    estimate_residual_variance = TRUE,
+    minAbsCorr = 0.8,
+    finemappingExtraOpts = list(refine = TRUE),
+    estimateResidualVariance = TRUE,
     methods = NULL,
-    add_susie_inf = TRUE,
+    addSusieInf = TRUE,
     # TWAS weights and CV for TWAS weights
-    twas_weights = TRUE,
-    sample_partition = NULL,
-    max_cv_variants = -1,
-    cv_folds = 5,
-    cv_threads = 1,
+    twasWeights = TRUE,
+    samplePartition = NULL,
+    maxCvVariants = -1,
+    cvFolds = 5,
+    cvThreads = 1,
     verbose = 0) {
   # Input validation
   if (!is.matrix(X) || !is.numeric(X)) stop("X must be a numeric matrix")
   if (!is.vector(Y) && !(is.matrix(Y) && ncol(Y) == 1) || !is.numeric(Y)) stop("Y must be a numeric vector or a single column matrix")
   if (nrow(X) != length(Y)) stop("X and Y must have the same number of rows/length")
-  # maf is optional (directionless, used ONLY for maf_cutoff filtering, never
+  # maf is optional (directionless, used ONLY for mafCutoff filtering, never
   # exported). af (directional effect-allele frequency) is optional and is the
   # single source of truth: when supplied it is exported as top_loci$af and the
   # filtering MAF is derived from it.
@@ -120,193 +120,193 @@ univariate_analysis_pipeline <- function(
   # from it (min(af, 1 - af)); a supplied directionless maf is only a fallback
   # and, if it disagrees with the af-derived value, af wins (with a warning).
   if (!is.null(af)) {
-    af_derived_maf <- pmin(af, 1 - af)
-    if (!is.null(maf) && any(abs(maf - af_derived_maf) > 1e-6, na.rm = TRUE)) {
+    afDerivedMaf <- pmin(af, 1 - af)
+    if (!is.null(maf) && any(abs(maf - afDerivedMaf) > 1e-6, na.rm = TRUE)) {
       warning("Both 'maf' and 'af' were supplied and disagree; using the ",
               "af-derived MAF for filtering (af is the single source of truth).")
     }
-    maf <- af_derived_maf
+    maf <- afDerivedMaf
   }
   # If a MAF cutoff is requested, a frequency must be available to derive it.
-  if (is.null(maf) && !is.null(maf_cutoff) && is.numeric(maf_cutoff) && maf_cutoff > 0) {
-    stop("maf_cutoff is set but neither 'af' nor 'maf' was supplied; provide ",
+  if (is.null(maf) && !is.null(mafCutoff) && is.numeric(mafCutoff) && mafCutoff > 0) {
+    stop("mafCutoff is set but neither 'af' nor 'maf' was supplied; provide ",
          "one so MAF can be derived for filtering.")
   }
-  if (!is.numeric(X_scalar) || (length(X_scalar) != 1 && length(X_scalar) != ncol(X))) stop("X_scalar must be a numeric scalar or vector with length equal to the number of columns in X")
-  if (!is.numeric(Y_scalar) || length(Y_scalar) != 1) stop("Y_scalar must be a numeric scalar")
+  if (!is.numeric(xScalar) || (length(xScalar) != 1 && length(xScalar) != ncol(X))) stop("xScalar must be a numeric scalar or vector with length equal to the number of columns in X")
+  if (!is.numeric(yScalar) || length(yScalar) != 1) stop("yScalar must be a numeric scalar")
   if (!is.numeric(L) || L <= 0) stop("L must be a positive integer")
-  if (!is.null(L_greedy) && (!is.numeric(L_greedy) || L_greedy <= 0)) stop("L_greedy must be NULL or a positive integer")
-  if (!is.logical(add_susie_inf) || length(add_susie_inf) != 1 || is.na(add_susie_inf)) {
-    stop("add_susie_inf must be TRUE or FALSE")
+  if (!is.null(lGreedy) && (!is.numeric(lGreedy) || lGreedy <= 0)) stop("lGreedy must be NULL or a positive integer")
+  if (!is.logical(addSusieInf) || length(addSusieInf) != 1 || is.na(addSusieInf)) {
+    stop("addSusieInf must be TRUE or FALSE")
   }
 
-  # Resolve effective methods. NULL => backward-compat via add_susie_inf.
-  valid_methods <- c("susie", "susie_inf", "susie_ash")
+  # Resolve effective methods. NULL => backward-compat via addSusieInf.
+  validMethods <- c("susie", "susie_inf", "susie_ash")
   if (is.null(methods)) {
-    methods <- if (isTRUE(add_susie_inf)) c("susie_inf", "susie") else "susie"
+    methods <- if (isTRUE(addSusieInf)) c("susie_inf", "susie") else "susie"
   } else {
     if (!is.character(methods) || length(methods) == 0L) {
       stop("methods must be a non-empty character vector of method names.")
     }
-    bad <- setdiff(methods, valid_methods)
+    bad <- setdiff(methods, validMethods)
     if (length(bad) > 0) {
       stop("Unknown method(s): ", paste(bad, collapse = ", "),
-           ". Valid options: ", paste(valid_methods, collapse = ", "))
+           ". Valid options: ", paste(validMethods, collapse = ", "))
     }
     methods <- unique(methods)
   }
   # SuSiE-inf initialisation chains into SuSiE and/or SuSiE-ash whenever
-  # either of them is requested alongside SuSiE-inf and add_susie_inf is TRUE.
-  chain_inf_to_susie     <- isTRUE(add_susie_inf) &&
+  # either of them is requested alongside SuSiE-inf and addSusieInf is TRUE.
+  chainInfToSusie     <- isTRUE(addSusieInf) &&
     all(c("susie_inf", "susie") %in% methods)
-  chain_inf_to_susie_ash <- isTRUE(add_susie_inf) &&
+  chainInfToSusieAsh  <- isTRUE(addSusieInf) &&
     all(c("susie_inf", "susie_ash") %in% methods)
-  any_chained_init <- chain_inf_to_susie || chain_inf_to_susie_ash
-  if (isTRUE(twas_weights) && !("susie" %in% methods)) {
-    stop("twas_weights = TRUE requires \"susie\" to be in methods.")
+  anyChainedInit <- chainInfToSusie || chainInfToSusieAsh
+  if (isTRUE(twasWeights) && !("susie" %in% methods)) {
+    stop("twasWeights = TRUE requires \"susie\" to be in methods.")
   }
-  if (isTRUE(twas_weights) && !chain_inf_to_susie) {
-    stop("twas_weights = TRUE requires SuSiE to be initialised from SuSiE-inf; ",
-         "set methods = c(\"susie_inf\", \"susie\") and add_susie_inf = TRUE.")
+  if (isTRUE(twasWeights) && !chainInfToSusie) {
+    stop("twasWeights = TRUE requires SuSiE to be initialised from SuSiE-inf; ",
+         "set methods = c(\"susie_inf\", \"susie\") and addSusieInf = TRUE.")
   }
 
   # Initial PIP check
-  if (pip_cutoff_to_skip != 0) {
-    if (pip_cutoff_to_skip < 0) {
+  if (pipCutoffToSkip != 0) {
+    if (pipCutoffToSkip < 0) {
       # automatically determine the cutoff to use
-      pip_cutoff_to_skip <- 3 * 1 / ncol(X)
+      pipCutoffToSkip <- 3 * 1 / ncol(X)
     }
-    top_model_pip <- susie(X, Y, L = 1)$pip
-    if (!any(top_model_pip > pip_cutoff_to_skip)) {
-      message(paste("Skipping follow-up analysis: No signals above PIP threshold", pip_cutoff_to_skip, "in initial model screening."))
+    topModelPip <- susie(X, Y, L = 1)$pip
+    if (!any(topModelPip > pipCutoffToSkip)) {
+      message(paste("Skipping follow-up analysis: No signals above PIP threshold", pipCutoffToSkip, "in initial model screening."))
       return(list())
     } else {
-      message(paste("Follow-up on region because signals above PIP threshold", pip_cutoff_to_skip, "were detected in initial model screening."))
+      message(paste("Follow-up on region because signals above PIP threshold", pipCutoffToSkip, "were detected in initial model screening."))
     }
   }
 
   # Filter variants if LD reference is provided
-  if (!is.null(ld_reference_meta_file)) {
-    variants_kept <- filter_variants_by_ld_reference(colnames(X), ld_reference_meta_file)
-    X <- X[, variants_kept$data, drop = FALSE]
-    if (!is.null(maf)) maf <- maf[variants_kept$idx]
-    if (!is.null(af)) af <- af[variants_kept$idx]
-    if (length(X_scalar) > 1) X_scalar <- X_scalar[variants_kept$idx]
+  if (!is.null(ldReferenceMetaFile)) {
+    variantsKept <- filterVariantsByLdReference(colnames(X), ldReferenceMetaFile)
+    X <- X[, variantsKept$data, drop = FALSE]
+    if (!is.null(maf)) maf <- maf[variantsKept$idx]
+    if (!is.null(af)) af <- af[variantsKept$idx]
+    if (length(xScalar) > 1) xScalar <- xScalar[variantsKept$idx]
   }
 
   # Filter X based on missingness, MAF, and variance
-  if (!is.null(imiss_cutoff) || !is.null(maf_cutoff)) {
-    X_filtered <- filter_X(X, imiss_cutoff, maf_cutoff, var_thresh = xvar_cutoff, maf = maf, X_variance = X_variance)
-    kept_indices <- match(colnames(X_filtered), colnames(X))
-    if (!is.null(maf)) maf <- maf[kept_indices]
-    if (!is.null(af)) af <- af[kept_indices]
-    if (length(X_scalar) > 1) X_scalar <- X_scalar[kept_indices]
-    X <- X_filtered
+  if (!is.null(imissCutoff) || !is.null(mafCutoff)) {
+    XFiltered <- filterX(X, imissCutoff, mafCutoff, varThresh = xvarCutoff, maf = maf, xVariance = xVariance)
+    keptIndices <- match(colnames(XFiltered), colnames(X))
+    if (!is.null(maf)) maf <- maf[keptIndices]
+    if (!is.null(af)) af <- af[keptIndices]
+    if (length(xScalar) > 1) xScalar <- xScalar[keptIndices]
+    X <- XFiltered
   }
 
   # Main analysis
   st <- proc.time()
   res <- list()
 
-  susie_args <- modifyList(
-    finemapping_extra_opts,
-    list(L = L, L_greedy = L_greedy, coverage = coverage[1],
-         estimate_residual_variance = estimate_residual_variance)
+  susieArgs <- modifyList(
+    finemappingExtraOpts,
+    list(L = L, L_greedy = lGreedy, coverage = coverage[1],
+         estimate_residual_variance = estimateResidualVariance)
   )
-  fitted_models <- list()
+  fittedModels <- list()
 
-  if ("susie_inf" %in% methods || any_chained_init) {
+  if ("susie_inf" %in% methods || anyChainedInit) {
     message("Fitting SuSiE-inf model on input data ...")
-    inf_args <- modifyList(susie_args, list(
+    infArgs <- modifyList(susieArgs, list(
       X = X, y = Y,
       unmappable_effects = "inf",
       convergence_method = "pip",
       refine = FALSE, model_init = NULL
     ))
-    inf_fit <- do.call(susie, inf_args)
-    fitted_models[["susie_inf"]] <- .set_finemapping_fit_class(inf_fit, "susie_inf")
+    infFit <- do.call(susie, infArgs)
+    fittedModels[["susie_inf"]] <- .setFinemappingFitClass(infFit, "susie_inf")
   }
 
   if ("susie" %in% methods) {
-    if (chain_inf_to_susie) {
+    if (chainInfToSusie) {
       message("Fitting SuSiE model initialized by SuSiE-inf ...")
-      su_args <- prepare_susie_from_inf_args(susie_args,
-                                             fitted_models[["susie_inf"]],
-                                             refine_default = TRUE,
-                                             unmappable_effects = "none")
-      su_fit <- do.call(susie, c(list(X = X, y = Y), su_args))
+      suArgs <- prepareSusieFromInfArgs(susieArgs,
+                                        fittedModels[["susie_inf"]],
+                                        refineDefault = TRUE,
+                                        unmappableEffects = "none")
+      suFit <- do.call(susie, c(list(X = X, y = Y), suArgs))
     } else {
       message("Fitting SuSiE model on input data ...")
-      su_fit <- do.call(susie, c(list(X = X, y = Y), susie_args))
+      suFit <- do.call(susie, c(list(X = X, y = Y), susieArgs))
     }
-    fitted_models[["susie"]] <- .set_finemapping_fit_class(su_fit, "susie")
+    fittedModels[["susie"]] <- .setFinemappingFitClass(suFit, "susie")
   }
 
   if ("susie_ash" %in% methods) {
-    if (chain_inf_to_susie_ash) {
+    if (chainInfToSusieAsh) {
       message("Fitting SuSiE-ash model initialized by SuSiE-inf ...")
-      ash_args <- prepare_susie_from_inf_args(susie_args,
-                                              fitted_models[["susie_inf"]],
-                                              refine_default = NULL,
-                                              unmappable_effects = "ash")
-      ash_fit <- do.call(susie, c(list(X = X, y = Y), ash_args))
+      ashArgs <- prepareSusieFromInfArgs(susieArgs,
+                                         fittedModels[["susie_inf"]],
+                                         refineDefault = NULL,
+                                         unmappableEffects = "ash")
+      ashFit <- do.call(susie, c(list(X = X, y = Y), ashArgs))
     } else {
       message("Fitting SuSiE-ash model on input data ...")
-      ash_args <- modifyList(susie_args, list(
+      ashArgs <- modifyList(susieArgs, list(
         X = X, y = Y,
         unmappable_effects = "ash",
         convergence_method = "pip"
       ))
-      ash_fit <- do.call(susie, ash_args)
+      ashFit <- do.call(susie, ashArgs)
     }
-    fitted_models[["susie_ash"]] <- .set_finemapping_fit_class(ash_fit, "susie_ash")
+    fittedModels[["susie_ash"]] <- .setFinemappingFitClass(ashFit, "susie_ash")
   }
 
   # Drop susie_inf from post-processing if it was only fit to provide init for
   # SuSiE / SuSiE-ash (i.e. caller did not request "susie_inf" in methods).
-  if (any_chained_init && !("susie_inf" %in% methods)) {
-    fitted_models[["susie_inf"]] <- NULL
+  if (anyChainedInit && !("susie_inf" %in% methods)) {
+    fittedModels[["susie_inf"]] <- NULL
   }
 
   # Back-compat slots for the most common methods
-  res$susie_inf_fitted <- fitted_models[["susie_inf"]]
-  res$susie_fitted     <- fitted_models[["susie"]]
-  res$susie_ash_fitted <- fitted_models[["susie_ash"]]
+  res$susie_inf_fitted <- fittedModels[["susie_inf"]]
+  res$susie_fitted     <- fittedModels[["susie"]]
+  res$susie_ash_fitted <- fittedModels[["susie_ash"]]
 
   # Process SuSiE results
-  susie_post <- postprocess_finemapping_fits(
-    fits = fitted_models,
-    data_x = X,
-    data_y = Y,
-    X_scalar = X_scalar,
-    y_scalar = Y_scalar,
+  susiePost <- postprocessFinemappingFits(
+    fits = fittedModels,
+    dataX = X,
+    dataY = Y,
+    xScalar = xScalar,
+    yScalar = yScalar,
     af = af,
     coverage = coverage[1],
-    secondary_coverage = if (length(coverage) > 1) coverage[-1] else NULL,
-    signal_cutoff = signal_cutoff,
-    min_abs_corr = min_abs_corr,
-    other_quantities = other_quantities,
+    secondaryCoverage = if (length(coverage) > 1) coverage[-1] else NULL,
+    signalCutoff = signalCutoff,
+    minAbsCorr = minAbsCorr,
+    otherQuantities = otherQuantities,
     region = region
   )
   # Primary method drives root-level finemapping_result / sumstats / etc.
   # Preference order favors "susie" for backward compatibility, then
   # falls back to the first requested method actually fitted.
-  primary_method <- if ("susie" %in% names(fitted_models)) "susie" else names(fitted_models)[1]
-  res <- c(res, format_finemapping_output(susie_post, primary_method = primary_method))
-  susie_inf_fm <- susie_post$finemapping_results$susie_inf$finemapping_result
-  res$susie_inf_result_trimmed <- if (!is.null(susie_inf_fm)) getTrimmedFit(susie_inf_fm) else NULL
-  susie_ash_fm <- susie_post$finemapping_results$susie_ash$finemapping_result
-  res$susie_ash_result_trimmed <- if (!is.null(susie_ash_fm)) getTrimmedFit(susie_ash_fm) else NULL
+  primaryMethod <- if ("susie" %in% names(fittedModels)) "susie" else names(fittedModels)[1]
+  res <- c(res, formatFinemappingOutput(susiePost, primaryMethod = primaryMethod))
+  susieInfFm <- susiePost$finemapping_results$susie_inf$finemapping_result
+  res$susie_inf_result_trimmed <- if (!is.null(susieInfFm)) getTrimmedFit(susieInfFm) else NULL
+  susieAshFm <- susiePost$finemapping_results$susie_ash$finemapping_result
+  res$susie_ash_result_trimmed <- if (!is.null(susieAshFm)) getTrimmedFit(susieAshFm) else NULL
   res$total_time_elapsed <- proc.time() - st
 
   # TWAS weights and cross-validation
-  if (twas_weights) {
-    res$twas_weights_result <- twas_weights_pipeline(
-      X, Y, fitted_models = fitted_models,
-      cv_folds = cv_folds,
-      max_cv_variants = max_cv_variants,
-      cv_threads = cv_threads,
-      sample_partition = sample_partition
+  if (twasWeights) {
+    res$twas_weights_result <- twasWeightsPipeline(
+      X, Y, fittedModels = fittedModels,
+      cvFolds = cvFolds,
+      maxCvVariants = maxCvVariants,
+      cvThreads = cvThreads,
+      samplePartition = samplePartition
     )
     if ("top_loci" %in% names(res) && !is.null(res$twas_weights_result$susie_weights_intermediate)) {
       res$twas_weights_result$susie_weights_intermediate$top_loci <- res$top_loci
@@ -318,32 +318,32 @@ univariate_analysis_pipeline <- function(
 
 #' Load LD for a study, supporting single or mixture panels.
 #'
-#' @param ld_path A single LD metadata TSV path, or comma-separated paths for
+#' @param ldPath A single LD metadata TSV path, or comma-separated paths for
 #'   mixture panels (e.g., "ld_EUR.tsv,ld_AFR.tsv").
 #' @param region Region string "chr:start-end".
-#' @return An \code{LDData} S4 object. For single panels, returns the result of
-#'   \code{load_LD_matrix()} unchanged. For mixture panels, \code{genotype_handle}
+#' @return An \code{LdData} S4 object. For single panels, returns the result of
+#'   \code{loadLdMatrix()} unchanged. For mixture panels, \code{genotypeHandle}
 #'   is a list of per-panel genotype handles sharing the first panel's variants.
 #' @export
-load_study_LD <- function(ld_path, region) {
-  paths <- strsplit(ld_path, ",")[[1]]
+loadStudyLd <- function(ldPath, region) {
+  paths <- strsplit(ldPath, ",")[[1]]
   if (length(paths) == 1) {
-    return(load_LD_matrix(paths, region, return_genotype = "auto"))
+    return(loadLdMatrix(paths, region, returnGenotype = "auto"))
   }
   # Mixture: load each panel; combine handles into a list
-  base <- load_LD_matrix(paths[1], region, return_genotype = TRUE)
-  other_handles <- lapply(paths[-1], function(p) {
-    ld <- load_LD_matrix(p, region, return_genotype = TRUE)
-    ld@genotype_handle
+  base <- loadLdMatrix(paths[1], region, returnGenotype = TRUE)
+  otherHandles <- lapply(paths[-1], function(p) {
+    ld <- loadLdMatrix(p, region, returnGenotype = TRUE)
+    ld@genotypeHandle
   })
-  all_handles <- c(list(base@genotype_handle), other_handles)
-  LDData(
+  allHandles <- c(list(base@genotypeHandle), otherHandles)
+  LdData(
     correlation = NULL,
-    genotype_handle = all_handles,
-    snp_idx = base@snp_idx,
+    genotypeHandle = allHandles,
+    snpIdx = base@snpIdx,
     variants = base@variants,
-    block_metadata = base@block_metadata,
-    n_ref = base@n_ref
+    blockMetadata = base@blockMetadata,
+    nRef = base@nRef
   )
 }
 
@@ -366,100 +366,102 @@ load_study_LD <- function(ld_path, region) {
   sumstats
 }
 
-.match_rss_variants <- function(variants, reference_ids, reference_name) {
-  idx <- match(variants, reference_ids)
+.match_rss_variants <- function(variants, referenceIds, referenceName) {
+  idx <- match(variants, referenceIds)
   if (anyNA(idx)) {
-    idx <- match(strip_chr_prefix(strip_build_suffix(variants)),
-                 strip_chr_prefix(strip_build_suffix(reference_ids)))
+    idx <- match(stripChrPrefix(stripBuildSuffix(variants)),
+                 stripChrPrefix(stripBuildSuffix(referenceIds)))
   }
   if (anyNA(idx)) {
-    missing <- variants[is.na(idx)]
-    stop(reference_name, " is missing ", length(missing),
-         " variant(s): ", paste(utils::head(missing, 3), collapse = ", "))
+    missingVar <- variants[is.na(idx)]
+    stop(referenceName, " is missing ", length(missingVar),
+         " variant(s): ", paste(utils::head(missingVar, 3), collapse = ", "))
   }
   idx
 }
 
-.subset_rss_matrix_columns <- function(X, variants, reference_ids, reference_name) {
-  if (is.null(colnames(X)) && length(reference_ids) == ncol(X)) {
-    colnames(X) <- reference_ids
+.subset_rss_matrix_columns <- function(X, variants, referenceIds, referenceName) {
+  if (is.null(colnames(X)) && length(referenceIds) == ncol(X)) {
+    colnames(X) <- referenceIds
   }
-  idx <- .match_rss_variants(variants, colnames(X), reference_name)
-  X_out <- X[, idx, drop = FALSE]
-  colnames(X_out) <- variants
-  X_out
+  idx <- .match_rss_variants(variants, colnames(X), referenceName)
+  Xout <- X[, idx, drop = FALSE]
+  colnames(Xout) <- variants
+  Xout
 }
 
-.subset_rss_ld_matrix <- function(R, variants, reference_ids) {
-  if (is.null(rownames(R)) && length(reference_ids) == nrow(R)) {
-    rownames(R) <- reference_ids
+.subset_rss_ld_matrix <- function(R, variants, referenceIds) {
+  if (is.null(rownames(R)) && length(referenceIds) == nrow(R)) {
+    rownames(R) <- referenceIds
   }
-  if (is.null(colnames(R)) && length(reference_ids) == ncol(R)) {
-    colnames(R) <- reference_ids
+  if (is.null(colnames(R)) && length(referenceIds) == ncol(R)) {
+    colnames(R) <- referenceIds
   }
   idx <- .match_rss_variants(variants, rownames(R), "LD matrix")
-  R_out <- R[idx, idx, drop = FALSE]
-  rownames(R_out) <- colnames(R_out) <- variants
-  R_out
+  Rout <- R[idx, idx, drop = FALSE]
+  rownames(Rout) <- colnames(Rout) <- variants
+  Rout
 }
 
 #' Convert one loaded RSS record to direct SuSiE RSS input
 #'
-#' @param rss_input A single loaded RSS record, usually one element of
+#' @param rssInput A single loaded RSS record, usually one element of
 #'   \code{qced_regional_data$sumstat_data$sumstats}. It must contain
 #'   \code{sumstats}, \code{n}, and \code{var_y}.
-#' @param LD_data A matching \code{LDData} object for the same study.
+#' @param ldData A matching \code{LdData} object for the same study.
 #' @return A list with \code{susie_rss_input}, ready to pass to
-#'   \code{\link{susie_rss_pipeline}}, and \code{source_info}.
+#'   \code{\link{susieRssPipeline}}, and \code{source_info}.
 #' @export
-region_data_to_susie_rss_input <- function(rss_input, LD_data) {
-  if (!is.list(rss_input) || is.null(rss_input$sumstats)) {
-    stop("rss_input must be a single RSS record with a sumstats element.")
+regionDataToSusieRssInput <- function(rssInput, ldData) {
+  if (!is.list(rssInput) || is.null(rssInput$sumstats)) {
+    stop("rssInput must be a single RSS record with a sumstats element.")
   }
-  if (is.null(LD_data) || !is(LD_data, "LDData")) {
-    stop("LD_data must be an LDData object.")
+  if (is.null(ldData) || !is(ldData, "LdData")) {
+    stop("ldData must be an LdData object.")
   }
 
-  sumstats <- .rss_sumstats_with_variant_id(rss_input$sumstats)
+  sumstats <- .rss_sumstats_with_variant_id(rssInput$sumstats)
   variants <- sumstats$variant_id
   if (length(variants) == 0L) {
-    stop("rss_input$sumstats contains no variants.")
+    stop("rssInput$sumstats contains no variants.")
   }
 
-  reference_ids <- getVariantIds(LD_data)
-  if (hasGenotypes(LD_data)) {
-    X <- getGenotypes(LD_data)
-    X_mat <- if (is.list(X) && !is.matrix(X)) {
+  referenceIds <- getVariantIds(ldData)
+  if (hasGenotypes(ldData)) {
+    X <- getGenotypes(ldData)
+    xMat <- if (is.list(X) && !is.matrix(X)) {
       lapply(X, .subset_rss_matrix_columns, variants = variants,
-             reference_ids = reference_ids,
-             reference_name = "genotype reference panel")
+             referenceIds = referenceIds,
+             referenceName = "genotype reference panel")
     } else {
-      .subset_rss_matrix_columns(X, variants, reference_ids,
-                                 reference_name = "genotype reference panel")
+      .subset_rss_matrix_columns(X, variants, referenceIds,
+                                 referenceName = "genotype reference panel")
     }
-    LD_mat <- NULL
+    ldMat <- NULL
   } else {
-    R <- LD_data@correlation
+    R <- ldData@correlation
     if (is.null(R) || (is.list(R) && !is.matrix(R))) {
-      stop("LD_data must contain one correlation matrix or genotype data.")
+      stop("ldData must contain one correlation matrix or genotype data.")
     }
-    LD_mat <- .subset_rss_ld_matrix(R, variants, reference_ids)
-    X_mat <- NULL
+    ldMat <- .subset_rss_ld_matrix(R, variants, referenceIds)
+    xMat <- NULL
   }
+
+  varY <- rssInput$varY %||% rssInput$var_y
 
   list(
     susie_rss_input = list(
       sumstats = sumstats,
-      LD_mat = LD_mat,
-      X_mat = X_mat,
-      n = rss_input$n,
-      var_y = rss_input$var_y
+      ldMat = ldMat,
+      xMat = xMat,
+      n = rssInput$n,
+      var_y = varY
     ),
     source_info = list(
       n_variants = length(variants),
       variants = variants,
-      uses_X_ref = !is.null(X_mat),
-      has_LD = !is.null(LD_mat)
+      uses_X_ref = !is.null(xMat),
+      has_LD = !is.null(ldMat)
     )
   )
 }
@@ -469,235 +471,239 @@ region_data_to_susie_rss_input <- function(rss_input, LD_data) {
 #' End-to-end pipeline for summary statistics fine-mapping via SuSiE RSS.
 #' Supports both z+R (correlation matrix) and z+X (genotype matrix) interfaces.
 #'
-#' @param sumstat_path File path to the summary statistics.
-#' @param column_file_path File path to the column mapping file.
-#' @param LD_data An \code{LDData} S4 object from \code{load_LD_matrix()}. When
-#'   \code{hasGenotypes(LD_data)} is TRUE (from \code{return_genotype=TRUE}),
+#' @param sumstatPath File path to the summary statistics.
+#' @param columnFilePath File path to the column mapping file.
+#' @param ldData An \code{LdData} S4 object from \code{loadLdMatrix()}. When
+#'   \code{hasGenotypes(ldData)} is TRUE (from \code{returnGenotype=TRUE}),
 #'   susie_rss uses the z+X interface via \code{getGenotypes()}. Local R is
 #'   computed only for QC stages that require a correlation matrix.
-#' @param n_sample Sample size. If 0, retrieved from the sumstat file.
-#' @param n_case Number of cases (for case-control studies).
-#' @param n_control Number of controls (for case-control studies).
-#' @param binary_trait_model How to handle case-control summary statistics.
+#' @param nSample Sample size. If 0, retrieved from the sumstat file.
+#' @param nCase Number of cases (for case-control studies).
+#' @param nControl Number of controls (for case-control studies).
+#' @param binaryTraitModel How to handle case-control summary statistics.
 #'   The default \code{"rss"} uses the z-score RSS interface and does not pass
 #'   a phenotype variance to \code{susieR::susie_rss()}. Use \code{"ols"} only
 #'   when \code{beta} and \code{se} are from OLS on a centered 0/1 phenotype;
-#'   then \code{var_y} is computed from \code{n_case/n} and passed through to
+#'   then \code{varY} is computed from \code{nCase/n} and passed through to
 #'   select the \code{bhat/shat/var_y} sufficient-statistic interface.
 #' @param region Region string "chr:start-end" for tabix subsetting.
-#' @param skip_region Character vector of regions to skip (format "chrom:start-end").
-#' @param extract_region_name Gene/phenotype name to subset.
-#' @param region_name_col Column to filter for extract_region_name.
-#' @param qc_method Summary-statistic QC method. \code{"slalom"} and
+#' @param skipRegion Character vector of regions to skip (format "chrom:start-end").
+#' @param extractRegionName Gene/phenotype name to subset.
+#' @param regionNameCol Column to filter for extractRegionName.
+#' @param qcMethod Summary-statistic QC method. \code{"slalom"} and
 #'   \code{"dentist"} run basic allele harmonization plus LD-mismatch QC;
 #'   \code{"none"} runs basic allele harmonization only.
-#' @param finemapping_method Iteration mode for the SuSiE-RSS fit (when
+#' @param finemappingMethod Iteration mode for the SuSiE-RSS fit (when
 #'   \code{"susie_rss"} is among \code{methods}). One of \code{"susie_rss"}
 #'   (default normal IBSS), \code{"single_effect"} (L=1, single iteration),
 #'   or \code{"bayesian_conditional_regression"} (full L, single iteration).
 #' @param methods Optional character vector selecting which SuSiE-RSS
 #'   variants to fit. Any subset of \code{c("susie_rss", "susie_inf_rss",
 #'   "susie_ash_rss")}. Default \code{NULL} preserves legacy single-method
-#'   behavior via \code{finemapping_method}. When set explicitly, every
+#'   behavior via \code{finemappingMethod}. When set explicitly, every
 #'   requested method contributes rows to the unified \code{top_loci}; when
 #'   \code{"susie_inf_rss"} is paired with \code{"susie_rss"} or
-#'   \code{"susie_ash_rss"} (or both) and \code{add_susie_inf = TRUE}, the
+#'   \code{"susie_ash_rss"} (or both) and \code{addSusieInf = TRUE}, the
 #'   SuSiE-inf-RSS fit initialises the chained downstream method(s).
-#' @param add_susie_inf Logical controlling chained init when
+#' @param addSusieInf Logical controlling chained init when
 #'   \code{"susie_inf_rss"} is in \code{methods} alongside
 #'   \code{"susie_rss"} and/or \code{"susie_ash_rss"}. Default \code{TRUE}.
-#' @param finemapping_opts List of fine-mapping options (L, L_greedy, coverage,
+#' @param finemappingOpts List of fine-mapping options (L, L_greedy, coverage,
 #'   signal_cutoff, min_abs_corr).
 #' @param impute Whether to impute missing variants via RAISS (default TRUE).
-#' @param impute_opts List of imputation options (rcond, R2_threshold, minimum_ld, lamb).
-#' @param pip_cutoff_to_skip PIP threshold for early stopping (default 0, no skip).
-#' @param R_finite Controls variance inflation to account for finite reference LD.
+#' @param imputeOpts List of imputation options (rcond, R2_threshold, minimum_ld, lamb).
+#' @param pipCutoffToSkip PIP threshold for early stopping (default 0, no skip).
+#' @param rFinite Controls variance inflation to account for finite reference LD.
 #'   Passed to \code{susieR::susie_rss()}.
-#' @param R_mismatch LD mismatch correction method passed to \code{susieR::susie_rss()}.
+#' @param rMismatch LD mismatch correction method passed to \code{susieR::susie_rss()}.
 #'   Default NULL disables mismatch correction.
-#' @param keep_indel Whether to keep indel variants (default TRUE).
-#' @param comment_string Comment character for sumstat file (default "#").
+#' @param keepIndel Whether to keep indel variants (default TRUE).
+#' @param commentString Comment character for sumstat file (default "#").
 #' @param diagnostics Whether to include diagnostic info (default FALSE).
 #'
 #' @return A list with fine-mapping results and analyzed summary statistics.
 #' @importFrom magrittr %>%
 #' @importFrom susieR susie_rss
 #' @export
-rss_analysis_pipeline <- function(
-    sumstat_path, column_file_path, LD_data,
-    n_sample = 0, n_case = 0, n_control = 0, region = NULL, skip_region = NULL,
-    extract_region_name = NULL, region_name_col = NULL,
-    qc_method = c("slalom", "dentist", "none"),
-    finemapping_method = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
+rssAnalysisPipeline <- function(
+    sumstatPath, columnFilePath, ldData,
+    nSample = 0, nCase = 0, nControl = 0, region = NULL, skipRegion = NULL,
+    extractRegionName = NULL, regionNameCol = NULL,
+    qcMethod = c("slalom", "dentist", "none"),
+    finemappingMethod = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
     methods = NULL,
-    add_susie_inf = TRUE,
-    finemapping_opts = list(
+    addSusieInf = TRUE,
+    finemappingOpts = list(
       L = 20, L_greedy = 5,
       coverage = c(0.95, 0.7, 0.5), signal_cutoff = 0.025,
       min_abs_corr = 0.8
     ),
-    impute = TRUE, impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
-    pip_cutoff_to_skip = 0, R_finite = NULL, R_mismatch = NULL,
-    keep_indel = TRUE, comment_string = "#", diagnostics = FALSE,
-    binary_trait_model = c("rss", "ols")) {
-  binary_trait_model <- match.arg(binary_trait_model)
-  if (!is(LD_data, "LDData")) {
-    stop("LD_data must be an LDData object")
+    impute = TRUE, imputeOpts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
+    pipCutoffToSkip = 0, rFinite = NULL, rMismatch = NULL,
+    keepIndel = TRUE, commentString = "#", diagnostics = FALSE,
+    binaryTraitModel = c("rss", "ols")) {
+  binaryTraitModel <- match.arg(binaryTraitModel)
+  if (!is(ldData, "LdData")) {
+    stop("ldData must be an LdData object")
   }
   res <- list()
-  rss_input <- load_rss_data(
-    sumstat_path = sumstat_path, column_file_path = column_file_path,
-    n_sample = n_sample, n_case = n_case, n_control = n_control,
-    extract_region_name = extract_region_name, region = region,
-    region_name_col = region_name_col, comment_string = comment_string,
-    binary_trait_model = binary_trait_model
+  rssInput <- loadRssData(
+    sumstatPath = sumstatPath, columnFilePath = columnFilePath,
+    nSample = nSample, nCase = nCase, nControl = nControl,
+    extractRegionName = extractRegionName, region = region,
+    regionNameCol = regionNameCol, commentString = commentString,
+    binaryTraitModel = binaryTraitModel
   )
 
-  sumstats <- rss_input$sumstats
-  n <- rss_input$n
-  var_y <- rss_input$var_y
+  sumstats <- rssInput$sumstats
+  n <- rssInput$n
+  varY <- rssInput$var_y
 
   if (nrow(sumstats) == 0) {
     return(list(rss_data_analyzed = sumstats))
   }
 
-  qc_method_arg <- if (is.null(qc_method)) NULL else match.arg(qc_method)
-  qc_method <- qc_method_arg
-  qc_record <- summary_stats_qc(
-    rss_input = rss_input,
-    LD_data = LD_data,
-    keep_indel = keep_indel,
-    skip_region = skip_region,
-    pip_cutoff_to_skip = pip_cutoff_to_skip,
-    qc_method = if (is.null(qc_method_arg)) "none" else qc_method_arg,
+  qcMethodArg <- if (is.null(qcMethod)) NULL else match.arg(qcMethod)
+  qcMethod <- qcMethodArg
+  qcRecord <- summaryStatsQc(
+    rssInput = rssInput,
+    ldData = ldData,
+    keepIndel = keepIndel,
+    skipRegion = skipRegion,
+    pipCutoffToSkip = pipCutoffToSkip,
+    qcMethod = if (is.null(qcMethodArg)) "none" else qcMethodArg,
     impute = impute,
-    impute_opts = impute_opts,
-    return_on_skip = "preprocess",
-    R_finite = R_finite,
-    R_mismatch = R_mismatch
+    imputeOpts = imputeOpts,
+    returnOnSkip = "preprocess",
+    R_finite = rFinite,
+    R_mismatch = rMismatch
   )
-  if (!is(qc_record, "QCResult")) {
-    stop("summary_stats_qc must return a QCResult object.")
+  if (!is(qcRecord, "QcResult")) {
+    stop("summaryStatsQc must return a QcResult object.")
   }
-  rss_record <- getRSSInput(qc_record)
-  sumstats <- rss_record$sumstats
-  n <- rss_record$n
-  var_y <- rss_record$var_y
-  preprocess_snapshot <- getPreprocess(qc_record)
-  preprocess_ld <- preprocess_snapshot$ld_data
-  preprocess_results <- list(
-    sumstats = preprocess_snapshot$sumstats
+  rssRecord <- getRssInput(qcRecord)
+  sumstats <- rssRecord$sumstats
+  n <- rssRecord$n
+  varY <- rssRecord$var_y
+  preprocessSnapshot <- getPreprocess(qcRecord)
+  preprocessLd <- preprocessSnapshot$ldData %||% preprocessSnapshot$ld_data
+  preprocessResults <- list(
+    sumstats = preprocessSnapshot$sumstats
   )
-  qc_results <- list(outlier_number = getOutlierNumber(qc_record))
+  qcResults <- list(outlier_number = getOutlierNumber(qcRecord))
 
   if (nrow(sumstats) == 0) {
     message("No variants left after preprocessing. Returning empty results.")
     return(list(rss_data_analyzed = sumstats))
   }
-  if (isSkipped(qc_record)) {
+  if (isSkipped(qcRecord)) {
     return(list(rss_data_analyzed = sumstats))
   }
 
-  qc_ld <- getLDData(qc_record)
-  susie_ready <- region_data_to_susie_rss_input(rss_record, qc_ld)$susie_rss_input
+  qcLd <- getLdData(qcRecord)
+  susieReady <- regionDataToSusieRssInput(rssRecord, qcLd)$susie_rss_input
 
-  # Fine-mapping: use X_mat if available, otherwise R
-  if (!is.null(finemapping_method)) {
-    pri_coverage <- finemapping_opts$coverage[1]
-    sec_coverage <- if (length(finemapping_opts$coverage) > 1) finemapping_opts$coverage[-1] else NULL
+  # Fine-mapping: use xMat if available, otherwise R
+  if (!is.null(finemappingMethod)) {
+    priCoverage <- finemappingOpts$coverage[1]
+    secCoverage <- if (length(finemappingOpts$coverage) > 1) finemappingOpts$coverage[-1] else NULL
 
-    res <- do.call(susie_rss_pipeline, c(susie_ready, list(
-      L = finemapping_opts$L, L_greedy = finemapping_opts$L_greedy,
-      analysis_method = finemapping_method,
+    finemappingOptsL_greedy <- finemappingOpts$L_greedy %||% finemappingOpts$lGreedy
+    finemappingOptsSignalCutoff <- finemappingOpts$signal_cutoff %||% finemappingOpts$signalCutoff
+    finemappingOptsMinAbsCorr <- finemappingOpts$min_abs_corr %||% finemappingOpts$minAbsCorr
+    res <- do.call(susieRssPipeline, c(susieReady, list(
+      L = finemappingOpts$L, lGreedy = finemappingOptsL_greedy,
+      analysisMethod = finemappingMethod,
       methods = methods,
-      add_susie_inf = add_susie_inf,
-      coverage = pri_coverage,
-      secondary_coverage = sec_coverage,
-      signal_cutoff = finemapping_opts$signal_cutoff,
-      min_abs_corr = finemapping_opts$min_abs_corr,
-      R_finite = R_finite,
-      R_mismatch = R_mismatch
+      addSusieInf = addSusieInf,
+      coverage = priCoverage,
+      secondaryCoverage = secCoverage,
+      signalCutoff = finemappingOptsSignalCutoff,
+      minAbsCorr = finemappingOptsMinAbsCorr,
+      rFinite = rFinite,
+      rMismatch = rMismatch
     )))
-    if (!is.null(qc_method)) {
-      res$outlier_number <- qc_results$outlier_number
+    if (!is.null(qcMethod)) {
+      res$outlier_number <- qcResults$outlier_number
     }
   }
-  .make_method_name <- function(method, qc_method, impute) {
-    suffix <- if (!is.null(qc_method) && impute) {
-      paste0(toupper(qc_method), "_RAISS_imputed")
-    } else if (!is.null(qc_method)) {
-      toupper(qc_method)
+  .makeMethodName <- function(method, qcMethod, impute) {
+    suffix <- if (!is.null(qcMethod) && impute) {
+      paste0(toupper(qcMethod), "_RAISS_imputed")
+    } else if (!is.null(qcMethod)) {
+      toupper(qcMethod)
     } else {
       "NO_QC"
     }
     paste0(method, "_", suffix)
   }
 
-  .run_reanalysis <- function(sumstats, ld_data, method, finemapping_opts, pri_coverage, sec_coverage) {
-    reanalysis_input <- region_data_to_susie_rss_input(
-      list(sumstats = sumstats, n = n, var_y = var_y),
-      ld_data
+  .runReanalysis <- function(sumstats, ldData, method, finemappingOpts, priCoverage, secCoverage) {
+    reanalysisInput <- regionDataToSusieRssInput(
+      list(sumstats = sumstats, n = n, var_y = varY),
+      ldData
     )$susie_rss_input
-    do.call(susie_rss_pipeline, c(reanalysis_input, list(
-      L = finemapping_opts$L, L_greedy = finemapping_opts$L_greedy,
-      analysis_method = method,
-      coverage = pri_coverage,
-      secondary_coverage = sec_coverage,
-      signal_cutoff = finemapping_opts$signal_cutoff,
-      min_abs_corr = finemapping_opts$min_abs_corr,
-      R_finite = R_finite,
-      R_mismatch = R_mismatch
+    do.call(susieRssPipeline, c(reanalysisInput, list(
+      L = finemappingOpts$L, lGreedy = finemappingOpts$L_greedy %||% finemappingOpts$lGreedy,
+      analysisMethod = method,
+      coverage = priCoverage,
+      secondaryCoverage = secCoverage,
+      signalCutoff = finemappingOptsSignalCutoff,
+      minAbsCorr = finemappingOptsMinAbsCorr,
+      rFinite = rFinite,
+      rMismatch = rMismatch
     )))
   }
 
-  method_name <- .make_method_name(finemapping_method, qc_method, impute)
-  result_list <- list()
-  result_list[[method_name]] <- res
-  result_list[["rss_data_analyzed"]] <- sumstats
+  methodName <- .makeMethodName(finemappingMethod, qcMethod, impute)
+  resultList <- list()
+  resultList[[methodName]] <- res
+  resultList[["rss_data_analyzed"]] <- sumstats
 
-  block_cs_metrics <- list()
+  blockCsMetrics <- list()
   if (diagnostics) {
     if (length(res) > 0) {
-        bvsr_res = get_susie_result(res)
-        bvsr_cs_num = if(!is.null(bvsr_res)) length(bvsr_res$sets$cs) else NULL
-        if (isTRUE(bvsr_cs_num > 0)) { # have CS
-            cs_names_bvsr = names(bvsr_res$sets$cs)
-            block_cs_metrics = extract_cs_info(con_data = res, cs_names = cs_names_bvsr, top_loci_table = res$top_loci)
+        bvsrRes <- getSusieResult(res)
+        bvsrCsNum <- if(!is.null(bvsrRes)) length(bvsrRes$sets$cs) else NULL
+        if (isTRUE(bvsrCsNum > 0)) { # have CS
+            csNamesBvsr <- names(bvsrRes$sets$cs)
+            blockCsMetrics <- extractCsInfo(conData = res, csNames = csNamesBvsr, topLociTable = res$top_loci)
         } else { # no CS
-            if (sum(bvsr_res$pip > finemapping_opts$signal_cutoff) > 0) {
-                block_cs_metrics = extract_top_pip_info(res)
+            if (sum(bvsrRes$pip > finemappingOpts$signal_cutoff) > 0) {
+                blockCsMetrics <- extractTopPipInfo(res)
             }
         }
     }
     # sensitive check for additional analyses
-    if (!is.null(block_cs_metrics) && length(block_cs_metrics) > 0) {
-      block_cs_metrics = parse_cs_corr(block_cs_metrics)
-      cs_row = block_cs_metrics %>% filter(!is.na(block_cs_metrics$variants_per_cs))
-      if (nrow(cs_row)>1) {# CS > 1
-        block_cs_metrics <- block_cs_metrics %>%
+    if (!is.null(blockCsMetrics) && length(blockCsMetrics) > 0) {
+      blockCsMetrics <- parseCsCorr(blockCsMetrics)
+      csRow <- blockCsMetrics %>% filter(!is.na(blockCsMetrics$variants_per_cs))
+      if (nrow(csRow) > 1) {# CS > 1
+        blockCsMetrics <- blockCsMetrics %>%
           mutate(max_cs_corr_study_block = if(all(is.na(cs_corr_max))) {
             NA_real_
           } else {
             max(cs_corr_max, na.rm = TRUE)
           })
-        if (any(block_cs_metrics$p_value > 1e-4 | block_cs_metrics$max_cs_corr_study_block > 0.5)) {
-          bcr <- .run_reanalysis(sumstats, qc_ld, "bayesian_conditional_regression",
-            finemapping_opts, pri_coverage, sec_coverage)
-          if (!is.null(qc_method)) {
-            bcr$outlier_number <- qc_results$outlier_number
+        if (any(blockCsMetrics$p_value > 1e-4 | blockCsMetrics$max_cs_corr_study_block > 0.5)) {
+          bcr <- .runReanalysis(sumstats, qcLd, "bayesian_conditional_regression",
+            finemappingOpts, priCoverage, secCoverage)
+          if (!is.null(qcMethod)) {
+            bcr$outlier_number <- qcResults$outlier_number
           }
-          result_list[[.make_method_name("bayesian_conditional_regression", qc_method, impute)]] <- bcr
-          ser <- .run_reanalysis(preprocess_results$sumstats, preprocess_ld,
-            "single_effect", finemapping_opts, pri_coverage, sec_coverage)
-          result_list[["single_effect_NO_QC"]] <- ser
+          resultList[[.makeMethodName("bayesian_conditional_regression", qcMethod, impute)]] <- bcr
+          ser <- .runReanalysis(preprocessResults$sumstats, preprocessLd,
+            "single_effect", finemappingOpts, priCoverage, secCoverage)
+          resultList[["single_effect_NO_QC"]] <- ser
         }
       } else { # CS = 1 or NA
-        ser <- .run_reanalysis(preprocess_results$sumstats, preprocess_ld,
-          "single_effect", finemapping_opts, pri_coverage, sec_coverage)
-        result_list[["single_effect_NO_QC"]] <- ser
+        ser <- .runReanalysis(preprocessResults$sumstats, preprocessLd,
+          "single_effect", finemappingOpts, priCoverage, secCoverage)
+        resultList[["single_effect_NO_QC"]] <- ser
       }
-    result_list[["diagnostics"]] <- block_cs_metrics
+    resultList[["diagnostics"]] <- blockCsMetrics
     }
   }
-  return(result_list)
+  return(resultList)
 }
+

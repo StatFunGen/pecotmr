@@ -4,14 +4,14 @@
 #' (a \code{FineMappingResult} S4 object), or NULL if no fine-mapping result
 #' is attached.
 #'
-#' @param con_data List. The method-layer entry from a finemapping pipeline
+#' @param conData List. The method-layer entry from a finemapping pipeline
 #'   result, expected to carry \code{$finemapping_result} as a
 #'   \code{FineMappingResult} object.
 #' @return The trimmed fit (a list with \code{pip}, \code{sets}, etc.) or NULL.
 #' @export
-get_susie_result <- function(con_data) {
-  if (length(con_data) == 0) return(NULL)
-  fm <- con_data$finemapping_result
+getSusieResult <- function(conData) {
+  if (length(conData) == 0) return(NULL)
+  fm <- conData$finemapping_result
   if (is.null(fm) || !is(fm, "FineMappingResult")) return(NULL)
   trimmed <- getTrimmedFit(fm)
   if (length(trimmed) == 0) return(NULL)
@@ -23,9 +23,9 @@ get_susie_result <- function(con_data) {
 #' This function extracts and processes information for each Credible Set (CS) 
 #' from finemapping results, typically obtained from a finemapping RDS file.
 #'
-#' @param con_data List. The method layer data from a finemapping RDS file that is not empty.
-#' @param cs_names Character vector. Names of the Credible Sets, usually in the format "L_<number>".
-#' @param top_loci_table Data frame. The $top_loci layer data from the finemapping results.
+#' @param conData List. The method layer data from a finemapping RDS file that is not empty.
+#' @param csNames Character vector. Names of the Credible Sets, usually in the format "L_<number>".
+#' @param topLociTable Data frame. The $top_loci layer data from the finemapping results.
 #'
 #' @return A data frame with one row per CS, containing the following columns:
 #'   \item{cs_name}{Name of the Credible Set}
@@ -48,49 +48,49 @@ get_susie_result <- function(con_data) {
 #' @importFrom dplyr bind_rows
 #'
 #' @export
-extract_cs_info <- function(con_data, cs_names, top_loci_table) {
-  fm <- con_data$finemapping_result
+extractCsInfo <- function(conData, csNames, topLociTable) {
+  fm <- conData$finemapping_result
   trimmed <- getTrimmedFit(fm)
-  variant_names <- getVariantNames(fm)
-  results <- map(seq_along(cs_names), function(i) {
-    cs_name <- cs_names[i]
-    indices <- trimmed$sets$cs[[cs_name]]
+  variantNames <- getVariantNames(fm)
+  results <- map(seq_along(csNames), function(i) {
+    csName <- csNames[i]
+    indices <- trimmed$sets$cs[[csName]]
 
-    # Get variants for this CS using the full variant_names list
-    cs_variants <- variant_names[indices]
-    cs_data <- top_loci_table[top_loci_table$variant_id %in% cs_variants, ]
-    top_row <- which.max(cs_data$pip)
+    # Get variants for this CS using the full variant names list
+    csVariants <- variantNames[indices]
+    csData <- topLociTable[topLociTable$variant_id %in% csVariants, ]
+    topRow <- which.max(csData$pip)
 
-    top_variant <- cs_data$variant_id[top_row]
+    topVariant <- csData$variant_id[topRow]
     # Find the global index of the top variant
-    top_variant_global_index = which(variant_names == top_variant)
-    top_pip <- cs_data$pip[top_row]
-    top_z <- cs_data$z[top_row]
-    p_value <- z_to_pvalue(top_z)
+    topVariantGlobalIndex <- which(variantNames == topVariant)
+    topPip <- csData$pip[topRow]
+    topZ <- csData$z[topRow]
+    pValue <- zToPvalue(topZ)
 
     # Extract cs_corr
-    cs_corr <- if (length(cs_names) > 1) {
+    csCorr <- if (length(csNames) > 1) {
       trimmed$cs_corr[i,]
     } else {
       NA  # Use NA for the second CS or when there's only one CS
     }
-    
+
     # Return results for this CS as a one-row data.frame
-    result = tibble(
-      cs_name = cs_name,
-      variants_per_cs = length(cs_variants),
-      top_variant = top_variant,
-      top_variant_index = top_variant_global_index,
-      top_pip = top_pip,
-      top_z = top_z,
-      p_value = p_value,
-      cs_corr = list(paste(cs_corr, collapse = ","))  # list column if cs_corr is a vector
+    result <- tibble(
+      cs_name = csName,
+      variants_per_cs = length(csVariants),
+      top_variant = topVariant,
+      top_variant_index = topVariantGlobalIndex,
+      top_pip = topPip,
+      top_z = topZ,
+      p_value = pValue,
+      cs_corr = list(paste(csCorr, collapse = ","))  # list column if csCorr is a vector
     )
     return(result)
   })
   # Combine all tibbles into one data frame
-  final_result <- bind_rows(results)
-  return(final_result)
+  finalResult <- bind_rows(results)
+  return(finalResult)
 }
 
 #' Extract Information for Top Variant from Finemapping Results
@@ -99,7 +99,7 @@ extract_cs_info <- function(con_data, cs_names, top_loci_table) {
 #' Inclusion Probability (PIP) from finemapping results, typically used when no 
 #' Credible Sets (CS) are identified in the analysis.
 #'
-#' @param con_data List. The method layer data from a finemapping RDS file.
+#' @param conData List. The method layer data from a finemapping RDS file.
 #'
 #' @return A data frame with one row containing the following columns:
 #'   \item{cs_name}{NA (as no CS is identified)}
@@ -123,40 +123,40 @@ extract_cs_info <- function(con_data, cs_names, top_loci_table) {
 #' analysis parameters or lower coverage. It maintains a structure similar to 
 #' the output of `extract_cs_info()` for consistency in downstream analyses.
 #'
-#' @seealso 
-#' \code{\link{extract_cs_info}} for processing when Credible Sets are present.
+#' @seealso
+#' \code{\link{extractCsInfo}} for processing when Credible Sets are present.
 #'
 #' @export
-extract_top_pip_info <- function(con_data) {
-  fm <- con_data$finemapping_result
+extractTopPipInfo <- function(conData) {
+  fm <- conData$finemapping_result
   trimmed <- getTrimmedFit(fm)
-  variant_names <- getVariantNames(fm)
+  variantNames <- getVariantNames(fm)
   # Find the variant with the highest PIP
-  top_pip_index <- which.max(trimmed$pip)
-  top_pip <- trimmed$pip[top_pip_index]
-  top_variant <- variant_names[top_pip_index]
-  top_z <- con_data$sumstats$z[top_pip_index]
-  p_value <- z_to_pvalue(top_z)
-  
+  topPipIndex <- which.max(trimmed$pip)
+  topPip <- trimmed$pip[topPipIndex]
+  topVariant <- variantNames[topPipIndex]
+  topZ <- conData$sumstats$z[topPipIndex]
+  pValue <- zToPvalue(topZ)
+
   list(
     cs_name = NA,
     variants_per_cs = NA,
-    top_variant = top_variant,
-    top_variant_index = top_pip_index,
-    top_pip = top_pip,
-    top_z = top_z,
-    p_value = p_value,
+    top_variant = topVariant,
+    top_variant_index = topPipIndex,
+    top_pip = topPip,
+    top_z = topZ,
+    p_value = pValue,
     cs_corr = NA  # or NULL
   )
 }
 
-#' Parse Credible Set Correlations from extract_cs_info() Output
+#' Parse Credible Set Correlations from extractCsInfo() Output
 #'
-#' This function takes the output from `extract_cs_info()` and expands the `cs_corr` column
+#' This function takes the output from `extractCsInfo()` and expands the `cs_corr` column
 #' into multiple columns, preserving the original order of correlations. It also
 #' calculates maximum and minimum correlation values for each Credible Set.
 #'
-#' @param df Data frame. The output from `extract_cs_info()` function,
+#' @param df Data frame. The output from `extractCsInfo()` function,
 #'           containing a `cs_corr` column with correlation information.
 #'
 #' @return A data frame with the original columns from the input, plus:
@@ -177,11 +177,11 @@ extract_top_pip_info <- function(con_data) {
 #'   these when calculating max and min correlations.
 #'
 #' @export
-parse_cs_corr <- function(df) {
+parseCsCorr <- function(df) {
   # Ensure we work with a data frame
   df <- as.data.frame(df)
 
-  extract_correlations <- function(x) {
+  extractCorrelations <- function(x) {
     # Early return if x is invalid
     if(is.na(x) || x == "" || is.null(x) || !grepl(",", as.character(x))) {
       return(list(values = numeric(0), max_corr = NA_real_, min_corr = NA_real_))
@@ -189,39 +189,39 @@ parse_cs_corr <- function(df) {
 
     # Convert and filter values
     values <- as.numeric(unlist(strsplit(x, ",")))
-    values_filtered <- abs(values[values != 1])
+    valuesFiltered <- abs(values[values != 1])
 
     # Return list with NA if no valid correlations
     list(
       values = values,
-      max_corr = if(length(values_filtered) > 0) max(abs(values_filtered), na.rm = TRUE) else NA_real_,
-      min_corr = if(length(values_filtered) > 0) min(abs(values_filtered), na.rm = TRUE) else NA_real_
+      max_corr = if(length(valuesFiltered) > 0) max(abs(valuesFiltered), na.rm = TRUE) else NA_real_,
+      min_corr = if(length(valuesFiltered) > 0) min(abs(valuesFiltered), na.rm = TRUE) else NA_real_
     )
   }
   # Process correlations
-  processed_results <- lapply(df$cs_corr, extract_correlations)
+  processedResults <- lapply(df$cs_corr, extractCorrelations)
   # If no valid results, add NA columns and return
-  if(all(sapply(processed_results, function(x) length(x$values) == 0))) {
+  if(all(sapply(processedResults, function(x) length(x$values) == 0))) {
     df$cs_corr_max <- NA_real_
     df$cs_corr_min <- NA_real_
     return(df)
   }
 
   # Determine max number of correlations
-  max_corr_count <- max(sapply(processed_results, function(x) length(x$values)))
+  maxCorrCount <- max(sapply(processedResults, function(x) length(x$values)))
 
   # Create and add correlation columns
-  col_names <- paste0("cs_corr_", 1:max_corr_count)
+  colNames <- paste0("cs_corr_", 1:maxCorrCount)
 
-  for(i in seq_along(col_names)) {
-    df[[col_names[i]]] <- sapply(processed_results, function(x) {
+  for(i in seq_along(colNames)) {
+    df[[colNames[i]]] <- sapply(processedResults, function(x) {
       if(length(x$values) >= i) x$values[i] else NA_real_
     })
   }
 
   # Add max and min correlation columns
-  df$cs_corr_max <- sapply(processed_results, `[[`, "max_corr")
-  df$cs_corr_min <- sapply(processed_results, `[[`, "min_corr")
+  df$cs_corr_max <- sapply(processedResults, `[[`, "max_corr")
+  df$cs_corr_min <- sapply(processedResults, `[[`, "min_corr")
 
   return(df)
 }
@@ -232,7 +232,7 @@ parse_cs_corr <- function(df) {
 #' updating strategies based on their statistical properties and correlations.
 #'
 #' @param df Data frame. Contains information about Credible Sets for a specific study and block.
-#' @param high_corr_cols Character vector. Names of columns in df that represent high correlations.
+#' @param highCorrCols Character vector. Names of columns in df that represent high correlations.
 #'
 #' @return A modified data frame with additional columns attached to the diagnostic table:
 #'   \item{top_cs}{Logical. TRUE for the CS with the highest absolute Z-score.}
@@ -259,38 +259,39 @@ parse_cs_corr <- function(df) {
 #' @importFrom dplyr case_when
 #'
 #' @export
-auto_decision <- function(df, high_corr_cols) {
+autoDecision <- function(df, highCorrCols) {
   # Identify top_cs
-  top_cs_index <- which.max(abs(df$top_z))
+  topCsIndex <- which.max(abs(df$top_z))
   df$top_cs <- FALSE
-  df$top_cs[top_cs_index] <- TRUE
+  df$top_cs[topCsIndex] <- TRUE
 
   # Identify tagged_cs
   df$tagged_cs <- sapply(1:nrow(df), function(i) {
     if (df$top_cs[i]) return(FALSE)
     if (df$p_value[i] > 1e-4) return(TRUE)
-    if (length(high_corr_cols) == 0) return(FALSE)
-    any(sapply(high_corr_cols, function(col) df[i, ..col] == 1))
+    if (length(highCorrCols) == 0) return(FALSE)
+    any(sapply(highCorrCols, function(col) df[i, ..col] == 1))
   })
 
   # Count total and remaining CS
-  total_cs <- nrow(df)
+  totalCs <- nrow(df)
   print("total_cs")
-  print(total_cs)
-  tagged_cs_count <- sum(df$tagged_cs)
-  if (total_cs > 0) {
-    remaining_cs <- total_cs - 1 - tagged_cs_count
+  print(totalCs)
+  taggedCsCount <- sum(df$tagged_cs)
+  if (totalCs > 0) {
+    remainingCs <- totalCs - 1 - taggedCsCount
   } else {
-    remaining_cs <- 0
+    remainingCs <- 0
   }
   # Determine method
   df$method <- case_when(
-  tagged_cs_count == 0 & total_cs > 1 ~ "BVSR",
-  (remaining_cs == 0 & total_cs > 1) | (total_cs == 1) ~ "SER",
-  remaining_cs > 0 ~ "BCR",
+  taggedCsCount == 0 & totalCs > 1 ~ "BVSR",
+  (remainingCs == 0 & totalCs > 1) | (totalCs == 1) ~ "SER",
+  remainingCs > 0 ~ "BCR",
   TRUE ~ NA_character_
 )
 
 
   return(df)
 }
+

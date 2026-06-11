@@ -1,29 +1,29 @@
 #' Convert QC'ed regional summary-statistic data to mvSuSiE RSS input
 #'
-#' @param sumstat_data The \code{sumstat_data} component from a QC'ed regional
+#' @param sumstatData The \code{sumstat_data} component from a QC'ed regional
 #'   object, typically \code{qced_regional_data$sumstat_data}.
-#' @param ld_name Optional name of the LD reference to use. If \code{NULL}, a
+#' @param ldName Optional name of the LD reference to use. If \code{NULL}, a
 #'   unique \code{LD_match} entry is used. If \code{LD_match} points to multiple
 #'   references, the first one is used with a message. When no \code{LD_match}
 #'   is available, the first LD reference containing all shared variants is used.
 #' @return A list with \code{mvsusie_rss_input}, ready for
 #'   \code{mvsusieR::mvsusie_rss()}, and \code{source_info}.
 #' @export
-region_data_to_mvsusie_rss_input <- function(sumstat_data, ld_name = NULL) {
-  if (is.null(sumstat_data) || is.null(sumstat_data$sumstats) ||
-      is.null(sumstat_data$LD_data)) {
-    stop("sumstat_data must contain post-QC sumstats and LD_data entries.")
+regionDataToMvsusieRssInput <- function(sumstatData, ldName = NULL) {
+  if (is.null(sumstatData) || is.null(sumstatData$sumstats) ||
+      is.null(sumstatData$LD_data)) {
+    stop("sumstatData must contain post-QC sumstats and LD_data entries.")
   }
 
-  sumstats <- sumstat_data$sumstats
+  sumstats <- sumstatData$sumstats
   if (length(sumstats) < 2L) {
     stop("mvSuSiE RSS input requires at least two summary-statistic studies.")
   }
 
-  study_names <- names(sumstats)
-  if (is.null(study_names) || any(!nzchar(study_names))) {
-    study_names <- paste0("study", seq_along(sumstats))
-    names(sumstats) <- study_names
+  studyNames <- names(sumstats)
+  if (is.null(studyNames) || any(!nzchar(studyNames))) {
+    studyNames <- paste0("study", seq_along(sumstats))
+    names(sumstats) <- studyNames
   }
 
   sumstats <- lapply(sumstats, function(record) {
@@ -39,92 +39,92 @@ region_data_to_mvsusie_rss_input <- function(sumstat_data, ld_name = NULL) {
     record$sumstats$z[match(overlap, record$sumstats$variant_id)]
   }))
   rownames(Z) <- overlap
-  colnames(Z) <- study_names
+  colnames(Z) <- studyNames
 
-  n_vec <- vapply(sumstats, function(record) {
+  nVec <- vapply(sumstats, function(record) {
     n <- record$n
     if (is.null(n) || length(n) == 0L) return(NA_real_)
     stats::median(as.numeric(n), na.rm = TRUE)
   }, numeric(1))
-  names(n_vec) <- study_names
+  names(nVec) <- studyNames
 
-  LD_data <- sumstat_data$LD_data
-  ld_names <- names(LD_data)
-  if (is.null(ld_names) || any(!nzchar(ld_names))) {
-    ld_names <- paste0("LD", seq_along(LD_data))
-    names(LD_data) <- ld_names
+  LD_data <- sumstatData$LD_data
+  ldNames <- names(LD_data)
+  if (is.null(ldNames) || any(!nzchar(ldNames))) {
+    ldNames <- paste0("LD", seq_along(LD_data))
+    names(LD_data) <- ldNames
   }
 
-  LD_match <- sumstat_data$LD_match
-  matched_ld_names <- character()
+  LD_match <- sumstatData$LD_match
+  matchedLdNames <- character()
   if (!is.null(LD_match)) {
     LD_match <- as.character(LD_match)
-    if (!is.null(names(LD_match)) && all(study_names %in% names(LD_match))) {
-      matched_ld_names <- LD_match[study_names]
-    } else if (length(LD_match) >= length(study_names)) {
-      matched_ld_names <- LD_match[seq_along(study_names)]
+    if (!is.null(names(LD_match)) && all(studyNames %in% names(LD_match))) {
+      matchedLdNames <- LD_match[studyNames]
+    } else if (length(LD_match) >= length(studyNames)) {
+      matchedLdNames <- LD_match[seq_along(studyNames)]
     }
-    matched_ld_names <- unique(matched_ld_names[!is.na(matched_ld_names) & nzchar(matched_ld_names)])
+    matchedLdNames <- unique(matchedLdNames[!is.na(matchedLdNames) & nzchar(matchedLdNames)])
   }
 
-  selected_ld_name <- ld_name
-  if (is.null(selected_ld_name) && length(matched_ld_names) == 1L) {
-    if (!matched_ld_names %in% ld_names) {
-      stop("LD_match points to an LD reference that is not present in sumstat_data$LD_data.")
+  selectedLdName <- ldName
+  if (is.null(selectedLdName) && length(matchedLdNames) == 1L) {
+    if (!matchedLdNames %in% ldNames) {
+      stop("LD_match points to an LD reference that is not present in sumstatData$LD_data.")
     }
-    selected_ld_name <- matched_ld_names
+    selectedLdName <- matchedLdNames
   }
-  if (is.null(selected_ld_name) && length(matched_ld_names) > 1L) {
-    selected_ld_name <- matched_ld_names[[1]]
+  if (is.null(selectedLdName) && length(matchedLdNames) > 1L) {
+    selectedLdName <- matchedLdNames[[1]]
     message("mvSuSiE RSS input: multiple LD_match references were found; using the first reference '",
-            selected_ld_name, "'. Provide ld_name to choose a different reference.")
+            selectedLdName, "'. Provide ldName to choose a different reference.")
   }
-  if (is.null(selected_ld_name)) {
-    contains_overlap <- vapply(LD_data, function(ld) {
-      is(ld, "LDData") && all(overlap %in% getVariantIds(ld))
+  if (is.null(selectedLdName)) {
+    containsOverlap <- vapply(LD_data, function(ld) {
+      is(ld, "LdData") && all(overlap %in% getVariantIds(ld))
     }, logical(1))
-    if (!any(contains_overlap)) {
+    if (!any(containsOverlap)) {
       stop("No LD_data entry contains all shared variants.")
     }
-    selected_ld_name <- ld_names[which(contains_overlap)[1]]
+    selectedLdName <- ldNames[which(containsOverlap)[1]]
   }
-  if (!selected_ld_name %in% ld_names) {
-    stop("ld_name is not present in sumstat_data$LD_data.")
+  if (!selectedLdName %in% ldNames) {
+    stop("ldName is not present in sumstatData$LD_data.")
   }
 
-  ld <- LD_data[[selected_ld_name]]
-  if (!is(ld, "LDData")) stop("Selected LD_data entry must be an LDData object.")
+  ld <- LD_data[[selectedLdName]]
+  if (!is(ld, "LdData")) stop("Selected LD_data entry must be an LdData object.")
 
-  reference_ids <- getVariantIds(ld)
+  referenceIds <- getVariantIds(ld)
   if (hasGenotypes(ld)) {
     X <- getGenotypes(ld)
     if (is.list(X) && !is.matrix(X)) {
-      stop("region_data_to_mvsusie_rss_input requires a single genotype reference, not mixture panels.")
+      stop("regionDataToMvsusieRssInput requires a single genotype reference, not mixture panels.")
     }
-    X_overlap <- .subset_rss_matrix_columns(
-      X, overlap, reference_ids, "genotype reference panel"
+    Xoverlap <- .subset_rss_matrix_columns(
+      X, overlap, referenceIds, "genotype reference panel"
     )
-    R <- compute_LD(X_overlap, method = "sample")
+    R <- computeLd(Xoverlap, method = "sample")
     rownames(R) <- colnames(R) <- overlap
   } else {
     R <- ld@correlation
     if (is.null(R) || (is.list(R) && !is.matrix(R))) {
-      stop("region_data_to_mvsusie_rss_input requires one correlation matrix or one genotype matrix.")
+      stop("regionDataToMvsusieRssInput requires one correlation matrix or one genotype matrix.")
     }
-    R <- .subset_rss_ld_matrix(R, overlap, reference_ids)
+    R <- .subset_rss_ld_matrix(R, overlap, referenceIds)
   }
 
   list(
     mvsusie_rss_input = list(
       Z = Z,
       R = R,
-      N = if (all(is.na(n_vec))) NA_real_ else max(n_vec, na.rm = TRUE)
+      N = if (all(is.na(nVec))) NA_real_ else max(nVec, na.rm = TRUE)
     ),
     source_info = list(
-      studies = study_names,
+      studies = studyNames,
       variants = overlap,
-      n = n_vec,
-      ld_name = selected_ld_name
+      n = nVec,
+      ld_name = selectedLdName
     )
   )
 }
@@ -185,157 +185,157 @@ region_data_to_mvsusie_rss_input <- function(sumstat_data, ld_name = NULL) {
 #'   list(U = x, w = rep(1 / length(x), length(x)))
 #' })
 #'
-#' result <- multivariate_analysis_pipeline(
+#' result <- multivariateAnalysisPipeline(
 #'   X = multitrait_data$X,
 #'   Y = multitrait_data$Y,
 #'   maf = colMeans(multitrait_data$X),
 #'   L = 10,
-#'   L_greedy = 5,
-#'   ld_reference_meta_file = NULL,
-#'   max_cv_variants = -1,
-#'   pip_cutoff_to_skip = 0,
-#'   signal_cutoff = 0.025,
-#'   data_driven_prior_matrices = data_driven_prior_matrices,
-#'   data_driven_prior_matrices_cv = data_driven_prior_matrices_cv,
-#'   canonical_prior_matrices = TRUE,
-#'   sample_partition = NULL,
-#'   cv_folds = 5,
-#'   cv_threads = 2,
-#'   data_driven_prior_weights_cutoff = 1e-4
+#'   lGreedy = 5,
+#'   ldReferenceMetaFile = NULL,
+#'   maxCvVariants = -1,
+#'   pipCutoffToSkip = 0,
+#'   signalCutoff = 0.025,
+#'   dataDrivenPriorMatrices = dataDrivenPriorMatrices,
+#'   dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
+#'   canonicalPriorMatrices = TRUE,
+#'   samplePartition = NULL,
+#'   cvFolds = 5,
+#'   cvThreads = 2,
+#'   dataDrivenPriorWeightsCutoff = 1e-4
 #' )
 #' @export
-multivariate_analysis_pipeline <- function(
+multivariateAnalysisPipeline <- function(
     # input data
     X,
     Y,
     maf = NULL,
     af = NULL,
-    X_variance = NULL,
-    other_quantities = list(),
+    xVariance = NULL,
+    otherQuantities = list(),
     region = NULL,
     # filters
-    imiss_cutoff = 1.0,
-    maf_cutoff = 0.01,
-    xvar_cutoff = 0.01,
-    ld_reference_meta_file = NULL,
-    pip_cutoff_to_skip = 0,
+    imissCutoff = 1.0,
+    mafCutoff = 0.01,
+    xvarCutoff = 0.01,
+    ldReferenceMetaFile = NULL,
+    pipCutoffToSkip = 0,
     # methods parameter configuration
     L = 30,
-    L_greedy = 5,
-    data_driven_prior_matrices = NULL,
-    data_driven_prior_matrices_cv = NULL,
-    data_driven_prior_weights_cutoff = 1e-4,
-    canonical_prior_matrices = TRUE,
-    mrmash_max_iter = 5000,
-    mvsusie_max_iter = 200,
-    estimate_residual_variance = TRUE,
+    lGreedy = 5,
+    dataDrivenPriorMatrices = NULL,
+    dataDrivenPriorMatricesCv = NULL,
+    dataDrivenPriorWeightsCutoff = 1e-4,
+    canonicalPriorMatrices = TRUE,
+    mrmashMaxIter = 5000,
+    mvsusieMaxIter = 200,
+    estimateResidualVariance = TRUE,
     # fine-mapping results summary
-    signal_cutoff = 0.025,
+    signalCutoff = 0.025,
     coverage = c(0.95, 0.7, 0.5),
-    min_abs_corr = 0.8,
+    minAbsCorr = 0.8,
     # TWAS weights and CV for TWAS weights
-    twas_weights = TRUE,
-    sample_partition = NULL,
-    max_cv_variants = -1,
-    cv_folds = 5,
-    cv_threads = 1,
+    twasWeights = TRUE,
+    samplePartition = NULL,
+    maxCvVariants = -1,
+    cvFolds = 5,
+    cvThreads = 1,
     verbose = 0) {
   # Make sure mvsusieR is installed
   if (!requireNamespace("mvsusieR", quietly = TRUE)) {
     stop("To use this function, please install mvsusieR: https://github.com/stephenslab/mvsusieR")
   }
   # Skip conditions based on univariate PIP values
-  skip_conditions <- function(X, Y, pip_cutoff_to_skip) {
-    if (length(pip_cutoff_to_skip) == 1 && is.numeric(pip_cutoff_to_skip)) {
-      pip_cutoff_to_skip <- rep(pip_cutoff_to_skip, ncol(Y))
-    } else if (length(pip_cutoff_to_skip) != ncol(Y)) {
-      stop("pip_cutoff_to_skip must be a single number or a vector of the same length as ncol(Y).")
+  skipConditions <- function(X, Y, pipCutoffToSkip) {
+    if (length(pipCutoffToSkip) == 1 && is.numeric(pipCutoffToSkip)) {
+      pipCutoffToSkip <- rep(pipCutoffToSkip, ncol(Y))
+    } else if (length(pipCutoffToSkip) != ncol(Y)) {
+      stop("pipCutoffToSkip must be a single number or a vector of the same length as ncol(Y).")
     }
-    cols_to_keep <- logical(ncol(Y))
+    colsToKeep <- logical(ncol(Y))
     for (r in 1:ncol(Y)) {
-      if (pip_cutoff_to_skip[r] != 0) {
-        non_missing_indices <- which(!is.na(Y[, r]))
-        X_non_missing <- X[match(names(Y[, r])[non_missing_indices], rownames(X)), ]
-        Y_non_missing <- Y[non_missing_indices, r]
-        if (pip_cutoff_to_skip[r] < 0) {
+      if (pipCutoffToSkip[r] != 0) {
+        nonMissingIndices <- which(!is.na(Y[, r]))
+        XNonMissing <- X[match(names(Y[, r])[nonMissingIndices], rownames(X)), ]
+        YNonMissing <- Y[nonMissingIndices, r]
+        if (pipCutoffToSkip[r] < 0) {
           # automatically determine the cutoff to use
-          pip_cutoff_to_skip[r] <- 3 * 1 / ncol(X_non_missing)
+          pipCutoffToSkip[r] <- 3 * 1 / ncol(XNonMissing)
         }
-        top_model_pip <- susie(X_non_missing, Y_non_missing, L = 1)$pip
+        topModelPip <- susie(XNonMissing, YNonMissing, L = 1)$pip
 
-        if (any(top_model_pip > pip_cutoff_to_skip[r])) {
-          cols_to_keep[r] <- TRUE
+        if (any(topModelPip > pipCutoffToSkip[r])) {
+          colsToKeep[r] <- TRUE
         } else {
           message(paste0(
-            "Skipping condition ", colnames(Y)[r], ", because all top_model_pip < pip_cutoff_to_skip = ",
-            pip_cutoff_to_skip[r], ". Top loci model does not show any potentially significant variants."
+            "Skipping condition ", colnames(Y)[r], ", because all top_model_pip < pipCutoffToSkip = ",
+            pipCutoffToSkip[r], ". Top loci model does not show any potentially significant variants."
           ))
         }
       } else {
-        cols_to_keep[r] <- TRUE
+        colsToKeep[r] <- TRUE
       }
     }
 
-    Y_filtered <- Y[, cols_to_keep, drop = FALSE]
+    YFiltered <- Y[, colsToKeep, drop = FALSE]
 
-    if (ncol(Y_filtered) <= 1) {
-      warning("After filtering by potential association signals, Y has ", ncol(Y_filtered), " context left. Returning NULL.")
+    if (ncol(YFiltered) <= 1) {
+      warning("After filtering by potential association signals, Y has ", ncol(YFiltered), " context left. Returning NULL.")
       return(NULL)
     } else {
-      message("After filtering by potential association signals, Y has ", ncol(Y_filtered), " contexts left.")
-      return(Y_filtered)
+      message("After filtering by potential association signals, Y has ", ncol(YFiltered), " contexts left.")
+      return(YFiltered)
     }
   }
 
-  initialize_mvsusie_prior <- function(condition_names, data_driven_prior_matrices,
-                                       data_driven_prior_matrices_cv, cv_folds, prior_weights, data_driven_prior_weights_cutoff) {
-    if (!is.null(data_driven_prior_matrices)) {
+  initializeMvsusiePrior <- function(conditionNames, dataDrivenPriorMatrices,
+                                     dataDrivenPriorMatricesCv, cvFolds, priorWeights, dataDrivenPriorWeightsCutoff) {
+    if (!is.null(dataDrivenPriorMatrices)) {
       # update w based on mrmash prior weights
       message("Updating prior weights based on mrmash_fitted. ")
-      data_driven_prior_matrices$w <- prior_weights
-      data_driven_prior_matrices$U <- data_driven_prior_matrices$U[names(prior_weights)]
-      data_driven_prior_matrices <- list(matrices = data_driven_prior_matrices$U, weights = data_driven_prior_matrices$w)
-      data_driven_prior_matrices <- mvsusieR::create_mixture_prior(mixture_prior = data_driven_prior_matrices, weights_tol = data_driven_prior_weights_cutoff, include_indices = condition_names)
+      dataDrivenPriorMatrices$w <- priorWeights
+      dataDrivenPriorMatrices$U <- dataDrivenPriorMatrices$U[names(priorWeights)]
+      dataDrivenPriorMatrices <- list(matrices = dataDrivenPriorMatrices$U, weights = dataDrivenPriorMatrices$w)
+      dataDrivenPriorMatrices <- mvsusieR::create_mixture_prior(mixture_prior = dataDrivenPriorMatrices, weights_tol = dataDrivenPriorWeightsCutoff, include_indices = conditionNames)
     } else {
-      data_driven_prior_matrices <- mvsusieR::create_mixture_prior(R = length(condition_names), include_indices = condition_names)
+      dataDrivenPriorMatrices <- mvsusieR::create_mixture_prior(R = length(conditionNames), include_indices = conditionNames)
     }
 
-    if (!is.null(data_driven_prior_matrices_cv)) {
-      data_driven_prior_matrices_cv <- lapply(
-        data_driven_prior_matrices_cv,
+    if (!is.null(dataDrivenPriorMatricesCv)) {
+      dataDrivenPriorMatricesCv <- lapply(
+        dataDrivenPriorMatricesCv,
         function(x) {
-          x$U <- x$U[names(prior_weights)]
-          x <- list(matrices = x$U, weights = prior_weights)
-          mvsusieR::create_mixture_prior(mixture_prior = x, weights_tol = data_driven_prior_weights_cutoff, include_indices = condition_names)
+          x$U <- x$U[names(priorWeights)]
+          x <- list(matrices = x$U, weights = priorWeights)
+          mvsusieR::create_mixture_prior(mixture_prior = x, weights_tol = dataDrivenPriorWeightsCutoff, include_indices = conditionNames)
         }
       )
     } else {
-      if (!is.null(data_driven_prior_matrices)) {
-        data_driven_prior_matrices_cv <- lapply(1:cv_folds, function(x) {
-          return(data_driven_prior_matrices)
+      if (!is.null(dataDrivenPriorMatrices)) {
+        dataDrivenPriorMatricesCv <- lapply(1:cvFolds, function(x) {
+          return(dataDrivenPriorMatrices)
         })
       }
     }
     return(list(
-      data_driven_prior_matrices = data_driven_prior_matrices, data_driven_prior_matrices_cv = data_driven_prior_matrices_cv
+      dataDrivenPriorMatrices = dataDrivenPriorMatrices, dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv
     ))
   }
 
   # filter X and Y missing, specific to multivariate analysis where some conditions are skipped we have to updated X matrix
-  filter_X_Y_missing <- function(X, Y) {
-    Y_rows_with_missing <- apply(Y, 1, function(row) all(is.na(row)))
-    if (any(Y_rows_with_missing)) {
-      Y_filtered <- Y[-which(Y_rows_with_missing), , drop = FALSE]
+  filterXYMissing <- function(X, Y) {
+    YRowsWithMissing <- apply(Y, 1, function(row) all(is.na(row)))
+    if (any(YRowsWithMissing)) {
+      YFiltered <- Y[-which(YRowsWithMissing), , drop = FALSE]
     } else {
-      Y_filtered <- Y
+      YFiltered <- Y
     }
-    X_filtered <- X[match(rownames(Y_filtered), rownames(X)), ]
-    X_columns_with_missing <- apply(X_filtered, 2, function(column) all(is.na(column)))
-    if (any(X_columns_with_missing)) {
-      columns_to_remove <- which(X_columns_with_missing)
-      X_filtered <- X_filtered[, -columns_to_remove, drop = FALSE]
+    XFiltered <- X[match(rownames(YFiltered), rownames(X)), ]
+    XColumnsWithMissing <- apply(XFiltered, 2, function(column) all(is.na(column)))
+    if (any(XColumnsWithMissing)) {
+      columnsToRemove <- which(XColumnsWithMissing)
+      XFiltered <- XFiltered[, -columnsToRemove, drop = FALSE]
     }
-    return(list(X_filtered = X_filtered, Y_filtered = Y_filtered))
+    return(list(XFiltered = XFiltered, YFiltered = YFiltered))
   }
 
   # Input validation
@@ -354,139 +354,141 @@ multivariate_analysis_pipeline <- function(
   # from it (min(af, 1 - af)); a supplied directionless maf is only a fallback
   # and, if it disagrees with the af-derived value, af wins (with a warning).
   if (!is.null(af)) {
-    af_derived_maf <- pmin(af, 1 - af)
-    if (!is.null(maf) && any(abs(maf - af_derived_maf) > 1e-6, na.rm = TRUE)) {
+    afDerivedMaf <- pmin(af, 1 - af)
+    if (!is.null(maf) && any(abs(maf - afDerivedMaf) > 1e-6, na.rm = TRUE)) {
       warning("Both 'maf' and 'af' were supplied and disagree; using the ",
               "af-derived MAF for filtering (af is the single source of truth).")
     }
-    maf <- af_derived_maf
+    maf <- afDerivedMaf
   }
-  if (is.null(maf) && !is.null(maf_cutoff) && is.numeric(maf_cutoff) && maf_cutoff > 0) {
-    stop("maf_cutoff is set but neither 'af' nor 'maf' was supplied; provide ",
+  if (is.null(maf) && !is.null(mafCutoff) && is.numeric(mafCutoff) && mafCutoff > 0) {
+    stop("mafCutoff is set but neither 'af' nor 'maf' was supplied; provide ",
          "one so MAF can be derived for filtering.")
   }
   if (!is.numeric(L) || L <= 0) stop("L must be a positive integer")
-  if (!is.null(L_greedy) && (!is.numeric(L_greedy) || L_greedy <= 0)) stop("L_greedy must be NULL or a positive integer")
-  if (!is.null(L_greedy)) L_greedy <- min(L_greedy, L)
+  if (!is.null(lGreedy) && (!is.numeric(lGreedy) || lGreedy <= 0)) stop("lGreedy must be NULL or a positive integer")
+  if (!is.null(lGreedy)) lGreedy <- min(lGreedy, L)
 
   # main analysis codes
-  Y <- skip_conditions(X, Y, pip_cutoff_to_skip)
+  Y <- skipConditions(X, Y, pipCutoffToSkip)
   if (is.null(Y)) {
     return(list())
   }
 
   # filter X and Y missing data
-  X_Y_filtered <- filter_X_Y_missing(X, Y)
-  X <- X_Y_filtered$X_filtered
-  Y <- X_Y_filtered$Y_filtered
+  XYFiltered <- filterXYMissing(X, Y)
+  X <- XYFiltered$XFiltered
+  Y <- XYFiltered$YFiltered
   if (nrow(Y) == 0 || is.null(Y)) {
     return(list())
   }
 
   # filter variants by ld reference panel
-  if (!is.null(ld_reference_meta_file)) {
-    variants_kept <- filter_variants_by_ld_reference(colnames(X), ld_reference_meta_file)
-    X <- X[, variants_kept$data, drop = FALSE]
-    if (!is.null(maf)) maf <- maf[variants_kept$idx]
-    if (!is.null(af)) af <- af[variants_kept$idx]
+  if (!is.null(ldReferenceMetaFile)) {
+    variantsKept <- filterVariantsByLdReference(colnames(X), ldReferenceMetaFile)
+    X <- X[, variantsKept$data, drop = FALSE]
+    if (!is.null(maf)) maf <- maf[variantsKept$idx]
+    if (!is.null(af)) af <- af[variantsKept$idx]
   }
 
   # filter X based on Y subjects
-  if (!is.null(imiss_cutoff) || !is.null(maf_cutoff)) {
-    X <- filter_X_with_Y(X, Y, imiss_cutoff, maf_cutoff, var_thresh = xvar_cutoff, maf = maf, X_variance = X_variance)
+  if (!is.null(imissCutoff) || !is.null(mafCutoff)) {
+    X <- filterXWithY(X, Y, imissCutoff, mafCutoff, varThresh = xvarCutoff, maf = maf, xVariance = xVariance)
     if (!is.null(maf)) maf <- maf[colnames(X)]
     if (!is.null(af)) af <- af[colnames(X)]
   }
 
   # filter data driven prior matrices
-  if (!is.null(data_driven_prior_matrices)) {
-    data_driven_prior_matrices <- filter_mixture_components(
+  if (!is.null(dataDrivenPriorMatrices)) {
+    dataDrivenPriorMatrices <- filterMixtureComponents(
       colnames(Y),
-      data_driven_prior_matrices$U, data_driven_prior_matrices$w,
-      data_driven_prior_weights_cutoff
+      dataDrivenPriorMatrices$U, dataDrivenPriorMatrices$w,
+      dataDrivenPriorWeightsCutoff
     )
   }
 
   st <- proc.time()
   res <- list()
   message("Fitting mr.mash model on input data ...")
-  res$mrmash_fitted <- mrmash_wrapper(
-    X = X, Y = Y, data_driven_prior_matrices = data_driven_prior_matrices,
-    canonical_prior_matrices = canonical_prior_matrices, max_iter = mrmash_max_iter
+  res$mrmash_fitted <- mrmashWrapper(
+    X = X, Y = Y, dataDrivenPriorMatrices = dataDrivenPriorMatrices,
+    canonicalPriorMatrices = canonicalPriorMatrices, maxIter = mrmashMaxIter
   )
 
   # For input into mvSuSiE
-  resid_Y <- res$mrmash_fitted$V
-  w0_updated <- rescale_cov_w0(res$mrmash_fitted$w0)
-  if (length(w0_updated) == 0) {
+  residY <- res$mrmash_fitted$V
+  w0Updated <- rescaleCovW0(res$mrmash_fitted$w0)
+  if (length(w0Updated) == 0) {
     return(list())
   }
-  w0_updated <- w0_updated[names(w0_updated) %in% names(data_driven_prior_matrices$U)]
-  data_driven_prior_matrices$U <- data_driven_prior_matrices$U[names(w0_updated)]
-  data_driven_prior_matrices$w <- data_driven_prior_matrices$w[names(w0_updated)]
+  w0Updated <- w0Updated[names(w0Updated) %in% names(dataDrivenPriorMatrices$U)]
+  dataDrivenPriorMatrices$U <- dataDrivenPriorMatrices$U[names(w0Updated)]
+  dataDrivenPriorMatrices$w <- dataDrivenPriorMatrices$w[names(w0Updated)]
 
-  if (!is.null(data_driven_prior_matrices_cv)) {
-    for (fold in seq_along(data_driven_prior_matrices_cv)) {
-      data_driven_prior_matrices_cv[[fold]] <- filter_mixture_components(
-        colnames(Y), data_driven_prior_matrices_cv[[fold]]$U,
-        data_driven_prior_matrices_cv[[fold]]$w, data_driven_prior_weights_cutoff
+  if (!is.null(dataDrivenPriorMatricesCv)) {
+    for (fold in seq_along(dataDrivenPriorMatricesCv)) {
+      dataDrivenPriorMatricesCv[[fold]] <- filterMixtureComponents(
+        colnames(Y), dataDrivenPriorMatricesCv[[fold]]$U,
+        dataDrivenPriorMatricesCv[[fold]]$w, dataDrivenPriorWeightsCutoff
       )
-      data_driven_prior_matrices_cv[[fold]]$w <- data_driven_prior_matrices_cv[[fold]]$w[names(data_driven_prior_matrices_cv[[fold]]$w) %in% names(w0_updated)]
-      data_driven_prior_matrices_cv[[fold]]$w <- w0_updated[names(data_driven_prior_matrices_cv[[fold]]$w)]
-      data_driven_prior_matrices_cv[[fold]]$U <- data_driven_prior_matrices_cv[[fold]]$U[names(data_driven_prior_matrices_cv[[fold]]$U) %in% names(w0_updated)]
+      dataDrivenPriorMatricesCv[[fold]]$w <- dataDrivenPriorMatricesCv[[fold]]$w[names(dataDrivenPriorMatricesCv[[fold]]$w) %in% names(w0Updated)]
+      dataDrivenPriorMatricesCv[[fold]]$w <- w0Updated[names(dataDrivenPriorMatricesCv[[fold]]$w)]
+      dataDrivenPriorMatricesCv[[fold]]$U <- dataDrivenPriorMatricesCv[[fold]]$U[names(dataDrivenPriorMatricesCv[[fold]]$U) %in% names(w0Updated)]
     }
-  } else if (is.null(data_driven_prior_matrices_cv) && !is.null(data_driven_prior_matrices)) {
-    data_driven_prior_matrices_cv <- lapply(1:cv_folds, function(fold) data_driven_prior_matrices)
-    names(data_driven_prior_matrices_cv) <- paste0("fold_", 1:cv_folds)
+  } else if (is.null(dataDrivenPriorMatricesCv) && !is.null(dataDrivenPriorMatrices)) {
+    dataDrivenPriorMatricesCv <- lapply(1:cvFolds, function(fold) dataDrivenPriorMatrices)
+    names(dataDrivenPriorMatricesCv) <- paste0("fold_", 1:cvFolds)
   }
 
-  mvsusie_reweighted_mixture_prior <- initialize_mvsusie_prior(
-    colnames(Y), data_driven_prior_matrices,
-    data_driven_prior_matrices_cv, cv_folds, w0_updated, data_driven_prior_weights_cutoff
+  mvsusieReweightedMixturePrior <- initializeMvsusiePrior(
+    colnames(Y), dataDrivenPriorMatrices,
+    dataDrivenPriorMatricesCv, cvFolds, w0Updated, dataDrivenPriorWeightsCutoff
   )
-  res$reweighted_mixture_prior <- mvsusie_reweighted_mixture_prior$data_driven_prior_matrices
-  res$reweighted_mixture_prior_cv <- mvsusie_reweighted_mixture_prior$data_driven_prior_matrices_cv
+  res$reweighted_mixture_prior <- mvsusieReweightedMixturePrior$dataDrivenPriorMatrices
+  res$reweighted_mixture_prior_cv <- mvsusieReweightedMixturePrior$dataDrivenPriorMatricesCv
 
   # Fit mvSuSiE
   message("Fitting mvSuSiE model on input data ...")
   res$mvsusie_fitted <- mvsusieR::mvsusie(X, Y,
-    L = L, L_greedy = L_greedy,
-    prior_variance = mvsusie_reweighted_mixture_prior$data_driven_prior_matrices,
-    residual_variance = resid_Y, estimate_residual_variance = estimate_residual_variance,
-    max_iter = mvsusie_max_iter,
+    L = L, L_greedy = lGreedy,
+    prior_variance = mvsusieReweightedMixturePrior$dataDrivenPriorMatrices,
+    residual_variance = residY, estimate_residual_variance = estimateResidualVariance,
+    max_iter = mvsusieMaxIter,
     verbose = verbose, coverage = coverage[1]
   )
 
   # Process mvSuSiE results
-  sec_coverage <- if (length(coverage) > 1) coverage[-1] else NULL
-  mvsusie_post <- postprocess_finemapping_fits(
-    fits = list(mvsusie = .set_finemapping_fit_class(res$mvsusie_fitted, "mvsusie")),
-    data_x = X,
-    data_y = NULL,
-    X_scalar = 1,
-    y_scalar = 1,
+  secCoverage <- if (length(coverage) > 1) coverage[-1] else NULL
+  mvsusiePost <- postprocessFinemappingFits(
+    fits = list(mvsusie = .setFinemappingFitClass(res$mvsusie_fitted, "mvsusie")),
+    dataX = X,
+    dataY = NULL,
+    xScalar = 1,
+    yScalar = 1,
     af = af,
     coverage = coverage[1],
-    secondary_coverage = sec_coverage,
-    signal_cutoff = signal_cutoff,
-    min_abs_corr = min_abs_corr,
-    other_quantities = other_quantities,
+    secondaryCoverage = secCoverage,
+    signalCutoff = signalCutoff,
+    minAbsCorr = minAbsCorr,
+    otherQuantities = otherQuantities,
     region = region
   )
-  res <- c(res, format_finemapping_output(mvsusie_post, primary_method = "mvsusie"))
+  res <- c(res, formatFinemappingOutput(mvsusiePost, primaryMethod = "mvsusie"))
   res$total_time_elapsed <- proc.time() - st
 
   # Run TWAS weights and optionally CV
-  if (twas_weights) {
-    res$twas_weights_result <- twas_multivariate_weights_pipeline(X, Y, res,
-      cv_folds = cv_folds, sample_partition = sample_partition,
-      max_cv_variants = max_cv_variants,
-      mvsusie_max_iter = mvsusie_max_iter, mrmash_max_iter = mrmash_max_iter,
-      canonical_prior_matrices = canonical_prior_matrices, data_driven_prior_matrices = data_driven_prior_matrices,
-      data_driven_prior_matrices_cv = data_driven_prior_matrices_cv,
-      L = L, L_greedy = L_greedy,
-      cv_threads = cv_threads, verbose = verbose
+  if (twasWeights) {
+    res$twas_weights_result <- twasMultivariateWeightsPipeline(X, Y, res,
+      cvFolds = cvFolds, samplePartition = samplePartition,
+      maxCvVariants = maxCvVariants,
+      mvsusieMaxIter = mvsusieMaxIter, mrmashMaxIter = mrmashMaxIter,
+      canonicalPriorMatrices = canonicalPriorMatrices,
+      dataDrivenPriorMatrices = dataDrivenPriorMatrices,
+      dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
+      L = L, Lgreedy = lGreedy,
+      cvThreads = cvThreads, verbose = verbose
     )
   }
   return(res)
 }
+

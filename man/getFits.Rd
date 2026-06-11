@@ -2,15 +2,15 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{getFits}
 \alias{getFits}
-\alias{getFits,TWASWeights-method}
+\alias{getFits,TwasWeights-method}
 \title{Get Model Fits}
 \usage{
 getFits(x, method = NULL)
 
-\S4method{getFits}{TWASWeights}(x, method = NULL)
+\S4method{getFits}{TwasWeights}(x, method = NULL)
 }
 \arguments{
-\item{x}{A \code{TWASWeights} object.}
+\item{x}{A \code{TwasWeights} object.}
 
 \item{method}{Character, specific method name. If NULL, returns all.}
 }
@@ -18,5 +18,5 @@ getFits(x, method = NULL)
 A list or single element.
 }
 \description{
-Extract fitted model objects from a TWASWeights object.
+Extract fitted model objects from a TwasWeights object.
 }

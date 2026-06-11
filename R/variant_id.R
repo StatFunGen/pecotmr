@@ -11,13 +11,17 @@ NULL
 #' @param x Character vector of chromosome identifiers (e.g., "chr1", "chrX").
 #' @return Character vector with "chr" prefix removed (e.g., "1", "X").
 #' @noRd
-strip_chr_prefix <- function(x) sub("^chr", "", x)
+stripChrPrefix <- function(x) sub("^chr", "", x)
+
+# Backwards-compat alias
 
 #' Strip build suffix from variant IDs (e.g., ":b38" or "_b38").
 #' @param x Character vector of variant IDs.
 #' @return Character vector with build suffix removed.
 #' @noRd
-strip_build_suffix <- function(x) sub("(:|_)b[0-9]+$", "", x)
+stripBuildSuffix <- function(x) sub("(:|_)b[0-9]+$", "", x)
+
+# Backwards-compat alias
 
 #' Test whether allele pairs are single-nucleotide (SNP, not indel).
 #'
@@ -26,10 +30,12 @@ strip_build_suffix <- function(x) sub("(:|_)b[0-9]+$", "", x)
 #' @param a2 Character vector of second alleles.
 #' @return Logical vector, TRUE if the variant is a SNP.
 #' @noRd
-is_snp_alleles <- function(a1, a2) {
+isSnpAlleles <- function(a1, a2) {
   nchar(a1) == 1L & nchar(a2) == 1L &
     grepl("^[ATCG]$", a1) & grepl("^[ATCG]$", a2)
 }
+
+# Backwards-compat alias
 
 #' Detect the naming convention of variant IDs
 #'
@@ -54,21 +60,23 @@ is_snp_alleles <- function(a1, a2) {
 #'     \item{example}{Character, the first non-NA ID for reference.}
 #'   }
 #' @noRd
-detect_variant_convention <- function(ids) {
+detectVariantConvention <- function(ids) {
   # Find first non-NA element
-  first_id <- ids[!is.na(ids)][1]
-  if (is.na(first_id) || length(first_id) == 0) {
+  firstId <- ids[!is.na(ids)][1]
+  if (is.na(firstId) || length(firstId) == 0) {
     return(list(has_chr = FALSE, allele_sep = ":", has_build = FALSE, example = NA_character_))
   }
-  has_chr <- grepl("^chr", first_id)
+  hasChr <- grepl("^chr", firstId)
   # Detect build suffix like :b38 or _b38 at end
-  has_build <- grepl("(:|_)b[0-9]+$", first_id)
-  id_clean <- strip_build_suffix(first_id)
+  hasBuild <- grepl("(:|_)b[0-9]+$", firstId)
+  idClean <- stripBuildSuffix(firstId)
   # Detect allele separator: check if variant uses underscores between allele fields
   # This catches both full underscore ("1_100_A_G") and mixed ("chr1:100_A_G") formats
-  allele_sep <- if (grepl("_[ATCGID*]+_[ATCGID*]+$", id_clean)) "_" else ":"
-  list(has_chr = has_chr, allele_sep = allele_sep, has_build = has_build, example = first_id)
+  alleleSep <- if (grepl("_[ATCGID*]+_[ATCGID*]+$", idClean)) "_" else ":"
+  list(has_chr = hasChr, allele_sep = alleleSep, has_build = hasBuild, example = firstId)
 }
+
+# Backwards-compat alias for external callers
 
 #' Parse variant IDs into a data frame
 #'
@@ -84,7 +92,7 @@ detect_variant_convention <- function(ids) {
 #'   (character), "A1" (character). The detected convention is stored as
 #'   \code{attr(result, "convention")}.
 #' @export
-parse_variant_id <- function(ids) {
+parseVariantId <- function(ids) {
   # Handle data.frame input
   if (is.data.frame(ids)) {
     if (all(c("chrom", "pos", "A2", "A1") %in% names(ids))) {
@@ -101,18 +109,18 @@ parse_variant_id <- function(ids) {
       has_chr = any(grepl("^chr", as.character(ids$chrom))),
       allele_sep = ":", has_build = FALSE, example = NA_character_
     )
-    ids$chrom <- as.integer(strip_chr_prefix(as.character(ids$chrom)))
+    ids$chrom <- as.integer(stripChrPrefix(as.character(ids$chrom)))
     ids$pos <- as.integer(ids$pos)
     attr(ids, "convention") <- conv
     return(ids)
   }
 
   # Detect convention before parsing
-  convention <- detect_variant_convention(ids)
+  convention <- detectVariantConvention(ids)
 
   # Normalize: convert underscores to colons, strip build suffix
   normalized <- gsub("_", ":", ids)
-  normalized <- strip_build_suffix(normalized)
+  normalized <- stripBuildSuffix(normalized)
 
   # Split into exactly 4 fields using strcapture (vectorized, no list overhead)
   data <- strcapture(
@@ -123,7 +131,7 @@ parse_variant_id <- function(ids) {
                        stringsAsFactors = FALSE)
   )
 
-  data$chrom <- as.integer(strip_chr_prefix(data$chrom))
+  data$chrom <- as.integer(stripChrPrefix(data$chrom))
   data$pos <- as.integer(data$pos)
 
   attr(data, "convention") <- convention
@@ -146,32 +154,34 @@ parse_variant_id <- function(ids) {
 #' @param pos Integer position.
 #' @param A2 Character reference allele.
 #' @param A1 Character alternate/effect allele.
-#' @param chr_prefix Logical, whether to add "chr" prefix. Default TRUE.
+#' @param chrPrefix Logical, whether to add "chr" prefix. Default TRUE.
 #'   Ignored if \code{convention} is provided.
-#' @param allele_sep Character, separator between pos/A2 and A2/A1 fields.
+#' @param alleleSep Character, separator between pos/A2 and A2/A1 fields.
 #'   Default \code{":"} produces canonical \code{"chr1:100:A:G"};
 #'   \code{"_"} produces mixed \code{"chr1:100_A_G"}.
 #'   Ignored if \code{convention} is provided.
-#' @param convention Optional list from \code{detect_variant_convention}.
+#' @param convention Optional list from \code{detectVariantConvention}.
 #'   When provided, \code{has_chr} and \code{allele_sep} are read from the
 #'   convention automatically. This is the preferred way to preserve the
 #'   user's input format.
 #' @return A character vector of formatted variant IDs.
 #' @noRd
-format_variant_id <- function(chrom, pos, A2, A1, chr_prefix = TRUE, allele_sep = ":", convention = NULL) {
+formatVariantId <- function(chrom, pos, A2, A1, chrPrefix = TRUE, alleleSep = ":", convention = NULL) {
   # If convention is provided, use it to determine format automatically
   if (!is.null(convention)) {
-    chr_prefix <- convention$has_chr
-    allele_sep <- if (!is.null(convention$allele_sep)) convention$allele_sep else ":"
+    chrPrefix <- convention$has_chr
+    alleleSep <- if (!is.null(convention$allele_sep)) convention$allele_sep else ":"
   }
   # Strip any existing chr prefix to normalize, then re-add if requested
-  chrom_clean <- strip_chr_prefix(as.character(chrom))
-  if (chr_prefix) {
-    paste0("chr", chrom_clean, ":", pos, allele_sep, A2, allele_sep, A1)
+  chromClean <- stripChrPrefix(as.character(chrom))
+  if (chrPrefix) {
+    paste0("chr", chromClean, ":", pos, alleleSep, A2, alleleSep, A1)
   } else {
-    paste0(chrom_clean, ":", pos, allele_sep, A2, allele_sep, A1)
+    paste0(chromClean, ":", pos, alleleSep, A2, alleleSep, A1)
   }
 }
+
+# Backwards-compat alias for external callers
 
 #' Normalize variant IDs to canonical format
 #'
@@ -181,30 +191,34 @@ format_variant_id <- function(chrom, pos, A2, A1, chr_prefix = TRUE, allele_sep 
 #' provided, the output preserves the user's original format automatically.
 #'
 #' @param ids A character vector of variant IDs in any supported format.
-#' @param chr_prefix Logical, whether to include "chr" prefix. Default TRUE.
+#' @param chrPrefix Logical, whether to include "chr" prefix. Default TRUE.
 #'   Ignored if \code{convention} is provided.
-#' @param convention Optional list from \code{detect_variant_convention} or
-#'   \code{attr(parse_variant_id(ids), "convention")}. When provided, the
+#' @param convention Optional list from \code{detectVariantConvention} or
+#'   \code{attr(parseVariantId(ids), "convention")}. When provided, the
 #'   output format is driven automatically by the detected convention.
 #' @return A character vector of normalized variant IDs.
 #' @export
-normalize_variant_id <- function(ids, chr_prefix = TRUE, convention = NULL) {
-  parsed <- parse_variant_id(ids)
+normalizeVariantId <- function(ids, chrPrefix = TRUE, convention = NULL) {
+  parsed <- parseVariantId(ids)
   if (!is.null(convention)) {
-    format_variant_id(parsed$chrom, parsed$pos, parsed$A2, parsed$A1, convention = convention)
+    formatVariantId(parsed$chrom, parsed$pos, parsed$A2, parsed$A1, convention = convention)
   } else {
-    format_variant_id(parsed$chrom, parsed$pos, parsed$A2, parsed$A1, chr_prefix = chr_prefix)
+    formatVariantId(parsed$chrom, parsed$pos, parsed$A2, parsed$A1, chrPrefix = chrPrefix)
   }
 }
 
-# Internal convenience wrapper around parse_variant_id.
-variant_id_to_df <- function(variant_id) {
-  parse_variant_id(variant_id)
+#' @export
+
+# Internal convenience wrapper around parseVariantId.
+variantIdToDf <- function(variantId) {
+  parseVariantId(variantId)
 }
+
+# Backwards-compat alias for external callers
 
 #' @importFrom stringr str_split
 #' @export
-parse_region <- function(region) {
+parseRegion <- function(region) {
   if (!is.character(region) || length(region) != 1) {
     return(region)
   }
@@ -214,7 +228,7 @@ parse_region <- function(region) {
   }
   parts <- str_split(region, "[:-]")[[1]]
   df <- data.frame(
-    chrom = strip_chr_prefix(parts[1]),
+    chrom = stripChrPrefix(parts[1]),
     start = as.integer(parts[2]),
     end = as.integer(parts[3])
   )
@@ -223,37 +237,39 @@ parse_region <- function(region) {
 }
 
 #' Utility function to convert LD region_ids to `region of interest` dataframe
-#' @param ld_region_id A string of region in the format of chrom_start_end.
+#' @param ldRegionId A string of region in the format of chrom_start_end.
 #' @export
-region_to_df <- function(ld_region_id, colnames = c("chrom", "start", "end")) {
-  region_of_interest <- as.data.frame(do.call(rbind, lapply(strsplit(ld_region_id, "[_:-]"), function(x) as.integer(strip_chr_prefix(x)))))
-  colnames(region_of_interest) <- colnames
-  return(region_of_interest)
+regionToDf <- function(ldRegionId, colnames = c("chrom", "start", "end")) {
+  regionOfInterest <- as.data.frame(do.call(rbind, lapply(strsplit(ldRegionId, "[_:-]"), function(x) as.integer(stripChrPrefix(x)))))
+  colnames(regionOfInterest) <- colnames
+  return(regionOfInterest)
 }
 
 #' Ensure two sets of variant IDs use matching chr prefix convention
 #'
-#' Detects whether \code{ids_a} and \code{ids_b} have mismatched chr prefixes.
+#' Detects whether \code{idsA} and \code{idsB} have mismatched chr prefixes.
 #' If mismatched, normalizes both to canonical format (with "chr" prefix) using
-#' \code{\link{normalize_variant_id}}. If already matching, returns inputs
+#' \code{\link{normalizeVariantId}}. If already matching, returns inputs
 #' unchanged.
 #'
-#' @param ids_a Character vector of variant IDs.
-#' @param ids_b Character vector of variant IDs.
+#' @param idsA Character vector of variant IDs.
+#' @param idsB Character vector of variant IDs.
 #' @return A list with components \code{ids_a} and \code{ids_b}, both normalized
 #'   to canonical chr-prefix format if they were mismatched.
 #' @noRd
-ensure_chr_match <- function(ids_a, ids_b) {
-  has_chr_a <- any(grepl("^chr", ids_a[!is.na(ids_a)][1:min(5, sum(!is.na(ids_a)))]))
-  has_chr_b <- any(grepl("^chr", ids_b[!is.na(ids_b)][1:min(5, sum(!is.na(ids_b)))]))
-  if (has_chr_a == has_chr_b) {
-    return(list(ids_a = ids_a, ids_b = ids_b))
+ensureChrMatch <- function(idsA, idsB) {
+  hasChrA <- any(grepl("^chr", idsA[!is.na(idsA)][1:min(5, sum(!is.na(idsA)))]))
+  hasChrB <- any(grepl("^chr", idsB[!is.na(idsB)][1:min(5, sum(!is.na(idsB)))]))
+  if (hasChrA == hasChrB) {
+    return(list(ids_a = idsA, ids_b = idsB))
   }
   list(
-    ids_a = normalize_variant_id(ids_a, chr_prefix = TRUE),
-    ids_b = normalize_variant_id(ids_b, chr_prefix = TRUE)
+    ids_a = normalizeVariantId(idsA, chrPrefix = TRUE),
+    ids_b = normalizeVariantId(idsB, chrPrefix = TRUE)
   )
 }
+
+# Backwards-compat alias for external callers
 
 #' Convert region specifications to a GRanges object
 #'
@@ -265,9 +281,9 @@ ensure_chr_match <- function(ids_a, ids_b) {
 #'   chrom/start/end columns.
 #' @return A \code{GRanges} object.
 #' @noRd
-as_granges <- function(regions) {
+asGranges <- function(regions) {
   if (is.character(regions)) {
-    df <- region_to_df(regions)
+    df <- regionToDf(regions)
   } else if (is.data.frame(regions)) {
     if (!all(c("chrom", "start", "end") %in% names(regions))) {
       stop("data.frame must have columns: chrom, start, end")
@@ -287,19 +303,21 @@ as_granges <- function(regions) {
   )
 }
 
+# Backwards-compat alias for external callers
+
 #' Test whether two genomic regions overlap
 #'
-#' @param region_a A region string ("chr1:100-200" or "1_100_200") or a
+#' @param regionA A region string ("chr1:100-200" or "1_100_200") or a
 #'   single-row data.frame with chrom/start/end columns.
-#' @param region_b A region string or single-row data.frame.
+#' @param regionB A region string or single-row data.frame.
 #' @return Logical scalar: TRUE if the regions share at least one base pair.
 #' @importFrom GenomicRanges GRanges
 #' @importFrom IRanges IRanges findOverlaps
 #' @export
-regions_overlap <- function(region_a, region_b) {
-  gr_a <- as_granges(region_a)
-  gr_b <- as_granges(region_b)
-  length(IRanges::findOverlaps(gr_a, gr_b)) > 0
+regionsOverlap <- function(regionA, regionB) {
+  grA <- asGranges(regionA)
+  grB <- asGranges(regionB)
+  length(IRanges::findOverlaps(grA, grB)) > 0
 }
 
 #' Find which target regions overlap a query region
@@ -314,10 +332,10 @@ regions_overlap <- function(region_a, region_b) {
 #' @importFrom IRanges IRanges findOverlaps
 #' @importFrom S4Vectors subjectHits
 #' @export
-find_overlapping_regions <- function(query, targets) {
-  gr_query <- as_granges(query)
-  gr_targets <- as_granges(targets)
-  hits <- IRanges::findOverlaps(gr_query, gr_targets)
+findOverlappingRegions <- function(query, targets) {
+  grQuery <- asGranges(query)
+  grTargets <- asGranges(targets)
+  hits <- IRanges::findOverlaps(grQuery, grTargets)
   unique(S4Vectors::subjectHits(hits))
 }
 
@@ -328,23 +346,24 @@ find_overlapping_regions <- function(query, targets) {
 #'
 #' @param ids A character vector of variant IDs in "chr:pos:ref:alt" format,
 #'   or a data.frame with A2 (ref) and A1 (alt) columns (e.g., from
-#'   \code{\link{parse_variant_id}}).
+#'   \code{\link{parseVariantId}}).
 #' @return A character vector with one of "SNP", "insertion", "deletion", or
 #'   "MNP" for each variant.
 #' @export
-classify_variant_type <- function(ids) {
+classifyVariantType <- function(ids) {
   if (is.character(ids)) {
-    ids <- parse_variant_id(ids)
+    ids <- parseVariantId(ids)
   }
   if (!is.data.frame(ids) || !all(c("A2", "A1") %in% names(ids))) {
     stop("Input must be a character vector of variant IDs or a data.frame with A2 and A1 columns.")
   }
-  len_ref <- nchar(ids$A2)
-  len_alt <- nchar(ids$A1)
+  lenRef <- nchar(ids$A2)
+  lenAlt <- nchar(ids$A1)
   type <- character(nrow(ids))
-  type[len_ref == 1L & len_alt == 1L & grepl("^[ATCG]$", ids$A2) & grepl("^[ATCG]$", ids$A1)] <- "SNP"
-  type[len_ref == len_alt & (len_ref > 1L | !grepl("^[ATCG]$", ids$A2) | !grepl("^[ATCG]$", ids$A1)) & type == ""] <- "MNP"
-  type[len_ref > len_alt] <- "deletion"
-  type[len_alt > len_ref] <- "insertion"
+  type[lenRef == 1L & lenAlt == 1L & grepl("^[ATCG]$", ids$A2) & grepl("^[ATCG]$", ids$A1)] <- "SNP"
+  type[lenRef == lenAlt & (lenRef > 1L | !grepl("^[ATCG]$", ids$A2) | !grepl("^[ATCG]$", ids$A1)) & type == ""] <- "MNP"
+  type[lenRef > lenAlt] <- "deletion"
+  type[lenAlt > lenRef] <- "insertion"
   type
 }
+

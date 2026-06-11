@@ -196,16 +196,16 @@ void oneIteration(const mat& LD_mat, const std::vector<size_t>& idx, const std::
  * information from a reference panel. It helps detect genotyping/imputation errors, allelic errors, and heterogeneity
  * between GWAS and LD reference samples, improving the reliability of subsequent analyses.
  *
- * @param LD_mat_r The linkage disequilibrium (LD) matrix from a reference panel.
+ * @param ldMatR The linkage disequilibrium (LD) matrix from a reference panel.
  * @param nSample The sample size used in the GWAS whose summary statistics are being analyzed.
- * @param zScore_r A vector of Z-scores from GWAS summary statistics.
+ * @param zScoreR A vector of Z-scores from GWAS summary statistics.
  * @param pValueThreshold Threshold for the p-value below which variants are considered for quality control.
  * @param propSVD Proportion of singular value decomposition (SVD) components retained in the analysis.
  * @param gcControl A boolean flag to apply genetic control corrections.
  * @param nIter The number of iterations to run the DENTIST algorithm.
  * @param gPvalueThreshold P-value threshold for grouping variants into significant and null categories.
  * @param ncpus The number of CPU cores to use for parallel processing.
- * @param correct_chen_et_al_bug Whether to correct the original DENTIST bug.
+ * @param correctChenEtAlBug Whether to correct the original DENTIST bug.
  * @param verbose A boolean flag to enable verbose output for debugging.
  *
  * @return A List object containing:
@@ -217,12 +217,12 @@ void oneIteration(const mat& LD_mat, const std::vector<size_t>& idx, const std::
  */
 
 [[cpp11::register]]
-cpp11::writable::list dentist_iterative_impute(const doubles_matrix<>& LD_mat_r, int nSample, const doubles& zScore_r,
+cpp11::writable::list dentistIterativeImpute(const doubles_matrix<>& ldMatR, int nSample, const doubles& zScoreR,
                               double pValueThreshold, double propSVD, bool gcControl, int nIter,
-                              double gPvalueThreshold, int ncpus, bool correct_chen_et_al_bug,
+                              double gPvalueThreshold, int ncpus, bool correctChenEtAlBug,
                               bool verbose) {
-	mat LD_mat = as_Mat(LD_mat_r);
-	vec zScore = as_Col(zScore_r);
+	mat LD_mat = as_Mat(ldMatR);
+	vec zScore = as_Col(zScoreR);
 
 	if (verbose) {
 		Rprintf("LD_mat dimensions: %lu x %lu\n", (unsigned long)LD_mat.n_rows, (unsigned long)LD_mat.n_cols);
@@ -234,7 +234,7 @@ cpp11::writable::list dentist_iterative_impute(const doubles_matrix<>& LD_mat_r,
 		Rprintf("nIter: %d\n", nIter);
 		Rprintf("gPvalueThreshold: %g\n", gPvalueThreshold);
 		Rprintf("ncpus: %d\n", ncpus);
-		Rprintf("correct_chen_et_al_bug: %d\n", correct_chen_et_al_bug);
+		Rprintf("correctChenEtAlBug: %d\n", correctChenEtAlBug);
 	}
 
 	// Set number of threads for parallel processing
@@ -312,11 +312,11 @@ cpp11::writable::list dentist_iterative_impute(const doubles_matrix<>& LD_mat_r,
 		        then your grouping_tmp will become (1,1,0,0,0) even you are just calling it in the function.
 		        https://github.com/Yves-CHEN/DENTIST/blob/2fefddb1bbee19896a30bf56229603561ea1dba8/main/inversion.cpp#L647
 		        https://github.com/Yves-CHEN/DENTIST/blob/2fefddb1bbee19896a30bf56229603561ea1dba8/main/inversion.cpp#L675
-		        Thus if we correct the original DENTIST code, i.e., correct_chen_et_al_bug = TRUE,
+		        Thus if we correct the original DENTIST code, i.e., correctChenEtAlBug = TRUE,
 		                we go through our function, getQuantile2, which doesn't have this issue
-		                else, i.e., correct_chen_et_al_bug = TRUE, it goes through the original function getQuantile2_chen_et_al
+		                else, i.e., correctChenEtAlBug = TRUE, it goes through the original function getQuantile2_chen_et_al
 		 */
-		if (correct_chen_et_al_bug) {
+		if (correctChenEtAlBug) {
 			threshold1 = getQuantile2(diff, grouping_tmp, 0.995, false);
 			threshold0 = getQuantile2(diff, grouping_tmp, 0.995, true);
 		} else {
@@ -331,14 +331,14 @@ cpp11::writable::list dentist_iterative_impute(const doubles_matrix<>& LD_mat_r,
 			threshold1 = threshold;
 			threshold0 = threshold;
 		}
-		if (correct_chen_et_al_bug || nIter - 2 >= 0) {
+		if (correctChenEtAlBug || nIter - 2 >= 0) {
 			/*In the original DENTIST method, if t=0 (first iteration) and nIter is 1,
 			   t is defined as a size_t (unassigned integer)
 			   https://github.com/Yves-CHEN/DENTIST/blob/2fefddb1bbee19896a30bf56229603561ea1dba8/main/inversion.cpp#L628
 			   and it will treat t (which is 0) no larger than nIter-2 (which is -1) which is wrong
-			   Thus if we correct the original DENTIST code, i.e., correct_chen_et_al_bug = TRUE, or when nIter - 2 >=0,
+			   Thus if we correct the original DENTIST code, i.e., correctChenEtAlBug = TRUE, or when nIter - 2 >=0,
 			   it will compare t and nIter as we expect.
-			   and if we want to keep the original DENTIST code, i.e., correct_chen_et_al_bug = TRUE, then it will skip this if condition for t > nIter - 2
+			   and if we want to keep the original DENTIST code, i.e., correctChenEtAlBug = TRUE, then it will skip this if condition for t > nIter - 2
 			 */
 			if (t > nIter - 2) {
 				threshold0 = threshold;
@@ -387,7 +387,7 @@ cpp11::writable::list dentist_iterative_impute(const doubles_matrix<>& LD_mat_r,
 
 		// Re-determine thresholds based on the recalculated differences and groupings
 		threshold = getQuantile(diff, 0.995);
-		if (correct_chen_et_al_bug) {
+		if (correctChenEtAlBug) {
 			threshold1 = getQuantile2(diff, grouping_tmp, 0.995, false);
 			threshold0 = getQuantile2(diff, grouping_tmp, 0.995, true);
 		} else {
@@ -399,7 +399,7 @@ cpp11::writable::list dentist_iterative_impute(const doubles_matrix<>& LD_mat_r,
 		}
 
 
-		if (correct_chen_et_al_bug || nIter - 2 >= 0) {
+		if (correctChenEtAlBug || nIter - 2 >= 0) {
 			if (t > nIter - 2) {
 				threshold0 = threshold;
 				threshold1 = threshold;
@@ -450,10 +450,10 @@ cpp11::writable::list dentist_iterative_impute(const doubles_matrix<>& LD_mat_r,
 				// When gcControl is false, simply check if the variant passes the basic threshold
 				if (minusLogPvalueChisq2(chisq_i) < -log10(pValueThreshold)) {
 					// In original DENTIST, grouping_tmp[i] is used here, which has been
-					// inverted by the !operator. When correct_chen_et_al_bug=FALSE we must
+					// inverted by the !operator. When correctChenEtAlBug=FALSE we must
 					// use grouping_tmp to match original behavior; when TRUE we use the
 					// un-mutated groupingGWAS.
-					size_t grp = correct_chen_et_al_bug ? groupingGWAS[fullIdx[i]] : grouping_tmp[i];
+					size_t grp = correctChenEtAlBug ? groupingGWAS[fullIdx[i]] : grouping_tmp[i];
 					if ((grp == 1 && diff[i] <= threshold1) ||
 					    (grp == 0 && diff[i] <= threshold0)) {
 						fullIdx_tmp.push_back(fullIdx[i]);
@@ -488,11 +488,11 @@ cpp11::writable::list dentist_iterative_impute(const doubles_matrix<>& LD_mat_r,
 
 	using namespace cpp11::literals;
 	writable::list result({
-		"original_z"_nm = as_doubles(zScore),
-		"imputed_z"_nm = as_doubles(imputedZ),
+		"originalZ"_nm = as_doubles(zScore),
+		"imputedZ"_nm = as_doubles(imputedZ),
 		"rsq"_nm = as_doubles(rsq),
-		"z_diff"_nm = as_doubles(zScore_e),
-		"iter_to_correct"_nm = as_integers(iterID)
+		"zDiff"_nm = as_doubles(zScore_e),
+		"iterToCorrect"_nm = as_integers(iterID)
 	});
 
 	return result;

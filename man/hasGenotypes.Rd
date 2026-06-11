@@ -2,20 +2,20 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{hasGenotypes}
 \alias{hasGenotypes}
-\alias{hasGenotypes,LDData-method}
+\alias{hasGenotypes,LdData-method}
 \title{Check Genotype Availability}
 \usage{
 hasGenotypes(x)
 
-\S4method{hasGenotypes}{LDData}(x)
+\S4method{hasGenotypes}{LdData}(x)
 }
 \arguments{
-\item{x}{An \code{LDData} object.}
+\item{x}{An \code{LdData} object.}
 }
 \value{
 Logical.
 }
 \description{
-Check whether an \code{LDData} object has a genotype
+Check whether an \code{LdData} object has a genotype
   handle for extracting raw genotypes.
 }

@@ -14,33 +14,33 @@ NULL
 #' @title Get SNP Indices Per Block
 #' @description For each LD block, find the SNP indices from a reference
 #'   that fall within the block boundaries.
-#' @param snp_info A data.frame with columns CHR, BP.
-#' @param ld_blocks An \code{LDBlocks} object.
+#' @param snpInfo A data.frame with columns CHR, BP.
+#' @param ldBlocks An \code{LdBlocks} object.
 #' @return A list of integer vectors, one per block.
 #' @keywords internal
-snpsPerBlock <- function(snp_info, ld_blocks) {
-  blocks_gr <- ld_blocks@blocks
-  snp_gr <- GRanges(
-    seqnames = snp_info$CHR,
-    ranges = IRanges(start = snp_info$BP, width = 1L)
+snpsPerBlock <- function(snpInfo, ldBlocks) {
+  blocksGr <- ldBlocks@blocks
+  snpGr <- GRanges(
+    seqnames = snpInfo$CHR,
+    ranges = IRanges(start = snpInfo$BP, width = 1L)
   )
-  hits <- findOverlaps(snp_gr, blocks_gr)
+  hits <- findOverlaps(snpGr, blocksGr)
   split(queryHits(hits), subjectHits(hits))
 }
 
 #' @title Apply Function Per Block with BiocParallel
 #' @description Apply a function to each LD block in parallel.
-#' @param block_indices List of SNP index vectors per block.
+#' @param blockIndices List of SNP index vectors per block.
 #' @param FUN Function to apply to each block's indices.
 #' @param BPPARAM BiocParallel parameter object.
 #' @param ... Additional arguments passed to FUN.
 #' @return A list of results, one per block.
 #' @keywords internal
-bplapplyBlocks <- function(block_indices, FUN, BPPARAM = NULL, ...) {
+bplapplyBlocks <- function(blockIndices, FUN, BPPARAM = NULL, ...) {
   if (is.null(BPPARAM)) {
     BPPARAM <- bpparam()
   }
-  bplapply(block_indices, FUN, BPPARAM = BPPARAM, ...)
+  bplapply(blockIndices, FUN, BPPARAM = BPPARAM, ...)
 }
 
 # =============================================================================
@@ -75,18 +75,18 @@ weightedLs <- function(y, X, w) {
 
 #' @title Jackknife Standard Errors by Block
 #' @description Compute jackknife SE estimates using leave-one-block-out.
-#' @param estimates_full Numeric vector, full-sample parameter estimates.
-#' @param estimates_loo A matrix (n_blocks x n_params), leave-one-out estimates.
+#' @param estimatesFull Numeric vector, full-sample parameter estimates.
+#' @param estimatesLoo A matrix (nBlocks x nParams), leave-one-out estimates.
 #' @return Numeric vector of jackknife SEs.
 #' @keywords internal
-jackknifeSe <- function(estimates_full, estimates_loo) {
-  n_blocks <- nrow(estimates_loo)
-  pseudo_vals <- n_blocks * matrix(estimates_full, nrow = n_blocks,
-                                   ncol = length(estimates_full),
-                                   byrow = TRUE) -
-    (n_blocks - 1) * estimates_loo
-  jk_var <- apply(pseudo_vals, 2, var) / n_blocks
-  sqrt(jk_var)
+jackknifeSe <- function(estimatesFull, estimatesLoo) {
+  nBlocks <- nrow(estimatesLoo)
+  pseudoVals <- nBlocks * matrix(estimatesFull, nrow = nBlocks,
+                                 ncol = length(estimatesFull),
+                                 byrow = TRUE) -
+    (nBlocks - 1) * estimatesLoo
+  jkVar <- apply(pseudoVals, 2, var) / nBlocks
+  sqrt(jkVar)
 }
 
 # =============================================================================
@@ -100,13 +100,13 @@ jackknifeSe <- function(estimates_full, estimates_loo) {
 #' @param w Numeric vector, weights (inverse variance).
 #' @param lambda Numeric, ridge penalty. 0 = no penalty (delegates to
 #'   \code{weightedLs}).
-#' @param penalize_intercept Logical. If FALSE (default), the last column
+#' @param penalizeIntercept Logical. If FALSE (default), the last column
 #'   of X (assumed to be the intercept) is not penalized.
 #' @return Same structure as \code{weightedLs}: coef, se, residuals, fitted,
 #'   vcov.
 #' @keywords internal
 weightedLsRidge <- function(y, X, w, lambda = 0,
-                            penalize_intercept = FALSE) {
+                            penalizeIntercept = FALSE) {
   if (lambda == 0) return(weightedLs(y, X, w))
   if (is.null(dim(X))) X <- matrix(X, ncol = 1)
   p <- ncol(X)
@@ -117,7 +117,7 @@ weightedLsRidge <- function(y, X, w, lambda = 0,
   Xty <- crossprod(Xw, yw)
   # Ridge penalty matrix (don't penalize intercept by default)
   penalty <- diag(lambda, p)
-  if (!penalize_intercept && p > 1) penalty[p, p] <- 0
+  if (!penalizeIntercept && p > 1) penalty[p, p] <- 0
   coef <- solve(XtX + penalty, Xty)
   fitted <- X %*% coef
   resid <- y - fitted
@@ -140,59 +140,59 @@ weightedLsRidge <- function(y, X, w, lambda = 0,
 #'   enrichment ratio, enrichment SE (from jackknife or delta method),
 #'   and p-value.
 #' @param tau Numeric vector of per-annotation regression coefficients.
-#' @param tau_se Numeric vector of SE for tau.
-#' @param tau_blocks Numeric matrix (n_blocks x n_annotations) of jackknife
+#' @param tauSe Numeric vector of SE for tau.
+#' @param tauBlocks Numeric matrix (nBlocks x nAnnotations) of jackknife
 #'   block-level tau values, or NULL.
-#' @param baseline_mat Numeric matrix (n_snps x n_annotations).
-#' @param annot_names Character vector of annotation names.
+#' @param baselineMat Numeric matrix (nSnps x nAnnotations).
+#' @param annotNames Character vector of annotation names.
 #' @param h2 Numeric scalar, total estimated h2.
 #' @return A data.frame with columns: annotation, tau, tau_se, enrichment,
 #'   enrichment_se, enrichment_p, prop_h2, prop_snps.
 #' @keywords internal
-computeBaselineEnrichment <- function(tau, tau_se, tau_blocks,
-                                      baseline_mat, annot_names, h2) {
-  M <- nrow(baseline_mat)
-  M_a <- colSums(baseline_mat)
-  prop_snps <- M_a / M
+computeBaselineEnrichment <- function(tau, tauSe, tauBlocks,
+                                      baselineMat, annotNames, h2) {
+  M <- nrow(baselineMat)
+  M_a <- colSums(baselineMat)
+  propSnps <- M_a / M
 
   # Per-annotation h2 and proportion
   h2_a <- tau * M_a
-  prop_h2 <- h2_a / h2
+  propH2 <- h2_a / h2
 
   # Enrichment ratio: (prop_h2 / prop_snps) = tau * M / h2
   enrichment <- tau * M / h2
 
   # Enrichment SE from jackknife blocks (preferred) or delta method (fallback)
-  if (!is.null(tau_blocks)) {
-    n_blocks <- nrow(tau_blocks)
+  if (!is.null(tauBlocks)) {
+    nBlocks <- nrow(tauBlocks)
     # Per-block enrichment: enrichment_b = tau_b * M / h2_b
-    h2_blocks <- as.vector(tau_blocks %*% M_a)
+    h2Blocks <- as.vector(tauBlocks %*% M_a)
     # Avoid division by zero
-    h2_blocks[h2_blocks == 0] <- NA
-    enrichment_blocks <- sweep(tau_blocks, 1, h2_blocks, FUN = "/") * M
+    h2Blocks[h2Blocks == 0] <- NA
+    enrichmentBlocks <- sweep(tauBlocks, 1, h2Blocks, FUN = "/") * M
     # Jackknife variance: Var = (B-1)/B * sum((x_b - x_bar)^2)
-    enrichment_mean <- colMeans(enrichment_blocks, na.rm = TRUE)
-    enrichment_var <- (n_blocks - 1) / n_blocks *
-      colSums(sweep(enrichment_blocks, 2, enrichment_mean)^2, na.rm = TRUE)
-    enrichment_se <- sqrt(enrichment_var)
+    enrichmentMean <- colMeans(enrichmentBlocks, na.rm = TRUE)
+    enrichmentVar <- (nBlocks - 1) / nBlocks *
+      colSums(sweep(enrichmentBlocks, 2, enrichmentMean)^2, na.rm = TRUE)
+    enrichmentSe <- sqrt(enrichmentVar)
   } else {
     # Delta method fallback: d(enrichment)/d(tau) = M / h2
-    enrichment_se <- tau_se * M / abs(h2)
+    enrichmentSe <- tauSe * M / abs(h2)
   }
 
   # P-value from z-score
-  enrichment_z <- enrichment / enrichment_se
-  enrichment_p <- 2 * pnorm(-abs(enrichment_z))
+  enrichmentZ <- enrichment / enrichmentSe
+  enrichmentP <- 2 * pnorm(-abs(enrichmentZ))
 
   data.frame(
-    annotation = annot_names,
+    annotation = annotNames,
     tau = tau,
-    tau_se = tau_se,
+    tau_se = tauSe,
     enrichment = enrichment,
-    enrichment_se = enrichment_se,
-    enrichment_p = enrichment_p,
-    prop_h2 = prop_h2,
-    prop_snps = prop_snps,
+    enrichment_se = enrichmentSe,
+    enrichment_p = enrichmentP,
+    prop_h2 = propH2,
+    prop_snps = propSnps,
     stringsAsFactors = FALSE
   )
 }
@@ -205,27 +205,27 @@ computeBaselineEnrichment <- function(tau, tau_se, tau_blocks,
 #' @description Apply shrinkage to sample LD matrix to reduce noise from
 #'   finite reference panel size, following Wen & Stephens (2010).
 #' @param R Numeric matrix, sample LD correlation matrix.
-#' @param n_ref Integer, reference panel sample size.
-#' @param shrinkage_type Character, one of "wen_stephens", "constant".
-#' @param genetic_map Numeric vector, genetic map positions for SNPs in R.
+#' @param nRef Integer, reference panel sample size.
+#' @param shrinkageType Character, one of "wen_stephens", "constant".
+#' @param geneticMap Numeric vector, genetic map positions for SNPs in R.
 #' @return Shrunk LD correlation matrix.
 #' @keywords internal
-shrinkLd <- function(R, n_ref, shrinkage_type = "wen_stephens",
-                      genetic_map = NULL) {
-  if (shrinkage_type == "wen_stephens" && !is.null(genetic_map)) {
+shrinkLd <- function(R, nRef, shrinkageType = "wen_stephens",
+                     geneticMap = NULL) {
+  if (shrinkageType == "wen_stephens" && !is.null(geneticMap)) {
     # Wen & Stephens (2010) shrinkage based on genetic distance
     p <- nrow(R)
-    theta <- 2 * n_ref / (22 * n_ref + 16)  # effective recombination
-    dist_cm <- abs(outer(genetic_map, genetic_map, "-"))
-    shrink_factor <- exp(-4 * n_ref * dist_cm / (100 * (2 * n_ref + 16)))
-    R_shrunk <- R * shrink_factor
-    diag(R_shrunk) <- 1
+    theta <- 2 * nRef / (22 * nRef + 16)  # effective recombination
+    distCm <- abs(outer(geneticMap, geneticMap, "-"))
+    shrinkFactor <- exp(-4 * nRef * distCm / (100 * (2 * nRef + 16)))
+    RShrunk <- R * shrinkFactor
+    diag(RShrunk) <- 1
   } else {
     # Simple constant shrinkage
-    lambda <- 1 / sqrt(n_ref)
-    R_shrunk <- (1 - lambda) * R + lambda * diag(nrow(R))
+    lambda <- 1 / sqrt(nRef)
+    RShrunk <- (1 - lambda) * R + lambda * diag(nrow(R))
   }
-  R_shrunk
+  RShrunk
 }
 
 # =============================================================================
@@ -240,10 +240,10 @@ shrinkLd <- function(R, n_ref, shrinkage_type = "wen_stephens",
 checkGenomeBuild <- function(...) {
   objects <- list(...)
   genomes <- vapply(objects, function(x) {
-    if (is(x, "GWASSumStats")) x@genome
-    else if (is(x, "LDStatistic")) x@genome
+    if (is(x, "GwasSumStats")) x@genome
+    else if (is(x, "LdStatistic")) x@genome
     else if (is(x, "AnnotationMatrix")) x@genome
-    else if (is(x, "LDBlocks")) x@genome
+    else if (is(x, "LdBlocks")) x@genome
     else stop("Unknown object type for genome build check")
   }, character(1))
   if (length(unique(genomes)) > 1) {
@@ -261,11 +261,11 @@ checkGenomeBuild <- function(...) {
 #'   \eqn{\tau^*_C = \tau_C \cdot sd_C \cdot M_{ref} / h^2_g}, with
 #'   jackknife SE from block-level tau values.
 #' @param tau Numeric vector of per-annotation regression coefficients.
-#' @param tau_blocks Numeric matrix (n_blocks x n_annotations) of
+#' @param tauBlocks Numeric matrix (nBlocks x nAnnotations) of
 #'   block-level tau estimates from delete-one jackknife.
-#' @param sd_annot Numeric vector of per-annotation standard deviations,
+#' @param sdAnnot Numeric vector of per-annotation standard deviations,
 #'   same length as \code{tau}.
-#' @param M_ref Scalar integer, total number of reference-panel SNPs.
+#' @param MRef Scalar integer, total number of reference-panel SNPs.
 #' @param h2g Numeric scalar, total estimated SNP heritability.
 #' @return A list with:
 #'   \describe{
@@ -273,25 +273,25 @@ checkGenomeBuild <- function(...) {
 #'     \item{tau_star_se}{Numeric vector of jackknife SE for tau_star.}
 #'   }
 #' @keywords internal
-standardize_tau_star <- function(tau, tau_blocks, sd_annot, M_ref, h2g) {
-  if (length(tau) != length(sd_annot)) {
-    stop("standardize_tau_star: tau and sd_annot must have the same length.")
+standardizeTauStar <- function(tau, tauBlocks, sdAnnot, MRef, h2g) {
+  if (length(tau) != length(sdAnnot)) {
+    stop("standardizeTauStar: tau and sdAnnot must have the same length.")
   }
   if (h2g == 0) {
-    stop("standardize_tau_star: h2g must be non-zero.")
+    stop("standardizeTauStar: h2g must be non-zero.")
   }
 
-  # Gazal standardization: tau* = tau * sd_annot * M_ref / h2g
-  coef <- sd_annot * M_ref / h2g
-  tau_star <- tau * coef
+  # Gazal standardization: tau* = tau * sdAnnot * MRef / h2g
+  coef <- sdAnnot * MRef / h2g
+  tauStar <- tau * coef
 
   # Jackknife SE from block-level tau
-  tau_star_blocks <- sweep(tau_blocks, 2L, coef, FUN = "*")
-  n_blocks <- nrow(tau_star_blocks)
-  jk_var <- apply(tau_star_blocks, 2L, function(x) var(x, na.rm = TRUE))
-  tau_star_se <- sqrt((n_blocks - 1)^2 / n_blocks * jk_var)
+  tauStarBlocks <- sweep(tauBlocks, 2L, coef, FUN = "*")
+  nBlocks <- nrow(tauStarBlocks)
+  jkVar <- apply(tauStarBlocks, 2L, function(x) var(x, na.rm = TRUE))
+  tauStarSe <- sqrt((nBlocks - 1)^2 / nBlocks * jkVar)
 
-  list(tau_star = tau_star, tau_star_se = tau_star_se)
+  list(tau_star = tauStar, tau_star_se = tauStarSe)
 }
 
 # =============================================================================
@@ -314,10 +314,10 @@ standardize_tau_star <- function(tau, tau_blocks, sd_annot, M_ref, h2g) {
 #'     \item{Q}{Cochran's Q statistic for heterogeneity.}
 #'   }
 #' @keywords internal
-meta_random_effects <- function(means, ses) {
+metaRandomEffects <- function(means, ses) {
   k <- length(means)
   if (k != length(ses)) {
-    stop("meta_random_effects: means and ses must have the same length.")
+    stop("metaRandomEffects: means and ses must have the same length.")
   }
   if (k == 0L) {
     return(list(mean = NA_real_, se = NA_real_, tau2 = NA_real_,
@@ -328,32 +328,32 @@ meta_random_effects <- function(means, ses) {
                 I2 = 0, Q = 0))
   }
   if (any(!is.finite(ses) | ses <= 0)) {
-    stop("meta_random_effects: all ses must be positive and finite.")
+    stop("metaRandomEffects: all ses must be positive and finite.")
   }
 
   # Fixed-effect weights
-  w_fe <- 1 / ses^2
+  wFe <- 1 / ses^2
 
   # Fixed-effect pooled estimate
-  mu_fe <- sum(w_fe * means) / sum(w_fe)
+  muFe <- sum(wFe * means) / sum(wFe)
 
   # Cochran's Q
-  Q <- sum(w_fe * (means - mu_fe)^2)
+  Q <- sum(wFe * (means - muFe)^2)
 
   # DerSimonian-Laird tau-squared estimator
-  c_dl <- sum(w_fe) - sum(w_fe^2) / sum(w_fe)
-  tau2 <- max(0, (Q - (k - 1)) / c_dl)
+  cDl <- sum(wFe) - sum(wFe^2) / sum(wFe)
+  tau2 <- max(0, (Q - (k - 1)) / cDl)
 
   # Random-effects weights
 
-  w_re <- 1 / (ses^2 + tau2)
+  wRe <- 1 / (ses^2 + tau2)
 
   # Pooled random-effects estimate
-  mu_re <- sum(w_re * means) / sum(w_re)
-  se_re <- sqrt(1 / sum(w_re))
+  muRe <- sum(wRe * means) / sum(wRe)
+  seRe <- sqrt(1 / sum(wRe))
 
   # Higgins I-squared
   I2 <- max(0, (Q - (k - 1)) / Q)
 
-  list(mean = mu_re, se = se_re, tau2 = tau2, I2 = I2, Q = Q)
+  list(mean = muRe, se = seRe, tau2 = tau2, I2 = I2, Q = Q)
 }

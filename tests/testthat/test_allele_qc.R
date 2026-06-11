@@ -1,4 +1,4 @@
-context("allele_qc")
+context("alleleQc")
 
 create_allele_data <- function(seed, n=100, match_min_prop=0.8, ambiguous=FALSE, non_actg=FALSE, edge_cases=FALSE) {
   set.seed(seed)
@@ -113,28 +113,28 @@ create_allele_data <- function(seed, n=100, match_min_prop=0.8, ambiguous=FALSE,
 
 test_that("Check that we correctly remove stand ambiguous SNPs",{
   res <- create_allele_data(1, n=100, match_min_prop=0.8, ambiguous=TRUE)
-  output <- allele_qc(
-    res$target_data, res$ref_variants, "beta", match_min_prop = 0.2,
+  output <- alleleQc(
+    res$target_data, res$ref_variants, "beta", matchMinProp = 0.2,
     TRUE, FALSE, TRUE)
   expect_equal(nrow(getHarmonizedData(output)), 80)
 })
 
 test_that("Check that we correctly remove non-ACTG coding SNPs",{
   res <- create_allele_data(1, n=100, match_min_prop=0.4, non_actg=TRUE)
-  output <- allele_qc(
-    res$target_data, res$ref_variants, "beta", match_min_prop = 0.2,
+  output <- alleleQc(
+    res$target_data, res$ref_variants, "beta", matchMinProp = 0.2,
     TRUE, FALSE, TRUE)
   expect_equal(nrow(getHarmonizedData(output)), 40)
 })
 
 test_that("Check that execution stops if not enough variants are matched",{
   res <- create_allele_data(1, n=100, match_min_prop=0.1, ambiguous=TRUE)
-  expect_error(allele_qc(
-    res$target_data, res$ref_variants, "beta", match_min_prop = 0.2,
+  expect_error(alleleQc(
+    res$target_data, res$ref_variants, "beta", matchMinProp = 0.2,
     TRUE, FALSE, TRUE), "Not enough variants have been matched.")
 })
 
-test_that("allele_qc matches exact alleles", {
+test_that("alleleQc matches exact alleles", {
   target <- data.frame(
     chrom = c(1, 1), pos = c(100, 200),
     A2 = c("A", "C"), A1 = c("G", "T")
@@ -143,11 +143,11 @@ test_that("allele_qc matches exact alleles", {
     chrom = c(1, 1), pos = c(100, 200),
     A2 = c("A", "C"), A1 = c("G", "T")
   )
-  result <- allele_qc(target, ref, match_min_prop = 0)
+  result <- alleleQc(target, ref, matchMinProp = 0)
   expect_equal(nrow(getHarmonizedData(result)), 2)
 })
 
-test_that("allele_qc detects sign flips", {
+test_that("alleleQc detects sign flips", {
   target <- data.frame(
     chrom = 1, pos = 100,
     A2 = "A", A1 = "G",
@@ -157,33 +157,33 @@ test_that("allele_qc detects sign flips", {
     chrom = 1, pos = 100,
     A2 = "G", A1 = "A"
   )
-  result <- allele_qc(target, ref, col_to_flip = "z", match_min_prop = 0)
+  result <- alleleQc(target, ref, colToFlip = "z", matchMinProp = 0)
   expect_equal(nrow(getHarmonizedData(result)), 1)
   # z should be flipped
   expect_equal(getHarmonizedData(result)$z, -2.5)
 })
 
-test_that("allele_qc handles string input format", {
+test_that("alleleQc handles string input format", {
   target <- c("1:100:A:G", "1:200:C:T")
   ref <- c("1:100:A:G", "1:200:C:T")
-  result <- allele_qc(target, ref, match_min_prop = 0)
+  result <- alleleQc(target, ref, matchMinProp = 0)
   expect_equal(nrow(getHarmonizedData(result)), 2)
 })
 
-test_that("allele_qc with chr prefix", {
+test_that("alleleQc with chr prefix", {
   target <- c("chr1:100:A:G", "chr1:200:C:T")
   ref <- c("chr1:100:A:G", "chr1:200:C:T")
-  result <- allele_qc(target, ref, match_min_prop = 0)
+  result <- alleleQc(target, ref, matchMinProp = 0)
   expect_equal(nrow(getHarmonizedData(result)), 2)
 })
 
-test_that("allele_qc warns when too few matches", {
+test_that("alleleQc warns when too few matches", {
   target <- c("1:100:A:G")
   ref <- c("2:200:C:T", "2:300:A:G", "2:400:C:T", "2:500:A:G", "2:600:C:T")
-  expect_warning(allele_qc(target, ref, match_min_prop = 0.5))
+  expect_warning(alleleQc(target, ref, matchMinProp = 0.5))
 })
 
-test_that("allele_qc with no matching positions returns empty", {
+test_that("alleleQc with no matching positions returns empty", {
   target <- data.frame(
     chrom = 1, pos = 100,
     A2 = "A", A1 = "G"
@@ -193,13 +193,13 @@ test_that("allele_qc with no matching positions returns empty", {
     A2 = "C", A1 = "T"
   )
   expect_warning(
-    result <- allele_qc(target, ref, match_min_prop = 0),
+    result <- alleleQc(target, ref, matchMinProp = 0),
     "No matching variants"
   )
   expect_equal(nrow(getHarmonizedData(result)), 0)
 })
 
-test_that("allele_qc preserves extra columns", {
+test_that("alleleQc preserves extra columns", {
   target <- data.frame(
     chrom = 1, pos = 100,
     A2 = "A", A1 = "G",
@@ -209,12 +209,12 @@ test_that("allele_qc preserves extra columns", {
     chrom = 1, pos = 100,
     A2 = "A", A1 = "G"
   )
-  result <- allele_qc(target, ref, match_min_prop = 0)
+  result <- alleleQc(target, ref, matchMinProp = 0)
   expect_true("beta" %in% colnames(getHarmonizedData(result)))
   expect_true("se" %in% colnames(getHarmonizedData(result)))
 })
 
-test_that("allele_qc with lowercase alleles", {
+test_that("alleleQc with lowercase alleles", {
   target <- data.frame(
     chrom = 1, pos = 100,
     A2 = "a", A1 = "g"
@@ -223,18 +223,18 @@ test_that("allele_qc with lowercase alleles", {
     chrom = 1, pos = 100,
     A2 = "A", A1 = "G"
   )
-  result <- allele_qc(target, ref, match_min_prop = 0)
+  result <- alleleQc(target, ref, matchMinProp = 0)
   expect_equal(nrow(getHarmonizedData(result)), 1)
 })
 
-test_that("align_variant_names correctly aligns variant names", {
+test_that("alignVariantNames correctly aligns variant names", {
   # Test case 1: Matching variant names
   source1 <- c("1:123:A:C", "2:456:G:T", "3:789:C:A")
   reference1 <- c("1:123:A:C", "2:456:T:G", "3:789:C:A")
   expected_aligned1 <- c("1:123:A:C", "2:456:T:G", "3:789:C:A")
   expected_unmatched1 <- integer(0)
 
-  result1 <- align_variant_names(source1, reference1)
+  result1 <- alignVariantNames(source1, reference1)
   expect_equal(result1$aligned_variants, expected_aligned1)
   expect_equal(result1$unmatched_indices, expected_unmatched1)
 
@@ -244,7 +244,7 @@ test_that("align_variant_names correctly aligns variant names", {
   expected_aligned2 <- c("1:123:A:C", "2:456:T:G", "3:789:C:A", "4:101:G:C")
   expected_unmatched2 <- 4
 
-  result2 <- align_variant_names(source2, reference2)
+  result2 <- alignVariantNames(source2, reference2)
   expect_equal(result2$aligned_variants, expected_aligned2)
   expect_equal(result2$unmatched_indices, expected_unmatched2)
 
@@ -254,19 +254,19 @@ test_that("align_variant_names correctly aligns variant names", {
   expected_aligned3 <- c("1:123:A:C", "2:456:T:G", "3:789:C:A")
   expected_unmatched3 <- integer(0)
 
-  result3 <- align_variant_names(source3, reference3)
+  result3 <- alignVariantNames(source3, reference3)
   expect_equal(result3$aligned_variants, expected_aligned3)
   expect_equal(result3$unmatched_indices, expected_unmatched3)
 })
 
-test_that("align_variant_names correctly aligns variant names with different flip patterns", {
+test_that("alignVariantNames correctly aligns variant names with different flip patterns", {
   # Test case 4: Strand flip
   source4 <- c("1:123:A:C", "2:456:G:T", "3:789:C:A")
   reference4 <- c("1:123:T:G", "2:456:A:C", "3:789:C:A")
   expected_aligned4 <- c("1:123:T:G", "2:456:A:C", "3:789:C:A")
   expected_unmatched4 <- integer(0)
 
-  result4 <- align_variant_names(source4, reference4)
+  result4 <- alignVariantNames(source4, reference4)
   expect_equal(result4$aligned_variants, expected_aligned4)
   expect_equal(result4$unmatched_indices, expected_unmatched4)
 
@@ -276,7 +276,7 @@ test_that("align_variant_names correctly aligns variant names with different fli
   expected_aligned5 <- c("1:123:A:T", "2:456:G:C", "3:789:C:A")
   expected_unmatched5 <- integer(0)
 
-  result5 <- align_variant_names(source5, reference5)
+  result5 <- alignVariantNames(source5, reference5)
   expect_equal(result5$aligned_variants, expected_aligned5)
   expect_equal(result5$unmatched_indices, expected_unmatched5)
 
@@ -286,7 +286,7 @@ test_that("align_variant_names correctly aligns variant names with different fli
   expected_aligned6 <- c("1:123:C:A", "2:456:T:G", "3:789:C:A")
   expected_unmatched6 <- integer(0)
 
-  result6 <- align_variant_names(source6, reference6)
+  result6 <- alignVariantNames(source6, reference6)
   expect_equal(result6$aligned_variants, expected_aligned6)
   expect_equal(result6$unmatched_indices, expected_unmatched6)
 
@@ -296,7 +296,7 @@ test_that("align_variant_names correctly aligns variant names with different fli
   expected_aligned7 <- c("1:123:G:T", "2:456:A:C", "3:789:C:A")
   expected_unmatched7 <- integer(0)
 
-  result7 <- align_variant_names(source7, reference7)
+  result7 <- alignVariantNames(source7, reference7)
   expect_equal(result7$aligned_variants, expected_aligned7)
   expect_equal(result7$unmatched_indices, expected_unmatched7)
 
@@ -306,19 +306,19 @@ test_that("align_variant_names correctly aligns variant names with different fli
   expected_aligned8 <- c("1:123:A:C", "2:456:T:G", "3:789:C:A", "4:101:GATC:G")
   expected_unmatched8 <- integer(0)
 
-  result8 <- align_variant_names(source8, reference8)
+  result8 <- alignVariantNames(source8, reference8)
   expect_equal(result8$aligned_variants, expected_aligned8)
   expect_equal(result8$unmatched_indices, expected_unmatched8)
 })
 
-test_that("align_variant_names correctly aligns variant names with different chr prefix conventions", {
+test_that("alignVariantNames correctly aligns variant names with different chr prefix conventions", {
   # Test case 9: Original without chr prefix, reference with chr prefix
   source9 <- c("1:123:A:C", "2:456:G:T", "3:789:C:A")
   reference9 <- c("chr1:123:A:C", "chr2:456:T:G", "chr3:789:C:A")
   expected_aligned9 <- c("chr1:123:A:C", "chr2:456:T:G", "chr3:789:C:A")
   expected_unmatched9 <- integer(0)
 
-  result9 <- align_variant_names(source9, reference9)
+  result9 <- alignVariantNames(source9, reference9)
   expect_equal(result9$aligned_variants, expected_aligned9)
   expect_equal(result9$unmatched_indices, expected_unmatched9)
 
@@ -328,38 +328,38 @@ test_that("align_variant_names correctly aligns variant names with different chr
   expected_aligned10 <- c("1:123:A:C", "2:456:T:G", "3:789:C:A")
   expected_unmatched10 <- integer(0)
 
-  result10 <- align_variant_names(source10, reference10)
+  result10 <- alignVariantNames(source10, reference10)
   expect_equal(result10$aligned_variants, expected_aligned10)
   expect_equal(result10$unmatched_indices, expected_unmatched10)
 })
 
-test_that("align_variant_names warns on non-standard format", {
+test_that("alignVariantNames warns on non-standard format", {
   source <- c("rs12345")
   reference <- c("rs67890")
   expect_warning(
-    align_variant_names(source, reference),
+    alignVariantNames(source, reference),
     "do not follow the expected"
   )
 })
 
-test_that("align_variant_names errors on mixed formats", {
+test_that("alignVariantNames errors on mixed formats", {
   source <- c("1:100:A:G")
   reference <- c("rs12345")
   expect_error(
-    align_variant_names(source, reference),
+    alignVariantNames(source, reference),
     "different variant naming conventions"
   )
 })
 
-test_that("align_variant_names strips build suffix", {
+test_that("alignVariantNames strips build suffix", {
   source <- c("1:100:A:G:b38")
   reference <- c("1:100:A:G")
-  result <- align_variant_names(source, reference, remove_build_suffix = TRUE)
+  result <- alignVariantNames(source, reference, removeBuildSuffix = TRUE)
   expect_length(result$aligned_variants, 1)
 })
 
-# ---- sanitize_names edge cases (allele_qc.R lines 37, 42) ----
-test_that("allele_qc handles data frame with NULL colnames after merge", {
+# ---- sanitize_names edge cases (alleleQc.R lines 37, 42) ----
+test_that("alleleQc handles data frame with NULL colnames after merge", {
   # Create a data frame where merge might produce empty names
   # by giving target_data a column with NA name
   target <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G")
@@ -368,35 +368,35 @@ test_that("allele_qc handles data frame with NULL colnames after merge", {
   colnames(target) <- make.unique(colnames(target), sep = "_")
   # Restore chrom for the join
   colnames(target)[1] <- "chrom"
-  result <- allele_qc(target, ref, match_min_prop = 0)
+  result <- alleleQc(target, ref, matchMinProp = 0)
   expect_equal(nrow(getHarmonizedData(result)), 1)
 })
 
-# ---- target_data with redundant columns (allele_qc.R line 75) ----
-test_that("allele_qc removes redundant columns from target_data before join", {
+# ---- target_data with redundant columns (alleleQc.R line 75) ----
+test_that("alleleQc removes redundant columns from target_data before join", {
   target <- data.frame(
     chrom = 1, pos = 100, A2 = "A", A1 = "G",
     variant_id = "1:100:A:G", chromosome = "chr1", position = 100
   )
   ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G")
-  result <- allele_qc(target, ref, match_min_prop = 0)
+  result <- alleleQc(target, ref, matchMinProp = 0)
   expect_equal(nrow(getHarmonizedData(result)), 1)
   # The redundant columns should have been removed before the join
   expect_true("variant_id" %in% colnames(getHarmonizedData(result)))
 })
 
-# ---- col_to_flip with nonexistent column (allele_qc.R line 130) ----
-test_that("allele_qc errors when col_to_flip column does not exist", {
+# ---- col_to_flip with nonexistent column (alleleQc.R line 130) ----
+test_that("alleleQc errors when col_to_flip column does not exist", {
   target <- data.frame(chrom = 1, pos = 100, A2 = "G", A1 = "A")
   ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G")
   expect_error(
-    allele_qc(target, ref, col_to_flip = "nonexistent_col", match_min_prop = 0),
-    "not found in target_data"
+    alleleQc(target, ref, colToFlip = "nonexistent_col", matchMinProp = 0),
+    "not found in targetData"
   )
 })
 
-# ---- duplicate removal warning (allele_qc.R lines 148-150) ----
-test_that("allele_qc warns and removes duplicate variants", {
+# ---- duplicate removal warning (alleleQc.R lines 148-150) ----
+test_that("alleleQc warns and removes duplicate variants", {
   # Two target rows at the same position will produce duplicates after join
   target <- data.frame(
     chrom = c(1, 1), pos = c(100, 100),
@@ -405,14 +405,14 @@ test_that("allele_qc warns and removes duplicate variants", {
   )
   ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G")
   expect_warning(
-    result <- allele_qc(target, ref, match_min_prop = 0, remove_dups = TRUE),
+    result <- alleleQc(target, ref, matchMinProp = 0, removeDups = TRUE),
     "duplicate variant"
   )
   expect_equal(nrow(getHarmonizedData(result)), 1)
 })
 
-# ---- duplicated variant IDs error (allele_qc.R line 180) ----
-test_that("allele_qc errors on duplicated variant IDs with different values when remove_dups is FALSE", {
+# ---- duplicated variant IDs error (alleleQc.R line 180) ----
+test_that("alleleQc errors on duplicated variant IDs with different values when remove_dups is FALSE", {
   # Two rows at same position, same alleles, but different beta - when not removing dups
   target <- data.frame(
     chrom = c(1, 1), pos = c(100, 100),
@@ -421,7 +421,7 @@ test_that("allele_qc errors on duplicated variant IDs with different values when
   )
   ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G")
   expect_error(
-    allele_qc(target, ref, match_min_prop = 0, remove_dups = FALSE),
+    alleleQc(target, ref, matchMinProp = 0, removeDups = FALSE),
     "Duplicated variants"
   )
 })

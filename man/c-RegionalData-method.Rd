@@ -16,9 +16,9 @@ A merged \code{RegionalData}.
 }
 \description{
 Concatenate two \code{RegionalData} objects by appending
-  their per-condition slots (phenotypes, covariates, maf, dropped_samples).
+  their per-condition slots (phenotypes, covariates, maf, droppedSamples).
   Used by multi-panel pipelines that load per-LD-panel data and aggregate
-  them. The \code{genotype_matrix} of \code{x} is retained as the
+  them. The \code{genotypeMatrix} of \code{x} is retained as the
   canonical genotype reference; the \code{region} is taken from \code{y}
   (mirrors prior list-merge behavior).
 }

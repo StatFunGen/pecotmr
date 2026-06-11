@@ -21,7 +21,7 @@ make_twas_table <- function(methods, twas_z_values, rsq_values, is_selected, gwa
 }
 
 # Access the internal function
-apply_fallback <- pecotmr:::apply_method_fallback
+apply_fallback <- pecotmr:::applyMethodFallback
 
 test_that("no fallback when selected method has valid z", {
   df <- make_twas_table(
@@ -107,9 +107,9 @@ test_that("fallback is per-study: one study needs fallback, another does not", {
 
 test_that("fallback handles empty data frame", {
   df <- data.frame(
-    molecular_id = character(), context = character(), gwas_study = character(),
+    molecularId = character(), context = character(), gwas_study = character(),
     method = character(), is_selected_method = logical(), is_imputable = logical(),
-    rsq_cv = numeric(), pval_cv = numeric(), twas_z = numeric(), twas_pval = numeric(),
+    rsq_cv = numeric(), pval_cv = numeric(), twasZ = numeric(), twas_pval = numeric(),
     stringsAsFactors = FALSE
   )
   result <- apply_fallback(df)

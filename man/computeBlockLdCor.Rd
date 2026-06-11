@@ -4,18 +4,12 @@
 \alias{computeBlockLdCor}
 \title{Compute Block LD Correlation}
 \usage{
-computeBlockLdCor(
-  handle,
-  snp_idx,
-  backend = "internal",
-  method = "sample",
-  ...
-)
+computeBlockLdCor(handle, snpIdx, backend = "internal", method = "sample", ...)
 }
 \arguments{
 \item{handle}{A \code{GenotypeHandle} object.}
 
-\item{snp_idx}{Integer vector of 1-based SNP indices.}
+\item{snpIdx}{Integer vector of 1-based SNP indices.}
 
 \item{backend}{Character, one of \code{"internal"} (default),
 \code{"snprelate"}, or \code{"snpstats"}. When \code{"internal"},
@@ -23,17 +17,17 @@ GDS-format handles automatically use \code{SNPRelate::snpgdsLDMat}
 via the native GDS path; other formats use the internal correlator.}
 
 \item{method}{Character, LD computation method passed to
-\code{\link{compute_LD}}. Default \code{"sample"}.}
+\code{\link{computeLd}}. Default \code{"sample"}.}
 
-\item{...}{Additional arguments passed to \code{\link{compute_LD}}
-(e.g., \code{shrinkage}, \code{trim_samples}).}
+\item{...}{Additional arguments passed to \code{\link{computeLd}}
+(e.g., \code{shrinkage}, \code{trimSamples}).}
 }
 \value{
 Numeric correlation matrix (p x p).
 }
 \description{
 Compute the LD correlation matrix for a block of SNPs.
-  Delegates to \code{\link{compute_LD}} for the actual computation,
+  Delegates to \code{\link{computeLd}} for the actual computation,
   with automatic backend selection based on file format unless
   overridden.
 }

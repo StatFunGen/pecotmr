@@ -4,14 +4,14 @@
 \alias{AnnotationMatrix}
 \title{Create an AnnotationMatrix Object}
 \usage{
-AnnotationMatrix(annotations, snp_ranges, annotation_meta, genome = "hg19")
+AnnotationMatrix(annotations, snpRanges, annotationMeta, genome = "hg19")
 }
 \arguments{
 \item{annotations}{A numeric matrix or sparse matrix (SNPs x annotations).}
 
-\item{snp_ranges}{A \code{GRanges} object with SNP positions.}
+\item{snpRanges}{A \code{GRanges} object with SNP positions.}
 
-\item{annotation_meta}{A data.frame with columns: name, tier, type.}
+\item{annotationMeta}{A data.frame with columns: name, tier, type.}
 
 \item{genome}{Character, genome build.}
 }

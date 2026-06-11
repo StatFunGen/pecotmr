@@ -4,12 +4,12 @@
 \alias{snpsPerBlock}
 \title{Get SNP Indices Per Block}
 \usage{
-snpsPerBlock(snp_info, ld_blocks)
+snpsPerBlock(snpInfo, ldBlocks)
 }
 \arguments{
-\item{snp_info}{A data.frame with columns CHR, BP.}
+\item{snpInfo}{A data.frame with columns CHR, BP.}
 
-\item{ld_blocks}{An \code{LDBlocks} object.}
+\item{ldBlocks}{An \code{LdBlocks} object.}
 }
 \value{
 A list of integer vectors, one per block.

@@ -2,19 +2,19 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{getBlockMetadata}
 \alias{getBlockMetadata}
-\alias{getBlockMetadata,LDData-method}
+\alias{getBlockMetadata,LdData-method}
 \title{Get Block Metadata}
 \usage{
 getBlockMetadata(x)
 
-\S4method{getBlockMetadata}{LDData}(x)
+\S4method{getBlockMetadata}{LdData}(x)
 }
 \arguments{
-\item{x}{An \code{LDData} object.}
+\item{x}{An \code{LdData} object.}
 }
 \value{
-An \code{LDBlocks} or \code{data.frame}.
+An \code{LdBlocks} or \code{data.frame}.
 }
 \description{
-Extract block metadata from an \code{LDData} object.
+Extract block metadata from an \code{LdData} object.
 }

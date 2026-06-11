@@ -2,26 +2,26 @@
 % Please edit documentation in R/AllGenerics.R, R/vcf_writer.R
 \name{writeSumstatsVcf}
 \alias{writeSumstatsVcf}
-\alias{writeSumstatsVcf,GWASSumStats-method}
+\alias{writeSumstatsVcf,GwasSumStats-method}
 \alias{writeSumstatsVcf,FineMappingResult-method}
 \title{Write summary statistics or fine-mapping results to VCF/BCF}
 \usage{
-writeSumstatsVcf(x, output_path, sample_name = NULL, ...)
+writeSumstatsVcf(x, outputPath, sampleName = NULL, ...)
 
-\S4method{writeSumstatsVcf}{GWASSumStats}(x, output_path, sample_name = NULL, ...)
+\S4method{writeSumstatsVcf}{GwasSumStats}(x, outputPath, sampleName = NULL, ...)
 
-\S4method{writeSumstatsVcf}{FineMappingResult}(x, output_path, sample_name = NULL, ...)
+\S4method{writeSumstatsVcf}{FineMappingResult}(x, outputPath, sampleName = NULL, ...)
 }
 \arguments{
-\item{x}{Input data: a \code{GWASSumStats} object, a
+\item{x}{Input data: a \code{GwasSumStats} object, a
 \code{FineMappingResult} object, or a data.frame with columns
 \code{chrom}, \code{pos}, \code{ref}, \code{alt}.}
 
-\item{output_path}{File path for output. Extension determines format:
+\item{outputPath}{File path for output. Extension determines format:
 \code{.vcf.gz} or \code{.vcf.bgz} for bgzipped VCF,
 \code{.bcf} for BCF, \code{.vcf} for uncompressed VCF.}
 
-\item{sample_name}{Name for the VCF sample column (default: trait name or
+\item{sampleName}{Name for the VCF sample column (default: trait name or
 method name from the S4 object).}
 
 \item{...}{Additional arguments passed to methods.}

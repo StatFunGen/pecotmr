@@ -2,236 +2,236 @@ context("misc")
 library(tidyverse)
 
 # =============================================================================
-# compute_maf
+# computeMaf
 # =============================================================================
 
-test_that("Test compute_maf freq 0.5",{
-    expect_equal(pecotmr:::compute_maf(rep(1, 20)), 0.5)
+test_that("Test computeMaf freq 0.5",{
+    expect_equal(pecotmr:::computeMaf(rep(1, 20)), 0.5)
 })
 
-test_that("Test compute_maf freq 0.6",{
-    expect_equal(pecotmr:::compute_maf(rep(1.2, 20)), 0.4)
+test_that("Test computeMaf freq 0.6",{
+    expect_equal(pecotmr:::computeMaf(rep(1.2, 20)), 0.4)
 })
 
-test_that("Test compute_maf freq 0.3",{
-    expect_equal(pecotmr:::compute_maf(rep(0.6, 20)), 0.3)
+test_that("Test computeMaf freq 0.3",{
+    expect_equal(pecotmr:::computeMaf(rep(0.6, 20)), 0.3)
 })
 
-test_that("Test compute_maf with NA",{
+test_that("Test computeMaf with NA",{
     set.seed(1)
     generate_small_dataset <- function(sample_size = 20) {
         vals <- c(1.2, NA)
         return(sample(vals, sample_size, replace = TRUE))
     }
-    expect_equal(pecotmr:::compute_maf(generate_small_dataset()), 0.4)
+    expect_equal(pecotmr:::computeMaf(generate_small_dataset()), 0.4)
 })
 
-test_that("compute_maf returns 0 for monomorphic (all 0)", {
-  expect_equal(pecotmr:::compute_maf(rep(0, 10)), 0)
+test_that("computeMaf returns 0 for monomorphic (all 0)", {
+  expect_equal(pecotmr:::computeMaf(rep(0, 10)), 0)
 })
 
 # =============================================================================
-# compute_missing
+# computeMissing
 # =============================================================================
 
-test_that("test compute_missing",{
+test_that("test computeMissing",{
     small_dataset <- c(rep(NA, 20), rep(1, 80))
-    expect_equal(pecotmr:::compute_missing(small_dataset), 0.2)
+    expect_equal(pecotmr:::computeMissing(small_dataset), 0.2)
 })
 
 # =============================================================================
-# compute_non_missing_y and compute_all_missing_y
+# computeNonMissingY and computeAllMissingY
 # =============================================================================
 
-test_that("Test compute_non_missing_y",{
+test_that("Test computeNonMissingY",{
     small_dataset <- c(rep(NA, 20), rep(1, 80))
-    expect_equal(pecotmr:::compute_non_missing_y(small_dataset), 80)
+    expect_equal(pecotmr:::computeNonMissingY(small_dataset), 80)
 })
 
-test_that("Test compute_all_missing_y",{
+test_that("Test computeAllMissingY",{
     small_dataset <- c(rep(NA, 20), rep(1, 80))
-    expect_equal(pecotmr:::compute_all_missing_y(small_dataset), F)
+    expect_equal(pecotmr:::computeAllMissingY(small_dataset), F)
 })
 
-test_that("compute_all_missing_y returns TRUE for all-NA vector", {
-  expect_true(pecotmr:::compute_all_missing_y(rep(NA, 5)))
+test_that("computeAllMissingY returns TRUE for all-NA vector", {
+  expect_true(pecotmr:::computeAllMissingY(rep(NA, 5)))
 })
 
-test_that("compute_all_missing_y returns FALSE for partially NA vector", {
-  expect_false(pecotmr:::compute_all_missing_y(c(NA, 1, NA)))
+test_that("computeAllMissingY returns FALSE for partially NA vector", {
+  expect_false(pecotmr:::computeAllMissingY(c(NA, 1, NA)))
 })
 
 # =============================================================================
-# mean_impute
+# meanImpute
 # =============================================================================
 
-test_that("Test mean_impute",{
+test_that("Test meanImpute",{
     dummy_data <- matrix(c(1,2,NA,1,2,3), nrow=3, ncol=2)
-    expect_equal(pecotmr:::mean_impute(dummy_data)[3,1], 1.5)
+    expect_equal(pecotmr:::meanImpute(dummy_data)[3,1], 1.5)
 })
 
-test_that("mean_impute with all NAs in a column imputes NaN", {
+test_that("meanImpute with all NAs in a column imputes NaN", {
   X <- matrix(c(NA, NA, NA, 1, 2, 3), nrow = 3, ncol = 2)
-  result <- pecotmr:::mean_impute(X)
+  result <- pecotmr:::meanImpute(X)
   expect_true(all(is.nan(result[, 1])))
   expect_equal(result[, 2], c(1, 2, 3))
 })
 
 # =============================================================================
-# is_zero_variance
+# isZeroVariance
 # =============================================================================
 
-test_that("Test is_zero_variance",{
+test_that("Test isZeroVariance",{
     dummy_data <- matrix(c(1,2,3,1,1,1), nrow=3, ncol=2)
-    col <- which(apply(dummy_data, 2, pecotmr:::is_zero_variance))
+    col <- which(apply(dummy_data, 2, pecotmr:::isZeroVariance))
     expect_equal(col, 2)
 })
 
-test_that("is_zero_variance with NA values treats them as distinct", {
-  expect_false(pecotmr:::is_zero_variance(c(1, NA, 1)))
+test_that("isZeroVariance with NA values treats them as distinct", {
+  expect_false(pecotmr:::isZeroVariance(c(1, NA, 1)))
 })
 
 # =============================================================================
-# filter_X
+# filterX
 # =============================================================================
 
-test_that("Test filter_X",{
+test_that("Test filterX",{
     dummy_data <- matrix(
         c(1,NA,NA,NA, 0,0,1,1, 2,2,2,2, 1,1,1,2, 2,2,0,1, 0,1,1,2),
         # Missing Rate, MAF thresh, Zero Var, Var Thresh, Regular values
         nrow=4, ncol=6)
     var_thres <- 0.3
-    expect_equal(filter_X(dummy_data, 0.70, 0.3, var_thres = 0.3), matrix(c(2,2,0,1, 0,1,1,2), nrow=4, ncol=2))
+    expect_equal(filterX(dummy_data, 0.70, 0.3, varThresh = 0.3), matrix(c(2,2,0,1, 0,1,1,2), nrow=4, ncol=2))
 })
 
-test_that("filter_X drops most columns when nearly all are zero variance", {
+test_that("filterX drops most columns when nearly all are zero variance", {
   X <- matrix(c(
     1, 1, 1, 1, 1,
     2, 2, 2, 2, 2,
     0, 0, 0, 0, 0,
     0, 1, 2, 0, 1
   ), nrow = 5, ncol = 4)
-  result <- pecotmr:::filter_X(X, missing_rate_thresh = 1.0, maf_thresh = 0)
+  result <- pecotmr:::filterX(X, missingRateThresh = 1.0, mafThresh = 0)
   expect_equal(ncol(result), 1)
 })
 
-test_that("filter_X with external maf vector uses it for filtering", {
+test_that("filterX with external maf vector uses it for filtering", {
   set.seed(42)
   X <- matrix(sample(0:2, 40, replace = TRUE), nrow = 10, ncol = 4)
   external_maf <- c(0.01, 0.05, 0.3, 0.4)
-  result <- pecotmr:::filter_X(X, missing_rate_thresh = 1.0, maf_thresh = 0.1, maf = external_maf)
+  result <- pecotmr:::filterX(X, missingRateThresh = 1.0, mafThresh = 0.1, maf = external_maf)
   # Columns 1 and 2 have MAF <= 0.1, so they are dropped; columns 3 and 4 remain
   expect_equal(ncol(result), 2)
 })
 
-test_that("filter_X skips MAF filtering for non-0/1/2 genotypes without external MAF", {
+test_that("filterX skips MAF filtering for non-0/1/2 genotypes without external MAF", {
   set.seed(42)
   X <- matrix(runif(40, 0, 2), nrow = 10, ncol = 4)
   expect_message(
-    result <- pecotmr:::filter_X(X, missing_rate_thresh = 1.0, maf_thresh = 0.1),
+    result <- pecotmr:::filterX(X, missingRateThresh = 1.0, mafThresh = 0.1),
     "Skipping MAF filtering"
   )
   expect_true(ncol(result) >= 1)
 })
 
-test_that("filter_X applies var_thresh with external X_variance", {
+test_that("filterX applies var_thresh with external X_variance", {
   set.seed(42)
   X <- matrix(sample(0:2, 40, replace = TRUE), nrow = 10, ncol = 4)
   external_var <- c(0.01, 0.5, 1.0, 0.02)
-  result <- pecotmr:::filter_X(X, missing_rate_thresh = 1.0, maf_thresh = 0, var_thresh = 0.1, X_variance = external_var)
+  result <- pecotmr:::filterX(X, missingRateThresh = 1.0, mafThresh = 0, varThresh = 0.1, xVariance = external_var)
   # Columns 1 and 4 have variance < 0.1, so they are dropped; columns 2 and 3 remain
   expect_equal(ncol(result), 2)
 })
 
-test_that("filter_X with NULL thresholds does not filter", {
+test_that("filterX with NULL thresholds does not filter", {
   set.seed(42)
   X <- matrix(sample(0:2, 40, replace = TRUE), nrow = 10, ncol = 4)
-  result <- pecotmr:::filter_X(X, missing_rate_thresh = NULL, maf_thresh = NULL, var_thresh = 0)
+  result <- pecotmr:::filterX(X, missingRateThresh = NULL, mafThresh = NULL, varThresh = 0)
   # No filtering applied: all 4 columns should remain (zero-variance check still runs but none are zero-variance)
   expect_equal(ncol(result), 4)
 })
 
-test_that("filter_X with missing_rate_thresh=0 drops columns with any NA", {
+test_that("filterX with missing_rate_thresh=0 drops columns with any NA", {
   X <- matrix(c(0, 1, 2, 1, 0, 1, NA, 2, 0, 1, 2, 1), nrow = 4, ncol = 3)
-  result <- pecotmr:::filter_X(X, missing_rate_thresh = 0, maf_thresh = 0, var_thresh = 0)
+  result <- pecotmr:::filterX(X, missingRateThresh = 0, mafThresh = 0, varThresh = 0)
   expect_true(ncol(result) <= 2)
 })
 
-test_that("filter_X with maf_thresh=0.5 removes nearly all columns", {
+test_that("filterX with maf_thresh=0.5 removes nearly all columns", {
   X <- matrix(c(
     0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
     0, 0, 0, 0, 0, 0, 0, 0, 2, 2,
     0, 0, 0, 0, 0, 2, 2, 2, 2, 2
   ), nrow = 10, ncol = 3)
-  result <- pecotmr:::filter_X(X, missing_rate_thresh = 1.0, maf_thresh = 0.45, var_thresh = 0)
+  result <- pecotmr:::filterX(X, missingRateThresh = 1.0, mafThresh = 0.45, varThresh = 0)
   expect_equal(ncol(result), 1)
 })
 
 # =============================================================================
-# filter_Y
+# filterY
 # =============================================================================
 
-test_that("Test filter_Y non-matrix",{
+test_that("Test filterY non-matrix",{
     dummy_data <- matrix(c(1,NA,NA,NA, 1,1,2,NA), nrow=4, ncol=2)
-    res <- filter_Y(as.data.frame(dummy_data), 3)
+    res <- filterY(as.data.frame(dummy_data), 3)
     expect_equal(length(res$Y), 3)
-    expect_equal(res$rm_rows, NULL)
+    expect_equal(res$rmRows, NULL)
 })
 
-test_that("Test filter_Y is-matrix",{
+test_that("Test filterY is-matrix",{
     dummy_data <- matrix(c(1,NA,NA,NA, 1,1,2,NA, 2,1,2,NA), nrow=4, ncol=3)
-    expect_equal(nrow(filter_Y(dummy_data, 3)$Y), 3)
-    expect_equal(ncol(filter_Y(dummy_data, 3)$Y), 2)
-    expect_equal(length(filter_Y(dummy_data, 3)$rm_rows), 1)
+    expect_equal(nrow(filterY(dummy_data, 3)$Y), 3)
+    expect_equal(ncol(filterY(dummy_data, 3)$Y), 2)
+    expect_equal(length(filterY(dummy_data, 3)$rmRows), 1)
 })
 
-test_that("filter_Y removes all columns with insufficient observations", {
+test_that("filterY removes all columns with insufficient observations", {
   Y <- matrix(c(NA, NA, NA, 1, NA, NA, NA, 2), nrow = 4, ncol = 2)
-  result <- pecotmr:::filter_Y(Y, n_nonmiss = 3)
+  result <- pecotmr:::filterY(Y, nNonmiss = 3)
   expect_true(length(result$Y) == 0 || ncol(as.matrix(result$Y)) == 0)
 })
 
-test_that("filter_Y removes columns with too few non-missing values", {
+test_that("filterY removes columns with too few non-missing values", {
   Y <- matrix(c(1, NA, NA, NA, 1, 2, 3, 4), nrow = 4)
-  result <- pecotmr:::filter_Y(Y, n_nonmiss = 3)
+  result <- pecotmr:::filterY(Y, nNonmiss = 3)
   expect_true(length(result$Y) >= 3)
 })
 
-test_that("filter_Y removes all-NA rows from matrix", {
+test_that("filterY removes all-NA rows from matrix", {
   Y <- matrix(c(NA, NA, 1, 2, NA, NA, 3, 4), nrow = 4)
-  result <- pecotmr:::filter_Y(Y, n_nonmiss = 1)
+  result <- pecotmr:::filterY(Y, nNonmiss = 1)
   expect_true(nrow(result$Y) < 4)
 })
 
 # =============================================================================
-# format_variant_id
+# formatVariantId
 # =============================================================================
 
-test_that("Test format_variant_id",{
-    expect_equal(format_variant_id(c(1, 1), c(123, 132), c("G", "A"), c("C", "T")), c("chr1:123:G:C", "chr1:132:A:T"))
+test_that("Test formatVariantId",{
+    expect_equal(formatVariantId(c(1, 1), c(123, 132), c("G", "A"), c("C", "T")), c("chr1:123:G:C", "chr1:132:A:T"))
 })
 
-test_that("format_variant_id uses convention parameter automatically", {
-  expect_equal(pecotmr:::format_variant_id(1, 100, "A", "G"), "chr1:100:A:G")
+test_that("formatVariantId uses convention parameter automatically", {
+  expect_equal(pecotmr:::formatVariantId(1, 100, "A", "G"), "chr1:100:A:G")
 
   conv_mixed <- list(has_chr = TRUE, allele_sep = "_")
-  expect_equal(pecotmr:::format_variant_id(1, 100, "A", "G", convention = conv_mixed), "chr1:100_A_G")
+  expect_equal(pecotmr:::formatVariantId(1, 100, "A", "G", convention = conv_mixed), "chr1:100_A_G")
 
   conv_nochr <- list(has_chr = FALSE, allele_sep = "_")
-  expect_equal(pecotmr:::format_variant_id(1, 100, "A", "G", convention = conv_nochr), "1:100_A_G")
+  expect_equal(pecotmr:::formatVariantId(1, 100, "A", "G", convention = conv_nochr), "1:100_A_G")
 
-  expect_equal(pecotmr:::format_variant_id(1, 100, "A", "G", chr_prefix = FALSE, convention = conv_mixed), "chr1:100_A_G")
+  expect_equal(pecotmr:::formatVariantId(1, 100, "A", "G", chrPrefix = FALSE, convention = conv_mixed), "chr1:100_A_G")
 })
 
-test_that("format_variant_id constructs canonical IDs", {
-  expect_equal(pecotmr:::format_variant_id(c(1, 2), c(100, 200), c("A", "C"), c("G", "T")),
+test_that("formatVariantId constructs canonical IDs", {
+  expect_equal(pecotmr:::formatVariantId(c(1, 2), c(100, 200), c("A", "C"), c("G", "T")),
                c("chr1:100:A:G", "chr2:200:C:T"))
-  expect_equal(pecotmr:::format_variant_id(1, 100, "A", "G", chr_prefix = FALSE), "1:100:A:G")
-  expect_equal(pecotmr:::format_variant_id("chr1", 100, "A", "G"), "chr1:100:A:G")
+  expect_equal(pecotmr:::formatVariantId(1, 100, "A", "G", chrPrefix = FALSE), "1:100:A:G")
+  expect_equal(pecotmr:::formatVariantId("chr1", 100, "A", "G"), "chr1:100:A:G")
 })
 
 # =============================================================================
-# find_duplicate_variants
+# findDuplicateVariants
 # =============================================================================
 
 z <- c(1, 2, 3, 4, 5)
@@ -241,7 +241,7 @@ LD <- matrix(c(1.0, 0.8, 0.2, 0.1, 0.3,
                0.1, 0.2, 0.6, 1.0, 0.3,
                0.3, 0.5, 0.1, 0.3, 1.0), nrow = 5, ncol = 5)
 
-test_that("find_duplicate_variants returns the expected output", {
+test_that("findDuplicateVariants returns the expected output", {
   rThreshold <- 0.5
   expected_output <- list(
     filteredZ = c(1, 3, 5),
@@ -252,11 +252,11 @@ test_that("find_duplicate_variants returns the expected output", {
     minValue = 0.1
   )
 
-  result <- find_duplicate_variants(z, LD, rThreshold)
+  result <- findDuplicateVariants(z, LD, rThreshold)
   expect_equal(result, expected_output)
 })
 
-test_that("find_duplicate_variants handles a high correlation threshold", {
+test_that("findDuplicateVariants handles a high correlation threshold", {
   rThreshold <- 1.0
   expected_output <- list(
     filteredZ = c(1, 2, 3, 4, 5),
@@ -267,11 +267,11 @@ test_that("find_duplicate_variants handles a high correlation threshold", {
     minValue = 0.1
   )
 
-  result <- find_duplicate_variants(z, LD, rThreshold)
+  result <- findDuplicateVariants(z, LD, rThreshold)
   expect_equal(result, expected_output)
 })
 
-test_that("find_duplicate_variants handles a low correlation threshold", {
+test_that("findDuplicateVariants handles a low correlation threshold", {
   rThreshold <- 0.0
   expected_output <- list(
     filteredZ = c(1),
@@ -282,11 +282,11 @@ test_that("find_duplicate_variants handles a low correlation threshold", {
     minValue = 0.1
   )
 
-  result <- find_duplicate_variants(z, LD, rThreshold)
+  result <- findDuplicateVariants(z, LD, rThreshold)
   expect_equal(result, expected_output)
 })
 
-test_that("find_duplicate_variants handles negative correlations", {
+test_that("findDuplicateVariants handles negative correlations", {
   LD_negative <- LD
   LD_negative[1, 2] <- -0.8
   LD_negative[2, 1] <- -0.8
@@ -300,85 +300,85 @@ test_that("find_duplicate_variants handles negative correlations", {
     minValue = 0.1
   )
 
-  result <- find_duplicate_variants(z, LD_negative, rThreshold)
+  result <- findDuplicateVariants(z, LD_negative, rThreshold)
   expect_equal(result, expected_output)
 })
 
 # =============================================================================
-# pval_global
+# pvalGlobal
 # =============================================================================
 
-test_that("pval_global with ACAT method returns valid combined p-value", {
+test_that("pvalGlobal with ACAT method returns valid combined p-value", {
   pvals <- c(0.01, 0.05, 0.5, 0.8)
-  result <- pecotmr:::pval_global(pvals, comb_method = "ACAT", naive = FALSE)
+  result <- pecotmr:::pvalGlobal(pvals, combMethod = "ACAT", naive = FALSE)
   expect_true(is.numeric(result))
   # ACAT statistic: T = mean(tan(pi*(0.5 - p_i))), p = P[Cauchy >= T]
   expected <- pcauchy(mean(tan(pi * (0.5 - pvals))), lower.tail = FALSE)
   expect_equal(result, expected, tolerance = 1e-10)
 })
 
-test_that("pval_global with naive=TRUE returns Bonferroni-corrected p-value", {
+test_that("pvalGlobal with naive=TRUE returns Bonferroni-corrected p-value", {
   pvals <- c(0.01, 0.05, 0.1, 0.5)
-  result <- pecotmr:::pval_global(pvals, comb_method = "HMP", naive = TRUE)
+  result <- pecotmr:::pvalGlobal(pvals, combMethod = "HMP", naive = TRUE)
   n_unique <- length(unique(pvals))
   expected <- min(n_unique * min(pvals), 1.0)
   expect_equal(result, expected)
 })
 
-test_that("pval_global naive method caps at 1.0", {
+test_that("pvalGlobal naive method caps at 1.0", {
   pvals <- seq(0.1, 0.9, by = 0.01)
-  result <- pecotmr:::pval_global(pvals, comb_method = "ACAT", naive = TRUE)
+  result <- pecotmr:::pvalGlobal(pvals, combMethod = "ACAT", naive = TRUE)
   expect_true(result <= 1.0)
 })
 
-test_that("pval_global naive method with single p-value returns that p-value", {
-  result <- pecotmr:::pval_global(0.03, comb_method = "ACAT", naive = TRUE)
+test_that("pvalGlobal naive method with single p-value returns that p-value", {
+  result <- pecotmr:::pvalGlobal(0.03, combMethod = "ACAT", naive = TRUE)
   expect_equal(result, 0.03)
 })
 
-test_that("pval_global ACAT with identical p-values", {
+test_that("pvalGlobal ACAT with identical p-values", {
   pvals <- rep(0.05, 5)
-  result <- pecotmr:::pval_global(pvals, comb_method = "ACAT", naive = FALSE)
+  result <- pecotmr:::pvalGlobal(pvals, combMethod = "ACAT", naive = FALSE)
   expect_true(is.numeric(result))
   expect_true(result > 0 && result < 1)
 })
 
-test_that("pval_global ACAT with single p-value delegates correctly", {
-  result <- pecotmr:::pval_global(0.05, comb_method = "ACAT", naive = FALSE)
+test_that("pvalGlobal ACAT with single p-value delegates correctly", {
+  result <- pecotmr:::pvalGlobal(0.05, combMethod = "ACAT", naive = FALSE)
   expect_equal(result, 0.05)
 })
 
-test_that("pval_global ACAT with very significant p-values", {
+test_that("pvalGlobal ACAT with very significant p-values", {
   pvals <- c(1e-8, 1e-6, 1e-4)
-  result <- pecotmr:::pval_global(pvals, comb_method = "ACAT", naive = FALSE)
+  result <- pecotmr:::pvalGlobal(pvals, combMethod = "ACAT", naive = FALSE)
   expect_true(is.numeric(result))
   expect_true(result > 0 && result <= 1)
 })
 
-test_that("pval_global HMP method returns valid p-value when harmonicmeanp available", {
+test_that("pvalGlobal HMP method returns valid p-value when harmonicmeanp available", {
   skip_if_not_installed("harmonicmeanp")
   pvals <- c(0.01, 0.05, 0.2, 0.7)
-  result <- pecotmr:::pval_global(pvals, comb_method = "HMP", naive = FALSE)
+  result <- pecotmr:::pvalGlobal(pvals, combMethod = "HMP", naive = FALSE)
   expect_true(is.numeric(result))
   expect_true(result >= 0 && result <= 1)
 })
 
-test_that("pval_global HMP errors when harmonicmeanp not installed", {
+test_that("pvalGlobal HMP errors when harmonicmeanp not installed", {
   skip_if(requireNamespace("harmonicmeanp", quietly = TRUE),
           "harmonicmeanp is installed, cannot test missing-package path")
   pvals <- c(0.01, 0.05)
-  expect_error(pecotmr:::pval_global(pvals, comb_method = "HMP", naive = FALSE),
+  expect_error(pecotmr:::pvalGlobal(pvals, combMethod = "HMP", naive = FALSE),
                "harmonicmeanp")
 })
 
 # =============================================================================
-# pval_hmp
+# pvalHmp
 # =============================================================================
 
-test_that("pval_hmp returns valid p-value", {
+test_that("pvalHmp returns valid p-value", {
   skip_if_not_installed("harmonicmeanp")
   pvals <- c(0.01, 0.05, 0.1)
-  result <- pecotmr:::pval_hmp(pvals)
+  result <- pecotmr:::pvalHmp(pvals)
   expect_true(is.numeric(result))
   expect_true(result >= 0 && result <= 1)
   # The harmonic mean is L/sum(1/p) where L = length(unique(pvals))
@@ -391,368 +391,368 @@ test_that("pval_hmp returns valid p-value", {
   expect_true(result < 0.1)
 })
 
-test_that("pval_hmp uses unique p-values only", {
+test_that("pvalHmp uses unique p-values only", {
   skip_if_not_installed("harmonicmeanp")
   pvals <- c(0.01, 0.01, 0.05, 0.05, 0.3)
-  result <- pecotmr:::pval_hmp(pvals)
+  result <- pecotmr:::pvalHmp(pvals)
   expect_true(is.numeric(result))
   expect_true(result >= 0 && result <= 1)
 })
 
-test_that("pval_hmp errors when package not available", {
+test_that("pvalHmp errors when package not available", {
   skip_if(requireNamespace("harmonicmeanp", quietly = TRUE),
           "harmonicmeanp is installed, cannot test missing-package path")
-  expect_error(pecotmr:::pval_hmp(c(0.01, 0.05)), "harmonicmeanp")
+  expect_error(pecotmr:::pvalHmp(c(0.01, 0.05)), "harmonicmeanp")
 })
 
 # =============================================================================
-# pval_acat
+# pvalAcat
 # =============================================================================
 
-test_that("pval_acat returns single p-value unchanged", {
-  expect_equal(pecotmr:::pval_acat(0.05), 0.05)
+test_that("pvalAcat returns single p-value unchanged", {
+  expect_equal(pecotmr:::pvalAcat(0.05), 0.05)
 })
 
-test_that("pval_acat combines multiple p-values", {
+test_that("pvalAcat combines multiple p-values", {
   pvals <- c(0.001, 0.01, 0.1)
-  combined <- pecotmr:::pval_acat(pvals)
+  combined <- pecotmr:::pvalAcat(pvals)
   expect_true(combined > 0 && combined < 1)
 })
 
-test_that("pval_acat with very small p-values does not return NA", {
-  result <- pecotmr:::pval_acat(c(1e-10, 1e-8, 1e-6))
+test_that("pvalAcat with very small p-values does not return NA", {
+  result <- pecotmr:::pvalAcat(c(1e-10, 1e-8, 1e-6))
   expect_true(is.numeric(result))
   expect_true(!is.na(result))
   expect_true(result > 0 && result <= 1)
 })
 
-test_that("pval_acat with all large p-values returns large combined p-value", {
-  result <- pecotmr:::pval_acat(c(0.8, 0.9, 0.95))
+test_that("pvalAcat with all large p-values returns large combined p-value", {
+  result <- pecotmr:::pvalAcat(c(0.8, 0.9, 0.95))
   expect_true(is.numeric(result))
   expect_true(result > 0.5 && result <= 1)
 })
 
 # =============================================================================
-# pval_cauchy
+# pvalCauchy
 # =============================================================================
 
-test_that("pval_cauchy combines p-values", {
+test_that("pvalCauchy combines p-values", {
   pvals <- c(0.01, 0.05, 0.5)
-  combined <- pecotmr:::pval_cauchy(pvals)
+  combined <- pecotmr:::pvalCauchy(pvals)
   # Manual: CCT stat = mean(tan((0.5 - p) * pi)), result = 1 - pcauchy(stat)
   cct_stat <- mean(tan((0.5 - pvals) * pi))
   expected <- 1 - pcauchy(cct_stat)
   expect_equal(combined, expected, tolerance = 1e-10)
 })
 
-test_that("pval_cauchy handles NAs with na.rm", {
+test_that("pvalCauchy handles NAs with na.rm", {
   pvals <- c(0.01, NA, 0.05)
-  combined <- pecotmr:::pval_cauchy(pvals, na.rm = TRUE)
+  combined <- pecotmr:::pvalCauchy(pvals, na.rm = TRUE)
   expect_true(!is.na(combined))
 })
 
-test_that("pval_cauchy with very small p-values", {
+test_that("pvalCauchy with very small p-values", {
   pvals <- c(1e-20, 1e-15)
-  combined <- pecotmr:::pval_cauchy(pvals)
+  combined <- pecotmr:::pvalCauchy(pvals)
   expect_true(combined < 1e-10)
 })
 
-test_that("pval_cauchy with all NA and na.rm=TRUE returns NA", {
-  result <- pecotmr:::pval_cauchy(c(NA, NA, NA), na.rm = TRUE)
+test_that("pvalCauchy with all NA and na.rm=TRUE returns NA", {
+  result <- pecotmr:::pvalCauchy(c(NA, NA, NA), na.rm = TRUE)
   expect_true(is.na(result))
 })
 
-test_that("pval_cauchy with p-values near 1 caps them at 0.99", {
-  result <- pecotmr:::pval_cauchy(c(0.999, 0.9999, 0.5))
+test_that("pvalCauchy with p-values near 1 caps them at 0.99", {
+  result <- pecotmr:::pvalCauchy(c(0.999, 0.9999, 0.5))
   expect_true(is.numeric(result))
   expect_true(!is.na(result))
 })
 
-test_that("pval_cauchy with na.rm=FALSE and NA present still computes result", {
-  result <- pecotmr:::pval_cauchy(c(0.01, NA, 0.05), na.rm = FALSE)
+test_that("pvalCauchy with na.rm=FALSE and NA present still computes result", {
+  result <- pecotmr:::pvalCauchy(c(0.01, NA, 0.05), na.rm = FALSE)
   expect_true(is.numeric(result))
 })
 
-test_that("pval_cauchy with extremely small p-values triggers large-stat branch", {
+test_that("pvalCauchy with extremely small p-values triggers large-stat branch", {
   # cct.stat > 1e+15 triggers the 1/(cct.stat*pi) return path
-  result <- pecotmr:::pval_cauchy(c(1e-300, 1e-290))
+  result <- pecotmr:::pvalCauchy(c(1e-300, 1e-290))
   expect_true(is.numeric(result))
   expect_true(result > 0 && result < 1)
   expect_false(is.na(result))
 })
 
-test_that("pval_acat uses asymptotic approximation for p < 1e-15", {
+test_that("pvalAcat uses asymptotic approximation for p < 1e-15", {
   # p-values below 1e-15 use 1/(p*pi) instead of tan()
-  result <- pecotmr:::pval_acat(c(1e-20, 1e-18, 0.01))
+  result <- pecotmr:::pvalAcat(c(1e-20, 1e-18, 0.01))
   expect_true(is.numeric(result))
   expect_true(result > 0 && result < 1)
   expect_false(is.na(result))
 })
 
 # =============================================================================
-# pval_poolr
+# pvalPoolr
 # =============================================================================
 
-test_that("pval_poolr fisher method returns valid p-value", {
+test_that("pvalPoolr fisher method returns valid p-value", {
   skip_if_not_installed("poolr")
   pvals <- c(0.01, 0.05, 0.1)
   R <- diag(3)
-  result <- pecotmr:::pval_poolr(pvals, method = "fisher", R = R)
+  result <- pecotmr:::pvalPoolr(pvals, method = "fisher", R = R)
   expect_true(is.numeric(result))
   expect_true(result > 0 && result < 1)
 })
 
-test_that("pval_poolr stouffer method returns valid p-value", {
+test_that("pvalPoolr stouffer method returns valid p-value", {
   skip_if_not_installed("poolr")
   pvals <- c(0.01, 0.05, 0.1)
   R <- diag(3)
-  result <- pecotmr:::pval_poolr(pvals, method = "stouffer", R = R)
+  result <- pecotmr:::pvalPoolr(pvals, method = "stouffer", R = R)
   expect_true(is.numeric(result))
   expect_true(result > 0 && result < 1)
 })
 
-test_that("pval_poolr invchisq method returns valid p-value", {
+test_that("pvalPoolr invchisq method returns valid p-value", {
   skip_if_not_installed("poolr")
   pvals <- c(0.01, 0.05, 0.1)
   R <- diag(3)
-  result <- pecotmr:::pval_poolr(pvals, method = "invchisq", R = R)
+  result <- pecotmr:::pvalPoolr(pvals, method = "invchisq", R = R)
   expect_true(is.numeric(result))
   expect_true(result > 0 && result < 1)
 })
 
-test_that("pval_poolr errors on unknown method", {
+test_that("pvalPoolr errors on unknown method", {
   skip_if_not_installed("poolr")
-  expect_error(pecotmr:::pval_poolr(c(0.01, 0.05), method = "bogus", R = diag(2)),
+  expect_error(pecotmr:::pvalPoolr(c(0.01, 0.05), method = "bogus", R = diag(2)),
                "Unknown poolr method")
 })
 
 # =============================================================================
-# pval_gbj
+# pvalGbj
 # =============================================================================
 
-test_that("pval_gbj gbj method returns valid p-value", {
+test_that("pvalGbj gbj method returns valid p-value", {
   skip_if_not_installed("GBJ")
   z <- c(2.5, 1.8, 3.0)
   R <- diag(3)
-  result <- pecotmr:::pval_gbj(z, R, method = "gbj")
+  result <- pecotmr:::pvalGbj(z, R, method = "gbj")
   expect_true(is.numeric(result))
   expect_true(result >= 0 && result <= 1)
 })
 
-test_that("pval_gbj hc method returns valid p-value", {
+test_that("pvalGbj hc method returns valid p-value", {
   skip_if_not_installed("GBJ")
   z <- c(2.5, 1.8, 3.0)
   R <- diag(3)
-  result <- pecotmr:::pval_gbj(z, R, method = "hc")
+  result <- pecotmr:::pvalGbj(z, R, method = "hc")
   expect_true(is.numeric(result))
   expect_true(result >= 0 && result <= 1)
 })
 
-test_that("pval_gbj minp method returns valid p-value", {
+test_that("pvalGbj minp method returns valid p-value", {
   skip_if_not_installed("GBJ")
   z <- c(2.5, 1.8, 3.0)
   R <- diag(3)
-  result <- pecotmr:::pval_gbj(z, R, method = "minp")
+  result <- pecotmr:::pvalGbj(z, R, method = "minp")
   expect_true(is.numeric(result))
   expect_true(result >= 0 && result <= 1)
 })
 
-test_that("pval_gbj bj method returns valid p-value", {
+test_that("pvalGbj bj method returns valid p-value", {
   skip_if_not_installed("GBJ")
   z <- c(2.5, 1.8, 3.0)
   R <- diag(3)
-  result <- pecotmr:::pval_gbj(z, R, method = "bj")
+  result <- pecotmr:::pvalGbj(z, R, method = "bj")
   expect_true(is.numeric(result))
   expect_true(result >= 0 && result <= 1)
 })
 
-test_that("pval_gbj ghc method returns valid p-value", {
+test_that("pvalGbj ghc method returns valid p-value", {
   skip_if_not_installed("GBJ")
   z <- c(2.5, 1.8, 3.0)
   R <- diag(3)
-  result <- pecotmr:::pval_gbj(z, R, method = "ghc")
+  result <- pecotmr:::pvalGbj(z, R, method = "ghc")
   expect_true(is.numeric(result))
   expect_true(result >= 0 && result <= 1)
 })
 
-test_that("pval_gbj gbj_omni method returns valid p-value", {
+test_that("pvalGbj gbj_omni method returns valid p-value", {
   skip_if_not_installed("GBJ")
   z <- c(2.5, 1.8, 3.0)
   R <- diag(3)
-  result <- pecotmr:::pval_gbj(z, R, method = "gbj_omni")
+  result <- pecotmr:::pvalGbj(z, R, method = "gbj_omni")
   expect_true(is.numeric(result))
   expect_true(result >= 0 && result <= 1)
 })
 
-test_that("pval_gbj errors on unknown method", {
+test_that("pvalGbj errors on unknown method", {
   skip_if_not_installed("GBJ")
-  expect_error(pecotmr:::pval_gbj(c(2.5, 1.8), diag(2), method = "bogus"),
+  expect_error(pecotmr:::pvalGbj(c(2.5, 1.8), diag(2), method = "bogus"),
                "Unknown GBJ method")
 })
 
 # =============================================================================
-# pval_aspu
+# pvalAspu
 # =============================================================================
 
-test_that("pval_aspu aspu method returns valid p-value", {
+test_that("pvalAspu aspu method returns valid p-value", {
   skip_if_not_installed("aSPU")
   set.seed(42)
   z <- c(2.5, 1.8, 3.0)
   R <- diag(3)
-  result <- pecotmr:::pval_aspu(z_scores = z, R = R, method = "aspu")
+  result <- pecotmr:::pvalAspu(zScores = z, R = R, method = "aspu")
   expect_true(is.numeric(result))
   expect_true(result >= 0 && result <= 1)
 })
 
-test_that("pval_aspu gates method returns valid p-value", {
+test_that("pvalAspu gates method returns valid p-value", {
   skip_if_not_installed("aSPU")
   pvals <- c(0.01, 0.05, 0.1)
   R <- diag(3)
-  result <- pecotmr:::pval_aspu(pvals = pvals, R = R, method = "gates")
+  result <- pecotmr:::pvalAspu(pvals = pvals, R = R, method = "gates")
   expect_true(is.numeric(result))
   expect_true(result >= 0 && result <= 1)
 })
 
-test_that("pval_aspu errors on unknown method", {
+test_that("pvalAspu errors on unknown method", {
   skip_if_not_installed("aSPU")
-  expect_error(pecotmr:::pval_aspu(z_scores = c(1, 2), R = diag(2), method = "bogus"),
+  expect_error(pecotmr:::pvalAspu(zScores = c(1, 2), R = diag(2), method = "bogus"),
                "Unknown aSPU method")
 })
 
 # =============================================================================
-# compute_qvalues
+# computeQvalues
 # =============================================================================
 
-test_that("compute_qvalues returns NA vector when all pvalues are NA", {
-  result <- pecotmr:::compute_qvalues(rep(NA_real_, 5))
+test_that("computeQvalues returns NA vector when all pvalues are NA", {
+  result <- pecotmr:::computeQvalues(rep(NA_real_, 5))
   expect_true(all(is.na(result)))
   expect_length(result, 5)
 })
 
-test_that("compute_qvalues returns single p-value unchanged", {
-  result <- pecotmr:::compute_qvalues(0.05)
+test_that("computeQvalues returns single p-value unchanged", {
+  result <- pecotmr:::computeQvalues(0.05)
   expect_equal(result, 0.05)
 })
 
-test_that("compute_qvalues returns empty input unchanged", {
-  result <- pecotmr:::compute_qvalues(numeric(0))
+test_that("computeQvalues returns empty input unchanged", {
+  result <- pecotmr:::computeQvalues(numeric(0))
   expect_length(result, 0)
 })
 
-test_that("compute_qvalues works with valid p-value vector", {
+test_that("computeQvalues works with valid p-value vector", {
   skip_if_not_installed("qvalue")
   set.seed(42)
   pvals <- runif(100, 0, 1)
-  result <- pecotmr:::compute_qvalues(pvals)
+  result <- pecotmr:::computeQvalues(pvals)
   expect_length(result, 100)
   expect_true(all(result >= 0 & result <= 1))
 })
 
-test_that("compute_qvalues falls back to BH when too few p-values", {
+test_that("computeQvalues falls back to BH when too few p-values", {
   skip_if_not_installed("qvalue")
   pvals <- c(0.001, 0.999)
-  result <- pecotmr:::compute_qvalues(pvals)
+  result <- pecotmr:::computeQvalues(pvals)
   expect_length(result, 2)
   expect_true(all(result >= 0 & result <= 1))
 })
 
-test_that("compute_qvalues errors when qvalue not installed", {
+test_that("computeQvalues errors when qvalue not installed", {
   skip_if(requireNamespace("qvalue", quietly = TRUE),
           "qvalue is installed, cannot test missing-package path")
-  expect_error(pecotmr:::compute_qvalues(c(0.01, 0.05)), "qvalue")
+  expect_error(pecotmr:::computeQvalues(c(0.01, 0.05)), "qvalue")
 })
 
 # =============================================================================
-# filter_molecular_events
+# filterMolecularEvents
 # =============================================================================
 
-test_that("filter_molecular_events errors when filter lacks required fields", {
+test_that("filterMolecularEvents errors when filter lacks required fields", {
   events <- c("gene_A_splicing", "gene_B_expression")
   bad_filter <- list(list(type_pattern = "gene"))
   expect_error(
-    pecotmr:::filter_molecular_events(events, bad_filter),
+    pecotmr:::filterMolecularEvents(events, bad_filter),
     "type_pattern and at least one of"
   )
 })
 
-test_that("filter_molecular_events errors when type_pattern is NULL", {
+test_that("filterMolecularEvents errors when type_pattern is NULL", {
   events <- c("gene_A_splicing")
   bad_filter <- list(list(type_pattern = NULL, valid_pattern = "splicing"))
   expect_error(
-    pecotmr:::filter_molecular_events(events, bad_filter),
+    pecotmr:::filterMolecularEvents(events, bad_filter),
     "type_pattern and at least one of"
   )
 })
 
-test_that("filter_molecular_events keeps events matching valid_pattern", {
+test_that("filterMolecularEvents keeps events matching valid_pattern", {
   events <- c("gene_A_splicing", "gene_A_expression", "gene_B_splicing", "protein_X")
   filters <- list(list(
     type_pattern = "gene_",
     valid_pattern = "splicing"
   ))
-  result <- pecotmr:::filter_molecular_events(events, filters)
+  result <- pecotmr:::filterMolecularEvents(events, filters)
   expect_true("protein_X" %in% result)
   gene_events <- result[grepl("gene_", result)]
   expect_true(all(grepl("splicing", gene_events)))
 })
 
-test_that("filter_molecular_events excludes events matching exclude_pattern", {
+test_that("filterMolecularEvents excludes events matching exclude_pattern", {
   events <- c("gene_A_splicing", "gene_A_expression", "gene_B_splicing")
   filters <- list(list(
     type_pattern = "gene_",
     exclude_pattern = "expression"
   ))
-  result <- pecotmr:::filter_molecular_events(events, filters)
+  result <- pecotmr:::filterMolecularEvents(events, filters)
   expect_false("gene_A_expression" %in% result)
   expect_true("gene_A_splicing" %in% result)
   expect_true("gene_B_splicing" %in% result)
 })
 
-test_that("filter_molecular_events returns NULL when no events pass filtering", {
+test_that("filterMolecularEvents returns NULL when no events pass filtering", {
   events <- c("gene_A_expression", "gene_B_expression")
   filters <- list(list(
     type_pattern = "gene_",
     valid_pattern = "splicing"
   ))
-  result <- pecotmr:::filter_molecular_events(events, filters)
+  result <- pecotmr:::filterMolecularEvents(events, filters)
   expect_null(result)
 })
 
-test_that("filter_molecular_events skips filter when no type events match", {
+test_that("filterMolecularEvents skips filter when no type events match", {
   events <- c("protein_X", "protein_Y")
   filters <- list(list(
     type_pattern = "gene_",
     valid_pattern = "splicing"
   ))
-  result <- pecotmr:::filter_molecular_events(events, filters)
+  result <- pecotmr:::filterMolecularEvents(events, filters)
   expect_equal(sort(result), sort(events))
 })
 
-test_that("filter_molecular_events handles comma-separated valid_pattern", {
+test_that("filterMolecularEvents handles comma-separated valid_pattern", {
   events <- c("gene_A_splicing", "gene_A_expression", "gene_B_methylation")
   filters <- list(list(
     type_pattern = "gene_",
     valid_pattern = "splicing,expression"
   ))
-  result <- pecotmr:::filter_molecular_events(events, filters)
+  result <- pecotmr:::filterMolecularEvents(events, filters)
   expect_true("gene_A_splicing" %in% result)
   expect_true("gene_A_expression" %in% result)
   expect_false("gene_B_methylation" %in% result)
 })
 
-test_that("filter_molecular_events handles comma-separated exclude_pattern", {
+test_that("filterMolecularEvents handles comma-separated exclude_pattern", {
   events <- c("gene_A_splicing", "gene_A_expression", "gene_B_methylation")
   filters <- list(list(
     type_pattern = "gene_",
     exclude_pattern = "expression,methylation"
   ))
-  result <- pecotmr:::filter_molecular_events(events, filters)
+  result <- pecotmr:::filterMolecularEvents(events, filters)
   expect_true("gene_A_splicing" %in% result)
   expect_false("gene_A_expression" %in% result)
   expect_false("gene_B_methylation" %in% result)
 })
 
-test_that("filter_molecular_events with both valid_pattern and exclude_pattern", {
+test_that("filterMolecularEvents with both valid_pattern and exclude_pattern", {
   events <- c("gene_A_splicing_good", "gene_A_splicing_bad",
               "gene_B_expression", "protein_X")
   filters <- list(list(
@@ -760,110 +760,110 @@ test_that("filter_molecular_events with both valid_pattern and exclude_pattern",
     valid_pattern = "splicing",
     exclude_pattern = "bad"
   ))
-  result <- pecotmr:::filter_molecular_events(events, filters)
+  result <- pecotmr:::filterMolecularEvents(events, filters)
   expect_true("gene_A_splicing_good" %in% result)
   expect_false("gene_A_splicing_bad" %in% result)
   expect_true("protein_X" %in% result)
 })
 
-test_that("filter_molecular_events with condition parameter", {
+test_that("filterMolecularEvents with condition parameter", {
   events <- c("gene_A_splicing", "gene_A_expression")
   filters <- list(list(
     type_pattern = "gene_",
     exclude_pattern = "expression"
   ))
-  result <- pecotmr:::filter_molecular_events(events, filters, condition = "test_context")
+  result <- pecotmr:::filterMolecularEvents(events, filters, condition = "test_context")
   expect_true("gene_A_splicing" %in% result)
   expect_false("gene_A_expression" %in% result)
 })
 
-test_that("filter_molecular_events with multiple filters", {
+test_that("filterMolecularEvents with multiple filters", {
   events <- c("gene_A_splicing", "gene_A_expression",
               "protein_X_high", "protein_X_low")
   filters <- list(
     list(type_pattern = "gene_", valid_pattern = "splicing"),
     list(type_pattern = "protein_", exclude_pattern = "low")
   )
-  result <- pecotmr:::filter_molecular_events(events, filters)
+  result <- pecotmr:::filterMolecularEvents(events, filters)
   expect_true("gene_A_splicing" %in% result)
   expect_false("gene_A_expression" %in% result)
   expect_true("protein_X_high" %in% result)
   expect_false("protein_X_low" %in% result)
 })
 
-test_that("filter_molecular_events returns all when all events match", {
+test_that("filterMolecularEvents returns all when all events match", {
   events <- c("gene_A_splicing", "gene_B_splicing")
   filters <- list(list(
     type_pattern = "gene_",
     valid_pattern = "splicing"
   ))
-  result <- pecotmr:::filter_molecular_events(events, filters)
+  result <- pecotmr:::filterMolecularEvents(events, filters)
   expect_equal(sort(result), sort(events))
 })
 
 # =============================================================================
-# find_valid_file_path and find_valid_file_paths
+# findValidFilePath and findValidFilePaths
 # =============================================================================
 
-test_that("find_valid_file_path returns target when it exists directly", {
+test_that("findValidFilePath returns target when it exists directly", {
   pkg_root <- normalizePath(file.path(test_path(), "..", ".."), mustWork = TRUE)
   target <- file.path(pkg_root, "DESCRIPTION")
   ref <- file.path(pkg_root, "NAMESPACE")
   skip_if_not(file.exists(target) && file.exists(ref), "Package root files not found")
-  result <- pecotmr:::find_valid_file_path(ref, target)
+  result <- pecotmr:::findValidFilePath(ref, target)
   expect_equal(result, target)
 })
 
-test_that("find_valid_file_path constructs path from reference directory", {
+test_that("findValidFilePath constructs path from reference directory", {
   pkg_root <- normalizePath(file.path(test_path(), "..", ".."), mustWork = TRUE)
   ref <- file.path(pkg_root, "NAMESPACE")
   skip_if_not(file.exists(ref), "NAMESPACE not found")
-  result <- pecotmr:::find_valid_file_path(ref, "DESCRIPTION")
+  result <- pecotmr:::findValidFilePath(ref, "DESCRIPTION")
   expect_true(file.exists(result))
   expect_true(grepl("DESCRIPTION$", result))
 })
 
-test_that("find_valid_file_path errors when both paths are invalid", {
+test_that("findValidFilePath errors when both paths are invalid", {
   expect_error(
-    pecotmr:::find_valid_file_path("/nonexistent/dir/ref.txt", "/nonexistent/target.txt"),
+    pecotmr:::findValidFilePath("/nonexistent/dir/ref.txt", "/nonexistent/target.txt"),
     "Both reference and target file paths do not work"
   )
 })
 
-test_that("find_valid_file_path returns reference when target is invalid but reference exists", {
+test_that("findValidFilePath returns reference when target is invalid but reference exists", {
   pkg_root <- normalizePath(file.path(test_path(), "..", ".."), mustWork = TRUE)
   ref <- file.path(pkg_root, "DESCRIPTION")
   skip_if_not(file.exists(ref), "DESCRIPTION not found")
-  result <- pecotmr:::find_valid_file_path(ref, "/totally/bogus/path.txt")
+  result <- pecotmr:::findValidFilePath(ref, "/totally/bogus/path.txt")
   expect_equal(result, ref)
 })
 
-test_that("find_valid_file_paths resolves multiple targets", {
+test_that("findValidFilePaths resolves multiple targets", {
   pkg_root <- normalizePath(file.path(test_path(), "..", ".."), mustWork = TRUE)
   ref <- file.path(pkg_root, "NAMESPACE")
   skip_if_not(file.exists(ref), "NAMESPACE not found")
   targets <- c("DESCRIPTION", "NAMESPACE")
-  result <- pecotmr:::find_valid_file_paths(ref, targets)
+  result <- pecotmr:::findValidFilePaths(ref, targets)
   expect_length(result, 2)
   expect_true(all(file.exists(result)))
 })
 
-test_that("find_valid_file_paths errors on all-invalid targets", {
+test_that("findValidFilePaths errors on all-invalid targets", {
   ref <- "/nonexistent/ref.txt"
   targets <- c("/bogus/a.txt", "/bogus/b.txt")
-  expect_error(pecotmr:::find_valid_file_paths(ref, targets))
+  expect_error(pecotmr:::findValidFilePaths(ref, targets))
 })
 
 # =============================================================================
-# compute_LD
+# computeLd
 # =============================================================================
 
-test_that("compute_LD sample method produces valid correlation matrix", {
+test_that("computeLd sample method produces valid correlation matrix", {
   set.seed(42)
   X <- matrix(sample(0:2, 200, replace = TRUE), nrow = 50)
   colnames(X) <- paste0("rs", 1:4)
 
-  R <- compute_LD(X, method = "sample")
+  R <- computeLd(X, method = "sample")
   expect_equal(nrow(R), 4)
   expect_equal(ncol(R), 4)
   expect_equal(unname(diag(R)), rep(1, 4))
@@ -871,227 +871,227 @@ test_that("compute_LD sample method produces valid correlation matrix", {
   expect_true(all(R >= -1 & R <= 1))
 })
 
-test_that("compute_LD population method produces valid matrix", {
+test_that("computeLd population method produces valid matrix", {
   set.seed(42)
   X <- matrix(sample(0:2, 200, replace = TRUE), nrow = 50)
   colnames(X) <- paste0("rs", 1:4)
 
-  R <- compute_LD(X, method = "population")
+  R <- computeLd(X, method = "population")
   expect_equal(nrow(R), 4)
   expect_equal(unname(diag(R)), rep(1, 4))
   expect_true(isSymmetric(R))
 })
 
-test_that("compute_LD with a single SNP returns 1x1 identity matrix", {
+test_that("computeLd with a single SNP returns 1x1 identity matrix", {
   X <- matrix(c(0, 1, 2, 1, 0), ncol = 1)
   colnames(X) <- "rs1"
-  R <- compute_LD(X, method = "sample")
+  R <- computeLd(X, method = "sample")
   expect_equal(dim(R), c(1L, 1L))
   expect_equal(R[1, 1], 1.0)
   expect_equal(colnames(R), "rs1")
 })
 
-test_that("compute_LD handles column with all NA gracefully", {
+test_that("computeLd handles column with all NA gracefully", {
   set.seed(123)
   X <- matrix(sample(0:2, 100, replace = TRUE), nrow = 20, ncol = 5)
   X[, 3] <- NA
   colnames(X) <- paste0("rs", 1:5)
 
-  R <- compute_LD(X, method = "sample")
+  R <- computeLd(X, method = "sample")
   expect_equal(dim(R), c(5L, 5L))
   expect_equal(unname(diag(R)), rep(1, 5))
   expect_equal(R[3, 1], 0)
   expect_equal(R[1, 3], 0)
 })
 
-test_that("compute_LD population method handles column with all NA", {
+test_that("computeLd population method handles column with all NA", {
   set.seed(123)
   X <- matrix(sample(0:2, 100, replace = TRUE), nrow = 20, ncol = 5)
   X[, 2] <- NA
   colnames(X) <- paste0("rs", 1:5)
 
-  R <- compute_LD(X, method = "population")
+  R <- computeLd(X, method = "population")
   expect_equal(dim(R), c(5L, 5L))
   expect_equal(unname(diag(R)), rep(1, 5))
   expect_equal(R[2, 4], 0)
 })
 
-test_that("compute_LD with larger matrix (100 SNPs) is fast and valid", {
+test_that("computeLd with larger matrix (100 SNPs) is fast and valid", {
   set.seed(99)
   X <- matrix(sample(0:2, 5000, replace = TRUE), nrow = 50, ncol = 100)
   colnames(X) <- paste0("rs", 1:100)
 
-  R <- compute_LD(X, method = "sample")
+  R <- computeLd(X, method = "sample")
   expect_equal(dim(R), c(100L, 100L))
   expect_equal(unname(diag(R)), rep(1, 100))
   expect_true(isSymmetric(R))
   expect_true(all(R >= -1 & R <= 1))
 })
 
-test_that("compute_LD population method with larger matrix is valid", {
+test_that("computeLd population method with larger matrix is valid", {
   set.seed(99)
   X <- matrix(sample(0:2, 5000, replace = TRUE), nrow = 50, ncol = 100)
   colnames(X) <- paste0("rs", 1:100)
 
-  R <- compute_LD(X, method = "population")
+  R <- computeLd(X, method = "population")
   expect_equal(dim(R), c(100L, 100L))
   expect_equal(unname(diag(R)), rep(1, 100))
   expect_true(isSymmetric(R))
 })
 
-test_that("compute_LD with perfectly correlated SNPs returns correlation of 1", {
+test_that("computeLd with perfectly correlated SNPs returns correlation of 1", {
   set.seed(42)
   col1 <- sample(0:2, 50, replace = TRUE)
   X <- matrix(c(col1, col1), ncol = 2)
   colnames(X) <- c("rs1", "rs2")
 
-  R <- compute_LD(X, method = "sample")
+  R <- computeLd(X, method = "sample")
   expect_equal(R[1, 2], 1.0, tolerance = 1e-10)
   expect_equal(R[2, 1], 1.0, tolerance = 1e-10)
 })
 
-test_that("compute_LD population method with trim_samples trims correctly", {
+test_that("computeLd population method with trim_samples trims correctly", {
   set.seed(42)
   X <- matrix(sample(0:2, 33, replace = TRUE), nrow = 11, ncol = 3)
   colnames(X) <- paste0("rs", 1:3)
 
-  R_trimmed <- compute_LD(X, method = "population", trim_samples = TRUE)
+  R_trimmed <- computeLd(X, method = "population", trimSamples = TRUE)
   expect_equal(dim(R_trimmed), c(3L, 3L))
-  R_full <- compute_LD(X, method = "population", trim_samples = FALSE)
+  R_full <- computeLd(X, method = "population", trimSamples = FALSE)
   expect_equal(dim(R_full), c(3L, 3L))
 })
 
-test_that("compute_LD with two monomorphic SNPs produces 0 off-diagonal", {
+test_that("computeLd with two monomorphic SNPs produces 0 off-diagonal", {
   X <- matrix(c(rep(1, 50), rep(2, 50)), nrow = 50, ncol = 2)
   colnames(X) <- c("mono1", "mono2")
 
-  R <- compute_LD(X, method = "sample")
+  R <- computeLd(X, method = "sample")
   expect_equal(R[1, 2], 0)
   expect_equal(R[2, 1], 0)
   expect_equal(unname(diag(R)), c(1, 1))
 })
 
-test_that("compute_LD preserves column names", {
+test_that("computeLd preserves column names", {
   set.seed(42)
   X <- matrix(sample(0:2, 60, replace = TRUE), nrow = 20, ncol = 3)
   colnames(X) <- c("snp_alpha", "snp_beta", "snp_gamma")
 
-  R <- compute_LD(X, method = "sample")
+  R <- computeLd(X, method = "sample")
   expect_equal(colnames(R), c("snp_alpha", "snp_beta", "snp_gamma"))
   expect_equal(rownames(R), c("snp_alpha", "snp_beta", "snp_gamma"))
 })
 
-test_that("compute_LD with heavy missingness still produces valid matrix", {
+test_that("computeLd with heavy missingness still produces valid matrix", {
   set.seed(42)
   X <- matrix(sample(0:2, 200, replace = TRUE), nrow = 40, ncol = 5)
   na_idx <- sample(length(X), size = floor(0.5 * length(X)))
   X[na_idx] <- NA
   colnames(X) <- paste0("rs", 1:5)
 
-  R <- compute_LD(X, method = "sample")
+  R <- computeLd(X, method = "sample")
   expect_true(all(!is.na(R)))
   expect_equal(unname(diag(R)), rep(1, 5))
 
-  R_pop <- compute_LD(X, method = "population")
+  R_pop <- computeLd(X, method = "population")
   expect_true(all(!is.na(R_pop)))
   expect_equal(unname(diag(R_pop)), rep(1, 5))
 })
 
-test_that("compute_LD with NA genotypes and sample method", {
+test_that("computeLd with NA genotypes and sample method", {
   set.seed(42)
   X <- matrix(sample(0:2, 200, replace = TRUE), nrow = 50)
   X[1, 1] <- NA
   X[5, 3] <- NA
   colnames(X) <- paste0("rs", 1:4)
 
-  R <- compute_LD(X, method = "sample")
+  R <- computeLd(X, method = "sample")
   expect_true(all(!is.na(R)))
   expect_equal(unname(diag(R)), rep(1, 4))
 })
 
-test_that("compute_LD errors on NULL input", {
-  expect_error(compute_LD(NULL), "X must be provided")
+test_that("computeLd errors on NULL input", {
+  expect_error(computeLd(NULL), "X must be provided")
 })
 
-test_that("compute_LD sample vs population differ but are close", {
+test_that("computeLd sample vs population differ but are close", {
   set.seed(42)
   X <- matrix(sample(0:2, 500, replace = TRUE), nrow = 100)
   colnames(X) <- paste0("rs", 1:5)
 
-  R_sample <- compute_LD(X, method = "sample")
-  R_pop <- compute_LD(X, method = "population")
+  R_sample <- computeLd(X, method = "sample")
+  R_pop <- computeLd(X, method = "population")
 
   expect_false(identical(R_sample, R_pop))
   expect_true(max(abs(R_sample - R_pop)) < 0.1)
 })
 
-test_that("compute_LD gcta method produces valid correlation matrix", {
+test_that("computeLd gcta method produces valid correlation matrix", {
   set.seed(42)
   X <- matrix(sample(0:2, 500, replace = TRUE), nrow = 100)
   colnames(X) <- paste0("rs", 1:5)
 
-  R <- compute_LD(X, method = "gcta")
+  R <- computeLd(X, method = "gcta")
   expect_equal(dim(R), c(5, 5))
   expect_equal(unname(diag(R)), rep(1, 5), tolerance = 1e-10)
   expect_true(isSymmetric(R, tol = 1e-10))
   expect_true(all(abs(R) <= 1 + 1e-10))
 })
 
-test_that("compute_LD gcta method handles missing data", {
+test_that("computeLd gcta method handles missing data", {
   set.seed(42)
   X <- matrix(sample(0:2, 500, replace = TRUE), nrow = 100)
   colnames(X) <- paste0("rs", 1:5)
   X[sample(length(X), 50)] <- NA
 
-  R <- compute_LD(X, method = "gcta")
+  R <- computeLd(X, method = "gcta")
   expect_equal(dim(R), c(5, 5))
   expect_true(all(is.finite(R)))
 })
 
-test_that("compute_LD gcta agrees with sample method on complete data", {
+test_that("computeLd gcta agrees with sample method on complete data", {
   set.seed(42)
   X <- matrix(sample(0:2, 500, replace = TRUE), nrow = 100)
   colnames(X) <- paste0("rs", 1:5)
 
-  R_sample <- compute_LD(X, method = "sample")
-  R_gcta <- compute_LD(X, method = "gcta")
+  R_sample <- computeLd(X, method = "sample")
+  R_gcta <- computeLd(X, method = "gcta")
 
   # With no missing data, GCTA and sample should be close (differ by N vs N-1 denom)
   expect_true(max(abs(R_sample - R_gcta)) < 0.05)
 })
 
-test_that("compute_LD gcta preserves column names", {
+test_that("computeLd gcta preserves column names", {
   set.seed(42)
   X <- matrix(sample(0:2, 300, replace = TRUE), nrow = 100)
   colnames(X) <- c("snp_a", "snp_b", "snp_c")
 
-  R <- compute_LD(X, method = "gcta")
+  R <- computeLd(X, method = "gcta")
   expect_equal(colnames(R), c("snp_a", "snp_b", "snp_c"))
   expect_equal(rownames(R), c("snp_a", "snp_b", "snp_c"))
 })
 
 # =============================================================================
-# filter_X_with_Y
+# filterXWithY
 # =============================================================================
 
-test_that("filter_X_with_Y preserves variants when Y has no missing data", {
+test_that("filterXWithY preserves variants when Y has no missing data", {
   set.seed(42)
   X <- matrix(sample(0:2, 40, replace = TRUE), nrow = 10, ncol = 4)
   Y <- matrix(rnorm(20), nrow = 10, ncol = 2)
   colnames(Y) <- c("ctx1", "ctx2")
   rownames(X) <- rownames(Y) <- paste0("s", 1:10)
 
-  result <- pecotmr:::filter_X_with_Y(X, Y, missing_rate_thresh = 1, maf_thresh = 0)
+  result <- pecotmr:::filterXWithY(X, Y, missingRateThresh = 1, mafThresh = 0)
   expect_true(ncol(result) >= 1)
 })
 
-test_that("filter_X_with_Y drops variants monomorphic due to Y missingness", {
+test_that("filterXWithY drops variants monomorphic due to Y missingness", {
   X <- matrix(c(0, 0, 1, 2, 0, 1, 1, 2), nrow = 4, ncol = 2)
   Y <- matrix(c(1, NA, NA, 1, 1, 1, 1, NA), nrow = 4, ncol = 2)
   colnames(Y) <- c("ctx1", "ctx2")
   rownames(X) <- rownames(Y) <- paste0("s", 1:4)
 
-  result <- pecotmr:::filter_X_with_Y(X, Y, missing_rate_thresh = 1, maf_thresh = 0)
+  result <- pecotmr:::filterXWithY(X, Y, missingRateThresh = 1, mafThresh = 0)
   expect_true(is.matrix(result))
 })
 
@@ -1128,84 +1128,84 @@ test_that("matxMax with negative values finds the least negative", {
 })
 
 # =============================================================================
-# wald_test_pval
+# waldTestPval
 # =============================================================================
 
-test_that("wald_test_pval computes correct p-values", {
-  pval <- wald_test_pval(beta = 5, se = 1, n = 100)
+test_that("waldTestPval computes correct p-values", {
+  pval <- waldTestPval(beta = 5, se = 1, n = 100)
   expect_true(pval < 0.001)
 
-  pval_zero <- wald_test_pval(beta = 0, se = 1, n = 100)
+  pval_zero <- waldTestPval(beta = 0, se = 1, n = 100)
   expect_equal(pval_zero, 1.0, tolerance = 1e-10)
 })
 
-test_that("wald_test_pval handles vector inputs", {
+test_that("waldTestPval handles vector inputs", {
   betas <- c(0, 1, 2, 5)
   ses <- c(1, 1, 1, 1)
-  pvals <- wald_test_pval(betas, ses, n = 100)
+  pvals <- waldTestPval(betas, ses, n = 100)
   expect_length(pvals, 4)
   expect_true(pvals[1] > pvals[4])
 })
 
-test_that("wald_test_pval is symmetric in beta sign", {
-  pval_pos <- wald_test_pval(beta = 3, se = 1, n = 50)
-  pval_neg <- wald_test_pval(beta = -3, se = 1, n = 50)
+test_that("waldTestPval is symmetric in beta sign", {
+  pval_pos <- waldTestPval(beta = 3, se = 1, n = 50)
+  pval_neg <- waldTestPval(beta = -3, se = 1, n = 50)
   expect_equal(pval_pos, pval_neg, tolerance = 1e-10)
 })
 
-test_that("wald_test_pval with very large beta gives p near 0", {
-  pval <- wald_test_pval(beta = 100, se = 1, n = 1000)
+test_that("waldTestPval with very large beta gives p near 0", {
+  pval <- waldTestPval(beta = 100, se = 1, n = 1000)
   expect_true(pval < 1e-10)
 })
 
-test_that("wald_test_pval with very large se gives p near 1", {
-  pval <- wald_test_pval(beta = 1, se = 1000, n = 100)
+test_that("waldTestPval with very large se gives p near 1", {
+  pval <- waldTestPval(beta = 1, se = 1000, n = 100)
   expect_true(pval > 0.99)
 })
 
 # =============================================================================
-# parse_region
+# parseRegion
 # =============================================================================
 
-test_that("parse_region parses valid region string", {
-  result <- parse_region("chr1:100-200")
+test_that("parseRegion parses valid region string", {
+  result <- parseRegion("chr1:100-200")
   expect_s3_class(result, "data.frame")
   expect_equal(result$chrom, "1")
   expect_equal(result$start, 100L)
   expect_equal(result$end, 200L)
 })
 
-test_that("parse_region handles X chromosome", {
-  result <- parse_region("chrX:500-1000")
+test_that("parseRegion handles X chromosome", {
+  result <- parseRegion("chrX:500-1000")
   expect_equal(result$chrom, "X")
   expect_equal(result$start, 500L)
   expect_equal(result$end, 1000L)
 })
 
-test_that("parse_region errors on invalid format", {
-  expect_error(parse_region("1:100-200"), "format must be")
-  expect_error(parse_region("chr1-100-200"), "format must be")
-  expect_error(parse_region("chr1:abc-200"), "format must be")
+test_that("parseRegion errors on invalid format", {
+  expect_error(parseRegion("1:100-200"), "format must be")
+  expect_error(parseRegion("chr1-100-200"), "format must be")
+  expect_error(parseRegion("chr1:abc-200"), "format must be")
 })
 
-test_that("parse_region returns non-string input unchanged", {
+test_that("parseRegion returns non-string input unchanged", {
   df <- data.frame(chrom = 1, start = 100, end = 200)
-  result <- parse_region(df)
+  result <- parseRegion(df)
   expect_identical(result, df)
 })
 
-test_that("parse_region returns non-single-string input unchanged", {
+test_that("parseRegion returns non-single-string input unchanged", {
   input <- c("chr1:100-200", "chr2:300-400")
-  result <- parse_region(input)
+  result <- parseRegion(input)
   expect_identical(result, input)
 })
 
 # =============================================================================
-# parse_variant_id
+# parseVariantId
 # =============================================================================
 
-test_that("parse_variant_id parses single variant with chr prefix", {
-  result <- parse_variant_id("chr1:12345:A:G")
+test_that("parseVariantId parses single variant with chr prefix", {
+  result <- parseVariantId("chr1:12345:A:G")
   expect_equal(result$chrom, 1L)
   expect_equal(result$pos, 12345L)
   expect_equal(result$A2, "A")
@@ -1215,8 +1215,8 @@ test_that("parse_variant_id parses single variant with chr prefix", {
   expect_equal(conv$allele_sep, ":")
 })
 
-test_that("parse_variant_id parses single variant without chr prefix", {
-  result <- parse_variant_id("5:12345:A:G")
+test_that("parseVariantId parses single variant without chr prefix", {
+  result <- parseVariantId("5:12345:A:G")
   expect_equal(result$chrom, 5L)
   expect_equal(result$pos, 12345L)
   expect_equal(result$A2, "A")
@@ -1225,9 +1225,9 @@ test_that("parse_variant_id parses single variant without chr prefix", {
   expect_false(conv$has_chr)
 })
 
-test_that("parse_variant_id parses multiple variants", {
+test_that("parseVariantId parses multiple variants", {
   ids <- c("chr1:100:A:G", "chr2:200:C:T", "chr3:300:G:A")
-  result <- parse_variant_id(ids)
+  result <- parseVariantId(ids)
   expect_equal(nrow(result), 3)
   expect_equal(result$chrom, c(1L, 2L, 3L))
   expect_equal(result$pos, c(100L, 200L, 300L))
@@ -1236,53 +1236,53 @@ test_that("parse_variant_id parses multiple variants", {
 })
 
 # =============================================================================
-# detect_variant_convention
+# detectVariantConvention
 # =============================================================================
 
-test_that("detect_variant_convention detects chr prefix and allele separators", {
-  conv <- pecotmr:::detect_variant_convention(c("chr1:100:A:G", "chr2:200:C:T"))
+test_that("detectVariantConvention detects chr prefix and allele separators", {
+  conv <- pecotmr:::detectVariantConvention(c("chr1:100:A:G", "chr2:200:C:T"))
   expect_true(conv$has_chr)
   expect_equal(conv$allele_sep, ":")
   expect_false(conv$has_build)
 
-  conv2 <- pecotmr:::detect_variant_convention(c("1_100_A_G", "2_200_C_T"))
+  conv2 <- pecotmr:::detectVariantConvention(c("1_100_A_G", "2_200_C_T"))
   expect_false(conv2$has_chr)
   expect_equal(conv2$allele_sep, "_")
 
-  conv3 <- pecotmr:::detect_variant_convention(c("chr1:100:A:G:b38"))
+  conv3 <- pecotmr:::detectVariantConvention(c("chr1:100:A:G:b38"))
   expect_true(conv3$has_build)
 
-  conv4 <- pecotmr:::detect_variant_convention(c("chr1:100_A_G"))
+  conv4 <- pecotmr:::detectVariantConvention(c("chr1:100_A_G"))
   expect_true(conv4$has_chr)
   expect_equal(conv4$allele_sep, "_")
 
-  conv5 <- pecotmr:::detect_variant_convention(c("1:100_A_G"))
+  conv5 <- pecotmr:::detectVariantConvention(c("1:100_A_G"))
   expect_false(conv5$has_chr)
   expect_equal(conv5$allele_sep, "_")
 })
 
 # =============================================================================
-# normalize_variant_id
+# normalizeVariantId
 # =============================================================================
 
-test_that("normalize_variant_id normalizes various formats", {
-  expect_equal(normalize_variant_id("1_100_A_G"), "chr1:100:A:G")
-  expect_equal(normalize_variant_id("chr1:100:A:G"), "chr1:100:A:G")
-  expect_equal(normalize_variant_id("1:100:A:G"), "chr1:100:A:G")
-  expect_equal(normalize_variant_id("chr1:100:A:G", chr_prefix = FALSE), "1:100:A:G")
-  expect_equal(normalize_variant_id("chr1:100:A:G:b38"), "chr1:100:A:G")
-  expect_equal(normalize_variant_id("chr1:100_A_G"), "chr1:100:A:G")
-  conv <- pecotmr:::detect_variant_convention(c("chr1:100_A_G"))
-  expect_equal(normalize_variant_id("1:200:C:T", convention = conv), "chr1:200_C_T")
+test_that("normalizeVariantId normalizes various formats", {
+  expect_equal(normalizeVariantId("1_100_A_G"), "chr1:100:A:G")
+  expect_equal(normalizeVariantId("chr1:100:A:G"), "chr1:100:A:G")
+  expect_equal(normalizeVariantId("1:100:A:G"), "chr1:100:A:G")
+  expect_equal(normalizeVariantId("chr1:100:A:G", chrPrefix = FALSE), "1:100:A:G")
+  expect_equal(normalizeVariantId("chr1:100:A:G:b38"), "chr1:100:A:G")
+  expect_equal(normalizeVariantId("chr1:100_A_G"), "chr1:100:A:G")
+  conv <- pecotmr:::detectVariantConvention(c("chr1:100_A_G"))
+  expect_equal(normalizeVariantId("1:200:C:T", convention = conv), "chr1:200_C_T")
 })
 
 # =============================================================================
-# variant_id_to_df
+# variantIdToDf
 # =============================================================================
 
-test_that("variant_id_to_df handles colon-separated format", {
+test_that("variantIdToDf handles colon-separated format", {
   ids <- c("1:100:A:G", "2:200:C:T")
-  result <- pecotmr:::variant_id_to_df(ids)
+  result <- pecotmr:::variantIdToDf(ids)
   expect_equal(nrow(result), 2)
   expect_equal(result$chrom, c(1L, 2L))
   expect_equal(result$pos, c(100L, 200L))
@@ -1290,30 +1290,30 @@ test_that("variant_id_to_df handles colon-separated format", {
   expect_equal(result$A1, c("G", "T"))
 })
 
-test_that("variant_id_to_df handles underscore-separated format", {
+test_that("variantIdToDf handles underscore-separated format", {
   ids <- c("1:100_A_G", "2:200_C_T")
-  result <- pecotmr:::variant_id_to_df(ids)
+  result <- pecotmr:::variantIdToDf(ids)
   expect_equal(nrow(result), 2)
   expect_equal(result$A2, c("A", "C"))
 })
 
-test_that("variant_id_to_df strips chr prefix", {
+test_that("variantIdToDf strips chr prefix", {
   ids <- c("chr1:100:A:G", "chr2:200:C:T")
-  result <- pecotmr:::variant_id_to_df(ids)
+  result <- pecotmr:::variantIdToDf(ids)
   expect_equal(result$chrom, c(1L, 2L))
 })
 
-test_that("variant_id_to_df handles data.frame input with named columns", {
+test_that("variantIdToDf handles data.frame input with named columns", {
   df <- data.frame(chrom = c("chr1", "2"), pos = c(100, 200),
                    A2 = c("A", "C"), A1 = c("G", "T"))
-  suppressWarnings(result <- pecotmr:::variant_id_to_df(df))
+  suppressWarnings(result <- pecotmr:::variantIdToDf(df))
   expect_equal(result$chrom, c(1L, 2L))
   expect_equal(result$pos, c(100L, 200L))
 })
 
-test_that("variant_id_to_df handles 5-part IDs with build suffix", {
+test_that("variantIdToDf handles 5-part IDs with build suffix", {
   ids <- c("chr1:100:A:G:b38", "chr2:200:T:C")
-  result <- pecotmr:::variant_id_to_df(ids)
+  result <- pecotmr:::variantIdToDf(ids)
   expect_equal(ncol(result), 4)
   expect_equal(colnames(result), c("chrom", "pos", "A2", "A1"))
   expect_equal(result$chrom, c(1L, 2L))
@@ -1321,101 +1321,101 @@ test_that("variant_id_to_df handles 5-part IDs with build suffix", {
   expect_equal(result$A1, c("G", "C"))
 })
 
-test_that("variant_id_to_df handles mixed 4/5-part IDs", {
+test_that("variantIdToDf handles mixed 4/5-part IDs", {
   ids <- c("1:100:A:G", "chr2:200:T:C:b38", "3:300:G:A:b37")
-  suppressWarnings(result <- pecotmr:::variant_id_to_df(ids))
+  suppressWarnings(result <- pecotmr:::variantIdToDf(ids))
   expect_equal(nrow(result), 3)
   expect_equal(ncol(result), 4)
   expect_equal(result$A1, c("G", "C", "A"))
 })
 
 # =============================================================================
-# get_nested_element
+# getNestedElement
 # =============================================================================
 
-test_that("get_nested_element retrieves deeply nested values", {
+test_that("getNestedElement retrieves deeply nested values", {
   nested <- list(a = list(b = list(c = 42)))
-  expect_equal(get_nested_element(nested, c("a", "b", "c")), 42)
+  expect_equal(getNestedElement(nested, c("a", "b", "c")), 42)
 })
 
-test_that("get_nested_element returns NULL for NULL name_vector", {
+test_that("getNestedElement returns NULL for NULL name_vector", {
   nested <- list(a = 1)
-  expect_null(get_nested_element(nested, NULL))
+  expect_null(getNestedElement(nested, NULL))
 })
 
-test_that("get_nested_element errors on missing element", {
+test_that("getNestedElement errors on missing element", {
   nested <- list(a = list(b = 1))
-  expect_error(get_nested_element(nested, c("a", "x")), "Element not found")
+  expect_error(getNestedElement(nested, c("a", "x")), "Element not found")
 })
 
-test_that("get_nested_element handles single level", {
+test_that("getNestedElement handles single level", {
   nested <- list(a = "hello")
-  expect_equal(get_nested_element(nested, "a"), "hello")
+  expect_equal(getNestedElement(nested, "a"), "hello")
 })
 
-test_that("get_nested_element skips empty strings", {
+test_that("getNestedElement skips empty strings", {
   nested <- list(a = list(b = 99))
-  expect_equal(get_nested_element(nested, c("", "a", "b")), 99)
+  expect_equal(getNestedElement(nested, c("", "a", "b")), 99)
 })
 
 # =============================================================================
-# region_to_df
+# regionToDf
 # =============================================================================
 
-test_that("region_to_df converts underscore-separated region IDs", {
+test_that("regionToDf converts underscore-separated region IDs", {
   ids <- c("1_100_200", "2_300_400")
-  result <- region_to_df(ids)
+  result <- regionToDf(ids)
   expect_equal(nrow(result), 2)
   expect_equal(result$chrom, c(1L, 2L))
   expect_equal(result$start, c(100L, 300L))
   expect_equal(result$end, c(200L, 400L))
 })
 
-test_that("region_to_df handles chr prefix", {
+test_that("regionToDf handles chr prefix", {
   ids <- c("chr1_100_200")
-  result <- region_to_df(ids)
+  result <- regionToDf(ids)
   expect_equal(result$chrom, 1L)
 })
 
-test_that("region_to_df allows custom column names", {
+test_that("regionToDf allows custom column names", {
   ids <- c("1_100_200")
-  result <- region_to_df(ids, colnames = c("chr", "begin", "finish"))
+  result <- regionToDf(ids, colnames = c("chr", "begin", "finish"))
   expect_true(all(c("chr", "begin", "finish") %in% colnames(result)))
 })
 
 # =============================================================================
-# z_to_pvalue
+# zToPvalue
 # =============================================================================
 
-test_that("z_to_pvalue returns correct p-values", {
-  expect_equal(z_to_pvalue(0), 1.0, tolerance = 1e-10)
-  expect_true(z_to_pvalue(1.96) < 0.05)
-  expect_true(z_to_pvalue(-1.96) < 0.05)
-  expect_equal(z_to_pvalue(1.96), z_to_pvalue(-1.96), tolerance = 1e-10)
+test_that("zToPvalue returns correct p-values", {
+  expect_equal(zToPvalue(0), 1.0, tolerance = 1e-10)
+  expect_true(zToPvalue(1.96) < 0.05)
+  expect_true(zToPvalue(-1.96) < 0.05)
+  expect_equal(zToPvalue(1.96), zToPvalue(-1.96), tolerance = 1e-10)
 })
 
-test_that("z_to_pvalue handles vector input", {
+test_that("zToPvalue handles vector input", {
   z <- c(0, 1, 2, 3)
-  p <- z_to_pvalue(z)
+  p <- zToPvalue(z)
   expect_length(p, 4)
   expect_true(all(diff(p) < 0))
 })
 
-test_that("z_to_pvalue handles extreme values", {
-  expect_true(z_to_pvalue(10) < 1e-20)
-  expect_true(z_to_pvalue(40) >= 0)
+test_that("zToPvalue handles extreme values", {
+  expect_true(zToPvalue(10) < 1e-20)
+  expect_true(zToPvalue(40) >= 0)
 })
 
 # =============================================================================
-# z_to_beta_se
+# zToBetaSe
 # =============================================================================
 
-test_that("z_to_beta_se produces correct conversions", {
+test_that("zToBetaSe produces correct conversions", {
   z <- c(2.0, -1.0)
   maf <- c(0.3, 0.1)
   n <- 10000
 
-  result <- pecotmr:::z_to_beta_se(z, maf, n)
+  result <- pecotmr:::zToBetaSe(z, maf, n)
   expect_s3_class(result, "data.frame")
   expect_true(all(c("beta", "se", "maf") %in% names(result)))
   expect_equal(nrow(result), 2)
@@ -1423,62 +1423,62 @@ test_that("z_to_beta_se produces correct conversions", {
   expect_true(result$beta[2] < 0)
 })
 
-test_that("z_to_beta_se errors on mismatched lengths", {
-  expect_error(pecotmr:::z_to_beta_se(c(1, 2), c(0.3), 1000), "same length")
+test_that("zToBetaSe errors on mismatched lengths", {
+  expect_error(pecotmr:::zToBetaSe(c(1, 2), c(0.3), 1000), "same length")
 })
 
-test_that("z_to_beta_se adjusts MAF > 0.5", {
-  result <- pecotmr:::z_to_beta_se(c(1.0), c(0.7), 1000)
+test_that("zToBetaSe adjusts MAF > 0.5", {
+  result <- pecotmr:::zToBetaSe(c(1.0), c(0.7), 1000)
   expect_equal(result$maf, 0.3)
 })
 
 # =============================================================================
-# lbf_to_alpha
+# lbfToAlpha
 # =============================================================================
 
-test_that("lbf_to_alpha converts matrix correctly", {
+test_that("lbfToAlpha converts matrix correctly", {
   lbf <- matrix(c(-0.5, 1.2, 0.3, 0.7, -1.1, 0.4), nrow = 2)
   colnames(lbf) <- paste0("v", 1:3)
-  result <- lbf_to_alpha(lbf)
+  result <- lbfToAlpha(lbf)
 
   expect_equal(nrow(result), 2)
   expect_equal(ncol(result), 3)
   expect_equal(rowSums(result), c(1, 1), tolerance = 1e-10)
 })
 
-test_that("lbf_to_alpha handles single column", {
+test_that("lbfToAlpha handles single column", {
   lbf <- matrix(c(0.5, 1.0), ncol = 1)
   colnames(lbf) <- "v1"
-  result <- lbf_to_alpha(lbf)
+  result <- lbfToAlpha(lbf)
   expect_equal(ncol(result), 1)
 })
 
-test_that("lbf_to_alpha handles all-zero row", {
+test_that("lbfToAlpha handles all-zero row", {
   lbf <- matrix(c(0, 0, 0), nrow = 1)
   colnames(lbf) <- paste0("v", 1:3)
-  result <- lbf_to_alpha(lbf)
+  result <- lbfToAlpha(lbf)
   expect_true(all(result == 0))
 })
 
 # =============================================================================
-# find_data
+# findData
 # =============================================================================
 
-test_that("find_data retrieves from nested list at depth 2", {
+test_that("findData retrieves from nested list at depth 2", {
   x <- list(a = list(val = 42), b = list(val = 99))
-  result <- find_data(x, c(2, "val"))
+  result <- findData(x, c(2, "val"))
   expect_equal(result, c(42, 99))
 })
 
-test_that("find_data returns list at depth 0", {
+test_that("findData returns list at depth 0", {
   x <- list(a = 1, b = 2)
-  result <- find_data(x, c(0))
+  result <- findData(x, c(0))
   expect_type(result, "list")
 })
 
-test_that("find_data with show_path=TRUE returns list structure", {
+test_that("findData with show_path=TRUE returns list structure", {
   x <- list(a = list(val = 10), b = list(val = 20))
-  result <- find_data(x, c(2, "val"), show_path = TRUE)
+  result <- findData(x, c(2, "val"), showPath = TRUE)
   expect_type(result, "list")
   expect_true("a" %in% names(result))
   expect_true("b" %in% names(result))
@@ -1486,17 +1486,17 @@ test_that("find_data with show_path=TRUE returns list structure", {
   expect_equal(result$b, 20)
 })
 
-test_that("find_data with rm_dup=TRUE removes duplicate values", {
+test_that("findData with rm_dup=TRUE removes duplicate values", {
   x <- list(
     a = list(val = 42),
     b = list(val = 42),
     c = list(val = 99)
   )
-  result <- find_data(x, c(2, "val"), rm_dup = TRUE)
+  result <- findData(x, c(2, "val"), rmDup = TRUE)
   expect_true("shared_list_names" %in% names(result))
 })
 
-test_that("find_data at depth 3 retrieves deeply nested values", {
+test_that("findData at depth 3 retrieves deeply nested values", {
   x <- list(
     level1_a = list(
       level2_a = list(target = "found_a"),
@@ -1506,160 +1506,160 @@ test_that("find_data at depth 3 retrieves deeply nested values", {
       level2_c = list(target = "found_c")
     )
   )
-  result <- find_data(x, c(3, "target"))
+  result <- findData(x, c(3, "target"))
   expect_true("found_a" %in% result)
   expect_true("found_b" %in% result)
   expect_true("found_c" %in% result)
 })
 
-test_that("find_data with depth=1 and list_name returns element directly", {
+test_that("findData with depth=1 and list_name returns element directly", {
   x <- list(a = 1, b = 2, c = 3)
-  result <- find_data(x, c(1, "b"))
+  result <- findData(x, c(1, "b"))
   expect_equal(result, 2)
 })
 
-test_that("find_data with rm_null=TRUE removes NULL results", {
+test_that("findData with rm_null=TRUE removes NULL results", {
   x2 <- list(
     a = list(val = 10),
     b = "not a list"
   )
-  result <- find_data(x2, c(2, "val"), rm_null = TRUE)
+  result <- findData(x2, c(2, "val"), rmNull = TRUE)
   expect_equal(result, 10)
 })
 
-test_that("find_data with show_path=TRUE and rm_dup=TRUE at depth 2", {
+test_that("findData with show_path=TRUE and rm_dup=TRUE at depth 2", {
   x <- list(
     a = list(val = 42),
     b = list(val = 42),
     c = list(val = 99)
   )
-  result <- find_data(x, c(2, "val"), show_path = TRUE, rm_dup = TRUE)
+  result <- findData(x, c(2, "val"), showPath = TRUE, rmDup = TRUE)
   expect_type(result, "list")
   expect_true("shared_list_names" %in% names(result))
 })
 
-test_that("find_data with depth=1 and no list_name returns whole object", {
+test_that("findData with depth=1 and no list_name returns whole object", {
   x <- list(a = 1, b = 2)
-  result <- find_data(x, c(1))
+  result <- findData(x, c(1))
   expect_identical(result, x)
 })
 
-test_that("find_data with docall=list preserves list structure", {
+test_that("findData with docall=list preserves list structure", {
   x <- list(
     a = list(val = c(1, 2)),
     b = list(val = c(3, 4))
   )
-  result <- find_data(x, c(2, "val"), docall = list)
+  result <- findData(x, c(2, "val"), docall = list)
   expect_type(result, "list")
   expect_equal(result[[1]], c(1, 2))
   expect_equal(result[[2]], c(3, 4))
 })
 
 # =============================================================================
-# robust_mahalanobis
+# robustMahalanobis
 # =============================================================================
 
-test_that("robust_mahalanobis works with non-singular covariance", {
+test_that("robustMahalanobis works with non-singular covariance", {
   set.seed(42)
   x <- matrix(rnorm(100), ncol = 2)
-  d <- robust_mahalanobis(x)
+  d <- robustMahalanobis(x)
   expect_length(d, 50)
   expect_true(all(d >= 0))
   expect_true(is.numeric(d))
 })
 
-test_that("robust_mahalanobis works with singular covariance (falls back to ginv)", {
+test_that("robustMahalanobis works with singular covariance (falls back to ginv)", {
   # Create a matrix where columns are linearly dependent -> singular cov
   set.seed(42)
   col1 <- rnorm(20)
   col2 <- rnorm(20)
   col3 <- col1 + col2  # linearly dependent
   x <- cbind(col1, col2, col3)
-  d <- robust_mahalanobis(x)
+  d <- robustMahalanobis(x)
   expect_length(d, 20)
   expect_true(all(d >= 0))
 })
 
-test_that("robust_mahalanobis with pre-inverted covariance", {
+test_that("robustMahalanobis with pre-inverted covariance", {
   set.seed(42)
   x <- matrix(rnorm(60), ncol = 2)
   center <- colMeans(x)
   cov_mat <- stats::cov(x)
   inv_cov <- solve(cov_mat)
-  d <- robust_mahalanobis(x, center = center, cov = inv_cov, inverted = TRUE)
+  d <- robustMahalanobis(x, center = center, cov = inv_cov, inverted = TRUE)
   expect_length(d, 30)
   expect_true(all(d >= 0))
 })
 
-test_that("robust_mahalanobis with vector input", {
+test_that("robustMahalanobis with vector input", {
   # Single observation as a vector
   x <- c(1.0, 2.0, 3.0)
-  d <- robust_mahalanobis(x, center = c(1, 2, 3), cov = diag(3), inverted = TRUE)
+  d <- robustMahalanobis(x, center = c(1, 2, 3), cov = diag(3), inverted = TRUE)
   expect_length(d, 1)
   expect_equal(as.numeric(d), 0)
 })
 
-test_that("robust_mahalanobis auto-computes center and cov when NULL", {
+test_that("robustMahalanobis auto-computes center and cov when NULL", {
   set.seed(42)
   x <- matrix(rnorm(40), ncol = 2)
-  d1 <- robust_mahalanobis(x)
-  d2 <- robust_mahalanobis(x, center = colMeans(x), cov = stats::cov(x))
+  d1 <- robustMahalanobis(x)
+  d2 <- robustMahalanobis(x, center = colMeans(x), cov = stats::cov(x))
   expect_equal(d1, d2)
 })
 
 # =============================================================================
-# detect_outliers_mahalanobis
+# detectOutliersMahalanobis
 # =============================================================================
 
-test_that("detect_outliers_mahalanobis returns correct structure", {
+test_that("detectOutliersMahalanobis returns correct structure", {
   set.seed(42)
   x <- matrix(rnorm(200), ncol = 2)
   rownames(x) <- paste0("sample", 1:100)
-  result <- detect_outliers_mahalanobis(x)
+  result <- detectOutliersMahalanobis(x)
   expect_s3_class(result, "data.frame")
   expect_true(all(c("sample_id", "mahal", "pvalue", "is_outlier") %in% names(result)))
   expect_equal(nrow(result), 100)
   expect_equal(result$sample_id[1], "sample1")
 })
 
-test_that("detect_outliers_mahalanobis detects clear outliers", {
+test_that("detectOutliersMahalanobis detects clear outliers", {
   set.seed(42)
   x <- matrix(rnorm(200), ncol = 2)
   # Add a clear outlier far from the center
   x <- rbind(x, c(50, 50))
   rownames(x) <- paste0("s", 1:101)
-  result <- detect_outliers_mahalanobis(x)
+  result <- detectOutliersMahalanobis(x)
   # The extreme point should be an outlier
   expect_true(result$is_outlier[101])
 })
 
-test_that("detect_outliers_mahalanobis with unnamed rows uses indices", {
+test_that("detectOutliersMahalanobis with unnamed rows uses indices", {
   set.seed(42)
   x <- matrix(rnorm(40), ncol = 2)
-  result <- detect_outliers_mahalanobis(x)
+  result <- detectOutliersMahalanobis(x)
   expect_equal(result$sample_id, as.character(1:20))
 })
 
-test_that("detect_outliers_mahalanobis threshold sensitivity", {
+test_that("detectOutliersMahalanobis threshold sensitivity", {
   set.seed(42)
   x <- matrix(rnorm(200), ncol = 2)
   # With very strict threshold, fewer outliers
-  r_strict <- detect_outliers_mahalanobis(x, prob = 0.999, pval_threshold = 0.001)
+  r_strict <- detectOutliersMahalanobis(x, prob = 0.999, pvalThreshold = 0.001)
   # With lenient threshold, more possible outliers
-  r_lenient <- detect_outliers_mahalanobis(x, prob = 0.90, pval_threshold = 0.10)
+  r_lenient <- detectOutliersMahalanobis(x, prob = 0.90, pvalThreshold = 0.10)
   expect_true(sum(r_strict$is_outlier) <= sum(r_lenient$is_outlier))
 })
 
 # =============================================================================
-# twas_method_cor
+# twasMethodCor
 # =============================================================================
 
-test_that("twas_method_cor with identity LD", {
+test_that("twasMethodCor with identity LD", {
   LD <- diag(3)
   w1 <- c(1, 0, 0)
   w2 <- c(0, 1, 0)
   w3 <- c(0, 0, 1)
-  result <- twas_method_cor(list(w1, w2, w3), LD)
+  result <- twasMethodCor(list(w1, w2, w3), LD)
   # With identity LD and orthogonal weights, off-diag should be 0
   expect_equal(dim(result), c(3, 3))
   expect_equal(diag(result), c(1, 1, 1))
@@ -1668,42 +1668,42 @@ test_that("twas_method_cor with identity LD", {
   expect_equal(result[2, 3], 0)
 })
 
-test_that("twas_method_cor with identical weights gives correlation 1", {
+test_that("twasMethodCor with identical weights gives correlation 1", {
   LD <- matrix(c(1, 0.5, 0.5, 1), 2, 2)
   w <- c(1, 1)
-  result <- twas_method_cor(list(w, w), LD)
+  result <- twasMethodCor(list(w, w), LD)
   expect_equal(result[1, 2], 1)
   expect_equal(result[2, 1], 1)
 })
 
-test_that("twas_method_cor with diagonal LD", {
+test_that("twasMethodCor with diagonal LD", {
   LD <- diag(c(2, 3, 1))
   w1 <- c(1, 0, 0)
   w2 <- c(0, 1, 0)
-  result <- twas_method_cor(list(w1, w2), LD)
+  result <- twasMethodCor(list(w1, w2), LD)
   expect_equal(result[1, 2], 0)
 })
 
 # =============================================================================
-# compute_qvalues — uncovered branches
+# computeQvalues — uncovered branches
 # =============================================================================
 
-test_that("compute_qvalues returns NA vector when all pvalues are NA", {
+test_that("computeQvalues returns NA vector when all pvalues are NA", {
   skip_if_not_installed("qvalue")
   result <- expect_message(
-    compute_qvalues(rep(NA_real_, 5)),
+    computeQvalues(rep(NA_real_, 5)),
     "All p-values are NA"
   )
   expect_equal(result, rep(NA_real_, 5))
 })
 
-test_that("compute_qvalues falls back to BH when qvalue fails", {
+test_that("computeQvalues falls back to BH when qvalue fails", {
   skip_if_not_installed("qvalue")
   # Very few unique p-values can cause qvalue() to fail with an error
   # Use only 2 identical p-values to trigger the tryCatch error path
   pvals <- rep(0.5, 3)
   result <- expect_message(
-    compute_qvalues(pvals),
+    computeQvalues(pvals),
     "Too few p-values|fall back to BH"
   )
   expect_length(result, 3)
@@ -1711,62 +1711,62 @@ test_that("compute_qvalues falls back to BH when qvalue fails", {
 })
 
 # =============================================================================
-# safe_svd — uncovered branches
+# safeSvd — uncovered branches
 # =============================================================================
 
-test_that("safe_svd with tol=0 keeps all singular values", {
+test_that("safeSvd with tol=0 keeps all singular values", {
   mat <- matrix(c(1, 0, 0, 1e-12), nrow = 2)
-  result <- safe_svd(mat, tol = 0)
+  result <- safeSvd(mat, tol = 0)
   expect_length(result$d, 2)
   expect_equal(ncol(result$u), 2)
   expect_equal(ncol(result$v), 2)
 })
 
-test_that("safe_svd errors when all singular values below tolerance", {
+test_that("safeSvd errors when all singular values below tolerance", {
   # A matrix with very small singular values
   mat <- matrix(c(1e-15, 0, 0, 1e-15), nrow = 2)
-  expect_error(safe_svd(mat, tol = 1), "All singular values are below the tolerance threshold")
+  expect_error(safeSvd(mat, tol = 1), "All singular values are below the tolerance threshold")
 })
 
 # =============================================================================
-# compute_LD — uncovered branches
+# computeLd — uncovered branches
 # =============================================================================
 
-test_that("compute_LD sample method without Rfast falls back to cor", {
+test_that("computeLd sample method without Rfast falls back to cor", {
   set.seed(42)
   X <- matrix(sample(0:2, 100, replace = TRUE), nrow = 20, ncol = 5)
   colnames(X) <- paste0("snp", 1:5)
-  R <- compute_LD(X, method = "sample")
+  R <- computeLd(X, method = "sample")
   expect_equal(dim(R), c(5, 5))
   expect_equal(as.numeric(diag(R)), rep(1, 5))
   expect_true(all(abs(R) <= 1))
 })
 
-test_that("compute_LD with gcta method and trim_samples", {
+test_that("computeLd with gcta method and trim_samples", {
   set.seed(42)
   # 21 samples -> trimmed to 20 (multiple of 4)
   X <- matrix(sample(0:2, 105, replace = TRUE), nrow = 21, ncol = 5)
   colnames(X) <- paste0("snp", 1:5)
-  R <- compute_LD(X, method = "gcta", trim_samples = TRUE)
+  R <- computeLd(X, method = "gcta", trimSamples = TRUE)
   expect_equal(dim(R), c(5, 5))
   expect_equal(as.numeric(diag(R)), rep(1, 5))
 })
 
-test_that("compute_LD population method with trim_samples", {
+test_that("computeLd population method with trim_samples", {
   set.seed(42)
   X <- matrix(sample(0:2, 105, replace = TRUE), nrow = 21, ncol = 5)
   colnames(X) <- paste0("snp", 1:5)
-  R <- compute_LD(X, method = "population", trim_samples = TRUE)
+  R <- computeLd(X, method = "population", trimSamples = TRUE)
   expect_equal(dim(R), c(5, 5))
   expect_equal(as.numeric(diag(R)), rep(1, 5))
 })
 
-test_that("compute_LD with shrinkage > 0", {
+test_that("computeLd with shrinkage > 0", {
   set.seed(42)
   X <- matrix(sample(0:2, 100, replace = TRUE), nrow = 20, ncol = 5)
   colnames(X) <- paste0("snp", 1:5)
-  R_no_shrink <- compute_LD(X, method = "sample", shrinkage = 0)
-  R_shrink <- compute_LD(X, method = "sample", shrinkage = 0.1)
+  R_no_shrink <- computeLd(X, method = "sample", shrinkage = 0)
+  R_shrink <- computeLd(X, method = "sample", shrinkage = 0.1)
   # Shrunk matrix should be closer to identity
   expect_equal(as.numeric(diag(R_shrink)), rep(1, 5))
   # Off-diagonal elements should be shrunk toward 0
@@ -1776,10 +1776,10 @@ test_that("compute_LD with shrinkage > 0", {
 })
 
 # =============================================================================
-# filter_X_with_Y — uncovered lines 513-515
+# filterXWithY — uncovered lines 513-515
 # =============================================================================
 
-test_that("filter_X_with_Y drops variants that become monomorphic due to Y NAs", {
+test_that("filterXWithY drops variants that become monomorphic due to Y NAs", {
   # Create X where some columns become monomorphic when Y NA rows are removed
   set.seed(42)
   X <- matrix(0, nrow = 10, ncol = 3)
@@ -1795,7 +1795,7 @@ test_that("filter_X_with_Y drops variants that become monomorphic due to Y NAs",
   colnames(Y) <- "context1"
   Y[1, 1] <- NA
   result <- expect_message(
-    filter_X_with_Y(X, Y, missing_rate_thresh = 1.0, maf_thresh = 0),
+    filterXWithY(X, Y, missingRateThresh = 1.0, mafThresh = 0),
     "Additional.*variants dropped"
   )
   # var1 should be dropped since it becomes monomorphic without subj1
@@ -1803,11 +1803,11 @@ test_that("filter_X_with_Y drops variants that become monomorphic due to Y NAs",
 })
 
 # =============================================================================
-# detect_variant_convention — uncovered line 586
+# detectVariantConvention — uncovered line 586
 # =============================================================================
 
-test_that("detect_variant_convention returns defaults for all-NA input", {
-  result <- detect_variant_convention(c(NA, NA, NA))
+test_that("detectVariantConvention returns defaults for all-NA input", {
+  result <- detectVariantConvention(c(NA, NA, NA))
   expect_false(result$has_chr)
   expect_equal(result$allele_sep, ":")
   expect_false(result$has_build)
@@ -1815,10 +1815,10 @@ test_that("detect_variant_convention returns defaults for all-NA input", {
 })
 
 # =============================================================================
-# parse_variant_id — uncovered line 622
+# parseVariantId — uncovered line 622
 # =============================================================================
 
-test_that("parse_variant_id handles data.frame with generic column names", {
+test_that("parseVariantId handles data.frame with generic column names", {
   df <- data.frame(
     col1 = c("chr1", "chr2"),
     col2 = c(100, 200),
@@ -1826,7 +1826,7 @@ test_that("parse_variant_id handles data.frame with generic column names", {
     col4 = c("G", "C"),
     stringsAsFactors = FALSE
   )
-  result <- parse_variant_id(df)
+  result <- parseVariantId(df)
   expect_equal(names(result)[1:4], c("chrom", "pos", "A2", "A1"))
   expect_equal(result$chrom, c(1L, 2L))
   expect_equal(result$pos, c(100L, 200L))
@@ -1835,10 +1835,10 @@ test_that("parse_variant_id handles data.frame with generic column names", {
 })
 
 # =============================================================================
-# filter_molecular_events — uncovered lines 1116-1128 (remove_all_group)
+# filterMolecularEvents — uncovered lines 1116-1128 (remove_all_group)
 # =============================================================================
 
-test_that("filter_molecular_events with remove_all_group=TRUE removes entire group", {
+test_that("filterMolecularEvents with remove_all_group=TRUE removes entire group", {
   events <- c(
     "gene1_tissue_brain",
     "gene1_tissue_liver",
@@ -1852,7 +1852,7 @@ test_that("filter_molecular_events with remove_all_group=TRUE removes entire gro
     )
   )
   result <- expect_message(
-    filter_molecular_events(events, filters, condition = "test", remove_all_group = TRUE),
+    filterMolecularEvents(events, filters, condition = "test", removeAllGroup = TRUE),
     "removed"
   )
   # With remove_all_group=TRUE, events from groups that had a brain entry removed
@@ -1861,11 +1861,11 @@ test_that("filter_molecular_events with remove_all_group=TRUE removes entire gro
 })
 
 # =============================================================================
-# find_data — uncovered lines 780-786 (numeric index path)
+# findData — uncovered lines 780-786 (numeric index path)
 # =============================================================================
 
-test_that("find_data with numeric indices in list_name path", {
-  # When list_name contains a numeric string like "2", find_data splits the path
+test_that("findData with numeric indices in list_name path", {
+  # When list_name contains a numeric string like "2", findData splits the path
   # at that numeric index: it navigates to "results" first, then treats "2" as
   # the new depth and "val" as the new list_name, recursing into each sub-list.
   x <- list(
@@ -1876,129 +1876,129 @@ test_that("find_data with numeric indices in list_name path", {
   )
   # depth=1, list_name = c("results", "2", "val")
   # -> second_depth at index 2 ("2" is numeric)
-  # -> data = get_nested_element(x, "results") = x$results
-  # -> remaining_path = c("2", "val") -> find_data(x$results, c("2","val"))
+  # -> data = getNestedElement(x, "results") = x$results
+  # -> remaining_path = c("2", "val") -> findData(x$results, c("2","val"))
   # -> depth=2, list_name="val" -> recurse into a and b at depth 1 looking for "val"
-  result <- find_data(x, c(1, "results", "2", "val"))
+  result <- findData(x, c(1, "results", "2", "val"))
   expect_equal(result, c(10, 20))
 })
 
 # =============================================================================
-# regions_overlap
+# regionsOverlap
 # =============================================================================
 
-test_that("regions_overlap detects overlapping regions on same chromosome", {
-  expect_true(regions_overlap("chr1:100-300", "chr1:200-400"))
+test_that("regionsOverlap detects overlapping regions on same chromosome", {
+  expect_true(regionsOverlap("chr1:100-300", "chr1:200-400"))
 })
 
-test_that("regions_overlap returns FALSE for non-overlapping same-chr regions", {
-  expect_false(regions_overlap("chr1:100-200", "chr1:300-400"))
+test_that("regionsOverlap returns FALSE for non-overlapping same-chr regions", {
+  expect_false(regionsOverlap("chr1:100-200", "chr1:300-400"))
 })
 
-test_that("regions_overlap returns FALSE for different chromosomes", {
-  expect_false(regions_overlap("chr1:100-300", "chr2:100-300"))
+test_that("regionsOverlap returns FALSE for different chromosomes", {
+  expect_false(regionsOverlap("chr1:100-300", "chr2:100-300"))
 })
 
-test_that("regions_overlap detects touching boundaries", {
-  expect_true(regions_overlap("chr1:100-200", "chr1:200-300"))
+test_that("regionsOverlap detects touching boundaries", {
+  expect_true(regionsOverlap("chr1:100-200", "chr1:200-300"))
 })
 
-test_that("regions_overlap works with underscore-separated IDs", {
-  expect_true(regions_overlap("1_100_300", "1_200_400"))
-  expect_false(regions_overlap("1_100_200", "2_100_200"))
+test_that("regionsOverlap works with underscore-separated IDs", {
+  expect_true(regionsOverlap("1_100_300", "1_200_400"))
+  expect_false(regionsOverlap("1_100_200", "2_100_200"))
 })
 
-test_that("regions_overlap works with data.frame input", {
+test_that("regionsOverlap works with data.frame input", {
   df_a <- data.frame(chrom = 1, start = 100, end = 300)
   df_b <- data.frame(chrom = 1, start = 200, end = 400)
-  expect_true(regions_overlap(df_a, df_b))
+  expect_true(regionsOverlap(df_a, df_b))
 })
 
 # =============================================================================
-# find_overlapping_regions
+# findOverlappingRegions
 # =============================================================================
 
-test_that("find_overlapping_regions returns correct indices", {
+test_that("findOverlappingRegions returns correct indices", {
   query <- "chr1:100-300"
   targets <- c("chr1:200-400", "chr2:100-200", "chr1:50-150")
-  result <- find_overlapping_regions(query, targets)
+  result <- findOverlappingRegions(query, targets)
   expect_true(1 %in% result)
   expect_true(3 %in% result)
   expect_false(2 %in% result)
 })
 
-test_that("find_overlapping_regions returns empty vector for no matches", {
+test_that("findOverlappingRegions returns empty vector for no matches", {
   query <- "chr1:100-200"
   targets <- c("chr2:100-200", "chr3:100-200")
-  result <- find_overlapping_regions(query, targets)
+  result <- findOverlappingRegions(query, targets)
   expect_length(result, 0)
 })
 
-test_that("find_overlapping_regions works with data.frame targets", {
+test_that("findOverlappingRegions works with data.frame targets", {
   query <- "chr1:100-300"
   targets <- data.frame(chrom = c(1, 2, 1), start = c(200, 100, 50), end = c(400, 200, 150))
-  result <- find_overlapping_regions(query, targets)
+  result <- findOverlappingRegions(query, targets)
   expect_true(1 %in% result)
   expect_true(3 %in% result)
   expect_false(2 %in% result)
 })
 
 # =============================================================================
-# classify_variant_type
+# classifyVariantType
 # =============================================================================
 
-test_that("classify_variant_type identifies SNPs", {
-  expect_equal(classify_variant_type("chr1:100:A:G"), "SNP")
+test_that("classifyVariantType identifies SNPs", {
+  expect_equal(classifyVariantType("chr1:100:A:G"), "SNP")
 })
 
-test_that("classify_variant_type identifies insertions", {
-  expect_equal(classify_variant_type("chr1:100:A:ATG"), "insertion")
+test_that("classifyVariantType identifies insertions", {
+  expect_equal(classifyVariantType("chr1:100:A:ATG"), "insertion")
 })
 
-test_that("classify_variant_type identifies deletions", {
-  expect_equal(classify_variant_type("chr1:100:ATG:A"), "deletion")
+test_that("classifyVariantType identifies deletions", {
+  expect_equal(classifyVariantType("chr1:100:ATG:A"), "deletion")
 })
 
-test_that("classify_variant_type identifies MNPs", {
-  expect_equal(classify_variant_type("chr1:100:AT:GC"), "MNP")
+test_that("classifyVariantType identifies MNPs", {
+  expect_equal(classifyVariantType("chr1:100:AT:GC"), "MNP")
 })
 
-test_that("classify_variant_type handles vector input", {
+test_that("classifyVariantType handles vector input", {
   ids <- c("chr1:100:A:G", "chr1:200:ATG:A", "chr1:300:A:ATG", "chr1:400:AT:GC")
-  result <- classify_variant_type(ids)
+  result <- classifyVariantType(ids)
   expect_equal(result, c("SNP", "deletion", "insertion", "MNP"))
 })
 
-test_that("classify_variant_type accepts data.frame input", {
+test_that("classifyVariantType accepts data.frame input", {
   df <- data.frame(A2 = c("A", "ATG"), A1 = c("G", "A"))
-  result <- classify_variant_type(df)
+  result <- classifyVariantType(df)
   expect_equal(result, c("SNP", "deletion"))
 })
 
 # =============================================================================
-# ensure_chr_match
+# ensureChrMatch
 # =============================================================================
 
-test_that("ensure_chr_match returns unchanged when both have chr prefix", {
+test_that("ensureChrMatch returns unchanged when both have chr prefix", {
   ids_a <- c("chr1:100:A:G", "chr1:200:C:T")
   ids_b <- c("chr1:150:A:G", "chr1:250:C:T")
-  result <- pecotmr:::ensure_chr_match(ids_a, ids_b)
+  result <- pecotmr:::ensureChrMatch(ids_a, ids_b)
   expect_equal(result$ids_a, ids_a)
   expect_equal(result$ids_b, ids_b)
 })
 
-test_that("ensure_chr_match normalizes when prefixes mismatch", {
+test_that("ensureChrMatch normalizes when prefixes mismatch", {
   ids_a <- c("chr1:100:A:G", "chr1:200:C:T")
   ids_b <- c("1:150:A:G", "1:250:C:T")
-  result <- pecotmr:::ensure_chr_match(ids_a, ids_b)
+  result <- pecotmr:::ensureChrMatch(ids_a, ids_b)
   expect_true(all(grepl("^chr", result$ids_a)))
   expect_true(all(grepl("^chr", result$ids_b)))
 })
 
-test_that("ensure_chr_match returns unchanged when both lack chr prefix", {
+test_that("ensureChrMatch returns unchanged when both lack chr prefix", {
   ids_a <- c("1:100:A:G", "1:200:C:T")
   ids_b <- c("1:150:A:G", "1:250:C:T")
-  result <- pecotmr:::ensure_chr_match(ids_a, ids_b)
+  result <- pecotmr:::ensureChrMatch(ids_a, ids_b)
   # Both already match (no prefix), so returned unchanged
   expect_equal(result$ids_a, ids_a)
   expect_equal(result$ids_b, ids_b)

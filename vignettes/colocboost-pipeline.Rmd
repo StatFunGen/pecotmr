@@ -20,21 +20,21 @@ knitr::opts_chunk$set(
 This vignette demonstrates how to use the bioinformatics pipeline for ColocBoost to perform colocalization analysis with `colocboost` for multiple individual-level datasets and/or summary statistics datasets. 
 
 - See more details about functions in the package `pecotmr` with [link](https://github.com/StatFunGen/pecotmr/tree/main) and 
-`colocboost_pipeline` with [link](https://github.com/StatFunGen/pecotmr/blob/main/R/colocboost_pipeline.R). 
+`colocboostPipeline` with [link](https://github.com/StatFunGen/pecotmr/blob/main/R/colocboostPipeline.R). 
 - See more details about input data preparation in `xqtl_protocol` with [link](https://statfungen.github.io/xqtl-protocol/code/mnm_analysis/mnm_methods/colocboost.html).
 
 Acknowledgment: Thanks to Kate (Kathryn) Lawrence (GitHub:@kal26) for her contributions to this vignette.
 
-# 1. Loading Data using `colocboost_pipeline` function
+# 1. Loading Data using `colocboostPipeline` function
 
 This function harmonizes the input data and prepares it for colocalization analysis. 
 
 
-In this section, we introduce how to load the regional data required for the ColocBoost analysis using the `load_multitask_regional_data` function. 
+In this section, we introduce how to load the regional data required for the ColocBoost analysis using the `loadMultitaskRegionalData` function. 
 This function loads mixed datasets for a specific region, including individual-level data (genotype, phenotype, covariate data), summary statistics 
-(sumstats, LD), or a combination of both. It runs `load_regional_univariate_data` for each individual-level dataset and `load_rss_data` for each summary statistics dataset.
+(sumstats, LD), or a combination of both. It runs `loadRegionalUnivariateData` for each individual-level dataset and `loadRssData` for each summary statistics dataset.
 The output is a list with `individual_data` and `sumstat_data` components, where `individual_data` is a list of individual-level data and `sumstat_data` is a list of summary statistics data. 
-This list is then passed to the `colocboost_pipeline` function for the colocalization analysis.
+This list is then passed to the `colocboostPipeline` function for the colocalization analysis.
 
 
 Below are the input parameters for this function for loading individual-level data:
@@ -61,7 +61,7 @@ Inputs:
 
 Outputs: 
 
-- **`region_data`**: List (with `individual_data`, `sumstat_data`); Output of the `load_multitask_regional_data` function. If only individual-level data is loaded, `sumstat_data` will be `NULL`.
+- **`region_data`**: List (with `individual_data`, `sumstat_data`); Output of the `loadMultitaskRegionalData` function. If only individual-level data is loaded, `sumstat_data` will be `NULL`.
 
 
 **Individual-level data loading example**
@@ -79,7 +79,7 @@ match_geno_pheno = c(1,1,2)
 association_window = "chr1:1000000-2000000" # set to be the same as region for cis-analysis
 extract_region_name = list(c("ENSG00000269699, ENSG00000789633"), c("ENSG00000269699"), c("ENSG00000269699", "ENSG00000789633"))
 region_name_col = 4
-keep_indel = TRUE
+keepIndel = TRUE
 keep_samples = c("SAMPLE1", "SAMPLE2", "SAMPLE3")
 
 # Following parameters need to be set according to your data
@@ -88,8 +88,8 @@ mac_cutoff = 10
 xvar_cutoff = 0
 imiss_cutoff = 0.9
 
-# More advanced parameters see pecotmr::load_multitask_regional_data()
-region_data_individual <- load_multitask_regional_data(
+# More advanced parameters see pecotmr::loadMultitaskRegionalData()
+region_data_individual <- loadMultitaskRegionalData(
     region = region,
     genotype_list = genotype_list,
     phenotype_list = phenotype_list,
@@ -99,7 +99,7 @@ region_data_individual <- load_multitask_regional_data(
     association_window = association_window,
     region_name_col = region_name_col,
     extract_region_name = extract_region_name,
-    keep_indel = keep_indel,
+    keepIndel = keep_indel,
     keep_samples = keep_samples,
     maf_cutoff = maf_cutoff,
     mac_cutoff = mac_cutoff,
@@ -127,7 +127,7 @@ Inputs:
 
 Outputs: 
 
-- **`region_data`**: List (with `individual_data`, `sumstat_data`); Output of the `load_multitask_regional_data` function. If only summary statistics data is loaded, `individual_data` will be `NULL`.
+- **`region_data`**: List (with `individual_data`, `sumstat_data`); Output of the `loadMultitaskRegionalData` function. If only summary statistics data is loaded, `individual_data` will be `NULL`.
 
 **Summary statistics loading example**
 
@@ -143,20 +143,20 @@ match_LD_sumstat = c("sumstat_1", "sumstat_2")
 association_window = "chr1:1000000-2000000"
 
 # Following parameters need to be set according to your data
-n_samples = c(300000, 0)
+nSamples = c(300000, 0)
 n_cases = c(0, 20000)
 n_controls = c(0, 40000)
 
 
-# More advanced parameters see pecotmr::load_multitask_regional_data()
-region_data_sumstat <- load_multitask_regional_data(
+# More advanced parameters see pecotmr::loadMultitaskRegionalData()
+region_data_sumstat <- loadMultitaskRegionalData(
     sumstat_path_list = sumstat_path_list,
     column_file_path_list = column_file_path_list,
     LD_meta_file_path_list = LD_meta_file_path_list,
     conditions_list_sumstat = conditions_list_sumstat,
     match_LD_sumstat = match_LD_sumstat,
     association_window = association_window,
-    n_samples = n_samples,
+    nSamples = n_samples,
     n_cases = n_cases,
     n_controls = n_controls
 )
@@ -201,9 +201,9 @@ The LD metadata file is a tab-separated file with the following columns:
 ```
 
 
-# 2. Perform ColocBoost using `colocboost_pipeline` function
+# 2. Perform ColocBoost using `colocboostPipeline` function
 
-In this section, we load region data for a combination of individual-level and summary statistics data, then perform the colocalization analysis using the `colocboost_pipeline` function.
+In this section, we load region data for a combination of individual-level and summary statistics data, then perform the colocalization analysis using the `colocboostPipeline` function.
 The colocalization analysis can be run in any one of three modes, or in a combination of these modes (names assume that individual-level data is xQTL data and summary statistics data is GWAS data):
 
 - **`xQTL-only mode`**: Only perform colocalization analysis on the individual-level data. Summary statistics data is not used.
@@ -212,7 +212,7 @@ The colocalization analysis can be run in any one of three modes, or in a combin
 
 Inputs:
 
-- **`region_data`**: List (with `individual_data`, `sumstat_data`); Output of the `load_multitask_regional_data` function.
+- **`region_data`**: List (with `individual_data`, `sumstat_data`); Output of the `loadMultitaskRegionalData` function.
 - **`focal_trait`**: String; For xQTL-only mode, the name of the trait to perform disease-prioritized ColocBoost, from `conditions_list_individual`. If not provided, xQTL-only mode will be run without disease-prioritized mode.
 - **`event_filters`**: List of character vectors; Patterns for filtering events based on context names. 
 Example: for sQTL, `list(type_pattern = ".*clu_(\\d+_[+-?]).*", valid_pattern = "clu_(\\d+_[+-?]):PR:", exclude_pattern = "clu_(\\d+_[+-?]):IN:")`.
@@ -228,12 +228,12 @@ Example: for sQTL, `list(type_pattern = ".*clu_(\\d+_[+-?]).*", valid_pattern = 
 
 Outputs:
 
-- **`colocboost_results`**: List of colocboost objects (with `xqtl_coloc`, `joint_gwas`, `separate_gwas`); Output of the `colocboost_pipeline` function. If the mode is not run, the corresponding element will be `NULL`.
+- **`colocboost_results`**: List of colocboost objects (with `xqtl_coloc`, `joint_gwas`, `separate_gwas`); Output of the `colocboostPipeline` function. If the mode is not run, the corresponding element will be `NULL`.
 
 ```{r, colocboost-analysis, eval = FALSE}
 #### Please check the example code below ####
 # # load in individual-level and sumstat data
-region_data_combined <- load_multitask_regional_data(
+region_data_combined <- loadMultitaskRegionalData(
     region = region,
     genotype_list = genotype_list,
     phenotype_list = phenotype_list,
@@ -243,7 +243,7 @@ region_data_combined <- load_multitask_regional_data(
     association_window = association_window,
     region_name_col = region_name_col,
     extract_region_name = extract_region_name,
-    keep_indel = keep_indel,
+    keepIndel = keep_indel,
     keep_samples = keep_samples,
     maf_cutoff = maf_cutoff,
     mac_cutoff = mac_cutoff,
@@ -254,7 +254,7 @@ region_data_combined <- load_multitask_regional_data(
     LD_meta_file_path_list = LD_meta_file_path_list,
     conditions_list_sumstat = conditions_list_sumstat,
     match_LD_sumstat = match_LD_sumstat,
-    n_samples = n_samples,
+    nSamples = n_samples,
     n_cases = n_cases,
     n_controls = n_controls
 )
@@ -262,15 +262,15 @@ region_data_combined <- load_multitask_regional_data(
 maf_cutoff = 0.01
 pip_cutoff_to_skip_ind = rep(0, length(phenotype_list))
 pip_cutoff_to_skip_sumstat = rep(0, length(sumstat_path_list))
-qc_method = "slalom"
+qcMethod = "slalom"
 
 # run colocboost analysis
-colocboost_results <- colocboost_pipeline(
+colocboost_results <- colocboostPipeline(
     region_data_combined,
     maf_cutoff = maf_cutoff, 
     pip_cutoff_to_skip_ind = pip_cutoff_to_skip_ind,
     pip_cutoff_to_skip_sumstat = pip_cutoff_to_skip_sumstat,
-    qc_method = qc_method,
+    qcMethod = qc_method,
     xqtl_coloc = TRUE,
     joint_gwas = TRUE,
     separate_gwas = TRUE

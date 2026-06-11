@@ -1,5 +1,5 @@
 # Tests for genotype loading via readGenotypes + extractBlockGenotypes,
-# and the load_genotype_region dispatcher.
+# and the loadGenotypeRegion dispatcher.
 
 # Fixtures: 100 samples x 349 variants on chr21:17513228-17592874
 test_data_dir <- test_path("test_data")
@@ -19,11 +19,11 @@ test_that("format detection supports dotted PLINK2 prefixes", {
   file.create(paste0(prefix, ".pgen"), paste0(prefix, ".pvar"), paste0(prefix, ".psam"))
   on.exit(unlink(paste0(prefix, c(".pgen", ".pvar", ".psam"))), add = TRUE)
 
-  expect_equal(pecotmr:::.h2_detect_format(prefix), "plink2")
+  expect_equal(pecotmr:::.h2DetectFormat(prefix), "plink2")
 })
 
-# Shared helper: validate the output structure from load_genotype_region
-# (with return_variant_info=TRUE)
+# Shared helper: validate the output structure from loadGenotypeRegion
+# (with returnVariantInfo=TRUE)
 check_genotype_result <- function(result, expected_nrow = n_samples, expected_ncol = n_variants,
                                   label = "") {
   expect_true(is.list(result), label = paste(label, "is list"))
@@ -51,16 +51,16 @@ test_that("readGenotypes creates plink1 handle", {
   handle <- readGenotypes(plink_prefix, format = "plink1")
   expect_s4_class(handle, "GenotypeHandle")
   expect_equal(handle@format, "plink1")
-  expect_equal(handle@n_samples, n_samples)
-  expect_equal(nrow(handle@snp_info), n_variants)
+  expect_equal(handle@nSamples, n_samples)
+  expect_equal(nrow(handle@snpInfo), n_variants)
 })
 
-test_that("load_genotype_region loads plink1 via dispatch", {
+test_that("loadGenotypeRegion loads plink1 via dispatch", {
   skip_if_not_installed("snpStats")
   # Use .genotype suffix plink1 files tested elsewhere in test_file_utils
   plink1_path <- file.path(test_data_dir, "protocol_example.genotype")
   skip_if(!file.exists(paste0(plink1_path, ".bed")), "plink1 test fixture missing")
-  result <- load_genotype_region(plink1_path, return_variant_info = TRUE)
+  result <- loadGenotypeRegion(plink1_path, returnVariantInfo = TRUE)
   expect_true(is.list(result))
   expect_true(is.matrix(result$X))
 })
@@ -72,40 +72,40 @@ test_that("readGenotypes creates plink2 handle", {
   handle <- readGenotypes(plink_prefix, format = "plink2")
   expect_s4_class(handle, "GenotypeHandle")
   expect_equal(handle@format, "plink2")
-  expect_equal(handle@n_samples, n_samples)
-  expect_equal(nrow(handle@snp_info), n_variants)
+  expect_equal(handle@nSamples, n_samples)
+  expect_equal(nrow(handle@snpInfo), n_variants)
 })
 
 test_that("extractBlockGenotypes works for plink2", {
   skip_if_not_installed("pgenlibr")
   handle <- readGenotypes(plink_prefix, format = "plink2")
-  rse <- extractBlockGenotypes(handle, seq_len(nrow(handle@snp_info)))
+  rse <- extractBlockGenotypes(handle, seq_len(nrow(handle@snpInfo)))
   expect_s4_class(rse, "SummarizedExperiment")
   dosage <- SummarizedExperiment::assay(rse, "dosage")
   expect_equal(nrow(dosage), n_variants)
   expect_equal(ncol(dosage), n_samples)
 })
 
-test_that("load_genotype_region filters plink2 by region", {
+test_that("loadGenotypeRegion filters plink2 by region", {
   skip_if_not_installed("pgenlibr")
-  result <- load_genotype_region(plink_prefix, region = region_sub,
-                                  return_variant_info = TRUE)
+  result <- loadGenotypeRegion(plink_prefix, region = region_sub,
+                                  returnVariantInfo = TRUE)
   check_genotype_result(result, expected_ncol = 134L, label = "plink2 region")
   expect_true(all(result$variant_info$pos >= 17513228 & result$variant_info$pos <= 17550000))
 })
 
-test_that("load_genotype_region filters plink2 indels", {
+test_that("loadGenotypeRegion filters plink2 indels", {
   skip_if_not_installed("pgenlibr")
-  result <- load_genotype_region(plink_prefix, keep_indel = FALSE,
-                                  return_variant_info = TRUE)
+  result <- loadGenotypeRegion(plink_prefix, keepIndel = FALSE,
+                                  returnVariantInfo = TRUE)
   expect_lt(ncol(result$X), n_variants)
   expect_true(all(nchar(result$variant_info$A1) == 1))
   expect_true(all(nchar(result$variant_info$A2) == 1))
 })
 
-test_that("load_genotype_region errors on empty region for plink2", {
+test_that("loadGenotypeRegion errors on empty region for plink2", {
   skip_if_not_installed("pgenlibr")
-  expect_error(load_genotype_region(plink_prefix, region = "chr1:1-2"))
+  expect_error(loadGenotypeRegion(plink_prefix, region = "chr1:1-2"))
 })
 
 # --- readGenotypes: VCF (VariantAnnotation) -----------------------------------
@@ -115,29 +115,29 @@ test_that("readGenotypes creates vcf handle", {
   handle <- readGenotypes(vcf_path, format = "vcf")
   expect_s4_class(handle, "GenotypeHandle")
   expect_equal(handle@format, "vcf")
-  expect_equal(handle@n_samples, n_samples)
-  expect_equal(nrow(handle@snp_info), n_variants)
+  expect_equal(handle@nSamples, n_samples)
+  expect_equal(nrow(handle@snpInfo), n_variants)
 })
 
-test_that("load_genotype_region loads VCF via dispatch", {
+test_that("loadGenotypeRegion loads VCF via dispatch", {
   skip_if_not_installed("VariantAnnotation")
-  result <- suppressWarnings(load_genotype_region(vcf_path, return_variant_info = TRUE))
+  result <- suppressWarnings(loadGenotypeRegion(vcf_path, returnVariantInfo = TRUE))
   check_genotype_result(result, label = "dispatch vcf")
 })
 
-test_that("load_genotype_region filters VCF by region", {
+test_that("loadGenotypeRegion filters VCF by region", {
   skip_if_not_installed("VariantAnnotation")
   skip_if_not_installed("Rsamtools")
-  result <- suppressWarnings(load_genotype_region(vcf_path, region = region_sub,
-                                                   return_variant_info = TRUE))
+  result <- suppressWarnings(loadGenotypeRegion(vcf_path, region = region_sub,
+                                                   returnVariantInfo = TRUE))
   check_genotype_result(result, expected_ncol = 134L, label = "vcf region")
   expect_true(all(result$variant_info$pos >= 17513228 & result$variant_info$pos <= 17550000))
 })
 
-test_that("load_genotype_region filters VCF indels", {
+test_that("loadGenotypeRegion filters VCF indels", {
   skip_if_not_installed("VariantAnnotation")
-  result <- suppressWarnings(load_genotype_region(vcf_path, keep_indel = FALSE,
-                                                   return_variant_info = TRUE))
+  result <- suppressWarnings(loadGenotypeRegion(vcf_path, keepIndel = FALSE,
+                                                   returnVariantInfo = TRUE))
   expect_lt(ncol(result$X), n_variants)
   expect_true(all(nchar(result$variant_info$A1) == 1))
   expect_true(all(nchar(result$variant_info$A2) == 1))
@@ -151,53 +151,53 @@ test_that("readGenotypes creates gds handle", {
   handle <- readGenotypes(gds_path, format = "gds")
   expect_s4_class(handle, "GenotypeHandle")
   expect_equal(handle@format, "gds")
-  expect_equal(handle@n_samples, n_samples)
-  expect_equal(nrow(handle@snp_info), n_variants)
+  expect_equal(handle@nSamples, n_samples)
+  expect_equal(nrow(handle@snpInfo), n_variants)
 })
 
-test_that("load_genotype_region loads GDS via dispatch", {
+test_that("loadGenotypeRegion loads GDS via dispatch", {
   skip_if_not_installed("SNPRelate")
   skip_if_not_installed("gdsfmt")
-  result <- load_genotype_region(gds_path, return_variant_info = TRUE)
+  result <- loadGenotypeRegion(gds_path, returnVariantInfo = TRUE)
   check_genotype_result(result, label = "dispatch gds")
 })
 
-test_that("load_genotype_region filters GDS by region", {
+test_that("loadGenotypeRegion filters GDS by region", {
   skip_if_not_installed("SNPRelate")
   skip_if_not_installed("gdsfmt")
-  result <- load_genotype_region(gds_path, region = region_sub,
-                                  return_variant_info = TRUE)
+  result <- loadGenotypeRegion(gds_path, region = region_sub,
+                                  returnVariantInfo = TRUE)
   check_genotype_result(result, expected_ncol = 134L, label = "gds region")
   expect_true(all(result$variant_info$pos >= 17513228 & result$variant_info$pos <= 17550000))
 })
 
-test_that("load_genotype_region filters GDS indels", {
+test_that("loadGenotypeRegion filters GDS indels", {
   skip_if_not_installed("SNPRelate")
   skip_if_not_installed("gdsfmt")
-  result <- load_genotype_region(gds_path, keep_indel = FALSE,
-                                  return_variant_info = TRUE)
+  result <- loadGenotypeRegion(gds_path, keepIndel = FALSE,
+                                  returnVariantInfo = TRUE)
   expect_lt(ncol(result$X), n_variants)
   expect_true(all(nchar(result$variant_info$A1) == 1))
   expect_true(all(nchar(result$variant_info$A2) == 1))
 })
 
-test_that("load_genotype_region errors on empty region for GDS", {
+test_that("loadGenotypeRegion errors on empty region for GDS", {
   skip_if_not_installed("SNPRelate")
   skip_if_not_installed("gdsfmt")
-  expect_error(load_genotype_region(gds_path, region = "chr1:1-2"))
+  expect_error(loadGenotypeRegion(gds_path, region = "chr1:1-2"))
 })
 
 # --- Cross-format consistency -------------------------------------------------
 
-test_that("all formats return same dimensions and positions via load_genotype_region", {
+test_that("all formats return same dimensions and positions via loadGenotypeRegion", {
   skip_if_not_installed("snpStats")
   skip_if_not_installed("pgenlibr")
   skip_if_not_installed("VariantAnnotation")
   skip_if_not_installed("SNPRelate")
 
-  p2 <- load_genotype_region(plink_prefix, return_variant_info = TRUE)
-  vcf <- suppressWarnings(load_genotype_region(vcf_path, return_variant_info = TRUE))
-  gds <- load_genotype_region(gds_path, return_variant_info = TRUE)
+  p2 <- loadGenotypeRegion(plink_prefix, returnVariantInfo = TRUE)
+  vcf <- suppressWarnings(loadGenotypeRegion(vcf_path, returnVariantInfo = TRUE))
+  gds <- loadGenotypeRegion(gds_path, returnVariantInfo = TRUE)
 
   # Same dimensions
   expect_equal(dim(p2$X), dim(vcf$X))
@@ -214,45 +214,45 @@ test_that("PLINK1 and PLINK2 readGenotypes return consistent alleles", {
   h1 <- readGenotypes(plink_prefix, format = "plink1")
   h2 <- readGenotypes(plink_prefix, format = "plink2")
 
-  expect_equal(h1@snp_info$A1, h2@snp_info$A1)
-  expect_equal(h1@snp_info$A2, h2@snp_info$A2)
+  expect_equal(h1@snpInfo$A1, h2@snpInfo$A1)
+  expect_equal(h1@snpInfo$A2, h2@snpInfo$A2)
 })
 
-# --- load_genotype_region (dispatch) -----------------------------------------
+# --- loadGenotypeRegion (dispatch) -----------------------------------------
 
-test_that("load_genotype_region dispatches to VCF by extension", {
+test_that("loadGenotypeRegion dispatches to VCF by extension", {
   skip_if_not_installed("VariantAnnotation")
-  result <- suppressWarnings(load_genotype_region(vcf_path, return_variant_info = TRUE))
+  result <- suppressWarnings(loadGenotypeRegion(vcf_path, returnVariantInfo = TRUE))
   check_genotype_result(result, label = "dispatch vcf")
 })
 
-test_that("load_genotype_region dispatches to GDS by extension", {
+test_that("loadGenotypeRegion dispatches to GDS by extension", {
   skip_if_not_installed("SNPRelate")
   skip_if_not_installed("gdsfmt")
-  result <- load_genotype_region(gds_path, return_variant_info = TRUE)
+  result <- loadGenotypeRegion(gds_path, returnVariantInfo = TRUE)
   check_genotype_result(result, label = "dispatch gds")
 })
 
-test_that("load_genotype_region dispatches to PLINK2 by prefix", {
+test_that("loadGenotypeRegion dispatches to PLINK2 by prefix", {
   skip_if_not_installed("pgenlibr")
-  result <- load_genotype_region(plink_prefix, return_variant_info = TRUE)
+  result <- loadGenotypeRegion(plink_prefix, returnVariantInfo = TRUE)
   check_genotype_result(result, label = "dispatch plink2")
 })
 
-test_that("load_genotype_region returns matrix when return_variant_info=FALSE", {
+test_that("loadGenotypeRegion returns matrix when returnVariantInfo=FALSE", {
   skip_if_not_installed("pgenlibr")
-  result <- load_genotype_region(plink_prefix)
+  result <- loadGenotypeRegion(plink_prefix)
   expect_true(is.matrix(result))
   expect_equal(nrow(result), n_samples)
   expect_equal(ncol(result), n_variants)
 })
 
-test_that("load_genotype_region applies region filter", {
+test_that("loadGenotypeRegion applies region filter", {
   skip_if_not_installed("pgenlibr")
-  result <- load_genotype_region(plink_prefix, region = region_sub, return_variant_info = TRUE)
+  result <- loadGenotypeRegion(plink_prefix, region = region_sub, returnVariantInfo = TRUE)
   expect_equal(ncol(result$X), 134L)
 })
 
-test_that("load_genotype_region errors on unrecognized format", {
-  expect_error(load_genotype_region("/nonexistent/file.xyz"), "not found")
+test_that("loadGenotypeRegion errors on unrecognized format", {
+  expect_error(loadGenotypeRegion("/nonexistent/file.xyz"), "not found")
 })

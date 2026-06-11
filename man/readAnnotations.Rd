@@ -5,29 +5,17 @@
 \alias{readAnnotations,character-method}
 \title{Read Annotations}
 \usage{
-readAnnotations(
-  paths,
-  snp_ranges,
-  annotation_meta = NULL,
-  genome = "hg19",
-  ...
-)
+readAnnotations(paths, snpRanges, annotationMeta = NULL, genome = "hg19", ...)
 
-\S4method{readAnnotations}{character}(
-  paths,
-  snp_ranges,
-  annotation_meta = NULL,
-  genome = "hg19",
-  ...
-)
+\S4method{readAnnotations}{character}(paths, snpRanges, annotationMeta = NULL, genome = "hg19", ...)
 }
 \arguments{
 \item{paths}{Named character vector of file paths, or a named list
 of GRanges objects. Names become annotation names.}
 
-\item{snp_ranges}{A \code{GRanges} object defining SNP positions.}
+\item{snpRanges}{A \code{GRanges} object defining SNP positions.}
 
-\item{annotation_meta}{A \code{data.frame} with annotation metadata
+\item{annotationMeta}{A \code{data.frame} with annotation metadata
 (name, tier, type). If NULL, auto-detected from file format.}
 
 \item{genome}{Character, genome build.}

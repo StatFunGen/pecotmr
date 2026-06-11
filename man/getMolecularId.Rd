@@ -2,19 +2,19 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{getMolecularId}
 \alias{getMolecularId}
-\alias{getMolecularId,TWASWeights-method}
+\alias{getMolecularId,TwasWeights-method}
 \title{Get Molecular ID}
 \usage{
 getMolecularId(x)
 
-\S4method{getMolecularId}{TWASWeights}(x)
+\S4method{getMolecularId}{TwasWeights}(x)
 }
 \arguments{
-\item{x}{A \code{TWASWeights} object.}
+\item{x}{A \code{TwasWeights} object.}
 }
 \value{
 Character string (length 0 or 1).
 }
 \description{
-Extract molecular/gene identifier from a TWASWeights object.
+Extract molecular/gene identifier from a TwasWeights object.
 }

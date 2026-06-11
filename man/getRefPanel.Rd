@@ -2,20 +2,20 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{getRefPanel}
 \alias{getRefPanel}
-\alias{getRefPanel,LDData-method}
+\alias{getRefPanel,LdData-method}
 \title{Get Reference Panel}
 \usage{
 getRefPanel(x)
 
-\S4method{getRefPanel}{LDData}(x)
+\S4method{getRefPanel}{LdData}(x)
 }
 \arguments{
-\item{x}{An \code{LDData} object.}
+\item{x}{An \code{LdData} object.}
 }
 \value{
 A data.frame with variant metadata including chrom, pos, A1, A2.
 }
 \description{
 Extract reference panel metadata as a data.frame from
-  an \code{LDData} object, including chrom and pos columns.
+  an \code{LdData} object, including chrom and pos columns.
 }

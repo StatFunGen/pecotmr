@@ -11,21 +11,21 @@ S4 container for regional genotype/phenotype/covariate data.
 \section{Slots}{
 
 \describe{
-\item{\code{genotype_matrix}}{Numeric matrix (samples x variants) of genotype
+\item{\code{genotypeMatrix}}{Numeric matrix (samples x variants) of genotype
 dosages, with colnames as variant IDs and rownames as sample IDs.}
 
 \item{\code{phenotypes}}{Named list of phenotype matrices (per condition).}
 
 \item{\code{covariates}}{Named list of covariate matrices (per condition).}
 
-\item{\code{scale_residuals}}{Logical, whether to scale residuals.}
+\item{\code{scaleResiduals}}{Logical, whether to scale residuals.}
 
 \item{\code{maf}}{Named list of MAF vectors (per condition).}
 
 \item{\code{region}}{A \code{GRanges} (single range) or NULL.}
 
-\item{\code{dropped_samples}}{Named list of dropped sample vectors.}
+\item{\code{droppedSamples}}{Named list of dropped sample vectors.}
 
-\item{\code{Y_coordinates}}{Phenotype coordinates, or NULL.}
+\item{\code{coordinates}}{Phenotype coordinates, or NULL.}
 }}
 

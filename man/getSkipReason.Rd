@@ -2,15 +2,15 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{getSkipReason}
 \alias{getSkipReason}
-\alias{getSkipReason,QCResult-method}
+\alias{getSkipReason,QcResult-method}
 \title{Get Skip Reason}
 \usage{
 getSkipReason(x)
 
-\S4method{getSkipReason}{QCResult}(x)
+\S4method{getSkipReason}{QcResult}(x)
 }
 \arguments{
-\item{x}{A \code{QCResult} object.}
+\item{x}{A \code{QcResult} object.}
 }
 \value{
 Character scalar.

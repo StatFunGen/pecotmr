@@ -31,7 +31,7 @@ make_fake_susie_fit <- function(p) {
   sets <- list(
     cs = list(L1 = c(1L, 2L)),
     purity = data.frame(min.abs.corr = 0.9, mean.abs.corr = 0.95, median.abs.corr = 0.93),
-    requested_coverage = 0.95
+    requestedCoverage = 0.95
   )
   niter <- 10
   list(
@@ -48,7 +48,7 @@ make_fake_post_result <- function(p) {
   vnames <- paste0("chr1:", seq_len(p), ":A:G")
   trimmed <- list(
     pip = runif(p),
-    sets = list(cs = list(L1 = c(1L, 2L)), requested_coverage = 0.95),
+    sets = list(cs = list(L1 = c(1L, 2L)), requestedCoverage = 0.95),
     cs_corr = matrix(c(1, 0.1, 0.1, 1), nrow = 2),
     alpha = matrix(runif(2 * p), 2, p),
     lbf_variable = matrix(rnorm(2 * p), 2, p),
@@ -57,17 +57,17 @@ make_fake_post_result <- function(p) {
     n_effects = 2
   )
   fm <- FineMappingResult(
-    variant_names = vnames,
-    trimmed_fit = trimmed,
-    top_loci = data.frame(variant_id = character(0), method = character(0)),
+    variantNames = vnames,
+    trimmedFit = trimmed,
+    topLoci = data.frame(variant_id = character(0), method = character(0)),
     method = "susie"
   )
   list(
     finemapping_result = fm,
-    # Legacy keys retained for diagnostics tests that mock get_susie_result
+    # Legacy keys retained for diagnostics tests that mock getSusieResult
     # to return res$susie_result_trimmed directly.
     susie_result_trimmed = trimmed,
-    variant_names = vnames,
+    variantNames = vnames,
     top_loci = data.frame(
       variant_id = paste0("chr1:1:A:G"),
       betahat = 1.5, sebetahat = 0.3, z = 5.0, maf = 0.25,
@@ -78,7 +78,7 @@ make_fake_post_result <- function(p) {
 }
 
 # ===========================================================================
-# Helper: fake twas_weights_pipeline return value
+# Helper: fake twasWeightsPipeline return value
 # ===========================================================================
 make_test_ld_data <- function(variant_ids, R = NULL) {
   if (is.null(R)) {
@@ -86,20 +86,20 @@ make_test_ld_data <- function(variant_ids, R = NULL) {
     R <- diag(p)
     rownames(R) <- colnames(R) <- variant_ids
   }
-  ref_panel <- pecotmr:::parse_variant_id(variant_ids)
+  ref_panel <- pecotmr:::parseVariantId(variant_ids)
   ref_panel$variant_id <- variant_ids
-  variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+  variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
   bm <- data.frame(
     block_id = 1L, chrom = as.character(ref_panel$chrom[1]),
     block_start = min(ref_panel$pos), block_end = max(ref_panel$pos),
     size = length(variant_ids), start_idx = 1L, end_idx = length(variant_ids),
     stringsAsFactors = FALSE
   )
-  LDData(correlation = R, variants = variants_gr, block_metadata = bm)
+  LdData(correlation = R, variants = variants_gr, blockMetadata = bm)
 }
 
 # ===========================================================================
-# Helper: build an LDData S4 object from a matrix for QCResult mocks.
+# Helper: build an LdData S4 object from a matrix for QcResult mocks.
 # When is_genotype = FALSE, the matrix is the correlation R (variants on row
 # and column names). When is_genotype = TRUE, the matrix is a genotype matrix
 # (samples x variants) and colnames are variant IDs.
@@ -107,38 +107,38 @@ make_test_ld_data <- function(variant_ids, R = NULL) {
 .test_lddata_from_matrix <- function(mat, is_genotype = FALSE) {
   vids <- if (is_genotype) colnames(mat) else rownames(mat)
   if (is.null(vids)) vids <- colnames(mat)
-  ref_panel <- cbind(pecotmr:::parse_variant_id(vids), variant_id = vids)
+  ref_panel <- cbind(pecotmr:::parseVariantId(vids), variant_id = vids)
   ref_panel$chrom <- as.character(ref_panel$chrom)
-  variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
-  bm <- pecotmr:::.infer_single_ld_block_metadata(ref_panel)
+  variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
+  bm <- pecotmr:::.inferSingleLdBlockMetadata(ref_panel)
   if (is_genotype) {
-    LDData(correlation = NULL, genotype_handle = mat,
-           variants = variants_gr, block_metadata = bm,
-           n_ref = as.integer(nrow(mat)))
+    LdData(correlation = NULL, genotypeHandle = mat,
+           variants = variants_gr, blockMetadata = bm,
+           nRef = as.integer(nrow(mat)))
   } else {
-    LDData(correlation = mat, variants = variants_gr, block_metadata = bm)
+    LdData(correlation = mat, variants = variants_gr, blockMetadata = bm)
   }
 }
 
 # ===========================================================================
-# Helper: build a QCResult mock from a sumstats data.frame and LD matrix.
+# Helper: build a QcResult mock from a sumstats data.frame and LD matrix.
 # ===========================================================================
-.test_qcresult <- function(sumstats, ld_mat, n = 1000, var_y = 1,
-                           outlier_number = 0L, skipped = FALSE,
+.test_qcresult <- function(sumstats, ld_mat, n = 1000, varY = 1,
+                           outlierNumber = 0L, skipped = FALSE,
                            is_genotype = FALSE) {
   ld <- .test_lddata_from_matrix(ld_mat, is_genotype = is_genotype)
-  QCResult(
-    ld_data = ld,
-    rss_input = list(sumstats = sumstats, n = n, var_y = var_y),
-    preprocess = list(sumstats = sumstats, ld_data = ld),
-    outlier_number = as.integer(outlier_number),
+  QcResult(
+    ldData = ld,
+    rssInput = list(sumstats = sumstats, n = n, varY = varY),
+    preprocess = list(sumstats = sumstats, ldData = ld),
+    outlierNumber = as.integer(outlierNumber),
     skipped = skipped
   )
 }
 
 make_fake_twas_result <- function(p) {
   list(
-    twas_weights = setNames(rep(0.1, p), paste0("chr1:", seq_len(p), ":A:G")),
+    twasWeights = setNames(rep(0.1, p), paste0("chr1:", seq_len(p), ":A:G")),
     twas_predictions = rnorm(30),
     susie_weights_intermediate = list(
       mu = matrix(rnorm(2 * p), 2, p),
@@ -151,50 +151,50 @@ make_fake_twas_result <- function(p) {
 }
 
 # ===========================================================================
-# univariate_analysis_pipeline: input validation
+# univariateAnalysisPipeline: input validation
 # ===========================================================================
 
 
-test_that("univariate_analysis_pipeline errors on non-matrix X", {
+test_that("univariateAnalysisPipeline errors on non-matrix X", {
   Y <- rnorm(10)
   maf <- runif(5, 0.05, 0.5)
   expect_error(
-    univariate_analysis_pipeline(X = data.frame(matrix(rnorm(50), 10, 5)), Y = Y, maf = maf),
+    univariateAnalysisPipeline(X = data.frame(matrix(rnorm(50), 10, 5)), Y = Y, maf = maf),
     "X must be a numeric matrix"
   )
 })
 
-test_that("univariate_analysis_pipeline errors on non-numeric X", {
+test_that("univariateAnalysisPipeline errors on non-numeric X", {
   X <- matrix(as.character(1:50), 10, 5)
   Y <- rnorm(10)
   maf <- runif(5, 0.05, 0.5)
   expect_error(
-    univariate_analysis_pipeline(X = X, Y = Y, maf = maf),
+    univariateAnalysisPipeline(X = X, Y = Y, maf = maf),
     "X must be a numeric matrix"
   )
 })
 
-test_that("univariate_analysis_pipeline errors on non-numeric Y", {
+test_that("univariateAnalysisPipeline errors on non-numeric Y", {
   X <- matrix(rnorm(50), 10, 5)
   Y <- as.character(rnorm(10))
   maf <- runif(5, 0.05, 0.5)
   expect_error(
-    univariate_analysis_pipeline(X = X, Y = Y, maf = maf),
+    univariateAnalysisPipeline(X = X, Y = Y, maf = maf),
     "Y must be a numeric vector"
   )
 })
 
-test_that("univariate_analysis_pipeline errors on multi-column Y matrix", {
+test_that("univariateAnalysisPipeline errors on multi-column Y matrix", {
   X <- matrix(rnorm(50), 10, 5)
   Y <- matrix(rnorm(20), 10, 2)
   maf <- runif(5, 0.05, 0.5)
   expect_error(
-    univariate_analysis_pipeline(X = X, Y = Y, maf = maf),
+    univariateAnalysisPipeline(X = X, Y = Y, maf = maf),
     "Y must be a numeric vector"
   )
 })
 
-test_that("univariate_analysis_pipeline accepts single-column Y matrix", {
+test_that("univariateAnalysisPipeline accepts single-column Y matrix", {
   skip_if_not_installed("susieR")
   set.seed(42)
   n <- 20; p <- 5
@@ -204,94 +204,94 @@ test_that("univariate_analysis_pipeline accepts single-column Y matrix", {
   Y <- matrix(X[, 1] * 2 + rnorm(n), ncol = 1)
   rownames(Y) <- rownames(X)
   maf <- runif(p, 0.1, 0.5)
-  result <- univariate_analysis_pipeline(X = X, Y = Y, maf = maf,
-    twas_weights = FALSE, L = 5, L_greedy = 5)
+  result <- univariateAnalysisPipeline(X = X, Y = Y, maf = maf,
+    twasWeights = FALSE, L = 5, lGreedy = 5)
   expect_type(result, "list")
 })
 
-test_that("univariate_analysis_pipeline errors on X/Y row mismatch", {
+test_that("univariateAnalysisPipeline errors on X/Y row mismatch", {
   X <- matrix(rnorm(50), 10, 5)
   Y <- rnorm(8)
   maf <- runif(5, 0.05, 0.5)
   expect_error(
-    univariate_analysis_pipeline(X = X, Y = Y, maf = maf),
+    univariateAnalysisPipeline(X = X, Y = Y, maf = maf),
     "same number of rows"
   )
 })
 
-test_that("univariate_analysis_pipeline errors on maf length mismatch", {
+test_that("univariateAnalysisPipeline errors on maf length mismatch", {
   X <- matrix(rnorm(50), 10, 5)
   Y <- rnorm(10)
   maf <- runif(3, 0.05, 0.5)
   expect_error(
-    univariate_analysis_pipeline(X = X, Y = Y, maf = maf),
+    univariateAnalysisPipeline(X = X, Y = Y, maf = maf),
     "length equal to the number of columns"
   )
 })
 
-test_that("univariate_analysis_pipeline errors on maf out of bounds", {
+test_that("univariateAnalysisPipeline errors on maf out of bounds", {
   X <- matrix(rnorm(50), 10, 5)
   Y <- rnorm(10)
   maf <- c(0.1, 0.2, -0.1, 0.3, 0.4)
   expect_error(
-    univariate_analysis_pipeline(X = X, Y = Y, maf = maf),
+    univariateAnalysisPipeline(X = X, Y = Y, maf = maf),
     "maf values must be between 0 and 1"
   )
 })
 
-test_that("univariate_analysis_pipeline errors on invalid X_scalar", {
+test_that("univariateAnalysisPipeline errors on invalid X_scalar", {
   X <- matrix(rnorm(50), 10, 5)
   Y <- rnorm(10)
   maf <- runif(5, 0.05, 0.5)
   expect_error(
-    univariate_analysis_pipeline(X = X, Y = Y, maf = maf, X_scalar = "bad"),
-    "X_scalar must be a numeric"
+    univariateAnalysisPipeline(X = X, Y = Y, maf = maf, xScalar = "bad"),
+    "xScalar must be a numeric"
   )
 })
 
-test_that("univariate_analysis_pipeline errors on wrong-length X_scalar vector", {
+test_that("univariateAnalysisPipeline errors on wrong-length X_scalar vector", {
   X <- matrix(rnorm(50), 10, 5)
   Y <- rnorm(10)
   maf <- runif(5, 0.05, 0.5)
   expect_error(
-    univariate_analysis_pipeline(X = X, Y = Y, maf = maf, X_scalar = c(1, 2, 3)),
-    "X_scalar must be a numeric"
+    univariateAnalysisPipeline(X = X, Y = Y, maf = maf, xScalar = c(1, 2, 3)),
+    "xScalar must be a numeric"
   )
 })
 
-test_that("univariate_analysis_pipeline errors on non-numeric Y_scalar", {
+test_that("univariateAnalysisPipeline errors on non-numeric Y_scalar", {
   X <- matrix(rnorm(50), 10, 5)
   Y <- rnorm(10)
   maf <- runif(5, 0.05, 0.5)
   expect_error(
-    univariate_analysis_pipeline(X = X, Y = Y, maf = maf, Y_scalar = "bad"),
-    "Y_scalar must be a numeric scalar"
+    univariateAnalysisPipeline(X = X, Y = Y, maf = maf, yScalar = "bad"),
+    "yScalar must be a numeric scalar"
   )
 })
 
-test_that("univariate_analysis_pipeline errors on non-positive L", {
+test_that("univariateAnalysisPipeline errors on non-positive L", {
   X <- matrix(rnorm(50), 10, 5)
   Y <- rnorm(10)
   maf <- runif(5, 0.05, 0.5)
   expect_error(
-    univariate_analysis_pipeline(X = X, Y = Y, maf = maf, L = 0),
+    univariateAnalysisPipeline(X = X, Y = Y, maf = maf, L = 0),
     "L must be a positive"
   )
 })
 
-test_that("univariate_analysis_pipeline errors on non-positive L_greedy", {
+test_that("univariateAnalysisPipeline errors on non-positive L_greedy", {
   X <- matrix(rnorm(50), 10, 5)
   Y <- rnorm(10)
   maf <- runif(5, 0.05, 0.5)
   expect_error(
-    univariate_analysis_pipeline(X = X, Y = Y, maf = maf, L_greedy = 0),
-    "L_greedy must be NULL or a positive"
+    univariateAnalysisPipeline(X = X, Y = Y, maf = maf, lGreedy = 0),
+    "lGreedy must be NULL or a positive"
   )
 })
 
-# ---- univariate_analysis_pipeline functional tests ----
+# ---- univariateAnalysisPipeline functional tests ----
 
-test_that("univariate_analysis_pipeline runs with minimal valid input", {
+test_that("univariateAnalysisPipeline runs with minimal valid input", {
   skip_if_not_installed("susieR")
   set.seed(42)
   n <- 30; p <- 10
@@ -303,9 +303,9 @@ test_that("univariate_analysis_pipeline runs with minimal valid input", {
   names(Y) <- rownames(X)
   maf <- runif(p, 0.1, 0.5)
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = X, Y = Y, maf = maf,
-    twas_weights = FALSE, L = 5, L_greedy = 5
+    twasWeights = FALSE, L = 5, lGreedy = 5
   )
 
   expect_type(result, "list")
@@ -314,7 +314,7 @@ test_that("univariate_analysis_pipeline runs with minimal valid input", {
   expect_true("total_time_elapsed" %in% names(result))
 })
 
-test_that("univariate_analysis_pipeline produces twas_weights when requested", {
+test_that("univariateAnalysisPipeline produces twasWeights when requested", {
   skip_if_not_installed("susieR")
   set.seed(42)
   n <- 30; p <- 10
@@ -325,16 +325,16 @@ test_that("univariate_analysis_pipeline produces twas_weights when requested", {
   names(Y) <- rownames(X)
   maf <- runif(p, 0.1, 0.5)
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = X, Y = Y, maf = maf,
-    twas_weights = TRUE, L = 5, L_greedy = 5,
-    cv_folds = 2
+    twasWeights = TRUE, L = 5, lGreedy = 5,
+    cvFolds = 2
   )
 
   expect_true("twas_weights_result" %in% names(result))
 })
 
-test_that("univariate_analysis_pipeline respects X_scalar vector", {
+test_that("univariateAnalysisPipeline respects X_scalar vector", {
   skip_if_not_installed("susieR")
   set.seed(42)
   n <- 20; p <- 5
@@ -345,20 +345,20 @@ test_that("univariate_analysis_pipeline respects X_scalar vector", {
   names(Y) <- rownames(X)
   maf <- runif(p, 0.1, 0.5)
 
-  r_noscalar <- suppressMessages(univariate_analysis_pipeline(
-    X = X, Y = Y, maf = maf, X_scalar = rep(1, p),
-    twas_weights = FALSE, L = 5, L_greedy = 5
+  r_noscalar <- suppressMessages(univariateAnalysisPipeline(
+    X = X, Y = Y, maf = maf, xScalar = rep(1, p),
+    twasWeights = FALSE, L = 5, lGreedy = 5
   ))
-  r_scalar <- suppressMessages(univariate_analysis_pipeline(
-    X = X, Y = Y, maf = maf, X_scalar = rep(2, p),
-    twas_weights = FALSE, L = 5, L_greedy = 5
+  r_scalar <- suppressMessages(univariateAnalysisPipeline(
+    X = X, Y = Y, maf = maf, xScalar = rep(2, p),
+    twasWeights = FALSE, L = 5, lGreedy = 5
   ))
   # X_scalar divides betahat: scalar=2 should halve the estimates
   ratio <- unname(r_noscalar$sumstats$betahat / r_scalar$sumstats$betahat)
   expect_equal(ratio, rep(2, p), tolerance = 1e-10)
 })
 
-test_that("univariate_analysis_pipeline with cv_folds=0 skips CV", {
+test_that("univariateAnalysisPipeline with cv_folds=0 skips CV", {
   skip_if_not_installed("susieR")
   set.seed(42)
   n <- 20; p <- 5
@@ -369,84 +369,84 @@ test_that("univariate_analysis_pipeline with cv_folds=0 skips CV", {
   names(Y) <- rownames(X)
   maf <- runif(p, 0.1, 0.5)
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = X, Y = Y, maf = maf,
-    twas_weights = TRUE, L = 5, L_greedy = 5,
-    cv_folds = 0
+    twasWeights = TRUE, L = 5, lGreedy = 5,
+    cvFolds = 0
   )
   expect_type(result, "list")
   expect_true("twas_weights_result" %in% names(result))
 })
 
-# ---- rss_analysis_pipeline input validation ----
+# ---- rssAnalysisPipeline input validation ----
 
-test_that("rss_analysis_pipeline requires file inputs", {
-  # rss_analysis_pipeline calls load_rss_data which requires valid file paths
+test_that("rssAnalysisPipeline requires file inputs", {
+  # rssAnalysisPipeline calls loadRssData which requires valid file paths
   dummy_ld <- make_test_ld_data(paste0("1:", 1:5, ":A:G"))
   expect_error(
-    rss_analysis_pipeline(
-      sumstat_path = "/nonexistent/file.tsv",
-      column_file_path = "/nonexistent/columns.yml",
-      LD_data = dummy_ld
+    rssAnalysisPipeline(
+      sumstatPath = "/nonexistent/file.tsv",
+      columnFilePath = "/nonexistent/columns.yml",
+      ldData = dummy_ld
     )
   )
 })
 
-# ---- resolve_LD_input ----
+# ---- resolveLdInput ----
 
-test_that("resolve_LD_input errors when both R and X are NULL", {
+test_that("resolveLdInput errors when both R and X are NULL", {
   expect_error(
-    pecotmr:::resolve_LD_input(R = NULL, X = NULL),
+    pecotmr:::resolveLdInput(R = NULL, X = NULL),
     "Either R .* or X .* must be provided"
   )
 })
 
-test_that("resolve_LD_input errors when both R and X are provided", {
+test_that("resolveLdInput errors when both R and X are provided", {
   R <- diag(5)
   X <- matrix(rnorm(50), 10, 5)
   expect_error(
-    pecotmr:::resolve_LD_input(R = R, X = X),
+    pecotmr:::resolveLdInput(R = R, X = X),
     "Provide either R or X, not both"
   )
 })
 
-test_that("resolve_LD_input with R returns R unchanged", {
+test_that("resolveLdInput with R returns R unchanged", {
   R <- diag(5)
-  result <- pecotmr:::resolve_LD_input(R = R, nSample = 100)
+  result <- pecotmr:::resolveLdInput(R = R, nSample = 100)
   expect_equal(result$R, R)
   expect_equal(result$nSample, 100)
 })
 
-test_that("resolve_LD_input with X computes LD and infers nSample", {
+test_that("resolveLdInput with X computes LD and infers nSample", {
   set.seed(42)
   X <- matrix(rbinom(200, 2, 0.3), 20, 10)
-  result <- pecotmr:::resolve_LD_input(X = X)
+  result <- pecotmr:::resolveLdInput(X = X)
   expect_equal(nrow(result$R), 10)
   expect_equal(ncol(result$R), 10)
   expect_equal(result$nSample, 20)
 })
 
-test_that("resolve_LD_input errors when nSample required but missing", {
+test_that("resolveLdInput errors when nSample required but missing", {
   R <- diag(5)
   expect_error(
-    pecotmr:::resolve_LD_input(R = R, need_nSample = TRUE),
+    pecotmr:::resolveLdInput(R = R, needNSample = TRUE),
     "nSample is required"
   )
 })
 
-test_that("resolve_LD_input does not error when nSample not needed", {
+test_that("resolveLdInput does not error when nSample not needed", {
   R <- diag(5)
-  result <- pecotmr:::resolve_LD_input(R = R, need_nSample = FALSE)
+  result <- pecotmr:::resolveLdInput(R = R, needNSample = FALSE)
   expect_equal(result$R, R)
   expect_null(result$nSample)
 })
 
 # ===========================================================================
-# univariate_analysis_pipeline: mocked pipeline tests
+# univariateAnalysisPipeline: mocked pipeline tests
 # ===========================================================================
 
 # ========================================================================
-#  SECTION 1: univariate_analysis_pipeline - pip_cutoff_to_skip branch
+#  SECTION 1: univariateAnalysisPipeline - pip_cutoff_to_skip branch
 # ========================================================================
 
 test_that("uap: pip_cutoff_to_skip > 0, no signal above threshold => returns empty list", {
@@ -457,10 +457,10 @@ test_that("uap: pip_cutoff_to_skip > 0, no signal above threshold => returns emp
     susie = function(...) list(pip = low_pip)
   )
   result <- expect_message(
-    univariate_analysis_pipeline(
+    univariateAnalysisPipeline(
       X = inp$X, Y = inp$Y, maf = inp$maf,
-      pip_cutoff_to_skip = 0.5,
-      twas_weights = FALSE, L = 5, L_greedy = 5
+      pipCutoffToSkip = 0.5,
+      twasWeights = FALSE, L = 5, lGreedy = 5
     ),
     "Skipping follow-up"
   )
@@ -481,15 +481,15 @@ test_that("uap: pip_cutoff_to_skip > 0, signal above threshold => continues anal
       call_count <<- call_count + 1
       if (call_count == 1) list(pip = high_pip) else fake_fit
     },
-    postprocess_finemapping_fits = function(...) fake_post,
-    format_finemapping_output = function(post, primary_method) post,
+    postprocessFinemappingFits = function(...) fake_post,
+    formatFinemappingOutput = function(post, primaryMethod) post,
   )
 
   result <- expect_message(
-    univariate_analysis_pipeline(
+    univariateAnalysisPipeline(
       X = inp$X, Y = inp$Y, maf = inp$maf,
-      pip_cutoff_to_skip = 0.5,
-      twas_weights = FALSE, L = 5, L_greedy = 5
+      pipCutoffToSkip = 0.5,
+      twasWeights = FALSE, L = 5, lGreedy = 5
     ),
     "Follow-up on region"
   )
@@ -507,10 +507,10 @@ test_that("uap: negative pip_cutoff_to_skip auto-computes threshold", {
   )
 
   result <- expect_message(
-    univariate_analysis_pipeline(
+    univariateAnalysisPipeline(
       X = inp$X, Y = inp$Y, maf = inp$maf,
-      pip_cutoff_to_skip = -1,
-      twas_weights = FALSE, L = 5, L_greedy = 5
+      pipCutoffToSkip = -1,
+      twasWeights = FALSE, L = 5, lGreedy = 5
     ),
     "Skipping follow-up"
   )
@@ -518,7 +518,7 @@ test_that("uap: negative pip_cutoff_to_skip auto-computes threshold", {
 })
 
 # ========================================================================
-#  SECTION 2: univariate_analysis_pipeline - LD reference filtering
+#  SECTION 2: univariateAnalysisPipeline - LD reference filtering
 # ========================================================================
 
 test_that("uap: LD reference filtering subsets X columns and maf", {
@@ -528,7 +528,7 @@ test_that("uap: LD reference filtering subsets X columns and maf", {
 
   captured_args <- list()
   local_mocked_bindings(
-    filter_variants_by_ld_reference = function(variant_ids, ld_ref_file) {
+    filterVariantsByLdReference = function(variant_ids, ld_ref_file) {
       # keep only first 5 variants
       list(data = variant_ids[1:5], idx = 1:5)
     },
@@ -536,14 +536,14 @@ test_that("uap: LD reference filtering subsets X columns and maf", {
       captured_args$ncol_X <<- ncol(X)
       fake_fit
     },
-    postprocess_finemapping_fits = function(...) fake_post,
-    format_finemapping_output = function(post, primary_method) post,
+    postprocessFinemappingFits = function(...) fake_post,
+    formatFinemappingOutput = function(post, primaryMethod) post,
   )
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$Y, maf = inp$maf,
-    ld_reference_meta_file = "/fake/ld_meta.tsv",
-    twas_weights = FALSE, L = 5, L_greedy = 5
+    ldReferenceMetaFile = "/fake/ld_meta.tsv",
+    twasWeights = FALSE, L = 5, lGreedy = 5
   )
   expect_equal(captured_args$ncol_X, 5)
   expect_true("susie_fitted" %in% names(result))
@@ -557,28 +557,28 @@ test_that("uap: LD reference filtering also subsets X_scalar vector", {
 
   captured_maf <- NULL
   local_mocked_bindings(
-    filter_variants_by_ld_reference = function(variant_ids, ld_ref_file) {
+    filterVariantsByLdReference = function(variant_ids, ld_ref_file) {
       list(data = variant_ids[1:5], idx = 1:5)
     },
     susie = function(...) fake_fit,
-    postprocess_finemapping_fits = function(fits, data_x, data_y, X_scalar, ...) {
-      captured_maf <<- length(data_x[1,])
+    postprocessFinemappingFits = function(fits, dataX, dataY, xScalar, ...) {
+      captured_maf <<- length(dataX[1,])
       fake_post
     },
-    format_finemapping_output = function(post, primary_method) post,
+    formatFinemappingOutput = function(post, primaryMethod) post,
   )
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$Y, maf = inp$maf,
-    X_scalar = X_scalar_vec,
-    ld_reference_meta_file = "/fake/ld_meta.tsv",
-    twas_weights = FALSE, L = 5, L_greedy = 5
+    xScalar = X_scalar_vec,
+    ldReferenceMetaFile = "/fake/ld_meta.tsv",
+    twasWeights = FALSE, L = 5, lGreedy = 5
   )
   expect_true("susie_fitted" %in% names(result))
 })
 
 # ========================================================================
-#  SECTION 3: univariate_analysis_pipeline - filter_X branch
+#  SECTION 3: univariateAnalysisPipeline - filter_X branch
 # ========================================================================
 
 test_that("uap: filter_X is invoked when imiss_cutoff is set", {
@@ -588,19 +588,19 @@ test_that("uap: filter_X is invoked when imiss_cutoff is set", {
 
   filter_called <- FALSE
   local_mocked_bindings(
-    filter_X = function(X, ...) {
+    filterX = function(X, ...) {
       filter_called <<- TRUE
       X  # return unchanged
     },
     susie = function(...) fake_fit,
-    postprocess_finemapping_fits = function(...) fake_post,
-    format_finemapping_output = function(post, primary_method) post,
+    postprocessFinemappingFits = function(...) fake_post,
+    formatFinemappingOutput = function(post, primaryMethod) post,
   )
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$Y, maf = inp$maf,
-    imiss_cutoff = 0.9,
-    twas_weights = FALSE, L = 5, L_greedy = 5
+    imissCutoff = 0.9,
+    twasWeights = FALSE, L = 5, lGreedy = 5
   )
   expect_true(filter_called)
 })
@@ -615,25 +615,25 @@ test_that("uap: filter_X with maf_cutoff active properly subsets maf and X_scala
 
   captured_ncol <- NULL
   local_mocked_bindings(
-    filter_X = function(X, ...) X_filtered,
+    filterX = function(X, ...) X_filtered,
     susie = function(X, ...) {
       captured_ncol <<- ncol(X)
       fake_fit
     },
-    postprocess_finemapping_fits = function(...) fake_post,
-    format_finemapping_output = function(post, primary_method) post,
+    postprocessFinemappingFits = function(...) fake_post,
+    formatFinemappingOutput = function(post, primaryMethod) post,
   )
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$Y, maf = inp$maf,
-    maf_cutoff = 0.05, X_scalar = rep(2, inp$p),
-    twas_weights = FALSE, L = 5, L_greedy = 5
+    mafCutoff = 0.05, xScalar = rep(2, inp$p),
+    twasWeights = FALSE, L = 5, lGreedy = 5
   )
   expect_equal(captured_ncol, length(keep_cols))
 })
 
 # ========================================================================
-#  SECTION 4: univariate_analysis_pipeline - main analysis (susie + post)
+#  SECTION 4: univariateAnalysisPipeline - main analysis (susie + post)
 # ========================================================================
 
 test_that("uap: susie-inf initializes susie with matching greedy L", {
@@ -649,7 +649,7 @@ test_that("uap: susie-inf initializes susie with matching greedy L", {
                      convergence_method = NULL, ...) {
       captured_calls[[length(captured_calls) + 1]] <<- list(
         L = L,
-        L_greedy = L_greedy,
+        lGreedy = L_greedy,
         unmappable_effects = unmappable_effects,
         model_init = model_init,
         refine = refine,
@@ -657,22 +657,22 @@ test_that("uap: susie-inf initializes susie with matching greedy L", {
       )
       if (identical(unmappable_effects, "inf")) fake_inf_fit else fake_fit
     },
-    postprocess_finemapping_fits = function(...) fake_post,
-    format_finemapping_output = function(post, primary_method) post,
+    postprocessFinemappingFits = function(...) fake_post,
+    formatFinemappingOutput = function(post, primaryMethod) post,
   )
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$Y, maf = inp$maf,
-    twas_weights = FALSE, L = 15, L_greedy = 7
+    twasWeights = FALSE, L = 15, lGreedy = 7
   )
   expect_length(captured_calls, 2)
   expect_equal(captured_calls[[1]]$L, 15)
-  expect_equal(captured_calls[[1]]$L_greedy, 7)
+  expect_equal(captured_calls[[1]]$lGreedy, 7)
   expect_equal(captured_calls[[1]]$unmappable_effects, "inf")
   expect_equal(captured_calls[[1]]$convergence_method, "pip")
   expect_false(captured_calls[[1]]$refine)
   expect_equal(captured_calls[[2]]$L, 15)
-  expect_equal(captured_calls[[2]]$L_greedy, nrow(fake_inf_fit$alpha))
+  expect_equal(captured_calls[[2]]$lGreedy, nrow(fake_inf_fit$alpha))
   expect_equal(captured_calls[[2]]$unmappable_effects, "none")
   expect_true(captured_calls[[2]]$refine)
   expect_identical(captured_calls[[2]]$model_init, result$susie_inf_fitted)
@@ -693,27 +693,27 @@ test_that("uap: ordinary susie can run without susie-inf initialization", {
                      model_init = NULL, ...) {
       captured_calls[[length(captured_calls) + 1]] <<- list(
         L = L,
-        L_greedy = L_greedy,
+        lGreedy = L_greedy,
         unmappable_effects = unmappable_effects,
         model_init = model_init
       )
       fake_fit
     },
-    postprocess_finemapping_fits = function(fits, ...) {
+    postprocessFinemappingFits = function(fits, ...) {
       expect_named(fits, "susie")
       fake_post
     },
-    format_finemapping_output = function(post, primary_method) post,
+    formatFinemappingOutput = function(post, primaryMethod) post,
   )
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$Y, maf = inp$maf,
-    twas_weights = FALSE, add_susie_inf = FALSE,
-    L = 15, L_greedy = 7
+    twasWeights = FALSE, addSusieInf = FALSE,
+    L = 15, lGreedy = 7
   )
   expect_length(captured_calls, 1)
   expect_equal(captured_calls[[1]]$L, 15)
-  expect_equal(captured_calls[[1]]$L_greedy, 7)
+  expect_equal(captured_calls[[1]]$lGreedy, 7)
   expect_equal(captured_calls[[1]]$unmappable_effects, "none")
   expect_null(captured_calls[[1]]$model_init)
   expect_s3_class(result$susie_fitted, "susie")
@@ -725,9 +725,9 @@ test_that("uap: post-processing output is merged into result", {
   inp <- make_uap_inputs()
   fake_fit <- make_fake_susie_fit(inp$p)
   fake_fm <- FineMappingResult(
-    variant_names = paste0("v", seq_len(inp$p)),
-    trimmed_fit = list(pip = runif(inp$p)),
-    top_loci = data.frame(variant_id = character(0), method = character(0)),
+    variantNames = paste0("v", seq_len(inp$p)),
+    trimmedFit = list(pip = runif(inp$p)),
+    topLoci = data.frame(variant_id = character(0), method = character(0)),
     method = "susie"
   )
   fake_post <- list(
@@ -737,18 +737,18 @@ test_that("uap: post-processing output is merged into result", {
 
   local_mocked_bindings(
     susie = function(...) fake_fit,
-    postprocess_finemapping_fits = function(fits, ...) {
+    postprocessFinemappingFits = function(fits, ...) {
       # SuSiE-inf is fitted first because chained SuSiE / SuSiE-ash
       # warm-start from it; the list-name order reflects fit order.
       expect_named(fits, c("susie_inf", "susie"))
       fake_post
     },
-    format_finemapping_output = function(post, primary_method) post,
+    formatFinemappingOutput = function(post, primaryMethod) post,
   )
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$Y, maf = inp$maf,
-    twas_weights = FALSE, L = 5, L_greedy = 5
+    twasWeights = FALSE, L = 5, lGreedy = 5
   )
   expect_true("finemapping_result" %in% names(result))
   expect_true("top_loci" %in% names(result))
@@ -767,23 +767,23 @@ test_that("uap: finemapping_extra_opts are forwarded to susie", {
       captured_refine <<- args$refine
       fake_fit
     },
-    postprocess_finemapping_fits = function(...) fake_post,
-    format_finemapping_output = function(post, primary_method) post,
+    postprocessFinemappingFits = function(...) fake_post,
+    formatFinemappingOutput = function(post, primaryMethod) post,
   )
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$Y, maf = inp$maf,
-    finemapping_extra_opts = list(refine = TRUE),
-    twas_weights = FALSE, L = 5, L_greedy = 5
+    finemappingExtraOpts = list(refine = TRUE),
+    twasWeights = FALSE, L = 5, lGreedy = 5
   )
   expect_true(captured_refine)
 })
 
 # ========================================================================
-#  SECTION 5: univariate_analysis_pipeline - TWAS weights
+#  SECTION 5: univariateAnalysisPipeline - TWAS weights
 # ========================================================================
 
-test_that("uap: twas_weights = TRUE calls twas_weights_pipeline", {
+test_that("uap: twasWeights = TRUE calls twasWeightsPipeline", {
   inp <- make_uap_inputs()
   fake_fit <- make_fake_susie_fit(inp$p)
   fake_post <- make_fake_post_result(inp$p)
@@ -792,24 +792,24 @@ test_that("uap: twas_weights = TRUE calls twas_weights_pipeline", {
   twas_called <- FALSE
   local_mocked_bindings(
     susie = function(...) fake_fit,
-    postprocess_finemapping_fits = function(...) fake_post,
-    format_finemapping_output = function(post, primary_method) post,
-    twas_weights_pipeline = function(...) {
+    postprocessFinemappingFits = function(...) fake_post,
+    formatFinemappingOutput = function(post, primaryMethod) post,
+    twasWeightsPipeline = function(...) {
       twas_called <<- TRUE
       fake_twas
     },
   )
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$Y, maf = inp$maf,
-    twas_weights = TRUE, L = 5, L_greedy = 5,
-    cv_folds = 2
+    twasWeights = TRUE, L = 5, lGreedy = 5,
+    cvFolds = 2
   )
   expect_true(twas_called)
   expect_true("twas_weights_result" %in% names(result))
 })
 
-test_that("uap: twas_weights copies top_loci into susie_weights_intermediate", {
+test_that("uap: twasWeights copies top_loci into susie_weights_intermediate", {
   inp <- make_uap_inputs()
   fake_fit <- make_fake_susie_fit(inp$p)
   fake_post <- make_fake_post_result(inp$p)
@@ -817,21 +817,21 @@ test_that("uap: twas_weights copies top_loci into susie_weights_intermediate", {
 
   local_mocked_bindings(
     susie = function(...) fake_fit,
-    postprocess_finemapping_fits = function(...) fake_post,
-    format_finemapping_output = function(post, primary_method) post,
-    twas_weights_pipeline = function(...) fake_twas,
+    postprocessFinemappingFits = function(...) fake_post,
+    formatFinemappingOutput = function(post, primaryMethod) post,
+    twasWeightsPipeline = function(...) fake_twas,
   )
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$Y, maf = inp$maf,
-    twas_weights = TRUE, L = 5, L_greedy = 5,
-    cv_folds = 2
+    twasWeights = TRUE, L = 5, lGreedy = 5,
+    cvFolds = 2
   )
   # top_loci should be copied from fake_post into the twas result
   expect_true("top_loci" %in% names(result$twas_weights_result$susie_weights_intermediate))
 })
 
-test_that("uap: twas_weights_pipeline receives correct cv_folds and sample_partition", {
+test_that("uap: twasWeightsPipeline receives correct cv_folds and sample_partition", {
   inp <- make_uap_inputs()
   fake_fit <- make_fake_susie_fit(inp$p)
   fake_post <- make_fake_post_result(inp$p)
@@ -841,27 +841,27 @@ test_that("uap: twas_weights_pipeline receives correct cv_folds and sample_parti
   captured_partition <- NULL
   local_mocked_bindings(
     susie = function(...) fake_fit,
-    postprocess_finemapping_fits = function(...) fake_post,
-    format_finemapping_output = function(post, primary_method) post,
-    twas_weights_pipeline = function(X, Y, fitted_models, cv_folds, max_cv_variants,
-                                     cv_threads, sample_partition) {
-      captured_cv_folds <<- cv_folds
-      captured_partition <<- sample_partition
+    postprocessFinemappingFits = function(...) fake_post,
+    formatFinemappingOutput = function(post, primaryMethod) post,
+    twasWeightsPipeline = function(X, Y, fittedModels, cvFolds, maxCvVariants,
+                                     cvThreads, samplePartition) {
+      captured_cv_folds <<- cvFolds
+      captured_partition <<- samplePartition
       fake_twas
     },
   )
 
   sample_part <- rep(1:3, length.out = inp$n)
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$Y, maf = inp$maf,
-    twas_weights = TRUE, L = 5, L_greedy = 5,
-    cv_folds = 3, sample_partition = sample_part
+    twasWeights = TRUE, L = 5, lGreedy = 5,
+    cvFolds = 3, samplePartition = sample_part
   )
   expect_equal(captured_cv_folds, 3)
   expect_equal(captured_partition, sample_part)
 })
 
-test_that("uap: twas_weights = FALSE skips twas_weights_pipeline", {
+test_that("uap: twasWeights = FALSE skips twasWeightsPipeline", {
   inp <- make_uap_inputs()
   fake_fit <- make_fake_susie_fit(inp$p)
   fake_post <- make_fake_post_result(inp$p)
@@ -869,24 +869,24 @@ test_that("uap: twas_weights = FALSE skips twas_weights_pipeline", {
   twas_called <- FALSE
   local_mocked_bindings(
     susie = function(...) fake_fit,
-    postprocess_finemapping_fits = function(...) fake_post,
-    format_finemapping_output = function(post, primary_method) post,
-    twas_weights_pipeline = function(...) {
+    postprocessFinemappingFits = function(...) fake_post,
+    formatFinemappingOutput = function(post, primaryMethod) post,
+    twasWeightsPipeline = function(...) {
       twas_called <<- TRUE
       make_fake_twas_result(inp$p)
     },
   )
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$Y, maf = inp$maf,
-    twas_weights = FALSE, L = 5, L_greedy = 5
+    twasWeights = FALSE, L = 5, lGreedy = 5
   )
   expect_false(twas_called)
   expect_false("twas_weights_result" %in% names(result))
 })
 
 # ========================================================================
-#  SECTION 6: univariate_analysis_pipeline - coverage vector forwarding
+#  SECTION 6: univariateAnalysisPipeline - coverage vector forwarding
 # ========================================================================
 
 test_that("uap: coverage vector is forwarded correctly to susie and post-processing", {
@@ -901,18 +901,18 @@ test_that("uap: coverage vector is forwarded correctly to susie and post-process
       captured_coverage_wrapper <<- coverage
       fake_fit
     },
-    postprocess_finemapping_fits = function(fits, data_x, data_y, X_scalar, y_scalar, maf,
-                                            secondary_coverage, ...) {
-      captured_secondary_cov <<- secondary_coverage
+    postprocessFinemappingFits = function(fits, data_x, data_y, X_scalar, y_scalar, maf,
+                                            secondaryCoverage, ...) {
+      captured_secondary_cov <<- secondaryCoverage
       fake_post
     },
-    format_finemapping_output = function(post, primary_method) post,
+    formatFinemappingOutput = function(post, primaryMethod) post,
   )
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$Y, maf = inp$maf,
     coverage = c(0.95, 0.7, 0.5),
-    twas_weights = FALSE, L = 5, L_greedy = 5
+    twasWeights = FALSE, L = 5, lGreedy = 5
   )
   expect_equal(captured_coverage_wrapper, 0.95)
   expect_equal(captured_secondary_cov, c(0.7, 0.5))
@@ -926,24 +926,24 @@ test_that("uap: single coverage value => secondary_coverage is NULL", {
   captured_secondary_cov <- "NOT_SET"
   local_mocked_bindings(
     susie = function(...) fake_fit,
-    postprocess_finemapping_fits = function(fits, data_x, data_y, X_scalar, y_scalar, maf,
-                                            secondary_coverage, ...) {
-      captured_secondary_cov <<- secondary_coverage
+    postprocessFinemappingFits = function(fits, data_x, data_y, X_scalar, y_scalar, maf,
+                                            secondaryCoverage, ...) {
+      captured_secondary_cov <<- secondaryCoverage
       fake_post
     },
-    format_finemapping_output = function(post, primary_method) post,
+    formatFinemappingOutput = function(post, primaryMethod) post,
   )
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$Y, maf = inp$maf,
     coverage = c(0.95),
-    twas_weights = FALSE, L = 5, L_greedy = 5
+    twasWeights = FALSE, L = 5, lGreedy = 5
   )
   expect_null(captured_secondary_cov)
 })
 
 # ========================================================================
-#  SECTION 7: univariate_analysis_pipeline - combined LD + filter_X
+#  SECTION 7: univariateAnalysisPipeline - combined LD + filter_X
 # ========================================================================
 
 test_that("uap: both LD filtering and filter_X applied in sequence", {
@@ -958,78 +958,78 @@ test_that("uap: both LD filtering and filter_X applied in sequence", {
 
   captured_ncol <- NULL
   local_mocked_bindings(
-    filter_variants_by_ld_reference = function(variant_ids, ld_ref_file) {
+    filterVariantsByLdReference = function(variant_ids, ld_ref_file) {
       list(data = variant_ids[1:8], idx = 1:8)
     },
-    filter_X = function(X, ...) X_after_filter,
+    filterX = function(X, ...) X_after_filter,
     susie = function(X, ...) {
       captured_ncol <<- ncol(X)
       fake_fit
     },
-    postprocess_finemapping_fits = function(...) fake_post,
-    format_finemapping_output = function(post, primary_method) post,
+    postprocessFinemappingFits = function(...) fake_post,
+    formatFinemappingOutput = function(post, primaryMethod) post,
   )
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$Y, maf = inp$maf,
-    ld_reference_meta_file = "/fake/ld.tsv",
-    imiss_cutoff = 0.9, maf_cutoff = 0.05,
-    twas_weights = FALSE, L = 5, L_greedy = 5
+    ldReferenceMetaFile = "/fake/ld.tsv",
+    imissCutoff = 0.9, mafCutoff = 0.05,
+    twasWeights = FALSE, L = 5, lGreedy = 5
   )
   expect_equal(captured_ncol, 6)
 })
 
 # ========================================================================
-#  SECTION 8: rss_analysis_pipeline - empty sumstats early return
+#  SECTION 8: rssAnalysisPipeline - empty sumstats early return
 # ========================================================================
 
-test_that("rss: empty sumstats from load_rss_data => early return", {
+test_that("rss: empty sumstats from loadRssData => early return", {
   dummy_ld <- make_test_ld_data(paste0("1:", 1:5, ":A:G"))
   local_mocked_bindings(
-    load_rss_data = function(...) {
-      list(sumstats = data.frame(), n = NULL, var_y = NULL)
+    loadRssData = function(...) {
+      list(sumstats = data.frame(), n = NULL, varY = NULL)
     },
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = dummy_ld
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = dummy_ld
   )
   expect_true("rss_data_analyzed" %in% names(result))
   expect_equal(nrow(result$rss_data_analyzed), 0)
 })
 
 # ========================================================================
-#  SECTION 9: rss_analysis_pipeline - empty sumstats after preprocessing
+#  SECTION 9: rssAnalysisPipeline - empty sumstats after preprocessing
 # ========================================================================
 
-test_that("rss: empty sumstats after rss_basic_qc => early return", {
+test_that("rss: empty sumstats after rssBasicQc => early return", {
   dummy_ld <- make_test_ld_data(c("1:100:A:G"))
   local_mocked_bindings(
-    load_rss_data = function(...) {
+    loadRssData = function(...) {
       list(
         sumstats = data.frame(chrom = 1, pos = 100, A1 = "A", A2 = "G", z = 2.5, variant_id = "1:100:A:G"),
         n = 1000,
-        var_y = 1
+        varY = 1
       )
     },
-    rss_basic_qc = function(...) {
-      QCResult(
-        ld_data = NULL,
-        rss_input = list(sumstats = data.frame(), n = NA_real_, var_y = NA_real_),
+    rssBasicQc = function(...) {
+      QcResult(
+        ldData = NULL,
+        rssInput = list(sumstats = data.frame(), n = NA_real_, varY = NA_real_),
         preprocess = list(),
-        outlier_number = 0L,
+        outlierNumber = 0L,
         skipped = FALSE
       )
     },
   )
 
   result <- expect_message(
-    rss_analysis_pipeline(
-      sumstat_path = "/fake/sumstats.tsv",
-      column_file_path = "/fake/columns.yml",
-      LD_data = dummy_ld
+    rssAnalysisPipeline(
+      sumstatPath = "/fake/sumstats.tsv",
+      columnFilePath = "/fake/columns.yml",
+      ldData = dummy_ld
     ),
     "No variants left after preprocessing"
   )
@@ -1038,7 +1038,7 @@ test_that("rss: empty sumstats after rss_basic_qc => early return", {
 })
 
 # ========================================================================
-#  SECTION 10: rss_analysis_pipeline - pip_cutoff_to_skip branch
+#  SECTION 10: rssAnalysisPipeline - pip_cutoff_to_skip branch
 # ========================================================================
 
 make_rss_sumstats <- function(n_variants = 5) {
@@ -1062,13 +1062,13 @@ make_rss_ld_mat <- function(n_variants = 5) {
   m
 }
 
-test_that("region_data_to_susie_rss_input prepares correlation-backed RSS input", {
+test_that("regionDataToSusieRssInput prepares correlation-backed RSS input", {
   ss <- make_rss_sumstats(5)
   ss_sub <- ss[c(2, 4, 5), , drop = FALSE]
   ld <- .test_lddata_from_matrix(make_rss_ld_mat(5))
 
-  out <- region_data_to_susie_rss_input(
-    list(sumstats = ss_sub, n = 1000, var_y = 1.5),
+  out <- regionDataToSusieRssInput(
+    list(sumstats = ss_sub, n = 1000, varY = 1.5),
     ld
   )
 
@@ -1076,37 +1076,37 @@ test_that("region_data_to_susie_rss_input prepares correlation-backed RSS input"
   expect_false(out$source_info$uses_X_ref)
   expect_equal(out$susie_rss_input$n, 1000)
   expect_equal(out$susie_rss_input$var_y, 1.5)
-  expect_null(out$susie_rss_input$X_mat)
-  expect_equal(rownames(out$susie_rss_input$LD_mat), ss_sub$variant_id)
-  expect_equal(colnames(out$susie_rss_input$LD_mat), ss_sub$variant_id)
+  expect_null(out$susie_rss_input$xMat)
+  expect_equal(rownames(out$susie_rss_input$ldMat), ss_sub$variant_id)
+  expect_equal(colnames(out$susie_rss_input$ldMat), ss_sub$variant_id)
 })
 
-test_that("region_data_to_susie_rss_input prepares genotype-backed RSS input", {
+test_that("regionDataToSusieRssInput prepares genotype-backed RSS input", {
   ss <- make_rss_sumstats(5)
   ss_sub <- ss[c(1, 3, 5), , drop = FALSE]
   X_ref <- matrix(rnorm(20 * 5), nrow = 20, ncol = 5)
   colnames(X_ref) <- ss$variant_id
   ld <- .test_lddata_from_matrix(X_ref, is_genotype = TRUE)
 
-  out <- region_data_to_susie_rss_input(
-    list(sumstats = ss_sub, n = 1000, var_y = 1),
+  out <- regionDataToSusieRssInput(
+    list(sumstats = ss_sub, n = 1000, varY = 1),
     ld
   )
 
   expect_true(out$source_info$uses_X_ref)
   expect_false(out$source_info$has_LD)
-  expect_null(out$susie_rss_input$LD_mat)
-  expect_equal(dim(out$susie_rss_input$X_mat), c(20, 3))
-  expect_equal(colnames(out$susie_rss_input$X_mat), ss_sub$variant_id)
+  expect_null(out$susie_rss_input$ldMat)
+  expect_equal(dim(out$susie_rss_input$xMat), c(20, 3))
+  expect_equal(colnames(out$susie_rss_input$xMat), ss_sub$variant_id)
 })
 
-test_that("region_data_to_susie_rss_input rejects default row names as variant IDs", {
+test_that("regionDataToSusieRssInput rejects default row names as variant IDs", {
   ss <- make_rss_sumstats(5)[c(2, 4, 5), , drop = FALSE]
   ss$variant_id <- NULL
   ld <- .test_lddata_from_matrix(make_rss_ld_mat(3))
 
   expect_error(
-    region_data_to_susie_rss_input(list(sumstats = ss, n = 1000, var_y = 1), ld),
+    regionDataToSusieRssInput(list(sumstats = ss, n = 1000, varY = 1), ld),
     "variant_id or variant"
   )
 })
@@ -1116,24 +1116,24 @@ test_that("rss: pip_cutoff_to_skip > 0, no signal => early return", {
   ld_mat <- make_rss_ld_mat(5)
 
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
     susie_ser = function(...) list(pip = rep(0.01, 5)),
   )
 
   result <- expect_message(
-    rss_analysis_pipeline(
-      sumstat_path = "/fake/sumstats.tsv",
-      column_file_path = "/fake/columns.yml",
-      LD_data = make_test_ld_data(ss$variant_id),
-      pip_cutoff_to_skip = 0.5,
-      qc_method = "none"
+    rssAnalysisPipeline(
+      sumstatPath = "/fake/sumstats.tsv",
+      columnFilePath = "/fake/columns.yml",
+      ldData = make_test_ld_data(ss$variant_id),
+      pipCutoffToSkip = 0.5,
+      qcMethod = "none"
     ),
     "Skipping follow-up"
   )
@@ -1146,32 +1146,32 @@ test_that("rss: pip_cutoff_to_skip > 0, signal detected => continues", {
   fake_rss_result <- make_fake_post_result(5)
 
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
     susie_rss = function(...) list(pip = c(0.9, 0.01, 0.01, 0.01, 0.01)),
-    summary_stats_qc = function(...) {
+    summaryStatsQc = function(...) {
       message("Follow-up on region: signals above PIP threshold 0.5 detected.")
-      .test_qcresult(ss, ld_mat, outlier_number = 0)
+      .test_qcresult(ss, ld_mat, outlierNumber = 0)
     },
-    partition_LD_matrix = function(...) ld_mat,
+    partitionLdMatrix = function(...) ld_mat,
     raiss = function(...) list(result_filter = ss, LD_mat = ld_mat),
-    susie_rss_pipeline = function(...) fake_rss_result,
+    susieRssPipeline = function(...) fake_rss_result,
   )
 
   result <- expect_message(
-    rss_analysis_pipeline(
-      sumstat_path = "/fake/sumstats.tsv",
-      column_file_path = "/fake/columns.yml",
-      LD_data = make_test_ld_data(ss$variant_id),
-      pip_cutoff_to_skip = 0.5,
-      qc_method = "slalom",
-      finemapping_method = "susie_rss"
+    rssAnalysisPipeline(
+      sumstatPath = "/fake/sumstats.tsv",
+      columnFilePath = "/fake/columns.yml",
+      ldData = make_test_ld_data(ss$variant_id),
+      pipCutoffToSkip = 0.5,
+      qcMethod = "slalom",
+      finemappingMethod = "susie_rss"
     ),
     "Follow-up on region"
   )
@@ -1185,12 +1185,12 @@ test_that("rss: negative pip_cutoff_to_skip auto-computes threshold", {
   ld_mat <- make_rss_ld_mat(5)
 
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
     susie_ser = function(...) list(pip = rep(0.01, 5)),
@@ -1198,12 +1198,12 @@ test_that("rss: negative pip_cutoff_to_skip auto-computes threshold", {
 
   # auto threshold = 3 * 1/5 = 0.6, all PIPs are 0.01 so skip
   result <- expect_message(
-    rss_analysis_pipeline(
-      sumstat_path = "/fake/sumstats.tsv",
-      column_file_path = "/fake/columns.yml",
-      LD_data = make_test_ld_data(ss$variant_id),
-      pip_cutoff_to_skip = -1,
-      qc_method = "none"
+    rssAnalysisPipeline(
+      sumstatPath = "/fake/sumstats.tsv",
+      columnFilePath = "/fake/columns.yml",
+      ldData = make_test_ld_data(ss$variant_id),
+      pipCutoffToSkip = -1,
+      qcMethod = "none"
     ),
     "Skipping follow-up"
   )
@@ -1211,7 +1211,7 @@ test_that("rss: negative pip_cutoff_to_skip auto-computes threshold", {
 })
 
 # ========================================================================
-#  SECTION 11: rss_analysis_pipeline - QC + imputation + fine-mapping
+#  SECTION 11: rssAnalysisPipeline - QC + imputation + fine-mapping
 # ========================================================================
 
 test_that("rss: full pipeline with QC, imputation, and fine-mapping", {
@@ -1224,39 +1224,39 @@ test_that("rss: full pipeline with QC, imputation, and fine-mapping", {
   finemapping_called <- FALSE
 
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(..., impute = FALSE) {
+    summaryStatsQc = function(..., impute = FALSE) {
       qc_called <<- TRUE
-      # Imputation now happens inside summary_stats_qc, so simulate that
+      # Imputation now happens inside summaryStatsQc, so simulate that
       # branch in the mock to keep the raiss call observable.
       if (isTRUE(impute)) raiss()
-      .test_qcresult(ss, ld_mat, outlier_number = 1)
+      .test_qcresult(ss, ld_mat, outlierNumber = 1)
     },
-    partition_LD_matrix = function(...) list(ld_matrices = list(ld_mat)),
+    partitionLdMatrix = function(...) list(ld_matrices = list(ld_mat)),
     raiss = function(...) {
       impute_called <<- TRUE
       list(result_filter = ss, LD_mat = ld_mat)
     },
-    susie_rss_pipeline = function(...) {
+    susieRssPipeline = function(...) {
       finemapping_called <<- TRUE
       fake_result
     },
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = "slalom",
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = "slalom",
     impute = TRUE,
-    finemapping_method = "susie_rss"
+    finemappingMethod = "susie_rss"
   )
 
   expect_true(qc_called)
@@ -1273,25 +1273,25 @@ test_that("rss: method name is correct for no-impute with QC", {
   fake_result <- make_fake_post_result(5)
 
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
-    susie_rss_pipeline = function(...) fake_result,
+    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlierNumber = 0),
+    susieRssPipeline = function(...) fake_result,
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = "slalom",
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = "slalom",
     impute = FALSE,
-    finemapping_method = "susie_rss"
+    finemappingMethod = "susie_rss"
   )
 
   expect_true(any(grepl("susie_rss_SLALOM$", names(result))))
@@ -1303,33 +1303,33 @@ test_that("rss: method name is correct for no QC", {
   fake_result <- make_fake_post_result(5)
 
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    partition_LD_matrix = function(...) list(ld_matrices = list(ld_mat)),
+    partitionLdMatrix = function(...) list(ld_matrices = list(ld_mat)),
     raiss = function(...) list(result_filter = ss, LD_mat = ld_mat),
-    susie_rss_pipeline = function(...) fake_result,
+    susieRssPipeline = function(...) fake_result,
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = NULL,
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = NULL,
     impute = TRUE,
-    finemapping_method = "susie_rss"
+    finemappingMethod = "susie_rss"
   )
 
   expect_true(any(grepl("NO_QC", names(result))))
 })
 
 # ========================================================================
-#  SECTION 12: rss_analysis_pipeline - outlier_number stored
+#  SECTION 12: rssAnalysisPipeline - outlier_number stored
 # ========================================================================
 
 test_that("rss: outlier_number is stored in result when QC is active", {
@@ -1338,25 +1338,25 @@ test_that("rss: outlier_number is stored in result when QC is active", {
   fake_result <- make_fake_post_result(5)
 
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 3),
-    susie_rss_pipeline = function(...) fake_result,
+    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlierNumber = 3),
+    susieRssPipeline = function(...) fake_result,
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = "dentist",
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = "dentist",
     impute = FALSE,
-    finemapping_method = "susie_rss"
+    finemappingMethod = "susie_rss"
   )
 
   method_key <- grep("DENTIST", names(result), value = TRUE)
@@ -1365,37 +1365,37 @@ test_that("rss: outlier_number is stored in result when QC is active", {
 })
 
 # ========================================================================
-#  SECTION 13: rss_analysis_pipeline - finemapping_method = NULL skips
+#  SECTION 13: rssAnalysisPipeline - finemappingMethod = NULL skips
 # ========================================================================
 
-test_that("rss: finemapping_method = NULL skips fine-mapping", {
+test_that("rss: finemappingMethod = NULL skips fine-mapping", {
   ss <- make_rss_sumstats(5)
   ld_mat <- make_rss_ld_mat(5)
 
   finemapping_called <- FALSE
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    susie_rss_pipeline = function(...) {
+    susieRssPipeline = function(...) {
       finemapping_called <<- TRUE
       list()
     },
   )
 
-  # Use qc_method = NULL and impute = FALSE to avoid paste0(NULL, ...) edge case
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = NULL,
+  # Use qcMethod = NULL and impute = FALSE to avoid paste0(NULL, ...) edge case
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = NULL,
     impute = FALSE,
-    finemapping_method = NULL
+    finemappingMethod = NULL
   )
 
   expect_false(finemapping_called)
@@ -1403,45 +1403,45 @@ test_that("rss: finemapping_method = NULL skips fine-mapping", {
 })
 
 # ========================================================================
-#  SECTION 14: rss_analysis_pipeline - QC = NULL skips QC
+#  SECTION 14: rssAnalysisPipeline - QC = NULL skips QC
 # ========================================================================
 
-test_that("rss: qc_method = NULL uses combined basic QC without LD-mismatch method", {
+test_that("rss: qcMethod = NULL uses combined basic QC without LD-mismatch method", {
   ss <- make_rss_sumstats(5)
   ld_mat <- make_rss_ld_mat(5)
   fake_result <- make_fake_post_result(5)
 
   qc_called <- FALSE
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) {
+    summaryStatsQc = function(...) {
       qc_called <<- TRUE
-      .test_qcresult(ss, ld_mat, outlier_number = 0)
+      .test_qcresult(ss, ld_mat, outlierNumber = 0)
     },
-    susie_rss_pipeline = function(...) fake_result,
+    susieRssPipeline = function(...) fake_result,
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = NULL,
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = NULL,
     impute = FALSE,
-    finemapping_method = "susie_rss"
+    finemappingMethod = "susie_rss"
   )
 
   expect_true(qc_called)
 })
 
 # ========================================================================
-#  SECTION 15: rss_analysis_pipeline - impute = FALSE skips imputation
+#  SECTION 15: rssAnalysisPipeline - impute = FALSE skips imputation
 # ========================================================================
 
 test_that("rss: impute = FALSE skips raiss imputation", {
@@ -1451,36 +1451,36 @@ test_that("rss: impute = FALSE skips raiss imputation", {
 
   raiss_called <- FALSE
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
+    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlierNumber = 0),
     raiss = function(...) {
       raiss_called <<- TRUE
       list(result_filter = ss, LD_mat = ld_mat)
     },
-    susie_rss_pipeline = function(...) fake_result,
+    susieRssPipeline = function(...) fake_result,
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = "slalom",
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = "slalom",
     impute = FALSE,
-    finemapping_method = "susie_rss"
+    finemappingMethod = "susie_rss"
   )
 
   expect_false(raiss_called)
 })
 
 # ========================================================================
-#  SECTION 16: rss_analysis_pipeline - diagnostics branch (empty res)
+#  SECTION 16: rssAnalysisPipeline - diagnostics branch (empty res)
 # ========================================================================
 
 test_that("rss: diagnostics = TRUE with empty fine-mapping result skips diagnostics logic", {
@@ -1488,26 +1488,26 @@ test_that("rss: diagnostics = TRUE with empty fine-mapping result skips diagnost
   ld_mat <- make_rss_ld_mat(5)
 
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
-    susie_rss_pipeline = function(...) list(),  # empty result
+    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlierNumber = 0),
+    susieRssPipeline = function(...) list(),  # empty result
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = "slalom",
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
-    finemapping_method = "susie_rss"
+    finemappingMethod = "susie_rss"
   )
 
   # With empty fine-mapping result, block_cs_metrics stays empty,
@@ -1516,7 +1516,7 @@ test_that("rss: diagnostics = TRUE with empty fine-mapping result skips diagnost
 })
 
 # ========================================================================
-#  SECTION 17: rss_analysis_pipeline - diagnostics with CS > 1 and
+#  SECTION 17: rssAnalysisPipeline - diagnostics with CS > 1 and
 #              high p-value triggers BCR + SER re-analysis
 # ========================================================================
 
@@ -1526,17 +1526,17 @@ test_that("rss: diagnostics with 2+ CS and high p-value/corr triggers BCR and SE
 
   # Build a fake result that has susie_result_trimmed with 2 CS
   fake_result <- list(
-    variant_names = paste0("1:", seq(100, by = 100, length.out = 5), ":A:G"),
+    variantNames = paste0("1:", seq(100, by = 100, length.out = 5), ":A:G"),
     susie_result_trimmed = list(
       pip = c(0.9, 0.8, 0.1, 0.05, 0.02),
       sets = list(
         cs = list(L1 = c(1L, 2L), L2 = c(3L, 4L)),
-        requested_coverage = 0.95
+        requestedCoverage = 0.95
       ),
       cs_corr = matrix(c(1, 0.6, 0.6, 1), nrow = 2)
     ),
     sumstats = list(z = c(5.0, 4.0, 1.5, 0.5, 0.1)),
-    top_loci = data.frame(
+    topLoci = data.frame(
       variant_id = c("1:100:A:G", "1:200:A:G", "1:300:A:G", "1:400:A:G"),
       pip = c(0.9, 0.8, 0.1, 0.05),
       z = c(5.0, 4.0, 1.5, 0.5),
@@ -1544,7 +1544,7 @@ test_that("rss: diagnostics with 2+ CS and high p-value/corr triggers BCR and SE
     )
   )
 
-  # extract_cs_info returns a tibble with 2 CS rows
+  # extractCsInfo returns a tibble with 2 CS rows
   fake_cs_info <- tibble::tibble(
     cs_name = c("L1", "L2"),
     variants_per_cs = c(2L, 2L),
@@ -1556,7 +1556,7 @@ test_that("rss: diagnostics with 2+ CS and high p-value/corr triggers BCR and SE
     cs_corr = list("1,0.6", "0.6,1")
   )
 
-  # parse_cs_corr adds cs_corr_max and cs_corr_min
+  # parseCsCorr adds cs_corr_max and cs_corr_min
   fake_parsed <- as.data.frame(fake_cs_info)
   fake_parsed$cs_corr_1 <- c(1, 0.6)
   fake_parsed$cs_corr_2 <- c(0.6, 1)
@@ -1565,32 +1565,32 @@ test_that("rss: diagnostics with 2+ CS and high p-value/corr triggers BCR and SE
 
   susie_rss_pipeline_call_count <- 0
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
-    susie_rss_pipeline = function(...) {
+    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlierNumber = 0),
+    susieRssPipeline = function(...) {
       susie_rss_pipeline_call_count <<- susie_rss_pipeline_call_count + 1
       fake_result
     },
-    get_susie_result = function(res) res$susie_result_trimmed,
-    extract_cs_info = function(...) fake_cs_info,
-    parse_cs_corr = function(...) fake_parsed,
+    getSusieResult = function(res) res$susie_result_trimmed,
+    extractCsInfo = function(...) fake_cs_info,
+    parseCsCorr = function(...) fake_parsed,
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = "slalom",
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
-    finemapping_method = "susie_rss"
+    finemappingMethod = "susie_rss"
   )
 
   # Main susie_rss call + BCR reanalysis + SER reanalysis = 3 calls
@@ -1602,7 +1602,7 @@ test_that("rss: diagnostics with 2+ CS and high p-value/corr triggers BCR and SE
 })
 
 # ========================================================================
-#  SECTION 18: rss_analysis_pipeline - diagnostics with 1 CS => SER only
+#  SECTION 18: rssAnalysisPipeline - diagnostics with 1 CS => SER only
 # ========================================================================
 
 test_that("rss: diagnostics with 1 CS triggers SER reanalysis only", {
@@ -1610,17 +1610,17 @@ test_that("rss: diagnostics with 1 CS triggers SER reanalysis only", {
   ld_mat <- make_rss_ld_mat(5)
 
   fake_result <- list(
-    variant_names = paste0("1:", seq(100, by = 100, length.out = 5), ":A:G"),
+    variantNames = paste0("1:", seq(100, by = 100, length.out = 5), ":A:G"),
     susie_result_trimmed = list(
       pip = c(0.9, 0.1, 0.05, 0.02, 0.01),
       sets = list(
         cs = list(L1 = c(1L, 2L)),
-        requested_coverage = 0.95
+        requestedCoverage = 0.95
       ),
       cs_corr = matrix(1, nrow = 1)
     ),
     sumstats = list(z = c(5.0, 1.0, 0.5, 0.2, 0.1)),
-    top_loci = data.frame(
+    topLoci = data.frame(
       variant_id = c("1:100:A:G", "1:200:A:G"),
       pip = c(0.9, 0.1),
       z = c(5.0, 1.0),
@@ -1645,32 +1645,32 @@ test_that("rss: diagnostics with 1 CS triggers SER reanalysis only", {
 
   susie_rss_pipeline_call_count <- 0
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
-    susie_rss_pipeline = function(...) {
+    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlierNumber = 0),
+    susieRssPipeline = function(...) {
       susie_rss_pipeline_call_count <<- susie_rss_pipeline_call_count + 1
       fake_result
     },
-    get_susie_result = function(res) res$susie_result_trimmed,
-    extract_cs_info = function(...) fake_cs_info,
-    parse_cs_corr = function(...) fake_parsed,
+    getSusieResult = function(res) res$susie_result_trimmed,
+    extractCsInfo = function(...) fake_cs_info,
+    parseCsCorr = function(...) fake_parsed,
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = "slalom",
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
-    finemapping_method = "susie_rss"
+    finemappingMethod = "susie_rss"
   )
 
   # Main call + SER reanalysis = 2 calls
@@ -1680,22 +1680,22 @@ test_that("rss: diagnostics with 1 CS triggers SER reanalysis only", {
 })
 
 # ========================================================================
-#  SECTION 19: rss_analysis_pipeline - diagnostics with no CS but high PIP
+#  SECTION 19: rssAnalysisPipeline - diagnostics with no CS but high PIP
 # ========================================================================
 
-test_that("rss: diagnostics with no CS but high PIP calls extract_top_pip_info", {
+test_that("rss: diagnostics with no CS but high PIP calls extractTopPipInfo", {
   ss <- make_rss_sumstats(5)
   ld_mat <- make_rss_ld_mat(5)
 
   fake_result <- list(
-    variant_names = paste0("1:", seq(100, by = 100, length.out = 5), ":A:G"),
+    variantNames = paste0("1:", seq(100, by = 100, length.out = 5), ":A:G"),
     susie_result_trimmed = list(
       pip = c(0.15, 0.05, 0.03, 0.02, 0.01),
-      sets = list(cs = NULL, requested_coverage = 0.95),
+      sets = list(cs = NULL, requestedCoverage = 0.95),
       cs_corr = NULL
     ),
     sumstats = list(z = c(3.0, 1.0, 0.5, 0.2, 0.1)),
-    top_loci = data.frame(
+    topLoci = data.frame(
       variant_id = "1:100:A:G",
       pip = 0.15,
       z = 3.0,
@@ -1703,7 +1703,7 @@ test_that("rss: diagnostics with no CS but high PIP calls extract_top_pip_info",
     )
   )
 
-  # extract_top_pip_info returns when no CS but PIP > signal_cutoff
+  # extractTopPipInfo returns when no CS but PIP > signal_cutoff
   extract_top_pip_called <- FALSE
   fake_top_pip_info <- list(
     cs_name = NA,
@@ -1717,22 +1717,22 @@ test_that("rss: diagnostics with no CS but high PIP calls extract_top_pip_info",
   )
 
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
-    susie_rss_pipeline = function(...) fake_result,
-    get_susie_result = function(res) res$susie_result_trimmed,
-    extract_top_pip_info = function(...) {
+    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlierNumber = 0),
+    susieRssPipeline = function(...) fake_result,
+    getSusieResult = function(res) res$susie_result_trimmed,
+    extractTopPipInfo = function(...) {
       extract_top_pip_called <<- TRUE
       fake_top_pip_info
     },
-    parse_cs_corr = function(df) {
+    parseCsCorr = function(df) {
       df <- as.data.frame(df)
       df$cs_corr_max <- NA_real_
       df$cs_corr_min <- NA_real_
@@ -1740,14 +1740,14 @@ test_that("rss: diagnostics with no CS but high PIP calls extract_top_pip_info",
     },
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = "slalom",
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
-    finemapping_method = "susie_rss"
+    finemappingMethod = "susie_rss"
   )
 
   expect_true(extract_top_pip_called)
@@ -1755,7 +1755,7 @@ test_that("rss: diagnostics with no CS but high PIP calls extract_top_pip_info",
 })
 
 # ========================================================================
-#  SECTION 20: rss_analysis_pipeline - diagnostics with no CS and low PIP
+#  SECTION 20: rssAnalysisPipeline - diagnostics with no CS and low PIP
 # ========================================================================
 
 test_that("rss: diagnostics with no CS and no high PIP => diagnostics empty", {
@@ -1763,40 +1763,40 @@ test_that("rss: diagnostics with no CS and no high PIP => diagnostics empty", {
   ld_mat <- make_rss_ld_mat(5)
 
   fake_result <- list(
-    variant_names = paste0("1:", seq(100, by = 100, length.out = 5), ":A:G"),
+    variantNames = paste0("1:", seq(100, by = 100, length.out = 5), ":A:G"),
     susie_result_trimmed = list(
       pip = c(0.01, 0.005, 0.003, 0.002, 0.001),
-      sets = list(cs = NULL, requested_coverage = 0.95),
+      sets = list(cs = NULL, requestedCoverage = 0.95),
       cs_corr = NULL
     ),
     sumstats = list(z = c(0.5, 0.3, 0.2, 0.1, 0.05))
   )
 
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
-    susie_rss_pipeline = function(...) fake_result,
-    get_susie_result = function(res) res$susie_result_trimmed,
+    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlierNumber = 0),
+    susieRssPipeline = function(...) fake_result,
+    getSusieResult = function(res) res$susie_result_trimmed,
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = "slalom",
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
-    finemapping_method = "susie_rss",
-    finemapping_opts = list(
-      L = 20, L_greedy = 5,
-      coverage = c(0.95, 0.7, 0.5), signal_cutoff = 0.025,
+    finemappingMethod = "susie_rss",
+    finemappingOpts = list(
+      L = 20, lGreedy = 5,
+      coverage = c(0.95, 0.7, 0.5), signalCutoff = 0.025,
       min_abs_corr = 0.8
     )
   )
@@ -1807,10 +1807,10 @@ test_that("rss: diagnostics with no CS and no high PIP => diagnostics empty", {
 })
 
 # ========================================================================
-#  SECTION 21: rss_analysis_pipeline - finemapping_opts forwarded correctly
+#  SECTION 21: rssAnalysisPipeline - finemapping_opts forwarded correctly
 # ========================================================================
 
-test_that("rss: finemapping_opts are forwarded to susie_rss_pipeline", {
+test_that("rss: finemapping_opts are forwarded to susieRssPipeline", {
   ss <- make_rss_sumstats(5)
   ld_mat <- make_rss_ld_mat(5)
 
@@ -1820,39 +1820,39 @@ test_that("rss: finemapping_opts are forwarded to susie_rss_pipeline", {
   captured_signal_cutoff <- NULL
   captured_R_mismatch <- NULL
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    susie_rss_pipeline = function(sumstats, LD_mat, n, var_y, L, L_greedy,
-                                  analysis_method, coverage, secondary_coverage,
-                                  signal_cutoff, min_abs_corr, ...) {
+    susieRssPipeline = function(sumstats, ldMat, n, var_y, L, lGreedy,
+                                  analysisMethod, coverage, secondaryCoverage,
+                                  signalCutoff, minAbsCorr, ...) {
       captured_L <<- L
-      captured_L_greedy <<- L_greedy
+      captured_L_greedy <<- lGreedy
       captured_coverage <<- coverage
-      captured_signal_cutoff <<- signal_cutoff
-      captured_R_mismatch <<- list(...)$R_mismatch
+      captured_signal_cutoff <<- signalCutoff
+      captured_R_mismatch <<- list(...)$rMismatch
       make_fake_post_result(5)
     },
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = NULL,
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = NULL,
     impute = FALSE,
-    finemapping_method = "susie_rss",
-    finemapping_opts = list(
-      L = 10, L_greedy = 3,
-      coverage = c(0.90, 0.6), signal_cutoff = 0.05,
+    finemappingMethod = "susie_rss",
+    finemappingOpts = list(
+      L = 10, lGreedy = 3,
+      coverage = c(0.90, 0.6), signalCutoff = 0.05,
       min_abs_corr = 0.7
     ),
-    R_mismatch = "eb"
+    rMismatch = "eb"
   )
 
   expect_equal(captured_L, 10)
@@ -1863,7 +1863,7 @@ test_that("rss: finemapping_opts are forwarded to susie_rss_pipeline", {
 })
 
 # ========================================================================
-#  SECTION 22: rss_analysis_pipeline - dentist QC method naming
+#  SECTION 22: rssAnalysisPipeline - dentist QC method naming
 # ========================================================================
 
 test_that("rss: dentist QC method generates correct method name", {
@@ -1872,34 +1872,34 @@ test_that("rss: dentist QC method generates correct method name", {
   fake_result <- make_fake_post_result(5)
 
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 2),
-    partition_LD_matrix = function(...) list(ld_matrices = list(ld_mat)),
+    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlierNumber = 2),
+    partitionLdMatrix = function(...) list(ld_matrices = list(ld_mat)),
     raiss = function(...) list(result_filter = ss, LD_mat = ld_mat),
-    susie_rss_pipeline = function(...) fake_result,
+    susieRssPipeline = function(...) fake_result,
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = "dentist",
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = "dentist",
     impute = TRUE,
-    finemapping_method = "susie_rss"
+    finemappingMethod = "susie_rss"
   )
 
   expect_true(any(grepl("DENTIST_RAISS_imputed", names(result))))
 })
 
 # ========================================================================
-#  SECTION 23: univariate_analysis_pipeline - null imiss/maf cutoffs skip filter_X
+#  SECTION 23: univariateAnalysisPipeline - null imiss/maf cutoffs skip filter_X
 # ========================================================================
 
 test_that("uap: both imiss_cutoff and maf_cutoff NULL skips filter_X", {
@@ -1909,67 +1909,67 @@ test_that("uap: both imiss_cutoff and maf_cutoff NULL skips filter_X", {
 
   filter_called <- FALSE
   local_mocked_bindings(
-    filter_X = function(...) {
+    filterX = function(...) {
       filter_called <<- TRUE
       inp$X
     },
     susie = function(...) fake_fit,
-    postprocess_finemapping_fits = function(...) fake_post,
-    format_finemapping_output = function(post, primary_method) post,
+    postprocessFinemappingFits = function(...) fake_post,
+    formatFinemappingOutput = function(post, primaryMethod) post,
   )
 
-  result <- univariate_analysis_pipeline(
+  result <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$Y, maf = inp$maf,
-    imiss_cutoff = NULL, maf_cutoff = NULL,
-    twas_weights = FALSE, L = 5, L_greedy = 5
+    imissCutoff = NULL, mafCutoff = NULL,
+    twasWeights = FALSE, L = 5, lGreedy = 5
   )
 
   expect_false(filter_called)
 })
 
 # ========================================================================
-#  SECTION 24: rss_analysis_pipeline - diagnostics with get_susie_result
+#  SECTION 24: rssAnalysisPipeline - diagnostics with getSusieResult
 #              returning NULL
 # ========================================================================
 
-test_that("rss: diagnostics with get_susie_result returning NULL => diagnostics empty", {
+test_that("rss: diagnostics with getSusieResult returning NULL => diagnostics empty", {
   ss <- make_rss_sumstats(5)
   ld_mat <- make_rss_ld_mat(5)
 
-  # A non-empty result but with get_susie_result returning NULL
+  # A non-empty result but with getSusieResult returning NULL
   fake_result <- list(some_field = "value")
 
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
-    susie_rss_pipeline = function(...) fake_result,
-    get_susie_result = function(res) NULL,
+    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlierNumber = 0),
+    susieRssPipeline = function(...) fake_result,
+    getSusieResult = function(res) NULL,
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = "slalom",
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
-    finemapping_method = "susie_rss"
+    finemappingMethod = "susie_rss"
   )
 
-  # get_susie_result returns NULL, so block_cs_metrics stays empty,
+  # getSusieResult returns NULL, so block_cs_metrics stays empty,
   # and "diagnostics" key is never added to result_list
   expect_false("diagnostics" %in% names(result))
 })
 
 # ========================================================================
-#  SECTION 25: rss_analysis_pipeline - diagnostics with CS but CS count <= 1
+#  SECTION 25: rssAnalysisPipeline - diagnostics with CS but CS count <= 1
 #              and null block_cs_metrics (no high PIP either)
 # ========================================================================
 
@@ -1979,10 +1979,10 @@ test_that("rss: diagnostics with null/empty block_cs_metrics => no additional an
 
   # Non-empty result with susie_result_trimmed having 0 CS and no high PIPs
   fake_result <- list(
-    variant_names = paste0("1:", seq(100, by = 100, length.out = 5), ":A:G"),
+    variantNames = paste0("1:", seq(100, by = 100, length.out = 5), ":A:G"),
     susie_result_trimmed = list(
       pip = c(0.001, 0.002, 0.001, 0.001, 0.001),
-      sets = list(cs = list(), requested_coverage = 0.95),
+      sets = list(cs = list(), requestedCoverage = 0.95),
       cs_corr = NULL
     ),
     sumstats = list(z = rep(0.1, 5))
@@ -1990,33 +1990,33 @@ test_that("rss: diagnostics with null/empty block_cs_metrics => no additional an
 
   susie_rss_call_count <- 0
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
-    susie_rss_pipeline = function(...) {
+    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlierNumber = 0),
+    susieRssPipeline = function(...) {
       susie_rss_call_count <<- susie_rss_call_count + 1
       fake_result
     },
-    get_susie_result = function(res) res$susie_result_trimmed,
+    getSusieResult = function(res) res$susie_result_trimmed,
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = "slalom",
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
-    finemapping_method = "susie_rss",
-    finemapping_opts = list(
-      L = 20, L_greedy = 5,
-      coverage = c(0.95, 0.7, 0.5), signal_cutoff = 0.025,
+    finemappingMethod = "susie_rss",
+    finemappingOpts = list(
+      L = 20, lGreedy = 5,
+      coverage = c(0.95, 0.7, 0.5), signalCutoff = 0.025,
       min_abs_corr = 0.8
     )
   )
@@ -2029,7 +2029,7 @@ test_that("rss: diagnostics with null/empty block_cs_metrics => no additional an
 })
 
 # ========================================================================
-#  SECTION 26: rss_analysis_pipeline - diagnostics with CS > 1 but low
+#  SECTION 26: rssAnalysisPipeline - diagnostics with CS > 1 but low
 #              p-value and low corr => no BCR/SER triggered
 # ========================================================================
 
@@ -2038,17 +2038,17 @@ test_that("rss: diagnostics with 2 CS but low p-value and low corr => no extra a
   ld_mat <- make_rss_ld_mat(5)
 
   fake_result <- list(
-    variant_names = paste0("1:", seq(100, by = 100, length.out = 5), ":A:G"),
+    variantNames = paste0("1:", seq(100, by = 100, length.out = 5), ":A:G"),
     susie_result_trimmed = list(
       pip = c(0.9, 0.8, 0.1, 0.05, 0.02),
       sets = list(
         cs = list(L1 = c(1L, 2L), L2 = c(3L, 4L)),
-        requested_coverage = 0.95
+        requestedCoverage = 0.95
       ),
       cs_corr = matrix(c(1, 0.1, 0.1, 1), nrow = 2)
     ),
     sumstats = list(z = c(5.0, 4.0, 3.0, 2.5, 0.1)),
-    top_loci = data.frame(
+    topLoci = data.frame(
       variant_id = c("1:100:A:G", "1:200:A:G", "1:300:A:G", "1:400:A:G"),
       pip = c(0.9, 0.8, 0.1, 0.05),
       z = c(5.0, 4.0, 3.0, 2.5),
@@ -2079,32 +2079,32 @@ test_that("rss: diagnostics with 2 CS but low p-value and low corr => no extra a
 
   susie_rss_call_count <- 0
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
-    susie_rss_pipeline = function(...) {
+    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlierNumber = 0),
+    susieRssPipeline = function(...) {
       susie_rss_call_count <<- susie_rss_call_count + 1
       fake_result
     },
-    get_susie_result = function(res) res$susie_result_trimmed,
-    extract_cs_info = function(...) fake_cs_info,
-    parse_cs_corr = function(...) fake_parsed,
+    getSusieResult = function(res) res$susie_result_trimmed,
+    extractCsInfo = function(...) fake_cs_info,
+    parseCsCorr = function(...) fake_parsed,
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = "slalom",
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
-    finemapping_method = "susie_rss"
+    finemappingMethod = "susie_rss"
   )
 
   # Only the main call, no BCR/SER because no p > 1e-4 and no corr > 0.5
@@ -2113,7 +2113,7 @@ test_that("rss: diagnostics with 2 CS but low p-value and low corr => no extra a
 })
 
 # ========================================================================
-#  SECTION 27: rss_analysis_pipeline - diagnostics with CS > 1 and
+#  SECTION 27: rssAnalysisPipeline - diagnostics with CS > 1 and
 #              high corr (> 0.5) but low p-value still triggers BCR+SER
 # ========================================================================
 
@@ -2122,17 +2122,17 @@ test_that("rss: diagnostics with high max_cs_corr_study_block triggers BCR+SER",
   ld_mat <- make_rss_ld_mat(5)
 
   fake_result <- list(
-    variant_names = paste0("1:", seq(100, by = 100, length.out = 5), ":A:G"),
+    variantNames = paste0("1:", seq(100, by = 100, length.out = 5), ":A:G"),
     susie_result_trimmed = list(
       pip = c(0.9, 0.8, 0.1, 0.05, 0.02),
       sets = list(
         cs = list(L1 = c(1L, 2L), L2 = c(3L, 4L)),
-        requested_coverage = 0.95
+        requestedCoverage = 0.95
       ),
       cs_corr = matrix(c(1, 0.7, 0.7, 1), nrow = 2)
     ),
     sumstats = list(z = c(10.0, 9.0, 8.0, 7.0, 0.1)),
-    top_loci = data.frame(
+    topLoci = data.frame(
       variant_id = c("1:100:A:G", "1:200:A:G", "1:300:A:G", "1:400:A:G"),
       pip = c(0.9, 0.8, 0.1, 0.05),
       z = c(10.0, 9.0, 8.0, 7.0),
@@ -2159,32 +2159,32 @@ test_that("rss: diagnostics with high max_cs_corr_study_block triggers BCR+SER",
 
   susie_rss_call_count <- 0
   local_mocked_bindings(
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
-    susie_rss_pipeline = function(...) {
+    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlierNumber = 0),
+    susieRssPipeline = function(...) {
       susie_rss_call_count <<- susie_rss_call_count + 1
       fake_result
     },
-    get_susie_result = function(res) res$susie_result_trimmed,
-    extract_cs_info = function(...) fake_cs_info,
-    parse_cs_corr = function(...) fake_parsed,
+    getSusieResult = function(res) res$susie_result_trimmed,
+    extractCsInfo = function(...) fake_cs_info,
+    parseCsCorr = function(...) fake_parsed,
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = make_test_ld_data(ss$variant_id),
-    qc_method = "slalom",
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    qcMethod = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
-    finemapping_method = "susie_rss"
+    finemappingMethod = "susie_rss"
   )
 
   # Main + BCR + SER = 3
@@ -2194,32 +2194,32 @@ test_that("rss: diagnostics with high max_cs_corr_study_block triggers BCR+SER",
 })
 
 # ========================================================================
-#  load_study_LD: single vs mixture LD panels
+#  loadStudyLd: single vs mixture LD panels
 # ========================================================================
 
-test_that("load_study_LD with single path returns load_LD_matrix output unchanged", {
+test_that("loadStudyLd with single path returns loadLdMatrix output unchanged", {
   fake_LD <- list(
     LD_matrix = diag(4),
     LD_variants = paste0("chr1:", 1:4, ":A:G"),
     is_genotype = FALSE,
-    block_metadata = data.frame(chrom = 1, start = 1, end = 4)
+    blockMetadata = data.frame(chrom = 1, start = 1, end = 4)
   )
   captured_args <- NULL
   local_mocked_bindings(
-    load_LD_matrix = function(LD_meta_file_path, region, ...) {
+    loadLdMatrix = function(LD_meta_file_path, region, ...) {
       captured_args <<- list(path = LD_meta_file_path, region = region, ...)
       fake_LD
     },
   )
-  out <- load_study_LD("ld_meta.tsv", "chr1:1-100")
+  out <- loadStudyLd("ld_meta.tsv", "chr1:1-100")
   expect_identical(out, fake_LD)
   expect_equal(captured_args$path, "ld_meta.tsv")
   expect_equal(captured_args$region, "chr1:1-100")
-  expect_equal(captured_args$return_genotype, "auto")
+  expect_equal(captured_args$returnGenotype, "auto")
 })
 
-test_that("load_study_LD with comma-separated paths builds list of X panels", {
-  # Build mock LDData objects with fake genotype handles
+test_that("loadStudyLd with comma-separated paths builds list of X panels", {
+  # Build mock LdData objects with fake genotype handles
   gr <- GenomicRanges::GRanges(
     seqnames = rep("chr1", 3),
     ranges = IRanges::IRanges(start = 1:3, width = 1L)
@@ -2231,36 +2231,36 @@ test_that("load_study_LD with comma-separated paths builds list of X panels", {
   bm <- data.frame(chrom = 1, start = 1, end = 3)
   fake_handle1 <- "handle1"
   fake_handle2 <- "handle2"
-  panel1 <- LDData(
-    correlation = NULL, genotype_handle = fake_handle1, snp_idx = 1:3,
-    variants = gr, block_metadata = bm, n_ref = 10L
+  panel1 <- LdData(
+    correlation = NULL, genotypeHandle = fake_handle1, snpIdx = 1:3,
+    variants = gr, blockMetadata = bm, nRef = 10L
   )
-  panel2 <- LDData(
-    correlation = NULL, genotype_handle = fake_handle2, snp_idx = 1:3,
-    variants = gr, block_metadata = bm, n_ref = 10L
+  panel2 <- LdData(
+    correlation = NULL, genotypeHandle = fake_handle2, snpIdx = 1:3,
+    variants = gr, blockMetadata = bm, nRef = 10L
   )
   call_count <- 0
   local_mocked_bindings(
-    load_LD_matrix = function(LD_meta_file_path, region, ...) {
+    loadLdMatrix = function(LD_meta_file_path, region, ...) {
       call_count <<- call_count + 1
       if (call_count == 1) panel1 else panel2
     },
   )
-  out <- load_study_LD("ld_eur.tsv,ld_afr.tsv", "chr1:1-100")
+  out <- loadStudyLd("ld_eur.tsv,ld_afr.tsv", "chr1:1-100")
   expect_equal(call_count, 2)
-  expect_s4_class(out, "LDData")
+  expect_s4_class(out, "LdData")
   expect_true(hasGenotypes(out))
   # Mixture: genotype_handle should be a list of handles
-  expect_true(is.list(out@genotype_handle))
-  expect_length(out@genotype_handle, 2)
-  expect_equal(out@genotype_handle[[1]], "handle1")
-  expect_equal(out@genotype_handle[[2]], "handle2")
+  expect_true(is.list(out@genotypeHandle))
+  expect_length(out@genotypeHandle, 2)
+  expect_equal(out@genotypeHandle[[1]], "handle1")
+  expect_equal(out@genotypeHandle[[2]], "handle2")
   # Variants preserved from base panel
   expect_equal(getVariantIds(out), paste0("chr1:", 1:3, ":A:G"))
 })
 
 # ========================================================================
-#  rss_analysis_pipeline: X-as-LD path (genotype interface)
+#  rssAnalysisPipeline: X-as-LD path (genotype interface)
 # ========================================================================
 
 test_that("rss: is_genotype=TRUE path does not precompute R and uses X for fine-mapping", {
@@ -2270,18 +2270,18 @@ test_that("rss: is_genotype=TRUE path does not precompute R and uses X for fine-
   colnames(X_geno) <- ss$variant_id
   fake_result <- make_fake_post_result(5)
 
-  # Create LDData with genotype_handle to trigger the genotype path
-  ref_panel <- pecotmr:::parse_variant_id(ss$variant_id)
+  # Create LdData with genotype_handle to trigger the genotype path
+  ref_panel <- pecotmr:::parseVariantId(ss$variant_id)
   ref_panel$variant_id <- ss$variant_id
-  variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+  variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
   bm <- data.frame(
     block_id = 1L, chrom = as.character(ref_panel$chrom[1]),
     block_start = min(ref_panel$pos), block_end = max(ref_panel$pos),
     size = 5L, start_idx = 1L, end_idx = 5L, stringsAsFactors = FALSE
   )
-  geno_ld <- LDData(
-    correlation = NULL, genotype_handle = "fake_handle", snp_idx = 1:5,
-    variants = variants_gr, block_metadata = bm, n_ref = 20L
+  geno_ld <- LdData(
+    correlation = NULL, genotypeHandle = "fake_handle", snpIdx = 1:5,
+    variants = variants_gr, blockMetadata = bm, nRef = 20L
   )
 
   compute_LD_called <- FALSE
@@ -2289,7 +2289,7 @@ test_that("rss: is_genotype=TRUE path does not precompute R and uses X for fine-
   susie_LD_arg <- "unset"
 
   # Mock extractBlockGenotypes to return a fake SummarizedExperiment-like object
-  # that getGenotypes can use. We mock getGenotypes directly at package level.
+  # that getgenotypes can use. We mock getgenotypes directly at package level.
   local_mocked_bindings(
     extractBlockGenotypes = function(handle, snp_idx, ...) {
       # Return a fake object that assay() can handle
@@ -2298,36 +2298,36 @@ test_that("rss: is_genotype=TRUE path does not precompute R and uses X for fine-
       )
       se
     },
-    compute_LD = function(X, method = "sample") {
+    computeLd = function(X, method = "sample") {
       compute_LD_called <<- TRUE
-      stop("rss_analysis_pipeline should not precompute LD from X")
+      stop("rssAnalysisPipeline should not precompute LD from X")
     },
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) .test_qcresult(
-      ss, X_geno, outlier_number = 0, is_genotype = TRUE
+    summaryStatsQc = function(...) .test_qcresult(
+      ss, X_geno, outlierNumber = 0, is_genotype = TRUE
     ),
-    partition_LD_matrix = function(...) list(ld_matrices = list(ld_mat)),
+    partitionLdMatrix = function(...) list(ld_matrices = list(ld_mat)),
     raiss = function(...) list(result_filter = ss, LD_mat = ld_mat),
-    susie_rss_pipeline = function(sumstats, LD_mat = NULL, X_mat = NULL, ...) {
-      susie_X_arg <<- X_mat
-      susie_LD_arg <<- LD_mat
+    susieRssPipeline = function(sumstats, ldMat = NULL, xMat = NULL, ...) {
+      susie_X_arg <<- xMat
+      susie_LD_arg <<- ldMat
       fake_result
     },
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = geno_ld,
-    qc_method = "slalom",
-    finemapping_method = "susie_rss"
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = geno_ld,
+    qcMethod = "slalom",
+    finemappingMethod = "susie_rss"
   )
 
   expect_false(compute_LD_called)
@@ -2336,7 +2336,7 @@ test_that("rss: is_genotype=TRUE path does not precompute R and uses X for fine-
   expect_true(any(grepl("susie_rss", names(result))))
 })
 
-test_that("rss: mixture LD_data (list of X panels) preserves list shape into susie_rss_pipeline", {
+test_that("rss: mixture LD_data (list of X panels) preserves list shape into susieRssPipeline", {
   ss <- make_rss_sumstats(5)
   ld_mat <- make_rss_ld_mat(5)
   X1 <- matrix(rnorm(20 * 5), nrow = 20, ncol = 5)
@@ -2344,18 +2344,18 @@ test_that("rss: mixture LD_data (list of X panels) preserves list shape into sus
   colnames(X1) <- colnames(X2) <- ss$variant_id
   fake_result <- make_fake_post_result(5)
 
-  # Create LDData with list of genotype handles (mixture path)
-  ref_panel <- pecotmr:::parse_variant_id(ss$variant_id)
+  # Create LdData with list of genotype handles (mixture path)
+  ref_panel <- pecotmr:::parseVariantId(ss$variant_id)
   ref_panel$variant_id <- ss$variant_id
-  variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+  variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
   bm <- data.frame(
     block_id = 1L, chrom = as.character(ref_panel$chrom[1]),
     block_start = min(ref_panel$pos), block_end = max(ref_panel$pos),
     size = 5L, start_idx = 1L, end_idx = 5L, stringsAsFactors = FALSE
   )
-  mixture_ld <- LDData(
-    correlation = NULL, genotype_handle = list("fake_handle1", "fake_handle2"),
-    snp_idx = 1:5, variants = variants_gr, block_metadata = bm, n_ref = 20L
+  mixture_ld <- LdData(
+    correlation = NULL, genotypeHandle = list("fake_handle1", "fake_handle2"),
+    snpIdx = 1:5, variants = variants_gr, blockMetadata = bm, nRef = 20L
   )
 
   susie_X_arg <- NULL
@@ -2371,43 +2371,43 @@ test_that("rss: mixture LD_data (list of X panels) preserves list shape into sus
         assays = list(dosage = t(X_mat))
       )
     },
-    compute_LD = function(X, method = "sample") {
+    computeLd = function(X, method = "sample") {
       compute_LD_called <<- TRUE
-      stop("rss_analysis_pipeline should not precompute LD from mixture X")
+      stop("rssAnalysisPipeline should not precompute LD from mixture X")
     },
-    load_rss_data = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    rss_basic_qc = function(...) QCResult(
-      ld_data = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
-      rss_input = list(sumstats = ss, n = NA_real_, var_y = NA_real_),
+    loadRssData = function(...) list(sumstats = ss, n = 1000, varY = 1),
+    rssBasicQc = function(...) QcResult(
+      ldData = if (nrow(ld_mat) > 0) .test_lddata_from_matrix(ld_mat) else NULL,
+      rssInput = list(sumstats = ss, n = NA_real_, varY = NA_real_),
       preprocess = list(),
-      outlier_number = 0L,
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    summary_stats_qc = function(...) QCResult(
-      ld_data = mixture_ld,
-      rss_input = list(sumstats = ss, n = 1000, var_y = 1),
-      preprocess = list(sumstats = ss, ld_data = mixture_ld),
-      outlier_number = 0L,
+    summaryStatsQc = function(...) QcResult(
+      ldData = mixture_ld,
+      rssInput = list(sumstats = ss, n = 1000, varY = 1),
+      preprocess = list(sumstats = ss, ldData = mixture_ld),
+      outlierNumber = 0L,
       skipped = FALSE
     ),
-    partition_LD_matrix = function(...) list(ld_matrices = list(ld_mat)),
+    partitionLdMatrix = function(...) list(ld_matrices = list(ld_mat)),
     raiss = function(...) list(result_filter = ss, LD_mat = ld_mat),
-    susie_rss_pipeline = function(sumstats, LD_mat = NULL, X_mat = NULL, ...) {
-      susie_X_arg <<- X_mat
+    susieRssPipeline = function(sumstats, ldMat = NULL, xMat = NULL, ...) {
+      susie_X_arg <<- xMat
       fake_result
     },
   )
 
-  result <- rss_analysis_pipeline(
-    sumstat_path = "/fake/sumstats.tsv",
-    column_file_path = "/fake/columns.yml",
-    LD_data = mixture_ld,
-    qc_method = "slalom",
-    finemapping_method = "susie_rss",
+  result <- rssAnalysisPipeline(
+    sumstatPath = "/fake/sumstats.tsv",
+    columnFilePath = "/fake/columns.yml",
+    ldData = mixture_ld,
+    qcMethod = "slalom",
+    finemappingMethod = "susie_rss",
     impute = FALSE
   )
 
-  # Mixture path => list of subset matrices passed to susie_rss_pipeline as X_mat
+  # Mixture path => list of subset matrices passed to susieRssPipeline as X_mat
   expect_false(compute_LD_called)
   expect_true(is.list(susie_X_arg))
   expect_length(susie_X_arg, 2)

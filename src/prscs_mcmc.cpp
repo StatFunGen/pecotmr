@@ -19,19 +19,19 @@ using namespace arma;
  * @param bhat Vector of effect sizes.
  * @param maf Vector of minor allele frequencies. If NULL, it is assumed to be a vector of zeros.
  * @param n Sample size.
- * @param ld_blk List of LD blocks.
- * @param n_iter Number of MCMC iterations.
- * @param n_burnin Number of burn-in iterations.
+ * @param ldBlk List of LD blocks.
+ * @param nIter Number of MCMC iterations.
+ * @param nBurnin Number of burn-in iterations.
  * @param thin Thinning interval.
  * @param verbose Whether to print verbose output.
  * @param seed Random seed. If NULL, no seed is set.
  * @return A list containing the posterior estimates.
  */
 [[cpp11::register]]
-cpp11::writable::list prs_cs_rcpp(double a, double b, sexp phi,
+cpp11::writable::list prsCsRcpp(double a, double b, sexp phi,
                        doubles bhat, sexp maf,
-                       int n, list ld_blk,
-                       int n_iter, int n_burnin, int thin,
+                       int n, list ldBlk,
+                       int nIter, int nBurnin, int thin,
                        bool verbose, sexp seed) {
 	// Convert cpp11 types to C++ types
 	std::vector<double> bhat_vec = cpp11::as_cpp<std::vector<double>>(bhat);
@@ -43,8 +43,8 @@ cpp11::writable::list prs_cs_rcpp(double a, double b, sexp phi,
 	}
 
 	std::vector<mat> ld_blk_vec;
-	for (int i = 0; i < ld_blk.size(); ++i) {
-		ld_blk_vec.push_back(as_Mat(doubles_matrix<>(ld_blk[i])));
+	for (int i = 0; i < ldBlk.size(); ++i) {
+		ld_blk_vec.push_back(as_Mat(doubles_matrix<>(ldBlk[i])));
 	}
 
 	// Use stack variable to avoid heap allocation and memory leak risk.
@@ -63,15 +63,15 @@ cpp11::writable::list prs_cs_rcpp(double a, double b, sexp phi,
 	}
 
 	std::map<std::string, vec> output = prs_cs_mcmc(a, b, phi_ptr, bhat_vec, maf_vec, n, ld_blk_vec,
-	                                                      n_iter, n_burnin, thin, verbose, seed_val);
+	                                                      nIter, nBurnin, thin, verbose, seed_val);
 
 	// Convert the output to a list
 	using namespace cpp11::literals;
 	writable::list result({
-		"beta_est"_nm = as_doubles(output["beta_est"]),
-		"psi_est"_nm = as_doubles(output["psi_est"]),
-		"sigma_est"_nm = cpp11::as_sexp(output["sigma_est"](0)),
-		"phi_est"_nm = cpp11::as_sexp(output["phi_est"](0))
+		"betaEst"_nm = as_doubles(output["beta_est"]),
+		"psiEst"_nm = as_doubles(output["psi_est"]),
+		"sigmaEst"_nm = cpp11::as_sexp(output["sigma_est"](0)),
+		"phiEst"_nm = cpp11::as_sexp(output["phi_est"](0))
 	});
 
 	return result;

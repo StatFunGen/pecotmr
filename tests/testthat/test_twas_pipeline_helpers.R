@@ -1,12 +1,12 @@
 library(testthat)
 
 # build_twas_score_row is an unexported contract helper shared between
-# twas_pipeline (pecotmr) and quantile_twas_pipeline (qQTLR). Tests cover the
-# shapes returned by twas_analysis() so both pipelines stay aligned.
+# twasPipeline (pecotmr) and quantile_twas_pipeline (qQTLR). Tests cover the
+# shapes returned by twasAnalysis() so both pipelines stay aligned.
 
 test_that("build_twas_score_row returns empty data.frame for NULL input", {
-  out <- pecotmr:::build_twas_score_row(NULL,
-                                        weight_db = "ENSG001",
+  out <- pecotmr:::buildTwasScoreRow(NULL,
+                                        weightDb ="ENSG001",
                                         context   = "Cortex",
                                         study     = "AD")
   expect_s3_class(out, "data.frame")
@@ -14,15 +14,15 @@ test_that("build_twas_score_row returns empty data.frame for NULL input", {
 })
 
 test_that("build_twas_score_row packs a single-method twas_rs", {
-  # Shape mimics twas_analysis() output: apply(weights, 2, twas_z) returns
+  # Shape mimics twasAnalysis() output: apply(weights, 2, twasZ) returns
   # a named list where each element is list(z=, pval=). The name's final
   # "_<suffix>" is the method marker (see the sub() regex).
-  # find_data(twas_rs, c(2, "z")) descends one level and pulls out "z".
+  # findData(twas_rs, c(2, "z")) descends one level and pulls out "z".
   twas_rs <- list(
-    enet_weights = list(z = 2.5, pval = 0.012)
+    enetWeights = list(z = 2.5, pval = 0.012)
   )
-  out <- pecotmr:::build_twas_score_row(twas_rs,
-                                        weight_db = "ENSG001",
+  out <- pecotmr:::buildTwasScoreRow(twas_rs,
+                                        weightDb ="ENSG001",
                                         context   = "Cortex",
                                         study     = "AD")
   expect_s3_class(out, "data.frame")
@@ -40,12 +40,12 @@ test_that("build_twas_score_row packs a single-method twas_rs", {
 
 test_that("build_twas_score_row packs a multi-method twas_rs", {
   twas_rs <- list(
-    enet_weights  = list(z =  2.5, pval = 0.012),
-    lasso_weights = list(z = -1.8, pval = 0.072),
+    enetWeights  = list(z =  2.5, pval = 0.012),
+    lassoWeights = list(z = -1.8, pval = 0.072),
     top_weights   = list(z =  0.4, pval = 0.689)
   )
-  out <- pecotmr:::build_twas_score_row(twas_rs,
-                                        weight_db = "ENSG002",
+  out <- pecotmr:::buildTwasScoreRow(twas_rs,
+                                        weightDb ="ENSG002",
                                         context   = "Liver",
                                         study     = "T2D")
   expect_equal(nrow(out), 3)

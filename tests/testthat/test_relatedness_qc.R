@@ -1,4 +1,4 @@
-context("filter_relatedness")
+context("filterRelatedness")
 
 # Helper: check no remaining pairs in the kept set exceed threshold
 no_related_pairs_remain <- function(relatedness, excluded, threshold,
@@ -23,10 +23,10 @@ test_that("maximize_unrelated removes related individuals and leaves clean set",
   )
   threshold <- 0.125
 
-  result <- filter_relatedness(
+  result <- filterRelatedness(
     relatedness = rel,
-    relatedness_threshold = threshold,
-    analysis_type = "maximize_unrelated"
+    relatednessThreshold = threshold,
+    analysisType = "maximize_unrelated"
   )
 
   expect_type(result, "character")
@@ -46,10 +46,10 @@ test_that("no related pairs returns empty exclusion vector", {
   )
   threshold <- 0.125
 
-  result <- filter_relatedness(
+  result <- filterRelatedness(
     relatedness = rel,
-    relatedness_threshold = threshold,
-    analysis_type = "maximize_unrelated"
+    relatednessThreshold = threshold,
+    analysisType = "maximize_unrelated"
   )
 
   expect_type(result, "character")
@@ -71,11 +71,11 @@ test_that("large component pre-pruning removes individuals", {
   )
   threshold <- 0.125
 
-  result <- filter_relatedness(
+  result <- filterRelatedness(
     relatedness = rel,
-    relatedness_threshold = threshold,
-    analysis_type = "maximize_unrelated",
-    max_component_size = 10
+    relatednessThreshold = threshold,
+    analysisType = "maximize_unrelated",
+    maxComponentSize = 10
   )
 
   expect_type(result, "character")
@@ -106,12 +106,12 @@ test_that("maximize_cases preferentially retains cases", {
   )
 
   threshold <- 0.125
-  result <- filter_relatedness(
+  result <- filterRelatedness(
     relatedness = rel,
-    relatedness_threshold = threshold,
-    analysis_type = "maximize_cases",
-    pheno_data = pheno,
-    pheno_col = "pheno"
+    relatednessThreshold = threshold,
+    analysisType = "maximize_cases",
+    phenoData = pheno,
+    phenoCol = "pheno"
   )
 
   expect_type(result, "character")
@@ -136,11 +136,11 @@ test_that("maximize_cases errors without pheno_data", {
   )
 
   expect_error(
-    filter_relatedness(
+    filterRelatedness(
       relatedness = rel,
-      relatedness_threshold = 0.125,
-      analysis_type = "maximize_cases"
+      relatednessThreshold = 0.125,
+      analysisType = "maximize_cases"
     ),
-    "Must provide pheno_data"
+    "Must provide phenoData"
   )
 })

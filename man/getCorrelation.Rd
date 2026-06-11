@@ -2,21 +2,21 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{getCorrelation}
 \alias{getCorrelation}
-\alias{getCorrelation,LDData-method}
+\alias{getCorrelation,LdData-method}
 \title{Get LD Correlation Matrix}
 \usage{
 getCorrelation(x)
 
-\S4method{getCorrelation}{LDData}(x)
+\S4method{getCorrelation}{LdData}(x)
 }
 \arguments{
-\item{x}{An \code{LDData} object.}
+\item{x}{An \code{LdData} object.}
 }
 \value{
 A correlation matrix, or a list of per-block matrices.
 }
 \description{
-Extract the LD correlation matrix from an \code{LDData}
+Extract the LD correlation matrix from an \code{LdData}
   object. If only a genotype handle is available, recomputes R from
   genotypes on the fly.
 }

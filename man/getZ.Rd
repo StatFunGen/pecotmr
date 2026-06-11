@@ -2,19 +2,19 @@
 % Please edit documentation in R/AllGenerics.R, R/gwas_sumstats.R
 \name{getZ}
 \alias{getZ}
-\alias{getZ,GWASSumStats-method}
+\alias{getZ,GwasSumStats-method}
 \title{Get Z-scores}
 \usage{
 getZ(x)
 
-\S4method{getZ}{GWASSumStats}(x)
+\S4method{getZ}{GwasSumStats}(x)
 }
 \arguments{
-\item{x}{A \code{GWASSumStats} object.}
+\item{x}{A \code{GwasSumStats} object.}
 }
 \value{
 Numeric vector of z-scores.
 }
 \description{
-Extract z-score vector from a GWASSumStats object.
+Extract z-score vector from a GwasSumStats object.
 }

@@ -257,22 +257,22 @@ static bool l0_swap_round(double lambda0, double l1, double l2,
 // ---- Registered entry point ----------------------------------------------
 
 [[cpp11::register]]
-cpp11::writable::list penalized_rss_rcpp(
-    const doubles& z_r,
+cpp11::writable::list penalizedRssRcpp(
+    const doubles& zR,
     const list& LD,
-    const doubles& lambda_r,
-    const std::string& penalty_str,
+    const doubles& lambdaR,
+    const std::string& penaltyStr,
     double gamma,
     double alpha,
     double lambda0,
     double lambda2,
     double thr,
     int maxiter,
-    int max_swaps) {
+    int maxSwaps) {
 
-  Penalty pen = parse_penalty(penalty_str);
-  vec z = as_Col(z_r);
-  vec lambda = as_Col(lambda_r);
+  Penalty pen = parse_penalty(penaltyStr);
+  vec z = as_Col(zR);
+  vec lambda = as_Col(lambdaR);
 
   // Cache LD blocks
   int n_blocks = LD.size();
@@ -316,8 +316,8 @@ cpp11::writable::list penalized_rss_rcpp(
                                        beta_blk, Rbeta_blk, maxiter);
 
       // L0 swap phase (per block)
-      if (pen == PEN_L0 && max_swaps > 0) {
-        for (int sw = 0; sw < max_swaps; sw++) {
+      if (pen == PEN_L0 && maxSwaps > 0) {
+        for (int sw = 0; sw < maxSwaps; sw++) {
           bool improved = l0_swap_round(lambda0, lambda(i), lambda2,
                                         diag_R, Rb, z_blk, thr,
                                         beta_blk, Rbeta_blk, maxiter);

@@ -27,13 +27,13 @@ data you have:
 
 | Data you have | Entry point | Methods supported |
 |---|---|---|
-| Individual-level genotype + phenotype, single context | `univariate_analysis_pipeline()` (sets `twas_weights = TRUE`) or `twas_weights_pipeline()` | SuSiE family, mr.ash, elastic net, LASSO, MCP, SCAD, L0Learn, Bayesian alphabet methods |
-| Individual-level data, multiple contexts (e.g. multi-tissue) | `twas_multivariate_weights_pipeline()` | mr.mash, mvSuSiE |
-| QTL summary statistics, single context | `twas_weights_sumstat_pipeline()` (replaces OTTERS) | lassosum-RSS, PRS-CS, SDPR, SuSiE-RSS family, P+T, MCP-RSS, SCAD-RSS, L0Learn-RSS, mr.ash-RSS |
-| QTL summary statistics, multiple contexts | `twas_multivariate_weights_sumstat_pipeline()` | mr.mash-RSS, mvSuSiE-RSS |
+| Individual-level genotype + phenotype, single context | `univariateAnalysisPipeline()` (sets `twasWeights = TRUE`) or `twasWeightsPipeline()` | SuSiE family, mr.ash, elastic net, LASSO, MCP, SCAD, L0Learn, Bayesian alphabet methods |
+| Individual-level data, multiple contexts (e.g. multi-tissue) | `twasMultivariateWeightsPipeline()` | mr.mash, mvSuSiE |
+| QTL summary statistics, single context | `twasWeightsSumstatPipeline()` (replaces OTTERS) | lassosum-RSS, PRS-CS, SDPR, SuSiE-RSS family, P+T, MCP-RSS, SCAD-RSS, L0Learn-RSS, mr.ash-RSS |
+| QTL summary statistics, multiple contexts | `twasMultivariateWeightsSumstatPipeline()` | mr.mash-RSS, mvSuSiE-RSS |
 
-All three return a `TWASWeights` S4 object that
-`harmonize_twas()` / `twas_pipeline()` consume directly.
+All three return a `TwasWeights` S4 object that
+`harmonizeTwas()` / `twasPipeline()` consume directly.
 
 ```{r load-packages}
 library(pecotmr)
@@ -42,7 +42,7 @@ library(pecotmr)
 ## Quick start: individual-level weights
 
 The simplest path for individual-level data is to call
-`univariate_analysis_pipeline()` with `twas_weights = TRUE` — fine-mapping
+`univariateAnalysisPipeline()` with `twasWeights = TRUE` — fine-mapping
 and weight learning happen in one call, sharing the fitted SuSiE models.
 
 ```{r individual-quickstart}
@@ -57,29 +57,29 @@ maf <- apply(X, 2, function(g) {
 set.seed(42)
 sub <- sort(sample(ncol(X), 300))
 
-fit <- univariate_analysis_pipeline(
+fit <- univariateAnalysisPipeline(
   X = X[, sub], Y = y, maf = maf[sub],
-  twas_weights = TRUE,
-  cv_folds = 3,
-  finemapping_extra_opts = list(refine = FALSE),
+  twasWeights = TRUE,
+  cvFolds = 3,
+  finemappingExtraOpts = list(refine = FALSE),
   region = "chr22:32119000-33000000",
   verbose = 0
 )
 
 names(fit$twas_weights_result)
-getMethodNames(fit$twas_weights_result$twas_weights)
+getmethodnames(fit$twas_weights_result$twasWeights)
 ```
 
 The default preset fits ten methods (SuSiE, SuSiE-inf, mr.ash, elastic
 net, LASSO, MCP, SCAD, L0Learn, BayesR, BayesC) plus an ensemble
-combination learned via stacked regression. The `TWASWeights` S4 object
+combination learned via stacked regression. The `TwasWeights` S4 object
 holds all per-method weight vectors and (optionally) the underlying
 fits.
 
 ## Available weight methods
 
 Methods are selected by passing a character vector to `weight_methods`
-on `twas_weights_pipeline()` or `univariate_analysis_pipeline()`. Short
+on `twasWeightsPipeline()` or `univariateAnalysisPipeline()`. Short
 names map to functions of the form `<method>_weights(stat, LD, ...)`:
 
 | Family | Methods |
@@ -89,7 +89,7 @@ names map to functions of the form `<method>_weights(stat, LD, ...)`:
 | **Penalized regression** | `enet`, `lasso`, `mcp`, `scad`, `l0learn` |
 | **Bayesian alphabet** | `bayes_r`, `bayes_l`, `bayes_a`, `bayes_b`, `bayes_c`, `bayes_n`, `b_lasso` |
 | **DPR** | `dpr_vb`, `dpr_gibbs`, `dpr_adaptive_gibbs` |
-| **Multi-context** | `mrmash`, `mvsusie` (use `twas_multivariate_weights_pipeline()` instead) |
+| **Multi-context** | `mrmash`, `mvsusie` (use `twasMultivariateWeightsPipeline()` instead) |
 
 ### Presets
 
@@ -100,25 +100,25 @@ names map to functions of the form `<method>_weights(stat, LD, ...)`:
 
 ```{r presets-example, eval=FALSE}
 # Use a preset
-fit <- univariate_analysis_pipeline(
+fit <- univariateAnalysisPipeline(
   X = X[, sub], Y = y, maf = maf[sub],
-  twas_weights = TRUE,
-  weight_methods = "fast_default",   # passed through to twas_weights_pipeline
-  cv_folds = 3, verbose = 0
+  twasWeights = TRUE,
+  weightMethods = "fast_default",   # passed through to twasWeightsPipeline
+  cvFolds = 3, verbose = 0
 )
 
 # Or a custom subset
-fit <- twas_weights_pipeline(
+fit <- twasWeightsPipeline(
   X = X[, sub], y = y,
-  susie_fit = fit$susie_fitted,
-  weight_methods = c("susie", "enet", "lasso"),
-  cv_folds = 3, verbose = 0
+  susieFit = fit$susie_fitted,
+  weightMethods = c("susie", "enet", "lasso"),
+  cvFolds = 3, verbose = 0
 )
 ```
 
-When `weight_methods = "default"` (or `"fast_default"`), the pipeline
+When `weightMethods = "default"` (or `"fast_default"`), the pipeline
 also estimates a spike-and-slab sparsity prior from mr.ash and injects
-it into BayesC / BayesB before fitting them — set `estimate_pi = FALSE`
+it into BayesC / BayesB before fitting them — set `estimatePi = FALSE`
 to skip.
 
 ## Cross-validation and ensemble weights
@@ -134,15 +134,15 @@ cv$sample_partition                  # data.frame(Sample, Fold)
 ```
 
 When `ensemble = TRUE` (default) and at least two methods pass the
-`ensemble_r2_threshold` (default 0.01), an additional `ensemble_weights`
+`ensemble_r2_threshold` (default 0.01), an additional `ensembleWeights`
 method is added by stacked regression over CV predictions. The default
 solver is `quadprog`; alternatives are `nnls`, `lbfgsb`, and `glmnet`
-(set `ensemble_solver`). The ensemble row is named `ensemble_weights`
-in the returned `TWASWeights` object.
+(set `ensemble_solver`). The ensemble row is named `ensembleWeights`
+in the returned `TwasWeights` object.
 
 ### Sample partitioning
 
-`twas_weights_cv()` partitions samples randomly into `cv_folds`. To
+`twasWeightsCv()` partitions samples randomly into `cv_folds`. To
 control the partition (e.g. to keep related samples in the same fold),
 pass a data.frame with `Sample` and `Fold` columns to
 `sample_partition`:
@@ -152,17 +152,17 @@ sample_partition <- data.frame(
   Sample = rownames(X),
   Fold   = sample(rep(1:5, length.out = nrow(X)))
 )
-fit <- univariate_analysis_pipeline(
+fit <- univariateAnalysisPipeline(
   X = X, Y = y, maf = maf,
-  twas_weights = TRUE,
-  cv_folds = 5, sample_partition = sample_partition,
+  twasWeights = TRUE,
+  cvFolds = 5, samplePartition = sample_partition,
   verbose = 0
 )
 ```
 
 ### Imputability selection
 
-Downstream TWAS-Z inference (`twas_pipeline()` and `twas_analysis()`)
+Downstream TWAS-Z inference (`twasPipeline()` and `twasAnalysis()`)
 treats a gene as *imputable* when at least one method passes
 `rsq_cutoff` (default 0.01) with `pval < rsq_pval_cutoff` (default
 0.05). For each imputable gene the best-performing method's weights are
@@ -172,9 +172,9 @@ inference layer.
 ## Multi-context weights
 
 For multi-tissue/multi-context QTL data, fit the multivariate analysis
-first (`multivariate_analysis_pipeline()` returns the mr.mash and
+first (`multivariateAnalysisPipeline()` returns the mr.mash and
 mvSuSiE fits), then pass them through
-`twas_multivariate_weights_pipeline()`:
+`twasMultivariateWeightsPipeline()`:
 
 ```{r multi-context, eval=FALSE}
 # TODO(data): replace with real multi-tissue eQTL X and Y matrices and
@@ -185,28 +185,28 @@ Y_mt <- "<numeric matrix samples x contexts>"
 prior_matrices <- "<list of data-driven prior matrices>"
 
 # (Step 1) Fit mr.mash and mvSuSiE
-mnm_fit <- multivariate_analysis_pipeline(
+mnm_fit <- multivariateAnalysisPipeline(
   X = X_mt, Y = Y_mt,
   data_driven_prior_matrices = prior_matrices
 )
 
 # (Step 2) Extract TWAS weights per condition
-mt_weights <- twas_multivariate_weights_pipeline(
-  X = X_mt, Y = Y_mt, mnm_fit = mnm_fit,
-  cv_folds = 5
+mt_weights <- twasMultivariateWeightsPipeline(
+  X = X_mt, Y = Y_mt, mnmFit = mnm_fit,
+  cvFolds = 5
 )
 # Returns a list indexed by context name; each element has its own
-# twas_weights and twas_cv_result.
+# twasWeights and twas_cv_result.
 ```
 
 `mnm_fit` provides the fitted multivariate models;
-`twas_multivariate_weights_pipeline()` extracts the per-context weights
-that match the contract `harmonize_twas()` expects.
+`twasMultivariateWeightsPipeline()` extracts the per-context weights
+that match the contract `harmonizeTwas()` expects.
 
 ## Summary-statistics weights
 
 When you have QTL summary statistics instead of individual-level data,
-use `twas_weights_sumstat_pipeline()`. It replaces the standalone
+use `twasWeightsSumstatPipeline()`. It replaces the standalone
 OTTERS pipeline with an integrated workflow: RSS QC → (optional)
 RAISS missing-variant imputation → multi-method weight training.
 
@@ -217,7 +217,7 @@ Out of the box the pipeline trains five methods on each region:
 | Method | Origin | Defaults |
 |---|---|---|
 | **lassosum-RSS** | Mak et al. 2017 | grid over `s = c(0.2, 0.5, 0.9, 1.0)`, lambda |
-| **PRS-CS** | Ge et al. 2019 | `phi = 1e-4`, `n_iter = 1000`, burnin 500, thin 5 |
+| **PRS-CS** | Ge et al. 2019 | `phi = 1e-4`, `nIter = 1000`, burnin 500, thin 5 |
 | **SDPR** | Zhou et al. 2023 | `iter = 1000`, `burn = 200`, thin 1 |
 | **SuSiE-RSS** | Wang et al. 2020 | normal IBSS |
 | **SuSiE-inf-RSS** | Cui et al. 2024 | `unmappable_effects = "inf"`, refine = FALSE |
@@ -230,7 +230,7 @@ comparison.
 
 P+T (pruning and thresholding) weights are also produced for any
 `p_thresholds` you pass (default `c(0.001, 0.05)`); set
-`p_thresholds = NULL` to skip P+T.
+`pThresholds = NULL` to skip P+T.
 
 ### All available SS-TWAS methods
 
@@ -239,15 +239,15 @@ through the `methods` argument:
 
 | Method short name | Function | Family / origin |
 |---|---|---|
-| `lassosum_rss` | `lassosum_rss_weights()` | L1-penalized regression on summary stats (Mak et al. 2017) |
-| `prs_cs` | `prs_cs_weights()` | Continuous shrinkage Bayesian prior (Ge et al. 2019) |
-| `sdpr` | `sdpr_weights()` | Dirichlet process mixture (Zhou et al. 2023) |
-| `susie_rss` | `susie_rss_weights()` | SuSiE-RSS, sparse single effects |
-| `susie_inf_rss` | `susie_inf_rss_weights()` | SuSiE with infinitesimal background (`unmappable_effects = "inf"`) |
-| `susie_ash_rss` | `susie_ash_rss_weights()` | SuSiE with adaptive shrinkage mixture (`unmappable_effects = "ash"`) |
-| `mr_ash_rss` | `mr_ash_rss_weights()` | mr.ash adaptive shrinkage on summary stats |
-| `mcp_rss` | `mcp_rss_weights()` | Minimax concave penalty on summary stats |
-| `scad_rss` | `scad_rss_weights()` | Smoothly clipped absolute deviation penalty |
+| `lassosumRss` | `lassosumRssWeights()` | L1-penalized regression on summary stats (Mak et al. 2017) |
+| `prsCs` | `prsCsWeights()` | Continuous shrinkage Bayesian prior (Ge et al. 2019) |
+| `sdpr` | `sdprWeights()` | Dirichlet process mixture (Zhou et al. 2023) |
+| `susie_rss` | `susieRssWeights()` | SuSiE-RSS, sparse single effects |
+| `susie_inf_rss` | `susieInfRssWeights()` | SuSiE with infinitesimal background (`unmappable_effects = "inf"`) |
+| `susie_ash_rss` | `susieAshRssWeights()` | SuSiE with adaptive shrinkage mixture (`unmappable_effects = "ash"`) |
+| `mr_ash_rss` | `mrAshRssWeights()` | mr.ash adaptive shrinkage on summary stats |
+| `mcp_rss` | `mcpRssWeights()` | Minimax concave penalty on summary stats |
+| `scad_rss` | `scadRssWeights()` | Smoothly clipped absolute deviation penalty |
 | `l0learn_rss` | `l0learn_rss_weights()` | L0Learn best-subset selection on summary stats |
 | **P+T** (built-in) | n/a | Marginal-effect thresholding at user-supplied `p_thresholds` |
 
@@ -269,20 +269,20 @@ ld_meta_path     <- "<path/to/ld_meta.tsv>"
 region           <- "<chr:start-end>"
 gene_id          <- "<ENSG...>"
 
-rss_input <- load_rss_data(
+rss_input <- loadRssData(
   sumstat_path = qtl_sumstat_path,
   column_file_path = qtl_column_map,
   region = region, extract_region_name = gene_id, region_name_col = 4L
 )
-ld_data <- load_LD_matrix(ld_meta_path, region = region)
+ld_data <- loadLdMatrix(ld_meta_path, region = region)
 
-ss_weights <- twas_weights_sumstat_pipeline(
+ss_weights <- twasWeightsSumstatPipeline(
   sumstats = rss_input$sumstats,
   LD_data  = ld_data,
   n        = rss_input$n,
-  qc_method = "slalom",       # SLALOM/DENTIST QC; see rss-qc.html
+  qcMethod = "slalom",       # SLALOM/DENTIST QC; see rss-qc.html
   impute    = TRUE,           # re-impute QC outliers via RAISS
-  impute_missing = FALSE      # see next section for missing-variant imputation
+  imputeMissing = FALSE      # see next section for missing-variant imputation
 )
 str(ss_weights, max.level = 2)
 ```
@@ -294,18 +294,18 @@ names must end in `_weights` and refer to a function with the contract
 `<method>_weights(stat, LD, ...)`:
 
 ```{r sumstat-custom, eval=FALSE}
-ss_weights <- twas_weights_sumstat_pipeline(
+ss_weights <- twasWeightsSumstatPipeline(
   sumstats = rss_input$sumstats, LD_data = ld_data, n = rss_input$n,
   methods = list(
-    lassosum_rss     = list(),
+    lassosumRss     = list(),
     susie_rss        = list(),
     mr_ash_rss       = list(           # add mr.ash.rss
-      var_y = 1, sigma2_e = 0.5,
+      varY = 1, sigma2_e = 0.5,
       s0 = c(0, 0.001, 0.01, 0.1, 0.5),
       w0 = rep(0.2, 5)
     )
   ),
-  p_thresholds = c(0.05)
+  pThresholds = c(0.05)
 )
 ```
 
@@ -319,11 +319,11 @@ use QTL sumstats and a separate LD panel).
 data(gwas_sumstats_example)
 data(eqtl_region_example)
 
-# Build an LDData object from the shipped genotype panel (in real
-# workflows this comes from load_LD_matrix())
+# Build an LdData object from the shipped genotype panel (in real
+# workflows this comes from loadLdMatrix())
 X_ref <- eqtl_region_example$X
-R <- compute_LD(X_ref, method = "sample")
-ref_panel <- parse_variant_id(colnames(X_ref))
+R <- computeLd(X_ref, method = "sample")
+ref_panel <- parseVariantId(colnames(X_ref))
 ref_panel$variant_id <- colnames(X_ref)
 variants_gr <- GenomicRanges::GRanges(
   seqnames = ref_panel$chrom,
@@ -337,31 +337,31 @@ block_meta <- data.frame(
   block_start = min(ref_panel$pos), block_end = max(ref_panel$pos),
   size = ncol(X_ref), start_idx = 1L, end_idx = ncol(X_ref)
 )
-ld_data <- LDData(correlation = R, variants = variants_gr,
-                  block_metadata = block_meta, n_ref = nrow(X_ref))
+ld_data <- LdData(correlation = R, variants = variants_gr,
+                  blockMetadata = block_meta, nRef = nrow(X_ref))
 
-ss_weights <- twas_weights_sumstat_pipeline(
+ss_weights <- twasWeightsSumstatPipeline(
   sumstats = gwas_sumstats_example,
   LD_data  = ld_data,
   n        = nrow(X_ref),
   methods  = list(susie_rss = list(max_iter = 50)),
-  p_thresholds = c(0.05),
-  check_ld_method = NULL,
+  pThresholds = c(0.05),
+  checkLdMethod = NULL,
   verbose  = 0
 )
-getMethodNames(ss_weights$twas_weights)
-length(getVariantIds(ss_weights$twas_weights))
+getmethodnames(ss_weights$twasWeights)
+length(getvariantids(ss_weights$twasWeights))
 ```
 
 ## Multi-context summary-statistics weights
 
 When you have per-context QTL sumstats (one set per tissue / cell type)
 but no individual-level data, use
-`twas_multivariate_weights_sumstat_pipeline()`. It mirrors
-`twas_multivariate_weights_pipeline()` (individual-level) but works
+`twasMultivariateWeightsSumstatPipeline()`. It mirrors
+`twasMultivariateWeightsPipeline()` (individual-level) but works
 from sumstats:
 
-1. Run per-context QC (`summary_stats_qc()` with optional SLALOM /
+1. Run per-context QC (`summaryStatsQc()` with optional SLALOM /
    DENTIST + RAISS re-imputation).
 2. Optionally RAISS-impute per-context z-scores for LD-reference
    variants missing from a context.
@@ -370,9 +370,9 @@ from sumstats:
    need only be per-context QC'd; cross-context alignment is automatic).
 4. Build the `variants × conditions` `Bhat`, `Shat`, and `Z` matrices.
 5. Estimate data-driven prior matrices from the cross-context `Bhat`
-   using `compute_cov_flash()` (with `compute_cov_diag()` as fallback) —
+   using `computeCovFlash()` (with `computeCovDiag()` as fallback) —
    the **same** prior-construction helpers used by the individual-level
-   `mrmash_wrapper()` via the shared `build_mrmash_prior_matrices()`.
+   `mrmashWrapper()` via the shared `buildMrmashPriorMatrices()`.
 6. Fit the requested methods (mr.mash-RSS, mvSuSiE-RSS) on the aligned
    matrices.
 
@@ -382,8 +382,8 @@ The pipeline trains two methods by default:
 
 | Method | Function | Underlying call |
 |---|---|---|
-| **mr.mash-RSS** | `mrmash_rss_weights()` | `mr.mashr::mr.mash.rss()`, sharing prior construction with `mrmash_wrapper()` |
-| **mvSuSiE-RSS** | `mvsusie_rss_weights()` | `mvsusieR::mvsusie_rss()`, with `create_mixture_prior()` default |
+| **mr.mash-RSS** | `mrmashRssWeights()` | `mr.mashr::mr.mash.rss()`, sharing prior construction with `mrmashWrapper()` |
+| **mvSuSiE-RSS** | `mvsusieRssWeights()` | `mvsusieR::mvsusie_rss()`, with `create_mixture_prior()` default |
 
 Both follow the same `<method>_weights(stat, LD, ...)` contract as the
 univariate RSS methods, with `stat$z` a variants × conditions matrix
@@ -406,7 +406,7 @@ n_per_ctx   <- c(brain = 1200, blood = 900, muscle = 500)
 
 # 1. Load per-context sumstats (each tabix-extracted on the same region)
 sumstats_list <- lapply(qtl_paths, function(p) {
-  rss <- load_rss_data(
+  rss <- loadRssData(
     sumstat_path = p, column_file_path = column_map,
     region = region, extract_region_name = gene_id, region_name_col = 4L
   )
@@ -414,10 +414,10 @@ sumstats_list <- lapply(qtl_paths, function(p) {
 })
 
 # 2. Load a shared LD reference for the region
-ld_data <- load_LD_matrix(ld_meta, region = region)
+ld_data <- loadLdMatrix(ld_meta, region = region)
 
 # 3. Fit both multivariate RSS methods
-mt_ss <- twas_multivariate_weights_sumstat_pipeline(
+mt_ss <- twasMultivariateWeightsSumstatPipeline(
   sumstats_list = sumstats_list,
   LD_data       = ld_data,
   n             = n_per_ctx,
@@ -427,10 +427,10 @@ mt_ss <- twas_multivariate_weights_sumstat_pipeline(
   ),
   qc_method      = "slalom",
   impute         = TRUE,    # QC re-imputation of LD-mismatch outliers
-  impute_missing = TRUE     # RAISS imputation of LD variants absent per context
+  imputeMissing = TRUE     # RAISS imputation of LD variants absent per context
 )
 
-# `mt_ss$twas_weights` is a TWASWeights S4 object whose weight matrices are
+# `mt_ss$twasWeights` is a TwasWeights S4 object whose weight matrices are
 # (variants x conditions). `mt_ss$qc_summary` reports per-context survivor
 # counts and the cross-context intersection size.
 str(mt_ss$qc_summary)
@@ -440,9 +440,9 @@ str(mt_ss$qc_summary)
 
 By default, the pipeline estimates the mr.mash data-driven covariance
 component from the aligned `Bhat` matrix via
-`compute_cov_flash(Bhat)` — the same FLASH-based covariance estimator
-the individual-level `mrmash_wrapper()` uses. If FLASH fails (e.g. with
-sparse contexts), it falls back to `compute_cov_diag(Bhat)`. Pass
+`computeCovFlash(Bhat)` — the same FLASH-based covariance estimator
+the individual-level `mrmashWrapper()` uses. If FLASH fails (e.g. with
+sparse contexts), it falls back to `computeCovDiag(Bhat)`. Pass
 `data_driven_prior_matrices = list(U = ...)` to supply your own
 precomputed components, or `canonical_prior_matrices = FALSE` to
 disable the canonical mixture.
@@ -461,7 +461,7 @@ prior_U <- list(
   identity       = diag(K)
 )
 
-mt_ss <- twas_multivariate_weights_sumstat_pipeline(
+mt_ss <- twasMultivariateWeightsSumstatPipeline(
   sumstats_list = sumstats_list, LD_data = ld_data, n = n_per_ctx,
   data_driven_prior_matrices    = list(U = prior_U),
   canonical_prior_matrices      = TRUE,
@@ -474,10 +474,10 @@ mt_ss <- twas_multivariate_weights_sumstat_pipeline(
 
 Cross-context alignment is **inside** the pipeline at step 3, *after*
 per-context QC. Each input `sumstats_list[[k]]` may have a different
-variant set; the pipeline runs `summary_stats_qc()` per context, then
+variant set; the pipeline runs `summaryStatsQc()` per context, then
 intersects survivors across contexts and the LD reference to define the
 common variant axis used downstream. To widen the intersection, enable
-`impute_missing = TRUE`: per-context RAISS imputes z-scores for LD
+`imputeMissing = TRUE`: per-context RAISS imputes z-scores for LD
 variants missing from that context's sumstats *before* the
 intersection.
 
@@ -486,20 +486,20 @@ intersection.
 When the QTL sumstats panel is narrower than the LD reference — common
 for nominal eQTL output that filters on per-cohort imputation quality —
 weight learners only see variants present in both. Setting
-`impute_missing = TRUE` calls RAISS to impute z-scores for LD-reference
+`imputeMissing = TRUE` calls RAISS to impute z-scores for LD-reference
 variants absent from the QTL sumstats *before* the weight learners
 fit, so they see a fuller variant set:
 
 ```{r impute-missing, eval=FALSE}
-ss_weights_wide <- twas_weights_sumstat_pipeline(
+ss_weights_wide <- twasWeightsSumstatPipeline(
   sumstats = rss_input$sumstats,
   LD_data  = ld_data,
   n        = rss_input$n,
-  methods  = list(susie_rss = list(), lassosum_rss = list()),
-  qc_method = "slalom",
+  methods  = list(susie_rss = list(), lassosumRss = list()),
+  qcMethod = "slalom",
   impute = TRUE,                                # QC re-imputation (existing)
-  impute_missing = TRUE,                        # missing-variant imputation (new)
-  impute_opts = list(rcond = 0.01, R2_threshold = 0.6,
+  imputeMissing = TRUE,                        # missing-variant imputation (new)
+  imputeOpts = list(rcond = 0.01, R2_threshold = 0.6,
                      minimum_ld = 5, lamb = 0.01)
 )
 ```
@@ -517,16 +517,16 @@ sketch at TWAS Z-score inference.
 
 | Function | Use it when |
 |---|---|
-| `univariate_analysis_pipeline(twas_weights = TRUE)` | Individual-level, single context. Fine-mapping + weight learning in one call. |
-| `twas_weights_pipeline()` | Lower-level individual-level entry. Same internals but takes pre-fitted SuSiE models. |
-| `twas_weights_cv()` | Standalone k-fold CV for any subset of methods. |
-| `twas_multivariate_weights_pipeline()` | Multi-context individual-level. Wraps mr.mash and mvSuSiE fits. |
-| `twas_weights_sumstat_pipeline()` | Single-context sumstats. Replaces standalone OTTERS. Defaults to lassosum-RSS, PRS-CS, SDPR, SuSiE-RSS, SuSiE-inf-RSS. |
-| `twas_multivariate_weights_sumstat_pipeline()` | Multi-context sumstats. Per-context QC + cross-context alignment + mr.mash-RSS / mvSuSiE-RSS. |
-| `ensemble_weights()` | Stack two or more methods via stacked regression. Called automatically by `twas_weights_pipeline()` when `ensemble = TRUE`. |
-| `build_mrmash_prior_matrices()` | Shared prior-matrix builder used by both `mrmash_wrapper()` (individual-level) and `mrmash_rss_weights()` (sumstats). |
+| `univariateAnalysisPipeline(twasWeights = TRUE)` | Individual-level, single context. Fine-mapping + weight learning in one call. |
+| `twasWeightsPipeline()` | Lower-level individual-level entry. Same internals but takes pre-fitted SuSiE models. |
+| `twasWeightsCv()` | Standalone k-fold CV for any subset of methods. |
+| `twasMultivariateWeightsPipeline()` | Multi-context individual-level. Wraps mr.mash and mvSuSiE fits. |
+| `twasWeightsSumstatPipeline()` | Single-context sumstats. Replaces standalone OTTERS. Defaults to lassosum-RSS, PRS-CS, SDPR, SuSiE-RSS, SuSiE-inf-RSS. |
+| `twasMultivariateWeightsSumstatPipeline()` | Multi-context sumstats. Per-context QC + cross-context alignment + mr.mash-RSS / mvSuSiE-RSS. |
+| `ensembleWeights()` | Stack two or more methods via stacked regression. Called automatically by `twasWeightsPipeline()` when `ensemble = TRUE`. |
+| `buildMrmashPriorMatrices()` | Shared prior-matrix builder used by both `mrmashWrapper()` (individual-level) and `mrmashRssWeights()` (sumstats). |
 
-All five return a `TWASWeights` S4 object. The
+All five return a `TwasWeights` S4 object. The
 [TWAS Z-score vignette](twas-zscore.html) shows how to apply these
 weights to GWAS summary statistics to compute per-gene TWAS Z-scores.
 

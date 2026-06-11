@@ -2,20 +2,20 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{getHarmonizedData}
 \alias{getHarmonizedData}
-\alias{getHarmonizedData,AlleleQCResult-method}
+\alias{getHarmonizedData,AlleleQcResult-method}
 \title{Get Harmonized Variant Data}
 \usage{
 getHarmonizedData(x)
 
-\S4method{getHarmonizedData}{AlleleQCResult}(x)
+\S4method{getHarmonizedData}{AlleleQcResult}(x)
 }
 \arguments{
-\item{x}{An \code{AlleleQCResult} object.}
+\item{x}{An \code{AlleleQcResult} object.}
 }
 \value{
 A \code{data.frame} of harmonized variants.
 }
 \description{
 Extract the post-QC, reference-harmonized variants from an
-  \code{AlleleQCResult}.
+  \code{AlleleQcResult}.
 }

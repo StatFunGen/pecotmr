@@ -16,9 +16,9 @@ make_test_gwas_sumstats <- function(n = 5) {
     Z = seq(1.5, by = -0.5, length.out = n),
     N = rep(1000L, n)
   )
-  new("GWASSumStats",
+  new("GwasSumStats",
     sumstats = gr, genome = "hg38",
-    trait_name = "test_trait", var_y = NULL)
+    traitName = "test_trait", varY = NULL)
 }
 
 make_test_finemapping_result <- function(n = 5) {
@@ -33,18 +33,18 @@ make_test_finemapping_result <- function(n = 5) {
     stringsAsFactors = FALSE
   )
   new("FineMappingResult",
-    variant_names = tl$variant_id,
-    trimmed_fit = list(),
-    top_loci = tl,
+    variantNames = tl$variant_id,
+    trimmedFit = list(),
+    topLoci = tl,
     method = "susie",
     sumstats = NULL)
 }
 
 # =============================================================================
-# GWASSumStats to VCF
+# GwasSumStats to VCF
 # =============================================================================
 
-test_that("writeSumstatsVcf writes GWASSumStats to uncompressed VCF", {
+test_that("writeSumstatsVcf writes GwasSumStats to uncompressed VCF", {
   skip_if_not_installed("VariantAnnotation")
   skip_if_not_installed("Biostrings")
 
@@ -59,10 +59,10 @@ test_that("writeSumstatsVcf writes GWASSumStats to uncompressed VCF", {
 })
 
 # =============================================================================
-# GWASSumStats to bgzipped VCF
+# GwasSumStats to bgzipped VCF
 # =============================================================================
 
-test_that("writeSumstatsVcf writes GWASSumStats to bgzipped VCF", {
+test_that("writeSumstatsVcf writes GwasSumStats to bgzipped VCF", {
   skip_if_not_installed("VariantAnnotation")
   skip_if_not_installed("Biostrings")
 
@@ -151,14 +151,14 @@ test_that("writeSumstatsVcf errors on empty FineMappingResult", {
     stringsAsFactors = FALSE
   )
   fm_empty <- new("FineMappingResult",
-    variant_names = character(0),
-    trimmed_fit = list(),
-    top_loci = empty_tl,
+    variantNames = character(0),
+    trimmedFit = list(),
+    topLoci = empty_tl,
     method = "susie",
     sumstats = NULL)
 
   out <- tempfile(fileext = ".vcf")
   on.exit(unlink(out), add = TRUE)
 
-  expect_error(writeSumstatsVcf(fm_empty, out), "no top_loci")
+  expect_error(writeSumstatsVcf(fm_empty, out), "no topLoci")
 })

@@ -92,74 +92,74 @@ generate_mock_mr_formatted_input <- function(num_variants = NULL, generate_full_
   }
 
 # =============================================================================
-# calc_I2
+# calcI2
 # =============================================================================
 
-test_that("calc_I2 works with dummy data",{
+test_that("calcI2 works with dummy data",{
     # Test with Q > 1e-3 and positive I2
-    expect_equal(calc_I2(10, c(1, 2, 3)), (10 - 3 + 1)/10)
+    expect_equal(calcI2(10, c(1, 2, 3)), (10 - 3 + 1)/10)
 
     # Test with Q exactly 1e-3 and I2 should be 0
-    expect_equal(calc_I2(1e-3, c(1, 2)), 0)
+    expect_equal(calcI2(1e-3, c(1, 2)), 0)
 
     # Test with Q < 1e-3 and I2 should be 0
-    expect_equal(calc_I2(1e-4, c(1, 2, 3, 4)), 0)
+    expect_equal(calcI2(1e-4, c(1, 2, 3, 4)), 0)
 
     # Test with negative Q and I2 should be 0
-    expect_equal(calc_I2(-10, c(1, 2, 3)), 0)
+    expect_equal(calcI2(-10, c(1, 2, 3)), 0)
 
     # Test with Q leading to negative I2, I2 should be 0
-    expect_equal(calc_I2(5, c(1, 2, 3, 4, 5, 6)), 0)
+    expect_equal(calcI2(5, c(1, 2, 3, 4, 5, 6)), 0)
 
     # Test with Q as 0, I2 should be 0
-    expect_equal(calc_I2(0, c(1, 2)), 0)
+    expect_equal(calcI2(0, c(1, 2)), 0)
 
     # Test with Est as empty vector -- returns 1.1 (edge case, see dedicated test below)
-    expect_equal(calc_I2(10, c()), 1.1)
+    expect_equal(calcI2(10, c()), 1.1)
 })
 
-test_that("calc_I2: very large Q returns value close to 1", {
+test_that("calcI2: very large Q returns value close to 1", {
   big_Q <- 1e12
   est_vec <- c(1, 2, 3, 4, 5)
-  result <- pecotmr:::calc_I2(Q = list(big_Q), Est = est_vec)
+  result <- pecotmr:::calcI2(Q = list(big_Q), Est = est_vec)
   expected <- (big_Q - 5 + 1) / big_Q
   expect_equal(result, expected, tolerance = 1e-10)
   expect_true(result > 0.99999)
 })
 
-test_that("calc_I2: very large Est (many unique) causes I2 to clamp to 0", {
+test_that("calcI2: very large Est (many unique) causes I2 to clamp to 0", {
   large_est <- seq_len(1000)
-  result <- pecotmr:::calc_I2(Q = list(5), Est = large_est)
+  result <- pecotmr:::calcI2(Q = list(5), Est = large_est)
   expect_equal(result, 0)
 })
 
-test_that("calc_I2: Est with duplicates reduces unique count", {
-  result <- pecotmr:::calc_I2(Q = list(20), Est = c(1, 1, 2, 2, 3, 3))
+test_that("calcI2: Est with duplicates reduces unique count", {
+  result <- pecotmr:::calcI2(Q = list(20), Est = c(1, 1, 2, 2, 3, 3))
   expected <- (20 - 3 + 1) / 20
   expect_equal(result, expected)
 })
 
-test_that("calc_I2 with empty Est vector returns value > 1 (edge case)", {
+test_that("calcI2 with empty Est vector returns value > 1 (edge case)", {
   # When Est is empty, length(unique(c())) = 0, so I2 = (Q - 0 + 1)/Q = 1 + 1/Q
   # This yields I2 > 1 which is outside the expected [0,1] range.
   # Documenting this behavior so any future fix will be detected.
-  result <- pecotmr:::calc_I2(Q = list(10), Est = c())
+  result <- pecotmr:::calcI2(Q = list(10), Est = c())
   expect_gt(result, 1)
   expect_equal(result, 1.1)
 })
 
 # =============================================================================
-# mr_format
+# mrFormat
 # =============================================================================
 
-test_that("mr_format functions with normal parameters", {
+test_that("mrFormat functions with normal parameters", {
   input_data <- generate_format_mock_data()
 
   condition <- "condition1"
   coverage <- "CS_95_susie"
-  allele_qc <- TRUE
+  alleleQc <- TRUE
 
-  res <- mr_format(input_data$susie_result, condition, input_data$gwas_sumstats_db, coverage, allele_qc)
+  res <- mrFormat(input_data$susie_result, condition, input_data$gwas_sumstats_db, coverage, alleleQc)
   expect_true(is.data.frame(res))
   expect_true(all(c("gene_name", "variant_id", "bhat_x", "sbhat_x", "cs", "pip", "bhat_y", "sbhat_y") %in% names(res)))
   expect_gt(nrow(res), 0)
@@ -170,45 +170,45 @@ test_that("mr_format functions with normal parameters", {
   expect_true(is.numeric(res$sbhat_y))
 })
 
-test_that("mr_format returns a dataframe with NAs for zero coverage in top_loci", {
+test_that("mrFormat returns a dataframe with NAs for zero coverage in top_loci", {
   input_data <- generate_format_mock_data()
 
   condition <- "condition1"
   coverage <- "CS_95_susie"
-  allele_qc <- TRUE
+  alleleQc <- TRUE
 
   susie_result_mock <- input_data$susie_result
   susie_result_mock[["susie_results"]][[condition]][["top_loci"]][[coverage]] <- rep(0, nrow(susie_result_mock[["susie_results"]][[condition]][["top_loci"]]))
 
-  result <- mr_format(susie_result_mock, condition, input_data$gwas_sumstats_db, coverage = coverage, run_allele_qc = allele_qc)
+  result <- mrFormat(susie_result_mock, condition, input_data$gwas_sumstats_db, coverage = coverage, runAlleleQc = alleleQc)
 
   expect_true(is.data.frame(result))
   expect_true(all(is.na(result[,-1])))
 })
 
-test_that("mr_format returns a dataframe with NAs with non-existent top_loci", {
+test_that("mrFormat returns a dataframe with NAs with non-existent top_loci", {
   input_data <- generate_format_mock_data()
 
   condition <- "condition1"
   coverage <- "CS_95_susie"
-  allele_qc <- TRUE
+  alleleQc <- TRUE
 
   susie_result_mock <- input_data$susie_result
   susie_result_mock[["susie_results"]][[condition]][["top_loci"]] <- list()
 
-  result <- mr_format(susie_result_mock, condition, input_data$gwas_sumstats_db, coverage = coverage, run_allele_qc = allele_qc)
+  result <- mrFormat(susie_result_mock, condition, input_data$gwas_sumstats_db, coverage = coverage, runAlleleQc = alleleQc)
 
   expect_true(is.data.frame(result))
   expect_true(all(is.na(result[,-1])))
 })
 
 # =============================================================================
-# mr_analysis
+# mrAnalysis
 # =============================================================================
 
-test_that("mr_analysis returns expected output with normal inputs", {
+test_that("mrAnalysis returns expected output with normal inputs", {
   input_data <- generate_mock_mr_formatted_input(num_variants = 10, generate_full_dataset = TRUE)
-  result <- mr_analysis(input_data, cpip_cutoff=0.5)
+  result <- mrAnalysis(input_data, cpipCutoff = 0.5)
   expect_true(is.data.frame(result))
   expect_gt(nrow(result), 0)
   expect_true(all(c("gene_name", "num_CS", "num_IV", "cpip", "meta_eff", "se_meta_eff", "meta_pval", "Q", "Q_pval", "I2") %in% names(result)))
@@ -220,24 +220,24 @@ test_that("mr_analysis returns expected output with normal inputs", {
   }
 })
 
-test_that("mr_analysis returns null output for all NA input except gene_name", {
+test_that("mrAnalysis returns null output for all NA input except gene_name", {
   input_data <- generate_mock_mr_formatted_input(generate_full_dataset = FALSE)
-  result <- mr_analysis(input_data, cpip_cutoff=0.5)
+  result <- mrAnalysis(input_data, cpipCutoff = 0.5)
   expect_true(is.data.frame(result))
   expect_equal(nrow(result), 1)
   expect_true(all(is.na(result[,-1])))
 })
 
-test_that("mr_analysis handles no significant cpip values correctly", {
+test_that("mrAnalysis handles no significant cpip values correctly", {
   input_data <- generate_mock_mr_formatted_input(num_variants = 5, generate_full_dataset = TRUE)
   input_data$pip <- runif(nrow(input_data), 0, 0.1)
-  result <- mr_analysis(input_data, cpip_cutoff = 0.5)
+  result <- mrAnalysis(input_data, cpipCutoff = 0.5)
   expect_true(is.data.frame(result))
   expect_equal(nrow(result), 1)
   expect_true(all(is.na(result[,-1])))
 })
 
-test_that("mr_analysis: single CS single variant with pip above cutoff", {
+test_that("mrAnalysis: single CS single variant with pip above cutoff", {
   set.seed(42)
   input <- data.frame(
     gene_name = "GENE_SINGLE",
@@ -251,7 +251,7 @@ test_that("mr_analysis: single CS single variant with pip above cutoff", {
     stringsAsFactors = FALSE
   )
 
-  result <- mr_analysis(input, cpip_cutoff = 0.5)
+  result <- mrAnalysis(input, cpipCutoff = 0.5)
   expect_s3_class(result, "data.frame")
   expect_equal(nrow(result), 1)
   expect_equal(result$gene_name, "GENE_SINGLE")
@@ -264,7 +264,7 @@ test_that("mr_analysis: single CS single variant with pip above cutoff", {
   expect_false(is.na(result$meta_pval))
 })
 
-test_that("mr_analysis: cpip exactly at cutoff boundary is included", {
+test_that("mrAnalysis: cpip exactly at cutoff boundary is included", {
   set.seed(101)
   input <- data.frame(
     gene_name = rep("GENE_BOUNDARY", 2),
@@ -278,7 +278,7 @@ test_that("mr_analysis: cpip exactly at cutoff boundary is included", {
     stringsAsFactors = FALSE
   )
 
-  result <- mr_analysis(input, cpip_cutoff = 0.5)
+  result <- mrAnalysis(input, cpipCutoff = 0.5)
   expect_s3_class(result, "data.frame")
   expect_equal(nrow(result), 1)
   expect_false(is.na(result$meta_eff))
@@ -286,7 +286,7 @@ test_that("mr_analysis: cpip exactly at cutoff boundary is included", {
   expect_equal(result$cpip, 0.5)
 })
 
-test_that("mr_analysis: cpip just below cutoff returns null output", {
+test_that("mrAnalysis: cpip just below cutoff returns null output", {
   set.seed(102)
   input <- data.frame(
     gene_name = rep("GENE_BELOW", 2),
@@ -300,14 +300,14 @@ test_that("mr_analysis: cpip just below cutoff returns null output", {
     stringsAsFactors = FALSE
   )
 
-  result <- mr_analysis(input, cpip_cutoff = 0.5)
+  result <- mrAnalysis(input, cpipCutoff = 0.5)
   expect_s3_class(result, "data.frame")
   expect_equal(nrow(result), 1)
   expect_true(is.na(result$meta_eff))
   expect_equal(result$gene_name, "GENE_BELOW")
 })
 
-test_that("mr_analysis: output columns are rounded to 3 decimal places", {
+test_that("mrAnalysis: output columns are rounded to 3 decimal places", {
   set.seed(300)
   input <- data.frame(
     gene_name = rep("GENE_ROUND", 4),
@@ -321,7 +321,7 @@ test_that("mr_analysis: output columns are rounded to 3 decimal places", {
     stringsAsFactors = FALSE
   )
 
-  result <- mr_analysis(input, cpip_cutoff = 0.5)
+  result <- mrAnalysis(input, cpipCutoff = 0.5)
 
   rounded_cols <- c("cpip", "meta_eff", "se_meta_eff", "meta_pval", "Q", "Q_pval", "I2")
   for (col in rounded_cols) {
@@ -333,7 +333,7 @@ test_that("mr_analysis: output columns are rounded to 3 decimal places", {
   }
 })
 
-test_that("mr_analysis: gene_name is preserved in output", {
+test_that("mrAnalysis: gene_name is preserved in output", {
   set.seed(400)
   gene <- "ENSG00000012345_BRCA1"
   input <- data.frame(
@@ -348,11 +348,11 @@ test_that("mr_analysis: gene_name is preserved in output", {
     stringsAsFactors = FALSE
   )
 
-  result <- mr_analysis(input, cpip_cutoff = 0.5)
+  result <- mrAnalysis(input, cpipCutoff = 0.5)
   expect_equal(result$gene_name, gene)
 })
 
-test_that("mr_analysis: meta_pval is a valid probability", {
+test_that("mrAnalysis: meta_pval is a valid probability", {
   set.seed(600)
   input <- data.frame(
     gene_name = rep("GENE_ORDER", 3),
@@ -366,11 +366,11 @@ test_that("mr_analysis: meta_pval is a valid probability", {
     stringsAsFactors = FALSE
   )
 
-  result <- mr_analysis(input, cpip_cutoff = 0.5)
+  result <- mrAnalysis(input, cpipCutoff = 0.5)
   expect_true(result$meta_pval >= 0 && result$meta_pval <= 1)
 })
 
-test_that("mr_analysis: se_meta_eff is always positive when result is non-null", {
+test_that("mrAnalysis: se_meta_eff is always positive when result is non-null", {
   set.seed(700)
   input <- data.frame(
     gene_name = rep("GENE_SE", 3),
@@ -384,11 +384,11 @@ test_that("mr_analysis: se_meta_eff is always positive when result is non-null",
     stringsAsFactors = FALSE
   )
 
-  result <- mr_analysis(input, cpip_cutoff = 0.5)
+  result <- mrAnalysis(input, cpipCutoff = 0.5)
   expect_true(result$se_meta_eff > 0)
 })
 
-test_that("mr_analysis: I2 is between 0 and 1 inclusive", {
+test_that("mrAnalysis: I2 is between 0 and 1 inclusive", {
   set.seed(800)
   input <- data.frame(
     gene_name = rep("GENE_I2", 4),
@@ -402,11 +402,11 @@ test_that("mr_analysis: I2 is between 0 and 1 inclusive", {
     stringsAsFactors = FALSE
   )
 
-  result <- mr_analysis(input, cpip_cutoff = 0.5)
+  result <- mrAnalysis(input, cpipCutoff = 0.5)
   expect_true(result$I2 >= 0 && result$I2 <= 1)
 })
 
-test_that("mr_analysis: Q_pval is a valid probability", {
+test_that("mrAnalysis: Q_pval is a valid probability", {
   set.seed(801)
   input <- data.frame(
     gene_name = rep("GENE_QPVAL", 4),
@@ -420,11 +420,11 @@ test_that("mr_analysis: Q_pval is a valid probability", {
     stringsAsFactors = FALSE
   )
 
-  result <- mr_analysis(input, cpip_cutoff = 0.5)
+  result <- mrAnalysis(input, cpipCutoff = 0.5)
   expect_true(result$Q_pval >= 0 && result$Q_pval <= 1)
 })
 
-test_that("mr_analysis: cpip_cutoff = 0 includes all CS groups", {
+test_that("mrAnalysis: cpipCutoff = 0 includes all CS groups", {
   set.seed(900)
   input <- data.frame(
     gene_name = rep("GENE_CUTOFF0", 3),
@@ -438,7 +438,7 @@ test_that("mr_analysis: cpip_cutoff = 0 includes all CS groups", {
     stringsAsFactors = FALSE
   )
 
-  result <- mr_analysis(input, cpip_cutoff = 0)
+  result <- mrAnalysis(input, cpipCutoff = 0)
   expect_s3_class(result, "data.frame")
   expect_equal(nrow(result), 1)
   expect_false(is.na(result$meta_eff))
@@ -446,7 +446,7 @@ test_that("mr_analysis: cpip_cutoff = 0 includes all CS groups", {
   expect_equal(result$num_IV, 3L)
 })
 
-test_that("mr_analysis: cpip_cutoff = 1 excludes CS with cpip < 1", {
+test_that("mrAnalysis: cpipCutoff = 1 excludes CS with cpip < 1", {
   set.seed(901)
   input <- data.frame(
     gene_name = rep("GENE_CUTOFF1", 3),
@@ -460,11 +460,11 @@ test_that("mr_analysis: cpip_cutoff = 1 excludes CS with cpip < 1", {
     stringsAsFactors = FALSE
   )
 
-  result <- mr_analysis(input, cpip_cutoff = 1.0)
+  result <- mrAnalysis(input, cpipCutoff = 1.0)
   expect_true(is.na(result$meta_eff))
 })
 
-test_that("mr_analysis: mixed CS where only some pass cpip filter", {
+test_that("mrAnalysis: mixed CS where only some pass cpip filter", {
   set.seed(1000)
   input <- data.frame(
     gene_name = rep("GENE_MIXED", 4),
@@ -478,7 +478,7 @@ test_that("mr_analysis: mixed CS where only some pass cpip filter", {
     stringsAsFactors = FALSE
   )
 
-  result <- mr_analysis(input, cpip_cutoff = 0.5)
+  result <- mrAnalysis(input, cpipCutoff = 0.5)
   expect_s3_class(result, "data.frame")
   expect_equal(nrow(result), 1)
   expect_false(is.na(result$meta_eff))
@@ -486,7 +486,7 @@ test_that("mr_analysis: mixed CS where only some pass cpip filter", {
   expect_equal(result$num_IV, 2L)
 })
 
-test_that("mr_analysis: large negative bhat_x values are handled", {
+test_that("mrAnalysis: large negative bhat_x values are handled", {
   set.seed(1100)
   input <- data.frame(
     gene_name = rep("GENE_NEG", 2),
@@ -500,13 +500,13 @@ test_that("mr_analysis: large negative bhat_x values are handled", {
     stringsAsFactors = FALSE
   )
 
-  result <- mr_analysis(input, cpip_cutoff = 0.5)
+  result <- mrAnalysis(input, cpipCutoff = 0.5)
   expect_s3_class(result, "data.frame")
   expect_false(is.na(result$meta_eff))
   expect_true(result$se_meta_eff > 0)
 })
 
-test_that("mr_analysis: bhat_x normalized to z-score (bhat_x/sbhat_x) then sbhat_x=1", {
+test_that("mrAnalysis: bhat_x normalized to z-score (bhat_x/sbhat_x) then sbhat_x=1", {
   set.seed(1200)
   bx <- 0.6
   sx <- 0.15
@@ -525,7 +525,7 @@ test_that("mr_analysis: bhat_x normalized to z-score (bhat_x/sbhat_x) then sbhat
     stringsAsFactors = FALSE
   )
 
-  result <- mr_analysis(input, cpip_cutoff = 0.5)
+  result <- mrAnalysis(input, cpipCutoff = 0.5)
 
   bhat_x_norm <- bx / sx
   sbhat_x_norm <- 1
@@ -536,7 +536,7 @@ test_that("mr_analysis: bhat_x normalized to z-score (bhat_x/sbhat_x) then sbhat
   expect_equal(result$meta_eff, expected_meta_eff)
 })
 
-test_that("mr_analysis with multiple credible sets", {
+test_that("mrAnalysis with multiple credible sets", {
   input <- data.frame(
     gene_name = rep("GENE1", 4),
     variant_id = paste0("1:", seq(100, 400, 100), ":A:G"),
@@ -549,18 +549,18 @@ test_that("mr_analysis with multiple credible sets", {
     stringsAsFactors = FALSE
   )
 
-  result <- mr_analysis(input, cpip_cutoff = 0.5)
+  result <- mrAnalysis(input, cpipCutoff = 0.5)
   expect_equal(nrow(result), 1)
   expect_equal(result$num_CS, 2)
 })
 
 # =============================================================================
-# .create_null_mr_df
+# .createNullMrDf
 # =============================================================================
 
-test_that(".create_null_mr_df creates correct structure", {
+test_that(".createNullMrDf creates correct structure", {
   spec <- c(x = "numeric", y = "character", z = "integer")
-  result <- pecotmr:::.create_null_mr_df("gene1", spec)
+  result <- pecotmr:::.createNullMrDf("gene1", spec)
   expect_s3_class(result, "data.frame")
   expect_equal(nrow(result), 1)
   expect_equal(result$gene_name, "gene1")
@@ -571,10 +571,10 @@ test_that(".create_null_mr_df creates correct structure", {
 })
 
 # =============================================================================
-# mr_format: tryCatch error path
+# mrFormat: tryCatch error path
 # =============================================================================
 
-test_that("mr_format returns null df when get_nested_element errors for top_loci", {
+test_that("mrFormat returns null df when getNestedElement errors for top_loci", {
   # susie_result has the gene_name path but top_loci path is broken
   bad_susie <- list(susie_results = list(
     condition1 = list(
@@ -582,7 +582,7 @@ test_that("mr_format returns null df when get_nested_element errors for top_loci
       # no top_loci key - forces tryCatch error path
     )
   ))
-  result <- mr_format(
+  result <- mrFormat(
     bad_susie, "condition1",
     data.frame(variant_id = "chr1:1:A:G", pos = 1, z = 1, beta = 0.1, se = 0.05,
                effect_allele_frequency = 0.3, n_case = 500, n_control = 500),
@@ -593,10 +593,10 @@ test_that("mr_format returns null df when get_nested_element errors for top_loci
 })
 
 # =============================================================================
-# mr_format: no overlapping positions
+# mrFormat: no overlapping positions
 # =============================================================================
 
-test_that("mr_format returns null df when no positions overlap", {
+test_that("mrFormat returns null df when no positions overlap", {
   input_data <- generate_format_mock_data(seed = 42)
   # Shift GWAS positions so they don't overlap with SuSiE positions
   input_data$gwas_sumstats_db$pos <- input_data$gwas_sumstats_db$pos + 10000
@@ -604,40 +604,40 @@ test_that("mr_format returns null df when no positions overlap", {
     "chr1:", input_data$gwas_sumstats_db$pos, ":",
     sub("chr1:\\d+:", "", input_data$gwas_sumstats_db$variant_id)
   )
-  result <- mr_format(
+  result <- mrFormat(
     input_data$susie_result, "condition1", input_data$gwas_sumstats_db,
-    coverage = "CS_95_susie", run_allele_qc = TRUE
+    coverage = "CS_95_susie", runAlleleQc = TRUE
   )
   expect_true(is.data.frame(result))
   expect_true(all(is.na(result[, -1])))
 })
 
 # =============================================================================
-# mr_format: coverage = NULL path (line 57)
+# mrFormat: coverage = NULL path (line 57)
 # =============================================================================
 
-test_that("mr_format derives coverage from coverage_level and method when coverage is NULL", {
+test_that("mrFormat derives coverage from coverage_level and method when coverage is NULL", {
   input_data <- generate_format_mock_data(seed = 10)
   # The default method is "susie" and coverage_level is 0.95 which gives "CS_95_susie"
-  result <- mr_format(
+  result <- mrFormat(
     input_data$susie_result, "condition1", input_data$gwas_sumstats_db,
-    coverage = NULL, run_allele_qc = TRUE,
-    method = "susie", coverage_level = 0.95
+    coverage = NULL, runAlleleQc = TRUE,
+    method = "susie", coverageLevel = 0.95
   )
   expect_true(is.data.frame(result))
   # Result should be the same as explicitly passing "CS_95_susie"
-  result_explicit <- mr_format(
+  result_explicit <- mrFormat(
     input_data$susie_result, "condition1", input_data$gwas_sumstats_db,
-    coverage = "CS_95_susie", run_allele_qc = TRUE
+    coverage = "CS_95_susie", runAlleleQc = TRUE
   )
   expect_equal(result, result_explicit)
 })
 
 # =============================================================================
-# mr_format: pip column not found (line 64)
+# mrFormat: pip column not found (line 64)
 # =============================================================================
 
-test_that("mr_format returns null df when pip column is not found", {
+test_that("mrFormat returns null df when pip column is not found", {
   input_data <- generate_format_mock_data(seed = 20)
   # Remove the pip column from top_loci so resolve_pip_column returns NULL
   tl <- input_data$susie_result$susie_results$condition1$top_loci
@@ -645,9 +645,9 @@ test_that("mr_format returns null df when pip column is not found", {
   # Also rename any pip_* columns if they exist
   names(tl) <- gsub("^pip_.*", "removed", names(tl))
   input_data$susie_result$susie_results$condition1$top_loci <- tl
-  result <- mr_format(
+  result <- mrFormat(
     input_data$susie_result, "condition1", input_data$gwas_sumstats_db,
-    coverage = "CS_95_susie", run_allele_qc = TRUE,
+    coverage = "CS_95_susie", runAlleleQc = TRUE,
     method = "nonexistent_method"
   )
   expect_true(is.data.frame(result))
@@ -655,10 +655,10 @@ test_that("mr_format returns null df when pip column is not found", {
 })
 
 # =============================================================================
-# mr_format: impute missing effect_allele_frequency (line 85)
+# mrFormat: impute missing effect_allele_frequency (line 85)
 # =============================================================================
 
-test_that("mr_format imputes missing effect_allele_frequency from ld_meta_df", {
+test_that("mrFormat imputes missing effect_allele_frequency from ld_meta_df", {
   set.seed(30)
   num_variants <- 5
   ref_alleles <- c("A", "T", "G", "C")
@@ -686,7 +686,7 @@ test_that("mr_format imputes missing effect_allele_frequency from ld_meta_df", {
   susie_result <- list(
     susie_results = list(
       condition1 = list(
-        top_loci = top_loci,
+        topLoci = top_loci,
         region_info = list(region_name = "Gene_Impute")
       )
     )
@@ -707,10 +707,10 @@ test_that("mr_format imputes missing effect_allele_frequency from ld_meta_df", {
     allele_freq = runif(num_variants, 0.1, 0.5),
     stringsAsFactors = FALSE
   )
-  result <- mr_format(
+  result <- mrFormat(
     susie_result, "condition1", gwas_sumstats_db,
-    coverage = "CS_95_susie", run_allele_qc = FALSE,
-    ld_meta_df = ld_meta_df
+    coverage = "CS_95_susie", runAlleleQc = FALSE,
+    ldMetaDf = ld_meta_df
   )
   expect_true(is.data.frame(result))
   # Should have some rows if matching worked
@@ -718,10 +718,10 @@ test_that("mr_format imputes missing effect_allele_frequency from ld_meta_df", {
 })
 
 # =============================================================================
-# mr_format: no common variants after allele QC (line 103)
+# mrFormat: no common variants after allele QC (line 103)
 # =============================================================================
 
-test_that("mr_format returns null df when allele QC removes all variants", {
+test_that("mrFormat returns null df when allele QC removes all variants", {
   set.seed(40)
   num_variants <- 3
   # Create SuSiE variants with one set of alleles
@@ -736,7 +736,7 @@ test_that("mr_format returns null df when allele QC removes all variants", {
   susie_result <- list(
     susie_results = list(
       condition1 = list(
-        top_loci = top_loci,
+        topLoci = top_loci,
         region_info = list(region_name = "Gene_NoCommon")
       )
     )
@@ -755,19 +755,19 @@ test_that("mr_format returns null df when allele QC removes all variants", {
     stringsAsFactors = FALSE
   ) %>%
     mutate(n_sample = n_case + n_control, z = beta / se)
-  result <- mr_format(
+  result <- mrFormat(
     susie_result, "condition1", gwas_sumstats_db,
-    coverage = "CS_95_susie", run_allele_qc = TRUE
+    coverage = "CS_95_susie", runAlleleQc = TRUE
   )
   expect_true(is.data.frame(result))
   expect_true(all(is.na(result[, -1])))
 })
 
 # =============================================================================
-# fine_mr
+# fineMr
 # =============================================================================
 
-test_that("fine_mr returns expected columns and reasonable values with multi-gene input", {
+test_that("fineMr returns expected columns and reasonable values with multi-gene input", {
   set.seed(100)
   # Gene A: 2 credible sets, 3 variants in CS1, 2 variants in CS2
   # Gene B: 2 credible sets, 2 variants in CS1, 3 variants in CS2
@@ -782,7 +782,7 @@ test_that("fine_mr returns expected columns and reasonable values with multi-gen
     snp = paste0("rs", 1:10)
   )
 
-  result <- fine_mr(formatted_input, cpip_cutoff = 0.5)
+  result <- fineMr(formatted_input, cpipCutoff = 0.5)
 
   # Check output structure
   expected_cols <- c("X_ID", "num_CS", "num_IV", "cpip", "composite_bhat",
@@ -806,7 +806,7 @@ test_that("fine_mr returns expected columns and reasonable values with multi-gen
   }
 })
 
-test_that("fine_mr filters out CS with cpip below cutoff", {
+test_that("fineMr filters out CS with cpip below cutoff", {
   set.seed(101)
   formatted_input <- tibble::tibble(
     X_ID = rep("GeneC", 4),
@@ -819,14 +819,14 @@ test_that("fine_mr filters out CS with cpip below cutoff", {
     snp = paste0("rs", 1:4)
   )
 
-  result <- fine_mr(formatted_input, cpip_cutoff = 0.5)
+  result <- fineMr(formatted_input, cpipCutoff = 0.5)
   # CS 2 has cpip = 0.10 which is below 0.5, so only CS 1 passes
   expect_equal(nrow(result), 1)
   expect_equal(result$num_CS, 1L)
   expect_equal(result$num_IV, 2L)
 })
 
-test_that("fine_mr returns empty result when all CS are below cpip cutoff", {
+test_that("fineMr returns empty result when all CS are below cpip cutoff", {
   set.seed(102)
   formatted_input <- tibble::tibble(
     X_ID = rep("GeneD", 4),
@@ -839,12 +839,12 @@ test_that("fine_mr returns empty result when all CS are below cpip cutoff", {
     snp = paste0("rs", 1:4)
   )
 
-  result <- fine_mr(formatted_input, cpip_cutoff = 0.5)
+  result <- fineMr(formatted_input, cpipCutoff = 0.5)
   # All CS have cpip = 0.2 which is below cutoff; result should be empty
   expect_equal(nrow(result), 0)
 })
 
-test_that("fine_mr with single variant single CS returns correct Wald ratio", {
+test_that("fineMr with single variant single CS returns correct Wald ratio", {
   set.seed(103)
   bx <- 0.8
   sx <- 0.1
@@ -862,7 +862,7 @@ test_that("fine_mr with single variant single CS returns correct Wald ratio", {
     snp = "rs1"
   )
 
-  result <- fine_mr(formatted_input, cpip_cutoff = 0.5)
+  result <- fineMr(formatted_input, cpipCutoff = 0.5)
   expect_equal(nrow(result), 1)
   expect_equal(result$num_CS, 1L)
   expect_equal(result$num_IV, 1L)
@@ -879,7 +879,7 @@ test_that("fine_mr with single variant single CS returns correct Wald ratio", {
   expect_equal(result$I2, 0)
 })
 
-test_that("fine_mr handles negative effect sizes", {
+test_that("fineMr handles negative effect sizes", {
   set.seed(104)
   formatted_input <- tibble::tibble(
     X_ID = rep("GeneF", 4),
@@ -892,13 +892,13 @@ test_that("fine_mr handles negative effect sizes", {
     snp = paste0("rs", 1:4)
   )
 
-  result <- fine_mr(formatted_input, cpip_cutoff = 0.5)
+  result <- fineMr(formatted_input, cpipCutoff = 0.5)
   expect_equal(nrow(result), 1)
   expect_true(is.finite(result$meta_eff))
   expect_true(result$se_meta_eff > 0)
 })
 
-test_that("fine_mr with cpip_cutoff = 0 includes all credible sets", {
+test_that("fineMr with cpipCutoff = 0 includes all credible sets", {
   set.seed(105)
   formatted_input <- tibble::tibble(
     X_ID = rep("GeneG", 3),
@@ -911,7 +911,7 @@ test_that("fine_mr with cpip_cutoff = 0 includes all credible sets", {
     snp = paste0("rs", 1:3)
   )
 
-  result <- fine_mr(formatted_input, cpip_cutoff = 0)
+  result <- fineMr(formatted_input, cpipCutoff = 0)
   expect_equal(nrow(result), 1)
   expect_equal(result$num_CS, 3L)
   expect_equal(result$num_IV, 3L)

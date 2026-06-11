@@ -2,15 +2,15 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{getOutlierNumber}
 \alias{getOutlierNumber}
-\alias{getOutlierNumber,QCResult-method}
+\alias{getOutlierNumber,QcResult-method}
 \title{Get Outlier Number}
 \usage{
 getOutlierNumber(x)
 
-\S4method{getOutlierNumber}{QCResult}(x)
+\S4method{getOutlierNumber}{QcResult}(x)
 }
 \arguments{
-\item{x}{A \code{QCResult} object.}
+\item{x}{A \code{QcResult} object.}
 }
 \value{
 Integer count.

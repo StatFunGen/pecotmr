@@ -2,19 +2,19 @@
 % Please edit documentation in R/AllGenerics.R, R/gwas_sumstats.R
 \name{getVarY}
 \alias{getVarY}
-\alias{getVarY,GWASSumStats-method}
+\alias{getVarY,GwasSumStats-method}
 \title{Get Phenotype Variance}
 \usage{
 getVarY(x)
 
-\S4method{getVarY}{GWASSumStats}(x)
+\S4method{getVarY}{GwasSumStats}(x)
 }
 \arguments{
-\item{x}{A \code{GWASSumStats} object.}
+\item{x}{A \code{GwasSumStats} object.}
 }
 \value{
 Numeric phenotype variance, or NULL.
 }
 \description{
-Extract phenotype variance from a GWASSumStats object.
+Extract phenotype variance from a GwasSumStats object.
 }

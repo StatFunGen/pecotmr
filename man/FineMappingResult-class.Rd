@@ -11,11 +11,11 @@ S4 container for fine-mapping output. Stores variant names,
 \section{Slots}{
 
 \describe{
-\item{\code{variant_names}}{Character vector of variant IDs.}
+\item{\code{variantNames}}{Character vector of variant IDs.}
 
-\item{\code{trimmed_fit}}{List containing the method-specific trimmed fit.}
+\item{\code{trimmedFit}}{List containing the method-specific trimmed fit.}
 
-\item{\code{top_loci}}{A \code{data.frame} in long format with columns:
+\item{\code{topLoci}}{A \code{data.frame} in long format with columns:
 variant_id, method, coverage, cs, pip, and optionally betahat, sd,
 cs_log10bf, z.}
 

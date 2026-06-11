@@ -2,21 +2,21 @@
 % Please edit documentation in R/AllGenerics.R, R/gwas_sumstats.R
 \name{subsetChr}
 \alias{subsetChr}
-\alias{subsetChr,GWASSumStats-method}
+\alias{subsetChr,GwasSumStats-method}
 \title{Subset by Chromosome}
 \usage{
 subsetChr(x, chr)
 
-\S4method{subsetChr}{GWASSumStats}(x, chr)
+\S4method{subsetChr}{GwasSumStats}(x, chr)
 }
 \arguments{
-\item{x}{A \code{GWASSumStats} object.}
+\item{x}{A \code{GwasSumStats} object.}
 
 \item{chr}{Character, chromosome name (e.g., "1", "chr1").}
 }
 \value{
-A \code{GWASSumStats} object.
+A \code{GwasSumStats} object.
 }
 \description{
-Extract a chromosome-specific subset of a GWASSumStats object.
+Extract a chromosome-specific subset of a GwasSumStats object.
 }

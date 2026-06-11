@@ -13,12 +13,12 @@ Container for univariate heritability estimation results.
 \describe{
 \item{\code{h2}}{Numeric, global SNP heritability estimate.}
 
-\item{\code{h2_se}}{Numeric, standard error of global h2.}
+\item{\code{h2Se}}{Numeric, standard error of global h2.}
 
 \item{\code{intercept}}{Numeric, confounding intercept estimate (NA if method
 does not estimate one).}
 
-\item{\code{intercept_se}}{Numeric, SE of intercept.}
+\item{\code{interceptSe}}{Numeric, SE of intercept.}
 
 \item{\code{local}}{A \code{data.frame} with per-block local heritability
 estimates (columns: \code{block_id}, \code{h2_local}, \code{h2_local_se}).
@@ -29,11 +29,11 @@ estimates (columns: \code{annotation}, \code{tau}, \code{tau_se},
 \code{enrichment}, \code{enrichment_se}, \code{enrichment_p},
 \code{prop_h2}, \code{prop_snps}). NULL if unstratified.}
 
-\item{\code{tau_blocks}}{A numeric matrix (n_blocks x n_annotations) of per-block
+\item{\code{tauBlocks}}{A numeric matrix (n_blocks x n_annotations) of per-block
 jackknife tau values. Required for Gazal tau_star standardization
 downstream. NULL if not available (e.g., unstratified analysis).}
 
-\item{\code{score_stats}}{A list with score statistics for candidate annotations,
+\item{\code{scoreStats}}{A list with score statistics for candidate annotations,
 suitable for input to \code{susie_rss}. Contains:
 \describe{
   \item{z}{Numeric vector of z-scores for each candidate annotation}
@@ -44,8 +44,8 @@ NULL if no candidate annotations provided.}
 
 \item{\code{method}}{Character string identifying the estimation method.}
 
-\item{\code{n_snps}}{Integer, number of SNPs used in estimation.}
+\item{\code{nSnps}}{Integer, number of SNPs used in estimation.}
 
-\item{\code{trait_name}}{Character string for trait identifier.}
+\item{\code{traitName}}{Character string for trait identifier.}
 }}
 

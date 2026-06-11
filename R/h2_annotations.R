@@ -15,29 +15,29 @@ NULL
 #' @title Create an AnnotationMatrix Object
 #' @description Construct an \code{AnnotationMatrix} from a matrix and metadata.
 #' @param annotations A numeric matrix or sparse matrix (SNPs x annotations).
-#' @param snp_ranges A \code{GRanges} object with SNP positions.
-#' @param annotation_meta A data.frame with columns: name, tier, type.
+#' @param snpRanges A \code{GRanges} object with SNP positions.
+#' @param annotationMeta A data.frame with columns: name, tier, type.
 #' @param genome Character, genome build.
 #' @return An \code{AnnotationMatrix} object.
 #' @export
-AnnotationMatrix <- function(annotations, snp_ranges, annotation_meta,
+AnnotationMatrix <- function(annotations, snpRanges, annotationMeta,
                              genome = "hg19") {
-  # Validate annotation_meta
-  if (!is.data.frame(annotation_meta))
-    stop("annotation_meta must be a data.frame")
+  # Validate annotationMeta
+  if (!is.data.frame(annotationMeta))
+    stop("annotationMeta must be a data.frame")
 
-  required_cols <- c("name", "tier", "type")
-  if (!all(required_cols %in% colnames(annotation_meta)))
-    stop("annotation_meta must have columns: name, tier, type")
+  requiredCols <- c("name", "tier", "type")
+  if (!all(requiredCols %in% colnames(annotationMeta)))
+    stop("annotationMeta must have columns: name, tier, type")
 
   # Set column names on matrix
   if (is.null(colnames(annotations)))
-    colnames(annotations) <- annotation_meta$name
+    colnames(annotations) <- annotationMeta$name
 
   new("AnnotationMatrix",
-    snp_ranges = snp_ranges,
+    snpRanges = snpRanges,
     annotations = annotations,
-    annotation_meta = annotation_meta,
+    annotationMeta = annotationMeta,
     genome = genome
   )
 }
@@ -50,53 +50,53 @@ AnnotationMatrix <- function(annotations, snp_ranges, annotation_meta,
 #' @export
 setMethod("readAnnotations",
   signature(paths = "character"),
-  function(paths, snp_ranges, annotation_meta = NULL, genome = "hg19", ...) {
+  function(paths, snpRanges, annotationMeta = NULL, genome = "hg19", ...) {
 
     if (is.null(names(paths)))
       stop("'paths' must be a named character vector (names = annotation names)")
 
-    annot_names <- names(paths)
-    n_snps <- length(snp_ranges)
-    n_annots <- length(paths)
+    annotNames <- names(paths)
+    nSnps <- length(snpRanges)
+    nAnnots <- length(paths)
 
     # Auto-detect types from file extensions
     types <- vapply(paths, function(p) {
-      fmt <- .annot_detect_format(p)
+      fmt <- .annotDetectFormat(p)
       if (fmt == "bigwig") "continuous"
       else "binary"
     }, character(1))
 
     # Initialize annotation matrix
-    annot_mat <- matrix(0, nrow = n_snps, ncol = n_annots)
-    colnames(annot_mat) <- annot_names
+    annotMat <- matrix(0, nrow = nSnps, ncol = nAnnots)
+    colnames(annotMat) <- annotNames
 
     for (i in seq_along(paths)) {
-      fmt <- .annot_detect_format(paths[i])
+      fmt <- .annotDetectFormat(paths[i])
 
       if (fmt == "bigwig") {
         # Continuous annotation from BigWig
-        annot_mat[, i] <- .read_bigwig_at_snps(paths[i], snp_ranges)
+        annotMat[, i] <- .readBigwigAtSnps(paths[i], snpRanges)
       } else if (fmt == "ldsc_annot") {
         # S-LDSC .annot format
-        annot_mat[, i] <- .read_ldsc_annot(paths[i], snp_ranges,
-                                            annot_names[i])
+        annotMat[, i] <- .readLdscAnnot(paths[i], snpRanges,
+                                        annotNames[i])
       } else {
         # Binary annotation from BED or similar
-        annot_mat[, i] <- .read_bed_annotation(paths[i], snp_ranges)
+        annotMat[, i] <- .readBedAnnotation(paths[i], snpRanges)
       }
     }
 
-    # Build annotation_meta if not provided
-    if (is.null(annotation_meta)) {
-      annotation_meta <- data.frame(
-        name = annot_names,
-        tier = rep("candidate", n_annots),
+    # Build annotationMeta if not provided
+    if (is.null(annotationMeta)) {
+      annotationMeta <- data.frame(
+        name = annotNames,
+        tier = rep("candidate", nAnnots),
         type = types,
         stringsAsFactors = FALSE
       )
     }
 
-    AnnotationMatrix(annot_mat, snp_ranges, annotation_meta, genome)
+    AnnotationMatrix(annotMat, snpRanges, annotationMeta, genome)
   }
 )
 
@@ -106,12 +106,12 @@ setMethod("readAnnotations",
 
 #' @title Detect Annotation File Format
 #' @description Detect annotation file format from extension. This is separate
-#'   from \code{.h2_detect_format} because BED annotation files (genomic
+#'   from \code{.h2DetectFormat} because BED annotation files (genomic
 #'   intervals for rtracklayer) must be distinguished from plink BED files.
 #' @param path Character, file path.
 #' @return Character, one of "bigwig", "ldsc_annot", or "bed".
 #' @keywords internal
-.annot_detect_format <- function(path) {
+.annotDetectFormat <- function(path) {
   lpath <- tolower(path)
   if (grepl("\\.annot\\.gz$", lpath))
     return("ldsc_annot")
@@ -127,13 +127,13 @@ setMethod("readAnnotations",
 
 #' @title Read BigWig Scores at SNP Positions
 #' @description Import scores from a BigWig file at specified SNP positions.
-#' @param bw_path Character, path to a BigWig file.
-#' @param snp_ranges A \code{GRanges} object with SNP positions.
+#' @param bwPath Character, path to a BigWig file.
+#' @param snpRanges A \code{GRanges} object with SNP positions.
 #' @return Numeric vector of scores (length = number of SNPs).
 #' @keywords internal
-.read_bigwig_at_snps <- function(bw_path, snp_ranges) {
-  bw <- rtracklayer::BigWigFile(bw_path)
-  scores <- rtracklayer::import(bw, which = snp_ranges, as = "NumericList")
+.readBigwigAtSnps <- function(bwPath, snpRanges) {
+  bw <- rtracklayer::BigWigFile(bwPath)
+  scores <- rtracklayer::import(bw, which = snpRanges, as = "NumericList")
   # Take mean score at each SNP position
   vapply(scores, function(x) if (length(x) > 0) mean(x) else 0,
          numeric(1))
@@ -141,14 +141,14 @@ setMethod("readAnnotations",
 
 #' @title Read BED Annotation
 #' @description Read a BED file and compute binary overlap with SNP positions.
-#' @param bed_path Character, path to a BED file.
-#' @param snp_ranges A \code{GRanges} object with SNP positions.
+#' @param bedPath Character, path to a BED file.
+#' @param snpRanges A \code{GRanges} object with SNP positions.
 #' @return Numeric vector of 0/1 values (length = number of SNPs).
 #' @keywords internal
-.read_bed_annotation <- function(bed_path, snp_ranges) {
-  regions <- rtracklayer::import(bed_path)
-  hits <- findOverlaps(snp_ranges, regions)
-  result <- rep(0L, length(snp_ranges))
+.readBedAnnotation <- function(bedPath, snpRanges) {
+  regions <- rtracklayer::import(bedPath)
+  hits <- findOverlaps(snpRanges, regions)
+  result <- rep(0L, length(snpRanges))
   result[queryHits(hits)] <- 1L
   as.numeric(result)
 }
@@ -156,34 +156,34 @@ setMethod("readAnnotations",
 #' @title Read LDSC Annotation File
 #' @description Read an S-LDSC .annot[.gz] file and extract a named annotation
 #'   column, matched to SNP positions.
-#' @param annot_path Character, path to an .annot or .annot.gz file.
-#' @param snp_ranges A \code{GRanges} object with SNP positions.
-#' @param annot_name Character, name of the annotation column to extract.
+#' @param annotPath Character, path to an .annot or .annot.gz file.
+#' @param snpRanges A \code{GRanges} object with SNP positions.
+#' @param annotName Character, name of the annotation column to extract.
 #' @return Numeric vector of annotation values (length = number of SNPs).
 #' @keywords internal
-.read_ldsc_annot <- function(annot_path, snp_ranges, annot_name) {
+.readLdscAnnot <- function(annotPath, snpRanges, annotName) {
   # S-LDSC .annot files are tab-separated with columns: CHR, BP, SNP, CM, ...
-  dt <- as.data.frame(vroom(annot_path, show_col_types = FALSE))
+  dt <- as.data.frame(vroom(annotPath, show_col_types = FALSE))
 
-  if (!annot_name %in% colnames(dt))
-    stop("Annotation column '", annot_name, "' not found in ", annot_path)
+  if (!annotName %in% colnames(dt))
+    stop("Annotation column '", annotName, "' not found in ", annotPath)
 
   if (!all(c("CHR", "BP") %in% colnames(dt)))
     stop("LDSC annot file must contain CHR and BP columns")
 
   # Build GRanges from the annot file positions
-  annot_gr <- GRanges(
+  annotGr <- GRanges(
     seqnames = paste0("chr", sub("^chr", "", dt$CHR)),
     ranges = IRanges(start = dt$BP, width = 1L)
   )
 
   # Match SNPs by genomic position
-  hits <- findOverlaps(snp_ranges, annot_gr)
+  hits <- findOverlaps(snpRanges, annotGr)
 
   # Initialize result with default 0
-  result <- rep(0, length(snp_ranges))
+  result <- rep(0, length(snpRanges))
   result[queryHits(hits)] <-
-    as.numeric(dt[[annot_name]][subjectHits(hits)])
+    as.numeric(dt[[annotName]][subjectHits(hits)])
 
   result
 }
@@ -199,11 +199,11 @@ setMethod("readAnnotations",
 #' @return An \code{AnnotationMatrix} with only baseline annotations.
 #' @export
 getBaseline <- function(annot) {
-  idx <- annot@annotation_meta$tier == "baseline"
+  idx <- annot@annotationMeta$tier == "baseline"
   AnnotationMatrix(
     annotations = annot@annotations[, idx, drop = FALSE],
-    snp_ranges = annot@snp_ranges,
-    annotation_meta = annot@annotation_meta[idx, , drop = FALSE],
+    snpRanges = annot@snpRanges,
+    annotationMeta = annot@annotationMeta[idx, , drop = FALSE],
     genome = annot@genome
   )
 }
@@ -215,11 +215,11 @@ getBaseline <- function(annot) {
 #' @return An \code{AnnotationMatrix} with only candidate annotations.
 #' @export
 getCandidates <- function(annot) {
-  idx <- annot@annotation_meta$tier == "candidate"
+  idx <- annot@annotationMeta$tier == "candidate"
   AnnotationMatrix(
     annotations = annot@annotations[, idx, drop = FALSE],
-    snp_ranges = annot@snp_ranges,
-    annotation_meta = annot@annotation_meta[idx, , drop = FALSE],
+    snpRanges = annot@snpRanges,
+    annotationMeta = annot@annotationMeta[idx, , drop = FALSE],
     genome = annot@genome
   )
 }

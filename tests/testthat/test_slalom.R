@@ -120,7 +120,7 @@ test_that("ABF: lbf formula matches manual calculation", {
 
   z <- c(z_val, 0)
   R <- diag(2)
-  result <- slalom(zScore = z, R = R, abf_prior_variance = W)
+  result <- slalom(zScore = z, R = R, abfPriorVariance = W)
 
   lbf_0 <- 0.5 * (log(1 - r) + r * 0^2)
   expected_ratio <- exp(expected_lbf - lbf_0)
@@ -227,7 +227,7 @@ test_that("lead variant by pvalue selects most negative z-score", {
   z <- c(0, -4, 3, -1, 2)
   R <- diag(5)
 
-  result <- slalom(zScore = z, R = R, lead_variant_choice = "pvalue")
+  result <- slalom(zScore = z, R = R, leadVariantChoice = "pvalue")
 
   expect_equal(result$summary$lead_pip_variant, 2)
 })
@@ -236,7 +236,7 @@ test_that("lead variant by abf selects highest PIP", {
   z <- c(0, -4, 3, -1, 2)
   R <- diag(5)
 
-  result <- slalom(zScore = z, R = R, lead_variant_choice = "abf")
+  result <- slalom(zScore = z, R = R, leadVariantChoice = "abf")
 
   expect_equal(result$summary$lead_pip_variant, which.max(result$data$prob))
 })
@@ -245,8 +245,8 @@ test_that("pvalue and abf lead can differ when z has asymmetric magnitudes", {
   z <- c(-3.0, 5.0, 0.1, -0.2, 0.3)
   R <- diag(5)
 
-  result_pv <- slalom(zScore = z, R = R, lead_variant_choice = "pvalue")
-  result_abf <- slalom(zScore = z, R = R, lead_variant_choice = "abf")
+  result_pv <- slalom(zScore = z, R = R, leadVariantChoice = "pvalue")
+  result_abf <- slalom(zScore = z, R = R, leadVariantChoice = "abf")
 
   expect_equal(result_pv$summary$lead_pip_variant, 1)
   expect_equal(result_abf$summary$lead_pip_variant, 2)
@@ -280,8 +280,8 @@ test_that("DENTIST-S: outlier variant inconsistent with LD is flagged", {
   R[1, 4] <- R[4, 1] <- -0.05
   R[1, 5] <- R[5, 1] <- 0.02
 
-  result <- slalom(zScore = z, R = R, r2_threshold = 0.5,
-                   nlog10p_dentist_s_threshold = 2.0)
+  result <- slalom(zScore = z, R = R, r2Threshold = 0.5,
+                   nlog10pDentistSThreshold = 2.0)
 
   lead <- result$summary$lead_pip_variant
   expect_equal(lead, 1)
@@ -298,8 +298,8 @@ test_that("DENTIST-S: perfectly consistent variant in LD is not flagged", {
   R[1, 3] <- R[3, 1] <- 0.05
   R[2, 3] <- R[3, 2] <- 0.04
 
-  result <- slalom(zScore = z, R = R, r2_threshold = 0.5,
-                   nlog10p_dentist_s_threshold = 4.0)
+  result <- slalom(zScore = z, R = R, r2Threshold = 0.5,
+                   nlog10pDentistSThreshold = 4.0)
 
   lead <- result$summary$lead_pip_variant
   expect_equal(lead, 1)
@@ -315,7 +315,7 @@ test_that("DENTIST-S: n_dentist_s_outlier and fraction are consistent", {
   z <- rnorm(n, sd = 1)
   z[1] <- -5
 
-  result <- slalom(zScore = z, R = syn$R, r2_threshold = 0.3)
+  result <- slalom(zScore = z, R = syn$R, r2Threshold = 0.3)
 
   n_r2 <- result$summary$n_r2
   n_out <- result$summary$n_dentist_s_outlier
@@ -334,10 +334,10 @@ test_that("DENTIST-S: lowering threshold flags more outliers", {
   z <- rnorm(n, sd = 2)
   z[5] <- -6
 
-  result_strict <- slalom(zScore = z, R = syn$R, nlog10p_dentist_s_threshold = 6.0,
-                          r2_threshold = 0.3)
-  result_loose <- slalom(zScore = z, R = syn$R, nlog10p_dentist_s_threshold = 1.0,
-                         r2_threshold = 0.3)
+  result_strict <- slalom(zScore = z, R = syn$R, nlog10pDentistSThreshold = 6.0,
+                          r2Threshold = 0.3)
+  result_loose <- slalom(zScore = z, R = syn$R, nlog10pDentistSThreshold = 1.0,
+                         r2Threshold = 0.3)
 
   expect_gte(result_loose$summary$n_dentist_s_outlier,
              result_strict$summary$n_dentist_s_outlier)
@@ -465,18 +465,18 @@ test_that("larger abf_prior_variance concentrates PIPs on strong signals more", 
   z[4] <- 4
   R <- diag(n)
 
-  result_small_W <- slalom(zScore = z, R = R, abf_prior_variance = 0.01)
-  result_large_W <- slalom(zScore = z, R = R, abf_prior_variance = 1.0)
+  result_small_W <- slalom(zScore = z, R = R, abfPriorVariance = 0.01)
+  result_large_W <- slalom(zScore = z, R = R, abfPriorVariance = 1.0)
 
   expect_gt(result_large_W$summary$max_pip, result_small_W$summary$max_pip)
 })
 
-test_that("abf_prior_variance = 0 gives uniform PIPs", {
+test_that("abfPriorVariance = 0 gives uniform PIPs", {
   n <- 10
   z <- c(5, 3, 1, 0, -1, -3, -5, 2, -2, 4)
   R <- diag(n)
 
-  result <- slalom(zScore = z, R = R, abf_prior_variance = 0)
+  result <- slalom(zScore = z, R = R, abfPriorVariance = 0)
 
   expect_equal(result$data$prob, rep(1 / n, n), tolerance = 1e-14)
 })
@@ -488,8 +488,8 @@ test_that("different standard_error values affect PIPs", {
   se1 <- c(1, 1, 1, 1, 1)
   se2 <- c(0.5, 1, 1, 1, 1)  # variant 1 has smaller SE
 
-  result1 <- slalom(zScore = z, R = R, standard_error = se1)
-  result2 <- slalom(zScore = z, R = R, standard_error = se2)
+  result1 <- slalom(zScore = z, R = R, standardError = se1)
+  result2 <- slalom(zScore = z, R = R, standardError = se2)
 
   expect_gt(result2$data$prob[1], result1$data$prob[1])
 })
@@ -501,8 +501,8 @@ test_that("r2_threshold variation affects n_r2 count", {
   z <- rnorm(n, sd = 2)
   z[1] <- -5
 
-  result_low <- slalom(zScore = z, R = syn$R, r2_threshold = 0.1)
-  result_high <- slalom(zScore = z, R = syn$R, r2_threshold = 0.9)
+  result_low <- slalom(zScore = z, R = syn$R, r2Threshold = 0.1)
+  result_high <- slalom(zScore = z, R = syn$R, r2Threshold = 0.9)
 
   expect_gte(result_low$summary$n_r2, result_high$summary$n_r2)
 })
@@ -514,8 +514,8 @@ test_that("nlog10p_dentist_s_threshold variation affects outlier count", {
   z <- rnorm(n, sd = 2)
   z[1] <- -6
 
-  result_low_thresh <- slalom(zScore = z, R = syn$R, nlog10p_dentist_s_threshold = 1.0)
-  result_high_thresh <- slalom(zScore = z, R = syn$R, nlog10p_dentist_s_threshold = 10.0)
+  result_low_thresh <- slalom(zScore = z, R = syn$R, nlog10pDentistSThreshold = 1.0)
+  result_high_thresh <- slalom(zScore = z, R = syn$R, nlog10pDentistSThreshold = 10.0)
 
   expect_gte(result_low_thresh$summary$n_dentist_s_outlier,
              result_high_thresh$summary$n_dentist_s_outlier)
@@ -574,7 +574,7 @@ test_that("n_r2 counts variants with r2 > threshold to lead correctly", {
   z <- c(-5, rep(0, 9))
   R <- diag(n)
 
-  result <- slalom(zScore = z, R = R, r2_threshold = 0.6)
+  result <- slalom(zScore = z, R = R, r2Threshold = 0.6)
   expect_equal(result$summary$n_r2, 1)
 })
 
@@ -584,7 +584,7 @@ test_that("n_r2 includes correlated variants", {
   R <- diag(n)
   R[1, 2] <- R[2, 1] <- 0.9
 
-  result <- slalom(zScore = z, R = R, r2_threshold = 0.6)
+  result <- slalom(zScore = z, R = R, r2Threshold = 0.6)
   expect_equal(result$summary$n_r2, 2)
 })
 
@@ -606,7 +606,7 @@ test_that("fraction is between 0 and 1", {
     z <- rnorm(n, sd = 2)
     z[1] <- -6
 
-    result <- slalom(zScore = z, R = syn$R, r2_threshold = 0.3)
+    result <- slalom(zScore = z, R = syn$R, r2Threshold = 0.3)
     expect_gte(result$summary$fraction, 0)
     expect_lte(result$summary$fraction, 1)
   }
@@ -653,8 +653,8 @@ test_that("realistic LD: DENTIST-S detects outlier in correlated block", {
     corrupt_idx <- candidates[1]
     z[corrupt_idx] <- z[corrupt_idx] + 10
 
-    result <- slalom(zScore = z, R = R, r2_threshold = 0.2,
-                     nlog10p_dentist_s_threshold = 3.0)
+    result <- slalom(zScore = z, R = R, r2Threshold = 0.2,
+                     nlog10pDentistSThreshold = 3.0)
 
     expect_true(result$data$outliers[corrupt_idx])
   }
@@ -668,8 +668,8 @@ test_that("realistic LD: no outliers when z perfectly matches LD structure", {
   lead_idx <- 1
   z <- R[, lead_idx] * (-4)
 
-  result <- slalom(zScore = z, R = R, r2_threshold = 0.3,
-                   nlog10p_dentist_s_threshold = 4.0)
+  result <- slalom(zScore = z, R = R, r2Threshold = 0.3,
+                   nlog10pDentistSThreshold = 4.0)
 
   non_lead <- setdiff(seq_along(z), result$summary$lead_pip_variant)
   lead <- result$summary$lead_pip_variant
@@ -684,35 +684,35 @@ test_that("realistic LD: no outliers when z perfectly matches LD structure", {
 })
 
 # ============================================================================
-# Internal function access (resolve_LD_input via :::)
+# Internal function access (resolveLdInput via :::)
 # ============================================================================
 
-test_that("resolve_LD_input returns R when R is provided", {
+test_that("resolveLdInput returns R when R is provided", {
   R <- diag(5)
-  res <- pecotmr:::resolve_LD_input(R = R, need_nSample = FALSE)
+  res <- pecotmr:::resolveLdInput(R = R, needNSample = FALSE)
   expect_equal(res$R, R)
 })
 
-test_that("resolve_LD_input computes R from X", {
+test_that("resolveLdInput computes R from X", {
   set.seed(1100)
   X <- matrix(sample(0:2, 200 * 5, replace = TRUE), nrow = 200, ncol = 5)
   colnames(X) <- paste0("s", 1:5)
-  res <- pecotmr:::resolve_LD_input(X = X, need_nSample = FALSE)
+  res <- pecotmr:::resolveLdInput(X = X, needNSample = FALSE)
   expect_true(is.matrix(res$R))
   expect_equal(nrow(res$R), 5)
   expect_equal(ncol(res$R), 5)
   for (j in seq_len(5)) expect_equal(res$R[j, j], 1.0, tolerance = 1e-6)
 })
 
-test_that("resolve_LD_input errors when neither R nor X given", {
-  expect_error(pecotmr:::resolve_LD_input(R = NULL, X = NULL),
+test_that("resolveLdInput errors when neither R nor X given", {
+  expect_error(pecotmr:::resolveLdInput(R = NULL, X = NULL),
                "Either R.*or X.*must be provided")
 })
 
-test_that("resolve_LD_input errors when both R and X given", {
+test_that("resolveLdInput errors when both R and X given", {
   R <- diag(3)
   X <- matrix(1, nrow = 10, ncol = 3)
-  expect_error(pecotmr:::resolve_LD_input(R = R, X = X),
+  expect_error(pecotmr:::resolveLdInput(R = R, X = X),
                "Provide either R or X, not both")
 })
 
@@ -738,7 +738,7 @@ test_that("standard_error near zero concentrates PIP on large z-scores", {
   R <- diag(4)
   se <- rep(0.01, 4)
 
-  result <- slalom(zScore = z, R = R, standard_error = se, abf_prior_variance = 0.04)
+  result <- slalom(zScore = z, R = R, standardError = se, abfPriorVariance = 0.04)
 
   expect_equal(which.max(result$data$prob), 1)
   expect_false(any(is.nan(result$data$prob)))

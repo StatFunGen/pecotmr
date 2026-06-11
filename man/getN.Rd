@@ -2,19 +2,19 @@
 % Please edit documentation in R/AllGenerics.R, R/gwas_sumstats.R
 \name{getN}
 \alias{getN}
-\alias{getN,GWASSumStats-method}
+\alias{getN,GwasSumStats-method}
 \title{Get Sample Sizes}
 \usage{
 getN(x)
 
-\S4method{getN}{GWASSumStats}(x)
+\S4method{getN}{GwasSumStats}(x)
 }
 \arguments{
-\item{x}{A \code{GWASSumStats} object.}
+\item{x}{A \code{GwasSumStats} object.}
 }
 \value{
 Numeric vector of sample sizes.
 }
 \description{
-Extract sample size vector from a GWASSumStats object.
+Extract sample size vector from a GwasSumStats object.
 }

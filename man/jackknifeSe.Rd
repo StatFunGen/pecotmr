@@ -4,12 +4,12 @@
 \alias{jackknifeSe}
 \title{Jackknife Standard Errors by Block}
 \usage{
-jackknifeSe(estimates_full, estimates_loo)
+jackknifeSe(estimatesFull, estimatesLoo)
 }
 \arguments{
-\item{estimates_full}{Numeric vector, full-sample parameter estimates.}
+\item{estimatesFull}{Numeric vector, full-sample parameter estimates.}
 
-\item{estimates_loo}{A matrix (n_blocks x n_params), leave-one-out estimates.}
+\item{estimatesLoo}{A matrix (nBlocks x nParams), leave-one-out estimates.}
 }
 \value{
 Numeric vector of jackknife SEs.

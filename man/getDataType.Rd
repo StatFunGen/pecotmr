@@ -2,19 +2,19 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{getDataType}
 \alias{getDataType}
-\alias{getDataType,TWASWeights-method}
+\alias{getDataType,TwasWeights-method}
 \title{Get Data Type}
 \usage{
 getDataType(x)
 
-\S4method{getDataType}{TWASWeights}(x)
+\S4method{getDataType}{TwasWeights}(x)
 }
 \arguments{
-\item{x}{A \code{TWASWeights} object.}
+\item{x}{A \code{TwasWeights} object.}
 }
 \value{
 A named list of data types per context, or NULL.
 }
 \description{
-Extract data type metadata from a TWASWeights object.
+Extract data type metadata from a TwasWeights object.
 }

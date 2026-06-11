@@ -1,6 +1,6 @@
 #' @title Summary Statistics Handling
 #' @description Functions for reading, validating, and constructing
-#'   \code{GWASSumStats} objects from various input formats.
+#'   \code{GwasSumStats} objects from various input formats.
 #' @name pecotmr-gwas-sumstats
 #' @keywords internal
 #' @importFrom GenomicRanges GRanges seqnames start
@@ -13,28 +13,28 @@ NULL
 # Constructor
 # =============================================================================
 
-#' @title Create a GWASSumStats Object
-#' @description Construct a \code{GWASSumStats} from a data.frame with
+#' @title Create a GwasSumStats Object
+#' @description Construct a \code{GwasSumStats} from a data.frame with
 #'   standardized column names.
 #' @param data A data.frame with at minimum columns:
 #'   SNP, CHR, BP, A1, A2, Z, N.
-#' @param trait_name Character, name for the trait.
+#' @param traitName Character, name for the trait.
 #' @param genome Character, genome build (e.g., "hg19", "hg38").
-#' @param var_y Numeric, phenotype variance. For observed-scale OLS on a
+#' @param varY Numeric, phenotype variance. For observed-scale OLS on a
 #'   centered 0/1 case-control trait, this is \code{n / (n - 1) * phi *
-#'   (1 - phi)}, where \code{phi = n_case / n}. Use it only with the full
+#'   (1 - phi)}, where \code{phi = nCase / n}. Use it only with the full
 #'   \code{bhat/shat/var_y} sufficient-statistic interface; z-score RSS
 #'   analyses should leave it NULL.
-#' @return A \code{GWASSumStats} object.
+#' @return A \code{GwasSumStats} object.
 #' @export
-GWASSumStats <- function(data, trait_name = "trait", genome = "hg19",
-                          var_y = NULL) {
+GwasSumStats <- function(data, traitName = "trait", genome = "hg19",
+                         varY = NULL) {
   data <- as.data.frame(data)
 
   required <- c("SNP", "CHR", "BP", "A1", "A2", "Z", "N")
-  missing_cols <- setdiff(required, colnames(data))
-  if (length(missing_cols) > 0) {
-    stop("Missing required columns: ", paste(missing_cols, collapse = ", "),
+  missingCols <- setdiff(required, colnames(data))
+  if (length(missingCols) > 0) {
+    stop("Missing required columns: ", paste(missingCols, collapse = ", "),
          ". Consider using readSumstats() with MungeSumStats for ",
          "automatic format detection.")
   }
@@ -60,20 +60,20 @@ GWASSumStats <- function(data, trait_name = "trait", genome = "hg19",
     ranges = IRanges(start = data$BP, width = 1L)
   )
 
-  mcols_data <- data[, c("SNP", "A1", "A2", "Z", "N")]
-  optional_cols <- c("MAF", "INFO", "BETA", "SE", "P")
-  for (col in optional_cols) {
+  mcolsData <- data[, c("SNP", "A1", "A2", "Z", "N")]
+  optionalCols <- c("MAF", "INFO", "BETA", "SE", "P")
+  for (col in optionalCols) {
     if (col %in% colnames(data)) {
-      mcols_data[[col]] <- as.numeric(data[[col]])
+      mcolsData[[col]] <- as.numeric(data[[col]])
     }
   }
-  mcols(gr) <- DataFrame(mcols_data)
+  mcols(gr) <- DataFrame(mcolsData)
 
-  new("GWASSumStats",
+  new("GwasSumStats",
     sumstats = gr,
     genome = genome,
-    trait_name = trait_name,
-    var_y = var_y
+    traitName = traitName,
+    varY = varY
   )
 }
 
@@ -85,10 +85,10 @@ GWASSumStats <- function(data, trait_name = "trait", genome = "hg19",
 #' @export
 setMethod("readSumstats",
   signature(path = "character"),
-  function(path, trait_name = "trait", genome = NULL, n = NULL,
-           use_mungesumstats = TRUE, ...) {
+  function(path, traitName = "trait", genome = NULL, n = NULL,
+           useMungesumstats = TRUE, ...) {
 
-    if (use_mungesumstats && requireNamespace("MungeSumstats", quietly = TRUE)) {
+    if (useMungesumstats && requireNamespace("MungeSumstats", quietly = TRUE)) {
       message("Standardizing summary statistics with MungeSumStats...")
       reformatted <- format_sumstats(
         path = path,
@@ -99,14 +99,14 @@ setMethod("readSumstats",
       )
       dt <- as.data.frame(reformatted)
 
-      col_map <- c(
+      colMap <- c(
         "SNP" = "SNP", "CHR" = "CHR", "BP" = "BP",
         "A1" = "A1", "A2" = "A2", "Z" = "Z", "N" = "N",
         "FRQ" = "MAF", "INFO" = "INFO", "BETA" = "BETA",
         "SE" = "SE", "P" = "P"
       )
-      present <- intersect(names(col_map), colnames(dt))
-      names(dt)[match(present, names(dt))] <- col_map[present]
+      present <- intersect(names(colMap), colnames(dt))
+      names(dt)[match(present, names(dt))] <- colMap[present]
 
       if (!"Z" %in% colnames(dt) && all(c("BETA", "SE") %in% colnames(dt))) {
         dt$Z <- dt$BETA / dt$SE
@@ -118,7 +118,7 @@ setMethod("readSumstats",
 
       if (is.null(genome)) genome <- "hg19"
 
-      return(GWASSumStats(dt, trait_name = trait_name, genome = genome))
+      return(GwasSumStats(dt, traitName = traitName, genome = genome))
     }
 
     message("Reading summary statistics directly (no MungeSumStats)...")
@@ -130,7 +130,7 @@ setMethod("readSumstats",
 
     if (is.null(genome)) genome <- "hg19"
 
-    GWASSumStats(dt, trait_name = trait_name, genome = genome)
+    GwasSumStats(dt, traitName = traitName, genome = genome)
   }
 )
 
@@ -140,100 +140,100 @@ setMethod("readSumstats",
 
 #' @rdname getZ
 #' @export
-setMethod("getZ", "GWASSumStats", function(x) {
+setMethod("getZ", "GwasSumStats", function(x) {
   mcols(x@sumstats)$Z
 })
 
 #' @rdname getN
 #' @export
-setMethod("getN", "GWASSumStats", function(x) {
+setMethod("getN", "GwasSumStats", function(x) {
   mcols(x@sumstats)$N
 })
 
 #' @rdname getMaf
 #' @export
-setMethod("getMaf", "GWASSumStats", function(x) {
+setMethod("getMaf", "GwasSumStats", function(x) {
   mc <- mcols(x@sumstats)
   if ("MAF" %in% colnames(mc)) mc$MAF else NULL
 })
 
 #' @rdname nSnps
 #' @export
-setMethod("nSnps", "GWASSumStats", function(x) {
+setMethod("nSnps", "GwasSumStats", function(x) {
   length(x@sumstats)
 })
 
 #' @rdname subsetChr
 #' @export
-setMethod("subsetChr", "GWASSumStats", function(x, chr) {
-  chr_name <- paste0("chr", sub("^chr", "", as.character(chr)))
-  idx <- as.character(seqnames(x@sumstats)) == chr_name
-  new("GWASSumStats",
+setMethod("subsetChr", "GwasSumStats", function(x, chr) {
+  chrName <- paste0("chr", sub("^chr", "", as.character(chr)))
+  idx <- as.character(seqnames(x@sumstats)) == chrName
+  new("GwasSumStats",
     sumstats = x@sumstats[idx],
     genome = x@genome,
-    trait_name = x@trait_name,
-    var_y = x@var_y
+    traitName = x@traitName,
+    varY = x@varY
   )
 })
 
 #' @rdname getVarY
 #' @export
-setMethod("getVarY", "GWASSumStats", function(x) {
-  x@var_y
+setMethod("getVarY", "GwasSumStats", function(x) {
+  x@varY
 })
 
 # =============================================================================
 # Coercion
 # =============================================================================
 
-#' @title Convert GWASSumStats to data.frame
+#' @title Convert GwasSumStats to data.frame
 #' @description Extracts the genomic ranges and metadata columns into a plain
 #'   data.frame with columns SNP, CHR, BP, A1, A2, Z, N (and any optional
 #'   columns such as MAF, BETA, SE, P).
-#' @param x A \code{GWASSumStats} object.
+#' @param x A \code{GwasSumStats} object.
 #' @param row.names Ignored (present for S3 generic compatibility).
 #' @param optional Ignored.
 #' @param ... Ignored.
 #' @return A data.frame.
-#' @method as.data.frame GWASSumStats
+#' @method as.data.frame GwasSumStats
 #' @export
-as.data.frame.GWASSumStats <- function(x, row.names = NULL, optional = FALSE, ...) {
+as.data.frame.GwasSumStats <- function(x, row.names = NULL, optional = FALSE, ...) {
   gr <- x@sumstats
   mc <- as.data.frame(mcols(gr))
   mc$CHR <- as.character(seqnames(gr))
   mc$BP  <- start(gr)
   # Reorder: SNP, CHR, BP first, then remaining columns
-  first_cols <- c("SNP", "CHR", "BP")
-  rest_cols  <- setdiff(names(mc), first_cols)
-  mc[, c(first_cols, rest_cols), drop = FALSE]
+  firstCols <- c("SNP", "CHR", "BP")
+  restCols  <- setdiff(names(mc), firstCols)
+  mc[, c(firstCols, restCols), drop = FALSE]
 }
 
-#' @title Convert load_rss_data Output to GWASSumStats
+#' @title Convert load_rss_data Output to GwasSumStats
 #' @description Converts the list returned by \code{load_rss_data}
 #'   (with elements \code{sumstats}, \code{n}, \code{var_y}) into a
-#'   \code{GWASSumStats} object.
-#' @param rss_list A list with elements \code{sumstats} (data.frame),
+#'   \code{GwasSumStats} object.
+#' @param rssList A list with elements \code{sumstats} (data.frame),
 #'   \code{n} (numeric or NULL), and \code{var_y} (numeric or NULL), as
 #'   returned by \code{load_rss_data}.
-#' @param trait_name Character, name for the trait.
+#' @param traitName Character, name for the trait.
 #' @param genome Character, genome build (e.g., "hg19", "hg38").
-#' @return A \code{GWASSumStats} object, or NULL if \code{rss_list$sumstats}
+#' @return A \code{GwasSumStats} object, or NULL if \code{rssList$sumstats}
 #'   has zero rows.
 #' @export
-rss_to_gwas_sumstats <- function(rss_list, trait_name = "trait",
-                                  genome = "hg38") {
-  ss <- rss_list$sumstats
+rssToGwasSumstats <- function(rssList, traitName = "trait",
+                              genome = "hg38") {
+  ss <- rssList$sumstats
   if (is.null(ss) || nrow(ss) == 0L) return(NULL)
 
-  # Map pecotmr column names to GWASSumStats expected names
-  col_map <- c(
+  # Map pecotmr column names to GwasSumStats expected names
+  colMap <- c(
     "chrom" = "CHR", "pos" = "BP", "variant_id" = "SNP",
     "z" = "Z", "beta" = "BETA", "se" = "SE"
   )
-  for (old_name in names(col_map)) {
-    new_name <- col_map[[old_name]]
-    if (old_name %in% names(ss) && !(new_name %in% names(ss))) {
-      names(ss)[names(ss) == old_name] <- new_name
+  for (oldName in names(colMap)) {
+    newName <- colMap[[oldName]]
+    if (oldName %in% names(ss) && !(newName %in% names(ss))) {
+      names(ss)[names(ss) == oldName] <- newName
     }
   }
 
@@ -248,9 +248,10 @@ rss_to_gwas_sumstats <- function(rss_list, trait_name = "trait",
 
   # Ensure N column exists
   if (!"N" %in% names(ss)) {
-    ss$N <- rss_list$n
+    ss$N <- rssList$n
   }
 
-  GWASSumStats(data = ss, trait_name = trait_name, genome = genome,
-               var_y = rss_list$var_y)
+  GwasSumStats(data = ss, traitName = traitName, genome = genome,
+               varY = rssList$var_y)
 }
+

@@ -8,7 +8,7 @@ sdpr(
   bhat,
   LD,
   n,
-  per_variant_sample_size = NULL,
+  perVariantSampleSize = NULL,
   array = NULL,
   a = 0.1,
   c = 1,
@@ -18,8 +18,8 @@ sdpr(
   iter = 1000,
   burn = 200,
   thin = 5,
-  n_threads = 1,
-  opt_llk = 1,
+  nThreads = 1,
+  optLlk = 1,
   verbose = TRUE,
   seed = NULL
 )
@@ -31,7 +31,7 @@ sdpr(
 
 \item{n}{The total sample size of the GWAS.}
 
-\item{per_variant_sample_size}{(Optional) A vector of sample sizes for each SNP. If NULL (default), it will be initialized
+\item{perVariantSampleSize}{(Optional) A vector of sample sizes for each SNP. If NULL (default), it will be initialized
 to a vector of length equal to `bhat`, with all values set to `n`.}
 
 \item{array}{(Optional) A vector of genotyping array information for each SNP. If NULL (default), it will be
@@ -53,9 +53,9 @@ initialized to a vector of 1's with length equal to `bhat`.}
 
 \item{thin}{Thinning interval for MCMC. Default is 5.}
 
-\item{n_threads}{Number of threads to use. Default is 1.}
+\item{nThreads}{Number of threads to use. Default is 1.}
 
-\item{opt_llk}{Which likelihood to evaluate. 1 for equation 6 (slightly shrink the correlation of SNPs)
+\item{optLlk}{Which likelihood to evaluate. 1 for equation 6 (slightly shrink the correlation of SNPs)
 and 2 for equation 5 (SNPs genotyped on different arrays in a separate cohort).
 Default is 1.}
 
@@ -113,6 +113,6 @@ sigmasq_init <- 1.5
 LD <- list(blk1 = R.hat)
 out <- sdpr(b.hat, LD, n)
 # In sample prediction correlations
-cor(X \%*\% out$beta_est, y) #
+cor(X \%*\% out$betaEst, y) #
 
 }

@@ -15,21 +15,21 @@ S4 container for regional association data prepared for
 \section{Slots}{
 
 \describe{
-\item{\code{genotype_matrix}}{Numeric matrix (samples x variants), rownames are
+\item{\code{genotypeMatrix}}{Numeric matrix (samples x variants), rownames are
 sample IDs, colnames are variant IDs.}
 
-\item{\code{Y_matrix}}{Numeric matrix (samples x conditions) of residualized
+\item{\code{Y}}{Numeric matrix (samples x conditions) of residualized
 phenotypes after joining conditions and (optionally) filtering rows by
 minimum non-missing count.}
 
-\item{\code{Y_scalar}}{Numeric vector of per-condition scaling factors
-(length = ncol(Y_matrix)).}
+\item{\code{scaling}}{Numeric vector of per-condition scaling factors
+(length = ncol(Y)).}
 
-\item{\code{dropped_samples}}{Character or list capturing sample IDs dropped
+\item{\code{droppedSamples}}{Character or list capturing sample IDs dropped
 during multivariate filtering.}
 
 \item{\code{region}}{A \code{GRanges} (single range) or NULL.}
 
-\item{\code{Y_coordinates}}{A data.frame of phenotype coordinates, or NULL.}
+\item{\code{coordinates}}{A data.frame of phenotype coordinates, or NULL.}
 }}
 

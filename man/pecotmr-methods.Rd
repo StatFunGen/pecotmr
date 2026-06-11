@@ -5,6 +5,6 @@
 \title{S4 Method Implementations}
 \description{
 Constructors and accessor method implementations for all
-  S4 classes: LDData, RegionalData, FineMappingResult, TWASWeights.
+  S4 classes: LdData, RegionalData, FineMappingResult, TwasWeights.
 }
 \keyword{internal}

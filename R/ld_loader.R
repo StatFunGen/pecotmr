@@ -1,12 +1,12 @@
-#' Extract the LD or genotype matrix from an LDData S4 object.
-#' @param ld An LDData object.
-#' @param want_genotype Logical; if TRUE, extract the genotype matrix
+#' Extract the LD or genotype matrix from an LdData S4 object.
+#' @param ld An LdData object.
+#' @param wantGenotype Logical; if TRUE, extract the genotype matrix
 #'   (via \code{getGenotypes()}).
 #' @return A matrix.
 #' @noRd
-extract_ld_matrix <- function(ld, want_genotype = FALSE) {
-  if (!is(ld, "LDData")) stop("ld must be an LDData object")
-  if (want_genotype && hasGenotypes(ld)) {
+extractLdMatrix <- function(ld, wantGenotype = FALSE) {
+  if (!is(ld, "LdData")) stop("ld must be an LdData object")
+  if (wantGenotype && hasGenotypes(ld)) {
     return(getGenotypes(ld))
   }
   getCorrelation(ld)
@@ -33,23 +33,23 @@ extract_ld_matrix <- function(ld, want_genotype = FALSE) {
 #'     cTWAS meta-data utilities). Set \code{LD_info}.}
 #' }
 #'
-#' @param R_list List of G precomputed LD correlation matrices (p_g x p_g).
-#' @param X_list List of G genotype matrices (n x p_g).
-#' @param ld_meta_path Path to a pecotmr LD metadata TSV file (as used by
+#' @param rList List of G precomputed LD correlation matrices (p_g x p_g).
+#' @param xList List of G genotype matrices (n x p_g).
+#' @param ldMetaPath Path to a pecotmr LD metadata TSV file (as used by
 #'   \code{\link{load_LD_matrix}}).
 #' @param regions Character vector of G region strings (e.g.,
-#'   \code{"chr22:17238266-19744294"}). Required when \code{ld_meta_path}
+#'   \code{"chr22:17238266-19744294"}). Required when \code{ldMetaPath}
 #'   is used.
-#' @param LD_info A data.frame with column \code{LD_file} (paths to
+#' @param ldInfo A data.frame with column \code{LD_file} (paths to
 #'   genotype files or \code{.cor.xz} LD matrix files) and optionally
 #'   \code{SNP_file} (paths to companion \code{.bim} files for pre-computed
 #'   blocks; defaults to \code{paste0(LD_file, ".bim")} if absent).
 #'   Genotype paths can be PLINK2 prefixes, PLINK1 prefixes, VCF files,
 #'   or GDS files. As returned by cTWAS meta-data utilities.
-#' @param return_genotype Logical. When using region mode, return the
+#' @param returnGenotype Logical. When using region mode, return the
 #'   genotype matrix X (\code{TRUE}) or LD correlation R (\code{FALSE},
 #'   default).
-#' @param max_variants Integer or \code{NULL}. If set, randomly subsample
+#' @param maxVariants Integer or \code{NULL}. If set, randomly subsample
 #'   blocks larger than this to control memory usage.
 #'
 #' @return A function \code{loader(g)} that, given a block index \code{g},
@@ -59,93 +59,93 @@ extract_ld_matrix <- function(ld, want_genotype = FALSE) {
 #' # List mode with pre-computed LD
 #' R1 <- diag(10)
 #' R2 <- diag(15)
-#' loader <- ld_loader(R_list = list(R1, R2))
+#' loader <- ldLoader(rList = list(R1, R2))
 #' loader(1)  # returns R1
 #' loader(2)  # returns R2
 #'
 #' @export
-ld_loader <- function(R_list = NULL, X_list = NULL,
-                      ld_meta_path = NULL, regions = NULL,
-                      LD_info = NULL,
-                      return_genotype = FALSE,
-                      max_variants = NULL) {
+ldLoader <- function(rList = NULL, xList = NULL,
+                     ldMetaPath = NULL, regions = NULL,
+                     ldInfo = NULL,
+                     returnGenotype = FALSE,
+                     maxVariants = NULL) {
   # Validate: exactly one source
-  n_sources <- sum(!is.null(R_list), !is.null(X_list),
-                   !is.null(ld_meta_path), !is.null(LD_info))
-  if (n_sources != 1)
-    stop("Provide exactly one of R_list, X_list, ld_meta_path, or LD_info.")
+  nSources <- sum(!is.null(rList), !is.null(xList),
+                  !is.null(ldMetaPath), !is.null(ldInfo))
+  if (nSources != 1)
+    stop("Provide exactly one of rList, xList, ldMetaPath, or ldInfo.")
 
-  if (!is.null(R_list)) {
+  if (!is.null(rList)) {
     # List mode (R matrices)
     loader <- function(g) {
-      R <- R_list[[g]]
-      if (!is.null(max_variants) && ncol(R) > max_variants) {
-        keep <- sort(sample(ncol(R), max_variants))
+      R <- rList[[g]]
+      if (!is.null(maxVariants) && ncol(R) > maxVariants) {
+        keep <- sort(sample(ncol(R), maxVariants))
         R <- R[keep, keep]
       }
       R
     }
-  } else if (!is.null(X_list)) {
+  } else if (!is.null(xList)) {
     # List mode (genotype matrices)
     loader <- function(g) {
-      X <- X_list[[g]]
-      if (!is.null(max_variants) && ncol(X) > max_variants) {
-        keep <- sort(sample(ncol(X), max_variants))
+      X <- xList[[g]]
+      if (!is.null(maxVariants) && ncol(X) > maxVariants) {
+        keep <- sort(sample(ncol(X), maxVariants))
         X <- X[, keep]
       }
       X
     }
-  } else if (!is.null(ld_meta_path)) {
-    # Region mode: load on the fly via load_LD_matrix()
+  } else if (!is.null(ldMetaPath)) {
+    # Region mode: load on the fly via loadLdMatrix()
     if (is.null(regions))
-      stop("'regions' is required when using ld_meta_path.")
+      stop("'regions' is required when using ldMetaPath.")
 
     loader <- function(g) {
-      ld <- load_LD_matrix(ld_meta_path, region = regions[g],
-                           return_genotype = return_genotype)
-      mat <- extract_ld_matrix(ld, want_genotype = return_genotype)
-      if (!is.null(max_variants) && ncol(mat) > max_variants) {
-        keep <- sort(sample(ncol(mat), max_variants))
-        if (return_genotype || nrow(mat) > ncol(mat)) {
+      ld <- loadLdMatrix(ldMetaPath, region = regions[g],
+                         returnGenotype = returnGenotype)
+      mat <- extractLdMatrix(ld, wantGenotype = returnGenotype)
+      if (!is.null(maxVariants) && ncol(mat) > maxVariants) {
+        keep <- sort(sample(ncol(mat), maxVariants))
+        if (returnGenotype || nrow(mat) > ncol(mat)) {
           mat <- mat[, keep]
         } else {
           mat <- mat[keep, keep]
         }
       }
       # Center and scale genotype matrices
-      if (return_genotype || nrow(mat) > ncol(mat)) {
+      if (returnGenotype || nrow(mat) > ncol(mat)) {
         mat <- scale(mat)
         mat[is.na(mat)] <- 0
       }
       mat
     }
   } else {
-    # LD_info mode: load LD blocks by index from file paths
+    # ldInfo mode: load LD blocks by index from file paths
     # Supports all genotype formats (PLINK2, PLINK1, VCF, GDS) and
     # pre-computed .cor.xz + .bim/.pvar blocks
-    if (!is.data.frame(LD_info) || !"LD_file" %in% colnames(LD_info))
-      stop("LD_info must be a data.frame with column 'LD_file'.")
+    if (!is.data.frame(ldInfo) || !"LD_file" %in% colnames(ldInfo))
+      stop("ldInfo must be a data.frame with column 'LD_file'.")
 
     loader <- function(g) {
-      ld_path <- LD_info$LD_file[g]
+      ldPath <- ldInfo$LD_file[g]
 
       # Auto-detect format: genotype source or pre-computed block
-      if (is_genotype_source(ld_path)) {
-        geno <- load_genotype_region(ld_path)
-        mat <- compute_LD(geno)
+      if (isGenotypeSource(ldPath)) {
+        geno <- loadGenotypeRegion(ldPath)
+        mat <- computeLd(geno)
       } else {
         # Pre-computed .cor.xz block
-        snp_file <- if ("SNP_file" %in% colnames(LD_info)) {
-          LD_info$SNP_file[g]
+        snpFile <- if ("SNP_file" %in% colnames(ldInfo)) {
+          ldInfo$SNP_file[g]
         } else {
-          NULL  # let process_LD_matrix auto-detect .bim/.pvar/.pvar.zst
+          NULL  # let processLdMatrix auto-detect .bim/.pvar/.pvar.zst
         }
-        ld <- process_LD_matrix(ld_path, snp_file)
-        mat <- extract_ld_matrix(ld)
+        ld <- processLdMatrix(ldPath, snpFile)
+        mat <- extractLdMatrix(ld)
       }
 
-      if (!is.null(max_variants) && ncol(mat) > max_variants) {
-        keep <- sort(sample(ncol(mat), max_variants))
+      if (!is.null(maxVariants) && ncol(mat) > maxVariants) {
+        keep <- sort(sample(ncol(mat), maxVariants))
         mat <- mat[keep, keep]
       }
       mat
@@ -154,3 +154,4 @@ ld_loader <- function(R_list = NULL, X_list = NULL,
 
   loader
 }
+

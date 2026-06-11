@@ -25,7 +25,7 @@ library(pecotmr)
 ```
 
 Load fine-mapping results from the package example data and write them to
-temporary RDS files, since `xqtl_enrichment_wrapper` expects file paths.
+temporary RDS files, since `xqtlEnrichmentWrapper` expects file paths.
 ```{r}
 data(gwas_finemapping_example)
 data(qtl_finemapping_example)
@@ -64,11 +64,11 @@ plot(qtl[["region_1"]][["context_1"]][["susie_result_trimmed"]]$pip,
 ```
 
 ## Perform enrichment analysis
-The input for `xqtl_enrichment_wrapper` requires the paths for GWAS and QTL fine mapping data. You need to specify the list name of SuSiE results in each dataset as `xqtl_finemapping_obj` and the list name of variant names as `xqtl_varname_obj`. For example, if SuSiE results for QTL data are under `qtl[["region_1"]][["context_1"]][["susie_result_trimmed"]]`, then `xqtl_finemapping_obj` would be `c("context_1", "susie_result_trimmed")`, and `xqtl_varname_obj` would be `c("context_1", "variant_names")` since the variant names are stored directly under `context_1`.
+The input for `xqtlEnrichmentWrapper` requires the paths for GWAS and QTL fine mapping data. You need to specify the list name of SuSiE results in each dataset as `xqtl_finemapping_obj` and the list name of variant names as `xqtl_varname_obj`. For example, if SuSiE results for QTL data are under `qtl[["region_1"]][["context_1"]][["susie_result_trimmed"]]`, then `xqtl_finemapping_obj` would be `c("context_1", "susie_result_trimmed")`, and `xqtl_varname_obj` would be `c("context_1", "variant_names")` since the variant names are stored directly under `context_1`.
 For GWAS data, the fine mapping results and variant names are stored under the first layer directly, so you do not need to specify `gwas_finemapping_obj` and `gwas_varname_obj`. However, if your data does not follow this structure, you may need to specify these parameters accordingly.
 
 ```{r}
-enrich_res <- xqtl_enrichment_wrapper(
+enrich_res <- xqtlEnrichmentWrapper(
   gwas_files = gwas_path, xqtl_files = qtl_path,
   xqtl_finemapping_obj = c("context_1", "susie_result_trimmed"),
   xqtl_varname_obj = c("context_1", "variant_names")

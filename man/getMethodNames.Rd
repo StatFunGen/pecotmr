@@ -2,19 +2,19 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{getMethodNames}
 \alias{getMethodNames}
-\alias{getMethodNames,TWASWeights-method}
+\alias{getMethodNames,TwasWeights-method}
 \title{Get Method Names}
 \usage{
 getMethodNames(x)
 
-\S4method{getMethodNames}{TWASWeights}(x)
+\S4method{getMethodNames}{TwasWeights}(x)
 }
 \arguments{
-\item{x}{A \code{TWASWeights} object.}
+\item{x}{A \code{TwasWeights} object.}
 }
 \value{
 Character vector.
 }
 \description{
-Extract method names from a TWASWeights object.
+Extract method names from a TwasWeights object.
 }

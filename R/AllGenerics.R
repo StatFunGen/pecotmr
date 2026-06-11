@@ -13,8 +13,8 @@ NULL
 #' @title Estimate SNP Heritability
 #' @description Estimate SNP heritability from GWAS summary statistics using
 #'   one of three methods: LDER, g-LDSC, or HDL/sHDL.
-#' @param sumstats A \code{GWASSumStats} object.
-#' @param ld_ref An \code{LDStatistic} object (method-appropriate subclass).
+#' @param sumstats A \code{GwasSumStats} object.
+#' @param ldRef An \code{LdStatistic} object (method-appropriate subclass).
 #' @param method Character, one of "lder", "gldsc", "hdl".
 #' @param annotations An \code{AnnotationMatrix} object, or NULL for
 #'   unstratified estimation.
@@ -23,7 +23,7 @@ NULL
 #' @return An \code{H2Estimate} object.
 #' @export
 setGeneric("estimateH2",
-  function(sumstats, ld_ref, method = "lder", annotations = NULL,
+  function(sumstats, ldRef, method = "lder", annotations = NULL,
            local = FALSE, ...)
     standardGeneric("estimateH2")
 )
@@ -35,13 +35,13 @@ setGeneric("estimateH2",
 #' @title Compute LD Scores
 #' @description Compute LD scores from an LD reference, optionally
 #'   stratified by annotations.
-#' @param ld_ref An \code{LDStatistic} object.
+#' @param ldRef An \code{LdStatistic} object.
 #' @param annotations An \code{AnnotationMatrix} object, or NULL.
 #' @param ... Additional arguments.
 #' @return A numeric matrix of LD scores (SNPs x annotations+1).
 #' @export
 setGeneric("computeLdScores",
-  function(ld_ref, annotations = NULL, ...)
+  function(ldRef, annotations = NULL, ...)
     standardGeneric("computeLdScores")
 )
 
@@ -68,18 +68,18 @@ setGeneric("readGenotypes",
 #' @description Read and standardize GWAS summary statistics from file.
 #'   Optionally uses MungeSumStats for format detection and QC.
 #' @param path Character, path to the summary statistics file.
-#' @param trait_name Character, name for the trait.
+#' @param traitName Character, name for the trait.
 #' @param genome Character, genome build (e.g., "hg19", "hg38").
 #'   If NULL, inferred by MungeSumStats.
 #' @param n Numeric, sample size (if not in the file).
-#' @param use_mungesumstats Logical, whether to use MungeSumStats for
+#' @param useMungesumstats Logical, whether to use MungeSumStats for
 #'   standardization. Default TRUE if available.
 #' @param ... Additional arguments.
-#' @return A \code{GWASSumStats} object.
+#' @return A \code{GwasSumStats} object.
 #' @export
 setGeneric("readSumstats",
-  function(path, trait_name = "trait", genome = NULL, n = NULL,
-           use_mungesumstats = TRUE, ...)
+  function(path, traitName = "trait", genome = NULL, n = NULL,
+           useMungesumstats = TRUE, ...)
     standardGeneric("readSumstats")
 )
 
@@ -89,15 +89,15 @@ setGeneric("readSumstats",
 #'   AnnotationMatrix.
 #' @param paths Named character vector of file paths, or a named list
 #'   of GRanges objects. Names become annotation names.
-#' @param snp_ranges A \code{GRanges} object defining SNP positions.
-#' @param annotation_meta A \code{data.frame} with annotation metadata
+#' @param snpRanges A \code{GRanges} object defining SNP positions.
+#' @param annotationMeta A \code{data.frame} with annotation metadata
 #'   (name, tier, type). If NULL, auto-detected from file format.
 #' @param genome Character, genome build.
 #' @param ... Additional arguments.
 #' @return An \code{AnnotationMatrix} object.
 #' @export
 setGeneric("readAnnotations",
-  function(paths, snp_ranges, annotation_meta = NULL,
+  function(paths, snpRanges, annotationMeta = NULL,
            genome = "hg19", ...)
     standardGeneric("readAnnotations")
 )
@@ -130,85 +130,85 @@ setGeneric("getScoreStats",
   function(object) standardGeneric("getScoreStats"))
 
 # =============================================================================
-# GWASSumStats accessor generics
+# GwasSumStats accessor generics
 # =============================================================================
 
 #' @title Get Z-scores
-#' @description Extract z-score vector from a GWASSumStats object.
-#' @param x A \code{GWASSumStats} object.
+#' @description Extract z-score vector from a GwasSumStats object.
+#' @param x A \code{GwasSumStats} object.
 #' @return Numeric vector of z-scores.
 #' @export
 setGeneric("getZ", function(x) standardGeneric("getZ"))
 
 #' @title Get Sample Sizes
-#' @description Extract sample size vector from a GWASSumStats object.
-#' @param x A \code{GWASSumStats} object.
+#' @description Extract sample size vector from a GwasSumStats object.
+#' @param x A \code{GwasSumStats} object.
 #' @return Numeric vector of sample sizes.
 #' @export
 setGeneric("getN", function(x) standardGeneric("getN"))
 
 #' @title Get Minor Allele Frequencies
-#' @description Extract MAF vector from a GWASSumStats object.
-#' @param x A \code{GWASSumStats} object.
+#' @description Extract MAF vector from a GwasSumStats object.
+#' @param x A \code{GwasSumStats} object.
 #' @return Numeric vector of MAFs, or NULL if not available.
 #' @export
 setGeneric("getMaf", function(x) standardGeneric("getMaf"))
 
 #' @title Get Number of SNPs
-#' @description Get the number of SNPs in a GWASSumStats object.
-#' @param x A \code{GWASSumStats} object.
+#' @description Get the number of SNPs in a GwasSumStats object.
+#' @param x A \code{GwasSumStats} object.
 #' @return Integer.
 #' @export
 setGeneric("nSnps", function(x) standardGeneric("nSnps"))
 
 #' @title Subset by Chromosome
-#' @description Extract a chromosome-specific subset of a GWASSumStats object.
-#' @param x A \code{GWASSumStats} object.
+#' @description Extract a chromosome-specific subset of a GwasSumStats object.
+#' @param x A \code{GwasSumStats} object.
 #' @param chr Character, chromosome name (e.g., "1", "chr1").
-#' @return A \code{GWASSumStats} object.
+#' @return A \code{GwasSumStats} object.
 #' @export
 setGeneric("subsetChr", function(x, chr) standardGeneric("subsetChr"))
 
 #' @title Get Phenotype Variance
-#' @description Extract phenotype variance from a GWASSumStats object.
-#' @param x A \code{GWASSumStats} object.
+#' @description Extract phenotype variance from a GwasSumStats object.
+#' @param x A \code{GwasSumStats} object.
 #' @return Numeric phenotype variance, or NULL.
 #' @export
 setGeneric("getVarY", function(x) standardGeneric("getVarY"))
 
 # =============================================================================
-# LDData accessor generics
+# LdData accessor generics
 # =============================================================================
 
 #' @title Get LD Correlation Matrix
-#' @description Extract the LD correlation matrix from an \code{LDData}
+#' @description Extract the LD correlation matrix from an \code{LdData}
 #'   object. If only a genotype handle is available, recomputes R from
 #'   genotypes on the fly.
-#' @param x An \code{LDData} object.
+#' @param x An \code{LdData} object.
 #' @return A correlation matrix, or a list of per-block matrices.
 #' @export
 setGeneric("getCorrelation", function(x) standardGeneric("getCorrelation"))
 
 #' @title Get Genotype Matrix
-#' @description Extract genotype matrix from an \code{LDData} object via
+#' @description Extract genotype matrix from an \code{LdData} object via
 #'   the genotype handle. Returns NULL if no handle is available.
-#' @param x An \code{LDData} object.
+#' @param x An \code{LdData} object.
 #' @return A numeric matrix (samples x variants), a list of matrices
 #'   for mixture panels, or NULL.
 #' @export
 setGeneric("getGenotypes", function(x) standardGeneric("getGenotypes"))
 
 #' @title Check Genotype Availability
-#' @description Check whether an \code{LDData} object has a genotype
+#' @description Check whether an \code{LdData} object has a genotype
 #'   handle for extracting raw genotypes.
-#' @param x An \code{LDData} object.
+#' @param x An \code{LdData} object.
 #' @return Logical.
 #' @export
 setGeneric("hasGenotypes", function(x) standardGeneric("hasGenotypes"))
 
 #' @title Get Variant IDs
-#' @description Extract variant ID vector from an \code{LDData} object.
-#' @param x An \code{LDData} object.
+#' @description Extract variant ID vector from an \code{LdData} object.
+#' @param x An \code{LdData} object.
 #' @return Character vector of variant IDs.
 #' @export
 setGeneric("getVariantIds", function(x) standardGeneric("getVariantIds"))
@@ -222,16 +222,16 @@ setGeneric("getVariantInfo", function(x) standardGeneric("getVariantInfo"))
 
 #' @title Get Reference Panel
 #' @description Extract reference panel metadata as a data.frame from
-#'   an \code{LDData} object, including chrom and pos columns.
-#' @param x An \code{LDData} object.
+#'   an \code{LdData} object, including chrom and pos columns.
+#' @param x An \code{LdData} object.
 #' @return A data.frame with variant metadata including chrom, pos, A1, A2.
 #' @export
 setGeneric("getRefPanel", function(x) standardGeneric("getRefPanel"))
 
 #' @title Get Block Metadata
-#' @description Extract block metadata from an \code{LDData} object.
-#' @param x An \code{LDData} object.
-#' @return An \code{LDBlocks} or \code{data.frame}.
+#' @description Extract block metadata from an \code{LdData} object.
+#' @param x An \code{LdData} object.
+#' @return An \code{LdBlocks} or \code{data.frame}.
 #' @export
 setGeneric("getBlockMetadata",
   function(x) standardGeneric("getBlockMetadata"))
@@ -333,7 +333,7 @@ setGeneric("getGrange", function(x) standardGeneric("getGrange"))
 #' @param x A \code{MultivariateRegionalData} object.
 #' @return A numeric matrix (samples x conditions).
 #' @export
-setGeneric("getYMatrix", function(x) standardGeneric("getYMatrix"))
+setGeneric("getY", function(x) standardGeneric("getY"))
 
 #' @title Get Y Scaling Factors
 #' @description Per-condition scaling factors used for residualized
@@ -341,7 +341,7 @@ setGeneric("getYMatrix", function(x) standardGeneric("getYMatrix"))
 #' @param x A \code{MultivariateRegionalData} object.
 #' @return A numeric vector (length = number of conditions).
 #' @export
-setGeneric("getYScalar", function(x) standardGeneric("getYScalar"))
+setGeneric("getScaling", function(x) standardGeneric("getScaling"))
 
 # =============================================================================
 # FineMappingResult accessor generics
@@ -352,7 +352,7 @@ setGeneric("getYScalar", function(x) standardGeneric("getYScalar"))
 #' @param x A \code{FineMappingResult} object.
 #' @return A named numeric vector of PIPs.
 #' @export
-setGeneric("getPIP", function(x) standardGeneric("getPIP"))
+setGeneric("getPip", function(x) standardGeneric("getPip"))
 
 #' @title Get Trimmed Fit
 #' @description Extract the trimmed SuSiE fit from a FineMappingResult.
@@ -381,8 +381,8 @@ setGeneric("getTopLoci", function(x) standardGeneric("getTopLoci"))
 #' @param coverage Numeric, coverage level to extract.
 #' @return A data.frame of credible set information.
 #' @export
-setGeneric("getCS",
-  function(x, coverage = 0.95) standardGeneric("getCS"))
+setGeneric("getCs",
+  function(x, coverage = 0.95) standardGeneric("getCs"))
 
 #' @title Get Log Bayes Factors
 #' @description Extract per-variant log Bayes factors from a fine-mapping result.
@@ -391,7 +391,7 @@ setGeneric("getCS",
 #' @return A data.frame with columns \code{variant_id} and one numeric column
 #'   per effect containing log Bayes factors.
 #' @export
-setGeneric("getLBF", function(x) standardGeneric("getLBF"))
+setGeneric("getLbf", function(x) standardGeneric("getLbf"))
 
 #' @title Get Per-Effect Fine-Mapping Summary
 #' @description Extract per-effect information from a fine-mapping result:
@@ -402,12 +402,12 @@ setGeneric("getLBF", function(x) standardGeneric("getLBF"))
 setGeneric("getEffects", function(x) standardGeneric("getEffects"))
 
 # =============================================================================
-# TWASWeights accessor generics
+# TwasWeights accessor generics
 # =============================================================================
 
 #' @title Get TWAS Weight Matrices
-#' @description Extract weight matrices from a TWASWeights object.
-#' @param x A \code{TWASWeights} object.
+#' @description Extract weight matrices from a TwasWeights object.
+#' @param x A \code{TwasWeights} object.
 #' @param method Character, specific method name. If NULL, returns all.
 #' @return A matrix or named list of matrices.
 #' @export
@@ -416,23 +416,23 @@ setGeneric("getWeights",
 
 #' @title Get Standardized Flag
 #' @description Check whether weights are on the standardized (correlation) scale.
-#' @param x A \code{TWASWeights} object.
+#' @param x A \code{TwasWeights} object.
 #' @return Logical.
 #' @export
 setGeneric("getStandardized", function(x) standardGeneric("getStandardized"))
 
 #' @title Get CV Performance
 #' @description Extract cross-validation performance metrics.
-#' @param x A \code{TWASWeights} object.
+#' @param x A \code{TwasWeights} object.
 #' @param method Character, specific method name. If NULL, returns all.
 #' @return A list or single element.
 #' @export
-setGeneric("getCVPerformance",
-  function(x, method = NULL) standardGeneric("getCVPerformance"))
+setGeneric("getCvPerformance",
+  function(x, method = NULL) standardGeneric("getCvPerformance"))
 
 #' @title Get Model Fits
-#' @description Extract fitted model objects from a TWASWeights object.
-#' @param x A \code{TWASWeights} object.
+#' @description Extract fitted model objects from a TwasWeights object.
+#' @param x A \code{TwasWeights} object.
 #' @param method Character, specific method name. If NULL, returns all.
 #' @return A list or single element.
 #' @export
@@ -440,34 +440,34 @@ setGeneric("getFits",
   function(x, method = NULL) standardGeneric("getFits"))
 
 #' @title Get Method Names
-#' @description Extract method names from a TWASWeights object.
-#' @param x A \code{TWASWeights} object.
+#' @description Extract method names from a TwasWeights object.
+#' @param x A \code{TwasWeights} object.
 #' @return Character vector.
 #' @export
 setGeneric("getMethodNames", function(x) standardGeneric("getMethodNames"))
 
 #' @title Get Molecular ID
-#' @description Extract molecular/gene identifier from a TWASWeights object.
-#' @param x A \code{TWASWeights} object.
+#' @description Extract molecular/gene identifier from a TwasWeights object.
+#' @param x A \code{TwasWeights} object.
 #' @return Character string (length 0 or 1).
 #' @export
 setGeneric("getMolecularId", function(x) standardGeneric("getMolecularId"))
 
 #' @title Get Data Type
-#' @description Extract data type metadata from a TWASWeights object.
-#' @param x A \code{TWASWeights} object.
+#' @description Extract data type metadata from a TwasWeights object.
+#' @param x A \code{TwasWeights} object.
 #' @return A named list of data types per context, or NULL.
 #' @export
 setGeneric("getDataType", function(x) standardGeneric("getDataType"))
 
 # =============================================================================
-# AlleleQCResult accessor generics
+# AlleleQcResult accessor generics
 # =============================================================================
 
 #' @title Get Harmonized Variant Data
 #' @description Extract the post-QC, reference-harmonized variants from an
-#'   \code{AlleleQCResult}.
-#' @param x An \code{AlleleQCResult} object.
+#'   \code{AlleleQcResult}.
+#' @param x An \code{AlleleQcResult} object.
 #' @return A \code{data.frame} of harmonized variants.
 #' @export
 setGeneric("getHarmonizedData", function(x) standardGeneric("getHarmonizedData"))
@@ -475,54 +475,54 @@ setGeneric("getHarmonizedData", function(x) standardGeneric("getHarmonizedData")
 #' @title Get Allele QC Summary
 #' @description Extract the full per-variant merge/flip/strand diagnostics
 #'   produced by allele QC.
-#' @param x An \code{AlleleQCResult} object.
+#' @param x An \code{AlleleQcResult} object.
 #' @return A \code{data.frame} with the diagnostic columns.
 #' @export
-setGeneric("getQCSummary", function(x) standardGeneric("getQCSummary"))
+setGeneric("getQcSummary", function(x) standardGeneric("getQcSummary"))
 
 # =============================================================================
-# QCResult accessor generics
+# QcResult accessor generics
 # =============================================================================
 
 #' @title Get LD Data
-#' @description Extract the post-QC LDData payload from a QCResult.
-#' @param x A \code{QCResult} object.
-#' @return An \code{LDData} object, or NULL when QC produced no LD reference.
+#' @description Extract the post-QC LdData payload from a QcResult.
+#' @param x A \code{QcResult} object.
+#' @return An \code{LdData} object, or NULL when QC produced no LD reference.
 #' @export
-setGeneric("getLDData", function(x) standardGeneric("getLDData"))
+setGeneric("getLdData", function(x) standardGeneric("getLdData"))
 
 #' @title Get RSS Input
-#' @description Extract the post-QC summary-statistic record (sumstats, n, var_y).
-#' @param x A \code{QCResult} object.
-#' @return A list with \code{sumstats}, \code{n}, \code{var_y}.
+#' @description Extract the post-QC summary-statistic record (sumstats, n, varY).
+#' @param x A \code{QcResult} object.
+#' @return A list with \code{sumstats}, \code{n}, \code{varY}.
 #' @export
-setGeneric("getRSSInput", function(x) standardGeneric("getRSSInput"))
+setGeneric("getRssInput", function(x) standardGeneric("getRssInput"))
 
 #' @title Get Preprocess Snapshot
 #' @description Extract the pre-imputation snapshot (\code{sumstats},
-#'   \code{ld_data}) captured before any LD-mismatch QC or RAISS imputation.
-#' @param x A \code{QCResult} object.
-#' @return A list with \code{sumstats} and \code{ld_data}.
+#'   \code{ldData}) captured before any LD-mismatch QC or RAISS imputation.
+#' @param x A \code{QcResult} object.
+#' @return A list with \code{sumstats} and \code{ldData}.
 #' @export
 setGeneric("getPreprocess", function(x) standardGeneric("getPreprocess"))
 
 #' @title Get Outlier Number
 #' @description Number of LD-mismatch outliers removed during QC.
-#' @param x A \code{QCResult} object.
+#' @param x A \code{QcResult} object.
 #' @return Integer count.
 #' @export
 setGeneric("getOutlierNumber", function(x) standardGeneric("getOutlierNumber"))
 
 #' @title Is Skipped
 #' @description Whether QC short-circuited (e.g. no signals, too few variants).
-#' @param x A \code{QCResult} object.
+#' @param x A \code{QcResult} object.
 #' @return Single logical.
 #' @export
 setGeneric("isSkipped", function(x) standardGeneric("isSkipped"))
 
 #' @title Get Skip Reason
 #' @description Why QC short-circuited; empty string if not skipped.
-#' @param x A \code{QCResult} object.
+#' @param x A \code{QcResult} object.
 #' @return Character scalar.
 #' @export
 setGeneric("getSkipReason", function(x) standardGeneric("getSkipReason"))
@@ -537,16 +537,16 @@ setGeneric("getSkipReason", function(x) standardGeneric("getSkipReason"))
 #' and writes it to disk. Supports bgzipped VCF (.vcf.gz/.vcf.bgz) and
 #' BCF (.bcf) output formats via VariantAnnotation and Rsamtools.
 #'
-#' @param x Input data: a \code{GWASSumStats} object, a
+#' @param x Input data: a \code{GwasSumStats} object, a
 #'   \code{FineMappingResult} object, or a data.frame with columns
 #'   \code{chrom}, \code{pos}, \code{ref}, \code{alt}.
-#' @param output_path File path for output. Extension determines format:
+#' @param outputPath File path for output. Extension determines format:
 #'   \code{.vcf.gz} or \code{.vcf.bgz} for bgzipped VCF,
 #'   \code{.bcf} for BCF, \code{.vcf} for uncompressed VCF.
-#' @param sample_name Name for the VCF sample column (default: trait name or
+#' @param sampleName Name for the VCF sample column (default: trait name or
 #'   method name from the S4 object).
 #' @param ... Additional arguments passed to methods.
 #' @return Invisible path to the written file.
 #' @export
 setGeneric("writeSumstatsVcf",
-  function(x, output_path, sample_name = NULL, ...) standardGeneric("writeSumstatsVcf"))
+  function(x, outputPath, sampleName = NULL, ...) standardGeneric("writeSumstatsVcf"))

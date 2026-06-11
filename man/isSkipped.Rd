@@ -2,15 +2,15 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{isSkipped}
 \alias{isSkipped}
-\alias{isSkipped,QCResult-method}
+\alias{isSkipped,QcResult-method}
 \title{Is Skipped}
 \usage{
 isSkipped(x)
 
-\S4method{isSkipped}{QCResult}(x)
+\S4method{isSkipped}{QcResult}(x)
 }
 \arguments{
-\item{x}{A \code{QCResult} object.}
+\item{x}{A \code{QcResult} object.}
 }
 \value{
 Single logical.

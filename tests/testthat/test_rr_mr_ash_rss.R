@@ -1,10 +1,10 @@
 context("regularized_regression - mr_ash_rss")
 
 # ============================================================================
-# mr_ash_rss_weights - dispatch + smoke test
+# mrAshRssWeights - dispatch + smoke test
 # ============================================================================
 
-test_that("mr_ash_rss_weights forwards arguments to susieR::mr.ash.rss", {
+test_that("mrAshRssWeights forwards arguments to susieR::mr.ash.rss", {
   set.seed(42)
   p <- 10
   bhat <- rnorm(p, sd = 0.1)
@@ -35,8 +35,8 @@ test_that("mr_ash_rss_weights forwards arguments to susieR::mr.ash.rss", {
       list(mu1 = seq_len(length(bhat)) * 0.01)
     }
   )
-  result <- mr_ash_rss_weights(
-    stat = stat, LD = R, var_y = 1.5, sigma2_e = 0.4,
+  result <- mrAshRssWeights(
+    stat = stat, LD = R, varY = 1.5, sigma2E = 0.4,
     s0 = c(0, 0.1, 0.2), w0 = c(0.5, 0.3, 0.2), z = z_vec,
     tol = 1e-6
   )
@@ -53,7 +53,7 @@ test_that("mr_ash_rss_weights forwards arguments to susieR::mr.ash.rss", {
   expect_equal(result, seq_len(p) * 0.01)
 })
 
-test_that("mr_ash_rss_weights returns a numeric vector of expected length", {
+test_that("mrAshRssWeights returns a numeric vector of expected length", {
   skip_if_not_installed("susieR")
   set.seed(2024)
   n <- 500
@@ -66,9 +66,9 @@ test_that("mr_ash_rss_weights returns a numeric vector of expected length", {
   shat <- rep(1 / sqrt(n - 1), p)
   R <- cor(X)
   stat <- list(b = bhat, seb = shat, n = rep(n, p))
-  w <- mr_ash_rss_weights(
-    stat = stat, LD = R, var_y = var(y),
-    sigma2_e = NULL,
+  w <- mrAshRssWeights(
+    stat = stat, LD = R, varY = var(y),
+    sigma2E = NULL,
     s0 = c(0, 0.01, 0.1, 0.5),
     w0 = rep(1 / 4, 4)
   )

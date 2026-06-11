@@ -4,26 +4,19 @@
 \alias{computeBaselineEnrichment}
 \title{Compute Baseline Annotation Enrichment Quantities}
 \usage{
-computeBaselineEnrichment(
-  tau,
-  tau_se,
-  tau_blocks,
-  baseline_mat,
-  annot_names,
-  h2
-)
+computeBaselineEnrichment(tau, tauSe, tauBlocks, baselineMat, annotNames, h2)
 }
 \arguments{
 \item{tau}{Numeric vector of per-annotation regression coefficients.}
 
-\item{tau_se}{Numeric vector of SE for tau.}
+\item{tauSe}{Numeric vector of SE for tau.}
 
-\item{tau_blocks}{Numeric matrix (n_blocks x n_annotations) of jackknife
+\item{tauBlocks}{Numeric matrix (nBlocks x nAnnotations) of jackknife
 block-level tau values, or NULL.}
 
-\item{baseline_mat}{Numeric matrix (n_snps x n_annotations).}
+\item{baselineMat}{Numeric matrix (nSnps x nAnnotations).}
 
-\item{annot_names}{Character vector of annotation names.}
+\item{annotNames}{Character vector of annotation names.}
 
 \item{h2}{Numeric scalar, total estimated h2.}
 }

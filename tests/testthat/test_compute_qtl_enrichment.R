@@ -1,4 +1,4 @@
-context("compute_qtl_enrichment")
+context("computeQtlEnrichment")
 
 generate_mock_data <- function(seed=1, num_pips = 1000, num_susie_fits = 2) {
   # Simulate fake data for gwas_pip
@@ -28,67 +28,67 @@ generate_mock_data <- function(seed=1, num_pips = 1000, num_susie_fits = 2) {
   return(list(gwas_fit=gwas_fit, susie_fits=susie_fits))
 }
 
-test_that("compute_qtl_enrichment dummy data single-threaded works",{
+test_that("computeQtlEnrichment dummy data single-threaded works",{
   local_mocked_bindings(
-      qtl_enrichment_rcpp = function(...) TRUE)
+      qtlEnrichmentRcpp = function(...) TRUE)
   input_data <- generate_mock_data(seed=1, num_pips=10)
   expect_warning(
-    compute_qtl_enrichment(input_data$gwas_fit$pip, input_data$susie_fits, lambda = 1, ImpN = 10, num_threads = 1),
-    "num_gwas is not provided. Estimating pi_gwas from the data. Note that this estimate may be biased if the input gwas_pip does not contain genome-wide variants.")
+    computeQtlEnrichment(input_data$gwas_fit$pip, input_data$susie_fits, lambda = 1, impN = 10, numThreads = 1),
+    "numGwas is not provided. Estimating piGwas from the data. Note that this estimate may be biased if the input gwasPip does not contain genome-wide variants.")
   expect_warning(
-    compute_qtl_enrichment(input_data$gwas_fit$pip, input_data$susie_fits, lambda = 1, ImpN = 10, num_threads = 1),
-    "pi_qtl is not provided. Estimating pi_qtl from the data. Note that this estimate may be biased if either 1) the input susie_qtl_regions does not have enough data, or 2) the single effects only include variables inside of credible sets or signal clusters.")
-  res <- expect_warning(compute_qtl_enrichment(input_data$gwas_fit$pip, input_data$susie_fits, num_gwas=5000, pi_qtl=0.49819, lambda = 1, ImpN = 10, num_threads = 1))
+    computeQtlEnrichment(input_data$gwas_fit$pip, input_data$susie_fits, lambda = 1, impN = 10, numThreads = 1),
+    "piQtl is not provided. Estimating piQtl from the data. Note that this estimate may be biased if either 1) the input susieQtlRegions does not have enough data, or 2) the single effects only include variables inside of credible sets or signal clusters.")
+  res <- expect_warning(computeQtlEnrichment(input_data$gwas_fit$pip, input_data$susie_fits, numGwas=5000, piQtl=0.49819, lambda = 1, impN = 10, numThreads = 1))
   expect_true(length(res) > 0)
 })
 
-test_that("compute_qtl_enrichment dummy data single thread and multi-threaded are equivalent",{
+test_that("computeQtlEnrichment dummy data single thread and multi-threaded are equivalent",{
   local_mocked_bindings(
-      qtl_enrichment_rcpp = function(...) TRUE)
+      qtlEnrichmentRcpp = function(...) TRUE)
   input_data <- generate_mock_data(seed=1, num_pips=10)
-  res_single <- expect_warning(compute_qtl_enrichment(input_data$gwas_fit$pip, input_data$susie_fits, num_gwas=5000, pi_qtl=0.49819, lambda = 1, ImpN = 10, num_threads = 1))
-  res_multi <- expect_warning(compute_qtl_enrichment(input_data$gwas_fit$pip, input_data$susie_fits, num_gwas=5000, pi_qtl=0.49819, lambda = 1, ImpN = 10, num_threads = 2))
+  res_single <- expect_warning(computeQtlEnrichment(input_data$gwas_fit$pip, input_data$susie_fits, numGwas=5000, piQtl=0.49819, lambda = 1, impN = 10, numThreads = 1))
+  res_multi <- expect_warning(computeQtlEnrichment(input_data$gwas_fit$pip, input_data$susie_fits, numGwas=5000, piQtl=0.49819, lambda = 1, impN = 10, numThreads = 2))
   expect_equal(res_single, res_multi)
 })
 
-# ---- error paths (compute_qtl_enrichment.R lines 86, 87, 91) ----
-test_that("compute_qtl_enrichment errors when pi_gwas is zero", {
+# ---- error paths (computeQtlEnrichment.R lines 86, 87, 91) ----
+test_that("computeQtlEnrichment errors when pi_gwas is zero", {
   gwas_pip <- rep(0, 10)
   names(gwas_pip) <- paste0("snp", 1:10)
   susie_fits <- list(fit1 = list(pip = setNames(runif(10), paste0("snp", 1:10)),
                                   alpha = matrix(1, 1, 10),
                                   prior_variance = 1))
   expect_error(
-    compute_qtl_enrichment(gwas_pip, susie_fits, pi_qtl = 0.5),
+    computeQtlEnrichment(gwas_pip, susie_fits, piQtl = 0.5),
     "No association signal found in GWAS data"
   )
 })
 
-test_that("compute_qtl_enrichment errors when pi_qtl is zero", {
+test_that("computeQtlEnrichment errors when pi_qtl is zero", {
   gwas_pip <- runif(10)
   names(gwas_pip) <- paste0("snp", 1:10)
   susie_fits <- list(fit1 = list(pip = setNames(rep(0, 10), paste0("snp", 1:10)),
                                   alpha = matrix(1, 1, 10),
                                   prior_variance = 1))
   expect_error(
-    suppressWarnings(compute_qtl_enrichment(gwas_pip, susie_fits, num_gwas = 1000, pi_qtl = 0)),
+    suppressWarnings(computeQtlEnrichment(gwas_pip, susie_fits, numGwas = 1000, piQtl = 0)),
     "No QTL associated"
   )
 })
 
-test_that("compute_qtl_enrichment errors when gwas_pip has no names", {
+test_that("computeQtlEnrichment errors when gwas_pip has no names", {
   gwas_pip <- runif(10)  # no names
   susie_fits <- list(fit1 = list(pip = setNames(runif(10), paste0("snp", 1:10)),
                                   alpha = matrix(1, 1, 10),
                                   prior_variance = 1))
   expect_error(
-    suppressWarnings(compute_qtl_enrichment(gwas_pip, susie_fits, num_gwas = 1000, pi_qtl = 0.5)),
-    "Variant names are missing in gwas_pip"
+    suppressWarnings(computeQtlEnrichment(gwas_pip, susie_fits, numGwas = 1000, piQtl = 0.5)),
+    "Variant names are missing in gwasPip"
   )
 })
 
-# ---- real C++ qtl_enrichment_rcpp integration test ----
-test_that("compute_qtl_enrichment calls real C++ enrichment code and returns expected keys", {
+# ---- real C++ qtlEnrichmentRcpp integration test ----
+test_that("computeQtlEnrichment calls real C++ enrichment code and returns expected keys", {
   set.seed(42)
   n_snps <- 50
   variant_names <- paste0("1:", 1:n_snps, ":A:G")
@@ -113,9 +113,9 @@ test_that("compute_qtl_enrichment calls real C++ enrichment code and returns exp
 
   # Call without mocking - exercises the real C++ code
   res <- suppressWarnings(
-    compute_qtl_enrichment(gwas_pip, susie_fits,
-                           num_gwas = 5000, pi_qtl = 0.5,
-                           lambda = 1, ImpN = 5, num_threads = 1)
+    computeQtlEnrichment(gwas_pip, susie_fits,
+                           numGwas = 5000, piQtl = 0.5,
+                           lambda = 1, impN = 5, numThreads = 1)
   )
   expect_type(res, "list")
   # The enrichment results are in res[[1]] (the C++ output list)
@@ -131,10 +131,10 @@ test_that("compute_qtl_enrichment calls real C++ enrichment code and returns exp
   expect_true(all(is.finite(numeric_vals)))
 })
 
-# ---- unmatched variants tracking (compute_qtl_enrichment.R line 102) ----
-test_that("compute_qtl_enrichment tracks unmatched QTL variants", {
+# ---- unmatched variants tracking (computeQtlEnrichment.R line 102) ----
+test_that("computeQtlEnrichment tracks unmatched QTL variants", {
   local_mocked_bindings(
-    qtl_enrichment_rcpp = function(...) TRUE
+    qtlEnrichmentRcpp = function(...) TRUE
   )
   gwas_pip <- runif(10)
   names(gwas_pip) <- paste0("1:", 1:10, ":A:G")
@@ -145,7 +145,7 @@ test_that("compute_qtl_enrichment tracks unmatched QTL variants", {
                                   alpha = matrix(runif(5), 1, 5),
                                   prior_variance = 1))
   res <- suppressWarnings(
-    compute_qtl_enrichment(gwas_pip, susie_fits, num_gwas = 1000, pi_qtl = 0.5)
+    computeQtlEnrichment(gwas_pip, susie_fits, numGwas = 1000, piQtl = 0.5)
   )
   expect_true("unused_xqtl_variants" %in% names(res))
 })

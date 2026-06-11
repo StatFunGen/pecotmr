@@ -1,4 +1,4 @@
-context("fsusie_wrapper")
+context("fsusieWrapper")
 
 # ---- cal_purity ----
 test_that("cal_purity with min method and single element CS", {
@@ -6,7 +6,7 @@ test_that("cal_purity with min method and single element CS", {
   X <- matrix(rnorm(100), nrow = 10, ncol = 10)
   l_cs <- list(c(1))
 
-  result <- pecotmr:::cal_purity(l_cs, X, method = "min")
+  result <- pecotmr:::calPurity(l_cs, X, method = "min")
   expect_equal(result[[1]], 1)
 })
 
@@ -15,7 +15,7 @@ test_that("cal_purity with min method and multi-element CS", {
   X <- matrix(rnorm(200), nrow = 20, ncol = 10)
   l_cs <- list(c(1, 2, 3))
 
-  result <- pecotmr:::cal_purity(l_cs, X, method = "min")
+  result <- pecotmr:::calPurity(l_cs, X, method = "min")
   expect_length(result, 1)
   # Manually compute expected: min off-diagonal |cor|
   cormat <- abs(cor(X[, c(1, 2, 3)]))
@@ -28,7 +28,7 @@ test_that("cal_purity with non-min method returns three values", {
   X <- matrix(rnorm(200), nrow = 20, ncol = 10)
   l_cs <- list(c(1, 2, 3))
 
-  result <- pecotmr:::cal_purity(l_cs, X, method = "susie")
+  result <- pecotmr:::calPurity(l_cs, X, method = "susie")
   expect_length(result[[1]], 3)  # min, mean, median
   # Manually compute expected values
   cormat <- abs(cor(X[, c(1, 2, 3)]))
@@ -46,7 +46,7 @@ test_that("cal_purity with non-min method single element returns (1,1,1)", {
   X <- matrix(rnorm(100), nrow = 10, ncol = 10)
   l_cs <- list(c(1))
 
-  result <- pecotmr:::cal_purity(l_cs, X, method = "susie")
+  result <- pecotmr:::calPurity(l_cs, X, method = "susie")
   expect_equal(result[[1]], c(1, 1, 1))
 })
 
@@ -55,28 +55,28 @@ test_that("cal_purity with multiple credible sets", {
   X <- matrix(rnorm(200), nrow = 20, ncol = 10)
   l_cs <- list(c(1, 2), c(5, 6, 7))
 
-  result <- pecotmr:::cal_purity(l_cs, X, method = "min")
+  result <- pecotmr:::calPurity(l_cs, X, method = "min")
   expect_length(result, 2)
 })
 
-# ---- fsusie_get_cs ----
-# ---- fsusie_wrapper ----
-test_that("fsusie_wrapper errors when fsusieR is not installed", {
+# ---- fsusieGetCs ----
+# ---- fsusieWrapper ----
+test_that("fsusieWrapper errors when fsusieR is not installed", {
   skip_if(requireNamespace("fsusieR", quietly = TRUE),
           "fsusieR is installed, skipping not-installed test")
   set.seed(1)
   X <- matrix(rnorm(50), nrow = 10, ncol = 5)
   Y <- matrix(rnorm(40), nrow = 10, ncol = 4)
   expect_error(
-    fsusie_wrapper(
+    fsusieWrapper(
       X = X, Y = Y, pos = seq_len(4), L = 3, prior = "mixture_normal",
-      max_SNP_EM = 100, cov_lev = 0.95, min_purity = 0.5, max_scale = 5
+      maxSnpEm = 100, covLev = 0.95, minPurity = 0.5, maxScale = 5
     ),
     "fsusieR"
   )
 })
 
-test_that("fsusie_wrapper low-purity branch sets cs to list(NULL) and cs_corr to NULL", {
+test_that("fsusieWrapper low-purity branch sets cs to list(NULL) and cs_corr to NULL", {
   skip_if_not_installed("fsusieR")
   fake_fit <- list(
     cs = list(c(1, 2), c(3)),
@@ -91,16 +91,16 @@ test_that("fsusie_wrapper low-purity branch sets cs to list(NULL) and cs_corr to
   set.seed(1)
   X <- matrix(rnorm(50), nrow = 10, ncol = 5)
   Y <- matrix(rnorm(40), nrow = 10, ncol = 4)
-  out <- fsusie_wrapper(
+  out <- fsusieWrapper(
     X = X, Y = Y, pos = seq_len(4), L = 3, prior = "mixture_normal",
-    max_SNP_EM = 100, cov_lev = 0.95, min_purity = 0.5, max_scale = 5
+    maxSnpEm = 100, covLev = 0.95, minPurity = 0.5, maxScale = 5
   )
   expect_equal(out$cs, list(NULL))
   expect_equal(out$sets$cs, list(NULL))
   expect_null(out$cs_corr)
 })
 
-test_that("fsusie_wrapper high-purity branch builds sets and computes cs_corr", {
+test_that("fsusieWrapper high-purity branch builds sets and computes cs_corr", {
   skip_if_not_installed("fsusieR")
   set.seed(2)
   p <- 5
@@ -120,9 +120,9 @@ test_that("fsusie_wrapper high-purity branch builds sets and computes cs_corr", 
   )
   X <- matrix(rnorm(10 * p), nrow = 10, ncol = p)
   Y <- matrix(rnorm(40), nrow = 10, ncol = 4)
-  out <- fsusie_wrapper(
+  out <- fsusieWrapper(
     X = X, Y = Y, pos = seq_len(4), L = 3, prior = "mixture_normal",
-    max_SNP_EM = 100, cov_lev = 0.95, min_purity = 0.5, max_scale = 5
+    maxSnpEm = 100, covLev = 0.95, minPurity = 0.5, maxScale = 5
   )
   expect_length(out$sets$cs, 2)
   expect_equal(names(out$sets$cs), c("L1", "L2"))
@@ -130,7 +130,7 @@ test_that("fsusie_wrapper high-purity branch builds sets and computes cs_corr", 
   expect_equal(out$sets$requested_coverage, 0.95)
 })
 
-test_that("fsusie_get_cs creates susie-like sets", {
+test_that("fsusieGetCs creates susie-like sets", {
   set.seed(42)
   X <- matrix(rnorm(200), nrow = 20, ncol = 10)
 
@@ -142,7 +142,7 @@ test_that("fsusie_get_cs creates susie-like sets", {
     )
   )
 
-  result <- fsusie_get_cs(fSuSiE_obj, X, requested_coverage = 0.95)
+  result <- fsusieGetCs(fSuSiE_obj, X, requestedCoverage = 0.95)
 
   expect_type(result, "list")
   expect_true("cs" %in% names(result))

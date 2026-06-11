@@ -5,26 +5,26 @@
 \title{Construct a MultivariateRegionalData object}
 \usage{
 MultivariateRegionalData(
-  genotype_matrix,
-  Y_matrix,
-  Y_scalar,
-  dropped_samples = NULL,
+  genotypeMatrix,
+  Y,
+  scaling,
+  droppedSamples = NULL,
   region = NULL,
-  Y_coordinates = NULL
+  coordinates = NULL
 )
 }
 \arguments{
-\item{genotype_matrix}{Numeric matrix (samples x variants).}
+\item{genotypeMatrix}{Numeric matrix (samples x variants).}
 
-\item{Y_matrix}{Numeric matrix (samples x conditions).}
+\item{Y}{Numeric matrix (samples x conditions).}
 
-\item{Y_scalar}{Numeric vector of per-condition scaling factors.}
+\item{scaling}{Numeric vector of per-condition scaling factors.}
 
-\item{dropped_samples}{Character vector or list of dropped sample IDs.}
+\item{droppedSamples}{Character vector or list of dropped sample IDs.}
 
 \item{region}{A \code{GRanges} or NULL.}
 
-\item{Y_coordinates}{A data.frame of phenotype coordinates, or NULL.}
+\item{coordinates}{A data.frame of phenotype coordinates, or NULL.}
 }
 \value{
 A \code{MultivariateRegionalData} object.

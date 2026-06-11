@@ -4,15 +4,15 @@
 \alias{extractBlockGenotypes}
 \title{Extract Block Genotypes}
 \usage{
-extractBlockGenotypes(handle, snp_idx, mean_impute = TRUE)
+extractBlockGenotypes(handle, snpIdx, meanImpute = TRUE)
 }
 \arguments{
 \item{handle}{A \code{GenotypeHandle} object.}
 
-\item{snp_idx}{Integer vector of 1-based SNP indices into
-\code{handle@snp_info}.}
+\item{snpIdx}{Integer vector of 1-based SNP indices into
+\code{handle@snpInfo}.}
 
-\item{mean_impute}{Logical, whether to mean-impute missing values.
+\item{meanImpute}{Logical, whether to mean-impute missing values.
 Default TRUE.}
 }
 \value{

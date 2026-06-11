@@ -2,19 +2,19 @@
 % Please edit documentation in R/AllGenerics.R, R/gwas_sumstats.R
 \name{nSnps}
 \alias{nSnps}
-\alias{nSnps,GWASSumStats-method}
+\alias{nSnps,GwasSumStats-method}
 \title{Get Number of SNPs}
 \usage{
 nSnps(x)
 
-\S4method{nSnps}{GWASSumStats}(x)
+\S4method{nSnps}{GwasSumStats}(x)
 }
 \arguments{
-\item{x}{A \code{GWASSumStats} object.}
+\item{x}{A \code{GwasSumStats} object.}
 }
 \value{
 Integer.
 }
 \description{
-Get the number of SNPs in a GWASSumStats object.
+Get the number of SNPs in a GwasSumStats object.
 }

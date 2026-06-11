@@ -8,12 +8,12 @@ slalom(
   zScore,
   R = NULL,
   X = NULL,
-  standard_error = rep(1, length(zScore)),
-  abf_prior_variance = 0.04,
-  nlog10p_dentist_s_threshold = 4,
-  r2_threshold = 0.6,
-  lead_variant_choice = "pvalue",
-  ld_method = "sample"
+  standardError = rep(1, length(zScore)),
+  abfPriorVariance = 0.04,
+  nlog10pDentistSThreshold = 4,
+  r2Threshold = 0.6,
+  leadVariantChoice = "pvalue",
+  ldMethod = "sample"
 )
 }
 \arguments{
@@ -22,25 +22,25 @@ slalom(
 \item{R}{Square LD correlation matrix. Provide either \code{R} or \code{X}.}
 
 \item{X}{Genotype matrix (samples x SNPs). If provided, LD is computed via
-\code{compute_LD(X)}.}
+\code{computeLd(X)}.}
 
-\item{standard_error}{Optional numeric vector of standard errors corresponding
+\item{standardError}{Optional numeric vector of standard errors corresponding
 to each z-score. If not provided, a default value of 1 is assumed for all variants.}
 
-\item{abf_prior_variance}{Numeric, the prior effect size variance for ABF calculations.
+\item{abfPriorVariance}{Numeric, the prior effect size variance for ABF calculations.
 Default is 0.04.}
 
-\item{nlog10p_dentist_s_threshold}{Numeric, the -log10 DENTIST-S P value threshold
+\item{nlog10pDentistSThreshold}{Numeric, the -log10 DENTIST-S P value threshold
 for identifying outlier variants for prediction. Default is 4.0.}
 
-\item{r2_threshold}{Numeric, the r2 threshold for DENTIST-S outlier variants
+\item{r2Threshold}{Numeric, the r2 threshold for DENTIST-S outlier variants
 for prediction. Default is 0.6.}
 
-\item{lead_variant_choice}{Character, method to choose the lead variant, either
+\item{leadVariantChoice}{Character, method to choose the lead variant, either
 "pvalue" or "abf", with default "pvalue".}
 
-\item{ld_method}{Character string specifying the LD computation method when
-\code{X} is provided. Passed to \code{\link{compute_LD}}. One of
+\item{ldMethod}{Character string specifying the LD computation method when
+\code{X} is provided. Passed to \code{\link{computeLd}}. One of
 \code{"sample"} (default), \code{"population"}, or \code{"gcta"}.
 Ignored when \code{R} is provided directly.}
 }
@@ -55,11 +55,11 @@ from z-scores assuming a two-sided standard normal distribution.
 }
 \details{
 Provide either an LD correlation matrix \code{R} or a genotype matrix \code{X}
-(from which LD is derived automatically via \code{compute_LD}).
+(from which LD is derived automatically via \code{computeLd}).
 }
 \examples{
-results <- slalom(zScore, R = R, standard_error = standard_error)
+results <- slalom(zScore, R = R, standardError = standardError)
 }
 \seealso{
-\code{\link{dentist_single_window}}, \code{\link{resolve_LD_input}}
+\code{\link{dentistSingleWindow}}, \code{\link{resolveLdInput}}
 }

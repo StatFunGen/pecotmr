@@ -21,7 +21,7 @@ result list containing:
 \description{
 SuSiE RSS fine-mapping results for de-identified GWAS summary
 statistics. Suitable for use with \code{\link{xqtl_enrichment_wrapper}} and
-\code{\link{compute_qtl_enrichment}}. All variant identifiers are synthetic.
+\code{\link{computeQtlEnrichment}}. All variant identifiers are synthetic.
 }
 \examples{
 data(gwas_finemapping_example)

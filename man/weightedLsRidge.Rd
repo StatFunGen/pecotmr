@@ -4,7 +4,7 @@
 \alias{weightedLsRidge}
 \title{Ridge-Regularized Weighted Least Squares}
 \usage{
-weightedLsRidge(y, X, w, lambda = 0, penalize_intercept = FALSE)
+weightedLsRidge(y, X, w, lambda = 0, penalizeIntercept = FALSE)
 }
 \arguments{
 \item{y}{Numeric vector, response.}
@@ -16,7 +16,7 @@ weightedLsRidge(y, X, w, lambda = 0, penalize_intercept = FALSE)
 \item{lambda}{Numeric, ridge penalty. 0 = no penalty (delegates to
 \code{weightedLs}).}
 
-\item{penalize_intercept}{Logical. If FALSE (default), the last column
+\item{penalizeIntercept}{Logical. If FALSE (default), the last column
 of X (assumed to be the intercept) is not penalized.}
 }
 \value{

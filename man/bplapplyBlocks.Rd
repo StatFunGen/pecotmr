@@ -4,10 +4,10 @@
 \alias{bplapplyBlocks}
 \title{Apply Function Per Block with BiocParallel}
 \usage{
-bplapplyBlocks(block_indices, FUN, BPPARAM = NULL, ...)
+bplapplyBlocks(blockIndices, FUN, BPPARAM = NULL, ...)
 }
 \arguments{
-\item{block_indices}{List of SNP index vectors per block.}
+\item{blockIndices}{List of SNP index vectors per block.}
 
 \item{FUN}{Function to apply to each block's indices.}
 

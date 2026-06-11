@@ -2,14 +2,14 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{getVariantInfo}
 \alias{getVariantInfo}
-\alias{getVariantInfo,LDData-method}
+\alias{getVariantInfo,LdData-method}
 \alias{getVariantInfo,RegionalData-method}
 \alias{getVariantInfo,MultivariateRegionalData-method}
 \title{Get Variant GRanges}
 \usage{
 getVariantInfo(x)
 
-\S4method{getVariantInfo}{LDData}(x)
+\S4method{getVariantInfo}{LdData}(x)
 
 \S4method{getVariantInfo}{RegionalData}(x)
 

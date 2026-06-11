@@ -1,16 +1,16 @@
 #include "qtl_enrichment.hpp"
 
 [[cpp11::register]]
-cpp11::writable::list qtl_enrichment_rcpp(
-	SEXP r_gwas_pip, SEXP r_qtl_susie_fit,
-	double pi_gwas = 0, double pi_qtl = 0,
-	int ImpN = 25, double shrinkage_lambda = 1.0,
-	bool double_shrinkage = false,
-	bool bessel_correction = true,
-	int num_threads = 1)
+cpp11::writable::list qtlEnrichmentRcpp(
+	SEXP rGwasPip, SEXP rQtlSusieFit,
+	double piGwas = 0, double piQtl = 0,
+	int ImpN = 25, double shrinkageLambda = 1.0,
+	bool doubleShrinkage = false,
+	bool besselCorrection = true,
+	int numThreads = 1)
 {
-	// Convert r_gwas_pip to C++ type
-	doubles gwas_pip_vec(r_gwas_pip);
+	// Convert rGwasPip to C++ type
+	doubles gwas_pip_vec(rGwasPip);
 	std::vector<double> gwas_pip = cpp11::as_cpp<std::vector<double>>(gwas_pip_vec);
 	cpp11::strings pip_names(gwas_pip_vec.attr("names"));
 	std::vector<std::string> gwas_pip_names;
@@ -19,8 +19,8 @@ cpp11::writable::list qtl_enrichment_rcpp(
 		gwas_pip_names.push_back(std::string(pip_names[i]));
 	}
 
-	// Convert r_qtl_susie_fit to C++ type
-	list susie_fit_list(r_qtl_susie_fit);
+	// Convert rQtlSusieFit to C++ type
+	list susie_fit_list(rQtlSusieFit);
 	std::vector<SuSiEFit> susie_fits;
 
 	for (int i = 0; i < susie_fit_list.size(); ++i) {
@@ -28,7 +28,7 @@ cpp11::writable::list qtl_enrichment_rcpp(
 		susie_fits.push_back(susie_fit);
 	}
 
-	std::map<std::string, double> output = qtl_enrichment_workhorse(susie_fits, gwas_pip, gwas_pip_names, pi_gwas, pi_qtl, ImpN, shrinkage_lambda, double_shrinkage, bessel_correction, num_threads);
+	std::map<std::string, double> output = qtl_enrichment_workhorse(susie_fits, gwas_pip, gwas_pip_names, piGwas, piQtl, ImpN, shrinkageLambda, doubleShrinkage, besselCorrection, numThreads);
 
 	// Convert std::map to list
 	using namespace cpp11::literals;

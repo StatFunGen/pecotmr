@@ -7,39 +7,39 @@
 \usage{
 readSumstats(
   path,
-  trait_name = "trait",
+  traitName = "trait",
   genome = NULL,
   n = NULL,
-  use_mungesumstats = TRUE,
+  useMungesumstats = TRUE,
   ...
 )
 
 \S4method{readSumstats}{character}(
   path,
-  trait_name = "trait",
+  traitName = "trait",
   genome = NULL,
   n = NULL,
-  use_mungesumstats = TRUE,
+  useMungesumstats = TRUE,
   ...
 )
 }
 \arguments{
 \item{path}{Character, path to the summary statistics file.}
 
-\item{trait_name}{Character, name for the trait.}
+\item{traitName}{Character, name for the trait.}
 
 \item{genome}{Character, genome build (e.g., "hg19", "hg38").
 If NULL, inferred by MungeSumStats.}
 
 \item{n}{Numeric, sample size (if not in the file).}
 
-\item{use_mungesumstats}{Logical, whether to use MungeSumStats for
+\item{useMungesumstats}{Logical, whether to use MungeSumStats for
 standardization. Default TRUE if available.}
 
 \item{...}{Additional arguments.}
 }
 \value{
-A \code{GWASSumStats} object.
+A \code{GwasSumStats} object.
 }
 \description{
 Read and standardize GWAS summary statistics from file.

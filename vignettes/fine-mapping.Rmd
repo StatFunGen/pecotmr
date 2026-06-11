@@ -35,9 +35,9 @@ This vignette demonstrates all three workflows:
 
 | Data you have | Entry point | Example dataset |
 |---|---|---|
-| Individual-level genotype + phenotype (QTL studies) | `univariate_analysis_pipeline()` | `eqtl_region_example` |
-| QTL summary statistics + LD reference | `rss_analysis_pipeline()` | placeholder (real QTL nominal output) |
-| GWAS summary statistics + LD reference | `rss_analysis_pipeline()` | placeholder (real GWAS sumstats) |
+| Individual-level genotype + phenotype (QTL studies) | `univariateAnalysisPipeline()` | `eqtl_region_example` |
+| QTL summary statistics + LD reference | `rssAnalysisPipeline()` | placeholder (real QTL nominal output) |
+| GWAS summary statistics + LD reference | `rssAnalysisPipeline()` | placeholder (real GWAS sumstats) |
 
 For SuSiE theory, see the
 [susieR vignettes](https://stephenslab.github.io/susieR/articles/index.html);
@@ -69,11 +69,11 @@ maf <- apply(X, 2, function(g) {
 set.seed(42)
 sub <- sort(sample(ncol(X), 500))
 
-fit <- univariate_analysis_pipeline(
+fit <- univariateAnalysisPipeline(
   X = X[, sub], Y = y, maf = maf[sub],
   region = "chr22:32119000-33000000",
-  twas_weights = FALSE,
-  finemapping_extra_opts = list(refine = FALSE),
+  twasWeights = FALSE,
+  finemappingExtraOpts = list(refine = FALSE),
   verbose = 0
 )
 ```
@@ -96,8 +96,8 @@ rows are useful as a sanity check on inferred non-sparse effects.
 ## Choosing among SuSiE variants
 
 `pecotmr` exposes five SuSiE-family fine-mapping variants. Pick which
-to fit via the `methods` parameter on `univariate_analysis_pipeline()`
-(individual-level) or `rss_analysis_pipeline()` / `susie_rss_pipeline()`
+to fit via the `methods` parameter on `univariateAnalysisPipeline()`
+(individual-level) or `rssAnalysisPipeline()` / `susieRssPipeline()`
 (summary statistics):
 
 | Variant | Individual-level | Summary statistics | What it models |
@@ -152,11 +152,11 @@ to fit each requested method independently rather than chained.
 ### Fitting multiple variants in one call
 
 ```{r multi-method-fit, eval=FALSE}
-multi <- univariate_analysis_pipeline(
+multi <- univariateAnalysisPipeline(
   X = X[, sub], Y = y, maf = maf[sub],
   methods = c("susie_inf", "susie", "susie_ash"),
-  twas_weights = FALSE,
-  signal_cutoff = 0
+  twasWeights = FALSE,
+  signalCutoff = 0
 )
 # top_loci has rows for all three methods; filter on `method` to inspect each
 table(multi$top_loci$method)
@@ -169,7 +169,7 @@ If you want the raw fits without `pecotmr`'s post-processing:
 ```{r two-stage-fit, eval=FALSE}
 # Two-stage convenience for the recommended default:
 fits <- fit_susie_inf_then_susie(X[, sub], y)         # list(susie, susie_inf)
-fits_rss <- fit_susie_inf_then_susie_rss(z, R, n)
+fits_rss <- fitSusieInfThenSusieRss(z, R, n)
 
 # Or call susieR directly with the right unmappable_effects flag:
 inf_fit <- susieR::susie(X, y, unmappable_effects = "inf",
@@ -178,17 +178,17 @@ ash_fit <- susieR::susie(X, y, unmappable_effects = "ash",
                           convergence_method = "pip")
 
 # Then post-process any combination through the unified pipeline:
-post <- postprocess_finemapping_fits(
+post <- postprocessFinemappingFits(
   fits = list(susie_inf = inf_fit, susie_ash = ash_fit),
   data_x = X[, sub], data_y = y, maf = maf[sub],
   coverage = 0.95, secondary_coverage = c(0.7, 0.5)
 )
-out <- format_finemapping_output(post, primary_method = "susie_inf")
+out <- formatFinemappingOutput(post, primary_method = "susie_inf")
 ```
 
 ## The unified `top_loci` table
 
-`postprocess_finemapping_fits()` produces a single table with the
+`postprocessFinemappingFits()` produces a single table with the
 following 22 columns, in this order:
 
 | #  | Column                  | Source                                                 |
@@ -248,15 +248,15 @@ TWAS) read the columns above; the schema is the contract.
 ## QTL summary-statistics fine-mapping
 
 When you have z-scores instead of `X` and `Y`, use
-`rss_analysis_pipeline()`. It bundles:
+`rssAnalysisPipeline()`. It bundles:
 
-1. `load_rss_data()` — tabix-region-extracts the sumstats and
+1. `loadRssData()` — tabix-region-extracts the sumstats and
    standardises column names via a YAML mapping (see the
    [RSS QC vignette](rss-qc.html) for the YAML schema).
-2. `summary_stats_qc()` — runs allele harmonization, SLALOM (default)
+2. `summaryStatsQc()` — runs allele harmonization, SLALOM (default)
    or DENTIST QC, and optional RAISS imputation. The vignette referenced
    above covers QC in detail.
-3. `susie_rss_pipeline()` — fits the two-stage SuSiE-RSS model and
+3. `susieRssPipeline()` — fits the two-stage SuSiE-RSS model and
    post-processes into the unified `top_loci` table.
 
 ### Pipeline call (file-based, production shape)
@@ -270,9 +270,9 @@ region            <- "<chr:start-end>"
 gene_id           <- "<ENSG...>"
 n_qtl_sample      <- 0  # 0 = read from sumstats
 
-ld_data <- load_LD_matrix(ld_meta_path, region = region)
+ld_data <- loadLdMatrix(ld_meta_path, region = region)
 
-fm <- rss_analysis_pipeline(
+fm <- rssAnalysisPipeline(
   sumstat_path        = qtl_sumstat_path,
   column_file_path    = qtl_column_map,
   LD_data             = ld_data,
@@ -284,7 +284,7 @@ fm <- rss_analysis_pipeline(
   finemapping_method  = "susie_rss",
   finemapping_opts    = list(L = 20, L_greedy = 5,
                              coverage = c(0.95, 0.7, 0.5),
-                             signal_cutoff = 0.025,
+                             signalCutoff = 0.025,
                              min_abs_corr = 0.8),
   impute              = TRUE
 )
@@ -294,8 +294,8 @@ head(fm$rss_data_analyzed[[1]]$top_loci)
 ### Lower-level alternative (in-memory, runnable here)
 
 For demonstration on the shipped example data, we skip the file-based
-loading and use `susie_rss_pipeline()` directly with the sumstats and
-LD already in memory. This is what `rss_analysis_pipeline()` calls
+loading and use `susieRssPipeline()` directly with the sumstats and
+LD already in memory. This is what `rssAnalysisPipeline()` calls
 internally after QC.
 
 ```{r qtl-rss-inmemory}
@@ -304,13 +304,13 @@ data(eqtl_region_example)
 
 # We treat the shipped GWAS-style sumstats as if they were QTL z-scores
 # for this demonstration. In a real workflow you would load QTL nominal
-# output via load_rss_data().
+# output via loadRssData().
 sumstats <- gwas_sumstats_example
 X_ref    <- eqtl_region_example$X
-R        <- compute_LD(X_ref, method = "sample")
+R        <- computeLd(X_ref, method = "sample")
 R_sub    <- R[sumstats$variant_id, sumstats$variant_id]
 
-fm_rss <- susie_rss_pipeline(
+fm_rss <- susieRssPipeline(
   sumstats          = sumstats,
   LD_mat            = R_sub,
   n                 = nrow(X_ref),
@@ -332,8 +332,8 @@ TWAS) consumes the same table.
 
 ## GWAS summary-statistics fine-mapping
 
-GWAS fine-mapping uses the **same** `rss_analysis_pipeline()` /
-`susie_rss_pipeline()` call. The only differences are at the loading
+GWAS fine-mapping uses the **same** `rssAnalysisPipeline()` /
+`susieRssPipeline()` call. The only differences are at the loading
 layer:
 
 - **Column mapping.** GWAS conventions (effect/non-effect, OR vs beta,
@@ -346,7 +346,7 @@ layer:
   and omit `extract_region_name` / `region_name_col`.
 - **Per-variant sample size.** GWAS sumstats often have a per-variant
   `n_sample` column (some variants were imputed in fewer cohorts);
-  `load_rss_data()` reads that automatically when the column is mapped.
+  `loadRssData()` reads that automatically when the column is mapped.
 
 ```{r gwas-rss-pipeline, eval=FALSE}
 # TODO(data): replace with real GWAS sumstats and LD-metadata paths
@@ -355,9 +355,9 @@ gwas_column_map   <- "<path/to/gwas_column_map.yml>"
 ld_meta_path      <- "<path/to/ld_meta.tsv>"
 region            <- "<chr:start-end>"
 
-ld_data <- load_LD_matrix(ld_meta_path, region = region)
+ld_data <- loadLdMatrix(ld_meta_path, region = region)
 
-fm_gwas <- rss_analysis_pipeline(
+fm_gwas <- rssAnalysisPipeline(
   sumstat_path       = gwas_sumstat_path,
   column_file_path   = gwas_column_map,
   LD_data            = ld_data,
@@ -383,7 +383,7 @@ sum(gwas_finemapping_example[[1]]$pip > 0.1)
 `gwas_finemapping_example` ships in the legacy `susie_result_trimmed`
 shape used by older pecotmr pipelines (PIPs, alpha matrix, credible
 sets). New workflows should consume the 22-column `top_loci` table
-produced by `rss_analysis_pipeline()` instead.
+produced by `rssAnalysisPipeline()` instead.
 
 <!-- TODO(data): once a real GWAS sumstat + LD example is ready, replace
 the above with a runnable end-to-end demonstration. -->
@@ -393,13 +393,13 @@ the above with a runnable end-to-end demonstration. -->
 The `top_loci` table feeds directly into several other `pecotmr`
 workflows:
 
-- **Enrichment** (`xqtl_enrichment_wrapper`): computes prior enrichment
+- **Enrichment** (`xqtlEnrichmentWrapper`): computes prior enrichment
   of QTL fine-mapping signals at GWAS PIPs. See the
   [enrichment vignette](xqtl-enrichment.html).
-- **Colocalization** (`colocboost_pipeline`): uses the trimmed SuSiE
+- **Colocalization** (`colocboostPipeline`): uses the trimmed SuSiE
   fits — `finemapping_result` slot — as colocalization input. See the
   [ColocBoost vignette](colocboost-pipeline.html).
-- **TWAS** (`twas_weights_pipeline`, `twas_pipeline`): uses the SuSiE
+- **TWAS** (`twasWeightsPipeline`, `twasPipeline`): uses the SuSiE
   effect estimates as weight learners for transcriptome-wide
   association testing. See the
   [TWAS weights vignette](twas-weights.html) and the
@@ -409,11 +409,11 @@ workflows:
 
 | Function | Use it when |
 |---|---|
-| `univariate_analysis_pipeline()` | Individual-level data: you have `X` (samples × variants), `Y` (phenotype). Pick variant(s) via `methods = c("susie", "susie_inf", "susie_ash")`. |
-| `rss_analysis_pipeline()` | Summary statistics (QTL or GWAS): you have z-scores in a tabix file and an LD reference. Pick variant(s) via `methods = c("susie_rss", "susie_inf_rss", "susie_ash_rss")`. |
-| `susie_rss_pipeline()` | Lower-level: you already have in-memory `z`, `R` (or `X`), `n`. Same `methods` argument as `rss_analysis_pipeline()`. |
-| `fit_susie_inf_then_susie()` / `fit_susie_inf_then_susie_rss()` | Lowest-level convenience for the two-stage chained default (SuSiE-inf init → SuSiE). |
-| `postprocess_finemapping_fits()` + `format_finemapping_output()` | Post-process any combination of `susie`, `susie_inf`, `susie_ash`, `susie_rss`, `susie_inf_rss`, `susie_ash_rss`, `mvsusie`, `fsusie` fits into the unified 22-column `top_loci`. |
+| `univariateAnalysisPipeline()` | Individual-level data: you have `X` (samples × variants), `Y` (phenotype). Pick variant(s) via `methods = c("susie", "susie_inf", "susie_ash")`. |
+| `rssAnalysisPipeline()` | Summary statistics (QTL or GWAS): you have z-scores in a tabix file and an LD reference. Pick variant(s) via `methods = c("susie_rss", "susie_inf_rss", "susie_ash_rss")`. |
+| `susieRssPipeline()` | Lower-level: you already have in-memory `z`, `R` (or `X`), `n`. Same `methods` argument as `rssAnalysisPipeline()`. |
+| `fit_susie_inf_then_susie()` / `fitSusieInfThenSusieRss()` | Lowest-level convenience for the two-stage chained default (SuSiE-inf init → SuSiE). |
+| `postprocessFinemappingFits()` + `formatFinemappingOutput()` | Post-process any combination of `susie`, `susie_inf`, `susie_ash`, `susie_rss`, `susie_inf_rss`, `susie_ash_rss`, `mvsusie`, `fsusie` fits into the unified 22-column `top_loci`. |
 
 All five entry points produce — or can be post-processed into — the
 same 22-column `top_loci` table documented above, which is the contract

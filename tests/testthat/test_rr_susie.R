@@ -1,38 +1,38 @@
 context("regularized_regression - susie")
 
-# ---- init_prior_sd ----
-test_that("init_prior_sd returns correct number of values with expected properties", {
+# ---- initPriorSd ----
+test_that("initPriorSd returns correct number of values with expected properties", {
   set.seed(123)
   n <- 50
   p <- 10
   X <- matrix(rnorm(n * p), nrow = n)
   y <- X[, 1] * 2 + rnorm(n)
 
-  result <- init_prior_sd(X, y)
+  result <- initPriorSd(X, y)
   expect_length(result, 30)
   expect_equal(result[1], 0)
   expect_true(all(diff(result) > 0))
 
-  result_15 <- init_prior_sd(X, y, n = 15)
+  result_15 <- initPriorSd(X, y, n = 15)
   expect_length(result_15, 15)
   expect_equal(result_15[1], 0)
   expect_true(all(diff(result_15) > 0))
 })
 
-# ---- susie_weights ----
-test_that("susie_weights returns zeros when no alpha/mu/X_column_scale_factors", {
+# ---- susieWeights ----
+test_that("susieWeights returns zeros when no alpha/mu/X_column_scale_factors", {
   mock_fit <- list(pip = c(0.1, 0.2, 0.3))
-  result <- susie_weights(susie_fit = mock_fit)
+  result <- susieWeights(susieFit = mock_fit)
   expect_equal(result, rep(0, 3))
 })
 
-test_that("susie_weights errors on dimension mismatch", {
+test_that("susieWeights errors on dimension mismatch", {
   mock_fit <- list(pip = c(0.1, 0.2))
   X <- matrix(rnorm(30), nrow = 10, ncol = 3)
-  expect_error(susie_weights(X = X, susie_fit = mock_fit), "Dimension mismatch")
+  expect_error(susieWeights(X = X, susieFit = mock_fit), "Dimension mismatch")
 })
 
-test_that("susie_weights with alpha/mu/X_column_scale_factors calls coef.susie", {
+test_that("susieWeights with alpha/mu/X_column_scale_factors calls coef.susie", {
   p <- 5
   L <- 2
   mock_fit <- list(
@@ -48,13 +48,13 @@ test_that("susie_weights with alpha/mu/X_column_scale_factors calls coef.susie",
     pip = runif(p),
     intercept = 0
   )
-  result <- susie_weights(susie_fit = mock_fit)
+  result <- susieWeights(susieFit = mock_fit)
   expect_length(result, p)
   expect_true(is.numeric(result))
   expect_true(any(result != 0))
 })
 
-test_that("susie_weights calls susie when susie_fit is NULL", {
+test_that("susieWeights calls susie when susie_fit is NULL", {
   set.seed(42)
   p <- 5
   n <- 50
@@ -65,24 +65,24 @@ test_that("susie_weights calls susie when susie_fit is NULL", {
       list(pip = rep(0.1, p))
     }
   )
-  result <- susie_weights(X = X, y = y)
+  result <- susieWeights(X = X, y = y)
   expect_equal(result, rep(0, p))
 })
 
-# ---- susie_ash_weights ----
-test_that("susie_ash_weights returns zeros when no expected fields", {
+# ---- susieAshWeights ----
+test_that("susieAshWeights returns zeros when no expected fields", {
   mock_fit <- list(pip = c(0.1, 0.2, 0.3))
-  result <- susie_ash_weights(susie_ash_fit = mock_fit)
+  result <- susieAshWeights(susieAshFit = mock_fit)
   expect_equal(result, rep(0, 3))
 })
 
-test_that("susie_ash_weights errors on dimension mismatch", {
+test_that("susieAshWeights errors on dimension mismatch", {
   mock_fit <- list(pip = c(0.1, 0.2))
   X <- matrix(rnorm(30), nrow = 10, ncol = 3)
-  expect_error(susie_ash_weights(X = X, susie_ash_fit = mock_fit), "Dimension mismatch")
+  expect_error(susieAshWeights(X = X, susieAshFit = mock_fit), "Dimension mismatch")
 })
 
-test_that("susie_ash_weights with proper fields calls coef.susie", {
+test_that("susieAshWeights with proper fields calls coef.susie", {
   p <- 4
   L <- 2
   mock_fit <- list(
@@ -93,12 +93,12 @@ test_that("susie_ash_weights with proper fields calls coef.susie", {
     pip = runif(p),
     intercept = 0
   )
-  result <- susie_ash_weights(susie_ash_fit = mock_fit)
+  result <- susieAshWeights(susieAshFit = mock_fit)
   expect_true(is.numeric(result))
   expect_true(length(result) >= p)
 })
 
-test_that("susie_ash_weights calls susie when fit is NULL", {
+test_that("susieAshWeights calls susie when fit is NULL", {
   set.seed(42)
   p <- 4
   n <- 30
@@ -109,24 +109,24 @@ test_that("susie_ash_weights calls susie when fit is NULL", {
       list(pip = rep(0.1, p))
     }
   )
-  result <- susie_ash_weights(X = X, y = y)
+  result <- susieAshWeights(X = X, y = y)
   expect_equal(result, rep(0, p))
 })
 
-# ---- susie_inf_weights ----
-test_that("susie_inf_weights returns zeros when no expected fields", {
+# ---- susieInfWeights ----
+test_that("susieInfWeights returns zeros when no expected fields", {
   mock_fit <- list(pip = c(0.4, 0.5))
-  result <- susie_inf_weights(susie_inf_fit = mock_fit)
+  result <- susieInfWeights(susieInfFit = mock_fit)
   expect_equal(result, rep(0, 2))
 })
 
-test_that("susie_inf_weights errors on dimension mismatch", {
+test_that("susieInfWeights errors on dimension mismatch", {
   mock_fit <- list(pip = c(0.1, 0.2))
   X <- matrix(rnorm(30), nrow = 10, ncol = 3)
-  expect_error(susie_inf_weights(X = X, susie_inf_fit = mock_fit), "Dimension mismatch")
+  expect_error(susieInfWeights(X = X, susieInfFit = mock_fit), "Dimension mismatch")
 })
 
-test_that("susie_inf_weights with proper fields calls coef.susie", {
+test_that("susieInfWeights with proper fields calls coef.susie", {
   p <- 4
   L <- 2
   mock_fit <- list(
@@ -137,12 +137,12 @@ test_that("susie_inf_weights with proper fields calls coef.susie", {
     pip = runif(p),
     intercept = 0
   )
-  result <- susie_inf_weights(susie_inf_fit = mock_fit)
+  result <- susieInfWeights(susieInfFit = mock_fit)
   expect_true(is.numeric(result))
   expect_true(length(result) >= p)
 })
 
-test_that("susie_inf_weights calls susie when fit is NULL", {
+test_that("susieInfWeights calls susie when fit is NULL", {
   set.seed(42)
   p <- 4
   n <- 30
@@ -153,6 +153,6 @@ test_that("susie_inf_weights calls susie when fit is NULL", {
       list(pip = rep(0.1, p))
     }
   )
-  result <- susie_inf_weights(X = X, y = y)
+  result <- susieInfWeights(X = X, y = y)
   expect_equal(result, rep(0, p))
 })

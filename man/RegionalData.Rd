@@ -5,32 +5,32 @@
 \title{Create a RegionalData Object}
 \usage{
 RegionalData(
-  genotype_matrix,
+  genotypeMatrix,
   phenotypes,
   covariates,
-  scale_residuals = FALSE,
+  scaleResiduals = FALSE,
   maf = list(),
   region = NULL,
-  dropped_samples = list(),
-  Y_coordinates = NULL
+  droppedSamples = list(),
+  coordinates = NULL
 )
 }
 \arguments{
-\item{genotype_matrix}{Numeric matrix (samples x variants).}
+\item{genotypeMatrix}{Numeric matrix (samples x variants).}
 
 \item{phenotypes}{Named list of phenotype matrices.}
 
 \item{covariates}{Named list of covariate matrices.}
 
-\item{scale_residuals}{Logical.}
+\item{scaleResiduals}{Logical.}
 
 \item{maf}{Named list of MAF vectors.}
 
 \item{region}{GRanges or NULL.}
 
-\item{dropped_samples}{List.}
+\item{droppedSamples}{List.}
 
-\item{Y_coordinates}{data.frame or NULL.}
+\item{coordinates}{data.frame or NULL.}
 }
 \value{
 A \code{RegionalData} object.

@@ -5,37 +5,37 @@
 #' from z-scores assuming a two-sided standard normal distribution.
 #'
 #' Provide either an LD correlation matrix \code{R} or a genotype matrix \code{X}
-#' (from which LD is derived automatically via \code{compute_LD}).
+#' (from which LD is derived automatically via \code{computeLd}).
 #'
 #' @param zScore Numeric vector of z-scores corresponding to each variant.
 #' @param R Square LD correlation matrix. Provide either \code{R} or \code{X}.
 #' @param X Genotype matrix (samples x SNPs). If provided, LD is computed via
-#'   \code{compute_LD(X)}.
-#' @param standard_error Optional numeric vector of standard errors corresponding
+#'   \code{computeLd(X)}.
+#' @param standardError Optional numeric vector of standard errors corresponding
 #'   to each z-score. If not provided, a default value of 1 is assumed for all variants.
-#' @param abf_prior_variance Numeric, the prior effect size variance for ABF calculations.
+#' @param abfPriorVariance Numeric, the prior effect size variance for ABF calculations.
 #'   Default is 0.04.
-#' @param nlog10p_dentist_s_threshold Numeric, the -log10 DENTIST-S P value threshold
+#' @param nlog10pDentistSThreshold Numeric, the -log10 DENTIST-S P value threshold
 #'   for identifying outlier variants for prediction. Default is 4.0.
-#' @param r2_threshold Numeric, the r2 threshold for DENTIST-S outlier variants
+#' @param r2Threshold Numeric, the r2 threshold for DENTIST-S outlier variants
 #'   for prediction. Default is 0.6.
-#' @param lead_variant_choice Character, method to choose the lead variant, either
+#' @param leadVariantChoice Character, method to choose the lead variant, either
 #'   "pvalue" or "abf", with default "pvalue".
-#' @param ld_method Character string specifying the LD computation method when
-#'   \code{X} is provided. Passed to \code{\link{compute_LD}}. One of
+#' @param ldMethod Character string specifying the LD computation method when
+#'   \code{X} is provided. Passed to \code{\link{computeLd}}. One of
 #'   \code{"sample"} (default), \code{"population"}, or \code{"gcta"}.
 #'   Ignored when \code{R} is provided directly.
 #' @return A list containing the annotated LD matrix with ABF results, credible sets,
 #'   lead variant, and DENTIST-S statistics; and a summary dataframe with aggregate statistics.
 #' @examples
-#' results <- slalom(zScore, R = R, standard_error = standard_error)
-#' @seealso \code{\link{dentist_single_window}}, \code{\link{resolve_LD_input}}
+#' results <- slalom(zScore, R = R, standardError = standardError)
+#' @seealso \code{\link{dentistSingleWindow}}, \code{\link{resolveLdInput}}
 #' @export
 #'
-slalom <- function(zScore, R = NULL, X = NULL, standard_error = rep(1, length(zScore)),
-                   abf_prior_variance = 0.04, nlog10p_dentist_s_threshold = 4.0,
-                   r2_threshold = 0.6, lead_variant_choice = "pvalue",
-                   ld_method = "sample") {
+slalom <- function(zScore, R = NULL, X = NULL, standardError = rep(1, length(zScore)),
+                   abfPriorVariance = 0.04, nlog10pDentistSThreshold = 4.0,
+                   r2Threshold = 0.6, leadVariantChoice = "pvalue",
+                   ldMethod = "sample") {
   if (is.null(R) && is.null(X)) {
     stop("Either R (LD matrix) or X (genotype matrix) must be provided.")
   }
@@ -44,13 +44,13 @@ slalom <- function(zScore, R = NULL, X = NULL, standard_error = rep(1, length(zS
   }
 
   # One-sided p-value matching the original Python implementation (stats.norm.cdf).
-  # This selects the most negative z-score as lead when lead_variant_choice == "pvalue".
+  # This selects the most negative z-score as lead when leadVariantChoice == "pvalue".
   pvalue <- pnorm(zScore)
 
   logSumExp <- function(x) {
-    max_x <- max(x, na.rm = TRUE)
-    sum_exp <- sum(exp(x - max_x), na.rm = TRUE)
-    return(max_x + log(sum_exp))
+    maxX <- max(x, na.rm = TRUE)
+    sumExp <- sum(exp(x - maxX), na.rm = TRUE)
+    return(maxX + log(sumExp))
   }
 
   abf <- function(z, se, W = 0.04) {
@@ -62,11 +62,11 @@ slalom <- function(zScore, R = NULL, X = NULL, standard_error = rep(1, length(zS
     return(list(lbf = lbf, prob = prob))
   }
 
-  abf_results <- abf(zScore, standard_error, W = abf_prior_variance)
-  lbf <- abf_results$lbf
-  prob <- abf_results$prob
+  abfResults <- abf(zScore, standardError, W = abfPriorVariance)
+  lbf <- abfResults$lbf
+  prob <- abfResults$prob
 
-  get_cs <- function(prob, coverage = 0.95) {
+  getCs <- function(prob, coverage = 0.95) {
     ordering <- order(prob, decreasing = TRUE)
     cumprob <- cumsum(prob[ordering])
     idx <- which(cumprob > coverage)[1]
@@ -74,10 +74,10 @@ slalom <- function(zScore, R = NULL, X = NULL, standard_error = rep(1, length(zS
     return(cs)
   }
 
-  cs <- get_cs(prob, coverage = 0.95)
-  cs_99 <- get_cs(prob, coverage = 0.99)
+  cs <- getCs(prob, coverage = 0.95)
+  cs99 <- getCs(prob, coverage = 0.99)
 
-  lead_idx <- if (lead_variant_choice == "pvalue") {
+  leadIdx <- if (leadVariantChoice == "pvalue") {
     which.min(pvalue)
   } else {
     which.max(prob)
@@ -87,35 +87,35 @@ slalom <- function(zScore, R = NULL, X = NULL, standard_error = rep(1, length(zS
   # When X is provided, compute just that column instead of the full p x p matrix.
   if (!is.null(X)) {
     if (!is.matrix(X)) X <- as.matrix(X)
-    r_lead <- as.numeric(cor(X, X[, lead_idx]))
+    rLead <- as.numeric(cor(X, X[, leadIdx]))
   } else {
     if (!is.matrix(R) || nrow(R) != ncol(R) || nrow(R) != length(zScore)) {
       stop("R must be a square matrix matching the length of zScore.")
     }
-    r_lead <- R[, lead_idx]
+    rLead <- R[, leadIdx]
   }
 
-  r2_lead <- r_lead^2
-  t_dentist_s <- (zScore - r_lead * zScore[lead_idx])^2 / (1 - r2_lead)
-  t_dentist_s[t_dentist_s < 0] <- Inf
-  nlog10p_dentist_s <- -log10(pchisq(t_dentist_s, df = 1, lower.tail = FALSE))
-  outliers <- (r2_lead > r2_threshold) & (nlog10p_dentist_s > nlog10p_dentist_s_threshold)
+  r2Lead <- rLead^2
+  tDentistS <- (zScore - rLead * zScore[leadIdx])^2 / (1 - r2Lead)
+  tDentistS[tDentistS < 0] <- Inf
+  nlog10pDentistS <- -log10(pchisq(tDentistS, df = 1, lower.tail = FALSE))
+  outliers <- (r2Lead > r2Threshold) & (nlog10pDentistS > nlog10pDentistSThreshold)
 
-  n_r2 <- sum(r2_lead > r2_threshold)
-  n_dentist_s_outlier <- sum(outliers, na.rm = TRUE)
-  max_pip <- max(prob)
+  nR2 <- sum(r2Lead > r2Threshold)
+  nDentistSOutlier <- sum(outliers, na.rm = TRUE)
+  maxPip <- max(prob)
 
   summary <- list(
-    lead_pip_variant = lead_idx,
+    lead_pip_variant = leadIdx,
     n_total = length(zScore),
-    n_r2 = n_r2,
-    n_dentist_s_outlier = n_dentist_s_outlier,
-    fraction = ifelse(n_r2 > 0, n_dentist_s_outlier / n_r2, 0),
-    max_pip = max_pip,
+    n_r2 = nR2,
+    n_dentist_s_outlier = nDentistSOutlier,
+    fraction = ifelse(nR2 > 0, nDentistSOutlier / nR2, 0),
+    max_pip = maxPip,
     cs_95 = cs,
-    cs_99 = cs_99
+    cs_99 = cs99
   )
-  result <- as.data.frame(list(original_z = zScore, prob = prob, pvalue = pvalue, outliers = outliers, nlog10p_dentist_s = nlog10p_dentist_s))
+  result <- as.data.frame(list(original_z = zScore, prob = prob, pvalue = pvalue, outliers = outliers, nlog10p_dentist_s = nlog10pDentistS))
 
   return(list(data = result, summary = summary))
 }

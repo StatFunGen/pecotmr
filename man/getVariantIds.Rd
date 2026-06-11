@@ -2,22 +2,22 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{getVariantIds}
 \alias{getVariantIds}
-\alias{getVariantIds,LDData-method}
-\alias{getVariantIds,TWASWeights-method}
+\alias{getVariantIds,LdData-method}
+\alias{getVariantIds,TwasWeights-method}
 \title{Get Variant IDs}
 \usage{
 getVariantIds(x)
 
-\S4method{getVariantIds}{LDData}(x)
+\S4method{getVariantIds}{LdData}(x)
 
-\S4method{getVariantIds}{TWASWeights}(x)
+\S4method{getVariantIds}{TwasWeights}(x)
 }
 \arguments{
-\item{x}{An \code{LDData} object.}
+\item{x}{An \code{LdData} object.}
 }
 \value{
 Character vector of variant IDs.
 }
 \description{
-Extract variant ID vector from an \code{LDData} object.
+Extract variant ID vector from an \code{LdData} object.
 }

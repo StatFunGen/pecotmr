@@ -2,21 +2,21 @@
 % Please edit documentation in R/AllGenerics.R, R/h2_estimate_wrappers.R
 \name{estimateH2}
 \alias{estimateH2}
-\alias{estimateH2,GWASSumStats,LDStatistic-method}
+\alias{estimateH2,GwasSumStats,LdStatistic-method}
 \title{Estimate SNP Heritability}
 \usage{
 estimateH2(
   sumstats,
-  ld_ref,
+  ldRef,
   method = "lder",
   annotations = NULL,
   local = FALSE,
   ...
 )
 
-\S4method{estimateH2}{GWASSumStats,LDStatistic}(
+\S4method{estimateH2}{GwasSumStats,LdStatistic}(
   sumstats,
-  ld_ref,
+  ldRef,
   method = "lder",
   annotations = NULL,
   local = FALSE,
@@ -24,9 +24,9 @@ estimateH2(
 )
 }
 \arguments{
-\item{sumstats}{A \code{GWASSumStats} object.}
+\item{sumstats}{A \code{GwasSumStats} object.}
 
-\item{ld_ref}{An \code{LDStatistic} object (method-appropriate subclass).}
+\item{ldRef}{An \code{LdStatistic} object (method-appropriate subclass).}
 
 \item{method}{Character, one of "lder", "gldsc", "hdl".}
 

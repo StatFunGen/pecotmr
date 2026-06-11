@@ -69,7 +69,7 @@ NULL
 #'
 #' @description SuSiE RSS fine-mapping results for de-identified GWAS summary
 #' statistics. Suitable for use with \code{\link{xqtl_enrichment_wrapper}} and
-#' \code{\link{compute_qtl_enrichment}}. All variant identifiers are synthetic.
+#' \code{\link{computeQtlEnrichment}}. All variant identifiers are synthetic.
 #'
 #' @format A list of length 1, where the first element is a trimmed SuSiE
 #' result list containing:

@@ -2,21 +2,21 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{getGenotypes}
 \alias{getGenotypes}
-\alias{getGenotypes,LDData-method}
+\alias{getGenotypes,LdData-method}
 \title{Get Genotype Matrix}
 \usage{
 getGenotypes(x)
 
-\S4method{getGenotypes}{LDData}(x)
+\S4method{getGenotypes}{LdData}(x)
 }
 \arguments{
-\item{x}{An \code{LDData} object.}
+\item{x}{An \code{LdData} object.}
 }
 \value{
 A numeric matrix (samples x variants), a list of matrices
   for mixture panels, or NULL.
 }
 \description{
-Extract genotype matrix from an \code{LDData} object via
+Extract genotype matrix from an \code{LdData} object via
   the genotype handle. Returns NULL if no handle is available.
 }

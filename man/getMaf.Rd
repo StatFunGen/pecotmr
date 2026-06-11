@@ -4,21 +4,21 @@
 \name{getMaf}
 \alias{getMaf}
 \alias{getMaf,MultivariateRegionalData-method}
-\alias{getMaf,GWASSumStats-method}
+\alias{getMaf,GwasSumStats-method}
 \title{Get Minor Allele Frequencies}
 \usage{
 getMaf(x)
 
 \S4method{getMaf}{MultivariateRegionalData}(x)
 
-\S4method{getMaf}{GWASSumStats}(x)
+\S4method{getMaf}{GwasSumStats}(x)
 }
 \arguments{
-\item{x}{A \code{GWASSumStats} object.}
+\item{x}{A \code{GwasSumStats} object.}
 }
 \value{
 Numeric vector of MAFs, or NULL if not available.
 }
 \description{
-Extract MAF vector from a GWASSumStats object.
+Extract MAF vector from a GwasSumStats object.
 }

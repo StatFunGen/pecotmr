@@ -20,7 +20,7 @@ NULL
 #'   Metadata columns may include \code{block_id} (integer).
 #' @slot genome Character string identifying the genome build (e.g., "hg19", "hg38").
 #' @export
-setClass("LDBlocks",
+setClass("LdBlocks",
   representation(
     blocks = "GRanges",
     genome = "character"
@@ -43,20 +43,20 @@ setClass("LDBlocks",
 #'   defer reading genotypes until block-level extraction is needed.
 #' @slot path Character, path to the genotype file (or stem for plink).
 #' @slot format Character, one of "gds", "vcf", "plink1", "plink2".
-#' @slot snp_info A \code{data.frame} with columns \code{SNP}, \code{CHR},
+#' @slot snpInfo A \code{data.frame} with columns \code{SNP}, \code{CHR},
 #'   \code{BP}, \code{A1}, \code{A2}. Cached on first access.
-#' @slot n_samples Integer, number of samples.
-#' @slot sample_ids Character vector of sample identifiers.
-#' @slot pgen_ptr An external pointer for plink2 pgen handle, or NULL.
+#' @slot nSamples Integer, number of samples.
+#' @slot sampleIds Character vector of sample identifiers.
+#' @slot pgenPtr An external pointer for plink2 pgen handle, or NULL.
 #' @export
 setClass("GenotypeHandle",
   representation(
     path = "character",
     format = "character",
-    snp_info = "data.frame",
-    n_samples = "integer",
-    sample_ids = "character",
-    pgen_ptr = "ANY"
+    snpInfo = "data.frame",
+    nSamples = "integer",
+    sampleIds = "character",
+    pgenPtr = "ANY"
   ),
   validity = function(object) {
     errors <- character()
@@ -89,20 +89,20 @@ setClass("GenotypeHandle",
 #'   Optional metadata columns: \code{MAF}, \code{INFO}, \code{BETA},
 #'   \code{SE}, \code{P}.
 #' @slot genome Character string for genome build.
-#' @slot trait_name Character string for trait identifier.
-#' @slot var_y Numeric, phenotype variance. For observed-scale OLS on a
+#' @slot traitName Character string for trait identifier.
+#' @slot varY Numeric, phenotype variance. For observed-scale OLS on a
 #'   centered 0/1 case-control trait, this is the \code{susieR}
 #'   \code{sum(y^2) / (n - 1)} value after centering,
-#'   \code{n / (n - 1) * phi * (1 - phi)}, where \code{phi = n_case / n}.
+#'   \code{n / (n - 1) * phi * (1 - phi)}, where \code{phi = nCase / n}.
 #'   Use it only with the full \code{bhat/shat/var_y} sufficient-statistic
 #'   interface; z-score RSS analyses should leave it NULL.
 #' @export
-setClass("GWASSumStats",
+setClass("GwasSumStats",
   representation(
     sumstats = "GRanges",
     genome = "character",
-    trait_name = "character",
-    var_y = "ANY"  # numeric or NULL
+    traitName = "character",
+    varY = "ANY"  # numeric or NULL
   ),
   validity = function(object) {
     errors <- character()
@@ -127,12 +127,12 @@ setClass("GWASSumStats",
 #'   heritability analysis. Supports binary (0/1) and continuous annotations.
 #'   Annotations are classified as baseline (always jointly fitted) or
 #'   candidate (evaluated via score statistics).
-#' @slot snp_ranges A \code{GRanges} object with one range per SNP,
+#' @slot snpRanges A \code{GRanges} object with one range per SNP,
 #'   defining genomic positions.
 #' @slot annotations A numeric matrix (SNPs x annotations). Dense for
 #'   small annotation counts, can be sparse (\code{dgCMatrix}) for large
 #'   binary annotation sets.
-#' @slot annotation_meta A \code{data.frame} with columns:
+#' @slot annotationMeta A \code{data.frame} with columns:
 #'   \describe{
 #'     \item{name}{Character, annotation name}
 #'     \item{tier}{Character, one of "baseline" or "candidate"}
@@ -142,33 +142,33 @@ setClass("GWASSumStats",
 #' @export
 setClass("AnnotationMatrix",
   representation(
-    snp_ranges = "GRanges",
+    snpRanges = "GRanges",
     annotations = "ANY",  # matrix or dgCMatrix
-    annotation_meta = "data.frame",
+    annotationMeta = "data.frame",
     genome = "character"
   ),
   validity = function(object) {
     errors <- character()
-    n_snp <- length(object@snp_ranges)
+    n_snp <- length(object@snpRanges)
     n_annot <- ncol(object@annotations)
     if (nrow(object@annotations) != n_snp)
       errors <- c(errors,
-        "Number of rows in 'annotations' must match length of 'snp_ranges'")
+        "Number of rows in 'annotations' must match length of 'snpRanges'")
     required_meta_cols <- c("name", "tier", "type")
-    if (!all(required_meta_cols %in% colnames(object@annotation_meta)))
+    if (!all(required_meta_cols %in% colnames(object@annotationMeta)))
       errors <- c(errors,
-        "annotation_meta must have columns: name, tier, type")
-    if (nrow(object@annotation_meta) != n_annot)
+        "annotationMeta must have columns: name, tier, type")
+    if (nrow(object@annotationMeta) != n_annot)
       errors <- c(errors,
-        "Number of rows in 'annotation_meta' must match annotation count")
+        "Number of rows in 'annotationMeta' must match annotation count")
     valid_tiers <- c("baseline", "candidate")
-    if (!all(object@annotation_meta$tier %in% valid_tiers))
+    if (!all(object@annotationMeta$tier %in% valid_tiers))
       errors <- c(errors,
-        "annotation_meta$tier must be 'baseline' or 'candidate'")
+        "annotationMeta$tier must be 'baseline' or 'candidate'")
     valid_types <- c("binary", "continuous")
-    if (!all(object@annotation_meta$type %in% valid_types))
+    if (!all(object@annotationMeta$type %in% valid_types))
       errors <- c(errors,
-        "annotation_meta$type must be 'binary' or 'continuous'")
+        "annotationMeta$type must be 'binary' or 'continuous'")
     if (length(errors) == 0) TRUE else errors
   }
 )
@@ -181,33 +181,33 @@ setClass("AnnotationMatrix",
 #' @description Abstract container for pre-computed LD statistics. Subclasses
 #'   provide method-specific representations: eigendecompositions (for
 #'   LDER/HDL/sHDL) and LD score matrices (for S-LDSC/g-LDSC).
-#' @slot ld_blocks An \code{LDBlocks} object defining the block structure.
-#' @slot snp_info A \code{data.frame} with columns \code{SNP}, \code{CHR},
+#' @slot ldBlocks An \code{LdBlocks} object defining the block structure.
+#' @slot snpInfo A \code{data.frame} with columns \code{SNP}, \code{CHR},
 #'   \code{BP}, \code{A1}, \code{A2}, and optionally \code{MAF}.
-#' @slot n_ref Integer, sample size of the LD reference panel.
-#' @slot in_sample Logical, whether the LD reference is from the same
+#' @slot nRef Integer, sample size of the LD reference panel.
+#' @slot inSample Logical, whether the LD reference is from the same
 #'   cohort as the GWAS (affects bias correction).
 #' @slot genome Character string for genome build.
 #' @export
-setClass("LDStatistic",
+setClass("LdStatistic",
   contains = "VIRTUAL",
   representation(
-    ld_blocks = "LDBlocks",
-    snp_info = "data.frame",
-    n_ref = "integer",
-    in_sample = "logical",
+    ldBlocks = "LdBlocks",
+    snpInfo = "data.frame",
+    nRef = "integer",
+    inSample = "logical",
     genome = "character"
   ),
   validity = function(object) {
     errors <- character()
-    if (length(object@n_ref) != 1L || object@n_ref <= 0L)
-      errors <- c(errors, "'n_ref' must be a single positive integer")
-    if (length(object@in_sample) != 1L)
-      errors <- c(errors, "'in_sample' must be a single logical value")
+    if (length(object@nRef) != 1L || object@nRef <= 0L)
+      errors <- c(errors, "'nRef' must be a single positive integer")
+    if (length(object@inSample) != 1L)
+      errors <- c(errors, "'inSample' must be a single logical value")
     if (length(object@genome) != 1L || !nzchar(object@genome))
       errors <- c(errors, "'genome' must be a single non-empty character string")
-    if (nrow(object@snp_info) == 0L)
-      errors <- c(errors, "'snp_info' must have at least one row")
+    if (nrow(object@snpInfo) == 0L)
+      errors <- c(errors, "'snpInfo' must have at least one row")
     if (length(errors) == 0) TRUE else errors
   }
 )
@@ -215,34 +215,34 @@ setClass("LDStatistic",
 #' @title Eigendecomposition-Based LD Statistic
 #' @description Pre-computed per-block eigendecompositions of the LD
 #'   correlation matrix. Used by LDER, HDL, and sHDL.
-#' @slot eigen_list A list of length \code{n_blocks}, each element a list
+#' @slot eigenList A list of length \code{n_blocks}, each element a list
 #'   with components:
 #'   \describe{
 #'     \item{values}{Numeric vector of eigenvalues}
 #'     \item{vectors}{Numeric matrix of eigenvectors (SNPs x retained components)}
-#'     \item{snp_idx}{Integer vector of SNP indices in \code{snp_info}}
+#'     \item{snp_idx}{Integer vector of SNP indices in \code{snpInfo}}
 #'   }
-#' @slot eigenvalue_truncation Numeric, proportion of variance retained
+#' @slot eigenvalueTruncation Numeric, proportion of variance retained
 #'   (e.g., 0.9 for HDL's default). If 1.0, no truncation.
 #' @export
-setClass("LDEigen",
-  contains = "LDStatistic",
+setClass("LdEigen",
+  contains = "LdStatistic",
   representation(
-    eigen_list = "list",
-    eigenvalue_truncation = "numeric"
+    eigenList = "list",
+    eigenvalueTruncation = "numeric"
   ),
   validity = function(object) {
-    parent_check <- getValidity(getClass("LDStatistic"))(object)
+    parent_check <- getValidity(getClass("LdStatistic"))(object)
     errors <- if (isTRUE(parent_check)) character() else parent_check
-    n_blocks <- length(object@ld_blocks@blocks)
-    if (length(object@eigen_list) != n_blocks)
+    n_blocks <- length(object@ldBlocks@blocks)
+    if (length(object@eigenList) != n_blocks)
       errors <- c(errors,
-        "Length of 'eigen_list' must match number of LD blocks")
-    if (length(object@eigenvalue_truncation) != 1L ||
-        object@eigenvalue_truncation <= 0 ||
-        object@eigenvalue_truncation > 1)
+        "Length of 'eigenList' must match number of LD blocks")
+    if (length(object@eigenvalueTruncation) != 1L ||
+        object@eigenvalueTruncation <= 0 ||
+        object@eigenvalueTruncation > 1)
       errors <- c(errors,
-        "'eigenvalue_truncation' must be a single value in (0, 1]")
+        "'eigenvalueTruncation' must be a single value in (0, 1]")
     if (length(errors) == 0) TRUE else errors
   }
 )
@@ -251,29 +251,29 @@ setClass("LDEigen",
 #' @description Pre-computed LD scores for each SNP. Used by S-LDSC and
 #'   g-LDSC. Supports both standard LD scores and annotation-stratified
 #'   LD scores.
-#' @slot ld_scores A numeric matrix (SNPs x annotations+1). The first
+#' @slot ldScores A numeric matrix (SNPs x annotations+1). The first
 #'   column is the base LD score (sum of r^2). Additional columns are
 #'   annotation-stratified LD scores if annotations are provided.
-#' @slot ld_score_weights A numeric vector of regression weights for each SNP.
-#' @slot ld_matrix_list For g-LDSC: a list of per-block LD (R^2) matrices
+#' @slot ldScoreWeights A numeric vector of regression weights for each SNP.
+#' @slot ldMatrixList For g-LDSC: a list of per-block LD (R^2) matrices
 #'   used to compute the FGLS residual covariance. NULL for S-LDSC.
 #' @export
-setClass("LDScore",
-  contains = "LDStatistic",
+setClass("LdScore",
+  contains = "LdStatistic",
   representation(
-    ld_scores = "matrix",
-    ld_score_weights = "numeric",
-    ld_matrix_list = "list"  # for g-LDSC; empty list for S-LDSC
+    ldScores = "matrix",
+    ldScoreWeights = "numeric",
+    ldMatrixList = "list"  # for g-LDSC; empty list for S-LDSC
   ),
   validity = function(object) {
-    parent_check <- getValidity(getClass("LDStatistic"))(object)
+    parent_check <- getValidity(getClass("LdStatistic"))(object)
     errors <- if (isTRUE(parent_check)) character() else parent_check
-    if (nrow(object@ld_scores) != nrow(object@snp_info))
+    if (nrow(object@ldScores) != nrow(object@snpInfo))
       errors <- c(errors,
-        "Number of rows in 'ld_scores' must match 'snp_info'")
-    if (length(object@ld_score_weights) != nrow(object@snp_info))
+        "Number of rows in 'ldScores' must match 'snpInfo'")
+    if (length(object@ldScoreWeights) != nrow(object@snpInfo))
       errors <- c(errors,
-        "Length of 'ld_score_weights' must match 'snp_info'")
+        "Length of 'ldScoreWeights' must match 'snpInfo'")
     if (length(errors) == 0) TRUE else errors
   }
 )
@@ -286,10 +286,10 @@ setClass("LDScore",
 #' @description Container for univariate heritability estimation results.
 #'   Holds global, local, and annotation-stratified estimates.
 #' @slot h2 Numeric, global SNP heritability estimate.
-#' @slot h2_se Numeric, standard error of global h2.
+#' @slot h2Se Numeric, standard error of global h2.
 #' @slot intercept Numeric, confounding intercept estimate (NA if method
 #'   does not estimate one).
-#' @slot intercept_se Numeric, SE of intercept.
+#' @slot interceptSe Numeric, SE of intercept.
 #' @slot local A \code{data.frame} with per-block local heritability
 #'   estimates (columns: \code{block_id}, \code{h2_local}, \code{h2_local_se}).
 #'   NULL if \code{local = FALSE}.
@@ -297,10 +297,10 @@ setClass("LDScore",
 #'   estimates (columns: \code{annotation}, \code{tau}, \code{tau_se},
 #'   \code{enrichment}, \code{enrichment_se}, \code{enrichment_p},
 #'   \code{prop_h2}, \code{prop_snps}). NULL if unstratified.
-#' @slot tau_blocks A numeric matrix (n_blocks x n_annotations) of per-block
+#' @slot tauBlocks A numeric matrix (n_blocks x n_annotations) of per-block
 #'   jackknife tau values. Required for Gazal tau_star standardization
 #'   downstream. NULL if not available (e.g., unstratified analysis).
-#' @slot score_stats A list with score statistics for candidate annotations,
+#' @slot scoreStats A list with score statistics for candidate annotations,
 #'   suitable for input to \code{susie_rss}. Contains:
 #'   \describe{
 #'     \item{z}{Numeric vector of z-scores for each candidate annotation}
@@ -309,22 +309,22 @@ setClass("LDScore",
 #'   }
 #'   NULL if no candidate annotations provided.
 #' @slot method Character string identifying the estimation method.
-#' @slot n_snps Integer, number of SNPs used in estimation.
-#' @slot trait_name Character string for trait identifier.
+#' @slot nSnps Integer, number of SNPs used in estimation.
+#' @slot traitName Character string for trait identifier.
 #' @export
 setClass("H2Estimate",
   representation(
     h2 = "numeric",
-    h2_se = "numeric",
+    h2Se = "numeric",
     intercept = "numeric",
-    intercept_se = "numeric",
+    interceptSe = "numeric",
     local = "ANY",        # data.frame or NULL
     enrichment = "ANY",   # data.frame or NULL
-    tau_blocks = "ANY",   # matrix or NULL
-    score_stats = "ANY",  # list or NULL
+    tauBlocks = "ANY",    # matrix or NULL
+    scoreStats = "ANY",   # list or NULL
     method = "character",
-    n_snps = "integer",
-    trait_name = "character"
+    nSnps = "integer",
+    traitName = "character"
   )
 )
 
@@ -340,31 +340,31 @@ setClass("H2Estimate",
 #' @slot correlation A correlation matrix, a list of per-block matrices
 #'   (block-diagonal LD), or NULL if genotypes are available and R should
 #'   be computed on demand.
-#' @slot genotype_handle A \code{GenotypeHandle}, a list of
+#' @slot genotypeHandle A \code{GenotypeHandle}, a list of
 #'   \code{GenotypeHandle}s (for mixture panels), or NULL when only
 #'   pre-computed R is available.
-#' @slot snp_idx Integer vector of 1-based SNP indices into the handle's
-#'   \code{snp_info}. NULL when correlation is pre-computed.
+#' @slot snpIdx Integer vector of 1-based SNP indices into the handle's
+#'   \code{snpInfo}. NULL when correlation is pre-computed.
 #' @slot variants A \code{GRanges} object with variant metadata (A1, A2,
 #'   variant_id, and optionally allele_freq, variance, n_nomiss).
-#' @slot block_metadata An \code{LDBlocks} object or a \code{data.frame}
+#' @slot blockMetadata An \code{LdBlocks} object or a \code{data.frame}
 #'   with block boundary information.
-#' @slot n_ref Integer, reference panel sample size.
+#' @slot nRef Integer, reference panel sample size.
 #' @export
-setClass("LDData",
+setClass("LdData",
   representation(
     correlation = "ANY",       # matrix, list of matrices, or NULL
-    genotype_handle = "ANY",   # GenotypeHandle, list of GenotypeHandles, or NULL
-    snp_idx = "ANY",           # integer or NULL
+    genotypeHandle = "ANY",    # GenotypeHandle, list of GenotypeHandles, or NULL
+    snpIdx = "ANY",            # integer or NULL
     variants = "GRanges",
-    block_metadata = "ANY",    # LDBlocks or data.frame
-    n_ref = "integer"
+    blockMetadata = "ANY",     # LdBlocks or data.frame
+    nRef = "integer"
   ),
   validity = function(object) {
     errors <- character()
-    if (is.null(object@correlation) && is.null(object@genotype_handle))
+    if (is.null(object@correlation) && is.null(object@genotypeHandle))
       errors <- c(errors,
-        "At least one of 'correlation' or 'genotype_handle' must be non-NULL")
+        "At least one of 'correlation' or 'genotypeHandle' must be non-NULL")
     if (length(object@variants) == 0)
       errors <- c(errors, "'variants' must not be empty")
     if (length(errors) == 0) TRUE else errors
@@ -378,9 +378,9 @@ setClass("LDData",
 #' @title Fine-Mapping Result
 #' @description S4 container for fine-mapping output. Stores variant names,
 #'   the trimmed model fit, and a long-format table of credible sets and PIPs.
-#' @slot variant_names Character vector of variant IDs.
-#' @slot trimmed_fit List containing the method-specific trimmed fit.
-#' @slot top_loci A \code{data.frame} in long format with columns:
+#' @slot variantNames Character vector of variant IDs.
+#' @slot trimmedFit List containing the method-specific trimmed fit.
+#' @slot topLoci A \code{data.frame} in long format with columns:
 #'   variant_id, method, coverage, cs, pip, and optionally betahat, sd,
 #'   cs_log10bf, z.
 #' @slot method Character string identifying the fine-mapping method.
@@ -388,9 +388,9 @@ setClass("LDData",
 #' @export
 setClass("FineMappingResult",
   representation(
-    variant_names = "character",
-    trimmed_fit = "ANY",
-    top_loci = "data.frame",
+    variantNames = "character",
+    trimmedFit = "ANY",
+    topLoci = "data.frame",
     method = "character",
     sumstats = "ANY"  # list or NULL
   ),
@@ -398,11 +398,11 @@ setClass("FineMappingResult",
     errors <- character()
     if (length(object@method) != 1L)
       errors <- c(errors, "'method' must be a single character string")
-    if (nrow(object@top_loci) > 0) {
+    if (nrow(object@topLoci) > 0) {
       required <- c("variant_id", "method")
-      missing_cols <- setdiff(required, colnames(object@top_loci))
+      missing_cols <- setdiff(required, colnames(object@topLoci))
       if (length(missing_cols) > 0)
-        errors <- c(errors, paste("top_loci missing columns:",
+        errors <- c(errors, paste("topLoci missing columns:",
                                   paste(missing_cols, collapse = ", ")))
     }
     if (length(errors) == 0) TRUE else errors
@@ -416,28 +416,28 @@ setClass("FineMappingResult",
 #' @title TWAS Weights
 #' @description S4 container for TWAS weight matrices.
 #' @slot weights Named list of numeric matrices (variants x outcomes).
-#' @slot variant_ids Character vector of variant IDs (row names for all
+#' @slot variantIds Character vector of variant IDs (row names for all
 #'   weight matrices).
 #' @slot methods Character vector of method names (names of the weights
 #'   list).
 #' @slot fits Named list of model fit objects, or NULL.
-#' @slot cv_performance Named list of cross-validation performance
+#' @slot cvPerformance Named list of cross-validation performance
 #'   metrics, or NULL.
 #' @slot standardized Logical, whether weights are on standardized
 #'   (correlation) scale. If TRUE, \code{harmonize_twas} skips the
 #'   \code{sqrt(variance)} scaling step. Individual-level weights use
 #'   FALSE (raw genotype scale); RSS weights use TRUE.
 #' @export
-setClass("TWASWeights",
+setClass("TwasWeights",
   representation(
     weights = "list",
-    variant_ids = "character",
+    variantIds = "character",
     methods = "character",
     fits = "ANY",           # list or NULL
-    cv_performance = "ANY", # list or NULL
+    cvPerformance = "ANY",  # list or NULL
     standardized = "logical",
-    molecular_id = "character",  # gene/molecule name (length 0 or 1)
-    data_type = "ANY"            # named list of data types per context, or NULL
+    molecularId = "character",  # gene/molecule name (length 0 or 1)
+    dataType = "ANY"            # named list of data types per context, or NULL
   ),
   validity = function(object) {
     errors <- character()
@@ -448,11 +448,11 @@ setClass("TWASWeights",
         "Length of 'methods' must match length of 'weights'")
     for (i in seq_along(object@weights)) {
       w <- object@weights[[i]]
-      if (!is.null(w) && is.matrix(w) && nrow(w) != length(object@variant_ids))
+      if (!is.null(w) && is.matrix(w) && nrow(w) != length(object@variantIds))
         errors <- c(errors, paste0(
           "Weight matrix '", object@methods[i],
-          "' has ", nrow(w), " rows but variant_ids has length ",
-          length(object@variant_ids)))
+          "' has ", nrow(w), " rows but variantIds has length ",
+          length(object@variantIds)))
     }
     if (length(errors) == 0) TRUE else errors
   }
@@ -463,22 +463,22 @@ setClass("TWASWeights",
 # =============================================================================
 
 #' @title Allele QC Result
-#' @description S4 container for the output of \code{match_ref_panel} /
-#'   \code{allele_qc}. Carries the post-QC target variants alongside the full
+#' @description S4 container for the output of \code{matchRefPanel} /
+#'   \code{alleleQc}. Carries the post-QC target variants alongside the full
 #'   merge / flip / strand diagnostics needed by downstream callers that
 #'   inspect what QC did.
-#' @slot harmonized_data A \code{data.frame} of variants retained after
+#' @slot harmonizedData A \code{data.frame} of variants retained after
 #'   allele harmonization, with reference-aligned A1/A2 and (when requested)
 #'   sign-flipped effect columns.
-#' @slot qc_summary A \code{data.frame} carrying per-variant QC diagnostics
+#' @slot qcSummary A \code{data.frame} carrying per-variant QC diagnostics
 #'   from the full merge: \code{variants_id_original}, \code{variants_id_qced},
 #'   \code{exact_match}, \code{sign_flip}, \code{strand_flip}, \code{INDEL},
 #'   \code{ID_match}, \code{keep}, etc.
 #' @export
-setClass("AlleleQCResult",
+setClass("AlleleQcResult",
   representation(
-    harmonized_data = "data.frame",
-    qc_summary = "data.frame"
+    harmonizedData = "data.frame",
+    qcSummary = "data.frame"
   )
 )
 
@@ -487,59 +487,59 @@ setClass("AlleleQCResult",
 # =============================================================================
 
 #' @title Summary-Statistics QC Result
-#' @description S4 container holding the output of \code{summary_stats_qc} and
+#' @description S4 container holding the output of \code{summaryStatsQc} and
 #'   \code{.summary_stats_qc_single_study}. Carries the post-QC LD reference
 #'   plus harmonized sumstats, a pre-imputation snapshot, and QC process
 #'   metadata. Replaces the legacy list-of-named-fields return shape.
-#' @slot ld_data An \code{LDData} S4 object containing the post-QC LD
+#' @slot ldData An \code{LdData} S4 object containing the post-QC LD
 #'   reference (correlation and/or genotype), or NULL when QC produced no LD.
-#' @slot rss_input List with \code{sumstats} (post-QC data.frame), \code{n},
-#'   and \code{var_y}.
-#' @slot preprocess List with \code{sumstats} and \code{ld_data} fields
+#' @slot rssInput List with \code{sumstats} (post-QC data.frame), \code{n},
+#'   and \code{varY}.
+#' @slot preprocess List with \code{sumstats} and \code{ldData} fields
 #'   capturing the pre-imputation snapshot for downstream re-runs.
-#' @slot outlier_number Integer count of LD-mismatch outliers removed.
+#' @slot outlierNumber Integer count of LD-mismatch outliers removed.
 #' @slot skipped Single logical; TRUE when QC short-circuited.
-#' @slot skip_reason Character string explaining a skip; empty otherwise.
+#' @slot skipReason Character string explaining a skip; empty otherwise.
 #' @export
-setClass("QCResult",
+setClass("QcResult",
   representation(
-    ld_data = "ANY",                  # LDData or NULL
-    rss_input = "list",
+    ldData = "ANY",                   # LdData or NULL
+    rssInput = "list",
     preprocess = "list",
-    outlier_number = "integer",
+    outlierNumber = "integer",
     skipped = "logical",
-    skip_reason = "character"
+    skipReason = "character"
   ),
   validity = function(object) {
     errors <- character()
-    if (!is.null(object@ld_data) && !is(object@ld_data, "LDData"))
-      errors <- c(errors, "'ld_data' must be an LDData object or NULL")
+    if (!is.null(object@ldData) && !is(object@ldData, "LdData"))
+      errors <- c(errors, "'ldData' must be an LdData object or NULL")
     if (length(object@skipped) != 1L)
       errors <- c(errors, "'skipped' must be a single logical value")
-    if (length(object@outlier_number) != 1L)
-      errors <- c(errors, "'outlier_number' must be a single integer")
-    if (length(object@skip_reason) > 1L)
-      errors <- c(errors, "'skip_reason' must be a single character string (or empty)")
-    if (length(object@rss_input) > 0L) {
-      required <- c("sumstats", "n", "var_y")
-      missing_keys <- setdiff(required, names(object@rss_input))
+    if (length(object@outlierNumber) != 1L)
+      errors <- c(errors, "'outlierNumber' must be a single integer")
+    if (length(object@skipReason) > 1L)
+      errors <- c(errors, "'skipReason' must be a single character string (or empty)")
+    if (length(object@rssInput) > 0L) {
+      required <- c("sumstats", "n", "varY")
+      missing_keys <- setdiff(required, names(object@rssInput))
       if (length(missing_keys) > 0L)
         errors <- c(errors, paste0(
-          "'rss_input' is missing key(s): ", paste(missing_keys, collapse = ", ")))
-      if (!is.null(object@rss_input$sumstats) &&
-          !is.data.frame(object@rss_input$sumstats))
+          "'rssInput' is missing key(s): ", paste(missing_keys, collapse = ", ")))
+      if (!is.null(object@rssInput$sumstats) &&
+          !is.data.frame(object@rssInput$sumstats))
         errors <- c(errors,
-          "'rss_input$sumstats' must be a data.frame")
+          "'rssInput$sumstats' must be a data.frame")
     }
     if (length(object@preprocess) > 0L) {
       pp_keys <- names(object@preprocess)
-      if (!all(pp_keys %in% c("sumstats", "ld_data")))
+      if (!all(pp_keys %in% c("sumstats", "ldData")))
         errors <- c(errors,
-          "'preprocess' may only contain 'sumstats' and 'ld_data' keys")
-      if (!is.null(object@preprocess$ld_data) &&
-          !is(object@preprocess$ld_data, "LDData"))
+          "'preprocess' may only contain 'sumstats' and 'ldData' keys")
+      if (!is.null(object@preprocess$ldData) &&
+          !is(object@preprocess$ldData, "LdData"))
         errors <- c(errors,
-          "'preprocess$ld_data' must be an LDData or NULL")
+          "'preprocess$ldData' must be an LdData or NULL")
     }
     if (length(errors) == 0) TRUE else errors
   }
@@ -552,26 +552,26 @@ setClass("QCResult",
 #' @title Regional Association Data
 #' @description S4 container for regional genotype/phenotype/covariate data.
 #'   Residualized genotypes and phenotypes are computed lazily via accessors.
-#' @slot genotype_matrix Numeric matrix (samples x variants) of genotype
+#' @slot genotypeMatrix Numeric matrix (samples x variants) of genotype
 #'   dosages, with colnames as variant IDs and rownames as sample IDs.
 #' @slot phenotypes Named list of phenotype matrices (per condition).
 #' @slot covariates Named list of covariate matrices (per condition).
-#' @slot scale_residuals Logical, whether to scale residuals.
+#' @slot scaleResiduals Logical, whether to scale residuals.
 #' @slot maf Named list of MAF vectors (per condition).
 #' @slot region A \code{GRanges} (single range) or NULL.
-#' @slot dropped_samples Named list of dropped sample vectors.
-#' @slot Y_coordinates Phenotype coordinates, or NULL.
+#' @slot droppedSamples Named list of dropped sample vectors.
+#' @slot coordinates Phenotype coordinates, or NULL.
 #' @export
 setClass("RegionalData",
   representation(
-    genotype_matrix = "matrix",
+    genotypeMatrix = "matrix",
     phenotypes = "list",
     covariates = "list",
-    scale_residuals = "logical",
+    scaleResiduals = "logical",
     maf = "list",
     region = "ANY",           # GRanges or NULL
-    dropped_samples = "list",
-    Y_coordinates = "ANY"     # data.frame or NULL
+    droppedSamples = "list",
+    coordinates = "ANY"       # data.frame or NULL
   ),
   validity = function(object) {
     errors <- character()
@@ -595,34 +595,34 @@ setClass("RegionalData",
 #'   matrices, this class assumes all conditions are jointly observed in the
 #'   same samples and packs the phenotypes into a single multivariate matrix
 #'   (samples x conditions).
-#' @slot genotype_matrix Numeric matrix (samples x variants), rownames are
+#' @slot genotypeMatrix Numeric matrix (samples x variants), rownames are
 #'   sample IDs, colnames are variant IDs.
-#' @slot Y_matrix Numeric matrix (samples x conditions) of residualized
+#' @slot Y Numeric matrix (samples x conditions) of residualized
 #'   phenotypes after joining conditions and (optionally) filtering rows by
 #'   minimum non-missing count.
-#' @slot Y_scalar Numeric vector of per-condition scaling factors
-#'   (length = ncol(Y_matrix)).
-#' @slot dropped_samples Character or list capturing sample IDs dropped
+#' @slot scaling Numeric vector of per-condition scaling factors
+#'   (length = ncol(Y)).
+#' @slot droppedSamples Character or list capturing sample IDs dropped
 #'   during multivariate filtering.
 #' @slot region A \code{GRanges} (single range) or NULL.
-#' @slot Y_coordinates A data.frame of phenotype coordinates, or NULL.
+#' @slot coordinates A data.frame of phenotype coordinates, or NULL.
 #' @export
 setClass("MultivariateRegionalData",
   representation(
-    genotype_matrix = "matrix",
-    Y_matrix = "matrix",
-    Y_scalar = "numeric",
-    dropped_samples = "ANY",
+    genotypeMatrix = "matrix",
+    Y = "matrix",
+    scaling = "numeric",
+    droppedSamples = "ANY",
     region = "ANY",
-    Y_coordinates = "ANY"
+    coordinates = "ANY"
   ),
   validity = function(object) {
     errors <- character()
-    if (nrow(object@genotype_matrix) != nrow(object@Y_matrix))
+    if (nrow(object@genotypeMatrix) != nrow(object@Y))
       errors <- c(errors,
-        "genotype_matrix and Y_matrix must have the same number of rows")
-    if (length(object@Y_scalar) != ncol(object@Y_matrix))
-      errors <- c(errors, "length(Y_scalar) must equal ncol(Y_matrix)")
+        "genotypeMatrix and Y must have the same number of rows")
+    if (length(object@scaling) != ncol(object@Y))
+      errors <- c(errors, "length(scaling) must equal ncol(Y)")
     if (length(errors) == 0) TRUE else errors
   }
 )
@@ -636,34 +636,34 @@ setMethod("show", "GenotypeHandle", function(object) {
   cat(sprintf("GenotypeHandle [%s]\n", object@format))
   cat(sprintf("  Path: %s\n", object@path))
   cat(sprintf("  %d samples, %d SNPs\n",
-              object@n_samples, nrow(object@snp_info)))
+              object@nSamples, nrow(object@snpInfo)))
 })
 
 #' @export
-setMethod("show", "GWASSumStats", function(object) {
-  cat(sprintf("GWASSumStats for '%s'\n", object@trait_name))
+setMethod("show", "GwasSumStats", function(object) {
+  cat(sprintf("GwasSumStats for '%s'\n", object@traitName))
   cat(sprintf("  %d SNPs, genome build: %s\n",
               length(object@sumstats), object@genome))
   cat(sprintf("  Median N: %.0f\n",
               stats::median(S4Vectors::mcols(object@sumstats)$N)))
   has_maf <- "MAF" %in% colnames(S4Vectors::mcols(object@sumstats))
   cat(sprintf("  MAF available: %s\n", has_maf))
-  if (!is.null(object@var_y))
-    cat(sprintf("  var_y: %.4f\n", object@var_y))
+  if (!is.null(object@varY))
+    cat(sprintf("  varY: %.4f\n", object@varY))
 })
 
 #' @export
-setMethod("show", "LDBlocks", function(object) {
-  cat(sprintf("LDBlocks: %d blocks, genome build: %s\n",
+setMethod("show", "LdBlocks", function(object) {
+  cat(sprintf("LdBlocks: %d blocks, genome build: %s\n",
               length(object@blocks), object@genome))
 })
 
 #' @export
 setMethod("show", "AnnotationMatrix", function(object) {
-  n_base <- sum(object@annotation_meta$tier == "baseline")
-  n_cand <- sum(object@annotation_meta$tier == "candidate")
-  n_bin <- sum(object@annotation_meta$type == "binary")
-  n_cont <- sum(object@annotation_meta$type == "continuous")
+  n_base <- sum(object@annotationMeta$tier == "baseline")
+  n_cand <- sum(object@annotationMeta$tier == "candidate")
+  n_bin <- sum(object@annotationMeta$type == "binary")
+  n_cont <- sum(object@annotationMeta$type == "continuous")
   cat(sprintf("AnnotationMatrix: %d SNPs x %d annotations\n",
               nrow(object@annotations), ncol(object@annotations)))
   cat(sprintf("  Baseline: %d, Candidate: %d\n", n_base, n_cand))
@@ -672,90 +672,90 @@ setMethod("show", "AnnotationMatrix", function(object) {
 })
 
 #' @export
-setMethod("show", "LDEigen", function(object) {
-  cat(sprintf("LDEigen: %d SNPs across %d blocks\n",
-              nrow(object@snp_info), length(object@eigen_list)))
+setMethod("show", "LdEigen", function(object) {
+  cat(sprintf("LdEigen: %d SNPs across %d blocks\n",
+              nrow(object@snpInfo), length(object@eigenList)))
   cat(sprintf("  Eigenvalue truncation: %.2f\n",
-              object@eigenvalue_truncation))
+              object@eigenvalueTruncation))
   cat(sprintf("  Reference N: %d, In-sample: %s\n",
-              object@n_ref, object@in_sample))
+              object@nRef, object@inSample))
 })
 
 #' @export
-setMethod("show", "LDScore", function(object) {
-  n_scores <- ncol(object@ld_scores)
-  has_matrix <- length(object@ld_matrix_list) > 0
-  cat(sprintf("LDScore: %d SNPs, %d LD score columns\n",
-              nrow(object@snp_info), n_scores))
+setMethod("show", "LdScore", function(object) {
+  n_scores <- ncol(object@ldScores)
+  has_matrix <- length(object@ldMatrixList) > 0
+  cat(sprintf("LdScore: %d SNPs, %d LD score columns\n",
+              nrow(object@snpInfo), n_scores))
   cat(sprintf("  Full LD matrices: %s (needed for g-LDSC)\n", has_matrix))
   cat(sprintf("  Reference N: %d, In-sample: %s\n",
-              object@n_ref, object@in_sample))
+              object@nRef, object@inSample))
 })
 
 #' @export
 setMethod("show", "H2Estimate", function(object) {
   cat(sprintf("H2Estimate for '%s' (method: %s)\n",
-              object@trait_name, object@method))
-  cat(sprintf("  h2 = %.4f (SE = %.4f)\n", object@h2, object@h2_se))
+              object@traitName, object@method))
+  cat(sprintf("  h2 = %.4f (SE = %.4f)\n", object@h2, object@h2Se))
   if (!is.na(object@intercept))
     cat(sprintf("  intercept = %.4f (SE = %.4f)\n",
-                object@intercept, object@intercept_se))
+                object@intercept, object@interceptSe))
   has_local <- !is.null(object@local)
   has_enrich <- !is.null(object@enrichment)
-  has_tau_blocks <- !is.null(object@tau_blocks)
-  cat(sprintf("  Local: %s, Enrichment: %s, tau_blocks: %s\n",
+  has_tau_blocks <- !is.null(object@tauBlocks)
+  cat(sprintf("  Local: %s, Enrichment: %s, tauBlocks: %s\n",
               has_local, has_enrich, has_tau_blocks))
-  cat(sprintf("  N SNPs: %d\n", object@n_snps))
+  cat(sprintf("  N SNPs: %d\n", object@nSnps))
 })
 
 #' @export
-setMethod("show", "LDData", function(object) {
+setMethod("show", "LdData", function(object) {
   n_var <- length(object@variants)
   has_R <- !is.null(object@correlation)
-  has_geno <- !is.null(object@genotype_handle)
+  has_geno <- !is.null(object@genotypeHandle)
   r_type <- if (has_R && is.list(object@correlation)) "block-diagonal" else "single"
-  cat(sprintf("LDData: %d variants\n", n_var))
+  cat(sprintf("LdData: %d variants\n", n_var))
   cat(sprintf("  Correlation: %s, Genotype handle: %s\n",
               if (has_R) r_type else "NULL",
               if (has_geno) "available" else "NULL"))
-  cat(sprintf("  Reference N: %d\n", object@n_ref))
+  cat(sprintf("  Reference N: %d\n", object@nRef))
 })
 
 #' @export
 setMethod("show", "FineMappingResult", function(object) {
-  n_cs <- if (nrow(object@top_loci) > 0 && "cs" %in% names(object@top_loci))
-    length(unique(object@top_loci$cs[object@top_loci$cs > 0])) else 0L
+  n_cs <- if (nrow(object@topLoci) > 0 && "cs" %in% names(object@topLoci))
+    length(unique(object@topLoci$cs[object@topLoci$cs > 0])) else 0L
   cat(sprintf("FineMappingResult [%s]: %d variants, %d credible sets\n",
-              object@method, length(object@variant_names), n_cs))
+              object@method, length(object@variantNames), n_cs))
 })
 
 #' @export
-setMethod("show", "TWASWeights", function(object) {
-  cat(sprintf("TWASWeights: %d methods, %d variants\n",
-              length(object@methods), length(object@variant_ids)))
-  if (length(object@molecular_id) > 0)
-    cat(sprintf("  Molecular ID: %s\n", object@molecular_id))
+setMethod("show", "TwasWeights", function(object) {
+  cat(sprintf("TwasWeights: %d methods, %d variants\n",
+              length(object@methods), length(object@variantIds)))
+  if (length(object@molecularId) > 0)
+    cat(sprintf("  Molecular ID: %s\n", object@molecularId))
   cat(sprintf("  Methods: %s\n", paste(object@methods, collapse = ", ")))
   cat(sprintf("  Standardized: %s\n", object@standardized))
-  has_cv <- !is.null(object@cv_performance)
+  has_cv <- !is.null(object@cvPerformance)
   cat(sprintf("  CV performance: %s\n", has_cv))
 })
 
 #' @export
 setMethod("show", "RegionalData", function(object) {
   n_cond <- length(object@phenotypes)
-  n_var <- ncol(object@genotype_matrix)
-  n_samp <- nrow(object@genotype_matrix)
+  n_var <- ncol(object@genotypeMatrix)
+  n_samp <- nrow(object@genotypeMatrix)
   cat(sprintf("RegionalData: %d conditions, %d variants, %d samples\n",
               n_cond, n_var, n_samp))
-  cat(sprintf("  Scale residuals: %s\n", object@scale_residuals))
+  cat(sprintf("  Scale residuals: %s\n", object@scaleResiduals))
 })
 
 #' @export
 setMethod("show", "MultivariateRegionalData", function(object) {
   cat(sprintf("MultivariateRegionalData: %d conditions, %d variants, %d samples\n",
-              ncol(object@Y_matrix), ncol(object@genotype_matrix),
-              nrow(object@genotype_matrix)))
+              ncol(object@Y), ncol(object@genotypeMatrix),
+              nrow(object@genotypeMatrix)))
   if (!is.null(object@region))
     cat(sprintf("  Region: %s:%d-%d\n",
                 as.character(GenomicRanges::seqnames(object@region))[1],
@@ -764,23 +764,23 @@ setMethod("show", "MultivariateRegionalData", function(object) {
 })
 
 #' @export
-setMethod("show", "AlleleQCResult", function(object) {
-  cat(sprintf("AlleleQCResult: %d harmonized variants (from %d scanned)\n",
-              nrow(object@harmonized_data), nrow(object@qc_summary)))
+setMethod("show", "AlleleQcResult", function(object) {
+  cat(sprintf("AlleleQcResult: %d harmonized variants (from %d scanned)\n",
+              nrow(object@harmonizedData), nrow(object@qcSummary)))
 })
 
 #' @export
-setMethod("show", "QCResult", function(object) {
-  cat(sprintf("QCResult: %s\n",
-              if (object@skipped) sprintf("skipped (%s)", object@skip_reason) else "completed"))
-  if (length(object@rss_input) > 0 && !is.null(object@rss_input$sumstats)) {
+setMethod("show", "QcResult", function(object) {
+  cat(sprintf("QcResult: %s\n",
+              if (object@skipped) sprintf("skipped (%s)", object@skipReason) else "completed"))
+  if (length(object@rssInput) > 0 && !is.null(object@rssInput$sumstats)) {
     cat(sprintf("  Sumstats: %d variants\n",
-                nrow(object@rss_input$sumstats)))
+                nrow(object@rssInput$sumstats)))
   }
-  if (!is.null(object@ld_data)) {
+  if (!is.null(object@ldData)) {
     cat(sprintf("  LD: %d variants%s\n",
-                length(getVariantIds(object@ld_data)),
-                if (hasGenotypes(object@ld_data)) " (genotype-backed)" else " (correlation)"))
+                length(getVariantIds(object@ldData)),
+                if (hasGenotypes(object@ldData)) " (genotype-backed)" else " (correlation)"))
   }
-  cat(sprintf("  Outliers removed: %d\n", object@outlier_number))
+  cat(sprintf("  Outliers removed: %d\n", object@outlierNumber))
 })

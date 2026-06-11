@@ -9,25 +9,25 @@ NULL
 
 #' @rdname writeSumstatsVcf
 #' @export
-setMethod("writeSumstatsVcf", signature("GWASSumStats"), function(x, output_path, sample_name = NULL, ...) {
+setMethod("writeSumstatsVcf", signature("GwasSumStats"), function(x, outputPath, sampleName = NULL, ...) {
   if (!requireNamespace("VariantAnnotation", quietly = TRUE))
     stop("Package 'VariantAnnotation' is required for writeSumstatsVcf")
 
   ss <- x@sumstats
   mc <- mcols(ss)
-  sample_name <- sample_name %||% x@trait_name
+  sampleName <- sampleName %||% x@traitName
 
-  # Build GENO fields from GWASSumStats metadata
-  n_snps <- length(ss)
+  # Build GENO fields from GwasSumStats metadata
+  nSnps <- length(ss)
   geno <- list()
   if ("Z" %in% colnames(mc))
-    geno[["ES"]] <- matrix(mc$Z, n_snps)
+    geno[["ES"]] <- matrix(mc$Z, nSnps)
   if ("N" %in% colnames(mc))
-    geno[["SS"]] <- matrix(as.integer(mc$N), n_snps)
+    geno[["SS"]] <- matrix(as.integer(mc$N), nSnps)
   if ("MAF" %in% colnames(mc))
-    geno[["AF"]] <- matrix(mc$MAF, n_snps)
+    geno[["AF"]] <- matrix(mc$MAF, nSnps)
 
-  geno_header <- DataFrame(
+  genoHeader <- DataFrame(
     Number = c("A", "A", "A"),
     Type = c("Float", "Integer", "Float"),
     Description = c(
@@ -36,104 +36,104 @@ setMethod("writeSumstatsVcf", signature("GWASSumStats"), function(x, output_path
       "Minor allele frequency"),
     row.names = c("ES", "SS", "AF"))
 
-  .write_vcf_impl(
+  .writeVcfImpl(
     chrom = as.character(seqnames(ss)),
     pos = start(ss),
     ref = mc$A2,
     alt = mc$A1,
-    snp_ids = mc$SNP,
+    snpIds = mc$SNP,
     geno = geno,
-    geno_header = geno_header,
-    sample_name = sample_name,
-    output_path = output_path)
+    genoHeader = genoHeader,
+    sampleName = sampleName,
+    outputPath = outputPath)
 })
 
 #' @rdname writeSumstatsVcf
 #' @export
-setMethod("writeSumstatsVcf", signature("FineMappingResult"), function(x, output_path, sample_name = NULL, ...) {
+setMethod("writeSumstatsVcf", signature("FineMappingResult"), function(x, outputPath, sampleName = NULL, ...) {
   if (!requireNamespace("VariantAnnotation", quietly = TRUE))
     stop("Package 'VariantAnnotation' is required for writeSumstatsVcf")
 
-  sample_name <- sample_name %||% x@method
-  tl <- x@top_loci
-  if (nrow(tl) == 0) stop("FineMappingResult has no top_loci to write")
+  sampleName <- sampleName %||% x@method
+  tl <- x@topLoci
+  if (nrow(tl) == 0) stop("FineMappingResult has no topLoci to write")
 
-  parsed <- parse_variant_id(tl$variant_id)
-  n_snps <- nrow(parsed)
+  parsed <- parseVariantId(tl$variant_id)
+  nSnps <- nrow(parsed)
 
   geno <- list()
-  geno_header_rows <- character(0)
-  geno_number <- character(0)
-  geno_type <- character(0)
-  geno_desc <- character(0)
+  genoHeaderRows <- character(0)
+  genoNumber <- character(0)
+  genoType <- character(0)
+  genoDesc <- character(0)
 
   # PIP
-  pip_col <- resolve_pip_column(tl)
-  if (!is.null(pip_col)) {
-    geno[["PIP"]] <- matrix(tl[[pip_col]], n_snps)
-    geno_header_rows <- c(geno_header_rows, "PIP")
-    geno_number <- c(geno_number, "A")
-    geno_type <- c(geno_type, "Float")
-    geno_desc <- c(geno_desc, "Posterior inclusion probability")
+  pipCol <- resolvePipColumn(tl)
+  if (!is.null(pipCol)) {
+    geno[["PIP"]] <- matrix(tl[[pipCol]], nSnps)
+    genoHeaderRows <- c(genoHeaderRows, "PIP")
+    genoNumber <- c(genoNumber, "A")
+    genoType <- c(genoType, "Float")
+    genoDesc <- c(genoDesc, "Posterior inclusion probability")
   }
 
   # CS
-  cs_col <- grep("^cs_index", colnames(tl), value = TRUE)
-  if (length(cs_col) > 0) {
-    geno[["CS"]] <- matrix(as.integer(tl[[cs_col[1]]]), n_snps)
-    geno_header_rows <- c(geno_header_rows, "CS")
-    geno_number <- c(geno_number, "A")
-    geno_type <- c(geno_type, "Integer")
-    geno_desc <- c(geno_desc, "Credible set index (0 = not in any CS)")
+  csCol <- grep("^cs_index", colnames(tl), value = TRUE)
+  if (length(csCol) > 0) {
+    geno[["CS"]] <- matrix(as.integer(tl[[csCol[1]]]), nSnps)
+    genoHeaderRows <- c(genoHeaderRows, "CS")
+    genoNumber <- c(genoNumber, "A")
+    genoType <- c(genoType, "Integer")
+    genoDesc <- c(genoDesc, "Credible set index (0 = not in any CS)")
   }
 
   # Effect size / SE if available
   if ("beta" %in% colnames(tl)) {
-    geno[["ES"]] <- matrix(tl$beta, n_snps)
-    geno_header_rows <- c(geno_header_rows, "ES")
-    geno_number <- c(geno_number, "A")
-    geno_type <- c(geno_type, "Float")
-    geno_desc <- c(geno_desc, "Effect size estimate relative to the alternative allele")
+    geno[["ES"]] <- matrix(tl$beta, nSnps)
+    genoHeaderRows <- c(genoHeaderRows, "ES")
+    genoNumber <- c(genoNumber, "A")
+    genoType <- c(genoType, "Float")
+    genoDesc <- c(genoDesc, "Effect size estimate relative to the alternative allele")
   }
   if ("se" %in% colnames(tl)) {
-    geno[["SE"]] <- matrix(tl$se, n_snps)
-    geno_header_rows <- c(geno_header_rows, "SE")
-    geno_number <- c(geno_number, "A")
-    geno_type <- c(geno_type, "Float")
-    geno_desc <- c(geno_desc, "Standard error of effect size estimate")
+    geno[["SE"]] <- matrix(tl$se, nSnps)
+    genoHeaderRows <- c(genoHeaderRows, "SE")
+    genoNumber <- c(genoNumber, "A")
+    genoType <- c(genoType, "Float")
+    genoDesc <- c(genoDesc, "Standard error of effect size estimate")
   }
   if ("z" %in% colnames(tl)) {
     pval <- 2 * pnorm(-abs(tl$z))
-    geno[["LP"]] <- matrix(-log10(pval), n_snps)
-    geno_header_rows <- c(geno_header_rows, "LP")
-    geno_number <- c(geno_number, "A")
-    geno_type <- c(geno_type, "Float")
-    geno_desc <- c(geno_desc, "-log10 p-value for effect estimate")
+    geno[["LP"]] <- matrix(-log10(pval), nSnps)
+    genoHeaderRows <- c(genoHeaderRows, "LP")
+    genoNumber <- c(genoNumber, "A")
+    genoType <- c(genoType, "Float")
+    genoDesc <- c(genoDesc, "-log10 p-value for effect estimate")
   }
 
-  geno_header <- DataFrame(
-    Number = geno_number,
-    Type = geno_type,
-    Description = geno_desc,
-    row.names = geno_header_rows)
+  genoHeader <- DataFrame(
+    Number = genoNumber,
+    Type = genoType,
+    Description = genoDesc,
+    row.names = genoHeaderRows)
 
-  .write_vcf_impl(
+  .writeVcfImpl(
     chrom = parsed$chrom,
     pos = parsed$pos,
     ref = parsed$A2,
     alt = parsed$A1,
-    snp_ids = tl$variant_id,
+    snpIds = tl$variant_id,
     geno = geno,
-    geno_header = geno_header,
-    sample_name = sample_name,
-    output_path = output_path)
+    genoHeader = genoHeader,
+    sampleName = sampleName,
+    outputPath = outputPath)
 })
 
 # Internal implementation shared by all methods
 # @noRd
-.write_vcf_impl <- function(chrom, pos, ref, alt, snp_ids, geno, geno_header,
-                             sample_name, output_path) {
-  n_snps <- length(chrom)
+.writeVcfImpl <- function(chrom, pos, ref, alt, snpIds, geno, genoHeader,
+                          sampleName, outputPath) {
+  nSnps <- length(chrom)
 
   # Ensure chromosome names have "chr" prefix
   if (!all(grepl("^chr", chrom)))
@@ -145,28 +145,28 @@ setMethod("writeSumstatsVcf", signature("FineMappingResult"), function(x, output
     IRanges(
       start = as.integer(pos),
       end = as.integer(pos) + pmax(nchar(ref), nchar(alt)) - 1L,
-      names = snp_ids))
+      names = snpIds))
 
   # Build VCF header
-  coldata <- DataFrame(Samples = sample_name, row.names = sample_name)
+  coldata <- DataFrame(Samples = sampleName, row.names = sampleName)
 
   hdr <- VariantAnnotation::VCFHeader(
     header = DataFrameList(
       fileformat = DataFrame(
         Value = "VCFv4.2", row.names = "fileformat")),
-    sample = sample_name)
+    sample = sampleName)
 
   # Subset geno header to only fields present in geno
-  geno_header <- geno_header[rownames(geno_header) %in% names(geno), , drop = FALSE]
-  VariantAnnotation::geno(hdr) <- geno_header
+  genoHeader <- genoHeader[rownames(genoHeader) %in% names(geno), , drop = FALSE]
+  VariantAnnotation::geno(hdr) <- genoHeader
 
   # Build VCF object
-  geno_sl <- SimpleList(geno)
+  genoSl <- SimpleList(geno)
   vcf <- VariantAnnotation::VCF(
     rowRanges = gr,
     colData = coldata,
     exptData = list(header = hdr),
-    geno = geno_sl)
+    geno = genoSl)
 
   VariantAnnotation::ref(vcf) <- DNAStringSet(ref)
   VariantAnnotation::alt(vcf) <- DNAStringSetList(as.list(alt))
@@ -176,34 +176,34 @@ setMethod("writeSumstatsVcf", signature("FineMappingResult"), function(x, output
   # Write based on output format
   # Note: VariantAnnotation::writeVcf appends ".bgz" to the path when
   # index = TRUE, so we must pass the path *without* the .bgz/.gz suffix.
-  ext <- file_ext(output_path)
+  ext <- file_ext(outputPath)
   if (ext == "bcf") {
     # Write temporary bgzipped VCF, then convert to BCF
-    tmp_vcf_stem <- tempfile(fileext = ".vcf")
-    tmp_vcf_bgz <- paste0(tmp_vcf_stem, ".bgz")
-    on.exit(unlink(c(tmp_vcf_bgz, paste0(tmp_vcf_bgz, ".tbi")),
+    tmpVcfStem <- tempfile(fileext = ".vcf")
+    tmpVcfBgz <- paste0(tmpVcfStem, ".bgz")
+    on.exit(unlink(c(tmpVcfBgz, paste0(tmpVcfBgz, ".tbi")),
                    force = TRUE), add = TRUE)
-    VariantAnnotation::writeVcf(vcf, tmp_vcf_stem, index = TRUE)
+    VariantAnnotation::writeVcf(vcf, tmpVcfStem, index = TRUE)
     # asBcf appends ".bcf" to destination, so strip the extension
-    bcf_stem <- sub("\\.bcf$", "", output_path)
+    bcfStem <- sub("\\.bcf$", "", outputPath)
     dict <- unique(chrom)
-    asBcf(tmp_vcf_bgz, dictionary = dict,
-                     destination = bcf_stem)
+    asBcf(tmpVcfBgz, dictionary = dict,
+                     destination = bcfStem)
   } else if (ext == "gz" || ext == "bgz") {
     # writeVcf will append .bgz, so strip it from the path
-    vcf_stem <- sub("\\.(bgz|gz)$", "", output_path)
-    VariantAnnotation::writeVcf(vcf, vcf_stem, index = TRUE)
+    vcfStem <- sub("\\.(bgz|gz)$", "", outputPath)
+    VariantAnnotation::writeVcf(vcf, vcfStem, index = TRUE)
     # writeVcf always creates .bgz; rename if the user requested .gz
-    actual_path <- paste0(vcf_stem, ".bgz")
-    if (actual_path != output_path && file.exists(actual_path)) {
-      file.rename(actual_path, output_path)
-      tbi_actual <- paste0(actual_path, ".tbi")
-      if (file.exists(tbi_actual))
-        file.rename(tbi_actual, paste0(output_path, ".tbi"))
+    actualPath <- paste0(vcfStem, ".bgz")
+    if (actualPath != outputPath && file.exists(actualPath)) {
+      file.rename(actualPath, outputPath)
+      tbiActual <- paste0(actualPath, ".tbi")
+      if (file.exists(tbiActual))
+        file.rename(tbiActual, paste0(outputPath, ".tbi"))
     }
   } else {
-    VariantAnnotation::writeVcf(vcf, output_path)
+    VariantAnnotation::writeVcf(vcf, outputPath)
   }
 
-  invisible(output_path)
+  invisible(outputPath)
 }

@@ -49,13 +49,13 @@ static int elnet_rss(double lambda1, const vec& diag_R,
 }
 
 [[cpp11::register]]
-cpp11::writable::list lassosum_rss_rcpp(const doubles& z_r,
+cpp11::writable::list lassosumRssRcpp(const doubles& zR,
                                         const list& LD,
-                                        const doubles& lambda_r,
+                                        const doubles& lambdaR,
                                         double thr,
                                         int maxiter) {
-  vec z = as_Col(z_r);
-  vec lambda = as_Col(lambda_r);
+  vec z = as_Col(zR);
+  vec lambda = as_Col(lambdaR);
 
   // Cache LD blocks once (avoid re-copying from R on every lambda iteration)
   int n_blocks = LD.size();

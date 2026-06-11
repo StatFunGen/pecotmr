@@ -1,8 +1,8 @@
 # Tests for SVD-based TWAS computation (LD sketch path)
 
-# Phase 1: twas_z() and twas_analysis() SVD branch
+# Phase 1: twasZ() and twasAnalysis() SVD branch
 
-test_that("twas_z: SVD path matches R path for full-rank genotype matrix", {
+test_that("twasZ: SVD path matches R path for full-rank genotype matrix", {
   set.seed(42)
   n <- 100 # samples (sketch size)
   p <- 20 # variants
@@ -26,16 +26,16 @@ test_that("twas_z: SVD path matches R path for full-rank genotype matrix", {
   z <- rnorm(p)
 
   # R path
-  result_R <- pecotmr:::twas_z(weights, z, R = R)
+  result_R <- pecotmr:::twasZ(weights, z, R = R)
 
   # SVD path
-  result_SVD <- pecotmr:::twas_z(weights, z, V = svd_result$v, D = svd_result$d, n_sketch = n)
+  result_SVD <- pecotmr:::twasZ(weights, z, V = svd_result$v, D = svd_result$d, nSketch = n)
 
   expect_equal(as.numeric(result_SVD$z), as.numeric(result_R$z), tolerance = 1e-10)
   expect_equal(as.numeric(result_SVD$pval), as.numeric(result_R$pval), tolerance = 1e-10)
 })
 
-test_that("twas_z: SVD path matches R path for rank-deficient matrix (n < p)", {
+test_that("twasZ: SVD path matches R path for rank-deficient matrix (n < p)", {
   set.seed(123)
   n <- 15 # fewer samples than variants
 
@@ -59,21 +59,21 @@ test_that("twas_z: SVD path matches R path for rank-deficient matrix (n < p)", {
   weights <- rnorm(p)
   z <- rnorm(p)
 
-  result_R <- pecotmr:::twas_z(weights, z, R = R)
-  result_SVD <- pecotmr:::twas_z(weights, z, V = svd_result$v, D = svd_result$d, n_sketch = n)
+  result_R <- pecotmr:::twasZ(weights, z, R = R)
+  result_SVD <- pecotmr:::twasZ(weights, z, V = svd_result$v, D = svd_result$d, nSketch = n)
 
   expect_equal(as.numeric(result_SVD$z), as.numeric(result_R$z), tolerance = 1e-10)
   expect_equal(as.numeric(result_SVD$pval), as.numeric(result_R$pval), tolerance = 1e-10)
 })
 
-test_that("twas_z: error when weights and z have different lengths", {
+test_that("twasZ: error when weights and z have different lengths", {
   expect_error(
-    pecotmr:::twas_z(rnorm(5), rnorm(3), V = matrix(1, 5, 2), D = c(1, 1), n_sketch = 10),
+    pecotmr:::twasZ(rnorm(5), rnorm(3), V = matrix(1, 5, 2), D = c(1, 1), nSketch = 10),
     "Weights and z-scores must have the same length"
   )
 })
 
-test_that("twas_analysis: SVD path produces same results as R path", {
+test_that("twasAnalysis: SVD path produces same results as R path", {
   set.seed(99)
   n <- 50
   p <- 10
@@ -91,7 +91,7 @@ test_that("twas_analysis: SVD path produces same results as R path", {
   # Weights matrix (2 methods)
   weights_matrix <- matrix(rnorm(p * 2), nrow = p, ncol = 2)
   rownames(weights_matrix) <- variant_ids
-  colnames(weights_matrix) <- c("lasso_weights", "enet_weights")
+  colnames(weights_matrix) <- c("lassoWeights", "enetWeights")
 
   # GWAS data
   gwas_df <- data.frame(variant_id = variant_ids, z = rnorm(p))
@@ -99,12 +99,12 @@ test_that("twas_analysis: SVD path produces same results as R path", {
   # Use a subset of variants
   extract_variants <- variant_ids[3:8]
 
-  result_R <- pecotmr:::twas_analysis(weights_matrix, gwas_df, LD_matrix = R,
-                                       extract_variants_objs = extract_variants)
-  result_SVD <- pecotmr:::twas_analysis(weights_matrix, gwas_df,
-                                         extract_variants_objs = extract_variants,
+  result_R <- pecotmr:::twasAnalysis(weights_matrix, gwas_df, ldMatrix = R,
+                                       extractVariantsObjs = extract_variants)
+  result_SVD <- pecotmr:::twasAnalysis(weights_matrix, gwas_df,
+                                         extractVariantsObjs = extract_variants,
                                          V = svd_result$v, D = svd_result$d,
-                                         n_sketch = n, ld_variant_ids = variant_ids)
+                                         nSketch = n, ldVariantIds = variant_ids)
 
   expect_equal(as.numeric(result_SVD[[1]]$z), as.numeric(result_R[[1]]$z), tolerance = 1e-10)
   expect_equal(as.numeric(result_SVD[[2]]$z), as.numeric(result_R[[2]]$z), tolerance = 1e-10)
@@ -112,7 +112,7 @@ test_that("twas_analysis: SVD path produces same results as R path", {
   expect_equal(as.numeric(result_SVD[[2]]$pval), as.numeric(result_R[[2]]$pval), tolerance = 1e-10)
 })
 
-test_that("twas_analysis: SVD path handles partial variant overlap", {
+test_that("twasAnalysis: SVD path handles partial variant overlap", {
   set.seed(77)
   n <- 40
   p <- 8
@@ -126,7 +126,7 @@ test_that("twas_analysis: SVD path handles partial variant overlap", {
 
   weights_matrix <- matrix(rnorm(p), nrow = p, ncol = 1)
   rownames(weights_matrix) <- variant_ids
-  colnames(weights_matrix) <- "lasso_weights"
+  colnames(weights_matrix) <- "lassoWeights"
 
   gwas_df <- data.frame(variant_id = variant_ids, z = rnorm(p))
 
@@ -134,17 +134,17 @@ test_that("twas_analysis: SVD path handles partial variant overlap", {
   extra_variant <- "chr1:5000:A:G"
   extract_variants <- c(variant_ids[1:4], extra_variant)
 
-  result <- pecotmr:::twas_analysis(weights_matrix, gwas_df,
-                                     extract_variants_objs = extract_variants,
+  result <- pecotmr:::twasAnalysis(weights_matrix, gwas_df,
+                                     extractVariantsObjs = extract_variants,
                                      V = svd_result$v, D = svd_result$d,
-                                     n_sketch = n, ld_variant_ids = variant_ids)
+                                     nSketch = n, ldVariantIds = variant_ids)
 
   # Should succeed using only the 4 valid variants
   expect_false(is.null(result))
   expect_equal(length(result[[1]]$z), 1)
 })
 
-test_that("twas_analysis: SVD path returns NULL when no variants overlap", {
+test_that("twasAnalysis: SVD path returns NULL when no variants overlap", {
   variant_ids <- paste0("chr1:", 1:5, ":A:G")
   other_ids <- paste0("chr2:", 1:5, ":A:G")
 
@@ -153,17 +153,17 @@ test_that("twas_analysis: SVD path returns NULL when no variants overlap", {
   colnames(weights_matrix) <- "w"
   gwas_df <- data.frame(variant_id = variant_ids, z = rnorm(5))
 
-  result <- suppressWarnings(pecotmr:::twas_analysis(
+  result <- suppressWarnings(pecotmr:::twasAnalysis(
     weights_matrix, gwas_df,
-    extract_variants_objs = variant_ids,
+    extractVariantsObjs = variant_ids,
     V = matrix(1, 5, 2), D = c(1, 1),
-    n_sketch = 10, ld_variant_ids = other_ids
+    nSketch = 10, ldVariantIds = other_ids
   ))
 
   expect_null(result)
 })
 
-# Phase 2: load_ld_sketch() and standardize_genotype_hwe()
+# Phase 2: loadLdSketch() and standardize_genotype_hwe()
 
 test_that("standardize_genotype_hwe: centers by 2p and scales by sqrt(2p(1-p))", {
   set.seed(42)
@@ -172,14 +172,14 @@ test_that("standardize_genotype_hwe: centers by 2p and scales by sqrt(2p(1-p))",
   af <- runif(p, 0.1, 0.9)
   X <- matrix(rbinom(n * p, 2, rep(af, each = n)), nrow = n, ncol = p)
 
-  X_std <- pecotmr:::standardize_genotype_hwe(X, af)
+  X_std <- pecotmr:::standardizeGenotypeHwe(X, af)
 
   # Manual verification
   expected <- sweep(sweep(X, 2, 2 * af), 2, sqrt(2 * af * (1 - af)), "/")
   expect_equal(X_std, expected, tolerance = 1e-14)
 })
 
-test_that("load_ld_sketch: returns LDData with raw genotypes and metadata", {
+test_that("loadLdSketch: returns LdData with raw genotypes and metadata", {
   set.seed(55)
   n <- 30
   p <- 12
@@ -198,30 +198,30 @@ test_that("load_ld_sketch: returns LDData with raw genotypes and metadata", {
     stringsAsFactors = FALSE
   )
 
-  variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+  variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
   block_metadata <- S4Vectors::DataFrame(
     region = "chr1:1000-2100", start = 1000L, end = 2100L, chrom = "chr1"
   )
-  # Store genotype matrix directly in genotype_handle (matching load_ld_sketch output)
-  mock_ld_data <- new("LDData",
+  # Store genotype matrix directly in genotype_handle (matching loadLdSketch output)
+  mock_ld_data <- new("LdData",
     correlation = NULL,
-    genotype_handle = X,
+    genotypeHandle = X,
     variants = variants_gr,
-    snp_idx = NULL,
-    block_metadata = block_metadata
+    snpIdx = NULL,
+    blockMetadata = block_metadata
   )
 
   local_mocked_bindings(
-    load_LD_matrix = function(ld_meta_file_path, region, return_genotype = FALSE, n_sample = NULL, ...) {
+    loadLdMatrix = function(ld_meta_file_path, region, return_genotype = FALSE, n_sample = NULL, ...) {
       mock_ld_data
     },
     .package = "pecotmr"
   )
 
-  result <- pecotmr::load_ld_sketch("fake_path.tsv", "chr1:1000-2100")
+  result <- pecotmr::loadLdSketch("fake_path.tsv", "chr1:1000-2100")
 
-  # Check structure -- returns an LDData S4 object
-  expect_true(is(result, "LDData"))
+  # Check structure -- returns an LdData S4 object
+  expect_true(is(result, "LdData"))
   result_X <- getGenotypes(result)
   result_ref <- getRefPanel(result)
   result_ids <- getVariantIds(result)
@@ -233,7 +233,7 @@ test_that("load_ld_sketch: returns LDData with raw genotypes and metadata", {
   expect_equal(result_X, X)
 })
 
-test_that("load_ld_sketch: removes monomorphic variants", {
+test_that("loadLdSketch: removes monomorphic variants", {
   set.seed(66)
   n <- 20
   p <- 5
@@ -251,30 +251,30 @@ test_that("load_ld_sketch: removes monomorphic variants", {
     stringsAsFactors = FALSE
   )
 
-  variants_gr <- pecotmr:::.ref_panel_to_granges(ref_panel)
+  variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
   block_metadata <- S4Vectors::DataFrame(
     region = "chr1:1-5", start = 1L, end = 5L, chrom = "chr1"
   )
   # Store genotype matrix directly in genotype_handle
-  mock_ld_data <- new("LDData",
+  mock_ld_data <- new("LdData",
     correlation = NULL,
-    genotype_handle = X,
+    genotypeHandle = X,
     variants = variants_gr,
-    snp_idx = NULL,
-    block_metadata = block_metadata
+    snpIdx = NULL,
+    blockMetadata = block_metadata
   )
 
   local_mocked_bindings(
-    load_LD_matrix = function(ld_meta_file_path, region, return_genotype = FALSE, n_sample = NULL, ...) {
+    loadLdMatrix = function(ld_meta_file_path, region, return_genotype = FALSE, n_sample = NULL, ...) {
       mock_ld_data
     },
     .package = "pecotmr"
   )
 
-  result <- pecotmr::load_ld_sketch("fake_path.tsv", "chr1:1-5")
+  result <- pecotmr::loadLdSketch("fake_path.tsv", "chr1:1-5")
 
-  # Returns LDData with monomorphic variant removed
-  expect_true(is(result, "LDData"))
+  # Returns LdData with monomorphic variant removed
+  expect_true(is(result, "LdData"))
   result_ids <- getVariantIds(result)
   result_ref <- getRefPanel(result)
   result_X <- getGenotypes(result)
@@ -292,7 +292,7 @@ test_that("SVD from raw sketch matches direct computation", {
   X <- matrix(rbinom(n * p, 2, rep(af, each = n)), nrow = n, ncol = p)
 
   # Two-step process: standardize then SVD
-  X_std <- pecotmr:::standardize_genotype_hwe(X, af)
+  X_std <- pecotmr:::standardizeGenotypeHwe(X, af)
   svd_result <- svd(X_std)
 
   # Verify this matches manual computation

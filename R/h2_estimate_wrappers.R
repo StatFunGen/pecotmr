@@ -15,57 +15,57 @@ NULL
 #' @rdname estimateH2
 #' @export
 setMethod("estimateH2",
-  signature(sumstats = "GWASSumStats", ld_ref = "LDStatistic"),
-  function(sumstats, ld_ref, method = "lder", annotations = NULL,
+  signature(sumstats = "GwasSumStats", ldRef = "LdStatistic"),
+  function(sumstats, ldRef, method = "lder", annotations = NULL,
            local = FALSE, ...) {
 
     method <- match.arg(method, c("lder", "gldsc", "hdl"))
-    .validate_method_ref(method, ld_ref)
+    .validateMethodRef(method, ldRef)
 
     z <- getZ(sumstats)
     n <- median(getN(sumstats))
     M <- nSnps(sumstats)
 
     # Apply the legacy heritability-wrapper correction. This is separate from
-    # the SuSiE RSS binary_trait_model handling in the fine-mapping pipeline.
-    var_y <- getVarY(sumstats)
-    if (!is.null(var_y)) {
-      n <- n / var_y
+    # the SuSiE RSS binaryTraitModel handling in the fine-mapping pipeline.
+    varY <- getVarY(sumstats)
+    if (!is.null(varY)) {
+      n <- n / varY
     }
 
     # Dispatch to method-specific function
     result <- switch(method,
-      "lder" = lder_univariate(z, n, ld_ref, annotations, local, ...),
-      "gldsc" = gldsc_univariate(z, n, ld_ref, annotations, local, ...),
-      "hdl" = hdl_univariate(z, n, ld_ref, annotations, local, ...)
+      "lder" = lderUnivariate(z, n, ldRef, annotations, local, ...),
+      "gldsc" = gldscUnivariate(z, n, ldRef, annotations, local, ...),
+      "hdl" = hdlUnivariate(z, n, ldRef, annotations, local, ...)
     )
 
     # Wrap into H2Estimate S4 object
     new("H2Estimate",
       h2 = result$h2,
-      h2_se = result$h2_se,
+      h2Se = result$h2_se,
       intercept = result$intercept %||% NA_real_,
-      intercept_se = result$intercept_se %||% NA_real_,
+      interceptSe = result$intercept_se %||% NA_real_,
       local = result$local,
       enrichment = result$enrichment,
-      tau_blocks = result$tau_blocks,
-      score_stats = result$score_stats,
+      tauBlocks = result$tau_blocks,
+      scoreStats = result$score_stats,
       method = method,
-      n_snps = as.integer(M),
-      trait_name = sumstats@trait_name
+      nSnps = as.integer(M),
+      traitName = sumstats@traitName
     )
   }
 )
 
 #' @keywords internal
-.validate_method_ref <- function(method, ld_ref) {
-  if (method %in% c("lder", "hdl") && !is(ld_ref, "LDEigen")) {
-    stop("Method '", method, "' requires an LDEigen object, ",
-         "got ", class(ld_ref))
+.validateMethodRef <- function(method, ldRef) {
+  if (method %in% c("lder", "hdl") && !is(ldRef, "LdEigen")) {
+    stop("Method '", method, "' requires an LdEigen object, ",
+         "got ", class(ldRef))
   }
-  if (method == "gldsc" && !is(ld_ref, "LDScore")) {
-    stop("Method 'gldsc' requires an LDScore object, ",
-         "got ", class(ld_ref))
+  if (method == "gldsc" && !is(ldRef, "LdScore")) {
+    stop("Method 'gldsc' requires an LdScore object, ",
+         "got ", class(ldRef))
   }
   invisible(TRUE)
 }
@@ -77,17 +77,17 @@ setMethod("estimateH2",
 #' @rdname computeLdScores
 #' @export
 setMethod("computeLdScores",
-  signature(ld_ref = "LDEigen"),
-  function(ld_ref, annotations = NULL, ...) {
+  signature(ldRef = "LdEigen"),
+  function(ldRef, annotations = NULL, ...) {
     # Reconstruct LD scores from eigendecompositions
     # l2[j] = sum_k r^2_{jk} = sum_b sum_{eigenvalues in b} V[j,.]^2 * d
-    n_snps <- nrow(ld_ref@snp_info)
+    nSnps <- nrow(ldRef@snpInfo)
 
     if (is.null(annotations)) {
       # Base LD scores only
-      l2 <- numeric(n_snps)
-      for (b in seq_along(ld_ref@eigen_list)) {
-        block <- ld_ref@eigen_list[[b]]
+      l2 <- numeric(nSnps)
+      for (b in seq_along(ldRef@eigenList)) {
+        block <- ldRef@eigenList[[b]]
         idx <- block$snp_idx
         V <- block$vectors
         d <- block$values
@@ -102,75 +102,75 @@ setMethod("computeLdScores",
     }
 
     # Annotation-stratified LD scores
-    annot_mat <- annotations@annotations
-    n_annot <- ncol(annot_mat)
+    annotMat <- annotations@annotations
+    nAnnot <- ncol(annotMat)
     # Base + annotation-stratified columns
-    l2_strat <- matrix(0, nrow = n_snps, ncol = 1 + n_annot)
+    l2Strat <- matrix(0, nrow = nSnps, ncol = 1 + nAnnot)
 
-    for (b in seq_along(ld_ref@eigen_list)) {
-      block <- ld_ref@eigen_list[[b]]
+    for (b in seq_along(ldRef@eigenList)) {
+      block <- ldRef@eigenList[[b]]
       idx <- block$snp_idx
       V <- block$vectors
       d <- block$values
 
       # Base LD score
       Vd <- sweep(V, 2, d, "*")
-      l2_strat[idx, 1] <- rowSums(Vd^2)
+      l2Strat[idx, 1] <- rowSums(Vd^2)
 
       # Annotation-stratified: l2_a[j] = sum_k r^2_{jk} * annot[k,a]
       # Using eigendecomposition: l2_a[j] = sum_i V[j,i]^2 * d[i]^2 *
       #   (sum_k V[k,i]^2 * annot[k,a])
-      for (a in seq_len(n_annot)) {
-        annot_col <- annot_mat[idx, a]
+      for (a in seq_len(nAnnot)) {
+        annotCol <- annotMat[idx, a]
         # For each eigenvalue: weight = sum_k V[k,i]^2 * annot[k,a]
-        annot_weights <- as.vector(crossprod(V^2, annot_col))
-        l2_strat[idx, 1 + a] <- as.vector(Vd^2 %*% annot_weights)
+        annotWeights <- as.vector(crossprod(V^2, annotCol))
+        l2Strat[idx, 1 + a] <- as.vector(Vd^2 %*% annotWeights)
       }
     }
 
-    col_names <- c("base_l2", annotations@annotation_meta$name)
-    colnames(l2_strat) <- col_names
-    l2_strat
+    colNames <- c("base_l2", annotations@annotationMeta$name)
+    colnames(l2Strat) <- colNames
+    l2Strat
   }
 )
 
 #' @rdname computeLdScores
 #' @export
 setMethod("computeLdScores",
-  signature(ld_ref = "LDScore"),
-  function(ld_ref, annotations = NULL, ...) {
+  signature(ldRef = "LdScore"),
+  function(ldRef, annotations = NULL, ...) {
     if (is.null(annotations)) {
-      return(ld_ref@ld_scores)
+      return(ldRef@ldScores)
     }
 
     # Compute annotation-stratified LD scores using LD matrices
-    if (length(ld_ref@ld_matrix_list) == 0) {
-      stop("Annotation-stratified LD scores require ld_matrix_list in LDScore. ",
+    if (length(ldRef@ldMatrixList) == 0) {
+      stop("Annotation-stratified LD scores require ldMatrixList in LdScore. ",
            "Recompute the LD reference with full LD matrices.")
     }
 
-    n_snps <- nrow(ld_ref@snp_info)
-    annot_mat <- annotations@annotations
-    n_annot <- ncol(annot_mat)
+    nSnps <- nrow(ldRef@snpInfo)
+    annotMat <- annotations@annotations
+    nAnnot <- ncol(annotMat)
 
     # Base L2 + annotation-stratified columns
-    l2_strat <- matrix(0, nrow = n_snps, ncol = 1 + n_annot)
-    l2_strat[, 1] <- ld_ref@ld_scores[, 1]
+    l2Strat <- matrix(0, nrow = nSnps, ncol = 1 + nAnnot)
+    l2Strat[, 1] <- ldRef@ldScores[, 1]
 
-    for (b in seq_along(ld_ref@ld_matrix_list)) {
-      block <- ld_ref@ld_matrix_list[[b]]
+    for (b in seq_along(ldRef@ldMatrixList)) {
+      block <- ldRef@ldMatrixList[[b]]
       R <- block$R
       idx <- block$snp_idx
       R2 <- R^2
-      for (a in seq_len(n_annot)) {
+      for (a in seq_len(nAnnot)) {
         # l2_a[j] = sum_k R^2_{jk} * annot[k, a]
-        l2_strat[idx, 1 + a] <- as.vector(R2 %*% annot_mat[idx, a])
+        l2Strat[idx, 1 + a] <- as.vector(R2 %*% annotMat[idx, a])
       }
     }
 
-    col_names <- c("base_l2", annotations@annotation_meta$name)
-    colnames(l2_strat) <- col_names
-    l2_strat
+    colNames <- c("base_l2", annotations@annotationMeta$name)
+    colnames(l2Strat) <- colNames
+    l2Strat
   }
 )
 
@@ -193,7 +193,7 @@ setMethod("getEnrichment", "H2Estimate", function(object) {
 #' @rdname getScoreStats
 #' @export
 setMethod("getScoreStats", "H2Estimate", function(object) {
-  object@score_stats
+  object@scoreStats
 })
 
 # =============================================================================
@@ -202,12 +202,12 @@ setMethod("getScoreStats", "H2Estimate", function(object) {
 
 #' @title Convert H2Estimate to S-LDSC Trait Format
 #' @description Convert an \code{H2Estimate} object into the list format
-#'   expected by \code{\link{standardize_sldsc_trait}} and
-#'   \code{\link{meta_sldsc_random}}. This bridges the h2 estimation
+#'   expected by \code{\link{standardizeSldscTrait}} and
+#'   \code{\link{metaSldscRandom}}. This bridges the h2 estimation
 #'   methods (LDER, gLDSC, HDL) into the sldsc_wrapper.R postprocessing
 #'   pipeline.
-#' @param h2_est An \code{H2Estimate} object with enrichment and tau_blocks.
-#' @return A named list matching the format of \code{\link{read_sldsc_trait}}:
+#' @param h2Est An \code{H2Estimate} object with enrichment and tauBlocks.
+#' @return A named list matching the format of \code{\link{readSldscTrait}}:
 #'   \describe{
 #'     \item{categories}{Character vector of annotation names}
 #'     \item{tau}{Named numeric vector of per-annotation coefficients}
@@ -218,48 +218,48 @@ setMethod("getScoreStats", "H2Estimate", function(object) {
 #'     \item{prop_h2}{Named numeric vector of proportion of h2}
 #'     \item{prop_snps}{Named numeric vector of proportion of SNPs}
 #'     \item{h2g}{Numeric scalar, global h2 estimate}
-#'     \item{tau_blocks}{Matrix (n_blocks x n_categories) for jackknife}
+#'     \item{tau_blocks}{Matrix (nBlocks x nCategories) for jackknife}
 #'     \item{n_blocks}{Integer, number of jackknife blocks}
 #'   }
 #' @export
-h2estimate_to_sldsc_trait <- function(h2_est) {
-  if (!is(h2_est, "H2Estimate")) {
-    stop("h2_est must be an H2Estimate object")
+h2EstimateToSldscTrait <- function(h2Est) {
+  if (!is(h2Est, "H2Estimate")) {
+    stop("h2Est must be an H2Estimate object")
   }
 
-  enrich_df <- h2_est@enrichment
-  if (is.null(enrich_df)) {
+  enrichDf <- h2Est@enrichment
+  if (is.null(enrichDf)) {
     stop("H2Estimate has no enrichment results. ",
          "Run estimateH2 with annotations to get enrichment estimates.")
   }
 
-  cats <- as.character(enrich_df$annotation)
-  n_cats <- length(cats)
+  cats <- as.character(enrichDf$annotation)
+  nCats <- length(cats)
 
-  tau_blocks <- h2_est@tau_blocks
-  if (is.null(tau_blocks)) {
+  tauBlocks <- h2Est@tauBlocks
+  if (is.null(tauBlocks)) {
     # Create a dummy single-block matrix from the point estimates
-    tau_blocks <- matrix(enrich_df$tau, nrow = 1)
-    colnames(tau_blocks) <- cats
-    n_blocks <- 1L
+    tauBlocks <- matrix(enrichDf$tau, nrow = 1)
+    colnames(tauBlocks) <- cats
+    nBlocks <- 1L
   } else {
-    n_blocks <- nrow(tau_blocks)
-    if (is.null(colnames(tau_blocks))) {
-      colnames(tau_blocks) <- cats
+    nBlocks <- nrow(tauBlocks)
+    if (is.null(colnames(tauBlocks))) {
+      colnames(tauBlocks) <- cats
     }
   }
 
   list(
     categories    = cats,
-    tau           = setNames(enrich_df$tau, cats),
-    tau_se        = setNames(enrich_df$tau_se, cats),
-    enrichment    = setNames(enrich_df$enrichment, cats),
-    enrichment_se = setNames(enrich_df$enrichment_se, cats),
-    enrichment_p  = setNames(enrich_df$enrichment_p, cats),
-    prop_h2       = setNames(enrich_df$prop_h2, cats),
-    prop_snps     = setNames(enrich_df$prop_snps, cats),
-    h2g           = h2_est@h2,
-    tau_blocks    = tau_blocks,
-    n_blocks      = n_blocks
+    tau           = setNames(enrichDf$tau, cats),
+    tau_se        = setNames(enrichDf$tau_se, cats),
+    enrichment    = setNames(enrichDf$enrichment, cats),
+    enrichment_se = setNames(enrichDf$enrichment_se, cats),
+    enrichment_p  = setNames(enrichDf$enrichment_p, cats),
+    prop_h2       = setNames(enrichDf$prop_h2, cats),
+    prop_snps     = setNames(enrichDf$prop_snps, cats),
+    h2g           = h2Est@h2,
+    tau_blocks    = tauBlocks,
+    n_blocks      = nBlocks
   )
 }

@@ -5,48 +5,48 @@
 \title{Impute Summary Statistics Using LD (RAISS)}
 \usage{
 raiss(
-  ref_panel,
-  known_zscores,
-  LD_matrix = NULL,
-  genotype_matrix = NULL,
+  refPanel,
+  knownZscores,
+  ldMatrix = NULL,
+  genotypeMatrix = NULL,
   lamb = 0.01,
   rcond = 0.01,
-  svd_tol = 1e-08,
-  R2_threshold = 0.6,
-  minimum_ld = 5,
+  svdTol = 1e-08,
+  r2Threshold = 0.6,
+  minimumLd = 5,
   verbose = TRUE
 )
 }
 \arguments{
-\item{ref_panel}{A data frame containing 'chrom', 'pos', 'variant_id', 'A1', and 'A2'.}
+\item{refPanel}{A data frame containing 'chrom', 'pos', 'variant_id', 'A1', and 'A2'.}
 
-\item{known_zscores}{A data frame containing 'chrom', 'pos', 'variant_id', 'A1', 'A2', and 'z' values.}
+\item{knownZscores}{A data frame containing 'chrom', 'pos', 'variant_id', 'A1', 'A2', and 'z' values.}
 
-\item{LD_matrix}{Either a square matrix or a list of matrices for LD blocks.
-Provide either \code{LD_matrix} or \code{genotype_matrix}, not both.}
+\item{ldMatrix}{Either a square matrix or a list of matrices for LD blocks.
+Provide either \code{ldMatrix} or \code{genotypeMatrix}, not both.}
 
-\item{genotype_matrix}{A centered and scaled genotype matrix (n x p) as an alternative
-to \code{LD_matrix}. Column order must match the variant order in \code{ref_panel}.
+\item{genotypeMatrix}{A centered and scaled genotype matrix (n x p) as an alternative
+to \code{ldMatrix}. Column order must match the variant order in \code{refPanel}.
 When provided, the imputation uses an SVD-based approach that avoids forming the
 p x p LD matrix.}
 
-\item{lamb}{Regularization term added to the diagonal of the LD_matrix.}
+\item{lamb}{Regularization term added to the diagonal of the ldMatrix.}
 
 \item{rcond}{Threshold for filtering eigenvalues in the pseudo-inverse computation
-(only used with LD_matrix path).}
+(only used with ldMatrix path).}
 
-\item{svd_tol}{Relative tolerance for filtering small singular values
-(only used with genotype_matrix path).}
+\item{svdTol}{Relative tolerance for filtering small singular values
+(only used with genotypeMatrix path).}
 
-\item{R2_threshold}{R square threshold below which SNPs are filtered from the output.}
+\item{r2Threshold}{R square threshold below which SNPs are filtered from the output.}
 
-\item{minimum_ld}{Minimum LD score threshold for SNP filtering.}
+\item{minimumLd}{Minimum LD score threshold for SNP filtering.}
 
 \item{verbose}{Logical indicating whether to print progress information.}
 }
 \value{
 A list containing filtered and unfiltered results, and filtered LD matrix
-  (LD_mat is NULL when using genotype_matrix path).
+  (LD_mat is NULL when using genotypeMatrix path).
 }
 \description{
 This function is a part of the statistical library for SNP imputation from:

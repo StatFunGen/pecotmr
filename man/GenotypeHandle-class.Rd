@@ -16,13 +16,13 @@ Lightweight handle to genotype data in any supported format.
 
 \item{\code{format}}{Character, one of "gds", "vcf", "plink1", "plink2".}
 
-\item{\code{snp_info}}{A \code{data.frame} with columns \code{SNP}, \code{CHR},
+\item{\code{snpInfo}}{A \code{data.frame} with columns \code{SNP}, \code{CHR},
 \code{BP}, \code{A1}, \code{A2}. Cached on first access.}
 
-\item{\code{n_samples}}{Integer, number of samples.}
+\item{\code{nSamples}}{Integer, number of samples.}
 
-\item{\code{sample_ids}}{Character vector of sample identifiers.}
+\item{\code{sampleIds}}{Character vector of sample identifiers.}
 
-\item{\code{pgen_ptr}}{An external pointer for plink2 pgen handle, or NULL.}
+\item{\code{pgenPtr}}{An external pointer for plink2 pgen handle, or NULL.}
 }}
 

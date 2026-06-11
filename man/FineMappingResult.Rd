@@ -4,20 +4,14 @@
 \alias{FineMappingResult}
 \title{Create a FineMappingResult Object}
 \usage{
-FineMappingResult(
-  variant_names,
-  trimmed_fit,
-  top_loci,
-  method,
-  sumstats = NULL
-)
+FineMappingResult(variantNames, trimmedFit, topLoci, method, sumstats = NULL)
 }
 \arguments{
-\item{variant_names}{Character vector.}
+\item{variantNames}{Character vector.}
 
-\item{trimmed_fit}{List.}
+\item{trimmedFit}{List.}
 
-\item{top_loci}{data.frame in long format.}
+\item{topLoci}{data.frame in long format.}
 
 \item{method}{Character.}
 

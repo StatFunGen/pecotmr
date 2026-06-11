@@ -5,12 +5,12 @@
 \title{Detect Outliers Using Dentist Algorithm}
 \usage{
 dentist(
-  sum_stat,
+  sumStat,
   R = NULL,
   X = NULL,
   nSample = NULL,
-  window_size = 2e+06,
-  window_mode = c("distance", "count"),
+  windowSize = 2e+06,
+  windowMode = c("distance", "count"),
   pValueThreshold = 5.0369e-08,
   propSVD = 0.4,
   gcControl = FALSE,
@@ -18,32 +18,32 @@ dentist(
   gPvalueThreshold = 0.05,
   duprThreshold = 0.99,
   ncpus = 1,
-  correct_chen_et_al_bug = TRUE,
-  min_dim = 2000,
-  ld_method = "sample"
+  correctChenEtAlBug = TRUE,
+  minDim = 2000,
+  ldMethod = "sample"
 )
 }
 \arguments{
-\item{sum_stat}{A data frame containing summary statistics, including 'pos' or 'position' and 'z' or 'zscore' columns.}
+\item{sumStat}{A data frame containing summary statistics, including 'pos' or 'position' and 'z' or 'zscore' columns.}
 
 \item{R}{Square LD correlation matrix. Provide either \code{R} or \code{X}.}
 
 \item{X}{Genotype matrix (samples x SNPs). If provided, LD is computed via
-\code{compute_LD(X)} and \code{nSample} defaults to \code{nrow(X)}.}
+\code{computeLd(X)} and \code{nSample} defaults to \code{nrow(X)}.}
 
 \item{nSample}{The number of samples in the LD reference panel (NOT the GWAS sample
 size). This controls the SVD truncation rank K = min(idx_size, nSample) * propSVD.
 Required when \code{R} is provided; inferred from \code{X} when \code{X} is provided.}
 
-\item{window_size}{The size of the window for dividing the genomic region
+\item{windowSize}{The size of the window for dividing the genomic region
 in distance mode (base pairs). Default is 2000000 (2 Mb). Only used when
-\code{window_mode = "distance"}.}
+\code{windowMode = "distance"}.}
 
-\item{window_mode}{Character string specifying the windowing strategy:
+\item{windowMode}{Character string specifying the windowing strategy:
 \code{"distance"} (default) creates windows by physical distance using
-\code{\link{segment_by_dist}} (C++ \code{--wind-dist}), and
+\code{\link{segmentByDist}} (C++ \code{--wind-dist}), and
 \code{"count"} creates windows by variant count using
-\code{\link{segment_by_count}} (C++ \code{--wind}).}
+\code{\link{segmentByCount}} (C++ \code{--wind}).}
 
 \item{pValueThreshold}{The p-value threshold for significance. Default is 5e-8.}
 
@@ -59,13 +59,13 @@ in distance mode (base pairs). Default is 2000000 (2 Mb). Only used when
 
 \item{ncpus}{The number of CPU cores to use for parallel processing. Default is 1.}
 
-\item{correct_chen_et_al_bug}{Logical indicating whether to correct the Chen et al. bug. Default is TRUE.}
+\item{correctChenEtAlBug}{Logical indicating whether to correct the Chen et al. bug. Default is TRUE.}
 
-\item{min_dim}{In distance mode: minimum number of SNPs per block (default 2000).
+\item{minDim}{In distance mode: minimum number of SNPs per block (default 2000).
 In count mode: the number of variants per window (i.e., the window size).}
 
-\item{ld_method}{Character string specifying the LD computation method when
-\code{X} is provided. Passed to \code{\link{compute_LD}}. One of
+\item{ldMethod}{Character string specifying the LD computation method when
+\code{X} is provided. Passed to \code{\link{computeLd}}. One of
 \code{"sample"} (default), \code{"population"}, or \code{"gcta"}.
 Ignored when \code{R} is provided directly.}
 }
@@ -75,7 +75,7 @@ A data frame containing the imputed result and detected outliers.
 The returned data frame includes the following columns:
 
 \describe{
-  \item{\code{original_z}}{The original z-score values from the input \code{sum_stat}.}
+  \item{\code{original_z}}{The original z-score values from the input \code{sumStat}.}
   \item{\code{imputed_z}}{The imputed z-score values computed by the Dentist algorithm.}
   \item{\code{rsq}}{The coefficient of determination (R-squared) between original and imputed z-scores.}
   \item{\code{iter_to_correct}}{The number of iterations required to correct the z-scores, if applicable.}
@@ -96,15 +96,15 @@ heterogeneity between GWAS and LD reference samples.
 Windowing supports two modes matching the original DENTIST C++ binary:
 \itemize{
   \item \code{"distance"} (default): Uses the \code{segmentingByDist} algorithm
-    (C++ \code{--wind-dist}), implemented in \code{\link{segment_by_dist}}.
-    Windows span a fixed physical distance (\code{window_size} bp).
+    (C++ \code{--wind-dist}), implemented in \code{\link{segmentByDist}}.
+    Windows span a fixed physical distance (\code{windowSize} bp).
   \item \code{"count"}: Uses the \code{segmentedQCed} algorithm
-    (C++ \code{--wind}), implemented in \code{\link{segment_by_count}}.
-    Windows contain a fixed number of variants (\code{min_dim}).
+    (C++ \code{--wind}), implemented in \code{\link{segmentByCount}}.
+    Windows contain a fixed number of variants (\code{minDim}).
     Useful when regions have sparse variants where distance-based windows
     would create windows with too few variants.
 }
-The \code{correct_chen_et_al_bug} parameter affects the iterative filtering
+The \code{correctChenEtAlBug} parameter affects the iterative filtering
 in two ways:
 \enumerate{
   \item Comparison between iteration index \code{t} and \code{nIter} (explained in source code)
@@ -113,6 +113,6 @@ in two ways:
 }
 \examples{
 # Example usage of dentist
-dentist(sum_stat, R = LD_mat, nSample = nSample)
+dentist(sumStat, R = ldMat, nSample = nSample)
 
 }

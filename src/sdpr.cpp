@@ -9,11 +9,11 @@ using namespace arma;
 
 // cpp11 interface function
 [[cpp11::register]]
-cpp11::writable::list sdpr_rcpp(
-	const doubles& bhat_r,
+cpp11::writable::list sdprRcpp(
+	const doubles& bhatR,
 	const list& LD,
 	int n,
-	sexp per_variant_sample_size = R_NilValue,
+	sexp perVariantSampleSize = R_NilValue,
 	sexp array = R_NilValue,
 	double a = 0.1,
 	double c = 1.0,
@@ -23,13 +23,13 @@ cpp11::writable::list sdpr_rcpp(
 	int iter = 1000,
 	int burn = 200,
 	int thin = 5,
-	int n_threads = 1,
-	int opt_llk = 1,
+	int nThreads = 1,
+	int optLlk = 1,
 	bool verbose = true,
 	sexp seed = R_NilValue
 	) {
 	// Convert inputs to C++ types
-	std::vector<double> bhat = cpp11::as_cpp<std::vector<double>>(bhat_r);
+	std::vector<double> bhat = cpp11::as_cpp<std::vector<double>>(bhatR);
 
 	// Convert list to std::vector<arma::mat>
 	std::vector<mat> ref_ld_mat;
@@ -37,11 +37,11 @@ cpp11::writable::list sdpr_rcpp(
 		ref_ld_mat.push_back(as_Mat(doubles_matrix<>(LD[i])));
 	}
 
-	// Initialize per_variant_sample_size and array if NULL
+	// Initialize perVariantSampleSize and array if NULL
 	std::vector<double> sz;
 	std::vector<int> arr;
-	if (per_variant_sample_size != R_NilValue) {
-		sz = cpp11::as_cpp<std::vector<double>>(per_variant_sample_size);
+	if (perVariantSampleSize != R_NilValue) {
+		sz = cpp11::as_cpp<std::vector<double>>(perVariantSampleSize);
 	} else {
 		sz = std::vector<double>(bhat.size(), n);
 	}
@@ -64,13 +64,13 @@ cpp11::writable::list sdpr_rcpp(
 
 	// Call the mcmc function
 	std::unordered_map<std::string, vec> results = mcmc(
-		data, n, a, c, M, a0k, b0k, iter, burn, thin, n_threads, opt_llk, verbose, seed_val
+		data, n, a, c, M, a0k, b0k, iter, burn, thin, nThreads, optLlk, verbose, seed_val
 		);
 
 	// Convert results to list
 	using namespace cpp11::literals;
 	writable::list output({
-		"beta_est"_nm = as_doubles(results["beta"]),
+		"betaEst"_nm = as_doubles(results["beta"]),
 		"h2"_nm = as_doubles(results["h2"])
 	});
 

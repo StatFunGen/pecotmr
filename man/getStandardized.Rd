@@ -2,15 +2,15 @@
 % Please edit documentation in R/AllGenerics.R, R/AllMethods.R
 \name{getStandardized}
 \alias{getStandardized}
-\alias{getStandardized,TWASWeights-method}
+\alias{getStandardized,TwasWeights-method}
 \title{Get Standardized Flag}
 \usage{
 getStandardized(x)
 
-\S4method{getStandardized}{TWASWeights}(x)
+\S4method{getStandardized}{TwasWeights}(x)
 }
 \arguments{
-\item{x}{A \code{TWASWeights} object.}
+\item{x}{A \code{TwasWeights} object.}
 }
 \value{
 Logical.

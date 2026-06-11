@@ -23,47 +23,47 @@ NULL
 #' @description Estimate h2 via HDL likelihood.
 #' @param z Numeric vector of z-scores.
 #' @param n Numeric, GWAS sample size.
-#' @param eigen_ref An \code{LDEigen} object.
+#' @param eigenRef An \code{LdEigen} object.
 #' @param annotations An \code{AnnotationMatrix}, or NULL.
 #' @param local Logical, return per-block estimates.
 #' @param lambda Numeric, L2 penalty on tau (default 0).
 #' @return List with h2, h2_se, local, enrichment, score_stats.
 #' @keywords internal
-hdl_univariate <- function(z, n, eigen_ref, annotations = NULL,
-                           local = FALSE, lambda = 0) {
-  n_blocks <- length(eigen_ref@eigen_list)
-  M <- nrow(eigen_ref@snp_info)
+hdlUnivariate <- function(z, n, eigenRef, annotations = NULL,
+                          local = FALSE, lambda = 0) {
+  nBlocks <- length(eigenRef@eigenList)
+  M <- nrow(eigenRef@snpInfo)
 
   # Extract baseline annotations if provided
-  baseline_mat <- NULL
+  baselineMat <- NULL
   if (!is.null(annotations)) {
     baseline <- getBaseline(annotations)
     if (ncol(baseline@annotations) > 0) {
-      baseline_mat <- baseline@annotations
+      baselineMat <- baseline@annotations
     }
   }
 
   # Precompute per-block quantities including annotation-stratified
   # eigenvalue scores
-  block_data <- lapply(seq_len(n_blocks), function(b) {
-    block <- eigen_ref@eigen_list[[b]]
+  blockData <- lapply(seq_len(nBlocks), function(b) {
+    block <- eigenRef@eigenList[[b]]
     idx <- block$snp_idx
     V <- block$vectors
     d <- block$values
-    z_rot <- as.vector(t(V) %*% z[idx])
+    zRot <- as.vector(t(V) %*% z[idx])
 
-    if (!is.null(baseline_mat)) {
-      ld_annot <- crossprod(V^2, baseline_mat[idx, , drop = FALSE])
+    if (!is.null(baselineMat)) {
+      ldAnnot <- crossprod(V^2, baselineMat[idx, , drop = FALSE])
     } else {
-      ld_annot <- NULL
+      ldAnnot <- NULL
     }
 
-    list(z_rot = z_rot, d = d, ld_annot = ld_annot,
+    list(z_rot = zRot, d = d, ld_annot = ldAnnot,
          snp_idx = idx, p = length(idx))
   })
 
   # Compute per-eigenvalue variance: sigma2_i = n/M * sum_a(tau_a * d_i * ld_annot_{a,i}) + 1
-  .compute_sigma2 <- function(tau, bd) {
+  .computeSigma2 <- function(tau, bd) {
     if (!is.null(bd$ld_annot)) {
       n / M * bd$d * as.vector(bd$ld_annot %*% tau) + 1
     } else {
@@ -71,14 +71,14 @@ hdl_univariate <- function(z, n, eigen_ref, annotations = NULL,
     }
   }
 
-  if (!is.null(baseline_mat)) {
-    n_tau <- ncol(baseline_mat)
+  if (!is.null(baselineMat)) {
+    nTau <- ncol(baselineMat)
 
     # Negative log-likelihood as function of tau vector (with optional L2 penalty)
     nll <- function(tau) {
       val <- 0
-      for (bd in block_data) {
-        sigma2 <- .compute_sigma2(tau, bd)
+      for (bd in blockData) {
+        sigma2 <- .computeSigma2(tau, bd)
         if (any(sigma2 <= 0)) return(1e10)
         val <- val + 0.5 * sum(log(sigma2) + bd$z_rot^2 / sigma2)
       }
@@ -87,13 +87,13 @@ hdl_univariate <- function(z, n, eigen_ref, annotations = NULL,
     }
 
     # Gradient of negative log-likelihood
-    nll_grad <- function(tau) {
-      grad <- numeric(n_tau)
-      for (bd in block_data) {
-        sigma2 <- .compute_sigma2(tau, bd)
-        if (any(sigma2 <= 0)) return(rep(0, n_tau))
+    nllGrad <- function(tau) {
+      grad <- numeric(nTau)
+      for (bd in blockData) {
+        sigma2 <- .computeSigma2(tau, bd)
+        if (any(sigma2 <= 0)) return(rep(0, nTau))
         # dsigma2/dtau_a = n/M * d_i * ld_annot_{a,i}
-        dsig <- n / M * bd$d * bd$ld_annot  # (n_eigen x n_tau)
+        dsig <- n / M * bd$d * bd$ld_annot  # (nEigen x nTau)
         # dNLL/dsigma2_i = 0.5 * (1/sigma2_i - z_rot_i^2/sigma2_i^2)
         dNLL_dsig <- 0.5 * (1 / sigma2 - bd$z_rot^2 / sigma2^2)
         grad <- grad + as.vector(crossprod(dsig, dNLL_dsig))
@@ -103,19 +103,19 @@ hdl_univariate <- function(z, n, eigen_ref, annotations = NULL,
     }
 
     # Initialize with uniform h2 across annotations
-    tau_init <- rep(0.5 / n_tau, n_tau)
+    tauInit <- rep(0.5 / nTau, nTau)
 
-    opt <- optim(tau_init, nll, gr = nll_grad, method = "BFGS",
+    opt <- optim(tauInit, nll, gr = nllGrad, method = "BFGS",
                         control = list(maxit = 200, reltol = 1e-8))
     tau <- opt$par
 
     # h2 = sum_a tau_a * M_a
-    h2 <- sum(tau * colSums(baseline_mat))
+    h2 <- sum(tau * colSums(baselineMat))
   } else {
     # Single-parameter case: use optimize (current behavior)
     nll <- function(h2) {
       val <- 0
-      for (bd in block_data) {
+      for (bd in blockData) {
         sigma2 <- n * h2 * bd$d / M + 1
         val <- val + 0.5 * sum(log(sigma2) + bd$z_rot^2 / sigma2)
       }
@@ -128,52 +128,52 @@ hdl_univariate <- function(z, n, eigen_ref, annotations = NULL,
   }
 
   # SE from observed Fisher information (returns h2_se, tau_se, tau_vcov)
-  fisher_result <- .hdl_se_fisher_stratified(tau, block_data, n, M,
-                                             baseline_mat, lambda = lambda)
-  h2_se <- fisher_result$h2_se
-  tau_se <- fisher_result$tau_se
+  fisherResult <- .hdlSeFisherStratified(tau, blockData, n, M,
+                                         baselineMat, lambda = lambda)
+  h2Se <- fisherResult$h2_se
+  tauSe <- fisherResult$tau_se
 
   # Jackknife tau_blocks via score approximation
-  tau_blocks <- NULL
-  if (!is.null(baseline_mat)) {
-    jk <- .hdl_jackknife_tau(tau, block_data, n, M, baseline_mat,
-                             lambda = lambda)
-    tau_blocks <- jk$loo_estimates
+  tauBlocks <- NULL
+  if (!is.null(baselineMat)) {
+    jk <- .hdlJackknifeTau(tau, blockData, n, M, baselineMat,
+                           lambda = lambda)
+    tauBlocks <- jk$loo_estimates
     # Use jackknife SE if available (more robust than Fisher for enrichment)
-    tau_se <- jk$tau_se
+    tauSe <- jk$tau_se
   }
 
   # Baseline enrichment
-  baseline_enrichment_df <- NULL
-  if (!is.null(baseline_mat)) {
-    annot_names <- if (!is.null(colnames(baseline_mat))) {
-      colnames(baseline_mat)
+  baselineEnrichmentDf <- NULL
+  if (!is.null(baselineMat)) {
+    annotNames <- if (!is.null(colnames(baselineMat))) {
+      colnames(baselineMat)
     } else {
-      paste0("annot_", seq_len(ncol(baseline_mat)))
+      paste0("annot_", seq_len(ncol(baselineMat)))
     }
-    baseline_enrichment_df <- computeBaselineEnrichment(
-      tau, tau_se, tau_blocks, baseline_mat, annot_names, h2
+    baselineEnrichmentDf <- computeBaselineEnrichment(
+      tau, tauSe, tauBlocks, baselineMat, annotNames, h2
     )
   }
 
   # Local estimation
-  local_df <- NULL
+  localDf <- NULL
   if (local) {
-    local_df <- .hdl_local(block_data, n, M, tau, baseline_mat)
+    localDf <- .hdlLocal(blockData, n, M, tau, baselineMat)
   }
 
   # Score statistics for candidate annotations (sHDL)
-  score_stats <- NULL
+  scoreStats <- NULL
   if (!is.null(annotations)) {
-    strat <- .shdl_stratified(z, n, eigen_ref, annotations, tau,
-                              baseline_mat)
-    score_stats <- strat$score_stats
+    strat <- .shdlStratified(z, n, eigenRef, annotations, tau,
+                             baselineMat)
+    scoreStats <- strat$score_stats
   }
 
-  list(h2 = h2, h2_se = h2_se, intercept = NA_real_,
-       intercept_se = NA_real_, tau = tau, tau_se = tau_se,
-       tau_blocks = tau_blocks, local = local_df,
-       enrichment = baseline_enrichment_df, score_stats = score_stats)
+  list(h2 = h2, h2_se = h2Se, intercept = NA_real_,
+       intercept_se = NA_real_, tau = tau, tau_se = tauSe,
+       tau_blocks = tauBlocks, local = localDf,
+       enrichment = baselineEnrichmentDf, score_stats = scoreStats)
 }
 
 # =============================================================================
@@ -181,52 +181,52 @@ hdl_univariate <- function(z, n, eigen_ref, annotations = NULL,
 # =============================================================================
 
 #' @keywords internal
-.hdl_se_fisher <- function(h2, block_data, n, M) {
+.hdlSeFisher <- function(h2, blockData, n, M) {
   # Fisher information = -E[d^2 LL / d h2^2]
   info <- 0
-  for (bd in block_data) {
+  for (bd in blockData) {
     sigma2 <- n * h2 * bd$d / M + 1
     info <- info + 0.5 * sum((n * bd$d / M)^2 / sigma2^2)
   }
-  h2_se <- 1 / sqrt(max(info, 1e-10))
-  list(h2_se = h2_se, tau_se = h2_se, tau_vcov = NULL)
+  h2Se <- 1 / sqrt(max(info, 1e-10))
+  list(h2_se = h2Se, tau_se = h2Se, tau_vcov = NULL)
 }
 
 #' @keywords internal
-.hdl_se_fisher_stratified <- function(tau, block_data, n, M,
-                                      baseline_mat = NULL, lambda = 0) {
-  if (is.null(baseline_mat)) {
-    return(.hdl_se_fisher(tau, block_data, n, M))
+.hdlSeFisherStratified <- function(tau, blockData, n, M,
+                                   baselineMat = NULL, lambda = 0) {
+  if (is.null(baselineMat)) {
+    return(.hdlSeFisher(tau, blockData, n, M))
   }
 
   # Fisher information matrix for tau, then delta method for h2
-  n_tau <- length(tau)
-  info_mat <- matrix(0, nrow = n_tau, ncol = n_tau)
-  for (bd in block_data) {
+  nTau <- length(tau)
+  infoMat <- matrix(0, nrow = nTau, ncol = nTau)
+  for (bd in blockData) {
     sigma2 <- n / M * bd$d * as.vector(bd$ld_annot %*% tau) + 1
     # dsigma2/dtau_a = n/M * d_i * ld_annot_{a,i}
-    dsig <- n / M * bd$d * bd$ld_annot  # (n_eigen x n_tau)
+    dsig <- n / M * bd$d * bd$ld_annot  # (nEigen x nTau)
     # Fisher info contribution: sum_i dsig_a * dsig_b / sigma2_i^2
     w <- 1 / sigma2^2
-    info_mat <- info_mat + 0.5 * crossprod(dsig * sqrt(w))
+    infoMat <- infoMat + 0.5 * crossprod(dsig * sqrt(w))
   }
   # Add ridge penalty contribution to Hessian
   if (lambda > 0) {
-    info_mat <- info_mat + 2 * lambda * diag(n_tau)
+    infoMat <- infoMat + 2 * lambda * diag(nTau)
   }
 
   # Variance of tau
-  tau_vcov <- tryCatch(solve(info_mat), error = function(e) {
-    diag(1 / pmax(diag(info_mat), 1e-10))
+  tauVcov <- tryCatch(solve(infoMat), error = function(e) {
+    diag(1 / pmax(diag(infoMat), 1e-10))
   })
-  tau_se <- sqrt(pmax(diag(tau_vcov), 0))
+  tauSe <- sqrt(pmax(diag(tauVcov), 0))
 
   # h2 = sum_a tau_a * M_a, so dh2/dtau = M_a
-  M_a <- colSums(baseline_mat)
-  h2_var <- as.numeric(t(M_a) %*% tau_vcov %*% M_a)
-  h2_se <- sqrt(max(h2_var, 0))
+  M_a <- colSums(baselineMat)
+  h2Var <- as.numeric(t(M_a) %*% tauVcov %*% M_a)
+  h2Se <- sqrt(max(h2Var, 0))
 
-  list(h2_se = h2_se, tau_se = tau_se, tau_vcov = tau_vcov)
+  list(h2_se = h2Se, tau_se = tauSe, tau_vcov = tauVcov)
 }
 
 #' @title Block-level jackknife for HDL tau via score approximation
@@ -235,179 +235,179 @@ hdl_univariate <- function(z, n, eigen_ref, annotations = NULL,
 #'   the Fisher information (Hessian of NLL) and grad_b is block b's
 #'   gradient contribution at the MLE.
 #' @keywords internal
-.hdl_jackknife_tau <- function(tau, block_data, n, M, baseline_mat,
-                               lambda = 0) {
-  n_blocks <- length(block_data)
-  n_tau <- length(tau)
+.hdlJackknifeTau <- function(tau, blockData, n, M, baselineMat,
+                             lambda = 0) {
+  nBlocks <- length(blockData)
+  nTau <- length(tau)
 
-  info_mat <- matrix(0, n_tau, n_tau)
-  block_grads <- matrix(0, n_blocks, n_tau)
+  infoMat <- matrix(0, nTau, nTau)
+  blockGrads <- matrix(0, nBlocks, nTau)
 
-  for (b in seq_len(n_blocks)) {
-    bd <- block_data[[b]]
+  for (b in seq_len(nBlocks)) {
+    bd <- blockData[[b]]
     sigma2 <- n / M * bd$d * as.vector(bd$ld_annot %*% tau) + 1
     dsig <- n / M * bd$d * bd$ld_annot
     # Block gradient contribution
     dNLL_dsig <- 0.5 * (1 / sigma2 - bd$z_rot^2 / sigma2^2)
-    block_grads[b, ] <- as.vector(crossprod(dsig, dNLL_dsig))
+    blockGrads[b, ] <- as.vector(crossprod(dsig, dNLL_dsig))
     # Block Fisher info contribution
     w <- 1 / sigma2^2
-    info_mat <- info_mat + 0.5 * crossprod(dsig * sqrt(w))
+    infoMat <- infoMat + 0.5 * crossprod(dsig * sqrt(w))
   }
   # Add ridge penalty to Hessian
   if (lambda > 0) {
-    info_mat <- info_mat + 2 * lambda * diag(n_tau)
+    infoMat <- infoMat + 2 * lambda * diag(nTau)
   }
 
-  H_inv <- tryCatch(solve(info_mat), error = function(e) {
-    diag(1 / pmax(diag(info_mat), 1e-10))
+  H_inv <- tryCatch(solve(infoMat), error = function(e) {
+    diag(1 / pmax(diag(infoMat), 1e-10))
   })
 
   # LOO estimates via linear approximation at MLE
-  loo_estimates <- matrix(NA, n_blocks, n_tau)
-  for (b in seq_len(n_blocks)) {
-    loo_estimates[b, ] <- tau - as.vector(H_inv %*% block_grads[b, ])
+  looEstimates <- matrix(NA, nBlocks, nTau)
+  for (b in seq_len(nBlocks)) {
+    looEstimates[b, ] <- tau - as.vector(H_inv %*% blockGrads[b, ])
   }
 
   list(
-    loo_estimates = loo_estimates,
-    tau_se = jackknifeSe(tau, loo_estimates)
+    loo_estimates = looEstimates,
+    tau_se = jackknifeSe(tau, looEstimates)
   )
 }
 
 #' @keywords internal
-.hdl_local <- function(block_data, n, M, tau = NULL,
-                       baseline_mat = NULL) {
-  local_results <- lapply(seq_along(block_data), function(b) {
-    bd <- block_data[[b]]
+.hdlLocal <- function(blockData, n, M, tau = NULL,
+                      baselineMat = NULL) {
+  localResults <- lapply(seq_along(blockData), function(b) {
+    bd <- blockData[[b]]
     if (bd$p < 3) {
       return(data.frame(block_id = b, h2_local = NA, h2_local_se = NA))
     }
 
     # Compute the global baseline sigma2 for this block
-    if (!is.null(baseline_mat) && !is.null(bd$ld_annot)) {
-      sigma2_baseline <- n / M * bd$d *
+    if (!is.null(baselineMat) && !is.null(bd$ld_annot)) {
+      sigma2Baseline <- n / M * bd$d *
         as.vector(bd$ld_annot %*% tau) + 1
     } else if (!is.null(tau)) {
-      sigma2_baseline <- n * tau[1] * bd$d / M + 1
+      sigma2Baseline <- n * tau[1] * bd$d / M + 1
     } else {
-      sigma2_baseline <- NULL
+      sigma2Baseline <- NULL
     }
 
-    # Local likelihood: optimize a local deviation delta_h2
+    # Local likelihood: optimize a local deviation deltaH2
     # sigma2_i = sigma2_baseline_i + n * delta_h2 * d_i / M
-    nll_local <- function(delta_h2) {
-      if (!is.null(sigma2_baseline)) {
-        sigma2 <- sigma2_baseline + n * delta_h2 * bd$d / M
+    nllLocal <- function(deltaH2) {
+      if (!is.null(sigma2Baseline)) {
+        sigma2 <- sigma2Baseline + n * deltaH2 * bd$d / M
       } else {
-        sigma2 <- n * delta_h2 * bd$d / M + 1
+        sigma2 <- n * deltaH2 * bd$d / M + 1
       }
       if (any(sigma2 <= 0)) return(1e10)
       0.5 * sum(log(sigma2) + bd$z_rot^2 / sigma2)
     }
-    opt <- optimize(nll_local, interval = c(-0.5, 0.5), tol = 1e-8)
-    delta_h2 <- opt$minimum
+    opt <- optimize(nllLocal, interval = c(-0.5, 0.5), tol = 1e-8)
+    deltaH2 <- opt$minimum
 
     # Total local h2 = global baseline contribution + local deviation
-    if (!is.null(sigma2_baseline)) {
+    if (!is.null(sigma2Baseline)) {
       # The baseline already explains some h2 in this block; delta is
       # the additional local deviation
-      h2_local <- delta_h2
+      h2Local <- deltaH2
     } else {
-      h2_local <- delta_h2
+      h2Local <- deltaH2
     }
 
     # SE from Fisher information at optimum
-    sigma2_opt <- if (!is.null(sigma2_baseline)) {
-      sigma2_baseline + n * delta_h2 * bd$d / M
+    sigma2Opt <- if (!is.null(sigma2Baseline)) {
+      sigma2Baseline + n * deltaH2 * bd$d / M
     } else {
-      n * delta_h2 * bd$d / M + 1
+      n * deltaH2 * bd$d / M + 1
     }
-    info <- 0.5 * sum((n * bd$d / M)^2 / sigma2_opt^2)
-    se_local <- 1 / sqrt(max(info, 1e-10))
+    info <- 0.5 * sum((n * bd$d / M)^2 / sigma2Opt^2)
+    seLocal <- 1 / sqrt(max(info, 1e-10))
 
-    data.frame(block_id = b, h2_local = h2_local, h2_local_se = se_local)
+    data.frame(block_id = b, h2_local = h2Local, h2_local_se = seLocal)
   })
-  do.call(rbind, local_results)
+  do.call(rbind, localResults)
 }
 
 #' @keywords internal
-.shdl_stratified <- function(z, n, eigen_ref, annotations, tau,
-                             baseline_mat = NULL) {
+.shdlStratified <- function(z, n, eigenRef, annotations, tau,
+                            baselineMat = NULL) {
   # sHDL: stratified HDL with annotation-specific h2
   # Score-based approach: baseline fit uses jointly fitted tau
   candidate <- getCandidates(annotations)
-  n_cand <- ncol(candidate@annotations)
-  if (n_cand == 0) return(list(enrichment = NULL, score_stats = NULL))
+  nCand <- ncol(candidate@annotations)
+  if (nCand == 0) return(list(enrichment = NULL, score_stats = NULL))
 
-  M <- nrow(eigen_ref@snp_info)
-  n_blocks <- length(eigen_ref@eigen_list)
+  M <- nrow(eigenRef@snpInfo)
+  nBlocks <- length(eigenRef@eigenList)
 
   # Score for each candidate: derivative of log-likelihood w.r.t. tau_a
   # at tau_a = 0, with baseline tau at the MLE
   # Collect per-block gradient and information for jackknife
-  block_grad <- matrix(0, nrow = n_blocks, ncol = n_cand)
-  block_info <- matrix(0, nrow = n_blocks, ncol = n_cand)
+  blockGrad <- matrix(0, nrow = nBlocks, ncol = nCand)
+  blockInfo <- matrix(0, nrow = nBlocks, ncol = nCand)
 
-  for (a in seq_len(n_cand)) {
-    annot_col <- candidate@annotations[, a]
+  for (a in seq_len(nCand)) {
+    annotCol <- candidate@annotations[, a]
 
-    for (b in seq_len(n_blocks)) {
-      block <- eigen_ref@eigen_list[[b]]
+    for (b in seq_len(nBlocks)) {
+      block <- eigenRef@eigenList[[b]]
       idx <- block$snp_idx
       V <- block$vectors
       d <- block$values
-      z_rot <- as.vector(t(V) %*% z[idx])
+      zRot <- as.vector(t(V) %*% z[idx])
 
       # Annotation-stratified eigenvalue score for this candidate
-      annot_block <- annot_col[idx]
-      d_annot <- as.vector(t(V^2) %*% annot_block)
+      annotBlock <- annotCol[idx]
+      dAnnot <- as.vector(t(V^2) %*% annotBlock)
 
       # Compute sigma2 from stratified baseline fit
-      if (!is.null(baseline_mat)) {
-        ld_annot_base <- crossprod(V^2, baseline_mat[idx, , drop = FALSE])
-        sigma2 <- n / M * d * as.vector(ld_annot_base %*% tau) + 1
+      if (!is.null(baselineMat)) {
+        ldAnnotBase <- crossprod(V^2, baselineMat[idx, , drop = FALSE])
+        sigma2 <- n / M * d * as.vector(ldAnnotBase %*% tau) + 1
       } else {
         sigma2 <- n * tau[1] * d / M + 1
       }
 
       # Gradient: sum_i [ (z_rot_i^2 / sigma2_i - 1) * n * d_annot_i / M ] /
       #           (2 * sigma2_i)
-      grad <- 0.5 * sum((z_rot^2 / sigma2 - 1) * n * d_annot /
+      grad <- 0.5 * sum((zRot^2 / sigma2 - 1) * n * dAnnot /
                           (M * sigma2))
-      info <- 0.5 * sum((n * d_annot / M)^2 / sigma2^2)
+      info <- 0.5 * sum((n * dAnnot / M)^2 / sigma2^2)
 
-      block_grad[b, a] <- grad
-      block_info[b, a] <- info
+      blockGrad[b, a] <- grad
+      blockInfo[b, a] <- info
     }
   }
 
   # Total score statistics
-  total_grad <- colSums(block_grad)
-  total_info <- colSums(block_info)
-  score_z <- total_grad / sqrt(pmax(total_info, 1e-10))
+  totalGrad <- colSums(blockGrad)
+  totalInfo <- colSums(blockInfo)
+  scoreZ <- totalGrad / sqrt(pmax(totalInfo, 1e-10))
 
   # Jackknife score correlation R: LOO by block
-  loo_score_z <- matrix(0, nrow = n_blocks, ncol = n_cand)
-  for (b in seq_len(n_blocks)) {
-    loo_grad <- total_grad - block_grad[b, ]
-    loo_info <- total_info - block_info[b, ]
-    loo_score_z[b, ] <- loo_grad / sqrt(pmax(loo_info, 1e-10))
+  looScoreZ <- matrix(0, nrow = nBlocks, ncol = nCand)
+  for (b in seq_len(nBlocks)) {
+    looGrad <- totalGrad - blockGrad[b, ]
+    looInfo <- totalInfo - blockInfo[b, ]
+    looScoreZ[b, ] <- looGrad / sqrt(pmax(looInfo, 1e-10))
   }
-  if (n_cand > 1 && n_blocks > 2) {
-    R <- cor(loo_score_z)
+  if (nCand > 1 && nBlocks > 2) {
+    R <- cor(looScoreZ)
   } else {
-    R <- diag(n_cand)
+    R <- diag(nCand)
   }
 
   list(
     enrichment = data.frame(
-      annotation = candidate@annotation_meta$name,
-      score_z = score_z,
-      score_p = 2 * pnorm(-abs(score_z)),
+      annotation = candidate@annotationMeta$name,
+      score_z = scoreZ,
+      score_p = 2 * pnorm(-abs(scoreZ)),
       stringsAsFactors = FALSE
     ),
-    score_stats = list(z = score_z, R = R,
-                       annotation_names = candidate@annotation_meta$name)
+    score_stats = list(z = scoreZ, R = R,
+                       annotation_names = candidate@annotationMeta$name)
   )
 }

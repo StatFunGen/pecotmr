@@ -30,18 +30,18 @@ make_mv_rss_sumstats <- function(n_variants = 5) {
 
 .test_mv_lddata_from_genotype <- function(X) {
   ids <- colnames(X)
-  ref_panel <- cbind(pecotmr:::parse_variant_id(ids), variant_id = ids)
+  ref_panel <- cbind(pecotmr:::parseVariantId(ids), variant_id = ids)
   ref_panel$chrom <- as.character(ref_panel$chrom)
-  LDData(
+  LdData(
     correlation = NULL,
-    genotype_handle = X,
-    variants = pecotmr:::.ref_panel_to_granges(ref_panel),
-    block_metadata = pecotmr:::.infer_single_ld_block_metadata(ref_panel),
-    n_ref = as.integer(nrow(X))
+    genotypeHandle = X,
+    variants = pecotmr:::.refPanelToGranges(ref_panel),
+    blockMetadata = pecotmr:::.inferSingleLdBlockMetadata(ref_panel),
+    nRef = as.integer(nrow(X))
   )
 }
 
-test_that("region_data_to_mvsusie_rss_input builds shared-variant Z and R", {
+test_that("regionDataToMvsusieRssInput builds shared-variant Z and R", {
   ss1 <- make_mv_rss_sumstats(5)
   ss2 <- make_mv_rss_sumstats(5)[2:5, , drop = FALSE]
   ss2$z <- ss2$z + 1
@@ -49,10 +49,10 @@ test_that("region_data_to_mvsusie_rss_input builds shared-variant Z and R", {
   colnames(X_ref) <- ss1$variant_id
   ld <- .test_mv_lddata_from_genotype(X_ref)
 
-  out <- region_data_to_mvsusie_rss_input(list(
+  out <- regionDataToMvsusieRssInput(list(
     sumstats = list(
-      study1 = list(sumstats = ss1, n = 100, var_y = 1),
-      study2 = list(sumstats = ss2, n = 120, var_y = 1)
+      study1 = list(sumstats = ss1, n = 100, varY = 1),
+      study2 = list(sumstats = ss2, n = 120, varY = 1)
     ),
     LD_data = list(study1 = ld),
     LD_match = c(study1 = "study1", study2 = "study1")
@@ -66,7 +66,7 @@ test_that("region_data_to_mvsusie_rss_input builds shared-variant Z and R", {
   expect_equal(out$source_info$n, c(study1 = 100, study2 = 120))
 })
 
-test_that("region_data_to_mvsusie_rss_input reports first LD for multiple LD matches", {
+test_that("regionDataToMvsusieRssInput reports first LD for multiple LD matches", {
   ss1 <- make_mv_rss_sumstats(5)
   ss2 <- make_mv_rss_sumstats(5)
   X_ref1 <- matrix(rnorm(25 * 5), nrow = 25, ncol = 5)
@@ -77,23 +77,23 @@ test_that("region_data_to_mvsusie_rss_input reports first LD for multiple LD mat
   ld2 <- .test_mv_lddata_from_genotype(X_ref2)
   input <- list(
     sumstats = list(
-      study1 = list(sumstats = ss1, n = 100, var_y = 1),
-      study2 = list(sumstats = ss2, n = 120, var_y = 1)
+      study1 = list(sumstats = ss1, n = 100, varY = 1),
+      study2 = list(sumstats = ss2, n = 120, varY = 1)
     ),
     LD_data = list(ld1 = ld1, ld2 = ld2),
     LD_match = c(study1 = "ld1", study2 = "ld2")
   )
 
   expect_message(
-    out_default <- region_data_to_mvsusie_rss_input(input),
+    out_default <- regionDataToMvsusieRssInput(input),
     "using the first reference 'ld1'"
   )
   expect_equal(out_default$source_info$ld_name, "ld1")
-  out <- region_data_to_mvsusie_rss_input(input, ld_name = "ld2")
+  out <- regionDataToMvsusieRssInput(input, ldName = "ld2")
   expect_equal(out$source_info$ld_name, "ld2")
 })
 
-# NOTE: In multivariate_analysis_pipeline, the mvsusieR check (requireNamespace)
+# NOTE: In multivariateAnalysisPipeline, the mvsusieR check (requireNamespace)
 # runs BEFORE input validation. So when mvsusieR is not installed, the function
 # stops with "please install mvsusieR" before ever reaching the X/Y/maf checks.
 # Input validation tests therefore require mvsusieR to be installed.
@@ -103,38 +103,38 @@ test_that("region_data_to_mvsusie_rss_input reports first LD for multiple LD mat
 # mvsusieR availability check in the pipeline)
 # ===========================================================================
 
-test_that("multivariate_analysis_pipeline errors when X is not a numeric matrix", {
+test_that("multivariateAnalysisPipeline errors when X is not a numeric matrix", {
   skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
           "mvsusieR not installed, input validation unreachable")
   d <- make_mv_data()
   expect_error(
-    multivariate_analysis_pipeline(
-      X = as.data.frame(d$X), Y = d$Y, maf = d$maf, pip_cutoff_to_skip = 0
+    multivariateAnalysisPipeline(
+      X = as.data.frame(d$X), Y = d$Y, maf = d$maf, pipCutoffToSkip = 0
     ),
     "X must be a numeric matrix"
   )
 })
 
-test_that("multivariate_analysis_pipeline errors when Y is not a numeric matrix", {
+test_that("multivariateAnalysisPipeline errors when Y is not a numeric matrix", {
   skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
           "mvsusieR not installed, input validation unreachable")
   d <- make_mv_data()
   expect_error(
-    multivariate_analysis_pipeline(
-      X = d$X, Y = as.data.frame(d$Y), maf = d$maf, pip_cutoff_to_skip = 0
+    multivariateAnalysisPipeline(
+      X = d$X, Y = as.data.frame(d$Y), maf = d$maf, pipCutoffToSkip = 0
     ),
     "Y must be a numeric matrix"
   )
 })
 
-test_that("multivariate_analysis_pipeline errors when nrow(X) != nrow(Y)", {
+test_that("multivariateAnalysisPipeline errors when nrow(X) != nrow(Y)", {
   skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
           "mvsusieR not installed, input validation unreachable")
   d <- make_mv_data()
   Y_short <- d$Y[1:10, , drop = FALSE]
   expect_error(
-    multivariate_analysis_pipeline(
-      X = d$X, Y = Y_short, maf = d$maf, pip_cutoff_to_skip = 0
+    multivariateAnalysisPipeline(
+      X = d$X, Y = Y_short, maf = d$maf, pipCutoffToSkip = 0
     ),
     "X and Y must have the same number of rows"
   )
@@ -142,59 +142,59 @@ test_that("multivariate_analysis_pipeline errors when nrow(X) != nrow(Y)", {
 
 # ---------- maf validation -------------------------------------------------
 
-test_that("multivariate_analysis_pipeline errors when maf has wrong length", {
+test_that("multivariateAnalysisPipeline errors when maf has wrong length", {
   skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
           "mvsusieR not installed, input validation unreachable")
   d <- make_mv_data()
   expect_error(
-    multivariate_analysis_pipeline(
-      X = d$X, Y = d$Y, maf = c(0.1, 0.2), pip_cutoff_to_skip = 0
+    multivariateAnalysisPipeline(
+      X = d$X, Y = d$Y, maf = c(0.1, 0.2), pipCutoffToSkip = 0
     ),
     "maf must be NULL or a numeric vector with length equal to the number of columns in X"
   )
 })
 
-test_that("multivariate_analysis_pipeline errors when maf is not numeric", {
+test_that("multivariateAnalysisPipeline errors when maf is not numeric", {
   skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
           "mvsusieR not installed, input validation unreachable")
   d <- make_mv_data()
   expect_error(
-    multivariate_analysis_pipeline(
-      X = d$X, Y = d$Y, maf = rep("0.1", ncol(d$X)), pip_cutoff_to_skip = 0
+    multivariateAnalysisPipeline(
+      X = d$X, Y = d$Y, maf = rep("0.1", ncol(d$X)), pipCutoffToSkip = 0
     ),
     "maf must be NULL or a numeric vector"
   )
 })
 
-test_that("multivariate_analysis_pipeline errors when maf values are below 0", {
+test_that("multivariateAnalysisPipeline errors when maf values are below 0", {
   skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
           "mvsusieR not installed, input validation unreachable")
   d <- make_mv_data()
   bad_maf <- d$maf
   bad_maf[1] <- -0.1
   expect_error(
-    multivariate_analysis_pipeline(
-      X = d$X, Y = d$Y, maf = bad_maf, pip_cutoff_to_skip = 0
+    multivariateAnalysisPipeline(
+      X = d$X, Y = d$Y, maf = bad_maf, pipCutoffToSkip = 0
     ),
     "maf values must be between 0 and 1"
   )
 })
 
-test_that("multivariate_analysis_pipeline errors when maf values exceed 1", {
+test_that("multivariateAnalysisPipeline errors when maf values exceed 1", {
   skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
           "mvsusieR not installed, input validation unreachable")
   d <- make_mv_data()
   bad_maf <- d$maf
   bad_maf[2] <- 1.5
   expect_error(
-    multivariate_analysis_pipeline(
-      X = d$X, Y = d$Y, maf = bad_maf, pip_cutoff_to_skip = 0
+    multivariateAnalysisPipeline(
+      X = d$X, Y = d$Y, maf = bad_maf, pipCutoffToSkip = 0
     ),
     "maf values must be between 0 and 1"
   )
 })
 
-test_that("multivariate_analysis_pipeline accepts maf of all zeros past validation", {
+test_that("multivariateAnalysisPipeline accepts maf of all zeros past validation", {
   skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
           "mvsusieR not installed, input validation unreachable")
   d <- make_mv_data()
@@ -202,8 +202,8 @@ test_that("multivariate_analysis_pipeline accepts maf of all zeros past validati
   # maf = 0 is between 0 and 1 so should pass maf validation;
   # the pipeline will proceed past validation into skip_conditions
   result <- tryCatch(
-    multivariate_analysis_pipeline(
-      X = d$X, Y = d$Y, maf = zero_maf, pip_cutoff_to_skip = 0
+    multivariateAnalysisPipeline(
+      X = d$X, Y = d$Y, maf = zero_maf, pipCutoffToSkip = 0
     ),
     error = function(e) e
   )
@@ -213,15 +213,15 @@ test_that("multivariate_analysis_pipeline accepts maf of all zeros past validati
   }
 })
 
-test_that("multivariate_analysis_pipeline accepts maf of all ones past validation", {
+test_that("multivariateAnalysisPipeline accepts maf of all ones past validation", {
   skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
           "mvsusieR not installed, input validation unreachable")
   d <- make_mv_data()
   one_maf <- rep(1, ncol(d$X))
   # maf = 1 is between 0 and 1 so passes maf validation
   result <- tryCatch(
-    multivariate_analysis_pipeline(
-      X = d$X, Y = d$Y, maf = one_maf, pip_cutoff_to_skip = 0
+    multivariateAnalysisPipeline(
+      X = d$X, Y = d$Y, maf = one_maf, pipCutoffToSkip = 0
     ),
     error = function(e) e
   )
@@ -237,25 +237,25 @@ test_that("multivariate_analysis_pipeline accepts maf of all ones past validatio
 # mvsusieR dependency check
 # ===========================================================================
 
-test_that("multivariate_analysis_pipeline errors when mvsusieR is not installed", {
+test_that("multivariateAnalysisPipeline errors when mvsusieR is not installed", {
   skip_if(requireNamespace("mvsusieR", quietly = TRUE),
           "mvsusieR is installed, skipping not-installed test")
   d <- make_mv_data()
   expect_error(
-    multivariate_analysis_pipeline(
-      X = d$X, Y = d$Y, maf = d$maf, pip_cutoff_to_skip = 0
+    multivariateAnalysisPipeline(
+      X = d$X, Y = d$Y, maf = d$maf, pipCutoffToSkip = 0
     ),
     "mvsusieR"
   )
 })
 
-test_that("multivariate_analysis_pipeline error message includes install URL", {
+test_that("multivariateAnalysisPipeline error message includes install URL", {
   skip_if(requireNamespace("mvsusieR", quietly = TRUE),
           "mvsusieR is installed, skipping not-installed test")
   d <- make_mv_data()
   expect_error(
-    multivariate_analysis_pipeline(
-      X = d$X, Y = d$Y, maf = d$maf, pip_cutoff_to_skip = 0
+    multivariateAnalysisPipeline(
+      X = d$X, Y = d$Y, maf = d$maf, pipCutoffToSkip = 0
     ),
     "github.com/stephenslab/mvsusieR"
   )
@@ -267,7 +267,7 @@ test_that("multivariate_analysis_pipeline error message includes install URL", {
 # skip_conditions is a local function inside the pipeline, so it can only
 # be reached through the pipeline. When mvsusieR is not installed, we can
 # still test cases where skip_conditions runs before mvsusieR is needed
-# (when pip_cutoff_to_skip = 0, skip_conditions keeps all columns and
+# (when pipCutoffToSkip = 0, skip_conditions keeps all columns and
 # the pipeline proceeds to mvsusieR check).
 # ===========================================================================
 
@@ -275,11 +275,11 @@ test_that("pipeline with pip_cutoff_to_skip=0 passes skip_conditions and reaches
   skip_if(requireNamespace("mvsusieR", quietly = TRUE),
           "mvsusieR is installed, skipping not-installed test")
   d <- make_mv_data()
-  # pip_cutoff_to_skip = 0 means keep all columns (no susie call needed)
+  # pipCutoffToSkip = 0 means keep all columns (no susie call needed)
   # Should reach mvsusieR check
   expect_error(
-    multivariate_analysis_pipeline(
-      X = d$X, Y = d$Y, maf = d$maf, pip_cutoff_to_skip = 0
+    multivariateAnalysisPipeline(
+      X = d$X, Y = d$Y, maf = d$maf, pipCutoffToSkip = 0
     ),
     "mvsusieR"
   )
@@ -294,10 +294,10 @@ test_that("pipeline with pip_cutoff_to_skip wrong length vector errors", {
   skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
           "mvsusieR not installed, cannot reach skip_conditions")
   expect_error(
-    multivariate_analysis_pipeline(
-      X = d$X, Y = d$Y, maf = d$maf, pip_cutoff_to_skip = c(0.1, 0.2)
+    multivariateAnalysisPipeline(
+      X = d$X, Y = d$Y, maf = d$maf, pipCutoffToSkip = c(0.1, 0.2)
     ),
-    "pip_cutoff_to_skip must be a single number or a vector of the same length"
+    "pipCutoffToSkip must be a single number or a vector of the same length"
   )
 })
 
@@ -309,9 +309,9 @@ test_that("pipeline with pip_cutoff_to_skip vector matching ncol(Y) is accepted"
   # This should pass skip_conditions validation
   # It may still fail later in the pipeline, but not on pip_cutoff_to_skip
   result <- tryCatch(
-    multivariate_analysis_pipeline(
+    multivariateAnalysisPipeline(
       X = d$X, Y = d$Y, maf = d$maf,
-      pip_cutoff_to_skip = rep(0, 3)
+      pipCutoffToSkip = rep(0, 3)
     ),
     error = function(e) e
   )
@@ -345,8 +345,8 @@ test_that("pipeline returns empty list when Y has all-NA rows leaving no data", 
   rownames(Y) <- rownames(X)
   colnames(Y) <- paste0("c", 1:r)
   maf <- rep(0.3, p)
-  result <- multivariate_analysis_pipeline(
-    X = X, Y = Y, maf = maf, pip_cutoff_to_skip = 0
+  result <- multivariateAnalysisPipeline(
+    X = X, Y = Y, maf = maf, pipCutoffToSkip = 0
   )
   expect_true(is.list(result))
   expect_equal(length(result), 0)
@@ -360,11 +360,11 @@ test_that("pipeline warns and returns empty list when Y has single column", {
   skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
           "mvsusieR not installed, cannot test single-column behavior")
   d <- make_mv_data(r = 1)
-  # With pip_cutoff_to_skip = 0, skip_conditions keeps the single column,
+  # With pipCutoffToSkip = 0, skip_conditions keeps the single column,
   # then checks ncol(Y_filtered) <= 1 which triggers warning + NULL return
   expect_warning(
-    result <- multivariate_analysis_pipeline(
-      X = d$X, Y = d$Y, maf = d$maf, pip_cutoff_to_skip = 0
+    result <- multivariateAnalysisPipeline(
+      X = d$X, Y = d$Y, maf = d$maf, pipCutoffToSkip = 0
     ),
     "After filtering.*1 context left"
   )
@@ -372,17 +372,17 @@ test_that("pipeline warns and returns empty list when Y has single column", {
   expect_equal(length(result), 0)
 })
 
-test_that("multivariate_analysis_pipeline errors when maf is NULL and maf_cutoff is set without af", {
+test_that("multivariateAnalysisPipeline errors when maf is NULL and mafCutoff is set without af", {
   skip_if(!requireNamespace("mvsusieR", quietly = TRUE),
           "mvsusieR not installed, input validation unreachable")
   d <- make_mv_data()
-  # maf is now optional; it only errors if maf_cutoff needs a frequency and
+  # maf is now optional; it only errors if mafCutoff needs a frequency and
   # neither maf nor af is supplied.
   expect_error(
-    multivariate_analysis_pipeline(
-      X = d$X, Y = d$Y, maf_cutoff = 0.01, pip_cutoff_to_skip = 0
+    multivariateAnalysisPipeline(
+      X = d$X, Y = d$Y, mafCutoff = 0.01, pipCutoffToSkip = 0
     ),
-    "maf_cutoff is set but neither"
+    "mafCutoff is set but neither"
   )
 })
 
@@ -404,8 +404,8 @@ test_that("skip_conditions with negative pip_cutoff_to_skip auto-computes thresh
     susie = function(X, Y, ...) list(pip = rep(1e-6, ncol(X))),
   )
   result <- expect_warning(
-    multivariate_analysis_pipeline(
-      X = d$X, Y = d$Y, maf = d$maf, pip_cutoff_to_skip = -1
+    multivariateAnalysisPipeline(
+      X = d$X, Y = d$Y, maf = d$maf, pipCutoffToSkip = -1
     ),
     "After filtering"
   )
@@ -423,24 +423,24 @@ test_that("multivariate_pipeline filters X by LD reference variants and short-ci
   d <- make_mv_data()
   filter_called <- FALSE
   mrmash_called <- FALSE
-  # filter_variants_by_ld_reference: keep first half of variants
+  # filterVariantsByLdReference: keep first half of variants
   local_mocked_bindings(
-    filter_variants_by_ld_reference = function(variant_ids, ld_reference_meta_file, ...) {
+    filterVariantsByLdReference = function(variant_ids, ld_reference_meta_file, ...) {
       filter_called <<- TRUE
       kept <- seq_len(length(variant_ids) %/% 2)
       list(data = variant_ids[kept], idx = kept)
     },
     # Short-circuit before mvSuSiE/mr.mash internals: return w0 of all "null"
     # so rescale_cov_w0 yields length 0 -> pipeline returns list().
-    mrmash_wrapper = function(X, Y, ...) {
+    mrmashWrapper = function(X, Y, ...) {
       mrmash_called <<- TRUE
       list(V = diag(ncol(Y)), w0 = c(null = 1.0), w1 = matrix(1, nrow = ncol(X), ncol = 1))
     },
   )
-  result <- multivariate_analysis_pipeline(
+  result <- multivariateAnalysisPipeline(
     X = d$X, Y = d$Y, maf = d$maf,
-    ld_reference_meta_file = "fake_ld_meta.tsv",
-    pip_cutoff_to_skip = 0
+    ldReferenceMetaFile = "fake_ld_meta.tsv",
+    pipCutoffToSkip = 0
   )
   expect_true(filter_called)
   expect_true(mrmash_called)
@@ -457,13 +457,13 @@ test_that("pipeline returns empty list when rescale_cov_w0 yields length 0", {
           "mvsusieR not installed")
   d <- make_mv_data()
   local_mocked_bindings(
-    mrmash_wrapper = function(X, Y, ...) {
+    mrmashWrapper = function(X, Y, ...) {
       # Only a "null" component -> rescale_cov_w0 strips it, length = 0.
       list(V = diag(ncol(Y)), w0 = c(null = 1.0), w1 = matrix(1, nrow = ncol(X), ncol = 1))
     },
   )
-  result <- multivariate_analysis_pipeline(
-    X = d$X, Y = d$Y, maf = d$maf, pip_cutoff_to_skip = 0
+  result <- multivariateAnalysisPipeline(
+    X = d$X, Y = d$Y, maf = d$maf, pipCutoffToSkip = 0
   )
   expect_true(is.list(result))
   expect_equal(length(result), 0)
@@ -486,12 +486,12 @@ test_that("skip_conditions keeps columns when top_model_pip exceeds cutoff", {
   local_mocked_bindings(
     susie = function(X, Y, ...) list(pip = c(0.9, rep(0.01, ncol(X) - 1)))
   )
-  # Use tryCatch to catch the downstream mrmash_wrapper error
+  # Use tryCatch to catch the downstream mrmashWrapper error
   # The message from skip_conditions tells us both columns were kept
   expect_message(
     tryCatch(
-      suppressWarnings(multivariate_analysis_pipeline(
-        X = d$X, Y = d$Y, maf = d$maf, pip_cutoff_to_skip = 0.5
+      suppressWarnings(multivariateAnalysisPipeline(
+        X = d$X, Y = d$Y, maf = d$maf, pipCutoffToSkip = 0.5
       )),
       error = function(e) NULL
     ),
@@ -523,12 +523,12 @@ test_that("initialize_mvsusie_prior runs with provided data_driven_prior_matrice
   # group prefix "udd_1"/"udd_2" survives.
   fake_w0 <- c("udd_1_a" = 0.4, "udd_2_a" = 0.4, "null" = 0.2)
   local_mocked_bindings(
-    mrmash_wrapper = function(X, Y, ...) {
+    mrmashWrapper = function(X, Y, ...) {
       list(V = diag(ncol(Y)), w0 = fake_w0,
            w1 = matrix(0.1, nrow = ncol(X), ncol = 1))
     },
-    postprocess_finemapping_fits = function(...) list(),
-    format_finemapping_output = function(post, primary_method) list(),
+    postprocessFinemappingFits = function(...) list(),
+    formatFinemappingOutput = function(post, primaryMethod) list(),
   )
   # Mock mvsusieR::mvsusie + create_mixture_prior to avoid heavy fits
   captured_mvsusie_args <- NULL
@@ -541,13 +541,13 @@ test_that("initialize_mvsusie_prior runs with provided data_driven_prior_matrice
     .package = "mvsusieR"
   )
 
-  result <- multivariate_analysis_pipeline(
+  result <- multivariateAnalysisPipeline(
     X = d$X, Y = d$Y, maf = d$maf,
-    pip_cutoff_to_skip = 0,
-    data_driven_prior_matrices = prior_mats,
+    pipCutoffToSkip = 0,
+    dataDrivenPriorMatrices = prior_mats,
     L = 9,
-    L_greedy = 3,
-    twas_weights = FALSE
+    lGreedy = 3,
+    twasWeights = FALSE
   )
   expect_true(is.list(result))
   # initialize_mvsusie_prior path stores reweighted_mixture_prior
@@ -582,7 +582,7 @@ test_that("pipeline propagates outcome_names from mvsusie through post-processin
   fake_w0 <- c("udd_1_a" = 0.4, "udd_2_a" = 0.4, "null" = 0.2)
 
   local_mocked_bindings(
-    mrmash_wrapper = function(X, Y, ...) {
+    mrmashWrapper = function(X, Y, ...) {
       list(V = diag(ncol(Y)), w0 = fake_w0,
            w1 = matrix(0.1, nrow = ncol(X), ncol = 1))
     },
@@ -595,7 +595,7 @@ test_that("pipeline propagates outcome_names from mvsusie through post-processin
         alpha = matrix(1 / p, nrow = L, ncol = p),
         lbf_variable = matrix(0, nrow = L, ncol = p),
         V = rep(1, L),
-        sets = list(cs = NULL, requested_coverage = 0.95),
+        sets = list(cs = NULL, requestedCoverage = 0.95),
         niter = 10,
         outcome_names = cnames,
         conditional_lfsr = array(0.5, dim = c(L, p, r))
@@ -606,11 +606,11 @@ test_that("pipeline propagates outcome_names from mvsusie through post-processin
     .package = "mvsusieR"
   )
 
-  result <- multivariate_analysis_pipeline(
+  result <- multivariateAnalysisPipeline(
     X = d$X, Y = d$Y, maf = d$maf,
-    pip_cutoff_to_skip = 0,
-    data_driven_prior_matrices = prior_mats,
-    twas_weights = FALSE
+    pipCutoffToSkip = 0,
+    dataDrivenPriorMatrices = prior_mats,
+    twasWeights = FALSE
   )
   expect_true(is.list(result))
   # outcome_names should propagate as context_names

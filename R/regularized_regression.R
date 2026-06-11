@@ -2,10 +2,10 @@
 #' @return A numeric vector of the posterior mean of the coefficients.
 #' @importFrom susieR mr.ash.rss
 #' @export
-mr_ash_rss_weights <- function(stat, LD, var_y, sigma2_e, s0, w0, z = numeric(0), ...) {
+mrAshRssWeights <- function(stat, LD, varY, sigma2E, s0, w0, z = numeric(0), ...) {
   model <- mr.ash.rss(
     bhat = stat$b, shat = stat$seb, z = z, R = LD,
-    var_y = var_y, n = median(stat$n), sigma2_e = sigma2_e,
+    var_y = varY, n = median(stat$n), sigma2_e = sigma2E,
     s0 = s0, w0 = w0, ...
   )
 
@@ -23,8 +23,8 @@ mr_ash_rss_weights <- function(stat, LD, var_y, sigma2_e, s0, w0, z = numeric(0)
 #' @param a Shape parameter for the prior distribution of psi. Default is 1.
 #' @param b Scale parameter for the prior distribution of psi. Default is 0.5.
 #' @param phi Global shrinkage parameter. If NULL, it will be estimated automatically. Default is NULL.
-#' @param n_iter Number of MCMC iterations. Default is 1000.
-#' @param n_burnin Number of burn-in iterations. Default is 500.
+#' @param nIter Number of MCMC iterations. Default is 1000.
+#' @param nBurnin Number of burn-in iterations. Default is 500.
 #' @param thin Thinning factor for MCMC. Default is 5.
 #' @param maf A vector of minor allele frequencies, if available, will standardize the effect sizes by MAF. Default is NULL.
 #' @param verbose Whether to print verbose output. Default is FALSE.
@@ -74,14 +74,14 @@ mr_ash_rss_weights <- function(stat, LD, var_y, sigma2_e, s0, w0, z = numeric(0)
 #' # Run PRS CS
 #' maf <- rep(0.5, length(b.hat)) # fake MAF
 #' LD <- list(blk1 = R.hat)
-#' out <- prs_cs(b.hat, LD, n, maf = maf)
+#' out <- prsCs(b.hat, LD, n, maf = maf)
 #' # In sample prediction correlations
 #' cor(X %*% out$beta_est, y) # 0.9944553
 #' @export
-prs_cs <- function(bhat, LD, n,
-                   a = 1, b = 0.5, phi = NULL,
-                   maf = NULL, n_iter = 1000, n_burnin = 500,
-                   thin = 5, verbose = FALSE, seed = NULL) {
+prsCs <- function(bhat, LD, n,
+                  a = 1, b = 0.5, phi = NULL,
+                  maf = NULL, nIter = 1000, nBurnin = 500,
+                  thin = 5, verbose = FALSE, seed = NULL) {
   # Check input parameters
   if (missing(LD) || !is.list(LD)) {
     stop("Please provide a valid list of LD blocks using 'LD'.")
@@ -96,34 +96,35 @@ prs_cs <- function(bhat, LD, n,
   }
 
   # Check if the length of bhat matches the sum of the nrow of all elements in the LD list
-  total_rows_in_LD <- sum(sapply(LD, nrow))
-  if (length(bhat) != total_rows_in_LD) {
+  totalRowsInLd <- sum(sapply(LD, nrow))
+  if (length(bhat) != totalRowsInLd) {
     stop("The length of 'bhat' must be the same as the sum of the number of rows of all elements in the 'LD' list.")
   }
 
   # Run PRS-CS
   # cpp11 requires exact integer types for int parameters
-  result <- prs_cs_rcpp(
-    a = a, b = b, phi = phi, bhat, maf,
-    n = as.integer(n), ld_blk = LD,
-    n_iter = as.integer(n_iter), n_burnin = as.integer(n_burnin), thin = as.integer(thin),
+  result <- prsCsRcpp(
+    a = a, b = b, phi = phi, bhat = bhat, maf = maf,
+    n = as.integer(n), ldBlk = LD,
+    nIter = as.integer(nIter), nBurnin = as.integer(nBurnin), thin = as.integer(thin),
     verbose = verbose, seed = seed
   )
 
-  # Return the result as a list
+  # Return the result as a list.
+  # prsCsRcpp returns camelCase keys; rename to snake_case for the R interface.
   list(
-    beta_est = result$beta_est,
-    psi_est = result$psi_est,
-    sigma_est = result$sigma_est,
-    phi_est = result$phi_est
+    beta_est = result$betaEst,
+    psi_est = result$psiEst,
+    sigma_est = result$sigmaEst,
+    phi_est = result$phiEst
   )
 }
 
-#' Extract weights from prs_cs function
+#' Extract weights from prsCs function
 #' @return A numeric vector of the posterior SNP coefficients.
 #' @export
-prs_cs_weights <- function(stat, LD, ...) {
-  model <- prs_cs(bhat = stat$b, LD = list(blk1 = LD), n = median(stat$n), ...)
+prsCsWeights <- function(stat, LD, ...) {
+  model <- prsCs(bhat = stat$b, LD = list(blk1 = LD), n = median(stat$n), ...)
 
   return(model$beta_est)
 }
@@ -136,7 +137,7 @@ prs_cs_weights <- function(stat, LD, ...) {
 #' @param bhat A vector of marginal beta values for each SNP.
 #' @param LD A list of LD matrices, where each matrix corresponds to a subset of SNPs.
 #' @param n The total sample size of the GWAS.
-#' @param per_variant_sample_size (Optional) A vector of sample sizes for each SNP. If NULL (default), it will be initialized
+#' @param perVariantSampleSize (Optional) A vector of sample sizes for each SNP. If NULL (default), it will be initialized
 #'                    to a vector of length equal to `bhat`, with all values set to `n`.
 #' @param array (Optional) A vector of genotyping array information for each SNP. If NULL (default), it will be
 #'              initialized to a vector of 1's with length equal to `bhat`.
@@ -148,8 +149,8 @@ prs_cs_weights <- function(stat, LD, ...) {
 #' @param iter Number of iterations for MCMC. Default is 1000.
 #' @param burn Number of burn-in iterations for MCMC. Default is 200.
 #' @param thin Thinning interval for MCMC. Default is 5.
-#' @param n_threads Number of threads to use. Default is 1.
-#' @param opt_llk Which likelihood to evaluate. 1 for equation 6 (slightly shrink the correlation of SNPs)
+#' @param nThreads Number of threads to use. Default is 1.
+#' @param optLlk Which likelihood to evaluate. 1 for equation 6 (slightly shrink the correlation of SNPs)
 #'                and 2 for equation 5 (SNPs genotyped on different arrays in a separate cohort).
 #'                Default is 1.
 #' @param verbose Whether to print verbose output. Default is true.
@@ -195,16 +196,16 @@ prs_cs_weights <- function(stat, LD, ...) {
 #' LD <- list(blk1 = R.hat)
 #' out <- sdpr(b.hat, LD, n)
 #' # In sample prediction correlations
-#' cor(X %*% out$beta_est, y) #
+#' cor(X %*% out$betaEst, y) #
 #'
 #' @note This function is a wrapper for the SDPR C++ implementation, which is a rewritten and adopted version
 #'       of the SDPR package. The original SDPR documentation is available at
 #'       https://htmlpreview.github.io/?https://github.com/eldronzhou/SDPR/blob/main/doc/Manual.html
 #'
 #' @export
-sdpr <- function(bhat, LD, n, per_variant_sample_size = NULL, array = NULL, a = 0.1, c = 1.0, M = 1000,
-                 a0k = 0.5, b0k = 0.5, iter = 1000, burn = 200, thin = 5, n_threads = 1,
-                 opt_llk = 1, verbose = TRUE, seed = NULL) {
+sdpr <- function(bhat, LD, n, perVariantSampleSize = NULL, array = NULL, a = 0.1, c = 1.0, M = 1000,
+                 a0k = 0.5, b0k = 0.5, iter = 1000, burn = 200, thin = 5, nThreads = 1,
+                 optLlk = 1, verbose = TRUE, seed = NULL) {
   # Check if the sum of the rows in LD list is the same as length of bhat
   if (sum(sapply(LD, nrow)) != length(bhat)) {
     stop("The sum of the rows in LD list must be the same as the length of bhat.")
@@ -220,9 +221,9 @@ sdpr <- function(bhat, LD, n, per_variant_sample_size = NULL, array = NULL, a = 
     stop("'M' must be at least 4.")
   }
 
-  # Check if per_variant_sample_size vector contains only positive values (if provided)
-  if (!is.null(per_variant_sample_size) && any(per_variant_sample_size <= 0)) {
-    stop("The 'per_variant_sample_size' vector must contain only positive values.")
+  # Check if perVariantSampleSize vector contains only positive values (if provided)
+  if (!is.null(perVariantSampleSize) && any(perVariantSampleSize <= 0)) {
+    stop("The 'perVariantSampleSize' vector must contain only positive values.")
   }
 
   # Check if array vector contains only 0, 1, or 2 (if provided)
@@ -232,11 +233,15 @@ sdpr <- function(bhat, LD, n, per_variant_sample_size = NULL, array = NULL, a = 
 
   # cpp11 requires exact integer types for int parameters and sexp-wrapped vectors
   if (!is.null(array)) array <- as.integer(array)
-  # Call the sdpr_rcpp function
-  result <- sdpr_rcpp(
-    bhat, LD, as.integer(n), per_variant_sample_size, array, a, c, as.integer(M),
-    a0k, b0k, as.integer(iter), as.integer(burn), as.integer(thin),
-    as.integer(n_threads), as.integer(opt_llk), verbose, seed
+  # Call the sdprRcpp function
+  result <- sdprRcpp(
+    bhatR = bhat, LD = LD, n = as.integer(n),
+    perVariantSampleSize = perVariantSampleSize, array = array,
+    a = a, c = c, M = as.integer(M),
+    a0k = a0k, b0k = b0k,
+    iter = as.integer(iter), burn = as.integer(burn), thin = as.integer(thin),
+    nThreads = as.integer(nThreads), optLlk = as.integer(optLlk),
+    verbose = verbose, seed = seed
   )
 
   return(result)
@@ -245,24 +250,24 @@ sdpr <- function(bhat, LD, n, per_variant_sample_size = NULL, array = NULL, a = 
 #' Extract weights from sdpr function
 #' @return A numeric vector of the posterior SNP coefficients.
 #' @export
-sdpr_weights <- function(stat, LD, ...) {
+sdprWeights <- function(stat, LD, ...) {
   model <- sdpr(bhat = stat$b, LD = list(blk1 = LD), n = median(stat$n), ...)
 
-  return(model$beta_est)
+  return(model$betaEst)
 }
 
 # Shared helper for susie/susie_ash/susie_inf weight extraction.
 # @param fit A susie fit object (or NULL to fit from X, y).
 # @param X Genotype matrix (optional).
 # @param y Phenotype vector (optional).
-# @param required_fields Fields that must be present in the fit to extract weights.
-# @param fit_args Extra arguments passed to susieR::susie when fit is NULL.
+# @param requiredFields Fields that must be present in the fit to extract weights.
+# @param fitArgs Extra arguments passed to susieR::susie when fit is NULL.
 # @param ... Additional arguments forwarded to susieR::susie.
 #' @importFrom susieR coef.susie susie
 #' @noRd
-.susie_extract_weights <- function(fit, X, y, required_fields, fit_args = list(), retain_fit = FALSE, ...) {
+.susieExtractWeights <- function(fit, X, y, requiredFields, fitArgs = list(), retainFit = FALSE, ...) {
   if (is.null(fit)) {
-    fit <- do.call(susie, c(list(X = X, y = y), fit_args, list(...)))
+    fit <- do.call(susie, c(list(X = X, y = y), fitArgs, list(...)))
   }
   if (!is.null(X) && length(fit$pip) != ncol(X)) {
     stop(paste0(
@@ -270,13 +275,13 @@ sdpr_weights <- function(stat, LD, ...) {
       " and TWAS weights ", ncol(X), ". "
     ))
   }
-  if (all(required_fields %in% names(fit))) {
+  if (all(requiredFields %in% names(fit))) {
     fit$intercept <- 0
     weights <- coef.susie(fit)[-1]
   } else {
     weights <- rep(0, length(fit$pip))
   }
-  if (retain_fit) attr(weights, "fit") <- fit
+  if (retainFit) attr(weights, "fit") <- fit
   return(weights)
 }
 
@@ -285,17 +290,17 @@ sdpr_weights <- function(stat, LD, ...) {
 #' Extracts coefficients from an existing SuSiE fit or fits `susieR::susie()`
 #' from `X` and `y` before extracting weights.
 #'
-#' @param X Genotype matrix. Required when `susie_fit` is NULL.
-#' @param y Phenotype vector. Required when `susie_fit` is NULL.
-#' @param susie_fit Optional fitted SuSiE object.
-#' @param retain_fit If TRUE, stores the fitted object as an attribute on the returned weights.
+#' @param X Genotype matrix. Required when `susieFit` is NULL.
+#' @param y Phenotype vector. Required when `susieFit` is NULL.
+#' @param susieFit Optional fitted SuSiE object.
+#' @param retainFit If TRUE, stores the fitted object as an attribute on the returned weights.
 #' @param ... Additional arguments passed to `susieR::susie()` when fitting.
 #' @return Numeric vector of variant weights.
 #' @export
-susie_weights <- function(X = NULL, y = NULL, susie_fit = NULL, retain_fit = FALSE, ...) {
-  .susie_extract_weights(susie_fit, X, y,
-    required_fields = c("alpha", "mu", "X_column_scale_factors"),
-    retain_fit = retain_fit, ...)
+susieWeights <- function(X = NULL, y = NULL, susieFit = NULL, retainFit = FALSE, ...) {
+  .susieExtractWeights(susieFit, X, y,
+    requiredFields = c("alpha", "mu", "X_column_scale_factors"),
+    retainFit = retainFit, ...)
 }
 
 #' Compute SuSiE-ASH TWAS weights
@@ -303,18 +308,18 @@ susie_weights <- function(X = NULL, y = NULL, susie_fit = NULL, retain_fit = FAL
 #' Extracts coefficients from an existing SuSiE-ASH fit or fits `susieR::susie()`
 #' with `unmappable_effects = "ash"`.
 #'
-#' @param X Genotype matrix. Required when `susie_ash_fit` is NULL.
-#' @param y Phenotype vector. Required when `susie_ash_fit` is NULL.
-#' @param susie_ash_fit Optional fitted SuSiE-ASH object.
-#' @param retain_fit If TRUE, stores the fitted object as an attribute on the returned weights.
+#' @param X Genotype matrix. Required when `susieAshFit` is NULL.
+#' @param y Phenotype vector. Required when `susieAshFit` is NULL.
+#' @param susieAshFit Optional fitted SuSiE-ASH object.
+#' @param retainFit If TRUE, stores the fitted object as an attribute on the returned weights.
 #' @param ... Additional arguments passed to `susieR::susie()` when fitting.
 #' @return Numeric vector of variant weights.
 #' @export
-susie_ash_weights <- function(X = NULL, y = NULL, susie_ash_fit = NULL, retain_fit = FALSE, ...) {
-  .susie_extract_weights(susie_ash_fit, X, y,
-    required_fields = c("alpha", "mu", "theta", "X_column_scale_factors"),
-    fit_args = list(unmappable_effects = "ash", convergence_method = "pip"),
-    retain_fit = retain_fit, ...)
+susieAshWeights <- function(X = NULL, y = NULL, susieAshFit = NULL, retainFit = FALSE, ...) {
+  .susieExtractWeights(susieAshFit, X, y,
+    requiredFields = c("alpha", "mu", "theta", "X_column_scale_factors"),
+    fitArgs = list(unmappable_effects = "ash", convergence_method = "pip"),
+    retainFit = retainFit, ...)
 }
 
 #' Compute SuSiE-inf TWAS weights
@@ -333,18 +338,18 @@ susie_ash_weights <- function(X = NULL, y = NULL, susie_ash_fit = NULL, retain_f
 #' that interpret per-variant PIPs as a gate on whether to use the weights
 #' should be aware that low or zero PIPs do not imply zero TWAS weights here.
 #'
-#' @param X Genotype matrix. Required when `susie_inf_fit` is NULL.
-#' @param y Phenotype vector. Required when `susie_inf_fit` is NULL.
-#' @param susie_inf_fit Optional fitted SuSiE-inf object.
-#' @param retain_fit If TRUE, stores the fitted object as an attribute on the returned weights.
+#' @param X Genotype matrix. Required when `susieInfFit` is NULL.
+#' @param y Phenotype vector. Required when `susieInfFit` is NULL.
+#' @param susieInfFit Optional fitted SuSiE-inf object.
+#' @param retainFit If TRUE, stores the fitted object as an attribute on the returned weights.
 #' @param ... Additional arguments passed to `susieR::susie()` when fitting.
 #' @return Numeric vector of variant weights.
 #' @export
-susie_inf_weights <- function(X = NULL, y = NULL, susie_inf_fit = NULL, retain_fit = FALSE, ...) {
-  .susie_extract_weights(susie_inf_fit, X, y,
-    required_fields = c("alpha", "mu", "theta", "X_column_scale_factors"),
-    fit_args = list(unmappable_effects = "inf", convergence_method = "pip"),
-    retain_fit = retain_fit, ...)
+susieInfWeights <- function(X = NULL, y = NULL, susieInfFit = NULL, retainFit = FALSE, ...) {
+  .susieExtractWeights(susieInfFit, X, y,
+    requiredFields = c("alpha", "mu", "theta", "X_column_scale_factors"),
+    fitArgs = list(unmappable_effects = "inf", convergence_method = "pip"),
+    retainFit = retainFit, ...)
 }
 
 # =============================================================================
@@ -355,24 +360,24 @@ susie_inf_weights <- function(X = NULL, y = NULL, susie_inf_fit = NULL, retain_f
 # Mirrors .susie_extract_weights but uses the RSS interface.
 #' @importFrom susieR coef.susie susie_rss
 #' @noRd
-.susie_rss_extract_weights <- function(fit, z, R, n,
-                                       required_fields, fit_args = list(),
-                                       retain_fit = FALSE) {
+.susieRssExtractWeights <- function(fit, z, R, n,
+                                    requiredFields, fitArgs = list(),
+                                    retainFit = FALSE) {
   if (is.null(fit)) {
-    fit <- do.call(susie_rss, c(list(z = z, R = R, n = n), fit_args))
+    fit <- do.call(susie_rss, c(list(z = z, R = R, n = n), fitArgs))
   }
   if (length(fit$pip) != nrow(R)) {
     stop(paste0(
       "Dimension mismatch: susie_rss fit has ", length(fit$pip),
       " variants but R has ", nrow(R), " rows."))
   }
-  if (all(required_fields %in% names(fit))) {
+  if (all(requiredFields %in% names(fit))) {
     fit$intercept <- 0
     weights <- coef.susie(fit)[-1]
   } else {
     weights <- rep(0, length(fit$pip))
   }
-  if (retain_fit) attr(weights, "fit") <- fit
+  if (retainFit) attr(weights, "fit") <- fit
   return(weights)
 }
 
@@ -383,20 +388,20 @@ susie_inf_weights <- function(X = NULL, y = NULL, susie_inf_fit = NULL, retain_f
 #'
 #' @param stat List with components \code{z} (z-scores), \code{n} (sample sizes).
 #' @param LD LD correlation matrix.
-#' @param susie_rss_fit Optional pre-fitted SuSiE-RSS object.
-#' @param retain_fit If TRUE, stores the fitted object as an attribute.
-#' @param method_args Named list of additional arguments passed to
+#' @param susieRssFit Optional pre-fitted SuSiE-RSS object.
+#' @param retainFit If TRUE, stores the fitted object as an attribute.
+#' @param methodArgs Named list of additional arguments passed to
 #'   \code{susieR::susie_rss()}. Use this instead of \code{...} to avoid
 #'   partial matching of short argument names (e.g. \code{L}) to the
 #'   \code{LD} parameter.
 #' @return Numeric vector of variant weights.
 #' @export
-susie_rss_weights <- function(stat, LD, susie_rss_fit = NULL, retain_fit = TRUE,
-                              method_args = list()) {
-  .susie_rss_extract_weights(fit = susie_rss_fit, z = stat$z, R = LD, n = median(stat$n),
-    required_fields = c("alpha", "mu", "X_column_scale_factors"),
-    fit_args = method_args,
-    retain_fit = retain_fit)
+susieRssWeights <- function(stat, LD, susieRssFit = NULL, retainFit = TRUE,
+                            methodArgs = list()) {
+  .susieRssExtractWeights(fit = susieRssFit, z = stat$z, R = LD, n = median(stat$n),
+    requiredFields = c("alpha", "mu", "X_column_scale_factors"),
+    fitArgs = methodArgs,
+    retainFit = retainFit)
 }
 
 #' Compute SuSiE-inf-RSS TWAS weights
@@ -404,16 +409,16 @@ susie_rss_weights <- function(stat, LD, susie_rss_fit = NULL, retain_fit = TRUE,
 #' Extracts coefficients from an existing SuSiE-inf-RSS fit or fits
 #' \code{susieR::susie_rss()} with \code{unmappable_effects = "inf"}.
 #'
-#' @inheritParams susie_rss_weights
-#' @param susie_inf_rss_fit Optional pre-fitted SuSiE-inf-RSS object.
+#' @inheritParams susieRssWeights
+#' @param susieInfRssFit Optional pre-fitted SuSiE-inf-RSS object.
 #' @return Numeric vector of variant weights.
 #' @export
-susie_inf_rss_weights <- function(stat, LD, susie_inf_rss_fit = NULL, retain_fit = TRUE,
-                                  method_args = list()) {
-  .susie_rss_extract_weights(fit = susie_inf_rss_fit, z = stat$z, R = LD, n = median(stat$n),
-    required_fields = c("alpha", "mu", "theta", "X_column_scale_factors"),
-    fit_args = c(list(unmappable_effects = "inf", convergence_method = "pip"), method_args),
-    retain_fit = retain_fit)
+susieInfRssWeights <- function(stat, LD, susieInfRssFit = NULL, retainFit = TRUE,
+                               methodArgs = list()) {
+  .susieRssExtractWeights(fit = susieInfRssFit, z = stat$z, R = LD, n = median(stat$n),
+    requiredFields = c("alpha", "mu", "theta", "X_column_scale_factors"),
+    fitArgs = c(list(unmappable_effects = "inf", convergence_method = "pip"), methodArgs),
+    retainFit = retainFit)
 }
 
 #' Compute SuSiE-ASH-RSS TWAS weights
@@ -421,40 +426,40 @@ susie_inf_rss_weights <- function(stat, LD, susie_inf_rss_fit = NULL, retain_fit
 #' Extracts coefficients from an existing SuSiE-ASH-RSS fit or fits
 #' \code{susieR::susie_rss()} with \code{unmappable_effects = "ash"}.
 #'
-#' @inheritParams susie_rss_weights
-#' @param susie_ash_rss_fit Optional pre-fitted SuSiE-ASH-RSS object.
+#' @inheritParams susieRssWeights
+#' @param susieAshRssFit Optional pre-fitted SuSiE-ASH-RSS object.
 #' @return Numeric vector of variant weights.
 #' @export
-susie_ash_rss_weights <- function(stat, LD, susie_ash_rss_fit = NULL, retain_fit = TRUE,
-                                  method_args = list()) {
-  .susie_rss_extract_weights(fit = susie_ash_rss_fit, z = stat$z, R = LD, n = median(stat$n),
-    required_fields = c("alpha", "mu", "theta", "X_column_scale_factors"),
-    fit_args = c(list(unmappable_effects = "ash", convergence_method = "pip"), method_args),
-    retain_fit = retain_fit)
+susieAshRssWeights <- function(stat, LD, susieAshRssFit = NULL, retainFit = TRUE,
+                               methodArgs = list()) {
+  .susieRssExtractWeights(fit = susieAshRssFit, z = stat$z, R = LD, n = median(stat$n),
+    requiredFields = c("alpha", "mu", "theta", "X_column_scale_factors"),
+    fitArgs = c(list(unmappable_effects = "ash", convergence_method = "pip"), methodArgs),
+    retainFit = retainFit)
 }
 
 #' Compute mr.mash TWAS weights
 #'
 #' Extracts coefficients from an existing mr.mash fit or fits mr.mash from `X` and `Y`.
 #'
-#' @param mrmash_fit Optional fitted mr.mash object.
-#' @param X Genotype matrix. Required when `mrmash_fit` is NULL.
-#' @param Y Phenotype matrix. Required when `mrmash_fit` is NULL.
-#' @param ... Additional arguments passed to `mrmash_wrapper()` when fitting.
+#' @param mrmashFit Optional fitted mr.mash object.
+#' @param X Genotype matrix. Required when `mrmashFit` is NULL.
+#' @param Y Phenotype matrix. Required when `mrmashFit` is NULL.
+#' @param ... Additional arguments passed to `mrmashWrapper()` when fitting.
 #' @return Matrix of variant weights.
 #' @export
-mrmash_weights <- function(mrmash_fit = NULL, X = NULL, Y = NULL, ...) {
+mrmashWeights <- function(mrmashFit = NULL, X = NULL, Y = NULL, ...) {
   if (!requireNamespace("mr.mashr", quietly = TRUE)) {
     stop("Package 'mr.mashr' is required. Install with: devtools::install_github('stephenslab/mr.mashr')")
   }
-  if (is.null(mrmash_fit)) {
-    message("mrmash_fit is not provided; fitting mr.mash now ...")
+  if (is.null(mrmashFit)) {
+    message("mrmashFit is not provided; fitting mr.mash now ...")
     if (is.null(X) || is.null(Y)) {
-      stop("Both X and Y must be provided if mrmash_fit is NULL.")
+      stop("Both X and Y must be provided if mrmashFit is NULL.")
     }
-    mrmash_fit <- mrmash_wrapper(X, Y, ...)
+    mrmashFit <- mrmashWrapper(X, Y, ...)
   }
-  return(mr.mashr::coef.mr.mash(mrmash_fit)[-1, ])
+  return(mr.mashr::coef.mr.mash(mrmashFit)[-1, ])
 }
 
 #' Compute mvSuSiE TWAS weights
@@ -462,44 +467,44 @@ mrmash_weights <- function(mrmash_fit = NULL, X = NULL, Y = NULL, ...) {
 #' Extracts coefficients from an existing mvSuSiE fit or fits `mvsusieR::mvsusie()`
 #' from `X` and `Y`.
 #'
-#' @param mvsusie_fit Optional fitted mvSuSiE object.
-#' @param X Genotype matrix. Required when `mvsusie_fit` is NULL.
-#' @param Y Phenotype matrix. Required when `mvsusie_fit` is NULL.
-#' @param prior_variance Optional mvSuSiE prior variance list.
-#' @param residual_variance Optional residual variance matrix.
+#' @param mvsusieFit Optional fitted mvSuSiE object.
+#' @param X Genotype matrix. Required when `mvsusieFit` is NULL.
+#' @param Y Phenotype matrix. Required when `mvsusieFit` is NULL.
+#' @param priorVariance Optional mvSuSiE prior variance list.
+#' @param residualVariance Optional residual variance matrix.
 #' @param L Maximum number of components.
-#' @param L_greedy Initial greedy number of components.
+#' @param LGreedy Initial greedy number of components.
 #' @param verbose If TRUE, prints mvSuSiE fitting progress.
 #' @param ... Additional arguments passed to `mvsusieR::mvsusie()` when fitting.
 #' @return Matrix of variant weights.
 #' @export
-mvsusie_weights <- function(mvsusie_fit = NULL, X = NULL, Y = NULL,
-                            prior_variance = NULL, residual_variance = NULL,
-                            L = 30, L_greedy = 5, verbose = FALSE, ...) {
+mvsusieWeights <- function(mvsusieFit = NULL, X = NULL, Y = NULL,
+                           priorVariance = NULL, residualVariance = NULL,
+                           L = 30, LGreedy = 5, verbose = FALSE, ...) {
   if (!requireNamespace("mvsusieR", quietly = TRUE)) {
     stop("Package 'mvsusieR' is required. Install with: devtools::install_github('stephenslab/mvsusieR')")
   }
-  if (is.null(mvsusie_fit)) {
-    message("mvsusie_fit is not provided; fitting mvSuSiE now ...")
+  if (is.null(mvsusieFit)) {
+    message("mvsusieFit is not provided; fitting mvSuSiE now ...")
     if (is.null(X) || is.null(Y)) {
-      stop("Both X and Y must be provided if mvsusie_fit is NULL.")
+      stop("Both X and Y must be provided if mvsusieFit is NULL.")
     }
-    if (is.null(prior_variance)) prior_variance <- mvsusieR::create_mixture_prior(R = ncol(Y))
-    if (!is.null(L_greedy)) L_greedy <- min(L_greedy, L)
+    if (is.null(priorVariance)) priorVariance <- mvsusieR::create_mixture_prior(R = ncol(Y))
+    if (!is.null(LGreedy)) LGreedy <- min(LGreedy, L)
 
-    mvsusie_fit <- mvsusieR::mvsusie(
-      X = X, Y = Y, L = L, L_greedy = L_greedy, prior_variance = prior_variance,
-      residual_variance = residual_variance,
+    mvsusieFit <- mvsusieR::mvsusie(
+      X = X, Y = Y, L = L, L_greedy = LGreedy, prior_variance = priorVariance,
+      residual_variance = residualVariance,
       estimate_residual_variance = TRUE,
       verbose = verbose, ...
     )
   }
-  return(mvsusieR::coef.mvsusie(mvsusie_fit)[-1, ])
+  return(mvsusieR::coef.mvsusie(mvsusieFit)[-1, ])
 }
 
 #' Compute mr.mash-RSS TWAS weights from summary statistics
 #'
-#' Multi-context summary-statistics analog of \code{\link{mrmash_weights}}:
+#' Multi-context summary-statistics analog of \code{\link{mrmashWeights}}:
 #' extracts coefficients from an existing \code{mr.mashr::mr.mash.rss} fit,
 #' or fits one from \code{stat} (variants x conditions) and \code{LD}.
 #'
@@ -510,36 +515,36 @@ mvsusie_weights <- function(mvsusie_fit = NULL, X = NULL, Y = NULL,
 #' n.
 #'
 #' Prior construction reuses the same infrastructure as the individual-level
-#' \code{\link{mrmash_wrapper}}: \code{\link{compute_grid}} +
+#' \code{\link{mrmashWrapper}}: \code{\link{computeGrid}} +
 #' \code{mr.mashr::compute_canonical_covs()} +
 #' \code{mr.mashr::expand_covs()} for \code{S0}, and
-#' \code{\link{compute_w0}} for the mixture weights. Supply
-#' \code{data_driven_prior_matrices} (e.g. from
-#' \code{\link{compute_cov_flash}} / \code{\link{compute_cov_diag}}) to add
+#' \code{\link{computeW0}} for the mixture weights. Supply
+#' \code{dataDrivenPriorMatrices} (e.g. from
+#' \code{\link{computeCovFlash}} / \code{\link{computeCovDiag}}) to add
 #' data-driven covariance components alongside the canonical mixture.
 #'
 #' @param stat A list with \code{z} (variants x conditions matrix) and
 #'   \code{n} (per-context numeric vector or scalar). May also include
 #'   \code{Bhat}, \code{Shat} matrices.
 #' @param LD LD correlation matrix.
-#' @param mrmash_rss_fit Optional pre-fitted \code{mr.mash.rss} object;
+#' @param mrmashRssFit Optional pre-fitted \code{mr.mash.rss} object;
 #'   skips fitting when supplied.
-#' @param data_driven_prior_matrices Optional list with element \code{U}
+#' @param dataDrivenPriorMatrices Optional list with element \code{U}
 #'   (list of raw covariance matrices). Passed directly to
 #'   \code{mr.mashr::expand_covs()} alongside the canonical mixture.
-#' @param canonical_prior_matrices Logical. When TRUE (default), include
+#' @param canonicalPriorMatrices Logical. When TRUE (default), include
 #'   the standard canonical mixture from
 #'   \code{mr.mashr::compute_canonical_covs()}. When FALSE,
-#'   \code{data_driven_prior_matrices} must be supplied.
+#'   \code{dataDrivenPriorMatrices} must be supplied.
 #' @param S0 Optional pre-built list of prior covariance matrices,
 #'   bypassing the canonical / data-driven construction.
 #' @param w0 Optional prior mixture weights; defaults to
-#'   \code{\link{compute_w0}(Bhat, length(S0))}.
+#'   \code{\link{computeW0}(Bhat, length(S0))}.
 #' @param V Optional residual covariance matrix (K x K). When NULL,
 #'   defaults to the identity matrix of size K.
 #' @param covY Optional response covariance matrix (K x K). When NULL,
 #'   defaults to the identity matrix of size K.
-#' @param retain_fit If TRUE, attaches the fitted object as the
+#' @param retainFit If TRUE, attaches the fitted object as the
 #'   \code{"fit"} attribute on the returned weights.
 #' @param ... Additional arguments forwarded to
 #'   \code{mr.mashr::mr.mash.rss}.
@@ -547,57 +552,57 @@ mvsusie_weights <- function(mvsusie_fit = NULL, X = NULL, Y = NULL,
 #' @return A numeric matrix of per-variant per-context weights
 #'   (variants x conditions).
 #' @export
-mrmash_rss_weights <- function(stat, LD, mrmash_rss_fit = NULL,
-                                data_driven_prior_matrices = NULL,
-                                canonical_prior_matrices = TRUE,
-                                S0 = NULL, w0 = NULL, V = NULL, covY = NULL,
-                                retain_fit = FALSE, ...) {
+mrmashRssWeights <- function(stat, LD, mrmashRssFit = NULL,
+                             dataDrivenPriorMatrices = NULL,
+                             canonicalPriorMatrices = TRUE,
+                             S0 = NULL, w0 = NULL, V = NULL, covY = NULL,
+                             retainFit = FALSE, ...) {
   if (!requireNamespace("mr.mashr", quietly = TRUE)) {
     stop("Package 'mr.mashr' is required. ",
          "Install with: devtools::install_github('stephenslab/mr.mash.alpha')")
   }
-  if (is.null(mrmash_rss_fit)) {
+  if (is.null(mrmashRssFit)) {
     Z <- if (is.matrix(stat$z)) stat$z else as.matrix(stat$z)
     if (ncol(Z) < 2) {
-      stop("mrmash_rss_weights expects stat$z to have >= 2 columns ",
-           "(one per context). For single-context use mr_ash_rss_weights().")
+      stop("mrmashRssWeights expects stat$z to have >= 2 columns ",
+           "(one per context). For single-context use mrAshRssWeights().")
     }
     K <- ncol(Z)
-    n_vec <- if (length(stat$n) > 1) stat$n else rep(stat$n, K)
-    Bhat <- if (!is.null(stat$Bhat)) stat$Bhat else sweep(Z, 2, sqrt(n_vec), "/")
-    Shat <- if (!is.null(stat$Shat)) stat$Shat else matrix(1 / sqrt(rep(n_vec, each = nrow(Z))),
+    nVec <- if (length(stat$n) > 1) stat$n else rep(stat$n, K)
+    Bhat <- if (!is.null(stat$Bhat)) stat$Bhat else sweep(Z, 2, sqrt(nVec), "/")
+    Shat <- if (!is.null(stat$Shat)) stat$Shat else matrix(1 / sqrt(rep(nVec, each = nrow(Z))),
                                                             nrow = nrow(Z), ncol = K)
-    # Reuse the same prior-building helper as mrmash_wrapper()
+    # Reuse the same prior-building helper as mrmashWrapper()
     if (is.null(S0)) {
-      prior_built <- build_mrmash_prior_matrices(
+      priorBuilt <- buildMrmashPriorMatrices(
         Bhat = Bhat, Shat = Shat, K = K,
-        data_driven_prior_matrices = data_driven_prior_matrices,
-        canonical_prior_matrices = canonical_prior_matrices
+        dataDrivenPriorMatrices = dataDrivenPriorMatrices,
+        canonicalPriorMatrices = canonicalPriorMatrices
       )
-      S0 <- prior_built$S0
+      S0 <- priorBuilt$S0
     }
     if (is.null(w0)) {
-      w0 <- compute_w0(Bhat, length(S0))
+      w0 <- computeW0(Bhat, length(S0))
     }
     if (is.null(V))    V    <- diag(K)
     if (is.null(covY)) covY <- diag(K)
     # mr.mash.rss expects either Z or (Bhat, Shat) but not both; prefer Bhat/Shat.
     # n must be a scalar (per the mr.mash.rss contract); use the median.
-    n_scalar <- as.numeric(stats::median(n_vec))
-    mrmash_rss_fit <- mr.mashr::mr.mash.rss(
-      Bhat = Bhat, Shat = Shat, R = LD, n = n_scalar,
+    nScalar <- as.numeric(stats::median(nVec))
+    mrmashRssFit <- mr.mashr::mr.mash.rss(
+      Bhat = Bhat, Shat = Shat, R = LD, n = nScalar,
       covY = covY, V = V, S0 = S0, w0 = w0, ...
     )
   }
   # coef.mr.mash.rss returns nrow(Bhat) rows (no intercept). Do not strip.
-  weights <- mr.mashr::coef.mr.mash.rss(mrmash_rss_fit)
-  if (retain_fit) attr(weights, "fit") <- mrmash_rss_fit
+  weights <- mr.mashr::coef.mr.mash.rss(mrmashRssFit)
+  if (retainFit) attr(weights, "fit") <- mrmashRssFit
   weights
 }
 
 #' Compute mvSuSiE-RSS TWAS weights from summary statistics
 #'
-#' Multi-context summary-statistics analog of \code{\link{mvsusie_weights}}:
+#' Multi-context summary-statistics analog of \code{\link{mvsusieWeights}}:
 #' extracts coefficients from an existing \code{mvsusieR::mvsusie_rss} fit,
 #' or fits one from \code{stat$z} (variants x conditions) and \code{LD}.
 #'
@@ -608,48 +613,48 @@ mrmash_rss_weights <- function(stat, LD, mrmash_rss_fit = NULL,
 #' @param stat A list with \code{z} (matrix variants x conditions) and
 #'   \code{n} (numeric vector or scalar).
 #' @param LD LD correlation matrix.
-#' @param mvsusie_rss_fit Optional pre-fitted \code{mvsusie_rss} object.
-#' @param prior_variance Optional mvSuSiE prior variance specification.
+#' @param mvsusieRssFit Optional pre-fitted \code{mvsusie_rss} object.
+#' @param priorVariance Optional mvSuSiE prior variance specification.
 #'   When NULL, \code{mvsusieR::create_mixture_prior()} is used with
 #'   \code{R = ncol(stat$z)}.
-#' @param residual_variance Optional residual covariance matrix.
+#' @param residualVariance Optional residual covariance matrix.
 #' @param L Maximum number of single effects (default 30).
-#' @param L_greedy Initial greedy effect count (default 5).
-#' @param retain_fit If TRUE, attaches the fitted object as an attribute.
+#' @param LGreedy Initial greedy effect count (default 5).
+#' @param retainFit If TRUE, attaches the fitted object as an attribute.
 #' @param ... Additional arguments forwarded to \code{mvsusieR::mvsusie_rss}.
 #'
 #' @return A numeric matrix of per-variant per-context weights
 #'   (variants x conditions).
 #' @export
-mvsusie_rss_weights <- function(stat, LD, mvsusie_rss_fit = NULL,
-                                 prior_variance = NULL,
-                                 residual_variance = NULL,
-                                 L = 30, L_greedy = 5,
-                                 retain_fit = FALSE, ...) {
+mvsusieRssWeights <- function(stat, LD, mvsusieRssFit = NULL,
+                              priorVariance = NULL,
+                              residualVariance = NULL,
+                              L = 30, LGreedy = 5,
+                              retainFit = FALSE, ...) {
   if (!requireNamespace("mvsusieR", quietly = TRUE)) {
     stop("Package 'mvsusieR' is required. ",
          "Install with: devtools::install_github('stephenslab/mvsusieR')")
   }
-  if (is.null(mvsusie_rss_fit)) {
+  if (is.null(mvsusieRssFit)) {
     Z <- if (is.matrix(stat$z)) stat$z else as.matrix(stat$z)
     if (ncol(Z) < 2) {
-      stop("mvsusie_rss_weights expects stat$z to have >= 2 columns ",
-           "(one per context). For single-context use susie_rss_weights().")
+      stop("mvsusieRssWeights expects stat$z to have >= 2 columns ",
+           "(one per context). For single-context use susieRssWeights().")
     }
     # mvsusieR::mvsusie_rss expects N to be a single scalar
-    N_scalar <- as.numeric(stats::median(stat$n))
-    if (is.null(prior_variance)) {
-      prior_variance <- mvsusieR::create_mixture_prior(R = ncol(Z))
+    nScalar <- as.numeric(stats::median(stat$n))
+    if (is.null(priorVariance)) {
+      priorVariance <- mvsusieR::create_mixture_prior(R = ncol(Z))
     }
-    if (!is.null(L_greedy)) L_greedy <- min(L_greedy, L)
-    mvsusie_rss_fit <- mvsusieR::mvsusie_rss(
-      Z = Z, R = LD, N = N_scalar,
-      prior_variance = prior_variance,
-      residual_variance = residual_variance, ...
+    if (!is.null(LGreedy)) LGreedy <- min(LGreedy, L)
+    mvsusieRssFit <- mvsusieR::mvsusie_rss(
+      Z = Z, R = LD, N = nScalar,
+      prior_variance = priorVariance,
+      residual_variance = residualVariance, ...
     )
   }
-  weights <- mvsusieR::coef.mvsusie(mvsusie_rss_fit)[-1, , drop = FALSE]
-  if (retain_fit) attr(weights, "fit") <- mvsusie_rss_fit
+  weights <- mvsusieR::coef.mvsusie(mvsusieRssFit)[-1, , drop = FALSE]
+  if (retainFit) attr(weights, "fit") <- mvsusieRssFit
   weights
 }
 
@@ -659,7 +664,7 @@ mvsusie_rss_weights <- function(stat, LD, mvsusie_rss_fit = NULL,
 # number of standard deviations to return. This code is adapted from
 # the autoselect.mixsd function in the ashr package.
 #' @importFrom susieR univariate_regression
-init_prior_sd <- function(X, y, n = 30) {
+initPriorSd <- function(X, y, n = 30) {
   res <- univariate_regression(X, y)
   smax <- 3 * max(res$betahat)
   seq(0, smax, length.out = n)
@@ -672,13 +677,13 @@ init_prior_sd <- function(X, y, n = 30) {
 # poorly on constant columns, so wrappers should filter them out and zero-pad
 # their results back to length p.
 #' @importFrom matrixStats colSds
-.drop_zero_variance <- function(X, fn_name) {
+.dropZeroVariance <- function(X, fnName) {
   sds <- colSds(X)
   keep <- !is.na(sds) & sds != 0
   if (!all(keep)) {
     warning(sprintf(
       "%s: dropping %d zero-variance column(s) from X (indices: %s)",
-      fn_name, sum(!keep),
+      fnName, sum(!keep),
       paste(which(!keep), collapse = ", ")
     ), call. = FALSE)
   }
@@ -687,23 +692,23 @@ init_prior_sd <- function(X, y, n = 30) {
 
 #' @importFrom stats coef
 #' @export
-glmnet_weights <- function(X, y, alpha) {
+glmnetWeights <- function(X, y, alpha) {
   # Check if glmnet is installed
   if (!requireNamespace("glmnet", quietly = TRUE)) {
     stop("To use this function, please install glmnet: https://cran.r-project.org/web/packages/glmnet/index.html")
   }
   eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
-  keep <- .drop_zero_variance(X, "glmnet_weights")
+  keep <- .dropZeroVariance(X, "glmnetWeights")
   enet <- glmnet::cv.glmnet(x = X[, keep, drop = FALSE], y = y, alpha = alpha, nfold = 5, intercept = TRUE, standardize = FALSE)
   eff.wgt[keep] <- coef(enet, s = "lambda.min")[2:(sum(keep) + 1)]
   return(eff.wgt)
 }
 
 #' @export
-enet_weights <- function(X, y) glmnet_weights(X, y, 0.5)
+enetWeights <- function(X, y) glmnetWeights(X, y, 0.5)
 
 #' @export
-lasso_weights <- function(X, y) glmnet_weights(X, y, 1)
+lassoWeights <- function(X, y) glmnetWeights(X, y, 1)
 
 #' Compute Weights Using mr.ash Shrinkage
 #'
@@ -712,23 +717,23 @@ lasso_weights <- function(X, y) glmnet_weights(X, y, 1)
 #' and can accept custom initial beta values.
 #'
 #' @examples
-#' wgt.mr.ash <- mrash_weights(eqtl$X, eqtl$y_res, beta.init = lasso_weights(X, y))
+#' wgt.mr.ash <- mrashWeights(eqtl$X, eqtl$y_res, beta.init = lassoWeights(X, y))
 #' @importFrom susieR mr.ash
 #' @importFrom stats predict
 #' @export
-mrash_weights <- function(X, y, init_prior_sd = TRUE, retain_fit = FALSE, ...) {
+mrashWeights <- function(X, y, initPriorSd = TRUE, retainFit = FALSE, ...) {
   eff.wgt <- rep(0, ncol(X))
-  keep <- .drop_zero_variance(X, "mrash_weights")
-  X_keep <- X[, keep, drop = FALSE]
-  args_list <- list(...)
-  if (!"beta.init" %in% names(args_list)) {
-    args_list$beta.init <- lasso_weights(X_keep, y)
-  } else if (length(args_list$beta.init) == ncol(X)) {
-    args_list$beta.init <- args_list$beta.init[keep]
+  keep <- .dropZeroVariance(X, "mrashWeights")
+  XKeep <- X[, keep, drop = FALSE]
+  argsList <- list(...)
+  if (!"beta.init" %in% names(argsList)) {
+    argsList$beta.init <- lassoWeights(XKeep, y)
+  } else if (length(argsList$beta.init) == ncol(X)) {
+    argsList$beta.init <- argsList$beta.init[keep]
   }
-  fit.mr.ash <- do.call(mr.ash, c(list(X = X_keep, y = y, sa2 = if (init_prior_sd) init_prior_sd(X_keep, y)^2 else NULL), args_list))
+  fit.mr.ash <- do.call(mr.ash, c(list(X = XKeep, y = y, sa2 = if (initPriorSd) initPriorSd(XKeep, y)^2 else NULL), argsList))
   eff.wgt[keep] <- predict(fit.mr.ash, type = "coefficients")[-1]
-  if (retain_fit) attr(eff.wgt, "fit") <- fit.mr.ash
+  if (retainFit) attr(eff.wgt, "fit") <- fit.mr.ash
   return(eff.wgt)
 }
 #' Extract Coefficients From Bayesian Linear Regression
@@ -753,10 +758,10 @@ mrash_weights <- function(X, y, init_prior_sd = TRUE, retain_fit = FALSE, ...) {
 #' g <- rowSums(X[, c(set1, set2)])
 #' e <- rnorm(nrow(X), mean = 0, sd = 1)
 #' y <- g + e
-#' bayes_l_weights(y = y, X = X, Z = Z)
-#' bayes_r_weights(y = y, X = X, Z = Z)
+#' bayesLWeights(y = y, X = X, Z = Z)
+#' bayesRWeights(y = y, X = X, Z = Z)
 #' @export
-bayes_alphabet_weights <- function(X, y, method, Z = NULL, h2 = NULL, nit = 5000, nburn = 1000, nthin = 5, ...) {
+bayesAlphabetWeights <- function(X, y, method, Z = NULL, h2 = NULL, nit = 5000, nburn = 1000, nthin = 5, ...) {
   # Make sure qgg is installed
   if (!requireNamespace("qgg", quietly = TRUE)) {
     stop("To use this function, please install qgg: https://cran.r-project.org/web/packages/qgg/index.html")
@@ -773,7 +778,7 @@ bayes_alphabet_weights <- function(X, y, method, Z = NULL, h2 = NULL, nit = 5000
   }
 
   eff.wgt <- rep(0, ncol(X))
-  keep <- .drop_zero_variance(X, "bayes_alphabet_weights")
+  keep <- .dropZeroVariance(X, "bayesAlphabetWeights")
 
   model <- qgg::gbayes(
     y = y,
@@ -791,29 +796,29 @@ bayes_alphabet_weights <- function(X, y, method, Z = NULL, h2 = NULL, nit = 5000
 }
 #' Use Gaussian distribution as prior. Posterior means will be BLUP, equivalent to Ridge Regression.
 #' @export
-bayes_n_weights <- function(X, y, Z = NULL, ...) {
-  return(bayes_alphabet_weights(X, y, method = "bayesN", Z, ...))
+bayesNWeights <- function(X, y, Z = NULL, ...) {
+  return(bayesAlphabetWeights(X, y, method = "bayesN", Z, ...))
 }
 #' Use laplace/double exponential distribution as prior. This is equivalent to Bayesian LASSO.
 #' @export
-bayes_l_weights <- function(X, y, Z = NULL, ...) {
-  return(bayes_alphabet_weights(X, y, method = "bayesL", Z, ...))
+bayesLWeights <- function(X, y, Z = NULL, ...) {
+  return(bayesAlphabetWeights(X, y, method = "bayesL", Z, ...))
 }
 #' Use t-distribution as prior.
 #' @export
-bayes_a_weights <- function(X, y, Z = NULL, ...) {
-  return(bayes_alphabet_weights(X, y, method = "bayesA", Z, ...))
+bayesAWeights <- function(X, y, Z = NULL, ...) {
+  return(bayesAlphabetWeights(X, y, method = "bayesA", Z, ...))
 }
 #' Use a rounded spike prior (low-variance Gaussian).
 #' @export
-bayes_c_weights <- function(X, y, Z = NULL, pi = 0.1, ...) {
-  return(bayes_alphabet_weights(X, y, method = "bayesC", Z, pi = pi, ...))
+bayesCWeights <- function(X, y, Z = NULL, pi = 0.1, ...) {
+  return(bayesAlphabetWeights(X, y, method = "bayesC", Z, pi = pi, ...))
 }
 #' Use a hierarchical Bayesian mixture model with four Gaussian components. Variances are scaled
 #' by 0, 0.0001 , 0.001 , and 0.01 .
 #' @export
-bayes_r_weights <- function(X, y, Z = NULL, ...) {
-  return(bayes_alphabet_weights(X, y, method = "bayesR", Z, ...))
+bayesRWeights <- function(X, y, Z = NULL, ...) {
+  return(bayesAlphabetWeights(X, y, method = "bayesR", Z, ...))
 }
 
 
@@ -1144,43 +1149,44 @@ bayes_r_weights <- function(X, y, Z = NULL, ...) {
 #'   R[i + 1, i] <- 0.3
 #' }
 #' LD <- list(blk1 = R)
-#' out <- lassosum_rss(bhat, LD, n)
+#' out <- lassosumRss(bhat, LD, n)
 #' @export
-lassosum_rss <- function(bhat, LD, n,
-                         lambda = exp(seq(log(0.0001), log(0.1), length.out = 20)),
-                         thr = 1e-4, maxiter = 10000) {
+lassosumRss <- function(bhat, LD, n,
+                        lambda = exp(seq(log(0.0001), log(0.1), length.out = 20)),
+                        thr = 1e-4, maxiter = 10000) {
   if (!is.list(LD)) {
     stop("Please provide a valid list of LD blocks using 'LD'.")
   }
   if (missing(n) || n <= 0) {
     stop("Please provide a valid sample size using 'n'.")
   }
-  total_rows_in_LD <- sum(sapply(LD, nrow))
-  if (length(bhat) != total_rows_in_LD) {
+  totalRowsInLd <- sum(sapply(LD, nrow))
+  if (length(bhat) != totalRowsInLd) {
     stop("The length of 'bhat' must be the same as the sum of the number of rows of all elements in the 'LD' list.")
   }
 
   z <- bhat / sqrt(n)
   order <- order(lambda, decreasing = TRUE)
   # cpp11 requires exact integer types for int parameters
-  result <- lassosum_rss_rcpp(z, LD, lambda[order], thr, as.integer(maxiter))
+  result <- lassosumRssRcpp(zR = z, LD = LD, lambdaR = lambda[order],
+                            thr = thr, maxiter = as.integer(maxiter))
 
   # Reorder back to original lambda order.
   # Must use inverse permutation to unsort: if order[i]=j, then
   # the result at position j in the sorted output goes to position i.
-  inv_order <- order(order)
-  result$beta  <- result$beta[, inv_order, drop = FALSE]
-  result$conv  <- result$conv[inv_order]
-  result$loss  <- result$loss[inv_order]
-  result$fbeta <- result$fbeta[inv_order]
+  invOrder <- order(order)
+  result$beta  <- result$beta[, invOrder, drop = FALSE]
+  result$conv  <- result$conv[invOrder]
+  result$loss  <- result$loss[invOrder]
+  result$fbeta <- result$fbeta[invOrder]
   result$lambda <- lambda
   result$nparams <- as.integer(colSums(result$beta != 0))
   result$beta_est <- as.numeric(result$beta[, which.min(result$fbeta)])
   result
 }
 
-.lassosum_cor_from_stat <- function(stat, n, p) {
-  cor_input <- if (!is.null(stat$cor)) {
+.lassosumCorFromStat <- function(stat, n, p) {
+  corInput <- if (!is.null(stat$cor)) {
     as.numeric(stat$cor)
   } else if (!is.null(stat$z)) {
     as.numeric(stat$z) / sqrt(n)
@@ -1189,59 +1195,59 @@ lassosum_rss <- function(bhat, LD, n,
   } else {
     stop("stat must contain one of 'cor', 'z', or 'b' for lassosum selection.")
   }
-  if (length(cor_input) != p) {
-    stop("The length of lassosum input statistics (", length(cor_input),
+  if (length(corInput) != p) {
+    stop("The length of lassosum input statistics (", length(corInput),
          ") must equal nrow(LD) (", p, ").")
   }
-  cor_input
+  corInput
 }
 
-.lassosum_clamp_cor <- function(cor_input) {
-  max_abs_cor <- max(abs(cor_input), na.rm = TRUE)
-  if (is.finite(max_abs_cor) && max_abs_cor >= 1) {
-    cor_input <- cor_input / (max_abs_cor / 0.9999)
+.lassosumClampCor <- function(corInput) {
+  maxAbsCor <- max(abs(corInput), na.rm = TRUE)
+  if (is.finite(maxAbsCor) && maxAbsCor >= 1) {
+    corInput <- corInput / (maxAbsCor / 0.9999)
   }
-  cor_input
+  corInput
 }
 
-.lassosum_first_max <- function(x) {
+.lassosumFirstMax <- function(x) {
   which(x == max(x, na.rm = TRUE))[1]
 }
 
-.lassosum_select_min_fbeta <- function(candidate_beta, candidate_meta) {
-  idx <- which.min(candidate_meta$fbeta)
+.lassosumSelectMinFbeta <- function(candidateBeta, candidateMeta) {
+  idx <- which.min(candidateMeta$fbeta)
   list(
-    beta = candidate_beta[, idx],
+    beta = candidateBeta[, idx],
     index = idx,
     mode = "min_fbeta"
   )
 }
 
-.lassosum_select_ld_quadratic <- function(candidate_beta, cor_input, LD) {
-  ld_beta <- LD %*% candidate_beta
-  bxy <- as.numeric(crossprod(cor_input, candidate_beta))
-  bxxb <- colSums(candidate_beta * ld_beta)
+.lassosumSelectLdQuadratic <- function(candidateBeta, corInput, LD) {
+  ldBeta <- LD %*% candidateBeta
+  bxy <- as.numeric(crossprod(corInput, candidateBeta))
+  bxxb <- colSums(candidateBeta * ldBeta)
   scores <- rep(-Inf, length(bxy))
   positive <- is.finite(bxxb) & bxxb > 0
   scores[positive] <- bxy[positive] / sqrt(bxxb[positive])
-  idx <- .lassosum_first_max(scores)
+  idx <- .lassosumFirstMax(scores)
   list(
-    beta = candidate_beta[, idx],
+    beta = candidateBeta[, idx],
     index = idx,
     mode = "ld_quadratic"
   )
 }
 
-#' Extract weights from lassosum_rss with shrinkage grid search
+#' Extract weights from lassosumRss with shrinkage grid search
 #'
 #' Searches over a grid of shrinkage parameters \code{s} (default:
 #' \code{c(0.2, 0.5, 0.9, 1.0)}, matching the original lassosum and OTTERS).
 #' For each \code{s}, the LD matrix is shrunk as \code{(1-s)*R + s*I}, then
-#' \code{lassosum_rss()} is called across the lambda path. Candidate selection
+#' \code{lassosumRss()} is called across the lambda path. Candidate selection
 #' defaults to the LD-only quadratic pseudovalidation score
 #' \deqn{\frac{c^T \beta}{\sqrt{\beta^T R \beta}}}
 #' evaluated on the supplied LD matrix \code{R}. This uses the same candidate
-#' beta path as \code{lassosum_rss()}, but scores each candidate directly from
+#' beta path as \code{lassosumRss()}, but scores each candidate directly from
 #' summary-statistics correlation \code{c} and LD, without requiring genotype.
 #'
 #' @details
@@ -1259,60 +1265,60 @@ lassosum_rss <- function(bhat, LD, n,
 #' @param selection Selection strategy. Default \code{"ld_quadratic"} uses
 #'   \eqn{c^T \beta / \sqrt{\beta^T R \beta}} on the supplied LD matrix.
 #'   \code{"min_fbeta"} is retained as an explicit alternative for debugging.
-#' @param ... Additional arguments passed to \code{lassosum_rss()}.
+#' @param ... Additional arguments passed to \code{lassosumRss()}.
 #'
 #' @return A numeric vector of the posterior SNP coefficients at the best (s, lambda).
 #' @export
-lassosum_rss_weights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
-                                 selection = c("ld_quadratic", "min_fbeta"),
-                                 ...) {
+lassosumRssWeights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
+                               selection = c("ld_quadratic", "min_fbeta"),
+                               ...) {
   selection <- match.arg(selection)
   n <- median(stat$n)
   p <- nrow(LD)
-  cor_input <- .lassosum_clamp_cor(.lassosum_cor_from_stat(stat, n = n, p = p))
-  solver_input <- cor_input * sqrt(n)
-  candidate_beta <- NULL
-  candidate_meta <- list()
+  corInput <- .lassosumClampCor(.lassosumCorFromStat(stat, n = n, p = p))
+  solverInput <- corInput * sqrt(n)
+  candidateBeta <- NULL
+  candidateMeta <- list()
 
-  for (s_val in s) {
-    LD_s <- (1 - s_val) * LD + s_val * diag(p)
-    model <- lassosum_rss(bhat = solver_input, LD = list(blk1 = LD_s), n = n, ...)
-    candidate_beta <- cbind(candidate_beta, model$beta)
-    candidate_meta[[length(candidate_meta) + 1L]] <- data.frame(
-      s = rep(s_val, length(model$lambda)),
+  for (sVal in s) {
+    LDs <- (1 - sVal) * LD + sVal * diag(p)
+    model <- lassosumRss(bhat = solverInput, LD = list(blk1 = LDs), n = n, ...)
+    candidateBeta <- cbind(candidateBeta, model$beta)
+    candidateMeta[[length(candidateMeta) + 1L]] <- data.frame(
+      s = rep(sVal, length(model$lambda)),
       lambda = model$lambda,
       fbeta = model$fbeta,
       stringsAsFactors = FALSE
     )
   }
-  candidate_meta <- do.call(rbind, candidate_meta)
+  candidateMeta <- do.call(rbind, candidateMeta)
 
-  selector_result <- if (selection == "ld_quadratic") {
-    .lassosum_select_ld_quadratic(candidate_beta, cor_input, LD)
+  selectorResult <- if (selection == "ld_quadratic") {
+    .lassosumSelectLdQuadratic(candidateBeta, corInput, LD)
   } else {
-    .lassosum_select_min_fbeta(candidate_beta, candidate_meta)
+    .lassosumSelectMinFbeta(candidateBeta, candidateMeta)
   }
 
-  best_beta <- as.numeric(selector_result$beta)
-  attr(best_beta, "lassosum_selection") <- c(
-    mode = selector_result$mode,
-    index = selector_result$index,
-    s = candidate_meta$s[selector_result$index],
-    lambda = candidate_meta$lambda[selector_result$index]
+  bestBeta <- as.numeric(selectorResult$beta)
+  attr(bestBeta, "lassosum_selection") <- c(
+    mode = selectorResult$mode,
+    index = selectorResult$index,
+    s = candidateMeta$s[selectorResult$index],
+    lambda = candidateMeta$lambda[selectorResult$index]
   )
-  best_beta
+  bestBeta
 }
 
 #' Penalized Regression on RSS (Summary Statistics) Objective
 #'
-#' Generalizes \code{lassosum_rss()} to support LASSO, MCP, SCAD, L0, L0L1,
+#' Generalizes \code{lassosumRss()} to support LASSO, MCP, SCAD, L0, L0L1,
 #' and L0L2 penalties.  Uses coordinate descent on the objective
 #' \deqn{\beta^T R \beta - 2 \beta^T z + \mathrm{penalty}(\beta)}
 #' where \eqn{R} is a (possibly pre-shrunk) LD matrix and \eqn{z = \hat\beta / \sqrt{n}}.
 #'
 #' @param bhat Numeric vector of marginal effect estimates (length p).
 #' @param LD A list of LD correlation matrices (one per block), as in
-#'   \code{lassosum_rss()}.
+#'   \code{lassosumRss()}.
 #' @param n GWAS sample size (positive scalar).
 #' @param penalty Penalty type: \code{"lasso"}, \code{"MCP"}, \code{"SCAD"},
 #'   \code{"L0"}, \code{"L0L1"}, or \code{"L0L2"}.
@@ -1350,20 +1356,20 @@ lassosum_rss_weights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
 #' bhat <- rnorm(p, sd = 0.1)
 #' R <- diag(p)
 #' # MCP
-#' penalized_rss(bhat, list(blk1 = R), n, penalty = "MCP")
+#' penalizedRss(bhat, list(blk1 = R), n, penalty = "MCP")
 #' # SCAD
-#' penalized_rss(bhat, list(blk1 = R), n, penalty = "SCAD")
+#' penalizedRss(bhat, list(blk1 = R), n, penalty = "SCAD")
 #' # L0
-#' penalized_rss(bhat, list(blk1 = R), n, penalty = "L0", lambda0 = 0.01,
+#' penalizedRss(bhat, list(blk1 = R), n, penalty = "L0", lambda0 = 0.01,
 #'               lambda = c(0))
 #' }
 #' @export
-penalized_rss <- function(bhat, LD, n,
-                          penalty = c("lasso", "MCP", "SCAD", "L0", "L0L1", "L0L2"),
-                          lambda = exp(seq(log(0.0001), log(0.1), length.out = 20)),
-                          gamma = NULL, alpha = 1.0,
-                          lambda0 = 0, lambda2 = 0,
-                          thr = 1e-4, maxiter = 10000, max_swaps = 100) {
+penalizedRss <- function(bhat, LD, n,
+                         penalty = c("lasso", "MCP", "SCAD", "L0", "L0L1", "L0L2"),
+                         lambda = exp(seq(log(0.0001), log(0.1), length.out = 20)),
+                         gamma = NULL, alpha = 1.0,
+                         lambda0 = 0, lambda2 = 0,
+                         thr = 1e-4, maxiter = 10000, maxSwaps = 100) {
   penalty <- match.arg(penalty)
   if (!is.list(LD)) {
     stop("Please provide a valid list of LD blocks using 'LD'.")
@@ -1371,8 +1377,8 @@ penalized_rss <- function(bhat, LD, n,
   if (missing(n) || n <= 0) {
     stop("Please provide a valid sample size using 'n'.")
   }
-  total_rows_in_LD <- sum(sapply(LD, nrow))
-  if (length(bhat) != total_rows_in_LD) {
+  totalRowsInLd <- sum(sapply(LD, nrow))
+  if (length(bhat) != totalRowsInLd) {
     stop("The length of 'bhat' must be the same as the sum of the number of rows of all elements in the 'LD' list.")
   }
 
@@ -1387,16 +1393,19 @@ penalized_rss <- function(bhat, LD, n,
   z <- bhat / sqrt(n)
   order <- order(lambda, decreasing = TRUE)
 
-  result <- penalized_rss_rcpp(z, LD, lambda[order], penalty,
-                               gamma, alpha, lambda0, lambda2,
-                               thr, as.integer(maxiter), as.integer(max_swaps))
+  result <- penalizedRssRcpp(zR = z, LD = LD, lambdaR = lambda[order],
+                             penaltyStr = penalty,
+                             gamma = gamma, alpha = alpha,
+                             lambda0 = lambda0, lambda2 = lambda2,
+                             thr = thr, maxiter = as.integer(maxiter),
+                             maxSwaps = as.integer(maxSwaps))
 
   # Reorder back to original lambda order
-  inv_order <- order(order)
-  result$beta   <- result$beta[, inv_order, drop = FALSE]
-  result$conv   <- result$conv[inv_order]
-  result$loss   <- result$loss[inv_order]
-  result$fbeta  <- result$fbeta[inv_order]
+  invOrder <- order(order)
+  result$beta   <- result$beta[, invOrder, drop = FALSE]
+  result$conv   <- result$conv[invOrder]
+  result$loss   <- result$loss[invOrder]
+  result$fbeta  <- result$fbeta[invOrder]
   result$lambda <- lambda
   result$nparams <- as.integer(colSums(result$beta != 0))
   result$beta_est <- as.numeric(result$beta[, which.min(result$fbeta)])
@@ -1405,8 +1414,8 @@ penalized_rss <- function(bhat, LD, n,
 
 #' RSS Weights Helper for Penalized Methods
 #'
-#' Shared implementation for \code{scad_rss_weights()}, \code{mcp_rss_weights()},
-#' and \code{l0learn_rss_weights()}.  Searches over a shrinkage grid \code{s}
+#' Shared implementation for \code{scadRssWeights()}, \code{mcpRssWeights()},
+#' and \code{l0learnRssWeights()}.  Searches over a shrinkage grid \code{s}
 #' (LD matrix shrinkage \code{(1-s)R + sI}) and selects the best candidate via
 #' LD-quadratic pseudovalidation or minimum penalized objective.
 #'
@@ -1414,50 +1423,50 @@ penalized_rss <- function(bhat, LD, n,
 #'   See the public wrappers for details.
 #' @return Numeric weight vector of length \code{nrow(LD)}.
 #' @keywords internal
-.penalized_rss_weights <- function(stat, LD, penalty,
-                                   s = c(0.2, 0.5, 0.9, 1.0),
-                                   gamma = NULL, alpha = 1.0,
-                                   lambda0 = 0, lambda2 = 0,
-                                   selection = c("ld_quadratic", "min_fbeta"),
-                                   ...) {
+.penalizedRssWeights <- function(stat, LD, penalty,
+                                 s = c(0.2, 0.5, 0.9, 1.0),
+                                 gamma = NULL, alpha = 1.0,
+                                 lambda0 = 0, lambda2 = 0,
+                                 selection = c("ld_quadratic", "min_fbeta"),
+                                 ...) {
   selection <- match.arg(selection)
   n <- median(stat$n)
   p <- nrow(LD)
-  cor_input <- .lassosum_clamp_cor(.lassosum_cor_from_stat(stat, n = n, p = p))
-  solver_input <- cor_input * sqrt(n)
-  candidate_beta <- NULL
-  candidate_meta <- list()
+  corInput <- .lassosumClampCor(.lassosumCorFromStat(stat, n = n, p = p))
+  solverInput <- corInput * sqrt(n)
+  candidateBeta <- NULL
+  candidateMeta <- list()
 
-  for (s_val in s) {
-    LD_s <- (1 - s_val) * LD + s_val * diag(p)
-    model <- penalized_rss(bhat = solver_input, LD = list(blk1 = LD_s), n = n,
-                           penalty = penalty, gamma = gamma, alpha = alpha,
-                           lambda0 = lambda0, lambda2 = lambda2, ...)
-    candidate_beta <- cbind(candidate_beta, model$beta)
-    candidate_meta[[length(candidate_meta) + 1L]] <- data.frame(
-      s = rep(s_val, length(model$lambda)),
+  for (sVal in s) {
+    LDs <- (1 - sVal) * LD + sVal * diag(p)
+    model <- penalizedRss(bhat = solverInput, LD = list(blk1 = LDs), n = n,
+                          penalty = penalty, gamma = gamma, alpha = alpha,
+                          lambda0 = lambda0, lambda2 = lambda2, ...)
+    candidateBeta <- cbind(candidateBeta, model$beta)
+    candidateMeta[[length(candidateMeta) + 1L]] <- data.frame(
+      s = rep(sVal, length(model$lambda)),
       lambda = model$lambda,
       fbeta = model$fbeta,
       stringsAsFactors = FALSE
     )
   }
-  candidate_meta <- do.call(rbind, candidate_meta)
+  candidateMeta <- do.call(rbind, candidateMeta)
 
-  selector_result <- if (selection == "ld_quadratic") {
-    .lassosum_select_ld_quadratic(candidate_beta, cor_input, LD)
+  selectorResult <- if (selection == "ld_quadratic") {
+    .lassosumSelectLdQuadratic(candidateBeta, corInput, LD)
   } else {
-    .lassosum_select_min_fbeta(candidate_beta, candidate_meta)
+    .lassosumSelectMinFbeta(candidateBeta, candidateMeta)
   }
 
-  best_beta <- as.numeric(selector_result$beta)
-  attr(best_beta, "penalized_rss_selection") <- c(
-    mode = selector_result$mode,
-    index = selector_result$index,
+  bestBeta <- as.numeric(selectorResult$beta)
+  attr(bestBeta, "penalized_rss_selection") <- c(
+    mode = selectorResult$mode,
+    index = selectorResult$index,
     penalty = penalty,
-    s = candidate_meta$s[selector_result$index],
-    lambda = candidate_meta$lambda[selector_result$index]
+    s = candidateMeta$s[selectorResult$index],
+    lambda = candidateMeta$lambda[selectorResult$index]
   )
-  best_beta
+  bestBeta
 }
 
 #' Compute SCAD-Penalized Weights from Summary Statistics
@@ -1474,15 +1483,15 @@ penalized_rss <- function(bhat, LD, n,
 #' @param alpha Elastic-net mixing (1 = pure L1).  Default 1.
 #' @param selection Selection strategy: \code{"ld_quadratic"} (default) or
 #'   \code{"min_fbeta"}.
-#' @param ... Additional arguments passed to \code{penalized_rss()}.
+#' @param ... Additional arguments passed to \code{penalizedRss()}.
 #' @return A numeric vector of SNP coefficient weights.
 #' @export
-scad_rss_weights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
-                             gamma = 3.7, alpha = 1.0,
-                             selection = c("ld_quadratic", "min_fbeta"), ...) {
-  .penalized_rss_weights(stat = stat, LD = LD, penalty = "SCAD",
-                         s = s, gamma = gamma, alpha = alpha,
-                         selection = selection, ...)
+scadRssWeights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
+                           gamma = 3.7, alpha = 1.0,
+                           selection = c("ld_quadratic", "min_fbeta"), ...) {
+  .penalizedRssWeights(stat = stat, LD = LD, penalty = "SCAD",
+                       s = s, gamma = gamma, alpha = alpha,
+                       selection = selection, ...)
 }
 
 #' Compute MCP-Penalized Weights from Summary Statistics
@@ -1499,15 +1508,15 @@ scad_rss_weights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
 #' @param alpha Elastic-net mixing (1 = pure L1).  Default 1.
 #' @param selection Selection strategy: \code{"ld_quadratic"} (default) or
 #'   \code{"min_fbeta"}.
-#' @param ... Additional arguments passed to \code{penalized_rss()}.
+#' @param ... Additional arguments passed to \code{penalizedRss()}.
 #' @return A numeric vector of SNP coefficient weights.
 #' @export
-mcp_rss_weights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
-                            gamma = 3.0, alpha = 1.0,
-                            selection = c("ld_quadratic", "min_fbeta"), ...) {
-  .penalized_rss_weights(stat = stat, LD = LD, penalty = "MCP",
-                         s = s, gamma = gamma, alpha = alpha,
-                         selection = selection, ...)
+mcpRssWeights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
+                          gamma = 3.0, alpha = 1.0,
+                          selection = c("ld_quadratic", "min_fbeta"), ...) {
+  .penalizedRssWeights(stat = stat, LD = LD, penalty = "MCP",
+                       s = s, gamma = gamma, alpha = alpha,
+                       selection = selection, ...)
 }
 
 #' Compute L0-Penalized Weights from Summary Statistics
@@ -1533,17 +1542,17 @@ mcp_rss_weights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
 #' @param lambda2 L2 penalty weight (for L0L2).  Default 0.
 #' @param selection Selection strategy: \code{"ld_quadratic"} (default) or
 #'   \code{"min_fbeta"}.
-#' @param max_swaps Maximum swap rounds per lambda.  Default 100.
-#' @param ... Additional arguments passed to \code{penalized_rss()}.
+#' @param maxSwaps Maximum swap rounds per lambda.  Default 100.
+#' @param ... Additional arguments passed to \code{penalizedRss()}.
 #' @return A numeric vector of SNP coefficient weights.
 #' @export
-l0learn_rss_weights <- function(stat, LD,
-                                penalty = c("L0", "L0L1", "L0L2"),
-                                s = c(0.2, 0.5, 0.9, 1.0),
-                                lambda0 = exp(seq(log(0.001), log(1), length.out = 10)),
-                                lambda = NULL, lambda2 = 0,
-                                selection = c("ld_quadratic", "min_fbeta"),
-                                max_swaps = 100, ...) {
+l0learnRssWeights <- function(stat, LD,
+                              penalty = c("L0", "L0L1", "L0L2"),
+                              s = c(0.2, 0.5, 0.9, 1.0),
+                              lambda0 = exp(seq(log(0.001), log(1), length.out = 10)),
+                              lambda = NULL, lambda2 = 0,
+                              selection = c("ld_quadratic", "min_fbeta"),
+                              maxSwaps = 100, ...) {
   penalty <- match.arg(penalty)
   selection <- match.arg(selection)
 
@@ -1558,54 +1567,54 @@ l0learn_rss_weights <- function(stat, LD,
 
   n <- median(stat$n)
   p <- nrow(LD)
-  cor_input <- .lassosum_clamp_cor(.lassosum_cor_from_stat(stat, n = n, p = p))
-  solver_input <- cor_input * sqrt(n)
-  candidate_beta <- NULL
-  candidate_meta <- list()
+  corInput <- .lassosumClampCor(.lassosumCorFromStat(stat, n = n, p = p))
+  solverInput <- corInput * sqrt(n)
+  candidateBeta <- NULL
+  candidateMeta <- list()
 
   # Grid search over s and lambda0
-  for (s_val in s) {
-    LD_s <- (1 - s_val) * LD + s_val * diag(p)
-    for (l0_val in lambda0) {
-      model <- penalized_rss(bhat = solver_input, LD = list(blk1 = LD_s), n = n,
-                             penalty = penalty, lambda = lambda,
-                             lambda0 = l0_val, lambda2 = lambda2,
-                             max_swaps = max_swaps, ...)
-      candidate_beta <- cbind(candidate_beta, model$beta)
-      candidate_meta[[length(candidate_meta) + 1L]] <- data.frame(
-        s = rep(s_val, length(model$lambda)),
-        lambda0 = rep(l0_val, length(model$lambda)),
+  for (sVal in s) {
+    LDs <- (1 - sVal) * LD + sVal * diag(p)
+    for (l0Val in lambda0) {
+      model <- penalizedRss(bhat = solverInput, LD = list(blk1 = LDs), n = n,
+                            penalty = penalty, lambda = lambda,
+                            lambda0 = l0Val, lambda2 = lambda2,
+                            maxSwaps = maxSwaps, ...)
+      candidateBeta <- cbind(candidateBeta, model$beta)
+      candidateMeta[[length(candidateMeta) + 1L]] <- data.frame(
+        s = rep(sVal, length(model$lambda)),
+        lambda0 = rep(l0Val, length(model$lambda)),
         lambda = model$lambda,
         fbeta = model$fbeta,
         stringsAsFactors = FALSE
       )
     }
   }
-  candidate_meta <- do.call(rbind, candidate_meta)
+  candidateMeta <- do.call(rbind, candidateMeta)
 
-  selector_result <- if (selection == "ld_quadratic") {
-    .lassosum_select_ld_quadratic(candidate_beta, cor_input, LD)
+  selectorResult <- if (selection == "ld_quadratic") {
+    .lassosumSelectLdQuadratic(candidateBeta, corInput, LD)
   } else {
-    .lassosum_select_min_fbeta(candidate_beta, candidate_meta)
+    .lassosumSelectMinFbeta(candidateBeta, candidateMeta)
   }
 
-  best_beta <- as.numeric(selector_result$beta)
-  attr(best_beta, "penalized_rss_selection") <- c(
-    mode = selector_result$mode,
-    index = selector_result$index,
+  bestBeta <- as.numeric(selectorResult$beta)
+  attr(bestBeta, "penalized_rss_selection") <- c(
+    mode = selectorResult$mode,
+    index = selectorResult$index,
     penalty = penalty,
-    s = candidate_meta$s[selector_result$index],
-    lambda0 = candidate_meta$lambda0[selector_result$index],
-    lambda = candidate_meta$lambda[selector_result$index]
+    s = candidateMeta$s[selectorResult$index],
+    lambda0 = candidateMeta$lambda0[selectorResult$index],
+    lambda = candidateMeta$lambda[selectorResult$index]
   )
-  best_beta
+  bestBeta
 }
 
 #' Compute Weights Using ncvreg with SCAD or MCP Penalty
 #'
 #' Internal helper that fits an `ncvreg` model with the specified non-convex
 #' penalty using k-fold cross-validation, then returns the coefficients at
-#' `lambda.min`. Following the convention of `glmnet_weights`, columns of `X`
+#' `lambda.min`. Following the convention of `glmnetWeights`, columns of `X`
 #' with zero (or `NA`) standard deviation are dropped before fitting and their
 #' weights are set to zero.
 #'
@@ -1618,12 +1627,12 @@ l0learn_rss_weights <- function(stat, LD,
 #' @return A numeric vector of length `ncol(X)` of variant weights.
 #' @importFrom stats coef
 #' @keywords internal
-ncvreg_weights <- function(X, y, penalty, nfolds = 5, ...) {
+ncvregWeights <- function(X, y, penalty, nfolds = 5, ...) {
   if (!requireNamespace("ncvreg", quietly = TRUE)) {
     stop("To use this function, please install ncvreg: https://cran.r-project.org/package=ncvreg")
   }
   eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
-  keep <- .drop_zero_variance(X, "ncvreg_weights")
+  keep <- .dropZeroVariance(X, "ncvregWeights")
   fit <- ncvreg::cv.ncvreg(X = X[, keep, drop = FALSE], y = y, penalty = penalty, nfolds = nfolds, ...)
   eff.wgt[keep] <- coef(fit, lambda = fit$lambda.min)[-1]
   return(eff.wgt)
@@ -1640,8 +1649,8 @@ ncvreg_weights <- function(X, y, penalty, nfolds = 5, ...) {
 #' @param ... Additional arguments passed through to `ncvreg::cv.ncvreg`.
 #' @return A numeric vector of length `ncol(X)` of variant weights.
 #' @export
-scad_weights <- function(X, y, nfolds = 5, ...) {
-  ncvreg_weights(X, y, penalty = "SCAD", nfolds = nfolds, ...)
+scadWeights <- function(X, y, nfolds = 5, ...) {
+  ncvregWeights(X, y, penalty = "SCAD", nfolds = nfolds, ...)
 }
 
 #' Compute Weights Using MCP-Penalized Regression
@@ -1655,8 +1664,8 @@ scad_weights <- function(X, y, nfolds = 5, ...) {
 #' @param ... Additional arguments passed through to `ncvreg::cv.ncvreg`.
 #' @return A numeric vector of length `ncol(X)` of variant weights.
 #' @export
-mcp_weights <- function(X, y, nfolds = 5, ...) {
-  ncvreg_weights(X, y, penalty = "MCP", nfolds = nfolds, ...)
+mcpWeights <- function(X, y, nfolds = 5, ...) {
+  ncvregWeights(X, y, penalty = "MCP", nfolds = nfolds, ...)
 }
 
 #' Compute Weights Using L0Learn
@@ -1675,22 +1684,22 @@ mcp_weights <- function(X, y, nfolds = 5, ...) {
 #'   (e.g. `nGamma`, `gammaMin`, `gammaMax`, `algorithm`, `maxSuppSize`).
 #' @return A numeric vector of length `ncol(X)` of variant weights.
 #' @export
-l0learn_weights <- function(X, y, penalty = "L0", nFolds = 5, ...) {
+l0learnWeights <- function(X, y, penalty = "L0", nFolds = 5, ...) {
   if (!requireNamespace("L0Learn", quietly = TRUE)) {
     stop("To use this function, please install L0Learn: https://cran.r-project.org/package=L0Learn")
   }
   eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
-  keep <- .drop_zero_variance(X, "l0learn_weights")
+  keep <- .dropZeroVariance(X, "l0learnWeights")
   fit <- L0Learn::L0Learn.cvfit(
     x = X[, keep, drop = FALSE], y = y, penalty = penalty, nFolds = nFolds, ...
   )
   # Find (gamma, lambda) minimizing CV error across the entire path.
-  cv_mins <- vapply(fit$cvMeans, function(v) min(as.numeric(v)), numeric(1))
-  gamma_idx <- which.min(cv_mins)
-  lambda_idx <- which.min(as.numeric(fit$cvMeans[[gamma_idx]]))
-  best_gamma <- fit$fit$gamma[gamma_idx]
-  best_lambda <- fit$fit$lambda[[gamma_idx]][lambda_idx]
-  coefs <- as.numeric(coef(fit, lambda = best_lambda, gamma = best_gamma))
+  cvMins <- vapply(fit$cvMeans, function(v) min(as.numeric(v)), numeric(1))
+  gammaIdx <- which.min(cvMins)
+  lambdaIdx <- which.min(as.numeric(fit$cvMeans[[gammaIdx]]))
+  bestGamma <- fit$fit$gamma[gammaIdx]
+  bestLambda <- fit$fit$lambda[[gammaIdx]][lambdaIdx]
+  coefs <- as.numeric(coef(fit, lambda = bestLambda, gamma = bestGamma))
   # If intercept was included, drop it (first row).
   if (length(coefs) == sum(keep) + 1L) {
     coefs <- coefs[-1L]
@@ -1713,24 +1722,24 @@ l0learn_weights <- function(X, y, penalty = "L0", nFolds = 5, ...) {
 #' @param nIter Number of MCMC iterations.
 #' @param burnIn Number of burn-in iterations.
 #' @param thin Thinning interval.
-#' @param eta_args Optional named list of additional arguments included in the
+#' @param etaArgs Optional named list of additional arguments included in the
 #'   `ETA` linear-term specification (e.g. `list(probIn = 0.05)` for BayesB).
 #' @param ... Additional arguments passed through to `BGLR::BGLR`.
 #' @return A numeric vector of length `ncol(X)` of variant weights.
 #' @keywords internal
-bglr_weights <- function(X, y, model, nIter, burnIn, thin, eta_args = list(), ...) {
+bglrWeights <- function(X, y, model, nIter, burnIn, thin, etaArgs = list(), ...) {
   if (!requireNamespace("BGLR", quietly = TRUE)) {
     stop("To use this function, please install BGLR: https://cran.r-project.org/package=BGLR")
   }
   eff.wgt <- rep(0, ncol(X))
-  keep <- .drop_zero_variance(X, "bglr_weights")
+  keep <- .dropZeroVariance(X, "bglrWeights")
 
   tmpdir <- tempfile("bglr_")
   dir.create(tmpdir, recursive = TRUE, showWarnings = FALSE)
   on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
   saveAt <- paste0(tmpdir, .Platform$file.sep)
 
-  eta <- list(c(list(X = X[, keep, drop = FALSE], model = model), eta_args))
+  eta <- list(c(list(X = X[, keep, drop = FALSE], model = model), etaArgs))
   fit <- BGLR::BGLR(
     y = y, ETA = eta,
     nIter = nIter, burnIn = burnIn, thin = thin,
@@ -1761,11 +1770,11 @@ bglr_weights <- function(X, y, model, nIter, burnIn, thin, eta_args = list(), ..
 #' @param ... Additional arguments passed through to `BGLR::BGLR`.
 #' @return A numeric vector of length `ncol(X)` of variant weights.
 #' @export
-bayes_b_weights <- function(X, y, nIter = 10000, burnIn = 2000, thin = 5, probIn = 0.2, ...) {
-  bglr_weights(
+bayesBWeights <- function(X, y, nIter = 10000, burnIn = 2000, thin = 5, probIn = 0.2, ...) {
+  bglrWeights(
     X, y,
     model = "BayesB", nIter = nIter, burnIn = burnIn, thin = thin,
-    eta_args = list(probIn = probIn), ...
+    etaArgs = list(probIn = probIn), ...
   )
 }
 
@@ -1774,7 +1783,7 @@ bayes_b_weights <- function(X, y, nIter = 10000, burnIn = 2000, thin = 5, probIn
 #' Fits a Bayesian LASSO linear regression model via `BGLR::BGLR` (the "BL"
 #' model, Park & Casella 2008) and returns the posterior mean of the marker
 #' effects. This is the same "B-Lasso" implementation benchmarked in Kim et
-#' al. (2022). Note that this is distinct from `bayes_l_weights`, which uses a
+#' al. (2022). Note that this is distinct from `bayesLWeights`, which uses a
 #' different Bayesian LASSO implementation backed by `qgg`.
 #'
 #' Defaults for `nIter`, `burnIn`, and `thin` are larger than BGLR's package
@@ -1789,8 +1798,8 @@ bayes_b_weights <- function(X, y, nIter = 10000, burnIn = 2000, thin = 5, probIn
 #' @param ... Additional arguments passed through to `BGLR::BGLR`.
 #' @return A numeric vector of length `ncol(X)` of variant weights.
 #' @export
-b_lasso_weights <- function(X, y, nIter = 10000, burnIn = 2000, thin = 5, ...) {
-  bglr_weights(
+bLassoWeights <- function(X, y, nIter = 10000, burnIn = 2000, thin = 5, ...) {
+  bglrWeights(
     X, y,
     model = "BL", nIter = nIter, burnIn = burnIn, thin = thin, ...
   )
@@ -1810,34 +1819,34 @@ b_lasso_weights <- function(X, y, nIter = 10000, burnIn = 2000, thin = 5, ...) {
 #'
 #' @param X A numeric matrix of predictors.
 #' @param y A numeric response vector.
-#' @param fitting_method One of "VB", "Gibbs", or "Adaptive_Gibbs". Default is "VB".
+#' @param fittingMethod One of "VB", "Gibbs", or "Adaptive_Gibbs". Default is "VB".
 #' @param ... Additional arguments passed through to `RcppDPR::fit_model`.
 #' @return A numeric vector of length `ncol(X)` of variant weights.
 #' @export
-dpr_weights <- function(X, y, fitting_method = "VB", retain_fit = FALSE, ...) {
+dprWeights <- function(X, y, fittingMethod = "VB", retainFit = FALSE, ...) {
   if (!requireNamespace("RcppDPR", quietly = TRUE)) {
     stop("To use this function, please install RcppDPR: https://cran.r-project.org/package=RcppDPR")
   }
   eff.wgt <- rep(0, ncol(X))
-  keep <- .drop_zero_variance(X, "dpr_weights")
+  keep <- .dropZeroVariance(X, "dprWeights")
   w <- matrix(1, nrow = nrow(X), ncol = 1)
   fit <- RcppDPR::fit_model(
     y = y, w = w, x = X[, keep, drop = FALSE],
-    rotate_variables = FALSE, fitting_method = fitting_method, ...
+    rotate_variables = FALSE, fitting_method = fittingMethod, ...
   )
   eff.wgt[keep] <- as.numeric(fit$beta + fit$alpha)
-  if (retain_fit) attr(eff.wgt, "fit") <- fit
+  if (retainFit) attr(eff.wgt, "fit") <- fit
   return(eff.wgt)
 }
 
-#' @rdname dpr_weights
+#' @rdname dprWeights
 #' @export
-dpr_vb_weights <- function(X, y, n_k = 8, retain_fit = FALSE, ...) dpr_weights(X, y, fitting_method = "VB", n_k = n_k, retain_fit = retain_fit, ...)
+dprVbWeights <- function(X, y, n_k = 8, retainFit = FALSE, ...) dprWeights(X, y, fittingMethod = "VB", n_k = n_k, retainFit = retainFit, ...)
 
-#' @rdname dpr_weights
+#' @rdname dprWeights
 #' @export
-dpr_gibbs_weights <- function(X, y, s_step = 5000, retain_fit = FALSE, ...) dpr_weights(X, y, fitting_method = "Gibbs", s_step = s_step, retain_fit = retain_fit, ...)
+dprGibbsWeights <- function(X, y, s_step = 5000, retainFit = FALSE, ...) dprWeights(X, y, fittingMethod = "Gibbs", s_step = s_step, retainFit = retainFit, ...)
 
-#' @rdname dpr_weights
+#' @rdname dprWeights
 #' @export
-dpr_adaptive_gibbs_weights <- function(X, y, retain_fit = FALSE, ...) dpr_weights(X, y, fitting_method = "Adaptive_Gibbs", retain_fit = retain_fit, ...)
+dprAdaptiveGibbsWeights <- function(X, y, retainFit = FALSE, ...) dprWeights(X, y, fittingMethod = "Adaptive_Gibbs", retainFit = retainFit, ...)
