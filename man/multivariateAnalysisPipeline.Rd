@@ -43,10 +43,10 @@ multivariateAnalysisPipeline(
 \item{Y}{A matrix of phenotype measurements, representing samples and columns represent conditions.}
 
 \item{maf}{Optional vector of minor allele frequencies for each variant in X,
-used ONLY for \code{maf_cutoff} filtering and never exported. When \code{af}
+used ONLY for \code{mafCutoff} filtering and never exported. When \code{af}
 is supplied the filtering MAF is derived from it (\code{min(af, 1 - af)}) and
 a supplied \code{maf} is ignored (with a warning if they disagree). Default
-NULL; if neither \code{maf} nor \code{af} is supplied and \code{maf_cutoff}
+NULL; if neither \code{maf} nor \code{af} is supplied and \code{mafCutoff}
 is set, the call errors.}
 
 \item{af}{Optional vector of directional effect-allele frequencies (frequency
