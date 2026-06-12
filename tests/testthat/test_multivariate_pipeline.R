@@ -641,8 +641,8 @@ test_that("multivariate exports a supplied af and derives the filtering MAF from
   prior_mats <- list(U = prior_U, w = c(udd_1 = 0.5, udd_2 = 0.5))
   fake_w0 <- c("udd_1_a" = 0.4, "udd_2_a" = 0.4, "null" = 0.2)
   local_mocked_bindings(
-    mrmash_wrapper = function(X, Y, ...) list(V = diag(ncol(Y)), w0 = fake_w0,
-                                              w1 = matrix(0.1, nrow = ncol(X), ncol = 1)),
+    mrmashWrapper = function(X, Y, ...) list(V = diag(ncol(Y)), w0 = fake_w0,
+                                             w1 = matrix(0.1, nrow = ncol(X), ncol = 1)),
   )
   local_mocked_bindings(
     mvsusie = function(...) list(
@@ -658,9 +658,9 @@ test_that("multivariate exports a supplied af and derives the filtering MAF from
     .package = "mvsusieR"
   )
   af <- setNames(seq(0.1, 0.5, length.out = p), vnames)   # directional, aligned to X cols
-  run <- function(...) multivariate_analysis_pipeline(
-    X = d$X, Y = d$Y, ..., pip_cutoff_to_skip = 0, signal_cutoff = 0.025,
-    data_driven_prior_matrices = prior_mats, twas_weights = FALSE)
+  run <- function(...) multivariateAnalysisPipeline(
+    X = d$X, Y = d$Y, ..., pipCutoffToSkip = 0, signalCutoff = 0.025,
+    dataDrivenPriorMatrices = prior_mats, twasWeights = FALSE)
   res_af  <- run(af = af)
   res_maf <- run(maf = pmin(af, 1 - af))
   # af supplied -> exported with real values; no maf column

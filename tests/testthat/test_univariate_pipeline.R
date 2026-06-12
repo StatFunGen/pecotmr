@@ -2432,8 +2432,8 @@ test_that("af supplied (no maf): MAF derived from af, af exported, no maf column
   skip_if_not_installed("susieR")
   d <- .uap_af_xy()
   af <- runif(d$p, 0.1, 0.5)
-  res <- univariate_analysis_pipeline(X = d$X, Y = d$Y, af = af,
-    maf_cutoff = 0.01, twas_weights = FALSE, L = 5, L_greedy = 5)
+  res <- univariateAnalysisPipeline(X = d$X, Y = d$Y, af = af,
+    mafCutoff = 0.01, twasWeights = FALSE, L = 5, lGreedy = 5)
   expect_true("top_loci" %in% names(res))
   expect_true("af" %in% colnames(res$top_loci))
   expect_false("maf" %in% colnames(res$top_loci))
@@ -2444,8 +2444,8 @@ test_that("maf supplied (no af): maf used for filtering, top_loci$af is NA", {
   skip_if_not_installed("susieR")
   d <- .uap_af_xy()
   maf <- runif(d$p, 0.1, 0.5)
-  res <- univariate_analysis_pipeline(X = d$X, Y = d$Y, maf = maf,
-    maf_cutoff = 0.01, twas_weights = FALSE, L = 5, L_greedy = 5)
+  res <- univariateAnalysisPipeline(X = d$X, Y = d$Y, maf = maf,
+    mafCutoff = 0.01, twasWeights = FALSE, L = 5, lGreedy = 5)
   expect_true("af" %in% colnames(res$top_loci))
   if (nrow(res$top_loci) > 0) expect_true(all(is.na(res$top_loci$af)))
 })
@@ -2456,8 +2456,8 @@ test_that("both af and maf supplied and disagreeing emits a warning (af wins)", 
   af  <- rep(0.30, d$p)   # min(af, 1-af) = 0.30
   maf <- rep(0.40, d$p)   # disagrees with the af-derived 0.30
   expect_warning(
-    univariate_analysis_pipeline(X = d$X, Y = d$Y, af = af, maf = maf,
-      maf_cutoff = 0.01, twas_weights = FALSE, L = 5, L_greedy = 5),
+    univariateAnalysisPipeline(X = d$X, Y = d$Y, af = af, maf = maf,
+      mafCutoff = 0.01, twasWeights = FALSE, L = 5, lGreedy = 5),
     "disagree"
   )
 })
@@ -2466,17 +2466,17 @@ test_that("neither af nor maf with maf_cutoff set errors clearly", {
   skip_if_not_installed("susieR")
   d <- .uap_af_xy()
   expect_error(
-    univariate_analysis_pipeline(X = d$X, Y = d$Y,
-      maf_cutoff = 0.01, twas_weights = FALSE, L = 5, L_greedy = 5),
-    "maf_cutoff is set but neither"
+    univariateAnalysisPipeline(X = d$X, Y = d$Y,
+      mafCutoff = 0.01, twasWeights = FALSE, L = 5, lGreedy = 5),
+    "mafCutoff is set but neither"
   )
 })
 
-test_that("neither af nor maf without maf_cutoff runs; top_loci$af is NA", {
+test_that("neither af nor maf without mafCutoff runs; top_loci$af is NA", {
   skip_if_not_installed("susieR")
   d <- .uap_af_xy()
-  res <- univariate_analysis_pipeline(X = d$X, Y = d$Y,
-    maf_cutoff = NULL, twas_weights = FALSE, L = 5, L_greedy = 5)
+  res <- univariateAnalysisPipeline(X = d$X, Y = d$Y,
+    mafCutoff = NULL, twasWeights = FALSE, L = 5, lGreedy = 5)
   expect_true("top_loci" %in% names(res))
   expect_true("af" %in% colnames(res$top_loci))
   if (nrow(res$top_loci) > 0) expect_true(all(is.na(res$top_loci$af)))
@@ -2491,10 +2491,10 @@ test_that("af-derived MAF drives maf_cutoff filtering identically to the equival
   skip_if_not_installed("susieR")
   d <- .uap_af_xy(p = 6)
   af  <- c(0.005, 0.85, 0.20, 0.45, 0.15, 0.40)   # variant 1 below cutoff; variant 2 af>0.5
-  res_af  <- univariate_analysis_pipeline(X = d$X, Y = d$Y, af = af,
-    maf_cutoff = 0.01, twas_weights = FALSE, L = 5, L_greedy = 5)
-  res_maf <- univariate_analysis_pipeline(X = d$X, Y = d$Y, maf = pmin(af, 1 - af),
-    maf_cutoff = 0.01, twas_weights = FALSE, L = 5, L_greedy = 5)
+  res_af  <- univariateAnalysisPipeline(X = d$X, Y = d$Y, af = af,
+    mafCutoff = 0.01, twasWeights = FALSE, L = 5, lGreedy = 5)
+  res_maf <- univariateAnalysisPipeline(X = d$X, Y = d$Y, maf = pmin(af, 1 - af),
+    mafCutoff = 0.01, twasWeights = FALSE, L = 5, lGreedy = 5)
   # Identical on every column except af (res_maf's af is NA) => the af-derived
   # MAF was used for filtering exactly like an explicit maf.
   cols <- setdiff(names(res_af$top_loci), "af")
