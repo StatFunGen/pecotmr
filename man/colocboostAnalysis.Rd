@@ -74,11 +74,11 @@ or more QC controls are requested.
 
 Individual-level QC is only attempted when at least one individual QC control
 is non-\code{NULL} and named \code{X} and \code{Y} inputs are available in
-\code{...}. Summary-statistic QC is only attempted when \code{qc_method},
+\code{...}. Summary-statistic QC is only attempted when \code{zMismatchQc},
 \code{pip_cutoff_to_skip_sumstat}, \code{impute = TRUE}, or
 \code{LD_reference_info} is supplied and named \code{sumstat} plus either
 \code{LD}, \code{X_ref}, or \code{LD_reference_info} are available.
-\code{qc_method = "none"} means run basic allele/variant harmonization
+\code{zMismatchQc = "none"} means run basic allele/variant harmonization
 only; it does not run SLALOM/DENTIST
 LD-mismatch QC. RAISS imputation is controlled separately by
 \code{impute = TRUE}.
