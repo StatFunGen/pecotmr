@@ -199,7 +199,7 @@ test_that("twasPredict: zero weights give zero predictions", {
 test_that("twasWeights: X must be a matrix", {
   d <- make_data()
   expect_error(
-    twasWeights(as.data.frame(d$X), d$Y, weightMethods = list()),
+    learnTwasWeights(as.data.frame(d$X), d$Y, weightMethods = list()),
     "X must be a matrix"
   )
 })
@@ -210,7 +210,7 @@ test_that("twasWeights: Y must be a matrix or vector", {
   # type check and gets converted via matrix(). The resulting matrix has
   # 1 row which mismatches X's 50 rows, triggering the row count error.
   expect_error(
-    twasWeights(d$X, list(d$Y), weightMethods = list()),
+    learnTwasWeights(d$X, list(d$Y), weightMethods = list()),
     "The number of rows in X and Y must be the same"
   )
 })
@@ -223,7 +223,7 @@ test_that("twasWeights: Y as vector gets converted to matrix internally", {
   local_mocked_bindings(
     lassoWeights = function(X, y, ...) rep(0, ncol(X))
   )
-  result <- twasWeights(d$X, y_vec, weightMethods = list(lassoWeights = list()))
+  result <- learnTwasWeights(d$X, y_vec, weightMethods = list(lassoWeights = list()))
   expect_true(is(result, "TwasWeights"))
   expect_equal(length(getMethodNames(result)), 1)
   expect_equal(nrow(getWeights(result, "lassoWeights")), ncol(d$X))
@@ -238,7 +238,7 @@ test_that("twasWeights: mismatched row counts error", {
   d <- make_data(n = 50, p = 10)
   Y_short <- d$Y[1:30, , drop = FALSE]
   expect_error(
-    twasWeights(d$X, Y_short, weightMethods = list()),
+    learnTwasWeights(d$X, Y_short, weightMethods = list()),
     "The number of rows in X and Y must be the same"
   )
 })
@@ -249,7 +249,7 @@ test_that("twasWeights: character weight_methods input is accepted", {
     lassoWeights = function(X, y, ...) rep(0, ncol(X))
   )
   # Short name should be resolved via .twas_method_lookup
-  result <- twasWeights(d$X, d$Y, weightMethods = c("lasso"))
+  result <- learnTwasWeights(d$X, d$Y, weightMethods = c("lasso"))
   expect_true(is(result, "TwasWeights"))
   expect_equal(getMethodNames(result), "lasso_weights")
 })
@@ -265,7 +265,7 @@ test_that("twasWeights: zero variance columns are filtered and padded back with 
       rep(1, ncol(X))
     }
   )
-  result <- twasWeights(d$X, d$Y, weightMethods = list(lassoWeights = list()))
+  result <- learnTwasWeights(d$X, d$Y, weightMethods = list(lassoWeights = list()))
 
   # The returned weight matrix should have rows equal to total columns (including zero-var)
   expect_equal(nrow(getWeights(result, "lassoWeights")), p_with_extra)
@@ -278,7 +278,7 @@ test_that("twasWeights: rownames of result match colnames of X", {
   local_mocked_bindings(
     enetWeights = function(X, y, ...) rep(0.1, ncol(X))
   )
-  result <- twasWeights(d$X, d$Y, weightMethods = list(enetWeights = list()))
+  result <- learnTwasWeights(d$X, d$Y, weightMethods = list(enetWeights = list()))
   expect_equal(rownames(getWeights(result, "enetWeights")), colnames(d$X))
 })
 
@@ -287,7 +287,7 @@ test_that("twasWeights: result dimensions match ncol(X) x ncol(Y)", {
   local_mocked_bindings(
     enetWeights = function(X, y, ...) rep(0, ncol(X))
   )
-  result <- twasWeights(d$X, d$Y, weightMethods = list(enetWeights = list()))
+  result <- learnTwasWeights(d$X, d$Y, weightMethods = list(enetWeights = list()))
   expect_equal(dim(getWeights(result, "enetWeights")), c(ncol(d$X), ncol(d$Y)))
 })
 
@@ -297,7 +297,7 @@ test_that("twasWeights: multiple methods return named list with one entry per me
     lassoWeights = function(X, y, ...) rep(0.1, ncol(X)),
     enetWeights  = function(X, y, ...) rep(0.2, ncol(X))
   )
-  result <- twasWeights(
+  result <- learnTwasWeights(
     d$X, d$Y,
     weightMethods = list(lassoWeights = list(), enetWeights = list())
   )
@@ -315,7 +315,7 @@ test_that("twasWeights: multiple methods return named list with one entry per me
 test_that("twasWeights: lassoWeights produces correct structure with real glmnet", {
   skip_if_not_installed("glmnet")
   d <- make_data(n = 50, p = 10)
-  result <- twasWeights(d$X, d$Y, weightMethods = list(lassoWeights = list()))
+  result <- learnTwasWeights(d$X, d$Y, weightMethods = list(lassoWeights = list()))
 
   expect_true(is(result, "TwasWeights"))
   expect_equal(getMethodNames(result), "lassoWeights")
@@ -328,7 +328,7 @@ test_that("twasWeights: lassoWeights produces correct structure with real glmnet
 test_that("twasWeights: enetWeights produces correct structure with real glmnet", {
   skip_if_not_installed("glmnet")
   d <- make_data(n = 50, p = 10)
-  result <- twasWeights(d$X, d$Y, weightMethods = list(enetWeights = list()))
+  result <- learnTwasWeights(d$X, d$Y, weightMethods = list(enetWeights = list()))
 
   expect_true(is(result, "TwasWeights"))
   expect_equal(getMethodNames(result), "enetWeights")
@@ -1073,7 +1073,7 @@ test_that("twasWeights: SuSiE-inf is fitted before and initializes ordinary SuSi
     }
   )
 
-  result <- twasWeights(
+  result <- learnTwasWeights(
     d$X,
     y_vec,
     weightMethods = list(
@@ -1301,7 +1301,7 @@ test_that("twasWeights: multivariate weights_matrix is reduced to valid_columns 
       m
     }
   )
-  result <- twasWeights(X, Y, weightMethods = list(mrmashWeights = list()))
+  result <- learnTwasWeights(X, Y, weightMethods = list(mrmashWeights = list()))
   # After the dim-fix, the weights matrix is restricted to v1..v5 -> shape p x ncol(Y)
   expect_equal(nrow(getWeights(result, "mrmashWeights")), p)
   expect_equal(ncol(getWeights(result, "mrmashWeights")), 2)

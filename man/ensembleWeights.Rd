@@ -22,7 +22,7 @@ ensembleWeights(
 multi-dataset: a list of vectors/matrices, one per dataset.}
 
 \item{twasWeightList}{Optional named list of weight matrices from
-\code{\link{twasWeights}}, with keys like \code{"susie_weights"}. Used to
+\code{\link{learnTwasWeights}}, with keys like \code{"susie_weights"}. Used to
 construct the final combined TWAS weight vector. For multi-dataset: a list
 of such lists (the first is used as the weight template).}
 
@@ -118,6 +118,6 @@ ens_multi <- ensembleWeights(
 
 }
 \seealso{
-\code{\link{twasWeightsCv}}, \code{\link{twasWeights}},
+\code{\link{twasWeightsCv}}, \code{\link{learnTwasWeights}},
   \code{\link{twasWeightsPipeline}}
 }

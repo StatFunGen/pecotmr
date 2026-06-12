@@ -560,8 +560,8 @@ twasWeightsCv <- function(X, Y, fold = NULL, samplePartitions = NULL, weightMeth
 #' @importFrom purrr map exec
 #' @importFrom rlang !!!
 #' @importFrom tictoc tic toc
-twasWeights <- function(X, Y, weightMethods, numThreads = 1,
-                        fittedModels = NULL, retainFits = FALSE, verbose = 1) {
+learnTwasWeights <- function(X, Y, weightMethods, numThreads = 1,
+                             fittedModels = NULL, retainFits = FALSE, verbose = 1) {
   if (!is.matrix(X) || (!is.matrix(Y) && !is.vector(Y))) {
     stop("X must be a matrix and Y must be a matrix or a vector.")
   }
@@ -730,9 +730,9 @@ twasPredict <- function(X, weightsList) {
 #' \code{probIn} for BayesB) of spike-and-slab Bayesian methods.
 #'
 #' @param weightResults Named list of weight vectors or matrices as
-#'   returned by \code{\link{twasWeights}}. The mr.ash element should
+#'   returned by \code{\link{learnTwasWeights}}. The mr.ash element should
 #'   have a \code{"fit"} attribute containing the model fit object
-#'   (set \code{retainFits = TRUE} in \code{twasWeights} to obtain this).
+#'   (set \code{retainFits = TRUE} in \code{learnTwasWeights} to obtain this).
 #'
 #' @return A scalar sparsity estimate (proportion of non-zero effects).
 #' @export
@@ -740,7 +740,7 @@ estimateSparsity <- function(weightResults) {
   if (is(weightResults, "TwasWeights")) {
     fit <- getFits(weightResults, "mrash_weights")
     if (is.null(fit) || is.null(fit$pi)) {
-      stop("mr.ash fit object not found. Run twasWeights() with retainFits = TRUE ",
+      stop("mr.ash fit object not found. Run learnTwasWeights() with retainFits = TRUE ",
            "and ensure mrash_weights is included.")
     }
   } else {
@@ -750,7 +750,7 @@ estimateSparsity <- function(weightResults) {
     }
     fit <- attr(w, "fit")
     if (is.null(fit) || is.null(fit$pi)) {
-      stop("mr.ash fit object not found. Run twasWeights() with retainFits = TRUE ",
+      stop("mr.ash fit object not found. Run learnTwasWeights() with retainFits = TRUE ",
            "and ensure mrash_weights is included.")
     }
   }
@@ -846,7 +846,7 @@ twasWeightsPipeline <- function(X,
     mrashMethods <- list(mrash_weights = weightMethods[["mrash_weights"]] %||% list())
 
     if (verbose >= 1) message("  Estimating sparsity from mr.ash ...")
-    mrashWeights <- twasWeights(X, y, weightMethods = mrashMethods, retainFits = TRUE, verbose = verbose)
+    mrashWeights <- learnTwasWeights(X, y, weightMethods = mrashMethods, retainFits = TRUE, verbose = verbose)
 
     empiricalPi <- estimateSparsity(mrashWeights)
     if (verbose >= 1) message(sprintf("  Empirical sparsity estimate: %.4f", empiricalPi))
@@ -861,7 +861,7 @@ twasWeightsPipeline <- function(X,
 
     if (length(remainingFnNames) > 0) {
       remainingMethods <- weightMethods[remainingFnNames]
-      remainingTw <- twasWeights(
+      remainingTw <- learnTwasWeights(
         X,
         y,
         weightMethods = remainingMethods,
@@ -894,7 +894,7 @@ twasWeightsPipeline <- function(X,
     }
   } else {
     # Run all methods at once
-    res$twas_weights <- twasWeights(
+    res$twas_weights <- learnTwasWeights(
       X,
       y,
       weightMethods = weightMethods,
@@ -1165,7 +1165,7 @@ twasMultivariateWeightsPipeline <- function(
     tic()
   }
   # get TWAS weights
-  twasWeightsRes <- twasWeights(X = X, Y = Y, weightMethods = weightMethods, verbose = verbose)
+  twasWeightsRes <- learnTwasWeights(X = X, Y = Y, weightMethods = weightMethods, verbose = verbose)
   if (verbose >= 1) {
     elapsed <- toc(quiet = TRUE)
     message(sprintf("Multivariate TWAS weights fitting done in %.1fs", elapsed$toc - elapsed$tic))
@@ -1423,7 +1423,7 @@ twasMultivariateWeightsPipeline <- function(
 #' @param Y Observed outcome vector or matrix (samples x contexts). For
 #'   multi-dataset: a list of vectors/matrices, one per dataset.
 #' @param twasWeightList Optional named list of weight matrices from
-#'   \code{\link{twasWeights}}, with keys like \code{"susie_weights"}. Used to
+#'   \code{\link{learnTwasWeights}}, with keys like \code{"susie_weights"}. Used to
 #'   construct the final combined TWAS weight vector. For multi-dataset: a list
 #'   of such lists (the first is used as the weight template).
 #' @param contextIndex Integer indicating which column of Y to use when Y is a
@@ -1475,7 +1475,7 @@ twasMultivariateWeightsPipeline <- function(
 #' Predictions and Y are aligned by sample names (rownames) when available,
 #' rather than assuming positional order.
 #'
-#' @seealso \code{\link{twasWeightsCv}}, \code{\link{twasWeights}},
+#' @seealso \code{\link{twasWeightsCv}}, \code{\link{learnTwasWeights}},
 #'   \code{\link{twasWeightsPipeline}}
 #'
 #' @examples

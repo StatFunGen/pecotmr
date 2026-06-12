@@ -49,7 +49,7 @@ make_cv_result <- function(n = 100, K = 4, seed = 1, method_quality = NULL) {
   )
 }
 
-# Build synthetic twasWeights() output
+# Build synthetic learnTwasWeights() output
 make_weight_list <- function(p = 20, method_names, seed = 2) {
   set.seed(seed)
   setNames(lapply(method_names, function(m) {

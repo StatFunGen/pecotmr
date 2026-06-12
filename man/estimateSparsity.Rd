@@ -8,9 +8,9 @@ estimateSparsity(weightResults)
 }
 \arguments{
 \item{weightResults}{Named list of weight vectors or matrices as
-returned by \code{\link{twasWeights}}. The mr.ash element should
+returned by \code{\link{learnTwasWeights}}. The mr.ash element should
 have a \code{"fit"} attribute containing the model fit object
-(set \code{retainFits = TRUE} in \code{twasWeights} to obtain this).}
+(set \code{retainFits = TRUE} in \code{learnTwasWeights} to obtain this).}
 }
 \value{
 A scalar sparsity estimate (proportion of non-zero effects).

@@ -348,7 +348,7 @@ test_that("twasWeightsCv handles errors appropriately", {
 #     RNGkind("default")
 # })
 #
-test_that("twasWeights handles errors appropriately", {
+test_that("learnTwasWeights handles errors appropriately", {
     sim <- generate_X_Y(seed=1)
     X <- sim$X
     y = sim$Y
@@ -357,11 +357,11 @@ test_that("twasWeights handles errors appropriately", {
         glmnetWeights = function(X, y, ...) runif(ncol(X))
     )
     weight_methods_test <- list(susieWeights = list(), glmnetWeights = list())
-    expect_error(twasWeights(matrix(rnorm(4, nrow=2)), matrix(rnorm(2, nrow=1))), "unused argument")
-    expect_error(twasWeights(X, y), "weightMethods")
+    expect_error(learnTwasWeights(matrix(rnorm(4, nrow=2)), matrix(rnorm(2, nrow=1))), "unused argument")
+    expect_error(learnTwasWeights(X, y), "weightMethods")
 })
 
-# test_that("twasWeights handles parallel processing", {
+# test_that("learnTwasWeights handles parallel processing", {
 #     RNGkind("L'Ecuyer-CMRG")
 #     sim <- generate_X_Y(seed=1, num_samples=30)
 #     X <- sim$X
@@ -369,9 +369,9 @@ test_that("twasWeights handles errors appropriately", {
 #     weight_methods_test <- list(
 #         glmnetWeights = list(alpha = 0.5))
 #     set.seed(1)
-#     result_parallel <- twasWeights(X, y, weightMethods = weight_methods_test, numThreads = 2)
+#     result_parallel <- learnTwasWeights(X, y, weightMethods = weight_methods_test, numThreads = 2)
 #     set.seed(1)
-#     result_single <- twasWeights(X, y, weightMethods = weight_methods_test, numThreads = 1)
+#     result_single <- learnTwasWeights(X, y, weightMethods = weight_methods_test, numThreads = 1)
 #     expect_equal(result_parallel, result_single)
 #     RNGkind("default")
 # })
