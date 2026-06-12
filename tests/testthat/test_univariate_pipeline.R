@@ -2516,7 +2516,7 @@ test_that("rss: mafCutoff removes low-MAF variants using AF-derived MAF", {
 
   local_mocked_bindings(
     loadRssData = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
+    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlierNumber = 0),
     susieRssPipeline = function(sumstats, ...) { captured_ss <<- sumstats; fake_result },
   )
 
@@ -2543,7 +2543,7 @@ test_that("rss: mafCutoff skips with one warning when af is missing (no fallback
 
   local_mocked_bindings(
     loadRssData = function(...) list(sumstats = ss, n = 1000, var_y = 1),
-    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
+    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlierNumber = 0),
     susieRssPipeline = function(sumstats, ...) { captured_ss <<- sumstats; fake_result },
   )
 
