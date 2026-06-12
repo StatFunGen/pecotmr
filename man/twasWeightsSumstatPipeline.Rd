@@ -13,7 +13,7 @@ twasWeightsSumstatPipeline(
     FALSE), susie_rss = list(), susie_inf_rss = list()),
   pThresholds = c(0.001, 0.05),
   checkLdMethod = "eigenfix",
-  qcMethod = NULL,
+  zMismatchQc = NULL,
   keepIndel = TRUE,
   pipCutoffToSkip = 0,
   impute = TRUE,
@@ -45,7 +45,7 @@ Set to NULL to skip.}
 \item{checkLdMethod}{LD matrix repair method: \code{"eigenfix"} (default),
 \code{"shrink"}, or NULL to skip.}
 
-\item{qcMethod}{RSS QC method for eQTL data: \code{"slalom"},
+\item{zMismatchQc}{RSS QC method for eQTL data: \code{"slalom"},
 \code{"dentist"}, or NULL/\code{"none"} to skip.}
 
 \item{keepIndel}{Whether to keep indels during QC. Default TRUE.}

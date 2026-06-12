@@ -219,7 +219,7 @@ Example: for sQTL, `list(type_pattern = ".*clu_(\\d+_[+-?]).*", valid_pattern = 
 - **`maf_cutoff`**: Numeric; Minor allele frequency cutoff. Default is 0.005.
 - **`pip_cutoff_to_skip_ind`**: Integer vector; Cutoff values for skipping analysis based on pre-screening with single-effect SuSiE (L=1). Context is skipped if none of the variants in the context have PIP values greater than the cutoff. Default is 0 (does not run single-effect SuSiE). Passing a negative value sets the cutoff to 3/number of variants.
 - **`pip_cutoff_to_skip_sumstat`**: Integer vector; Cutoff values for skipping analysis based on pre-screening with single-effect SuSiE (L=1). Sumstat is skipped if none of the variants in the sumstat have PIP values greater than the cutoff. Default is 0 (does not run single-effect SuSiE). Passing a negative value sets the cutoff to 3/number of variants.
-- **`qc_method`**: String; Quality control method to use. Options are "slalom", "dentist", or "none". Default is `slalom`.
+- **`zMismatchQc`**: String; z-score / LD-mismatch QC selector. Options are "slalom", "dentist", or "none". Default is `none` (basic allele harmonization only). Hard rename of the former `qcMethod` (no alias).
 - **`impute`**: Logical; if TRUE, performs imputation for outliers identified in the analysis. Default is `TRUE`.
 - **`impute_opts`**: List of lists; Imputation options including rcond, R2_threshold, and minimum_ld. Default is `list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5)`.
 - **`xqtl_coloc`**: Logical; if TRUE, performs xQTL-only mode. Default is `TRUE`.
@@ -262,7 +262,7 @@ region_data_combined <- loadMultitaskRegionalData(
 maf_cutoff = 0.01
 pip_cutoff_to_skip_ind = rep(0, length(phenotype_list))
 pip_cutoff_to_skip_sumstat = rep(0, length(sumstat_path_list))
-qcMethod = "slalom"
+zMismatchQc = "slalom"
 
 # run colocboost analysis
 colocboost_results <- colocboostPipeline(
@@ -270,7 +270,7 @@ colocboost_results <- colocboostPipeline(
     maf_cutoff = maf_cutoff, 
     pip_cutoff_to_skip_ind = pip_cutoff_to_skip_ind,
     pip_cutoff_to_skip_sumstat = pip_cutoff_to_skip_sumstat,
-    qcMethod = qc_method,
+    zMismatchQc = zMismatchQc,
     xqtl_coloc = TRUE,
     joint_gwas = TRUE,
     separate_gwas = TRUE

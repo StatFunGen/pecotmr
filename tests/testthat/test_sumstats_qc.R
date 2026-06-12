@@ -414,7 +414,7 @@ test_that("summaryStatsQc basic genotype-backed path does not compute LD", {
 
   expect_message(
     result <- summaryStatsQc(rssInput = rss_input, ldData = LD_data_geno,
-                               qcMethod = "none", impute = FALSE),
+                               zMismatchQc = "none", impute = FALSE),
     "basic harmonization retained"
   )
   result_ld <- getLdData(result)
@@ -472,7 +472,7 @@ test_that("summaryStatsQc accepts genotype-backed LdData", {
   result <- suppressMessages(summaryStatsQc(
     rssInput = rss_input,
     ldData = ld_data,
-    qcMethod = "none",
+    zMismatchQc = "none",
     impute = FALSE
   ))
 
@@ -502,7 +502,7 @@ test_that("summaryStatsQc PIP screening uses LD-independent SER", {
   result <- suppressMessages(summaryStatsQc(
     rssInput = rss_input,
     ldData = LD_data_geno,
-    qcMethod = "none",
+    zMismatchQc = "none",
     pipCutoffToSkip = 0.1,
     impute = FALSE
   ))
@@ -523,7 +523,7 @@ test_that("summaryStatsQc treats NULL qc_method as basic-only none", {
     result <- summaryStatsQc(
       rssInput = rss_input,
       ldData = td$LD_data,
-      qcMethod = NULL,
+      zMismatchQc = NULL,
       impute = FALSE
     ),
     "basic harmonization retained"
@@ -539,7 +539,7 @@ test_that("summaryStatsQc rejects invalid qc_method values", {
     summaryStatsQc(
       rssInput = rss_input,
       ldData = td$LD_data,
-      qcMethod = "bad_method"
+      zMismatchQc = "bad_method"
     ),
     "should be one of"
   )
@@ -574,7 +574,7 @@ test_that("summaryStatsQc LD-mismatch QC computes only filtered local LD from X_
   result <- suppressMessages(summaryStatsQc(
     rssInput = rss_input,
     ldData = LD_data_geno,
-    qcMethod = "slalom",
+    zMismatchQc = "slalom",
     skipRegion = "1:150-350",
     impute = FALSE
   ))
@@ -615,4 +615,89 @@ test_that("ldMismatchQc method argument is validated", {
   z <- rnorm(5)
   R <- diag(5)
   expect_error(ldMismatchQc(z, R = R, method = "invalid"))
+})
+
+# ===========================================================================
+# zMismatchQc resolver + hard rename (rss-qc-parity)
+# ===========================================================================
+
+test_that(".resolveZMismatchQc resolves none/slalom/dentist and defaults to none", {
+  expect_equal(pecotmr:::.resolveZMismatchQc(NULL), "none")
+  expect_equal(pecotmr:::.resolveZMismatchQc("none"), "none")
+  expect_equal(pecotmr:::.resolveZMismatchQc("slalom"), "slalom")
+  expect_equal(pecotmr:::.resolveZMismatchQc("dentist"), "dentist")
+})
+
+test_that(".resolveZMismatchQc rejects stale rss_qc and other invalid tokens", {
+  expect_error(pecotmr:::.resolveZMismatchQc("rss_qc"), "should be one of")
+  expect_error(pecotmr:::.resolveZMismatchQc("bad"), "should be one of")
+})
+
+test_that("removed qcMethod argument is rejected as unknown (no alias)", {
+  td <- make_test_sumstats_ld(n_variants = 5)
+  rssInput <- list(sumstats = td$sumstats, n = 1000, varY = 1)
+  expect_error(
+    summaryStatsQc(rssInput = rssInput, ldData = td$LD_data, qcMethod = "slalom"),
+    "unused argument"
+  )
+})
+
+# ===========================================================================
+# krigingOutlierQc + alleleFlipKriging (rss-qc-parity)
+# ===========================================================================
+
+test_that("krigingOutlierQc flags an LD-inconsistent variant and spares the rest", {
+  m <- 6
+  rho <- 0.7
+  R <- matrix(rho, m, m); diag(R) <- 1
+  ids <- paste0("1:", seq_len(m) * 100, ":A:G")
+  rownames(R) <- colnames(R) <- ids
+  z <- rep(3, m)
+  z[3] <- -8                       # strongly inconsistent with its neighbours
+  kr <- krigingOutlierQc(z, R, variantIds = ids)
+  expect_true(kr$outlier[3])
+  expect_false(any(kr$outlier[-3]))
+  expect_equal(nrow(kr$diagnostics), m)
+  expect_true(all(c("predicted", "residual", "statistic", "p_value") %in%
+                    colnames(kr$diagnostics)))
+})
+
+test_that("kriging is not run by default (alleleFlipKriging = FALSE)", {
+  td <- make_test_sumstats_ld(n_variants = 5)
+  rssInput <- list(sumstats = td$sumstats, n = 1000, varY = 1)
+  local_mocked_bindings(
+    krigingOutlierQc = function(...) stop("krigingOutlierQc should not be called")
+  )
+  expect_message(
+    result <- summaryStatsQc(
+      rssInput = rssInput, ldData = td$LD_data,
+      zMismatchQc = "none", impute = FALSE
+    ),
+    "basic harmonization retained"
+  )
+  expect_equal(nrow(getRssInput(result)$sumstats), nrow(td$sumstats))
+})
+
+test_that("alleleFlipKriging drops a planted outlier and composes with zMismatchQc", {
+  td <- make_test_sumstats_ld(n_variants = 6)
+  rssInput <- list(sumstats = td$sumstats, n = 1000, varY = 1)
+  seenN <- NULL
+  local_mocked_bindings(
+    krigingOutlierQc = function(zScore, R, variantIds = NULL, ...) {
+      out <- rep(FALSE, length(zScore)); out[2] <- TRUE
+      list(outlier = out, diagnostics = data.frame(outlier = out))
+    },
+    ldMismatchQc = function(zScore, R, ...) {
+      seenN <<- length(zScore)
+      data.frame(outlier = rep(FALSE, length(zScore)))
+    },
+    .package = "pecotmr"
+  )
+  result <- suppressMessages(summaryStatsQc(
+    rssInput = rssInput, ldData = td$LD_data,
+    zMismatchQc = "dentist", alleleFlipKriging = TRUE, impute = FALSE
+  ))
+  expect_true(is(result, "QcResult"))
+  expect_equal(seenN, nrow(td$sumstats) - 1)   # kriging removed one before dentist
+  expect_equal(getOutlierNumber(result), 1)
 })

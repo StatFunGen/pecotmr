@@ -280,7 +280,7 @@ ss_weights <- twasWeightsSumstatPipeline(
   sumstats = rss_input$sumstats,
   LD_data  = ld_data,
   n        = rss_input$n,
-  qcMethod = "slalom",       # SLALOM/DENTIST QC; see rss-qc.html
+  zMismatchQc = "slalom",       # SLALOM/DENTIST QC; see rss-qc.html
   impute    = TRUE,           # re-impute QC outliers via RAISS
   imputeMissing = FALSE      # see next section for missing-variant imputation
 )
@@ -425,7 +425,7 @@ mt_ss <- twasMultivariateWeightsSumstatPipeline(
     mrmash_rss  = list(max_iter = 200, verbose = FALSE),
     mvsusie_rss = list(L = 10)
   ),
-  qc_method      = "slalom",
+  zMismatchQc      = "slalom",
   impute         = TRUE,    # QC re-imputation of LD-mismatch outliers
   imputeMissing = TRUE     # RAISS imputation of LD variants absent per context
 )
@@ -496,7 +496,7 @@ ss_weights_wide <- twasWeightsSumstatPipeline(
   LD_data  = ld_data,
   n        = rss_input$n,
   methods  = list(susie_rss = list(), lassosumRss = list()),
-  qcMethod = "slalom",
+  zMismatchQc = "slalom",
   impute = TRUE,                                # QC re-imputation (existing)
   imputeMissing = TRUE,                        # missing-variant imputation (new)
   imputeOpts = list(rcond = 0.01, R2_threshold = 0.6,

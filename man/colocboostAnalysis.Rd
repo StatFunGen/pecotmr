@@ -13,7 +13,7 @@ colocboostAnalysis(
   pipCutoffToSkipInd = NULL,
   keepIndel = TRUE,
   pipCutoffToSkipSumstat = NULL,
-  qcMethod = NULL,
+  zMismatchQc = NULL,
   impute = FALSE,
   imputeOpts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
   ldReferenceInfo = NULL,
@@ -30,7 +30,7 @@ QC can only inspect inputs that are supplied by name.}
 \item{missingRateThresh, mafCutoff, xvarCutoff, ldReferenceMetaFile, pipCutoffToSkipInd}{Individual-level QC controls. If all are \code{NULL}, individual-level QC
 is not run.}
 
-\item{keepIndel, pipCutoffToSkipSumstat, qcMethod, impute, imputeOpts}{Summary-statistic QC controls. \code{qcMethod = "none"} runs
+\item{keepIndel, pipCutoffToSkipSumstat, zMismatchQc, impute, imputeOpts}{Summary-statistic QC controls. \code{zMismatchQc = "none"} runs
 basic allele harmonization without
 LD-mismatch outlier detection. Imputation is only run when
 \code{impute = TRUE}.}
@@ -97,17 +97,17 @@ fit <- colocboostAnalysis(X = X, Y = Y, M = 500)
 
 # Summary-statistic input with basic allele/variant harmonization only.
 fit <- colocboostAnalysis(sumstat = sumstat, LD = LD,
-                          qcMethod = "none", M = 500)
+                          zMismatchQc = "none", M = 500)
 
 # Summary-statistic input with LD-mismatch QC and RAISS imputation.
 fit <- colocboostAnalysis(sumstat = sumstat, LD = LD,
-                          qcMethod = "slalom", impute = TRUE)
+                          zMismatchQc = "slalom", impute = TRUE)
 
 # Use richer LD metadata from load_LD_matrix() for QC, while still passing
 # ColocBoost's native LD input.
 ldData <- load_LD_matrix(ldMetaFile, region)
 fit <- colocboostAnalysis(sumstat = sumstat, LD = getCorrelation(ldData),
-                          ldReferenceInfo = ldData, qcMethod = "none")
+                          ldReferenceInfo = ldData, zMismatchQc = "none")
 
 # Individual-level input with explicit genotype QC thresholds.
 fit <- colocboostAnalysis(X = X, Y = Y,

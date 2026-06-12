@@ -12,6 +12,14 @@ NULL
 #'   or a vector of strings in the format of "chr:pos:A2:A1"/"chr:pos_A2_A1". Can be automatically converted to a data frame if a vector.
 #' @param refVariants A data frame with columns "chrom", "pos", "A2", "A1" or strings in the format of "chr:pos:A2:A1"/"chr:pos_A2_A1".
 #' @param colToFlip The name of the column in targetData where flips are to be applied.
+#'   On an allele swap these columns are sign-flipped (multiplied by -1), the
+#'   correct operation for signed quantities like \code{beta} and \code{z}.
+#' @param colToComplement Names of columns in targetData to complement
+#'   (\code{1 - x}) on an allele swap, the correct operation for an
+#'   effect-allele frequency like \code{af}. Default \code{character()} does no
+#'   complementing, so non-RSS callers are unchanged. Distinct from
+#'   \code{colToFlip}: frequencies are complemented, signed effects are
+#'   sign-flipped.
 #' @param matchMinProp Minimum proportion of variants in the smallest data
 #'   to be matched, otherwise stops with an error. Default is 20%.
 #' @param removeDups Whether to remove duplicates, default is TRUE.
@@ -33,7 +41,8 @@ NULL
 matchRefPanel <- function(targetData, refVariants, colToFlip = NULL,
                           matchMinProp = 0.2, removeDups = TRUE,
                           removeIndels = FALSE, removeStrandAmbiguous = TRUE,
-                          flipStrand = FALSE, removeUnmatched = TRUE, ...) {
+                          flipStrand = FALSE, removeUnmatched = TRUE,
+                          colToComplement = character(), ...) {
 	strandFlip <- function(ref) {
 	  chartr("ATCG", "TAGC", ref)
 	}
@@ -138,6 +147,18 @@ matchRefPanel <- function(targetData, refVariants, colToFlip = NULL,
 	  stop("Column(s) '", paste(missing, collapse = "', '"), "' not found in targetData.")
 	}
 	matchResult[matchResult$sign_flip, colToFlip] <- -1 * matchResult[matchResult$sign_flip, colToFlip]
+  }
+  # Complement (1 - x) colToComplement for the same swapped variants. A
+  # frequency tracks the effect allele, so an allele swap takes af -> 1 - af
+  # (not a sign flip). Kept independent of colToFlip so signed columns are
+  # untouched here.
+  if (length(colToComplement) > 0) {
+	missing <- setdiff(colToComplement, colnames(matchResult))
+	if (length(missing) > 0) {
+	  stop("Column(s) '", paste(missing, collapse = "', '"), "' not found in targetData.")
+	}
+	matchResult[matchResult$sign_flip, colToComplement] <-
+	  1 - matchResult[matchResult$sign_flip, colToComplement]
   }
   # flip the strands if there is a strand flip
   if (flipStrand) {

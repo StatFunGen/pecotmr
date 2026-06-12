@@ -342,7 +342,9 @@ processColocResults <- function(colocResult, ldMetaFilePath, analysisRegion, pph
 #' @param nCase Number of cases for binary traits.
 #' @param nControl Number of controls for binary traits.
 #' @param region Genomic region string (e.g., "chr1:1000-2000").
-#' @param qcMethod QC method: "slalom", "dentist", or "none". Default "slalom".
+#' @param zMismatchQc Z-score / LD-mismatch QC selector forwarded to
+#'   \code{\link{rssAnalysisPipeline}}: "slalom", "dentist", or "none".
+#'   Default "slalom". (Hard rename of the former \code{zMismatchQc}; no alias.)
 #' @param finemappingMethod Fine-mapping method. Default "susie_rss".
 #' @param finemappingOpts List of fine-mapping options passed to
 #'   \code{\link{rssAnalysisPipeline}}.
@@ -372,7 +374,7 @@ colocWrapper <- function(xqtlFile, gwasFiles = NULL,
                          ldData = NULL,
                          nSample = 0, nCase = 0, nControl = 0,
                          region = NULL,
-                         qcMethod = "slalom",
+                         zMismatchQc = "slalom",
                          finemappingMethod = "susie_rss",
                          finemappingOpts = list(
                            L = 20, L_greedy = 5,
@@ -408,7 +410,7 @@ colocWrapper <- function(xqtlFile, gwasFiles = NULL,
       ldData = ldData,
       nSample = nSample, nCase = nCase, nControl = nControl,
       region = region,
-      qcMethod = qcMethod, finemappingMethod = finemappingMethod,
+      zMismatchQc = zMismatchQc, finemappingMethod = finemappingMethod,
       finemappingOpts = finemappingOpts,
       impute = impute, imputeOpts = imputeOpts
     )

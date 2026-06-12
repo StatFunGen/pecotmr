@@ -1846,7 +1846,7 @@ imputeMissingSumstatsForLd <- function(sumstats, ldMat, ldData,
 #'   Set to NULL to skip.
 #' @param checkLdMethod LD matrix repair method: \code{"eigenfix"} (default),
 #'   \code{"shrink"}, or NULL to skip.
-#' @param qcMethod RSS QC method for eQTL data: \code{"slalom"},
+#' @param zMismatchQc RSS QC method for eQTL data: \code{"slalom"},
 #'   \code{"dentist"}, or NULL/\code{"none"} to skip.
 #' @param keepIndel Whether to keep indels during QC. Default TRUE.
 #' @param pipCutoffToSkip PIP threshold for early stopping. Default 0 (off).
@@ -1885,7 +1885,7 @@ twasWeightsSumstatPipeline <- function(
     ),
     pThresholds = c(0.001, 0.05),
     checkLdMethod = "eigenfix",
-    qcMethod = NULL,
+    zMismatchQc = NULL,
     keepIndel = TRUE,
     pipCutoffToSkip = 0,
     impute = TRUE,
@@ -1897,14 +1897,14 @@ twasWeightsSumstatPipeline <- function(
   # -----------------------------------------------------------------------
   # 1. RSS QC on eQTL summary statistics
   # -----------------------------------------------------------------------
-  needsQc <- !is.null(qcMethod) && !identical(qcMethod, "none")
+  needsQc <- !is.null(zMismatchQc) && !identical(zMismatchQc, "none")
   if (needsQc || impute || pipCutoffToSkip != 0) {
     qcResult <- summaryStatsQc(
       rssInput = list(sumstats = sumstats, n = n, var_y = varY),
       ldData = ldData,
       keepIndel = keepIndel,
       pipCutoffToSkip = pipCutoffToSkip,
-      qcMethod = qcMethod,
+      zMismatchQc = zMismatchQc,
       impute = impute,
       imputeOpts = imputeOpts,
       returnOnSkip = "null"
@@ -2156,7 +2156,7 @@ twasWeightsSumstatPipeline <- function(
 #' @param methods Named list of multivariate RSS weight methods to fit.
 #'   Function names must match \code{<name>_weights}. Defaults to mr.mash-RSS
 #'   and mvSuSiE-RSS with default arguments.
-#' @param qcMethod Per-context QC method passed to
+#' @param zMismatchQc Per-context QC method passed to
 #'   \code{\link{summary_stats_qc}}; one of \code{"slalom"}, \code{"dentist"},
 #'   or NULL/\code{"none"}. Default \code{NULL} (basic harmonization only).
 #' @param keepIndel Passed through to QC. Default TRUE.
@@ -2197,7 +2197,7 @@ twasWeightsSumstatPipeline <- function(
 twasMultivariateWeightsSumstatPipeline <- function(
     sumstatsList, ldData, n,
     methods = list(mrmash_rss = list(), mvsusie_rss = list()),
-    qcMethod = NULL,
+    zMismatchQc = NULL,
     keepIndel = TRUE,
     impute = FALSE,
     imputeMissing = FALSE,
@@ -2233,13 +2233,13 @@ twasMultivariateWeightsSumstatPipeline <- function(
     } else {
       stop(sprintf("Context %s: sumstats must contain z or (beta, se).", cond))
     }
-    qcRecord <- summary_stats_qc(
-      rss_input = list(sumstats = ssC, n = n[[cond]], var_y = 1),
-      LD_data = ldData,
-      keep_indel = keepIndel,
-      qc_method = if (is.null(qcMethod)) "none" else qcMethod,
-      impute = impute, impute_opts = imputeOpts,
-      return_on_skip = "preprocess",
+    qcRecord <- summaryStatsQc(
+      rssInput = list(sumstats = ssC, n = n[[cond]], var_y = 1),
+      ldData = ldData,
+      keepIndel = keepIndel,
+      zMismatchQc = if (is.null(zMismatchQc)) "none" else zMismatchQc,
+      impute = impute, imputeOpts = imputeOpts,
+      returnOnSkip = "preprocess",
       study = cond
     )
     ssQced <- getRssInput(qcRecord)$sumstats

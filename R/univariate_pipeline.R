@@ -490,9 +490,20 @@ regionDataToSusieRssInput <- function(rssInput, ldData) {
 #' @param skipRegion Character vector of regions to skip (format "chrom:start-end").
 #' @param extractRegionName Gene/phenotype name to subset.
 #' @param regionNameCol Column to filter for extractRegionName.
-#' @param qcMethod Summary-statistic QC method. \code{"slalom"} and
-#'   \code{"dentist"} run basic allele harmonization plus LD-mismatch QC;
-#'   \code{"none"} runs basic allele harmonization only.
+#' @param mafCutoff Minor-allele-frequency cutoff applied after harmonization
+#'   and LD/reference alignment. The MAF is derived internally from the
+#'   effect-allele frequency \code{af} (\code{min(af, 1 - af)}); \code{af} is the
+#'   single source of truth and, unlike the individual/multivariate paths, the
+#'   RSS path does NOT fall back to a directionless input \code{maf}. When
+#'   \code{af} is missing the filter is skipped with one warning. Default
+#'   \code{NULL} (no filtering). \code{maf} is never exported.
+#' @param zMismatchQc Z-score / LD-mismatch QC selector. One of \code{"none"}
+#'   (default; basic allele harmonization only), \code{"slalom"}, or
+#'   \code{"dentist"} (harmonization plus LD-mismatch outlier QC). Hard rename of
+#'   the former \code{qcMethod} (alpha phase; no alias).
+#' @param alleleFlipKriging Logical; opt-in kriging LD-consistency prefilter
+#'   run before the heavier \code{zMismatchQc}, or standalone when
+#'   \code{zMismatchQc = "none"}. Default \code{FALSE}.
 #' @param finemappingMethod Iteration mode for the SuSiE-RSS fit (when
 #'   \code{"susie_rss"} is among \code{methods}). One of \code{"susie_rss"}
 #'   (default normal IBSS), \code{"single_effect"} (L=1, single iteration),
@@ -529,7 +540,9 @@ rssAnalysisPipeline <- function(
     sumstatPath, columnFilePath, ldData,
     nSample = 0, nCase = 0, nControl = 0, region = NULL, skipRegion = NULL,
     extractRegionName = NULL, regionNameCol = NULL,
-    qcMethod = c("slalom", "dentist", "none"),
+    mafCutoff = NULL,
+    zMismatchQc = "none",
+    alleleFlipKriging = FALSE,
     finemappingMethod = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
     methods = NULL,
     addSusieInf = TRUE,
@@ -563,15 +576,15 @@ rssAnalysisPipeline <- function(
     return(list(rss_data_analyzed = sumstats))
   }
 
-  qcMethodArg <- if (is.null(qcMethod)) NULL else match.arg(qcMethod)
-  qcMethod <- qcMethodArg
+  zMismatchQc <- .resolveZMismatchQc(zMismatchQc)
   qcRecord <- summaryStatsQc(
     rssInput = rssInput,
     ldData = ldData,
     keepIndel = keepIndel,
     skipRegion = skipRegion,
     pipCutoffToSkip = pipCutoffToSkip,
-    qcMethod = if (is.null(qcMethodArg)) "none" else qcMethodArg,
+    zMismatchQc = zMismatchQc,
+    alleleFlipKriging = alleleFlipKriging,
     impute = impute,
     imputeOpts = imputeOpts,
     returnOnSkip = "preprocess",
@@ -600,6 +613,33 @@ rssAnalysisPipeline <- function(
     return(list(rss_data_analyzed = sumstats))
   }
 
+  # mafCutoff: filter after harmonization + LD/reference alignment, using the
+  # AF-derived MAF. af is the single source of truth on the RSS path; unlike the
+  # univariate/multivariate paths it does NOT fall back to a directionless input
+  # maf. When af is missing the filter is skipped with one warning. maf is never
+  # exported (top_loci carries af only). Removing rows here re-aligns the LD,
+  # which regionDataToSusieRssInput() subsets by the surviving variants.
+  if (!is.null(mafCutoff) && is.numeric(mafCutoff) && mafCutoff > 0) {
+    af <- sumstats$af
+    if (is.null(af) || all(is.na(af))) {
+      warning("mafCutoff is set but af is missing for this region; skipping MAF filtering ",
+              "(the RSS path does not fall back to a directionless maf).")
+    } else {
+      maf <- mafFromAf(af)
+      rmIdx <- which(maf <= mafCutoff)
+      if (length(rmIdx) > 0) {
+        message("QC track: mafCutoff removed ", length(rmIdx),
+                " variant(s) at or below MAF ", mafCutoff, ".")
+        sumstats <- sumstats[-rmIdx, , drop = FALSE]
+        rssRecord$sumstats <- sumstats
+        if (nrow(sumstats) == 0) {
+          message("No variants left after mafCutoff filtering. Returning empty results.")
+          return(list(rss_data_analyzed = sumstats))
+        }
+      }
+    }
+  }
+
   qcLd <- getLdData(qcRecord)
   susieReady <- regionDataToSusieRssInput(rssRecord, qcLd)$susie_rss_input
 
@@ -623,15 +663,18 @@ rssAnalysisPipeline <- function(
       rFinite = rFinite,
       rMismatch = rMismatch
     )))
-    if (!is.null(qcMethod)) {
+    if (!identical(zMismatchQc, "none") || isTRUE(alleleFlipKriging)) {
       res$outlier_number <- qcResults$outlier_number
     }
   }
-  .makeMethodName <- function(method, qcMethod, impute) {
-    suffix <- if (!is.null(qcMethod) && impute) {
-      paste0(toupper(qcMethod), "_RAISS_imputed")
-    } else if (!is.null(qcMethod)) {
-      toupper(qcMethod)
+  # "none" keeps the historical NO_QC suffix (the de-facto default the SoS
+  # notebooks hit via qcMethod = NULL); slalom/dentist keep their uppercase
+  # suffixes for result-file naming continuity.
+  .makeMethodName <- function(method, zMismatchQc, impute) {
+    suffix <- if (!identical(zMismatchQc, "none") && impute) {
+      paste0(toupper(zMismatchQc), "_RAISS_imputed")
+    } else if (!identical(zMismatchQc, "none")) {
+      toupper(zMismatchQc)
     } else {
       "NO_QC"
     }
@@ -655,7 +698,7 @@ rssAnalysisPipeline <- function(
     )))
   }
 
-  methodName <- .makeMethodName(finemappingMethod, qcMethod, impute)
+  methodName <- .makeMethodName(finemappingMethod, zMismatchQc, impute)
   resultList <- list()
   resultList[[methodName]] <- res
   resultList[["rss_data_analyzed"]] <- sumstats
@@ -688,10 +731,10 @@ rssAnalysisPipeline <- function(
         if (any(blockCsMetrics$p_value > 1e-4 | blockCsMetrics$max_cs_corr_study_block > 0.5)) {
           bcr <- .runReanalysis(sumstats, qcLd, "bayesian_conditional_regression",
             finemappingOpts, priCoverage, secCoverage)
-          if (!is.null(qcMethod)) {
+          if (!identical(zMismatchQc, "none") || isTRUE(alleleFlipKriging)) {
             bcr$outlier_number <- qcResults$outlier_number
           }
-          resultList[[.makeMethodName("bayesian_conditional_regression", qcMethod, impute)]] <- bcr
+          resultList[[.makeMethodName("bayesian_conditional_regression", zMismatchQc, impute)]] <- bcr
           ser <- .runReanalysis(preprocessResults$sumstats, preprocessLd,
             "single_effect", finemappingOpts, priCoverage, secCoverage)
           resultList[["single_effect_NO_QC"]] <- ser

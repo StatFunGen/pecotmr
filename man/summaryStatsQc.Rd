@@ -13,7 +13,8 @@ summaryStatsQc(
   keepIndel = TRUE,
   skipRegion = NULL,
   pipCutoffToSkip = 0,
-  qcMethod = NULL,
+  zMismatchQc = NULL,
+  alleleFlipKriging = FALSE,
   impute = FALSE,
   imputeOpts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
   study = NULL,
@@ -40,9 +41,18 @@ combined RSS/ColocBoost QC workflow. A single RSS record is detected by
 structure, not by the name \code{sumstats}, so a multi-study list may safely
 include a study named \code{"sumstats"}.}
 
-\item{keepIndel, skipRegion, pipCutoffToSkip, qcMethod, impute, imputeOpts, study, varY, returnOnSkip, R_finite, R_mismatch}{Additional controls for the combined RSS/ColocBoost QC workflow. They are
+\item{keepIndel, skipRegion, pipCutoffToSkip, impute, imputeOpts, study, varY, returnOnSkip, R_finite, R_mismatch}{Additional controls for the combined RSS/ColocBoost QC workflow. They are
 ignored by the historical LD-mismatch-only call unless \code{rssInput} or
 combined-QC options are supplied.}
+
+\item{zMismatchQc}{The z-score / LD-mismatch QC selector for the combined
+workflow. One of \code{"none"} (default; basic allele harmonization only),
+\code{"slalom"}, or \code{"dentist"}. \code{NULL} resolves to \code{"none"}.
+(Hard rename of the former \code{qcMethod}; no alias.)}
+
+\item{alleleFlipKriging}{Logical; opt-in kriging LD-consistency prefilter
+(\code{\link{krigingOutlierQc}}) run before the heavier QC, or standalone
+when \code{zMismatchQc = "none"}. Default \code{FALSE}.}
 }
 \value{
 A \code{QcResult} S4 object for the historical LD-mismatch-only
@@ -69,7 +79,7 @@ This function applies the specified quality control method to the
   through this same function, and optional RAISS imputation. The combined
   path normalizes one or many RSS records to the same loop internally; only
   true single-record input is unwrapped on return.
-  \code{qcMethod = NULL} and \code{"none"} mean basic-only summary-stat
+  \code{zMismatchQc = NULL} and \code{"none"} mean basic-only summary-stat
   preprocessing without SLALOM/DENTIST outlier QC.
 
   When the combined path receives genotype-backed reference data
@@ -89,6 +99,6 @@ qcResults <- summaryStatsQc(sumstats, ldData, method = "slalom")
 
 # Additional combined basic-only RSS QC.
 qcResults <- summaryStatsQc(rssInput = rssInput, ldData = ldData,
-                            qcMethod = "none")
+                            zMismatchQc = "none")
 
 }

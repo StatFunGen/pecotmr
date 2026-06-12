@@ -47,8 +47,13 @@ rssBasicQc <- function(sumstats, ldData, skipRegion = NULL, keepIndel = TRUE,
 
   refVariants <- ldVariants
 
+  # Complement af on allele swaps when present. Step 1 only populates af when it
+  # is proven effect-allele frequency, so the column's presence is the signal.
+  colToComplement <- intersect("af", colnames(sumstats))
+
   alleleFlip <- matchRefPanel(sumstats, refVariants,
     colToFlip = colToFlip,
+    colToComplement = colToComplement,
     matchMinProp = 0, removeDups = TRUE, removeIndels = !keepIndel,
     removeStrandAmbiguous = TRUE
   )
@@ -167,9 +172,62 @@ ldMismatchQc <- function(zScore, R = NULL, X = NULL, nSample = NULL,
   }
 }
 
-.resolveSummaryQcMethod <- function(qcMethod) {
-  if (is.null(qcMethod)) return("none")
-  match.arg(qcMethod, c("none", "slalom", "dentist"))
+.resolveZMismatchQc <- function(zMismatchQc) {
+  if (is.null(zMismatchQc)) return("none")
+  match.arg(zMismatchQc, c("none", "slalom", "dentist"))
+}
+
+#' Kriging-style LD-consistency outlier QC
+#'
+#' Flags variants whose observed z-score is inconsistent with the value
+#' predicted from its LD neighbours. For \code{z ~ N(0, R)} the leave-one-out
+#' conditional distribution of \code{z_i} given the rest has mean
+#' \code{-(1/Omega_ii) * Omega_{i,-i} z_{-i}} and variance \code{1/Omega_ii},
+#' where \code{Omega = R^{-1}}. The standardized residual is ~\code{N(0,1)} when
+#' the z-scores and LD are mutually consistent, so a large residual marks an
+#' allele-flip / LD-mismatch outlier. RSS-only helper, opt-in via
+#' \code{alleleFlipKriging}; never wired into \code{alleleQc()} /
+#' \code{matchRefPanel()}.
+#'
+#' @param zScore Numeric vector of harmonized z-scores.
+#' @param R Square LD correlation matrix aligned to \code{zScore}.
+#' @param variantIds Optional variant IDs for the diagnostics table.
+#' @param pThreshold Two-sided p-value cutoff for flagging an outlier
+#'   (default \code{5e-8}).
+#' @param ridge Small diagonal added to \code{R} before inversion for numerical
+#'   stability (default \code{1e-3}).
+#' @return A list with \code{outlier} (logical vector) and \code{diagnostics}
+#'   (data frame of per-variant predicted z, residual, statistic, p-value, and
+#'   outlier flag).
+#' @importFrom stats pnorm
+#' @export
+krigingOutlierQc <- function(zScore, R, variantIds = NULL,
+                             pThreshold = 5e-8, ridge = 1e-3) {
+  zScore <- as.numeric(zScore)
+  m <- length(zScore)
+  if (is.null(R) || !is.matrix(R) || nrow(R) != m || ncol(R) != m) {
+    stop("krigingOutlierQc requires a square LD matrix aligned to zScore.")
+  }
+  if (is.null(variantIds)) variantIds <- rownames(R)
+  # Regularize so the precision matrix is well-defined for collinear panels.
+  Omega <- solve(R + diag(ridge, m))
+  d <- diag(Omega)
+  omegaZ <- as.numeric(Omega %*% zScore)
+  condMean <- -(omegaZ - d * zScore) / d
+  condVar <- 1 / d
+  residual <- zScore - condMean
+  statistic <- residual / sqrt(condVar)
+  pValue <- 2 * pnorm(-abs(statistic))
+  outlier <- !is.na(pValue) & pValue < pThreshold
+  list(
+    outlier = outlier,
+    diagnostics = data.frame(
+      variant_id = if (is.null(variantIds)) seq_len(m) else variantIds,
+      z = zScore, predicted = condMean, residual = residual,
+      statistic = statistic, p_value = pValue, outlier = outlier,
+      stringsAsFactors = FALSE
+    )
+  )
 }
 
 #' Perform Quality Control on Summary Statistics
@@ -189,7 +247,14 @@ ldMismatchQc <- function(zScore, R = NULL, X = NULL, nSample = NULL,
 #'   combined RSS/ColocBoost QC workflow. A single RSS record is detected by
 #'   structure, not by the name \code{sumstats}, so a multi-study list may safely
 #'   include a study named \code{"sumstats"}.
-#' @param keepIndel,skipRegion,pipCutoffToSkip,qcMethod,impute,imputeOpts,study,varY,returnOnSkip,R_finite,R_mismatch
+#' @param zMismatchQc The z-score / LD-mismatch QC selector for the combined
+#'   workflow. One of \code{"none"} (default; basic allele harmonization only),
+#'   \code{"slalom"}, or \code{"dentist"}. \code{NULL} resolves to \code{"none"}.
+#'   (Hard rename of the former \code{qcMethod}; no alias.)
+#' @param alleleFlipKriging Logical; opt-in kriging LD-consistency prefilter
+#'   (\code{\link{krigingOutlierQc}}) run before the heavier QC, or standalone
+#'   when \code{zMismatchQc = "none"}. Default \code{FALSE}.
+#' @param keepIndel,skipRegion,pipCutoffToSkip,impute,imputeOpts,study,varY,returnOnSkip,R_finite,R_mismatch
 #'   Additional controls for the combined RSS/ColocBoost QC workflow. They are
 #'   ignored by the historical LD-mismatch-only call unless \code{rssInput} or
 #'   combined-QC options are supplied.
@@ -212,7 +277,7 @@ ldMismatchQc <- function(zScore, R = NULL, X = NULL, nSample = NULL,
 #'   through this same function, and optional RAISS imputation. The combined
 #'   path normalizes one or many RSS records to the same loop internally; only
 #'   true single-record input is unwrapped on return.
-#'   \code{qcMethod = NULL} and \code{"none"} mean basic-only summary-stat
+#'   \code{zMismatchQc = NULL} and \code{"none"} mean basic-only summary-stat
 #'   preprocessing without SLALOM/DENTIST outlier QC.
 #'
 #'   When the combined path receives genotype-backed reference data
@@ -232,7 +297,7 @@ ldMismatchQc <- function(zScore, R = NULL, X = NULL, nSample = NULL,
 #'
 #' # Additional combined basic-only RSS QC.
 #' qcResults <- summaryStatsQc(rssInput = rssInput, ldData = ldData,
-#'                             qcMethod = "none")
+#'                             zMismatchQc = "none")
 #'
 #' @importFrom dplyr mutate row_number filter pull
 #' @importFrom susieR susie_ser
@@ -243,7 +308,8 @@ summaryStatsQc <- function(sumstats, ldData, n = NULL,
                            keepIndel = TRUE,
                            skipRegion = NULL,
                            pipCutoffToSkip = 0,
-                           qcMethod = NULL,
+                           zMismatchQc = NULL,
+                           alleleFlipKriging = FALSE,
                            impute = FALSE,
                            imputeOpts = list(rcond = 0.01, R2_threshold = 0.6,
                                              minimum_ld = 5, lamb = 0.01),
@@ -254,7 +320,8 @@ summaryStatsQc <- function(sumstats, ldData, n = NULL,
                            R_mismatch = NULL) {
   if (missing(sumstats)) sumstats <- NULL
   returnOnSkip <- match.arg(returnOnSkip)
-  if (is.null(rssInput) && is.data.frame(sumstats) && is.null(qcMethod) &&
+  if (is.null(rssInput) && is.data.frame(sumstats) && is.null(zMismatchQc) &&
+      isFALSE(alleleFlipKriging) &&
       isFALSE(impute) && identical(pipCutoffToSkip, 0) && is.null(skipRegion)) {
     method <- match.arg(method)
     # When genotypes are available, compute R only for the needed variant subset
@@ -287,7 +354,7 @@ summaryStatsQc <- function(sumstats, ldData, n = NULL,
     ))
   }
 
-  qcMethod <- .resolveSummaryQcMethod(qcMethod)
+  zMismatchQc <- .resolveZMismatchQc(zMismatchQc)
 
   if (is.null(rssInput)) {
     if (is.null(sumstats)) stop("summaryStatsQc requires sumstats or rssInput.")
@@ -367,7 +434,8 @@ summaryStatsQc <- function(sumstats, ldData, n = NULL,
       keepIndel = keepIndel,
       skipRegion = skipRegion,
       pipCutoffToSkip = cutoffs[[studyName]],
-      qcMethod = qcMethod,
+      zMismatchQc = zMismatchQc,
+      alleleFlipKriging = alleleFlipKriging,
       impute = impute,
       imputeOpts = imputeOpts,
       study = studyName,
@@ -432,8 +500,9 @@ summaryStatsQc <- function(sumstats, ldData, n = NULL,
 }
 
 .summaryStatsQcSingleStudy <- function(rssInput, ldData, keepIndel, skipRegion,
-                                       pipCutoffToSkip, qcMethod, impute,
+                                       pipCutoffToSkip, zMismatchQc, impute,
                                        imputeOpts, study, returnOnSkip,
+                                       alleleFlipKriging = FALSE,
                                        R_finite = NULL, R_mismatch = NULL) {
   if (is.null(rssInput) || is.null(ldData)) return(NULL)
   message("QC track: starting basic allele harmonization for summary-stat study ", study, ".")
@@ -538,16 +607,34 @@ summaryStatsQc <- function(sumstats, ldData, n = NULL,
   }
 
   outlierNumber <- 0L
-  if (!is.null(qcMethod) && !identical(qcMethod, "none")) {
-    message("QC track: running ", qcMethod, " LD-mismatch QC for summary-stat study ", study, ".")
+  # Optional kriging LD-consistency prefilter (opt-in). Runs before the heavier
+  # SLALOM/DENTIST QC, or standalone when zMismatchQc == "none".
+  if (isTRUE(alleleFlipKriging) && nrow(sumstats) >= 2) {
+    message("QC track: running kriging LD-consistency prefilter for summary-stat study ", study, ".")
+    krLd <- ldDataWithLocalR(sumstats)
+    rKr <- getCorrelation(krLd)
+    rKr <- rKr[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
+    kr <- krigingOutlierQc(sumstats$z, rKr, variantIds = sumstats$variant_id)
+    nKr <- sum(kr$outlier)
+    if (nKr > 0) {
+      sumstats <- sumstats[!kr$outlier, , drop = FALSE]
+      if (!hasGenotype) R_mat <- R_mat[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
+      outlierNumber <- outlierNumber + nKr
+    }
+    message("QC track: kriging prefilter removed ", nKr,
+            " LD-inconsistent variant(s) for summary-stat study ", study, ".")
+  }
+  if (!is.null(zMismatchQc) && !identical(zMismatchQc, "none")) {
+    message("QC track: running ", zMismatchQc, " z-score/LD-mismatch QC for summary-stat study ", study, ".")
     qc <- summaryStatsQc(sumstats = sumstats, ldData = ldDataWithLocalR(sumstats),
-                         n = n, method = qcMethod)
+                         n = n, method = zMismatchQc)
     qcRss <- getRssInput(qc)
     sumstats <- qcRss$sumstats
     qcLd <- getLdData(qc)
     R_mat <- if (is.null(qcLd)) NULL else getCorrelation(qcLd)
-    outlierNumber <- getOutlierNumber(qc)
-    message("QC track: removed ", outlierNumber,
+    ldMismatchOutliers <- getOutlierNumber(qc)
+    outlierNumber <- outlierNumber + ldMismatchOutliers
+    message("QC track: removed ", ldMismatchOutliers,
             " LD-mismatch outlier(s) for summary-stat study ", study, ".")
   }
   if (isTRUE(impute)) {

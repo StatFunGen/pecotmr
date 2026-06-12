@@ -87,16 +87,16 @@ test_that("qcRegionalData is exported for downstream use", {
   expect_identical(getExportedValue("pecotmr", "qcRegionalData"), qcRegionalData)
 })
 
-test_that("qcRegionalData accepts explicit qcMethod = 'slalom'", {
+test_that("qcRegionalData accepts explicit zMismatchQc = 'slalom'", {
   region_data <- list(individual_data = NULL, sumstat_data = NULL)
-  result <- qcRegionalData(region_data, qcMethod = "slalom")
+  result <- qcRegionalData(region_data, zMismatchQc = "slalom")
   expect_type(result, "list")
 })
 
 test_that("qcRegionalData rejects invalid qc_method", {
   region_data <- list(individual_data = NULL, sumstat_data = NULL)
   expect_error(
-    qcRegionalData(region_data, qcMethod = "invalid"),
+    qcRegionalData(region_data, zMismatchQc = "invalid"),
     "arg"
   )
 })
@@ -279,8 +279,8 @@ test_that("qcRegionalData treats NULL qc_method as basic-only none", {
   )
 
   local_mocked_bindings(
-    summaryStatsQc = function(..., qcMethod) {
-      captured_qc_method <<- qcMethod
+    summaryStatsQc = function(..., zMismatchQc) {
+      captured_qc_method <<- zMismatchQc
       list(study1 = QcResult(
         ldData = ld_data_one,
         rssInput = list(sumstats = data.frame(variant_id = "chr1:100:A:G"),
@@ -292,7 +292,7 @@ test_that("qcRegionalData treats NULL qc_method as basic-only none", {
     }
   )
 
-  result <- qcRegionalData(region_data, qcMethod = NULL, impute = FALSE)
+  result <- qcRegionalData(region_data, zMismatchQc = NULL, impute = FALSE)
   expect_equal(captured_qc_method, "none")
   expect_type(result, "list")
 })
@@ -302,8 +302,8 @@ test_that("colocboostPipeline default qc_method resolves to basic-only none", {
   captured_qc_method <- NULL
 
   local_mocked_bindings(
-    qcRegionalData = function(regionData, ..., qcMethod) {
-      captured_qc_method <<- qcMethod
+    qcRegionalData = function(regionData, ..., zMismatchQc) {
+      captured_qc_method <<- zMismatchQc
       ind <- regionData$individual_data
       list(
         individual_data = list(
@@ -412,7 +412,7 @@ test_that("ColocBoost adapters accept genotype-backed LdData", {
     sumstat = data.frame(variant = variant_id, z = seq_along(variant_id), n = 1000),
     X_ref = X_ref,
     ldReferenceInfo = ld_data,
-    qcMethod = "none",
+    zMismatchQc = "none",
     M = 2
   ))
   expect_null(result$args$LD)
@@ -583,7 +583,7 @@ test_that("summaryStatsQc runs combined basic harmonization when qc_method is no
     result <- summaryStatsQc(
       rssInput = rss_input$rss_input,
       ldData = rss_input$LD_data,
-      qcMethod = "none",
+      zMismatchQc = "none",
       impute = FALSE
     ),
     "basic allele harmonization"
@@ -601,7 +601,7 @@ test_that("summaryStatsQc returns one cleaned record for one RSS record", {
     result <- summaryStatsQc(
       rssInput = rss_input$rss_input$study1,
       ldData = rss_input$LD_data$study1,
-      qcMethod = "none",
+      zMismatchQc = "none",
       impute = FALSE
     ),
     "basic allele harmonization"
@@ -621,7 +621,7 @@ test_that("summaryStatsQc treats a study named sumstats as multiple-study input"
     result <- summaryStatsQc(
       rssInput = rss_input$rss_input,
       ldData = rss_input$LD_data,
-      qcMethod = "none",
+      zMismatchQc = "none",
       impute = FALSE
     ),
     "basic allele harmonization"
@@ -639,7 +639,7 @@ test_that("summaryStatsQc imputes when block metadata can be inferred from LD ma
     result <- summaryStatsQc(
       rssInput = rss_input$rss_input,
       ldData = rss_input$LD_data,
-      qcMethod = "none",
+      zMismatchQc = "none",
       impute = TRUE,
       imputeOpts = list(rcond = 0.01, R2_threshold = -Inf, minimum_ld = -Inf, lamb = 0.01)
     ),
@@ -726,7 +726,7 @@ test_that("colocboostAnalysis refreshes outcome_names after combined QC", {
   expect_message(
     result <- do.call(
       colocboostAnalysis,
-      c(converted$colocboost_input, list(missingRateThresh = 1, qcMethod = "none", M = 2))
+      c(converted$colocboost_input, list(missingRateThresh = 1, zMismatchQc = "none", M = 2))
     ),
     "summary-statistic"
   )
@@ -810,7 +810,7 @@ test_that("colocboostAnalysis skips empty individual QC for sumstat-only inputs"
   withCallingHandlers(
     result <- do.call(
       colocboostAnalysis,
-      c(converted$colocboost_input, list(qcMethod = "none", M = 2))
+      c(converted$colocboost_input, list(zMismatchQc = "none", M = 2))
     ),
     message = function(m) {
       messages <<- c(messages, conditionMessage(m))
@@ -831,7 +831,7 @@ test_that("colocboostAnalysis falls back to direct call when QC inputs are unava
   )
 
   expect_warning(
-    result <- colocboostAnalysis(qcMethod = "none", M = 2),
+    result <- colocboostAnalysis(zMismatchQc = "none", M = 2),
     "required QC inputs are unavailable"
   )
   expect_equal(result$args$M, 2)
@@ -874,7 +874,7 @@ test_that("colocboostAnalysis derives summary QC input from ColocBoost-style inp
   rownames(LD) <- colnames(LD) <- variants
 
   expect_message(
-    result <- colocboostAnalysis(sumstat = sumstat, LD = LD, qcMethod = "none", M = 2),
+    result <- colocboostAnalysis(sumstat = sumstat, LD = LD, zMismatchQc = "none", M = 2),
     "summary-statistic"
   )
   expect_equal(length(result$args$sumstat), 1)
@@ -907,7 +907,7 @@ test_that("colocboostAnalysis keeps multiple GWAS as colocboost list input after
     result <- colocboostAnalysis(
       sumstat = list(gwas1 = make_sumstat(1), gwas2 = make_sumstat(2)),
       LD = LD,
-      qcMethod = "none",
+      zMismatchQc = "none",
       M = 2
     ),
     "summary-statistic"
@@ -949,7 +949,7 @@ test_that("colocboostAnalysis imputes native LD input using inferred block metad
     expect_message(
       result <- colocboostAnalysis(
         sumstat = sumstat, LD = LD,
-        qcMethod = "none", impute = TRUE, M = 2
+        zMismatchQc = "none", impute = TRUE, M = 2
       ),
       "running imputation"
     ),
@@ -983,7 +983,7 @@ test_that("colocboostAnalysis imputes X_ref input through R-based RAISS path", {
     expect_message(
       result <- colocboostAnalysis(
         sumstat = sumstat, X_ref = X_ref,
-        qcMethod = "none", impute = TRUE, M = 2
+        zMismatchQc = "none", impute = TRUE, M = 2
       ),
       "running imputation"
     ),
@@ -1018,7 +1018,7 @@ test_that("colocboostAnalysis keeps QC-generated X_ref mutually exclusive with o
     sumstat = sumstat,
     LD = LD,
     ldReferenceInfo = LD_reference_info,
-    qcMethod = "none",
+    zMismatchQc = "none",
     M = 2
   ))
 
@@ -1045,7 +1045,7 @@ test_that("colocboostAnalysis native summary QC supports explicit A1_A2 variant 
 
   result <- suppressMessages(colocboostAnalysis(
     sumstat = sumstat, LD = LD,
-    qcMethod = "none",
+    zMismatchQc = "none",
     variantConvention = "A1_A2", M = 2
   ))
   expect_equal(result$args$sumstat[[1]]$variant, paste0("chr1:", seq_len(5) * 100, ":A:G"))
@@ -1080,7 +1080,7 @@ test_that("colocboostAnalysis uses LD_reference_info data frame for rsid-named L
   expect_message(
     result <- colocboostAnalysis(
       sumstat = sumstat, LD = LD,
-      qcMethod = "none",
+      zMismatchQc = "none",
       ldReferenceInfo = LD_reference_info,
       M = 2
     ),
@@ -1115,7 +1115,7 @@ test_that("colocboostAnalysis uses LD_reference_info row order when LD names are
   expect_message(
     result <- colocboostAnalysis(
       sumstat = sumstat, LD = LD,
-      qcMethod = "none",
+      zMismatchQc = "none",
       ldReferenceInfo = LD_reference_info,
       M = 2
     ),
@@ -1152,7 +1152,7 @@ test_that("colocboostAnalysis reads LD_reference_info from a bim file", {
 
   result <- suppressMessages(colocboostAnalysis(
     sumstat = sumstat, LD = LD,
-    qcMethod = "none",
+    zMismatchQc = "none",
     ldReferenceInfo = bim_file,
     M = 2
   ))
@@ -1176,7 +1176,7 @@ test_that("colocboostAnalysis reports missing LD_reference_info when LD names ar
   rownames(LD) <- colnames(LD) <- paste0("rs", seq_len(5))
 
   expect_warning(
-    result <- colocboostAnalysis(sumstat = sumstat, LD = LD, qcMethod = "none", M = 2),
+    result <- colocboostAnalysis(sumstat = sumstat, LD = LD, zMismatchQc = "none", M = 2),
     "LD_reference_info"
   )
   expect_identical(result$args$LD, LD)
@@ -1267,7 +1267,7 @@ test_that("colocboostPipeline preserves result fields when analyses return NULL"
     xqtlColoc =TRUE,
     jointGwas =TRUE,
     separateGwas =TRUE,
-    qcMethod = "none",
+    zMismatchQc = "none",
     impute = FALSE
   ))
   expect_named(result, c("xqtl_coloc", "joint_gwas", "separate_gwas", "computing_time"))
@@ -1566,7 +1566,7 @@ test_that("qcRegionalData handles named pipCutoffToSkipSumstat vector", {
     qcRegionalData(
       region_data,
       pipCutoffToSkipSumstat = pip_named,
-      qcMethod = "slalom",
+      zMismatchQc = "slalom",
       impute = FALSE
     )
   )
@@ -1605,7 +1605,7 @@ test_that("qcRegionalData fills missing study names with 0 for pipCutoffToSkipSu
       qcRegionalData(
         region_data,
         pipCutoffToSkipSumstat = pip_partial,
-        qcMethod = "slalom",
+        zMismatchQc = "slalom",
         impute = FALSE
       )
     ),
@@ -2995,7 +2995,7 @@ test_that("qcRegionalData: mismatched pipCutoffToSkipInd length errors", {
     qcRegionalData(
       region_data,
       pipCutoffToSkipInd = c(0.1, 0.2, 0.3),  # 3 values but only 2 contexts
-      qcMethod = "slalom"
+      zMismatchQc = "slalom"
     ),
     "pipCutoffToSkipInd must be a scalar"
   )
@@ -3008,7 +3008,7 @@ test_that("qcRegionalData: named pipCutoffToSkipInd works with context names", {
   result <- qcRegionalData(
     region_data,
     pipCutoffToSkipInd = c(ctx1 = 0, ctx2 = 0),
-    qcMethod = "slalom"
+    zMismatchQc = "slalom"
   )
   expect_type(result, "list")
 })
@@ -3020,7 +3020,7 @@ test_that("qcRegionalData: named pipCutoffToSkipInd fills missing contexts with 
   result <- qcRegionalData(
     region_data,
     pipCutoffToSkipInd = c(ctx1 = 0),
-    qcMethod = "slalom"
+    zMismatchQc = "slalom"
   )
   expect_type(result, "list")
 })
@@ -3032,7 +3032,7 @@ test_that("qcRegionalData: scalar pipCutoffToSkipInd becomes named vector", {
   result <- qcRegionalData(
     region_data,
     pipCutoffToSkipInd = 0,
-    qcMethod = "slalom"
+    zMismatchQc = "slalom"
   )
   expect_type(result, "list")
 })
@@ -3068,7 +3068,7 @@ test_that("qcRegionalData: pipCutoffToSkipInd lookup works when X and Y have dif
   result <- qcRegionalData(
     region_data,
     pipCutoffToSkipInd = 0,
-    qcMethod = "slalom"
+    zMismatchQc = "slalom"
   )
   expect_type(result, "list")
 })
@@ -3207,7 +3207,7 @@ test_that("qcRegionalData: with only sumstat data processes correctly", {
   result <- suppressMessages(
     qcRegionalData(
       region_data,
-      qcMethod = "slalom",
+      zMismatchQc = "slalom",
       impute = FALSE
     )
   )
@@ -3255,3 +3255,12 @@ test_that(".runColocboost returns NULL and message on error", {
   expect_s3_class(result$time, "difftime")
 })
 NA
+
+# ---- removed qcMethod is rejected (hard rename, no alias) ----
+test_that("qcRegionalData rejects the removed qcMethod argument as unknown", {
+  region_data <- list(individual_data = NULL, sumstat_data = NULL)
+  expect_error(
+    qcRegionalData(region_data, qcMethod = "slalom"),
+    "unused argument"
+  )
+})

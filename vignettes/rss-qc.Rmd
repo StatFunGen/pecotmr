@@ -40,9 +40,10 @@ The same wrappers work for both GWAS and QTL summary statistics — only the
 loading layer differs (QTL sumstats are typically tabix-indexed per-gene
 tables that need a column-mapping YAML). The fine-mapping and
 TWAS-weights pipelines (`rssAnalysisPipeline()`,
-`twasWeightsSumstatPipeline()`) call these QC functions internally with
-`qcMethod = "slalom"` as the default; this vignette shows what they do
-under the hood so you can run QC standalone or tune its behavior.
+`twasWeightsSumstatPipeline()`) call these QC functions internally; the
+selector is `zMismatchQc` (default `"none"`, i.e. basic allele harmonization
+only — set `"slalom"` or `"dentist"` to add LD-mismatch QC). This vignette
+shows what they do under the hood so you can run QC standalone or tune it.
 
 ```{r load-packages}
 library(pecotmr)
@@ -396,8 +397,8 @@ to impute from).
 
 Downstream pipelines (`rssAnalysisPipeline()`,
 `twasWeightsSumstatPipeline()`, `colocboostPipeline()`) all call
-`summaryStatsQc()` internally with `qcMethod = "slalom"` as the
-default. The two TWAS pipelines additionally accept
+`summaryStatsQc()` internally; the `zMismatchQc` selector defaults to
+`"none"` (basic allele harmonization only). The two TWAS pipelines additionally accept
 `imputeMissing = TRUE` to fill missing variants from the LD reference
 at the harmonization stage (see vignettes referenced above). Run QC
 standalone when you need to inspect outliers or tune QC options;

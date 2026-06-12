@@ -122,11 +122,11 @@ regionDataToColocboostInput <- function(regionData) {
 #'
 #' Individual-level QC is only attempted when at least one individual QC control
 #' is non-\code{NULL} and named \code{X} and \code{Y} inputs are available in
-#' \code{...}. Summary-statistic QC is only attempted when \code{qc_method},
+#' \code{...}. Summary-statistic QC is only attempted when \code{zMismatchQc},
 #' \code{pip_cutoff_to_skip_sumstat}, \code{impute = TRUE}, or
 #' \code{LD_reference_info} is supplied and named \code{sumstat} plus either
 #' \code{LD}, \code{X_ref}, or \code{LD_reference_info} are available.
-#' \code{qc_method = "none"} means run basic allele/variant harmonization
+#' \code{zMismatchQc = "none"} means run basic allele/variant harmonization
 #' only; it does not run SLALOM/DENTIST
 #' LD-mismatch QC. RAISS imputation is controlled separately by
 #' \code{impute = TRUE}.
@@ -146,8 +146,8 @@ regionDataToColocboostInput <- function(regionData) {
 #' @param missingRateThresh,mafCutoff,xvarCutoff,ldReferenceMetaFile,pipCutoffToSkipInd
 #'   Individual-level QC controls. If all are \code{NULL}, individual-level QC
 #'   is not run.
-#' @param keepIndel,pipCutoffToSkipSumstat,qcMethod,impute,imputeOpts
-#'   Summary-statistic QC controls. \code{qcMethod = "none"} runs
+#' @param keepIndel,pipCutoffToSkipSumstat,zMismatchQc,impute,imputeOpts
+#'   Summary-statistic QC controls. \code{zMismatchQc = "none"} runs
 #'   basic allele harmonization without
 #'   LD-mismatch outlier detection. Imputation is only run when
 #'   \code{impute = TRUE}.
@@ -170,17 +170,17 @@ regionDataToColocboostInput <- function(regionData) {
 #'
 #' # Summary-statistic input with basic allele/variant harmonization only.
 #' fit <- colocboostAnalysis(sumstat = sumstat, LD = LD,
-#'                           qcMethod = "none", M = 500)
+#'                           zMismatchQc = "none", M = 500)
 #'
 #' # Summary-statistic input with LD-mismatch QC and RAISS imputation.
 #' fit <- colocboostAnalysis(sumstat = sumstat, LD = LD,
-#'                           qcMethod = "slalom", impute = TRUE)
+#'                           zMismatchQc = "slalom", impute = TRUE)
 #'
 #' # Use richer LD metadata from load_LD_matrix() for QC, while still passing
 #' # ColocBoost's native LD input.
 #' ldData <- load_LD_matrix(ldMetaFile, region)
 #' fit <- colocboostAnalysis(sumstat = sumstat, LD = getCorrelation(ldData),
-#'                           ldReferenceInfo = ldData, qcMethod = "none")
+#'                           ldReferenceInfo = ldData, zMismatchQc = "none")
 #'
 #' # Individual-level input with explicit genotype QC thresholds.
 #' fit <- colocboostAnalysis(X = X, Y = Y,
@@ -198,7 +198,7 @@ colocboostAnalysis <- function(...,
                                # sumstat QC
                                keepIndel = TRUE,
                                pipCutoffToSkipSumstat = NULL,
-                               qcMethod = NULL,
+                               zMismatchQc = NULL,
                                impute = FALSE,
                                imputeOpts = list(rcond = 0.01, R2_threshold = 0.6,
                                                  minimum_ld = 5, lamb = 0.01),
@@ -208,12 +208,12 @@ colocboostAnalysis <- function(...,
   directArgs <- list(...)
   preQcDataOutcomes <- .cbColocboostOutcomeNames(directArgs, preferSupplied = FALSE)
   preQcDisplayOutcomes <- .cbColocboostOutcomeNames(directArgs, preferSupplied = TRUE)
-  if (!is.null(qcMethod)) qcMethod <- .resolveSummaryQcMethod(qcMethod)
+  if (!is.null(zMismatchQc)) zMismatchQc <- .resolveZMismatchQc(zMismatchQc)
 
   individualQcRequested <- !is.null(missingRateThresh) ||
     !is.null(mafCutoff) || !is.null(xvarCutoff) ||
     !is.null(ldReferenceMetaFile) || !is.null(pipCutoffToSkipInd)
-  sumstatQcRequested <- !is.null(qcMethod) || isTRUE(impute) ||
+  sumstatQcRequested <- !is.null(zMismatchQc) || isTRUE(impute) ||
     !is.null(pipCutoffToSkipSumstat) || !is.null(ldReferenceInfo)
   qcRequested <- individualQcRequested || sumstatQcRequested
   if (!qcRequested) {
@@ -303,7 +303,7 @@ colocboostAnalysis <- function(...,
         ldData = sumstatQcInput$LD_data,
         keepIndel = keepIndel,
         pipCutoffToSkip = .cbDefault(pipCutoffToSkipSumstat, 0),
-        qcMethod = if (is.null(qcMethod)) "none" else qcMethod,
+        zMismatchQc = if (is.null(zMismatchQc)) "none" else zMismatchQc,
         impute = impute,
         imputeOpts = imputeOpts
       )
@@ -352,7 +352,7 @@ colocboostAnalysis <- function(...,
 #' @param mafCutoff A scalar to remove variants with maf < mafCutoff, dafault is 0.005.
 #' @param pipCutoffToSkipInd A vector of cutoff values for skipping analysis based on PIP values for each context. Default is 0.
 #' @param pipCutoffToSkipSumstat A vector of cutoff values for skipping analysis based on PIP values for each sumstat Default is 0.
-#' @param qcMethod Quality control method to use. Options are "none",
+#' @param zMismatchQc Quality control method to use. Options are "none",
 #'   "slalom", or "dentist". \code{NULL} is treated as \code{"none"} for
 #'   basic-only summary-stat preprocessing.
 #' @param impute Logical; if TRUE, performs imputation for outliers identified in the analysis (default: TRUE).
@@ -388,7 +388,7 @@ colocboostPipeline <- function(
   # - sumstat QC
   keepIndel = TRUE,
   pipCutoffToSkipSumstat = 0,
-  qcMethod = NULL,
+  zMismatchQc = NULL,
   impute = TRUE,
   imputeOpts = list(
     rcond = 0.01, R2_threshold = 0.6,
@@ -512,7 +512,7 @@ colocboostPipeline <- function(
   }
 
   ####### ========= resolve defaults ======== #######
-  qcMethod <- .resolveSummaryQcMethod(qcMethod)
+  zMismatchQc <- .resolveZMismatchQc(zMismatchQc)
 
   ####### ========= initial output results before QC ======== #######
   analysisResults <- list("xqtl_coloc" = NULL, "joint_gwas" = NULL, "separate_gwas" = NULL)
@@ -589,7 +589,7 @@ colocboostPipeline <- function(
     pipCutoffToSkipInd = pipCutoffToSkipInd,
     keepIndel = keepIndel,
     pipCutoffToSkipSumstat = pipCutoffToSkipSumstat,
-    qcMethod = qcMethod,
+    zMismatchQc = zMismatchQc,
     impute = impute,
     imputeOpts = imputeOpts
   )
@@ -681,7 +681,7 @@ colocboostPipeline <- function(
 #' @param keepIndel Logical; if \code{FALSE}, remove indel variants during
 #'   summary-statistic allele harmonization.
 #' @param pipCutoffToSkipSumstat A vector of cutoff values for skipping summary-stat studies.
-#' @param qcMethod Quality control method to use. Options are "none",
+#' @param zMismatchQc Quality control method to use. Options are "none",
 #'   "slalom", or "dentist". \code{NULL} is treated as \code{"none"} for
 #'   basic-only summary-stat preprocessing.
 #' @param impute Logical; if TRUE, performs imputation when required metadata are available.
@@ -695,10 +695,10 @@ qcRegionalData <- function(regionData,
                            # - sumstat
                            keepIndel = TRUE,
                            pipCutoffToSkipSumstat = 0,
-                           qcMethod = NULL,
+                           zMismatchQc = NULL,
                            impute = FALSE,
                            imputeOpts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)) {
-  qcMethod <- .resolveSummaryQcMethod(qcMethod)
+  zMismatchQc <- .resolveZMismatchQc(zMismatchQc)
   qcedIndividualToRegionData <- function(indQc) {
     if (is.null(indQc) || length(indQc) == 0) return(NULL)
     list(
@@ -770,7 +770,7 @@ qcRegionalData <- function(regionData,
       ldData = rssInput$LD_data,
       keepIndel = keepIndel,
       pipCutoffToSkip = pipCutoffToSkipSumstat,
-      qcMethod = qcMethod,
+      zMismatchQc = zMismatchQc,
       impute = impute,
       imputeOpts = imputeOpts
     )

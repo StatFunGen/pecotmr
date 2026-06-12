@@ -15,7 +15,9 @@ rssAnalysisPipeline(
   skipRegion = NULL,
   extractRegionName = NULL,
   regionNameCol = NULL,
-  qcMethod = c("slalom", "dentist", "none"),
+  mafCutoff = NULL,
+  zMismatchQc = "none",
+  alleleFlipKriging = FALSE,
   finemappingMethod = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
   methods = NULL,
   addSusieInf = TRUE,
@@ -56,9 +58,22 @@ computed only for QC stages that require a correlation matrix.}
 
 \item{regionNameCol}{Column to filter for extractRegionName.}
 
-\item{qcMethod}{Summary-statistic QC method. \code{"slalom"} and
-\code{"dentist"} run basic allele harmonization plus LD-mismatch QC;
-\code{"none"} runs basic allele harmonization only.}
+\item{mafCutoff}{Minor-allele-frequency cutoff applied after harmonization
+and LD/reference alignment. The MAF is derived internally from the
+effect-allele frequency \code{af} (\code{min(af, 1 - af)}); \code{af} is the
+single source of truth and, unlike the individual/multivariate paths, the
+RSS path does NOT fall back to a directionless input \code{maf}. When
+\code{af} is missing the filter is skipped with one warning. Default
+\code{NULL} (no filtering). \code{maf} is never exported.}
+
+\item{zMismatchQc}{Z-score / LD-mismatch QC selector. One of \code{"none"}
+(default; basic allele harmonization only), \code{"slalom"}, or
+\code{"dentist"} (harmonization plus LD-mismatch outlier QC). Hard rename of
+the former \code{qcMethod} (alpha phase; no alias).}
+
+\item{alleleFlipKriging}{Logical; opt-in kriging LD-consistency prefilter
+run before the heavier \code{zMismatchQc}, or standalone when
+\code{zMismatchQc = "none"}. Default \code{FALSE}.}
 
 \item{finemappingMethod}{Iteration mode for the SuSiE-RSS fit (when
 \code{"susie_rss"} is among \code{methods}). One of \code{"susie_rss"}

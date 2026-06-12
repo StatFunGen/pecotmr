@@ -9,7 +9,7 @@ twasMultivariateWeightsSumstatPipeline(
   ldData,
   n,
   methods = list(mrmash_rss = list(), mvsusie_rss = list()),
-  qcMethod = NULL,
+  zMismatchQc = NULL,
   keepIndel = TRUE,
   impute = FALSE,
   imputeMissing = FALSE,
@@ -36,7 +36,7 @@ variants. Each per-context sumstats is QC'd against this same LD panel.}
 Function names must match \code{<name>_weights}. Defaults to mr.mash-RSS
 and mvSuSiE-RSS with default arguments.}
 
-\item{qcMethod}{Per-context QC method passed to
+\item{zMismatchQc}{Per-context QC method passed to
 \code{\link{summary_stats_qc}}; one of \code{"slalom"}, \code{"dentist"},
 or NULL/\code{"none"}. Default \code{NULL} (basic harmonization only).}
 

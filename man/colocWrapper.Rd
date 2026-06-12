@@ -27,7 +27,7 @@ colocWrapper(
   nCase = 0,
   nControl = 0,
   region = NULL,
-  qcMethod = "slalom",
+  zMismatchQc = "slalom",
   finemappingMethod = "susie_rss",
   finemappingOpts = list(L = 20, L_greedy = 5, coverage = c(0.95, 0.7, 0.5),
     signal_cutoff = 0.025, min_abs_corr = 0.8),
@@ -87,7 +87,9 @@ colocWrapper(
 
 \item{region}{Genomic region string (e.g., "chr1:1000-2000").}
 
-\item{qcMethod}{QC method: "slalom", "dentist", or "none". Default "slalom".}
+\item{zMismatchQc}{Z-score / LD-mismatch QC selector forwarded to
+\code{\link{rssAnalysisPipeline}}: "slalom", "dentist", or "none".
+Default "slalom". (Hard rename of the former \code{zMismatchQc}; no alias.)}
 
 \item{finemappingMethod}{Fine-mapping method. Default "susie_rss".}
 

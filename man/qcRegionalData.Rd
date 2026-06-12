@@ -10,7 +10,7 @@ qcRegionalData(
   pipCutoffToSkipInd = 0,
   keepIndel = TRUE,
   pipCutoffToSkipSumstat = 0,
-  qcMethod = NULL,
+  zMismatchQc = NULL,
   impute = FALSE,
   imputeOpts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)
 )
@@ -27,7 +27,7 @@ summary-statistic allele harmonization.}
 
 \item{pipCutoffToSkipSumstat}{A vector of cutoff values for skipping summary-stat studies.}
 
-\item{qcMethod}{Quality control method to use. Options are "none",
+\item{zMismatchQc}{Quality control method to use. Options are "none",
 "slalom", or "dentist". \code{NULL} is treated as \code{"none"} for
 basic-only summary-stat preprocessing.}
 

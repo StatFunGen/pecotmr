@@ -15,6 +15,7 @@ matchRefPanel(
   removeStrandAmbiguous = TRUE,
   flipStrand = FALSE,
   removeUnmatched = TRUE,
+  colToComplement = character(),
   ...
 )
 
@@ -28,6 +29,7 @@ alleleQc(
   removeStrandAmbiguous = TRUE,
   flipStrand = FALSE,
   removeUnmatched = TRUE,
+  colToComplement = character(),
   ...
 )
 }
@@ -37,7 +39,9 @@ or a vector of strings in the format of "chr:pos:A2:A1"/"chr:pos_A2_A1". Can be 
 
 \item{refVariants}{A data frame with columns "chrom", "pos", "A2", "A1" or strings in the format of "chr:pos:A2:A1"/"chr:pos_A2_A1".}
 
-\item{colToFlip}{The name of the column in targetData where flips are to be applied.}
+\item{colToFlip}{The name of the column in targetData where flips are to be applied.
+On an allele swap these columns are sign-flipped (multiplied by -1), the
+correct operation for signed quantities like \code{beta} and \code{z}.}
 
 \item{matchMinProp}{Minimum proportion of variants in the smallest data
 to be matched, otherwise stops with an error. Default is 20%.}
@@ -51,6 +55,13 @@ to be matched, otherwise stops with an error. Default is 20%.}
 \item{flipStrand}{Whether to output the variants after strand flip. Default is `FALSE`.}
 
 \item{removeUnmatched}{Whether to remove unmatched variants. Default is `TRUE`.}
+
+\item{colToComplement}{Names of columns in targetData to complement
+(\code{1 - x}) on an allele swap, the correct operation for an
+effect-allele frequency like \code{af}. Default \code{character()} does no
+complementing, so non-RSS callers are unchanged. Distinct from
+\code{colToFlip}: frequencies are complemented, signed effects are
+sign-flipped.}
 
 \item{flip}{Whether the alleles must be flipped: A <--> T & C <--> G, in which case
 corresponding `colToFlip` are multiplied by -1. Default is `TRUE`.}

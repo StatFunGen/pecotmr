@@ -425,3 +425,50 @@ test_that("alleleQc errors on duplicated variant IDs with different values when 
     "Duplicated variants"
   )
 })
+
+# ===========================================================================
+# colToComplement hook (rss-qc-parity): af complemented on allele swap
+# ===========================================================================
+
+test_that("af is complemented (1 - af) when harmonization swaps the effect allele", {
+  ref <- data.frame(chrom = c("chr1", "chr1"), pos = c(100, 200),
+                    A2 = c("A", "C"), A1 = c("G", "T"), stringsAsFactors = FALSE)
+  # chr1:100 alleles swapped vs ref (=> sign flip); chr1:200 exact match.
+  target <- data.frame(chrom = c("chr1", "chr1"), pos = c(100, 200),
+                       A2 = c("G", "C"), A1 = c("A", "T"),
+                       z = c(2.0, 1.5), af = c(0.30, 0.40), stringsAsFactors = FALSE)
+
+  res <- matchRefPanel(target, ref, colToFlip = "z", colToComplement = "af")
+  h <- getHarmonizedData(res)
+  swapped <- h[h$pos == 100, ]
+  control <- h[h$pos == 200, ]
+
+  expect_equal(swapped$af, 0.70)   # 1 - input af
+  expect_equal(swapped$z, -2.0)    # signed columns still sign-flip
+  expect_equal(control$af, 0.40)   # untouched (no swap)
+  expect_equal(control$z, 1.5)
+})
+
+test_that("colToComplement default leaves af unchanged (non-RSS callers unaffected)", {
+  ref <- data.frame(chrom = c("chr1", "chr1"), pos = c(100, 200),
+                    A2 = c("A", "C"), A1 = c("G", "T"), stringsAsFactors = FALSE)
+  target <- data.frame(chrom = c("chr1", "chr1"), pos = c(100, 200),
+                       A2 = c("G", "C"), A1 = c("A", "T"),
+                       z = c(2.0, 1.5), af = c(0.30, 0.40), stringsAsFactors = FALSE)
+
+  res <- matchRefPanel(target, ref, colToFlip = "z")  # default: no complement
+  h <- getHarmonizedData(res)
+  swapped <- h[h$pos == 100, ]
+  expect_equal(swapped$af, 0.30)   # unchanged
+  expect_equal(swapped$z, -2.0)    # z still sign-flips (independent path)
+})
+
+test_that("colToComplement errors on a missing column name", {
+  ref <- data.frame(chrom = "chr1", pos = 100, A2 = "A", A1 = "G", stringsAsFactors = FALSE)
+  target <- data.frame(chrom = "chr1", pos = 100, A2 = "A", A1 = "G",
+                       z = 1.0, stringsAsFactors = FALSE)
+  expect_error(
+    matchRefPanel(target, ref, colToComplement = "af"),
+    "not found in targetData"
+  )
+})

@@ -1133,7 +1133,7 @@ test_that("rss: pip_cutoff_to_skip > 0, no signal => early return", {
       columnFilePath = "/fake/columns.yml",
       ldData = make_test_ld_data(ss$variant_id),
       pipCutoffToSkip = 0.5,
-      qcMethod = "none"
+      zMismatchQc = "none"
     ),
     "Skipping follow-up"
   )
@@ -1170,7 +1170,7 @@ test_that("rss: pip_cutoff_to_skip > 0, signal detected => continues", {
       columnFilePath = "/fake/columns.yml",
       ldData = make_test_ld_data(ss$variant_id),
       pipCutoffToSkip = 0.5,
-      qcMethod = "slalom",
+      zMismatchQc = "slalom",
       finemappingMethod = "susie_rss"
     ),
     "Follow-up on region"
@@ -1203,7 +1203,7 @@ test_that("rss: negative pip_cutoff_to_skip auto-computes threshold", {
       columnFilePath = "/fake/columns.yml",
       ldData = make_test_ld_data(ss$variant_id),
       pipCutoffToSkip = -1,
-      qcMethod = "none"
+      zMismatchQc = "none"
     ),
     "Skipping follow-up"
   )
@@ -1254,7 +1254,7 @@ test_that("rss: full pipeline with QC, imputation, and fine-mapping", {
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = "slalom",
+    zMismatchQc = "slalom",
     impute = TRUE,
     finemappingMethod = "susie_rss"
   )
@@ -1289,7 +1289,7 @@ test_that("rss: method name is correct for no-impute with QC", {
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = "slalom",
+    zMismatchQc = "slalom",
     impute = FALSE,
     finemappingMethod = "susie_rss"
   )
@@ -1320,7 +1320,7 @@ test_that("rss: method name is correct for no QC", {
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = NULL,
+    zMismatchQc = NULL,
     impute = TRUE,
     finemappingMethod = "susie_rss"
   )
@@ -1354,7 +1354,7 @@ test_that("rss: outlier_number is stored in result when QC is active", {
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = "dentist",
+    zMismatchQc = "dentist",
     impute = FALSE,
     finemappingMethod = "susie_rss"
   )
@@ -1388,12 +1388,12 @@ test_that("rss: finemappingMethod = NULL skips fine-mapping", {
     },
   )
 
-  # Use qcMethod = NULL and impute = FALSE to avoid paste0(NULL, ...) edge case
+  # Use zMismatchQc = NULL and impute = FALSE to avoid paste0(NULL, ...) edge case
   result <- rssAnalysisPipeline(
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = NULL,
+    zMismatchQc = NULL,
     impute = FALSE,
     finemappingMethod = NULL
   )
@@ -1406,7 +1406,7 @@ test_that("rss: finemappingMethod = NULL skips fine-mapping", {
 #  SECTION 14: rssAnalysisPipeline - QC = NULL skips QC
 # ========================================================================
 
-test_that("rss: qcMethod = NULL uses combined basic QC without LD-mismatch method", {
+test_that("rss: zMismatchQc = NULL uses combined basic QC without LD-mismatch method", {
   ss <- make_rss_sumstats(5)
   ld_mat <- make_rss_ld_mat(5)
   fake_result <- make_fake_post_result(5)
@@ -1432,7 +1432,7 @@ test_that("rss: qcMethod = NULL uses combined basic QC without LD-mismatch metho
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = NULL,
+    zMismatchQc = NULL,
     impute = FALSE,
     finemappingMethod = "susie_rss"
   )
@@ -1471,7 +1471,7 @@ test_that("rss: impute = FALSE skips raiss imputation", {
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = "slalom",
+    zMismatchQc = "slalom",
     impute = FALSE,
     finemappingMethod = "susie_rss"
   )
@@ -1504,7 +1504,7 @@ test_that("rss: diagnostics = TRUE with empty fine-mapping result skips diagnost
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = "slalom",
+    zMismatchQc = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
     finemappingMethod = "susie_rss"
@@ -1587,7 +1587,7 @@ test_that("rss: diagnostics with 2+ CS and high p-value/corr triggers BCR and SE
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = "slalom",
+    zMismatchQc = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
     finemappingMethod = "susie_rss"
@@ -1667,7 +1667,7 @@ test_that("rss: diagnostics with 1 CS triggers SER reanalysis only", {
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = "slalom",
+    zMismatchQc = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
     finemappingMethod = "susie_rss"
@@ -1744,7 +1744,7 @@ test_that("rss: diagnostics with no CS but high PIP calls extractTopPipInfo", {
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = "slalom",
+    zMismatchQc = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
     finemappingMethod = "susie_rss"
@@ -1790,7 +1790,7 @@ test_that("rss: diagnostics with no CS and no high PIP => diagnostics empty", {
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = "slalom",
+    zMismatchQc = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
     finemappingMethod = "susie_rss",
@@ -1844,7 +1844,7 @@ test_that("rss: finemapping_opts are forwarded to susieRssPipeline", {
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = NULL,
+    zMismatchQc = NULL,
     impute = FALSE,
     finemappingMethod = "susie_rss",
     finemappingOpts = list(
@@ -1890,7 +1890,7 @@ test_that("rss: dentist QC method generates correct method name", {
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = "dentist",
+    zMismatchQc = "dentist",
     impute = TRUE,
     finemappingMethod = "susie_rss"
   )
@@ -1957,7 +1957,7 @@ test_that("rss: diagnostics with getSusieResult returning NULL => diagnostics em
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = "slalom",
+    zMismatchQc = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
     finemappingMethod = "susie_rss"
@@ -2010,7 +2010,7 @@ test_that("rss: diagnostics with null/empty block_cs_metrics => no additional an
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = "slalom",
+    zMismatchQc = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
     finemappingMethod = "susie_rss",
@@ -2101,7 +2101,7 @@ test_that("rss: diagnostics with 2 CS but low p-value and low corr => no extra a
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = "slalom",
+    zMismatchQc = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
     finemappingMethod = "susie_rss"
@@ -2181,7 +2181,7 @@ test_that("rss: diagnostics with high max_cs_corr_study_block triggers BCR+SER",
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = make_test_ld_data(ss$variant_id),
-    qcMethod = "slalom",
+    zMismatchQc = "slalom",
     impute = FALSE,
     diagnostics = TRUE,
     finemappingMethod = "susie_rss"
@@ -2326,7 +2326,7 @@ test_that("rss: is_genotype=TRUE path does not precompute R and uses X for fine-
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = geno_ld,
-    qcMethod = "slalom",
+    zMismatchQc = "slalom",
     finemappingMethod = "susie_rss"
   )
 
@@ -2402,7 +2402,7 @@ test_that("rss: mixture LD_data (list of X panels) preserves list shape into sus
     sumstatPath = "/fake/sumstats.tsv",
     columnFilePath = "/fake/columns.yml",
     ldData = mixture_ld,
-    qcMethod = "slalom",
+    zMismatchQc = "slalom",
     finemappingMethod = "susie_rss",
     impute = FALSE
   )
@@ -2501,4 +2501,62 @@ test_that("af-derived MAF drives maf_cutoff filtering identically to the equival
   expect_equal(res_af$top_loci[cols], res_maf$top_loci[cols])
   # And the sub-cutoff variant (chr1:1:A:G, MAF 0.005 < 0.01) was filtered out:
   expect_false("chr1:1:A:G" %in% res_af$top_loci$variant)
+})
+
+# ========================================================================
+#  SECTION: rssAnalysisPipeline mafCutoff (rss-qc-parity, af single source)
+# ========================================================================
+
+test_that("rss: mafCutoff removes low-MAF variants using AF-derived MAF", {
+  ss <- make_rss_sumstats(5)
+  ss$af <- c(0.40, 0.40, 0.001, 0.40, 0.40)   # variant 3 (pos 300): MAF 0.001
+  ld_mat <- make_rss_ld_mat(5)
+  fake_result <- make_fake_post_result(5)
+  captured_ss <- NULL
+
+  local_mocked_bindings(
+    loadRssData = function(...) list(sumstats = ss, n = 1000, var_y = 1),
+    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
+    susieRssPipeline = function(sumstats, ...) { captured_ss <<- sumstats; fake_result },
+  )
+
+  result <- suppressMessages(rssAnalysisPipeline(
+    sumstatPath = "/fake/s.tsv", columnFilePath = "/fake/c.yml",
+    ldData = make_test_ld_data(ss$variant_id),
+    zMismatchQc = "none", mafCutoff = 0.01, impute = FALSE,
+    finemappingMethod = "susie_rss"
+  ))
+
+  expect_equal(nrow(captured_ss), 4)                       # one variant removed
+  expect_false("1:300:A:G" %in% captured_ss$variant_id)    # the MAF-0.001 one
+  expect_true("af" %in% colnames(captured_ss))             # af carried through
+  expect_false(any(is.na(captured_ss$af)))
+})
+
+test_that("rss: mafCutoff skips with one warning when af is missing (no fallback to maf)", {
+  ss <- make_rss_sumstats(5)
+  ss$af <- rep(NA_real_, 5)                   # no trustworthy AF
+  ss$maf <- c(0.40, 0.40, 0.001, 0.40, 0.40)  # a directionless maf is present...
+  ld_mat <- make_rss_ld_mat(5)
+  fake_result <- make_fake_post_result(5)
+  captured_ss <- NULL
+
+  local_mocked_bindings(
+    loadRssData = function(...) list(sumstats = ss, n = 1000, var_y = 1),
+    summaryStatsQc = function(...) .test_qcresult(ss, ld_mat, outlier_number = 0),
+    susieRssPipeline = function(sumstats, ...) { captured_ss <<- sumstats; fake_result },
+  )
+
+  expect_warning(
+    result <- suppressMessages(rssAnalysisPipeline(
+      sumstatPath = "/fake/s.tsv", columnFilePath = "/fake/c.yml",
+      ldData = make_test_ld_data(ss$variant_id),
+      zMismatchQc = "none", mafCutoff = 0.01, impute = FALSE,
+      finemappingMethod = "susie_rss"
+    )),
+    "af is missing"
+  )
+  # ...but it is NOT used: nothing filtered, all 5 variants kept.
+  expect_equal(nrow(captured_ss), 5)
+  expect_true("1:300:A:G" %in% captured_ss$variant_id)
 })
