@@ -62,7 +62,7 @@ A list with components:
   \item{loss}{Quadratic loss at each lambda.}
   \item{fbeta}{Full penalized objective at each lambda.}
   \item{nparams}{Number of non-zero coefficients at each lambda.}
-  \item{beta_est}{Coefficient vector at the lambda minimizing fbeta.}
+  \item{betaEst}{Coefficient vector at the lambda minimizing fbeta.}
 }
 }
 \description{

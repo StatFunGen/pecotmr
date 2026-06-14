@@ -46,10 +46,10 @@ prsCs(
 }
 \value{
 A list containing the posterior estimates:
-  - beta_est: Posterior estimates of SNP effect sizes.
-  - psi_est: Posterior estimates of psi (shrinkage parameters).
-  - sigma_est: Posterior estimate of the residual variance.
-  - phi_est: Posterior estimate of the global shrinkage parameter.
+  - betaEst: Posterior estimates of SNP effect sizes.
+  - psiEst: Posterior estimates of psi (shrinkage parameters).
+  - sigmaEst: Posterior estimate of the residual variance.
+  - phiEst: Posterior estimate of the global shrinkage parameter.
 }
 \description{
 This function is a wrapper for the PRS-CS method implemented in C++. It takes marginal effect size estimates from regression and an external LD reference panel
@@ -96,5 +96,5 @@ maf <- rep(0.5, length(b.hat)) # fake MAF
 LD <- list(blk1 = R.hat)
 out <- prsCs(b.hat, LD, n, maf = maf)
 # In sample prediction correlations
-cor(X \%*\% out$beta_est, y) # 0.9944553
+cor(X \%*\% out$betaEst, y) # 0.9944553
 }

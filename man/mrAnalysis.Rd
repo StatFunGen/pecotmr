@@ -12,8 +12,8 @@ mrAnalysis(mrFormattedInput, cpipCutoff = 0.5)
 \item{cpipCutoff}{the threshold of cumulative posterior inclusion probability, default is 0.5}
 }
 \value{
-A single data frame of output with columns "gene_name", "num_CS", "num_IV",
-"meta_eff", "se_meta_eff", "meta_pval", "Q", "Q_pval" and "I2". "gene_name" is ensemble ID. "num_CS" is the number of credible sets
+A single data frame of output with columns "geneName", "num_CS", "num_IV",
+"meta_eff", "se_meta_eff", "meta_pval", "Q", "Q_pval" and "I2". "geneName" is ensemble ID. "num_CS" is the number of credible sets
 contained in each gene, "num_IV" is the number of variants contained in each gene. "meta_eff", "se_meta_eff" and "meta_pval" are the MR estimate, standard error and pvalue.
 "Q" is Cochran's Q statistic, "I2" quantifies the heterogeneity, range from 0 to 1.
 }

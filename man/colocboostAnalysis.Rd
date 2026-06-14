@@ -15,7 +15,7 @@ colocboostAnalysis(
   pipCutoffToSkipSumstat = NULL,
   zMismatchQc = NULL,
   impute = FALSE,
-  imputeOpts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
+  imputeOpts = list(rcond = 0.01, r2Threshold = 0.6, minimumLd = 5, lamb = 0.01),
   ldReferenceInfo = NULL,
   variantConvention = c("A2_A1", "A1_A2")
 )
@@ -76,8 +76,8 @@ Individual-level QC is only attempted when at least one individual QC control
 is non-\code{NULL} and named \code{X} and \code{Y} inputs are available in
 \code{...}. Summary-statistic QC is only attempted when \code{zMismatchQc},
 \code{pip_cutoff_to_skip_sumstat}, \code{impute = TRUE}, or
-\code{LD_reference_info} is supplied and named \code{sumstat} plus either
-\code{LD}, \code{X_ref}, or \code{LD_reference_info} are available.
+\code{ldReferenceInfo} is supplied and named \code{sumstat} plus either
+\code{LD}, \code{X_ref}, or \code{ldReferenceInfo} are available.
 \code{zMismatchQc = "none"} means run basic allele/variant harmonization
 only; it does not run SLALOM/DENTIST
 LD-mismatch QC. RAISS imputation is controlled separately by

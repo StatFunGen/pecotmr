@@ -33,17 +33,17 @@ make_mock_region_data <- function() {
   pip_vals <- c(0.8, 0.05, 0.6, 0.02)
   names(pip_vals) <- variant_ids
 
-  susie_weights_intermediate <- list()
-  susie_weights_intermediate[["GENE1"]] <- list()
-  susie_weights_intermediate[["GENE1"]][[context]] <- list(
+  susieWeightsIntermediate <- list()
+  susieWeightsIntermediate[["GENE1"]] <- list()
+  susieWeightsIntermediate[["GENE1"]][[context]] <- list(
     pip = pip_vals,
-    cs_variants = list(variant_ids[c(1, 3)]),
-    cs_purity = list(min.abs.corr = 0.9)
+    csVariants = list(variant_ids[c(1, 3)]),
+    csPurity = list(minAbsCorr = 0.9)
   )
 
   list(
     weights = weights,
-    susie_weights_intermediate = susie_weights_intermediate
+    susieWeightsIntermediate = susieWeightsIntermediate
   )
 }
 
@@ -129,11 +129,11 @@ test_that("trimCtwasVariants handles multiple genes", {
 
   pip_vals2 <- c(0.7, 0.4)
   names(pip_vals2) <- variant_ids2
-  rd$susie_weights_intermediate[["GENE2"]] <- list()
-  rd$susie_weights_intermediate[["GENE2"]][["ctx1"]] <- list(
+  rd$susieWeightsIntermediate[["GENE2"]] <- list()
+  rd$susieWeightsIntermediate[["GENE2"]][["ctx1"]] <- list(
     pip = pip_vals2,
-    cs_variants = list(variant_ids2[1]),
-    cs_purity = list(min.abs.corr = 0.95)
+    csVariants = list(variant_ids2[1]),
+    csPurity = list(minAbsCorr = 0.95)
   )
 
   result <- trimCtwasVariants(rd, twasWeightCutoff = 1e-5)
@@ -143,7 +143,7 @@ test_that("trimCtwasVariants handles multiple genes", {
 
 test_that("trimCtwasVariants select_variants uses csMinCor to include CS variants", {
   rd <- make_mock_region_data()
-  # cs_purity min.abs.corr = 0.9, so with csMinCor = 0.8 the CS variants
+  # csPurity minAbsCorr = 0.9, so with csMinCor = 0.8 the CS variants
   # (variant 1 and 3) should be included. Max 2 variants.
   result <- trimCtwasVariants(rd,
     twasWeightCutoff = 1e-5,
@@ -221,7 +221,7 @@ test_that("ctwasBimfileLoader works with real test fixture", {
 #  Deprecated wrapper: getCtwasMetaData
 # ===========================================================================
 
-test_that("getCtwasMetaData reads LD metadata and returns LD_info + region_info", {
+test_that("getCtwasMetaData reads LD metadata and returns ldInfo + regionInfo", {
   meta_file <- tempfile(fileext = ".tsv")
   on.exit(unlink(meta_file), add = TRUE)
   writeLines(
@@ -238,18 +238,18 @@ test_that("getCtwasMetaData reads LD metadata and returns LD_info + region_info"
     "deprecated"
   )
   expect_true(is.list(res))
-  expect_true("LD_info" %in% names(res))
-  expect_true("region_info" %in% names(res))
+  expect_true("ldInfo" %in% names(res))
+  expect_true("regionInfo" %in% names(res))
 
-  expect_equal(nrow(res$LD_info), 2)
-  expect_equal(colnames(res$LD_info), c("region_id", "LD_file", "SNP_file"))
-  expect_equal(res$LD_info$region_id, c("1_1000_2000", "1_2000_3000"))
+  expect_equal(nrow(res$ldInfo), 2)
+  expect_equal(colnames(res$ldInfo), c("region_id", "LD_file", "SNP_file"))
+  expect_equal(res$ldInfo$region_id, c("1_1000_2000", "1_2000_3000"))
 
-  expect_equal(nrow(res$region_info), 2)
-  expect_equal(colnames(res$region_info), c("chrom", "start", "stop", "region_id"))
-  expect_equal(res$region_info$chrom, c(1L, 1L))
-  expect_equal(res$region_info$start, c(1000L, 2000L))
-  expect_equal(res$region_info$stop, c(2000L, 3000L))
+  expect_equal(nrow(res$regionInfo), 2)
+  expect_equal(colnames(res$regionInfo), c("chrom", "start", "stop", "region_id"))
+  expect_equal(res$regionInfo$chrom, c(1L, 1L))
+  expect_equal(res$regionInfo$start, c(1000L, 2000L))
+  expect_equal(res$regionInfo$stop, c(2000L, 3000L))
 })
 
 test_that("getCtwasMetaData subset_region_ids filters correctly", {
@@ -270,10 +270,10 @@ test_that("getCtwasMetaData subset_region_ids filters correctly", {
     res <- getCtwasMetaData(meta_file, subsetRegionIds = "1_1000_2000"),
     "deprecated"
   )
-  expect_equal(nrow(res$region_info), 1)
-  expect_equal(res$region_info$region_id, "1_1000_2000")
-  # LD_info is not subsetted (matches original behavior)
-  expect_equal(nrow(res$LD_info), 3)
+  expect_equal(nrow(res$regionInfo), 1)
+  expect_equal(res$regionInfo$region_id, "1_1000_2000")
+  # ldInfo is not subsetted (matches original behavior)
+  expect_equal(nrow(res$ldInfo), 3)
 })
 
 test_that("getCtwasMetaData LD_file paths are relative to metadata directory", {
@@ -291,6 +291,6 @@ test_that("getCtwasMetaData LD_file paths are relative to metadata directory", {
     res <- getCtwasMetaData(meta_file),
     "deprecated"
   )
-  expect_equal(res$LD_info$LD_file, file.path(tmpdir, "subdir/block.cor.xz"))
-  expect_equal(res$LD_info$SNP_file, paste0(file.path(tmpdir, "subdir/block.cor.xz"), ".bim"))
+  expect_equal(res$ldInfo$LD_file, file.path(tmpdir, "subdir/block.cor.xz"))
+  expect_equal(res$ldInfo$SNP_file, paste0(file.path(tmpdir, "subdir/block.cor.xz"), ".bim"))
 })

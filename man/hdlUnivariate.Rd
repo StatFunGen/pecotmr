@@ -20,7 +20,7 @@ hdlUnivariate(z, n, eigenRef, annotations = NULL, local = FALSE, lambda = 0)
 \item{lambda}{Numeric, L2 penalty on tau (default 0).}
 }
 \value{
-List with h2, h2_se, local, enrichment, score_stats.
+List with h2, h2Se, local, enrichment, scoreStats.
 }
 \description{
 Estimate h2 via HDL likelihood.

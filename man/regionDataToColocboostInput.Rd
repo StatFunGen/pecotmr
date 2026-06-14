@@ -10,8 +10,8 @@ regionDataToColocboostInput(regionData)
 \item{regionData}{A list returned by \code{load_multitask_regional_data()}.}
 }
 \value{
-A structured list containing \code{colocboost_input},
-  \code{qc_input}, and \code{source_info}.
+A structured list containing \code{colocboostInput},
+  \code{qcInput}, and \code{sourceInfo}.
 }
 \description{
 Convert loaded regional data to ColocBoost inputs

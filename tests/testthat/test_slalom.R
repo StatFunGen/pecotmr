@@ -161,8 +161,8 @@ test_that("CS95 contains the causal variant in a simple synthetic signal", {
 
   result <- slalom(zScore = z, R = R)
 
-  expect_true(causal %in% result$summary$cs_95)
-  expect_true(causal %in% result$summary$cs_99)
+  expect_true(causal %in% result$summary$cs95)
+  expect_true(causal %in% result$summary$cs99)
 })
 
 test_that("CS99 is a superset of CS95", {
@@ -173,8 +173,8 @@ test_that("CS99 is a superset of CS95", {
 
   result <- slalom(zScore = z, R = R)
 
-  expect_true(all(result$summary$cs_95 %in% result$summary$cs_99))
-  expect_gte(length(result$summary$cs_99), length(result$summary$cs_95))
+  expect_true(all(result$summary$cs95 %in% result$summary$cs99))
+  expect_gte(length(result$summary$cs99), length(result$summary$cs95))
 })
 
 test_that("CS95 covers at least 95% of posterior mass", {
@@ -186,10 +186,10 @@ test_that("CS95 covers at least 95% of posterior mass", {
 
   result <- slalom(zScore = z, R = R)
 
-  cs95_mass <- sum(result$data$prob[result$summary$cs_95])
+  cs95_mass <- sum(result$data$prob[result$summary$cs95])
   expect_gt(cs95_mass, 0.95)
 
-  cs99_mass <- sum(result$data$prob[result$summary$cs_99])
+  cs99_mass <- sum(result$data$prob[result$summary$cs99])
   expect_gt(cs99_mass, 0.99)
 })
 
@@ -202,9 +202,9 @@ test_that("CS with very strong signal contains only the causal variant", {
 
   result <- slalom(zScore = z, R = R)
 
-  expect_equal(result$summary$cs_95[1], 8)
-  expect_true(8 %in% result$summary$cs_95)
-  expect_true(8 %in% result$summary$cs_99)
+  expect_equal(result$summary$cs95[1], 8)
+  expect_true(8 %in% result$summary$cs95)
+  expect_true(8 %in% result$summary$cs99)
 })
 
 test_that("CS with diffuse signal contains many variants", {
@@ -216,7 +216,7 @@ test_that("CS with diffuse signal contains many variants", {
   result <- slalom(zScore = z, R = R)
 
   # Uniform PIPs => need at least ceiling(0.95 * n) = 10 variants for 95% coverage
-  expect_equal(length(result$summary$cs_95), n)
+  expect_equal(length(result$summary$cs95), n)
 })
 
 # ============================================================================
@@ -229,7 +229,7 @@ test_that("lead variant by pvalue selects most negative z-score", {
 
   result <- slalom(zScore = z, R = R, leadVariantChoice = "pvalue")
 
-  expect_equal(result$summary$lead_pip_variant, 2)
+  expect_equal(result$summary$leadPipVariant, 2)
 })
 
 test_that("lead variant by abf selects highest PIP", {
@@ -238,7 +238,7 @@ test_that("lead variant by abf selects highest PIP", {
 
   result <- slalom(zScore = z, R = R, leadVariantChoice = "abf")
 
-  expect_equal(result$summary$lead_pip_variant, which.max(result$data$prob))
+  expect_equal(result$summary$leadPipVariant, which.max(result$data$prob))
 })
 
 test_that("pvalue and abf lead can differ when z has asymmetric magnitudes", {
@@ -248,9 +248,9 @@ test_that("pvalue and abf lead can differ when z has asymmetric magnitudes", {
   result_pv <- slalom(zScore = z, R = R, leadVariantChoice = "pvalue")
   result_abf <- slalom(zScore = z, R = R, leadVariantChoice = "abf")
 
-  expect_equal(result_pv$summary$lead_pip_variant, 1)
-  expect_equal(result_abf$summary$lead_pip_variant, 2)
-  expect_false(result_pv$summary$lead_pip_variant == result_abf$summary$lead_pip_variant)
+  expect_equal(result_pv$summary$leadPipVariant, 1)
+  expect_equal(result_abf$summary$leadPipVariant, 2)
+  expect_false(result_pv$summary$leadPipVariant == result_abf$summary$leadPipVariant)
 })
 
 # ============================================================================
@@ -265,7 +265,7 @@ test_that("DENTIST-S: lead variant itself is not flagged as outlier", {
   R <- diag(n)
 
   result <- slalom(zScore = z, R = R)
-  lead <- result$summary$lead_pip_variant
+  lead <- result$summary$leadPipVariant
   expect_equal(lead, 3)
 
   expect_true(is.na(result$data$outliers[lead]) || !result$data$outliers[lead])
@@ -283,7 +283,7 @@ test_that("DENTIST-S: outlier variant inconsistent with LD is flagged", {
   result <- slalom(zScore = z, R = R, r2Threshold = 0.5,
                    nlog10pDentistSThreshold = 2.0)
 
-  lead <- result$summary$lead_pip_variant
+  lead <- result$summary$leadPipVariant
   expect_equal(lead, 1)
 
   expect_true(result$data$outliers[2])
@@ -301,7 +301,7 @@ test_that("DENTIST-S: perfectly consistent variant in LD is not flagged", {
   result <- slalom(zScore = z, R = R, r2Threshold = 0.5,
                    nlog10pDentistSThreshold = 4.0)
 
-  lead <- result$summary$lead_pip_variant
+  lead <- result$summary$leadPipVariant
   expect_equal(lead, 1)
 
   expect_equal(result$data$nlog10p_dentist_s[2], 0, tolerance = 1e-10)
@@ -317,8 +317,8 @@ test_that("DENTIST-S: n_dentist_s_outlier and fraction are consistent", {
 
   result <- slalom(zScore = z, R = syn$R, r2Threshold = 0.3)
 
-  n_r2 <- result$summary$n_r2
-  n_out <- result$summary$n_dentist_s_outlier
+  n_r2 <- result$summary$nR2
+  n_out <- result$summary$nDentistSOutlier
   frac <- result$summary$fraction
 
   expect_gte(n_r2, 1)
@@ -339,8 +339,8 @@ test_that("DENTIST-S: lowering threshold flags more outliers", {
   result_loose <- slalom(zScore = z, R = syn$R, nlog10pDentistSThreshold = 1.0,
                          r2Threshold = 0.3)
 
-  expect_gte(result_loose$summary$n_dentist_s_outlier,
-             result_strict$summary$n_dentist_s_outlier)
+  expect_gte(result_loose$summary$nDentistSOutlier,
+             result_strict$summary$nDentistSOutlier)
 })
 
 # ============================================================================
@@ -355,10 +355,10 @@ test_that("edge case: single variant", {
 
   expect_equal(nrow(result$data), 1)
   expect_equal(result$data$prob[1], 1.0, tolerance = 1e-14)
-  expect_equal(result$summary$lead_pip_variant, 1)
-  expect_equal(result$summary$n_total, 1)
-  expect_equal(result$summary$cs_95, 1)
-  expect_equal(result$summary$cs_99, 1)
+  expect_equal(result$summary$leadPipVariant, 1)
+  expect_equal(result$summary$nTotal, 1)
+  expect_equal(result$summary$cs95, 1)
+  expect_equal(result$summary$cs99, 1)
 })
 
 test_that("edge case: all zero z-scores", {
@@ -370,7 +370,7 @@ test_that("edge case: all zero z-scores", {
 
   expect_equal(result$data$prob, rep(1 / n, n), tolerance = 1e-14)
   expect_equal(result$data$pvalue, rep(0.5, n), tolerance = 1e-14)
-  expect_equal(result$summary$max_pip, 1 / n, tolerance = 1e-14)
+  expect_equal(result$summary$maxPip, 1 / n, tolerance = 1e-14)
 })
 
 test_that("edge case: very large z-scores do not produce NaN in PIPs", {
@@ -403,7 +403,7 @@ test_that("edge case: two variants only", {
 
   expect_equal(nrow(result$data), 2)
   expect_equal(sum(result$data$prob), 1, tolerance = 1e-12)
-  expect_equal(result$summary$lead_pip_variant, 1)
+  expect_equal(result$summary$leadPipVariant, 1)
   expect_gt(result$data$prob[1], result$data$prob[2])
 })
 
@@ -449,9 +449,9 @@ test_that("X input yields same result as R = cor(X)", {
 
   expect_equal(result_X$data$prob, result_R$data$prob, tolerance = 1e-10)
   expect_equal(result_X$data$original_z, result_R$data$original_z, tolerance = 1e-14)
-  expect_equal(result_X$summary$lead_pip_variant, result_R$summary$lead_pip_variant)
-  expect_equal(result_X$summary$cs_95, result_R$summary$cs_95)
-  expect_equal(result_X$summary$cs_99, result_R$summary$cs_99)
+  expect_equal(result_X$summary$leadPipVariant, result_R$summary$leadPipVariant)
+  expect_equal(result_X$summary$cs95, result_R$summary$cs95)
+  expect_equal(result_X$summary$cs99, result_R$summary$cs99)
 })
 
 # ============================================================================
@@ -468,7 +468,7 @@ test_that("larger abf_prior_variance concentrates PIPs on strong signals more", 
   result_small_W <- slalom(zScore = z, R = R, abfPriorVariance = 0.01)
   result_large_W <- slalom(zScore = z, R = R, abfPriorVariance = 1.0)
 
-  expect_gt(result_large_W$summary$max_pip, result_small_W$summary$max_pip)
+  expect_gt(result_large_W$summary$maxPip, result_small_W$summary$maxPip)
 })
 
 test_that("abfPriorVariance = 0 gives uniform PIPs", {
@@ -504,7 +504,7 @@ test_that("r2_threshold variation affects n_r2 count", {
   result_low <- slalom(zScore = z, R = syn$R, r2Threshold = 0.1)
   result_high <- slalom(zScore = z, R = syn$R, r2Threshold = 0.9)
 
-  expect_gte(result_low$summary$n_r2, result_high$summary$n_r2)
+  expect_gte(result_low$summary$nR2, result_high$summary$nR2)
 })
 
 test_that("nlog10p_dentist_s_threshold variation affects outlier count", {
@@ -517,8 +517,8 @@ test_that("nlog10p_dentist_s_threshold variation affects outlier count", {
   result_low_thresh <- slalom(zScore = z, R = syn$R, nlog10pDentistSThreshold = 1.0)
   result_high_thresh <- slalom(zScore = z, R = syn$R, nlog10pDentistSThreshold = 10.0)
 
-  expect_gte(result_low_thresh$summary$n_dentist_s_outlier,
-             result_high_thresh$summary$n_dentist_s_outlier)
+  expect_gte(result_low_thresh$summary$nDentistSOutlier,
+             result_high_thresh$summary$nDentistSOutlier)
 })
 
 # ============================================================================
@@ -539,14 +539,14 @@ test_that("output data types are correct", {
   expect_type(result$data$outliers, "logical")
   expect_type(result$data$nlog10p_dentist_s, "double")
 
-  expect_type(result$summary$lead_pip_variant, "integer")
-  expect_type(result$summary$n_total, "integer")
-  expect_type(result$summary$n_r2, "integer")
-  expect_type(result$summary$n_dentist_s_outlier, "integer")
+  expect_type(result$summary$leadPipVariant, "integer")
+  expect_type(result$summary$nTotal, "integer")
+  expect_type(result$summary$nR2, "integer")
+  expect_type(result$summary$nDentistSOutlier, "integer")
   expect_type(result$summary$fraction, "double")
-  expect_type(result$summary$max_pip, "double")
-  expect_type(result$summary$cs_95, "integer")
-  expect_type(result$summary$cs_99, "integer")
+  expect_type(result$summary$maxPip, "double")
+  expect_type(result$summary$cs95, "integer")
+  expect_type(result$summary$cs99, "integer")
 })
 
 test_that("original_z in output matches input z-scores", {
@@ -575,7 +575,7 @@ test_that("n_r2 counts variants with r2 > threshold to lead correctly", {
   R <- diag(n)
 
   result <- slalom(zScore = z, R = R, r2Threshold = 0.6)
-  expect_equal(result$summary$n_r2, 1)
+  expect_equal(result$summary$nR2, 1)
 })
 
 test_that("n_r2 includes correlated variants", {
@@ -585,7 +585,7 @@ test_that("n_r2 includes correlated variants", {
   R[1, 2] <- R[2, 1] <- 0.9
 
   result <- slalom(zScore = z, R = R, r2Threshold = 0.6)
-  expect_equal(result$summary$n_r2, 2)
+  expect_equal(result$summary$nR2, 2)
 })
 
 test_that("fraction = 0 when there are no outliers (identity LD, consistent z)", {
@@ -612,14 +612,14 @@ test_that("fraction is between 0 and 1", {
   }
 })
 
-test_that("max_pip equals the maximum of prob vector", {
+test_that("maxPip equals the maximum of prob vector", {
   set.seed(901)
   n <- 20
   z <- rnorm(n, sd = 2)
   R <- diag(n)
 
   result <- slalom(zScore = z, R = R)
-  expect_equal(result$summary$max_pip, max(result$data$prob), tolerance = 1e-14)
+  expect_equal(result$summary$maxPip, max(result$data$prob), tolerance = 1e-14)
 })
 
 # ============================================================================
@@ -634,7 +634,7 @@ test_that("realistic LD: correlated variants share PIP mass", {
 
   result <- slalom(zScore = z, R = syn$R)
 
-  expect_true(3 %in% result$summary$cs_95)
+  expect_true(3 %in% result$summary$cs95)
   expect_equal(sum(result$data$prob), 1, tolerance = 1e-12)
 })
 
@@ -671,8 +671,8 @@ test_that("realistic LD: no outliers when z perfectly matches LD structure", {
   result <- slalom(zScore = z, R = R, r2Threshold = 0.3,
                    nlog10pDentistSThreshold = 4.0)
 
-  non_lead <- setdiff(seq_along(z), result$summary$lead_pip_variant)
-  lead <- result$summary$lead_pip_variant
+  non_lead <- setdiff(seq_along(z), result$summary$leadPipVariant)
+  lead <- result$summary$leadPipVariant
   for (i in non_lead) {
     r2_val <- R[i, lead]^2
     if (r2_val > 0.3 && r2_val < 1.0) {
@@ -756,9 +756,9 @@ test_that("slalom is deterministic (no randomness)", {
   result2 <- slalom(zScore = z, R = R)
 
   expect_identical(result1$data, result2$data)
-  expect_identical(result1$summary$lead_pip_variant, result2$summary$lead_pip_variant)
-  expect_identical(result1$summary$cs_95, result2$summary$cs_95)
-  expect_identical(result1$summary$cs_99, result2$summary$cs_99)
+  expect_identical(result1$summary$leadPipVariant, result2$summary$leadPipVariant)
+  expect_identical(result1$summary$cs95, result2$summary$cs95)
+  expect_identical(result1$summary$cs99, result2$summary$cs99)
 })
 
 # ============================================================================
@@ -773,7 +773,7 @@ test_that("CS95 variants are ordered by decreasing PIP", {
 
   result <- slalom(zScore = z, R = R)
 
-  cs_pips <- result$data$prob[result$summary$cs_95]
+  cs_pips <- result$data$prob[result$summary$cs95]
   expect_true(all(diff(cs_pips) <= .Machine$double.eps))
 })
 

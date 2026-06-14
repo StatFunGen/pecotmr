@@ -26,13 +26,13 @@ Default: \code{0.01}.}
 A list with components:
 \describe{
   \item{R}{The (possibly repaired) LD matrix.}
-  \item{is_pd}{Logical: is the matrix positive definite?}
-  \item{is_psd}{Logical: is the matrix positive semidefinite (within rTol)?}
-  \item{min_eigenvalue}{Smallest eigenvalue of the original matrix.}
-  \item{n_negative}{Number of negative eigenvalues (below -rTol).}
-  \item{condition_number}{Ratio of largest to smallest positive eigenvalue
+  \item{isPd}{Logical: is the matrix positive definite?}
+  \item{isPsd}{Logical: is the matrix positive semidefinite (within rTol)?}
+  \item{minEigenvalue}{Smallest eigenvalue of the original matrix.}
+  \item{nNegative}{Number of negative eigenvalues (below -rTol).}
+  \item{conditionNumber}{Ratio of largest to smallest positive eigenvalue
     (\code{Inf} if any eigenvalue is zero).}
-  \item{method_applied}{Character: \code{"none"}, \code{"shrink"}, or
+  \item{methodApplied}{Character: \code{"none"}, \code{"shrink"}, or
     \code{"eigenfix"}.}
 }
 }
@@ -60,12 +60,12 @@ Three modes are available:
 \examples{
 # A well-conditioned matrix
 R_good <- diag(5)
-checkLd(R_good)$is_pd  # TRUE
+checkLd(R_good)$isPd  # TRUE
 
 # A matrix with negative eigenvalues
 R_bad <- matrix(0.9, 3, 3); diag(R_bad) <- 1; R_bad[1,3] <- R_bad[3,1] <- -0.5
-checkLd(R_bad)$is_psd  # FALSE
+checkLd(R_bad)$isPsd  # FALSE
 R_fixed <- checkLd(R_bad, method = "eigenfix")$R
-checkLd(R_fixed)$is_psd  # TRUE
+checkLd(R_fixed)$isPsd  # TRUE
 
 }

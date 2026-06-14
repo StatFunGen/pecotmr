@@ -20,7 +20,7 @@ A \code{RangedSummarizedExperiment} with:
   \describe{
     \item{assay("dosage")}{Numeric matrix (variants x samples)}
     \item{rowRanges}{GRanges with A1, A2 metadata}
-    \item{colData}{DataFrame with sample_id column}
+    \item{colData}{DataFrame with sampleId column}
   }
 }
 \description{

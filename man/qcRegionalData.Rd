@@ -12,7 +12,7 @@ qcRegionalData(
   pipCutoffToSkipSumstat = 0,
   zMismatchQc = NULL,
   impute = FALSE,
-  imputeOpts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)
+  imputeOpts = list(rcond = 0.01, r2Threshold = 0.6, minimumLd = 5, lamb = 0.01)
 )
 }
 \arguments{
@@ -36,7 +36,7 @@ basic-only summary-stat preprocessing.}
 \item{imputeOpts}{A list of imputation options.}
 }
 \value{
-A list containing post-QC \code{individual_data} and \code{sumstat_data}.
+A list containing post-QC \code{individualData} and \code{sumstatData}.
 }
 \description{
 This compatibility wrapper converts loaded regional data to reusable individual

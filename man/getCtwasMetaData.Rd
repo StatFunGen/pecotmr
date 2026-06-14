@@ -15,14 +15,14 @@ getCtwasMetaData(ldMetaDataFile, subsetRegionIds = NULL)
 \value{
 A list with components:
 \describe{
-  \item{LD_info}{Data.frame with columns \code{region_id}, \code{LD_file},
+  \item{ldInfo}{Data.frame with columns \code{region_id}, \code{LD_file},
     \code{SNP_file}.}
-  \item{region_info}{Data.frame with columns \code{chrom}, \code{start},
+  \item{regionInfo}{Data.frame with columns \code{chrom}, \code{start},
     \code{stop}, \code{region_id}.}
 }
 }
 \description{
 \strong{Deprecated.} Use [ldLoader()] with its \code{ldInfo}
 argument instead. This wrapper remains for backwards compatibility and
-produces the same \code{list(LD_info, region_info)} output as the original.
+produces the same \code{list(ldInfo, regionInfo)} output as the original.
 }

@@ -53,10 +53,10 @@ isSnpAlleles <- function(a1, a2) {
 #' @param ids A character vector of variant IDs.
 #' @return A list with components:
 #'   \describe{
-#'     \item{has_chr}{Logical, whether the IDs have a "chr" prefix.}
-#'     \item{allele_sep}{Character, the separator between allele fields (":" or "_").
+#'     \item{hasChr}{Logical, whether the IDs have a "chr" prefix.}
+#'     \item{alleleSep}{Character, the separator between allele fields (":" or "_").
 #'       For mixed format \code{"chr1:100_A_G"}, this is \code{"_"}.}
-#'     \item{has_build}{Logical, whether a build suffix is present.}
+#'     \item{hasBuild}{Logical, whether a build suffix is present.}
 #'     \item{example}{Character, the first non-NA ID for reference.}
 #'   }
 #' @noRd
@@ -64,7 +64,7 @@ detectVariantConvention <- function(ids) {
   # Find first non-NA element
   firstId <- ids[!is.na(ids)][1]
   if (is.na(firstId) || length(firstId) == 0) {
-    return(list(has_chr = FALSE, allele_sep = ":", has_build = FALSE, example = NA_character_))
+    return(list(hasChr = FALSE, alleleSep = ":", hasBuild = FALSE, example = NA_character_))
   }
   hasChr <- grepl("^chr", firstId)
   # Detect build suffix like :b38 or _b38 at end
@@ -73,7 +73,7 @@ detectVariantConvention <- function(ids) {
   # Detect allele separator: check if variant uses underscores between allele fields
   # This catches both full underscore ("1_100_A_G") and mixed ("chr1:100_A_G") formats
   alleleSep <- if (grepl("_[ATCGID*]+_[ATCGID*]+$", idClean)) "_" else ":"
-  list(has_chr = hasChr, allele_sep = alleleSep, has_build = hasBuild, example = firstId)
+  list(hasChr = hasChr, alleleSep = alleleSep, hasBuild = hasBuild, example = firstId)
 }
 
 # Backwards-compat alias for external callers
@@ -106,8 +106,8 @@ parseVariantId <- function(ids) {
     }
     # Detect convention from chrom column before converting
     conv <- list(
-      has_chr = any(grepl("^chr", as.character(ids$chrom))),
-      allele_sep = ":", has_build = FALSE, example = NA_character_
+      hasChr = any(grepl("^chr", as.character(ids$chrom))),
+      alleleSep = ":", hasBuild = FALSE, example = NA_character_
     )
     ids$chrom <- as.integer(stripChrPrefix(as.character(ids$chrom)))
     ids$pos <- as.integer(ids$pos)
@@ -148,7 +148,7 @@ parseVariantId <- function(ids) {
 #' When a \code{convention} object (from \code{detect_variant_convention}) is
 #' provided, the output format is driven automatically by the detected
 #' convention, so callers do not need to specify \code{chr_prefix} or
-#' \code{allele_sep} manually.
+#' \code{alleleSep} manually.
 #'
 #' @param chrom Integer or character chromosome (e.g., 1 or "chr1").
 #' @param pos Integer position.
@@ -161,7 +161,7 @@ parseVariantId <- function(ids) {
 #'   \code{"_"} produces mixed \code{"chr1:100_A_G"}.
 #'   Ignored if \code{convention} is provided.
 #' @param convention Optional list from \code{detectVariantConvention}.
-#'   When provided, \code{has_chr} and \code{allele_sep} are read from the
+#'   When provided, \code{hasChr} and \code{alleleSep} are read from the
 #'   convention automatically. This is the preferred way to preserve the
 #'   user's input format.
 #' @return A character vector of formatted variant IDs.
@@ -169,8 +169,8 @@ parseVariantId <- function(ids) {
 formatVariantId <- function(chrom, pos, A2, A1, chrPrefix = TRUE, alleleSep = ":", convention = NULL) {
   # If convention is provided, use it to determine format automatically
   if (!is.null(convention)) {
-    chrPrefix <- convention$has_chr
-    alleleSep <- if (!is.null(convention$allele_sep)) convention$allele_sep else ":"
+    chrPrefix <- convention$hasChr
+    alleleSep <- if (!is.null(convention$alleleSep)) convention$alleleSep else ":"
   }
   # Strip any existing chr prefix to normalize, then re-add if requested
   chromClean <- stripChrPrefix(as.character(chrom))
@@ -254,18 +254,18 @@ regionToDf <- function(ldRegionId, colnames = c("chrom", "start", "end")) {
 #'
 #' @param idsA Character vector of variant IDs.
 #' @param idsB Character vector of variant IDs.
-#' @return A list with components \code{ids_a} and \code{ids_b}, both normalized
+#' @return A list with components \code{idsA} and \code{idsB}, both normalized
 #'   to canonical chr-prefix format if they were mismatched.
 #' @noRd
 ensureChrMatch <- function(idsA, idsB) {
   hasChrA <- any(grepl("^chr", idsA[!is.na(idsA)][1:min(5, sum(!is.na(idsA)))]))
   hasChrB <- any(grepl("^chr", idsB[!is.na(idsB)][1:min(5, sum(!is.na(idsB)))]))
   if (hasChrA == hasChrB) {
-    return(list(ids_a = idsA, ids_b = idsB))
+    return(list(idsA = idsA, idsB = idsB))
   }
   list(
-    ids_a = normalizeVariantId(idsA, chrPrefix = TRUE),
-    ids_b = normalizeVariantId(idsB, chrPrefix = TRUE)
+    idsA = normalizeVariantId(idsA, chrPrefix = TRUE),
+    idsB = normalizeVariantId(idsB, chrPrefix = TRUE)
   )
 }
 

@@ -9,9 +9,9 @@
 \usage{
 dprWeights(X, y, fittingMethod = "VB", retainFit = FALSE, ...)
 
-dprVbWeights(X, y, n_k = 8, retainFit = FALSE, ...)
+dprVbWeights(X, y, nK = 8, retainFit = FALSE, ...)
 
-dprGibbsWeights(X, y, s_step = 5000, retainFit = FALSE, ...)
+dprGibbsWeights(X, y, sStep = 5000, retainFit = FALSE, ...)
 
 dprAdaptiveGibbsWeights(X, y, retainFit = FALSE, ...)
 }

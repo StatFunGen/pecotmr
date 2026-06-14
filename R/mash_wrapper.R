@@ -231,14 +231,14 @@ loadMultitraitTensorqtlSumstat <- function(
     sorted <- out[order(-abs(out$beta / out$se)), c("variants", "molecular_trait_id")]
     topV <- apply(sorted[1:2, ], 1, function(row) paste(row, collapse = "_")) # paste the variant (chr:pos:alt:ref) with gene_id with '_'
     out <- as.list(out)
-    out$top_variants <- topV
+    out$topVariants <- topV
     return(out)
   }, region = region, gene = gene)
 
   ## Y is list of data frames where colnames(Y[[1]])=
   ## c('chrom','pos','alt','ref','variant_id','molecular_trait_id','start_distance',
   ## 'end_distance','af','ma_samples','ma_count','pvalue','beta','se','molecular_trait_object_id',
-  ## 'n','variant''top_variants')
+  ## 'n','variant''topVariants')
 
   ### The step below assigns condition names to the Y; in case the filename
   ### itself does not contain any condition names, users can input the
@@ -282,7 +282,7 @@ loadMultitraitTensorqtlSumstat <- function(
   }
 
   if (topLoci) {
-    unionTopLoci <- unique(unlist(lapply(Y, function(item) item$top_variants)))
+    unionTopLoci <- unique(unlist(lapply(Y, function(item) item$topVariants)))
     varIdx <- which(variants %in% unionTopLoci) # varIdx may end up empty if maxRowsSelected number too small
   }
 
@@ -301,7 +301,7 @@ loadMultitraitTensorqtlSumstat <- function(
     "se"
   ))] <- traitNames
   out$region <- region
-  out$top_variants <- lapply(Y, function(x) x$top_variants)
+  out$topVariants <- lapply(Y, function(x) x$topVariants)
   return(out)
 }
 
@@ -420,8 +420,8 @@ mergeSusieCs <- function(susieFit, coverage = "CS_95_susie", method = NULL) {
         paste(sort(unique(unlist(extractedResult[[variantId]]$sets))), collapse = ",")
       }
       data.frame(
-        variant_id = variantId, credible_set_names = credibleSetNames,
-        max_pip = maxPip, median_pip = medianPip, stringsAsFactors = FALSE
+        variant_id = variantId, credibleSetNames = credibleSetNames,
+        maxPip = maxPip, medianPip = medianPip, stringsAsFactors = FALSE
       )
     }))
     return(topLociDf)
@@ -504,7 +504,7 @@ loadMultitraitRSumstat <- function(susieFit, sumstatsDb, coverage = NULL, extrac
       stop("Variants are from multiple chromosomes. Cannot create a single range string.")
     }
     # Reconstruct chrom string with original convention for tabix
-    chromStr <- if (conv$has_chr) paste0("chr", chrom) else as.character(chrom)
+    chromStr <- if (conv$hasChr) paste0("chr", chrom) else as.character(chrom)
     region <- paste0(chromStr, ":", minPos, "-", maxPos)
     refTable <- tabixRegion(filterFile, region)
     if (is.null(refTable)) {
@@ -538,8 +538,8 @@ loadMultitraitRSumstat <- function(susieFit, sumstatsDb, coverage = NULL, extrac
     unionTopLoci <- mergeSusieCs(susieFit, coverage)
     if (!is.null(unionTopLoci)) {
       strongSignalDf <- unionTopLoci %>%
-        group_by(credible_set_names) %>%
-        filter(median_pip == max(median_pip)) %>%
+        group_by(credibleSetNames) %>%
+        filter(medianPip == max(medianPip)) %>%
         slice(1) %>%
         ungroup()
       varIdx <- which(out[[1]]$variants %in% strongSignalDf$variant_id)
@@ -1072,9 +1072,9 @@ loadMulticontextSumstats <- function(datList, signalDf, cond, region, extractInf
 #'
 #' @description
 #' Recursively searches a nested list to extract summary statistics (z, beta, or se)
-#' using `variant_names` and `sumstats`. Computes `z` if needed from `betahat` and `sebetahat`.
+#' using `variantNames` and `sumstats`. Computes `z` if needed from `betahat` and `sebetahat`.
 #'
-#' @param data A nested list structure potentially containing `variant_names` and `sumstats`.
+#' @param data A nested list structure potentially containing `variantNames` and `sumstats`.
 #' @param extractInf Character. One of `"z"`, `"beta"`, or `"se"`.
 #' @param maxDepth Integer. Maximum depth to search within the list. Default is 3.
 #'
@@ -1095,15 +1095,15 @@ extractFlattenSumstatsFromNested <- function(data, extractInf = "z", maxDepth = 
   # Internal recursive function
   findNested <- function(element, currentDepth = 0) {
     if (currentDepth >= maxDepth) {
-      message("Maximum search depth reached. Could not find 'variant_names' and 'sumstats' together.")
+      message("Maximum search depth reached. Could not find 'variantNames' and 'sumstats' together.")
       return(NULL)
     }
 
     if (is.list(element)) {
-      hasFm <- !is.null(element$finemapping_result) && is(element$finemapping_result, "FineMappingResult")
+      hasFm <- !is.null(element$finemappingResult) && is(element$finemappingResult, "FineMappingResult")
       hasSumstats <- "sumstats" %in% names(element)
       if (hasSumstats && hasFm) {
-        variantNames <- getVariantNames(element$finemapping_result)
+        variantNames <- getVariantNames(element$finemappingResult)
         sumstats <- element$sumstats
 
         # Extract based on type

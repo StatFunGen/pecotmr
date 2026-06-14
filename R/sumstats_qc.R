@@ -254,7 +254,7 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
 #' @param alleleFlipKriging Logical; opt-in kriging LD-consistency prefilter
 #'   (\code{\link{krigingOutlierQc}}) run before the heavier QC, or standalone
 #'   when \code{zMismatchQc = "none"}. Default \code{FALSE}.
-#' @param keepIndel,skipRegion,pipCutoffToSkip,impute,imputeOpts,study,varY,returnOnSkip,R_finite,R_mismatch
+#' @param keepIndel,skipRegion,pipCutoffToSkip,impute,imputeOpts,study,varY,returnOnSkip,rFinite,rMismatch
 #'   Additional controls for the combined RSS/ColocBoost QC workflow. They are
 #'   ignored by the historical LD-mismatch-only call unless \code{rssInput} or
 #'   combined-QC options are supplied.
@@ -311,13 +311,13 @@ summaryStatsQc <- function(sumstats, ldData, n = NULL,
                            zMismatchQc = NULL,
                            alleleFlipKriging = FALSE,
                            impute = FALSE,
-                           imputeOpts = list(rcond = 0.01, R2_threshold = 0.6,
-                                             minimum_ld = 5, lamb = 0.01),
+                           imputeOpts = list(rcond = 0.01, r2Threshold = 0.6,
+                                             minimumLd = 5, lamb = 0.01),
                            study = NULL,
                            varY = NULL,
                            returnOnSkip = c("null", "preprocess"),
-                           R_finite = NULL,
-                           R_mismatch = NULL) {
+                           rFinite = NULL,
+                           rMismatch = NULL) {
   if (missing(sumstats)) sumstats <- NULL
   returnOnSkip <- match.arg(returnOnSkip)
   if (is.null(rssInput) && is.data.frame(sumstats) && is.null(zMismatchQc) &&
@@ -440,8 +440,8 @@ summaryStatsQc <- function(sumstats, ldData, n = NULL,
       imputeOpts = imputeOpts,
       study = studyName,
       returnOnSkip = returnOnSkip,
-      R_finite = R_finite,
-      R_mismatch = R_mismatch
+      rFinite = rFinite,
+      rMismatch = rMismatch
     )
     if (!is.null(result)) out[[studyName]] <- result
   }
@@ -451,13 +451,13 @@ summaryStatsQc <- function(sumstats, ldData, n = NULL,
 .inferSingleLdBlockMetadata <- function(refPanel) {
   nVariants <- nrow(refPanel)
   data.frame(
-    block_id = 1L,
+    blockId = 1L,
     chrom = as.character(refPanel$chrom[1]),
-    block_start = suppressWarnings(min(refPanel$pos, na.rm = TRUE)),
-    block_end = suppressWarnings(max(refPanel$pos, na.rm = TRUE)),
+    blockStart = suppressWarnings(min(refPanel$pos, na.rm = TRUE)),
+    blockEnd = suppressWarnings(max(refPanel$pos, na.rm = TRUE)),
     size = nVariants,
-    start_idx = 1L,
-    end_idx = nVariants,
+    startIdx = 1L,
+    endIdx = nVariants,
     stringsAsFactors = FALSE
   )
 }
@@ -503,7 +503,7 @@ summaryStatsQc <- function(sumstats, ldData, n = NULL,
                                        pipCutoffToSkip, zMismatchQc, impute,
                                        imputeOpts, study, returnOnSkip,
                                        alleleFlipKriging = FALSE,
-                                       R_finite = NULL, R_mismatch = NULL) {
+                                       rFinite = NULL, rMismatch = NULL) {
   if (is.null(rssInput) || is.null(ldData)) return(NULL)
   message("QC track: starting basic allele harmonization for summary-stat study ", study, ".")
   message("QC track: basic summary-stat QC requires sumstat$variant and ldData variant IDs ",
@@ -645,19 +645,19 @@ summaryStatsQc <- function(sumstats, ldData, n = NULL,
       colnames(X_ref_scaled) <- colnames(X_ref)
       raiss(refPanel, sumstats,
             genotypeMatrix = X_ref_scaled,
-            svdTol = if (is.null(imputeOpts$svd_tol)) 1e-12 else imputeOpts$svd_tol,
-            r2Threshold = imputeOpts$R2_threshold,
-            minimumLd = imputeOpts$minimum_ld,
+            svdTol = if (is.null(imputeOpts$svdTol)) 1e-12 else imputeOpts$svdTol,
+            r2Threshold = imputeOpts$r2Threshold,
+            minimumLd = imputeOpts$minimumLd,
             lamb = imputeOpts$lamb)
     } else {
       raiss(refPanel, sumstats, partitionLdMatrix(ldDataForQc),
             rcond = imputeOpts$rcond,
-            r2Threshold = imputeOpts$R2_threshold,
-            minimumLd = imputeOpts$minimum_ld,
+            r2Threshold = imputeOpts$r2Threshold,
+            minimumLd = imputeOpts$minimumLd,
             lamb = imputeOpts$lamb)
     }
-    sumstats <- imputed$result_filter
-    if (!is.null(imputed$LD_mat)) R_mat <- imputed$LD_mat
+    sumstats <- imputed$resultFilter
+    if (!is.null(imputed$ldMat)) R_mat <- imputed$ldMat
   }
   finalVars <- sumstats$variant_id
   finalLdMat <- if (hasGenotype) referenceForVariants(finalVars) else R_mat

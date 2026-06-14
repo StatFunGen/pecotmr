@@ -91,12 +91,12 @@ test_that("computeQtlEnrichment errors when gwas_pip has no names", {
 test_that("computeQtlEnrichment calls real C++ enrichment code and returns expected keys", {
   set.seed(42)
   n_snps <- 50
-  variant_names <- paste0("1:", 1:n_snps, ":A:G")
+  variantNames <- paste0("1:", 1:n_snps, ":A:G")
 
   # GWAS PIPs: sparse signal
   gwas_pip <- rep(0.01, n_snps)
   gwas_pip[c(5, 20, 35)] <- c(0.8, 0.6, 0.9)
-  names(gwas_pip) <- variant_names
+  names(gwas_pip) <- variantNames
 
   # SuSiE fit with 2 single effects over same variants
   L <- 2
@@ -105,7 +105,7 @@ test_that("computeQtlEnrichment calls real C++ enrichment code and returns expec
   alpha[1, ] <- 0.001; alpha[1, 5] <- 0.95; alpha[1, ] <- alpha[1, ] / sum(alpha[1, ])
   alpha[2, ] <- 0.001; alpha[2, 20] <- 0.95; alpha[2, ] <- alpha[2, ] / sum(alpha[2, ])
   pip <- colSums(alpha)
-  names(pip) <- variant_names
+  names(pip) <- variantNames
 
   susie_fits <- list(
     fit1 = list(pip = pip, alpha = alpha, prior_variance = c(0.5, 0.3))

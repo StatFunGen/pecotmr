@@ -22,7 +22,7 @@
 \item{baselineMat}{Matrix of baseline annotations, or NULL.}
 }
 \value{
-A list with enrichment data.frame and score_stats list.
+A list with enrichment data.frame and scoreStats list.
 }
 \description{
 Score-based approach: fit baseline jointly, compute scores

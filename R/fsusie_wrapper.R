@@ -64,7 +64,7 @@ calPurity <- function(lCs, X, method = "min") {
 #'  credible sets. This is purely for record purpose so should be
 #'  manually ensured that it correctly reflect the actual coverage used. Defaults to 0.95.
 #' @return A list containing named credible sets (cs), a dataframe of purity metrics
-#'         (min.abs.corr, mean.abs.corr, median.abs.corr), an index of credible sets (cs_index),
+#'         (minAbsCorr, meanAbsCorr, medianAbsCorr), an index of credible sets (cs_index),
 #'         coverage values for each set, and the requested coverage level. Similar to the SuSiE set output
 #' @export
 fsusieGetCs <- function(fsusieObj, X, requestedCoverage = 0.95) {
@@ -74,7 +74,7 @@ fsusieGetCs <- function(fsusieObj, X, requestedCoverage = 0.95) {
   # Create 'purity' data frame
   purityDf <- do.call(rbind, lapply(calPurity(fsusieObj$cs, X = X, method = "susie"), function(x) as.data.frame(t(x))))
   rownames(purityDf) <- names(csNamed)
-  colnames(purityDf) <- c("min.abs.corr", "mean.abs.corr", "median.abs.corr")
+  colnames(purityDf) <- c("minAbsCorr", "meanAbsCorr", "medianAbsCorr")
 
   # Create 'coverage' without
   coverageVector <- numeric(length(fsusieObj$alpha))

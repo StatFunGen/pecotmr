@@ -267,10 +267,10 @@ getRefVariantInfo <- function(source, region = NULL) {
   resolved <- resolveLdSource(source)
 
   # For genotype sources via metadata, resolve per-chromosome path
-  if (resolved$type %in% c("plink2", "plink1", "vcf", "gds") && !is.null(resolved$meta_path) && !is.null(region)) {
-    dataPath <- resolveGenotypePathForRegion(resolved$meta_path, region)
+  if (resolved$type %in% c("plink2", "plink1", "vcf", "gds") && !is.null(resolved$metaPath) && !is.null(region)) {
+    dataPath <- resolveGenotypePathForRegion(resolved$metaPath, region)
   } else {
-    dataPath <- resolved$data_path
+    dataPath <- resolved$dataPath
   }
 
   if (resolved$type == "plink2") {
@@ -297,7 +297,7 @@ getRefVariantInfo <- function(source, region = NULL) {
     return(info)  # Already region-filtered by the loader
   } else {
     # Pre-computed LD: read bim/pvar files via metadata
-    bimPaths <- getRegionalLdMeta(resolved$meta_path, region)$intersections$bim_file_paths
+    bimPaths <- getRegionalLdMeta(resolved$metaPath, region)$intersections$bimFilePaths
     info <- do.call(rbind, lapply(bimPaths, function(path) {
       df <- readVariantMetadata(path)
       out <- data.frame(
@@ -1094,7 +1094,7 @@ cleanContextNames <- function(context, gene) {
 #' print(consolidated_weights)
 #' @export
 loadTwasWeights <- function(weightDbFiles, conditions = NULL,
-                            variableNameObj = c("preset_variants_result", "variant_names"),
+                            variableNameObj = c("preset_variants_result", "variantNames"),
                             susieObj = c("preset_variants_result", "susie_result_trimmed"),
                             twasWeightsTable = "twas_weights") {
   ## Internal function to load and validate data from RDS files
@@ -1178,22 +1178,22 @@ loadTwasWeights <- function(weightDbFiles, conditions = NULL,
         uniVariants <- getNestedElement(combinedAllData[[gene]][[context]], variableNameObj)
         # Harmonize chr prefix convention between multivariate and univariate variant IDs
         chrMatched <- ensureChrMatch(multiVariants, uniVariants)
-        multiVariantsH <- chrMatched$ids_a
-        uniVariantsH <- chrMatched$ids_b
+        multiVariantsH <- chrMatched$idsA
+        uniVariantsH <- chrMatched$idsB
         multiWeights <- setNames(rep(0, length(uniVariantsH)), uniVariantsH)
-        multiWeights <- lapply(combinedAllData[["mnm_rs"]][[context]]$twas_weights, function(weightList) {
+        multiWeights <- lapply(combinedAllData[["mnm_rs"]][[context]]$twasWeights, function(weightList) {
           alignedWeights <- setNames(rep(0, length(uniVariantsH)), uniVariantsH)
           weightVals <- unlist(weightList)
-          names(weightVals) <- ensureChrMatch(names(weightVals), uniVariantsH)$ids_a
+          names(weightVals) <- ensureChrMatch(names(weightVals), uniVariantsH)$idsA
           methodWeightVariants <- names(weightVals)
           overlapVariants <- methodWeightVariants[methodWeightVariants %in% multiVariantsH[multiVariantsH %in% uniVariantsH]]
           alignedWeights[overlapVariants] <- weightVals[overlapVariants]
           alignedWeights <- as.matrix(alignedWeights)
         })
-        combinedAllData[[gene]][[context]]$twas_weights <- c(combinedAllData[[gene]][[context]]$twas_weights, multiWeights)
-        combinedAllData[[gene]][[context]]$twas_cv_result$performance <- c(
-          combinedAllData[[gene]][[context]]$twas_cv_result$performance,
-          combinedAllData[["mnm_rs"]][[context]]$twas_cv_result$performance
+        combinedAllData[[gene]][[context]]$twasWeights <- c(combinedAllData[[gene]][[context]]$twasWeights, multiWeights)
+        combinedAllData[[gene]][[context]]$twasCvResult$performance <- c(
+          combinedAllData[[gene]][[context]]$twasCvResult$performance,
+          combinedAllData[["mnm_rs"]][[context]]$twasCvResult$performance
         )
       }
       combinedAllData[["mnm_rs"]] <- NULL
@@ -1262,7 +1262,7 @@ loadTwasWeights <- function(weightDbFiles, conditions = NULL,
       weights <- consolidateWeightsList(combinedAllData, conditions, variableNameObj, twasWeightsTable)
       combinedSusieResult <- lapply(combinedAllData, function(context) getNestedElement(context, susieObj))
       performanceTables <- lapply(conditions, function(condition) {
-        getNestedElement(combinedAllData, c(condition, "twas_cv_result", "performance"))
+        getNestedElement(combinedAllData, c(condition, "twasCvResult", "performance"))
       })
       names(performanceTables) <- conditions
       # Extract variant_ids from weight matrices (union across all contexts)
@@ -1304,7 +1304,7 @@ loadTwasWeights <- function(weightDbFiles, conditions = NULL,
 #' @param columnFilePath Optional file path to a custom column mapping file
 #'   (format: standard_name:original_name, one per line). Applied after
 #'   MungeSumstats standardization.
-#' @param commentString Comment character in column_file_path. Default is "#".
+#' @param commentString Comment character in columnFilePath. Default is "#".
 #' @return A data frame with standardized column names.
 #' @export
 standardiseSumstatsColumns <- function(sumstats, columnFilePath = NULL, commentString = "#") {
@@ -1378,15 +1378,15 @@ standardiseSumstatsColumns <- function(sumstats, columnFilePath = NULL, commentS
 #' optionally variance of Y for observed-scale binary OLS summary statistics.
 #' Missing values in n_sample, n_case, and n_control are backfilled with median values.
 #'
-#' @param sumstat_path File path to the summary statistics.
-#' @param column_file_path Optional file path to a custom column mapping file for
+#' @param sumstatPath File path to the summary statistics.
+#' @param columnFilePath Optional file path to a custom column mapping file for
 #'   non-standard column names not recognized by MungeSumstats.
 #' @param n_sample User-specified sample size. If unknown, set as 0 to retrieve from the sumstat file.
 #' @param n_case User-specified number of cases.
 #' @param n_control User-specified number of controls.
 #' @param binary_trait_model How to treat case-control sample counts. The
 #'   default \code{"rss"} uses counts only to infer \code{n} and leaves
-#'   \code{var_y = NULL}, so \code{susie_rss()} uses its z-score RSS interface
+#'   \code{var_y = NULL}, so \code{susieRss()} uses its z-score RSS interface
 #'   on the standardized phenotype scale. Use \code{"ols"} only when
 #'   \code{beta} and \code{se} come from ordinary least squares on a 0/1
 #'   phenotype and the full \code{bhat/shat/var_y} sufficient-statistic
@@ -1431,7 +1431,7 @@ loadRssData <- function(sumstatPath, columnFilePath = NULL, nSample = 0, nCase =
     if (is.null(sumstats)) {
       sumstats <- data.frame()
     }
-    return(list(sumstats = sumstats, n = NULL, var_y = NULL))
+    return(list(sumstats = sumstats, n = NULL, varY = NULL))
   } else {
     message(paste0("Region ", region, " include ", nVariants, " in input sumstats."))
   }
@@ -1546,7 +1546,7 @@ loadRssData <- function(sumstatPath, columnFilePath = NULL, nSample = 0, nCase =
            "n_sample/n_case/n_control columns in your summary statistics.")
     }
   }
-  return(list(sumstats = sumstats, n = n, var_y = varY))
+  return(list(sumstats = sumstats, n = n, varY = varY))
 }
 
 
@@ -1593,8 +1593,8 @@ loadRssData <- function(sumstatPath, columnFilePath = NULL, nSample = 0, nCase =
 #' @param comment_string comment sign in the column_mapping file, default is #
 #' @param extract_coordinates Optional data frame with columns "chrom" and "pos" for specific coordinates extraction.
 #'
-#' @return A list containing the individual_data and sumstat_data:
-#' individual_data contains the following components if exist
+#' @return A list containing the individualData and sumstatData:
+#' individualData contains the following components if exist
 #' \itemize{
 #'   \item residual_Y: A list of residualized phenotype values (either a vector or a matrix).
 #'   \item residual_X: A list of residualized genotype matrices for each condition.
@@ -1610,10 +1610,10 @@ loadRssData <- function(sumstatPath, columnFilePath = NULL, nSample = 0, nCase =
 #'   \item grange: Genomic range of the region (start and end positions).
 #'   \item Y_coordinates: Phenotype coordinates if a region is specified.
 #' }
-#' sumstat_data contains the following components if exist
+#' sumstatData contains the following components if exist
 #' \itemize{
-#'   \item sumstats: A list of summary statistics for the matched LD_info, each sublist contains sumstats, n, var_y from \code{loadRssData}.
-#'   \item LD_info: A list of \code{LdData} S4 objects (one per LD reference), as returned by \code{load_LD_matrix}.
+#'   \item sumstats: A list of summary statistics for the matched ldInfo, each sublist contains sumstats, n, var_y from \code{loadRssData}.
+#'   \item ldInfo: A list of \code{LdData} S4 objects (one per LD reference), as returned by \code{load_LD_matrix}.
 #' }
 #'
 #' @export
@@ -1766,14 +1766,14 @@ loadMultitaskRegionalData <- function(region, # a string of chr:start-end for ph
         sumstats <- sumstats[-posNoVariants]
       }
       sumstatData$sumstats <- c(sumstatData$sumstats, list(sumstats))
-      sumstatData$LD_info <- c(sumstatData$LD_info, list(ldInfo))
+      sumstatData$ldInfo <- c(sumstatData$ldInfo, list(ldInfo))
     }
-    names(sumstatData$sumstats) <- names(sumstatData$LD_info) <- names(matchLdSumstat)
+    names(sumstatData$sumstats) <- names(sumstatData$ldInfo) <- names(matchLdSumstat)
   }
 
   return(list(
-    individual_data = individualData,
-    sumstat_data = sumstatData
+    individualData = individualData,
+    sumstatData = sumstatData
   ))
 }
 
@@ -1832,10 +1832,10 @@ regionDataToIndInput <- function(regionData) {
     list(X = X[names(grouped)], Y = grouped)
   }
 
-  individualData <- regionData$individual_data
+  individualData <- regionData$individualData
   if (is.null(individualData)) {
-    return(list(X = NULL, Y = NULL, maf = NULL, X_variance = NULL,
-                source_info = list(has_individual = FALSE, contexts = character())))
+    return(list(X = NULL, Y = NULL, maf = NULL, xVariance = NULL,
+                sourceInfo = list(hasIndividual = FALSE, contexts = character())))
   }
 
   if (is(individualData, "RegionalData")) {
@@ -1861,9 +1861,9 @@ regionDataToIndInput <- function(regionData) {
       X = X,
       Y = Y,
       maf = maf,
-      X_variance = XVariance,
-      source_info = list(has_individual = !is.null(X) && !is.null(Y),
-                         contexts = contexts)
+      xVariance = XVariance,
+      sourceInfo = list(hasIndividual = !is.null(X) && !is.null(Y),
+                        contexts = contexts)
     ))
   }
 
@@ -1882,13 +1882,13 @@ regionDataToIndInput <- function(regionData) {
       X = X,
       Y = Y,
       maf = maf,
-      X_variance = XVariance,
-      source_info = list(has_individual = !is.null(X) && !is.null(Y),
-                         contexts = contexts)
+      xVariance = XVariance,
+      sourceInfo = list(hasIndividual = !is.null(X) && !is.null(Y),
+                        contexts = contexts)
     ))
   }
 
-  stop("region_data$individual_data must be a RegionalData object or a post-QC list with X/Y entries")
+  stop("region_data$individualData must be a RegionalData object or a post-QC list with X/Y entries")
 }
 
 #' Convert loaded regional data to RSS inputs
@@ -1900,8 +1900,8 @@ regionDataToIndInput <- function(regionData) {
 regionDataToRssInput <- function(regionData) {
   rssInputFromQcedSumstat <- function(sumstatData) {
     rssInput <- sumstatData$sumstats
-    ldDataIn <- sumstatData$LD_data
-    ldMatch <- sumstatData$LD_match
+    ldDataIn <- sumstatData$ldData
+    ldMatch <- sumstatData$ldMatch
     studies <- names(rssInput)
     ldData <- list()
     ldGroup <- character()
@@ -1913,27 +1913,27 @@ regionDataToRssInput <- function(regionData) {
       }
       ld <- ldDataIn[[ldName]]
       if (!is.null(ld) && !is(ld, "LdData")) {
-        stop("region_data$sumstat_data$LD_data entries must be LdData objects.")
+        stop("region_data$sumstatData$ldData entries must be LdData objects.")
       }
       ldData[[study]] <- ld
       ldGroup[[study]] <- ldName
     }
     list(
-      rss_input = rssInput,
-      LD_data = ldData,
-      source_info = list(has_sumstat = length(rssInput) > 0,
+      rssInput = rssInput,
+      ldData = ldData,
+      sourceInfo = list(hasSumstat = length(rssInput) > 0,
                          studies = names(rssInput),
-                         ld_group = ldGroup)
+                         ldGroup = ldGroup)
     )
   }
 
-  sumstatData <- regionData$sumstat_data
+  sumstatData <- regionData$sumstatData
   if (is.null(sumstatData) || is.null(sumstatData$sumstats)) {
-    return(list(rss_input = list(), LD_data = list(),
-                source_info = list(has_sumstat = FALSE, studies = character(),
-                                   ld_group = character())))
+    return(list(rssInput = list(), ldData = list(),
+                sourceInfo = list(hasSumstat = FALSE, studies = character(),
+                                   ldGroup = character())))
   }
-  if (!is.null(sumstatData$LD_data)) {
+  if (!is.null(sumstatData$ldData)) {
     return(rssInputFromQcedSumstat(sumstatData))
   }
 
@@ -1943,14 +1943,14 @@ regionDataToRssInput <- function(regionData) {
 
   for (i in seq_along(sumstatData$sumstats)) {
     studies <- sumstatData$sumstats[[i]]
-    ldIndex <- min(i, length(sumstatData$LD_info))
-    groupName <- names(sumstatData$LD_info)[ldIndex]
+    ldIndex <- min(i, length(sumstatData$ldInfo))
+    groupName <- names(sumstatData$ldInfo)[ldIndex]
     if (is.null(groupName) || is.na(groupName) || groupName == "") {
       groupName <- paste0("LD", ldIndex)
     }
-    ldEntry <- sumstatData$LD_info[[ldIndex]]
+    ldEntry <- sumstatData$ldInfo[[ldIndex]]
     if (!is.null(ldEntry) && !is(ldEntry, "LdData")) {
-      stop("region_data$sumstat_data$LD_info entries must be LdData objects.")
+      stop("region_data$sumstatData$ldInfo entries must be LdData objects.")
     }
     for (study in names(studies)) {
       outputName <- study
@@ -1964,11 +1964,11 @@ regionDataToRssInput <- function(regionData) {
   }
 
   list(
-    rss_input = rssInput,
-    LD_data = ldData,
-    source_info = list(has_sumstat = length(rssInput) > 0,
+    rssInput = rssInput,
+    ldData = ldData,
+    sourceInfo = list(hasSumstat = length(rssInput) > 0,
                        studies = names(rssInput),
-                       ld_group = ldGroup)
+                       ldGroup = ldGroup)
   )
 }
 
@@ -2072,7 +2072,7 @@ batchLoadTwasWeights <- function(twasWeightsResults, metaDataDf, maxMemoryPerBat
   }
 
   geneMemoryDf <- data.frame(
-    gene_name = geneNames, memory_mb = sapply(geneNames, function(gene) {
+    geneName = geneNames, memoryMb = sapply(geneNames, function(gene) {
       as.numeric(object.size(twasWeightsResults[[gene]])) / (1024^2) # Get object size in bytes and convert to MB
     })
   )
@@ -2080,17 +2080,17 @@ batchLoadTwasWeights <- function(twasWeightsResults, metaDataDf, maxMemoryPerBat
   # Merge with meta_data_df to get TSS information
   metaDataDf <- metaDataDf[!duplicated(metaDataDf[, c("region_id", "TSS")]), ]
   geneMemoryDf <- merge(geneMemoryDf, metaDataDf[, c("region_id", "TSS")],
-    by.x = "gene_name",
+    by.x = "geneName",
     by.y = "region_id", all.x = TRUE
   )
   geneMemoryDf <- geneMemoryDf[order(geneMemoryDf$TSS), ]
 
   # Check if we need to split into batches
-  totalMemoryMb <- sum(geneMemoryDf$memory_mb)
+  totalMemoryMb <- sum(geneMemoryDf$memoryMb)
   message("Total memory usage: ", round(totalMemoryMb, 2), " MB")
   if (totalMemoryMb <= maxMemoryPerBatch) {
     message("All genes fit within the memory limit. No need to split into batches.")
-    return(list(all_genes = twasWeightsResults))
+    return(list(allGenes = twasWeightsResults))
   }
 
   # Create batches by adding genes until we reach the memory limit
@@ -2100,8 +2100,8 @@ batchLoadTwasWeights <- function(twasWeightsResults, metaDataDf, maxMemoryPerBat
   batchIndex <- 1
 
   for (i in 1:nrow(geneMemoryDf)) {
-    gene <- geneMemoryDf$gene_name[i]
-    geneMemory <- geneMemoryDf$memory_mb[i]
+    gene <- geneMemoryDf$geneName[i]
+    geneMemory <- geneMemoryDf$memoryMb[i]
     # If a single gene exceeds the memory limit, include it in its own batch
     if (geneMemory > maxMemoryPerBatch) {
       batches[[paste0("batch_", batchIndex)]] <- twasWeightsResults[gene]

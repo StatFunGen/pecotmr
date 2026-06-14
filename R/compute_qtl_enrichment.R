@@ -99,9 +99,9 @@ computeQtlEnrichment <- function(gwasPip, susieQtlRegions,
   # Align the names of susieQtlRegions$pip to gwasPip names and document unmatched variants
   alignedSusieQtlRegions <- lapply(susieQtlRegions, function(x) {
     alignmentResult <- alignVariantNames(names(x$pip), names(gwasPip))
-    names(x$pip) <- alignmentResult$aligned_variants
-    if (length(alignmentResult$unmatched_indices) > 0) {
-      x$unmatched_variants <- names(x$pip)[alignmentResult$unmatched_indices]
+    names(x$pip) <- alignmentResult$alignedVariants
+    if (length(alignmentResult$unmatchedIndices) > 0) {
+      x$unmatched_variants <- names(x$pip)[alignmentResult$unmatchedIndices]
     }
     x
   })

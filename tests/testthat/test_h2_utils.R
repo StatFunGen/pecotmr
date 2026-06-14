@@ -59,11 +59,11 @@ test_that("weightedLs fitted + residuals = y", {
 # =============================================================================
 
 test_that("jackknifeSe returns zero when all LOO estimates equal full", {
-  n_blocks <- 5
+  nBlocks <- 5
   n_params <- 3
   estimates_full <- c(1.0, 2.0, 3.0)
-  estimates_loo <- matrix(rep(estimates_full, each = n_blocks),
-                          nrow = n_blocks, ncol = n_params)
+  estimates_loo <- matrix(rep(estimates_full, each = nBlocks),
+                          nrow = nBlocks, ncol = n_params)
   se <- pecotmr:::jackknifeSe(estimates_full, estimates_loo)
   expect_length(se, n_params)
   expect_equal(se, rep(0, n_params))
@@ -71,10 +71,10 @@ test_that("jackknifeSe returns zero when all LOO estimates equal full", {
 
 test_that("jackknifeSe returns positive SE with varying LOO estimates", {
   set.seed(42)
-  n_blocks <- 10
+  nBlocks <- 10
   estimates_full <- c(5.0, 10.0)
-  estimates_loo <- matrix(rnorm(n_blocks * 2, mean = rep(estimates_full, each = n_blocks), sd = 0.5),
-                          nrow = n_blocks, ncol = 2)
+  estimates_loo <- matrix(rnorm(nBlocks * 2, mean = rep(estimates_full, each = nBlocks), sd = 0.5),
+                          nrow = nBlocks, ncol = 2)
   se <- pecotmr:::jackknifeSe(estimates_full, estimates_loo)
   expect_length(se, 2)
   expect_true(all(se > 0))
@@ -151,14 +151,14 @@ test_that("computeBaselineEnrichment returns correct structure", {
   baseline_mat[1:50, 1] <- 1
   baseline_mat[, 2] <- 1
   tau <- c(0.01, 0.005)
-  tau_se <- c(0.002, 0.001)
+  tauSe <- c(0.002, 0.001)
   h2 <- 0.5
   annot_names <- c("annot1", "base")
-  res <- pecotmr:::computeBaselineEnrichment(tau, tau_se, NULL,
+  res <- pecotmr:::computeBaselineEnrichment(tau, tauSe, NULL,
                                               baseline_mat, annot_names, h2)
   expect_s3_class(res, "data.frame")
-  expected_cols <- c("annotation", "tau", "tau_se", "enrichment",
-                     "enrichment_se", "enrichment_p", "prop_h2", "prop_snps")
+  expected_cols <- c("annotation", "tau", "tauSe", "enrichment",
+                     "enrichmentSe", "enrichmentP", "propH2", "propSnps")
   expect_named(res, expected_cols)
   expect_equal(nrow(res), 2)
 })
@@ -169,60 +169,60 @@ test_that("computeBaselineEnrichment computes enrichment = tau * M / h2", {
   baseline_mat[1:50, 1] <- 1
   baseline_mat[, 2] <- 1
   tau <- c(0.01, 0.005)
-  tau_se <- c(0.002, 0.001)
+  tauSe <- c(0.002, 0.001)
   h2 <- 0.5
   annot_names <- c("annot1", "base")
-  res <- pecotmr:::computeBaselineEnrichment(tau, tau_se, NULL,
+  res <- pecotmr:::computeBaselineEnrichment(tau, tauSe, NULL,
                                               baseline_mat, annot_names, h2)
   expect_equal(res$enrichment, tau * M / h2)
 })
 
-test_that("computeBaselineEnrichment computes prop_snps correctly", {
+test_that("computeBaselineEnrichment computes propSnps correctly", {
   M <- 100
   baseline_mat <- matrix(0, nrow = M, ncol = 2)
   baseline_mat[1:50, 1] <- 1
   baseline_mat[, 2] <- 1
   tau <- c(0.01, 0.005)
-  tau_se <- c(0.002, 0.001)
+  tauSe <- c(0.002, 0.001)
   h2 <- 0.5
   annot_names <- c("annot1", "base")
-  res <- pecotmr:::computeBaselineEnrichment(tau, tau_se, NULL,
+  res <- pecotmr:::computeBaselineEnrichment(tau, tauSe, NULL,
                                               baseline_mat, annot_names, h2)
-  expect_equal(res$prop_snps, c(0.5, 1.0))
+  expect_equal(res$propSnps, c(0.5, 1.0))
 })
 
 test_that("computeBaselineEnrichment uses jackknife blocks when provided", {
   M <- 100
-  n_blocks <- 5
+  nBlocks <- 5
   baseline_mat <- matrix(0, nrow = M, ncol = 2)
   baseline_mat[1:50, 1] <- 1
   baseline_mat[, 2] <- 1
   tau <- c(0.01, 0.005)
-  tau_se <- c(0.002, 0.001)
+  tauSe <- c(0.002, 0.001)
   h2 <- 0.5
   annot_names <- c("annot1", "base")
-  tau_blocks <- matrix(rep(tau, each = n_blocks), nrow = n_blocks, ncol = 2)
-  res <- pecotmr:::computeBaselineEnrichment(tau, tau_se, tau_blocks,
+  tauBlocks <- matrix(rep(tau, each = nBlocks), nrow = nBlocks, ncol = 2)
+  res <- pecotmr:::computeBaselineEnrichment(tau, tauSe, tauBlocks,
                                               baseline_mat, annot_names, h2)
-  # With constant tau_blocks, enrichment_se should be 0
-  expect_equal(res$enrichment_se, c(0, 0))
+  # With constant tauBlocks, enrichmentSe should be 0
+  expect_equal(res$enrichmentSe, c(0, 0))
 })
 
 # =============================================================================
 # standardize_tau_star
 # =============================================================================
 
-test_that("standardize_tau_star computes tau_star = tau * sd_annot * M_ref / h2g", {
+test_that("standardize_tau_star computes tauStar = tau * sd_annot * M_ref / h2g", {
   tau <- c(0.01, 0.02)
   sd_annot <- c(0.5, 0.3)
   M_ref <- 1000L
   h2g <- 0.4
-  n_blocks <- 5
-  tau_blocks <- matrix(rep(tau, each = n_blocks), nrow = n_blocks, ncol = 2)
-  res <- pecotmr:::standardizeTauStar(tau, tau_blocks, sd_annot, M_ref, h2g)
+  nBlocks <- 5
+  tauBlocks <- matrix(rep(tau, each = nBlocks), nrow = nBlocks, ncol = 2)
+  res <- pecotmr:::standardizeTauStar(tau, tauBlocks, sd_annot, M_ref, h2g)
   expected <- tau * sd_annot * M_ref / h2g
-  expect_equal(res$tau_star, expected)
-  expect_length(res$tau_star_se, 2)
+  expect_equal(res$tauStar, expected)
+  expect_length(res$tauStarSe, 2)
 })
 
 test_that("standardize_tau_star errors when h2g == 0", {
@@ -241,17 +241,17 @@ test_that("standardize_tau_star errors when tau and sd_annot differ in length", 
   )
 })
 
-test_that("standardize_tau_star returns list with tau_star and tau_star_se", {
+test_that("standardize_tau_star returns list with tauStar and tauStarSe", {
   tau <- c(0.01)
   sd_annot <- c(0.5)
   M_ref <- 1000L
   h2g <- 0.4
-  tau_blocks <- matrix(rnorm(5, mean = 0.01, sd = 0.001), nrow = 5, ncol = 1)
-  res <- pecotmr:::standardizeTauStar(tau, tau_blocks, sd_annot, M_ref, h2g)
+  tauBlocks <- matrix(rnorm(5, mean = 0.01, sd = 0.001), nrow = 5, ncol = 1)
+  res <- pecotmr:::standardizeTauStar(tau, tauBlocks, sd_annot, M_ref, h2g)
   expect_true(is.list(res))
-  expect_named(res, c("tau_star", "tau_star_se"))
-  expect_length(res$tau_star, 1)
-  expect_length(res$tau_star_se, 1)
+  expect_named(res, c("tauStar", "tauStarSe"))
+  expect_length(res$tauStar, 1)
+  expect_length(res$tauStarSe, 1)
 })
 
 # =============================================================================

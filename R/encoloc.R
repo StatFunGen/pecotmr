@@ -71,14 +71,14 @@ xqtlEnrichmentWrapper <- function(xqtlFiles, gwasFiles,
     })
 
     # Return results as a list
-    return(list(gwas_pip = gwasPip, xqtl_data = xqtlData))
+    return(list(gwasPip = gwasPip, xqtlData = xqtlData))
   }
 
   # Load data
   dat <- processFinemappedData(xqtlFiles, gwasFiles, xqtlFinemappingObj, gwasFinemappingObj, xqtlVarnameObj, gwasVarnameObj)
   # Compute QTL enrichment
   return(computeQtlEnrichment(
-    gwasPip = dat$gwas_pip, susieQtlRegions = dat$xqtl_data,
+    gwasPip = dat$gwasPip, susieQtlRegions = dat$xqtlData,
     numGwas = numGwas, piQtl = piQtl,
     lambda = lambda, impN = impN,
     doubleShrinkage = doubleShrinkage,
@@ -125,12 +125,12 @@ extractLdForVariants <- function(ldMetaFilePath, analysisRegion, variants) {
   # When genotypes available, compute R only for the needed variant subset
   if (hasGeno) {
     X <- getGenotypes(ldData)
-    colnames(X) <- aligned$aligned_variants
+    colnames(X) <- aligned$alignedVariants
     xSub <- X[, variants, drop = FALSE]
     ldMatrix <- computeLd(xSub, method = "sample")
   } else {
     ldMatrix <- getCorrelation(ldData)
-    colnames(ldMatrix) <- rownames(ldMatrix) <- aligned$aligned_variants
+    colnames(ldMatrix) <- rownames(ldMatrix) <- aligned$alignedVariants
     ldMatrix <- ldMatrix[variants, variants]
   }
   ldMatrix
@@ -181,11 +181,11 @@ processColocResults <- function(colocResult, ldMetaFilePath, analysisRegion, pph
     purity <- map_dfr(seq_along(cs), function(n) {
       variants <- normalizeVariantId(cs[[n]])
       if (nullIndex > 0 && nullIndex %in% variants) {
-        data.frame(min.abs.corr = -9, mean.abs.corr = -9, median.abs.corr = -9)
+        data.frame(minAbsCorr = -9, meanAbsCorr = -9, medianAbsCorr = -9)
       } else {
         extLd <- extractLdForVariants(ldMetaFilePath, analysisRegion, variants)
         p <- calculatePurity(variants, extLd)
-        data.frame(min.abs.corr = p[1, 1], mean.abs.corr = p[1, 2], median.abs.corr = p[1, 3])
+        data.frame(minAbsCorr = p[1, 1], meanAbsCorr = p[1, 2], medianAbsCorr = p[1, 3])
       }
     })
     isPure <- which(purity[, 1] >= minAbsCorr)
@@ -195,7 +195,7 @@ processColocResults <- function(colocResult, ldMetaFilePath, analysisRegion, pph
       cs <- cs[isPure]
       purity <- purity[isPure, ]
       trueSummary <- colocSummaryFil[isPure, ]
-      colocRes$sets <- list(cs = cs, purity = purity, true_summary = trueSummary)
+      colocRes$sets <- list(cs = cs, purity = purity, trueSummary = trueSummary)
     }
   } else {
     message("Coloc results did not find any variants that satisfy the condition of PP.H4 being the highest value and > ", pph4Thres)
@@ -251,7 +251,7 @@ processColocResults <- function(colocResult, ldMetaFilePath, analysisRegion, pph
   if (!is.null(varnameObj)) colnames(lbfMatrix) <- getNestedElement(rawData, varnameObj)
   lbfMatrix <- lbfMatrix[, !is.na(colnames(lbfMatrix))]
 
-  list(lbf_matrix = lbfMatrix, fm_data = fmData)
+  list(lbfMatrix = lbfMatrix, fmData = fmData)
 }
 
 # Extract LBF matrix from an rssAnalysisPipeline result object.
@@ -261,11 +261,11 @@ processColocResults <- function(colocResult, ldMetaFilePath, analysisRegion, pph
 .extractLbfFromPipelineResult <- function(pipelineResult,
                                           filterLbfCs, filterLbfCsSecondary,
                                           priorTol) {
-  methodNames <- setdiff(names(pipelineResult), "rss_data_analyzed")
+  methodNames <- setdiff(names(pipelineResult), "rssDataAnalyzed")
   if (length(methodNames) == 0) return(NULL)
 
   methodResult <- pipelineResult[[methodNames[1]]]
-  fmResult <- methodResult$finemapping_result
+  fmResult <- methodResult$finemappingResult
   if (is.null(fmResult) || !is(fmResult, "FineMappingResult")) return(NULL)
   fmData <- getTrimmedFit(fmResult)
   variantNames <- getVariantNames(fmResult)
@@ -286,7 +286,7 @@ processColocResults <- function(colocResult, ldMetaFilePath, analysisRegion, pph
     colnames(lbfMatrix) <- variantNames
   }
   lbfMatrix <- lbfMatrix[, !is.na(colnames(lbfMatrix))]
-  list(lbf_matrix = lbfMatrix, fm_data = fmData)
+  list(lbfMatrix = lbfMatrix, fmData = fmData)
 }
 
 # Save inline fine-mapping result to disk in a format compatible with the
@@ -294,19 +294,19 @@ processColocResults <- function(colocResult, ldMetaFilePath, analysisRegion, pph
 # @noRd
 .saveFinemappingResult <- function(pipelineResult, savePath) {
   if (is.null(savePath) || is.null(pipelineResult)) return(invisible(NULL))
-  methodNames <- setdiff(names(pipelineResult), "rss_data_analyzed")
+  methodNames <- setdiff(names(pipelineResult), "rssDataAnalyzed")
   if (length(methodNames) == 0) return(invisible(NULL))
   methodResult <- pipelineResult[[methodNames[1]]]
-  fmResult <- methodResult$finemapping_result
+  fmResult <- methodResult$finemappingResult
   if (is.null(fmResult) || !is(fmResult, "FineMappingResult")) return(invisible(NULL))
   saveData <- list(
     susie_fit = getTrimmedFit(fmResult),
-    variant_names = getVariantNames(fmResult)
+    variantNames = getVariantNames(fmResult)
   )
   saveRDS(list(saveData), savePath)
   message("Fine-mapping result saved to: ", savePath,
           "\n  Reuse with: gwasFiles = '", savePath,
-          "', gwasFinemappingObj = 'susie_fit', gwasVarnameObj = 'variant_names'")
+          "', gwasFinemappingObj = 'susie_fit', gwasVarnameObj = 'variantNames'")
   invisible(savePath)
 }
 
@@ -345,7 +345,7 @@ processColocResults <- function(colocResult, ldMetaFilePath, analysisRegion, pph
 #' @param zMismatchQc Z-score / LD-mismatch QC selector forwarded to
 #'   \code{\link{rssAnalysisPipeline}}: "slalom", "dentist", or "none".
 #'   Default "slalom". (Hard rename of the former \code{zMismatchQc}; no alias.)
-#' @param finemappingMethod Fine-mapping method. Default "susie_rss".
+#' @param finemappingMethod Fine-mapping method. Default "susieRss".
 #' @param finemappingOpts List of fine-mapping options passed to
 #'   \code{\link{rssAnalysisPipeline}}.
 #' @param impute Logical. Run RAISS imputation. Default TRUE.
@@ -353,9 +353,9 @@ processColocResults <- function(colocResult, ldMetaFilePath, analysisRegion, pph
 #' @param saveFinemappingPath Path to save fine-mapping result as RDS. The
 #'   saved file can be reused via \code{gwasFiles} with
 #'   \code{gwasFinemappingObj = "susie_fit"} and
-#'   \code{gwasVarnameObj = "variant_names"}.
+#'   \code{gwasVarnameObj = "variantNames"}.
 #' @param returnFinemapping Logical. If TRUE and \code{runFinemapping = TRUE},
-#'   include full fine-mapping result under \code{$gwas_finemapping}.
+#'   include full fine-mapping result under \code{$gwasFinemapping}.
 #' @param ... Additional arguments (currently unused).
 #' @return A list containing the coloc results and the summarized sets.
 #' @seealso \code{\link{rssAnalysisPipeline}}, \code{\link{colocPostProcessor}}
@@ -375,16 +375,16 @@ colocWrapper <- function(xqtlFile, gwasFiles = NULL,
                          nSample = 0, nCase = 0, nControl = 0,
                          region = NULL,
                          zMismatchQc = "slalom",
-                         finemappingMethod = "susie_rss",
+                         finemappingMethod = "susieRss",
                          finemappingOpts = list(
-                           L = 20, L_greedy = 5,
+                           L = 20, lGreedy = 5,
                            coverage = c(0.95, 0.7, 0.5),
-                           signal_cutoff = 0.025,
-                           min_abs_corr = 0.8
+                           signalCutoff = 0.025,
+                           minAbsCorr = 0.8
                          ),
                          impute = TRUE,
-                         imputeOpts = list(rcond = 0.01, R2_threshold = 0.6,
-                                           minimum_ld = 5, lamb = 0.01),
+                         imputeOpts = list(rcond = 0.01, r2Threshold = 0.6,
+                                           minimumLd = 5, lamb = 0.01),
                          saveFinemappingPath = NULL,
                          returnFinemapping = FALSE,
                          ...) {
@@ -423,18 +423,18 @@ colocWrapper <- function(xqtlFile, gwasFiles = NULL,
     )
     if (is.null(gwasExtracted)) {
       colocRes <- list("No GWAS fine-mapping results produced by inline pipeline.")
-      result <- c(colocRes, analysis_region = region)
-      if (returnFinemapping) result$gwas_finemapping <- gwasPipelineResult
+      result <- c(colocRes, analysisRegion = region)
+      if (returnFinemapping) result$gwasFinemapping <- gwasPipelineResult
       return(result)
     }
-    combinedGwasLbfMatrix <- gwasExtracted$lbf_matrix %>%
+    combinedGwasLbfMatrix <- gwasExtracted$lbfMatrix %>%
       as.data.frame() %>% mutate(across(everything(), ~ replace_na(., 0)))
   } else {
     # --- File-based path (unchanged) ---
     gwasLbfMatrices <- map(gwasFiles, function(file) {
       rawData <- readRDS(file)[[1]]
       .extractLbfMatrix(rawData, gwasFinemappingObj, gwasVarnameObj,
-                        filterLbfCs, filterLbfCsSecondary, priorTol)$lbf_matrix
+                        filterLbfCs, filterLbfCsSecondary, priorTol)$lbfMatrix
     })
     combinedGwasLbfMatrix <- bind_rows(gwasLbfMatrices) %>%
       mutate(across(everything(), ~ replace_na(., 0)))
@@ -446,9 +446,9 @@ colocWrapper <- function(xqtlFile, gwasFiles = NULL,
                                      filterLbfCs, filterLbfCsSecondary, priorTol)
 
   if (!is.null(xqtlExtracted)) {
-    xqtlLbfMatrix <- xqtlExtracted$lbf_matrix
+    xqtlLbfMatrix <- xqtlExtracted$lbfMatrix
     if (nrow(combinedGwasLbfMatrix) > 0 && nrow(xqtlLbfMatrix) > 0) {
-      colnames(xqtlLbfMatrix) <- alignVariantNames(colnames(xqtlLbfMatrix), colnames(combinedGwasLbfMatrix))$aligned_variants
+      colnames(xqtlLbfMatrix) <- alignVariantNames(colnames(xqtlLbfMatrix), colnames(combinedGwasLbfMatrix))$alignedVariants
       commonColnames <- intersect(colnames(xqtlLbfMatrix), colnames(combinedGwasLbfMatrix))
 
       numDroppedCols <- ncol(xqtlLbfMatrix) - length(commonColnames)
@@ -476,9 +476,9 @@ colocWrapper <- function(xqtlFile, gwasFiles = NULL,
     analysisRegionOut <- region
   }
 
-  result <- c(colocRes, analysis_region = analysisRegionOut)
+  result <- c(colocRes, analysisRegion = analysisRegionOut)
   if (returnFinemapping && !is.null(gwasPipelineResult)) {
-    result$gwas_finemapping <- gwasPipelineResult
+    result$gwasFinemapping <- gwasPipelineResult
   }
   return(result)
 }

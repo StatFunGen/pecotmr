@@ -37,7 +37,7 @@ LD/reference variants). Exported directly as the \code{af} column. MAF is
 never exported; derive it from \code{af} at filter time. Default NULL ->
 \code{af = NA_real_}.}
 
-\item{method}{Method name (e.g. \code{"susie"}, \code{"susie_inf"}). Required.}
+\item{method}{Method name (e.g. \code{"susie"}, \code{"susieInf"}). Required.}
 
 \item{signalCutoff}{PIP cutoff for retaining PIP-only (non-CS) variants.}
 

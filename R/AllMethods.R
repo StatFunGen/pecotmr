@@ -500,11 +500,11 @@ setMethod("getEffects", "FineMappingResult", function(x) {
   }
 
   data.frame(
-    effect_id = effectIds,
+    effectId = effectIds,
     V = V,
-    cs_log10bf = csLog10bf,
-    cs_min_r2 = csMinR2,
-    cs_avg_r2 = csAvgR2,
+    csLog10bf = csLog10bf,
+    csMinR2 = csMinR2,
+    csAvgR2 = csAvgR2,
     coverage = coverage,
     cs = csVariants,
     stringsAsFactors = FALSE)

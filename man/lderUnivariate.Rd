@@ -20,7 +20,7 @@ lderUnivariate(z, n, eigenRef, annotations = NULL, local = FALSE, lambda = 0)
 \item{lambda}{Numeric, ridge penalty (default 0).}
 }
 \value{
-A list with h2, h2_se, intercept, intercept_se, local estimates,
+A list with h2, h2Se, intercept, interceptSe, local estimates,
   and enrichment estimates.
 }
 \description{

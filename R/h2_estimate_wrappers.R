@@ -43,13 +43,13 @@ setMethod("estimateH2",
     # Wrap into H2Estimate S4 object
     new("H2Estimate",
       h2 = result$h2,
-      h2Se = result$h2_se,
+      h2Se = result$h2Se,
       intercept = result$intercept %||% NA_real_,
-      interceptSe = result$intercept_se %||% NA_real_,
+      interceptSe = result$interceptSe %||% NA_real_,
       local = result$local,
       enrichment = result$enrichment,
-      tauBlocks = result$tau_blocks,
-      scoreStats = result$score_stats,
+      tauBlocks = result$tauBlocks,
+      scoreStats = result$scoreStats,
       method = method,
       nSnps = as.integer(M),
       traitName = sumstats@traitName
@@ -88,7 +88,7 @@ setMethod("computeLdScores",
       l2 <- numeric(nSnps)
       for (b in seq_along(ldRef@eigenList)) {
         block <- ldRef@eigenList[[b]]
-        idx <- block$snp_idx
+        idx <- block$snpIdx
         V <- block$vectors
         d <- block$values
         # LD score for SNP j = sum_i V[j,i]^2 * d[i]^2
@@ -109,7 +109,7 @@ setMethod("computeLdScores",
 
     for (b in seq_along(ldRef@eigenList)) {
       block <- ldRef@eigenList[[b]]
-      idx <- block$snp_idx
+      idx <- block$snpIdx
       V <- block$vectors
       d <- block$values
 
@@ -160,7 +160,7 @@ setMethod("computeLdScores",
     for (b in seq_along(ldRef@ldMatrixList)) {
       block <- ldRef@ldMatrixList[[b]]
       R <- block$R
-      idx <- block$snp_idx
+      idx <- block$snpIdx
       R2 <- R^2
       for (a in seq_len(nAnnot)) {
         # l2_a[j] = sum_k R^2_{jk} * annot[k, a]
@@ -211,15 +211,15 @@ setMethod("getScoreStats", "H2Estimate", function(object) {
 #'   \describe{
 #'     \item{categories}{Character vector of annotation names}
 #'     \item{tau}{Named numeric vector of per-annotation coefficients}
-#'     \item{tau_se}{Named numeric vector of tau standard errors}
+#'     \item{tauSe}{Named numeric vector of tau standard errors}
 #'     \item{enrichment}{Named numeric vector of enrichment ratios}
-#'     \item{enrichment_se}{Named numeric vector of enrichment SEs}
-#'     \item{enrichment_p}{Named numeric vector of enrichment p-values}
-#'     \item{prop_h2}{Named numeric vector of proportion of h2}
-#'     \item{prop_snps}{Named numeric vector of proportion of SNPs}
+#'     \item{enrichmentSe}{Named numeric vector of enrichment SEs}
+#'     \item{enrichmentP}{Named numeric vector of enrichment p-values}
+#'     \item{propH2}{Named numeric vector of proportion of h2}
+#'     \item{propSnps}{Named numeric vector of proportion of SNPs}
 #'     \item{h2g}{Numeric scalar, global h2 estimate}
-#'     \item{tau_blocks}{Matrix (nBlocks x nCategories) for jackknife}
-#'     \item{n_blocks}{Integer, number of jackknife blocks}
+#'     \item{tauBlocks}{Matrix (nBlocks x nCategories) for jackknife}
+#'     \item{nBlocks}{Integer, number of jackknife blocks}
 #'   }
 #' @export
 h2EstimateToSldscTrait <- function(h2Est) {
@@ -252,14 +252,14 @@ h2EstimateToSldscTrait <- function(h2Est) {
   list(
     categories    = cats,
     tau           = setNames(enrichDf$tau, cats),
-    tau_se        = setNames(enrichDf$tau_se, cats),
+    tauSe        = setNames(enrichDf$tauSe, cats),
     enrichment    = setNames(enrichDf$enrichment, cats),
-    enrichment_se = setNames(enrichDf$enrichment_se, cats),
-    enrichment_p  = setNames(enrichDf$enrichment_p, cats),
-    prop_h2       = setNames(enrichDf$prop_h2, cats),
-    prop_snps     = setNames(enrichDf$prop_snps, cats),
+    enrichmentSe = setNames(enrichDf$enrichmentSe, cats),
+    enrichmentP  = setNames(enrichDf$enrichmentP, cats),
+    propH2       = setNames(enrichDf$propH2, cats),
+    propSnps     = setNames(enrichDf$propSnps, cats),
     h2g           = h2Est@h2,
-    tau_blocks    = tauBlocks,
-    n_blocks      = nBlocks
+    tauBlocks    = tauBlocks,
+    nBlocks      = nBlocks
   )
 }

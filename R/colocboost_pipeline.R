@@ -39,8 +39,8 @@ buildLdArgs <- function(ldList, subset = NULL) {
 #' Convert loaded regional data to ColocBoost inputs
 #'
 #' @param regionData A list returned by \code{load_multitask_regional_data()}.
-#' @return A structured list containing \code{colocboost_input},
-#'   \code{qc_input}, and \code{source_info}.
+#' @return A structured list containing \code{colocboostInput},
+#'   \code{qcInput}, and \code{sourceInfo}.
 #' @export
 regionDataToColocboostInput <- function(regionData) {
   indRecordsFromInput <- function(input) {
@@ -54,7 +54,7 @@ regionDataToColocboostInput <- function(regionData) {
         X = X[[context]],
         Y = Y[[context]],
         maf = .cbListValue(input$maf, context),
-        X_variance = .cbListValue(input$X_variance, context)
+        xVariance = .cbListValue(input$xVariance, context)
       )
     }
     records
@@ -66,20 +66,20 @@ regionDataToColocboostInput <- function(regionData) {
   indRecords <- indRecordsFromInput(indInput)
   indArgs <- .cbFormatIndividual(indRecords)
 
-  # Wrap each (rss_input, LD_data) pair as a QcResult (with no QC applied)
+  # Wrap each (rssInput, ldData) pair as a QcResult (with no QC applied)
   # so .cbFormatSumstat consumes a uniform shape regardless of whether the
   # records came from summary_stats_qc or directly from regionData.
-  sumstatRecords <- lapply(names(rssInput$rss_input), function(study) {
+  sumstatRecords <- lapply(names(rssInput$rssInput), function(study) {
     QcResult(
-      ldData = rssInput$LD_data[[study]],
-      rssInput = rssInput$rss_input[[study]],
+      ldData = rssInput$ldData[[study]],
+      rssInput = rssInput$rssInput[[study]],
       preprocess = list(),
       outlierNumber = 0L,
       skipped = FALSE,
       skipReason = ""
     )
   })
-  names(sumstatRecords) <- names(rssInput$rss_input)
+  names(sumstatRecords) <- names(rssInput$rssInput)
   sumstatArgs <- .cbFormatSumstat(sumstatRecords)
 
   outcomeNames <- c(indArgs$outcome_names, names(sumstatArgs$sumstat))
@@ -88,13 +88,13 @@ regionDataToColocboostInput <- function(regionData) {
   if (length(outcomeNames) > 0) colocboostInput$outcome_names <- outcomeNames
 
   list(
-    colocboost_input = Filter(Negate(is.null), colocboostInput),
-    qc_input = list(
-      individual = indInput[c("X", "Y", "maf", "X_variance")],
-      sumstat = rssInput[c("rss_input", "LD_data")]
+    colocboostInput = Filter(Negate(is.null), colocboostInput),
+    qcInput = list(
+      individual = indInput[c("X", "Y", "maf", "xVariance")],
+      sumstat = rssInput[c("rssInput", "ldData")]
     ),
-    source_info = list(individual = indInput$source_info,
-                       sumstat = rssInput$source_info)
+    sourceInfo = list(individual = indInput$sourceInfo,
+                      sumstat = rssInput$sourceInfo)
   )
 }
 
@@ -124,8 +124,8 @@ regionDataToColocboostInput <- function(regionData) {
 #' is non-\code{NULL} and named \code{X} and \code{Y} inputs are available in
 #' \code{...}. Summary-statistic QC is only attempted when \code{zMismatchQc},
 #' \code{pip_cutoff_to_skip_sumstat}, \code{impute = TRUE}, or
-#' \code{LD_reference_info} is supplied and named \code{sumstat} plus either
-#' \code{LD}, \code{X_ref}, or \code{LD_reference_info} are available.
+#' \code{ldReferenceInfo} is supplied and named \code{sumstat} plus either
+#' \code{LD}, \code{X_ref}, or \code{ldReferenceInfo} are available.
 #' \code{zMismatchQc = "none"} means run basic allele/variant harmonization
 #' only; it does not run SLALOM/DENTIST
 #' LD-mismatch QC. RAISS imputation is controlled separately by
@@ -200,8 +200,8 @@ colocboostAnalysis <- function(...,
                                pipCutoffToSkipSumstat = NULL,
                                zMismatchQc = NULL,
                                impute = FALSE,
-                               imputeOpts = list(rcond = 0.01, R2_threshold = 0.6,
-                                                 minimum_ld = 5, lamb = 0.01),
+                               imputeOpts = list(rcond = 0.01, r2Threshold = 0.6,
+                                                 minimumLd = 5, lamb = 0.01),
                                ldReferenceInfo = NULL,
                                variantConvention = c("A2_A1", "A1_A2")) {
   variantConvention <- match.arg(variantConvention)
@@ -245,8 +245,8 @@ colocboostAnalysis <- function(...,
       sumstatQcInput <- tryCatch(
         .cbSumstatQcInputFromColocboost(
           sumstat, LD, X_ref, dict_sumstatLD,
-          LD_reference_info = ldReferenceInfo,
-          variant_convention = variantConvention
+          ldReferenceInfo = ldReferenceInfo,
+          variantConvention = variantConvention
         ),
         error = function(e) {
           qcSkipMessages <<- c(
@@ -257,10 +257,10 @@ colocboostAnalysis <- function(...,
         }
       )
       if (!is.null(sumstatQcInput)) {
-        if (length(sumstatQcInput$skip_reasons) > 0) {
-          qcSkipMessages <- c(qcSkipMessages, sumstatQcInput$skip_reasons)
+        if (length(sumstatQcInput$skipReasons) > 0) {
+          qcSkipMessages <- c(qcSkipMessages, sumstatQcInput$skipReasons)
         }
-        if (length(sumstatQcInput$rss_input) == 0) {
+        if (length(sumstatQcInput$rssInput) == 0) {
           sumstatQcInput <- NULL
         }
       }
@@ -296,11 +296,11 @@ colocboostAnalysis <- function(...,
       )
       args <- .cbMergeArgs(args, .cbFormatIndividual(ind))
     }
-    if (!is.null(sumstatQcInput) && length(sumstatQcInput$rss_input) > 0) {
+    if (!is.null(sumstatQcInput) && length(sumstatQcInput$rssInput) > 0) {
       message("QC track: processing summary-statistic inputs before ColocBoost.")
       sumstatQc <- summaryStatsQc(
-        rssInput = sumstatQcInput$rss_input,
-        ldData = sumstatQcInput$LD_data,
+        rssInput = sumstatQcInput$rssInput,
+        ldData = sumstatQcInput$ldData,
         keepIndel = keepIndel,
         pipCutoffToSkip = .cbDefault(pipCutoffToSkipSumstat, 0),
         zMismatchQc = if (is.null(zMismatchQc)) "none" else zMismatchQc,
@@ -356,19 +356,19 @@ colocboostAnalysis <- function(...,
 #'   "slalom", or "dentist". \code{NULL} is treated as \code{"none"} for
 #'   basic-only summary-stat preprocessing.
 #' @param impute Logical; if TRUE, performs imputation for outliers identified in the analysis (default: TRUE).
-#' @param imputeOpts A list of imputation options including rcond, R2_threshold, and minimum_ld (default: list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5)).
+#' @param imputeOpts A list of imputation options including rcond, R2_threshold, and minimum_ld (default: list(rcond = 0.01, r2Threshold = 0.6, minimumLd = 5)).
 #'
 #'
-#' @return A list containing the individual_data and sumstat_data after QC:
-#' individual_data contains the following components if exist
+#' @return A list containing the individualData and sumstatData after QC:
+#' individualData contains the following components if exist
 #' \itemize{
 #'   \item Y: A list of residualized phenotype values for all tasks.
 #'   \item X: A list of residualized genotype matrices all tasks.
 #' }
-#' sumstat_data contains the following components if exist
+#' sumstatData contains the following components if exist
 #' \itemize{
-#'   \item sumstats: A list of summary statistics f or the matched LD_info, each sublist contains sumstats, n, var_y from \code{load_rss_data}.
-#'   \item LD_info: A list of LD information, each sublist contains LD_variants, LD_matrix, ref_panel  \code{load_LD_matrix}.
+#'   \item sumstats: A list of summary statistics f or the matched ldInfo, each sublist contains sumstats, n, var_y from \code{load_rss_data}.
+#'   \item ldInfo: A list of LD information, each sublist contains ldVariants, ldMatrix, ref_panel  \code{load_LD_matrix}.
 #' }
 #'
 #' @importFrom susieR susie_rss
@@ -391,8 +391,8 @@ colocboostPipeline <- function(
   zMismatchQc = NULL,
   impute = TRUE,
   imputeOpts = list(
-    rcond = 0.01, R2_threshold = 0.6,
-    minimum_ld = 5, lamb = 0.01
+    rcond = 0.01, r2Threshold = 0.6,
+    minimumLd = 5, lamb = 0.01
   ),
   ...
 ) {
@@ -452,8 +452,8 @@ colocboostPipeline <- function(
 
   # - extract contexts and studies from region data, handling both pre- and post-QC
   extractContextsStudies <- function(regionData, phenotypesInit = NULL) {
-    individualData <- regionData$individual_data
-    sumstatData <- regionData$sumstat_data
+    individualData <- regionData$individualData
+    sumstatData <- regionData$sumstatData
     phenotypes <- list("individual_contexts" = NULL, "sumstat_studies" = NULL)
 
     # Extract individual contexts
@@ -539,8 +539,8 @@ colocboostPipeline <- function(
   }
 
   ####### ========= Filtering events before QC =========== #########
-  if (!is.null(eventFilters) & !is.null(regionData$individual_data)) {
-    indData <- regionData$individual_data
+  if (!is.null(eventFilters) & !is.null(regionData$individualData)) {
+    indData <- regionData$individualData
     YList <- getPhenotypes(indData)
     YNames <- names(YList)
     YFiltered <- lapply(seq_along(YList), function(i) {
@@ -558,7 +558,7 @@ colocboostPipeline <- function(
     # downstream QC messaging via a synthetic NULL-Y list.
     keepCond <- !vapply(YFiltered, is.null, logical(1))
     if (!any(keepCond)) {
-      regionData$individual_data <- NULL
+      regionData$individualData <- NULL
     } else {
       YClean <- YFiltered[keepCond]
       # Attach a record of dropped conditions for extractContextsStudies()
@@ -566,7 +566,7 @@ colocboostPipeline <- function(
       droppedNames <- names(YFiltered)[!keepCond]
       mafList <- indData@maf
       YCoords <- indData@coordinates
-      regionData$individual_data <- RegionalData(
+      regionData$individualData <- RegionalData(
         genotypeMatrix = getGenotypeMatrix(indData),
         phenotypes = YClean,
         covariates = getCovariates(indData)[keepCond],
@@ -577,7 +577,7 @@ colocboostPipeline <- function(
         coordinates = if (!is.null(YCoords)) YCoords[keepCond] else NULL
       )
       if (length(droppedNames) > 0) {
-        attr(regionData$individual_data, "filtered_out_contexts") <- droppedNames
+        attr(regionData$individualData, "filtered_out_contexts") <- droppedNames
       }
     }
   }
@@ -602,7 +602,7 @@ colocboostPipeline <- function(
   analysisResults$computing_time$QC <- t02 - t01
 
   ####### ========= convert QC'd regional data to ColocBoost input ======== ########
-  colocboostInput <- regionDataToColocboostInput(regionData)$colocboost_input
+  colocboostInput <- regionDataToColocboostInput(regionData)$colocboostInput
   X <- colocboostInput$X
   Y <- colocboostInput$Y
   dict_YX <- colocboostInput$dict_YX
@@ -686,7 +686,7 @@ colocboostPipeline <- function(
 #'   basic-only summary-stat preprocessing.
 #' @param impute Logical; if TRUE, performs imputation when required metadata are available.
 #' @param imputeOpts A list of imputation options.
-#' @return A list containing post-QC \code{individual_data} and \code{sumstat_data}.
+#' @return A list containing post-QC \code{individualData} and \code{sumstatData}.
 #' @export
 qcRegionalData <- function(regionData,
                            # - individual
@@ -697,7 +697,7 @@ qcRegionalData <- function(regionData,
                            pipCutoffToSkipSumstat = 0,
                            zMismatchQc = NULL,
                            impute = FALSE,
-                           imputeOpts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)) {
+                           imputeOpts = list(rcond = 0.01, r2Threshold = 0.6, minimumLd = 5, lamb = 0.01)) {
   zMismatchQc <- .resolveZMismatchQc(zMismatchQc)
   qcedIndividualToRegionData <- function(indQc) {
     if (is.null(indQc) || length(indQc) == 0) return(NULL)
@@ -712,31 +712,31 @@ qcRegionalData <- function(regionData,
       sumstatQc <- list(study1 = sumstatQc)
     }
     sumstats <- lapply(sumstatQc, getRssInput)
-    LD_data <- list()
-    LD_match <- character()
+    ldData <- list()
+    ldMatch <- character()
     ldVariantIndex <- list()
     for (study in names(sumstatQc)) {
       ldObj <- getLdData(sumstatQc[[study]])
       variantKey <- paste(if (is.null(ldObj)) "" else getVariantIds(ldObj), collapse = ",")
       if (variantKey %in% names(ldVariantIndex)) {
-        LD_match <- c(LD_match, ldVariantIndex[[variantKey]])
+        ldMatch <- c(ldMatch, ldVariantIndex[[variantKey]])
       } else {
-        LD_data[[study]] <- ldObj
+        ldData[[study]] <- ldObj
         ldVariantIndex[[variantKey]] <- study
-        LD_match <- c(LD_match, study)
+        ldMatch <- c(ldMatch, study)
       }
     }
-    list(sumstats = sumstats, LD_data = LD_data, LD_match = LD_match)
+    list(sumstats = sumstats, ldData = ldData, ldMatch = ldMatch)
   }
 
   individualData <- NULL
   indInput <- regionDataToIndInput(regionData)
-  if (isTRUE(indInput$source_info$has_individual)) {
+  if (isTRUE(indInput$sourceInfo$hasIndividual)) {
     indQc <- qcIndividualData(
       X = indInput$X,
       Y = indInput$Y,
       maf = indInput$maf,
-      XVariance = indInput$X_variance,
+      XVariance = indInput$xVariance,
       mafCutoff = mafCutoff,
       pipCutoffToSkip = pipCutoffToSkipInd
     )
@@ -744,7 +744,7 @@ qcRegionalData <- function(regionData,
     # If eventFilters dropped any pre-QC contexts entirely, surface them as
     # NULL-Y entries so downstream extractContextsStudies() emits the
     # "Skipping follow-up analysis for individual traits ..." message.
-    droppedCtx <- attr(regionData$individual_data, "filtered_out_contexts")
+    droppedCtx <- attr(regionData$individualData, "filtered_out_contexts")
     if (!is.null(droppedCtx) && length(droppedCtx) > 0 && !is.null(individualData)) {
       for (ctx in droppedCtx) {
         individualData$X[[ctx]] <- NULL
@@ -764,10 +764,10 @@ qcRegionalData <- function(regionData,
 
   sumstatData <- NULL
   rssInput <- regionDataToRssInput(regionData)
-  if (isTRUE(rssInput$source_info$has_sumstat)) {
+  if (isTRUE(rssInput$sourceInfo$hasSumstat)) {
     sumstatQc <- summaryStatsQc(
-      rssInput = rssInput$rss_input,
-      ldData = rssInput$LD_data,
+      rssInput = rssInput$rssInput,
+      ldData = rssInput$ldData,
       keepIndel = keepIndel,
       pipCutoffToSkip = pipCutoffToSkipSumstat,
       zMismatchQc = zMismatchQc,
@@ -777,7 +777,7 @@ qcRegionalData <- function(regionData,
     sumstatData <- qcedSumstatToRegionData(sumstatQc)
   }
 
-  list(individual_data = individualData, sumstat_data = sumstatData)
+  list(individualData = individualData, sumstatData = sumstatData)
 }
 
 #' Run reusable individual-level QC
@@ -1184,8 +1184,8 @@ qcIndividualData <- function(X, Y, maf = NULL, XVariance = NULL,
 ##### Summary-statistic ColocBoost helper functions #####
 
 .cbSumstatQcInputFromColocboost <- function(sumstat, LD, X_ref, dict_sumstatLD,
-                                            LD_reference_info = NULL,
-                                            variant_convention = c("A2_A1", "A1_A2")) {
+                                            ldReferenceInfo = NULL,
+                                            variantConvention = c("A2_A1", "A1_A2")) {
   isLdData <- function(x) {
     is(x, "LdData")
   }
@@ -1195,7 +1195,7 @@ qcIndividualData <- function(X, Y, maf = NULL, XVariance = NULL,
       return(list(LD = x))
     }
     if (is.list(x) && length(x) > 0) return(x)
-    stop("LD_reference_info must be a .bim/.pvar path, data.frame, load_LD_matrix() result, or a list of these.")
+    stop("ldReferenceInfo must be a .bim/.pvar path, data.frame, loadLdMatrix() result, or a list of these.")
   }
   referenceInfoForIndex <- function(referenceInfo, index) {
     if (is.null(referenceInfo)) return(NULL)
@@ -1219,16 +1219,16 @@ qcIndividualData <- function(X, Y, maf = NULL, XVariance = NULL,
     if (nrow(ld) == ncol(ld)) rownames(ld) else colnames(ld)
   }
 
-  variant_convention <- match.arg(variant_convention)
+  variantConvention <- match.arg(variantConvention)
   sumstat <- .cbAsNamedList(sumstat, "sumstat")
   usingXRef <- is.null(LD) && !is.null(X_ref)
   ldSource <- .cbAsNamedList(if (!is.null(LD)) LD else X_ref, "LD")
-  referenceInfo <- asReferenceInfoList(LD_reference_info)
+  referenceInfo <- asReferenceInfoList(ldReferenceInfo)
   if (is.null(dict_sumstatLD)) {
     dict_sumstatLD <- cbind(seq_along(sumstat), pmin(seq_along(sumstat), length(ldSource)))
   }
   rssInput <- list()
-  LD_data <- list()
+  ldDataList <- list()
   skipReasons <- character()
   for (i in seq_along(sumstat)) {
     study <- names(sumstat)[i]
@@ -1248,39 +1248,39 @@ qcIndividualData <- function(X, Y, maf = NULL, XVariance = NULL,
           skipReasons,
           paste0("Summary-statistic QC for study ", study,
                  " requires LD row/column names or X_ref column names parseable as genomic variant IDs; ",
-                 "provide LD_reference_info for QC. Skipping summary-statistic QC for this study.")
+                 "provide ldReferenceInfo for QC. Skipping summary-statistic QC for this study.")
         )
         next
       }
-      ldData <- .cbMakeLdData(
+      studyLd <- .cbMakeLdData(
         ldMat,
         isGenotype = usingXRef,
-        variantConvention = variant_convention
+        variantConvention = variantConvention
       )
-      if (is.null(ldData)) {
+      if (is.null(studyLd)) {
         skipReasons <- c(
           skipReasons,
           paste0("Summary-statistic QC for study ", study,
                  " could not parse LD/X_ref names as genomic variant IDs; ",
-                 "provide LD_reference_info for QC. Skipping summary-statistic QC for this study.")
+                 "provide ldReferenceInfo for QC. Skipping summary-statistic QC for this study.")
         )
         next
       }
       message("QC track: LD/X_ref names are parseable for summary-stat study ", study, ".")
     } else if (isLdData(refInfo)) {
-      message("QC track: using supplied LD_reference_info LD data for summary-stat study ", study, ".")
-      ldData <- refInfo
+      message("QC track: using supplied ldReferenceInfo LD data for summary-stat study ", study, ".")
+      studyLd <- refInfo
     } else {
-      message("QC track: using supplied LD_reference_info variant metadata for summary-stat study ", study, ".")
-      ldData <- .cbMakeLdData(
+      message("QC track: using supplied ldReferenceInfo variant metadata for summary-stat study ", study, ".")
+      studyLd <- .cbMakeLdData(
         ldMat,
         isGenotype = usingXRef,
         referenceInfo = refInfo,
-        variantConvention = variant_convention
+        variantConvention = variantConvention
       )
     }
     parsed <- tryCatch(
-      .cbParseVariantsForQc(sumstat[[i]]$variant, variant_convention),
+      .cbParseVariantsForQc(sumstat[[i]]$variant, variantConvention),
       error = function(e) {
         skipReasons <<- c(
           skipReasons,
@@ -1298,10 +1298,10 @@ qcIndividualData <- function(X, Y, maf = NULL, XVariance = NULL,
                      stringsAsFactors = FALSE)
     n <- if ("n" %in% colnames(sumstat[[i]])) unique(sumstat[[i]]$n)[1] else NULL
     varY <- if ("var_y" %in% colnames(sumstat[[i]])) unique(sumstat[[i]]$var_y)[1] else 1
-    rssInput[[study]] <- list(sumstats = ss, n = n, var_y = varY)
-    LD_data[[study]] <- ldData
+    rssInput[[study]] <- list(sumstats = ss, n = n, varY = varY)
+    ldDataList[[study]] <- studyLd
   }
-  list(rss_input = rssInput, LD_data = LD_data, skip_reasons = skipReasons)
+  list(rssInput = rssInput, ldData = ldDataList, skipReasons = skipReasons)
 }
 
 .cbFormatSumstat <- function(sumstatQc) {
@@ -1315,18 +1315,18 @@ qcIndividualData <- function(X, Y, maf = NULL, XVariance = NULL,
   filterValidSumstats <- function(sumstats, ldMat, minVariants = 2) {
     dedupeLd <- function(ldMat, studies) {
       uniqueLd <- list()
-      LD_match <- character()
+      ldMatch <- character()
       for (study in studies) {
         ld <- ldMat[[study]]
         matched <- names(uniqueLd)[vapply(uniqueLd, identical, logical(1), ld)]
         if (length(matched) > 0) {
-          LD_match <- c(LD_match, matched[[1]])
+          ldMatch <- c(ldMatch, matched[[1]])
         } else {
           uniqueLd[[study]] <- ld
-          LD_match <- c(LD_match, study)
+          ldMatch <- c(ldMatch, study)
         }
       }
-      list(LD_mat = uniqueLd, LD_match = LD_match)
+      list(ldMat = uniqueLd, ldMatch = ldMatch)
     }
 
     validIdx <- vapply(sumstats, validSumstatEntry, logical(1),
@@ -1342,10 +1342,10 @@ qcIndividualData <- function(X, Y, maf = NULL, XVariance = NULL,
     sumstats <- sumstats[validIdx]
     ldMat <- ldMat[validIdx]
     deduped <- dedupeLd(ldMat, names(sumstats))
-    ldMat <- deduped$LD_mat
-    LD_match <- deduped$LD_match
-    dict_sumstatLD <- cbind(seq_along(sumstats), match(LD_match, names(ldMat)))
-    list(sumstats = sumstats, LD_mat = ldMat, LD_match = LD_match,
+    ldMat <- deduped$ldMat
+    ldMatch <- deduped$ldMatch
+    dict_sumstatLD <- cbind(seq_along(sumstats), match(ldMatch, names(ldMat)))
+    list(sumstats = sumstats, ldMat = ldMat, ldMatch = ldMatch,
          dict_sumstatLD = dict_sumstatLD)
   }
   if (length(sumstatQc) == 0) return(list())
@@ -1375,7 +1375,7 @@ qcIndividualData <- function(X, Y, maf = NULL, XVariance = NULL,
       sumstat = filtered$sumstats,
       dict_sumstatLD = filtered$dict_sumstatLD
     ),
-    buildLdArgs(filtered$LD_mat)
+    buildLdArgs(filtered$ldMat)
   )
 }
 
@@ -1388,12 +1388,12 @@ qcIndividualData <- function(X, Y, maf = NULL, XVariance = NULL,
   referenceInfoToRefPanel <- function(referenceInfo) {
     if (is.character(referenceInfo) && length(referenceInfo) == 1) {
       if (!file.exists(referenceInfo)) {
-        stop("LD_reference_info file does not exist: ", referenceInfo)
+        stop("ldReferenceInfo file does not exist: ", referenceInfo)
       }
       referenceInfo <- readVariantMetadata(referenceInfo)
     }
     if (!is.data.frame(referenceInfo)) {
-      stop("LD_reference_info must be a .bim/.pvar path or data.frame when it is not a load_LD_matrix() result.")
+      stop("ldReferenceInfo must be a .bim/.pvar path or data.frame when it is not a load_LD_matrix() result.")
     }
     info <- as.data.frame(referenceInfo, stringsAsFactors = FALSE)
     names(info) <- sub("^#", "", names(info))
@@ -1413,7 +1413,7 @@ qcIndividualData <- function(X, Y, maf = NULL, XVariance = NULL,
     if (!"variant_id" %in% names(info)) {
       missingCols <- setdiff(c("chrom", "pos", "A2", "A1"), names(info))
       if (length(missingCols) > 0) {
-        stop("LD_reference_info must contain variant_id or columns chrom, pos, A2, A1. Missing: ",
+        stop("ldReferenceInfo must contain variant_id or columns chrom, pos, A2, A1. Missing: ",
              paste(missingCols, collapse = ", "), ".")
       }
       info$variant_id <- normalizeVariantId(formatVariantId(info$chrom, info$pos, info$A2, info$A1))
@@ -1448,17 +1448,17 @@ qcIndividualData <- function(X, Y, maf = NULL, XVariance = NULL,
         return(refPanel)
       }
       if (length(ldNames) == nrow(refPanel)) {
-        message("QC track: LD_reference_info could not be matched by LD names; using LD_reference_info row order.")
+        message("QC track: ldReferenceInfo could not be matched by LD names; using ldReferenceInfo row order.")
         return(refPanel[seq_along(ldNames), , drop = FALSE])
       }
-      stop("LD_reference_info could not be matched to LD/X_ref names. ",
+      stop("ldReferenceInfo could not be matched to LD/X_ref names. ",
            "Provide an id/variant_id column matching LD names, or provide rows in LD matrix order.")
     }
     if (nrow(refPanel) != nVariants) {
-      stop("LD_reference_info has ", nrow(refPanel), " variants but LD/X_ref has ",
-           nVariants, " columns. Provide LD_reference_info in LD matrix order or with matching LD names.")
+      stop("ldReferenceInfo has ", nrow(refPanel), " variants but LD/X_ref has ",
+           nVariants, " columns. Provide ldReferenceInfo in LD matrix order or with matching LD names.")
     }
-    message("QC track: LD/X_ref names are missing; using LD_reference_info row order.")
+    message("QC track: LD/X_ref names are missing; using ldReferenceInfo row order.")
     refPanel
   }
 
@@ -1525,7 +1525,7 @@ qcIndividualData <- function(X, Y, maf = NULL, XVariance = NULL,
   if (any(is.na(parsed$chrom)) || any(is.na(parsed$pos)) ||
       any(is.na(parsed$A1)) || any(is.na(parsed$A2))) {
     stop("QC requires variant IDs parseable as chr:pos:A2:A1 by default. ",
-         "If the input uses chr:pos:A1:A2, set variant_convention = 'A1_A2'.")
+         "If the input uses chr:pos:A1:A2, set variantConvention = 'A1_A2'.")
   }
   if (identical(variantConvention, "A1_A2")) {
     parsed <- data.frame(chrom = parsed$chrom, pos = parsed$pos,

@@ -7,17 +7,17 @@
 regionDataToMvsusieRssInput(sumstatData, ldName = NULL)
 }
 \arguments{
-\item{sumstatData}{The \code{sumstat_data} component from a QC'ed regional
-object, typically \code{qced_regional_data$sumstat_data}.}
+\item{sumstatData}{The \code{sumstatData} component from a QC'ed regional
+object, typically \code{qced_regional_data$sumstatData}.}
 
 \item{ldName}{Optional name of the LD reference to use. If \code{NULL}, a
-unique \code{LD_match} entry is used. If \code{LD_match} points to multiple
-references, the first one is used with a message. When no \code{LD_match}
+unique \code{ldMatch} entry is used. If \code{ldMatch} points to multiple
+references, the first one is used with a message. When no \code{ldMatch}
 is available, the first LD reference containing all shared variants is used.}
 }
 \value{
-A list with \code{mvsusie_rss_input}, ready for
-  \code{mvsusieR::mvsusie_rss()}, and \code{source_info}.
+A list with \code{mvsusieRssInput}, ready for
+  \code{mvsusieR::mvsusie_rss()}, and \code{sourceInfo}.
 }
 \description{
 Convert QC'ed regional summary-statistic data to mvSuSiE RSS input

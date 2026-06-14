@@ -28,14 +28,14 @@ test_that("build_twas_score_row packs a single-method twas_rs", {
   expect_s3_class(out, "data.frame")
   expect_equal(nrow(out), 1)
   expect_setequal(colnames(out),
-                  c("gwas_study", "method", "twas_z", "twas_pval",
-                    "context", "molecular_id"))
-  expect_equal(out$gwas_study,   "AD")
+                  c("gwasStudy", "method", "twasZ", "twasPval",
+                    "context", "molecularId"))
+  expect_equal(out$gwasStudy,   "AD")
   expect_equal(out$method,       "enet")
-  expect_equal(out$twas_z,       2.5)
-  expect_equal(out$twas_pval,    0.012)
+  expect_equal(out$twasZ,       2.5)
+  expect_equal(out$twasPval,    0.012)
   expect_equal(out$context,      "Cortex")
-  expect_equal(out$molecular_id, "ENSG001")
+  expect_equal(out$molecularId, "ENSG001")
 })
 
 test_that("build_twas_score_row packs a multi-method twas_rs", {
@@ -50,9 +50,9 @@ test_that("build_twas_score_row packs a multi-method twas_rs", {
                                         study     = "T2D")
   expect_equal(nrow(out), 3)
   expect_equal(out$method,       c("enet", "lasso", "top"))
-  expect_equal(out$twas_z,       c(2.5, -1.8, 0.4))
-  expect_equal(out$twas_pval,    c(0.012, 0.072, 0.689))
-  expect_true(all(out$gwas_study   == "T2D"))
+  expect_equal(out$twasZ,       c(2.5, -1.8, 0.4))
+  expect_equal(out$twasPval,    c(0.012, 0.072, 0.689))
+  expect_true(all(out$gwasStudy   == "T2D"))
   expect_true(all(out$context      == "Liver"))
-  expect_true(all(out$molecular_id == "ENSG002"))
+  expect_true(all(out$molecularId == "ENSG002"))
 })

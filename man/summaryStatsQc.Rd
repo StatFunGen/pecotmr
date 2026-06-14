@@ -16,12 +16,12 @@ summaryStatsQc(
   zMismatchQc = NULL,
   alleleFlipKriging = FALSE,
   impute = FALSE,
-  imputeOpts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
+  imputeOpts = list(rcond = 0.01, r2Threshold = 0.6, minimumLd = 5, lamb = 0.01),
   study = NULL,
   varY = NULL,
   returnOnSkip = c("null", "preprocess"),
-  R_finite = NULL,
-  R_mismatch = NULL
+  rFinite = NULL,
+  rMismatch = NULL
 )
 }
 \arguments{
@@ -41,7 +41,7 @@ combined RSS/ColocBoost QC workflow. A single RSS record is detected by
 structure, not by the name \code{sumstats}, so a multi-study list may safely
 include a study named \code{"sumstats"}.}
 
-\item{keepIndel, skipRegion, pipCutoffToSkip, impute, imputeOpts, study, varY, returnOnSkip, R_finite, R_mismatch}{Additional controls for the combined RSS/ColocBoost QC workflow. They are
+\item{keepIndel, skipRegion, pipCutoffToSkip, impute, imputeOpts, study, varY, returnOnSkip, rFinite, rMismatch}{Additional controls for the combined RSS/ColocBoost QC workflow. They are
 ignored by the historical LD-mismatch-only call unless \code{rssInput} or
 combined-QC options are supplied.}
 

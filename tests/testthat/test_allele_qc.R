@@ -235,8 +235,8 @@ test_that("alignVariantNames correctly aligns variant names", {
   expected_unmatched1 <- integer(0)
 
   result1 <- alignVariantNames(source1, reference1)
-  expect_equal(result1$aligned_variants, expected_aligned1)
-  expect_equal(result1$unmatched_indices, expected_unmatched1)
+  expect_equal(result1$alignedVariants, expected_aligned1)
+  expect_equal(result1$unmatchedIndices, expected_unmatched1)
 
   # Test case 2: Unmatched variant names
   source2 <- c("1:123:A:C", "2:456:G:T", "3:789:C:A", "4:101:G:C")
@@ -245,8 +245,8 @@ test_that("alignVariantNames correctly aligns variant names", {
   expected_unmatched2 <- 4
 
   result2 <- alignVariantNames(source2, reference2)
-  expect_equal(result2$aligned_variants, expected_aligned2)
-  expect_equal(result2$unmatched_indices, expected_unmatched2)
+  expect_equal(result2$alignedVariants, expected_aligned2)
+  expect_equal(result2$unmatchedIndices, expected_unmatched2)
 
   # Test case 3: Different variant name formats
   source3 <- c("1:123:A:C", "2:456_G_T", "3:789:C:A")
@@ -255,8 +255,8 @@ test_that("alignVariantNames correctly aligns variant names", {
   expected_unmatched3 <- integer(0)
 
   result3 <- alignVariantNames(source3, reference3)
-  expect_equal(result3$aligned_variants, expected_aligned3)
-  expect_equal(result3$unmatched_indices, expected_unmatched3)
+  expect_equal(result3$alignedVariants, expected_aligned3)
+  expect_equal(result3$unmatchedIndices, expected_unmatched3)
 })
 
 test_that("alignVariantNames correctly aligns variant names with different flip patterns", {
@@ -267,8 +267,8 @@ test_that("alignVariantNames correctly aligns variant names with different flip 
   expected_unmatched4 <- integer(0)
 
   result4 <- alignVariantNames(source4, reference4)
-  expect_equal(result4$aligned_variants, expected_aligned4)
-  expect_equal(result4$unmatched_indices, expected_unmatched4)
+  expect_equal(result4$alignedVariants, expected_aligned4)
+  expect_equal(result4$unmatchedIndices, expected_unmatched4)
 
   # Test case 5: Strand ambiguous variants
   source5 <- c("1:123:A:T", "2:456:G:C", "3:789:C:A")
@@ -277,8 +277,8 @@ test_that("alignVariantNames correctly aligns variant names with different flip 
   expected_unmatched5 <- integer(0)
 
   result5 <- alignVariantNames(source5, reference5)
-  expect_equal(result5$aligned_variants, expected_aligned5)
-  expect_equal(result5$unmatched_indices, expected_unmatched5)
+  expect_equal(result5$alignedVariants, expected_aligned5)
+  expect_equal(result5$unmatchedIndices, expected_unmatched5)
 
   # Test case 6: Sign flip
   source6 <- c("1:123:A:C", "2:456:G:T", "3:789:C:A")
@@ -287,8 +287,8 @@ test_that("alignVariantNames correctly aligns variant names with different flip 
   expected_unmatched6 <- integer(0)
 
   result6 <- alignVariantNames(source6, reference6)
-  expect_equal(result6$aligned_variants, expected_aligned6)
-  expect_equal(result6$unmatched_indices, expected_unmatched6)
+  expect_equal(result6$alignedVariants, expected_aligned6)
+  expect_equal(result6$unmatchedIndices, expected_unmatched6)
 
   # Test case 7: Strand and sign flip
   source7 <- c("1:123:A:C", "2:456:G:T", "3:789:C:A")
@@ -297,8 +297,8 @@ test_that("alignVariantNames correctly aligns variant names with different flip 
   expected_unmatched7 <- integer(0)
 
   result7 <- alignVariantNames(source7, reference7)
-  expect_equal(result7$aligned_variants, expected_aligned7)
-  expect_equal(result7$unmatched_indices, expected_unmatched7)
+  expect_equal(result7$alignedVariants, expected_aligned7)
+  expect_equal(result7$unmatchedIndices, expected_unmatched7)
 
   # Test case 8: Indels
   source8 <- c("1:123:A:C", "2:456:G:T", "3:789:C:A", "4:101:G:GATC")
@@ -307,8 +307,8 @@ test_that("alignVariantNames correctly aligns variant names with different flip 
   expected_unmatched8 <- integer(0)
 
   result8 <- alignVariantNames(source8, reference8)
-  expect_equal(result8$aligned_variants, expected_aligned8)
-  expect_equal(result8$unmatched_indices, expected_unmatched8)
+  expect_equal(result8$alignedVariants, expected_aligned8)
+  expect_equal(result8$unmatchedIndices, expected_unmatched8)
 })
 
 test_that("alignVariantNames correctly aligns variant names with different chr prefix conventions", {
@@ -319,8 +319,8 @@ test_that("alignVariantNames correctly aligns variant names with different chr p
   expected_unmatched9 <- integer(0)
 
   result9 <- alignVariantNames(source9, reference9)
-  expect_equal(result9$aligned_variants, expected_aligned9)
-  expect_equal(result9$unmatched_indices, expected_unmatched9)
+  expect_equal(result9$alignedVariants, expected_aligned9)
+  expect_equal(result9$unmatchedIndices, expected_unmatched9)
 
   # Test case 10: Original with chr prefix, reference without chr prefix
   source10 <- c("chr1:123:A:C", "chr2:456:G:T", "chr3:789:C:A")
@@ -329,8 +329,8 @@ test_that("alignVariantNames correctly aligns variant names with different chr p
   expected_unmatched10 <- integer(0)
 
   result10 <- alignVariantNames(source10, reference10)
-  expect_equal(result10$aligned_variants, expected_aligned10)
-  expect_equal(result10$unmatched_indices, expected_unmatched10)
+  expect_equal(result10$alignedVariants, expected_aligned10)
+  expect_equal(result10$unmatchedIndices, expected_unmatched10)
 })
 
 test_that("alignVariantNames warns on non-standard format", {
@@ -355,7 +355,7 @@ test_that("alignVariantNames strips build suffix", {
   source <- c("1:100:A:G:b38")
   reference <- c("1:100:A:G")
   result <- alignVariantNames(source, reference, removeBuildSuffix = TRUE)
-  expect_length(result$aligned_variants, 1)
+  expect_length(result$alignedVariants, 1)
 })
 
 # ---- sanitize_names edge cases (alleleQc.R lines 37, 42) ----

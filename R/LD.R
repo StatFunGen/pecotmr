@@ -33,7 +33,7 @@ findIntersectionRows <- function(genomicData, regionChrom, regionStart, regionEn
     stop("Region ", regionChrom, ":", regionStart, "-", regionEnd,
          " is not covered by any rows in the LD metadata.")
   }
-  list(start_row = startRow, end_row = endRow)
+  list(startRow = startRow, endRow = endRow)
 }
 
 #' Validate that startRow..endRow fully covers [regionStart, regionEnd].
@@ -51,9 +51,9 @@ extractFilePaths <- function(genomicData, intersectionRows, columnToExtract) {
   if (!columnToExtract %in% names(genomicData)) {
     stop("Column '", columnToExtract, "' not found in genomic data.")
   }
-  idx <- which(genomicData$chrom == intersectionRows$start_row$chrom &
-               genomicData$start >= intersectionRows$start_row$start &
-               genomicData$start <= intersectionRows$end_row$start)
+  idx <- which(genomicData$chrom == intersectionRows$startRow$chrom &
+               genomicData$start >= intersectionRows$startRow$start &
+               genomicData$start <= intersectionRows$endRow$start)
   genomicData[[columnToExtract]][idx]
 }
 
@@ -64,8 +64,8 @@ extractFilePaths <- function(genomicData, intersectionRows, columnToExtract) {
 #' @param region "chr:start-end" string or data.frame with chrom/start/end.
 #' @param completeCoverageRequired If TRUE, error when the region extends
 #'   beyond available LD blocks.
-#' @return A list with: intersections (LD_file_paths, bim_file_paths),
-#'   ld_meta_data, and parsed region.
+#' @return A list with: intersections (LD_file_paths, bimFilePaths),
+#'   ldMetaData, and parsed region.
 #' @importFrom stringr str_split
 #' @importFrom dplyr select
 #' @importFrom vroom vroom
@@ -98,7 +98,7 @@ getRegionalLdMeta <- function(ldReferenceMetaFile, region, completeCoverageRequi
 
   # Validate region
   if (completeCoverageRequired) {
-    validateSelectedRegion(intersectionRows$start_row, intersectionRows$end_row, region$start, region$end)
+    validateSelectedRegion(intersectionRows$startRow, intersectionRows$endRow, region$start, region$end)
   }
 
   # Extract file paths
@@ -111,12 +111,12 @@ getRegionalLdMeta <- function(ldReferenceMetaFile, region, completeCoverageRequi
 
   return(list(
     intersections = list(
-      start_index = intersectionRows$start_row,
-      end_index = intersectionRows$end_row,
+      startIndex = intersectionRows$startRow,
+      endIndex = intersectionRows$endRow,
       LD_file_paths = ldPaths,
-      bim_file_paths = bimPaths
+      bimFilePaths = bimPaths
     ),
-    ld_meta_data = genomicData,
+    ldMetaData = genomicData,
     region = region
   ))
 }
@@ -169,7 +169,7 @@ processLdMatrix <- function(ldFilePath, snpFilePath = NULL) {
   ldVariants <- ldVariants[posOrder, ]
   ldMatrix <- ldMatrix[ldVariants$variants, ldVariants$variants]
 
-  list(LD_matrix = ldMatrix, LD_variants = ldVariants)
+  list(ldMatrix = ldMatrix, ldVariants = ldVariants)
 }
 
 #' Subset an LD matrix and variant info to a genomic region, optionally
@@ -193,7 +193,7 @@ extractLdForRegion <- function(ldMatrix, variants, region, extractCoordinates) {
   }
 
   mat <- ldMatrix[extracted$variants, extracted$variants, drop = FALSE]
-  list(extracted_LD_matrix = mat, extracted_LD_variants = extracted)
+  list(extractedLdMatrix = mat, extractedLdVariants = extracted)
 }
 
 #' Combine multiple block-level LD matrices into one, handling boundary overlaps.
@@ -243,7 +243,7 @@ createLdMatrix <- function(ldMatrices, variants) {
 #' @param region Region of interest: "chr:start-end" string or data.frame with chrom/start/end.
 #' @param extractCoordinates Optional data.frame with columns "chrom" and "pos" for
 #'   specific coordinates extraction (only for pre-computed LD blocks).
-#' @param returnGenotype Controls what LD_matrix contains in the return value.
+#' @param returnGenotype Controls what ldMatrix contains in the return value.
 #'   FALSE (default): always return correlation matrix R.
 #'   TRUE: return genotype matrix X (only valid for PLINK sources).
 #'   "auto": return X for PLINK sources, R for pre-computed sources.
@@ -253,12 +253,12 @@ createLdMatrix <- function(ldMatrices, variants) {
 #'
 #' @return A list with:
 #' \describe{
-#'   \item{LD_variants}{Character vector of variant IDs (canonical format).}
-#'   \item{LD_matrix}{LD correlation matrix R (or genotype matrix X when returnGenotype is TRUE or "auto" with PLINK source).}
+#'   \item{ldVariants}{Character vector of variant IDs (canonical format).}
+#'   \item{ldMatrix}{LD correlation matrix R (or genotype matrix X when returnGenotype is TRUE or "auto" with PLINK source).}
 #'   \item{ref_panel}{Data.frame with variant metadata (chrom, pos, A2, A1, variant_id,
 #'     and optionally allele_freq, variance, n_nomiss).}
-#'   \item{is_genotype}{Logical: TRUE if LD_matrix contains genotype X, FALSE if correlation R.}
-#'   \item{block_metadata}{Data.frame with region/block info. For pre-computed LD: one row per block.
+#'   \item{is_genotype}{Logical: TRUE if ldMatrix contains genotype X, FALSE if correlation R.}
+#'   \item{blockMetadata}{Data.frame with region/block info. For pre-computed LD: one row per block.
 #'     For PLINK: a single row spanning the loaded region.}
 #' }
 #' @export
@@ -271,7 +271,7 @@ loadLdMatrix <- function(ldMetaFilePath, region, extractCoordinates = NULL,
   if (identical(returnGenotype, "auto")) returnGenotype <- isGeno
 
   if (isGeno) {
-    genoPath <- resolveGenotypePathForRegion(source$meta_path, region)
+    genoPath <- resolveGenotypePathForRegion(source$metaPath, region)
     result <- loadLdFromGenotype(genoPath, region,
                                     returnGenotype = returnGenotype,
                                     nSample = nSample)
@@ -280,7 +280,7 @@ loadLdMatrix <- function(ldMetaFilePath, region, extractCoordinates = NULL,
     if (returnGenotype) {
       stop("returnGenotype=TRUE requires genotype files, not pre-computed LD matrices.")
     }
-    result <- loadLdFromBlocks(source$meta_path, region, extractCoordinates, nSample = nSample)
+    result <- loadLdFromBlocks(source$metaPath, region, extractCoordinates, nSample = nSample)
   }
 
   # Remove any duplicate variant IDs (safety net for boundary overlaps)
@@ -359,9 +359,9 @@ isGenotypeSource <- function(path) {
 #' @param path Path to a metadata TSV file with columns chrom, start, end, path.
 #' @return A list with:
 #'   \item{type}{"plink2", "plink1", "vcf", "gds", or "precomputed"}
-#'   \item{data_path}{Genotype path from first row (for type detection only; actual
+#'   \item{dataPath}{Genotype path from first row (for type detection only; actual
 #'     per-chromosome path is resolved at load time)}
-#'   \item{meta_path}{The metadata TSV path (always set)}
+#'   \item{metaPath}{The metadata TSV path (always set)}
 #' @importFrom vroom vroom
 #' @noRd
 resolveLdSource <- function(path) {
@@ -377,10 +377,10 @@ resolveLdSource <- function(path) {
   rawPath <- gsub(",.*$", "", meta$path[1])  # strip comma-separated bim path
   resolved <- file.path(dirname(path), rawPath)
 
-  if (hasPlink2Files(resolved)) return(list(type = "plink2", data_path = resolved, meta_path = path))
-  if (hasPlink1Files(resolved)) return(list(type = "plink1", data_path = resolved, meta_path = path))
-  if (isVcfPath(resolved)) return(list(type = "vcf", data_path = resolved, meta_path = path))
-  if (isGdsPath(resolved)) return(list(type = "gds", data_path = resolved, meta_path = path))
+  if (hasPlink2Files(resolved)) return(list(type = "plink2", dataPath = resolved, metaPath = path))
+  if (hasPlink1Files(resolved)) return(list(type = "plink1", dataPath = resolved, metaPath = path))
+  if (isVcfPath(resolved)) return(list(type = "vcf", dataPath = resolved, metaPath = path))
+  if (isGdsPath(resolved)) return(list(type = "gds", dataPath = resolved, metaPath = path))
 
   # Pre-computed .cor.xz blocks - verify not using 0:0 sentinel
   if (!is.na(meta$start) && !is.na(meta$end) && meta$start == 0 && meta$end == 0) {
@@ -388,7 +388,7 @@ resolveLdSource <- function(path) {
          "\n  The 0:0 sentinel is only valid for whole-chromosome genotype files.")
   }
 
-  list(type = "precomputed", meta_path = path)
+  list(type = "precomputed", metaPath = path)
 }
 
 #' Resolve the correct genotype path for a given region from a metadata TSV.
@@ -458,13 +458,13 @@ loadLdFromGenotype <- function(genotypePath, region,
   # Block metadata (single block spanning the loaded region)
   positions <- variantInfo$pos
   blockMetadata <- data.frame(
-    block_id = 1L,
+    blockId = 1L,
     chrom = as.character(variantInfo$chrom[1]),
-    block_start = min(positions),
-    block_end = max(positions),
+    blockStart = min(positions),
+    blockEnd = max(positions),
     size = length(variantIds),
-    start_idx = 1L,
-    end_idx = length(variantIds),
+    startIdx = 1L,
+    endIdx = length(variantIds),
     stringsAsFactors = FALSE
   )
 
@@ -472,7 +472,7 @@ loadLdFromGenotype <- function(genotypePath, region,
   variantsGr <- .refPanelToGranges(refPanel)
 
   if (returnGenotype) {
-    # Store genotype handle + snp_idx for lazy access
+    # Store genotype handle + snpIdx for lazy access
     handle <- readGenotypes(genotypePath)
     snpIdx <- .regionToSnpIdx(handle@snpInfo, region)
     return(LdData(
@@ -569,7 +569,7 @@ loadLdFromBlocks <- function(ldMetaFilePath, region, extractCoordinates = NULL, 
   intersectedLdFiles <- getRegionalLdMeta(ldMetaFilePath, region)
 
   ldFilePaths <- intersectedLdFiles$intersections$LD_file_paths
-  bimFilePaths <- intersectedLdFiles$intersections$bim_file_paths
+  bimFilePaths <- intersectedLdFiles$intersections$bimFilePaths
 
   extractedLdMatricesList <- list()
   extractedLdVariantsList <- list()
@@ -578,13 +578,13 @@ loadLdFromBlocks <- function(ldMetaFilePath, region, extractCoordinates = NULL, 
   for (j in seq_along(ldFilePaths)) {
     ldMatrixProcessed <- processLdMatrix(ldFilePaths[j], bimFilePaths[j])
     extractedLdList <- extractLdForRegion(
-      ldMatrix = ldMatrixProcessed$LD_matrix,
-      variants = ldMatrixProcessed$LD_variants,
+      ldMatrix = ldMatrixProcessed$ldMatrix,
+      variants = ldMatrixProcessed$ldVariants,
       region = intersectedLdFiles$region,
       extractCoordinates = extractCoordinates
     )
-    extractedLdMatricesList[[j]] <- extractedLdList$extracted_LD_matrix
-    extractedLdVariantsList[[j]] <- extractedLdList$extracted_LD_variants
+    extractedLdMatricesList[[j]] <- extractedLdList$extractedLdMatrix
+    extractedLdVariantsList[[j]] <- extractedLdList$extractedLdVariants
     if (nrow(extractedLdVariantsList[[j]]) > 0) {
       blockChroms[j] <- as.character(extractedLdVariantsList[[j]]$chrom[1])
     } else {
@@ -616,13 +616,13 @@ loadLdFromBlocks <- function(ldMetaFilePath, region, extractCoordinates = NULL, 
   blockVariants <- lapply(extractedLdVariantsList, function(v) v$variants)
   blockPositions <- lapply(extractedLdVariantsList, function(v) v$pos)
   blockMetadata <- data.frame(
-    block_id = seq_along(ldFilePaths),
+    blockId = seq_along(ldFilePaths),
     chrom = blockChroms,
-    block_start = sapply(blockPositions, min),
-    block_end = sapply(blockPositions, max),
+    blockStart = sapply(blockPositions, min),
+    blockEnd = sapply(blockPositions, max),
     size = sapply(blockVariants, length),
-    start_idx = sapply(blockVariants, function(v) min(match(v, ldVariants))),
-    end_idx = sapply(blockVariants, function(v) max(match(v, ldVariants))),
+    startIdx = sapply(blockVariants, function(v) min(match(v, ldVariants))),
+    endIdx = sapply(blockVariants, function(v) max(match(v, ldVariants))),
     stringsAsFactors = FALSE
   )
 
@@ -721,9 +721,9 @@ filterVariantsByLdReference <- function(variantIds, ldReferenceMetaFile, keepInd
 #'
 #' @return returns a list containing:
 #' \describe{
-#' \item{ld_matrices}{A list of matrices, each representing LD for a specific block.}
-#' \item{variant_indices}{A data frame that maps variant IDs to their corresponding block.}
-#' \item{block_metadata}{Information about each block including size, chromosome, start and end positions.}
+#' \item{ldMatrices}{A list of matrices, each representing LD for a specific block.}
+#' \item{variantIndices}{A data frame that maps variant IDs to their corresponding block.}
+#' \item{blockMetadata}{Information about each block including size, chromosome, start and end positions.}
 #' }
 #' @noRd
 partitionLdMatrix <- function(ldData, mergeSmallBlocks = TRUE,
@@ -753,8 +753,8 @@ partitionLdMatrix <- function(ldData, mergeSmallBlocks = TRUE,
   # Filter out blocks with invalid indices (empty blocks, out-of-range, NA, Inf)
   nVariants <- length(variantIds)
   validBlocks <- sapply(seq_len(nrow(blockMetadata)), function(i) {
-    s <- blockMetadata$start_idx[i]
-    e <- blockMetadata$end_idx[i]
+    s <- blockMetadata$startIdx[i]
+    e <- blockMetadata$endIdx[i]
     sz <- blockMetadata$size[i]
     # Block is valid if: size > 0, indices are finite integers, and within range
     !is.na(s) && !is.na(e) && is.finite(s) && is.finite(e) &&
@@ -771,7 +771,7 @@ partitionLdMatrix <- function(ldData, mergeSmallBlocks = TRUE,
       "LD block(s) with invalid or out-of-range indices."
     ))
     blockMetadata <- blockMetadata[validBlocks, , drop = FALSE]
-    blockMetadata$block_id <- seq_len(nrow(blockMetadata))
+    blockMetadata$blockId <- seq_len(nrow(blockMetadata))
   }
 
   # Validate the block structure of the matrix (skip if only one block)
@@ -797,8 +797,8 @@ validateBlockStructure <- function(matrix, blockMetadata, variantIds) {
 
   for (i in 1:(nrow(blockMetadata) - 1)) {
     for (j in (i + 1):nrow(blockMetadata)) {
-      si <- blockMetadata$start_idx[i]; ei <- blockMetadata$end_idx[i]
-      sj <- blockMetadata$start_idx[j]; ej <- blockMetadata$end_idx[j]
+      si <- blockMetadata$startIdx[i]; ei <- blockMetadata$endIdx[i]
+      sj <- blockMetadata$startIdx[j]; ej <- blockMetadata$endIdx[j]
       if (si > n || ei > n || sj > n || ej > n) {
         msgs <- c(msgs, paste("Block indices out of range for blocks", i, "and", j))
         next
@@ -827,10 +827,10 @@ canMerge <- function(block1, block2, maxSize) {
 mergeTwoBlocks <- function(blockMetadata, idx1, idx2) {
   if (idx1 > idx2) { tmp <- idx1; idx1 <- idx2; idx2 <- tmp }
   result <- blockMetadata
-  result$end_idx[idx1] <- blockMetadata$end_idx[idx2]
+  result$endIdx[idx1] <- blockMetadata$endIdx[idx2]
   result$size[idx1] <- blockMetadata$size[idx1] + blockMetadata$size[idx2]
   result <- result[-idx2, ]
-  result$block_id <- seq_len(nrow(result))
+  result$blockId <- seq_len(nrow(result))
   result
 }
 
@@ -869,13 +869,13 @@ extractBlockMatrices <- function(matrix, blockMetadata, variantIds) {
   ldMatrices <- list()
   variantMapping <- data.frame(
     variant_id = character(),
-    block_id = integer(),
+    blockId = integer(),
     stringsAsFactors = FALSE
   )
 
   for (i in seq_len(nrow(blockMetadata))) {
-    startIdx <- blockMetadata$start_idx[i]
-    endIdx <- blockMetadata$end_idx[i]
+    startIdx <- blockMetadata$startIdx[i]
+    endIdx <- blockMetadata$endIdx[i]
 
     # Skip empty blocks
     if (endIdx < startIdx) next
@@ -898,7 +898,7 @@ extractBlockMatrices <- function(matrix, blockMetadata, variantIds) {
     # Update variant mapping
     blockMapping <- data.frame(
       variant_id = blockVariants,
-      block_id = i,
+      blockId = i,
       stringsAsFactors = FALSE
     )
     variantMapping <- rbind(variantMapping, blockMapping)
@@ -906,9 +906,9 @@ extractBlockMatrices <- function(matrix, blockMetadata, variantIds) {
   }
 
   return(list(
-    ld_matrices = ldMatrices,
-    variant_indices = variantMapping,
-    block_metadata = blockMetadata
+    ldMatrices = ldMatrices,
+    variantIndices = variantMapping,
+    blockMetadata = blockMetadata
   ))
 }
 
@@ -944,26 +944,26 @@ extractBlockMatrices <- function(matrix, blockMetadata, variantIds) {
 #' @return A list with components:
 #' \describe{
 #'   \item{R}{The (possibly repaired) LD matrix.}
-#'   \item{is_pd}{Logical: is the matrix positive definite?}
-#'   \item{is_psd}{Logical: is the matrix positive semidefinite (within rTol)?}
-#'   \item{min_eigenvalue}{Smallest eigenvalue of the original matrix.}
-#'   \item{n_negative}{Number of negative eigenvalues (below -rTol).}
-#'   \item{condition_number}{Ratio of largest to smallest positive eigenvalue
+#'   \item{isPd}{Logical: is the matrix positive definite?}
+#'   \item{isPsd}{Logical: is the matrix positive semidefinite (within rTol)?}
+#'   \item{minEigenvalue}{Smallest eigenvalue of the original matrix.}
+#'   \item{nNegative}{Number of negative eigenvalues (below -rTol).}
+#'   \item{conditionNumber}{Ratio of largest to smallest positive eigenvalue
 #'     (\code{Inf} if any eigenvalue is zero).}
-#'   \item{method_applied}{Character: \code{"none"}, \code{"shrink"}, or
+#'   \item{methodApplied}{Character: \code{"none"}, \code{"shrink"}, or
 #'     \code{"eigenfix"}.}
 #' }
 #'
 #' @examples
 #' # A well-conditioned matrix
 #' R_good <- diag(5)
-#' checkLd(R_good)$is_pd  # TRUE
+#' checkLd(R_good)$isPd  # TRUE
 #'
 #' # A matrix with negative eigenvalues
 #' R_bad <- matrix(0.9, 3, 3); diag(R_bad) <- 1; R_bad[1,3] <- R_bad[3,1] <- -0.5
-#' checkLd(R_bad)$is_psd  # FALSE
+#' checkLd(R_bad)$isPsd  # FALSE
 #' R_fixed <- checkLd(R_bad, method = "eigenfix")$R
-#' checkLd(R_fixed)$is_psd  # TRUE
+#' checkLd(R_fixed)$isPsd  # TRUE
 #'
 #' @export
 checkLd <- function(R,
@@ -1006,12 +1006,12 @@ checkLd <- function(R,
 
   list(
     R = Rout,
-    is_pd = isPd,
-    is_psd = isPsd,
-    min_eigenvalue = minEval,
-    n_negative = nNeg,
-    condition_number = condNum,
-    method_applied = methodApplied
+    isPd = isPd,
+    isPsd = isPsd,
+    minEigenvalue = minEval,
+    nNegative = nNeg,
+    conditionNumber = condNum,
+    methodApplied = methodApplied
   )
 }
 

@@ -204,7 +204,7 @@ setMethod("readGenotypes",
 #'   \describe{
 #'     \item{assay("dosage")}{Numeric matrix (variants x samples)}
 #'     \item{rowRanges}{GRanges with A1, A2 metadata}
-#'     \item{colData}{DataFrame with sample_id column}
+#'     \item{colData}{DataFrame with sampleId column}
 #'   }
 #' @export
 extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
@@ -233,7 +233,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
   )
 
   colData <- DataFrame(
-    sample_id = handle@sampleIds,
+    sampleId = handle@sampleIds,
     row.names = handle@sampleIds
   )
 

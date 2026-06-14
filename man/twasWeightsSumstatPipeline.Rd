@@ -8,9 +8,9 @@ twasWeightsSumstatPipeline(
   sumstats,
   ldData,
   n,
-  methods = list(lassosum_rss = list(), prs_cs = list(phi = 1e-04, n_iter = 1000,
-    n_burnin = 500, thin = 5), sdpr = list(iter = 1000, burn = 200, thin = 1, verbose =
-    FALSE), susie_rss = list(), susie_inf_rss = list()),
+  methods = list(lassosumRss = list(), prsCs = list(phi = 1e-04, nIter = 1000, nBurnin =
+    500, thin = 5), sdpr = list(iter = 1000, burn = 200, thin = 1, verbose = FALSE),
+    susieRss = list(), susieInfRss = list()),
   pThresholds = c(0.001, 0.05),
   checkLdMethod = "eigenfix",
   zMismatchQc = NULL,
@@ -18,7 +18,7 @@ twasWeightsSumstatPipeline(
   pipCutoffToSkip = 0,
   impute = TRUE,
   imputeMissing = FALSE,
-  imputeOpts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
+  imputeOpts = list(rcond = 0.01, r2Threshold = 0.6, minimumLd = 5, lamb = 0.01),
   varY = 1,
   verbose = 1
 )
@@ -28,16 +28,16 @@ twasWeightsSumstatPipeline(
 \code{A2}, \code{chrom}, \code{pos}, and either \code{z} or both
 \code{beta} and \code{se}.}
 
-\item{ldData}{LdData S4 object, or a legacy list with \code{LD_matrix},
-\code{LD_variants}, \code{ref_panel}. Can also be a plain correlation
+\item{ldData}{LdData S4 object, or a legacy list with \code{ldMatrix},
+\code{ldVariants}, \code{ref_panel}. Can also be a plain correlation
 matrix (variant IDs taken from row/colnames).}
 
 \item{n}{eQTL study sample size (scalar).}
 
 \item{methods}{Named list of RSS weight methods and their arguments.
 Method names correspond to functions named
-\code{<method>_weights(stat, LD, ...)}. Defaults include lassosum_rss,
-prs_cs, sdpr, susie_rss, and susie_inf_rss.}
+\code{<method>_weights(stat, LD, ...)}. Defaults include lassosumRss,
+prsCs, sdpr, susieRss, and susieInfRss.}
 
 \item{pThresholds}{Numeric vector of p-value thresholds for P+T weights.
 Set to NULL to skip.}
@@ -75,7 +75,7 @@ A list with:
 \describe{
   \item{twas_weights}{A \code{TwasWeights} S4 object with
     \code{standardized = TRUE}.}
-  \item{finemapping_result}{A \code{FineMappingResult} S4 object from the
+  \item{finemappingResult}{A \code{FineMappingResult} S4 object from the
     SuSiE-RSS fit, or NULL if no SuSiE-RSS method was used.}
   \item{qc_summary}{List with outlier counts and QC metadata.}
 }

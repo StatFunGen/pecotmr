@@ -40,9 +40,9 @@
 #' set.seed(123)
 #' prior_grid <- runif(17, 0.00005, 0.05)
 #'
-#' sample_id <- paste0("P000", str_pad(1:400, 3, pad = "0"))
+#' sampleId <- paste0("P000", str_pad(1:400, 3, pad = "0"))
 #' X <- matrix(sample(0:2, size = n * p, replace = TRUE, prob = c(0.65, 0.30, 0.05)), nrow = n)
-#' rownames(X) <- sample_id
+#' rownames(X) <- sampleId
 #' colnames(X) <- paste0("rs", sample(10000:100000, p))
 #'
 #' tissues <- c(
@@ -52,7 +52,7 @@
 #' Y <- matrix(runif(n * r, -2, 2), nrow = n)
 #' Y <- scale(Y)
 #' colnames(Y) <- tissues
-#' rownames(Y) <- sample_id
+#' rownames(Y) <- sampleId
 #'
 #' set.seed(Sys.time())
 #' components <- c(

@@ -526,7 +526,7 @@ test_that("rssToGwasSumstats() converts from loadRssData format", {
       stringsAsFactors = FALSE
     ),
     n = 5000,
-    var_y = 1.0
+    varY = 1.0
   )
 
   obj <- rssToGwasSumstats(rss_list, traitName = "test_trait",
@@ -545,7 +545,7 @@ test_that("rssToGwasSumstats() returns NULL for empty input", {
       A1 = character(), A2 = character(), z = numeric()
     ),
     n = 1000,
-    var_y = NULL
+    varY = NULL
   )
   expect_null(rssToGwasSumstats(rss_list))
   expect_null(rssToGwasSumstats(list(sumstats = NULL)))
@@ -984,7 +984,7 @@ test_that("rssToGwasSumstats fabricates SNP from CHR:BP:A2:A1 when SNP missing",
       stringsAsFactors = FALSE
     ),
     n = 8000,
-    var_y = NULL
+    varY = NULL
   )
 
   result <- rssToGwasSumstats(rss_list)
@@ -1004,7 +1004,7 @@ test_that("rssToGwasSumstats uses sequential integers for SNP when CHR/BP/A1/A2 
     stringsAsFactors = FALSE
   )
   expect_error(
-    rssToGwasSumstats(list(sumstats = ss_df, n = 1000, var_y = NULL)),
+    rssToGwasSumstats(list(sumstats = ss_df, n = 1000, varY = NULL)),
     "Missing required columns"
   )
 })

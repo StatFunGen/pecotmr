@@ -20,7 +20,7 @@
 \item{baselineMat}{Matrix of baseline annotations, or NULL.}
 }
 \value{
-A data.frame with block_id, h2_local, h2_local_se.
+A data.frame with blockId, h2Local, h2LocalSe.
 }
 \description{
 Per-block heritability using the Hessian-based SE.

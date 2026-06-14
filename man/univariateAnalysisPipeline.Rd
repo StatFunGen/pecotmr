@@ -54,6 +54,8 @@ of \code{a1}) aligned to the columns of X. When supplied it is exported as
 the \code{top_loci$af} column; when NULL, \code{af} is \code{NA_real_}.
 Default NULL.}
 
+\item{otherQuantities}{A list of other quantities to be carried into fine-mapping post-processing. Default is an empty list.}
+
 \item{region}{Optional \code{"chr:start-end"} string for the analysis region. Default is NULL.}
 
 \item{L}{Maximum number of components in SuSiE. Default is 20.}
@@ -61,18 +63,20 @@ Default NULL.}
 \item{coverage}{A vector of coverage probabilities for credible sets. Default is c(0.95, 0.7, 0.5).}
 
 \item{methods}{Optional character vector selecting which SuSiE variants to
-fit. Any subset of \code{c("susie", "susie_inf", "susie_ash")}. Default
+fit. Any subset of \code{c("susie", "susieInf", "susieAsh")}. Default
 \code{NULL} falls back to the legacy \code{add_susie_inf} behavior:
 \code{add_susie_inf = TRUE} (default) maps to
-\code{methods = c("susie_inf", "susie")} with SuSiE-inf chained into the
+\code{methods = c("susieInf", "susie")} with SuSiE-inf chained into the
 SuSiE fit as initialization; \code{add_susie_inf = FALSE} maps to
 \code{methods = "susie"} (plain SuSiE alone). When \code{methods} is
 passed explicitly, each requested method is fitted; if
-\code{"susie_inf"} is paired with \code{"susie"} or \code{"susie_ash"}
+\code{"susieInf"} is paired with \code{"susie"} or \code{"susieAsh"}
 (or both) and \code{add_susie_inf = TRUE}, the SuSiE-inf fit
 initialises each chained downstream method. This gives five distinct
 fitting modes: SuSiE alone, SuSiE with SuSiE-inf init, SuSiE-inf alone,
 SuSiE-ash alone, and SuSiE-ash with SuSiE-inf init.}
+
+\item{samplePartition}{Optional data frame with Sample and Fold columns for cross-validation. Default is NULL.}
 
 \item{verbose}{Verbosity level. Default is 0.}
 
@@ -81,8 +85,6 @@ SuSiE-ash alone, and SuSiE-ash with SuSiE-inf init.}
 \item{Y_scalar}{A scalar to rescale Y to its original scale.}
 
 \item{X_variance}{Optional variance of X. Default is NULL.}
-
-\item{other_quantities}{A list of other quantities to be carried into fine-mapping post-processing. Default is an empty list.}
 
 \item{imiss_cutoff}{Individual missingness cutoff. Default is 1.0.}
 
@@ -110,12 +112,10 @@ fit keeps these options and is initialized with \code{model_init}.}
 \item{add_susie_inf}{When \code{methods} is \code{NULL}, controls whether
 SuSiE-inf is fitted and chained into SuSiE. When \code{methods} is set
 explicitly, controls whether the chained-init shortcut is applied to
-any \code{"susie"} or \code{"susie_ash"} method present alongside
-\code{"susie_inf"}. Default \code{TRUE}.}
+any \code{"susie"} or \code{"susieAsh"} method present alongside
+\code{"susieInf"}. Default \code{TRUE}.}
 
 \item{twas_weights}{Whether to compute TWAS weights. Default is TRUE.}
-
-\item{sample_partition}{Optional data frame with Sample and Fold columns for cross-validation. Default is NULL.}
 
 \item{max_cv_variants}{The maximum number of variants to be included in cross-validation. Default is -1 (no limit).}
 

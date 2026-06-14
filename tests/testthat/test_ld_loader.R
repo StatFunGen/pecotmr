@@ -104,17 +104,17 @@ test_that("ldLoader with ld_meta_path but no regions errors", {
 })
 
 # ===========================================================================
-# ldLoader: LD_info branch validation
+# ldLoader: ldInfo branch validation
 # ===========================================================================
 
-test_that("ldLoader with LD_info errors when not a data.frame", {
+test_that("ldLoader with ldInfo errors when not a data.frame", {
   expect_error(
     ldLoader(ldInfo = "not_a_df"),
     "ldInfo must be a data.frame"
   )
 })
 
-test_that("ldLoader with LD_info errors when missing LD_file column", {
+test_that("ldLoader with ldInfo errors when missing LD_file column", {
   expect_error(
     ldLoader(ldInfo = data.frame(col1 = "a")),
     "ldInfo must be a data.frame with column 'LD_file'"
@@ -122,12 +122,12 @@ test_that("ldLoader with LD_info errors when missing LD_file column", {
 })
 
 # ===========================================================================
-# ldLoader: LD_info branch with real genotype fixtures
+# ldLoader: ldInfo branch with real genotype fixtures
 # ===========================================================================
 
 test_data_dir <- test_path("test_data")
 
-test_that("ldLoader LD_info loads LD from PLINK2 files", {
+test_that("ldLoader ldInfo loads LD from PLINK2 files", {
   skip_if_not_installed("pgenlibr")
   plink_prefix <- file.path(test_data_dir, "test_variants")
   loader <- ldLoader(ldInfo = data.frame(LD_file = plink_prefix))
@@ -139,7 +139,7 @@ test_that("ldLoader LD_info loads LD from PLINK2 files", {
   expect_true(all(abs(diag(mat) - 1) < 1e-10))
 })
 
-test_that("ldLoader LD_info loads LD from VCF file", {
+test_that("ldLoader ldInfo loads LD from VCF file", {
   skip_if_not_installed("VariantAnnotation")
   vcf_path <- file.path(test_data_dir, "test_variants.vcf.gz")
   loader <- ldLoader(ldInfo = data.frame(LD_file = vcf_path))
@@ -149,7 +149,7 @@ test_that("ldLoader LD_info loads LD from VCF file", {
   expect_true(isSymmetric(mat))
 })
 
-test_that("ldLoader LD_info loads LD from GDS file", {
+test_that("ldLoader ldInfo loads LD from GDS file", {
   skip_if_not_installed("SNPRelate")
   skip_if_not_installed("gdsfmt")
   gds_path <- file.path(test_data_dir, "test_variants.gds")
@@ -160,7 +160,7 @@ test_that("ldLoader LD_info loads LD from GDS file", {
   expect_true(isSymmetric(mat))
 })
 
-test_that("ldLoader LD_info loads LD from PLINK1 files", {
+test_that("ldLoader ldInfo loads LD from PLINK1 files", {
   skip_if_not_installed("snpStats")
   plink1_prefix <- file.path(test_data_dir, "protocol_example.genotype")
   loader <- ldLoader(ldInfo = data.frame(LD_file = plink1_prefix))
@@ -169,7 +169,7 @@ test_that("ldLoader LD_info loads LD from PLINK1 files", {
   expect_true(isSymmetric(mat))
 })
 
-test_that("ldLoader LD_info loads pre-computed .cor.xz blocks", {
+test_that("ldLoader ldInfo loads pre-computed .cor.xz blocks", {
   ld_file <- file.path(test_data_dir, "LD_block_1.chr1_1000_1200.float16.txt.xz")
   bim_file <- file.path(test_data_dir, "LD_block_1.chr1_1000_1200.float16.bim")
 
@@ -179,16 +179,16 @@ test_that("ldLoader LD_info loads pre-computed .cor.xz blocks", {
   local_mocked_bindings(
     processLdMatrix = function(LD_file_path, snp_file_path = NULL) {
       result <- real_process(LD_file_path, snp_file_path)
-      mat <- result$LD_matrix
-      variant_ids <- result$LD_variants$variants
+      mat <- result$ldMatrix
+      variant_ids <- result$ldVariants$variants
       ref_panel <- pecotmr:::parseVariantId(variant_ids)
       ref_panel$variant_id <- variant_ids
       variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
       bm <- data.frame(
-        block_id = 1L, chrom = as.character(ref_panel$chrom[1]),
-        block_start = min(ref_panel$pos), block_end = max(ref_panel$pos),
-        size = length(variant_ids), start_idx = 1L,
-        end_idx = length(variant_ids), stringsAsFactors = FALSE
+        blockId = 1L, chrom = as.character(ref_panel$chrom[1]),
+        blockStart = min(ref_panel$pos), blockEnd = max(ref_panel$pos),
+        size = length(variant_ids), startIdx = 1L,
+        endIdx = length(variant_ids), stringsAsFactors = FALSE
       )
       LdData(correlation = mat, variants = variants_gr, blockMetadata = bm)
     },
@@ -202,7 +202,7 @@ test_that("ldLoader LD_info loads pre-computed .cor.xz blocks", {
   expect_true(nrow(mat) > 0)
 })
 
-test_that("ldLoader LD_info with max_variants subsamples", {
+test_that("ldLoader ldInfo with max_variants subsamples", {
   skip_if_not_installed("pgenlibr")
   plink_prefix <- file.path(test_data_dir, "test_variants")
   set.seed(42)
@@ -212,7 +212,7 @@ test_that("ldLoader LD_info with max_variants subsamples", {
   expect_equal(ncol(mat), 20L)
 })
 
-test_that("ldLoader LD_info returns consistent LD across formats", {
+test_that("ldLoader ldInfo returns consistent LD across formats", {
   skip_if_not_installed("pgenlibr")
   skip_if_not_installed("SNPRelate")
   skip_if_not_installed("gdsfmt")

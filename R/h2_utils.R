@@ -136,7 +136,7 @@ weightedLsRidge <- function(y, X, w, lambda = 0,
 
 #' @title Compute Baseline Annotation Enrichment Quantities
 #' @description Given tau coefficients and a baseline annotation matrix,
-#'   compute the full set of enrichment quantities: prop_h2, prop_snps,
+#'   compute the full set of enrichment quantities: propH2, propSnps,
 #'   enrichment ratio, enrichment SE (from jackknife or delta method),
 #'   and p-value.
 #' @param tau Numeric vector of per-annotation regression coefficients.
@@ -146,8 +146,8 @@ weightedLsRidge <- function(y, X, w, lambda = 0,
 #' @param baselineMat Numeric matrix (nSnps x nAnnotations).
 #' @param annotNames Character vector of annotation names.
 #' @param h2 Numeric scalar, total estimated h2.
-#' @return A data.frame with columns: annotation, tau, tau_se, enrichment,
-#'   enrichment_se, enrichment_p, prop_h2, prop_snps.
+#' @return A data.frame with columns: annotation, tau, tauSe, enrichment,
+#'   enrichmentSe, enrichmentP, propH2, propSnps.
 #' @keywords internal
 computeBaselineEnrichment <- function(tau, tauSe, tauBlocks,
                                       baselineMat, annotNames, h2) {
@@ -159,7 +159,7 @@ computeBaselineEnrichment <- function(tau, tauSe, tauBlocks,
   h2_a <- tau * M_a
   propH2 <- h2_a / h2
 
-  # Enrichment ratio: (prop_h2 / prop_snps) = tau * M / h2
+  # Enrichment ratio: (propH2 / propSnps) = tau * M / h2
   enrichment <- tau * M / h2
 
   # Enrichment SE from jackknife blocks (preferred) or delta method (fallback)
@@ -187,12 +187,12 @@ computeBaselineEnrichment <- function(tau, tauSe, tauBlocks,
   data.frame(
     annotation = annotNames,
     tau = tau,
-    tau_se = tauSe,
+    tauSe = tauSe,
     enrichment = enrichment,
-    enrichment_se = enrichmentSe,
-    enrichment_p = enrichmentP,
-    prop_h2 = propH2,
-    prop_snps = propSnps,
+    enrichmentSe = enrichmentSe,
+    enrichmentP = enrichmentP,
+    propH2 = propH2,
+    propSnps = propSnps,
     stringsAsFactors = FALSE
   )
 }
@@ -269,8 +269,8 @@ checkGenomeBuild <- function(...) {
 #' @param h2g Numeric scalar, total estimated SNP heritability.
 #' @return A list with:
 #'   \describe{
-#'     \item{tau_star}{Numeric vector of standardized tau values.}
-#'     \item{tau_star_se}{Numeric vector of jackknife SE for tau_star.}
+#'     \item{tauStar}{Numeric vector of standardized tau values.}
+#'     \item{tauStarSe}{Numeric vector of jackknife SE for tauStar.}
 #'   }
 #' @keywords internal
 standardizeTauStar <- function(tau, tauBlocks, sdAnnot, MRef, h2g) {
@@ -291,7 +291,7 @@ standardizeTauStar <- function(tau, tauBlocks, sdAnnot, MRef, h2g) {
   jkVar <- apply(tauStarBlocks, 2L, function(x) var(x, na.rm = TRUE))
   tauStarSe <- sqrt((nBlocks - 1)^2 / nBlocks * jkVar)
 
-  list(tau_star = tauStar, tau_star_se = tauStarSe)
+  list(tauStar = tauStar, tauStarSe = tauStarSe)
 }
 
 # =============================================================================

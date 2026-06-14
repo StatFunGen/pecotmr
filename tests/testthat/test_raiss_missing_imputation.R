@@ -13,9 +13,9 @@ context("RAISS missing-variant imputation in TWAS pipelines")
     variant_id = ref$variant_id, A1 = ref$A1, A2 = ref$A2
   )
   bm <- data.frame(
-    block_id = 1L, chrom = ref$chrom[1],
-    block_start = min(ref$pos), block_end = max(ref$pos),
-    size = ncol(X), start_idx = 1L, end_idx = ncol(X)
+    blockId = 1L, chrom = ref$chrom[1],
+    blockStart = min(ref$pos), blockEnd = max(ref$pos),
+    size = ncol(X), startIdx = 1L, endIdx = ncol(X)
   )
   LdData(correlation = R, variants = gr, blockMetadata = bm,
          nRef = nrow(X))
@@ -43,11 +43,11 @@ test_that("twasWeightsSumstatPipeline: imputeMissing = FALSE leaves sumstats as-
   )
   result <- twasWeightsSumstatPipeline(
     sumstats = ss_partial, ldData = ld_data, n = 1000,
-    methods = list(susie_rss = list(max_iter = 30)),
+    methods = list(susieRss = list(max_iter = 30)),
     pThresholds = NULL, checkLdMethod = NULL,
     impute = FALSE, imputeMissing = FALSE, verbose = 0
   )
-  expect_equal(length(getVariantIds(result$twas_weights)), nrow(ss_partial))
+  expect_equal(length(getVariantIds(result$twasWeights)), nrow(ss_partial))
 })
 
 test_that("twasWeightsSumstatPipeline: imputeMissing = TRUE widens variant panel", {
@@ -62,12 +62,12 @@ test_that("twasWeightsSumstatPipeline: imputeMissing = TRUE widens variant panel
 
   result_on <- twasWeightsSumstatPipeline(
     sumstats = ss_partial, ldData = ld_data, n = 1000,
-    methods = list(susie_rss = list(max_iter = 30)),
+    methods = list(susieRss = list(max_iter = 30)),
     pThresholds = NULL, checkLdMethod = NULL,
     impute = FALSE, imputeMissing = TRUE, verbose = 0
   )
 
-  n_kept <- length(getVariantIds(result_on$twas_weights))
+  n_kept <- length(getVariantIds(result_on$twasWeights))
   expect_gt(n_kept, nrow(ss_partial))
   expect_lte(n_kept, ncol(eqtl_region_example$X))
 })
@@ -85,24 +85,24 @@ test_that("twasWeightsSumstatPipeline: low-R^2 imputations are dropped", {
   # High R^2 threshold should yield fewer imputed variants than a low one
   result_strict <- twasWeightsSumstatPipeline(
     sumstats = ss_partial, ldData = ld_data, n = 1000,
-    methods = list(susie_rss = list(max_iter = 30)),
+    methods = list(susieRss = list(max_iter = 30)),
     pThresholds = NULL, checkLdMethod = NULL,
     impute = FALSE, imputeMissing = TRUE,
-    imputeOpts = list(rcond = 0.01, R2_threshold = 0.95,
-                       minimum_ld = 5, lamb = 0.01),
+    imputeOpts = list(rcond = 0.01, r2Threshold = 0.95,
+                       minimumLd = 5, lamb = 0.01),
     verbose = 0
   )
   result_lenient <- twasWeightsSumstatPipeline(
     sumstats = ss_partial, ldData = ld_data, n = 1000,
-    methods = list(susie_rss = list(max_iter = 30)),
+    methods = list(susieRss = list(max_iter = 30)),
     pThresholds = NULL, checkLdMethod = NULL,
     impute = FALSE, imputeMissing = TRUE,
-    imputeOpts = list(rcond = 0.01, R2_threshold = 0.2,
-                       minimum_ld = 5, lamb = 0.01),
+    imputeOpts = list(rcond = 0.01, r2Threshold = 0.2,
+                       minimumLd = 5, lamb = 0.01),
     verbose = 0
   )
-  expect_lt(length(getVariantIds(result_strict$twas_weights)),
-            length(getVariantIds(result_lenient$twas_weights)))
+  expect_lt(length(getVariantIds(result_strict$twasWeights)),
+            length(getVariantIds(result_lenient$twasWeights)))
 })
 
 # =============================================================================
@@ -123,8 +123,8 @@ test_that("imputeMissingGwasForSketch: returns unchanged when nothing is missing
     gwasDataSumstats = gwas,
     sketchRefPanel = ref,
     sketchX = X,
-    imputeOpts = list(rcond = 0.01, R2_threshold = 0.6,
-                       minimum_ld = 5, lamb = 0.01),
+    imputeOpts = list(rcond = 0.01, r2Threshold = 0.6,
+                       minimumLd = 5, lamb = 0.01),
     contextLabel = "test-noop"
   )
   expect_equal(nrow(result), nrow(gwas))
@@ -143,8 +143,8 @@ test_that("imputeMissingGwasForSketch: widens GWAS to include sketch variants", 
     gwasDataSumstats = gwas_partial,
     sketchRefPanel = ref,
     sketchX = X,
-    imputeOpts = list(rcond = 0.01, R2_threshold = 0.6,
-                       minimum_ld = 5, lamb = 0.01),
+    imputeOpts = list(rcond = 0.01, r2Threshold = 0.6,
+                       minimumLd = 5, lamb = 0.01),
     contextLabel = "test-widen"
   )
   expect_gt(nrow(result), nrow(gwas_partial))
@@ -169,8 +169,8 @@ test_that("imputeMissingGwasForSketch: imputed beta = z and se = 1 when columns 
     gwasDataSumstats = gwas_partial,
     sketchRefPanel = ref,
     sketchX = X,
-    imputeOpts = list(rcond = 0.01, R2_threshold = 0.6,
-                       minimum_ld = 5, lamb = 0.01),
+    imputeOpts = list(rcond = 0.01, r2Threshold = 0.6,
+                       minimumLd = 5, lamb = 0.01),
     contextLabel = "test-beta-se"
   )
   added_ids <- setdiff(result$variant_id, gwas_partial$variant_id)
@@ -197,8 +197,8 @@ test_that("imputeMissingGwasForSketch: gracefully skips when required cols missi
       gwasDataSumstats = bad_gwas,
       sketchRefPanel = ref,
       sketchX = X,
-      imputeOpts = list(rcond = 0.01, R2_threshold = 0.6,
-                         minimum_ld = 5, lamb = 0.01),
+      imputeOpts = list(rcond = 0.01, r2Threshold = 0.6,
+                         minimumLd = 5, lamb = 0.01),
       contextLabel = "test-skip"
     ),
     "missing required columns"

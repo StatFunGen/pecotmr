@@ -8,12 +8,12 @@ twasMultivariateWeightsSumstatPipeline(
   sumstatsList,
   ldData,
   n,
-  methods = list(mrmash_rss = list(), mvsusie_rss = list()),
+  methods = list(mrmashRss = list(), mvsusieRss = list()),
   zMismatchQc = NULL,
   keepIndel = TRUE,
   impute = FALSE,
   imputeMissing = FALSE,
-  imputeOpts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
+  imputeOpts = list(rcond = 0.01, r2Threshold = 0.6, minimumLd = 5, lamb = 0.01),
   dataDrivenPriorMatrices = NULL,
   canonicalPriorMatrices = TRUE,
   estimatePriorsFromSumstats = TRUE,
@@ -90,6 +90,6 @@ QC, cross-context variant alignment, optional RAISS missing-variant
 imputation, data-driven prior construction (reusing
 \code{\link{build_mrmash_prior_matrices}} and the same FLASH / diagonal
 covariance helpers as the individual-level pipeline), and multi-context
-weight training via \code{\link{mrmash_rss_weights}} and/or
-\code{\link{mvsusie_rss_weights}}.
+weight training via \code{\link{mrmashRssWeights}} and/or
+\code{\link{mvsusieRssWeights}}.
 }

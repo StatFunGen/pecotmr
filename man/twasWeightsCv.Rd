@@ -47,7 +47,7 @@ If set to 2 or more, parallel processing is enabled with that many threads.}
 \value{
 A list with the following components:
 \itemize{
-  \item `sample_partition`: A dataframe showing the sample partitioning used in the cross-validation.
+  \item `samplePartition`: A dataframe showing the sample partitioning used in the cross-validation.
   \item `prediction`: A list of matrices with predicted Y values for each method and fold.
   \item `metrics`: A matrix with rows representing methods and columns for various metrics:
     \itemize{
@@ -57,7 +57,7 @@ A list with the following components:
       \item `RMSE`: Root Mean Squared Error, a measure of the model's prediction error.
       \item `MAE`: Mean Absolute Error, a measure of the average magnitude of errors in a set of predictions.
     }
-  \item `time_elapsed`: The time taken to complete the cross-validation process.
+  \item `timeElapsed`: The time taken to complete the cross-validation process.
 }
 }
 \description{

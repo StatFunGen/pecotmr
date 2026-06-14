@@ -108,8 +108,8 @@ columns are available.}
 \item{extract_coordinates}{Optional data frame with columns "chrom" and "pos" for specific coordinates extraction.}
 }
 \value{
-A list containing the individual_data and sumstat_data:
-individual_data contains the following components if exist
+A list containing the individualData and sumstatData:
+individualData contains the following components if exist
 \itemize{
   \item residual_Y: A list of residualized phenotype values (either a vector or a matrix).
   \item residual_X: A list of residualized genotype matrices for each condition.
@@ -125,10 +125,10 @@ individual_data contains the following components if exist
   \item grange: Genomic range of the region (start and end positions).
   \item Y_coordinates: Phenotype coordinates if a region is specified.
 }
-sumstat_data contains the following components if exist
+sumstatData contains the following components if exist
 \itemize{
-  \item sumstats: A list of summary statistics for the matched LD_info, each sublist contains sumstats, n, var_y from \code{loadRssData}.
-  \item LD_info: A list of \code{LdData} S4 objects (one per LD reference), as returned by \code{load_LD_matrix}.
+  \item sumstats: A list of summary statistics for the matched ldInfo, each sublist contains sumstats, n, var_y from \code{loadRssData}.
+  \item ldInfo: A list of \code{LdData} S4 objects (one per LD reference), as returned by \code{load_LD_matrix}.
 }
 }
 \description{
@@ -136,10 +136,10 @@ This function loads a mixture data sets for a specific region, including individ
 or summary statistics (sumstats, LD). Run \code{loadRegionalUnivariateData} and \code{loadRssData} multiple times for different datasets
 }
 \section{Loading individual level data from multiple corhorts}{
-NA
+
 }
 
 \section{Loading summary statistics from multiple corhorts or data set}{
-NA
+
 }
 

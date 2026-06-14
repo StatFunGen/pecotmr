@@ -21,7 +21,7 @@ NULL
 #' @param annotations An \code{AnnotationMatrix}, or NULL.
 #' @param local Logical, return per-block estimates.
 #' @param lambda Numeric, ridge penalty (default 0).
-#' @return A list with h2, h2_se, intercept, enrichment, score_stats.
+#' @return A list with h2, h2Se, intercept, enrichment, scoreStats.
 #' @keywords internal
 gldscUnivariate <- function(z, n, ldRef, annotations = NULL,
                             local = FALSE, lambda = 0) {
@@ -101,7 +101,7 @@ gldscUnivariate <- function(z, n, ldRef, annotations = NULL,
                         lambda = lambda)
 
   # Extract per-annotation tau jackknife blocks and SE
-  tauBlocksFull <- jk$loo_estimates[, seq_len(nTau), drop = FALSE]
+  tauBlocksFull <- jk$looEstimates[, seq_len(nTau), drop = FALSE]
 
   # h2 and intercept SE
   if (!is.null(baselineMat)) {
@@ -109,11 +109,11 @@ gldscUnivariate <- function(z, n, ldRef, annotations = NULL,
     # Annotation-specific blocks (exclude base L2 column)
     tauBlocks <- tauBlocksFull[, -1, drop = FALSE]
   } else {
-    h2Loo <- jk$loo_estimates[, 1]
+    h2Loo <- jk$looEstimates[, 1]
     tauBlocks <- tauBlocksFull
   }
   tauSe <- jackknifeSe(tau, tauBlocks)
-  aLoo <- jk$loo_estimates[, nParams]
+  aLoo <- jk$looEstimates[, nParams]
   se <- jackknifeSe(c(h2, intercept), cbind(h2Loo, aLoo))
 
   # Baseline enrichment (annotation-specific only, not base L2)
@@ -140,20 +140,20 @@ gldscUnivariate <- function(z, n, ldRef, annotations = NULL,
   if (!is.null(annotations)) {
     strat <- .gldscScoreStats(z, n, ldRef, annotations,
                               fitFgls$coef, weights)
-    scoreStats <- strat$score_stats
+    scoreStats <- strat$scoreStats
   }
 
   list(
     h2 = h2,
-    h2_se = se[1],
+    h2Se = se[1],
     intercept = intercept,
-    intercept_se = se[2],
+    interceptSe = se[2],
     tau = tau,
-    tau_se = tauSe,
-    tau_blocks = tauBlocks,
+    tauSe = tauSe,
+    tauBlocks = tauBlocks,
     local = localDf,
     enrichment = baselineEnrichmentDf,
-    score_stats = scoreStats
+    scoreStats = scoreStats
   )
 }
 
@@ -165,7 +165,7 @@ gldscUnivariate <- function(z, n, ldRef, annotations = NULL,
 #'
 #' @description Compute per-block precision matrices from LD matrices
 #'   and fitted values for feasible GLS estimation.
-#' @param ldMatrixList List of LD matrix blocks, each with R and snp_idx.
+#' @param ldMatrixList List of LD matrix blocks, each with R and snpIdx.
 #' @param fittedValues Numeric vector of fitted values from initial WLS.
 #' @return A list of per-block precision matrices (inverse Omega blocks).
 #' @keywords internal
@@ -175,7 +175,7 @@ gldscUnivariate <- function(z, n, ldRef, annotations = NULL,
   for (b in seq_along(ldMatrixList)) {
     block <- ldMatrixList[[b]]
     RBlock <- block$R
-    snpIdx <- block$snp_idx
+    snpIdx <- block$snpIdx
     fittedBlock <- fittedValues[snpIdx]
     mBlock <- length(snpIdx)
 
@@ -189,7 +189,7 @@ gldscUnivariate <- function(z, n, ldRef, annotations = NULL,
     OmegaBlock <- OmegaBlock + diag(1e-6, mBlock)
     OmegaInvBlock <- solve(OmegaBlock)
 
-    result[[b]] <- list(Omega_inv = OmegaInvBlock, snp_idx = snpIdx)
+    result[[b]] <- list(omegaInv = OmegaInvBlock, snpIdx = snpIdx)
   }
   result
 }
@@ -218,8 +218,8 @@ gldscUnivariate <- function(z, n, ldRef, annotations = NULL,
   XtOiy <- numeric(p)
 
   for (b in seq_along(OmegaInv)) {
-    idx <- OmegaInv[[b]]$snp_idx
-    Oi <- OmegaInv[[b]]$Omega_inv
+    idx <- OmegaInv[[b]]$snpIdx
+    Oi <- OmegaInv[[b]]$omegaInv
     X_b <- X[idx, , drop = FALSE]
     y_b <- y[idx]
 
@@ -258,7 +258,7 @@ gldscUnivariate <- function(z, n, ldRef, annotations = NULL,
 #' @param blockAssign Integer vector, block assignments from
 #'   \code{.assignSnpsToJackknifeBlocks}.
 #' @param lambda Numeric, ridge penalty (default 0).
-#' @return A list with se and loo_estimates.
+#' @return A list with se and looEstimates.
 #' @keywords internal
 .gldscJackknife <- function(y, X, w, coefFull, blockAssign,
                             lambda = 0) {
@@ -280,7 +280,7 @@ gldscUnivariate <- function(z, n, ldRef, annotations = NULL,
   }
   list(
     se = jackknifeSe(coefFull, looEstimates),
-    loo_estimates = looEstimates
+    looEstimates = looEstimates
   )
 }
 
@@ -293,7 +293,7 @@ gldscUnivariate <- function(z, n, ldRef, annotations = NULL,
 #' @param ldRef An \code{LdScore} object.
 #' @param h2 Numeric, global h2 estimate.
 #' @param intercept Numeric, g-LDSC intercept estimate.
-#' @return A data.frame with block_id, h2_local, h2_local_se.
+#' @return A data.frame with blockId, h2Local, h2LocalSe.
 #' @keywords internal
 .gldscLocal <- function(z, n, ldRef, h2, intercept) {
   nLdBlocks <- length(ldRef@ldBlocks@blocks)
@@ -328,7 +328,7 @@ gldscUnivariate <- function(z, n, ldRef, annotations = NULL,
             (n * sumLd / M)
 
     # SE from block-level Fisher information:
-    # Var(h2_local) ~ M_block / (n * sum_ld / M)^2
+    # Var(h2Local) ~ M_block / (n * sum_ld / M)^2
     h2LocalSeB <- sqrt(2 * MBlock) / (n * sumLd / M)
 
     blockId[b] <- b
@@ -337,9 +337,9 @@ gldscUnivariate <- function(z, n, ldRef, annotations = NULL,
   }
 
   data.frame(
-    block_id = blockId,
-    h2_local = h2Local,
-    h2_local_se = h2LocalSe,
+    blockId = blockId,
+    h2Local = h2Local,
+    h2LocalSe = h2LocalSe,
     stringsAsFactors = FALSE
   )
 }
@@ -354,14 +354,14 @@ gldscUnivariate <- function(z, n, ldRef, annotations = NULL,
 #' @param annotations An \code{AnnotationMatrix} object.
 #' @param coef Numeric vector, fitted coefficients from the baseline model.
 #' @param w Numeric vector, regression weights.
-#' @return A list with enrichment (data.frame) and score_stats (list with
-#'   z, R, annotation_names).
+#' @return A list with enrichment (data.frame) and scoreStats (list with
+#'   z, R, annotationNames).
 #' @keywords internal
 .gldscScoreStats <- function(z, n, ldRef, annotations, coef, w) {
   # Score statistics for candidate annotations
   candidate <- getCandidates(annotations)
   nCand <- ncol(candidate@annotations)
-  if (nCand == 0) return(list(enrichment = NULL, score_stats = NULL))
+  if (nCand == 0) return(list(enrichment = NULL, scoreStats = NULL))
 
   # Compute score for each candidate annotation
   # S_a = dLL/d(tau_a) at tau_a = 0, baseline fitted
@@ -415,13 +415,13 @@ gldscUnivariate <- function(z, n, ldRef, annotations = NULL,
   list(
     enrichment = data.frame(
       annotation = candidate@annotationMeta$name,
-      score_z = scoreZ,
-      score_p = 2 * pnorm(-abs(scoreZ)),
+      scoreZ = scoreZ,
+      scoreP = 2 * pnorm(-abs(scoreZ)),
       stringsAsFactors = FALSE
     ),
-    score_stats = list(
+    scoreStats = list(
       z = scoreZ, R = R,
-      annotation_names = candidate@annotationMeta$name
+      annotationNames = candidate@annotationMeta$name
     )
   )
 }

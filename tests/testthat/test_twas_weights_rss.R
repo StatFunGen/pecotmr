@@ -104,9 +104,9 @@ test_that("fitSusieInfThenSusieRss returns two fits", {
   fits <- fitSusieInfThenSusieRss(z, R, n, args = list(L = 5))
   expect_true(is.list(fits))
   expect_true("susie" %in% names(fits))
-  expect_true("susie_inf" %in% names(fits))
-  expect_true("susie_inf" %in% class(fits$susie_inf))
-  expect_true("susie_rss" %in% class(fits$susie))
+  expect_true("susieInf" %in% names(fits))
+  expect_true("susieInf" %in% class(fits$susieInf))
+  expect_true("susieRss" %in% class(fits$susie))
 })
 
 # =============================================================================
@@ -186,32 +186,32 @@ test_that("twasWeightsSumstatPipeline produces TwasWeights with standardized = T
     stringsAsFactors = FALSE
   )
   variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
-  block_metadata <- S4Vectors::DataFrame(
+  blockMetadata <- S4Vectors::DataFrame(
     region = paste0("chr1:", 1001, "-", 1000 + p),
     start = 1001L, end = as.integer(1000 + p), chrom = "chr1",
-    start_idx = 1L, end_idx = as.integer(p), size = as.integer(p)
+    startIdx = 1L, endIdx = as.integer(p), size = as.integer(p)
   )
   ld_data <- new("LdData",
     correlation = R,
     genotypeHandle = NULL,
     variants = variants_gr,
     snpIdx = seq_len(p),
-    blockMetadata = block_metadata
+    blockMetadata = blockMetadata
   )
 
   result <- twasWeightsSumstatPipeline(
     sumstats = sumstats,
     ldData = ld_data,
     n = n,
-    methods = list(susie_rss = list(L = 5)),
+    methods = list(susieRss = list(L = 5)),
     pThresholds = c(0.05),
     checkLdMethod = NULL,
     verbose = 0
   )
 
-  expect_false(is.null(result$twas_weights))
-  expect_true(is(result$twas_weights, "TwasWeights"))
-  expect_true(result$twas_weights@standardized)
-  expect_true(length(result$twas_weights@variantIds) > 0)
-  expect_false(result$qc_summary$skipped)
+  expect_false(is.null(result$twasWeights))
+  expect_true(is(result$twasWeights, "TwasWeights"))
+  expect_true(result$twasWeights@standardized)
+  expect_true(length(result$twasWeights@variantIds) > 0)
+  expect_false(result$qcSummary$skipped)
 })

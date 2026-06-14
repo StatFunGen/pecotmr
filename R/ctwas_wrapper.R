@@ -38,7 +38,7 @@ ctwasBimfileLoader <- function(bimFilePath) {
 #' @description
 #' \strong{Deprecated.} Use [ldLoader()] with its \code{ldInfo}
 #' argument instead. This wrapper remains for backwards compatibility and
-#' produces the same \code{list(LD_info, region_info)} output as the original.
+#' produces the same \code{list(ldInfo, regionInfo)} output as the original.
 #'
 #' @param ldMetaDataFile Path to the LD meta-data TSV file.
 #' @param subsetRegionIds Optional character vector of region IDs
@@ -46,9 +46,9 @@ ctwasBimfileLoader <- function(bimFilePath) {
 #'
 #' @return A list with components:
 #' \describe{
-#'   \item{LD_info}{Data.frame with columns \code{region_id}, \code{LD_file},
+#'   \item{ldInfo}{Data.frame with columns \code{region_id}, \code{LD_file},
 #'     \code{SNP_file}.}
-#'   \item{region_info}{Data.frame with columns \code{chrom}, \code{start},
+#'   \item{regionInfo}{Data.frame with columns \code{chrom}, \code{start},
 #'     \code{stop}, \code{region_id}.}
 #' }
 #'
@@ -57,28 +57,28 @@ ctwasBimfileLoader <- function(bimFilePath) {
 getCtwasMetaData <- function(ldMetaDataFile, subsetRegionIds = NULL) {
   .Deprecated("ldLoader", package = "pecotmr",
               msg = "getCtwasMetaData() is deprecated. Use ldLoader() with ldInfo instead.")
-  LD_info <- as.data.frame(vroom(ldMetaDataFile))
-  colnames(LD_info)[1] <- "chrom"
-  LD_info$region_id <- paste(as.integer(stripChrPrefix(LD_info$chrom)),
-                             LD_info$start, LD_info$end, sep = "_")
-  LD_info$LD_file <- paste0(dirname(ldMetaDataFile), "/",
-                            gsub(",.*$", "", LD_info$path))
-  LD_info$SNP_file <- paste0(LD_info$LD_file, ".bim")
-  LD_info <- LD_info[, c("region_id", "LD_file", "SNP_file")]
-  region_info <- LD_info[, "region_id", drop = FALSE]
-  region_info$chrom <- as.integer(gsub("\\_.*$", "", region_info$region_id))
-  region_info$start <- as.integer(gsub("\\_.*$", "",
-                                       sub("^.*?\\_", "", region_info$region_id)))
-  region_info$stop <- as.integer(sub("^.*?\\_", "",
-                                      sub("^.*?\\_", "", region_info$region_id)))
-  region_info$region_id <- paste0(region_info$chrom, "_",
-                                   region_info$start, "_",
-                                   region_info$stop)
-  region_info <- region_info[, c("chrom", "start", "stop", "region_id")]
+  ldInfo <- as.data.frame(vroom(ldMetaDataFile))
+  colnames(ldInfo)[1] <- "chrom"
+  ldInfo$region_id <- paste(as.integer(stripChrPrefix(ldInfo$chrom)),
+                            ldInfo$start, ldInfo$end, sep = "_")
+  ldInfo$LD_file <- paste0(dirname(ldMetaDataFile), "/",
+                           gsub(",.*$", "", ldInfo$path))
+  ldInfo$SNP_file <- paste0(ldInfo$LD_file, ".bim")
+  ldInfo <- ldInfo[, c("region_id", "LD_file", "SNP_file")]
+  regionInfo <- ldInfo[, "region_id", drop = FALSE]
+  regionInfo$chrom <- as.integer(gsub("\\_.*$", "", regionInfo$region_id))
+  regionInfo$start <- as.integer(gsub("\\_.*$", "",
+                                      sub("^.*?\\_", "", regionInfo$region_id)))
+  regionInfo$stop <- as.integer(sub("^.*?\\_", "",
+                                    sub("^.*?\\_", "", regionInfo$region_id)))
+  regionInfo$region_id <- paste0(regionInfo$chrom, "_",
+                                 regionInfo$start, "_",
+                                 regionInfo$stop)
+  regionInfo <- regionInfo[, c("chrom", "start", "stop", "region_id")]
   if (!is.null(subsetRegionIds)) {
-    region_info <- region_info[region_info$region_id %in% subsetRegionIds, ]
+    regionInfo <- regionInfo[regionInfo$region_id %in% subsetRegionIds, ]
   }
-  return(list(LD_info = LD_info, region_info = region_info))
+  return(list(ldInfo = ldInfo, regionInfo = regionInfo))
 }
 
 #' Function to select variants for ctwas weights input
@@ -95,17 +95,17 @@ trimCtwasVariants <- function(regionData, twasWeightCutoff = 1e-5, csMinCor = 0.
     selectedVariantsByContext <- c()
     molecularId <- gsub("\\|.*", "", groupName)
 
-    if ("cs_variants" %in% names(regionData$susie_weights_intermediate[[molecularId]][[context]]) & length(regionData$susie_weights_intermediate[[molecularId]][[context]][["cs_variants"]]) != 0) {
-      csMinAbsCor <- regionData$susie_weights_intermediate[[molecularId]][[context]]$cs_purity$min.abs.corr
-      for (L in seq_along(regionData$susie_weights_intermediate[[molecularId]][[context]]$cs_variants)) {
+    if ("csVariants" %in% names(regionData$susieWeightsIntermediate[[molecularId]][[context]]) & length(regionData$susieWeightsIntermediate[[molecularId]][[context]][["csVariants"]]) != 0) {
+      csMinAbsCor <- regionData$susieWeightsIntermediate[[molecularId]][[context]]$csPurity$minAbsCorr
+      for (L in seq_along(regionData$susieWeightsIntermediate[[molecularId]][[context]]$csVariants)) {
         # we includ all variants in $cs_variant if min_abs_corr > csMinCor for the set
         if (csMinAbsCor[L] >= csMinCor) {
-          csVariants <- regionData$susie_weights_intermediate[[molecularId]][[context]]$cs_variants[[L]]
+          csVariants <- regionData$susieWeightsIntermediate[[molecularId]][[context]]$csVariants[[L]]
           selectedVariantsByContext <- csVariants[csVariants %in% rownames(weightList$wgt)]
         }
       }
     }
-    contextPip <- regionData$susie_weights_intermediate[[molecularId]][[context]]$pip
+    contextPip <- regionData$susieWeightsIntermediate[[molecularId]][[context]]$pip
     # variant IDs are in canonical chr-prefix format from allele_qc pipeline
     highPipVariants <- names(contextPip[contextPip > minPipCutoff])[names(contextPip[contextPip > minPipCutoff]) %in% rownames(weightList$wgt)]
     selectedVariantsByContext <- unique(c(selectedVariantsByContext, highPipVariants))
@@ -140,10 +140,10 @@ trimCtwasVariants <- function(regionData, twasWeightCutoff = 1e-5, csMinCor = 0.
         next
       }
       if (nrow(regionData$weights[[group]][[study]]$wgt) < maxNumVariants) {
-        regionData$weights[[group]][[study]]$n_wgt <- nrow(regionData$weights[[group]][[study]]$wgt)
+        regionData$weights[[group]][[study]]$nWgt <- nrow(regionData$weights[[group]][[study]]$wgt)
       } else {
         regionData$weights[[group]][[study]] <- selectVariants(group, study, regionData, csMinCor = csMinCor, minPipCutoff = minPipCutoff, maxNumVariants = maxNumVariants)
-        regionData$weights[[group]][[study]]$n_wgt <- nrow(regionData$weights[[group]][[study]]$wgt)
+        regionData$weights[[group]][[study]]$nWgt <- nrow(regionData$weights[[group]][[study]]$wgt)
       }
       regionData$weights[[group]] <- Filter(Negate(is.null), regionData$weights[[group]])
       contextRange <- as.integer(sapply(rownames(regionData$weights[[group]][[study]]$wgt), function(variant) strsplit(variant, "\\:")[[1]][2]))

@@ -8,14 +8,14 @@ regionDataToSusieRssInput(rssInput, ldData)
 }
 \arguments{
 \item{rssInput}{A single loaded RSS record, usually one element of
-\code{qced_regional_data$sumstat_data$sumstats}. It must contain
+\code{qced_regional_data$sumstatData$sumstats}. It must contain
 \code{sumstats}, \code{n}, and \code{var_y}.}
 
 \item{ldData}{A matching \code{LdData} object for the same study.}
 }
 \value{
-A list with \code{susie_rss_input}, ready to pass to
-  \code{\link{susieRssPipeline}}, and \code{source_info}.
+A list with \code{susieRssInput}, ready to pass to
+  \code{\link{susieRssPipeline}}, and \code{sourceInfo}.
 }
 \description{
 Convert one loaded RSS record to direct SuSiE RSS input

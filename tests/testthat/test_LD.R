@@ -13,9 +13,9 @@ make_test_ld_data <- function(variant_ids, R = NULL, blockMetadata = NULL) {
   variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
   if (is.null(blockMetadata)) {
     blockMetadata <- data.frame(
-      block_id = 1L, chrom = as.character(ref_panel$chrom[1]),
-      block_start = min(ref_panel$pos), block_end = max(ref_panel$pos),
-      size = length(variant_ids), start_idx = 1L, end_idx = length(variant_ids),
+      blockId = 1L, chrom = as.character(ref_panel$chrom[1]),
+      blockStart = min(ref_panel$pos), blockEnd = max(ref_panel$pos),
+      size = length(variant_ids), startIdx = 1L, endIdx = length(variant_ids),
       stringsAsFactors = FALSE
     )
   }
@@ -112,11 +112,11 @@ test_that("partitionLdMatrix correctly partitions a single block", {
   partitioned <- partitionLdMatrix(ld_data)
 
   # Expectations for single block case
-  expect_equal(length(partitioned$ld_matrices), 1)
-  expect_equal(nrow(partitioned$variant_indices), length(getVariantIds(ld_data)))
-  expect_equal(unique(partitioned$variant_indices$block_id), 1)
-  expect_identical(rownames(partitioned$ld_matrices[[1]]), getVariantIds(ld_data))
-  expect_identical(colnames(partitioned$ld_matrices[[1]]), getVariantIds(ld_data))
+  expect_equal(length(partitioned$ldMatrices), 1)
+  expect_equal(nrow(partitioned$variantIndices), length(getVariantIds(ld_data)))
+  expect_equal(unique(partitioned$variantIndices$blockId), 1)
+  expect_identical(rownames(partitioned$ldMatrices[[1]]), getVariantIds(ld_data))
+  expect_identical(colnames(partitioned$ldMatrices[[1]]), getVariantIds(ld_data))
 
   file.remove(LD_meta_file_path)
 })
@@ -136,13 +136,13 @@ test_that("partitionLdMatrix correctly partitions multiple blocks", {
   # Check if we have the correct number of blocks
   # Should have block 1 (1000-1200), block 2 (1200-1400), and block 3 (1400-1600)
   expected_block_count <- 3
-  expect_equal(length(partitioned$ld_matrices), expected_block_count)
+  expect_equal(length(partitioned$ldMatrices), expected_block_count)
 
   # Check if all variants are assigned to blocks
-  expect_equal(nrow(partitioned$variant_indices), length(getVariantIds(ld_data)))
+  expect_equal(nrow(partitioned$variantIndices), length(getVariantIds(ld_data)))
 
   # Check if block IDs are correct
-  expect_setequal(unique(partitioned$variant_indices$block_id), 1:expected_block_count)
+  expect_setequal(unique(partitioned$variantIndices$blockId), 1:expected_block_count)
 
   file.remove(LD_meta_file_path)
 })
@@ -165,13 +165,13 @@ test_that("partitionLdMatrix properly merges small blocks", {
                                     minMergedBlockSize =min_block_size)
 
   # We expect fewer blocks after merging
-  expect_lt(length(partitioned$ld_matrices), 3)
+  expect_lt(length(partitioned$ldMatrices), 3)
 
   # Check if all variants are still assigned to blocks
-  expect_equal(nrow(partitioned$variant_indices), length(getVariantIds(ld_data)))
+  expect_equal(nrow(partitioned$variantIndices), length(getVariantIds(ld_data)))
 
   # Check if merged blocks are larger than min_block_size
-  block_sizes <- sapply(partitioned$ld_matrices, nrow)
+  block_sizes <- sapply(partitioned$ldMatrices, nrow)
   expect_true(all(block_sizes >= min_block_size | block_sizes == length(getVariantIds(ld_data))))
 
   file.remove(LD_meta_file_path)
@@ -196,7 +196,7 @@ test_that("partitionLdMatrix respects max_merged_block_size", {
                                     maxMergedBlockSize =max_block_size)
 
   # Check if no block exceeds max_block_size
-  block_sizes <- sapply(partitioned$ld_matrices, nrow)
+  block_sizes <- sapply(partitioned$ldMatrices, nrow)
   expect_true(all(block_sizes <= max_block_size))
 
   file.remove(LD_meta_file_path)
@@ -205,14 +205,14 @@ test_that("partitionLdMatrix respects max_merged_block_size", {
 test_that("partitionLdMatrix handles empty matrix gracefully", {
   # A plain list (legacy format) is no longer accepted; the S4 check fires first.
   empty_ld_data <- list(
-    LD_matrix = matrix(0, 0, 0),
-    LD_variants = character(0),
+    ldMatrix = matrix(0, 0, 0),
+    ldVariants = character(0),
     blockMetadata = data.frame(
-      block_id = integer(0),
+      blockId = integer(0),
       chrom = character(0),
       size = integer(0),
-      start_idx = integer(0),
-      end_idx = integer(0)
+      startIdx = integer(0),
+      endIdx = integer(0)
     )
   )
 
@@ -229,7 +229,7 @@ test_that("partitionLdMatrix validates block structure properly", {
   # Load the LD matrix that spans multiple blocks
   ld_data <- loadLdMatrix(LD_meta_file_path, region)
 
-  # Create an invalid block structure by modifying block_metadata
+  # Create an invalid block structure by modifying blockMetadata
   bm <- getBlockMetadata(ld_data)
   vids <- getVariantIds(ld_data)
   ldmat <- getCorrelation(ld_data)
@@ -237,13 +237,13 @@ test_that("partitionLdMatrix validates block structure properly", {
   # Assuming we have at least 2 blocks:
   if(nrow(bm) >= 2) {
     # Create overlapping blocks with invalid start/end indices
-    bm$start_idx[2] <- bm$start_idx[1]
-    bm$end_idx[1] <- bm$end_idx[2]
+    bm$startIdx[2] <- bm$startIdx[1]
+    bm$endIdx[1] <- bm$endIdx[2]
 
     # Introduce non-zero elements between blocks to trigger validation error
     if(length(vids) >= 2) {
-      idx1 <- bm$start_idx[1]
-      idx2 <- bm$start_idx[2] + 1
+      idx1 <- bm$startIdx[1]
+      idx2 <- bm$startIdx[2] + 1
       if(idx1 <= length(vids) && idx2 <= length(vids)) {
         var1 <- vids[idx1]
         var2 <- vids[idx2]
@@ -280,13 +280,13 @@ test_that("partitionLdMatrix properly maps variants to blocks", {
   partitioned <- partitionLdMatrix(ld_data, mergeSmallBlocks =FALSE)
 
   # Check that each variant is mapped to the correct block
-  for(i in seq_along(partitioned$ld_matrices)) {
+  for(i in seq_along(partitioned$ldMatrices)) {
     # Get variants in this block matrix
-    block_variants <- rownames(partitioned$ld_matrices[[i]])
+    block_variants <- rownames(partitioned$ldMatrices[[i]])
 
-    # Find these variants in the variant_indices dataframe
-    variant_block_ids <- partitioned$variant_indices$block_id[
-      match(block_variants, partitioned$variant_indices$variant_id)]
+    # Find these variants in the variantIndices dataframe
+    variant_block_ids <- partitioned$variantIndices$blockId[
+      match(block_variants, partitioned$variantIndices$variant_id)]
 
     # All variants should be mapped to this block
     expect_true(all(variant_block_ids == i))
@@ -319,8 +319,8 @@ test_that("partitionLdMatrix handles row/column name mismatches", {
   partitioned <- partitionLdMatrix(mismatched_ld_data)
 
   # Check if names are fixed
-  expect_identical(rownames(partitioned$ld_matrices[[1]]), getVariantIds(ld_data))
-  expect_identical(colnames(partitioned$ld_matrices[[1]]), getVariantIds(ld_data))
+  expect_identical(rownames(partitioned$ldMatrices[[1]]), getVariantIds(ld_data))
+  expect_identical(colnames(partitioned$ldMatrices[[1]]), getVariantIds(ld_data))
 
   file.remove(LD_meta_file_path)
 })
@@ -340,24 +340,24 @@ test_that("partitionLdMatrix correctly extracts blocks based on metadata", {
   # For each block, check if the extracted matrix matches the expected submatrix
   ld_variants <- getVariantIds(ld_data)
   ld_matrix <- getCorrelation(ld_data)
-  for(i in seq_along(partitioned$ld_matrices)) {
-    block_info <- partitioned$block_metadata[i, ]
-    start_idx <- block_info$start_idx
-    end_idx <- block_info$end_idx
+  for(i in seq_along(partitioned$ldMatrices)) {
+    block_info <- partitioned$blockMetadata[i, ]
+    startIdx <- block_info$startIdx
+    endIdx <- block_info$endIdx
 
     # Skip if indices are invalid
-    if(start_idx > length(ld_variants) ||
-       end_idx > length(ld_variants) ||
-       end_idx < start_idx) next
+    if(startIdx > length(ld_variants) ||
+       endIdx > length(ld_variants) ||
+       endIdx < startIdx) next
 
     # Get variants for this block
-    block_variants <- ld_variants[start_idx:end_idx]
+    block_variants <- ld_variants[startIdx:endIdx]
 
     # Extract expected submatrix
     expected_submatrix <- ld_matrix[block_variants, block_variants, drop = FALSE]
 
     # Compare with actual block matrix
-    expect_equal(partitioned$ld_matrices[[i]], expected_submatrix)
+    expect_equal(partitioned$ldMatrices[[i]], expected_submatrix)
   }
 
   file.remove(LD_meta_file_path)
@@ -373,13 +373,13 @@ test_that("partitionLdMatrix partitions correctly with synthetic data", {
   rownames(mat) <- colnames(mat) <- variant_ids
 
   bm <- data.frame(
-    block_id = c(1L, 2L),
+    blockId = c(1L, 2L),
     chrom = c("1", "1"),
-    block_start = c(100L, 400L),
-    block_end = c(300L, 600L),
+    blockStart = c(100L, 400L),
+    blockEnd = c(300L, 600L),
     size = c(3L, 3L),
-    start_idx = c(1L, 4L),
-    end_idx = c(3L, 6L),
+    startIdx = c(1L, 4L),
+    endIdx = c(3L, 6L),
     stringsAsFactors = FALSE
   )
 
@@ -388,11 +388,11 @@ test_that("partitionLdMatrix partitions correctly with synthetic data", {
   result <- pecotmr:::partitionLdMatrix(ld_data, mergeSmallBlocks =FALSE)
 
   expect_type(result, "list")
-  expect_true("ld_matrices" %in% names(result))
-  expect_true("variant_indices" %in% names(result))
-  expect_length(result$ld_matrices, 2)
-  expect_equal(nrow(result$ld_matrices[[1]]), 3)
-  expect_equal(nrow(result$ld_matrices[[2]]), 3)
+  expect_true("ldMatrices" %in% names(result))
+  expect_true("variantIndices" %in% names(result))
+  expect_length(result$ldMatrices, 2)
+  expect_equal(nrow(result$ldMatrices[[1]]), 3)
+  expect_equal(nrow(result$ldMatrices[[2]]), 3)
 })
 
 # ---- orderDedupRegions ----
@@ -440,8 +440,8 @@ test_that("findIntersectionRows correctly identifies start and end rows", {
 
   # Region entirely within the dataset
   result <- findIntersectionRows(genomic_data, 1, 220, 330)
-  expect_equal(result$start_row$start, 200)
-  expect_equal(result$end_row$end, 350)
+  expect_equal(result$startRow$start, 200)
+  expect_equal(result$endRow$end, 350)
 })
 
 test_that("findIntersectionRows adjusts region bounds if needed", {
@@ -455,8 +455,8 @@ test_that("findIntersectionRows adjusts region bounds if needed", {
   # Region extends beyond the dataset
   result <- findIntersectionRows(genomic_data, 1, 50, 500)
   # Should adjust to the bounds of the dataset
-  expect_equal(result$start_row$start, 100)
-  expect_equal(result$end_row$end, 450)
+  expect_equal(result$startRow$start, 100)
+  expect_equal(result$endRow$end, 450)
 })
 
 test_that("findIntersectionRows errors for non-overlapping regions", {
@@ -477,16 +477,16 @@ test_that("findIntersectionRows errors for non-overlapping regions", {
 # ---- validateSelectedRegion ----
 
 test_that("validateSelectedRegion passes for valid region", {
-  start_row <- data.frame(start = 0)
-  end_row <- data.frame(end = 300)
-  expect_silent(pecotmr:::validateSelectedRegion(start_row, end_row, 50, 250))
+  startRow <- data.frame(start = 0)
+  endRow <- data.frame(end = 300)
+  expect_silent(pecotmr:::validateSelectedRegion(startRow, endRow, 50, 250))
 })
 
 test_that("validateSelectedRegion errors for uncovered region", {
-  start_row <- data.frame(start = 100)
-  end_row <- data.frame(end = 200)
+  startRow <- data.frame(start = 100)
+  endRow <- data.frame(end = 200)
   expect_error(
-    pecotmr:::validateSelectedRegion(start_row, end_row, 50, 250),
+    pecotmr:::validateSelectedRegion(startRow, endRow, 50, 250),
     "not fully covered"
   )
 })
@@ -501,8 +501,8 @@ test_that("extractFilePaths extracts correct paths", {
     path = c("f1.ld", "f2.ld", "f3.ld")
   )
   intersection <- list(
-    start_row = data.frame(chrom = 1, start = 0),
-    end_row = data.frame(start = 200)
+    startRow = data.frame(chrom = 1, start = 0),
+    endRow = data.frame(start = 200)
   )
   result <- pecotmr:::extractFilePaths(gd, intersection, "path")
   expect_equal(length(result), 3)
@@ -511,8 +511,8 @@ test_that("extractFilePaths extracts correct paths", {
 test_that("extractFilePaths errors on missing column", {
   gd <- data.frame(chrom = 1, start = 0, end = 100)
   intersection <- list(
-    start_row = data.frame(chrom = 1, start = 0),
-    end_row = data.frame(start = 0)
+    startRow = data.frame(chrom = 1, start = 0),
+    endRow = data.frame(start = 0)
   )
   expect_error(pecotmr:::extractFilePaths(gd, intersection, "nonexistent"),
                "not found")
@@ -527,29 +527,29 @@ test_that("partitionLdMatrix handles blocks with different chromosomes", {
   variant_ids <- c("chr1:100:A:G", "chr1:200:C:T", "chr2:100:G:A", "chr2:200:T:C")
   rownames(test_matrix) <- colnames(test_matrix) <- variant_ids
 
-  block_metadata <- data.frame(
-    block_id = c(1L, 2L),
+  blockMetadata <- data.frame(
+    blockId = c(1L, 2L),
     chrom = c("1", "2"),
-    block_start = c(100L, 100L),
-    block_end = c(200L, 200L),
+    blockStart = c(100L, 100L),
+    blockEnd = c(200L, 200L),
     size = c(2L, 2L),
-    start_idx = c(1L, 3L),
-    end_idx = c(2L, 4L),
+    startIdx = c(1L, 3L),
+    endIdx = c(2L, 4L),
     stringsAsFactors = FALSE
   )
 
   test_ld_data <- make_test_ld_data(variant_ids, R = test_matrix,
-                                     blockMetadata = block_metadata)
+                                     blockMetadata = blockMetadata)
 
   # Partition the matrix
   partitioned <- partitionLdMatrix(test_ld_data)
 
   # Should not merge blocks from different chromosomes
-  expect_equal(length(partitioned$ld_matrices), 2)
+  expect_equal(length(partitioned$ldMatrices), 2)
 
   # Each block should have the correct variants
-  expect_equal(rownames(partitioned$ld_matrices[[1]]), c("chr1:100:A:G", "chr1:200:C:T"))
-  expect_equal(rownames(partitioned$ld_matrices[[2]]), c("chr2:100:G:A", "chr2:200:T:C"))
+  expect_equal(rownames(partitioned$ldMatrices[[1]]), c("chr1:100:A:G", "chr1:200:C:T"))
+  expect_equal(rownames(partitioned$ldMatrices[[2]]), c("chr2:100:G:A", "chr2:200:T:C"))
 })
 
 test_that("partitionLdMatrix works with edge case block structures", {
@@ -564,33 +564,33 @@ test_that("partitionLdMatrix works with edge case block structures", {
   diag(test_matrix) <- 1
 
   # Generate variant names in chr:pos:A2:A1 format
-  variant_names <- paste0("chr1:", 100:(100+n_variants-1), ":A:G")
-  rownames(test_matrix) <- colnames(test_matrix) <- variant_names
+  variantNames <- paste0("chr1:", 100:(100+n_variants-1), ":A:G")
+  rownames(test_matrix) <- colnames(test_matrix) <- variantNames
 
   # Create block metadata
-  block_metadata <- data.frame(
-    block_id = 1:4,
+  blockMetadata <- data.frame(
+    blockId = 1:4,
     chrom = rep("1", 4),
-    block_start = c(100L, as.integer(100+large_block_size),
+    blockStart = c(100L, as.integer(100+large_block_size),
                     as.integer(100+large_block_size+small_block_size),
                     as.integer(100+large_block_size+small_block_size*2)),
-    block_end = c(as.integer(100+large_block_size-1),
+    blockEnd = c(as.integer(100+large_block_size-1),
                   as.integer(100+large_block_size+small_block_size-1),
                   as.integer(100+large_block_size+small_block_size*2-1),
                   as.integer(100+n_variants-1)),
     size = c(large_block_size, small_block_size, small_block_size, small_block_size),
-    start_idx = c(1L, as.integer(large_block_size+1),
+    startIdx = c(1L, as.integer(large_block_size+1),
                   as.integer(large_block_size+small_block_size+1),
                   as.integer(large_block_size+small_block_size*2+1)),
-    end_idx = c(as.integer(large_block_size),
+    endIdx = c(as.integer(large_block_size),
                 as.integer(large_block_size+small_block_size),
                 as.integer(large_block_size+small_block_size*2),
                 as.integer(n_variants)),
     stringsAsFactors = FALSE
   )
 
-  test_ld_data <- make_test_ld_data(variant_names, R = test_matrix,
-                                     blockMetadata = block_metadata)
+  test_ld_data <- make_test_ld_data(variantNames, R = test_matrix,
+                                     blockMetadata = blockMetadata)
 
   # Set minimum block size to force merging of small blocks
   min_merged_size <- small_block_size + 1
@@ -600,11 +600,11 @@ test_that("partitionLdMatrix works with edge case block structures", {
                                     minMergedBlockSize =min_merged_size)
 
   # Should merge the small blocks but leave the large block alone
-  expect_lt(length(partitioned$ld_matrices), 4)
-  expect_gt(length(partitioned$ld_matrices), 1)
+  expect_lt(length(partitioned$ldMatrices), 4)
+  expect_gt(length(partitioned$ldMatrices), 1)
 
   # First block should still be large_block_size
-  expect_equal(nrow(partitioned$ld_matrices[[1]]), large_block_size)
+  expect_equal(nrow(partitioned$ldMatrices[[1]]), large_block_size)
 })
 
 # ---- extractLdForRegion ----
@@ -634,12 +634,12 @@ test_that("extractLdForRegion extracts correct region", {
   result <- extractLdForRegion(ld_matrix, ld_variants, region, NULL)
 
   # Should have extracted only the relevant variants
-  expect_equal(nrow(result$extracted_LD_variants), 2)
-  expect_equal(result$extracted_LD_variants$variants, c("1:200:C:T", "1:300:G:A"))
+  expect_equal(nrow(result$extractedLdVariants), 2)
+  expect_equal(result$extractedLdVariants$variants, c("1:200:C:T", "1:300:G:A"))
 
   # Matrix should be 2x2 with the correct row/column names
-  expect_equal(dim(result$extracted_LD_matrix), c(2, 2))
-  expect_equal(rownames(result$extracted_LD_matrix), c("1:200:C:T", "1:300:G:A"))
+  expect_equal(dim(result$extractedLdMatrix), c(2, 2))
+  expect_equal(rownames(result$extractedLdMatrix), c("1:200:C:T", "1:300:G:A"))
 })
 
 test_that("extractLdForRegion works with extract_coordinates", {
@@ -673,12 +673,12 @@ test_that("extractLdForRegion works with extract_coordinates", {
   result <- extractLdForRegion(ld_matrix, ld_variants, region, extract_coordinates)
 
   # Should have extracted only the specified coordinates
-  expect_equal(nrow(result$extracted_LD_variants), 2)
-  expect_equal(result$extracted_LD_variants$variants, c("1:100:A:G", "1:300:G:A"))
+  expect_equal(nrow(result$extractedLdVariants), 2)
+  expect_equal(result$extractedLdVariants$variants, c("1:100:A:G", "1:300:G:A"))
 
   # Matrix should be 2x2 with the correct row/column names
-  expect_equal(dim(result$extracted_LD_matrix), c(2, 2))
-  expect_equal(rownames(result$extracted_LD_matrix), c("1:100:A:G", "1:300:G:A"))
+  expect_equal(dim(result$extractedLdMatrix), c(2, 2))
+  expect_equal(rownames(result$extractedLdMatrix), c("1:100:A:G", "1:300:G:A"))
 })
 
 # ---- createLdMatrix ----
@@ -759,11 +759,11 @@ test_that("validateBlockStructure passes for proper block structure", {
   rownames(mat) <- colnames(mat) <- variant_ids
 
   block_meta <- data.frame(
-    block_id = c(1, 2),
+    blockId = c(1, 2),
     chrom = c("1", "1"),
     size = c(3, 3),
-    start_idx = c(1, 4),
-    end_idx = c(3, 6)
+    startIdx = c(1, 4),
+    endIdx = c(3, 6)
   )
 
   expect_silent(pecotmr:::validateBlockStructure(mat, block_meta, variant_ids))
@@ -777,11 +777,11 @@ test_that("validateBlockStructure errors on non-block structure", {
   rownames(mat) <- colnames(mat) <- variant_ids
 
   block_meta <- data.frame(
-    block_id = c(1, 2),
+    blockId = c(1, 2),
     chrom = c("1", "1"),
     size = c(2, 2),
-    start_idx = c(1, 3),
-    end_idx = c(2, 4)
+    startIdx = c(1, 3),
+    endIdx = c(2, 4)
   )
 
   expect_error(pecotmr:::validateBlockStructure(mat, block_meta, variant_ids),
@@ -794,24 +794,24 @@ test_that("mergeBlocks properly handles blocks at chromosome boundaries", {
   # Create test data with small blocks at chromosome boundaries
   test_matrix <- matrix(0, 6, 6)
   diag(test_matrix) <- 1
-  variant_names <- c("chr1:900:A:G", "chr1:950:C:T", "chr2:100:G:A",
+  variantNames <- c("chr1:900:A:G", "chr1:950:C:T", "chr2:100:G:A",
                      "chr2:150:T:C", "chr3:100:A:G", "chr3:150:C:T")
-  rownames(test_matrix) <- colnames(test_matrix) <- variant_names
+  rownames(test_matrix) <- colnames(test_matrix) <- variantNames
 
   # Create block metadata with small blocks at chromosome boundaries
-  block_metadata <- data.frame(
-    block_id = c(1L, 2L, 3L),
+  blockMetadata <- data.frame(
+    blockId = c(1L, 2L, 3L),
     chrom = c("1", "2", "3"),
-    block_start = c(900L, 100L, 100L),
-    block_end = c(950L, 150L, 150L),
+    blockStart = c(900L, 100L, 100L),
+    blockEnd = c(950L, 150L, 150L),
     size = c(2L, 2L, 2L),
-    start_idx = c(1L, 3L, 5L),
-    end_idx = c(2L, 4L, 6L),
+    startIdx = c(1L, 3L, 5L),
+    endIdx = c(2L, 4L, 6L),
     stringsAsFactors = FALSE
   )
 
-  test_ld_data <- make_test_ld_data(variant_names, R = test_matrix,
-                                     blockMetadata = block_metadata)
+  test_ld_data <- make_test_ld_data(variantNames, R = test_matrix,
+                                     blockMetadata = blockMetadata)
 
   # Set min block size to force merging attempts
   min_block_size <- 3
@@ -821,11 +821,11 @@ test_that("mergeBlocks properly handles blocks at chromosome boundaries", {
                                      minMergedBlockSize =min_block_size)
 
   # Should not merge blocks across chromosome boundaries
-  expect_equal(length(partitioned$ld_matrices), 3)
+  expect_equal(length(partitioned$ldMatrices), 3)
 
   # Each block should match its chromosome
   for (i in 1:3) {
-    block_variants <- rownames(partitioned$ld_matrices[[i]])
+    block_variants <- rownames(partitioned$ldMatrices[[i]])
     # Strip "chr" prefix before extracting chromosome number
     chrom_from_variants <- unique(as.integer(sub("chr([0-9]+):.*", "\\1", block_variants)))
     expect_equal(length(chrom_from_variants), 1)  # Should only have one chromosome per block
@@ -835,11 +835,11 @@ test_that("mergeBlocks properly handles blocks at chromosome boundaries", {
 
 test_that("mergeBlocks merges small adjacent blocks", {
   block_meta <- data.frame(
-    block_id = c(1, 2, 3),
+    blockId = c(1, 2, 3),
     chrom = c("1", "1", "1"),
     size = c(50, 50, 100),
-    start_idx = c(1, 51, 101),
-    end_idx = c(50, 100, 200)
+    startIdx = c(1, 51, 101),
+    endIdx = c(50, 100, 200)
   )
   result <- pecotmr:::mergeBlocks(block_meta, minSize =100, maxSize =10000)
   expect_true(nrow(result) < 3)
@@ -847,11 +847,11 @@ test_that("mergeBlocks merges small adjacent blocks", {
 
 test_that("mergeBlocks does not merge cross-chromosome", {
   block_meta <- data.frame(
-    block_id = c(1, 2),
+    blockId = c(1, 2),
     chrom = c("1", "2"),
     size = c(10, 10),
-    start_idx = c(1, 11),
-    end_idx = c(10, 20)
+    startIdx = c(1, 11),
+    endIdx = c(10, 20)
   )
   result <- pecotmr:::mergeBlocks(block_meta, minSize =50, maxSize =10000)
   expect_equal(nrow(result), 2)  # Cannot merge across chromosomes
@@ -859,8 +859,8 @@ test_that("mergeBlocks does not merge cross-chromosome", {
 
 test_that("mergeBlocks returns single block unchanged", {
   block_meta <- data.frame(
-    block_id = 1, chrom = "1", size = 10,
-    start_idx = 1, end_idx = 10
+    blockId = 1, chrom = "1", size = 10,
+    startIdx = 1, endIdx = 10
   )
   result <- pecotmr:::mergeBlocks(block_meta, minSize =100, maxSize =10000)
   expect_equal(nrow(result), 1)
@@ -885,21 +885,21 @@ test_that("canMerge checks chromosome and size", {
 test_that("checkLd reports PD for identity matrix", {
   R <- diag(5)
   result <- checkLd(R)
-  expect_true(result$is_pd)
-  expect_true(result$is_psd)
-  expect_equal(result$method_applied, "none")
+  expect_true(result$isPd)
+  expect_true(result$isPsd)
+  expect_equal(result$methodApplied, "none")
   expect_equal(result$R, R)
-  expect_equal(result$condition_number, 1)
+  expect_equal(result$conditionNumber, 1)
 })
 
 test_that("checkLd reports PD for well-conditioned correlation matrix", {
   R <- matrix(0.3, 4, 4)
   diag(R) <- 1
   result <- checkLd(R)
-  expect_true(result$is_pd)
-  expect_true(result$is_psd)
-  expect_equal(result$n_negative, 0)
-  expect_equal(result$method_applied, "none")
+  expect_true(result$isPd)
+  expect_true(result$isPsd)
+  expect_equal(result$nNegative, 0)
+  expect_equal(result$methodApplied, "none")
 })
 
 test_that("checkLd detects non-PSD matrix", {
@@ -907,10 +907,10 @@ test_that("checkLd detects non-PSD matrix", {
   diag(R) <- 1
   R[1, 3] <- R[3, 1] <- -0.5
   result <- checkLd(R)
-  expect_false(result$is_psd)
-  expect_true(result$n_negative > 0)
-  expect_true(result$min_eigenvalue < 0)
-  expect_equal(result$method_applied, "none")
+  expect_false(result$isPsd)
+  expect_true(result$nNegative > 0)
+  expect_true(result$minEigenvalue < 0)
+  expect_equal(result$methodApplied, "none")
 })
 
 test_that("checkLd shrink method modifies non-PD matrix", {
@@ -918,7 +918,7 @@ test_that("checkLd shrink method modifies non-PD matrix", {
   diag(R) <- 1
   R[1, 3] <- R[3, 1] <- -0.5
   result <- checkLd(R, method = "shrink")
-  expect_equal(result$method_applied, "shrink")
+  expect_equal(result$methodApplied, "shrink")
   expect_false(identical(result$R, R))
   # With strong enough shrinkage, result should be PD
   result2 <- checkLd(R, method = "shrink", shrinkage = 0.5)
@@ -932,7 +932,7 @@ test_that("checkLd eigenfix method improves non-PD matrix", {
   R[1, 3] <- R[3, 1] <- -0.5
   original_min_eval <- min(eigen(R, symmetric = TRUE)$values)
   result <- checkLd(R, method = "eigenfix")
-  expect_equal(result$method_applied, "eigenfix")
+  expect_equal(result$methodApplied, "eigenfix")
   # Eigenfix should improve the minimum eigenvalue
   fixed_min_eval <- min(eigen(result$R, symmetric = TRUE)$values)
   expect_true(fixed_min_eval > original_min_eval)
@@ -945,14 +945,14 @@ test_that("checkLd eigenfix method improves non-PD matrix", {
 test_that("checkLd shrink does nothing when matrix is already PD", {
   R <- diag(3)
   result <- checkLd(R, method = "shrink")
-  expect_equal(result$method_applied, "none")
+  expect_equal(result$methodApplied, "none")
   expect_equal(result$R, R)
 })
 
 test_that("checkLd eigenfix does nothing when matrix is already PD", {
   R <- diag(3)
   result <- checkLd(R, method = "eigenfix")
-  expect_equal(result$method_applied, "none")
+  expect_equal(result$methodApplied, "none")
   expect_equal(result$R, R)
 })
 
@@ -964,21 +964,21 @@ test_that("extractBlockMatrices warns and skips out-of-range blocks", {
   mat <- diag(4)
   vnames <- paste0("v", 1:4)
   rownames(mat) <- colnames(mat) <- vnames
-  block_metadata <- data.frame(
-    block_id = c(1, 2),
-    start_idx = c(1, 10),
-    end_idx = c(2, 12),
+  blockMetadata <- data.frame(
+    blockId = c(1, 2),
+    startIdx = c(1, 10),
+    endIdx = c(2, 12),
     chrom = c("1", "1"),
-    block_start = c(100, 500),
-    block_end = c(200, 600),
+    blockStart = c(100, 500),
+    blockEnd = c(200, 600),
     size = c(2, 3),
     stringsAsFactors = FALSE
   )
   expect_warning(
-    result <- pecotmr:::extractBlockMatrices(mat, block_metadata, vnames),
+    result <- pecotmr:::extractBlockMatrices(mat, blockMetadata, vnames),
     "outside the range"
   )
-  valid_blocks <- result$ld_matrices[!sapply(result$ld_matrices, is.null)]
+  valid_blocks <- result$ldMatrices[!sapply(result$ldMatrices, is.null)]
   expect_equal(length(valid_blocks), 1)
   expect_equal(nrow(valid_blocks[[1]]), 2)
 })
@@ -998,7 +998,7 @@ test_that("resolveLdSource detects PLINK2 from metadata", {
       file = meta_file, append = TRUE)
   result <- pecotmr:::resolveLdSource(meta_file)
   expect_equal(result$type, "plink2")
-  expect_equal(result$meta_path, meta_file)
+  expect_equal(result$metaPath, meta_file)
 })
 
 test_that("resolveLdSource detects VCF from metadata", {
@@ -1089,7 +1089,7 @@ test_that("loadLdFromGenotype returns LD matrix with .afreq", {
   expect_true("allele_freq" %in% names(S4Vectors::mcols(getVariantInfo(result))))
   expect_true(all(S4Vectors::mcols(getVariantInfo(result))$allele_freq > 0))
   expect_true(all(S4Vectors::mcols(getVariantInfo(result))$allele_freq < 1))
-  # block_metadata
+  # blockMetadata
   expect_true(is.data.frame(getBlockMetadata(result)))
   expect_equal(nrow(getBlockMetadata(result)), 1L)
 })
@@ -1260,7 +1260,7 @@ test_that("loadLdMatrix loads single precomputed block", {
   expect_equal(length(getVariantIds(result)), 5L)
   expect_true(all(grepl("^chr1:", getVariantIds(result))))
   expect_false(hasGenotypes(result))
-  # block_metadata should have one block
+  # blockMetadata should have one block
   expect_equal(nrow(getBlockMetadata(result)), 1L)
   # ref_panel (now GRanges) should have variant info via mcols
   ref_mcols <- S4Vectors::mcols(getVariantInfo(result))
@@ -1318,18 +1318,18 @@ test_that("processLdMatrix reads .cor.xz with explicit bim path", {
   bim_file <- file.path(geno_test_data_dir, "LD_block_1.chr1_1000_1200.float16.bim")
   result <- pecotmr:::processLdMatrix(ld_file, bim_file)
   expect_true(is.list(result))
-  expect_true(is.matrix(result$LD_matrix))
-  expect_equal(nrow(result$LD_matrix), 5L)
-  expect_equal(ncol(result$LD_matrix), 5L)
-  expect_true(isSymmetric(result$LD_matrix))
+  expect_true(is.matrix(result$ldMatrix))
+  expect_equal(nrow(result$ldMatrix), 5L)
+  expect_equal(ncol(result$ldMatrix), 5L)
+  expect_true(isSymmetric(result$ldMatrix))
   # Diagonal should be 1
-  expect_true(all(abs(diag(result$LD_matrix) - 1) < 1e-4))
+  expect_true(all(abs(diag(result$ldMatrix) - 1) < 1e-4))
   # Variant names should be chr:pos:A2:A1 format
-  expect_true(all(grepl("^chr1:", rownames(result$LD_matrix))))
-  # LD_variants data frame
-  expect_true(is.data.frame(result$LD_variants))
-  expect_true("variants" %in% names(result$LD_variants))
-  expect_equal(nrow(result$LD_variants), 5L)
+  expect_true(all(grepl("^chr1:", rownames(result$ldMatrix))))
+  # ldVariants data frame
+  expect_true(is.data.frame(result$ldVariants))
+  expect_true("variants" %in% names(result$ldVariants))
+  expect_equal(nrow(result$ldVariants), 5L)
 })
 
 test_that("processLdMatrix reads different blocks consistently", {
@@ -1340,21 +1340,21 @@ test_that("processLdMatrix reads different blocks consistently", {
   r1 <- pecotmr:::processLdMatrix(ld1, bim1)
   r2 <- pecotmr:::processLdMatrix(ld2, bim2)
   # Different blocks should have different variant positions
-  expect_false(any(rownames(r1$LD_matrix) %in% rownames(r2$LD_matrix)))
+  expect_false(any(rownames(r1$ldMatrix) %in% rownames(r2$ldMatrix)))
 })
 
 test_that("processLdMatrix reads 9-column bim with allele_freq/variance/n_nomiss", {
   ld_file <- file.path(geno_test_data_dir, "LD_block_1.chr1_1000_1200.float16.txt.xz")
   bim_file <- file.path(geno_test_data_dir, "LD_block_1.chr1_1000_1200.float16.9col.bim")
   result <- pecotmr:::processLdMatrix(ld_file, bim_file)
-  expect_equal(nrow(result$LD_matrix), 5L)
-  expect_true(isSymmetric(result$LD_matrix))
+  expect_equal(nrow(result$ldMatrix), 5L)
+  expect_true(isSymmetric(result$ldMatrix))
   # 9-column bim should include extra columns
-  expect_true("allele_freq" %in% names(result$LD_variants))
-  expect_true("variance" %in% names(result$LD_variants))
-  expect_true("n_nomiss" %in% names(result$LD_variants))
-  expect_equal(result$LD_variants$allele_freq, c(0.3, 0.4, 0.2, 0.5, 0.15))
-  expect_equal(result$LD_variants$n_nomiss, rep(500, 5))
+  expect_true("allele_freq" %in% names(result$ldVariants))
+  expect_true("variance" %in% names(result$ldVariants))
+  expect_true("n_nomiss" %in% names(result$ldVariants))
+  expect_equal(result$ldVariants$allele_freq, c(0.3, 0.4, 0.2, 0.5, 0.15))
+  expect_equal(result$ldVariants$n_nomiss, rep(500, 5))
 })
 
 test_that("loadLdMatrix propagates allele_freq/variance/n_nomiss from 9-col bim", {
@@ -1396,7 +1396,7 @@ test_that("getRegionalLdMeta returns correct file paths for single block", {
   expect_true(length(result$intersections$LD_file_paths) >= 1)
   # All returned paths should exist
   expect_true(all(file.exists(result$intersections$LD_file_paths)))
-  expect_true(all(file.exists(result$intersections$bim_file_paths)))
+  expect_true(all(file.exists(result$intersections$bimFilePaths)))
 })
 
 test_that("getRegionalLdMeta spans multiple blocks for wide region", {
@@ -1590,7 +1590,7 @@ test_that("ldPruneByCorrelation verbose reports no pruning", {
 
 test_that("loadLdMatrix dedup removes duplicated variants from result", {
   # Simulate what loadLdMatrix does after calling the backend: a result with
-  # duplicated LD_variants should have duplicates removed.
+  # duplicated ldVariants should have duplicates removed.
   # We test the dedup logic by constructing a mock result and verifying
   # the internal dedup code path via the exported function's contract.
   # Since we can't easily call the real function without data, test the dedup

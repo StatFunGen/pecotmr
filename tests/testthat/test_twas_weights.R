@@ -401,26 +401,26 @@ test_that("twasWeightsCv: Y as vector is accepted and converted", {
   d <- make_data()
   y_vec <- as.numeric(d$Y)
 
-  # With NULL weight_methods, should return just sample_partition
+  # With NULL weight_methods, should return just samplePartition
   expect_message(
     result <- twasWeightsCv(d$X, y_vec, fold = 3, weightMethods = NULL),
     "Y converted to matrix"
   )
   expect_true(is.list(result))
-  expect_true("sample_partition" %in% names(result))
+  expect_true("samplePartition" %in% names(result))
 })
 
-test_that("twasWeightsCv: NULL weight_methods returns only sample_partition", {
+test_that("twasWeightsCv: NULL weight_methods returns only samplePartition", {
   d <- make_data()
   result <- twasWeightsCv(d$X, d$Y, fold = 3, weightMethods = NULL)
-  expect_equal(names(result), "sample_partition")
-  expect_true(is.data.frame(result$sample_partition))
+  expect_equal(names(result), "samplePartition")
+  expect_true(is.data.frame(result$samplePartition))
 })
 
-test_that("twasWeightsCv: sample_partition structure is correct", {
+test_that("twasWeightsCv: samplePartition structure is correct", {
   d <- make_data()
   result <- twasWeightsCv(d$X, d$Y, fold = 5, weightMethods = NULL)
-  sp <- result$sample_partition
+  sp <- result$samplePartition
 
   expect_true("Sample" %in% colnames(sp))
   expect_true("Fold" %in% colnames(sp))
@@ -509,7 +509,7 @@ test_that("twasWeightsCv: provided sample_partitions are used", {
     stringsAsFactors = FALSE
   )
   result <- twasWeightsCv(d$X, d$Y, samplePartitions = sp, weightMethods = NULL)
-  expect_equal(result$sample_partition, sp)
+  expect_equal(result$samplePartition, sp)
 })
 
 test_that("twasWeightsCv: rownames are auto-generated when missing", {
@@ -521,7 +521,7 @@ test_that("twasWeightsCv: rownames are auto-generated when missing", {
   # No row names on X or Y
 
   result <- twasWeightsCv(X, Y, fold = 2, weightMethods = NULL)
-  sp <- result$sample_partition
+  sp <- result$samplePartition
 
   # Should have auto-generated sample names
   expect_true(all(grepl("^sample_", sp$Sample)))
@@ -628,10 +628,10 @@ test_that("twasWeightsCv: basic CV with lassoWeights produces correct metrics st
 
   # Structure checks
   expect_true(is.list(result))
-  expect_true("sample_partition" %in% names(result))
+  expect_true("samplePartition" %in% names(result))
   expect_true("prediction" %in% names(result))
   expect_true("performance" %in% names(result))
-  expect_true("time_elapsed" %in% names(result))
+  expect_true("timeElapsed" %in% names(result))
 
   # Prediction name transformation
   expect_equal(names(result$prediction), "lassoPredicted")
@@ -766,16 +766,16 @@ test_that("twasWeightsPipeline: returns list with expected structure (mocked)", 
                                   estimatePi = FALSE)
 
   expect_true(is.list(result))
-  expect_true("twas_weights" %in% names(result))
-  expect_true("twas_predictions" %in% names(result))
-  expect_true("total_time_elapsed" %in% names(result))
+  expect_true("twasWeights" %in% names(result))
+  expect_true("twasPredictions" %in% names(result))
+  expect_true("totalTimeElapsed" %in% names(result))
   # Verify that mock values appear in the weight matrices
-  enet_w <- getWeights(result$twas_weights, "enet_weights")
+  enet_w <- getWeights(result$twasWeights, "enet_weights")
   expect_true(all(enet_w[, 1] == 0.1))
-  lasso_w <- getWeights(result$twas_weights, "lasso_weights")
+  lasso_w <- getWeights(result$twasWeights, "lasso_weights")
   expect_true(all(lasso_w[, 1] == 0.2))
   # The number of weight methods should equal the 10 default methods
-  expect_equal(length(getMethodNames(result$twas_weights)), 10)
+  expect_equal(length(getMethodNames(result$twasWeights)), 10)
 })
 
 test_that("twasWeightsPipeline: twasWeights contains all default methods", {
@@ -805,7 +805,7 @@ test_that("twasWeightsPipeline: twasWeights contains all default methods", {
     "scad_weights", "l0learn_weights", "susie_weights",
     "susie_inf_weights"
   )
-  expect_true(all(expected_methods %in% getMethodNames(result$twas_weights)))
+  expect_true(all(expected_methods %in% getMethodNames(result$twasWeights)))
 })
 
 test_that("twasWeightsPipeline: stores ensemble weights when ensemble is fitted", {
@@ -834,8 +834,8 @@ test_that("twasWeightsPipeline: stores ensemble weights when ensemble is fitted"
     },
     ensembleWeights = function(cvResults, Y, twasWeightList, ...) {
       list(
-        method_coef = c(enet = 0.5, lasso = 0.5),
-        ensemble_twas_weights = (twasWeightList$enet_weights + twasWeightList$lasso_weights) / 2
+        methodCoef = c(enet = 0.5, lasso = 0.5),
+        ensembleTwasWeights = (twasWeightList$enet_weights + twasWeightList$lasso_weights) / 2
       )
     }
   )
@@ -849,8 +849,8 @@ test_that("twasWeightsPipeline: stores ensemble weights when ensemble is fitted"
     estimatePi = FALSE
   )
 
-  expect_true("ensembleWeights" %in% getMethodNames(result$twas_weights))
-  expect_true("ensemble_predicted" %in% names(result$twas_predictions))
+  expect_true("ensembleWeights" %in% getMethodNames(result$twasWeights))
+  expect_true("ensemble_predicted" %in% names(result$twasPredictions))
   expect_true("ensemble" %in% names(result))
 })
 
@@ -881,7 +881,7 @@ test_that("twasWeightsPipeline: predictions have _predicted suffix", {
     "scad_predicted", "l0learn_predicted", "susie_predicted",
     "susie_inf_predicted"
   )
-  expect_true(all(expected_pred_names %in% names(result$twas_predictions)))
+  expect_true(all(expected_pred_names %in% names(result$twasPredictions)))
 })
 
 test_that("twasWeightsPipeline: cv_folds=0 skips cross-validation", {
@@ -905,15 +905,15 @@ test_that("twasWeightsPipeline: cv_folds=0 skips cross-validation", {
   result <- twasWeightsPipeline(d$X, y_vec, susieFit = NULL, cvFolds = 0,
                                   estimatePi = FALSE)
 
-  expect_false("twas_cv_result" %in% names(result))
+  expect_false("twasCvResult" %in% names(result))
   # All mock weights were zero, so all predictions should be zero
-  for (pred_name in names(result$twas_predictions)) {
-    expect_true(all(result$twas_predictions[[pred_name]] == 0),
+  for (pred_name in names(result$twasPredictions)) {
+    expect_true(all(result$twasPredictions[[pred_name]] == 0),
                 info = paste("Non-zero prediction in", pred_name))
   }
   # Weight dimensions should match ncol(X)
-  for (w_name in getMethodNames(result$twas_weights)) {
-    expect_equal(nrow(getWeights(result$twas_weights, w_name)), ncol(d$X),
+  for (w_name in getMethodNames(result$twasWeights)) {
+    expect_equal(nrow(getWeights(result$twasWeights, w_name)), ncol(d$X),
                  info = paste("Wrong nrow for", w_name))
   }
 })
@@ -932,7 +932,7 @@ test_that("twasWeightsPipeline: custom weight_methods are respected", {
     weightMethods = list(lassoWeights = list(), enetWeights = list())
   )
 
-  expect_equal(sort(getMethodNames(result$twas_weights)), sort(c("lassoWeights", "enetWeights")))
+  expect_equal(sort(getMethodNames(result$twasWeights)), sort(c("lassoWeights", "enetWeights")))
 })
 
 test_that("twasWeightsPipeline: accepts 'fast_default' preset string", {
@@ -959,7 +959,7 @@ test_that("twasWeightsPipeline: accepts 'fast_default' preset string", {
   expected_methods <- c("susie_weights", "susie_inf_weights", "mrash_weights",
                         "enet_weights", "lasso_weights", "mcp_weights",
                         "scad_weights", "l0learn_weights")
-  expect_equal(sort(getMethodNames(result$twas_weights)), sort(expected_methods))
+  expect_equal(sort(getMethodNames(result$twasWeights)), sort(expected_methods))
 })
 
 test_that("twasWeightsPipeline: accepts custom short-name vector", {
@@ -976,7 +976,7 @@ test_that("twasWeightsPipeline: accepts custom short-name vector", {
     weightMethods = c("lasso", "enet")
   )
 
-  expect_equal(sort(getMethodNames(result$twas_weights)), sort(c("lasso_weights", "enet_weights")))
+  expect_equal(sort(getMethodNames(result$twasWeights)), sort(c("lasso_weights", "enet_weights")))
 })
 
 test_that("twasWeightsPipeline: with fitted_models stores SuSiE intermediates", {
@@ -1004,8 +1004,8 @@ test_that("twasWeightsPipeline: with fitted_models stores SuSiE intermediates", 
     estimatePi = FALSE
   )
 
-  expect_true("susie_weights_intermediate" %in% names(result))
-  expect_true("mu" %in% names(result$susie_weights_intermediate))
+  expect_true("susieWeightsIntermediate" %in% names(result))
+  expect_true("mu" %in% names(result$susieWeightsIntermediate))
 })
 
 test_that("twasWeightsPipeline: fitted_models are injected into SuSiE-family weights", {
@@ -1028,7 +1028,7 @@ test_that("twasWeightsPipeline: fitted_models are injected into SuSiE-family wei
     l0learnWeights =function(X, y, ...) rep(0, ncol(X)),
     susieInfWeights = function(X, y, ...) {
       args <- list(...)
-      if (!is.null(args$susieInfFit) && "susie_inf" %in% class(args$susieInfFit)) {
+      if (!is.null(args$susieInfFit) && "susieInf" %in% class(args$susieInfFit)) {
         susie_inf_received_fit <<- TRUE
       }
       rep(0, ncol(X))
@@ -1044,7 +1044,7 @@ test_that("twasWeightsPipeline: fitted_models are injected into SuSiE-family wei
 
   result <- twasWeightsPipeline(
     d$X, y_vec,
-    fittedModels = list(susie = fake_susie, susie_inf = fake_susie_inf),
+    fittedModels = list(susie = fake_susie, susieInf = fake_susie_inf),
     cvFolds = 0,
     estimatePi = FALSE
   )
@@ -1087,7 +1087,7 @@ test_that("twasWeights: SuSiE-inf is fitted before and initializes ordinary SuSi
   expect_equal(susie_calls[[1]]$unmappable_effects, "inf")
   expect_equal(susie_calls[[1]]$convergence_method, "pip")
   expect_equal(susie_calls[[2]]$unmappable_effects, "none")
-  expect_true("susie_inf" %in% class(susie_calls[[2]]$model_init))
+  expect_true("susieInf" %in% class(susie_calls[[2]]$model_init))
   expect_equal(susie_calls[[2]]$L_greedy, 5)
 })
 
@@ -1105,8 +1105,8 @@ test_that("twasWeightsPipeline: weight dimensions match input", {
     weightMethods = list(lassoWeights = list(), enetWeights = list())
   )
 
-  for (method_name in getMethodNames(result$twas_weights)) {
-    w <- getWeights(result$twas_weights, method_name)
+  for (method_name in getMethodNames(result$twasWeights)) {
+    w <- getWeights(result$twasWeights, method_name)
     expect_equal(nrow(w), ncol(d$X))
     expect_equal(ncol(w), 1)
   }
@@ -1143,12 +1143,12 @@ test_that("twasWeightsCv: rownames(X) get reassigned to rownames(Y) when they di
   rownames(d$X) <- paste0("xname_", seq_len(nrow(d$X)))  # differ from rownames(Y)
   set.seed(42)
   result <- twasWeightsCv(d$X, d$Y, fold = 2, weightMethods = NULL)
-  # sample_partition$Sample should now use rownames(Y), not rownames(X)
-  expect_true(all(result$sample_partition$Sample %in% rownames(d$Y)))
-  expect_false(any(grepl("^xname_", result$sample_partition$Sample)))
+  # samplePartition$Sample should now use rownames(Y), not rownames(X)
+  expect_true(all(result$samplePartition$Sample %in% rownames(d$Y)))
+  expect_false(any(grepl("^xname_", result$samplePartition$Sample)))
 })
 
-test_that("twasWeightsCv: sample_names taken from Y when only Y has rownames", {
+test_that("twasWeightsCv: sampleNames taken from Y when only Y has rownames", {
   set.seed(42)
   n <- 20; p <- 5
   X <- matrix(rnorm(n * p), nrow = n, ncol = p)
@@ -1156,7 +1156,7 @@ test_that("twasWeightsCv: sample_names taken from Y when only Y has rownames", {
   Y <- matrix(rnorm(n), ncol = 1)
   rownames(Y) <- paste0("yonly_", seq_len(n))
   result <- twasWeightsCv(X, Y, fold = 2, weightMethods = NULL)
-  expect_true(all(grepl("^yonly_", result$sample_partition$Sample)))
+  expect_true(all(grepl("^yonly_", result$samplePartition$Sample)))
 })
 
 test_that("twasWeightsCv: variants_to_keep >= max_num_variants samples from variants_to_keep only", {
@@ -1265,7 +1265,7 @@ test_that("twasWeightsPipeline: max_cv_variants subsamples colnames of X", {
                                maxNumVariants, numThreads, variantsToKeep, ...) {
       captured_keep <<- variantsToKeep
       list(samplePartition = data.frame(Sample = rownames(X), Fold = 1),
-           prediction = list(), performance = list(), time_elapsed = 0)
+           prediction = list(), performance = list(), timeElapsed = 0)
     }
   )
   set.seed(42)

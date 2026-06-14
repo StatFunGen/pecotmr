@@ -2,12 +2,12 @@ context("raiss")
 library(tidyverse)
 library(MASS)
 
-# Helper: build LdData S4 from a ref_panel data.frame, correlation matrix, and block_metadata
-make_ld_data_from_ref_panel <- function(R_mat, ref_panel, block_metadata) {
+# Helper: build LdData S4 from a ref_panel data.frame, correlation matrix, and blockMetadata
+make_ld_data_from_ref_panel <- function(R_mat, ref_panel, blockMetadata) {
   ref_panel$chrom <- as.character(ref_panel$chrom)
   ref_panel$variant_id <- as.character(ref_panel$variant_id)
   variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
-  LdData(correlation = R_mat, variants = variants_gr, blockMetadata = block_metadata)
+  LdData(correlation = R_mat, variants = variants_gr, blockMetadata = blockMetadata)
 }
 
 generate_dummy_data <- function(seed=1, ref_panel_ordered=TRUE, known_zscores_ordered=TRUE) {
@@ -32,39 +32,39 @@ generate_dummy_data <- function(seed=1, ref_panel_ordered=TRUE, known_zscores_or
         z = rnorm(n_known)
     )
 
-    LD_matrix <- matrix(rnorm(n_variants^2), nrow = n_variants, ncol = n_variants)
-    diag(LD_matrix) <- 1
+    ldMatrix <- matrix(rnorm(n_variants^2), nrow = n_variants, ncol = n_variants)
+    diag(ldMatrix) <- 1
     known_zscores <- if (known_zscores_ordered) known_zscores[order(known_zscores$pos),] else known_zscores
     ref_panel <- if (ref_panel_ordered) ref_panel else ref_panel[order(ref_panel$pos, decreasing = TRUE),]
-    return(list(ref_panel=ref_panel, known_zscores=known_zscores, LD_matrix=LD_matrix))
+    return(list(ref_panel=ref_panel, known_zscores=known_zscores, ldMatrix=ldMatrix))
 }
 
 test_that("Input validation for raiss works correctly", {
     input_data <- generate_dummy_data()
     input_data_ref_panel_unordered <- generate_dummy_data(ref_panel_ordered=FALSE)
     input_data_zscores_unordered <- generate_dummy_data(known_zscores_ordered=FALSE)
-    expect_error(raiss(input_data_ref_panel_unordered$ref_panel, input_data$known_zscores, input_data$LD_matrix))
-    expect_error(raiss(input_data$ref_panel, input_data_zscores_unordered$known_zscores, input_data$LD_matrix))
+    expect_error(raiss(input_data_ref_panel_unordered$ref_panel, input_data$known_zscores, input_data$ldMatrix))
+    expect_error(raiss(input_data$ref_panel, input_data_zscores_unordered$known_zscores, input_data$ldMatrix))
 })
 
 test_that("Default parameters for raiss work correctly", {
     input_data <- generate_dummy_data()
-    result <- raiss(input_data$ref_panel, input_data$known_zscores, input_data$LD_matrix)
+    result <- raiss(input_data$ref_panel, input_data$known_zscores, input_data$ldMatrix)
     expect_true(is.list(result))
     # Expected list elements
-    expect_true(all(c("result_nofilter", "result_filter", "LD_mat") %in% names(result)))
-    # result_nofilter should be a data frame with expected columns
-    expect_true(is.data.frame(result$result_nofilter))
-    expect_true(all(c("variant_id", "z", "Var", "raiss_ld_score") %in% names(result$result_nofilter)))
+    expect_true(all(c("resultNofilter", "resultFilter", "ldMat") %in% names(result)))
+    # resultNofilter should be a data frame with expected columns
+    expect_true(is.data.frame(result$resultNofilter))
+    expect_true(all(c("variant_id", "z", "Var", "raissLdScore") %in% names(result$resultNofilter)))
     # Imputed z-scores should be numeric and finite
-    expect_true(is.numeric(result$result_nofilter$z))
-    expect_true(all(is.finite(result$result_nofilter$z)))
+    expect_true(is.numeric(result$resultNofilter$z))
+    expect_true(all(is.finite(result$resultNofilter$z)))
     # Output should cover all ref_panel variants (known + imputed)
-    expect_equal(nrow(result$result_nofilter), nrow(input_data$ref_panel))
+    expect_equal(nrow(result$resultNofilter), nrow(input_data$ref_panel))
     # Filtered result should be a subset of unfiltered
-    expect_true(nrow(result$result_filter) <= nrow(result$result_nofilter))
-    # LD_mat should be a matrix
-    expect_true(is.matrix(result$LD_mat))
+    expect_true(nrow(result$resultFilter) <= nrow(result$resultNofilter))
+    # ldMat should be a matrix
+    expect_true(is.matrix(result$ldMat))
 })
 
 test_that("Test Default Parameters for raissModel", {
@@ -75,15 +75,15 @@ test_that("Test Default Parameters for raissModel", {
   result <- raissModel(zt, sig_t, sig_i_t)
 
   expect_true(is.list(result))
-  expect_true(all(c("var", "mu", "raiss_ld_score", "condition_number", "correct_inversion") %in% names(result)))
+  expect_true(all(c("var", "mu", "raissLdScore", "conditionNumber", "correctInversion") %in% names(result)))
   # mu (imputed z-scores) should be numeric and finite
   expect_true(is.numeric(result$mu))
   expect_true(all(is.finite(result$mu)))
   # var should be numeric
   expect_true(is.numeric(result$var))
-  # raiss_ld_score should be numeric and non-negative
-  expect_true(is.numeric(result$raiss_ld_score))
-  expect_true(all(result$raiss_ld_score >= 0))
+  # raissLdScore should be numeric and non-negative
+  expect_true(is.numeric(result$raissLdScore))
+  expect_true(all(result$raissLdScore >= 0))
 })
 
 test_that("Test with Different lamb Values for raissModel", {
@@ -95,7 +95,7 @@ test_that("Test with Different lamb Values for raissModel", {
   for (lamb in lamb_values) {
     result <- raissModel(zt, sig_t, sig_i_t, lamb)
     expect_true(is.list(result))
-    expect_true(all(c("var", "mu", "raiss_ld_score") %in% names(result)))
+    expect_true(all(c("var", "mu", "raissLdScore") %in% names(result)))
     expect_true(is.numeric(result$mu))
     expect_true(all(is.finite(result$mu)))
   }
@@ -111,8 +111,8 @@ test_that("Report Condition Number in raissModel", {
 
   expect_true(is.list(result_with_cn))
   expect_true(is.list(result_without_cn))
-  # With condition number reporting, condition_number should be populated
-  expect_true(is.numeric(result_with_cn$condition_number))
+  # With condition number reporting, conditionNumber should be populated
+  expect_true(is.numeric(result_with_cn$conditionNumber))
   expect_true(all(is.finite(result_with_cn$mu)))
   expect_true(all(is.finite(result_without_cn$mu)))
 })
@@ -154,7 +154,7 @@ test_that("Test with Different rcond Values for raissModel", {
   for (rcond in rcond_values) {
     result <- raissModel(zt, sig_t, sig_i_t, lamb = 0.01, rcond = rcond)
     expect_true(is.list(result))
-    expect_true(all(c("var", "mu", "raiss_ld_score", "condition_number", "correct_inversion") %in% names(result)))
+    expect_true(all(c("var", "mu", "raissLdScore", "conditionNumber", "correctInversion") %in% names(result)))
     expect_true(is.numeric(result$mu))
     expect_true(all(is.finite(result$mu)))
   }
@@ -164,9 +164,9 @@ test_that("formatRaissDf returns correctly formatted data frame", {
   imp <- list(
     mu = rnorm(5),
     var = runif(5),
-    raiss_ld_score = rnorm(5),
-    condition_number = runif(5),
-    correct_inversion = sample(c(TRUE, FALSE), 5, replace = TRUE)
+    raissLdScore = rnorm(5),
+    conditionNumber = runif(5),
+    correctInversion = sample(c(TRUE, FALSE), 5, replace = TRUE)
   )
 
   ref_panel <- data.frame(
@@ -183,12 +183,12 @@ test_that("formatRaissDf returns correctly formatted data frame", {
 
   expect_true(is.data.frame(result))
   expect_equal(ncol(result), 10)
-  expect_equal(colnames(result), c('chrom', 'pos', 'variant_id', 'A1', 'A2', 'z', 'Var', 'raiss_ld_score', 'condition_number', 'correct_inversion'))
+  expect_equal(colnames(result), c('chrom', 'pos', 'variant_id', 'A1', 'A2', 'z', 'Var', 'raissLdScore', 'conditionNumber', 'correctInversion'))
 
   for (col in c('chrom', 'pos', 'variant_id', 'A1', 'A2')) {
     expect_equal(setNames(unlist(result[col]), NULL), unlist(ref_panel[unknowns, col, drop = TRUE]))
   }
-  for (col in c('z', 'Var', 'raiss_ld_score', 'condition_number', 'correct_inversion')) {
+  for (col in c('z', 'Var', 'raissLdScore', 'conditionNumber', 'correctInversion')) {
     expected_col <- if (col == "z") "mu" else if (col == "Var") "var" else col
     expect_equal(setNames(unlist(result[col]), NULL), setNames(unlist(imp[expected_col]), NULL))
   }
@@ -203,8 +203,8 @@ test_that("Merge operation is correct for mergeRaissDf", {
         A2 = c("T", "A"),
         z = c(0.5, 1.5),
         Var = c(0.2, 0.3),
-        raiss_ld_score = c(10, 20),
-        raiss_R2 = c(0.8, 0.7))
+        raissLdScore = c(10, 20),
+        raissR2 = c(0.8, 0.7))
 
     known_zscores_example <- data.frame(
         chrom = c("chr21", "chr22"),
@@ -229,21 +229,21 @@ generate_fro_test_data <- function(seed=1) {
         A2 = rep("T", 10),
         z = rnorm(10),
         Var = runif(10, 0, 1),
-        raiss_ld_score = rnorm(10, 5, 2)
+        raissLdScore = rnorm(10, 5, 2)
     ))
 }
 
 test_that("Correct columns are selected in filterRaissOutput", {
     test_data <- generate_fro_test_data()
     output <- filterRaissOutput(test_data)$zscores
-    expect_true(all(c('variant_id', 'A1', 'A2', 'z', 'Var', 'raiss_ld_score') %in% names(output)))
+    expect_true(all(c('variant_id', 'A1', 'A2', 'z', 'Var', 'raissLdScore') %in% names(output)))
 })
 
-test_that("raiss_R2 is calculated correctly in filterRaissOutput", {
+test_that("raissR2 is calculated correctly in filterRaissOutput", {
     test_data <- generate_fro_test_data()
     output <- filterRaissOutput(test_data)$zscores
-    expected_R2 <- 1 - test_data[which(test_data$raiss_ld_score >= 5),]$Var
-    expect_equal(output$raiss_R2, expected_R2[which(expected_R2 > 0.6)])
+    expected_R2 <- 1 - test_data[which(test_data$raissLdScore >= 5),]$Var
+    expect_equal(output$raissR2, expected_R2[which(expected_R2 > 0.6)])
 })
 
 test_that("Filtering is applied correctly in filterRaissOutput", {
@@ -252,16 +252,16 @@ test_that("Filtering is applied correctly in filterRaissOutput", {
     minimum_ld <- 5
     output <- filterRaissOutput(test_data, R2_threshold, minimum_ld)$zscores
 
-    expect_true(all(output$raiss_R2 > R2_threshold))
-    expect_true(all(output$raiss_ld_score >= minimum_ld))
+    expect_true(all(output$raissR2 > R2_threshold))
+    expect_true(all(output$raissLdScore >= minimum_ld))
 })
 
 test_that("Function returns the correct subset in filterRaissOutput", {
     test_data <- generate_fro_test_data()
-    test_data$raiss_R2 <- 1 - test_data$Var
+    test_data$raissR2 <- 1 - test_data$Var
     output <- filterRaissOutput(test_data)$zscores
 
-    manual_filter <- test_data[test_data$raiss_R2 > 0.6 & test_data$raiss_ld_score >= 5, ]
+    manual_filter <- test_data[test_data$raissR2 > 0.6 & test_data$raissLdScore >= 5, ]
 
     expect_equal(nrow(output), nrow(manual_filter))
     expect_equal(sum(output$variant_id != manual_filter$variant_id), 0)
@@ -290,9 +290,9 @@ test_that("computeVar returns correct output for batch = TRUE", {
     result <- computeVar(input_data$sig_i_t_1, input_data$sig_t_inv_1, input_data$lamb_1, batch = TRUE)
     expect_true(is.list(result))
     expect_length(result, 2)
-    expect_true(all(c("var", "raiss_ld_score") %in% names(result)))
+    expect_true(all(c("var", "raissLdScore") %in% names(result)))
     expect_true(is.numeric(result$var))
-    expect_true(is.numeric(result$raiss_ld_score))
+    expect_true(is.numeric(result$raissLdScore))
 })
 
 test_that("computeVar returns correct output for batch = FALSE", {
@@ -300,9 +300,9 @@ test_that("computeVar returns correct output for batch = FALSE", {
     result <- computeVar(input_data$sig_i_t_1, input_data$sig_t_inv_1, input_data$lamb_1, batch = FALSE)
     expect_true(is.list(result))
     expect_length(result, 2)
-    expect_true(all(c("var", "raiss_ld_score") %in% names(result)))
+    expect_true(all(c("var", "raissLdScore") %in% names(result)))
     expect_true(is.numeric(result$var))
-    expect_true(is.numeric(result$raiss_ld_score))
+    expect_true(is.numeric(result$raissLdScore))
 })
 
 test_that("checkInversion correctly identifies inverse matrices in", {
@@ -416,8 +416,8 @@ test_that("raissSingleMatrix returns NULL when no known variants overlap", {
     A1 = rep("A", 3), A2 = rep("G", 3),
     z = rnorm(3), stringsAsFactors = FALSE
   )
-  LD_matrix <- diag(10)
-  result <- raissSingleMatrix(ref_panel, known_zscores, LD_matrix, verbose = FALSE)
+  ldMatrix <- diag(10)
+  result <- raissSingleMatrix(ref_panel, known_zscores, ldMatrix, verbose = FALSE)
   expect_null(result)
 })
 
@@ -436,12 +436,12 @@ test_that("raissSingleMatrix returns known zscores when no unknowns to impute", 
     A1 = rep("A", 5), A2 = rep("G", 5),
     z = rnorm(5), stringsAsFactors = FALSE
   )
-  LD_matrix <- diag(5)
-  result <- raissSingleMatrix(ref_panel, known_zscores, LD_matrix, verbose = FALSE)
+  ldMatrix <- diag(5)
+  result <- raissSingleMatrix(ref_panel, known_zscores, ldMatrix, verbose = FALSE)
   expect_true(is.list(result))
-  expect_equal(result$result_nofilter, known_zscores)
-  expect_equal(result$result_filter, known_zscores)
-  expect_equal(result$LD_mat, LD_matrix)
+  expect_equal(result$resultNofilter, known_zscores)
+  expect_equal(result$resultFilter, known_zscores)
+  expect_equal(result$ldMat, ldMatrix)
 })
 
 # ===========================================================================
@@ -492,8 +492,8 @@ test_that("raissSingleMatrixFromX returns known zscores when no unknowns to impu
   colnames(X) <- ref_panel$variant_id
   result <- raissSingleMatrixFromX(ref_panel, known_zscores, X, verbose = FALSE)
   expect_true(is.list(result))
-  expect_equal(result$result_nofilter, known_zscores)
-  expect_null(result$LD_mat)
+  expect_equal(result$resultNofilter, known_zscores)
+  expect_null(result$ldMat)
 })
 
 # ===========================================================================
@@ -520,14 +520,14 @@ test_that("raiss with single-matrix LD list dispatches to single matrix path", {
   R <- diag(n_variants)
   colnames(R) <- rownames(R) <- ref_panel$variant_id
 
-  # Wrap in list structure with ld_matrices
-  LD_list <- list(ld_matrices = list(R))
+  # Wrap in list structure with ldMatrices
+  LD_list <- list(ldMatrices = list(R))
 
   result <- raiss(ref_panel, known_zscores, ldMatrix =LD_list,
                   r2Threshold =0, minimumLd =0, verbose = FALSE)
   expect_true(is.list(result))
-  expect_true("result_nofilter" %in% names(result))
-  expect_equal(nrow(result$result_nofilter), n_variants)
+  expect_true("resultNofilter" %in% names(result))
+  expect_equal(nrow(result$resultNofilter), n_variants)
 })
 
 test_that("raiss with genotype_matrix list processes multiple blocks", {
@@ -559,9 +559,9 @@ test_that("raiss with genotype_matrix list processes multiple blocks", {
   result <- raiss(ref_panel, known_zscores, genotypeMatrix = X_list,
                   r2Threshold =0, minimumLd =0, verbose = FALSE)
   expect_true(is.list(result))
-  expect_true("result_nofilter" %in% names(result))
-  expect_true(nrow(result$result_nofilter) > 0)
-  expect_null(result$LD_mat)
+  expect_true("resultNofilter" %in% names(result))
+  expect_true(nrow(result$resultNofilter) > 0)
+  expect_null(result$ldMat)
 })
 
 test_that("raiss with genotype_matrix list returns NULL when all blocks fail", {
@@ -642,9 +642,9 @@ generate_block_diagonal_test_data <- function(seed = 123, block_structure = "ove
     n_blocks <- ceiling(n_variants / block_size)
     block_boundaries <- list()
     for (i in 1:n_blocks) {
-      start_idx <- (i-1) * block_size + 1
-      end_idx <- min(i * block_size, n_variants)
-      block_boundaries[[i]] <- c(start_idx, end_idx)
+      startIdx <- (i-1) * block_size + 1
+      endIdx <- min(i * block_size, n_variants)
+      block_boundaries[[i]] <- c(startIdx, endIdx)
     }
   } else if (block_structure == "single_block") {
     block_boundaries <- list(c(1, n_variants))
@@ -653,9 +653,9 @@ generate_block_diagonal_test_data <- function(seed = 123, block_structure = "ove
   # First, create independent block matrices
   block_matrices <- list()
   for (i in seq_along(block_boundaries)) {
-    start_idx <- block_boundaries[[i]][1]
-    end_idx <- block_boundaries[[i]][2]
-    block_variant_ids <- ref_panel$variant_id[start_idx:end_idx]
+    startIdx <- block_boundaries[[i]][1]
+    endIdx <- block_boundaries[[i]][2]
+    block_variant_ids <- ref_panel$variant_id[startIdx:endIdx]
     n_block <- length(block_variant_ids)
 
     # Create the block matrix with correlations ONLY within the block
@@ -677,32 +677,32 @@ generate_block_diagonal_test_data <- function(seed = 123, block_structure = "ove
   }
 
   # Create variant indices data frame
-  variant_indices <- data.frame(
+  variantIndices <- data.frame(
     variant_id = character(),
-    block_id = integer(),
+    blockId = integer(),
     stringsAsFactors = FALSE
   )
 
   for (i in seq_along(block_boundaries)) {
-    start_idx <- block_boundaries[[i]][1]
-    end_idx <- block_boundaries[[i]][2]
-    block_variant_ids <- ref_panel$variant_id[start_idx:end_idx]
+    startIdx <- block_boundaries[[i]][1]
+    endIdx <- block_boundaries[[i]][2]
+    block_variant_ids <- ref_panel$variant_id[startIdx:endIdx]
 
     block_indices <- data.frame(
       variant_id = block_variant_ids,
-      block_id = i,
+      blockId = i,
       stringsAsFactors = FALSE
     )
-    variant_indices <- rbind(variant_indices, block_indices)
+    variantIndices <- rbind(variantIndices, block_indices)
   }
 
   # Create block metadata
   block_sizes <- sapply(block_boundaries, function(b) b[2] - b[1] + 1)
-  block_metadata <- data.frame(
-    block_id = seq_along(block_boundaries),
+  blockMetadata <- data.frame(
+    blockId = seq_along(block_boundaries),
     chrom = rep(1, length(block_boundaries)),
     size = block_sizes,
-    start_idx = sapply(seq_along(block_boundaries), function(i) {
+    startIdx = sapply(seq_along(block_boundaries), function(i) {
       # Adjust for 1-based indexing in R
       if (i == 1) return(1)
       # Count unique variants before this block
@@ -716,7 +716,7 @@ generate_block_diagonal_test_data <- function(seed = 123, block_structure = "ove
         }
       })) + 1
     }),
-    end_idx = sapply(seq_along(block_boundaries), function(i) {
+    endIdx = sapply(seq_along(block_boundaries), function(i) {
       # Count all unique variants up to and including this block
       sum(sapply(1:i, function(j) {
         # If there's an overlap with the next block, count one less
@@ -732,7 +732,7 @@ generate_block_diagonal_test_data <- function(seed = 123, block_structure = "ove
 
   # Build the full matrix correctly ensuring proper block structure
   # IMPORTANT: Initialize a matrix with zeros - ensure no correlations between blocks
-  all_variant_ids <- unique(variant_indices$variant_id)
+  all_variant_ids <- unique(variantIndices$variant_id)
   LD_matrix_full <- matrix(0, nrow = length(all_variant_ids), ncol = length(all_variant_ids))
   rownames(LD_matrix_full) <- all_variant_ids
   colnames(LD_matrix_full) <- all_variant_ids
@@ -751,10 +751,10 @@ generate_block_diagonal_test_data <- function(seed = 123, block_structure = "ove
 
   # Create the block structure for RAISS
   LD_matrix_blocks <- list(
-    ld_matrices = block_matrices,
-    variant_indices = variant_indices,
-    blockMetadata = block_metadata,
-    LD_variants = all_variant_ids
+    ldMatrices = block_matrices,
+    variantIndices = variantIndices,
+    blockMetadata = blockMetadata,
+    ldVariants = all_variant_ids
   )
 
   return(list(
@@ -762,9 +762,9 @@ generate_block_diagonal_test_data <- function(seed = 123, block_structure = "ove
     known_zscores = known_zscores,
     LD_matrix_full = LD_matrix_full,
     LD_matrix_blocks = LD_matrix_blocks,
-    variant_indices = variant_indices,
+    variantIndices = variantIndices,
     block_boundaries = block_boundaries,
-    block_metadata = block_metadata
+    blockMetadata = blockMetadata
   ))
 }
 
@@ -777,7 +777,7 @@ test_that("full matrix and block processing produce identical results", {
 
     # Prepare ld_data as LdData S4 for partitionLdMatrix
     ld_data <- make_ld_data_from_ref_panel(
-      test_data$LD_matrix_full, test_data$ref_panel, test_data$block_metadata
+      test_data$LD_matrix_full, test_data$ref_panel, test_data$blockMetadata
     )
 
     # For non-overlapping structures, use partitionLdMatrix
@@ -811,13 +811,13 @@ test_that("full matrix and block processing produce identical results", {
     )
 
     # For non-overlapping blocks, we compare all variants
-    result_full_sorted <- result_full$result_nofilter %>% arrange(variant_id)
-    result_blocks_sorted <- result_blocks$result_nofilter %>% arrange(variant_id)
+    result_full_sorted <- result_full$resultNofilter %>% arrange(variant_id)
+    result_blocks_sorted <- result_blocks$resultNofilter %>% arrange(variant_id)
 
     # Compare variant IDs
     expect_equal(
-      sort(result_full$result_nofilter$variant_id),
-      sort(result_blocks$result_nofilter$variant_id),
+      sort(result_full$resultNofilter$variant_id),
+      sort(result_blocks$resultNofilter$variant_id),
       info = paste("Variant IDs should match for", structure)
     )
 
@@ -830,16 +830,16 @@ test_that("full matrix and block processing produce identical results", {
     )
 
     # Compare filtered results if present
-    if (!is.null(result_full$result_filter) && !is.null(result_blocks$result_filter) &&
-        nrow(result_full$result_filter) > 0 && nrow(result_blocks$result_filter) > 0) {
+    if (!is.null(result_full$resultFilter) && !is.null(result_blocks$resultFilter) &&
+        nrow(result_full$resultFilter) > 0 && nrow(result_blocks$resultFilter) > 0) {
       expect_equal(
-        sort(result_full$result_filter$variant_id),
-        sort(result_blocks$result_filter$variant_id),
+        sort(result_full$resultFilter$variant_id),
+        sort(result_blocks$resultFilter$variant_id),
         info = paste("Filtered variant IDs should match for", structure)
       )
 
-      result_full_filter_sorted <- result_full$result_filter %>% arrange(variant_id)
-      result_blocks_filter_sorted <- result_blocks$result_filter %>% arrange(variant_id)
+      result_full_filter_sorted <- result_full$resultFilter %>% arrange(variant_id)
+      result_blocks_filter_sorted <- result_blocks$resultFilter %>% arrange(variant_id)
 
       expect_equal(
         result_full_filter_sorted$z,
@@ -881,8 +881,8 @@ test_that("overlapping blocks preserve variant IDs but may have different z-scor
 
   # Test 1: Verify all variants are present in both results
   expect_equal(
-    sort(result_full$result_nofilter$variant_id),
-    sort(result_blocks$result_nofilter$variant_id),
+    sort(result_full$resultNofilter$variant_id),
+    sort(result_blocks$resultNofilter$variant_id),
     info = "Both methods should have the same set of variant IDs"
   )
 
@@ -896,12 +896,12 @@ test_that("overlapping blocks preserve variant IDs but may have different z-scor
 
   # Verify boundary variants exist in results
   expect_true(
-    all(boundary_variants %in% result_blocks$result_nofilter$variant_id),
+    all(boundary_variants %in% result_blocks$resultNofilter$variant_id),
     info = "All boundary variants should be present in block results"
   )
 
   # Verify boundary variants have valid z-scores
-  boundary_results <- result_blocks$result_nofilter %>%
+  boundary_results <- result_blocks$resultNofilter %>%
     filter(variant_id %in% boundary_variants)
 
   expect_true(
@@ -910,7 +910,7 @@ test_that("overlapping blocks preserve variant IDs but may have different z-scor
   )
 
   # Test 3: Verify non-boundary variants have z-scores with reasonable range
-  non_boundary_results <- result_blocks$result_nofilter %>%
+  non_boundary_results <- result_blocks$resultNofilter %>%
     filter(!variant_id %in% boundary_variants)
 
   expect_true(
@@ -949,24 +949,24 @@ test_that("raiss handles block boundaries correctly", {
 
   # First verify that the required columns exist in the results
   expect_true(
-    "variant_id" %in% names(result$result_nofilter),
-    info = "result_nofilter should contain a variant_id column"
+    "variant_id" %in% names(result$resultNofilter),
+    info = "resultNofilter should contain a variant_id column"
   )
 
   expect_true(
-    "raiss_R2" %in% names(result$result_nofilter),
-    info = "result_nofilter should contain a raiss_R2 column"
+    "raissR2" %in% names(result$resultNofilter),
+    info = "resultNofilter should contain a raissR2 column"
   )
 
   expect_true(
-    "raiss_ld_score" %in% names(result$result_nofilter),
-    info = "result_nofilter should contain a raiss_ld_score column"
+    "raissLdScore" %in% names(result$resultNofilter),
+    info = "resultNofilter should contain a raissLdScore column"
   )
 
   # Check that we have only one entry per variant ID (no duplicates)
   expect_equal(
-    length(unique(result$result_nofilter$variant_id)),
-    length(result$result_nofilter$variant_id),
+    length(unique(result$resultNofilter$variant_id)),
+    length(result$resultNofilter$variant_id),
     info = "Result should have no duplicate variant IDs"
   )
 
@@ -979,16 +979,16 @@ test_that("raiss handles block boundaries correctly", {
 
   # Verify that boundary variants exist in the results
   expect_true(
-    all(boundary_variants %in% result$result_nofilter$variant_id),
+    all(boundary_variants %in% result$resultNofilter$variant_id),
     info = "All boundary variants should be present in the results"
   )
 
   # Get the boundary variant results
-  boundary_results <- result$result_nofilter %>%
+  boundary_results <- result$resultNofilter %>%
     filter(variant_id %in% boundary_variants)
 
   # Check R-squared values for non-NA boundary variants
-  non_na_r2 <- boundary_results$raiss_R2[!is.na(boundary_results$raiss_R2)]
+  non_na_r2 <- boundary_results$raissR2[!is.na(boundary_results$raissR2)]
   if (length(non_na_r2) > 0) {
     expect_true(
       all(non_na_r2 >= 0 & non_na_r2 <= 1),
@@ -997,7 +997,7 @@ test_that("raiss handles block boundaries correctly", {
   }
 
   # Check LD scores for non-NA boundary variants
-  non_na_ld <- boundary_results$raiss_ld_score[!is.na(boundary_results$raiss_ld_score)]
+  non_na_ld <- boundary_results$raissLdScore[!is.na(boundary_results$raissLdScore)]
   if (length(non_na_ld) > 0) {
     expect_true(
       all(non_na_ld >= 0),
@@ -1006,33 +1006,33 @@ test_that("raiss handles block boundaries correctly", {
   }
 
   # Verify that pre-filtering and post-filtering steps handle boundary variants correctly
-  if (!is.null(result$result_filter) && nrow(result$result_filter) > 0) {
+  if (!is.null(result$resultFilter) && nrow(result$resultFilter) > 0) {
     # First check if filtered results have the required columns
     expect_true(
-      "variant_id" %in% names(result$result_filter),
-      info = "result_filter should contain a variant_id column"
+      "variant_id" %in% names(result$resultFilter),
+      info = "resultFilter should contain a variant_id column"
     )
 
     expect_true(
-      "raiss_R2" %in% names(result$result_filter),
-      info = "result_filter should contain a raiss_R2 column"
+      "raissR2" %in% names(result$resultFilter),
+      info = "resultFilter should contain a raissR2 column"
     )
 
     expect_true(
-      "raiss_ld_score" %in% names(result$result_filter),
-      info = "result_filter should contain a raiss_ld_score column"
+      "raissLdScore" %in% names(result$resultFilter),
+      info = "resultFilter should contain a raissLdScore column"
     )
 
     # Check which boundary variants passed the filtering
-    boundary_in_filtered <- boundary_variants %in% result$result_filter$variant_id
+    boundary_in_filtered <- boundary_variants %in% result$resultFilter$variant_id
 
     if (any(boundary_in_filtered)) {
       # Get the filtered boundary variants
-      boundary_filtered <- result$result_filter %>%
+      boundary_filtered <- result$resultFilter %>%
         filter(variant_id %in% boundary_variants)
 
       # Check that non-NA R-squared values meet the threshold
-      non_na_r2_filtered <- boundary_filtered$raiss_R2[!is.na(boundary_filtered$raiss_R2)]
+      non_na_r2_filtered <- boundary_filtered$raissR2[!is.na(boundary_filtered$raissR2)]
       if (length(non_na_r2_filtered) > 0) {
         expect_true(
           all(non_na_r2_filtered >= test_R2_threshold),
@@ -1041,7 +1041,7 @@ test_that("raiss handles block boundaries correctly", {
       }
 
       # Check that non-NA LD scores meet the threshold
-      non_na_ld_filtered <- boundary_filtered$raiss_ld_score[!is.na(boundary_filtered$raiss_ld_score)]
+      non_na_ld_filtered <- boundary_filtered$raissLdScore[!is.na(boundary_filtered$raissLdScore)]
       if (length(non_na_ld_filtered) > 0) {
         expect_true(
           all(non_na_ld_filtered >= test_minimum_ld),
@@ -1056,7 +1056,7 @@ test_that("partitionLdMatrix integrates correctly with RAISS", {
   test_data <- generate_block_diagonal_test_data(seed = 456, block_structure = "non_overlapping")
 
   ld_data <- make_ld_data_from_ref_panel(
-    test_data$LD_matrix_full, test_data$ref_panel, test_data$block_metadata
+    test_data$LD_matrix_full, test_data$ref_panel, test_data$blockMetadata
   )
 
   partitioned <- partitionLdMatrix(
@@ -1086,8 +1086,8 @@ test_that("partitionLdMatrix integrates correctly with RAISS", {
     verbose = FALSE
   )
 
-  result_full_sorted <- result_full$result_nofilter %>% arrange(variant_id)
-  result_partitioned_sorted <- result_partitioned$result_nofilter %>% arrange(variant_id)
+  result_full_sorted <- result_full$resultNofilter %>% arrange(variant_id)
+  result_partitioned_sorted <- result_partitioned$resultNofilter %>% arrange(variant_id)
 
   expect_equal(
     result_full_sorted$variant_id,
@@ -1118,20 +1118,20 @@ test_that("boundary overlaps are handled correctly", {
     verbose = FALSE
   )
 
-  variant_counts <- table(test_data$variant_indices$variant_id)
+  variant_counts <- table(test_data$variantIndices$variant_id)
   boundary_vars <- names(variant_counts[variant_counts > 1])
 
   for (var in boundary_vars) {
     expect_equal(
-      sum(result_blocks$result_nofilter$variant_id == var),
+      sum(result_blocks$resultNofilter$variant_id == var),
       1,
       info = paste("Boundary variant", var, "should appear once")
     )
   }
 
   expect_equal(
-    nrow(result_blocks$result_nofilter),
-    length(unique(result_blocks$result_nofilter$variant_id)),
+    nrow(result_blocks$resultNofilter),
+    length(unique(result_blocks$resultNofilter$variant_id)),
     info = "No duplicate variants in results"
   )
 })
@@ -1162,8 +1162,8 @@ test_that("RAISS handles single-block list correctly", {
     verbose = FALSE
   )
 
-  result_full_sorted <- result_full$result_nofilter %>% arrange(variant_id)
-  result_single_block_sorted <- result_single_block$result_nofilter %>% arrange(variant_id)
+  result_full_sorted <- result_full$resultNofilter %>% arrange(variant_id)
+  result_single_block_sorted <- result_single_block$resultNofilter %>% arrange(variant_id)
 
   expect_equal(
     result_full_sorted$z,
@@ -1266,14 +1266,14 @@ test_that("X path matches R path: basic equivalence (n > p)", {
                     verbose = FALSE)
 
   # Compare imputed z-scores (sort by variant_id for alignment)
-  r_sorted <- result_R$result_nofilter %>% arrange(variant_id)
-  x_sorted <- result_X$result_nofilter %>% arrange(variant_id)
+  r_sorted <- result_R$resultNofilter %>% arrange(variant_id)
+  x_sorted <- result_X$resultNofilter %>% arrange(variant_id)
 
   expect_equal(r_sorted$z, x_sorted$z, tolerance = 1e-4,
                info = "Imputed z-scores should match between X and R paths")
   expect_equal(r_sorted$Var, x_sorted$Var, tolerance = 1e-4,
                info = "Variance should match between X and R paths")
-  expect_equal(r_sorted$raiss_ld_score, x_sorted$raiss_ld_score, tolerance = 1e-4,
+  expect_equal(r_sorted$raissLdScore, x_sorted$raissLdScore, tolerance = 1e-4,
                info = "LD scores should match between X and R paths")
 })
 
@@ -1287,8 +1287,8 @@ test_that("X path matches R path: n < p regime", {
                     lamb = 0.01, svdTol =1e-12, r2Threshold =0, minimumLd =0,
                     verbose = FALSE)
 
-  r_sorted <- result_R$result_nofilter %>% arrange(variant_id)
-  x_sorted <- result_X$result_nofilter %>% arrange(variant_id)
+  r_sorted <- result_R$resultNofilter %>% arrange(variant_id)
+  x_sorted <- result_X$resultNofilter %>% arrange(variant_id)
 
   expect_equal(r_sorted$z, x_sorted$z, tolerance = 1e-4,
                info = "z-scores should match in n < p regime")
@@ -1306,8 +1306,8 @@ test_that("X path matches R path: n >> p regime", {
                     lamb = 0.01, svdTol =1e-12, r2Threshold =0, minimumLd =0,
                     verbose = FALSE)
 
-  r_sorted <- result_R$result_nofilter %>% arrange(variant_id)
-  x_sorted <- result_X$result_nofilter %>% arrange(variant_id)
+  r_sorted <- result_R$resultNofilter %>% arrange(variant_id)
+  x_sorted <- result_X$resultNofilter %>% arrange(variant_id)
 
   expect_equal(r_sorted$z, x_sorted$z, tolerance = 1e-4)
   expect_equal(r_sorted$Var, x_sorted$Var, tolerance = 1e-4)
@@ -1324,8 +1324,8 @@ test_that("X path matches R path: varying lambda", {
                       lamb = lamb, svdTol =1e-12, r2Threshold =0, minimumLd =0,
                       verbose = FALSE)
 
-    r_sorted <- result_R$result_nofilter %>% arrange(variant_id)
-    x_sorted <- result_X$result_nofilter %>% arrange(variant_id)
+    r_sorted <- result_R$resultNofilter %>% arrange(variant_id)
+    x_sorted <- result_X$resultNofilter %>% arrange(variant_id)
 
     expect_equal(r_sorted$z, x_sorted$z, tolerance = 1e-4,
                  info = paste("z-scores should match for lamb =", lamb))
@@ -1348,7 +1348,7 @@ test_that("X path handles all-known edge case", {
   )
   result <- raiss(data$ref_panel, all_known, genotypeMatrix = data$X,
                   verbose = FALSE)
-  expect_equal(nrow(result$result_nofilter), nrow(data$ref_panel))
+  expect_equal(nrow(result$resultNofilter), nrow(data$ref_panel))
 })
 
 test_that("X path handles single unknown variant", {
@@ -1361,8 +1361,8 @@ test_that("X path handles single unknown variant", {
                     lamb = 0.01, svdTol =1e-12, r2Threshold =0, minimumLd =0,
                     verbose = FALSE)
 
-  r_sorted <- result_R$result_nofilter %>% arrange(variant_id)
-  x_sorted <- result_X$result_nofilter %>% arrange(variant_id)
+  r_sorted <- result_R$resultNofilter %>% arrange(variant_id)
+  x_sorted <- result_X$resultNofilter %>% arrange(variant_id)
 
   expect_equal(r_sorted$z, x_sorted$z, tolerance = 1e-4)
 })
@@ -1373,8 +1373,8 @@ test_that("X path handles single known variant", {
   result_X <- raiss(data$ref_panel, data$known_zscores, genotypeMatrix = data$X,
                     lamb = 0.01, svdTol =1e-12, r2Threshold =0, minimumLd =0,
                     verbose = FALSE)
-  expect_true(is.data.frame(result_X$result_nofilter))
-  expect_equal(nrow(result_X$result_nofilter), nrow(data$ref_panel))
+  expect_true(is.data.frame(result_X$resultNofilter))
+  expect_equal(nrow(result_X$resultNofilter), nrow(data$ref_panel))
 })
 
 test_that("X path R2 filtering matches R path", {
@@ -1388,8 +1388,8 @@ test_that("X path R2 filtering matches R path", {
                     verbose = FALSE)
 
   # Same variants should pass filtering
-  r_filtered_ids <- sort(result_R$result_filter$variant_id)
-  x_filtered_ids <- sort(result_X$result_filter$variant_id)
+  r_filtered_ids <- sort(result_R$resultFilter$variant_id)
+  x_filtered_ids <- sort(result_X$resultFilter$variant_id)
   expect_equal(r_filtered_ids, x_filtered_ids,
                info = "Same variants should pass R2/LD filtering")
 })
@@ -1442,21 +1442,21 @@ test_that("raw genotype_matrix path is not equivalent to LD path used by legacy 
                            r2Threshold =0.6, minimumLd =0,
                            verbose = FALSE)
 
-  ld_ids <- sort(result_LD$result_filter$variant_id)
-  raw_x_ids <- sort(result_raw_X$result_filter$variant_id)
-  scaled_x_ids <- sort(result_scaled_X$result_filter$variant_id)
+  ld_ids <- sort(result_LD$resultFilter$variant_id)
+  raw_x_ids <- sort(result_raw_X$resultFilter$variant_id)
+  scaled_x_ids <- sort(result_scaled_X$resultFilter$variant_id)
 
   expect_false(identical(ld_ids, raw_x_ids))
-  expect_gt(nrow(result_raw_X$result_filter), nrow(result_LD$result_filter))
+  expect_gt(nrow(result_raw_X$resultFilter), nrow(result_LD$resultFilter))
   expect_equal(scaled_x_ids, ld_ids)
 
-  ld_sorted <- result_LD$result_nofilter %>% arrange(variant_id)
-  scaled_sorted <- result_scaled_X$result_nofilter %>% arrange(variant_id)
+  ld_sorted <- result_LD$resultNofilter %>% arrange(variant_id)
+  scaled_sorted <- result_scaled_X$resultNofilter %>% arrange(variant_id)
   expect_equal(ld_sorted$z, scaled_sorted$z, tolerance = 1e-10)
-  expect_equal(ld_sorted$raiss_R2, scaled_sorted$raiss_R2, tolerance = 1e-10)
+  expect_equal(ld_sorted$raissR2, scaled_sorted$raissR2, tolerance = 1e-10)
 })
 
-test_that("raiss rejects both LD_matrix and genotype_matrix", {
+test_that("raiss rejects both ldMatrix and genotype_matrix", {
   data <- generate_X_test_data(n = 50, p = 20, n_known = 10, seed = 1)
   expect_error(
     raiss(data$ref_panel, data$known_zscores,
@@ -1465,7 +1465,7 @@ test_that("raiss rejects both LD_matrix and genotype_matrix", {
   )
 })
 
-test_that("raiss rejects neither LD_matrix nor genotype_matrix", {
+test_that("raiss rejects neither ldMatrix nor genotype_matrix", {
   data <- generate_X_test_data(n = 50, p = 20, n_known = 10, seed = 1)
   expect_error(
     raiss(data$ref_panel, data$known_zscores),
@@ -1515,8 +1515,8 @@ test_that("X path with collinear variants matches R path", {
                     lamb = 0.01, svdTol =1e-12, r2Threshold =0, minimumLd =0,
                     verbose = FALSE)
 
-  r_sorted <- result_R$result_nofilter %>% arrange(variant_id)
-  x_sorted <- result_X$result_nofilter %>% arrange(variant_id)
+  r_sorted <- result_R$resultNofilter %>% arrange(variant_id)
+  x_sorted <- result_X$resultNofilter %>% arrange(variant_id)
 
   expect_equal(r_sorted$z, x_sorted$z, tolerance = 1e-3,
                info = "Collinear case: z-scores should be close")

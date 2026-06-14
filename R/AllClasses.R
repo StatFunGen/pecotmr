@@ -17,7 +17,7 @@ NULL
 #'   estimation. Typically derived from Berisa & Pickrell (2016) or
 #'   user-provided boundaries.
 #' @slot blocks A \code{GRanges} object with one range per LD block.
-#'   Metadata columns may include \code{block_id} (integer).
+#'   Metadata columns may include \code{blockId} (integer).
 #' @slot genome Character string identifying the genome build (e.g., "hg19", "hg38").
 #' @export
 setClass("LdBlocks",
@@ -215,12 +215,12 @@ setClass("LdStatistic",
 #' @title Eigendecomposition-Based LD Statistic
 #' @description Pre-computed per-block eigendecompositions of the LD
 #'   correlation matrix. Used by LDER, HDL, and sHDL.
-#' @slot eigenList A list of length \code{n_blocks}, each element a list
+#' @slot eigenList A list of length \code{nBlocks}, each element a list
 #'   with components:
 #'   \describe{
 #'     \item{values}{Numeric vector of eigenvalues}
 #'     \item{vectors}{Numeric matrix of eigenvectors (SNPs x retained components)}
-#'     \item{snp_idx}{Integer vector of SNP indices in \code{snpInfo}}
+#'     \item{snpIdx}{Integer vector of SNP indices in \code{snpInfo}}
 #'   }
 #' @slot eigenvalueTruncation Numeric, proportion of variance retained
 #'   (e.g., 0.9 for HDL's default). If 1.0, no truncation.
@@ -234,8 +234,8 @@ setClass("LdEigen",
   validity = function(object) {
     parent_check <- getValidity(getClass("LdStatistic"))(object)
     errors <- if (isTRUE(parent_check)) character() else parent_check
-    n_blocks <- length(object@ldBlocks@blocks)
-    if (length(object@eigenList) != n_blocks)
+    nBlocks <- length(object@ldBlocks@blocks)
+    if (length(object@eigenList) != nBlocks)
       errors <- c(errors,
         "Length of 'eigenList' must match number of LD blocks")
     if (length(object@eigenvalueTruncation) != 1L ||
@@ -291,21 +291,21 @@ setClass("LdScore",
 #'   does not estimate one).
 #' @slot interceptSe Numeric, SE of intercept.
 #' @slot local A \code{data.frame} with per-block local heritability
-#'   estimates (columns: \code{block_id}, \code{h2_local}, \code{h2_local_se}).
+#'   estimates (columns: \code{blockId}, \code{h2Local}, \code{h2LocalSe}).
 #'   NULL if \code{local = FALSE}.
 #' @slot enrichment A \code{data.frame} with baseline annotation enrichment
-#'   estimates (columns: \code{annotation}, \code{tau}, \code{tau_se},
-#'   \code{enrichment}, \code{enrichment_se}, \code{enrichment_p},
-#'   \code{prop_h2}, \code{prop_snps}). NULL if unstratified.
-#' @slot tauBlocks A numeric matrix (n_blocks x n_annotations) of per-block
-#'   jackknife tau values. Required for Gazal tau_star standardization
+#'   estimates (columns: \code{annotation}, \code{tau}, \code{tauSe},
+#'   \code{enrichment}, \code{enrichmentSe}, \code{enrichmentP},
+#'   \code{propH2}, \code{propSnps}). NULL if unstratified.
+#' @slot tauBlocks A numeric matrix (nBlocks x n_annotations) of per-block
+#'   jackknife tau values. Required for Gazal tauStar standardization
 #'   downstream. NULL if not available (e.g., unstratified analysis).
 #' @slot scoreStats A list with score statistics for candidate annotations,
-#'   suitable for input to \code{susie_rss}. Contains:
+#'   suitable for input to \code{susieRss}. Contains:
 #'   \describe{
 #'     \item{z}{Numeric vector of z-scores for each candidate annotation}
 #'     \item{R}{Correlation matrix of the score statistics}
-#'     \item{annotation_names}{Character vector of candidate annotation names}
+#'     \item{annotationNames}{Character vector of candidate annotation names}
 #'   }
 #'   NULL if no candidate annotations provided.
 #' @slot method Character string identifying the estimation method.
@@ -382,7 +382,7 @@ setClass("LdData",
 #' @slot trimmedFit List containing the method-specific trimmed fit.
 #' @slot topLoci A \code{data.frame} in long format with columns:
 #'   variant_id, method, coverage, cs, pip, and optionally betahat, sd,
-#'   cs_log10bf, z.
+#'   csLog10bf, z.
 #' @slot method Character string identifying the fine-mapping method.
 #' @slot sumstats List of summary statistics used in the analysis, or NULL.
 #' @export

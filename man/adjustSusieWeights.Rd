@@ -8,7 +8,7 @@ adjustSusieWeights(
   twasWeightsResults,
   keepVariants,
   runAlleleQc = TRUE,
-  variableNameObj = c("susie_results", context, "variant_names"),
+  variableNameObj = c("susie_results", context, "variantNames"),
   susieObj = c("susie_results", context, "susie_result_trimmed"),
   twasWeightsTable = c("weights", context),
   ldVariants,
@@ -33,7 +33,7 @@ adjustSusieWeights(
 \item{matchMinProp}{Minimum proportion of matched variants. Default 0.2.}
 }
 \value{
-A list with adjusted_susie_weights and remained_variants_ids.
+A list with adjustedSusieWeights and remainedVariantIds.
 }
 \description{
 Adjusts SuSiE TWAS weights by subsetting to intersected variants and

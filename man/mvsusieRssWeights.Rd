@@ -22,7 +22,7 @@ mvsusieRssWeights(
 
 \item{LD}{LD correlation matrix.}
 
-\item{mvsusieRssFit}{Optional pre-fitted \code{mvsusie_rss} object.}
+\item{mvsusieRssFit}{Optional pre-fitted \code{mvsusieRss} object.}
 
 \item{priorVariance}{Optional mvSuSiE prior variance specification.
 When NULL, \code{mvsusieR::create_mixture_prior()} is used with
@@ -36,7 +36,7 @@ When NULL, \code{mvsusieR::create_mixture_prior()} is used with
 
 \item{retainFit}{If TRUE, attaches the fitted object as an attribute.}
 
-\item{...}{Additional arguments forwarded to \code{mvsusieR::mvsusie_rss}.}
+\item{...}{Additional arguments forwarded to \code{mvsusieR::mvsusieRss}.}
 }
 \value{
 A numeric matrix of per-variant per-context weights
@@ -44,7 +44,7 @@ A numeric matrix of per-variant per-context weights
 }
 \description{
 Multi-context summary-statistics analog of \code{\link{mvsusieWeights}}:
-extracts coefficients from an existing \code{mvsusieR::mvsusie_rss} fit,
+extracts coefficients from an existing \code{mvsusieR::mvsusieRss} fit,
 or fits one from \code{stat$z} (variants x conditions) and \code{LD}.
 }
 \details{

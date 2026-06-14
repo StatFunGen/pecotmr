@@ -18,12 +18,12 @@ loadRssData(
 )
 }
 \arguments{
-\item{region}{The region where tabix use to subset the input dataset.}
+\item{sumstatPath}{File path to the summary statistics.}
 
-\item{sumstat_path}{File path to the summary statistics.}
-
-\item{column_file_path}{Optional file path to a custom column mapping file for
+\item{columnFilePath}{Optional file path to a custom column mapping file for
 non-standard column names not recognized by MungeSumstats.}
+
+\item{region}{The region where tabix use to subset the input dataset.}
 
 \item{n_sample}{User-specified sample size. If unknown, set as 0 to retrieve from the sumstat file.}
 
@@ -33,7 +33,7 @@ non-standard column names not recognized by MungeSumstats.}
 
 \item{binary_trait_model}{How to treat case-control sample counts. The
 default \code{"rss"} uses counts only to infer \code{n} and leaves
-\code{var_y = NULL}, so \code{susie_rss()} uses its z-score RSS interface
+\code{var_y = NULL}, so \code{susieRss()} uses its z-score RSS interface
 on the standardized phenotype scale. Use \code{"ols"} only when
 \code{beta} and \code{se} come from ordinary least squares on a 0/1
 phenotype and the full \code{bhat/shat/var_y} sufficient-statistic

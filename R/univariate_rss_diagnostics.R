@@ -1,17 +1,17 @@
 #' Extract the trimmed SuSiE fit from a finemapping pipeline result
 #'
-#' Returns the trimmed model fit underlying \code{con_data$finemapping_result}
+#' Returns the trimmed model fit underlying \code{con_data$finemappingResult}
 #' (a \code{FineMappingResult} S4 object), or NULL if no fine-mapping result
 #' is attached.
 #'
 #' @param conData List. The method-layer entry from a finemapping pipeline
-#'   result, expected to carry \code{$finemapping_result} as a
+#'   result, expected to carry \code{$finemappingResult} as a
 #'   \code{FineMappingResult} object.
 #' @return The trimmed fit (a list with \code{pip}, \code{sets}, etc.) or NULL.
 #' @export
 getSusieResult <- function(conData) {
   if (length(conData) == 0) return(NULL)
-  fm <- conData$finemapping_result
+  fm <- conData$finemappingResult
   if (is.null(fm) || !is(fm, "FineMappingResult")) return(NULL)
   trimmed <- getTrimmedFit(fm)
   if (length(trimmed) == 0) return(NULL)
@@ -49,7 +49,7 @@ getSusieResult <- function(conData) {
 #'
 #' @export
 extractCsInfo <- function(conData, csNames, topLociTable) {
-  fm <- conData$finemapping_result
+  fm <- conData$finemappingResult
   trimmed <- getTrimmedFit(fm)
   variantNames <- getVariantNames(fm)
   results <- map(seq_along(csNames), function(i) {
@@ -128,7 +128,7 @@ extractCsInfo <- function(conData, csNames, topLociTable) {
 #'
 #' @export
 extractTopPipInfo <- function(conData) {
-  fm <- conData$finemapping_result
+  fm <- conData$finemappingResult
   trimmed <- getTrimmedFit(fm)
   variantNames <- getVariantNames(fm)
   # Find the variant with the highest PIP

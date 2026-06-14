@@ -28,11 +28,11 @@ colocWrapper(
   nControl = 0,
   region = NULL,
   zMismatchQc = "slalom",
-  finemappingMethod = "susie_rss",
-  finemappingOpts = list(L = 20, L_greedy = 5, coverage = c(0.95, 0.7, 0.5),
-    signal_cutoff = 0.025, min_abs_corr = 0.8),
+  finemappingMethod = "susieRss",
+  finemappingOpts = list(L = 20, lGreedy = 5, coverage = c(0.95, 0.7, 0.5), signalCutoff
+    = 0.025, minAbsCorr = 0.8),
   impute = TRUE,
-  imputeOpts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
+  imputeOpts = list(rcond = 0.01, r2Threshold = 0.6, minimumLd = 5, lamb = 0.01),
   saveFinemappingPath = NULL,
   returnFinemapping = FALSE,
   ...
@@ -91,7 +91,7 @@ colocWrapper(
 \code{\link{rssAnalysisPipeline}}: "slalom", "dentist", or "none".
 Default "slalom". (Hard rename of the former \code{zMismatchQc}; no alias.)}
 
-\item{finemappingMethod}{Fine-mapping method. Default "susie_rss".}
+\item{finemappingMethod}{Fine-mapping method. Default "susieRss".}
 
 \item{finemappingOpts}{List of fine-mapping options passed to
 \code{\link{rssAnalysisPipeline}}.}
@@ -103,10 +103,10 @@ Default "slalom". (Hard rename of the former \code{zMismatchQc}; no alias.)}
 \item{saveFinemappingPath}{Path to save fine-mapping result as RDS. The
 saved file can be reused via \code{gwasFiles} with
 \code{gwasFinemappingObj = "susie_fit"} and
-\code{gwasVarnameObj = "variant_names"}.}
+\code{gwasVarnameObj = "variantNames"}.}
 
 \item{returnFinemapping}{Logical. If TRUE and \code{runFinemapping = TRUE},
-include full fine-mapping result under \code{$gwas_finemapping}.}
+include full fine-mapping result under \code{$gwasFinemapping}.}
 
 \item{...}{Additional arguments (currently unused).}
 }

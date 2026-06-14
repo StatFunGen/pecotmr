@@ -7,7 +7,7 @@ calcI2 <- function(Q, Est) {
   return(if (I2 < 0) 0 else I2)
 }
 
-# Create a null data frame with gene_name and NA columns for MR pipeline outputs.
+# Create a null data frame with geneName and NA columns for MR pipeline outputs.
 # @noRd
 .createNullMrDf <- function(geneName, colSpec) {
   n <- length(geneName)
@@ -18,14 +18,14 @@ calcI2 <- function(Q, Est) {
       numeric = as.numeric(rep(NA, n))
     )
   })
-  do.call(data.frame, c(list(gene_name = geneName), cols, list(stringsAsFactors = FALSE)))
+  do.call(data.frame, c(list(geneName = geneName), cols, list(stringsAsFactors = FALSE)))
 }
 
 #' MR Format Function
 #'
 #' Description of what the function does.
 #'
-#' @param susieResult A list containing the results of SuSiE analysis. This list should include nested elements such as 'susie_results', 'finemapping_result' (a FineMappingResult S4 object), and 'top_loci', containing details about the statistical analysis of genetic variants.
+#' @param susieResult A list containing the results of SuSiE analysis. This list should include nested elements such as 'susie_results', 'finemappingResult' (a FineMappingResult S4 object), and 'top_loci', containing details about the statistical analysis of genetic variants.
 #' @param condition A character string specifying the conditions. This is used to select the corresponding subset of results within 'susieResult'.
 #' @param gwasSumstatsDb A data frame containing summary statistics from GWAS studies. It should include columns for variant id and their associated statistics such as beta coefficients and standard errors.
 #' @param coverage A character string specifying the credible set column. If
@@ -64,12 +64,12 @@ mrFormat <- function(susieResult, condition, gwasSumstatsDb, coverage = NULL,
   if (is.null(pipCol)) return(.createNullMrDf(geneName, mrFormatSpec))
 
   susieCsResultFormatted <- topLoci[!is.na(csValues) & csValues >= 1, , drop = FALSE] %>%
-    mutate(gene_name = geneName) %>%
+    mutate(geneName = geneName) %>%
     mutate(
       variant_id = normalizeVariantId(variant_id),
       variant = stripChrPrefix(variant_id)
     ) %>%
-    select(gene_name, variant_id, variant, betahat, sebetahat, all_of(coverage), all_of(pipCol)) %>%
+    select(geneName, variant_id, variant, betahat, sebetahat, all_of(coverage), all_of(pipCol)) %>%
     rename("bhat_x" = "betahat", "sbhat_x" = "sebetahat", "cs" = all_of(coverage), "pip" = all_of(pipCol))
 
   susiePos <- str_split_i(susieCsResultFormatted$variant, ":", 2)
@@ -95,14 +95,14 @@ mrFormat <- function(susieResult, condition, gwasSumstatsDb, coverage = NULL,
       gwasSumstatsDbExtracted$variant_id, c("bhat_x"),
       matchMinProp = 0
     )
-    susieCsResultFormatted <- getHarmonizedData(susieCsResultFormatted)[, c("gene_name", "variant_id", "bhat_x", "sbhat_x", "cs", "pip")]
+    susieCsResultFormatted <- getHarmonizedData(susieCsResultFormatted)[, c("geneName", "variant_id", "bhat_x", "sbhat_x", "cs", "pip")]
   }
   # Ensure consistent chr prefix convention before intersecting
   if (nrow(susieCsResultFormatted) == 0) return(.createNullMrDf(geneName, mrFormatSpec))
   if (!is.null(susieCsResultFormatted$variant_id) && !is.null(gwasSumstatsDbExtracted$variant_id)) {
     chrMatched <- ensureChrMatch(susieCsResultFormatted$variant_id, gwasSumstatsDbExtracted$variant_id)
-    susieCsResultFormatted$variant_id <- chrMatched$ids_a
-    gwasSumstatsDbExtracted$variant_id <- chrMatched$ids_b
+    susieCsResultFormatted$variant_id <- chrMatched$idsA
+    gwasSumstatsDbExtracted$variant_id <- chrMatched$idsB
   }
   commonVariants <- intersect(susieCsResultFormatted$variant_id, gwasSumstatsDbExtracted$variant_id)
   if (length(commonVariants) == 0) return(.createNullMrDf(geneName, mrFormatSpec))
@@ -117,8 +117,8 @@ mrFormat <- function(susieResult, condition, gwasSumstatsDb, coverage = NULL,
 #'
 #' @param mrFormattedInput the output of twas_mr_format_input function
 #' @param cpipCutoff the threshold of cumulative posterior inclusion probability, default is 0.5
-#' @return A single data frame of output with columns "gene_name", "num_CS", "num_IV",
-#' "meta_eff", "se_meta_eff", "meta_pval", "Q", "Q_pval" and "I2". "gene_name" is ensemble ID. "num_CS" is the number of credible sets
+#' @return A single data frame of output with columns "geneName", "num_CS", "num_IV",
+#' "meta_eff", "se_meta_eff", "meta_pval", "Q", "Q_pval" and "I2". "geneName" is ensemble ID. "num_CS" is the number of credible sets
 #' contained in each gene, "num_IV" is the number of variants contained in each gene. "meta_eff", "se_meta_eff" and "meta_pval" are the MR estimate, standard error and pvalue.
 #' "Q" is Cochran's Q statistic, "I2" quantifies the heterogeneity, range from 0 to 1.
 #' @importFrom dplyr mutate group_by filter ungroup distinct arrange select summarise n left_join
@@ -130,24 +130,24 @@ mrAnalysis <- function(mrFormattedInput, cpipCutoff = 0.5) {
                     meta_eff = "numeric", se_meta_eff = "numeric", meta_pval = "numeric",
                     Q = "numeric", Q_pval = "numeric", I2 = "numeric")
   if (all(is.na(mrFormattedInput[, -1]))) {
-    return(.createNullMrDf(unique(mrFormattedInput$gene_name), mrOutputSpec))
+    return(.createNullMrDf(unique(mrFormattedInput$geneName), mrOutputSpec))
   }
   output <- mrFormattedInput %>%
     mutate(
       bhat_x = bhat_x / sbhat_x,
       sbhat_x = 1
     ) %>%
-    group_by(gene_name, cs) %>%
+    group_by(geneName, cs) %>%
     mutate(cpip = sum(pip)) %>%
     filter(cpip >= cpipCutoff)
 
   if (nrow(output) == 0) {
-    return(.createNullMrDf(unique(mrFormattedInput$gene_name), mrOutputSpec))
+    return(.createNullMrDf(unique(mrFormattedInput$geneName), mrOutputSpec))
   }
 
   # Compute per-CS composite estimates
   csSummary <- output %>%
-    group_by(gene_name, cs) %>%
+    group_by(geneName, cs) %>%
     summarise(
       cpip = first(cpip),
       composite_bhat = sum((bhat_y / bhat_x * pip) / cpip),
@@ -161,7 +161,7 @@ mrAnalysis <- function(mrFormattedInput, cpipCutoff = 0.5) {
 
   # Compute gene-level meta-analysis
   geneSummary <- csSummary %>%
-    group_by(gene_name) %>%
+    group_by(geneName) %>%
     summarise(
       num_CS = n(),
       cpip = first(cpip),
@@ -179,11 +179,11 @@ mrAnalysis <- function(mrFormattedInput, cpipCutoff = 0.5) {
 
   # Add num_IV from original output
   ivCounts <- output %>%
-    group_by(gene_name) %>%
+    group_by(geneName) %>%
     summarise(num_IV = n(), .groups = "drop")
 
   geneSummary %>%
-    left_join(ivCounts, by = "gene_name") %>%
+    left_join(ivCounts, by = "geneName") %>%
     mutate(
       cpip = round(cpip, 3),
       meta_eff = round(meta_eff, 3),
@@ -194,7 +194,7 @@ mrAnalysis <- function(mrFormattedInput, cpipCutoff = 0.5) {
       I2 = round(I2, 3)
     ) %>%
     arrange(meta_pval) %>%
-    select(gene_name, num_CS, num_IV, cpip, meta_eff, se_meta_eff, meta_pval, Q, Q_pval, I2)
+    select(geneName, num_CS, num_IV, cpip, meta_eff, se_meta_eff, meta_pval, Q, Q_pval, I2)
 }
 
 #' Fine-mapping-based Mendelian Randomization

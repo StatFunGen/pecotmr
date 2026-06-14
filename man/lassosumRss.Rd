@@ -29,7 +29,7 @@ If shrinkage is desired, apply it before passing (e.g., \code{(1-s)*R + s*I}).}
 }
 \value{
 A list containing:
-  \item{beta_est}{Posterior estimates of SNP effect sizes at best lambda.}
+  \item{betaEst}{Posterior estimates of SNP effect sizes at best lambda.}
   \item{beta}{Matrix of estimates (p x nlambda).}
   \item{lambda}{The lambda values used.}
   \item{conv}{Convergence indicators (1 = converged).}

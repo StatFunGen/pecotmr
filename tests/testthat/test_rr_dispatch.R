@@ -22,7 +22,7 @@ test_that("prsCsWeights dispatches to prsCs with correct arguments", {
       captured$LD <- LD
       captured$n <- n
       captured$dots <- list(...)
-      list(beta_est = seq_len(length(bhat)) * 0.01)
+      list(betaEst = seq_len(length(bhat)) * 0.01)
     }
   )
   result <- prsCsWeights(stat = stat, LD = R, maf = rep(0.3, p), nIter = 17)

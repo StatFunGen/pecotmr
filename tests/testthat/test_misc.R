@@ -214,10 +214,10 @@ test_that("Test formatVariantId",{
 test_that("formatVariantId uses convention parameter automatically", {
   expect_equal(pecotmr:::formatVariantId(1, 100, "A", "G"), "chr1:100:A:G")
 
-  conv_mixed <- list(has_chr = TRUE, allele_sep = "_")
+  conv_mixed <- list(hasChr = TRUE, alleleSep = "_")
   expect_equal(pecotmr:::formatVariantId(1, 100, "A", "G", convention = conv_mixed), "chr1:100_A_G")
 
-  conv_nochr <- list(has_chr = FALSE, allele_sep = "_")
+  conv_nochr <- list(hasChr = FALSE, alleleSep = "_")
   expect_equal(pecotmr:::formatVariantId(1, 100, "A", "G", convention = conv_nochr), "1:100_A_G")
 
   expect_equal(pecotmr:::formatVariantId(1, 100, "A", "G", chrPrefix = FALSE, convention = conv_mixed), "chr1:100_A_G")
@@ -1211,8 +1211,8 @@ test_that("parseVariantId parses single variant with chr prefix", {
   expect_equal(result$A2, "A")
   expect_equal(result$A1, "G")
   conv <- attr(result, "convention")
-  expect_true(conv$has_chr)
-  expect_equal(conv$allele_sep, ":")
+  expect_true(conv$hasChr)
+  expect_equal(conv$alleleSep, ":")
 })
 
 test_that("parseVariantId parses single variant without chr prefix", {
@@ -1222,7 +1222,7 @@ test_that("parseVariantId parses single variant without chr prefix", {
   expect_equal(result$A2, "A")
   expect_equal(result$A1, "G")
   conv <- attr(result, "convention")
-  expect_false(conv$has_chr)
+  expect_false(conv$hasChr)
 })
 
 test_that("parseVariantId parses multiple variants", {
@@ -1241,24 +1241,24 @@ test_that("parseVariantId parses multiple variants", {
 
 test_that("detectVariantConvention detects chr prefix and allele separators", {
   conv <- pecotmr:::detectVariantConvention(c("chr1:100:A:G", "chr2:200:C:T"))
-  expect_true(conv$has_chr)
-  expect_equal(conv$allele_sep, ":")
-  expect_false(conv$has_build)
+  expect_true(conv$hasChr)
+  expect_equal(conv$alleleSep, ":")
+  expect_false(conv$hasBuild)
 
   conv2 <- pecotmr:::detectVariantConvention(c("1_100_A_G", "2_200_C_T"))
-  expect_false(conv2$has_chr)
-  expect_equal(conv2$allele_sep, "_")
+  expect_false(conv2$hasChr)
+  expect_equal(conv2$alleleSep, "_")
 
   conv3 <- pecotmr:::detectVariantConvention(c("chr1:100:A:G:b38"))
-  expect_true(conv3$has_build)
+  expect_true(conv3$hasBuild)
 
   conv4 <- pecotmr:::detectVariantConvention(c("chr1:100_A_G"))
-  expect_true(conv4$has_chr)
-  expect_equal(conv4$allele_sep, "_")
+  expect_true(conv4$hasChr)
+  expect_equal(conv4$alleleSep, "_")
 
   conv5 <- pecotmr:::detectVariantConvention(c("1:100_A_G"))
-  expect_false(conv5$has_chr)
-  expect_equal(conv5$allele_sep, "_")
+  expect_false(conv5$hasChr)
+  expect_equal(conv5$alleleSep, "_")
 })
 
 # =============================================================================
@@ -1617,9 +1617,9 @@ test_that("detectOutliersMahalanobis returns correct structure", {
   rownames(x) <- paste0("sample", 1:100)
   result <- detectOutliersMahalanobis(x)
   expect_s3_class(result, "data.frame")
-  expect_true(all(c("sample_id", "mahal", "pvalue", "is_outlier") %in% names(result)))
+  expect_true(all(c("sampleId", "mahal", "pvalue", "isOutlier") %in% names(result)))
   expect_equal(nrow(result), 100)
-  expect_equal(result$sample_id[1], "sample1")
+  expect_equal(result$sampleId[1], "sample1")
 })
 
 test_that("detectOutliersMahalanobis detects clear outliers", {
@@ -1630,14 +1630,14 @@ test_that("detectOutliersMahalanobis detects clear outliers", {
   rownames(x) <- paste0("s", 1:101)
   result <- detectOutliersMahalanobis(x)
   # The extreme point should be an outlier
-  expect_true(result$is_outlier[101])
+  expect_true(result$isOutlier[101])
 })
 
 test_that("detectOutliersMahalanobis with unnamed rows uses indices", {
   set.seed(42)
   x <- matrix(rnorm(40), ncol = 2)
   result <- detectOutliersMahalanobis(x)
-  expect_equal(result$sample_id, as.character(1:20))
+  expect_equal(result$sampleId, as.character(1:20))
 })
 
 test_that("detectOutliersMahalanobis threshold sensitivity", {
@@ -1647,7 +1647,7 @@ test_that("detectOutliersMahalanobis threshold sensitivity", {
   r_strict <- detectOutliersMahalanobis(x, prob = 0.999, pvalThreshold = 0.001)
   # With lenient threshold, more possible outliers
   r_lenient <- detectOutliersMahalanobis(x, prob = 0.90, pvalThreshold = 0.10)
-  expect_true(sum(r_strict$is_outlier) <= sum(r_lenient$is_outlier))
+  expect_true(sum(r_strict$isOutlier) <= sum(r_lenient$isOutlier))
 })
 
 # =============================================================================
@@ -1808,9 +1808,9 @@ test_that("filterXWithY drops variants that become monomorphic due to Y NAs", {
 
 test_that("detectVariantConvention returns defaults for all-NA input", {
   result <- detectVariantConvention(c(NA, NA, NA))
-  expect_false(result$has_chr)
-  expect_equal(result$allele_sep, ":")
-  expect_false(result$has_build)
+  expect_false(result$hasChr)
+  expect_equal(result$alleleSep, ":")
+  expect_false(result$hasBuild)
   expect_true(is.na(result$example))
 })
 
@@ -1980,26 +1980,26 @@ test_that("classifyVariantType accepts data.frame input", {
 # =============================================================================
 
 test_that("ensureChrMatch returns unchanged when both have chr prefix", {
-  ids_a <- c("chr1:100:A:G", "chr1:200:C:T")
-  ids_b <- c("chr1:150:A:G", "chr1:250:C:T")
-  result <- pecotmr:::ensureChrMatch(ids_a, ids_b)
-  expect_equal(result$ids_a, ids_a)
-  expect_equal(result$ids_b, ids_b)
+  idsA <- c("chr1:100:A:G", "chr1:200:C:T")
+  idsB <- c("chr1:150:A:G", "chr1:250:C:T")
+  result <- pecotmr:::ensureChrMatch(idsA, idsB)
+  expect_equal(result$idsA, idsA)
+  expect_equal(result$idsB, idsB)
 })
 
 test_that("ensureChrMatch normalizes when prefixes mismatch", {
-  ids_a <- c("chr1:100:A:G", "chr1:200:C:T")
-  ids_b <- c("1:150:A:G", "1:250:C:T")
-  result <- pecotmr:::ensureChrMatch(ids_a, ids_b)
-  expect_true(all(grepl("^chr", result$ids_a)))
-  expect_true(all(grepl("^chr", result$ids_b)))
+  idsA <- c("chr1:100:A:G", "chr1:200:C:T")
+  idsB <- c("1:150:A:G", "1:250:C:T")
+  result <- pecotmr:::ensureChrMatch(idsA, idsB)
+  expect_true(all(grepl("^chr", result$idsA)))
+  expect_true(all(grepl("^chr", result$idsB)))
 })
 
 test_that("ensureChrMatch returns unchanged when both lack chr prefix", {
-  ids_a <- c("1:100:A:G", "1:200:C:T")
-  ids_b <- c("1:150:A:G", "1:250:C:T")
-  result <- pecotmr:::ensureChrMatch(ids_a, ids_b)
+  idsA <- c("1:100:A:G", "1:200:C:T")
+  idsB <- c("1:150:A:G", "1:250:C:T")
+  result <- pecotmr:::ensureChrMatch(idsA, idsB)
   # Both already match (no prefix), so returned unchanged
-  expect_equal(result$ids_a, ids_a)
-  expect_equal(result$ids_b, ids_b)
+  expect_equal(result$idsA, idsA)
+  expect_equal(result$idsB, idsB)
 })

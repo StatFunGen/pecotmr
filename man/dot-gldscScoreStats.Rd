@@ -20,8 +20,8 @@
 \item{w}{Numeric vector, regression weights.}
 }
 \value{
-A list with enrichment (data.frame) and score_stats (list with
-  z, R, annotation_names).
+A list with enrichment (data.frame) and scoreStats (list with
+  z, R, annotationNames).
 }
 \description{
 Compute score z-statistics and their correlation matrix

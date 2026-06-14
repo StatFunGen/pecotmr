@@ -57,12 +57,12 @@ test_that("checkLd diagnoses real LD matrix correctly", {
   R <- computeLd(X, method = "sample")
   result <- checkLd(R)
   expect_true(is.list(result))
-  expect_true(result$is_psd)
-  expect_equal(result$method_applied, "none")
+  expect_true(result$isPsd)
+  expect_equal(result$methodApplied, "none")
   # min eigenvalue may be near-zero (numerically PSD, not strictly PD)
-  expect_true(result$min_eigenvalue > -1e-7)
-  expect_true(result$n_negative == 0)
-  expect_true(is.finite(result$condition_number))
+  expect_true(result$minEigenvalue > -1e-7)
+  expect_true(result$nNegative == 0)
+  expect_true(is.finite(result$conditionNumber))
 })
 
 test_that("checkLd eigenfix improves non-PSD matrix", {
@@ -76,14 +76,14 @@ test_that("checkLd eigenfix improves non-PSD matrix", {
   diag(R_bad) <- 1
 
   result_check <- checkLd(R_bad, method = "check")
-  expect_false(result_check$is_psd)
-  expect_true(result_check$n_negative > 0)
+  expect_false(result_check$isPsd)
+  expect_true(result_check$nNegative > 0)
 
   result_fix <- checkLd(R_bad, method = "eigenfix")
-  expect_equal(result_fix$method_applied, "eigenfix")
+  expect_equal(result_fix$methodApplied, "eigenfix")
   # Eigenfix should improve (raise) minimum eigenvalue
   fixed_check <- checkLd(result_fix$R)
-  expect_true(fixed_check$min_eigenvalue > result_check$min_eigenvalue)
+  expect_true(fixed_check$minEigenvalue > result_check$minEigenvalue)
 })
 
 test_that("checkLd shrink repairs perturbed LD matrix", {
@@ -94,7 +94,7 @@ test_that("checkLd shrink repairs perturbed LD matrix", {
   R_bad[1, 2] <- R_bad[2, 1] <- 1.5
   diag(R_bad) <- 1
   result <- checkLd(R_bad, method = "shrink", shrinkage = 0.1)
-  expect_equal(result$method_applied, "shrink")
+  expect_equal(result$methodApplied, "shrink")
 })
 
 # --- ldPruneByCorrelation -------------------------------------------------

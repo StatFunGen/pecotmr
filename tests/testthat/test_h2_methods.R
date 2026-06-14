@@ -9,16 +9,16 @@ set.seed(42)
 # Helpers: simulate test data
 # =============================================================================
 
-simulate_h2_data <- function(n_snps = 100, n_blocks = 2, n_gwas = 50000,
+simulate_h2_data <- function(n_snps = 100, nBlocks = 2, n_gwas = 50000,
                              h2_true = 0.3) {
   set.seed(42)
-  snps_per_block <- n_snps / n_blocks
+  snps_per_block <- n_snps / nBlocks
 
   # Block structure
   blocks_gr <- GenomicRanges::GRanges(
-    seqnames = rep("chr1", n_blocks),
+    seqnames = rep("chr1", nBlocks),
     ranges = IRanges::IRanges(
-      start = seq(1, by = snps_per_block * 100, length.out = n_blocks),
+      start = seq(1, by = snps_per_block * 100, length.out = nBlocks),
       width = snps_per_block * 100 - 1
     )
   )
@@ -36,15 +36,15 @@ simulate_h2_data <- function(n_snps = 100, n_blocks = 2, n_gwas = 50000,
   # Build block-diagonal LD (AR(1) with rho = 0.5)
   eigen_list <- list()
   R_blocks <- list()
-  for (b in seq_len(n_blocks)) {
+  for (b in seq_len(nBlocks)) {
     idx <- seq((b - 1) * snps_per_block + 1, b * snps_per_block)
     p <- length(idx)
     R <- 0.5^abs(outer(seq_len(p), seq_len(p), "-"))
     e <- eigen(R, symmetric = TRUE)
     eigen_list[[b]] <- list(
-      values = e$values, vectors = e$vectors, snp_idx = as.integer(idx)
+      values = e$values, vectors = e$vectors, snpIdx = as.integer(idx)
     )
-    R_blocks[[b]] <- list(R = R, snp_idx = as.integer(idx))
+    R_blocks[[b]] <- list(R = R, snpIdx = as.integer(idx))
   }
 
   # Simulate z-scores under infinitesimal model
@@ -60,8 +60,8 @@ simulate_h2_data <- function(n_snps = 100, n_blocks = 2, n_gwas = 50000,
 
   # LD scores: l2_j = sum_k r^2_{jk}
   ld_scores_vec <- numeric(n_snps)
-  for (b in seq_len(n_blocks)) {
-    idx <- R_blocks[[b]]$snp_idx
+  for (b in seq_len(nBlocks)) {
+    idx <- R_blocks[[b]]$snpIdx
     R <- R_blocks[[b]]$R
     ld_scores_vec[idx] <- rowSums(R^2)
   }
@@ -114,8 +114,8 @@ dat <- simulate_h2_data()
 test_that("lderUnivariate returns correct structure", {
   res <- pecotmr:::lderUnivariate(dat$z, dat$n, dat$eigen_ref)
   expect_type(res, "list")
-  expect_true(all(c("h2", "h2_se", "intercept", "intercept_se",
-                     "local", "enrichment", "tau_blocks", "score_stats")
+  expect_true(all(c("h2", "h2Se", "intercept", "interceptSe",
+                     "local", "enrichment", "tauBlocks", "scoreStats")
                    %in% names(res)))
 })
 
@@ -125,15 +125,15 @@ test_that("lderUnivariate h2 is finite and in reasonable range", {
   expect_true(res$h2 > -0.5 && res$h2 < 1.0)
 })
 
-test_that("lderUnivariate h2_se is positive", {
+test_that("lderUnivariate h2Se is positive", {
   res <- pecotmr:::lderUnivariate(dat$z, dat$n, dat$eigen_ref)
-  expect_true(is.finite(res$h2_se))
-  expect_true(res$h2_se > 0)
+  expect_true(is.finite(res$h2Se))
+  expect_true(res$h2Se > 0)
 })
 
 test_that("lderUnivariate intercept is near zero for well-calibrated data", {
   # In LDER the intercept parameter a represents confounding deviation:
-  # the model is E[chi2_rot - 1] = n * h2/M * d + n * a
+  # the model is E[chi2Rot - 1] = n * h2/M * d + n * a
   # so a ~ 0 when there is no confounding.
   res <- pecotmr:::lderUnivariate(dat$z, dat$n, dat$eigen_ref)
   expect_true(is.finite(res$intercept))
@@ -143,7 +143,7 @@ test_that("lderUnivariate intercept is near zero for well-calibrated data", {
 test_that("lderUnivariate with local = TRUE returns local data.frame", {
   res <- pecotmr:::lderUnivariate(dat$z, dat$n, dat$eigen_ref, local = TRUE)
   expect_true(is.data.frame(res$local))
-  expect_true("h2_local" %in% colnames(res$local))
+  expect_true("h2Local" %in% colnames(res$local))
 })
 
 test_that("lderUnivariate without annotations returns NULL enrichment", {
@@ -158,8 +158,8 @@ test_that("lderUnivariate without annotations returns NULL enrichment", {
 test_that("gldscUnivariate returns correct structure", {
   res <- pecotmr:::gldscUnivariate(dat$z, dat$n, dat$ld_score_ref)
   expect_type(res, "list")
-  expect_true(all(c("h2", "h2_se", "intercept", "intercept_se",
-                     "local", "enrichment", "tau_blocks", "score_stats")
+  expect_true(all(c("h2", "h2Se", "intercept", "interceptSe",
+                     "local", "enrichment", "tauBlocks", "scoreStats")
                    %in% names(res)))
 })
 
@@ -168,10 +168,10 @@ test_that("gldscUnivariate h2 is finite", {
   expect_true(is.finite(res$h2))
 })
 
-test_that("gldscUnivariate h2_se is positive", {
+test_that("gldscUnivariate h2Se is positive", {
   res <- pecotmr:::gldscUnivariate(dat$z, dat$n, dat$ld_score_ref)
-  expect_true(is.finite(res$h2_se))
-  expect_true(res$h2_se > 0)
+  expect_true(is.finite(res$h2Se))
+  expect_true(res$h2Se > 0)
 })
 
 test_that("gldscUnivariate with local = TRUE needs fine-grained blocks", {
@@ -189,8 +189,8 @@ test_that("gldscUnivariate with local = TRUE needs fine-grained blocks", {
 test_that("hdlUnivariate returns correct structure", {
   res <- pecotmr:::hdlUnivariate(dat$z, dat$n, dat$eigen_ref)
   expect_type(res, "list")
-  expect_true(all(c("h2", "h2_se", "intercept", "intercept_se",
-                     "local", "enrichment", "tau_blocks", "score_stats")
+  expect_true(all(c("h2", "h2Se", "intercept", "interceptSe",
+                     "local", "enrichment", "tauBlocks", "scoreStats")
                    %in% names(res)))
 })
 
@@ -199,16 +199,16 @@ test_that("hdlUnivariate h2 is finite", {
   expect_true(is.finite(res$h2))
 })
 
-test_that("hdlUnivariate h2_se is positive", {
+test_that("hdlUnivariate h2Se is positive", {
   res <- pecotmr:::hdlUnivariate(dat$z, dat$n, dat$eigen_ref)
-  expect_true(is.finite(res$h2_se))
-  expect_true(res$h2_se > 0)
+  expect_true(is.finite(res$h2Se))
+  expect_true(res$h2Se > 0)
 })
 
 test_that("hdlUnivariate with local = TRUE returns local data.frame", {
   res <- pecotmr:::hdlUnivariate(dat$z, dat$n, dat$eigen_ref, local = TRUE)
   expect_true(is.data.frame(res$local))
-  expect_true("h2_local" %in% colnames(res$local))
+  expect_true("h2Local" %in% colnames(res$local))
 })
 
 # =============================================================================
@@ -216,7 +216,7 @@ test_that("hdlUnivariate with local = TRUE returns local data.frame", {
 # =============================================================================
 
 # Use 5 blocks and 500 SNPs for annotation tests to avoid singular matrices
-dat_annot <- simulate_h2_data(n_snps = 500, n_blocks = 5)
+dat_annot <- simulate_h2_data(n_snps = 500, nBlocks = 5)
 
 test_that("lderUnivariate with annotations returns enrichment data.frame", {
   annot <- make_test_annotations(dat_annot$n_snps)
@@ -231,28 +231,28 @@ test_that("lder enrichment has correct columns", {
   res <- pecotmr:::lderUnivariate(dat_annot$z, dat_annot$n,
                                    dat_annot$eigen_ref,
                                    annotations = annot)
-  expected_cols <- c("annotation", "tau", "tau_se", "enrichment",
-                     "enrichment_se", "enrichment_p", "prop_h2", "prop_snps")
+  expected_cols <- c("annotation", "tau", "tauSe", "enrichment",
+                     "enrichmentSe", "enrichmentP", "propH2", "propSnps")
   expect_true(all(expected_cols %in% colnames(res$enrichment)))
 })
 
-test_that("lder with annotations returns tau_blocks matrix", {
+test_that("lder with annotations returns tauBlocks matrix", {
   annot <- make_test_annotations(dat_annot$n_snps)
   res <- pecotmr:::lderUnivariate(dat_annot$z, dat_annot$n,
                                    dat_annot$eigen_ref,
                                    annotations = annot)
-  expect_true(is.matrix(res$tau_blocks))
-  # n_blocks rows (5 blocks in the annotation test data)
-  expect_equal(nrow(res$tau_blocks), 5L)
+  expect_true(is.matrix(res$tauBlocks))
+  # nBlocks rows (5 blocks in the annotation test data)
+  expect_equal(nrow(res$tauBlocks), 5L)
 })
 
-test_that("lder with annotations returns score_stats list", {
+test_that("lder with annotations returns scoreStats list", {
   annot <- make_test_annotations(dat_annot$n_snps)
   res <- pecotmr:::lderUnivariate(dat_annot$z, dat_annot$n,
                                    dat_annot$eigen_ref,
                                    annotations = annot)
-  expect_type(res$score_stats, "list")
-  expect_true(all(c("z", "R") %in% names(res$score_stats)))
+  expect_type(res$scoreStats, "list")
+  expect_true(all(c("z", "R") %in% names(res$scoreStats)))
 })
 
 # =============================================================================
@@ -266,8 +266,8 @@ test_that("hdlUnivariate with annotations returns enrichment data.frame with cor
                                   dat_annot$eigen_ref,
                                   annotations = annot)
   expect_true(is.data.frame(res$enrichment))
-  expected_cols <- c("annotation", "tau", "tau_se", "enrichment",
-                     "enrichment_se", "enrichment_p", "prop_h2", "prop_snps")
+  expected_cols <- c("annotation", "tau", "tauSe", "enrichment",
+                     "enrichmentSe", "enrichmentP", "propH2", "propSnps")
   expect_true(all(expected_cols %in% colnames(res$enrichment)))
   # Should have one row per baseline annotation
   expect_equal(nrow(res$enrichment), 1L)  # 1 baseline annotation
@@ -276,19 +276,19 @@ test_that("hdlUnivariate with annotations returns enrichment data.frame with cor
   expect_true(all(is.finite(res$enrichment$enrichment)))
 })
 
-test_that("hdlUnivariate with annotations returns tau_blocks matrix", {
+test_that("hdlUnivariate with annotations returns tauBlocks matrix", {
   set.seed(124)
   annot <- make_test_annotations(dat_annot$n_snps)
   res <- pecotmr:::hdlUnivariate(dat_annot$z, dat_annot$n,
                                   dat_annot$eigen_ref,
                                   annotations = annot)
-  expect_true(is.matrix(res$tau_blocks))
-  # n_blocks rows (5 blocks in dat_annot)
-  expect_equal(nrow(res$tau_blocks), 5L)
+  expect_true(is.matrix(res$tauBlocks))
+  # nBlocks rows (5 blocks in dat_annot)
+  expect_equal(nrow(res$tauBlocks), 5L)
   # Number of columns matches baseline annotation count
-  expect_equal(ncol(res$tau_blocks), 1L)
+  expect_equal(ncol(res$tauBlocks), 1L)
   # Values should be finite
-  expect_true(all(is.finite(res$tau_blocks)))
+  expect_true(all(is.finite(res$tauBlocks)))
 })
 
 test_that("hdlUnivariate with annotations and local = TRUE returns local data.frame", {
@@ -299,30 +299,30 @@ test_that("hdlUnivariate with annotations and local = TRUE returns local data.fr
                                   annotations = annot,
                                   local = TRUE)
   expect_true(is.data.frame(res$local))
-  expect_true("h2_local" %in% colnames(res$local))
-  expect_true("h2_local_se" %in% colnames(res$local))
-  expect_true("block_id" %in% colnames(res$local))
+  expect_true("h2Local" %in% colnames(res$local))
+  expect_true("h2LocalSe" %in% colnames(res$local))
+  expect_true("blockId" %in% colnames(res$local))
   # Should have one row per block
   expect_equal(nrow(res$local), 5L)
 })
 
-test_that("hdlUnivariate with annotations returns score_stats with z and R", {
+test_that("hdlUnivariate with annotations returns scoreStats with z and R", {
   set.seed(126)
   annot <- make_test_annotations(dat_annot$n_snps)
   res <- pecotmr:::hdlUnivariate(dat_annot$z, dat_annot$n,
                                   dat_annot$eigen_ref,
                                   annotations = annot)
-  expect_type(res$score_stats, "list")
-  expect_true(all(c("z", "R") %in% names(res$score_stats)))
+  expect_type(res$scoreStats, "list")
+  expect_true(all(c("z", "R") %in% names(res$scoreStats)))
   # z should have length = number of candidate annotations (1)
-  expect_length(res$score_stats$z, 1L)
-  expect_true(is.finite(res$score_stats$z[1]))
+  expect_length(res$scoreStats$z, 1L)
+  expect_true(is.finite(res$scoreStats$z[1]))
   # R should be a matrix
-  expect_true(is.matrix(res$score_stats$R))
-  expect_equal(dim(res$score_stats$R), c(1L, 1L))
-  # annotation_names should be present
-  expect_true("annotation_names" %in% names(res$score_stats))
-  expect_equal(res$score_stats$annotation_names, "candidate1")
+  expect_true(is.matrix(res$scoreStats$R))
+  expect_equal(dim(res$scoreStats$R), c(1L, 1L))
+  # annotationNames should be present
+  expect_true("annotationNames" %in% names(res$scoreStats))
+  expect_equal(res$scoreStats$annotationNames, "candidate1")
 })
 
 # =============================================================================
@@ -362,8 +362,8 @@ test_that("gldscUnivariate with annotations returns enrichment data.frame", {
                                     dat_annot$ld_score_ref,
                                     annotations = annot)
   expect_true(is.data.frame(res$enrichment))
-  expected_cols <- c("annotation", "tau", "tau_se", "enrichment",
-                     "enrichment_se", "enrichment_p", "prop_h2", "prop_snps")
+  expected_cols <- c("annotation", "tau", "tauSe", "enrichment",
+                     "enrichmentSe", "enrichmentP", "propH2", "propSnps")
   expect_true(all(expected_cols %in% colnames(res$enrichment)))
   # Should have one row per baseline annotation
   expect_equal(nrow(res$enrichment), 1L)
@@ -372,37 +372,37 @@ test_that("gldscUnivariate with annotations returns enrichment data.frame", {
   expect_true(all(is.finite(res$enrichment$enrichment)))
 })
 
-test_that("gldscUnivariate with annotations returns tau_blocks matrix", {
+test_that("gldscUnivariate with annotations returns tauBlocks matrix", {
   set.seed(201)
   annot <- make_gldsc_annotations(dat_annot$n_snps)
   res <- pecotmr:::gldscUnivariate(dat_annot$z, dat_annot$n,
                                     dat_annot$ld_score_ref,
                                     annotations = annot)
-  expect_true(is.matrix(res$tau_blocks))
+  expect_true(is.matrix(res$tauBlocks))
   # gldsc jackknife uses 200 blocks by default; with 500 SNPs the actual
   # number of unique blocks equals ceil(500/ceil(500/200)) = 200
-  expect_true(nrow(res$tau_blocks) > 0)
+  expect_true(nrow(res$tauBlocks) > 0)
   # Number of columns matches baseline annotation count
-  expect_equal(ncol(res$tau_blocks), 1L)
+  expect_equal(ncol(res$tauBlocks), 1L)
   # Values should be finite (allow some NAs from edge blocks)
-  expect_true(any(is.finite(res$tau_blocks)))
+  expect_true(any(is.finite(res$tauBlocks)))
 })
 
-test_that("gldscUnivariate with annotations returns score_stats", {
+test_that("gldscUnivariate with annotations returns scoreStats", {
   set.seed(202)
   annot <- make_gldsc_annotations(dat_annot$n_snps)
   res <- pecotmr:::gldscUnivariate(dat_annot$z, dat_annot$n,
                                     dat_annot$ld_score_ref,
                                     annotations = annot)
-  expect_type(res$score_stats, "list")
-  expect_true(all(c("z", "R") %in% names(res$score_stats)))
+  expect_type(res$scoreStats, "list")
+  expect_true(all(c("z", "R") %in% names(res$scoreStats)))
   # z should have length = number of candidate annotations (1)
-  expect_length(res$score_stats$z, 1L)
-  expect_true(is.finite(res$score_stats$z[1]))
+  expect_length(res$scoreStats$z, 1L)
+  expect_true(is.finite(res$scoreStats$z[1]))
   # R should be a matrix
-  expect_true(is.matrix(res$score_stats$R))
-  expect_equal(dim(res$score_stats$R), c(1L, 1L))
-  # annotation_names should be present
-  expect_true("annotation_names" %in% names(res$score_stats))
-  expect_equal(res$score_stats$annotation_names, "candidate1")
+  expect_true(is.matrix(res$scoreStats$R))
+  expect_equal(dim(res$scoreStats$R), c(1L, 1L))
+  # annotationNames should be present
+  expect_true("annotationNames" %in% names(res$scoreStats))
+  expect_equal(res$scoreStats$annotationNames, "candidate1")
 })

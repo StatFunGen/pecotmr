@@ -20,10 +20,10 @@ the quantile cutoff \emph{and} its p-value is below this threshold.}
 \value{
 A data.frame with columns:
   \describe{
-    \item{sample_id}{Row names from \code{x}, or row indices if unnamed.}
+    \item{sampleId}{Row names from \code{x}, or row indices if unnamed.}
     \item{mahal}{Mahalanobis distance.}
     \item{pvalue}{Chi-squared p-value (df = number of features).}
-    \item{is_outlier}{Logical; TRUE if distance > quantile cutoff and
+    \item{isOutlier}{Logical; TRUE if distance > quantile cutoff and
       p-value < \code{pvalThreshold}.}
   }
 }

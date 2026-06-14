@@ -4,12 +4,12 @@ context("h2_estimate_wrappers")
 # Helper functions to build test S4 objects
 # ===========================================================================
 
-make_test_eigen_ref <- function(nSnps = 20, n_blocks = 2) {
-  snps_per_block <- nSnps / n_blocks
+make_test_eigen_ref <- function(nSnps = 20, nBlocks = 2) {
+  snps_per_block <- nSnps / nBlocks
   blocks_gr <- GenomicRanges::GRanges(
-    seqnames = rep("chr1", n_blocks),
+    seqnames = rep("chr1", nBlocks),
     ranges = IRanges::IRanges(
-      start = seq(1, by = snps_per_block * 100, length.out = n_blocks),
+      start = seq(1, by = snps_per_block * 100, length.out = nBlocks),
       width = snps_per_block * 100 - 1
     )
   )
@@ -24,14 +24,14 @@ make_test_eigen_ref <- function(nSnps = 20, n_blocks = 2) {
     stringsAsFactors = FALSE
   )
 
-  eigen_list <- lapply(seq_len(n_blocks), function(b) {
+  eigen_list <- lapply(seq_len(nBlocks), function(b) {
     idx <- seq((b - 1) * snps_per_block + 1, b * snps_per_block)
     p <- length(idx)
     set.seed(42 + b)
     R <- matrix(0.3, p, p)
     diag(R) <- 1
     e <- eigen(R)
-    list(values = e$values, vectors = e$vectors, snp_idx = as.integer(idx))
+    list(values = e$values, vectors = e$vectors, snpIdx = as.integer(idx))
   })
 
   new("LdEigen",
@@ -45,13 +45,13 @@ make_test_eigen_ref <- function(nSnps = 20, n_blocks = 2) {
   )
 }
 
-make_test_score_ref <- function(nSnps = 20, n_blocks = 2,
+make_test_score_ref <- function(nSnps = 20, nBlocks = 2,
                                 with_ld_matrices = FALSE) {
-  snps_per_block <- nSnps / n_blocks
+  snps_per_block <- nSnps / nBlocks
   blocks_gr <- GenomicRanges::GRanges(
-    seqnames = rep("chr1", n_blocks),
+    seqnames = rep("chr1", nBlocks),
     ranges = IRanges::IRanges(
-      start = seq(1, by = snps_per_block * 100, length.out = n_blocks),
+      start = seq(1, by = snps_per_block * 100, length.out = nBlocks),
       width = snps_per_block * 100 - 1
     )
   )
@@ -72,12 +72,12 @@ make_test_score_ref <- function(nSnps = 20, n_blocks = 2,
   ld_score_weights <- rep(1 / nSnps, nSnps)
 
   ld_matrix_list <- if (with_ld_matrices) {
-    lapply(seq_len(n_blocks), function(b) {
+    lapply(seq_len(nBlocks), function(b) {
       idx <- seq((b - 1) * snps_per_block + 1, b * snps_per_block)
       p <- length(idx)
       R <- matrix(0.3, p, p)
       diag(R) <- 1
-      list(R = R, snp_idx = as.integer(idx))
+      list(R = R, snpIdx = as.integer(idx))
     })
   } else {
     list()
@@ -123,12 +123,12 @@ make_test_h2estimate <- function(with_enrichment = TRUE) {
     data.frame(
       annotation = c("annot1", "annot2"),
       tau = c(1e-7, 2e-7),
-      tau_se = c(5e-8, 6e-8),
+      tauSe = c(5e-8, 6e-8),
       enrichment = c(2.0, 3.0),
-      enrichment_se = c(0.5, 0.7),
-      enrichment_p = c(0.01, 0.001),
-      prop_h2 = c(0.3, 0.5),
-      prop_snps = c(0.15, 0.17),
+      enrichmentSe = c(0.5, 0.7),
+      enrichmentP = c(0.01, 0.001),
+      propH2 = c(0.3, 0.5),
+      propSnps = c(0.15, 0.17),
       stringsAsFactors = FALSE
     )
   } else {
@@ -136,7 +136,7 @@ make_test_h2estimate <- function(with_enrichment = TRUE) {
   }
 
   set.seed(55)
-  tau_blocks <- if (with_enrichment) {
+  tauBlocks <- if (with_enrichment) {
     matrix(rnorm(20), nrow = 10, ncol = 2,
            dimnames = list(NULL, c("annot1", "annot2")))
   } else {
@@ -147,7 +147,7 @@ make_test_h2estimate <- function(with_enrichment = TRUE) {
     h2 = 0.3, h2Se = 0.05,
     intercept = 1.01, interceptSe = 0.02,
     local = NULL, enrichment = enrich,
-    tauBlocks = tau_blocks, scoreStats = NULL,
+    tauBlocks = tauBlocks, scoreStats = NULL,
     method = "lder", nSnps = 100L, traitName = "test"
   )
 }
@@ -251,9 +251,9 @@ test_that("computeLdScores LdScore with annotations but no ld_matrix_list errors
 
 test_that("getlocal returns the local slot", {
   local_df <- data.frame(
-    block_id = 1:3,
-    h2_local = c(0.1, 0.15, 0.05),
-    h2_local_se = c(0.02, 0.03, 0.01),
+    blockId = 1:3,
+    h2Local = c(0.1, 0.15, 0.05),
+    h2LocalSe = c(0.02, 0.03, 0.01),
     stringsAsFactors = FALSE
   )
   h2_obj <- new("H2Estimate",
@@ -273,17 +273,17 @@ test_that("getenrichment returns the enrichment slot", {
   expect_equal(result$annotation, c("annot1", "annot2"))
 })
 
-test_that("getscorestats returns the score_stats slot", {
-  score_stats <- list(z = c(1.5, -0.8), R = diag(2),
-                      annotation_names = c("a1", "a2"))
+test_that("getscorestats returns the scoreStats slot", {
+  scoreStats <- list(z = c(1.5, -0.8), R = diag(2),
+                      annotationNames = c("a1", "a2"))
   h2_obj <- new("H2Estimate",
     h2 = 0.3, h2Se = 0.05,
     intercept = 1.0, interceptSe = 0.01,
     local = NULL, enrichment = NULL,
-    tauBlocks = NULL, scoreStats = score_stats,
+    tauBlocks = NULL, scoreStats = scoreStats,
     method = "lder", nSnps = 100L, traitName = "test"
   )
-  expect_identical(getScoreStats(h2_obj), score_stats)
+  expect_identical(getScoreStats(h2_obj), scoreStats)
 })
 
 test_that("accessors return NULL when slots are NULL", {
@@ -307,16 +307,16 @@ test_that("h2EstimateToSldscTrait returns correct list structure", {
   h2_obj <- make_test_h2estimate(with_enrichment = TRUE)
   result <- h2EstimateToSldscTrait(h2_obj)
 
-  expected_names <- c("categories", "tau", "tau_se", "enrichment",
-                      "enrichment_se", "enrichment_p", "prop_h2",
-                      "prop_snps", "h2g", "tau_blocks", "n_blocks")
+  expected_names <- c("categories", "tau", "tauSe", "enrichment",
+                      "enrichmentSe", "enrichmentP", "propH2",
+                      "propSnps", "h2g", "tauBlocks", "nBlocks")
   expect_true(all(expected_names %in% names(result)))
   expect_equal(length(result), length(expected_names))
 
   expect_equal(result$categories, c("annot1", "annot2"))
   expect_equal(result$h2g, 0.3)
-  expect_true(is.matrix(result$tau_blocks))
-  expect_equal(result$n_blocks, 10L)
+  expect_true(is.matrix(result$tauBlocks))
+  expect_equal(result$nBlocks, 10L)
   expect_equal(names(result$tau), c("annot1", "annot2"))
   expect_equal(names(result$enrichment), c("annot1", "annot2"))
 })
@@ -336,13 +336,13 @@ test_that("h2EstimateToSldscTrait errors when enrichment is NULL", {
   )
 })
 
-test_that("h2EstimateToSldscTrait creates 1-row dummy when tau_blocks is NULL", {
+test_that("h2EstimateToSldscTrait creates 1-row dummy when tauBlocks is NULL", {
   h2_obj <- make_test_h2estimate(with_enrichment = TRUE)
   h2_obj@tauBlocks <- NULL
   result <- h2EstimateToSldscTrait(h2_obj)
-  expect_equal(nrow(result$tau_blocks), 1)
-  expect_equal(result$n_blocks, 1L)
-  expect_equal(colnames(result$tau_blocks), c("annot1", "annot2"))
+  expect_equal(nrow(result$tauBlocks), 1)
+  expect_equal(result$nBlocks, 1L)
+  expect_equal(colnames(result$tauBlocks), c("annot1", "annot2"))
 })
 
 # ===========================================================================

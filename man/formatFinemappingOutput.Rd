@@ -12,13 +12,13 @@ formatFinemappingOutput(post, primaryMethod)
 \item{primaryMethod}{Method whose result should populate root-level fields.}
 }
 \value{
-A list with root-level fields including \code{finemapping_result}
+A list with root-level fields including \code{finemappingResult}
   and \code{top_loci}.
 }
 \description{
 Converts method-aware fine-mapping post-processing output into the root-level
 fields consumed by protocol RDS files. The primary method's
-\code{FineMappingResult} S4 object is promoted to the \code{finemapping_result}
+\code{FineMappingResult} S4 object is promoted to the \code{finemappingResult}
 field; use its accessors (\code{getTrimmedFit}, \code{getVariantNames},
 \code{getTopLoci}, etc.) instead of legacy list keys.
 }

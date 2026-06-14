@@ -6,11 +6,11 @@ context("ensembleWeights")
 # Build a synthetic twasWeightsCv() output with K methods. Each method's
 # prediction is a convex combination of the truth + noise, letting us control
 # per-method accuracy. Returns a list shaped exactly like twasWeightsCv()'s
-# output (with $prediction, $performance, $sample_partition).
+# output (with $prediction, $performance, $samplePartition).
 make_cv_result <- function(n = 100, K = 4, seed = 1, method_quality = NULL) {
   set.seed(seed)
   y <- rnorm(n)
-  sample_names <- paste0("sample_", seq_len(n))
+  sampleNames <- paste0("sample_", seq_len(n))
 
   if (is.null(method_quality)) {
     # Methods with decreasing quality (noise amounts)
@@ -25,7 +25,7 @@ make_cv_result <- function(n = 100, K = 4, seed = 1, method_quality = NULL) {
     noise_sd <- method_quality[k]
     pred <- y + rnorm(n, sd = noise_sd)
     mat <- matrix(pred, ncol = 1)
-    rownames(mat) <- sample_names
+    rownames(mat) <- sampleNames
     colnames(mat) <- "outcome_1"
     mat
   }), pred_names)
@@ -38,12 +38,12 @@ make_cv_result <- function(n = 100, K = 4, seed = 1, method_quality = NULL) {
   }), paste0(method_names, "_performance"))
 
   list(
-    samplePartition = data.frame(Sample = sample_names,
+    samplePartition = data.frame(Sample = sampleNames,
                                    Fold = rep(1:5, length.out = n),
                                    stringsAsFactors = FALSE),
     prediction = prediction,
     performance = performance,
-    time_elapsed = 0,
+    timeElapsed = 0,
     .y = y,
     .method_names = method_names
   )
@@ -118,8 +118,8 @@ test_that("ensembleWeights: coefficients are non-negative and sum to 1", {
   cv <- make_cv_result(n = 100, K = 4, seed = 42)
   res <- ensembleWeights(cv, Y = cv$.y)
 
-  expect_true(all(res$method_coef >= 0))
-  expect_equal(sum(res$method_coef), 1, tolerance = 1e-6)
+  expect_true(all(res$methodCoef >= 0))
+  expect_equal(sum(res$methodCoef), 1, tolerance = 1e-6)
 })
 
 test_that("ensembleWeights: best method receives the largest coefficient", {
@@ -128,7 +128,7 @@ test_that("ensembleWeights: best method receives the largest coefficient", {
                         method_quality = c(0.1, 0.5, 0.8, 1.2))
   res <- ensembleWeights(cv, Y = cv$.y)
 
-  expect_equal(names(which.max(res$method_coef)), "method1")
+  expect_equal(names(which.max(res$methodCoef)), "method1")
 })
 
 test_that("ensembleWeights: does not return ensemble_performance (in-sample R^2 omitted)", {
@@ -143,18 +143,18 @@ test_that("ensembleWeights: per-method R^2 values are sensible (between 0 and 1)
   cv <- make_cv_result(n = 200, K = 4, seed = 21)
   res <- ensembleWeights(cv, Y = cv$.y)
 
-  expect_true(all(res$method_performance >= 0, na.rm = TRUE))
-  expect_true(all(res$method_performance <= 1, na.rm = TRUE))
-  expect_equal(length(res$method_performance), 4)
+  expect_true(all(res$methodPerformance >= 0, na.rm = TRUE))
+  expect_true(all(res$methodPerformance <= 1, na.rm = TRUE))
+  expect_equal(length(res$methodPerformance), 4)
 })
 
 test_that("ensembleWeights: method names are stripped of _predicted suffix", {
   cv <- make_cv_result(n = 50, K = 3, seed = 1)
   res <- ensembleWeights(cv, Y = cv$.y)
 
-  expect_equal(names(res$method_coef),
+  expect_equal(names(res$methodCoef),
                c("method1", "method2", "method3"))
-  expect_equal(names(res$method_performance),
+  expect_equal(names(res$methodPerformance),
                c("method1", "method2", "method3"))
 })
 
@@ -174,7 +174,7 @@ test_that("ensembleWeights: aligns Y and predictions by sample name", {
   res_original <- ensembleWeights(cv, Y = cv$.y)
 
   # Results should be identical regardless of Y order
-  expect_equal(res_aligned$method_coef, res_original$method_coef, tolerance = 1e-10)
+  expect_equal(res_aligned$methodCoef, res_original$methodCoef, tolerance = 1e-10)
 })
 
 test_that("ensembleWeights: aligns Y matrix and predictions by sample name", {
@@ -188,7 +188,7 @@ test_that("ensembleWeights: aligns Y matrix and predictions by sample name", {
   res_aligned <- ensembleWeights(cv, Y = Y_mat)
   res_original <- ensembleWeights(cv, Y = cv$.y)
 
-  expect_equal(res_aligned$method_coef, res_original$method_coef, tolerance = 1e-10)
+  expect_equal(res_aligned$methodCoef, res_original$methodCoef, tolerance = 1e-10)
 })
 
 test_that("ensembleWeights: errors when no common sample names", {
@@ -208,8 +208,8 @@ test_that("ensembleWeights: zero-variance method gets coefficient 0", {
   cv$prediction$method2_predicted[, 1] <- 0.5
   res <- ensembleWeights(cv, Y = cv$.y)
 
-  expect_equal(res$method_coef["method2"], c(method2 = 0))
-  expect_equal(sum(res$method_coef), 1, tolerance = 1e-6)
+  expect_equal(res$methodCoef["method2"], c(method2 = 0))
+  expect_equal(sum(res$methodCoef), 1, tolerance = 1e-6)
 })
 
 test_that("ensembleWeights: NA predictions in some samples are dropped", {
@@ -219,7 +219,7 @@ test_that("ensembleWeights: NA predictions in some samples are dropped", {
     res <- ensembleWeights(cv, Y = cv$.y),
     "Dropping"
   )
-  expect_equal(sum(res$method_coef), 1, tolerance = 1e-6)
+  expect_equal(sum(res$methodCoef), 1, tolerance = 1e-6)
 })
 
 test_that("ensembleWeights: all zero-variance methods errors", {
@@ -234,29 +234,29 @@ test_that("ensembleWeights: all zero-variance methods errors", {
 #  Weight combination
 # ===========================================================================
 
-test_that("ensembleWeights: ensemble_twas_weights is sum of zeta_k * w_k", {
+test_that("ensembleWeights: ensembleTwasWeights is sum of zeta_k * w_k", {
   cv <- make_cv_result(n = 100, K = 3, seed = 42)
   wt <- make_weight_list(p = 10, method_names = cv$.method_names)
 
   res <- ensembleWeights(cv, Y = cv$.y, twasWeightList = wt)
 
-  expect_false(is.null(res$ensemble_twas_weights))
+  expect_false(is.null(res$ensembleTwasWeights))
 
   # Verify the combination is correct
   expected <- matrix(0, nrow = 10, ncol = 1)
   for (k in seq_along(cv$.method_names)) {
     m <- cv$.method_names[k]
-    expected <- expected + res$method_coef[m] * wt[[paste0(m, "_weights")]]
+    expected <- expected + res$methodCoef[m] * wt[[paste0(m, "_weights")]]
   }
-  expect_equal(as.numeric(res$ensemble_twas_weights),
+  expect_equal(as.numeric(res$ensembleTwasWeights),
                as.numeric(expected),
                tolerance = 1e-10)
 })
 
-test_that("ensembleWeights: NULL twas_weight_list returns NULL ensemble_twas_weights", {
+test_that("ensembleWeights: NULL twas_weight_list returns NULL ensembleTwasWeights", {
   cv <- make_cv_result(n = 50, K = 3, seed = 1)
   res <- ensembleWeights(cv, Y = cv$.y, twasWeightList = NULL)
-  expect_null(res$ensemble_twas_weights)
+  expect_null(res$ensembleTwasWeights)
 })
 
 test_that("ensembleWeights: weights with no matching keys warns and skips", {
@@ -267,7 +267,7 @@ test_that("ensembleWeights: weights with no matching keys warns and skips", {
     res <- ensembleWeights(cv, Y = cv$.y, twasWeightList = wt),
     "No matching weight keys"
   )
-  expect_null(res$ensemble_twas_weights)
+  expect_null(res$ensembleTwasWeights)
 })
 
 # ===========================================================================
@@ -283,9 +283,9 @@ test_that("ensembleWeights: multi-dataset combines predictions correctly", {
     Y = list(cv1$.y, cv2$.y)
   )
 
-  expect_true(all(res$method_coef >= 0))
-  expect_equal(sum(res$method_coef), 1, tolerance = 1e-6)
-  expect_equal(length(res$method_performance), 3)
+  expect_true(all(res$methodCoef >= 0))
+  expect_equal(sum(res$methodCoef), 1, tolerance = 1e-6)
+  expect_equal(length(res$methodPerformance), 3)
 })
 
 test_that("ensembleWeights: Y as matrix with context_index works", {
@@ -294,7 +294,7 @@ test_that("ensembleWeights: Y as matrix with context_index works", {
   colnames(Y_mat) <- "ctx1"
 
   res <- ensembleWeights(cv, Y = Y_mat, contextIndex = 1)
-  expect_equal(sum(res$method_coef), 1, tolerance = 1e-6)
+  expect_equal(sum(res$methodCoef), 1, tolerance = 1e-6)
 })
 
 # ===========================================================================
@@ -324,9 +324,9 @@ test_that("ensembleWeights: end-to-end with twasWeightsCv output", {
 
   res <- ensembleWeights(cv, Y = y)
 
-  expect_equal(sum(res$method_coef), 1, tolerance = 1e-6)
-  expect_true(all(res$method_coef >= 0))
-  expect_equal(names(res$method_coef), c("lasso", "enet"))
+  expect_equal(sum(res$methodCoef), 1, tolerance = 1e-6)
+  expect_true(all(res$methodCoef >= 0))
+  expect_equal(names(res$methodCoef), c("lasso", "enet"))
   expect_null(res$ensemble_performance)
 })
 
@@ -360,7 +360,7 @@ test_that("pipeline: ensemble=TRUE with only 1 method prints skip message", {
 
   # No ensemble result should be present
   expect_null(res$ensemble)
-  expect_false("ensembleWeights" %in% getMethodNames(res$twas_weights))
+  expect_false("ensembleWeights" %in% getMethodNames(res$twasWeights))
 })
 
 test_that("pipeline: ensemble=TRUE skips when methods fail R^2 cutoff", {
@@ -388,7 +388,7 @@ test_that("pipeline: ensemble=TRUE skips when methods fail R^2 cutoff", {
 
   expect_true(any(grepl("Ensemble TWAS skipped", msgs)))
   expect_null(res$ensemble)
-  expect_false("ensembleWeights" %in% getMethodNames(res$twas_weights))
+  expect_false("ensembleWeights" %in% getMethodNames(res$twasWeights))
 })
 
 test_that("pipeline: ensemble=TRUE succeeds and adds ensembleWeights", {
@@ -415,21 +415,21 @@ test_that("pipeline: ensemble=TRUE succeeds and adds ensembleWeights", {
   expect_true(any(grepl("Computing ensemble TWAS weights", msgs)))
 
   # Ensemble weights added alongside individual methods
-  expect_true("ensembleWeights" %in% getMethodNames(res$twas_weights))
-  expect_true("lassoWeights" %in% getMethodNames(res$twas_weights))
-  expect_true("enetWeights" %in% getMethodNames(res$twas_weights))
+  expect_true("ensembleWeights" %in% getMethodNames(res$twasWeights))
+  expect_true("lassoWeights" %in% getMethodNames(res$twasWeights))
+  expect_true("enetWeights" %in% getMethodNames(res$twasWeights))
 
   # Ensemble predictions added
-  expect_true("ensemble_predicted" %in% names(res$twas_predictions))
+  expect_true("ensemble_predicted" %in% names(res$twasPredictions))
 
   # Ensemble result metadata present
   expect_false(is.null(res$ensemble))
-  expect_true(all(res$ensemble$method_coef >= 0))
-  expect_equal(sum(res$ensemble$method_coef), 1, tolerance = 1e-6)
+  expect_true(all(res$ensemble$methodCoef >= 0))
+  expect_equal(sum(res$ensemble$methodCoef), 1, tolerance = 1e-6)
 
   # Ensemble weights should have same length as individual weights
-  expect_equal(length(getWeights(res$twas_weights,"ensembleWeights")),
-               length(getWeights(res$twas_weights,"lassoWeights")))
+  expect_equal(length(getWeights(res$twasWeights,"ensembleWeights")),
+               length(getWeights(res$twasWeights,"lassoWeights")))
 })
 
 test_that("pipeline: ensemble=FALSE does not run ensemble", {
@@ -452,7 +452,7 @@ test_that("pipeline: ensemble=FALSE does not run ensemble", {
   ))
 
   expect_null(res$ensemble)
-  expect_false("ensembleWeights" %in% getMethodNames(res$twas_weights))
+  expect_false("ensembleWeights" %in% getMethodNames(res$twasWeights))
 })
 
 test_that("pipeline: ensemble_r2_threshold filters methods for ensemble", {
@@ -505,9 +505,9 @@ for (slv in c("quadprog", "nnls", "lbfgsb", "glmnet")) {
     cv <- make_cv_result(n = 100, K = 4, seed = 42)
     res <- ensembleWeights(cv, Y = cv$.y, solver = slv)
 
-    expect_true(all(res$method_coef >= 0))
-    expect_equal(sum(res$method_coef), 1, tolerance = 1e-6)
-    expect_equal(length(res$method_coef), 4)
+    expect_true(all(res$methodCoef >= 0))
+    expect_equal(sum(res$methodCoef), 1, tolerance = 1e-6)
+    expect_equal(length(res$methodCoef), 4)
   })
 
   test_that(paste0("ensembleWeights: solver='", slv, "' assigns best method largest coef"), {
@@ -519,7 +519,7 @@ for (slv in c("quadprog", "nnls", "lbfgsb", "glmnet")) {
                           method_quality = c(0.1, 0.5, 0.8, 1.2))
     res <- ensembleWeights(cv, Y = cv$.y, solver = slv)
 
-    expect_equal(names(which.max(res$method_coef)), "method1")
+    expect_equal(names(which.max(res$methodCoef)), "method1")
   })
 
   test_that(paste0("ensembleWeights: solver='", slv, "' combines weights correctly"), {
@@ -531,14 +531,14 @@ for (slv in c("quadprog", "nnls", "lbfgsb", "glmnet")) {
     wt <- make_weight_list(p = 10, method_names = cv$.method_names)
     res <- ensembleWeights(cv, Y = cv$.y, twasWeightList = wt, solver = slv)
 
-    expect_false(is.null(res$ensemble_twas_weights))
+    expect_false(is.null(res$ensembleTwasWeights))
 
     expected <- matrix(0, nrow = 10, ncol = 1)
     for (k in seq_along(cv$.method_names)) {
       m <- cv$.method_names[k]
-      expected <- expected + res$method_coef[m] * wt[[paste0(m, "_weights")]]
+      expected <- expected + res$methodCoef[m] * wt[[paste0(m, "_weights")]]
     }
-    expect_equal(as.numeric(res$ensemble_twas_weights),
+    expect_equal(as.numeric(res$ensembleTwasWeights),
                  as.numeric(expected),
                  tolerance = 1e-10)
   })
@@ -574,9 +574,9 @@ test_that("pipeline: ensemble_solver='nnls' works end-to-end", {
   )
 
   expect_true(any(grepl("Computing ensemble TWAS weights", msgs)))
-  expect_true("ensembleWeights" %in% getMethodNames(res$twas_weights))
-  expect_true(all(res$ensemble$method_coef >= 0))
-  expect_equal(sum(res$ensemble$method_coef), 1, tolerance = 1e-6)
+  expect_true("ensembleWeights" %in% getMethodNames(res$twasWeights))
+  expect_true(all(res$ensemble$methodCoef >= 0))
+  expect_equal(sum(res$ensemble$methodCoef), 1, tolerance = 1e-6)
 })
 
 test_that("pipeline: ensemble_solver='lbfgsb' works end-to-end", {
@@ -602,9 +602,9 @@ test_that("pipeline: ensemble_solver='lbfgsb' works end-to-end", {
   )
 
   expect_true(any(grepl("Computing ensemble TWAS weights", msgs)))
-  expect_true("ensembleWeights" %in% getMethodNames(res$twas_weights))
-  expect_true(all(res$ensemble$method_coef >= 0))
-  expect_equal(sum(res$ensemble$method_coef), 1, tolerance = 1e-6)
+  expect_true("ensembleWeights" %in% getMethodNames(res$twasWeights))
+  expect_true(all(res$ensemble$methodCoef >= 0))
+  expect_equal(sum(res$ensemble$methodCoef), 1, tolerance = 1e-6)
 })
 
 test_that("pipeline: ensemble_solver='glmnet' works end-to-end", {
@@ -630,9 +630,9 @@ test_that("pipeline: ensemble_solver='glmnet' works end-to-end", {
   )
 
   expect_true(any(grepl("Computing ensemble TWAS weights", msgs)))
-  expect_true("ensembleWeights" %in% getMethodNames(res$twas_weights))
-  expect_true(all(res$ensemble$method_coef >= 0))
-  expect_equal(sum(res$ensemble$method_coef), 1, tolerance = 1e-6)
+  expect_true("ensembleWeights" %in% getMethodNames(res$twasWeights))
+  expect_true(all(res$ensemble$methodCoef >= 0))
+  expect_equal(sum(res$ensemble$methodCoef), 1, tolerance = 1e-6)
 })
 
 test_that("ensembleWeights: solver='glmnet' respects alpha parameter", {
@@ -644,13 +644,13 @@ test_that("ensembleWeights: solver='glmnet' respects alpha parameter", {
   res_ridge <- ensembleWeights(cv, Y = cv$.y, solver = "glmnet", alpha = 0)
 
   # Both should be valid
-  expect_true(all(res_lasso$method_coef >= 0))
-  expect_equal(sum(res_lasso$method_coef), 1, tolerance = 1e-6)
-  expect_true(all(res_ridge$method_coef >= 0))
-  expect_equal(sum(res_ridge$method_coef), 1, tolerance = 1e-6)
+  expect_true(all(res_lasso$methodCoef >= 0))
+  expect_equal(sum(res_lasso$methodCoef), 1, tolerance = 1e-6)
+  expect_true(all(res_ridge$methodCoef >= 0))
+  expect_equal(sum(res_ridge$methodCoef), 1, tolerance = 1e-6)
 
   # Lasso should be at least as sparse as ridge (fewer or equal non-zero coefs)
-  n_nonzero_lasso <- sum(res_lasso$method_coef > 1e-8)
-  n_nonzero_ridge <- sum(res_ridge$method_coef > 1e-8)
+  n_nonzero_lasso <- sum(res_lasso$methodCoef > 1e-8)
+  n_nonzero_ridge <- sum(res_ridge$methodCoef > 1e-8)
   expect_true(n_nonzero_lasso <= n_nonzero_ridge)
 })

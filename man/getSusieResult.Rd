@@ -8,14 +8,14 @@ getSusieResult(conData)
 }
 \arguments{
 \item{conData}{List. The method-layer entry from a finemapping pipeline
-result, expected to carry \code{$finemapping_result} as a
+result, expected to carry \code{$finemappingResult} as a
 \code{FineMappingResult} object.}
 }
 \value{
 The trimmed fit (a list with \code{pip}, \code{sets}, etc.) or NULL.
 }
 \description{
-Returns the trimmed model fit underlying \code{con_data$finemapping_result}
+Returns the trimmed model fit underlying \code{con_data$finemappingResult}
 (a \code{FineMappingResult} S4 object), or NULL if no fine-mapping result
 is attached.
 }

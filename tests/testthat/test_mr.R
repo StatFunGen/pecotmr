@@ -65,7 +65,7 @@ generate_mock_mr_formatted_input <- function(num_variants = NULL, generate_full_
   }
   if (generate_full_dataset) {
     data.frame(
-      gene_name = rep("Gene1", num_variants),
+      geneName = rep("Gene1", num_variants),
       #cs = sample(1:2, num_variants, replace = TRUE),
       cs = as.integer(rep(1,num_variants)),
       variant_id = paste0("1:", 1:num_variants, ":", generate_ref_alt(num_variants)),
@@ -78,7 +78,7 @@ generate_mock_mr_formatted_input <- function(num_variants = NULL, generate_full_
     )
   } else {
     data.frame(
-     gene_name = "Gene1",
+     geneName = "Gene1",
      variant_id = as.character(NA),
      bhat_x = as.numeric(NA),
      sbhat_x = as.numeric(NA),
@@ -161,10 +161,10 @@ test_that("mrFormat functions with normal parameters", {
 
   res <- mrFormat(input_data$susie_result, condition, input_data$gwas_sumstats_db, coverage, alleleQc)
   expect_true(is.data.frame(res))
-  expect_true(all(c("gene_name", "variant_id", "bhat_x", "sbhat_x", "cs", "pip", "bhat_y", "sbhat_y") %in% names(res)))
+  expect_true(all(c("geneName", "variant_id", "bhat_x", "sbhat_x", "cs", "pip", "bhat_y", "sbhat_y") %in% names(res)))
   expect_gt(nrow(res), 0)
-  # gene_name should be populated
-  expect_true(all(res$gene_name == res$gene_name[1]))
+  # geneName should be populated
+  expect_true(all(res$geneName == res$geneName[1]))
   # When we get matched rows, bhat_y and sbhat_y should be numeric
   expect_true(is.numeric(res$bhat_y))
   expect_true(is.numeric(res$sbhat_y))
@@ -211,7 +211,7 @@ test_that("mrAnalysis returns expected output with normal inputs", {
   result <- mrAnalysis(input_data, cpipCutoff = 0.5)
   expect_true(is.data.frame(result))
   expect_gt(nrow(result), 0)
-  expect_true(all(c("gene_name", "num_CS", "num_IV", "cpip", "meta_eff", "se_meta_eff", "meta_pval", "Q", "Q_pval", "I2") %in% names(result)))
+  expect_true(all(c("geneName", "num_CS", "num_IV", "cpip", "meta_eff", "se_meta_eff", "meta_pval", "Q", "Q_pval", "I2") %in% names(result)))
   # When result has non-NA values, verify value properties
   if (!is.na(result$meta_eff)) {
     expect_true(is.finite(result$meta_eff))
@@ -220,7 +220,7 @@ test_that("mrAnalysis returns expected output with normal inputs", {
   }
 })
 
-test_that("mrAnalysis returns null output for all NA input except gene_name", {
+test_that("mrAnalysis returns null output for all NA input except geneName", {
   input_data <- generate_mock_mr_formatted_input(generate_full_dataset = FALSE)
   result <- mrAnalysis(input_data, cpipCutoff = 0.5)
   expect_true(is.data.frame(result))
@@ -240,7 +240,7 @@ test_that("mrAnalysis handles no significant cpip values correctly", {
 test_that("mrAnalysis: single CS single variant with pip above cutoff", {
   set.seed(42)
   input <- data.frame(
-    gene_name = "GENE_SINGLE",
+    geneName = "GENE_SINGLE",
     variant_id = "1:500:A:C",
     bhat_x = 0.8,
     sbhat_x = 0.1,
@@ -254,7 +254,7 @@ test_that("mrAnalysis: single CS single variant with pip above cutoff", {
   result <- mrAnalysis(input, cpipCutoff = 0.5)
   expect_s3_class(result, "data.frame")
   expect_equal(nrow(result), 1)
-  expect_equal(result$gene_name, "GENE_SINGLE")
+  expect_equal(result$geneName, "GENE_SINGLE")
   expect_equal(result$num_CS, 1L)
   expect_equal(result$num_IV, 1L)
   expect_equal(result$Q, 0)
@@ -267,7 +267,7 @@ test_that("mrAnalysis: single CS single variant with pip above cutoff", {
 test_that("mrAnalysis: cpip exactly at cutoff boundary is included", {
   set.seed(101)
   input <- data.frame(
-    gene_name = rep("GENE_BOUNDARY", 2),
+    geneName = rep("GENE_BOUNDARY", 2),
     variant_id = c("1:100:A:G", "1:200:C:T"),
     bhat_x = c(0.5, 0.4),
     sbhat_x = c(0.1, 0.1),
@@ -282,14 +282,14 @@ test_that("mrAnalysis: cpip exactly at cutoff boundary is included", {
   expect_s3_class(result, "data.frame")
   expect_equal(nrow(result), 1)
   expect_false(is.na(result$meta_eff))
-  expect_equal(result$gene_name, "GENE_BOUNDARY")
+  expect_equal(result$geneName, "GENE_BOUNDARY")
   expect_equal(result$cpip, 0.5)
 })
 
 test_that("mrAnalysis: cpip just below cutoff returns null output", {
   set.seed(102)
   input <- data.frame(
-    gene_name = rep("GENE_BELOW", 2),
+    geneName = rep("GENE_BELOW", 2),
     variant_id = c("1:100:A:G", "1:200:C:T"),
     bhat_x = c(0.5, 0.4),
     sbhat_x = c(0.1, 0.1),
@@ -304,13 +304,13 @@ test_that("mrAnalysis: cpip just below cutoff returns null output", {
   expect_s3_class(result, "data.frame")
   expect_equal(nrow(result), 1)
   expect_true(is.na(result$meta_eff))
-  expect_equal(result$gene_name, "GENE_BELOW")
+  expect_equal(result$geneName, "GENE_BELOW")
 })
 
 test_that("mrAnalysis: output columns are rounded to 3 decimal places", {
   set.seed(300)
   input <- data.frame(
-    gene_name = rep("GENE_ROUND", 4),
+    geneName = rep("GENE_ROUND", 4),
     variant_id = c("1:10:A:G", "1:20:C:T", "1:30:G:A", "1:40:T:C"),
     bhat_x = c(0.5, 0.3, 0.4, 0.6),
     sbhat_x = c(0.1, 0.1, 0.1, 0.1),
@@ -333,11 +333,11 @@ test_that("mrAnalysis: output columns are rounded to 3 decimal places", {
   }
 })
 
-test_that("mrAnalysis: gene_name is preserved in output", {
+test_that("mrAnalysis: geneName is preserved in output", {
   set.seed(400)
   gene <- "ENSG00000012345_BRCA1"
   input <- data.frame(
-    gene_name = rep(gene, 2),
+    geneName = rep(gene, 2),
     variant_id = c("1:100:A:G", "1:200:C:T"),
     bhat_x = c(0.5, 0.3),
     sbhat_x = c(0.1, 0.1),
@@ -349,13 +349,13 @@ test_that("mrAnalysis: gene_name is preserved in output", {
   )
 
   result <- mrAnalysis(input, cpipCutoff = 0.5)
-  expect_equal(result$gene_name, gene)
+  expect_equal(result$geneName, gene)
 })
 
 test_that("mrAnalysis: meta_pval is a valid probability", {
   set.seed(600)
   input <- data.frame(
-    gene_name = rep("GENE_ORDER", 3),
+    geneName = rep("GENE_ORDER", 3),
     variant_id = c("1:10:A:G", "1:20:C:T", "1:30:G:A"),
     bhat_x = c(0.5, 0.3, 0.4),
     sbhat_x = c(0.1, 0.1, 0.1),
@@ -373,7 +373,7 @@ test_that("mrAnalysis: meta_pval is a valid probability", {
 test_that("mrAnalysis: se_meta_eff is always positive when result is non-null", {
   set.seed(700)
   input <- data.frame(
-    gene_name = rep("GENE_SE", 3),
+    geneName = rep("GENE_SE", 3),
     variant_id = c("1:10:A:G", "1:20:C:T", "1:30:G:A"),
     bhat_x = c(0.5, -0.3, 0.4),
     sbhat_x = c(0.1, 0.1, 0.1),
@@ -391,7 +391,7 @@ test_that("mrAnalysis: se_meta_eff is always positive when result is non-null", 
 test_that("mrAnalysis: I2 is between 0 and 1 inclusive", {
   set.seed(800)
   input <- data.frame(
-    gene_name = rep("GENE_I2", 4),
+    geneName = rep("GENE_I2", 4),
     variant_id = c("1:10:A:G", "1:20:C:T", "1:30:G:A", "1:40:T:C"),
     bhat_x = c(0.5, 0.3, 0.4, 0.6),
     sbhat_x = c(0.1, 0.1, 0.1, 0.1),
@@ -409,7 +409,7 @@ test_that("mrAnalysis: I2 is between 0 and 1 inclusive", {
 test_that("mrAnalysis: Q_pval is a valid probability", {
   set.seed(801)
   input <- data.frame(
-    gene_name = rep("GENE_QPVAL", 4),
+    geneName = rep("GENE_QPVAL", 4),
     variant_id = c("1:10:A:G", "1:20:C:T", "1:30:G:A", "1:40:T:C"),
     bhat_x = c(0.5, 0.3, 0.4, 0.6),
     sbhat_x = c(0.1, 0.1, 0.1, 0.1),
@@ -427,7 +427,7 @@ test_that("mrAnalysis: Q_pval is a valid probability", {
 test_that("mrAnalysis: cpipCutoff = 0 includes all CS groups", {
   set.seed(900)
   input <- data.frame(
-    gene_name = rep("GENE_CUTOFF0", 3),
+    geneName = rep("GENE_CUTOFF0", 3),
     variant_id = c("1:10:A:G", "1:20:C:T", "1:30:G:A"),
     bhat_x = c(0.5, 0.3, 0.4),
     sbhat_x = c(0.1, 0.1, 0.1),
@@ -449,7 +449,7 @@ test_that("mrAnalysis: cpipCutoff = 0 includes all CS groups", {
 test_that("mrAnalysis: cpipCutoff = 1 excludes CS with cpip < 1", {
   set.seed(901)
   input <- data.frame(
-    gene_name = rep("GENE_CUTOFF1", 3),
+    geneName = rep("GENE_CUTOFF1", 3),
     variant_id = c("1:10:A:G", "1:20:C:T", "1:30:G:A"),
     bhat_x = c(0.5, 0.3, 0.4),
     sbhat_x = c(0.1, 0.1, 0.1),
@@ -467,7 +467,7 @@ test_that("mrAnalysis: cpipCutoff = 1 excludes CS with cpip < 1", {
 test_that("mrAnalysis: mixed CS where only some pass cpip filter", {
   set.seed(1000)
   input <- data.frame(
-    gene_name = rep("GENE_MIXED", 4),
+    geneName = rep("GENE_MIXED", 4),
     variant_id = c("1:10:A:G", "1:20:C:T", "1:30:G:A", "1:40:T:C"),
     bhat_x = c(0.5, 0.3, 0.4, 0.6),
     sbhat_x = c(0.1, 0.1, 0.1, 0.1),
@@ -489,7 +489,7 @@ test_that("mrAnalysis: mixed CS where only some pass cpip filter", {
 test_that("mrAnalysis: large negative bhat_x values are handled", {
   set.seed(1100)
   input <- data.frame(
-    gene_name = rep("GENE_NEG", 2),
+    geneName = rep("GENE_NEG", 2),
     variant_id = c("1:10:A:G", "1:20:C:T"),
     bhat_x = c(-2.5, -1.8),
     sbhat_x = c(0.1, 0.1),
@@ -514,7 +514,7 @@ test_that("mrAnalysis: bhat_x normalized to z-score (bhat_x/sbhat_x) then sbhat_
   sy <- 0.05
 
   input <- data.frame(
-    gene_name = "GENE_NORM",
+    geneName = "GENE_NORM",
     variant_id = "1:10:A:G",
     bhat_x = bx,
     sbhat_x = sx,
@@ -538,7 +538,7 @@ test_that("mrAnalysis: bhat_x normalized to z-score (bhat_x/sbhat_x) then sbhat_
 
 test_that("mrAnalysis with multiple credible sets", {
   input <- data.frame(
-    gene_name = rep("GENE1", 4),
+    geneName = rep("GENE1", 4),
     variant_id = paste0("1:", seq(100, 400, 100), ":A:G"),
     bhat_x = c(0.5, 0.3, 0.4, 0.6),
     sbhat_x = c(0.1, 0.1, 0.1, 0.1),
@@ -563,7 +563,7 @@ test_that(".createNullMrDf creates correct structure", {
   result <- pecotmr:::.createNullMrDf("gene1", spec)
   expect_s3_class(result, "data.frame")
   expect_equal(nrow(result), 1)
-  expect_equal(result$gene_name, "gene1")
+  expect_equal(result$geneName, "gene1")
   expect_true(is.numeric(result$x))
   expect_true(is.character(result$y))
   expect_true(is.integer(result$z))
@@ -575,7 +575,7 @@ test_that(".createNullMrDf creates correct structure", {
 # =============================================================================
 
 test_that("mrFormat returns null df when getNestedElement errors for top_loci", {
-  # susie_result has the gene_name path but top_loci path is broken
+  # susie_result has the geneName path but top_loci path is broken
   bad_susie <- list(susie_results = list(
     condition1 = list(
       region_info = list(region_name = "Gene_Test")

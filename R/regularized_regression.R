@@ -31,10 +31,10 @@ mrAshRssWeights <- function(stat, LD, varY, sigma2E, s0, w0, z = numeric(0), ...
 #' @param seed Random seed for reproducibility. Default is NULL.
 #'
 #' @return A list containing the posterior estimates:
-#'   - beta_est: Posterior estimates of SNP effect sizes.
-#'   - psi_est: Posterior estimates of psi (shrinkage parameters).
-#'   - sigma_est: Posterior estimate of the residual variance.
-#'   - phi_est: Posterior estimate of the global shrinkage parameter.
+#'   - betaEst: Posterior estimates of SNP effect sizes.
+#'   - psiEst: Posterior estimates of psi (shrinkage parameters).
+#'   - sigmaEst: Posterior estimate of the residual variance.
+#'   - phiEst: Posterior estimate of the global shrinkage parameter.
 #' @examples
 #' # Generate example data
 #' set.seed(985115)
@@ -76,7 +76,7 @@ mrAshRssWeights <- function(stat, LD, varY, sigma2E, s0, w0, z = numeric(0), ...
 #' LD <- list(blk1 = R.hat)
 #' out <- prsCs(b.hat, LD, n, maf = maf)
 #' # In sample prediction correlations
-#' cor(X %*% out$beta_est, y) # 0.9944553
+#' cor(X %*% out$betaEst, y) # 0.9944553
 #' @export
 prsCs <- function(bhat, LD, n,
                   a = 1, b = 0.5, phi = NULL,
@@ -110,13 +110,12 @@ prsCs <- function(bhat, LD, n,
     verbose = verbose, seed = seed
   )
 
-  # Return the result as a list.
-  # prsCsRcpp returns camelCase keys; rename to snake_case for the R interface.
+  # Return the result as a list (camelCase to match the rest of the package API).
   list(
-    beta_est = result$betaEst,
-    psi_est = result$psiEst,
-    sigma_est = result$sigmaEst,
-    phi_est = result$phiEst
+    betaEst = result$betaEst,
+    psiEst = result$psiEst,
+    sigmaEst = result$sigmaEst,
+    phiEst = result$phiEst
   )
 }
 
@@ -126,7 +125,7 @@ prsCs <- function(bhat, LD, n,
 prsCsWeights <- function(stat, LD, ...) {
   model <- prsCs(bhat = stat$b, LD = list(blk1 = LD), n = median(stat$n), ...)
 
-  return(model$beta_est)
+  return(model$betaEst)
 }
 
 #' SDPR (Summary-Statistics-Based Dirichelt Process Regression for Polygenic Risk Prediction)
@@ -256,7 +255,7 @@ sdprWeights <- function(stat, LD, ...) {
   return(model$betaEst)
 }
 
-# Shared helper for susie/susie_ash/susie_inf weight extraction.
+# Shared helper for susie/susieAsh/susieInf weight extraction.
 # @param fit A susie fit object (or NULL to fit from X, y).
 # @param X Genotype matrix (optional).
 # @param y Phenotype vector (optional).
@@ -356,9 +355,9 @@ susieInfWeights <- function(X = NULL, y = NULL, susieInfFit = NULL, retainFit = 
 # SuSiE-RSS weight functions
 # =============================================================================
 
-# Internal helper: extract weights from a susie_rss fit.
+# Internal helper: extract weights from a susieRss fit.
 # Mirrors .susie_extract_weights but uses the RSS interface.
-#' @importFrom susieR coef.susie susie_rss
+#' @importFrom susieR coef.susie susieRss
 #' @noRd
 .susieRssExtractWeights <- function(fit, z, R, n,
                                     requiredFields, fitArgs = list(),
@@ -368,7 +367,7 @@ susieInfWeights <- function(X = NULL, y = NULL, susieInfFit = NULL, retainFit = 
   }
   if (length(fit$pip) != nrow(R)) {
     stop(paste0(
-      "Dimension mismatch: susie_rss fit has ", length(fit$pip),
+      "Dimension mismatch: susieRss fit has ", length(fit$pip),
       " variants but R has ", nrow(R), " rows."))
   }
   if (all(requiredFields %in% names(fit))) {
@@ -603,7 +602,7 @@ mrmashRssWeights <- function(stat, LD, mrmashRssFit = NULL,
 #' Compute mvSuSiE-RSS TWAS weights from summary statistics
 #'
 #' Multi-context summary-statistics analog of \code{\link{mvsusieWeights}}:
-#' extracts coefficients from an existing \code{mvsusieR::mvsusie_rss} fit,
+#' extracts coefficients from an existing \code{mvsusieR::mvsusieRss} fit,
 #' or fits one from \code{stat$z} (variants x conditions) and \code{LD}.
 #'
 #' Follows the \code{*_rss_weights(stat, LD, ...)} contract. Expects
@@ -613,7 +612,7 @@ mrmashRssWeights <- function(stat, LD, mrmashRssFit = NULL,
 #' @param stat A list with \code{z} (matrix variants x conditions) and
 #'   \code{n} (numeric vector or scalar).
 #' @param LD LD correlation matrix.
-#' @param mvsusieRssFit Optional pre-fitted \code{mvsusie_rss} object.
+#' @param mvsusieRssFit Optional pre-fitted \code{mvsusieRss} object.
 #' @param priorVariance Optional mvSuSiE prior variance specification.
 #'   When NULL, \code{mvsusieR::create_mixture_prior()} is used with
 #'   \code{R = ncol(stat$z)}.
@@ -621,7 +620,7 @@ mrmashRssWeights <- function(stat, LD, mrmashRssFit = NULL,
 #' @param L Maximum number of single effects (default 30).
 #' @param LGreedy Initial greedy effect count (default 5).
 #' @param retainFit If TRUE, attaches the fitted object as an attribute.
-#' @param ... Additional arguments forwarded to \code{mvsusieR::mvsusie_rss}.
+#' @param ... Additional arguments forwarded to \code{mvsusieR::mvsusieRss}.
 #'
 #' @return A numeric matrix of per-variant per-context weights
 #'   (variants x conditions).
@@ -641,13 +640,13 @@ mvsusieRssWeights <- function(stat, LD, mvsusieRssFit = NULL,
       stop("mvsusieRssWeights expects stat$z to have >= 2 columns ",
            "(one per context). For single-context use susieRssWeights().")
     }
-    # mvsusieR::mvsusie_rss expects N to be a single scalar
+    # mvsusieR::mvsusieRss expects N to be a single scalar
     nScalar <- as.numeric(stats::median(stat$n))
     if (is.null(priorVariance)) {
       priorVariance <- mvsusieR::create_mixture_prior(R = ncol(Z))
     }
     if (!is.null(LGreedy)) LGreedy <- min(LGreedy, L)
-    mvsusieRssFit <- mvsusieR::mvsusie_rss(
+    mvsusieRssFit <- mvsusieR::mvsusieRss(
       Z = Z, R = LD, N = nScalar,
       prior_variance = priorVariance,
       residual_variance = residualVariance, ...
@@ -1130,7 +1129,7 @@ bayesRWeights <- function(X, y, Z = NULL, ...) {
 #' @param maxiter Maximum number of iterations. Default: 10000.
 #'
 #' @return A list containing:
-#'   \item{beta_est}{Posterior estimates of SNP effect sizes at best lambda.}
+#'   \item{betaEst}{Posterior estimates of SNP effect sizes at best lambda.}
 #'   \item{beta}{Matrix of estimates (p x nlambda).}
 #'   \item{lambda}{The lambda values used.}
 #'   \item{conv}{Convergence indicators (1 = converged).}
@@ -1181,7 +1180,7 @@ lassosumRss <- function(bhat, LD, n,
   result$fbeta <- result$fbeta[invOrder]
   result$lambda <- lambda
   result$nparams <- as.integer(colSums(result$beta != 0))
-  result$beta_est <- as.numeric(result$beta[, which.min(result$fbeta)])
+  result$betaEst <- as.numeric(result$beta[, which.min(result$fbeta)])
   result
 }
 
@@ -1346,7 +1345,7 @@ lassosumRssWeights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
 #'   \item{loss}{Quadratic loss at each lambda.}
 #'   \item{fbeta}{Full penalized objective at each lambda.}
 #'   \item{nparams}{Number of non-zero coefficients at each lambda.}
-#'   \item{beta_est}{Coefficient vector at the lambda minimizing fbeta.}
+#'   \item{betaEst}{Coefficient vector at the lambda minimizing fbeta.}
 #' }
 #'
 #' @examples
@@ -1408,7 +1407,7 @@ penalizedRss <- function(bhat, LD, n,
   result$fbeta  <- result$fbeta[invOrder]
   result$lambda <- lambda
   result$nparams <- as.integer(colSums(result$beta != 0))
-  result$beta_est <- as.numeric(result$beta[, which.min(result$fbeta)])
+  result$betaEst <- as.numeric(result$beta[, which.min(result$fbeta)])
   result
 }
 
@@ -1841,11 +1840,11 @@ dprWeights <- function(X, y, fittingMethod = "VB", retainFit = FALSE, ...) {
 
 #' @rdname dprWeights
 #' @export
-dprVbWeights <- function(X, y, n_k = 8, retainFit = FALSE, ...) dprWeights(X, y, fittingMethod = "VB", n_k = n_k, retainFit = retainFit, ...)
+dprVbWeights <- function(X, y, nK = 8, retainFit = FALSE, ...) dprWeights(X, y, fittingMethod = "VB", n_k = nK, retainFit = retainFit, ...)
 
 #' @rdname dprWeights
 #' @export
-dprGibbsWeights <- function(X, y, s_step = 5000, retainFit = FALSE, ...) dprWeights(X, y, fittingMethod = "Gibbs", s_step = s_step, retainFit = retainFit, ...)
+dprGibbsWeights <- function(X, y, sStep = 5000, retainFit = FALSE, ...) dprWeights(X, y, fittingMethod = "Gibbs", s_step = sStep, retainFit = retainFit, ...)
 
 #' @rdname dprWeights
 #' @export

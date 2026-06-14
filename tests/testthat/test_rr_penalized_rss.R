@@ -28,7 +28,7 @@ test_that("penalizedRss with large lambda gives all-zero betas (MCP)", {
   bhat <- rnorm(p, sd = 0.1)
   result <- penalizedRss(bhat = bhat, LD = list(blk1 = diag(p)), n = n,
                           penalty = "MCP", lambda = c(100))
-  expect_true(all(result$beta_est == 0))
+  expect_true(all(result$betaEst == 0))
 })
 
 test_that("penalizedRss with large lambda gives all-zero betas (SCAD)", {
@@ -37,7 +37,7 @@ test_that("penalizedRss with large lambda gives all-zero betas (SCAD)", {
   bhat <- rnorm(p, sd = 0.1)
   result <- penalizedRss(bhat = bhat, LD = list(blk1 = diag(p)), n = n,
                           penalty = "SCAD", lambda = c(100))
-  expect_true(all(result$beta_est == 0))
+  expect_true(all(result$betaEst == 0))
 })
 
 test_that("penalizedRss with large lambda0 gives all-zero betas (L0)", {
@@ -46,7 +46,7 @@ test_that("penalizedRss with large lambda0 gives all-zero betas (L0)", {
   bhat <- rnorm(p, sd = 0.1)
   result <- penalizedRss(bhat = bhat, LD = list(blk1 = diag(p)), n = n,
                           penalty = "L0", lambda = c(0), lambda0 = 1e6)
-  expect_true(all(result$beta_est == 0))
+  expect_true(all(result$betaEst == 0))
 })
 
 test_that("penalizedRss runs with MCP and returns correct structure", {
@@ -61,9 +61,9 @@ test_that("penalizedRss runs with MCP and returns correct structure", {
   result <- penalizedRss(bhat = bhat, LD = list(blk1 = R), n = n,
                           penalty = "MCP")
   expect_type(result, "list")
-  expect_true("beta_est" %in% names(result))
-  expect_equal(length(result$beta_est), p)
-  expect_true(all(is.finite(result$beta_est)))
+  expect_true("betaEst" %in% names(result))
+  expect_equal(length(result$betaEst), p)
+  expect_true(all(is.finite(result$betaEst)))
   expect_equal(nrow(result$beta), p)
   expect_equal(ncol(result$beta), 20)
   expect_true(all(result$conv %in% c(0L, 1L)))
@@ -77,8 +77,8 @@ test_that("penalizedRss runs with SCAD and returns correct structure", {
   result <- penalizedRss(bhat = bhat, LD = list(blk1 = R), n = n,
                           penalty = "SCAD")
   expect_type(result, "list")
-  expect_equal(length(result$beta_est), p)
-  expect_true(all(is.finite(result$beta_est)))
+  expect_equal(length(result$betaEst), p)
+  expect_true(all(is.finite(result$betaEst)))
 })
 
 test_that("penalizedRss runs with L0 and returns correct structure", {
@@ -89,8 +89,8 @@ test_that("penalizedRss runs with L0 and returns correct structure", {
   result <- penalizedRss(bhat = bhat, LD = list(blk1 = R), n = n,
                           penalty = "L0", lambda = c(0), lambda0 = 0.01)
   expect_type(result, "list")
-  expect_equal(length(result$beta_est), p)
-  expect_true(all(is.finite(result$beta_est)))
+  expect_equal(length(result$betaEst), p)
+  expect_true(all(is.finite(result$betaEst)))
 })
 
 test_that("penalizedRss accepts multiple LD blocks", {
@@ -100,8 +100,8 @@ test_that("penalizedRss accepts multiple LD blocks", {
   result <- penalizedRss(bhat = bhat,
                           LD = list(blk1 = diag(p1), blk2 = diag(p2)),
                           n = n, penalty = "MCP")
-  expect_equal(length(result$beta_est), p)
-  expect_true(all(is.finite(result$beta_est)))
+  expect_equal(length(result$betaEst), p)
+  expect_true(all(is.finite(result$betaEst)))
 })
 
 test_that("penalizedRss LASSO matches lassosumRss on identity LD", {

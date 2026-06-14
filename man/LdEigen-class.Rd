@@ -11,12 +11,12 @@ Pre-computed per-block eigendecompositions of the LD
 \section{Slots}{
 
 \describe{
-\item{\code{eigenList}}{A list of length \code{n_blocks}, each element a list
+\item{\code{eigenList}}{A list of length \code{nBlocks}, each element a list
 with components:
 \describe{
   \item{values}{Numeric vector of eigenvalues}
   \item{vectors}{Numeric matrix of eigenvectors (SNPs x retained components)}
-  \item{snp_idx}{Integer vector of SNP indices in \code{snpInfo}}
+  \item{snpIdx}{Integer vector of SNP indices in \code{snpInfo}}
 }}
 
 \item{\code{eigenvalueTruncation}}{Numeric, proportion of variance retained

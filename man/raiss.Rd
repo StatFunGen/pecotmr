@@ -46,7 +46,7 @@ p x p LD matrix.}
 }
 \value{
 A list containing filtered and unfiltered results, and filtered LD matrix
-  (LD_mat is NULL when using genotypeMatrix path).
+  (ldMat is NULL when using genotypeMatrix path).
 }
 \description{
 This function is a part of the statistical library for SNP imputation from:

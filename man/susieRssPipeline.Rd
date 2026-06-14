@@ -11,7 +11,7 @@ susieRssPipeline(
   n = NULL,
   L = 30,
   lGreedy = 5,
-  analysisMethod = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
+  analysisMethod = c("susieRss", "singleEffect", "bayesianConditionalRegression"),
   methods = NULL,
   addSusieInf = TRUE,
   coverage = 0.95,
@@ -36,25 +36,25 @@ susieRssPipeline(
 
 \item{lGreedy}{Initial greedy number of causal configurations (default: 5).}
 
-\item{analysisMethod}{Iteration mode for the \code{"susie_rss"} fit:
-\code{"susie_rss"} (default, normal IBSS), \code{"single_effect"} (L=1,
-single iteration), or \code{"bayesian_conditional_regression"}
-(full L, single iteration). Only affects the \code{"susie_rss"}
-method; ignored for \code{"susie_inf_rss"} and \code{"susie_ash_rss"}.}
+\item{analysisMethod}{Iteration mode for the \code{"susieRss"} fit:
+\code{"susieRss"} (default, normal IBSS), \code{"singleEffect"} (L=1,
+single iteration), or \code{"bayesianConditionalRegression"}
+(full L, single iteration). Only affects the \code{"susieRss"}
+method; ignored for \code{"susieInfRss"} and \code{"susieAshRss"}.}
 
 \item{methods}{Optional character vector selecting which RSS variants to
-fit. Any subset of \code{c("susie_rss", "susie_inf_rss",
-"susie_ash_rss")}. Default \code{NULL} falls back to a single-method fit
+fit. Any subset of \code{c("susieRss", "susieInfRss",
+"susieAshRss")}. Default \code{NULL} falls back to a single-method fit
 driven by \code{analysisMethod} (backward-compatible behavior). When
 \code{methods} is passed explicitly, each requested method is fitted;
-if \code{"susie_inf_rss"} is paired with \code{"susie_rss"} or
-\code{"susie_ash_rss"} (or both) and \code{addSusieInf = TRUE}, the
+if \code{"susieInfRss"} is paired with \code{"susieRss"} or
+\code{"susieAshRss"} (or both) and \code{addSusieInf = TRUE}, the
 SuSiE-inf-RSS fit initialises the downstream method. This exposes five
 distinct fitting modes mirroring the individual-level pipeline.}
 
 \item{addSusieInf}{Logical. When \code{methods} contains
-\code{"susie_inf_rss"} alongside \code{"susie_rss"} and/or
-\code{"susie_ash_rss"}, controls whether SuSiE-inf-RSS is chained into
+\code{"susieInfRss"} alongside \code{"susieRss"} and/or
+\code{"susieAshRss"}, controls whether SuSiE-inf-RSS is chained into
 the downstream method(s) as initialisation. Default \code{TRUE}.}
 
 \item{coverage}{Coverage level (default: 0.95).}
@@ -67,12 +67,12 @@ the downstream method(s) as initialisation. Default \code{TRUE}.}
 
 \item{rFinite}{Controls variance inflation to account for estimating
 the R matrix from a finite reference panel. NULL (default): no
-variance inflation. Passed directly to susie_rss.}
+variance inflation. Passed directly to susieRss.}
 
-\item{rMismatch}{LD mismatch correction method passed directly to susie_rss.
+\item{rMismatch}{LD mismatch correction method passed directly to susieRss.
 Default NULL disables mismatch correction.}
 
-\item{...}{Additional parameters passed to susie_rss. Supplying
+\item{...}{Additional parameters passed to susieRss. Supplying
 \code{var_y} here, together with \code{beta} and \code{se} columns in
 \code{sumstats}, selects the \code{bhat/shat/var_y} sufficient-statistic
 interface. Without \code{var_y}, this wrapper uses the z-score RSS

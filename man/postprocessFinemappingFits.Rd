@@ -23,7 +23,7 @@ postprocessFinemappingFits(
 }
 \arguments{
 \item{fits}{Named list of fine-mapping fits. Names define method identity,
-for example \code{susie}, \code{susie_inf}, \code{susie_rss},
+for example \code{susie}, \code{susieInf}, \code{susieRss},
 \code{mvsusie}, or \code{fsusie}.}
 
 \item{dataX}{Genotype matrix, LD/correlation matrix, or other method-specific
@@ -51,7 +51,7 @@ MAF). Default NULL.}
 \item{minAbsCorr}{Minimum absolute correlation for credible-set purity.}
 }
 \value{
-A list with \code{finemapping_results} (per-method post-processed
+A list with \code{finemappingResults} (per-method post-processed
   objects, each carrying a trimmed fit and method-specific intermediates)
   and a single unified \code{top_loci} table in the fixed 22-column shape
   (see \code{\link{buildTopLoci}}). Per-method contributions are

@@ -50,7 +50,7 @@
 # Create the three polyfun output files (.results, .log, .part_delete)
 # for a single-target run. Real polyfun output includes baseline categories
 # even in single-target mode, so we add 2 dummy baseline categories.
-.make_polyfun_single <- function(dir, prefix, target_name, n_blocks = 10,
+.make_polyfun_single <- function(dir, prefix, target_name, nBlocks = 10,
                                  h2g = 0.3, tau = 1e-7, enrichment = 2.5,
                                  n_baseline = 2) {
   target_cat <- paste0(target_name, "_0")
@@ -81,10 +81,10 @@
     "Analysis finished"
   ), paste0(prefix, ".log"))
 
-  blocks <- matrix(rnorm(n_blocks * n_cats,
-                         mean = rep(taus_all, each = n_blocks),
-                         sd = abs(rep(taus_all, each = n_blocks)) * 0.5),
-                   nrow = n_blocks, ncol = n_cats)
+  blocks <- matrix(rnorm(nBlocks * n_cats,
+                         mean = rep(taus_all, each = nBlocks),
+                         sd = abs(rep(taus_all, each = nBlocks)) * 0.5),
+                   nrow = nBlocks, ncol = n_cats)
   colnames(blocks) <- all_cats
   vroom::vroom_write(as.data.frame(blocks), paste0(prefix, ".part_delete"), delim = "\t")
   invisible(NULL)
@@ -92,7 +92,7 @@
 
 # Create polyfun output files for a joint run (target + baseline annotations)
 .make_polyfun_joint <- function(dir, prefix, target_names,
-                                n_baseline = 3, n_blocks = 10, h2g = 0.3) {
+                                n_baseline = 3, nBlocks = 10, h2g = 0.3) {
   target_cats <- paste0(target_names, "_0")
   baseline_cats <- paste0("baselineLD_", seq_len(n_baseline) - 1L)
   all_cats <- c(target_cats, baseline_cats)
@@ -121,9 +121,9 @@
     "Analysis finished"
   ), paste0(prefix, ".log"))
 
-  blocks <- matrix(rnorm(n_blocks * n_cats, mean = rep(taus, each = n_blocks),
-                         sd = abs(rep(taus, each = n_blocks)) * 0.5),
-                   nrow = n_blocks, ncol = n_cats)
+  blocks <- matrix(rnorm(nBlocks * n_cats, mean = rep(taus, each = nBlocks),
+                         sd = abs(rep(taus, each = nBlocks)) * 0.5),
+                   nrow = nBlocks, ncol = n_cats)
   colnames(blocks) <- all_cats
   vroom::vroom_write(as.data.frame(blocks), paste0(prefix, ".part_delete"), delim = "\t")
   invisible(NULL)
@@ -214,19 +214,19 @@ test_that(".sldscDetectAnnotCols finds non-standard columns", {
 test_that("readSldscTrait reads polyfun outputs correctly", {
   dir <- withr::local_tempdir()
   prefix <- file.path(dir, "test_trait")
-  .make_polyfun_single(dir, prefix, "myannot", n_blocks = 5, h2g = 0.25)
+  .make_polyfun_single(dir, prefix, "myannot", nBlocks = 5, h2g = 0.25)
 
   result <- readSldscTrait(prefix)
   expect_true(is.list(result))
   # 1 target + 2 baseline categories
   expect_true("myannot_0" %in% result$categories)
   expect_equal(result$h2g, 0.25)
-  expect_equal(result$n_blocks, 5L)
+  expect_equal(result$nBlocks, 5L)
   expect_equal(length(result$tau), 3L)
   expect_true("myannot_0" %in% names(result$tau))
-  expect_true(is.matrix(result$tau_blocks))
-  expect_equal(nrow(result$tau_blocks), 5L)
-  expect_equal(ncol(result$tau_blocks), 3L)
+  expect_true(is.matrix(result$tauBlocks))
+  expect_equal(nrow(result$tauBlocks), 5L)
+  expect_equal(ncol(result$tauBlocks), 3L)
 })
 
 test_that("readSldscTrait errors on missing files", {
@@ -236,7 +236,7 @@ test_that("readSldscTrait errors on missing files", {
 test_that("readSldscTrait errors when h2 not in log", {
   dir <- withr::local_tempdir()
   prefix <- file.path(dir, "bad_log")
-  .make_polyfun_single(dir, prefix, "a", n_blocks = 3)
+  .make_polyfun_single(dir, prefix, "a", nBlocks = 3)
   # Overwrite the log with no h2 line
   writeLines("No heritability here", paste0(prefix, ".log"))
   expect_error(readSldscTrait(prefix), "Total Observed scale h2")
@@ -245,7 +245,7 @@ test_that("readSldscTrait errors when h2 not in log", {
 test_that("readSldscTrait errors on column mismatch in part_delete", {
   dir <- withr::local_tempdir()
   prefix <- file.path(dir, "bad_delete")
-  .make_polyfun_single(dir, prefix, "a", n_blocks = 3)
+  .make_polyfun_single(dir, prefix, "a", nBlocks = 3)
   # Overwrite part_delete with wrong number of columns (need != 3)
   vroom::vroom_write(data.frame(x = 1:3, y = 4:6, z = 7:9, w = 10:12),
                      paste0(prefix, ".part_delete"), delim = "\t")
@@ -472,26 +472,26 @@ test_that("isBinarySldscAnnot errors on empty dir", {
 # =============================================================================
 
 # Helper to build a trait_data list (as from readSldscTrait)
-.make_trait_data <- function(cats = c("A_0", "B_0"), n_blocks = 10, h2g = 0.3) {
+.make_trait_data <- function(cats = c("A_0", "B_0"), nBlocks = 10, h2g = 0.3) {
   n <- length(cats)
   taus <- rep(1e-7, n)
-  blocks <- matrix(rnorm(n_blocks * n, mean = rep(taus, each = n_blocks),
+  blocks <- matrix(rnorm(nBlocks * n, mean = rep(taus, each = nBlocks),
                          sd = 1e-8),
-                   nrow = n_blocks, ncol = n)
+                   nrow = nBlocks, ncol = n)
   colnames(blocks) <- cats
 
   list(
     categories     = cats,
     tau            = setNames(taus, cats),
-    tau_se         = setNames(abs(taus) * 0.3, cats),
+    tauSe         = setNames(abs(taus) * 0.3, cats),
     enrichment     = setNames(rep(2.0, n), cats),
-    enrichment_se  = setNames(rep(0.4, n), cats),
-    enrichment_p   = setNames(rep(0.01, n), cats),
-    prop_h2        = setNames(rep(0.15, n), cats),
-    prop_snps      = setNames(rep(0.06, n), cats),
+    enrichmentSe  = setNames(rep(0.4, n), cats),
+    enrichmentP   = setNames(rep(0.01, n), cats),
+    propH2        = setNames(rep(0.15, n), cats),
+    propSnps      = setNames(rep(0.06, n), cats),
     h2g            = h2g,
-    tau_blocks     = blocks,
-    n_blocks       = n_blocks
+    tauBlocks     = blocks,
+    nBlocks       = nBlocks
   )
 }
 
@@ -504,17 +504,17 @@ test_that("standardizeSldscTrait works in single mode", {
   expect_true(is.list(result))
   expect_equal(result$mode, "single")
   expect_equal(result$h2g, 0.3)
-  expect_equal(result$n_blocks, 10L)
+  expect_equal(result$nBlocks, 10L)
 
   s <- result$summary
   expect_true(is.data.frame(s))
   expect_equal(nrow(s), 2L)
-  expect_true(all(c("tau_star", "tau_star_se", "enrichment", "enrichment_se",
-                     "enrichment_p", "enrichstat", "enrichstat_se") %in% names(s)))
+  expect_true(all(c("tauStar", "tauStarSe", "enrichment", "enrichmentSe",
+                     "enrichmentP", "enrichstat", "enrichstatSe") %in% names(s)))
 
-  # tau_star = tau * sd * M_ref / h2g
+  # tauStar = tau * sd * M_ref / h2g
   expected_ts <- unname(td$tau) * c(0.5, 1.2) * 1000 / 0.3
-  expect_equal(s$tau_star, expected_ts)
+  expect_equal(s$tauStar, expected_ts)
 
   # tau_star_blocks has correct dimensions
   expect_true(is.matrix(result$tau_star_blocks))
@@ -531,7 +531,7 @@ test_that("standardizeSldscTrait works in joint mode", {
   s <- result$summary
   # joint mode should NOT have enrichment columns
   expect_false("enrichment" %in% names(s))
-  expect_true("tau_star" %in% names(s))
+  expect_true("tauStar" %in% names(s))
 })
 
 test_that("standardizeSldscTrait auto-detects target categories", {
@@ -568,14 +568,14 @@ test_that("standardizeSldscTrait warns on zero sd", {
   )
 })
 
-test_that("standardizeSldscTrait enrichstat_se handles p = 0", {
+test_that("standardizeSldscTrait enrichstatSe handles p = 0", {
   td <- .make_trait_data(cats = "A_0")
-  td$enrichment_p <- c(A_0 = 0)  # p = 0 → abs_z = Inf → se = 0
+  td$enrichmentP <- c(A_0 = 0)  # p = 0 → abs_z = Inf → se = 0
   sd_annot <- c(A_0 = 0.5)
 
   result <- standardizeSldscTrait(td, sd_annot, 1000L, mode = "single")
-  # enrichstat_se should be NA when abs_z is infinite
-  expect_true(is.na(result$summary$enrichstat_se))
+  # enrichstatSe should be NA when abs_z is infinite
+  expect_true(is.na(result$summary$enrichstatSe))
 })
 
 
@@ -584,21 +584,21 @@ test_that("standardizeSldscTrait enrichstat_se handles p = 0", {
 # =============================================================================
 
 # Helper to build per_trait_estimates for metaSldscRandom
-.make_per_trait_meta <- function(n_traits = 3, category = "A_0",
+.make_per_trait_meta <- function(nTraits = 3, category = "A_0",
                                  means = NULL, ses = NULL) {
-  if (is.null(means)) means <- rnorm(n_traits, 1e-5, 1e-6)
-  if (is.null(ses)) ses <- rep(1e-6, n_traits)
+  if (is.null(means)) means <- rnorm(nTraits, 1e-5, 1e-6)
+  if (is.null(ses)) ses <- rep(1e-6, nTraits)
   per_trait <- list()
-  for (i in seq_len(n_traits)) {
+  for (i in seq_len(nTraits)) {
     per_trait[[paste0("trait", i)]] <- list(
       summary = data.frame(
         target      = category,
-        tau_star    = means[i],
-        tau_star_se = ses[i],
+        tauStar    = means[i],
+        tauStarSe = ses[i],
         enrichment    = means[i] * 100,
-        enrichment_se = ses[i] * 50,
+        enrichmentSe = ses[i] * 50,
         enrichstat    = means[i] * 10,
-        enrichstat_se = ses[i] * 5,
+        enrichstatSe = ses[i] * 5,
         stringsAsFactors = FALSE
       )
     )
@@ -606,71 +606,71 @@ test_that("standardizeSldscTrait enrichstat_se handles p = 0", {
   per_trait
 }
 
-test_that("metaSldscRandom works for tau_star", {
-  pt <- .make_per_trait_meta(n_traits = 4)
-  result <- metaSldscRandom(pt, "A_0", quantity = "tau_star")
+test_that("metaSldscRandom works for tauStar", {
+  pt <- .make_per_trait_meta(nTraits = 4)
+  result <- metaSldscRandom(pt, "A_0", quantity = "tauStar")
   expect_true(is.list(result))
-  expect_equal(result$n_traits, 4L)
+  expect_equal(result$nTraits, 4L)
   expect_true(is.numeric(result$mean))
   expect_true(is.numeric(result$se))
   expect_true(is.numeric(result$p))
   expect_true(result$se > 0)
-  expect_equal(length(result$traits_used), 4L)
+  expect_equal(length(result$traitsUsed), 4L)
 })
 
 test_that("metaSldscRandom works for enrichment", {
-  pt <- .make_per_trait_meta(n_traits = 3)
+  pt <- .make_per_trait_meta(nTraits = 3)
   result <- metaSldscRandom(pt, "A_0", quantity = "enrichment")
-  expect_equal(result$n_traits, 3L)
+  expect_equal(result$nTraits, 3L)
   expect_true(is.finite(result$mean))
 })
 
 test_that("metaSldscRandom works for enrichstat", {
-  pt <- .make_per_trait_meta(n_traits = 3)
+  pt <- .make_per_trait_meta(nTraits = 3)
   result <- metaSldscRandom(pt, "A_0", quantity = "enrichstat")
-  expect_equal(result$n_traits, 3L)
+  expect_equal(result$nTraits, 3L)
   expect_true(is.finite(result$mean))
 })
 
 test_that("metaSldscRandom returns NA with < 2 traits", {
-  pt <- .make_per_trait_meta(n_traits = 1)
-  result <- metaSldscRandom(pt, "A_0", "tau_star")
+  pt <- .make_per_trait_meta(nTraits = 1)
+  result <- metaSldscRandom(pt, "A_0", "tauStar")
   expect_true(is.na(result$mean))
   expect_true(is.na(result$se))
   expect_true(is.na(result$p))
-  expect_equal(result$n_traits, 1L)
+  expect_equal(result$nTraits, 1L)
 })
 
 test_that("metaSldscRandom skips traits with missing category", {
-  pt <- .make_per_trait_meta(n_traits = 3)
+  pt <- .make_per_trait_meta(nTraits = 3)
   # Change category in trait2
   pt$trait2$summary$target <- "other"
-  result <- metaSldscRandom(pt, "A_0", "tau_star")
-  expect_equal(result$n_traits, 2L)
-  expect_equal(result$traits_used, c("trait1", "trait3"))
+  result <- metaSldscRandom(pt, "A_0", "tauStar")
+  expect_equal(result$nTraits, 2L)
+  expect_equal(result$traitsUsed, c("trait1", "trait3"))
 })
 
 test_that("metaSldscRandom skips traits with NA or zero SE", {
-  pt <- .make_per_trait_meta(n_traits = 3)
-  pt$trait2$summary$tau_star_se <- NA
-  pt$trait3$summary$tau_star_se <- 0
-  result <- metaSldscRandom(pt, "A_0", "tau_star")
-  expect_equal(result$n_traits, 1L)
+  pt <- .make_per_trait_meta(nTraits = 3)
+  pt$trait2$summary$tauStarSe <- NA
+  pt$trait3$summary$tauStarSe <- 0
+  result <- metaSldscRandom(pt, "A_0", "tauStar")
+  expect_equal(result$nTraits, 1L)
   expect_true(is.na(result$mean))  # < 2 valid
 })
 
 test_that("metaSldscRandom skips NULL entries", {
-  pt <- .make_per_trait_meta(n_traits = 3)
+  pt <- .make_per_trait_meta(nTraits = 3)
   pt$trait2 <- NULL
-  result <- metaSldscRandom(pt, "A_0", "tau_star")
-  expect_equal(result$n_traits, 2L)
+  result <- metaSldscRandom(pt, "A_0", "tauStar")
+  expect_equal(result$nTraits, 2L)
 })
 
 test_that("metaSldscRandom generates names for unnamed list", {
-  pt <- .make_per_trait_meta(n_traits = 2)
+  pt <- .make_per_trait_meta(nTraits = 2)
   names(pt) <- NULL
-  result <- metaSldscRandom(pt, "A_0", "tau_star")
-  expect_equal(result$traits_used, c("1", "2"))
+  result <- metaSldscRandom(pt, "A_0", "tauStar")
+  expect_equal(result$traitsUsed, c("1", "2"))
 })
 
 
@@ -685,54 +685,54 @@ test_that(".sldscAssembleTraitSummary combines single and joint", {
 
   single_df <- data.frame(
     target = targets,
-    tau = c(1e-7, 2e-7), tau_se = c(3e-8, 4e-8),
-    tau_star = c(0.01, 0.02), tau_star_se = c(0.003, 0.004),
-    enrichment = c(2.0, 3.0), enrichment_se = c(0.4, 0.6),
-    enrichment_p = c(0.01, 0.05),
-    enrichstat = c(0.001, 0.002), enrichstat_se = c(0.0003, 0.0004),
+    tau = c(1e-7, 2e-7), tauSe = c(3e-8, 4e-8),
+    tauStar = c(0.01, 0.02), tauStarSe = c(0.003, 0.004),
+    enrichment = c(2.0, 3.0), enrichmentSe = c(0.4, 0.6),
+    enrichmentP = c(0.01, 0.05),
+    enrichstat = c(0.001, 0.002), enrichstatSe = c(0.0003, 0.0004),
     stringsAsFactors = FALSE
   )
 
   joint_df <- data.frame(
     target = targets,
-    tau = c(1.1e-7, 2.1e-7), tau_se = c(3.1e-8, 4.1e-8),
-    tau_star = c(0.011, 0.021), tau_star_se = c(0.0031, 0.0041),
+    tau = c(1.1e-7, 2.1e-7), tauSe = c(3.1e-8, 4.1e-8),
+    tauStar = c(0.011, 0.021), tauStarSe = c(0.0031, 0.0041),
     stringsAsFactors = FALSE
   )
 
   result <- fn(single_df, joint_df, targets, is_bin)
   expect_true(is.data.frame(result))
   expect_equal(nrow(result), 2L)
-  expect_true("is_binary" %in% names(result))
-  expect_equal(result$is_binary, c(TRUE, FALSE))
-  expect_true("tau_star_single" %in% names(result))
-  expect_true("tau_star_joint" %in% names(result))
-  expect_equal(result$tau_star_single, c(0.01, 0.02))
-  expect_equal(result$tau_star_joint, c(0.011, 0.021))
+  expect_true("isBinary" %in% names(result))
+  expect_equal(result$isBinary, c(TRUE, FALSE))
+  expect_true("tauStarSingle" %in% names(result))
+  expect_true("tauStarJoint" %in% names(result))
+  expect_equal(result$tauStarSingle, c(0.01, 0.02))
+  expect_equal(result$tauStarJoint, c(0.011, 0.021))
 })
 
 test_that(".sldscAssembleTraitSummary handles NULL single", {
   fn <- pecotmr:::.sldscAssembleTraitSummary
-  joint_df <- data.frame(target = "A_0", tau_star = 0.01, tau_star_se = 0.003,
+  joint_df <- data.frame(target = "A_0", tauStar = 0.01, tauStarSe = 0.003,
                           stringsAsFactors = FALSE)
   is_bin <- c(A_0 = TRUE)
   result <- fn(NULL, joint_df, "A_0", is_bin)
   expect_equal(nrow(result), 1L)
-  expect_true(all(is.na(result$tau_star_single)))
-  expect_equal(result$tau_star_joint, 0.01)
+  expect_true(all(is.na(result$tauStarSingle)))
+  expect_equal(result$tauStarJoint, 0.01)
 })
 
 test_that(".sldscAssembleTraitSummary handles NULL joint", {
   fn <- pecotmr:::.sldscAssembleTraitSummary
-  single_df <- data.frame(target = "A_0", tau_star = 0.01, tau_star_se = 0.003,
-                           enrichment = 2.0, enrichment_se = 0.4,
-                           enrichment_p = 0.01, enrichstat = 0.001,
-                           enrichstat_se = 0.0003,
+  single_df <- data.frame(target = "A_0", tauStar = 0.01, tauStarSe = 0.003,
+                           enrichment = 2.0, enrichmentSe = 0.4,
+                           enrichmentP = 0.01, enrichstat = 0.001,
+                           enrichstatSe = 0.0003,
                            stringsAsFactors = FALSE)
   is_bin <- c(A_0 = TRUE)
   result <- fn(single_df, NULL, "A_0", is_bin)
-  expect_equal(result$tau_star_single, 0.01)
-  expect_true(all(is.na(result$tau_star_joint)))
+  expect_equal(result$tauStarSingle, 0.01)
+  expect_true(all(is.na(result$tauStarJoint)))
 })
 
 test_that(".sldscAssembleTraitSummary handles both NULL", {
@@ -753,8 +753,8 @@ test_that(".sldscViewForMeta extracts single-mode columns", {
   per_trait <- list(
     traitX = list(summary = data.frame(
       target = "A_0",
-      tau_star_single = 0.01, tau_star_se_single = 0.003,
-      enrichment_single = 2.0, enrichment_se_single = 0.4,
+      tauStarSingle = 0.01, tauStarSeSingle = 0.003,
+      enrichmentSingle = 2.0, enrichmentSeSingle = 0.4,
       stringsAsFactors = FALSE
     ))
   )
@@ -762,9 +762,9 @@ test_that(".sldscViewForMeta extracts single-mode columns", {
   expect_true(is.list(view))
   expect_equal(length(view), 1L)
   s <- view$traitX$summary
-  expect_true("tau_star" %in% names(s))
-  expect_true("tau_star_se" %in% names(s))
-  expect_equal(s$tau_star, 0.01)
+  expect_true("tauStar" %in% names(s))
+  expect_true("tauStarSe" %in% names(s))
+  expect_equal(s$tauStar, 0.01)
 })
 
 test_that(".sldscViewForMeta returns NULL for missing summary", {
@@ -825,16 +825,16 @@ test_that("sldscPostprocessingPipeline runs end-to-end", {
 
   pt <- result$per_trait$traitX
   expect_true(is.data.frame(pt$summary))
-  expect_true("is_binary" %in% names(pt$summary))
+  expect_true("isBinary" %in% names(pt$summary))
   expect_true(is.numeric(pt$h2g))
 
   # meta
-  expect_named(result$meta, c("tau_star", "enrichment", "enrichstat"))
+  expect_named(result$meta, c("tauStar", "enrichment", "enrichstat"))
   for (nm in names(result$meta)) {
     m <- result$meta[[nm]]
     expect_true(is.data.frame(m))
     expect_true("target" %in% names(m))
-    expect_true("is_binary" %in% names(m))
+    expect_true("isBinary" %in% names(m))
   }
 
   # params
@@ -869,7 +869,7 @@ test_that("sldscPostprocessingPipeline works without joint runs", {
   ))
 
   expect_true(is.list(result))
-  expect_true(all(is.na(result$meta$tau_star$joint_mean)))
+  expect_true(all(is.na(result$meta$tauStar$jointMean)))
 })
 
 test_that("sldscPostprocessingPipeline applies target_labels", {
@@ -903,7 +903,7 @@ test_that("sldscPostprocessingPipeline applies target_labels", {
   # Check relabeling
   expect_equal(result$params$target_categories, c("Pretty_A", "Pretty_B"))
   expect_true(!is.null(result$params$target_categories_orig))
-  expect_true(all(result$meta$tau_star$target %in% c("Pretty_A", "Pretty_B")))
+  expect_true(all(result$meta$tauStar$target %in% c("Pretty_A", "Pretty_B")))
   expect_true(all(result$per_trait$traitX$summary$target %in% c("Pretty_A", "Pretty_B")))
 })
 

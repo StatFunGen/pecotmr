@@ -106,14 +106,14 @@ slalom <- function(zScore, R = NULL, X = NULL, standardError = rep(1, length(zSc
   maxPip <- max(prob)
 
   summary <- list(
-    lead_pip_variant = leadIdx,
-    n_total = length(zScore),
-    n_r2 = nR2,
-    n_dentist_s_outlier = nDentistSOutlier,
+    leadPipVariant = leadIdx,
+    nTotal = length(zScore),
+    nR2 = nR2,
+    nDentistSOutlier = nDentistSOutlier,
     fraction = ifelse(nR2 > 0, nDentistSOutlier / nR2, 0),
-    max_pip = maxPip,
-    cs_95 = cs,
-    cs_99 = cs99
+    maxPip = maxPip,
+    cs95 = cs,
+    cs99 = cs99
   )
   result <- as.data.frame(list(original_z = zScore, prob = prob, pvalue = pvalue, outliers = outliers, nlog10p_dentist_s = nlog10pDentistS))
 

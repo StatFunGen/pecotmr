@@ -20,7 +20,7 @@ generate_dentist_data <- function(seed=42, nSnps = 100, sample_size = 100, n_out
         position = unlist(lapply(seq(start_pos,end_pos,length.out = nSnps), round)),
         z = z_scores
     )
-    return(list(sumstat = sumstat, LD_mat = ld_matrix, nSample = sample_size))
+    return(list(sumstat = sumstat, ldMat = ld_matrix, nSample = sample_size))
 }
 
 generate_dentist_single_window_data <- function(seed=42, nSnps = 100, sample_size = 100, n_outliers = 5) {
@@ -37,7 +37,7 @@ generate_dentist_single_window_data <- function(seed=42, nSnps = 100, sample_siz
     z_scores <- mvrnorm(n = 1, mu = rep(0, nSnps), Sigma = ld_matrix)
     outlier_indices <- sample(1:nSnps, n_outliers)
     z_scores[outlier_indices] <- rnorm(n_outliers, mean = 0, sd = 5)
-    return(list(z_scores = z_scores, LD_mat = ld_matrix, nSample = sample_size))
+    return(list(z_scores = z_scores, ldMat = ld_matrix, nSample = sample_size))
 }
 
 # ===========================================================================
@@ -46,27 +46,27 @@ generate_dentist_single_window_data <- function(seed=42, nSnps = 100, sample_siz
 
 test_that("dentist output has exactly N rows for N input variants", {
     data <- generate_dentist_data(nSnps = 100)
-    expect_warning(res <- dentist(data$sumstat, R = data$LD_mat, nSample = data$nSample))
+    expect_warning(res <- dentist(data$sumstat, R = data$ldMat, nSample = data$nSample))
     expect_equal(nrow(res), 100)
 })
 
 test_that("dentist output has exactly N rows with correctChenEtAlBug = FALSE", {
     data <- generate_dentist_data(nSnps = 100)
-    expect_warning(res <- dentist(data$sumstat, R = data$LD_mat, nSample = data$nSample, correctChenEtAlBug = FALSE))
+    expect_warning(res <- dentist(data$sumstat, R = data$ldMat, nSample = data$nSample, correctChenEtAlBug = FALSE))
     expect_equal(nrow(res), 100)
 })
 
 test_that("dentist stops when missing position", {
     data <- generate_dentist_data()
     colnames(data$sumstat) <- c("something", "z")
-    expect_error(dentist(data$sumstat, R = data$LD_mat, nSample = data$nSample, correctChenEtAlBug = FALSE),
+    expect_error(dentist(data$sumstat, R = data$ldMat, nSample = data$nSample, correctChenEtAlBug = FALSE),
                  regexp = "missing either.*pos.*or.*z")
 })
 
 test_that("dentist stops when missing zscore", {
     data <- generate_dentist_data()
     colnames(data$sumstat) <- c("position", "something")
-    expect_error(dentist(data$sumstat, R = data$LD_mat, nSample = data$nSample, correctChenEtAlBug = FALSE),
+    expect_error(dentist(data$sumstat, R = data$ldMat, nSample = data$nSample, correctChenEtAlBug = FALSE),
                  regexp = "missing either.*pos.*or.*z")
 })
 
@@ -109,31 +109,31 @@ test_that("dentist with X matrix input returns exactly N rows", {
 
 test_that("dentistSingleWindow returns exactly N rows for N input z-scores", {
     data <- generate_dentist_single_window_data()
-    expect_warning(res <- dentistSingleWindow(data$z_scores, R = data$LD_mat, nSample = data$nSample))
+    expect_warning(res <- dentistSingleWindow(data$z_scores, R = data$ldMat, nSample = data$nSample))
     expect_equal(nrow(res), 100)
 })
 
 test_that("dentistSingleWindow warns when < 2000 variants", {
     data <- generate_dentist_single_window_data()
-    expect_warning(dentistSingleWindow(data$z_scores, R = data$LD_mat, nSample = data$nSample))
+    expect_warning(dentistSingleWindow(data$z_scores, R = data$ldMat, nSample = data$nSample))
 })
 
 test_that("dentistSingleWindow stops with zscore/LD matrix dimension mismatch", {
     data <- generate_dentist_single_window_data()
-    expect_warning(expect_error(dentistSingleWindow(generate_dentist_single_window_data()$z_scores, R = generate_dentist_single_window_data(nSnps = 80)$LD_mat, nSample = data$nSample),
+    expect_warning(expect_error(dentistSingleWindow(generate_dentist_single_window_data()$z_scores, R = generate_dentist_single_window_data(nSnps = 80)$ldMat, nSample = data$nSample),
                                 regexp = "ldMat must be a square matrix"))
 })
 
 test_that("dentistSingleWindow output columns are correct", {
     data <- generate_dentist_single_window_data()
-    expect_warning(res <- dentistSingleWindow(data$z_scores, R = data$LD_mat, nSample = data$nSample))
+    expect_warning(res <- dentistSingleWindow(data$z_scores, R = data$ldMat, nSample = data$nSample))
     expected_cols <- c("original_z", "imputed_z", "iter_to_correct", "rsq", "is_duplicate", "outlier_stat", "outlier")
     expect_true(all(expected_cols %in% colnames(res)))
 })
 
 test_that("dentistSingleWindow original_z matches input z-scores", {
     data <- generate_dentist_single_window_data()
-    expect_warning(res <- dentistSingleWindow(data$z_scores, R = data$LD_mat, nSample = data$nSample))
+    expect_warning(res <- dentistSingleWindow(data$z_scores, R = data$ldMat, nSample = data$nSample))
     expect_equal(res$original_z, data$z_scores)
 })
 
@@ -150,7 +150,7 @@ test_that("dentistSingleWindow with X matrix input returns exactly N rows", {
 test_that("dentistSingleWindow with correctChenEtAlBug = FALSE returns N rows", {
     data <- generate_dentist_single_window_data()
     expect_warning(res <- dentistSingleWindow(
-      data$z_scores, R = data$LD_mat, nSample = data$nSample,
+      data$z_scores, R = data$ldMat, nSample = data$nSample,
       correctChenEtAlBug = FALSE
     ))
     expect_equal(nrow(res), 100)
@@ -160,7 +160,7 @@ test_that("dentistSingleWindow with correctChenEtAlBug = FALSE returns N rows", 
 test_that("dentistSingleWindow with gcControl = TRUE returns N rows", {
     data <- generate_dentist_single_window_data()
     expect_warning(res <- dentistSingleWindow(
-      data$z_scores, R = data$LD_mat, nSample = data$nSample,
+      data$z_scores, R = data$ldMat, nSample = data$nSample,
       gcControl = TRUE
     ))
     expect_equal(nrow(res), 100)
@@ -170,7 +170,7 @@ test_that("dentistSingleWindow with gcControl = TRUE returns N rows", {
 test_that("dentist with gcControl = TRUE returns N rows", {
     data <- generate_dentist_data(nSnps = 100)
     expect_warning(res <- dentist(
-      data$sumstat, R = data$LD_mat, nSample = data$nSample,
+      data$sumstat, R = data$ldMat, nSample = data$nSample,
       gcControl = TRUE
     ))
     expect_equal(nrow(res), 100)
@@ -404,7 +404,7 @@ test_that("merge_windows returns exactly N rows", {
         for (k in 1:nrow(window_divided_res)) {
             idx_range <- window_divided_res$windowStartIdx[k]:(window_divided_res$windowEndIdx[k] - 1L)
             zScore_k <- data$sumstat$z[idx_range]
-            LD_mat_k <- data$LD_mat[idx_range, idx_range]
+            LD_mat_k <- data$ldMat[idx_range, idx_range]
             dentist_result_by_window[[k]] <- dentistSingleWindow(
                 zScore_k, R = LD_mat_k, nSample = 100,
                 pValueThreshold = 5.0369e-8, propSVD = 0.4, gcControl = FALSE,
@@ -463,7 +463,7 @@ test_that("dentist windowed output has exactly N rows for large input", {
     data <- generate_dentist_data(seed = 123, nSnps = 1000, sample_size = 1000,
                                    n_outliers = 50, start_pos = 0, end_pos = 5000000)
     suppressWarnings({
-        res <- dentist(data$sumstat, R = data$LD_mat, nSample = data$nSample,
+        res <- dentist(data$sumstat, R = data$ldMat, nSample = data$nSample,
                        minDim = 100, windowSize = 2000000)
     })
     expect_equal(nrow(res), 1000)
@@ -471,7 +471,7 @@ test_that("dentist windowed output has exactly N rows for large input", {
 
 test_that("dentist outlier_stat formula is correct: (z-imputed)^2/(1-rsq)", {
     data <- generate_dentist_single_window_data(seed = 55, nSnps = 100)
-    expect_warning(res <- dentistSingleWindow(data$z_scores, R = data$LD_mat, nSample = data$nSample))
+    expect_warning(res <- dentistSingleWindow(data$z_scores, R = data$ldMat, nSample = data$nSample))
     expected_stat <- (res$original_z - res$imputed_z)^2 / pmax(1 - res$rsq, 1e-8)
     expect_equal(res$outlier_stat, expected_stat, tolerance = 1e-10)
 })
@@ -484,7 +484,7 @@ test_that("dentist with window_mode='count' returns exactly N rows", {
     data <- generate_dentist_data(seed = 789, nSnps = 500, sample_size = 500,
                                    n_outliers = 25, start_pos = 1000000, end_pos = 4000000)
     suppressWarnings({
-        res <- dentist(data$sumstat, R = data$LD_mat, nSample = data$nSample,
+        res <- dentist(data$sumstat, R = data$ldMat, nSample = data$nSample,
                        windowMode = "count", minDim = 100)
     })
     expect_equal(nrow(res), 500)
@@ -521,9 +521,9 @@ test_that("both windowing modes produce same dentist results on uniform data", {
     data <- generate_dentist_data(seed = 555, nSnps = 500, sample_size = 500,
                                    n_outliers = 25, start_pos = 0, end_pos = 5000000)
     suppressWarnings({
-        res_dist <- dentist(data$sumstat, R = data$LD_mat, nSample = data$nSample,
+        res_dist <- dentist(data$sumstat, R = data$ldMat, nSample = data$nSample,
                             windowMode = "distance", minDim = 100, windowSize = 2000000)
-        res_count <- dentist(data$sumstat, R = data$LD_mat, nSample = data$nSample,
+        res_count <- dentist(data$sumstat, R = data$ldMat, nSample = data$nSample,
                              windowMode = "count", minDim = 100)
     })
     # Both should return exactly N rows

@@ -31,7 +31,7 @@ test_that("univariateAnalysisPipeline: default behavior (addSusieInf = TRUE) fit
   expect_false(is.null(r$susie_inf_fitted))
   expect_false(is.null(r$susie_fitted))
   expect_true(is.null(r$susie_ash_fitted))
-  expect_true(all(c("susie", "susie_inf") %in% unique(r$top_loci$method)) ||
+  expect_true(all(c("susie", "susieInf") %in% unique(r$top_loci$method)) ||
               "susie" %in% unique(r$top_loci$method))
 })
 
@@ -49,12 +49,12 @@ test_that("univariateAnalysisPipeline: addSusieInf = FALSE fits plain SuSiE alon
   expect_equal(unique(r$top_loci$method), "susie")
 })
 
-test_that("univariateAnalysisPipeline: methods = \"susie_inf\" fits SuSiE-inf alone", {
+test_that("univariateAnalysisPipeline: methods = \"susieInf\" fits SuSiE-inf alone", {
   skip_if_not_installed("susieR")
   inp <- .make_uvp_inputs()
   r <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$y, maf = inp$maf,
-    methods = c("susie_inf"), twasWeights = FALSE,
+    methods = c("susieInf"), twasWeights = FALSE,
     finemappingExtraOpts = list(refine = FALSE),
     signalCutoff = 0, verbose = 0
   )
@@ -63,27 +63,27 @@ test_that("univariateAnalysisPipeline: methods = \"susie_inf\" fits SuSiE-inf al
   expect_true(is.null(r$susie_ash_fitted))
 })
 
-test_that("univariateAnalysisPipeline: methods = \"susie_ash\" fits SuSiE-ash alone", {
+test_that("univariateAnalysisPipeline: methods = \"susieAsh\" fits SuSiE-ash alone", {
   skip_if_not_installed("susieR")
   inp <- .make_uvp_inputs()
   r <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$y, maf = inp$maf,
-    methods = c("susie_ash"), twasWeights = FALSE,
+    methods = c("susieAsh"), twasWeights = FALSE,
     finemappingExtraOpts = list(refine = FALSE),
     signalCutoff = 0, verbose = 0
   )
   expect_true(is.null(r$susie_inf_fitted))
   expect_true(is.null(r$susie_fitted))
   expect_false(is.null(r$susie_ash_fitted))
-  expect_equal(unique(r$top_loci$method), "susie_ash")
+  expect_equal(unique(r$top_loci$method), "susieAsh")
 })
 
-test_that("univariateAnalysisPipeline: methods = c(susie_inf, susie, susie_ash) returns rows for each", {
+test_that("univariateAnalysisPipeline: methods = c(susieInf, susie, susieAsh) returns rows for each", {
   skip_if_not_installed("susieR")
   inp <- .make_uvp_inputs()
   r <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$y, maf = inp$maf,
-    methods = c("susie_inf", "susie", "susie_ash"),
+    methods = c("susieInf", "susie", "susieAsh"),
     twasWeights = FALSE,
     finemappingExtraOpts = list(refine = FALSE),
     signalCutoff = 0, verbose = 0
@@ -91,8 +91,8 @@ test_that("univariateAnalysisPipeline: methods = c(susie_inf, susie, susie_ash) 
   expect_false(is.null(r$susie_inf_fitted))
   expect_false(is.null(r$susie_fitted))
   expect_false(is.null(r$susie_ash_fitted))
-  # SuSiE-inf may report zero PIPs and contribute zero rows; expect at least susie + susie_ash
-  expect_true(all(c("susie", "susie_ash") %in% unique(r$top_loci$method)))
+  # SuSiE-inf may report zero PIPs and contribute zero rows; expect at least susie + susieAsh
+  expect_true(all(c("susie", "susieAsh") %in% unique(r$top_loci$method)))
 })
 
 test_that("univariateAnalysisPipeline: unknown method rejected", {
@@ -128,25 +128,25 @@ test_that("univariateAnalysisPipeline: unknown method rejected", {
   list(X = X, y = y, maf = maf)
 }
 
-test_that("univariateAnalysisPipeline: chained SuSiE-inf -> SuSiE-ash differs from independent susie_ash", {
+test_that("univariateAnalysisPipeline: chained SuSiE-inf -> SuSiE-ash differs from independent susieAsh", {
   skip_if_not_installed("susieR")
   inp <- .make_strong_signal_inputs()
   chained <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$y, maf = inp$maf,
-    methods = c("susie_inf", "susie_ash"), addSusieInf = TRUE,
+    methods = c("susieInf", "susieAsh"), addSusieInf = TRUE,
     twasWeights = FALSE,
     finemappingExtraOpts = list(refine = FALSE),
     signalCutoff = 0, verbose = 0
   )
   indep <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$y, maf = inp$maf,
-    methods = c("susie_inf", "susie_ash"), addSusieInf = FALSE,
+    methods = c("susieInf", "susieAsh"), addSusieInf = FALSE,
     twasWeights = FALSE,
     finemappingExtraOpts = list(refine = FALSE),
     signalCutoff = 0, verbose = 0
   )
-  expect_true(all(c("susie_inf", "susie_ash") %in% unique(chained$top_loci$method)))
-  expect_true(all(c("susie_inf", "susie_ash") %in% unique(indep$top_loci$method)))
+  expect_true(all(c("susieInf", "susieAsh") %in% unique(chained$top_loci$method)))
+  expect_true(all(c("susieInf", "susieAsh") %in% unique(indep$top_loci$method)))
   expect_false(is.null(chained$susie_inf_fitted))
   expect_false(is.null(chained$susie_ash_fitted))
   # SuSiE-inf must have non-trivial mappable effects for model_init to matter
@@ -164,7 +164,7 @@ test_that("univariateAnalysisPipeline: chain dispatch emits the chained-init mes
   expect_message(
     univariateAnalysisPipeline(
       X = inp$X, Y = inp$y, maf = inp$maf,
-      methods = c("susie_inf", "susie_ash"), addSusieInf = TRUE,
+      methods = c("susieInf", "susieAsh"), addSusieInf = TRUE,
       twasWeights = FALSE,
       finemappingExtraOpts = list(refine = FALSE),
       signalCutoff = 0, verbose = 0
@@ -179,7 +179,7 @@ test_that("univariateAnalysisPipeline: add_susie_inf=FALSE fits SuSiE-ash withou
   expect_message(
     univariateAnalysisPipeline(
       X = inp$X, Y = inp$y, maf = inp$maf,
-      methods = c("susie_inf", "susie_ash"), addSusieInf = FALSE,
+      methods = c("susieInf", "susieAsh"), addSusieInf = FALSE,
       twasWeights = FALSE,
       finemappingExtraOpts = list(refine = FALSE),
       signalCutoff = 0, verbose = 0
@@ -188,12 +188,12 @@ test_that("univariateAnalysisPipeline: add_susie_inf=FALSE fits SuSiE-ash withou
   )
 })
 
-test_that("univariateAnalysisPipeline: all three methods + chain initialises both susie and susie_ash", {
+test_that("univariateAnalysisPipeline: all three methods + chain initialises both susie and susieAsh", {
   skip_if_not_installed("susieR")
   inp <- .make_strong_signal_inputs()
   r <- univariateAnalysisPipeline(
     X = inp$X, Y = inp$y, maf = inp$maf,
-    methods = c("susie_inf", "susie", "susie_ash"), addSusieInf = TRUE,
+    methods = c("susieInf", "susie", "susieAsh"), addSusieInf = TRUE,
     twasWeights = FALSE,
     finemappingExtraOpts = list(refine = FALSE),
     signalCutoff = 0, verbose = 0
@@ -201,7 +201,7 @@ test_that("univariateAnalysisPipeline: all three methods + chain initialises bot
   expect_false(is.null(r$susie_inf_fitted))
   expect_false(is.null(r$susie_fitted))
   expect_false(is.null(r$susie_ash_fitted))
-  expect_true(all(c("susie_inf", "susie", "susie_ash") %in% unique(r$top_loci$method)))
+  expect_true(all(c("susieInf", "susie", "susieAsh") %in% unique(r$top_loci$method)))
 })
 
 test_that("univariateAnalysisPipeline: twasWeights = TRUE requires chained two-stage", {
@@ -218,7 +218,7 @@ test_that("univariateAnalysisPipeline: twasWeights = TRUE requires chained two-s
   expect_error(
     univariateAnalysisPipeline(
       X = inp$X, Y = inp$y, maf = inp$maf,
-      methods = c("susie_ash"), twasWeights = TRUE, verbose = 0
+      methods = c("susieAsh"), twasWeights = TRUE, verbose = 0
     ),
     "susie"
   )
@@ -247,37 +247,37 @@ test_that("susieRssPipeline: default (methods = NULL) is single-method via analy
     sumstats = rss$sumstats, ldMat = rss$ldMat, n = rss$n,
     L = 5, signalCutoff = 0
   )
-  expect_equal(unique(r$top_loci$method), "susie_rss")
+  expect_equal(unique(r$top_loci$method), "susieRss")
 })
 
-test_that("susieRssPipeline: legacy analysis_method = single_effect respected when methods = NULL", {
+test_that("susieRssPipeline: legacy analysis_method = singleEffect respected when methods = NULL", {
   skip_if_not_installed("susieR")
   rss <- .make_rss_inputs()
   r <- susieRssPipeline(
     sumstats = rss$sumstats, ldMat = rss$ldMat, n = rss$n,
-    L = 5, analysisMethod = "single_effect", signalCutoff = 0
+    L = 5, analysisMethod = "singleEffect", signalCutoff = 0
   )
-  expect_equal(unique(r$top_loci$method), "single_effect")
+  expect_equal(unique(r$top_loci$method), "singleEffect")
 })
 
-test_that("susieRssPipeline: methods = \"susie_inf_rss\" alone", {
+test_that("susieRssPipeline: methods = \"susieInfRss\" alone", {
   skip_if_not_installed("susieR")
   rss <- .make_rss_inputs()
   r <- susieRssPipeline(
     sumstats = rss$sumstats, ldMat = rss$ldMat, n = rss$n,
-    L = 5, methods = c("susie_inf_rss"), signalCutoff = 0
+    L = 5, methods = c("susieInfRss"), signalCutoff = 0
   )
-  expect_equal(unique(r$top_loci$method), "susie_inf_rss")
+  expect_equal(unique(r$top_loci$method), "susieInfRss")
 })
 
-test_that("susieRssPipeline: methods = \"susie_ash_rss\" alone", {
+test_that("susieRssPipeline: methods = \"susieAshRss\" alone", {
   skip_if_not_installed("susieR")
   rss <- .make_rss_inputs()
   r <- susieRssPipeline(
     sumstats = rss$sumstats, ldMat = rss$ldMat, n = rss$n,
-    L = 5, methods = c("susie_ash_rss"), signalCutoff = 0
+    L = 5, methods = c("susieAshRss"), signalCutoff = 0
   )
-  expect_equal(unique(r$top_loci$method), "susie_ash_rss")
+  expect_equal(unique(r$top_loci$method), "susieAshRss")
 })
 
 test_that("susieRssPipeline: chained init produces both rows", {
@@ -285,10 +285,10 @@ test_that("susieRssPipeline: chained init produces both rows", {
   rss <- .make_rss_inputs()
   r <- susieRssPipeline(
     sumstats = rss$sumstats, ldMat = rss$ldMat, n = rss$n,
-    L = 5, methods = c("susie_inf_rss", "susie_rss"),
+    L = 5, methods = c("susieInfRss", "susieRss"),
     addSusieInf = TRUE, signalCutoff = 0
   )
-  expect_true(all(c("susie_inf_rss", "susie_rss") %in% unique(r$top_loci$method)))
+  expect_true(all(c("susieInfRss", "susieRss") %in% unique(r$top_loci$method)))
 })
 
 test_that("susieRssPipeline: independent both (addSusieInf = FALSE)", {
@@ -296,10 +296,10 @@ test_that("susieRssPipeline: independent both (addSusieInf = FALSE)", {
   rss <- .make_rss_inputs()
   r <- susieRssPipeline(
     sumstats = rss$sumstats, ldMat = rss$ldMat, n = rss$n,
-    L = 5, methods = c("susie_inf_rss", "susie_rss"),
+    L = 5, methods = c("susieInfRss", "susieRss"),
     addSusieInf = FALSE, signalCutoff = 0
   )
-  expect_true(all(c("susie_inf_rss", "susie_rss") %in% unique(r$top_loci$method)))
+  expect_true(all(c("susieInfRss", "susieRss") %in% unique(r$top_loci$method)))
 })
 
 test_that("susieRssPipeline: unknown method rejected", {

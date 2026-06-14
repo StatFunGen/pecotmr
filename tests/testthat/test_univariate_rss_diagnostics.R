@@ -21,14 +21,14 @@ test_that("getSusieResult returns NULL for empty input", {
   expect_null(result)
 })
 
-test_that("getSusieResult returns NULL when finemapping_result missing", {
+test_that("getSusieResult returns NULL when finemappingResult missing", {
   result <- getSusieResult(list(some_data = 42))
   expect_null(result)
 })
 
 test_that("getSusieResult returns trimmed result when present", {
   mock_result <- list(pip = c(0.1, 0.5, 0.3), sets = list(cs = list()))
-  con_data <- list(finemapping_result = .test_fm_result(
+  con_data <- list(finemappingResult = .test_fm_result(
     variantNames = character(0),
     trimmedFit = mock_result
   ))
@@ -42,7 +42,7 @@ test_that("getSusieResult returns trimmed result when present", {
 
 test_that("extractTopPipInfo finds top PIP variant", {
   con_data <- list(
-    finemapping_result = .test_fm_result(
+    finemappingResult = .test_fm_result(
       variantNames = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
       trimmedFit = list(pip = c(0.1, 0.7, 0.2))
     ),
@@ -59,7 +59,7 @@ test_that("extractTopPipInfo finds top PIP variant", {
 
 test_that("extractTopPipInfo computes p_value from z", {
   con_data <- list(
-    finemapping_result = .test_fm_result(
+    finemappingResult = .test_fm_result(
       variantNames = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
       trimmedFit = list(pip = c(0.9, 0.05, 0.05))
     ),
@@ -72,7 +72,7 @@ test_that("extractTopPipInfo computes p_value from z", {
 
 test_that("extractTopPipInfo handles ties by taking first max", {
   con_data <- list(
-    finemapping_result = .test_fm_result(
+    finemappingResult = .test_fm_result(
       variantNames = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
       trimmedFit = list(pip = c(0.5, 0.5, 0.5))
     ),
@@ -89,7 +89,7 @@ test_that("extractTopPipInfo handles ties by taking first max", {
 
 test_that("extractCsInfo extracts single CS correctly", {
   con_data <- list(
-    finemapping_result = .test_fm_result(
+    finemappingResult = .test_fm_result(
       variantNames = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
       trimmedFit = list(
         sets = list(cs = list(L_1 = c(1, 2))),
@@ -114,7 +114,7 @@ test_that("extractCsInfo extracts single CS correctly", {
 
 test_that("extractCsInfo extracts multiple CSs with cs_corr", {
   con_data <- list(
-    finemapping_result = .test_fm_result(
+    finemappingResult = .test_fm_result(
       variantNames = c("1:100:A:G", "1:200:C:T", "1:300:G:A", "1:400:T:C"),
       trimmedFit = list(
         sets = list(
@@ -141,7 +141,7 @@ test_that("extractCsInfo extracts multiple CSs with cs_corr", {
 
 test_that("extractCsInfo computes p_value from z-score", {
   con_data <- list(
-    finemapping_result = .test_fm_result(
+    finemappingResult = .test_fm_result(
       variantNames = c("1:100:A:G", "1:200:C:T"),
       trimmedFit = list(
         sets = list(cs = list(L_1 = c(1, 2))),

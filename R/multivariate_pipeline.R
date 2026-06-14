@@ -1,18 +1,18 @@
 #' Convert QC'ed regional summary-statistic data to mvSuSiE RSS input
 #'
-#' @param sumstatData The \code{sumstat_data} component from a QC'ed regional
-#'   object, typically \code{qced_regional_data$sumstat_data}.
+#' @param sumstatData The \code{sumstatData} component from a QC'ed regional
+#'   object, typically \code{qced_regional_data$sumstatData}.
 #' @param ldName Optional name of the LD reference to use. If \code{NULL}, a
-#'   unique \code{LD_match} entry is used. If \code{LD_match} points to multiple
-#'   references, the first one is used with a message. When no \code{LD_match}
+#'   unique \code{ldMatch} entry is used. If \code{ldMatch} points to multiple
+#'   references, the first one is used with a message. When no \code{ldMatch}
 #'   is available, the first LD reference containing all shared variants is used.
-#' @return A list with \code{mvsusie_rss_input}, ready for
-#'   \code{mvsusieR::mvsusie_rss()}, and \code{source_info}.
+#' @return A list with \code{mvsusieRssInput}, ready for
+#'   \code{mvsusieR::mvsusie_rss()}, and \code{sourceInfo}.
 #' @export
 regionDataToMvsusieRssInput <- function(sumstatData, ldName = NULL) {
   if (is.null(sumstatData) || is.null(sumstatData$sumstats) ||
-      is.null(sumstatData$LD_data)) {
-    stop("sumstatData must contain post-QC sumstats and LD_data entries.")
+      is.null(sumstatData$ldData)) {
+    stop("sumstatData must contain post-QC sumstats and ldData entries.")
   }
 
   sumstats <- sumstatData$sumstats
@@ -48,21 +48,21 @@ regionDataToMvsusieRssInput <- function(sumstatData, ldName = NULL) {
   }, numeric(1))
   names(nVec) <- studyNames
 
-  LD_data <- sumstatData$LD_data
-  ldNames <- names(LD_data)
+  ldData <- sumstatData$ldData
+  ldNames <- names(ldData)
   if (is.null(ldNames) || any(!nzchar(ldNames))) {
-    ldNames <- paste0("LD", seq_along(LD_data))
-    names(LD_data) <- ldNames
+    ldNames <- paste0("LD", seq_along(ldData))
+    names(ldData) <- ldNames
   }
 
-  LD_match <- sumstatData$LD_match
+  ldMatch <- sumstatData$ldMatch
   matchedLdNames <- character()
-  if (!is.null(LD_match)) {
-    LD_match <- as.character(LD_match)
-    if (!is.null(names(LD_match)) && all(studyNames %in% names(LD_match))) {
-      matchedLdNames <- LD_match[studyNames]
-    } else if (length(LD_match) >= length(studyNames)) {
-      matchedLdNames <- LD_match[seq_along(studyNames)]
+  if (!is.null(ldMatch)) {
+    ldMatch <- as.character(ldMatch)
+    if (!is.null(names(ldMatch)) && all(studyNames %in% names(ldMatch))) {
+      matchedLdNames <- ldMatch[studyNames]
+    } else if (length(ldMatch) >= length(studyNames)) {
+      matchedLdNames <- ldMatch[seq_along(studyNames)]
     }
     matchedLdNames <- unique(matchedLdNames[!is.na(matchedLdNames) & nzchar(matchedLdNames)])
   }
@@ -70,30 +70,30 @@ regionDataToMvsusieRssInput <- function(sumstatData, ldName = NULL) {
   selectedLdName <- ldName
   if (is.null(selectedLdName) && length(matchedLdNames) == 1L) {
     if (!matchedLdNames %in% ldNames) {
-      stop("LD_match points to an LD reference that is not present in sumstatData$LD_data.")
+      stop("ldMatch points to an LD reference that is not present in sumstatData$ldData.")
     }
     selectedLdName <- matchedLdNames
   }
   if (is.null(selectedLdName) && length(matchedLdNames) > 1L) {
     selectedLdName <- matchedLdNames[[1]]
-    message("mvSuSiE RSS input: multiple LD_match references were found; using the first reference '",
+    message("mvSuSiE RSS input: multiple ldMatch references were found; using the first reference '",
             selectedLdName, "'. Provide ldName to choose a different reference.")
   }
   if (is.null(selectedLdName)) {
-    containsOverlap <- vapply(LD_data, function(ld) {
+    containsOverlap <- vapply(ldData, function(ld) {
       is(ld, "LdData") && all(overlap %in% getVariantIds(ld))
     }, logical(1))
     if (!any(containsOverlap)) {
-      stop("No LD_data entry contains all shared variants.")
+      stop("No ldData entry contains all shared variants.")
     }
     selectedLdName <- ldNames[which(containsOverlap)[1]]
   }
   if (!selectedLdName %in% ldNames) {
-    stop("ldName is not present in sumstatData$LD_data.")
+    stop("ldName is not present in sumstatData$ldData.")
   }
 
-  ld <- LD_data[[selectedLdName]]
-  if (!is(ld, "LdData")) stop("Selected LD_data entry must be an LdData object.")
+  ld <- ldData[[selectedLdName]]
+  if (!is(ld, "LdData")) stop("Selected ldData entry must be an LdData object.")
 
   referenceIds <- getVariantIds(ld)
   if (hasGenotypes(ld)) {
@@ -115,16 +115,16 @@ regionDataToMvsusieRssInput <- function(sumstatData, ldName = NULL) {
   }
 
   list(
-    mvsusie_rss_input = list(
+    mvsusieRssInput = list(
       Z = Z,
       R = R,
       N = if (all(is.na(nVec))) NA_real_ else max(nVec, na.rm = TRUE)
     ),
-    source_info = list(
+    sourceInfo = list(
       studies = studyNames,
       variants = overlap,
       n = nVec,
-      ld_name = selectedLdName
+      ldName = selectedLdName
     )
   )
 }
@@ -158,7 +158,7 @@ regionDataToMvsusieRssInput <- function(sumstatData, ldName = NULL) {
 #' @param data_driven_prior_matrices A list of data-driven covariance matrices for mr.mash weights.
 #' @param data_driven_prior_matrices_cv A list of data-driven covariance matrices for mr.mash weights in cross-validation.
 #' @param canonical_prior_matrices If set to TRUE, will compute canonical covariance matrices and add them into the prior covariance matrix list in mrmash_wrapper. Default is TRUE.
-#' @param sample_partition Optional data frame with Sample and Fold columns for cross-validation.
+#' @param samplePartition Optional data frame with Sample and Fold columns for cross-validation.
 #' @param mrmash_max_iter The maximum number of iterations for mr.mash. Default is 5000.
 #' @param mvsusie_max_iter The maximum number of iterations for mvSuSiE. Default is 200.
 #' @param estimate_residual_variance Passed to \code{mvsusieR::mvsusie()}. Default is TRUE.
@@ -291,7 +291,7 @@ multivariateAnalysisPipeline <- function(
                                      dataDrivenPriorMatricesCv, cvFolds, priorWeights, dataDrivenPriorWeightsCutoff) {
     if (!is.null(dataDrivenPriorMatrices)) {
       # update w based on mrmash prior weights
-      message("Updating prior weights based on mrmash_fitted. ")
+      message("Updating prior weights based on mrmashFitted. ")
       dataDrivenPriorMatrices$w <- priorWeights
       dataDrivenPriorMatrices$U <- dataDrivenPriorMatrices$U[names(priorWeights)]
       dataDrivenPriorMatrices <- list(matrices = dataDrivenPriorMatrices$U, weights = dataDrivenPriorMatrices$w)
@@ -410,14 +410,14 @@ multivariateAnalysisPipeline <- function(
   st <- proc.time()
   res <- list()
   message("Fitting mr.mash model on input data ...")
-  res$mrmash_fitted <- mrmashWrapper(
+  res$mrmashFitted <- mrmashWrapper(
     X = X, Y = Y, dataDrivenPriorMatrices = dataDrivenPriorMatrices,
     canonicalPriorMatrices = canonicalPriorMatrices, maxIter = mrmashMaxIter
   )
 
   # For input into mvSuSiE
-  residY <- res$mrmash_fitted$V
-  w0Updated <- rescaleCovW0(res$mrmash_fitted$w0)
+  residY <- res$mrmashFitted$V
+  w0Updated <- rescaleCovW0(res$mrmashFitted$w0)
   if (length(w0Updated) == 0) {
     return(list())
   }
@@ -444,12 +444,12 @@ multivariateAnalysisPipeline <- function(
     colnames(Y), dataDrivenPriorMatrices,
     dataDrivenPriorMatricesCv, cvFolds, w0Updated, dataDrivenPriorWeightsCutoff
   )
-  res$reweighted_mixture_prior <- mvsusieReweightedMixturePrior$dataDrivenPriorMatrices
-  res$reweighted_mixture_prior_cv <- mvsusieReweightedMixturePrior$dataDrivenPriorMatricesCv
+  res$reweightedMixturePrior <- mvsusieReweightedMixturePrior$dataDrivenPriorMatrices
+  res$reweightedMixturePriorCv <- mvsusieReweightedMixturePrior$dataDrivenPriorMatricesCv
 
   # Fit mvSuSiE
   message("Fitting mvSuSiE model on input data ...")
-  res$mvsusie_fitted <- mvsusieR::mvsusie(X, Y,
+  res$mvsusieFitted <- mvsusieR::mvsusie(X, Y,
     L = L, L_greedy = lGreedy,
     prior_variance = mvsusieReweightedMixturePrior$dataDrivenPriorMatrices,
     residual_variance = residY, estimate_residual_variance = estimateResidualVariance,
@@ -460,7 +460,7 @@ multivariateAnalysisPipeline <- function(
   # Process mvSuSiE results
   secCoverage <- if (length(coverage) > 1) coverage[-1] else NULL
   mvsusiePost <- postprocessFinemappingFits(
-    fits = list(mvsusie = .setFinemappingFitClass(res$mvsusie_fitted, "mvsusie")),
+    fits = list(mvsusie = .setFinemappingFitClass(res$mvsusieFitted, "mvsusie")),
     dataX = X,
     dataY = NULL,
     xScalar = 1,
@@ -474,11 +474,11 @@ multivariateAnalysisPipeline <- function(
     region = region
   )
   res <- c(res, formatFinemappingOutput(mvsusiePost, primaryMethod = "mvsusie"))
-  res$total_time_elapsed <- proc.time() - st
+  res$totalTimeElapsed <- proc.time() - st
 
   # Run TWAS weights and optionally CV
   if (twasWeights) {
-    res$twas_weights_result <- twasMultivariateWeightsPipeline(X, Y, res,
+    res$twasWeightsResult <- twasMultivariateWeightsPipeline(X, Y, res,
       cvFolds = cvFolds, samplePartition = samplePartition,
       maxCvVariants = maxCvVariants,
       mvsusieMaxIter = mvsusieMaxIter, mrmashMaxIter = mrmashMaxIter,

@@ -18,13 +18,13 @@ rssAnalysisPipeline(
   mafCutoff = NULL,
   zMismatchQc = "none",
   alleleFlipKriging = FALSE,
-  finemappingMethod = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
+  finemappingMethod = c("susieRss", "singleEffect", "bayesianConditionalRegression"),
   methods = NULL,
   addSusieInf = TRUE,
-  finemappingOpts = list(L = 20, L_greedy = 5, coverage = c(0.95, 0.7, 0.5),
-    signal_cutoff = 0.025, min_abs_corr = 0.8),
+  finemappingOpts = list(L = 20, lGreedy = 5, coverage = c(0.95, 0.7, 0.5), signalCutoff
+    = 0.025, minAbsCorr = 0.8),
   impute = TRUE,
-  imputeOpts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
+  imputeOpts = list(rcond = 0.01, r2Threshold = 0.6, minimumLd = 5, lamb = 0.01),
   pipCutoffToSkip = 0,
   rFinite = NULL,
   rMismatch = NULL,
@@ -41,7 +41,7 @@ rssAnalysisPipeline(
 
 \item{ldData}{An \code{LdData} S4 object from \code{loadLdMatrix()}. When
 \code{hasGenotypes(ldData)} is TRUE (from \code{returnGenotype=TRUE}),
-susie_rss uses the z+X interface via \code{getGenotypes()}. Local R is
+susieRss uses the z+X interface via \code{getGenotypes()}. Local R is
 computed only for QC stages that require a correlation matrix.}
 
 \item{nSample}{Sample size. If 0, retrieved from the sumstat file.}
@@ -76,25 +76,25 @@ run before the heavier \code{zMismatchQc}, or standalone when
 \code{zMismatchQc = "none"}. Default \code{FALSE}.}
 
 \item{finemappingMethod}{Iteration mode for the SuSiE-RSS fit (when
-\code{"susie_rss"} is among \code{methods}). One of \code{"susie_rss"}
-(default normal IBSS), \code{"single_effect"} (L=1, single iteration),
-or \code{"bayesian_conditional_regression"} (full L, single iteration).}
+\code{"susieRss"} is among \code{methods}). One of \code{"susieRss"}
+(default normal IBSS), \code{"singleEffect"} (L=1, single iteration),
+or \code{"bayesianConditionalRegression"} (full L, single iteration).}
 
 \item{methods}{Optional character vector selecting which SuSiE-RSS
-variants to fit. Any subset of \code{c("susie_rss", "susie_inf_rss",
-"susie_ash_rss")}. Default \code{NULL} preserves legacy single-method
+variants to fit. Any subset of \code{c("susieRss", "susieInfRss",
+"susieAshRss")}. Default \code{NULL} preserves legacy single-method
 behavior via \code{finemappingMethod}. When set explicitly, every
 requested method contributes rows to the unified \code{top_loci}; when
-\code{"susie_inf_rss"} is paired with \code{"susie_rss"} or
-\code{"susie_ash_rss"} (or both) and \code{addSusieInf = TRUE}, the
+\code{"susieInfRss"} is paired with \code{"susieRss"} or
+\code{"susieAshRss"} (or both) and \code{addSusieInf = TRUE}, the
 SuSiE-inf-RSS fit initialises the chained downstream method(s).}
 
 \item{addSusieInf}{Logical controlling chained init when
-\code{"susie_inf_rss"} is in \code{methods} alongside
-\code{"susie_rss"} and/or \code{"susie_ash_rss"}. Default \code{TRUE}.}
+\code{"susieInfRss"} is in \code{methods} alongside
+\code{"susieRss"} and/or \code{"susieAshRss"}. Default \code{TRUE}.}
 
-\item{finemappingOpts}{List of fine-mapping options (L, L_greedy, coverage,
-signal_cutoff, min_abs_corr).}
+\item{finemappingOpts}{List of fine-mapping options (L, lGreedy, coverage,
+signalCutoff, minAbsCorr).}
 
 \item{impute}{Whether to impute missing variants via RAISS (default TRUE).}
 

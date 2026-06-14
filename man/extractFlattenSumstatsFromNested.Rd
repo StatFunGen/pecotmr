@@ -7,7 +7,7 @@
 extractFlattenSumstatsFromNested(data, extractInf = "z", maxDepth = 3)
 }
 \arguments{
-\item{data}{A nested list structure potentially containing `variant_names` and `sumstats`.}
+\item{data}{A nested list structure potentially containing `variantNames` and `sumstats`.}
 
 \item{extractInf}{Character. One of `"z"`, `"beta"`, or `"se"`.}
 
@@ -18,7 +18,7 @@ A data.frame with columns `variants` and the requested summary statistic.
 }
 \description{
 Recursively searches a nested list to extract summary statistics (z, beta, or se)
-using `variant_names` and `sumstats`. Computes `z` if needed from `betahat` and `sebetahat`.
+using `variantNames` and `sumstats`. Computes `z` if needed from `betahat` and `sebetahat`.
 }
 \examples{
 \dontrun{

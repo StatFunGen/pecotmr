@@ -22,8 +22,8 @@ same length as \code{tau}.}
 \value{
 A list with:
   \describe{
-    \item{tau_star}{Numeric vector of standardized tau values.}
-    \item{tau_star_se}{Numeric vector of jackknife SE for tau_star.}
+    \item{tauStar}{Numeric vector of standardized tau values.}
+    \item{tauStarSe}{Numeric vector of jackknife SE for tauStar.}
   }
 }
 \description{

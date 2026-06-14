@@ -38,9 +38,9 @@ test_that("prsCs runs successfully with valid input", {
   result <- prsCs(bhat = bhat, LD = list(blk1 = R), n = n,
                    maf = rep(0.3, p), nIter = 50, nBurnin = 10, thin = 2)
   expect_type(result, "list")
-  expect_true("beta_est" %in% names(result))
-  expect_equal(length(result$beta_est), p)
-  expect_true(all(is.finite(result$beta_est)))
+  expect_true("betaEst" %in% names(result))
+  expect_equal(length(result$betaEst), p)
+  expect_true(all(is.finite(result$betaEst)))
 })
 
 test_that("prsCs accepts multiple LD blocks whose dimensions sum to length of bhat", {
@@ -63,9 +63,9 @@ test_that("prsCs accepts multiple LD blocks whose dimensions sum to length of bh
   )
 
   expect_type(result, "list")
-  expect_true("beta_est" %in% names(result))
-  expect_equal(length(result$beta_est), p)
-  expect_true(all(is.finite(result$beta_est)))
+  expect_true("betaEst" %in% names(result))
+  expect_equal(length(result$betaEst), p)
+  expect_true(all(is.finite(result$betaEst)))
 })
 
 test_that("prsCs with phi = NULL estimates phi automatically", {
@@ -76,7 +76,7 @@ test_that("prsCs with phi = NULL estimates phi automatically", {
   result <- prsCs(bhat = bhat, LD = list(blk1 = R), n = n,
                    phi = NULL, maf = rep(0.3, p),
                    nIter = 50, nBurnin = 10, thin = 2)
-  expect_true("phi_est" %in% names(result))
+  expect_true("phiEst" %in% names(result))
 })
 
 test_that("prsCs with explicit phi value", {
@@ -87,9 +87,9 @@ test_that("prsCs with explicit phi value", {
   result <- prsCs(bhat = bhat, LD = list(blk1 = R), n = n,
                    phi = 0.01, maf = rep(0.3, p),
                    nIter = 50, nBurnin = 10, thin = 2)
-  expect_true("phi_est" %in% names(result))
-  expect_true("sigma_est" %in% names(result))
-  expect_true("psi_est" %in% names(result))
+  expect_true("phiEst" %in% names(result))
+  expect_true("sigmaEst" %in% names(result))
+  expect_true("psiEst" %in% names(result))
 })
 
 test_that("prsCs works without maf (maf = NULL)", {
@@ -99,7 +99,7 @@ test_that("prsCs works without maf (maf = NULL)", {
   R <- diag(p)
   result <- prsCs(bhat = bhat, LD = list(blk1 = R), n = n,
                    maf = NULL, nIter = 50, nBurnin = 10, thin = 2)
-  expect_equal(length(result$beta_est), p)
+  expect_equal(length(result$betaEst), p)
 })
 
 # ---- prsCs verbose output ----
@@ -113,8 +113,8 @@ test_that("prsCs with verbose = TRUE produces output", {
                    maf = rep(0.3, p), nIter = 110, nBurnin = 10, thin = 2,
                    verbose = TRUE, seed = 42L)
   expect_type(result, "list")
-  expect_equal(length(result$beta_est), p)
-  expect_true(all(is.finite(result$beta_est)))
+  expect_equal(length(result$betaEst), p)
+  expect_true(all(is.finite(result$betaEst)))
 })
 
 test_that("prsCs verbose with phi = NULL shows estimated phi", {
@@ -126,8 +126,8 @@ test_that("prsCs verbose with phi = NULL shows estimated phi", {
                    phi = NULL, maf = rep(0.3, p),
                    nIter = 110, nBurnin = 10, thin = 2,
                    verbose = TRUE, seed = 42L)
-  expect_true("phi_est" %in% names(result))
-  expect_true(result$phi_est > 0)
+  expect_true("phiEst" %in% names(result))
+  expect_true(result$phiEst > 0)
 })
 
 # ---- prsCs signal recovery ----
@@ -143,17 +143,17 @@ test_that("prsCs recovers signal direction on simulated genotype data", {
   R <- cor(X)
   result <- prsCs(bhat = bhat, LD = list(blk1 = R), n = n,
                    nIter = 1000, nBurnin = 500, thin = 5, seed = 42)
-  expect_true("beta_est" %in% names(result))
-  expect_equal(length(result$beta_est), p)
-  expect_true(all(is.finite(result$beta_est)))
+  expect_true("betaEst" %in% names(result))
+  expect_equal(length(result$betaEst), p)
+  expect_true(all(is.finite(result$betaEst)))
   # Sigma should be reasonable (near 1 for standardized data)
-  expect_true(result$sigma_est > 0.1 && result$sigma_est < 10)
+  expect_true(result$sigmaEst > 0.1 && result$sigmaEst < 10)
   # Correlation with truth should be positive (signal recovery)
-  expect_gt(cor(result$beta_est, beta_true), 0.5)
+  expect_gt(cor(result$betaEst, beta_true), 0.5)
 })
 
 # ---- prsCsWeights (wrapper) ----
-test_that("prsCsWeights calls prsCs and returns beta_est", {
+test_that("prsCsWeights calls prsCs and returns betaEst", {
   set.seed(42)
   p <- 10
   n <- 100

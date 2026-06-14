@@ -5,7 +5,7 @@ context("colocboostPipeline")
 # ===========================================================================
 
 # Wrap a correlation (or genotype) matrix into an LdData for use in test mocks
-# that previously used bare matrices for LD_mat/LD_info fields.
+# that previously used bare matrices for ldMat/ldInfo fields.
 .test_lddata_from_matrix <- function(mat, is_genotype = FALSE) {
   vids <- if (is_genotype) colnames(mat) else rownames(mat)
   if (is.null(vids)) vids <- colnames(mat)
@@ -22,11 +22,11 @@ context("colocboostPipeline")
   }
 }
 
-# Wrap one (rss_input, LD_matrix) pair as a QcResult for mocks that previously
+# Wrap one (rss_input, ldMatrix) pair as a QcResult for mocks that previously
 # returned the legacy list shape.
-.test_qcresult_from_list <- function(rss_input, LD_mat) {
+.test_qcresult_from_list <- function(rss_input, ldMat) {
   QcResult(
-    ldData = .test_lddata_from_matrix(LD_mat),
+    ldData = .test_lddata_from_matrix(ldMat),
     rssInput = rss_input,
     preprocess = list(),
     outlierNumber = 0L,
@@ -88,13 +88,13 @@ test_that("qcRegionalData is exported for downstream use", {
 })
 
 test_that("qcRegionalData accepts explicit zMismatchQc = 'slalom'", {
-  region_data <- list(individual_data = NULL, sumstat_data = NULL)
+  region_data <- list(individualData = NULL, sumstatData = NULL)
   result <- qcRegionalData(region_data, zMismatchQc = "slalom")
   expect_type(result, "list")
 })
 
 test_that("qcRegionalData rejects invalid qc_method", {
-  region_data <- list(individual_data = NULL, sumstat_data = NULL)
+  region_data <- list(individualData = NULL, sumstatData = NULL)
   expect_error(
     qcRegionalData(region_data, zMismatchQc = "invalid"),
     "arg"
@@ -103,7 +103,7 @@ test_that("qcRegionalData rejects invalid qc_method", {
 
 # ---- pipCutoffToSkipInd validation ----
 test_that("pip_cutoff scalar is recycled for individual contexts", {
-  # Create individual_data with 3 real-ish contexts
+  # Create individualData with 3 real-ish contexts
   set.seed(42)
   n <- 10; p <- 5
   make_ctx <- function() {
@@ -114,12 +114,12 @@ test_that("pip_cutoff scalar is recycled for individual contexts", {
     list(X = X, Y = Y, maf = runif(p, 0.05, 0.5))
   }
   ctx <- make_ctx()
-  individual_data <- .test_regionaldata_from_lists(
+  individualData <- .test_regionaldata_from_lists(
     residual_Y = list(ctx1 = ctx$Y, ctx2 = ctx$Y, ctx3 = ctx$Y),
     residual_X = list(ctx1 = ctx$X, ctx2 = ctx$X, ctx3 = ctx$X),
     maf = list(ctx1 = ctx$maf, ctx2 = ctx$maf, ctx3 = ctx$maf)
   )
-  region_data <- list(individual_data = individual_data, sumstat_data = NULL)
+  region_data <- list(individualData = individualData, sumstatData = NULL)
 
   # Scalar 0 (no PIP check) should be recycled and run without error
   result <- qcRegionalData(region_data, pipCutoffToSkipInd = 0)
@@ -133,12 +133,12 @@ test_that("pip_cutoff wrong length errors for individual contexts", {
   colnames(X) <- paste0("var", 1:p)
   Y <- matrix(rnorm(n), n, 1)
   colnames(Y) <- "gene1"
-  individual_data <- .test_regionaldata_from_lists(
+  individualData <- .test_regionaldata_from_lists(
     residual_Y = list(ctx1 = Y, ctx2 = Y, ctx3 = Y),
     residual_X = list(ctx1 = X, ctx2 = X, ctx3 = X),
     maf = list(ctx1 = runif(p), ctx2 = runif(p), ctx3 = runif(p))
   )
-  region_data <- list(individual_data = individual_data, sumstat_data = NULL)
+  region_data <- list(individualData = individualData, sumstatData = NULL)
 
   expect_error(
     qcRegionalData(region_data, pipCutoffToSkipInd = c(0, 0)),
@@ -153,12 +153,12 @@ test_that("pip_cutoff correct length vector works", {
   colnames(X) <- paste0("var", 1:p)
   Y <- matrix(rnorm(n), n, 1)
   colnames(Y) <- "gene1"
-  individual_data <- .test_regionaldata_from_lists(
+  individualData <- .test_regionaldata_from_lists(
     residual_Y = list(ctx1 = Y, ctx2 = Y),
     residual_X = list(ctx1 = X, ctx2 = X),
     maf = list(ctx1 = runif(p, 0.05, 0.5), ctx2 = runif(p, 0.05, 0.5))
   )
-  region_data <- list(individual_data = individual_data, sumstat_data = NULL)
+  region_data <- list(individualData = individualData, sumstatData = NULL)
 
   # Length-2 vector for 2 contexts should work
   result <- qcRegionalData(region_data, pipCutoffToSkipInd = c(0, 0))
@@ -178,19 +178,19 @@ make_individual_region_data <- function(n = 20, p = 8, n_contexts = 2, n_events 
   sample_ids <- paste0("sample", seq_len(n))
   var_ids <- paste0("chr1:", seq_len(p) * 100, ":A:G")
   X <- matrix(rnorm(n * p), n, p, dimnames = list(sample_ids, var_ids))
-  context_names <- paste0("ctx", seq_len(n_contexts))
+  contextNames <- paste0("ctx", seq_len(n_contexts))
   phenotypes <- stats::setNames(lapply(seq_len(n_contexts), function(i) {
     Y <- matrix(rnorm(n * n_events), n, n_events,
                 dimnames = list(sample_ids, paste0("event", seq_len(n_events))))
     Y
-  }), context_names)
+  }), contextNames)
   # Per-context covariates: empty intercept-only model (n x 0 with rownames)
   covariates <- stats::setNames(lapply(seq_len(n_contexts), function(i) {
     matrix(numeric(0), nrow = n, ncol = 0, dimnames = list(sample_ids, NULL))
-  }), context_names)
+  }), contextNames)
   maf_list <- stats::setNames(lapply(seq_len(n_contexts), function(i) {
     runif(p, 0.05, 0.45)
-  }), context_names)
+  }), contextNames)
   rd <- RegionalData(
     genotypeMatrix = X,
     phenotypes = phenotypes,
@@ -202,8 +202,8 @@ make_individual_region_data <- function(n = 20, p = 8, n_contexts = 2, n_events 
     coordinates = NULL
   )
   list(
-    individual_data = rd,
-    sumstat_data = NULL
+    individualData = rd,
+    sumstatData = NULL
   )
 }
 
@@ -214,8 +214,8 @@ make_sumstat_region_data <- function(n_variants = 5, n_studies = 2) {
   set.seed(202)
   vids <- paste0("chr1:", seq_len(n_variants) * 100, ":A:G")
 
-  LD_mat <- diag(n_variants)
-  rownames(LD_mat) <- colnames(LD_mat) <- vids
+  ldMat <- diag(n_variants)
+  rownames(ldMat) <- colnames(ldMat) <- vids
 
   ref_panel <- data.frame(
     chrom = as.character(rep(1, n_variants)),
@@ -247,16 +247,16 @@ make_sumstat_region_data <- function(n_variants = 5, n_studies = 2) {
 
   variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
   ld_data <- LdData(
-    correlation = LD_mat,
+    correlation = ldMat,
     variants = variants_gr,
     blockMetadata = pecotmr:::.inferSingleLdBlockMetadata(ref_panel)
   )
 
   list(
-    individual_data = NULL,
-    sumstat_data    = list(
+    individualData = NULL,
+    sumstatData    = list(
       sumstats = sumstats_list,
-      LD_info  = list(ld_data)
+      ldInfo  = list(ld_data)
     )
   )
 }
@@ -264,8 +264,8 @@ make_sumstat_region_data <- function(n_variants = 5, n_studies = 2) {
 test_that("qcRegionalData treats NULL qc_method as basic-only none", {
   region_data <- make_sumstat_region_data(n_variants = 5, n_studies = 1)
   captured_qc_method <- NULL
-  LD_mat <- diag(1)
-  rownames(LD_mat) <- colnames(LD_mat) <- "chr1:100:A:G"
+  ldMat <- diag(1)
+  rownames(ldMat) <- colnames(ldMat) <- "chr1:100:A:G"
 
   ref_panel_one <- data.frame(
     chrom = "1", pos = 100L, A2 = "A", A1 = "G",
@@ -273,7 +273,7 @@ test_that("qcRegionalData treats NULL qc_method as basic-only none", {
   )
   variants_gr_one <- pecotmr:::.refPanelToGranges(ref_panel_one)
   ld_data_one <- LdData(
-    correlation = LD_mat,
+    correlation = ldMat,
     variants = variants_gr_one,
     blockMetadata = pecotmr:::.inferSingleLdBlockMetadata(ref_panel_one)
   )
@@ -304,16 +304,16 @@ test_that("colocboostPipeline default qc_method resolves to basic-only none", {
   local_mocked_bindings(
     qcRegionalData = function(regionData, ..., zMismatchQc) {
       captured_qc_method <<- zMismatchQc
-      ind <- regionData$individual_data
+      ind <- regionData$individualData
       list(
-        individual_data = list(
+        individualData = list(
           Y = ind@phenotypes,
           X = stats::setNames(
             lapply(seq_along(ind@phenotypes), function(i) ind@genotypeMatrix),
             names(ind@phenotypes)
           )
         ),
-        sumstat_data = NULL
+        sumstatData = NULL
       )
     },
     .runColocboost = function(label, ...) {
@@ -332,15 +332,15 @@ test_that("colocboostPipeline default qc_method resolves to basic-only none", {
 test_that("RegionalData adapters expose individual and RSS inputs", {
   ind_region <- make_individual_region_data(n = 12, p = 5, n_contexts = 1, n_events = 2)
   ind_input <- regionDataToIndInput(ind_region)
-  expect_true(ind_input$source_info$has_individual)
+  expect_true(ind_input$sourceInfo$hasIndividual)
   expect_equal(names(ind_input$X), "ctx1")
   expect_equal(names(ind_input$Y), "ctx1")
 
   rss_region <- make_sumstat_region_data(n_variants = 5, n_studies = 2)
   rss_input <- regionDataToRssInput(rss_region)
-  expect_true(rss_input$source_info$has_sumstat)
-  expect_equal(names(rss_input$rss_input), c("study1", "study2"))
-  expect_true(all(names(rss_input$rss_input) %in% names(rss_input$LD_data)))
+  expect_true(rss_input$sourceInfo$hasSumstat)
+  expect_equal(names(rss_input$rssInput), c("study1", "study2"))
+  expect_true(all(names(rss_input$rssInput) %in% names(rss_input$ldData)))
 })
 
 test_that("ColocBoost adapters accept genotype-backed LdData", {
@@ -390,18 +390,18 @@ test_that("ColocBoost adapters accept genotype-backed LdData", {
     varY = 1
   )
   region_data <- list(
-    individual_data = NULL,
-    sumstat_data = list(
+    individualData = NULL,
+    sumstatData = list(
       sumstats = list(ldgrp = list(study = rss_record)),
-      LD_info = list(ldgrp = ld_data)
+      ldInfo = list(ldgrp = ld_data)
     )
   )
 
   converted <- regionDataToColocboostInput(region_data)
-  expect_null(converted$colocboost_input$LD)
-  expect_equal(length(converted$colocboost_input$X_ref), 1)
-  expect_equal(nrow(converted$colocboost_input$X_ref[[1]]), 100L)
-  expect_equal(ncol(converted$colocboost_input$X_ref[[1]]), length(getVariantIds(ld_data)))
+  expect_null(converted$colocboostInput$LD)
+  expect_equal(length(converted$colocboostInput$X_ref), 1)
+  expect_equal(nrow(converted$colocboostInput$X_ref[[1]]), 100L)
+  expect_equal(ncol(converted$colocboostInput$X_ref[[1]]), length(getVariantIds(ld_data)))
 
   local_mocked_bindings(
     .cbCallColocboost = function(args, dots) list(args = args, dots = dots)
@@ -426,72 +426,72 @@ test_that("RegionalData individual adapter exposes context names from phenotypes
   ind_input <- regionDataToIndInput(ind_region)
   expect_equal(names(ind_input$X), c("ctx1", "ctx2"))
   expect_equal(names(ind_input$maf), c("ctx1", "ctx2"))
-  expect_equal(names(ind_input$X_variance), c("ctx1", "ctx2"))
+  expect_equal(names(ind_input$xVariance), c("ctx1", "ctx2"))
 
   converted <- regionDataToColocboostInput(ind_region)
   # X is shared across contexts in RegionalData; deduplication yields one X.
-  expect_equal(length(converted$colocboost_input$X), 1)
-  expect_equal(nrow(converted$colocboost_input$dict_YX), 2)
+  expect_equal(length(converted$colocboostInput$X), 1)
+  expect_equal(nrow(converted$colocboostInput$dict_YX), 2)
 })
 
 test_that("RegionalData adapters handle missing data without fabricating inputs", {
-  empty_region <- list(individual_data = NULL, sumstat_data = NULL)
+  empty_region <- list(individualData = NULL, sumstatData = NULL)
 
   ind_input <- regionDataToIndInput(empty_region)
-  expect_false(ind_input$source_info$has_individual)
+  expect_false(ind_input$sourceInfo$hasIndividual)
   expect_null(ind_input$X)
   expect_null(ind_input$Y)
 
   rss_input <- regionDataToRssInput(empty_region)
-  expect_false(rss_input$source_info$has_sumstat)
-  expect_equal(rss_input$rss_input, list())
-  expect_equal(rss_input$LD_data, list())
+  expect_false(rss_input$sourceInfo$hasSumstat)
+  expect_equal(rss_input$rssInput, list())
+  expect_equal(rss_input$ldData, list())
 
   converted <- regionDataToColocboostInput(empty_region)
-  expect_equal(converted$colocboost_input, list())
-  expect_false(converted$source_info$individual$has_individual)
-  expect_false(converted$source_info$sumstat$has_sumstat)
+  expect_equal(converted$colocboostInput, list())
+  expect_false(converted$sourceInfo$individual$hasIndividual)
+  expect_false(converted$sourceInfo$sumstat$hasSumstat)
 })
 
 test_that("regionDataToRssInput keeps duplicate study names unique by LD group", {
   base_region <- make_sumstat_region_data(n_variants = 4, n_studies = 1)
-  study <- base_region$sumstat_data$sumstats[[1]]
-  ld_info <- base_region$sumstat_data$LD_info[[1]]
+  study <- base_region$sumstatData$sumstats[[1]]
+  ld_info <- base_region$sumstatData$ldInfo[[1]]
   region_data <- list(
-    individual_data = NULL,
-    sumstat_data = list(
+    individualData = NULL,
+    sumstatData = list(
       sumstats = list(study, study),
-      LD_info = list(ldA = ld_info, ldB = ld_info)
+      ldInfo = list(ldA = ld_info, ldB = ld_info)
     )
   )
 
   rss_input <- regionDataToRssInput(region_data)
-  expect_equal(names(rss_input$rss_input), c("study1", "study1.1"))
-  expect_equal(names(rss_input$LD_data), c("study1", "study1.1"))
-  expect_equal(unname(rss_input$source_info$ld_group), c("ldA", "ldB"))
+  expect_equal(names(rss_input$rssInput), c("study1", "study1.1"))
+  expect_equal(names(rss_input$ldData), c("study1", "study1.1"))
+  expect_equal(unname(rss_input$sourceInfo$ldGroup), c("ldA", "ldB"))
 })
 
 test_that("regionDataToColocboostInput returns core and QC inputs", {
   region_data <- make_individual_region_data(n = 12, p = 5, n_contexts = 1, n_events = 2)
   converted <- regionDataToColocboostInput(region_data)
-  expect_true("colocboost_input" %in% names(converted))
-  expect_true("qc_input" %in% names(converted))
-  expect_true("source_info" %in% names(converted))
-  expect_equal(length(converted$colocboost_input$X), 1)
-  expect_equal(length(converted$colocboost_input$Y), 2)
-  expect_equal(nrow(converted$colocboost_input$dict_YX), 2)
+  expect_true("colocboostInput" %in% names(converted))
+  expect_true("qcInput" %in% names(converted))
+  expect_true("sourceInfo" %in% names(converted))
+  expect_equal(length(converted$colocboostInput$X), 1)
+  expect_equal(length(converted$colocboostInput$Y), 2)
+  expect_equal(nrow(converted$colocboostInput$dict_YX), 2)
 })
 
 test_that("regionDataToColocboostInput routes genotype LdData through X_ref", {
   region_data <- make_sumstat_region_data(n_variants = 5, n_studies = 1)
-  variants <- region_data$sumstat_data$sumstats[[1]][[1]]$sumstats$variant_id
+  variants <- region_data$sumstatData$sumstats[[1]][[1]]$sumstats$variant_id
   X_ref <- matrix(rnorm(50), 10, 5)
   colnames(X_ref) <- variants
 
   ref_panel <- cbind(parseVariantId(variants), variant_id = variants)
   ref_panel$chrom <- as.character(ref_panel$chrom)
   variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
-  region_data$sumstat_data$LD_info[[1]] <- LdData(
+  region_data$sumstatData$ldInfo[[1]] <- LdData(
     correlation = NULL,
     genotypeHandle = X_ref,
     variants = variants_gr,
@@ -501,21 +501,21 @@ test_that("regionDataToColocboostInput routes genotype LdData through X_ref", {
 
   converted <- regionDataToColocboostInput(region_data)
 
-  expect_null(converted$colocboost_input$LD)
-  expect_equal(length(converted$colocboost_input$X_ref), 1)
-  expect_equal(dim(converted$colocboost_input$X_ref[[1]]), c(10, 5))
-  expect_equal(colnames(converted$colocboost_input$X_ref[[1]]), variants)
+  expect_null(converted$colocboostInput$LD)
+  expect_equal(length(converted$colocboostInput$X_ref), 1)
+  expect_equal(dim(converted$colocboostInput$X_ref[[1]]), c(10, 5))
+  expect_equal(colnames(converted$colocboostInput$X_ref[[1]]), variants)
 })
 
 test_that("regionDataToColocboostInput preserves duplicated outcome names across contexts", {
   region_data <- make_individual_region_data(n = 12, p = 5, n_contexts = 2, n_events = 1)
   converted <- regionDataToColocboostInput(region_data)
 
-  expect_equal(names(converted$colocboost_input$Y), c("ctx1_event1", "ctx2_event1"))
-  expect_equal(length(converted$colocboost_input$Y), 2)
-  expect_equal(nrow(converted$colocboost_input$dict_YX), 2)
+  expect_equal(names(converted$colocboostInput$Y), c("ctx1_event1", "ctx2_event1"))
+  expect_equal(length(converted$colocboostInput$Y), 2)
+  expect_equal(nrow(converted$colocboostInput$dict_YX), 2)
   # X is shared across contexts in RegionalData; dict_YX maps both Y to X #1.
-  expect_equal(converted$colocboost_input$dict_YX[, "X"], c(1, 1))
+  expect_equal(converted$colocboostInput$dict_YX[, "X"], c(1, 1))
 })
 
 test_that("regionDataToColocboostInput deduplicates shared individual X", {
@@ -524,28 +524,28 @@ test_that("regionDataToColocboostInput deduplicates shared individual X", {
   region_data <- make_individual_region_data(n = 12, p = 5, n_contexts = 2, n_events = 1)
   converted <- regionDataToColocboostInput(region_data)
 
-  expect_equal(length(converted$colocboost_input$X), 1)
-  expect_equal(length(converted$colocboost_input$Y), 2)
-  expect_equal(converted$colocboost_input$dict_YX[, "X"], c(1, 1))
+  expect_equal(length(converted$colocboostInput$X), 1)
+  expect_equal(length(converted$colocboostInput$Y), 2)
+  expect_equal(converted$colocboostInput$dict_YX[, "X"], c(1, 1))
 })
 
 test_that("regionDataToColocboostInput combines individual and RSS inputs", {
   ind_region <- make_individual_region_data(n = 12, p = 5, n_contexts = 1, n_events = 2)
   rss_region <- make_sumstat_region_data(n_variants = 5, n_studies = 1)
   region_data <- list(
-    individual_data = ind_region$individual_data,
-    sumstat_data = rss_region$sumstat_data
+    individualData = ind_region$individualData,
+    sumstatData = rss_region$sumstatData
   )
 
   converted <- regionDataToColocboostInput(region_data)
-  expect_equal(length(converted$colocboost_input$X), 1)
-  expect_equal(length(converted$colocboost_input$Y), 2)
-  expect_equal(nrow(converted$colocboost_input$dict_YX), 2)
-  expect_equal(length(converted$colocboost_input$sumstat), 1)
-  expect_equal(length(converted$colocboost_input$LD), 1)
-  expect_equal(nrow(converted$colocboost_input$dict_sumstatLD), 1)
-  expect_true(converted$source_info$individual$has_individual)
-  expect_true(converted$source_info$sumstat$has_sumstat)
+  expect_equal(length(converted$colocboostInput$X), 1)
+  expect_equal(length(converted$colocboostInput$Y), 2)
+  expect_equal(nrow(converted$colocboostInput$dict_YX), 2)
+  expect_equal(length(converted$colocboostInput$sumstat), 1)
+  expect_equal(length(converted$colocboostInput$LD), 1)
+  expect_equal(nrow(converted$colocboostInput$dict_sumstatLD), 1)
+  expect_true(converted$sourceInfo$individual$hasIndividual)
+  expect_true(converted$sourceInfo$sumstat$hasSumstat)
 })
 
 test_that("qcRegionalData applies individual genotype filtering helpers", {
@@ -554,26 +554,26 @@ test_that("qcRegionalData applies individual genotype filtering helpers", {
     result <- qcRegionalData(region_data, mafCutoff =0),
     "QC track"
   )
-  expect_equal(names(result$individual_data$Y), "ctx1")
-  expect_equal(ncol(result$individual_data$Y$ctx1), 2)
+  expect_equal(names(result$individualData$Y), "ctx1")
+  expect_equal(ncol(result$individualData$Y$ctx1), 2)
 })
 
 test_that("qcRegionalData keeps individual context labels after filtering", {
   region_data <- make_individual_region_data(n = 12, p = 5, n_contexts = 1, n_events = 2)
-  region_data$individual_data@maf$ctx1 <- stats::setNames(
-    rep(0.2, ncol(region_data$individual_data@genotypeMatrix)),
-    colnames(region_data$individual_data@genotypeMatrix)
+  region_data$individualData@maf$ctx1 <- stats::setNames(
+    rep(0.2, ncol(region_data$individualData@genotypeMatrix)),
+    colnames(region_data$individualData@genotypeMatrix)
   )
-  region_data$individual_data@maf$ctx1[1] <- 0.001
+  region_data$individualData@maf$ctx1[1] <- 0.001
 
   expect_message(
     result <- qcRegionalData(region_data, mafCutoff =0.05),
     "retained"
   )
-  dropped_variant <- names(region_data$individual_data@maf$ctx1)[1]
-  expect_false(dropped_variant %in% colnames(result$individual_data$X$ctx1))
-  expect_true(all(startsWith(colnames(result$individual_data$Y$ctx1), "ctx1_")))
-  expect_equal(ncol(result$individual_data$Y$ctx1), ncol(region_data$individual_data@phenotypes$ctx1))
+  dropped_variant <- names(region_data$individualData@maf$ctx1)[1]
+  expect_false(dropped_variant %in% colnames(result$individualData$X$ctx1))
+  expect_true(all(startsWith(colnames(result$individualData$Y$ctx1), "ctx1_")))
+  expect_equal(ncol(result$individualData$Y$ctx1), ncol(region_data$individualData@phenotypes$ctx1))
 })
 
 test_that("summaryStatsQc runs combined basic harmonization when qc_method is none", {
@@ -581,8 +581,8 @@ test_that("summaryStatsQc runs combined basic harmonization when qc_method is no
   rss_input <- regionDataToRssInput(region_data)
   expect_message(
     result <- summaryStatsQc(
-      rssInput = rss_input$rss_input,
-      ldData = rss_input$LD_data,
+      rssInput = rss_input$rssInput,
+      ldData = rss_input$ldData,
       zMismatchQc = "none",
       impute = FALSE
     ),
@@ -599,8 +599,8 @@ test_that("summaryStatsQc returns one cleaned record for one RSS record", {
 
   expect_message(
     result <- summaryStatsQc(
-      rssInput = rss_input$rss_input$study1,
-      ldData = rss_input$LD_data$study1,
+      rssInput = rss_input$rssInput$study1,
+      ldData = rss_input$ldData$study1,
       zMismatchQc = "none",
       impute = FALSE
     ),
@@ -614,13 +614,13 @@ test_that("summaryStatsQc returns one cleaned record for one RSS record", {
 test_that("summaryStatsQc treats a study named sumstats as multiple-study input", {
   region_data <- make_sumstat_region_data(n_variants = 5, n_studies = 2)
   rss_input <- regionDataToRssInput(region_data)
-  names(rss_input$rss_input)[1] <- "sumstats"
-  names(rss_input$LD_data)[1] <- "sumstats"
+  names(rss_input$rssInput)[1] <- "sumstats"
+  names(rss_input$ldData)[1] <- "sumstats"
 
   expect_message(
     result <- summaryStatsQc(
-      rssInput = rss_input$rss_input,
-      ldData = rss_input$LD_data,
+      rssInput = rss_input$rssInput,
+      ldData = rss_input$ldData,
       zMismatchQc = "none",
       impute = FALSE
     ),
@@ -637,11 +637,11 @@ test_that("summaryStatsQc imputes when block metadata can be inferred from LD ma
 
   expect_message(
     result <- summaryStatsQc(
-      rssInput = rss_input$rss_input,
-      ldData = rss_input$LD_data,
+      rssInput = rss_input$rssInput,
+      ldData = rss_input$ldData,
       zMismatchQc = "none",
       impute = TRUE,
-      imputeOpts = list(rcond = 0.01, R2_threshold = -Inf, minimum_ld = -Inf, lamb = 0.01)
+      imputeOpts = list(rcond = 0.01, r2Threshold = -Inf, minimumLd = -Inf, lamb = 0.01)
     ),
     "running imputation"
   )
@@ -678,7 +678,7 @@ test_that("colocboostAnalysis runs individual QC from colocboost-style inputs", 
   expect_message(
     result <- do.call(
       colocboostAnalysis,
-      c(converted$colocboost_input, list(missingRateThresh = 1, M = 2))
+      c(converted$colocboostInput, list(missingRateThresh = 1, M = 2))
     ),
     "individual-level"
   )
@@ -718,15 +718,15 @@ test_that("colocboostAnalysis refreshes outcome_names after combined QC", {
   ind_region <- make_individual_region_data(n = 12, p = 5, n_contexts = 1, n_events = 2)
   rss_region <- make_sumstat_region_data(n_variants = 5, n_studies = 1)
   region_data <- list(
-    individual_data = ind_region$individual_data,
-    sumstat_data = rss_region$sumstat_data
+    individualData = ind_region$individualData,
+    sumstatData = rss_region$sumstatData
   )
   converted <- regionDataToColocboostInput(region_data)
 
   expect_message(
     result <- do.call(
       colocboostAnalysis,
-      c(converted$colocboost_input, list(missingRateThresh = 1, zMismatchQc = "none", M = 2))
+      c(converted$colocboostInput, list(missingRateThresh = 1, zMismatchQc = "none", M = 2))
     ),
     "summary-statistic"
   )
@@ -810,7 +810,7 @@ test_that("colocboostAnalysis skips empty individual QC for sumstat-only inputs"
   withCallingHandlers(
     result <- do.call(
       colocboostAnalysis,
-      c(converted$colocboost_input, list(zMismatchQc = "none", M = 2))
+      c(converted$colocboostInput, list(zMismatchQc = "none", M = 2))
     ),
     message = function(m) {
       messages <<- c(messages, conditionMessage(m))
@@ -926,12 +926,12 @@ test_that("colocboostAnalysis imputes native LD input using inferred block metad
     raiss = function(refPanel, knownZscores, ldMatrix = NULL, genotypeMatrix = NULL, ...) {
       expect_null(genotypeMatrix)
       expect_type(ldMatrix, "list")
-      expect_true("ld_matrices" %in% names(ldMatrix))
-      LD_mat <- diag(nrow(knownZscores))
-      rownames(LD_mat) <- colnames(LD_mat) <- knownZscores$variant_id
+      expect_true("ldMatrices" %in% names(ldMatrix))
+      ldMat <- diag(nrow(knownZscores))
+      rownames(ldMat) <- colnames(ldMat) <- knownZscores$variant_id
       list(
-        result_filter = knownZscores,
-        LD_mat = LD_mat
+        resultFilter = knownZscores,
+        ldMat = ldMat
       )
     }
   )
@@ -966,7 +966,7 @@ test_that("colocboostAnalysis imputes X_ref input through R-based RAISS path", {
     raiss = function(refPanel, knownZscores, ldMatrix = NULL, genotypeMatrix = NULL, ...) {
       # With S4 migration, X_ref is converted to R and imputation uses R-based path
       expect_true(!is.null(ldMatrix) || !is.null(genotypeMatrix))
-      list(result_filter = knownZscores, LD_mat = NULL)
+      list(resultFilter = knownZscores, ldMat = NULL)
     }
   )
   variants <- paste0("chr1:", seq_len(5) * 100, ":A:G")
@@ -1177,7 +1177,7 @@ test_that("colocboostAnalysis reports missing LD_reference_info when LD names ar
 
   expect_warning(
     result <- colocboostAnalysis(sumstat = sumstat, LD = LD, zMismatchQc = "none", M = 2),
-    "LD_reference_info"
+    "ldReferenceInfo"
   )
   expect_identical(result$args$LD, LD)
   expect_equal(result$args$M, 2)
@@ -1190,19 +1190,19 @@ test_that("colocboostPipeline is the protocol entry", {
   Y <- matrix(rnorm(10), 10, 1)
   colnames(Y) <- "gene1"
   region_data <- list(
-    individual_data = .test_regionaldata_from_lists(
+    individualData = .test_regionaldata_from_lists(
       residual_Y = list(ctx1 = Y),
       residual_X = list(ctx1 = X),
       maf = list(ctx1 = runif(5, 0.05, 0.45))
     ),
-    sumstat_data = NULL
+    sumstatData = NULL
   )
 
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
       list(
-        individual_data = list(Y = list(ctx1 = Y), X = list(ctx1 = X)),
-        sumstat_data = NULL
+        individualData = list(Y = list(ctx1 = Y), X = list(ctx1 = X)),
+        sumstatData = NULL
       )
     },
     .runColocboost = function(label, ...) {
@@ -1240,19 +1240,19 @@ test_that("colocboostPipeline preserves result fields when analyses return NULL"
     correlation = LD,
     variants = pecotmr:::.refPanelToGranges(ld_ref_panel),
     blockMetadata = data.frame(
-      block_id = 1L, chrom = "1", block_start = 100, block_end = 500,
-      size = 5L, start_idx = 1L, end_idx = 5L
+      blockId = 1L, chrom = "1", blockStart = 100, blockEnd = 500,
+      size = 5L, startIdx = 1L, endIdx = 5L
     )
   )
   region_data <- list(
-    individual_data = .test_regionaldata_from_lists(
+    individualData = .test_regionaldata_from_lists(
       residual_Y = list(ctx1 = Y),
       residual_X = list(ctx1 = X),
       maf = list(ctx1 = runif(5, 0.05, 0.45))
     ),
-    sumstat_data = list(
+    sumstatData = list(
       sumstats = list(chr21_ref = list(study1 = list(sumstats = sumstat, n = 1000, varY = 1))),
-      LD_info = list(chr21_ref = ld_data_obj)
+      ldInfo = list(chr21_ref = ld_data_obj)
     )
   )
 
@@ -1298,10 +1298,10 @@ test_that("pipeline returns empty results with message when no analysis flags se
 })
 
 # ===========================================================================
-# 2. colocboostPipeline: NULL individual_data and NULL sumstat_data
+# 2. colocboostPipeline: NULL individualData and NULL sumstatData
 # ===========================================================================
 test_that("pipeline returns early when both data sources are NULL", {
-  region_data <- list(individual_data = NULL, sumstat_data = NULL)
+  region_data <- list(individualData = NULL, sumstatData = NULL)
   expect_message(
     result <- colocboostPipeline(region_data, xqtlColoc =TRUE),
     "No individual data"
@@ -1329,12 +1329,12 @@ test_that("filter_events keeps events matching valid_pattern", {
   colnames(Y) <- events
 
   region_data <- list(
-    individual_data = .test_regionaldata_from_lists(
+    individualData = .test_regionaldata_from_lists(
       residual_Y = list(tissue1 = Y),
       residual_X = list(tissue1 = X),
       maf = list(tissue1 = runif(p, 0.05, 0.45))
     ),
-    sumstat_data = NULL
+    sumstatData = NULL
   )
 
   event_filters <- list(
@@ -1351,11 +1351,11 @@ test_that("filter_events keeps events matching valid_pattern", {
     qcRegionalData = function(region_data, ...) {
       # Return the data as-is; transform residual_Y to Y format
       list(
-        individual_data = list(
-          Y = region_data$individual_data@phenotypes,
-          X = stats::setNames(replicate(length(region_data$individual_data@phenotypes), region_data$individual_data@genotypeMatrix, simplify = FALSE), names(region_data$individual_data@phenotypes))
+        individualData = list(
+          Y = region_data$individualData@phenotypes,
+          X = stats::setNames(replicate(length(region_data$individualData@phenotypes), region_data$individualData@genotypeMatrix, simplify = FALSE), names(region_data$individualData@phenotypes))
         ),
-        sumstat_data = NULL
+        sumstatData = NULL
       )
     }
   )
@@ -1386,12 +1386,12 @@ test_that("filter_events errors on missing type_pattern", {
   colnames(Y) <- c("evt1", "evt2")
 
   region_data <- list(
-    individual_data = .test_regionaldata_from_lists(
+    individualData = .test_regionaldata_from_lists(
       residual_Y = list(ctx1 = Y),
       residual_X = list(ctx1 = X),
       maf = list(ctx1 = runif(p, 0.05, 0.45))
     ),
-    sumstat_data = NULL
+    sumstatData = NULL
   )
 
   # Filter missing type_pattern
@@ -1420,12 +1420,12 @@ test_that("filter_events errors when only type_pattern is given (no valid or exc
   colnames(Y) <- c("evt1", "evt2")
 
   region_data <- list(
-    individual_data = .test_regionaldata_from_lists(
+    individualData = .test_regionaldata_from_lists(
       residual_Y = list(ctx1 = Y),
       residual_X = list(ctx1 = X),
       maf = list(ctx1 = runif(p, 0.05, 0.45))
     ),
-    sumstat_data = NULL
+    sumstatData = NULL
   )
 
   bad_filter <- list(list(type_pattern = "evt.*"))
@@ -1451,11 +1451,11 @@ test_that("extract_contexts_studies returns individual contexts and sumstat stud
   X_mat <- matrix(1, 2, 2, dimnames = list(NULL, c("v1", "v2")))
   Y_mat <- matrix(1, 2, 2, dimnames = list(NULL, c("g1", "g2")))
   region_data <- list(
-    individual_data = .test_regionaldata_from_lists(
+    individualData = .test_regionaldata_from_lists(
       residual_Y = list(tissue_A = Y_mat, tissue_B = Y_mat),
       residual_X = list(tissue_A = X_mat, tissue_B = X_mat)
     ),
-    sumstat_data = list(
+    sumstatData = list(
       sumstats = list(
         list(gwas_trait1 = list(), gwas_trait2 = list())
       )
@@ -1488,12 +1488,12 @@ test_that("extract_contexts_studies reports after-QC when some individual data r
   colnames(Y) <- "gene1"
 
   region_data <- list(
-    individual_data = .test_regionaldata_from_lists(
+    individualData = .test_regionaldata_from_lists(
       residual_Y = list(ctx1 = Y, ctx2 = Y),
       residual_X = list(ctx1 = X, ctx2 = X),
       maf = list(ctx1 = runif(p, 0.05, 0.45), ctx2 = runif(p, 0.05, 0.45))
     ),
-    sumstat_data = NULL
+    sumstatData = NULL
   )
 
   # Mock qcRegionalData to return one NULL context (simulating QC removal).
@@ -1509,11 +1509,11 @@ test_that("extract_contexts_studies reports after-QC when some individual data r
       X2 <- matrix(rnorm(50), 10, 5)
       colnames(X2) <- paste0("chr1:", seq_len(5) * 100, ":A:G")
       list(
-        individual_data = list(
+        individualData = list(
           Y = list(ctx1_gene1 = Y1, ctx2_gene1 = NULL),
           X = list(ctx1 = X1, ctx2 = X2)
         ),
-        sumstat_data = NULL
+        sumstatData = NULL
       )
     }
   )
@@ -1542,20 +1542,20 @@ test_that("qcRegionalData handles named pipCutoffToSkipSumstat vector", {
       AlleleQcResult(harmonizedData = target_data, qcSummary = target_data)
     },
     rssBasicQc = function(sumstats, ldData, ...) {
-      ld_corr <- if (is(ldData, "LdData")) getCorrelation(ldData) else ldData$LD_matrix
-      LD_mat <- ld_corr[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
-      list(sumstats = sumstats, LD_mat = LD_mat)
+      ld_corr <- if (is(ldData, "LdData")) getCorrelation(ldData) else ldData$ldMatrix
+      ldMat <- ld_corr[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
+      list(sumstats = sumstats, ldMat = ldMat)
     },
     summaryStatsQc = function(rssInput = NULL, ldData, ...) {
       stats::setNames(lapply(names(rssInput), function(study) {
         ss <- rssInput[[study]]$sumstats
-        ld <- if (is(ldData[[study]], "LdData")) getCorrelation(ldData[[study]]) else ldData[[study]]$LD_matrix
-        LD_mat <- ld[ss$variant_id, ss$variant_id, drop = FALSE]
-        .test_qcresult_from_list(rssInput[[study]], LD_mat)
+        ld <- if (is(ldData[[study]], "LdData")) getCorrelation(ldData[[study]]) else ldData[[study]]$ldMatrix
+        ldMat <- ld[ss$variant_id, ss$variant_id, drop = FALSE]
+        .test_qcresult_from_list(rssInput[[study]], ldMat)
       }), names(rssInput))
     },
     raiss = function(...) {
-      list(result_filter = data.frame(z = rnorm(5)), LD_mat = diag(5))
+      list(resultFilter = data.frame(z = rnorm(5)), ldMat = diag(5))
     },
     partitionLdMatrix = function(...) diag(5)
   )
@@ -1581,19 +1581,19 @@ test_that("qcRegionalData fills missing study names with 0 for pipCutoffToSkipSu
 
   local_mocked_bindings(
     rssBasicQc = function(sumstats, ldData, ...) {
-      ld_corr <- if (is(ldData, "LdData")) getCorrelation(ldData) else ldData$LD_matrix
-      LD_mat <- ld_corr[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
-      list(sumstats = sumstats, LD_mat = LD_mat)
+      ld_corr <- if (is(ldData, "LdData")) getCorrelation(ldData) else ldData$ldMatrix
+      ldMat <- ld_corr[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
+      list(sumstats = sumstats, ldMat = ldMat)
     },
     summaryStatsQc = function(rssInput = NULL, ldData, ...) {
       stats::setNames(lapply(names(rssInput), function(study) {
         ss <- rssInput[[study]]$sumstats
-        ld <- if (is(ldData[[study]], "LdData")) getCorrelation(ldData[[study]]) else ldData[[study]]$LD_matrix
-        LD_mat <- ld[ss$variant_id, ss$variant_id, drop = FALSE]
-        .test_qcresult_from_list(rssInput[[study]], LD_mat)
+        ld <- if (is(ldData[[study]], "LdData")) getCorrelation(ldData[[study]]) else ldData[[study]]$ldMatrix
+        ldMat <- ld[ss$variant_id, ss$variant_id, drop = FALSE]
+        .test_qcresult_from_list(rssInput[[study]], ldMat)
       }), names(rssInput))
     },
-    raiss = function(...) list(result_filter = data.frame(z = rnorm(5)), LD_mat = diag(5)),
+    raiss = function(...) list(resultFilter = data.frame(z = rnorm(5)), ldMat = diag(5)),
     partitionLdMatrix = function(...) diag(5)
   )
 
@@ -1623,7 +1623,7 @@ test_that("qcRegionalData fills missing study names with 0 for pipCutoffToSkipSu
 # 9. colocboostPipeline: output structure verification
 # ===========================================================================
 test_that("pipeline output structure has expected top-level keys", {
-  region_data <- list(individual_data = NULL, sumstat_data = NULL)
+  region_data <- list(individualData = NULL, sumstatData = NULL)
   result <- suppressMessages(
     colocboostPipeline(region_data, xqtlColoc =FALSE, jointGwas =FALSE, separateGwas =FALSE)
   )
@@ -1648,14 +1648,14 @@ test_that("pipeline with individual data enters xqtl_coloc path and records timi
   # by checking that computing_time$Analysis$xqtl_coloc is recorded.
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
-      Y1 <- region_data$individual_data@phenotypes[[1]]
-      colnames(Y1) <- paste0(names(region_data$individual_data@phenotypes)[1], "_", colnames(Y1))
+      Y1 <- region_data$individualData@phenotypes[[1]]
+      colnames(Y1) <- paste0(names(region_data$individualData@phenotypes)[1], "_", colnames(Y1))
       list(
-        individual_data = list(
+        individualData = list(
           Y = list(ctx1 = Y1),
-          X = list(ctx1 = stats::setNames(replicate(length(region_data$individual_data@phenotypes), region_data$individual_data@genotypeMatrix, simplify = FALSE), names(region_data$individual_data@phenotypes))[[1]])
+          X = list(ctx1 = stats::setNames(replicate(length(region_data$individualData@phenotypes), region_data$individualData@genotypeMatrix, simplify = FALSE), names(region_data$individualData@phenotypes))[[1]])
         ),
-        sumstat_data = NULL
+        sumstatData = NULL
       )
     }
   )
@@ -1687,12 +1687,12 @@ test_that("filter_events exclude_pattern removes matching events via pipeline", 
   colnames(Y) <- c("good_event", "bad_event")
 
   region_data <- list(
-    individual_data = .test_regionaldata_from_lists(
+    individualData = .test_regionaldata_from_lists(
       residual_Y = list(ctx1 = Y),
       residual_X = list(ctx1 = X),
       maf = list(ctx1 = runif(p, 0.05, 0.45))
     ),
-    sumstat_data = NULL
+    sumstatData = NULL
   )
 
   event_filters <- list(
@@ -1709,13 +1709,13 @@ test_that("filter_events exclude_pattern removes matching events via pipeline", 
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
       # The residual_Y should have had bad_event removed by filter_events
-      remaining_events <- colnames(region_data$individual_data@phenotypes$ctx1)
+      remaining_events <- colnames(region_data$individualData@phenotypes$ctx1)
       list(
-        individual_data = list(
-          Y = list(ctx1 = region_data$individual_data@phenotypes$ctx1),
-          X = list(ctx1 = stats::setNames(replicate(length(region_data$individual_data@phenotypes), region_data$individual_data@genotypeMatrix, simplify = FALSE), names(region_data$individual_data@phenotypes))$ctx1)
+        individualData = list(
+          Y = list(ctx1 = region_data$individualData@phenotypes$ctx1),
+          X = list(ctx1 = stats::setNames(replicate(length(region_data$individualData@phenotypes), region_data$individualData@genotypeMatrix, simplify = FALSE), names(region_data$individualData@phenotypes))$ctx1)
         ),
-        sumstat_data = NULL
+        sumstatData = NULL
       )
     }
   )
@@ -1732,7 +1732,7 @@ test_that("filter_events exclude_pattern removes matching events via pipeline", 
 })
 
 # ===========================================================================
-# 12. Pipeline with sumstat_data initializes separate_gwas structure
+# 12. Pipeline with sumstatData initializes separate_gwas structure
 # ===========================================================================
 # ===========================================================================
 # 13. Pipeline catches colocboost errors gracefully
@@ -1748,17 +1748,17 @@ test_that("pipeline catches colocboost xqtl error and returns NULL result", {
   # local_mocked_bindings.
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
-      Y1 <- region_data$individual_data@phenotypes[[1]]
+      Y1 <- region_data$individualData@phenotypes[[1]]
       colnames(Y1) <- paste0("ctx1_", colnames(Y1))
       # Return X with mismatched rows to guarantee colocboost errors
       bad_X <- matrix(rnorm(5 * 8), nrow = 5, ncol = 8)
-      colnames(bad_X) <- colnames(stats::setNames(replicate(length(region_data$individual_data@phenotypes), region_data$individual_data@genotypeMatrix, simplify = FALSE), names(region_data$individual_data@phenotypes))[[1]])
+      colnames(bad_X) <- colnames(stats::setNames(replicate(length(region_data$individualData@phenotypes), region_data$individualData@genotypeMatrix, simplify = FALSE), names(region_data$individualData@phenotypes))[[1]])
       list(
-        individual_data = list(
+        individualData = list(
           Y = list(ctx1 = Y1),
           X = list(ctx1 = bad_X)
         ),
-        sumstat_data = NULL
+        sumstatData = NULL
       )
     }
   )
@@ -1784,7 +1784,7 @@ test_that("pipeline returns early when all data fails QC", {
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
       # Simulate all data removed by QC
-      list(individual_data = NULL, sumstat_data = list(sumstats = NULL))
+      list(individualData = NULL, sumstatData = list(sumstats = NULL))
     }
   )
 
@@ -1802,8 +1802,8 @@ test_that("pipeline returns early when all data fails QC", {
 
 make_qced_sumstat_data <- function(studies = c("study1"), n_variants = 5) {
   vids <- paste0("chr1:", seq_len(n_variants) * 100, ":A:G")
-  LD_mat <- diag(n_variants)
-  rownames(LD_mat) <- colnames(LD_mat) <- vids
+  ldMat <- diag(n_variants)
+  rownames(ldMat) <- colnames(ldMat) <- vids
   sumstats <- lapply(studies, function(study) {
     list(
       sumstats = data.frame(
@@ -1818,8 +1818,8 @@ make_qced_sumstat_data <- function(studies = c("study1"), n_variants = 5) {
   names(sumstats) <- studies
   list(
     sumstats = sumstats,
-    LD_data = stats::setNames(list(.test_lddata_from_matrix(LD_mat)), studies[1]),
-    LD_match = stats::setNames(rep(studies[1], length(studies)), studies)
+    ldData = stats::setNames(list(.test_lddata_from_matrix(ldMat)), studies[1]),
+    ldMatch = stats::setNames(rep(studies[1], length(studies)), studies)
   )
 }
 
@@ -1827,16 +1827,16 @@ test_that("pipeline skips xqtl branch when QC removes individual data but keeps 
   ind_region <- make_individual_region_data(n = 20, p = 8, n_contexts = 1, n_events = 2)
   sumstat_region <- make_sumstat_region_data(n_variants = 5, n_studies = 1)
   region_data <- list(
-    individual_data = ind_region$individual_data,
-    sumstat_data = sumstat_region$sumstat_data
+    individualData = ind_region$individualData,
+    sumstatData = sumstat_region$sumstatData
   )
   calls <- character()
 
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
       list(
-        individual_data = NULL,
-        sumstat_data = make_qced_sumstat_data("study1")
+        individualData = NULL,
+        sumstatData = make_qced_sumstat_data("study1")
       )
     },
     .runColocboost = function(label, ...) {
@@ -1865,21 +1865,21 @@ test_that("pipeline skips joint_gwas when QC removes sumstats but keeps individu
   ind_region <- make_individual_region_data(n = 20, p = 8, n_contexts = 1, n_events = 2)
   sumstat_region <- make_sumstat_region_data(n_variants = 5, n_studies = 1)
   region_data <- list(
-    individual_data = ind_region$individual_data,
-    sumstat_data = sumstat_region$sumstat_data
+    individualData = ind_region$individualData,
+    sumstatData = sumstat_region$sumstatData
   )
   calls <- character()
 
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
-      Y1 <- region_data$individual_data@phenotypes[[1]]
+      Y1 <- region_data$individualData@phenotypes[[1]]
       colnames(Y1) <- paste0("ctx1_", colnames(Y1))
       list(
-        individual_data = list(
+        individualData = list(
           Y = list(ctx1 = Y1),
-          X = list(ctx1 = stats::setNames(replicate(length(region_data$individual_data@phenotypes), region_data$individual_data@genotypeMatrix, simplify = FALSE), names(region_data$individual_data@phenotypes))[[1]])
+          X = list(ctx1 = stats::setNames(replicate(length(region_data$individualData@phenotypes), region_data$individualData@genotypeMatrix, simplify = FALSE), names(region_data$individualData@phenotypes))[[1]])
         ),
-        sumstat_data = list(sumstats = NULL)
+        sumstatData = list(sumstats = NULL)
       )
     },
     .runColocboost = function(label, ...) {
@@ -1911,8 +1911,8 @@ test_that("pipeline separate_gwas loops only over sumstats that survive QC", {
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
       list(
-        individual_data = NULL,
-        sumstat_data = make_qced_sumstat_data("study1")
+        individualData = NULL,
+        sumstatData = make_qced_sumstat_data("study1")
       )
     },
     .runColocboost = function(label, ...) {
@@ -1949,12 +1949,12 @@ test_that("pipeline event filters can remove all events in one context while kee
   Y_keep <- matrix(rnorm(n * 2), n, 2)
   colnames(Y_keep) <- c("keep_event", "bad_event")
   region_data <- list(
-    individual_data = .test_regionaldata_from_lists(
+    individualData = .test_regionaldata_from_lists(
       residual_Y = list(ctx_drop = Y_drop, ctx_keep = Y_keep),
       residual_X = list(ctx_drop = X, ctx_keep = X),
       maf = list(ctx_drop = runif(p, 0.05, 0.45), ctx_keep = runif(p, 0.05, 0.45))
     ),
-    sumstat_data = NULL
+    sumstatData = NULL
   )
   event_filters <- list(list(
     type_pattern = ".*_event.*",
@@ -1964,15 +1964,15 @@ test_that("pipeline event filters can remove all events in one context while kee
 
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
-      Y_list <- region_data$individual_data@phenotypes
+      Y_list <- region_data$individualData@phenotypes
       X_list <- stats::setNames(
-        replicate(length(Y_list), region_data$individual_data@genotypeMatrix,
+        replicate(length(Y_list), region_data$individualData@genotypeMatrix,
                   simplify = FALSE),
         names(Y_list)
       )
       # event_filters dropped contexts: re-attach them as NULL entries so the
       # pipeline emits the legacy "Skipping follow-up analysis" message.
-      dropped <- attr(region_data$individual_data, "filtered_out_contexts")
+      dropped <- attr(region_data$individualData, "filtered_out_contexts")
       if (!is.null(dropped)) {
         for (ctx in dropped) {
           Y_list <- c(Y_list, stats::setNames(list(NULL), ctx))
@@ -1980,8 +1980,8 @@ test_that("pipeline event filters can remove all events in one context while kee
         }
       }
       list(
-        individual_data = list(Y = Y_list, X = X_list),
-        sumstat_data = NULL
+        individualData = list(Y = Y_list, X = X_list),
+        sumstatData = NULL
       )
     },
     .runColocboost = function(label, ...) {
@@ -2025,12 +2025,12 @@ make_individual_region_data <- function(n = 20, p = 8, n_contexts = 2, n_events 
   ctxs <- lapply(paste0("ctx", seq_len(n_contexts)), make_ctx)
   names(ctxs) <- paste0("ctx", seq_len(n_contexts))
   list(
-    individual_data = .test_regionaldata_from_lists(
+    individualData = .test_regionaldata_from_lists(
       residual_Y = lapply(ctxs, `[[`, "Y"),
       residual_X = lapply(ctxs, `[[`, "X"),
       maf = lapply(ctxs, `[[`, "maf")
     ),
-    sumstat_data = NULL
+    sumstatData = NULL
   )
 }
 
@@ -2039,8 +2039,8 @@ make_sumstat_region_data <- function(n_variants = 5, n_studies = 2) {
   set.seed(702)
   vids <- paste0("chr1:", seq_len(n_variants) * 100, ":A:G")
 
-  LD_mat <- diag(n_variants)
-  rownames(LD_mat) <- colnames(LD_mat) <- vids
+  ldMat <- diag(n_variants)
+  rownames(ldMat) <- colnames(ldMat) <- vids
 
   ref_panel <- data.frame(
     chrom = rep(1, n_variants),
@@ -2069,13 +2069,13 @@ make_sumstat_region_data <- function(n_variants = 5, n_studies = 2) {
     list(ss) |> setNames(paste0("study", i))
   })
 
-  LD_info <- list(.test_lddata_from_matrix(LD_mat))
+  ldInfo <- list(.test_lddata_from_matrix(ldMat))
 
   list(
-    individual_data = NULL,
-    sumstat_data = list(
+    individualData = NULL,
+    sumstatData = list(
       sumstats = sumstats_list,
-      LD_info = LD_info
+      ldInfo = ldInfo
     )
   )
 }
@@ -2097,12 +2097,12 @@ test_that("filter_events: valid_pattern with no matching groups returns NULL (li
   colnames(Y) <- events
 
   region_data <- list(
-    individual_data = .test_regionaldata_from_lists(
+    individualData = .test_regionaldata_from_lists(
       residual_Y = list(tissue1 = Y),
       residual_X = list(tissue1 = X),
       maf = list(tissue1 = runif(p, 0.05, 0.45))
     ),
-    sumstat_data = NULL
+    sumstatData = NULL
   )
 
   # valid_pattern requires ":PR:" but no events have it -> valid_groups is empty -> type_events = character(0) -> returns NULL
@@ -2115,15 +2115,15 @@ test_that("filter_events: valid_pattern with no matching groups returns NULL (li
 
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
-      if (is.null(region_data$individual_data)) {
-        return(list(individual_data = NULL, sumstat_data = NULL))
+      if (is.null(region_data$individualData)) {
+        return(list(individualData = NULL, sumstatData = NULL))
       }
       list(
-        individual_data = list(
-          Y = region_data$individual_data@phenotypes,
-          X = stats::setNames(replicate(length(region_data$individual_data@phenotypes), region_data$individual_data@genotypeMatrix, simplify = FALSE), names(region_data$individual_data@phenotypes))
+        individualData = list(
+          Y = region_data$individualData@phenotypes,
+          X = stats::setNames(replicate(length(region_data$individualData@phenotypes), region_data$individualData@genotypeMatrix, simplify = FALSE), names(region_data$individualData@phenotypes))
         ),
-        sumstat_data = NULL
+        sumstatData = NULL
       )
     }
   )
@@ -2151,12 +2151,12 @@ test_that("filter_events: type_pattern matches nothing skips via next (line 64)"
   colnames(Y) <- c("gene_A", "gene_B")
 
   region_data <- list(
-    individual_data = .test_regionaldata_from_lists(
+    individualData = .test_regionaldata_from_lists(
       residual_Y = list(ctx1 = Y),
       residual_X = list(ctx1 = X),
       maf = list(ctx1 = runif(p, 0.05, 0.45))
     ),
-    sumstat_data = NULL
+    sumstatData = NULL
   )
 
   # type_pattern matches nothing -> type_events length 0 -> next
@@ -2170,14 +2170,14 @@ test_that("filter_events: type_pattern matches nothing skips via next (line 64)"
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
       # Verify events were NOT filtered (both still present)
-      remaining <- colnames(region_data$individual_data@phenotypes$ctx1)
+      remaining <- colnames(region_data$individualData@phenotypes$ctx1)
       expect_equal(length(remaining), 2)
       list(
-        individual_data = list(
-          Y = region_data$individual_data@phenotypes,
-          X = stats::setNames(replicate(length(region_data$individual_data@phenotypes), region_data$individual_data@genotypeMatrix, simplify = FALSE), names(region_data$individual_data@phenotypes))
+        individualData = list(
+          Y = region_data$individualData@phenotypes,
+          X = stats::setNames(replicate(length(region_data$individualData@phenotypes), region_data$individualData@genotypeMatrix, simplify = FALSE), names(region_data$individualData@phenotypes))
         ),
-        sumstat_data = NULL
+        sumstatData = NULL
       )
     }
   )
@@ -2204,12 +2204,12 @@ test_that("filter_events: all events pass -> 'included in following analysis' me
   colnames(Y) <- c("evt_alpha", "evt_beta")
 
   region_data <- list(
-    individual_data = .test_regionaldata_from_lists(
+    individualData = .test_regionaldata_from_lists(
       residual_Y = list(ctx1 = Y),
       residual_X = list(ctx1 = X),
       maf = list(ctx1 = runif(p, 0.05, 0.45))
     ),
-    sumstat_data = NULL
+    sumstatData = NULL
   )
 
   # type_pattern matches all events, exclude_pattern matches none
@@ -2223,11 +2223,11 @@ test_that("filter_events: all events pass -> 'included in following analysis' me
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
       list(
-        individual_data = list(
-          Y = region_data$individual_data@phenotypes,
-          X = stats::setNames(replicate(length(region_data$individual_data@phenotypes), region_data$individual_data@genotypeMatrix, simplify = FALSE), names(region_data$individual_data@phenotypes))
+        individualData = list(
+          Y = region_data$individualData@phenotypes,
+          X = stats::setNames(replicate(length(region_data$individualData@phenotypes), region_data$individualData@genotypeMatrix, simplify = FALSE), names(region_data$individualData@phenotypes))
         ),
-        sumstat_data = NULL
+        sumstatData = NULL
       )
     }
   )
@@ -2255,12 +2255,12 @@ test_that("filter_events: valid_pattern with successful groups retains valid eve
   colnames(Y) <- events
 
   region_data <- list(
-    individual_data = .test_regionaldata_from_lists(
+    individualData = .test_regionaldata_from_lists(
       residual_Y = list(tissue1 = Y),
       residual_X = list(tissue1 = X),
       maf = list(tissue1 = runif(p, 0.05, 0.45))
     ),
-    sumstat_data = NULL
+    sumstatData = NULL
   )
 
   event_filters <- list(
@@ -2273,15 +2273,15 @@ test_that("filter_events: valid_pattern with successful groups retains valid eve
 
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
-      remaining <- colnames(region_data$individual_data@phenotypes$tissue1)
+      remaining <- colnames(region_data$individualData@phenotypes$tissue1)
       # IN event should be removed
       expect_false("clu_1_+:IN:gene1" %in% remaining)
       list(
-        individual_data = list(
-          Y = region_data$individual_data@phenotypes,
-          X = stats::setNames(replicate(length(region_data$individual_data@phenotypes), region_data$individual_data@genotypeMatrix, simplify = FALSE), names(region_data$individual_data@phenotypes))
+        individualData = list(
+          Y = region_data$individualData@phenotypes,
+          X = stats::setNames(replicate(length(region_data$individualData@phenotypes), region_data$individualData@genotypeMatrix, simplify = FALSE), names(region_data$individualData@phenotypes))
         ),
-        sumstat_data = NULL
+        sumstatData = NULL
       )
     }
   )
@@ -2314,11 +2314,11 @@ test_that("extract_contexts_studies: all individual data pass QC (line 126)", {
       X1 <- matrix(rnorm(20 * 8), 20, 8); colnames(X1) <- paste0("chr1:", seq_len(8) * 100, ":A:G")
       X2 <- matrix(rnorm(20 * 8), 20, 8); colnames(X2) <- paste0("chr1:", seq_len(8) * 100, ":A:G")
       list(
-        individual_data = list(
+        individualData = list(
           Y = list(ctx1_event1 = Y1, ctx2_event1 = Y2),
           X = list(ctx1 = X1, ctx2 = X2)
         ),
-        sumstat_data = NULL
+        sumstatData = NULL
       )
     }
   )
@@ -2341,11 +2341,11 @@ test_that("extract_contexts_studies: all individual data fail QC (line 134-135)"
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
       list(
-        individual_data = list(
+        individualData = list(
           Y = list(ctx1 = NULL, ctx2 = NULL),
           X = list(ctx1 = matrix(0, 1, 1), ctx2 = matrix(0, 1, 1))
         ),
-        sumstat_data = NULL
+        sumstatData = NULL
       )
     }
   )
@@ -2365,8 +2365,8 @@ test_that("extract_contexts_studies: all individual data fail QC (line 134-135)"
 test_that("extract_contexts_studies: sumstat studies extraction on initial call (line 114)", {
   # region_data with sumstat only -> triggers sumstat branch in extract_contexts_studies
   region_data <- list(
-    individual_data = NULL,
-    sumstat_data = list(
+    individualData = NULL,
+    sumstatData = list(
       sumstats = list(
         list(gwas_trait1 = list(sumstats = data.frame(z = 1), n = 100, varY = 1))
       )
@@ -2376,14 +2376,14 @@ test_that("extract_contexts_studies: sumstat studies extraction on initial call 
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
       list(
-        individual_data = NULL,
-        sumstat_data = list(
+        individualData = NULL,
+        sumstatData = list(
           sumstats = list(gwas_trait1 = list(
             sumstats = data.frame(z = 1.5, variant_id = "chr1:100:A:G"),
             n = 100, varY = 1
           )),
-          LD_data = list(gwas_trait1 = .test_lddata_from_matrix(matrix(1, 1, 1, dimnames = list("chr1:100:A:G", "chr1:100:A:G")))),
-          LD_match = "gwas_trait1"
+          ldData = list(gwas_trait1 = .test_lddata_from_matrix(matrix(1, 1, 1, dimnames = list("chr1:100:A:G", "chr1:100:A:G")))),
+          ldMatch = "gwas_trait1"
         )
       )
     }
@@ -2407,15 +2407,15 @@ test_that("extract_contexts_studies: after-QC sumstat all pass (line 144)", {
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
       vids <- paste0("chr1:", seq_len(5) * 100, ":A:G")
-      LD_mat <- diag(5); rownames(LD_mat) <- colnames(LD_mat) <- vids
+      ldMat <- diag(5); rownames(ldMat) <- colnames(ldMat) <- vids
       ss1 <- list(sumstats = data.frame(z = rnorm(5), variant_id = vids), n = 10000, varY = 1)
       ss2 <- list(sumstats = data.frame(z = rnorm(5), variant_id = vids), n = 10000, varY = 1)
       list(
-        individual_data = NULL,
-        sumstat_data = list(
+        individualData = NULL,
+        sumstatData = list(
           sumstats = list(study1 = ss1, study2 = ss2),
-          LD_data = list(study1 = .test_lddata_from_matrix(LD_mat)),
-          LD_match = c("study1", "study1")
+          ldData = list(study1 = .test_lddata_from_matrix(ldMat)),
+          ldMatch = c("study1", "study1")
         )
       )
     }
@@ -2439,15 +2439,15 @@ test_that("extract_contexts_studies: after-QC sumstat partial pass (line 146)", 
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
       vids <- paste0("chr1:", seq_len(5) * 100, ":A:G")
-      LD_mat <- diag(5); rownames(LD_mat) <- colnames(LD_mat) <- vids
+      ldMat <- diag(5); rownames(ldMat) <- colnames(ldMat) <- vids
       # Only one study remains after QC
       ss1 <- list(sumstats = data.frame(z = rnorm(5), variant_id = vids), n = 10000, varY = 1)
       list(
-        individual_data = NULL,
-        sumstat_data = list(
+        individualData = NULL,
+        sumstatData = list(
           sumstats = list(study1 = ss1),
-          LD_data = list(study1 = .test_lddata_from_matrix(LD_mat)),
-          LD_match = c("study1")
+          ldData = list(study1 = .test_lddata_from_matrix(ldMat)),
+          ldMatch = c("study1")
         )
       )
     }
@@ -2474,19 +2474,19 @@ test_that("pipeline sumstat block: normalizes variant IDs and processes LD matri
   set.seed(820)
   n_variants <- 4
   vids <- paste0("chr1:", seq_len(n_variants) * 100, ":A:G")
-  LD_mat <- diag(n_variants)
-  rownames(LD_mat) <- colnames(LD_mat) <- vids
+  ldMat <- diag(n_variants)
+  rownames(ldMat) <- colnames(ldMat) <- vids
 
   region_data <- list(
-    individual_data = NULL,
-    sumstat_data = list(
+    individualData = NULL,
+    sumstatData = list(
       sumstats = list(
         list(study1 = list(
           sumstats = data.frame(z = c(2.1, -1.5, 0.8, 3.2), variant_id = vids),
           n = 5000, varY = 1
         ))
       ),
-      LD_info = list(.test_lddata_from_matrix(LD_mat))
+      ldInfo = list(.test_lddata_from_matrix(ldMat))
     )
   )
 
@@ -2494,11 +2494,11 @@ test_that("pipeline sumstat block: normalizes variant IDs and processes LD matri
     qcRegionalData = function(region_data, ...) {
       ss <- list(sumstats = data.frame(z = c(2.1, -1.5, 0.8, 3.2), variant_id = vids), n = 5000, varY = 1)
       list(
-        individual_data = NULL,
-        sumstat_data = list(
+        individualData = NULL,
+        sumstatData = list(
           sumstats = list(study1 = ss),
-          LD_data = list(study1 = .test_lddata_from_matrix(LD_mat)),
-          LD_match = c("study1")
+          ldData = list(study1 = .test_lddata_from_matrix(ldMat)),
+          ldMatch = c("study1")
         )
       )
     }
@@ -2521,19 +2521,19 @@ test_that("pipeline sumstat block: single sumstat study initializes separate_gwa
   set.seed(821)
   n_variants <- 3
   vids <- paste0("chr1:", seq_len(n_variants) * 100, ":A:G")
-  LD_mat <- diag(n_variants)
-  rownames(LD_mat) <- colnames(LD_mat) <- vids
+  ldMat <- diag(n_variants)
+  rownames(ldMat) <- colnames(ldMat) <- vids
 
   region_data <- list(
-    individual_data = NULL,
-    sumstat_data = list(
+    individualData = NULL,
+    sumstatData = list(
       sumstats = list(
         list(single_study = list(
           sumstats = data.frame(z = rnorm(n_variants), variant_id = vids),
           n = 5000, varY = 1
         ))
       ),
-      LD_info = list(.test_lddata_from_matrix(LD_mat))
+      ldInfo = list(.test_lddata_from_matrix(ldMat))
     )
   )
 
@@ -2542,11 +2542,11 @@ test_that("pipeline sumstat block: single sumstat study initializes separate_gwa
     qcRegionalData = function(region_data, ...) {
       ss <- list(sumstats = data.frame(z = rnorm(n_variants), variant_id = vids), n = 5000, varY = 1)
       list(
-        individual_data = NULL,
-        sumstat_data = list(
+        individualData = NULL,
+        sumstatData = list(
           sumstats = list(single_study = ss),
-          LD_data = list(single_study = .test_lddata_from_matrix(LD_mat)),
-          LD_match = c("single_study")
+          ldData = list(single_study = .test_lddata_from_matrix(ldMat)),
+          ldMatch = c("single_study")
         )
       )
     }
@@ -2570,12 +2570,12 @@ test_that("pipeline sumstat block: multiple sumstat studies initializes separate
   set.seed(822)
   n_variants <- 3
   vids <- paste0("chr1:", seq_len(n_variants) * 100, ":A:G")
-  LD_mat <- diag(n_variants)
-  rownames(LD_mat) <- colnames(LD_mat) <- vids
+  ldMat <- diag(n_variants)
+  rownames(ldMat) <- colnames(ldMat) <- vids
 
   region_data <- list(
-    individual_data = NULL,
-    sumstat_data = list(
+    individualData = NULL,
+    sumstatData = list(
       sumstats = list(
         list(studyA = list(
           sumstats = data.frame(z = rnorm(n_variants), variant_id = vids), n = 5000, varY = 1
@@ -2583,7 +2583,7 @@ test_that("pipeline sumstat block: multiple sumstat studies initializes separate
           sumstats = data.frame(z = rnorm(n_variants), variant_id = vids), n = 5000, varY = 1
         ))
       ),
-      LD_info = list(.test_lddata_from_matrix(LD_mat))
+      ldInfo = list(.test_lddata_from_matrix(ldMat))
     )
   )
 
@@ -2592,11 +2592,11 @@ test_that("pipeline sumstat block: multiple sumstat studies initializes separate
       ss1 <- list(sumstats = data.frame(z = rnorm(n_variants), variant_id = vids), n = 5000, varY = 1)
       ss2 <- list(sumstats = data.frame(z = rnorm(n_variants), variant_id = vids), n = 5000, varY = 1)
       list(
-        individual_data = NULL,
-        sumstat_data = list(
+        individualData = NULL,
+        sumstatData = list(
           sumstats = list(studyA = ss1, studyB = ss2),
-          LD_data = list(studyA = .test_lddata_from_matrix(LD_mat)),
-          LD_match = c("studyA", "studyA")
+          ldData = list(studyA = .test_lddata_from_matrix(ldMat)),
+          ldMatch = c("studyA", "studyA")
         )
       )
     }
@@ -2625,18 +2625,18 @@ test_that("pipeline: all sumstats invalid returns No data pass QC (line 275-276)
   set.seed(830)
   n_variants <- 3
   vids <- paste0("chr1:", seq_len(n_variants) * 100, ":A:G")
-  LD_mat <- diag(n_variants)
-  rownames(LD_mat) <- colnames(LD_mat) <- vids
+  ldMat <- diag(n_variants)
+  rownames(ldMat) <- colnames(ldMat) <- vids
 
   region_data <- list(
-    individual_data = NULL,
-    sumstat_data = list(
+    individualData = NULL,
+    sumstatData = list(
       sumstats = list(
         list(study1 = list(
           sumstats = data.frame(z = rnorm(n_variants), variant_id = vids), n = 5000, varY = 1
         ))
       ),
-      LD_info = list(.test_lddata_from_matrix(LD_mat))
+      ldInfo = list(.test_lddata_from_matrix(ldMat))
     )
   )
 
@@ -2648,11 +2648,11 @@ test_that("pipeline: all sumstats invalid returns No data pass QC (line 275-276)
         n = 0, varY = 1
       )
       list(
-        individual_data = NULL,
-        sumstat_data = list(
+        individualData = NULL,
+        sumstatData = list(
           sumstats = list(study1 = invalid_ss),
-          LD_data = list(study1 = .test_lddata_from_matrix(matrix(1, 1, 1, dimnames = list("chr1:100:A:G", "chr1:100:A:G")))),
-          LD_match = c("study1")
+          ldData = list(study1 = .test_lddata_from_matrix(matrix(1, 1, 1, dimnames = list("chr1:100:A:G", "chr1:100:A:G")))),
+          ldMatch = c("study1")
         )
       )
     }
@@ -2684,11 +2684,11 @@ test_that("pipeline: focal_trait matches a trait name sets focal_outcome_idx (li
       X1 <- matrix(rnorm(20 * 8), 20, 8)
       colnames(X1) <- paste0("chr1:", seq_len(8) * 100, ":A:G")
       list(
-        individual_data = list(
+        individualData = list(
           Y = list(ctx1_event1 = Y1[, 1, drop = FALSE], ctx1_event2 = Y1[, 2, drop = FALSE]),
           X = list(ctx1 = X1)
         ),
-        sumstat_data = NULL
+        sumstatData = NULL
       )
     }
   )
@@ -2717,11 +2717,11 @@ test_that("pipeline: focal_trait does NOT match leaves focal_outcome_idx NULL (l
       X1 <- matrix(rnorm(20 * 8), 20, 8)
       colnames(X1) <- paste0("chr1:", seq_len(8) * 100, ":A:G")
       list(
-        individual_data = list(
+        individualData = list(
           Y = list(ctx1_event1 = Y1),
           X = list(ctx1 = X1)
         ),
-        sumstat_data = NULL
+        sumstatData = NULL
       )
     }
   )
@@ -2752,21 +2752,21 @@ test_that("pipeline: joint_gwas path is entered with both individual and sumstat
   colnames(X) <- vids
   Y <- matrix(rnorm(n * 2), n, 2)
   colnames(Y) <- c("ctx1_gene1", "ctx1_gene2")
-  LD_mat <- diag(p); rownames(LD_mat) <- colnames(LD_mat) <- vids
+  ldMat <- diag(p); rownames(ldMat) <- colnames(ldMat) <- vids
 
   region_data <- list(
-    individual_data = .test_regionaldata_from_lists(
+    individualData = .test_regionaldata_from_lists(
       residual_Y = list(ctx1 = Y),
       residual_X = list(ctx1 = X),
       maf = list(ctx1 = runif(p, 0.05, 0.45))
     ),
-    sumstat_data = list(
+    sumstatData = list(
       sumstats = list(
         list(gwas1 = list(
           sumstats = data.frame(z = rnorm(p), variant_id = vids), n = 5000, varY = 1
         ))
       ),
-      LD_info = list(.test_lddata_from_matrix(LD_mat))
+      ldInfo = list(.test_lddata_from_matrix(ldMat))
     )
   )
 
@@ -2774,14 +2774,14 @@ test_that("pipeline: joint_gwas path is entered with both individual and sumstat
     qcRegionalData = function(region_data, ...) {
       ss <- list(sumstats = data.frame(z = rnorm(p), variant_id = vids), n = 5000, varY = 1)
       list(
-        individual_data = list(
+        individualData = list(
           Y = list(ctx1_gene1 = Y[, 1, drop = FALSE], ctx1_gene2 = Y[, 2, drop = FALSE]),
           X = list(ctx1 = X)
         ),
-        sumstat_data = list(
+        sumstatData = list(
           sumstats = list(gwas1 = ss),
-          LD_data = list(gwas1 = .test_lddata_from_matrix(LD_mat)),
-          LD_match = c("gwas1")
+          ldData = list(gwas1 = .test_lddata_from_matrix(ldMat)),
+          ldMatch = c("gwas1")
         )
       )
     }
@@ -2812,21 +2812,21 @@ test_that("pipeline: separate_gwas path is entered for each GWAS study", {
   vids <- paste0("chr1:", seq_len(p) * 100, ":A:G")
   X <- matrix(rnorm(n * p), n, p); colnames(X) <- vids
   Y <- matrix(rnorm(n), n, 1); colnames(Y) <- "ctx1_gene1"
-  LD_mat <- diag(p); rownames(LD_mat) <- colnames(LD_mat) <- vids
+  ldMat <- diag(p); rownames(ldMat) <- colnames(ldMat) <- vids
 
   region_data <- list(
-    individual_data = .test_regionaldata_from_lists(
+    individualData = .test_regionaldata_from_lists(
       residual_Y = list(ctx1 = Y),
       residual_X = list(ctx1 = X),
       maf = list(ctx1 = runif(p, 0.05, 0.45))
     ),
-    sumstat_data = list(
+    sumstatData = list(
       sumstats = list(
         list(gwasA = list(
           sumstats = data.frame(z = rnorm(p), variant_id = vids), n = 5000, varY = 1
         ))
       ),
-      LD_info = list(.test_lddata_from_matrix(LD_mat))
+      ldInfo = list(.test_lddata_from_matrix(ldMat))
     )
   )
 
@@ -2834,14 +2834,14 @@ test_that("pipeline: separate_gwas path is entered for each GWAS study", {
     qcRegionalData = function(region_data, ...) {
       ss <- list(sumstats = data.frame(z = rnorm(p), variant_id = vids), n = 5000, varY = 1)
       list(
-        individual_data = list(
+        individualData = list(
           Y = list(ctx1_gene1 = Y),
           X = list(ctx1 = X)
         ),
-        sumstat_data = list(
+        sumstatData = list(
           sumstats = list(gwasA = ss),
-          LD_data = list(gwasA = .test_lddata_from_matrix(LD_mat)),
-          LD_match = c("gwasA")
+          ldData = list(gwasA = .test_lddata_from_matrix(ldMat)),
+          ldMatch = c("gwasA")
         )
       )
     }
@@ -2869,13 +2869,13 @@ test_that("pipeline: all Y become NULL after organizing individual data (lines 2
 
   local_mocked_bindings(
     qcRegionalData = function(region_data, ...) {
-      # Return individual_data where all Y entries are NULL
+      # Return individualData where all Y entries are NULL
       list(
-        individual_data = list(
+        individualData = list(
           Y = list(ctx1 = NULL, ctx2 = NULL),
           X = list(ctx1 = matrix(rnorm(160), 20, 8), ctx2 = matrix(rnorm(160), 20, 8))
         ),
-        sumstat_data = NULL
+        sumstatData = NULL
       )
     }
   )
@@ -2900,17 +2900,17 @@ test_that("pipeline: sumstat with all NA z-scores yields warning message (lines 
   set.seed(860)
   n_variants <- 3
   vids <- paste0("chr1:", seq_len(n_variants) * 100, ":A:G")
-  LD_mat <- diag(n_variants); rownames(LD_mat) <- colnames(LD_mat) <- vids
+  ldMat <- diag(n_variants); rownames(ldMat) <- colnames(ldMat) <- vids
 
   region_data <- list(
-    individual_data = NULL,
-    sumstat_data = list(
+    individualData = NULL,
+    sumstatData = list(
       sumstats = list(
         list(study_na = list(
           sumstats = data.frame(z = rnorm(n_variants), variant_id = vids), n = 5000, varY = 1
         ))
       ),
-      LD_info = list(.test_lddata_from_matrix(LD_mat))
+      ldInfo = list(.test_lddata_from_matrix(ldMat))
     )
   )
 
@@ -2922,11 +2922,11 @@ test_that("pipeline: sumstat with all NA z-scores yields warning message (lines 
         n = 5000, varY = 1
       )
       list(
-        individual_data = NULL,
-        sumstat_data = list(
+        individualData = NULL,
+        sumstatData = list(
           sumstats = list(study_na = ss),
-          LD_data = list(study_na = .test_lddata_from_matrix(LD_mat)),
-          LD_match = c("study_na")
+          ldData = list(study_na = .test_lddata_from_matrix(ldMat)),
+          ldMatch = c("study_na")
         )
       )
     }
@@ -2945,13 +2945,13 @@ test_that("pipeline: sumstat with all NA z-scores yields warning message (lines 
 })
 
 # ===========================================================================
-# SECTION L: colocboostPipeline - no sumstat_data pass QC (line 152)
+# SECTION L: colocboostPipeline - no sumstatData pass QC (line 152)
 # ===========================================================================
 
 test_that("extract_contexts_studies: no sumstat data pass QC message", {
   region_data <- make_individual_region_data(n = 20, p = 8, n_contexts = 1, n_events = 2)
-  # Add some sumstat_data so it enters the initial extraction
-  region_data$sumstat_data <- list(
+  # Add some sumstatData so it enters the initial extraction
+  region_data$sumstatData <- list(
     sumstats = list(
       list(gwas1 = list(sumstats = data.frame(z = 1), n = 100, varY = 1))
     )
@@ -2963,11 +2963,11 @@ test_that("extract_contexts_studies: no sumstat data pass QC message", {
       X1 <- matrix(rnorm(160), 20, 8)
       colnames(X1) <- paste0("chr1:", seq_len(8) * 100, ":A:G")
       list(
-        individual_data = list(
+        individualData = list(
           Y = list(ctx1_event1 = Y1),
           X = list(ctx1 = X1)
         ),
-        sumstat_data = NULL  # All sumstat data removed by QC
+        sumstatData = NULL  # All sumstat data removed by QC
       )
     }
   )
@@ -3056,12 +3056,12 @@ test_that("qcRegionalData: pipCutoffToSkipInd lookup works when X and Y have dif
   # residual_X has 3 contexts, residual_Y only has 2
   # pipCutoffToSkipInd is recycled from residual_Y (length 2)
   region_data <- list(
-    individual_data = .test_regionaldata_from_lists(
+    individualData = .test_regionaldata_from_lists(
       residual_Y = list(ctx1 = ctx1$Y, ctx2 = ctx2$Y),
       residual_X = list(ctx1 = ctx1$X, ctx2 = ctx2$X, ctx3 = ctx3$X),
       maf = list(ctx1 = ctx1$maf, ctx2 = ctx2$maf, ctx3 = ctx3$maf)
     ),
-    sumstat_data = NULL
+    sumstatData = NULL
   )
 
   # Should not error - ctx3 in X has no pip_cutoff entry, defaults to 0
@@ -3081,17 +3081,17 @@ test_that("pipeline sumstat processing handles all-NA z-scores with warning (lin
   set.seed(870)
   n_variants <- 4
   vids <- paste0("chr1:", seq_len(n_variants) * 100, ":A:G")
-  LD_mat <- diag(n_variants); rownames(LD_mat) <- colnames(LD_mat) <- vids
+  ldMat <- diag(n_variants); rownames(ldMat) <- colnames(ldMat) <- vids
 
   region_data <- list(
-    individual_data = NULL,
-    sumstat_data = list(
+    individualData = NULL,
+    sumstatData = list(
       sumstats = list(
         list(study_allna = list(
           sumstats = data.frame(z = rnorm(n_variants), variant_id = vids), n = 5000, varY = 1
         ))
       ),
-      LD_info = list(.test_lddata_from_matrix(LD_mat))
+      ldInfo = list(.test_lddata_from_matrix(ldMat))
     )
   )
 
@@ -3103,11 +3103,11 @@ test_that("pipeline sumstat processing handles all-NA z-scores with warning (lin
         n = 5000, varY = 1
       )
       list(
-        individual_data = NULL,
-        sumstat_data = list(
+        individualData = NULL,
+        sumstatData = list(
           sumstats = list(study_allna = ss_allna),
-          LD_data = list(study_allna = .test_lddata_from_matrix(LD_mat)),
-          LD_match = c("study_allna")
+          ldData = list(study_allna = .test_lddata_from_matrix(ldMat)),
+          ldMatch = c("study_allna")
         )
       )
     }
@@ -3136,18 +3136,18 @@ test_that("pipeline: LD matrix dimnames are normalized to canonical format (line
   vids_no_chr <- paste0("1:", seq_len(n_variants) * 100, ":A:G")
   vids_with_chr <- paste0("chr1:", seq_len(n_variants) * 100, ":A:G")
 
-  LD_mat <- diag(n_variants)
-  rownames(LD_mat) <- colnames(LD_mat) <- vids_no_chr
+  ldMat <- diag(n_variants)
+  rownames(ldMat) <- colnames(ldMat) <- vids_no_chr
 
   region_data <- list(
-    individual_data = NULL,
-    sumstat_data = list(
+    individualData = NULL,
+    sumstatData = list(
       sumstats = list(
         list(study1 = list(
           sumstats = data.frame(z = rnorm(n_variants), variant_id = vids_no_chr), n = 5000, varY = 1
         ))
       ),
-      LD_info = list(.test_lddata_from_matrix(LD_mat))
+      ldInfo = list(.test_lddata_from_matrix(ldMat))
     )
   )
 
@@ -3158,11 +3158,11 @@ test_that("pipeline: LD matrix dimnames are normalized to canonical format (line
         n = 5000, varY = 1
       )
       list(
-        individual_data = NULL,
-        sumstat_data = list(
+        individualData = NULL,
+        sumstatData = list(
           sumstats = list(study1 = ss),
-          LD_data = list(study1 = .test_lddata_from_matrix(LD_mat)),  # LD_mat has non-chr names
-          LD_match = c("study1")
+          ldData = list(study1 = .test_lddata_from_matrix(ldMat)),  # ldMat has non-chr names
+          ldMatch = c("study1")
         )
       )
     }
@@ -3181,7 +3181,7 @@ test_that("pipeline: LD matrix dimnames are normalized to canonical format (line
 })
 
 # ===========================================================================
-# SECTION X: colocboost - qcRegionalData with NULL individual_data only sumstat
+# SECTION X: colocboost - qcRegionalData with NULL individualData only sumstat
 # ===========================================================================
 
 test_that("qcRegionalData: with only sumstat data processes correctly", {
@@ -3189,17 +3189,17 @@ test_that("qcRegionalData: with only sumstat data processes correctly", {
 
   local_mocked_bindings(
     rssBasicQc = function(sumstats, ldData, ...) {
-      ld_corr <- if (is(ldData, "LdData")) getCorrelation(ldData) else ldData$LD_matrix
-      list(sumstats = sumstats, LD_mat = ld_corr)
+      ld_corr <- if (is(ldData, "LdData")) getCorrelation(ldData) else ldData$ldMatrix
+      list(sumstats = sumstats, ldMat = ld_corr)
     },
     summaryStatsQc = function(rssInput = NULL, ldData, ...) {
       stats::setNames(lapply(names(rssInput), function(study) {
-        ld <- if (is(ldData[[study]], "LdData")) getCorrelation(ldData[[study]]) else ldData[[study]]$LD_matrix
+        ld <- if (is(ldData[[study]], "LdData")) getCorrelation(ldData[[study]]) else ldData[[study]]$ldMatrix
         .test_qcresult_from_list(rssInput[[study]], ld)
       }), names(rssInput))
     },
     raiss = function(...) {
-      list(result_filter = data.frame(z = rnorm(5)), LD_mat = diag(5))
+      list(resultFilter = data.frame(z = rnorm(5)), ldMat = diag(5))
     },
     partitionLdMatrix = function(...) diag(5)
   )
@@ -3212,8 +3212,8 @@ test_that("qcRegionalData: with only sumstat data processes correctly", {
     )
   )
   expect_type(result, "list")
-  expect_null(result$individual_data)
-  expect_true(!is.null(result$sumstat_data))
+  expect_null(result$individualData)
+  expect_true(!is.null(result$sumstatData))
 })
 
 # ===========================================================================
@@ -3258,7 +3258,7 @@ NA
 
 # ---- removed qcMethod is rejected (hard rename, no alias) ----
 test_that("qcRegionalData rejects the removed qcMethod argument as unknown", {
-  region_data <- list(individual_data = NULL, sumstat_data = NULL)
+  region_data <- list(individualData = NULL, sumstatData = NULL)
   expect_error(
     qcRegionalData(region_data, qcMethod = "slalom"),
     "unused argument"

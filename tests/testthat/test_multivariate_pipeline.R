@@ -54,16 +54,16 @@ test_that("regionDataToMvsusieRssInput builds shared-variant Z and R", {
       study1 = list(sumstats = ss1, n = 100, varY = 1),
       study2 = list(sumstats = ss2, n = 120, varY = 1)
     ),
-    LD_data = list(study1 = ld),
-    LD_match = c(study1 = "study1", study2 = "study1")
+    ldData = list(study1 = ld),
+    ldMatch = c(study1 = "study1", study2 = "study1")
   ))
 
   overlap <- ss2$variant_id
-  expect_equal(rownames(out$mvsusie_rss_input$Z), overlap)
-  expect_equal(colnames(out$mvsusie_rss_input$Z), c("study1", "study2"))
-  expect_equal(dim(out$mvsusie_rss_input$R), c(length(overlap), length(overlap)))
-  expect_equal(out$mvsusie_rss_input$N, 120)
-  expect_equal(out$source_info$n, c(study1 = 100, study2 = 120))
+  expect_equal(rownames(out$mvsusieRssInput$Z), overlap)
+  expect_equal(colnames(out$mvsusieRssInput$Z), c("study1", "study2"))
+  expect_equal(dim(out$mvsusieRssInput$R), c(length(overlap), length(overlap)))
+  expect_equal(out$mvsusieRssInput$N, 120)
+  expect_equal(out$sourceInfo$n, c(study1 = 100, study2 = 120))
 })
 
 test_that("regionDataToMvsusieRssInput reports first LD for multiple LD matches", {
@@ -80,17 +80,17 @@ test_that("regionDataToMvsusieRssInput reports first LD for multiple LD matches"
       study1 = list(sumstats = ss1, n = 100, varY = 1),
       study2 = list(sumstats = ss2, n = 120, varY = 1)
     ),
-    LD_data = list(ld1 = ld1, ld2 = ld2),
-    LD_match = c(study1 = "ld1", study2 = "ld2")
+    ldData = list(ld1 = ld1, ld2 = ld2),
+    ldMatch = c(study1 = "ld1", study2 = "ld2")
   )
 
   expect_message(
     out_default <- regionDataToMvsusieRssInput(input),
     "using the first reference 'ld1'"
   )
-  expect_equal(out_default$source_info$ld_name, "ld1")
+  expect_equal(out_default$sourceInfo$ldName, "ld1")
   out <- regionDataToMvsusieRssInput(input, ldName = "ld2")
-  expect_equal(out$source_info$ld_name, "ld2")
+  expect_equal(out$sourceInfo$ldName, "ld2")
 })
 
 # NOTE: In multivariateAnalysisPipeline, the mvsusieR check (requireNamespace)
@@ -550,10 +550,10 @@ test_that("initialize_mvsusie_prior runs with provided data_driven_prior_matrice
     twasWeights = FALSE
   )
   expect_true(is.list(result))
-  # initialize_mvsusie_prior path stores reweighted_mixture_prior
-  expect_true("reweighted_mixture_prior" %in% names(result))
-  expect_true("reweighted_mixture_prior_cv" %in% names(result))
-  expect_true("mvsusie_fitted" %in% names(result))
+  # initialize_mvsusie_prior path stores reweightedMixturePrior
+  expect_true("reweightedMixturePrior" %in% names(result))
+  expect_true("reweightedMixturePriorCv" %in% names(result))
+  expect_true("mvsusieFitted" %in% names(result))
   expect_equal(captured_mvsusie_args$L, 9)
   expect_equal(captured_mvsusie_args$L_greedy, 3)
 })
@@ -613,12 +613,12 @@ test_that("pipeline propagates outcome_names from mvsusie through post-processin
     twasWeights = FALSE
   )
   expect_true(is.list(result))
-  # outcome_names should propagate as context_names
-  expect_equal(result$context_names, cnames)
+  # outcome_names should propagate as contextNames
+  expect_equal(result$contextNames, cnames)
   # coef and clfsr should be present in the FineMappingResult trimmed fit
   # coef.mvsusie returns a (p + 1) x r matrix (first row is the intercept);
   # trim_finemapping_fit strips that intercept row before storing.
-  trimmed <- getTrimmedFit(result$finemapping_result)
+  trimmed <- getTrimmedFit(result$finemappingResult)
   expect_equal(trimmed$coef, fake_coef[-1, , drop = FALSE])
   expect_equal(dim(trimmed$clfsr), c(L, p, r))
   # rss-top-loci-af regression: top_loci exports `af`, not the directionless

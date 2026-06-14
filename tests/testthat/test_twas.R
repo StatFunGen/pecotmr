@@ -48,7 +48,7 @@ make_variant_ids <- function(chrom = 1, positions = c(100, 200, 300, 400, 500), 
   paste0("chr", chrom, ":", positions, ":", A2, ":", A1)
 }
 
-make_weights_matrix <- function(variant_ids, methods = c("susieWeights", "lassoWeights"), seed = 42) {
+make_weights_matrix <- function(variant_ids, methods = c("susie_weights", "lasso_weights"), seed = 42) {
   set.seed(seed)
   p <- length(variant_ids)
   m <- length(methods)
@@ -63,7 +63,7 @@ make_twas_weights_data <- function(
     positions = c(100, 200, 300, 400, 500),
     methods = c("susieWeights", "lassoWeights"),
     with_cv = TRUE,
-    with_data_type = TRUE,
+    withDataType = TRUE,
     seed = 42
 ) {
   variant_ids <- make_variant_ids(chrom, positions)
@@ -71,7 +71,7 @@ make_twas_weights_data <- function(
   data[[molecularId]] <- list()
   data[[molecularId]]$weights <- list()
   if (with_cv) data[[molecularId]]$twas_cv_performance <- list()
-  if (with_data_type) data[[molecularId]]$data_type <- list()
+  if (withDataType) data[[molecularId]]$dataType <- list()
 
   for (ctx in contexts) {
     data[[molecularId]]$weights[[ctx]] <- make_weights_matrix(variant_ids, methods, seed)
@@ -85,7 +85,7 @@ make_twas_weights_data <- function(
       }
       data[[molecularId]]$twas_cv_performance[[ctx]] <- perf_list
     }
-    if (with_data_type) data[[molecularId]]$data_type[[ctx]] <- "expression"
+    if (withDataType) data[[molecularId]]$dataType[[ctx]] <- "expression"
   }
   data
 }
@@ -94,7 +94,7 @@ make_twas_weights_data <- function(
 # (mimics the output of loadLdSketch after the S4 refactor).
 make_mock_ld_sketch <- function(X, ref_panel, variant_ids) {
   variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
-  block_metadata <- S4Vectors::DataFrame(
+  blockMetadata <- S4Vectors::DataFrame(
     region = "mock", start = 1L, end = 1L, chrom = "chr1"
   )
   LdData(
@@ -102,7 +102,7 @@ make_mock_ld_sketch <- function(X, ref_panel, variant_ids) {
     genotypeHandle = X,
     snpIdx = NULL,
     variants = variants_gr,
-    blockMetadata = block_metadata,
+    blockMetadata = blockMetadata,
     nRef = 0L
   )
 }
@@ -176,8 +176,8 @@ generate_mock_data <- function(seed=1, num_snps=100, empty_sets = F, gwas_mismat
     z = rnorm(num_snps)
   ) %>% arrange(chr, pos)
   
-  LD_matrix <- matrix(runif(num_snps^2), nrow = num_snps, ncol = num_snps)
-  colnames(LD_matrix) <- rownames(LD_matrix) <- variants_id_all <- paste(
+  ldMatrix <- matrix(runif(num_snps^2), nrow = num_snps, ncol = num_snps)
+  colnames(ldMatrix) <- rownames(ldMatrix) <- variants_id_all <- paste(
     gwas_sumstats_db$chr, gwas_sumstats_db$pos, gwas_sumstats_db$A1.sumstats, gwas_sumstats_db$A2.sumstats, sep = ":")
   
   # Ensure row names of weights_all_matrix match variant IDs
@@ -188,13 +188,13 @@ generate_mock_data <- function(seed=1, num_snps=100, empty_sets = F, gwas_mismat
   gwas_sumstats_db$variant_id <- if (!gwas_mismatch) variants_id_all else paste(
     12, gwas_sumstats_db$pos, gwas_sumstats_db$A1.sumstats, gwas_sumstats_db$A2.sumstats, sep = ":")
 
-  colnames(LD_matrix) <- rownames(LD_matrix) <- if (!LD_mismatch) colnames(LD_matrix) else paste(
+  colnames(ldMatrix) <- rownames(ldMatrix) <- if (!LD_mismatch) colnames(ldMatrix) else paste(
     3, gwas_sumstats_db$pos, gwas_sumstats_db$A1.sumstats, gwas_sumstats_db$A2.sumstats, sep = ":")
 
   return(list(
     weights_all_matrix = weights_all_matrix,
     gwas_sumstats_db = gwas_sumstats_db,
-    LD_matrix = LD_matrix,
+    ldMatrix = ldMatrix,
     extract_variants_objs = extract_variants_objs))
 }
 
@@ -212,8 +212,8 @@ mock_weights_db <- function(seed = 1, region = "chr1:100-200", condition = "mono
 
   # Define mock data
   #weights <- matrix(runif(100), ncol = 10) # Adjust size as needed
-  variant_names <- if (has_variable_names) paste0("variant_", r_variants) else NULL
-  #colnames(weights) <- rownames(weights) <- variant_names
+  variantNames <- if (has_variable_names) paste0("variant_", r_variants) else NULL
+  #colnames(weights) <- rownames(weights) <- variantNames
   susie_result_trimmed <- runif(10) # Example data
   top_loci <- sample(r_variants, 5) # Example data
   region_info <- list(region = region, condition = condition)
@@ -222,17 +222,17 @@ mock_weights_db <- function(seed = 1, region = "chr1:100-200", condition = "mono
   weights_db_data <- list(
     region_info = region_info,
     preset_variants_result = list(
-      variant_names = variant_names,
+      variantNames = variantNames,
       susie_result_trimmed = susie_result_trimmed,
       top_loci = top_loci
     ),
     twasWeights = list(
-      model_one_weights = runif(length(variant_names)),
-      model_two_weights = runif(length(variant_names)),
-      model_three_weights = runif(length(variant_names)),
-      variant_names = variant_names
+      model_one_weights = runif(length(variantNames)),
+      model_two_weights = runif(length(variantNames)),
+      model_three_weights = runif(length(variantNames)),
+      variantNames = variantNames
     ),
-    twas_cv_result = list(
+    twasCvResult = list(
       performance=data.frame(corr=0.5, rsq=0.2, adj_rsq=0.2, pval=8e-20, RMSE=0.4, MAE=0.3)
     )
   )
@@ -246,7 +246,7 @@ mock_weights_db <- function(seed = 1, region = "chr1:100-200", condition = "mono
 
 test_that("Confirm twas_scan works with simulated data",{
   data <- generate_mock_data()
-  res <- twasAnalysis(data$weights_all_matrix, data$gwas_sumstats_db, data$LD_matrix, data$extract_variants_objs)
+  res <- twasAnalysis(data$weights_all_matrix, data$gwas_sumstats_db, data$ldMatrix, data$extract_variants_objs)
   expect_equal(length(res), 4)
   expect_true(all(unlist(lapply(res, function(x) {"z" %in% names(x)}))))
   expect_true(all(unlist(lapply(res, function(x) {"pval" %in% names(x)}))))
@@ -255,14 +255,14 @@ test_that("Confirm twas_scan works with simulated data",{
 # test_that("twasAnalysis raises error if empty gwas",{
 #   data <- generate_mock_data(gwas_mismatch = T, LD_mismatch = F)
 #   expect_error(
-#     twasAnalysis(data$weights_all_matrix, data$gwas_sumstats_db, data$LD_matrix, data$extract_variants_objs),
+#     twasAnalysis(data$weights_all_matrix, data$gwas_sumstats_db, data$ldMatrix, data$extract_variants_objs),
 #     "No GWAS summary statistics found for the specified variants.")
 # })
 #
-# test_that("twasAnalysis raises error if specified variants are not in LD_matrix", {
+# test_that("twasAnalysis raises error if specified variants are not in ldMatrix", {
 #   data <- generate_mock_data(gwas_mismatch = FALSE, LD_mismatch = TRUE)
 #   expect_error(
-#     twasAnalysis(data$weights_matrix, data$gwas_sumstats_db, data$LD_matrix, data$extract_variants_objs),
+#     twasAnalysis(data$weights_matrix, data$gwas_sumstats_db, data$ldMatrix, data$extract_variants_objs),
 #     "None of the specified variants are present in the LD matrix."
 #   )
 # })
@@ -308,7 +308,7 @@ test_that("twasWeightsCv is reproducible with seed", {
     result_seed1 <- twasWeightsCv(X, y, fold = 2, weightMethods = weight_methods_test)
     set.seed(1)
     result_seed2 <- twasWeightsCv(X, y, fold = 2, weightMethods = weight_methods_test)
-    expect_equal(result_seed1$sample_partition, result_seed2$sample_partition)
+    expect_equal(result_seed1$samplePartition, result_seed2$samplePartition)
 })
 
 test_that("twasWeightsCv handles errors appropriately", {
@@ -343,7 +343,7 @@ test_that("twasWeightsCv handles errors appropriately", {
 #     result_single <- twasWeightsCv(X, y, fold = 2, weightMethods = weight_methods_test, numThreads = 1)
 #     expect_is(result_parallel, "list")
 #     expect_is(result_single, "list")
-#     expect_equal(result_parallel$sample_partition, result_single$sample_partition)
+#     expect_equal(result_parallel$samplePartition, result_single$samplePartition)
 #     expect_equal(result_parallel$prediction$glmnet_predicted, result_single$prediction$glmnet_predicted)
 #     RNGkind("default")
 # })
@@ -624,11 +624,11 @@ test_that("twasAnalysis: returns NULL when no GWAS variants match", {
     z = rnorm(4),
     stringsAsFactors = FALSE
   )
-  LD_matrix <- diag(4)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- rownames(weights_matrix)
+  ldMatrix <- diag(4)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- rownames(weights_matrix)
   extract_variants <- paste0("chr1:", c(100, 200, 300, 400), ":A:T")
   # The GWAS has no matching variant_ids
-  result <- suppressWarnings(twasAnalysis(weights_matrix, gwas_sumstats_db, LD_matrix, extract_variants))
+  result <- suppressWarnings(twasAnalysis(weights_matrix, gwas_sumstats_db, ldMatrix, extract_variants))
   expect_null(result)
 })
 
@@ -642,9 +642,9 @@ test_that("twasAnalysis: returns NULL when no variants in LD matrix", {
     z = rnorm(3),
     stringsAsFactors = FALSE
   )
-  LD_matrix <- diag(3)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- paste0("chr2:", c(100, 200, 300), ":G:C") # wrong variants
-  result <- suppressWarnings(twasAnalysis(weights_matrix, gwas_sumstats_db, LD_matrix, variant_ids))
+  ldMatrix <- diag(3)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- paste0("chr2:", c(100, 200, 300), ":G:C") # wrong variants
+  result <- suppressWarnings(twasAnalysis(weights_matrix, gwas_sumstats_db, ldMatrix, variant_ids))
   expect_null(result)
 })
 
@@ -660,10 +660,10 @@ test_that("twasAnalysis: returns correct structure with valid inputs", {
     z = rnorm(p),
     stringsAsFactors = FALSE
   )
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
-  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, LD_matrix, variant_ids)
+  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, ldMatrix, variant_ids)
   expect_true(is.list(result))
   expect_equal(length(result), 2) # one per weight column
   expect_true(all(sapply(result, function(x) all(c("z", "pval") %in% names(x)))))
@@ -682,11 +682,11 @@ test_that("twasAnalysis: partial variant overlap works correctly", {
     z = rnorm(3),
     stringsAsFactors = FALSE
   )
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
   # Extract only first 3 variants
   extract_variants <- variant_ids[1:3]
-  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, LD_matrix, extract_variants)
+  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, ldMatrix, extract_variants)
   expect_true(is.list(result))
   expect_equal(length(result), 2)
 })
@@ -701,9 +701,9 @@ test_that("twasAnalysis: single variant input works", {
     z = 3.0,
     stringsAsFactors = FALSE
   )
-  LD_matrix <- matrix(1, nrow = 1, ncol = 1)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_id
-  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, LD_matrix, variant_id)
+  ldMatrix <- matrix(1, nrow = 1, ncol = 1)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_id
+  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, ldMatrix, variant_id)
   expect_true(is.list(result))
   expect_equal(length(result), 2)
   # For single variant with R=1: z_twas = weight * z_gwas / sqrt(weight^2 * 1) = z_gwas * sign(weight)
@@ -720,9 +720,9 @@ test_that("twasAnalysis: all NA GWAS sumstats returns list with NA z and pval", 
     z = c(NA, NA),
     stringsAsFactors = FALSE
   )
-  LD_matrix <- diag(2)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
-  result <- suppressWarnings(twasAnalysis(weights_matrix, gwas_sumstats_db, LD_matrix, variant_ids))
+  ldMatrix <- diag(2)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
+  result <- suppressWarnings(twasAnalysis(weights_matrix, gwas_sumstats_db, ldMatrix, variant_ids))
   # With all-NA z-scores, the function proceeds but produces NA z and pval
   expect_true(is.list(result))
   expect_equal(length(result), 2)
@@ -848,10 +848,10 @@ test_that("harmonizeGwas: renames #chrom to chrom in tabix output", {
   expect_false("#chrom" %in% colnames(result))
 })
 
-test_that("harmonizeGwas: uses loadRssData when column_file_path is provided", {
+test_that("harmonizeGwas: uses loadRssData when columnFilePath is provided", {
   mock_called <- FALSE
   local_mocked_bindings(
-    loadRssData = function(sumstat_path, column_file_path, ...) {
+    loadRssData = function(sumstatPath, columnFilePath, ...) {
       mock_called <<- TRUE
       list(sumstats = data.frame(
         chrom = c(1, 1),
@@ -1047,9 +1047,9 @@ test_that("twasAnalysis: returns one result per weight column", {
     z = rnorm(p),
     stringsAsFactors = FALSE
   )
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
-  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, LD_matrix, variant_ids)
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
+  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, ldMatrix, variant_ids)
   expect_equal(length(result), ncols)
   expect_true(all(names(result) == colnames(weights_matrix)))
 })
@@ -1137,15 +1137,15 @@ test_that("twasAnalysis result matches manual twasZ calls", {
     z = z_vals,
     stringsAsFactors = FALSE
   )
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
   # Run twasAnalysis
-  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, LD_matrix, variant_ids)
+  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, ldMatrix, variant_ids)
 
   # Manually compute for each method
   for (col_name in colnames(weights_matrix)) {
-    manual_result <- twasZ(weights_matrix[, col_name], z_vals, R = LD_matrix)
+    manual_result <- twasZ(weights_matrix[, col_name], z_vals, R = ldMatrix)
     expect_equal(as.numeric(result[[col_name]]$z), as.numeric(manual_result$z), tolerance = 1e-10,
       info = paste("Mismatch for", col_name))
     expect_equal(as.numeric(result[[col_name]]$pval), as.numeric(manual_result$pval), tolerance = 1e-10,
@@ -1398,9 +1398,9 @@ test_that("twasAnalysis: single method column works", {
     z = c(2.0, -1.0, 3.0),
     stringsAsFactors = FALSE
   )
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
-  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, LD_matrix, variant_ids)
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
+  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, ldMatrix, variant_ids)
   expect_equal(length(result), 1)
   expect_equal(names(result), "susieWeights")
   expect_true(all(c("z", "pval") %in% names(result$susieWeights)))
@@ -1420,9 +1420,9 @@ test_that("twasAnalysis: gwas_sumstats_db with extra rows gets filtered to extra
     z = rnorm(p + 3),
     stringsAsFactors = FALSE
   )
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
-  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, LD_matrix, variant_ids)
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
+  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, ldMatrix, variant_ids)
   expect_true(is.list(result))
   expect_equal(length(result), 2)
 })
@@ -1440,14 +1440,14 @@ test_that("twasAnalysis: correctly uses extract_variants_objs subset", {
     z = z_vals,
     stringsAsFactors = FALSE
   )
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
   # Only extract first 3 variants
   extract_subset <- variant_ids[1:3]
-  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, LD_matrix, extract_subset)
+  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, ldMatrix, extract_subset)
   expect_true(is.list(result))
   # Manually verify the result matches using only the first 3 variants
-  manual <- twasZ(weights_matrix[extract_subset, "m1_weights"], z_vals[1:3], R = LD_matrix[extract_subset, extract_subset])
+  manual <- twasZ(weights_matrix[extract_subset, "m1_weights"], z_vals[1:3], R = ldMatrix[extract_subset, extract_subset])
   expect_equal(as.numeric(result$m1_weights$z), as.numeric(manual$z), tolerance = 1e-10)
 })
 
@@ -1515,33 +1515,33 @@ test_that("twasPipeline: pick_best_model path is executed when rsq_cutoff > 0", 
   variant_ids <- make_variant_ids()
   p <- length(variant_ids)
   weights_mat <- make_weights_matrix(variant_ids)
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       dataType = list(ctx1 = "expression"),
       variantNames = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat,
+      weightsQced = list(ctx1 = list(study1 = list(
+        scaledWeights = weights_mat,
         weights = weights_mat
       ))),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = variant_ids,
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -1557,7 +1557,7 @@ test_that("twasPipeline: pick_best_model path is executed when rsq_cutoff > 0", 
     rsqPvalOption ="pval"
   )
 
-  # Should return a list with twas_result
+  # Should return a list with twasResult
   expect_true(is.list(result))
 })
 
@@ -1579,33 +1579,33 @@ test_that("twasPipeline: pick_best_model selects model with best rsq", {
   variant_ids <- make_variant_ids()
   p <- length(variant_ids)
   weights_mat <- make_weights_matrix(variant_ids)
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       dataType = list(ctx1 = "expression"),
       variantNames = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat,
+      weightsQced = list(ctx1 = list(study1 = list(
+        scaledWeights = weights_mat,
         weights = weights_mat
       ))),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = variant_ids,
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -1621,10 +1621,10 @@ test_that("twasPipeline: pick_best_model selects model with best rsq", {
   )
 
   expect_true(is.list(result))
-  # The twas_result should have is_selected_method TRUE for susie (better model)
-  if (!is.null(result$twas_result)) {
-    expect_true("twasZ" %in% colnames(result$twas_result))
-    expect_true("twas_pval" %in% colnames(result$twas_result))
+  # The twasResult should have isSelectedMethod TRUE for susie (better model)
+  if (!is.null(result$twasResult)) {
+    expect_true("twasZ" %in% colnames(result$twasResult))
+    expect_true("twasPval" %in% colnames(result$twasResult))
   }
 })
 
@@ -1645,33 +1645,33 @@ test_that("twasPipeline: pick_best_model skips context when no model passes thre
   variant_ids <- make_variant_ids()
   p <- length(variant_ids)
   weights_mat <- make_weights_matrix(variant_ids)
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       dataType = list(ctx1 = "expression"),
       variantNames = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat,
+      weightsQced = list(ctx1 = list(study1 = list(
+        scaledWeights = weights_mat,
         weights = weights_mat
       ))),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = variant_ids,
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -1690,8 +1690,8 @@ test_that("twasPipeline: pick_best_model skips context when no model passes thre
 })
 
 # NOTE: Removed test "twasPipeline: rsq_cutoff=0 skips best model selection entirely"
-# When rsq_cutoff=0, the source code assigns NA model_selection
-# instead of a list structure, causing the is_imputable column to be missing in the
+# When rsq_cutoff=0, the source code assigns NA modelSelection
+# instead of a list structure, causing the isImputable column to be missing in the
 # downstream data frame construction. This is a known source code issue.
 
 # ===========================================================================
@@ -1704,11 +1704,11 @@ test_that("twasPipeline: handles harmonizeTwas returning NULL for a gene", {
     contexts = "ctx1"
   )
 
-  mock_twas_data_qced <- list(gene1 = NULL)
+  mockTwasDataQced <- list(gene1 = NULL)
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -1729,11 +1729,11 @@ test_that("twasPipeline: handles harmonizeTwas returning empty list for a gene",
     contexts = "ctx1"
   )
 
-  mock_twas_data_qced <- list(gene1 = list())
+  mockTwasDataQced <- list(gene1 = list())
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -1752,7 +1752,7 @@ test_that("twasPipeline: handles harmonizeTwas returning empty list for a gene",
 # twasPipeline: TWAS analysis loop coverage
 # ===========================================================================
 
-test_that("twasPipeline: full pipeline with mocked harmonizeTwas produces twas_result table", {
+test_that("twasPipeline: full pipeline with mocked harmonizeTwas produces twasResult table", {
   set.seed(99)
   variant_ids <- make_variant_ids()
   p <- length(variant_ids)
@@ -1771,34 +1771,34 @@ test_that("twasPipeline: full pipeline with mocked harmonizeTwas produces twas_r
     rsq = 0.3, adj_rsq = 0.25, pval = 0.01, adj_rsq_pval = 0.02
   )
 
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
   gwas_z <- rnorm(p)
 
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       dataType = list(ctx1 = "expression"),
       variantNames = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat,
+      weightsQced = list(ctx1 = list(study1 = list(
+        scaledWeights = weights_mat,
         weights = weights_mat
       ))),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = variant_ids,
         z = gwas_z,
         stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -1814,16 +1814,16 @@ test_that("twasPipeline: full pipeline with mocked harmonizeTwas produces twas_r
   ))
 
   expect_true(is.list(result))
-  expect_true("twas_result" %in% names(result))
-  if (!is.null(result$twas_result)) {
-    expect_true(is.data.frame(result$twas_result))
-    expect_true("twasZ" %in% colnames(result$twas_result))
-    expect_true("twas_pval" %in% colnames(result$twas_result))
-    expect_true("molecular_id" %in% colnames(result$twas_result))
-    expect_true("chr" %in% colnames(result$twas_result))
-    expect_true("block" %in% colnames(result$twas_result))
-    expect_true(all(result$twas_result$molecular_id == "gene1"))
-    expect_true(all(result$twas_result$block == "chr1_100_500"))
+  expect_true("twasResult" %in% names(result))
+  if (!is.null(result$twasResult)) {
+    expect_true(is.data.frame(result$twasResult))
+    expect_true("twasZ" %in% colnames(result$twasResult))
+    expect_true("twasPval" %in% colnames(result$twasResult))
+    expect_true("molecularId" %in% colnames(result$twasResult))
+    expect_true("chr" %in% colnames(result$twasResult))
+    expect_true("block" %in% colnames(result$twasResult))
+    expect_true(all(result$twasResult$molecularId == "gene1"))
+    expect_true(all(result$twasResult$block == "chr1_100_500"))
   }
 })
 
@@ -1846,34 +1846,34 @@ test_that("twasPipeline: multiple genes processed correctly", {
     )
   }
 
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
-  mock_twas_data_qced <- list()
+  mockTwasDataQced <- list()
   for (gene in c("gene1", "gene2")) {
-    mock_twas_data_qced[[gene]] <- list(
+    mockTwasDataQced[[gene]] <- list(
       chrom = 1,
       dataType = list(ctx1 = "expression"),
       variantNames = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = make_weights_matrix(variant_ids, seed = if (gene == "gene1") 42 else 43),
+      weightsQced = list(ctx1 = list(study1 = list(
+        scaledWeights = make_weights_matrix(variant_ids, seed = if (gene == "gene1") 42 else 43),
         weights = make_weights_matrix(variant_ids, seed = if (gene == "gene1") 42 else 43)
       ))),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = variant_ids,
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   }
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -1887,8 +1887,8 @@ test_that("twasPipeline: multiple genes processed correctly", {
   ))
 
   expect_true(is.list(result))
-  if (!is.null(result$twas_result)) {
-    expect_true("gene1" %in% result$twas_result$molecular_id || "gene2" %in% result$twas_result$molecular_id)
+  if (!is.null(result$twasResult)) {
+    expect_true("gene1" %in% result$twasResult$molecularId || "gene2" %in% result$twasResult$molecularId)
   }
 })
 
@@ -1903,35 +1903,35 @@ test_that("twasPipeline: empty twas_variants intersection returns empty data fra
     contexts = "ctx1"
   )
 
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
   # GWAS has completely different variant_ids - no intersection
   diff_variant_ids <- paste0("chr2:", seq(100, by = 100, length.out = p), ":G:C")
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       dataType = list(ctx1 = "expression"),
       variantNames = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat,
+      weightsQced = list(ctx1 = list(study1 = list(
+        scaledWeights = weights_mat,
         weights = weights_mat
       ))),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = diff_variant_ids,
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -1948,12 +1948,12 @@ test_that("twasPipeline: empty twas_variants intersection returns empty data fra
 })
 
 # ===========================================================================
-# twasPipeline: data_type handling
+# twasPipeline: dataType handling
 # ===========================================================================
 
-# NOTE: Removed test "twasPipeline: missing data_type in twas_weights_data gets assigned NA"
-# When rsq_cutoff=0, the source code assigns NA model_selection
-# instead of a list structure, causing the is_imputable column to be missing in the
+# NOTE: Removed test "twasPipeline: missing dataType in twas_weights_data gets assigned NA"
+# When rsq_cutoff=0, the source code assigns NA modelSelection
+# instead of a list structure, causing the isImputable column to be missing in the
 # downstream data frame construction. This is a known source code issue.
 
 # ===========================================================================
@@ -1977,34 +1977,34 @@ test_that("twasPipeline: output_twas_data=TRUE triggers format_twas_data path", 
     rsq = 0.4, adj_rsq = 0.35, pval = 0.01, adj_rsq_pval = 0.02
   )
 
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       dataType = list(ctx1 = "expression"),
       variantNames = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat,
+      weightsQced = list(ctx1 = list(study1 = list(
+        scaledWeights = weights_mat,
         weights = weights_mat
       ))),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = variant_ids,
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix),
-      model_selection = list(ctx1 = list(selected_model = "susie", is_imputable = TRUE))
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix),
+      modelSelection = list(ctx1 = list(selectedModel = "susie", isImputable = TRUE))
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -2021,8 +2021,8 @@ test_that("twasPipeline: output_twas_data=TRUE triggers format_twas_data path", 
   ))
 
   expect_true(is.list(result))
-  expect_true("twas_data" %in% names(result))
-  # twas_data can be NULL if no imputable genes passed, but the branch was exercised
+  expect_true("twasData" %in% names(result))
+  # twasData can be NULL if no imputable genes passed, but the branch was exercised
 })
 
 # ===========================================================================
@@ -2054,10 +2054,10 @@ test_that("twasPipeline: multiple contexts are processed independently", {
 
   weights_mat1 <- make_weights_matrix(variant_ids, seed = 42)
   weights_mat2 <- make_weights_matrix(variant_ids, seed = 43)
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       dataType = list(ctx1 = "expression", ctx2 = "splicing"),
@@ -2065,25 +2065,25 @@ test_that("twasPipeline: multiple contexts are processed independently", {
         ctx1 = list(study1 = variant_ids),
         ctx2 = list(study1 = variant_ids)
       ),
-      weights_qced = list(
-        ctx1 = list(study1 = list(scaled_weights = weights_mat1, weights = weights_mat1)),
-        ctx2 = list(study1 = list(scaled_weights = weights_mat2, weights = weights_mat2))
+      weightsQced = list(
+        ctx1 = list(study1 = list(scaledWeights = weights_mat1, weights = weights_mat1)),
+        ctx2 = list(study1 = list(scaledWeights = weights_mat2, weights = weights_mat2))
       ),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = variant_ids,
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -2099,17 +2099,17 @@ test_that("twasPipeline: multiple contexts are processed independently", {
   ))
 
   expect_true(is.list(result))
-  if (!is.null(result$twas_result)) {
+  if (!is.null(result$twasResult)) {
     # ctx1 should be imputable, ctx2 should not
-    expect_true(any(result$twas_result$context == "ctx1"))
+    expect_true(any(result$twasResult$context == "ctx1"))
   }
 })
 
 # ===========================================================================
-# twasPipeline: mr_result column is always present in output
+# twasPipeline: mrResult column is always present in output
 # ===========================================================================
 
-test_that("twasPipeline: mr_result is returned in final result", {
+test_that("twasPipeline: mrResult is returned in final result", {
   set.seed(401)
   variant_ids <- make_variant_ids()
   p <- length(variant_ids)
@@ -2123,33 +2123,33 @@ test_that("twasPipeline: mr_result is returned in final result", {
     rsq = 0.6, adj_rsq = 0.55, pval = 0.001, adj_rsq_pval = 0.002
   )
 
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       dataType = list(ctx1 = "expression"),
       variantNames = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat,
+      weightsQced = list(ctx1 = list(study1 = list(
+        scaledWeights = weights_mat,
         weights = weights_mat
       ))),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = variant_ids,
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -2162,7 +2162,7 @@ test_that("twasPipeline: mr_result is returned in final result", {
     rsqPvalOption ="pval"
   ))
 
-  expect_true("mr_result" %in% names(result))
+  expect_true("mrResult" %in% names(result))
 })
 
 # ===========================================================================
@@ -2180,35 +2180,35 @@ test_that("twasPipeline: when TWAS analysis yields no results, returns NULL comp
     contexts = "ctx1"
   )
 
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
   # GWAS with all zero z-scores -- twasAnalysis should still produce results though
   # Instead, make GWAS have completely non-matching variant_ids so twasAnalysis returns NULL
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       dataType = list(ctx1 = "expression"),
       variantNames = list(ctx1 = list(study1 = character(0))),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat,
+      weightsQced = list(ctx1 = list(study1 = list(
+        scaledWeights = weights_mat,
         weights = weights_mat
       ))),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = variant_ids,
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -2223,7 +2223,7 @@ test_that("twasPipeline: when TWAS analysis yields no results, returns NULL comp
   )))
 
   expect_true(is.list(result))
-  # When no TWAS results, returns list(twas_result = NULL, twas_data = NULL, mr_result = NULL)
+  # When no TWAS results, returns list(twasResult = NULL, twasData = NULL, mrResult = NULL)
   # or list(NULL) depending on path
 })
 
@@ -2370,11 +2370,11 @@ test_that("twasAnalysis: reorders gwas_sumstats to match extract_variants order"
     z = rev(z_vals),
     stringsAsFactors = FALSE
   )
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
-  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, LD_matrix, variant_ids)
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
+  result <- twasAnalysis(weights_matrix, gwas_sumstats_db, ldMatrix, variant_ids)
   # The match() call in twasAnalysis reorders GWAS to match extract_variants
-  manual <- twasZ(weights_matrix[, 1], z_vals, R = LD_matrix)
+  manual <- twasZ(weights_matrix[, 1], z_vals, R = ldMatrix)
   expect_equal(as.numeric(result$susieWeights$z), as.numeric(manual$z), tolerance = 1e-10)
 })
 
@@ -2428,11 +2428,11 @@ test_that("twasPipeline: processes multiple GWAS studies correctly", {
     rsq = 0.6, adj_rsq = 0.55, pval = 0.001, adj_rsq_pval = 0.002
   )
 
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
   # Two GWAS studies
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       dataType = list(ctx1 = "expression"),
@@ -2440,24 +2440,24 @@ test_that("twasPipeline: processes multiple GWAS studies correctly", {
         studyA = variant_ids,
         studyB = variant_ids
       )),
-      weights_qced = list(ctx1 = list(
-        studyA = list(scaled_weights = weights_mat, weights = weights_mat),
-        studyB = list(scaled_weights = weights_mat, weights = weights_mat)
+      weightsQced = list(ctx1 = list(
+        studyA = list(scaledWeights = weights_mat, weights = weights_mat),
+        studyB = list(scaledWeights = weights_mat, weights = weights_mat)
       )),
-      gwas_qced = list(
+      gwasQced = list(
         studyA = data.frame(variant_id = variant_ids, z = rnorm(p), stringsAsFactors = FALSE),
         studyB = data.frame(variant_id = variant_ids, z = rnorm(p), stringsAsFactors = FALSE)
       ),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -2471,10 +2471,10 @@ test_that("twasPipeline: processes multiple GWAS studies correctly", {
   ))
 
   expect_true(is.list(result))
-  if (!is.null(result$twas_result)) {
-    expect_true("gwas_study" %in% colnames(result$twas_result))
+  if (!is.null(result$twasResult)) {
+    expect_true("gwasStudy" %in% colnames(result$twasResult))
     # Should have results for both studies
-    studies_present <- unique(result$twas_result$gwas_study)
+    studies_present <- unique(result$twasResult$gwasStudy)
     expect_true(length(studies_present) >= 1)
   }
 })
@@ -2501,33 +2501,33 @@ test_that("twasPipeline: rsq_option='adj_rsq' uses adjusted R-squared", {
     rsq = 0.003, adj_rsq = 0.4, pval = 0.01, adj_rsq_pval = 0.02
   )
 
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       dataType = list(ctx1 = "expression"),
       variantNames = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat,
+      weightsQced = list(ctx1 = list(study1 = list(
+        scaledWeights = weights_mat,
         weights = weights_mat
       ))),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = variant_ids,
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -2544,8 +2544,8 @@ test_that("twasPipeline: rsq_option='adj_rsq' uses adjusted R-squared", {
 
   expect_true(is.list(result))
   # With adj_rsq option, susie (adj_rsq=0.6) should be selected
-  if (!is.null(result$twas_result)) {
-    expect_true(nrow(result$twas_result) > 0)
+  if (!is.null(result$twasResult)) {
+    expect_true(nrow(result$twasResult) > 0)
   }
 })
 
@@ -2571,33 +2571,33 @@ test_that("twasPipeline: rsq_pval_option='adj_rsq_pval' uses the correct p-value
     rsq = 0.3, adj_rsq = 0.25, pval = 0.02, adj_rsq_pval = 0.8
   )
 
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       dataType = list(ctx1 = "expression"),
       variantNames = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat,
+      weightsQced = list(ctx1 = list(study1 = list(
+        scaledWeights = weights_mat,
         weights = weights_mat
       ))),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = variant_ids,
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -2700,7 +2700,7 @@ test_that("loadTwasWeights raises error if different regions specified", {
   weight_db <- setup_weight_db_vector(n_rds = 2, n_cond = 4, same_gene = FALSE)
   expect_true(
     inherits(
-      loadTwasWeights(weight_db$weight_paths, conditions = NULL, variableNameObj =c("preset_variants_result", "variant_names"),
+      loadTwasWeights(weight_db$weight_paths, conditions = NULL, variableNameObj =c("preset_variants_result", "variantNames"),
                        susieObj =c("preset_variants_result", "susie_result_trimmed"),twasWeightsTable = "twasWeights"),
       "try-error"))
   cleanup_weight_db_vector(weight_db$weight_paths)
@@ -2711,7 +2711,7 @@ test_that("loadTwasWeights raises error if different number of conditions per rd
   weight_db <- setup_weight_db_vector(n_rds = 2, n_cond = 4)
   expect_true(
     inherits(
-      suppressWarnings(loadTwasWeights(weight_db$weight_paths, conditions = "not_found", variableNameObj =c("preset_variants_result", "variant_names"),
+      suppressWarnings(loadTwasWeights(weight_db$weight_paths, conditions = "not_found", variableNameObj =c("preset_variants_result", "variantNames"),
                        susieObj =c("preset_variants_result", "susie_result_trimmed"),twasWeightsTable = "twasWeights")),
       "try-error"))
   cleanup_weight_db_vector(weight_db$weight_paths)
@@ -2720,7 +2720,7 @@ test_that("loadTwasWeights raises error if different number of conditions per rd
 # Test null conditions
 test_that("loadTwasWeights works with null condition", {
   weight_db <- setup_weight_db_vector(n_rds = 2, n_cond = 4)
-  res <- loadTwasWeights(weight_db$weight_paths, conditions = NULL, variableNameObj =c("preset_variants_result", "variant_names"),
+  res <- loadTwasWeights(weight_db$weight_paths, conditions = NULL, variableNameObj =c("preset_variants_result", "variantNames"),
                           susieObj = c("preset_variants_result", "susie_result_trimmed"),twasWeightsTable = "twasWeights")
   expect_true(is(res, "TwasWeights"))
   expect_true(length(getMethodNames(res)) > 0)
@@ -2731,7 +2731,7 @@ test_that("loadTwasWeights works with null condition", {
 # Specify conditions
 test_that("loadTwasWeights works with specified condition", {
   weight_db <- setup_weight_db_vector(n_rds = 2, n_cond = 4, same_condition = TRUE, condition = "cond_1_joe_eQTL")
-  res <- loadTwasWeights(weight_db$weight_paths, conditions = "cond_1_joe_eQTL", variableNameObj =c("preset_variants_result", "variant_names"),
+  res <- loadTwasWeights(weight_db$weight_paths, conditions = "cond_1_joe_eQTL", variableNameObj =c("preset_variants_result", "variantNames"),
                           susieObj = c("preset_variants_result", "susie_result_trimmed"),twasWeightsTable = "twasWeights")
   expect_true(is(res, "TwasWeights"))
   expect_true(length(getMethodNames(res)) > 0)
@@ -2754,7 +2754,7 @@ test_that("loadTwasWeights raises error with null variable_name_obj and variable
   weight_db <- setup_weight_db_vector(n_rds = 2, n_cond = 4, var_row_lengths = TRUE)
   expect_false( # it should not return error 
     inherits(
-      loadTwasWeights(weight_db$weight_paths, conditions = NULL, variableNameObj =c("preset_variants_result", "variant_names"),
+      loadTwasWeights(weight_db$weight_paths, conditions = NULL, variableNameObj =c("preset_variants_result", "variantNames"),
                        susieObj =c("preset_variants_result", "susie_result_trimmed"),twasWeightsTable = "twasWeights"),
       "try-error"))
   cleanup_weight_db_vector(weight_db$weight_paths)
@@ -2831,10 +2831,10 @@ test_that("harmonizeTwas: group_contexts_by_region single context path (lines 43
 
   local_mocked_bindings(
     loadLdSketch = function(...) {
-      n_sketch <- 50L
+      nSketch <- 50L
       p_sketch <- length(mock_LD_variants)
       set.seed(123)
-      X <- matrix(rbinom(n_sketch * p_sketch, 2, 0.3), nrow = n_sketch, ncol = p_sketch)
+      X <- matrix(rbinom(nSketch * p_sketch, 2, 0.3), nrow = nSketch, ncol = p_sketch)
       make_mock_ld_sketch(X, mock_ref_panel, mock_LD_variants
       )
     },
@@ -2873,12 +2873,12 @@ test_that("harmonizeTwas: group_contexts_by_region single context path (lines 43
   result <- harmonizeTwas(twas_weights_data, "fake_ld.tsv", gwas_meta_file, ldReferenceSampleSize =17000)
 
   expect_true(is.list(result))
-  expect_true("twas_data_qced" %in% names(result))
-  expect_true("ref_panel" %in% names(result))
+  expect_true("twasDataQced" %in% names(result))
+  expect_true("refPanel" %in% names(result))
   # The single-context path should have been exercised
-  if (!is.null(result$twas_data_qced$gene1)) {
-    expect_true("chrom" %in% names(result$twas_data_qced$gene1))
-    expect_true("weights_qced" %in% names(result$twas_data_qced$gene1))
+  if (!is.null(result$twasDataQced$gene1)) {
+    expect_true("chrom" %in% names(result$twasDataQced$gene1))
+    expect_true("weightsQced" %in% names(result$twasDataQced$gene1))
   }
 })
 
@@ -2957,10 +2957,10 @@ test_that("harmonizeTwas: group_contexts_by_region multi-context clustering (lin
 
   local_mocked_bindings(
     loadLdSketch = function(...) {
-      n_sketch <- 50L
+      nSketch <- 50L
       p_sketch <- length(all_variant_ids)
       set.seed(123)
-      X <- matrix(rbinom(n_sketch * p_sketch, 2, 0.3), nrow = n_sketch, ncol = p_sketch)
+      X <- matrix(rbinom(nSketch * p_sketch, 2, 0.3), nrow = nSketch, ncol = p_sketch)
       ref_panel <- data.frame(chrom = 1, pos = as.integer(sapply(strsplit(all_variant_ids, ":"), `[`, 2)),
                               A2 = "A", A1 = "T",
                               variant_id = all_variant_ids,
@@ -3000,9 +3000,9 @@ test_that("harmonizeTwas: group_contexts_by_region multi-context clustering (lin
   result <- harmonizeTwas(twas_weights_data, "fake_ld.tsv", gwas_meta_file, ldReferenceSampleSize =17000)
 
   expect_true(is.list(result))
-  expect_true("twas_data_qced" %in% names(result))
-  if (!is.null(result$twas_data_qced$gene1)) {
-    expect_true("chrom" %in% names(result$twas_data_qced$gene1))
+  expect_true("twasDataQced" %in% names(result))
+  if (!is.null(result$twasDataQced$gene1)) {
+    expect_true("chrom" %in% names(result$twasDataQced$gene1))
   }
 })
 
@@ -3028,33 +3028,33 @@ test_that("twasPipeline: adj_rsq_pval option exercised in pick_best_model", {
     rsq = 0.3, adj_rsq = 0.25, pval = 0.01, adj_rsq_pval = 0.02
   )
 
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       dataType = list(ctx1 = "expression"),
       variantNames = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat,
+      weightsQced = list(ctx1 = list(study1 = list(
+        scaledWeights = weights_mat,
         weights = weights_mat
       ))),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = variant_ids,
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -3072,26 +3072,26 @@ test_that("twasPipeline: adj_rsq_pval option exercised in pick_best_model", {
   ))
 
   expect_true(is.list(result))
-  if (!is.null(result$twas_result)) {
-    expect_true("twasZ" %in% colnames(result$twas_result))
+  if (!is.null(result$twasResult)) {
+    expect_true("twasZ" %in% colnames(result$twasResult))
   }
 })
 
 # ===========================================================================
-# SECTION R: twasPipeline - data_type missing from twas_weights_data (line 614)
+# SECTION R: twasPipeline - dataType missing from twas_weights_data (line 614)
 # ===========================================================================
 
-test_that("twasPipeline: missing data_type triggers assignment check on line 614", {
+test_that("twasPipeline: missing dataType triggers assignment check on line 614", {
   set.seed(903)
   variant_ids <- make_variant_ids()
   p <- length(variant_ids)
   weights_mat <- make_weights_matrix(variant_ids)
 
-  # Create weights data WITHOUT data_type to exercise line 614.
-  # NOTE: This is a known source code limitation - when data_type is missing from
-  # twas_weights_data, line 614-618 assigns it to twas_data_qced but line 748 reads
+  # Create weights data WITHOUT dataType to exercise line 614.
+  # NOTE: This is a known source code limitation - when dataType is missing from
+  # twas_weights_data, line 614-618 assigns it to twasDataQced but line 748 reads
   # from twas_weights_data (original), causing a downstream data.frame error.
-  # We verify the function reaches the data_type check by expecting the error.
+  # We verify the function reaches the dataType check by expecting the error.
   twas_weights_data <- list(
     gene1 = list(
       weights = list(ctx1 = weights_mat),
@@ -3101,40 +3101,40 @@ test_that("twasPipeline: missing data_type triggers assignment check on line 614
           lasso_performance = data.frame(rsq = 0.3, adj_rsq = 0.25, pval = 0.01, adj_rsq_pval = 0.02)
         )
       )
-      # NOTE: no data_type field
+      # NOTE: no dataType field
     )
   )
 
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       variantNames = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat,
+      weightsQced = list(ctx1 = list(study1 = list(
+        scaledWeights = weights_mat,
         weights = weights_mat
       ))),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = variant_ids,
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
-  # With S4 normalization, NULL data_type is handled cleanly (defaults to NA per context).
+  # With S4 normalization, NULL dataType is handled cleanly (defaults to NA per context).
   # The pipeline should complete without the previous dimension mismatch error.
   result <- suppressMessages(twasPipeline(
     twasWeightsData =twas_weights_data,
@@ -3171,35 +3171,35 @@ test_that("twasPipeline: twasAnalysis returning NULL yields empty rows (line 642
     rsq = 0.3, adj_rsq = 0.25, pval = 0.01, adj_rsq_pval = 0.02
   )
 
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
   # GWAS with non-matching variant IDs -> twasAnalysis will return NULL
   diff_vids <- paste0("chr2:", seq(100, by = 100, length.out = p), ":G:C")
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       dataType = list(ctx1 = "expression"),
       variantNames = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat,
+      weightsQced = list(ctx1 = list(study1 = list(
+        scaledWeights = weights_mat,
         weights = weights_mat
       ))),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = diff_vids,
         z = rnorm(p),
         stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -3222,7 +3222,7 @@ test_that("twasPipeline: twasAnalysis returning NULL yields empty rows (line 642
 # (lines 650-674 - MR formatting and analysis)
 # ===========================================================================
 
-test_that("twasPipeline: MR path entered when susie_results and significant twas_pval", {
+test_that("twasPipeline: MR path entered when susie_results and significant twasPval", {
   set.seed(905)
   variant_ids <- make_variant_ids()
   p <- length(variant_ids)
@@ -3244,38 +3244,38 @@ test_that("twasPipeline: MR path entered when susie_results and significant twas
     ctx1 = list(
       topLoci = data.frame(variant_id = variant_ids[1:2], pip = c(0.9, 0.8)),
       pip = setNames(c(0.9, 0.8, 0.1, 0.05, 0.02), variant_ids),
-      cs_variants = list(variant_ids[1:2]),
-      cs_purity = 0.95
+      csVariants = list(variant_ids[1:2]),
+      csPurity = 0.95
     )
   )
 
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       dataType = list(ctx1 = "expression"),
       variantNames = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat,
+      weightsQced = list(ctx1 = list(study1 = list(
+        scaledWeights = weights_mat,
         weights = weights_mat
       ))),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = variant_ids,
         z = c(10.0, 8.0, 1.0, 0.5, 0.2),  # Large z to get small pval for MR trigger
         stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 
@@ -3293,8 +3293,8 @@ test_that("twasPipeline: MR path entered when susie_results and significant twas
   )))
 
   expect_true(is.list(result))
-  # mr_result should be in the output
-  expect_true("mr_result" %in% names(result))
+  # mrResult should be in the output
+  expect_true("mrResult" %in% names(result))
 })
 
 # ===========================================================================
@@ -3310,30 +3310,30 @@ test_that("twasPipeline: event_filters filtering some but not all contexts", {
   variant_ids <- make_variant_ids()
   p <- length(variant_ids)
   weights_mat <- make_weights_matrix(variant_ids)
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       dataType = list(brain_ctx = "expression"),
       variantNames = list(brain_ctx = list(study1 = variant_ids)),
-      weights_qced = list(brain_ctx = list(study1 = list(
-        scaled_weights = weights_mat, weights = weights_mat
+      weightsQced = list(brain_ctx = list(study1 = list(
+        scaledWeights = weights_mat, weights = weights_mat
       ))),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = variant_ids, z = rnorm(p), stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     },
     filterMolecularEvents =function(contexts, filters, ...) {
       # Only keep brain_ctx
@@ -3406,9 +3406,9 @@ test_that("harmonizeTwas: duplicated LD variants are removed", {
   # Mock loadLdSketch to return already-deduped data (3 unique variants).
   local_mocked_bindings(
     loadLdSketch = function(...) {
-      n_sketch <- 50L
+      nSketch <- 50L
       set.seed(123)
-      X <- matrix(rbinom(n_sketch * p, 2, 0.3), nrow = n_sketch, ncol = p)
+      X <- matrix(rbinom(nSketch * p, 2, 0.3), nrow = nSketch, ncol = p)
       rp <- data.frame(
         chrom = rep(1, p), pos = c(100, 200, 300),
         A2 = rep("A", p), A1 = rep("T", p),
@@ -3446,13 +3446,13 @@ test_that("harmonizeTwas: duplicated LD variants are removed", {
 
   expect_true(is.list(result))
   # ref_panel should have the 3 unique variants
-  expect_equal(nrow(result$ref_panel), p)
+  expect_equal(nrow(result$refPanel), p)
 })
 
 # ===========================================================================
 # harmonizeTwas: results[[id]] = NULL when no GWAS data overlaps (line 217)
 # ===========================================================================
-test_that("harmonizeTwas: drops molecular_id when harmonizeGwas returns NULL for all studies", {
+test_that("harmonizeTwas: drops molecularId when harmonizeGwas returns NULL for all studies", {
   variant_ids <- make_variant_ids(chrom = 1, positions = c(100, 200, 300))
   p <- length(variant_ids)
   weights_mat <- make_weights_matrix(variant_ids,
@@ -3473,8 +3473,8 @@ test_that("harmonizeTwas: drops molecular_id when harmonizeGwas returns NULL for
     )
   )
 
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
   ref_panel <- data.frame(
     chrom = 1, pos = c(100, 200, 300), A2 = "A", A1 = "T",
     variant_id = variant_ids, allele_freq = 0.3, variance = 1.0, stringsAsFactors = FALSE
@@ -3482,12 +3482,12 @@ test_that("harmonizeTwas: drops molecular_id when harmonizeGwas returns NULL for
 
   local_mocked_bindings(
     loadLdSketch = function(...) {
-      n_sketch <- 50L
+      nSketch <- 50L
       set.seed(123)
-      X <- matrix(rbinom(n_sketch * p, 2, 0.3), nrow = n_sketch, ncol = p)
+      X <- matrix(rbinom(nSketch * p, 2, 0.3), nrow = nSketch, ncol = p)
       make_mock_ld_sketch(X, ref_panel, variant_ids)
     },
-    # Returning NULL skips the entire context loop, so gwas_qced stays empty
+    # Returning NULL skips the entire context loop, so gwasQced stays empty
     harmonizeGwas = function(...) NULL,
     matchRefPanel = function(target_data, ref_data, ...) AlleleQcResult(harmonizedData = target_data, qcSummary = target_data)
   )
@@ -3503,9 +3503,9 @@ test_that("harmonizeTwas: drops molecular_id when harmonizeGwas returns NULL for
 
   result <- harmonizeTwas(twas_weights_data, "fake_ld.tsv", gwas_meta_file, ldReferenceSampleSize =17000)
 
-  # gene1 should have been dropped (gwas_qced is empty)
+  # gene1 should have been dropped (gwasQced is empty)
   expect_true(is.list(result))
-  expect_null(result$twas_data_qced$gene1)
+  expect_null(result$twasDataQced$gene1)
 })
 
 # ===========================================================================
@@ -3521,11 +3521,11 @@ test_that("harmonizeTwas: susieWeights column triggers adjustSusieWeights branch
 
   susie_results_ctx1 <- list(
     pip = setNames(c(0.4, 0.3, 0.2), variant_ids),
-    cs_variants = list(L1 = data.frame(
+    csVariants = list(L1 = data.frame(
       chrom = 1, pos = c(100, 200), A2 = "A", A1 = "T",
       variant_id = variant_ids[1:2], stringsAsFactors = FALSE
     )),
-    cs_purity = 0.95
+    csPurity = 0.95
   )
   tw <- TwasWeights(
     weights = list(ctx1 = weights_mat),
@@ -3544,8 +3544,8 @@ test_that("harmonizeTwas: susieWeights column triggers adjustSusieWeights branch
     )
   )
 
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
   ref_panel <- data.frame(
     chrom = 1, pos = c(100, 200, 300), A2 = "A", A1 = "T",
     variant_id = variant_ids, allele_freq = 0.3, variance = 1.0, stringsAsFactors = FALSE
@@ -3560,9 +3560,9 @@ test_that("harmonizeTwas: susieWeights column triggers adjustSusieWeights branch
 
   local_mocked_bindings(
     loadLdSketch = function(...) {
-      n_sketch <- 50L
+      nSketch <- 50L
       set.seed(123)
-      X <- matrix(rbinom(n_sketch * p, 2, 0.3), nrow = n_sketch, ncol = p)
+      X <- matrix(rbinom(nSketch * p, 2, 0.3), nrow = nSketch, ncol = p)
       make_mock_ld_sketch(X, ref_panel, variant_ids)
     },
     harmonizeGwas = function(...) mock_gwas_data,
@@ -3577,10 +3577,10 @@ test_that("harmonizeTwas: susieWeights column triggers adjustSusieWeights branch
         AlleleQcResult(harmonizedData = target_data, qcSummary = target_data)
       }
     },
-    adjustSusieWeights = function(twas_data, keep_variants, ...) {
+    adjustSusieWeights = function(twasData, keep_variants, ...) {
       list(
-        adjusted_susie_weights = setNames(rep(0.1, length(keep_variants)), keep_variants),
-        remained_variants_ids = keep_variants
+        adjustedSusieWeights = setNames(rep(0.1, length(keep_variants)), keep_variants),
+        remainedVariantIds = keep_variants
       )
     }
   )
@@ -3597,9 +3597,9 @@ test_that("harmonizeTwas: susieWeights column triggers adjustSusieWeights branch
   result <- harmonizeTwas(twas_weights_data, "fake_ld.tsv", gwas_meta_file, ldReferenceSampleSize =17000)
 
   expect_true(is.list(result))
-  # The susie branch should have populated susie_weights_intermediate_qced
-  expect_true("susie_weights_intermediate_qced" %in% names(result$twas_data_qced$gene1))
-  expect_true("ctx1" %in% names(result$twas_data_qced$gene1$susie_weights_intermediate_qced))
+  # The susie branch should have populated susieWeightsIntermediateQced
+  expect_true("susieWeightsIntermediateQced" %in% names(result$twasDataQced$gene1))
+  expect_true("ctx1" %in% names(result$twasDataQced$gene1$susieWeightsIntermediateQced))
 })
 
 # ===========================================================================
@@ -3623,30 +3623,30 @@ test_that("twasPipeline: pick_best_model returns NULL when all CV rsq are NA", {
     rsq = NA_real_, adj_rsq = NA_real_, pval = NA_real_, adj_rsq_pval = NA_real_
   )
 
-  LD_matrix <- diag(p)
-  rownames(LD_matrix) <- colnames(LD_matrix) <- variant_ids
+  ldMatrix <- diag(p)
+  rownames(ldMatrix) <- colnames(ldMatrix) <- variant_ids
 
-  mock_twas_data_qced <- list(
+  mockTwasDataQced <- list(
     gene1 = list(
       chrom = 1,
       dataType = list(ctx1 = "expression"),
       variantNames = list(ctx1 = list(study1 = variant_ids)),
-      weights_qced = list(ctx1 = list(study1 = list(
-        scaled_weights = weights_mat, weights = weights_mat
+      weightsQced = list(ctx1 = list(study1 = list(
+        scaledWeights = weights_mat, weights = weights_mat
       ))),
-      gwas_qced = list(study1 = data.frame(
+      gwasQced = list(study1 = data.frame(
         variant_id = variant_ids, z = rnorm(p), stringsAsFactors = FALSE
       )),
-      svd_V = diag(nrow(LD_matrix)),
-      svd_D = rep(sqrt(49), nrow(LD_matrix)),
-      n_sketch = 50L,
-      ld_variant_ids = rownames(LD_matrix)
+      svdV = diag(nrow(ldMatrix)),
+      svdD = rep(sqrt(49), nrow(ldMatrix)),
+      nSketch = 50L,
+      ldVariantIds = rownames(ldMatrix)
     )
   )
 
   local_mocked_bindings(
     harmonizeTwas = function(...) {
-      list(twas_data_qced = mock_twas_data_qced, refPanel = data.frame())
+      list(twasDataQced = mockTwasDataQced, refPanel = data.frame())
     }
   )
 

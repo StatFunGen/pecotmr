@@ -86,15 +86,15 @@ readSldscTrait <- function(prefix) {
   list(
     categories     = cats,
     tau            = setNames(as.numeric(results$Coefficient),                 cats),
-    tau_se         = setNames(as.numeric(results[["Coefficient_std_error"]]),  cats),
+    tauSe         = setNames(as.numeric(results[["Coefficient_std_error"]]),  cats),
     enrichment     = setNames(as.numeric(results$Enrichment),                  cats),
-    enrichment_se  = setNames(as.numeric(results[["Enrichment_std_error"]]),   cats),
-    enrichment_p   = setNames(as.numeric(results[["Enrichment_p"]]),           cats),
-    prop_h2        = setNames(as.numeric(results[["Prop._h2"]]),               cats),
-    prop_snps      = setNames(as.numeric(results[["Prop._SNPs"]]),             cats),
+    enrichmentSe  = setNames(as.numeric(results[["Enrichment_std_error"]]),   cats),
+    enrichmentP   = setNames(as.numeric(results[["Enrichment_p"]]),           cats),
+    propH2        = setNames(as.numeric(results[["Prop._h2"]]),               cats),
+    propSnps      = setNames(as.numeric(results[["Prop._SNPs"]]),             cats),
     h2g            = h2g,
-    tau_blocks     = deleteValues,
-    n_blocks       = nrow(deleteValues)
+    tauBlocks     = deleteValues,
+    nBlocks       = nrow(deleteValues)
   )
 }
 
@@ -312,7 +312,7 @@ isBinarySldscAnnot <- function(targetAnnoDir, annotCols = NULL) {
 #' @param mode Character: `"single"` or `"joint"`.
 #'
 #' @return A list with `summary` (data frame), `tau_star_blocks` (matrix),
-#'   `h2g`, `n_blocks`, `mode`.
+#'   `h2g`, `nBlocks`, `mode`.
 #'
 #' @importFrom stats qnorm var
 #' @export
@@ -336,30 +336,30 @@ standardizeSldscTrait <- function(traitData, sdAnnot, MRef,
     warning("standardizeSldscTrait: zero/NA sd for some targets; tau* will be NA/0.")
 
   tau        <- as.numeric(traitData$tau[targetCategories])
-  tauSe      <- as.numeric(traitData$tau_se[targetCategories])
-  blocksTarget   <- traitData$tau_blocks[, targetIdx, drop = FALSE]
+  tauSe      <- as.numeric(traitData$tauSe[targetCategories])
+  blocksTarget   <- traitData$tauBlocks[, targetIdx, drop = FALSE]
 
   ts <- standardizeTauStar(tau, blocksTarget, sdTarget, MRef, h2g)
-  tauStar    <- ts$tau_star
-  tauStarSe  <- ts$tau_star_se
+  tauStar    <- ts$tauStar
+  tauStarSe  <- ts$tauStarSe
 
   tauStarBlocks <- sweep(blocksTarget, 2L, sdTarget * MRef / h2g, FUN = "*")
 
   summaryDf <- data.frame(
     target      = targetCategories,
     tau         = tau,
-    tau_se      = tauSe,
-    tau_star    = tauStar,
-    tau_star_se = tauStarSe,
+    tauSe      = tauSe,
+    tauStar    = tauStar,
+    tauStarSe = tauStarSe,
     stringsAsFactors = FALSE
   )
 
   if (mode == "single") {
     enrich    <- as.numeric(traitData$enrichment[targetCategories])
-    enrichSe  <- as.numeric(traitData$enrichment_se[targetCategories])
-    enrichP   <- as.numeric(traitData$enrichment_p[targetCategories])
-    pH2       <- as.numeric(traitData$prop_h2[targetCategories])
-    pM        <- as.numeric(traitData$prop_snps[targetCategories])
+    enrichSe  <- as.numeric(traitData$enrichmentSe[targetCategories])
+    enrichP   <- as.numeric(traitData$enrichmentP[targetCategories])
+    pH2       <- as.numeric(traitData$propH2[targetCategories])
+    pM        <- as.numeric(traitData$propSnps[targetCategories])
 
     diffRatio   <- (pH2 / pM) - (1 - pH2) / (1 - pM)
     enrichstat  <- (h2g / MRef) * diffRatio
@@ -369,17 +369,17 @@ standardizeSldscTrait <- function(traitData, sdAnnot, MRef,
     enrichstatSe[!is.finite(absZ) | absZ <= 0] <- NA_real_
 
     summaryDf$enrichment    <- enrich
-    summaryDf$enrichment_se <- enrichSe
-    summaryDf$enrichment_p  <- enrichP
+    summaryDf$enrichmentSe <- enrichSe
+    summaryDf$enrichmentP  <- enrichP
     summaryDf$enrichstat    <- enrichstat
-    summaryDf$enrichstat_se <- enrichstatSe
+    summaryDf$enrichstatSe <- enrichstatSe
   }
 
   list(
     summary         = summaryDf,
     tau_star_blocks = tauStarBlocks,
     h2g             = h2g,
-    n_blocks        = nrow(blocksTarget),
+    nBlocks        = nrow(blocksTarget),
     mode            = mode
   )
 }
@@ -391,26 +391,26 @@ standardizeSldscTrait <- function(traitData, sdAnnot, MRef,
 #'   quantity for one annotation across multiple traits.
 #'
 #' @details Per-trait \eqn{SE_i} sources:
-#'   - `quantity = "tau_star"`: jackknife SE from per-block \eqn{\tau^*}.
+#'   - `quantity = "tauStar"`: jackknife SE from per-block \eqn{\tau^*}.
 #'   - `quantity = "enrichment"`: polyfun-reported `Enrichment_std_error`.
 #'   - `quantity = "enrichstat"`: back-solved SE from polyfun's `Enrichment_p`.
 #'
 #' @param perTraitEstimates Named list of per-trait results (each with a
 #'   `summary` data frame).
 #' @param category Character. Annotation name to meta-analyze.
-#' @param quantity Character: `"tau_star"`, `"enrichment"`, or `"enrichstat"`.
+#' @param quantity Character: `"tauStar"`, `"enrichment"`, or `"enrichstat"`.
 #'
-#' @return List with `mean`, `se`, `p`, `n_traits`, `traits_used`, `tau2`.
+#' @return List with `mean`, `se`, `p`, `nTraits`, `traitsUsed`, `tau2`.
 #'
 #' @importFrom stats pnorm
 #' @export
 metaSldscRandom <- function(perTraitEstimates, category,
-                            quantity = c("tau_star", "enrichment", "enrichstat")) {
+                            quantity = c("tauStar", "enrichment", "enrichstat")) {
   quantity <- match.arg(quantity)
   colPairs <- list(
-    tau_star   = c("tau_star",   "tau_star_se"),
-    enrichment = c("enrichment", "enrichment_se"),
-    enrichstat = c("enrichstat", "enrichstat_se")
+    tauStar   = c("tauStar",   "tauStarSe"),
+    enrichment = c("enrichment", "enrichmentSe"),
+    enrichstat = c("enrichstat", "enrichstatSe")
   )
   cols <- colPairs[[quantity]]
   traitNames <- names(perTraitEstimates)
@@ -433,7 +433,7 @@ metaSldscRandom <- function(perTraitEstimates, category,
 
   if (length(means) < 2L) {
     return(list(mean = NA_real_, se = NA_real_, p = NA_real_,
-                n_traits = length(means), traits_used = used,
+                nTraits = length(means), traitsUsed = used,
                 tau2 = NA_real_))
   }
   meta <- metaRandomEffects(means, ses)
@@ -443,8 +443,8 @@ metaSldscRandom <- function(perTraitEstimates, category,
     mean        = meta$mean,
     se          = meta$se,
     p           = as.numeric(p),
-    n_traits    = length(means),
-    traits_used = used,
+    nTraits    = length(means),
+    traitsUsed = used,
     tau2        = meta$tau2
   )
 }
@@ -457,15 +457,17 @@ metaSldscRandom <- function(perTraitEstimates, category,
   rows <- if (!is.null(singleDf)) singleDf$target else
           if (!is.null(jointDf))  jointDf$target  else targetCategories
   out <- data.frame(target = rows,
-                    is_binary = unname(isBinaryVec[rows]),
+                    isBinary = unname(isBinaryVec[rows]),
                     stringsAsFactors = FALSE)
 
   addCols <- function(out, src, suffix) {
-    colsToAdd <- c("tau", "tau_se", "tau_star", "tau_star_se",
-                   "enrichment", "enrichment_se", "enrichment_p",
-                   "enrichstat", "enrichstat_se")
+    colsToAdd <- c("tau", "tauSe", "tauStar", "tauStarSe",
+                   "enrichment", "enrichmentSe", "enrichmentP",
+                   "enrichstat", "enrichstatSe")
+    suffixCap <- paste0(toupper(substring(suffix, 1, 1)),
+                        substring(suffix, 2))
     for (c in colsToAdd) {
-      newcol <- paste0(c, "_", suffix)
+      newcol <- paste0(c, suffixCap)
       if (!is.null(src) && c %in% names(src)) {
         out[[newcol]] <- src[[c]][match(out$target, src$target)]
       } else {
@@ -482,14 +484,16 @@ metaSldscRandom <- function(perTraitEstimates, category,
 
 # Internal helper: build a per-trait list view that metaSldscRandom can read.
 # Each list element has a $summary frame with the requested mode's columns
-# renamed to the canonical names (tau_star, tau_star_se, enrichment, ...).
+# renamed to the canonical names (tauStar, tauStarSe, enrichment, ...).
 .sldscViewForMeta <- function(perTrait, suffix) {
   lapply(perTrait, function(pt) {
     if (is.null(pt$summary)) return(NULL)
     df <- pt$summary
-    colsHave <- c("tau_star", "tau_star_se", "enrichment", "enrichment_se",
-                  "enrichment_p", "enrichstat", "enrichstat_se")
-    srcCols <- paste0(colsHave, "_", suffix)
+    colsHave <- c("tauStar", "tauStarSe", "enrichment", "enrichmentSe",
+                  "enrichmentP", "enrichstat", "enrichstatSe")
+    suffixCap <- paste0(toupper(substring(suffix, 1, 1)),
+                        substring(suffix, 2))
+    srcCols <- paste0(colsHave, suffixCap)
     avail    <- srcCols %in% names(df)
     if (!any(avail)) return(NULL)
     newDf <- data.frame(target = df$target, stringsAsFactors = FALSE)
@@ -602,7 +606,7 @@ sldscPostprocessingPipeline <- function(traitSinglePrefixes,
         paste(head(pivotRun$categories[-seq_len(nTarget)], 3), collapse = ", ")
       else "(none)"
       message(sprintf(paste0(
-        "[sldsc] sd_annot/is_binary names did not match polyfun .results categories;\n",
+        "[sldsc] sdAnnot/isBinary names did not match polyfun .results categories;\n",
         "        falling back to positional rename (target = first %d rows of .results)\n",
         "        target  (%d): %s -> %s\n",
         "        baseline (%d): %s%s"),
@@ -697,7 +701,7 @@ sldscPostprocessingPipeline <- function(traitSinglePrefixes,
             jointDf       <- std$summary
             blocksJoint   <- std$tau_star_blocks
             jointH2g      <- std$h2g
-            nBlocksTrait  <- std$n_blocks
+            nBlocksTrait  <- std$nBlocks
           }
         }
       }
@@ -712,7 +716,7 @@ sldscPostprocessingPipeline <- function(traitSinglePrefixes,
       h2g                    = if (!is.na(jointH2g)) jointH2g
                                else if (length(singleH2gs) > 0L) median(singleH2gs)
                                else NA_real_,
-      n_blocks               = nBlocksTrait
+      nBlocks               = nBlocksTrait
     )
   }
 
@@ -726,37 +730,38 @@ sldscPostprocessingPipeline <- function(traitSinglePrefixes,
       m <- metaSldscRandom(view, cat, quantity)
       rows[[cat]] <- data.frame(
         target    = cat,
-        is_binary = unname(isBinary[cat]),
+        isBinary = unname(isBinary[cat]),
         mean      = m$mean,
         se        = m$se,
         p         = m$p,
-        n_traits  = m$n_traits,
+        nTraits  = m$nTraits,
         stringsAsFactors = FALSE
       )
     }
     df <- do.call(rbind, rows)
     rownames(df) <- NULL
     nmOld <- c("mean", "se", "p")
-    nmNew <- paste0(label, "_", nmOld)
+    nmNew <- paste0(label, toupper(substring(nmOld, 1, 1)),
+                    substring(nmOld, 2))
     names(df)[names(df) %in% nmOld] <- nmNew
     df
   }
 
-  metaTauStarSingle <- buildTable("tau_star",   ptViewSingle, "single")
-  metaTauStarJoint  <- buildTable("tau_star",   ptViewJoint,  "joint")
+  metaTauStarSingle <- buildTable("tauStar",   ptViewSingle, "single")
+  metaTauStarJoint  <- buildTable("tauStar",   ptViewJoint,  "joint")
   metaESingle       <- buildTable("enrichment", ptViewSingle, "single")
   metaEsSingle      <- buildTable("enrichstat", ptViewSingle, "single")
 
-  # Combine tau_star single + joint into one wide frame.
+  # Combine tauStar single + joint into one wide frame.
   metaTauStar <- metaTauStarSingle
   ord <- match(metaTauStar$target, metaTauStarJoint$target)
-  metaTauStar$joint_mean <- metaTauStarJoint$joint_mean[ord]
-  metaTauStar$joint_se   <- metaTauStarJoint$joint_se[ord]
-  metaTauStar$joint_p    <- metaTauStarJoint$joint_p[ord]
+  metaTauStar$jointMean <- metaTauStarJoint$jointMean[ord]
+  metaTauStar$jointSe   <- metaTauStarJoint$jointSe[ord]
+  metaTauStar$jointP    <- metaTauStarJoint$jointP[ord]
 
   # Two-channel enrichment meta: effect/SE from E meta, p from EnrichStat meta.
   metaEnrichment <- metaESingle
-  metaEnrichment$single_p <- metaEsSingle$single_p[match(metaEnrichment$target,
+  metaEnrichment$singleP <- metaEsSingle$singleP[match(metaEnrichment$target,
                                                           metaEsSingle$target)]
 
   # Pure EnrichStat meta (separate frame).
@@ -765,7 +770,7 @@ sldscPostprocessingPipeline <- function(traitSinglePrefixes,
   res <- list(
     per_trait = perTrait,
     meta = list(
-      tau_star   = metaTauStar,
+      tauStar   = metaTauStar,
       enrichment = metaEnrichment,
       enrichstat = metaEnrichstat
     ),

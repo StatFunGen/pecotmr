@@ -17,7 +17,7 @@ standardiseSumstatsColumns(
 (format: standard_name:original_name, one per line). Applied after
 MungeSumstats standardization.}
 
-\item{commentString}{Comment character in column_file_path. Default is "#".}
+\item{commentString}{Comment character in columnFilePath. Default is "#".}
 }
 \value{
 A data frame with standardized column names.

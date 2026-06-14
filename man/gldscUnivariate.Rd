@@ -20,7 +20,7 @@ gldscUnivariate(z, n, ldRef, annotations = NULL, local = FALSE, lambda = 0)
 \item{lambda}{Numeric, ridge penalty (default 0).}
 }
 \value{
-A list with h2, h2_se, intercept, enrichment, score_stats.
+A list with h2, h2Se, intercept, enrichment, scoreStats.
 }
 \description{
 Estimate h2 using g-LDSC with FGLS estimation.

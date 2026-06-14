@@ -28,14 +28,14 @@ fitSusieInfThenSusieRss(
 \item{susieArgs}{Standard SuSiE-RSS-specific overrides.}
 
 \item{fittedModels}{Optional list with pre-fitted \code{$susie} and/or
-\code{$susie_inf} objects to skip re-fitting.}
+\code{$susieInf} objects to skip re-fitting.}
 }
 \value{
-A list with \code{susie} and \code{susie_inf} fit objects.
+A list with \code{susie} and \code{susieInf} fit objects.
 }
 \description{
 RSS analog of \code{fitSusieInfThenSusie}. Fits SuSiE-inf via
-\code{susie_rss} first, then initialises standard SuSiE-RSS from
+\code{susieRss} first, then initialises standard SuSiE-RSS from
 the SuSiE-inf result. The single pair of fits can be used both for
 fine-mapping post-processing and TWAS weight extraction.
 }

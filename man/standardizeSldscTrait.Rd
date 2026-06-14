@@ -26,7 +26,7 @@ standardizeSldscTrait(
 }
 \value{
 A list with `summary` (data frame), `tau_star_blocks` (matrix),
-  `h2g`, `n_blocks`, `mode`.
+  `h2g`, `nBlocks`, `mode`.
 }
 \description{
 Applies the Gazal standardization

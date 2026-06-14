@@ -14,15 +14,15 @@ A named list matching the format of \code{\link{readSldscTrait}}:
   \describe{
     \item{categories}{Character vector of annotation names}
     \item{tau}{Named numeric vector of per-annotation coefficients}
-    \item{tau_se}{Named numeric vector of tau standard errors}
+    \item{tauSe}{Named numeric vector of tau standard errors}
     \item{enrichment}{Named numeric vector of enrichment ratios}
-    \item{enrichment_se}{Named numeric vector of enrichment SEs}
-    \item{enrichment_p}{Named numeric vector of enrichment p-values}
-    \item{prop_h2}{Named numeric vector of proportion of h2}
-    \item{prop_snps}{Named numeric vector of proportion of SNPs}
+    \item{enrichmentSe}{Named numeric vector of enrichment SEs}
+    \item{enrichmentP}{Named numeric vector of enrichment p-values}
+    \item{propH2}{Named numeric vector of proportion of h2}
+    \item{propSnps}{Named numeric vector of proportion of SNPs}
     \item{h2g}{Numeric scalar, global h2 estimate}
-    \item{tau_blocks}{Matrix (nBlocks x nCategories) for jackknife}
-    \item{n_blocks}{Integer, number of jackknife blocks}
+    \item{tauBlocks}{Matrix (nBlocks x nCategories) for jackknife}
+    \item{nBlocks}{Integer, number of jackknife blocks}
   }
 }
 \description{

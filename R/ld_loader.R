@@ -28,9 +28,9 @@ extractLdMatrix <- function(ld, wantGenotype = FALSE) {
 #'   \item{region mode}{Loads LD from a pecotmr metadata TSV file on the fly
 #'     via \code{\link{load_LD_matrix}}. Memory-efficient for large datasets.
 #'     Set \code{ld_meta_path} and \code{regions}.}
-#'   \item{LD_info mode}{Loads pre-computed LD blocks from \code{.cor.xz}
-#'     files listed in an \code{LD_info} data.frame (as returned by
-#'     cTWAS meta-data utilities). Set \code{LD_info}.}
+#'   \item{ldInfo mode}{Loads pre-computed LD blocks from \code{.cor.xz}
+#'     files listed in an \code{ldInfo} data.frame (as returned by
+#'     cTWAS meta-data utilities). Set \code{ldInfo}.}
 #' }
 #'
 #' @param rList List of G precomputed LD correlation matrices (p_g x p_g).

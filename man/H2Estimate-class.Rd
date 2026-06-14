@@ -21,24 +21,24 @@ does not estimate one).}
 \item{\code{interceptSe}}{Numeric, SE of intercept.}
 
 \item{\code{local}}{A \code{data.frame} with per-block local heritability
-estimates (columns: \code{block_id}, \code{h2_local}, \code{h2_local_se}).
+estimates (columns: \code{blockId}, \code{h2Local}, \code{h2LocalSe}).
 NULL if \code{local = FALSE}.}
 
 \item{\code{enrichment}}{A \code{data.frame} with baseline annotation enrichment
-estimates (columns: \code{annotation}, \code{tau}, \code{tau_se},
-\code{enrichment}, \code{enrichment_se}, \code{enrichment_p},
-\code{prop_h2}, \code{prop_snps}). NULL if unstratified.}
+estimates (columns: \code{annotation}, \code{tau}, \code{tauSe},
+\code{enrichment}, \code{enrichmentSe}, \code{enrichmentP},
+\code{propH2}, \code{propSnps}). NULL if unstratified.}
 
-\item{\code{tauBlocks}}{A numeric matrix (n_blocks x n_annotations) of per-block
-jackknife tau values. Required for Gazal tau_star standardization
+\item{\code{tauBlocks}}{A numeric matrix (nBlocks x n_annotations) of per-block
+jackknife tau values. Required for Gazal tauStar standardization
 downstream. NULL if not available (e.g., unstratified analysis).}
 
 \item{\code{scoreStats}}{A list with score statistics for candidate annotations,
-suitable for input to \code{susie_rss}. Contains:
+suitable for input to \code{susieRss}. Contains:
 \describe{
   \item{z}{Numeric vector of z-scores for each candidate annotation}
   \item{R}{Correlation matrix of the score statistics}
-  \item{annotation_names}{Character vector of candidate annotation names}
+  \item{annotationNames}{Character vector of candidate annotation names}
 }
 NULL if no candidate annotations provided.}
 

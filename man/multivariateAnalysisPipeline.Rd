@@ -58,6 +58,8 @@ Default NULL.}
 
 \item{coverage}{A vector of coverage probabilities, with the first element being the primary coverage and the rest being secondary coverage probabilities for credible set refinement. Defaults to c(0.95, 0.7, 0.5).}
 
+\item{samplePartition}{Optional data frame with Sample and Fold columns for cross-validation.}
+
 \item{verbose}{Verbosity level. Default is 0.}
 
 \item{L_greedy}{Initial greedy number of components in mvSuSiE. Default is 5.}
@@ -76,8 +78,6 @@ which is stricter than the susieR default of 0.5.}
 \item{data_driven_prior_matrices_cv}{A list of data-driven covariance matrices for mr.mash weights in cross-validation.}
 
 \item{canonical_prior_matrices}{If set to TRUE, will compute canonical covariance matrices and add them into the prior covariance matrix list in mrmash_wrapper. Default is TRUE.}
-
-\item{sample_partition}{Optional data frame with Sample and Fold columns for cross-validation.}
 
 \item{mrmash_max_iter}{The maximum number of iterations for mr.mash. Default is 5000.}
 

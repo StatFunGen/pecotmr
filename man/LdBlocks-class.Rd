@@ -13,7 +13,7 @@ Defines approximately independent LD blocks for local
 
 \describe{
 \item{\code{blocks}}{A \code{GRanges} object with one range per LD block.
-Metadata columns may include \code{block_id} (integer).}
+Metadata columns may include \code{blockId} (integer).}
 
 \item{\code{genome}}{Character string identifying the genome build (e.g., "hg19", "hg38").}
 }}

@@ -26,8 +26,8 @@ imputed variants with \code{R2 < r2Threshold} are dropped.}
 \value{
 A list of list containing twas result table and formatted TWAS data compatible with ctwas_sumstats() function.
 \itemize{
-  \item{twas_table}{ A dataframe of twas results summary is generated for each gene-contexts-method pair of all methods for imputable genes.}
-  \item{twas_data}{ A list of list containing formatted TWAS data.}
+  \item{twasTable}{ A dataframe of twas results summary is generated for each gene-contexts-method pair of all methods for imputable genes.}
+  \item{twasData}{ A list of list containing formatted TWAS data.}
 }
 }
 \description{

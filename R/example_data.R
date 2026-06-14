@@ -111,7 +111,7 @@ NULL
 #'   \item{susie_result_trimmed}{List. Trimmed SuSiE result with elements
 #'     \code{alpha}, \code{pip}, \code{V}, and \code{sets}. (Legacy key; new
 #'     code should use the \code{FineMappingResult} S4 object.)}
-#'   \item{variant_names}{Character vector (length 2,828). Synthetic variant
+#'   \item{variantNames}{Character vector (length 2,828). Synthetic variant
 #'     identifiers matching the variant names in the SuSiE result.
 #'     (Legacy key; new code should use the \code{FineMappingResult} S4 object.)}
 #' }

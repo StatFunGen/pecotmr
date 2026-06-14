@@ -20,8 +20,8 @@ alignVariantNames(
 }
 \value{
 A list with two elements:
-- aligned_variants: A character vector of aligned variant names.
-- unmatched_indices: A vector of indices for the variants in the source that could not be matched.
+- alignedVariants: A character vector of aligned variant names.
+- unmatchedIndices: A vector of indices for the variants in the source that could not be matched.
 }
 \description{
 This function aligns variant names from two strings containing variant names in the format of

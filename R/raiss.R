@@ -39,9 +39,9 @@ raissSingleMatrix <- function(refPanel, knownZscores, ldMatrix, lamb = 0.01, rco
   if (length(unknowns) == 0) {
     if (verbose) message("No unknown variants to impute, returning known variants.")
     return(list(
-      result_nofilter = knownZscores,
-      result_filter = knownZscores,
-      LD_mat = ldMatrix
+      resultNofilter = knownZscores,
+      resultFilter = knownZscores,
+      ldMat = ldMatrix
     ))
   }
 
@@ -58,7 +58,7 @@ raissSingleMatrix <- function(refPanel, knownZscores, ldMatrix, lamb = 0.01, rco
   results <- filterRaissOutput(results, r2Threshold, minimumLd, verbose)
 
   # Merge with known z-scores
-  resultNofilter <- mergeRaissDf(results$zscores_nofilter, knownZscores) %>% arrange(pos)
+  resultNofilter <- mergeRaissDf(results$zscoresNofilter, knownZscores) %>% arrange(pos)
   resultFilter <- mergeRaissDf(results$zscores, knownZscores) %>% arrange(pos)
 
   # Filter out variants not included in the imputation result
@@ -73,9 +73,9 @@ raissSingleMatrix <- function(refPanel, knownZscores, ldMatrix, lamb = 0.01, rco
   }
   # Return results
   return(list(
-    result_nofilter = resultNofilter,
-    result_filter = resultFilter,
-    LD_mat = ldExtractFiltered
+    resultNofilter = resultNofilter,
+    resultFilter = resultFilter,
+    ldMat = ldExtractFiltered
   ))
 }
 
@@ -99,7 +99,7 @@ raissSingleMatrix <- function(refPanel, knownZscores, ldMatrix, lamb = 0.01, rco
 #' @param minimumLd Minimum LD score threshold for SNP filtering.
 #' @param verbose Logical indicating whether to print progress information.
 #'
-#' @return A list containing filtered and unfiltered results, and LD_mat = NULL.
+#' @return A list containing filtered and unfiltered results, and ldMat = NULL.
 #' @importFrom dplyr arrange
 #' @noRd
 raissSingleMatrixFromX <- function(refPanel, knownZscores, X, lamb = 0.01,
@@ -126,9 +126,9 @@ raissSingleMatrixFromX <- function(refPanel, knownZscores, X, lamb = 0.01,
   if (length(unknowns) == 0) {
     if (verbose) message("No unknown variants to impute, returning known variants.")
     return(list(
-      result_nofilter = knownZscores,
-      result_filter = knownZscores,
-      LD_mat = NULL
+      resultNofilter = knownZscores,
+      resultFilter = knownZscores,
+      ldMat = NULL
     ))
   }
 
@@ -191,9 +191,9 @@ raissSingleMatrixFromX <- function(refPanel, knownZscores, X, lamb = 0.01,
   imp <- list(
     var = varNorm,
     mu = mu,
-    raiss_ld_score = raissLdScore,
-    condition_number = conditionNumber,
-    correct_inversion = correctInversion
+    raissLdScore = raissLdScore,
+    conditionNumber = conditionNumber,
+    correctInversion = correctInversion
   )
 
   # Reuse existing formatting and filtering functions
@@ -201,13 +201,13 @@ raissSingleMatrixFromX <- function(refPanel, knownZscores, X, lamb = 0.01,
   results <- filterRaissOutput(results, r2Threshold, minimumLd, verbose)
 
   # Merge with known z-scores
-  resultNofilter <- mergeRaissDf(results$zscores_nofilter, knownZscores) %>% arrange(pos)
+  resultNofilter <- mergeRaissDf(results$zscoresNofilter, knownZscores) %>% arrange(pos)
   resultFilter <- mergeRaissDf(results$zscores, knownZscores) %>% arrange(pos)
 
   return(list(
-    result_nofilter = resultNofilter,
-    result_filter = resultFilter,
-    LD_mat = NULL
+    resultNofilter = resultNofilter,
+    resultFilter = resultFilter,
+    ldMat = NULL
   ))
 }
 
@@ -243,7 +243,7 @@ raissSingleMatrixFromX <- function(refPanel, knownZscores, X, lamb = 0.01,
 #' @param verbose Logical indicating whether to print progress information.
 #'
 #' @return A list containing filtered and unfiltered results, and filtered LD matrix
-#'   (LD_mat is NULL when using genotypeMatrix path).
+#'   (ldMat is NULL when using genotypeMatrix path).
 #' @importFrom dplyr arrange bind_rows
 #' @export
 raiss <- function(refPanel, knownZscores, ldMatrix = NULL,
@@ -281,12 +281,12 @@ raiss <- function(refPanel, knownZscores, ldMatrix = NULL,
         if (verbose) message("No blocks could be processed.")
         return(NULL)
       }
-      combinedNofilter <- do.call(bind_rows, lapply(resultsList, `[[`, "result_nofilter"))
-      combinedFilter <- do.call(bind_rows, lapply(resultsList, `[[`, "result_filter"))
+      combinedNofilter <- do.call(bind_rows, lapply(resultsList, `[[`, "resultNofilter"))
+      combinedFilter <- do.call(bind_rows, lapply(resultsList, `[[`, "resultFilter"))
       return(list(
-        result_nofilter = combinedNofilter %>% arrange(pos),
-        result_filter = combinedFilter %>% arrange(pos),
-        LD_mat = NULL
+        resultNofilter = combinedNofilter %>% arrange(pos),
+        resultFilter = combinedFilter %>% arrange(pos),
+        ldMat = NULL
       ))
     }
     stop("genotypeMatrix must be a matrix or a list of matrices.")
@@ -298,15 +298,15 @@ raiss <- function(refPanel, knownZscores, ldMatrix = NULL,
   }
   # Determine if we can process as a single matrix
   isSingleMatrixCase <- is.matrix(ldMatrix) ||
-    (is.list(ldMatrix) && !is.null(ldMatrix$ld_matrices) &&
-      length(ldMatrix$ld_matrices) == 1)
+    (is.list(ldMatrix) && !is.null(ldMatrix$ldMatrices) &&
+      length(ldMatrix$ldMatrices) == 1)
 
   if (isSingleMatrixCase) {
     if (verbose) message("Processing single LD matrix", if (!is.matrix(ldMatrix)) " from list", "...")
 
     # Extract the matrix if it's in a list
     if (!is.matrix(ldMatrix)) {
-      ldMatrix <- ldMatrix$ld_matrices[[1]]
+      ldMatrix <- ldMatrix$ldMatrices[[1]]
     }
 
     return(raissSingleMatrix(
@@ -332,8 +332,8 @@ raiss <- function(refPanel, knownZscores, ldMatrix = NULL,
     firstVar <- newResult$variant_id[1]
 
     if (lastVar == firstVar) {
-      newR2 <- newResult$raiss_R2[1]
-      oldR2 <- combinedResult$raiss_R2[nrow(combinedResult)]
+      newR2 <- newResult$raissR2[1]
+      oldR2 <- combinedResult$raissR2[nrow(combinedResult)]
       if (is.na(newR2) && is.na(oldR2)) {
         # Both are NA - keep the existing one
       } else if (is.na(oldR2)) {
@@ -359,18 +359,18 @@ raiss <- function(refPanel, knownZscores, ldMatrix = NULL,
   }
 
   resultsList <- list()
-  variantIndices <- ldMatrix$variant_indices
-  blockIds <- unique(variantIndices$block_id)
+  variantIndices <- ldMatrix$variantIndices
+  blockIds <- unique(variantIndices$blockId)
 
   for (blockId in blockIds) {
     if (verbose) message(paste("Processing block", blockId, "of", length(blockIds)))
 
-    blockVariantIds <- variantIndices$variant_id[variantIndices$block_id == blockId]
+    blockVariantIds <- variantIndices$variant_id[variantIndices$blockId == blockId]
 
     # Subset refPanel and ldMatrix for this block
     blockIndices <- match(blockVariantIds, refPanel$variant_id)
     blockRefPanel <- refPanel[blockIndices, ]
-    blockLdMatrix <- ldMatrix$ld_matrices[[blockId]]
+    blockLdMatrix <- ldMatrix$ldMatrices[[blockId]]
     blockKnownZscores <- knownZscores %>% filter(variant_id %in% blockVariantIds)
     if (nrow(blockLdMatrix) != nrow(blockRefPanel)) {
       stop(paste("Block", blockId, ": LD matrix dimension does not match number of variants in reference panel"))
@@ -394,24 +394,24 @@ raiss <- function(refPanel, knownZscores, ldMatrix = NULL,
   }
 
   # Combine results sequentially to handle boundary duplicates
-  combinedNofilter <- resultsList[[1]]$result_nofilter
-  combinedFilter <- resultsList[[1]]$result_filter
+  combinedNofilter <- resultsList[[1]]$resultNofilter
+  combinedFilter <- resultsList[[1]]$resultFilter
 
   if (length(resultsList) > 1) {
     for (i in 2:length(resultsList)) {
       combinedNofilter <- combineWithBoundaryCheck(
         combinedNofilter,
-        resultsList[[i]]$result_nofilter
+        resultsList[[i]]$resultNofilter
       )
 
       combinedFilter <- combineWithBoundaryCheck(
         combinedFilter,
-        resultsList[[i]]$result_filter
+        resultsList[[i]]$resultFilter
       )
     }
   }
 
-  ldFilteredList <- lapply(resultsList, function(x) x$LD_mat)
+  ldFilteredList <- lapply(resultsList, function(x) x$ldMat)
   variantList <- lapply(ldFilteredList, function(ld) data.frame(variants = colnames(ld)))
   ldMatrix <- createLdMatrix(
     ldMatrices = ldFilteredList,
@@ -419,9 +419,9 @@ raiss <- function(refPanel, knownZscores, ldMatrix = NULL,
   )
 
   return(list(
-    result_nofilter = combinedNofilter,
-    result_filter = combinedFilter,
-    LD_mat = ldMatrix
+    resultNofilter = combinedNofilter,
+    resultFilter = combinedFilter,
+    ldMat = ldMatrix
   ))
 }
 
@@ -433,9 +433,9 @@ raiss <- function(refPanel, knownZscores, ldMatrix = NULL,
 #' @param rcond Threshold for filtering eigenvalues in the pseudo-inverse computation.
 #' @param batch Boolean indicating whether batch processing is used.
 #'
-#' @return A list containing the variance 'var', estimation 'mu', LD score 'raiss_ld_score',
-#'         condition number 'condition_number', and correctness of inversion
-#'         'correct_inversion'.
+#' @return A list containing the variance 'var', estimation 'mu', LD score 'raissLdScore',
+#'         condition number 'conditionNumber', and correctness of inversion
+#'         'correctInversion'.
 #' @noRd
 raissModel <- function(zt, sigT, sigIT, lamb = 0.01, rcond = 0.01, batch = TRUE, reportConditionNumber = FALSE) {
   sigTInv <- invertMatRecursive(sigT, lamb, rcond)
@@ -452,7 +452,7 @@ raissModel <- function(zt, sigT, sigIT, lamb = 0.01, rcond = 0.01, batch = TRUE,
 
   varRaissLdScore <- computeVar(sigIT, sigTInv, lamb, batch)
   var <- varRaissLdScore$var
-  raissLdScore <- varRaissLdScore$raiss_ld_score
+  raissLdScore <- varRaissLdScore$raissLdScore
 
   mu <- computeMu(sigIT, sigTInv, zt)
   varNorm <- varInBoundaries(var, lamb)
@@ -460,7 +460,7 @@ raissModel <- function(zt, sigT, sigIT, lamb = 0.01, rcond = 0.01, batch = TRUE,
   R2 <- ((1 + lamb) - varNorm)
   mu <- mu / sqrt(R2)
 
-  return(list(var = varNorm, mu = mu, raiss_ld_score = raissLdScore, condition_number = conditionNumber, correct_inversion = correctInversion))
+  return(list(var = varNorm, mu = mu, raissLdScore = raissLdScore, conditionNumber = conditionNumber, correctInversion = correctInversion))
 }
 
 #' @param imp is the output of raissModel()
@@ -475,15 +475,15 @@ formatRaissDf <- function(imp, refPanel, unknowns) {
     A2 = refPanel[unknowns, "A2"],
     z = imp$mu,
     Var = imp$var,
-    raiss_ld_score = imp$raiss_ld_score,
-    condition_number = imp$condition_number,
-    correct_inversion = imp$correct_inversion
+    raissLdScore = imp$raissLdScore,
+    conditionNumber = imp$conditionNumber,
+    correctInversion = imp$correctInversion
   )
 
   # Specify the column order
   columnOrder <- c(
-    "chrom", "pos", "variant_id", "A1", "A2", "z", "Var", "raiss_ld_score", "condition_number",
-    "correct_inversion"
+    "chrom", "pos", "variant_id", "A1", "A2", "z", "Var", "raissLdScore", "conditionNumber",
+    "correctInversion"
   )
 
   # Reorder the columns
@@ -498,9 +498,9 @@ mergeRaissDf <- function(raissDf, knownZscores) {
   # Identify rows that came from knownZscores
   fromKnown <- !is.na(mergedDf$z.y) & is.na(mergedDf$z.x)
 
-  # Set Var to -1 and raiss_ld_score to Inf for these rows
+  # Set Var to -1 and raissLdScore to Inf for these rows
   mergedDf$Var[fromKnown] <- -1
-  mergedDf$raiss_ld_score[fromKnown] <- Inf
+  mergedDf$raissLdScore[fromKnown] <- Inf
 
   # If there are overlapping columns (e.g., z.x and z.y), resolve them
   # For example, use z from knownZscores where available, otherwise use z from raissDf
@@ -517,19 +517,19 @@ mergeRaissDf <- function(raissDf, knownZscores) {
 
 filterRaissOutput <- function(zscores, r2Threshold = 0.6, minimumLd = 5, verbose = TRUE) {
   # Reset the index and subset the data frame
-  zscores <- zscores[, c("chrom", "pos", "variant_id", "A1", "A2", "z", "Var", "raiss_ld_score")]
-  zscores$raiss_R2 <- 1 - zscores$Var
+  zscores <- zscores[, c("chrom", "pos", "variant_id", "A1", "A2", "z", "Var", "raissLdScore")]
+  zscores$raissR2 <- 1 - zscores$Var
 
   # Count statistics before filtering
   nSnpsBfFilt <- nrow(zscores)
-  nSnpsInitial <- sum(zscores$raiss_R2 == 2.0, na.rm = TRUE)
-  nSnpsImputed <- sum(zscores$raiss_R2 != 2.0, na.rm = TRUE)
-  nSnpsLdFilt <- sum(zscores$raiss_ld_score < minimumLd, na.rm = TRUE)
-  nSnpsR2Filt <- sum(zscores$raiss_R2 < r2Threshold, na.rm = TRUE)
+  nSnpsInitial <- sum(zscores$raissR2 == 2.0, na.rm = TRUE)
+  nSnpsImputed <- sum(zscores$raissR2 != 2.0, na.rm = TRUE)
+  nSnpsLdFilt <- sum(zscores$raissLdScore < minimumLd, na.rm = TRUE)
+  nSnpsR2Filt <- sum(zscores$raissR2 < r2Threshold, na.rm = TRUE)
 
   # Apply filters
   zscoresNofilter <- zscores
-  zscores <- zscores[zscores$raiss_R2 > r2Threshold & zscores$raiss_ld_score >= minimumLd, ]
+  zscores <- zscores[zscores$raissR2 > r2Threshold & zscores$raissLdScore >= minimumLd, ]
   nSnpsAfFilt <- nrow(zscores)
 
   # Print report
@@ -555,7 +555,7 @@ filterRaissOutput <- function(zscores, r2Threshold = 0.6, minimumLd = 5, verbose
     message(formatLine("Variants filtered because of low R2", nSnpsR2Filt))
     message(formatLine("Remaining variants after filter", nSnpsAfFilt))
   }
-  return(zscore_list = list(zscores_nofilter = zscoresNofilter, zscores = zscores))
+  return(zscore_list = list(zscoresNofilter = zscoresNofilter, zscores = zscores))
 }
 
 computeMu <- function(sigIT, sigTInv, zt) {
@@ -570,7 +570,7 @@ computeVar <- function(sigIT, sigTInv, lamb, batch = TRUE) {
     var <- (1 + lamb) - (sigIT %*% (sigTInv %*% t(sigIT)))
     raissLdScore <- sum(sigIT^2)
   }
-  return(list(var = var, raiss_ld_score = raissLdScore))
+  return(list(var = var, raissLdScore = raissLdScore))
 }
 
 checkInversion <- function(sigT, sigTInv) {

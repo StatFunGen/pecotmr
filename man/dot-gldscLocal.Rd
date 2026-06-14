@@ -18,7 +18,7 @@
 \item{intercept}{Numeric, g-LDSC intercept estimate.}
 }
 \value{
-A data.frame with block_id, h2_local, h2_local_se.
+A data.frame with blockId, h2Local, h2LocalSe.
 }
 \description{
 Estimate per-block local heritability using the

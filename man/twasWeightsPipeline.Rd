@@ -31,7 +31,7 @@ twasWeightsPipeline(
 \item{susieFit}{An object returned by the SuSiE function, containing the SuSiE model fit.}
 
 \item{fittedModels}{Optional named list of fitted fine-mapping models, such
-as \code{list(susie = susieFit, susie_inf = susieInfFit)}.}
+as \code{list(susie = susieFit, susieInf = susieInfFit)}.}
 
 \item{cvFolds}{The number of folds to use for cross-validation. Set to 0 to skip cross-validation. Defaults to 5.}
 

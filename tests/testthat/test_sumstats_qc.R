@@ -12,20 +12,20 @@ make_ld_data_s4 <- function(R_mat, variant_ids, chrom_val = 1, positions = NULL)
   }
   variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
   bm <- data.frame(
-    block_id = 1L,
+    blockId = 1L,
     chrom = ref_panel$chrom[1],
-    block_start = min(ref_panel$pos),
-    block_end = max(ref_panel$pos),
+    blockStart = min(ref_panel$pos),
+    blockEnd = max(ref_panel$pos),
     size = length(variant_ids),
-    start_idx = 1L,
-    end_idx = length(variant_ids),
+    startIdx = 1L,
+    endIdx = length(variant_ids),
     stringsAsFactors = FALSE
   )
   LdData(correlation = R_mat, variants = variants_gr, blockMetadata = bm)
 }
 
 # ===========================================================================
-# Helper: build matching sumstats and LD_data
+# Helper: build matching sumstats and ldData
 # ===========================================================================
 make_test_sumstats_ld <- function(n_variants = 5, chrom_val = 1, with_indels = FALSE) {
   set.seed(42)
@@ -52,14 +52,14 @@ make_test_sumstats_ld <- function(n_variants = 5, chrom_val = 1, with_indels = F
     stringsAsFactors = FALSE
   )
 
-  LD_mat <- diag(n_variants) + matrix(0.01, n_variants, n_variants)
-  diag(LD_mat) <- 1
-  rownames(LD_mat) <- colnames(LD_mat) <- variant_ids
+  ldMat <- diag(n_variants) + matrix(0.01, n_variants, n_variants)
+  diag(ldMat) <- 1
+  rownames(ldMat) <- colnames(ldMat) <- variant_ids
 
-  LD_data <- make_ld_data_s4(LD_mat, variant_ids, chrom_val = chrom_val,
+  ldData <- make_ld_data_s4(ldMat, variant_ids, chrom_val = chrom_val,
                              positions = positions)
 
-  list(sumstats = sumstats, LD_data = LD_data,
+  list(sumstats = sumstats, ldData = ldData,
        variantIds = variant_ids, variant_ids = variant_ids)
 }
 
@@ -70,8 +70,8 @@ make_test_sumstats_ld <- function(n_variants = 5, chrom_val = 1, with_indels = F
 test_that("rssBasicQc requires correct columns", {
   sumstats <- data.frame(beta = 1, se = 0.5)
   R_mat <- matrix(1, 1, 1, dimnames = list("1:100:A:G", "1:100:A:G"))
-  LD_data <- make_ld_data_s4(R_mat, "1:100:A:G")
-  expect_error(rssBasicQc(sumstats, LD_data), "Missing columns")
+  ldData <- make_ld_data_s4(R_mat, "1:100:A:G")
+  expect_error(rssBasicQc(sumstats, ldData), "Missing columns")
 })
 
 test_that("rssBasicQc processes matching variants correctly", {
@@ -88,12 +88,12 @@ test_that("rssBasicQc processes matching variants correctly", {
     stringsAsFactors = FALSE
   )
 
-  LD_mat <- diag(3)
-  rownames(LD_mat) <- colnames(LD_mat) <- variant_ids
+  ldMat <- diag(3)
+  rownames(ldMat) <- colnames(ldMat) <- variant_ids
 
-  LD_data <- make_ld_data_s4(LD_mat, variant_ids)
+  ldData <- make_ld_data_s4(ldMat, variant_ids)
 
-  result <- rssBasicQc(sumstats, LD_data)
+  result <- rssBasicQc(sumstats, ldData)
   expect_true(is(result, "QcResult"))
   expect_true(!is.null(getRssInput(result)$sumstats))
   expect_true(!is.null(getLdData(result)))
@@ -102,7 +102,7 @@ test_that("rssBasicQc processes matching variants correctly", {
 test_that("rssBasicQc skips variants in specified region", {
   td <- make_test_sumstats_ld(n_variants = 5)
 
-  result <- rssBasicQc(td$sumstats, td$LD_data, skipRegion = "1:150-350")
+  result <- rssBasicQc(td$sumstats, td$ldData, skipRegion = "1:150-350")
 
   expect_true(is(result, "QcResult"))
   expect_true(!is.null(getRssInput(result)$sumstats))
@@ -114,7 +114,7 @@ test_that("rssBasicQc skips variants in specified region", {
 
 test_that("rssBasicQc with skip_region preserves non-skipped variants", {
   td <- make_test_sumstats_ld(n_variants = 5)
-  result <- rssBasicQc(td$sumstats, td$LD_data, skipRegion = "1:150-250")
+  result <- rssBasicQc(td$sumstats, td$ldData, skipRegion = "1:150-250")
   remaining_pos <- getRssInput(result)$sumstats$pos
   expect_false(200 %in% remaining_pos)
   expect_true(100 %in% remaining_pos)
@@ -123,7 +123,7 @@ test_that("rssBasicQc with skip_region preserves non-skipped variants", {
 
 test_that("rssBasicQc with keep_indel=FALSE removes indel variants", {
   td <- make_test_sumstats_ld(n_variants = 5, with_indels = TRUE)
-  result <- rssBasicQc(td$sumstats, td$LD_data, keepIndel = FALSE)
+  result <- rssBasicQc(td$sumstats, td$ldData, keepIndel = FALSE)
   expect_true(is(result, "QcResult"))
   expect_lte(nrow(getRssInput(result)$sumstats), nrow(td$sumstats))
 })
@@ -142,12 +142,12 @@ test_that("rssBasicQc errors when no variants overlap", {
   )
 
   ld_ids <- c("1:50000:A:G", "1:60000:C:T")
-  LD_mat <- diag(2)
-  rownames(LD_mat) <- colnames(LD_mat) <- ld_ids
+  ldMat <- diag(2)
+  rownames(ldMat) <- colnames(ldMat) <- ld_ids
 
-  LD_data <- make_ld_data_s4(LD_mat, ld_ids)
+  ldData <- make_ld_data_s4(ldMat, ld_ids)
 
-  expect_error(rssBasicQc(sumstats, LD_data), "No overlapping|No matching")
+  expect_error(rssBasicQc(sumstats, ldData), "No overlapping|No matching")
 })
 
 test_that("rssBasicQc aligns variant IDs by stripping build suffix", {
@@ -164,17 +164,17 @@ test_that("rssBasicQc aligns variant IDs by stripping build suffix", {
   )
 
   ld_ids <- c("1:100:A:G_b38", "1:200:C:T_b38", "1:300:G:A_b38")
-  LD_mat <- diag(3) + 0.01
-  diag(LD_mat) <- 1
-  rownames(LD_mat) <- colnames(LD_mat) <- ld_ids
+  ldMat <- diag(3) + 0.01
+  diag(ldMat) <- 1
+  rownames(ldMat) <- colnames(ldMat) <- ld_ids
 
   # For the build-suffix variant IDs, construct the LdData with the
   # base IDs (without suffix) for variant metadata so parseVariantId works,
   # while the correlation matrix retains the suffixed rownames.
   base_ids <- c("1:100:A:G", "1:200:C:T", "1:300:G:A")
-  LD_data <- make_ld_data_s4(LD_mat, base_ids)
+  ldData <- make_ld_data_s4(ldMat, base_ids)
 
-  result <- rssBasicQc(sumstats, LD_data)
+  result <- rssBasicQc(sumstats, ldData)
   expect_true(is(result, "QcResult"))
   expect_true(nrow(getRssInput(result)$sumstats) > 0)
 })
@@ -193,22 +193,22 @@ test_that("rssBasicQc handles chr prefix differences during alignment", {
   )
 
   ld_ids <- c("chr1:100:A:G", "chr1:200:C:T")
-  LD_mat <- diag(2)
-  rownames(LD_mat) <- colnames(LD_mat) <- ld_ids
+  ldMat <- diag(2)
+  rownames(ldMat) <- colnames(ldMat) <- ld_ids
 
   # Use base IDs (without chr prefix) for variant metadata, while
   # the correlation matrix has chr-prefixed rownames.
   base_ids <- c("1:100:A:G", "1:200:C:T")
-  LD_data <- make_ld_data_s4(LD_mat, base_ids)
+  ldData <- make_ld_data_s4(ldMat, base_ids)
 
-  result <- rssBasicQc(sumstats, LD_data)
+  result <- rssBasicQc(sumstats, ldData)
   expect_true(is(result, "QcResult"))
   expect_true(nrow(getRssInput(result)$sumstats) > 0)
 })
 
-test_that("rssBasicQc output LD_mat has same dimension as sumstats rows", {
+test_that("rssBasicQc output ldMat has same dimension as sumstats rows", {
   td <- make_test_sumstats_ld(n_variants = 6)
-  result <- rssBasicQc(td$sumstats, td$LD_data)
+  result <- rssBasicQc(td$sumstats, td$ldData)
   result_ld_mat <- getCorrelation(getLdData(result))
   result_sumstats <- getRssInput(result)$sumstats
   expect_equal(nrow(result_ld_mat), nrow(result_sumstats))
@@ -217,14 +217,14 @@ test_that("rssBasicQc output LD_mat has same dimension as sumstats rows", {
 
 test_that("rssBasicQc errors when LD matrix has NULL rownames", {
   td <- make_test_sumstats_ld(n_variants = 3)
-  ld_mat <- getCorrelation(td$LD_data)
+  ld_mat <- getCorrelation(td$ldData)
   rownames(ld_mat) <- NULL
   colnames(ld_mat) <- NULL
   # Rebuild the LdData with a NULL-rownames correlation matrix
   LD_data_bad <- LdData(
     correlation = ld_mat,
-    variants = getVariantInfo(td$LD_data),
-    blockMetadata = getBlockMetadata(td$LD_data)
+    variants = getVariantInfo(td$ldData),
+    blockMetadata = getBlockMetadata(td$ldData)
   )
 
   expect_error(rssBasicQc(td$sumstats, LD_data_bad), "rownames are NULL|cannot align")
@@ -232,7 +232,7 @@ test_that("rssBasicQc errors when LD matrix has NULL rownames", {
 
 test_that("rssBasicQc handles multiple skip regions", {
   td <- make_test_sumstats_ld(n_variants = 10)
-  result <- rssBasicQc(td$sumstats, td$LD_data,
+  result <- rssBasicQc(td$sumstats, td$ldData,
                           skipRegion = c("1:099-250", "1:650-850"))
   remaining_pos <- getRssInput(result)$sumstats$pos
   expect_false(100 %in% remaining_pos)
@@ -249,8 +249,8 @@ test_that("rssBasicQc can skip LD matrix subsetting for genotype references", {
   # Store X_ref as correlation; with return_LD_mat=FALSE the matrix is not subsetted
   LD_data_geno <- LdData(
     correlation = X_ref,
-    variants = getVariantInfo(td$LD_data),
-    blockMetadata = getBlockMetadata(td$LD_data)
+    variants = getVariantInfo(td$ldData),
+    blockMetadata = getBlockMetadata(td$ldData)
   )
 
   result <- rssBasicQc(td$sumstats, LD_data_geno, returnLdMat = FALSE)
@@ -266,14 +266,14 @@ test_that("rssBasicQc can skip LD matrix subsetting for genotype references", {
 test_that("summaryStatsQc errors on invalid method", {
   sumstats <- data.frame(variant_id = "1:100:A:G", z = 2.0)
   R_mat <- matrix(1, 1, 1, dimnames = list("1:100:A:G", "1:100:A:G"))
-  LD_data <- make_ld_data_s4(R_mat, "1:100:A:G")
-  expect_error(summaryStatsQc(sumstats, LD_data, method = "invalid"),
+  ldData <- make_ld_data_s4(R_mat, "1:100:A:G")
+  expect_error(summaryStatsQc(sumstats, ldData, method = "invalid"),
                "should be one of")
 })
 
 test_that("summaryStatsQc with slalom method returns correct structure", {
   td <- make_test_sumstats_ld(n_variants = 5)
-  basic_result <- rssBasicQc(td$sumstats, td$LD_data)
+  basic_result <- rssBasicQc(td$sumstats, td$ldData)
 
   local_mocked_bindings(
     slalom = function(zScore, R, ...) {
@@ -288,7 +288,7 @@ test_that("summaryStatsQc with slalom method returns correct structure", {
   )
 
   result <- summaryStatsQc(
-    getRssInput(basic_result)$sumstats, td$LD_data,
+    getRssInput(basic_result)$sumstats, td$ldData,
     n = 10000, method = "slalom"
   )
 
@@ -302,7 +302,7 @@ test_that("summaryStatsQc with slalom method returns correct structure", {
 
 test_that("summaryStatsQc with slalom and no outliers keeps all variants", {
   td <- make_test_sumstats_ld(n_variants = 4)
-  basic_result <- rssBasicQc(td$sumstats, td$LD_data)
+  basic_result <- rssBasicQc(td$sumstats, td$ldData)
 
   local_mocked_bindings(
     slalom = function(zScore, R, ...) {
@@ -317,7 +317,7 @@ test_that("summaryStatsQc with slalom and no outliers keeps all variants", {
   )
 
   result <- summaryStatsQc(
-    getRssInput(basic_result)$sumstats, td$LD_data,
+    getRssInput(basic_result)$sumstats, td$ldData,
     n = 10000, method = "slalom"
   )
   expect_equal(getOutlierNumber(result), 0)
@@ -327,7 +327,7 @@ test_that("summaryStatsQc with slalom and no outliers keeps all variants", {
 
 test_that("summaryStatsQc with dentist method returns correct structure", {
   td <- make_test_sumstats_ld(n_variants = 5)
-  basic_result <- rssBasicQc(td$sumstats, td$LD_data)
+  basic_result <- rssBasicQc(td$sumstats, td$ldData)
 
   local_mocked_bindings(
     dentistSingleWindow = function(zScore, R, nSample, ...) {
@@ -340,7 +340,7 @@ test_that("summaryStatsQc with dentist method returns correct structure", {
   )
 
   result <- summaryStatsQc(
-    getRssInput(basic_result)$sumstats, td$LD_data,
+    getRssInput(basic_result)$sumstats, td$ldData,
     n = 10000, method = "dentist"
   )
 
@@ -354,7 +354,7 @@ test_that("summaryStatsQc with dentist method returns correct structure", {
 
 test_that("summaryStatsQc with dentist and all outliers returns empty", {
   td <- make_test_sumstats_ld(n_variants = 3)
-  basic_result <- rssBasicQc(td$sumstats, td$LD_data)
+  basic_result <- rssBasicQc(td$sumstats, td$ldData)
 
   local_mocked_bindings(
     dentistSingleWindow = function(zScore, R, nSample, ...) {
@@ -367,7 +367,7 @@ test_that("summaryStatsQc with dentist and all outliers returns empty", {
   )
 
   result <- summaryStatsQc(
-    getRssInput(basic_result)$sumstats, td$LD_data,
+    getRssInput(basic_result)$sumstats, td$ldData,
     n = 10000, method = "dentist"
   )
   expect_equal(nrow(getRssInput(result)$sumstats), 0)
@@ -375,9 +375,9 @@ test_that("summaryStatsQc with dentist and all outliers returns empty", {
                nrow(getRssInput(basic_result)$sumstats))
 })
 
-test_that("summaryStatsQc returns LD_mat matching filtered sumstats dimensions", {
+test_that("summaryStatsQc returns ldMat matching filtered sumstats dimensions", {
   td <- make_test_sumstats_ld(n_variants = 6)
-  basic_result <- rssBasicQc(td$sumstats, td$LD_data)
+  basic_result <- rssBasicQc(td$sumstats, td$ldData)
 
   local_mocked_bindings(
     slalom = function(zScore, R, ...) {
@@ -389,7 +389,7 @@ test_that("summaryStatsQc returns LD_mat matching filtered sumstats dimensions",
   )
 
   result <- summaryStatsQc(
-    getRssInput(basic_result)$sumstats, td$LD_data,
+    getRssInput(basic_result)$sumstats, td$ldData,
     n = 10000, method = "slalom"
   )
   result_ld_mat <- getCorrelation(getLdData(result))
@@ -522,7 +522,7 @@ test_that("summaryStatsQc treats NULL qc_method as basic-only none", {
   expect_message(
     result <- summaryStatsQc(
       rssInput = rss_input,
-      ldData = td$LD_data,
+      ldData = td$ldData,
       zMismatchQc = NULL,
       impute = FALSE
     ),
@@ -538,7 +538,7 @@ test_that("summaryStatsQc rejects invalid qc_method values", {
   expect_error(
     summaryStatsQc(
       rssInput = rss_input,
-      ldData = td$LD_data,
+      ldData = td$ldData,
       zMismatchQc = "bad_method"
     ),
     "should be one of"
@@ -637,7 +637,7 @@ test_that("removed qcMethod argument is rejected as unknown (no alias)", {
   td <- make_test_sumstats_ld(n_variants = 5)
   rssInput <- list(sumstats = td$sumstats, n = 1000, varY = 1)
   expect_error(
-    summaryStatsQc(rssInput = rssInput, ldData = td$LD_data, qcMethod = "slalom"),
+    summaryStatsQc(rssInput = rssInput, ldData = td$ldData, qcMethod = "slalom"),
     "unused argument"
   )
 })
@@ -670,7 +670,7 @@ test_that("kriging is not run by default (alleleFlipKriging = FALSE)", {
   )
   expect_message(
     result <- summaryStatsQc(
-      rssInput = rssInput, ldData = td$LD_data,
+      rssInput = rssInput, ldData = td$ldData,
       zMismatchQc = "none", impute = FALSE
     ),
     "basic harmonization retained"
@@ -694,7 +694,7 @@ test_that("alleleFlipKriging drops a planted outlier and composes with zMismatch
     .package = "pecotmr"
   )
   result <- suppressMessages(summaryStatsQc(
-    rssInput = rssInput, ldData = td$LD_data,
+    rssInput = rssInput, ldData = td$ldData,
     zMismatchQc = "dentist", alleleFlipKriging = TRUE, impute = FALSE
   ))
   expect_true(is(result, "QcResult"))

@@ -7,7 +7,7 @@
 metaSldscRandom(
   perTraitEstimates,
   category,
-  quantity = c("tau_star", "enrichment", "enrichstat")
+  quantity = c("tauStar", "enrichment", "enrichstat")
 )
 }
 \arguments{
@@ -16,10 +16,10 @@ metaSldscRandom(
 
 \item{category}{Character. Annotation name to meta-analyze.}
 
-\item{quantity}{Character: `"tau_star"`, `"enrichment"`, or `"enrichstat"`.}
+\item{quantity}{Character: `"tauStar"`, `"enrichment"`, or `"enrichstat"`.}
 }
 \value{
-List with `mean`, `se`, `p`, `n_traits`, `traits_used`, `tau2`.
+List with `mean`, `se`, `p`, `nTraits`, `traitsUsed`, `tau2`.
 }
 \description{
 DerSimonian-Laird random-effects meta-analysis of one S-LDSC
@@ -27,7 +27,7 @@ DerSimonian-Laird random-effects meta-analysis of one S-LDSC
 }
 \details{
 Per-trait \eqn{SE_i} sources:
-  - `quantity = "tau_star"`: jackknife SE from per-block \eqn{\tau^*}.
+  - `quantity = "tauStar"`: jackknife SE from per-block \eqn{\tau^*}.
   - `quantity = "enrichment"`: polyfun-reported `Enrichment_std_error`.
   - `quantity = "enrichstat"`: back-solved SE from polyfun's `Enrichment_p`.
 }

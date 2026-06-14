@@ -36,8 +36,8 @@
   # actual camelCase function name implemented by the package.
   methodMap <- list(
     susie = list(fn = "susie_weights", impl = "susieWeights", args = list(refine = FALSE, L = 20, L_greedy = 5)),
-    susie_ash = list(fn = "susie_ash_weights", impl = "susieAshWeights", args = list()),
-    susie_inf = list(fn = "susie_inf_weights", impl = "susieInfWeights", args = list()),
+    susieAsh = list(fn = "susie_ash_weights", impl = "susieAshWeights", args = list()),
+    susieInf = list(fn = "susie_inf_weights", impl = "susieInfWeights", args = list()),
     mrash = list(fn = "mrash_weights", impl = "mrashWeights", args = list(initPriorSd = TRUE, max.iter = 100)),
     enet = list(fn = "enet_weights", impl = "enetWeights", args = list()),
     lasso = list(fn = "lasso_weights", impl = "lassoWeights", args = list()),
@@ -59,7 +59,7 @@
   )
 
   # Handle presets
-  fastDefault <- c("susie", "susie_inf", "mrash", "enet", "lasso", "mcp", "scad", "l0learn")
+  fastDefault <- c("susie", "susieInf", "mrash", "enet", "lasso", "mcp", "scad", "l0learn")
   if (length(methods) == 1) {
     if (methods == "fast_default") {
       methods <- fastDefault
@@ -168,8 +168,8 @@
   keep <- intersect(c("mu", "lbf_variable", "X_column_scale_factors", "pip", "theta"), names(fit))
   intermediate <- fit[keep]
   if (!is.null(fit$sets$cs)) {
-    intermediate$cs_variants <- setNames(lapply(fit$sets$cs, function(L) colnames(X)[L]), names(fit$sets$cs))
-    intermediate$cs_purity <- fit$sets$purity
+    intermediate$csVariants <- setNames(lapply(fit$sets$cs, function(L) colnames(X)[L]), names(fit$sets$cs))
+    intermediate$csPurity <- .translateSusiePurity(fit$sets$purity)
   }
   intermediate
 }
@@ -182,13 +182,13 @@
   susieFit <- if (hasSusie) weightMethods[["susie_weights"]][["susieFit"]] else NULL
   susieInfFit <- if (hasSusieInf) weightMethods[["susie_inf_weights"]][["susieInfFit"]] else NULL
   if (is.null(susieFit)) susieFit <- fittedModels[["susie"]]
-  if (is.null(susieInfFit)) susieInfFit <- fittedModels[["susie_inf"]]
+  if (is.null(susieInfFit)) susieInfFit <- fittedModels[["susieInf"]]
 
   if (!is.null(susieFit)) {
     susieFit <- .setFinemappingFitClass(susieFit, "susie")
   }
   if (!is.null(susieInfFit)) {
-    susieInfFit <- .setFinemappingFitClass(susieInfFit, "susie_inf")
+    susieInfFit <- .setFinemappingFitClass(susieInfFit, "susieInf")
   }
 
   if (hasSusie && hasSusieInf && ncol(Y) == 1 &&
@@ -202,10 +202,10 @@
         list(convergence_method = "pip"),
         weightMethods[["susie_inf_weights"]][setdiff(names(weightMethods[["susie_inf_weights"]]), fitArgNames)]
       ),
-      fittedModels = list(susie = susieFit, susie_inf = susieInfFit)
+      fittedModels = list(susie = susieFit, susieInf = susieInfFit)
     )
     susieFit <- fits[["susie"]]
-    susieInfFit <- fits[["susie_inf"]]
+    susieInfFit <- fits[["susieInf"]]
   }
 
   if (!is.null(susieInfFit) && hasSusieInf) {
@@ -247,7 +247,7 @@
 #'   2 = show all messages including those from external packages.
 #' @return A list with the following components:
 #' \itemize{
-#'   \item `sample_partition`: A dataframe showing the sample partitioning used in the cross-validation.
+#'   \item `samplePartition`: A dataframe showing the sample partitioning used in the cross-validation.
 #'   \item `prediction`: A list of matrices with predicted Y values for each method and fold.
 #'   \item `metrics`: A matrix with rows representing methods and columns for various metrics:
 #'     \itemize{
@@ -257,7 +257,7 @@
 #'       \item `RMSE`: Root Mean Squared Error, a measure of the model's prediction error.
 #'       \item `MAE`: Mean Absolute Error, a measure of the average magnitude of errors in a set of predictions.
 #'     }
-#'   \item `time_elapsed`: The time taken to complete the cross-validation process.
+#'   \item `timeElapsed`: The time taken to complete the cross-validation process.
 #' }
 #' @importFrom purrr map
 #' @importFrom BiocParallel bplapply bpworkers MulticoreParam
@@ -379,7 +379,7 @@ twasWeightsCv <- function(X, Y, fold = NULL, samplePartitions = NULL, weightMeth
 
   st <- proc.time()
   if (is.null(weightMethods)) {
-    return(list(sample_partition = samplePartition))
+    return(list(samplePartition = samplePartition))
   } else {
     # Hardcoded vector of multivariate weightMethods (accept both snake and camel)
     multivariateWeightMethods <- c("mrmash_weights", "mvsusie_weights",
@@ -425,7 +425,7 @@ twasWeightsCv <- function(X, Y, fold = NULL, samplePartitions = NULL, weightMeth
               args$data_driven_prior_matrices <- cvArgs$data_driven_prior_matrices_cv[[j]]
             }
             if (method %in% c("mvsusie_weights", "mvsusieWeights")) {
-              args$prior_variance <- cvArgs$reweighted_mixture_prior_cv[[j]]
+              args$prior_variance <- cvArgs$reweightedMixturePriorCv[[j]]
             }
           }
           weightsMatrix <- if (verbose < 2) {
@@ -530,7 +530,7 @@ twasWeightsCv <- function(X, Y, fold = NULL, samplePartitions = NULL, weightMeth
       }
     }
     names(metricsTable) <- .renameSuffix(names(metricsTable), "performance")
-    return(list(sample_partition = samplePartition, prediction = Ypred, performance = metricsTable, time_elapsed = proc.time() - st))
+    return(list(samplePartition = samplePartition, prediction = Ypred, performance = metricsTable, timeElapsed = proc.time() - st))
   }
 }
 
@@ -770,7 +770,7 @@ estimateSparsity <- function(weightResults) {
 #' @param y A vector of phenotype measurements for each sample.
 #' @param susieFit An object returned by the SuSiE function, containing the SuSiE model fit.
 #' @param fittedModels Optional named list of fitted fine-mapping models, such
-#'   as \code{list(susie = susieFit, susie_inf = susieInfFit)}.
+#'   as \code{list(susie = susieFit, susieInf = susieInfFit)}.
 #' @param cvFolds The number of folds to use for cross-validation. Set to 0 to skip cross-validation. Defaults to 5.
 #' @param samplePartition Optional data frame with Sample and Fold columns for cross-validation. If NULL, a random partition is generated.
 #' @param weightMethods List of methods to use to compute weights for TWAS; along with their parameters.
@@ -831,7 +831,7 @@ twasWeightsPipeline <- function(X,
   }
 
   if (!is.null(fittedModels[["susie"]]) && !is.null(weightMethods$susie_weights)) {
-    res$susie_weights_intermediate <- .susieWeightIntermediate(fittedModels[["susie"]], X)
+    res$susieWeightsIntermediate <- .susieWeightIntermediate(fittedModels[["susie"]], X)
   }
 
   # Check if empirical pi estimation is needed for spike-and-slab methods
@@ -850,7 +850,7 @@ twasWeightsPipeline <- function(X,
 
     empiricalPi <- estimateSparsity(mrashWeights)
     if (verbose >= 1) message(sprintf("  Empirical sparsity estimate: %.4f", empiricalPi))
-    res$empirical_pi <- empiricalPi
+    res$empiricalPi <- empiricalPi
 
     # Inject into spike-and-slab methods that need it
     if (bayesCneedsPi) weightMethods$bayes_c_weights$pi <- as.numeric(empiricalPi)
@@ -871,30 +871,30 @@ twasWeightsPipeline <- function(X,
       # Combine two TwasWeights objects
       combinedWeights <- c(getWeights(mrashWeights), getWeights(remainingTw))
       combinedFits <- c(getFits(mrashWeights), getFits(remainingTw))
-      res$twas_weights <- TwasWeights(
+      res$twasWeights <- TwasWeights(
         weights = combinedWeights,
         variantIds = getVariantIds(mrashWeights),
         fits = combinedFits
       )
     } else {
-      res$twas_weights <- mrashWeights
+      res$twasWeights <- mrashWeights
     }
 
     # Remove mr.ash if it was not in the original weightMethods
     if (!"mrash_weights" %in% names(weightMethods)) {
-      wList <- getWeights(res$twas_weights)
-      fList <- getFits(res$twas_weights)
+      wList <- getWeights(res$twasWeights)
+      fList <- getFits(res$twasWeights)
       wList[["mrash_weights"]] <- NULL
       if (!is.null(fList)) fList[["mrash_weights"]] <- NULL
-      res$twas_weights <- TwasWeights(
+      res$twasWeights <- TwasWeights(
         weights = wList,
-        variantIds = getVariantIds(res$twas_weights),
+        variantIds = getVariantIds(res$twasWeights),
         fits = if (length(fList) > 0) fList else NULL
       )
     }
   } else {
     # Run all methods at once
-    res$twas_weights <- learnTwasWeights(
+    res$twasWeights <- learnTwasWeights(
       X,
       y,
       weightMethods = weightMethods,
@@ -906,27 +906,27 @@ twasWeightsPipeline <- function(X,
     elapsed <- toc(quiet = TRUE)
     message(sprintf("TWAS weights fitting done in %.1fs", elapsed$toc - elapsed$tic))
   }
-  res$twas_predictions <- twasPredict(X, res$twas_weights)
+  res$twasPredictions <- twasPredict(X, res$twasWeights)
 
   if (cvFolds > 1) {
     # A few cutting corners to run CV faster at the disadvantage of SuSiE and mr.ash:
     # 1. reset SuSiE to not using refine or adaptive L but to use L from previous analysis
     # 2. at most 100 iterations for mr.ash allowed
     # 3. only use a subset of variants randomly selected to avoid bias
-    if (!is.null(fittedModels[["susie_inf"]]) && !is.null(weightMethods$susie_inf_weights)) {
-      weightMethods$susie_inf_weights$L <- length(fittedModels[["susie_inf"]]$V)
+    if (!is.null(fittedModels[["susieInf"]]) && !is.null(weightMethods$susie_inf_weights)) {
+      weightMethods$susie_inf_weights$L <- length(fittedModels[["susieInf"]]$V)
       weightMethods$susie_inf_weights$refine <- FALSE
     }
     if (!is.null(weightMethods$susie_weights)) {
       susieCvFit <- fittedModels[["susie"]]
-      if (is.null(susieCvFit)) susieCvFit <- fittedModels[["susie_inf"]]
+      if (is.null(susieCvFit)) susieCvFit <- fittedModels[["susieInf"]]
       if (!is.null(susieCvFit)) {
         weightMethods$susie_weights$L <- length(susieCvFit$V)
         weightMethods$susie_weights$refine <- FALSE
       }
     }
     if (is.null(cvWeightMethods)) {
-      cvWeightMethods <- .filterZeroWeightMethods(weightMethods, res$twas_weights)
+      cvWeightMethods <- .filterZeroWeightMethods(weightMethods, res$twasWeights)
     }
 
     variantsForCv <- c()
@@ -941,7 +941,7 @@ twasWeightsPipeline <- function(X,
       message("Performing cross-validation to assess TWAS weights ...")
       tic()
     }
-    res$twas_cv_result <- twasWeightsCv(
+    res$twasCvResult <- twasWeightsCv(
       X,
       y,
       fold = cvFolds,
@@ -963,9 +963,9 @@ twasWeightsPipeline <- function(X,
               " weight method provided (need >= 2 for ensemble learning).")
     }
     if (isTRUE(ensemble) && length(cvWeightMethods) > 1) {
-      if (!is.null(res$twas_cv_result$performance)) {
+      if (!is.null(res$twasCvResult$performance)) {
         # Extract R-squared for each method from CV performance table
-        methodRsq <- vapply(res$twas_cv_result$performance, function(perf) {
+        methodRsq <- vapply(res$twasCvResult$performance, function(perf) {
           perf[1, "rsq"]
         }, numeric(1))
         names(methodRsq) <- sub("(_performance|Performance)$", "", names(methodRsq))
@@ -1004,17 +1004,17 @@ twasWeightsPipeline <- function(X,
           # Subset cvResults predictions to passing methods, matching on the
           # base name regardless of whether the prediction key uses snake
           # ("lasso_predicted") or camel ("lassoPredicted") form.
-          filteredCv <- res$twas_cv_result
+          filteredCv <- res$twasCvResult
           predBaseNames <- sub("(_predicted|Predicted)$", "", names(filteredCv$prediction))
           filteredCv$prediction <- filteredCv$prediction[match(passingBase, predBaseNames)]
 
           # Subset twas_weights to passing methods.
           # Original weight keys may use either snake_case (lasso_weights) or
           # camelCase (lassoWeights); match either by stripping the suffix.
-          if (is(res$twas_weights, "TwasWeights")) {
-            wl <- getWeights(res$twas_weights)
+          if (is(res$twasWeights, "TwasWeights")) {
+            wl <- getWeights(res$twasWeights)
           } else {
-            wl <- res$twas_weights
+            wl <- res$twasWeights
           }
           wlBaseNames <- sub("(_weights|Weights)$", "", names(wl))
           filteredWeights <- wl[match(passingBase, wlBaseNames)]
@@ -1041,13 +1041,13 @@ twasWeightsPipeline <- function(X,
           }
 
           # Add ensemble weights alongside individual method weights
-          if (!is.null(ensResult$ensemble_twas_weights)) {
-            ensWt <- ensResult$ensemble_twas_weights
+          if (!is.null(ensResult$ensembleTwasWeights)) {
+            ensWt <- ensResult$ensembleTwasWeights
             if (!is.matrix(ensWt)) ensWt <- matrix(ensWt, ncol = 1)
             # Rebuild TwasWeights S4 with ensemble method added
-            tw <- res$twas_weights
+            tw <- res$twasWeights
             newWeights <- c(getWeights(tw), list(ensembleWeights = ensWt))
-            res$twas_weights <- new("TwasWeights",
+            res$twasWeights <- new("TwasWeights",
               weights = newWeights,
               variantIds = getVariantIds(tw),
               methods = c(getMethodNames(tw), "ensembleWeights"),
@@ -1055,14 +1055,14 @@ twasWeightsPipeline <- function(X,
               cvPerformance = getCvPerformance(tw),
               standardized = getStandardized(tw)
             )
-            res$twas_predictions$ensemble_predicted <- X %*% ensWt
+            res$twasPredictions$ensemble_predicted <- X %*% ensWt
           }
           res$ensemble <- ensResult
         }
       }
     }
   }
-  res$total_time_elapsed <- proc.time() - st
+  res$totalTimeElapsed <- proc.time() - st
 
   return(res)
 }
@@ -1118,9 +1118,9 @@ twasMultivariateWeightsPipeline <- function(
     setNames(lapply(contextNames, function(ctx) {
       if (ctx %in% colnames(wl[[1]])) {
         list(
-          twas_weights = lapply(wl, function(wgts) wgts[, ctx]),
-          twas_predictions = lapply(twasPredictions, function(pred) pred[, ctx]),
-          variant_names = variantNames
+          twasWeights = lapply(wl, function(wgts) wgts[, ctx]),
+          twasPredictions = lapply(twasPredictions, function(pred) pred[, ctx]),
+          variantNames = variantNames
         )
       } else {
         NULL
@@ -1131,20 +1131,20 @@ twasMultivariateWeightsPipeline <- function(
   copyTwasCvResults <- function(twasResult, twasCvResult) {
     for (i in names(twasResult)) {
       if (i %in% colnames(twasCvResult$prediction[[1]])) {
-        twasResult[[i]]$twas_cv_result$sample_partition <- twasCvResult$sample_partition
-        twasResult[[i]]$twas_cv_result$prediction <- lapply(
+        twasResult[[i]]$twasCvResult$samplePartition <- twasCvResult$samplePartition
+        twasResult[[i]]$twasCvResult$prediction <- lapply(
           twasCvResult$prediction,
           function(predicted) {
             as.matrix(predicted[, i], ncol = 1)
           }
         )
-        twasResult[[i]]$twas_cv_result$performance <- lapply(
+        twasResult[[i]]$twasCvResult$performance <- lapply(
           twasCvResult$performance,
           function(perform) {
             t(as.matrix(perform[i, ], ncol = 1))
           }
         )
-        twasResult[[i]]$twas_cv_result$time_elapsed <- twasCvResult$time_elapsed
+        twasResult[[i]]$twasCvResult$timeElapsed <- twasCvResult$timeElapsed
       }
     }
     return(twasResult)
@@ -1153,10 +1153,10 @@ twasMultivariateWeightsPipeline <- function(
   # TWAS weights and predictions
   weightMethods <- list(
     mrmash_weights = list(
-      mrmash_fit = mnmFit$mrmash_fitted
+      mrmash_fit = mnmFit$mrmashFitted
     ),
     mvsusie_weights = list(
-      mvsusie_fit = mnmFit$mvsusie_fitted
+      mvsusie_fit = mnmFit$mvsusieFitted
     )
   )
   st <- proc.time()
@@ -1174,11 +1174,11 @@ twasMultivariateWeightsPipeline <- function(
   twasPredictions <- twasPredict(X, twasWeightsRes)
 
   # copy TWAS results by condition
-  res <- copyTwasResults(colnames(Y), mnmFit$variant_names, twasWeightsRes, twasPredictions)
+  res <- copyTwasResults(colnames(Y), mnmFit$variantNames, twasWeightsRes, twasPredictions)
 
   # Perform cross-validation if specified
   if (cvFolds > 1) {
-    if (is.null(L)) L <- length(mnmFit$mvsusie_fitted$V)
+    if (is.null(L)) L <- length(mnmFit$mvsusieFitted$V)
     if (!is.null(Lgreedy)) Lgreedy <- min(Lgreedy, L)
     subVerbose <- verbose >= 2
     weightMethods <- list(
@@ -1189,8 +1189,8 @@ twasMultivariateWeightsPipeline <- function(
         verbose = subVerbose
       ),
       mvsusie_weights = list(
-        prior_variance = mnmFit$reweighted_mixture_prior,
-        residual_variance = mnmFit$mrmash_fitted$V,
+        prior_variance = mnmFit$reweightedMixturePrior,
+        residual_variance = mnmFit$mrmashFitted$V,
         L = L,
         L_greedy = Lgreedy,
         max_iter = mvsusieMaxIter,
@@ -1218,7 +1218,7 @@ twasMultivariateWeightsPipeline <- function(
       verbose = verbose,
       variantsToKeep = if (length(variantsForCv) > 0) variantsForCv else NULL,
       data_driven_prior_matrices_cv = dataDrivenPriorMatricesCv,
-      reweighted_mixture_prior_cv = mnmFit$reweighted_mixture_prior_cv
+      reweightedMixturePriorCv = mnmFit$reweightedMixturePriorCv
     )
     if (verbose >= 1) {
       elapsed <- toc(quiet = TRUE)
@@ -1228,7 +1228,7 @@ twasMultivariateWeightsPipeline <- function(
   }
   totalTimeElapsed <- proc.time() - st
   for (i in seq_along(res)) {
-    res[[i]]$total_time_elapsed <- totalTimeElapsed
+    res[[i]]$totalTimeElapsed <- totalTimeElapsed
   }
   return(res)
 }
@@ -1446,13 +1446,13 @@ twasMultivariateWeightsPipeline <- function(
 #'
 #' @return A list with components:
 #' \describe{
-#'   \item{method_coef}{Named numeric vector of combination coefficients
+#'   \item{methodCoef}{Named numeric vector of combination coefficients
 #'     (\eqn{\zeta_k}), non-negative and summing to 1. Names are method
 #'     base names (e.g., \code{"susie"}, \code{"enet"}).}
-#'   \item{ensemble_twas_weights}{Final combined weight vector
+#'   \item{ensembleTwasWeights}{Final combined weight vector
 #'     \eqn{w = \sum_k \zeta_k w_k}, or NULL if \code{twasWeightList}
 #'     is not provided. Returned as a vector for univariate Y, matrix otherwise.}
-#'   \item{method_performance}{Named numeric vector of per-method R-squared
+#'   \item{methodPerformance}{Named numeric vector of per-method R-squared
 #'     computed from out-of-fold CV predictions. Preserved so users can still
 #'     report individual method performance.}
 #' }
@@ -1484,17 +1484,17 @@ twasMultivariateWeightsPipeline <- function(
 #' res <- twasWeightsPipeline(X, y, cvFolds = 5, weightMethods = methods)
 #'
 #' ens <- ensembleWeights(
-#'   cvResults = res$twas_cv_result,
+#'   cvResults = res$twasCvResult,
 #'   Y = y,
-#'   twasWeightList = res$twas_weights
+#'   twasWeightList = res$twasWeights
 #' )
-#' ens$method_coef           # combination weights, sum to 1
+#' ens$methodCoef           # combination weights, sum to 1
 #'
 #' # Multi-dataset ensemble (e.g., CUMC1 + MIT cell types):
 #' ens_multi <- ensembleWeights(
-#'   cvResults = list(res_cumc$twas_cv_result, res_mit$twas_cv_result),
+#'   cvResults = list(res_cumc$twasCvResult, res_mit$twasCvResult),
 #'   Y = list(y_cumc, y_mit),
-#'   twasWeightList = list(res_cumc$twas_weights, res_mit$twas_weights)
+#'   twasWeightList = list(res_cumc$twasWeights, res_mit$twasWeights)
 #' )
 #' }
 #'
@@ -1740,9 +1740,9 @@ ensembleWeights <- function(cvResults, Y, twasWeightList = NULL,
   }
 
   list(
-    method_coef = zeta,
-    ensemble_twas_weights = ensembleTwasWt,
-    method_performance = methodRsq
+    methodCoef = zeta,
+    ensembleTwasWeights = ensembleTwasWt,
+    methodPerformance = methodRsq
   )
 }
 
@@ -1781,31 +1781,21 @@ imputeMissingSumstatsForLd <- function(sumstats, ldMat, ldData,
   # RAISS requires inputs sorted by position (within each chromosome)
   refSorted <- ldRefPanel[order(ldRefPanel$chrom, ldRefPanel$pos), refCols, drop = FALSE]
   knownSorted <- sumstats[order(sumstats$chrom, sumstats$pos), c(refCols, "z"), drop = FALSE]
-  # Translate snake_case imputeOpts keys to camelCase raiss() arguments.
-  imputeOptsRenamed <- imputeOpts
-  if ("R2_threshold" %in% names(imputeOptsRenamed)) {
-    imputeOptsRenamed$r2Threshold <- imputeOptsRenamed$R2_threshold
-    imputeOptsRenamed$R2_threshold <- NULL
-  }
-  if ("minimum_ld" %in% names(imputeOptsRenamed)) {
-    imputeOptsRenamed$minimumLd <- imputeOptsRenamed$minimum_ld
-    imputeOptsRenamed$minimum_ld <- NULL
-  }
   raissArgs <- c(list(
     refPanel = refSorted,
     knownZscores = knownSorted,
     ldMatrix = ldMat,
     verbose = (verbose >= 2)
-  ), imputeOptsRenamed)
+  ), imputeOpts)
   raissOut <- tryCatch(do.call(raiss, raissArgs),
                        error = function(e) {
                          warning(sprintf("RAISS missing-sumstat imputation failed: %s", e$message))
                          NULL
                        })
-  if (is.null(raissOut) || is.null(raissOut$result_filter)) return(sumstats)
+  if (is.null(raissOut) || is.null(raissOut$resultFilter)) return(sumstats)
 
-  newRows <- raissOut$result_filter[
-    !raissOut$result_filter$variant_id %in% sumstats$variant_id, , drop = FALSE
+  newRows <- raissOut$resultFilter[
+    !raissOut$resultFilter$variant_id %in% sumstats$variant_id, , drop = FALSE
   ]
   if (nrow(newRows) == 0) return(sumstats)
 
@@ -1834,14 +1824,14 @@ imputeMissingSumstatsForLd <- function(sumstats, ldMat, ldData,
 #' @param sumstats Data.frame with columns: \code{variant_id}, \code{A1},
 #'   \code{A2}, \code{chrom}, \code{pos}, and either \code{z} or both
 #'   \code{beta} and \code{se}.
-#' @param ldData LdData S4 object, or a legacy list with \code{LD_matrix},
-#'   \code{LD_variants}, \code{ref_panel}. Can also be a plain correlation
+#' @param ldData LdData S4 object, or a legacy list with \code{ldMatrix},
+#'   \code{ldVariants}, \code{ref_panel}. Can also be a plain correlation
 #'   matrix (variant IDs taken from row/colnames).
 #' @param n eQTL study sample size (scalar).
 #' @param methods Named list of RSS weight methods and their arguments.
 #'   Method names correspond to functions named
-#'   \code{<method>_weights(stat, LD, ...)}. Defaults include lassosum_rss,
-#'   prs_cs, sdpr, susie_rss, and susie_inf_rss.
+#'   \code{<method>_weights(stat, LD, ...)}. Defaults include lassosumRss,
+#'   prsCs, sdpr, susieRss, and susieInfRss.
 #' @param pThresholds Numeric vector of p-value thresholds for P+T weights.
 #'   Set to NULL to skip.
 #' @param checkLdMethod LD matrix repair method: \code{"eigenfix"} (default),
@@ -1868,7 +1858,7 @@ imputeMissingSumstatsForLd <- function(sumstats, ldMat, ldData,
 #' \describe{
 #'   \item{twas_weights}{A \code{TwasWeights} S4 object with
 #'     \code{standardized = TRUE}.}
-#'   \item{finemapping_result}{A \code{FineMappingResult} S4 object from the
+#'   \item{finemappingResult}{A \code{FineMappingResult} S4 object from the
 #'     SuSiE-RSS fit, or NULL if no SuSiE-RSS method was used.}
 #'   \item{qc_summary}{List with outlier counts and QC metadata.}
 #' }
@@ -1877,11 +1867,11 @@ imputeMissingSumstatsForLd <- function(sumstats, ldMat, ldData,
 twasWeightsSumstatPipeline <- function(
     sumstats, ldData, n,
     methods = list(
-      lassosum_rss = list(),
-      prs_cs = list(phi = 1e-4, n_iter = 1000, n_burnin = 500, thin = 5),
+      lassosumRss = list(),
+      prsCs = list(phi = 1e-4, nIter = 1000, nBurnin = 500, thin = 5),
       sdpr = list(iter = 1000, burn = 200, thin = 1, verbose = FALSE),
-      susie_rss = list(),
-      susie_inf_rss = list()
+      susieRss = list(),
+      susieInfRss = list()
     ),
     pThresholds = c(0.001, 0.05),
     checkLdMethod = "eigenfix",
@@ -1890,8 +1880,8 @@ twasWeightsSumstatPipeline <- function(
     pipCutoffToSkip = 0,
     impute = TRUE,
     imputeMissing = FALSE,
-    imputeOpts = list(rcond = 0.01, R2_threshold = 0.6,
-                      minimum_ld = 5, lamb = 0.01),
+    imputeOpts = list(rcond = 0.01, r2Threshold = 0.6,
+                      minimumLd = 5, lamb = 0.01),
     varY = 1, verbose = 1) {
 
   # -----------------------------------------------------------------------
@@ -1900,7 +1890,7 @@ twasWeightsSumstatPipeline <- function(
   needsQc <- !is.null(zMismatchQc) && !identical(zMismatchQc, "none")
   if (needsQc || impute || pipCutoffToSkip != 0) {
     qcResult <- summaryStatsQc(
-      rssInput = list(sumstats = sumstats, n = n, var_y = varY),
+      rssInput = list(sumstats = sumstats, n = n, varY = varY),
       ldData = ldData,
       keepIndel = keepIndel,
       pipCutoffToSkip = pipCutoffToSkip,
@@ -1910,8 +1900,8 @@ twasWeightsSumstatPipeline <- function(
       returnOnSkip = "null"
     )
     if (is.null(qcResult) || isSkipped(qcResult)) {
-      return(list(twas_weights = NULL, finemapping_result = NULL,
-                  qc_summary = list(skipped = TRUE)))
+      return(list(twasWeights = NULL, finemappingResult = NULL,
+                  qcSummary = list(skipped = TRUE)))
     }
     sumstats <- getRssInput(qcResult)$sumstats
     qcLd <- getLdData(qcResult)
@@ -1930,8 +1920,8 @@ twasWeightsSumstatPipeline <- function(
   }
 
   if (nrow(sumstats) < 2) {
-    return(list(twas_weights = NULL, finemapping_result = NULL,
-                qc_summary = list(skipped = TRUE, reason = "fewer than 2 variants")))
+    return(list(twasWeights = NULL, finemappingResult = NULL,
+                qcSummary = list(skipped = TRUE, reason = "fewer than 2 variants")))
   }
 
   # -----------------------------------------------------------------------
@@ -1990,25 +1980,25 @@ twasWeightsSumstatPipeline <- function(
   # -----------------------------------------------------------------------
   if (!is.null(checkLdMethod)) {
     ldCheck <- check_ld(ldMat, method = checkLdMethod)
-    if (ldCheck$method_applied != "none") {
+    if (ldCheck$methodApplied != "none") {
       if (verbose >= 1) {
         message(sprintf("check_ld: repaired LD via '%s' (min eigenvalue was %.2e, %d negative).",
-                        ldCheck$method_applied, ldCheck$min_eigenvalue, ldCheck$n_negative))
+                        ldCheck$methodApplied, ldCheck$minEigenvalue, ldCheck$nNegative))
       }
     }
     ldMat <- ldCheck$R
   }
 
   # -----------------------------------------------------------------------
-  # 4. Two-stage SuSiE-RSS (shared fit for susie_rss + susie_inf_rss)
+  # 4. Two-stage SuSiE-RSS (shared fit for susieRss + susieInfRss)
   # -----------------------------------------------------------------------
-  hasSusieRss <- "susie_rss" %in% names(methods)
-  hasSusieInfRss <- "susie_inf_rss" %in% names(methods)
+  hasSusieRss <- "susieRss" %in% names(methods)
+  hasSusieInfRss <- "susieInfRss" %in% names(methods)
   susieFits <- NULL
 
   if (hasSusieRss && hasSusieInfRss) {
-    susieArgs <- methods[["susie_rss"]]
-    susieInfArgs <- methods[["susie_inf_rss"]]
+    susieArgs <- methods[["susieRss"]]
+    susieInfArgs <- methods[["susieInfRss"]]
     susieFits <- fitSusieInfThenSusieRss(
       z = z, R = ldMat, n = n,
       susieInfArgs = susieInfArgs,
@@ -2046,15 +2036,15 @@ twasWeightsSumstatPipeline <- function(
 
     # Build call arguments: separate pre-fitted objects from methodArgs
     callArgs <- list(stat = stat, LD = ldMat)
-    if (methodName == "susie_rss" && !is.null(susieFits)) {
+    if (methodName == "susieRss" && !is.null(susieFits)) {
       callArgs[["susie_rss_fit"]] <- susieFits$susie
-    } else if (methodName == "susie_inf_rss" && !is.null(susieFits)) {
-      callArgs[["susie_inf_rss_fit"]] <- susieFits$susie_inf
+    } else if (methodName == "susieInfRss" && !is.null(susieFits)) {
+      callArgs[["susie_inf_rss_fit"]] <- susieFits$susieInf
     }
 
     # SuSiE-RSS methods accept the user-facing method options as a single
     # `methodArgs` list; other methods take them spread directly.
-    isSusieRssMethod <- methodName %in% c("susie_rss", "susie_inf_rss", "susie_ash_rss")
+    isSusieRssMethod <- methodName %in% c("susieRss", "susieInfRss", "susieAshRss")
     if (isSusieRssMethod) {
       callArgs[["methodArgs"]] <- methodArgs
     } else {
@@ -2064,9 +2054,9 @@ twasWeightsSumstatPipeline <- function(
     tryCatch({
       w <- do.call(fnName, callArgs)
       # Capture retained fit for fine-mapping post-processing
-      if (methodName == "susie_rss" && !is.null(attr(w, "fit"))) {
+      if (methodName == "susieRss" && !is.null(attr(w, "fit"))) {
         susieRssFitForFm <- attr(w, "fit")
-      } else if (methodName == "susie_inf_rss" && is.null(susieRssFitForFm) && !is.null(attr(w, "fit"))) {
+      } else if (methodName == "susieInfRss" && is.null(susieRssFitForFm) && !is.null(attr(w, "fit"))) {
         susieRssFitForFm <- attr(w, "fit")
       }
       results[[methodName]] <- as.numeric(w)
@@ -2077,8 +2067,8 @@ twasWeightsSumstatPipeline <- function(
   }
 
   if (length(results) == 0) {
-    return(list(twas_weights = NULL, finemapping_result = NULL,
-                qc_summary = list(skipped = TRUE, reason = "all methods failed")))
+    return(list(twasWeights = NULL, finemappingResult = NULL,
+                qcSummary = list(skipped = TRUE, reason = "all methods failed")))
   }
 
   # -----------------------------------------------------------------------
@@ -2086,7 +2076,7 @@ twasWeightsSumstatPipeline <- function(
   # -----------------------------------------------------------------------
   finemappingResult <- NULL
   if (!is.null(susieRssFitForFm)) {
-    fmFits <- list(susie_rss = susieRssFitForFm)
+    fmFits <- list(susieRss = susieRssFitForFm)
     tryCatch({
       fmOutput <- postprocessFinemappingFits(
         fits = fmFits,
@@ -2095,8 +2085,8 @@ twasWeightsSumstatPipeline <- function(
         signalCutoff = 0.025,
         csInput = "Xcorr"
       )
-      if (!is.null(fmOutput$finemapping_results$susie_rss$finemapping_result)) {
-        finemappingResult <- fmOutput$finemapping_results$susie_rss$finemapping_result
+      if (!is.null(fmOutput$finemappingResults$susieRss$finemappingResult)) {
+        finemappingResult <- fmOutput$finemappingResults$susieRss$finemappingResult
       }
     }, error = function(e) {
       warning(sprintf("Fine-mapping post-processing failed: %s", e$message))
@@ -2118,14 +2108,14 @@ twasWeightsSumstatPipeline <- function(
   )
 
   list(
-    twas_weights = twasWt,
-    finemapping_result = finemappingResult,
-    qc_summary = list(
+    twasWeights = twasWt,
+    finemappingResult = finemappingResult,
+    qcSummary = list(
       skipped = FALSE,
-      n_variants_input = p,
-      n_variants_after_qc = nrow(sumstats),
-      outlier_number = outlierNumber,
-      methods_succeeded = names(results)
+      nVariantsInput = p,
+      nVariantsAfterQc = nrow(sumstats),
+      outlierNumber = outlierNumber,
+      methodsSucceeded = names(results)
     )
   )
 }
@@ -2142,8 +2132,8 @@ twasWeightsSumstatPipeline <- function(
 #' imputation, data-driven prior construction (reusing
 #' \code{\link{build_mrmash_prior_matrices}} and the same FLASH / diagonal
 #' covariance helpers as the individual-level pipeline), and multi-context
-#' weight training via \code{\link{mrmash_rss_weights}} and/or
-#' \code{\link{mvsusie_rss_weights}}.
+#' weight training via \code{\link{mrmashRssWeights}} and/or
+#' \code{\link{mvsusieRssWeights}}.
 #'
 #' @param sumstatsList Named list of per-context sumstats data.frames. Each
 #'   data.frame must contain \code{variant_id}, \code{chrom}, \code{pos},
@@ -2196,13 +2186,13 @@ twasWeightsSumstatPipeline <- function(
 #' @export
 twasMultivariateWeightsSumstatPipeline <- function(
     sumstatsList, ldData, n,
-    methods = list(mrmash_rss = list(), mvsusie_rss = list()),
+    methods = list(mrmashRss = list(), mvsusieRss = list()),
     zMismatchQc = NULL,
     keepIndel = TRUE,
     impute = FALSE,
     imputeMissing = FALSE,
-    imputeOpts = list(rcond = 0.01, R2_threshold = 0.6,
-                      minimum_ld = 5, lamb = 0.01),
+    imputeOpts = list(rcond = 0.01, r2Threshold = 0.6,
+                      minimumLd = 5, lamb = 0.01),
     dataDrivenPriorMatrices = NULL,
     canonicalPriorMatrices = TRUE,
     estimatePriorsFromSumstats = TRUE,
@@ -2234,7 +2224,7 @@ twasMultivariateWeightsSumstatPipeline <- function(
       stop(sprintf("Context %s: sumstats must contain z or (beta, se).", cond))
     }
     qcRecord <- summaryStatsQc(
-      rssInput = list(sumstats = ssC, n = n[[cond]], var_y = 1),
+      rssInput = list(sumstats = ssC, n = n[[cond]], varY = 1),
       ldData = ldData,
       keepIndel = keepIndel,
       zMismatchQc = if (is.null(zMismatchQc)) "none" else zMismatchQc,
@@ -2262,8 +2252,8 @@ twasMultivariateWeightsSumstatPipeline <- function(
   variantSets <- lapply(perContextQc, function(df) df$variant_id)
   commonVariants <- Reduce(intersect, variantSets)
   if (length(commonVariants) < 2) {
-    return(list(twas_weights = NULL,
-                qc_summary = list(skipped = TRUE,
+    return(list(twasWeights = NULL,
+                qcSummary = list(skipped = TRUE,
                                   reason = "fewer than 2 shared variants across contexts"),
                 Z = NULL))
   }
@@ -2318,9 +2308,9 @@ twasMultivariateWeightsSumstatPipeline <- function(
       next
     }
     methodArgs <- methods[[methodName]] %||% list()
-    if (methodName == "mrmash_rss") {
-      methodArgs$data_driven_prior_matrices <- methodArgs$data_driven_prior_matrices %||% priorInput
-      methodArgs$canonical_prior_matrices  <- methodArgs$canonical_prior_matrices  %||% canonicalPriorMatrices
+    if (methodName == "mrmashRss") {
+      methodArgs$dataDrivenPriorMatrices <- methodArgs$dataDrivenPriorMatrices %||% priorInput
+      methodArgs$canonicalPriorMatrices  <- methodArgs$canonicalPriorMatrices  %||% canonicalPriorMatrices
     }
     fn <- get(fnName, mode = "function")
     if (verbose >= 1) message("Fitting ", methodName, " ...")
@@ -2340,8 +2330,8 @@ twasMultivariateWeightsSumstatPipeline <- function(
 
   # ----- 8. Package into TwasWeights S4 -----
   if (length(results) == 0) {
-    return(list(twas_weights = NULL,
-                qc_summary = list(skipped = TRUE,
+    return(list(twasWeights = NULL,
+                qcSummary = list(skipped = TRUE,
                                   reason = "all methods failed"),
                 Z = Z))
   }
@@ -2352,13 +2342,13 @@ twasMultivariateWeightsSumstatPipeline <- function(
     cvPerformance = NULL
   )
   list(
-    twas_weights = twasWt,
-    qc_summary = list(
+    twasWeights = twasWt,
+    qcSummary = list(
       skipped = FALSE,
-      n_per_context = vapply(perContextQc, nrow, integer(1)),
-      n_common = length(commonVariants),
+      nPerContext = vapply(perContextQc, nrow, integer(1)),
+      nCommon = length(commonVariants),
       conditions = conditions,
-      methods_succeeded = names(results)
+      methodsSucceeded = names(results)
     ),
     Z = Z
   )

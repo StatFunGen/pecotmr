@@ -909,10 +909,10 @@ robustMahalanobis <- function(x, center = NULL, cov = NULL,
 #'   the quantile cutoff \emph{and} its p-value is below this threshold.
 #' @return A data.frame with columns:
 #'   \describe{
-#'     \item{sample_id}{Row names from \code{x}, or row indices if unnamed.}
+#'     \item{sampleId}{Row names from \code{x}, or row indices if unnamed.}
 #'     \item{mahal}{Mahalanobis distance.}
 #'     \item{pvalue}{Chi-squared p-value (df = number of features).}
-#'     \item{is_outlier}{Logical; TRUE if distance > quantile cutoff and
+#'     \item{isOutlier}{Logical; TRUE if distance > quantile cutoff and
 #'       p-value < \code{pvalThreshold}.}
 #'   }
 #' @export
@@ -927,10 +927,10 @@ detectOutliersMahalanobis <- function(x, prob = 0.99,
   pvals <- pchisq(d, df = p, lower.tail = FALSE)
   cutoff <- quantile(d, probs = prob)
   data.frame(
-    sample_id = sampleIds,
+    sampleId = sampleIds,
     mahal = as.numeric(d),
     pvalue = pvals,
-    is_outlier = (d > cutoff) & (pvals < pvalThreshold),
+    isOutlier = (d > cutoff) & (pvals < pvalThreshold),
     row.names = NULL,
     stringsAsFactors = FALSE
   )

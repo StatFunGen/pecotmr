@@ -49,13 +49,13 @@ give elastic net.}
 \value{
 A list with components:
 \describe{
-  \item{method_coef}{Named numeric vector of combination coefficients
+  \item{methodCoef}{Named numeric vector of combination coefficients
     (\eqn{\zeta_k}), non-negative and summing to 1. Names are method
     base names (e.g., \code{"susie"}, \code{"enet"}).}
-  \item{ensemble_twas_weights}{Final combined weight vector
+  \item{ensembleTwasWeights}{Final combined weight vector
     \eqn{w = \sum_k \zeta_k w_k}, or NULL if \code{twasWeightList}
     is not provided. Returned as a vector for univariate Y, matrix otherwise.}
-  \item{method_performance}{Named numeric vector of per-method R-squared
+  \item{methodPerformance}{Named numeric vector of per-method R-squared
     computed from out-of-fold CV predictions. Preserved so users can still
     report individual method performance.}
 }
@@ -102,17 +102,17 @@ rather than assuming positional order.
 res <- twasWeightsPipeline(X, y, cvFolds = 5, weightMethods = methods)
 
 ens <- ensembleWeights(
-  cvResults = res$twas_cv_result,
+  cvResults = res$twasCvResult,
   Y = y,
-  twasWeightList = res$twas_weights
+  twasWeightList = res$twasWeights
 )
-ens$method_coef           # combination weights, sum to 1
+ens$methodCoef           # combination weights, sum to 1
 
 # Multi-dataset ensemble (e.g., CUMC1 + MIT cell types):
 ens_multi <- ensembleWeights(
-  cvResults = list(res_cumc$twas_cv_result, res_mit$twas_cv_result),
+  cvResults = list(res_cumc$twasCvResult, res_mit$twasCvResult),
   Y = list(y_cumc, y_mit),
-  twasWeightList = list(res_cumc$twas_weights, res_mit$twas_weights)
+  twasWeightList = list(res_cumc$twasWeights, res_mit$twasWeights)
 )
 }
 

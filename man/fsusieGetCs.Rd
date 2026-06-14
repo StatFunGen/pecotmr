@@ -16,7 +16,7 @@ manually ensured that it correctly reflect the actual coverage used. Defaults to
 }
 \value{
 A list containing named credible sets (cs), a dataframe of purity metrics
-        (min.abs.corr, mean.abs.corr, median.abs.corr), an index of credible sets (cs_index),
+        (minAbsCorr, meanAbsCorr, medianAbsCorr), an index of credible sets (cs_index),
         coverage values for each set, and the requested coverage level. Similar to the SuSiE set output
 }
 \description{

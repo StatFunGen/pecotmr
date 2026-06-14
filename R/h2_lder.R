@@ -22,7 +22,7 @@ NULL
 #' @param annotations An \code{AnnotationMatrix}, or NULL.
 #' @param local Logical, return per-block estimates.
 #' @param lambda Numeric, ridge penalty (default 0).
-#' @return A list with h2, h2_se, intercept, intercept_se, local estimates,
+#' @return A list with h2, h2Se, intercept, interceptSe, local estimates,
 #'   and enrichment estimates.
 #' @keywords internal
 lderUnivariate <- function(z, n, eigenRef, annotations = NULL,
@@ -44,7 +44,7 @@ lderUnivariate <- function(z, n, eigenRef, annotations = NULL,
   # Collect per-block eigenvalue regression quantities
   blockData <- lapply(seq_len(nBlocks), function(b) {
     block <- eigenRef@eigenList[[b]]
-    idx <- block$snp_idx
+    idx <- block$snpIdx
     d <- block$values        # eigenvalues
     V <- block$vectors       # eigenvectors
     zBlock <- z[idx]
@@ -62,23 +62,23 @@ lderUnivariate <- function(z, n, eigenRef, annotations = NULL,
     }
 
     list(
-      chi2_rot = chi2Rot,
+      chi2Rot = chi2Rot,
       eigenvalues = d,
-      ld_annot = ldAnnot,
+      ldAnnot = ldAnnot,
       n_snps = length(idx),
-      snp_idx = idx
+      snpIdx = idx
     )
   })
 
   # Assemble regression data
-  allChi2 <- unlist(lapply(blockData, `[[`, "chi2_rot"))
+  allChi2 <- unlist(lapply(blockData, `[[`, "chi2Rot"))
   allD <- unlist(lapply(blockData, `[[`, "eigenvalues"))
 
   # Build design matrix
   # Stratified model: E[chi2_rot_i - 1] = n/M * sum_a(tau_a * d_i * ld_annot_{a,i}) + n*a
   # Unstratified model (no baseline annotations): same with single base column
   if (!is.null(baselineMat)) {
-    allLdAnnot <- do.call(rbind, lapply(blockData, `[[`, "ld_annot"))
+    allLdAnnot <- do.call(rbind, lapply(blockData, `[[`, "ldAnnot"))
     X <- cbind(n * allD * allLdAnnot / M, rep(n, length(allD)))
     nTau <- ncol(baselineMat)
   } else {
@@ -151,20 +151,20 @@ lderUnivariate <- function(z, n, eigenRef, annotations = NULL,
   if (!is.null(annotations)) {
     strat <- .lderStratified(z, n, eigenRef, annotations, tau, a,
                              baselineMat)
-    scoreStats <- strat$score_stats
+    scoreStats <- strat$scoreStats
   }
 
   list(
     h2 = h2,
-    h2_se = se[1],
+    h2Se = se[1],
     intercept = a,
-    intercept_se = se[2],
+    interceptSe = se[2],
     tau = tau,
-    tau_se = tauSe,
-    tau_blocks = tauBlocks,
+    tauSe = tauSe,
+    tauBlocks = tauBlocks,
     local = localDf,
     enrichment = baselineEnrichmentDf,
-    score_stats = scoreStats
+    scoreStats = scoreStats
   )
 }
 
@@ -180,7 +180,7 @@ lderUnivariate <- function(z, n, eigenRef, annotations = NULL,
 #' @param tau Numeric vector of annotation coefficients.
 #' @param aGlobal Numeric, global intercept.
 #' @param baselineMat Matrix of baseline annotations, or NULL.
-#' @return A data.frame with block_id, h2_local, h2_local_se.
+#' @return A data.frame with blockId, h2Local, h2LocalSe.
 #' @keywords internal
 .lderLocalH2 <- function(blockData, n, M, tau, aGlobal,
                          baselineMat = NULL) {
@@ -189,11 +189,11 @@ lderUnivariate <- function(z, n, eigenRef, annotations = NULL,
     bd <- blockData[[b]]
     pBlock <- bd$n_snps
     d <- bd$eigenvalues
-    chi2 <- bd$chi2_rot
+    chi2 <- bd$chi2Rot
 
     # Compute fitted baseline contribution for this block
     if (!is.null(baselineMat)) {
-      ldAnnot <- bd$ld_annot  # nEigenvalues x nAnnotations
+      ldAnnot <- bd$ldAnnot  # nEigenvalues x nAnnotations
       fittedBaseline <- as.vector(n / M * d *
                                     (ldAnnot %*% tau))
     } else {
@@ -204,7 +204,7 @@ lderUnivariate <- function(z, n, eigenRef, annotations = NULL,
     y <- chi2 - 1 - n * aGlobal - fittedBaseline
     x <- n * d / M
     if (length(y) < 3) {
-      return(data.frame(block_id = b, h2_local = NA, h2_local_se = NA))
+      return(data.frame(blockId = b, h2Local = NA, h2LocalSe = NA))
     }
     w <- 1 / (2 * pmax(chi2, 1)^2)
     h2Local <- sum(w * x * y) / sum(w * x^2)
@@ -213,7 +213,7 @@ lderUnivariate <- function(z, n, eigenRef, annotations = NULL,
     info <- sum(w * x^2)
     seLocal <- 1 / sqrt(info)
 
-    data.frame(block_id = b, h2_local = h2Local, h2_local_se = seLocal)
+    data.frame(blockId = b, h2Local = h2Local, h2LocalSe = seLocal)
   })
   do.call(rbind, localResults)
 }
@@ -228,7 +228,7 @@ lderUnivariate <- function(z, n, eigenRef, annotations = NULL,
 #' @param tau Numeric vector of annotation coefficients.
 #' @param a Numeric, intercept.
 #' @param baselineMat Matrix of baseline annotations, or NULL.
-#' @return A list with enrichment data.frame and score_stats list.
+#' @return A list with enrichment data.frame and scoreStats list.
 #' @keywords internal
 .lderStratified <- function(z, n, eigenRef, annotations, tau, a,
                             baselineMat = NULL) {
@@ -237,7 +237,7 @@ lderUnivariate <- function(z, n, eigenRef, annotations = NULL,
   nCandidates <- ncol(candidateAnnot@annotations)
 
   if (nCandidates == 0) {
-    return(list(enrichment = NULL, score_stats = NULL))
+    return(list(enrichment = NULL, scoreStats = NULL))
   }
 
   nBlocks <- length(eigenRef@eigenList)
@@ -248,7 +248,7 @@ lderUnivariate <- function(z, n, eigenRef, annotations = NULL,
 
   for (b in seq_len(nBlocks)) {
     block <- eigenRef@eigenList[[b]]
-    idx <- block$snp_idx
+    idx <- block$snpIdx
     V <- block$vectors
     d <- block$values
     zBlock <- z[idx]
@@ -296,16 +296,16 @@ lderUnivariate <- function(z, n, eigenRef, annotations = NULL,
 
   enrichmentDf <- data.frame(
     annotation = candidateAnnot@annotationMeta$name,
-    score_z = scoreZ,
-    score_p = 2 * pnorm(-abs(scoreZ)),
+    scoreZ = scoreZ,
+    scoreP = 2 * pnorm(-abs(scoreZ)),
     stringsAsFactors = FALSE
   )
 
   scoreStatsList <- list(
     z = scoreZ,
     R = R,
-    annotation_names = candidateAnnot@annotationMeta$name
+    annotationNames = candidateAnnot@annotationMeta$name
   )
 
-  list(enrichment = enrichmentDf, score_stats = scoreStatsList)
+  list(enrichment = enrichmentDf, scoreStats = scoreStatsList)
 }

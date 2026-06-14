@@ -16,8 +16,8 @@ test_that("LdData constructor works with correlation matrix", {
     variant_id = c("chr1:100:A:G", "chr1:200:C:T"),
     A1 = c("G", "T"), A2 = c("A", "C")
   )
-  bm <- data.frame(block_id = 1L, chrom = "1", block_start = 100L,
-                    block_end = 200L, size = 2L, start_idx = 1L, end_idx = 2L)
+  bm <- data.frame(blockId = 1L, chrom = "1", blockStart = 100L,
+                    blockEnd = 200L, size = 2L, startIdx = 1L, endIdx = 2L)
 
   ld <- LdData(correlation = R, variants = gr, blockMetadata = bm)
   expect_s4_class(ld, "LdData")
@@ -94,7 +94,7 @@ test_that("LdData S4 accessors return correct data", {
     variant_id = c("v1", "v2"), A1 = c("A", "C"), A2 = c("G", "T")
   )
   ld <- LdData(correlation = R, variants = gr,
-               blockMetadata = data.frame(block_id = 1L))
+               blockMetadata = data.frame(blockId = 1L))
   expect_equal(getCorrelation(ld), R)
   expect_equal(getVariantIds(ld), c("v1", "v2"))
   expect_false(hasGenotypes(ld))
@@ -223,7 +223,7 @@ test_that("RegionalData show method works", {
 test_that("FineMappingResult constructor and accessors work", {
   tl <- data.frame(
     variant_id = c("v1", "v2", "v3"),
-    method = rep("susie_rss", 3),
+    method = rep("susieRss", 3),
     pip = c(0.9, 0.05, 0.8),
     cs = c(1L, 0L, 2L),
     stringsAsFactors = FALSE
@@ -232,7 +232,7 @@ test_that("FineMappingResult constructor and accessors work", {
     variantNames = c("v1", "v2", "v3"),
     trimmedFit = list(alpha = matrix(0, 2, 3)),
     topLoci = tl,
-    method = "susie_rss"
+    method = "susieRss"
   )
   expect_s4_class(fm, "FineMappingResult")
 
@@ -259,7 +259,7 @@ test_that("FineMappingResult validation rejects missing method", {
 test_that("FineMappingResult show method works", {
   tl <- data.frame(
     variant_id = c("v1", "v2"),
-    method = rep("susie_rss", 2),
+    method = rep("susieRss", 2),
     pip = c(0.9, 0.1),
     cs = c(1L, 0L),
     stringsAsFactors = FALSE
@@ -268,9 +268,9 @@ test_that("FineMappingResult show method works", {
     variantNames = c("v1", "v2"),
     trimmedFit = list(),
     topLoci = tl,
-    method = "susie_rss"
+    method = "susieRss"
   )
-  expect_output(show(fm), "FineMappingResult.*susie_rss.*2 variants.*1 credible")
+  expect_output(show(fm), "FineMappingResult.*susieRss.*2 variants.*1 credible")
 })
 
 # =============================================================================
@@ -394,9 +394,9 @@ test_that("getLbf returns data.frame with variant_id and L columns", {
     variantNames = c("v1", "v2", "v3", "v4"),
     trimmedFit = list(lbf_variable = lbf_mat, pip = pip_vec),
     topLoci = data.frame(variant_id = names(pip_vec),
-                          method = rep("susie_rss", 4),
+                          method = rep("susieRss", 4),
                           stringsAsFactors = FALSE),
-    method = "susie_rss"
+    method = "susieRss"
   )
   result <- getLbf(fm)
   expect_s3_class(result, "data.frame")
@@ -416,9 +416,9 @@ test_that("getLbf returns empty data.frame when trimmed_fit is NULL", {
     variantNames = c("v1", "v2"),
     trimmedFit = NULL,
     topLoci = data.frame(variant_id = c("v1", "v2"),
-                          method = rep("susie_rss", 2),
+                          method = rep("susieRss", 2),
                           stringsAsFactors = FALSE),
-    method = "susie_rss"
+    method = "susieRss"
   )
   result <- getLbf(fm)
   expect_s3_class(result, "data.frame")
@@ -431,9 +431,9 @@ test_that("getLbf returns empty data.frame when lbf_variable is absent", {
     variantNames = c("v1", "v2"),
     trimmedFit = list(pip = c(v1 = 0.5, v2 = 0.5)),
     topLoci = data.frame(variant_id = c("v1", "v2"),
-                          method = rep("susie_rss", 2),
+                          method = rep("susieRss", 2),
                           stringsAsFactors = FALSE),
-    method = "susie_rss"
+    method = "susieRss"
   )
   result <- getLbf(fm)
   expect_s3_class(result, "data.frame")
@@ -441,7 +441,7 @@ test_that("getLbf returns empty data.frame when lbf_variable is absent", {
   expect_equal(ncol(result), 0)
 })
 
-test_that("getLbf falls back to pip names when variant_names is empty", {
+test_that("getLbf falls back to pip names when variantNames is empty", {
   lbf_mat <- matrix(c(1, 2, 3, 4), nrow = 1)
   fm <- FineMappingResult(
     variantNames = character(0),
@@ -450,7 +450,7 @@ test_that("getLbf falls back to pip names when variant_names is empty", {
     topLoci = data.frame(variant_id = character(0),
                           method = character(0),
                           stringsAsFactors = FALSE),
-    method = "susie_rss"
+    method = "susieRss"
   )
   result <- getLbf(fm)
   expect_equal(result$variant_id, c("a", "b", "c", "d"))
@@ -464,8 +464,8 @@ test_that("getLbf falls back to pip names when variant_names is empty", {
 test_that("getEffects returns per-effect summary with correct columns", {
   # 3 effects, 5 variants
   purity_mat <- matrix(
-    c(0.8, 0.9, 0.85,   # min.abs.corr column
-      0.85, 0.95, 0.90), # mean.abs.corr column
+    c(0.8, 0.9, 0.85,   # minAbsCorr column
+      0.85, 0.95, 0.90), # meanAbsCorr column
     nrow = 3, ncol = 2
   )
   rownames(purity_mat) <- c("L1", "L2", "L3")
@@ -483,25 +483,25 @@ test_that("getEffects returns per-effect summary with correct columns", {
       )
     ),
     topLoci = data.frame(variant_id = paste0("v", 1:5),
-                          method = rep("susie_rss", 5),
+                          method = rep("susieRss", 5),
                           stringsAsFactors = FALSE),
-    method = "susie_rss"
+    method = "susieRss"
   )
 
   result <- getEffects(fm)
   expect_s3_class(result, "data.frame")
   expect_equal(nrow(result), 3)
-  expected_cols <- c("effect_id", "V", "cs_log10bf", "cs_min_r2",
-                     "cs_avg_r2", "coverage", "cs")
+  expected_cols <- c("effectId", "V", "csLog10bf", "csMinR2",
+                     "csAvgR2", "coverage", "cs")
   expect_true(all(expected_cols %in% names(result)))
 
   # effect_ids
 
-  expect_equal(result$effect_id, c("L1", "L2", "L3"))
+  expect_equal(result$effectId, c("L1", "L2", "L3"))
   # V
   expect_equal(result$V, c(0.01, 0.02, 0.03))
-  # cs_log10bf
-  expect_equal(result$cs_log10bf, c(10.5, 20.3, 5.1))
+  # csLog10bf
+  expect_equal(result$csLog10bf, c(10.5, 20.3, 5.1))
 })
 
 test_that("getEffects cs column has semicolon-separated variant names", {
@@ -523,9 +523,9 @@ test_that("getEffects cs column has semicolon-separated variant names", {
       )
     ),
     topLoci = data.frame(variant_id = paste0("v", 1:4),
-                          method = rep("susie_rss", 4),
+                          method = rep("susieRss", 4),
                           stringsAsFactors = FALSE),
-    method = "susie_rss"
+    method = "susieRss"
   )
 
   result <- getEffects(fm)
@@ -533,10 +533,10 @@ test_that("getEffects cs column has semicolon-separated variant names", {
   expect_equal(result$cs[2], "v2;v4")
   expect_equal(result$coverage[1], 0.95)
   expect_equal(result$coverage[2], 0.99)
-  expect_equal(result$cs_min_r2[1], 0.8)
-  expect_equal(result$cs_avg_r2[1], 0.85)
-  expect_equal(result$cs_min_r2[2], 0.9)
-  expect_equal(result$cs_avg_r2[2], 0.95)
+  expect_equal(result$csMinR2[1], 0.8)
+  expect_equal(result$csAvgR2[1], 0.85)
+  expect_equal(result$csMinR2[2], 0.9)
+  expect_equal(result$csAvgR2[2], 0.95)
 })
 
 test_that("getEffects reports None for effects without CS", {
@@ -549,16 +549,16 @@ test_that("getEffects reports None for effects without CS", {
       sets = list(cs = NULL, coverage = NULL, purity = NULL)
     ),
     topLoci = data.frame(variant_id = paste0("v", 1:3),
-                          method = rep("susie_rss", 3),
+                          method = rep("susieRss", 3),
                           stringsAsFactors = FALSE),
-    method = "susie_rss"
+    method = "susieRss"
   )
 
   result <- getEffects(fm)
   expect_equal(nrow(result), 2)
   expect_true(all(result$cs == "None"))
   expect_true(all(result$coverage == 0))
-  expect_true(all(result$cs_min_r2 == 0))
+  expect_true(all(result$csMinR2 == 0))
 })
 
 test_that("getEffects returns empty data.frame when trimmed_fit is NULL", {
@@ -566,9 +566,9 @@ test_that("getEffects returns empty data.frame when trimmed_fit is NULL", {
     variantNames = c("v1", "v2"),
     trimmedFit = NULL,
     topLoci = data.frame(variant_id = c("v1", "v2"),
-                          method = rep("susie_rss", 2),
+                          method = rep("susieRss", 2),
                           stringsAsFactors = FALSE),
-    method = "susie_rss"
+    method = "susieRss"
   )
   result <- getEffects(fm)
   expect_s3_class(result, "data.frame")
@@ -581,9 +581,9 @@ test_that("getEffects returns empty data.frame when no V or alpha", {
     variantNames = c("v1", "v2"),
     trimmedFit = list(pip = c(v1 = 0.5, v2 = 0.5)),
     topLoci = data.frame(variant_id = c("v1", "v2"),
-                          method = rep("susie_rss", 2),
+                          method = rep("susieRss", 2),
                           stringsAsFactors = FALSE),
-    method = "susie_rss"
+    method = "susieRss"
   )
   result <- getEffects(fm)
   expect_s3_class(result, "data.frame")

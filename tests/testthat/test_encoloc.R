@@ -1,11 +1,11 @@
 context("encoloc")
 
-.test_fm_result <- function(variant_names, trimmedFit = list(),
+.test_fm_result <- function(variantNames, trimmedFit = list(),
                             topLoci = data.frame(variant_id = character(0),
                                                   method = character(0),
                                                   stringsAsFactors = FALSE)) {
   FineMappingResult(
-    variantNames = variant_names,
+    variantNames = variantNames,
     trimmedFit = trimmedFit,
     topLoci = topLoci,
     method = "susie"
@@ -73,10 +73,10 @@ generate_mock_ld_files <- function(seed = 1, num_blocks = 5) {
         end = seq(100, 500, 100),
         path = unlist(lapply(1:num_blocks, function(i) paste0(ld_paths[[i]], ",", bim_paths[[i]]))))
 
-    meta_path <- gsub("//", "/", tempfile(pattern = paste0("ld_meta_file_path"), tmpdir = tempdir(), fileext = ".txt.gz"))
-    write_delim(meta_df, meta_path, delim = "\t")
+    metaPath <- gsub("//", "/", tempfile(pattern = paste0("ld_meta_file_path"), tmpdir = tempdir(), fileext = ".txt.gz"))
+    write_delim(meta_df, metaPath, delim = "\t")
 
-    return(list(ld_paths = ld_paths, bim_paths = bim_paths, meta_path = meta_path))
+    return(list(ld_paths = ld_paths, bim_paths = bim_paths, metaPath = metaPath))
 }
 
 generate_mock_data_for_enrichment <- function(seed=1, num_files=2) {
@@ -88,17 +88,17 @@ generate_mock_data_for_enrichment <- function(seed=1, num_files=2) {
 
 generate_mock_susie_fit <- function(seed=1, num_samples = 10, num_features=10, unique_names=T) {
     set.seed(seed)
-    start_index <- sample(1:100000, 1)
+    startIndex <- sample(1:100000, 1)
     alpha_raw <- matrix(runif(num_samples * num_features), nrow = num_samples)
     alpha_normalized <- t(apply(alpha_raw, 1, function(x) x / sum(x)))
     if (unique_names) {
-        variant_names <- paste0("chr22:", start_index:(num_features + start_index -1), ":A:C")
+        variantNames <- paste0("chr22:", startIndex:(num_features + startIndex -1), ":A:C")
     } else {
-        variant_names <- rep("chr22:1:A:C", num_features + start_index - 1)
+        variantNames <- rep("chr22:1:A:C", num_features + startIndex - 1)
     }
     susie_fit <- list(
-        pip = setNames(runif(num_features), paste0("rs", start_index:(num_features+start_index-1))),
-        variantNames = variant_names,
+        pip = setNames(runif(num_features), paste0("rs", startIndex:(num_features+startIndex-1))),
+        variantNames = variantNames,
         lbf_variable = matrix(runif(num_features * 10), nrow = 10, ncol=num_features),
         alpha = alpha_normalized,
         V = runif(10),
@@ -252,7 +252,7 @@ test_that("colocWrapper works with dummy input",{
     res <- colocWrapper(input_data$xqtl_finemapped_data, input_data$gwas_finemapped_data,
                      xqtlFinemappingObj = "susieFit", gwasFinemappingObj = NULL,
                      xqtlVarnameObj = c("susieFit", "variantNames"), gwasVarnameObj = c("variantNames"))
-    expect_true(all(names(res) %in% c("summary","results","priors","analysis_region")))
+    expect_true(all(names(res) %in% c("summary","results","priors","analysisRegion")))
     file.remove(input_data$gwas_finemapped_data)
     file.remove(input_data$xqtl_finemapped_data)
 })
@@ -409,7 +409,7 @@ test_that("colocWrapper produces message when xqtl_data has no V", {
   file.remove(gwas_file, xqtl_file)
 })
 
-test_that("colocWrapper extracts analysis_region from xqtl_region_obj", {
+test_that("colocWrapper extracts analysisRegion from xqtl_region_obj", {
   gwas_file <- tempfile(fileext = ".rds")
   xqtl_file <- tempfile(fileext = ".rds")
 
@@ -433,7 +433,7 @@ test_that("colocWrapper extracts analysis_region from xqtl_region_obj", {
     xqtlVarnameObj = c("susieFit", "variantNames"),
     xqtlRegionObj = "region_info"
   )
-  expect_true("analysis_region" %in% names(result))
+  expect_true("analysisRegion" %in% names(result))
 
   file.remove(gwas_file, xqtl_file)
 })
@@ -452,14 +452,14 @@ test_that("colocWrapper errors when no GWAS source provided", {
   file.remove(xqtl_file)
 })
 
-test_that("colocWrapper errors when run_finemapping missing sumstat_path", {
+test_that("colocWrapper errors when run_finemapping missing sumstatPath", {
   expect_error(
     colocWrapper("fake.rds", runFinemapping = TRUE, ldData = list()),
     "sumstatPath is required"
   )
 })
 
-test_that("colocWrapper errors when run_finemapping missing LD_data", {
+test_that("colocWrapper errors when run_finemapping missing ldData", {
   expect_error(
     colocWrapper("fake.rds", runFinemapping = TRUE, sumstatPath = "s.tsv"),
     "ldData is required"
@@ -467,7 +467,7 @@ test_that("colocWrapper errors when run_finemapping missing LD_data", {
 })
 
 test_that("colocWrapper warns when both gwas_files and run_finemapping", {
-  # This will warn, then error on sumstat_path/LD_data validation
+  # This will warn, then error on sumstatPath/ldData validation
   expect_warning(
     tryCatch(
       colocWrapper("xqtl.rds", gwasFiles = "gwas.rds",
@@ -487,8 +487,8 @@ test_that("colocWrapper with runFinemapping = TRUE uses rssAnalysisPipeline", {
   # Build mock pipeline result matching rssAnalysisPipeline output structure
   mock_pipeline <- list(
     "susie_rss_SLALOM_RAISS_imputed" = list(
-      finemapping_result = .test_fm_result(
-        variant_names = xqtl_fit$variantNames,
+      finemappingResult = .test_fm_result(
+        variantNames = xqtl_fit$variantNames,
         trimmedFit = list(
           lbf_variable = xqtl_fit$lbf_variable,
           V = xqtl_fit$V,
@@ -497,7 +497,7 @@ test_that("colocWrapper with runFinemapping = TRUE uses rssAnalysisPipeline", {
         )
       )
     ),
-    rss_data_analyzed = data.frame(
+    rssDataAnalyzed = data.frame(
       variant_id = xqtl_fit$variantNames,
       z = rnorm(length(xqtl_fit$variantNames))
     )
@@ -511,7 +511,7 @@ test_that("colocWrapper with runFinemapping = TRUE uses rssAnalysisPipeline", {
     xqtl_file,
     runFinemapping = TRUE,
     sumstatPath = "/fake/gwas.tsv",
-    ldData = list(LD_matrix = diag(10)),
+    ldData = list(ldMatrix = diag(10)),
     nSample = 10000,
     region = "chr22:1-100",
     xqtlFinemappingObj = "susieFit",
@@ -528,8 +528,8 @@ test_that("colocWrapper with return_finemapping includes pipeline result", {
 
   mock_pipeline <- list(
     "susie_rss_SLALOM" = list(
-      finemapping_result = .test_fm_result(
-        variant_names = xqtl_fit$variantNames,
+      finemappingResult = .test_fm_result(
+        variantNames = xqtl_fit$variantNames,
         trimmedFit = list(
           lbf_variable = xqtl_fit$lbf_variable,
           V = xqtl_fit$V,
@@ -538,7 +538,7 @@ test_that("colocWrapper with return_finemapping includes pipeline result", {
         )
       )
     ),
-    rss_data_analyzed = data.frame(
+    rssDataAnalyzed = data.frame(
       variant_id = xqtl_fit$variantNames,
       z = rnorm(length(xqtl_fit$variantNames))
     )
@@ -552,14 +552,14 @@ test_that("colocWrapper with return_finemapping includes pipeline result", {
     xqtl_file,
     runFinemapping = TRUE,
     sumstatPath = "/fake/gwas.tsv",
-    ldData = list(LD_matrix = diag(10)),
+    ldData = list(ldMatrix = diag(10)),
     nSample = 10000,
     xqtlFinemappingObj = "susieFit",
     xqtlVarnameObj = c("susieFit", "variantNames"),
     returnFinemapping = TRUE
   )
-  expect_true("gwas_finemapping" %in% names(result))
-  expect_true("susie_rss_SLALOM" %in% names(result$gwas_finemapping))
+  expect_true("gwasFinemapping" %in% names(result))
+  expect_true("susie_rss_SLALOM" %in% names(result$gwasFinemapping))
   file.remove(xqtl_file)
 })
 
@@ -571,8 +571,8 @@ test_that("colocWrapper save_finemapping_path saves reusable RDS", {
 
   mock_pipeline <- list(
     "susie_rss_SLALOM" = list(
-      finemapping_result = .test_fm_result(
-        variant_names = xqtl_fit$variantNames,
+      finemappingResult = .test_fm_result(
+        variantNames = xqtl_fit$variantNames,
         trimmedFit = list(
           lbf_variable = xqtl_fit$lbf_variable,
           V = xqtl_fit$V,
@@ -581,7 +581,7 @@ test_that("colocWrapper save_finemapping_path saves reusable RDS", {
         )
       )
     ),
-    rss_data_analyzed = data.frame(
+    rssDataAnalyzed = data.frame(
       variant_id = xqtl_fit$variantNames,
       z = rnorm(length(xqtl_fit$variantNames))
     )
@@ -595,7 +595,7 @@ test_that("colocWrapper save_finemapping_path saves reusable RDS", {
     xqtl_file,
     runFinemapping = TRUE,
     sumstatPath = "/fake/gwas.tsv",
-    ldData = list(LD_matrix = diag(10)),
+    ldData = list(ldMatrix = diag(10)),
     nSample = 10000,
     xqtlFinemappingObj = "susieFit",
     xqtlVarnameObj = c("susieFit", "variantNames"),
@@ -608,7 +608,7 @@ test_that("colocWrapper save_finemapping_path saves reusable RDS", {
   # Verify saved format is compatible with file-based reading path
   saved_data <- readRDS(save_path)[[1]]
   expect_true("susie_fit" %in% names(saved_data))
-  expect_true("variant_names" %in% names(saved_data))
+  expect_true("variantNames" %in% names(saved_data))
   expect_true(!is.null(saved_data$susie_fit$lbf_variable))
   expect_true(!is.null(saved_data$susie_fit$V))
 
@@ -619,7 +619,7 @@ test_that("colocWrapper save_finemapping_path saves reusable RDS", {
     xqtlFinemappingObj = "susieFit",
     gwasFinemappingObj = "susie_fit",
     xqtlVarnameObj = c("susieFit", "variantNames"),
-    gwasVarnameObj = "variant_names"
+    gwasVarnameObj = "variantNames"
   )
   expect_true(all(c("summary", "results") %in% names(result2)))
 
@@ -642,7 +642,7 @@ test_that("colocWrapper backward compatibility with gwas_files only", {
   res <- colocWrapper(input_data$xqtl_finemapped_data, input_data$gwas_finemapped_data,
                        xqtlFinemappingObj = "susieFit", gwasFinemappingObj = NULL,
                        xqtlVarnameObj = c("susieFit", "variantNames"), gwasVarnameObj = c("variantNames"))
-  expect_true(all(names(res) %in% c("summary", "results", "priors", "analysis_region")))
+  expect_true(all(names(res) %in% c("summary", "results", "priors", "analysisRegion")))
   file.remove(input_data$gwas_finemapped_data)
   file.remove(input_data$xqtl_finemapped_data)
 })
@@ -865,7 +865,7 @@ test_that("colocPostProcessor with LD path and region calls processColocResults"
   local_mocked_bindings(
     processColocResults = function(...) {
       list(sets = list(cs = list(c("s1", "s2")),
-                       purity = data.frame(min.abs.corr = 0.9, mean.abs.corr = 0.95, median.abs.corr = 0.92)))
+                       purity = data.frame(minAbsCorr = 0.9, meanAbsCorr = 0.95, medianAbsCorr = 0.92)))
     }
   )
 
@@ -1013,7 +1013,7 @@ test_that("processColocResults returns cs when purity passes", {
   expect_true(!is.null(result$sets$cs))
   expect_true(!is.null(result$sets$purity))
   expect_equal(ncol(result$sets$purity), 3)
-  expect_equal(colnames(result$sets$purity), c("min.abs.corr", "mean.abs.corr", "median.abs.corr"))
+  expect_equal(colnames(result$sets$purity), c("minAbsCorr", "meanAbsCorr", "medianAbsCorr"))
 })
 
 test_that("processColocResults filters impure credible sets", {
@@ -1082,9 +1082,9 @@ test_that("extract_ld_for_variants loads LD, aligns names, and subsets", {
       ref_panel$variant_id <- ld_variants
       variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
       bm <- data.frame(
-        block_id = 1L, chrom = as.character(ref_panel$chrom[1]),
-        block_start = min(ref_panel$pos), block_end = max(ref_panel$pos),
-        size = length(ld_variants), start_idx = 1L, end_idx = length(ld_variants),
+        blockId = 1L, chrom = as.character(ref_panel$chrom[1]),
+        blockStart = min(ref_panel$pos), blockEnd = max(ref_panel$pos),
+        size = length(ld_variants), startIdx = 1L, endIdx = length(ld_variants),
         stringsAsFactors = FALSE
       )
       LdData(correlation = ld_mat, variants = variants_gr, blockMetadata = bm)
@@ -1108,13 +1108,13 @@ test_that("colocWrapper passes through xqtl_raw_data when xqtl_finemapping_obj i
   on.exit(file.remove(gwas_file, xqtl_file), add = TRUE)
 
   p <- 50
-  variant_names <- paste0("chr1:", 1:p, ":A:G")
+  variantNames <- paste0("chr1:", 1:p, ":A:G")
 
   # GWAS file with standard susie structure
   gwas_data <- list(list(
     lbf_variable = matrix(rnorm(5 * p), nrow = 5),
     V = rep(1, 5),
-    variantNames = variant_names
+    variantNames = variantNames
   ))
   saveRDS(gwas_data, gwas_file)
 
@@ -1122,7 +1122,7 @@ test_that("colocWrapper passes through xqtl_raw_data when xqtl_finemapping_obj i
   xqtl_data <- list(list(
     lbf_variable = matrix(rnorm(3 * p), nrow = 3),
     V = rep(1, 3),
-    variantNames = variant_names
+    variantNames = variantNames
   ))
   saveRDS(xqtl_data, xqtl_file)
 
@@ -1149,7 +1149,7 @@ test_that("colocWrapper falls back to fsusie structure when lbf_variable is empt
   on.exit(file.remove(gwas_file, xqtl_file), add = TRUE)
 
   p <- 20
-  variant_names <- paste0("chr1:", 1:p, ":A:G")
+  variantNames <- paste0("chr1:", 1:p, ":A:G")
 
   # GWAS: readRDS(file)[[1]] = raw_data, raw_data has lbf_variable (empty),
   # and raw_data[[1]]$fsusie_result$lBF for the fallback path
@@ -1158,7 +1158,7 @@ test_that("colocWrapper falls back to fsusie structure when lbf_variable is empt
     fsusie_inner,
     lbf_variable = data.frame(),
     V = numeric(0),
-    variantNames = variant_names
+    variantNames = variantNames
   )
   saveRDS(list(gwas_raw), gwas_file)
 
@@ -1169,7 +1169,7 @@ test_that("colocWrapper falls back to fsusie structure when lbf_variable is empt
     susieFit = list(
       lbf_variable = data.frame(),
       V = numeric(0),
-      variantNames = variant_names
+      variantNames = variantNames
     )
   )
   saveRDS(list(xqtl_raw), xqtl_file)
@@ -1202,7 +1202,7 @@ test_that("colocWrapper falls back to fsusie structure when lbf_variable is empt
 #     B2 <- D2
 #     B1$snp <- B2$snp <- colnames(B1$LD) <- colnames(B2$LD) <- rownames(B1$LD) <- rownames(B2$LD) <- paste0("1:", 1:500, ":A:G")
 #     variants <- paste0("1:", 1:5, ":A:G")
-#     res <- load_and_extract_ld_matrix(data$meta_path, region, variants)
+#     res <- load_and_extract_ld_matrix(data$metaPath, region, variants)
 #     expect_equal(nrow(res), 5)
 #     expect_equal(ncol(res), 5)
 #     lapply(unlist(data), function(x) {
@@ -1219,7 +1219,7 @@ test_that("colocWrapper falls back to fsusie structure when lbf_variable is empt
 #     B2 <- D2
 #     B1$snp <- B2$snp <- colnames(B1$LD) <- colnames(B2$LD) <- rownames(B1$LD) <- rownames(B2$LD) <- paste0("1:", 1:500, ":A:G")
 #     variants <- paste0("1:", 1:5, ":A:G")
-#     ext_ld <- load_and_extract_ld_matrix(data$meta_path, region, variants)
+#     ext_ld <- load_and_extract_ld_matrix(data$metaPath, region, variants)
 #     res <- calculate_purity(variants, ext_ld, squared = TRUE)
 #     expect_equal(ncol(res), 3)
 #     lapply(unlist(data), function(x) {
@@ -1236,7 +1236,7 @@ test_that("colocWrapper falls back to fsusie structure when lbf_variable is empt
 #     B2 <- D2
 #     B1$snp <- B2$snp <- colnames(B1$LD) <- colnames(B2$LD) <- rownames(B1$LD) <- rownames(B2$LD) <- paste0("1:", 1:500, ":A:G")
 #     mock_coloc_results <- coloc.signals(B1, B2, p12 = 1e-5)
-#     res <- processColocResults(mock_coloc_results, data$meta_path, region)
+#     res <- processColocResults(mock_coloc_results, data$metaPath, region)
 #     expect_equal(length(res$sets$cs), 1)
 #     lapply(unlist(data), function(x) {
 #         file.remove(x)

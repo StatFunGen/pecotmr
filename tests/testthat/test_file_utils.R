@@ -312,14 +312,14 @@ test_that("readStochasticMeta returns NULL for nonexistent file", {
 
 test_that("loadGenotypeRegion applies stochastic inversion with explicit sidecar", {
   td <- test_path("test_data")
-  meta_path <- file.path(td, "test_harmonize_regions.stochastic_meta.tsv")
-  smeta <- pecotmr:::readStochasticMeta(meta_path)
+  metaPath <- file.path(td, "test_harmonize_regions.stochastic_meta.tsv")
+  smeta <- pecotmr:::readStochasticMeta(metaPath)
 
   # Load with explicit sidecar - inversion transforms the integer dosages
   res <- loadGenotypeRegion(
     file.path(td, "test_harmonize_regions"),
     returnVariantInfo =TRUE,
-    stochasticMetaPath =meta_path
+    stochasticMetaPath =metaPath
   )
 
   expect_equal(ncol(res$X), 8L)
@@ -1303,8 +1303,8 @@ test_that("batchLoadTwasWeights does not split when within memory limit", {
     stringsAsFactors = FALSE
   )
   result <- batchLoadTwasWeights(mock_results, meta_df, maxMemoryPerBatch =1000)
-  expect_equal(names(result), "all_genes")
-  expect_equal(names(result$all_genes), c("gene1", "gene2"))
+  expect_equal(names(result), "allGenes")
+  expect_equal(names(result$allGenes), c("gene1", "gene2"))
 })
 
 test_that("batchLoadTwasWeights splits when exceeding memory limit", {
@@ -1515,7 +1515,7 @@ test_that("loadRssData uses case/control counts for n but not varY by default", 
 
   result <- suppressWarnings(loadRssData(tmp_sumstat, tmp_col, nCase =500, nControl =500))
   expect_equal(result$n, 1000)
-  expect_null(result$var_y)
+  expect_null(result$varY)
   file.remove(tmp_sumstat, tmp_col)
 })
 
@@ -1533,7 +1533,7 @@ test_that("loadRssData computes observed-scale OLS varY from case/control counts
     binaryTraitModel = "ols"))
   expect_equal(result$n, 1000)
   phi <- 500 / 1000
-  expect_equal(result$var_y, 1000 / 999 * phi * (1 - phi))
+  expect_equal(result$varY, 1000 / 999 * phi * (1 - phi))
   file.remove(tmpSumstat, tmpCol)
 })
 
@@ -1648,10 +1648,10 @@ test_that("loadRssData extracts n from n_case and n_control columns", {
 
   result <- suppressWarnings(loadRssData(tmp_sumstat, tmp_col))
   expect_equal(result$n, 1000)
-  expect_null(result$var_y)
+  expect_null(result$varY)
   result_ols <- suppressWarnings(loadRssData(
     tmp_sumstat, tmp_col, binaryTraitModel = "ols"))
-  expect_equal(result_ols$var_y, 1000 / 999 * 0.5 * 0.5)
+  expect_equal(result_ols$varY, 1000 / 999 * 0.5 * 0.5)
   file.remove(tmp_sumstat, tmp_col)
 })
 
@@ -1750,14 +1750,14 @@ test_that("loadMultitaskRegionalData individual-level path returns expected stru
     conditionsListIndividual ="cond1"
   )
   expect_true(is.list(result))
-  expect_named(result, c("individual_data", "sumstat_data"))
-  expect_false(is.null(result$individual_data))
-  expect_true(is.null(result$sumstat_data))
+  expect_named(result, c("individualData", "sumstatData"))
+  expect_false(is.null(result$individualData))
+  expect_true(is.null(result$sumstatData))
   # Individual data should be a RegionalData
-  expect_true(is(result$individual_data, "RegionalData"))
-  expect_true(is.matrix(getResidualY(result$individual_data, 1L)))
-  expect_true(is.matrix(result$individual_data@genotypeMatrix))
-  expect_true(!is.null(getChrom(result$individual_data)))
+  expect_true(is(result$individualData, "RegionalData"))
+  expect_true(is.matrix(getResidualY(result$individualData, 1L)))
+  expect_true(is.matrix(result$individualData@genotypeMatrix))
+  expect_true(!is.null(getChrom(result$individualData)))
 })
 
 test_that("loadMultitaskRegionalData loads and merges multiple genotype groups", {
@@ -1821,8 +1821,8 @@ test_that("loadMultitaskRegionalData loads and merges multiple genotype groups",
   expect_equal(calls[[2]]$phenotype, paste0("pheno", 3:4))
   expect_equal(calls[[1]]$extractRegionName, as.list(paste0("gene", 1:2)))
   expect_equal(calls[[2]]$extractRegionName, as.list(paste0("gene", 3:4)))
-  expect_true(is(result$individual_data, "RegionalData"))
-  expect_equal(names(result$individual_data@phenotypes), paste0("cond", 1:4))
+  expect_true(is(result$individualData, "RegionalData"))
+  expect_equal(names(result$individualData@phenotypes), paste0("cond", 1:4))
 })
 
 test_that("loadMultitaskRegionalData defaults missing individual condition names", {
@@ -1879,7 +1879,7 @@ test_that("loadMultitaskRegionalData defaults missing individual condition names
   expect_equal(length(calls), 2L)
   expect_equal(calls[[1]]$conditions, paste0("condition", 1:2))
   expect_equal(calls[[2]]$conditions, paste0("condition", 3:4))
-  expect_equal(names(result$individual_data@phenotypes), paste0("condition", 1:4))
+  expect_equal(names(result$individualData@phenotypes), paste0("condition", 1:4))
 })
 
 test_that("loadMultitaskRegionalData validates individual input vector lengths", {
@@ -1929,12 +1929,12 @@ test_that("loadMultitaskRegionalData sumstat path returns expected structure", {
   cat(paste("21", "0", "0", "test_harmonize_regions", sep = "\t"), "\n",
       file = meta_file, append = TRUE)
 
-  sumstat_path <- file.path(td, "test_sumstats.tsv.gz")
+  sumstatPath <- file.path(td, "test_sumstats.tsv.gz")
   result <- suppressMessages(suppressWarnings(
     loadMultitaskRegionalData(
       region = "chr21:17014042-45433269",
       associationWindow ="chr21:17014042-45433269",
-      sumstatPathList =sumstat_path,
+      sumstatPathList =sumstatPath,
       ldMetaFilePathList =meta_file,
       conditionsListSumstat ="sumstat_cond1",
       nSamples = 1000,
@@ -1943,16 +1943,16 @@ test_that("loadMultitaskRegionalData sumstat path returns expected structure", {
     )
   ))
   expect_true(is.list(result))
-  expect_named(result, c("individual_data", "sumstat_data"))
-  expect_true(is.null(result$individual_data))
-  expect_false(is.null(result$sumstat_data))
-  # Sumstat data should have sumstats and LD_info lists
-  expect_true("sumstats" %in% names(result$sumstat_data))
-  expect_true("LD_info" %in% names(result$sumstat_data))
-  expect_equal(length(result$sumstat_data$sumstats), 1L)
-  expect_equal(length(result$sumstat_data$LD_info), 1L)
+  expect_named(result, c("individualData", "sumstatData"))
+  expect_true(is.null(result$individualData))
+  expect_false(is.null(result$sumstatData))
+  # Sumstat data should have sumstats and ldInfo lists
+  expect_true("sumstats" %in% names(result$sumstatData))
+  expect_true("ldInfo" %in% names(result$sumstatData))
+  expect_equal(length(result$sumstatData$sumstats), 1L)
+  expect_equal(length(result$sumstatData$ldInfo), 1L)
   # The inner sumstats should be a named list with the condition
-  inner <- result$sumstat_data$sumstats[[1]]
+  inner <- result$sumstatData$sumstats[[1]]
   expect_true("sumstat_cond1" %in% names(inner))
   ss <- inner[["sumstat_cond1"]]
   expect_true(is.data.frame(ss$sumstats))
@@ -1993,12 +1993,12 @@ test_that("loadMultitaskRegionalData both paths simultaneously", {
       nControls =0
     )
   ))
-  expect_false(is.null(result$individual_data))
-  expect_false(is.null(result$sumstat_data))
+  expect_false(is.null(result$individualData))
+  expect_false(is.null(result$sumstatData))
   # Both paths should produce valid data
-  expect_true(is(result$individual_data, "RegionalData"))
-  expect_true(is.matrix(result$individual_data@genotypeMatrix))
-  expect_true(is.data.frame(result$sumstat_data$sumstats[[1]][["ss_cond1"]]$sumstats))
+  expect_true(is(result$individualData, "RegionalData"))
+  expect_true(is.matrix(result$individualData@genotypeMatrix))
+  expect_true(is.data.frame(result$sumstatData$sumstats[[1]][["ss_cond1"]]$sumstats))
 })
 
 test_that("loadMultitaskRegionalData sumstat path errors on mismatched match_LD_sumstat", {
@@ -2118,8 +2118,8 @@ test_that("batchLoadTwasWeights splits into multiple batches", {
   result <- batchLoadTwasWeights(twas, meta, maxMemoryPerBatch =max_mb)
   expect_true(length(result) >= 2)
   # All genes should be present across batches
-  all_genes <- unlist(lapply(result, names))
-  expect_true(all(c("gene1", "gene2", "gene3") %in% all_genes))
+  allGenes <- unlist(lapply(result, names))
+  expect_true(all(c("gene1", "gene2", "gene3") %in% allGenes))
 })
 
 test_that("batchLoadTwasWeights puts oversized gene in its own batch", {
@@ -2169,8 +2169,8 @@ test_that("loadCovariateData errors on missing file", {
 
 test_that("loadTsvRegion reads full gz file without region", {
   skip_if_not_installed("Rsamtools")
-  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
-  result <- loadTsvRegion(sumstat_path)
+  sumstatPath <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  result <- loadTsvRegion(sumstatPath)
   expect_true(is.data.frame(result))
   expect_equal(nrow(result), 8L)
   expect_true("BETA" %in% names(result) || "beta" %in% names(result))
@@ -2178,23 +2178,23 @@ test_that("loadTsvRegion reads full gz file without region", {
 
 test_that("loadTsvRegion queries region via tabix", {
   skip_if_not_installed("Rsamtools")
-  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
-  result <- loadTsvRegion(sumstat_path, region = "chr21:17014042-45433269")
+  sumstatPath <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  result <- loadTsvRegion(sumstatPath, region = "chr21:17014042-45433269")
   expect_true(is.data.frame(result))
   expect_equal(nrow(result), 8L)
 })
 
 test_that("loadTsvRegion errors for non-overlapping region", {
   skip_if_not_installed("Rsamtools")
-  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
-  expect_error(loadTsvRegion(sumstat_path, region = "chr1:1-2"), "tabix-indexed")
+  sumstatPath <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  expect_error(loadTsvRegion(sumstatPath, region = "chr1:1-2"), "tabix-indexed")
 })
 
 test_that("loadTsvRegion queries subregion correctly", {
   skip_if_not_installed("Rsamtools")
-  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  sumstatPath <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
   # Only first 2 variants: pos 17014042 and 18759786
-  result <- loadTsvRegion(sumstat_path, region = "chr21:17014042-18759786")
+  result <- loadTsvRegion(sumstatPath, region = "chr21:17014042-18759786")
   expect_true(is.data.frame(result))
   expect_equal(nrow(result), 2L)
 })
@@ -2205,8 +2205,8 @@ test_that("loadTsvRegion queries subregion correctly", {
 
 test_that("loadRssData reads summary statistics without region", {
   skip_if_not_installed("MungeSumstats")
-  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
-  result <- suppressMessages(loadRssData(sumstat_path))
+  sumstatPath <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  result <- suppressMessages(loadRssData(sumstatPath))
   expect_true(is.list(result))
   expect_true(is.data.frame(result$sumstats))
   expect_equal(nrow(result$sumstats), 8L)
@@ -2221,9 +2221,9 @@ test_that("loadRssData reads summary statistics without region", {
 test_that("loadRssData reads summary statistics with region", {
   skip_if_not_installed("MungeSumstats")
   skip_if_not_installed("Rsamtools")
-  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  sumstatPath <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
   result <- suppressMessages(
-    loadRssData(sumstat_path, region = "chr21:17014042-45433269")
+    loadRssData(sumstatPath, region = "chr21:17014042-45433269")
   )
   expect_true(is.data.frame(result$sumstats))
   expect_equal(nrow(result$sumstats), 8L)
@@ -2231,36 +2231,36 @@ test_that("loadRssData reads summary statistics with region", {
 
 test_that("loadRssData with n_sample returns sample size", {
   skip_if_not_installed("MungeSumstats")
-  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
-  result <- suppressMessages(loadRssData(sumstat_path, nSample =500))
+  sumstatPath <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  result <- suppressMessages(loadRssData(sumstatPath, nSample =500))
   expect_equal(result$n, 500)
-  expect_null(result$var_y)
+  expect_null(result$varY)
 })
 
 test_that("loadRssData with nCase and nControl defaults to RSS varY", {
   skip_if_not_installed("MungeSumstats")
-  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
-  result <- suppressMessages(loadRssData(sumstat_path, nCase =200, nControl =300))
+  sumstatPath <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  result <- suppressMessages(loadRssData(sumstatPath, nCase =200, nControl =300))
   expect_equal(result$n, 500)
-  expect_null(result$var_y)
+  expect_null(result$varY)
 })
 
 test_that("loadRssData with nCase and nControl computes OLS varY", {
   skip_if_not_installed("MungeSumstats")
-  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  sumstatPath <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
   result <- suppressMessages(loadRssData(
-    sumstat_path, nCase = 200, nControl = 300,
+    sumstatPath, nCase = 200, nControl = 300,
     binaryTraitModel = "ols"))
   expect_equal(result$n, 500)
   # centered 0/1 y has y'y = n * phi * (1 - phi), and susieR expects y'y/(n - 1)
-  expect_equal(result$var_y, 500 / 499 * 0.4 * 0.6)
+  expect_equal(result$varY, 500 / 499 * 0.4 * 0.6)
 })
 
 test_that("loadRssData extracts n from sumstats N column", {
   skip_if_not_installed("MungeSumstats")
-  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  sumstatPath <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
   # n_sample=0 means "get from file"
-  result <- suppressMessages(loadRssData(sumstat_path))
+  result <- suppressMessages(loadRssData(sumstatPath))
   # The fixture has N column with per-variant sample sizes; median should be used
   expect_true(!is.null(result$n))
   expect_true(result$n > 0)
@@ -2273,9 +2273,9 @@ test_that("loadRssData errors on missing file", {
 test_that("loadRssData errors for non-overlapping region", {
   skip_if_not_installed("MungeSumstats")
   skip_if_not_installed("Rsamtools")
-  sumstat_path <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
+  sumstatPath <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
   expect_error(
-    suppressMessages(loadRssData(sumstat_path, region = "chr1:1-2")),
+    suppressMessages(loadRssData(sumstatPath, region = "chr1:1-2")),
     "tabix-indexed"
   )
 })

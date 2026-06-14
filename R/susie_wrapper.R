@@ -95,14 +95,33 @@ formatCsColumn <- function(coverage, method) {
   topLoci
 }
 
+# Translate a camelCase pecotmr method identifier (e.g. "susieInfRss") into the
+# snake_case form (e.g. "susie_inf_rss") used in the documented top_loci schema.
+# Single-word identifiers (e.g. "susie", "mvsusie", "fsusie") pass through.
+.camelToSnakeMethod <- function(method) {
+  if (is.null(method) || length(method) == 0L) return(method)
+  lookup <- c(
+    susieInf                      = "susie_inf",
+    susieAsh                      = "susie_ash",
+    susieRss                      = "susie_rss",
+    susieInfRss                   = "susie_inf_rss",
+    susieAshRss                   = "susie_ash_rss",
+    singleEffect                  = "single_effect",
+    bayesianConditionalRegression = "bayesian_conditional_regression"
+  )
+  vapply(method, function(m) {
+    if (m %in% names(lookup)) lookup[[m]] else m
+  }, character(1), USE.NAMES = FALSE)
+}
+
 .setFinemappingFitClass <- function(fit, method) {
   if (is.null(fit)) return(NULL)
   methodClass <- switch(method,
     susie = "susie",
-    susie_inf = "susie_inf",
-    susie_rss = "susie_rss",
-    single_effect = "susie_rss",
-    bayesian_conditional_regression = "susie_rss",
+    susieInf = "susieInf",
+    susieRss = "susieRss",
+    singleEffect = "susieRss",
+    bayesianConditionalRegression = "susieRss",
     fsusie = "susiF",
     mvsusie = "mvsusie",
     NULL
@@ -135,7 +154,7 @@ fitSusieInfThenSusie <- function(X, y, args = list(),
                                  susieArgs = list(),
                                  fittedModels = NULL) {
   if (is.null(fittedModels)) fittedModels <- list()
-  susieInfFit <- fittedModels[["susie_inf"]]
+  susieInfFit <- fittedModels[["susieInf"]]
   susieFit <- fittedModels[["susie"]]
 
   if (is.null(susieInfFit)) {
@@ -146,7 +165,7 @@ fitSusieInfThenSusie <- function(X, y, args = list(),
     ))
     susieInfFit <- do.call(susie, fitArgs)
   }
-  susieInfFit <- .setFinemappingFitClass(susieInfFit, "susie_inf")
+  susieInfFit <- .setFinemappingFitClass(susieInfFit, "susieInf")
 
   if (is.null(susieFit)) {
     fitArgs <- prepareSusieFromInfArgs(modifyList(args, susieArgs), susieInfFit, refineDefault = TRUE)
@@ -154,13 +173,13 @@ fitSusieInfThenSusie <- function(X, y, args = list(),
   }
   susieFit <- .setFinemappingFitClass(susieFit, "susie")
 
-  list(susie = susieFit, susie_inf = susieInfFit)
+  list(susie = susieFit, susieInf = susieInfFit)
 }
 
 #' Two-stage SuSiE-RSS Fine-mapping
 #'
 #' RSS analog of \code{fitSusieInfThenSusie}. Fits SuSiE-inf via
-#' \code{susie_rss} first, then initialises standard SuSiE-RSS from
+#' \code{susieRss} first, then initialises standard SuSiE-RSS from
 #' the SuSiE-inf result. The single pair of fits can be used both for
 #' fine-mapping post-processing and TWAS weight extraction.
 #'
@@ -171,8 +190,8 @@ fitSusieInfThenSusie <- function(X, y, args = list(),
 #' @param susieInfArgs SuSiE-inf-specific overrides.
 #' @param susieArgs Standard SuSiE-RSS-specific overrides.
 #' @param fittedModels Optional list with pre-fitted \code{$susie} and/or
-#'   \code{$susie_inf} objects to skip re-fitting.
-#' @return A list with \code{susie} and \code{susie_inf} fit objects.
+#'   \code{$susieInf} objects to skip re-fitting.
+#' @return A list with \code{susie} and \code{susieInf} fit objects.
 #' @importFrom susieR susie_rss
 #' @export
 fitSusieInfThenSusieRss <- function(z, R, n, args = list(),
@@ -180,7 +199,7 @@ fitSusieInfThenSusieRss <- function(z, R, n, args = list(),
                                     susieArgs = list(),
                                     fittedModels = NULL) {
   if (is.null(fittedModels)) fittedModels <- list()
-  susieInfFit <- fittedModels[["susie_inf"]]
+  susieInfFit <- fittedModels[["susieInf"]]
   susieFit <- fittedModels[["susie"]]
 
   if (is.null(susieInfFit)) {
@@ -191,15 +210,15 @@ fitSusieInfThenSusieRss <- function(z, R, n, args = list(),
     ))
     susieInfFit <- do.call(susie_rss, fitArgs)
   }
-  susieInfFit <- .setFinemappingFitClass(susieInfFit, "susie_inf")
+  susieInfFit <- .setFinemappingFitClass(susieInfFit, "susieInf")
 
   if (is.null(susieFit)) {
     fitArgs <- prepareSusieFromInfArgs(modifyList(args, susieArgs), susieInfFit, refineDefault = TRUE)
     susieFit <- do.call(susie_rss, c(list(z = z, R = R, n = n), fitArgs))
   }
-  susieFit <- .setFinemappingFitClass(susieFit, "susie_rss")
+  susieFit <- .setFinemappingFitClass(susieFit, "susieRss")
 
-  list(susie = susieFit, susie_inf = susieInfFit)
+  list(susie = susieFit, susieInf = susieInfFit)
 }
 
 #' Post-process Fine-mapping Fits
@@ -208,7 +227,7 @@ fitSusieInfThenSusieRss <- function(z, R, n, args = list(),
 #' builds both a method-specific result list and shared top-loci tables.
 #'
 #' @param fits Named list of fine-mapping fits. Names define method identity,
-#'   for example \code{susie}, \code{susie_inf}, \code{susie_rss},
+#'   for example \code{susie}, \code{susieInf}, \code{susieRss},
 #'   \code{mvsusie}, or \code{fsusie}.
 #' @param dataX Genotype matrix, LD/correlation matrix, or other method-specific
 #'   input used for credible-set purity and correlations.
@@ -223,7 +242,7 @@ fitSusieInfThenSusieRss <- function(z, R, n, args = list(),
 #' @param otherQuantities Optional list carried into each method result.
 #' @param priorEffTol Tolerance for retaining effects by prior variance.
 #' @param minAbsCorr Minimum absolute correlation for credible-set purity.
-#' @return A list with \code{finemapping_results} (per-method post-processed
+#' @return A list with \code{finemappingResults} (per-method post-processed
 #'   objects, each carrying a trimmed fit and method-specific intermediates)
 #'   and a single unified \code{top_loci} table in the fixed 22-column shape
 #'   (see \code{\link{buildTopLoci}}). Per-method contributions are
@@ -276,7 +295,7 @@ postprocessFinemappingFits <- function(fits, dataX, dataY = NULL,
   })
 
   list(
-    finemapping_results = posts,
+    finemappingResults = posts,
     top_loci = topLoci
   )
 }
@@ -292,13 +311,13 @@ postprocessFinemappingFit.susie <- function(fit, method = "susie", csInput = NUL
 }
 
 #' @exportS3Method
-postprocessFinemappingFit.susie_inf <- function(fit, method = "susie_inf", csInput = NULL, ...) {
+postprocessFinemappingFit.susieInf <- function(fit, method = "susieInf", csInput = NULL, ...) {
   if (is.null(csInput)) csInput <- "X"
   .postprocessFinemappingFitCommon(fit, method = method, csInput = csInput, ...)
 }
 
 #' @exportS3Method
-postprocessFinemappingFit.susie_rss <- function(fit, method = "susie_rss", csInput = NULL, ...) {
+postprocessFinemappingFit.susieRss <- function(fit, method = "susieRss", csInput = NULL, ...) {
   if (is.null(csInput)) csInput <- "Xcorr"
   .postprocessFinemappingFitCommon(fit, method = method, csInput = csInput, ...)
 }
@@ -361,15 +380,15 @@ postprocessFinemappingFit.susiF <- function(fit, method = "fsusie", csInput = NU
 
   res <- list(
     top_loci = topLoci,
-    finemapping_result = fmResult
+    finemappingResult = fmResult
   )
   if (!is.null(sumstats)) res$sumstats <- sumstats
   sampleNames <- .sampleNamesFromDataY(dataY)
-  if (!is.null(sampleNames)) res$sample_names <- sampleNames
-  if (method == "mvsusie" && !is.null(fit$outcome_names)) res$context_names <- fit$outcome_names
+  if (!is.null(sampleNames)) res$sampleNames <- sampleNames
+  if (method == "mvsusie" && !is.null(fit$outcome_names)) res$contextNames <- fit$outcome_names
   analysisScript <- loadScript()
-  if (analysisScript != "") res$analysis_script <- analysisScript
-  if (!is.null(otherQuantities)) res$other_quantities <- otherQuantities
+  if (analysisScript != "") res$analysisScript <- analysisScript
+  if (!is.null(otherQuantities)) res$otherQuantities <- otherQuantities
   res
 }
 
@@ -382,7 +401,7 @@ extractVariantNames <- function(fit) {
 
 extractSumstats <- function(fit, dataX, dataY, xScalar = 1, yScalar = 1, method = "susie") {
   if (is.null(dataY)) return(NULL)
-  if (method == "susie_rss") return(dataY)
+  if (method == "susieRss") return(dataY)
   if (is.list(dataY) && !is.data.frame(dataY) &&
       any(c("betahat", "sebetahat", "z") %in% names(dataY))) {
     return(dataY)
@@ -519,7 +538,7 @@ computeCsTable <- function(fit, dataX, coverage, csInput = c("X", "Xcorr", "fsus
 #'   LD/reference variants). Exported directly as the \code{af} column. MAF is
 #'   never exported; derive it from \code{af} at filter time. Default NULL ->
 #'   \code{af = NA_real_}.
-#' @param method Method name (e.g. \code{"susie"}, \code{"susie_inf"}). Required.
+#' @param method Method name (e.g. \code{"susie"}, \code{"susieInf"}). Required.
 #' @param signalCutoff PIP cutoff for retaining PIP-only (non-CS) variants.
 #' @param dataX Optional regional genotype matrix.
 #' @param dataY Optional regional phenotype matrix; \code{nrow(dataY)} fills
@@ -536,7 +555,7 @@ buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
                          region = NULL) {
   if (missing(method) || is.null(method) ||
       length(method) != 1L || is.na(method) || !nzchar(method)) {
-    stop("buildTopLoci: `method` is required (e.g. \"susie\", \"susie_inf\").")
+    stop("buildTopLoci: `method` is required (e.g. \"susie\", \"susieInf\").")
   }
   if (length(csTables) == 0) return(.emptyTopLoci())
   coverageValues <- attr(csTables, "coverage")
@@ -642,9 +661,12 @@ buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
     pip                   = as.numeric(fit$pip[vIdx]),
     posterior_effect_mean = postMean[vIdx],
     posterior_effect_se   = postSe[vIdx],
-    cs_95                 = paste0(method, "_", idx95),
-    cs_70                 = paste0(method, "_", idx70),
-    cs_50                 = paste0(method, "_", idx50),
+    # cs_<coverage> values carry the snake_case method identifier prefix
+    # (`susie_rss_0`) for downstream-schema stability; the `method` column
+    # itself carries the camelCase pecotmr-internal identifier.
+    cs_95                 = paste0(.camelToSnakeMethod(method), "_", idx95),
+    cs_70                 = paste0(.camelToSnakeMethod(method), "_", idx70),
+    cs_50                 = paste0(.camelToSnakeMethod(method), "_", idx50),
     cs_95_purity          = cs95Purity,
     method                = rep(method, nKeys),
     grange_start          = rep(grange[["start"]], nKeys),
@@ -654,6 +676,25 @@ buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
   )
   rownames(out) <- NULL
   out
+}
+
+# Translate susieR's snake-case `sets$purity` columns into pecotmr camelCase.
+# Accepts a data.frame, matrix, or NULL; preserves type and column order.
+.translateSusiePurity <- function(p) {
+  if (is.null(p)) return(p)
+  lookup <- c("min.abs.corr"    = "minAbsCorr",
+              "mean.abs.corr"   = "meanAbsCorr",
+              "median.abs.corr" = "medianAbsCorr")
+  if (is.data.frame(p)) {
+    nm <- names(p)
+    names(p) <- ifelse(nm %in% names(lookup), lookup[nm], nm)
+  } else if (is.matrix(p)) {
+    cn <- colnames(p)
+    if (!is.null(cn)) {
+      colnames(p) <- ifelse(cn %in% names(lookup), lookup[cn], cn)
+    }
+  }
+  p
 }
 
 # Per-CS purity from one cs_table: prefer susieR's sets$purity$min.abs.corr;
@@ -798,19 +839,19 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
 #'
 #' Converts method-aware fine-mapping post-processing output into the root-level
 #' fields consumed by protocol RDS files. The primary method's
-#' \code{FineMappingResult} S4 object is promoted to the \code{finemapping_result}
+#' \code{FineMappingResult} S4 object is promoted to the \code{finemappingResult}
 #' field; use its accessors (\code{getTrimmedFit}, \code{getVariantNames},
 #' \code{getTopLoci}, etc.) instead of legacy list keys.
 #'
 #' @param post Output from \code{\link{postprocessFinemappingFits}}.
 #' @param primaryMethod Method whose result should populate root-level fields.
-#' @return A list with root-level fields including \code{finemapping_result}
+#' @return A list with root-level fields including \code{finemappingResult}
 #'   and \code{top_loci}.
 #' @export
 formatFinemappingOutput <- function(post, primaryMethod) {
-  methodPost <- post$finemapping_results[[primaryMethod]]
+  methodPost <- post$finemappingResults[[primaryMethod]]
   if (is.null(methodPost)) {
-    stop("primaryMethod was not found in finemapping_results: ", primaryMethod)
+    stop("primaryMethod was not found in finemappingResults: ", primaryMethod)
   }
   c(
     methodPost,
@@ -833,10 +874,10 @@ formatFinemappingOutput <- function(post, primaryMethod) {
 #' @param twasWeightsTable Path to weights table in the nested list.
 #' @param ldVariants Vector of LD reference variant IDs for allele QC.
 #' @param matchMinProp Minimum proportion of matched variants. Default 0.2.
-#' @return A list with adjusted_susie_weights and remained_variants_ids.
+#' @return A list with adjustedSusieWeights and remainedVariantIds.
 #' @export
 adjustSusieWeights <- function(twasWeightsResults, keepVariants, runAlleleQc = TRUE,
-                               variableNameObj = c("susie_results", context, "variant_names"),
+                               variableNameObj = c("susie_results", context, "variantNames"),
                                susieObj = c("susie_results", context, "susie_result_trimmed"),
                                twasWeightsTable = c("weights", context), ldVariants, matchMinProp = 0.2) {
   # Intersect the rownames of weights with keepVariants
@@ -866,7 +907,7 @@ adjustSusieWeights <- function(twasWeightsResults, keepVariants, runAlleleQc = T
   if (length(intersectedIndices) == 0) {
     stop("Error: No intersected variants found. Please check 'twas_weights' and 'keep_variants' inputs to make sure there are variants left to use.")
   }
-  # Subset lbf_matrix, mu, and x_column_scale_factors
+  # Subset lbfMatrix, mu, and x_column_scale_factors
   lbfMatrix <- getNestedElement(twasWeightsResults, c(susieObj, "lbf_variable"))
   mu <- getNestedElement(twasWeightsResults, c(susieObj, "mu"))
   xColumnScalFactors <- getNestedElement(twasWeightsResults, c(susieObj, "X_column_scale_factors"))
@@ -875,7 +916,7 @@ adjustSusieWeights <- function(twasWeightsResults, keepVariants, runAlleleQc = T
   muSubset <- mu[, intersectedIndices, drop = FALSE]
   xColumnScalFactorsSubset <- xColumnScalFactors[intersectedIndices]
 
-  # Convert lbf_matrix to alpha and calculate adjusted xQTL coefficients
+  # Convert lbfMatrix to alpha and calculate adjusted xQTL coefficients
   adjustedXqtlAlpha <- lbfToAlpha(lbfMatrixSubset)
   adjustedXqtlCoef <- colSums(adjustedXqtlAlpha * muSubset) / xColumnScalFactorsSubset
   # alleleQc now outputs canonical variant_ids (with chr prefix) -- no need to add chr
@@ -884,7 +925,7 @@ adjustSusieWeights <- function(twasWeightsResults, keepVariants, runAlleleQc = T
   } else {
     intersectedVariants
   }
-  return(list(adjusted_susie_weights = adjustedXqtlCoef, remained_variants_ids = remainedVariantsIds))
+  return(list(adjustedSusieWeights = adjustedXqtlCoef, remainedVariantIds = remainedVariantsIds))
 }
 
 #' Run the SuSiE RSS pipeline
@@ -898,23 +939,23 @@ adjustSusieWeights <- function(twasWeightsResults, keepVariants, runAlleleQc = T
 #' @param n Sample size.
 #' @param L Maximum number of causal configurations (default: 30).
 #' @param lGreedy Initial greedy number of causal configurations (default: 5).
-#' @param analysisMethod Iteration mode for the \code{"susie_rss"} fit:
-#'   \code{"susie_rss"} (default, normal IBSS), \code{"single_effect"} (L=1,
-#'   single iteration), or \code{"bayesian_conditional_regression"}
-#'   (full L, single iteration). Only affects the \code{"susie_rss"}
-#'   method; ignored for \code{"susie_inf_rss"} and \code{"susie_ash_rss"}.
+#' @param analysisMethod Iteration mode for the \code{"susieRss"} fit:
+#'   \code{"susieRss"} (default, normal IBSS), \code{"singleEffect"} (L=1,
+#'   single iteration), or \code{"bayesianConditionalRegression"}
+#'   (full L, single iteration). Only affects the \code{"susieRss"}
+#'   method; ignored for \code{"susieInfRss"} and \code{"susieAshRss"}.
 #' @param methods Optional character vector selecting which RSS variants to
-#'   fit. Any subset of \code{c("susie_rss", "susie_inf_rss",
-#'   "susie_ash_rss")}. Default \code{NULL} falls back to a single-method fit
+#'   fit. Any subset of \code{c("susieRss", "susieInfRss",
+#'   "susieAshRss")}. Default \code{NULL} falls back to a single-method fit
 #'   driven by \code{analysisMethod} (backward-compatible behavior). When
 #'   \code{methods} is passed explicitly, each requested method is fitted;
-#'   if \code{"susie_inf_rss"} is paired with \code{"susie_rss"} or
-#'   \code{"susie_ash_rss"} (or both) and \code{addSusieInf = TRUE}, the
+#'   if \code{"susieInfRss"} is paired with \code{"susieRss"} or
+#'   \code{"susieAshRss"} (or both) and \code{addSusieInf = TRUE}, the
 #'   SuSiE-inf-RSS fit initialises the downstream method. This exposes five
 #'   distinct fitting modes mirroring the individual-level pipeline.
 #' @param addSusieInf Logical. When \code{methods} contains
-#'   \code{"susie_inf_rss"} alongside \code{"susie_rss"} and/or
-#'   \code{"susie_ash_rss"}, controls whether SuSiE-inf-RSS is chained into
+#'   \code{"susieInfRss"} alongside \code{"susieRss"} and/or
+#'   \code{"susieAshRss"}, controls whether SuSiE-inf-RSS is chained into
 #'   the downstream method(s) as initialisation. Default \code{TRUE}.
 #' @param coverage Coverage level (default: 0.95).
 #' @param secondaryCoverage Secondary coverage levels (default: c(0.7, 0.5)).
@@ -922,10 +963,10 @@ adjustSusieWeights <- function(twasWeightsResults, keepVariants, runAlleleQc = T
 #' @param minAbsCorr Minimum absolute correlation for CS purity (default: 0.8).
 #' @param rFinite Controls variance inflation to account for estimating
 #'   the R matrix from a finite reference panel. NULL (default): no
-#'   variance inflation. Passed directly to susie_rss.
-#' @param rMismatch LD mismatch correction method passed directly to susie_rss.
+#'   variance inflation. Passed directly to susieRss.
+#' @param rMismatch LD mismatch correction method passed directly to susieRss.
 #'   Default NULL disables mismatch correction.
-#' @param ... Additional parameters passed to susie_rss. Supplying
+#' @param ... Additional parameters passed to susieRss. Supplying
 #'   \code{var_y} here, together with \code{beta} and \code{se} columns in
 #'   \code{sumstats}, selects the \code{bhat/shat/var_y} sufficient-statistic
 #'   interface. Without \code{var_y}, this wrapper uses the z-score RSS
@@ -941,7 +982,7 @@ adjustSusieWeights <- function(twasWeightsResults, keepVariants, runAlleleQc = T
 #' @export
 susieRssPipeline <- function(sumstats, ldMat = NULL, xMat = NULL, n = NULL,
                              L = 30, lGreedy = 5,
-                             analysisMethod = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
+                             analysisMethod = c("susieRss", "singleEffect", "bayesianConditionalRegression"),
                              methods = NULL,
                              addSusieInf = TRUE,
                              coverage = 0.95,
@@ -955,7 +996,7 @@ susieRssPipeline <- function(sumstats, ldMat = NULL, xMat = NULL, n = NULL,
   if (!is.null(lGreedy)) lGreedy <- min(lGreedy, L)
 
   # Resolve effective methods. NULL => legacy single-method via analysisMethod.
-  validRssMethods <- c("susie_rss", "susie_inf_rss", "susie_ash_rss")
+  validRssMethods <- c("susieRss", "susieInfRss", "susieAshRss")
   if (is.null(methods)) {
     # Backward-compatible: single fit using analysisMethod, labeled accordingly.
     fitMethods <- analysisMethod
@@ -971,9 +1012,9 @@ susieRssPipeline <- function(sumstats, ldMat = NULL, xMat = NULL, n = NULL,
     fitMethods <- unique(methods)
   }
   chainInfToSusieRss     <- isTRUE(addSusieInf) &&
-    all(c("susie_inf_rss", "susie_rss") %in% fitMethods)
+    all(c("susieInfRss", "susieRss") %in% fitMethods)
   chainInfToSusieAshRss <- isTRUE(addSusieInf) &&
-    all(c("susie_inf_rss", "susie_ash_rss") %in% fitMethods)
+    all(c("susieInfRss", "susieAshRss") %in% fitMethods)
   anyChainedInitRss <- chainInfToSusieRss || chainInfToSusieAshRss
 
   if (!is.null(sumstats$z)) {
@@ -1026,9 +1067,9 @@ susieRssPipeline <- function(sumstats, ldMat = NULL, xMat = NULL, n = NULL,
   if (!is.null(xMat)) common$X <- xMat else common$R <- ldMat
 
   fitOneSusieRss <- function() {
-    if (analysisMethod == "single_effect") {
+    if (analysisMethod == "singleEffect") {
       do.call(susie_rss, c(common, list(L = 1, L_greedy = NULL, max_iter = 1)))
-    } else if (analysisMethod == "bayesian_conditional_regression") {
+    } else if (analysisMethod == "bayesianConditionalRegression") {
       do.call(susie_rss, c(common, list(L = L, L_greedy = lGreedy, max_iter = 1)))
     } else {
       do.call(susie_rss, c(common, list(L = L, L_greedy = lGreedy)))
@@ -1047,44 +1088,44 @@ susieRssPipeline <- function(sumstats, ldMat = NULL, xMat = NULL, n = NULL,
   }
 
   fittedModels <- list()
-  if ("susie_inf_rss" %in% fitMethods || anyChainedInitRss) {
+  if ("susieInfRss" %in% fitMethods || anyChainedInitRss) {
     infFit <- fitOneSusieInfRss()
-    fittedModels[["susie_inf_rss"]] <- .setFinemappingFitClass(infFit, "susie_inf_rss")
+    fittedModels[["susieInfRss"]] <- .setFinemappingFitClass(infFit, "susieInfRss")
   }
-  if ("susie_rss" %in% fitMethods ||
-      identical(fitMethods, "single_effect") ||
-      identical(fitMethods, "bayesian_conditional_regression")) {
+  if ("susieRss" %in% fitMethods ||
+      identical(fitMethods, "singleEffect") ||
+      identical(fitMethods, "bayesianConditionalRegression")) {
     if (chainInfToSusieRss) {
       chainedArgs <- prepareSusieFromInfArgs(
         list(L = L, L_greedy = lGreedy),
-        fittedModels[["susie_inf_rss"]], refineDefault = TRUE,
+        fittedModels[["susieInfRss"]], refineDefault = TRUE,
         unmappableEffects = "none"
       )
       rssFit <- do.call(susie_rss, c(common, chainedArgs))
     } else {
       rssFit <- fitOneSusieRss()
     }
-    # Label by analysisMethod when in legacy single-method mode, else "susie_rss"
-    rssLabel <- if (is.null(methods)) analysisMethod else "susie_rss"
+    # Label by analysisMethod when in legacy single-method mode, else "susieRss"
+    rssLabel <- if (is.null(methods)) analysisMethod else "susieRss"
     fittedModels[[rssLabel]] <- .setFinemappingFitClass(rssFit, rssLabel)
   }
-  if ("susie_ash_rss" %in% fitMethods) {
+  if ("susieAshRss" %in% fitMethods) {
     if (chainInfToSusieAshRss) {
       chainedArgs <- prepareSusieFromInfArgs(
         list(L = L, L_greedy = lGreedy),
-        fittedModels[["susie_inf_rss"]], refineDefault = NULL,
+        fittedModels[["susieInfRss"]], refineDefault = NULL,
         unmappableEffects = "ash"
       )
       ashFit <- do.call(susie_rss, c(common, chainedArgs))
     } else {
       ashFit <- fitOneSusieAshRss()
     }
-    fittedModels[["susie_ash_rss"]] <- .setFinemappingFitClass(ashFit, "susie_ash_rss")
+    fittedModels[["susieAshRss"]] <- .setFinemappingFitClass(ashFit, "susieAshRss")
   }
 
   # Drop SuSiE-inf-RSS from post-processing if it was only fit for init
-  if (anyChainedInitRss && !("susie_inf_rss" %in% fitMethods)) {
-    fittedModels[["susie_inf_rss"]] <- NULL
+  if (anyChainedInitRss && !("susieInfRss" %in% fitMethods)) {
+    fittedModels[["susieInfRss"]] <- NULL
   }
 
   # For post-processing, pass genotype matrix X directly when available.
@@ -1115,8 +1156,8 @@ susieRssPipeline <- function(sumstats, ldMat = NULL, xMat = NULL, n = NULL,
     minAbsCorr = minAbsCorr,
     csInput = ppCsInput
   )
-  # Primary method preference: "susie_rss" > other names > first fit
-  primary <- if ("susie_rss" %in% names(fittedModels)) "susie_rss" else names(fittedModels)[1]
+  # Primary method preference: "susieRss" > other names > first fit
+  primary <- if ("susieRss" %in% names(fittedModels)) "susieRss" else names(fittedModels)[1]
   formatFinemappingOutput(post, primaryMethod = primary)
 }
 

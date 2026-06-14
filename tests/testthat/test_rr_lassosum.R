@@ -30,9 +30,9 @@ test_that("lassosumRss runs successfully with valid input", {
   }
   result <- lassosumRss(bhat = bhat, LD = list(blk1 = R), n = n)
   expect_type(result, "list")
-  expect_true("beta_est" %in% names(result))
-  expect_equal(length(result$beta_est), p)
-  expect_true(all(is.finite(result$beta_est)))
+  expect_true("betaEst" %in% names(result))
+  expect_equal(length(result$betaEst), p)
+  expect_true(all(is.finite(result$betaEst)))
   expect_equal(nrow(result$beta), p)
   expect_equal(ncol(result$beta), 20)
 })
@@ -48,9 +48,9 @@ test_that("lassosumRss accepts multiple LD blocks", {
   R2 <- diag(p2)
   result <- lassosumRss(bhat = bhat, LD = list(blk1 = R1, blk2 = R2), n = n)
   expect_type(result, "list")
-  expect_true("beta_est" %in% names(result))
-  expect_equal(length(result$beta_est), p)
-  expect_true(all(is.finite(result$beta_est)))
+  expect_true("betaEst" %in% names(result))
+  expect_equal(length(result$betaEst), p)
+  expect_true(all(is.finite(result$betaEst)))
 })
 
 test_that("lassosumRss with large lambda gives all-zero betas", {
@@ -61,11 +61,11 @@ test_that("lassosumRss with large lambda gives all-zero betas", {
   R <- diag(p)
   result <- lassosumRss(bhat = bhat, LD = list(blk1 = R), n = n,
                          lambda = c(100))
-  expect_true(all(result$beta_est == 0))
+  expect_true(all(result$betaEst == 0))
 })
 
 # ---- lassosumRssWeights (wrapper) ----
-test_that("lassosumRssWeights calls lassosumRss and returns beta_est", {
+test_that("lassosumRssWeights calls lassosumRss and returns betaEst", {
   set.seed(42)
   p <- 10
   n <- 100

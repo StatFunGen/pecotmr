@@ -7,7 +7,7 @@
 .computeFglsWeights(ldMatrixList, fittedValues)
 }
 \arguments{
-\item{ldMatrixList}{List of LD matrix blocks, each with R and snp_idx.}
+\item{ldMatrixList}{List of LD matrix blocks, each with R and snpIdx.}
 
 \item{fittedValues}{Numeric vector of fitted values from initial WLS.}
 }

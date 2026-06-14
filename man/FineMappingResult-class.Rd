@@ -17,7 +17,7 @@ S4 container for fine-mapping output. Stores variant names,
 
 \item{\code{topLoci}}{A \code{data.frame} in long format with columns:
 variant_id, method, coverage, cs, pip, and optionally betahat, sd,
-cs_log10bf, z.}
+csLog10bf, z.}
 
 \item{\code{method}}{Character string identifying the fine-mapping method.}
 

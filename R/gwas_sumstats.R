@@ -252,6 +252,6 @@ rssToGwasSumstats <- function(rssList, traitName = "trait",
   }
 
   GwasSumStats(data = ss, traitName = traitName, genome = genome,
-               varY = rssList$var_y)
+               varY = rssList$varY)
 }
 

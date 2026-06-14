@@ -234,17 +234,17 @@ test_that("get_cs_info reports variant in multiple CSs as multiple rows", {
 
 test_that("susieRssPipeline errors on missing z and beta/se", {
   sumstats <- data.frame(x = 1)
-  LD_mat <- matrix(1)
-  expect_error(susieRssPipeline(sumstats, LD_mat), "must have 'z'")
+  ldMat <- matrix(1)
+  expect_error(susieRssPipeline(sumstats, ldMat), "must have 'z'")
 })
 
 test_that("susieRssPipeline errors on invalid method", {
   sumstats <- list(z = rnorm(5))
-  LD_mat <- diag(5)
-  expect_error(susieRssPipeline(sumstats, LD_mat, analysisMethod = "invalid"))
+  ldMat <- diag(5)
+  expect_error(susieRssPipeline(sumstats, ldMat, analysisMethod = "invalid"))
 })
 
-test_that("susieRssPipeline runs with single_effect method", {
+test_that("susieRssPipeline runs with singleEffect method", {
   skip_if_not_installed("susieR")
   set.seed(42)
   n <- 20
@@ -254,14 +254,14 @@ test_that("susieRssPipeline runs with single_effect method", {
   colnames(R) <- rownames(R) <- names(z)
   sumstats <- list(z = z)
 
-  result <- susieRssPipeline(sumstats, R, analysisMethod = "single_effect")
+  result <- susieRssPipeline(sumstats, R, analysisMethod = "singleEffect")
   expect_true(is.list(result))
-  expect_true("finemapping_result" %in% names(result))
-  fm <- result$finemapping_result
+  expect_true("finemappingResult" %in% names(result))
+  fm <- result$finemappingResult
   if (!is.null(result$top_loci) && nrow(result$top_loci) > 0) {
     expect_true("pip"   %in% names(result$top_loci))
     expect_true("cs_95" %in% names(result$top_loci))
-    expect_true(all(result$top_loci$method == "single_effect"))
+    expect_true(all(result$top_loci$method == "singleEffect"))
   }
   # PIPs should be numeric, in [0,1], and sum to at most 1 (L=1)
   pip <- getTrimmedFit(fm)$pip
@@ -278,7 +278,7 @@ test_that("susieRssPipeline runs with single_effect method", {
   }
 })
 
-test_that("susieRssPipeline runs with bayesian_conditional_regression", {
+test_that("susieRssPipeline runs with bayesianConditionalRegression", {
   skip_if_not_installed("susieR")
   set.seed(42)
   n <- 20
@@ -289,16 +289,16 @@ test_that("susieRssPipeline runs with bayesian_conditional_regression", {
   sumstats <- list(z = z)
 
   result <- susieRssPipeline(sumstats, R,
-    analysisMethod = "bayesian_conditional_regression",
+    analysisMethod = "bayesianConditionalRegression",
     L = 5, lGreedy = 5
   )
   expect_true(is.list(result))
-  expect_true("finemapping_result" %in% names(result))
-  fm <- result$finemapping_result
+  expect_true("finemappingResult" %in% names(result))
+  fm <- result$finemappingResult
   if (!is.null(result$top_loci) && nrow(result$top_loci) > 0) {
     expect_true("pip"   %in% names(result$top_loci))
     expect_true("cs_95" %in% names(result$top_loci))
-    expect_true(all(result$top_loci$method == "bayesian_conditional_regression"))
+    expect_true(all(result$top_loci$method == "bayesianConditionalRegression"))
   }
   pip <- getTrimmedFit(fm)$pip
   expect_true(is.numeric(pip))
@@ -326,12 +326,12 @@ test_that("susieRssPipeline uses beta/se when z not provided", {
   sumstats <- list(beta = beta, se = se)
 
   result <- susieRssPipeline(sumstats, R,
-    analysisMethod = "susie_rss",
+    analysisMethod = "susieRss",
     L = 5, lGreedy = 5
   )
   expect_true(is.list(result))
-  expect_true("finemapping_result" %in% names(result))
-  fm <- result$finemapping_result
+  expect_true("finemappingResult" %in% names(result))
+  fm <- result$finemappingResult
   pip <- getTrimmedFit(fm)$pip
   expect_true(is.numeric(pip))
   expect_length(pip, n)
@@ -522,7 +522,7 @@ make_adjust_obj <- function(variant_ids, L = 3, ctx = "ctx") {
   )
   list(
     susie_results = setNames(list(list(
-      variant_names = variant_ids,
+      variantNames = variant_ids,
       susie_result_trimmed = list(
         lbf_variable = matrix(rnorm(L * p), nrow = L, ncol = p),
         mu = matrix(rnorm(L * p), nrow = L, ncol = p),
@@ -539,7 +539,7 @@ adjust_vids <- function(positions = 1:6) {
 }
 
 # =============================================================================
-# postprocessFinemappingFits: analysis_script and V=NULL branches (Tier 1)
+# postprocessFinemappingFits: analysisScript and V=NULL branches (Tier 1)
 # =============================================================================
 
 # Helper: build a minimal synthetic SuSiE-family output for post-processing
@@ -561,7 +561,7 @@ make_fake_susie_output <- function(p = 5, L = 3, has_V = TRUE) {
   out
 }
 
-test_that("postprocessFinemappingFits stores analysis_script when load_script returns non-empty", {
+test_that("postprocessFinemappingFits stores analysisScript when load_script returns non-empty", {
   skip_if_not_installed("susieR")
   p <- 5
   fake_output <- make_fake_susie_output(p)
@@ -571,13 +571,13 @@ test_that("postprocessFinemappingFits stores analysis_script when load_script re
     loadScript = function() "fake_script_content"
   )
   post <- postprocessFinemappingFits(
-    fits = list(susie_rss = pecotmr:::.setFinemappingFitClass(fake_output, "susie_rss")),
+    fits = list(susieRss = pecotmr:::.setFinemappingFitClass(fake_output, "susieRss")),
     dataX = R,
     dataY = list(z = rnorm(p)),
     coverage = 0.95
   )
-  result <- formatFinemappingOutput(post, primaryMethod = "susie_rss")
-  expect_equal(result$analysis_script, "fake_script_content")
+  result <- formatFinemappingOutput(post, primaryMethod = "susieRss")
+  expect_equal(result$analysisScript, "fake_script_content")
 })
 
 test_that("postprocessFinemappingFits keeps all effects when V is NULL", {
@@ -588,13 +588,13 @@ test_that("postprocessFinemappingFits keeps all effects when V is NULL", {
   R <- diag(p)
   colnames(R) <- rownames(R) <- names(fake_output$pip)
   post <- postprocessFinemappingFits(
-    fits = list(susie_rss = pecotmr:::.setFinemappingFitClass(fake_output, "susie_rss")),
+    fits = list(susieRss = pecotmr:::.setFinemappingFitClass(fake_output, "susieRss")),
     dataX = R,
     dataY = list(z = rnorm(p)),
     coverage = 0.95
   )
-  result <- formatFinemappingOutput(post, primaryMethod = "susie_rss")
-  trimmed <- getTrimmedFit(result$finemapping_result)
+  result <- formatFinemappingOutput(post, primaryMethod = "susieRss")
+  trimmed <- getTrimmedFit(result$finemappingResult)
   # With V=NULL, eff_idx = 1:L, so trimmed alpha should keep all L rows
   expect_equal(nrow(trimmed$alpha), L)
   # V should be NULL in trimmed output
@@ -644,9 +644,9 @@ test_that("postprocessFinemappingFits stores outcome_names, coef, and clfsr for 
   )
   result <- formatFinemappingOutput(post, primaryMethod = "mvsusie")
 
-  # outcome_names should be stored as context_names
-  expect_equal(result$context_names, cnames)
-  trimmed <- getTrimmedFit(result$finemapping_result)
+  # outcome_names should be stored as contextNames
+  expect_equal(result$contextNames, cnames)
+  trimmed <- getTrimmedFit(result$finemappingResult)
   # coef should come from mvsusieR::coef.mvsusie
   expect_equal(trimmed$coef, fake_coef[-1, , drop = FALSE])
   # conditional_lfsr should be trimmed to eff_idx
@@ -657,7 +657,7 @@ test_that("postprocessFinemappingFits stores outcome_names, coef, and clfsr for 
 # susieRssPipeline X-mode branches (Tier 2)
 # =============================================================================
 
-test_that("susieRssPipeline X-mode passes X to susie_rss and computes LD from X for post-processor", {
+test_that("susieRssPipeline X-mode passes X to susieRss and computes LD from X for post-processor", {
   skip_if_not_installed("susieR")
   p <- 5
   n <- 20
@@ -747,7 +747,7 @@ test_that("adjustSusieWeights errors when no variants intersect", {
       obj,
       keepVariants = paste0("chr2:", 1:5, ":A:G"),
       runAlleleQc = FALSE,
-      variableNameObj = c("susie_results", "ctx", "variant_names"),
+      variableNameObj = c("susie_results", "ctx", "variantNames"),
       susieObj = c("susie_results", "ctx", "susie_result_trimmed"),
       twasWeightsTable = c("weights", "ctx"),
       ldVariants = NULL
@@ -763,14 +763,14 @@ test_that("adjustSusieWeights run_allele_qc=FALSE returns intersect coefs", {
   out <- adjustSusieWeights(
     obj,
     keepVariants = keep, runAlleleQc = FALSE,
-    variableNameObj = c("susie_results", "ctx", "variant_names"),
+    variableNameObj = c("susie_results", "ctx", "variantNames"),
     susieObj = c("susie_results", "ctx", "susie_result_trimmed"),
     twasWeightsTable = c("weights", "ctx"),
     ldVariants = NULL
   )
-  expect_length(out$adjusted_susie_weights, 4)
-  expect_equal(out$remained_variants_ids, normalizeVariantId(keep))
-  expect_true(all(is.finite(out$adjusted_susie_weights)))
+  expect_length(out$adjustedSusieWeights, 4)
+  expect_equal(out$remainedVariantIds, normalizeVariantId(keep))
+  expect_true(all(is.finite(out$adjustedSusieWeights)))
 })
 
 test_that("adjustSusieWeights run_allele_qc=FALSE normalizes variant ids before matching", {
@@ -782,13 +782,13 @@ test_that("adjustSusieWeights run_allele_qc=FALSE normalizes variant ids before 
   out <- adjustSusieWeights(
     obj,
     keepVariants = keep, runAlleleQc = FALSE,
-    variableNameObj = c("susie_results", "ctx", "variant_names"),
+    variableNameObj = c("susie_results", "ctx", "variantNames"),
     susieObj = c("susie_results", "ctx", "susie_result_trimmed"),
     twasWeightsTable = c("weights", "ctx"),
     ldVariants = NULL
   )
-  expect_length(out$adjusted_susie_weights, 2)
-  expect_equal(out$remained_variants_ids, c("chr1:2:A:G", "chr1:3:A:G"))
+  expect_length(out$adjustedSusieWeights, 2)
+  expect_equal(out$remainedVariantIds, c("chr1:2:A:G", "chr1:3:A:G"))
 })
 
 test_that("adjustSusieWeights run_allele_qc=TRUE returns adjusted xQTL coefs", {
@@ -797,14 +797,14 @@ test_that("adjustSusieWeights run_allele_qc=TRUE returns adjusted xQTL coefs", {
   out <- adjustSusieWeights(
     obj,
     keepVariants = vids, runAlleleQc = TRUE, ldVariants = vids,
-    variableNameObj = c("susie_results", "ctx", "variant_names"),
+    variableNameObj = c("susie_results", "ctx", "variantNames"),
     susieObj = c("susie_results", "ctx", "susie_result_trimmed"),
     twasWeightsTable = c("weights", "ctx"),
     matchMinProp = 0.1
   )
-  expect_true(length(out$adjusted_susie_weights) > 0)
-  expect_true(all(is.finite(out$adjusted_susie_weights)))
-  expect_true(all(grepl("^chr1:", out$remained_variants_ids)))
+  expect_true(length(out$adjustedSusieWeights) > 0)
+  expect_true(all(is.finite(out$adjustedSusieWeights)))
+  expect_true(all(grepl("^chr1:", out$remainedVariantIds)))
 })
 
 test_that("adjustSusieWeights run_allele_qc=TRUE auto-prepends chrom/pos/A2/A1", {
@@ -815,12 +815,12 @@ test_that("adjustSusieWeights run_allele_qc=TRUE auto-prepends chrom/pos/A2/A1",
   out <- adjustSusieWeights(
     obj,
     keepVariants = vids, runAlleleQc = TRUE, ldVariants = vids,
-    variableNameObj = c("susie_results", "ctx", "variant_names"),
+    variableNameObj = c("susie_results", "ctx", "variantNames"),
     susieObj = c("susie_results", "ctx", "susie_result_trimmed"),
     twasWeightsTable = c("weights", "ctx"),
     matchMinProp = 0.1
   )
-  expect_true(length(out$adjusted_susie_weights) > 0)
+  expect_true(length(out$adjustedSusieWeights) > 0)
 })
 
 test_that("formatFinemappingOutput does not duplicate top loci variants", {
@@ -837,8 +837,8 @@ test_that("formatFinemappingOutput does not duplicate top loci variants", {
     method = "susie"
   )
   post <- list(
-    finemapping_results = list(susie = list(
-      finemapping_result = fm
+    finemappingResults = list(susie = list(
+      finemappingResult = fm
     )),
     top_loci = top_loci
   )
@@ -873,7 +873,7 @@ test_that(".translate_legacy_top_loci_cs_columns renames pip_susie -> pip for le
   out <- pecotmr:::.translateLegacyTopLociCsColumns(new_format)
   expect_true("pip" %in% colnames(out))
   expect_false("pip_susie" %in% colnames(out))
-  # The susie_inf and CS columns are untouched
+  # The susieInf and CS columns are untouched
   expect_true("pip_susie_inf" %in% colnames(out))
   expect_true("CS_95_susie" %in% colnames(out))
   expect_true("CS_95_susie_inf" %in% colnames(out))
@@ -1094,24 +1094,24 @@ test_that("PIP-only retained variants carry '<method>_0' at every coverage and c
   expect_true(all(out$cs_95_purity == 0))
 })
 
-test_that("per-method CS indices are independent across susie and susie_inf (postprocessFinemappingFits)", {
+test_that("per-method CS indices are independent across susie and susieInf (postprocessFinemappingFits)", {
   d <- .make_univariate_data(seed = 21, effect_idx = c(15, 35))
   fits <- fitSusieInfThenSusie(d$X, d$y)
   post <- postprocessFinemappingFits(fits, dataX = d$X, dataY = d$y,
                                        coverage = 0.95,
                                        secondaryCoverage = c(0.7, 0.5))
   tl <- post$top_loci
-  expect_setequal(unique(tl$method), c("susie", "susie_inf"))
+  expect_setequal(unique(tl$method), c("susie", "susieInf"))
   # Each method must only ever emit "<method>_<idx>" strings, never strings
   # from the other method. This is the core safeguard against silent
   # method-mixing.
   susie_rows     <- tl[tl$method == "susie", , drop = FALSE]
-  susie_inf_rows <- tl[tl$method == "susie_inf", , drop = FALSE]
+  susie_inf_rows <- tl[tl$method == "susieInf", , drop = FALSE]
   for (col in c("cs_95", "cs_70", "cs_50")) {
     expect_true(all(grepl("^susie_\\d+$", susie_rows[[col]])),
                 info = paste("susie rows have wrong prefix in", col))
     expect_true(all(grepl("^susie_inf_\\d+$", susie_inf_rows[[col]])),
-                info = paste("susie_inf rows have wrong prefix in", col))
+                info = paste("susieInf rows have wrong prefix in", col))
   }
   # CS indices are not sequenced across methods: if both methods have any
   # CS, each may independently include "<method>_1".
@@ -1198,9 +1198,9 @@ test_that("postprocessFinemappingFits does not return top_loci_long anywhere", {
   expect_true("top_loci" %in% names(post))
   expect_false("top_loci_long" %in% names(post))
   expect_equal(names(post$top_loci), .UNIFIED_TOP_LOCI_COLS)
-  # No per-method finemapping_results entry should carry a top_loci_long either.
-  for (name in names(post$finemapping_results)) {
-    expect_false("top_loci_long" %in% names(post$finemapping_results[[name]]),
+  # No per-method finemappingResults entry should carry a top_loci_long either.
+  for (name in names(post$finemappingResults)) {
+    expect_false("top_loci_long" %in% names(post$finemappingResults[[name]]),
                  info = name)
   }
 })
@@ -1256,13 +1256,13 @@ test_that("buildTopLoci requires `method`", {
   ), "method")
 })
 
-test_that("formatFinemappingOutput exposes finemapping_result with S4 accessors", {
+test_that("formatFinemappingOutput exposes finemappingResult with S4 accessors", {
   d <- .make_univariate_data(seed = 25, effect_idx = c(20))
   fit <- susieR::susie(d$X, d$y, L = 5)
   post <- postprocessFinemappingFits(list(susie = fit), dataX = d$X, dataY = d$y, coverage = 0.95)
   out <- formatFinemappingOutput(post, primaryMethod = "susie")
-  expect_true("finemapping_result" %in% names(out))
-  fm <- out$finemapping_result
+  expect_true("finemappingResult" %in% names(out))
+  fm <- out$finemappingResult
   expect_true(is.character(getVariantNames(fm)) && length(getVariantNames(fm)) == ncol(d$X))
   expect_true(is.list(getTrimmedFit(fm)) && !is.null(getTrimmedFit(fm)$pip))
 })

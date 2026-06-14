@@ -17,7 +17,7 @@ colocboostPipeline(
   pipCutoffToSkipSumstat = 0,
   zMismatchQc = NULL,
   impute = TRUE,
-  imputeOpts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
+  imputeOpts = list(rcond = 0.01, r2Threshold = 0.6, minimumLd = 5, lamb = 0.01),
   ...
 )
 }
@@ -40,19 +40,19 @@ basic-only summary-stat preprocessing.}
 
 \item{impute}{Logical; if TRUE, performs imputation for outliers identified in the analysis (default: TRUE).}
 
-\item{imputeOpts}{A list of imputation options including rcond, R2_threshold, and minimum_ld (default: list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5)).}
+\item{imputeOpts}{A list of imputation options including rcond, R2_threshold, and minimum_ld (default: list(rcond = 0.01, r2Threshold = 0.6, minimumLd = 5)).}
 }
 \value{
-A list containing the individual_data and sumstat_data after QC:
-individual_data contains the following components if exist
+A list containing the individualData and sumstatData after QC:
+individualData contains the following components if exist
 \itemize{
   \item Y: A list of residualized phenotype values for all tasks.
   \item X: A list of residualized genotype matrices all tasks.
 }
-sumstat_data contains the following components if exist
+sumstatData contains the following components if exist
 \itemize{
-  \item sumstats: A list of summary statistics f or the matched LD_info, each sublist contains sumstats, n, var_y from \code{load_rss_data}.
-  \item LD_info: A list of LD information, each sublist contains LD_variants, LD_matrix, ref_panel  \code{load_LD_matrix}.
+  \item sumstats: A list of summary statistics f or the matched ldInfo, each sublist contains sumstats, n, var_y from \code{load_rss_data}.
+  \item ldInfo: A list of LD information, each sublist contains ldVariants, ldMatrix, ref_panel  \code{load_LD_matrix}.
 }
 }
 \description{

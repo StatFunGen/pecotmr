@@ -227,8 +227,8 @@ alleleQc <- matchRefPanel
 #' @param removeBuildSuffix Whether to strip trailing genome build suffixes like ":b38" or "_b38" before alignment. Default TRUE.
 #'
 #' @return A list with two elements:
-#' - aligned_variants: A character vector of aligned variant names.
-#' - unmatched_indices: A vector of indices for the variants in the source that could not be matched.
+#' - alignedVariants: A character vector of aligned variant names.
+#' - unmatchedIndices: A vector of indices for the variants in the source that could not be matched.
 #'
 #' @examples
 #' source <- c("1:123:A:C", "2:456:G:T", "3:789:C:A")
@@ -248,7 +248,7 @@ alignVariantNames <- function(source, reference, removeIndels = FALSE, removeBui
 
   if (!all(sourcePattern) && !all(referencePattern)) {
     warning("Cannot unify variant names because they do not follow the expected variant naming convention chr:pos:A2:A1 or chr:pos_A2_A1.")
-    return(list(aligned_variants = source, unmatched_indices = integer(0)))
+    return(list(alignedVariants = source, unmatchedIndices = integer(0)))
   }
 
   if ((!all(sourcePattern) && all(referencePattern)) || (all(sourcePattern) && !all(referencePattern))) {
@@ -287,8 +287,8 @@ alignVariantNames <- function(source, reference, removeIndels = FALSE, removeBui
   unmatchedIndices <- which(match(alignedVariants, refNormalized, nomatch = 0) == 0)
 
   list(
-    aligned_variants = alignedVariants,
-    unmatched_indices = unmatchedIndices
+    alignedVariants = alignedVariants,
+    unmatchedIndices = unmatchedIndices
   )
 }
 

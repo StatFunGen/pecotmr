@@ -21,7 +21,7 @@
 \item{lambda}{Numeric, ridge penalty (default 0).}
 }
 \value{
-A list with se and loo_estimates.
+A list with se and looEstimates.
 }
 \description{
 Compute leave-one-block-out jackknife standard errors

@@ -130,7 +130,7 @@ test_that("twasAnalysis: SVD path handles partial variant overlap", {
 
   gwas_df <- data.frame(variant_id = variant_ids, z = rnorm(p))
 
-  # Request variants where some are NOT in ld_variant_ids
+  # Request variants where some are NOT in ldVariantIds
   extra_variant <- "chr1:5000:A:G"
   extract_variants <- c(variant_ids[1:4], extra_variant)
 
@@ -199,7 +199,7 @@ test_that("loadLdSketch: returns LdData with raw genotypes and metadata", {
   )
 
   variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
-  block_metadata <- S4Vectors::DataFrame(
+  blockMetadata <- S4Vectors::DataFrame(
     region = "chr1:1000-2100", start = 1000L, end = 2100L, chrom = "chr1"
   )
   # Store genotype matrix directly in genotype_handle (matching loadLdSketch output)
@@ -208,7 +208,7 @@ test_that("loadLdSketch: returns LdData with raw genotypes and metadata", {
     genotypeHandle = X,
     variants = variants_gr,
     snpIdx = NULL,
-    blockMetadata = block_metadata
+    blockMetadata = blockMetadata
   )
 
   local_mocked_bindings(
@@ -252,7 +252,7 @@ test_that("loadLdSketch: removes monomorphic variants", {
   )
 
   variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
-  block_metadata <- S4Vectors::DataFrame(
+  blockMetadata <- S4Vectors::DataFrame(
     region = "chr1:1-5", start = 1L, end = 5L, chrom = "chr1"
   )
   # Store genotype matrix directly in genotype_handle
@@ -261,7 +261,7 @@ test_that("loadLdSketch: removes monomorphic variants", {
     genotypeHandle = X,
     variants = variants_gr,
     snpIdx = NULL,
-    blockMetadata = block_metadata
+    blockMetadata = blockMetadata
   )
 
   local_mocked_bindings(

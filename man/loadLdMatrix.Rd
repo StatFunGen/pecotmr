@@ -20,7 +20,7 @@ loadLdMatrix(
 \item{extractCoordinates}{Optional data.frame with columns "chrom" and "pos" for
 specific coordinates extraction (only for pre-computed LD blocks).}
 
-\item{returnGenotype}{Controls what LD_matrix contains in the return value.
+\item{returnGenotype}{Controls what ldMatrix contains in the return value.
 FALSE (default): always return correlation matrix R.
 TRUE: return genotype matrix X (only valid for PLINK sources).
 "auto": return X for PLINK sources, R for pre-computed sources.}
@@ -32,12 +32,12 @@ Only used for PLINK genotype sources.}
 \value{
 A list with:
 \describe{
-  \item{LD_variants}{Character vector of variant IDs (canonical format).}
-  \item{LD_matrix}{LD correlation matrix R (or genotype matrix X when returnGenotype is TRUE or "auto" with PLINK source).}
+  \item{ldVariants}{Character vector of variant IDs (canonical format).}
+  \item{ldMatrix}{LD correlation matrix R (or genotype matrix X when returnGenotype is TRUE or "auto" with PLINK source).}
   \item{ref_panel}{Data.frame with variant metadata (chrom, pos, A2, A1, variant_id,
     and optionally allele_freq, variance, n_nomiss).}
-  \item{is_genotype}{Logical: TRUE if LD_matrix contains genotype X, FALSE if correlation R.}
-  \item{block_metadata}{Data.frame with region/block info. For pre-computed LD: one row per block.
+  \item{is_genotype}{Logical: TRUE if ldMatrix contains genotype X, FALSE if correlation R.}
+  \item{blockMetadata}{Data.frame with region/block info. For pre-computed LD: one row per block.
     For PLINK: a single row spanning the loaded region.}
 }
 }

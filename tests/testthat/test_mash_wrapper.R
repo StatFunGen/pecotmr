@@ -1,10 +1,10 @@
 context("mash_wrapper")
 
 # Build a minimal FineMappingResult for unit-testing find_nested / extractFlattenSumstatsFromNested
-.test_fm_result <- function(variant_names) {
+.test_fm_result <- function(variantNames) {
     FineMappingResult(
-        variantNames = variant_names,
-        trimmedFit = list(pip = rep(0.5, length(variant_names))),
+        variantNames = variantNames,
+        trimmedFit = list(pip = rep(0.5, length(variantNames))),
         topLoci = data.frame(variant_id = character(0), method = character(0),
                               stringsAsFactors = FALSE),
         method = "susie"
@@ -38,9 +38,9 @@ test_that("mergeSusieCs merges credible sets correctly", {
 
   expected_output_1 <- data.frame(
     variant_id = c("variant1", "variant2", "variant3", "variant4"),
-    credible_set_names = c("cs_1_1", "cs_1_1", "cs_2_1", "cs_2_2"),
-    max_pip = c(0.8, 0.6, 0.9, 0.7),
-    median_pip = c(0.8, 0.6, 0.9, 0.7),
+    credibleSetNames = c("cs_1_1", "cs_1_1", "cs_2_1", "cs_2_2"),
+    maxPip = c(0.8, 0.6, 0.9, 0.7),
+    medianPip = c(0.8, 0.6, 0.9, 0.7),
     stringsAsFactors = FALSE
   )
 
@@ -68,9 +68,9 @@ test_that("mergeSusieCs merges credible sets correctly", {
 
   expected_output_2 <- data.frame(
     variant_id = c("variant1", "variant2", "variant3"),
-    credible_set_names = c("cs_1_1,cs_2_2", "cs_1_1,cs_2_2", "cs_1_1,cs_2_2"),
-    max_pip = c(0.8, 0.7, 0.9),
-    median_pip = c(0.8, 0.65, 0.9),
+    credibleSetNames = c("cs_1_1,cs_2_2", "cs_1_1,cs_2_2", "cs_1_1,cs_2_2"),
+    maxPip = c(0.8, 0.7, 0.9),
+    medianPip = c(0.8, 0.65, 0.9),
     stringsAsFactors = FALSE
   )
 
@@ -79,9 +79,9 @@ test_that("mergeSusieCs merges credible sets correctly", {
   # Test case 3: Empty input
   susie_fit_3 <- list(condition_1 = list(top_loci = data.frame(
     variant_id = character(),
-    credible_set_names = character(),
-    max_pip = numeric(),
-    median_pip = numeric(),
+    credibleSetNames = character(),
+    maxPip = numeric(),
+    medianPip = numeric(),
     stringsAsFactors = FALSE
   )))
 
@@ -111,9 +111,9 @@ test_that("mergeSusieCs merges credible sets correctly", {
 
   expected_output_5 <- data.frame(
     variant_id = c("variant1", "variant2", "variant3", "variant4"),
-    credible_set_names = c("cs_1_1", "cs_1_1", "cs_2_2", "cs_2_2"),
-    max_pip = c(0.8, 0.6, 0.9, 0.7),
-    median_pip = c(0.8, 0.6, 0.9, 0.7),
+    credibleSetNames = c("cs_1_1", "cs_1_1", "cs_2_2", "cs_2_2"),
+    maxPip = c(0.8, 0.6, 0.9, 0.7),
+    medianPip = c(0.8, 0.6, 0.9, 0.7),
     stringsAsFactors = FALSE
   )
 
@@ -148,9 +148,9 @@ test_that("mergeSusieCs merges credible sets correctly", {
 
   expected_output_6 <- data.frame(
     variant_id = c("variant1", "variant2", "variant3", "variant4", "variant5", "variant6", "variant7", "variant8"),
-    credible_set_names = c("cs_1_1", "cs_1_1", "cs_1_2", "cs_2_2", "cs_2_3", "cs_3_1", "cs_3_3", "cs_3_2"),
-    max_pip = c(0.8, 0.6, 0.7, 0.9, 0.7, 0.85, 0.75, 0.8),
-    median_pip = c(0.8, 0.6, 0.7, 0.9, 0.7, 0.85, 0.75, 0.8),
+    credibleSetNames = c("cs_1_1", "cs_1_1", "cs_1_2", "cs_2_2", "cs_2_3", "cs_3_1", "cs_3_3", "cs_3_2"),
+    maxPip = c(0.8, 0.6, 0.7, 0.9, 0.7, 0.85, 0.75, 0.8),
+    medianPip = c(0.8, 0.6, 0.7, 0.9, 0.7, 0.85, 0.75, 0.8),
     stringsAsFactors = FALSE
   )
 
@@ -185,9 +185,9 @@ test_that("mergeSusieCs merges credible sets correctly", {
 
   expected_output_7 <- data.frame(
     variant_id = c("variant1", "variant2", "variant3", "variant4", "variant5"),
-    credible_set_names = c("cs_1_1,cs_1_2,cs_2_2", "cs_1_1,cs_1_2,cs_2_2", "cs_1_1,cs_1_2,cs_2_2","cs_2_1,cs_3_3", "cs_3_2"),
-    max_pip = c(0.8, 0.7, 0.9, 0.85, 0.8),
-    median_pip = c(0.8, 0.65, 0.8, 0.8, 0.8),
+    credibleSetNames = c("cs_1_1,cs_1_2,cs_2_2", "cs_1_1,cs_1_2,cs_2_2", "cs_1_1,cs_1_2,cs_2_2","cs_2_1,cs_3_3", "cs_3_2"),
+    maxPip = c(0.8, 0.7, 0.9, 0.85, 0.8),
+    medianPip = c(0.8, 0.65, 0.8, 0.8, 0.8),
     stringsAsFactors = FALSE
   )
 
@@ -222,9 +222,9 @@ test_that("mergeSusieCs merges credible sets correctly", {
 
   expected_output_8 <- data.frame(
     variant_id = c("variant1", "variant2", "variant3", "variant4", "variant5", "variant6", "variant7", "variant8"),
-    credible_set_names = c("cs_1_1", "cs_1_2", "cs_1_3", "cs_2_3", "cs_2_1", "cs_3_2", "cs_3_3", "cs_3_1"),
-    max_pip = c(0.8, 0.6, 0.7, 0.9, 0.7, 0.85, 0.75, 0.8),
-    median_pip = c(0.8, 0.6, 0.7, 0.9, 0.7, 0.85, 0.75, 0.8),
+    credibleSetNames = c("cs_1_1", "cs_1_2", "cs_1_3", "cs_2_3", "cs_2_1", "cs_3_2", "cs_3_3", "cs_3_1"),
+    maxPip = c(0.8, 0.6, 0.7, 0.9, 0.7, 0.85, 0.75, 0.8),
+    medianPip = c(0.8, 0.6, 0.7, 0.9, 0.7, 0.85, 0.75, 0.8),
     stringsAsFactors = FALSE
   )
 
@@ -245,9 +245,9 @@ test_that("mergeSusieCs merges credible sets correctly", {
 
   expected_output_9 <- data.frame(
     variant_id = c("variant1", "variant2", "variant3", "variant5", "variant4"),
-    credible_set_names = c("cs_1_1", "cs_1_1", "cs_1_2", "cs_1_2", "cs_1_3"),
-    max_pip = c(0.8, 0.6, 0.7, 0.85, 0.9),
-    median_pip = c(0.8, 0.6, 0.7, 0.85, 0.9),
+    credibleSetNames = c("cs_1_1", "cs_1_1", "cs_1_2", "cs_1_2", "cs_1_3"),
+    maxPip = c(0.8, 0.6, 0.7, 0.85, 0.9),
+    medianPip = c(0.8, 0.6, 0.7, 0.85, 0.9),
     stringsAsFactors = FALSE
   )
 
@@ -282,9 +282,9 @@ test_that("mergeSusieCs merges credible sets correctly", {
 
   expected_output_10 <- data.frame(
     variant_id = c("variant1", "variant3", "variant2", "variant4", "variant5", "variant6"),
-    credible_set_names = c("cs_1_1,cs_3_3", "cs_1_1,cs_3_3", "cs_1_2,cs_2_2", "cs_2_1", "cs_2_3,cs_3_2", "cs_3_1"),
-    max_pip = c(0.8, 0.7, 0.75, 0.9, 0.85, 0.7),
-    median_pip = c(0.8, 0.675, 0.675, 0.9, 0.825, 0.7),
+    credibleSetNames = c("cs_1_1,cs_3_3", "cs_1_1,cs_3_3", "cs_1_2,cs_2_2", "cs_2_1", "cs_2_3,cs_3_2", "cs_3_1"),
+    maxPip = c(0.8, 0.7, 0.75, 0.9, 0.85, 0.7),
+    medianPip = c(0.8, 0.675, 0.675, 0.9, 0.825, 0.7),
     stringsAsFactors = FALSE
   )
 
@@ -306,7 +306,7 @@ test_that("mergeSusieCs handles single condition with single CS", {
   result <- pecotmr:::mergeSusieCs(susie_fit)
   expect_s3_class(result, "data.frame")
   expect_true("variant_id" %in% colnames(result))
-  expect_true("max_pip" %in% colnames(result))
+  expect_true("maxPip" %in% colnames(result))
 })
 
 # ===========================================================================
@@ -1006,7 +1006,7 @@ test_that("mergeSumstatsMatrices with single valid dataset returns properly", {
 
 test_that("extractFlattenSumstatsFromNested computes z from betahat/sebetahat", {
   data <- list(
-    finemapping_result = .test_fm_result(c("1:100:A:G", "1:200:C:T")),
+    finemappingResult = .test_fm_result(c("1:100:A:G", "1:200:C:T")),
     sumstats = list(
       betahat = c(0.5, -0.3),
       sebetahat = c(0.1, 0.15)
@@ -1022,7 +1022,7 @@ test_that("extractFlattenSumstatsFromNested computes z from betahat/sebetahat", 
 
 test_that("extractFlattenSumstatsFromNested uses z directly when available", {
   data <- list(
-    finemapping_result = .test_fm_result(c("1:100:A:G")),
+    finemappingResult = .test_fm_result(c("1:100:A:G")),
     sumstats = list(z = c(3.5))
   )
   result <- extractFlattenSumstatsFromNested(data, extractInf = "z")
@@ -1031,7 +1031,7 @@ test_that("extractFlattenSumstatsFromNested uses z directly when available", {
 
 test_that("extractFlattenSumstatsFromNested extracts beta from direct sumstats", {
   data <- list(
-    finemapping_result = .test_fm_result(c("chr1:100:A:G", "chr1:200:C:T")),
+    finemappingResult = .test_fm_result(c("chr1:100:A:G", "chr1:200:C:T")),
     sumstats = list(
       betahat = c(0.5, -0.3),
       sebetahat = c(0.1, 0.15)
@@ -1043,7 +1043,7 @@ test_that("extractFlattenSumstatsFromNested extracts beta from direct sumstats",
 
 test_that("extractFlattenSumstatsFromNested extracts se from direct sumstats", {
   data <- list(
-    finemapping_result = .test_fm_result(c("chr1:100:A:G", "chr1:200:C:T")),
+    finemappingResult = .test_fm_result(c("chr1:100:A:G", "chr1:200:C:T")),
     sumstats = list(
       betahat = c(0.5, -0.3),
       sebetahat = c(0.1, 0.15)
@@ -1055,7 +1055,7 @@ test_that("extractFlattenSumstatsFromNested extracts se from direct sumstats", {
 
 test_that("extractFlattenSumstatsFromNested reaches maxDepth and returns NULL", {
   data <- list(level1 = list(level2 = list(level3 = list(level4 = list(
-    finemapping_result = .test_fm_result(c("1:100:A:G")),
+    finemappingResult = .test_fm_result(c("1:100:A:G")),
     sumstats = list(z = c(2.0))
   )))))
   result <- extractFlattenSumstatsFromNested(data, extractInf = "z", maxDepth = 2)
@@ -1064,7 +1064,7 @@ test_that("extractFlattenSumstatsFromNested reaches maxDepth and returns NULL", 
 
 test_that("extractFlattenSumstatsFromNested handles missing betahat for z", {
   data <- list(
-    finemapping_result = .test_fm_result(c("1:100:A:G")),
+    finemappingResult = .test_fm_result(c("1:100:A:G")),
     sumstats = list(something_else = c(1.0))
   )
   result <- expect_message(
@@ -1076,7 +1076,7 @@ test_that("extractFlattenSumstatsFromNested handles missing betahat for z", {
 
 test_that("extractFlattenSumstatsFromNested handles missing betahat for beta", {
   data <- list(
-    finemapping_result = .test_fm_result(c("1:100:A:G")),
+    finemappingResult = .test_fm_result(c("1:100:A:G")),
     sumstats = list(z = c(2.0))
   )
   result <- expect_message(
@@ -1088,7 +1088,7 @@ test_that("extractFlattenSumstatsFromNested handles missing betahat for beta", {
 
 test_that("extractFlattenSumstatsFromNested handles missing sebetahat for se", {
   data <- list(
-    finemapping_result = .test_fm_result(c("1:100:A:G")),
+    finemappingResult = .test_fm_result(c("1:100:A:G")),
     sumstats = list(betahat = c(0.5))
   )
   result <- expect_message(
@@ -1100,7 +1100,7 @@ test_that("extractFlattenSumstatsFromNested handles missing sebetahat for se", {
 
 test_that("extractFlattenSumstatsFromNested rejects invalid extractInf values", {
   data <- list(
-    finemapping_result = .test_fm_result(c("1:100:A:G")),
+    finemappingResult = .test_fm_result(c("1:100:A:G")),
     sumstats = list(z = c(1.0))
   )
   expect_error(
@@ -1111,7 +1111,7 @@ test_that("extractFlattenSumstatsFromNested rejects invalid extractInf values", 
 
 test_that("extractFlattenSumstatsFromNested normalizes variant IDs to chr prefix", {
   data <- list(
-    finemapping_result = .test_fm_result(c("1:100:A:G", "2:200:C:T")),
+    finemappingResult = .test_fm_result(c("1:100:A:G", "2:200:C:T")),
     sumstats = list(z = c(1.0, 2.0))
   )
   result <- extractFlattenSumstatsFromNested(data, extractInf = "z")
@@ -1121,7 +1121,7 @@ test_that("extractFlattenSumstatsFromNested normalizes variant IDs to chr prefix
 test_that("extractFlattenSumstatsFromNested normalizes variant IDs from nested search", {
   data <- list(
     nested = list(
-      finemapping_result = .test_fm_result(c("1:100:A:G")),
+      finemappingResult = .test_fm_result(c("1:100:A:G")),
       sumstats = list(z = c(3.0))
     )
   )
@@ -1133,7 +1133,7 @@ test_that("extractFlattenSumstatsFromNested recurses through multiple nesting le
   data <- list(
     level1 = list(
       level2 = list(
-        finemapping_result = .test_fm_result(c("chr1:100:A:G", "chr1:200:C:T")),
+        finemappingResult = .test_fm_result(c("chr1:100:A:G", "chr1:200:C:T")),
         sumstats = list(
           betahat = c(0.5, -0.3),
           sebetahat = c(0.1, 0.15)
@@ -1152,7 +1152,7 @@ test_that("extractFlattenSumstatsFromNested returns NULL for deeply nested beyon
     a = list(
       b = list(
         c = list(
-          finemapping_result = .test_fm_result(c("1:100:A:G")),
+          finemappingResult = .test_fm_result(c("1:100:A:G")),
           sumstats = list(z = c(2.0))
         )
       )

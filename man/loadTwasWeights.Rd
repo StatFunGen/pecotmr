@@ -7,7 +7,7 @@
 loadTwasWeights(
   weightDbFiles,
   conditions = NULL,
-  variableNameObj = c("preset_variants_result", "variant_names"),
+  variableNameObj = c("preset_variants_result", "variantNames"),
   susieObj = c("preset_variants_result", "susie_result_trimmed"),
   twasWeightsTable = "twas_weights"
 )
