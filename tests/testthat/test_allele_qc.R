@@ -472,3 +472,35 @@ test_that("colToComplement errors on a missing column name", {
     "not found in targetData"
   )
 })
+
+# ===========================================================================
+# QC summary counts (rss-vignette-and-qc-logging)
+# ===========================================================================
+
+test_that("matchRefPanel surfaces sign/strand/dropped counts via qcCounts attribute", {
+  # Deterministic fixture at four shared positions:
+  #   100 exact match | 200 sign flip | 300 strand flip (A/G, unambiguous) | 400 allele mismatch (dropped)
+  target <- data.frame(
+    chrom = c(1, 1, 1, 1), pos = c(100, 200, 300, 400),
+    A2 = c("A", "A", "A", "A"), A1 = c("G", "G", "G", "G"),
+    z = c(1, 2, 3, 4), stringsAsFactors = FALSE
+  )
+  ref <- data.frame(
+    chrom = c(1, 1, 1, 1), pos = c(100, 200, 300, 400),
+    A2 = c("A", "G", "T", "C"), A1 = c("G", "A", "C", "A"), stringsAsFactors = FALSE
+  )
+  res <- matchRefPanel(target, ref, colToFlip = "z", matchMinProp = 0)
+
+  # Default return shape unchanged: kept variants only in harmonizedData.
+  expect_s4_class(res, "AlleleQcResult")
+  expect_equal(nrow(getHarmonizedData(res)), 3L)  # exact + sign + strand kept; mismatch dropped
+
+  # Counts surfaced as an attribute (additive; non-RSS callers ignore it).
+  cnt <- attr(res, "qcCounts")
+  expect_false(is.null(cnt))
+  expect_equal(cnt$considered, 4L)
+  expect_equal(cnt$signFlip, 1L)
+  expect_equal(cnt$strandFlip, 1L)
+  expect_equal(cnt$kept, 3L)
+  expect_equal(cnt$dropped, 1L)
+})

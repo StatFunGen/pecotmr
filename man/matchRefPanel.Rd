@@ -70,7 +70,13 @@ corresponding `colToFlip` are multiplied by -1. Default is `TRUE`.}
 An \code{AlleleQcResult} S4 object. Use
   \code{getHarmonizedData()} to recover the post-QC variant
   data.frame and \code{getQcSummary()} to inspect the per-variant
-  merge/flip/strand diagnostics.
+  merge/flip/strand diagnostics. The object also carries a
+  \code{"qcCounts"} attribute (\code{attr(x, "qcCounts")}) — a list with
+  \code{considered}, \code{signFlip}, \code{strandFlip} (corrections applied
+  to retained variants), \code{kept}, \code{dropped}, and the drop breakdown
+  \code{droppedIndel} / \code{droppedAmbiguous} / \code{droppedOther} — used
+  for QC summary logging. Existing callers that read the data.frame are
+  unaffected.
 }
 \description{
 Match by ("chrom", "A1", "A2" and "pos"), accounting for possible

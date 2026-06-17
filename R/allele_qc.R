@@ -32,7 +32,13 @@ NULL
 #' @return An \code{AlleleQcResult} S4 object. Use
 #'   \code{getHarmonizedData()} to recover the post-QC variant
 #'   data.frame and \code{getQcSummary()} to inspect the per-variant
-#'   merge/flip/strand diagnostics.
+#'   merge/flip/strand diagnostics. The object also carries a
+#'   \code{"qcCounts"} attribute (\code{attr(x, "qcCounts")}) — a list with
+#'   \code{considered}, \code{signFlip}, \code{strandFlip} (corrections applied
+#'   to retained variants), \code{kept}, \code{dropped}, and the drop breakdown
+#'   \code{droppedIndel} / \code{droppedAmbiguous} / \code{droppedOther} — used
+#'   for QC summary logging. Existing callers that read the data.frame are
+#'   unaffected.
 #' @importFrom magrittr %>%
 #' @importFrom dplyr mutate inner_join filter pull select everything row_number if_else any_of all_of rename
 #' @importFrom vctrs vec_duplicate_detect
@@ -98,7 +104,11 @@ matchRefPanel <- function(targetData, refVariants, colToFlip = NULL,
 
   if (nrow(matchResult) == 0) {
 	warning("No matching variants found between target data and reference variants.")
-	return(AlleleQcResult(harmonizedData = matchResult, qcSummary = matchResult))
+	emptyOut <- AlleleQcResult(harmonizedData = matchResult, qcSummary = matchResult)
+	attr(emptyOut, "qcCounts") <- list(considered = 0L, signFlip = 0L, strandFlip = 0L,
+	                                   kept = 0L, dropped = 0L, droppedIndel = 0L,
+	                                   droppedAmbiguous = 0L, droppedOther = 0L)
+	return(emptyOut)
   }
     # match target & ref by chrom and position
   matchResult = matchResult %>%
@@ -209,7 +219,31 @@ matchRefPanel <- function(targetData, refVariants, colToFlip = NULL,
 	stop("Duplicated variants with different values found. Please check the input data and determine which to keep.")
   }
 
-  return(AlleleQcResult(harmonizedData = result, qcSummary = matchResult))
+  # QC summary counts for logging. Corrections (sign/strand flip) are counted on
+  # retained variants; drops are split by reason. Computed from the per-variant
+  # flags still on matchResult (default removeUnmatched = TRUE path); attached as
+  # a `qcCounts` attribute so callers that read the data frame are unaffected.
+  qcCounts <- if (all(c("sign_flip", "strand_flip", "keep", "INDEL", "strand_unambiguous") %in% names(matchResult))) {
+    cnt <- list(
+      considered = nrow(matchResult),
+      signFlip = sum(matchResult$sign_flip & matchResult$keep, na.rm = TRUE),
+      strandFlip = sum(matchResult$strand_flip & matchResult$keep, na.rm = TRUE),
+      kept = sum(matchResult$keep, na.rm = TRUE),
+      dropped = sum(!matchResult$keep, na.rm = TRUE),
+      droppedIndel = sum(!matchResult$keep & matchResult$INDEL, na.rm = TRUE),
+      droppedAmbiguous = sum(!matchResult$keep & !matchResult$INDEL &
+                               matchResult$strand_flip & !matchResult$strand_unambiguous, na.rm = TRUE)
+    )
+    cnt$droppedOther <- cnt$dropped - cnt$droppedIndel - cnt$droppedAmbiguous
+    cnt
+  } else {
+    list(considered = nrow(matchResult), signFlip = 0L, strandFlip = 0L,
+         kept = nrow(matchResult), dropped = 0L, droppedIndel = 0L,
+         droppedAmbiguous = 0L, droppedOther = 0L)
+  }
+  out <- AlleleQcResult(harmonizedData = result, qcSummary = matchResult)
+  attr(out, "qcCounts") <- qcCounts
+  return(out)
 }
 
 #' @rdname matchRefPanel

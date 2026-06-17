@@ -58,6 +58,7 @@ rssBasicQc <- function(sumstats, ldData, skipRegion = NULL, keepIndel = TRUE,
     removeStrandAmbiguous = TRUE
   )
 
+  bqCounts <- attr(alleleFlip, "qcCounts")
   qced <- getHarmonizedData(alleleFlip)
   if (!is.null(skipRegion)) {
     skipTable <- tibble(region = skipRegion) %>%
@@ -81,13 +82,15 @@ rssBasicQc <- function(sumstats, ldData, skipRegion = NULL, keepIndel = TRUE,
   nRef <- ldData@nRef
 
   if (!isTRUE(returnLdMat)) {
-    return(QcResult(
+    resNoLd <- QcResult(
       ldData = NULL,
       rssInput = list(sumstats = sumstatsProcessed, n = NA_real_, varY = NA_real_),
       preprocess = list(),
       outlierNumber = 0L,
       skipped = FALSE
-    ))
+    )
+    attr(resNoLd, "qcCounts") <- bqCounts
+    return(resNoLd)
   }
 
   # Align and subset LD by mapping core IDs (strip trailing build suffix) to exact LD IDs
@@ -113,7 +116,7 @@ rssBasicQc <- function(sumstats, ldData, skipRegion = NULL, keepIndel = TRUE,
 
   ldMatProcessed <- ldMatrix[sumstatsProcessed$variant_id, sumstatsProcessed$variant_id, drop = FALSE]
 
-  QcResult(
+  resFinal <- QcResult(
     ldData = .qcLdDataFromMatrix(ldMatProcessed, sumstatsProcessed$variant_id,
                                  hasGenotype = FALSE, nRef = nRef),
     rssInput = list(sumstats = sumstatsProcessed, n = NA_real_, varY = NA_real_),
@@ -121,6 +124,8 @@ rssBasicQc <- function(sumstats, ldData, skipRegion = NULL, keepIndel = TRUE,
     outlierNumber = 0L,
     skipped = FALSE
   )
+  attr(resFinal, "qcCounts") <- bqCounts
+  resFinal
 }
 
 
@@ -537,6 +542,10 @@ summaryStatsQc <- function(sumstats, ldData, n = NULL,
                       returnLdMat = !hasGenotype)
   sumstats <- getRssInput(basic)$sumstats
   basicLd <- getLdData(basic)
+  # QC logging: counts surfaced by matchRefPanel (via rssBasicQc) plus the study
+  # input size, used for "N of M" per-step messages and the per-study rollup.
+  hCounts <- attr(basic, "qcCounts")
+  nStudyIn <- nrow(rssInput$sumstats)
   R_mat <- if (is.null(basicLd)) NULL else getCorrelation(basicLd)
   n <- rssInput$n
   varY <- rssInput$varY
@@ -582,8 +591,15 @@ summaryStatsQc <- function(sumstats, ldData, n = NULL,
       nRef = ldDataForQc@nRef
     )
   }
-  message("QC track: basic harmonization retained ", nrow(sumstats),
-          " variants for summary-stat study ", study, ".")
+  harmKept <- nrow(sumstats)
+  harmDropped <- nStudyIn - harmKept
+  message("QC track: basic harmonization kept ", harmKept, " of ", nStudyIn,
+          " variant(s) for summary-stat study ", study,
+          if (!is.null(hCounts)) {
+            paste0(" (corrected: sign-flipped ", hCounts$signFlip,
+                   ", strand-flipped ", hCounts$strandFlip,
+                   "; dropped ", harmDropped, ").")
+          } else ".")
   if (nrow(sumstats) < 2) {
     return(skippedResult(sumstats, referenceForVariants(sumstats$variant_id),
                          "fewer than two variants remain after basic QC"))
@@ -607,10 +623,15 @@ summaryStatsQc <- function(sumstats, ldData, n = NULL,
   }
 
   outlierNumber <- 0L
+  krRemoved <- 0L
+  mismatchRemoved <- 0L
+  imputedBefore <- NA_integer_
+  imputedAfter <- NA_integer_
   # Optional kriging LD-consistency prefilter (opt-in). Runs before the heavier
   # SLALOM/DENTIST QC, or standalone when zMismatchQc == "none".
   if (isTRUE(alleleFlipKriging) && nrow(sumstats) >= 2) {
     message("QC track: running kriging LD-consistency prefilter for summary-stat study ", study, ".")
+    nKrIn <- nrow(sumstats)
     krLd <- ldDataWithLocalR(sumstats)
     rKr <- getCorrelation(krLd)
     rKr <- rKr[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
@@ -621,11 +642,13 @@ summaryStatsQc <- function(sumstats, ldData, n = NULL,
       if (!hasGenotype) R_mat <- R_mat[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
       outlierNumber <- outlierNumber + nKr
     }
-    message("QC track: kriging prefilter removed ", nKr,
+    krRemoved <- nKr
+    message("QC track: kriging prefilter removed ", nKr, " of ", nKrIn,
             " LD-inconsistent variant(s) for summary-stat study ", study, ".")
   }
   if (!is.null(zMismatchQc) && !identical(zMismatchQc, "none")) {
     message("QC track: running ", zMismatchQc, " z-score/LD-mismatch QC for summary-stat study ", study, ".")
+    nMmIn <- nrow(sumstats)
     qc <- summaryStatsQc(sumstats = sumstats, ldData = ldDataWithLocalR(sumstats),
                          n = n, method = zMismatchQc)
     qcRss <- getRssInput(qc)
@@ -634,11 +657,13 @@ summaryStatsQc <- function(sumstats, ldData, n = NULL,
     R_mat <- if (is.null(qcLd)) NULL else getCorrelation(qcLd)
     ldMismatchOutliers <- getOutlierNumber(qc)
     outlierNumber <- outlierNumber + ldMismatchOutliers
-    message("QC track: removed ", ldMismatchOutliers,
+    mismatchRemoved <- ldMismatchOutliers
+    message("QC track: removed ", ldMismatchOutliers, " of ", nMmIn,
             " LD-mismatch outlier(s) for summary-stat study ", study, ".")
   }
   if (isTRUE(impute)) {
     message("QC track: running imputation for summary-stat study ", study, ".")
+    imputedBefore <- nrow(sumstats)
     imputed <- if (hasGenotype) {
       X_ref_scaled <- scale(X_ref)
       X_ref_scaled[is.na(X_ref_scaled)] <- 0
@@ -658,7 +683,28 @@ summaryStatsQc <- function(sumstats, ldData, n = NULL,
     }
     sumstats <- imputed$resultFilter
     if (!is.null(imputed$ldMat)) R_mat <- imputed$ldMat
+    imputedAfter <- nrow(sumstats)
+    message("QC track: imputation ", imputedBefore, " -> ", imputedAfter,
+            " variant(s) (net ", sprintf("%+d", imputedAfter - imputedBefore),
+            ") for summary-stat study ", study, ".")
   }
+  # Per-study QC rollup: corrected (sign/strand flip, retained), removed (drops at
+  # each stage), imputed (added). Kept as distinct categories because imputation
+  # adds variants back, so "in -> out" is not monotonic. Skipped stages omitted.
+  correctedSeg <- if (!is.null(hCounts)) {
+    paste0("sign-flip ", hCounts$signFlip, ", strand-flip ", hCounts$strandFlip)
+  } else "n/a"
+  removedSegs <- character(0)
+  removedSegs <- c(removedSegs, paste0("harmonization ", harmDropped))
+  if (isTRUE(alleleFlipKriging)) removedSegs <- c(removedSegs, paste0("kriging ", krRemoved))
+  if (!identical(zMismatchQc, "none")) removedSegs <- c(removedSegs, paste0("mismatch ", mismatchRemoved))
+  impSeg <- if (isTRUE(impute) && !is.na(imputedAfter)) {
+    paste0(" | imputed ", sprintf("%+d", imputedAfter - imputedBefore))
+  } else ""
+  message("QC summary [", study, "]: ", nStudyIn, " in -> ", nrow(sumstats),
+          " out | corrected: ", correctedSeg,
+          " | removed: ", paste(removedSegs, collapse = ", "), impSeg)
+
   finalVars <- sumstats$variant_id
   finalLdMat <- if (hasGenotype) referenceForVariants(finalVars) else R_mat
   preprocessSumstats <- preprocess$sumstats

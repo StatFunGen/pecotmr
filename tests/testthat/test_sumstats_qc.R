@@ -415,7 +415,7 @@ test_that("summaryStatsQc basic genotype-backed path does not compute LD", {
   expect_message(
     result <- summaryStatsQc(rssInput = rss_input, ldData = LD_data_geno,
                                zMismatchQc = "none", impute = FALSE),
-    "basic harmonization retained"
+    "basic harmonization kept"
   )
   result_ld <- getLdData(result)
   result_geno <- getGenotypes(result_ld)
@@ -526,7 +526,7 @@ test_that("summaryStatsQc treats NULL qc_method as basic-only none", {
       zMismatchQc = NULL,
       impute = FALSE
     ),
-    "basic harmonization retained"
+    "basic harmonization kept"
   )
   expect_equal(nrow(getRssInput(result)$sumstats), nrow(td$sumstats))
 })
@@ -673,7 +673,7 @@ test_that("kriging is not run by default (alleleFlipKriging = FALSE)", {
       rssInput = rssInput, ldData = td$ldData,
       zMismatchQc = "none", impute = FALSE
     ),
-    "basic harmonization retained"
+    "basic harmonization kept"
   )
   expect_equal(nrow(getRssInput(result)$sumstats), nrow(td$sumstats))
 })
@@ -700,4 +700,47 @@ test_that("alleleFlipKriging drops a planted outlier and composes with zMismatch
   expect_true(is(result, "QcResult"))
   expect_equal(seenN, nrow(td$sumstats) - 1)   # kriging removed one before dentist
   expect_equal(getOutlierNumber(result), 1)
+})
+
+# ===========================================================================
+# QC summary logging (rss-vignette-and-qc-logging)
+# ===========================================================================
+
+test_that("QC track reports kept-of-considered and a per-study rollup", {
+  td <- make_test_sumstats_ld(6)
+  msgs <- capture_messages(
+    summaryStatsQc(rssInput = list(sumstats = td$sumstats, n = 1000, varY = 1),
+                   ldData = td$ldData, zMismatchQc = "none", impute = FALSE,
+                   returnOnSkip = "preprocess", study = "studyA")
+  )
+  joined <- paste(msgs, collapse = "")
+  expect_match(joined, "harmoni", ignore.case = TRUE)
+  expect_match(joined, "of [0-9]+")        # "N of M" denominator framing
+  expect_match(joined, "QC summary")       # per-study rollup line
+})
+
+test_that("kriging outliers are reported as removed-of-N (denominator), never flipped", {
+  td <- make_test_sumstats_ld(6)
+  msgs <- capture_messages(
+    summaryStatsQc(rssInput = list(sumstats = td$sumstats, n = 1000, varY = 1),
+                   ldData = td$ldData, zMismatchQc = "none",
+                   alleleFlipKriging = TRUE, impute = FALSE,
+                   returnOnSkip = "preprocess", study = "studyA")
+  )
+  joined <- paste(msgs, collapse = "")
+  expect_match(joined, "kriging", ignore.case = TRUE)
+  expect_match(joined, "removed [0-9]+ of [0-9]+", ignore.case = TRUE)
+})
+
+test_that("skipped QC steps are not reported as actions", {
+  td <- make_test_sumstats_ld(6)
+  msgs <- capture_messages(
+    summaryStatsQc(rssInput = list(sumstats = td$sumstats, n = 1000, varY = 1),
+                   ldData = td$ldData, zMismatchQc = "none",
+                   alleleFlipKriging = FALSE, impute = FALSE,
+                   returnOnSkip = "preprocess", study = "studyA")
+  )
+  joined <- paste(msgs, collapse = "")
+  expect_match(joined, "QC summary")
+  expect_false(grepl("imputed \\+[1-9]", joined))   # imputation disabled -> no positive imputed count
 })

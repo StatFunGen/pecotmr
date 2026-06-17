@@ -102,11 +102,11 @@ to fit via the `methods` parameter on `univariateAnalysisPipeline()`
 
 | Variant | Individual-level | Summary statistics | What it models |
 |---|---|---|---|
-| **SuSiE alone** | `methods = "susie"` | `methods = "susie_rss"` | Sparse causal effects only. No infinitesimal/background term. Lightest weight; can fold polygenic background into noisy "extra" credible sets. |
-| **SuSiE with SuSiE-inf init** (default) | `methods = c("susie_inf", "susie")` + `add_susie_inf = TRUE` | `methods = c("susie_inf_rss", "susie_rss")` + `add_susie_inf = TRUE` | Two-stage: SuSiE-inf absorbs background polygenicity first, SuSiE then refines sparse signals from that initialisation. Recommended default for most QTL and GWAS fine-mapping. |
-| **SuSiE-inf alone** | `methods = "susie_inf"` | `methods = "susie_inf_rss"` | Sparse + infinitesimal joint fit. Useful for regions with strong polygenic background where the SuSiE refinement step is undesired. |
-| **SuSiE-ash alone** | `methods = "susie_ash"` | `methods = "susie_ash_rss"` | Sparse + adaptive shrinkage (ASH) mixture. Useful when you suspect a mix of medium-effect and small-effect variants beyond a small handful of large ones. |
-| **SuSiE-ash with SuSiE-inf init** | `methods = c("susie_inf", "susie_ash")` + `add_susie_inf = TRUE` | `methods = c("susie_inf_rss", "susie_ash_rss")` + `add_susie_inf = TRUE` | Same chained two-stage idea as the SuSiE variant but with ASH on the downstream fit: SuSiE-inf absorbs polygenic background first, then SuSiE-ash refines using the mixture prior. |
+| **SuSiE alone** | `methods = "susie"` | `methods = "susieRss"` | Sparse causal effects only. No infinitesimal/background term. Lightest weight; can fold polygenic background into noisy "extra" credible sets. |
+| **SuSiE with SuSiE-inf init** (default) | `methods = c("susieInf", "susie")` + `addSusieInf = TRUE` | `methods = c("susieInfRss", "susieRss")` + `addSusieInf = TRUE` | Two-stage: SuSiE-inf absorbs background polygenicity first, SuSiE then refines sparse signals from that initialisation. Recommended default for most QTL and GWAS fine-mapping. |
+| **SuSiE-inf alone** | `methods = "susieInf"` | `methods = "susieInfRss"` | Sparse + infinitesimal joint fit. Useful for regions with strong polygenic background where the SuSiE refinement step is undesired. |
+| **SuSiE-ash alone** | `methods = "susieAsh"` | `methods = "susieAshRss"` | Sparse + adaptive shrinkage (ASH) mixture. Useful when you suspect a mix of medium-effect and small-effect variants beyond a small handful of large ones. |
+| **SuSiE-ash with SuSiE-inf init** | `methods = c("susieInf", "susieAsh")` + `addSusieInf = TRUE` | `methods = c("susieInfRss", "susieAshRss")` + `addSusieInf = TRUE` | Same chained two-stage idea as the SuSiE variant but with ASH on the downstream fit: SuSiE-inf absorbs polygenic background first, then SuSiE-ash refines using the mixture prior. |
 
 The chained SuSiE-inf → SuSiE two-stage is the default both for
 backward compatibility and because it produces clean credible sets in
@@ -114,10 +114,10 @@ most settings: SuSiE alone can fold polygenic background into noisy
 "extra" credible sets; SuSiE-inf absorbs that background first so the
 SuSiE refinement concentrates on sparse signals.
 
-`add_susie_inf = TRUE` chains SuSiE-inf into **any** of `"susie"` or
-`"susie_ash"` that appear in `methods`. Listing all three
-(`methods = c("susie_inf", "susie", "susie_ash")` with
-`add_susie_inf = TRUE`) fits SuSiE-inf once, then both SuSiE and
+`addSusieInf = TRUE` chains SuSiE-inf into **any** of `"susie"` or
+`"susieAsh"` that appear in `methods`. Listing all three
+(`methods = c("susieInf", "susie", "susieAsh")` with
+`addSusieInf = TRUE`) fits SuSiE-inf once, then both SuSiE and
 SuSiE-ash initialised from it — useful for direct head-to-head
 comparison on the same warm start.
 
@@ -134,19 +134,19 @@ the `method` column.
 > means head-to-head differences only show up on regions with at
 > least one sparse signal.
 
-### Backward compatibility with `add_susie_inf`
+### Backward compatibility with `addSusieInf`
 
-The pre-existing `add_susie_inf` boolean still works exactly as before
+The pre-existing `addSusieInf` boolean still works exactly as before
 when `methods` is `NULL` (the default):
 
-- `add_susie_inf = TRUE` (default) → fit SuSiE-inf, then chain it into
-  SuSiE. Equivalent to `methods = c("susie_inf", "susie")`.
-- `add_susie_inf = FALSE` → plain SuSiE alone. Equivalent to
+- `addSusieInf = TRUE` (default) → fit SuSiE-inf, then chain it into
+  SuSiE. Equivalent to `methods = c("susieInf", "susie")`.
+- `addSusieInf = FALSE` → plain SuSiE alone. Equivalent to
   `methods = "susie"`.
 
-When `methods` is set explicitly, `add_susie_inf` controls whether the
-chained-init shortcut is applied to any `"susie"` or `"susie_ash"`
-method that appears alongside `"susie_inf"`. Set `add_susie_inf = FALSE`
+When `methods` is set explicitly, `addSusieInf` controls whether the
+chained-init shortcut is applied to any `"susie"` or `"susieAsh"`
+method that appears alongside `"susieInf"`. Set `addSusieInf = FALSE`
 to fit each requested method independently rather than chained.
 
 ### Fitting multiple variants in one call
@@ -154,7 +154,7 @@ to fit each requested method independently rather than chained.
 ```{r multi-method-fit, eval=FALSE}
 multi <- univariateAnalysisPipeline(
   X = X[, sub], Y = y, maf = maf[sub],
-  methods = c("susie_inf", "susie", "susie_ash"),
+  methods = c("susieInf", "susie", "susieAsh"),
   twasWeights = FALSE,
   signalCutoff = 0
 )
@@ -168,7 +168,7 @@ If you want the raw fits without `pecotmr`'s post-processing:
 
 ```{r two-stage-fit, eval=FALSE}
 # Two-stage convenience for the recommended default:
-fits <- fit_susie_inf_then_susie(X[, sub], y)         # list(susie, susie_inf)
+fits <- fitSusieInfThenSusie(X[, sub], y)             # list(susie, susieInf)
 fits_rss <- fitSusieInfThenSusieRss(z, R, n)
 
 # Or call susieR directly with the right unmappable_effects flag:
@@ -179,11 +179,11 @@ ash_fit <- susieR::susie(X, y, unmappable_effects = "ash",
 
 # Then post-process any combination through the unified pipeline:
 post <- postprocessFinemappingFits(
-  fits = list(susie_inf = inf_fit, susie_ash = ash_fit),
-  data_x = X[, sub], data_y = y, maf = maf[sub],
-  coverage = 0.95, secondary_coverage = c(0.7, 0.5)
+  fits = list(susieInf = inf_fit, susieAsh = ash_fit),
+  dataX = X[, sub], dataY = y, af = maf[sub],
+  coverage = 0.95, secondaryCoverage = c(0.7, 0.5)
 )
-out <- formatFinemappingOutput(post, primary_method = "susie_inf")
+out <- formatFinemappingOutput(post, primaryMethod = "susieInf")
 ```
 
 ## The unified `top_loci` table
@@ -199,10 +199,10 @@ following 22 columns, in this order:
 |  4 | `a1`                    | from parsed `variant`                                  |
 |  5 | `a2`                    | from parsed `variant`                                  |
 |  6 | `variant`               | the row's variant id (`chr:pos:A2:A1`)                 |
-|  7 | `gene`                  | phenotype identifier (`colnames(data_y)[1]`)           |
+|  7 | `gene`                  | phenotype identifier (`colnames(dataY)[1]`)            |
 |  8 | `event`                 | `paste(condition_id, gene, sep = "_")`                 |
 |  9 | `n`                     | analyzed sample count                                  |
-| 10 | `maf`                   | from the `maf` argument                                |
+| 10 | `af`                    | effect-allele frequency (`af`; complemented on allele swaps) |
 | 11 | `beta`                  | univariate effect (`sumstats$betahat`)                 |
 | 12 | `se`                    | univariate SE (`sumstats$sebetahat`)                   |
 | 13 | `pip`                   | per-variant SuSiE PIP                                  |
@@ -273,22 +273,22 @@ n_qtl_sample      <- 0  # 0 = read from sumstats
 ld_data <- loadLdMatrix(ld_meta_path, region = region)
 
 fm <- rssAnalysisPipeline(
-  sumstat_path        = qtl_sumstat_path,
-  column_file_path    = qtl_column_map,
-  LD_data             = ld_data,
-  n_sample            = n_qtl_sample,
+  sumstatPath         = qtl_sumstat_path,
+  columnFilePath      = qtl_column_map,
+  ldData              = ld_data,
+  nSample             = n_qtl_sample,
   region              = region,
-  extract_region_name = gene_id,
-  region_name_col     = 4L,
-  qc_method           = "slalom",
-  finemapping_method  = "susie_rss",
-  finemapping_opts    = list(L = 20, L_greedy = 5,
+  extractRegionName   = gene_id,
+  regionNameCol       = 4L,
+  zMismatchQc         = "slalom",
+  finemappingMethod   = "susieRss",
+  finemappingOpts     = list(L = 20, L_greedy = 5,
                              coverage = c(0.95, 0.7, 0.5),
-                             signalCutoff = 0.025,
+                             signal_cutoff = 0.025,
                              min_abs_corr = 0.8),
   impute              = TRUE
 )
-head(fm$rss_data_analyzed[[1]]$top_loci)
+head(fm$rssDataAnalyzed[[1]]$top_loci)
 ```
 
 ### Lower-level alternative (in-memory, runnable here)
@@ -312,12 +312,12 @@ R_sub    <- R[sumstats$variant_id, sumstats$variant_id]
 
 fm_rss <- susieRssPipeline(
   sumstats          = sumstats,
-  LD_mat            = R_sub,
+  ldMat             = R_sub,
   n                 = nrow(X_ref),
-  L                 = 10, L_greedy = 5,
-  analysis_method   = "susie_rss",
+  analysisMethod    = "susieRss",
   coverage          = 0.95,
-  secondary_coverage = c(0.7, 0.5)
+  secondaryCoverage = c(0.7, 0.5),
+  finemappingOpts   = list(L = 10, L_greedy = 5)
 )
 names(fm_rss)
 dim(fm_rss$top_loci)
@@ -326,9 +326,10 @@ head(fm_rss$top_loci[, c("variant", "pip", "cs_95",
 ```
 
 Note that the output schema is the same 22 columns as the
-individual-level pipeline — `method` is `"susie_rss"` instead of
-`"susie"`, but everything downstream (ColocBoost, xqtl-enrichment,
-TWAS) consumes the same table.
+individual-level pipeline — the `method` column reads `"susie_rss"`
+instead of `"susie"` (the output `method` values stay snake_case even
+though the `methods` argument is camelCase), but everything downstream
+(ColocBoost, xqtl-enrichment, TWAS) consumes the same table.
 
 ## GWAS summary-statistics fine-mapping
 
@@ -341,9 +342,9 @@ layer:
   [RSS QC vignette](rss-qc.html) shows the YAML schema; common GWAS
   alternatives are `effect_allele`/`other_allele` for `A1`/`A2`,
   `OR` (you'll need `log(OR)` for `beta`), and `N` for `n_sample`.
-- **No `extract_region_name`.** GWAS sumstats are not gene-keyed, so
+- **No `extractRegionName`.** GWAS sumstats are not gene-keyed, so
   you slice by physical region only. Pass `region = "chr:start-end"`
-  and omit `extract_region_name` / `region_name_col`.
+  and omit `extractRegionName` / `regionNameCol`.
 - **Per-variant sample size.** GWAS sumstats often have a per-variant
   `n_sample` column (some variants were imputed in fewer cohorts);
   `loadRssData()` reads that automatically when the column is mapped.
@@ -358,14 +359,14 @@ region            <- "<chr:start-end>"
 ld_data <- loadLdMatrix(ld_meta_path, region = region)
 
 fm_gwas <- rssAnalysisPipeline(
-  sumstat_path       = gwas_sumstat_path,
-  column_file_path   = gwas_column_map,
-  LD_data            = ld_data,
-  n_case             = 0,        # set if known; 0 reads from sumstats
-  n_control          = 0,
+  sumstatPath        = gwas_sumstat_path,
+  columnFilePath     = gwas_column_map,
+  ldData             = ld_data,
+  nCase              = 0,        # set if known; 0 reads from sumstats
+  nControl           = 0,
   region             = region,
-  qc_method          = "slalom",
-  finemapping_method = "susie_rss",
+  zMismatchQc        = "slalom",
+  finemappingMethod  = "susieRss",
   impute             = TRUE
 )
 ```
@@ -397,7 +398,7 @@ workflows:
   of QTL fine-mapping signals at GWAS PIPs. See the
   [enrichment vignette](xqtl-enrichment.html).
 - **Colocalization** (`colocboostPipeline`): uses the trimmed SuSiE
-  fits — `finemapping_result` slot — as colocalization input. See the
+  fits — `finemappingResult` slot — as colocalization input. See the
   [ColocBoost vignette](colocboost-pipeline.html).
 - **TWAS** (`twasWeightsPipeline`, `twasPipeline`): uses the SuSiE
   effect estimates as weight learners for transcriptome-wide
@@ -409,11 +410,11 @@ workflows:
 
 | Function | Use it when |
 |---|---|
-| `univariateAnalysisPipeline()` | Individual-level data: you have `X` (samples × variants), `Y` (phenotype). Pick variant(s) via `methods = c("susie", "susie_inf", "susie_ash")`. |
-| `rssAnalysisPipeline()` | Summary statistics (QTL or GWAS): you have z-scores in a tabix file and an LD reference. Pick variant(s) via `methods = c("susie_rss", "susie_inf_rss", "susie_ash_rss")`. |
+| `univariateAnalysisPipeline()` | Individual-level data: you have `X` (samples × variants), `Y` (phenotype). Pick variant(s) via `methods = c("susie", "susieInf", "susieAsh")`. |
+| `rssAnalysisPipeline()` | Summary statistics (QTL or GWAS): you have z-scores in a tabix file and an LD reference. Pick variant(s) via `methods = c("susieRss", "susieInfRss", "susieAshRss")`. |
 | `susieRssPipeline()` | Lower-level: you already have in-memory `z`, `R` (or `X`), `n`. Same `methods` argument as `rssAnalysisPipeline()`. |
-| `fit_susie_inf_then_susie()` / `fitSusieInfThenSusieRss()` | Lowest-level convenience for the two-stage chained default (SuSiE-inf init → SuSiE). |
-| `postprocessFinemappingFits()` + `formatFinemappingOutput()` | Post-process any combination of `susie`, `susie_inf`, `susie_ash`, `susie_rss`, `susie_inf_rss`, `susie_ash_rss`, `mvsusie`, `fsusie` fits into the unified 22-column `top_loci`. |
+| `fitSusieInfThenSusie()` / `fitSusieInfThenSusieRss()` | Lowest-level convenience for the two-stage chained default (SuSiE-inf init → SuSiE). |
+| `postprocessFinemappingFits()` + `formatFinemappingOutput()` | Post-process any combination of `susie`, `susieInf`, `susieAsh`, `susieRss`, `susieInfRss`, `susieAshRss`, `mvsusie`, `fsusie` fits into the unified 22-column `top_loci`. |
 
 All five entry points produce — or can be post-processed into — the
 same 22-column `top_loci` table documented above, which is the contract
