@@ -293,14 +293,14 @@ loadLdMatrix <- function(ldMetaFilePath, region, extractCoordinates = NULL,
       if (!is.null(corr)) {
         corr <- corr[-dupIdx, -dupIdx, drop = FALSE]
       }
-      variantsGr <- result@variants[-dupIdx]
+      variantsGr <- getVariantInfo(result)[-dupIdx]
       result <- LdData(
         correlation = corr,
-        genotypeHandle = result@genotypeHandle,
-        snpIdx = result@snpIdx,
+        genotypeHandle = getGenotypeHandle(result),
+        snpIdx = getSnpIdx(result),
         variants = variantsGr,
-        blockMetadata = result@blockMetadata,
-        nRef = result@nRef
+        blockMetadata = getBlockMetadata(result),
+        nRef = getNRef(result)
       )
     }
   }
@@ -474,7 +474,7 @@ loadLdFromGenotype <- function(genotypePath, region,
   if (returnGenotype) {
     # Store genotype handle + snpIdx for lazy access
     handle <- readGenotypes(genotypePath)
-    snpIdx <- .regionToSnpIdx(handle@snpInfo, region)
+    snpIdx <- .regionToSnpIdx(getSnpInfo(handle), region)
     return(LdData(
       correlation = NULL,
       genotypeHandle = handle,
@@ -556,7 +556,7 @@ loadLdSketch <- function(ldMetaFilePath, region, nSample = NULL) {
     snpIdx = NULL,
     variants = variantsGr,
     blockMetadata = getBlockMetadata(result),
-    nRef = result@nRef
+    nRef = getNRef(result)
   )
 }
 
@@ -732,9 +732,9 @@ partitionLdMatrix <- function(ldData, mergeSmallBlocks = TRUE,
     stop("ldData must be an LdData object")
   }
   combinedMatrix <- getCorrelation(ldData)
-  blockMetadata <- ldData@blockMetadata
+  blockMetadata <- getBlockMetadata(ldData)
   if (is(blockMetadata, "LdBlocks")) {
-    blockMetadata <- as.data.frame(blockMetadata@blocks)
+    blockMetadata <- as.data.frame(getBlocks(blockMetadata))
   }
   variantIds <- getVariantIds(ldData)
 

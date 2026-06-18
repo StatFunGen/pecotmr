@@ -305,73 +305,6 @@ test_that("findDuplicateVariants handles negative correlations", {
 })
 
 # =============================================================================
-# pvalGlobal
-# =============================================================================
-
-test_that("pvalGlobal with ACAT method returns valid combined p-value", {
-  pvals <- c(0.01, 0.05, 0.5, 0.8)
-  result <- pecotmr:::pvalGlobal(pvals, combMethod = "ACAT", naive = FALSE)
-  expect_true(is.numeric(result))
-  # ACAT statistic: T = mean(tan(pi*(0.5 - p_i))), p = P[Cauchy >= T]
-  expected <- pcauchy(mean(tan(pi * (0.5 - pvals))), lower.tail = FALSE)
-  expect_equal(result, expected, tolerance = 1e-10)
-})
-
-test_that("pvalGlobal with naive=TRUE returns Bonferroni-corrected p-value", {
-  pvals <- c(0.01, 0.05, 0.1, 0.5)
-  result <- pecotmr:::pvalGlobal(pvals, combMethod = "HMP", naive = TRUE)
-  n_unique <- length(unique(pvals))
-  expected <- min(n_unique * min(pvals), 1.0)
-  expect_equal(result, expected)
-})
-
-test_that("pvalGlobal naive method caps at 1.0", {
-  pvals <- seq(0.1, 0.9, by = 0.01)
-  result <- pecotmr:::pvalGlobal(pvals, combMethod = "ACAT", naive = TRUE)
-  expect_true(result <= 1.0)
-})
-
-test_that("pvalGlobal naive method with single p-value returns that p-value", {
-  result <- pecotmr:::pvalGlobal(0.03, combMethod = "ACAT", naive = TRUE)
-  expect_equal(result, 0.03)
-})
-
-test_that("pvalGlobal ACAT with identical p-values", {
-  pvals <- rep(0.05, 5)
-  result <- pecotmr:::pvalGlobal(pvals, combMethod = "ACAT", naive = FALSE)
-  expect_true(is.numeric(result))
-  expect_true(result > 0 && result < 1)
-})
-
-test_that("pvalGlobal ACAT with single p-value delegates correctly", {
-  result <- pecotmr:::pvalGlobal(0.05, combMethod = "ACAT", naive = FALSE)
-  expect_equal(result, 0.05)
-})
-
-test_that("pvalGlobal ACAT with very significant p-values", {
-  pvals <- c(1e-8, 1e-6, 1e-4)
-  result <- pecotmr:::pvalGlobal(pvals, combMethod = "ACAT", naive = FALSE)
-  expect_true(is.numeric(result))
-  expect_true(result > 0 && result <= 1)
-})
-
-test_that("pvalGlobal HMP method returns valid p-value when harmonicmeanp available", {
-  skip_if_not_installed("harmonicmeanp")
-  pvals <- c(0.01, 0.05, 0.2, 0.7)
-  result <- pecotmr:::pvalGlobal(pvals, combMethod = "HMP", naive = FALSE)
-  expect_true(is.numeric(result))
-  expect_true(result >= 0 && result <= 1)
-})
-
-test_that("pvalGlobal HMP errors when harmonicmeanp not installed", {
-  skip_if(requireNamespace("harmonicmeanp", quietly = TRUE),
-          "harmonicmeanp is installed, cannot test missing-package path")
-  pvals <- c(0.01, 0.05)
-  expect_error(pecotmr:::pvalGlobal(pvals, combMethod = "HMP", naive = FALSE),
-               "harmonicmeanp")
-})
-
-# =============================================================================
 # pvalHmp
 # =============================================================================
 
@@ -432,54 +365,6 @@ test_that("pvalAcat with all large p-values returns large combined p-value", {
   expect_true(result > 0.5 && result <= 1)
 })
 
-# =============================================================================
-# pvalCauchy
-# =============================================================================
-
-test_that("pvalCauchy combines p-values", {
-  pvals <- c(0.01, 0.05, 0.5)
-  combined <- pecotmr:::pvalCauchy(pvals)
-  # Manual: CCT stat = mean(tan((0.5 - p) * pi)), result = 1 - pcauchy(stat)
-  cct_stat <- mean(tan((0.5 - pvals) * pi))
-  expected <- 1 - pcauchy(cct_stat)
-  expect_equal(combined, expected, tolerance = 1e-10)
-})
-
-test_that("pvalCauchy handles NAs with na.rm", {
-  pvals <- c(0.01, NA, 0.05)
-  combined <- pecotmr:::pvalCauchy(pvals, na.rm = TRUE)
-  expect_true(!is.na(combined))
-})
-
-test_that("pvalCauchy with very small p-values", {
-  pvals <- c(1e-20, 1e-15)
-  combined <- pecotmr:::pvalCauchy(pvals)
-  expect_true(combined < 1e-10)
-})
-
-test_that("pvalCauchy with all NA and na.rm=TRUE returns NA", {
-  result <- pecotmr:::pvalCauchy(c(NA, NA, NA), na.rm = TRUE)
-  expect_true(is.na(result))
-})
-
-test_that("pvalCauchy with p-values near 1 caps them at 0.99", {
-  result <- pecotmr:::pvalCauchy(c(0.999, 0.9999, 0.5))
-  expect_true(is.numeric(result))
-  expect_true(!is.na(result))
-})
-
-test_that("pvalCauchy with na.rm=FALSE and NA present still computes result", {
-  result <- pecotmr:::pvalCauchy(c(0.01, NA, 0.05), na.rm = FALSE)
-  expect_true(is.numeric(result))
-})
-
-test_that("pvalCauchy with extremely small p-values triggers large-stat branch", {
-  # cct.stat > 1e+15 triggers the 1/(cct.stat*pi) return path
-  result <- pecotmr:::pvalCauchy(c(1e-300, 1e-290))
-  expect_true(is.numeric(result))
-  expect_true(result > 0 && result < 1)
-  expect_false(is.na(result))
-})
 
 test_that("pvalAcat uses asymptotic approximation for p < 1e-15", {
   # p-values below 1e-15 use 1/(p*pi) instead of tan()
@@ -1648,40 +1533,6 @@ test_that("detectOutliersMahalanobis threshold sensitivity", {
   # With lenient threshold, more possible outliers
   r_lenient <- detectOutliersMahalanobis(x, prob = 0.90, pvalThreshold = 0.10)
   expect_true(sum(r_strict$isOutlier) <= sum(r_lenient$isOutlier))
-})
-
-# =============================================================================
-# twasMethodCor
-# =============================================================================
-
-test_that("twasMethodCor with identity LD", {
-  LD <- diag(3)
-  w1 <- c(1, 0, 0)
-  w2 <- c(0, 1, 0)
-  w3 <- c(0, 0, 1)
-  result <- twasMethodCor(list(w1, w2, w3), LD)
-  # With identity LD and orthogonal weights, off-diag should be 0
-  expect_equal(dim(result), c(3, 3))
-  expect_equal(diag(result), c(1, 1, 1))
-  expect_equal(result[1, 2], 0)
-  expect_equal(result[1, 3], 0)
-  expect_equal(result[2, 3], 0)
-})
-
-test_that("twasMethodCor with identical weights gives correlation 1", {
-  LD <- matrix(c(1, 0.5, 0.5, 1), 2, 2)
-  w <- c(1, 1)
-  result <- twasMethodCor(list(w, w), LD)
-  expect_equal(result[1, 2], 1)
-  expect_equal(result[2, 1], 1)
-})
-
-test_that("twasMethodCor with diagonal LD", {
-  LD <- diag(c(2, 3, 1))
-  w1 <- c(1, 0, 0)
-  w2 <- c(0, 1, 0)
-  result <- twasMethodCor(list(w1, w2), LD)
-  expect_equal(result[1, 2], 0)
 })
 
 # =============================================================================

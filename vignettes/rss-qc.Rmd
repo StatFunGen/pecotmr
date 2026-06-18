@@ -18,350 +18,227 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
 
 Regression-with-summary-statistics (RSS) methods — SuSiE-RSS, ColocBoost,
 DENTIST, lassosum, PRS-CS, SDPR — all require a summary-statistics table
-(`z` or `beta`/`se`) and an LD reference panel that agree about which
+(`Z` or `BETA`/`SE`) and an LD reference panel that agree about which
 variant is which. Two things go wrong in practice:
 
 1. **Allele alignment.** Sumstats and LD panel may flip A1/A2, encode
    strand-ambiguous variants inconsistently, or contain indels and
    duplicates that need filtering.
 2. **LD-summary-statistic mismatch.** Even when alleles align, individual
-   z-scores can be inconsistent with the LD pattern because of imputation
-   errors, ancestry differences between the GWAS and LD panel, or
-   per-variant sample-size differences.
+   z-scores can be inconsistent with the LD pattern around them because
+   of imputation errors, ancestry differences between the GWAS and LD
+   panel, or per-variant sample-size differences.
 
-`pecotmr` exposes both stages through pipeline-level wrappers:
+In the current S4 API both stages are unified behind a single pipeline
+entry point:
 
-| Stage | Function | What it does |
-|---|---|---|
-| 1 — Allele alignment | `rssBasicQc()` | Match alleles, flip effect direction, drop indels/duplicates/strand-ambiguous variants, optionally exclude skip regions. |
-| 2 — Mismatch detection | `ldMismatchQc()` / `summaryStatsQc()` | Flag LD-inconsistent variants via SLALOM (default) or DENTIST; optionally re-impute with RAISS. |
+| Stage | Mechanism |
+|---|---|
+| Variant-content QC (column standardization, indels, strand-ambiguous, MAF/INFO/N filters, p-value & effect-size sanity checks, optional dbSNP / liftover) | Delegated to `MungeSumstats::format_sumstats()` from inside `summaryStatsQc()`. |
+| Pecotmr-specific QC (`skipRegion`, optional PIP screen, panel harmonization against the `ldSketch`, optional SLALOM/DENTIST LD-mismatch QC, optional RAISS imputation) | Implemented inside `summaryStatsQc()`. |
 
-The same wrappers work for both GWAS and QTL summary statistics — only the
-loading layer differs (QTL sumstats are typically tabix-indexed per-gene
-tables that need a column-mapping YAML). The fine-mapping and
-TWAS-weights pipelines (`rssAnalysisPipeline()`,
-`twasWeightsSumstatPipeline()`) call these QC functions internally; the
-selector is `zMismatchQc` (default `"none"`, i.e. basic allele harmonization
-only — set `"slalom"` or `"dentist"` to add LD-mismatch QC). This vignette
-shows what they do under the hood so you can run QC standalone or tune it.
+`summaryStatsQc()` is the **only** QC entry point. It takes a
+`GwasSumStats` or `QtlSumStats` (a DFrame collection that already carries
+its LD reference via the `ldSketch` slot), runs the full pipeline above,
+and returns a new collection of the same class with cleaned entries and
+a populated `qcInfo` slot. Downstream pipelines refuse SumStats
+collections where `length(getQcInfo(x)) == 0L`, so QC is mandatory before
+fine-mapping, TWAS-weight learning, colocalization, etc.
 
 ```{r load-packages}
 library(pecotmr)
 ```
 
-## Quick start on shipped example data
+## Reading summary statistics into pecotmr
 
-The `gwas_sumstats_example` dataset is a de-identified GWAS summary table
-on a single region, and `eqtl_region_example$X` is the matching
-individual-level genotype matrix that we can use as an in-sample LD
-reference. The two datasets share all 2,828 variants, so we can focus on
-QC mechanics without dealing with cross-cohort variant matching yet.
+There is no `readSumstats()` or `loadRssData()` in the new API. The S4
+design is constructor-only: build an in-memory `GRanges` (one per
+study/context/trait tuple) carrying the variant metadata in its `mcols`,
+then pass a list of those `GRanges` to `GwasSumStats()` or
+`QtlSumStats()` together with the LD reference (`ldSketch`).
 
-```{r load-toy}
-data(gwas_sumstats_example)
-data(eqtl_region_example)
+The minimum required mcols on each entry are `SNP`, `A1`, `A2`, `Z`,
+`N`; optional columns are `MAF`, `INFO`, `BETA`, `SE`, `P`. The
+`ldSketch` is a `GenotypeHandle` covering the same variant universe
+(can be built from a VCF, GDS, PLINK1/2 file, or — new in this release
+— from an LD-meta TSV row via `GenotypeHandle(ldMeta = ..., region = ...)`).
 
-sumstats <- gwas_sumstats_example
-X_ref <- eqtl_region_example$X
+### Worked example: GWAS sumstats from a TSV
 
-cat(sprintf("Sumstats: %d variants\nReference panel: %d samples x %d variants\n",
-            nrow(sumstats), nrow(X_ref), ncol(X_ref)))
-head(sumstats, 3)
+```{r build-gwas-sumstats, eval=FALSE}
+# TODO(data): replace paths with your own; this block is illustrative.
+
+# Read your sumstats with MungeSumstats first to harmonize column names
+# and genome build (summaryStatsQc() will re-run it with the curated knobs,
+# but it's convenient to standardize before building the GRanges).
+df <- MungeSumstats::format_sumstats(
+  path             = "your_gwas.tsv.gz",
+  ref_genome       = "GRCh38",
+  return_data      = TRUE,
+  return_format    = "data.frame")
+
+gr <- GenomicRanges::GRanges(
+  seqnames = paste0("chr", df$CHR),
+  ranges   = IRanges::IRanges(start = df$BP, width = 1L))
+S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+  SNP = df$SNP, A1 = df$A1, A2 = df$A2,
+  Z   = df$BETA / df$SE,
+  N   = df$N)
+
+ldSketch <- GenotypeHandle(ldMeta = "ld_meta.tsv",
+                           region = "chr1:1-1000000")
+
+gws <- GwasSumStats(
+  study    = "MyStudy",
+  entry    = list(gr),
+  genome   = "GRCh38",
+  ldSketch = ldSketch)
 ```
 
-The shipped sumstats are already aligned to the LD panel (same `variant_id`
-strings, same allele orientation). That lets us go straight to the
-LD-mismatch step; we will come back to allele harmonization in the next
-section.
+### Worked example: QTL sumstats (tabix-indexed per-gene tables)
 
-```{r quick-qc}
-R <- computeLd(X_ref, method = "sample")
+```{r build-qtl-sumstats, eval=FALSE}
+# TODO(data): point at your tabix-indexed per-gene QTL tables and column
+# map. The pattern below works for tensorQTL / APEX nominal output once
+# columns are renamed to SNP / A1 / A2 / Z / N.
 
-qc <- ldMismatchQc(
-  zScore = sumstats$z,
-  R = R[sumstats$variant_id, sumstats$variant_id],
-  method = "slalom"
-)
+readOneGene <- function(tabix_path, gene_id, region) {
+  rows <- Rsamtools::scanTabix(Rsamtools::TabixFile(tabix_path),
+                               param = GenomicRanges::GRanges(region))[[1L]]
+  df <- read.table(text = rows, sep = "\t",
+                   col.names = c("chrom","pos","SNP","A1","A2","BETA","SE","N"))
+  df <- df[df$gene_id == gene_id, , drop = FALSE]
+  gr <- GenomicRanges::GRanges(
+    seqnames = paste0("chr", df$chrom),
+    ranges   = IRanges::IRanges(start = df$pos, width = 1L))
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    SNP = df$SNP, A1 = df$A1, A2 = df$A2,
+    Z   = df$BETA / df$SE,
+    N   = df$N)
+  gr
+}
 
-cat(sprintf("SLALOM flagged %d / %d variants (%.1f%%)\n",
-            sum(qc$outlier, na.rm = TRUE),
-            nrow(qc),
-            100 * mean(qc$outlier, na.rm = TRUE)))
+ldSketch <- GenotypeHandle(ldMeta = "ld_meta.tsv",
+                           region = "chr1:1-1000000")
+
+qts <- QtlSumStats(
+  study    = "MyQTL",
+  context  = "brain",
+  trait    = c("ENSG00000001", "ENSG00000002"),
+  entry    = list(readOneGene("brain.tsv.gz", "ENSG00000001", "chr1:1-1000000"),
+                  readOneGene("brain.tsv.gz", "ENSG00000002", "chr1:1-1000000")),
+  genome   = "GRCh38",
+  ldSketch = ldSketch)
 ```
 
-`ldMismatchQc()` is the lowest-level entry point: pass z-scores and an
-LD matrix, get back a per-variant `outlier` flag. The pipeline functions
-in `pecotmr` call this internally on each region after allele alignment.
+The binary-trait variance formula `varY = n / (n - 1) * phi * (1 - phi)`
+(with `phi = nCase / n`) is computed in user code and passed via the
+constructor's `varY = c(<value>)` argument.
 
-## Pipeline integration: `rssBasicQc()` + `summaryStatsQc()`
+## Running the QC
 
-In a typical workflow you would load LD from a metadata TSV
-(`loadLdMatrix()` returns an `LdData` S4 object) and pass it through the
-two-stage QC pipeline. We construct an `LdData` from the shipped genotype
-matrix to keep the example self-contained.
+Once the SumStats collection is built, every QC step lives in
+`summaryStatsQc()`:
 
-```{r build-lddata}
-ref_panel <- parseVariantId(colnames(X_ref))
-ref_panel$variant_id <- colnames(X_ref)
-
-variants_gr <- GenomicRanges::GRanges(
-  seqnames = ref_panel$chrom,
-  ranges = IRanges::IRanges(start = ref_panel$pos, width = 1L)
-)
-S4Vectors::mcols(variants_gr) <- S4Vectors::DataFrame(
-  variant_id = ref_panel$variant_id,
-  A1 = ref_panel$A1,
-  A2 = ref_panel$A2
-)
-block_meta <- data.frame(
-  block_id = 1L,
-  chrom = ref_panel$chrom[1],
-  block_start = min(ref_panel$pos),
-  block_end = max(ref_panel$pos),
-  size = nrow(ref_panel),
-  start_idx = 1L,
-  end_idx = nrow(ref_panel)
-)
-
-ld_data <- LdData(
-  correlation = R,
-  variants = variants_gr,
-  blockMetadata = block_meta,
-  nRef = nrow(X_ref)
-)
+```{r run-qc, eval=FALSE}
+gws_qcd <- summaryStatsQc(
+  gws,
+  useDbsnpRefCheck      = FALSE,   # opt-in to MungeSumstats dbSNP checks
+  removeIndels          = FALSE,
+  removeStrandAmbiguous = TRUE,
+  mafCutoff             = 0,       # 0 = off; > 0 requires MAF column
+  infoCutoff            = 0,       # 0 = off; > 0 requires INFO column
+  nCutoff               = 5,
+  skipRegion            = NULL,    # e.g. MHC "chr6:25000000-35000000"
+  zMismatchQc           = "slalom", # "none", "slalom", "dentist"
+  alleleFlipKriging     = FALSE,    # opt-in pre-SLALOM LD-consistency check
+  impute                = FALSE,    # RAISS imputation against ldSketch
+  matchMinProp          = 0)
 ```
 
-### Stage 1 — `rssBasicQc()`
+`gws_qcd` is a new `GwasSumStats` of the same class, with cleaned
+entries and a populated `qcInfo` slot. The per-entry audit record is
+accessible via `getQcInfo()`:
 
-`rssBasicQc()` performs allele-level harmonization between the sumstats
-and the LD panel. It flips signs on `z` (and `beta` if present) for
-variants where A1/A2 swap, drops strand-ambiguous A/T and C/G variants,
-removes duplicates, and optionally removes indels.
-
-```{r rss-basic-qc}
-qc_basic <- rssBasicQc(sumstats, LD_data = ld_data)
-sumstats_aligned <- getrssinput(qc_basic)$sumstats
-cat(sprintf("After allele QC: %d variants\n", nrow(sumstats_aligned)))
+```{r inspect-qcinfo, eval=FALSE}
+qc <- getQcInfo(gws_qcd)
+str(qc$entryAudit[[1]])    # per-entry counts: variantsIn, mungeSumstatsDropped,
+                           # keepVariantsDropped, skipRegionDropped, matchedAgainstSketch,
+                           # krigingOutliersDropped, ldMismatchOutliersDropped, ...
+qc$options                 # the curated knobs you passed (frozen for provenance)
 ```
 
-The return value is a `QcResult` S4 object; use `getrssinput()$sumstats`
-for the cleaned sumstats and `getlddata()` for the LD subset aligned to
-those variants.
+## Column-availability contract
 
-### Stage 2 — `summaryStatsQc()`
-
-`summaryStatsQc()` dispatches to SLALOM (default) or DENTIST to flag
-LD-inconsistent variants, then subsets sumstats and LD to the
-non-outliers. With `impute = TRUE` it also runs RAISS to re-impute the
-outlier z-scores from the surviving variants.
-
-```{r summary-stats-qc}
-qc_full <- summaryStatsQc(
-  sumstats = sumstats_aligned,
-  LD_data = getlddata(qc_basic),
-  method = "slalom"
-)
-
-sumstats_clean <- getrssinput(qc_full)$sumstats
-cat(sprintf("After LD-mismatch QC: %d variants (%d flagged)\n",
-            nrow(sumstats_clean),
-            getoutliernumber(qc_full)))
-```
-
-`sumstats_clean` is now ready to feed into any downstream RSS method:
-`susie_rss()`, `colocboostPipeline()`, `otters_weights()`, etc. The
-fine-mapping and TWAS-weights vignettes pick up from here.
-
-## QC for QTL summary statistics
-
-QTL sumstats (e.g. eQTL, sQTL nominal output from tensorQTL or APEX) need
-the same two-stage QC. The only practical differences are:
-
-- **Loading.** QTL sumstats are typically very large per-tissue tables,
-  so you load them region-by-region via tabix using `loadRssData()`.
-- **Column mapping.** Nominal-output column names vary by tool. A small
-  YAML file maps your column names to the standardized names
-  `pecotmr` expects.
-
-The same `rssBasicQc()` / `summaryStatsQc()` calls work on the
-loaded sumstats; the pipeline functions `rssAnalysisPipeline()` and
-`twasWeightsSumstatPipeline()` wrap all of this.
-
-### Column mapping
-
-The mapping YAML maps your column names (right) to the standard names
-`pecotmr` expects (left). Required keys are `chrom`, `pos`, `A1`, `A2`,
-plus either `z` or `beta`/`sebeta`.
-
-```yaml
-# TODO(data): replace with the column names from your QTL tool's output
-chrom: chromosome
-pos: position
-A1: alt_allele
-A2: ref_allele
-beta: slope
-sebeta: slope_se
-n_sample: ma_count   # optional; per-variant sample size column
-```
-
-### Loading and QC
-
-```{r qtl-qc, eval=FALSE}
-# TODO(data): replace with real QTL sumstats and LD-metadata paths
-qtl_sumstat_path  <- "<path/to/qtl_nominal.tsv.gz>"
-qtl_column_map    <- "<path/to/qtl_column_map.yml>"
-ld_meta_path      <- "<path/to/ld_meta.tsv>"
-region            <- "<chr:start-end>"
-gene_id           <- "<ENSG...>"
-n_qtl_sample      <- 0  # 0 = read from sumstats; otherwise pass explicit n
-
-# Load sumstats for one gene region, with column standardization
-rss_input <- loadRssData(
-  sumstat_path        = qtl_sumstat_path,
-  column_file_path    = qtl_column_map,
-  region              = region,
-  extract_region_name = gene_id,
-  region_name_col     = 4L,
-  n_sample            = n_qtl_sample
-)
-
-# Load LD reference for the same region
-ld_data <- loadLdMatrix(ld_meta_path, region = region)
-
-# Same two-stage QC as for GWAS
-qc_basic <- rssBasicQc(rss_input$sumstats, LD_data = ld_data)
-qc_full  <- summaryStatsQc(
-  sumstats = getrssinput(qc_basic)$sumstats,
-  LD_data  = getlddata(qc_basic),
-  method   = "slalom",
-  impute   = TRUE,
-  n        = rss_input$n
-)
-qtl_sumstats_clean <- getrssinput(qc_full)$sumstats
-```
-
-The `rssAnalysisPipeline()` wrapper bundles `loadRssData()` +
-`summaryStatsQc()` + fine-mapping into a single call when you do not
-need to inspect the intermediate QC output — see the fine-mapping
-vignette.
+A non-zero `mafCutoff` requires every entry to carry a `MAF` mcol;
+non-zero `infoCutoff` requires `INFO`; non-zero `nCutoff` requires `N`.
+Missing column with a non-zero cutoff is a hard error — there is no
+silent fallback. If you don't want a given filter to run, leave its
+cutoff at 0 (its default).
 
 ## Method internals: SLALOM vs DENTIST
 
-`summaryStatsQc()` dispatches to one of two LD-mismatch detectors. They
-differ in how they decide whether a variant's z-score is inconsistent
-with the LD pattern around it.
+`summaryStatsQc(zMismatchQc = ...)` dispatches to one of two
+LD-mismatch detectors. They differ in how they decide whether a
+variant's z-score is inconsistent with the LD pattern around it.
 
-**SLALOM** (Kanai et al. 2022, default in pecotmr):
+**SLALOM** (Kanai et al. 2022, the recommended default once you turn
+zMismatchQc on):
 
 - For each variant, compares its z-score against the *lead* variant's
-  z-score scaled by their LD: large `(z_i − r_{i,lead} · z_lead)` flags
-  the variant as inconsistent.
-- Restricted to variants in high LD with the lead (`r2 > r2_threshold`).
+  z-score scaled by their LD: a large `(z_i − r_{i,lead} · z_lead)`
+  flags the variant as inconsistent.
+- Restricted to variants in high LD with the lead (`r2Threshold`).
 - Stable: results do not depend on window-size parameters.
 
 **DENTIST** (Chen et al. 2021):
 
 - Iteratively imputes each z-score from all other z-scores via SVD-
-  truncated LD regression, then flags large `(z_obs − z_imp)^2 / (1 − r²)`
-  values as outliers.
+  truncated LD regression, then flags large
+  `(z_obs − z_imp)^2 / (1 − r²)` values as outliers.
 - Operates on windows of the chromosome; the window size noticeably
   affects how many outliers it reports.
 
 Both methods are available directly as `slalom()` / `dentist()` /
-`dentistSingleWindow()` if you want to run them outside the QC
-pipeline.
+`dentistSingleWindow()` if you want to run them outside the
+`summaryStatsQc()` pipeline (typically to tune parameters or to inspect
+the per-variant intermediate output).
 
 ### When DENTIST window size matters
 
-DENTIST's outlier rate is sensitive to its window size. With the toy
-genotype panel we can compare two settings of `min_dim` (count-based
-windowing, equivalent to the C++ `--wind` flag):
+DENTIST's outlier rate is sensitive to its window size. On a typical
+∼17k-variant test region we observe:
 
-```{r dentist-windows, eval=FALSE}
-# TODO(data): runnable with the inst/extdata/toy_summary.txt.gz +
-# toy_ref.* PLINK files (~17k variants) where window sensitivity is
-# visible. With the 2,828-variant shipped example it is less informative.
+| `min_dim` | Approx outlier rate |
+|---|---|
+| 2,000 | ∼8 % |
+| 6,000 | ∼1.5 % |
+| 20,000 | ∼0.6 % |
 
-bfile <- system.file("extdata", "toy_ref", package = "pecotmr")
-sumstat_gz <- system.file("extdata", "toy_summary.txt.gz", package = "pecotmr")
-
-# (See dentist() examples for the full setup.)
-result_2000 <- dentist(sum_stat = ..., R = ..., nSample = ...,
-                       windowMode = "count", min_dim = 2000, nIter = 8)
-result_6000 <- dentist(sum_stat = ..., R = ..., nSample = ...,
-                       windowMode = "count", min_dim = 6000, nIter = 8)
-# Observed on this toy dataset:
-#   min_dim = 2000:  ~8.2% outliers
-#   min_dim = 6000:  ~1.5% outliers
-#   min_dim = 20000: ~0.6% outliers
-```
-
-For this reason SLALOM is the recommended default in `pecotmr`. Use
-DENTIST when you specifically want its iterative imputation output, or
-when you are reproducing a DENTIST-based pipeline.
+For this reason SLALOM is the recommended default when you turn
+zMismatchQc on. Use DENTIST when you specifically want its iterative
+imputation output, or when you are reproducing a DENTIST-based
+pipeline.
 
 ### SLALOM + RAISS as the imputation alternative
 
 SLALOM only *flags* outliers; it does not impute them. To re-impute the
 flagged variants from the surviving ones, pair SLALOM with **RAISS** (a
-LD-regression imputer). `summaryStatsQc(impute = TRUE)` does this for
-you; the standalone version is:
+LD-regression imputer). `summaryStatsQc(zMismatchQc = "slalom", impute = TRUE)`
+does this for you. The standalone version is exposed as `raiss()`; the
+full set of RAISS knobs lives under the `imputeOpts` argument to
+`summaryStatsQc()`:
 
-```{r slalom-raiss}
-sl <- slalom(zScore = sumstats$z,
-             R = R[sumstats$variant_id, sumstats$variant_id],
-             nlog10pDentistSThreshold = 4.0,
-             r2Threshold = 0.6)
-
-outlier_flags <- sl$data$outliers
-outlier_flags[is.na(outlier_flags)] <- FALSE
-
-cat(sprintf("SLALOM lead-variant PIP: %.4f, 95%% CS size: %d\n",
-            sl$summary$max_pip, length(sl$summary$cs_95)))
-cat(sprintf("Flagged outliers: %d / %d\n",
-            sum(outlier_flags), length(outlier_flags)))
+```{r raiss-args, eval=FALSE}
+gws_qcd <- summaryStatsQc(
+  gws,
+  zMismatchQc = "slalom",
+  impute      = TRUE,
+  imputeOpts  = list(rcond = 0.01, r2Threshold = 0.6,
+                     minimumLd = 5, lamb = 0.01))
 ```
 
-```{r raiss-impute, eval=FALSE}
-# TODO(data): runnable RAISS demo needs an LD reference rich enough that
-# a flagged variant has well-imputed neighbors. With the shipped 2,828
-# variant region most outlier sets are too sparse for a meaningful
-# imputed-vs-observed comparison.
-
-# raiss() takes a "known" subset and imputes the "unknown" complement
-# using LD regression. Returns imputed z-scores with per-variant R^2.
-imputed <- raiss(
-  ref_panel     = ref_panel,
-  known_zscores = sumstats[!outlier_flags, ],
-  LD_matrix     = R,
-  lamb = 0.01, rcond = 0.01,
-  R2_threshold = 0.6, minimum_ld = 5
-)
-```
-
-### Method comparison on a richer dataset
-
-<!-- TODO(figure): three-panel comparison plot (original z vs DENTIST QC'd z;
-DENTIST QC'd vs SLALOM+RAISS QC'd; DENTIST imputed vs RAISS imputed on
-DENTIST-flagged outliers). Plot once we settle on a richer example
-dataset where the disagreements are visible. -->
-
-The three QC paths to compare on real data are:
-
-1. **DENTIST alone**: iterative SVD-truncated imputation across all
-   variants. Returns imputed z-scores for everything.
-2. **SLALOM + RAISS**: SLALOM flags outliers, RAISS imputes them.
-3. **DENTIST flags + RAISS impute**: use DENTIST's outlier flags but
-   RAISS's per-flag imputation.
-
-On a typical region the three QC'd z-score vectors correlate above
-~0.99 for non-outlier variants; the per-method disagreements are
-concentrated on the flagged variants, where SLALOM+RAISS and
-DENTIST-alone can disagree by 1-2 SD because they apply different
-penalization. We will reproduce this comparison once we pick the
-final example dataset.
-
-## Where else RAISS is used in `pecotmr`
+## Where else RAISS is used
 
 QC re-imputation (above) is one of three places RAISS is wired into the
 pipelines. The other two impute summary statistics *outside* the QC
@@ -369,19 +246,16 @@ context, and are documented in the TWAS vignettes:
 
 - **Filling GWAS variants missing from the LD reference**, so that TWAS
   weight variants with LD neighbors but no observed GWAS hit are not
-  silently dropped at the weight-vs-GWAS intersection. Enabled by
-  `twasPipeline(imputeMissing = TRUE, ...)` (or directly on
-  `harmonizeTwas()`). See the *Inferring TWAS Z-scores from GWAS
-  summary statistics* vignette.
+  silently dropped at the weight-vs-GWAS intersection. See the
+  *Inferring TWAS Z-scores from GWAS summary statistics* vignette.
 
 - **Filling QTL variants missing from the LD reference** before
   summary-statistics TWAS weight training, so the weight learners
   (lassosum-RSS, PRS-CS, SDPR, SuSiE-RSS, etc.) see a richer variant
-  set. Enabled by `twasWeightsSumstatPipeline(imputeMissing = TRUE,
-  ...)`. See the *Learning TWAS weights* vignette.
+  set. See the *Learning TWAS weights* vignette.
 
 In all three cases RAISS imputes **summary statistics only**, never
-weights. Imputed variants with `R^2 < R2_threshold` are dropped by
+weights. Imputed variants with `R^2 < r2Threshold` are dropped by
 RAISS's internal filter. Weight variants with no LD-reference
 counterpart at all are warned about and dropped (they have no neighbors
 to impute from).
@@ -390,19 +264,17 @@ to impute from).
 
 | Function | Use it when |
 |---|---|
-| `rssBasicQc()` | Allele alignment between sumstats and LD panel. Always run first. |
-| `ldMismatchQc()` | One-shot SLALOM/DENTIST flagging when you already have aligned `z` and `R`. |
-| `summaryStatsQc()` | Pipeline wrapper: takes the `QcResult` from `rssBasicQc()`, dispatches to SLALOM or DENTIST, optionally re-imputes with RAISS (`impute = TRUE`), returns a new `QcResult`. |
-| `slalom()` / `dentist()` / `dentistSingleWindow()` / `raiss()` | Direct access to the underlying methods. `raiss()` also covers the missing-variant imputation paths used by the TWAS pipelines. |
+| `summaryStatsQc()` | The single QC entry point. Takes a `GwasSumStats` / `QtlSumStats`, runs MungeSumstats variant-content QC + pecotmr-specific QC (allele harmonization, SLALOM/DENTIST, RAISS), returns a new SumStats with `qcInfo` populated. Mandatory before fine-mapping / TWAS / colocalization. |
+| `getQcInfo()` | Inspect the per-entry audit record left behind by `summaryStatsQc()`. |
+| `slalom()` / `dentist()` / `dentistSingleWindow()` / `raiss()` | Direct access to the underlying methods for inspection or parameter tuning. |
+| `ldMismatchQc()` | One-shot SLALOM/DENTIST flagging when you already have aligned `z` and `R` and want just the per-variant outlier flag. |
 
-Downstream pipelines (`rssAnalysisPipeline()`,
-`twasWeightsSumstatPipeline()`, `colocboostPipeline()`) all call
-`summaryStatsQc()` internally; the `zMismatchQc` selector defaults to
-`"none"` (basic allele harmonization only). The two TWAS pipelines additionally accept
-`imputeMissing = TRUE` to fill missing variants from the LD reference
-at the harmonization stage (see vignettes referenced above). Run QC
-standalone when you need to inspect outliers or tune QC options;
-otherwise the pipeline functions handle it.
+Downstream pipelines (`fineMappingPipeline()`, `twasWeightsPipeline()`,
+`colocboostPipeline()`, etc.) enforce that `length(getQcInfo(x)) > 0L`
+before they accept a SumStats input, so QC is never silently skipped.
+The two TWAS pipelines additionally accept `imputeMissing = TRUE` to
+fill missing variants from the LD reference at the harmonization stage
+(see the TWAS vignettes).
 
 ```{r session-info}
 sessionInfo()

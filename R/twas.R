@@ -55,1039 +55,224 @@ imputeMissingGwasForSketch <- function(gwasDataSumstats, sketchRefPanel,
   rbind(gwasDataSumstats, added)
 }
 
-#' Function to perform allele flip QC and harmonization on the weights and GWAS against LD for a region.
-#' FIXME: GWAS loading function from Haochen for both tabix & column-mapping yml application
+#' (Deprecated) Harmonize TWAS Weights and GWAS Against LD
 #'
-#' Function Conditions:
-#' - processes data in the format of either the output from load_twas_weights/generate_twas_db or
-#'   refined_twas_weights_data from twas pipeline.
-#' - For the first format, we expect there is only one gene/events's information, that can be accessed through `region_info_obj`
-#'   and refined_twas_weights_data contains per region multiple gene/event's refined weights data.
+#' \strong{Deprecated.} Allele harmonization is now part of
+#' \code{\link{summaryStatsQc}} (run it on your
+#' \code{\link{GwasSumStats}} before fine-mapping or
+#' \code{\link{twasWeightsPipeline}}). The TWAS-side panel
+#' harmonization is absorbed into \code{\link{causalInferencePipeline}}.
 #'
-#' Main Steps:
-#' 1. allele QC for TWAS weights against the LD meta
-#' 2. allele QC for GWA summary stats against the LD meta
-#' 3. adjust susie/mvsusie weights based on the overlap variants
-#'
-#' @param twasWeightsData List of list of twas weights output from from generate_twas_db function.
-#' @param gwasMetaFile A file path for a dataframe table with column of "study_id", "chrom" (integer), "file_path",
-#' "column_mapping_file". Each file in "file_path" column is tab-delimited dataframe of GWAS summary statistics with column name
-#' "chrom" (or #chrom" if tabix-indexed), "pos", "A2", "A1".
-#' @param ldMetaFilePath Path to LD reference: either a PLINK2/PLINK1 prefix, or a tab-delimited
-#'   metadata file with columns "#chrom", "start", "end", "path" (auto-detected).
-#' @param ldReferenceSampleSize Sample size of the LD reference panel (integer). Required.
-#'   Used to compute per-variant variance as 2*p*(1-p)*n/(n-1). For ADSP R4, use 17000.
-#' @param imputeMissing Logical. When \code{TRUE}, RAISS imputes GWAS z-scores
-#'   for variants that are present in the LD sketch but missing from the GWAS
-#'   summary statistics. This widens GWAS coverage so weight variants with LD
-#'   neighbors but no GWAS hit are no longer silently dropped at the
-#'   weight-vs-GWAS intersection. Default \code{FALSE}.
-#' @param imputeOpts Named list of RAISS imputation parameters. Used when
-#'   \code{imputeMissing = TRUE}. Defaults:
-#'   \code{list(rcond = 0.01, r2Threshold = 0.6, minimumLd = 5, lamb = 0.01)}.
-#'   Imputed variants with \code{R2 < r2Threshold} are dropped.
-#' @return A list of list for harmonized weights and dataframe of gwas summary statistics that is add to the original input of
-#' twasWeightsData under each context.
-#' @importFrom vroom vroom
-#' @importFrom readr parse_number
-#' @importFrom S4Vectors queryHits subjectHits
-#' @importFrom IRanges IRanges findOverlaps start end reduce
+#' @param ... Ignored.
+#' @return \code{NULL} (invisibly).
 #' @export
-harmonizeTwas <- function(twasWeightsData, ldMetaFilePath, gwasMetaFile,
-                          ldReferenceSampleSize, columnFilePath = NULL, commentString = "#",
-                          imputeMissing = FALSE,
-                          imputeOpts = list(rcond = 0.01, r2Threshold = 0.6,
-                                             minimumLd = 5, lamb = 0.01)) {
-  # Step 1: Normalize twasWeightsData -- accept bare TwasWeights or wrapper lists
-  molecularIds <- names(twasWeightsData)
-  for (molId in molecularIds) {
-    entry <- twasWeightsData[[molId]]
-    if (is(entry, "TwasWeights")) {
-      # Already a bare TwasWeights, use directly
-    } else if (is.list(entry) && is(entry$twasWeights, "TwasWeights")) {
-      # Wrapper list -- extract the TwasWeights
-      twasWeightsData[[molId]] <- entry$twasWeights
-    } else {
-      stop("Each element of twasWeightsData must be a TwasWeights S4 object ",
-           "or a list with a $twasWeights TwasWeights element")
-    }
-  }
-  firstTw <- twasWeightsData[[1]]
-  chrom <- as.integer(parse_number(gsub(":.*$", "", getVariantIds(firstTw)[1])))
-  gwasMetaDf <- as.data.frame(vroom(gwasMetaFile))
-  gwasFiles <- unique(gwasMetaDf$file_path[gwasMetaDf$chrom == chrom])
-  names(gwasFiles) <- unique(gwasMetaDf$study_id[gwasMetaDf$chrom == chrom])
-  results <- list()
-
-  # Per-gene loop: each gene loads its own LD sketch independently
-  for (molecularId in molecularIds) {
-    tw <- twasWeightsData[[molecularId]]
-    molRes <- list(chrom = chrom, variantNames = list())
-    molRes[["dataType"]] <- getDataType(tw)
-    contexts <- getMethodNames(tw)
-
-    # Step 2: Build gene window from all contexts' variant positions
-    allWeightVariants <- getVariantIds(tw)
-    variantPositions <- parseVariantId(allWeightVariants)$pos
-    geneRegion <- paste0(chrom, ":", min(variantPositions), "-", max(variantPositions))
-
-    # Step 3: Load LD sketch for this gene's window and compute SVD
-    sketch <- loadLdSketch(ldMetaFilePath, geneRegion, nSample = ldReferenceSampleSize)
-    sketchX <- getGenotypes(sketch)
-    sketchRefPanel <- getRefPanel(sketch)
-    sketchVariantIds <- getVariantIds(sketch)
-    sketchN <- nrow(sketchX)
-    xStd <- standardizeGenotypeHwe(sketchX, sketchRefPanel$allele_freq)
-    svdResult <- safeSvd(xStd, tol = 0)
-
-    # Warn when weight variants have no LD-reference counterpart at all
-    # (cannot be imputed by RAISS; will be dropped at the weights-vs-sketch step).
-    weightNoLd <- setdiff(allWeightVariants, sketchVariantIds)
-    if (length(weightNoLd) > 0) {
-      warning(sprintf(
-        "harmonizeTwas: %d of %d weight variants for %s have no LD-reference counterpart and will be dropped.",
-        length(weightNoLd), length(allWeightVariants), molecularId
-      ))
-    }
-
-    # Step 4: Harmonize GWAS and weights against sketch variants
-    for (study in names(gwasFiles)) {
-      gwasFile <- gwasFiles[study]
-      gwasDataSumstats <- harmonizeGwas(gwasFile, queryRegion = geneRegion,
-                                        sketchVariantIds, c("beta", "z"),
-                                        matchMinProp = 0, columnFilePath = columnFilePath,
-                                        commentString = commentString)
-      if (is.null(gwasDataSumstats)) next
-
-      # Optional RAISS imputation: fill GWAS z-scores for sketch variants
-      # absent from the harmonized GWAS. Widens GWAS so the downstream
-      # weight-vs-GWAS intersection no longer drops weight variants that
-      # have LD neighbors but no observed GWAS hit.
-      if (isTRUE(imputeMissing)) {
-        gwasDataSumstats <- imputeMissingGwasForSketch(
-          gwasDataSumstats = gwasDataSumstats,
-          sketchRefPanel = sketchRefPanel,
-          sketchX = sketchX,
-          imputeOpts = imputeOpts,
-          contextLabel = sprintf("study=%s, gene=%s", study, molecularId)
-        )
-      }
-
-      for (context in contexts) {
-        weightsMatrix <- getWeights(tw, context)
-        originalWeightVariants <- rownames(weightsMatrix)
-
-        # Harmonize weights against sketch reference
-        weightsMatrix <- cbind(variantIdToDf(rownames(weightsMatrix)), weightsMatrix)
-        weightsMatrixQced <- matchRefPanel(weightsMatrix, sketchVariantIds,
-          colnames(weightsMatrix)[!colnames(weightsMatrix) %in% c("chrom", "pos", "A2", "A1")],
-          matchMinProp = 0
-        )
-        qcedData <- getHarmonizedData(weightsMatrixQced)
-        weightsMatrixSubset <- as.matrix(qcedData[, !colnames(qcedData) %in% c(
-          "chrom", "pos", "A2", "A1", "variant_id", "variants_id_original"
-        ), drop = FALSE])
-        rownames(weightsMatrixSubset) <- qcedData$variant_id
-
-        # Ensure consistent chr prefix convention before intersecting
-        chrMatched <- ensureChrMatch(gwasDataSumstats$variant_id, sketchVariantIds)
-        gwasDataSumstats$variant_id <- chrMatched$idsA
-        rownames(weightsMatrixSubset) <- ensureChrMatch(rownames(weightsMatrixSubset), gwasDataSumstats$variant_id)$idsA
-        weightsMatrixSubset <- weightsMatrixSubset[rownames(weightsMatrixSubset) %in% gwasDataSumstats$variant_id, , drop = FALSE]
-        if (nrow(weightsMatrixSubset) == 0) next
-        postqcWeightVariants <- rownames(weightsMatrixSubset)
-
-        # Step 5: adjust SuSiE weights based on available variants
-        twWeightsCtx <- getWeights(tw, context)
-        if ("susie_weights" %in% colnames(twWeightsCtx)) {
-          # For adjustSusieWeights, wrap TwasWeights in the list format it expects
-          molDataForAdjust <- list(
-            susie_results = getFits(tw),
-            weights = getWeights(tw),
-            variantNames = lapply(getWeights(tw), function(w) if (is.matrix(w)) rownames(w) else names(w))
-          )
-          adjustedSusieWeights <- adjustSusieWeights(molDataForAdjust,
-            keepVariants = postqcWeightVariants, runAlleleQc = TRUE,
-            variableNameObj = c("variantNames", context),
-            susieObj = c("susie_results", context),
-            twasWeightsTable = c("weights", context), postqcWeightVariants, matchMinProp = 0
-          )
-          weightsMatrixSubset <- cbind(
-            susie_weights = setNames(adjustedSusieWeights$adjustedSusieWeights, adjustedSusieWeights$remainedVariantIds),
-            weightsMatrixSubset[adjustedSusieWeights$remainedVariantIds, !colnames(weightsMatrixSubset) %in% "susie_weights", drop = FALSE]
-          )
-          susieResults <- getFits(tw, context)
-          susieIntermediate <- susieResults[c("pip", "csVariants", "csPurity")]
-          names(susieIntermediate[["pip"]]) <- originalWeightVariants # original variants not yet qced
-          pip <- susieIntermediate[["pip"]]
-          pipQced <- matchRefPanel(cbind(parseVariantId(names(pip)), pip), sketchVariantIds, "pip", matchMinProp = 0)
-          pipQcedDf <- getHarmonizedData(pipQced)
-          susieIntermediate[["pip"]] <- abs(pipQcedDf$pip)
-          names(susieIntermediate[["pip"]]) <- pipQcedDf$variant_id
-          susieIntermediate[["csVariants"]] <- lapply(susieIntermediate[["csVariants"]], function(x) {
-            variantQc <- matchRefPanel(x, sketchVariantIds, matchMinProp = 0)
-            variantQcDf <- getHarmonizedData(variantQc)
-            variantQcDf$variant_id[variantQcDf$variant_id %in% postqcWeightVariants]
-          })
-          molRes[["susieWeightsIntermediateQced"]][[context]] <- susieIntermediate
-        }
-        rm(weightsMatrix)
-
-        if (nrow(weightsMatrixSubset) == 0) {
-          warning("weightsMatrixSubset is empty. Skipping this context.")
-          next
-        }
-        molRes[["variantNames"]][[context]][[study]] <- rownames(weightsMatrixSubset)
-
-        # Step 6: scale weights by variance (from sketch ref_panel)
-        # RSS/standardized weights are already on the correlation scale and
-        # do not need sqrt(variance) scaling.
-        isStandardized <- isTRUE(getStandardized(tw))
-        if (isStandardized) {
-          scaled <- weightsMatrixSubset
-        } else {
-          variance <- sketchRefPanel$variance[match(rownames(weightsMatrixSubset), sketchRefPanel$variant_id)]
-          scaled <- weightsMatrixSubset * sqrt(variance)
-        }
-        molRes[["weightsQced"]][[context]][[study]] <- list(scaledWeights = scaled, weights = weightsMatrixSubset)
-      }
-      # Combine GWAS sumstats for this study (filter to variants used by any context)
-      usedVariants <- unique(findData(molRes[["variantNames"]], c(2, study)))
-      if (!is.null(usedVariants)) {
-        gwasSubset <- gwasDataSumstats[gwasDataSumstats$variant_id %in% usedVariants, , drop = FALSE]
-        molRes[["gwasQced"]][[study]] <- rbind(molRes[["gwasQced"]][[study]], gwasSubset)
-        gwasQced <- molRes[["gwasQced"]][[study]]
-        molRes[["gwasQced"]][[study]] <- gwasQced[!duplicated(gwasQced[, c("variant_id", "z")]), ]
-      }
-    }
-
-    twasWeightsData[[molecularId]] <- NULL
-    # Store SVD components for this gene
-    if (is.null(molRes[["gwasQced"]]) || length(molRes[["gwasQced"]]) == 0) {
-      results[[molecularId]] <- NULL
-    } else {
-      molRes[["svdV"]] <- svdResult$v
-      molRes[["svdD"]] <- svdResult$d
-      molRes[["nSketch"]] <- sketchN
-      molRes[["ldVariantIds"]] <- sketchVariantIds
-      results[[molecularId]] <- molRes
-    }
-  }
-  return(list(twasDataQced = results, refPanel = sketchRefPanel))
+harmonizeTwas <- function(...) {
+  .Deprecated(new = "causalInferencePipeline", package = "pecotmr",
+    msg = paste(
+      "harmonizeTwas() has been removed. Allele harmonization is now",
+      "part of summaryStatsQc() (for the GWAS side) and",
+      "causalInferencePipeline() (for the TWAS-against-LD side)."))
+  invisible(NULL)
 }
 
-#' Harmonize GWAS Summary Statistics
-#' perform harmonization on gwas summary statistics for a chromosome data or specific queried region
-#' @param gwasFile A string for the file path of gwas summary statistics file that is already tabix indexed
-#' @param queryRegion A string for region of query for tabix-indexed gwas summary statistics file in the format of chr:start-end
-#' @noRd
+#' (Deprecated) Harmonize GWAS Summary Statistics
+#'
+#' \strong{Deprecated.} Use \code{\link{summaryStatsQc}} on the
+#' \code{\link{GwasSumStats}} input directly; harmonization (allele
+#' alignment against the LD sketch via \code{.matchRefPanel}, optional
+#' MungeSumstats filters, optional liftover, optional imputation) is
+#' all part of that single QC pass.
+#'
+#' @param ... Ignored.
+#' @return \code{NULL} (invisibly).
 #' @export
-harmonizeGwas <- function(gwasFile, queryRegion, ldVariants, colToFlip=NULL, matchMinProp=0, columnFilePath=NULL, commentString="#"){
-    if(is.null(gwasFile)| is.na(gwasFile)) stop("No GWAS file path provided. ")
-    if (!is.null(columnFilePath)) {
-      rssResult <- loadRssData(
-        sumstatPath = gwasFile,
-        columnFilePath = columnFilePath,
-        region = queryRegion,
-        commentString = commentString
-      )
-      gwasDataSumstats <- rssResult$sumstats
-    } else {
-      gwasDataSumstats <- as.data.frame(tabixRegion(gwasFile, queryRegion))
-      if (nrow(gwasDataSumstats) > 0) {
-        gwasDataSumstats <- standardiseSumstatsColumns(gwasDataSumstats)
-      }
-    }
-    if (nrow(gwasDataSumstats) == 0) {
-        if (length(names(gwasFile))==0) names(gwasFile) <- gwasFile
-        warning(paste0("No GWAS summary statistics found for the region of ", queryRegion, " in ", names(gwasFile), ". "))
-        return(NULL)
-    }
-    # Check if sumstats has z-scores or (beta and se)
-    if (!is.null(gwasDataSumstats$z)) {
-      # z-scores already present, nothing to do
-    } else if (!is.null(gwasDataSumstats$beta) && !is.null(gwasDataSumstats$se)) {
-      gwasDataSumstats$z <- gwasDataSumstats$beta / gwasDataSumstats$se
-    } else {
-      stop("gwasDataSumstats should have 'z' or ('beta' and 'se') columns")
-    }
-    # check for overlapping variants
-    if (!any(gwasDataSumstats$pos %in% gsub("\\:.*$", "", sub("^.*?\\:", "", ldVariants)))) return(NULL)
-    gwasAlleleFlip <- matchRefPanel(gwasDataSumstats, ldVariants, colToFlip=colToFlip, matchMinProp = matchMinProp)
-    gwasDataSumstats <- getHarmonizedData(gwasAlleleFlip) # post-qc gwas data that is flipped and corrected - gwas study level
-    gwasDataSumstats <- gwasDataSumstats[!is.na(gwasDataSumstats$z) & !is.infinite(gwasDataSumstats$z), ]
-    return(gwasDataSumstats)
+harmonizeGwas <- function(...) {
+  .Deprecated(new = "summaryStatsQc", package = "pecotmr",
+    msg = paste(
+      "harmonizeGwas() has been removed. Use summaryStatsQc() on the",
+      "GwasSumStats input directly."))
+  invisible(NULL)
 }
 
-#' Function to perform TWAS analysis for across multiple contexts.
-#' This function peforms TWAS analysis for multiple contexts for imputable genes within an LD region and summarize the twas results.
-#' @param twasWeightsData List of list of twas weights output from generate_twas_db function.
-#' @param regionBlock A string with LD region informaiton of chromosome number, star and end position of LD block conneced with "_".
-#' @param imputeMissing Logical. Passed to \code{\link{harmonizeTwas}}. When
-#'   \code{TRUE}, RAISS imputes GWAS z-scores for variants present in the LD
-#'   sketch but missing from the GWAS summary statistics, so weight variants
-#'   with LD neighbors but no observed GWAS hit are not silently dropped at
-#'   the weight-vs-GWAS intersection. Default \code{FALSE}.
-#' @param imputeOpts Named list of RAISS imputation parameters used when
-#'   \code{imputeMissing = TRUE}. Defaults to
-#'   \code{list(rcond = 0.01, r2Threshold = 0.6, minimumLd = 5, lamb = 0.01)};
-#'   imputed variants with \code{R2 < r2Threshold} are dropped.
-#' @return A list of list containing twas result table and formatted TWAS data compatible with ctwas_sumstats() function.
-#' \itemize{
-#'   \item{twasTable}{ A dataframe of twas results summary is generated for each gene-contexts-method pair of all methods for imputable genes.}
-#'   \item{twasData}{ A list of list containing formatted TWAS data.}
-#' }
-# Shared shape for twasAnalysis() result rows. Internal.
-buildTwasScoreRow <- function(twasRs, weightDb, context, study) {
-  if (is.null(twasRs)) return(data.frame())
-  # Strip trailing "_<suffix>" (snake_case) or "Weights" (camelCase) from
-  # method keys to produce a short method name (e.g. enetWeights -> enet,
-  # enet_weights -> enet).
-  methodLabels <- sub("(_[^_]+|Weights)$", "", names(twasRs))
-  data.frame(
-    gwasStudy   = study,
-    method       = methodLabels,
-    twasZ       = findData(twasRs, c(2, "z")),
-    twasPval    = findData(twasRs, c(2, "pval")),
-    context      = context,
-    molecularId = weightDb
-  )
-}
-
-# Internal: for each gene-context-study group, if the selected method produced
-# NA/Inf TWAS z-scores, fall back to the next best method by rsqCv.
-applyMethodFallback <- function(df) {
-  if (nrow(df) == 0 || !all(c("molecularId", "context", "gwasStudy", "isSelectedMethod", "twasZ", "rsqCv", "isImputable") %in% names(df))) {
-    return(df)
-  }
-  groups <- split(seq_len(nrow(df)), list(df$molecularId, df$context, df$gwasStudy), drop = TRUE)
-  for (idxs in groups) {
-    selIdx <- idxs[df$isSelectedMethod[idxs]]
-    if (length(selIdx) != 1) next
-    zVal <- df$twasZ[selIdx]
-    if (!is.na(zVal) && is.finite(zVal)) next
-    # Selected method has invalid z — try fallback
-    otherIdxs <- setdiff(idxs, selIdx)
-    validMask <- !is.na(df$twasZ[otherIdxs]) & is.finite(df$twasZ[otherIdxs])
-    if (any(validMask)) {
-      candidates <- otherIdxs[validMask]
-      best <- candidates[which.max(df$rsqCv[candidates])]
-      df$isSelectedMethod[selIdx] <- FALSE
-      df$isSelectedMethod[best] <- TRUE
-      message(paste0("TWAS method fallback for ", df$molecularId[selIdx],
-                     " / ", df$context[selIdx], " / ", df$gwasStudy[selIdx],
-                     ": ", df$method[selIdx], " -> ", df$method[best]))
-    } else {
-      # No method has valid z — mark group as non-imputable
-      df$isImputable[idxs] <- FALSE
-    }
-  }
-  df
-}
-
-#' @importFrom stringr str_remove
-#' @importFrom purrr list_flatten
+#' (Deprecated) TWAS Pipeline
+#'
+#' \strong{Deprecated.} Use \code{\link{ctwasPipeline}} for the cTWAS
+#' (causal TWAS) variant and \code{\link{causalInferencePipeline}} for
+#' the standard TWAS z + MR computation. The new pipelines accept
+#' \code{TwasWeights}, \code{FineMappingResult}, and
+#' \code{GwasSumStats} S4 inputs and replace the old multi-file
+#' driver.
+#'
+#' @param ... Ignored.
+#' @return \code{NULL} (invisibly).
 #' @export
-twasPipeline <- function(twasWeightsData,
-                         ldMetaFilePath,
-                         gwasMetaFile,
-                         regionBlock,
-                         ldReferenceSampleSize,
-                         rsqCutoff = 0.01,
-                         rsqPvalCutoff = 0.05,
-                         rsqOption = c("rsq", "adj_rsq"),
-                         rsqPvalOption = c("pval", "adj_rsq_pval"),
-                         mrPvalCutoff = 0.05,
-                         mrCoverageColumn = NULL,
-                         mrMethod = "susie",
-                         mrCoverage = 0.95,
-                         outputTwasData = FALSE,
-                         eventFilters=NULL,
-                         columnFilePath = NULL,
-                         commentString="#",
-                         imputeMissing = FALSE,
-                         imputeOpts = list(rcond = 0.01, r2Threshold = 0.6,
-                                            minimumLd = 5, lamb = 0.01)) {
-  # internal function to format TWAS output
-  formatTwasData <- function(postQcTwasData, twasTable) {
-    weightsList <- map(names(postQcTwasData), function(molecularId) {
-      mol <- postQcTwasData[[molecularId]]
-      contexts <- names(mol[["weightsQced"]])
-      molChrom <- mol[["chrom"]]
-      modelSel <- mol[["modelSelection"]]
-
-      map(contexts, function(context) {
-        dataType <- mol[["dataType"]][[context]]
-        if (!is.null(modelSel) && is.list(modelSel) && length(modelSel) > 0) {
-          isImputable <- modelSel[[context]]$isImputable
-          modelSelected <- if (isTRUE(isImputable)) modelSel[[context]]$selectedModel else NA
-        } else {
-          modelSelected <- NA
-          isImputable <- NA
-        }
-        if (is.null(modelSelected) || !isTRUE(isImputable)) return(NULL)
-
-        gwasStudies <- names(mol[["weightsQced"]][[context]])
-        weightKey <- paste0(molecularId, "|", dataType, "_", context)
-        studyEntries <- map(gwasStudies, function(study) {
-          ctxWeights <- mol[["weightsQced"]][[context]][[study]]
-          scaledWgt <- ctxWeights[["scaledWeights"]][, paste0(modelSelected, "_weights"), drop = FALSE]
-          colnames(scaledWgt) <- "weight"
-          contextVariants <- rownames(ctxWeights[["scaledWeights"]])
-          contextRange <- parseVariantId(contextVariants)$pos
-          entry <- list(list(
-            chrom = molChrom, p0 = min(contextRange), p1 = max(contextRange),
-            wgt = scaledWgt, molecularId = molecularId,
-            weightName = paste0(dataType, "_", context), type = dataType,
-            context = context, nWgt = length(contextVariants)
-          ))
-          names(entry) <- study
-          result <- list(entry)
-          names(result) <- weightKey
-          result
-        }) %>% list_flatten()
-        studyEntries
-      }) %>% compact() %>% list_flatten()
-    }) %>% list_flatten()
-    weights <- compact(weightsList)
-    # Optional susieWeightsIntermediateQced processing
-    if ("susieWeightsIntermediateQced" %in% names(postQcTwasData[[1]])) {
-      susieWeightsIntermediateQced <- setNames(lapply(
-        names(postQcTwasData),
-        function(x) postQcTwasData[[x]]$susieWeightsIntermediateQced
-      ), names(postQcTwasData))
-    } else {
-      susieWeightsIntermediateQced <- NULL
-    }
-
-    # gene_z table
-    if ("isSelectedMethod" %in% colnames(twasTable)) {
-      twasTable <- twasTable[na.omit(twasTable$isSelectedMethod), , drop = FALSE]
-    }
-    if (nrow(twasTable) > 0) {
-      twasTable$id <- paste0(twasTable$molecularId, "|", twasTable$type, "_", twasTable$context)
-      twasTable$group <- paste0(twasTable$context, "|", twasTable$type)
-
-      twasTable$z <- twasTable$twasZ
-
-      outputColumns <- c("id", "z", "type", "context", "group", "gwasStudy")
-      twasTable <- twasTable[, intersect(outputColumns, colnames(twasTable)), drop = FALSE]
-      studies <- unique(twasTable$gwasStudy)
-      zGeneList <- list()
-      zSnp <- list()
-      for (study in studies) {
-        zGeneList[[study]] <- twasTable[twasTable$gwasStudy == study, , drop = FALSE]
-      }
-      result <- list(weights = weights, z_gene = zGeneList)
-      if (!is.null(susieWeightsIntermediateQced)) {
-        result$susieWeightsIntermediateQced <- susieWeightsIntermediateQced
-      }
-      return(result)
-    } else {
-      return(NULL)
-    }
-  }
-  pickBestModel <- function(tw, molecularId, rsqCutoff, rsqPvalCutoff, rsqOption, rsqPvalOption) {
-    bestRsq <- rsqCutoff
-    cvPerf <- getCvPerformance(tw)
-    methodNames <- getMethodNames(tw)
-    # SS-TWAS path: no CV performance, all methods are valid
-    if (is.null(cvPerf) || length(cvPerf) == 0) {
-      modelSelection <- lapply(methodNames, function(context) {
-        list(selectedModel = NA, isImputable = TRUE, allMethods = TRUE)
-      })
-      names(modelSelection) <- methodNames
-      return(modelSelection)
-    }
-    # Determine if a gene/region is imputable and select the best model
-    modelSelection <- lapply(methodNames, function(context) {
-      selectedModel <- NULL
-      availableModels <- do.call(c, lapply(names(cvPerf[[context]]), function(model) {
-        if (!is.na(cvPerf[[context]][[model]][, rsqOption])) {
-          return(model)
-        }
-      }))
-      if (length(availableModels) <= 0) {
-        message(paste0("No model provided TWAS cross validation performance metrics information at context ", context, ". "))
-        return(NULL)
-      }
-      for (model in availableModels) {
-        modelData <- cvPerf[[context]][[model]]
-        if (modelData[, rsqOption] >= bestRsq & modelData[, colnames(modelData)[which(colnames(modelData) %in% rsqPvalOption)]] < rsqPvalCutoff) {
-          bestRsq <- modelData[, rsqOption]
-          selectedModel <- model
-        }
-      }
-      if (is.null(selectedModel)) {
-        message(paste0(
-          "No model has p-value < ", rsqPvalCutoff, " and r2 >= ", rsqCutoff, ", skipping context ", context,
-          " at region ", molecularId, ". "
-        ))
-        return(list(selectedModel = c("context_non_imputable"), isImputable = FALSE)) # No significant model found
-      } else {
-        selectedModel <- unlist(strsplit(selectedModel, "_performance"))
-        message(paste0("The selected best performing model for context ", context, " at region ", molecularId, " is ", selectedModel, ". "))
-        return(list(selectedModel = selectedModel, isImputable = TRUE))
-      }
-    })
-    names(modelSelection) <- methodNames
-    return(modelSelection)
-  }
-
-  # Step 1: TWAS and MR analysis for all methods for imputable gene
-  rsqOption <- match.arg(rsqOption)
-
-  # Normalize twasWeightsData entries to TwasWeights S4
-  for (wdb in names(twasWeightsData)) {
-    entry <- twasWeightsData[[wdb]]
-    if (is(entry, "TwasWeights")) next
-    if (is.list(entry) && is(entry[["twasWeights"]], "TwasWeights")) {
-      # Wrapper list with $twasWeights — unwrap but merge metadata into S4
-      twInner <- entry[["twasWeights"]]
-      twasWeightsData[[wdb]] <- TwasWeights(
-        weights = getWeights(twInner),
-        variantIds = getVariantIds(twInner),
-        fits = getFits(twInner),
-        cvPerformance = getCvPerformance(twInner),
-        standardized = getStandardized(twInner),
-        molecularId = if (!is.null(entry[["molecularId"]])) entry[["molecularId"]] else getMolecularId(twInner),
-        dataType = if (!is.null(entry[["dataType"]])) entry[["dataType"]] else getDataType(twInner)
-      )
-    } else if (is.list(entry) && !is.null(entry[["weights"]])) {
-      # Legacy list from load_twas_weights or test fixtures
-      wts <- entry[["weights"]]
-      vid <- if (!is.null(names(wts)) && length(wts) > 0 && !is.null(rownames(wts[[1]]))) {
-        Reduce(union, lapply(wts, rownames))
-      } else character(0)
-      twasWeightsData[[wdb]] <- TwasWeights(
-        weights = wts,
-        variantIds = vid,
-        fits = entry[["susie_results"]],
-        cvPerformance = entry[["twas_cv_performance"]],
-        molecularId = if (!is.null(entry[["molecularId"]])) entry[["molecularId"]] else character(0),
-        dataType = entry[["dataType"]]
-      )
-    }
-  }
-
-  # filter events
-  if (!is.null(eventFilters)) {
-    for (weightDb in names(twasWeightsData)) {
-      tw <- twasWeightsData[[weightDb]]
-      contexts <- getMethodNames(tw)
-      filteredEvents <- filterMolecularEvents(contexts, eventFilters, removeAllGroup = TRUE)
-      if (length(filteredEvents) != 0) {
-        # Rebuild TwasWeights with only the filtered contexts
-        twasWeightsData[[weightDb]] <- TwasWeights(
-          weights = getWeights(tw)[filteredEvents],
-          variantIds = getVariantIds(tw),
-          fits = if (!is.null(getFits(tw))) getFits(tw)[intersect(filteredEvents, names(getFits(tw)))] else NULL,
-          cvPerformance = if (!is.null(getCvPerformance(tw))) getCvPerformance(tw)[intersect(filteredEvents, names(getCvPerformance(tw)))] else NULL,
-          standardized = getStandardized(tw),
-          molecularId = getMolecularId(tw),
-          dataType = getDataType(tw)
-        )
-      } else {
-        twasWeightsData[[weightDb]] <- NULL
-      }
-    }
-  }
-  if (length(twasWeightsData)==0) {
-    return(list(NULL))
-  }
-
-  # harmonize twas weights and gwas sumstats against LD
-  twasDataQcedResult <- harmonizeTwas(twasWeightsData, ldMetaFilePath, gwasMetaFile,
-                                      ldReferenceSampleSize = ldReferenceSampleSize,
-                                      columnFilePath = columnFilePath, commentString = commentString,
-                                      imputeMissing = imputeMissing,
-                                      imputeOpts = imputeOpts)
-  twasResultsDb <- lapply(names(twasWeightsData), function(weightDb) {
-    tw <- twasWeightsData[[weightDb]]
-    twMethods <- getMethodNames(tw)
-    twCv <- getCvPerformance(tw)
-    twFits <- getFits(tw)
-    twasDataQced <- twasDataQcedResult$twasDataQced
-    if (length(twasDataQced[[weightDb]]) == 0 | is.null(twasDataQced[[weightDb]])) {
-      warning(paste0("No data harmonized for ", weightDb, ". Returning NULL for TWAS result for this region."))
-      return(NULL)
-    }
-    if (rsqCutoff > 0) {
-      message("Selecting the best model based on criteria...")
-      bestModelSelection <- pickBestModel(
-        tw, molecularId = weightDb,
-        rsqCutoff = rsqCutoff,
-        rsqPvalCutoff = rsqPvalCutoff,
-        rsqOption = rsqOption,
-        rsqPvalOption = rsqPvalOption
-      )
-      twasDataQced[[weightDb]][["modelSelection"]] <- setNames(bestModelSelection, twMethods)
-    } else {
-      message("Skipping best model selection. Assigning NA of modelSelection to all weights.")
-      twasDataQced[[weightDb]][["modelSelection"]] <- setNames(
-        rep(NA, length(twMethods)), twMethods
-      )
-    }
-    dt <- getDataType(tw)
-    if (is.null(dt)) {
-      twasDataQced[[weightDb]][["dataType"]] <- setNames(
-        rep(list(NA), length(twMethods)), twMethods
-      )
-    }
-    if (length(weightDb) < 1) stop(paste0("No data harmonized for ", weightDb, ". "))
-    contexts <- names(twasDataQced[[weightDb]][["weightsQced"]])
-    gwasStudies <- names(twasDataQced[[weightDb]][["gwasQced"]])
-
-    # Combined loop for TWAS and MR analysis
-    mrCols <- c("geneName", "num_CS", "num_IV", "cpip", "meta_eff", "se_meta_eff", "meta_pval", "Q", "Q_pval", "I2")
-
-    # Nested lapply for contexts and gwas studies
-    twasGeneResults <- lapply(contexts, function(context) {
-      studyResults <- lapply(gwasStudies, function(study) {
-        twasVariants <- Reduce(intersect, list(rownames(twasDataQced[[weightDb]][["weightsQced"]][[context]][[study]][["weights"]]),
-          twasDataQced[[weightDb]][["variantNames"]][[context]][[study]],
-          twasDataQced[[weightDb]][["gwasQced"]][[study]]$variant_id)
-        )
-        if (length(twasVariants) == 0) {
-          return(list(twasRsDf = data.frame(), mrRsDf = data.frame()))
-        }
-        # twas analysis -- enable omnibus when no CV performance available
-        hasCv <- !is.null(twCv) && length(twCv) > 0
-        twasRs <- twasAnalysis(
-          twasDataQced[[weightDb]][["weightsQced"]][[context]][[study]][["weights"]],
-          twasDataQced[[weightDb]][["gwasQced"]][[study]],
-          extractVariantsObjs = twasVariants,
-          V = twasDataQced[[weightDb]][["svdV"]],
-          D = twasDataQced[[weightDb]][["svdD"]],
-          nSketch = twasDataQced[[weightDb]][["nSketch"]],
-          ldVariantIds = twasDataQced[[weightDb]][["ldVariantIds"]],
-          combineIfNoCv = !hasCv
-        )
-        if (is.null(twasRs)) {
-          return(list(twasRsDf = data.frame(), mrRsDf = data.frame()))
-        }
-        twasRsDf <- buildTwasScoreRow(twasRs, weightDb, context, study)
-        # MR analysis
-        if (!is.null(twFits) &&
-          any(na.omit(twasRsDf$twasPval) < mrPvalCutoff) &&
-          !is.null(twFits[[context]]) && "top_loci" %in% names(twFits[[context]])) {
-          if (!"effect_allele_frequency" %in% colnames(twasDataQced[[weightDb]][["gwasQced"]][[study]])) {
-            warning(paste0("skip MR for ", weightDb, " for ", study, ", the effect_allele_frequency information is not available."))
-            return(list(twasRsDf = twasRsDf, mrRsDf = data.frame()))
-          }
-          combinedLdMetaDf <- twasDataQcedResult$refPanel
-          # mrFormat expects a nested list with $molecularId and $susie_results
-          mrInput <- list(molecularId = weightDb, susie_results = twFits)
-          mrFormattedInput <- mrFormat(mrInput, context, twasDataQced[[weightDb]][["gwasQced"]][[study]],
-            coverage = mrCoverageColumn, runAlleleQc = TRUE, method = mrMethod,
-            coverageLevel = mrCoverage, molecularNameObj = c("molecularId"),
-            ldMetaDf = combinedLdMetaDf
-          )
-          if (all(is.na(mrFormattedInput$bhat_y))) {
-            # FIXME: after updating gwas beta and se NA problem, mr analysis will be restored
-            mrRsDf <- as.data.frame(matrix(rep(NA, length(mrCols)), nrow = 1))
-            colnames(mrRsDf) <- mrCols
-          } else {
-            mrRsDf <- as.data.frame(mrAnalysis(mrFormattedInput, cpipCutoff = 0.1))
-          }
-        } else {
-          mrRsDf <- as.data.frame(matrix(rep(NA, length(mrCols)), nrow = 1))
-          colnames(mrRsDf) <- mrCols
-        }
-        mrRsDf$context <- context
-        mrRsDf$gwasStudy <- study
-        mrRsDf$geneName <- weightDb
-        return(list(twasRsDf = twasRsDf, mrRsDf = mrRsDf))
-      })
-      twasContextTable <- do.call(rbind, lapply(studyResults, function(x) x$twasRsDf))
-      mrContextTable <- do.call(rbind, lapply(studyResults, function(x) x$mrRsDf))
-      return(list(twasContextTable = twasContextTable, mrContextTable = mrContextTable))
-    })
-    twasDataQced[[weightDb]][["svdV"]] <- NULL
-    twasDataQced[[weightDb]][["svdD"]] <- NULL
-    twasDataQced[[weightDb]][["nSketch"]] <- NULL
-    twasDataQced[[weightDb]][["ldVariantIds"]] <- NULL
-    twasWeightsData[[weightDb]] <- NULL
-    twasGeneTable <- do.call(rbind, lapply(twasGeneResults, function(x) x$twasContextTable))
-    mrGeneTable <- do.call(rbind, lapply(twasGeneResults, function(x) x$mrContextTable))
-    return(list(twasTable = twasGeneTable, twasDataQced = twasDataQced[weightDb], mrResult = mrGeneTable))
-  })
-  rm(twasDataQcedResult)
-  gc()
-  twasResultsDb <- twasResultsDb[!sapply(twasResultsDb, function(x) is.null(x) || (is.list(x) && all(sapply(x, is.null))))]
-  if (length(twasResultsDb) == 0) {
-    return(list(NULL))
-  }
-  twasResultsTable <- do.call(rbind, lapply(twasResultsDb, function(x) x$twasTable))
-  mrResults <- do.call(rbind, lapply(twasResultsDb, function(x) x$mrResult))
-  twasData <- do.call(c, lapply(twasResultsDb, function(x) x$twasDataQced))
-  # snp_info <- do.call(c, lapply(twasResultsDb, function(x) x$snp_info))
-  rm(twasResultsDb)
-  gc()
-
-  # Step 2: Summarize and merge twas cv results and region information for all methods for all contexts for imputable genes.
-  twasTable <- do.call(rbind, lapply(names(twasData), function(molecularId) {
-    twMol <- twasWeightsData[[molecularId]]
-    contexts <- getMethodNames(twMol)
-    twMolCv <- getCvPerformance(twMol)
-    twMolDt <- getDataType(twMol)
-    # merge twas_cv information for same gene across all weight db files, loop through each context for all methods
-    geneTable <- do.call(rbind, lapply(contexts, function(context) {
-      cvPerf <- if (!is.null(twMolCv)) twMolCv[[context]] else NULL
-      modelSel <- twasData[[molecularId]][["modelSelection"]][[context]]
-      isImputable <- if (!is.null(modelSel)) modelSel$isImputable else TRUE
-
-      if (is.null(cvPerf) || length(cvPerf) == 0) {
-        # SS-TWAS path: no CV, derive methods from weight matrix columns
-        wtMat <- getWeights(twMol, context)
-        methods <- if (is.matrix(wtMat)) colnames(wtMat) else names(wtMat)
-        if (is.null(methods)) methods <- "unknown"
-        dtVal <- if (!is.null(twMolDt)) twMolDt[[context]] else NA
-        contextTable <- data.frame(
-          context = context, method = methods,
-          isImputable = isImputable,
-          isSelectedMethod = FALSE,
-          rsqCv = NA_real_, pvalCv = NA_real_,
-          type = dtVal
-        )
-      } else {
-        methods <- sub("_[^_]+$", "", names(cvPerf))
-        selectedMethod <- if (!is.null(modelSel)) modelSel$selectedModel else NA
-        if (is.null(selectedMethod)) selectedMethod <- NA
-        isSelectedMethod <- ifelse(methods == selectedMethod, TRUE, FALSE)
-
-        cvRsqs <- sapply(cvPerf, function(x) x[, rsqOption])
-        cvPvals <- sapply(cvPerf, function(x) x[, colnames(x)[which(colnames(x) %in% rsqPvalOption)]])
-
-        dtVal <- if (!is.null(twMolDt)) twMolDt[[context]] else NA
-        contextTable <- data.frame(
-          context = context, method = methods,
-          isImputable = isImputable,
-          isSelectedMethod = isSelectedMethod,
-          rsqCv = cvRsqs, pvalCv = cvPvals,
-          type = dtVal
-        )
-      }
-      return(contextTable)
-    }))
-    geneTable$molecularId <- molecularId
-    return(geneTable)
-  }))
-  twasTable$chr <- as.integer(stripChrPrefix(gsub("\\_.*", "", regionBlock)))
-  twasTable$block <- regionBlock
-
-  # Step 3. merge twas result table and twas input into twasData to output
-  colnameOrdered <- c("chr", "molecularId", "context", "gwasStudy", "method", "isImputable", "isSelectedMethod", "rsqCv", "pvalCv", "twasZ", "twasPval", "type", "block")
-  if (nrow(twasResultsTable) == 0) {
-    return(list(twasResult = NULL, twasData = NULL, mrResult = NULL))
-  }
-  twasTable <- merge(twasTable, twasResultsTable, by = c("molecularId", "context", "method"))
-  twasTable <- applyMethodFallback(twasTable)
-  twasTable <- twasTable[twasTable$isImputable, , drop = FALSE]
-  if (outputTwasData & nrow(twasTable) > 0) {
-    twasDataSubset <- formatTwasData(twasData, twasTable)
-    # if (!is.null(twasDataSubset)) twasDataSubset$snp_info <- snp_info
-  } else {
-    twasDataSubset <- NULL
-  }
-  return(list(twasResult = twasTable[, colnameOrdered], twasData = twasDataSubset, mrResult = mrResults))
+twasPipeline <- function(...) {
+  .Deprecated(new = "ctwasPipeline", package = "pecotmr",
+    msg = paste(
+      "twasPipeline() has been removed. Use ctwasPipeline() for the",
+      "cTWAS variant or causalInferencePipeline() for the TWAS-Z + MR",
+      "path."))
+  invisible(NULL)
 }
 
-#' Calculate TWAS z-score and p-value
-#'
-#' This function calculates the TWAS z-score and p-value given the weights, z-scores,
-#' and optionally the correlation matrix (R) or the genotype matrix (X).
-#'
-#' @param weights A numeric vector of weights.
-#' @param z A numeric vector of z-scores.
-#' @param R An optional correlation matrix. If not provided, it will be calculated from the genotype matrix X.
-#' @param X An optional genotype matrix. If R is not provided, X must be supplied to calculate the correlation matrix.
-#'
-#' @return A list containing the following elements:
-#' \itemize{
-#'   \item z: The TWAS z-score.
-#'   \item pval: The corresponding p-value.
-#' }
-#'
-#' @importFrom stats cor pchisq
-#'
-#' @export
-twasZ <- function(weights, z, R = NULL, X = NULL, V = NULL, D = NULL, nSketch = NULL) {
-  # Check that weights and z-scores have the same length
-  if (length(weights) != length(z)) {
-    stop("Weights and z-scores must have the same length.")
-  }
+# =============================================================================
+# Unified TWAS Z-statistic
+# =============================================================================
 
-  stat <- t(weights) %*% z
-
-  if (!is.null(V) && !is.null(D) && !is.null(nSketch)) {
-    # SVD path: denom = wᵀRw = sum(Lambda * (Vᵀw)²) where Lambda = D²/(nSketch-1)
+# Internal: build the K x K covariance Wᵀ R W. Uses the SVD path when the
+# triplet (V, D, nSketch) is supplied, otherwise the R / X path. Aligns LD
+# rows/cols to the rownames of W when both are named; falls back to
+# positional alignment otherwise.
+.twasZCovY <- function(weights, R = NULL, X = NULL,
+                       V = NULL, D = NULL, nSketch = NULL) {
+  rn <- rownames(weights)
+  useSvd <- !is.null(V) && !is.null(D) && !is.null(nSketch)
+  if (useSvd) {
+    if (!is.null(rownames(V)) && !is.null(rn)) {
+      idx <- match(rn, rownames(V))
+      if (anyNA(idx))
+        stop("twasZ: V is missing rows for ", sum(is.na(idx)),
+             " variant(s) named in weights.")
+      vSub <- V[idx, , drop = FALSE]
+    } else {
+      if (nrow(V) != nrow(weights))
+        stop("twasZ: positional alignment requires nrow(V) == nrow(weights).")
+      vSub <- V
+    }
     Lambda <- D^2 / (nSketch - 1)
-    Vw <- crossprod(V, weights)
-    denom <- sum(Lambda * Vw^2)
-  } else {
-    if (is.null(R)) R <- computeLd(X)
-    denom <- t(weights) %*% R %*% weights
+    VtW    <- crossprod(vSub, weights)              # r x K
+    covY   <- crossprod(VtW * sqrt(Lambda))          # K x K
+    return(list(covY = covY))
   }
-
-  zscore <- stat / sqrt(denom)
-  pval <- pchisq(zscore * zscore, 1, lower.tail = FALSE)
-
-  return(list(z = zscore, pval = pval))
+  if (is.null(R)) {
+    if (is.null(X))
+      stop("twasZ: provide R, X, or the (V, D, nSketch) SVD triplet.")
+    R <- computeLd(X)
+  }
+  if (!is.null(rownames(R)) && !is.null(rn)) {
+    idx <- match(rn, rownames(R))
+    if (anyNA(idx))
+      stop("twasZ: R is missing rows for ", sum(is.na(idx)),
+           " variant(s) named in weights.")
+    rSub <- R[idx, idx, drop = FALSE]
+  } else {
+    if (nrow(R) != nrow(weights))
+      stop("twasZ: positional alignment requires nrow(R) == nrow(weights).")
+    rSub <- R
+  }
+  covY <- crossprod(weights, rSub) %*% weights       # K x K
+  list(covY = covY)
 }
 
-#' Multi-condition TWAS joint test
+#' Calculate TWAS Z-Statistics for One or More Methods / Contexts
 #'
-#' Computes per-condition TWAS z-scores from a variants x conditions weight
-#' matrix and an LD sketch (eigenvalues / eigenvectors), and combines them
-#' into a joint p-value across conditions using any of the p-value
-#' combination methods supported elsewhere in the package.
+#' Unified TWAS Z-statistic: accepts a weight vector (single
+#' method/context) or a (variants x K) weight matrix, computes the
+#' per-tuple TWAS Z-score and two-sided p-value, and optionally
+#' delegates cross-tuple p-value combination to
+#' \code{\link{combinePValues}}.
 #'
-#' Per-condition test statistics use the cross-condition correlation
-#' matrix induced by the weights and LD sketch; methods that need the
-#' correlation (\code{"fisher"}, \code{"stouffer"}, \code{"invchisq"},
-#' \code{"gbj"}, \code{"aspu"}, \code{"gates"}) consume it directly.
+#' For each column k of \code{weights}:
+#' \itemize{
+#'   \item \code{stat_k = w_kᵀ z}
+#'   \item \code{denom_k = w_kᵀ R w_k}
+#'   \item \code{Z_k = stat_k / sqrt(denom_k)}, \code{p_k = 2 * (1 - Phi(|Z_k|))}
+#' }
+#' When \code{combineMethods} is non-NULL and K >= 2, the cross-tuple
+#' correlation matrix \code{rho_{i,j} = covY_{i,j} / sqrt(covY_{i,i} *
+#' covY_{j,j})} is constructed once and forwarded to
+#' \code{combinePValues} as the \code{R} argument. When K == 1, the
+#' combined p-value trivially equals the per-tuple p-value.
 #'
-#' @param weights A matrix of weights, one column per condition.
-#' @param z A numeric vector of GWAS z-scores aligned to the rows of
+#' The SVD path (\code{V}, \code{D}, \code{nSketch}) lets the caller
+#' avoid materializing the full LD matrix: \code{covY = (VᵀW · sqrt(Lambda))ᵀ
+#' (VᵀW · sqrt(Lambda))} with \code{Lambda_i = D_i^2 / (nSketch - 1)}.
+#' Use the \code{R} path when an LD correlation matrix is already
+#' available; use the \code{X} path to compute \code{R} from a genotype
+#' matrix.
+#'
+#' @param weights Numeric vector of weights (single tuple) or a numeric
+#'   matrix with one column per tuple (method / context). When a
+#'   vector, the column name defaults to \code{"method1"}.
+#' @param z Numeric vector of GWAS Z-scores aligned to the rows of
 #'   \code{weights}.
-#' @param V SVD right-singular vectors (variants x components) of the
-#'   LD sketch.
-#' @param dSvd SVD singular values (vector) of the LD sketch.
-#' @param nSketch Sample size of the LD sketch.
-#' @param combineMethod Cross-condition p-value combination method. One
-#'   of \code{"acat"} (default), \code{"hmp"}, \code{"fisher"},
-#'   \code{"stouffer"}, \code{"invchisq"}, \code{"gbj"}, \code{"aspu"},
-#'   or \code{"gates"}.
-#' @param R,X Legacy alternatives to the LD sketch SVD path; supplying
-#'   either still works but is no longer recommended. Documented
-#'   workflows use \code{V}, \code{dSvd}, \code{nSketch}.
-#'
+#' @param R Optional LD correlation matrix.
+#' @param X Optional genotype matrix used to compute \code{R} when
+#'   \code{R} is missing.
+#' @param V,D,nSketch SVD components of the LD sketch (right-singular
+#'   vectors, singular values, panel sample size). Supplying all three
+#'   selects the SVD path.
+#' @param combineMethods Optional character vector of method names to
+#'   forward to \code{\link{combinePValues}} for cross-tuple
+#'   combination. \code{NULL} (default) skips combination.
 #' @return A list with:
 #' \describe{
-#'   \item{Z}{Per-condition Z-score and p-value matrix
-#'     (one row per condition).}
-#'   \item{combined}{List with \code{method} (the requested
-#'     \code{combineMethod}) and \code{pval} (the joint p-value).}
+#'   \item{Z}{A \code{K x 2} numeric matrix with columns
+#'     \code{c("Z", "pval")}; rownames are the column names of
+#'     \code{weights}.}
+#'   \item{combined}{Output of \code{combinePValues} (or its trivial
+#'     K=1 equivalent) when \code{combineMethods} is non-NULL,
+#'     otherwise \code{NULL}.}
 #' }
-#'
+#' @seealso \code{\link{combinePValues}} for the combination method menu.
 #' @importFrom stats pnorm
 #' @export
-twasJointZ <- function(weights, z, R = NULL, X = NULL,
-                       V = NULL, dSvd = NULL, nSketch = NULL,
-                       combineMethod = c("acat", "hmp", "fisher",
-                                          "stouffer", "invchisq",
-                                          "gbj", "aspu", "gates")) {
-  combineMethod <- match.arg(combineMethod)
-  if (nrow(weights) != length(z)) {
-    stop("Number of rows in weights must match the length of z-scores.")
+twasZ <- function(weights, z, R = NULL, X = NULL,
+                  V = NULL, D = NULL, nSketch = NULL,
+                  combineMethods = NULL) {
+  # Coerce a numeric vector to a one-column matrix.
+  if (is.numeric(weights) && is.null(dim(weights))) {
+    nm <- if (!is.null(names(weights))) names(weights) else NULL
+    weights <- matrix(weights, ncol = 1L,
+                      dimnames = list(nm, "method1"))
   }
-
-  useSvd <- !is.null(V) && !is.null(dSvd) && !is.null(nSketch)
-
-  if (useSvd) {
-    # Eigendecomposition path: R = V diag(Lambda) V' with
-    # Lambda_i = dSvd_i^2 / (nSketch - 1). Avoid ever forming R.
-    Lambda <- dSvd^2 / (nSketch - 1)
-    idx <- which(rownames(V) %in% rownames(weights))
-    vSub <- V[idx, , drop = FALSE]
-    VtW <- crossprod(vSub, weights)  # r x k
-    covY <- crossprod(VtW * sqrt(Lambda))  # k x k
-  } else {
-    # Legacy R / X path (kept for backwards compatibility).
-    if (is.null(R)) R <- computeLd(X)
-    idx <- which(rownames(R) %in% rownames(weights))
-    rSub <- R[idx, idx]
-    covY <- crossprod(weights, rSub) %*% weights
+  if (!is.matrix(weights))
+    stop("`weights` must be a numeric vector or a matrix.")
+  if (is.null(colnames(weights))) {
+    colnames(weights) <- paste0("method", seq_len(ncol(weights)))
   }
+  if (nrow(weights) != length(z))
+    stop("nrow(weights) must equal length(z).")
+  K <- ncol(weights)
 
-  ySd <- sqrt(diag(covY))
-  xSd <- rep(1, nrow(weights))  # standardized genotype scale
+  covInfo <- .twasZCovY(weights = weights, R = R, X = X,
+                        V = V, D = D, nSketch = nSketch)
+  covY <- covInfo$covY
+  ySd  <- sqrt(diag(covY))
+  stats <- as.numeric(crossprod(weights, as.numeric(z)))
+  zVec <- stats / ySd
+  pVec <- 2 * pnorm(-abs(zVec))
 
-  # Gamma scaling per condition: gamma_k = diag(xSd / ySd[k])
-  g <- setNames(lapply(colnames(weights), function(cond) {
-    diag(xSd / ySd[cond], length(xSd), length(xSd))
-  }), colnames(weights))
-
-  # Per-condition Z-score and two-sided p-value
-  zMatrix <- do.call(rbind, lapply(colnames(weights), function(cond) {
-    Zi <- crossprod(weights[, cond], g[[cond]]) %*% as.numeric(z)
-    pval <- 2 * pnorm(abs(Zi), lower.tail = FALSE)
-    setNames(c(Zi, pval), c("Z", "pval"))
-  }))
+  zMatrix <- cbind(Z = zVec, pval = pVec)
   rownames(zMatrix) <- colnames(weights)
 
-  # Cross-condition correlation sig[i,j] from weighted LD sketch.
-  lam <- matrix(NA_real_, nrow = ncol(weights), ncol = nrow(weights),
-                dimnames = list(colnames(weights), NULL))
-  for (cond in colnames(weights)) {
-    lam[cond, ] <- as.numeric(weights[, cond] %*% g[[cond]])
-  }
-  if (useSvd) {
-    LV <- lam %*% vSub                               # k x r
-    sig <- tcrossprod(sweep(LV, 2, Lambda, "*"), LV) # k x k
-  } else {
-    sig <- tcrossprod((lam %*% rSub), lam)
-  }
-
-  # Dispatch to the requested combination method. Methods reuse the same
-  # helpers as twasAnalysis's cross-method omnibus.
-  zscores <- as.numeric(zMatrix[, "Z"])
-  pvals   <- as.numeric(zMatrix[, "pval"])
-  valid <- is.finite(pvals) & pvals > 0 & pvals < 1
-  combinedPval <- if (sum(valid) < 2L) {
-    NA_real_
-  } else {
-    sigSub <- sig[valid, valid, drop = FALSE]
-    tryCatch(
-      switch(combineMethod,
-        acat     = pvalAcat(pvals[valid]),
-        hmp      = pvalHmp(pvals[valid]),
-        fisher   = ,
-        stouffer = ,
-        invchisq = pvalPoolr(pvals[valid], method = combineMethod, R = sigSub),
-        gbj      = pvalGbj(zscores[valid], R = sigSub, method = combineMethod),
-        aspu     = ,
-        gates    = pvalAspu(zscores[valid], pvals[valid],
-                              R = sigSub, method = combineMethod)
-      ),
-      error = function(e) {
-        warning(sprintf("twasJointZ combineMethod = '%s' failed: %s",
-                        combineMethod, e$message))
-        NA_real_
-      }
-    )
-  }
-
-  list(Z = zMatrix,
-       combined = list(method = combineMethod, pval = combinedPval))
-}
-
-#' TWAS Analysis
-#'
-#' Performs TWAS analysis using the provided weights matrix, GWAS summary statistics database,
-#' and LD matrix. It extracts the necessary GWAS summary statistics and LD matrix based on the
-#' specified variants and computes the z-score and p-value for each gene.
-#'
-#' When \code{combineIfNoCv = TRUE} and there are at least two methods with
-#' valid p-values, an omnibus p-value is computed via the method specified in
-#' \code{combineMethod} and appended as an \code{"omnibus"} entry. This is
-#' intended for summary-statistics TWAS where cross-validation performance is
-#' not available for model selection.
-#'
-#' @param weightsMatrix A matrix containing weights for all methods.
-#' @param gwasSumstatsDb A data frame containing the GWAS summary statistics.
-#' @param ldMatrix A matrix representing linkage disequilibrium between variants.
-#' @param extractVariantsObjs A vector of variant identifiers to extract from the GWAS and LD matrix.
-#' @param V SVD right-singular vectors from LD sketch (optional).
-#' @param D SVD singular values from LD sketch (optional).
-#' @param nSketch Sample size of LD sketch (optional).
-#' @param ldVariantIds Variant IDs in the LD sketch (optional).
-#' @param combineMethod P-value combination method: \code{"acat"} (default),
-#'   \code{"hmp"}, \code{"fisher"}, \code{"stouffer"}, \code{"invchisq"},
-#'   \code{"gbj"}, \code{"aspu"}, or \code{"gates"}.
-#' @param combineIfNoCv Logical. If TRUE and no CV performance is available,
-#'   combine per-method p-values into an omnibus result.
-#'
-#' @return A list with TWAS z-scores and p-values across methods for each gene.
-#'   When omnibus combination is enabled, includes an additional \code{"omnibus"}
-#'   entry.
-#' @export
-twasAnalysis <- function(weightsMatrix, gwasSumstatsDb, ldMatrix = NULL,
-                         extractVariantsObjs, V = NULL, D = NULL,
-                         nSketch = NULL, ldVariantIds = NULL,
-                         combineMethod = "acat",
-                         combineIfNoCv = FALSE) {
-  # Extract gwas_sumstats
-  gwasSumstatsSubset <- gwasSumstatsDb[match(extractVariantsObjs, gwasSumstatsDb$variant_id), ]
-  # Validate that the GWAS subset is not empty
-  if (nrow(gwasSumstatsSubset) == 0 | all(is.na(gwasSumstatsSubset))) {
-    warning("No GWAS summary statistics found for the specified variants.")
-    return(NULL)
-  }
-
-  # SVD path
-  if (!is.null(V) && !is.null(D) && !is.null(nSketch) && !is.null(ldVariantIds)) {
-    validIndices <- extractVariantsObjs %in% ldVariantIds
-    if (!any(validIndices)) {
-      warning("None of the specified variants are present in the LD sketch. Skipping this context.")
-      return(NULL)
+  combined <- NULL
+  if (!is.null(combineMethods)) {
+    combineMethods <- as.character(combineMethods)
+    if (K == 1L) {
+      perMethod <- lapply(combineMethods, function(m) {
+        list(method = m, pval = as.numeric(pVec[[1L]]))
+      })
+      names(perMethod) <- combineMethods
+      combined <- list(
+        input = list(nPvalsIn = 1L, nZScoresIn = 1L, nValid = 1L,
+                     Raligned = matrix(1.0, 1L, 1L,
+                                       dimnames = list(rownames(zMatrix),
+                                                       rownames(zMatrix)))),
+        results = perMethod)
+    } else {
+      sig <- covY / tcrossprod(ySd, ySd)
+      rownames(sig) <- colnames(sig) <- rownames(zMatrix)
+      names(pVec) <- rownames(zMatrix)
+      names(zVec) <- rownames(zMatrix)
+      combined <- combinePValues(
+        pvals    = pVec,
+        zScores  = zVec,
+        methods  = combineMethods,
+        R        = sig)
     }
-    validVariantsObjs <- extractVariantsObjs[validIndices]
-    # Subset V rows to match the valid variants
-    vRowIdx <- match(validVariantsObjs, ldVariantIds)
-    vSubset <- V[vRowIdx, , drop = FALSE]
-    weightsMatrix <- weightsMatrix[validVariantsObjs, , drop = FALSE]
-    gwasSumstatsSubset <- gwasSumstatsDb[match(validVariantsObjs, gwasSumstatsDb$variant_id), ]
-    twasZPval <- apply(
-      as.matrix(weightsMatrix), 2,
-      function(x) twasZ(x, gwasSumstatsSubset$z, V = vSubset, D = D, nSketch = nSketch)
-    )
-    return(.maybeAddOmnibus(twasZPval, weightsMatrix, ldMatrix,
-                            combineMethod, combineIfNoCv))
   }
 
-  # LD matrix path
-  validIndices <- extractVariantsObjs %in% rownames(ldMatrix)
-  if (!any(validIndices)) {
-    warning("None of the specified variants are present in the LD matrix. Skipping this context.")
-    return(NULL)
-  }
-  validVariantsObjs <- extractVariantsObjs[validIndices]
-  ldMatrixSubset <- ldMatrix[validVariantsObjs, validVariantsObjs]
-  weightsMatrix <- weightsMatrix[validVariantsObjs, , drop = FALSE]
-  gwasSumstatsSubset <- gwasSumstatsDb[match(validVariantsObjs, gwasSumstatsDb$variant_id), ]
-  twasZPval <- apply(
-    as.matrix(weightsMatrix), 2,
-    function(x) twasZ(x, gwasSumstatsSubset$z, R = ldMatrixSubset)
-  )
-  return(.maybeAddOmnibus(twasZPval, weightsMatrix, ldMatrixSubset,
-                          combineMethod, combineIfNoCv))
+  list(Z = zMatrix, combined = combined)
 }
 
-#' Add omnibus p-value combination to TWAS results
-#' @noRd
-.maybeAddOmnibus <- function(twasZPval, weightsMatrix, ldMatrix,
-                             combineMethod, combineIfNoCv) {
-  if (!isTRUE(combineIfNoCv) || length(twasZPval) < 2) {
-    return(twasZPval)
-  }
-
-  pvals <- vapply(twasZPval, function(x) as.numeric(x$pval), numeric(1))
-  zscores <- vapply(twasZPval, function(x) as.numeric(x$z), numeric(1))
-  valid <- !is.na(pvals) & is.finite(pvals) & pvals > 0 & pvals < 1
-
-  if (sum(valid) < 2) return(twasZPval)
-
-  combinedPval <- tryCatch({
-    switch(combineMethod,
-      acat = pvalAcat(pvals[valid]),
-      hmp = pvalHmp(pvals[valid]),
-      fisher = , stouffer = , invchisq = {
-        methodCor <- twasMethodCor(
-          lapply(which(valid), function(i) weightsMatrix[, i]),
-          ldMatrix)
-        pvalPoolr(pvals[valid], method = combineMethod, R = methodCor)
-      },
-      gbj = {
-        methodCor <- twasMethodCor(
-          lapply(which(valid), function(i) weightsMatrix[, i]),
-          ldMatrix)
-        pvalGbj(zscores[valid], R = methodCor, method = combineMethod)
-      },
-      aspu = , gates = {
-        methodCor <- twasMethodCor(
-          lapply(which(valid), function(i) weightsMatrix[, i]),
-          ldMatrix)
-        pvalAspu(zscores[valid], pvals[valid], R = methodCor, method = combineMethod)
-      },
-      pvalAcat(pvals[valid])  # fallback
-    )
-  }, error = function(e) {
-    warning(sprintf("Omnibus combination (%s) failed: %s", combineMethod, e$message))
-    NA_real_
-  })
-
-  twasZPval[["omnibus"]] <- list(z = NA_real_, pval = combinedPval)
-  twasZPval
-}

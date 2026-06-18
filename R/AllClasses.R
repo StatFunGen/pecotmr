@@ -74,49 +74,9 @@ setClass("GenotypeHandle",
 # GWAS Summary Statistics
 # =============================================================================
 
-#' @title GWAS Summary Statistics
-#' @description Standardized container for GWAS summary statistics. SNP
-#'   positions are stored as a \code{GRanges} object, with effect sizes,
-#'   standard errors, and sample sizes as metadata columns.
-#' @slot sumstats A \code{GRanges} object with required metadata columns:
-#'   \describe{
-#'     \item{SNP}{Character, SNP identifier (rsID or chr:pos:ref:alt)}
-#'     \item{A1}{Character, effect allele}
-#'     \item{A2}{Character, non-effect allele}
-#'     \item{Z}{Numeric, z-score (BETA/SE)}
-#'     \item{N}{Numeric, sample size (per-SNP or constant)}
-#'   }
-#'   Optional metadata columns: \code{MAF}, \code{INFO}, \code{BETA},
-#'   \code{SE}, \code{P}.
-#' @slot genome Character string for genome build.
-#' @slot traitName Character string for trait identifier.
-#' @slot varY Numeric, phenotype variance. For observed-scale OLS on a
-#'   centered 0/1 case-control trait, this is the \code{susieR}
-#'   \code{sum(y^2) / (n - 1)} value after centering,
-#'   \code{n / (n - 1) * phi * (1 - phi)}, where \code{phi = nCase / n}.
-#'   Use it only with the full \code{bhat/shat/var_y} sufficient-statistic
-#'   interface; z-score RSS analyses should leave it NULL.
-#' @export
-setClass("GwasSumStats",
-  representation(
-    sumstats = "GRanges",
-    genome = "character",
-    traitName = "character",
-    varY = "ANY"  # numeric or NULL
-  ),
-  validity = function(object) {
-    errors <- character()
-    required_cols <- c("SNP", "A1", "A2", "Z", "N")
-    mcols_names <- colnames(mcols(object@sumstats))
-    missing <- setdiff(required_cols, mcols_names)
-    if (length(missing) > 0)
-      errors <- c(errors, paste("Missing required columns:",
-                                paste(missing, collapse = ", ")))
-    if (length(object@genome) != 1L)
-      errors <- c(errors, "'genome' must be a single character string")
-    if (length(errors) == 0) TRUE else errors
-  }
-)
+# NOTE: the old single-study GwasSumStats class has been removed; see the
+# DFrame-subclass replacement at the bottom of this file (search for
+# `setClass("GwasSumStats", contains = "DFrame", ...)`).
 
 # =============================================================================
 # Annotation Data
@@ -350,6 +310,13 @@ setClass("H2Estimate",
 #' @slot blockMetadata An \code{LdBlocks} object or a \code{data.frame}
 #'   with block boundary information.
 #' @slot nRef Integer, reference panel sample size.
+#' @slot mixtureWeights NULL when \code{genotypeHandle} is a single
+#'   \code{GenotypeHandle}; a numeric vector of mixing proportions (one
+#'   per panel, summing to 1) when \code{genotypeHandle} is a list of
+#'   \code{GenotypeHandle}s. Used by \code{getCorrelation()} to compute
+#'   a weighted-average mixture LD matrix; required whenever
+#'   \code{genotypeHandle} is a list and \code{getCorrelation()} will be
+#'   called.
 #' @export
 setClass("LdData",
   representation(
@@ -358,7 +325,8 @@ setClass("LdData",
     snpIdx = "ANY",            # integer or NULL
     variants = "GRanges",
     blockMetadata = "ANY",     # LdBlocks or data.frame
-    nRef = "integer"
+    nRef = "integer",
+    mixtureWeights = "ANY"     # numeric vector or NULL
   ),
   validity = function(object) {
     errors <- character()
@@ -367,6 +335,20 @@ setClass("LdData",
         "At least one of 'correlation' or 'genotypeHandle' must be non-NULL")
     if (length(object@variants) == 0)
       errors <- c(errors, "'variants' must not be empty")
+    if (!is.null(object@mixtureWeights)) {
+      if (!is.list(object@genotypeHandle))
+        errors <- c(errors,
+          "'mixtureWeights' may only be set when 'genotypeHandle' is a list of GenotypeHandles")
+      else {
+        w <- object@mixtureWeights
+        if (!is.numeric(w) || length(w) != length(object@genotypeHandle))
+          errors <- c(errors,
+            "'mixtureWeights' must be numeric of length equal to the genotypeHandle list")
+        else if (any(w < 0) || abs(sum(w) - 1) > 1e-6)
+          errors <- c(errors,
+            "'mixtureWeights' must be non-negative and sum to 1")
+      }
+    }
     if (length(errors) == 0) TRUE else errors
   }
 )
@@ -375,37 +357,107 @@ setClass("LdData",
 # Fine-Mapping Result
 # =============================================================================
 
-#' @title Fine-Mapping Result
-#' @description S4 container for fine-mapping output. Stores variant names,
-#'   the trimmed model fit, and a long-format table of credible sets and PIPs.
-#' @slot variantNames Character vector of variant IDs.
-#' @slot trimmedFit List containing the method-specific trimmed fit.
-#' @slot topLoci A \code{data.frame} in long format with columns:
-#'   variant_id, method, coverage, cs, pip, and optionally betahat, sd,
-#'   csLog10bf, z.
-#' @slot method Character string identifying the fine-mapping method.
-#' @slot sumstats List of summary statistics used in the analysis, or NULL.
+#' @title Fine-Mapping Result Base Class
+#' @description Virtual base class for fine-mapping result collections.
+#'   Concrete subclasses (\code{QtlFineMappingResult},
+#'   \code{GwasFineMappingResult}) carry a \code{DFrame} of per-fit rows
+#'   and a shared \code{ldSketch} slot. Downstream pipelines should
+#'   dispatch on \code{FineMappingResultBase} for behaviors that apply to
+#'   either flavour, and on the concrete subclass when the tuple shape
+#'   matters.
+#' @slot ldSketch The LD reference \code{GenotypeHandle} the fits were
+#'   computed against, or \code{NULL} when the fits were derived from
+#'   individual-level data (no LD reference). Used downstream for
+#'   cross-pipeline LD-sketch identity validation.
 #' @export
-setClass("FineMappingResult",
-  representation(
-    variantNames = "character",
-    trimmedFit = "ANY",
-    topLoci = "data.frame",
-    method = "character",
-    sumstats = "ANY"  # list or NULL
-  ),
+setClass("FineMappingResultBase",
+  contains = c("VIRTUAL", "DFrame"),
+  representation(ldSketch = "ANY"))
+
+#' @title QTL Fine-Mapping Result Collection
+#' @description S4 collection of fine-mapping fits keyed by the identity
+#'   tuple \code{(study, context, trait, method)}. Each entry is a
+#'   \code{FineMappingEntry}. Implements the \code{DFrame}-subclass
+#'   collection pattern: subsetting with \code{[} and concatenation via
+#'   \code{c()} are inherited from \code{S4Vectors::DataFrame}.
+#'
+#'   Required columns: \code{study}, \code{context}, \code{trait},
+#'   \code{method}, \code{entry}. The 4-tuple is unique. Each
+#'   \code{entry} is a \code{FineMappingEntry}.
+#' @export
+setClass("QtlFineMappingResult",
+  contains = "FineMappingResultBase",
   validity = function(object) {
     errors <- character()
-    if (length(object@method) != 1L)
-      errors <- c(errors, "'method' must be a single character string")
-    if (nrow(object@topLoci) > 0) {
-      required <- c("variant_id", "method")
-      missing_cols <- setdiff(required, colnames(object@topLoci))
-      if (length(missing_cols) > 0)
-        errors <- c(errors, paste("topLoci missing columns:",
-                                  paste(missing_cols, collapse = ", ")))
+    required <- c("study", "context", "trait", "method", "entry")
+    missingCols <- setdiff(required, names(object))
+    if (length(missingCols) > 0L)
+      errors <- c(errors, paste("missing columns:",
+                                paste(missingCols, collapse = ", ")))
+    if (length(errors) == 0L) {
+      if (length(object$entry) != nrow(object))
+        errors <- c(errors,
+          "length(entry) must equal nrow(.) for QtlFineMappingResult")
+      entryTypes <- vapply(object$entry,
+                          function(e) methods::is(e, "FineMappingEntry"),
+                          logical(1))
+      if (!all(entryTypes))
+        errors <- c(errors,
+          "every element of the `entry` column must be a FineMappingEntry")
+      keyDf <- as.data.frame(object[, c("study", "context", "trait", "method")])
+      if (anyDuplicated(keyDf))
+        errors <- c(errors,
+          "(study, context, trait, method) tuple uniqueness violated")
     }
-    if (length(errors) == 0) TRUE else errors
+    if (!is.null(object@ldSketch) &&
+        !methods::is(object@ldSketch, "GenotypeHandle")) {
+      errors <- c(errors,
+        "'ldSketch' must be a GenotypeHandle or NULL")
+    }
+    if (length(errors) == 0L) TRUE else errors
+  }
+)
+
+#' @title GWAS Fine-Mapping Result Collection
+#' @description S4 collection of fine-mapping fits for one or more GWAS
+#'   studies on a single LD block. Keyed by the identity tuple
+#'   \code{(study, method)}; each entry is a \code{FineMappingEntry}.
+#'
+#'   Required columns: \code{study}, \code{method}, \code{entry}. The
+#'   2-tuple is unique. The caller is expected to construct one
+#'   \code{GwasFineMappingResult} per LD block (no in-class block
+#'   indexing).
+#' @export
+setClass("GwasFineMappingResult",
+  contains = "FineMappingResultBase",
+  validity = function(object) {
+    errors <- character()
+    required <- c("study", "method", "entry")
+    missingCols <- setdiff(required, names(object))
+    if (length(missingCols) > 0L)
+      errors <- c(errors, paste("missing columns:",
+                                paste(missingCols, collapse = ", ")))
+    if (length(errors) == 0L) {
+      if (length(object$entry) != nrow(object))
+        errors <- c(errors,
+          "length(entry) must equal nrow(.) for GwasFineMappingResult")
+      entryTypes <- vapply(object$entry,
+                          function(e) methods::is(e, "FineMappingEntry"),
+                          logical(1))
+      if (!all(entryTypes))
+        errors <- c(errors,
+          "every element of the `entry` column must be a FineMappingEntry")
+      keyDf <- as.data.frame(object[, c("study", "method")])
+      if (anyDuplicated(keyDf))
+        errors <- c(errors,
+          "(study, method) tuple uniqueness violated")
+    }
+    if (!is.null(object@ldSketch) &&
+        !methods::is(object@ldSketch, "GenotypeHandle")) {
+      errors <- c(errors,
+        "'ldSketch' must be a GenotypeHandle or NULL")
+    }
+    if (length(errors) == 0L) TRUE else errors
   }
 )
 
@@ -413,217 +465,501 @@ setClass("FineMappingResult",
 # TWAS Weights
 # =============================================================================
 
-#' @title TWAS Weights
-#' @description S4 container for TWAS weight matrices.
-#' @slot weights Named list of numeric matrices (variants x outcomes).
-#' @slot variantIds Character vector of variant IDs (row names for all
-#'   weight matrices).
-#' @slot methods Character vector of method names (names of the weights
-#'   list).
-#' @slot fits Named list of model fit objects, or NULL.
-#' @slot cvPerformance Named list of cross-validation performance
-#'   metrics, or NULL.
-#' @slot standardized Logical, whether weights are on standardized
-#'   (correlation) scale. If TRUE, \code{harmonize_twas} skips the
-#'   \code{sqrt(variance)} scaling step. Individual-level weights use
-#'   FALSE (raw genotype scale); RSS weights use TRUE.
+#' @title TWAS Weights Collection
+#' @description S4 collection of TWAS weights keyed by the identity tuple
+#'   \code{(study, context, trait, method)}. Each entry is a
+#'   \code{TwasWeightsEntry} carrying one method's weights for one
+#'   trait/context/study. Implements the \code{DFrame}-subclass
+#'   collection pattern.
+#'
+#'   Required columns: \code{study}, \code{context}, \code{trait},
+#'   \code{method}, \code{entry}. The 4-tuple is unique. Each
+#'   \code{entry} is a \code{TwasWeightsEntry}.
+#' @slot ldSketch The LD reference \code{GenotypeHandle} the weights were
+#'   derived against, or \code{NULL} when the weights were learned from
+#'   individual-level data. Used downstream for cross-pipeline
+#'   LD-sketch identity validation.
 #' @export
 setClass("TwasWeights",
+  contains = "DFrame",
+  representation(ldSketch = "ANY"),
+  validity = function(object) {
+    errors <- character()
+    required <- c("study", "context", "trait", "method", "entry")
+    missingCols <- setdiff(required, names(object))
+    if (length(missingCols) > 0L)
+      errors <- c(errors, paste("missing columns:",
+                                paste(missingCols, collapse = ", ")))
+    if (length(errors) == 0L) {
+      if (length(object$entry) != nrow(object))
+        errors <- c(errors,
+          "length(entry) must equal nrow(.) for TwasWeights")
+      entryTypes <- vapply(object$entry,
+                          function(e) methods::is(e, "TwasWeightsEntry"),
+                          logical(1))
+      if (!all(entryTypes))
+        errors <- c(errors,
+          "every element of the `entry` column must be a TwasWeightsEntry")
+      keyDf <- as.data.frame(object[, c("study", "context", "trait", "method")])
+      if (anyDuplicated(keyDf))
+        errors <- c(errors,
+          "(study, context, trait, method) tuple uniqueness violated")
+    }
+    if (!is.null(object@ldSketch) &&
+        !methods::is(object@ldSketch, "GenotypeHandle")) {
+      errors <- c(errors,
+        "'ldSketch' must be a GenotypeHandle or NULL")
+    }
+    if (length(errors) == 0L) TRUE else errors
+  }
+)
+
+
+# =============================================================================
+# QTL Dataset
+# =============================================================================
+
+#' @title QTL Dataset (individual-level data for one study)
+#' @description S4 container for a single QTL study's regional data. Holds
+#'   a genotype handle plus per-context \code{SummarizedExperiment} objects
+#'   carrying molecular-trait measurements. Each context's SE has
+#'   \code{rowRanges} describing per-trait genomic positions and
+#'   \code{colData} carrying per-context phenotype covariates. A single
+#'   matrix of genotype-derived covariates (e.g., ancestry PCs) applies
+#'   across contexts.
+#'
+#' @slot study Character (length 1). Study identifier; used in collection
+#'   classes to tag downstream \code{FineMappingResult} / \code{TwasWeights}
+#'   entries.
+#' @slot genotypes A \code{GenotypeHandle} for lazy access to genotype
+#'   dosages.
+#' @slot phenotypes Named list of \code{SummarizedExperiment} objects, one
+#'   per QTL context. Each SE has rows = molecular traits with positions
+#'   in \code{rowRanges(se)}, columns = samples, and per-context covariates
+#'   in \code{colData(se)}. Different contexts may carry different subsets
+#'   of traits (rows); traits shared across contexts must have identical
+#'   \code{rowRanges} entries (enforced by validity).
+#' @slot genotypeCovariates Numeric matrix (samples x covariates) of
+#'   genotype-derived covariates applied uniformly across all contexts
+#'   (e.g., ancestry PCs).
+#' @slot scaleResiduals Logical (length 1). Whether residualization
+#'   accessors scale residuals to unit variance.
+#' @slot mafCutoff Numeric (length 1). Minor allele frequency threshold;
+#'   variants with \code{MAF < mafCutoff} are dropped at extraction time
+#'   inside \code{getGenotypes()} / \code{getResidualizedGenotypes()}.
+#'   Default 0 (no filter).
+#' @slot macCutoff Numeric (length 1). Minor allele count threshold;
+#'   converted to a MAF threshold using
+#'   \code{max(mafCutoff, macCutoff / (2 * n))} where \code{n} is the
+#'   post-narrowing sample count of the extracted block. Default 0
+#'   (no filter).
+#' @slot xvarCutoff Numeric (length 1). Per-variant genotype variance
+#'   threshold; variants with column variance below this are dropped at
+#'   extraction time. Default 0 (no filter).
+#' @slot imissCutoff Numeric (length 1). Per-sample genotype-missingness
+#'   threshold; samples with a missing-genotype rate above this are
+#'   dropped at extraction time. Default 0 (no filter).
+#' @slot keepSamples Character vector of sample identifiers to retain
+#'   prior to per-block QC; intersected with the genotype handle's
+#'   \code{sampleIds} and the \code{samples} argument of
+#'   \code{getGenotypes()}. Length 0 means no restriction.
+#' @slot keepVariants Character vector of variant identifiers to retain
+#'   prior to per-block QC. Length 0 means no restriction.
+#' @export
+setClass("QtlDataset",
   representation(
-    weights = "list",
+    study              = "character",
+    genotypes          = "GenotypeHandle",
+    phenotypes         = "list",
+    genotypeCovariates = "matrix",
+    scaleResiduals     = "logical",
+    mafCutoff          = "numeric",
+    macCutoff          = "numeric",
+    xvarCutoff         = "numeric",
+    imissCutoff        = "numeric",
+    keepSamples        = "character",
+    keepVariants       = "character"
+  ),
+  validity = function(object) {
+    errors <- character()
+    if (length(object@study) != 1L || !nzchar(object@study))
+      errors <- c(errors, "'study' must be a single non-empty character string")
+    if (length(object@scaleResiduals) != 1L)
+      errors <- c(errors, "'scaleResiduals' must be a single logical value")
+    for (nm in c("mafCutoff", "macCutoff", "xvarCutoff", "imissCutoff")) {
+      v <- methods::slot(object, nm)
+      if (length(v) != 1L || is.na(v) || !is.finite(v) || v < 0)
+        errors <- c(errors, sprintf(
+          "'%s' must be a single finite non-negative numeric", nm))
+    }
+    if (length(object@phenotypes) == 0L)
+      errors <- c(errors, "'phenotypes' must not be empty")
+    contextNames <- names(object@phenotypes)
+    if (is.null(contextNames) || any(!nzchar(contextNames)) ||
+        any(is.na(contextNames)))
+      errors <- c(errors, "'phenotypes' must be a named list with non-empty names")
+    else if (anyDuplicated(contextNames))
+      errors <- c(errors, "context names in 'phenotypes' must be unique")
+    for (ctx in seq_along(object@phenotypes)) {
+      se <- object@phenotypes[[ctx]]
+      if (!methods::is(se, "SummarizedExperiment")) {
+        errors <- c(errors, sprintf(
+          "phenotypes[[%d]] must be a SummarizedExperiment (got %s)",
+          ctx, class(se)[[1L]]))
+      }
+    }
+    # Trait-position consistency across shared traits in different contexts.
+    if (length(object@phenotypes) > 1L &&
+        all(vapply(object@phenotypes, methods::is, logical(1),
+                   "SummarizedExperiment"))) {
+      traitToRange <- list()
+      for (ctx in seq_along(object@phenotypes)) {
+        se <- object@phenotypes[[ctx]]
+        rr <- SummarizedExperiment::rowRanges(se)
+        ids <- rownames(se)
+        if (length(rr) != length(ids)) next
+        for (i in seq_along(ids)) {
+          tid <- ids[[i]]
+          prev <- traitToRange[[tid]]
+          this <- rr[i]
+          if (is.null(prev)) {
+            traitToRange[[tid]] <- this
+          } else {
+            if (!isTRUE(all.equal(
+                  as.character(GenomicRanges::seqnames(prev)),
+                  as.character(GenomicRanges::seqnames(this))
+                )) ||
+                GenomicRanges::start(prev) != GenomicRanges::start(this) ||
+                GenomicRanges::end(prev) != GenomicRanges::end(this)) {
+              errors <- c(errors, sprintf(
+                "trait '%s' has inconsistent rowRanges across contexts", tid))
+            }
+          }
+        }
+      }
+    }
+    if (length(errors) == 0) TRUE else errors
+  }
+)
+
+# =============================================================================
+# Per-entry payload classes for FineMappingResult and TwasWeights
+# =============================================================================
+
+#' @title Fine-Mapping Entry (per-tuple payload)
+#' @description S4 container for a single fine-mapping fit attached to a
+#'   \code{FineMappingResult} row. One entry corresponds to one
+#'   \code{(study, context, trait, method)} tuple.
+#'
+#'   For joint fits (e.g., multi-trait mvSuSiE or fSuSiE), multiple
+#'   \code{FineMappingEntry} objects in the same \code{FineMappingResult}
+#'   collection may carry references to the same underlying R fit object
+#'   (R's copy-on-modify semantics keep this memory-efficient).
+#' @slot variantIds Character vector of variant IDs in the fit.
+#' @slot trimmedFit The method-specific fit object (SuSiE list, mvSuSiE
+#'   object, fSuSiE object, etc.). May be shared by reference across
+#'   joint-fit entries.
+#' @slot topLoci A long-format \code{data.frame} with at minimum
+#'   \code{variant_id} and \code{pip} columns; optional \code{cs},
+#'   \code{coverage}, \code{betahat}, \code{sd}, \code{csLog10bf},
+#'   \code{z}.
+#' @slot sumstats A list of summary statistics used in the fit, or
+#'   \code{NULL}.
+#' @export
+setClass("FineMappingEntry",
+  representation(
     variantIds = "character",
-    methods = "character",
-    fits = "ANY",           # list or NULL
-    cvPerformance = "ANY",  # list or NULL
-    standardized = "logical",
-    molecularId = "character",  # gene/molecule name (length 0 or 1)
-    dataType = "ANY"            # named list of data types per context, or NULL
+    trimmedFit = "ANY",
+    topLoci    = "data.frame",
+    sumstats   = "ANY"
+  ),
+  validity = function(object) {
+    errors <- character()
+    if (nrow(object@topLoci) > 0L) {
+      required <- c("variant_id", "pip")
+      missingCols <- setdiff(required, colnames(object@topLoci))
+      if (length(missingCols) > 0L)
+        errors <- c(errors, paste("topLoci missing columns:",
+                                  paste(missingCols, collapse = ", ")))
+    }
+    if (length(errors) == 0L) TRUE else errors
+  }
+)
+
+#' @title TWAS Weights Entry (per-tuple payload)
+#' @description S4 container for one method's TWAS weights, attached to
+#'   a \code{TwasWeights} row. One entry corresponds to one
+#'   \code{(study, context, trait, method)} tuple.
+#' @slot variantIds Character vector of variant IDs that have weights.
+#' @slot weights Numeric vector (single-method, single-outcome) or
+#'   matrix (multi-outcome).
+#' @slot fits Optional method-specific fit object.
+#' @slot cvPerformance Optional named list of CV metrics (\code{rsq},
+#'   \code{pval}, etc.).
+#' @slot standardized Logical (length 1). Whether the weights are on the
+#'   standardized scale.
+#' @slot dataType Data-type tag for downstream usage (e.g.,
+#'   \code{"expression"}, \code{"splicing"}); may be \code{NULL}.
+#' @export
+setClass("TwasWeightsEntry",
+  representation(
+    variantIds    = "character",
+    weights       = "ANY",
+    fits          = "ANY",
+    cvPerformance = "ANY",
+    standardized  = "logical",
+    dataType      = "ANY"
   ),
   validity = function(object) {
     errors <- character()
     if (length(object@standardized) != 1L)
-      errors <- c(errors, "'standardized' must be a single logical value")
-    if (length(object@methods) != length(object@weights))
+      errors <- c(errors, "'standardized' must be a single logical")
+    if (is.matrix(object@weights) &&
+        nrow(object@weights) != length(object@variantIds))
       errors <- c(errors,
-        "Length of 'methods' must match length of 'weights'")
-    for (i in seq_along(object@weights)) {
-      w <- object@weights[[i]]
-      if (!is.null(w) && is.matrix(w) && nrow(w) != length(object@variantIds))
-        errors <- c(errors, paste0(
-          "Weight matrix '", object@methods[i],
-          "' has ", nrow(w), " rows but variantIds has length ",
-          length(object@variantIds)))
-    }
-    if (length(errors) == 0) TRUE else errors
+        "nrow(weights) must equal length(variantIds)")
+    if (length(errors) == 0L) TRUE else errors
   }
 )
 
 # =============================================================================
-# Allele QC Result
+# MultiTaskQtlDataset
 # =============================================================================
 
-#' @title Allele QC Result
-#' @description S4 container for the output of \code{matchRefPanel} /
-#'   \code{alleleQc}. Carries the post-QC target variants alongside the full
-#'   merge / flip / strand diagnostics needed by downstream callers that
-#'   inspect what QC did.
-#' @slot harmonizedData A \code{data.frame} of variants retained after
-#'   allele harmonization, with reference-aligned A1/A2 and (when requested)
-#'   sign-flipped effect columns.
-#' @slot qcSummary A \code{data.frame} carrying per-variant QC diagnostics
-#'   from the full merge: \code{variants_id_original}, \code{variants_id_qced},
-#'   \code{exact_match}, \code{sign_flip}, \code{strand_flip}, \code{INDEL},
-#'   \code{ID_match}, \code{keep}, etc.
+#' @title Multi-Task QTL Dataset
+#' @description S4 container for a multi-task QTL analysis: a collection
+#'   of individual-level \code{QtlDataset} studies, optionally combined
+#'   with a \code{QtlSumStats} collection of summary-statistic-only
+#'   studies. Used as the input to multi-study fine-mapping and
+#'   colocboost-style analyses.
+#'
+#'   At least two studies must be present in total, counting
+#'   \code{qtlDatasets} entries plus the studies in \code{sumStats}.
+#'
+#'   For traits that appear in more than one \code{qtlDatasets} entry,
+#'   the per-trait genomic positions must agree across the entries
+#'   (enforced by validity). No cross-checking is performed against
+#'   \code{sumStats} variant positions, since summary statistics are
+#'   already computed and cannot be re-aligned at construction time.
+#' @slot qtlDatasets A named list of \code{QtlDataset} objects, keyed by
+#'   study identifier.
+#' @slot sumStats An optional \code{QtlSumStats} carrying additional
+#'   summary-statistic-only studies. \code{NULL} when absent.
 #' @export
-setClass("AlleleQcResult",
+setClass("MultiTaskQtlDataset",
   representation(
-    harmonizedData = "data.frame",
-    qcSummary = "data.frame"
-  )
-)
-
-# =============================================================================
-# Summary-Statistics QC Result
-# =============================================================================
-
-#' @title Summary-Statistics QC Result
-#' @description S4 container holding the output of \code{summaryStatsQc} and
-#'   \code{.summary_stats_qc_single_study}. Carries the post-QC LD reference
-#'   plus harmonized sumstats, a pre-imputation snapshot, and QC process
-#'   metadata. Replaces the legacy list-of-named-fields return shape.
-#' @slot ldData An \code{LdData} S4 object containing the post-QC LD
-#'   reference (correlation and/or genotype), or NULL when QC produced no LD.
-#' @slot rssInput List with \code{sumstats} (post-QC data.frame), \code{n},
-#'   and \code{varY}.
-#' @slot preprocess List with \code{sumstats} and \code{ldData} fields
-#'   capturing the pre-imputation snapshot for downstream re-runs.
-#' @slot outlierNumber Integer count of LD-mismatch outliers removed.
-#' @slot skipped Single logical; TRUE when QC short-circuited.
-#' @slot skipReason Character string explaining a skip; empty otherwise.
-#' @export
-setClass("QcResult",
-  representation(
-    ldData = "ANY",                   # LdData or NULL
-    rssInput = "list",
-    preprocess = "list",
-    outlierNumber = "integer",
-    skipped = "logical",
-    skipReason = "character"
+    qtlDatasets = "list",
+    sumStats    = "ANY"
   ),
   validity = function(object) {
     errors <- character()
-    if (!is.null(object@ldData) && !is(object@ldData, "LdData"))
-      errors <- c(errors, "'ldData' must be an LdData object or NULL")
-    if (length(object@skipped) != 1L)
-      errors <- c(errors, "'skipped' must be a single logical value")
-    if (length(object@outlierNumber) != 1L)
-      errors <- c(errors, "'outlierNumber' must be a single integer")
-    if (length(object@skipReason) > 1L)
-      errors <- c(errors, "'skipReason' must be a single character string (or empty)")
-    if (length(object@rssInput) > 0L) {
-      required <- c("sumstats", "n", "varY")
-      missing_keys <- setdiff(required, names(object@rssInput))
-      if (length(missing_keys) > 0L)
-        errors <- c(errors, paste0(
-          "'rssInput' is missing key(s): ", paste(missing_keys, collapse = ", ")))
-      if (!is.null(object@rssInput$sumstats) &&
-          !is.data.frame(object@rssInput$sumstats))
+    # qtlDatasets elements
+    if (!is.list(object@qtlDatasets) || length(object@qtlDatasets) == 0L) {
+      errors <- c(errors, "'qtlDatasets' must be a non-empty named list")
+    } else {
+      nm <- names(object@qtlDatasets)
+      if (is.null(nm) || any(!nzchar(nm)) || any(is.na(nm)))
+        errors <- c(errors, "'qtlDatasets' must be a named list with non-empty names")
+      else if (anyDuplicated(nm))
+        errors <- c(errors, "names of 'qtlDatasets' must be unique")
+      bad <- !vapply(object@qtlDatasets,
+                    function(d) methods::is(d, "QtlDataset"), logical(1))
+      if (any(bad))
         errors <- c(errors,
-          "'rssInput$sumstats' must be a data.frame")
+          "every element of 'qtlDatasets' must be a QtlDataset")
     }
-    if (length(object@preprocess) > 0L) {
-      pp_keys <- names(object@preprocess)
-      if (!all(pp_keys %in% c("sumstats", "ldData")))
-        errors <- c(errors,
-          "'preprocess' may only contain 'sumstats' and 'ldData' keys")
-      if (!is.null(object@preprocess$ldData) &&
-          !is(object@preprocess$ldData, "LdData"))
-        errors <- c(errors,
-          "'preprocess$ldData' must be an LdData or NULL")
+    # sumStats: either NULL or a QtlSumStats
+    if (!is.null(object@sumStats) && !methods::is(object@sumStats, "QtlSumStats")) {
+      errors <- c(errors,
+        "'sumStats' must be a QtlSumStats object or NULL")
     }
-    if (length(errors) == 0) TRUE else errors
+    # Total study count >= 2
+    nQtl <- length(object@qtlDatasets)
+    nSumstats <- if (is.null(object@sumStats)) 0L
+                 else length(unique(as.character(object@sumStats$study)))
+    if (length(errors) == 0L && (nQtl + nSumstats) < 2L) {
+      errors <- c(errors, sprintf(
+        "MultiTaskQtlDataset requires at least 2 studies in total (got ",
+        "%d individual-level + %d summary-statistic = %d).",
+        nQtl, nSumstats, nQtl + nSumstats))
+    }
+    # Pairwise trait-position consistency across qtlDatasets
+    if (length(errors) == 0L && nQtl >= 2L) {
+      traitRanges <- lapply(object@qtlDatasets, function(qd) {
+        out <- list()
+        for (ctx in seq_along(qd@phenotypes)) {
+          se <- qd@phenotypes[[ctx]]
+          rr <- SummarizedExperiment::rowRanges(se)
+          ids <- rownames(se)
+          for (i in seq_along(ids)) {
+            tid <- ids[[i]]
+            if (is.null(out[[tid]])) out[[tid]] <- rr[i]
+          }
+        }
+        out
+      })
+      pairs <- utils::combn(seq_along(traitRanges), 2L)
+      for (k in seq_len(ncol(pairs))) {
+        i <- pairs[1L, k]; j <- pairs[2L, k]
+        a <- traitRanges[[i]]; b <- traitRanges[[j]]
+        shared <- intersect(names(a), names(b))
+        for (tid in shared) {
+          if (!isTRUE(all.equal(
+                as.character(GenomicRanges::seqnames(a[[tid]])),
+                as.character(GenomicRanges::seqnames(b[[tid]])))) ||
+              GenomicRanges::start(a[[tid]]) != GenomicRanges::start(b[[tid]]) ||
+              GenomicRanges::end(a[[tid]]) != GenomicRanges::end(b[[tid]])) {
+            errors <- c(errors, sprintf(
+              "trait '%s' has inconsistent rowRanges between studies '%s' and '%s'",
+              tid, names(object@qtlDatasets)[i],
+              names(object@qtlDatasets)[j]))
+          }
+        }
+      }
+    }
+    if (length(errors) == 0L) TRUE else errors
   }
 )
 
 # =============================================================================
-# Regional Data (pipeline input)
+# Summary Statistics collection classes (post-refactor; DFrame subclasses)
 # =============================================================================
 
-#' @title Regional Association Data
-#' @description S4 container for regional genotype/phenotype/covariate data.
-#'   Residualized genotypes and phenotypes are computed lazily via accessors.
-#' @slot genotypeMatrix Numeric matrix (samples x variants) of genotype
-#'   dosages, with colnames as variant IDs and rownames as sample IDs.
-#' @slot phenotypes Named list of phenotype matrices (per condition).
-#' @slot covariates Named list of covariate matrices (per condition).
-#' @slot scaleResiduals Logical, whether to scale residuals.
-#' @slot maf Named list of MAF vectors (per condition).
-#' @slot region A \code{GRanges} (single range) or NULL.
-#' @slot droppedSamples Named list of dropped sample vectors.
-#' @slot coordinates Phenotype coordinates, or NULL.
+#' @title QTL Summary Statistics Collection
+#' @description S4 collection of QTL summary statistics keyed by the
+#'   identity tuple \code{(study, context, trait)}. Each entry holds a
+#'   \code{GRanges} of summary statistics for that tuple. Class-level
+#'   slots \code{ldSketch} (the LD reference \code{GenotypeHandle}) and
+#'   \code{genome} (the genome build, a single character string) apply
+#'   to every entry; the genome build must be uniform because all
+#'   entries necessarily share the LD reference.
+#'
+#'   Required columns: \code{study}, \code{context}, \code{trait},
+#'   \code{entry}. Optional columns include \code{varY} (numeric,
+#'   per-tuple phenotype variance; \code{NA_real_} when unused). The
+#'   3-tuple \code{(study, context, trait)} is unique. Each \code{entry}
+#'   is a \code{GRanges} whose mcols carry the per-variant statistics
+#'   (\code{SNP}, \code{A1}, \code{A2}, \code{Z}, \code{N}; plus
+#'   optional \code{MAF}, \code{INFO}, \code{BETA}, \code{SE}, \code{P}).
+#' @slot ldSketch A \code{GenotypeHandle} carrying the LD reference for
+#'   downstream QC and RSS analysis.
+#' @slot genome A single character string giving the genome build that
+#'   the LD sketch and every entry are aligned to.
+#' @title Summary Statistics Base Class
+#' @description Virtual base class for summary-statistic collections.
+#'   Concrete subclasses (\code{QtlSumStats}, \code{GwasSumStats}) carry
+#'   a \code{DFrame} of per-entry rows plus shared slots \code{ldSketch},
+#'   \code{genome}, and \code{qcInfo}. Downstream pipelines should
+#'   dispatch on \code{SumStatsBase} for behaviors that apply to either
+#'   flavour and on the concrete subclass when the tuple shape matters.
+#' @slot ldSketch A \code{GenotypeHandle} carrying the LD reference for
+#'   downstream QC and RSS analysis.
+#' @slot genome A single character string giving the genome build that
+#'   the LD sketch and every entry are aligned to.
+#' @slot qcInfo A \code{list} recording which QC steps ran. Empty
+#'   \code{list()} on construction; populated by \code{summaryStatsQc()}.
+#'   Fine-mapping and TWAS-weights pipelines reject inputs where
+#'   \code{length(getQcInfo(x)) == 0L} — the slot serves as both the
+#'   gating flag and the audit trail.
 #' @export
-setClass("RegionalData",
+setClass("SumStatsBase",
+  contains = c("VIRTUAL", "DFrame"),
   representation(
-    genotypeMatrix = "matrix",
-    phenotypes = "list",
-    covariates = "list",
-    scaleResiduals = "logical",
-    maf = "list",
-    region = "ANY",           # GRanges or NULL
-    droppedSamples = "list",
-    coordinates = "ANY"       # data.frame or NULL
-  ),
+    ldSketch = "GenotypeHandle",
+    genome   = "character",
+    qcInfo   = "list"
+  ))
+
+#' @slot qcInfo A \code{list} recording which QC steps ran. Empty
+#'   \code{list()} on construction; populated by \code{summaryStatsQc()}
+#'   with a per-step audit record (filter names, drop counts, liftover
+#'   target, RAISS settings, etc.). Fine-mapping and TWAS-weights
+#'   pipelines reject inputs where \code{length(getQcInfo(x)) == 0L} — the
+#'   slot serves as both the gating flag and the audit trail.
+#' @export
+setClass("QtlSumStats",
+  contains = "SumStatsBase",
   validity = function(object) {
     errors <- character()
-    if (length(object@phenotypes) == 0)
-      errors <- c(errors, "'phenotypes' must not be empty")
-    if (length(object@covariates) != length(object@phenotypes))
+    required <- c("study", "context", "trait", "entry")
+    missingCols <- setdiff(required, names(object))
+    if (length(missingCols) > 0L)
+      errors <- c(errors, paste("missing columns:",
+                                paste(missingCols, collapse = ", ")))
+    if (length(object@genome) != 1L || !nzchar(object@genome))
       errors <- c(errors,
-        "'covariates' and 'phenotypes' must have the same length")
-    if (length(errors) == 0) TRUE else errors
+        "'genome' slot must be a single non-empty character string")
+    if (!is.list(object@qcInfo))
+      errors <- c(errors, "'qcInfo' slot must be a list")
+    if (length(errors) == 0L) {
+      if (length(object$entry) != nrow(object))
+        errors <- c(errors,
+          "length(entry) must equal nrow(.) for QtlSumStats")
+      entryTypes <- vapply(object$entry,
+                          function(e) methods::is(e, "GRanges"), logical(1))
+      if (!all(entryTypes))
+        errors <- c(errors,
+          "every element of the `entry` column must be a GRanges")
+      keyDf <- as.data.frame(object[, c("study", "context", "trait")])
+      if (anyDuplicated(keyDf))
+        errors <- c(errors,
+          "(study, context, trait) tuple uniqueness violated")
+    }
+    if (length(errors) == 0L) TRUE else errors
   }
 )
 
-# =============================================================================
-# Multivariate Regional Data
-# =============================================================================
-
-#' @title Multivariate Regional Association Data
-#' @description S4 container for regional association data prepared for
-#'   multivariate (joint-across-conditions) modeling. Unlike
-#'   \code{RegionalData}, which carries a per-condition list of phenotype
-#'   matrices, this class assumes all conditions are jointly observed in the
-#'   same samples and packs the phenotypes into a single multivariate matrix
-#'   (samples x conditions).
-#' @slot genotypeMatrix Numeric matrix (samples x variants), rownames are
-#'   sample IDs, colnames are variant IDs.
-#' @slot Y Numeric matrix (samples x conditions) of residualized
-#'   phenotypes after joining conditions and (optionally) filtering rows by
-#'   minimum non-missing count.
-#' @slot scaling Numeric vector of per-condition scaling factors
-#'   (length = ncol(Y)).
-#' @slot droppedSamples Character or list capturing sample IDs dropped
-#'   during multivariate filtering.
-#' @slot region A \code{GRanges} (single range) or NULL.
-#' @slot coordinates A data.frame of phenotype coordinates, or NULL.
+#' @title GWAS Summary Statistics Collection
+#' @description S4 collection of GWAS summary statistics keyed by
+#'   \code{study}. Each entry holds a \code{GRanges} of summary statistics
+#'   for that study. Class-level slots \code{ldSketch} (the LD reference
+#'   \code{GenotypeHandle}) and \code{genome} (the genome build, a single
+#'   character string) apply to every entry; the genome build must be
+#'   uniform because all entries necessarily share the LD reference.
+#'
+#'   Required columns: \code{study}, \code{entry}. Optional columns
+#'   include \code{varY} (numeric, phenotype variance for the
+#'   sufficient-statistic interface; NA otherwise). \code{study} is
+#'   unique. Each \code{entry} is a \code{GRanges} whose mcols carry the
+#'   per-variant statistics (\code{SNP}, \code{A1}, \code{A2}, \code{Z},
+#'   \code{N}; plus optional \code{MAF}, \code{INFO}, \code{BETA},
+#'   \code{SE}, \code{P}).
+#' @slot ldSketch A \code{GenotypeHandle} for the LD reference.
+#' @slot genome A single character string giving the genome build that
+#'   the LD sketch and every entry are aligned to.
+#' @slot qcInfo A \code{list} recording which QC steps ran. Empty
+#'   \code{list()} on construction; populated by \code{summaryStatsQc()}.
+#'   Fine-mapping and TWAS-weights pipelines reject inputs where
+#'   \code{length(getQcInfo(x)) == 0L} — the slot serves as both the
+#'   gating flag and the audit trail.
 #' @export
-setClass("MultivariateRegionalData",
-  representation(
-    genotypeMatrix = "matrix",
-    Y = "matrix",
-    scaling = "numeric",
-    droppedSamples = "ANY",
-    region = "ANY",
-    coordinates = "ANY"
-  ),
+setClass("GwasSumStats",
+  contains = "SumStatsBase",
   validity = function(object) {
     errors <- character()
-    if (nrow(object@genotypeMatrix) != nrow(object@Y))
+    required <- c("study", "entry")
+    missingCols <- setdiff(required, names(object))
+    if (length(missingCols) > 0L)
+      errors <- c(errors, paste("missing columns:",
+                                paste(missingCols, collapse = ", ")))
+    if (length(object@genome) != 1L || !nzchar(object@genome))
       errors <- c(errors,
-        "genotypeMatrix and Y must have the same number of rows")
-    if (length(object@scaling) != ncol(object@Y))
-      errors <- c(errors, "length(scaling) must equal ncol(Y)")
-    if (length(errors) == 0) TRUE else errors
+        "'genome' slot must be a single non-empty character string")
+    if (!is.list(object@qcInfo))
+      errors <- c(errors, "'qcInfo' slot must be a list")
+    if (length(errors) == 0L) {
+      if (length(object$entry) != nrow(object))
+        errors <- c(errors,
+          "length(entry) must equal nrow(.) for GwasSumStats")
+      entryTypes <- vapply(object$entry,
+                          function(e) methods::is(e, "GRanges"), logical(1))
+      if (!all(entryTypes))
+        errors <- c(errors,
+          "every element of the `entry` column must be a GRanges")
+      if (anyDuplicated(as.character(object$study)))
+        errors <- c(errors, "`study` must be unique")
+    }
+    if (length(errors) == 0L) TRUE else errors
   }
 )
 
@@ -639,18 +975,9 @@ setMethod("show", "GenotypeHandle", function(object) {
               object@nSamples, nrow(object@snpInfo)))
 })
 
-#' @export
-setMethod("show", "GwasSumStats", function(object) {
-  cat(sprintf("GwasSumStats for '%s'\n", object@traitName))
-  cat(sprintf("  %d SNPs, genome build: %s\n",
-              length(object@sumstats), object@genome))
-  cat(sprintf("  Median N: %.0f\n",
-              stats::median(S4Vectors::mcols(object@sumstats)$N)))
-  has_maf <- "MAF" %in% colnames(S4Vectors::mcols(object@sumstats))
-  cat(sprintf("  MAF available: %s\n", has_maf))
-  if (!is.null(object@varY))
-    cat(sprintf("  varY: %.4f\n", object@varY))
-})
+# NOTE: the old single-study GwasSumStats show method has been removed;
+# the new collection class's show method is defined alongside its class
+# definition (see QtlSumStats / GwasSumStats section above).
 
 #' @export
 setMethod("show", "LdBlocks", function(object) {
@@ -722,65 +1049,110 @@ setMethod("show", "LdData", function(object) {
 })
 
 #' @export
-setMethod("show", "FineMappingResult", function(object) {
-  n_cs <- if (nrow(object@topLoci) > 0 && "cs" %in% names(object@topLoci))
-    length(unique(object@topLoci$cs[object@topLoci$cs > 0])) else 0L
-  cat(sprintf("FineMappingResult [%s]: %d variants, %d credible sets\n",
-              object@method, length(object@variantNames), n_cs))
+setMethod("show", "QtlFineMappingResult", function(object) {
+  cat(sprintf("QtlFineMappingResult: %d entries\n", nrow(object)))
+  if (nrow(object) > 0L) {
+    cat(sprintf("  %d studies, %d contexts, %d traits, %d methods\n",
+                length(unique(object$study)),
+                length(unique(object$context)),
+                length(unique(object$trait)),
+                length(unique(object$method))))
+  }
+  ldSrc <- if (is.null(object@ldSketch)) "NULL (individual-level fit)"
+           else sprintf("%s @ %s",
+                         object@ldSketch@format,
+                         object@ldSketch@path)
+  cat(sprintf("  LD sketch: %s\n", ldSrc))
+})
+
+#' @export
+setMethod("show", "GwasFineMappingResult", function(object) {
+  cat(sprintf("GwasFineMappingResult: %d entries\n", nrow(object)))
+  if (nrow(object) > 0L) {
+    cat(sprintf("  %d studies, %d methods\n",
+                length(unique(object$study)),
+                length(unique(object$method))))
+  }
+  ldSrc <- if (is.null(object@ldSketch)) "NULL"
+           else sprintf("%s @ %s",
+                         object@ldSketch@format,
+                         object@ldSketch@path)
+  cat(sprintf("  LD sketch: %s\n", ldSrc))
 })
 
 #' @export
 setMethod("show", "TwasWeights", function(object) {
-  cat(sprintf("TwasWeights: %d methods, %d variants\n",
-              length(object@methods), length(object@variantIds)))
-  if (length(object@molecularId) > 0)
-    cat(sprintf("  Molecular ID: %s\n", object@molecularId))
-  cat(sprintf("  Methods: %s\n", paste(object@methods, collapse = ", ")))
-  cat(sprintf("  Standardized: %s\n", object@standardized))
-  has_cv <- !is.null(object@cvPerformance)
-  cat(sprintf("  CV performance: %s\n", has_cv))
+  cat(sprintf("TwasWeights: %d entries\n", nrow(object)))
+  if (nrow(object) > 0L) {
+    cat(sprintf("  %d studies, %d contexts, %d traits, %d methods\n",
+                length(unique(object$study)),
+                length(unique(object$context)),
+                length(unique(object$trait)),
+                length(unique(object$method))))
+  }
+  ldSrc <- if (is.null(object@ldSketch)) "NULL (individual-level fit)"
+           else sprintf("%s @ %s",
+                         object@ldSketch@format,
+                         object@ldSketch@path)
+  cat(sprintf("  LD sketch: %s\n", ldSrc))
+})
+
+setMethod("show", "GwasSumStats", function(object) {
+  cat(sprintf("GwasSumStats: %d studies, genome build %s\n",
+              nrow(object), object@genome))
+  cat(sprintf("  LD sketch: %s @ %s\n",
+              object@ldSketch@format, object@ldSketch@path))
 })
 
 #' @export
-setMethod("show", "RegionalData", function(object) {
-  n_cond <- length(object@phenotypes)
-  n_var <- ncol(object@genotypeMatrix)
-  n_samp <- nrow(object@genotypeMatrix)
-  cat(sprintf("RegionalData: %d conditions, %d variants, %d samples\n",
-              n_cond, n_var, n_samp))
+setMethod("show", "FineMappingEntry", function(object) {
+  nCs <- if (nrow(object@topLoci) > 0L && "cs" %in% names(object@topLoci))
+           length(unique(object@topLoci$cs[object@topLoci$cs > 0]))
+         else 0L
+  cat(sprintf("FineMappingEntry: %d variants, %d credible sets\n",
+              length(object@variantIds), nCs))
+})
+
+#' @export
+setMethod("show", "TwasWeightsEntry", function(object) {
+  cat(sprintf("TwasWeightsEntry: %d variants, standardized=%s\n",
+              length(object@variantIds), object@standardized))
+  hasCv <- !is.null(object@cvPerformance)
+  cat(sprintf("  CV performance: %s\n", hasCv))
+})
+
+#' @export
+setMethod("show", "MultiTaskQtlDataset", function(object) {
+  nQtl <- length(object@qtlDatasets)
+  ssEntries <- if (is.null(object@sumStats)) 0L
+               else length(unique(as.character(object@sumStats$study)))
+  cat(sprintf("MultiTaskQtlDataset: %d individual-level + %d sumstats studies\n",
+              nQtl, ssEntries))
+  if (nQtl > 0L) {
+    cat(sprintf("  Individual-level studies: %s\n",
+                paste(names(object@qtlDatasets), collapse = ", ")))
+  }
+  if (!is.null(object@sumStats)) {
+    cat(sprintf("  Sumstats studies: %s\n",
+                paste(unique(as.character(object@sumStats$study)),
+                      collapse = ", ")))
+  }
+})
+
+#' @export
+setMethod("show", "QtlDataset", function(object) {
+  nCtx <- length(object@phenotypes)
+  ctxNames <- names(object@phenotypes)
+  totalTraits <- length(unique(unlist(
+    lapply(object@phenotypes, rownames), use.names = FALSE)))
+  cat(sprintf("QtlDataset for study '%s'\n", object@study))
+  cat(sprintf("  %d context(s): %s\n", nCtx,
+              paste(ctxNames, collapse = ", ")))
+  cat(sprintf("  %d unique traits across contexts\n", totalTraits))
+  cat(sprintf("  Genotypes: %s\n",
+              paste0(object@genotypes@format, " @ ", object@genotypes@path)))
+  cat(sprintf("  Genotype covariates: %d cols\n",
+              ncol(object@genotypeCovariates)))
   cat(sprintf("  Scale residuals: %s\n", object@scaleResiduals))
 })
 
-#' @export
-setMethod("show", "MultivariateRegionalData", function(object) {
-  cat(sprintf("MultivariateRegionalData: %d conditions, %d variants, %d samples\n",
-              ncol(object@Y), ncol(object@genotypeMatrix),
-              nrow(object@genotypeMatrix)))
-  if (!is.null(object@region))
-    cat(sprintf("  Region: %s:%d-%d\n",
-                as.character(GenomicRanges::seqnames(object@region))[1],
-                GenomicRanges::start(object@region),
-                GenomicRanges::end(object@region)))
-})
-
-#' @export
-setMethod("show", "AlleleQcResult", function(object) {
-  cat(sprintf("AlleleQcResult: %d harmonized variants (from %d scanned)\n",
-              nrow(object@harmonizedData), nrow(object@qcSummary)))
-})
-
-#' @export
-setMethod("show", "QcResult", function(object) {
-  cat(sprintf("QcResult: %s\n",
-              if (object@skipped) sprintf("skipped (%s)", object@skipReason) else "completed"))
-  if (length(object@rssInput) > 0 && !is.null(object@rssInput$sumstats)) {
-    cat(sprintf("  Sumstats: %d variants\n",
-                nrow(object@rssInput$sumstats)))
-  }
-  if (!is.null(object@ldData)) {
-    cat(sprintf("  LD: %d variants%s\n",
-                length(getVariantIds(object@ldData)),
-                if (hasGenotypes(object@ldData)) " (genotype-backed)" else " (correlation)"))
-  }
-  cat(sprintf("  Outliers removed: %d\n", object@outlierNumber))
-})

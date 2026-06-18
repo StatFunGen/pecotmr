@@ -25,7 +25,7 @@ calcI2 <- function(Q, Est) {
 #'
 #' Description of what the function does.
 #'
-#' @param susieResult A list containing the results of SuSiE analysis. This list should include nested elements such as 'susie_results', 'finemappingResult' (a FineMappingResult S4 object), and 'top_loci', containing details about the statistical analysis of genetic variants.
+#' @param susieResult A list containing the results of SuSiE analysis. This list should include nested elements such as 'susie_results', 'finemappingEntry' (a FineMappingEntry S4 object), and 'top_loci', containing details about the statistical analysis of genetic variants.
 #' @param condition A character string specifying the conditions. This is used to select the corresponding subset of results within 'susieResult'.
 #' @param gwasSumstatsDb A data frame containing summary statistics from GWAS studies. It should include columns for variant id and their associated statistics such as beta coefficients and standard errors.
 #' @param coverage A character string specifying the credible set column. If
@@ -91,11 +91,11 @@ mrFormat <- function(susieResult, condition, gwasSumstatsDb, coverage = NULL,
   gwasBetaSe <- zToBetaSe(gwasSumstatsDbExtracted$z, gwasSumstatsDbExtracted$effect_allele_frequency, gwasSumstatsDbExtracted$n_sample)
   gwasSumstatsDbExtracted <- gwasSumstatsDbExtracted %>% mutate(beta = gwasBetaSe$beta, se = gwasBetaSe$se)
   if (runAlleleQc) {
-    susieCsResultFormatted <- matchRefPanel(cbind(variantIdToDf(susieCsResultFormatted$variant), susieCsResultFormatted),
+    susieCsResultFormatted <- .matchRefPanel(cbind(variantIdToDf(susieCsResultFormatted$variant), susieCsResultFormatted),
       gwasSumstatsDbExtracted$variant_id, c("bhat_x"),
       matchMinProp = 0
     )
-    susieCsResultFormatted <- getHarmonizedData(susieCsResultFormatted)[, c("geneName", "variant_id", "bhat_x", "sbhat_x", "cs", "pip")]
+    susieCsResultFormatted <- susieCsResultFormatted$harmonizedData[, c("geneName", "variant_id", "bhat_x", "sbhat_x", "cs", "pip")]
   }
   # Ensure consistent chr prefix convention before intersecting
   if (nrow(susieCsResultFormatted) == 0) return(.createNullMrDf(geneName, mrFormatSpec))

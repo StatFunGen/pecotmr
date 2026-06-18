@@ -2,7 +2,7 @@
 #' @description All S4 generic function definitions for pecotmr.
 #' @name pecotmr-generics
 #' @keywords internal
-#' @include AllClasses.R
+#' @include allClasses.R
 #' @importFrom methods setGeneric
 NULL
 
@@ -64,25 +64,6 @@ setGeneric("readGenotypes",
     standardGeneric("readGenotypes")
 )
 
-#' @title Read GWAS Summary Statistics
-#' @description Read and standardize GWAS summary statistics from file.
-#'   Optionally uses MungeSumStats for format detection and QC.
-#' @param path Character, path to the summary statistics file.
-#' @param traitName Character, name for the trait.
-#' @param genome Character, genome build (e.g., "hg19", "hg38").
-#'   If NULL, inferred by MungeSumStats.
-#' @param n Numeric, sample size (if not in the file).
-#' @param useMungesumstats Logical, whether to use MungeSumStats for
-#'   standardization. Default TRUE if available.
-#' @param ... Additional arguments.
-#' @return A \code{GwasSumStats} object.
-#' @export
-setGeneric("readSumstats",
-  function(path, traitName = "trait", genome = NULL, n = NULL,
-           useMungesumstats = TRUE, ...)
-    standardGeneric("readSumstats")
-)
-
 #' @title Read Annotations
 #' @description Read genomic annotations from files (BED, BigWig,
 #'   S-LDSC .annot format, or GRanges objects) and create an
@@ -134,32 +115,42 @@ setGeneric("getScoreStats",
 # =============================================================================
 
 #' @title Get Z-scores
-#' @description Extract z-score vector from a GwasSumStats object.
-#' @param x A \code{GwasSumStats} object.
+#' @description Extract z-score vector from a \code{GwasSumStats} or
+#'   \code{QtlSumStats} entry, selected by its identity tuple.
+#' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
+#' @param ... Class-specific selection arguments (e.g., \code{study} for
+#'   \code{GwasSumStats}; \code{study}, \code{context}, \code{trait} for
+#'   \code{QtlSumStats}).
 #' @return Numeric vector of z-scores.
 #' @export
-setGeneric("getZ", function(x) standardGeneric("getZ"))
+setGeneric("getZ", function(x, ...) standardGeneric("getZ"))
 
 #' @title Get Sample Sizes
-#' @description Extract sample size vector from a GwasSumStats object.
-#' @param x A \code{GwasSumStats} object.
+#' @description Extract sample size vector from a \code{GwasSumStats} or
+#'   \code{QtlSumStats} entry, selected by its identity tuple.
+#' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
+#' @param ... Class-specific selection arguments.
 #' @return Numeric vector of sample sizes.
 #' @export
-setGeneric("getN", function(x) standardGeneric("getN"))
+setGeneric("getN", function(x, ...) standardGeneric("getN"))
 
 #' @title Get Minor Allele Frequencies
 #' @description Extract MAF vector from a GwasSumStats object.
-#' @param x A \code{GwasSumStats} object.
+#' @param x A \code{GwasSumStats} or \code{QtlDataset} object.
+#' @param ... Class-specific selection arguments (e.g., \code{region},
+#'   \code{cisWindow} for \code{QtlDataset}).
 #' @return Numeric vector of MAFs, or NULL if not available.
 #' @export
-setGeneric("getMaf", function(x) standardGeneric("getMaf"))
+setGeneric("getMaf", function(x, ...) standardGeneric("getMaf"))
 
 #' @title Get Number of SNPs
-#' @description Get the number of SNPs in a GwasSumStats object.
-#' @param x A \code{GwasSumStats} object.
+#' @description Number of SNPs in a \code{GwasSumStats} or
+#'   \code{QtlSumStats} entry, selected by its identity tuple.
+#' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
+#' @param ... Class-specific selection arguments.
 #' @return Integer.
 #' @export
-setGeneric("nSnps", function(x) standardGeneric("nSnps"))
+setGeneric("nSnps", function(x, ...) standardGeneric("nSnps"))
 
 #' @title Subset by Chromosome
 #' @description Extract a chromosome-specific subset of a GwasSumStats object.
@@ -170,11 +161,79 @@ setGeneric("nSnps", function(x) standardGeneric("nSnps"))
 setGeneric("subsetChr", function(x, chr) standardGeneric("subsetChr"))
 
 #' @title Get Phenotype Variance
-#' @description Extract phenotype variance from a GwasSumStats object.
-#' @param x A \code{GwasSumStats} object.
+#' @description Extract phenotype variance from a \code{GwasSumStats} or
+#'   \code{QtlSumStats} entry, selected by its identity tuple. Returns
+#'   \code{NULL} when the entry has no \code{varY} recorded.
+#' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
+#' @param ... Class-specific selection arguments.
 #' @return Numeric phenotype variance, or NULL.
 #' @export
-setGeneric("getVarY", function(x) standardGeneric("getVarY"))
+setGeneric("getVarY", function(x, ...) standardGeneric("getVarY"))
+
+#' @title Get a Single Summary-Statistic Entry or Embedded Collection
+#' @description Behavior depends on the class of \code{x}:
+#'   \describe{
+#'     \item{For \code{GwasSumStats} / \code{QtlSumStats}}{Returns the
+#'       per-variant \code{GRanges} of summary statistics for one entry,
+#'       selected by its identity tuple (\code{study} for GWAS;
+#'       \code{study}, \code{context}, \code{trait} for QTL).}
+#'     \item{For \code{MultiTaskQtlDataset}}{Returns the embedded
+#'       \code{QtlSumStats} collection (the summary-statistic-only
+#'       studies), or \code{NULL} when absent. No selection arguments
+#'       are accepted in this case.}
+#'   }
+#' @param x A \code{GwasSumStats}, \code{QtlSumStats}, or
+#'   \code{MultiTaskQtlDataset} object.
+#' @param ... Class-specific selection arguments (see above).
+#' @return A \code{GRanges}, a \code{QtlSumStats}, or \code{NULL}.
+#' @export
+setGeneric("getSumStats", function(x, ...) standardGeneric("getSumStats"))
+
+#' @title Get the Embedded QtlDataset List
+#' @description Return the named list of \code{QtlDataset} objects
+#'   carried by a \code{MultiTaskQtlDataset}.
+#' @param x A \code{MultiTaskQtlDataset} object.
+#' @return A named list of \code{QtlDataset} objects.
+#' @export
+setGeneric("getQtlDatasets",
+  function(x) standardGeneric("getQtlDatasets"))
+
+#' @title Get the Genome Build
+#' @description Return the genome build that the collection's LD sketch
+#'   and every entry are aligned to. Because all entries in a
+#'   \code{GwasSumStats} or \code{QtlSumStats} share the LD sketch, the
+#'   genome build is a single value at the collection level.
+#' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
+#' @param ... Unused (present for method-signature compatibility).
+#' @return Character (length 1).
+#' @export
+setGeneric("getGenome", function(x, ...) standardGeneric("getGenome"))
+
+#' @title Get QC Audit Record
+#' @description Return the audit record of QC steps applied to this
+#'   collection. An empty \code{list()} (default on construction) means
+#'   \code{\link{summaryStatsQc}} has not yet been run. Pipelines that
+#'   require harmonized sumstats (\code{fineMappingPipeline},
+#'   \code{twasWeightsPipeline}, and downstream consumers) reject inputs
+#'   where \code{length(getQcInfo(x)) == 0L}.
+#' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
+#' @param ... Unused.
+#' @return A \code{list} (possibly empty).
+#' @export
+setGeneric("getQcInfo", function(x, ...) standardGeneric("getQcInfo"))
+
+#' @title Get LD Sketch
+#' @description Return the \code{GenotypeHandle} carrying the LD
+#'   reference for this collection. Defined on classes that embed an
+#'   \code{ldSketch} slot: \code{GwasSumStats}, \code{QtlSumStats},
+#'   \code{FineMappingResult}, \code{TwasWeights}. Returns \code{NULL}
+#'   when the slot is unset (e.g. a \code{TwasWeights} fit from
+#'   individual-level data via \code{QtlDataset}).
+#' @param x An S4 object that carries an \code{ldSketch} slot.
+#' @param ... Unused.
+#' @return A \code{GenotypeHandle} or \code{NULL}.
+#' @export
+setGeneric("getLdSketch", function(x, ...) standardGeneric("getLdSketch"))
 
 # =============================================================================
 # LdData accessor generics
@@ -190,13 +249,18 @@ setGeneric("getVarY", function(x) standardGeneric("getVarY"))
 setGeneric("getCorrelation", function(x) standardGeneric("getCorrelation"))
 
 #' @title Get Genotype Matrix
-#' @description Extract genotype matrix from an \code{LdData} object via
-#'   the genotype handle. Returns NULL if no handle is available.
-#' @param x An \code{LdData} object.
-#' @return A numeric matrix (samples x variants), a list of matrices
-#'   for mixture panels, or NULL.
+#' @description Extract a genotype matrix from an object that carries
+#'   genotype data. For an \code{LdData}, returns the underlying genotype
+#'   matrix via its handle (or \code{NULL} if no handle is available).
+#'   For a \code{QtlDataset}, returns the genotype matrix for a selected
+#'   set of traits or region (see method documentation for the
+#'   per-class selection arguments).
+#' @param x The object to extract from.
+#' @param ... Class-specific selection arguments (e.g., \code{traitId},
+#'   \code{region}, \code{cisWindow} for \code{QtlDataset}).
+#' @return A numeric matrix, a list of matrices, or \code{NULL}.
 #' @export
-setGeneric("getGenotypes", function(x) standardGeneric("getGenotypes"))
+setGeneric("getGenotypes", function(x, ...) standardGeneric("getGenotypes"))
 
 #' @title Check Genotype Availability
 #' @description Check whether an \code{LdData} object has a genotype
@@ -207,326 +271,159 @@ setGeneric("getGenotypes", function(x) standardGeneric("getGenotypes"))
 setGeneric("hasGenotypes", function(x) standardGeneric("hasGenotypes"))
 
 #' @title Get Variant IDs
-#' @description Extract variant ID vector from an \code{LdData} object.
-#' @param x An \code{LdData} object.
+#' @description Extract variant ID vector from an object that carries one
+#'   (e.g., \code{LdData}, \code{FineMappingEntry}, \code{TwasWeightsEntry})
+#'   or from one entry of a collection class selected by its identity
+#'   tuple.
+#' @param x The object.
+#' @param ... Class-specific selection arguments.
 #' @return Character vector of variant IDs.
 #' @export
-setGeneric("getVariantIds", function(x) standardGeneric("getVariantIds"))
-
-#' @title Get Variant GRanges
-#' @description Extract variant metadata as GRanges.
-#' @param x An object with variant metadata.
-#' @return A \code{GRanges} object.
-#' @export
-setGeneric("getVariantInfo", function(x) standardGeneric("getVariantInfo"))
-
-#' @title Get Reference Panel
-#' @description Extract reference panel metadata as a data.frame from
-#'   an \code{LdData} object, including chrom and pos columns.
-#' @param x An \code{LdData} object.
-#' @return A data.frame with variant metadata including chrom, pos, A1, A2.
-#' @export
-setGeneric("getRefPanel", function(x) standardGeneric("getRefPanel"))
-
-#' @title Get Block Metadata
-#' @description Extract block metadata from an \code{LdData} object.
-#' @param x An \code{LdData} object.
-#' @return An \code{LdBlocks} or \code{data.frame}.
-#' @export
-setGeneric("getBlockMetadata",
-  function(x) standardGeneric("getBlockMetadata"))
-
-# =============================================================================
-# RegionalData accessor generics
-# =============================================================================
-
-#' @title Get Residualized Genotypes
-#' @description Compute residualized genotypes on demand for a given
-#'   condition index.
-#' @param x A \code{RegionalData} object.
-#' @param condition Integer index of the condition.
-#' @return A numeric matrix of residualized genotypes.
-#' @export
-setGeneric("getResidualX",
-  function(x, condition = 1L) standardGeneric("getResidualX"))
-
-#' @title Get Residualized Phenotypes
-#' @description Compute residualized phenotypes on demand for a given
-#'   condition index.
-#' @param x A \code{RegionalData} object.
-#' @param condition Integer index of the condition.
-#' @return A numeric matrix of residualized phenotypes.
-#' @export
-setGeneric("getResidualY",
-  function(x, condition = 1L) standardGeneric("getResidualY"))
-
-#' @title Get Residual X Scalar
-#' @description Compute per-variant SDs of residualized genotypes.
-#' @param x A \code{RegionalData} object.
-#' @param condition Integer index of the condition.
-#' @return A numeric vector or 1 if not scaling.
-#' @export
-setGeneric("getResidualXScalar",
-  function(x, condition = 1L) standardGeneric("getResidualXScalar"))
-
-#' @title Get Residual Y Scalar
-#' @description Compute per-column SDs of residualized phenotypes.
-#' @param x A \code{RegionalData} object.
-#' @param condition Integer index of the condition.
-#' @return A numeric vector or 1 if not scaling.
-#' @export
-setGeneric("getResidualYScalar",
-  function(x, condition = 1L) standardGeneric("getResidualYScalar"))
-
-#' @title Get Per-Variant Variance
-#' @description Per-variant variance of residualized genotypes for a
-#'   condition.
-#' @param x A \code{RegionalData} object.
-#' @param condition Integer index of the condition.
-#' @return A numeric vector (length = number of variants).
-#' @export
-setGeneric("getXVariance",
-  function(x, condition = 1L) standardGeneric("getXVariance"))
+setGeneric("getVariantIds", function(x, ...) standardGeneric("getVariantIds"))
 
 #' @title Get Phenotype List
-#' @description Extract the per-condition phenotype list from a
-#'   \code{RegionalData}.
-#' @param x A \code{RegionalData} object.
-#' @return A named list of phenotype matrices.
+#' @description Extract phenotype data from an object that carries it.
+#'   For a \code{QtlDataset}, the user can optionally select specific
+#'   contexts, traits, or a region (see method documentation for the
+#'   per-class selection arguments).
+#' @param x The object to extract from.
+#' @param ... Class-specific selection arguments (e.g., \code{contexts},
+#'   \code{traitId}, \code{region}).
+#' @return A named list of phenotype matrices or
+#'   \code{SummarizedExperiment} objects.
 #' @export
-setGeneric("getPhenotypes", function(x) standardGeneric("getPhenotypes"))
-
-#' @title Get Covariate List
-#' @description Extract the per-condition covariate list from a
-#'   \code{RegionalData}.
-#' @param x A \code{RegionalData} object.
-#' @return A named list of covariate matrices.
-#' @export
-setGeneric("getCovariates", function(x) standardGeneric("getCovariates"))
-
-#' @title Get Genotype Matrix
-#' @description Extract the raw genotype matrix from a
-#'   \code{RegionalData} or \code{MultivariateRegionalData}.
-#' @param x The object.
-#' @return A numeric matrix (samples x variants).
-#' @export
-setGeneric("getGenotypeMatrix", function(x) standardGeneric("getGenotypeMatrix"))
-
-#' @title Get Region Chromosome
-#' @description Extract the chromosome name from a region-bearing S4 object.
-#' @param x The object.
-#' @return A single character string, or NULL.
-#' @export
-setGeneric("getChrom", function(x) standardGeneric("getChrom"))
-
-#' @title Get Region Range
-#' @description Extract the start/end positions from a region-bearing S4
-#'   object as a character vector \code{c(start, end)}.
-#' @param x The object.
-#' @return A character vector of length 2, or NULL.
-#' @export
-setGeneric("getGrange", function(x) standardGeneric("getGrange"))
-
-#' @title Get Multivariate Y Matrix
-#' @description Extract the multivariate phenotype matrix from a
-#'   \code{MultivariateRegionalData}.
-#' @param x A \code{MultivariateRegionalData} object.
-#' @return A numeric matrix (samples x conditions).
-#' @export
-setGeneric("getY", function(x) standardGeneric("getY"))
-
-#' @title Get Y Scaling Factors
-#' @description Per-condition scaling factors used for residualized
-#'   multivariate phenotypes.
-#' @param x A \code{MultivariateRegionalData} object.
-#' @return A numeric vector (length = number of conditions).
-#' @export
-setGeneric("getScaling", function(x) standardGeneric("getScaling"))
-
+setGeneric("getPhenotypes", function(x, ...) standardGeneric("getPhenotypes"))
 # =============================================================================
 # FineMappingResult accessor generics
 # =============================================================================
 
 #' @title Get PIP Values
-#' @description Extract posterior inclusion probabilities.
-#' @param x A \code{FineMappingResult} object.
+#' @description Extract posterior inclusion probabilities from a single
+#'   \code{FineMappingEntry} or from one entry of a
+#'   \code{FineMappingResult} (selected by its identity tuple).
+#' @param x A \code{FineMappingEntry} or \code{FineMappingResult}.
+#' @param ... Class-specific selection arguments.
 #' @return A named numeric vector of PIPs.
 #' @export
-setGeneric("getPip", function(x) standardGeneric("getPip"))
+setGeneric("getPip", function(x, ...) standardGeneric("getPip"))
 
 #' @title Get Trimmed Fit
-#' @description Extract the trimmed SuSiE fit from a FineMappingResult.
-#' @param x A \code{FineMappingResult} object.
+#' @description Extract the trimmed SuSiE fit.
+#' @param x A \code{FineMappingEntry} or \code{FineMappingResult}.
+#' @param ... Class-specific selection arguments.
 #' @return A list (trimmed SuSiE fit).
 #' @export
-setGeneric("getTrimmedFit", function(x) standardGeneric("getTrimmedFit"))
+setGeneric("getTrimmedFit", function(x, ...) standardGeneric("getTrimmedFit"))
 
 #' @title Get Variant Names
-#' @description Extract variant names from a FineMappingResult.
+#' @description Extract variant names.
 #' @param x A \code{FineMappingResult} object.
+#' @param ... Class-specific selection arguments.
 #' @return Character vector of variant names.
 #' @export
-setGeneric("getVariantNames", function(x) standardGeneric("getVariantNames"))
+setGeneric("getVariantNames",
+  function(x, ...) standardGeneric("getVariantNames"))
 
 #' @title Get Top Loci
-#' @description Extract top loci data.frame from a FineMappingResult.
-#' @param x A \code{FineMappingResult} object.
+#' @description Extract the top-loci data.frame.
+#' @param x A \code{FineMappingEntry} or \code{FineMappingResult}.
+#' @param ... Class-specific selection arguments.
 #' @return A data.frame of top loci.
 #' @export
-setGeneric("getTopLoci", function(x) standardGeneric("getTopLoci"))
+setGeneric("getTopLoci", function(x, ...) standardGeneric("getTopLoci"))
 
 #' @title Get Credible Sets
-#' @description Extract credible set assignments.
-#' @param x A \code{FineMappingResult} object.
-#' @param coverage Numeric, coverage level to extract.
+#' @description Extract credible set assignments at the requested coverage.
+#' @param x A \code{FineMappingEntry} or \code{FineMappingResult}.
+#' @param ... Class-specific selection arguments plus \code{coverage}.
 #' @return A data.frame of credible set information.
 #' @export
-setGeneric("getCs",
-  function(x, coverage = 0.95) standardGeneric("getCs"))
+setGeneric("getCs", function(x, ...) standardGeneric("getCs"))
 
 #' @title Get Log Bayes Factors
 #' @description Extract per-variant log Bayes factors from a fine-mapping result.
-#'   Returns a data.frame with variant names and one column per effect (L1, L2, ...).
-#' @param x A \code{FineMappingResult} object.
+#' @param x A \code{FineMappingEntry} or \code{FineMappingResult}.
+#' @param ... Class-specific selection arguments.
 #' @return A data.frame with columns \code{variant_id} and one numeric column
-#'   per effect containing log Bayes factors.
+#'   per effect.
 #' @export
-setGeneric("getLbf", function(x) standardGeneric("getLbf"))
+setGeneric("getLbf", function(x, ...) standardGeneric("getLbf"))
 
 #' @title Get Per-Effect Fine-Mapping Summary
-#' @description Extract per-effect information from a fine-mapping result:
-#'   prior variance, credible set log BF, purity, coverage, and member variants.
-#' @param x A \code{FineMappingResult} object.
+#' @description Extract per-effect information from a fine-mapping result.
+#' @param x A \code{FineMappingEntry} or \code{FineMappingResult}.
+#' @param ... Class-specific selection arguments.
 #' @return A data.frame with one row per effect.
 #' @export
-setGeneric("getEffects", function(x) standardGeneric("getEffects"))
+setGeneric("getEffects", function(x, ...) standardGeneric("getEffects"))
 
 # =============================================================================
 # TwasWeights accessor generics
 # =============================================================================
 
-#' @title Get TWAS Weight Matrices
-#' @description Extract weight matrices from a TwasWeights object.
-#' @param x A \code{TwasWeights} object.
-#' @param method Character, specific method name. If NULL, returns all.
-#' @return A matrix or named list of matrices.
+#' @title Get TWAS Weights
+#' @description Extract weights from a \code{TwasWeightsEntry} or from
+#'   one entry of a \code{TwasWeights} collection.
+#' @param x A \code{TwasWeightsEntry} or \code{TwasWeights}.
+#' @param ... Class-specific selection arguments.
+#' @return A numeric vector or matrix of weights.
 #' @export
-setGeneric("getWeights",
-  function(x, method = NULL) standardGeneric("getWeights"))
+setGeneric("getWeights", function(x, ...) standardGeneric("getWeights"))
 
 #' @title Get Standardized Flag
-#' @description Check whether weights are on the standardized (correlation) scale.
-#' @param x A \code{TwasWeights} object.
+#' @description Check whether weights are on the standardized scale.
+#' @param x A \code{TwasWeightsEntry} or \code{TwasWeights}.
+#' @param ... Class-specific selection arguments.
 #' @return Logical.
 #' @export
-setGeneric("getStandardized", function(x) standardGeneric("getStandardized"))
+setGeneric("getStandardized",
+  function(x, ...) standardGeneric("getStandardized"))
 
 #' @title Get CV Performance
 #' @description Extract cross-validation performance metrics.
-#' @param x A \code{TwasWeights} object.
-#' @param method Character, specific method name. If NULL, returns all.
-#' @return A list or single element.
+#' @param x A \code{TwasWeightsEntry} or \code{TwasWeights}.
+#' @param ... Class-specific selection arguments.
+#' @return Method-specific (typically a list).
 #' @export
 setGeneric("getCvPerformance",
-  function(x, method = NULL) standardGeneric("getCvPerformance"))
+  function(x, ...) standardGeneric("getCvPerformance"))
 
 #' @title Get Model Fits
-#' @description Extract fitted model objects from a TwasWeights object.
-#' @param x A \code{TwasWeights} object.
-#' @param method Character, specific method name. If NULL, returns all.
-#' @return A list or single element.
+#' @description Extract fitted model objects.
+#' @param x A \code{TwasWeightsEntry} or \code{TwasWeights}.
+#' @param ... Class-specific selection arguments.
+#' @return Method-specific (typically a list).
 #' @export
-setGeneric("getFits",
-  function(x, method = NULL) standardGeneric("getFits"))
+setGeneric("getFits", function(x, ...) standardGeneric("getFits"))
 
 #' @title Get Method Names
-#' @description Extract method names from a TwasWeights object.
-#' @param x A \code{TwasWeights} object.
+#' @description Extract method names from a collection class.
+#' @param x A \code{FineMappingResult} or \code{TwasWeights} object.
 #' @return Character vector.
 #' @export
 setGeneric("getMethodNames", function(x) standardGeneric("getMethodNames"))
 
-#' @title Get Molecular ID
-#' @description Extract molecular/gene identifier from a TwasWeights object.
-#' @param x A \code{TwasWeights} object.
-#' @return Character string (length 0 or 1).
+#' @title Get Molecular ID (legacy)
+#' @description Legacy accessor. The molecular identifier is now stored
+#'   as the \code{trait} column on \code{TwasWeights} and
+#'   \code{FineMappingResult} collections — use \code{getTraits(x)}
+#'   instead.
+#' @param x The object.
+#' @return Character vector.
 #' @export
 setGeneric("getMolecularId", function(x) standardGeneric("getMolecularId"))
 
 #' @title Get Data Type
-#' @description Extract data type metadata from a TwasWeights object.
-#' @param x A \code{TwasWeights} object.
-#' @return A named list of data types per context, or NULL.
+#' @description Extract the data-type tag.
+#' @param x A \code{TwasWeightsEntry} or \code{TwasWeights}.
+#' @param ... Class-specific selection arguments.
+#' @return A character vector or NULL.
 #' @export
-setGeneric("getDataType", function(x) standardGeneric("getDataType"))
+setGeneric("getDataType", function(x, ...) standardGeneric("getDataType"))
 
 # =============================================================================
 # AlleleQcResult accessor generics
-# =============================================================================
-
-#' @title Get Harmonized Variant Data
-#' @description Extract the post-QC, reference-harmonized variants from an
-#'   \code{AlleleQcResult}.
-#' @param x An \code{AlleleQcResult} object.
-#' @return A \code{data.frame} of harmonized variants.
-#' @export
-setGeneric("getHarmonizedData", function(x) standardGeneric("getHarmonizedData"))
-
-#' @title Get Allele QC Summary
-#' @description Extract the full per-variant merge/flip/strand diagnostics
-#'   produced by allele QC.
-#' @param x An \code{AlleleQcResult} object.
-#' @return A \code{data.frame} with the diagnostic columns.
-#' @export
-setGeneric("getQcSummary", function(x) standardGeneric("getQcSummary"))
-
-# =============================================================================
 # QcResult accessor generics
-# =============================================================================
-
-#' @title Get LD Data
-#' @description Extract the post-QC LdData payload from a QcResult.
-#' @param x A \code{QcResult} object.
-#' @return An \code{LdData} object, or NULL when QC produced no LD reference.
-#' @export
-setGeneric("getLdData", function(x) standardGeneric("getLdData"))
-
-#' @title Get RSS Input
-#' @description Extract the post-QC summary-statistic record (sumstats, n, varY).
-#' @param x A \code{QcResult} object.
-#' @return A list with \code{sumstats}, \code{n}, \code{varY}.
-#' @export
-setGeneric("getRssInput", function(x) standardGeneric("getRssInput"))
-
-#' @title Get Preprocess Snapshot
-#' @description Extract the pre-imputation snapshot (\code{sumstats},
-#'   \code{ldData}) captured before any LD-mismatch QC or RAISS imputation.
-#' @param x A \code{QcResult} object.
-#' @return A list with \code{sumstats} and \code{ldData}.
-#' @export
-setGeneric("getPreprocess", function(x) standardGeneric("getPreprocess"))
-
-#' @title Get Outlier Number
-#' @description Number of LD-mismatch outliers removed during QC.
-#' @param x A \code{QcResult} object.
-#' @return Integer count.
-#' @export
-setGeneric("getOutlierNumber", function(x) standardGeneric("getOutlierNumber"))
-
-#' @title Is Skipped
-#' @description Whether QC short-circuited (e.g. no signals, too few variants).
-#' @param x A \code{QcResult} object.
-#' @return Single logical.
-#' @export
-setGeneric("isSkipped", function(x) standardGeneric("isSkipped"))
-
-#' @title Get Skip Reason
-#' @description Why QC short-circuited; empty string if not skipped.
-#' @param x A \code{QcResult} object.
-#' @return Character scalar.
-#' @export
-setGeneric("getSkipReason", function(x) standardGeneric("getSkipReason"))
-
 # =============================================================================
 # VCF/BCF writer generic
 # =============================================================================
@@ -550,3 +447,296 @@ setGeneric("getSkipReason", function(x) standardGeneric("getSkipReason"))
 #' @export
 setGeneric("writeSumstatsVcf",
   function(x, outputPath, sampleName = NULL, ...) standardGeneric("writeSumstatsVcf"))
+
+# =============================================================================
+# QtlDataset accessor generics
+# =============================================================================
+
+#' @title Get Study Identifier
+#' @description Return the study identifier carried by a \code{QtlDataset}.
+#' @param x A \code{QtlDataset} object.
+#' @return Character (length 1).
+#' @export
+setGeneric("getStudy", function(x) standardGeneric("getStudy"))
+
+#' @title Get Context Names
+#' @description Return the names of all contexts carried by an object
+#'   (e.g., the keys of the \code{phenotypes} list on a \code{QtlDataset},
+#'   or the unique \code{context} values of a \code{QtlSumStats}).
+#' @param x The object.
+#' @return Character vector of context names.
+#' @export
+setGeneric("getContexts", function(x) standardGeneric("getContexts"))
+
+#' @title Get Unique Trait Names
+#' @description Return the unique trait identifiers carried by a
+#'   collection class (e.g., \code{QtlSumStats}).
+#' @param x The object.
+#' @return Character vector of unique trait names.
+#' @export
+setGeneric("getTraits", function(x) standardGeneric("getTraits"))
+
+#' @title Get Residualized Genotypes
+#' @description Residualize the genotype matrix against the per-context
+#'   phenotype covariates and the genotype covariates, optionally
+#'   subsetting variants to those falling within a trait's cis-window or
+#'   an explicit region.
+#' @param x A \code{QtlDataset} object.
+#' @param ... Selection arguments: \code{traitId}, \code{region},
+#'   \code{cisWindow}, \code{phenotypeCovariatesToRemove},
+#'   \code{genotypeCovariatesToRemove}.
+#' @return A numeric matrix (samples x variants).
+#' @export
+setGeneric("getResidualizedGenotypes",
+  function(x, ...) standardGeneric("getResidualizedGenotypes"))
+
+#' @title Get Residualized Phenotypes
+#' @description Residualize the per-context phenotype matrices against
+#'   the per-context phenotype covariates and the genotype covariates,
+#'   for one or more requested contexts.
+#' @param x A \code{QtlDataset} object.
+#' @param ... Selection arguments: \code{contexts} (required),
+#'   \code{traitId}, \code{region},
+#'   \code{phenotypeCovariatesToRemove},
+#'   \code{genotypeCovariatesToRemove}.
+#' @return A named list of numeric matrices keyed by context.
+#' @export
+setGeneric("getResidualizedPhenotypes",
+  function(x, ...) standardGeneric("getResidualizedPhenotypes"))
+
+#' @title Get Per-Context Phenotype Covariates
+#' @description Return per-context phenotype covariate matrices, taken
+#'   from the \code{colData} of each context's \code{SummarizedExperiment}.
+#' @param x A \code{QtlDataset} object.
+#' @param contexts Character vector of context names (subset of
+#'   \code{names(getPhenotypes(x))}).
+#' @return A named list of matrices keyed by context.
+#' @export
+setGeneric("getPhenotypeCovariates",
+  function(x, contexts) standardGeneric("getPhenotypeCovariates"))
+
+#' @title Get Genotype Covariates
+#' @description Return the single genotype-derived covariate matrix
+#'   carried by a \code{QtlDataset} (e.g., ancestry PCs).
+#' @param x A \code{QtlDataset} object.
+#' @return Numeric matrix (samples x covariates).
+#' @export
+setGeneric("getGenotypeCovariates",
+  function(x) standardGeneric("getGenotypeCovariates"))
+
+#' @title Get scaleResiduals Flag
+#' @description Whether residualization accessors scale residuals to unit
+#'   variance.
+#' @param x A \code{QtlDataset} object.
+#' @return Logical (length 1).
+#' @export
+setGeneric("getScaleResiduals",
+  function(x) standardGeneric("getScaleResiduals"))
+
+# =============================================================================
+# GenotypeHandle / LD-statistic / Annotation / LdData / H2Estimate accessors
+# =============================================================================
+
+#' @title Get SNP Info
+#' @description Return the cached SNP metadata data.frame
+#'   (columns: SNP, CHR, BP, A1, A2, optionally MAF).
+#' @param x A \code{GenotypeHandle} or \code{LdStatistic}.
+#' @return A data.frame.
+#' @export
+setGeneric("getSnpInfo", function(x) standardGeneric("getSnpInfo"))
+
+#' @title Get Genotype Storage Format
+#' @description Return the detected genotype storage format.
+#' @param x A \code{GenotypeHandle}.
+#' @return Character (length 1): one of "gds", "vcf", "plink1", "plink2".
+#' @export
+setGeneric("getFormat", function(x) standardGeneric("getFormat"))
+
+#' @title Get File Path
+#' @description Return the underlying genotype file path or stem.
+#' @param x A \code{GenotypeHandle}.
+#' @return Character (length 1).
+#' @export
+setGeneric("getPath", function(x) standardGeneric("getPath"))
+
+#' @title Get Sample Identifiers
+#' @description Return the sample-id vector.
+#' @param x A \code{GenotypeHandle}.
+#' @return Character vector.
+#' @export
+setGeneric("getSampleIds", function(x) standardGeneric("getSampleIds"))
+
+#' @title Get plink2 pgen Pointer
+#' @description Return the cached external pointer to the plink2 pgen
+#'   handle (NULL when the handle is not pgen-backed).
+#' @param x A \code{GenotypeHandle}.
+#' @return An external pointer or NULL.
+#' @export
+setGeneric("getPgenPtr", function(x) standardGeneric("getPgenPtr"))
+
+#' @title Get Sample Count
+#' @description Return the number of samples carried by a
+#'   \code{GenotypeHandle}.
+#' @param x A \code{GenotypeHandle}.
+#' @return Integer (length 1).
+#' @export
+setGeneric("getNSamples", function(x) standardGeneric("getNSamples"))
+
+#' @title Get Per-Block Eigendecompositions
+#' @description Return the per-block eigendecomposition list carried by
+#'   an \code{LdEigen} object.
+#' @param x An \code{LdEigen}.
+#' @return List of per-block eigen decompositions.
+#' @export
+setGeneric("getEigenList", function(x) standardGeneric("getEigenList"))
+
+#' @title Get LD Reference Panel Size
+#' @description Return the reference-panel sample size used to compute
+#'   an \code{LdStatistic} or carried by an \code{LdData}.
+#' @param x An \code{LdStatistic} or \code{LdData}.
+#' @return Integer (length 1).
+#' @export
+setGeneric("getNRef", function(x) standardGeneric("getNRef"))
+
+#' @title Get In-Sample Flag
+#' @description Whether the LD reference panel is from the same cohort
+#'   as the GWAS (affects bias correction).
+#' @param x An \code{LdStatistic}.
+#' @return Logical (length 1).
+#' @export
+setGeneric("getInSample", function(x) standardGeneric("getInSample"))
+
+#' @title Get LD Scores
+#' @description Return the per-SNP LD score matrix carried by an
+#'   \code{LdScore} object.
+#' @param x An \code{LdScore}.
+#' @return Numeric matrix (SNPs x annotations+1).
+#' @export
+setGeneric("getLdScores", function(x) standardGeneric("getLdScores"))
+
+#' @title Get LD-Score Regression Weights
+#' @description Return the per-SNP regression weights vector carried by
+#'   an \code{LdScore} object.
+#' @param x An \code{LdScore}.
+#' @return Numeric vector.
+#' @export
+setGeneric("getLdScoreWeights",
+  function(x) standardGeneric("getLdScoreWeights"))
+
+#' @title Get Per-Block LD Matrix List
+#' @description Return the list of per-block LD (R^2) matrices used for
+#'   the FGLS residual covariance in g-LDSC.
+#' @param x An \code{LdScore}.
+#' @return List of matrices (empty list for S-LDSC).
+#' @export
+setGeneric("getLdMatrixList",
+  function(x) standardGeneric("getLdMatrixList"))
+
+#' @title Get LD Block Container
+#' @description Return the \code{LdBlocks} object carried by an
+#'   \code{LdStatistic}.
+#' @param x An \code{LdStatistic}.
+#' @return An \code{LdBlocks} object.
+#' @export
+setGeneric("getLdBlocks", function(x) standardGeneric("getLdBlocks"))
+
+#' @title Get Annotation Matrix
+#' @description Return the (SNPs x annotations) annotation matrix.
+#' @param x An \code{AnnotationMatrix}.
+#' @return Numeric matrix or dgCMatrix.
+#' @export
+setGeneric("getAnnotations",
+  function(x) standardGeneric("getAnnotations"))
+
+#' @title Get Annotation Metadata
+#' @description Return the per-annotation metadata data.frame (columns
+#'   \code{name}, \code{tier}, \code{type}).
+#' @param x An \code{AnnotationMatrix}.
+#' @return A data.frame.
+#' @export
+setGeneric("getAnnotationMeta",
+  function(x) standardGeneric("getAnnotationMeta"))
+
+#' @title Get SNP Ranges
+#' @description Return the per-SNP \code{GRanges} carried by an
+#'   \code{AnnotationMatrix}.
+#' @param x An \code{AnnotationMatrix}.
+#' @return A \code{GRanges} object.
+#' @export
+setGeneric("getSnpRanges", function(x) standardGeneric("getSnpRanges"))
+
+#' @title Get LD Block Ranges
+#' @description Return the per-block \code{GRanges} carried by an
+#'   \code{LdBlocks} object.
+#' @param x An \code{LdBlocks}.
+#' @return A \code{GRanges} object.
+#' @export
+setGeneric("getBlocks", function(x) standardGeneric("getBlocks"))
+
+#' @title Get GenotypeHandle from LdData
+#' @description Return the \code{GenotypeHandle} (or list of handles for
+#'   mixture panels) carried by an \code{LdData}.
+#' @param x An \code{LdData}.
+#' @return A \code{GenotypeHandle}, a list of them, or NULL.
+#' @export
+setGeneric("getGenotypeHandle",
+  function(x) standardGeneric("getGenotypeHandle"))
+
+#' @title Get Mixture Weights
+#' @description Return the per-panel mixing proportions carried by an
+#'   \code{LdData} when its \code{genotypeHandle} slot is a list of
+#'   panels. NULL for single-panel objects.
+#' @param x An \code{LdData}.
+#' @return Numeric vector or NULL.
+#' @export
+setGeneric("getMixtureWeights",
+  function(x) standardGeneric("getMixtureWeights"))
+
+#' @title Get SNP Indices
+#' @description Return the integer indices into the handle's snpInfo
+#'   carried by an \code{LdData}.
+#' @param x An \code{LdData}.
+#' @return Integer vector or NULL.
+#' @export
+setGeneric("getSnpIdx", function(x) standardGeneric("getSnpIdx"))
+
+#' @title Get Variant GRanges
+#' @description Return the variant metadata \code{GRanges} of an
+#'   \code{LdData}.
+#' @param x An \code{LdData}.
+#' @return A \code{GRanges}.
+#' @export
+setGeneric("getVariantInfo", function(x) standardGeneric("getVariantInfo"))
+
+#' @title Get Block Metadata
+#' @description Return the block metadata (\code{LdBlocks} or
+#'   \code{data.frame}) carried by an \code{LdData}.
+#' @param x An \code{LdData}.
+#' @return An \code{LdBlocks} or \code{data.frame}.
+#' @export
+setGeneric("getBlockMetadata",
+  function(x) standardGeneric("getBlockMetadata"))
+
+#' @title Get Reference Panel (data.frame)
+#' @description Flatten the variant \code{GRanges} of an \code{LdData}
+#'   into a reference-panel data.frame.
+#' @param x An \code{LdData}.
+#' @return A data.frame.
+#' @export
+setGeneric("getRefPanel", function(x) standardGeneric("getRefPanel"))
+
+#' @title Get Per-Block tau Matrix
+#' @description Return the per-block jackknife tau matrix carried by an
+#'   \code{H2Estimate}.
+#' @param x An \code{H2Estimate}.
+#' @return A numeric matrix or NULL.
+#' @export
+setGeneric("getTauBlocks", function(x) standardGeneric("getTauBlocks"))
+
+#' @title Get Global SNP Heritability
+#' @description Return the global SNP heritability estimate carried by
+#'   an \code{H2Estimate}.
+#' @param x An \code{H2Estimate}.
+#' @return Numeric (length 1).
+#' @export
+setGeneric("getH2", function(x) standardGeneric("getH2"))
