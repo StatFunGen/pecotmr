@@ -154,9 +154,13 @@ setMethod("subsetChr", "GwasSumStats", function(x, chr) {
     idx <- as.character(seqnames(gr)) == chrName
     gr[idx]
   })
-  res <- x
-  res$entry <- S4Vectors::SimpleList(newEntries)
-  res
+  GwasSumStats(
+    study    = as.character(x$study),
+    entry    = newEntries,
+    genome   = x@genome,
+    ldSketch = x@ldSketch,
+    varY     = as.numeric(x$varY),
+    qcInfo   = x@qcInfo)
 })
 
 #' @rdname getVarY

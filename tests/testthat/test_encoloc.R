@@ -13,7 +13,7 @@ context("encoloc")
 test_that("xqtlEnrichmentWrapper is a deprecated no-op", {
   expect_warning(
     res <- xqtlEnrichmentWrapper(),
-    "deprecated",
+    "has been removed",
     ignore.case = TRUE)
   expect_null(res)
 })
@@ -21,7 +21,7 @@ test_that("xqtlEnrichmentWrapper is a deprecated no-op", {
 test_that("colocWrapper is a deprecated no-op", {
   expect_warning(
     res <- colocWrapper(),
-    "deprecated",
+    "has been removed",
     ignore.case = TRUE)
   expect_null(res)
 })
@@ -29,7 +29,7 @@ test_that("colocWrapper is a deprecated no-op", {
 test_that("colocPostProcessor is a deprecated no-op", {
   expect_warning(
     res <- colocPostProcessor(),
-    "deprecated",
+    "has been removed",
     ignore.case = TRUE)
   expect_null(res)
 })

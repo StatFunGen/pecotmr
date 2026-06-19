@@ -141,8 +141,15 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
 # Reassemble a harmonized data.frame into a GRanges with the SumStats mcol
 # shape (SNP, A1, A2, Z, N, ... optional MAF/INFO/BETA/SE/P kept if present).
 .dfToEntryGranges <- function(df) {
-  chr <- paste0("chr", sub("^chr", "", as.character(df$chrom),
-                           ignore.case = TRUE))
+  # Short-circuit on empty input: `paste0("chr", character(0))` returns
+  # "chr" (a length-1 vector), not character(0), so we cannot rely on the
+  # paste/IRanges constructors to handle the zero-row case cleanly.
+  chrRaw <- as.character(df$chrom)
+  if (length(chrRaw) == 0L) {
+    gr <- GenomicRanges::GRanges()
+    return(gr)
+  }
+  chr <- paste0("chr", sub("^chr", "", chrRaw, ignore.case = TRUE))
   gr <- GenomicRanges::GRanges(
     seqnames = chr,
     ranges   = IRanges::IRanges(start = as.integer(df$pos), width = 1L))
@@ -152,6 +159,61 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
   use <- intersect(c(baseCols, optCols), colnames(df))
   S4Vectors::mcols(gr) <- S4Vectors::DataFrame(df[, use, drop = FALSE])
   gr
+}
+
+# -----------------------------------------------------------------------------
+# Shared entry-to-sumstat data.frame converter
+# -----------------------------------------------------------------------------
+
+# Internal: convert one sumstat-entry GRanges into a flat data.frame with
+# (variant_id, chrom, pos, A1, A2) base columns plus a configurable set
+# of stats columns (z, beta, se, N, maf). Shared by the four pipelines
+# that walk sumstats GRanges (fineMappingPipeline, twasWeights,
+# ctwasPipeline, colocboostPipeline).
+#
+# `require`   character vector of mcol names that MUST be present; errors
+#             when any is missing. Use this for the strict callers
+#             (e.g. `.fmExtractZN` needs SNP + Z + N to proceed).
+# `derive`    when "zFromBetaSe" and `z` is absent but BETA + SE are
+#             present, set z := BETA/SE. Default "none".
+# `label`     error-message prefix for missing-`require` errors.
+# `keepChrPrefix`  when TRUE keep the seqname as-is ("chr1"); when FALSE,
+#                  strip any leading "chr" so callers that expect numeric
+#                  chrom (ctwas, colocboost) see "1".
+.entryToSumstatDf <- function(gr,
+                              require = character(0),
+                              derive = c("none", "zFromBetaSe"),
+                              label = "entry",
+                              keepChrPrefix = TRUE) {
+  derive <- match.arg(derive)
+  mc <- S4Vectors::mcols(gr)
+  for (col in require) {
+    if (!(col %in% colnames(mc))) {
+      stop(sprintf("%s: entry has no %s mcol.", label, col))
+    }
+  }
+  chr <- as.character(GenomicRanges::seqnames(gr))
+  if (!keepChrPrefix) chr <- sub("^chr", "", chr, ignore.case = TRUE)
+  df <- data.frame(
+    variant_id = if ("SNP" %in% colnames(mc)) as.character(mc$SNP)
+                 else rep(NA_character_, length(gr)),
+    chrom      = chr,
+    pos        = as.integer(GenomicRanges::start(gr)),
+    A1         = if ("A1" %in% colnames(mc)) as.character(mc$A1)
+                 else rep(NA_character_, length(gr)),
+    A2         = if ("A2" %in% colnames(mc)) as.character(mc$A2)
+                 else rep(NA_character_, length(gr)),
+    stringsAsFactors = FALSE)
+  if ("Z"    %in% colnames(mc)) df$z    <- as.numeric(mc$Z)
+  if ("BETA" %in% colnames(mc)) df$beta <- as.numeric(mc$BETA)
+  if ("SE"   %in% colnames(mc)) df$se   <- as.numeric(mc$SE)
+  if ("N"    %in% colnames(mc)) df$N    <- as.numeric(mc$N)
+  if ("MAF"  %in% colnames(mc)) df$maf  <- as.numeric(mc$MAF)
+  if (derive == "zFromBetaSe" && is.null(df$z) &&
+      !is.null(df$beta) && !is.null(df$se)) {
+    df$z <- df$beta / df$se
+  }
+  df
 }
 
 # Drop variants whose (chrom, pos) overlaps any user-supplied skipRegion.

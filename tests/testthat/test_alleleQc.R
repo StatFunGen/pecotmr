@@ -114,24 +114,24 @@ create_allele_data <- function(seed, n=100, match_min_prop=0.8, ambiguous=FALSE,
 test_that("Check that we correctly remove stand ambiguous SNPs",{
   res <- create_allele_data(1, n=100, match_min_prop=0.8, ambiguous=TRUE)
   output <- alleleQc(
-    res$target_data, res$ref_variants, "beta", matchMinProp = 0.2,
-    TRUE, FALSE, TRUE)
-  expect_equal(nrow(getHarmonizedData(output)), 80)
+    res$target_data, res$ref_variants, colToFlip = "beta",
+    matchMinProp = 0.2)
+  expect_equal(nrow(output$harmonizedData), 80)
 })
 
 test_that("Check that we correctly remove non-ACTG coding SNPs",{
   res <- create_allele_data(1, n=100, match_min_prop=0.4, non_actg=TRUE)
   output <- alleleQc(
-    res$target_data, res$ref_variants, "beta", matchMinProp = 0.2,
-    TRUE, FALSE, TRUE)
-  expect_equal(nrow(getHarmonizedData(output)), 40)
+    res$target_data, res$ref_variants, colToFlip = "beta",
+    matchMinProp = 0.2)
+  expect_equal(nrow(output$harmonizedData), 40)
 })
 
 test_that("Check that execution stops if not enough variants are matched",{
   res <- create_allele_data(1, n=100, match_min_prop=0.1, ambiguous=TRUE)
   expect_error(alleleQc(
-    res$target_data, res$ref_variants, "beta", matchMinProp = 0.2,
-    TRUE, FALSE, TRUE), "Not enough variants have been matched.")
+    res$target_data, res$ref_variants, colToFlip = "beta",
+    matchMinProp = 0.2), "Not enough variants have been matched.")
 })
 
 test_that("alleleQc matches exact alleles", {
@@ -144,7 +144,7 @@ test_that("alleleQc matches exact alleles", {
     A2 = c("A", "C"), A1 = c("G", "T")
   )
   result <- alleleQc(target, ref, matchMinProp = 0)
-  expect_equal(nrow(getHarmonizedData(result)), 2)
+  expect_equal(nrow(result$harmonizedData), 2)
 })
 
 test_that("alleleQc detects sign flips", {
@@ -158,23 +158,23 @@ test_that("alleleQc detects sign flips", {
     A2 = "G", A1 = "A"
   )
   result <- alleleQc(target, ref, colToFlip = "z", matchMinProp = 0)
-  expect_equal(nrow(getHarmonizedData(result)), 1)
+  expect_equal(nrow(result$harmonizedData), 1)
   # z should be flipped
-  expect_equal(getHarmonizedData(result)$z, -2.5)
+  expect_equal(result$harmonizedData$z, -2.5)
 })
 
 test_that("alleleQc handles string input format", {
   target <- c("1:100:A:G", "1:200:C:T")
   ref <- c("1:100:A:G", "1:200:C:T")
   result <- alleleQc(target, ref, matchMinProp = 0)
-  expect_equal(nrow(getHarmonizedData(result)), 2)
+  expect_equal(nrow(result$harmonizedData), 2)
 })
 
 test_that("alleleQc with chr prefix", {
   target <- c("chr1:100:A:G", "chr1:200:C:T")
   ref <- c("chr1:100:A:G", "chr1:200:C:T")
   result <- alleleQc(target, ref, matchMinProp = 0)
-  expect_equal(nrow(getHarmonizedData(result)), 2)
+  expect_equal(nrow(result$harmonizedData), 2)
 })
 
 test_that("alleleQc warns when too few matches", {
@@ -196,7 +196,7 @@ test_that("alleleQc with no matching positions returns empty", {
     result <- alleleQc(target, ref, matchMinProp = 0),
     "No matching variants"
   )
-  expect_equal(nrow(getHarmonizedData(result)), 0)
+  expect_equal(nrow(result$harmonizedData), 0)
 })
 
 test_that("alleleQc preserves extra columns", {
@@ -210,8 +210,8 @@ test_that("alleleQc preserves extra columns", {
     A2 = "A", A1 = "G"
   )
   result <- alleleQc(target, ref, matchMinProp = 0)
-  expect_true("beta" %in% colnames(getHarmonizedData(result)))
-  expect_true("se" %in% colnames(getHarmonizedData(result)))
+  expect_true("beta" %in% colnames(result$harmonizedData))
+  expect_true("se" %in% colnames(result$harmonizedData))
 })
 
 test_that("alleleQc with lowercase alleles", {
@@ -224,7 +224,7 @@ test_that("alleleQc with lowercase alleles", {
     A2 = "A", A1 = "G"
   )
   result <- alleleQc(target, ref, matchMinProp = 0)
-  expect_equal(nrow(getHarmonizedData(result)), 1)
+  expect_equal(nrow(result$harmonizedData), 1)
 })
 
 test_that("alignVariantNames correctly aligns variant names", {
@@ -358,6 +358,18 @@ test_that("alignVariantNames strips build suffix", {
   expect_length(result$alignedVariants, 1)
 })
 
+test_that("alignVariantNames: disjoint source/reference returns source unchanged", {
+  # Bug fix: when no variants harmonize, paste0() over length-0 components
+  # used to collapse to a single "chr:::" placeholder. Verify the output
+  # now preserves source length and flags every position as unmatched.
+  src <- c("chr1:10:A:G", "chr1:20:A:G", "chr1:30:A:G")
+  ref <- c("chr2:40:A:G", "chr2:50:A:G", "chr2:60:A:G")
+  out <- suppressWarnings(alignVariantNames(src, ref))
+  expect_equal(length(out$alignedVariants), length(src))
+  expect_equal(out$alignedVariants, src)
+  expect_equal(out$unmatchedIndices, seq_along(src))
+})
+
 # ---- sanitize_names edge cases (alleleQc.R lines 37, 42) ----
 test_that("alleleQc handles data frame with NULL colnames after merge", {
   # Create a data frame where merge might produce empty names
@@ -369,7 +381,7 @@ test_that("alleleQc handles data frame with NULL colnames after merge", {
   # Restore chrom for the join
   colnames(target)[1] <- "chrom"
   result <- alleleQc(target, ref, matchMinProp = 0)
-  expect_equal(nrow(getHarmonizedData(result)), 1)
+  expect_equal(nrow(result$harmonizedData), 1)
 })
 
 # ---- target_data with redundant columns (alleleQc.R line 75) ----
@@ -380,9 +392,9 @@ test_that("alleleQc removes redundant columns from target_data before join", {
   )
   ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G")
   result <- alleleQc(target, ref, matchMinProp = 0)
-  expect_equal(nrow(getHarmonizedData(result)), 1)
+  expect_equal(nrow(result$harmonizedData), 1)
   # The redundant columns should have been removed before the join
-  expect_true("variant_id" %in% colnames(getHarmonizedData(result)))
+  expect_true("variant_id" %in% colnames(result$harmonizedData))
 })
 
 # ---- col_to_flip with nonexistent column (alleleQc.R line 130) ----
@@ -395,25 +407,10 @@ test_that("alleleQc errors when col_to_flip column does not exist", {
   )
 })
 
-# ---- duplicate removal warning (alleleQc.R lines 148-150) ----
-test_that("alleleQc warns and removes duplicate variants", {
-  # Two target rows at the same position will produce duplicates after join
-  target <- data.frame(
-    chrom = c(1, 1), pos = c(100, 100),
-    A2 = c("A", "A"), A1 = c("G", "G"),
-    beta = c(0.5, 0.6)
-  )
-  ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G")
-  expect_warning(
-    result <- alleleQc(target, ref, matchMinProp = 0, removeDups = TRUE),
-    "duplicate variant"
-  )
-  expect_equal(nrow(getHarmonizedData(result)), 1)
-})
-
-# ---- duplicated variant IDs error (alleleQc.R line 180) ----
-test_that("alleleQc errors on duplicated variant IDs with different values when remove_dups is FALSE", {
-  # Two rows at same position, same alleles, but different beta - when not removing dups
+# Duplicate-handling is no longer the responsibility of alleleQc /
+# matchRefPanel: callers are expected to deduplicate (via MungeSumstats /
+# summaryStatsQc) before harmonization. The new behavior is to error.
+test_that("alleleQc errors on duplicate variants in target input", {
   target <- data.frame(
     chrom = c(1, 1), pos = c(100, 100),
     A2 = c("A", "A"), A1 = c("G", "G"),
@@ -421,8 +418,8 @@ test_that("alleleQc errors on duplicated variant IDs with different values when 
   )
   ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G")
   expect_error(
-    alleleQc(target, ref, matchMinProp = 0, removeDups = FALSE),
-    "Duplicated variants"
+    alleleQc(target, ref, matchMinProp = 0),
+    "Duplicated variant IDs"
   )
 })
 
@@ -439,7 +436,7 @@ test_that("af is complemented (1 - af) when harmonization swaps the effect allel
                        z = c(2.0, 1.5), af = c(0.30, 0.40), stringsAsFactors = FALSE)
 
   res <- matchRefPanel(target, ref, colToFlip = "z", colToComplement = "af")
-  h <- getHarmonizedData(res)
+  h <- res$harmonizedData
   swapped <- h[h$pos == 100, ]
   control <- h[h$pos == 200, ]
 
@@ -457,7 +454,7 @@ test_that("colToComplement default leaves af unchanged (non-RSS callers unaffect
                        z = c(2.0, 1.5), af = c(0.30, 0.40), stringsAsFactors = FALSE)
 
   res <- matchRefPanel(target, ref, colToFlip = "z")  # default: no complement
-  h <- getHarmonizedData(res)
+  h <- res$harmonizedData
   swapped <- h[h$pos == 100, ]
   expect_equal(swapped$af, 0.30)   # unchanged
   expect_equal(swapped$z, -2.0)    # z still sign-flips (independent path)

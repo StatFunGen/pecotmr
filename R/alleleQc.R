@@ -81,10 +81,16 @@ NULL
   }
   refVariants <- variantIdToDf(refVariants)
 
-  # Strip merge-conflicting columns; keep target A1/A2.
+  # Strip merge-conflicting columns; keep target A1/A2. `variant_id` is also
+  # stripped from `refVariants` because the post-harmonization variant_id is
+  # rebuilt from the QC'd alleles further down (`variants_id_qced`), and
+  # leaving the input variant_id on either side causes the final rename to
+  # collide on duplicate names.
   columnsToRemove <- c("chromosome", "position", "ref", "alt", "variant_id")
   if (any(columnsToRemove %in% colnames(targetData)))
     targetData <- select(targetData, -any_of(columnsToRemove))
+  if ("variant_id" %in% colnames(refVariants))
+    refVariants <- select(refVariants, -any_of("variant_id"))
 
   matchResult <- inner_join(targetData, refVariants,
                             by = c("chrom", "pos"),
@@ -203,11 +209,18 @@ NULL
 #' implementation so existing callers continue to work, but it emits a
 #' deprecation warning on every call.
 #'
-#' @inheritParams .matchRefPanel
+#' @param targetData A data frame with columns \code{chrom}, \code{pos},
+#'   \code{A2}, \code{A1} (and optionally other columns like \code{beta}
+#'   or \code{z}), or a vector of strings in the format of
+#'   \code{chr:pos:A2:A1}/\code{chr:pos_A2_A1}.
+#' @param refVariants A data frame with columns \code{chrom}, \code{pos},
+#'   \code{A2}, \code{A1} or strings in the format of
+#'   \code{chr:pos:A2:A1}/\code{chr:pos_A2_A1}.
 #' @param ... Additional arguments forwarded to the internal
 #'   implementation.
-#' @return An \code{AlleleQcResult} S4 object (same as the previous
-#'   public function).
+#' @return A list with components \code{harmonizedData} (the post-QC
+#'   variant data.frame) and \code{qcSummary} (per-variant
+#'   merge/flip/strand diagnostics).
 #' @export
 matchRefPanel <- function(targetData, refVariants, ...) {
   .Deprecated(new = "summaryStatsQc", package = "pecotmr",
@@ -285,6 +298,15 @@ alignVariantNames <- function(source, reference, removeIndels = FALSE, removeBui
   )
 
   alignedDf <- qcResult$harmonizedData
+
+  # When no variants harmonize against the reference, return the source
+  # unchanged with every position flagged as unmatched. paste0() with all
+  # length-0 components otherwise collapses to a single "chr:::"-style
+  # placeholder that callers then assign back to colnames with wrong length.
+  if (nrow(alignedDf) == 0L) {
+    return(list(alignedVariants = source,
+                unmatchedIndices = seq_along(source)))
+  }
 
   # Format output using reference convention (preserving user's format automatically)
   alignedVariants <- formatVariantId(

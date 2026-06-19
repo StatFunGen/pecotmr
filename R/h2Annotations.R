@@ -5,6 +5,8 @@
 #' @keywords internal
 #' @importFrom tools file_ext
 #' @importFrom GenomicRanges GRanges
+#' @importFrom IRanges findOverlaps
+#' @importFrom S4Vectors queryHits subjectHits
 #' @include allGenerics.R
 NULL
 

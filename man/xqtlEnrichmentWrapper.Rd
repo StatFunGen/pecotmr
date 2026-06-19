@@ -2,57 +2,21 @@
 % Please edit documentation in R/encoloc.R
 \name{xqtlEnrichmentWrapper}
 \alias{xqtlEnrichmentWrapper}
-\title{xQTL GWAS Enrichment Analysis}
+\title{(Deprecated) xQTL GWAS Enrichment Analysis}
 \usage{
-xqtlEnrichmentWrapper(
-  xqtlFiles,
-  gwasFiles,
-  xqtlFinemappingObj = NULL,
-  gwasFinemappingObj = NULL,
-  xqtlVarnameObj = NULL,
-  gwasVarnameObj = NULL,
-  numGwas = NULL,
-  piQtl = NULL,
-  lambda = 1,
-  impN = 25,
-  doubleShrinkage = FALSE,
-  besselCorrection = TRUE,
-  numThreads = 1
-)
+xqtlEnrichmentWrapper(...)
 }
 \arguments{
-\item{xqtlFiles}{Vector of xQTL RDS file paths.}
-
-\item{gwasFiles}{Vector of GWAS RDS file paths.}
-
-\item{xqtlFinemappingObj}{Optional table name in xQTL RDS files (default 'susie_fit').}
-
-\item{gwasFinemappingObj}{Optional table name in GWAS RDS files (default 'susie_fit').}
-
-\item{xqtlVarnameObj}{Optional table name in xQTL RDS files (default 'susie_fit').}
-
-\item{gwasVarnameObj}{Optional table name in GWAS RDS files (default 'susie_fit').}
-
-\item{piQtl}{Optional parameter for xQTL enrichment estimation (see `computeQtlEnrichment`).}
-
-\item{lambda}{Shrinkage parameter for enrichment computation (see `computeQtlEnrichment`).}
-
-\item{impN}{Importance parameter for enrichment computation (see `computeQtlEnrichment`).}
-
-\item{numThreads}{Number of threads for parallel processing (see `computeQtlEnrichment`).}
-
-\item{piGwas}{Optional parameter for GWAS enrichment estimation (see `computeQtlEnrichment`).}
+\item{...}{Ignored.}
 }
 \value{
-The output from the computeQtlEnrichment function.
+\code{NULL} (invisibly).
 }
 \description{
-This function processes GWAS and xQTL finemapped data files and then computes QTL enrichment.
-For details on the parameters `piGwas`, `piQtl`, `lambda`, `impN`, and `numThreads`,
-refer to the documentation of the `computeQtlEnrichment` function.
-}
-\examples{
-gwasFiles <- c("gwas_file1.rds", "gwas_file2.rds")
-xqtlFiles <- c("xqtl_file1.rds", "xqtl_file2.rds")
-result <- xqtlEnrichmentWrapper(gwasFiles, xqtlFiles)
+\strong{Deprecated.} The file-path enrichment wrapper has been
+removed. Use \code{\link{qtlEnrichmentPipeline}}: build
+genome-wide \code{\link{FineMappingResult}} collections for both
+the GWAS (LD-block-indexed via \code{susieRSS}) and the QTLs in
+your own code, then pass them to \code{qtlEnrichmentPipeline()}
+along with their shared \code{ldSketch}.
 }

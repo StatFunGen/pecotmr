@@ -113,43 +113,29 @@ ctwasPipeline <- function(gwasSumStats,
 # Internal helpers
 # =============================================================================
 
+# LD-sketch identity check. Thin wrapper over the shared
+# `.requireMatchingLdSketches` helper (R/ld.R).
 .ctwasRequireMatchingLdSketches <- function(twLd, gwasLd) {
-  if (is.null(twLd)) return(invisible(NULL))
-  if (is.null(gwasLd))
-    stop("ctwasPipeline: twasWeights carries a non-NULL ldSketch but ",
-         "gwasSumStats has none.")
-  if (!methods::is(twLd, "GenotypeHandle") ||
-      !methods::is(gwasLd, "GenotypeHandle"))
-    stop("ctwasPipeline: ldSketch slots must be GenotypeHandle objects.")
-  q <- getSnpInfo(twLd); g <- getSnpInfo(gwasLd)
-  if (nrow(q) != nrow(g))
-    stop("ctwasPipeline: ldSketch panels differ in size.")
-  for (col in c("SNP", "CHR", "BP", "A1", "A2"))
-    if (!identical(as.character(q[[col]]), as.character(g[[col]])))
-      stop("ctwasPipeline: ldSketch panels differ in column ", col, ".")
-  if (!identical(getSampleIds(twLd), getSampleIds(gwasLd)))
-    stop("ctwasPipeline: ldSketch panels have different sample sets.")
-  invisible(NULL)
+  .requireMatchingLdSketches(twLd, gwasLd, pipelineName = "ctwasPipeline")
 }
 
 # Build the per-variant Z data.frame ctwas expects from a GwasSumStats.
-# Stacks each study row's GRanges; ctwas accepts multiple studies via
-# the `study` column.
+# Stacks each study row's GRanges via the shared `.entryToSumstatDf`
+# helper (R/sumstatsQc.R), then projects to ctwas's column shape and
+# bolts on the `study` column ctwas uses to disambiguate stacked rows.
 # @noRd
 .ctwasBuildZSnp <- function(gwasSumStats) {
   pieces <- list()
   for (i in seq_len(nrow(gwasSumStats))) {
-    gr <- gwasSumStats$entry[[i]]
-    mc <- S4Vectors::mcols(gr)
+    df <- .entryToSumstatDf(gwasSumStats$entry[[i]],
+                             keepChrPrefix = FALSE)
     pieces[[i]] <- data.frame(
-      id    = as.character(mc$SNP),
-      chrom = as.integer(sub("^chr", "",
-                              as.character(GenomicRanges::seqnames(gr)),
-                              ignore.case = TRUE)),
-      pos   = GenomicRanges::start(gr),
-      A1    = as.character(mc$A1),
-      A2    = as.character(mc$A2),
-      z     = as.numeric(mc$Z),
+      id    = df$variant_id,
+      chrom = as.integer(df$chrom),
+      pos   = df$pos,
+      A1    = df$A1,
+      A2    = df$A2,
+      z     = df$z,
       study = as.character(gwasSumStats$study)[[i]],
       stringsAsFactors = FALSE)
   }

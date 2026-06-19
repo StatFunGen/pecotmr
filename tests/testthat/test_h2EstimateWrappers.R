@@ -349,7 +349,28 @@ test_that("h2EstimateToSldscTrait creates 1-row dummy when tauBlocks is NULL", {
 # Helper: GwasSumStats matched to a reference panel
 # ===========================================================================
 
-make_test_sumstats_for_ref <- function(ref, traitName = "test") {
+make_test_gwas_genotype_handle <- function() {
+  new("GenotypeHandle",
+    path = "/tmp/test.gds",
+    format = "gds",
+    snpInfo = data.frame(),
+    nSamples = 0L,
+    sampleIds = character(),
+    pgenPtr = NULL)
+}
+
+.dfToGwasGr <- function(df) {
+  gr <- GenomicRanges::GRanges(
+    seqnames = df$CHR,
+    ranges = IRanges::IRanges(start = df$BP, width = 1L)
+  )
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    SNP = df$SNP, A1 = df$A1, A2 = df$A2, Z = df$Z, N = df$N
+  )
+  gr
+}
+
+make_test_sumstats_for_ref <- function(ref, traitName = "test", varY = NA_real_) {
   n_snps <- nrow(ref@snpInfo)
   set.seed(123)
   df <- data.frame(
@@ -362,7 +383,12 @@ make_test_sumstats_for_ref <- function(ref, traitName = "test") {
     N = rep(50000, n_snps),
     stringsAsFactors = FALSE
   )
-  GwasSumStats(df, traitName = traitName, genome = "hg19")
+  GwasSumStats(
+    study = traitName,
+    entry = list(.dfToGwasGr(df)),
+    genome = "hg19",
+    ldSketch = make_test_gwas_genotype_handle(),
+    varY = varY)
 }
 
 # ===========================================================================
@@ -386,19 +412,7 @@ test_that("estimateh2 with method='lder' returns H2Estimate with correct slots",
 
 test_that("estimateh2 with var_y correction runs without error", {
   eigen_ref <- make_test_eigen_ref()
-  n_snps <- nrow(eigen_ref@snpInfo)
-  set.seed(123)
-  df <- data.frame(
-    SNP = eigen_ref@snpInfo$SNP,
-    CHR = sub("^chr", "", eigen_ref@snpInfo$CHR),
-    BP = eigen_ref@snpInfo$BP,
-    A1 = eigen_ref@snpInfo$A1,
-    A2 = eigen_ref@snpInfo$A2,
-    Z = rnorm(n_snps),
-    N = rep(50000, n_snps),
-    stringsAsFactors = FALSE
-  )
-  ss <- GwasSumStats(df, traitName = "cc_trait", genome = "hg19", varY = 4.0)
+  ss <- make_test_sumstats_for_ref(eigen_ref, traitName = "cc_trait", varY = 4.0)
   expect_equal(getVarY(ss), 4.0)
 
   result <- estimateH2(ss, eigen_ref, method = "lder")

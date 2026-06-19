@@ -1079,48 +1079,19 @@ estimateSparsity <- function(weightResults) {
   list(tokens = tokens, methodList = methodList)
 }
 
-# Enforce input-class / method compatibility. Errors with a clear listing
-# of incompatible methods and what input would accept them.
+# Enforce input-class / method compatibility. Thin wrapper over the
+# shared `.checkMethodCapabilities` helper (R/misc.R), passing the TWAS
+# capability table. The twasWeightsPipeline has no GwasSumStats branch,
+# so `gwasKinds` is set to character(0); the individual-only reason
+# wording is the twas-specific "use a QtlSumStats input" variant.
 # @noRd
 .twasCheckMethodCapabilities <- function(tokens, inputKind) {
-  if (length(tokens) == 0L) return(invisible(NULL))
-  caps <- .twasMethodCapabilities
-  bad <- character(0)
-  reason <- character(0)
-  unknownTokens <- character(0)
-  for (tk in tokens) {
-    info <- caps[[tk]]
-    if (is.null(info)) {
-      unknownTokens <- c(unknownTokens, tk)
-      next
-    }
-    if (inputKind == "QtlDataset" || inputKind == "MultiTaskQtlDataset") {
-      if (is.null(info$individualImpl)) {
-        bad <- c(bad, tk)
-        reason <- c(reason,
-                    "is sumstat-only (use a QtlSumStats input)")
-      }
-    } else if (inputKind == "QtlSumStats") {
-      if (is.null(info$sumstatImpl)) {
-        bad <- c(bad, tk)
-        reason <- c(reason,
-                    "is individual-only (use a QtlDataset input)")
-      }
-    }
-  }
-  if (length(unknownTokens) > 0L) {
-    stop(sprintf(
-      "twasWeightsPipeline: unknown method token(s): %s. Known tokens: %s.",
-      paste(unknownTokens, collapse = ", "),
-      paste(names(caps), collapse = ", ")))
-  }
-  if (length(bad) > 0L) {
-    stop(sprintf(
-      "twasWeightsPipeline: the following method(s) are not available for input class '%s': %s. %s.",
-      inputKind,
-      paste(bad, collapse = ", "),
-      paste(sprintf("%s %s", bad, reason), collapse = "; ")))
-  }
+  .checkMethodCapabilities(
+    tokens, inputKind,
+    caps = .twasMethodCapabilities,
+    pipelineName = "twasWeightsPipeline",
+    individualOnlyReason = "is sumstat-only (use a QtlSumStats input)",
+    gwasKinds = character(0))
 }
 
 # Enforce the multi-trait / multi-context rule for mvsusie / mr.mash
@@ -1155,52 +1126,52 @@ estimateSparsity <- function(weightResults) {
 }
 
 # Extract a correlation matrix from a GenotypeHandle (LD sketch) for the
-# variant subset given by `variantIds`. Reads dosage and computes
-# sample-based LD via computeLd().
+# variant subset given by `variantIds`. Thin wrapper over the shared
+# `.ldFromSketch` helper.
 # @noRd
 .twasLdFromSketch <- function(ldSketch, variantIds) {
-  if (!is(ldSketch, "GenotypeHandle")) {
-    stop(".twasLdFromSketch: ldSketch must be a GenotypeHandle.")
-  }
-  snpInfo <- getSnpInfo(ldSketch)
-  snpAll  <- as.character(snpInfo$SNP)
-  idx <- match(variantIds, snpAll)
-  if (anyNA(idx)) {
-    stop(sprintf(
-      ".twasLdFromSketch: %d variant id(s) are not present in the LD sketch panel.",
-      sum(is.na(idx))))
-  }
-  block <- extractBlockGenotypes(ldSketch, idx, meanImpute = TRUE)
-  geno <- t(SummarizedExperiment::assay(block, "dosage"))
-  # Subset / order to the requested variantIds.
-  colnames(geno) <- as.character(snpInfo$SNP[idx])
-  ldMat <- computeLd(geno, method = "sample")
-  dimnames(ldMat) <- list(variantIds, variantIds)
-  ldMat
+  .ldFromSketch(ldSketch, variantIds, label = ".twasLdFromSketch")
 }
 
 # Helper to convert a single QtlSumStats / GwasSumStats entry GRanges to
 # the data.frame shape (variant_id, chrom, pos, A1, A2, z, N) expected by
-# the matrix-based sumstat pipelines.
+# the matrix-based sumstat pipelines. Thin wrapper over the shared
+# `.entryToSumstatDf` helper (R/sumstatsQc.R).
 # @noRd
 .twasSumstatsEntryToDf <- function(gr) {
-  mc <- as.data.frame(S4Vectors::mcols(gr))
-  df <- data.frame(
-    variant_id = as.character(mc$SNP),
-    chrom      = as.character(GenomicRanges::seqnames(gr)),
-    pos        = as.integer(GenomicRanges::start(gr)),
-    A1         = as.character(mc$A1),
-    A2         = as.character(mc$A2),
-    stringsAsFactors = FALSE)
-  if ("Z"    %in% colnames(mc)) df$z    <- as.numeric(mc$Z)
-  if ("BETA" %in% colnames(mc)) df$beta <- as.numeric(mc$BETA)
-  if ("SE"   %in% colnames(mc)) df$se   <- as.numeric(mc$SE)
-  if ("N"    %in% colnames(mc)) df$N    <- as.numeric(mc$N)
-  if ("MAF"  %in% colnames(mc)) df$maf  <- as.numeric(mc$MAF)
-  if (is.null(df$z) && !is.null(df$beta) && !is.null(df$se)) {
-    df$z <- df$beta / df$se
-  }
-  df
+  .entryToSumstatDf(gr, derive = "zFromBetaSe")
+}
+
+# Optional resume-cache lookup for twasWeightsPipeline. Returns the
+# matching TwasWeightsEntry from `twasWeights` for the tuple (study,
+# context, trait, method), or NULL when there is no hit. Returns NULL
+# silently when twasWeights is NULL or not a TwasWeights collection.
+# Mirrors .fmCacheLookup (R/fineMappingPipeline.R).
+# @noRd
+.twasCacheLookup <- function(twasWeights, study, context, trait, method) {
+  if (is.null(twasWeights)) return(NULL)
+  if (!is(twasWeights, "TwasWeights")) return(NULL)
+  idx <- .matchTupleRows(twasWeights,
+                          list(study = study, context = context,
+                               trait = trait, method = method))
+  if (length(idx) == 0L) return(NULL)
+  twasWeights$entry[[idx[[1L]]]]
+}
+
+# Build a TwasWeights collection from a list of cached entries keyed by
+# short-method-name (the value of the `method` column). Helper for the
+# resume-cache short-circuit path in twasWeightsPipeline.
+# @noRd
+.twasBuildFromCachedRows <- function(cachedRows, study, context, trait,
+                                     ldSketch = NULL) {
+  if (length(cachedRows) == 0L) return(NULL)
+  TwasWeights(
+    study   = rep(study,   length(cachedRows)),
+    context = rep(context, length(cachedRows)),
+    trait   = rep(trait,   length(cachedRows)),
+    method  = names(cachedRows),
+    entry   = unname(cachedRows),
+    ldSketch = ldSketch)
 }
 
 # Convert a FineMappingResult (single-method susie/susie_inf row matched
@@ -1293,6 +1264,17 @@ estimateSparsity <- function(weightResults) {
 #'   the matching (study, context, trait) tuples are injected into
 #'   \code{learnTwasWeights} via \code{fittedModels} so SuSiE-family
 #'   weight methods reuse the prior fit instead of refitting.
+#' @param twasWeights Optional \code{\link{TwasWeights}} resume cache.
+#'   For each requested \code{(study, context, trait, method)} tuple
+#'   already present in this collection, the cached
+#'   \code{TwasWeightsEntry} is copied through and the corresponding
+#'   weight fit is skipped. Only the un-cached method subset is fit;
+#'   the cached and fresh entries are concatenated in the returned
+#'   collection. Per-tuple matching mirrors the \code{fineMappingResult}
+#'   cache in \code{\link{fineMappingPipeline}}. Multivariate dispatch
+#'   (\code{mvsusie}, \code{mr.mash}) is unaffected because those
+#'   methods produce one fit jointly across multiple
+#'   \code{(context, trait)} columns.
 #' @param cvFolds Integer. Cross-validation folds. Default 5. Set to 0
 #'   to skip CV (and ensemble).
 #' @param samplePartition Optional pre-defined CV partition data.frame.
@@ -1338,6 +1320,7 @@ setMethod("twasWeightsPipeline", "QtlDataset",
            region                 = NULL,
            cisWindow              = NULL,
            fineMappingResult      = NULL,
+           twasWeights            = NULL,
            cvFolds                = 5,
            samplePartition        = NULL,
            maxCvVariants          = -1,
@@ -1397,6 +1380,23 @@ setMethod("twasWeightsPipeline", "QtlDataset",
     }, logical(1)))
 
     runOne <- function(ctx, tid) {
+      # Resume cache: per-method check against the supplied `twasWeights`
+      # collection. Methods present in the cache for (study, ctx, tid)
+      # are pulled directly; the remaining methods (if any) are fit via
+      # .twasWeightsPipelineMatrix with a subset weightMethods list.
+      cachedRows <- list()
+      remaining  <- norm$methodList
+      for (mName in names(norm$methodList)) {
+        shortMethod <- sub("(_weights|Weights)$", "", mName)
+        cached <- .twasCacheLookup(twasWeights, study, ctx, tid, shortMethod)
+        if (!is.null(cached)) {
+          cachedRows[[shortMethod]] <- cached
+          remaining[[mName]] <- NULL
+        }
+      }
+      cachedTw <- .twasBuildFromCachedRows(cachedRows, study, ctx, tid)
+      if (length(remaining) == 0L) return(cachedTw)
+
       X <- getResidualizedGenotypes(
         data, contexts = ctx, traitId = tid,
         cisWindow = cisWindow,
@@ -1420,13 +1420,13 @@ setMethod("twasWeightsPipeline", "QtlDataset",
                                             study = study,
                                             context = ctx,
                                             trait = tid)
-      .twasWeightsPipelineMatrix(
+      freshTw <- .twasWeightsPipelineMatrix(
         X = X, y = Y,
         study = study, context = ctx, trait = tid,
         fittedModels = fittedModels,
         cvFolds = cvFolds,
         samplePartition = samplePartition,
-        weightMethods = norm$methodList,
+        weightMethods = remaining,
         maxCvVariants = maxCvVariants,
         cvThreads = cvThreads,
         cvWeightMethods = cvWeightMethods,
@@ -1439,6 +1439,8 @@ setMethod("twasWeightsPipeline", "QtlDataset",
         dataType = dataType,
         ldSketch = NULL,
         verbose = verbose)$twasWeights
+      if (is.null(cachedTw)) freshTw
+      else .rbindTwasWeights(freshTw, cachedTw, ldSketch = NULL)
     }
 
     runMultivariate <- function(traits) {
@@ -1538,6 +1540,7 @@ setMethod("twasWeightsPipeline", "QtlSumStats",
            methods           = NULL,
            contexts          = NULL,
            traitId           = NULL,
+           twasWeights       = NULL,
            dataType          = NULL,
            verbose           = 1L,
            ...) {
@@ -1604,6 +1607,26 @@ setMethod("twasWeightsPipeline", "QtlSumStats",
     # ---- Univariate dispatch: per (study, context, trait), per method.
     for (i in selRows) {
       st <- studyCol[i]; ctx <- contextCol[i]; tr <- traitCol[i]
+
+      # Resume cache: pull cached entries up front and reduce the
+      # per-entry fit work to the un-cached tokens. When every requested
+      # token hits the cache the expensive Z/N/varY/ldMat setup is
+      # skipped entirely.
+      toFitTokens <- character(0)
+      for (tk in univariateTokens) {
+        cached <- .twasCacheLookup(twasWeights, st, ctx, tr, tk)
+        if (!is.null(cached)) {
+          rowStudy   <- c(rowStudy,   st)
+          rowContext <- c(rowContext, ctx)
+          rowTrait   <- c(rowTrait,   tr)
+          rowMethod  <- c(rowMethod,  tk)
+          rowEntries[[length(rowEntries) + 1L]] <- cached
+        } else {
+          toFitTokens <- c(toFitTokens, tk)
+        }
+      }
+      if (length(toFitTokens) == 0L) next
+
       entry <- data$entry[[i]]
       mc <- S4Vectors::mcols(entry)
       variantIds <- as.character(mc$SNP)
@@ -1622,7 +1645,7 @@ setMethod("twasWeightsPipeline", "QtlSumStats",
                    variantNames = variantIds)
       ldMat <- .twasLdFromSketch(ldSketch, variantIds)
 
-      for (tk in univariateTokens) {
+      for (tk in toFitTokens) {
         fn <- .twasMethodCapabilities[[tk]]$sumstatImpl
         userArgs <- methodArgs[[tk]]
         if (is.null(userArgs)) userArgs <- list()

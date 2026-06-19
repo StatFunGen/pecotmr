@@ -223,55 +223,17 @@ setGeneric("fineMappingPipeline",
 }
 
 
-# Enforce input-class / method compatibility. Errors with a clear listing
-# of incompatible methods and what input would accept them.
+# Enforce input-class / method compatibility. Thin wrapper over the
+# shared `.checkMethodCapabilities` helper (R/misc.R), passing the
+# fine-mapping capability table and the `mrmash` hard-rejection rule.
 # @noRd
 .fmCheckMethodCapabilities <- function(tokens, inputKind) {
-  if (length(tokens) == 0L) return(invisible(NULL))
-  caps <- .fineMappingMethodCapabilities
-  unknown <- setdiff(tokens, names(caps))
-  if (length(unknown) > 0L) {
-    stop(sprintf(
-      "fineMappingPipeline: unknown method token(s): %s. Known tokens: %s.",
-      paste(unknown, collapse = ", "),
-      paste(names(caps), collapse = ", ")))
-  }
-  bad <- character(0)
-  reason <- character(0)
-  for (tk in tokens) {
-    info <- caps[[tk]]
-    if (identical(tk, "mrmash")) {
-      bad <- c(bad, tk)
-      reason <- c(reason,
-                  "mr.mash is a TWAS-weight-oriented method; use twasWeightsPipeline()")
-      next
-    }
-    if (inputKind %in% c("QtlDataset", "MultiTaskQtlDataset")) {
-      if (is.null(info$individualImpl)) {
-        bad <- c(bad, tk)
-        reason <- c(reason, "is sumstat-only on this pipeline")
-      }
-    } else if (inputKind == "QtlSumStats") {
-      if (is.null(info$sumstatImpl)) {
-        bad <- c(bad, tk)
-        reason <- c(reason,
-                    "is individual-only (use a QtlDataset input)")
-      }
-    } else if (inputKind == "GwasSumStats") {
-      if (!isTRUE(info$gwasAllowed) || is.null(info$sumstatImpl)) {
-        bad <- c(bad, tk)
-        reason <- c(reason,
-                    "is not supported on GwasSumStats (only the SuSiE-RSS family is)")
-      }
-    }
-  }
-  if (length(bad) > 0L) {
-    stop(sprintf(
-      "fineMappingPipeline: the following method(s) are not available for input class '%s': %s. %s.",
-      inputKind,
-      paste(unique(bad), collapse = ", "),
-      paste(sprintf("%s %s", bad, reason), collapse = "; ")))
-  }
+  .checkMethodCapabilities(
+    tokens, inputKind,
+    caps = .fineMappingMethodCapabilities,
+    pipelineName = "fineMappingPipeline",
+    hardRejections = list(
+      mrmash = "mr.mash is a TWAS-weight-oriented method; use twasWeightsPipeline()"))
 }
 
 
@@ -308,16 +270,15 @@ setGeneric("fineMappingPipeline",
 
 # Optional resume-cache lookup. Returns the matching FineMappingEntry from
 # `fineMappingResult` for the tuple (study, context, trait, method), or
-# NULL when there is no hit. Errors when fineMappingResult is not a
-# FineMappingResult.
+# NULL when there is no hit. Returns NULL silently when fineMappingResult
+# is NULL or not a QtlFineMappingResult.
 # @noRd
 .fmCacheLookup <- function(fineMappingResult, study, context, trait, method) {
   if (is.null(fineMappingResult)) return(NULL)
   if (!is(fineMappingResult, "QtlFineMappingResult")) return(NULL)
-  idx <- which(as.character(fineMappingResult$study)   == study &
-               as.character(fineMappingResult$context) == context &
-               as.character(fineMappingResult$trait)   == trait &
-               as.character(fineMappingResult$method)  == method)
+  idx <- .matchTupleRows(fineMappingResult,
+                          list(study = study, context = context,
+                               trait = trait, method = method))
   if (length(idx) == 0L) return(NULL)
   fineMappingResult$entry[[idx[[1L]]]]
 }
@@ -327,8 +288,8 @@ setGeneric("fineMappingPipeline",
 .fmCacheLookupGwas <- function(fineMappingResult, study, method) {
   if (is.null(fineMappingResult)) return(NULL)
   if (!is(fineMappingResult, "GwasFineMappingResult")) return(NULL)
-  idx <- which(as.character(fineMappingResult$study)  == study &
-               as.character(fineMappingResult$method) == method)
+  idx <- .matchTupleRows(fineMappingResult,
+                          list(study = study, method = method))
   if (length(idx) == 0L) return(NULL)
   fineMappingResult$entry[[idx[[1L]]]]
 }
@@ -397,27 +358,11 @@ setGeneric("fineMappingPipeline",
 
 
 # Build an LD correlation matrix from an LD sketch genotype handle for a
-# specific variant subset. Matches `.twasLdFromSketch` in
-# R/twasWeights.R. Uses `extractBlockGenotypes` + `computeLd("sample")`.
+# specific variant subset. Thin wrapper over the shared `.ldFromSketch`
+# helper (R/ld.R).
 # @noRd
 .fmLdFromSketch <- function(ldSketch, variantIds) {
-  if (!is(ldSketch, "GenotypeHandle")) {
-    stop(".fmLdFromSketch: ldSketch must be a GenotypeHandle.")
-  }
-  snpInfo <- getSnpInfo(ldSketch)
-  snpAll <- as.character(snpInfo$SNP)
-  idx <- match(variantIds, snpAll)
-  if (anyNA(idx)) {
-    stop(sprintf(
-      ".fmLdFromSketch: %d variant id(s) not present in the LD sketch panel.",
-      sum(is.na(idx))))
-  }
-  block <- extractBlockGenotypes(ldSketch, idx, meanImpute = TRUE)
-  geno <- t(SummarizedExperiment::assay(block, "dosage"))
-  colnames(geno) <- as.character(snpInfo$SNP[idx])
-  ldMat <- computeLd(geno, method = "sample")
-  dimnames(ldMat) <- list(variantIds, variantIds)
-  ldMat
+  .ldFromSketch(ldSketch, variantIds, label = ".fmLdFromSketch")
 }
 
 
@@ -520,20 +465,16 @@ setGeneric("fineMappingPipeline",
 
 
 # Extract variant ids + Z + (median) N from a single QtlSumStats /
-# GwasSumStats entry GRanges. Errors when Z or N is missing.
+# GwasSumStats entry GRanges. Errors when Z or N is missing. Wraps the
+# shared `.entryToSumstatDf` helper (R/sumstatsQc.R).
 # @noRd
 .fmExtractZN <- function(gr, label) {
-  mc <- S4Vectors::mcols(gr)
-  if (!"SNP" %in% colnames(mc))
-    stop(sprintf("%s: entry has no SNP mcol.", label))
-  variantIds <- as.character(mc$SNP)
-  if (!"Z" %in% colnames(mc))
-    stop(sprintf("%s: entry has no Z mcol.", label))
-  if (!"N" %in% colnames(mc))
-    stop(sprintf("%s: entry has no N mcol.", label))
-  list(variantIds = variantIds,
-       z = as.numeric(mc$Z),
-       n = stats::median(as.numeric(mc$N), na.rm = TRUE))
+  df <- .entryToSumstatDf(gr,
+                          require = c("SNP", "Z", "N"),
+                          label = label)
+  list(variantIds = df$variant_id,
+       z = df$z,
+       n = stats::median(df$N, na.rm = TRUE))
 }
 
 

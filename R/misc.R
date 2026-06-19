@@ -935,3 +935,83 @@ detectOutliersMahalanobis <- function(x, prob = 0.99,
     stringsAsFactors = FALSE
   )
 }
+
+# -----------------------------------------------------------------------------
+# Shared input-class / method capability checker
+# -----------------------------------------------------------------------------
+
+# Internal: enforce input-class / method compatibility for a pipeline's
+# method-capability table. Shared by .fmCheckMethodCapabilities (R/
+# fineMappingPipeline.R) and .twasCheckMethodCapabilities (R/twasWeights.R).
+#
+# `tokens`         character vector of canonical method tokens to check.
+# `inputKind`      class name of the pipeline input (e.g. "QtlDataset",
+#                  "MultiTaskQtlDataset", "QtlSumStats", "GwasSumStats").
+# `caps`           the per-pipeline capability table (named list keyed by
+#                  token; each value carries $individualImpl, $sumstatImpl,
+#                  and optionally $gwasAllowed).
+# `pipelineName`   error-message prefix ("fineMappingPipeline" / ...).
+# `individualKinds`  input classes that route through $individualImpl.
+# `sumstatKinds`     input classes that route through $sumstatImpl
+#                    (no gwas-allowed check).
+# `gwasKinds`        input classes that route through $sumstatImpl AND
+#                    require $gwasAllowed = TRUE. Empty character() disables.
+# `individualOnlyReason`, `sumstatOnlyReason`, `gwasReason`
+#                  the per-branch explanation woven into the failure
+#                  message; allows callers to tune wording.
+# `hardRejections` named list mapping token -> reason; any token in
+#                  `hardRejections` is rejected outright with that reason
+#                  regardless of capability table.
+.checkMethodCapabilities <- function(
+  tokens, inputKind, caps, pipelineName,
+  individualKinds = c("QtlDataset", "MultiTaskQtlDataset"),
+  sumstatKinds = "QtlSumStats",
+  gwasKinds = "GwasSumStats",
+  individualOnlyReason = "is sumstat-only on this pipeline",
+  sumstatOnlyReason = "is individual-only (use a QtlDataset input)",
+  gwasReason = "is not supported on GwasSumStats (only the SuSiE-RSS family is)",
+  hardRejections = list()) {
+  if (length(tokens) == 0L) return(invisible(NULL))
+  unknown <- setdiff(tokens, names(caps))
+  if (length(unknown) > 0L) {
+    stop(sprintf(
+      "%s: unknown method token(s): %s. Known tokens: %s.",
+      pipelineName,
+      paste(unknown, collapse = ", "),
+      paste(names(caps), collapse = ", ")))
+  }
+  bad <- character(0)
+  reason <- character(0)
+  for (tk in tokens) {
+    info <- caps[[tk]]
+    if (tk %in% names(hardRejections)) {
+      bad <- c(bad, tk)
+      reason <- c(reason, hardRejections[[tk]])
+      next
+    }
+    if (inputKind %in% individualKinds) {
+      if (is.null(info$individualImpl)) {
+        bad <- c(bad, tk)
+        reason <- c(reason, individualOnlyReason)
+      }
+    } else if (inputKind %in% sumstatKinds) {
+      if (is.null(info$sumstatImpl)) {
+        bad <- c(bad, tk)
+        reason <- c(reason, sumstatOnlyReason)
+      }
+    } else if (length(gwasKinds) > 0L && inputKind %in% gwasKinds) {
+      if (!isTRUE(info$gwasAllowed) || is.null(info$sumstatImpl)) {
+        bad <- c(bad, tk)
+        reason <- c(reason, gwasReason)
+      }
+    }
+  }
+  if (length(bad) > 0L) {
+    stop(sprintf(
+      "%s: the following method(s) are not available for input class '%s': %s. %s.",
+      pipelineName,
+      inputKind,
+      paste(unique(bad), collapse = ", "),
+      paste(sprintf("%s %s", bad, reason), collapse = "; ")))
+  }
+}

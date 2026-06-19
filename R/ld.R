@@ -497,6 +497,119 @@ loadLdFromGenotype <- function(genotypePath, region,
   )
 }
 
+# ---------- LD sketch: per-variant LD matrix ----------
+
+# Internal: build a sample-correlation LD matrix for a specified variant
+# subset of an `ldSketch` `GenotypeHandle`. Shared by twasWeightsPipeline,
+# fineMappingPipeline, causalInferencePipeline, and colocboostPipeline. The
+# four sites differed only in their error message prefix and in whether
+# variants absent from the panel raise an error or get silently dropped.
+#
+# Arguments:
+#   ldSketch    A GenotypeHandle.
+#   variantIds  Character vector of SNP IDs to extract.
+#   label       Error-message prefix, e.g. ".twasLdFromSketch".
+#   onMissing   "error" (default) -> any unmatched id stops the call;
+#               "drop"           -> unmatched ids are silently filtered.
+#               When "drop" leaves no surviving variants the function
+#               returns NULL.
+#
+# Returns:
+#   A `length(variantIds) x length(variantIds)` symmetric LD matrix with
+#   rows/cols named by the (possibly filtered) `variantIds`.
+#   With `onMissing = "drop"` the returned matrix carries an attribute
+#   `"keptVariantIds"` so callers can recover which ids survived.
+.ldFromSketch <- function(ldSketch, variantIds,
+                          label = ".ldFromSketch",
+                          onMissing = c("error", "drop")) {
+  if (!methods::is(ldSketch, "GenotypeHandle")) {
+    stop(sprintf("%s: ldSketch must be a GenotypeHandle.", label))
+  }
+  onMissing <- match.arg(onMissing)
+  snpInfo <- getSnpInfo(ldSketch)
+  idx <- match(variantIds, as.character(snpInfo$SNP))
+  if (anyNA(idx)) {
+    if (onMissing == "error") {
+      stop(sprintf("%s: %d variant id(s) not present in the LD sketch panel.",
+                   label, sum(is.na(idx))))
+    }
+    keep <- !is.na(idx)
+    if (!any(keep)) return(NULL)
+    variantIds <- variantIds[keep]
+    idx <- idx[keep]
+  }
+  block <- extractBlockGenotypes(ldSketch, idx, meanImpute = TRUE)
+  geno  <- t(SummarizedExperiment::assay(block, "dosage"))
+  colnames(geno) <- variantIds
+  ldMat <- computeLd(geno, method = "sample")
+  dimnames(ldMat) <- list(variantIds, variantIds)
+  if (onMissing == "drop") {
+    attr(ldMat, "keptVariantIds") <- variantIds
+  }
+  ldMat
+}
+
+# ---------- LD sketch: cross-pipeline LD-panel equality check ----------
+
+# Internal: assert that two `GenotypeHandle` LD sketches describe exactly the
+# same reference panel (same snpInfo: SNP, CHR, BP, A1, A2, in the same
+# order; same sampleIds). Shared by causalInferencePipeline, colocPipeline,
+# qtlEnrichmentPipeline, ctwasPipeline, enlocPipeline, and
+# colocboostPipeline.
+#
+# NULL handling:
+#   nullPolicy = "qtl-required" (default): a NULL qtlLd skips the check; a
+#     non-NULL qtlLd with a NULL gwasLd is an error. Used by cip / coloc /
+#     ctwas / enloc / qtlEnrichment.
+#   nullPolicy = "lenient": a NULL on either side skips the check. Used by
+#     colocboostPipeline.
+#
+# `label` is the human-readable name of the QTL-side input (e.g.
+# "twasWeights" or "fineMappingResult"); it is woven into the error
+# messages when provided. `pipelineName` prefixes every error so the
+# failure source remains discoverable.
+.requireMatchingLdSketches <- function(qtlLd, gwasLd, pipelineName,
+                                       label = NULL,
+                                       nullPolicy = c("qtl-required",
+                                                      "lenient")) {
+  nullPolicy <- match.arg(nullPolicy)
+  if (is.null(qtlLd)) return(invisible(NULL))
+  if (is.null(gwasLd)) {
+    if (nullPolicy == "lenient") return(invisible(NULL))
+    stop(pipelineName, ": ",
+         if (!is.null(label)) sprintf("ldSketch on `%s` is non-NULL ", label)
+         else "qtl ldSketch is non-NULL ",
+         "but the GWAS ldSketch is NULL.")
+  }
+  between <- if (!is.null(label)) sprintf(" between `%s` and gwas inputs",
+                                          label) else ""
+  if (!methods::is(qtlLd, "GenotypeHandle") ||
+      !methods::is(gwasLd, "GenotypeHandle")) {
+    stop(pipelineName, ": ldSketch slots", between,
+         " must both be GenotypeHandle objects ",
+         "for the cross-pipeline LD reference check.")
+  }
+  qSnp <- getSnpInfo(qtlLd)
+  gSnp <- getSnpInfo(gwasLd)
+  if (nrow(qSnp) != nrow(gSnp)) {
+    stop(pipelineName, ": ldSketch panels differ in size (",
+         nrow(qSnp), " vs ", nrow(gSnp), " variants)", between,
+         "; the two ldSketch GenotypeHandles must match exactly.")
+  }
+  for (col in c("SNP", "CHR", "BP", "A1", "A2")) {
+    if (!identical(as.character(qSnp[[col]]),
+                   as.character(gSnp[[col]]))) {
+      stop(pipelineName, ": ldSketch panels differ in column ",
+           col, between, "; use the same ldSketch on both.")
+    }
+  }
+  if (!identical(getSampleIds(qtlLd), getSampleIds(gwasLd))) {
+    stop(pipelineName, ": ldSketch panels have different sample sets",
+         between, "; use the same ldSketch on both.")
+  }
+  invisible(NULL)
+}
+
 # ---------- LD sketch: genotype loading ----------
 
 #' HWE-based standardization of a genotype matrix

@@ -455,8 +455,27 @@ GwasFineMappingResult <- function(study, method, entry,
   obj
 }
 
-# Internal: resolve a (study, context, trait, method) tuple to a single
-# row index of a QtlFineMappingResult / TwasWeights collection.
+# Internal: return integer row indices of `x` where every (column, value)
+# pair in `keys` matches as.character(x[[column]]) == value. Shared
+# building block for all of pecotmr's tuple-keyed row selectors and
+# cache lookups (.tupleSelectRow, .qtlSumStatsSelectRow,
+# .gwasSelectStudy, .fmCacheLookup, .cipFmrHasTuple, etc.). Pure
+# vectorised AND-match with character coercion -- no validation, no
+# error reporting.
+.matchTupleRows <- function(x, keys) {
+  if (length(keys) == 0L) return(seq_len(nrow(x)))
+  ok <- rep(TRUE, nrow(x))
+  for (k in names(keys)) {
+    ok <- ok & as.character(x[[k]]) == keys[[k]]
+  }
+  which(ok)
+}
+
+# Internal: resolve a tuple-keyed selection (study, context, trait,
+# method) to a single row index. Used by the QtlFineMappingResult and
+# TwasWeights accessors. Returns an error when no row matches; returns
+# the single row index when the collection has exactly one row and any
+# selector argument was omitted.
 .tupleSelectRow <- function(x, study, context, trait, method,
                             cls = "QtlFineMappingResult") {
   if (nrow(x) == 0L) stop(cls, " has no rows.")
@@ -472,10 +491,8 @@ GwasFineMappingResult <- function(study, method, entry,
       length(trait) != 1L || length(method) != 1L) {
     stop("`study`, `context`, `trait`, and `method` must each be length 1.")
   }
-  idx <- which(as.character(x$study)   == study &
-               as.character(x$context) == context &
-               as.character(x$trait)   == trait &
-               as.character(x$method)  == method)
+  idx <- .matchTupleRows(x, list(study = study, context = context,
+                                  trait = trait, method = method))
   if (length(idx) == 0L) {
     stop(sprintf(
       "No entry for (study='%s', context='%s', trait='%s', method='%s').",
@@ -496,8 +513,7 @@ GwasFineMappingResult <- function(study, method, entry,
   }
   if (length(study) != 1L || length(method) != 1L)
     stop("`study` and `method` must each be length 1.")
-  idx <- which(as.character(x$study) == study &
-               as.character(x$method) == method)
+  idx <- .matchTupleRows(x, list(study = study, method = method))
   if (length(idx) == 0L)
     stop(sprintf("No entry for (study='%s', method='%s').", study, method))
   idx[[1L]]
@@ -737,7 +753,15 @@ TwasWeights <- function(study, context, trait, method, entry,
   obj
 }
 
-#' @rdname getTwasWeights
+#' @title Get a Single TWAS Weights Entry
+#' @description Return the \code{TwasWeightsEntry} for one
+#'   \code{(study, context, trait, method)} row of a \code{TwasWeights}
+#'   collection.
+#' @param x A \code{TwasWeights} object.
+#' @param study,context,trait,method Single character identifiers. All
+#'   required when the collection has more than one row; optional when
+#'   the collection has a single row.
+#' @return A \code{TwasWeightsEntry} object.
 #' @export
 setGeneric("getTwasWeights",
   function(x, study = NULL, context = NULL, trait = NULL, method = NULL)
@@ -1198,14 +1222,23 @@ setMethod("getPhenotypeCovariates", "QtlDataset",
   } else {
     cbind(intercept = 1, C)
   }
-  qrX <- qr(X, LAPACK = TRUE)
-  res <- qr.resid(qrX, Y)
+  # `qr.resid` does not support LAPACK pivoted QR, so use `lm.fit`. It
+  # handles rank-deficient designs gracefully via base-R's pivoted QR
+  # internally — same effect the LAPACK path was meant to deliver.
+  res <- stats::lm.fit(x = X, y = Y)$residuals
   res <- as.matrix(res)
   rownames(res) <- rownames(Y)
   colnames(res) <- colnames(Y)
   if (isTRUE(scaleResiduals)) {
     sds <- apply(res, 2L, function(v) stats::sd(v, na.rm = TRUE))
-    sds[!is.finite(sds) | sds == 0] <- 1
+    # `sds == 0` exact-zero test is unreliable for residuals coming out of
+    # lm.fit on a constant Y: roundoff gives sd ~ 1e-16 instead of 0, and
+    # dividing the (also-tiny) residuals by it amplifies floating-point
+    # noise to unit-scale. Treat anything below sqrt(.Machine$double.eps)
+    # as effectively zero (column is constant) and skip rescaling.
+    nearZero <- !is.finite(sds) | sds < sqrt(.Machine$double.eps)
+    sds[nearZero] <- 1
+    res[, nearZero] <- 0
     res <- sweep(res, 2L, sds, FUN = "/")
   }
   res

@@ -207,29 +207,12 @@ colocPipeline <- function(qtlFineMappingResult,
 # Internal helpers
 # =============================================================================
 
-# LD-sketch identity check (mirrors .cipRequireMatchingLdSketches).
+# LD-sketch identity check. Thin wrapper over the shared
+# `.requireMatchingLdSketches` helper (R/ld.R). Shared with
+# qtlEnrichmentPipeline and enlocPipeline.
 # @noRd
 .colocRequireMatchingLdSketches <- function(qtlLd, gwasLd) {
-  if (is.null(qtlLd)) return(invisible(NULL))
-  if (is.null(gwasLd))
-    stop("colocPipeline: qtlFineMappingResult carries a non-NULL ",
-         "ldSketch but gwasInput's ldSketch is NULL.")
-  if (!methods::is(qtlLd, "GenotypeHandle") ||
-      !methods::is(gwasLd, "GenotypeHandle"))
-    stop("colocPipeline: both ldSketch slots must be GenotypeHandle ",
-         "objects.")
-  qSnp <- getSnpInfo(qtlLd)
-  gSnp <- getSnpInfo(gwasLd)
-  if (nrow(qSnp) != nrow(gSnp))
-    stop("colocPipeline: ldSketch panels differ in size (",
-         nrow(qSnp), " vs ", nrow(gSnp), ").")
-  for (col in c("SNP", "CHR", "BP", "A1", "A2"))
-    if (!identical(as.character(qSnp[[col]]),
-                   as.character(gSnp[[col]])))
-      stop("colocPipeline: ldSketch panels differ in column ", col, ".")
-  if (!identical(getSampleIds(qtlLd), getSampleIds(gwasLd)))
-    stop("colocPipeline: ldSketch panels have different sample sets.")
-  invisible(NULL)
+  .requireMatchingLdSketches(qtlLd, gwasLd, pipelineName = "colocPipeline")
 }
 
 # Extract an LBF matrix (effects x variants) from a FineMappingEntry,

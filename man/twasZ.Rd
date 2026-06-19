@@ -2,27 +2,78 @@
 % Please edit documentation in R/twas.R
 \name{twasZ}
 \alias{twasZ}
-\title{Calculate TWAS z-score and p-value}
+\title{Calculate TWAS Z-Statistics for One or More Methods / Contexts}
 \usage{
-twasZ(weights, z, R = NULL, X = NULL, V = NULL, D = NULL, nSketch = NULL)
+twasZ(
+  weights,
+  z,
+  R = NULL,
+  X = NULL,
+  V = NULL,
+  D = NULL,
+  nSketch = NULL,
+  combineMethods = NULL
+)
 }
 \arguments{
-\item{weights}{A numeric vector of weights.}
+\item{weights}{Numeric vector of weights (single tuple) or a numeric
+matrix with one column per tuple (method / context). When a
+vector, the column name defaults to \code{"method1"}.}
 
-\item{z}{A numeric vector of z-scores.}
+\item{z}{Numeric vector of GWAS Z-scores aligned to the rows of
+\code{weights}.}
 
-\item{R}{An optional correlation matrix. If not provided, it will be calculated from the genotype matrix X.}
+\item{R}{Optional LD correlation matrix.}
 
-\item{X}{An optional genotype matrix. If R is not provided, X must be supplied to calculate the correlation matrix.}
+\item{X}{Optional genotype matrix used to compute \code{R} when
+\code{R} is missing.}
+
+\item{V, D, nSketch}{SVD components of the LD sketch (right-singular
+vectors, singular values, panel sample size). Supplying all three
+selects the SVD path.}
+
+\item{combineMethods}{Optional character vector of method names to
+forward to \code{\link{combinePValues}} for cross-tuple
+combination. \code{NULL} (default) skips combination.}
 }
 \value{
-A list containing the following elements:
-\itemize{
-  \item z: The TWAS z-score.
-  \item pval: The corresponding p-value.
+A list with:
+\describe{
+  \item{Z}{A \code{K x 2} numeric matrix with columns
+    \code{c("Z", "pval")}; rownames are the column names of
+    \code{weights}.}
+  \item{combined}{Output of \code{combinePValues} (or its trivial
+    K=1 equivalent) when \code{combineMethods} is non-NULL,
+    otherwise \code{NULL}.}
 }
 }
 \description{
-This function calculates the TWAS z-score and p-value given the weights, z-scores,
-and optionally the correlation matrix (R) or the genotype matrix (X).
+Unified TWAS Z-statistic: accepts a weight vector (single
+method/context) or a (variants x K) weight matrix, computes the
+per-tuple TWAS Z-score and two-sided p-value, and optionally
+delegates cross-tuple p-value combination to
+\code{\link{combinePValues}}.
+}
+\details{
+For each column k of \code{weights}:
+\itemize{
+  \item \code{stat_k = w_kᵀ z}
+  \item \code{denom_k = w_kᵀ R w_k}
+  \item \code{Z_k = stat_k / sqrt(denom_k)}, \code{p_k = 2 * (1 - Phi(|Z_k|))}
+}
+When \code{combineMethods} is non-NULL and K >= 2, the cross-tuple
+correlation matrix \code{rho_{i,j} = covY_{i,j} / sqrt(covY_{i,i} *
+covY_{j,j})} is constructed once and forwarded to
+\code{combinePValues} as the \code{R} argument. When K == 1, the
+combined p-value trivially equals the per-tuple p-value.
+
+The SVD path (\code{V}, \code{D}, \code{nSketch}) lets the caller
+avoid materializing the full LD matrix: \code{covY = (VᵀW · sqrt(Lambda))ᵀ
+(VᵀW · sqrt(Lambda))} with \code{Lambda_i = D_i^2 / (nSketch - 1)}.
+Use the \code{R} path when an LD correlation matrix is already
+available; use the \code{X} path to compute \code{R} from a genotype
+matrix.
+}
+\seealso{
+\code{\link{combinePValues}} for the combination method menu.
 }

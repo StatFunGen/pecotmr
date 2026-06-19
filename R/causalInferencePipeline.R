@@ -183,35 +183,12 @@ causalInferencePipeline <- function(gwasSumStats,
 # Internal helpers
 # =============================================================================
 
-# Compare two GenotypeHandles for LD-sketch identity. Mirrors the
-# colocboost helper but lets a NULL qtl-side handle skip the check.
+# Compare two GenotypeHandles for LD-sketch identity. Thin wrapper over
+# the shared `.requireMatchingLdSketches` helper (R/ld.R).
 .cipRequireMatchingLdSketches <- function(qtlLd, gwasLd, label) {
-  if (is.null(qtlLd)) return(invisible(NULL))
-  if (!methods::is(qtlLd, "GenotypeHandle") ||
-      !methods::is(gwasLd, "GenotypeHandle")) {
-    stop("causalInferencePipeline: ldSketch on `", label,
-         "` and gwasSumStats must both be GenotypeHandle objects for ",
-         "the cross-pipeline LD reference check.")
-  }
-  qSnp <- getSnpInfo(qtlLd)
-  gSnp <- getSnpInfo(gwasLd)
-  if (nrow(qSnp) != nrow(gSnp))
-    stop("causalInferencePipeline: ldSketch panels on `", label,
-         "` (", nrow(qSnp), " variants) and gwasSumStats (",
-         nrow(gSnp), " variants) differ in size; the two ldSketch ",
-         "GenotypeHandles must match exactly.")
-  for (col in c("SNP", "CHR", "BP", "A1", "A2")) {
-    if (!identical(as.character(qSnp[[col]]),
-                   as.character(gSnp[[col]])))
-      stop("causalInferencePipeline: ldSketch panels on `", label,
-           "` and gwasSumStats differ in column ", col,
-           "; use the same ldSketch on both.")
-  }
-  if (!identical(getSampleIds(qtlLd), getSampleIds(gwasLd)))
-    stop("causalInferencePipeline: ldSketch panels on `", label,
-         "` and gwasSumStats have different sample sets; use the same ",
-         "ldSketch on both.")
-  invisible(NULL)
+  .requireMatchingLdSketches(qtlLd, gwasLd,
+                             pipelineName = "causalInferencePipeline",
+                             label = label)
 }
 
 # Build the (qtlStudy, context, trait, method) work list from
@@ -238,10 +215,9 @@ causalInferencePipeline <- function(gwasSumStats,
 }
 
 .cipFmrHasTuple <- function(fmr, study, context, trait, method) {
-  any(as.character(fmr$study)   == study &
-      as.character(fmr$context) == context &
-      as.character(fmr$trait)   == trait &
-      as.character(fmr$method)  == method)
+  length(.matchTupleRows(fmr,
+                          list(study = study, context = context,
+                               trait = trait, method = method))) > 0L
 }
 
 # Extract the per-tuple weights vector. From TwasWeights: read the
@@ -250,10 +226,10 @@ causalInferencePipeline <- function(gwasSumStats,
 .cipExtractWeights <- function(twasWeights, fineMappingResult,
                                study, context, trait, method, useFmr) {
   if (!useFmr) {
-    if (!any(as.character(twasWeights$study)   == study &
-             as.character(twasWeights$context) == context &
-             as.character(twasWeights$trait)   == trait &
-             as.character(twasWeights$method)  == method)) return(NULL)
+    if (length(.matchTupleRows(twasWeights,
+                               list(study = study, context = context,
+                                    trait = trait, method = method))) == 0L)
+      return(NULL)
     twEntry <- getTwasWeights(twasWeights, study = study, context = context,
                               trait = trait, method = method)
     vids <- getVariantIds(twEntry)
@@ -304,21 +280,10 @@ causalInferencePipeline <- function(gwasSumStats,
 }
 
 # Build an LD correlation matrix for a given variant subset from an
-# LD sketch. Same pattern as .twasLdFromSketch / .fmLdFromSketch.
+# LD sketch. Thin wrapper over the shared `.ldFromSketch` helper
+# (R/ld.R).
 .cipLdFromSketch <- function(ldSketch, variantIds) {
-  snpInfo <- getSnpInfo(ldSketch)
-  idx <- match(variantIds, as.character(snpInfo$SNP))
-  if (anyNA(idx)) {
-    stop("causalInferencePipeline: ", sum(is.na(idx)),
-         " variant id(s) are absent from the ldSketch panel; the ",
-         "summaryStatsQc step should have removed them.")
-  }
-  block <- extractBlockGenotypes(ldSketch, idx, meanImpute = TRUE)
-  geno  <- t(SummarizedExperiment::assay(block, "dosage"))
-  colnames(geno) <- variantIds
-  ld <- computeLd(geno, method = "sample")
-  dimnames(ld) <- list(variantIds, variantIds)
-  ld
+  .ldFromSketch(ldSketch, variantIds, label = "causalInferencePipeline")
 }
 
 # Compute the Wald-ratio IVW MR estimate for a single tuple. Uses the

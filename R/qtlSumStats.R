@@ -95,9 +95,8 @@ QtlSumStats <- function(study, context, trait, entry, genome, ldSketch,
   if (length(study) != 1L || length(context) != 1L || length(trait) != 1L) {
     stop("`study`, `context`, and `trait` must each be length 1.")
   }
-  idx <- which(as.character(x$study)   == study &
-               as.character(x$context) == context &
-               as.character(x$trait)   == trait)
+  idx <- .matchTupleRows(x, list(study = study, context = context,
+                                  trait = trait))
   if (length(idx) == 0L) {
     stop(sprintf(
       "No entry for (study='%s', context='%s', trait='%s').",
@@ -166,9 +165,15 @@ setMethod("subsetChr", "QtlSumStats", function(x, chr) {
     idx <- as.character(seqnames(gr)) == chrName
     gr[idx]
   })
-  res <- x
-  res$entry <- S4Vectors::SimpleList(newEntries)
-  res
+  QtlSumStats(
+    study    = as.character(x$study),
+    context  = as.character(x$context),
+    trait    = as.character(x$trait),
+    entry    = newEntries,
+    genome   = x@genome,
+    ldSketch = x@ldSketch,
+    varY     = as.numeric(x$varY),
+    qcInfo   = x@qcInfo)
 })
 
 #' @rdname getVarY

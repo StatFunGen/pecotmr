@@ -330,19 +330,18 @@ setGeneric("colocboostPipeline",
                     as.character(mc$A2),
                     as.character(mc$A1))
   }
-  panelIds <- as.character(getSnpInfo(ldSketch)$SNP)
-  panelMatch <- match(variantIds, panelIds)
-  keep <- !is.na(panelMatch)
-  if (!any(keep)) return(NULL)
+  # Use the shared `.ldFromSketch` helper in "drop" mode so missing-from-
+  # panel variants are silently filtered (the colocboost path expects to
+  # operate only on the overlap).
+  R <- .ldFromSketch(ldSketch, variantIds,
+                     label = ".cbSumstatPair", onMissing = "drop")
+  if (is.null(R)) return(NULL)
+  keptIds <- attr(R, "keptVariantIds")
+  attr(R, "keptVariantIds") <- NULL
+  keep <- variantIds %in% keptIds
   gr <- gr[keep]
-  variantIds <- variantIds[keep]
-  panelIdx <- panelMatch[keep]
+  variantIds <- keptIds
   mc <- S4Vectors::mcols(gr)
-
-  block <- extractBlockGenotypes(ldSketch, panelIdx, meanImpute = TRUE)
-  X <- t(SummarizedExperiment::assay(block, "dosage"))
-  colnames(X) <- variantIds
-  R <- computeLd(X, method = "sample")
 
   N <- if ("N" %in% colnames(mc)) as.numeric(mc$N) else NA_real_
   ss <- data.frame(
@@ -361,7 +360,7 @@ setGeneric("colocboostPipeline",
 # study label, where each entry has (sumstat, LD).
 .cbQtlSumStatsBundle <- function(ss, contexts = NULL, traitId = NULL) {
   if (is.null(ss) || nrow(ss) == 0L) return(list())
-  ldSketch <- .cbLdSketch(ss)
+  ldSketch <- getLdSketch(ss)
   keepRow <- rep(TRUE, nrow(ss))
   if (!is.null(contexts) && length(contexts) > 0L) {
     keepRow <- keepRow & as.character(ss$context) %in% contexts
@@ -390,7 +389,7 @@ setGeneric("colocboostPipeline",
 # study label.
 .cbGwasSumStatsBundle <- function(gws) {
   if (is.null(gws) || nrow(gws) == 0L) return(list())
-  ldSketch <- .cbLdSketch(gws)
+  ldSketch <- getLdSketch(gws)
   bundle <- list()
   for (i in seq_len(nrow(gws))) {
     label <- as.character(gws$study)[[i]]
@@ -403,36 +402,15 @@ setGeneric("colocboostPipeline",
   bundle
 }
 
-# Pipeline-side wrapper: delegate to the public getLdSketch generic.
-.cbLdSketch <- function(x) getLdSketch(x)
-
-# Compare two GenotypeHandles for the LD-sketch equality contract.
-# Two handles match iff they have identical snpInfo (variant id, CHR,
-# BP, A1, A2 in the same order) and identical sampleIds. Returns silently
-# when matched; hard error on mismatch.
+# Compare two GenotypeHandles for the LD-sketch equality contract. Thin
+# wrapper over the shared `.requireMatchingLdSketches` helper (R/ld.R)
+# using the "lenient" null policy: a NULL on either side skips the check
+# (only colocboostPipeline allows that, since some bundles only have a
+# QTL side or only a GWAS side).
 .cbRequireMatchingLdSketches <- function(qtlLd, gwasLd) {
-  if (is.null(qtlLd) || is.null(gwasLd)) return(invisible(NULL))
-  if (!methods::is(qtlLd, "GenotypeHandle") ||
-      !methods::is(gwasLd, "GenotypeHandle")) {
-    stop("colocboostPipeline: both ldSketch slots must be GenotypeHandle ",
-         "objects for the cross-pipeline LD reference check.")
-  }
-  qSnps <- getSnpInfo(qtlLd)
-  gSnps <- getSnpInfo(gwasLd)
-  if (nrow(qSnps) != nrow(gSnps))
-    stop("colocboostPipeline: QTL and GWAS ldSketch panels have different ",
-         "variant counts (", nrow(qSnps), " vs ", nrow(gSnps),
-         "). The two ldSketch GenotypeHandles must match exactly.")
-  for (col in c("SNP", "CHR", "BP", "A1", "A2")) {
-    if (!identical(as.character(qSnps[[col]]),
-                   as.character(gSnps[[col]])))
-      stop("colocboostPipeline: QTL and GWAS ldSketch panels differ in ",
-           col, ". Use the same ldSketch on both sides.")
-  }
-  if (!identical(getSampleIds(qtlLd), getSampleIds(gwasLd)))
-    stop("colocboostPipeline: QTL and GWAS ldSketch panels have different ",
-         "sample sets. Use the same ldSketch on both sides.")
-  invisible(NULL)
+  .requireMatchingLdSketches(qtlLd, gwasLd,
+                             pipelineName = "colocboostPipeline",
+                             nullPolicy = "lenient")
 }
 
 # Combine sumstat bundles into the (sumstat-list, LD-list, dict) shape

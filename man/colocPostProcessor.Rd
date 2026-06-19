@@ -2,20 +2,18 @@
 % Please edit documentation in R/encoloc.R
 \name{colocPostProcessor}
 \alias{colocPostProcessor}
-\title{colocPostProcessor function}
+\title{(Deprecated) Colocalization Post-Processor}
 \usage{
-colocPostProcessor(colocRes, ldMetaFilePath = NULL, analysisRegion = NULL, ...)
+colocPostProcessor(...)
 }
 \arguments{
-\item{colocRes}{coloc results from coloc.susie.}
-
-\item{ldMetaFilePath}{Path to the metadata of LD reference.}
-
-\item{analysisRegion}{Path to the analysis region of coloc result.}
+\item{...}{Ignored.}
 }
 \value{
-A list containing the coloc results and post processed coloc sets.
+\code{NULL} (invisibly).
 }
 \description{
-colocPostProcessor function
+\strong{Deprecated.} Post-processing now happens inside
+\code{\link{colocPipeline}} and \code{\link{enlocPipeline}}, which
+return the cleaned, ranked colocalization output directly.
 }

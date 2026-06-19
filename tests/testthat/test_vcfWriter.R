@@ -4,6 +4,16 @@
 # Test data helpers
 # =============================================================================
 
+make_test_genotype_handle <- function() {
+  new("GenotypeHandle",
+    path = "/tmp/test.gds",
+    format = "gds",
+    snpInfo = data.frame(),
+    nSamples = 0L,
+    sampleIds = character(),
+    pgenPtr = NULL)
+}
+
 make_test_gwas_sumstats <- function(n = 5) {
   gr <- GenomicRanges::GRanges(
     "chr1",
@@ -16,9 +26,11 @@ make_test_gwas_sumstats <- function(n = 5) {
     Z = seq(1.5, by = -0.5, length.out = n),
     N = rep(1000L, n)
   )
-  new("GwasSumStats",
-    sumstats = gr, genome = "hg38",
-    traitName = "test_trait", varY = NULL)
+  GwasSumStats(
+    study = "test_trait",
+    entry = list(gr),
+    genome = "hg38",
+    ldSketch = make_test_genotype_handle())
 }
 
 make_test_finemapping_result <- function(n = 5) {
@@ -32,12 +44,15 @@ make_test_finemapping_result <- function(n = 5) {
     z = seq(5.0, by = -1.0, length.out = n),
     stringsAsFactors = FALSE
   )
-  new("FineMappingResult",
-    variantNames = tl$variant_id,
+  entry <- FineMappingEntry(
+    variantIds = tl$variant_id,
     trimmedFit = list(),
     topLoci = tl,
-    method = "susie",
     sumstats = NULL)
+  GwasFineMappingResult(
+    study  = "test_study",
+    method = "susie",
+    entry  = list(entry))
 }
 
 # =============================================================================
@@ -147,15 +162,18 @@ test_that("writeSumstatsVcf errors on empty FineMappingResult", {
 
   empty_tl <- data.frame(
     variant_id = character(0),
-    method = character(0),
+    pip = numeric(0),
     stringsAsFactors = FALSE
   )
-  fm_empty <- new("FineMappingResult",
-    variantNames = character(0),
+  entry <- FineMappingEntry(
+    variantIds = character(0),
     trimmedFit = list(),
     topLoci = empty_tl,
-    method = "susie",
     sumstats = NULL)
+  fm_empty <- GwasFineMappingResult(
+    study  = "test_study",
+    method = "susie",
+    entry  = list(entry))
 
   out <- tempfile(fileext = ".vcf")
   on.exit(unlink(out), add = TRUE)

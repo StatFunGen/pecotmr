@@ -2,122 +2,21 @@
 % Please edit documentation in R/encoloc.R
 \name{colocWrapper}
 \alias{colocWrapper}
-\title{Colocalization Analysis Wrapper}
+\title{(Deprecated) Colocalization Wrapper}
 \usage{
-colocWrapper(
-  xqtlFile,
-  gwasFiles = NULL,
-  xqtlFinemappingObj = NULL,
-  xqtlVarnameObj = NULL,
-  xqtlRegionObj = NULL,
-  gwasFinemappingObj = NULL,
-  gwasVarnameObj = NULL,
-  gwasRegionObj = NULL,
-  filterLbfCs = FALSE,
-  filterLbfCsSecondary = NULL,
-  priorTol = 1e-09,
-  p1 = 1e-04,
-  p2 = 1e-04,
-  p12 = 5e-06,
-  runFinemapping = FALSE,
-  sumstatPath = NULL,
-  columnFilePath = NULL,
-  ldData = NULL,
-  nSample = 0,
-  nCase = 0,
-  nControl = 0,
-  region = NULL,
-  zMismatchQc = "slalom",
-  finemappingMethod = "susieRss",
-  finemappingOpts = list(L = 20, lGreedy = 5, coverage = c(0.95, 0.7, 0.5), signalCutoff
-    = 0.025, minAbsCorr = 0.8),
-  impute = TRUE,
-  imputeOpts = list(rcond = 0.01, r2Threshold = 0.6, minimumLd = 5, lamb = 0.01),
-  saveFinemappingPath = NULL,
-  returnFinemapping = FALSE,
-  ...
-)
+colocWrapper(...)
 }
 \arguments{
-\item{xqtlFile}{Path to the xQTL RDS file.}
-
-\item{gwasFiles}{Vector of paths to GWAS RDS files. Required when
-\code{runFinemapping = FALSE}. Ignored when \code{runFinemapping = TRUE}.}
-
-\item{xqtlFinemappingObj}{Optional path in xQTL RDS to the finemapping object.}
-
-\item{xqtlVarnameObj}{Optional path in xQTL RDS to variant names.}
-
-\item{xqtlRegionObj}{Optional path in xQTL RDS to region info.}
-
-\item{gwasFinemappingObj}{Optional path in GWAS RDS to the finemapping object.}
-
-\item{gwasVarnameObj}{Optional path in GWAS RDS to variant names.}
-
-\item{gwasRegionObj}{Optional path in GWAS RDS to region info.}
-
-\item{filterLbfCs}{Logical. Filter LBF rows by credible set index.}
-
-\item{filterLbfCsSecondary}{Coverage for secondary LBF filtering.}
-
-\item{priorTol}{Minimum prior variance to retain an effect (default 1e-9).}
-
-\item{p1}{Prior probability a SNP is associated with trait 1 (default 1e-4).}
-
-\item{p2}{Prior probability a SNP is associated with trait 2 (default 1e-4).}
-
-\item{p12}{Prior probability a SNP is associated with both traits (default 5e-6).}
-
-\item{runFinemapping}{Logical. If TRUE, run GWAS fine-mapping inline via
-\code{\link{rssAnalysisPipeline}}. Default FALSE.}
-
-\item{sumstatPath}{Path to GWAS summary statistics file. Required when
-\code{runFinemapping = TRUE}.}
-
-\item{columnFilePath}{Path to column mapping file for summary statistics.}
-
-\item{ldData}{LD reference data (LdData object or list). Required when
-\code{runFinemapping = TRUE}.}
-
-\item{nSample}{Sample size for GWAS.}
-
-\item{nCase}{Number of cases for binary traits.}
-
-\item{nControl}{Number of controls for binary traits.}
-
-\item{region}{Genomic region string (e.g., "chr1:1000-2000").}
-
-\item{zMismatchQc}{Z-score / LD-mismatch QC selector forwarded to
-\code{\link{rssAnalysisPipeline}}: "slalom", "dentist", or "none".
-Default "slalom". (Hard rename of the former \code{zMismatchQc}; no alias.)}
-
-\item{finemappingMethod}{Fine-mapping method. Default "susieRss".}
-
-\item{finemappingOpts}{List of fine-mapping options passed to
-\code{\link{rssAnalysisPipeline}}.}
-
-\item{impute}{Logical. Run RAISS imputation. Default TRUE.}
-
-\item{imputeOpts}{List of imputation options.}
-
-\item{saveFinemappingPath}{Path to save fine-mapping result as RDS. The
-saved file can be reused via \code{gwasFiles} with
-\code{gwasFinemappingObj = "susie_fit"} and
-\code{gwasVarnameObj = "variantNames"}.}
-
-\item{returnFinemapping}{Logical. If TRUE and \code{runFinemapping = TRUE},
-include full fine-mapping result under \code{$gwasFinemapping}.}
-
-\item{...}{Additional arguments (currently unused).}
+\item{...}{Ignored.}
 }
 \value{
-A list containing the coloc results and the summarized sets.
+\code{NULL} (invisibly).
 }
 \description{
-Processes xQTL and GWAS finemapped data for colocalization analysis.
-GWAS data can come from pre-computed RDS files or from inline fine-mapping
-via \code{\link{rssAnalysisPipeline}}.
-}
-\seealso{
-\code{\link{rssAnalysisPipeline}}, \code{\link{colocPostProcessor}}
+\strong{Deprecated.} The file-path colocalization wrapper has been
+removed. Use \code{\link{colocPipeline}}: build a
+\code{FineMappingResult} for the QTLs in your own code, then pass
+it along with a \code{GwasSumStats} (window-level GWAS
+fine-mapping is run internally) or an existing genome-wide GWAS
+\code{FineMappingResult} to \code{colocPipeline()}.
 }

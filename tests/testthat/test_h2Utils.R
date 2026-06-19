@@ -372,20 +372,14 @@ test_that("snpsPerBlock returns empty for blocks with no SNPs", {
 # =============================================================================
 
 test_that("checkGenomeBuild returns TRUE when all objects match", {
-  blocks_gr <- GenomicRanges::GRanges(
+  blocks_gr_a <- GenomicRanges::GRanges(
     seqnames = "chr1",
     ranges = IRanges::IRanges(start = 1, end = 5000)
   )
-  ld_blocks <- new("LdBlocks", blocks = blocks_gr, genome = "hg19")
+  ld_blocks_a <- new("LdBlocks", blocks = blocks_gr_a, genome = "hg19")
+  ld_blocks_b <- new("LdBlocks", blocks = blocks_gr_a, genome = "hg19")
 
-  set.seed(42)
-  ss_df <- data.frame(
-    SNP = paste0("rs", 1:5), CHR = "1", BP = 1:5,
-    A1 = "A", A2 = "G", Z = rnorm(5), N = 1000
-  )
-  ss <- GwasSumStats(ss_df, genome = "hg19")
-
-  expect_true(pecotmr:::checkGenomeBuild(ld_blocks, ss))
+  expect_true(pecotmr:::checkGenomeBuild(ld_blocks_a, ld_blocks_b))
 })
 
 test_that("checkGenomeBuild errors when genome builds mismatch", {

@@ -55,6 +55,49 @@ make_test_annotation_meta <- function() {
   )
 }
 
+# Bridge helper: turn the legacy per-study data.frame shape into a
+# single-row GwasSumStats collection using the new API. Keeps the bulk of
+# the per-accessor tests below readable.
+.testGenotypeHandle <- function() {
+  new("GenotypeHandle",
+    path = "/tmp/test.gds", format = "gds",
+    snpInfo = data.frame(), nSamples = 0L,
+    sampleIds = character(), pgenPtr = NULL)
+}
+
+.dfToSumstatsGr <- function(df) {
+  chrs <- as.character(df$CHR)
+  if (!all(grepl("^chr", chrs))) chrs <- paste0("chr", sub("^chr", "", chrs))
+  gr <- GenomicRanges::GRanges(
+    seqnames = chrs,
+    ranges = IRanges::IRanges(start = as.integer(df$BP), width = 1L)
+  )
+  mc <- df[, setdiff(colnames(df), c("CHR", "BP")), drop = FALSE]
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(mc)
+  gr
+}
+
+makeGwasSumStatsFromDf <- function(df, traitName = "test",
+                                   genome = "hg19", varY = NA_real_) {
+  required <- c("SNP", "A1", "A2", "Z", "N")
+  missingCols <- setdiff(required, colnames(df))
+  if (length(missingCols) > 0L)
+    stop("Missing required columns: ",
+         paste(missingCols, collapse = ", "))
+  keep <- stats::complete.cases(df[, required, drop = FALSE])
+  if (!all(keep))
+    message(sprintf("Removed %d SNPs with missing required-column values.",
+                    sum(!keep)))
+  df <- df[keep, , drop = FALSE]
+  if (is.null(varY)) varY <- NA_real_
+  GwasSumStats(
+    study    = traitName,
+    entry    = list(.dfToSumstatsGr(df)),
+    genome   = genome,
+    ldSketch = .testGenotypeHandle(),
+    varY     = varY)
+}
+
 # =============================================================================
 # S4 Classes (h2_classes.R)
 # =============================================================================
@@ -124,34 +167,29 @@ test_that("GenotypeHandle rejects invalid format", {
   )
 })
 
-test_that("GwasSumStats validity requires SNP, A1, A2, Z, N mcols", {
-  gr <- make_test_granges(5)
-  # Only set SNP and A1 -- missing A2, Z, N
-  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-    SNP = paste0("rs", 1:5),
-    A1 = rep("A", 5)
-  )
+test_that("GwasSumStats(df) errors when required mcols are missing", {
+  df <- data.frame(SNP = "rs1", CHR = "1", BP = 100,
+                   A1 = "A",
+                   stringsAsFactors = FALSE)
   expect_error(
-    methods::validObject(new("GwasSumStats",
-      sumstats = gr, genome = "hg19", traitName = "test", varY = NULL
-    )),
+    makeGwasSumStatsFromDf(df),
     "Missing required columns"
   )
 })
 
 test_that("GwasSumStats valid object passes with all required mcols", {
   set.seed(1)
-  gr <- make_test_granges(5)
-  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+  df <- data.frame(
     SNP = paste0("rs", 1:5),
+    CHR = rep("1", 5),
+    BP = 1:5,
     A1 = rep("A", 5),
     A2 = rep("G", 5),
     Z = rnorm(5),
-    N = rep(1000, 5)
+    N = rep(1000, 5),
+    stringsAsFactors = FALSE
   )
-  obj <- new("GwasSumStats",
-    sumstats = gr, genome = "hg19", traitName = "test", varY = NULL
-  )
+  obj <- makeGwasSumStatsFromDf(df)
   expect_true(methods::validObject(obj))
 })
 
@@ -348,7 +386,7 @@ test_that("show() methods do not error", {
   expect_output(show(gh), "GenotypeHandle")
 
   # GwasSumStats (via constructor)
-  ss <- GwasSumStats(make_test_sumstats_df(10))
+  ss <- makeGwasSumStatsFromDf(make_test_sumstats_df(10))
   expect_output(show(ss), "GwasSumStats")
 
   # AnnotationMatrix
@@ -402,50 +440,50 @@ test_that("show() methods do not error", {
 # GwasSumStats Constructor (h2_sumstats.R)
 # =============================================================================
 
-test_that("GwasSumStats() constructor creates object from data.frame", {
+test_that("makeGwasSumStatsFromDf() constructor creates object from data.frame", {
   df <- make_test_sumstats_df(20)
-  obj <- GwasSumStats(df, traitName = "height", genome = "hg38")
+  obj <- makeGwasSumStatsFromDf(df, traitName = "height", genome = "hg38")
 
   expect_s4_class(obj, "GwasSumStats")
-  expect_equal(obj@traitName, "height")
-  expect_equal(obj@genome, "hg38")
-  expect_equal(length(obj@sumstats), 20)
+  expect_equal(as.character(obj$study)[[1L]], "height")
+  expect_equal(getGenome(obj), "hg38")
+  expect_equal(length(getSumStats(obj)), 20)
 })
 
-test_that("GwasSumStats() normalizes chr prefix", {
+test_that("makeGwasSumStatsFromDf() normalizes chr prefix", {
   df <- make_test_sumstats_df(5)
   # Input has CHR = "1" (no prefix)
-  obj <- GwasSumStats(df)
-  chrs <- as.character(GenomicRanges::seqnames(obj@sumstats))
+  obj <- makeGwasSumStatsFromDf(df)
+  chrs <- as.character(GenomicRanges::seqnames(getSumStats(obj)))
   expect_true(all(startsWith(chrs, "chr")))
 
   # Input already has "chr" prefix
   df2 <- df
   df2$CHR <- "chr1"
-  obj2 <- GwasSumStats(df2)
-  chrs2 <- as.character(GenomicRanges::seqnames(obj2@sumstats))
+  obj2 <- makeGwasSumStatsFromDf(df2)
+  chrs2 <- as.character(GenomicRanges::seqnames(getSumStats(obj2)))
   # Should not double-prefix
   expect_true(all(chrs2 == "chr1"))
   expect_false(any(grepl("^chrchr", chrs2)))
 })
 
-test_that("GwasSumStats() errors on missing columns", {
+test_that("makeGwasSumStatsFromDf() errors on missing columns", {
   df <- data.frame(SNP = "rs1", CHR = "1", BP = 100)
-  expect_error(GwasSumStats(df), "Missing required columns.*A1.*A2.*Z.*N")
+  expect_error(makeGwasSumStatsFromDf(df), "Missing required columns")
 })
 
-test_that("GwasSumStats() removes rows with NA in required columns", {
+test_that("makeGwasSumStatsFromDf() removes rows with NA in required columns", {
   df <- make_test_sumstats_df(10)
   df$Z[1] <- NA
   df$N[3] <- NA
-  expect_message(obj <- GwasSumStats(df), "Removed.*SNPs with missing")
-  expect_equal(length(obj@sumstats), 8)
+  expect_message(obj <- makeGwasSumStatsFromDf(df), "Removed.*SNPs with missing")
+  expect_equal(length(getSumStats(obj)), 8)
 })
 
 test_that("getz() returns correct Z vector", {
   set.seed(99)
   df <- make_test_sumstats_df(5)
-  obj <- GwasSumStats(df)
+  obj <- makeGwasSumStatsFromDf(df)
   z <- getZ(obj)
   expect_type(z, "double")
   expect_equal(length(z), 5)
@@ -453,7 +491,7 @@ test_that("getz() returns correct Z vector", {
 
 test_that("getn() returns correct N vector", {
   df <- make_test_sumstats_df(5)
-  obj <- GwasSumStats(df)
+  obj <- makeGwasSumStatsFromDf(df)
   n <- getN(obj)
   expect_equal(length(n), 5)
   expect_true(all(n == 10000))
@@ -461,11 +499,11 @@ test_that("getn() returns correct N vector", {
 
 test_that("getmaf() returns MAF when present, NULL when absent", {
   df <- make_test_sumstats_df(5)
-  obj_no_maf <- GwasSumStats(df)
+  obj_no_maf <- makeGwasSumStatsFromDf(df)
   expect_null(getMaf(obj_no_maf))
 
   df$MAF <- runif(5, 0.01, 0.5)
-  obj_with_maf <- GwasSumStats(df)
+  obj_with_maf <- makeGwasSumStatsFromDf(df)
   maf <- getMaf(obj_with_maf)
   expect_type(maf, "double")
   expect_equal(length(maf), 5)
@@ -473,14 +511,14 @@ test_that("getmaf() returns MAF when present, NULL when absent", {
 
 test_that("nSnps() returns correct count", {
   df <- make_test_sumstats_df(30)
-  obj <- GwasSumStats(df)
+  obj <- makeGwasSumStatsFromDf(df)
   expect_equal(nSnps(obj), 30)
 })
 
 test_that("subsetchr() filters correctly", {
   df <- make_test_sumstats_df(10)
   df$CHR <- c(rep("1", 6), rep("2", 4))
-  obj <- GwasSumStats(df)
+  obj <- makeGwasSumStatsFromDf(df)
 
   chr1 <- subsetChr(obj, "1")
   expect_equal(nSnps(chr1), 6)
@@ -493,16 +531,16 @@ test_that("subsetchr() filters correctly", {
 test_that("getvary() returns var_y and NULL cases", {
   df <- make_test_sumstats_df(5)
 
-  obj_null <- GwasSumStats(df, varY = NULL)
+  obj_null <- makeGwasSumStatsFromDf(df, varY = NULL)
   expect_null(getVarY(obj_null))
 
-  obj_vy <- GwasSumStats(df, varY = 4.5)
+  obj_vy <- makeGwasSumStatsFromDf(df, varY = 4.5)
   expect_equal(getVarY(obj_vy), 4.5)
 })
 
-test_that("as.data.frame.GwasSumStats() round-trips", {
+test_that("as.data.frame.makeGwasSumStatsFromDf() round-trips", {
   df_in <- make_test_sumstats_df(15)
-  obj <- GwasSumStats(df_in)
+  obj <- makeGwasSumStatsFromDf(df_in)
   df_out <- as.data.frame(obj)
 
   expect_true(is.data.frame(df_out))

@@ -348,7 +348,7 @@ test_that("pipeline: ensemble=TRUE with only 1 method prints skip message", {
   y <- as.numeric(X %*% beta + rnorm(n, sd = 0.5))
 
   msgs <- testthat::capture_messages(
-    res <- twasWeightsPipeline(
+    res <- pecotmr:::.twasWeightsPipelineMatrix(
       X, y, cvFolds = 3,
       weightMethods = list(lassoWeights = list()),
       ensemble = TRUE
@@ -360,7 +360,7 @@ test_that("pipeline: ensemble=TRUE with only 1 method prints skip message", {
 
   # No ensemble result should be present
   expect_null(res$ensemble)
-  expect_false("ensembleWeights" %in% getMethodNames(res$twasWeights))
+  expect_false("ensemble" %in% getMethodNames(res$twasWeights))
 })
 
 test_that("pipeline: ensemble=TRUE skips when methods fail R^2 cutoff", {
@@ -378,7 +378,7 @@ test_that("pipeline: ensemble=TRUE skips when methods fail R^2 cutoff", {
   y <- as.numeric(X %*% beta + rnorm(n, sd = 0.5))
 
   msgs <- testthat::capture_messages(
-    res <- twasWeightsPipeline(
+    res <- pecotmr:::.twasWeightsPipelineMatrix(
       X, y, cvFolds = 3,
       weightMethods = list(lassoWeights = list(), enetWeights = list()),
       ensemble = TRUE,
@@ -388,7 +388,7 @@ test_that("pipeline: ensemble=TRUE skips when methods fail R^2 cutoff", {
 
   expect_true(any(grepl("Ensemble TWAS skipped", msgs)))
   expect_null(res$ensemble)
-  expect_false("ensembleWeights" %in% getMethodNames(res$twasWeights))
+  expect_false("ensemble" %in% getMethodNames(res$twasWeights))
 })
 
 test_that("pipeline: ensemble=TRUE succeeds and adds ensembleWeights", {
@@ -405,7 +405,7 @@ test_that("pipeline: ensemble=TRUE succeeds and adds ensembleWeights", {
   y <- as.numeric(X %*% beta + rnorm(n, sd = 0.5))
 
   msgs <- testthat::capture_messages(
-    res <- twasWeightsPipeline(
+    res <- pecotmr:::.twasWeightsPipelineMatrix(
       X, y, cvFolds = 3,
       weightMethods = list(lassoWeights = list(), enetWeights = list()),
       ensemble = TRUE
@@ -415,9 +415,9 @@ test_that("pipeline: ensemble=TRUE succeeds and adds ensembleWeights", {
   expect_true(any(grepl("Computing ensemble TWAS weights", msgs)))
 
   # Ensemble weights added alongside individual methods
-  expect_true("ensembleWeights" %in% getMethodNames(res$twasWeights))
-  expect_true("lassoWeights" %in% getMethodNames(res$twasWeights))
-  expect_true("enetWeights" %in% getMethodNames(res$twasWeights))
+  expect_true("ensemble" %in% getMethodNames(res$twasWeights))
+  expect_true("lasso" %in% getMethodNames(res$twasWeights))
+  expect_true("enet" %in% getMethodNames(res$twasWeights))
 
   # Ensemble predictions added
   expect_true("ensemble_predicted" %in% names(res$twasPredictions))
@@ -428,8 +428,12 @@ test_that("pipeline: ensemble=TRUE succeeds and adds ensembleWeights", {
   expect_equal(sum(res$ensemble$methodCoef), 1, tolerance = 1e-6)
 
   # Ensemble weights should have same length as individual weights
-  expect_equal(length(getWeights(res$twasWeights,"ensembleWeights")),
-               length(getWeights(res$twasWeights,"lassoWeights")))
+  expect_equal(length(getWeights(res$twasWeights,
+                                 study = "", context = "", trait = "",
+                                 method = "ensemble")),
+               length(getWeights(res$twasWeights,
+                                 study = "", context = "", trait = "",
+                                 method = "lasso")))
 })
 
 test_that("pipeline: ensemble=FALSE does not run ensemble", {
@@ -445,14 +449,14 @@ test_that("pipeline: ensemble=FALSE does not run ensemble", {
   beta <- c(1.5, -1.0, 0.8, rep(0, p - 3))
   y <- as.numeric(X %*% beta + rnorm(n, sd = 0.5))
 
-  res <- suppressMessages(twasWeightsPipeline(
+  res <- suppressMessages(pecotmr:::.twasWeightsPipelineMatrix(
     X, y, cvFolds = 3,
     weightMethods = list(lassoWeights = list(), enetWeights = list()),
     ensemble = FALSE
   ))
 
   expect_null(res$ensemble)
-  expect_false("ensembleWeights" %in% getMethodNames(res$twasWeights))
+  expect_false("ensemble" %in% getMethodNames(res$twasWeights))
 })
 
 test_that("pipeline: ensemble_r2_threshold filters methods for ensemble", {
@@ -470,7 +474,7 @@ test_that("pipeline: ensemble_r2_threshold filters methods for ensemble", {
 
   # Run with very low threshold - both methods should pass
   msgs_low <- testthat::capture_messages(
-    res_low <- twasWeightsPipeline(
+    res_low <- pecotmr:::.twasWeightsPipelineMatrix(
       X, y, cvFolds = 3,
       weightMethods = list(lassoWeights = list(), enetWeights = list()),
       ensemble = TRUE,
@@ -481,7 +485,7 @@ test_that("pipeline: ensemble_r2_threshold filters methods for ensemble", {
 
   # Run with very high threshold - neither should pass
   msgs_high <- testthat::capture_messages(
-    res_high <- twasWeightsPipeline(
+    res_high <- pecotmr:::.twasWeightsPipelineMatrix(
       X, y, cvFolds = 3,
       weightMethods = list(lassoWeights = list(), enetWeights = list()),
       ensemble = TRUE,
@@ -565,7 +569,7 @@ test_that("pipeline: ensemble_solver='nnls' works end-to-end", {
   y <- as.numeric(X %*% beta + rnorm(n, sd = 0.5))
 
   msgs <- testthat::capture_messages(
-    res <- twasWeightsPipeline(
+    res <- pecotmr:::.twasWeightsPipelineMatrix(
       X, y, cvFolds = 3,
       weightMethods = list(lassoWeights = list(), enetWeights = list()),
       ensemble = TRUE,
@@ -574,7 +578,7 @@ test_that("pipeline: ensemble_solver='nnls' works end-to-end", {
   )
 
   expect_true(any(grepl("Computing ensemble TWAS weights", msgs)))
-  expect_true("ensembleWeights" %in% getMethodNames(res$twasWeights))
+  expect_true("ensemble" %in% getMethodNames(res$twasWeights))
   expect_true(all(res$ensemble$methodCoef >= 0))
   expect_equal(sum(res$ensemble$methodCoef), 1, tolerance = 1e-6)
 })
@@ -593,7 +597,7 @@ test_that("pipeline: ensemble_solver='lbfgsb' works end-to-end", {
   y <- as.numeric(X %*% beta + rnorm(n, sd = 0.5))
 
   msgs <- testthat::capture_messages(
-    res <- twasWeightsPipeline(
+    res <- pecotmr:::.twasWeightsPipelineMatrix(
       X, y, cvFolds = 3,
       weightMethods = list(lassoWeights = list(), enetWeights = list()),
       ensemble = TRUE,
@@ -602,7 +606,7 @@ test_that("pipeline: ensemble_solver='lbfgsb' works end-to-end", {
   )
 
   expect_true(any(grepl("Computing ensemble TWAS weights", msgs)))
-  expect_true("ensembleWeights" %in% getMethodNames(res$twasWeights))
+  expect_true("ensemble" %in% getMethodNames(res$twasWeights))
   expect_true(all(res$ensemble$methodCoef >= 0))
   expect_equal(sum(res$ensemble$methodCoef), 1, tolerance = 1e-6)
 })
@@ -621,7 +625,7 @@ test_that("pipeline: ensemble_solver='glmnet' works end-to-end", {
   y <- as.numeric(X %*% beta + rnorm(n, sd = 0.5))
 
   msgs <- testthat::capture_messages(
-    res <- twasWeightsPipeline(
+    res <- pecotmr:::.twasWeightsPipelineMatrix(
       X, y, cvFolds = 3,
       weightMethods = list(lassoWeights = list(), enetWeights = list()),
       ensemble = TRUE,
@@ -630,7 +634,7 @@ test_that("pipeline: ensemble_solver='glmnet' works end-to-end", {
   )
 
   expect_true(any(grepl("Computing ensemble TWAS weights", msgs)))
-  expect_true("ensembleWeights" %in% getMethodNames(res$twasWeights))
+  expect_true("ensemble" %in% getMethodNames(res$twasWeights))
   expect_true(all(res$ensemble$methodCoef >= 0))
   expect_equal(sum(res$ensemble$methodCoef), 1, tolerance = 1e-6)
 })

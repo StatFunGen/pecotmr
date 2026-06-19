@@ -357,7 +357,7 @@ susieInfWeights <- function(X = NULL, y = NULL, susieInfFit = NULL, retainFit = 
 
 # Internal helper: extract weights from a susieRss fit.
 # Mirrors .susie_extract_weights but uses the RSS interface.
-#' @importFrom susieR coef.susie susieRss
+#' @importFrom susieR coef.susie susie_rss
 #' @noRd
 .susieRssExtractWeights <- function(fit, z, R, n,
                                     requiredFields, fitArgs = list(),

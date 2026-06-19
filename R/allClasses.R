@@ -779,8 +779,8 @@ setClass("MultiTaskQtlDataset",
                  else length(unique(as.character(object@sumStats$study)))
     if (length(errors) == 0L && (nQtl + nSumstats) < 2L) {
       errors <- c(errors, sprintf(
-        "MultiTaskQtlDataset requires at least 2 studies in total (got ",
-        "%d individual-level + %d summary-statistic = %d).",
+        paste0("MultiTaskQtlDataset requires at least 2 studies in total ",
+               "(got %d individual-level + %d summary-statistic = %d)."),
         nQtl, nSumstats, nQtl + nSumstats))
     }
     # Pairwise trait-position consistency across qtlDatasets

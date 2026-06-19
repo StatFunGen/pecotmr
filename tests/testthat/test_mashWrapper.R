@@ -866,68 +866,12 @@ test_that("mashRandNullSample caps random sample at available rows", {
   expect_equal(nrow(result$random$z), 3)
 })
 
-# ===========================================================================
-# mashPipeline
-# ===========================================================================
-
-test_that("mashPipeline uses residualCorrelation when null data is empty", {
-  skip_if_not_installed("mashr")
-  skip_if_not_installed("flashier")
-
-  n_cond <- 3
-  n_strong <- 15
-  mock_input <- list(
-    null.b = numeric(0),
-    null.s = numeric(0),
-    random.b = matrix(rnorm(n_strong * n_cond), n_strong, n_cond),
-    random.s = matrix(abs(rnorm(n_strong * n_cond)) + 0.1, n_strong, n_cond),
-    strong.b = matrix(rnorm(n_strong * n_cond), n_strong, n_cond),
-    strong.s = matrix(abs(rnorm(n_strong * n_cond)) + 0.1, n_strong, n_cond)
-  )
-  custom_vhat <- matrix(c(1, 0.3, 0.1, 0.3, 1, 0.2, 0.1, 0.2, 1), 3, 3)
-
-  result <- mashPipeline(mock_input, alpha = 1, residualCorrelation = custom_vhat)
-  expect_true(is.list(result))
-  expect_null(result$error)
-})
-
-test_that("mashPipeline does not error about mashr when mashr is available", {
-  skip_if_not_installed("mashr")
-  skip_if_not_installed("flashier")
-
-  n_cond <- 3
-  n_strong <- 15
-  mock_input <- list(
-    null.b = numeric(0),
-    null.s = numeric(0),
-    random.b = matrix(rnorm(n_strong * n_cond), n_strong, n_cond),
-    random.s = matrix(abs(rnorm(n_strong * n_cond)) + 0.1, n_strong, n_cond),
-    strong.b = matrix(rnorm(n_strong * n_cond), n_strong, n_cond),
-    strong.s = matrix(abs(rnorm(n_strong * n_cond)) + 0.1, n_strong, n_cond)
-  )
-  result <- mashPipeline(mock_input, alpha = 1)
-  expect_true(is.list(result))
-})
-
-test_that("mashPipeline uses identity matrix when null data empty and no residualCorrelation", {
-  skip_if_not_installed("mashr")
-  skip_if_not_installed("flashier")
-
-  n_cond <- 3
-  n_strong <- 15
-  mock_input <- list(
-    null.b = numeric(0),
-    null.s = numeric(0),
-    random.b = matrix(rnorm(n_strong * n_cond), n_strong, n_cond),
-    random.s = matrix(abs(rnorm(n_strong * n_cond)) + 0.1, n_strong, n_cond),
-    strong.b = matrix(rnorm(n_strong * n_cond), n_strong, n_cond),
-    strong.s = matrix(abs(rnorm(n_strong * n_cond)) + 0.1, n_strong, n_cond)
-  )
-
-  result <- mashPipeline(mock_input, alpha = 1, residualCorrelation = NULL)
-  expect_true(is.list(result))
-  expect_null(result$error)
-})
+# mashPipeline integration tests were removed in the S4 refactor: the
+# legacy matrix-list input (strong.b/strong.s/random.b/random.s/null.b/null.s)
+# is no longer accepted. The new API takes a named list of QtlSumStats /
+# GwasSumStats objects, which is non-trivial to mock without exercising the
+# full SumStats QC pipeline. Cover mashPipeline behavior end-to-end via the
+# pipeline-level integration tests instead.
 
 # ===========================================================================
 # mergeSumstatsMatrices

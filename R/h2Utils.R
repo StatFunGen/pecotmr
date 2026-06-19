@@ -5,6 +5,8 @@
 #' @keywords internal
 #' @importFrom GenomicRanges GRanges
 #' @importFrom BiocParallel bplapply bpparam
+#' @importFrom IRanges findOverlaps
+#' @importFrom S4Vectors queryHits subjectHits
 NULL
 
 # =============================================================================
