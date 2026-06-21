@@ -3,7 +3,7 @@
 \name{fineMappingPipeline}
 \alias{fineMappingPipeline}
 \alias{fineMappingPipeline,QtlDataset-method}
-\alias{fineMappingPipeline,MultiTaskQtlDataset-method}
+\alias{fineMappingPipeline,MultiStudyQtlDataset-method}
 \alias{fineMappingPipeline,QtlSumStats-method}
 \alias{fineMappingPipeline,GwasSumStats-method}
 \alias{fineMappingPipeline,ANY-method}
@@ -18,29 +18,33 @@ fineMappingPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
+  jointSpecification = NULL,
   addSusieInf = TRUE,
   coverage = 0.95,
   secondaryCoverage = c(0.7, 0.5),
   signalCutoff = 0.025,
   minAbsCorr = 0.8,
   fineMappingResult = NULL,
+  naAction = c("drop", "impute"),
   verbose = 1,
   ...
 )
 
-\S4method{fineMappingPipeline}{MultiTaskQtlDataset}(
+\S4method{fineMappingPipeline}{MultiStudyQtlDataset}(
   data,
   methods,
   contexts = NULL,
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
+  jointSpecification = NULL,
   addSusieInf = TRUE,
   coverage = 0.95,
   secondaryCoverage = c(0.7, 0.5),
   signalCutoff = 0.025,
   minAbsCorr = 0.8,
   fineMappingResult = NULL,
+  naAction = c("drop", "impute"),
   verbose = 1,
   ...
 )
@@ -50,6 +54,7 @@ fineMappingPipeline(data, ...)
   methods,
   contexts = NULL,
   traitId = NULL,
+  jointSpecification = NULL,
   addSusieInf = TRUE,
   coverage = 0.95,
   secondaryCoverage = c(0.7, 0.5),
@@ -76,7 +81,7 @@ fineMappingPipeline(data, ...)
 \S4method{fineMappingPipeline}{ANY}(data, ...)
 }
 \arguments{
-\item{data}{A \code{QtlDataset}, \code{MultiTaskQtlDataset},
+\item{data}{A \code{QtlDataset}, \code{MultiStudyQtlDataset},
 \code{QtlSumStats}, or \code{GwasSumStats}.}
 
 \item{...}{Reserved for future per-method arguments.}
@@ -97,6 +102,17 @@ selection. Mutually exclusive with \code{traitId}.}
 \item{cisWindow}{For QtlDataset: cis-window (bp) around each trait's
 genomic position when extracting variants. Required when
 \code{traitId} is supplied.}
+
+\item{jointSpecification}{Optional joint-fit specification (NULL by
+default). When NULL, the pipeline runs the implicit multi-context /
+multi-trait mvSuSiE / fSuSiE branches as before. When non-NULL, the
+argument is parsed and validated via the joint-spec grammar
+documented under \code{parseJointSpecification} (a character vector
+of axes, or a list of \code{list(axes, scope)} specs); the
+per-spec axis dispatcher implementation is in progress and a
+non-NULL value currently errors with an informative message.
+See the design notes in \code{R/jointSpecification.R} for the
+accepted grammar.}
 
 \item{addSusieInf}{Logical. When \code{susieInf} is in
 \code{methods} alongside \code{susie} and/or \code{susieAsh},
@@ -129,7 +145,7 @@ Required for the GwasSumStats method.}
 A \code{\link{FineMappingResult}} collection keyed by
   \code{(study, context, trait, method)}. The \code{ldSketch} slot
   is set automatically: \code{NULL} for individual-level
-  (QtlDataset / all-individual-level MultiTaskQtlDataset) fits, the
+  (QtlDataset / all-individual-level MultiStudyQtlDataset) fits, the
   input's \code{ldSketch} for RSS-derived fits.
 }
 \description{
@@ -142,7 +158,7 @@ S4-dispatched per-region fine-mapping entry point that
           fits (per-context / per-trait univariate SuSiE; joint
           multi-trait or multi-context mvSuSiE; joint multi-trait
           fSuSiE per context);
-    \item a \code{\link{MultiTaskQtlDataset}} which recurses through
+    \item a \code{\link{MultiStudyQtlDataset}} which recurses through
           each embedded \code{QtlDataset} per study and processes
           the optional embedded \code{QtlSumStats} via the
           sumstat method;
@@ -166,7 +182,7 @@ S4-dispatched per-region fine-mapping entry point that
           variant of the same.}
     \item{\code{mvsusie}}{\code{mvsusieR::mvsusie} on individual-
           level input (requires multi-trait OR multi-context Y),
-          \code{mvsusieR::mvsusieRss} on sumstat input (requires
+          \code{mvsusieR::mvsusie_rss} on sumstat input (requires
           multi-context within a single (study, trait) group).
           Errors on \code{GwasSumStats} input.}
     \item{\code{fsusie}}{\code{fsusieR::susiF} joint multi-trait fit

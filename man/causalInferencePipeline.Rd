@@ -9,6 +9,8 @@ causalInferencePipeline(
   twasWeights = NULL,
   fineMappingResult = NULL,
   mrPipCutoff = 0.5,
+  mrMethod = c("ivwPerVariant", "csAware"),
+  mrCpipCutoff = 0.5,
   combineMethods = NULL,
   ...
 )
@@ -27,8 +29,21 @@ When supplied, drives the MR computation and (when
 coefficients on each entry's \code{topLoci}.}
 
 \item{mrPipCutoff}{Numeric (length 1). PIP threshold for an entry's
-\code{topLoci} variant to be used as an instrumental variable. Default
-\code{0.5}.}
+\code{topLoci} variant to be used as an instrumental variable.
+Used only when \code{mrMethod = "ivwPerVariant"}. Default \code{0.5}.}
+
+\item{mrMethod}{One of \code{"ivwPerVariant"} (default) or
+\code{"csAware"}. The IVW-per-variant method filters topLoci
+variants by \code{pip > mrPipCutoff} and IVW-pools Wald ratios
+across variants. The CS-aware method groups variants by credible
+set (column \code{cs} in topLoci), computes a PIP-weighted
+composite Wald ratio per CS using \code{mrCpipCutoff} on the
+per-CS cumulative PIP, then IVW-pools across CSs and reports
+Cochran's Q + I-squared in the output columns \code{Q}, \code{I2}.}
+
+\item{mrCpipCutoff}{Numeric (length 1). Cumulative-PIP cutoff for
+retaining a credible set. Used only when
+\code{mrMethod = "csAware"}. Default \code{0.5}.}
 
 \item{combineMethods}{Optional character vector forwarded to
 \code{\link{combinePValues}} for cross-method combination per

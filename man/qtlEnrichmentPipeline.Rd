@@ -34,24 +34,24 @@ Default \code{1.0}.}
 \code{25}.}
 
 \item{numThreads}{Number of threads used by
-\code{computeQtlEnrichment}. Default \code{1}.}
+\code{qtlEnrichment}. Default \code{1}.}
 
 \item{...}{Additional arguments forwarded to
-\code{\link{computeQtlEnrichment}}.}
+\code{\link{qtlEnrichment}}.}
 }
 \value{
 A data frame with one row per (gwasStudy, qtlContext) pair
   and columns \code{gwasStudy}, \code{qtlContext},
   \code{enrichment}, \code{enrichmentSe}, \code{enrichmentLogOdds},
   plus any extras the underlying estimator emits. Suitable as the
-  \code{enrichment} argument to \code{\link{enlocPipeline}}.
+  \code{enrichment} argument to \code{\link{colocPipeline}}.
 }
 \description{
 Genome-wide pipeline that computes per-pair (GWAS study,
   QTL context) enrichment estimates by passing the GWAS PIP vector
   and the QTL credible-set posteriors to
-  \code{\link{computeQtlEnrichment}}. The returned table feeds
-  \code{\link{enlocPipeline}}.
+  \code{\link{qtlEnrichment}}. The returned table feeds
+  \code{\link{colocPipeline}} via its \code{enrichment} argument.
 
   \strong{Not gene-parallelisable}: the enrichment estimator runs
   over the full genome of GWAS PIPs and the full collection of QTL

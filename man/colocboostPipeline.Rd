@@ -4,7 +4,7 @@
 \alias{colocboostPipeline}
 \alias{colocboostPipeline,QtlDataset-method}
 \alias{colocboostPipeline,QtlSumStats-method}
-\alias{colocboostPipeline,MultiTaskQtlDataset-method}
+\alias{colocboostPipeline,MultiStudyQtlDataset-method}
 \alias{colocboostPipeline,ANY-method}
 \title{ColocBoost multi-trait colocalization pipeline (S4)}
 \usage{
@@ -18,7 +18,6 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   region = NULL,
   cisWindow = NULL,
   focalTrait = NULL,
-  eventFilters = NULL,
   xqtlColoc = TRUE,
   jointGwas = FALSE,
   separateGwas = FALSE,
@@ -34,14 +33,13 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   region = NULL,
   cisWindow = NULL,
   focalTrait = NULL,
-  eventFilters = NULL,
   xqtlColoc = TRUE,
   jointGwas = FALSE,
   separateGwas = FALSE,
   ...
 )
 
-\S4method{colocboostPipeline}{MultiTaskQtlDataset}(
+\S4method{colocboostPipeline}{MultiStudyQtlDataset}(
   qtlData,
   gwasSumStats = NULL,
   contexts = NULL,
@@ -49,7 +47,6 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   region = NULL,
   cisWindow = NULL,
   focalTrait = NULL,
-  eventFilters = NULL,
   xqtlColoc = TRUE,
   jointGwas = FALSE,
   separateGwas = FALSE,
@@ -61,7 +58,7 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
 }
 \arguments{
 \item{qtlData}{One of \code{QtlDataset}, \code{QtlSumStats}, or
-\code{MultiTaskQtlDataset}.}
+\code{MultiStudyQtlDataset}.}
 
 \item{gwasSumStats}{Optional \code{GwasSumStats} with the GWAS
 studies to colocalize against. \code{NULL} to skip GWAS
@@ -92,12 +89,6 @@ analysis window. Mutually exclusive with \code{traitId} (see the
 the assembled outcome list, the colocboost xQTL-only run uses it
 as the focal outcome.}
 
-\item{eventFilters}{Optional list of per-context event-name filter
-specifications (each a list with \code{type_pattern} and at least
-one of \code{valid_pattern} / \code{exclude_pattern}). Applied to
-the trait columns within each context's residualized phenotype
-block before the colocboost call.}
-
 \item{xqtlColoc, jointGwas, separateGwas}{Logical flags selecting which
 colocboost variants to run.}
 }
@@ -117,7 +108,7 @@ Protocol-level multi-trait colocalization analysis using
           shared LD reference (\code{ldSketch}). Must already have
           been passed through \code{\link{summaryStatsQc}} (the
           pipeline rejects inputs whose \code{getQcInfo()} is empty).
-    \item \code{MultiTaskQtlDataset} — a mixture of one or more
+    \item \code{MultiStudyQtlDataset} — a mixture of one or more
           individual-level \code{QtlDataset} studies and an optional
           \code{QtlSumStats} collection.
   }
