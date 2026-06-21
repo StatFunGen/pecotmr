@@ -73,6 +73,7 @@ requirements:
     - r-readr
     - r-rfast
     - r-rlang
+    - r-robustbase
     - r-softimpute
     - r-stringr
     - r-susier
@@ -132,6 +133,7 @@ requirements:
     - r-readr
     - r-rfast
     - r-rlang
+    - r-robustbase
     - r-softimpute
     - r-stringr
     - r-susier
