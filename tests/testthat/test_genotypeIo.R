@@ -32,16 +32,16 @@ test_that("openBed dummy data works",{
 test_that("findValidFilePath works",{
     ref_path <- "test_data/protocol_example.genotype.bed"
     expect_error(
-        findValidFilePath(paste0(ref_path, "s"), "protocol_example.genotype.bamf"),
+        pecotmr:::.findValidFilePath(paste0(ref_path, "s"), "protocol_example.genotype.bamf"),
         "Both reference and target file paths do not work. Tried paths: 'test_data/protocol_example.genotype.beds' and 'test_data/protocol_example.genotype.bamf'")
     expect_equal(
-        findValidFilePath(ref_path, "abc"),
+        pecotmr:::.findValidFilePath(ref_path, "abc"),
         ref_path)
     expect_equal(
-        findValidFilePath(ref_path, "protocol_example.genotype.bim"),
+        pecotmr:::.findValidFilePath(ref_path, "protocol_example.genotype.bim"),
         "test_data/protocol_example.genotype.bim")
     expect_equal(
-        findValidFilePath(ref_path, "test_data/protocol_example.genotype.bim"),
+        pecotmr:::.findValidFilePath(ref_path, "test_data/protocol_example.genotype.bim"),
         "test_data/protocol_example.genotype.bim")
 })
 
@@ -343,352 +343,25 @@ test_that("loadGenotypeRegion applies stochastic inversion with explicit sidecar
   expect_false(all(res$X == round(res$X), na.rm = TRUE))
 })
 
-test_that("Test loadCovariateData reads tab-delimited file", {
-  # Create a temp covariate file: first column is sample ID, rest are numeric
-  tmp <- tempfile(fileext = ".tsv")
-  writeLines(c("SampleID\tPC1\tPC2", "S1\t0.1\t0.2", "S2\t0.3\t0.4"), tmp)
-  result <- loadCovariateData(tmp)
-  expect_type(result, "list")
-  expect_length(result, 1)
-  # Result should be transposed matrix (covariates x samples)
-  expect_true(is.matrix(result[[1]]))
-  file.remove(tmp)
-})
 
-test_that("loadCovariateData errors on non-numeric columns", {
-  tmp <- tempfile(fileext = ".tsv")
-  writeLines(c("SampleID\tPC1\tLabel", "S1\t0.1\tabc", "S2\t0.3\tdef"), tmp)
-  expect_error(
-    loadCovariateData(tmp),
-    "Non-numeric columns found in covariate file.*Label.*must be numeric"
-  )
-  file.remove(tmp)
-})
 
-test_that("loadCovariateData errors on missing file", {
-  expect_error(
-    loadCovariateData("/nonexistent/covar.tsv"),
-    "Covariate file.*not found"
-  )
-})
 
-test_that("Test loadPhenotypeData errors on invalid extract_region_name", {
-  tmp <- tempfile(fileext = ".tsv")
-  writeLines(c("ID\tgene1\tgene2", "S1\t1.0\t2.0"), tmp)
-  expect_error(
-    loadPhenotypeData(tmp, region = NULL, extractRegionName ="not_a_list"),
-    "must be NULL or a list"
-  )
-  file.remove(tmp)
-})
 
-test_that("loadPhenotypeData errors when extract_region_name length mismatch", {
-  tmp <- tempfile(fileext = ".tsv")
-  writeLines(c("#chr\tstart\tend\tS1\tS2", "chr1\t100\t200\t1.0\t2.0"), tmp)
-  expect_error(
-    loadPhenotypeData(c(tmp, tmp), region = NULL,
-                        extractRegionName =list("gene1")),
-    "same length as phenotype_path"
-  )
-  file.remove(tmp)
-})
 
-test_that("loadPhenotypeData errors when all phenotype files are empty", {
-  local_mocked_bindings(
-    tabixRegion = function(...) tibble::tibble()
-  )
-  expect_error(
-    loadPhenotypeData("fake.gz", region = "chr1:1-100"),
-    class = "NoPhenotypeError"
-  )
-})
 
-test_that("loadPhenotypeData with region_name_col out of bounds errors", {
-  mock_df <- data.frame(
-    chr = "chr1", start = 100, end = 200,
-    S1 = 1.0,
-    stringsAsFactors = FALSE
-  )
-  local_mocked_bindings(
-    tabixRegion = function(...) mock_df
-  )
-  expect_error(
-    loadPhenotypeData("fake.gz", region = "chr1:1-500",
-                        extractRegionName =list("gene1"),
-                        regionNameCol =99),
-    "out of bounds"
-  )
-})
 
-test_that("loadPhenotypeData with extract_region_name and region_name_col filters properly", {
-  mock_df <- data.frame(
-    chr = c("chr1", "chr1"),
-    gene = c("BRCA1", "TP53"),
-    start = c(100, 200),
-    end = c(150, 250),
-    S1 = c(1.0, 2.0),
-    S2 = c(3.0, 4.0),
-    stringsAsFactors = FALSE
-  )
-  local_mocked_bindings(
-    tabixRegion = function(...) mock_df
-  )
-  result <- loadPhenotypeData(
-    "fake.gz", region = "chr1:1-500",
-    extractRegionName =list("BRCA1"),
-    regionNameCol =2
-  )
-  expect_true(length(result) >= 1)
-})
 
-test_that("loadPhenotypeData stores kept_indices attribute", {
-  mock_df1 <- data.frame(
-    chr = "chr1", start = 100, end = 200, S1 = 1.0,
-    stringsAsFactors = FALSE
-  )
-  call_count <- 0
-  local_mocked_bindings(
-    tabixRegion = function(...) {
-      call_count <<- call_count + 1
-      if (call_count == 1) mock_df1 else tibble::tibble()
-    }
-  )
-  result <- loadPhenotypeData(c("f1.gz", "f2.gz"), region = "chr1:1-500")
-  expect_true(!is.null(attr(result, "kept_indices")))
-  expect_equal(attr(result, "kept_indices"), 1L)
-})
 
-test_that("loadPhenotypeData assigns colnames from region_name_col without extract_region_name", {
-  tmp <- tempfile(fileext = ".tsv")
-  writeLines(c("gene_id\tstart\tend\tS1\tS2",
-               "ENSG001\t100\t200\t1.5\t2.5",
-               "ENSG002\t300\t400\t3.5\t4.5"), tmp)
 
-  result <- loadPhenotypeData(tmp, region = NULL, regionNameCol =1)
-  expect_type(result, "list")
-  expect_length(result, 1)
-  expect_true(all(c("ENSG001", "ENSG002") %in% colnames(result[[1]])))
-  file.remove(tmp)
-})
 
-test_that("loadPhenotypeData errors on empty phenotype file", {
-  tmp <- tempfile(fileext = ".tsv")
-  writeLines(c("gene_id\tstart\tend\tS1\tS2"), tmp)
 
-  expect_error(
-    loadPhenotypeData(tmp, region = NULL),
-    "empty"
-  )
-  file.remove(tmp)
-})
 
-test_that("loadPhenotypeData kept_indices reflects filtering", {
-  tmp1 <- tempfile(fileext = ".tsv")
-  writeLines(c("gene_id\tstart\tend\tS1\tS2",
-               "ENSG001\t100\t200\t1.5\t2.5"), tmp1)
 
-  tmp2 <- tempfile(fileext = ".tsv")
-  writeLines(c("gene_id\tstart\tend\tS1\tS2"), tmp2)
 
-  result <- tryCatch(
-    loadPhenotypeData(c(tmp1, tmp2), region = NULL),
-    error = function(e) NULL
-  )
-  if (!is.null(result)) {
-    idx <- attr(result, "kept_indices")
-    expect_true(1 %in% idx)
-  }
 
-  file.remove(tmp1, tmp2)
-})
 
-test_that("Test filterByCommonSamples",{
-    common_samples <- c("Sample_1", "Sample_2", "Sample_3")
-    dat <- as.data.frame(matrix(c(1,2,3,4,5,6,7,8), nrow=4, ncol=2))
-    rownames(dat) <- c("Sample_1", "Sample_2", "Sample_3", "Sample_4")
-    colnames(dat) <- c("chr1:122:G:C", "chr1:123:G:C")
-    expect_equal(nrow(filterByCommonSamples(dat, common_samples)), 3)
-    expect_equal(rownames(filterByCommonSamples(dat, common_samples)), common_samples)
-})
 
-test_that("Test prepareDataList multiple pheno",{
-    # Create dummy data
-    ## Prepare Genotype Data
-    dummy_geno_data <- matrix(
-        c(1,NA,NA,NA, 0,0,1,1, 2,2,2,2, 1,1,1,2, 2,2,0,1, 0,1,1,2),
-        # Missing Rate, MAF thresh, Zero Var, Var Thresh, Regular values
-        nrow=4, ncol=6)
-    rownames(dummy_geno_data) <- c("Sample_1", "Sample_2", "Sample_3", "Sample_14")
-    colnames(dummy_geno_data) <- c("chr1:122:G:C", "chr1:123:G:C", "chr1:124:G:C", "chr1:125:G:C", "chr1:126:G:C", "chr1:127:G:C")
-    ## Prepare Phenotype Data
-    dummy_pheno_data_one <- matrix(c("chr1", "222", "223", "1","1","2",NA), nrow=7, ncol=1)
-    rownames(dummy_pheno_data_one) <- c("#chr", "start", "end", "Sample_3", "Sample_1", "Sample_2", "Sample_10")
-    dummy_pheno_data_two <- matrix(c("chr1", "222", "223", "2","1","2",NA), nrow=7, ncol=1)
-    rownames(dummy_pheno_data_two) <- c("#chr", "start", "end", "Sample_3", "Sample_1", "Sample_2", "Sample_10")
-    ## Prepare Covariate Data
-    dummy_covar_data <- matrix(c(70,71,72,73, 28,30,15,20, 1,2,3,4), nrow=4, ncol=3)
-    rownames(dummy_covar_data) <- c("Sample_1", "Sample_2", "Sample_3", "Sample_4")
-    colnames(dummy_covar_data) <- c("covar_1", "covar_2", "covar_3")
-    # Set parameters
-    imiss_cutoff <- 0.70
-    maf_cutoff <- 0.025
-    mac_cutoff <- 1.0
-    xvar_cutoff <- 0.3
-    keep_samples <- c("Sample_1", "Sample_2", "Sample_3")
-    res <- prepareDataList(
-        dummy_geno_data, list(dummy_pheno_data_one, dummy_pheno_data_two), list(dummy_covar_data, dummy_covar_data),
-        imiss_cutoff, maf_cutoff, mac_cutoff, xvar_cutoff, phenotypeHeader =3, keepSamples=keep_samples)
-    # Check that Covar, X, and Y have the same number of rows
-    expect_equal(nrow(res$covar[[1]]), 3)
-    expect_equal(nrow(res$X[[1]]), 3)
-    expect_equal(length(res$Y[[1]]), 3)
-    # Check that filter_X occured
-    # expect_equal(ncol(res$X[[1]]), 2)
-    # Check that Covar, X, and Y have the same samples
-    expect_equal(rownames(res$covar[[1]]), rownames(res$X[[1]]))
-    expect_equal(rownames(res$covar[[1]]), rownames(res$Y[[1]]))
-    expect_equal(rownames(res$X[[1]]), rownames(res$Y[[1]]))
-})
 
-test_that("Test prepareDataList",{
-    # Create dummy data
-    ## Prepare Genotype Data
-    dummy_geno_data <- matrix(
-        c(1,NA,NA,NA, 0,0,1,1, 2,2,2,2, 1,1,1,2, 2,2,0,1, 0,1,1,2),
-        # Missing Rate, MAF thresh, Zero Var, Var Thresh, Regular values
-        nrow=4, ncol=6)
-    rownames(dummy_geno_data) <- c("Sample_1", "Sample_2", "Sample_3", "Sample_14")
-    colnames(dummy_geno_data) <- c("chr1:122:G:C", "chr1:123:G:C", "chr1:124:G:C", "chr1:125:G:C", "chr1:126:G:C", "chr1:127:G:C")
-    ## Prepare Phenotype Data
-    dummy_pheno_data <- matrix(
-        c(
-            rep("chr1", 4),
-            rep(10, 4),
-            rep(11, 4),
-            1, NA, NA, NA,
-            1, 1, 2, NA,
-            2, 1, 2, NA
-        ), ncol = 6, nrow = 4
-    )
-    rownames(dummy_pheno_data) <- c("Pheno_1", "Pheno_2", "Pheno_3", "Pheno_4")
-    colnames(dummy_pheno_data) <- c("chrom", "start", "end", "Sample_1", "Sample_2", "Sample_3")
-    dummy_pheno_data <- t(dummy_pheno_data)
-    ## Prepare Covariate Data
-    dummy_covar_data <- matrix(c(70,71,72,73, 28,30,15,20, 1,2,3,4), nrow=4, ncol=3)
-    rownames(dummy_covar_data) <- c("Sample_1", "Sample_2", "Sample_3", "Sample_4")
-    colnames(dummy_covar_data) <- c("covar_1", "covar_2", "covar_3")
-    # Set parameters
-    imiss_cutoff <- 0.70
-    maf_cutoff <- 0.1
-    mac_cutoff <- 1.8
-    xvar_cutoff <- 0.3
-    keep_samples <- c("Sample_1", "Sample_2", "Sample_3")
-    res <- prepareDataList(
-        dummy_geno_data, list(dummy_pheno_data), list(dummy_covar_data), imiss_cutoff, maf_cutoff, mac_cutoff, xvar_cutoff,
-        phenotypeHeader =3, keepSamples=keep_samples)
-    # Check that Covar, X, and Y have the same number of rows
-    expect_equal(nrow(res$covar[[1]]), 3)
-    expect_equal(nrow(res$X[[1]]), 3)
-    expect_equal(nrow(res$Y[[1]]), 3)
-    # Check that filter_X occured
-    expect_equal(ncol(res$X[[1]]), 2)
-    # Check that Covar, X, and Y have the same samples
-    expect_equal(rownames(res$covar[[1]]), rownames(res$X[[1]]))
-    expect_equal(rownames(res$covar[[1]]), rownames(res$Y[[1]]))
-    expect_equal(rownames(res$X[[1]]), rownames(res$Y[[1]]))
-})
-
-test_that("Test prepareXMatrix",{
-    dummy_geno_data <- matrix(
-        c(1,NA,NA,NA,2, 0,0,1,1,0, 2,2,2,2,2, 1,1,1,2,1, 2,2,0,1,2, 0,1,1,2,2),
-        # Missing Rate, MAF thresh, Zero Var, Var Thresh, Regular values
-        nrow=5, ncol=6)
-    rownames(dummy_geno_data) <- c("Sample_1", "Sample_2", "Sample_3", "Sample_4", "Sample_5")
-    colnames(dummy_geno_data) <- c("chr1:122:G:C", "chr1:123:G:C", "chr1:124:G:C", "chr1:125:G:C", "chr1:126:G:C", "chr1:127:G:C")
-    dummy_covar_data <- matrix(
-        c(70,71,72,73,74, 28,30,15,20,22, 1,2,3,4,5),
-        nrow=5, ncol=3)
-    rownames(dummy_covar_data) <- c("Sample_1", "Sample_2", "Sample_3", "Sample_4", "Sample_5")
-    colnames(dummy_covar_data) <- c("covar_1", "covar_2", "covar_3")
-    dummy_data_list <- tibble(
-        covar = list(dummy_covar_data))
-    # Set parameters
-    imiss_cutoff <- 0.70
-    maf_cutoff <- 0.3
-    mac_cutoff <- 1.8
-    xvar_cutoff <- 0.3
-    res <- prepareXMatrix(dummy_geno_data, dummy_data_list, imiss_cutoff, maf_cutoff, mac_cutoff, xvar_cutoff)
-    target <- matrix(c(2,2,0,1,2, 0,1,1,2,2), nrow=5, ncol=2)
-    rownames(target) <- c("Sample_1", "Sample_2", "Sample_3", "Sample_4", "Sample_5")
-    colnames(target) <- c("chr1:126:G:C", "chr1:127:G:C")
-    expect_equal(res, target)
-})
-
-test_that("Test addXResiduals",{
-    dummy_geno_data <- matrix(
-        c(2,2,0,1, 0,1,1,2),
-        nrow=4, ncol=2)
-    dummy_covar_data <- matrix(
-        c(70,71,72,73, 28,30,15,20, 1,2,3,4),
-        nrow=4, ncol=3)
-    dummy_data_list <- tibble(
-        X = list(dummy_geno_data),
-        covar = list(dummy_covar_data))
-    res <- addXResiduals(dummy_data_list)
-    res_X <- .lm.fit(x = cbind(1, dummy_covar_data), y = dummy_geno_data)$residuals %>% as.matrix()
-    res_X_mean <- apply(res_X, 2, mean)
-    res_X_sd <- apply(res_X, 2, sd)
-    expect_equal(res$lm_res_X[[1]], res_X)
-    expect_equal(res$X_resid_mean[[1]], res_X_mean)
-    expect_equal(res$X_resid_sd[[1]], res_X_sd)
-})
-
-test_that("addXResiduals with scale_residuals=TRUE scales output", {
-  dummy_X <- matrix(c(2, 2, 0, 1, 0, 1, 1, 2), nrow = 4, ncol = 2)
-  dummy_covar <- matrix(c(70, 71, 72, 73, 28, 30, 15, 20), nrow = 4, ncol = 2)
-  data_list <- tibble::tibble(
-    X = list(dummy_X),
-    covar = list(dummy_covar)
-  )
-  result <- addXResiduals(data_list, scaleResiduals = TRUE)
-  resid_mat <- result$X_resid[[1]]
-  expect_true(is.matrix(resid_mat))
-  col_means <- apply(resid_mat, 2, mean, na.rm = TRUE)
-  expect_true(all(abs(col_means) < 1e-10))
-})
-
-test_that("Test addYResiduals",{
-    dummy_pheno_data <- rnorm(4)
-    dummy_covar_data <- matrix(
-        c(70,71,72,73, 28,30,15,20, 1,2,3,4),
-        nrow=4, ncol=3)
-    dummy_data_list <- tibble(
-        Y = list(dummy_pheno_data),
-        covar = list(dummy_covar_data))
-    conditions <- c("cond_1")
-    res_Y <- .lm.fit(x = cbind(1, dummy_covar_data), y = dummy_pheno_data)$residuals %>% as.matrix()
-    res_Y_mean <- apply(res_Y, 2, mean)
-    res_Y_sd <- apply(res_Y, 2, sd)
-    res <- addYResiduals(dummy_data_list, conditions)
-    expect_equal(res$lm_res[[1]], res_Y)
-    expect_equal(res$Y_resid_mean[[1]], res_Y_mean)
-    expect_equal(res$Y_resid_sd[[1]], res_Y_sd)
-})
-
-test_that("addYResiduals with scale_residuals=TRUE scales output", {
-  set.seed(42)
-  dummy_Y <- rnorm(5)
-  names(dummy_Y) <- paste0("S", 1:5)
-  dummy_covar <- matrix(rnorm(15), nrow = 5, ncol = 3)
-  rownames(dummy_covar) <- paste0("S", 1:5)
-  data_list <- tibble::tibble(
-    Y = list(dummy_Y),
-    covar = list(dummy_covar)
-  )
-  result <- addYResiduals(data_list, conditions = "cond1", scaleResiduals = TRUE)
-  resid_mat <- result$Y_resid[[1]]
-  expect_true(is.matrix(resid_mat))
-})
 
 # ===========================================================================
 # readBim vroom-based tests
@@ -714,57 +387,9 @@ test_that("readBim returns correct columns and types", {
 # tabixRegion
 # ===========================================================================
 
-test_that("tabixRegion stops when file does not exist", {
-  expect_error(
-    tabixRegion("/nonexistent/path.tsv.gz", "chr1:1-100"),
-    "Input file does not exist"
-  )
-})
 
-test_that("tabixRegion returns empty tibble on NULL cmd_output (error path)", {
-  tmp <- tempfile()
-  writeLines("dummy", tmp)
-  local_mocked_bindings(
-    readTabixRegion = function(...) stop("mock error")
-  )
-  result <- tabixRegion(tmp, "chr1:1-100")
-  expect_true(nrow(result) == 0)
-  file.remove(tmp)
-})
 
-test_that("tabixRegion filters with target and target_column_index", {
-  mock_df <- data.frame(
-    chrom = c("chr1", "chr1", "chr1"),
-    pos = c(100, 200, 300),
-    gene = c("BRCA1", "TP53", "BRCA1"),
-    stringsAsFactors = FALSE
-  )
-  tmp <- tempfile()
-  writeLines("dummy", tmp)
-  local_mocked_bindings(
-    readTabixRegion = function(...) mock_df
-  )
-  result <- tabixRegion(tmp, "chr1:1-500", target = "BRCA1", targetColumnIndex =3)
-  expect_equal(nrow(result), 2)
-  file.remove(tmp)
-})
 
-test_that("tabixRegion filters with target but no target_column_index (text path)", {
-  mock_df <- data.frame(
-    chrom = c("chr1", "chr1"),
-    pos = c(100, 200),
-    name = c("ABC", "DEF"),
-    stringsAsFactors = FALSE
-  )
-  tmp <- tempfile()
-  writeLines("dummy", tmp)
-  local_mocked_bindings(
-    readTabixRegion = function(...) mock_df
-  )
-  result <- tabixRegion(tmp, "chr1:1-500", target = "ABC")
-  expect_equal(nrow(result), 1)
-  file.remove(tmp)
-})
 
 # ===========================================================================
 # NoSNPsError / NoPhenotypeError custom conditions
@@ -778,132 +403,29 @@ test_that("NoSNPsError creates proper error condition", {
   expect_equal(err$message, "test message")
 })
 
-test_that("NoPhenotypeError creates proper error condition", {
-  err <- NoPhenotypeError("no pheno")
-  expect_true(inherits(err, "NoPhenotypeError"))
-  expect_true(inherits(err, "error"))
-  expect_equal(err$message, "no pheno")
-})
 
 # ===========================================================================
 # extractPhenotypeCoordinates
 # ===========================================================================
 
-test_that("extractPhenotypeCoordinates returns correct structure", {
-  pheno <- list(
-    matrix(
-      c("chr1", "100", "200", "1.0", "2.0"),
-      nrow = 5, ncol = 1,
-      dimnames = list(c("#chr", "start", "end", "S1", "S2"), NULL)
-    )
-  )
-  result <- extractPhenotypeCoordinates(pheno)
-  expect_true(is.list(result))
-  expect_true("start" %in% colnames(result[[1]]))
-  expect_true("end" %in% colnames(result[[1]]))
-  expect_true(is.numeric(result[[1]]$start))
-})
-
-# ===========================================================================
-# cleanContextNames
-# ===========================================================================
-
-test_that("cleanContextNames removes gene suffix from context", {
-  context <- c("tissue1_ENSG00001", "tissue2_ENSG00001", "tissue3_ENSG00002")
-  gene <- c("ENSG00001", "ENSG00002")
-  result <- cleanContextNames(context, gene)
-  expect_equal(result, c("tissue1", "tissue2", "tissue3"))
-})
-
-test_that("cleanContextNames handles multiple gene IDs, longest match first", {
-  context <- c("ctx_GENE_LONG", "ctx_GENE")
-  gene <- c("GENE", "GENE_LONG")
-  result <- cleanContextNames(context, gene)
-  expect_equal(result, c("ctx", "ctx"))
-})
-
 # ===========================================================================
 # loadTsvRegion
 # ===========================================================================
 
-test_that("loadTsvRegion reads plain tsv file", {
-  tsv_path <- tempfile(fileext = ".tsv")
-  df <- data.frame(
-    chrom = c("chr1", "chr1", "chr2"),
-    pos = c(100, 200, 300),
-    value = c(1.1, 2.2, 3.3),
-    stringsAsFactors = FALSE
-  )
-  readr::write_tsv(df, tsv_path)
 
-  res <- suppressWarnings(loadTsvRegion(tsv_path))
-  expect_equal(nrow(res), 3)
-  expect_equal(colnames(res), c("chrom", "pos", "value"))
-  expect_equal(res$pos, c(100, 200, 300))
-  file.remove(tsv_path)
-})
-
-test_that("loadTsvRegion reads plain file with region_name filter", {
-  tsv_path <- tempfile(fileext = ".tsv")
-  df <- data.frame(
-    chrom = c("chr1", "chr1", "chr2"),
-    gene = c("BRCA1", "TP53", "BRCA1"),
-    value = c(1.1, 2.2, 3.3),
-    stringsAsFactors = FALSE
-  )
-  readr::write_tsv(df, tsv_path)
-
-  res <- suppressWarnings(loadTsvRegion(tsv_path,
-    extractRegionName ="BRCA1", regionNameCol =2))
-  expect_equal(nrow(res), 2)
-  expect_equal(res$gene, c("BRCA1", "BRCA1"))
-  file.remove(tsv_path)
-})
 
 # ===========================================================================
 # batchLoadTwasWeights
 # ===========================================================================
 
-test_that("batchLoadTwasWeights returns empty list for empty input", {
-  result <- batchLoadTwasWeights(list(), data.frame())
-  expect_equal(result, list())
-})
 
-test_that("batchLoadTwasWeights does not split when within memory limit", {
-  mock_results <- list(
-    gene1 = list(weights = matrix(1:10, nrow = 5)),
-    gene2 = list(weights = matrix(1:10, nrow = 5))
-  )
-  meta_df <- data.frame(
-    region_id = c("gene1", "gene2"),
-    TSS = c(100, 200),
-    stringsAsFactors = FALSE
-  )
-  result <- batchLoadTwasWeights(mock_results, meta_df, maxMemoryPerBatch =1000)
-  expect_equal(names(result), "allGenes")
-  expect_equal(names(result$allGenes), c("gene1", "gene2"))
-})
 
-test_that("batchLoadTwasWeights splits when exceeding memory limit", {
-  mock_results <- list(
-    gene1 = list(weights = matrix(rnorm(10000), nrow = 100)),
-    gene2 = list(weights = matrix(rnorm(10000), nrow = 100)),
-    gene3 = list(weights = matrix(rnorm(10000), nrow = 100))
-  )
-  meta_df <- data.frame(
-    region_id = c("gene1", "gene2", "gene3"),
-    TSS = c(100, 200, 300),
-    stringsAsFactors = FALSE
-  )
-  result <- batchLoadTwasWeights(mock_results, meta_df, maxMemoryPerBatch =0.0001)
-  expect_true(length(result) >= 2)
-})
 
 # ===========================================================================
-# getFilterLbfIndex
+# .colocFilterCsByConcentration
 # ===========================================================================
 
-test_that("getFilterLbfIndex returns numeric index vector", {
+test_that(".colocFilterCsByConcentration returns numeric index vector", {
   set.seed(42)
   n_L <- 5
   n_vars <- 20
@@ -922,7 +444,8 @@ test_that("getFilterLbfIndex returns numeric index vector", {
     converged = TRUE
   )
 
-  result <- getFilterLbfIndex(mock_susie, coverage = 0.5, sizeFactor =0.5)
+  result <- pecotmr:::.colocFilterCsByConcentration(
+    mock_susie, coverage = 0.5, concentration = 0.5)
   expect_true(is.numeric(result))
 })
 
@@ -1021,123 +544,23 @@ test_that("invertMinmaxScaling errors on mismatched lengths", {
 # batchLoadTwasWeights (additional coverage)
 # ===========================================================================
 
-test_that("batchLoadTwasWeights returns empty list for empty input (with message)", {
-  expect_message(
-    result <- batchLoadTwasWeights(list(), data.frame(region_id = character(), TSS = integer())),
-    "No genes"
-  )
-  expect_equal(length(result), 0)
-})
 
-test_that("batchLoadTwasWeights returns single batch when total memory fits", {
-  twas <- list(
-    gene1 = list(a = 1:10),
-    gene2 = list(a = 1:10)
-  )
-  meta <- data.frame(region_id = c("gene1", "gene2"), TSS = c(100, 200))
-  expect_message(
-    result <- batchLoadTwasWeights(twas, meta, maxMemoryPerBatch =1000),
-    "No need to split"
-  )
-  expect_equal(length(result), 1)
-  expect_true(all(c("gene1", "gene2") %in% names(result[[1]])))
-})
 
-test_that("batchLoadTwasWeights splits into multiple batches", {
-  # Create data large enough to require splitting
-  twas <- list(
-    gene1 = rnorm(1e5),
-    gene2 = rnorm(1e5),
-    gene3 = rnorm(1e5)
-  )
-  # Each gene is ~0.76 MB
-  gene_size_mb <- as.numeric(object.size(twas[[1]])) / (1024^2)
-  # Set limit so at most 2 genes fit per batch
-  max_mb <- gene_size_mb * 1.5
-  meta <- data.frame(region_id = c("gene1", "gene2", "gene3"), TSS = c(100, 200, 300))
-  result <- batchLoadTwasWeights(twas, meta, maxMemoryPerBatch =max_mb)
-  expect_true(length(result) >= 2)
-  # All genes should be present across batches
-  allGenes <- unlist(lapply(result, names))
-  expect_true(all(c("gene1", "gene2", "gene3") %in% allGenes))
-})
 
-test_that("batchLoadTwasWeights puts oversized gene in its own batch", {
-  twas <- list(
-    gene_small = list(a = 1:10),
-    gene_big = rnorm(1e6)
-  )
-  big_size_mb <- as.numeric(object.size(twas$gene_big)) / (1024^2)
-  small_size_mb <- as.numeric(object.size(twas$gene_small)) / (1024^2)
-  # Set limit between small and big
-  max_mb <- big_size_mb * 0.5
-  meta <- data.frame(region_id = c("gene_small", "gene_big"), TSS = c(100, 200))
-  result <- batchLoadTwasWeights(twas, meta, maxMemoryPerBatch =max_mb)
-  # Big gene should be in its own batch
-  expect_true(length(result) >= 2)
-})
 
 # ===========================================================================
 # loadCovariateData with real fixture
 # ===========================================================================
 
-test_that("loadCovariateData reads and transposes covariate file", {
-  covar_path <- file.path(test_path("test_data"), "test_covariates.tsv")
-  result <- pecotmr:::loadCovariateData(covar_path)
-  expect_true(is.list(result))
-  expect_equal(length(result), 1L)
-  mat <- result[[1]]
-  expect_true(is.matrix(mat))
-  # Original: 8 rows (PCs) x 101 cols (variable + 100 samples)
-  # After drop col 1 + transpose: 100 rows (samples) x 8 cols (PCs)
-  expect_equal(nrow(mat), 100L)
-  expect_equal(ncol(mat), 8L)
-  expect_true(is.numeric(mat))
-  expect_false(any(is.na(mat)))
-})
 
-test_that("loadCovariateData errors on missing file", {
-  expect_error(
-    pecotmr:::loadCovariateData("/nonexistent/covariate.tsv"),
-    "not found"
-  )
-})
 
 # ===========================================================================
 # loadTsvRegion with real tabix-indexed fixture
 # ===========================================================================
 
-test_that("loadTsvRegion reads full gz file without region", {
-  skip_if_not_installed("Rsamtools")
-  sumstatPath <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
-  result <- loadTsvRegion(sumstatPath)
-  expect_true(is.data.frame(result))
-  expect_equal(nrow(result), 8L)
-  expect_true("BETA" %in% names(result) || "beta" %in% names(result))
-})
 
-test_that("loadTsvRegion queries region via tabix", {
-  skip_if_not_installed("Rsamtools")
-  sumstatPath <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
-  result <- loadTsvRegion(sumstatPath, region = "chr21:17014042-45433269")
-  expect_true(is.data.frame(result))
-  expect_equal(nrow(result), 8L)
-})
 
-test_that("loadTsvRegion errors for non-overlapping region", {
-  skip_if_not_installed("Rsamtools")
-  sumstatPath <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
-  expect_error(loadTsvRegion(sumstatPath, region = "chr1:1-2"), "tabix-indexed")
-})
 
-test_that("loadTsvRegion queries subregion correctly", {
-  skip_if_not_installed("Rsamtools")
-  sumstatPath <- file.path(test_path("test_data"), "test_sumstats.tsv.gz")
-  # Only first 2 variants: pos 17014042 and 18759786
-  result <- loadTsvRegion(sumstatPath, region = "chr21:17014042-18759786")
-  expect_true(is.data.frame(result))
-  expect_equal(nrow(result), 2L)
-})
 
 # ===========================================================================
 # getRefVariantInfo with PLINK2 fixture
@@ -1428,48 +851,8 @@ test_that("matchVariantsToKeep uses position-only matching when no alleles", {
 # standardiseSumstatsColumns
 # ===========================================================================
 
-test_that("standardiseSumstatsColumns renames standard headers", {
-  skip_if_not_installed("MungeSumstats")
-  df <- data.frame(
-    SNPID = "rs1", CHR = 1, POS = 100,
-    EFFECT_ALLELE = "A", OTHER_ALLELE = "G",
-    BETA = 0.5, SE = 0.1, P = 0.01,
-    stringsAsFactors = FALSE
-  )
-  result <- standardiseSumstatsColumns(df)
-  expect_true("chrom" %in% colnames(result))
-  expect_true("pos" %in% colnames(result))
-  expect_true("beta" %in% colnames(result))
-  expect_true("se" %in% colnames(result))
-  expect_true("p" %in% colnames(result))
-})
 
-test_that("standardiseSumstatsColumns applies custom column mapping", {
-  skip_if_not_installed("MungeSumstats")
-  df <- data.frame(
-    SNP = "rs1", CHR = 1, BP = 100,
-    A1 = "A", A2 = "G",
-    BETA = 0.5, SE = 0.1, P = 0.01,
-    MY_FREQ = 0.3,
-    stringsAsFactors = FALSE
-  )
-  col_file <- tempfile(fileext = ".txt")
-  on.exit(unlink(col_file), add = TRUE)
-  writeLines("maf:MY_FREQ", col_file)
 
-  result <- standardiseSumstatsColumns(df, columnFilePath =col_file)
-  expect_true("maf" %in% colnames(result))
-})
-
-test_that("standardiseSumstatsColumns errors on missing column file", {
-  skip_if_not_installed("MungeSumstats")
-  df <- data.frame(SNP = "rs1", CHR = 1, BP = 100, A1 = "A", A2 = "G",
-                   BETA = 0.5, SE = 0.1, P = 0.01, stringsAsFactors = FALSE)
-  expect_error(
-    standardiseSumstatsColumns(df, columnFilePath ="/no/such/file.txt"),
-    "Column mapping file not found"
-  )
-})
 
 # ===========================================================================
 # readGenotypes + extractblockgenotypes: plink2 tests (replacing load_plink2_data)
@@ -1554,94 +937,12 @@ test_that("readGenotypes plink2 sample names match psam IIDs", {
 # loadPhenotypeData with real BED-style tabix-indexed fixture
 # ===========================================================================
 
-test_that("loadPhenotypeData reads compressed file with tabix region", {
-  skip_if_not_installed("Rsamtools")
-  td <- test_path("test_data")
-  pheno <- loadPhenotypeData(
-    file.path(td, "test_phenotypes.tsv.gz"),
-    region = "chr21:17513043-17593579"
-  )
-  expect_true(is.list(pheno))
-  expect_equal(length(pheno), 1L)
-  mat <- pheno[[1]]
-  expect_true(is.matrix(mat))
-  # 4 header rows (seqid, start, end, gene_id) + 100 samples = 104 rows, 1 gene column
-  expect_equal(nrow(mat), 104L)
-  expect_equal(ncol(mat), 1L)
-  # Sample IDs start at row 5
-  expect_equal(rownames(mat)[5], "HG02461")
-})
 
-test_that("loadPhenotypeData filters by extract_region_name and region_name_col", {
-  skip_if_not_installed("Rsamtools")
-  td <- test_path("test_data")
-  pheno <- loadPhenotypeData(
-    file.path(td, "test_phenotypes.tsv.gz"),
-    region = "chr21:17513043-17593579",
-    extractRegionName =list(c("ENSG00000154639")),
-    regionNameCol =4
-  )
-  expect_equal(length(pheno), 1L)
-  expect_true("ENSG00000154639" %in% colnames(pheno[[1]]))
-})
 
-test_that("loadPhenotypeData assigns gene names with region_name_col", {
-  skip_if_not_installed("Rsamtools")
-  td <- test_path("test_data")
-  pheno <- loadPhenotypeData(
-    file.path(td, "test_phenotypes.tsv.gz"),
-    region = "chr21:17513043-17593579",
-    regionNameCol =4
-  )
-  expect_equal(colnames(pheno[[1]]), "ENSG00000154639")
-})
 
-test_that("loadPhenotypeData returns multiple genes for broad region", {
-  skip_if_not_installed("Rsamtools")
-  td <- test_path("test_data")
-  pheno <- loadPhenotypeData(
-    file.path(td, "test_phenotypes.tsv.gz"),
-    region = "chr21:14000000-18000000",
-    regionNameCol =4
-  )
-  expect_equal(length(pheno), 1L)
-  expect_true(ncol(pheno[[1]]) > 1)
-  expect_true("ENSG00000154639" %in% colnames(pheno[[1]]))
-})
 
-test_that("loadPhenotypeData errors on non-overlapping region", {
-  skip_if_not_installed("Rsamtools")
-  td <- test_path("test_data")
-  expect_error(
-    loadPhenotypeData(
-      file.path(td, "test_phenotypes.tsv.gz"),
-      region = "chr21:1-100"
-    ),
-    "empty"
-  )
-})
 
-test_that("loadPhenotypeData reads uncompressed file without region", {
-  td <- test_path("test_data")
-  pheno <- loadPhenotypeData(
-    file.path(td, "test_phenotypes.tsv"),
-    region = NULL,
-    regionNameCol =4
-  )
-  expect_equal(length(pheno), 1L)
-  # All 93 genes in the uncompressed file
-  expect_equal(ncol(pheno[[1]]), 93L)
-})
 
-test_that("loadPhenotypeData stores kept_indices attribute", {
-  skip_if_not_installed("Rsamtools")
-  td <- test_path("test_data")
-  pheno <- loadPhenotypeData(
-    file.path(td, "test_phenotypes.tsv.gz"),
-    region = "chr21:17513043-17593579"
-  )
-  expect_equal(attr(pheno, "kept_indices"), 1L)
-})
 
 # =============================================================================
 # Removed during the post-S4-refactor cleanup
@@ -1653,9 +954,9 @@ test_that("loadPhenotypeData stores kept_indices attribute", {
 #   * loadRegionalAssociationData    -> use QtlDataset()
 #   * loadRegionalUnivariateData     -> use QtlDataset()
 #   * loadRegionalRegressionData     -> use QtlDataset()
-#   * loadRegionalMultivariateData   -> use MultiTaskQtlDataset()
+#   * loadRegionalMultivariateData   -> use MultiStudyQtlDataset()
 #   * loadRegionalFunctionalData     -> use QtlDataset()
-#   * loadMultitaskRegionalData      -> use MultiTaskQtlDataset()
+#   * loadMultitaskRegionalData      -> use MultiStudyQtlDataset()
 #   * loadRssData                    -> use GwasSumStats() / QtlSumStats() +
 #                                       summaryStatsQc()
 #   * loadTwasWeights                -> use TwasWeights() / TwasWeightsEntry()
@@ -1682,3 +983,321 @@ test_that("loadPhenotypeData stores kept_indices attribute", {
 # related identifiers, so no `$finemappingEntry` /
 # `FineMappingEntry(variantIds=...)` substitutions were necessary here.
 # =============================================================================
+
+
+# Tests for genotype loading via readGenotypes + extractBlockGenotypes,
+# and the loadGenotypeRegion dispatcher.
+
+# Fixtures: 100 samples x 349 variants on chr21:17513228-17592874
+test_data_dir <- test_path("test_data")
+plink_prefix <- file.path(test_data_dir, "test_variants")
+vcf_path <- file.path(test_data_dir, "test_variants.vcf.gz")
+gds_path <- file.path(test_data_dir, "test_variants.gds")
+region_all <- "chr21:17513228-17592874"
+region_sub <- "chr21:17513228-17550000"
+
+# Expected dimensions
+n_samples <- 100L
+n_variants <- 349L
+
+test_that("format detection supports dotted PLINK2 prefixes", {
+  tmp <- tempfile("plink2_dotted_prefix_")
+  prefix <- file.path(dirname(tmp), "ADSP.R4.EUR.chr21")
+  file.create(paste0(prefix, ".pgen"), paste0(prefix, ".pvar"), paste0(prefix, ".psam"))
+  on.exit(unlink(paste0(prefix, c(".pgen", ".pvar", ".psam"))), add = TRUE)
+
+  expect_equal(pecotmr:::.h2DetectFormat(prefix), "plink2")
+})
+
+# Shared helper: validate the output structure from loadGenotypeRegion
+# (with returnVariantInfo=TRUE)
+check_genotype_result <- function(result, expected_nrow = n_samples, expected_ncol = n_variants,
+                                  label = "") {
+  expect_true(is.list(result), label = paste(label, "is list"))
+  expect_named(result, c("X", "variant_info"), ignore.order = TRUE)
+  expect_true(is.matrix(result$X))
+  expect_true(is.numeric(result$X))
+  expect_equal(nrow(result$X), expected_nrow)
+  expect_equal(ncol(result$X), expected_ncol)
+  expect_true(is.data.frame(result$variant_info))
+  expect_true(all(c("chrom", "id", "pos", "A2", "A1") %in% names(result$variant_info)))
+  expect_equal(nrow(result$variant_info), expected_ncol)
+  # Column names of X match variant IDs
+  expect_equal(colnames(result$X), result$variant_info$id)
+  # Dosage values should be non-negative integers (0, 1, 2 for biallelic;
+  # multiallelic VCF sites can have higher values)
+  vals <- result$X[!is.na(result$X)]
+  expect_true(all(vals >= 0), label = paste(label, "dosage non-negative"))
+  expect_true(all(vals == round(vals)), label = paste(label, "dosage integer-valued"))
+}
+
+# --- readGenotypes: PLINK1 (snpStats) ----------------------------------------
+
+test_that("readGenotypes creates plink1 handle", {
+  skip_if_not_installed("snpStats")
+  handle <- readGenotypes(plink_prefix, format = "plink1")
+  expect_s4_class(handle, "GenotypeHandle")
+  expect_equal(handle@format, "plink1")
+  expect_equal(handle@nSamples, n_samples)
+  expect_equal(nrow(handle@snpInfo), n_variants)
+})
+
+test_that("loadGenotypeRegion loads plink1 via dispatch", {
+  skip_if_not_installed("snpStats")
+  # Use .genotype suffix plink1 files tested elsewhere in test_file_utils
+  plink1_path <- file.path(test_data_dir, "protocol_example.genotype")
+  skip_if(!file.exists(paste0(plink1_path, ".bed")), "plink1 test fixture missing")
+  result <- loadGenotypeRegion(plink1_path, returnVariantInfo = TRUE)
+  expect_true(is.list(result))
+  expect_true(is.matrix(result$X))
+})
+
+# --- readGenotypes: PLINK2 (pgenlibr) ----------------------------------------
+
+test_that("readGenotypes creates plink2 handle", {
+  skip_if_not_installed("pgenlibr")
+  handle <- readGenotypes(plink_prefix, format = "plink2")
+  expect_s4_class(handle, "GenotypeHandle")
+  expect_equal(handle@format, "plink2")
+  expect_equal(handle@nSamples, n_samples)
+  expect_equal(nrow(handle@snpInfo), n_variants)
+})
+
+test_that("extractBlockGenotypes works for plink2", {
+  skip_if_not_installed("pgenlibr")
+  handle <- readGenotypes(plink_prefix, format = "plink2")
+  rse <- extractBlockGenotypes(handle, seq_len(nrow(handle@snpInfo)))
+  expect_s4_class(rse, "SummarizedExperiment")
+  dosage <- SummarizedExperiment::assay(rse, "dosage")
+  expect_equal(nrow(dosage), n_variants)
+  expect_equal(ncol(dosage), n_samples)
+})
+
+test_that("loadGenotypeRegion filters plink2 by region", {
+  skip_if_not_installed("pgenlibr")
+  result <- loadGenotypeRegion(plink_prefix, region = region_sub,
+                                  returnVariantInfo = TRUE)
+  check_genotype_result(result, expected_ncol = 134L, label = "plink2 region")
+  expect_true(all(result$variant_info$pos >= 17513228 & result$variant_info$pos <= 17550000))
+})
+
+test_that("loadGenotypeRegion filters plink2 indels", {
+  skip_if_not_installed("pgenlibr")
+  result <- loadGenotypeRegion(plink_prefix, keepIndel = FALSE,
+                                  returnVariantInfo = TRUE)
+  expect_lt(ncol(result$X), n_variants)
+  expect_true(all(nchar(result$variant_info$A1) == 1))
+  expect_true(all(nchar(result$variant_info$A2) == 1))
+})
+
+test_that("loadGenotypeRegion errors on empty region for plink2", {
+  skip_if_not_installed("pgenlibr")
+  expect_error(loadGenotypeRegion(plink_prefix, region = "chr1:1-2"))
+})
+
+# --- readGenotypes: VCF (VariantAnnotation) -----------------------------------
+
+test_that("readGenotypes creates vcf handle", {
+  skip_if_not_installed("VariantAnnotation")
+  handle <- readGenotypes(vcf_path, format = "vcf")
+  expect_s4_class(handle, "GenotypeHandle")
+  expect_equal(handle@format, "vcf")
+  expect_equal(handle@nSamples, n_samples)
+  expect_equal(nrow(handle@snpInfo), n_variants)
+})
+
+test_that("loadGenotypeRegion loads VCF via dispatch", {
+  skip_if_not_installed("VariantAnnotation")
+  result <- suppressWarnings(loadGenotypeRegion(vcf_path, returnVariantInfo = TRUE))
+  check_genotype_result(result, label = "dispatch vcf")
+})
+
+test_that("loadGenotypeRegion filters VCF by region", {
+  skip_if_not_installed("VariantAnnotation")
+  skip_if_not_installed("Rsamtools")
+  result <- suppressWarnings(loadGenotypeRegion(vcf_path, region = region_sub,
+                                                   returnVariantInfo = TRUE))
+  check_genotype_result(result, expected_ncol = 134L, label = "vcf region")
+  expect_true(all(result$variant_info$pos >= 17513228 & result$variant_info$pos <= 17550000))
+})
+
+test_that("loadGenotypeRegion filters VCF indels", {
+  skip_if_not_installed("VariantAnnotation")
+  result <- suppressWarnings(loadGenotypeRegion(vcf_path, keepIndel = FALSE,
+                                                   returnVariantInfo = TRUE))
+  expect_lt(ncol(result$X), n_variants)
+  expect_true(all(nchar(result$variant_info$A1) == 1))
+  expect_true(all(nchar(result$variant_info$A2) == 1))
+})
+
+# --- readGenotypes: GDS (SNPRelate) -------------------------------------------
+
+test_that("readGenotypes creates gds handle", {
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  handle <- readGenotypes(gds_path, format = "gds")
+  expect_s4_class(handle, "GenotypeHandle")
+  expect_equal(handle@format, "gds")
+  expect_equal(handle@nSamples, n_samples)
+  expect_equal(nrow(handle@snpInfo), n_variants)
+})
+
+test_that("loadGenotypeRegion loads GDS via dispatch", {
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  result <- loadGenotypeRegion(gds_path, returnVariantInfo = TRUE)
+  check_genotype_result(result, label = "dispatch gds")
+})
+
+test_that("loadGenotypeRegion filters GDS by region", {
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  result <- loadGenotypeRegion(gds_path, region = region_sub,
+                                  returnVariantInfo = TRUE)
+  check_genotype_result(result, expected_ncol = 134L, label = "gds region")
+  expect_true(all(result$variant_info$pos >= 17513228 & result$variant_info$pos <= 17550000))
+})
+
+test_that("loadGenotypeRegion filters GDS indels", {
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  result <- loadGenotypeRegion(gds_path, keepIndel = FALSE,
+                                  returnVariantInfo = TRUE)
+  expect_lt(ncol(result$X), n_variants)
+  expect_true(all(nchar(result$variant_info$A1) == 1))
+  expect_true(all(nchar(result$variant_info$A2) == 1))
+})
+
+test_that("loadGenotypeRegion errors on empty region for GDS", {
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  expect_error(loadGenotypeRegion(gds_path, region = "chr1:1-2"))
+})
+
+# --- Cross-format consistency -------------------------------------------------
+
+test_that("all formats return same dimensions and positions via loadGenotypeRegion", {
+  skip_if_not_installed("snpStats")
+  skip_if_not_installed("pgenlibr")
+  skip_if_not_installed("VariantAnnotation")
+  skip_if_not_installed("SNPRelate")
+
+  p2 <- loadGenotypeRegion(plink_prefix, returnVariantInfo = TRUE)
+  vcf <- suppressWarnings(loadGenotypeRegion(vcf_path, returnVariantInfo = TRUE))
+  gds <- loadGenotypeRegion(gds_path, returnVariantInfo = TRUE)
+
+  # Same dimensions
+  expect_equal(dim(p2$X), dim(vcf$X))
+  expect_equal(dim(p2$X), dim(gds$X))
+
+  # Same positions
+  expect_equal(p2$variant_info$pos, vcf$variant_info$pos)
+  expect_equal(p2$variant_info$pos, gds$variant_info$pos)
+})
+
+test_that("PLINK1 and PLINK2 readGenotypes return consistent alleles", {
+  skip_if_not_installed("snpStats")
+  skip_if_not_installed("pgenlibr")
+  h1 <- readGenotypes(plink_prefix, format = "plink1")
+  h2 <- readGenotypes(plink_prefix, format = "plink2")
+
+  expect_equal(h1@snpInfo$A1, h2@snpInfo$A1)
+  expect_equal(h1@snpInfo$A2, h2@snpInfo$A2)
+})
+
+# --- loadGenotypeRegion (dispatch) -----------------------------------------
+
+test_that("loadGenotypeRegion dispatches to VCF by extension", {
+  skip_if_not_installed("VariantAnnotation")
+  result <- suppressWarnings(loadGenotypeRegion(vcf_path, returnVariantInfo = TRUE))
+  check_genotype_result(result, label = "dispatch vcf")
+})
+
+test_that("loadGenotypeRegion dispatches to GDS by extension", {
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  result <- loadGenotypeRegion(gds_path, returnVariantInfo = TRUE)
+  check_genotype_result(result, label = "dispatch gds")
+})
+
+test_that("loadGenotypeRegion dispatches to PLINK2 by prefix", {
+  skip_if_not_installed("pgenlibr")
+  result <- loadGenotypeRegion(plink_prefix, returnVariantInfo = TRUE)
+  check_genotype_result(result, label = "dispatch plink2")
+})
+
+test_that("loadGenotypeRegion returns matrix when returnVariantInfo=FALSE", {
+  skip_if_not_installed("pgenlibr")
+  result <- loadGenotypeRegion(plink_prefix)
+  expect_true(is.matrix(result))
+  expect_equal(nrow(result), n_samples)
+  expect_equal(ncol(result), n_variants)
+})
+
+test_that("loadGenotypeRegion applies region filter", {
+  skip_if_not_installed("pgenlibr")
+  result <- loadGenotypeRegion(plink_prefix, region = region_sub, returnVariantInfo = TRUE)
+  expect_equal(ncol(result$X), 134L)
+})
+
+test_that("loadGenotypeRegion errors on unrecognized format", {
+  expect_error(loadGenotypeRegion("/nonexistent/file.xyz"), "not found")
+})
+
+# ===========================================================================
+# Tests migrated from test_dataStructures.R (extractBlockGenotypes)
+# ===========================================================================
+
+test_that("extractBlockGenotypes returns SummarizedExperiment", {
+  skip_if_not_installed("pgenlibr")
+  stem <- test_path("test_data", "test_variants")
+  handle <- readGenotypes(stem, format = "plink2")
+  n_snps <- nrow(handle@snpInfo)
+  skip_if(n_snps == 0, "No SNPs in handle")
+
+  rse <- extractBlockGenotypes(handle, seq_len(min(5L, n_snps)))
+  expect_s4_class(rse, "SummarizedExperiment")
+  expect_true("dosage" %in% SummarizedExperiment::assayNames(rse))
+  dosage <- SummarizedExperiment::assay(rse, "dosage")
+  # Bioc convention: variants x samples
+  expect_equal(nrow(dosage), min(5L, n_snps))
+  expect_equal(ncol(dosage), handle@nSamples)
+  # rowRanges should have variant info
+  rr <- SummarizedExperiment::rowRanges(rse)
+  expect_true("A1" %in% names(S4Vectors::mcols(rr)))
+  expect_true("A2" %in% names(S4Vectors::mcols(rr)))
+})
+
+# =============================================================================
+# adjustPips
+# =============================================================================
+
+# Build a minimal FineMappingEntry with a known lbf_variable so PIP
+# renormalization can be checked end-to-end.
+.makeAdjustEntry <- function(vids, L = 2L) {
+  p <- length(vids)
+  set.seed(11L)
+  lbf <- matrix(rnorm(L * p), nrow = L, ncol = p)
+  colnames(lbf) <- vids
+  alpha <- lbfToAlpha(lbf)
+  pip <- as.numeric(1 - apply(1 - alpha, 2, prod))
+  FineMappingEntry(
+    variantIds = vids,
+    trimmedFit = list(
+      pip          = pip,
+      alpha        = alpha,
+      lbf_variable = lbf,
+      mu           = matrix(0, L, p),
+      X_column_scale_factors = rep(1, p)
+    ),
+    topLoci = data.frame(
+      variant_id = vids,
+      pip        = pip,
+      betahat    = rep(0, p),
+      sebetahat  = rep(1, p),
+      stringsAsFactors = FALSE
+    )
+  )
+}
+
+

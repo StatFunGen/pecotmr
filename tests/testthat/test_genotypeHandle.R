@@ -279,3 +279,53 @@ test_that("GenotypeHandle ldMeta: region with no covering row errors", {
     "No data for chromosome|no LD-meta row covers"
   )
 })
+
+# === Tests migrated from test_h2ClassesSumstats.R (GenotypeHandle) ===
+
+test_that("GenotypeHandle constructs and validates correctly", {
+  obj <- new("GenotypeHandle",
+    path = "/tmp/test.gds",
+    format = "gds",
+    snpInfo = make_test_snp_info(),
+    nSamples = 100L,
+    sampleIds = paste0("sample_", 1:100),
+    pgenPtr = NULL
+  )
+  expect_s4_class(obj, "GenotypeHandle")
+  expect_equal(obj@format, "gds")
+  expect_true(methods::validObject(obj))
+})
+
+
+test_that("GenotypeHandle accepts all valid formats", {
+  for (fmt in c("gds", "vcf", "plink1", "plink2")) {
+    obj <- new("GenotypeHandle",
+      path = "/tmp/test",
+      format = fmt,
+      snpInfo = data.frame(),
+      nSamples = 0L,
+      sampleIds = character(),
+      pgenPtr = NULL
+    )
+    expect_true(methods::validObject(obj))
+  }
+})
+
+
+test_that("GenotypeHandle rejects invalid format", {
+  expect_error(
+    methods::validObject(
+      new("GenotypeHandle",
+        path = "/tmp/test",
+        format = "bgen",
+        snpInfo = data.frame(),
+        nSamples = 0L,
+        sampleIds = character(),
+        pgenPtr = NULL
+      )
+    ),
+    "format.*must be one of"
+  )
+})
+
+

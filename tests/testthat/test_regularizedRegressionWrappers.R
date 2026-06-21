@@ -1,67 +1,109 @@
-context("mrmashWrapper")
+context("SS-TWAS: weights, pipeline, and omnibus combination")
 
-test_that("filterMixtureComponents filters zero matrices", {
-  U <- list(
-    mat1 = matrix(c(1, 0.5, 0.5, 1), 2, 2, dimnames = list(c("A", "B"), c("A", "B"))),
-    mat2 = matrix(0, 2, 2, dimnames = list(c("A", "B"), c("A", "B"))),
-    mat3 = matrix(c(0.8, 0.3, 0.3, 0.9), 2, 2, dimnames = list(c("A", "B"), c("A", "B")))
+# Previous TwasWeights-class tests used the legacy constructor
+# `TwasWeights(weights = list(...), variantIds = ..., standardized = ...)`.
+# The new `TwasWeights` is a DFrame collection class with (study,
+# context, trait, method, entry) columns where each entry is a
+# `TwasWeightsEntry` S4 object carrying weights / fits / cvPerformance.
+# Class-shape tests for the new collection should live alongside the
+# pipeline tests and assert via accessors (`getWeights`, `getStudy`,
+# `getCvPerformance`, etc.) — not against legacy slot shapes.
+#
+# `twasAnalysis()` was collapsed into the unified `twasZ()` dispatcher
+# (task #37); its tests are removed here.
+# `twasWeightsSumstatPipeline()` was removed without replacement in the
+# S4 refactor (twasWeightsPipeline now dispatches directly on
+# `QtlSumStats` / `QtlDataset` / `MultiStudyQtlDataset`).
+#
+# What remains: tests of the internal SuSiE-RSS weight extractors that
+# are still present in `R/twasWeights.R` (`.susieRssExtractWeights`,
+# `susieRssWeights`, `susieInfRssWeights`, `fitSusieInfThenSusieRss`).
+
+# =============================================================================
+# SuSiE-RSS weight extraction
+# =============================================================================
+
+test_that(".susie_rss_extract_weights returns correct-length vector", {
+  skip_if_not_installed("susieR")
+  set.seed(42)
+  p <- 20
+  n <- 500
+  R <- diag(p)
+  z <- rnorm(p)
+  w <- pecotmr:::.susieRssExtractWeights(
+    fit = NULL, z = z, R = R, n = n,
+    requiredFields = c("alpha", "mu", "X_column_scale_factors"),
+    fitArgs = list(L = 5)
   )
-  w <- c(mat1 = 0.5, mat2 = 0.3, mat3 = 0.2)
-  conditions_to_keep <- c("A", "B")
-
-  result <- filterMixtureComponents(conditions_to_keep, U, w)
-
-  # mat2 should be removed (all zeros)
-  expect_true(!"mat2" %in% names(result$U))
-  # weights should be rescaled to maintain sum
-  expect_equal(sum(result$w), sum(w), tolerance = 1e-10)
+  expect_equal(length(w), p)
+  expect_true(all(is.finite(w)))
 })
 
-test_that("filterMixtureComponents removes low weight components", {
-  U <- list(
-    mat1 = matrix(c(1, 0.5, 0.5, 1), 2, 2, dimnames = list(c("A", "B"), c("A", "B"))),
-    mat2 = matrix(c(0.8, 0.3, 0.3, 0.9), 2, 2, dimnames = list(c("A", "B"), c("A", "B")))
-  )
-  w <- c(mat1 = 0.999, mat2 = 0.00001)  # mat2 below default cutoff
-  conditions_to_keep <- c("A", "B")
-
-  result <- filterMixtureComponents(conditions_to_keep, U, w, wCutoff = 1e-04)
-  expect_true(!"mat2" %in% names(result$U))
+test_that("susieRssWeights follows (stat, LD) convention", {
+  skip_if_not_installed("susieR")
+  set.seed(42)
+  p <- 20
+  n <- 500
+  R <- diag(p)
+  z <- rnorm(p)
+  stat <- list(b = z / sqrt(n), cor = z / sqrt(n), z = z, n = rep(n, p))
+  w <- susieRssWeights(stat, R, methodArgs = list(L = 5))
+  expect_equal(length(w), p)
+  expect_true(all(is.finite(w)))
 })
 
-test_that("filterMixtureComponents errors on missing condition", {
-  U <- list(
-    mat1 = matrix(c(1, 0.5, 0.5, 1), 2, 2, dimnames = list(c("A", "B"), c("A", "B")))
-  )
-  w <- c(mat1 = 1.0)
-  expect_error(filterMixtureComponents(c("A", "C"), U, w), "not found in matrix")
+test_that("susieRssWeights retains fit when retainFit = TRUE", {
+  skip_if_not_installed("susieR")
+  set.seed(42)
+  p <- 20
+  n <- 500
+  R <- diag(p)
+  z <- rnorm(p)
+  stat <- list(b = z / sqrt(n), cor = z / sqrt(n), z = z, n = rep(n, p))
+  w <- susieRssWeights(stat, R, retainFit = TRUE, methodArgs = list(L = 5))
+  expect_false(is.null(attr(w, "fit")))
 })
 
-test_that("filterMixtureComponents subsets conditions", {
-  U <- list(
-    mat1 = matrix(c(1, 0.5, 0.2, 0.5, 1, 0.3, 0.2, 0.3, 1), 3, 3,
-                  dimnames = list(c("A", "B", "C"), c("A", "B", "C")))
-  )
-  w <- c(mat1 = 1.0)
-
-  result <- filterMixtureComponents(c("A", "B"), U, w)
-  expect_equal(nrow(result$U[[1]]), 2)
-  expect_equal(ncol(result$U[[1]]), 2)
+test_that("susieInfRssWeights works", {
+  skip_if_not_installed("susieR")
+  set.seed(42)
+  p <- 20
+  n <- 500
+  R <- diag(p)
+  z <- rnorm(p)
+  stat <- list(b = z / sqrt(n), cor = z / sqrt(n), z = z, n = rep(n, p))
+  w <- susieInfRssWeights(stat, R, methodArgs = list(L = 5))
+  expect_equal(length(w), p)
+  expect_true(all(is.finite(w)))
 })
 
-# ===========================================================================
-# Tests from test_misc_round3.R (mrmashWrapper coverage boost)
-# ===========================================================================
+# =============================================================================
+# Two-stage SuSiE-RSS fitting
+# =============================================================================
 
-# =========================================================================
-# mrmashWrapper.R: compute_w0 (lines 284-298)
-# =========================================================================
+test_that("fitSusieInfThenSusieRss returns two fits", {
+  skip_if_not_installed("susieR")
+  set.seed(42)
+  p <- 20
+  n <- 500
+  R <- diag(p)
+  z <- rnorm(p)
+  fits <- fitSusieInfThenSusieRss(z, R, n, args = list(L = 5))
+  expect_true(is.list(fits))
+  expect_true("susie" %in% names(fits))
+  expect_true("susieInf" %in% names(fits))
+  expect_true("susieInf" %in% class(fits$susieInf))
+  expect_true("susieRss" %in% class(fits$susie))
+})
+
+# === Tests migrated from test_mrmashWrapper.R (mr.mash + glasso/glmnet coef helpers) ===
 
 test_that("compute_w0 returns uniform weights when ncomps == 1", {
   Bhat <- matrix(c(1, 0, 0, 2, 0, 0), nrow = 3, ncol = 2)
   result <- pecotmr:::compute_w0(Bhat, ncomps = 1)
   expect_equal(result, 1)
 })
+
 
 test_that("compute_w0 handles all-zero Bhat by returning uniform weights", {
   # When Bhat is all zero, prop_nonzero = 0
@@ -71,6 +113,7 @@ test_that("compute_w0 handles all-zero Bhat by returning uniform weights", {
   expect_equal(result, rep(1 / 4, 4))
   expect_equal(sum(result), 1)
 })
+
 
 test_that("compute_w0 distributes weight based on nonzero rows when ncomps > 1", {
   # 2 out of 4 rows have nonzero entries
@@ -88,12 +131,14 @@ test_that("compute_w0 distributes weight based on nonzero rows when ncomps > 1",
 # mrmashWrapper.R: rescale_cov_w0 (lines 300-329)
 # =========================================================================
 
+
 test_that("rescale_cov_w0 removes null component and renormalizes", {
   w0 <- c(null = 0.3, XtX_1 = 0.2, XtX_2 = 0.1, FLASH_1 = 0.15, FLASH_2 = 0.25)
   result <- pecotmr:::rescale_cov_w0(w0)
   expect_false("null" %in% names(result))
   expect_equal(sum(result), 1, tolerance = 1e-10)
 })
+
 
 test_that("rescale_cov_w0 handles all-zero non-null weights", {
   w0 <- c(null = 1.0, XtX_1 = 0, XtX_2 = 0, FLASH_1 = 0)
@@ -102,6 +147,7 @@ test_that("rescale_cov_w0 handles all-zero non-null weights", {
   expect_equal(sum(result), 1, tolerance = 1e-10)
   expect_true(all(result == result[1]))  # all equal
 })
+
 
 test_that("rescale_cov_w0 groups correctly by prior group prefix", {
   w0 <- c(null = 0.5, PCA_1 = 0.1, PCA_2 = 0.2, tFLASH_1 = 0.1, tFLASH_2 = 0.1)
@@ -116,12 +162,14 @@ test_that("rescale_cov_w0 groups correctly by prior group prefix", {
 # (lines 333-372)
 # =========================================================================
 
+
 test_that("grid_max returns scaled grid_min when bhat^2 <= sbhat^2", {
   bhat <- c(0.1, 0.2)
   sbhat <- c(1.0, 1.0)
   result <- pecotmr:::gridMax(bhat, sbhat)
   expect_equal(result, 8 * pecotmr:::gridMin(bhat, sbhat))
 })
+
 
 test_that("grid_max returns 2*sqrt(max(bhat^2 - sbhat^2)) otherwise", {
   bhat <- c(5, 1)
@@ -131,10 +179,12 @@ test_that("grid_max returns 2*sqrt(max(bhat^2 - sbhat^2)) otherwise", {
   expect_equal(result, expected)
 })
 
+
 test_that("autoselect_mixsd returns 2-element vector when mult == 0", {
   result <- pecotmr:::autoselectMixsd(0.01, 1.0, mult = 0)
   expect_equal(result, c(0, 0.5))
 })
+
 
 test_that("autoselect_mixsd returns valid grid with sqrt(2) mult", {
   result <- pecotmr:::autoselectMixsd(0.01, 1.0, mult = sqrt(2))
@@ -145,6 +195,7 @@ test_that("autoselect_mixsd returns valid grid with sqrt(2) mult", {
   expect_true(all(result > 0))
 })
 
+
 test_that("compute_grid produces a valid grid from summary statistics", {
   set.seed(42)
   bhat <- matrix(rnorm(20, sd = 2), nrow = 10, ncol = 2)
@@ -154,6 +205,7 @@ test_that("compute_grid produces a valid grid from summary statistics", {
   expect_true(length(result) > 0)
   expect_true(all(result > 0))
 })
+
 
 test_that("compute_grid handles NA and zero sbhat values", {
   bhat <- c(1, 2, NA, 4, 5)
@@ -171,6 +223,7 @@ test_that("compute_grid handles NA and zero sbhat values", {
 # base R function, not in pecotmr's namespace. We skip these tests and instead
 # test the downstream validation that we CAN exercise.
 
+
 test_that("mrmashWrapper errors when X and Y are not matrices", {
   skip_if_not_installed("glmnet")
   skip_if_not_installed("mr.mashr")
@@ -178,12 +231,14 @@ test_that("mrmashWrapper errors when X and Y are not matrices", {
                "matrices")
 })
 
+
 test_that("mrmashWrapper errors when X and Y row counts differ", {
   skip_if_not_installed("glmnet")
   skip_if_not_installed("mr.mashr")
   expect_error(mrmashWrapper(matrix(1:6, nrow = 3, ncol = 2), matrix(1:8, nrow = 4, ncol = 2)),
                "same number of rows")
 })
+
 
 test_that("mrmashWrapper errors when prior_grid is not a vector", {
   skip_if_not_installed("glmnet")
@@ -194,6 +249,7 @@ test_that("mrmashWrapper errors when prior_grid is not a vector", {
                "priorGrid must be a vector")
 })
 
+
 test_that("mrmashWrapper errors when no prior matrices and canonical_prior_matrices is FALSE", {
   skip_if_not_installed("glmnet")
   skip_if_not_installed("mr.mashr")
@@ -203,6 +259,7 @@ test_that("mrmashWrapper errors when no prior matrices and canonical_prior_matri
                                canonicalPriorMatrices = FALSE),
                "dataDrivenPriorMatrices")
 })
+
 
 test_that("mrmashWrapper warns when Y has missing and B_init_method is glasso", {
   skip_if_not_installed("glmnet")
@@ -231,6 +288,7 @@ test_that("mrmashWrapper warns when Y has missing and B_init_method is glasso", 
 # mrmashWrapper.R: computeCoefficientsGlasso (lines 211-240)
 # =========================================================================
 
+
 test_that("computeCoefficientsGlasso runs without Xnew", {
   skip_if_not_installed("glmnet")
   set.seed(42)
@@ -246,6 +304,7 @@ test_that("computeCoefficientsGlasso runs without Xnew", {
   expect_equal(ncol(result$Bhat), r)
   expect_null(result$Yhat_new)
 })
+
 
 test_that("computeCoefficientsGlasso runs with Xnew", {
   skip_if_not_installed("glmnet")
@@ -267,6 +326,7 @@ test_that("computeCoefficientsGlasso runs with Xnew", {
 # mrmashWrapper.R: computeCoefficientsUnivGlmnet (lines 243-281)
 # =========================================================================
 
+
 test_that("computeCoefficientsUnivGlmnet runs without Xnew", {
   skip_if_not_installed("glmnet")
   set.seed(42)
@@ -284,6 +344,7 @@ test_that("computeCoefficientsUnivGlmnet runs without Xnew", {
   expect_null(result$Yhat_new)
 })
 
+
 test_that("computeCoefficientsUnivGlmnet runs with Xnew", {
   skip_if_not_installed("glmnet")
   set.seed(42)
@@ -300,6 +361,7 @@ test_that("computeCoefficientsUnivGlmnet runs with Xnew", {
   expect_equal(ncol(result$Yhat_new), r)
   expect_equal(colnames(result$Yhat_new), colnames(Y))
 })
+
 
 test_that("computeCoefficientsUnivGlmnet handles NA in Y", {
   skip_if_not_installed("glmnet")
@@ -323,3 +385,4 @@ test_that("computeCoefficientsUnivGlmnet handles NA in Y", {
 # Note: Cannot mock base::exists() via local_mocked_bindings.
 # The seed-check message on line 107-108 would require removing .Random.seed
 # from the global environment, which is not safe to do in tests.
+

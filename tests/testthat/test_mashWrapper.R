@@ -1123,64 +1123,70 @@ test_that("extractFlattenSumstatsFromNested returns NULL when not found", {
 # loadMultitraitTensorqtlSumstat: input validation
 # ===========================================================================
 
-test_that("loadMultitraitTensorqtlSumstat errors when sumstatsPaths files do not exist", {
-  expect_error(
-    loadMultitraitTensorqtlSumstat(
-      sumstatsPaths = c("/nonexistent/file1.txt", "/nonexistent/file2.txt"),
-      region = "chr1:1000-2000",
-      traitNames = c("trait1", "trait2")
-    ),
-    "sumstatsPaths must be a vector of existing file paths"
+
+
+
+
+# === Tests migrated from test_mrmashWrapper.R (filterMixtureComponents) ===
+
+test_that("filterMixtureComponents filters zero matrices", {
+  U <- list(
+    mat1 = matrix(c(1, 0.5, 0.5, 1), 2, 2, dimnames = list(c("A", "B"), c("A", "B"))),
+    mat2 = matrix(0, 2, 2, dimnames = list(c("A", "B"), c("A", "B"))),
+    mat3 = matrix(c(0.8, 0.3, 0.3, 0.9), 2, 2, dimnames = list(c("A", "B"), c("A", "B")))
   )
+  w <- c(mat1 = 0.5, mat2 = 0.3, mat3 = 0.2)
+  conditions_to_keep <- c("A", "B")
+
+  result <- filterMixtureComponents(conditions_to_keep, U, w)
+
+  # mat2 should be removed (all zeros)
+  expect_true(!"mat2" %in% names(result$U))
+  # weights should be rescaled to maintain sum
+  expect_equal(sum(result$w), sum(w), tolerance = 1e-10)
 })
 
-test_that("loadMultitraitTensorqtlSumstat errors when sumstatsPaths is a list (not vector)", {
-  expect_error(
-    loadMultitraitTensorqtlSumstat(
-      sumstatsPaths = list("a", "b"),
-      region = "chr1:1000-2000",
-      traitNames = c("trait1", "trait2")
-    )
+
+test_that("filterMixtureComponents removes low weight components", {
+  U <- list(
+    mat1 = matrix(c(1, 0.5, 0.5, 1), 2, 2, dimnames = list(c("A", "B"), c("A", "B"))),
+    mat2 = matrix(c(0.8, 0.3, 0.3, 0.9), 2, 2, dimnames = list(c("A", "B"), c("A", "B")))
   )
+  w <- c(mat1 = 0.999, mat2 = 0.00001)  # mat2 below default cutoff
+  conditions_to_keep <- c("A", "B")
+
+  result <- filterMixtureComponents(conditions_to_keep, U, w, wCutoff = 1e-04)
+  expect_true(!"mat2" %in% names(result$U))
 })
 
-test_that("loadMultitraitTensorqtlSumstat errors when region is not single character", {
-  f1 <- tempfile()
-  f2 <- tempfile()
-  file.create(f1, f2)
-  on.exit(unlink(c(f1, f2)))
 
-  expect_error(
-    loadMultitraitTensorqtlSumstat(
-      sumstatsPaths = c(f1, f2),
-      region = 12345,
-      traitNames = c("trait1", "trait2")
-    ),
-    "region must be a single character string"
+test_that("filterMixtureComponents errors on missing condition", {
+  U <- list(
+    mat1 = matrix(c(1, 0.5, 0.5, 1), 2, 2, dimnames = list(c("A", "B"), c("A", "B")))
   )
-
-  expect_error(
-    loadMultitraitTensorqtlSumstat(
-      sumstatsPaths = c(f1, f2),
-      region = c("chr1:1-100", "chr2:1-100"),
-      traitNames = c("trait1", "trait2")
-    ),
-    "region must be a single character string"
-  )
+  w <- c(mat1 = 1.0)
+  expect_error(filterMixtureComponents(c("A", "C"), U, w), "not found in matrix")
 })
 
-test_that("loadMultitraitTensorqtlSumstat errors when traitNames is not character", {
-  f1 <- tempfile()
-  f2 <- tempfile()
-  file.create(f1, f2)
-  on.exit(unlink(c(f1, f2)))
 
-  expect_error(
-    loadMultitraitTensorqtlSumstat(
-      sumstatsPaths = c(f1, f2),
-      region = "chr1:1000-2000",
-      traitNames = c(1, 2)
-    ),
-    "traitNames must be a vector of character strings"
+test_that("filterMixtureComponents subsets conditions", {
+  U <- list(
+    mat1 = matrix(c(1, 0.5, 0.2, 0.5, 1, 0.3, 0.2, 0.3, 1), 3, 3,
+                  dimnames = list(c("A", "B", "C"), c("A", "B", "C")))
   )
+  w <- c(mat1 = 1.0)
+
+  result <- filterMixtureComponents(c("A", "B"), U, w)
+  expect_equal(nrow(result$U[[1]]), 2)
+  expect_equal(ncol(result$U[[1]]), 2)
 })
+
+# ===========================================================================
+# Tests from test_misc_round3.R (mrmashWrapper coverage boost)
+# ===========================================================================
+
+# =========================================================================
+# mrmashWrapper.R: compute_w0 (lines 284-298)
+# =========================================================================
+
+

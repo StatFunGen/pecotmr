@@ -1614,3 +1614,1042 @@ test_that("loadLdMatrix dedup removes duplicated variants from result", {
   expect_equal(nrow(ref_clean), 3)
   expect_false(any(duplicated(variants_clean)))
 })
+
+
+context("ldLoader")
+
+# ===========================================================================
+# ldLoader: input validation
+# ===========================================================================
+
+test_that("ldLoader errors when no source is provided", {
+  expect_error(ldLoader(), "Provide exactly one")
+})
+
+test_that("ldLoader errors when multiple sources are provided", {
+  R <- list(matrix(1, 2, 2))
+  X <- list(matrix(1, 3, 2))
+  expect_error(ldLoader(rList = R, xList = X), "Provide exactly one")
+})
+
+# ===========================================================================
+# ldLoader: R_list branch
+# ===========================================================================
+
+test_that("ldLoader with R_list returns a function", {
+  R <- list(matrix(c(1, 0.5, 0.5, 1), 2, 2))
+  loader <- ldLoader(rList = R)
+  expect_type(loader, "closure")
+})
+
+test_that("ldLoader R_list returns correct matrix", {
+  R1 <- matrix(c(1, 0.3, 0.3, 1), 2, 2)
+  R2 <- matrix(c(1, 0.8, 0.8, 1), 2, 2)
+  loader <- ldLoader(rList = list(R1, R2))
+  expect_equal(loader(1), R1)
+  expect_equal(loader(2), R2)
+})
+
+test_that("ldLoader R_list with max_variants downsamples", {
+  set.seed(42)
+  R <- matrix(0.1, 10, 10)
+  diag(R) <- 1
+  loader <- ldLoader(rList = list(R), maxVariants = 5)
+  result <- loader(1)
+  expect_equal(nrow(result), 5)
+  expect_equal(ncol(result), 5)
+})
+
+test_that("ldLoader R_list without max_variants returns full matrix", {
+  R <- matrix(0.1, 10, 10)
+  diag(R) <- 1
+  loader <- ldLoader(rList = list(R))
+  result <- loader(1)
+  expect_equal(nrow(result), 10)
+})
+
+test_that("ldLoader R_list max_variants larger than matrix returns full matrix", {
+  R <- matrix(0.1, 3, 3)
+  diag(R) <- 1
+  loader <- ldLoader(rList = list(R), maxVariants = 100)
+  result <- loader(1)
+  expect_equal(nrow(result), 3)
+})
+
+# ===========================================================================
+# ldLoader: X_list branch
+# ===========================================================================
+
+test_that("ldLoader with X_list returns a function", {
+  X <- list(matrix(rnorm(30), 10, 3))
+  loader <- ldLoader(xList = X)
+  expect_type(loader, "closure")
+})
+
+test_that("ldLoader X_list returns correct matrix", {
+  X1 <- matrix(1:12, 4, 3)
+  X2 <- matrix(1:8, 4, 2)
+  loader <- ldLoader(xList = list(X1, X2))
+  expect_equal(loader(1), X1)
+  expect_equal(loader(2), X2)
+})
+
+test_that("ldLoader X_list with max_variants downsamples columns", {
+  set.seed(42)
+  X <- matrix(rnorm(50), 10, 5)
+  loader <- ldLoader(xList = list(X), maxVariants = 3)
+  result <- loader(1)
+  expect_equal(nrow(result), 10)
+  expect_equal(ncol(result), 3)
+})
+
+test_that("ldLoader X_list max_variants larger than ncol returns full matrix", {
+  X <- matrix(rnorm(12), 4, 3)
+  loader <- ldLoader(xList = list(X), maxVariants = 100)
+  result <- loader(1)
+  expect_equal(ncol(result), 3)
+})
+
+# ===========================================================================
+# ldLoader: ld_meta_path branch validation
+# ===========================================================================
+
+test_that("ldLoader with ld_meta_path but no regions errors", {
+  expect_error(
+    ldLoader(ldMetaPath = "/some/path"),
+    "regions.*required"
+  )
+})
+
+# ===========================================================================
+# ldLoader: ldInfo branch validation
+# ===========================================================================
+
+test_that("ldLoader with ldInfo errors when not a data.frame", {
+  expect_error(
+    ldLoader(ldInfo = "not_a_df"),
+    "ldInfo must be a data.frame"
+  )
+})
+
+test_that("ldLoader with ldInfo errors when missing LD_file column", {
+  expect_error(
+    ldLoader(ldInfo = data.frame(col1 = "a")),
+    "ldInfo must be a data.frame with column 'LD_file'"
+  )
+})
+
+# ===========================================================================
+# ldLoader: ldInfo branch with real genotype fixtures
+# ===========================================================================
+
+test_data_dir <- test_path("test_data")
+
+test_that("ldLoader ldInfo loads LD from PLINK2 files", {
+  skip_if_not_installed("pgenlibr")
+  plink_prefix <- file.path(test_data_dir, "test_variants")
+  loader <- ldLoader(ldInfo = data.frame(LD_file = plink_prefix))
+  mat <- loader(1)
+  expect_true(is.matrix(mat))
+  expect_equal(nrow(mat), 349L)
+  expect_equal(ncol(mat), 349L)
+  expect_true(isSymmetric(mat))
+  expect_true(all(abs(diag(mat) - 1) < 1e-10))
+})
+
+test_that("ldLoader ldInfo loads LD from VCF file", {
+  skip_if_not_installed("VariantAnnotation")
+  vcf_path <- file.path(test_data_dir, "test_variants.vcf.gz")
+  loader <- ldLoader(ldInfo = data.frame(LD_file = vcf_path))
+  mat <- suppressWarnings(loader(1))
+  expect_true(is.matrix(mat))
+  expect_equal(nrow(mat), 349L)
+  expect_true(isSymmetric(mat))
+})
+
+test_that("ldLoader ldInfo loads LD from GDS file", {
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  gds_path <- file.path(test_data_dir, "test_variants.gds")
+  loader <- ldLoader(ldInfo = data.frame(LD_file = gds_path))
+  mat <- loader(1)
+  expect_true(is.matrix(mat))
+  expect_equal(nrow(mat), 349L)
+  expect_true(isSymmetric(mat))
+})
+
+test_that("ldLoader ldInfo loads LD from PLINK1 files", {
+  skip_if_not_installed("snpStats")
+  plink1_prefix <- file.path(test_data_dir, "protocol_example.genotype")
+  loader <- ldLoader(ldInfo = data.frame(LD_file = plink1_prefix))
+  mat <- loader(1)
+  expect_true(is.matrix(mat))
+  expect_true(isSymmetric(mat))
+})
+
+test_that("ldLoader ldInfo loads pre-computed .cor.xz blocks", {
+  ld_file <- file.path(test_data_dir, "LD_block_1.chr1_1000_1200.float16.txt.xz")
+  bim_file <- file.path(test_data_dir, "LD_block_1.chr1_1000_1200.float16.bim")
+
+  # Mock processLdMatrix to wrap its result in an LdData S4 object,
+  # since extract_ld_matrix now requires an LdData.
+  real_process <- pecotmr:::processLdMatrix
+  local_mocked_bindings(
+    processLdMatrix = function(LD_file_path, snp_file_path = NULL) {
+      result <- real_process(LD_file_path, snp_file_path)
+      mat <- result$ldMatrix
+      variant_ids <- result$ldVariants$variants
+      ref_panel <- pecotmr:::parseVariantId(variant_ids)
+      ref_panel$variant_id <- variant_ids
+      variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
+      bm <- data.frame(
+        blockId = 1L, chrom = as.character(ref_panel$chrom[1]),
+        blockStart = min(ref_panel$pos), blockEnd = max(ref_panel$pos),
+        size = length(variant_ids), startIdx = 1L,
+        endIdx = length(variant_ids), stringsAsFactors = FALSE
+      )
+      LdData(correlation = mat, variants = variants_gr, blockMetadata = bm)
+    },
+    .package = "pecotmr"
+  )
+
+  loader <- ldLoader(ldInfo = data.frame(LD_file = ld_file, SNP_file = bim_file))
+  mat <- loader(1)
+  expect_true(is.matrix(mat))
+  expect_true(isSymmetric(mat))
+  expect_true(nrow(mat) > 0)
+})
+
+test_that("ldLoader ldInfo with max_variants subsamples", {
+  skip_if_not_installed("pgenlibr")
+  plink_prefix <- file.path(test_data_dir, "test_variants")
+  set.seed(42)
+  loader <- ldLoader(ldInfo = data.frame(LD_file = plink_prefix), maxVariants = 20)
+  mat <- loader(1)
+  expect_equal(nrow(mat), 20L)
+  expect_equal(ncol(mat), 20L)
+})
+
+test_that("ldLoader ldInfo returns consistent LD across formats", {
+  skip_if_not_installed("pgenlibr")
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  plink_prefix <- file.path(test_data_dir, "test_variants")
+  gds_path <- file.path(test_data_dir, "test_variants.gds")
+  loader_plink <- ldLoader(ldInfo = data.frame(LD_file = plink_prefix))
+  loader_gds <- ldLoader(ldInfo = data.frame(LD_file = gds_path))
+  mat_plink <- loader_plink(1)
+  mat_gds <- loader_gds(1)
+  expect_equal(dim(mat_plink), dim(mat_gds))
+})
+
+# ===========================================================================
+# ldLoader: ld_meta_path branch with real genotype fixtures
+# ===========================================================================
+
+test_that("ldLoader ld_meta_path loads LD from PLINK2 metadata", {
+  skip_if_not_installed("pgenlibr")
+  meta_file <- file.path(test_data_dir, "ld_meta_plink2_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(
+    paste("chrom", "start", "end", "path", sep = "\t"),
+    meta_file
+  )
+  cat(paste("21", "0", "0", "test_variants", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  region <- "chr21:17513228-17592874"
+  loader <- ldLoader(ldMetaPath = meta_file, regions = region)
+  mat <- loader(1)
+  expect_true(is.matrix(mat))
+  expect_equal(nrow(mat), 349L)
+  expect_equal(ncol(mat), 349L)
+})
+
+test_that("ldLoader ld_meta_path loads LD from VCF metadata", {
+  skip_if_not_installed("VariantAnnotation")
+  meta_file <- file.path(test_data_dir, "ld_meta_vcf_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(
+    paste("chrom", "start", "end", "path", sep = "\t"),
+    meta_file
+  )
+  cat(paste("21", "0", "0", "test_variants.vcf.gz", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  region <- "chr21:17513228-17592874"
+  loader <- ldLoader(ldMetaPath = meta_file, regions = region)
+  mat <- suppressWarnings(loader(1))
+  expect_true(is.matrix(mat))
+  expect_equal(nrow(mat), 349L)
+})
+
+
+library(testthat)
+
+# ===========================================================================
+# ldPruneByCorrelation
+# ===========================================================================
+
+test_that("ldPruneByCorrelation removes highly correlated columns", {
+  set.seed(42)
+  n <- 50; p <- 10
+  X <- matrix(rnorm(n * p), nrow = n)
+  colnames(X) <- paste0("v", 1:p)
+  X[, 2] <- X[, 1] + rnorm(n, sd = 0.01)
+  result <- ldPruneByCorrelation(X, corThres =0.9)
+  expect_true(ncol(result$X.new) < p)
+  expect_equal(length(result$filter.id), ncol(result$X.new))
+})
+
+test_that("ldPruneByCorrelation keeps all columns when uncorrelated", {
+  set.seed(42)
+  n <- 100; p <- 5
+  X <- matrix(rnorm(n * p), nrow = n)
+  colnames(X) <- paste0("v", 1:p)
+  result <- ldPruneByCorrelation(X, corThres =0.99)
+  expect_equal(ncol(result$X.new), p)
+  expect_equal(result$filter.id, 1:p)
+})
+
+test_that("ldPruneByCorrelation preserves colnames for single remaining column", {
+  set.seed(42)
+  n <- 50
+  X <- matrix(rnorm(n * 3), nrow = n)
+  colnames(X) <- c("a", "b", "c")
+  X[, 2] <- X[, 1] + rnorm(n, sd = 0.001)
+  X[, 3] <- X[, 1] + rnorm(n, sd = 0.001)
+  result <- ldPruneByCorrelation(X, corThres =0.5)
+  expect_true(ncol(result$X.new) >= 1)
+  expect_true(!is.null(colnames(result$X.new)))
+})
+
+test_that("ldPruneByCorrelation errors on single-column input", {
+  set.seed(42)
+  n <- 30
+  X <- matrix(rnorm(n), nrow = n, ncol = 1)
+  colnames(X) <- "v1"
+  expect_error(ldPruneByCorrelation(X, corThres =0.8))
+})
+
+test_that("ldPruneByCorrelation strict threshold removes at least as many as lenient", {
+  set.seed(42)
+  n <- 100; p <- 5
+  X <- matrix(rnorm(n * p), nrow = n)
+  colnames(X) <- paste0("v", 1:p)
+  X[, 2] <- X[, 1] + rnorm(n, sd = 0.1)
+  X[, 3] <- X[, 1] + rnorm(n, sd = 0.1)
+  X[, 5] <- X[, 4] + rnorm(n, sd = 0.1)
+  result_strict <- ldPruneByCorrelation(X, corThres =0.3)
+  result_lenient <- ldPruneByCorrelation(X, corThres =0.99)
+  expect_true(ncol(result_strict$X.new) <= ncol(result_lenient$X.new))
+})
+
+test_that("ldPruneByCorrelation preserves colnames when no columns deleted", {
+  set.seed(42)
+  n <- 100; p <- 3
+  X <- matrix(rnorm(n * p), nrow = n)
+  colnames(X) <- c("snp_a", "snp_b", "snp_c")
+  result <- ldPruneByCorrelation(X, corThres =0.999)
+  expect_equal(colnames(result$X.new), colnames(X))
+})
+
+test_that("ldPruneByCorrelation is silent by default, chatty with verbose", {
+  set.seed(1)
+  X <- matrix(rnorm(100), 20, 5)
+  colnames(X) <- paste0("v", 1:5)
+  X[, 2] <- X[, 1] + rnorm(20, sd = 1e-3)
+  expect_silent(ldPruneByCorrelation(X, corThres =0.9))
+  expect_message(ldPruneByCorrelation(X, corThres =0.9, verbose = TRUE),
+                 "ldPruneByCorrelation")
+})
+
+# ===========================================================================
+# dropCollinearColumns
+# ===========================================================================
+
+# dropCollinearColumns and enforceDesignFullRank are unexported helpers;
+# access them via pecotmr::: in these tests.
+
+test_that("dropCollinearColumns returns X unchanged when problematicCols is empty", {
+  X <- matrix(rnorm(100), nrow = 20, ncol = 5)
+  colnames(X) <- paste0("v", 1:5)
+  result <- pecotmr:::dropCollinearColumns(X, problematicCols = character(0), strategy = "correlation")
+  expect_equal(ncol(result), 5)
+})
+
+test_that("dropCollinearColumns removes single problematic column", {
+  X <- matrix(rnorm(100), nrow = 20, ncol = 5)
+  colnames(X) <- paste0("v", 1:5)
+  result <- pecotmr:::dropCollinearColumns(X, problematicCols = "v3", strategy = "correlation")
+  expect_equal(ncol(result), 4)
+  expect_false("v3" %in% colnames(result))
+})
+
+test_that("dropCollinearColumns variance strategy removes lowest variance column", {
+  set.seed(42)
+  n <- 50
+  X <- matrix(rnorm(n * 3), nrow = n, ncol = 3)
+  colnames(X) <- c("low_var", "mid_var", "high_var")
+  X[, 1] <- X[, 1] * 0.01
+  X[, 3] <- X[, 3] * 10
+  result <- pecotmr:::dropCollinearColumns(X, problematicCols = c("low_var", "mid_var", "high_var"),
+                                             strategy = "variance")
+  expect_equal(ncol(result), 2)
+  expect_false("low_var" %in% colnames(result))
+})
+
+test_that("dropCollinearColumns correlation strategy with two columns removes one", {
+  set.seed(42)
+  X <- matrix(rnorm(100), nrow = 20, ncol = 5)
+  colnames(X) <- paste0("v", 1:5)
+  result <- pecotmr:::dropCollinearColumns(X, problematicCols = c("v1", "v2"), strategy = "correlation")
+  expect_equal(ncol(result), 4)
+})
+
+test_that("dropCollinearColumns correlation strategy with 3+ cols removes highest sum", {
+  set.seed(42)
+  n <- 50
+  X <- matrix(rnorm(n * 4), nrow = n, ncol = 4)
+  colnames(X) <- paste0("v", 1:4)
+  X[, 2] <- X[, 1] + rnorm(n, sd = 0.01)
+  X[, 3] <- X[, 1] + rnorm(n, sd = 0.01)
+  result <- pecotmr:::dropCollinearColumns(X, problematicCols = c("v1", "v2", "v3"),
+                                             strategy = "correlation")
+  expect_equal(ncol(result), 3)
+})
+
+test_that("dropCollinearColumns response_correlation strategy removes lowest |cor| with response", {
+  set.seed(42)
+  n <- 50
+  X <- matrix(rnorm(n * 3), nrow = n, ncol = 3)
+  colnames(X) <- c("v1", "v2", "v3")
+  response <- X[, 1] * 2 + rnorm(n, sd = 0.1)
+  result <- pecotmr:::dropCollinearColumns(X, problematicCols = c("v1", "v2", "v3"),
+                                             strategy = "response_correlation",
+                                             response = response)
+  expect_equal(ncol(result), 2)
+  expect_true("v1" %in% colnames(result))
+})
+
+test_that("dropCollinearColumns errors on response_correlation without response", {
+  X <- matrix(rnorm(60), 20, 3)
+  colnames(X) <- c("v1", "v2", "v3")
+  expect_error(
+    pecotmr:::dropCollinearColumns(X, problematicCols = c("v1", "v2"),
+                                     strategy = "response_correlation"),
+    "response"
+  )
+})
+
+test_that("dropCollinearColumns errors on invalid strategy", {
+  X <- matrix(rnorm(100), nrow = 20, ncol = 5)
+  colnames(X) <- paste0("v", 1:5)
+  expect_error(
+    pecotmr:::dropCollinearColumns(X, problematicCols = c("v1", "v2"),
+                                     strategy = "invalid_strategy"),
+    "arg"
+  )
+})
+
+test_that("dropCollinearColumns preserves column name when single column remains", {
+  set.seed(42)
+  X <- matrix(rnorm(40), nrow = 20, ncol = 2)
+  colnames(X) <- c("keeper", "removed")
+  result <- pecotmr:::dropCollinearColumns(X, problematicCols = "removed", strategy = "correlation")
+  expect_equal(ncol(result), 1)
+  expect_equal(colnames(result), "keeper")
+})
+
+test_that("dropCollinearColumns is silent by default", {
+  X <- matrix(rnorm(40), 20, 2)
+  colnames(X) <- c("a", "b")
+  expect_silent(pecotmr:::dropCollinearColumns(X, problematicCols = "b", strategy = "correlation"))
+})
+
+# ===========================================================================
+# enforceDesignFullRank (unexported)
+# ===========================================================================
+
+test_that("enforceDesignFullRank returns full-rank matrix when already full rank", {
+  set.seed(42)
+  n <- 50
+  X <- matrix(rnorm(n * 3), nrow = n, ncol = 3)
+  colnames(X) <- paste0("v", 1:3)
+  C <- matrix(rnorm(n * 2), nrow = n, ncol = 2)
+  result <- enforceDesignFullRank(X = X, C = C, strategy = "correlation")
+  expect_true(is.matrix(result))
+  expect_true(ncol(result) >= 1)
+})
+
+test_that("enforceDesignFullRank handles rank-deficient design via correlation fallback", {
+  set.seed(42)
+  n <- 50
+  X <- matrix(rnorm(n * 4), nrow = n, ncol = 4)
+  colnames(X) <- paste0("v", 1:4)
+  X[, 4] <- X[, 1] + X[, 2]
+  result <- enforceDesignFullRank(X = X, C = NULL, strategy = "correlation")
+  design <- cbind(1, result)
+  expect_equal(qr(design)$rank, ncol(design))
+})
+
+test_that("enforceDesignFullRank preserves colname for single-column input", {
+  set.seed(42)
+  n <- 50
+  X <- matrix(rnorm(n), nrow = n, ncol = 1)
+  colnames(X) <- "only_snp"
+  result <- enforceDesignFullRank(X = X, C = NULL, strategy = "correlation")
+  expect_equal(colnames(result), "only_snp")
+})
+
+test_that("enforceDesignFullRank is silent by default", {
+  set.seed(42)
+  n <- 50
+  X <- matrix(rnorm(n * 3), n, 3)
+  colnames(X) <- paste0("v", 1:3)
+  expect_silent(enforceDesignFullRank(X = X, C = NULL, strategy = "correlation"))
+})
+
+# ===========================================================================
+# ldClumpByScore
+# ===========================================================================
+
+test_that("ldClumpByScore skips clumping on single-column input", {
+  skip_if_not_installed("bigsnpr")
+  skip_if_not_installed("bigstatsr")
+  set.seed(1)
+  X <- matrix(rbinom(100, 2, 0.3), 100, 1)
+  colnames(X) <- "chr1:100:A:G"
+  keep <- ldClumpByScore(X, score = 1.0, chr = 1L, pos = 100L, r2 = 0.2)
+  expect_equal(keep, 1L)
+})
+
+test_that("ldClumpByScore validates input lengths", {
+  skip_if_not_installed("bigsnpr")
+  skip_if_not_installed("bigstatsr")
+  set.seed(1)
+  X <- matrix(rbinom(100 * 3, 2, 0.3), 100, 3)
+  colnames(X) <- paste0("chr1:", seq_len(3) * 1000, ":A:G")
+  expect_error(
+    ldClumpByScore(X, score = 1:2, chr = rep(1L, 3), pos = seq_len(3) * 1000L),
+    "score"
+  )
+  expect_error(
+    ldClumpByScore(X, score = 1:3, chr = rep(1L, 2), pos = seq_len(3) * 1000L),
+    "chr and pos"
+  )
+})
+
+test_that("ldClumpByScore returns indices on real data", {
+  skip_if_not_installed("bigsnpr")
+  skip_if_not_installed("bigstatsr")
+  set.seed(1)
+  n <- 500; p <- 20
+  X <- matrix(rbinom(n * p, 2, 0.3), n, p)
+  colnames(X) <- paste0("chr1:", seq_len(p) * 1000, ":A:G")
+  # Introduce perfect LD between variants 1 and 2
+  X[, 2] <- X[, 1]
+  score <- c(2, 1, runif(p - 2))
+  chr <- rep(1L, p)
+  pos <- seq_len(p) * 1000L
+  keep <- ldClumpByScore(X, score = score, chr = chr, pos = pos, r2 = 0.2)
+  expect_true(1L %in% keep)
+  expect_false(2L %in% keep)   # pruned: same as variant 1 but lower score
+  expect_true(length(keep) < p)
+})
+
+# ===========================================================================
+# Tests migrated from test_twasSketch.R (loadLdSketch / standardizeGenotypeHwe)
+# ===========================================================================
+
+test_that("standardize_genotype_hwe: centers by 2p and scales by sqrt(2p(1-p))", {
+  set.seed(42)
+  n <- 30
+  p <- 5
+  af <- runif(p, 0.1, 0.9)
+  X <- matrix(rbinom(n * p, 2, rep(af, each = n)), nrow = n, ncol = p)
+
+  X_std <- pecotmr:::standardizeGenotypeHwe(X, af)
+
+  # Manual verification
+  expected <- sweep(sweep(X, 2, 2 * af), 2, sqrt(2 * af * (1 - af)), "/")
+  expect_equal(X_std, expected, tolerance = 1e-14)
+})
+
+
+test_that("loadLdSketch: returns LdData with raw genotypes and metadata", {
+  set.seed(55)
+  n <- 30
+  p <- 12
+  variant_ids <- paste0("chr1:", seq(1000, by = 100, length.out = p), ":A:G")
+
+  # Create a mock genotype matrix
+  af_true <- runif(p, 0.1, 0.9)
+  X <- matrix(rbinom(n * p, 2, rep(af_true, each = n)), nrow = n, ncol = p)
+
+  # Build mock ref_panel
+  ref_panel <- data.frame(
+    chrom = 1L, pos = seq(1000, by = 100, length.out = p),
+    A2 = "A", A1 = "G",
+    variant_id = variant_ids,
+    allele_freq = colMeans(X) / 2,
+    stringsAsFactors = FALSE
+  )
+
+  variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
+  blockMetadata <- S4Vectors::DataFrame(
+    region = "chr1:1000-2100", start = 1000L, end = 2100L, chrom = "chr1"
+  )
+  # Store genotype matrix directly in genotype_handle (matching loadLdSketch output)
+  mock_ld_data <- new("LdData",
+    correlation = NULL,
+    genotypeHandle = X,
+    variants = variants_gr,
+    snpIdx = NULL,
+    blockMetadata = blockMetadata
+  )
+
+  local_mocked_bindings(
+    loadLdMatrix = function(ld_meta_file_path, region, return_genotype = FALSE, n_sample = NULL, ...) {
+      mock_ld_data
+    },
+    .package = "pecotmr"
+  )
+
+  result <- pecotmr::loadLdSketch("fake_path.tsv", "chr1:1000-2100")
+
+  # Check structure -- returns an LdData S4 object
+  expect_true(is(result, "LdData"))
+  result_X <- getGenotypes(result)
+  result_ref <- getRefPanel(result)
+  result_ids <- getVariantIds(result)
+  expect_equal(nrow(result_X), n)
+  expect_equal(ncol(result_X), p)
+  expect_equal(length(result_ids), p)
+
+  # Raw genotype matrix is returned unchanged
+  expect_equal(result_X, X)
+})
+
+
+test_that("loadLdSketch: removes monomorphic variants", {
+  set.seed(66)
+  n <- 20
+  p <- 5
+  variant_ids <- paste0("chr1:", 1:p, ":A:G")
+
+  # Make column 3 monomorphic (all 0)
+  X <- matrix(rbinom(n * p, 2, 0.3), nrow = n, ncol = p)
+  X[, 3] <- 0  # monomorphic
+
+  ref_panel <- data.frame(
+    chrom = 1L, pos = 1:p,
+    A2 = "A", A1 = "G",
+    variant_id = variant_ids,
+    allele_freq = colMeans(X) / 2,
+    stringsAsFactors = FALSE
+  )
+
+  variants_gr <- pecotmr:::.refPanelToGranges(ref_panel)
+  blockMetadata <- S4Vectors::DataFrame(
+    region = "chr1:1-5", start = 1L, end = 5L, chrom = "chr1"
+  )
+  # Store genotype matrix directly in genotype_handle
+  mock_ld_data <- new("LdData",
+    correlation = NULL,
+    genotypeHandle = X,
+    variants = variants_gr,
+    snpIdx = NULL,
+    blockMetadata = blockMetadata
+  )
+
+  local_mocked_bindings(
+    loadLdMatrix = function(ld_meta_file_path, region, return_genotype = FALSE, n_sample = NULL, ...) {
+      mock_ld_data
+    },
+    .package = "pecotmr"
+  )
+
+  result <- pecotmr::loadLdSketch("fake_path.tsv", "chr1:1-5")
+
+  # Returns LdData with monomorphic variant removed
+  expect_true(is(result, "LdData"))
+  result_ids <- getVariantIds(result)
+  result_ref <- getRefPanel(result)
+  result_X <- getGenotypes(result)
+  expect_equal(length(result_ids), p - 1)
+  expect_false(variant_ids[3] %in% result_ids)
+  expect_equal(nrow(result_ref), p - 1)
+  expect_equal(ncol(result_X), p - 1)
+})
+
+
+test_that("SVD from raw sketch matches direct computation", {
+  set.seed(77)
+  n <- 25
+  p <- 8
+  af <- runif(p, 0.15, 0.85)
+  X <- matrix(rbinom(n * p, 2, rep(af, each = n)), nrow = n, ncol = p)
+
+  # Two-step process: standardize then SVD
+  X_std <- pecotmr:::standardizeGenotypeHwe(X, af)
+  svd_result <- svd(X_std)
+
+  # Verify this matches manual computation
+  X_manual <- sweep(sweep(X, 2, 2 * af), 2, sqrt(2 * af * (1 - af)), "/")
+  svd_manual <- svd(X_manual)
+
+  expect_equal(svd_result$d, svd_manual$d, tolerance = 1e-14)
+  expect_equal(abs(svd_result$v), abs(svd_manual$v), tolerance = 1e-14)
+})
+
+
+# ===========================================================================
+# Tests migrated from test_misc.R (computeLd + .findValidFilePath*)
+# ===========================================================================
+
+test_that("findValidFilePath returns target when it exists directly", {
+  pkg_root <- normalizePath(file.path(test_path(), "..", ".."), mustWork = TRUE)
+  target <- file.path(pkg_root, "DESCRIPTION")
+  ref <- file.path(pkg_root, "NAMESPACE")
+  skip_if_not(file.exists(target) && file.exists(ref), "Package root files not found")
+  result <- pecotmr:::.findValidFilePath(ref, target)
+  expect_equal(result, target)
+})
+
+
+test_that("findValidFilePath constructs path from reference directory", {
+  pkg_root <- normalizePath(file.path(test_path(), "..", ".."), mustWork = TRUE)
+  ref <- file.path(pkg_root, "NAMESPACE")
+  skip_if_not(file.exists(ref), "NAMESPACE not found")
+  result <- pecotmr:::.findValidFilePath(ref, "DESCRIPTION")
+  expect_true(file.exists(result))
+  expect_true(grepl("DESCRIPTION$", result))
+})
+
+
+test_that("findValidFilePath errors when both paths are invalid", {
+  expect_error(
+    pecotmr:::.findValidFilePath("/nonexistent/dir/ref.txt", "/nonexistent/target.txt"),
+    "Both reference and target file paths do not work"
+  )
+})
+
+
+test_that("findValidFilePath returns reference when target is invalid but reference exists", {
+  pkg_root <- normalizePath(file.path(test_path(), "..", ".."), mustWork = TRUE)
+  ref <- file.path(pkg_root, "DESCRIPTION")
+  skip_if_not(file.exists(ref), "DESCRIPTION not found")
+  result <- pecotmr:::.findValidFilePath(ref, "/totally/bogus/path.txt")
+  expect_equal(result, ref)
+})
+
+
+test_that("findValidFilePaths resolves multiple targets", {
+  pkg_root <- normalizePath(file.path(test_path(), "..", ".."), mustWork = TRUE)
+  ref <- file.path(pkg_root, "NAMESPACE")
+  skip_if_not(file.exists(ref), "NAMESPACE not found")
+  targets <- c("DESCRIPTION", "NAMESPACE")
+  result <- pecotmr:::.findValidFilePaths(ref, targets)
+  expect_length(result, 2)
+  expect_true(all(file.exists(result)))
+})
+
+
+test_that("findValidFilePaths errors on all-invalid targets", {
+  ref <- "/nonexistent/ref.txt"
+  targets <- c("/bogus/a.txt", "/bogus/b.txt")
+  expect_error(pecotmr:::.findValidFilePaths(ref, targets))
+})
+
+# =============================================================================
+# computeLd
+# =============================================================================
+
+
+test_that("computeLd sample method produces valid correlation matrix", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 200, replace = TRUE), nrow = 50)
+  colnames(X) <- paste0("rs", 1:4)
+
+  R <- computeLd(X, method = "sample")
+  expect_equal(nrow(R), 4)
+  expect_equal(ncol(R), 4)
+  expect_equal(unname(diag(R)), rep(1, 4))
+  expect_true(isSymmetric(R))
+  expect_true(all(R >= -1 & R <= 1))
+})
+
+
+test_that("computeLd population method produces valid matrix", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 200, replace = TRUE), nrow = 50)
+  colnames(X) <- paste0("rs", 1:4)
+
+  R <- computeLd(X, method = "population")
+  expect_equal(nrow(R), 4)
+  expect_equal(unname(diag(R)), rep(1, 4))
+  expect_true(isSymmetric(R))
+})
+
+
+test_that("computeLd with a single SNP returns 1x1 identity matrix", {
+  X <- matrix(c(0, 1, 2, 1, 0), ncol = 1)
+  colnames(X) <- "rs1"
+  R <- computeLd(X, method = "sample")
+  expect_equal(dim(R), c(1L, 1L))
+  expect_equal(R[1, 1], 1.0)
+  expect_equal(colnames(R), "rs1")
+})
+
+
+test_that("computeLd handles column with all NA gracefully", {
+  set.seed(123)
+  X <- matrix(sample(0:2, 100, replace = TRUE), nrow = 20, ncol = 5)
+  X[, 3] <- NA
+  colnames(X) <- paste0("rs", 1:5)
+
+  R <- computeLd(X, method = "sample")
+  expect_equal(dim(R), c(5L, 5L))
+  expect_equal(unname(diag(R)), rep(1, 5))
+  expect_equal(R[3, 1], 0)
+  expect_equal(R[1, 3], 0)
+})
+
+
+test_that("computeLd population method handles column with all NA", {
+  set.seed(123)
+  X <- matrix(sample(0:2, 100, replace = TRUE), nrow = 20, ncol = 5)
+  X[, 2] <- NA
+  colnames(X) <- paste0("rs", 1:5)
+
+  R <- computeLd(X, method = "population")
+  expect_equal(dim(R), c(5L, 5L))
+  expect_equal(unname(diag(R)), rep(1, 5))
+  expect_equal(R[2, 4], 0)
+})
+
+
+test_that("computeLd with larger matrix (100 SNPs) is fast and valid", {
+  set.seed(99)
+  X <- matrix(sample(0:2, 5000, replace = TRUE), nrow = 50, ncol = 100)
+  colnames(X) <- paste0("rs", 1:100)
+
+  R <- computeLd(X, method = "sample")
+  expect_equal(dim(R), c(100L, 100L))
+  expect_equal(unname(diag(R)), rep(1, 100))
+  expect_true(isSymmetric(R))
+  expect_true(all(R >= -1 & R <= 1))
+})
+
+
+test_that("computeLd population method with larger matrix is valid", {
+  set.seed(99)
+  X <- matrix(sample(0:2, 5000, replace = TRUE), nrow = 50, ncol = 100)
+  colnames(X) <- paste0("rs", 1:100)
+
+  R <- computeLd(X, method = "population")
+  expect_equal(dim(R), c(100L, 100L))
+  expect_equal(unname(diag(R)), rep(1, 100))
+  expect_true(isSymmetric(R))
+})
+
+
+test_that("computeLd with perfectly correlated SNPs returns correlation of 1", {
+  set.seed(42)
+  col1 <- sample(0:2, 50, replace = TRUE)
+  X <- matrix(c(col1, col1), ncol = 2)
+  colnames(X) <- c("rs1", "rs2")
+
+  R <- computeLd(X, method = "sample")
+  expect_equal(R[1, 2], 1.0, tolerance = 1e-10)
+  expect_equal(R[2, 1], 1.0, tolerance = 1e-10)
+})
+
+
+test_that("computeLd population method with trim_samples trims correctly", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 33, replace = TRUE), nrow = 11, ncol = 3)
+  colnames(X) <- paste0("rs", 1:3)
+
+  R_trimmed <- computeLd(X, method = "population", trimSamples = TRUE)
+  expect_equal(dim(R_trimmed), c(3L, 3L))
+  R_full <- computeLd(X, method = "population", trimSamples = FALSE)
+  expect_equal(dim(R_full), c(3L, 3L))
+})
+
+
+test_that("computeLd with two monomorphic SNPs produces 0 off-diagonal", {
+  X <- matrix(c(rep(1, 50), rep(2, 50)), nrow = 50, ncol = 2)
+  colnames(X) <- c("mono1", "mono2")
+
+  R <- computeLd(X, method = "sample")
+  expect_equal(R[1, 2], 0)
+  expect_equal(R[2, 1], 0)
+  expect_equal(unname(diag(R)), c(1, 1))
+})
+
+
+test_that("computeLd preserves column names", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 60, replace = TRUE), nrow = 20, ncol = 3)
+  colnames(X) <- c("snp_alpha", "snp_beta", "snp_gamma")
+
+  R <- computeLd(X, method = "sample")
+  expect_equal(colnames(R), c("snp_alpha", "snp_beta", "snp_gamma"))
+  expect_equal(rownames(R), c("snp_alpha", "snp_beta", "snp_gamma"))
+})
+
+
+test_that("computeLd with heavy missingness still produces valid matrix", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 200, replace = TRUE), nrow = 40, ncol = 5)
+  na_idx <- sample(length(X), size = floor(0.5 * length(X)))
+  X[na_idx] <- NA
+  colnames(X) <- paste0("rs", 1:5)
+
+  R <- computeLd(X, method = "sample")
+  expect_true(all(!is.na(R)))
+  expect_equal(unname(diag(R)), rep(1, 5))
+
+  R_pop <- computeLd(X, method = "population")
+  expect_true(all(!is.na(R_pop)))
+  expect_equal(unname(diag(R_pop)), rep(1, 5))
+})
+
+
+test_that("computeLd with NA genotypes and sample method", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 200, replace = TRUE), nrow = 50)
+  X[1, 1] <- NA
+  X[5, 3] <- NA
+  colnames(X) <- paste0("rs", 1:4)
+
+  R <- computeLd(X, method = "sample")
+  expect_true(all(!is.na(R)))
+  expect_equal(unname(diag(R)), rep(1, 4))
+})
+
+
+test_that("computeLd errors on NULL input", {
+  expect_error(computeLd(NULL), "X must be provided")
+})
+
+
+test_that("computeLd sample vs population differ but are close", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 500, replace = TRUE), nrow = 100)
+  colnames(X) <- paste0("rs", 1:5)
+
+  R_sample <- computeLd(X, method = "sample")
+  R_pop <- computeLd(X, method = "population")
+
+  expect_false(identical(R_sample, R_pop))
+  expect_true(max(abs(R_sample - R_pop)) < 0.1)
+})
+
+
+test_that("computeLd gcta method produces valid correlation matrix", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 500, replace = TRUE), nrow = 100)
+  colnames(X) <- paste0("rs", 1:5)
+
+  R <- computeLd(X, method = "gcta")
+  expect_equal(dim(R), c(5, 5))
+  expect_equal(unname(diag(R)), rep(1, 5), tolerance = 1e-10)
+  expect_true(isSymmetric(R, tol = 1e-10))
+  expect_true(all(abs(R) <= 1 + 1e-10))
+})
+
+
+test_that("computeLd gcta method handles missing data", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 500, replace = TRUE), nrow = 100)
+  colnames(X) <- paste0("rs", 1:5)
+  X[sample(length(X), 50)] <- NA
+
+  R <- computeLd(X, method = "gcta")
+  expect_equal(dim(R), c(5, 5))
+  expect_true(all(is.finite(R)))
+})
+
+
+test_that("computeLd gcta agrees with sample method on complete data", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 500, replace = TRUE), nrow = 100)
+  colnames(X) <- paste0("rs", 1:5)
+
+  R_sample <- computeLd(X, method = "sample")
+  R_gcta <- computeLd(X, method = "gcta")
+
+  # With no missing data, GCTA and sample should be close (differ by N vs N-1 denom)
+  expect_true(max(abs(R_sample - R_gcta)) < 0.05)
+})
+
+
+test_that("computeLd gcta preserves column names", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 300, replace = TRUE), nrow = 100)
+  colnames(X) <- c("snp_a", "snp_b", "snp_c")
+
+  R <- computeLd(X, method = "gcta")
+  expect_equal(colnames(R), c("snp_a", "snp_b", "snp_c"))
+  expect_equal(rownames(R), c("snp_a", "snp_b", "snp_c"))
+})
+
+
+# =============================================================================
+# waldTestPval
+# =============================================================================
+
+
+test_that("computeLd sample method without Rfast falls back to cor", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 100, replace = TRUE), nrow = 20, ncol = 5)
+  colnames(X) <- paste0("snp", 1:5)
+  R <- computeLd(X, method = "sample")
+  expect_equal(dim(R), c(5, 5))
+  expect_equal(as.numeric(diag(R)), rep(1, 5))
+  expect_true(all(abs(R) <= 1))
+})
+
+
+test_that("computeLd with gcta method and trim_samples", {
+  set.seed(42)
+  # 21 samples -> trimmed to 20 (multiple of 4)
+  X <- matrix(sample(0:2, 105, replace = TRUE), nrow = 21, ncol = 5)
+  colnames(X) <- paste0("snp", 1:5)
+  R <- computeLd(X, method = "gcta", trimSamples = TRUE)
+  expect_equal(dim(R), c(5, 5))
+  expect_equal(as.numeric(diag(R)), rep(1, 5))
+})
+
+
+test_that("computeLd population method with trim_samples", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 105, replace = TRUE), nrow = 21, ncol = 5)
+  colnames(X) <- paste0("snp", 1:5)
+  R <- computeLd(X, method = "population", trimSamples = TRUE)
+  expect_equal(dim(R), c(5, 5))
+  expect_equal(as.numeric(diag(R)), rep(1, 5))
+})
+
+
+test_that("computeLd with shrinkage > 0", {
+  set.seed(42)
+  X <- matrix(sample(0:2, 100, replace = TRUE), nrow = 20, ncol = 5)
+  colnames(X) <- paste0("snp", 1:5)
+  R_no_shrink <- computeLd(X, method = "sample", shrinkage = 0)
+  R_shrink <- computeLd(X, method = "sample", shrinkage = 0.1)
+  # Shrunk matrix should be closer to identity
+  expect_equal(as.numeric(diag(R_shrink)), rep(1, 5))
+  # Off-diagonal elements should be shrunk toward 0
+  off_diag_no <- R_no_shrink[1, 2]
+  off_diag_s <- R_shrink[1, 2]
+  expect_equal(off_diag_s, 0.9 * off_diag_no)
+})
+
+
+# =============================================================================
+# detectVariantConvention — uncovered line 586
+# =============================================================================
+
+

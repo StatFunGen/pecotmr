@@ -531,6 +531,116 @@ test_that("fineMappingPipeline(QtlDataset): mvsusie both multi falls back to per
   expect_equal(nrow(res), 4L)
 })
 
+test_that("fineMappingPipeline(QtlDataset): jointSpec='context' produces one joint row per trait", {
+  qd <- .fmp_makeQtlDataset(contexts = c("brain", "liver"),
+                            traits = c("ENSG_A", "ENSG_B"))
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    mvsusie               = .fmp_mockMvsusie(),
+    create_mixture_prior  = .fmp_mockMixturePrior(),
+    .package = "mvsusieR")
+  res <- suppressMessages(
+    fineMappingPipeline(qd, methods = "mvsusie", cisWindow = 1000L,
+                        jointSpecification = "context"))
+  expect_s4_class(res, "QtlFineMappingResult")
+  # One joint row per trait (context column collapses to "joint")
+  expect_equal(nrow(res), 2L)
+  expect_true("jointContexts" %in% names(res))
+  expect_true(all(as.character(res$context) == "joint"))
+  expect_setequal(getTraits(res), c("ENSG_A", "ENSG_B"))
+  expect_true(all(grepl("brain;liver|liver;brain",
+                        as.character(res$jointContexts))))
+})
+
+test_that("fineMappingPipeline(QtlDataset): jointSpec='context' + univariate compose without double-fitting mvsusie", {
+  qd <- .fmp_makeQtlDataset(contexts = c("brain", "liver"),
+                            traits = "ENSG_A")
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieIndiv      = .fmp_mockFitIndiv(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    mvsusie               = .fmp_mockMvsusie(),
+    create_mixture_prior  = .fmp_mockMixturePrior(),
+    .package = "mvsusieR")
+  res <- suppressMessages(
+    fineMappingPipeline(qd, methods = c("susie", "mvsusie"), cisWindow = 1000L,
+                        jointSpecification = "context",
+                        addSusieInf = FALSE))
+  # susie -> 2 univariate rows (one per context); mvsusie -> 1 joint row.
+  expect_equal(nrow(res), 3L)
+  expect_equal(sum(as.character(res$method) == "mvsusie"), 1L)
+  expect_equal(sum(as.character(res$method) == "susie"), 2L)
+  # Univariate rows have NA in jointContexts; joint row has the membership.
+  jc <- as.character(res$jointContexts)
+  expect_equal(sum(is.na(jc)), 2L)
+  expect_equal(sum(!is.na(jc)), 1L)
+})
+
+test_that("fineMappingPipeline(QtlDataset): jointSpec='context' with only one context skips with message", {
+  qd <- .fmp_makeQtlDataset(contexts = "brain",
+                            traits = c("ENSG_A", "ENSG_B"))
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    mvsusie               = .fmp_mockMvsusie(),
+    create_mixture_prior  = .fmp_mockMixturePrior(),
+    .package = "mvsusieR")
+  expect_error(
+    suppressMessages(
+      fineMappingPipeline(qd, methods = "mvsusie", cisWindow = 1000L,
+                          jointSpecification = "context")),
+    "no joint fits produced")
+})
+
+test_that("fineMappingPipeline(QtlDataset): jointSpec='trait' produces one joint row per context", {
+  qd <- .fmp_makeQtlDataset(contexts = c("brain", "liver"),
+                            traits = c("ENSG_A", "ENSG_B"))
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    mvsusie               = .fmp_mockMvsusie(),
+    create_mixture_prior  = .fmp_mockMixturePrior(),
+    .package = "mvsusieR")
+  res <- suppressMessages(
+    fineMappingPipeline(qd, methods = "mvsusie", cisWindow = 1000L,
+                        jointSpecification = "trait"))
+  expect_s4_class(res, "QtlFineMappingResult")
+  # One joint row per context (trait collapses to "joint")
+  expect_equal(nrow(res), 2L)
+  expect_true("jointTraits" %in% names(res))
+  expect_true(all(as.character(res$trait) == "joint"))
+  expect_setequal(as.character(res$context), c("brain", "liver"))
+})
+
+test_that("fineMappingPipeline(QtlDataset): jointSpec='trait' with fsusie wires fsusieR::susiF", {
+  qd <- .fmp_makeQtlDataset(contexts = "brain",
+                            traits = c("ENSG_A", "ENSG_B"))
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    susiF                 = .fmp_mockSusiF(),
+    .package = "fsusieR")
+  res <- suppressMessages(
+    fineMappingPipeline(qd, methods = "fsusie", cisWindow = 1000L,
+                        jointSpecification = "trait"))
+  expect_s4_class(res, "QtlFineMappingResult")
+  expect_equal(nrow(res), 1L)
+  expect_equal(as.character(res$method), "fsusie")
+  expect_equal(as.character(res$trait), "joint")
+  expect_true("jointTraits" %in% names(res))
+})
+
 test_that("fineMappingPipeline(QtlDataset): fsusie multi-trait per context dispatch", {
   qd <- .fmp_makeQtlDataset(contexts = "brain",
                             traits = c("ENSG_A", "ENSG_B"))
@@ -550,10 +660,10 @@ test_that("fineMappingPipeline(QtlDataset): fsusie multi-trait per context dispa
 })
 
 # ===========================================================================
-# fineMappingPipeline(MultiTaskQtlDataset)
+# fineMappingPipeline(MultiStudyQtlDataset)
 # ===========================================================================
 
-test_that("fineMappingPipeline(MultiTaskQtlDataset): aggregates results across constituent QtlDatasets", {
+test_that("fineMappingPipeline(MultiStudyQtlDataset): aggregates results across constituent QtlDatasets", {
   qd1 <- QtlDataset(
     study              = "s1",
     genotypes          = .fmp_makeHandle(),
@@ -564,7 +674,7 @@ test_that("fineMappingPipeline(MultiTaskQtlDataset): aggregates results across c
     genotypes          = .fmp_makeHandle(),
     phenotypes         = list(brain = .fmp_makeSe(traits = "ENSG_A")),
     genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0))
-  mt <- MultiTaskQtlDataset(qtlDatasets = list(s1 = qd1, s2 = qd2))
+  mt <- MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1, s2 = qd2))
   local_mocked_bindings(
     extractBlockGenotypes = .fmp_mockExtractor(),
     .fmFitSusieIndiv      = .fmp_mockFitIndiv(),
@@ -581,14 +691,14 @@ test_that("fineMappingPipeline(MultiTaskQtlDataset): aggregates results across c
   expect_null(getLdSketch(res))
 })
 
-test_that("fineMappingPipeline(MultiTaskQtlDataset): with embedded QtlSumStats stamps the ldSketch", {
+test_that("fineMappingPipeline(MultiStudyQtlDataset): with embedded QtlSumStats stamps the ldSketch", {
   qd <- QtlDataset(
     study              = "s1",
     genotypes          = .fmp_makeHandle(),
     phenotypes         = list(brain = .fmp_makeSe(traits = "ENSG_A")),
     genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0))
   ss <- .fmp_makeQtlSumStats()
-  mt <- MultiTaskQtlDataset(qtlDatasets = list(s1 = qd), sumStats = ss)
+  mt <- MultiStudyQtlDataset(qtlDatasets = list(s1 = qd), sumStats = ss)
   local_mocked_bindings(
     extractBlockGenotypes = .fmp_mockExtractor(),
     .fmFitSusieIndiv      = .fmp_mockFitIndiv(),
@@ -983,3 +1093,144 @@ test_that("fineMappingPipeline(QtlDataset): cache hit avoids the fitter", {
   expect_equal(fitter_calls, 0L)
   expect_equal(nrow(res), 1L)
 })
+
+
+context("univariate_pipeline")
+
+# ===========================================================================
+# Post-S4-refactor cleanup
+# ---------------------------------------------------------------------------
+# The S4 refactor removed `univariateAnalysisPipeline()`,
+# `rssAnalysisPipeline()`, `loadStudyLd()`, `loadRssData()`, and
+# `rssBasicQc()` as functional pipelines. They are now `.Deprecated()`
+# no-ops that return `NULL` invisibly. The `QcResult` /
+# `FineMappingResult` classes and `regionDataToSusieRssInput()` helper
+# were also removed. Their replacements live behind a different S4 API
+# (`fineMappingPipeline()` dispatched on `GwasSumStats` / `QtlSumStats` /
+# `QtlDataset`, `summaryStatsQc()`, `FineMappingEntry()`) with different
+# signatures and contracts, so the legacy mocked pipeline tests cannot
+# be ported in a meaningful way and have been removed.
+#
+# What survives in this file:
+#   * Deprecation no-op checks for the removed public wrappers.
+#   * Tests for `resolveLdInput()`, which is still a live internal helper
+#     in `dentistQc.R` with an unchanged signature.
+# ===========================================================================
+
+# ===========================================================================
+# resolveLdInput (still-live internal helper in dentistQc.R)
+# ===========================================================================
+
+test_that("resolveLdInput errors when both R and X are NULL", {
+  expect_error(
+    pecotmr:::resolveLdInput(R = NULL, X = NULL),
+    "Either R .* or X .* must be provided"
+  )
+})
+
+test_that("resolveLdInput errors when both R and X are provided", {
+  R <- diag(5)
+  X <- matrix(rnorm(50), 10, 5)
+  expect_error(
+    pecotmr:::resolveLdInput(R = R, X = X),
+    "Provide either R or X, not both"
+  )
+})
+
+test_that("resolveLdInput with R returns R unchanged", {
+  R <- diag(5)
+  result <- pecotmr:::resolveLdInput(R = R, nSample = 100)
+  expect_equal(result$R, R)
+  expect_equal(result$nSample, 100)
+})
+
+test_that("resolveLdInput with X computes LD and infers nSample", {
+  set.seed(42)
+  X <- matrix(rbinom(200, 2, 0.3), 20, 10)
+  result <- pecotmr:::resolveLdInput(X = X)
+  expect_equal(nrow(result$R), 10)
+  expect_equal(ncol(result$R), 10)
+  expect_equal(result$nSample, 20)
+})
+
+test_that("resolveLdInput errors when nSample required but missing", {
+  R <- diag(5)
+  expect_error(
+    pecotmr:::resolveLdInput(R = R, needNSample = TRUE),
+    "nSample is required"
+  )
+})
+
+test_that("resolveLdInput does not error when nSample not needed", {
+  R <- diag(5)
+  result <- pecotmr:::resolveLdInput(R = R, needNSample = FALSE)
+  expect_equal(result$R, R)
+  expect_null(result$nSample)
+})
+
+# ===========================================================================
+# Deprecation no-op checks for removed public wrappers
+# ===========================================================================
+
+test_that("univariateAnalysisPipeline is a deprecated no-op", {
+  expect_warning(res <- univariateAnalysisPipeline(), "deprecated|removed")
+  expect_null(res)
+})
+
+test_that("rssAnalysisPipeline is a deprecated no-op", {
+  expect_warning(res <- rssAnalysisPipeline(), "deprecated|removed")
+  expect_null(res)
+})
+
+test_that("loadStudyLd is a deprecated no-op", {
+  expect_warning(res <- loadStudyLd(), "deprecated|removed")
+  expect_null(res)
+})
+
+test_that("loadRssData is a deprecated no-op", {
+  expect_warning(res <- loadRssData(), "deprecated|removed")
+  expect_null(res)
+})
+
+# ===========================================================================
+# Removed during the post-S4-refactor cleanup (for traceability)
+# ---------------------------------------------------------------------------
+# univariateAnalysisPipeline input-validation tests (12):
+#   * X non-matrix / non-numeric / Y non-numeric / multi-column Y /
+#     single-column Y / X-Y row mismatch / maf length mismatch /
+#     maf out of bounds / invalid xScalar / wrong-length xScalar /
+#     non-numeric yScalar / non-positive L / non-positive lGreedy.
+# univariateAnalysisPipeline functional tests (4):
+#   * minimal valid input; twasWeights = TRUE; respects xScalar;
+#     cvFolds = 0.
+# univariateAnalysisPipeline mocked-pipeline tests (16):
+#   * pip_cutoff_to_skip branch (3); LD reference filtering (2);
+#     filter_X branch (2); main susie + post-processing (4);
+#     TWAS weights (4); coverage forwarding (2); combined LD +
+#     filter_X (1); null imiss/maf cutoffs (1).
+# univariateAnalysisPipeline af/maf single-source tests (6):
+#   * af supplied (no maf); maf supplied (no af); both disagreeing;
+#     neither with mafCutoff errors; neither without mafCutoff runs;
+#     af-derived MAF parity with explicit maf.
+# rssAnalysisPipeline tests (~21):
+#   * input-file validation; empty sumstats branches; pip_cutoff_to_skip
+#     branches; full QC + imputation + fine-mapping; method-name
+#     conventions (NO_QC / SLALOM / DENTIST / RAISS); outlierNumber
+#     plumbing; finemappingMethod = NULL skip; zMismatchQc = NULL;
+#     impute = FALSE; diagnostics branches (BCR + SER re-analysis);
+#     finemappingOpts passthrough; mafCutoff (af single source);
+#     finemapping-defaults passthrough; X-as-LD genotype path;
+#     mixture-LD passthrough.
+# regionDataToSusieRssInput tests (3):
+#   * correlation-backed input; genotype-backed input; rejects
+#     default rownames as variant IDs.
+# loadStudyLd tests (2):
+#   * single path returns loadLdMatrix output unchanged; comma-separated
+#     paths build a mixture LdData with a list of genotype handles.
+#
+# Replacement APIs (do NOT speculatively port — that is out of scope for
+# this cleanup): `fineMappingPipeline()` dispatched on `GwasSumStats` /
+# `QtlSumStats` / `QtlDataset`; `summaryStatsQc()` (returns a SumStats
+# with `getQcInfo()` populated); `FineMappingEntry(variantIds, ...)`;
+# `result$finemappingEntry` (was `result$finemappingResult`).
+# ===========================================================================

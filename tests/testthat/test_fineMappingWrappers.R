@@ -316,37 +316,6 @@ test_that("init_prior_sd returns n standard deviations", {
 })
 
 # =============================================================================
-# adjustSusieWeights
-# =============================================================================
-
-# Helper: build a minimal twas_weights_results object with the nested structure
-# adjustSusieWeights expects (susie_results / weights paths).
-make_adjust_obj <- function(variant_ids, L = 3, ctx = "ctx") {
-  set.seed(123)
-  p <- length(variant_ids)
-  weights_df <- data.frame(
-    susie = rnorm(p), enet = rnorm(p),
-    row.names = variant_ids, stringsAsFactors = FALSE
-  )
-  list(
-    susie_results = setNames(list(list(
-      variantNames = variant_ids,
-      susie_result_trimmed = list(
-        lbf_variable = matrix(rnorm(L * p), nrow = L, ncol = p),
-        mu = matrix(rnorm(L * p), nrow = L, ncol = p),
-        X_column_scale_factors = rep(1, p)
-      )
-    )), ctx),
-    weights = setNames(list(weights_df), ctx)
-  )
-}
-
-# Use non-strand-ambiguous alleles (A2="A", A1="G") so alleleQc keeps them.
-adjust_vids <- function(positions = 1:6) {
-  paste0("chr1:", positions, ":A:G")
-}
-
-# =============================================================================
 # postprocessFinemappingFits: analysisScript and V=NULL branches (Tier 1)
 # =============================================================================
 
@@ -368,25 +337,6 @@ make_fake_susie_output <- function(p = 5, L = 3, has_V = TRUE) {
   }
   out
 }
-
-test_that("postprocessFinemappingFits stores analysisScript when load_script returns non-empty", {
-  skip_if_not_installed("susieR")
-  p <- 5
-  fake_output <- make_fake_susie_output(p)
-  R <- diag(p)
-  colnames(R) <- rownames(R) <- names(fake_output$pip)
-  local_mocked_bindings(
-    loadScript = function() "fake_script_content"
-  )
-  post <- postprocessFinemappingFits(
-    fits = list(susieRss = pecotmr:::.setFinemappingFitClass(fake_output, "susieRss")),
-    dataX = R,
-    dataY = list(z = rnorm(p)),
-    coverage = 0.95
-  )
-  result <- formatFinemappingOutput(post, primaryMethod = "susieRss")
-  expect_equal(result$analysisScript, "fake_script_content")
-})
 
 test_that("postprocessFinemappingFits keeps all effects when V is NULL", {
   skip_if_not_installed("susieR")
@@ -459,94 +409,6 @@ test_that("postprocessFinemappingFits stores outcome_names, coef, and clfsr for 
   expect_equal(trimmed$coef, fake_coef[-1, , drop = FALSE])
   # conditional_lfsr should be trimmed to eff_idx
   expect_equal(dim(trimmed$clfsr), c(L, p, R))
-})
-
-# =============================================================================
-# adjustSusieWeights
-# =============================================================================
-
-test_that("adjustSusieWeights errors when no variants intersect", {
-  vids <- adjust_vids(1:5)
-  obj <- make_adjust_obj(vids)
-  expect_error(
-    adjustSusieWeights(
-      obj,
-      keepVariants = paste0("chr2:", 1:5, ":A:G"),
-      runAlleleQc = FALSE,
-      variableNameObj = c("susie_results", "ctx", "variantNames"),
-      susieObj = c("susie_results", "ctx", "susie_result_trimmed"),
-      twasWeightsTable = c("weights", "ctx"),
-      ldVariants = NULL
-    ),
-    "No intersected variants"
-  )
-})
-
-test_that("adjustSusieWeights run_allele_qc=FALSE returns intersect coefs", {
-  vids <- adjust_vids(1:6)
-  obj <- make_adjust_obj(vids)
-  keep <- vids[2:5]
-  out <- adjustSusieWeights(
-    obj,
-    keepVariants = keep, runAlleleQc = FALSE,
-    variableNameObj = c("susie_results", "ctx", "variantNames"),
-    susieObj = c("susie_results", "ctx", "susie_result_trimmed"),
-    twasWeightsTable = c("weights", "ctx"),
-    ldVariants = NULL
-  )
-  expect_length(out$adjustedSusieWeights, 4)
-  expect_equal(out$remainedVariantIds, normalizeVariantId(keep))
-  expect_true(all(is.finite(out$adjustedSusieWeights)))
-})
-
-test_that("adjustSusieWeights run_allele_qc=FALSE normalizes variant ids before matching", {
-  # Object has non-canonical (no chr prefix) variant ids
-  vids_raw <- c("1:1:A:G", "1:2:A:G", "1:3:A:G", "1:4:A:G")
-  obj <- make_adjust_obj(vids_raw)
-  # keep_variants supplied with chr prefix
-  keep <- c("chr1:2:A:G", "chr1:3:A:G")
-  out <- adjustSusieWeights(
-    obj,
-    keepVariants = keep, runAlleleQc = FALSE,
-    variableNameObj = c("susie_results", "ctx", "variantNames"),
-    susieObj = c("susie_results", "ctx", "susie_result_trimmed"),
-    twasWeightsTable = c("weights", "ctx"),
-    ldVariants = NULL
-  )
-  expect_length(out$adjustedSusieWeights, 2)
-  expect_equal(out$remainedVariantIds, c("chr1:2:A:G", "chr1:3:A:G"))
-})
-
-test_that("adjustSusieWeights run_allele_qc=TRUE returns adjusted xQTL coefs", {
-  vids <- adjust_vids(1:5)
-  obj <- make_adjust_obj(vids)
-  out <- adjustSusieWeights(
-    obj,
-    keepVariants = vids, runAlleleQc = TRUE, ldVariants = vids,
-    variableNameObj = c("susie_results", "ctx", "variantNames"),
-    susieObj = c("susie_results", "ctx", "susie_result_trimmed"),
-    twasWeightsTable = c("weights", "ctx"),
-    matchMinProp = 0.1
-  )
-  expect_true(length(out$adjustedSusieWeights) > 0)
-  expect_true(all(is.finite(out$adjustedSusieWeights)))
-  expect_true(all(grepl("^chr1:", out$remainedVariantIds)))
-})
-
-test_that("adjustSusieWeights run_allele_qc=TRUE auto-prepends chrom/pos/A2/A1", {
-  vids <- adjust_vids(1:5)
-  obj <- make_adjust_obj(vids)
-  # Confirm the helper produced a weights matrix WITHOUT chrom/pos/A2/A1 cols
-  expect_false(any(c("chrom", "pos", "A2", "A1") %in% colnames(obj$weights$ctx)))
-  out <- adjustSusieWeights(
-    obj,
-    keepVariants = vids, runAlleleQc = TRUE, ldVariants = vids,
-    variableNameObj = c("susie_results", "ctx", "variantNames"),
-    susieObj = c("susie_results", "ctx", "susie_result_trimmed"),
-    twasWeightsTable = c("weights", "ctx"),
-    matchMinProp = 0.1
-  )
-  expect_true(length(out$adjustedSusieWeights) > 0)
 })
 
 test_that("formatFinemappingOutput does not duplicate top loci variants", {
@@ -1026,4 +888,170 @@ test_that("posterior_effect_mean equals colSums(alpha*mu); posterior_effect_se e
     expect_equal(unique(row$posterior_effect_se), expected_se[i],
                  tolerance = 1e-10)
   }
+})
+
+
+context("fsusieWrapper")
+
+# ---- cal_purity ----
+test_that("cal_purity with min method and single element CS", {
+  set.seed(42)
+  X <- matrix(rnorm(100), nrow = 10, ncol = 10)
+  l_cs <- list(c(1))
+
+  result <- pecotmr:::calPurity(l_cs, X, method = "min")
+  expect_equal(result[[1]], 1)
+})
+
+test_that("cal_purity with min method and multi-element CS", {
+  set.seed(42)
+  X <- matrix(rnorm(200), nrow = 20, ncol = 10)
+  l_cs <- list(c(1, 2, 3))
+
+  result <- pecotmr:::calPurity(l_cs, X, method = "min")
+  expect_length(result, 1)
+  # Manually compute expected: min off-diagonal |cor|
+  cormat <- abs(cor(X[, c(1, 2, 3)]))
+  diag(cormat) <- NA
+  expect_equal(result[[1]], min(cormat, na.rm = TRUE))
+})
+
+test_that("cal_purity with non-min method returns three values", {
+  set.seed(42)
+  X <- matrix(rnorm(200), nrow = 20, ncol = 10)
+  l_cs <- list(c(1, 2, 3))
+
+  result <- pecotmr:::calPurity(l_cs, X, method = "susie")
+  expect_length(result[[1]], 3)  # min, mean, median
+  # Manually compute expected values
+  cormat <- abs(cor(X[, c(1, 2, 3)]))
+  diag(cormat) <- NA
+  vals <- cormat[!is.na(cormat)]
+  expect_equal(result[[1]][1], min(vals))
+  expect_equal(result[[1]][2], mean(vals))
+  expect_equal(result[[1]][3], median(vals))
+  # min <= mean and min <= median by definition
+  expect_true(result[[1]][1] <= result[[1]][2])
+  expect_true(result[[1]][1] <= result[[1]][3])
+})
+
+test_that("cal_purity with non-min method single element returns (1,1,1)", {
+  X <- matrix(rnorm(100), nrow = 10, ncol = 10)
+  l_cs <- list(c(1))
+
+  result <- pecotmr:::calPurity(l_cs, X, method = "susie")
+  expect_equal(result[[1]], c(1, 1, 1))
+})
+
+test_that("cal_purity with multiple credible sets", {
+  set.seed(42)
+  X <- matrix(rnorm(200), nrow = 20, ncol = 10)
+  l_cs <- list(c(1, 2), c(5, 6, 7))
+
+  result <- pecotmr:::calPurity(l_cs, X, method = "min")
+  expect_length(result, 2)
+})
+
+# ---- fsusieGetCs ----
+# ---- fsusieWrapper ----
+test_that("fsusieWrapper errors when fsusieR is not installed", {
+  skip_if(requireNamespace("fsusieR", quietly = TRUE),
+          "fsusieR is installed, skipping not-installed test")
+  set.seed(1)
+  X <- matrix(rnorm(50), nrow = 10, ncol = 5)
+  Y <- matrix(rnorm(40), nrow = 10, ncol = 4)
+  expect_error(
+    fsusieWrapper(
+      X = X, Y = Y, pos = seq_len(4), L = 3, prior = "mixture_normal",
+      maxSnpEm = 100, covLev = 0.95, minPurity = 0.5, maxScale = 5
+    ),
+    "fsusieR"
+  )
+})
+
+test_that("fsusieWrapper low-purity branch sets cs to list(NULL) and cs_corr to NULL", {
+  skip_if_not_installed("fsusieR")
+  fake_fit <- list(
+    cs = list(c(1, 2), c(3)),
+    purity = c(0.1, 0.05),  # all < min_purity = 0.5
+    pip = c(0.1, 0.2, 0.3, 0.05, 0.05),
+    alpha = list(matrix(0.1, nrow = 2, ncol = 5), matrix(0.1, nrow = 2, ncol = 5))
+  )
+  local_mocked_bindings(
+    susiF = function(...) fake_fit,
+    .package = "fsusieR"
+  )
+  set.seed(1)
+  X <- matrix(rnorm(50), nrow = 10, ncol = 5)
+  Y <- matrix(rnorm(40), nrow = 10, ncol = 4)
+  out <- fsusieWrapper(
+    X = X, Y = Y, pos = seq_len(4), L = 3, prior = "mixture_normal",
+    maxSnpEm = 100, covLev = 0.95, minPurity = 0.5, maxScale = 5
+  )
+  expect_equal(out$cs, list(NULL))
+  expect_equal(out$sets$cs, list(NULL))
+  expect_null(out$cs_corr)
+})
+
+test_that("fsusieWrapper high-purity branch builds sets and computes cs_corr", {
+  skip_if_not_installed("fsusieR")
+  set.seed(2)
+  p <- 5
+  fake_fit <- list(
+    cs = list(c(1, 2), c(3, 4)),
+    purity = c(0.95, 0.9),  # all > min_purity = 0.5
+    pip = c(0.4, 0.4, 0.6, 0.6, 0.1),
+    alpha = list(
+      matrix(rep(c(0.4, 0.4, 0.05, 0.05, 0.1), each = 2), nrow = 2, byrow = FALSE),
+      matrix(rep(c(0.05, 0.05, 0.45, 0.4, 0.05), each = 2), nrow = 2, byrow = FALSE)
+    )
+  )
+  local_mocked_bindings(
+    susiF = function(...) fake_fit,
+    cal_cor_cs = function(obj, X) matrix(c(1, 0.9, 0.9, 1), nrow = 2),
+    .package = "fsusieR"
+  )
+  X <- matrix(rnorm(10 * p), nrow = 10, ncol = p)
+  Y <- matrix(rnorm(40), nrow = 10, ncol = 4)
+  out <- fsusieWrapper(
+    X = X, Y = Y, pos = seq_len(4), L = 3, prior = "mixture_normal",
+    maxSnpEm = 100, covLev = 0.95, minPurity = 0.5, maxScale = 5
+  )
+  expect_length(out$sets$cs, 2)
+  expect_equal(names(out$sets$cs), c("L1", "L2"))
+  expect_equal(dim(out$cs_corr), c(2, 2))
+  expect_equal(out$sets$requested_coverage, 0.95)
+})
+
+test_that("fsusieGetCs creates susie-like sets", {
+  set.seed(42)
+  X <- matrix(rnorm(200), nrow = 20, ncol = 10)
+
+  fSuSiE_obj <- list(
+    cs = list(c(1, 2, 3), c(5, 6)),
+    alpha = list(
+      c(0.4, 0.3, 0.2, 0.05, 0.02, 0.01, 0.01, 0.005, 0.003, 0.002),
+      c(0.01, 0.02, 0.02, 0.05, 0.45, 0.35, 0.05, 0.02, 0.02, 0.01)
+    )
+  )
+
+  result <- fsusieGetCs(fSuSiE_obj, X, requestedCoverage = 0.95)
+
+  expect_type(result, "list")
+  expect_true("cs" %in% names(result))
+  expect_true("purity" %in% names(result))
+  expect_true("cs_index" %in% names(result))
+  expect_true("coverage" %in% names(result))
+  expect_true("requested_coverage" %in% names(result))
+  expect_equal(result$requested_coverage, 0.95)
+  expect_equal(length(result$cs), 2)
+  expect_equal(names(result$cs), c("L1", "L2"))
+  # Purity should be a data.frame with min/mean/median columns
+  expect_true(is.data.frame(result$purity))
+  expect_equal(nrow(result$purity), 2)
+  # Coverage should be numeric and positive, one per CS
+  expect_length(result$coverage, 2)
+  expect_true(all(result$coverage > 0 & result$coverage <= 1))
+  # cs_index should identify which effects had credible sets
+  expect_length(result$cs_index, 2)
 })

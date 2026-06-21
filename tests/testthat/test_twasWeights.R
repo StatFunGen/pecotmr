@@ -1328,3 +1328,221 @@ test_that("twasWeights: multivariate weights_matrix is reduced to valid_columns 
   expect_equal(ncol(.weightsByMethod(result, "mrmashWeights")), 2)
   expect_equal(rownames(.weightsByMethod(result, "mrmashWeights")), paste0("v", seq_len(p)))
 })
+
+# ===========================================================================
+# Tests migrated from test_twas.R (twasWeightsCv, learnTwasWeights, twasPredict)
+# ===========================================================================
+
+test_that("twasWeightsCv is reproducible with seed", {
+    sim <- generate_X_Y(seed=1)
+    X <- sim$X
+    y = sim$Y
+    local_mocked_bindings(
+        susieWeights = function(X, y, ...) rnorm(ncol(X)),
+        glmnetWeights = function(X, y, ...) runif(ncol(X))
+    )
+    weight_methods_test <- list(susieWeights = list(), glmnetWeights = list())
+    set.seed(1)
+    result_seed1 <- twasWeightsCv(X, y, fold = 2, weightMethods = weight_methods_test)
+    set.seed(1)
+    result_seed2 <- twasWeightsCv(X, y, fold = 2, weightMethods = weight_methods_test)
+    expect_equal(result_seed1$samplePartition, result_seed2$samplePartition)
+})
+
+
+test_that("twasWeightsCv handles errors appropriately", {
+    sim <- generate_X_Y(seed=1)
+    X <- sim$X
+    y = sim$Y
+    local_mocked_bindings(
+        susieWeights = function(X, y, ...) rnorm(ncol(X)),
+        glmnetWeights = function(X, y, ...) runif(ncol(X))
+    )
+    weight_methods_test <- list(susieWeights = list(), glmnetWeights = list())
+    expect_error(twasWeightsCv(X, y, fold = NULL), "fold.*samplePartitions")
+    expect_error(twasWeightsCv(X, y, fold = "invalid"), "positive integer")
+    expect_error(twasWeightsCv(X, y, fold = -1), "positive integer")
+    expect_error(twasWeightsCv(2, y, fold = 2), "must be a matrix")
+    expect_error(twasWeightsCv(X, 2, fold = 2), "number of rows")
+    expect_error(twasWeightsCv(matrix(rnorm(4, nrow=2)), matrix(rnorm(2, nrow=1)), fold = 2), "unused argument")
+    expect_error(twasWeightsCv(X, y), "fold.*samplePartitions")
+})
+
+
+test_that("learnTwasWeights handles errors appropriately", {
+    sim <- generate_X_Y(seed=1)
+    X <- sim$X
+    y = sim$Y
+    local_mocked_bindings(
+        susieWeights = function(X, y, ...) rnorm(ncol(X)),
+        glmnetWeights = function(X, y, ...) runif(ncol(X))
+    )
+    weight_methods_test <- list(susieWeights = list(), glmnetWeights = list())
+    expect_error(learnTwasWeights(matrix(rnorm(4, nrow=2)), matrix(rnorm(2, nrow=1))), "unused argument")
+    expect_error(learnTwasWeights(X, y), "weightMethods")
+})
+
+# ===========================================================================
+# twasZ: mathematical correctness (single-method / vector path)
+# ===========================================================================
+
+
+test_that("twasPredict multiplies X by weights", {
+  X <- matrix(c(1, 2, 3, 4, 5, 6), nrow = 3, ncol = 2)
+  weights_list <- list(method1_weights = c(0.5, -0.5))
+  result <- twasPredict(X, weights_list)
+  expect_length(result, 1)
+  expect_equal(names(result), "method1_predicted")
+  expected <- X %*% c(0.5, -0.5)
+  expect_equal(result[[1]], expected)
+})
+
+
+test_that("twasPredict handles multiple weight methods", {
+  set.seed(42)
+  X <- matrix(rnorm(30), nrow = 10, ncol = 3)
+  weights_list <- list(
+    lassoWeights = c(1, 0, -1),
+    enetWeights = c(0.5, 0.3, 0.2),
+    susieWeights = c(0, 0, 1)
+  )
+  result <- twasPredict(X, weights_list)
+  expect_length(result, 3)
+  expect_equal(names(result), c("lassoPredicted", "enetPredicted", "susiePredicted"))
+  # Verify computation for one method
+  expect_equal(result$lassoPredicted, X %*% c(1, 0, -1))
+})
+
+
+test_that("twasPredict with zero weights gives zero predictions", {
+  X <- matrix(1:6, nrow = 2, ncol = 3)
+  weights_list <- list(null_weights = c(0, 0, 0))
+  result <- twasPredict(X, weights_list)
+  expect_true(all(result$null_predicted == 0))
+})
+
+
+test_that("twasPredict with single variant", {
+  X <- matrix(c(1, 2, 3), nrow = 3, ncol = 1)
+  weights_list <- list(single_weights = 2.0)
+  result <- twasPredict(X, weights_list)
+  expect_equal(as.numeric(result$single_predicted), c(2, 4, 6))
+})
+
+
+# === Tests migrated from test_s4Constructors.R (TwasWeights) ===
+
+test_that("TwasWeights: builds a collection keyed by 4-tuple", {
+  e1 <- .sc_makeTwasWeightsEntry()
+  e2 <- .sc_makeTwasWeightsEntry()
+  tw <- TwasWeights(
+    study   = c("s1", "s1"),
+    context = c("c1", "c1"),
+    trait   = c("t1", "t1"),
+    method  = c("lasso", "enet"),
+    entry   = list(e1, e2))
+  expect_s4_class(tw, "TwasWeights")
+  expect_equal(nrow(tw), 2L)
+  expect_setequal(getMethodNames(tw), c("lasso", "enet"))
+})
+
+
+test_that("TwasWeights: getStudy / getContexts / getTraits / getMethodNames", {
+  e <- .sc_makeTwasWeightsEntry()
+  tw <- TwasWeights(
+    study   = c("s1", "s2"),
+    context = c("c1", "c2"),
+    trait   = c("t1", "t1"),
+    method  = c("lasso", "lasso"),
+    entry   = list(e, e))
+  expect_setequal(getContexts(tw), c("c1", "c2"))
+  expect_equal(getTraits(tw), "t1")
+  expect_equal(getMethodNames(tw), "lasso")
+})
+
+
+test_that("TwasWeights: rejects duplicate 4-tuples", {
+  e <- .sc_makeTwasWeightsEntry()
+  expect_error(
+    TwasWeights(
+      study   = c("s1", "s1"),
+      context = c("c1", "c1"),
+      trait   = c("t1", "t1"),
+      method  = c("lasso", "lasso"),
+      entry   = list(e, e)),
+    "uniqueness violated"
+  )
+})
+
+
+test_that("TwasWeights: joint columns work the same as on the FMR class", {
+  e <- .sc_makeTwasWeightsEntry()
+  tw <- TwasWeights(
+    study   = c("s1", "s1"),
+    context = c("c1", "joint"),
+    trait   = c("t1", "t1"),
+    method  = c("lasso", "mrmash"),
+    entry   = list(e, e),
+    jointContexts = c(NA_character_, "c1;c2"))
+  expect_true("jointContexts" %in% names(tw))
+  expect_identical(tw$jointContexts, c(NA_character_, "c1;c2"))
+  # uniqueness: distinct jointContexts -> distinct rows
+  tw2 <- TwasWeights(
+    study   = c("s1", "s1"),
+    context = c("joint", "joint"),
+    trait   = c("t1", "t1"),
+    method  = c("mrmash", "mrmash"),
+    entry   = list(e, e),
+    jointContexts = c("c1;c2", "c1;c3"))
+  expect_equal(nrow(tw2), 2L)
+})
+
+
+test_that("TwasWeights: getTwasWeights extracts the entry for a tuple", {
+  e1 <- .sc_makeTwasWeightsEntry()
+  e2 <- .sc_makeTwasWeightsEntry()
+  tw <- TwasWeights(
+    study   = c("s1", "s1"),
+    context = c("c1", "c1"),
+    trait   = c("t1", "t1"),
+    method  = c("lasso", "enet"),
+    entry   = list(e1, e2))
+  expect_identical(
+    getTwasWeights(tw, study = "s1", context = "c1",
+                   trait = "t1", method = "enet"),
+    e2)
+})
+
+# ===========================================================================
+# LdData
+# ===========================================================================
+
+
+
+# === Tests migrated from test_showMethods.R (TwasWeights) ===
+
+test_that("show.TwasWeights prints entry/study/context/trait/method counts", {
+  e <- .sh_makeTwEntry()
+  tw <- TwasWeights(
+    study   = c("s1", "s1"),
+    context = c("c1", "c2"),
+    trait   = c("t1", "t1"),
+    method  = c("lasso", "enet"),
+    entry   = list(e, e))
+  out <- capture.output(show(tw))
+  expect_true(any(grepl("TwasWeights: 2 entries", out)))
+  expect_true(any(grepl("1 studies.*2 contexts.*1 traits.*2 methods", out)))
+})
+
+
+test_that("show.TwasWeights reports ldSketch when present", {
+  e <- .sh_makeTwEntry()
+  tw <- TwasWeights(
+    study = "s1", context = "c1", trait = "t1", method = "lasso",
+    entry = list(e),
+    ldSketch = .sh_makeGenotypeHandle())
+  out <- capture.output(show(tw))
+  expect_true(any(grepl("LD sketch: gds @ /tmp/test.gds", out)))
+})
+
+
