@@ -119,7 +119,12 @@ NULL
 
   if (nrow(matchResult) == 0) {
     warning("No matching variants found between target data and reference variants.")
-    return(list(harmonizedData = matchResult, qcSummary = matchResult))
+    emptyOut <- list(harmonizedData = matchResult, qcSummary = matchResult)
+    attr(emptyOut, "qcCounts") <- list(
+      considered = 0L, signFlip = 0L, strandFlip = 0L, kept = 0L,
+      dropped = 0L, droppedIndel = 0L, droppedAmbiguous = 0L,
+      droppedOther = 0L)
+    return(emptyOut)
   }
 
   matchResult <- matchResult %>%
@@ -180,6 +185,30 @@ NULL
     matchResult[sIdx, "A2.target"] <- strandFlip(matchResult[sIdx, "A2.target"])
   }
 
+  # Per-step QC counts (used by .runEntrySummaryStatsQc for "kept N of M
+  # (corrected: sign-flipped A, strand-flipped B; dropped C)" logging).
+  # Computed from the per-variant flags before they are stripped from the
+  # returned data frame so callers reading the data frame are unaffected.
+  qcCounts <- list(
+    considered = nrow(matchResult),
+    signFlip   = sum(matchResult$sign_flip   & matchResult$keep, na.rm = TRUE),
+    strandFlip = sum(matchResult$strand_flip & matchResult$keep, na.rm = TRUE),
+    kept       = sum(matchResult$keep,  na.rm = TRUE),
+    dropped    = sum(!matchResult$keep, na.rm = TRUE))
+  if ("INDEL" %in% colnames(matchResult)) {
+    qcCounts$droppedIndel <- sum(!matchResult$keep & matchResult$INDEL,
+                                  na.rm = TRUE)
+  } else {
+    qcCounts$droppedIndel <- 0L
+  }
+  qcCounts$droppedAmbiguous <- sum(
+    !matchResult$keep & matchResult$strand_flip &
+    !matchResult$strand_unambiguous &
+    if ("INDEL" %in% colnames(matchResult)) !matchResult$INDEL else TRUE,
+    na.rm = TRUE)
+  qcCounts$droppedOther <- qcCounts$dropped - qcCounts$droppedIndel -
+                           qcCounts$droppedAmbiguous
+
   result <- matchResult[matchResult$keep, , drop = FALSE]
 
   qcCols <- c("flip1.ref", "flip2.ref", "strand_unambiguous",
@@ -212,7 +241,9 @@ NULL
          "should have been deduplicated by MungeSumstats / summaryStatsQc ",
          "before calling .matchRefPanel.")
 
-  list(harmonizedData = result, qcSummary = matchResult)
+  out <- list(harmonizedData = result, qcSummary = matchResult)
+  attr(out, "qcCounts") <- qcCounts
+  out
 }
 
 #' Align Variant Names
@@ -2635,6 +2666,7 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
   out <- res$harmonizedData
   if (!"chrom" %in% colnames(out) && "chr" %in% colnames(out))
     colnames(out)[colnames(out) == "chr"] <- "chrom"
+  attr(out, "qcCounts") <- attr(res, "qcCounts")
   out
 }
 
@@ -2672,12 +2704,29 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
 }
 
 # Internal: per-entry pipeline. Returns the cleaned GRanges and an audit list.
-.runEntrySummaryStatsQc <- function(gr, ldSketch, refGenome, opts) {
+.runEntrySummaryStatsQc <- function(gr, ldSketch, refGenome, opts,
+                                    entryLabel = NULL) {
   entryAudit <- list()
+  # Counter capture for per-step "kept N of M" messages + per-entry rollup.
+  # Each step records what it removed / added so we can summarise without
+  # re-scanning the data. Skipped steps are left as NA / 0 and omitted
+  # from the rollup.
+  qcCount <- list(
+    harmCorrSign = 0L, harmCorrStrand = 0L, harmDropped = 0L,
+    krigingRemoved = 0L, mismatchRemoved = 0L,
+    imputeBefore = NA_integer_, imputeAfter = NA_integer_)
+  lbl <- if (!is.null(entryLabel) && nzchar(entryLabel)) entryLabel
+         else NA_character_
+  emit <- function(...) {
+    if (is.na(lbl)) message(...) else message("[", lbl, "] ", ...)
+  }
+
   df <- .entryGrangesToDf(gr)
   entryAudit$variantsIn <- nrow(df)
+  nStudyIn <- nrow(df)
 
   # 1. MungeSumstats variant-content pass.
+  nMungeIn <- nrow(df)
   mungeResult <- .runMungeSumstatsFilter(
     df,
     refGenome             = refGenome,
@@ -2691,6 +2740,10 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
     mungeSumstatsArgs     = opts$mungeSumstatsArgs)
   df <- mungeResult$df
   entryAudit$mungeSumstatsDropped <- mungeResult$droppedNVariants
+  if (nMungeIn > 0L) {
+    emit("QC track: MungeSumstats kept ", nrow(df), " of ", nMungeIn,
+         " variant(s).")
+  }
 
   # 1b. Derive BETA / SE from signed Z when the input only carries Z.
   # Formula (Zhu et al. 2016 / RAISS): se = 1/sqrt(2 * maf * (1-maf) *
@@ -2734,11 +2787,28 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
   }
 
   # 5. Panel-vs-sumstats allele harmonization.
+  nHarmIn <- nrow(df)
   df <- .matchAgainstSketch(df, ldSketch, matchMinProp = opts$matchMinProp)
+  harmCounts <- attr(df, "qcCounts")
+  attr(df, "qcCounts") <- NULL
   entryAudit$matchedAgainstSketch <- nrow(df)
+  if (!is.null(harmCounts)) {
+    qcCount$harmCorrSign   <- harmCounts$signFlip
+    qcCount$harmCorrStrand <- harmCounts$strandFlip
+    qcCount$harmDropped    <- nHarmIn - nrow(df)
+    emit("QC track: harmonization kept ", nrow(df), " of ", nHarmIn,
+         " variant(s) (corrected: sign-flipped ", harmCounts$signFlip,
+         ", strand-flipped ", harmCounts$strandFlip,
+         "; dropped ", qcCount$harmDropped, ").")
+  } else {
+    qcCount$harmDropped <- nHarmIn - nrow(df)
+    emit("QC track: harmonization kept ", nrow(df), " of ", nHarmIn,
+         " variant(s).")
+  }
 
   # 6. Optional kriging prefilter.
   if (isTRUE(opts$alleleFlipKriging) && nrow(df) >= 2L) {
+    nKrIn <- nrow(df)
     snpIdx <- match(df$SNP, as.character(getSnpInfo(ldSketch)$SNP))
     block <- extractBlockGenotypes(ldSketch, snpIdx, meanImpute = TRUE)
     dosage <- t(SummarizedExperiment::assay(block, "dosage"))
@@ -2748,18 +2818,26 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
     nKr <- sum(kr$outlier)
     if (nKr > 0L) df <- df[!kr$outlier, , drop = FALSE]
     entryAudit$krigingOutliersDropped <- nKr
+    qcCount$krigingRemoved <- nKr
+    emit("QC track: kriging prefilter removed ", nKr, " of ", nKrIn,
+         " LD-inconsistent variant(s).")
   }
 
   # 7. Optional LD-mismatch QC.
   if (!identical(opts$zMismatchQc, "none") && nrow(df) >= 2L) {
+    nMmIn <- nrow(df)
     ldQc <- .applyLdMismatchQcToEntry(df, ldSketch, opts$zMismatchQc)
     df <- ldQc$df
     entryAudit$ldMismatchOutliersDropped <- ldQc$outliers
     entryAudit$ldMismatchMethod          <- opts$zMismatchQc
+    qcCount$mismatchRemoved <- ldQc$outliers
+    emit("QC track: ", opts$zMismatchQc, " removed ", ldQc$outliers, " of ",
+         nMmIn, " LD-mismatch outlier(s).")
   }
 
   # 8. Optional RAISS imputation against the ldSketch.
   if (isTRUE(opts$impute) && nrow(df) >= 1L) {
+    qcCount$imputeBefore <- nrow(df)
     refPanel <- .refVariantsFromSketch(ldSketch)
     refPanel <- refPanel[order(refPanel$pos), , drop = FALSE]
 
@@ -2822,7 +2900,41 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
     } else {
       entryAudit$raissImputedVariants <- 0L
     }
+    qcCount$imputeAfter <- nrow(df)
+    emit("QC track: RAISS imputation ", qcCount$imputeBefore, " -> ",
+         qcCount$imputeAfter, " variant(s) (net ",
+         sprintf("%+d", qcCount$imputeAfter - qcCount$imputeBefore), ").")
   }
+
+  # Per-entry QC rollup: corrected (sign/strand flip, retained), removed
+  # (drops at each step), imputed (added). Kept as distinct categories
+  # because imputation adds variants back, so "in -> out" is not monotonic.
+  # Skipped steps omitted.
+  removedSegs <- character(0)
+  if (entryAudit$mungeSumstatsDropped > 0L)
+    removedSegs <- c(removedSegs,
+                     paste0("munge ", entryAudit$mungeSumstatsDropped))
+  if (qcCount$harmDropped > 0L)
+    removedSegs <- c(removedSegs,
+                     paste0("harmonization ", qcCount$harmDropped))
+  if (isTRUE(opts$alleleFlipKriging))
+    removedSegs <- c(removedSegs,
+                     paste0("kriging ", qcCount$krigingRemoved))
+  if (!identical(opts$zMismatchQc, "none"))
+    removedSegs <- c(removedSegs,
+                     paste0("mismatch ", qcCount$mismatchRemoved))
+  correctedSeg <- paste0("sign-flip ", qcCount$harmCorrSign,
+                          ", strand-flip ", qcCount$harmCorrStrand)
+  impSeg <- if (isTRUE(opts$impute) && !is.na(qcCount$imputeAfter)) {
+    paste0(" | imputed ",
+           sprintf("%+d", qcCount$imputeAfter - qcCount$imputeBefore))
+  } else ""
+  emit("QC summary: ", nStudyIn, " in -> ", nrow(df), " out",
+       " | corrected: ", correctedSeg,
+       if (length(removedSegs) > 0L)
+         paste0(" | removed: ", paste(removedSegs, collapse = ", "))
+       else "",
+       impSeg)
 
   entryAudit$variantsOut <- nrow(df)
   list(gr = .dfToEntryGranges(df), audit = entryAudit)
@@ -2960,15 +3072,27 @@ summaryStatsQc <- function(sumstats,
 
   newEntries <- vector("list", nrow(sumstats))
   entryAudits <- vector("list", nrow(sumstats))
+  isQtl <- methods::is(sumstats, "QtlSumStats")
   for (i in seq_len(nrow(sumstats))) {
     opts$nForPip <- if ("N" %in% colnames(S4Vectors::mcols(sumstats$entry[[i]])))
       stats::median(S4Vectors::mcols(sumstats$entry[[i]])$N, na.rm = TRUE)
     else NULL
+    # Per-entry label woven into QC log messages and the rollup. For
+    # QtlSumStats it's (study/context/trait); for GwasSumStats it's the
+    # study identifier.
+    entryLabel <- if (isQtl) {
+      paste(as.character(sumstats$study)[[i]],
+            as.character(sumstats$context)[[i]],
+            as.character(sumstats$trait)[[i]], sep = "/")
+    } else {
+      as.character(sumstats$study)[[i]]
+    }
     result <- .runEntrySummaryStatsQc(
-      gr        = sumstats$entry[[i]],
-      ldSketch  = getLdSketch(sumstats),
-      refGenome = getGenome(sumstats),
-      opts      = opts)
+      gr         = sumstats$entry[[i]],
+      ldSketch   = getLdSketch(sumstats),
+      refGenome  = getGenome(sumstats),
+      opts       = opts,
+      entryLabel = entryLabel)
     newEntries[[i]] <- result$gr
     entryAudits[[i]] <- result$audit
   }

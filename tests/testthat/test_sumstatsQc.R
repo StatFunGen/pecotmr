@@ -2882,6 +2882,98 @@ test_that("summaryStatsQc: impute = TRUE with raiss returning NULL records 0 imp
   expect_equal(ea$raissImputedVariants, 0L)
 })
 
+# ===========================================================================
+# summaryStatsQc: per-step QC counter logging (concept salvaged from PR #520)
+# ===========================================================================
+
+test_that(".matchRefPanel surfaces sign/strand/dropped counts via qcCounts attribute", {
+  # 4 shared positions: 100 exact, 200 sign-flip, 300 strand-flip (A/G
+  # unambiguous), 400 allele mismatch (dropped).
+  target <- data.frame(
+    chrom = c(1, 1, 1, 1), pos = c(100, 200, 300, 400),
+    A2 = c("A", "A", "A", "A"), A1 = c("G", "G", "G", "G"),
+    z = c(1, 2, 3, 4), stringsAsFactors = FALSE)
+  ref <- data.frame(
+    chrom = c(1, 1, 1, 1), pos = c(100, 200, 300, 400),
+    A2 = c("A", "G", "T", "C"), A1 = c("G", "A", "C", "A"),
+    stringsAsFactors = FALSE)
+  res <- pecotmr:::.matchRefPanel(target, ref, colToFlip = "z",
+                                   matchMinProp = 0)
+  # Default return shape unchanged.
+  expect_named(res, c("harmonizedData", "qcSummary"))
+  expect_equal(nrow(res$harmonizedData), 3L)
+  cnt <- attr(res, "qcCounts")
+  expect_false(is.null(cnt))
+  expect_equal(cnt$considered, 4L)
+  expect_equal(cnt$signFlip,   1L)
+  expect_equal(cnt$strandFlip, 1L)
+  expect_equal(cnt$kept,       3L)
+  expect_equal(cnt$dropped,    1L)
+})
+
+test_that("summaryStatsQc: QC track emits per-step 'kept N of M' messages plus a rollup", {
+  ss <- .ssQ_makeGwasSumStats()
+  local_mocked_bindings(
+    .runMungeSumstatsFilter = .ssQ_mockMunge(),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    extractBlockGenotypes = .ssQ_mockExtractor(),
+    .package = "pecotmr")
+  msgs <- capture_messages(summaryStatsQc(ss))
+  joined <- paste(msgs, collapse = "")
+  # MungeSumstats step + denominator framing.
+  expect_match(joined, "MungeSumstats kept [0-9]+ of [0-9]+ variant")
+  # Harmonization step + corrected/dropped breakdown.
+  expect_match(joined, "harmonization kept [0-9]+ of [0-9]+")
+  expect_match(joined, "corrected: sign-flipped [0-9]+, strand-flipped [0-9]+")
+  # Per-entry rollup line.
+  expect_match(joined, "QC summary: [0-9]+ in -> [0-9]+ out")
+  expect_match(joined, "corrected: sign-flip [0-9]+, strand-flip [0-9]+")
+})
+
+test_that("summaryStatsQc: skipped optional steps are omitted from the rollup", {
+  ss <- .ssQ_makeGwasSumStats()
+  local_mocked_bindings(
+    .runMungeSumstatsFilter = .ssQ_mockMunge(),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    extractBlockGenotypes = .ssQ_mockExtractor(),
+    .package = "pecotmr")
+  msgs <- capture_messages(
+    summaryStatsQc(ss,
+                   alleleFlipKriging = FALSE,
+                   zMismatchQc       = "none",
+                   impute            = FALSE))
+  joined <- paste(msgs, collapse = "")
+  # Kriging / mismatch / imputation are skipped: their per-step messages
+  # and their rollup segments should be absent.
+  expect_false(grepl("kriging", joined))
+  expect_false(grepl("LD-mismatch", joined))
+  expect_false(grepl("RAISS imputation", joined))
+  expect_false(grepl("imputed [+-][1-9]", joined))
+})
+
+test_that("summaryStatsQc: per-entry log lines carry the (study/context/trait) label for QtlSumStats", {
+  # Reuse the QtlSumStats fixture from the round-trip test.
+  qss <- QtlSumStats(
+    study    = "qstudy",
+    context  = "qctx",
+    trait    = "qtrait",
+    entry    = list(.ssQ_makeEntryGr()),
+    genome   = "hg19",
+    ldSketch = .ssQ_makeHandle())
+  local_mocked_bindings(
+    .runMungeSumstatsFilter = .ssQ_mockMunge(),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    extractBlockGenotypes = .ssQ_mockExtractor(),
+    .package = "pecotmr")
+  msgs <- capture_messages(summaryStatsQc(qss))
+  joined <- paste(msgs, collapse = "")
+  expect_match(joined, "\\[qstudy/qctx/qtrait\\] QC track")
+  expect_match(joined, "\\[qstudy/qctx/qtrait\\] QC summary")
+})
+
 
 context("sumstatsQc internal helpers")
 
