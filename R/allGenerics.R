@@ -188,6 +188,23 @@ setGeneric("getVarY", function(x, ...) standardGeneric("getVarY"))
 #' @export
 setGeneric("getSumStats", function(x, ...) standardGeneric("getSumStats"))
 
+#' @title Get Standardized Sumstat Data Frame for One Tuple
+#' @description Return a per-tuple summary-statistics \code{data.frame}
+#'   in the standardized layout \code{variant_id, chrom, pos, A1, A2,
+#'   z, beta, se, N, maf} (optional columns omitted when absent on the
+#'   entry). Combines tuple-keyed row selection (\code{getSumStats})
+#'   with mcols unpacking; replaces the pre-S4 idiom of pulling
+#'   \code{S4Vectors::mcols(entry)$<col>} directly inside pipelines.
+#' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
+#' @param ... Class-specific selectors (\code{study} for
+#'   \code{GwasSumStats}; \code{study}, \code{context}, \code{trait}
+#'   for \code{QtlSumStats}) plus pass-throughs \code{require},
+#'   \code{derive}, \code{keepChrPrefix} forwarded to the underlying
+#'   unpacker.
+#' @return A \code{data.frame}.
+#' @export
+setGeneric("getSumstatDf", function(x, ...) standardGeneric("getSumstatDf"))
+
 #' @title Get the Embedded QtlDataset List
 #' @description Return the named list of \code{QtlDataset} objects
 #'   carried by a \code{MultiStudyQtlDataset}.

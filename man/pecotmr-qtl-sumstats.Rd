@@ -2,40 +2,10 @@
 % Please edit documentation in R/QtlSumStats.R
 \name{pecotmr-qtl-sumstats}
 \alias{pecotmr-qtl-sumstats}
-\title{GWAS Summary Statistics Collection}
+\title{QTL Summary Statistics Handling}
 \description{
-S4 collection of GWAS summary statistics keyed by
-  \code{study}. Each entry holds a \code{GRanges} of summary statistics
-  for that study. Class-level slots \code{ldSketch} (the LD reference
-  \code{GenotypeHandle}) and \code{genome} (the genome build, a single
-  character string) apply to every entry; the genome build must be
-  uniform because all entries necessarily share the LD reference.
-
-  Required columns: \code{study}, \code{entry}. Optional columns
-  include \code{varY} (numeric, phenotype variance for the
-  sufficient-statistic interface; NA otherwise). \code{study} is
-  unique. Each \code{entry} is a \code{GRanges} whose mcols carry the
-  per-variant statistics (\code{SNP}, \code{A1}, \code{A2}, \code{Z},
-  \code{N}; plus optional \code{MAF}, \code{INFO}, \code{BETA},
-  \code{SE}, \code{P}).
-
 Constructor and accessor methods for \code{QtlSumStats},
   the DFrame-subclass collection keyed by
   \code{(study, context, trait)}.
 }
-\section{Slots}{
-
-\describe{
-\item{\code{ldSketch}}{A \code{GenotypeHandle} for the LD reference.}
-
-\item{\code{genome}}{A single character string giving the genome build that
-the LD sketch and every entry are aligned to.}
-
-\item{\code{qcInfo}}{A \code{list} recording which QC steps ran. Empty
-\code{list()} on construction; populated by \code{summaryStatsQc()}.
-Fine-mapping and TWAS-weights pipelines reject inputs where
-\code{length(getQcInfo(x)) == 0L} — the slot serves as both the
-gating flag and the audit trail.}
-}}
-
 \keyword{internal}

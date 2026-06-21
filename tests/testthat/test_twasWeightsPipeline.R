@@ -1281,17 +1281,39 @@ test_that(".twasAssertQcd: passes when qcInfo is populated", {
 })
 
 # ===========================================================================
-# .twasSumstatsEntryToDf
+# getSumstatDf (public method on GwasSumStats / QtlSumStats; replaces
+# the now-deleted `.twasSumstatsEntryToDf` shim)
 # ===========================================================================
 
-test_that(".twasSumstatsEntryToDf: returns canonical column layout", {
+.gsd_makeHandle <- function(snp_n = 2L) {
+  new("GenotypeHandle",
+    path = "/tmp/sketch.gds", format = "gds",
+    snpInfo = data.frame(
+      SNP = paste0("rs", seq_len(snp_n)),
+      CHR = rep("1", snp_n),
+      BP  = seq(100L, by = 100L, length.out = snp_n),
+      A1  = rep("A", snp_n), A2 = rep("G", snp_n),
+      stringsAsFactors = FALSE),
+    nSamples = 10L, sampleIds = paste0("s", seq_len(10L)),
+    pgenPtr = NULL)
+}
+
+.gsd_makeGwasSumStats <- function(mcolsDf, snp_n = nrow(mcolsDf)) {
   gr <- GenomicRanges::GRanges(
-    c("chr1", "chr1"),
-    IRanges::IRanges(start = c(100L, 200L), width = 1L))
-  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    seqnames = rep("chr1", snp_n),
+    ranges = IRanges::IRanges(
+      start = seq(100L, by = 100L, length.out = snp_n), width = 1L))
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(mcolsDf)
+  GwasSumStats(study = "G1", entry = list(gr), genome = "hg19",
+               ldSketch = .gsd_makeHandle(snp_n),
+               qcInfo = list(prebuilt = "synthetic"))
+}
+
+test_that("getSumstatDf: returns the canonical column layout", {
+  ss <- .gsd_makeGwasSumStats(data.frame(
     SNP = c("rs1", "rs2"), A1 = c("A", "A"), A2 = c("G", "G"),
-    Z = c(1.0, -2.5), N = c(1000L, 1500L), MAF = c(0.1, 0.3))
-  df <- pecotmr:::.twasSumstatsEntryToDf(gr)
+    Z = c(1.0, -2.5), N = c(1000L, 1500L), MAF = c(0.1, 0.3)))
+  df <- getSumstatDf(ss)
   expect_s3_class(df, "data.frame")
   expect_equal(df$variant_id, c("rs1", "rs2"))
   expect_equal(df$chrom, c("chr1", "chr1"))
@@ -1301,29 +1323,32 @@ test_that(".twasSumstatsEntryToDf: returns canonical column layout", {
   expect_equal(df$maf, c(0.1, 0.3))
 })
 
-test_that(".twasSumstatsEntryToDf: derives z from beta/se when z is absent", {
-  gr <- GenomicRanges::GRanges(
-    "chr1", IRanges::IRanges(start = 100L, width = 1L))
-  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+test_that("getSumstatDf: derives z from beta/se when derive='zFromBetaSe'", {
+  ss <- .gsd_makeGwasSumStats(data.frame(
     SNP = "rs1", A1 = "A", A2 = "G",
-    BETA = 0.5, SE = 0.1, N = 1000L)
-  df <- pecotmr:::.twasSumstatsEntryToDf(gr)
+    BETA = 0.5, SE = 0.1, N = 1000L), snp_n = 1L)
+  df <- getSumstatDf(ss, derive = "zFromBetaSe")
   expect_equal(df$beta, 0.5)
   expect_equal(df$se, 0.1)
   expect_equal(df$z, 0.5 / 0.1)
 })
 
-test_that(".twasSumstatsEntryToDf: omits optional columns when absent", {
-  gr <- GenomicRanges::GRanges(
-    "chr1", IRanges::IRanges(start = 100L, width = 1L))
-  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-    SNP = "rs1", A1 = "A", A2 = "G")
-  df <- pecotmr:::.twasSumstatsEntryToDf(gr)
+test_that("getSumstatDf: omits optional columns when absent", {
+  ss <- .gsd_makeGwasSumStats(data.frame(
+    SNP = "rs1", A1 = "A", A2 = "G"), snp_n = 1L)
+  df <- getSumstatDf(ss)
   expect_false("z"    %in% names(df))
   expect_false("beta" %in% names(df))
   expect_false("se"   %in% names(df))
   expect_false("N"    %in% names(df))
   expect_false("maf"  %in% names(df))
+})
+
+test_that("getSumstatDf: require=c('Z','N') errors when columns missing", {
+  ss <- .gsd_makeGwasSumStats(data.frame(
+    SNP = "rs1", A1 = "A", A2 = "G", Z = 1.5), snp_n = 1L)
+  expect_error(getSumstatDf(ss, require = c("Z", "N")),
+                "no N mcol")
 })
 
 # ===========================================================================

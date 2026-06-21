@@ -86,6 +86,7 @@ filterInvalidSummaryStat <- function(datList, bhat = NULL, sbhat = NULL, z = NUL
   return(datList)
 }
 
+#' @importFrom purrr keep
 #' @export
 filterMixtureComponents <- function(conditionsToKeep, U, w = NULL, wCutoff = 1e-04) {
   # Identify conditions not to keep (to be removed)
@@ -135,6 +136,8 @@ filterMixtureComponents <- function(conditionsToKeep, U, w = NULL, wCutoff = 1e-
   return(list(U = U, w = w))
 }
 
+#' @importFrom purrr map_dfr
+#' @importFrom dplyr bind_rows
 mergeSusieCs <- function(susieFit, coverage = "CS_95_susie", method = NULL) {
   if (is.null(coverage)) coverage <- "CS_95_susie"
   coverage <- .translateLegacyCsColumnName(coverage)
@@ -385,7 +388,9 @@ mergeMashData <- function(resData, oneData) {
 # (1000) inside mashr::mash_set_data via its `zero_Bhat_Shat_reset`
 # pathway, matching the prior pipeline's handling of incomplete cells.
 # @noRd
-.mashSumStatsToMatrices <- function(x, role) {
+.mashSumStatsToMatrices <- function(x, role,
+                                    inputScale = c("auto", "beta", "z")) {
+  inputScale <- match.arg(inputScale)
   if (!methods::is(x, "QtlSumStats") && !methods::is(x, "GwasSumStats")) {
     stop(sprintf(
       "mashPipeline: '%s' input must be a QtlSumStats or GwasSumStats; got %s.",
@@ -419,17 +424,44 @@ mergeMashData <- function(resData, oneData) {
   # Per-entry GRanges (avoid `@`; use the public list-column accessor).
   entries <- x$entry
 
-  # Validate Z presence on every entry up front.
-  for (i in seq_len(nrow(x))) {
-    gr <- entries[[i]]
-    mc <- S4Vectors::mcols(gr)
-    if (!"Z" %in% colnames(mc)) {
-      stop(sprintf(
-        "mashPipeline: '%s' SumStats entry %d has no 'Z' mcol; ",
-        role, i),
-        "every entry must carry Z scores.")
-    }
-  }
+  # Resolve per-entry scale: which (Bhat, Shat) source to pull. mashr
+  # expects one coherent convention per call:
+  #   "beta" → Bhat = BETA, Shat = SE   (effect-size scale; standard)
+  #   "z"    → Bhat = Z,    Shat = 1    (z-score scale)
+  # "auto" picks "beta" when every entry has BETA + SE, else "z" if
+  # every entry has Z. Mixed inputs (some entries missing BETA, others
+  # missing Z) are a hard error.
+  entryCaps <- lapply(seq_len(nrow(x)), function(i) {
+    mc <- S4Vectors::mcols(entries[[i]])
+    list(hasBetaSe = all(c("BETA", "SE") %in% colnames(mc)),
+         hasZ      = "Z" %in% colnames(mc))
+  })
+  allHaveBetaSe <- all(vapply(entryCaps, `[[`, logical(1), "hasBetaSe"))
+  allHaveZ      <- all(vapply(entryCaps, `[[`, logical(1), "hasZ"))
+  resolvedScale <- switch(inputScale,
+    beta = {
+      if (!allHaveBetaSe)
+        stop(sprintf(
+          "mashPipeline: inputScale = 'beta' requires every '%s' entry to ",
+          role),
+          "carry both BETA and SE mcols.")
+      "beta"
+    },
+    z = {
+      if (!allHaveZ)
+        stop(sprintf(
+          "mashPipeline: inputScale = 'z' requires every '%s' entry to ",
+          role), "carry a Z mcol.")
+      "z"
+    },
+    auto = {
+      if (allHaveBetaSe) "beta"
+      else if (allHaveZ) "z"
+      else stop(sprintf(
+        "mashPipeline: '%s' SumStats has no usable scale — every entry ",
+        role),
+        "must carry (BETA, SE) or Z mcols.")
+    })
 
   # Group rows of x by (study, trait) block; within each block, build a
   # variant × context matrix for Bhat and Shat.
@@ -445,26 +477,29 @@ mergeMashData <- function(resData, oneData) {
     # Variant universe for this block = union of variant IDs (SNP)
     # across the contexts in this block, preserving first-seen order.
     variantOrder <- character()
-    perContextZ <- list()
+    perContextB  <- list()
     perContextSe <- list()
+    requireCols <- if (resolvedScale == "beta") c("SNP", "BETA", "SE")
+                   else                          c("SNP", "Z")
     for (rIdx in rowsInBlock) {
-      gr <- entries[[rIdx]]
-      mc <- S4Vectors::mcols(gr)
-      if (!"SNP" %in% colnames(mc)) {
-        stop(sprintf(
-          "mashPipeline: '%s' SumStats entry %d has no 'SNP' mcol; ",
-          role, rIdx),
-          "variant alignment across contexts requires SNP IDs.")
+      df <- if (isQtl) {
+        getSumstatDf(x,
+                     study   = studyCol[[rIdx]],
+                     context = contextCol[[rIdx]],
+                     trait   = traitCol[[rIdx]],
+                     require = requireCols)
+      } else {
+        getSumstatDf(x, study = studyCol[[rIdx]], require = requireCols)
       }
-      snps <- as.character(mc$SNP)
+      snps <- df$variant_id
       newSnps <- setdiff(snps, variantOrder)
       variantOrder <- c(variantOrder, newSnps)
       ctx <- contextCol[[rIdx]]
-      perContextZ[[ctx]] <- setNames(as.numeric(mc$Z), snps)
-      if ("SE" %in% colnames(mc)) {
-        perContextSe[[ctx]] <- setNames(as.numeric(mc$SE), snps)
+      if (resolvedScale == "beta") {
+        perContextB[[ctx]]  <- setNames(df$beta, snps)
+        perContextSe[[ctx]] <- setNames(df$se,   snps)
       } else {
-        # No SE column: treat input as Z scores with Shat == 1.
+        perContextB[[ctx]]  <- setNames(df$z, snps)
         perContextSe[[ctx]] <- setNames(rep(1, length(snps)), snps)
       }
     }
@@ -474,8 +509,8 @@ mergeMashData <- function(resData, oneData) {
                    dimnames = list(variantOrder, columnLabels))
     sMat <- matrix(NA_real_, nrow = nVar, ncol = length(columnLabels),
                    dimnames = list(variantOrder, columnLabels))
-    for (ctx in names(perContextZ)) {
-      bMat[names(perContextZ[[ctx]]), ctx] <- perContextZ[[ctx]]
+    for (ctx in names(perContextB)) {
+      bMat[names(perContextB[[ctx]]), ctx] <- perContextB[[ctx]]
       sMat[names(perContextSe[[ctx]]), ctx] <- perContextSe[[ctx]]
     }
     # Disambiguate rownames across blocks to avoid silent dedup.

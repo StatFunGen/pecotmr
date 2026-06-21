@@ -1,2 +1,4 @@
 .pixi
 /tmp/pixi/.pixi
+R/deprecated.R
+R/exampleData.R

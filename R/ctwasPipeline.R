@@ -79,14 +79,31 @@ ctwasPipeline <- function(gwasSumStats,
   gwasLd <- getLdSketch(gwasSumStats)
   .ctwasRequireMatchingLdSketches(twLd, gwasLd)
 
+  # --- Compute the full-panel LD ONCE -------------------------------
+  # Single source of truth for both the LD-loader closure (which ctwas
+  # invokes per region during assemble + fine-map stages) and the
+  # per-gene R_wgt submatrices (sliced from this cache by SNP ID).
+  ldPanel <- .ctwasComputeFullPanelLd(gwasLd)
+
   # --- Build the single-region ctwas inputs ---------------------------
   zSnp        <- .ctwasBuildZSnp(gwasSumStats)
   regionInfo  <- .ctwasBuildSingleRegionInfo(regionId, gwasLd)
-  ldMap       <- data.frame(region_id = regionId, LD_file = regionId,
-                            stringsAsFactors = FALSE)
+  # ctwas::ctwas_sumstats top-level asserts `file.exists(LD_map$LD_file)`
+  # and `file.exists(LD_map$SNP_file)` unconditionally — even when
+  # LD_format = "custom" routes all data through our loaders and the file
+  # paths are never read. The right fix is upstream (gate the assertion
+  # on `LD_format != "custom"` or drop it entirely; see
+  # https://github.com/xinhe-lab/ctwas — `ctwas_sumstats()` L33-34). Until
+  # that lands, point both columns at `tempdir()`: always exists, no disk
+  # writes, no cleanup. The loader closures ignore the file token.
+  vestigialPath <- tempdir()
+  ldMap <- data.frame(region_id = regionId,
+                      LD_file   = vestigialPath,
+                      SNP_file  = vestigialPath,
+                      stringsAsFactors = FALSE)
   snpMap      <- list()
-  snpMap[[regionId]] <- .ctwasSnpInfoForBlock(gwasLd)
-  weightsList <- .ctwasBuildWeights(twasWeights)
+  snpMap[[regionId]] <- ldPanel$snpInfo
+  weightsList <- .ctwasBuildWeights(twasWeights, ldPanel)
   zGene       <- if (!is.null(twasZ)) .ctwasBuildZGene(twasZ) else NULL
 
   # --- Call the ctwas engine ------------------------------------------
@@ -103,8 +120,8 @@ ctwasPipeline <- function(gwasSumStats,
     L                          = as.integer(L),
     group_prior_var_structure  = groupPriorVarStructure,
     LD_format                  = "custom",
-    LD_loader_fun              = .ctwasSingleBlockLdLoader(gwasLd),
-    snpinfo_loader_fun         = .ctwasSingleBlockSnpInfoLoader(gwasLd),
+    LD_loader_fun              = .ctwasSingleBlockLdLoader(ldPanel$R),
+    snpinfo_loader_fun         = .ctwasSingleBlockSnpInfoLoader(ldPanel$snpInfo),
     ncore                      = as.integer(ncore),
     ...)
 }
@@ -162,46 +179,97 @@ ctwasPipeline <- function(gwasSumStats,
     stringsAsFactors = FALSE)
 }
 
-# Per-block SNP info table (id, chrom, pos, A1, A2). Used both as the
-# single snp_map element and as the loader return value.
+# Per-block SNP info table (chrom, id, pos, alt, ref). ctwas requires
+# these exact column names (read_snp_info_files asserts them). `alt`
+# maps to A1 (effect allele) and `ref` to A2.
 # @noRd
 .ctwasSnpInfoForBlock <- function(gwasLd) {
   snpInfo <- getSnpInfo(gwasLd)
   chr <- as.integer(sub("^chr", "", as.character(snpInfo$CHR),
                          ignore.case = TRUE))
   data.frame(
-    id    = as.character(snpInfo$SNP),
     chrom = chr,
+    id    = as.character(snpInfo$SNP),
     pos   = as.integer(snpInfo$BP),
-    A1    = as.character(snpInfo$A1),
-    A2    = as.character(snpInfo$A2),
+    alt   = as.character(snpInfo$A1),
+    ref   = as.character(snpInfo$A2),
     stringsAsFactors = FALSE)
 }
 
-# Build the weights list ctwas expects: keyed by per-tuple gene id,
-# each element a list with id (SNP id), wgt (weight vector), and gene
-# metadata. Walks every TwasWeights row.
+# Compute the full-panel LD ONCE and return everything the rest of the
+# pipeline needs to consume it. Returns a list with:
+#   R       : full-panel correlation matrix (n_var x n_var, dimnames =
+#             SNP IDs). Single source of truth for both the per-region
+#             LD loader closure and the per-gene R_wgt submatrices.
+#   snpInfo : ctwas-shaped per-block table (chrom, id, pos, alt, ref)
+#             — both the snp_map element and the snpinfo loader return.
 # @noRd
-.ctwasBuildWeights <- function(twasWeights) {
+.ctwasComputeFullPanelLd <- function(gwasLd) {
+  snpInfoCtwas <- .ctwasSnpInfoForBlock(gwasLd)
+  block <- extractBlockGenotypes(gwasLd, seq_len(nrow(snpInfoCtwas)),
+                                  meanImpute = TRUE)
+  geno  <- t(SummarizedExperiment::assay(block, "dosage"))
+  R <- computeLd(geno, method = "sample")
+  snpIds <- snpInfoCtwas$id
+  dimnames(R) <- list(snpIds, snpIds)
+  list(R = R, snpInfo = snpInfoCtwas)
+}
+
+# Build the weights list ctwas expects: keyed by per-tuple gene id,
+# each element a list with wgt (variants x 1 matrix; rownames = SNP id),
+# R_wgt (per-gene LD submatrix), and gene metadata. ctwas's compute_gene_z
+# pulls rownames(wgt) for the SNP IDs and computes z.gene = crossprod(wgt,
+# z.s) / sqrt(t(wgt) %*% R_wgt %*% wgt), so wgt must be a numeric matrix
+# (not a vector) and R_wgt must be the LD submatrix over the same SNPs.
+#
+# R_wgt is sliced from the cached full-panel LD by SNP ID — no
+# per-gene genotype re-extraction. Variants absent from the panel
+# are dropped from that gene's row set.
+# @noRd
+.ctwasBuildWeights <- function(twasWeights, ldPanel) {
+  panelSnps <- rownames(ldPanel$R)
+  panelInfo <- ldPanel$snpInfo
   out <- list()
   for (i in seq_len(nrow(twasWeights))) {
     entry  <- twasWeights$entry[[i]]
     vids   <- getVariantIds(entry)
     w      <- as.numeric(getWeights(entry))
     if (length(vids) == 0L || length(vids) != length(w)) next
+
+    # Drop variants not in the LD sketch panel.
+    keep <- vids %in% panelSnps
+    if (!any(keep)) next
+    vids <- vids[keep]; w <- w[keep]
+
+    Rwgt   <- ldPanel$R[vids, vids, drop = FALSE]
+    wgtMat <- matrix(w, ncol = 1L, dimnames = list(vids, "wgt"))
+
     gStudy   <- as.character(twasWeights$study)[[i]]
     gContext <- as.character(twasWeights$context)[[i]]
     gTrait   <- as.character(twasWeights$trait)[[i]]
     gMethod  <- as.character(twasWeights$method)[[i]]
     key <- sprintf("%s|%s|%s|%s", gStudy, gContext, gTrait, gMethod)
+
+    # Per-gene chromosome + BP span derived from the cached snpInfo.
+    rowIdx <- match(vids, panelInfo$id)
+    gChrom <- as.integer(panelInfo$chrom[[rowIdx[1L]]])
+    gP0 <- min(as.integer(panelInfo$pos[rowIdx]))
+    gP1 <- max(as.integer(panelInfo$pos[rowIdx]))
+
     out[[key]] <- list(
-      id        = vids,
-      wgt       = w,
-      type      = gContext,
-      context   = gContext,
-      gene_name = gTrait,
-      study     = gStudy,
-      method    = gMethod)
+      wgt          = wgtMat,
+      R_wgt        = Rwgt,
+      type         = gContext,
+      context      = gContext,
+      gene_name    = gTrait,
+      study        = gStudy,
+      method       = gMethod,
+      n_wgt        = length(vids),
+      chrom        = gChrom,
+      p0           = gP0,
+      p1           = gP1,
+      molecular_id = gTrait,
+      weight_name  = paste(gContext, gContext, sep = "_"))
   }
   out
 }
@@ -225,26 +293,18 @@ ctwasPipeline <- function(gwasSumStats,
     stringsAsFactors = FALSE)
 }
 
-# Single-block LD loader for ctwas: ignores the LD_file token and just
-# materialises the dosage matrix from the gwasSumStats's ldSketch
-# (which is, by the single-block convention, the only block this call
-# concerns).
+# Single-block LD loader for ctwas: captures the precomputed full-panel
+# correlation matrix and returns it on every loader call (ctwas invokes
+# the loader multiple times per region across assemble + fine-map). The
+# `LD_file` argument is a vestigial region token — ignored.
 # @noRd
-.ctwasSingleBlockLdLoader <- function(gwasLd) {
-  function(LD_file, ...) {
-    snpInfo <- getSnpInfo(gwasLd)
-    idx <- seq_len(nrow(snpInfo))
-    block <- extractBlockGenotypes(gwasLd, idx, meanImpute = TRUE)
-    geno  <- t(SummarizedExperiment::assay(block, "dosage"))
-    ld    <- computeLd(geno, method = "sample")
-    dimnames(ld) <- list(as.character(snpInfo$SNP),
-                         as.character(snpInfo$SNP))
-    ld
-  }
+.ctwasSingleBlockLdLoader <- function(R) {
+  function(LD_file, ...) R
 }
 
-# Single-block SNP-info loader for ctwas.
+# Single-block SNP-info loader for ctwas: captures the precomputed
+# per-block snpInfo table and returns it on every loader call.
 # @noRd
-.ctwasSingleBlockSnpInfoLoader <- function(gwasLd) {
-  function(LD_file, ...) .ctwasSnpInfoForBlock(gwasLd)
+.ctwasSingleBlockSnpInfoLoader <- function(snpInfo) {
+  function(LD_file, ...) snpInfo
 }

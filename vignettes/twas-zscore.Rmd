@@ -1,10 +1,10 @@
 ---
-title: "Inferring TWAS Z-Scores from GWAS Summary Statistics"
+title: "Causal inference: TWAS Z-scores + Wald-ratio MR"
 author: "pecotmr authors"
 date: "`r Sys.Date()`"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Inferring TWAS Z-Scores from GWAS Summary Statistics}
+  %\VignetteIndexEntry{Causal inference: TWAS Z-scores + Wald-ratio MR}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -16,369 +16,150 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
 
 ## Overview
 
-This vignette picks up where the
-[TWAS weights vignette](twas-weights.html) leaves off: a `TwasWeights`
-S4 object with per-gene per-variant weights already exists. The
-remaining task is to combine those weights with GWAS summary statistics
-to obtain a per-gene TWAS Z-score.
+`causalInferencePipeline()` pairs QTL-side weights and/or a QTL
+fine-mapping result with one or more GWAS studies to produce, per
+`(qtlStudy, context, trait, method, gwasStudy)` tuple:
 
-`pecotmr` exposes this inference at three layers:
+- a **TWAS Z-score** (and p-value), and
+- when `fineMappingResult` is supplied, a **Wald-ratio Mendelian
+  Randomization** estimate over the QTL credible sets.
 
-| Layer | Entry point | When to use |
+Three valid input combinations:
+
+| What you supply | TWAS-Z source | MR? |
 |---|---|---|
-| File-based pipeline | `twasPipeline()` | Production: per-gene weights database + tabix-indexed GWAS sumstats + LD sketch genotypes; outputs per-gene-per-context-per-study TWAS results with imputability gating, method fallback, and optional MR. |
-| Per-gene inference | `twasAnalysis()` | In-memory: applies many weight methods to one gene's GWAS sumstats and combines per-method p-values (ACAT / HMP / Fisher / Stouffer / etc.) into an omnibus test. |
-| Single-method math | `twasZ()`, `twasJointZ()` | When you already have aligned `weights`, `z`, and an LD sketch. Convenient for custom workflows or method comparisons. |
+| `twasWeights` only | per-tuple weights from `TwasWeights` | no |
+| `fineMappingResult` only | SuSiE coefficients from each `FineMappingEntry`'s `topLoci` | yes |
+| both | weights from `TwasWeights` | yes (MR uses the FMR) |
 
 ```{r load-packages}
 library(pecotmr)
 ```
 
-## The TWAS Z-score formula
+## Bundled inputs
 
-Per single weight vector `w` and GWAS z-score vector `z`, the TWAS test
-statistic is
+```{r bundled}
+data(qtl_dataset_example, gwas_sumstats_s4_example)
+qtl_dataset_example      <- fixupExampleGenotypePaths(qtl_dataset_example)
+gwas_sumstats_s4_example <- fixupExampleGenotypePaths(gwas_sumstats_s4_example)
 
-\[
-z_\text{TWAS} \;=\; \frac{w^\top z}{\sqrt{w^\top R\, w}}
-\]
-
-where `R` is the LD matrix at the weight variants. Under the null,
-`z_TWAS` follows a standard normal.
-
-### Eigenvalue / eigenvector reparameterisation
-
-`pecotmr` evaluates the denominator from the **full SVD of the
-standardised LD sketch genotype matrix** rather than materialising `R`.
-If `X = U D V^\top` is the (untruncated) SVD of the standardised
-sketch, then
-
-\[
-R \;=\; \frac{X^\top X}{n_\text{sketch}-1}
-   \;=\; V\, \Lambda\, V^\top,
-\qquad
-\Lambda_i \;=\; \frac{D_i^{2}}{n_\text{sketch}-1},
-\]
-
-and
-
-\[
-w^\top R\, w
-\;=\; \sum_{i=1}^{r} \Lambda_i \,\bigl(V^\top w\bigr)_i^{2},
-\qquad r \;=\; \mathrm{rank}(X).
-\]
-
-The sum runs over **every** nonzero singular value — no top-K
-truncation. The two expressions are algebraically equivalent (and
-numerically agree to floating-point precision when both are computed),
-so this is a reparameterisation, not an approximation.
-
-We use this form for two practical reasons:
-
-- The SVD is computed **once per gene region** and reused across every
-  method × condition × study evaluation. Each subsequent denominator
-  costs `O(r p)` for `V^\top w` plus `O(r)` for the weighted sum,
-  versus `O(p^2)` to multiply against an explicit `R`.
-- When the LD sketch has `n_\text{sketch} \le p`, `R` is rank-deficient
-  (rank `r`, with `n_\text{sketch} \ge r`). Working in the `r`-dimensional
-  eigenbasis represents exactly the information the sketch carries and
-  avoids forming a singular `p \times p` matrix.
-
-In practice this means `twasZ()` and `twasJointZ()` consume
-`(V, D, n_\text{sketch})` directly from the per-gene LD sketch — `R`
-is never formed at any step of the pipeline.
-
-## Single-method inference: `twasZ()`
-
-Given aligned weights, GWAS z-scores, and the LD sketch components,
-`twasZ()` returns the per-gene Z and two-sided p-value:
-
-```{r twas-z-demo, eval=FALSE}
-# Inputs from the upstream pipelines (twas-weights.html and earlier):
-#   w        : numeric vector, one weight per variant for one gene/method
-#   gwas_z   : numeric vector of GWAS z-scores, aligned to the same variants
-#   V, D, n  : right singular vectors, singular values, sample size of the
-#              LD sketch for the gene region
-
-res <- twasZ(weights = w, z = gwas_z,
-              V = V, D = D, n_sketch = n)
-res$z       # TWAS z-score
-res$pval    # two-sided p-value
+# Pre-compute the QTL-side products from the bundled QtlDataset.
+fmr <- fineMappingPipeline(qtl_dataset_example, methods = "susie",
+                            cisWindow = 1e6)
+tw  <- twasWeightsPipeline(qtl_dataset_example,
+                            methods           = "susie",
+                            cisWindow         = 1e6,
+                            fineMappingResult = fmr)
 ```
 
-`V`, `D`, and `n_sketch` come from the LD sketch the pipeline already
-loads for each gene (see "The file-based pipeline" below); you do not
-need to compute them yourself in the normal workflow.
+## TWAS Z only (weights alone)
 
-## Combining multiple methods per gene: `twasAnalysis()`
-
-When the gene's `TwasWeights` carries weights for several methods (the
-default for both `twasWeightsPipeline()` and
-`twasWeightsSumstatPipeline()`), `twasAnalysis()` applies each
-method's weights to the GWAS and optionally combines the per-method
-p-values into an omnibus test:
-
-```{r multi-method, eval=FALSE}
-# weights_matrix: variants x methods (one column per weight method)
-# gwas_sumstats_db: data.frame with variant_id, z, ... for the GWAS
-# V, D, n_sketch, ld_variant_ids: LD sketch components for the gene region
-
-res <- twasAnalysis(
-  weights_matrix       = weights_matrix,
-  gwas_sumstats_db     = gwas_sumstats_db,
-  extract_variants_objs = rownames(weights_matrix),
-  V = V, D = D, n_sketch = n_sketch, ld_variant_ids = ld_variant_ids,
-  combine_method       = "acat",
-  combine_if_no_cv     = TRUE
-)
+```{r ci-tw-only}
+res <- causalInferencePipeline(
+  gwasSumStats = gwas_sumstats_s4_example,
+  twasWeights  = tw)
+head(S4Vectors::mcols(res))
 ```
 
-The output is a list keyed by method, each entry containing `z` and
-`pval`. When `combine_if_no_cv = TRUE` and at least two methods produce
-valid p-values, an `omnibus` entry is appended using the chosen
-combine method:
+The result is a `GRanges` positioned at the variant span of each QTL
+weight set, with identity columns (`qtlStudy`, `context`, `trait`,
+`method`, `gwasStudy`) and the TWAS columns (`twasZ`, `twasPval`).
+MR columns are `NA` in this mode.
 
-| `combine_method` | Combination |
-|---|---|
-| `"acat"` (default) | Cauchy combination |
-| `"hmp"` | Harmonic mean p-value |
-| `"fisher"` | Fisher's method |
-| `"stouffer"` | Stouffer's Z |
-| `"invchisq"` | Inverse chi-square |
-| `"gbj"` | Generalized Berk-Jones |
-| `"aspu"` | Adaptive sum of powered scores |
-| `"gates"` | GATES gene-based test |
+## TWAS Z + MR (weights + fine-mapping)
 
-For summary-statistics TWAS where no cross-validation performance is
-available to gate methods, `combine_if_no_cv = TRUE` is the standard
-default. For individual-level TWAS where CV performance has selected a
-best method per gene (`twasPipeline()` handles this automatically),
-the omnibus is generally not needed.
+When you also pass `fineMappingResult`, the pipeline adds Wald-ratio MR
+on top of the TWAS computation. The MR uses each fine-mapping entry's
+`topLoci` rows as candidate instrumental variables.
 
-## Multi-condition joint test: `twasJointZ()`
-
-For per-condition weights (the output of
-`twasMultivariateWeightsPipeline()` or
-`twasMultivariateWeightsSumstatPipeline()`), `twasJointZ()`
-computes a per-condition TWAS Z plus a cross-condition joint test
-using any of the same p-value combination methods as `twasAnalysis()`:
-
-```{r joint, eval=FALSE}
-# weights: variants x conditions matrix
-# gwas_z:  GWAS z-scores aligned to the rows of `weights`
-# V, D_svd, n_sketch: LD sketch SVD for the gene region
-
-joint <- twasJointZ(
-  weights        = weights,
-  z              = gwas_z,
-  V              = V,
-  D_svd          = D_svd,
-  n_sketch       = n_sketch,
-  combine_method = "acat"   # or "hmp", "fisher", "stouffer", "invchisq",
-                            # "gbj", "aspu", "gates"
-)
-
-joint$Z                          # per-condition z + p-value
-joint$combined$method            # the combine method used
-joint$combined$pval              # joint cross-condition p-value
+```{r ci-both}
+res2 <- causalInferencePipeline(
+  gwasSumStats      = gwas_sumstats_s4_example,
+  twasWeights       = tw,
+  fineMappingResult = fmr,
+  mrMethod          = "ivwPerVariant",
+  mrPipCutoff       = 0.5)
+S4Vectors::mcols(res2)[, c("twasZ", "twasPval", "waldRatio",
+                            "waldRatioSe", "mrPval", "nIV")]
 ```
 
-All eight methods listed in the `twasAnalysis()` table above are
-accepted. The cross-condition correlation matrix induced by the weights
-and the LD sketch is computed internally and passed to whichever method
-needs it (Fisher, Stouffer, inverse chi-square, GBJ, aSPU, GATES);
-ACAT and HMP work on the p-values directly.
+## MR variants: per-variant vs CS-aware IVW
 
-## The file-based pipeline: `twasPipeline()`
+| `mrMethod` | What it does | Extra knobs |
+|---|---|---|
+| `"ivwPerVariant"` (default) | Treats every `topLoci` variant with `pip > mrPipCutoff` as an IV; pools their Wald ratios via inverse-variance weighting. | `mrPipCutoff` |
+| `"csAware"` | Groups variants by credible set (column `cs` in `topLoci`), forms a PIP-weighted composite Wald ratio per CS (subject to per-CS cumulative-PIP cutoff `mrCpipCutoff`), then IVW-pools across CSs. Reports Cochran's Q and I-squared. | `mrCpipCutoff` |
 
-For production use you generally have:
-
-- A weights database produced by `twasWeightsPipeline()` (or the
-  summary-statistics analog), saved as one entry per gene-region.
-- Tabix-indexed GWAS sumstats files, one per study.
-- An LD metadata TSV pointing at LD sketch genotype files (one
-  per-chromosome entry, format-agnostic — the loader resolves the
-  underlying genotype representation).
-
-`twasPipeline()` consumes all three and produces a
-per-gene-per-context-per-study TWAS results table, plus an optional MR
-analysis layer.
-
-### Input formats
-
-**`gwas_meta_file`** — a TSV with these columns:
-
-| Column | Meaning |
-|---|---|
-| `study_id` | Identifier for the GWAS study |
-| `chrom` | Integer chromosome the file covers (one row per chromosome per study) |
-| `file_path` | Path to the tabix-indexed sumstats file |
-| `column_mapping_file` | Path to the YAML column-name map (see [RSS QC vignette](rss-qc.html)) |
-
-**`ld_meta_file_path`** — TSV pointing at the per-gene LD sketch
-genotype source. The pipeline loads an LD sketch on the fly for each
-gene's window via `loadLdSketch()`; only the sketch path is used —
-the full LD matrix is never materialised.
-
-**`twas_weights_data`** — a named list where each entry is a
-`TwasWeights` S4 object (one per gene-region). The list keys are
-typically gene IDs (`ENSG...`); each entry stores all per-method weight
-matrices for that gene's variants. This is the output you carry over
-from the [TWAS weights vignette](twas-weights.html).
-
-### Call shape
-
-```{r twas-pipeline, eval=FALSE}
-# TODO(data): replace with real weights database, GWAS meta, LD meta
-weights_db    <- list(
-  ENSG00000179403 = "<TwasWeights S4 object from twasWeightsPipeline>",
-  ENSG00000269699 = "<...>"
-)
-gwas_meta_file <- "<path/to/gwas_meta.tsv>"
-ld_meta_path   <- "<path/to/ld_meta.tsv>"
-region_block   <- "<chrom_start_end>"  # e.g. "1_1000000_2000000"
-
-twas_res <- twasPipeline(
-  twas_weights_data       = weights_db,
-  ld_meta_file_path       = ld_meta_path,
-  gwas_meta_file          = gwas_meta_file,
-  region_block            = region_block,
-  ld_reference_sample_size = 17000,         # e.g. ADSP R4
-  rsq_cutoff              = 0.01,            # imputability gate (R^2)
-  rsq_pval_cutoff         = 0.05,            # imputability gate (p-value)
-  mr_method               = "susie",         # MR using SuSiE weights
-  mr_pval_cutoff          = 0.05
-)
-
-names(twas_res)         # "twas_result", "twas_data", "mr_result"
-head(twas_res$twas_result[, c("molecular_id", "context", "gwas_study",
-                              "method", "twasZ", "twas_pval",
-                              "is_imputable", "is_selected_method")])
+```{r ci-csaware, eval=FALSE}
+causalInferencePipeline(
+  gwasSumStats      = gwas_sumstats_s4_example,
+  twasWeights       = tw,
+  fineMappingResult = fmr,
+  mrMethod          = "csAware",
+  mrCpipCutoff      = 0.5)
 ```
 
-The pipeline internally:
+## Cross-method p-value combination
 
-1. Loads the per-gene LD sketch for the region via `loadLdSketch()`
-   and computes its SVD once; only `V`, `D`, and the sketch sample size
-   are carried forward — no `p × p` correlation matrix is ever formed.
-2. Calls `harmonizeTwas()` to align the weights and GWAS to the LD
-   sketch (allele QC, sign-flips, intersection on `variant_id`).
-3. Calls `twasAnalysis()` per gene to apply weights to the harmonised
-   GWAS — using the LD sketch SVD path through `twasZ()` and including
-   any omnibus combination.
-4. Applies imputability gating (`rsq_cutoff`, `rsq_pval_cutoff`) and
-   method fallback (if the selected method's z-score is NA / non-finite,
-   falls back to the next-best by CV R²).
-5. Optionally runs an MR layer using `mr_method`'s weights.
+When a `(qtlStudy, context, trait, gwasStudy)` group has TWAS results
+from multiple weight methods, `combineMethods` runs
+`combinePValues()` to produce a single combined p-value per group.
 
-### Harmonization steps
-
-The harmonization layer can also be called directly:
-
-- `harmonizeGwas(gwas_file, query_region, ld_variants, col_to_flip,
-  match_min_prop, column_file_path, comment_string)` — tabix-loads
-  one GWAS file for a region, standardises columns, runs allele QC
-  against `ld_variants`, returns the harmonised data.frame.
-- `harmonizeTwas(twas_weights_data, ld_meta_file_path, gwas_meta_file,
-  ld_reference_sample_size, ..., impute_missing, impute_opts)` —
-  loops over genes and studies, loads each LD sketch, calls
-  `harmonizeGwas()` per study, then aligns weights to the harmonised
-  GWAS via `matchRefPanel()`.
-
-The intersection at the harmonization stage is **by default** between
-LD-sketch variants and GWAS variants and weight variants. Weight
-variants that have LD-sketch neighbours but no observed GWAS hit get
-dropped silently — unless you turn on the option below.
-
-## RAISS imputation of missing GWAS variants
-
-When the GWAS panel is narrower than the LD sketch — common when the
-GWAS was imputed with a smaller reference, or when allele QC trims
-strand-ambiguous variants — some weight variants get dropped at the
-weight-vs-GWAS intersection in `harmonizeTwas()`. Setting
-`imputeMissing = TRUE` calls RAISS to impute GWAS z-scores for
-LD-sketch variants that are present in the LD sketch but absent
-from the GWAS:
-
-```{r impute-missing, eval=FALSE}
-twas_res <- twasPipeline(
-  twas_weights_data       = weights_db,
-  ld_meta_file_path       = ld_meta_path,
-  gwas_meta_file          = gwas_meta_file,
-  region_block            = region_block,
-  ld_reference_sample_size = 17000,
-  impute_missing          = TRUE,                # widen GWAS via RAISS
-  impute_opts             = list(rcond = 0.01,
-                                 R2_threshold = 0.6,
-                                 minimum_ld = 5,
-                                 lamb = 0.01)
-)
+```{r ci-combine, eval=FALSE}
+# Multi-method weights so combination is meaningful
+tw_multi <- twasWeightsPipeline(qtl_dataset_example,
+                                 methods = c("susie", "lasso"))
+causalInferencePipeline(
+  gwasSumStats   = gwas_sumstats_s4_example,
+  twasWeights    = tw_multi,
+  combineMethods = c("acat", "hmp"))
 ```
 
-RAISS imputes **summary statistics only** — never weights. Imputed
-variants with `R² < R2_threshold` are dropped. Weight variants that
-have no LD-sketch neighbour at all are warned about and dropped; RAISS
-cannot impute without neighbours.
+Accepted method tokens for `combineMethods`: `acat`, `hmp`,
+`bonferroni`, `fisher`, `stouffer`, `invchisq`, `gbj`, `bj`, `hc`,
+`ghc`, `minp`, `gbj_omni`, `aspu`, `gates` (see `?combinePValues`).
 
-## Output table
+## LD-sketch consistency
 
-`twasPipeline()` returns a list with:
+Both `twasWeights` and `fineMappingResult` carry an `ldSketch` slot.
+When they're non-`NULL`, they must reference the same LD panel as
+`gwasSumStats`. The pipeline errors on mismatch.
 
-- **`twas_result`** — data.frame, one row per gene-context-study-method
-  combination, with columns:
+A QTL input with `ldSketch = NULL` (e.g. weights learned from
+individual-level data without any RSS step) skips the panel check for
+that input — useful for analyses that mix individual-level QTL fits
+with sumstats GWAS.
 
-  | Column | Meaning |
-  |---|---|
-  | `chr` | Chromosome |
-  | `molecular_id` | Gene ID |
-  | `context` | Condition (tissue, cell type) name |
-  | `gwas_study` | GWAS study ID from `gwas_meta_file` |
-  | `method` | Weight method (e.g. `susie`, `enet`, `lassosumRss`) |
-  | `is_imputable` | Whether the gene passed the imputability gate |
-  | `is_selected_method` | TRUE for the gene-context's chosen method |
-  | `rsq_cv` | Cross-validated R² (individual-level path only) |
-  | `pval_cv` | p-value for `rsq_cv` |
-  | `twasZ` | TWAS Z-score for this method |
-  | `twas_pval` | TWAS p-value |
-  | `type` | Molecular trait type (e.g. `expression`, `splicing`) |
-  | `block` | LD region identifier |
+## Common parameters
 
-- **`twas_data`** — list of harmonised gene-context inputs in the shape
-  expected by `cTWAS::ctwas_sumstats()`. Only populated when
-  `output_twas_data = TRUE`.
-
-- **`mr_result`** — MR analysis output from the chosen `mr_method` and
-  coverage cutoff, when MR is enabled.
-
-When `combine_if_no_cv = TRUE` (used in summary-statistics TWAS where
-CV performance is not available), the per-method rows are augmented
-with an `omnibus` row containing the ACAT-combined p-value.
-
-## Imputability gating and method fallback
-
-Two gates filter the per-gene-context output:
-
-- **Imputability**: a gene-context is kept only if **at least one
-  method** has `rsq_cv ≥ rsq_cutoff` and `pval_cv < rsq_pval_cutoff`.
-  This is the individual-level CV-based gate. Summary-statistics TWAS
-  bypasses this gate (`is_imputable = TRUE` for all genes; no CV
-  performance available).
-- **Selected method**: within an imputable gene-context, the method
-  with the highest `rsq_cv` becomes `is_selected_method = TRUE`. If
-  that method's `twasZ` is NA or non-finite, the pipeline falls back
-  to the next-best method with a valid z-score, surfacing the swap as
-  a `TWAS method fallback` message.
-
-## Summary
-
-| Function | Use it when |
-|---|---|
-| `twasZ()` | One method × one gene; you already have aligned `weights`, `z`, and the LD sketch SVD `(V, D, n_sketch)`. |
-| `twasJointZ()` | Multi-condition weights for one gene; want per-condition TWAS plus a joint test combined via any of `acat`, `hmp`, `fisher`, `stouffer`, `invchisq`, `gbj`, `aspu`, `gates`. |
-| `twasAnalysis()` | Multi-method weights for one gene; want per-method TWAS plus an omnibus combination. |
-| `twasPipeline()` | Production: weight database + tabix GWAS + LD sketch metadata → per-gene-per-context-per-study results. |
-| `harmonizeTwas()` / `harmonizeGwas()` | Lower-level harmonization layer used by `twasPipeline()`. Pass `imputeMissing = TRUE` to widen GWAS via RAISS. |
-
-```{r session-info}
-sessionInfo()
+```{r ci-params, eval=FALSE}
+causalInferencePipeline(
+  gwasSumStats      = gwas_sumstats_s4_example,
+  twasWeights       = tw,
+  fineMappingResult = fmr,
+  mrPipCutoff       = 0.5,            # ivwPerVariant
+  mrMethod          = "ivwPerVariant",
+  mrCpipCutoff      = 0.5,            # csAware
+  combineMethods    = NULL)           # e.g. c("acat", "hmp")
 ```
+
+## Reading the result
+
+The `GRanges` output indexes results by the QTL variant span (the
+union of variants used in each tuple's weights). Extract per-tuple
+values with `S4Vectors::mcols()`:
+
+```{r ci-mcols, eval=FALSE}
+mc <- as.data.frame(S4Vectors::mcols(res2))
+# Significant TWAS hits at Bonferroni alpha = 0.05 across rows
+mc[mc$twasPval < 0.05 / nrow(mc), ]
+```
+
+## Next steps
+
+- Pair TWAS hits with coloc evidence via
+  [`colocPipeline`](coloc-pipeline.html) or
+  [`colocboostPipeline`](colocboost-pipeline.html).
+- Refine the input weight ensemble by re-running
+  [`twasWeightsPipeline`](twas-weights.html) with a richer `methods`
+  vector and the same `fineMappingResult`.

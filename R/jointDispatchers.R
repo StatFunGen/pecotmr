@@ -67,20 +67,30 @@
 # `errorLabel` is woven into the SNP-order error to identify the caller.
 # @noRd
 .buildJointSumstatZMatrix <- function(data, tupleRows, colLabels, errorLabel) {
-  firstMc <- S4Vectors::mcols(data$entry[[tupleRows[[1L]]]])
-  if (!"SNP" %in% colnames(firstMc))
-    stop(sprintf("%s: entry has no SNP mcol.", errorLabel))
-  variantIds <- as.character(firstMc$SNP)
+  studyCol   <- as.character(data$study)
+  contextCol <- as.character(data$context)
+  traitCol   <- as.character(data$trait)
+  firstDf <- getSumstatDf(data,
+                           study   = studyCol[[tupleRows[[1L]]]],
+                           context = contextCol[[tupleRows[[1L]]]],
+                           trait   = traitCol[[tupleRows[[1L]]]],
+                           require = c("SNP", "Z", "N"))
+  variantIds <- firstDf$variant_id
   Z <- matrix(NA_real_, nrow = length(variantIds), ncol = length(tupleRows),
               dimnames = list(variantIds, colLabels))
   nVec <- numeric(length(tupleRows))
   for (kk in seq_along(tupleRows)) {
-    mc <- S4Vectors::mcols(data$entry[[tupleRows[kk]]])
-    if (!identical(as.character(mc$SNP), variantIds))
+    i <- tupleRows[[kk]]
+    d <- getSumstatDf(data,
+                       study   = studyCol[[i]],
+                       context = contextCol[[i]],
+                       trait   = traitCol[[i]],
+                       require = c("SNP", "Z", "N"))
+    if (!identical(d$variant_id, variantIds))
       stop(sprintf("%s: every entry in a joint group must share an identical SNP order after summaryStatsQc().",
                    errorLabel))
-    Z[, kk] <- as.numeric(mc$Z)
-    nVec[kk] <- stats::median(as.numeric(mc$N), na.rm = TRUE)
+    Z[, kk] <- d$z
+    nVec[kk] <- stats::median(d$N, na.rm = TRUE)
   }
   list(Z = Z, nVec = nVec, variantIds = variantIds)
 }

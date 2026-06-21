@@ -257,20 +257,14 @@ setGeneric("colocboostPipeline",
 # Build a single (sumstat data.frame, LD correlation matrix) pair from a
 # QtlSumStats / GwasSumStats entry. Returns NULL when the entry has no
 # variants overlapping the ldSketch panel.
-.cbSumstatPair <- function(gr, ldSketch, varY = NULL) {
-  if (is.null(gr) || length(gr) == 0L) return(NULL)
-  mc <- S4Vectors::mcols(gr)
-  if (!"Z" %in% colnames(mc)) {
-    stop("colocboostPipeline: sumstat entry is missing the Z mcol; ",
-         "summaryStatsQc() should have written it.")
-  }
-  variantIds <- if ("SNP" %in% colnames(mc)) {
-    as.character(mc$SNP)
-  } else {
-    formatVariantId(as.character(GenomicRanges::seqnames(gr)),
-                    GenomicRanges::start(gr),
-                    as.character(mc$A2),
-                    as.character(mc$A1))
+.cbSumstatPair <- function(df, ldSketch, varY = NULL) {
+  if (is.null(df) || nrow(df) == 0L) return(NULL)
+  variantIds <- df$variant_id
+  if (anyNA(variantIds)) {
+    # Fall back to canonical chr:pos:A2:A1 form when the entry had no
+    # SNP mcol (getSumstatDf leaves variant_id NA in that case).
+    variantIds <- formatVariantId(df$chrom, df$pos, df$A2, df$A1)
+    df$variant_id <- variantIds
   }
   # Use the shared `.ldFromSketch` helper in "drop" mode so missing-from-
   # panel variants are silently filtered (the colocboost path expects to
@@ -281,14 +275,12 @@ setGeneric("colocboostPipeline",
   keptIds <- attr(R, "keptVariantIds")
   attr(R, "keptVariantIds") <- NULL
   keep <- variantIds %in% keptIds
-  gr <- gr[keep]
+  df <- df[keep, , drop = FALSE]
   variantIds <- keptIds
-  mc <- S4Vectors::mcols(gr)
 
-  N <- if ("N" %in% colnames(mc)) as.numeric(mc$N) else NA_real_
   ss <- data.frame(
-    z       = as.numeric(mc$Z),
-    n       = N,
+    z       = df$z,
+    n       = if (!is.null(df$N)) df$N else NA_real_,
     variant = variantIds,
     stringsAsFactors = FALSE)
   if (!is.null(varY) && !is.na(varY)) {
@@ -315,11 +307,13 @@ setGeneric("colocboostPipeline",
 
   bundle <- list()
   for (i in rows) {
-    label <- paste(as.character(ss$study)[[i]],
-                   as.character(ss$context)[[i]],
-                   as.character(ss$trait)[[i]], sep = ":")
+    st  <- as.character(ss$study)[[i]]
+    ctx <- as.character(ss$context)[[i]]
+    tr  <- as.character(ss$trait)[[i]]
+    label <- paste(st, ctx, tr, sep = ":")
     pair <- .cbSumstatPair(
-      gr       = ss$entry[[i]],
+      df       = getSumstatDf(ss, study = st, context = ctx, trait = tr,
+                              require = "Z"),
       ldSketch = ldSketch,
       varY     = if ("varY" %in% names(ss)) ss$varY[[i]] else NA_real_)
     if (!is.null(pair)) bundle[[label]] <- pair
@@ -334,12 +328,12 @@ setGeneric("colocboostPipeline",
   ldSketch <- getLdSketch(gws)
   bundle <- list()
   for (i in seq_len(nrow(gws))) {
-    label <- as.character(gws$study)[[i]]
+    st <- as.character(gws$study)[[i]]
     pair <- .cbSumstatPair(
-      gr       = gws$entry[[i]],
+      df       = getSumstatDf(gws, study = st, require = "Z"),
       ldSketch = ldSketch,
       varY     = if ("varY" %in% names(gws)) gws$varY[[i]] else NA_real_)
-    if (!is.null(pair)) bundle[[label]] <- pair
+    if (!is.null(pair)) bundle[[st]] <- pair
   }
   bundle
 }

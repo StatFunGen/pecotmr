@@ -310,15 +310,6 @@
   .ldFromSketch(ldSketch, variantIds, label = ".twasLdFromSketch")
 }
 
-# Helper to convert a single QtlSumStats / GwasSumStats entry GRanges to
-# the data.frame shape (variant_id, chrom, pos, A1, A2, z, N) expected by
-# the matrix-based sumstat pipelines. Thin wrapper over the shared
-# `.entryToSumstatDf` helper (R/sumstatsQc.R).
-# @noRd
-.twasSumstatsEntryToDf <- function(gr) {
-  .entryToSumstatDf(gr, derive = "zFromBetaSe")
-}
-
 # Optional resume-cache lookup for twasWeightsPipeline. Returns the
 # matching TwasWeightsEntry from `twasWeights` for the tuple (study,
 # context, trait, method), or NULL when there is no hit. Returns NULL
@@ -876,21 +867,13 @@ setMethod("twasWeightsPipeline", "QtlSumStats",
       }
       if (length(toFitTokens) == 0L) next
 
-      entry <- data$entry[[i]]
-      mc <- S4Vectors::mcols(entry)
-      variantIds <- as.character(mc$SNP)
-      if (!"Z" %in% colnames(mc))
-        stop(sprintf(
-          "twasWeightsPipeline(QtlSumStats): entry %d (study='%s', context='%s', trait='%s') has no Z column.",
-          i, st, ctx, tr))
-      if (!"N" %in% colnames(mc))
-        stop(sprintf(
-          "twasWeightsPipeline(QtlSumStats): entry %d (study='%s', context='%s', trait='%s') has no N column.",
-          i, st, ctx, tr))
-      n <- stats::median(as.numeric(mc$N), na.rm = TRUE)
+      df <- getSumstatDf(data, study = st, context = ctx, trait = tr,
+                          require = c("Z", "N"), derive = "zFromBetaSe")
+      variantIds <- df$variant_id
+      n <- stats::median(df$N, na.rm = TRUE)
       varY <- getVarY(data, study = st, context = ctx, trait = tr)
       if (is.null(varY)) varY <- 1
-      stat <- list(z = as.numeric(mc$Z), n = n, varY = varY,
+      stat <- list(z = df$z, n = n, varY = varY,
                    variantNames = variantIds)
       ldMat <- .twasLdFromSketch(ldSketch, variantIds)
 
@@ -937,20 +920,28 @@ setMethod("twasWeightsPipeline", "QtlSumStats",
 
         # Build (variants x contexts) Z matrix. All entries in a (study, trait)
         # group must share an identical variant order after summaryStatsQc().
-        firstMc <- S4Vectors::mcols(data$entry[[gIdx[[1L]]]])
-        variantIds <- as.character(firstMc$SNP)
+        firstDf <- getSumstatDf(data,
+                                 study = st, context = ctxNames[[1L]],
+                                 trait = tr,
+                                 require = c("Z", "N"),
+                                 derive = "zFromBetaSe")
+        variantIds <- firstDf$variant_id
         Z <- matrix(NA_real_, nrow = length(variantIds), ncol = length(gIdx),
                     dimnames = list(variantIds, ctxNames))
         nVec <- numeric(length(gIdx))
         for (kk in seq_along(gIdx)) {
-          mc <- S4Vectors::mcols(data$entry[[gIdx[kk]]])
-          if (!identical(as.character(mc$SNP), variantIds))
+          d <- getSumstatDf(data,
+                             study = st, context = ctxNames[[kk]],
+                             trait = tr,
+                             require = c("Z", "N"),
+                             derive = "zFromBetaSe")
+          if (!identical(d$variant_id, variantIds))
             stop("twasWeightsPipeline(QtlSumStats, multivariate): every ",
                  "entry for (study='", st, "', trait='", tr,
                  "') must share an identical SNP order after ",
                  "summaryStatsQc(). Use the same ldSketch on every entry.")
-          Z[, kk] <- as.numeric(mc$Z)
-          nVec[kk] <- stats::median(as.numeric(mc$N), na.rm = TRUE)
+          Z[, kk] <- d$z
+          nVec[kk] <- stats::median(d$N, na.rm = TRUE)
         }
         names(nVec) <- ctxNames
         stat <- list(z = Z, n = nVec, variantNames = variantIds)

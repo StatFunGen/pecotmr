@@ -195,21 +195,69 @@ test_that(".ctwasBuildSingleRegionInfo: multi-chromosome sketch errors", {
   )
 })
 
-test_that(".ctwasSnpInfoForBlock: returns id/chrom/pos/A1/A2", {
+test_that(".ctwasSnpInfoForBlock: returns ctwas-required columns chrom/id/pos/alt/ref", {
   df <- pecotmr:::.ctwasSnpInfoForBlock(.ctp_makeHandle())
+  # ctwas's read_snp_info_files asserts these exact column names
   expect_setequal(colnames(df),
-                  c("id", "chrom", "pos", "A1", "A2"))
+                  c("chrom", "id", "pos", "alt", "ref"))
 })
+
+# Build an ldPanel fixture (matches .ctwasComputeFullPanelLd's return
+# shape) for the 6-SNP toy panel from .ctp_makeHandle().
+.ctp_makeLdPanel <- function(snp_n = 6L) {
+  h <- .ctp_makeHandle(snp_n = snp_n)
+  snpInfo <- pecotmr:::.ctwasSnpInfoForBlock(h)
+  R <- diag(1, snp_n)
+  dimnames(R) <- list(snpInfo$id, snpInfo$id)
+  list(R = R, snpInfo = snpInfo)
+}
 
 test_that(".ctwasBuildWeights: keys per-tuple weights and stamps gene metadata", {
   tw <- .ctp_makeTwasWeights()
-  wl <- pecotmr:::.ctwasBuildWeights(tw)
+  panel <- .ctp_makeLdPanel()
+  wl <- pecotmr:::.ctwasBuildWeights(tw, panel)
   expect_equal(length(wl), 1L)
   expect_equal(names(wl), "Q1|c1|t1|susie")
   expect_equal(wl[[1L]]$study, "Q1")
   expect_equal(wl[[1L]]$context, "c1")
   expect_equal(wl[[1L]]$gene_name, "t1")
-  expect_equal(length(wl[[1L]]$id), 5L)
+  # wgt is a variants x 1 matrix with rownames = SNP IDs
+  expect_true(is.matrix(wl[[1L]]$wgt))
+  expect_equal(dim(wl[[1L]]$wgt), c(5L, 1L))
+  expect_equal(rownames(wl[[1L]]$wgt), paste0("v", 1:5))
+  # R_wgt is a 5x5 slice of the cached panel R
+  expect_true(is.matrix(wl[[1L]]$R_wgt))
+  expect_equal(dim(wl[[1L]]$R_wgt), c(5L, 5L))
+  expect_equal(rownames(wl[[1L]]$R_wgt), paste0("v", 1:5))
+  expect_equal(wl[[1L]]$n_wgt, 5L)
+  # And it is literally a slice of the panel R (no recompute path).
+  expect_equal(wl[[1L]]$R_wgt, panel$R[paste0("v", 1:5), paste0("v", 1:5)])
+})
+
+test_that(".ctwasBuildWeights: drops variants not present in the LD panel", {
+  tw <- TwasWeights(
+    study = "Q1", context = "c1", trait = "t1", method = "susie",
+    entry = list(TwasWeightsEntry(
+      variantIds = c(paste0("v", 1:3), "missing1", "missing2"),
+      weights    = c(0.1, 0.2, 0.3, 0.4, 0.5))),
+    ldSketch = .ctp_makeHandle())
+  panel <- .ctp_makeLdPanel()
+  wl <- pecotmr:::.ctwasBuildWeights(tw, panel)
+  expect_equal(nrow(wl[[1L]]$wgt), 3L)
+  expect_equal(rownames(wl[[1L]]$wgt), paste0("v", 1:3))
+  expect_equal(wl[[1L]]$n_wgt, 3L)
+})
+
+test_that(".ctwasComputeFullPanelLd: extracts once + returns cached R + snpInfo", {
+  local_mocked_bindings(extractBlockGenotypes = .ctp_mockExtractor(),
+                        .package = "pecotmr")
+  out <- pecotmr:::.ctwasComputeFullPanelLd(.ctp_makeHandle())
+  expect_named(out, c("R", "snpInfo"))
+  expect_true(is.matrix(out$R))
+  expect_equal(dim(out$R), c(6L, 6L))
+  expect_equal(rownames(out$R), paste0("v", 1:6))
+  expect_setequal(colnames(out$snpInfo),
+                   c("chrom", "id", "pos", "alt", "ref"))
 })
 
 test_that(".ctwasBuildZGene: builds z_gene from a TWAS-Z GRanges", {
@@ -229,20 +277,21 @@ test_that(".ctwasBuildZGene: builds z_gene from a TWAS-Z GRanges", {
 # LD loader / SNP-info loader closures
 # ===========================================================================
 
-test_that(".ctwasSingleBlockLdLoader: returns a function that produces an LD matrix", {
-  local_mocked_bindings(extractBlockGenotypes = .ctp_mockExtractor(),
-                        .package = "pecotmr")
-  loader <- pecotmr:::.ctwasSingleBlockLdLoader(.ctp_makeHandle())
-  R <- loader("ignored.cor")
-  expect_true(is.matrix(R))
-  expect_equal(dim(R), c(6L, 6L))
-  expect_equal(rownames(R), paste0("v", 1:6))
+test_that(".ctwasSingleBlockLdLoader: returns the cached R unchanged on every call", {
+  R0 <- matrix(runif(36), 6, 6, dimnames = list(paste0("v", 1:6),
+                                                  paste0("v", 1:6)))
+  loader <- pecotmr:::.ctwasSingleBlockLdLoader(R0)
+  expect_identical(loader("any_token"), R0)
+  expect_identical(loader("different_token"), R0)
 })
 
-test_that(".ctwasSingleBlockSnpInfoLoader: returns a function that produces snp_info", {
-  loader <- pecotmr:::.ctwasSingleBlockSnpInfoLoader(.ctp_makeHandle())
-  df <- loader("ignored.cor")
-  expect_setequal(colnames(df), c("id", "chrom", "pos", "A1", "A2"))
+test_that(".ctwasSingleBlockSnpInfoLoader: returns the cached snpInfo unchanged on every call", {
+  info0 <- data.frame(chrom = 1L, id = paste0("v", 1:3),
+                       pos = c(100L, 200L, 300L),
+                       alt = "A", ref = "G", stringsAsFactors = FALSE)
+  loader <- pecotmr:::.ctwasSingleBlockSnpInfoLoader(info0)
+  expect_identical(loader("any_token"), info0)
+  expect_identical(loader("different_token"), info0)
 })
 
 # ===========================================================================
@@ -260,6 +309,8 @@ test_that("ctwasPipeline: assembles the documented input shape for ctwas_sumstat
       list(susie_alpha_res = "mocked")
     },
     .package = "ctwas")
+  local_mocked_bindings(extractBlockGenotypes = .ctp_mockExtractor(),
+                        .package = "pecotmr")
   out <- ctwasPipeline(gwasSumStats = ss, twasWeights = tw,
                        regionId = "myBlock")
   expect_equal(out$susie_alpha_res, "mocked")
@@ -284,7 +335,59 @@ test_that("ctwasPipeline: forwards a twasZ argument as z_gene", {
       list(ok = TRUE)
     },
     .package = "ctwas")
+  local_mocked_bindings(extractBlockGenotypes = .ctp_mockExtractor(),
+                        .package = "pecotmr")
   ctwasPipeline(gwasSumStats = ss, twasWeights = tw, twasZ = twasZ,
                 regionId = "block1")
   expect_equal(capturedArgs$z_gene$id, "Q1|c1|t1|susie")
+})
+
+# ===========================================================================
+# Real-engine end-to-end: drives ctwas::ctwas_sumstats with the bundled
+# example PLINK panel + synthetic TwasWeights. Exercises the LD-loader
+# and snp-info-loader closure bodies as actually invoked by ctwas
+# (mocked tests only construct the closures, never invoke them).
+# ===========================================================================
+
+test_that("ctwasPipeline: real-engine end-to-end on the bundled example panel", {
+  skip_if_not_installed("ctwas")
+  data(gwas_sumstats_s4_example)
+  data(qtl_dataset_example)
+  gss <- fixupExampleGenotypePaths(gwas_sumstats_s4_example)
+  qd  <- fixupExampleGenotypePaths(qtl_dataset_example)
+  gh  <- qd@genotypes
+
+  # 5-variant synthetic gene from the bundled panel.
+  vids <- gh@snpInfo$SNP[1:5]
+  ent  <- TwasWeightsEntry(
+    variantIds = vids,
+    weights    = c(0.1, -0.2, 0.05, 0.0, 0.3))
+  tw <- TwasWeights(
+    study   = "study1", context = "brain",
+    trait   = "ENSG_example", method = "susie",
+    entry   = list(ent),
+    ldSketch = gh)
+
+  res <- suppressMessages(suppressWarnings(
+    ctwasPipeline(gwasSumStats = gss, twasWeights = tw,
+                  regionId    = "block1",
+                  niter       = 5L,
+                  niterPrefit = 2L,
+                  # Single-gene single-block toy: relax the production
+                  # filters that gate out tiny inputs.
+                  min_group_size       = 1L,
+                  min_p_single_effect  = 0,
+                  filter_L             = FALSE)))
+
+  # ctwas_sumstats returns these 7 elements on success.
+  expect_named(res, c("z_gene", "param", "finemap_res", "susie_alpha_res",
+                       "region_data", "boundary_genes", "screen_res"),
+                ignore.order = TRUE)
+  # The gene we passed in came through.
+  expect_equal(nrow(res$z_gene), 1L)
+  expect_equal(res$z_gene$id, "study1|brain|ENSG_example|susie")
+  # Per-SNP susie_alpha output covers our 5 weight SNPs.
+  expect_equal(nrow(res$susie_alpha_res), 5L)
+  expect_true(all(c("susie_pip", "susie_alpha", "region_id")
+                   %in% colnames(res$susie_alpha_res)))
 })

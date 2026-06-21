@@ -1,0 +1,209 @@
+---
+title: "Pairwise colocalization with colocPipeline"
+author: "pecotmr authors"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Pairwise colocalization with colocPipeline}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 4.5)
+```
+
+## Overview
+
+`colocPipeline()` runs pairwise QTL ↔ GWAS colocalization using
+`coloc::coloc.bf_bf` on the SuSiE log Bayes-factor (LBF) matrices
+carried by each fine-mapping entry. For multi-trait colocalization
+across many QTL outcomes in one model, use
+[`colocboostPipeline`](colocboost-pipeline.html) instead.
+
+Inputs:
+
+- **QTL side** — a `QtlFineMappingResult` produced by
+  [`fineMappingPipeline`](fine-mapping.html).
+- **GWAS side** — either a `GwasFineMappingResult` (used directly) or a
+  `GwasSumStats` (the pipeline fine-maps it inline first).
+
+The output is a long-format data frame with one row per
+`(QTL tuple, GWAS tuple, credible-set pair)` combination and the
+standard coloc posterior columns `PP.H0.abf` … `PP.H4.abf`.
+
+```{r load-packages}
+library(pecotmr)
+```
+
+## Bundled inputs
+
+```{r bundled}
+data(qtl_dataset_example, gwas_sumstats_s4_example)
+qtl_dataset_example      <- fixupExampleGenotypePaths(qtl_dataset_example)
+gwas_sumstats_s4_example <- fixupExampleGenotypePaths(gwas_sumstats_s4_example)
+
+# Build a QtlFineMappingResult from the bundled QtlDataset.
+qtlFmr <- fineMappingPipeline(qtl_dataset_example, methods = "susie",
+                               cisWindow = 1e6)
+```
+
+## QTL FMR + GWAS sumstats (inline GWAS fine-mapping)
+
+The simplest call: hand `colocPipeline()` the QTL fine-mapping result
+and a GWAS `SumStats`. The pipeline runs `fineMappingPipeline()`
+internally on the GWAS sumstats (with `finemappingMethods`), then runs
+`coloc.bf_bf` per (QTL, GWAS) pair.
+
+```{r coloc-quickstart}
+res <- colocPipeline(
+  qtlFineMappingResult = qtlFmr,
+  gwasInput            = gwas_sumstats_s4_example,
+  finemappingMethods   = "susie")
+head(res)
+```
+
+Use `returnGwasFineMapping = TRUE` to get the inline GWAS FMR back as an
+attribute on the result:
+
+```{r coloc-return-fmr, eval=FALSE}
+res2 <- colocPipeline(
+  qtlFineMappingResult  = qtlFmr,
+  gwasInput             = gwas_sumstats_s4_example,
+  returnGwasFineMapping = TRUE)
+attr(res2, "gwasFineMapping")
+```
+
+## QTL FMR + pre-computed GWAS FMR
+
+If you already have a `GwasFineMappingResult` (e.g. computed once and
+reused), pass it directly — the pipeline skips the inline fine-mapping
+step:
+
+```{r coloc-precomputed-fmr, eval=FALSE}
+gwasFmr <- fineMappingPipeline(gwas_sumstats_s4_example, methods = "susie")
+colocPipeline(qtlFineMappingResult = qtlFmr,
+              gwasInput            = gwasFmr)
+```
+
+## Filtering effects fed into coloc
+
+`coloc::coloc.bf_bf` accepts one LBF matrix per side. By default, every
+effect with non-trivial prior variance (`V > priorTol`) gets included.
+Two opt-in filters tighten this:
+
+```{r coloc-filters-table, echo=FALSE}
+df <- data.frame(
+  Knob = c("`filterLbfCs`", "`filterLbfCsSecondary`",
+           "`filterLbfCsConcentration`", "`priorTol`"),
+  When = c("`filterLbfCsSecondary` is NULL",
+           "`filterLbfCsSecondary` is non-NULL (overrides `filterLbfCs`)",
+           "only with `filterLbfCsSecondary`",
+           "default filter (no `filterLbfCs*`)"),
+  What = c("TRUE keeps only effects that produced a credible set (`trimmedFit$sets$cs_index`).",
+           "Numeric coverage in (0,1). Runs a CS-concentration filter at that coverage.",
+           "Numeric in (0,1). Concentration factor: a CS at coverage X is kept only if it spans fewer than `nVariants * X * concentration` variants.",
+           "Drop effects whose estimated prior variance is at or below this threshold."),
+  Default = c("FALSE", "NULL", "0.5", "1e-9"),
+  stringsAsFactors = FALSE)
+knitr::kable(df)
+```
+
+```{r coloc-filter-example, eval=FALSE}
+colocPipeline(
+  qtlFineMappingResult     = qtlFmr,
+  gwasInput                = gwas_sumstats_s4_example,
+  filterLbfCsSecondary     = 0.5,   # 50% CS concentration filter
+  filterLbfCsConcentration = 0.5)   # span < 25% of locus variants
+```
+
+## Enrichment-aware coloc (enloc mode)
+
+Pass a per-`(gwasStudy, qtlContext)` enrichment table (the output of
+`qtlEnrichmentPipeline()`) to scale the shared-signal prior:
+
+\[
+p_{12}^{\text{used}} = \min\bigl(p_{12}\,(1 + \text{enrichment}),\, p_{12,\max}\bigr)
+\]
+
+Pairs without a matching enrichment row fall back to the baseline
+`p12` with a warning. Two extra columns are added to the output:
+`enrichment` (the lookup) and `p12Used` (what was actually passed to
+`coloc.bf_bf`).
+
+```{r coloc-enloc, eval=FALSE}
+enrichmentTable <- data.frame(
+  gwasStudy  = "trait1",
+  qtlContext = "brain",
+  enrichment = 2.5,
+  stringsAsFactors = FALSE)
+colocPipeline(
+  qtlFineMappingResult = qtlFmr,
+  gwasInput            = gwas_sumstats_s4_example,
+  enrichment           = enrichmentTable,
+  p12Max               = 1e-3)
+```
+
+## PIP renormalization on variant intersection
+
+When the QTL and GWAS fine-mapping results were fit on different
+variant sets (common when the user declines RAISS imputation, or when
+the GWAS FMR carries variants the QTL FMR doesn't), `adjustPips = TRUE`
+(default) renormalizes each side's PIPs to the cross-FMR variant
+intersection before any per-pair inference. Pass `FALSE` to use the
+FMRs as supplied.
+
+```{r coloc-adjustpips, eval=FALSE}
+colocPipeline(
+  qtlFineMappingResult = qtlFmr,
+  gwasInput            = gwas_sumstats_s4_example,
+  adjustPips           = TRUE)   # default
+```
+
+## LD-sketch consistency
+
+The QTL `FineMappingResult` and the GWAS `SumStats`/FMR must share an
+LD sketch (or the QTL side's `ldSketch` must be `NULL` — indicating an
+individual-level fit, in which case the check is skipped on the QTL
+side). Mismatch is a hard error.
+
+## Common parameters
+
+```{r coloc-params, eval=FALSE}
+colocPipeline(
+  qtlFineMappingResult     = qtlFmr,
+  gwasInput                = gwas_sumstats_s4_example,
+  filterLbfCs              = FALSE,
+  filterLbfCsSecondary     = NULL,    # e.g. 0.5
+  filterLbfCsConcentration = 0.5,
+  priorTol                 = 1e-9,
+  p1                       = 1e-4,
+  p2                       = 1e-4,
+  p12                      = 5e-6,
+  finemappingMethods       = "susie", # inline GWAS FM when needed
+  returnGwasFineMapping    = FALSE,
+  enrichment               = NULL,    # data.frame for enloc mode
+  p12Max                   = 1e-3,
+  adjustPips               = TRUE)
+```
+
+## Reading the result
+
+```{r read-result}
+str(res, max.level = 1L)
+head(res[order(res$PP.H4.abf, decreasing = TRUE), ])
+```
+
+Each row is one CS-pair combination; in particular the `idx1` /
+`idx2` columns identify the QTL / GWAS effect indices within the
+respective LBF matrices, and `PP.H4.abf` is the standard coloc
+shared-signal posterior.
+
+## Next steps
+
+- For multi-trait colocalization across many QTL outcomes
+  simultaneously, see
+  [`colocboostPipeline`](colocboost-pipeline.html).
+- Couple coloc evidence with per-gene TWAS Z + MR via
+  [`causalInferencePipeline`](twas-zscore.html).

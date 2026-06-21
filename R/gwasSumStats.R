@@ -190,6 +190,24 @@ setMethod("getMaf", "GwasSumStats", function(x, study = NULL, ...) {
   if ("MAF" %in% colnames(mc)) mc$MAF else NULL
 })
 
+#' @rdname getSumstatDf
+#' @export
+setMethod("getSumstatDf", "GwasSumStats",
+  function(x, study = NULL,
+           require = character(0),
+           derive  = c("none", "zFromBetaSe"),
+           keepChrPrefix = TRUE) {
+    derive <- match.arg(derive)
+    gr <- getSumStats(x, study = study)
+    .entryToSumstatDf(gr,
+                      require       = require,
+                      derive        = derive,
+                      keepChrPrefix = keepChrPrefix,
+                      label         = sprintf("GwasSumStats[%s]",
+                                              if (is.null(study)) "<auto>"
+                                              else study))
+  })
+
 #' @rdname nSnps
 #' @export
 setMethod("nSnps", "GwasSumStats", function(x, study = NULL) {

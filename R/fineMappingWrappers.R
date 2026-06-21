@@ -922,24 +922,21 @@ calPurity <- function(lCs, X, method = "min") {
   tt <- list()
 
   for (k in seq_along(lCs)) {
-    csIndices <- unlist(lCs[[k]]) # Extract indices for the current credible set
-    # Calculate purity based on the specified method
+    csIndices <- unlist(lCs[[k]])
     if (method == "min") {
       if (length(csIndices) == 1) {
-        tt[[k]] <- 1 # Set purity to 1 for non-"min" methods
+        tt[[k]] <- 1
       } else {
-        x <- abs(cor(X[, csIndices])) # Compute the absolute correlation matrix
-        x[col(x) == row(x)] <- NA # Set diagonal elements to NA to exclude them
-        tt[[k]] <- min(x, na.rm = TRUE) # Calculate minimum off-diagonal correlation for "min" method
-        # Check if the credible set has only one element and the method is not "min"
+        x <- abs(computeLd(X[, csIndices, drop = FALSE], method = "sample"))
+        x[col(x) == row(x)] <- NA
+        tt[[k]] <- min(x, na.rm = TRUE)
       }
     } else {
       if (length(csIndices) == 1) {
-        tt[[k]] <- c(1, 1, 1) # Set purity to 1 for non-"min" methods
+        tt[[k]] <- c(1, 1, 1)
       } else {
-        x <- abs(cor(X[, csIndices])) # Compute the absolute correlation matrix
-        x[col(x) == row(x)] <- NA # Set diagonal elements to NA to exclude them
-        # Calculate min, mean, and median of off-diagonal correlations for other methods
+        x <- abs(computeLd(X[, csIndices, drop = FALSE], method = "sample"))
+        x[col(x) == row(x)] <- NA
         tt[[k]] <- c(
           min(x, na.rm = TRUE),
           mean(x, na.rm = TRUE),

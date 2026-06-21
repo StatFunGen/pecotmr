@@ -44,31 +44,6 @@ setClass("QtlSumStats",
   }
 )
 
-#' @title GWAS Summary Statistics Collection
-#' @description S4 collection of GWAS summary statistics keyed by
-#'   \code{study}. Each entry holds a \code{GRanges} of summary statistics
-#'   for that study. Class-level slots \code{ldSketch} (the LD reference
-#'   \code{GenotypeHandle}) and \code{genome} (the genome build, a single
-#'   character string) apply to every entry; the genome build must be
-#'   uniform because all entries necessarily share the LD reference.
-#'
-#'   Required columns: \code{study}, \code{entry}. Optional columns
-#'   include \code{varY} (numeric, phenotype variance for the
-#'   sufficient-statistic interface; NA otherwise). \code{study} is
-#'   unique. Each \code{entry} is a \code{GRanges} whose mcols carry the
-#'   per-variant statistics (\code{SNP}, \code{A1}, \code{A2}, \code{Z},
-#'   \code{N}; plus optional \code{MAF}, \code{INFO}, \code{BETA},
-#'   \code{SE}, \code{P}).
-#' @slot ldSketch A \code{GenotypeHandle} for the LD reference.
-#' @slot genome A single character string giving the genome build that
-#'   the LD sketch and every entry are aligned to.
-#' @slot qcInfo A \code{list} recording which QC steps ran. Empty
-#'   \code{list()} on construction; populated by \code{summaryStatsQc()}.
-#'   Fine-mapping and TWAS-weights pipelines reject inputs where
-#'   \code{length(getQcInfo(x)) == 0L} — the slot serves as both the
-#'   gating flag and the audit trail.
-#' @export
-
 #' @title QTL Summary Statistics Handling
 #' @description Constructor and accessor methods for \code{QtlSumStats},
 #'   the DFrame-subclass collection keyed by
@@ -215,6 +190,27 @@ setMethod("getMaf", "QtlSumStats",
     gr <- getSumStats(x, study = study, context = context, trait = trait)
     mc <- mcols(gr)
     if ("MAF" %in% colnames(mc)) mc$MAF else NULL
+  }
+)
+
+#' @rdname getSumstatDf
+#' @export
+setMethod("getSumstatDf", "QtlSumStats",
+  function(x, study = NULL, context = NULL, trait = NULL,
+           require = character(0),
+           derive  = c("none", "zFromBetaSe"),
+           keepChrPrefix = TRUE) {
+    derive <- match.arg(derive)
+    gr <- getSumStats(x, study = study, context = context, trait = trait)
+    .entryToSumstatDf(gr,
+                      require       = require,
+                      derive        = derive,
+                      keepChrPrefix = keepChrPrefix,
+                      label         = sprintf(
+                        "QtlSumStats[%s/%s/%s]",
+                        if (is.null(study))   "<auto>" else study,
+                        if (is.null(context)) "<auto>" else context,
+                        if (is.null(trait))   "<auto>" else trait))
   }
 )
 

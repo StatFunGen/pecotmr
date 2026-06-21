@@ -179,3 +179,188 @@ NULL
 #' @examples
 #' data(multitraite_data)
 #'
+NULL
+
+
+#' @name qtl_dataset_example
+#'
+#' @title Example QtlDataset (S4)
+#'
+#' @docType data
+#'
+#' @description A minimal but complete \code{\link{QtlDataset}} built from the
+#' bundled \code{inst/extdata/toy_ref} PLINK1 panel (165 samples, 200 chr22
+#' variants) plus a synthetic single-trait phenotype with two causal variants.
+#' Intended as a self-contained input for the
+#' \code{\link{fineMappingPipeline}}, \code{\link{twasWeightsPipeline}}, and
+#' \code{\link{colocboostPipeline}} vignettes.
+#'
+#' @format A \code{QtlDataset} object: study = \code{"study1"}, single context
+#'   \code{"brain"}, single trait \code{"ENSG_example"}. Genotype handle wraps
+#'   the bundled toy PLINK1 reference; phenotypes are a single-row
+#'   \code{SummarizedExperiment} with synthetic dosage-driven values.
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(qtl_dataset_example)
+#' qtl_dataset_example
+#'
+NULL
+
+
+#' @name qtl_sumstats_example
+#'
+#' @title Example QtlSumStats (S4)
+#'
+#' @docType data
+#'
+#' @description A pre-QC'd \code{\link{QtlSumStats}} collection covering the
+#' same (study, context, trait) tuple as \code{\link{qtl_dataset_example}};
+#' the per-variant Z / BETA / SE / N values were computed from the synthetic
+#' phenotype by per-variant linear regression. The \code{ldSketch} slot
+#' references the same toy PLINK1 panel.
+#'
+#' @format A \code{QtlSumStats} S4 collection with one row (study1, brain,
+#'   ENSG_example) backed by a GRanges of 200 chr22 variants.
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(qtl_sumstats_example)
+#' qtl_sumstats_example
+#'
+NULL
+
+
+#' @name qtl_sumstats_multicontext_example
+#'
+#' @title Example multi-context QtlSumStats (S4) for mash demos
+#'
+#' @docType data
+#'
+#' @description A \code{\link{QtlSumStats}} collection covering one trait
+#' (\code{"ENSG_example"}) across three synthetic contexts (\code{brain},
+#' \code{blood}, \code{muscle}) on the same toy PLINK1 panel used by
+#' \code{\link{qtl_sumstats_example}}. The signal pattern is wired for
+#' mash pattern recovery: one variant is causal in all three contexts
+#' (the shared eQTL), one is brain-only, one is blood-only, and muscle
+#' carries only the shared signal. Per-variant \code{BETA}, \code{SE},
+#' \code{Z}, \code{N}, and \code{MAF} are populated, so the bundle
+#' works with both \code{inputScale = "beta"} (the default) and
+#' \code{inputScale = "z"} paths through \code{\link{mashPipeline}}.
+#'
+#' @format A \code{QtlSumStats} S4 collection with three rows (one per
+#'   context) backed by GRanges of 200 chr22 variants each.
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(qtl_sumstats_multicontext_example)
+#' qtl_sumstats_multicontext_example
+#' getContexts(qtl_sumstats_multicontext_example)
+#'
+NULL
+
+
+#' @name gwas_sumstats_s4_example
+#'
+#' @title Example GwasSumStats (S4)
+#'
+#' @docType data
+#'
+#' @description A pre-QC'd \code{\link{GwasSumStats}} collection for one
+#' synthetic trait (\code{"trait1"}, N = 50,000). The signal pattern shares
+#' one causal variant with \code{\link{qtl_sumstats_example}} (for
+#' colocalization demos) and adds a second GWAS-only causal variant.
+#' The \code{ldSketch} slot references the same toy PLINK1 panel used
+#' for the QTL example.
+#'
+#' @format A \code{GwasSumStats} S4 collection with one row (trait1)
+#'   backed by a GRanges of 200 chr22 variants.
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(gwas_sumstats_s4_example)
+#' gwas_sumstats_s4_example
+#'
+NULL
+
+
+#' @title Resolve bundled-example GenotypeHandle paths
+#'
+#' @description The bundled S4 example objects (\code{qtl_dataset_example},
+#' \code{qtl_sumstats_example}, \code{qtl_sumstats_multicontext_example},
+#' \code{gwas_sumstats_s4_example}, \code{multi_study_qtl_dataset_example})
+#' store a relative-style path to the bundled
+#' \code{inst/extdata/toy_canonical} PLINK1 reference.
+#' Call this helper once at the top of a vignette to re-point each
+#' contained \code{GenotypeHandle} at the installed path resolved via
+#' \code{system.file()}.
+#'
+#' @param x A bundled \code{QtlDataset}, \code{MultiStudyQtlDataset},
+#'   \code{QtlSumStats}, or \code{GwasSumStats} example object.
+#' @return The same object with \code{GenotypeHandle@@path} rewritten
+#'   to the resolved install path.
+#' @export
+fixupExampleGenotypePaths <- function(x) {
+  resolve <- function(handle) {
+    bn <- basename(handle@path)
+    # PLINK1 / PLINK2 are stems (no extension); resolve via the .bed
+    # (or .pgen) sidecar and strip the extension back off.
+    bedPath <- system.file("extdata", paste0(bn, ".bed"),
+                            package = "pecotmr")
+    if (nzchar(bedPath)) {
+      handle@path <- sub("\\.bed$", "", bedPath)
+      return(handle)
+    }
+    new <- system.file("extdata", bn, package = "pecotmr")
+    if (!nzchar(new))
+      stop("fixupExampleGenotypePaths: cannot resolve '", bn,
+           "' under inst/extdata/")
+    handle@path <- new
+    handle
+  }
+  if (methods::is(x, "QtlDataset")) {
+    x@genotypes <- resolve(x@genotypes)
+  } else if (methods::is(x, "MultiStudyQtlDataset")) {
+    for (nm in names(x@qtlDatasets))
+      x@qtlDatasets[[nm]]@genotypes <-
+        resolve(x@qtlDatasets[[nm]]@genotypes)
+    if (!is.null(x@sumStats))
+      x@sumStats@ldSketch <- resolve(x@sumStats@ldSketch)
+  } else if (methods::is(x, "QtlSumStats") ||
+             methods::is(x, "GwasSumStats")) {
+    x@ldSketch <- resolve(x@ldSketch)
+  } else {
+    stop("fixupExampleGenotypePaths: unsupported class '",
+         class(x)[[1L]], "'.")
+  }
+  x
+}
+
+
+#' @name multi_study_qtl_dataset_example
+#'
+#' @title Example MultiStudyQtlDataset (S4)
+#'
+#' @docType data
+#'
+#' @description A \code{\link{MultiStudyQtlDataset}} combining two
+#' synthetic \code{QtlDataset}s (\code{study1} and \code{study2}) that
+#' share the toy PLINK1 panel but have different causal variants. Use it
+#' to demonstrate the multi-study dispatch of
+#' \code{\link{fineMappingPipeline}}, \code{\link{twasWeightsPipeline}},
+#' and \code{\link{colocboostPipeline}}.
+#'
+#' @format A \code{MultiStudyQtlDataset} with two embedded
+#'   \code{QtlDataset}s (study1 and study2) and \code{sumStats = NULL}.
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(multi_study_qtl_dataset_example)
+#' multi_study_qtl_dataset_example
+#'
+NULL

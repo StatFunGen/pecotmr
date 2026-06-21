@@ -149,18 +149,19 @@ causalInferencePipeline <- function(gwasSumStats,
 
     for (gi in seq_len(nrow(gwasSumStats))) {
       gStudy <- as.character(gwasSumStats$study)[[gi]]
-      gGr    <- gwasSumStats$entry[[gi]]
+      gdf    <- getSumstatDf(gwasSumStats, study = gStudy,
+                             require = c("SNP", "Z"))
       twasOut <- .cipComputeTwasZ(
         weights = wVec, variantIds = wVariantIds,
-        gwasGr  = gGr, gwasLd = gwasLd)
+        gwasDf  = gdf, gwasLd = gwasLd)
       if (is.null(twasOut)) next
 
       mrOut <- if (!is.null(fmrEntry)) {
         if (mrMethod == "csAware") {
-          .cipComputeMrCsAware(fmrEntry = fmrEntry, gwasGr = gGr,
+          .cipComputeMrCsAware(fmrEntry = fmrEntry, gwasDf = gdf,
                                 cpipCutoff = mrCpipCutoff)
         } else {
-          .cipComputeMr(fmrEntry = fmrEntry, gwasGr = gGr,
+          .cipComputeMr(fmrEntry = fmrEntry, gwasDf = gdf,
                         pipCutoff = mrPipCutoff)
         }
       } else {
@@ -277,16 +278,15 @@ causalInferencePipeline <- function(gwasSumStats,
   list(variantIds = vids[ok], weights = w[ok])
 }
 
-# Compute the per-tuple TWAS Z for one (weights vector, GWAS GRanges).
-# Returns NULL when the overlap is too small.
-.cipComputeTwasZ <- function(weights, variantIds, gwasGr, gwasLd) {
-  gwasIds <- as.character(S4Vectors::mcols(gwasGr)$SNP)
-  gwasZ   <- as.numeric(S4Vectors::mcols(gwasGr)$Z)
-  common <- intersect(variantIds, gwasIds)
+# Compute the per-tuple TWAS Z from a single GwasSumStats tuple's
+# unpacked data.frame (produced by getSumstatDf upstream). Returns
+# NULL when the overlap is too small.
+.cipComputeTwasZ <- function(weights, variantIds, gwasDf, gwasLd) {
+  common <- intersect(variantIds, gwasDf$variant_id)
   if (length(common) < 2L) return(NULL)
 
   wSub <- weights[match(common, variantIds)]
-  zSub <- gwasZ[match(common, gwasIds)]
+  zSub <- gwasDf$z[match(common, gwasDf$variant_id)]
   ldMat <- .cipLdFromSketch(gwasLd, common)
 
   res <- twasZ(weights = wSub, z = zSub, R = ldMat)
@@ -294,10 +294,10 @@ causalInferencePipeline <- function(gwasSumStats,
   zVal <- as.numeric(zMat[1L, "Z"])
   pVal <- as.numeric(zMat[1L, "pval"])
   # Position the row at the variant span.
-  idx <- match(common, gwasIds)
-  chrom    <- as.character(GenomicRanges::seqnames(gwasGr))[[idx[[1L]]]]
-  startPos <- min(GenomicRanges::start(gwasGr)[idx])
-  endPos   <- max(GenomicRanges::end(gwasGr)[idx])
+  idx <- match(common, gwasDf$variant_id)
+  chrom    <- gwasDf$chrom[[idx[[1L]]]]
+  startPos <- min(gwasDf$pos[idx])
+  endPos   <- max(gwasDf$pos[idx])
   list(Z = zVal, pval = pVal,
        chrom = chrom, startPos = startPos, endPos = endPos)
 }
@@ -314,7 +314,7 @@ causalInferencePipeline <- function(gwasSumStats,
 # variant with PIP > pipCutoff contributes one ratio = beta_y / beta_x.
 # Returns list(waldRatio, waldRatioSe, mrPval, nIV) with NA fields when
 # no IVs survive.
-.cipComputeMr <- function(fmrEntry, gwasGr, pipCutoff) {
+.cipComputeMr <- function(fmrEntry, gwasDf, pipCutoff) {
   tl <- getTopLoci(fmrEntry)
   if (is.null(tl) || nrow(tl) == 0L)
     return(list(waldRatio = NA_real_, waldRatioSe = NA_real_,
@@ -332,19 +332,16 @@ causalInferencePipeline <- function(gwasSumStats,
                 mrPval = NA_real_, nIV = 0L))
   betaX <- as.numeric(tl[[betaCol[[1L]]]])[keep]
   seX   <- as.numeric(tl[[seCol[[1L]]]])[keep]
-  gIds  <- as.character(S4Vectors::mcols(gwasGr)$SNP)
-  gIdx  <- match(ivVars, gIds)
+  gIdx  <- match(ivVars, gwasDf$variant_id)
   ok    <- !is.na(gIdx)
   if (sum(ok) == 0L)
     return(list(waldRatio = NA_real_, waldRatioSe = NA_real_,
                 mrPval = NA_real_, nIV = 0L))
   betaX <- betaX[ok]; seX <- seX[ok]; gIdx <- gIdx[ok]
-  gZ <- as.numeric(S4Vectors::mcols(gwasGr)$Z)[gIdx]
-  gN <- if ("N" %in% colnames(S4Vectors::mcols(gwasGr)))
-    as.numeric(S4Vectors::mcols(gwasGr)$N)[gIdx]
+  gZ <- gwasDf$z[gIdx]
+  gN <- if (!is.null(gwasDf$N)) gwasDf$N[gIdx]
         else rep(NA_real_, length(gIdx))
-  gMaf <- if ("MAF" %in% colnames(S4Vectors::mcols(gwasGr)))
-    as.numeric(S4Vectors::mcols(gwasGr)$MAF)[gIdx]
+  gMaf <- if (!is.null(gwasDf$maf)) gwasDf$maf[gIdx]
           else rep(NA_real_, length(gIdx))
   betaY <- .cipZToBeta(gZ, gMaf, gN)
   seY   <- .cipZToSe(gZ, gMaf, gN)
@@ -394,7 +391,7 @@ causalInferencePipeline <- function(gwasSumStats,
 # Returns list(waldRatio, waldRatioSe, mrPval, nIV, Q, I2, nCs) with NA
 # fields when no usable CS survives.
 # @noRd
-.cipComputeMrCsAware <- function(fmrEntry, gwasGr, cpipCutoff) {
+.cipComputeMrCsAware <- function(fmrEntry, gwasDf, cpipCutoff) {
   naResult <- list(waldRatio = NA_real_, waldRatioSe = NA_real_,
                    mrPval = NA_real_, nIV = 0L,
                    Q = NA_real_, I2 = NA_real_, nCs = 0L)
@@ -427,20 +424,17 @@ causalInferencePipeline <- function(gwasSumStats,
   bhatX <- bhatX[ok]; sbhatX <- sbhatX[ok]; vids <- vids[ok]
 
   # Match GWAS-side beta/se via the existing helpers.
-  gIds <- as.character(S4Vectors::mcols(gwasGr)$SNP)
-  gIdx <- match(vids, gIds)
+  gIdx <- match(vids, gwasDf$variant_id)
   ok   <- !is.na(gIdx)
   if (!any(ok)) return(naResult)
   cs <- cs[ok]; pip <- pip[ok]
   bhatX <- bhatX[ok]; sbhatX <- sbhatX[ok]
   gIdx <- gIdx[ok]; vids <- vids[ok]
 
-  gZ <- as.numeric(S4Vectors::mcols(gwasGr)$Z)[gIdx]
-  gN <- if ("N" %in% colnames(S4Vectors::mcols(gwasGr)))
-    as.numeric(S4Vectors::mcols(gwasGr)$N)[gIdx]
+  gZ <- gwasDf$z[gIdx]
+  gN <- if (!is.null(gwasDf$N)) gwasDf$N[gIdx]
         else rep(NA_real_, length(gIdx))
-  gMaf <- if ("MAF" %in% colnames(S4Vectors::mcols(gwasGr)))
-    as.numeric(S4Vectors::mcols(gwasGr)$MAF)[gIdx]
+  gMaf <- if (!is.null(gwasDf$maf)) gwasDf$maf[gIdx]
           else rep(NA_real_, length(gIdx))
   bhatY  <- .cipZToBeta(gZ, gMaf, gN)
   sbhatY <- .cipZToSe(gZ, gMaf, gN)

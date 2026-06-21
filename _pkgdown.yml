@@ -67,8 +67,10 @@ articles:
     - twas-zscore
   - title: "Colocalization"
     desc: >
-      Multi-task colocalization with ColocBoost.
+      Pairwise QTL/GWAS colocalization (coloc.bf_bf) and multi-trait
+      colocalization with ColocBoost.
     contents:
+    - coloc-pipeline
     - colocboost-pipeline
   - title: "Enrichment Analysis"
     contents:

@@ -64,6 +64,7 @@ r45 = {features = ["r45"]}
 "r-colocboost" = "*"
 "r-cpp11" = "*"
 "r-cpp11armadillo" = "*"
+"r-ctwas" = "*"
 "r-decor" = "*"
 "r-dplyr" = "*"
 "r-flashier" = "*"

@@ -45,6 +45,7 @@ requirements:
     - r-colocboost
     - r-cpp11
     - r-cpp11armadillo
+    - r-ctwas
     - r-decor
     - r-dplyr
     - r-flashier
@@ -105,6 +106,7 @@ requirements:
     - r-colocboost
     - r-cpp11
     - r-cpp11armadillo
+    - r-ctwas
     - r-decor
     - r-dplyr
     - r-flashier

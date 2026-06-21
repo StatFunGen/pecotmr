@@ -1,7 +1,51 @@
+#' @title Run mashr Across Multi-Context QTL or GWAS Summary Statistics
+#' @description End-to-end driver: from `{strong, random, null}` sumstats
+#'   collections, builds the variant × context Bhat / Shat matrices,
+#'   estimates the residual correlation (\code{Vhat}), and fits the mash
+#'   model with canonical + PCA + flash + ED covariance components,
+#'   returning the fitted covariance list and the estimated mixture
+#'   weights.
+#' @param sumStatsList Named list (or \code{SimpleList}) of
+#'   \code{\link{QtlSumStats}} or \code{\link{GwasSumStats}} objects.
+#'   Required names: \code{"strong"} (discovery variants), \code{"random"}
+#'   (random background). Optional: \code{"null"} (for residual
+#'   correlation estimation).
+#' @param alpha Numeric (length 1). Variance-stabilising-transform
+#'   exponent forwarded to \code{mashr::mash_set_data()}. Use
+#'   \code{alpha = 0} on the BETA scale, \code{alpha = 1} on the Z scale.
+#' @param residualCorrelation Optional pre-computed residual correlation
+#'   matrix (\code{Vhat}). Only consulted when \code{sumStatsList$null}
+#'   is absent; otherwise \code{Vhat} is estimated from the null slice
+#'   via \code{mashr::estimate_null_correlation_simple()}.
+#' @param nPcs Optional integer; number of principal components seeded
+#'   into \code{mashr::cov_pca()}. Defaults to \code{ncol(Bhat) - 1}.
+#' @param inputScale One of \code{"auto"} (default), \code{"beta"},
+#'   \code{"z"}. Controls which (Bhat, Shat) pair is extracted from each
+#'   sumstats entry:
+#'   \describe{
+#'     \item{\code{"beta"}}{Bhat = BETA, Shat = SE — the standard
+#'       effect-size scale mashr was designed around. Requires every
+#'       entry to carry BETA + SE mcols.}
+#'     \item{\code{"z"}}{Bhat = Z, Shat = 1 — z-score scale. Requires Z.}
+#'     \item{\code{"auto"}}{Use BETA + SE when every entry carries both;
+#'       otherwise fall back to (Z, 1) when every entry carries Z. Mixed
+#'       inputs (some entries missing BETA, others missing Z) are a
+#'       hard error.}
+#'   }
+#'   \code{alpha} should be chosen consistently with the resolved scale:
+#'   typically \code{alpha = 0} for beta, \code{alpha = 1} for z.
+#' @param setSeed Integer. RNG seed for reproducibility of
+#'   \code{mashr::cov_flash} and \code{mashr::cov_ed}. Default 999.
+#' @return A list with elements \code{U} (the combined covariance list:
+#'   canonical + PCA + flash + ED) and \code{w} (the estimated mixture
+#'   weights).
+#' @export
 mashPipeline <- function(sumStatsList, alpha,
                           residualCorrelation = NULL,
                           nPcs = NULL,
+                          inputScale = c("auto", "beta", "z"),
                           setSeed = 999) {
+  inputScale <- match.arg(inputScale)
   if (!requireNamespace("mashr", quietly = TRUE)) {
     stop("To use this function, please install mashr: ",
          "https://cran.r-project.org/web/packages/mashr/index.html")
@@ -36,12 +80,15 @@ mashPipeline <- function(sumStatsList, alpha,
 
   set.seed(setSeed)
 
-  strongMats <- .mashSumStatsToMatrices(sumStatsList$strong, "strong")
-  randomMats <- .mashSumStatsToMatrices(sumStatsList$random, "random")
+  strongMats <- .mashSumStatsToMatrices(sumStatsList$strong, "strong",
+                                         inputScale = inputScale)
+  randomMats <- .mashSumStatsToMatrices(sumStatsList$random, "random",
+                                         inputScale = inputScale)
 
   hasNull <- "null" %in% names(sumStatsList) && !is.null(sumStatsList$null)
   if (hasNull) {
-    nullMats <- .mashSumStatsToMatrices(sumStatsList$null, "null")
+    nullMats <- .mashSumStatsToMatrices(sumStatsList$null, "null",
+                                         inputScale = inputScale)
   }
 
   if (!hasNull) {
@@ -84,452 +131,9 @@ mashPipeline <- function(sumStatsList, alpha,
   list(U = U.all, w = w)
 }
 
-#' Merge a List of Matrices or Data Frames with Optional Allele Flipping
-#'
-#' @description
-#' This function merges a list of matrices or data frames by a shared identifier column,
-#' optionally aligning to a reference panel using allele QC procedures.
-#'
-#' @param matrixList A named or unnamed list of data frames or matrices.
-#' @param valueColumn Character string. The name of the column containing values to extract (e.g., z-scores or betas).
-#' @param refPanel Optional data frame. A reference panel for allele QC (must be compatible with `allele_qc`).
-#' @param idColumn Character string. The name of the column identifying variant IDs. Default is `"variants"`.
-#' @param removeAnyMissing Logical. If `TRUE`, rows with any missing values will be removed after merging.
-#'
-#' @return A data frame containing merged values, one column per dataset with suffix `_i`.
-#' @examples
-#' \dontrun{
-#' merged <- mergeSumstatsMatrices(list(df1, df2), valueColumn = "variants", refPanel = ref_df)
-#' }
-#' @import dplyr
-#' @export
-
-mergeSumstatsMatrices <- function(matrixList, valueColumn, refPanel = NULL, ldMetaFile = NULL, idColumn = "variants",
-                             removeAnyMissing = FALSE) {
-    # Input validation
-    if (!is.list(matrixList) || length(matrixList) == 0) {
-      stop("matrixList must be a non-empty list")
-    }
-    if (!is.character(valueColumn) || length(valueColumn) != 1) {
-      stop("valueColumn must be a single string")
-    }
-    if (!is.character(idColumn) || length(idColumn) != 1) {
-      stop("idColumn must be a single string")
-    }
-
-    dfList <- lapply(seq_along(matrixList), function(i) {
-      tryCatch(
-        {
-           # Step 1: Convert matrix to data frame and extract relevant columns
-           df <- as.data.frame(matrixList[[i]])
-           if (!(idColumn %in% colnames(df)) || !(valueColumn %in% colnames(df))) {
-            stop(paste("Required columns", idColumn, "or", valueColumn, "not found in dataset", i))
-           }
-           df2 <- df[, c(idColumn, valueColumn)]
-             if (!is.null(ldMetaFile)) {
-            # Step 2: Split 'variants' to extract chromosomal info
-            cohortVariantsDf <- parse_variant_id(df2[, c(idColumn)])
-            # Step 3: Combine extracted chromosomal info with value column
-            cohortDf <- cbind(cohortVariantsDf, value = df2[, valueColumn, drop = FALSE])
-
-            # Step 4: Merge with LD reference and filter
-            # Normalize ldMetaFile chrom to integer to match parse_variant_id output
-            ldMetaFile$chrom <- as.integer(stripChrPrefix(as.character(ldMetaFile$chrom)))
-            variantsLdBlockMatch <- merge(cohortDf, ldMetaFile, by = "chrom", allow.cartesian = TRUE) %>%
-              filter(pos > start & pos < end) %>%
-              select(-path)
-
-            # Function to process each group
-            processGroup <- function(data) {
-              # Construct file path
-              bimFilePath <- unique(data$bim_path)
-              ldBimFile <- vroom(bimFilePath)
-
-              # Perform allele quality control
-              flippedData <- .matchRefPanel(data, ldBimFile$V2,
-                colToFlip = c(valueColumn),
-                matchMinProp = 0,
-                flipStrand = FALSE, removeUnmatched = TRUE
-              )$harmonizedData
-              return(flippedData)
-            }
-
-            finalDf <- variantsLdBlockMatch %>%
-              group_by(start, end) %>%
-              group_map(~ processGroup(.x)) %>%
-              bind_rows() %>%
-              select(c("variant_id", valueColumn)) %>%
-              rename("variants" = "variant_id")
-            # Rename columns to avoid duplication
-            colnames(finalDf) <- c(idColumn, paste0(valueColumn, "_", i))
-          } else if (!is.null(refPanel)) {
-            # Step 2: Split 'variants' to extract chromosomal info
-            cohortVariantsDf <- parse_variant_id(df2[, c(idColumn)])
-            # Step 3: Combine extracted chromosomal info with value column
-            cohortDf <- cbind(cohortVariantsDf, value = df2[, valueColumn, drop = FALSE])
-
-            flippedData <- .matchRefPanel(cohortDf, refPanel, colToFlip = c(valueColumn),
-                matchMinProp = 0,
-                flipStrand = FALSE, removeUnmatched = TRUE)$harmonizedData
-
-            finalDf <- flippedData %>%
-                select(c("variant_id", valueColumn))
-            colnames(finalDf) <- c(idColumn, paste0(valueColumn, "_", i))
-          } else {
-            finalDf <- df2
-            colnames(finalDf) <- c(idColumn, paste0(valueColumn, "_", i))
-          }
-          return(finalDf)
-        },
-        error = function(e) {
-          message(paste("Error processing dataset", i, ":", e$message))
-          return(NULL)
-        }
-      )
-    })
-
-    # Remove any NULL results from errors
-    dfList <- dfList[!sapply(dfList, is.null)]
-    if (length(dfList) == 0) {
-        message("No valid datasets after processing")
-        return(NULL)
-    }
-
-    # Iteratively merge the data frames
-    mergedDf <- Reduce(
-      function(x, y) merge(x, y, by = idColumn, all = TRUE),
-      dfList
-    )
-    # Optionally, remove rows with any missing values
-    if (removeAnyMissing) {
-      mergedDf <- mergedDf[complete.cases(mergedDf), ]
-    }
-    return(mergedDf)
-  }
                  
-#' Load and Align Summary Statistics for a Given Gene and Condition
-#'
-#' @description
-#' This function processes summary statistics matrices for a target gene across contexts,
-#' optionally aligning with a reference panel and updating an existing result list.
-#'
-#' @param datList A named list of matrices or data.frames, each element corresponding to a summary statistics type (e.g., z, beta).
-#' @param signalDf A data.frame containing signal information including `variant_ID`, `gene_ID`, and `event_ID`.
-#' @param cond Character. Condition type: "strong", "null", or "random".
-#' @param region Character. Target gene ID.
-#' @param extractInfs Character vector. Names of summary statistics to extract (e.g., `"z"`, `"beta"`).
-#' @param tagPatterns Optional named pattern list used to classify context.
-#' @param resultListFormat A nested list used as a running result container.
-#'
-#' @importFrom stringr str_detect str_remove_all
-#' @importFrom rlang .data sym
-#' @importFrom purrr keep map_dfr map_chr
-#' @importFrom utils combn
-#' @import dplyr tidyr tibble
-#' @return The updated `resultListFormat` with processed results for the specified gene and condition.
-#' @export
-loadMulticontextSumstats <- function(datList, signalDf, cond, region, extractInfs = "z", tagPatterns = NULL, resultListFormat) {
-  # Initialize output list
-  out <- list()
-  traitNames <- names(datList[[1]])
-    if (cond == "strong" && region %in% signalDf$gene_ID){
-  events <- signalDf %>% filter(gene_ID == region) %>% pull(event_ID) %>% unique()
-  for (j in seq_along(events)){
-        refDfFiltered <- signalDf %>% filter(gene_ID == region, event_ID == events[j]) %>%
-            filter(!str_detect(context_classify, "NE"))
-        if(dim(refDfFiltered)[1] == 0) next
-        ## generate the reference panel for allele flipping
-        refPanel <- parse_variant_id(refDfFiltered$variant_ID%>%unique())
-
-        varIdx <- c()
-        variants <- c()
-        sumstatsDf <- list()
-        eventIDextracted <- c()
-
-        # Flatten the nested list
-        for (extractInf in extractInfs) {
-        extractedMatrix <- mergeSumstatsMatrices(datList[[extractInf]], valueColumn = extractInf, refPanel = refPanel, idColumn = "variants", removeAnyMissing = FALSE)
-        if(is.null(extractedMatrix)||dim(extractedMatrix)[1]==0) return(resultListFormat)
-        out[[extractInf]] <- extractedMatrix
-        # Set variant order on first iteration
-        if (is.null(varIdx)&& is.null(variants)) {
-            varIdx <- 1:nrow(out[[extractInf]])
-            variants <- out[[extractInf]]$variants[varIdx]
-        }
-        numberIndex <- str_extract(colnames(out[[extractInf]]), "\\d+")[-1]
-        out[[extractInf]] <- out[[extractInf]][varIdx, , drop = FALSE]
-        rownames(out[[extractInf]]) <- variants
-        colnames(out[[extractInf]])[2:ncol(out[[extractInf]])] <- traitNames[as.integer(numberIndex)]
-        out[[extractInf]] <- out[[extractInf]][, -which(names(out[[extractInf]]) == "variants"), drop = FALSE]
-
-        df <- as.data.frame(t(out[[extractInf]]))
-        df <- rownames_to_column(df, var = "context")
-
-            # Match context to tag
-        df <- df %>%
-                  mutate(context_classify = if (is.null(tagPatterns) || length(tagPatterns) == 0) {
-                    context
-                  } else {
-                    map_chr(context, function(ctx) {
-                      matched <- names(tagPatterns)[str_detect(ctx, tagPatterns)]
-                      if (length(matched) == 0) NA_character_ else matched[1]
-                    })
-                  })
-
-        numericCol <- colnames(df)[2]
-
-         if (extractInf == "z"){
-                # Make a copy to store added rows
-              addedDf <- data.frame()
-
-                # Ensure the column name of the numeric column
-                if (any(grepl("sQTL|pQTL|gpQTL", df$context_classify))) {
-                  if (any(grepl("sQTL|pQTL|gpQTL", refDfFiltered$context_classify))) {
-
-                    # Extract sQTL contexts to loop over
-                    xQTLspecificContexts <- unique(str_subset(refDfFiltered$context_classify, "sQTL|pQTL|gpQTL"))
-
-                    for (cont in xQTLspecificContexts) {
-                          eventIDsExtracted <- refDfFiltered %>%
-                                    filter(context_classify == cont) %>%
-                                    pull(event_IDs)
-
-                    # Filter matching rows in df
-                          contextRows <- df %>%
-                                filter(context_classify == cont, str_detect(context, paste(eventIDsExtracted, collapse = "|")))
-
-                      if (nrow(contextRows) > 0) {
-                        # Get the row with median absolute value
-                        absValues <- abs(contextRows[[numericCol]])
-                        medianVal <- median(absValues, na.rm = TRUE)
-                        medianIdx <- which.min(abs(absValues - medianVal))  # Closest to median
-                        selectedDf <- contextRows[medianIdx, , drop = FALSE]
-
-                        addedDf <- bind_rows(addedDf, selectedDf)
-                        df <- df %>% filter(context_classify !=cont)
-                      }
-                    }
-                    # Combine updated sQTL-specific rows back into df
-                    df <- bind_rows(df, addedDf)
-                  }
-                }
-                sumstatsDf[[extractInf]] <- df %>%
-                  filter(!str_detect(context_classify, "NE") & context_classify != 'NA')%>%
-                  group_by(context_classify) %>%
-                  slice_min(order_by = abs(.data[[numericCol]] - median(abs(.data[[numericCol]]), na.rm = TRUE)), n = 1, with_ties = FALSE) %>%
-                  ungroup()%>%
-                  rename(!!numericCol := !!sym(numericCol))
-                eventIDextracted <- sumstatsDf[[extractInf]]%>%pull(context)
-             } else if (is.null(eventIDextracted)){
-                    warning("Please provide 'z-score'")
-             } else {
-                 sumstatsDf[[extractInf]] <- df %>% filter(context%in%eventIDextracted)%>%
-                                        rename(!!numericCol := !!sym(numericCol))
-             }
-             resultDf <- sumstatsDf[[extractInf]] %>%
-                  select(-context) %>%
-                  rename(value = !!sym(numericCol)) %>%
-                  pivot_wider(names_from = context_classify, values_from = value) %>%
-                  mutate(
-                    variant_ID = numericCol,
-                    gene_ID = region
-                  ) %>%
-                 select(variant_ID, gene_ID, everything())
-                 resultListFormat[[cond]][[extractInf]]  <- resultListFormat[[cond]][[extractInf]]%>% rows_update(resultDf, by = c("variant_ID", "gene_ID"))
-     }
-  }
-}
-  # Handle "null" condition
-  if (cond%in%c("null","random") && region %in% signalDf$gene_ID) {
-    refDfFiltered <- signalDf %>% filter(gene_ID == region)
-    refPanel <- parse_variant_id(refDfFiltered$variant_ID %>% unique())
-
-    varIdx <- c()
-    variants <- c()
-    sumstatsDf <- list()
-    eventIDextracted <- list()
-    for (extractInf in extractInfs){
-         # Flatten the nested list
-         extractedMatrix <- mergeSumstatsMatrices(datList[[extractInf]], valueColumn = extractInf, refPanel = refPanel, idColumn = "variants", removeAnyMissing = FALSE)
-          if (is.null(extractedMatrix)||dim(extractedMatrix)[1]==0) return(resultListFormat)
-         out[[extractInf]] <- extractedMatrix
-          # Set variant order on first iteration
-          if (is.null(varIdx)&& is.null(variants)) {
-                varIdx <- 1:nrow(out[[extractInf]])
-                variants <- out[[extractInf]]$variants[varIdx]
-          }
-          numberIndex <- str_extract(colnames(out[[extractInf]]), "\\d+")[-1]
-          out[[extractInf]] <- out[[extractInf]][varIdx, , drop = FALSE]
-          rownames(out[[extractInf]]) <- variants
-          colnames(out[[extractInf]])[2:ncol(out[[extractInf]])] <- traitNames[as.integer(numberIndex)]
-          out[[extractInf]] <- out[[extractInf]][, -which(names(out[[extractInf]]) == "variants"), drop = FALSE]
-
-          for (k in 1: dim(out[[extractInf]])[1]){
-               df <- as.data.frame(t(out[[extractInf]][k,]))
-               df <- rownames_to_column(df, var = "context")
-
-              # Match context to tag
-               df <- df %>%
-                   mutate(context_classify = if (is.null(tagPatterns) || length(tagPatterns) == 0) {
-                     context
-                   } else {
-                     map_chr(context, function(ctx) {
-                       matched <- names(tagPatterns)[str_detect(ctx, tagPatterns)]
-                       if (length(matched) == 0) NA_character_ else matched[1]
-                     })
-                   })
-
-              numericCol <- colnames(df)[2]
-            if (extractInf == "z"){
-                sumstatsDf[[extractInf]] <- df %>%
-                          filter(!str_detect(context_classify, "NE") & context_classify != 'NA')
-                if(cond == "null"){
-                  sumstatsDf[[extractInf]] <- sumstatsDf[[extractInf]] %>%
-                        group_by(context_classify) %>%
-                        filter(
-                            !is.na(.data[[numericCol]]),
-                            if (any(str_detect(context_classify, "sQTL|pQTL|gpQTL"))) {
-                              abs(.data[[numericCol]]) < 2
-                            } else {
-                              TRUE
-                            }
-                          )%>%
-                         slice_min(
-                            order_by = abs(.data[[numericCol]] - median(abs(.data[[numericCol]]), na.rm = TRUE)),
-                            n = 1,
-                            with_ties = FALSE
-                          ) %>%
-                          ungroup() %>%
-                          rename(!!numericCol := !!sym(numericCol))
-                } else if (cond == "random") {
-                    sumstatsDf[[extractInf]] <-  sumstatsDf[[extractInf]] %>%
-                          group_by(context_classify) %>%
-                          slice_min(
-                            order_by = abs(.data[[numericCol]] - median(abs(.data[[numericCol]]), na.rm = TRUE)),
-                            n = 1,
-                            with_ties = FALSE
-                          ) %>%
-                          ungroup() %>%
-                          rename(!!numericCol := !!sym(numericCol))
-                }
-                eventIDextracted[[k]] <- sumstatsDf[[extractInf]]%>%pull(context)
-            }  else if (is.null(eventIDextracted)){
-                    warning("Please provide 'z-score'")
-            } else {
-                sumstatsDf[[extractInf]] <- df %>% filter(context%in%eventIDextracted[[k]])%>%
-                                        rename(!!numericCol := !!sym(numericCol))
-            }
-            resultDf <- sumstatsDf[[extractInf]] %>%
-                  select(-context) %>%
-                  rename(value = !!sym(numericCol)) %>%
-                  pivot_wider(names_from = context_classify, values_from = value) %>%
-                  mutate(
-                    variant_ID = numericCol,
-                    gene_ID = region
-                  ) %>%
-                 select(variant_ID, gene_ID, everything())
-            resultListFormat[[cond]][[extractInf]]  <- resultListFormat[[cond]][[extractInf]] %>% rows_update(resultDf, by = c("variant_ID", "gene_ID"))
-            }
-          }
-       }
-     return(resultListFormat)
-   }
 
             
-#' Extract Summary Statistics from Nested Data Structure
-#'
-#' @description
-#' Recursively searches a nested list to extract summary statistics (z, beta, or se)
-#' using `variantNames` and `sumstats`. Computes `z` if needed from `betahat` and `sebetahat`.
-#'
-#' @param data A nested list structure potentially containing `variantNames` and `sumstats`.
-#' @param extractInf Character. One of `"z"`, `"beta"`, or `"se"`.
-#' @param maxDepth Integer. Maximum depth to search within the list. Default is 3.
-#'
-#' @return A data.frame with columns `variants` and the requested summary statistic.
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' result <- extractFlattenSumstatsFromNested(nestedListObject, extractInf = "z")
-#' }
-
-extractFlattenSumstatsFromNested <- function(data, extractInf = "z", maxDepth = 3) {
-  # Validate input
-  if (!extractInf %in% c("z", "beta", "se")) {
-    stop("extractInf must be one of: 'z', 'beta', or 'se'")
-  }
-
-  # Internal recursive function
-  findNested <- function(element, currentDepth = 0) {
-    if (currentDepth >= maxDepth) {
-      message("Maximum search depth reached. Could not find 'variantNames' and 'sumstats' together.")
-      return(NULL)
-    }
-
-    if (is.list(element)) {
-      hasFm <- !is.null(element$finemappingEntry) && is(element$finemappingEntry, "FineMappingEntry")
-      hasSumstats <- "sumstats" %in% names(element)
-      if (hasSumstats && hasFm) {
-        variantNames <- getVariantIds(element$finemappingEntry)
-        sumstats <- element$sumstats
-
-        # Extract based on type
-        resultColumn <- switch(
-          extractInf,
-          "z" = {
-            if (all(c("betahat", "sebetahat") %in% names(sumstats))) {
-              sumstats$betahat / sumstats$sebetahat
-            } else if ("z" %in% names(sumstats)) {
-              sumstats$z
-            } else {
-              message("Cannot compute z: missing 'betahat' and 'sebetahat', and 'z' not available.")
-              return(NULL)
-            }
-          },
-          "beta" = {
-            if ("betahat" %in% names(sumstats)) {
-              sumstats$betahat
-            } else {
-              message("Missing 'betahat' for beta extraction.")
-              return(NULL)
-            }
-          },
-          "se" = {
-            if ("sebetahat" %in% names(sumstats)) {
-              sumstats$sebetahat
-            } else {
-              message("Missing 'sebetahat' for se extraction.")
-              return(NULL)
-            }
-          }
-        )
-
-        result <- data.frame(variants = variantNames)
-        result[[extractInf]] <- resultColumn
-
-        # Normalize variants to canonical format (with chr prefix)
-        result$variants <- normalizeVariantId(result$variants)
-
-        return(result)
-      }
-
-      # Recurse into nested elements
-      for (name in names(element)) {
-        result <- findNested(element[[name]], currentDepth + 1)
-        if (!is.null(result)) {
-          result$variants <- normalizeVariantId(result$variants)
-          return(result)
-        }
-      }
-    }
-
-    return(NULL)
-  }
-
-  # Start search
-  return(findNested(data))
-}
 
 # =============================================================================
 # Mash pairwise contrast functions
@@ -572,6 +176,8 @@ makePairwiseContrastCol <- function(pair, template) {
 #'   \code{mean_contrast_*}, \code{se_contrast_*}, \code{p_contrast_*} for
 #'   both deviation and pairwise contrasts. Returns NULL if fewer than 2
 #'   tested conditions.
+#' @importFrom stringr str_remove_all
+#' @importFrom utils combn
 #' @export
 fitMashContrast <- function(index, origMean, posteriorMean, posteriorVcov,
                                grouping = NULL) {
@@ -786,6 +392,8 @@ sanitizeMashData <- function(data) {
 #'     \item{I2}{Heterogeneity measure (proportion of variance due to
 #'       between-study variance), in [0, 1].}
 #'   }
+#' @importFrom tibble tibble
+#' @importFrom dplyr bind_rows
 #' @export
 metaAnalysisPerCell <- function(effectSizes, seValues,
                                    seCutoff = 0) {

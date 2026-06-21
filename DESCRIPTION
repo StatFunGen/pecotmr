@@ -138,3 +138,6 @@ Collate:
     'twasWeightsPipeline.R'
     'variantId.R'
     'vcfWriter.R'
+Depends: 
+    R (>= 3.5)
+LazyData: true

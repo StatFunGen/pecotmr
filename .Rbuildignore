@@ -8,3 +8,4 @@
 ^\.pixi
 ^.covrignore
 ^.claude
+^data-raw$
