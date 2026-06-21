@@ -8,7 +8,7 @@
 #'           fits (per-context / per-trait univariate SuSiE; joint
 #'           multi-trait or multi-context mvSuSiE; joint multi-trait
 #'           fSuSiE per context);
-#'     \item a \code{\link{MultiTaskQtlDataset}} which recurses through
+#'     \item a \code{\link{MultiStudyQtlDataset}} which recurses through
 #'           each embedded \code{QtlDataset} per study and processes
 #'           the optional embedded \code{QtlSumStats} via the
 #'           sumstat method;
@@ -32,7 +32,7 @@
 #'           variant of the same.}
 #'     \item{\code{mvsusie}}{\code{mvsusieR::mvsusie} on individual-
 #'           level input (requires multi-trait OR multi-context Y),
-#'           \code{mvsusieR::mvsusieRss} on sumstat input (requires
+#'           \code{mvsusieR::mvsusie_rss} on sumstat input (requires
 #'           multi-context within a single (study, trait) group).
 #'           Errors on \code{GwasSumStats} input.}
 #'     \item{\code{fsusie}}{\code{fsusieR::susiF} joint multi-trait fit
@@ -101,7 +101,7 @@
 #'         provenance is recorded on the sumstats' \code{qcInfo}.
 #' }
 #'
-#' @param data A \code{QtlDataset}, \code{MultiTaskQtlDataset},
+#' @param data A \code{QtlDataset}, \code{MultiStudyQtlDataset},
 #'   \code{QtlSumStats}, or \code{GwasSumStats}.
 #' @param methods Character vector of method tokens (any subset of
 #'   \code{c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")}).
@@ -129,6 +129,16 @@
 #'   purity. Default \code{0.8}.
 #' @param fineMappingResult Optional existing \code{FineMappingResult}
 #'   to use as a resume cache; tuples already present are not refit.
+#' @param jointSpecification Optional joint-fit specification (NULL by
+#'   default). When NULL, the pipeline runs the implicit multi-context /
+#'   multi-trait mvSuSiE / fSuSiE branches as before. When non-NULL, the
+#'   argument is parsed and validated via the joint-spec grammar
+#'   documented under \code{parseJointSpecification} (a character vector
+#'   of axes, or a list of \code{list(axes, scope)} specs); the
+#'   per-spec axis dispatcher implementation is in progress and a
+#'   non-NULL value currently errors with an informative message.
+#'   See the design notes in \code{R/jointSpecification.R} for the
+#'   accepted grammar.
 #' @param ldBlocks For \code{GwasSumStats} input only: an
 #'   \code{LdBlocks} object describing the LD-block partition. The
 #'   pipeline performs SuSiE-RSS fine-mapping per (study, ldBlock).
@@ -139,7 +149,7 @@
 #' @return A \code{\link{FineMappingResult}} collection keyed by
 #'   \code{(study, context, trait, method)}. The \code{ldSketch} slot
 #'   is set automatically: \code{NULL} for individual-level
-#'   (QtlDataset / all-individual-level MultiTaskQtlDataset) fits, the
+#'   (QtlDataset / all-individual-level MultiStudyQtlDataset) fits, the
 #'   input's \code{ldSketch} for RSS-derived fits.
 #' @export
 setGeneric("fineMappingPipeline",
@@ -151,11 +161,11 @@ setGeneric("fineMappingPipeline",
 # =============================================================================
 
 # `individualImpl`  : function-call symbol used when input is QtlDataset /
-#                     MultiTaskQtlDataset (NULL = not supported).
+#                     MultiStudyQtlDataset (NULL = not supported).
 # `sumstatImpl`     : function-call symbol used when input is QtlSumStats /
 #                     GwasSumStats (NULL = not supported).
 # `multivariate`    : requires a multi-trait or multi-context joint Y
-#                     (mvsusie / mvsusieRss / fsusie).
+#                     (mvsusie / mvsusie_rss / fsusie).
 # `gwasAllowed`     : whether the method is permitted on a GwasSumStats
 #                     input. Only the SuSiE-RSS family supports per-LD-block
 #                     GWAS fine-mapping.
@@ -189,7 +199,7 @@ setGeneric("fineMappingPipeline",
     unmappableEffects = "ash"),
   mvsusie = list(
     individualImpl    = "mvsusieR::mvsusie",
-    sumstatImpl       = "mvsusieR::mvsusieRss",
+    sumstatImpl       = "mvsusieR::mvsusie_rss",
     multivariate      = TRUE,
     gwasAllowed       = FALSE,
     unmappableEffects = NA_character_),
@@ -223,17 +233,56 @@ setGeneric("fineMappingPipeline",
 }
 
 
-# Enforce input-class / method compatibility. Thin wrapper over the
-# shared `.checkMethodCapabilities` helper (R/misc.R), passing the
-# fine-mapping capability table and the `mrmash` hard-rejection rule.
+# Enforce input-class / method compatibility against the fine-mapping
+# capability table. Hard-rejects `mrmash` (a TWAS-weight-oriented
+# method). Routes the input class through individual / sumstat / GWAS
+# branches and emits a single error listing every offending token.
 # @noRd
 .fmCheckMethodCapabilities <- function(tokens, inputKind) {
-  .checkMethodCapabilities(
-    tokens, inputKind,
-    caps = .fineMappingMethodCapabilities,
-    pipelineName = "fineMappingPipeline",
-    hardRejections = list(
-      mrmash = "mr.mash is a TWAS-weight-oriented method; use twasWeightsPipeline()"))
+  if (length(tokens) == 0L) return(invisible(NULL))
+  caps <- .fineMappingMethodCapabilities
+  unknown <- setdiff(tokens, names(caps))
+  if (length(unknown) > 0L) {
+    stop(sprintf(
+      "fineMappingPipeline: unknown method token(s): %s. Known tokens: %s.",
+      paste(unknown, collapse = ", "),
+      paste(names(caps), collapse = ", ")))
+  }
+  hardRejections <- list(
+    mrmash = "mr.mash is a TWAS-weight-oriented method; use twasWeightsPipeline()")
+  individualKinds <- c("QtlDataset", "MultiStudyQtlDataset")
+  bad <- character(0); reason <- character(0)
+  for (tk in tokens) {
+    info <- caps[[tk]]
+    if (tk %in% names(hardRejections)) {
+      bad <- c(bad, tk); reason <- c(reason, hardRejections[[tk]])
+      next
+    }
+    if (inputKind %in% individualKinds) {
+      if (is.null(info$individualImpl)) {
+        bad <- c(bad, tk)
+        reason <- c(reason, "is sumstat-only on this pipeline")
+      }
+    } else if (inputKind == "QtlSumStats") {
+      if (is.null(info$sumstatImpl)) {
+        bad <- c(bad, tk)
+        reason <- c(reason, "is individual-only (use a QtlDataset input)")
+      }
+    } else if (inputKind == "GwasSumStats") {
+      if (!isTRUE(info$gwasAllowed) || is.null(info$sumstatImpl)) {
+        bad <- c(bad, tk)
+        reason <- c(reason,
+          "is not supported on GwasSumStats (only the SuSiE-RSS family is)")
+      }
+    }
+  }
+  if (length(bad) > 0L) {
+    stop(sprintf(
+      "fineMappingPipeline: the following method(s) are not available for input class '%s': %s. %s.",
+      inputKind,
+      paste(unique(bad), collapse = ", "),
+      paste(sprintf("%s %s", bad, reason), collapse = "; ")))
+  }
 }
 
 
@@ -296,20 +345,30 @@ setGeneric("fineMappingPipeline",
 
 
 # Build a QtlFineMappingResult collection from per-tuple parallel vectors.
+# `jointStudies`, `jointContexts`, `jointTraits` are optional character
+# vectors (length matches `studies`) describing semicolon-joined joint
+# members for cross-study / cross-context / cross-trait joint fits; pass
+# `NULL` (default) to omit the column entirely.
 # @noRd
 .fmBuildQtlResult <- function(studies, contexts, traits, methods, entries,
-                              ldSketch = NULL) {
+                              jointStudies  = NULL,
+                              jointContexts = NULL,
+                              jointTraits   = NULL,
+                              ldSketch      = NULL) {
   if (length(entries) == 0L) {
     stop("fineMappingPipeline: no (study, context, trait, method) tuples ",
          "produced a fine-mapping result.")
   }
   QtlFineMappingResult(
-    study    = studies,
-    context  = contexts,
-    trait    = traits,
-    method   = methods,
-    entry    = entries,
-    ldSketch = ldSketch)
+    study         = studies,
+    context       = contexts,
+    trait         = traits,
+    method        = methods,
+    entry         = entries,
+    jointStudies  = jointStudies,
+    jointContexts = jointContexts,
+    jointTraits   = jointTraits,
+    ldSketch      = ldSketch)
 }
 
 # Build a GwasFineMappingResult collection from per-(study, method) vectors.
@@ -324,6 +383,22 @@ setGeneric("fineMappingPipeline",
     method   = methods,
     entry    = entries,
     ldSketch = ldSketch)
+}
+
+# Combine an optional joint column across two collections. Returns NULL
+# when neither input carries the column (so the rebuilt collection
+# omits it too); otherwise pads the missing side with NA_character_ so
+# both halves contribute a same-length character vector.
+# @noRd
+.combineJointCol <- function(a, b, colName) {
+  hasA <- colName %in% names(a)
+  hasB <- colName %in% names(b)
+  if (!hasA && !hasB) return(NULL)
+  aVals <- if (hasA) as.character(a[[colName]])
+           else rep(NA_character_, nrow(a))
+  bVals <- if (hasB) as.character(b[[colName]])
+           else rep(NA_character_, nrow(b))
+  c(aVals, bVals)
 }
 
 # Concatenate two FineMappingResult collections row-wise. Routes to the
@@ -341,12 +416,15 @@ setGeneric("fineMappingPipeline",
   }
   if (is(a, "QtlFineMappingResult")) {
     QtlFineMappingResult(
-      study    = c(as.character(a$study),   as.character(b$study)),
-      context  = c(as.character(a$context), as.character(b$context)),
-      trait    = c(as.character(a$trait),   as.character(b$trait)),
-      method   = c(as.character(a$method),  as.character(b$method)),
-      entry    = c(as.list(a$entry), as.list(b$entry)),
-      ldSketch = ldSketch)
+      study         = c(as.character(a$study),   as.character(b$study)),
+      context       = c(as.character(a$context), as.character(b$context)),
+      trait         = c(as.character(a$trait),   as.character(b$trait)),
+      method        = c(as.character(a$method),  as.character(b$method)),
+      entry         = c(as.list(a$entry), as.list(b$entry)),
+      jointStudies  = .combineJointCol(a, b, "jointStudies"),
+      jointContexts = .combineJointCol(a, b, "jointContexts"),
+      jointTraits   = .combineJointCol(a, b, "jointTraits"),
+      ldSketch      = ldSketch)
   } else {
     GwasFineMappingResult(
       study    = c(as.character(a$study),  as.character(b$study)),
@@ -487,20 +565,45 @@ setGeneric("fineMappingPipeline",
 setMethod("fineMappingPipeline", "QtlDataset",
   function(data,
            methods,
-           contexts          = NULL,
-           traitId           = NULL,
-           region            = NULL,
-           cisWindow         = NULL,
-           addSusieInf       = TRUE,
-           coverage          = 0.95,
-           secondaryCoverage = c(0.7, 0.5),
-           signalCutoff      = 0.025,
-           minAbsCorr        = 0.8,
-           fineMappingResult = NULL,
-           verbose           = 1,
+           contexts           = NULL,
+           traitId            = NULL,
+           region             = NULL,
+           cisWindow          = NULL,
+           jointSpecification = NULL,
+           addSusieInf        = TRUE,
+           coverage           = 0.95,
+           secondaryCoverage  = c(0.7, 0.5),
+           signalCutoff       = 0.025,
+           minAbsCorr         = 0.8,
+           fineMappingResult  = NULL,
+           naAction           = c("drop", "impute"),
+           verbose            = 1,
            ...) {
+    naAction <- match.arg(naAction)
+    parsedJointSpec <- parseJointSpecification(jointSpecification, data)
     tokens <- .fmNormalizeMethods(methods)
     .fmCheckMethodCapabilities(tokens, "QtlDataset")
+
+    # Explicit jointSpecification path: run the per-spec axis dispatcher for
+    # the multi-axis methods (mvsusie / fsusie) and remove them from the
+    # per-tuple loop's token set so they aren't fitted twice. Non-joint
+    # methods continue through the existing per-(context, trait) iteration
+    # below.
+    jointResult <- NULL
+    if (length(parsedJointSpec) > 0L) {
+      jointResult <- .fmDispatchJointSpecsQtlDataset(
+        parsedJointSpec, data, intersect(tokens, c("mvsusie", "fsusie")),
+        contexts, traitId, cisWindow,
+        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose)
+      tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
+      if (length(tokens) == 0L) {
+        if (is.null(jointResult))
+          stop("fineMappingPipeline(QtlDataset): no joint fits produced. ",
+               "Check that the jointSpecification scope intersects the ",
+               "available studies / contexts / traits.")
+        return(jointResult)
+      }
+    }
 
     study <- getStudy(data)
     allCtx <- getContexts(data)
@@ -518,7 +621,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
     perCtxTraits <- vector("list", length(useCtx))
     names(perCtxTraits) <- useCtx
     for (ctx in useCtx) {
-      se <- getPhenotypes(data, contexts = ctx)[[ctx]]
+      se <- getPhenotypes(data, contexts = ctx)
       ids <- rownames(se)
       if (!is.null(traitId)) {
         ids <- intersect(ids, traitId)
@@ -588,12 +691,11 @@ setMethod("fineMappingPipeline", "QtlDataset",
           }
           if (length(toRun) == 0L) next
 
+          Y <- getResidualizedPhenotypes(
+            data, contexts = ctx, traitId = tid, naAction = naAction)
           X <- getResidualizedGenotypes(
             data, contexts = ctx, traitId = tid,
-            cisWindow = cisWindow)
-          Yres <- getResidualizedPhenotypes(
-            data, contexts = ctx, traitId = tid)
-          Y <- Yres[[ctx]]
+            cisWindow = cisWindow, samples = rownames(Y))
           common <- intersect(rownames(X), rownames(Y))
           if (length(common) < 2L) {
             stop(sprintf(
@@ -681,14 +783,15 @@ setMethod("fineMappingPipeline", "QtlDataset",
           # context but getResidualizedPhenotypes already residualises.
           contextsHere <- job$contexts
           # Use the union of per-context cis-windows for variant extraction.
+          Yres <- getResidualizedPhenotypes(
+            data, contexts = contextsHere, traitId = tid, naAction = naAction)
+          if (length(contextsHere) == 1L)
+            Yres <- setNames(list(Yres), contextsHere)
+          commonSamples <- Reduce(intersect, lapply(Yres, rownames))
           X <- getResidualizedGenotypes(
             data, contexts = contextsHere, traitId = tid,
-            cisWindow = cisWindow)
-          Yres <- getResidualizedPhenotypes(
-            data, contexts = contextsHere, traitId = tid)
-          commonSamples <- Reduce(intersect,
-            c(list(rownames(X)),
-              lapply(Yres, rownames)))
+            cisWindow = cisWindow, samples = commonSamples)
+          commonSamples <- intersect(commonSamples, rownames(X))
           if (length(commonSamples) < 2L) {
             stop("fineMappingPipeline(QtlDataset, mvsusie multi-context): ",
                  "insufficient shared samples across selected contexts.")
@@ -699,13 +802,6 @@ setMethod("fineMappingPipeline", "QtlDataset",
             colnames(ym) <- ctx
             ym
           }))
-          keep <- stats::complete.cases(Y)
-          if (sum(keep) < 2L) {
-            stop("fineMappingPipeline(QtlDataset, mvsusie multi-context): ",
-                 "too few complete-Y subjects across contexts.")
-          }
-          X <- X[keep, , drop = FALSE]
-          Y <- Y[keep, , drop = FALSE]
 
           # Resume cache: every (study, ctx, tid, mvsusie) row.
           allCached <- TRUE
@@ -724,7 +820,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
 
           if (verbose >= 1)
             message(sprintf("Fitting mvsusie (multi-context) for trait='%s' ...", tid))
-          fit <- mvsusieR::mvsusie(
+          fit <- fitMvsusie(
             X = X, Y = Y,
             prior_variance = mvsusieR::create_mixture_prior(R = ncol(Y)),
             coverage = coverage)
@@ -760,12 +856,11 @@ setMethod("fineMappingPipeline", "QtlDataset",
             next
           }
 
+          Y <- getResidualizedPhenotypes(
+            data, contexts = ctx, traitId = traits, naAction = naAction)
           X <- getResidualizedGenotypes(
             data, contexts = ctx, traitId = traits,
-            cisWindow = cisWindow)
-          Yres <- getResidualizedPhenotypes(
-            data, contexts = ctx, traitId = traits)
-          Y <- Yres[[ctx]]
+            cisWindow = cisWindow, samples = rownames(Y))
           common <- intersect(rownames(X), rownames(Y))
           if (length(common) < 2L) {
             stop(sprintf(
@@ -774,16 +869,10 @@ setMethod("fineMappingPipeline", "QtlDataset",
           }
           X <- X[common, , drop = FALSE]
           Y <- Y[common, , drop = FALSE]
-          keep <- stats::complete.cases(Y)
-          if (sum(keep) < 2L) {
-            stop("fineMappingPipeline(QtlDataset, mvsusie multi-trait): too few complete-Y subjects.")
-          }
-          X <- X[keep, , drop = FALSE]
-          Y <- Y[keep, , drop = FALSE]
 
           if (verbose >= 1)
             message(sprintf("Fitting mvsusie (multi-trait) for context='%s' ...", ctx))
-          fit <- mvsusieR::mvsusie(
+          fit <- fitMvsusie(
             X = X, Y = Y,
             prior_variance = mvsusieR::create_mixture_prior(R = ncol(Y)),
             coverage = coverage)
@@ -831,28 +920,21 @@ setMethod("fineMappingPipeline", "QtlDataset",
           next
         }
 
+        Y <- getResidualizedPhenotypes(
+          data, contexts = ctx, traitId = traits, naAction = naAction)
         X <- getResidualizedGenotypes(
           data, contexts = ctx, traitId = traits,
-          cisWindow = cisWindow)
-        Yres <- getResidualizedPhenotypes(
-          data, contexts = ctx, traitId = traits)
-        Y <- Yres[[ctx]]
+          cisWindow = cisWindow, samples = rownames(Y))
         common <- intersect(rownames(X), rownames(Y))
         if (length(common) < 2L) {
           stop(sprintf("fineMappingPipeline(QtlDataset, fsusie): too few shared samples in context '%s'.", ctx))
         }
         X <- X[common, , drop = FALSE]
         Y <- Y[common, , drop = FALSE]
-        keep <- stats::complete.cases(Y)
-        if (sum(keep) < 2L) {
-          stop(sprintf("fineMappingPipeline(QtlDataset, fsusie): too few complete-Y subjects in context '%s'.", ctx))
-        }
-        X <- X[keep, , drop = FALSE]
-        Y <- Y[keep, , drop = FALSE]
 
         # Per-trait genomic positions for the wavelet model. Use the
         # midpoint of each trait's rowRanges in this context.
-        se <- getPhenotypes(data, contexts = ctx, traitId = traits)[[ctx]]
+        se <- getPhenotypes(data, contexts = ctx, traitId = traits)
         rr <- SummarizedExperiment::rowRanges(se)
         # Reorder rr to the column order of Y.
         rrIds <- rownames(se)
@@ -866,7 +948,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
         if (verbose >= 1)
           message(sprintf("Fitting fsusie for context='%s' (multi-trait, %d traits) ...",
                           ctx, length(traits)))
-        fit <- fsusieR::susiF(X = X, Y = Y, pos = pos)
+        fit <- fitFsusie(X = X, Y = Y, pos = pos)
         fit <- .setFinemappingFitClass(fit, "fsusie")
         entry <- .fmPostprocessOne(
           fit = fit, method = "fsusie",
@@ -882,34 +964,68 @@ setMethod("fineMappingPipeline", "QtlDataset",
       }
     }
 
-    .fmBuildQtlResult(rowStudy, rowContext, rowTrait, rowMethod, rowEntries,
-                  ldSketch = NULL)
+    perTupleResult <- if (length(rowEntries) > 0L)
+      .fmBuildQtlResult(rowStudy, rowContext, rowTrait, rowMethod, rowEntries,
+                        ldSketch = NULL)
+      else NULL
+
+    if (is.null(jointResult)) {
+      if (is.null(perTupleResult))
+        stop("fineMappingPipeline: no (study, context, trait, method) tuples ",
+             "produced a fine-mapping result.")
+      return(perTupleResult)
+    }
+    if (is.null(perTupleResult)) return(jointResult)
+    .rbindFineMappingResult(perTupleResult, jointResult, ldSketch = NULL)
   })
 
 
 # =============================================================================
-# MultiTaskQtlDataset method
+# MultiStudyQtlDataset method
 # =============================================================================
 
 #' @rdname fineMappingPipeline
 #' @export
-setMethod("fineMappingPipeline", "MultiTaskQtlDataset",
+setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
   function(data,
            methods,
-           contexts          = NULL,
-           traitId           = NULL,
-           region            = NULL,
-           cisWindow         = NULL,
-           addSusieInf       = TRUE,
-           coverage          = 0.95,
-           secondaryCoverage = c(0.7, 0.5),
-           signalCutoff      = 0.025,
-           minAbsCorr        = 0.8,
-           fineMappingResult = NULL,
-           verbose           = 1,
+           contexts           = NULL,
+           traitId            = NULL,
+           region             = NULL,
+           cisWindow          = NULL,
+           jointSpecification = NULL,
+           addSusieInf        = TRUE,
+           coverage           = 0.95,
+           secondaryCoverage  = c(0.7, 0.5),
+           signalCutoff       = 0.025,
+           minAbsCorr         = 0.8,
+           fineMappingResult  = NULL,
+           naAction           = c("drop", "impute"),
+           verbose            = 1,
            ...) {
+    naAction <- match.arg(naAction)
+    parsedJointSpec <- parseJointSpecification(jointSpecification, data)
     tokens <- .fmNormalizeMethods(methods)
-    .fmCheckMethodCapabilities(tokens, "MultiTaskQtlDataset")
+    .fmCheckMethodCapabilities(tokens, "MultiStudyQtlDataset")
+
+    # Explicit jointSpecification path: run the per-component, per-spec
+    # joint dispatcher and remove joint-eligible methods from the
+    # per-tuple recursion below.
+    jointResult <- NULL
+    if (length(parsedJointSpec) > 0L) {
+      jointResult <- .fmDispatchJointSpecsMultiStudy(
+        parsedJointSpec, data, intersect(tokens, c("mvsusie", "fsusie")),
+        contexts, traitId, cisWindow,
+        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose)
+      methods <- setdiff(methods, c("mvsusie", "fsusie"))
+      tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
+      if (length(tokens) == 0L) {
+        if (is.null(jointResult))
+          stop("fineMappingPipeline(MultiStudyQtlDataset): no joint fits produced. ",
+               "Check that the jointSpecification scope intersects the available data.")
+        return(jointResult)
+      }
+    }
 
     qtlDatasets <- getQtlDatasets(data)
     sumStats <- getSumStats(data)
@@ -919,55 +1035,70 @@ setMethod("fineMappingPipeline", "MultiTaskQtlDataset",
     for (qdName in names(qtlDatasets)) {
       qd <- qtlDatasets[[qdName]]
       res <- fineMappingPipeline(
-        data              = qd,
-        methods           = methods,
-        contexts          = contexts,
-        traitId           = traitId,
-        region            = region,
-        cisWindow         = cisWindow,
-        addSusieInf       = addSusieInf,
-        coverage          = coverage,
-        secondaryCoverage = secondaryCoverage,
-        signalCutoff      = signalCutoff,
-        minAbsCorr        = minAbsCorr,
-        fineMappingResult = fineMappingResult,
-        verbose           = verbose,
+        data               = qd,
+        methods            = methods,
+        contexts           = contexts,
+        traitId            = traitId,
+        region             = region,
+        cisWindow          = cisWindow,
+        jointSpecification = NULL,
+        addSusieInf        = addSusieInf,
+        coverage           = coverage,
+        secondaryCoverage  = secondaryCoverage,
+        signalCutoff       = signalCutoff,
+        minAbsCorr         = minAbsCorr,
+        fineMappingResult  = fineMappingResult,
+        naAction           = naAction,
+        verbose            = verbose,
         ...)
       out <- if (is.null(out)) res else .rbindFineMappingResult(out, res, ldSketch = NULL)
     }
 
     if (!is.null(sumStats)) {
       ssRes <- fineMappingPipeline(
-        data              = sumStats,
-        methods           = methods,
-        contexts          = contexts,
-        traitId           = traitId,
-        addSusieInf       = addSusieInf,
-        coverage          = coverage,
-        secondaryCoverage = secondaryCoverage,
-        signalCutoff      = signalCutoff,
-        minAbsCorr        = minAbsCorr,
-        fineMappingResult = fineMappingResult,
-        verbose           = verbose,
+        data               = sumStats,
+        methods            = methods,
+        contexts           = contexts,
+        traitId            = traitId,
+        jointSpecification = NULL,
+        addSusieInf        = addSusieInf,
+        coverage           = coverage,
+        secondaryCoverage  = secondaryCoverage,
+        signalCutoff       = signalCutoff,
+        minAbsCorr         = minAbsCorr,
+        fineMappingResult  = fineMappingResult,
+        verbose            = verbose,
         ...)
       embeddedLd <- getLdSketch(ssRes)
       out <- if (is.null(out)) ssRes else .rbindFineMappingResult(out, ssRes,
         ldSketch = embeddedLd)
     }
 
-    if (is.null(out)) {
-      stop("fineMappingPipeline(MultiTaskQtlDataset): no entries produced a result.")
+    perTupleResult <- if (!is.null(out)) {
+      # ldSketch: NULL if all studies were individual-level; the embedded
+      # sumStats's ldSketch otherwise.
+      QtlFineMappingResult(
+        study         = as.character(out$study),
+        context       = as.character(out$context),
+        trait         = as.character(out$trait),
+        method        = as.character(out$method),
+        entry         = as.list(out$entry),
+        jointStudies  = if ("jointStudies"  %in% names(out))
+                          as.character(out$jointStudies)  else NULL,
+        jointContexts = if ("jointContexts" %in% names(out))
+                          as.character(out$jointContexts) else NULL,
+        jointTraits   = if ("jointTraits"   %in% names(out))
+                          as.character(out$jointTraits)   else NULL,
+        ldSketch      = embeddedLd)
+    } else NULL
+
+    if (is.null(jointResult)) {
+      if (is.null(perTupleResult))
+        stop("fineMappingPipeline(MultiStudyQtlDataset): no entries produced a result.")
+      return(perTupleResult)
     }
-    # ldSketch: NULL if all studies were individual-level; the embedded
-    # sumStats's ldSketch otherwise. MultiTaskQtlDataset always produces
-    # a QtlFineMappingResult since its constituents are QTL-keyed.
-    QtlFineMappingResult(
-      study    = as.character(out$study),
-      context  = as.character(out$context),
-      trait    = as.character(out$trait),
-      method   = as.character(out$method),
-      entry    = as.list(out$entry),
-      ldSketch = embeddedLd)
+    if (is.null(perTupleResult)) return(jointResult)
+    .rbindFineMappingResult(perTupleResult, jointResult, ldSketch = embeddedLd)
   })
 
 
@@ -980,19 +1111,36 @@ setMethod("fineMappingPipeline", "MultiTaskQtlDataset",
 setMethod("fineMappingPipeline", "QtlSumStats",
   function(data,
            methods,
-           contexts          = NULL,
-           traitId           = NULL,
-           addSusieInf       = TRUE,
-           coverage          = 0.95,
-           secondaryCoverage = c(0.7, 0.5),
-           signalCutoff      = 0.025,
-           minAbsCorr        = 0.8,
-           fineMappingResult = NULL,
-           verbose           = 1,
+           contexts           = NULL,
+           traitId            = NULL,
+           jointSpecification = NULL,
+           addSusieInf        = TRUE,
+           coverage           = 0.95,
+           secondaryCoverage  = c(0.7, 0.5),
+           signalCutoff       = 0.025,
+           minAbsCorr         = 0.8,
+           fineMappingResult  = NULL,
+           verbose            = 1,
            ...) {
     .fmAssertQcd(data)
+    parsedJointSpec <- parseJointSpecification(jointSpecification, data)
     tokens <- .fmNormalizeMethods(methods)
     .fmCheckMethodCapabilities(tokens, "QtlSumStats")
+
+    jointResult <- NULL
+    if (length(parsedJointSpec) > 0L) {
+      jointResult <- .fmDispatchJointSpecsQtlSumStats(
+        parsedJointSpec, data, intersect(tokens, "mvsusie"),
+        contexts, traitId,
+        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose)
+      tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
+      if (length(tokens) == 0L) {
+        if (is.null(jointResult))
+          stop("fineMappingPipeline(QtlSumStats): no joint fits produced. ",
+               "Check that the jointSpecification scope intersects the available data.")
+        return(jointResult)
+      }
+    }
 
     studyCol   <- as.character(data$study)
     contextCol <- as.character(data$context)
@@ -1153,7 +1301,7 @@ setMethod("fineMappingPipeline", "QtlSumStats",
         if (verbose >= 1)
           message(sprintf("Fitting mvsusie (RSS) for (study='%s', trait='%s', %d contexts) ...",
                           st, tr, length(ctxNames)))
-        fit <- mvsusieR::mvsusieRss(
+        fit <- fitMvsusieRss(
           Z = Z, R = ldMat, N = as.numeric(stats::median(nVec)),
           prior_variance = mvsusieR::create_mixture_prior(R = ncol(Z)),
           coverage = coverage)
@@ -1172,8 +1320,17 @@ setMethod("fineMappingPipeline", "QtlSumStats",
       }
     }
 
-    .fmBuildQtlResult(rowStudy, rowContext, rowTrait, rowMethod, rowEntries,
-                  ldSketch = ldSketch)
+    perTupleResult <- if (length(rowEntries) > 0L)
+      .fmBuildQtlResult(rowStudy, rowContext, rowTrait, rowMethod, rowEntries,
+                        ldSketch = ldSketch)
+      else NULL
+    if (is.null(jointResult)) {
+      if (is.null(perTupleResult))
+        stop("fineMappingPipeline(QtlSumStats): no entries produced a result.")
+      return(perTupleResult)
+    }
+    if (is.null(perTupleResult)) return(jointResult)
+    .rbindFineMappingResult(perTupleResult, jointResult, ldSketch = ldSketch)
   })
 
 
@@ -1293,7 +1450,7 @@ setMethod("fineMappingPipeline", "GwasSumStats",
 setMethod("fineMappingPipeline", "ANY",
   function(data, ...) {
     stop("fineMappingPipeline does not accept inputs of class '",
-         class(data)[[1L]], "'. Pass a QtlDataset, MultiTaskQtlDataset, ",
+         class(data)[[1L]], "'. Pass a QtlDataset, MultiStudyQtlDataset, ",
          "QtlSumStats, or GwasSumStats. Use summaryStatsQc() on SumStats ",
          "inputs first.")
   })

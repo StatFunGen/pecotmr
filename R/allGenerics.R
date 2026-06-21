@@ -2,7 +2,6 @@
 #' @description All S4 generic function definitions for pecotmr.
 #' @name pecotmr-generics
 #' @keywords internal
-#' @include allClasses.R
 #' @importFrom methods setGeneric
 NULL
 
@@ -177,13 +176,13 @@ setGeneric("getVarY", function(x, ...) standardGeneric("getVarY"))
 #'       per-variant \code{GRanges} of summary statistics for one entry,
 #'       selected by its identity tuple (\code{study} for GWAS;
 #'       \code{study}, \code{context}, \code{trait} for QTL).}
-#'     \item{For \code{MultiTaskQtlDataset}}{Returns the embedded
+#'     \item{For \code{MultiStudyQtlDataset}}{Returns the embedded
 #'       \code{QtlSumStats} collection (the summary-statistic-only
 #'       studies), or \code{NULL} when absent. No selection arguments
 #'       are accepted in this case.}
 #'   }
 #' @param x A \code{GwasSumStats}, \code{QtlSumStats}, or
-#'   \code{MultiTaskQtlDataset} object.
+#'   \code{MultiStudyQtlDataset} object.
 #' @param ... Class-specific selection arguments (see above).
 #' @return A \code{GRanges}, a \code{QtlSumStats}, or \code{NULL}.
 #' @export
@@ -191,8 +190,8 @@ setGeneric("getSumStats", function(x, ...) standardGeneric("getSumStats"))
 
 #' @title Get the Embedded QtlDataset List
 #' @description Return the named list of \code{QtlDataset} objects
-#'   carried by a \code{MultiTaskQtlDataset}.
-#' @param x A \code{MultiTaskQtlDataset} object.
+#'   carried by a \code{MultiStudyQtlDataset}.
+#' @param x A \code{MultiStudyQtlDataset} object.
 #' @return A named list of \code{QtlDataset} objects.
 #' @export
 setGeneric("getQtlDatasets",
@@ -297,6 +296,49 @@ setGeneric("getPhenotypes", function(x, ...) standardGeneric("getPhenotypes"))
 # FineMappingResult accessor generics
 # =============================================================================
 
+#' @title Get a Single Fine-Mapping Entry
+#' @description Return the \code{FineMappingEntry} for one
+#'   \code{(study, context, trait, method)} row of a
+#'   \code{FineMappingResult} collection.
+#' @param x A \code{FineMappingResult} object.
+#' @param study,context,trait,method Single character identifiers. All
+#'   required when the collection has more than one row; optional when
+#'   the collection has a single row.
+#' @return A \code{FineMappingEntry} object.
+#' @export
+setGeneric("getFineMappingResult",
+  function(x, study = NULL, context = NULL, trait = NULL, method = NULL)
+    standardGeneric("getFineMappingResult"))
+
+#' @title Renormalize Fine-Mapping PIPs to a Variant Subset
+#' @description Re-derive a \code{FineMappingEntry}'s PIPs (and the
+#'   \code{topLoci} table) after restricting to a kept variant subset.
+#'   For each effect the \code{lbf_variable} row is subset to the kept
+#'   variants, renormalized via \code{lbfToAlpha()}, and the per-variant
+#'   PIPs are recomputed as \code{1 - prod_l(1 - alpha[l, p])}.
+#'
+#'   The two scenarios this supports:
+#'   \itemize{
+#'     \item The user declined to impute missing variants in a GWAS
+#'           \code{SumStats}, so a downstream fine-mapping result needs
+#'           PIPs restricted to the GWAS-covered intersection.
+#'     \item Colocalization between a GWAS \code{FineMappingResult} and a
+#'           QTL \code{FineMappingResult} computed on different variant
+#'           sets — the GWAS PIPs (or QTL PIPs) get renormalized to the
+#'           common variant set.
+#'   }
+#'
+#' @param x A \code{FineMappingEntry} or \code{FineMappingResultBase}.
+#' @param keepVariants Character vector of variant IDs to keep. Intersected
+#'   with the entry's own \code{variantIds}; an empty intersection raises
+#'   an error.
+#' @param ... Future expansion.
+#' @return The same flavour of object with PIPs renormalized on the kept
+#'   subset.
+#' @export
+setGeneric("adjustPips",
+  function(x, keepVariants, ...) standardGeneric("adjustPips"))
+
 #' @title Get PIP Values
 #' @description Extract posterior inclusion probabilities from a single
 #'   \code{FineMappingEntry} or from one entry of a
@@ -325,12 +367,18 @@ setGeneric("getVariantNames",
   function(x, ...) standardGeneric("getVariantNames"))
 
 #' @title Get Top Loci
-#' @description Extract the top-loci data.frame.
+#' @description Extract the top-loci payload as either a
+#'   \code{data.frame} (default, the on-disk shape) or a \code{GRanges}
+#'   (parsed from the \code{variant_id} \code{chr:pos:A2:A1} encoding,
+#'   with the remaining columns carried into \code{mcols}).
 #' @param x A \code{FineMappingEntry} or \code{FineMappingResult}.
+#' @param type One of \code{"data.frame"} (default) or \code{"GRanges"}.
 #' @param ... Class-specific selection arguments.
-#' @return A data.frame of top loci.
+#' @return A \code{data.frame} or a \code{GRanges}.
 #' @export
-setGeneric("getTopLoci", function(x, ...) standardGeneric("getTopLoci"))
+setGeneric("getTopLoci",
+  function(x, type = c("data.frame", "GRanges"), ...)
+    standardGeneric("getTopLoci"))
 
 #' @title Get Credible Sets
 #' @description Extract credible set assignments at the requested coverage.

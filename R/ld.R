@@ -57,6 +57,27 @@ extractFilePaths <- function(genomicData, intersectionRows, columnToExtract) {
   genomicData[[columnToExtract]][idx]
 }
 
+# Internal: resolve a sidecar file path declared in an LD-meta TSV.
+# Paths in the TSV's `path` column are conventionally written relative
+# to the TSV's own directory, not the analysis CWD; try the path as
+# given first, then `dirname(ldReferenceMetaFile)/<path>`, then the
+# manifest itself as a fallback.
+# @noRd
+.findValidFilePath <- function(referenceFilePath, targetFilePath) {
+  if (file.exists(targetFilePath)) return(targetFilePath)
+  targetFullPath <- file.path(dirname(referenceFilePath), targetFilePath)
+  if (file.exists(targetFullPath)) return(targetFullPath)
+  if (file.exists(referenceFilePath)) return(referenceFilePath)
+  stop(sprintf(
+    "Both reference and target file paths do not work. Tried paths: '%s' and '%s'",
+    referenceFilePath, targetFullPath))
+}
+
+# Vectorised .findValidFilePath over a vector of target paths.
+# @noRd
+.findValidFilePaths <- function(referenceFilePath, targetFilePaths)
+  sapply(targetFilePaths, function(x) .findValidFilePath(referenceFilePath, x))
+
 #' Find LD blocks overlapping a query region from a metadata TSV file.
 #'
 #' @param ldReferenceMetaFile TSV with columns chrom, start, end, path.
@@ -102,9 +123,9 @@ getRegionalLdMeta <- function(ldReferenceMetaFile, region, completeCoverageRequi
   }
 
   # Extract file paths
-  ldPaths <- findValidFilePaths(ldReferenceMetaFile, extractFilePaths(genomicData, intersectionRows, "LD_file_path"))
+  ldPaths <- .findValidFilePaths(ldReferenceMetaFile, extractFilePaths(genomicData, intersectionRows, "LD_file_path"))
   bimPaths <- if ("bim_file_path" %in% names(genomicData)) {
-    findValidFilePaths(ldReferenceMetaFile, extractFilePaths(genomicData, intersectionRows, "bim_file_path"))
+    .findValidFilePaths(ldReferenceMetaFile, extractFilePaths(genomicData, intersectionRows, "bim_file_path"))
   } else {
     NULL
   }
@@ -554,7 +575,7 @@ loadLdFromGenotype <- function(genotypePath, region,
 # Internal: assert that two `GenotypeHandle` LD sketches describe exactly the
 # same reference panel (same snpInfo: SNP, CHR, BP, A1, A2, in the same
 # order; same sampleIds). Shared by causalInferencePipeline, colocPipeline,
-# qtlEnrichmentPipeline, ctwasPipeline, enlocPipeline, and
+# qtlEnrichmentPipeline, ctwasPipeline, and
 # colocboostPipeline.
 #
 # NULL handling:
@@ -1578,3 +1599,384 @@ ldClumpByScore <- function(X, score, chr, pos, r2 = 0.2,
   }
   keep
 }
+
+
+# =============================================================================
+# Block-wise LD loaders
+# -----------------------------------------------------------------------------
+# High-level helpers that sit on top of `loadLdMatrix` / `processLdMatrix`
+# to retrieve per-block LD or genotype matrices on demand. Used by
+# downstream pipelines (cTWAS, etc.) that need to walk many LD blocks
+# without materializing them all in memory at once.
+# =============================================================================
+
+#' Extract the LD or genotype matrix from an LdData S4 object.
+#' @param ld An LdData object.
+#' @param wantGenotype Logical; if TRUE, extract the genotype matrix
+#'   (via \code{getGenotypes()}).
+#' @return A matrix.
+#' @noRd
+extractLdMatrix <- function(ld, wantGenotype = FALSE) {
+  if (!is(ld, "LdData")) stop("ld must be an LdData object")
+  if (wantGenotype && hasGenotypes(ld)) {
+    return(getGenotypes(ld))
+  }
+  getCorrelation(ld)
+}
+
+#' Create an LD loader for on-demand block-wise LD retrieval
+#'
+#' Constructs a loader function that retrieves per-block LD matrices on
+#' demand. This avoids loading all blocks into memory simultaneously,
+#' which is critical for genome-wide analyses with hundreds of blocks.
+#'
+#' Four modes are supported:
+#'
+#' \describe{
+#'   \item{list mode (R)}{Pre-loaded list of LD correlation matrices.
+#'     Simple but uses more memory. Set \code{R_list}.}
+#'   \item{list mode (X)}{Pre-loaded list of genotype matrices (n x p_g).
+#'     Set \code{X_list}.}
+#'   \item{region mode}{Loads LD from a pecotmr metadata TSV file on the fly
+#'     via \code{\link{loadLdMatrix}}. Memory-efficient for large datasets.
+#'     Set \code{ld_meta_path} and \code{regions}.}
+#'   \item{ldInfo mode}{Loads pre-computed LD blocks from \code{.cor.xz}
+#'     files listed in an \code{ldInfo} data.frame (as returned by
+#'     cTWAS meta-data utilities). Set \code{ldInfo}.}
+#' }
+#'
+#' @param rList List of G precomputed LD correlation matrices (p_g x p_g).
+#' @param xList List of G genotype matrices (n x p_g).
+#' @param ldMetaPath Path to a pecotmr LD metadata TSV file (as used by
+#'   \code{\link{loadLdMatrix}}).
+#' @param regions Character vector of G region strings (e.g.,
+#'   \code{"chr22:17238266-19744294"}). Required when \code{ldMetaPath}
+#'   is used.
+#' @param ldInfo A data.frame with column \code{LD_file} (paths to
+#'   genotype files or \code{.cor.xz} LD matrix files) and optionally
+#'   \code{SNP_file} (paths to companion \code{.bim} files for pre-computed
+#'   blocks; defaults to \code{paste0(LD_file, ".bim")} if absent).
+#'   Genotype paths can be PLINK2 prefixes, PLINK1 prefixes, VCF files,
+#'   or GDS files. As returned by cTWAS meta-data utilities.
+#' @param returnGenotype Logical. When using region mode, return the
+#'   genotype matrix X (\code{TRUE}) or LD correlation R (\code{FALSE},
+#'   default).
+#' @param maxVariants Integer or \code{NULL}. If set, randomly subsample
+#'   blocks larger than this to control memory usage.
+#'
+#' @return A function \code{loader(g)} that, given a block index \code{g},
+#'   returns the corresponding LD matrix or genotype matrix.
+#'
+#' @examples
+#' # List mode with pre-computed LD
+#' R1 <- diag(10)
+#' R2 <- diag(15)
+#' loader <- ldLoader(rList = list(R1, R2))
+#' loader(1)  # returns R1
+#' loader(2)  # returns R2
+#'
+#' @export
+ldLoader <- function(rList = NULL, xList = NULL,
+                     ldMetaPath = NULL, regions = NULL,
+                     ldInfo = NULL,
+                     returnGenotype = FALSE,
+                     maxVariants = NULL) {
+  # Validate: exactly one source
+  nSources <- sum(!is.null(rList), !is.null(xList),
+                  !is.null(ldMetaPath), !is.null(ldInfo))
+  if (nSources != 1)
+    stop("Provide exactly one of rList, xList, ldMetaPath, or ldInfo.")
+
+  if (!is.null(rList)) {
+    # List mode (R matrices)
+    loader <- function(g) {
+      R <- rList[[g]]
+      if (!is.null(maxVariants) && ncol(R) > maxVariants) {
+        keep <- sort(sample(ncol(R), maxVariants))
+        R <- R[keep, keep]
+      }
+      R
+    }
+  } else if (!is.null(xList)) {
+    # List mode (genotype matrices)
+    loader <- function(g) {
+      X <- xList[[g]]
+      if (!is.null(maxVariants) && ncol(X) > maxVariants) {
+        keep <- sort(sample(ncol(X), maxVariants))
+        X <- X[, keep]
+      }
+      X
+    }
+  } else if (!is.null(ldMetaPath)) {
+    # Region mode: load on the fly via loadLdMatrix()
+    if (is.null(regions))
+      stop("'regions' is required when using ldMetaPath.")
+
+    loader <- function(g) {
+      ld <- loadLdMatrix(ldMetaPath, region = regions[g],
+                         returnGenotype = returnGenotype)
+      mat <- extractLdMatrix(ld, wantGenotype = returnGenotype)
+      if (!is.null(maxVariants) && ncol(mat) > maxVariants) {
+        keep <- sort(sample(ncol(mat), maxVariants))
+        if (returnGenotype || nrow(mat) > ncol(mat)) {
+          mat <- mat[, keep]
+        } else {
+          mat <- mat[keep, keep]
+        }
+      }
+      # Center and scale genotype matrices
+      if (returnGenotype || nrow(mat) > ncol(mat)) {
+        mat <- scale(mat)
+        mat[is.na(mat)] <- 0
+      }
+      mat
+    }
+  } else {
+    # ldInfo mode: load LD blocks by index from file paths
+    # Supports all genotype formats (PLINK2, PLINK1, VCF, GDS) and
+    # pre-computed .cor.xz + .bim/.pvar blocks
+    if (!is.data.frame(ldInfo) || !"LD_file" %in% colnames(ldInfo))
+      stop("ldInfo must be a data.frame with column 'LD_file'.")
+
+    loader <- function(g) {
+      ldPath <- ldInfo$LD_file[g]
+
+      # Auto-detect format: genotype source or pre-computed block
+      if (isGenotypeSource(ldPath)) {
+        geno <- loadGenotypeRegion(ldPath)
+        mat <- computeLd(geno)
+      } else {
+        # Pre-computed .cor.xz block
+        snpFile <- if ("SNP_file" %in% colnames(ldInfo)) {
+          ldInfo$SNP_file[g]
+        } else {
+          NULL  # let processLdMatrix auto-detect .bim/.pvar/.pvar.zst
+        }
+        ld <- processLdMatrix(ldPath, snpFile)
+        mat <- extractLdMatrix(ld)
+      }
+
+      if (!is.null(maxVariants) && ncol(mat) > maxVariants) {
+        keep <- sort(sample(ncol(mat), maxVariants))
+        mat <- mat[keep, keep]
+      }
+      mat
+    }
+  }
+
+  loader
+}
+
+
+# =============================================================================
+# LD correlation matrix from a dosage matrix
+# -----------------------------------------------------------------------------
+# Direct LD computation from an n x p dosage matrix. The internal backend
+# uses Rfast::cora when available (else base cor()); optional snprelate /
+# snpstats backends round-trip through a temp GDS or SnpMatrix. The
+# population and GCTA methods match PLINK / GCTA conventions for missing
+# data handling.
+# =============================================================================
+
+computeLd <- function(X, method = c("sample", "population", "gcta"),
+                      backend = c("internal", "snprelate", "snpstats"),
+                      trimSamples = FALSE, shrinkage = 0) {
+  if (is.null(X)) {
+    stop("X must be provided.")
+  }
+  method <- match.arg(method)
+  backend <- match.arg(backend)
+  nms <- colnames(X)
+
+  if (method == "sample") {
+    # ---- Standard sample correlation (N-1 denominator) ----
+    if (backend == "snprelate") {
+      R <- .computeLdSnprelate(X)
+    } else if (backend == "snpstats") {
+      R <- .computeLdSnpstats(X)
+    } else {
+      # internal backend: Rfast::cora if available, else base cor()
+      # Mean impute only if NAs exist (PLINK2 data typically has none)
+      X_imp <- X
+      if (anyNA(X_imp)) {
+        colMeansX <- colMeans(X_imp, na.rm = TRUE)
+        naPos <- which(is.na(X_imp), arr.ind = TRUE)
+        X_imp[naPos] <- colMeansX[naPos[, 2]]
+      }
+      if (requireNamespace("Rfast", quietly = TRUE)) {
+        # large=FALSE uses tcrossprod internally, ~40x faster than large=TRUE
+        R <- Rfast::cora(X_imp, large = FALSE)
+      } else {
+        R <- cor(X_imp)
+      }
+    }
+  } else if (method == "population") {
+    if (backend != "internal") {
+      stop("backend '", backend, "' is only supported with method='sample'.")
+    }
+    # ---- Population variance (N denominator, GCTA-style) ----
+    # Optionally trim trailing samples to a multiple of 4 (matches .bed processing)
+    if (trimSamples) {
+      N_kept <- (nrow(X) %/% 4L) * 4L
+      if (N_kept < nrow(X)) X <- X[seq_len(N_kept), , drop = FALSE]
+    }
+    N <- nrow(X)
+    # Per-SNP means from non-missing values
+    colMeansX <- colMeans(X, na.rm = TRUE)
+    # Population variance: E[X^2] - E[X]^2
+    colVarsX <- colMeans(X^2, na.rm = TRUE) - colMeansX^2
+    # Center; set NA -> 0 so missing pairs don't contribute to cross-products.
+    # NOTE: the covariance divides by total N (not pairwise non-missing counts),
+    # which is an approximation that assumes uniform missingness across SNPs.
+    # With heterogeneous missingness, correlations between high-missing and
+    # low-missing columns will be slightly deflated. This matches the GCTA
+    # convention and is standard for PLINK-style LD computation.
+    if (anyNA(X)) {
+      naRates <- colMeans(is.na(X))
+      if (max(naRates) - min(naRates) > 0.1) {
+        warning("Population LD method with heterogeneous missingness ",
+                "(max NA rate ", round(max(naRates), 3),
+                ", min ", round(min(naRates), 3),
+                "): correlations may be biased. Consider using method='sample' ",
+                "which handles missingness via mean imputation.")
+      }
+    }
+    X_c <- sweep(X, 2, colMeansX)
+    X_c[is.na(X_c)] <- 0
+    # Covariance with N denominator
+    covMat <- crossprod(X_c) / N
+    # Correlation
+    sdVec <- sqrt(colVarsX)
+    R <- covMat / outer(sdVec, sdVec)
+  } else {
+    if (backend != "internal") {
+      stop("backend '", backend, "' is only supported with method='sample'.")
+    }
+    # ---- GCTA per-pair missing data correction ----
+    # Matches the DENTIST binary's calcLDFromBfile_gcta formula exactly.
+    # Unlike "population" which divides by total N, this method tracks
+    # per-pair missing counts and applies a correction term.
+    if (trimSamples) {
+      N_kept <- (nrow(X) %/% 4L) * 4L
+      if (N_kept < nrow(X)) X <- X[seq_len(N_kept), , drop = FALSE]
+    }
+    N <- nrow(X)
+    p <- ncol(X)
+
+    # Marginal statistics from non-missing values
+    colMeansX <- colMeans(X, na.rm = TRUE)
+    colMeanSq <- colMeans(X^2, na.rm = TRUE)
+    colVarsX <- colMeanSq - colMeansX^2
+
+    # Build indicator matrix for non-missing values
+    notNa <- !is.na(X)
+    # Replace NA with 0 for cross-product computation
+    X_zero <- X
+    X_zero[is.na(X_zero)] <- 0
+
+    # Per-pair non-missing counts: notNa'notNa gives count of jointly observed
+    pairCounts <- crossprod(notNa * 1.0)
+    nMissing <- N - pairCounts
+
+    # Per-pair sums: sum of X_i over samples where both i and j are observed
+    # For the correction term we need E_i2 = sum_i_pair / N (pair-specific mean)
+    # X_zero' %*% notNa gives, for each (i,j), sum of X_i where j is not missing
+    pairSums <- crossprod(X_zero, notNa * 1.0)
+
+    # Cross-product sum: sum(X_i * X_j) over jointly non-missing samples
+    sum_XY <- crossprod(X_zero)
+
+    # GCTA correction formula:
+    # E_i2[i,j] = pairSums[i,j] / N  (mean of SNP i restricted to non-missing-j samples, divided by N)
+    # cov = sum_XY/N + E[i]*E[j]*(N-m)/N - E[i]*E_j2 - E_i2*E[j]
+    E_i2 <- pairSums / N  # p x p: row i, col j = sum of X_i where j non-missing, / N
+    E_j2 <- t(E_i2)        # transposed version
+
+    covMat <- sum_XY / N +
+      outer(colMeansX, colMeansX) * (pairCounts / N) -
+      colMeansX * E_j2 -
+      E_i2 * rep(colMeansX, each = p)
+
+    # Correlation
+    sdVec <- sqrt(colVarsX)
+    sdOuter <- outer(sdVec, sdVec)
+    R <- matrix(0.001, p, p)
+    valid <- sdOuter > 0
+    R[valid] <- covMat[valid] / sdOuter[valid]
+  }
+
+  # Ensure clean output
+  diag(R) <- 1.0
+  R[is.na(R) | is.nan(R)] <- 0
+
+  # Optional shrinkage toward identity: R_s = (1 - shrinkage) * R + shrinkage * I
+  # Used e.g. by lassosum (Mak et al 2017) to regularize LD for RSS methods.
+  if (shrinkage > 0 && shrinkage <= 1) {
+    R <- (1 - shrinkage) * R + shrinkage * diag(nrow(R))
+  }
+
+  colnames(R) <- rownames(R) <- nms
+  R
+}
+
+#' Compute LD via SNPRelate (creates a temporary GDS file from the dosage matrix).
+#' @param X Numeric genotype matrix (samples x SNPs).
+#' @return Correlation matrix.
+#' @noRd
+.computeLdSnprelate <- function(X) {
+  if (!requireNamespace("SNPRelate", quietly = TRUE))
+    stop("Package 'SNPRelate' is required for backend='snprelate'")
+  if (!requireNamespace("gdsfmt", quietly = TRUE))
+    stop("Package 'gdsfmt' is required for backend='snprelate'")
+
+  tmpGds <- tempfile(fileext = ".gds")
+  on.exit(unlink(tmpGds), add = TRUE)
+
+  # Round to integer dosage for GDS (0/1/2)
+  X_int <- round(X)
+  storage.mode(X_int) <- "integer"
+  X_int[is.na(X_int)] <- 3L  # GDS missing code
+
+  snpIds <- colnames(X) %||% seq_len(ncol(X))
+  sampleIds <- rownames(X) %||% seq_len(nrow(X))
+
+  SNPRelate::snpgdsCreateGeno(tmpGds,
+    genmat = X_int,
+    sample.id = sampleIds,
+    snp.id = snpIds,
+    snp.chromosome = rep(1L, ncol(X)),
+    snp.position = seq_len(ncol(X)),
+    snpfirstdim = FALSE
+  )
+
+  gds <- SNPRelate::snpgdsOpen(tmpGds, readonly = TRUE)
+  on.exit(SNPRelate::snpgdsClose(gds), add = TRUE)
+
+  ldObj <- SNPRelate::snpgdsLDMat(gds, method = "corr",
+                                  slide = -1, verbose = FALSE)
+  ldObj$LD
+}
+
+#' Compute LD via snpStats (converts dosage matrix to SnpMatrix).
+#' @param X Numeric genotype matrix (samples x SNPs).
+#' @return Correlation matrix (r, not r²).
+#' @noRd
+.computeLdSnpstats <- function(X) {
+  if (!requireNamespace("snpStats", quietly = TRUE))
+    stop("Package 'snpStats' is required for backend='snpstats'")
+
+  # snpStats expects counts of the B allele as raw codes: 1=AA, 2=AB, 3=BB, 0=NA
+  # pecotmr dosage is ALT count (0/1/2), so map: 0->1, 1->2, 2->3, NA->0
+  X_raw <- round(X) + 1L
+  X_raw[is.na(X) | X_raw < 1L] <- 0L
+  X_raw[X_raw > 3L] <- 3L
+  storage.mode(X_raw) <- "raw"
+  sm <- new("SnpMatrix", X_raw)
+
+  R <- as.matrix(snpStats::ld(sm, stats = "R", depth = ncol(X) - 1L))
+  # snpStats::ld returns a sparse-like matrix; ensure full dense
+  R[is.na(R)] <- 0
+  diag(R) <- 1
+  R
+}
+

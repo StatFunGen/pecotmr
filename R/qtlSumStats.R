@@ -1,3 +1,74 @@
+# =============================================================================
+# QtlSumStats S4 class
+# -----------------------------------------------------------------------------
+# DFrame-subclass collection keyed by the identity tuple (study, context,
+# trait). Each row holds a per-tuple GRanges of summary statistics
+# (variant_id + per-variant Z/N/MAF mcols). Class-level slots ldSketch
+# (a GenotypeHandle for the LD reference) + genome (the genome build)
+# apply uniformly across rows. Built-in qcInfo slot tracks which
+# summaryStatsQc() passes have been run.
+# =============================================================================
+
+#' @include SumStatsBase.R tupleSelectors.R
+NULL
+
+setClass("QtlSumStats",
+  contains = "SumStatsBase",
+  validity = function(object) {
+    errors <- character()
+    required <- c("study", "context", "trait", "entry")
+    missingCols <- setdiff(required, names(object))
+    if (length(missingCols) > 0L)
+      errors <- c(errors, paste("missing columns:",
+                                paste(missingCols, collapse = ", ")))
+    if (length(object@genome) != 1L || !nzchar(object@genome))
+      errors <- c(errors,
+        "'genome' slot must be a single non-empty character string")
+    if (!is.list(object@qcInfo))
+      errors <- c(errors, "'qcInfo' slot must be a list")
+    if (length(errors) == 0L) {
+      if (length(object$entry) != nrow(object))
+        errors <- c(errors,
+          "length(entry) must equal nrow(.) for QtlSumStats")
+      entryTypes <- vapply(object$entry,
+                          function(e) methods::is(e, "GRanges"), logical(1))
+      if (!all(entryTypes))
+        errors <- c(errors,
+          "every element of the `entry` column must be a GRanges")
+      keyDf <- as.data.frame(object[, c("study", "context", "trait")])
+      if (anyDuplicated(keyDf))
+        errors <- c(errors,
+          "(study, context, trait) tuple uniqueness violated")
+    }
+    if (length(errors) == 0L) TRUE else errors
+  }
+)
+
+#' @title GWAS Summary Statistics Collection
+#' @description S4 collection of GWAS summary statistics keyed by
+#'   \code{study}. Each entry holds a \code{GRanges} of summary statistics
+#'   for that study. Class-level slots \code{ldSketch} (the LD reference
+#'   \code{GenotypeHandle}) and \code{genome} (the genome build, a single
+#'   character string) apply to every entry; the genome build must be
+#'   uniform because all entries necessarily share the LD reference.
+#'
+#'   Required columns: \code{study}, \code{entry}. Optional columns
+#'   include \code{varY} (numeric, phenotype variance for the
+#'   sufficient-statistic interface; NA otherwise). \code{study} is
+#'   unique. Each \code{entry} is a \code{GRanges} whose mcols carry the
+#'   per-variant statistics (\code{SNP}, \code{A1}, \code{A2}, \code{Z},
+#'   \code{N}; plus optional \code{MAF}, \code{INFO}, \code{BETA},
+#'   \code{SE}, \code{P}).
+#' @slot ldSketch A \code{GenotypeHandle} for the LD reference.
+#' @slot genome A single character string giving the genome build that
+#'   the LD sketch and every entry are aligned to.
+#' @slot qcInfo A \code{list} recording which QC steps ran. Empty
+#'   \code{list()} on construction; populated by \code{summaryStatsQc()}.
+#'   Fine-mapping and TWAS-weights pipelines reject inputs where
+#'   \code{length(getQcInfo(x)) == 0L} — the slot serves as both the
+#'   gating flag and the audit trail.
+#' @export
+
 #' @title QTL Summary Statistics Handling
 #' @description Constructor and accessor methods for \code{QtlSumStats},
 #'   the DFrame-subclass collection keyed by

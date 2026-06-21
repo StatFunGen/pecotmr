@@ -1,3 +1,55 @@
+# =============================================================================
+# GwasSumStats S4 class
+# -----------------------------------------------------------------------------
+# DFrame-subclass collection keyed by the identity tuple (study). Each
+# row holds a per-study GRanges of GWAS summary statistics covering a
+# single LD block; build a separate collection per block when sweeping
+# the genome. Class-level slots ldSketch + genome + qcInfo apply
+# uniformly across rows.
+# =============================================================================
+
+#' @include SumStatsBase.R tupleSelectors.R
+NULL
+
+setClass("GwasSumStats",
+  contains = "SumStatsBase",
+  validity = function(object) {
+    errors <- character()
+    required <- c("study", "entry")
+    missingCols <- setdiff(required, names(object))
+    if (length(missingCols) > 0L)
+      errors <- c(errors, paste("missing columns:",
+                                paste(missingCols, collapse = ", ")))
+    if (length(object@genome) != 1L || !nzchar(object@genome))
+      errors <- c(errors,
+        "'genome' slot must be a single non-empty character string")
+    if (!is.list(object@qcInfo))
+      errors <- c(errors, "'qcInfo' slot must be a list")
+    if (length(errors) == 0L) {
+      if (length(object$entry) != nrow(object))
+        errors <- c(errors,
+          "length(entry) must equal nrow(.) for GwasSumStats")
+      entryTypes <- vapply(object$entry,
+                          function(e) methods::is(e, "GRanges"), logical(1))
+      if (!all(entryTypes))
+        errors <- c(errors,
+          "every element of the `entry` column must be a GRanges")
+      if (anyDuplicated(as.character(object$study)))
+        errors <- c(errors, "`study` must be unique")
+    }
+    if (length(errors) == 0L) TRUE else errors
+  }
+)
+
+
+setMethod("show", "GwasSumStats", function(object) {
+  cat(sprintf("GwasSumStats: %d studies, genome build %s\n",
+              nrow(object), object@genome))
+  cat(sprintf("  LD sketch: %s @ %s\n",
+              object@ldSketch@format, object@ldSketch@path))
+})
+
+
 #' @title GWAS Summary Statistics Handling
 #' @description Constructor, accessors, and converters for
 #'   \code{GwasSumStats} (the post-refactor DFrame-subclass collection

@@ -10,7 +10,7 @@
 #'           shared LD reference (\code{ldSketch}). Must already have
 #'           been passed through \code{\link{summaryStatsQc}} (the
 #'           pipeline rejects inputs whose \code{getQcInfo()} is empty).
-#'     \item \code{MultiTaskQtlDataset} — a mixture of one or more
+#'     \item \code{MultiStudyQtlDataset} — a mixture of one or more
 #'           individual-level \code{QtlDataset} studies and an optional
 #'           \code{QtlSumStats} collection.
 #'   }
@@ -50,7 +50,7 @@
 #'   }
 #'
 #' @param qtlData One of \code{QtlDataset}, \code{QtlSumStats}, or
-#'   \code{MultiTaskQtlDataset}.
+#'   \code{MultiStudyQtlDataset}.
 #' @param gwasSumStats Optional \code{GwasSumStats} with the GWAS
 #'   studies to colocalize against. \code{NULL} to skip GWAS
 #'   colocalization.
@@ -70,11 +70,6 @@
 #' @param focalTrait Optional trait name; when supplied and present in
 #'   the assembled outcome list, the colocboost xQTL-only run uses it
 #'   as the focal outcome.
-#' @param eventFilters Optional list of per-context event-name filter
-#'   specifications (each a list with \code{type_pattern} and at least
-#'   one of \code{valid_pattern} / \code{exclude_pattern}). Applied to
-#'   the trait columns within each context's residualized phenotype
-#'   block before the colocboost call.
 #' @param xqtlColoc,jointGwas,separateGwas Logical flags selecting which
 #'   colocboost variants to run.
 #' @param ... Additional arguments forwarded to
@@ -149,66 +144,16 @@ setGeneric("colocboostPipeline",
   invisible(NULL)
 }
 
-# Apply user-supplied event filters to the columns of a single
-# residualized phenotype matrix. Returns the filtered matrix, or NULL
-# when no events pass.
-.cbApplyEventFilters <- function(y, filters, context) {
-  if (is.null(y) || length(filters) == 0L) return(y)
-  events <- colnames(y)
-  if (is.null(events) || length(events) == 0L) return(y)
-  kept <- events
-  for (filter in filters) {
-    if (is.null(filter$type_pattern) ||
-        (is.null(filter$valid_pattern) && is.null(filter$exclude_pattern))) {
-      stop("Each event filter must specify type_pattern and at least ",
-           "one of valid_pattern or exclude_pattern.")
-    }
-    typeEvents <- kept[grepl(filter$type_pattern, kept)]
-    if (length(typeEvents) == 0L) next
-    if (!is.null(filter$valid_pattern)) {
-      validGroups <- unique(gsub(filter$type_pattern, "\\1",
-                                 typeEvents[grepl(filter$valid_pattern,
-                                                  typeEvents)]))
-      if (length(validGroups) == 0L) {
-        typeEvents <- character(0)
-      } else {
-        typeEvents <- events[grepl(paste(validGroups, collapse = "|"),
-                                   events)]
-      }
-    }
-    if (!is.null(filter$exclude_pattern)) {
-      typeEvents <- typeEvents[!grepl(filter$exclude_pattern, typeEvents)]
-    }
-    if (length(typeEvents) == length(events)) {
-      message("All events matching ", filter$type_pattern,
-              " in ", context, " included in following analysis.")
-    } else if (length(typeEvents) == 0L) {
-      message("No events matching ", filter$type_pattern,
-              " in ", context, " pass the filtering.")
-      return(NULL)
-    } else {
-      excludeEvents <- paste(setdiff(events, typeEvents), collapse = ";")
-      message("Some events, ", excludeEvents,
-              " in ", context, " are removed.")
-    }
-    kept <- unique(c(kept[!grepl(filter$type_pattern, kept)], typeEvents))
-  }
-  keep <- intersect(colnames(y), kept)
-  if (length(keep) == 0L) return(NULL)
-  y[, keep, drop = FALSE]
-}
-
 # Materialise an individual-level QtlDataset into the colocboost
 # (X, Y, dict_YX, outcome_names) bundle. Each context becomes one X /
 # Y pair; the YA matrices are split into single-trait columns and
 # dict_YX maps each split column back to its X. Returns NULL when no
-# context survives selection / event filtering.
+# context survives selection.
 .cbIndividualBundle <- function(qd, contexts = NULL,
                                 traitId = NULL,
                                 region = NULL,
                                 cisWindow = NULL,
-                                samples = NULL,
-                                eventFilters = NULL) {
+                                samples = NULL) {
   if (is.null(contexts) || length(contexts) == 0L) {
     contexts <- getContexts(qd)
   } else {
@@ -224,7 +169,7 @@ setGeneric("colocboostPipeline",
   YperCtx <- list()
   XperCtx <- list()
   for (ctx in contexts) {
-    yList <- tryCatch(
+    Y <- tryCatch(
       getResidualizedPhenotypes(qd, contexts = ctx,
                                 traitId = traitId, region = region),
       error = function(e) {
@@ -233,9 +178,6 @@ setGeneric("colocboostPipeline",
                 conditionMessage(e), ").")
         NULL
       })
-    if (is.null(yList) || !ctx %in% names(yList)) next
-    Y <- yList[[ctx]]
-    Y <- .cbApplyEventFilters(Y, eventFilters, ctx)
     if (is.null(Y) || ncol(Y) == 0L) next
     X <- tryCatch(
       getResidualizedGenotypes(qd, contexts = ctx,
@@ -600,7 +542,6 @@ setMethod("colocboostPipeline", "QtlDataset",
            contexts = NULL,
            traitId = NULL, region = NULL, cisWindow = NULL,
            focalTrait = NULL,
-           eventFilters = NULL,
            xqtlColoc = TRUE,
            jointGwas = FALSE,
            separateGwas = FALSE,
@@ -613,8 +554,7 @@ setMethod("colocboostPipeline", "QtlDataset",
       traitId      = traitId,
       region       = region,
       cisWindow    = cisWindow,
-      samples      = samples,
-      eventFilters = eventFilters)
+      samples      = samples)
     .cbDriver(indBundle, qtlPairs = list(), gwasSumStats,
               xqtlColoc, jointGwas, separateGwas,
               focalTrait, dotArgs)
@@ -627,15 +567,10 @@ setMethod("colocboostPipeline", "QtlSumStats",
            contexts = NULL,
            traitId = NULL, region = NULL, cisWindow = NULL,
            focalTrait = NULL,
-           eventFilters = NULL,
            xqtlColoc = TRUE,
            jointGwas = FALSE,
            separateGwas = FALSE,
            ...) {
-    if (!is.null(eventFilters)) {
-      warning("eventFilters is ignored for QtlSumStats input (no per-trait ",
-              "phenotype matrix to filter).")
-    }
     .cbRequireSumStatsQc(qtlData, "qtlData")
     dotArgs <- list(...)
     qtlPairs <- .cbQtlSumStatsBundle(
@@ -653,12 +588,11 @@ setMethod("colocboostPipeline", "QtlSumStats",
 
 #' @rdname colocboostPipeline
 #' @export
-setMethod("colocboostPipeline", "MultiTaskQtlDataset",
+setMethod("colocboostPipeline", "MultiStudyQtlDataset",
   function(qtlData, gwasSumStats = NULL,
            contexts = NULL,
            traitId = NULL, region = NULL, cisWindow = NULL,
            focalTrait = NULL,
-           eventFilters = NULL,
            xqtlColoc = TRUE,
            jointGwas = FALSE,
            separateGwas = FALSE,
@@ -683,8 +617,7 @@ setMethod("colocboostPipeline", "MultiTaskQtlDataset",
         traitId      = traitId,
         region       = region,
         cisWindow    = cisWindow,
-        samples      = samples,
-        eventFilters = eventFilters)
+        samples      = samples)
       if (is.null(sub)) next
       xOffset <- length(combinedX)
       yOffset <- length(combinedY)
@@ -708,13 +641,13 @@ setMethod("colocboostPipeline", "MultiTaskQtlDataset",
            outcomeNames = combinedOutcomes)
     } else NULL
 
-    # Sumstat side: any QtlSumStats embedded in the MultiTaskQtlDataset.
+    # Sumstat side: any QtlSumStats embedded in the MultiStudyQtlDataset.
     embeddedSs <- getSumStats(qtlData)
     qtlPairs <- list()
     qtlLdSketch <- NULL
     if (!is.null(embeddedSs)) {
       .cbRequireSumStatsQc(embeddedSs,
-                           "MultiTaskQtlDataset@sumStats")
+                           "MultiStudyQtlDataset@sumStats")
       qtlPairs <- .cbQtlSumStatsBundle(
         embeddedSs, contexts = contexts, traitId = traitId)
       qtlLdSketch <- getLdSketch(embeddedSs)
@@ -732,5 +665,5 @@ setMethod("colocboostPipeline", "ANY",
   function(qtlData, gwasSumStats = NULL, ...) {
     stop("colocboostPipeline does not accept inputs of class '",
          class(qtlData)[[1L]], "'. Pass a QtlDataset, QtlSumStats, or ",
-         "MultiTaskQtlDataset for QTL data.")
+         "MultiStudyQtlDataset for QTL data.")
   })

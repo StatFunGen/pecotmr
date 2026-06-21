@@ -53,8 +53,18 @@
 #'   that produced a credible set (\code{trimmedFit$sets$cs_index}).
 #'   Default \code{FALSE}.
 #' @param filterLbfCsSecondary Optional secondary coverage (numeric in
-#'   \eqn{(0,1)}); see \code{\link{getFilterLbfIndex}}. When supplied
-#'   it overrides \code{filterLbfCs}.
+#'   \eqn{(0, 1)}). When supplied, run a credible-set concentration
+#'   filter at this coverage level instead of \code{filterLbfCs}: each
+#'   L-effect's credible set must span fewer than \code{nVariants *
+#'   filterLbfCsSecondary * filterLbfCsConcentration} variants to be
+#'   kept. Effects with diffuse credible sets are dropped before the
+#'   LBF matrix is passed to \code{coloc::coloc.bf_bf}. Overrides
+#'   \code{filterLbfCs} when set.
+#' @param filterLbfCsConcentration Numeric in \eqn{(0, 1)}; the
+#'   concentration factor in the cutoff above. With the default
+#'   \code{0.5} a 50\% credible set is kept only if it spans fewer
+#'   than 25\% of the locus's variants. Only consulted when
+#'   \code{filterLbfCsSecondary} is non-NULL. Default \code{0.5}.
 #' @param priorTol Prior-variance cutoff for the default filter:
 #'   effects with \code{V <= priorTol} are dropped. Ignored when
 #'   either \code{filterLbfCs} or \code{filterLbfCsSecondary} is in
@@ -71,6 +81,26 @@
 #' @param returnGwasFineMapping Logical. When \code{TRUE}, attach the
 #'   computed \code{GwasFineMappingResult} on the returned data frame
 #'   as attribute \code{"gwasFineMapping"}. Default \code{FALSE}.
+#' @param enrichment Optional data.frame of per-(gwasStudy, qtlContext)
+#'   enrichment factors with columns \code{gwasStudy}, \code{qtlContext},
+#'   \code{enrichment}. Output of \code{\link{qtlEnrichmentPipeline}}.
+#'   When non-\code{NULL}, each pair's \code{p12} prior is scaled to
+#'   \code{min(p12 * (1 + enrichment), p12Max)} (the enrichment-informed
+#'   colocalization variant, "enloc"). Pairs without a matching
+#'   enrichment row fall back to the baseline \code{p12} with a warning.
+#'   Default \code{NULL} (baseline coloc).
+#' @param p12Max Numeric scalar. Maximum value for the enrichment-adjusted
+#'   \code{p12} prior. Default \code{1e-3}. Ignored when
+#'   \code{enrichment = NULL}.
+#' @param adjustPips Logical, default \code{TRUE}. When TRUE, before any
+#'   per-pair inference the QTL and GWAS fine-mapping result collections
+#'   are passed through \code{\link{adjustPips}} so each entry's PIPs are
+#'   renormalized to the intersection of its variants with the union of
+#'   the other side's variant IDs. This matters in two scenarios: (1) the
+#'   user declined to impute missing variants in the GWAS \code{SumStats}
+#'   and the QTL fine-mapping input has additional variants; (2) the GWAS
+#'   fine-mapping result contains variants not present in the QTL
+#'   fine-mapping result. Pass \code{FALSE} to use the FMRs as supplied.
 #' @param ... Additional arguments forwarded to
 #'   \code{coloc::coloc.bf_bf}.
 #' @return A data frame with one row per (QTL tuple, GWAS tuple,
@@ -78,19 +108,38 @@
 #'   \code{context}, \code{trait}, \code{method}, \code{gwasStudy},
 #'   \code{gwasMethod}, plus the standard coloc fields
 #'   (\code{idx1}, \code{idx2}, \code{nSnps},
-#'   \code{PP.H0.abf} \ldots \code{PP.H4.abf}).
+#'   \code{PP.H0.abf} \ldots \code{PP.H4.abf}). When \code{enrichment}
+#'   is supplied, two additional columns \code{enrichment} and
+#'   \code{p12Used} report the per-pair factor and the prior actually
+#'   passed to \code{coloc::coloc.bf_bf}.
 #' @export
 colocPipeline <- function(qtlFineMappingResult,
                           gwasInput,
-                          filterLbfCs           = FALSE,
-                          filterLbfCsSecondary  = NULL,
-                          priorTol              = 1e-9,
-                          p1                    = 1e-4,
-                          p2                    = 1e-4,
-                          p12                   = 5e-6,
-                          finemappingMethods    = "susie",
-                          returnGwasFineMapping = FALSE,
+                          filterLbfCs              = FALSE,
+                          filterLbfCsSecondary     = NULL,
+                          filterLbfCsConcentration = 0.5,
+                          priorTol                 = 1e-9,
+                          p1                       = 1e-4,
+                          p2                       = 1e-4,
+                          p12                      = 5e-6,
+                          finemappingMethods       = "susie",
+                          returnGwasFineMapping    = FALSE,
+                          enrichment               = NULL,
+                          p12Max                   = 1e-3,
+                          adjustPips               = TRUE,
                           ...) {
+  useEnrichment <- !is.null(enrichment)
+  if (useEnrichment) {
+    if (!is.data.frame(enrichment))
+      stop("`enrichment` must be a data.frame with at least gwasStudy, ",
+           "qtlContext, enrichment columns (output of ",
+           "qtlEnrichmentPipeline).")
+    required <- c("gwasStudy", "qtlContext", "enrichment")
+    missingCols <- setdiff(required, colnames(enrichment))
+    if (length(missingCols) > 0L)
+      stop("`enrichment` is missing column(s): ",
+           paste(missingCols, collapse = ", "))
+  }
   if (!requireNamespace("coloc", quietly = TRUE)) {
     stop("Package 'coloc' is required for colocPipeline. ",
          "Install with: install.packages('coloc').")
@@ -122,15 +171,33 @@ colocPipeline <- function(qtlFineMappingResult,
   gwasLd <- getLdSketch(gwasFmr)
   .colocRequireMatchingLdSketches(qtlLd, gwasLd)
 
+  # --- Optional PIP renormalization to the cross-FMR variant union -----
+  # Renormalize each side's entry PIPs to the intersection of its own
+  # variants with the union of the other side's variants. Handles two
+  # cases: (a) GWAS sumstats missing variants present in the QTL FMR
+  # (no imputation requested); (b) GWAS FMR carrying variants not in
+  # the QTL FMR.
+  if (isTRUE(adjustPips)) {
+    qtlVids  <- unique(unlist(lapply(qtlFineMappingResult$entry,
+                                     function(e) e@variantIds)))
+    gwasVids <- unique(unlist(lapply(gwasFmr$entry,
+                                     function(e) e@variantIds)))
+    if (length(qtlVids) > 0L && length(gwasVids) > 0L) {
+      qtlFineMappingResult <- adjustPips(qtlFineMappingResult, gwasVids)
+      gwasFmr              <- adjustPips(gwasFmr, qtlVids)
+    }
+  }
+
   # --- Pre-extract per-GWAS-tuple LBF matrices ------------------------
   # The legacy colocWrapper combined multiple GWAS files' LBF matrices
   # row-wise before a single coloc.bf_bf call per xQTL. Reproduce that
   # by grouping the GWAS FMR by study, stacking each study's LBF rows,
   # and storing per-(study, method) batched matrices.
   gwasLbfByPair <- .colocPreextractGwasLbf(
-    gwasFmr, filterLbfCs, filterLbfCsSecondary, priorTol)
+    gwasFmr, filterLbfCs, filterLbfCsSecondary,
+    filterLbfCsConcentration, priorTol)
   if (length(gwasLbfByPair) == 0L) {
-    out <- .colocEmptyResult()
+    out <- .colocEmptyResult(enriched = useEnrichment)
     if (returnGwasFineMapping && methods::is(gwasInput, "GwasSumStats")) {
       attr(out, "gwasFineMapping") <- gwasFmr
     }
@@ -146,7 +213,8 @@ colocPipeline <- function(qtlFineMappingResult,
     qMethod  <- as.character(qtlFineMappingResult$method)[[qi]]
     qEntry   <- qtlFineMappingResult$entry[[qi]]
     qLbfInfo <- .colocExtractLbfFromEntry(
-      qEntry, filterLbfCs, filterLbfCsSecondary, priorTol,
+      qEntry, filterLbfCs, filterLbfCsSecondary,
+      filterLbfCsConcentration, priorTol,
       label = sprintf("QTL (study='%s', context='%s', trait='%s', method='%s')",
                       qStudy, qContext, qTrait, qMethod))
     if (is.null(qLbfInfo)) next
@@ -163,9 +231,25 @@ colocPipeline <- function(qtlFineMappingResult,
       qAligned <- aligned$qtl
       gAligned <- aligned$gwas
 
+      # Enrichment-informed p12: per-pair scaling capped at p12Max.
+      # Baseline p12 used when no enrichment table or no matching row.
+      if (useEnrichment) {
+        enRow <- .colocLookupEnrichment(enrichment, gInfo$study, qContext)
+        if (is.na(enRow)) {
+          warning(sprintf(
+            "colocPipeline: no enrichment entry for (gwasStudy='%s', qtlContext='%s'); using baseline p12.",
+            gInfo$study, qContext))
+          enRow <- 0
+        }
+        p12Used <- min(p12 * (1 + enRow), p12Max)
+      } else {
+        enRow   <- NA_real_
+        p12Used <- p12
+      }
+
       pairRes <- tryCatch(
         coloc::coloc.bf_bf(qAligned, gAligned,
-                           p1 = p1, p2 = p2, p12 = p12, ...),
+                           p1 = p1, p2 = p2, p12 = p12Used, ...),
         error = function(e) {
           warning(sprintf(
             "colocPipeline: coloc.bf_bf failed for QTL (study='%s', context='%s', trait='%s', method='%s') x GWAS (study='%s', method='%s'): %s",
@@ -182,17 +266,22 @@ colocPipeline <- function(qtlFineMappingResult,
       sm$method     <- qMethod
       sm$gwasStudy  <- gInfo$study
       sm$gwasMethod <- gInfo$method
+      if (useEnrichment) {
+        sm$enrichment <- enRow
+        sm$p12Used    <- p12Used
+      }
       results[[length(results) + 1L]] <- sm
     }
   }
 
   if (length(results) == 0L) {
-    out <- .colocEmptyResult()
+    out <- .colocEmptyResult(enriched = useEnrichment)
   } else {
     out <- do.call(rbind, lapply(results, .colocStandardiseRow))
     rownames(out) <- NULL
     idCols <- c("study", "context", "trait", "method",
                 "gwasStudy", "gwasMethod")
+    if (useEnrichment) idCols <- c(idCols, "enrichment", "p12Used")
     other  <- setdiff(colnames(out), idCols)
     out    <- out[, c(idCols, other), drop = FALSE]
   }
@@ -209,23 +298,47 @@ colocPipeline <- function(qtlFineMappingResult,
 
 # LD-sketch identity check. Thin wrapper over the shared
 # `.requireMatchingLdSketches` helper (R/ld.R). Shared with
-# qtlEnrichmentPipeline and enlocPipeline.
+# qtlEnrichmentPipeline.
 # @noRd
 .colocRequireMatchingLdSketches <- function(qtlLd, gwasLd) {
   .requireMatchingLdSketches(qtlLd, gwasLd, pipelineName = "colocPipeline")
 }
 
+# SuSiE credible-set concentration filter. Given a trimmed SuSiE fit
+# and a coverage level, return the L-effect indices whose credible set
+# is "narrow enough" to be informative: |CS| < nVariants * coverage *
+# concentration. With concentration = 0.5 a 50% CS is kept only if it
+# spans fewer than 25% of the locus variants -- this prunes diffuse
+# signals before they reach coloc.bf_bf.
+#
+# Returns an integer vector of kept effect indices (empty when nothing
+# survives), or errors when susieR is unavailable.
+# @noRd
+#' @importFrom susieR susie_get_cs
+#' @importFrom purrr map_lgl
+.colocFilterCsByConcentration <- function(fit, coverage = 0.5,
+                                          concentration = 0.5) {
+  fit$V <- NULL  # disable V-based filtering inside susie_get_cs
+  csList <- susie_get_cs(fit, coverage = coverage, dedup = FALSE)
+  totalVariants <- ncol(fit$alpha)
+  maxSize <- totalVariants * coverage * concentration
+  keep <- map_lgl(csList$cs, ~ length(.x) < maxSize)
+  as.numeric(gsub("L", "", names(which(keep))))
+}
+
 # Extract an LBF matrix (effects x variants) from a FineMappingEntry,
 # applying the same filtering knobs as the legacy .extractLbfMatrix:
 #   - filterLbfCs (CS-only)
-#   - filterLbfCsSecondary (secondary coverage CS)
+#   - filterLbfCsSecondary (secondary coverage CS, with concentration cutoff)
 #   - priorTol drop on V (default)
 # Handles the fSuSiE shape (where the LBF lives at a different slot).
 # Returns list(lbf = <matrix>, variantIds = <character>) or NULL when
 # the entry has no usable LBF matrix.
 # @noRd
 .colocExtractLbfFromEntry <- function(entry, filterLbfCs,
-                                      filterLbfCsSecondary, priorTol,
+                                      filterLbfCsSecondary,
+                                      filterLbfCsConcentration,
+                                      priorTol,
                                       label = "entry") {
   fit <- getTrimmedFit(entry)
   if (is.null(fit)) {
@@ -261,7 +374,9 @@ colocPipeline <- function(qtlFineMappingResult,
       lbfMatrix <- lbfMatrix[csIdx, , drop = FALSE]
   } else if (!is.null(filterLbfCsSecondary)) {
     secIdx <- tryCatch(
-      getFilterLbfIndex(fit, coverage = filterLbfCsSecondary),
+      .colocFilterCsByConcentration(fit,
+                                    coverage = filterLbfCsSecondary,
+                                    concentration = filterLbfCsConcentration),
       error = function(e) NULL)
     if (!is.null(secIdx) && length(secIdx) > 0L)
       lbfMatrix <- lbfMatrix[secIdx, , drop = FALSE]
@@ -291,7 +406,9 @@ colocPipeline <- function(qtlFineMappingResult,
 # 0 so a fresh QTL pairing always lands on the same coordinate frame.
 # @noRd
 .colocPreextractGwasLbf <- function(gwasFmr, filterLbfCs,
-                                    filterLbfCsSecondary, priorTol) {
+                                    filterLbfCsSecondary,
+                                    filterLbfCsConcentration,
+                                    priorTol) {
   groupKey <- paste(as.character(gwasFmr$study),
                     as.character(gwasFmr$method),
                     sep = "||")
@@ -303,7 +420,8 @@ colocPipeline <- function(qtlFineMappingResult,
     for (ri in rows) {
       info <- .colocExtractLbfFromEntry(
         gwasFmr$entry[[ri]],
-        filterLbfCs, filterLbfCsSecondary, priorTol,
+        filterLbfCs, filterLbfCsSecondary,
+        filterLbfCsConcentration, priorTol,
         label = sprintf("GWAS (study='%s', method='%s', row=%d)",
                         as.character(gwasFmr$study)[[ri]],
                         as.character(gwasFmr$method)[[ri]], ri))
@@ -359,10 +477,11 @@ colocPipeline <- function(qtlFineMappingResult,
 }
 
 # A blank result data frame for the no-pair case so callers downstream
-# do not have to special-case a NULL return.
+# do not have to special-case a NULL return. When `enriched = TRUE` the
+# enrichment + p12Used columns are appended (the enloc-mode schema).
 # @noRd
-.colocEmptyResult <- function() {
-  data.frame(
+.colocEmptyResult <- function(enriched = FALSE) {
+  base <- data.frame(
     study      = character(0),
     context    = character(0),
     trait      = character(0),
@@ -378,6 +497,23 @@ colocPipeline <- function(qtlFineMappingResult,
     PP.H3.abf  = numeric(0),
     PP.H4.abf  = numeric(0),
     stringsAsFactors = FALSE)
+  if (enriched) {
+    base$enrichment <- numeric(0)
+    base$p12Used    <- numeric(0)
+  }
+  base
+}
+
+# Look up the enrichment factor for a (gwasStudy, qtlContext) pair in
+# the user-supplied enrichment table. Returns NA when the pair is not
+# present; the caller falls back to the baseline p12 and emits a
+# warning.
+# @noRd
+.colocLookupEnrichment <- function(enrichment, gwasStudy, qtlContext) {
+  idx <- which(as.character(enrichment$gwasStudy)  == gwasStudy &
+               as.character(enrichment$qtlContext) == qtlContext)
+  if (length(idx) == 0L) return(NA_real_)
+  as.numeric(enrichment$enrichment[[idx[[1L]]]])
 }
 
 # Ensure each row data.frame from coloc.bf_bf carries the standard PP
