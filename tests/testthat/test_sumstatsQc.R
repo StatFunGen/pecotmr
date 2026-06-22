@@ -3897,14 +3897,14 @@ test_that("sliding_window_loop errors on infinite loop", {
 
 context("univariate_rss_diagnostics")
 
-.testFineMappingEntry <- function(variantIds, trimmedFit = list(),
+.testFineMappingEntry <- function(variantIds, susieFit = list(),
                                   topLoci = data.frame(
                                     variant_id = character(0),
                                     pip = numeric(0),
                                     stringsAsFactors = FALSE)) {
   FineMappingEntry(
     variantIds = variantIds,
-    trimmedFit = trimmedFit,
+    susieFit   = susieFit,
     topLoci    = topLoci
   )
 }
@@ -3927,7 +3927,7 @@ test_that("getSusieResult returns trimmed result when present", {
   mock_result <- list(pip = c(0.1, 0.5, 0.3), sets = list(cs = list()))
   con_data <- list(finemappingEntry = .testFineMappingEntry(
     variantIds = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
-    trimmedFit = mock_result
+    susieFit = mock_result
   ))
   result <- getSusieResult(con_data)
   expect_equal(result, mock_result)
@@ -3941,7 +3941,7 @@ test_that("extractTopPipInfo finds top PIP variant", {
   con_data <- list(
     finemappingEntry = .testFineMappingEntry(
       variantIds = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
-      trimmedFit = list(pip = c(0.1, 0.7, 0.2))
+      susieFit = list(pip = c(0.1, 0.7, 0.2))
     ),
     sumstats = list(z = c(1.0, 3.5, -0.5))
   )
@@ -3958,7 +3958,7 @@ test_that("extractTopPipInfo computes p_value from z", {
   con_data <- list(
     finemappingEntry = .testFineMappingEntry(
       variantIds = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
-      trimmedFit = list(pip = c(0.9, 0.05, 0.05))
+      susieFit = list(pip = c(0.9, 0.05, 0.05))
     ),
     sumstats = list(z = c(5.0, 0.5, -0.3))
   )
@@ -3971,7 +3971,7 @@ test_that("extractTopPipInfo handles ties by taking first max", {
   con_data <- list(
     finemappingEntry = .testFineMappingEntry(
       variantIds = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
-      trimmedFit = list(pip = c(0.5, 0.5, 0.5))
+      susieFit = list(pip = c(0.5, 0.5, 0.5))
     ),
     sumstats = list(z = c(1.0, 2.0, 3.0))
   )
@@ -3988,7 +3988,7 @@ test_that("extractCsInfo extracts single CS correctly", {
   con_data <- list(
     finemappingEntry = .testFineMappingEntry(
       variantIds = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
-      trimmedFit = list(
+      susieFit = list(
         sets = list(cs = list(L_1 = c(1, 2))),
         cs_corr = NULL
       )
@@ -4013,7 +4013,7 @@ test_that("extractCsInfo extracts multiple CSs with cs_corr", {
   con_data <- list(
     finemappingEntry = .testFineMappingEntry(
       variantIds = c("1:100:A:G", "1:200:C:T", "1:300:G:A", "1:400:T:C"),
-      trimmedFit = list(
+      susieFit = list(
         sets = list(
           cs = list(L_1 = c(1, 2), L_2 = c(3, 4))
         ),
@@ -4040,7 +4040,7 @@ test_that("extractCsInfo computes p_value from z-score", {
   con_data <- list(
     finemappingEntry = .testFineMappingEntry(
       variantIds = c("1:100:A:G", "1:200:C:T"),
-      trimmedFit = list(
+      susieFit = list(
         sets = list(cs = list(L_1 = c(1, 2))),
         cs_corr = NULL
       )

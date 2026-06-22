@@ -6,7 +6,7 @@
 # baseline (always jointly fitted) or candidate (score-tested).
 # =============================================================================
 
-#' @include allGenerics.R
+#' @include AllGenerics.R
 NULL
 
 #' @title Genomic Annotation Matrix

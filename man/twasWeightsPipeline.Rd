@@ -32,6 +32,8 @@ twasWeightsPipeline(data, ...)
   estimatePi = TRUE,
   phenotypeCovariatesToResidualize = NULL,
   genotypeCovariatesToResidualize = NULL,
+  residualizePhenotypeCovariates = TRUE,
+  residualizeGenotypeCovariates = TRUE,
   dataType = NULL,
   naAction = c("drop", "impute"),
   verbose = 1,
@@ -62,6 +64,10 @@ twasWeightsPipeline(data, ...)
   twasWeights = NULL,
   naAction = c("drop", "impute"),
   verbose = 1,
+  phenotypeCovariatesToResidualize = NULL,
+  genotypeCovariatesToResidualize = NULL,
+  residualizePhenotypeCovariates = TRUE,
+  residualizeGenotypeCovariates = TRUE,
   ...
 )
 
@@ -149,9 +155,22 @@ inclusion. Default 0.01.}
 \item{estimatePi}{If TRUE, estimate spike-and-slab sparsity from
 mr.ash before BGLR / qgg spike-and-slab methods that consume it.}
 
-\item{phenotypeCovariatesToResidualize, genotypeCovariatesToResidualize}{Pass-through to \code{\link{getResidualizedPhenotypes}} and
-\code{\link{getResidualizedGenotypes}} for QtlDataset input.
-Default \code{NULL} (use all covariates).}
+\item{phenotypeCovariatesToResidualize, genotypeCovariatesToResidualize}{Character vector (or \code{NULL}) of covariate column names to
+residualize against. Forwarded to
+\code{\link{getResidualizedPhenotypes}} /
+\code{\link{getResidualizedGenotypes}} for \code{QtlDataset} /
+\code{MultiStudyQtlDataset} input. Default \code{NULL} (use all
+available covariates). Ignored for sumstat inputs.}
+
+\item{residualizePhenotypeCovariates}{Logical (length 1). When
+\code{TRUE} (default) residualize against the phenotype-side
+covariates listed in \code{phenotypeCovariatesToResidualize}; set
+\code{FALSE} to disable.}
+
+\item{residualizeGenotypeCovariates}{Logical (length 1). When
+\code{TRUE} (default) residualize against the genotype-side
+covariates listed in \code{genotypeCovariatesToResidualize}; set
+\code{FALSE} to disable.}
 
 \item{dataType}{Optional data-type tag stamped into every
 \code{TwasWeightsEntry$dataType} (e.g. \code{"expression"}).}

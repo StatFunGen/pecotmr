@@ -30,6 +30,13 @@
 #'   \code{\link{causalInferencePipeline}}). When supplied, the
 #'   per-(trait, context) Z is used as the \code{z_gene} input to
 #'   \code{ctwas_sumstats} so it is not recomputed.
+#' @param fineMappingResult Optional \code{QtlFineMappingResult} or
+#'   \code{GwasFineMappingResult} carrying the per-variant PIP and
+#'   credible-set membership data used by the CS / PIP rescue filters
+#'   (\code{csMinCor} and \code{minPipCutoff}). When \code{NULL}
+#'   (default) the smart filters are no-ops; only the magnitude filter
+#'   (\code{twasWeightCutoff}) and the per-gene cap
+#'   (\code{maxNumVariants}, ordered by \code{|weight|}) apply.
 #' @param regionId Optional character (length 1) label for the LD
 #'   block. Default \code{"block1"}.
 #' @param thin,niterPrefit,niter,L Pass-throughs to
@@ -37,6 +44,24 @@
 #' @param groupPriorVarStructure Pass-through (defaults
 #'   \code{"shared_type"}).
 #' @param ncore Number of cores. Default \code{1}.
+#' @param twasWeightCutoff Numeric (length 1). Drop variants with
+#'   \code{|weight| < twasWeightCutoff} from each gene's weight matrix
+#'   before ctwas sees it. Default \code{0} (no filter).
+#' @param csMinCor Numeric (length 1). When \code{fineMappingResult} is
+#'   provided, variants belonging to any 95\% credible set with purity
+#'   (\code{min_abs_corr}) \code{>= csMinCor} are marked as must-keep
+#'   and survive the per-gene cap. Default \code{0.8}. Ignored without
+#'   a \code{fineMappingResult}.
+#' @param minPipCutoff Numeric (length 1). When
+#'   \code{fineMappingResult} is provided, variants with PIP greater
+#'   than \code{minPipCutoff} are marked as must-keep and survive the
+#'   per-gene cap. Default \code{0} (no PIP rescue). Ignored without a
+#'   \code{fineMappingResult}.
+#' @param maxNumVariants Numeric (length 1). Cap on per-gene variant
+#'   count. When the gene has more variants than this, keep all
+#'   must-keep variants and fill remaining slots by descending PIP
+#'   (when available) or descending \code{|weight|}. Default
+#'   \code{Inf} (no cap).
 #' @param ... Additional arguments forwarded to
 #'   \code{ctwas::ctwas_sumstats}.
 #' @return Whatever \code{ctwas::ctwas_sumstats} returns (a list with
@@ -45,6 +70,7 @@
 ctwasPipeline <- function(gwasSumStats,
                           twasWeights,
                           twasZ                   = NULL,
+                          fineMappingResult       = NULL,
                           regionId                = "block1",
                           thin                    = 0.1,
                           niterPrefit             = 3L,
@@ -56,6 +82,10 @@ ctwasPipeline <- function(gwasSumStats,
                                                       "shared_all",
                                                       "independent"),
                           ncore                   = 1L,
+                          twasWeightCutoff        = 0,
+                          csMinCor                = 0.8,
+                          minPipCutoff            = 0,
+                          maxNumVariants          = Inf,
                           ...) {
   if (!requireNamespace("ctwas", quietly = TRUE)) {
     stop("Package 'ctwas' is required for ctwasPipeline. ",
@@ -71,6 +101,10 @@ ctwasPipeline <- function(gwasSumStats,
   if (!is.null(twasZ) && !methods::is(twasZ, "GRanges"))
     stop("`twasZ` must be a GRanges (output of causalInferencePipeline) ",
          "or NULL.")
+  if (!is.null(fineMappingResult) &&
+      !methods::is(fineMappingResult, "FineMappingResultBase"))
+    stop("`fineMappingResult` must be a FineMappingResultBase ",
+         "(QtlFineMappingResult or GwasFineMappingResult) or NULL.")
   if (length(regionId) != 1L || !nzchar(regionId))
     stop("`regionId` must be a single non-empty character string.")
   groupPriorVarStructure <- match.arg(groupPriorVarStructure)
@@ -103,7 +137,13 @@ ctwasPipeline <- function(gwasSumStats,
                       stringsAsFactors = FALSE)
   snpMap      <- list()
   snpMap[[regionId]] <- ldPanel$snpInfo
-  weightsList <- .ctwasBuildWeights(twasWeights, ldPanel)
+  weightsList <- .ctwasBuildWeights(
+    twasWeights, ldPanel,
+    fineMappingResult = fineMappingResult,
+    twasWeightCutoff  = twasWeightCutoff,
+    csMinCor          = csMinCor,
+    minPipCutoff      = minPipCutoff,
+    maxNumVariants    = maxNumVariants)
   zGene       <- if (!is.null(twasZ)) .ctwasBuildZGene(twasZ) else NULL
 
   # --- Call the ctwas engine ------------------------------------------
@@ -226,7 +266,12 @@ ctwasPipeline <- function(gwasSumStats,
 # per-gene genotype re-extraction. Variants absent from the panel
 # are dropped from that gene's row set.
 # @noRd
-.ctwasBuildWeights <- function(twasWeights, ldPanel) {
+.ctwasBuildWeights <- function(twasWeights, ldPanel,
+                               fineMappingResult = NULL,
+                               twasWeightCutoff  = 0,
+                               csMinCor          = 0.8,
+                               minPipCutoff      = 0,
+                               maxNumVariants    = Inf) {
   panelSnps <- rownames(ldPanel$R)
   panelInfo <- ldPanel$snpInfo
   out <- list()
@@ -241,16 +286,34 @@ ctwasPipeline <- function(gwasSumStats,
     if (!any(keep)) next
     vids <- vids[keep]; w <- w[keep]
 
-    Rwgt   <- ldPanel$R[vids, vids, drop = FALSE]
-    wgtMat <- matrix(w, ncol = 1L, dimnames = list(vids, "wgt"))
-
     gStudy   <- as.character(twasWeights$study)[[i]]
     gContext <- as.character(twasWeights$context)[[i]]
     gTrait   <- as.character(twasWeights$trait)[[i]]
     gMethod  <- as.character(twasWeights$method)[[i]]
     key <- sprintf("%s|%s|%s|%s", gStudy, gContext, gTrait, gMethod)
 
-    # Per-gene chromosome + BP span derived from the cached snpInfo.
+    # PIP / credible-set context for the smart filters (csMinCor +
+    # minPipCutoff). Only available when the caller passed the matching
+    # FineMappingResult. NULL means we fall back to weight-magnitude
+    # priority only.
+    finemapAux <- .ctwasGetFinemapAux(fineMappingResult, gStudy, gContext,
+                                       gTrait, gMethod)
+
+    # Apply the four filters in order.
+    kept <- .ctwasFilterVariants(
+      vids = vids, w = w, finemapAux = finemapAux,
+      twasWeightCutoff = twasWeightCutoff,
+      csMinCor         = csMinCor,
+      minPipCutoff     = minPipCutoff,
+      maxNumVariants   = maxNumVariants)
+    if (length(kept) < 1L) next
+    vids <- kept$vids; w <- kept$w
+
+    Rwgt   <- ldPanel$R[vids, vids, drop = FALSE]
+    wgtMat <- matrix(w, ncol = 1L, dimnames = list(vids, "wgt"))
+
+    # Per-gene chromosome + BP span derived from the cached snpInfo
+    # AFTER filtering (so p0/p1 reflect the retained variants).
     rowIdx <- match(vids, panelInfo$id)
     gChrom <- as.integer(panelInfo$chrom[[rowIdx[1L]]])
     gP0 <- min(as.integer(panelInfo$pos[rowIdx]))
@@ -272,6 +335,110 @@ ctwasPipeline <- function(gwasSumStats,
       weight_name  = paste(gContext, gContext, sep = "_"))
   }
   out
+}
+
+# Look up the per-(study, context, trait, method) PIP vector and the
+# 95% credible-set membership / purity for one gene from the supplied
+# FineMappingResult. Returns NULL when no FineMappingResult was passed
+# or no matching tuple exists. Output is a list with:
+#   pip       : named numeric vector keyed by variant_id
+#   csMembers : list of character vectors (one per CS at 95% coverage)
+#   csPurity  : numeric vector aligned with csMembers
+# @noRd
+.ctwasGetFinemapAux <- function(fineMappingResult, study, context, trait,
+                                method) {
+  if (is.null(fineMappingResult)) return(NULL)
+  selectors <- list(study = study, method = method)
+  if ("context" %in% names(fineMappingResult)) selectors$context <- context
+  if ("trait"   %in% names(fineMappingResult)) selectors$trait   <- trait
+  entry <- tryCatch(
+    do.call(getFineMappingResult,
+            c(list(fineMappingResult), selectors)),
+    error = function(e) NULL)
+  if (is.null(entry)) return(NULL)
+  tl <- entry@topLoci
+  if (nrow(tl) == 0L) return(NULL)
+  pip <- if ("pip" %in% names(tl))
+            setNames(as.numeric(tl$pip), as.character(tl$variant_id))
+         else NULL
+  # Per-CS membership at 95% coverage. cs_95 stores `<method>_<idx>`
+  # where idx == 0 means "not in any CS".
+  csMembers <- list(); csPurity <- numeric(0)
+  if ("cs_95" %in% names(tl)) {
+    csIdx <- suppressWarnings(as.integer(sub("^.*_", "", tl$cs_95)))
+    keepIdx <- !is.na(csIdx) & csIdx > 0L
+    for (k in sort(unique(csIdx[keepIdx]))) {
+      members <- as.character(tl$variant_id)[csIdx == k & keepIdx]
+      csMembers[[length(csMembers) + 1L]] <- members
+      # Pull the purity from cs_95_purity if present; same value
+      # broadcast to every row in the CS, so any row will do.
+      p <- if ("cs_95_purity" %in% names(tl))
+              as.numeric(tl$cs_95_purity[which(csIdx == k & keepIdx)[1L]])
+           else NA_real_
+      csPurity <- c(csPurity, p)
+    }
+  }
+  list(pip = pip, csMembers = csMembers, csPurity = csPurity)
+}
+
+# Apply the four trimCtwasVariants filters to one gene's (vids, w)
+# pair. Returns a list(vids, w) with the retained subset, or NULL when
+# no variants survive. Filter order:
+#   1. Magnitude:   drop variants with |w| < twasWeightCutoff
+#   2. CS rescue:   when fineMappingResult is provided, mark variants
+#                   in any high-purity CS (purity >= csMinCor) as
+#                   "must-keep"
+#   3. PIP rescue:  mark variants with PIP > minPipCutoff as must-keep
+#   4. Cap:         if surviving variants > maxNumVariants, keep all
+#                   must-keep variants and fill remaining slots by
+#                   descending PIP (or |w| when no PIP available)
+# @noRd
+.ctwasFilterVariants <- function(vids, w, finemapAux,
+                                 twasWeightCutoff, csMinCor,
+                                 minPipCutoff, maxNumVariants) {
+  if (length(vids) == 0L) return(NULL)
+  # Step 1: magnitude.
+  if (twasWeightCutoff > 0) {
+    magKeep <- !is.na(w) & abs(w) >= twasWeightCutoff
+    vids <- vids[magKeep]; w <- w[magKeep]
+    if (length(vids) == 0L) return(NULL)
+  }
+  # Steps 2-3: PIP / CS rescue (only when fineMappingResult was passed).
+  mustKeep <- character(0)
+  if (!is.null(finemapAux)) {
+    if (length(finemapAux$csMembers) > 0L && csMinCor > 0) {
+      for (k in seq_along(finemapAux$csMembers)) {
+        if (!is.na(finemapAux$csPurity[k]) &&
+            finemapAux$csPurity[k] >= csMinCor) {
+          mustKeep <- union(mustKeep,
+                            intersect(finemapAux$csMembers[[k]], vids))
+        }
+      }
+    }
+    if (!is.null(finemapAux$pip) && minPipCutoff > 0) {
+      hits <- names(finemapAux$pip)[finemapAux$pip > minPipCutoff]
+      mustKeep <- union(mustKeep, intersect(hits, vids))
+    }
+  }
+  # Step 4: cap. Always keep must-keep variants; fill the rest by
+  # descending PIP (when PIP available) or descending |w|.
+  if (length(vids) > maxNumVariants && is.finite(maxNumVariants)) {
+    priorities <- if (!is.null(finemapAux) && !is.null(finemapAux$pip)) {
+      unname(finemapAux$pip[vids])  # NAs for variants without PIP
+    } else NULL
+    if (is.null(priorities) || all(is.na(priorities))) {
+      priorities <- abs(w)
+    } else {
+      # Fall back to |w| for variants the PIP table doesn't know about.
+      priorities[is.na(priorities)] <- abs(w)[is.na(priorities)]
+    }
+    # Order: must-keep first, then the rest by descending priority.
+    isMust <- vids %in% mustKeep
+    ord <- order(!isMust, -priorities)
+    keepIdx <- ord[seq_len(min(maxNumVariants, length(vids)))]
+    vids <- vids[keepIdx]; w <- w[keepIdx]
+  }
+  list(vids = vids, w = w)
 }
 
 # Build z_gene data.frame from a TWAS-Z GRanges (output of

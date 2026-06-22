@@ -1556,7 +1556,7 @@ hdlUnivariate <- function(z, n, eigenRef, annotations = NULL,
 #'   to bridge H2Estimate into the sldscWrapper.R postprocessing pipeline.
 #' @name pecotmr-h2-wrappers
 #' @keywords internal
-#' @include allGenerics.R
+#' @include AllGenerics.R
 #' @importFrom stats median
 NULL
 

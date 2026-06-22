@@ -27,6 +27,11 @@ fineMappingPipeline(data, ...)
   fineMappingResult = NULL,
   naAction = c("drop", "impute"),
   verbose = 1,
+  trim = TRUE,
+  phenotypeCovariatesToResidualize = NULL,
+  genotypeCovariatesToResidualize = NULL,
+  residualizePhenotypeCovariates = TRUE,
+  residualizeGenotypeCovariates = TRUE,
   ...
 )
 
@@ -46,6 +51,11 @@ fineMappingPipeline(data, ...)
   fineMappingResult = NULL,
   naAction = c("drop", "impute"),
   verbose = 1,
+  trim = TRUE,
+  phenotypeCovariatesToResidualize = NULL,
+  genotypeCovariatesToResidualize = NULL,
+  residualizePhenotypeCovariates = TRUE,
+  residualizeGenotypeCovariates = TRUE,
   ...
 )
 
@@ -62,6 +72,7 @@ fineMappingPipeline(data, ...)
   minAbsCorr = 0.8,
   fineMappingResult = NULL,
   verbose = 1,
+  trim = TRUE,
   ...
 )
 
@@ -75,6 +86,7 @@ fineMappingPipeline(data, ...)
   minAbsCorr = 0.8,
   fineMappingResult = NULL,
   verbose = 1,
+  trim = TRUE,
   ...
 )
 
@@ -135,6 +147,41 @@ purity. Default \code{0.8}.}
 to use as a resume cache; tuples already present are not refit.}
 
 \item{verbose}{Verbosity (0 silent, 1 default). Default \code{1}.}
+
+\item{trim}{Logical (length 1). When \code{TRUE} (default) the
+\code{susieFit} slot on each output \code{FineMappingEntry} carries
+a trimmed view of the SuSiE fit (the minimal subset needed by
+downstream pipelines). When \code{FALSE} the full untrimmed
+\code{susie()} return is retained so accessors like
+\code{getSusieFit()} and non-default-coverage queries through
+\code{getCs()} can read the full posterior matrices
+(\code{lbf_variable}, \code{mu}, \code{mu2}, \code{V}). The
+per-variant \code{topLoci} table is always fully populated
+regardless of \code{trim}.}
+
+\item{phenotypeCovariatesToResidualize}{Character vector (or
+\code{NULL}) of phenotype-covariate names to residualize against.
+\code{NULL} (default) uses every available phenotype covariate.
+Only meaningful when the input is a \code{QtlDataset} /
+\code{MultiStudyQtlDataset} (ignored for sumstat inputs).}
+
+\item{genotypeCovariatesToResidualize}{Character vector (or
+\code{NULL}) of genotype-covariate column names to residualize
+against. \code{NULL} uses every available genotype covariate.}
+
+\item{residualizePhenotypeCovariates}{Logical (length 1). When
+\code{TRUE} (default) residualize against the phenotype-side
+covariates listed in \code{phenotypeCovariatesToResidualize}. Set
+\code{FALSE} to disable phenotype-covariate residualization
+entirely. The marginal univariate effects stored on each
+\code{FineMappingEntry} obey the same residualization choice as
+the SuSiE fit itself — they are computed against the same
+residualized \code{X} / \code{Y}.}
+
+\item{residualizeGenotypeCovariates}{Logical (length 1). When
+\code{TRUE} (default) residualize against the genotype-side
+covariates listed in \code{genotypeCovariatesToResidualize}. Set
+\code{FALSE} to disable.}
 
 \item{ldBlocks}{For \code{GwasSumStats} input only: an
 \code{LdBlocks} object describing the LD-block partition. The

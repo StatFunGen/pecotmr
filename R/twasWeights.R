@@ -10,7 +10,7 @@
 # (learnTwasWeights, CV, ensemble, etc.) follow at the bottom.
 # =============================================================================
 
-#' @include allGenerics.R tupleSelectors.R
+#' @include AllGenerics.R tupleSelectors.R
 NULL
 
 setClass("TwasWeights",

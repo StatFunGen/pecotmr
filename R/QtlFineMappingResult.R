@@ -11,7 +11,7 @@
 # the joint dispatchers.
 # =============================================================================
 
-#' @include FineMappingResultBase.R tupleSelectors.R
+#' @include AllClasses.R tupleSelectors.R
 NULL
 
 setClass("QtlFineMappingResult",
@@ -169,19 +169,29 @@ setMethod("getCs", "QtlFineMappingResult",
 #' @export
 setMethod("getTopLoci", "QtlFineMappingResult",
   function(x, type = c("data.frame", "GRanges"),
+           signalCutoff = 0.025,
            study = NULL, context = NULL, trait = NULL, method = NULL,
            ...) {
     entry <- getFineMappingResult(x, study, context, trait, method)
-    getTopLoci(entry, type = match.arg(type))
+    getTopLoci(entry, type = match.arg(type), signalCutoff = signalCutoff)
   })
 
-#' @rdname getTrimmedFit
+#' @rdname getMarginalEffects
 #' @export
-setMethod("getTrimmedFit", "QtlFineMappingResult",
+setMethod("getMarginalEffects", "QtlFineMappingResult",
+  function(x, maxPval = NULL,
+           study = NULL, context = NULL, trait = NULL, method = NULL, ...) {
+    entry <- getFineMappingResult(x, study, context, trait, method)
+    getMarginalEffects(entry, maxPval = maxPval)
+  })
+
+#' @rdname getSusieFit
+#' @export
+setMethod("getSusieFit", "QtlFineMappingResult",
   function(x, study = NULL, context = NULL, trait = NULL, method = NULL,
            ...) {
     entry <- getFineMappingResult(x, study, context, trait, method)
-    getTrimmedFit(entry)
+    getSusieFit(entry)
   })
 
 #' @rdname getVariantIds

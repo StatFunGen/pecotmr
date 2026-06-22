@@ -10,7 +10,7 @@
 # context/trait (GWAS has no per-tuple context or trait axis).
 # =============================================================================
 
-#' @include FineMappingResultBase.R tupleSelectors.R
+#' @include AllClasses.R tupleSelectors.R
 NULL
 
 setClass("GwasFineMappingResult",
@@ -153,17 +153,27 @@ setMethod("getCs", "GwasFineMappingResult",
 #' @export
 setMethod("getTopLoci", "GwasFineMappingResult",
   function(x, type = c("data.frame", "GRanges"),
+           signalCutoff = 0.025,
            study = NULL, context = NULL, trait = NULL, method = NULL, ...) {
     entry <- getFineMappingResult(x, study = study, method = method)
-    getTopLoci(entry, type = match.arg(type))
+    getTopLoci(entry, type = match.arg(type), signalCutoff = signalCutoff)
   })
 
-#' @rdname getTrimmedFit
+#' @rdname getMarginalEffects
 #' @export
-setMethod("getTrimmedFit", "GwasFineMappingResult",
+setMethod("getMarginalEffects", "GwasFineMappingResult",
+  function(x, maxPval = NULL,
+           study = NULL, context = NULL, trait = NULL, method = NULL, ...) {
+    entry <- getFineMappingResult(x, study = study, method = method)
+    getMarginalEffects(entry, maxPval = maxPval)
+  })
+
+#' @rdname getSusieFit
+#' @export
+setMethod("getSusieFit", "GwasFineMappingResult",
   function(x, study = NULL, context = NULL, trait = NULL, method = NULL, ...) {
     entry <- getFineMappingResult(x, study = study, method = method)
-    getTrimmedFit(entry)
+    getSusieFit(entry)
   })
 
 #' @rdname getVariantIds

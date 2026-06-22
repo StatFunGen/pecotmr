@@ -1425,7 +1425,7 @@ context("twasWeights internal helpers (extra)")
 .tw_makeFmEntry <- function(method_tag = "susie", n = 3) {
   FineMappingEntry(
     variantIds = paste0("v", seq_len(n)),
-    trimmedFit = list(payload = method_tag),
+    susieFit = list(payload = method_tag),
     topLoci    = data.frame(variant_id = paste0("v", seq_len(n)),
                             pip = seq(0.9, by = -0.1, length.out = n),
                             stringsAsFactors = FALSE))

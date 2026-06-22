@@ -7,7 +7,7 @@
 # indexed GWAS fine-mapping.
 # =============================================================================
 
-#' @include allGenerics.R
+#' @include AllGenerics.R
 NULL
 
 setClass("LdBlocks",

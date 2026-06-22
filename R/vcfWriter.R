@@ -1,4 +1,4 @@
-#' @include allGenerics.R
+#' @include AllGenerics.R
 #' @importFrom S4Vectors DataFrame SimpleList mcols
 #' @importFrom GenomicRanges GRanges seqnames
 #' @importFrom IRanges DataFrameList
@@ -61,97 +61,162 @@ setMethod("writeSumstatsVcf", signature("GwasSumStats"),
 setMethod("writeSumstatsVcf", signature("FineMappingResultBase"),
   function(x, outputPath, sampleName = NULL,
            study = NULL, context = NULL, trait = NULL, method = NULL,
+           splitByContext = FALSE, splitByTrait = FALSE,
            ...) {
   if (!requireNamespace("VariantAnnotation", quietly = TRUE))
     stop("Package 'VariantAnnotation' is required for writeSumstatsVcf")
 
-  # Resolve the single (study, context, trait, method) row to write.
-  if (is.null(study) || is.null(context) || is.null(trait) || is.null(method)) {
-    if (nrow(x) != 1L) {
-      stop("This FineMappingResult has ", nrow(x), " entries. ",
-           "Pass `study`, `context`, `trait`, and `method` to select one.")
-    }
-    study   <- as.character(x$study)[1L]
-    context <- as.character(x$context)[1L]
-    trait   <- as.character(x$trait)[1L]
-    method  <- as.character(x$method)[1L]
+  # Resolve the set of rows to write. With both selectors NULL and no
+  # split flags, the collection must have exactly one row. Splitting
+  # iterates over the unique values of the requested axis.
+  rowSpecs <- .resolveFineMappingRows(
+    x, study = study, context = context, trait = trait, method = method,
+    splitByContext = splitByContext, splitByTrait = splitByTrait)
+  out <- character(length(rowSpecs))
+  for (i in seq_along(rowSpecs)) {
+    spec <- rowSpecs[[i]]
+    out[[i]] <- .writeFineMappingVcf(x, spec,
+                                     outputPath = outputPath,
+                                     sampleName = sampleName,
+                                     splitByContext = splitByContext,
+                                     splitByTrait   = splitByTrait)
   }
-  entry <- getFineMappingResult(x, study, context, trait, method)
-  sampleName <- sampleName %||% sprintf("%s|%s|%s|%s",
-                                       study, context, trait, method)
-  tl <- getTopLoci(entry)
-  if (nrow(tl) == 0) stop("FineMappingEntry has no topLoci to write")
+  invisible(out)
+})
 
-  parsed <- parseVariantId(tl$variant_id)
-  nSnps <- nrow(parsed)
+# Resolve which (study, context, trait, method) rows to write. Without
+# the split flags this returns a single spec; with `splitByContext` or
+# `splitByTrait` the collection's rows are walked and one spec is emitted
+# per row (after applying any explicit selector filters).
+# @noRd
+.resolveFineMappingRows <- function(x, study, context, trait, method,
+                                    splitByContext, splitByTrait) {
+  hasContextSlot <- "context" %in% names(x)
+  hasTraitSlot   <- "trait"   %in% names(x)
+  rows <- seq_len(nrow(x))
+  if (!is.null(study))   rows <- rows[as.character(x$study)[rows]   == study]
+  if (hasContextSlot && !is.null(context))
+    rows <- rows[as.character(x$context)[rows] == context]
+  if (hasTraitSlot && !is.null(trait))
+    rows <- rows[as.character(x$trait)[rows]   == trait]
+  if (!is.null(method))  rows <- rows[as.character(x$method)[rows]  == method]
+  if (length(rows) == 0L)
+    stop("writeSumstatsVcf: no rows match the supplied selectors.")
+  if (!isTRUE(splitByContext) && !isTRUE(splitByTrait)) {
+    if (length(rows) != 1L)
+      stop("This FineMappingResult has ", length(rows), " matching rows. ",
+           "Pass `study`/`context`/`trait`/`method` to select one, or ",
+           "set `splitByContext = TRUE` / `splitByTrait = TRUE` to emit ",
+           "one file per row.")
+    return(list(.rowSpec(x, rows[[1L]])))
+  }
+  lapply(rows, function(r) .rowSpec(x, r))
+}
 
+# Build a (study, context, trait, method) spec list for one row index.
+# @noRd
+.rowSpec <- function(x, r) {
+  list(
+    study   = as.character(x$study)[r],
+    context = if ("context" %in% names(x)) as.character(x$context)[r]
+              else NA_character_,
+    trait   = if ("trait"   %in% names(x)) as.character(x$trait)[r]
+              else NA_character_,
+    method  = as.character(x$method)[r])
+}
+
+# Internal worker: write one (study, context, trait, method) tuple to a
+# single VCF. When `splitByContext` / `splitByTrait` is in play the
+# output path is decorated with the corresponding tag(s) so multiple
+# files don't collide.
+# @noRd
+.writeFineMappingVcf <- function(x, spec, outputPath, sampleName,
+                                 splitByContext, splitByTrait) {
+  entry <- getFineMappingResult(x, spec$study, spec$context, spec$trait,
+                                spec$method)
+  finalPath <- .decorateOutputPath(outputPath, spec, splitByContext,
+                                   splitByTrait)
+  sn <- sampleName %||% sprintf("%s|%s|%s|%s",
+                                 spec$study, spec$context %||% "_",
+                                 spec$trait %||% "_", spec$method)
+
+  # Body of the VCF is exclusively marginal univariate effects — no
+  # posterior output. By design the fine-mapping write-out emits the
+  # marginal sumstats so consumers can run their own downstream
+  # analysis (coloc, TWAS, etc.) on a uniform per-variant table.
+  marginal <- getMarginalEffects(entry)
+  if (nrow(marginal) == 0)
+    stop("writeSumstatsVcf: entry [", sn, "] has no variants to write")
+
+  nSnps <- nrow(marginal)
   geno <- list()
-  genoHeaderRows <- character(0)
-  genoNumber <- character(0)
-  genoType <- character(0)
-  genoDesc <- character(0)
-
-  # PIP
-  pipCol <- resolvePipColumn(tl)
-  if (!is.null(pipCol)) {
-    geno[["PIP"]] <- matrix(tl[[pipCol]], nSnps)
-    genoHeaderRows <- c(genoHeaderRows, "PIP")
-    genoNumber <- c(genoNumber, "A")
-    genoType <- c(genoType, "Float")
-    genoDesc <- c(genoDesc, "Posterior inclusion probability")
+  hdrRows <- character(0); hdrNum <- character(0)
+  hdrType <- character(0); hdrDesc <- character(0)
+  addGeno <- function(name, vec, type, desc) {
+    geno[[name]] <<- matrix(vec, nSnps)
+    hdrRows <<- c(hdrRows, name); hdrNum <<- c(hdrNum, "A")
+    hdrType <<- c(hdrType, type); hdrDesc <<- c(hdrDesc, desc)
   }
-
-  # CS
-  csCol <- grep("^cs_index", colnames(tl), value = TRUE)
-  if (length(csCol) > 0) {
-    geno[["CS"]] <- matrix(as.integer(tl[[csCol[1]]]), nSnps)
-    genoHeaderRows <- c(genoHeaderRows, "CS")
-    genoNumber <- c(genoNumber, "A")
-    genoType <- c(genoType, "Integer")
-    genoDesc <- c(genoDesc, "Credible set index (0 = not in any CS)")
+  if (any(!is.na(marginal$beta)))
+    addGeno("ES", marginal$beta, "Float",
+            "Marginal univariate effect-size estimate (effect allele)")
+  if (any(!is.na(marginal$se)))
+    addGeno("SE", marginal$se, "Float",
+            "Standard error of the marginal effect-size estimate")
+  if (any(!is.na(marginal$p))) {
+    lp <- ifelse(is.na(marginal$p) | marginal$p <= 0,
+                 NA_real_, -log10(marginal$p))
+    addGeno("LP", lp, "Float",
+            "-log10 p-value of the marginal univariate effect")
   }
-
-  # Effect size / SE if available
-  if ("beta" %in% colnames(tl)) {
-    geno[["ES"]] <- matrix(tl$beta, nSnps)
-    genoHeaderRows <- c(genoHeaderRows, "ES")
-    genoNumber <- c(genoNumber, "A")
-    genoType <- c(genoType, "Float")
-    genoDesc <- c(genoDesc, "Effect size estimate relative to the alternative allele")
-  }
-  if ("se" %in% colnames(tl)) {
-    geno[["SE"]] <- matrix(tl$se, nSnps)
-    genoHeaderRows <- c(genoHeaderRows, "SE")
-    genoNumber <- c(genoNumber, "A")
-    genoType <- c(genoType, "Float")
-    genoDesc <- c(genoDesc, "Standard error of effect size estimate")
-  }
-  if ("z" %in% colnames(tl)) {
-    pval <- 2 * pnorm(-abs(tl$z))
-    geno[["LP"]] <- matrix(-log10(pval), nSnps)
-    genoHeaderRows <- c(genoHeaderRows, "LP")
-    genoNumber <- c(genoNumber, "A")
-    genoType <- c(genoType, "Float")
-    genoDesc <- c(genoDesc, "-log10 p-value for effect estimate")
-  }
+  if (any(!is.na(marginal$N)))
+    addGeno("SS", as.integer(marginal$N), "Integer", "Sample size")
+  if (any(!is.na(marginal$MAF)))
+    addGeno("AF", marginal$MAF, "Float", "Minor allele frequency")
 
   genoHeader <- DataFrame(
-    Number = genoNumber,
-    Type = genoType,
-    Description = genoDesc,
-    row.names = genoHeaderRows)
+    Number = hdrNum, Type = hdrType, Description = hdrDesc,
+    row.names = hdrRows)
 
   .writeVcfImpl(
-    chrom = parsed$chrom,
-    pos = parsed$pos,
-    ref = parsed$A2,
-    alt = parsed$A1,
-    snpIds = tl$variant_id,
+    chrom = marginal$chrom,
+    pos = marginal$pos,
+    ref = marginal$A2,
+    alt = marginal$A1,
+    snpIds = marginal$variant_id,
     geno = geno,
     genoHeader = genoHeader,
-    sampleName = sampleName,
-    outputPath = outputPath)
-})
+    sampleName = sn,
+    outputPath = finalPath)
+  finalPath
+}
+
+# Decorate `outputPath` with the spec's context / trait tags when split
+# flags are set. Preserves the file extension. Examples:
+#   "out.vcf" + (context="brain") -> "out.brain.vcf"
+#   "out.vcf.bgz" + (context="brain", trait="ENSG1") -> "out.brain.ENSG1.vcf.bgz"
+# @noRd
+.decorateOutputPath <- function(outputPath, spec, splitByContext,
+                                splitByTrait) {
+  if (!isTRUE(splitByContext) && !isTRUE(splitByTrait)) return(outputPath)
+  ext <- tolower(tools::file_ext(outputPath))
+  composite <- ext == "bgz" || ext == "gz"
+  base <- if (composite) {
+    sub("\\.[^.]+\\.(bgz|gz)$", "", outputPath, ignore.case = TRUE)
+  } else {
+    tools::file_path_sans_ext(outputPath)
+  }
+  ext_keep <- substr(outputPath, nchar(base) + 1L, nchar(outputPath))
+  tags <- character(0)
+  if (isTRUE(splitByContext) &&
+      !is.null(spec$context) && !is.na(spec$context) && nzchar(spec$context))
+    tags <- c(tags, spec$context)
+  if (isTRUE(splitByTrait) &&
+      !is.null(spec$trait) && !is.na(spec$trait) && nzchar(spec$trait))
+    tags <- c(tags, spec$trait)
+  if (length(tags) == 0L) return(outputPath)
+  paste0(base, ".", paste(tags, collapse = "."), ext_keep)
+}
 
 # Internal implementation shared by all methods
 # @noRd

@@ -27,8 +27,23 @@ context("colocPipeline")
 .cp_makeFmEntry <- function(variant_ids = paste0("chr1:", 100 * (1:5), ":A:G"),
                              withLbf = TRUE, n_eff = 2L) {
   pip <- seq(0.9, by = -0.15, length.out = length(variant_ids))
-  tl <- data.frame(variant_id = variant_ids, pip = pip,
-                   stringsAsFactors = FALSE)
+  n <- length(variant_ids)
+  tl <- data.frame(
+    variant_id     = variant_ids,
+    chrom          = rep("1", n),
+    pos            = as.integer(100 * (1:n)),
+    A1             = rep("G", n),
+    A2             = rep("A", n),
+    N              = rep(1000, n),
+    MAF            = rep(0.1, n),
+    marginal_beta  = rep(0.1, n),
+    marginal_se    = rep(0.05, n),
+    marginal_z     = rep(2.0, n),
+    marginal_p     = rep(0.05, n),
+    pip            = pip,
+    posterior_mean = rep(0.05, n),
+    posterior_sd   = rep(0.02, n),
+    stringsAsFactors = FALSE)
   fit <- list(
     alpha = matrix(1/length(variant_ids),
                    nrow = n_eff, ncol = length(variant_ids),
@@ -40,7 +55,7 @@ context("colocPipeline")
                                nrow = n_eff, ncol = length(variant_ids),
                                dimnames = list(NULL, variant_ids))
   FineMappingEntry(variantIds = variant_ids,
-                   trimmedFit = fit,
+                   susieFit   = fit,
                    topLoci    = tl)
 }
 
@@ -228,7 +243,7 @@ test_that("colocPipeline: empty result has the documented schema", {
   emptyFit <- list(alpha = matrix(0, 1, 1), pip = c(v1 = 0),
                    V = 0, lbf_variable = matrix(NA_real_, 1, 1))
   e <- FineMappingEntry(variantIds = "v1",
-                        trimmedFit = emptyFit,
+                        susieFit = emptyFit,
                         topLoci = data.frame(variant_id = "v1", pip = 0,
                                               stringsAsFactors = FALSE))
   gfmr <- GwasFineMappingResult(
@@ -253,7 +268,7 @@ test_that("colocPipeline: empty result has the documented schema", {
 test_that(".colocExtractLbfFromEntry: entry without trimmedFit returns NULL with warning", {
   e <- FineMappingEntry(
     variantIds = "v1",
-    trimmedFit = NULL,
+    susieFit = NULL,
     topLoci    = data.frame(variant_id = "v1", pip = 0.1,
                             stringsAsFactors = FALSE))
   expect_warning(
@@ -271,7 +286,7 @@ test_that(".colocExtractLbfFromEntry: filterLbfCs subsets by cs_index", {
     lbf_variable = matrix(1:12, 3, 4, dimnames = list(NULL, paste0("v", 1:4))),
     sets = list(cs_index = c(1L, 3L)))   # keep effects 1 and 3
   e <- FineMappingEntry(variantIds = paste0("v", 1:4),
-                        trimmedFit = fit,
+                        susieFit = fit,
                         topLoci = data.frame(variant_id = paste0("v", 1:4),
                                               pip = c(0.9, 0.1, 0.5, 0.2),
                                               stringsAsFactors = FALSE))

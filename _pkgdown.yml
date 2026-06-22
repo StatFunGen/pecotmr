@@ -80,6 +80,450 @@ articles:
     contents:
     - qtl-gwas-resources
 
+reference:
+  - title: "Class definitions"
+    desc: >
+      S4 class definitions. The `-class` topic documents the slots and
+      validity constraints; the matching constructor topic (next
+      section) documents the user-facing factory function.
+    contents:
+      - AnnotationMatrix-class
+      - FineMappingResultBase-class
+      - GenotypeHandle-class
+      - H2Estimate-class
+      - LdData-class
+      - LdEigen-class
+      - LdScore-class
+      - LdStatistic-class
+      - MultiStudyQtlDataset-class
+      - SumStatsBase-class
+
+  - title: "Class constructors"
+    desc: >
+      User-facing constructors. For classes that have both a `-class`
+      topic and a constructor topic, prefer the constructor for
+      day-to-day use; the `-class` topic is the authoritative slot
+      reference.
+    contents:
+      - AnnotationMatrix
+      - FineMappingEntry
+      - GenotypeHandle
+      - GwasFineMappingResult
+      - GwasSumStats
+      - LdData
+      - MultiStudyQtlDataset
+      - QtlDataset
+      - QtlFineMappingResult
+      - QtlSumStats
+      - TwasWeights
+      - TwasWeightsEntry
+
+  - title: "Class methods"
+    desc: >
+      Accessor and behaviour methods grouped by the class they're
+      defined on. Generics with implementations on multiple classes
+      appear under each. S4 pipeline dispatch methods
+      (`fineMappingPipeline`, `colocboostPipeline`,
+      `twasWeightsPipeline`) are listed under "Pipelines" further
+      down rather than repeated per class.
+
+  - subtitle: "AnnotationMatrix"
+    contents:
+      - getAnnotationMeta
+      - getAnnotations
+      - getBaseline
+      - getCandidates
+      - getGenome
+      - getSnpRanges
+
+  - subtitle: "FineMappingEntry"
+    contents:
+      - adjustPips
+      - getCs
+      - getMarginalEffects
+      - getPip
+      - getSusieFit
+      - getTopLoci
+      - getVariantIds
+
+  - subtitle: "FineMappingResultBase"
+    contents:
+      - getLdSketch
+      - getMethodNames
+      - getStudy
+      - writeSumstatsVcf
+
+  - subtitle: "GenotypeHandle"
+    contents:
+      - getFormat
+      - getNSamples
+      - getPath
+      - getPgenPtr
+      - getSampleIds
+      - getSnpInfo
+      - readGenotypes
+
+  - subtitle: "GwasFineMappingResult"
+    contents:
+      - getContexts
+      - getFineMappingResult
+      - getTraits
+
+  - subtitle: "GwasSumStats"
+    contents:
+      - getMaf
+      - getN
+      - getSumStats
+      - getSumstatDf
+      - getVarY
+      - getZ
+      - nSnps
+      - subsetChr
+
+  - subtitle: "H2Estimate"
+    contents:
+      - getEnrichment
+      - getH2
+      - getLocal
+      - getScoreStats
+      - getTauBlocks
+
+  - subtitle: "LdBlocks"
+    contents:
+      - getBlocks
+
+  - subtitle: "LdData"
+    contents:
+      - getBlockMetadata
+      - getCorrelation
+      - getGenotypeHandle
+      - getGenotypes
+      - getMixtureWeights
+      - getNRef
+      - getRefPanel
+      - getSnpIdx
+      - getVariantInfo
+      - hasGenotypes
+
+  - subtitle: "LdEigen"
+    contents:
+      - getEigenList
+
+  - subtitle: "LdScore"
+    contents:
+      - getLdMatrixList
+      - getLdScoreWeights
+      - getLdScores
+
+  - subtitle: "LdStatistic"
+    contents:
+      - getInSample
+      - getLdBlocks
+
+  - subtitle: "MultiStudyQtlDataset"
+    contents:
+      - getQtlDatasets
+
+  - subtitle: "QtlDataset"
+    contents:
+      - getGenotypeCovariates
+      - getGenotypes
+      - getPhenotypeCovariates
+      - getPhenotypes
+      - getResidualizedGenotypes
+      - getResidualizedPhenotypes
+      - getScaleResiduals
+
+  - subtitle: "QtlFineMappingResult"
+    contents:
+      - getFineMappingResult
+
+  - subtitle: "QtlSumStats"
+    contents:
+      - getContexts
+      - getTraits
+
+  - subtitle: "SumStatsBase"
+    contents:
+      - getQcInfo
+
+  - subtitle: "TwasWeights"
+    contents:
+      - getCvPerformance
+      - getDataType
+      - getFits
+      - getStandardized
+      - getTwasWeights
+      - getWeights
+
+  - subtitle: "TwasWeightsEntry"
+    contents:
+      # Same generic surface as TwasWeights — dispatches on per-row entries.
+      - getCvPerformance
+      - getDataType
+      - getFits
+      - getStandardized
+      - getVariantIds
+      - getWeights
+
+  - title: "Pipelines"
+    desc: >
+      End-to-end pipeline entry points. Each takes one or more S4
+      input classes and returns a SumStats, FineMappingResult,
+      TwasWeights collection, or a tabular summary.
+    contents:
+      - causalInferencePipeline
+      - colocboostPipeline
+      - colocPipeline
+      - ctwasPipeline
+      - fineMappingPipeline
+      - mashPipeline
+      - qtlEnrichmentPipeline
+      - twasWeightsPipeline
+
+  - title: "Quality control"
+    desc: >
+      Summary-statistics QC orchestrator plus the underlying allele
+      harmonization, LD-mismatch, kriging, SLALOM, DENTIST, RAISS,
+      and relatedness checks.
+    contents:
+      - summaryStatsQc
+      - alignVariantNames
+      - ldMismatchQc
+      - krigingOutlierQc
+      - slalom
+      - dentist
+      - dentistSingleWindow
+      - autoDecision
+      - raiss
+      - mergeVariantInfo
+      - parseCsCorr
+      - filterRelatedness
+
+  - title: "LD infrastructure"
+    desc: >
+      Loading and manipulating LD matrices, plus design-matrix
+      conditioning utilities.
+    contents:
+      - loadLdMatrix
+      - loadLdSketch
+      - checkLd
+      - enforceDesignFullRank
+      - ldClumpByScore
+      - ldLoader
+      - ldPruneByCorrelation
+      - filterVariantsByLdReference
+
+  - title: "Genotype I/O"
+    desc: >
+      Reading and manipulating per-region genotype data outside the
+      GenotypeHandle accessor surface.
+    contents:
+      - extractBlockGenotypes
+      - computeBlockLdCor
+      - loadGenotypeRegion
+      - readAfreq
+      - getRefVariantInfo
+      - invertMinmaxScaling
+
+  - title: "Variant ID and region helpers"
+    desc: >
+      Parsing, formatting, and overlap checks for variant IDs
+      (`chr:pos:A2:A1`) and genomic regions (`chr:start-end`).
+    contents:
+      - parseVariantId
+      - normalizeVariantId
+      - classifyVariantType
+      - regionToDf
+      - regionsOverlap
+      - findOverlappingRegions
+
+  - title: "Fine-mapping"
+    desc: >
+      SuSiE-family fit wrappers (individual-level and summary-stat
+      variants) plus the shared post-processing that produces the
+      unified `top_loci` table. The VCF writer for fine-mapping
+      results is documented under
+      \code{FineMappingResultBase} in the Class methods section above.
+    contents:
+      - susieWeights
+      - susieRssWeights
+      - susieInfWeights
+      - susieInfRssWeights
+      - susieAshWeights
+      - susieAshRssWeights
+      - mvsusieWeights
+      - mvsusieRssWeights
+      - fitMvsusie
+      - fitMvsusieRss
+      - fitFsusie
+      - fitSusieInfThenSusieRss
+      - fsusieGetCs
+      - fsusieWrapper
+      - getSusieResult
+      - buildTopLoci
+      - extractCsInfo
+      - extractTopPipInfo
+      - formatFinemappingOutput
+      - lbfToAlpha
+      - postprocessFinemappingFits
+
+  - title: "TWAS"
+    desc: >
+      Per-method weight-training functions invoked by
+      `twasWeightsPipeline()`, the cross-validation / ensembling
+      machinery that combines them, and multi-method p-value
+      combination. Grouped by method family below. (SuSiE-family
+      weight functions live under "Fine-mapping" above since they
+      double as fine-mappers.)
+
+  - subtitle: "Penalized regression"
+    contents:
+      - lassosumRss
+      - lassosumRssWeights
+      - mcpWeights
+      - mcpRssWeights
+      - scadWeights
+      - scadRssWeights
+      - l0learnWeights
+      - l0learnRssWeights
+      - penalizedRss
+
+  - subtitle: "Bayesian alphabet"
+    contents:
+      - bayesAlphabetWeights
+      - bayesAWeights
+      - bayesBWeights
+      - bayesCWeights
+      - bayesLWeights
+      - bayesNWeights
+      - bayesRWeights
+      - bLassoWeights
+      - prsCs
+      - prsCsWeights
+      - sdpr
+      - sdprWeights
+      - dprWeights
+
+  - subtitle: "mr.mash / mr.ash"
+    contents:
+      - mrashWeights
+      - mrAshRssWeights
+      - mrmashWeights
+      - mrmashRssWeights
+      - mrmashWrapper
+      - buildMrmashPriorMatrices
+      - computeCovDiag
+      - computeCovFlash
+
+  - subtitle: "Ensembling / cross-validation / prediction"
+    contents:
+      - learnTwasWeights
+      - ensembleWeights
+      - twasWeightsCv
+      - twasPredict
+      - twasZ
+      - estimateSparsity
+
+  - subtitle: "Multi-method p-value combination"
+    contents:
+      - combinePValues
+
+  - title: "mash helpers"
+    desc: >
+      Utilities exposed by the mash track for posterior contrast
+      construction, mixture management, and meta-analysis.
+    contents:
+      - makePairwiseContrastCol
+      - fitMashContrast
+      - metaAnalysisPerCell
+      - sanitizeMashData
+      - sliceMashData
+      - updateMashModelCov
+
+  - title: "Heritability and enrichment"
+    desc: >
+      Heritability estimation, LD-score computation, stratified
+      LD-score regression utilities, and per-variant QTL/GWAS
+      enrichment analysis (low-level kernel that powers
+      \code{qtlEnrichmentPipeline}).
+    contents:
+      - estimateH2
+      - computeLdScores
+      - computeSldscAnnotSd
+      - computeSldscMRef
+      - readAnnotations
+      - readSldscTrait
+      - standardizeSldscTrait
+      - h2EstimateToSldscTrait
+      - isBinarySldscAnnot
+      - metaSldscRandom
+      - qtlEnrichment
+
+  - title: "Bundled datasets and example helpers"
+    desc: >
+      Synthetic data shipped with the package for vignettes and
+      tests. `fixupExampleGenotypePaths()` re-points the bundled
+      GenotypeHandle paths at the install-time `inst/extdata/`
+      location.
+    contents:
+      - fixupExampleGenotypePaths
+      - qtl_dataset_example
+      - qtl_sumstats_example
+      - qtl_sumstats_multicontext_example
+      - gwas_sumstats_s4_example
+      - multi_study_qtl_dataset_example
+      - eqtl_region_example
+      - gwas_sumstats_example
+      - gwas_finemapping_example
+      - qtl_finemapping_example
+      - multitraite_data
+
+  - title: internal
+    desc: >
+      Deprecated entry points retained for backward compatibility.
+      Each emits a `.Deprecated()` warning and forwards to the
+      canonical replacement. Hidden from the reference index but
+      still searchable and rendered.
+    contents:
+      - alleleQc
+      - matchRefPanel
+      - xqtlEnrichmentWrapper
+      - computeQtlEnrichment
+      - colocWrapper
+      - colocPostProcessor
+      - enlocPipeline
+      - ctwasBimfileLoader
+      - getCtwasMetaData
+      - loadRegionalAssociationData
+      - loadRegionalUnivariateData
+      - loadRegionalRegressionData
+      - loadRegionalMultivariateData
+      - loadRegionalFunctionalData
+      - loadTwasWeights
+      - loadRssData
+      - loadMultitaskRegionalData
+      - regionDataToIndInput
+      - regionDataToRssInput
+      - harmonizeTwas
+      - harmonizeGwas
+      - loadStudyLd
+      - univariateAnalysisPipeline
+      - rssAnalysisPipeline
+      - multivariateAnalysisPipeline
+      - susieRssPipeline
+      - twasPipeline
+      - twasMultivariateWeightsPipeline
+      - standardiseSumstatsColumns
+      - loadTsvRegion
+      - batchLoadTwasWeights
+      - loadMultitraitTensorqtlSumstat
+      - loadMultitraitRSumstat
+      # Implementation details with .Rd topics but no front-facing role.
+      - as.data.frame.GwasSumStats
+      - rescaleCovW0
+      - "getSumStats,GwasSumStats-method"
+
 footer:
  structure:
   left: developed_by

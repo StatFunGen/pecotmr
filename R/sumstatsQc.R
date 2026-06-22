@@ -1319,7 +1319,7 @@ getSusieResult <- function(conData) {
   if (length(conData) == 0) return(NULL)
   fm <- conData$finemappingEntry
   if (is.null(fm) || !is(fm, "FineMappingEntry")) return(NULL)
-  trimmed <- getTrimmedFit(fm)
+  trimmed <- getSusieFit(fm)
   if (length(trimmed) == 0) return(NULL)
   trimmed
 }
@@ -1356,7 +1356,7 @@ getSusieResult <- function(conData) {
 #' @export
 extractCsInfo <- function(conData, csNames, topLociTable) {
   fm <- conData$finemappingEntry
-  trimmed <- getTrimmedFit(fm)
+  trimmed <- getSusieFit(fm)
   variantNames <- getVariantIds(fm)
   results <- map(seq_along(csNames), function(i) {
     csName <- csNames[i]
@@ -1435,7 +1435,7 @@ extractCsInfo <- function(conData, csNames, topLociTable) {
 #' @export
 extractTopPipInfo <- function(conData) {
   fm <- conData$finemappingEntry
-  trimmed <- getTrimmedFit(fm)
+  trimmed <- getSusieFit(fm)
   variantNames <- getVariantIds(fm)
   # Find the variant with the highest PIP
   topPipIndex <- which.max(trimmed$pip)

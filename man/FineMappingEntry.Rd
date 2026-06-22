@@ -2,48 +2,29 @@
 % Please edit documentation in R/FineMappingEntry.R
 \name{FineMappingEntry}
 \alias{FineMappingEntry}
-\title{TWAS Weights Entry (per-tuple payload)}
+\title{Create a FineMappingEntry Object}
 \usage{
-FineMappingEntry(variantIds, trimmedFit, topLoci, sumstats = NULL)
+FineMappingEntry(variantIds, susieFit, topLoci)
 }
 \arguments{
-\item{variantIds}{Character vector of variant IDs.}
+\item{variantIds}{Character vector of variant IDs in fit order.}
 
-\item{trimmedFit}{Method-specific fit object.}
+\item{susieFit}{The SuSiE fit object (full or trimmed; controlled by
+the pipeline's \code{trim} parameter).}
 
-\item{topLoci}{Long-format \code{data.frame}.}
-
-\item{sumstats}{Optional list of summary statistics, or \code{NULL}.}
+\item{topLoci}{Per-variant \code{data.frame} in canonical schema:
+identity columns (\code{variant_id, chrom, pos, A1, A2}), context
+(\code{N, MAF}), marginal columns (\code{marginal_beta,
+marginal_se, marginal_z, marginal_p}), posterior columns
+(\code{pip, posterior_mean, posterior_sd, cs_*, cs_*_purity}),
+pipeline stamps (\code{method, gene, event, grange_start,
+grange_end}). Unfiltered: one row per variant in the fit.}
 }
 \value{
 A \code{FineMappingEntry} object.
 }
 \description{
-S4 container for one method's TWAS weights, attached to
-  a \code{TwasWeights} row. One entry corresponds to one
-  \code{(study, context, trait, method)} tuple.
-
 Construct a \code{FineMappingEntry} payload for one
   \code{(study, context, trait, method)} row of a
   \code{FineMappingResult} collection.
 }
-\section{Slots}{
-
-\describe{
-\item{\code{variantIds}}{Character vector of variant IDs that have weights.}
-
-\item{\code{weights}}{Numeric vector (single-method, single-outcome) or
-matrix (multi-outcome).}
-
-\item{\code{fits}}{Optional method-specific fit object.}
-
-\item{\code{cvPerformance}}{Optional named list of CV metrics (\code{rsq},
-\code{pval}, etc.).}
-
-\item{\code{standardized}}{Logical (length 1). Whether the weights are on the
-standardized scale.}
-
-\item{\code{dataType}}{Data-type tag for downstream usage (e.g.,
-\code{"expression"}, \code{"splicing"}); may be \code{NULL}.}
-}}
-

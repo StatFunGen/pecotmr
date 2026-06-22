@@ -11,7 +11,7 @@ buildTopLoci(
   sumstats = NULL,
   af = NULL,
   method,
-  signalCutoff = 0.1,
+  signalCutoff = 0,
   dataX = NULL,
   dataY = NULL,
   otherQuantities = NULL,

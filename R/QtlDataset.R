@@ -11,7 +11,7 @@
 # multi-study composition (MultiStudyQtlDataset).
 # =============================================================================
 
-#' @include allGenerics.R
+#' @include AllGenerics.R
 NULL
 
 setClass("QtlDataset",

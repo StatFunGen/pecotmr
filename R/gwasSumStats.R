@@ -8,7 +8,7 @@
 # uniformly across rows.
 # =============================================================================
 
-#' @include SumStatsBase.R tupleSelectors.R
+#' @include AllClasses.R tupleSelectors.R
 NULL
 
 setClass("GwasSumStats",
@@ -59,7 +59,7 @@ setMethod("show", "GwasSumStats", function(object) {
 #' @importFrom GenomicRanges GRanges seqnames start
 #' @importFrom S4Vectors DataFrame mcols mcols<- SimpleList
 #' @importFrom IRanges IRanges
-#' @include allGenerics.R
+#' @include AllGenerics.R
 NULL
 
 # =============================================================================

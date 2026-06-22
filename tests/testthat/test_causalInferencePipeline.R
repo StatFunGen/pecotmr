@@ -80,14 +80,18 @@ context("causalInferencePipeline")
 }
 
 .cip_makeQtlFmr <- function(variant_ids = paste0("v", 1:5)) {
+  n <- length(variant_ids)
   tl <- data.frame(
-    variant_id = variant_ids,
-    pip        = c(0.9, 0.05, 0.5, 0.8, 0.01),
-    betahat    = c(0.2, 0.05, -0.1, 0.3, 0.0),
-    sebetahat  = rep(0.05, length(variant_ids)),
+    variant_id     = variant_ids,
+    pip            = c(0.9, 0.05, 0.5, 0.8, 0.01),
+    # posterior_mean / posterior_sd carry the "fine-mapped causal effect"
+    # estimates that getTopLoci surfaces as beta / se in its projected
+    # output (the column names downstream MR / TWAS code reads).
+    posterior_mean = c(0.2, 0.05, -0.1, 0.3, 0.0),
+    posterior_sd   = rep(0.05, n),
     stringsAsFactors = FALSE)
   e <- FineMappingEntry(variantIds = variant_ids,
-                        trimmedFit = list(),
+                        susieFit   = list(),
                         topLoci    = tl)
   QtlFineMappingResult(
     study   = "Q1", context = "c1", trait = "t1", method = "susie",
@@ -128,7 +132,7 @@ test_that("causalInferencePipeline: rejects non-TwasWeights twasWeights arg", {
 })
 
 test_that("causalInferencePipeline: rejects GwasFineMappingResult for the QTL slot", {
-  e <- FineMappingEntry(variantIds = "v1", trimmedFit = list(),
+  e <- FineMappingEntry(variantIds = "v1", susieFit = list(),
                         topLoci = data.frame(variant_id = "v1", pip = 0.1,
                                               stringsAsFactors = FALSE))
   gfmr <- GwasFineMappingResult(

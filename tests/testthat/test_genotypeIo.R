@@ -1283,7 +1283,7 @@ test_that("extractBlockGenotypes returns SummarizedExperiment", {
   pip <- as.numeric(1 - apply(1 - alpha, 2, prod))
   FineMappingEntry(
     variantIds = vids,
-    trimmedFit = list(
+    susieFit = list(
       pip          = pip,
       alpha        = alpha,
       lbf_variable = lbf,

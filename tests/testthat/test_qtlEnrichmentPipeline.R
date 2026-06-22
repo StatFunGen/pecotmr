@@ -32,7 +32,7 @@ context("qtlEnrichmentPipeline")
   fit <- list(alpha = alpha, pip = setNames(pip, variant_ids),
               V = 0.1)
   FineMappingEntry(variantIds = variant_ids,
-                   trimmedFit = fit,
+                   susieFit = fit,
                    topLoci    = tl)
 }
 
@@ -169,7 +169,7 @@ test_that("qtlEnrichmentPipeline: empty input collections yield the empty schema
   # vector is empty.
   emptyEntry <- FineMappingEntry(
     variantIds = "v1",
-    trimmedFit = list(),  # no pip -> .enrBuildGwasPipVector returns numeric(0)
+    susieFit = list(),  # no pip -> .enrBuildGwasPipVector returns numeric(0)
     topLoci    = data.frame(variant_id = "v1", pip = 0.1,
                             stringsAsFactors = FALSE))
   gfmr <- GwasFineMappingResult(

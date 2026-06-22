@@ -9,7 +9,7 @@
 #' @importFrom S4Vectors DataFrame mcols mcols<-
 #' @importFrom tools file_ext
 #' @importFrom methods as
-#' @include allGenerics.R
+#' @include AllGenerics.R
 NULL
 
 # =============================================================================

@@ -365,7 +365,7 @@
                  as.character(fineMappingResult$context) == context &
                  as.character(fineMappingResult$trait)   == trait)
     if (length(idx) > 0L) {
-      out[[canonical]] <- getTrimmedFit(fineMappingResult$entry[[idx[[1L]]]])
+      out[[canonical]] <- getSusieFit(fineMappingResult$entry[[idx[[1L]]]])
     }
   }
   out
@@ -470,9 +470,20 @@
 #' @param estimatePi If TRUE, estimate spike-and-slab sparsity from
 #'   mr.ash before BGLR / qgg spike-and-slab methods that consume it.
 #' @param phenotypeCovariatesToResidualize,genotypeCovariatesToResidualize
-#'   Pass-through to \code{\link{getResidualizedPhenotypes}} and
-#'   \code{\link{getResidualizedGenotypes}} for QtlDataset input.
-#'   Default \code{NULL} (use all covariates).
+#'   Character vector (or \code{NULL}) of covariate column names to
+#'   residualize against. Forwarded to
+#'   \code{\link{getResidualizedPhenotypes}} /
+#'   \code{\link{getResidualizedGenotypes}} for \code{QtlDataset} /
+#'   \code{MultiStudyQtlDataset} input. Default \code{NULL} (use all
+#'   available covariates). Ignored for sumstat inputs.
+#' @param residualizePhenotypeCovariates Logical (length 1). When
+#'   \code{TRUE} (default) residualize against the phenotype-side
+#'   covariates listed in \code{phenotypeCovariatesToResidualize}; set
+#'   \code{FALSE} to disable.
+#' @param residualizeGenotypeCovariates Logical (length 1). When
+#'   \code{TRUE} (default) residualize against the genotype-side
+#'   covariates listed in \code{genotypeCovariatesToResidualize}; set
+#'   \code{FALSE} to disable.
 #' @param dataType Optional data-type tag stamped into every
 #'   \code{TwasWeightsEntry$dataType} (e.g. \code{"expression"}).
 #' @param verbose Verbosity (0 silent, 1 default, 2 includes external
@@ -511,6 +522,8 @@ setMethod("twasWeightsPipeline", "QtlDataset",
            estimatePi             = TRUE,
            phenotypeCovariatesToResidualize = NULL,
            genotypeCovariatesToResidualize  = NULL,
+           residualizePhenotypeCovariates   = TRUE,
+           residualizeGenotypeCovariates    = TRUE,
            dataType               = NULL,
            naAction               = c("drop", "impute"),
            verbose                = 1,
@@ -603,12 +616,12 @@ setMethod("twasWeightsPipeline", "QtlDataset",
       cachedTw <- .twasBuildFromCachedRows(cachedRows, study, ctx, tid)
       if (length(remaining) == 0L) return(cachedTw)
 
-      Y <- getResidualizedPhenotypes(
+      Y <- .fmResidPheno(
         data, contexts = ctx, traitId = tid,
         phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
         genotypeCovariatesToResidualize  = genotypeCovariatesToResidualize,
         naAction = naAction)
-      X <- getResidualizedGenotypes(
+      X <- .fmResidGeno(
         data, contexts = ctx, traitId = tid,
         cisWindow = cisWindow,
         phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
@@ -654,7 +667,7 @@ setMethod("twasWeightsPipeline", "QtlDataset",
       # Joint over selected (contexts, traits): residualize, intersect
       # samples across contexts, drop subjects with any-NA in Y.
       Xlist <- lapply(useCtx, function(ctx) {
-        getResidualizedGenotypes(
+        .fmResidGeno(
           data, contexts = ctx, traitId = traits,
           cisWindow = cisWindow,
           phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
@@ -667,7 +680,7 @@ setMethod("twasWeightsPipeline", "QtlDataset",
       }
       X <- Xlist[[1L]][commonSamples, , drop = FALSE]
 
-      Yres <- getResidualizedPhenotypes(
+      Yres <- .fmResidPheno(
         data, contexts = useCtx, traitId = traits,
         phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
         genotypeCovariatesToResidualize  = genotypeCovariatesToResidualize,
@@ -1025,6 +1038,10 @@ setMethod("twasWeightsPipeline", "MultiStudyQtlDataset",
            twasWeights        = NULL,
            naAction           = c("drop", "impute"),
            verbose            = 1,
+           phenotypeCovariatesToResidualize = NULL,
+           genotypeCovariatesToResidualize  = NULL,
+           residualizePhenotypeCovariates   = TRUE,
+           residualizeGenotypeCovariates    = TRUE,
            ...) {
     naAction <- match.arg(naAction)
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)

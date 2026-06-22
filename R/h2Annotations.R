@@ -7,7 +7,7 @@
 #' @importFrom GenomicRanges GRanges
 #' @importFrom IRanges findOverlaps
 #' @importFrom S4Vectors queryHits subjectHits
-#' @include allGenerics.R
+#' @include AllGenerics.R
 NULL
 
 # =============================================================================

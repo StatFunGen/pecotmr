@@ -147,7 +147,7 @@ context("fineMappingPipeline")
     if (is.null(vids)) vids <- "v_unknown"
     FineMappingEntry(
       variantIds = vids,
-      trimmedFit = list(method = method, payload = fit),
+      susieFit = list(method = method, payload = fit),
       topLoci    = data.frame(variant_id = vids,
                               pip = seq(0.9, by = -0.1,
                                         length.out = length(vids)),
@@ -240,7 +240,7 @@ test_that(".fmCacheLookup: NULL fineMappingResult returns NULL", {
 test_that(".fmCacheLookup: returns matching entry by 4-tuple", {
   e <- FineMappingEntry(
     variantIds = "v1",
-    trimmedFit = list(token = "susie"),
+    susieFit = list(token = "susie"),
     topLoci    = data.frame(variant_id = "v1", pip = 0.5,
                             stringsAsFactors = FALSE))
   fmr <- QtlFineMappingResult(
@@ -254,7 +254,7 @@ test_that(".fmCacheLookup: returns matching entry by 4-tuple", {
 test_that(".fmCacheLookupGwas: returns matching entry by (study, method)", {
   e <- FineMappingEntry(
     variantIds = "v1",
-    trimmedFit = list(token = "susie"),
+    susieFit = list(token = "susie"),
     topLoci    = data.frame(variant_id = "v1", pip = 0.5,
                             stringsAsFactors = FALSE))
   fmr <- GwasFineMappingResult(study = "g1", method = "susie",
@@ -268,7 +268,7 @@ test_that(".fmCacheLookupGwas: returns matching entry by (study, method)", {
 test_that(".fmCacheLookup: non-QtlFineMappingResult input returns NULL", {
   e <- FineMappingEntry(
     variantIds = "v1",
-    trimmedFit = list(token = "susie"),
+    susieFit = list(token = "susie"),
     topLoci    = data.frame(variant_id = "v1", pip = 0.5,
                             stringsAsFactors = FALSE))
   gwasFmr <- GwasFineMappingResult(study = "g1", method = "susie",
@@ -279,7 +279,7 @@ test_that(".fmCacheLookup: non-QtlFineMappingResult input returns NULL", {
 test_that(".fmCacheLookupGwas: non-GwasFineMappingResult input returns NULL", {
   e <- FineMappingEntry(
     variantIds = "v1",
-    trimmedFit = list(token = "susie"),
+    susieFit = list(token = "susie"),
     topLoci    = data.frame(variant_id = "v1", pip = 0.5,
                             stringsAsFactors = FALSE))
   qtlFmr <- QtlFineMappingResult(
@@ -314,7 +314,7 @@ test_that(".fmBuildGwasResult: empty entries errors", {
 test_that(".rbindFineMappingResult: rejects non-FineMappingResultBase input", {
   e <- FineMappingEntry(
     variantIds = "v1",
-    trimmedFit = list(token = "susie"),
+    susieFit = list(token = "susie"),
     topLoci    = data.frame(variant_id = "v1", pip = 0.5,
                             stringsAsFactors = FALSE))
   fmr <- QtlFineMappingResult(
@@ -333,7 +333,7 @@ test_that(".rbindFineMappingResult: rejects non-FineMappingResultBase input", {
 test_that(".rbindFineMappingResult: rejects mixed Qtl/Gwas inputs", {
   e <- FineMappingEntry(
     variantIds = "v1",
-    trimmedFit = list(token = "susie"),
+    susieFit = list(token = "susie"),
     topLoci    = data.frame(variant_id = "v1", pip = 0.5,
                             stringsAsFactors = FALSE))
   qtlFmr <- QtlFineMappingResult(
@@ -350,7 +350,7 @@ test_that(".rbindFineMappingResult: rejects mixed Qtl/Gwas inputs", {
 test_that(".rbindFineMappingResult: concatenates two GwasFineMappingResult collections", {
   e <- FineMappingEntry(
     variantIds = "v1",
-    trimmedFit = list(token = "susie"),
+    susieFit = list(token = "susie"),
     topLoci    = data.frame(variant_id = "v1", pip = 0.5,
                             stringsAsFactors = FALSE))
   a <- GwasFineMappingResult(study = "g1", method = "susie", entry = list(e))
@@ -976,7 +976,7 @@ test_that("fineMappingPipeline(QtlSumStats): cache hit short-circuits the RSS fi
   ss <- .fmp_makeQtlSumStats()
   cachedEntry <- FineMappingEntry(
     variantIds = paste0("v", 1:5),
-    trimmedFit = list(token = "susie_cached"),
+    susieFit = list(token = "susie_cached"),
     topLoci    = data.frame(variant_id = paste0("v", 1:5),
                              pip = seq(0.9, 0.1, length.out = 5),
                              stringsAsFactors = FALSE))
@@ -1009,7 +1009,7 @@ test_that("fineMappingPipeline(GwasSumStats): cache hit short-circuits the RSS f
   gss <- .fmp_makeGwasSumStats()
   cachedEntry <- FineMappingEntry(
     variantIds = paste0("v", 1:5),
-    trimmedFit = list(token = "susie_cached"),
+    susieFit = list(token = "susie_cached"),
     topLoci    = data.frame(variant_id = paste0("v", 1:5),
                              pip = seq(0.9, 0.1, length.out = 5),
                              stringsAsFactors = FALSE))
@@ -1041,7 +1041,7 @@ test_that("fineMappingPipeline(GwasSumStats): wrong-shape cache (QtlFineMappingR
   gss <- .fmp_makeGwasSumStats()
   cachedEntry <- FineMappingEntry(
     variantIds = paste0("v", 1:5),
-    trimmedFit = list(token = "susie_cached"),
+    susieFit = list(token = "susie_cached"),
     topLoci    = data.frame(variant_id = paste0("v", 1:5),
                              pip = rep(0.5, 5),
                              stringsAsFactors = FALSE))
@@ -1070,7 +1070,7 @@ test_that("fineMappingPipeline(QtlDataset): cache hit avoids the fitter", {
   # Build a cache that already has the (study1, brain, ENSG_A, susie) row.
   cachedEntry <- FineMappingEntry(
     variantIds = paste0("v", 1:3),
-    trimmedFit = list(token = "susie_cached"),
+    susieFit = list(token = "susie_cached"),
     topLoci    = data.frame(variant_id = paste0("v", 1:3),
                              pip = c(0.9, 0.5, 0.1),
                              stringsAsFactors = FALSE))
@@ -1190,6 +1190,75 @@ test_that("loadStudyLd is a deprecated no-op", {
 test_that("loadRssData is a deprecated no-op", {
   expect_warning(res <- loadRssData(), "deprecated|removed")
   expect_null(res)
+})
+
+# ===========================================================================
+# Residualization flag propagation
+# ===========================================================================
+# .resPickFlags() walks up the call stack and harvests the four
+# residualization flags from whichever frame defines them. The
+# fineMappingPipeline / twasWeightsPipeline setMethod signatures
+# define these flags so they reach `getResidualized{Phenotypes,
+# Genotypes}` via the .fmResid* wrappers without per-call-site
+# threading.
+
+test_that(".resPickFlags picks up flags from the enclosing frame", {
+  outerFn <- function() {
+    # Mirror the QtlDataset setMethod's residualization signature.
+    residualizePhenotypeCovariates <- FALSE
+    residualizeGenotypeCovariates  <- TRUE
+    phenotypeCovariatesToResidualize <- c("age", "sex")
+    genotypeCovariatesToResidualize  <- NULL
+    innerFn <- function() {
+      pecotmr:::.resPickFlags()
+    }
+    innerFn()
+  }
+  flags <- outerFn()
+  expect_false(flags$residualizePhenotypeCovariates)
+  expect_true(flags$residualizeGenotypeCovariates)
+  expect_equal(flags$phenotypeCovariatesToResidualize, c("age", "sex"))
+  expect_null(flags$genotypeCovariatesToResidualize)
+})
+
+test_that(".resPickFlags returns an empty list when nothing is in scope", {
+  flags <- pecotmr:::.resPickFlags()
+  # Top-level call should not pick up any of the flags (the names are
+  # not defined here).
+  expect_false(any(c("residualizePhenotypeCovariates",
+                     "residualizeGenotypeCovariates") %in% names(flags)))
+})
+
+test_that(".fmResidGeno / .fmResidPheno forward picked-up flags to the real accessors", {
+  capturedGeno <- NULL
+  capturedPheno <- NULL
+  fakeGeno <- function(x, ...) {
+    capturedGeno <<- list(...); matrix(0, 0, 0)
+  }
+  fakePheno <- function(x, ...) {
+    capturedPheno <<- list(...); matrix(0, 0, 0)
+  }
+  local_mocked_bindings(
+    getResidualizedGenotypes  = fakeGeno,
+    getResidualizedPhenotypes = fakePheno,
+    .package = "pecotmr")
+
+  # Emulate the setMethod frame: define the four flags then call the
+  # wrappers.
+  outerFn <- function() {
+    residualizePhenotypeCovariates <- FALSE
+    residualizeGenotypeCovariates  <- TRUE
+    phenotypeCovariatesToResidualize <- "age"
+    genotypeCovariatesToResidualize  <- NULL
+    pecotmr:::.fmResidGeno(NULL, contexts = "c1")
+    pecotmr:::.fmResidPheno(NULL, contexts = "c1")
+  }
+  outerFn()
+  expect_false(capturedGeno$residualizePhenotypeCovariates)
+  expect_true(capturedGeno$residualizeGenotypeCovariates)
+  expect_equal(capturedGeno$phenotypeCovariatesToResidualize, "age")
+  expect_false(capturedPheno$residualizePhenotypeCovariates)
+  expect_true(capturedPheno$residualizeGenotypeCovariates)
 })
 
 # ===========================================================================

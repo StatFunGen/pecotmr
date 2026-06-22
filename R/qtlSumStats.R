@@ -9,7 +9,7 @@
 # summaryStatsQc() passes have been run.
 # =============================================================================
 
-#' @include SumStatsBase.R tupleSelectors.R
+#' @include AllClasses.R tupleSelectors.R
 NULL
 
 setClass("QtlSumStats",
@@ -52,7 +52,7 @@ setClass("QtlSumStats",
 #' @keywords internal
 #' @importFrom GenomicRanges GRanges seqnames start
 #' @importFrom S4Vectors DataFrame SimpleList mcols
-#' @include allGenerics.R
+#' @include AllGenerics.R
 NULL
 
 # =============================================================================

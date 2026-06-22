@@ -8,6 +8,7 @@ ctwasPipeline(
   gwasSumStats,
   twasWeights,
   twasZ = NULL,
+  fineMappingResult = NULL,
   regionId = "block1",
   thin = 0.1,
   niterPrefit = 3L,
@@ -16,6 +17,10 @@ ctwasPipeline(
   groupPriorVarStructure = c("shared_type", "shared_context", "shared_nonSNP",
     "shared_all", "independent"),
   ncore = 1L,
+  twasWeightCutoff = 0,
+  csMinCor = 0.8,
+  minPipCutoff = 0,
+  maxNumVariants = Inf,
   ...
 )
 }
@@ -31,6 +36,14 @@ context, trait, method) weights over the same LD block.}
 per-(trait, context) Z is used as the \code{z_gene} input to
 \code{ctwas_sumstats} so it is not recomputed.}
 
+\item{fineMappingResult}{Optional \code{QtlFineMappingResult} or
+\code{GwasFineMappingResult} carrying the per-variant PIP and
+credible-set membership data used by the CS / PIP rescue filters
+(\code{csMinCor} and \code{minPipCutoff}). When \code{NULL}
+(default) the smart filters are no-ops; only the magnitude filter
+(\code{twasWeightCutoff}) and the per-gene cap
+(\code{maxNumVariants}, ordered by \code{|weight|}) apply.}
+
 \item{regionId}{Optional character (length 1) label for the LD
 block. Default \code{"block1"}.}
 
@@ -41,6 +54,28 @@ block. Default \code{"block1"}.}
 \code{"shared_type"}).}
 
 \item{ncore}{Number of cores. Default \code{1}.}
+
+\item{twasWeightCutoff}{Numeric (length 1). Drop variants with
+\code{|weight| < twasWeightCutoff} from each gene's weight matrix
+before ctwas sees it. Default \code{0} (no filter).}
+
+\item{csMinCor}{Numeric (length 1). When \code{fineMappingResult} is
+provided, variants belonging to any 95\% credible set with purity
+(\code{min_abs_corr}) \code{>= csMinCor} are marked as must-keep
+and survive the per-gene cap. Default \code{0.8}. Ignored without
+a \code{fineMappingResult}.}
+
+\item{minPipCutoff}{Numeric (length 1). When
+\code{fineMappingResult} is provided, variants with PIP greater
+than \code{minPipCutoff} are marked as must-keep and survive the
+per-gene cap. Default \code{0} (no PIP rescue). Ignored without a
+\code{fineMappingResult}.}
+
+\item{maxNumVariants}{Numeric (length 1). Cap on per-gene variant
+count. When the gene has more variants than this, keep all
+must-keep variants and fill remaining slots by descending PIP
+(when available) or descending \code{|weight|}. Default
+\code{Inf} (no cap).}
 
 \item{...}{Additional arguments forwarded to
 \code{ctwas::ctwas_sumstats}.}

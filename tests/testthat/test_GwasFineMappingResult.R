@@ -100,13 +100,18 @@ test_that("GwasFineMappingResult: getContexts/getTraits return NULL", {
 })
 
 
-test_that("GwasFineMappingResult: getCs/getTopLoci/getTrimmedFit/getVariantIds dispatch", {
+test_that("GwasFineMappingResult: getCs/getTopLoci/getSusieFit/getVariantIds dispatch", {
   e <- .ca_makeFmEntry(3)
   res <- GwasFineMappingResult(study = "g1", method = "susie",
                                 entry = list(e))
   expect_equal(nrow(getCs(res)), 2L)
-  expect_equal(getTopLoci(res), .ca_makeTopLoci(3))
-  expect_equal(getTrimmedFit(res), list(payload = "fit_n=3"))
+  # getTopLoci returns the projected posterior view (filtered by default
+  # signalCutoff = 0.025; .ca_makeTopLoci sets all pip > 0.025 so all rows
+  # survive). Compare on the projected shape, not the slot's raw shape.
+  tl <- getTopLoci(res, signalCutoff = 0)
+  expect_equal(nrow(tl), 3L)
+  expect_equal(tl$variant_id, .ca_makeTopLoci(3)$variant_id)
+  expect_equal(getSusieFit(res), list(payload = "fit_n=3"))
   expect_equal(length(getVariantIds(res)), 3L)
 })
 

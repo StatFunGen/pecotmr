@@ -391,3 +391,114 @@ test_that("ctwasPipeline: real-engine end-to-end on the bundled example panel", 
   expect_true(all(c("susie_pip", "susie_alpha", "region_id")
                    %in% colnames(res$susie_alpha_res)))
 })
+
+# ===========================================================================
+# .ctwasFilterVariants — ported from R/ctwasWrapper.R::trimCtwasVariants
+# ===========================================================================
+# The filter has four knobs:
+#   1. twasWeightCutoff — drop |w| < cutoff
+#   2. csMinCor         — high-purity CS rescue (must-keep)
+#   3. minPipCutoff     — high-PIP rescue (must-keep)
+#   4. maxNumVariants   — per-gene cap, prioritized by PIP then |w|
+
+test_that(".ctwasFilterVariants: twasWeightCutoff drops low-magnitude variants", {
+  vids <- paste0("v", 1:6)
+  w    <- c(0.5, 0.001, 0.3, 0.0005, -0.4, 0)
+  out <- pecotmr:::.ctwasFilterVariants(
+    vids = vids, w = w, finemapAux = NULL,
+    twasWeightCutoff = 0.01, csMinCor = 0.8,
+    minPipCutoff = 0, maxNumVariants = Inf)
+  # Survivors: v1 (0.5), v3 (0.3), v5 (-0.4) — three with |w| >= 0.01
+  expect_setequal(out$vids, c("v1", "v3", "v5"))
+})
+
+test_that(".ctwasFilterVariants: maxNumVariants caps by |w| when no PIP", {
+  vids <- paste0("v", 1:5)
+  w    <- c(0.1, 0.5, 0.2, 0.4, 0.05)
+  out <- pecotmr:::.ctwasFilterVariants(
+    vids = vids, w = w, finemapAux = NULL,
+    twasWeightCutoff = 0, csMinCor = 0.8,
+    minPipCutoff = 0, maxNumVariants = 3)
+  # Top 3 by |w|: v2 (0.5), v4 (0.4), v3 (0.2)
+  expect_setequal(out$vids, c("v2", "v4", "v3"))
+})
+
+test_that(".ctwasFilterVariants: minPipCutoff rescues high-PIP variants from cap", {
+  vids <- paste0("v", 1:5)
+  w    <- c(0.5, 0.4, 0.3, 0.2, 0.1)
+  finemapAux <- list(
+    pip = setNames(c(0.01, 0.02, 0.8, 0.01, 0.95), vids),
+    csMembers = list(),
+    csPurity  = numeric(0))
+  out <- pecotmr:::.ctwasFilterVariants(
+    vids = vids, w = w, finemapAux = finemapAux,
+    twasWeightCutoff = 0, csMinCor = 0.8,
+    minPipCutoff = 0.5, maxNumVariants = 2)
+  # Must-keep (PIP > 0.5): v3, v5. Cap is 2 → both kept.
+  expect_setequal(out$vids, c("v3", "v5"))
+})
+
+test_that(".ctwasFilterVariants: csMinCor rescues high-purity CS members from cap", {
+  vids <- paste0("v", 1:6)
+  w    <- c(0.5, 0.4, 0.3, 0.2, 0.1, 0.05)
+  finemapAux <- list(
+    pip = setNames(rep(0, length(vids)), vids),
+    csMembers = list(c("v3", "v6"), c("v2", "v4")),
+    csPurity  = c(0.9, 0.5))  # CS 1 (v3, v6) is high-purity
+  out <- pecotmr:::.ctwasFilterVariants(
+    vids = vids, w = w, finemapAux = finemapAux,
+    twasWeightCutoff = 0, csMinCor = 0.8,
+    minPipCutoff = 0, maxNumVariants = 3)
+  # Must-keep from high-purity CS: v3, v6. Remaining slot filled by
+  # next-highest |w| that isn't must-keep: v1 (0.5).
+  expect_setequal(out$vids, c("v3", "v6", "v1"))
+})
+
+test_that(".ctwasFilterVariants: returns NULL when no variants survive", {
+  vids <- paste0("v", 1:3)
+  w    <- c(0.001, 0.0005, 0.002)
+  out <- pecotmr:::.ctwasFilterVariants(
+    vids = vids, w = w, finemapAux = NULL,
+    twasWeightCutoff = 0.5, csMinCor = 0.8,
+    minPipCutoff = 0, maxNumVariants = Inf)
+  expect_null(out)
+})
+
+test_that(".ctwasBuildWeights: maxNumVariants caps the per-gene weight matrix", {
+  data(qtl_dataset_example)
+  qd <- fixupExampleGenotypePaths(qtl_dataset_example)
+  gh <- qd@genotypes
+  vids <- gh@snpInfo$SNP[1:5]
+  ent <- TwasWeightsEntry(
+    variantIds = vids,
+    weights    = c(0.1, -0.2, 0.05, 0.3, 0.15))
+  tw <- TwasWeights(
+    study = "study1", context = "brain",
+    trait = "ENSG_example", method = "susie",
+    entry = list(ent), ldSketch = gh)
+  ldPanel <- pecotmr:::.ctwasComputeFullPanelLd(gh)
+  wl <- pecotmr:::.ctwasBuildWeights(tw, ldPanel, maxNumVariants = 3L)
+  expect_equal(wl[[1L]]$n_wgt, 3L)
+  expect_equal(nrow(wl[[1L]]$wgt), 3L)
+  # Top 3 by |w| from c(0.1, -0.2, 0.05, 0.3, 0.15): 0.3, -0.2, 0.15
+  expect_setequal(rownames(wl[[1L]]$wgt), vids[c(4L, 2L, 5L)])
+})
+
+test_that(".ctwasBuildWeights: twasWeightCutoff drops low-magnitude variants", {
+  data(qtl_dataset_example)
+  qd <- fixupExampleGenotypePaths(qtl_dataset_example)
+  gh <- qd@genotypes
+  vids <- gh@snpInfo$SNP[1:5]
+  ent <- TwasWeightsEntry(
+    variantIds = vids,
+    # v1 (0.005) and v3 (0.001) will be dropped at cutoff 0.01
+    weights    = c(0.005, 0.2, 0.001, 0.3, 0.1))
+  tw <- TwasWeights(
+    study = "study1", context = "brain",
+    trait = "ENSG_example", method = "susie",
+    entry = list(ent), ldSketch = gh)
+  ldPanel <- pecotmr:::.ctwasComputeFullPanelLd(gh)
+  wl <- pecotmr:::.ctwasBuildWeights(tw, ldPanel, twasWeightCutoff = 0.01)
+  expect_equal(wl[[1L]]$n_wgt, 3L)
+  expect_setequal(rownames(wl[[1L]]$wgt), vids[c(2L, 4L, 5L)])
+})

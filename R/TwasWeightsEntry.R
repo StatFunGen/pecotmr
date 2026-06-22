@@ -7,7 +7,7 @@
 # every row of a TwasWeights collection.
 # =============================================================================
 
-#' @include allGenerics.R
+#' @include AllGenerics.R
 NULL
 
 setClass("TwasWeightsEntry",

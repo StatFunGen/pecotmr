@@ -366,35 +366,54 @@ setGeneric("adjustPips",
 #' @export
 setGeneric("getPip", function(x, ...) standardGeneric("getPip"))
 
-#' @title Get Trimmed Fit
-#' @description Extract the trimmed SuSiE fit.
+#' @title Get SuSiE Fit
+#' @description Extract the SuSiE fit object from a fine-mapping entry
+#'   or result. The fit may be the trimmed view (when the pipeline ran
+#'   with the default \code{trim = TRUE}) or the full untrimmed
+#'   \code{susie()} return (when \code{trim = FALSE}).
 #' @param x A \code{FineMappingEntry} or \code{FineMappingResult}.
 #' @param ... Class-specific selection arguments.
-#' @return A list (trimmed SuSiE fit).
+#' @return A list (the SuSiE fit object).
 #' @export
-setGeneric("getTrimmedFit", function(x, ...) standardGeneric("getTrimmedFit"))
+setGeneric("getSusieFit", function(x, ...) standardGeneric("getSusieFit"))
 
-#' @title Get Variant Names
-#' @description Extract variant names.
-#' @param x A \code{FineMappingResult} object.
+#' @title Get Marginal Effects
+#' @description Extract per-variant marginal univariate effects from a
+#'   fine-mapping entry or result. Returns a \code{data.frame} with
+#'   identity columns (\code{variant_id, chrom, pos, A1, A2}), context
+#'   (\code{N, MAF}), and the marginal effect columns
+#'   (\code{beta, se, z, p}). Populated uniformly across the
+#'   individual-level and RSS paths.
+#' @param x A \code{FineMappingEntry} or \code{FineMappingResult}.
+#' @param maxPval Optional numeric (length 1). When non-\code{NULL},
+#'   filter rows where \code{p > maxPval}. Default \code{NULL}
+#'   (no filter — return all variants).
 #' @param ... Class-specific selection arguments.
-#' @return Character vector of variant names.
+#' @return A \code{data.frame}.
 #' @export
-setGeneric("getVariantNames",
-  function(x, ...) standardGeneric("getVariantNames"))
+setGeneric("getMarginalEffects",
+  function(x, maxPval = NULL, ...) standardGeneric("getMarginalEffects"))
 
-#' @title Get Top Loci
-#' @description Extract the top-loci payload as either a
-#'   \code{data.frame} (default, the on-disk shape) or a \code{GRanges}
-#'   (parsed from the \code{variant_id} \code{chr:pos:A2:A1} encoding,
-#'   with the remaining columns carried into \code{mcols}).
+#' @title Get Top Loci (posterior view)
+#' @description Extract the per-variant posterior fine-mapping payload
+#'   as either a \code{data.frame} (default) or a \code{GRanges}.
+#'   Returns identity columns (\code{variant_id, chrom, pos, A1, A2}),
+#'   context (\code{N, MAF}), the posterior effect columns
+#'   (\code{beta = posterior_mean, se = posterior_sd}), \code{pip},
+#'   and credible-set membership columns (\code{cs_95}, etc.).
+#'   Rows are filtered by PIP by default — set \code{signalCutoff = 0}
+#'   to return every variant.
 #' @param x A \code{FineMappingEntry} or \code{FineMappingResult}.
 #' @param type One of \code{"data.frame"} (default) or \code{"GRanges"}.
+#' @param signalCutoff Numeric (length 1). Drop rows where
+#'   \code{pip <= signalCutoff}. Default \code{0.025}. Use
+#'   \code{signalCutoff = 0} to keep every variant.
 #' @param ... Class-specific selection arguments.
 #' @return A \code{data.frame} or a \code{GRanges}.
 #' @export
 setGeneric("getTopLoci",
-  function(x, type = c("data.frame", "GRanges"), ...)
+  function(x, type = c("data.frame", "GRanges"),
+           signalCutoff = 0.025, ...)
     standardGeneric("getTopLoci"))
 
 #' @title Get Credible Sets
@@ -404,23 +423,6 @@ setGeneric("getTopLoci",
 #' @return A data.frame of credible set information.
 #' @export
 setGeneric("getCs", function(x, ...) standardGeneric("getCs"))
-
-#' @title Get Log Bayes Factors
-#' @description Extract per-variant log Bayes factors from a fine-mapping result.
-#' @param x A \code{FineMappingEntry} or \code{FineMappingResult}.
-#' @param ... Class-specific selection arguments.
-#' @return A data.frame with columns \code{variant_id} and one numeric column
-#'   per effect.
-#' @export
-setGeneric("getLbf", function(x, ...) standardGeneric("getLbf"))
-
-#' @title Get Per-Effect Fine-Mapping Summary
-#' @description Extract per-effect information from a fine-mapping result.
-#' @param x A \code{FineMappingEntry} or \code{FineMappingResult}.
-#' @param ... Class-specific selection arguments.
-#' @return A data.frame with one row per effect.
-#' @export
-setGeneric("getEffects", function(x, ...) standardGeneric("getEffects"))
 
 # =============================================================================
 # TwasWeights accessor generics
@@ -468,16 +470,6 @@ setGeneric("getFits", function(x, ...) standardGeneric("getFits"))
 #' @export
 setGeneric("getMethodNames", function(x) standardGeneric("getMethodNames"))
 
-#' @title Get Molecular ID (legacy)
-#' @description Legacy accessor. The molecular identifier is now stored
-#'   as the \code{trait} column on \code{TwasWeights} and
-#'   \code{FineMappingResult} collections — use \code{getTraits(x)}
-#'   instead.
-#' @param x The object.
-#' @return Character vector.
-#' @export
-setGeneric("getMolecularId", function(x) standardGeneric("getMolecularId"))
-
 #' @title Get Data Type
 #' @description Extract the data-type tag.
 #' @param x A \code{TwasWeightsEntry} or \code{TwasWeights}.
@@ -504,11 +496,22 @@ setGeneric("getDataType", function(x, ...) standardGeneric("getDataType"))
 #'   \code{chrom}, \code{pos}, \code{ref}, \code{alt}.
 #' @param outputPath File path for output. Extension determines format:
 #'   \code{.vcf.gz} or \code{.vcf.bgz} for bgzipped VCF,
-#'   \code{.bcf} for BCF, \code{.vcf} for uncompressed VCF.
+#'   \code{.bcf} for BCF, \code{.vcf} for uncompressed VCF. When
+#'   \code{splitByContext} or \code{splitByTrait} is \code{TRUE} on a
+#'   \code{FineMappingResult} method call, the corresponding tag is
+#'   appended to the file stem (e.g.
+#'   \code{out.vcf} + context = \code{"brain"} →
+#'   \code{out.brain.vcf}).
 #' @param sampleName Name for the VCF sample column (default: trait name or
 #'   method name from the S4 object).
-#' @param ... Additional arguments passed to methods.
-#' @return Invisible path to the written file.
+#' @param ... Additional arguments passed to methods. For the
+#'   \code{FineMappingResult} method these include \code{splitByContext}
+#'   (logical, default \code{FALSE}) and \code{splitByTrait} (logical,
+#'   default \code{FALSE}): when either is \code{TRUE}, write one VCF
+#'   per row of the collection with the tuple value appended to the
+#'   output filename.
+#' @return Invisible path (or character vector of paths when splitting)
+#'   to the written file(s).
 #' @export
 setGeneric("writeSumstatsVcf",
   function(x, outputPath, sampleName = NULL, ...) standardGeneric("writeSumstatsVcf"))

@@ -151,7 +151,7 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
   pieces <- list()
   for (i in idx) {
     entry <- gwasFmr$entry[[i]]
-    fit <- getTrimmedFit(entry)
+    fit <- getSusieFit(entry)
     if (is.null(fit) || is.null(fit$pip)) next
     pip <- as.numeric(fit$pip)
     ids <- if (!is.null(names(fit$pip))) names(fit$pip)
@@ -190,7 +190,7 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
   out <- list()
   for (i in idx) {
     entry <- qtlFmr$entry[[i]]
-    fit <- getTrimmedFit(entry)
+    fit <- getSusieFit(entry)
     if (is.null(fit) || is.null(fit$alpha) || is.null(fit$pip)) next
     pV <- if (!is.null(fit$V)) fit$V
           else if (!is.null(fit$prior_variance)) fit$prior_variance

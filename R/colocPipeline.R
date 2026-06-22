@@ -340,7 +340,7 @@ colocPipeline <- function(qtlFineMappingResult,
                                       filterLbfCsConcentration,
                                       priorTol,
                                       label = "entry") {
-  fit <- getTrimmedFit(entry)
+  fit <- getSusieFit(entry)
   if (is.null(fit)) {
     warning(sprintf("colocPipeline: %s has no trimmedFit; skipping.",
                     label))

@@ -19,7 +19,8 @@ postprocessFinemappingFits(
   priorEffTol = 1e-09,
   minAbsCorr = 0.8,
   medianAbsCorr = NULL,
-  csInput = NULL
+  csInput = NULL,
+  trim = TRUE
 )
 }
 \arguments{

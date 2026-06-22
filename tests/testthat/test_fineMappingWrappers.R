@@ -352,7 +352,7 @@ test_that("postprocessFinemappingFits keeps all effects when V is NULL", {
     coverage = 0.95
   )
   result <- formatFinemappingOutput(post, primaryMethod = "susieRss")
-  trimmed <- getTrimmedFit(result$finemappingEntry)
+  trimmed <- getSusieFit(result$finemappingEntry)
   # With V=NULL, eff_idx = 1:L, so trimmed alpha should keep all L rows
   expect_equal(nrow(trimmed$alpha), L)
   # V should be NULL in trimmed output
@@ -404,7 +404,7 @@ test_that("postprocessFinemappingFits stores outcome_names, coef, and clfsr for 
 
   # outcome_names should be stored as contextNames
   expect_equal(result$contextNames, cnames)
-  trimmed <- getTrimmedFit(result$finemappingEntry)
+  trimmed <- getSusieFit(result$finemappingEntry)
   # coef should come from mvsusieR::coef.mvsusie
   expect_equal(trimmed$coef, fake_coef[-1, , drop = FALSE])
   # conditional_lfsr should be trimmed to eff_idx
@@ -420,7 +420,7 @@ test_that("formatFinemappingOutput does not duplicate top loci variants", {
   )
   fm <- FineMappingEntry(
     variantIds = paste0("v", 1:4),
-    trimmedFit = list(pip = 1:4),
+    susieFit = list(pip = 1:4),
     topLoci = data.frame(variant_id = character(0), pip = numeric(0))
   )
   post <- list(
@@ -508,12 +508,12 @@ if (!exists(".make_univariate_data", inherits = FALSE)) {
 }
 
 .UNIFIED_TOP_LOCI_COLS <- c(
-  "#chr", "start", "end", "a1", "a2",
-  "variant", "gene", "event",
-  "n", "af", "beta", "se",
-  "pip", "posterior_effect_mean", "posterior_effect_se",
+  "variant_id", "chrom", "pos", "A1", "A2",
+  "N", "MAF",
+  "marginal_beta", "marginal_se", "marginal_z", "marginal_p",
+  "pip", "posterior_mean", "posterior_sd",
   "cs_95", "cs_70", "cs_50", "cs_95_purity",
-  "method", "grange_start", "grange_end"
+  "method", "gene", "event", "grange_start", "grange_end"
 )
 
 # Synthesize a SuSiE-like fit + cs_tables with explicit per-coverage CS
@@ -577,7 +577,8 @@ if (!exists(".make_univariate_data", inherits = FALSE)) {
 }
 
 .runBuildTopLoci <- function(inp, method = "susie", signalCutoff = 0.05,
-                             sumstats = NULL, af = NULL,
+                             af = NULL,
+                             sumstats = NULL,
                              otherQuantities = NULL,
                              region = NULL) {
   buildTopLoci(
@@ -603,23 +604,27 @@ test_that("buildTopLoci returns the exact 22-column schema in order with stable 
   out <- empty_fn()
   expect_equal(names(out), .UNIFIED_TOP_LOCI_COLS)
   expect_equal(nrow(out), 0L)
-  expect_true(is.character(out$"#chr"))
-  expect_true(is.integer(out$start))
-  expect_true(is.integer(out$end))
-  expect_true(is.character(out$variant))
-  expect_true(is.character(out$gene))
-  expect_true(is.character(out$event))
-  expect_true(is.integer(out$n))
-  expect_true(is.numeric(out$af))
-  expect_false("maf" %in% names(out))
+  expect_true(is.character(out$variant_id))
+  expect_true(is.character(out$chrom))
+  expect_true(is.integer(out$pos))
+  expect_true(is.character(out$A1))
+  expect_true(is.character(out$A2))
+  expect_true(is.numeric(out$N))
+  expect_true(is.numeric(out$MAF))
+  expect_true(is.numeric(out$marginal_beta))
+  expect_true(is.numeric(out$marginal_se))
+  expect_true(is.numeric(out$marginal_z))
+  expect_true(is.numeric(out$marginal_p))
   expect_true(is.numeric(out$pip))
-  expect_true(is.numeric(out$posterior_effect_mean))
-  expect_true(is.numeric(out$posterior_effect_se))
+  expect_true(is.numeric(out$posterior_mean))
+  expect_true(is.numeric(out$posterior_sd))
   expect_true(is.character(out$cs_95))
   expect_true(is.character(out$cs_70))
   expect_true(is.character(out$cs_50))
   expect_true(is.numeric(out$cs_95_purity))
   expect_true(is.character(out$method))
+  expect_true(is.character(out$gene))
+  expect_true(is.character(out$event))
   expect_true(is.integer(out$grange_start))
   expect_true(is.integer(out$grange_end))
 })
@@ -643,7 +648,7 @@ test_that("buildTopLoci emits 22 columns in the fixed order on a non-empty fit",
   expect_equal(unique(out$event), "Ast_DeJager_eQTL_ENSG00000179403")
   expect_equal(unique(out$grange_start), 10823338L)
   expect_equal(unique(out$grange_end),   14348298L)
-  expect_equal(unique(out$n), 419L)
+  expect_equal(unique(out$N), 419L)
   expect_equal(unique(out$method), "susie")
 })
 
@@ -727,7 +732,7 @@ test_that("cs_95_purity = 0 when cs_95 is '<method>_0', and in (0, 1] otherwise"
   expect_true(all(in_cs$cs_95_purity > 0 & in_cs$cs_95_purity <= 1))
 })
 
-test_that("overlapping CS within one method produces one row per CS membership", {
+test_that("overlapping CS within one method: one row per variant; smallest cs_idx wins", {
   variant_ids <- c("chr1:100:A:G")
   # One variant belongs to CS 1 AND CS 2 at 95-cov (overlap).
   cs_at_cov <- list("0.95" = list(1L, 1L),
@@ -735,12 +740,12 @@ test_that("overlapping CS within one method produces one row per CS membership",
                     "0.5"  = list(1L, 1L))
   inp <- .fake_fit_and_cs(variant_ids, cs_at_cov, pip = 0.9)
   out <- .runBuildTopLoci(inp, method = "susie")
-  # Two rows: one for CS 1 membership, one for CS 2 membership; same
-  # (variant, gene, method).
-  expect_equal(nrow(out), 2L)
-  expect_equal(unique(out$variant), "chr1:100:A:G")
-  expect_equal(unique(out$method), "susie")
-  expect_setequal(out$cs_95, c("susie_1", "susie_2"))
+  # Canonical schema is one row per variant. When a variant is in
+  # multiple CSs at a coverage, the smallest cs_idx is reported.
+  expect_equal(nrow(out), 1L)
+  expect_equal(out$variant_id, "chr1:100:A:G")
+  expect_equal(out$method, "susie")
+  expect_equal(out$cs_95, "susie_1")
 })
 
 test_that("overlapping CS across methods produces one row per method", {
@@ -851,7 +856,7 @@ test_that("formatFinemappingOutput exposes finemappingEntry with S4 accessors", 
   expect_true("finemappingEntry" %in% names(out))
   fm <- out$finemappingEntry
   expect_true(is.character(getVariantIds(fm)) && length(getVariantIds(fm)) == ncol(d$X))
-  expect_true(is.list(getTrimmedFit(fm)) && !is.null(getTrimmedFit(fm)$pip))
+  expect_true(is.list(getSusieFit(fm)) && !is.null(getSusieFit(fm)$pip))
 })
 
 test_that("missing region produces NA grange columns rather than silent omission", {
@@ -870,7 +875,7 @@ test_that("missing region produces NA grange columns rather than silent omission
   expect_equal(unique(out$event), "ctx_ENSG00000179403")
 })
 
-test_that("posterior_effect_mean equals colSums(alpha*mu); posterior_effect_se equals sqrt(pmax(colSums(alpha*mu2) - mean^2, 0))", {
+test_that("posterior_mean equals colSums(alpha*mu); posterior_sd equals sqrt(pmax(colSums(alpha*mu2) - mean^2, 0))", {
   variant_ids <- c("chr1:100:A:G", "chr1:200:C:T")
   cs_at_cov <- list("0.95" = list(c(1L, 2L)),
                     "0.7"  = list(c(1L, 2L)),
@@ -881,11 +886,11 @@ test_that("posterior_effect_mean equals colSums(alpha*mu); posterior_effect_se e
   expected_se   <- sqrt(pmax(colSums(inp$fit$alpha * inp$fit$mu2) - expected_mean^2, 0))
   # Match per variant index by looking up via variant string.
   for (i in seq_along(variant_ids)) {
-    row <- out[out$variant == variant_ids[i], , drop = FALSE]
+    row <- out[out$variant_id == variant_ids[i], , drop = FALSE]
     expect_true(nrow(row) >= 1L)
-    expect_equal(unique(row$posterior_effect_mean), expected_mean[i],
+    expect_equal(unique(row$posterior_mean), expected_mean[i],
                  tolerance = 1e-10)
-    expect_equal(unique(row$posterior_effect_se), expected_se[i],
+    expect_equal(unique(row$posterior_sd), expected_se[i],
                  tolerance = 1e-10)
   }
 })

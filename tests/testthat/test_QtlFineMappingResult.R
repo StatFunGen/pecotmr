@@ -244,31 +244,32 @@ test_that("QtlFineMappingResult: getPip(returnList = TRUE) wraps in pipe-keyed l
 
 
 test_that("QtlFineMappingResult: getCs filters to credible sets", {
-  e <- .ca_makeFmEntry(3)  # cs = c(1, 1, 0)
+  e <- .ca_makeFmEntry(3)  # cs_95 = c("susie_1", "susie_1", "susie_0")
   res <- QtlFineMappingResult(
     study = "s1", context = "c1", trait = "t1", method = "susie",
     entry = list(e))
   cs <- getCs(res)
   expect_equal(nrow(cs), 2L)
-  expect_true(all(cs$cs > 0))
 })
 
 
-test_that("QtlFineMappingResult: getTopLoci returns the entry's topLoci", {
+test_that("QtlFineMappingResult: getTopLoci returns the entry's topLoci (projected)", {
   e <- .ca_makeFmEntry(3)
   res <- QtlFineMappingResult(
     study = "s1", context = "c1", trait = "t1", method = "susie",
     entry = list(e))
-  expect_equal(getTopLoci(res), .ca_makeTopLoci(3))
+  tl <- getTopLoci(res, signalCutoff = 0)
+  expect_equal(nrow(tl), 3L)
+  expect_equal(tl$variant_id, .ca_makeTopLoci(3)$variant_id)
 })
 
 
-test_that("QtlFineMappingResult: getTrimmedFit reads the entry's trimmedFit", {
+test_that("QtlFineMappingResult: getSusieFit reads the entry's trimmedFit", {
   e <- .ca_makeFmEntry(3)
   res <- QtlFineMappingResult(
     study = "s1", context = "c1", trait = "t1", method = "susie",
     entry = list(e))
-  expect_equal(getTrimmedFit(res), list(payload = "fit_n=3"))
+  expect_equal(getSusieFit(res), list(payload = "fit_n=3"))
 })
 
 

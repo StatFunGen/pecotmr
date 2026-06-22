@@ -8,7 +8,7 @@ context("mash_wrapper")
 .testFineMappingEntry <- function(variantNames) {
     FineMappingEntry(
         variantIds = variantNames,
-        trimmedFit = list(pip = rep(0.5, length(variantNames))),
+        susieFit = list(pip = rep(0.5, length(variantNames))),
         topLoci = data.frame(variant_id = character(0),
                               pip = numeric(0),
                               stringsAsFactors = FALSE)

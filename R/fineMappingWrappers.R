@@ -258,7 +258,8 @@ postprocessFinemappingFits <- function(fits, dataX, dataY = NULL,
                                        priorEffTol = 1e-9,
                                        minAbsCorr = 0.8,
                                        medianAbsCorr = NULL,
-                                       csInput = NULL) {
+                                       csInput = NULL,
+                                       trim = TRUE) {
   fits <- fits[!vapply(fits, is.null, logical(1))]
   if (length(fits) == 0) stop("At least one fine-mapping fit must be supplied.")
   if (is.null(names(fits)) || any(names(fits) == "")) {
@@ -278,7 +279,8 @@ postprocessFinemappingFits <- function(fits, dataX, dataY = NULL,
       region = region,
       priorEffTol = priorEffTol, minAbsCorr = minAbsCorr,
       medianAbsCorr = medianAbsCorr,
-      csInput = csInput
+      csInput = csInput,
+      trim = trim
     )
   })
   names(posts) <- names(fits)
@@ -344,6 +346,7 @@ postprocessFinemappingFit.susiF <- function(fit, method = "fsusie", csInput = NU
                                              otherQuantities = NULL,
                                              region = NULL,
                                              priorEffTol = 1e-9,
+                                             trim = TRUE,
                                              minAbsCorr = 0.8,
                                              medianAbsCorr = NULL,
                                              csInput = c("X", "Xcorr", "fsusie")) {
@@ -356,32 +359,39 @@ postprocessFinemappingFit.susiF <- function(fit, method = "fsusie", csInput = NU
     secondaryCoverage = secondaryCoverage, method = method,
     csInput = csInput, minAbsCorr = minAbsCorr, medianAbsCorr = medianAbsCorr
   )
-  topLoci <- buildTopLoci(
+  # Always build the canonical unfiltered table; the FineMappingEntry
+  # slot stores it as-is so accessors can filter by PIP at query time.
+  # The wrapper-facing `top_loci` (in `res` below) preserves the legacy
+  # `signalCutoff` behaviour for non-S4 callers.
+  topLociFull <- buildTopLoci(
     fit, csTables, variantNames = variantNames, sumstats = sumstats,
-    af = af, method = method, signalCutoff = signalCutoff,
+    af = af, method = method, signalCutoff = 0,
     dataX = dataX, dataY = dataY, otherQuantities = otherQuantities,
     region = region
   )
 
-  trimmed <- trimFinemappingFit(fit, effectIdx, method, csTables)
+  # When `trim = TRUE` we store a minimal subset of the fit on the
+  # entry; when `trim = FALSE` we keep the full untrimmed susie return so
+  # downstream code can access `mu` / `mu2` / `lbf_variable` / `V` / etc.
+  storedFit <- if (isTRUE(trim)) {
+    trimFinemappingFit(fit, effectIdx, method, csTables)
+  } else {
+    fit
+  }
 
-  # Project the rich `top_loci` table down to the slot shape required by
-  # the FineMappingEntry validity check / vcf_writer / getPip / getCs
-  # accessors. The wrapper-facing `top_loci` returned to callers is
-  # unchanged.
-  s4TopLoci <- .topLociForS4Slot(topLoci)
-  # Return a bare `FineMappingEntry` payload. The caller (a pipeline step
-  # or user code) is responsible for wrapping one or more entries into a
-  # `FineMappingResult` collection with the correct (study, context,
-  # trait, method) identity tags and the appropriate `ldSketch`.
   fmEntry <- FineMappingEntry(
     variantIds = variantNames,
-    trimmedFit = trimmed,
-    topLoci    = s4TopLoci,
-    sumstats   = sumstats)
+    susieFit   = storedFit,
+    topLoci    = topLociFull)
+
+  topLociWrapper <- topLociFull
+  if (!is.null(signalCutoff) && signalCutoff > 0 && nrow(topLociWrapper) > 0L) {
+    keep <- !is.na(topLociWrapper$pip) & topLociWrapper$pip > signalCutoff
+    topLociWrapper <- topLociWrapper[keep, , drop = FALSE]
+  }
 
   res <- list(
-    top_loci = topLoci,
+    top_loci = topLociWrapper,
     finemappingEntry = fmEntry,
     method = method
   )
@@ -557,7 +567,7 @@ computeCsTable <- function(fit, dataX, coverage, csInput = c("X", "Xcorr", "fsus
 #'   or an empty data frame if nothing is retained.
 #' @export
 buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
-                         af = NULL, method, signalCutoff = 0.1,
+                         af = NULL, method, signalCutoff = 0,
                          dataX = NULL, dataY = NULL,
                          otherQuantities = NULL,
                          region = NULL) {
@@ -565,7 +575,7 @@ buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
       length(method) != 1L || is.na(method) || !nzchar(method)) {
     stop("buildTopLoci: `method` is required (e.g. \"susie\", \"susieInf\").")
   }
-  if (length(csTables) == 0) return(.emptyTopLoci())
+  if (length(variantNames) == 0L) return(.emptyTopLoci())
   coverageValues <- attr(csTables, "coverage")
   if (is.null(coverageValues)) coverageValues <- rep(NA_real_, length(csTables))
 
@@ -588,60 +598,16 @@ buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
   postMean <- if (!is.null(mu) && all(dim(alpha) == dim(mu))) {
     colSums(alpha * mu)
   } else rep(NA_real_, length(variantNames))
-  postSe <- if (!is.null(mu2) && all(dim(alpha) == dim(mu2))) {
+  postSd <- if (!is.null(mu2) && all(dim(alpha) == dim(mu2))) {
     sqrt(pmax(colSums(alpha * mu2) - postMean^2, 0))
   } else rep(NA_real_, length(variantNames))
 
-  # Collect CS-membership records (variant_idx, cs_idx, coverage) across all
-  # requested coverages. This is the only intermediate; the 22-column shape
-  # is projected from it below.
-  csRecords <- do.call(rbind, lapply(seq_along(csTables), function(i) {
-    ct <- csTables[[i]]
-    info <- getCsInfo(ct$sets$cs, getTopVariantsIdx(ct, signalCutoff))
-    if (is.null(info) || nrow(info) == 0) return(NULL)
-    data.frame(variant_idx = as.integer(info$variant_idx),
-               cs_idx      = as.integer(info$cs_idx),
-               coverage    = as.numeric(coverageValues[[i]]),
-               stringsAsFactors = FALSE)
-  }))
-  if (is.null(csRecords) || nrow(csRecords) == 0) return(.emptyTopLoci())
-
-  # Key grid: one row per (variant_idx, cs_idx). Overlapping CS membership
-  # within this method is preserved as separate keys.
-  keyGrid <- unique(csRecords[, c("variant_idx", "cs_idx"), drop = FALSE])
-  rownames(keyGrid) <- NULL
-  nKeys  <- nrow(keyGrid)
-  keyStr <- paste(keyGrid$variant_idx, keyGrid$cs_idx, sep = ":")
-
-  # For each requested coverage, which keys appear in csRecords at that
-  # coverage? Returns the key's cs_idx if present, else 0L.
-  idxAt <- function(cov) {
-    at <- csRecords[abs(csRecords$coverage - cov) < 1e-12, , drop = FALSE]
-    hits <- paste(at$variant_idx, at$cs_idx, sep = ":")
-    ifelse(keyStr %in% hits, keyGrid$cs_idx, 0L)
-  }
-  idx95 <- idxAt(0.95); idx70 <- idxAt(0.70); idx50 <- idxAt(0.50)
-
-  # Per-coverage CS purity vectors (indexed by 1-based CS index). Only the
-  # 0.95-coverage purity is currently exported (as cs_95_purity); per-CS
-  # purities for the other coverages are kept here for downstream / future
-  # use even though they are not part of the 22-column output.
-  purityPerCov <- lapply(csTables, .csPurityVec)
-  cov95        <- which(abs(coverageValues - 0.95) < 1e-12)
-  purity95     <- if (length(cov95) > 0L) purityPerCov[[cov95[1]]] else numeric()
-  cs95Purity   <- vapply(idx95, function(i) {
-    if (i <= 0L || i > length(purity95)) return(0)
-    v <- purity95[i]; if (is.na(v)) 0 else as.numeric(v)
-  }, numeric(1))
-
-  vIdx          <- keyGrid$variant_idx
-  variantIdVec <- variantNames[vIdx]
+  # Parse variant IDs into chrom/pos/A1/A2 (one row per variant).
   parsed <- tryCatch(
-    suppressWarnings(parseVariantId(variantIdVec)),
+    suppressWarnings(parseVariantId(variantNames)),
     error = function(e) stop("buildTopLoci: parseVariantId failed: ",
-                             conditionMessage(e))
-  )
-  if (is.null(parsed) || nrow(parsed) != length(variantIdVec)) {
+                             conditionMessage(e)))
+  if (is.null(parsed) || nrow(parsed) != length(variantNames)) {
     stop("buildTopLoci: parseVariantId did not return one row per variant.")
   }
   invalid <- is.na(parsed$chrom) | is.na(parsed$pos) |
@@ -649,39 +615,85 @@ buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
     is.na(parsed$A2) | !nzchar(parsed$A2)
   if (any(invalid)) {
     stop("buildTopLoci: parseVariantId produced invalid coordinates ",
-         "for variant_id: ", variantIdVec[which(invalid)[[1]]])
+         "for variant_id: ", variantNames[which(invalid)[[1]]])
   }
-  pick <- function(x) if (is.null(x)) rep(NA_real_, nKeys) else x[vIdx]
 
+  # Marginal univariate effects (β, SE, Z, p). Per-variant; populated
+  # uniformly across individual-level and RSS paths (the caller computes
+  # the underlying sumstats list).
+  nV <- length(variantNames)
+  marginalBeta <- if (!is.null(sumstats$betahat))   as.numeric(sumstats$betahat)
+                  else rep(NA_real_, nV)
+  marginalSe   <- if (!is.null(sumstats$sebetahat)) as.numeric(sumstats$sebetahat)
+                  else rep(NA_real_, nV)
+  marginalZ    <- if (!is.null(sumstats$z))         as.numeric(sumstats$z)
+                  else if (any(!is.na(marginalBeta)) && any(!is.na(marginalSe)))
+                    marginalBeta / marginalSe
+                  else rep(NA_real_, nV)
+  marginalP    <- if (!is.null(sumstats$p))         as.numeric(sumstats$p)
+                  else if (any(!is.na(marginalZ)))  2 * stats::pnorm(-abs(marginalZ))
+                  else rep(NA_real_, nV)
+
+  # Per-coverage CS membership: for each variant, which CS at each
+  # coverage level (cs_idx, or 0 if not in any). If a variant belongs
+  # to multiple CSs at a given coverage, the smallest cs_idx wins.
+  csIdxAtCoverage <- function(targetCov) {
+    out <- integer(nV)
+    hit <- which(abs(coverageValues - targetCov) < 1e-12)
+    if (length(hit) == 0L) return(out)
+    sets <- csTables[[hit[1L]]]$sets$cs
+    if (is.null(sets) || length(sets) == 0L) return(out)
+    for (csIdx in seq_along(sets)) {
+      vi <- as.integer(sets[[csIdx]])
+      vi <- vi[vi >= 1L & vi <= nV & out[vi] == 0L]
+      out[vi] <- csIdx
+    }
+    out
+  }
+  idx95 <- csIdxAtCoverage(0.95)
+  idx70 <- csIdxAtCoverage(0.70)
+  idx50 <- csIdxAtCoverage(0.50)
+
+  # 0.95-coverage CS purity, per-variant (0 for non-CS variants).
+  purityPerCs <- {
+    h <- which(abs(coverageValues - 0.95) < 1e-12)
+    if (length(h) > 0L) .csPurityVec(csTables[[h[1L]]]) else numeric()
+  }
+  cs95Purity <- vapply(idx95, function(i) {
+    if (i <= 0L || i > length(purityPerCs)) return(0)
+    v <- purityPerCs[i]; if (is.na(v)) 0 else as.numeric(v)
+  }, numeric(1))
+
+  methodTag <- .camelToSnakeMethod(method)
   out <- data.frame(
-    "#chr"                = parsed$chrom,
-    start                 = as.integer(parsed$pos) - 1L,
-    end                   = as.integer(parsed$pos),
-    a1                    = parsed$A1,
-    a2                    = parsed$A2,
-    variant               = variantIdVec,
-    gene                  = rep(fitGene, nKeys),
-    event                 = rep(fitEvent, nKeys),
-    n                     = rep(fitN, nKeys),
-    af                    = pick(af),
-    beta                  = pick(sumstats$betahat),
-    se                    = pick(sumstats$sebetahat),
-    pip                   = as.numeric(fit$pip[vIdx]),
-    posterior_effect_mean = postMean[vIdx],
-    posterior_effect_se   = postSe[vIdx],
-    # cs_<coverage> values carry the snake_case method identifier prefix
-    # (`susie_rss_0`) for downstream-schema stability; the `method` column
-    # itself carries the camelCase pecotmr-internal identifier.
-    cs_95                 = paste0(.camelToSnakeMethod(method), "_", idx95),
-    cs_70                 = paste0(.camelToSnakeMethod(method), "_", idx70),
-    cs_50                 = paste0(.camelToSnakeMethod(method), "_", idx50),
-    cs_95_purity          = cs95Purity,
-    method                = rep(method, nKeys),
-    grange_start          = rep(grange[["start"]], nKeys),
-    grange_end            = rep(grange[["end"]],   nKeys),
-    stringsAsFactors      = FALSE,
-    check.names           = FALSE
-  )
+    variant_id     = as.character(variantNames),
+    chrom          = parsed$chrom,
+    pos            = as.integer(parsed$pos),
+    A1             = parsed$A1,
+    A2             = parsed$A2,
+    N              = rep(fitN, nV),
+    MAF            = if (is.null(af)) rep(NA_real_, nV) else as.numeric(af),
+    marginal_beta  = marginalBeta,
+    marginal_se    = marginalSe,
+    marginal_z     = marginalZ,
+    marginal_p     = marginalP,
+    pip            = as.numeric(fit$pip),
+    posterior_mean = postMean,
+    posterior_sd   = postSd,
+    cs_95          = paste0(methodTag, "_", idx95),
+    cs_70          = paste0(methodTag, "_", idx70),
+    cs_50          = paste0(methodTag, "_", idx50),
+    cs_95_purity   = cs95Purity,
+    method         = rep(method, nV),
+    gene           = rep(fitGene, nV),
+    event          = rep(fitEvent, nV),
+    grange_start   = rep(grange[["start"]], nV),
+    grange_end     = rep(grange[["end"]],   nV),
+    stringsAsFactors = FALSE)
+  if (!is.null(signalCutoff) && signalCutoff > 0) {
+    keep <- !is.na(out$pip) & out$pip > signalCutoff
+    out <- out[keep, , drop = FALSE]
+  }
   rownames(out) <- NULL
   out
 }
@@ -724,30 +736,30 @@ buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
 
 .emptyTopLoci <- function() {
   data.frame(
-    "#chr"                = character(),
-    start                 = integer(),
-    end                   = integer(),
-    a1                    = character(),
-    a2                    = character(),
-    variant               = character(),
-    gene                  = character(),
-    event                 = character(),
-    n                     = integer(),
-    af                    = numeric(),
-    beta                  = numeric(),
-    se                    = numeric(),
-    pip                   = numeric(),
-    posterior_effect_mean = numeric(),
-    posterior_effect_se   = numeric(),
-    cs_95                 = character(),
-    cs_70                 = character(),
-    cs_50                 = character(),
-    cs_95_purity          = numeric(),
-    method                = character(),
-    grange_start          = integer(),
-    grange_end            = integer(),
-    stringsAsFactors      = FALSE,
-    check.names           = FALSE
+    variant_id     = character(),
+    chrom          = character(),
+    pos            = integer(),
+    A1             = character(),
+    A2             = character(),
+    N              = numeric(),
+    MAF            = numeric(),
+    marginal_beta  = numeric(),
+    marginal_se    = numeric(),
+    marginal_z     = numeric(),
+    marginal_p     = numeric(),
+    pip            = numeric(),
+    posterior_mean = numeric(),
+    posterior_sd   = numeric(),
+    cs_95          = character(),
+    cs_70          = character(),
+    cs_50          = character(),
+    cs_95_purity   = numeric(),
+    method         = character(),
+    gene           = character(),
+    event          = character(),
+    grange_start   = integer(),
+    grange_end     = integer(),
+    stringsAsFactors = FALSE
   )
 }
 

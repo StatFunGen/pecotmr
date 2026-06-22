@@ -7,7 +7,7 @@
 # LD-score-based methods (S-LDSC/g-LDSC).
 # =============================================================================
 
-#' @include allGenerics.R LdBlocks.R
+#' @include AllGenerics.R LdBlocks.R
 NULL
 
 #' @title LD Statistic (Virtual Base Class)

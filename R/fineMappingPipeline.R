@@ -144,6 +144,36 @@
 #'   pipeline performs SuSiE-RSS fine-mapping per (study, ldBlock).
 #'   Required for the GwasSumStats method.
 #' @param verbose Verbosity (0 silent, 1 default). Default \code{1}.
+#' @param phenotypeCovariatesToResidualize Character vector (or
+#'   \code{NULL}) of phenotype-covariate names to residualize against.
+#'   \code{NULL} (default) uses every available phenotype covariate.
+#'   Only meaningful when the input is a \code{QtlDataset} /
+#'   \code{MultiStudyQtlDataset} (ignored for sumstat inputs).
+#' @param genotypeCovariatesToResidualize Character vector (or
+#'   \code{NULL}) of genotype-covariate column names to residualize
+#'   against. \code{NULL} uses every available genotype covariate.
+#' @param residualizePhenotypeCovariates Logical (length 1). When
+#'   \code{TRUE} (default) residualize against the phenotype-side
+#'   covariates listed in \code{phenotypeCovariatesToResidualize}. Set
+#'   \code{FALSE} to disable phenotype-covariate residualization
+#'   entirely. The marginal univariate effects stored on each
+#'   \code{FineMappingEntry} obey the same residualization choice as
+#'   the SuSiE fit itself — they are computed against the same
+#'   residualized \code{X} / \code{Y}.
+#' @param residualizeGenotypeCovariates Logical (length 1). When
+#'   \code{TRUE} (default) residualize against the genotype-side
+#'   covariates listed in \code{genotypeCovariatesToResidualize}. Set
+#'   \code{FALSE} to disable.
+#' @param trim Logical (length 1). When \code{TRUE} (default) the
+#'   \code{susieFit} slot on each output \code{FineMappingEntry} carries
+#'   a trimmed view of the SuSiE fit (the minimal subset needed by
+#'   downstream pipelines). When \code{FALSE} the full untrimmed
+#'   \code{susie()} return is retained so accessors like
+#'   \code{getSusieFit()} and non-default-coverage queries through
+#'   \code{getCs()} can read the full posterior matrices
+#'   (\code{lbf_variable}, \code{mu}, \code{mu2}, \code{V}). The
+#'   per-variant \code{topLoci} table is always fully populated
+#'   regardless of \code{trim}.
 #' @param ... Reserved for future per-method arguments.
 #'
 #' @return A \code{\link{FineMappingResult}} collection keyed by
@@ -449,10 +479,57 @@ setGeneric("fineMappingPipeline",
 # formatFinemappingOutput). Returns a bare FineMappingEntry payload, ready
 # to be inserted into a FineMappingResult.
 # @noRd
+# Look up residualization flags from the enclosing setMethod frame
+# and call `getResidualized{Phenotypes,Genotypes}` with them. Each
+# fineMappingPipeline / twasWeightsPipeline method exposes the four
+# convenience flags listed in `.resFlagNames`; the wrapper threads them
+# through to the accessor so per-call-site changes aren't needed.
+.resFlagNames <- c(
+  "phenotypeCovariatesToResidualize",
+  "genotypeCovariatesToResidualize",
+  "residualizePhenotypeCovariates",
+  "residualizeGenotypeCovariates")
+
+.resPickFlags <- function() {
+  out <- list()
+  # Walk up from the immediate caller; the public setMethod frame is
+  # where the user-facing args live. sys.frames()[[1]] is the global
+  # env so stop before that.
+  frames <- sys.frames()
+  for (i in seq_along(frames)) {
+    fr <- frames[[i]]
+    for (nm in .resFlagNames) {
+      if (!nm %in% names(out) && exists(nm, envir = fr, inherits = FALSE)) {
+        out[[nm]] <- get(nm, envir = fr, inherits = FALSE)
+      }
+    }
+  }
+  out
+}
+
+.fmResidPheno <- function(x, ...) {
+  do.call(getResidualizedPhenotypes,
+          c(list(x = x, ...), .resPickFlags()))
+}
+
+.fmResidGeno <- function(x, ...) {
+  do.call(getResidualizedGenotypes,
+          c(list(x = x, ...), .resPickFlags()))
+}
+
 .fmPostprocessOne <- function(fit, method, dataX, dataY,
                               coverage, secondaryCoverage, signalCutoff,
                               minAbsCorr, csInput = NULL, af = NULL,
-                              region = NULL) {
+                              region = NULL, trim = NULL) {
+  # Inherit `trim` from the calling method's frame if not passed in
+  # explicitly. The 10 internal call sites don't currently forward it
+  # (they predate the trim knob) so we look it up from the caller. This
+  # keeps the patch surface minimal: each public setMethod gains a
+  # `trim = TRUE` parameter and that value naturally reaches here.
+  if (is.null(trim)) {
+    trim <- tryCatch(get("trim", envir = parent.frame()),
+                     error = function(e) TRUE)
+  }
   fits <- setNames(list(fit), method)
   post <- postprocessFinemappingFits(
     fits = fits, dataX = dataX, dataY = dataY,
@@ -460,7 +537,7 @@ setGeneric("fineMappingPipeline",
     secondaryCoverage = secondaryCoverage,
     signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
     region = region,
-    csInput = csInput)
+    csInput = csInput, trim = isTRUE(trim))
   out <- formatFinemappingOutput(post, primaryMethod = method)
   # `formatFinemappingOutput` returns a list with $finemappingEntry as a
   # bare FineMappingEntry per the helper's contract.
@@ -578,6 +655,11 @@ setMethod("fineMappingPipeline", "QtlDataset",
            fineMappingResult  = NULL,
            naAction           = c("drop", "impute"),
            verbose            = 1,
+           trim               = TRUE,
+           phenotypeCovariatesToResidualize = NULL,
+           genotypeCovariatesToResidualize  = NULL,
+           residualizePhenotypeCovariates   = TRUE,
+           residualizeGenotypeCovariates    = TRUE,
            ...) {
     naAction <- match.arg(naAction)
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
@@ -691,9 +773,9 @@ setMethod("fineMappingPipeline", "QtlDataset",
           }
           if (length(toRun) == 0L) next
 
-          Y <- getResidualizedPhenotypes(
+          Y <- .fmResidPheno(
             data, contexts = ctx, traitId = tid, naAction = naAction)
-          X <- getResidualizedGenotypes(
+          X <- .fmResidGeno(
             data, contexts = ctx, traitId = tid,
             cisWindow = cisWindow, samples = rownames(Y))
           common <- intersect(rownames(X), rownames(Y))
@@ -783,12 +865,12 @@ setMethod("fineMappingPipeline", "QtlDataset",
           # context but getResidualizedPhenotypes already residualises.
           contextsHere <- job$contexts
           # Use the union of per-context cis-windows for variant extraction.
-          Yres <- getResidualizedPhenotypes(
+          Yres <- .fmResidPheno(
             data, contexts = contextsHere, traitId = tid, naAction = naAction)
           if (length(contextsHere) == 1L)
             Yres <- setNames(list(Yres), contextsHere)
           commonSamples <- Reduce(intersect, lapply(Yres, rownames))
-          X <- getResidualizedGenotypes(
+          X <- .fmResidGeno(
             data, contexts = contextsHere, traitId = tid,
             cisWindow = cisWindow, samples = commonSamples)
           commonSamples <- intersect(commonSamples, rownames(X))
@@ -856,9 +938,9 @@ setMethod("fineMappingPipeline", "QtlDataset",
             next
           }
 
-          Y <- getResidualizedPhenotypes(
+          Y <- .fmResidPheno(
             data, contexts = ctx, traitId = traits, naAction = naAction)
-          X <- getResidualizedGenotypes(
+          X <- .fmResidGeno(
             data, contexts = ctx, traitId = traits,
             cisWindow = cisWindow, samples = rownames(Y))
           common <- intersect(rownames(X), rownames(Y))
@@ -920,9 +1002,9 @@ setMethod("fineMappingPipeline", "QtlDataset",
           next
         }
 
-        Y <- getResidualizedPhenotypes(
+        Y <- .fmResidPheno(
           data, contexts = ctx, traitId = traits, naAction = naAction)
-        X <- getResidualizedGenotypes(
+        X <- .fmResidGeno(
           data, contexts = ctx, traitId = traits,
           cisWindow = cisWindow, samples = rownames(Y))
         common <- intersect(rownames(X), rownames(Y))
@@ -1002,6 +1084,11 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
            fineMappingResult  = NULL,
            naAction           = c("drop", "impute"),
            verbose            = 1,
+           trim               = TRUE,
+           phenotypeCovariatesToResidualize = NULL,
+           genotypeCovariatesToResidualize  = NULL,
+           residualizePhenotypeCovariates   = TRUE,
+           residualizeGenotypeCovariates    = TRUE,
            ...) {
     naAction <- match.arg(naAction)
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
@@ -1121,6 +1208,7 @@ setMethod("fineMappingPipeline", "QtlSumStats",
            minAbsCorr         = 0.8,
            fineMappingResult  = NULL,
            verbose            = 1,
+           trim               = TRUE,
            ...) {
     .fmAssertQcd(data)
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
@@ -1350,6 +1438,7 @@ setMethod("fineMappingPipeline", "GwasSumStats",
            minAbsCorr        = 0.8,
            fineMappingResult = NULL,
            verbose           = 1,
+           trim              = TRUE,
            ...) {
     .fmAssertQcd(data)
     tokens <- .fmNormalizeMethods(methods)

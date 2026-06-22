@@ -6,7 +6,7 @@
 # is deferred until extractBlockGenotypes() is called.
 # =============================================================================
 
-#' @include allGenerics.R
+#' @include AllGenerics.R
 NULL
 
 #' @title Genotype File Handle

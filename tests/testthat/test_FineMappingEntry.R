@@ -11,7 +11,7 @@
   pip <- as.numeric(1 - apply(1 - alpha, 2, prod))
   FineMappingEntry(
     variantIds = vids,
-    trimmedFit = list(
+    susieFit = list(
       pip          = pip,
       alpha        = alpha,
       lbf_variable = lbf,
@@ -44,7 +44,7 @@ test_that("getTopLoci(type='GRanges') converts topLoci data.frame to GRanges", {
     stringsAsFactors = FALSE
   )
   ent <- FineMappingEntry(variantIds = tl$variant_id,
-                          trimmedFit = list(), topLoci = tl)
+                          susieFit = list(), topLoci = tl)
   gr <- getTopLoci(ent, type = "GRanges")
   expect_s4_class(gr, "GRanges")
   expect_equal(length(gr), 2)
@@ -54,7 +54,7 @@ test_that("getTopLoci(type='GRanges') converts topLoci data.frame to GRanges", {
 
 test_that("getTopLoci(type='GRanges') handles empty input", {
   ent <- FineMappingEntry(variantIds = character(0),
-                          trimmedFit = list(),
+                          susieFit = list(),
                           topLoci = data.frame())
   gr <- getTopLoci(ent, type = "GRanges")
   expect_s4_class(gr, "GRanges")
@@ -69,7 +69,7 @@ test_that("getTopLoci defaults to data.frame", {
     stringsAsFactors = FALSE
   )
   ent <- FineMappingEntry(variantIds = tl$variant_id,
-                          trimmedFit = list(), topLoci = tl)
+                          susieFit = list(), topLoci = tl)
   expect_s3_class(getTopLoci(ent), "data.frame")
 })
 
@@ -85,14 +85,14 @@ test_that("adjustPips renormalizes PIPs on a kept FineMappingEntry subset", {
   adj <- adjustPips(entry, keep)
   expect_s4_class(adj, "FineMappingEntry")
   expect_equal(adj@variantIds, keep)
-  expect_equal(ncol(adj@trimmedFit$lbf_variable), 4)
+  expect_equal(ncol(adj@susieFit$lbf_variable), 4)
   # Renormalized: each effect's alpha row sums to 1 (when row has any signal)
-  expect_true(all(abs(rowSums(adj@trimmedFit$alpha) - 1) < 1e-10))
+  expect_true(all(abs(rowSums(adj@susieFit$alpha) - 1) < 1e-10))
   # PIPs match topLoci
-  expect_equal(adj@topLoci$pip, adj@trimmedFit$pip)
+  expect_equal(adj@topLoci$pip, adj@susieFit$pip)
   # PIPs change under renormalization
   origPips <- getPip(entry)
-  expect_false(identical(unname(origPips[keep]), adj@trimmedFit$pip))
+  expect_false(identical(unname(origPips[keep]), adj@susieFit$pip))
 })
 
 
@@ -131,15 +131,17 @@ test_that("adjustPips on a FineMappingResultBase collection renormalizes each en
 
 test_that("FineMappingEntry: constructor stores slots and accessors return them", {
   tl <- .sc_makeTopLoci(3)
+  tl$variant_id <- c("a", "b", "c")
   entry <- FineMappingEntry(
     variantIds = c("a", "b", "c"),
-    trimmedFit = list(payload = 1L),
-    topLoci    = tl,
-    sumstats   = list(z = c(1, 2, 3)))
+    susieFit   = list(payload = 1L),
+    topLoci    = tl)
   expect_s4_class(entry, "FineMappingEntry")
   expect_equal(getVariantIds(entry), c("a", "b", "c"))
-  expect_equal(getTrimmedFit(entry), list(payload = 1L))
-  expect_equal(getTopLoci(entry), tl)
+  expect_equal(getSusieFit(entry), list(payload = 1L))
+  # getTopLoci returns the projected posterior view, not the raw slot
+  out <- getTopLoci(entry, signalCutoff = 0)
+  expect_equal(out$variant_id, c("a", "b", "c"))
 })
 
 
@@ -155,18 +157,17 @@ test_that("FineMappingEntry: getPip returns named pip vector keyed by variant_id
 test_that("FineMappingEntry: getPip returns numeric(0) when topLoci is empty", {
   entry <- FineMappingEntry(
     variantIds = character(0),
-    trimmedFit = list(),
+    susieFit = list(),
     topLoci    = data.frame(variant_id = character(0), pip = numeric(0),
                             stringsAsFactors = FALSE))
   expect_equal(getPip(entry), numeric(0))
 })
 
 
-test_that("FineMappingEntry: getCs filters to rows with cs > 0", {
-  entry <- .sc_makeFineMappingEntry(3)  # last row has cs = 0
+test_that("FineMappingEntry: getCs filters to rows in any credible set", {
+  entry <- .sc_makeFineMappingEntry(3)  # last row has cs_95 = "susie_0"
   res <- getCs(entry)
   expect_equal(nrow(res), 2L)
-  expect_true(all(res$cs > 0))
 })
 
 
@@ -174,9 +175,9 @@ test_that("FineMappingEntry: validity errors when topLoci is missing required co
   expect_error(
     FineMappingEntry(
       variantIds = "v1",
-      trimmedFit = list(),
+      susieFit   = list(),
       topLoci    = data.frame(other = 1, stringsAsFactors = FALSE)),
-    "topLoci missing columns"
+    "topLoci missing required columns"
   )
 })
 
@@ -207,7 +208,7 @@ test_that("show.FineMappingEntry reports variant count and CS count", {
   tl <- data.frame(variant_id = c("a", "b"), pip = c(0.1, 0.2),
                    stringsAsFactors = FALSE)
   e_no_cs <- FineMappingEntry(variantIds = c("a", "b"),
-                              trimmedFit = list(), topLoci = tl)
+                              susieFit = list(), topLoci = tl)
   out_no <- capture.output(show(e_no_cs))
   expect_true(any(grepl("0 credible sets", out_no)))
 })
