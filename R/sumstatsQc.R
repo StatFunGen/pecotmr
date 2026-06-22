@@ -61,17 +61,17 @@ NULL
 #' @details
 #' Pure panel-vs-sumstats allele harmonization: match by (chrom, pos),
 #' detect A1/A2 swap, sign-flip \code{colToFlip} columns and complement
-#' \code{colToComplement} columns on swap. Variant-content filters
-#' (indels, strand-ambiguous, duplicates, NAs, MAF / INFO / N cutoffs)
-#' are NOT applied here — \code{summaryStatsQc()} delegates those to
-#' \code{MungeSumstats::format_sumstats()} before \code{.matchRefPanel}
-#' runs. The internal \code{strand_unambiguous} guard remains so that
-#' if a caller bypasses MungeSumstats and feeds in A/T or C/G
-#' strand-ambiguous variants, they are not mis-flipped: the keep rule
-#' only accepts a strand-flip claim when the unambiguous flag agrees.
+#' \code{colToComplement} columns on swap. Variant-allele filters
+#' (indels, strand-ambiguous, duplicates) are applied here directly when
+#' the corresponding \code{removeIndels} / \code{removeStrandAmbiguous} /
+#' \code{removeDups} flags are set; MAF / INFO / N column-numeric filters
+#' run in \code{.applyContentFilters()} before this function.
 .matchRefPanel <- function(targetData, refVariants, colToFlip = NULL,
                            matchMinProp = 0.2, flipStrand = FALSE,
                            removeUnmatched = TRUE,
+                           removeIndels = FALSE,
+                           removeStrandAmbiguous = TRUE,
+                           removeDups = FALSE,
                            colToComplement = character(), ...) {
   strandFlip <- function(ref) chartr("ATCG", "TAGC", ref)
 
@@ -148,7 +148,19 @@ NULL
                         (A1.target != A1.ref & A2.target != A2.ref)) %>%
     mutate(strand_flip = ((A1.target == flip1.ref & A2.target == flip2.ref) |
                          (A1.target == flip2.ref & A2.target == flip1.ref)) &
-                        (A1.target != A1.ref & A2.target != A2.ref))
+                        (A1.target != A1.ref & A2.target != A2.ref)) %>%
+    # INDEL detection: explicit "I"/"D" notation, or any allele wider than 1bp.
+    mutate(INDEL = (A2.target == "I" | A2.target == "D" |
+                   nchar(A2.target) > 1L | nchar(A1.target) > 1L)) %>%
+    # ID_match: an indel encoded as I/D on the target side matches an indel
+    # on the reference side (where the reference uses multi-base alleles).
+    mutate(ID_match = ((A2.target == "D" | A2.target == "I") &
+                      (nchar(A1.ref) > 1L | nchar(A2.ref) > 1L)))
+
+  # When removeStrandAmbiguous = FALSE, the A/T - C/G safety guard is
+  # disabled: ambiguous variants are treated as exact/sign-flip cases.
+  if (!removeStrandAmbiguous)
+    matchResult$strand_unambiguous <- TRUE
 
   # If no strand_flip survives the unambiguous test, the remaining ambiguous
   # variants can be treated as exact/sign-flip cases rather than dropped.
@@ -157,8 +169,12 @@ NULL
 
   matchResult <- matchResult %>%
     mutate(keep = if_else(strand_flip,
-                          true  = strand_unambiguous | exact_match,
-                          false = exact_match | sign_flip))
+                          true  = strand_unambiguous | exact_match | ID_match,
+                          false = exact_match | sign_flip | ID_match))
+
+  if (removeIndels)
+    matchResult <- matchResult %>%
+      mutate(keep = if_else(INDEL, FALSE, keep))
 
   if (!is.null(colToFlip)) {
     missing <- setdiff(colToFlip, colnames(matchResult))
@@ -212,10 +228,22 @@ NULL
   result <- matchResult[matchResult$keep, , drop = FALSE]
 
   qcCols <- c("flip1.ref", "flip2.ref", "strand_unambiguous",
-              "exact_match", "sign_flip", "strand_flip", "keep")
+              "exact_match", "sign_flip", "strand_flip", "INDEL",
+              "ID_match", "keep")
   result <- result %>%
     select(-any_of(qcCols), -A1.target, -A2.target) %>%
     rename(A1 = A1.ref, A2 = A2.ref, variant_id = variants_id_qced)
+
+  # removeDups: drop duplicate variant rows (same chrom/pos/qced ID).
+  # Default FALSE keeps the existing strict behavior (error on dups).
+  if (removeDups) {
+    dups <- duplicated(result[, c("chrom", "pos", "variant_id")])
+    if (any(dups)) {
+      warning(sprintf("Removed %d duplicate variant(s), keeping first occurrence.",
+                      sum(dups)))
+      result <- result[!dups, , drop = FALSE]
+    }
+  }
 
   if (!removeUnmatched) {
     matchVariant <- result %>% pull(variants_id_original)
@@ -237,9 +265,9 @@ NULL
   if (nrow(result) < matchMinProp * nrow(refVariants))
     stop("Not enough variants have been matched.")
   if (any(duplicated(result$variant_id)))
-    stop("Duplicated variant IDs remain after harmonization; the input ",
-         "should have been deduplicated by MungeSumstats / summaryStatsQc ",
-         "before calling .matchRefPanel.")
+    stop("Duplicated variant IDs remain after harmonization; pass ",
+         "removeDups = TRUE or deduplicate upstream before calling ",
+         ".matchRefPanel.")
 
   out <- list(harmonizedData = result, qcSummary = matchResult)
   attr(out, "qcCounts") <- qcCounts
@@ -2358,9 +2386,8 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
 # data.frame/LdData/QcResult-based summaryStatsQc and rssBasicQc).
 # =============================================================================
 
-# Convert one entry's GRanges into a flat data.frame with the column shape that
-# MungeSumstats and .matchRefPanel expect (lower-case chrom/pos plus the
-# CapsCase mcols).
+# Convert one entry's GRanges into a flat data.frame with the column shape
+# .matchRefPanel expects (lower-case chrom/pos plus the CapsCase mcols).
 .entryGrangesToDf <- function(gr) {
   mc <- as.data.frame(S4Vectors::mcols(gr), stringsAsFactors = FALSE)
   out <- data.frame(
@@ -2591,62 +2618,14 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
   df[!dropMask, , drop = FALSE]
 }
 
-# Run the curated MungeSumstats::format_sumstats() pass. Returns the cleaned
-# data.frame in pecotmr CapsCase column convention plus a per-entry audit
-# record describing what was applied. Caller is responsible for catching
-# errors and reporting them with the entry identity.
-.runMungeSumstatsFilter <- function(df, refGenome, useDbsnpRefCheck,
-                                    removeIndels, removeStrandAmbiguous,
-                                    mafCutoff, infoCutoff, nCutoff,
-                                    convertRefGenome, mungeSumstatsArgs) {
-  if (!requireNamespace("MungeSumstats", quietly = TRUE))
-    stop("Package 'MungeSumstats' is required for summaryStatsQc(). ",
-         "Install it from Bioconductor.")
-  # MungeSumstats writes through a temp tsv when invoked with a path; pass the
-  # in-memory data.frame via the file-write/read path it provides.
-  tmpIn  <- tempfile(fileext = ".tsv.gz")
-  on.exit(unlink(tmpIn), add = TRUE)
-  data.table::fwrite(df, tmpIn, sep = "\t")
-
-  baseArgs <- list(
-    path                = tmpIn,
-    ref_genome          = if (is.null(refGenome)) "GRCh38" else refGenome,
-    convert_ref_genome  = convertRefGenome,
-    on_ref_genome       = isTRUE(useDbsnpRefCheck),
-    infer_eff_direction = isTRUE(useDbsnpRefCheck),
-    allele_flip_check   = isTRUE(useDbsnpRefCheck),
-    bi_allelic_filter   = isTRUE(useDbsnpRefCheck),
-    strand_ambig_filter = isTRUE(removeStrandAmbiguous),
-    drop_indels         = isTRUE(removeIndels),
-    FRQ_filter          = mafCutoff,
-    INFO_filter         = infoCutoff,
-    N_std               = nCutoff,
-    return_data         = TRUE,
-    return_format       = "data.table",
-    log_folder_ind      = FALSE,
-    log_mungesumstats_msgs = FALSE)
-  # Caller-supplied pass-through overrides anything we set above.
-  for (nm in names(mungeSumstatsArgs)) baseArgs[[nm]] <- mungeSumstatsArgs[[nm]]
-
-  before <- nrow(df)
-  cleaned <- do.call(MungeSumstats::format_sumstats, baseArgs)
-  cleaned <- as.data.frame(cleaned)
-  # Restore lower-case chrom/pos for downstream pecotmr code.
-  if ("CHR" %in% colnames(cleaned)) {
-    cleaned$chrom <- sub("^chr", "", as.character(cleaned$CHR),
-                          ignore.case = TRUE)
-    cleaned$CHR <- NULL
-  }
-  if ("BP" %in% colnames(cleaned)) {
-    cleaned$pos <- as.integer(cleaned$BP)
-    cleaned$BP <- NULL
-  }
-  list(df = cleaned, droppedNVariants = before - nrow(cleaned))
-}
-
 # Apply the panel-vs-sumstats allele harmonization using the slim
-# .matchRefPanel against the ldSketch's variant info.
-.matchAgainstSketch <- function(df, ldSketch, matchMinProp) {
+# .matchRefPanel against the ldSketch's variant info. Threads the
+# variant-level filters (indels, strand-ambiguous, duplicates) through
+# so the LD-panel-anchored pass handles them in a single sweep.
+.matchAgainstSketch <- function(df, ldSketch, matchMinProp,
+                                removeIndels = FALSE,
+                                removeStrandAmbiguous = TRUE,
+                                removeDups = TRUE) {
   refVariants <- .refVariantsFromSketch(ldSketch)
   flipCandidates <- c("Z", "BETA")
   colToFlip <- intersect(flipCandidates, colnames(df))
@@ -2657,17 +2636,203 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
   if (!"A1" %in% colnames(df) || !"A2" %in% colnames(df))
     stop("summaryStatsQc: input entry must contain A1 and A2 columns.")
   res <- .matchRefPanel(
-    targetData      = df,
-    refVariants     = refVariants,
-    colToFlip       = colToFlip,
-    colToComplement = colToComplement,
-    matchMinProp    = matchMinProp,
-    removeUnmatched = TRUE)
+    targetData            = df,
+    refVariants           = refVariants,
+    colToFlip             = colToFlip,
+    colToComplement       = colToComplement,
+    matchMinProp          = matchMinProp,
+    removeUnmatched       = TRUE,
+    removeIndels          = removeIndels,
+    removeStrandAmbiguous = removeStrandAmbiguous,
+    removeDups            = removeDups)
   out <- res$harmonizedData
   if (!"chrom" %in% colnames(out) && "chr" %in% colnames(out))
     colnames(out)[colnames(out) == "chr"] <- "chrom"
   attr(out, "qcCounts") <- attr(res, "qcCounts")
   out
+}
+
+# Variant-content filters (MAF / INFO / N). Pure data-frame column
+# filters; no Bioconductor genome packages needed.
+#
+# mafCutoff:  drop rows where MAF (or FRQ) < mafCutoff. Requires either
+#             column when mafCutoff > 0; errors if neither is present.
+# infoCutoff: drop rows where INFO < infoCutoff. Requires INFO column
+#             when infoCutoff > 0.
+# nCutoff:    drop rows whose N is more than nCutoff median-absolute-
+#             deviations from the median (a 5-MAD-from-median cap on
+#             per-variant N). Set nCutoff = 0 to disable. Rows with NA N
+#             are always dropped.
+.applyContentFilters <- function(df, mafCutoff = 0, infoCutoff = 0,
+                                 nCutoff = 5) {
+  audit <- list()
+  if (mafCutoff > 0) {
+    mafCol <- intersect(c("MAF", "FRQ"), colnames(df))[1L]
+    if (is.na(mafCol))
+      stop(".applyContentFilters: mafCutoff > 0 requires a MAF or FRQ column.")
+    before <- nrow(df)
+    mafVals <- as.numeric(df[[mafCol]])
+    # Normalise effect-allele frequency to MAF: take min(af, 1-af).
+    mafVals <- pmin(mafVals, 1 - mafVals, na.rm = FALSE)
+    df <- df[!is.na(mafVals) & mafVals >= mafCutoff, , drop = FALSE]
+    audit$mafDropped <- before - nrow(df)
+  }
+  if (infoCutoff > 0) {
+    if (!"INFO" %in% colnames(df))
+      stop(".applyContentFilters: infoCutoff > 0 requires an INFO column.")
+    before <- nrow(df)
+    infoVals <- as.numeric(df$INFO)
+    df <- df[!is.na(infoVals) & infoVals >= infoCutoff, , drop = FALSE]
+    audit$infoDropped <- before - nrow(df)
+  }
+  if (nCutoff > 0 && "N" %in% colnames(df) && nrow(df) > 0L) {
+    nVals <- as.numeric(df$N)
+    before <- nrow(df)
+    if (any(is.na(nVals))) {
+      df <- df[!is.na(nVals), , drop = FALSE]
+      nVals <- nVals[!is.na(nVals)]
+    }
+    if (length(nVals) > 0L) {
+      medN <- stats::median(nVals)
+      madN <- stats::mad(nVals, constant = 1)
+      if (madN > 0) {
+        zN <- abs(nVals - medN) / madN
+        df <- df[zN <= nCutoff, , drop = FALSE]
+      }
+    }
+    audit$nDropped <- before - nrow(df)
+  }
+  list(df = df, audit = audit)
+}
+
+# Per-row variant sanity / hygiene checks ported from MungeSumstats's
+# check_*.R series but rewritten as pure data.frame operations with no
+# genome / dbSNP dependency. Each step is gated by its own flag so a
+# caller can disable any single check.
+#
+# Steps (in order; each contributes a count to audit):
+#   - coerceNumeric: cast signed columns to numeric (catches stray "0.5"
+#       strings). NA-introducing coercions are counted.
+#   - normalizeChr:   strip "chr"/"ch" prefix, uppercase X/Y/MT, map
+#       23->X, 24->Y, M->MT. Optional dropNonstandardChr removes rows
+#       whose CHR is outside 1..22, X, Y, MT after normalization.
+#   - dropMissData:   drop rows with NA in any vital column (chrom, pos,
+#       A1, A2, and at least one of Z / BETA).
+#   - dropPOutOfRange: drop rows where P < 0 or P > 1 (corrupt p-values).
+#       Only fires when a P column is present.
+#   - clampSmallP:    floor 0 <= P <= smallPFloor to smallPFloor so
+#       -log10(P) stays finite downstream.
+#   - dropZeroEffect: drop rows where any effect column is exactly 0
+#       (BETA / LOG_ODDS / SIGNED_SUMSTAT) or OR is exactly 1. MungeSumstats
+#       treats these as degenerate / artefactual.
+#   - dropNonpositiveSe: drop rows where SE <= 0.
+.applySanityChecks <- function(df,
+                                coerceNumeric        = TRUE,
+                                normalizeChr         = TRUE,
+                                dropNonstandardChr   = TRUE,
+                                dropMissData         = TRUE,
+                                dropPOutOfRange      = TRUE,
+                                clampSmallP          = TRUE,
+                                smallPFloor          = 5e-324,
+                                dropZeroEffect       = TRUE,
+                                dropNonpositiveSe    = TRUE) {
+  audit <- list()
+  if (nrow(df) == 0L) return(list(df = df, audit = audit))
+
+  if (coerceNumeric) {
+    numericCols <- intersect(
+      c("Z", "BETA", "SE", "OR", "LOG_ODDS", "SIGNED_SUMSTAT",
+        "P", "MAF", "FRQ", "INFO", "N"),
+      colnames(df))
+    naIntroduced <- 0L
+    for (col in numericCols) {
+      orig <- df[[col]]
+      if (is.numeric(orig)) next
+      coerced <- suppressWarnings(as.numeric(orig))
+      naIntroduced <- naIntroduced +
+        sum(is.na(coerced) & !is.na(orig))
+      df[[col]] <- coerced
+    }
+    if (naIntroduced > 0L) audit$nonNumericCoerced <- naIntroduced
+  }
+
+  if (normalizeChr && "chrom" %in% colnames(df)) {
+    chr <- as.character(df$chrom)
+    chr <- sub("^chr", "", chr, ignore.case = TRUE)
+    chr <- sub("^ch",  "", chr, ignore.case = TRUE)
+    chr <- toupper(chr)
+    chr[chr == "23"] <- "X"
+    chr[chr == "24"] <- "Y"
+    chr[chr == "M"]  <- "MT"
+    df$chrom <- chr
+    if (dropNonstandardChr) {
+      before <- nrow(df)
+      standardChrs <- c(as.character(1:22), "X", "Y", "MT")
+      df <- df[chr %in% standardChrs, , drop = FALSE]
+      dropped <- before - nrow(df)
+      if (dropped > 0L) audit$nonstandardChrDropped <- dropped
+    }
+  }
+
+  if (dropMissData && nrow(df) > 0L) {
+    vital <- intersect(c("chrom", "pos", "A1", "A2"), colnames(df))
+    signedCol <- intersect(c("Z", "BETA"), colnames(df))[1L]
+    if (!is.na(signedCol)) vital <- c(vital, signedCol)
+    if (length(vital) > 0L) {
+      before <- nrow(df)
+      bad <- Reduce(`|`, lapply(vital, function(c) is.na(df[[c]])))
+      if (any(bad)) df <- df[!bad, , drop = FALSE]
+      dropped <- before - nrow(df)
+      if (dropped > 0L) audit$missDataDropped <- dropped
+    }
+  }
+
+  if (dropPOutOfRange && "P" %in% colnames(df) && nrow(df) > 0L) {
+    before <- nrow(df)
+    p <- as.numeric(df$P)
+    bad <- !is.na(p) & (p < 0 | p > 1)
+    if (any(bad)) df <- df[!bad, , drop = FALSE]
+    dropped <- before - nrow(df)
+    if (dropped > 0L) audit$pOutOfRangeDropped <- dropped
+  }
+
+  if (clampSmallP && "P" %in% colnames(df) && nrow(df) > 0L) {
+    p <- as.numeric(df$P)
+    smallMask <- !is.na(p) & p >= 0 & p < smallPFloor
+    nClamped <- sum(smallMask)
+    if (nClamped > 0L) {
+      df$P[smallMask] <- smallPFloor
+      audit$smallPClamped <- nClamped
+    }
+  }
+
+  if (dropZeroEffect && nrow(df) > 0L) {
+    effectCols <- intersect(
+      c("BETA", "LOG_ODDS", "SIGNED_SUMSTAT", "OR"), colnames(df))
+    if (length(effectCols) > 0L) {
+      before <- nrow(df)
+      badMask <- rep(FALSE, nrow(df))
+      for (col in effectCols) {
+        vals <- as.numeric(df[[col]])
+        sentinel <- if (col == "OR") 1 else 0
+        badMask <- badMask | (!is.na(vals) & vals == sentinel)
+      }
+      if (any(badMask)) df <- df[!badMask, , drop = FALSE]
+      dropped <- before - nrow(df)
+      if (dropped > 0L) audit$zeroEffectDropped <- dropped
+    }
+  }
+
+  if (dropNonpositiveSe && "SE" %in% colnames(df) && nrow(df) > 0L) {
+    before <- nrow(df)
+    se <- as.numeric(df$SE)
+    bad <- !is.na(se) & se <= 0
+    if (any(bad)) df <- df[!bad, , drop = FALSE]
+    dropped <- before - nrow(df)
+    if (dropped > 0L) audit$nonpositiveSeDropped <- dropped
+  }
+
+  list(df = df, audit = audit)
 }
 
 # Apply ldMismatchQc (SLALOM/DENTIST) against the LD sketch.
@@ -2725,38 +2890,69 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
   entryAudit$variantsIn <- nrow(df)
   nStudyIn <- nrow(df)
 
-  # 1. MungeSumstats variant-content pass.
-  nMungeIn <- nrow(df)
-  mungeResult <- .runMungeSumstatsFilter(
+  # 1. Per-row sanity checks (drop bad P / zero effect / non-positive SE,
+  # clamp tiny P, coerce numeric, normalize CHR, drop missing-data rows).
+  # Runs before any other filtering so downstream steps see clean values.
+  nSanIn <- nrow(df)
+  sanity <- .applySanityChecks(
     df,
-    refGenome             = refGenome,
-    useDbsnpRefCheck      = opts$useDbsnpRefCheck,
-    removeIndels          = opts$removeIndels,
-    removeStrandAmbiguous = opts$removeStrandAmbiguous,
-    mafCutoff             = opts$mafCutoff,
-    infoCutoff            = opts$infoCutoff,
-    nCutoff               = opts$nCutoff,
-    convertRefGenome      = opts$convertRefGenome,
-    mungeSumstatsArgs     = opts$mungeSumstatsArgs)
-  df <- mungeResult$df
-  entryAudit$mungeSumstatsDropped <- mungeResult$droppedNVariants
-  if (nMungeIn > 0L) {
-    emit("QC track: MungeSumstats kept ", nrow(df), " of ", nMungeIn,
+    coerceNumeric      = opts$coerceNumeric,
+    normalizeChr       = opts$normalizeChr,
+    dropNonstandardChr = opts$dropNonstandardChr,
+    dropMissData       = opts$dropMissData,
+    dropPOutOfRange    = opts$dropPOutOfRange,
+    clampSmallP        = opts$clampSmallP,
+    smallPFloor        = opts$smallPFloor,
+    dropZeroEffect     = opts$dropZeroEffect,
+    dropNonpositiveSe  = opts$dropNonpositiveSe)
+  df <- sanity$df
+  if (length(sanity$audit) > 0L) entryAudit$sanityChecks <- sanity$audit
+  if (nSanIn > 0L && nrow(df) != nSanIn) {
+    emit("QC track: sanity checks kept ", nrow(df), " of ", nSanIn,
          " variant(s).")
   }
 
-  # 1b. Derive BETA / SE from signed Z when the input only carries Z.
+  # 2. Variant-content filters (MAF / INFO / N). Pure column-numeric
+  # filters; the indel / strand-ambiguous variant-allele filtering happens
+  # inside .matchAgainstSketch via .matchRefPanel against the LD panel.
+  nFiltIn <- nrow(df)
+  contentFiltered <- .applyContentFilters(
+    df,
+    mafCutoff  = opts$mafCutoff,
+    infoCutoff = opts$infoCutoff,
+    nCutoff    = opts$nCutoff)
+  df <- contentFiltered$df
+  if (length(contentFiltered$audit) > 0L)
+    entryAudit$contentFilters <- contentFiltered$audit
+  if (nFiltIn > 0L && nrow(df) != nFiltIn) {
+    emit("QC track: MAF/INFO/N filters kept ", nrow(df), " of ", nFiltIn,
+         " variant(s).")
+  }
+
+  # 3. Derive BETA / SE from signed Z when the input only carries Z.
   # Formula (Zhu et al. 2016 / RAISS): se = 1/sqrt(2 * maf * (1-maf) *
   # (N + z^2)); beta = z * se. Requires Z, MAF, and N to all be present.
   derived <- .deriveBetaSeFromZ(df)
   df <- derived$df
   if (!is.null(derived$audit)) entryAudit$betaSeFromZ <- derived$audit
 
-  # 1c. Derive P-values from Z when the entry carries Z but not P.
-  # Standard two-tailed normal: p = 2 * pnorm(-|z|).
+  # 4. Derive P-values from Z when the entry carries Z but not P.
+  # Standard two-tailed normal: p = 2 * pnorm(-|z|). Very large |Z| can
+  # underflow to P = 0, so re-apply the small-P clamp afterwards.
   if ("Z" %in% colnames(df) && !"P" %in% colnames(df)) {
     df$P <- .zToPvalue(df$Z)
     entryAudit$pValueFromZ <- sum(!is.na(df$P))
+    if (isTRUE(opts$clampSmallP) && nrow(df) > 0L) {
+      smallMask <- !is.na(df$P) & df$P >= 0 & df$P < opts$smallPFloor
+      nClamped <- sum(smallMask)
+      if (nClamped > 0L) {
+        df$P[smallMask] <- opts$smallPFloor
+        prev <- entryAudit$sanityChecks$smallPClamped %||% 0L
+        if (is.null(entryAudit$sanityChecks))
+          entryAudit$sanityChecks <- list()
+        entryAudit$sanityChecks$smallPClamped <- prev + nClamped
+      }
+    }
   }
 
   # 2. keepVariants subset.
@@ -2788,7 +2984,12 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
 
   # 5. Panel-vs-sumstats allele harmonization.
   nHarmIn <- nrow(df)
-  df <- .matchAgainstSketch(df, ldSketch, matchMinProp = opts$matchMinProp)
+  df <- .matchAgainstSketch(
+    df, ldSketch,
+    matchMinProp          = opts$matchMinProp,
+    removeIndels          = opts$removeIndels,
+    removeStrandAmbiguous = opts$removeStrandAmbiguous,
+    removeDups            = TRUE)
   harmCounts <- attr(df, "qcCounts")
   attr(df, "qcCounts") <- NULL
   entryAudit$matchedAgainstSketch <- nrow(df)
@@ -2911,9 +3112,33 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
   # because imputation adds variants back, so "in -> out" is not monotonic.
   # Skipped steps omitted.
   removedSegs <- character(0)
-  if (entryAudit$mungeSumstatsDropped > 0L)
-    removedSegs <- c(removedSegs,
-                     paste0("munge ", entryAudit$mungeSumstatsDropped))
+  sc <- entryAudit$sanityChecks
+  if (!is.null(sc)) {
+    if (!is.null(sc$nonstandardChrDropped) && sc$nonstandardChrDropped > 0L)
+      removedSegs <- c(removedSegs,
+                       paste0("nonstdChr ", sc$nonstandardChrDropped))
+    if (!is.null(sc$missDataDropped) && sc$missDataDropped > 0L)
+      removedSegs <- c(removedSegs,
+                       paste0("missData ", sc$missDataDropped))
+    if (!is.null(sc$pOutOfRangeDropped) && sc$pOutOfRangeDropped > 0L)
+      removedSegs <- c(removedSegs,
+                       paste0("badP ", sc$pOutOfRangeDropped))
+    if (!is.null(sc$zeroEffectDropped) && sc$zeroEffectDropped > 0L)
+      removedSegs <- c(removedSegs,
+                       paste0("zeroEffect ", sc$zeroEffectDropped))
+    if (!is.null(sc$nonpositiveSeDropped) && sc$nonpositiveSeDropped > 0L)
+      removedSegs <- c(removedSegs,
+                       paste0("badSE ", sc$nonpositiveSeDropped))
+  }
+  cf <- entryAudit$contentFilters
+  if (!is.null(cf)) {
+    if (!is.null(cf$mafDropped) && cf$mafDropped > 0L)
+      removedSegs <- c(removedSegs, paste0("maf ", cf$mafDropped))
+    if (!is.null(cf$infoDropped) && cf$infoDropped > 0L)
+      removedSegs <- c(removedSegs, paste0("info ", cf$infoDropped))
+    if (!is.null(cf$nDropped) && cf$nDropped > 0L)
+      removedSegs <- c(removedSegs, paste0("nCutoff ", cf$nDropped))
+  }
   if (qcCount$harmDropped > 0L)
     removedSegs <- c(removedSegs,
                      paste0("harmonization ", qcCount$harmDropped))
@@ -2943,13 +3168,16 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
 #' Run QC on a SumStats Collection
 #'
 #' Applies a single QC pass to a \code{QtlSumStats} or \code{GwasSumStats}
-#' collection: delegates variant-content QC (column standardization,
-#' indels, strand-ambiguous, MAF/INFO/N filters, p-value & effect-size
-#' sanity checks, optional dbSNP / liftover) to
-#' \code{MungeSumstats::format_sumstats()}, then runs pecotmr-specific
-#' steps (\code{skipRegion}, optional PIP screen, panel harmonization
-#' against the \code{ldSketch} via \code{.matchRefPanel}, optional
-#' SLALOM/DENTIST LD-mismatch QC, optional RAISS imputation).
+#' collection: per-row sanity checks via \code{.applySanityChecks} (drop
+#' rows with out-of-range / zero P, BETA == 0, SE <= 0, NA in vital
+#' columns; clamp tiny P; normalize CHR; coerce signed columns to
+#' numeric), variant-content filters (MAF / INFO / N) via
+#' \code{.applyContentFilters}, optional \code{skipRegion} drop, optional
+#' PIP screen, panel-vs-sumstats allele harmonization against the
+#' \code{ldSketch} via \code{.matchRefPanel} (which handles indels,
+#' strand-ambiguous variants, sign / strand flips, and duplicate drops in
+#' a single sweep), optional SLALOM/DENTIST LD-mismatch QC, and optional
+#' RAISS imputation. No Bioconductor genome / dbSNP packages required.
 #'
 #' The returned collection has its \code{qcInfo} slot populated with a
 #' per-entry audit record (variant counts, drop counts at each step,
@@ -2964,24 +3192,19 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
 #'
 #' @param sumstats A \code{QtlSumStats} or \code{GwasSumStats}
 #'   collection.
-#' @param useDbsnpRefCheck One-shot opt-in to MungeSumstats's
-#'   dbSNP-based reference-genome / allele-flip / biallelic-filter
-#'   checks. When \code{TRUE}, sets \code{on_ref_genome},
-#'   \code{infer_eff_direction}, \code{allele_flip_check}, and
-#'   \code{bi_allelic_filter} all to \code{TRUE} simultaneously.
-#'   Default \code{FALSE} (trust input alleles, lighter dependency
-#'   footprint).
 #' @param removeIndels Logical (length 1). When \code{TRUE}, drop
-#'   indels. Default \code{FALSE} (match MungeSumstats default).
+#'   indels during panel harmonization. Default \code{FALSE}.
 #' @param removeStrandAmbiguous Logical (length 1). When \code{TRUE},
 #'   drop A/T and C/G strand-ambiguous variants. Default \code{TRUE}.
 #' @param mafCutoff Numeric (length 1). MAF threshold (variants with
 #'   \code{MAF < mafCutoff} are dropped). Default 0. Requires \code{MAF}
-#'   column.
+#'   or \code{FRQ} column when non-zero.
 #' @param infoCutoff Numeric (length 1). INFO score threshold. Default
-#'   0. Requires \code{INFO} column.
-#' @param nCutoff Numeric (length 1). MungeSumstats \code{N_std} value;
-#'   sample-size deviation threshold. Default 5.
+#'   0. Requires \code{INFO} column when non-zero.
+#' @param nCutoff Numeric (length 1). Sample-size deviation threshold:
+#'   drop variants whose \code{N} is more than \code{nCutoff}
+#'   median-absolute-deviations from the median. Set to 0 to disable.
+#'   Default 5.
 #' @param keepVariants Optional character vector of variant IDs (SNP
 #'   column) to retain prior to harmonization.
 #' @param skipRegion Optional character vector of \code{"chr:start-end"}
@@ -3000,19 +3223,35 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
 #'   sketch is not yet fully wired for the new path; the option is
 #'   accepted but currently emits a warning and is skipped.)
 #' @param imputeOpts Named list of RAISS parameters.
-#' @param convertRefGenome Optional character (\code{"GRCh37"} or
-#'   \code{"GRCh38"}) to liftover the sumstats to via MungeSumstats.
-#'   \code{NULL} (default) skips liftover.
 #' @param matchMinProp Minimum proportion of LD panel variants that must
 #'   be matched by the sumstats; default 0.
-#' @param mungeSumstatsArgs Optional named list of pass-through args to
-#'   \code{MungeSumstats::format_sumstats()}. Any name supplied here
-#'   overrides the value the curated knobs would have set.
+#' @param coerceNumeric Logical. Coerce signed columns
+#'   (Z/BETA/SE/OR/LOG_ODDS/SIGNED_SUMSTAT/P/MAF/FRQ/INFO/N) to numeric.
+#'   Default \code{TRUE}.
+#' @param normalizeChr Logical. Strip \code{"chr"} prefix, uppercase the
+#'   chromosome label, and map 23->X, 24->Y, M->MT. Default \code{TRUE}.
+#' @param dropNonstandardChr Logical. Drop variants whose CHR (after
+#'   normalization) is outside 1..22, X, Y, MT. Default \code{TRUE}.
+#' @param dropMissData Logical. Drop rows with NA in any vital column
+#'   (chrom, pos, A1, A2, and at least one of Z / BETA). Default
+#'   \code{TRUE}.
+#' @param dropPOutOfRange Logical. Drop rows where \code{P < 0} or
+#'   \code{P > 1}. Default \code{TRUE}.
+#' @param clampSmallP Logical. Floor non-negative P values below
+#'   \code{smallPFloor} to \code{smallPFloor} so \code{-log10(P)} stays
+#'   finite. Applied to both input and Z-derived P values. Default
+#'   \code{TRUE}.
+#' @param smallPFloor Numeric (length 1). Floor for \code{clampSmallP}.
+#'   Default \code{5e-324} (R's smallest positive double).
+#' @param dropZeroEffect Logical. Drop rows where any effect column is
+#'   exactly 0 (\code{BETA}, \code{LOG_ODDS}, \code{SIGNED_SUMSTAT}) or
+#'   \code{OR} is exactly 1. Default \code{TRUE}.
+#' @param dropNonpositiveSe Logical. Drop rows where \code{SE <= 0}.
+#'   Default \code{TRUE}.
 #' @return A new \code{QtlSumStats} / \code{GwasSumStats} with cleaned
 #'   entries and \code{qcInfo} populated.
 #' @export
 summaryStatsQc <- function(sumstats,
-                           useDbsnpRefCheck       = FALSE,
                            removeIndels           = FALSE,
                            removeStrandAmbiguous  = TRUE,
                            mafCutoff              = 0,
@@ -3029,9 +3268,16 @@ summaryStatsQc <- function(sumstats,
                                                         r2Threshold = 0.6,
                                                         minimumLd = 5,
                                                         lamb = 0.01),
-                           convertRefGenome       = NULL,
                            matchMinProp           = 0,
-                           mungeSumstatsArgs      = list()) {
+                           coerceNumeric          = TRUE,
+                           normalizeChr           = TRUE,
+                           dropNonstandardChr     = TRUE,
+                           dropMissData           = TRUE,
+                           dropPOutOfRange        = TRUE,
+                           clampSmallP            = TRUE,
+                           smallPFloor            = 5e-324,
+                           dropZeroEffect         = TRUE,
+                           dropNonpositiveSe      = TRUE) {
   if (!methods::is(sumstats, "QtlSumStats") &&
       !methods::is(sumstats, "GwasSumStats")) {
     stop("summaryStatsQc requires a QtlSumStats or GwasSumStats input.")
@@ -3044,15 +3290,13 @@ summaryStatsQc <- function(sumstats,
     cols <- colnames(mc)
     if (mafCutoff > 0 && !any(c("MAF", "FRQ") %in% cols))
       stop("summaryStatsQc: mafCutoff > 0 requires every entry to carry a ",
-           "MAF or FRQ column; entry ", i, " does not. MungeSumstats ",
-           "normalises FRQ to MAF internally during format_sumstats.")
+           "MAF or FRQ column; entry ", i, " does not.")
     if (infoCutoff > 0 && !"INFO" %in% cols)
       stop("summaryStatsQc: infoCutoff > 0 requires every entry to carry an ",
            "INFO column; entry ", i, " does not.")
   }
 
   opts <- list(
-    useDbsnpRefCheck       = useDbsnpRefCheck,
     removeIndels           = removeIndels,
     removeStrandAmbiguous  = removeStrandAmbiguous,
     mafCutoff              = mafCutoff,
@@ -3065,9 +3309,16 @@ summaryStatsQc <- function(sumstats,
     alleleFlipKriging      = alleleFlipKriging,
     impute                 = impute,
     imputeOpts             = imputeOpts,
-    convertRefGenome       = convertRefGenome,
     matchMinProp           = matchMinProp,
-    mungeSumstatsArgs      = mungeSumstatsArgs,
+    coerceNumeric          = coerceNumeric,
+    normalizeChr           = normalizeChr,
+    dropNonstandardChr     = dropNonstandardChr,
+    dropMissData           = dropMissData,
+    dropPOutOfRange        = dropPOutOfRange,
+    clampSmallP            = clampSmallP,
+    smallPFloor            = smallPFloor,
+    dropZeroEffect         = dropZeroEffect,
+    dropNonpositiveSe      = dropNonpositiveSe,
     nForPip                = NULL)
 
   newEntries <- vector("list", nrow(sumstats))
@@ -3100,7 +3351,6 @@ summaryStatsQc <- function(sumstats,
   qcInfo <- list(
     timestamp        = NA_character_,
     options          = list(
-      useDbsnpRefCheck      = useDbsnpRefCheck,
       removeIndels          = removeIndels,
       removeStrandAmbiguous = removeStrandAmbiguous,
       mafCutoff             = mafCutoff,
@@ -3109,9 +3359,16 @@ summaryStatsQc <- function(sumstats,
       zMismatchQc           = zMismatchQc,
       alleleFlipKriging     = alleleFlipKriging,
       impute                = impute,
-      convertRefGenome      = convertRefGenome),
-    entryAudit       = entryAudits,
-    mungeSumstatsArgs = mungeSumstatsArgs)
+      coerceNumeric         = coerceNumeric,
+      normalizeChr          = normalizeChr,
+      dropNonstandardChr    = dropNonstandardChr,
+      dropMissData          = dropMissData,
+      dropPOutOfRange       = dropPOutOfRange,
+      clampSmallP           = clampSmallP,
+      smallPFloor           = smallPFloor,
+      dropZeroEffect        = dropZeroEffect,
+      dropNonpositiveSe     = dropNonpositiveSe),
+    entryAudit       = entryAudits)
 
   # Rebuild the SumStats with new entries and qcInfo.
   if (methods::is(sumstats, "GwasSumStats")) {

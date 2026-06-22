@@ -314,9 +314,18 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 
 #' @keywords internal
 .extractBlockPlink2 <- function(handle, snpIdx) {
-  # pgenlibr::ReadList returns ALT dosage = A1 dosage in pecotmr convention
-  geno <- pgenlibr::ReadList(getPgenPtr(handle), variant_subset = snpIdx,
-                              meanimpute = FALSE)
+  # pgenlibr::ReadList returns ALT dosage = A1 dosage in pecotmr convention.
+  # The cached @pgenPtr does not survive saveRDS/readRDS (external pointers
+  # become stale), so we re-open from getPath() on the fly if the cached
+  # pointer errors out. Opening is cheap relative to dosage extraction.
+  ptr <- getPgenPtr(handle)
+  paths <- resolvePlink2Paths(getPath(handle))
+  geno <- tryCatch(
+    pgenlibr::ReadList(ptr, variant_subset = snpIdx, meanimpute = FALSE),
+    error = function(e) {
+      reopened <- pgenlibr::NewPgen(paths$pgen)
+      pgenlibr::ReadList(reopened, variant_subset = snpIdx, meanimpute = FALSE)
+    })
   storage.mode(geno) <- "double"
   geno
 }
@@ -530,7 +539,6 @@ computeBlockLdCor <- function(handle, snpIdx, backend = "internal",
 #' @importFrom Rsamtools TabixFile seqnamesTabix scanTabix headerTabix
 #' @importFrom GenomicRanges GRanges seqnames
 #' @importFrom SummarizedExperiment assay
-#' @importFrom MungeSumstats standardise_header
 readBim <- function(bed) {
   bimf <- paste0(file_path_sans_ext(bed), ".bim")
   bim <- vroom(bimf, col_names = FALSE)

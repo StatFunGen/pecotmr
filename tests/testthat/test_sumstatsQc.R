@@ -2547,16 +2547,15 @@ test_that("CS95 variants are ordered by decreasing PIP", {
 
 
 
-context("summaryStatsQc (with mocked MungeSumstats)")
+context("summaryStatsQc")
 
 # NOTE
 # ----
-# `.runMungeSumstatsFilter` wraps MungeSumstats::format_sumstats which needs
-# a real dbSNP reference panel (multi-GB download). To exercise the QC chain
-# in a unit test we mock that helper so it just returns the input data.frame
-# unchanged, recording a "no variants dropped" audit record. The pecotmr-
-# native steps (.applySkipRegion, .matchAgainstSketch, .applyPipScreen,
-# .applyLdMismatchQcToEntry) all run for real on the synthetic fixture.
+# The variant-content QC (MAF/INFO/N) is pure data.frame filtering via
+# .applyContentFilters; no external genome / dbSNP packages required.
+# All pecotmr-native steps (.applyContentFilters, .applySkipRegion,
+# .matchAgainstSketch, .applyPipScreen, .applyLdMismatchQcToEntry) run
+# for real on the synthetic fixture.
 
 # ===========================================================================
 # Fixture builders
@@ -2600,21 +2599,6 @@ context("summaryStatsQc (with mocked MungeSumstats)")
     entry    = list(.ssQ_makeEntryGr(snp_ids, positions)),
     genome   = "hg19",
     ldSketch = .ssQ_makeHandle())
-}
-
-.ssQ_mockMunge <- function(drop = 0L) {
-  # Mock that pretends MungeSumstats validated the input and returned the
-  # same data.frame, dropping `drop` rows.
-  function(df, refGenome, useDbsnpRefCheck, removeIndels,
-           removeStrandAmbiguous, mafCutoff, infoCutoff, nCutoff,
-           convertRefGenome, mungeSumstatsArgs) {
-    keep <- if (drop > 0L && drop < nrow(df))
-      seq_len(nrow(df) - drop)
-    else
-      seq_len(nrow(df))
-    list(df = df[keep, , drop = FALSE],
-         droppedNVariants = nrow(df) - length(keep))
-  }
 }
 
 .ssQ_mockExtractor <- function(seed = 13, n_samples = 60L) {
@@ -2702,14 +2686,11 @@ test_that(".deriveBetaSeFromZ: skipped when N missing", {
 })
 
 # ===========================================================================
-# summaryStatsQc: end-to-end with mocked MungeSumstats
+# summaryStatsQc: end-to-end on the synthetic fixture
 # ===========================================================================
 
 test_that("summaryStatsQc: vanilla run populates qcInfo and returns a GwasSumStats", {
   ss <- .ssQ_makeGwasSumStats()
-  local_mocked_bindings(
-    .runMungeSumstatsFilter = .ssQ_mockMunge(),
-    .package = "pecotmr")
   res <- summaryStatsQc(ss)
   expect_s4_class(res, "GwasSumStats")
   qc <- getQcInfo(res)
@@ -2717,18 +2698,13 @@ test_that("summaryStatsQc: vanilla run populates qcInfo and returns a GwasSumSta
   expect_true("options" %in% names(qc))
   expect_true("entryAudit" %in% names(qc))
   expect_equal(length(qc$entryAudit), nrow(ss))
-  # Per-entry audit records variantsIn / variantsOut / mungeSumstatsDropped.
   ea <- qc$entryAudit[[1L]]
   expect_equal(ea$variantsIn, 4L)
   expect_equal(ea$variantsOut, 4L)
-  expect_equal(ea$mungeSumstatsDropped, 0L)
 })
 
 test_that("summaryStatsQc: keepVariants subsets each entry and records the drop", {
   ss <- .ssQ_makeGwasSumStats()
-  local_mocked_bindings(
-    .runMungeSumstatsFilter = .ssQ_mockMunge(),
-    .package = "pecotmr")
   res <- summaryStatsQc(ss, keepVariants = c("rs1", "rs3"))
   ea <- getQcInfo(res)$entryAudit[[1L]]
   expect_equal(ea$keepVariantsDropped, 2L)
@@ -2737,9 +2713,6 @@ test_that("summaryStatsQc: keepVariants subsets each entry and records the drop"
 
 test_that("summaryStatsQc: skipRegion drops overlapping variants", {
   ss <- .ssQ_makeGwasSumStats()
-  local_mocked_bindings(
-    .runMungeSumstatsFilter = .ssQ_mockMunge(),
-    .package = "pecotmr")
   res <- summaryStatsQc(ss, skipRegion = "chr1:50-150")
   ea <- getQcInfo(res)$entryAudit[[1L]]
   expect_equal(ea$skipRegionDropped, 1L)  # rs1 at pos 100 is dropped
@@ -2752,9 +2725,6 @@ test_that("summaryStatsQc: PIP screen triggers when no variant has signal", {
   S4Vectors::mcols(gr)$Z <- rep(0.1, length(gr))
   ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
                       ldSketch = .ssQ_makeHandle())
-  local_mocked_bindings(
-    .runMungeSumstatsFilter = .ssQ_mockMunge(),
-    .package = "pecotmr")
   res <- summaryStatsQc(ss, pipCutoffToSkip = 0.99)
   ea <- getQcInfo(res)$entryAudit[[1L]]
   expect_true(isTRUE(ea$pipScreenSkipped))
@@ -2762,22 +2732,8 @@ test_that("summaryStatsQc: PIP screen triggers when no variant has signal", {
   expect_equal(length(res$entry[[1L]]), 0L)
 })
 
-test_that("summaryStatsQc: early-exit records when fewer than 2 variants remain pre-harmonization", {
-  ss <- .ssQ_makeGwasSumStats()
-  local_mocked_bindings(
-    # Mock keeps only 1 row of the input
-    .runMungeSumstatsFilter = .ssQ_mockMunge(drop = 3L),
-    .package = "pecotmr")
-  res <- summaryStatsQc(ss)
-  ea <- getQcInfo(res)$entryAudit[[1L]]
-  expect_match(ea$earlyExit, "fewer than two variants")
-})
-
 test_that("summaryStatsQc: harmonized variants count is recorded", {
   ss <- .ssQ_makeGwasSumStats()
-  local_mocked_bindings(
-    .runMungeSumstatsFilter = .ssQ_mockMunge(),
-    .package = "pecotmr")
   res <- summaryStatsQc(ss)
   ea <- getQcInfo(res)$entryAudit[[1L]]
   expect_equal(ea$matchedAgainstSketch, 4L)
@@ -2785,9 +2741,6 @@ test_that("summaryStatsQc: harmonized variants count is recorded", {
 
 test_that("summaryStatsQc: options block records the curated knobs", {
   ss <- .ssQ_makeGwasSumStats()
-  local_mocked_bindings(
-    .runMungeSumstatsFilter = .ssQ_mockMunge(),
-    .package = "pecotmr")
   res <- summaryStatsQc(ss, removeIndels = TRUE, removeStrandAmbiguous = FALSE,
                         nCutoff = 10)
   opts <- getQcInfo(res)$options
@@ -2801,9 +2754,6 @@ test_that("summaryStatsQc: round-trips QtlSumStats inputs", {
   ss <- QtlSumStats(study = "s1", context = "c1", trait = "t1",
                      entry = list(gr), genome = "hg19",
                      ldSketch = .ssQ_makeHandle())
-  local_mocked_bindings(
-    .runMungeSumstatsFilter = .ssQ_mockMunge(),
-    .package = "pecotmr")
   res <- summaryStatsQc(ss)
   expect_s4_class(res, "QtlSumStats")
   expect_equal(length(getQcInfo(res)$entryAudit), 1L)
@@ -2817,8 +2767,7 @@ test_that("summaryStatsQc: zMismatchQc = 'dentist' walks the LD-mismatch branch"
   ss <- .ssQ_makeGwasSumStats(snp_ids = paste0("rs", 1:8),
                               positions = seq(100L, by = 100L, length.out = 8L))
   local_mocked_bindings(
-    .runMungeSumstatsFilter = .ssQ_mockMunge(),
-    extractBlockGenotypes   = .ssQ_mockExtractor(),
+    extractBlockGenotypes = .ssQ_mockExtractor(),
     .package = "pecotmr")
   res <- suppressWarnings(summaryStatsQc(ss, zMismatchQc = "dentist"))
   ea <- getQcInfo(res)$entryAudit[[1L]]
@@ -2844,7 +2793,6 @@ test_that("summaryStatsQc: impute = TRUE invokes RAISS and records the audit cou
     ldSketch = .ssQ_makeHandle(snp_n = 8L, n_samples = 60L))
 
   local_mocked_bindings(
-    .runMungeSumstatsFilter = .ssQ_mockMunge(),
     extractBlockGenotypes   = .ssQ_mockExtractor(),
     raiss = function(refPanel, knownZscores, genotypeMatrix, ...) {
       # Pretend RAISS imputed two of the missing panel variants (rs5, rs6)
@@ -2873,8 +2821,7 @@ test_that("summaryStatsQc: impute = TRUE with raiss returning NULL records 0 imp
     ldSketch = .ssQ_makeHandle(snp_n = 8L, n_samples = 60L))
 
   local_mocked_bindings(
-    .runMungeSumstatsFilter = .ssQ_mockMunge(),
-    extractBlockGenotypes   = .ssQ_mockExtractor(),
+    extractBlockGenotypes = .ssQ_mockExtractor(),
     raiss = function(...) NULL,
     .package = "pecotmr")
   res <- summaryStatsQc(ss, impute = TRUE)
@@ -2914,15 +2861,10 @@ test_that(".matchRefPanel surfaces sign/strand/dropped counts via qcCounts attri
 test_that("summaryStatsQc: QC track emits per-step 'kept N of M' messages plus a rollup", {
   ss <- .ssQ_makeGwasSumStats()
   local_mocked_bindings(
-    .runMungeSumstatsFilter = .ssQ_mockMunge(),
-    .package = "pecotmr")
-  local_mocked_bindings(
     extractBlockGenotypes = .ssQ_mockExtractor(),
     .package = "pecotmr")
   msgs <- capture_messages(summaryStatsQc(ss))
   joined <- paste(msgs, collapse = "")
-  # MungeSumstats step + denominator framing.
-  expect_match(joined, "MungeSumstats kept [0-9]+ of [0-9]+ variant")
   # Harmonization step + corrected/dropped breakdown.
   expect_match(joined, "harmonization kept [0-9]+ of [0-9]+")
   expect_match(joined, "corrected: sign-flipped [0-9]+, strand-flipped [0-9]+")
@@ -2933,9 +2875,6 @@ test_that("summaryStatsQc: QC track emits per-step 'kept N of M' messages plus a
 
 test_that("summaryStatsQc: skipped optional steps are omitted from the rollup", {
   ss <- .ssQ_makeGwasSumStats()
-  local_mocked_bindings(
-    .runMungeSumstatsFilter = .ssQ_mockMunge(),
-    .package = "pecotmr")
   local_mocked_bindings(
     extractBlockGenotypes = .ssQ_mockExtractor(),
     .package = "pecotmr")
@@ -2962,9 +2901,6 @@ test_that("summaryStatsQc: per-entry log lines carry the (study/context/trait) l
     entry    = list(.ssQ_makeEntryGr()),
     genome   = "hg19",
     ldSketch = .ssQ_makeHandle())
-  local_mocked_bindings(
-    .runMungeSumstatsFilter = .ssQ_mockMunge(),
-    .package = "pecotmr")
   local_mocked_bindings(
     extractBlockGenotypes = .ssQ_mockExtractor(),
     .package = "pecotmr")
@@ -3127,6 +3063,145 @@ test_that(".refVariantsFromSketch: extracts chr/pos/A1/A2/variant_id from snpInf
     Z     = c(1, 2, 3),
     stringsAsFactors = FALSE)
 }
+
+test_that(".applySanityChecks: empty input is a no-op", {
+  out <- pecotmr:::.applySanityChecks(data.frame(chrom = character()))
+  expect_equal(nrow(out$df), 0L)
+  expect_equal(out$audit, list())
+})
+
+test_that(".applySanityChecks: coerceNumeric converts character columns and counts NAs", {
+  df <- data.frame(
+    chrom = c("1", "1"), pos = c(100L, 200L),
+    A1 = c("A", "C"), A2 = c("G", "T"),
+    Z = c("1.5", "not_a_number"),
+    stringsAsFactors = FALSE)
+  out <- pecotmr:::.applySanityChecks(df, dropMissData = FALSE)
+  expect_type(out$df$Z, "double")
+  expect_equal(out$df$Z[[1L]], 1.5)
+  expect_true(is.na(out$df$Z[[2L]]))
+  expect_equal(out$audit$nonNumericCoerced, 1L)
+})
+
+test_that(".applySanityChecks: normalizeChr maps 23/24/M/chr* and drops non-standard", {
+  df <- data.frame(
+    chrom = c("chr1", "23", "24", "M", "chrX_random"),
+    pos = c(100L, 200L, 300L, 400L, 500L),
+    A1 = c("A", "A", "A", "A", "A"),
+    A2 = c("G", "G", "G", "G", "G"),
+    Z = c(1, 2, 3, 4, 5),
+    stringsAsFactors = FALSE)
+  out <- pecotmr:::.applySanityChecks(df)
+  expect_equal(out$df$chrom, c("1", "X", "Y", "MT"))
+  expect_equal(out$audit$nonstandardChrDropped, 1L)
+})
+
+test_that(".applySanityChecks: dropMissData drops rows with NA in vital columns", {
+  df <- data.frame(
+    chrom = c("1", "1", "1"),
+    pos   = c(100L, 200L, 300L),
+    A1    = c("A", NA, "C"),
+    A2    = c("G", "T", "T"),
+    Z     = c(1, 2, NA),
+    stringsAsFactors = FALSE)
+  out <- pecotmr:::.applySanityChecks(df)
+  expect_equal(nrow(out$df), 1L)
+  expect_equal(out$audit$missDataDropped, 2L)
+})
+
+test_that(".applySanityChecks: dropPOutOfRange drops P < 0 and P > 1", {
+  df <- data.frame(
+    chrom = c("1", "1", "1", "1"),
+    pos   = c(100L, 200L, 300L, 400L),
+    A1    = c("A", "A", "A", "A"), A2 = c("G", "G", "G", "G"),
+    Z     = c(1, 2, 3, 4),
+    P     = c(0.5, -0.1, 1.5, 0.001),
+    stringsAsFactors = FALSE)
+  out <- pecotmr:::.applySanityChecks(df)
+  expect_equal(nrow(out$df), 2L)
+  expect_equal(out$audit$pOutOfRangeDropped, 2L)
+})
+
+test_that(".applySanityChecks: clampSmallP floors to smallPFloor", {
+  df <- data.frame(
+    chrom = c("1", "1"),
+    pos   = c(100L, 200L),
+    A1    = c("A", "A"), A2 = c("G", "G"),
+    Z     = c(1, 50),
+    P     = c(0.1, 0),
+    stringsAsFactors = FALSE)
+  out <- pecotmr:::.applySanityChecks(df, smallPFloor = 5e-324)
+  expect_equal(out$df$P[[2L]], 5e-324)
+  expect_equal(out$audit$smallPClamped, 1L)
+})
+
+test_that(".applySanityChecks: dropZeroEffect drops BETA==0 and OR==1", {
+  df <- data.frame(
+    chrom = c("1", "1", "1"),
+    pos   = c(100L, 200L, 300L),
+    A1    = c("A", "A", "A"), A2 = c("G", "G", "G"),
+    BETA  = c(0.5, 0, 0.2),
+    OR    = c(1.5, 1.5, 1),
+    SE    = c(0.1, 0.1, 0.1),
+    Z     = c(5, 0, 2),
+    stringsAsFactors = FALSE)
+  out <- pecotmr:::.applySanityChecks(df)
+  expect_equal(nrow(out$df), 1L)
+  expect_equal(out$audit$zeroEffectDropped, 2L)
+})
+
+test_that(".applySanityChecks: dropNonpositiveSe drops SE <= 0", {
+  df <- data.frame(
+    chrom = c("1", "1", "1"),
+    pos   = c(100L, 200L, 300L),
+    A1    = c("A", "A", "A"), A2 = c("G", "G", "G"),
+    SE    = c(0.1, 0, -0.2),
+    Z     = c(1, 2, 3),
+    stringsAsFactors = FALSE)
+  out <- pecotmr:::.applySanityChecks(df)
+  expect_equal(nrow(out$df), 1L)
+  expect_equal(out$audit$nonpositiveSeDropped, 2L)
+})
+
+test_that(".applySanityChecks: per-check knobs can disable each step", {
+  df <- data.frame(
+    chrom = c("chr1", "23"),
+    pos   = c(100L, 200L),
+    A1    = c("A", "A"), A2 = c("G", "G"),
+    BETA  = c(0.5, 0),
+    SE    = c(0.1, -0.2),
+    P     = c(0.5, 1.5),
+    Z     = c(1, 2),
+    stringsAsFactors = FALSE)
+  out <- pecotmr:::.applySanityChecks(
+    df,
+    coerceNumeric      = FALSE,
+    normalizeChr       = FALSE,
+    dropMissData       = FALSE,
+    dropPOutOfRange    = FALSE,
+    clampSmallP        = FALSE,
+    dropZeroEffect     = FALSE,
+    dropNonpositiveSe  = FALSE)
+  expect_equal(nrow(out$df), 2L)
+  expect_equal(out$audit, list())
+  expect_equal(out$df$chrom, c("chr1", "23"))
+})
+
+test_that("summaryStatsQc: surfaces sanity-check audit and respects per-check knobs", {
+  gr <- .ssQ_makeEntryGr()
+  S4Vectors::mcols(gr)$BETA <- c(0.1, 0, 0.2, 0)
+  S4Vectors::mcols(gr)$SE   <- c(0.1, 0.1, 0.1, 0.1)
+  S4Vectors::mcols(gr)$P    <- c(0.5, 0.5, 0.5, 0.5)
+  ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
+                      ldSketch = .ssQ_makeHandle())
+  res <- summaryStatsQc(ss)
+  ea <- getQcInfo(res)$entryAudit[[1L]]
+  expect_equal(ea$sanityChecks$zeroEffectDropped, 2L)
+  # Disable the knob: zero-effect rows should remain.
+  res2 <- summaryStatsQc(ss, dropZeroEffect = FALSE)
+  ea2 <- getQcInfo(res2)$entryAudit[[1L]]
+  expect_null(ea2$sanityChecks$zeroEffectDropped)
+})
 
 test_that(".applySkipRegion: NULL / empty skipRegion is a no-op", {
   df <- .ssh_smallDf()

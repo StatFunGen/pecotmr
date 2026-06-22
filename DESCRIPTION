@@ -20,7 +20,6 @@ Imports:
     IRanges,
     MASS,
     Matrix,
-    MungeSumstats,
     Rsamtools,
     S4Vectors,
     SummarizedExperiment,

@@ -1,7 +1,7 @@
-#' @title Causal TWAS Pipeline (cTWAS, single LD block)
-#' @description Per-LD-block pipeline that hands a
-#'   \code{\link{GwasSumStats}} of GWAS Z-scores together with per-gene
-#'   TWAS weights and the shared LD sketch to
+#' @title Causal TWAS Pipeline (cTWAS, multi LD block)
+#' @description Pipeline that hands a per-block set of
+#'   \code{\link{GwasSumStats}} of GWAS Z-scores together with the
+#'   matching per-block per-gene TWAS weights and LD sketches to
 #'   \code{ctwas::ctwas_sumstats}, producing per-gene posterior
 #'   inclusion probabilities for causal genes. Optionally accepts a
 #'   precomputed TWAS-Z \code{GRanges} from
@@ -9,23 +9,27 @@
 #'   so the per-gene Z is not recomputed inside ctwas.
 #'
 #' @section LD block convention:
-#' Each call assumes the inputs cover exactly one LD block — the user
-#' is responsible for constructing the \code{GwasSumStats} and
-#' \code{TwasWeights} over the block of interest before calling this
-#' pipeline (the same convention used by
-#' \code{\link{fineMappingPipeline}} on \code{GwasSumStats}). The
-#' single-region \code{region_info}, \code{LD_map}, and \code{snp_map}
-#' that \code{ctwas::ctwas_sumstats} requires are derived
-#' automatically from the LD sketch on \code{gwasSumStats}.
+#' Inputs are NAMED LISTS keyed by \code{region_id}
+#' (\code{list(block1 = gss1, block2 = gss2, ...)}). Per-block
+#' \code{region_info}, \code{LD_map}, and \code{snp_map} entries are
+#' built automatically from each block's LD sketch and concatenated
+#' before the call to \code{ctwas::ctwas_sumstats}. A single-block
+#' input is rejected: cTWAS's EM cannot converge on a single region,
+#' so callers must supply at least two blocks.
 #'
 #' @section LD-sketch identity check:
-#' \code{getLdSketch(twasWeights)} (when non-NULL) must match
-#' \code{getLdSketch(gwasSumStats)}. Mismatch is a hard error.
+#' Per block: \code{getLdSketch(twasWeights)} (when non-NULL) must
+#' match \code{getLdSketch(gwasSumStats)}. Mismatch is a hard error.
 #'
-#' @param gwasSumStats A \code{\link{GwasSumStats}} over one LD block.
-#'   Must have \code{getQcInfo()} non-empty.
-#' @param twasWeights A \code{\link{TwasWeights}} carrying per-(study,
-#'   context, trait, method) weights over the same LD block.
+#' @param gwasSumStats NAMED LIST of \code{\link{GwasSumStats}} keyed
+#'   by \code{region_id} (at least two entries). Each must have
+#'   \code{getQcInfo()} non-empty.
+#' @param twasWeights NAMED LIST of \code{\link{TwasWeights}} keyed by
+#'   \code{region_id}. Keys must be a SUBSET of \code{gwasSumStats}'s
+#'   keys: blocks without any TWAS weights still contribute their
+#'   SNP-level signal to ctwas's joint group prior estimate (matches
+#'   the legacy whole-chromosome pattern where only a few of many LD
+#'   blocks carry gene weights).
 #' @param twasZ Optional \code{GRanges} of TWAS Z-scores (output of
 #'   \code{\link{causalInferencePipeline}}). When supplied, the
 #'   per-(trait, context) Z is used as the \code{z_gene} input to
@@ -37,8 +41,13 @@
 #'   (default) the smart filters are no-ops; only the magnitude filter
 #'   (\code{twasWeightCutoff}) and the per-gene cap
 #'   (\code{maxNumVariants}, ordered by \code{|weight|}) apply.
-#' @param regionId Optional character (length 1) label for the LD
-#'   block. Default \code{"block1"}.
+#' @param method Optional character (length 1). Picks which TWAS
+#'   method's weights to feed into ctwas for each (study, context,
+#'   trait) gene. When \code{NULL} (default): use \code{"ensemble"} if
+#'   that method is present across the TwasWeights; otherwise use the
+#'   sole method when only one is present; otherwise error. Passing
+#'   the name explicitly (e.g. \code{"mrash"}) overrides the default
+#'   resolution.
 #' @param thin,niterPrefit,niter,L Pass-throughs to
 #'   \code{ctwas::ctwas_sumstats}.
 #' @param groupPriorVarStructure Pass-through (defaults
@@ -71,7 +80,7 @@ ctwasPipeline <- function(gwasSumStats,
                           twasWeights,
                           twasZ                   = NULL,
                           fineMappingResult       = NULL,
-                          regionId                = "block1",
+                          method                  = NULL,
                           thin                    = 0.1,
                           niterPrefit             = 3L,
                           niter                   = 30L,
@@ -87,17 +96,104 @@ ctwasPipeline <- function(gwasSumStats,
                           minPipCutoff            = 0,
                           maxNumVariants          = Inf,
                           ...) {
+  groupPriorVarStructure <- match.arg(groupPriorVarStructure)
+  inputs <- assembleCtwasInputs(
+    gwasSumStats       = gwasSumStats,
+    twasWeights        = twasWeights,
+    twasZ              = twasZ,
+    fineMappingResult  = fineMappingResult,
+    method             = method,
+    twasWeightCutoff   = twasWeightCutoff,
+    csMinCor           = csMinCor,
+    minPipCutoff       = minPipCutoff,
+    maxNumVariants     = maxNumVariants)
+  est <- estCtwasParam(
+    inputs,
+    thin                    = thin,
+    niterPrefit             = niterPrefit,
+    niter                   = niter,
+    groupPriorVarStructure  = groupPriorVarStructure,
+    ncore                   = ncore,
+    ...)
+  screened <- screenCtwasRegions(
+    est,
+    L     = L,
+    ncore = ncore,
+    ...)
+  finemapCtwasRegions(
+    screened,
+    L     = L,
+    ncore = ncore,
+    ...)
+}
+
+#' Assemble cTWAS inputs from S4 GwasSumStats / TwasWeights
+#'
+#' @description Builds the per-block ctwas-shape input set
+#'   (\code{z_snp}, \code{weights}, \code{region_info}, \code{snp_map},
+#'   \code{LD_map}, the LD- and SNP-info loader closures, plus optional
+#'   \code{z_gene}) that the downstream ctwas steps consume.
+#'   This is step 1 of the three-step \code{\link{ctwasPipeline}} split.
+#'
+#' @details The returned list is the SHARED STATE threaded through
+#'   \code{\link{estCtwasParam}} → \code{\link{screenCtwasRegions}} →
+#'   \code{\link{finemapCtwasRegions}}. Callers can short-circuit at any
+#'   step (e.g. override the estimated priors before fine-mapping) or
+#'   call \code{ctwasPipeline()} for the one-shot path.
+#'
+#' @inheritParams ctwasPipeline
+#' @return A list with elements \code{z_snp}, \code{z_gene} (NULL when
+#'   no \code{twasZ}), \code{weights}, \code{region_info},
+#'   \code{snp_map}, \code{LD_map}, \code{LD_loader_fun},
+#'   \code{snpinfo_loader_fun}, and \code{resolvedMethod}.
+#' @export
+assembleCtwasInputs <- function(gwasSumStats, twasWeights,
+                                twasZ              = NULL,
+                                fineMappingResult  = NULL,
+                                method             = NULL,
+                                twasWeightCutoff   = 0,
+                                csMinCor           = 0.8,
+                                minPipCutoff       = 0,
+                                maxNumVariants     = Inf) {
   if (!requireNamespace("ctwas", quietly = TRUE)) {
-    stop("Package 'ctwas' is required for ctwasPipeline. ",
+    stop("Package 'ctwas' is required for the cTWAS pipeline. ",
          "Install from https://github.com/xinhe-lab/ctwas .")
   }
-  if (!methods::is(gwasSumStats, "GwasSumStats"))
-    stop("`gwasSumStats` must be a GwasSumStats object.")
-  if (length(getQcInfo(gwasSumStats)) == 0L)
-    stop("ctwasPipeline: gwasSumStats has no QC record. Call ",
-         "summaryStatsQc() first.")
-  if (missing(twasWeights) || !methods::is(twasWeights, "TwasWeights"))
-    stop("`twasWeights` must be a TwasWeights object.")
+  if (missing(gwasSumStats) || !is.list(gwasSumStats) ||
+      methods::is(gwasSumStats, "GwasSumStats"))
+    stop("`gwasSumStats` must be a NAMED LIST of GwasSumStats keyed by ",
+         "region_id (got ", class(gwasSumStats)[[1L]], "). cTWAS's EM ",
+         "requires multi-block context to converge; single-block calls ",
+         "are no longer supported.")
+  if (missing(twasWeights) || !is.list(twasWeights) ||
+      methods::is(twasWeights, "TwasWeights"))
+    stop("`twasWeights` must be a NAMED LIST of TwasWeights keyed by ",
+         "region_id.")
+  if (is.null(names(gwasSumStats)) || any(!nzchar(names(gwasSumStats))))
+    stop("`gwasSumStats` must be a named list keyed by region_id (got an ",
+         "unnamed or empty-named list).")
+  if (is.null(names(twasWeights)) || any(!nzchar(names(twasWeights))))
+    stop("`twasWeights` must be a named list keyed by region_id (got an ",
+         "unnamed or empty-named list).")
+  extra_tw_keys <- setdiff(names(twasWeights), names(gwasSumStats))
+  if (length(extra_tw_keys) > 0L)
+    stop("`twasWeights` has region_id key(s) not present in ",
+         "`gwasSumStats`: ", paste(extra_tw_keys, collapse = ", "))
+  if (length(gwasSumStats) < 2L)
+    stop("assembleCtwasInputs: at least two LD blocks are required (got ",
+         length(gwasSumStats), "). cTWAS's EM cannot estimate the SNP-",
+         "group prior variance from a single region.")
+  for (rid in names(gwasSumStats)) {
+    if (!methods::is(gwasSumStats[[rid]], "GwasSumStats"))
+      stop("gwasSumStats[['", rid, "']] is not a GwasSumStats.")
+    if (length(getQcInfo(gwasSumStats[[rid]])) == 0L)
+      stop("assembleCtwasInputs: gwasSumStats[['", rid,
+           "']] has no QC record. Call summaryStatsQc() first.")
+  }
+  for (rid in names(twasWeights)) {
+    if (!methods::is(twasWeights[[rid]], "TwasWeights"))
+      stop("twasWeights[['", rid, "']] is not a TwasWeights.")
+  }
   if (!is.null(twasZ) && !methods::is(twasZ, "GRanges"))
     stop("`twasZ` must be a GRanges (output of causalInferencePipeline) ",
          "or NULL.")
@@ -105,65 +201,281 @@ ctwasPipeline <- function(gwasSumStats,
       !methods::is(fineMappingResult, "FineMappingResultBase"))
     stop("`fineMappingResult` must be a FineMappingResultBase ",
          "(QtlFineMappingResult or GwasFineMappingResult) or NULL.")
-  if (length(regionId) != 1L || !nzchar(regionId))
-    stop("`regionId` must be a single non-empty character string.")
+
+  regionIds      <- names(gwasSumStats)
+  resolvedMethod <- .ctwasResolveMethod(twasWeights, method)
+
+  ldPanelsByRegion <- list()
+  weightsList      <- list()
+  zSnpPieces       <- list()
+  regionInfoPieces <- list()
+  snpMap           <- list()
+  ldFileByRegion   <- setNames(character(length(regionIds)), regionIds)
+
+  # First pass: cache ld panels, build z_snp pieces, region_info,
+  # snp_map per region. We need the union of GWAS variant IDs ACROSS
+  # all blocks before we can correctly filter each per-block TwasWeights
+  # — a gene's weight variants can straddle adjacent LD blocks, and the
+  # per-block GWAS subset would drop the cross-boundary variants.
+  for (rid in regionIds) {
+    gss    <- gwasSumStats[[rid]]
+    tw     <- twasWeights[[rid]]   # may be NULL for SNP-only blocks
+    gwasLd <- getLdSketch(gss)
+    if (!is.null(tw))
+      .ctwasRequireMatchingLdSketches(getLdSketch(tw), gwasLd)
+
+    ldKey <- .ctwasLdPanelKey(gwasLd)
+    if (is.null(ldPanelsByRegion[[ldKey]])) {
+      ldPanelsByRegion[[ldKey]] <- .ctwasComputeFullPanelLd(gwasLd)
+    }
+    ldPanel <- ldPanelsByRegion[[ldKey]]
+    ldFileByRegion[[rid]] <- ldKey
+
+    zSnpPieces[[rid]]       <- .ctwasBuildZSnp(gss)
+    regionInfoPieces[[rid]] <- .ctwasBuildSingleRegionInfo(rid, gwasLd)
+    snpMap[[rid]] <- .ctwasSnpInfoForGwasBlock(gss, ldPanel$snpInfo)
+  }
+
+  # Global union of GWAS variant IDs across all blocks. Used to filter
+  # per-block TwasWeights so cross-boundary weight variants survive
+  # (ctwas's compute_gene_z consumes the concatenated z_snp + the gene's
+  # full weight vector regardless of which home block the gene's TSS
+  # falls in).
+  globalGwasSnpIds <- unique(unlist(lapply(zSnpPieces, function(p) p$id)))
+
+  # Second pass: build per-block weight lists with the GLOBAL gwasSnpIds
+  # filter, so a gene whose cis-window straddles block boundaries
+  # contributes its full weight vector to ctwas.
+  for (rid in regionIds) {
+    tw <- twasWeights[[rid]]
+    if (is.null(tw)) next
+    twMethod <- .ctwasFilterMethod(tw, resolvedMethod)
+    if (is.null(twMethod)) next
+    ldKey   <- ldFileByRegion[[rid]]
+    ldPanel <- ldPanelsByRegion[[ldKey]]
+    blockWeights <- .ctwasBuildWeights(
+      twMethod, ldPanel,
+      fineMappingResult = fineMappingResult,
+      twasWeightCutoff  = twasWeightCutoff,
+      csMinCor          = csMinCor,
+      minPipCutoff      = minPipCutoff,
+      maxNumVariants    = maxNumVariants,
+      gwasSnpIds        = globalGwasSnpIds)
+    if (length(blockWeights) > 0L) {
+      names(blockWeights) <- paste0(rid, "|", names(blockWeights))
+      weightsList <- c(weightsList, blockWeights)
+    }
+  }
+
+  zSnp       <- do.call(rbind, zSnpPieces)
+  rownames(zSnp) <- NULL
+  regionInfo <- do.call(rbind, regionInfoPieces)
+  rownames(regionInfo) <- NULL
+
+  ldMap <- data.frame(
+    region_id = regionIds,
+    LD_file   = unname(ldFileByRegion),
+    SNP_file  = unname(ldFileByRegion),
+    stringsAsFactors = FALSE)
+
+  list(
+    z_snp              = zSnp,
+    z_gene             = if (!is.null(twasZ)) .ctwasBuildZGene(twasZ) else NULL,
+    weights            = weightsList,
+    region_info        = regionInfo,
+    snp_map            = snpMap,
+    LD_map             = ldMap,
+    LD_loader_fun      = .ctwasMultiBlockLdLoader(ldPanelsByRegion),
+    snpinfo_loader_fun = .ctwasMultiBlockSnpInfoLoader(ldPanelsByRegion),
+    resolvedMethod     = resolvedMethod)
+}
+
+#' Estimate cTWAS group prior + prior variance
+#'
+#' @description Step 2 of the three-step \code{\link{ctwasPipeline}}:
+#'   assembles \code{region_data} from the inputs and runs
+#'   \code{ctwas::est_param} (prefit EM + accurate EM) to estimate the
+#'   group prior probabilities and prior variances. Returns the input
+#'   state plus \code{region_data}, \code{boundary_genes},
+#'   \code{z_gene}, and \code{param}.
+#'
+#' @param inputs A list returned by \code{\link{assembleCtwasInputs}}.
+#' @param thin,niterPrefit,niter Pass-throughs to
+#'   \code{ctwas::assemble_region_data} / \code{ctwas::est_param}.
+#' @param groupPriorVarStructure Pass-through.
+#' @param ncore Number of cores.
+#' @param ... Additional arguments forwarded to \code{ctwas::est_param}
+#'   (e.g. \code{min_p_single_effect}, \code{min_group_size}).
+#' @return The \code{inputs} list augmented with \code{region_data},
+#'   \code{boundary_genes}, \code{z_gene}, and \code{param}.
+#' @export
+estCtwasParam <- function(inputs,
+                          thin                    = 0.1,
+                          niterPrefit             = 3L,
+                          niter                   = 30L,
+                          groupPriorVarStructure  = c("shared_type",
+                                                      "shared_context",
+                                                      "shared_nonSNP",
+                                                      "shared_all",
+                                                      "independent"),
+                          ncore                   = 1L,
+                          ...) {
+  if (!requireNamespace("ctwas", quietly = TRUE)) {
+    stop("Package 'ctwas' is required for estCtwasParam.")
+  }
   groupPriorVarStructure <- match.arg(groupPriorVarStructure)
+  # ctwas::assemble_region_data assumes z_gene is non-NULL; when the
+  # caller did not supply a precomputed twasZ, compute it now via
+  # ctwas::compute_gene_z, mirroring ctwas_sumstats's own behaviour.
+  zGene <- inputs$z_gene
+  if (is.null(zGene)) {
+    zGene <- ctwas::compute_gene_z(
+      inputs$z_snp, inputs$weights, ncore = as.integer(ncore))
+  }
+  assembled <- .ctwasInvoke(ctwas::assemble_region_data, list(
+    region_info     = inputs$region_info,
+    z_snp           = inputs$z_snp,
+    z_gene          = zGene,
+    weights         = inputs$weights,
+    snp_map         = inputs$snp_map,
+    thin            = thin,
+    ncore           = as.integer(ncore)), extra = list(...))
+  paramRes <- .ctwasInvoke(ctwas::est_param, list(
+    region_data               = assembled$region_data,
+    niter_prefit              = as.integer(niterPrefit),
+    niter                     = as.integer(niter),
+    group_prior_var_structure = groupPriorVarStructure,
+    ncore                     = as.integer(ncore)), extra = list(...))
+  # ctwas::assemble_region_data does not echo z_gene back in its return
+  # list, so propagate the precomputed (or freshly computed) z_gene we
+  # passed into it. This matches ctwas_sumstats's top-level return shape.
+  # Replace inputs$z_gene (which is NULL when twasZ wasn't supplied) with
+  # the computed zGene so $z_gene resolves to the right entry.
+  inputs$z_gene <- zGene
+  c(inputs, list(
+    region_data    = assembled$region_data,
+    boundary_genes = assembled$boundary_genes,
+    param          = paramRes))
+}
 
-  twLd   <- getLdSketch(twasWeights)
-  gwasLd <- getLdSketch(gwasSumStats)
-  .ctwasRequireMatchingLdSketches(twLd, gwasLd)
+#' Screen cTWAS regions
+#'
+#' @description Step 3 of the three-step \code{\link{ctwasPipeline}}:
+#'   runs \code{ctwas::screen_regions} on the
+#'   \code{\link{estCtwasParam}} result and returns the screened-region
+#'   set. Use this entry point to substitute hand-tuned priors for the
+#'   ones estimated in step 2 (e.g. when the accurate EM diverges to
+#'   NaN and you want to recover the prefit values).
+#'
+#' @param estResult A list returned by \code{\link{estCtwasParam}}.
+#' @param L Pass-through to \code{ctwas::screen_regions} (and downstream
+#'   fine-mapping).
+#' @param ncore Number of cores.
+#' @param ... Additional arguments forwarded to
+#'   \code{ctwas::screen_regions} (e.g. \code{filter_L},
+#'   \code{min_nonSNP_PIP}, \code{min_L}).
+#' @return The \code{estResult} list augmented with
+#'   \code{screen_res} (the full ctwas output) and
+#'   \code{screened_region_data}.
+#' @export
+screenCtwasRegions <- function(estResult,
+                               L     = 5L,
+                               ncore = 1L,
+                               ...) {
+  if (!requireNamespace("ctwas", quietly = TRUE)) {
+    stop("Package 'ctwas' is required for screenCtwasRegions.")
+  }
+  screenRes <- .ctwasInvoke(ctwas::screen_regions, list(
+    region_data        = estResult$region_data,
+    LD_map             = estResult$LD_map,
+    weights            = estResult$weights,
+    group_prior        = estResult$param$group_prior,
+    group_prior_var    = estResult$param$group_prior_var,
+    L                  = as.integer(L),
+    LD_format          = "custom",
+    LD_loader_fun      = estResult$LD_loader_fun,
+    snpinfo_loader_fun = estResult$snpinfo_loader_fun,
+    ncore              = as.integer(ncore)), extra = list(...))
+  c(estResult, list(
+    screen_res            = screenRes,
+    screened_region_data  = screenRes$screened_region_data))
+}
 
-  # --- Compute the full-panel LD ONCE -------------------------------
-  # Single source of truth for both the LD-loader closure (which ctwas
-  # invokes per region during assemble + fine-map stages) and the
-  # per-gene R_wgt submatrices (sliced from this cache by SNP ID).
-  ldPanel <- .ctwasComputeFullPanelLd(gwasLd)
+#' Fine-map cTWAS regions
+#'
+#' @description Step 4 (final) of the three-step
+#'   \code{\link{ctwasPipeline}}: runs \code{ctwas::finemap_regions} on
+#'   the screened-region set from \code{\link{screenCtwasRegions}} and
+#'   assembles the documented top-level ctwas output (\code{z_gene},
+#'   \code{param}, \code{finemap_res}, \code{susie_alpha_res},
+#'   \code{region_data}, \code{boundary_genes}, \code{screen_res}).
+#'
+#' @param screenResult A list returned by
+#'   \code{\link{screenCtwasRegions}}.
+#' @param L Pass-through.
+#' @param ncore Number of cores.
+#' @param ... Additional arguments forwarded to
+#'   \code{ctwas::finemap_regions}.
+#' @return A list mirroring \code{ctwas::ctwas_sumstats}'s output:
+#'   \code{z_gene}, \code{param}, \code{finemap_res},
+#'   \code{susie_alpha_res}, \code{region_data}, \code{boundary_genes},
+#'   \code{screen_res}.
+#' @export
+finemapCtwasRegions <- function(screenResult,
+                                L     = 5L,
+                                ncore = 1L,
+                                ...) {
+  if (!requireNamespace("ctwas", quietly = TRUE)) {
+    stop("Package 'ctwas' is required for finemapCtwasRegions.")
+  }
+  rd <- screenResult$screened_region_data
+  fmRes <- if (length(rd) == 0L) {
+    list(finemap_res = NULL, susie_alpha_res = NULL)
+  } else {
+    .ctwasInvoke(ctwas::finemap_regions, list(
+      region_data        = rd,
+      LD_map             = screenResult$LD_map,
+      weights            = screenResult$weights,
+      group_prior        = screenResult$param$group_prior,
+      group_prior_var    = screenResult$param$group_prior_var,
+      L                  = as.integer(L),
+      LD_format          = "custom",
+      LD_loader_fun      = screenResult$LD_loader_fun,
+      snpinfo_loader_fun = screenResult$snpinfo_loader_fun,
+      ncore              = as.integer(ncore)), extra = list(...))
+  }
+  list(
+    z_gene          = screenResult$z_gene,
+    param           = screenResult$param,
+    finemap_res     = fmRes$finemap_res,
+    susie_alpha_res = fmRes$susie_alpha_res,
+    region_data     = screenResult$region_data,
+    boundary_genes  = screenResult$boundary_genes,
+    screen_res      = screenResult$screen_res)
+}
 
-  # --- Build the single-region ctwas inputs ---------------------------
-  zSnp        <- .ctwasBuildZSnp(gwasSumStats)
-  regionInfo  <- .ctwasBuildSingleRegionInfo(regionId, gwasLd)
-  # ctwas::ctwas_sumstats top-level asserts `file.exists(LD_map$LD_file)`
-  # and `file.exists(LD_map$SNP_file)` unconditionally — even when
-  # LD_format = "custom" routes all data through our loaders and the file
-  # paths are never read. The right fix is upstream (gate the assertion
-  # on `LD_format != "custom"` or drop it entirely; see
-  # https://github.com/xinhe-lab/ctwas — `ctwas_sumstats()` L33-34). Until
-  # that lands, point both columns at `tempdir()`: always exists, no disk
-  # writes, no cleanup. The loader closures ignore the file token.
-  vestigialPath <- tempdir()
-  ldMap <- data.frame(region_id = regionId,
-                      LD_file   = vestigialPath,
-                      SNP_file  = vestigialPath,
-                      stringsAsFactors = FALSE)
-  snpMap      <- list()
-  snpMap[[regionId]] <- ldPanel$snpInfo
-  weightsList <- .ctwasBuildWeights(
-    twasWeights, ldPanel,
-    fineMappingResult = fineMappingResult,
-    twasWeightCutoff  = twasWeightCutoff,
-    csMinCor          = csMinCor,
-    minPipCutoff      = minPipCutoff,
-    maxNumVariants    = maxNumVariants)
-  zGene       <- if (!is.null(twasZ)) .ctwasBuildZGene(twasZ) else NULL
-
-  # --- Call the ctwas engine ------------------------------------------
-  ctwas::ctwas_sumstats(
-    z_snp                      = zSnp,
-    weights                    = weightsList,
-    region_info                = regionInfo,
-    LD_map                     = ldMap,
-    snp_map                    = snpMap,
-    z_gene                     = zGene,
-    thin                       = thin,
-    niter_prefit               = as.integer(niterPrefit),
-    niter                      = as.integer(niter),
-    L                          = as.integer(L),
-    group_prior_var_structure  = groupPriorVarStructure,
-    LD_format                  = "custom",
-    LD_loader_fun              = .ctwasSingleBlockLdLoader(ldPanel$R),
-    snpinfo_loader_fun         = .ctwasSingleBlockSnpInfoLoader(ldPanel$snpInfo),
-    ncore                      = as.integer(ncore),
-    ...)
+# Invoke a ctwas function with a fixed `args` list plus optional `extra`
+# (typically the `...` collected by the wrapper). `extra` names that
+# duplicate `args` names are silently dropped, so the wrapper's explicit
+# arguments always win over caller-supplied `...`.
+# @noRd
+.ctwasInvoke <- function(fn, args, extra = list()) {
+  if (length(extra) > 0L) {
+    extra <- extra[setdiff(names(extra), names(args))]
+    # `...` is forwarded uniformly to four different ctwas functions
+    # (assemble_region_data / est_param / screen_regions /
+    # finemap_regions). Restrict to fn's explicit formals so an arg
+    # meant for a sibling step doesn't crash this one -- and so args
+    # that fn would otherwise forward via its own `...` (e.g. into
+    # susie_rss) don't bleed into incompatible downstream functions.
+    formalsFn <- tryCatch(names(formals(fn)), error = function(e) NULL)
+    if (!is.null(formalsFn)) {
+      explicitFormals <- setdiff(formalsFn, "...")
+      extra <- extra[intersect(names(extra), explicitFormals)]
+    }
+    args <- c(args, extra)
+  }
+  do.call(fn, args)
 }
 
 # =============================================================================
@@ -174,6 +486,52 @@ ctwasPipeline <- function(gwasSumStats,
 # `.requireMatchingLdSketches` helper (R/ld.R).
 .ctwasRequireMatchingLdSketches <- function(twLd, gwasLd) {
   .requireMatchingLdSketches(twLd, gwasLd, pipelineName = "ctwasPipeline")
+}
+
+# Resolve which TWAS method's weights to feed into ctwas given a
+# TwasWeights collection that may carry multiple methods per
+# (study, context, trait). Rules:
+#   - Caller-supplied method (non-NULL, non-empty) wins, provided that
+#     method exists in the TwasWeights's `method` column.
+#   - Otherwise prefer "ensemble" when present.
+#   - Otherwise return the sole method when only one is present.
+#   - Otherwise: error.
+# @noRd
+.ctwasResolveMethod <- function(twasWeightsList, method = NULL) {
+  available <- unique(unlist(lapply(twasWeightsList, function(tw)
+    as.character(tw$method))))
+  if (length(available) == 0L)
+    stop("ctwasPipeline: TwasWeights collections have no method entries.")
+  if (!is.null(method) && nzchar(method)) {
+    if (!method %in% available)
+      stop("ctwasPipeline: method '", method, "' not present in TwasWeights ",
+           "(available: ", paste(available, collapse = ", "), ").")
+    return(method)
+  }
+  if ("ensemble" %in% available) return("ensemble")
+  if (length(available) == 1L) return(available[[1L]])
+  stop("ctwasPipeline: TwasWeights carries multiple methods (",
+       paste(available, collapse = ", "),
+       ") with no 'ensemble' entry. Supply a `method` argument to ",
+       "pick one (e.g. method = \"mrash\").")
+}
+
+# Subset a TwasWeights collection to rows whose `method` matches the
+# resolved method. Used to enforce the "one ctwas gene per (study,
+# context, trait)" semantics — the legacy pipeline fed a single
+# best-CV-method weight per gene; the new S4 TwasWeights may carry
+# many methods, but ctwas should only see one.
+# @noRd
+.ctwasFilterMethod <- function(tw, method) {
+  keep <- which(as.character(tw$method) == method)
+  if (length(keep) == 0L) return(NULL)
+  TwasWeights(
+    study    = as.character(tw$study)[keep],
+    context  = as.character(tw$context)[keep],
+    trait    = as.character(tw$trait)[keep],
+    method   = as.character(tw$method)[keep],
+    entry    = as.list(tw$entry[keep]),
+    ldSketch = getLdSketch(tw))
 }
 
 # Build the per-variant Z data.frame ctwas expects from a GwasSumStats.
@@ -238,11 +596,14 @@ ctwasPipeline <- function(gwasSumStats,
 
 # Compute the full-panel LD ONCE and return everything the rest of the
 # pipeline needs to consume it. Returns a list with:
-#   R       : full-panel correlation matrix (n_var x n_var, dimnames =
-#             SNP IDs). Single source of truth for both the per-region
-#             LD loader closure and the per-gene R_wgt submatrices.
-#   snpInfo : ctwas-shaped per-block table (chrom, id, pos, alt, ref)
-#             — both the snp_map element and the snpinfo loader return.
+#   R        : full-panel correlation matrix (n_var x n_var, dimnames =
+#              SNP IDs). Single source of truth for both the per-region
+#              LD loader closure and the per-gene R_wgt submatrices.
+#   snpInfo  : ctwas-shaped per-block table (chrom, id, pos, alt, ref)
+#              — both the snp_map element and the snpinfo loader return.
+#   variance : named numeric vector of per-variant dosage variance from
+#              the LD reference. Used to scale non-standardized TWAS
+#              weights to the correlation scale that ctwas expects.
 # @noRd
 .ctwasComputeFullPanelLd <- function(gwasLd) {
   snpInfoCtwas <- .ctwasSnpInfoForBlock(gwasLd)
@@ -252,7 +613,88 @@ ctwasPipeline <- function(gwasSumStats,
   R <- computeLd(geno, method = "sample")
   snpIds <- snpInfoCtwas$id
   dimnames(R) <- list(snpIds, snpIds)
-  list(R = R, snpInfo = snpInfoCtwas)
+  variance <- setNames(apply(geno, 2, stats::var, na.rm = TRUE), snpIds)
+  list(R = R, snpInfo = snpInfoCtwas, variance = variance)
+}
+
+# Harmonize TWAS weight variants against the LD reference panel. Same
+# allele-matching semantics as the GWAS-side `.matchRefPanel` flow:
+# match by (chrom, pos), accept exact A1/A2 frame, sign-flip the weight
+# when alleles are swapped, drop unmatched / strand-ambiguous variants.
+# Returns a data.frame with columns:
+#   variant_id : canonical (panel-frame) variant ID
+#   w          : sign-flipped weight aligned to the panel's A1 frame
+#   origIdx    : index back into the entry's original variantIds vector
+#                (used by SuSiE renormalization to slice mu / lbf)
+# Returns NULL when the entry has no variants in common with the panel.
+# @noRd
+.ctwasHarmonizeWeights <- function(origVids, origW, refVariants) {
+  parsed <- tryCatch(parseVariantId(origVids), error = function(e) NULL)
+  if (is.null(parsed) || nrow(parsed) == 0L) return(NULL)
+  targetDf <- data.frame(
+    chrom   = as.integer(parsed$chrom),
+    pos     = as.integer(parsed$pos),
+    A2      = as.character(parsed$A2),
+    A1      = as.character(parsed$A1),
+    w       = as.numeric(origW),
+    origIdx = seq_along(origVids),
+    stringsAsFactors = FALSE)
+  res <- tryCatch(
+    .matchRefPanel(
+      targetData            = targetDf,
+      refVariants           = refVariants,
+      colToFlip             = "w",
+      matchMinProp          = 0,
+      removeUnmatched       = TRUE,
+      removeStrandAmbiguous = TRUE),
+    error = function(e) NULL)
+  if (is.null(res)) return(NULL)
+  res$harmonizedData
+}
+
+# Does the entry's `fits` slot carry a SuSiE-shape intermediate (lbf,
+# mu, X_column_scale_factors)? Used to gate the renormalization branch.
+# @noRd
+.ctwasIsSusieFit <- function(fits) {
+  if (is.null(fits)) return(FALSE)
+  needed <- c("lbf_variable", "mu", "X_column_scale_factors")
+  all(needed %in% names(fits))
+}
+
+# Renormalize SuSiE TWAS weights over the kept variant set. When some
+# variants got dropped by allele harmonization / panel intersection,
+# the posterior `alpha` values from the original fit no longer sum to
+# 1 over the kept variants. We re-softmax `lbf_variable[, keptIdx]`
+# into a renormalized alpha, sign-flip the rows of `mu[, keptIdx]` to
+# match the panel's allele frame (carrying over the per-variant sign
+# flip already applied to `harmonizedW`), and recompute the per-variant
+# weight as `colSums(alpha * mu_subset) / X_column_scale_factors_subset`.
+# Returns the new weight vector (length = length(keptIdx)), or NULL if
+# the fit's dimensions don't line up with the entry's variantIds.
+# @noRd
+.ctwasRenormalizeSusieWeights <- function(fits, origVids, origW,
+                                          keptIdx, harmonizedW) {
+  lbf  <- fits$lbf_variable
+  mu   <- fits$mu
+  xCol <- fits$X_column_scale_factors
+  if (is.null(lbf) || is.null(mu) || is.null(xCol)) return(NULL)
+  if (ncol(lbf) != length(origVids) ||
+      ncol(mu)  != length(origVids) ||
+      length(xCol) != length(origVids)) {
+    # Fit-vs-entry dimension mismatch; skip rather than mis-slice.
+    return(NULL)
+  }
+  # Per-variant sign flip applied by allele harmonization. NaN signs
+  # (origW == 0) default to +1.
+  signFlip <- sign(harmonizedW / origW[keptIdx])
+  signFlip[!is.finite(signFlip)] <- 1
+  lbfSub  <- lbf[, keptIdx, drop = FALSE]
+  muSub   <- sweep(mu[, keptIdx, drop = FALSE], 2L, signFlip, `*`)
+  xColSub <- xCol[keptIdx]
+  # Guard against zero scale factors (shouldn't happen in practice).
+  xColSub[xColSub == 0] <- 1
+  newAlpha <- lbfToAlpha(lbfSub)
+  as.numeric(colSums(newAlpha * muSub) / xColSub)
 }
 
 # Build the weights list ctwas expects: keyed by per-tuple gene id,
@@ -271,20 +713,83 @@ ctwasPipeline <- function(gwasSumStats,
                                twasWeightCutoff  = 0,
                                csMinCor          = 0.8,
                                minPipCutoff      = 0,
-                               maxNumVariants    = Inf) {
+                               maxNumVariants    = Inf,
+                               gwasSnpIds        = NULL) {
   panelSnps <- rownames(ldPanel$R)
+  # ctwas's compute_gene_z asserts that every weight variant exists in the
+  # block's z_snp$id. When the LD sketch covers more than the block (e.g.
+  # a whole-chromosome PLINK2 used for a single-block GwasSumStats),
+  # panelSnps alone leaks variants outside the block. Intersect with the
+  # caller-supplied GWAS sumstats variant set when provided.
+  if (!is.null(gwasSnpIds)) {
+    panelSnps <- intersect(panelSnps, as.character(gwasSnpIds))
+  }
   panelInfo <- ldPanel$snpInfo
+  # Reference frame for allele-harmonization: panel variant info with
+  # the column shape `.matchRefPanel` expects (chrom/pos/A2/A1).
+  refVariants <- data.frame(
+    chrom      = as.integer(panelInfo$chrom),
+    pos        = as.integer(panelInfo$pos),
+    A2         = as.character(panelInfo$ref),
+    A1         = as.character(panelInfo$alt),
+    variant_id = as.character(panelInfo$id),
+    stringsAsFactors = FALSE)
+
   out <- list()
   for (i in seq_len(nrow(twasWeights))) {
-    entry  <- twasWeights$entry[[i]]
-    vids   <- getVariantIds(entry)
-    w      <- as.numeric(getWeights(entry))
-    if (length(vids) == 0L || length(vids) != length(w)) next
+    entry    <- twasWeights$entry[[i]]
+    origVids <- getVariantIds(entry)
+    origW    <- as.numeric(getWeights(entry))
+    if (length(origVids) == 0L || length(origVids) != length(origW)) next
 
-    # Drop variants not in the LD sketch panel.
+    # --- Step 1: allele-harmonize against the LD panel -------------
+    # Parses chr:pos:A2:A1 IDs into the data.frame `.matchRefPanel`
+    # expects, then matches by (chrom, pos) with exact / sign-flip /
+    # strand-flip detection. Returned canonical variant IDs are in the
+    # panel's A1/A2 frame; weights are sign-flipped for variants whose
+    # input A1/A2 frame was swapped relative to the panel.
+    harm <- .ctwasHarmonizeWeights(origVids, origW, refVariants)
+    if (is.null(harm) || nrow(harm) == 0L) next
+    vids    <- as.character(harm$variant_id)
+    w       <- as.numeric(harm$w)
+    keptIdx <- as.integer(harm$origIdx)  # back-reference into origVids/origW
+
+    # --- Step 2: restrict to panel ∩ gwasSnpIds --------------------
     keep <- vids %in% panelSnps
     if (!any(keep)) next
-    vids <- vids[keep]; w <- w[keep]
+    vids    <- vids[keep]
+    w       <- w[keep]
+    keptIdx <- keptIdx[keep]
+
+    # --- Step 3: SuSiE alpha renormalization -----------------------
+    # When the entry carries a SuSiE-style fit (lbf_variable + mu +
+    # X_column_scale_factors) and the kept variant set is smaller than
+    # the original fit, the posterior probabilities `alpha` no longer
+    # sum to 1 over the kept variants. Renormalize via softmax of
+    # lbf_variable over the kept columns and recompute the per-variant
+    # weight as colSums(new_alpha * mu_subset) /
+    # X_column_scale_factors_subset. mu is sign-flipped per the allele
+    # harmonization so the recomputed weight stays in the panel's
+    # allele frame. Mirrors the legacy adjustSusieWeights helper.
+    fits <- getFits(entry)
+    if (.ctwasIsSusieFit(fits) && length(keptIdx) < length(origVids)) {
+      renorm <- .ctwasRenormalizeSusieWeights(
+        fits, origVids = origVids, origW = origW,
+        keptIdx = keptIdx, harmonizedW = w)
+      if (!is.null(renorm)) w <- renorm
+    }
+
+    # --- Step 4: variance scaling for non-standardized weights -----
+    # w_scaled = w_raw * sqrt(per-variant genotype variance from the
+    # LD reference panel). Standardized entries (RSS-style, already on
+    # the correlation scale) pass through unchanged.
+    if (!isTRUE(getStandardized(entry))) {
+      varLookup <- ldPanel$variance[vids]
+      if (anyNA(varLookup))
+        stop(".ctwasBuildWeights: missing genotype variance for ",
+             sum(is.na(varLookup)), " variant(s) in the LD panel.")
+      w <- w * sqrt(varLookup)
+    }
 
     gStudy   <- as.character(twasWeights$study)[[i]]
     gContext <- as.character(twasWeights$context)[[i]]
@@ -460,18 +965,71 @@ ctwasPipeline <- function(gwasSumStats,
     stringsAsFactors = FALSE)
 }
 
-# Single-block LD loader for ctwas: captures the precomputed full-panel
-# correlation matrix and returns it on every loader call (ctwas invokes
-# the loader multiple times per region across assemble + fine-map). The
-# `LD_file` argument is a vestigial region token — ignored.
+# Multi-block LD loader for ctwas. ctwas invokes
+# `LD_loader_fun(LD_file)` per region during region_data assembly and
+# fine-mapping; we dispatch by `LD_file` (the same string set on
+# `LD_map$LD_file`) into the cached per-sketch ldPanel.
 # @noRd
-.ctwasSingleBlockLdLoader <- function(R) {
-  function(LD_file, ...) R
+.ctwasMultiBlockLdLoader <- function(ldPanelsByRegion) {
+  function(LD_file, ...) {
+    panel <- ldPanelsByRegion[[LD_file]]
+    if (is.null(panel))
+      stop("ctwasPipeline LD loader: no cached panel for LD_file = '",
+           LD_file, "'")
+    panel$R
+  }
 }
 
-# Single-block SNP-info loader for ctwas: captures the precomputed
-# per-block snpInfo table and returns it on every loader call.
+# Multi-block SNP-info loader for ctwas. Mirrors the LD loader.
 # @noRd
-.ctwasSingleBlockSnpInfoLoader <- function(snpInfo) {
-  function(LD_file, ...) snpInfo
+.ctwasMultiBlockSnpInfoLoader <- function(ldPanelsByRegion) {
+  function(LD_file, ...) {
+    panel <- ldPanelsByRegion[[LD_file]]
+    if (is.null(panel))
+      stop("ctwasPipeline snpInfo loader: no cached panel for LD_file = '",
+           LD_file, "'")
+    panel$snpInfo
+  }
+}
+
+# Derive the LD_file token for ctwas from a GenotypeHandle. We point
+# at the on-disk file that already backs the sketch's data, so the
+# `file.exists(LD_map$LD_file)` assertion in ctwas::ctwas_sumstats
+# passes WITHOUT pecotmr doing any new I/O. The token also serves as
+# the dispatch key for the multi-block LD / snpInfo loaders, so two
+# blocks sharing the same on-disk LD payload share one cached panel.
+# @noRd
+.ctwasLdPanelKey <- function(handle) {
+  fmt <- getFormat(handle)
+  stem <- getPath(handle)
+  candidates <- switch(fmt,
+    "plink2" = c(paste0(stem, ".pgen")),
+    "plink1" = c(paste0(stem, ".bed")),
+    "gds"    = c(stem),
+    "vcf"    = c(stem),
+    stem)
+  hit <- candidates[file.exists(candidates)]
+  if (length(hit) == 0L)
+    stop("ctwasPipeline: could not derive an existing LD-file token for ",
+         "the GenotypeHandle (format=", fmt, ", path=", stem,
+         "). Looked for: ", paste(candidates, collapse = ", "))
+  hit[[1L]]
+}
+
+# Build a per-block snpInfo table restricted to variants present in the
+# GwasSumStats entry. Mirrors `.ctwasSnpInfoForBlock` but restricts to
+# the block's GWAS variants (intersected against the cached panel) so
+# snp_map[[region_id]] is sized to the block, not the whole panel.
+# @noRd
+.ctwasSnpInfoForGwasBlock <- function(gwasSumStats, panelSnpInfo) {
+  blockIds <- character(0)
+  for (i in seq_len(nrow(gwasSumStats))) {
+    mc <- S4Vectors::mcols(gwasSumStats$entry[[i]])
+    if ("SNP" %in% colnames(mc))
+      blockIds <- c(blockIds, as.character(mc$SNP))
+  }
+  blockIds <- unique(blockIds)
+  if (length(blockIds) == 0L) return(panelSnpInfo[FALSE, , drop = FALSE])
+  keep <- panelSnpInfo$id %in% blockIds
+  panelSnpInfo[keep, , drop = FALSE]
 }
