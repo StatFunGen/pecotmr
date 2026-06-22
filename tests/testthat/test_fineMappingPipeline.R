@@ -251,18 +251,23 @@ test_that(".fmCacheLookup: returns matching entry by 4-tuple", {
   expect_null(pecotmr:::.fmCacheLookup(fmr, "ghost", "c1", "t1", "susie"))
 })
 
-test_that(".fmCacheLookupGwas: returns matching entry by (study, method)", {
+test_that(".fmCacheLookupGwas: returns matching entry by (study, method, region_id)", {
   e <- FineMappingEntry(
     variantIds = "v1",
     susieFit = list(token = "susie"),
     topLoci    = data.frame(variant_id = "v1", pip = 0.5,
                             stringsAsFactors = FALSE))
+  # GwasFineMappingResult assigns the synthetic region_id "region_1"
+  # when none is supplied; the lookup must include it in the 3-tuple
+  # key (multi-block FMRs disambiguate per-block fits by region_id).
   fmr <- GwasFineMappingResult(study = "g1", method = "susie",
                                 entry = list(e))
   expect_identical(
-    pecotmr:::.fmCacheLookupGwas(fmr, "g1", "susie"),
+    pecotmr:::.fmCacheLookupGwas(fmr, "g1", "susie", "region_1"),
     e)
-  expect_null(pecotmr:::.fmCacheLookupGwas(fmr, "ghost", "susie"))
+  expect_null(pecotmr:::.fmCacheLookupGwas(fmr, "ghost", "susie", "region_1"))
+  # Wrong region_id is also a miss.
+  expect_null(pecotmr:::.fmCacheLookupGwas(fmr, "g1", "susie", "other_region"))
 })
 
 test_that(".fmCacheLookup: non-QtlFineMappingResult input returns NULL", {
@@ -285,7 +290,7 @@ test_that(".fmCacheLookupGwas: non-GwasFineMappingResult input returns NULL", {
   qtlFmr <- QtlFineMappingResult(
     study = "s1", context = "c1", trait = "t1", method = "susie",
     entry = list(e))
-  expect_null(pecotmr:::.fmCacheLookupGwas(qtlFmr, "s1", "susie"))
+  expect_null(pecotmr:::.fmCacheLookupGwas(qtlFmr, "s1", "susie", "region_1"))
 })
 
 # ===========================================================================
@@ -303,7 +308,7 @@ test_that(".fmBuildQtlResult: empty entries errors", {
 test_that(".fmBuildGwasResult: empty entries errors", {
   expect_error(
     pecotmr:::.fmBuildGwasResult(character(0), character(0), list()),
-    "no \\(study, method\\) tuples"
+    "no \\(study, method, region_id\\) tuples"
   )
 })
 
@@ -1013,8 +1018,13 @@ test_that("fineMappingPipeline(GwasSumStats): cache hit short-circuits the RSS f
     topLoci    = data.frame(variant_id = paste0("v", 1:5),
                              pip = seq(0.9, 0.1, length.out = 5),
                              stringsAsFactors = FALSE))
+  # The GwasSumStats branch keys its cache by (study, method, region_id)
+  # where region_id is "{seqname}_{minPos}_{maxPos}" derived from the
+  # entry's GRanges. .fmp_makeSumstatsGr() yields chr1 positions 100..500,
+  # so the cache row must use region_id = "chr1_100_500" to hit.
   cache <- GwasFineMappingResult(
     study = "G1", method = "susie",
+    region_id = "chr1_100_500",
     entry = list(cachedEntry),
     ldSketch = .fmp_makeHandle())
   rss_calls <- 0

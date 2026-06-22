@@ -43,11 +43,12 @@
 #'   \code{qtlEnrichment}. Default \code{1}.
 #' @param ... Additional arguments forwarded to
 #'   \code{\link{qtlEnrichment}}.
-#' @return A data frame with one row per (gwasStudy, qtlContext) pair
-#'   and columns \code{gwasStudy}, \code{qtlContext},
-#'   \code{enrichment}, \code{enrichmentSe}, \code{enrichmentLogOdds},
-#'   plus any extras the underlying estimator emits. Suitable as the
-#'   \code{enrichment} argument to \code{\link{colocPipeline}}.
+#' @return A data frame with one row per (gwasStudy, qtlStudy,
+#'   qtlContext) triple and columns \code{gwasStudy}, \code{qtlStudy},
+#'   \code{qtlContext}, \code{enrichment}, \code{enrichmentSe},
+#'   \code{enrichmentLogOdds}, plus any extras the underlying estimator
+#'   emits. Suitable as the \code{enrichment} argument to
+#'   \code{\link{colocPipeline}} (which joins on the same triple).
 #' @export
 qtlEnrichmentPipeline <- function(gwasFineMappingResult,
                                   qtlFineMappingResult,
@@ -71,11 +72,19 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
 
   # Per-study genome-wide GWAS PIP vector (named by variant id).
   gwasStudies <- unique(as.character(gwasFineMappingResult$study))
-  qtlContexts <- unique(as.character(qtlFineMappingResult$context))
+  # Unique QTL (study, context) tuples — using context alone would
+  # silently merge two studies that share a context label (e.g. MSBB
+  # and ROSMAP both labelling something "DLPFC_eQTL"), giving wrong
+  # enrichment estimates. The S4 schema carries study explicitly per
+  # entry, so we iterate over the joint key.
+  qtlTuples <- unique(data.frame(
+    qtlStudy   = as.character(qtlFineMappingResult$study),
+    qtlContext = as.character(qtlFineMappingResult$context),
+    stringsAsFactors = FALSE))
 
-  if (length(gwasStudies) == 0L || length(qtlContexts) == 0L)
-    stop("qtlEnrichmentPipeline: no (gwasStudy, qtlContext) pairs ",
-         "to compute (one of the inputs has zero rows).")
+  if (length(gwasStudies) == 0L || nrow(qtlTuples) == 0L)
+    stop("qtlEnrichmentPipeline: no (gwasStudy, qtlStudy, qtlContext) ",
+         "triples to compute (one of the inputs has zero rows).")
 
   results <- list()
   for (gStudy in gwasStudies) {
@@ -86,12 +95,15 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
         gStudy))
       next
     }
-    for (qContext in qtlContexts) {
-      qtlRegions <- .enrBuildQtlRegionsList(qtlFineMappingResult, qContext)
+    for (k in seq_len(nrow(qtlTuples))) {
+      qStudy   <- qtlTuples$qtlStudy[[k]]
+      qContext <- qtlTuples$qtlContext[[k]]
+      qtlRegions <- .enrBuildQtlRegionsList(qtlFineMappingResult,
+                                             qStudy, qContext)
       if (length(qtlRegions) == 0L) {
         warning(sprintf(
-          "qtlEnrichmentPipeline: no usable QTL regions for qtlContext='%s'; skipping.",
-          qContext))
+          "qtlEnrichmentPipeline: no usable QTL regions for (qtlStudy='%s', qtlContext='%s'); skipping.",
+          qStudy, qContext))
         next
       }
       enr <- tryCatch(
@@ -106,13 +118,14 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
           ...),
         error = function(e) {
           warning(sprintf(
-            "qtlEnrichmentPipeline: qtlEnrichment failed for (gwasStudy='%s', qtlContext='%s'): %s",
-            gStudy, qContext, conditionMessage(e)))
+            "qtlEnrichmentPipeline: qtlEnrichment failed for (gwasStudy='%s', qtlStudy='%s', qtlContext='%s'): %s",
+            gStudy, qStudy, qContext, conditionMessage(e)))
           NULL
         })
       if (is.null(enr)) next
       row <- .enrFlattenEnrichment(enr)
       row$gwasStudy  <- gStudy
+      row$qtlStudy   <- qStudy
       row$qtlContext <- qContext
       results[[length(results) + 1L]] <- row
     }
@@ -121,6 +134,7 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
   if (length(results) == 0L) {
     return(data.frame(
       gwasStudy  = character(0),
+      qtlStudy   = character(0),
       qtlContext = character(0),
       enrichment = numeric(0),
       enrichmentSe = numeric(0),
@@ -130,7 +144,7 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
   out <- do.call(rbind, lapply(results, as.data.frame,
                               stringsAsFactors = FALSE))
   rownames(out) <- NULL
-  idCols <- c("gwasStudy", "qtlContext")
+  idCols <- c("gwasStudy", "qtlStudy", "qtlContext")
   other  <- setdiff(colnames(out), idCols)
   out[, c(idCols, other), drop = FALSE]
 }
@@ -180,12 +194,15 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
   all
 }
 
-# Build the per-(qtl context) list of region fits in the shape that
-# qtlEnrichment expects: list(d) where each d carries
-# alpha, pip, prior_variance (V).
+# Build the per-(qtlStudy, qtlContext) list of region fits in the shape
+# that qtlEnrichment expects: list(d) where each d carries
+# alpha, pip, prior_variance (V). Filters on BOTH study and context so
+# entries from different studies that happen to share a context label
+# are not pooled into one enrichment estimate.
 # @noRd
-.enrBuildQtlRegionsList <- function(qtlFmr, qContext) {
-  idx <- which(as.character(qtlFmr$context) == qContext)
+.enrBuildQtlRegionsList <- function(qtlFmr, qStudy, qContext) {
+  idx <- which(as.character(qtlFmr$study)   == qStudy &
+               as.character(qtlFmr$context) == qContext)
   if (length(idx) == 0L) return(list())
   out <- list()
   for (i in idx) {

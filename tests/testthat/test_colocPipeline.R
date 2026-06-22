@@ -339,18 +339,24 @@ context("encoloc")
 # .colocLookupEnrichment (formerly .enlocLookupEnrichment, now shared)
 # ===========================================================================
 
-test_that(".colocLookupEnrichment: returns the value for a (gwasStudy, qtlContext) hit", {
-  enr <- data.frame(gwasStudy = c("G1", "G2"),
+test_that(".colocLookupEnrichment: returns the value for a (gwasStudy, qtlStudy, qtlContext) hit", {
+  enr <- data.frame(gwasStudy  = c("G1", "G2"),
+                    qtlStudy   = c("Q1", "Q1"),
                     qtlContext = c("c1", "c1"),
                     enrichment = c(2.0, 3.5),
                     stringsAsFactors = FALSE)
-  expect_equal(pecotmr:::.colocLookupEnrichment(enr, "G2", "c1"), 3.5)
+  expect_equal(pecotmr:::.colocLookupEnrichment(enr, "G2", "Q1", "c1"), 3.5)
 })
 
 test_that(".colocLookupEnrichment: returns NA when no row matches", {
-  enr <- data.frame(gwasStudy = "G1", qtlContext = "c1", enrichment = 2.0,
+  enr <- data.frame(gwasStudy  = "G1",
+                    qtlStudy   = "Q1",
+                    qtlContext = "c1",
+                    enrichment = 2.0,
                     stringsAsFactors = FALSE)
-  expect_true(is.na(pecotmr:::.colocLookupEnrichment(enr, "ghost", "c1")))
+  expect_true(is.na(pecotmr:::.colocLookupEnrichment(enr, "ghost", "Q1", "c1")))
+  # qtlStudy mismatch also a miss.
+  expect_true(is.na(pecotmr:::.colocLookupEnrichment(enr, "G1", "Qghost", "c1")))
 })
 
 # ===========================================================================

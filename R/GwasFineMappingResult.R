@@ -1,9 +1,13 @@
 # =============================================================================
 # GwasFineMappingResult S4 class
 # -----------------------------------------------------------------------------
-# DFrame-subclass collection keyed by the identity tuple (study, method).
-# Each row holds a FineMappingEntry payload for one GWAS study at one
-# fine-mapping method, covering a single LD block. Class-level slots:
+# DFrame-subclass collection keyed by the identity tuple
+# (study, method, region_id). Each row holds a FineMappingEntry payload
+# for one GWAS study at one fine-mapping method over one LD block.
+# Multiple rows per (study, method) are allowed when they differ on
+# region_id — the genome-wide-across-blocks shape that
+# qtlEnrichmentPipeline / colocPipeline expect when sweeping a study
+# across LD blocks. Class-level slots:
 #   * ldSketch   GenotypeHandle for the LD reference; required for the
 #                LD-block-indexed susieRSS workflow.
 # Methods that take per-row selectors accept (study, method) and ignore
@@ -17,7 +21,7 @@ setClass("GwasFineMappingResult",
   contains = "FineMappingResultBase",
   validity = function(object) {
     errors <- character()
-    required <- c("study", "method", "entry")
+    required <- c("study", "method", "region_id", "entry")
     missingCols <- setdiff(required, names(object))
     if (length(missingCols) > 0L)
       errors <- c(errors, paste("missing columns:",
@@ -32,10 +36,10 @@ setClass("GwasFineMappingResult",
       if (!all(entryTypes))
         errors <- c(errors,
           "every element of the `entry` column must be a FineMappingEntry")
-      keyDf <- as.data.frame(object[, c("study", "method")])
+      keyDf <- as.data.frame(object[, c("study", "method", "region_id")])
       if (anyDuplicated(keyDf))
         errors <- c(errors,
-          "(study, method) tuple uniqueness violated")
+          "(study, method, region_id) tuple uniqueness violated")
     }
     if (!is.null(object@ldSketch) &&
         !methods::is(object@ldSketch, "GenotypeHandle")) {
@@ -77,26 +81,41 @@ setClass("GwasFineMappingResult",
 
 #' @title Create a GwasFineMappingResult Collection
 #' @description Construct a \code{GwasFineMappingResult} DFrame-subclass
-#'   collection from per-(study, method) tuples and a list of
-#'   \code{FineMappingEntry} payloads. The collection represents one LD
-#'   block of GWAS fine-mapping fits; build a separate collection per
-#'   block when sweeping the genome.
+#'   collection from per-(study, method, region_id) tuples and a list of
+#'   \code{FineMappingEntry} payloads. The collection can represent
+#'   either a single LD block (one row per (study, method)) or a
+#'   genome-wide sweep across blocks (multiple rows per (study, method),
+#'   each tagged with its own region_id).
 #' @param study Character vector of study identifiers (per tuple).
 #' @param method Character vector of fine-mapping method names (per tuple).
 #' @param entry List / \code{SimpleList} of \code{FineMappingEntry} objects.
+#' @param region_id Character vector of LD-block identifiers (per
+#'   tuple). When omitted (\code{NULL}), defaults to a per-row synthetic
+#'   id (\code{"region_1"}, \code{"region_2"}, ...) so the
+#'   (\code{study}, \code{method}, \code{region_id}) triple is unique.
+#'   Supplying meaningful labels (e.g. \code{"chr22_10516173_17414263"})
+#'   is preferred for downstream consumers that join on region.
 #' @param ldSketch An optional \code{GenotypeHandle}.
 #' @return A \code{GwasFineMappingResult} object.
 #' @export
 GwasFineMappingResult <- function(study, method, entry,
+                                  region_id = NULL,
                                   ldSketch = NULL) {
   n <- length(study)
   if (length(method) != n || length(entry) != n) {
     stop("`study`, `method`, and `entry` must all have the same length.")
   }
+  if (is.null(region_id)) {
+    region_id <- paste0("region_", seq_len(n))
+  } else if (length(region_id) != n) {
+    stop("`region_id` must have the same length as `study` (got ",
+         length(region_id), " vs ", n, ").")
+  }
   cols <- list(
-    study  = as.character(study),
-    method = as.character(method),
-    entry  = S4Vectors::SimpleList(entry)
+    study     = as.character(study),
+    method    = as.character(method),
+    region_id = as.character(region_id),
+    entry     = S4Vectors::SimpleList(entry)
   )
   df <- do.call(S4Vectors::DataFrame,
                 c(cols, list(check.names = FALSE)))
@@ -121,9 +140,10 @@ setMethod("getContexts", "GwasFineMappingResult", function(x) NULL)
 #' @export
 setMethod("getTraits", "GwasFineMappingResult", function(x) NULL)
 
-# Per-tuple lookup for the GWAS variant (2-tuple instead of 4-tuple).
-# The generic accepts the full set of selectors; context/trait args are
-# ignored for GwasFineMappingResult.
+# Per-tuple lookup keyed by (study, method, region_id). The generic
+# accepts the full set of selectors; context/trait args are ignored for
+# GwasFineMappingResult. `region` (passed via `...`) is the per-block
+# disambiguator for multi-block genome-wide collections.
 #' @rdname getFineMappingResult
 #' @export
 setMethod("getFineMappingResult", "GwasFineMappingResult",
@@ -136,17 +156,18 @@ setMethod("getFineMappingResult", "GwasFineMappingResult",
 #' @export
 setMethod("getPip", "GwasFineMappingResult",
   function(x, study = NULL, context = NULL, trait = NULL, method = NULL,
-           returnList = FALSE, ...) {
-    entry <- getFineMappingResult(x, study = study, method = method)
-    getPip(entry)
+           region = NULL, returnList = FALSE, ...) {
+    idx <- .tupleSelectRowGwasFmr(x, study, method, region)
+    getPip(x$entry[[idx]])
   })
 
 #' @rdname getCs
 #' @export
 setMethod("getCs", "GwasFineMappingResult",
-  function(x, study = NULL, context = NULL, trait = NULL, method = NULL, ...) {
-    entry <- getFineMappingResult(x, study = study, method = method)
-    getCs(entry)
+  function(x, study = NULL, context = NULL, trait = NULL, method = NULL,
+           region = NULL, ...) {
+    idx <- .tupleSelectRowGwasFmr(x, study, method, region)
+    getCs(x$entry[[idx]])
   })
 
 #' @rdname getTopLoci
@@ -154,34 +175,39 @@ setMethod("getCs", "GwasFineMappingResult",
 setMethod("getTopLoci", "GwasFineMappingResult",
   function(x, type = c("data.frame", "GRanges"),
            signalCutoff = 0.025,
-           study = NULL, context = NULL, trait = NULL, method = NULL, ...) {
-    entry <- getFineMappingResult(x, study = study, method = method)
-    getTopLoci(entry, type = match.arg(type), signalCutoff = signalCutoff)
+           study = NULL, context = NULL, trait = NULL, method = NULL,
+           region = NULL, ...) {
+    idx <- .tupleSelectRowGwasFmr(x, study, method, region)
+    getTopLoci(x$entry[[idx]], type = match.arg(type),
+               signalCutoff = signalCutoff)
   })
 
 #' @rdname getMarginalEffects
 #' @export
 setMethod("getMarginalEffects", "GwasFineMappingResult",
   function(x, maxPval = NULL,
-           study = NULL, context = NULL, trait = NULL, method = NULL, ...) {
-    entry <- getFineMappingResult(x, study = study, method = method)
-    getMarginalEffects(entry, maxPval = maxPval)
+           study = NULL, context = NULL, trait = NULL, method = NULL,
+           region = NULL, ...) {
+    idx <- .tupleSelectRowGwasFmr(x, study, method, region)
+    getMarginalEffects(x$entry[[idx]], maxPval = maxPval)
   })
 
 #' @rdname getSusieFit
 #' @export
 setMethod("getSusieFit", "GwasFineMappingResult",
-  function(x, study = NULL, context = NULL, trait = NULL, method = NULL, ...) {
-    entry <- getFineMappingResult(x, study = study, method = method)
-    getSusieFit(entry)
+  function(x, study = NULL, context = NULL, trait = NULL, method = NULL,
+           region = NULL, ...) {
+    idx <- .tupleSelectRowGwasFmr(x, study, method, region)
+    getSusieFit(x$entry[[idx]])
   })
 
 #' @rdname getVariantIds
 #' @export
 setMethod("getVariantIds", "GwasFineMappingResult",
-  function(x, study = NULL, context = NULL, trait = NULL, method = NULL, ...) {
-    entry <- getFineMappingResult(x, study = study, method = method)
-    getVariantIds(entry)
+  function(x, study = NULL, context = NULL, trait = NULL, method = NULL,
+           region = NULL, ...) {
+    idx <- .tupleSelectRowGwasFmr(x, study, method, region)
+    getVariantIds(x$entry[[idx]])
   })
 
 

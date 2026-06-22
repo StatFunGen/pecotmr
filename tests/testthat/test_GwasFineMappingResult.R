@@ -26,15 +26,47 @@ test_that("GwasFineMappingResult: errors on length mismatch", {
 })
 
 
-test_that("GwasFineMappingResult: rejects duplicate (study, method) tuples", {
+test_that("GwasFineMappingResult: same (study, method) across distinct region_ids OK", {
+  # The default constructor synthesises region_1, region_2, ... so the
+  # (study, method, region_id) triple is unique even when (study, method)
+  # repeats. This is the genome-wide-across-blocks shape that
+  # qtlEnrichmentPipeline + colocPipeline expect.
+  e1 <- .sc_makeFineMappingEntry(3)
+  e2 <- .sc_makeFineMappingEntry(3)
+  res <- GwasFineMappingResult(
+    study  = c("g1", "g1"),
+    method = c("susie", "susie"),
+    entry  = list(e1, e2))
+  expect_s4_class(res, "GwasFineMappingResult")
+  expect_equal(nrow(res), 2L)
+  expect_setequal(as.character(res$region_id), c("region_1", "region_2"))
+})
+
+
+test_that("GwasFineMappingResult: rejects duplicate (study, method, region_id) tuples", {
   e1 <- .sc_makeFineMappingEntry(3)
   e2 <- .sc_makeFineMappingEntry(3)
   expect_error(
     GwasFineMappingResult(
-      study  = c("g1", "g1"),
-      method = c("susie", "susie"),
-      entry  = list(e1, e2)),
+      study     = c("g1", "g1"),
+      method    = c("susie", "susie"),
+      region_id = c("chr22_1_100", "chr22_1_100"),
+      entry     = list(e1, e2)),
     "uniqueness violated"
+  )
+})
+
+
+test_that("GwasFineMappingResult: errors when region_id length mismatches", {
+  e1 <- .sc_makeFineMappingEntry(3)
+  e2 <- .sc_makeFineMappingEntry(3)
+  expect_error(
+    GwasFineMappingResult(
+      study     = c("g1", "g1"),
+      method    = c("susie", "susie"),
+      region_id = "only_one",
+      entry     = list(e1, e2)),
+    "same length"
   )
 })
 

@@ -71,6 +71,11 @@
 #'   must-keep variants and fill remaining slots by descending PIP
 #'   (when available) or descending \code{|weight|}. Default
 #'   \code{Inf} (no cap).
+#' @param fallbackToPrefit Logical (length 1). Forwarded to
+#'   \code{\link{estCtwasParam}}. When \code{TRUE}, ctwas's accurate-EM
+#'   NaN failure is recovered by falling back to the prefit estimates
+#'   (mirrors the legacy ctwas_2 workaround on underpowered data).
+#'   Default \code{FALSE}.
 #' @param ... Additional arguments forwarded to
 #'   \code{ctwas::ctwas_sumstats}.
 #' @return Whatever \code{ctwas::ctwas_sumstats} returns (a list with
@@ -95,6 +100,7 @@ ctwasPipeline <- function(gwasSumStats,
                           csMinCor                = 0.8,
                           minPipCutoff            = 0,
                           maxNumVariants          = Inf,
+                          fallbackToPrefit        = FALSE,
                           ...) {
   groupPriorVarStructure <- match.arg(groupPriorVarStructure)
   inputs <- assembleCtwasInputs(
@@ -114,6 +120,7 @@ ctwasPipeline <- function(gwasSumStats,
     niter                   = niter,
     groupPriorVarStructure  = groupPriorVarStructure,
     ncore                   = ncore,
+    fallbackToPrefit        = fallbackToPrefit,
     ...)
   screened <- screenCtwasRegions(
     est,
@@ -304,6 +311,12 @@ assembleCtwasInputs <- function(gwasSumStats, twasWeights,
 #'   \code{ctwas::assemble_region_data} / \code{ctwas::est_param}.
 #' @param groupPriorVarStructure Pass-through.
 #' @param ncore Number of cores.
+#' @param fallbackToPrefit Logical (length 1). When \code{TRUE} (default
+#'   \code{FALSE}), if \code{ctwas::est_param}'s accurate EM diverges to
+#'   NaN and throws \code{"Estimated group_prior(_var)? contains NAs"},
+#'   re-run only the prefit step via \code{ctwas:::fit_EM} and return
+#'   those (typically finite) priors as the param. Mirrors the legacy
+#'   ctwas_2 workaround on toy data where the accurate EM saturates.
 #' @param ... Additional arguments forwarded to \code{ctwas::est_param}
 #'   (e.g. \code{min_p_single_effect}, \code{min_group_size}).
 #' @return The \code{inputs} list augmented with \code{region_data},
@@ -319,6 +332,7 @@ estCtwasParam <- function(inputs,
                                                       "shared_all",
                                                       "independent"),
                           ncore                   = 1L,
+                          fallbackToPrefit        = FALSE,
                           ...) {
   if (!requireNamespace("ctwas", quietly = TRUE)) {
     stop("Package 'ctwas' is required for estCtwasParam.")
@@ -340,12 +354,27 @@ estCtwasParam <- function(inputs,
     snp_map         = inputs$snp_map,
     thin            = thin,
     ncore           = as.integer(ncore)), extra = list(...))
-  paramRes <- .ctwasInvoke(ctwas::est_param, list(
-    region_data               = assembled$region_data,
-    niter_prefit              = as.integer(niterPrefit),
-    niter                     = as.integer(niter),
-    group_prior_var_structure = groupPriorVarStructure,
-    ncore                     = as.integer(ncore)), extra = list(...))
+  paramRes <- tryCatch(
+    .ctwasInvoke(ctwas::est_param, list(
+      region_data               = assembled$region_data,
+      niter_prefit              = as.integer(niterPrefit),
+      niter                     = as.integer(niter),
+      group_prior_var_structure = groupPriorVarStructure,
+      ncore                     = as.integer(ncore)), extra = list(...)),
+    error = function(e) {
+      if (fallbackToPrefit && grepl("contains NAs", conditionMessage(e))) {
+        message("estCtwasParam: accurate EM diverged (",
+                conditionMessage(e), "); falling back to prefit estimates.")
+        .ctwasFitPrefitEm(assembled$region_data,
+                          niterPrefit            = as.integer(niterPrefit),
+                          groupPriorVarStructure = groupPriorVarStructure,
+                          thin                   = thin,
+                          ncore                  = as.integer(ncore),
+                          extra                  = list(...))
+      } else {
+        stop(e)
+      }
+    })
   # ctwas::assemble_region_data does not echo z_gene back in its return
   # list, so propagate the precomputed (or freshly computed) z_gene we
   # passed into it. This matches ctwas_sumstats's top-level return shape.
@@ -476,6 +505,57 @@ finemapCtwasRegions <- function(screenResult,
     args <- c(args, extra)
   }
   do.call(fn, args)
+}
+
+# Run ONLY ctwas's prefit EM step against `region_data` and return a
+# param list shaped like ctwas::est_param normally produces. Used as
+# the fallback path when est_param's accurate EM diverges to NaN on
+# toy / underpowered data (matches the legacy ctwas_2 workaround).
+# Calls ctwas's internal `fit_EM` (via ::: getFromNamespace) with
+# niter = niter_prefit, then applies the same thin-adjustment to the
+# SNP group_prior that est_param applies. p_single_effect is left as
+# NA since the accurate EM never ran.
+# @noRd
+.ctwasFitPrefitEm <- function(region_data, niterPrefit,
+                              groupPriorVarStructure, thin, ncore,
+                              extra = list()) {
+  fitEm <- getFromNamespace("fit_EM", "ctwas")
+  fitArgs <- list(
+    region_data               = region_data,
+    niter                     = as.integer(niterPrefit),
+    group_prior_var_structure = groupPriorVarStructure,
+    ncore                     = as.integer(ncore))
+  if (length(extra) > 0L) {
+    formalsFn <- tryCatch(names(formals(fitEm)), error = function(e) NULL)
+    if (!is.null(formalsFn)) {
+      explicitFormals <- setdiff(formalsFn, "...")
+      extra <- extra[setdiff(names(extra), names(fitArgs))]
+      extra <- extra[intersect(names(extra), explicitFormals)]
+    }
+    fitArgs <- c(fitArgs, extra)
+  }
+  prefit <- do.call(fitEm, fitArgs)
+  groupPrior <- prefit$group_prior
+  groupSize  <- prefit$group_size
+  if (thin != 1) {
+    if ("SNP" %in% names(groupPrior))
+      groupPrior["SNP"] <- groupPrior["SNP"] * thin
+    if ("SNP" %in% names(groupSize))
+      groupSize["SNP"]  <- groupSize["SNP"] / thin
+  }
+  if (length(groupPrior) > 0L)
+    groupSize <- groupSize[names(groupPrior)]
+  list(
+    group_prior               = groupPrior,
+    group_prior_var           = prefit$group_prior_var,
+    group_prior_iters         = prefit$group_prior_iters,
+    group_prior_var_iters     = prefit$group_prior_var_iters,
+    group_prior_var_structure = groupPriorVarStructure,
+    group_size                = groupSize,
+    p_single_effect           = data.frame(
+      region_id        = names(region_data),
+      p_single_effect  = NA_real_,
+      stringsAsFactors = FALSE))
 }
 
 # =============================================================================

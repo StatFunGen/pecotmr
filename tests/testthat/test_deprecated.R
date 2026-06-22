@@ -503,7 +503,7 @@ test_that("enlocPipeline: rejects non-QtlFineMappingResult qtlFmr", {
   expect_error(
     suppressWarnings(enlocPipeline(qtlFineMappingResult = "no",
                   gwasInput            = .ep_makeGwasFmr(),
-                  enrichment = data.frame(gwasStudy = "G1", qtlContext = "c1",
+                  enrichment = data.frame(gwasStudy = "G1", qtlStudy = "Q1", qtlContext = "c1",
                                            enrichment = 2.0,
                                            stringsAsFactors = FALSE))),
     "must be a QtlFineMappingResult"
@@ -515,7 +515,7 @@ test_that("enlocPipeline: rejects gwasInput that is neither GwasSumStats nor Gwa
   expect_error(
     suppressWarnings(enlocPipeline(qtlFineMappingResult = .ep_makeQtlFmr(),
                   gwasInput            = 42L,
-                  enrichment = data.frame(gwasStudy = "G1", qtlContext = "c1",
+                  enrichment = data.frame(gwasStudy = "G1", qtlStudy = "Q1", qtlContext = "c1",
                                            enrichment = 2.0,
                                            stringsAsFactors = FALSE))),
     "must be a GwasSumStats or a GwasFineMappingResult"
@@ -547,7 +547,7 @@ test_that("enlocPipeline: un-QCd GwasSumStats input is rejected", {
   expect_error(
     suppressWarnings(enlocPipeline(qtlFineMappingResult = .ep_makeQtlFmr(),
                   gwasInput            = .ep_makeGwasSumstats(qc = FALSE),
-                  enrichment = data.frame(gwasStudy = "G1", qtlContext = "c1",
+                  enrichment = data.frame(gwasStudy = "G1", qtlStudy = "Q1", qtlContext = "c1",
                                            enrichment = 2.0,
                                            stringsAsFactors = FALSE))),
     "has no QC record"
@@ -560,7 +560,7 @@ test_that("enlocPipeline: un-QCd GwasSumStats input is rejected", {
 
 test_that("enlocPipeline: pair loop produces one row per (QTL tuple, GWAS tuple) with adjusted p12", {
   skip_on_covr()
-  enr <- data.frame(gwasStudy = "G1", qtlContext = "c1", enrichment = 2.0,
+  enr <- data.frame(gwasStudy = "G1", qtlStudy = "Q1", qtlContext = "c1", enrichment = 2.0,
                     stringsAsFactors = FALSE)
   local_mocked_bindings(coloc.bf_bf = .ep_mockColocBfBf(), .package = "coloc")
   out <- suppressWarnings(
@@ -580,7 +580,7 @@ test_that("enlocPipeline: pair loop produces one row per (QTL tuple, GWAS tuple)
 test_that("enlocPipeline: missing-enrichment pair falls back to baseline p12 with a warning", {
   skip_on_covr()
   # An enrichment frame that has no row for (G1, c1).
-  enr <- data.frame(gwasStudy = "G_other", qtlContext = "c_other",
+  enr <- data.frame(gwasStudy = "G_other", qtlStudy = "Q_other", qtlContext = "c_other",
                     enrichment = 10.0, stringsAsFactors = FALSE)
   local_mocked_bindings(coloc.bf_bf = .ep_mockColocBfBf(), .package = "coloc")
   expect_warning(
@@ -597,7 +597,7 @@ test_that("enlocPipeline: missing-enrichment pair falls back to baseline p12 wit
 
 test_that("enlocPipeline: p12Max caps the adjusted prior", {
   skip_on_covr()
-  enr <- data.frame(gwasStudy = "G1", qtlContext = "c1", enrichment = 1e6,
+  enr <- data.frame(gwasStudy = "G1", qtlStudy = "Q1", qtlContext = "c1", enrichment = 1e6,
                     stringsAsFactors = FALSE)
   local_mocked_bindings(coloc.bf_bf = .ep_mockColocBfBf(), .package = "coloc")
   out <- suppressWarnings(
@@ -611,7 +611,7 @@ test_that("enlocPipeline: p12Max caps the adjusted prior", {
 
 test_that("enlocPipeline: coloc.bf_bf failures are caught and warned, pair skipped", {
   skip_on_covr()
-  enr <- data.frame(gwasStudy = "G1", qtlContext = "c1", enrichment = 2.0,
+  enr <- data.frame(gwasStudy = "G1", qtlStudy = "Q1", qtlContext = "c1", enrichment = 2.0,
                     stringsAsFactors = FALSE)
   local_mocked_bindings(
     coloc.bf_bf = function(q, g, ...) stop("boom"),
@@ -627,7 +627,7 @@ test_that("enlocPipeline: coloc.bf_bf failures are caught and warned, pair skipp
 
 test_that("enlocPipeline: returnGwasFineMapping=TRUE attaches gwasFineMapping attr (non-empty result)", {
   skip_on_covr()
-  enr <- data.frame(gwasStudy = "G1", qtlContext = "c1", enrichment = 2.0,
+  enr <- data.frame(gwasStudy = "G1", qtlStudy = "Q1", qtlContext = "c1", enrichment = 2.0,
                     stringsAsFactors = FALSE)
   local_mocked_bindings(coloc.bf_bf = .ep_mockColocBfBf(), .package = "coloc")
   # Use GwasFineMappingResult input: returnGwasFineMapping has no effect
@@ -672,7 +672,7 @@ test_that("enlocPipeline: qLbf NULL (QTL entry's LBF rows drop after priorTol) s
     enlocPipeline(qtlFineMappingResult = qfmr,
                   gwasInput            = .ep_makeGwasFmr(),
                   enrichment           = data.frame(
-                    gwasStudy = "G1", qtlContext = "c1",
+                    gwasStudy = "G1", qtlStudy = "Q1", qtlContext = "c1",
                     enrichment = 1.0, stringsAsFactors = FALSE)))
   expect_equal(nrow(out), 0L)
 })
@@ -695,7 +695,7 @@ test_that("enlocPipeline: aligned NULL (disjoint variant sets) skips that pair",
     enlocPipeline(qtlFineMappingResult = qfmr,
                   gwasInput            = gfmr,
                   enrichment           = data.frame(
-                    gwasStudy = "G1", qtlContext = "c1",
+                    gwasStudy = "G1", qtlStudy = "Q1", qtlContext = "c1",
                     enrichment = 1.0, stringsAsFactors = FALSE)))
   expect_equal(nrow(out), 0L)
 })
@@ -722,7 +722,7 @@ test_that("enlocPipeline: empty result schema includes enrichment + p12Used", {
     enlocPipeline(qtlFineMappingResult = .ep_makeQtlFmr(),
                   gwasInput            = gfmr,
                   enrichment           = data.frame(
-                    gwasStudy = "G1", qtlContext = "c1",
+                    gwasStudy = "G1", qtlStudy = "Q1", qtlContext = "c1",
                     enrichment = 1.0, stringsAsFactors = FALSE)))
   expect_equal(nrow(out), 0L)
   expect_true(all(c("enrichment", "p12Used") %in% colnames(out)))

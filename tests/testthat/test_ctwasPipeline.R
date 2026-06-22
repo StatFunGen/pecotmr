@@ -785,6 +785,43 @@ test_that("ctwasPipeline: dispatches assemble → est → screen → finemap and
       "region_data", "boundary_genes", "screen_res"))
 })
 
+test_that("estCtwasParam: fallbackToPrefit recovers from accurate-EM NaN divergence", {
+  skip_if_not_installed("ctwas")
+  inp <- .ctp_makeMultiBlockInputs()
+  # Mock est_param to throw the documented NaN error, and fit_EM to
+  # produce a stub prefit result. Verify estCtwasParam catches the
+  # NaN error AND that the returned param is the prefit estimate.
+  local_mocked_bindings(
+    assemble_region_data = function(...) list(
+      region_data    = list(block1 = list(stub = TRUE)),
+      boundary_genes = list(),
+      z_gene         = data.frame(id = "t1", z = 1.0)),
+    compute_gene_z = function(...) data.frame(id = "t1", z = 1.0),
+    est_param = function(...) stop("Estimated group_prior_var contains NAs!"),
+    # ctwas:::fit_EM is internal — mock via the same `ctwas` namespace.
+    fit_EM = function(region_data, ...) list(
+      group_prior     = c(g = 0.05, SNP = 1e-4),
+      group_prior_var = c(g = 4.0, SNP = 5.0),
+      group_size      = c(g = 1, SNP = 100)),
+    .package = "ctwas")
+  local_mocked_bindings(extractBlockGenotypes = .ctp_mockExtractor(),
+                        .package = "pecotmr")
+  # Without fallback: the NaN error propagates.
+  expect_error(
+    estCtwasParam(assembleCtwasInputs(inp$gwasSumStats, inp$twasWeights),
+                  fallbackToPrefit = FALSE),
+    "contains NAs")
+  # With fallback: prefit estimates are returned as the param.
+  # .ctwasFitPrefitEm thin-scales the SNP group_prior (mirroring ctwas's
+  # est_param), so the mocked SNP prior 1e-4 emerges as 1e-4 * thin
+  # (default thin = 0.1) → 1e-5. The group_prior_var is not thinned.
+  est <- estCtwasParam(
+    assembleCtwasInputs(inp$gwasSumStats, inp$twasWeights),
+    fallbackToPrefit = TRUE)
+  expect_equal(unname(est$param$group_prior),     c(0.05, 1e-5))
+  expect_equal(unname(est$param$group_prior_var), c(4.0, 5.0))
+})
+
 test_that("estCtwasParam / screenCtwasRegions / finemapCtwasRegions can be called independently", {
   skip_if_not_installed("ctwas")
   inp <- .ctp_makeMultiBlockInputs()

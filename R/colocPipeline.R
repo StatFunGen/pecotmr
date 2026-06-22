@@ -81,9 +81,10 @@
 #' @param returnGwasFineMapping Logical. When \code{TRUE}, attach the
 #'   computed \code{GwasFineMappingResult} on the returned data frame
 #'   as attribute \code{"gwasFineMapping"}. Default \code{FALSE}.
-#' @param enrichment Optional data.frame of per-(gwasStudy, qtlContext)
-#'   enrichment factors with columns \code{gwasStudy}, \code{qtlContext},
-#'   \code{enrichment}. Output of \code{\link{qtlEnrichmentPipeline}}.
+#' @param enrichment Optional data.frame of per-(gwasStudy, qtlStudy,
+#'   qtlContext) enrichment factors with columns \code{gwasStudy},
+#'   \code{qtlStudy}, \code{qtlContext}, \code{enrichment}. Output of
+#'   \code{\link{qtlEnrichmentPipeline}}.
 #'   When non-\code{NULL}, each pair's \code{p12} prior is scaled to
 #'   \code{min(p12 * (1 + enrichment), p12Max)} (the enrichment-informed
 #'   colocalization variant, "enloc"). Pairs without a matching
@@ -132,9 +133,9 @@ colocPipeline <- function(qtlFineMappingResult,
   if (useEnrichment) {
     if (!is.data.frame(enrichment))
       stop("`enrichment` must be a data.frame with at least gwasStudy, ",
-           "qtlContext, enrichment columns (output of ",
+           "qtlStudy, qtlContext, enrichment columns (output of ",
            "qtlEnrichmentPipeline).")
-    required <- c("gwasStudy", "qtlContext", "enrichment")
+    required <- c("gwasStudy", "qtlStudy", "qtlContext", "enrichment")
     missingCols <- setdiff(required, colnames(enrichment))
     if (length(missingCols) > 0L)
       stop("`enrichment` is missing column(s): ",
@@ -231,14 +232,16 @@ colocPipeline <- function(qtlFineMappingResult,
       qAligned <- aligned$qtl
       gAligned <- aligned$gwas
 
-      # Enrichment-informed p12: per-pair scaling capped at p12Max.
-      # Baseline p12 used when no enrichment table or no matching row.
+      # Enrichment-informed p12: per-(gwasStudy, qtlStudy, qtlContext)
+      # scaling capped at p12Max. Baseline p12 used when no enrichment
+      # table or no matching row.
       if (useEnrichment) {
-        enRow <- .colocLookupEnrichment(enrichment, gInfo$study, qContext)
+        enRow <- .colocLookupEnrichment(enrichment, gInfo$study,
+                                        qStudy, qContext)
         if (is.na(enRow)) {
           warning(sprintf(
-            "colocPipeline: no enrichment entry for (gwasStudy='%s', qtlContext='%s'); using baseline p12.",
-            gInfo$study, qContext))
+            "colocPipeline: no enrichment entry for (gwasStudy='%s', qtlStudy='%s', qtlContext='%s'); using baseline p12.",
+            gInfo$study, qStudy, qContext))
           enRow <- 0
         }
         p12Used <- min(p12 * (1 + enRow), p12Max)
@@ -504,13 +507,14 @@ colocPipeline <- function(qtlFineMappingResult,
   base
 }
 
-# Look up the enrichment factor for a (gwasStudy, qtlContext) pair in
-# the user-supplied enrichment table. Returns NA when the pair is not
-# present; the caller falls back to the baseline p12 and emits a
-# warning.
+# Look up the enrichment factor for a (gwasStudy, qtlStudy, qtlContext)
+# triple in the user-supplied enrichment table. Returns NA when the
+# triple is not present; the caller falls back to the baseline p12 and
+# emits a warning.
 # @noRd
-.colocLookupEnrichment <- function(enrichment, gwasStudy, qtlContext) {
+.colocLookupEnrichment <- function(enrichment, gwasStudy, qtlStudy, qtlContext) {
   idx <- which(as.character(enrichment$gwasStudy)  == gwasStudy &
+               as.character(enrichment$qtlStudy)   == qtlStudy &
                as.character(enrichment$qtlContext) == qtlContext)
   if (length(idx) == 0L) return(NA_real_)
   as.numeric(enrichment$enrichment[[idx[[1L]]]])

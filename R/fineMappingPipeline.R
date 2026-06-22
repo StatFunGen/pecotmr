@@ -362,13 +362,17 @@ setGeneric("fineMappingPipeline",
   fineMappingResult$entry[[idx[[1L]]]]
 }
 
-# GwasFineMappingResult cache lookup using the (study, method) 2-tuple.
+# GwasFineMappingResult cache lookup using the (study, method,
+# region_id) 3-tuple. Multi-block FMRs can carry one entry per
+# (study, method, region_id) triple, so the cache key must include
+# region_id to correctly retrieve the cached fit for a specific block.
 # @noRd
-.fmCacheLookupGwas <- function(fineMappingResult, study, method) {
+.fmCacheLookupGwas <- function(fineMappingResult, study, method, region_id) {
   if (is.null(fineMappingResult)) return(NULL)
   if (!is(fineMappingResult, "GwasFineMappingResult")) return(NULL)
   idx <- .matchTupleRows(fineMappingResult,
-                          list(study = study, method = method))
+                          list(study = study, method = method,
+                               region_id = region_id))
   if (length(idx) == 0L) return(NULL)
   fineMappingResult$entry[[idx[[1L]]]]
 }
@@ -401,18 +405,24 @@ setGeneric("fineMappingPipeline",
     ldSketch      = ldSketch)
 }
 
-# Build a GwasFineMappingResult collection from per-(study, method) vectors.
+# Build a GwasFineMappingResult collection from per-row vectors. When
+# `region_ids` is NULL, falls through to the constructor's synthetic
+# defaults (region_1, region_2, ...). For callers that have meaningful
+# block labels (e.g. derived from a GwasSumStats entry's GRanges),
+# pass them explicitly so downstream consumers can join on region.
 # @noRd
-.fmBuildGwasResult <- function(studies, methods, entries, ldSketch = NULL) {
+.fmBuildGwasResult <- function(studies, methods, entries,
+                               region_ids = NULL, ldSketch = NULL) {
   if (length(entries) == 0L) {
-    stop("fineMappingPipeline: no (study, method) tuples produced a ",
+    stop("fineMappingPipeline: no (study, method, region_id) tuples produced a ",
          "fine-mapping result.")
   }
   GwasFineMappingResult(
-    study    = studies,
-    method   = methods,
-    entry    = entries,
-    ldSketch = ldSketch)
+    study     = studies,
+    method    = methods,
+    region_id = region_ids,
+    entry     = entries,
+    ldSketch  = ldSketch)
 }
 
 # Combine an optional joint column across two collections. Returns NULL
@@ -457,10 +467,11 @@ setGeneric("fineMappingPipeline",
       ldSketch      = ldSketch)
   } else {
     GwasFineMappingResult(
-      study    = c(as.character(a$study),  as.character(b$study)),
-      method   = c(as.character(a$method), as.character(b$method)),
-      entry    = c(as.list(a$entry), as.list(b$entry)),
-      ldSketch = ldSketch)
+      study     = c(as.character(a$study),     as.character(b$study)),
+      method    = c(as.character(a$method),    as.character(b$method)),
+      region_id = c(as.character(a$region_id), as.character(b$region_id)),
+      entry     = c(as.list(a$entry), as.list(b$entry)),
+      ldSketch  = ldSketch)
   }
 }
 
@@ -1455,10 +1466,12 @@ setMethod("fineMappingPipeline", "GwasSumStats",
 
     rowStudy   <- character(0)
     rowMethod  <- character(0)
+    rowRegion  <- character(0)
     rowEntries <- list()
-    pushRow <- function(st, mt, ent) {
+    pushRow <- function(st, mt, rg, ent) {
       rowStudy   <<- c(rowStudy,   st)
       rowMethod  <<- c(rowMethod,  mt)
+      rowRegion  <<- c(rowRegion,  rg)
       rowEntries[[length(rowEntries) + 1L]] <<- ent
     }
 
@@ -1470,18 +1483,26 @@ setMethod("fineMappingPipeline", "GwasSumStats",
       variantIds <- zn$variantIds
       z <- zn$z
       n <- zn$n
+      # Derive a region_id from the entry's GRanges so multi-block
+      # genome-wide GWAS sweeps can carry one row per block without
+      # tripping (study, method, region_id) uniqueness. Format:
+      # "{seqname}_{minPos}_{maxPos}" (e.g. "chr22_10516173_17379581").
+      region_id <- sprintf("%s_%d_%d",
+                           as.character(GenomicRanges::seqnames(gr))[[1L]],
+                           min(GenomicRanges::start(gr)),
+                           max(GenomicRanges::start(gr)))
 
       # The .fmCacheLookup helper takes a 4-tuple key for the QTL cache
       # shape. For GWAS resume we look up using the GwasFineMappingResult
-      # 2-tuple shape.
+      # 3-tuple shape (study, method, region_id).
       toRun <- character(0)
       for (tk in tokens) {
         cached <- if (!is.null(fineMappingResult) &&
                       is(fineMappingResult, "GwasFineMappingResult")) {
-          .fmCacheLookupGwas(fineMappingResult, st, tk)
+          .fmCacheLookupGwas(fineMappingResult, st, tk, region_id)
         } else NULL
         if (!is.null(cached)) {
-          pushRow(st, tk, cached)
+          pushRow(st, tk, region_id, cached)
         } else {
           toRun <- c(toRun, tk)
         }
@@ -1494,7 +1515,8 @@ setMethod("fineMappingPipeline", "GwasSumStats",
       infFit <- NULL
       if (chainLocal$runInf) {
         if (verbose >= 1)
-          message(sprintf("Fitting susieInf (RSS) for GWAS (study='%s') ...", st))
+          message(sprintf("Fitting susieInf (RSS) for GWAS (study='%s', region='%s') ...",
+                          st, region_id))
         infFit <- .fmFitSusieRss(z, ldMat, n, "susieInf",
                                  coverage = coverage)
       }
@@ -1507,8 +1529,8 @@ setMethod("fineMappingPipeline", "GwasSumStats",
                            (tk == "susieAsh" && chainLocal$chainAsh))
                         infFit else NULL
           if (verbose >= 1)
-            message(sprintf("Fitting %s (RSS) for GWAS (study='%s') ...",
-                            tk, st))
+            message(sprintf("Fitting %s (RSS) for GWAS (study='%s', region='%s') ...",
+                            tk, st, region_id))
           fit <- .fmFitSusieRss(z, ldMat, n, tk,
                                 chainFromInf = chainFrom,
                                 coverage = coverage)
@@ -1521,12 +1543,13 @@ setMethod("fineMappingPipeline", "GwasSumStats",
           signalCutoff = signalCutoff,
           minAbsCorr = minAbsCorr,
           csInput = "Xcorr")
-        pushRow(st, tk, ent)
+        pushRow(st, tk, region_id, ent)
       }
     }
 
     .fmBuildGwasResult(rowStudy, rowMethod, rowEntries,
-                       ldSketch = ldSketch)
+                       region_ids = rowRegion,
+                       ldSketch   = ldSketch)
   })
 
 

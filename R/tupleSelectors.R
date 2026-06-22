@@ -51,9 +51,11 @@
   idx[[1L]]
 }
 
-# Internal: resolve a (study, method) tuple to a single row index of a
-# GwasFineMappingResult collection.
-.tupleSelectRowGwasFmr <- function(x, study, method) {
+# Internal: resolve a (study, method, region_id) tuple to a single row
+# index of a GwasFineMappingResult collection. `region` may be NULL when
+# the (study, method) pair maps to a single row; otherwise it disambiguates
+# among per-block rows of a genome-wide collection.
+.tupleSelectRowGwasFmr <- function(x, study, method, region = NULL) {
   if (nrow(x) == 0L) stop("GwasFineMappingResult has no rows.")
   if (missing(study) || is.null(study) ||
       missing(method) || is.null(method)) {
@@ -63,8 +65,24 @@
   }
   if (length(study) != 1L || length(method) != 1L)
     stop("`study` and `method` must each be length 1.")
-  idx <- .matchTupleRows(x, list(study = study, method = method))
-  if (length(idx) == 0L)
-    stop(sprintf("No entry for (study='%s', method='%s').", study, method))
+  if (!is.null(region) && length(region) != 1L)
+    stop("`region` must be length 1 when supplied.")
+  keys <- list(study = study, method = method)
+  if (!is.null(region)) keys$region_id <- region
+  idx <- .matchTupleRows(x, keys)
+  if (length(idx) == 0L) {
+    stop(sprintf(
+      "No entry for (study='%s', method='%s'%s).",
+      study, method,
+      if (is.null(region)) "" else sprintf(", region='%s'", region)))
+  }
+  if (length(idx) > 1L) {
+    stop(sprintf(
+      "GwasFineMappingResult has %d rows matching (study='%s', method='%s'); ",
+      length(idx), study, method),
+      "pass `region` to disambiguate (available: ",
+      paste(shQuote(as.character(x$region_id[idx])), collapse = ", "),
+      ").")
+  }
   idx[[1L]]
 }

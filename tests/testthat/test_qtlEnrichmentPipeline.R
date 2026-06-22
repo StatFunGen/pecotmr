@@ -136,7 +136,7 @@ test_that("qtlEnrichmentPipeline: ldSketch mismatch errors", {
 # Per-study / per-context iteration via mocked qtlEnrichment
 # ===========================================================================
 
-test_that("qtlEnrichmentPipeline: returns one row per (gwasStudy, qtlContext) pair", {
+test_that("qtlEnrichmentPipeline: returns one row per (gwasStudy, qtlStudy, qtlContext) triple", {
   gfmr <- .qep_makeGwasFmr()
   qfmr <- .qep_makeQtlFmr(contexts = c("c1", "c2"))
   local_mocked_bindings(qtlEnrichment = .qep_mockEnrichment(2.0),
@@ -144,10 +144,42 @@ test_that("qtlEnrichmentPipeline: returns one row per (gwasStudy, qtlContext) pa
   out <- qtlEnrichmentPipeline(gwasFineMappingResult = gfmr,
                                 qtlFineMappingResult  = qfmr)
   expect_s3_class(out, "data.frame")
-  expect_equal(nrow(out), 2L)  # 1 GWAS study * 2 contexts
-  expect_setequal(out$gwasStudy, "G1")
+  expect_equal(nrow(out), 2L)  # 1 GWAS study * 1 QTL study * 2 contexts
+  expect_setequal(out$gwasStudy,  "G1")
+  expect_setequal(out$qtlStudy,   "Q1")
   expect_setequal(out$qtlContext, c("c1", "c2"))
   expect_equal(out$enrichment, c(2.0, 2.0))
+})
+
+test_that("qtlEnrichmentPipeline: distinguishes two QTL studies that share a context label", {
+  # Build a QtlFineMappingResult with two studies (Q1, Q2) both
+  # tagging the same context "shared_ctx". Per-study filtering must
+  # keep them separate (a context-only filter would merge them and
+  # produce a single enrichment row instead of two).
+  e1 <- .qep_makeFmEntry(variant_ids = paste0("v", 1:5))
+  e2 <- .qep_makeFmEntry(variant_ids = paste0("v", 1:5))
+  qfmr <- QtlFineMappingResult(
+    study    = c("Q1", "Q2"),
+    context  = c("shared_ctx", "shared_ctx"),
+    trait    = c("t1", "t1"),
+    method   = c("susie", "susie"),
+    entry    = list(e1, e2),
+    ldSketch = .qep_makeHandle())
+  gfmr <- .qep_makeGwasFmr()
+  capturedRegions <- list()
+  local_mocked_bindings(
+    qtlEnrichment = function(gwasPip, susieQtlRegions, ...) {
+      capturedRegions[[length(capturedRegions) + 1L]] <<- susieQtlRegions
+      list(enrichment = 2.0, enrichmentSe = 0.1, enrichmentLogOdds = log(2))
+    },
+    .package = "pecotmr")
+  out <- qtlEnrichmentPipeline(gwasFineMappingResult = gfmr,
+                                qtlFineMappingResult  = qfmr)
+  expect_equal(nrow(out), 2L)
+  expect_setequal(out$qtlStudy, c("Q1", "Q2"))
+  # Each call to qtlEnrichment sees exactly one region (the per-study one),
+  # not both regions merged together.
+  expect_true(all(lengths(capturedRegions) == 1L))
 })
 
 test_that("qtlEnrichmentPipeline: qtlEnrichment failure produces a warning + skip", {
@@ -185,7 +217,7 @@ test_that("qtlEnrichmentPipeline: empty input collections yield the empty schema
   expect_s3_class(out, "data.frame")
   expect_equal(nrow(out), 0L)
   expect_setequal(colnames(out),
-                  c("gwasStudy", "qtlContext", "enrichment",
+                  c("gwasStudy", "qtlStudy", "qtlContext", "enrichment",
                     "enrichmentSe", "enrichmentLogOdds"))
 })
 
@@ -201,15 +233,16 @@ test_that(".enrBuildGwasPipVector: extracts pip per study", {
 })
 
 test_that(".enrBuildGwasPipVector: deduplicates identical PIPs across blocks", {
-  # Two rows under the same study but different methods, sharing v1 with
-  # an identical PIP value. The (study, method) validity constraint rules
-  # out same-method repeats, so we use susie + susieInf for the second.
+  # Two rows under the same study, same method, different LD blocks
+  # (distinct region_ids auto-supplied by the constructor) — the
+  # genome-wide multi-block shape. Both rows share v1 with the same
+  # PIP, so dedup must collapse it.
   e1 <- .qep_makeFmEntry(variant_ids = c("v1", "v2"),
                           pip = c(0.5, 0.2))
   e2 <- .qep_makeFmEntry(variant_ids = c("v1", "v3"),
                           pip = c(0.5, 0.4))
   g <- GwasFineMappingResult(
-    study = c("G1", "G1"), method = c("susie", "susieInf"),
+    study = c("G1", "G1"), method = c("susie", "susie"),
     entry = list(e1, e2),
     ldSketch = .qep_makeHandle())
   out <- pecotmr:::.enrBuildGwasPipVector(g, "G1")
@@ -217,12 +250,14 @@ test_that(".enrBuildGwasPipVector: deduplicates identical PIPs across blocks", {
 })
 
 test_that(".enrBuildGwasPipVector: conflicting PIPs across blocks errors", {
+  # Same variant 'v1' appears in two LD blocks with different PIPs —
+  # .enrBuildGwasPipVector must refuse to merge them silently.
   e1 <- .qep_makeFmEntry(variant_ids = c("v1"), pip = 0.5,
                           alpha = matrix(0.5, 1, 1))
   e2 <- .qep_makeFmEntry(variant_ids = c("v1"), pip = 0.8,
                           alpha = matrix(0.8, 1, 1))
   g <- GwasFineMappingResult(
-    study = c("G1", "G1"), method = c("susie", "susieInf"),
+    study = c("G1", "G1"), method = c("susie", "susie"),
     entry = list(e1, e2),
     ldSketch = .qep_makeHandle())
   expect_error(
@@ -231,12 +266,20 @@ test_that(".enrBuildGwasPipVector: conflicting PIPs across blocks errors", {
   )
 })
 
-test_that(".enrBuildQtlRegionsList: returns per-entry fit shapes", {
+test_that(".enrBuildQtlRegionsList: returns per-entry fit shapes for a (study, context) hit", {
   qfmr <- .qep_makeQtlFmr(contexts = c("c1", "c2"))
-  out <- pecotmr:::.enrBuildQtlRegionsList(qfmr, "c1")
+  out <- pecotmr:::.enrBuildQtlRegionsList(qfmr, "Q1", "c1")
   expect_equal(length(out), 1L)
   expect_true(!is.null(out[[1L]]$alpha))
   expect_true(!is.null(out[[1L]]$pip))
+})
+
+test_that(".enrBuildQtlRegionsList: returns empty list when the (study, context) tuple is absent", {
+  qfmr <- .qep_makeQtlFmr(contexts = c("c1", "c2"))
+  # Correct context but wrong study -> no hit, even though context exists.
+  expect_equal(length(pecotmr:::.enrBuildQtlRegionsList(qfmr, "Q_ghost", "c1")), 0L)
+  # Correct study but wrong context.
+  expect_equal(length(pecotmr:::.enrBuildQtlRegionsList(qfmr, "Q1", "c_ghost")), 0L)
 })
 
 # ===========================================================================
