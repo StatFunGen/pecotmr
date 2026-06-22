@@ -50,14 +50,22 @@ multi_study_qtl_dataset_example <- fixupExampleGenotypePaths(multi_study_qtl_dat
 
 ## Individual-level weights
 
-The simplest call learns a single susie-based weight set from a
+The simplest call learns a single regression-based weight set from a
 `QtlDataset`. Cross-validation is on by default (`cvFolds = 5`). Like
 `fineMappingPipeline()`, you need to tell it which genotype window to
 extract — `cisWindow` (per trait) is the most common choice.
 
+Fine-mapping methods (`susie`, `susieInf`, `susieAsh`, `mvsusie`,
+`fsusie`) are intentionally NOT runnable here on their own:
+`twasWeightsPipeline()` will not re-fit fine-mapping models from
+scratch. Run `fineMappingPipeline()` first and pass the result via
+`fineMappingResult = …` (see the next section). The quickstart below
+uses `lasso`, a TWAS-regression method that has no fine-mapping
+dependency.
+
 ```{r individual-quickstart}
 tw <- twasWeightsPipeline(qtl_dataset_example,
-                           methods   = "susie",
+                           methods   = "lasso",
                            cisWindow = 1e6)
 tw
 ```
@@ -66,7 +74,7 @@ Extract the per-variant weights for one tuple:
 
 ```{r individual-weights}
 entry <- getTwasWeights(tw, study = "study1", context = "brain",
-                         trait = "ENSG_example", method = "susie")
+                         trait = "ENSG_example", method = "lasso")
 head(getWeights(entry))
 ```
 
@@ -110,7 +118,7 @@ matching fine-mapping row fit the susie weights from scratch as normal.
 
 ```{r multistudy}
 msTw <- twasWeightsPipeline(multi_study_qtl_dataset_example,
-                             methods   = "susie",
+                             methods   = "lasso",
                              cisWindow = 1e6)
 table(msTw$study)
 ```
@@ -118,23 +126,40 @@ table(msTw$study)
 ## Multiple weight methods at once
 
 Pass a character vector to fit several methods on the same fold split
-and return them as separate `(method)` rows in the collection:
+and return them as separate `(method)` rows in the collection.
+Fine-mapping methods (`susie`, `susieInf`, `susieAsh`, `mvsusie`) can
+ride along when a `fineMappingResult` is supplied; without one, restrict
+the list to the TWAS-regression methods:
 
 ```{r multimethod, eval=FALSE}
+# TWAS-regression only — no fineMappingResult needed.
 twasWeightsPipeline(
   qtl_dataset_example,
-  methods = c("susie", "lasso", "enet", "ridge", "mrash"))
+  methods = c("lasso", "enet", "ridge", "mrash"))
+
+# Add a fine-mapping susie row by providing the FineMappingResult.
+fmr <- fineMappingPipeline(qtl_dataset_example, methods = "susie",
+                            cisWindow = 1e6)
+twasWeightsPipeline(
+  qtl_dataset_example,
+  methods           = c("susie", "lasso", "enet", "ridge", "mrash"),
+  cisWindow         = 1e6,
+  fineMappingResult = fmr)
 ```
 
 ## RSS / sumstats weights
 
 ```{r sumstats}
-twSs <- twasWeightsPipeline(qtl_sumstats_example, methods = "susie")
+twSs <- twasWeightsPipeline(qtl_sumstats_example, methods = "lasso")
 twSs
 ```
 
 The RSS path uses the `ldSketch` `GenotypeHandle` carried on the
-`QtlSumStats` collection to compute / fetch LD as needed.
+`QtlSumStats` collection to compute / fetch LD as needed. The fine-
+mapping methods (`susie`, `susieInf`, `susieAsh`, `mvsusie`) follow the
+same `fineMappingResult` gate as the individual-level path — call
+`fineMappingPipeline()` on the `QtlSumStats` first, then pass the
+result into `twasWeightsPipeline(..., fineMappingResult = ...)`.
 
 ## Multivariate (multi-context) weights
 
