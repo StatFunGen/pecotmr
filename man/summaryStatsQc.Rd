@@ -6,7 +6,6 @@
 \usage{
 summaryStatsQc(
   sumstats,
-  useDbsnpRefCheck = FALSE,
   removeIndels = FALSE,
   removeStrandAmbiguous = TRUE,
   mafCutoff = 0,
@@ -19,38 +18,39 @@ summaryStatsQc(
   alleleFlipKriging = FALSE,
   impute = FALSE,
   imputeOpts = list(rcond = 0.01, r2Threshold = 0.6, minimumLd = 5, lamb = 0.01),
-  convertRefGenome = NULL,
   matchMinProp = 0,
-  mungeSumstatsArgs = list()
+  coerceNumeric = TRUE,
+  normalizeChr = TRUE,
+  dropNonstandardChr = TRUE,
+  dropMissData = TRUE,
+  dropPOutOfRange = TRUE,
+  clampSmallP = TRUE,
+  smallPFloor = 4.94065645841247e-324,
+  dropZeroEffect = TRUE,
+  dropNonpositiveSe = TRUE
 )
 }
 \arguments{
 \item{sumstats}{A \code{QtlSumStats} or \code{GwasSumStats}
 collection.}
 
-\item{useDbsnpRefCheck}{One-shot opt-in to MungeSumstats's
-dbSNP-based reference-genome / allele-flip / biallelic-filter
-checks. When \code{TRUE}, sets \code{on_ref_genome},
-\code{infer_eff_direction}, \code{allele_flip_check}, and
-\code{bi_allelic_filter} all to \code{TRUE} simultaneously.
-Default \code{FALSE} (trust input alleles, lighter dependency
-footprint).}
-
 \item{removeIndels}{Logical (length 1). When \code{TRUE}, drop
-indels. Default \code{FALSE} (match MungeSumstats default).}
+indels during panel harmonization. Default \code{FALSE}.}
 
 \item{removeStrandAmbiguous}{Logical (length 1). When \code{TRUE},
 drop A/T and C/G strand-ambiguous variants. Default \code{TRUE}.}
 
 \item{mafCutoff}{Numeric (length 1). MAF threshold (variants with
 \code{MAF < mafCutoff} are dropped). Default 0. Requires \code{MAF}
-column.}
+or \code{FRQ} column when non-zero.}
 
 \item{infoCutoff}{Numeric (length 1). INFO score threshold. Default
-0. Requires \code{INFO} column.}
+0. Requires \code{INFO} column when non-zero.}
 
-\item{nCutoff}{Numeric (length 1). MungeSumstats \code{N_std} value;
-sample-size deviation threshold. Default 5.}
+\item{nCutoff}{Numeric (length 1). Sample-size deviation threshold:
+drop variants whose \code{N} is more than \code{nCutoff}
+median-absolute-deviations from the median. Set to 0 to disable.
+Default 5.}
 
 \item{keepVariants}{Optional character vector of variant IDs (SNP
 column) to retain prior to harmonization.}
@@ -77,16 +77,40 @@ accepted but currently emits a warning and is skipped.)}
 
 \item{imputeOpts}{Named list of RAISS parameters.}
 
-\item{convertRefGenome}{Optional character (\code{"GRCh37"} or
-\code{"GRCh38"}) to liftover the sumstats to via MungeSumstats.
-\code{NULL} (default) skips liftover.}
-
 \item{matchMinProp}{Minimum proportion of LD panel variants that must
 be matched by the sumstats; default 0.}
 
-\item{mungeSumstatsArgs}{Optional named list of pass-through args to
-\code{MungeSumstats::format_sumstats()}. Any name supplied here
-overrides the value the curated knobs would have set.}
+\item{coerceNumeric}{Logical. Coerce signed columns
+(Z/BETA/SE/OR/LOG_ODDS/SIGNED_SUMSTAT/P/MAF/FRQ/INFO/N) to numeric.
+Default \code{TRUE}.}
+
+\item{normalizeChr}{Logical. Strip \code{"chr"} prefix, uppercase the
+chromosome label, and map 23->X, 24->Y, M->MT. Default \code{TRUE}.}
+
+\item{dropNonstandardChr}{Logical. Drop variants whose CHR (after
+normalization) is outside 1..22, X, Y, MT. Default \code{TRUE}.}
+
+\item{dropMissData}{Logical. Drop rows with NA in any vital column
+(chrom, pos, A1, A2, and at least one of Z / BETA). Default
+\code{TRUE}.}
+
+\item{dropPOutOfRange}{Logical. Drop rows where \code{P < 0} or
+\code{P > 1}. Default \code{TRUE}.}
+
+\item{clampSmallP}{Logical. Floor non-negative P values below
+\code{smallPFloor} to \code{smallPFloor} so \code{-log10(P)} stays
+finite. Applied to both input and Z-derived P values. Default
+\code{TRUE}.}
+
+\item{smallPFloor}{Numeric (length 1). Floor for \code{clampSmallP}.
+Default \code{5e-324} (R's smallest positive double).}
+
+\item{dropZeroEffect}{Logical. Drop rows where any effect column is
+exactly 0 (\code{BETA}, \code{LOG_ODDS}, \code{SIGNED_SUMSTAT}) or
+\code{OR} is exactly 1. Default \code{TRUE}.}
+
+\item{dropNonpositiveSe}{Logical. Drop rows where \code{SE <= 0}.
+Default \code{TRUE}.}
 }
 \value{
 A new \code{QtlSumStats} / \code{GwasSumStats} with cleaned
@@ -94,13 +118,16 @@ A new \code{QtlSumStats} / \code{GwasSumStats} with cleaned
 }
 \description{
 Applies a single QC pass to a \code{QtlSumStats} or \code{GwasSumStats}
-collection: delegates variant-content QC (column standardization,
-indels, strand-ambiguous, MAF/INFO/N filters, p-value & effect-size
-sanity checks, optional dbSNP / liftover) to
-\code{MungeSumstats::format_sumstats()}, then runs pecotmr-specific
-steps (\code{skipRegion}, optional PIP screen, panel harmonization
-against the \code{ldSketch} via \code{.matchRefPanel}, optional
-SLALOM/DENTIST LD-mismatch QC, optional RAISS imputation).
+collection: per-row sanity checks via \code{.applySanityChecks} (drop
+rows with out-of-range / zero P, BETA == 0, SE <= 0, NA in vital
+columns; clamp tiny P; normalize CHR; coerce signed columns to
+numeric), variant-content filters (MAF / INFO / N) via
+\code{.applyContentFilters}, optional \code{skipRegion} drop, optional
+PIP screen, panel-vs-sumstats allele harmonization against the
+\code{ldSketch} via \code{.matchRefPanel} (which handles indels,
+strand-ambiguous variants, sign / strand flips, and duplicate drops in
+a single sweep), optional SLALOM/DENTIST LD-mismatch QC, and optional
+RAISS imputation. No Bioconductor genome / dbSNP packages required.
 }
 \details{
 The returned collection has its \code{qcInfo} slot populated with a

@@ -18,6 +18,7 @@ getPip(x, ...)
   context = NULL,
   trait = NULL,
   method = NULL,
+  region = NULL,
   returnList = FALSE,
   ...
 )

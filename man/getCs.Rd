@@ -12,7 +12,15 @@ getCs(x, ...)
 
 \S4method{getCs}{FineMappingEntry}(x, coverage = 0.95, ...)
 
-\S4method{getCs}{GwasFineMappingResult}(x, study = NULL, context = NULL, trait = NULL, method = NULL, ...)
+\S4method{getCs}{GwasFineMappingResult}(
+  x,
+  study = NULL,
+  context = NULL,
+  trait = NULL,
+  method = NULL,
+  region = NULL,
+  ...
+)
 
 \S4method{getCs}{QtlFineMappingResult}(
   x,

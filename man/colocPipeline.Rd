@@ -71,9 +71,10 @@ use. Default \code{1e-9}.}
 computed \code{GwasFineMappingResult} on the returned data frame
 as attribute \code{"gwasFineMapping"}. Default \code{FALSE}.}
 
-\item{enrichment}{Optional data.frame of per-(gwasStudy, qtlContext)
-enrichment factors with columns \code{gwasStudy}, \code{qtlContext},
-\code{enrichment}. Output of \code{\link{qtlEnrichmentPipeline}}.
+\item{enrichment}{Optional data.frame of per-(gwasStudy, qtlStudy,
+qtlContext) enrichment factors with columns \code{gwasStudy},
+\code{qtlStudy}, \code{qtlContext}, \code{enrichment}. Output of
+\code{\link{qtlEnrichmentPipeline}}.
 When non-\code{NULL}, each pair's \code{p12} prior is scaled to
 \code{min(p12 * (1 + enrichment), p12Max)} (the enrichment-informed
 colocalization variant, "enloc"). Pairs without a matching

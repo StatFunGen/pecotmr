@@ -12,7 +12,15 @@ getSusieFit(x, ...)
 
 \S4method{getSusieFit}{FineMappingEntry}(x, ...)
 
-\S4method{getSusieFit}{GwasFineMappingResult}(x, study = NULL, context = NULL, trait = NULL, method = NULL, ...)
+\S4method{getSusieFit}{GwasFineMappingResult}(
+  x,
+  study = NULL,
+  context = NULL,
+  trait = NULL,
+  method = NULL,
+  region = NULL,
+  ...
+)
 
 \S4method{getSusieFit}{QtlFineMappingResult}(x, study = NULL, context = NULL, trait = NULL, method = NULL, ...)
 }

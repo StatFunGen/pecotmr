@@ -20,6 +20,7 @@ getTopLoci(x, type = c("data.frame", "GRanges"), signalCutoff = 0.025, ...)
   context = NULL,
   trait = NULL,
   method = NULL,
+  region = NULL,
   ...
 )
 

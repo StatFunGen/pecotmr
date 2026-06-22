@@ -4,7 +4,7 @@
 \alias{GwasFineMappingResult}
 \title{TWAS Weights Collection}
 \usage{
-GwasFineMappingResult(study, method, entry, ldSketch = NULL)
+GwasFineMappingResult(study, method, entry, region_id = NULL, ldSketch = NULL)
 }
 \arguments{
 \item{study}{Character vector of study identifiers (per tuple).}
@@ -12,6 +12,13 @@ GwasFineMappingResult(study, method, entry, ldSketch = NULL)
 \item{method}{Character vector of fine-mapping method names (per tuple).}
 
 \item{entry}{List / \code{SimpleList} of \code{FineMappingEntry} objects.}
+
+\item{region_id}{Character vector of LD-block identifiers (per
+tuple). When omitted (\code{NULL}), defaults to a per-row synthetic
+id (\code{"region_1"}, \code{"region_2"}, ...) so the
+(\code{study}, \code{method}, \code{region_id}) triple is unique.
+Supplying meaningful labels (e.g. \code{"chr22_10516173_17414263"})
+is preferred for downstream consumers that join on region.}
 
 \item{ldSketch}{An optional \code{GenotypeHandle}.}
 }
@@ -39,10 +46,11 @@ S4 collection of TWAS weights keyed by the identity tuple
   across the identity-tuple columns and any present joint columns.
 
 Construct a \code{GwasFineMappingResult} DFrame-subclass
-  collection from per-(study, method) tuples and a list of
-  \code{FineMappingEntry} payloads. The collection represents one LD
-  block of GWAS fine-mapping fits; build a separate collection per
-  block when sweeping the genome.
+  collection from per-(study, method, region_id) tuples and a list of
+  \code{FineMappingEntry} payloads. The collection can represent
+  either a single LD block (one row per (study, method)) or a
+  genome-wide sweep across blocks (multiple rows per (study, method),
+  each tagged with its own region_id).
 }
 \section{Slots}{
 

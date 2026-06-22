@@ -19,6 +19,7 @@ getMarginalEffects(x, maxPval = NULL, ...)
   context = NULL,
   trait = NULL,
   method = NULL,
+  region = NULL,
   ...
 )
 

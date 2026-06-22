@@ -40,11 +40,12 @@ Default \code{1.0}.}
 \code{\link{qtlEnrichment}}.}
 }
 \value{
-A data frame with one row per (gwasStudy, qtlContext) pair
-  and columns \code{gwasStudy}, \code{qtlContext},
-  \code{enrichment}, \code{enrichmentSe}, \code{enrichmentLogOdds},
-  plus any extras the underlying estimator emits. Suitable as the
-  \code{enrichment} argument to \code{\link{colocPipeline}}.
+A data frame with one row per (gwasStudy, qtlStudy,
+  qtlContext) triple and columns \code{gwasStudy}, \code{qtlStudy},
+  \code{qtlContext}, \code{enrichment}, \code{enrichmentSe},
+  \code{enrichmentLogOdds}, plus any extras the underlying estimator
+  emits. Suitable as the \code{enrichment} argument to
+  \code{\link{colocPipeline}} (which joins on the same triple).
 }
 \description{
 Genome-wide pipeline that computes per-pair (GWAS study,

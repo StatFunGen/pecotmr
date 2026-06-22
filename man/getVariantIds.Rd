@@ -22,6 +22,7 @@ getVariantIds(x, ...)
   context = NULL,
   trait = NULL,
   method = NULL,
+  region = NULL,
   ...
 )
 
