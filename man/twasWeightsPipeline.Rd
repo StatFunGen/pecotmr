@@ -46,6 +46,7 @@ twasWeightsPipeline(data, ...)
   contexts = NULL,
   traitId = NULL,
   jointSpecification = NULL,
+  fineMappingResult = NULL,
   twasWeights = NULL,
   dataType = NULL,
   verbose = 1L,
