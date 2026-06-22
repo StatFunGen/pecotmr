@@ -37,7 +37,7 @@ getMarginalEffects(x, maxPval = NULL, ...)
 
 \item{maxPval}{Optional numeric (length 1). When non-\code{NULL},
 filter rows where \code{p > maxPval}. Default \code{NULL}
-(no filter — return all variants).}
+(no filter).}
 
 \item{...}{Class-specific selection arguments.}
 }

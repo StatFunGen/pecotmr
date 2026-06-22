@@ -239,4 +239,135 @@ test_that(".enrBuildQtlRegionsList: returns per-entry fit shapes", {
   expect_true(!is.null(out[[1L]]$pip))
 })
 
+# ===========================================================================
+# qtlEnrichment() — kernel wrapper + real C++ integration
+# These tests deliberately do NOT mock qtlEnrichmentRcpp so the C++
+# kernel in src/qtl_enrichment.cpp gets coverage. The wrapper itself
+# (R/qtlEnrichmentPipeline.R::qtlEnrichment) is exercised here directly
+# rather than via the deprecated `computeQtlEnrichment` shim (which has
+# skip_on_covr()).
+# ===========================================================================
+
+# Build a small (gwasPip, susieQtlRegions) fixture with a sparse causal
+# signal at known indices so the C++ enrichment routine has something
+# meaningful to compute.
+.qep_makeRealKernelInputs <- function(seed = 42, nSnps = 50,
+                                       causalIdx = c(5, 20, 35),
+                                       causalPips = c(0.8, 0.6, 0.9),
+                                       L = 2L) {
+  set.seed(seed)
+  variantNames <- paste0("1:", seq_len(nSnps), ":A:G")
+  gwasPip <- rep(0.01, nSnps)
+  gwasPip[causalIdx] <- causalPips
+  names(gwasPip) <- variantNames
+
+  alpha <- matrix(1 / nSnps, nrow = L, ncol = nSnps)
+  alpha[1, ] <- 0.001; alpha[1, causalIdx[1]] <- 0.95
+  alpha[1, ] <- alpha[1, ] / sum(alpha[1, ])
+  alpha[2, ] <- 0.001; alpha[2, causalIdx[2]] <- 0.95
+  alpha[2, ] <- alpha[2, ] / sum(alpha[2, ])
+  pip <- colSums(alpha)
+  names(pip) <- variantNames
+  susieFits <- list(
+    fit1 = list(pip = pip, alpha = alpha,
+                prior_variance = c(0.5, 0.3)))
+  list(gwasPip = gwasPip, susieQtlRegions = susieFits,
+       variantNames = variantNames)
+}
+
+test_that("qtlEnrichment: real C++ kernel returns the expected keys (numGwas + piQtl supplied)", {
+  fx <- .qep_makeRealKernelInputs()
+  res <- qtlEnrichment(
+    gwasPip = fx$gwasPip, susieQtlRegions = fx$susieQtlRegions,
+    numGwas = 5000, piQtl = 0.5,
+    lambda = 1, impN = 5, numThreads = 1, verbose = FALSE)
+  expect_type(res, "list")
+  en <- res[[1L]]
+  expectedKeys <- c("Intercept", "Enrichment (no shrinkage)",
+                    "Enrichment (w/ shrinkage)",
+                    "sd (no shrinkage)", "sd (w/ shrinkage)",
+                    "Alternative (coloc) p1", "Alternative (coloc) p2",
+                    "Alternative (coloc) p12")
+  expect_setequal(intersect(expectedKeys, names(en)), expectedKeys)
+  expect_true(all(is.finite(unlist(en[expectedKeys]))))
+})
+
+test_that("qtlEnrichment: numGwas omitted -> estimates piGwas from data + warns", {
+  fx <- .qep_makeRealKernelInputs(nSnps = 30, causalIdx = c(5, 15))
+  expect_warning(
+    res <- qtlEnrichment(
+      gwasPip = fx$gwasPip, susieQtlRegions = fx$susieQtlRegions,
+      piQtl = 0.5, impN = 5, numThreads = 1, verbose = FALSE),
+    "numGwas is not provided")
+  expect_type(res, "list")
+})
+
+test_that("qtlEnrichment: piQtl omitted -> estimates from susieQtlRegions + warns", {
+  fx <- .qep_makeRealKernelInputs(nSnps = 30, causalIdx = c(5, 15))
+  expect_warning(
+    res <- qtlEnrichment(
+      gwasPip = fx$gwasPip, susieQtlRegions = fx$susieQtlRegions,
+      numGwas = 3000, impN = 5, numThreads = 1, verbose = FALSE),
+    "piQtl is not provided")
+  expect_type(res, "list")
+})
+
+test_that("qtlEnrichment: errors when piGwas resolves to zero", {
+  fx <- .qep_makeRealKernelInputs()
+  zeroGwas <- rep(0, length(fx$gwasPip))
+  names(zeroGwas) <- names(fx$gwasPip)
+  expect_error(
+    qtlEnrichment(gwasPip = zeroGwas,
+                  susieQtlRegions = fx$susieQtlRegions,
+                  piQtl = 0.5, numThreads = 1, verbose = FALSE),
+    "No association signal found")
+})
+
+test_that("qtlEnrichment: errors when piQtl resolves to zero", {
+  fx <- .qep_makeRealKernelInputs()
+  expect_error(
+    qtlEnrichment(gwasPip = fx$gwasPip,
+                  susieQtlRegions = fx$susieQtlRegions,
+                  numGwas = 5000, piQtl = 0,
+                  numThreads = 1, verbose = FALSE),
+    "No QTL associated")
+})
+
+test_that("qtlEnrichment: errors when gwasPip has no names", {
+  fx <- .qep_makeRealKernelInputs()
+  unnamed <- unname(fx$gwasPip)
+  expect_error(
+    qtlEnrichment(gwasPip = unnamed,
+                  susieQtlRegions = fx$susieQtlRegions,
+                  numGwas = 5000, piQtl = 0.5,
+                  numThreads = 1, verbose = FALSE),
+    "Variant names are missing in gwasPip")
+})
+
+test_that("qtlEnrichment: errors when susieQtlRegions$pip lacks names", {
+  fx <- .qep_makeRealKernelInputs()
+  fx$susieQtlRegions$fit1$pip <- unname(fx$susieQtlRegions$fit1$pip)
+  expect_error(
+    qtlEnrichment(gwasPip = fx$gwasPip,
+                  susieQtlRegions = fx$susieQtlRegions,
+                  numGwas = 5000, piQtl = 0.5,
+                  numThreads = 1, verbose = FALSE),
+    "Variant names are missing in susieQtlRegions")
+})
+
+test_that("qtlEnrichment: tracks unmatched QTL variants in the output", {
+  fx <- .qep_makeRealKernelInputs(nSnps = 30, causalIdx = c(5, 15))
+  # Inject a couple of variant IDs into the QTL fit that don't exist
+  # in the GWAS PIP vector.
+  newNames <- names(fx$susieQtlRegions$fit1$pip)
+  newNames[1:2] <- c("1:9999:A:G", "1:9998:A:G")
+  names(fx$susieQtlRegions$fit1$pip) <- newNames
+  colnames(fx$susieQtlRegions$fit1$alpha) <- newNames
+  res <- qtlEnrichment(
+    gwasPip = fx$gwasPip, susieQtlRegions = fx$susieQtlRegions,
+    numGwas = 3000, piQtl = 0.5,
+    impN = 5, numThreads = 1, verbose = FALSE)
+  expect_true("unused_xqtl_variants" %in% names(res))
+})
+
 

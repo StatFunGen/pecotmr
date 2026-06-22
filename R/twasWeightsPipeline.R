@@ -137,15 +137,11 @@
 # documented as individual-only for now. prsCs has no individual-level
 # counterpart (it is a sumstat-only Bayesian shrinkage method).
 .twasMethodCapabilities <- list(
-  susie               = list(individualImpl = "susieWeights",
-                             sumstatImpl    = "susieRssWeights",
-                             multivariate   = FALSE),
-  susieInf            = list(individualImpl = "susieInfWeights",
-                             sumstatImpl    = "susieInfRssWeights",
-                             multivariate   = FALSE),
-  susieAsh            = list(individualImpl = "susieAshWeights",
-                             sumstatImpl    = "susieAshRssWeights",
-                             multivariate   = FALSE),
+  # NOTE: fine-mapping methods (susie / susieInf / susieAsh / mvsusie /
+  # fsusie) are NOT listed here. Their availability is governed by
+  # .fineMappingMethodCapabilities (the same registry fineMappingPipeline
+  # uses) and gated by .twasCheckFineMappingMethods, which delegates
+  # input-class compatibility to .fmCheckMethodCapabilities.
   mrash               = list(individualImpl = "mrashWeights",
                              sumstatImpl    = "mrAshRssWeights",
                              multivariate   = FALSE),
@@ -161,9 +157,6 @@
   l0learn             = list(individualImpl = "l0learnWeights",
                              sumstatImpl    = "l0learnRssWeights",
                              multivariate   = FALSE),
-  mvsusie             = list(individualImpl = "mvsusieWeights",
-                             sumstatImpl    = "mvsusieRssWeights",
-                             multivariate   = TRUE),
   mrmash              = list(individualImpl = "mrmashWeights",
                              sumstatImpl    = "mrmashRssWeights",
                              multivariate   = TRUE),
@@ -218,15 +211,67 @@
 .twasNormalizeMethods <- function(methods) {
   if (is.null(methods)) {
     methodList <- .twasMethodLookup("default")
+    tokens <- .twasTokensFromMethodList(methodList)
   } else if (is.character(methods)) {
-    methodList <- .twasMethodLookup(methods)
+    # Fine-mapping tokens without a .twasMethodLookup entry (e.g. fsusie)
+    # are recognised here so the downstream gate can produce a method-
+    # specific error rather than "Unknown TWAS method" from the lookup.
+    fmExtra <- setdiff(intersect(methods, .twasFineMappingTokens()),
+                       .twasKnownMethodLookupNames())
+    regular <- setdiff(methods, fmExtra)
+    methodList <- if (length(regular) > 0L) .twasMethodLookup(regular)
+                  else list()
+    if (length(fmExtra) > 0L) {
+      # Append stub entries (empty args) for fine-mapping tokens with no
+      # learner counterpart (e.g. fsusie). The gate will reject these.
+      for (tk in fmExtra) {
+        snake <- paste0(tk, "_weights")
+        methodList[[snake]] <- list()
+      }
+    }
+    # Tokens come from the user input (canonical camelCase) — the snake
+    # keys in methodList are an internal detail of learnTwasWeights.
+    tokens <- unique(methods)
   } else if (is.list(methods)) {
     methodList <- methods
+    tokens <- .twasTokensFromMethodList(methodList)
   } else {
     stop("`methods` must be a character vector, preset string, or named list.")
   }
-  tokens <- sub("(_weights|Weights)$", "", names(methodList))
   list(tokens = tokens, methodList = methodList)
+}
+
+# Canonical (camelCase) tokens known to .twasMethodLookup, for use by
+# .twasNormalizeMethods. Source of truth: the methodMap inside
+# .twasMethodLookup.
+# @noRd
+.twasKnownMethodLookupNames <- function() {
+  c("susie", "susieAsh", "susieInf", "mrash", "enet", "lasso",
+    "bayes_r", "bayes_l", "bayes_a", "bayes_b", "bayes_c", "bayes_n",
+    "b_lasso", "dpr_vb", "dpr_gibbs", "dpr_adaptive_gibbs",
+    "scad", "mcp", "l0learn", "mvsusie", "mrmash")
+}
+
+# Convert a methodList (snake_case keys like `susie_inf_weights`) back to
+# canonical camelCase tokens (susieInf). Falls back to the snake form for
+# unknown keys.
+# @noRd
+.twasTokensFromMethodList <- function(methodList) {
+  snake <- sub("(_weights|Weights)$", "", names(methodList))
+  snakeToCanonical <- c(
+    susie = "susie", susie_ash = "susieAsh", susie_inf = "susieInf",
+    susie_ash_inf = "susieAsh",
+    mrash = "mrash", enet = "enet", lasso = "lasso",
+    bayes_r = "bayes_r", bayes_l = "bayes_l", bayes_a = "bayes_a",
+    bayes_b = "bayes_b", bayes_c = "bayes_c", bayes_n = "bayes_n",
+    b_lasso = "b_lasso", dpr_vb = "dpr_vb", dpr_gibbs = "dpr_gibbs",
+    dpr_adaptive_gibbs = "dpr_adaptive_gibbs",
+    scad = "scad", mcp = "mcp", l0learn = "l0learn",
+    mvsusie = "mvsusie", mrmash = "mrmash", prsCs = "prsCs",
+    fsusie = "fsusie")
+  vapply(snake, function(s) {
+    if (!is.na(snakeToCanonical[s])) snakeToCanonical[[s]] else s
+  }, character(1), USE.NAMES = FALSE)
 }
 
 # Enforce input-class / method compatibility against the TWAS
@@ -238,12 +283,18 @@
 .twasCheckMethodCapabilities <- function(tokens, inputKind) {
   if (length(tokens) == 0L) return(invisible(NULL))
   caps <- .twasMethodCapabilities
+  # Fine-mapping tokens are governed by .twasCheckFineMappingMethods (and
+  # delegate input-class compat to .fmCheckMethodCapabilities); skip them
+  # here so they aren't reported as "unknown".
+  fmTokens <- intersect(tokens, .twasFineMappingTokens())
+  tokens   <- setdiff(tokens, fmTokens)
+  if (length(tokens) == 0L) return(invisible(NULL))
   unknown <- setdiff(tokens, names(caps))
   if (length(unknown) > 0L) {
     stop(sprintf(
       "twasWeightsPipeline: unknown method token(s): %s. Known tokens: %s.",
       paste(unknown, collapse = ", "),
-      paste(names(caps), collapse = ", ")))
+      paste(c(names(caps), .twasFineMappingTokens()), collapse = ", ")))
   }
   individualKinds <- c("QtlDataset", "MultiStudyQtlDataset")
   bad <- character(0); reason <- character(0)
@@ -271,17 +322,101 @@
   }
 }
 
+# Adapter registry mapping each fine-mapping method (whose existence is
+# governed by .fineMappingMethodCapabilities) to its TWAS-weight extractor
+# wrapper. The wrapper names follow the *Weights / *RssWeights convention,
+# and the *Fit argument receives the pre-fitted fine-mapping object.
+# fSuSiE is intentionally absent: no TWAS-weight extractor exists for it.
+# @noRd
+.twasFineMappingMethodAdapters <- list(
+  susie    = list(weightFn = "susieWeights",
+                  rssWeightFn = "susieRssWeights",
+                  fitArg = "susieFit",
+                  rssFitArg = "susieRssFit",
+                  methodKey = "susie_weights"),
+  susieInf = list(weightFn = "susieInfWeights",
+                  rssWeightFn = "susieInfRssWeights",
+                  fitArg = "susieInfFit",
+                  rssFitArg = "susieInfRssFit",
+                  methodKey = "susie_inf_weights"),
+  susieAsh = list(weightFn = "susieAshWeights",
+                  rssWeightFn = "susieAshRssWeights",
+                  fitArg = "susieAshFit",
+                  rssFitArg = "susieAshRssFit",
+                  methodKey = "susie_ash_weights"),
+  mvsusie  = list(weightFn = "mvsusieWeights",
+                  rssWeightFn = "mvsusieRssWeights",
+                  fitArg = "mvsusieFit",
+                  rssFitArg = "mvsusieRssFit",
+                  methodKey = "mvsusie_weights"))
+
+# Canonical list of fine-mapping tokens recognised by twasWeightsPipeline.
+# Sourced from fineMappingPipeline's registry minus mrmash (which
+# fineMappingPipeline hard-rejects as a TWAS-only method).
+# @noRd
+.twasFineMappingTokens <- function() {
+  setdiff(names(.fineMappingMethodCapabilities), "mrmash")
+}
+
+# Reject fine-mapping methods (susie / susieInf / susieAsh / mvsusie /
+# fsusie) when no FineMappingResult is supplied. twasWeightsPipeline is
+# not allowed to re-fit fine-mapping models from scratch; users must run
+# fineMappingPipeline() first and pass the result via `fineMappingResult`.
+# Input-class compatibility (e.g. fsusie has no QtlSumStats path) is
+# delegated to .fmCheckMethodCapabilities so the rule set stays in lock-
+# step with fineMappingPipeline. Methods with no TWAS-weight extractor
+# (fsusie) are rejected with a method-specific message.
+# @noRd
+.twasCheckFineMappingMethods <- function(tokens, fineMappingResult, inputKind) {
+  if (length(tokens) == 0L) return(invisible(NULL))
+  fmTokens <- intersect(tokens, .twasFineMappingTokens())
+  if (length(fmTokens) == 0L) return(invisible(NULL))
+
+  # Defer input-class compatibility to fineMappingPipeline. e.g. this
+  # rejects fsusie on QtlSumStats (fsusie has no RSS impl).
+  .fmCheckMethodCapabilities(fmTokens, inputKind)
+
+  # Reject fine-mapping methods that have no TWAS-weight extractor
+  # (currently only fsusie).
+  noAdapter <- setdiff(fmTokens, names(.twasFineMappingMethodAdapters))
+  if (length(noAdapter) > 0L) {
+    stop(sprintf(
+      "twasWeightsPipeline: method(s) %s have no TWAS-weight extractor. For multi-trait fine-mapping use mvsusie via fineMappingResult.",
+      paste(noAdapter, collapse = ", ")))
+  }
+
+  if (is.null(fineMappingResult)) {
+    stop(sprintf(
+      "twasWeightsPipeline: method(s) %s are fine-mapping methods and may not be re-fit by twasWeightsPipeline. Run fineMappingPipeline() first and pass the result via `fineMappingResult = <FineMappingResult>`.",
+      paste(unique(fmTokens), collapse = ", ")))
+  }
+  if (!is(fineMappingResult, "FineMappingResultBase")) {
+    stop("`fineMappingResult` must be a FineMappingResult or NULL.")
+  }
+  invisible(NULL)
+}
+
+# Look up the multivariate flag for a token. Checks the TWAS-regression
+# capability table first; if absent, falls back to the fine-mapping
+# capability table (the source of truth for susie / mvsusie / fsusie /
+# etc.). Returns FALSE for unknown tokens.
+# @noRd
+.twasIsMultivariateToken <- function(token) {
+  info <- .twasMethodCapabilities[[token]]
+  if (!is.null(info)) return(isTRUE(info$multivariate))
+  fmInfo <- .fineMappingMethodCapabilities[[token]]
+  if (!is.null(fmInfo)) return(isTRUE(fmInfo$multivariate))
+  FALSE
+}
+
 # Enforce the multi-trait / multi-context rule for mvsusie / mr.mash
 # methods (same family as the fine-mapping mvSuSiE rule in the design
 # doc). Multivariate methods need at least 2 traits *or* at least 2
 # contexts in the Y matrix passed to learnTwasWeights.
 # @noRd
 .twasCheckMultivariateY <- function(tokens, nTraits, nContexts) {
-  caps <- .twasMethodCapabilities
-  multivariateTokens <- tokens[vapply(tokens, function(tk) {
-    info <- caps[[tk]]
-    !is.null(info) && isTRUE(info$multivariate)
-  }, logical(1))]
+  multivariateTokens <- tokens[vapply(tokens, .twasIsMultivariateToken,
+                                       logical(1))]
   if (length(multivariateTokens) == 0L) return(invisible(NULL))
   if (nTraits < 2L && nContexts < 2L) {
     stop(sprintf(
@@ -354,7 +489,7 @@
   }
   out <- list()
   methods <- as.character(fineMappingResult$method)
-  for (canonical in c("susie", "susieInf", "susieAsh")) {
+  for (canonical in c("susie", "susieInf", "susieAsh", "mvsusie")) {
     candidates <- c(canonical,
                     paste0(tolower(substring(canonical, 1L, 1L)),
                            substring(canonical, 2L)),
@@ -369,6 +504,19 @@
     }
   }
   out
+}
+
+# Locate a fine-mapping fit for one (study, context, trait, token) tuple.
+# Used by the QtlSumStats sumstat dispatcher to pass the precomputed fit
+# into susieRssWeights / susieInfRssWeights / susieAshRssWeights /
+# mvsusieRssWeights via their respective *Fit arguments.
+# @noRd
+.twasFineMappingFitFor <- function(fineMappingResult, study, context, trait,
+                                    token) {
+  if (is.null(fineMappingResult)) return(NULL)
+  fits <- .twasFineMappingFits(fineMappingResult,
+                                study = study, context = context, trait = trait)
+  fits[[token]]
 }
 
 #' TWAS Weights Pipeline
@@ -532,6 +680,7 @@ setMethod("twasWeightsPipeline", "QtlDataset",
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
     norm <- .twasNormalizeMethods(methods)
     .twasCheckMethodCapabilities(norm$tokens, "QtlDataset")
+    .twasCheckFineMappingMethods(norm$tokens, fineMappingResult, "QtlDataset")
 
     # Explicit jointSpecification path: run the per-spec axis dispatcher for
     # mr.mash. Other (univariate) methods continue through the existing
@@ -720,6 +869,15 @@ setMethod("twasWeightsPipeline", "QtlDataset",
       Y <- Y[keep, , drop = FALSE]
       X <- X[rownames(Y), , drop = FALSE]
 
+      # mvsusie joint fits are stored once per (context, trait) row in
+      # the FineMappingResult; all rows of a single joint fit point at
+      # the same fit object. Pull the fit using the first (context,
+      # trait) of the joint group and thread it through.
+      jointFits <- .twasFineMappingFits(fineMappingResult,
+                                         study = study,
+                                         context = meta$context[[1L]],
+                                         trait   = meta$trait[[1L]])
+
       # Build per-column identity tuples for learnTwasWeights so multi-
       # outcome methods emit one row per (context, trait).
       .twasWeightsPipelineMatrix(
@@ -727,6 +885,7 @@ setMethod("twasWeightsPipeline", "QtlDataset",
         study   = study,
         context = meta$context,
         trait   = meta$trait,
+        fittedModels = jointFits,
         cvFolds = cvFolds,
         samplePartition = samplePartition,
         weightMethods = norm$methodList,
@@ -776,6 +935,7 @@ setMethod("twasWeightsPipeline", "QtlSumStats",
            contexts           = NULL,
            traitId            = NULL,
            jointSpecification = NULL,
+           fineMappingResult  = NULL,
            twasWeights        = NULL,
            dataType           = NULL,
            verbose            = 1L,
@@ -788,9 +948,12 @@ setMethod("twasWeightsPipeline", "QtlSumStats",
 
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
 
-    # Normalize the methods argument into (tokens, methodArgs).
+    # Normalize the methods argument into (tokens, methodArgs). The default
+    # set excludes fine-mapping methods (susie / susieInf / susieAsh /
+    # mvsusie); those must be requested explicitly together with a
+    # FineMappingResult passed via `fineMappingResult`.
     if (is.null(methods)) {
-      tokens <- c("susie", "susieInf", "lasso", "prsCs", "dpr_gibbs")
+      tokens <- c("lasso", "prsCs", "dpr_gibbs")
       methodArgs <- setNames(rep(list(list()), length(tokens)), tokens)
     } else if (is.character(methods)) {
       tokens <- methods
@@ -803,6 +966,7 @@ setMethod("twasWeightsPipeline", "QtlSumStats",
            "of <token> = <args> entries.")
     }
     .twasCheckMethodCapabilities(tokens, "QtlSumStats")
+    .twasCheckFineMappingMethods(tokens, fineMappingResult, "QtlSumStats")
 
     jointResult <- NULL
     if (length(parsedJointSpec) > 0L) {
@@ -832,9 +996,7 @@ setMethod("twasWeightsPipeline", "QtlSumStats",
     }
 
     # Partition method tokens by univariate vs multivariate dispatch.
-    isMv <- vapply(tokens, function(tk) {
-      isTRUE(.twasMethodCapabilities[[tk]]$multivariate)
-    }, logical(1))
+    isMv <- vapply(tokens, .twasIsMultivariateToken, logical(1))
     multivariateTokens <- tokens[isMv]
     univariateTokens   <- tokens[!isMv]
 
@@ -891,9 +1053,27 @@ setMethod("twasWeightsPipeline", "QtlSumStats",
       ldMat <- .twasLdFromSketch(ldSketch, variantIds)
 
       for (tk in toFitTokens) {
-        fn <- .twasMethodCapabilities[[tk]]$sumstatImpl
+        adapter <- .twasFineMappingMethodAdapters[[tk]]
+        fn <- if (!is.null(adapter)) adapter$rssWeightFn
+              else .twasMethodCapabilities[[tk]]$sumstatImpl
         userArgs <- methodArgs[[tk]]
         if (is.null(userArgs)) userArgs <- list()
+        # When the token is a fine-mapping method, pass the precomputed
+        # fit into the *Rss weight function via its dedicated *Fit arg
+        # (e.g. susieRssFit, susieInfRssFit, susieAshRssFit). The gate
+        # above ensures fineMappingResult is non-NULL here.
+        if (!is.null(adapter)) {
+          fit <- .twasFineMappingFitFor(fineMappingResult,
+                                         study = st, context = ctx, trait = tr,
+                                         token = tk)
+          if (is.null(fit)) {
+            warning(sprintf(
+              "twasWeightsPipeline: no '%s' fit found in fineMappingResult for (study=%s, context=%s, trait=%s); skipping.",
+              tk, st, ctx, tr))
+            next
+          }
+          userArgs[[adapter$rssFitArg]] <- fit
+        }
         weights <- tryCatch(
           do.call(get(fn, mode = "function"),
                   c(list(stat = stat, LD = ldMat), userArgs)),
@@ -961,9 +1141,27 @@ setMethod("twasWeightsPipeline", "QtlSumStats",
         ldMat <- .twasLdFromSketch(ldSketch, variantIds)
 
         for (tk in multivariateTokens) {
-          fn <- .twasMethodCapabilities[[tk]]$sumstatImpl
+          adapter <- .twasFineMappingMethodAdapters[[tk]]
+          fn <- if (!is.null(adapter)) adapter$rssWeightFn
+                else .twasMethodCapabilities[[tk]]$sumstatImpl
           userArgs <- methodArgs[[tk]]
           if (is.null(userArgs)) userArgs <- list()
+          # mvsusie is fine-mapping; thread the pre-fit through. mr.mash is
+          # not, so this branch only fires for mvsusie.
+          if (!is.null(adapter)) {
+            fit <- .twasFineMappingFitFor(fineMappingResult,
+                                           study = st,
+                                           context = ctxNames[[1L]],
+                                           trait = tr,
+                                           token = tk)
+            if (is.null(fit)) {
+              warning(sprintf(
+                "twasWeightsPipeline: no '%s' fit found in fineMappingResult for (study=%s, trait=%s); skipping.",
+                tk, st, tr))
+              next
+            }
+            userArgs[[adapter$rssFitArg]] <- fit
+          }
           weights <- tryCatch(
             do.call(get(fn, mode = "function"),
                     c(list(stat = stat, LD = ldMat), userArgs)),
@@ -1046,6 +1244,17 @@ setMethod("twasWeightsPipeline", "MultiStudyQtlDataset",
     naAction <- match.arg(naAction)
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
 
+    # Gate fine-mapping methods early so the recursion into the embedded
+    # QtlDataset / QtlSumStats components doesn't re-run fine-mapping.
+    {
+      gateTokens <- if (is.character(methods)) methods
+                    else if (is.list(methods))
+                      sub("(_weights|Weights)$", "", names(methods))
+                    else character(0)
+      .twasCheckFineMappingMethods(gateTokens, fineMappingResult,
+                                    "MultiStudyQtlDataset")
+    }
+
     jointResult <- NULL
     if (length(parsedJointSpec) > 0L) {
       jointMethods <- character(0)
@@ -1101,6 +1310,7 @@ setMethod("twasWeightsPipeline", "MultiStudyQtlDataset",
         contexts           = contexts,
         traitId            = traitId,
         jointSpecification = NULL,
+        fineMappingResult  = fineMappingResult,
         twasWeights        = twasWeights,
         verbose            = verbose,
         ...)
@@ -1195,6 +1405,21 @@ setMethod("twasWeightsPipeline", "ANY",
   }
   if (is.null(fittedModels)) fittedModels <- list()
   if (!is.null(susieFit)) fittedModels[["susie"]] <- susieFit
+
+  # Inject precomputed fine-mapping fits into the per-method args so the
+  # corresponding *Weights wrapper extracts coefficients from the fit
+  # rather than refitting. The adapter table (.twasFineMappingMethodAdapters)
+  # gives the snake_case methodList key and the *Fit argument name for
+  # each fine-mapping method.
+  for (canonical in names(.twasFineMappingMethodAdapters)) {
+    adapter <- .twasFineMappingMethodAdapters[[canonical]]
+    if (!is.null(fittedModels[[canonical]]) &&
+        !is.null(weightMethods[[adapter$methodKey]]) &&
+        is.null(weightMethods[[adapter$methodKey]][[adapter$fitArg]])) {
+      weightMethods[[adapter$methodKey]][[adapter$fitArg]] <-
+        fittedModels[[canonical]]
+    }
+  }
 
   res <- list()
   st <- proc.time()

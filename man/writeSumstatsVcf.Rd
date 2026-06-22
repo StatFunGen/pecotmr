@@ -30,26 +30,15 @@ writeSumstatsVcf(x, outputPath, sampleName = NULL, ...)
 
 \item{outputPath}{File path for output. Extension determines format:
 \code{.vcf.gz} or \code{.vcf.bgz} for bgzipped VCF,
-\code{.bcf} for BCF, \code{.vcf} for uncompressed VCF. When
-\code{splitByContext} or \code{splitByTrait} is \code{TRUE} on a
-\code{FineMappingResult} method call, the corresponding tag is
-appended to the file stem (e.g.
-\code{out.vcf} + context = \code{"brain"} →
-\code{out.brain.vcf}).}
+\code{.bcf} for BCF, \code{.vcf} for uncompressed VCF.}
 
 \item{sampleName}{Name for the VCF sample column (default: trait name or
 method name from the S4 object).}
 
-\item{...}{Additional arguments passed to methods. For the
-\code{FineMappingResult} method these include \code{splitByContext}
-(logical, default \code{FALSE}) and \code{splitByTrait} (logical,
-default \code{FALSE}): when either is \code{TRUE}, write one VCF
-per row of the collection with the tuple value appended to the
-output filename.}
+\item{...}{Additional arguments passed to methods.}
 }
 \value{
-Invisible path (or character vector of paths when splitting)
-  to the written file(s).
+Invisible path to the written file.
 }
 \description{
 Creates a VCF object from GWAS summary statistics or fine-mapping results

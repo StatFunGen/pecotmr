@@ -96,6 +96,46 @@ context("twasWeightsPipeline (S4 dispatch) with mocked weight methods")
   }
 }
 
+# Build a minimal FineMappingResult that satisfies .twasCheckFineMappingMethods.
+# Each entry stores a stub fit list under the susieFit slot; the per-tuple
+# loop pulls these via .twasFineMappingFits() and threads them into the
+# corresponding *Weights wrapper as susieFit / susieInfFit / mvsusieFit / etc.
+.tp_makeStubFineMappingResult <- function(study   = "study1",
+                                          contexts = "brain",
+                                          traits   = "ENSG_A",
+                                          method   = "susie",
+                                          fitPayload = NULL) {
+  rows <- expand.grid(study = study, context = contexts, trait = traits,
+                      method = method, stringsAsFactors = FALSE)
+  entries <- lapply(seq_len(nrow(rows)), function(i) {
+    if (is.null(fitPayload))
+      fitPayload <- list(method = rows$method[[i]],
+                          context = rows$context[[i]],
+                          trait = rows$trait[[i]])
+    tl <- data.frame(
+      variant_id = paste0("v", seq_len(3L)),
+      pip        = c(0.9, 0.5, 0.1),
+      stringsAsFactors = FALSE)
+    FineMappingEntry(
+      variantIds = tl$variant_id,
+      susieFit   = fitPayload,
+      topLoci    = tl)
+  })
+  if ("brain" %in% rows$context || any(rows$context != "")) {
+    QtlFineMappingResult(
+      study   = rows$study,
+      context = rows$context,
+      trait   = rows$trait,
+      method  = rows$method,
+      entry   = entries)
+  } else {
+    GwasFineMappingResult(
+      study  = rows$study,
+      method = rows$method,
+      entry  = entries)
+  }
+}
+
 # Mock individual-level weight methods to return zero vectors quickly.
 .tp_mockIndividualWeights <- function() {
   list(
@@ -234,21 +274,22 @@ test_that("twasWeightsPipeline(QtlSumStats): runs end-to-end with mocked solvers
     .tp_mockSumstatWeights())
   do.call(local_mocked_bindings,
           c(mocks, list(.package = "pecotmr")))
-  # Method tokens are the bare short names ("susie", "lasso"); the
-  # QtlSumStats dispatch resolves them to the *Rss / lassosumRss impl via
-  # the .twasMethodCapabilities table.
+  # Method tokens are the bare short names; the QtlSumStats dispatch
+  # resolves them to the *Rss impl via the .twasMethodCapabilities table.
+  # Fine-mapping methods (susie / susieInf / etc.) require a
+  # FineMappingResult and are covered by separate tests.
   res <- suppressMessages(suppressWarnings(
-    twasWeightsPipeline(ss, methods = c("susie", "lasso"),
+    twasWeightsPipeline(ss, methods = c("mrash", "lasso"),
                         verbose = 0)))
   expect_s4_class(res, "TwasWeights")
   expect_equal(nrow(res), 2L)
-  expect_setequal(getMethodNames(res), c("susie", "lasso"))
+  expect_setequal(getMethodNames(res), c("mrash", "lasso"))
 })
 
 test_that("twasWeightsPipeline(QtlSumStats): un-QCd input is rejected", {
   ss <- .tp_makeQtlSumStats(qc = FALSE)
   expect_error(
-    twasWeightsPipeline(ss, methods = "susie"),
+    twasWeightsPipeline(ss, methods = "lasso"),
     "has no QC record"
   )
 })
@@ -264,7 +305,7 @@ test_that("twasWeightsPipeline(QtlSumStats): individual-only method rejected", {
 test_that("twasWeightsPipeline(QtlSumStats): empty contexts/trait filter errors", {
   ss <- .tp_makeQtlSumStats()
   expect_error(
-    twasWeightsPipeline(ss, methods = "susie",
+    twasWeightsPipeline(ss, methods = "lasso",
                         contexts = "ghost"),
     "no entries matched"
   )
@@ -275,24 +316,356 @@ test_that("twasWeightsPipeline(QtlSumStats): per-method failure surfaces as warn
   mocks <- c(
     list(extractBlockGenotypes = .tp_mockExtractor()),
     .tp_mockSumstatWeights())
-  # Override susieRssWeights with the failure-producing version.
-  mocks$susieRssWeights <- function(stat, LD, ...) stop("synthetic test failure")
+  # Override lassosumRssWeights with the failure-producing version.
+  mocks$lassosumRssWeights <- function(stat, LD, ...) stop("synthetic test failure")
   do.call(local_mocked_bindings,
           c(mocks, list(.package = "pecotmr")))
   # All entries fail -> the per-method-warning fires *and* the pipeline
   # then errors out (no rows produced). Capture both.
   expect_error(
     suppressWarnings(suppressMessages(
-      twasWeightsPipeline(ss, methods = "susie", verbose = 0))),
+      twasWeightsPipeline(ss, methods = "lasso", verbose = 0))),
     "no entries produced weights"
   )
 })
 
 test_that("twasWeightsPipeline(QtlSumStats): multivariate requires >=2 contexts per (study, trait)", {
   ss <- .tp_makeQtlSumStats(n_entries = 1L)  # 1 context per (study, trait)
+  # Provide a stub FineMappingResult so the gate passes; the multivariate
+  # guard is what we want to exercise here.
+  fmr <- .tp_makeStubFineMappingResult(study = "s1", contexts = "c1",
+                                        traits = "t1", method = "mvsusie")
   expect_error(
-    twasWeightsPipeline(ss, methods = "mvsusie"),
+    twasWeightsPipeline(ss, methods = "mvsusie", fineMappingResult = fmr),
     "multivariate method.*require at least two contexts"
+  )
+})
+
+# ===========================================================================
+# Fine-mapping method gate: every fine-mapping method (susie / susieInf /
+# susieAsh / mvsusie / fsusie) must be paired with a FineMappingResult.
+# twasWeightsPipeline is not allowed to re-fit them from scratch. Input-
+# class compatibility is delegated to .fmCheckMethodCapabilities so the
+# rule set stays in sync with fineMappingPipeline.
+# ===========================================================================
+
+test_that("gate: QtlDataset + susie without fineMappingResult errors", {
+  qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  expect_error(
+    twasWeightsPipeline(qd, methods = "susie"),
+    "are fine-mapping methods and may not be re-fit")
+})
+
+test_that("gate: QtlSumStats + susieInf without fineMappingResult errors", {
+  ss <- .tp_makeQtlSumStats()
+  expect_error(
+    twasWeightsPipeline(ss, methods = "susieInf"),
+    "are fine-mapping methods and may not be re-fit")
+})
+
+test_that("gate: QtlDataset + susieAsh without fineMappingResult errors", {
+  qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  expect_error(
+    twasWeightsPipeline(qd, methods = "susieAsh"),
+    "are fine-mapping methods and may not be re-fit")
+})
+
+test_that("gate: composite (susie + susieInf) without fineMappingResult errors", {
+  qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  # Mixed: lasso is allowed, but susie/susieInf must still be gated.
+  expect_error(
+    twasWeightsPipeline(qd, methods = c("susie", "susieInf", "lasso")),
+    "are fine-mapping methods and may not be re-fit")
+})
+
+test_that("gate: mvsusie without fineMappingResult errors (QtlDataset)", {
+  qd <- .tp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
+  expect_error(
+    twasWeightsPipeline(qd, methods = "mvsusie"),
+    "are fine-mapping methods and may not be re-fit")
+})
+
+test_that("gate: fsusie has no TWAS-weight extractor (rejected by name)", {
+  qd <- .tp_makeQtlDataset(contexts = c("brain", "liver"),
+                            traits = c("ENSG_A", "ENSG_B"))
+  fmr <- .tp_makeStubFineMappingResult(
+    study = "study1", contexts = c("brain", "liver"),
+    traits = "ENSG_A", method = "fsusie")
+  # Even with a fineMappingResult, fsusie can't produce TWAS weights.
+  expect_error(
+    twasWeightsPipeline(qd, methods = "fsusie", fineMappingResult = fmr),
+    "have no TWAS-weight extractor")
+})
+
+test_that("gate: fsusie on QtlSumStats delegates to .fmCheckMethodCapabilities", {
+  ss <- .tp_makeQtlSumStats()
+  fmr <- .tp_makeStubFineMappingResult(study = "s1", contexts = "c1",
+                                        traits = "t1", method = "fsusie")
+  # fineMappingPipeline rejects fsusie on QtlSumStats ("sumstat-only on this
+  # pipeline" / no sumstat impl); twasWeightsPipeline reuses that check.
+  expect_error(
+    twasWeightsPipeline(ss, methods = "fsusie", fineMappingResult = fmr),
+    "individual-only|sumstat-only|not supported")
+})
+
+test_that("gate: non-FineMappingResult object passed in errors", {
+  qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  expect_error(
+    twasWeightsPipeline(qd, methods = "susie",
+                        fineMappingResult = list()),
+    "must be a FineMappingResult")
+})
+
+test_that("gate: unknown method tokens still error with full menu", {
+  qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  expect_error(
+    twasWeightsPipeline(qd, methods = "totallyMadeUpMethod"),
+    "Unknown TWAS method|unknown method")
+})
+
+# ---------------------------------------------------------------------------
+# Success: when a FineMappingResult is supplied, the fit is threaded into
+# the corresponding *Weights wrapper via its *Fit argument. The wrappers
+# are mocked to verify the fit arrives and the underlying fitter is NOT
+# re-invoked.
+# ---------------------------------------------------------------------------
+
+test_that("gate: QtlDataset + susie + fineMappingResult threads the susieFit", {
+  qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  fmr <- .tp_makeStubFineMappingResult(
+    study = "study1", contexts = "brain", traits = "ENSG_A",
+    method = "susie")
+  sawFit <- FALSE
+  mocks <- list(
+    extractBlockGenotypes = .tp_mockExtractor(),
+    susieWeights = function(X = NULL, y = NULL, susieFit = NULL, ...) {
+      sawFit <<- !is.null(susieFit)
+      rep(0, ncol(X))
+    })
+  do.call(local_mocked_bindings,
+          c(mocks, list(.package = "pecotmr")))
+  res <- suppressMessages(suppressWarnings(
+    twasWeightsPipeline(qd,
+                        methods           = "susie",
+                        fineMappingResult = fmr,
+                        cisWindow         = 1000L,
+                        cvFolds           = 0,
+                        ensemble          = FALSE,
+                        estimatePi        = FALSE,
+                        verbose           = 0)))
+  expect_s4_class(res, "TwasWeights")
+  expect_equal(nrow(res), 1L)
+  expect_setequal(getMethodNames(res), "susie")
+  expect_true(sawFit)
+})
+
+test_that("gate: QtlSumStats + susie + fineMappingResult threads the susieRssFit", {
+  ss <- .tp_makeQtlSumStats()
+  fmr <- .tp_makeStubFineMappingResult(study = "s1", contexts = "c1",
+                                        traits = "t1", method = "susie")
+  fitsSeen <- 0L
+  mocks <- list(
+    extractBlockGenotypes = .tp_mockExtractor(),
+    susieRssWeights = function(stat, LD, susieRssFit = NULL, ...) {
+      if (!is.null(susieRssFit)) fitsSeen <<- fitsSeen + 1L
+      rep(0, nrow(LD))
+    })
+  do.call(local_mocked_bindings,
+          c(mocks, list(.package = "pecotmr")))
+  res <- suppressMessages(suppressWarnings(
+    twasWeightsPipeline(ss, methods = "susie",
+                        fineMappingResult = fmr, verbose = 0)))
+  expect_s4_class(res, "TwasWeights")
+  expect_equal(nrow(res), 1L)
+  expect_setequal(getMethodNames(res), "susie")
+  expect_equal(fitsSeen, 1L)
+})
+
+test_that("gate: QtlSumStats + susieAsh + fineMappingResult threads the susieAshRssFit", {
+  ss <- .tp_makeQtlSumStats()
+  fmr <- .tp_makeStubFineMappingResult(study = "s1", contexts = "c1",
+                                        traits = "t1", method = "susieAsh")
+  sawFit <- FALSE
+  mocks <- list(
+    extractBlockGenotypes = .tp_mockExtractor(),
+    susieAshRssWeights = function(stat, LD, susieAshRssFit = NULL, ...) {
+      sawFit <<- !is.null(susieAshRssFit)
+      rep(0, nrow(LD))
+    })
+  do.call(local_mocked_bindings,
+          c(mocks, list(.package = "pecotmr")))
+  res <- suppressMessages(suppressWarnings(
+    twasWeightsPipeline(ss, methods = "susieAsh",
+                        fineMappingResult = fmr, verbose = 0)))
+  expect_s4_class(res, "TwasWeights")
+  expect_equal(nrow(res), 1L)
+  expect_setequal(getMethodNames(res), "susieAsh")
+  expect_true(sawFit)
+})
+
+test_that("gate: missing matching tuple in fineMappingResult warns and skips", {
+  ss <- .tp_makeQtlSumStats()
+  # FineMappingResult has a row for a DIFFERENT (study, context, trait):
+  # the gate passes (any fine-mapping fit present satisfies the object
+  # check), but the per-tuple lookup finds nothing and warns.
+  fmr <- .tp_makeStubFineMappingResult(study = "other_study",
+                                        contexts = "other_ctx",
+                                        traits = "other_trait",
+                                        method = "susie")
+  mocks <- c(
+    list(extractBlockGenotypes = .tp_mockExtractor()),
+    .tp_mockSumstatWeights())
+  do.call(local_mocked_bindings,
+          c(mocks, list(.package = "pecotmr")))
+  expect_error(
+    suppressWarnings(suppressMessages(
+      twasWeightsPipeline(ss, methods = "susie",
+                          fineMappingResult = fmr, verbose = 0))),
+    "no entries produced weights")
+})
+
+# ===========================================================================
+# Multivariate dispatch paths (mvsusie / mr.mash) on individual-level data
+# (QtlDataset.runMultivariate) and on summary-statistics input (QtlSumStats
+# multivariate-Z dispatch). Both paths build a multi-column Y / Z and invoke
+# a single multivariate solver that returns a (variants x conditions) weight
+# matrix; we mock that solver to return a zero matrix of the expected shape.
+# ===========================================================================
+
+test_that("twasWeightsPipeline(QtlDataset): mvsusie multivariate path returns one row per (context, trait)", {
+  qd <- .tp_makeQtlDataset(contexts = c("brain", "liver"),
+                            traits = "ENSG_A")
+  fmr <- .tp_makeStubFineMappingResult(
+    study = "study1", contexts = c("brain", "liver"),
+    traits = "ENSG_A", method = "mvsusie")
+  mvCalls <- 0L
+  mocks <- list(
+    extractBlockGenotypes = .tp_mockExtractor(),
+    mvsusieWeights = function(X, Y, mvsusieFit = NULL, ...) {
+      mvCalls <<- mvCalls + 1L
+      # Verify the gate threaded the precomputed fit through.
+      stopifnot(!is.null(mvsusieFit))
+      matrix(0, nrow = ncol(X), ncol = ncol(Y),
+             dimnames = list(colnames(X), colnames(Y)))
+    })
+  do.call(local_mocked_bindings,
+          c(mocks, list(.package = "pecotmr")))
+  res <- suppressMessages(suppressWarnings(
+    twasWeightsPipeline(qd,
+                        methods           = "mvsusie",
+                        fineMappingResult = fmr,
+                        cisWindow         = 1000L,
+                        cvFolds           = 0,
+                        ensemble          = FALSE,
+                        estimatePi        = FALSE,
+                        verbose           = 0)))
+  expect_s4_class(res, "TwasWeights")
+  # Joint fit on 2 contexts x 1 trait -> 2 rows back, one per (context, trait).
+  expect_equal(nrow(res), 2L)
+  expect_setequal(getContexts(res), c("brain", "liver"))
+  expect_setequal(getTraits(res), "ENSG_A")
+  expect_setequal(getMethodNames(res), "mvsusie")
+  expect_gte(mvCalls, 1L)
+})
+
+test_that("twasWeightsPipeline(QtlDataset): mr.mash multivariate path with 2 traits x 2 contexts", {
+  qd <- .tp_makeQtlDataset(contexts = c("brain", "liver"),
+                            traits = c("ENSG_A", "ENSG_B"))
+  mocks <- list(
+    extractBlockGenotypes = .tp_mockExtractor(),
+    mrmashWeights = function(X, Y, ...) {
+      matrix(0, nrow = ncol(X), ncol = ncol(Y),
+             dimnames = list(colnames(X), colnames(Y)))
+    })
+  do.call(local_mocked_bindings,
+          c(mocks, list(.package = "pecotmr")))
+  res <- suppressMessages(suppressWarnings(
+    twasWeightsPipeline(qd,
+                        methods    = "mrmash",
+                        cisWindow  = 1000L,
+                        cvFolds    = 0,
+                        ensemble   = FALSE,
+                        estimatePi = FALSE,
+                        verbose    = 0)))
+  expect_s4_class(res, "TwasWeights")
+  # 2 contexts x 2 traits = 4 output rows.
+  expect_equal(nrow(res), 4L)
+  expect_setequal(getContexts(res), c("brain", "liver"))
+  expect_setequal(getTraits(res), c("ENSG_A", "ENSG_B"))
+  expect_setequal(getMethodNames(res), "mrmash")
+})
+
+# ---------------------------------------------------------------------------
+# QtlSumStats: multivariate dispatch builds a (variants x contexts) Z matrix
+# and invokes the *Rss solver once per (study, trait) group.
+# ---------------------------------------------------------------------------
+
+.tp_makeMultiCtxQtlSumStats <- function(contexts = c("c1", "c2"),
+                                         snp_ids  = paste0("v", 1:8),
+                                         positions = seq(100L, by = 100L, length.out = 8L)) {
+  n <- length(contexts)
+  entries <- lapply(seq_len(n), function(i) {
+    # Same SNP order across contexts -- required by the multivariate path
+    # (it errors on any divergence after summaryStatsQc).
+    .tp_makeSumstatsEntry(snp_ids = snp_ids, positions = positions)
+  })
+  QtlSumStats(study   = rep("s1", n),
+              context = contexts,
+              trait   = rep("t1", n),
+              entry   = entries,
+              genome  = "hg19",
+              ldSketch = .tp_makeHandle(snp_n = 20L),
+              qcInfo   = list(step1 = "ok"))
+}
+
+test_that("twasWeightsPipeline(QtlSumStats): mvsusie multivariate path returns one row per context", {
+  ss <- .tp_makeMultiCtxQtlSumStats(contexts = c("c1", "c2"))
+  fmr <- .tp_makeStubFineMappingResult(
+    study = "s1", contexts = c("c1", "c2"), traits = "t1",
+    method = "mvsusie")
+  shapesSeen <- list()
+  mocks <- list(
+    extractBlockGenotypes = .tp_mockExtractor(),
+    mvsusieRssWeights = function(stat, LD, mvsusieRssFit = NULL, ...) {
+      shapesSeen[[length(shapesSeen) + 1L]] <<- list(
+        Zdim = dim(stat$z), LDdim = dim(LD),
+        ctxNames = colnames(stat$z),
+        sawFit = !is.null(mvsusieRssFit))
+      matrix(0, nrow = nrow(LD), ncol = ncol(stat$z),
+             dimnames = list(stat$variantNames, colnames(stat$z)))
+    })
+  do.call(local_mocked_bindings,
+          c(mocks, list(.package = "pecotmr")))
+  res <- suppressMessages(suppressWarnings(
+    twasWeightsPipeline(ss, methods = "mvsusie",
+                        fineMappingResult = fmr, verbose = 0)))
+  expect_s4_class(res, "TwasWeights")
+  # 1 (study, trait) group with 2 contexts -> 2 output rows.
+  expect_equal(nrow(res), 2L)
+  expect_setequal(getContexts(res), c("c1", "c2"))
+  expect_setequal(getTraits(res), "t1")
+  expect_setequal(getMethodNames(res), "mvsusie")
+  # The solver was called once with a (variants x 2) Z matrix and was
+  # handed the precomputed fit from fineMappingResult.
+  expect_length(shapesSeen, 1L)
+  expect_equal(shapesSeen[[1L]]$Zdim[[2L]], 2L)
+  expect_setequal(shapesSeen[[1L]]$ctxNames, c("c1", "c2"))
+  expect_true(shapesSeen[[1L]]$sawFit)
+})
+
+test_that("twasWeightsPipeline(QtlSumStats): mr.mash multivariate solver failure surfaces as warning + empty result", {
+  ss <- .tp_makeMultiCtxQtlSumStats(contexts = c("c1", "c2"))
+  mocks <- list(
+    extractBlockGenotypes = .tp_mockExtractor(),
+    mrmashRssWeights = function(stat, LD, ...) stop("synthetic multivariate failure"))
+  do.call(local_mocked_bindings,
+          c(mocks, list(.package = "pecotmr")))
+  # All multivariate fits fail -> no rows -> the pipeline errors out at the
+  # end, surfacing the per-group warning along the way.
+  expect_error(
+    suppressWarnings(suppressMessages(
+      twasWeightsPipeline(ss, methods = "mrmash", verbose = 0))),
+    "no entries produced weights"
   )
 })
 
@@ -371,20 +744,20 @@ test_that("twasWeightsPipeline(QtlSumStats): cache hit on a per-tuple basis", {
   ss <- .tp_makeQtlSumStats()
   cached <- TwasWeights(
     study   = "s1", context = "c1", trait = "t1",
-    method  = "susie",
+    method  = "lasso",
     entry   = list(.tp_makeCachedEntry()))
   rssCalls <- 0L
   mocks <- c(
     list(extractBlockGenotypes = .tp_mockExtractor()),
     .tp_mockSumstatWeights())
-  mocks$susieRssWeights <- function(stat, LD, ...) {
+  mocks$lassosumRssWeights <- function(stat, LD, ...) {
     rssCalls <<- rssCalls + 1L
     rep(0, nrow(LD))
   }
   do.call(local_mocked_bindings,
           c(mocks, list(.package = "pecotmr")))
   res <- suppressMessages(suppressWarnings(
-    twasWeightsPipeline(ss, methods = "susie",
+    twasWeightsPipeline(ss, methods = "lasso",
                         twasWeights = cached,
                         verbose = 0)))
   expect_s4_class(res, "TwasWeights")
