@@ -683,6 +683,11 @@ test_that("buildTopLoci sets af = NA when no af is supplied (no silent coercion)
   length(setdiff(unique(as.character(post$top_loci$cs_95)), c(NA, "")))
 
 test_that("postprocessFinemappingFits forwards medianAbsCorr to susie_get_cs (OR-logic admits >= sets)", {
+  # medianAbsCorr is only meaningful when the installed susieR's susie_get_cs
+  # accepts median_abs_corr (GitHub-HEAD susieR; the CRAN/conda-forge build
+  # does not yet). Skip rather than error where it is unavailable.
+  skip_if_not("median_abs_corr" %in% names(formals(susieR::susie_get_cs)),
+              "installed susieR has no median_abs_corr support")
   d <- .make_univariate_data(seed = 11, effect_idx = c(10, 35))
   fit <- susieR::susie(d$X, d$y, L = 5)
   # A very strict min_abs_corr alone vs the same min_abs_corr OR a lenient
