@@ -271,11 +271,19 @@ reference:
       End-to-end pipeline entry points. Each takes one or more S4
       input classes and returns a SumStats, FineMappingResult,
       TwasWeights collection, or a tabular summary.
+      `ctwasPipeline` is also exposed as four chainable steps
+      (`assembleCtwasInputs` → `estCtwasParam` → `screenCtwasRegions`
+      → `finemapCtwasRegions`) for users who want to override estimated
+      priors or run only part of the pipeline.
     contents:
       - causalInferencePipeline
       - colocboostPipeline
       - colocPipeline
       - ctwasPipeline
+      - assembleCtwasInputs
+      - estCtwasParam
+      - screenCtwasRegions
+      - finemapCtwasRegions
       - fineMappingPipeline
       - mashPipeline
       - qtlEnrichmentPipeline
