@@ -2989,20 +2989,12 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
     entryAudit$skipRegionDropped <- before - nrow(df)
   }
 
-  # 4. Optional PIP screen.
-  if (opts$pipCutoffToSkip != 0) {
-    pip <- .applyPipScreen(df, n = opts$nForPip, cutoff = opts$pipCutoffToSkip)
-    df <- pip$df
-    entryAudit$pipScreenSkipped <- isTRUE(pip$skipped)
-    if (isTRUE(pip$skipped)) entryAudit$pipScreenReason <- pip$reason
-  }
-
   if (nrow(df) < 2L) {
     entryAudit$earlyExit <- "fewer than two variants after pre-harmonization QC"
     return(list(gr = .dfToEntryGranges(df), audit = entryAudit))
   }
 
-  # 5. Panel-vs-sumstats allele harmonization.
+  # 4. Panel-vs-sumstats allele harmonization.
   nHarmIn <- nrow(df)
   df <- .matchAgainstSketch(
     df, ldSketch,
@@ -3025,6 +3017,14 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
     qcCount$harmDropped <- nHarmIn - nrow(df)
     emit("QC track: harmonization kept ", nrow(df), " of ", nHarmIn,
          " variant(s).")
+  }
+
+  # 5. Optional PIP screen (after harmonization, on panel-aligned variants).
+  if (opts$pipCutoffToSkip != 0) {
+    pip <- .applyPipScreen(df, n = opts$nForPip, cutoff = opts$pipCutoffToSkip)
+    df <- pip$df
+    entryAudit$pipScreenSkipped <- isTRUE(pip$skipped)
+    if (isTRUE(pip$skipped)) entryAudit$pipScreenReason <- pip$reason
   }
 
   # 6. Optional kriging prefilter.

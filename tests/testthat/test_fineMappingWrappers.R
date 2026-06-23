@@ -509,7 +509,7 @@ if (!exists(".make_univariate_data", inherits = FALSE)) {
 
 .UNIFIED_TOP_LOCI_COLS <- c(
   "variant_id", "chrom", "pos", "A1", "A2",
-  "N", "MAF",
+  "N", "af",
   "marginal_beta", "marginal_se", "marginal_z", "marginal_p",
   "pip", "posterior_mean", "posterior_sd",
   "cs_95", "cs_70", "cs_50", "cs_95_purity",
@@ -610,7 +610,7 @@ test_that("buildTopLoci returns the exact 22-column schema in order with stable 
   expect_true(is.character(out$A1))
   expect_true(is.character(out$A2))
   expect_true(is.numeric(out$N))
-  expect_true(is.numeric(out$MAF))
+  expect_true(is.numeric(out$af))
   expect_true(is.numeric(out$marginal_beta))
   expect_true(is.numeric(out$marginal_se))
   expect_true(is.numeric(out$marginal_z))
@@ -650,6 +650,61 @@ test_that("buildTopLoci emits 22 columns in the fixed order on a non-empty fit",
   expect_equal(unique(out$grange_end),   14348298L)
   expect_equal(unique(out$N), 419L)
   expect_equal(unique(out$method), "susie")
+})
+
+test_that("buildTopLoci exports af (not MAF) and carries the supplied af values", {
+  variant_ids <- c("chr1:100:A:G", "chr1:200:C:T")
+  inp <- .fake_fit_and_cs(
+    variant_ids,
+    cs_at_cov = list("0.95" = list(c(1L, 2L)), "0.7" = list(c(1L, 2L)),
+                     "0.5" = list(c(1L, 2L))),
+    pip = c(0.9, 0.9))
+  out <- .runBuildTopLoci(inp, method = "susie", af = c(0.12, 0.87))
+  expect_true("af" %in% names(out))
+  expect_false("MAF" %in% names(out))
+  # Directional effect-allele frequency: value passed through verbatim,
+  # not folded to a minor-allele frequency (0.87 retained, not 0.13).
+  expect_equal(out$af, c(0.12, 0.87))
+})
+
+test_that("buildTopLoci sets af = NA when no af is supplied (no silent coercion)", {
+  variant_ids <- c("chr1:100:A:G", "chr1:200:C:T")
+  inp <- .fake_fit_and_cs(
+    variant_ids,
+    cs_at_cov = list("0.95" = list(c(1L, 2L)), "0.7" = list(c(1L, 2L)),
+                     "0.5" = list(c(1L, 2L))),
+    pip = c(0.9, 0.9))
+  out <- .runBuildTopLoci(inp, method = "susie", af = NULL)
+  expect_true("af" %in% names(out))
+  expect_true(all(is.na(out$af)))
+})
+
+.n_cs95 <- function(post)
+  length(setdiff(unique(as.character(post$top_loci$cs_95)), c(NA, "")))
+
+test_that("postprocessFinemappingFits forwards medianAbsCorr to susie_get_cs (OR-logic admits >= sets)", {
+  d <- .make_univariate_data(seed = 11, effect_idx = c(10, 35))
+  fit <- susieR::susie(d$X, d$y, L = 5)
+  # A very strict min_abs_corr alone vs the same min_abs_corr OR a lenient
+  # median_abs_corr: OR-logic keeps at least as many credible sets.
+  pStrict <- postprocessFinemappingFits(list(susie = fit), dataX = d$X, dataY = d$y,
+                                        coverage = 0.95, minAbsCorr = 0.999,
+                                        medianAbsCorr = NULL)
+  pOr     <- postprocessFinemappingFits(list(susie = fit), dataX = d$X, dataY = d$y,
+                                        coverage = 0.95, minAbsCorr = 0.999,
+                                        medianAbsCorr = 0.1)
+  expect_gte(.n_cs95(pOr), .n_cs95(pStrict))
+})
+
+test_that("postprocessFinemappingFits with medianAbsCorr = NULL is a no-op", {
+  d <- .make_univariate_data(seed = 7, effect_idx = c(20))
+  fit <- susieR::susie(d$X, d$y, L = 5)
+  p1 <- postprocessFinemappingFits(list(susie = fit), dataX = d$X, dataY = d$y,
+                                   coverage = 0.95)
+  p2 <- postprocessFinemappingFits(list(susie = fit), dataX = d$X, dataY = d$y,
+                                   coverage = 0.95, medianAbsCorr = NULL)
+  expect_equal(p1$top_loci$cs_95, p2$top_loci$cs_95)
+  expect_equal(p1$top_loci$af, p2$top_loci$af)
 })
 
 test_that("cs_95 / cs_70 / cs_50 are character strings of the form '<method>_<idx>'", {

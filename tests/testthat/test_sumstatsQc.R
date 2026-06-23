@@ -2648,6 +2648,40 @@ test_that("summaryStatsQc: infoCutoff > 0 with no INFO column errors", {
                "infoCutoff > 0 requires every entry to carry an INFO column")
 })
 
+test_that("summaryStatsQc: PIP screen runs AFTER allele harmonization", {
+  # Entry: three weak panel-matched variants plus one STRONG signal whose
+  # position (9999) is absent from the LD sketch (panel BP = 100..800), so
+  # harmonization drops it. With the screen running *after* harmonization it
+  # never sees the strong off-panel signal, so the remaining weak variants
+  # fail the PIP screen and the region is skipped (empty). (Pre-harmonization
+  # screening would have kept the region on the strength of the off-panel hit.)
+  gr <- .ssQ_makeEntryGr(c("rs1", "rs2", "rs3", "rsX"),
+                         positions = c(100L, 200L, 300L, 9999L))
+  mc <- S4Vectors::mcols(gr)
+  mc$Z <- c(0.2, 0.3, 0.1, 12)   # only the off-panel rsX carries signal
+  S4Vectors::mcols(gr) <- mc
+  ss <- GwasSumStats(study = "g1", entry = list(gr),
+                     genome = "hg19", ldSketch = .ssQ_makeHandle())
+  out <- summaryStatsQc(ss, pipCutoffToSkip = 0.5, nCutoff = 0)
+  snps <- as.character(S4Vectors::mcols(out$entry[[1L]])$SNP)
+  expect_false("rsX" %in% snps)            # dropped by harmonization
+  expect_equal(length(out$entry[[1L]]), 0L) # screen (post-harmonization) skips the region
+})
+
+test_that("summaryStatsQc: PIP screen off leaves the harmonized set intact", {
+  # Same harmonized variants, screen disabled (pipCutoffToSkip = 0): the three
+  # panel-matched variants survive (behavior-invariance for the screen-off path).
+  gr <- .ssQ_makeEntryGr(c("rs1", "rs2", "rs3", "rsX"),
+                         positions = c(100L, 200L, 300L, 9999L))
+  mc <- S4Vectors::mcols(gr); mc$Z <- c(0.2, 0.3, 0.1, 12)
+  S4Vectors::mcols(gr) <- mc
+  ss <- GwasSumStats(study = "g1", entry = list(gr),
+                     genome = "hg19", ldSketch = .ssQ_makeHandle())
+  out <- summaryStatsQc(ss, pipCutoffToSkip = 0, nCutoff = 0)
+  snps <- as.character(S4Vectors::mcols(out$entry[[1L]])$SNP)
+  expect_setequal(snps, c("rs1", "rs2", "rs3"))
+})
+
 test_that(".deriveBetaSeFromZ: derives BETA+SE when entry has Z+MAF+N only", {
   df <- data.frame(
     SNP = paste0("rs", 1:3),

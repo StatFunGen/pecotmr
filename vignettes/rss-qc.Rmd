@@ -35,7 +35,7 @@ entry point:
 | Stage | Mechanism |
 |---|---|
 | Variant-content QC (column standardization, indels, strand-ambiguous, MAF/INFO/N filters, p-value & effect-size sanity checks, optional dbSNP / liftover) | Delegated to `MungeSumstats::format_sumstats()` from inside `summaryStatsQc()`. |
-| Pecotmr-specific QC (`skipRegion`, optional PIP screen, panel harmonization against the `ldSketch`, optional SLALOM/DENTIST LD-mismatch QC, optional RAISS imputation) | Implemented inside `summaryStatsQc()`. |
+| Pecotmr-specific QC (`skipRegion`, panel harmonization against the `ldSketch`, optional PIP screen on the harmonized variants, optional SLALOM/DENTIST LD-mismatch QC, optional RAISS imputation) | Implemented inside `summaryStatsQc()`. |
 
 `summaryStatsQc()` is the **only** QC entry point. It takes a
 `GwasSumStats` or `QtlSumStats` (a DFrame collection that already carries

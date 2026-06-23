@@ -144,6 +144,10 @@
 #'   \code{0.025}.
 #' @param minAbsCorr Minimum absolute correlation for credible-set
 #'   purity. Default \code{0.8}.
+#' @param medianAbsCorr Optional median absolute correlation for
+#'   credible-set purity, routed to \code{susieR::susie_get_cs}. A set is
+#'   kept if it passes either \code{minAbsCorr} or \code{medianAbsCorr}
+#'   (OR-logic). Default \code{NULL} (off).
 #' @param fineMappingResult Optional existing \code{FineMappingResult}
 #'   to use as a resume cache; tuples already present are not refit.
 #' @param jointSpecification Optional joint-fit specification (NULL by
@@ -584,7 +588,8 @@ setGeneric("fineMappingPipeline",
 .fmPostprocessOne <- function(fit, method, dataX, dataY,
                               coverage, secondaryCoverage, signalCutoff,
                               minAbsCorr, csInput = NULL, af = NULL,
-                              region = NULL, trim = NULL) {
+                              region = NULL, trim = NULL,
+                              medianAbsCorr = NULL) {
   # Inherit `trim` from the calling method's frame if not passed in
   # explicitly. The 10 internal call sites don't currently forward it
   # (they predate the trim knob) so we look it up from the caller. This
@@ -594,12 +599,19 @@ setGeneric("fineMappingPipeline",
     trim <- tryCatch(get("trim", envir = parent.frame()),
                      error = function(e) TRUE)
   }
+  # `medianAbsCorr` is inherited the same way (each public setMethod gains a
+  # `medianAbsCorr = NULL` parameter); NULL is a no-op (OR-logic purity off).
+  if (is.null(medianAbsCorr)) {
+    medianAbsCorr <- tryCatch(get("medianAbsCorr", envir = parent.frame()),
+                              error = function(e) NULL)
+  }
   fits <- setNames(list(fit), method)
   post <- postprocessFinemappingFits(
     fits = fits, dataX = dataX, dataY = dataY,
     af = af, coverage = coverage,
     secondaryCoverage = secondaryCoverage,
     signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
+    medianAbsCorr = medianAbsCorr,
     region = region,
     csInput = csInput, trim = isTRUE(trim))
   out <- formatFinemappingOutput(post, primaryMethod = method)
@@ -738,6 +750,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
            secondaryCoverage  = c(0.7, 0.5),
            signalCutoff       = 0.025,
            minAbsCorr         = 0.8,
+           medianAbsCorr      = NULL,
            fineMappingResult  = NULL,
            naAction           = c("drop", "impute"),
            verbose            = 1,
@@ -1181,6 +1194,7 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
            secondaryCoverage  = c(0.7, 0.5),
            signalCutoff       = 0.025,
            minAbsCorr         = 0.8,
+           medianAbsCorr      = NULL,
            fineMappingResult  = NULL,
            naAction           = c("drop", "impute"),
            verbose            = 1,
@@ -1313,6 +1327,7 @@ setMethod("fineMappingPipeline", "QtlSumStats",
            secondaryCoverage  = c(0.7, 0.5),
            signalCutoff       = 0.025,
            minAbsCorr         = 0.8,
+           medianAbsCorr      = NULL,
            fineMappingResult  = NULL,
            verbose            = 1,
            trim               = TRUE,
@@ -1406,6 +1421,11 @@ setMethod("fineMappingPipeline", "QtlSumStats",
         variantIds <- zn$variantIds
         z <- zn$z
         n <- zn$n
+        # Effect-allele frequency for export as `af` (entry MAF mcol, post-QC
+        # harmonized/complemented); aligned to variantIds, NULL -> af NA.
+        .qmc <- S4Vectors::mcols(entry)
+        afByVar <- if ("MAF" %in% colnames(.qmc))
+          setNames(as.numeric(.qmc$MAF), as.character(.qmc$SNP))[variantIds] else NULL
         ldMat <- .fmLdFromSketch(ldSketch, variantIds)
         names(z) <- variantIds
 
@@ -1441,6 +1461,7 @@ setMethod("fineMappingPipeline", "QtlSumStats",
             secondaryCoverage = secondaryCoverage,
             signalCutoff = signalCutoff,
             minAbsCorr = minAbsCorr,
+            af = afByVar,
             csInput = "Xcorr")
           # The method column on the FineMappingResult carries the bare
           # token (susie / susieInf / susieAsh), independent of which
@@ -1552,6 +1573,7 @@ setMethod("fineMappingPipeline", "GwasSumStats",
            secondaryCoverage = c(0.7, 0.5),
            signalCutoff      = 0.025,
            minAbsCorr        = 0.8,
+           medianAbsCorr     = NULL,
            fineMappingResult = NULL,
            verbose           = 1,
            trim              = TRUE,
@@ -1590,6 +1612,12 @@ setMethod("fineMappingPipeline", "GwasSumStats",
       variantIds <- zn$variantIds
       z <- zn$z
       n <- zn$n
+      # Effect-allele frequency for export as the `af` column (post-QC the
+      # entry carries the harmonized, complemented frequency in its MAF mcol).
+      # Aligned to `variantIds`; NULL when absent -> af exported as NA.
+      .gmc <- S4Vectors::mcols(gr)
+      afByVar <- if ("MAF" %in% colnames(.gmc))
+        setNames(as.numeric(.gmc$MAF), as.character(.gmc$SNP))[variantIds] else NULL
       # Derive a region_id from the entry's GRanges so multi-block
       # genome-wide GWAS sweeps can carry one row per block without
       # tripping (study, method, region_id) uniqueness. Format:
@@ -1651,6 +1679,7 @@ setMethod("fineMappingPipeline", "GwasSumStats",
           secondaryCoverage = secondaryCoverage,
           signalCutoff = signalCutoff,
           minAbsCorr = minAbsCorr,
+          af = afByVar,
           csInput = "Xcorr")
         pushRow(st, tk, region_id, ent)
       }

@@ -80,7 +80,7 @@ setClass("FineMappingEntry",
 #'   the pipeline's \code{trim} parameter).
 #' @param topLoci Per-variant \code{data.frame} in canonical schema:
 #'   identity columns (\code{variant_id, chrom, pos, A1, A2}), context
-#'   (\code{N, MAF}), marginal columns (\code{marginal_beta,
+#'   (\code{N, af}; effect-allele frequency, never MAF), marginal columns (\code{marginal_beta,
 #'   marginal_se, marginal_z, marginal_p}), posterior columns
 #'   (\code{pip, posterior_mean, posterior_sd, cs_*, cs_*_purity}),
 #'   pipeline stamps (\code{method, gene, event, grange_start,
@@ -268,16 +268,17 @@ setMethod("show", "FineMappingEntry", function(object) {
 }
 
 # Project the canonical wide topLoci to the posterior view: identity +
-# N/MAF + (beta=posterior_mean, se=posterior_sd) + pip + cs_* + signal_cluster
+# N/af + (beta=posterior_mean, se=posterior_sd) + pip + cs_* + signal_cluster
 # + pipeline stamps. Renames `posterior_mean`/`posterior_sd` to `beta`/`se`.
-# Missing optional columns are NA-filled.
+# Exports effect-allele frequency as `af` (never MAF). Missing optional
+# columns are NA-filled.
 # @noRd
 .projectPosteriorView <- function(tl) {
   if (nrow(tl) == 0L) {
     return(data.frame(
       variant_id = character(0), chrom = character(0), pos = integer(0),
       A1 = character(0), A2 = character(0),
-      N = numeric(0), MAF = numeric(0),
+      N = numeric(0), af = numeric(0),
       beta = numeric(0), se = numeric(0), pip = numeric(0),
       stringsAsFactors = FALSE))
   }
@@ -288,7 +289,7 @@ setMethod("show", "FineMappingEntry", function(object) {
     A1              = .tlCol(tl, "A1",         "character"),
     A2              = .tlCol(tl, "A2",         "character"),
     N               = .tlCol(tl, "N",          "numeric"),
-    MAF             = .tlCol(tl, "MAF",        "numeric"),
+    af              = .tlCol(tl, "af",         "numeric"),
     beta            = .tlCol(tl, "posterior_mean", "numeric"),
     se              = .tlCol(tl, "posterior_sd",   "numeric"),
     pip             = .tlCol(tl, "pip",        "numeric"),
@@ -304,16 +305,17 @@ setMethod("show", "FineMappingEntry", function(object) {
   out
 }
 
-# Project to the marginal view: identity + N/MAF + (beta, se, z, p) where
+# Project to the marginal view: identity + N/af + (beta, se, z, p) where
 # beta/se/z/p are the marginal univariate columns renamed from their
-# `marginal_*` storage names. Missing optional columns are NA-filled.
+# `marginal_*` storage names. Exports effect-allele frequency as `af`
+# (never MAF). Missing optional columns are NA-filled.
 # @noRd
 .projectMarginalView <- function(tl) {
   if (nrow(tl) == 0L) {
     return(data.frame(
       variant_id = character(0), chrom = character(0), pos = integer(0),
       A1 = character(0), A2 = character(0),
-      N = numeric(0), MAF = numeric(0),
+      N = numeric(0), af = numeric(0),
       beta = numeric(0), se = numeric(0), z = numeric(0), p = numeric(0),
       stringsAsFactors = FALSE))
   }
@@ -324,7 +326,7 @@ setMethod("show", "FineMappingEntry", function(object) {
     A1         = .tlCol(tl, "A1",            "character"),
     A2         = .tlCol(tl, "A2",            "character"),
     N          = .tlCol(tl, "N",             "numeric"),
-    MAF        = .tlCol(tl, "MAF",           "numeric"),
+    af         = .tlCol(tl, "af",            "numeric"),
     beta       = .tlCol(tl, "marginal_beta", "numeric"),
     se         = .tlCol(tl, "marginal_se",   "numeric"),
     z          = .tlCol(tl, "marginal_z",    "numeric"),
