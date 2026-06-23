@@ -346,7 +346,13 @@ estCtwasParam <- function(inputs,
     zGene <- ctwas::compute_gene_z(
       inputs$z_snp, inputs$weights, ncore = as.integer(ncore))
   }
-  assembled <- .ctwasInvoke(ctwas::assemble_region_data, list(
+  # ctwas::assemble_region_data returns the region_data list directly
+  # (a per-region list, keyed by region_id) — NOT a wrapper carrying
+  # $region_data / $boundary_genes. Boundary genes are computed
+  # internally for adjustment but never returned, so we recover them
+  # separately via the exported ctwas::get_boundary_genes for the
+  # downstream finemap return shape.
+  regionData <- .ctwasInvoke(ctwas::assemble_region_data, list(
     region_info     = inputs$region_info,
     z_snp           = inputs$z_snp,
     z_gene          = zGene,
@@ -354,9 +360,17 @@ estCtwasParam <- function(inputs,
     snp_map         = inputs$snp_map,
     thin            = thin,
     ncore           = as.integer(ncore)), extra = list(...))
+  boundaryGenes <- if (nrow(inputs$region_info) > 1L) {
+    .ctwasInvoke(ctwas::get_boundary_genes, list(
+      region_info = inputs$region_info,
+      weights     = inputs$weights,
+      ncore       = as.integer(ncore)), extra = list(...))
+  } else {
+    NULL
+  }
   paramRes <- tryCatch(
     .ctwasInvoke(ctwas::est_param, list(
-      region_data               = assembled$region_data,
+      region_data               = regionData,
       niter_prefit              = as.integer(niterPrefit),
       niter                     = as.integer(niter),
       group_prior_var_structure = groupPriorVarStructure,
@@ -365,7 +379,7 @@ estCtwasParam <- function(inputs,
       if (fallbackToPrefit && grepl("contains NAs", conditionMessage(e))) {
         message("estCtwasParam: accurate EM diverged (",
                 conditionMessage(e), "); falling back to prefit estimates.")
-        .ctwasFitPrefitEm(assembled$region_data,
+        .ctwasFitPrefitEm(regionData,
                           niterPrefit            = as.integer(niterPrefit),
                           groupPriorVarStructure = groupPriorVarStructure,
                           thin                   = thin,
@@ -375,15 +389,14 @@ estCtwasParam <- function(inputs,
         stop(e)
       }
     })
-  # ctwas::assemble_region_data does not echo z_gene back in its return
-  # list, so propagate the precomputed (or freshly computed) z_gene we
-  # passed into it. This matches ctwas_sumstats's top-level return shape.
-  # Replace inputs$z_gene (which is NULL when twasZ wasn't supplied) with
-  # the computed zGene so $z_gene resolves to the right entry.
+  # ctwas::assemble_region_data does not echo z_gene back, so propagate
+  # the precomputed (or freshly computed) z_gene we passed into it.
+  # Replace inputs$z_gene (which is NULL when twasZ wasn't supplied) so
+  # $z_gene resolves to the right entry.
   inputs$z_gene <- zGene
   c(inputs, list(
-    region_data    = assembled$region_data,
-    boundary_genes = assembled$boundary_genes,
+    region_data    = regionData,
+    boundary_genes = boundaryGenes,
     param          = paramRes))
 }
 
@@ -397,12 +410,14 @@ estCtwasParam <- function(inputs,
 #'   NaN and you want to recover the prefit values).
 #'
 #' @param estResult A list returned by \code{\link{estCtwasParam}}.
-#' @param L Pass-through to \code{ctwas::screen_regions} (and downstream
-#'   fine-mapping).
+#' @param L Unused. Retained for call-site compatibility with
+#'   \code{\link{ctwasPipeline}}; ctwas's screening always uses the
+#'   single-effect (SER) model and ignores L. \code{L} is applied by
+#'   \code{\link{finemapCtwasRegions}} downstream.
 #' @param ncore Number of cores.
 #' @param ... Additional arguments forwarded to
-#'   \code{ctwas::screen_regions} (e.g. \code{filter_L},
-#'   \code{min_nonSNP_PIP}, \code{min_L}).
+#'   \code{ctwas::screen_regions} (e.g. \code{min_nonSNP_PIP},
+#'   \code{min_snp_pval}, \code{min_var}, \code{min_gene}).
 #' @return The \code{estResult} list augmented with
 #'   \code{screen_res} (the full ctwas output) and
 #'   \code{screened_region_data}.
@@ -414,16 +429,25 @@ screenCtwasRegions <- function(estResult,
   if (!requireNamespace("ctwas", quietly = TRUE)) {
     stop("Package 'ctwas' is required for screenCtwasRegions.")
   }
+  # ctwas::screen_regions requires thin = 1 region_data; expand the
+  # thinned set first when assemble_region_data was called with thin < 1
+  # (matches ctwas_sumstats's own expand-before-screen step).
+  thinVals <- sapply(estResult$region_data, function(rd) rd$thin)
+  thinVals <- thinVals[!sapply(thinVals, is.null)]
+  needsExpand <- length(thinVals) > 0L && min(unlist(thinVals)) < 1
+  regionDataForScreen <- if (needsExpand) {
+    .ctwasInvoke(ctwas::expand_region_data, list(
+      region_data = estResult$region_data,
+      snp_map     = estResult$snp_map,
+      z_snp       = estResult$z_snp,
+      ncore       = as.integer(ncore)), extra = list(...))
+  } else {
+    estResult$region_data
+  }
   screenRes <- .ctwasInvoke(ctwas::screen_regions, list(
-    region_data        = estResult$region_data,
-    LD_map             = estResult$LD_map,
-    weights            = estResult$weights,
+    region_data        = regionDataForScreen,
     group_prior        = estResult$param$group_prior,
     group_prior_var    = estResult$param$group_prior_var,
-    L                  = as.integer(L),
-    LD_format          = "custom",
-    LD_loader_fun      = estResult$LD_loader_fun,
-    snpinfo_loader_fun = estResult$snpinfo_loader_fun,
     ncore              = as.integer(ncore)), extra = list(...))
   c(estResult, list(
     screen_res            = screenRes,

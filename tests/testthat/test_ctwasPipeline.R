@@ -742,10 +742,9 @@ test_that("ctwasPipeline: dispatches assemble → est → screen → finemap and
   local_mocked_bindings(
     assemble_region_data = function(...) {
       capturedAssemble <<- list(...)
-      list(region_data    = list(block1 = list(stub = TRUE)),
-           boundary_genes = list(stub = TRUE),
-           z_gene         = data.frame(id = "t1", z = 1.5))
+      list(block1 = list(stub = TRUE))
     },
+    get_boundary_genes = function(...) data.frame(id = "t1", n_regions = 2L),
     est_param = function(...) {
       capturedEst <<- list(...)
       list(group_prior = c(g = 0.1, SNP = 0.0001),
@@ -792,10 +791,8 @@ test_that("estCtwasParam: fallbackToPrefit recovers from accurate-EM NaN diverge
   # produce a stub prefit result. Verify estCtwasParam catches the
   # NaN error AND that the returned param is the prefit estimate.
   local_mocked_bindings(
-    assemble_region_data = function(...) list(
-      region_data    = list(block1 = list(stub = TRUE)),
-      boundary_genes = list(),
-      z_gene         = data.frame(id = "t1", z = 1.0)),
+    assemble_region_data = function(...) list(block1 = list(stub = TRUE)),
+    get_boundary_genes   = function(...) data.frame(id = "t1", n_regions = 2L),
     compute_gene_z = function(...) data.frame(id = "t1", z = 1.0),
     est_param = function(...) stop("Estimated group_prior_var contains NAs!"),
     # ctwas:::fit_EM is internal — mock via the same `ctwas` namespace.
@@ -826,10 +823,8 @@ test_that("estCtwasParam / screenCtwasRegions / finemapCtwasRegions can be calle
   skip_if_not_installed("ctwas")
   inp <- .ctp_makeMultiBlockInputs()
   local_mocked_bindings(
-    assemble_region_data = function(...) list(
-      region_data    = list(block1 = list(stub = TRUE)),
-      boundary_genes = list(),
-      z_gene         = data.frame(id = "t1", z = 1.0)),
+    assemble_region_data = function(...) list(block1 = list(stub = TRUE)),
+    get_boundary_genes   = function(...) data.frame(id = "t1", n_regions = 2L),
     est_param = function(...) list(
       group_prior = c(g = 0.05, SNP = 1e-4),
       group_prior_var = c(g = 4, SNP = 5)),
