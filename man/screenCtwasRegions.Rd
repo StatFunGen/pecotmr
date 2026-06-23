@@ -9,14 +9,16 @@ screenCtwasRegions(estResult, L = 5L, ncore = 1L, ...)
 \arguments{
 \item{estResult}{A list returned by \code{\link{estCtwasParam}}.}
 
-\item{L}{Pass-through to \code{ctwas::screen_regions} (and downstream
-fine-mapping).}
+\item{L}{Unused. Retained for call-site compatibility with
+\code{\link{ctwasPipeline}}; ctwas's screening always uses the
+single-effect (SER) model and ignores L. \code{L} is applied by
+\code{\link{finemapCtwasRegions}} downstream.}
 
 \item{ncore}{Number of cores.}
 
 \item{...}{Additional arguments forwarded to
-\code{ctwas::screen_regions} (e.g. \code{filter_L},
-\code{min_nonSNP_PIP}, \code{min_L}).}
+\code{ctwas::screen_regions} (e.g. \code{min_nonSNP_PIP},
+\code{min_snp_pval}, \code{min_var}, \code{min_gene}).}
 }
 \value{
 The \code{estResult} list augmented with
