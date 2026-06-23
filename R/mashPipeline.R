@@ -14,11 +14,23 @@
 #'   exponent forwarded to \code{mashr::mash_set_data()}. Use
 #'   \code{alpha = 0} on the BETA scale, \code{alpha = 1} on the Z scale.
 #' @param residualCorrelation Optional pre-computed residual correlation
-#'   matrix (\code{Vhat}). Only consulted when \code{sumStatsList$null}
-#'   is absent; otherwise \code{Vhat} is estimated from the null slice
-#'   via \code{mashr::estimate_null_correlation_simple()}.
+#'   matrix (\code{Vhat}). When supplied, replaces the inline
+#'   \code{mashr::estimate_null_correlation_simple()} call entirely and
+#'   the \code{"random"} slot of \code{sumStatsList} becomes optional
+#'   (the function does not need it for anything else). Useful when
+#'   \code{Vhat} was estimated previously on a larger reference and
+#'   shipped as a static artefact (the legacy MWE pattern).
+#' @param priorCovariances Optional named list of square covariance
+#'   matrices (the \code{Ulist} \code{mashr::mash()} consumes). When
+#'   supplied, replaces the canonical + PCA + flash + ED chain
+#'   (\code{cov_canonical} / \code{cov_pca} / \code{cov_flash} /
+#'   \code{cov_ed}) entirely; mash sees only the supplied matrices.
+#'   Every entry must be a \code{ncol(Bhat) x ncol(Bhat)} matrix.
+#'   Useful when \code{U} was learnt on a larger reference and shipped
+#'   as a static artefact (the legacy MWE pattern).
 #' @param nPcs Optional integer; number of principal components seeded
 #'   into \code{mashr::cov_pca()}. Defaults to \code{ncol(Bhat) - 1}.
+#'   Ignored when \code{priorCovariances} is supplied.
 #' @param inputScale One of \code{"auto"} (default), \code{"beta"},
 #'   \code{"z"}. Controls which (Bhat, Shat) pair is extracted from each
 #'   sumstats entry:
@@ -42,6 +54,7 @@
 #' @export
 mashPipeline <- function(sumStatsList, alpha,
                           residualCorrelation = NULL,
+                          priorCovariances = NULL,
                           nPcs = NULL,
                           inputScale = c("auto", "beta", "z"),
                           setSeed = 999) {
@@ -64,7 +77,10 @@ mashPipeline <- function(sumStatsList, alpha,
          "of QtlSumStats / GwasSumStats objects, named with at least ",
          "'strong' and 'random' (optionally 'null').")
   }
-  required <- c("strong", "random")
+  # `random` is required only when we need to derive vhat from data; when
+  # the caller supplies a pre-computed `residualCorrelation`, the random
+  # subset is no longer needed.
+  required <- if (is.null(residualCorrelation)) c("strong", "random") else "strong"
   missingNames <- setdiff(required, names(sumStatsList))
   if (length(missingNames) > 0L) {
     stop("mashPipeline: `sumStatsList` is missing required entr",
@@ -82,8 +98,11 @@ mashPipeline <- function(sumStatsList, alpha,
 
   strongMats <- .mashSumStatsToMatrices(sumStatsList$strong, "strong",
                                          inputScale = inputScale)
-  randomMats <- .mashSumStatsToMatrices(sumStatsList$random, "random",
-                                         inputScale = inputScale)
+  randomMats <- if ("random" %in% names(sumStatsList) &&
+                    !is.null(sumStatsList$random)) {
+    .mashSumStatsToMatrices(sumStatsList$random, "random",
+                             inputScale = inputScale)
+  } else NULL
 
   hasNull <- "null" %in% names(sumStatsList) && !is.null(sumStatsList$null)
   if (hasNull) {
@@ -95,7 +114,11 @@ mashPipeline <- function(sumStatsList, alpha,
     if (!is.null(residualCorrelation)) {
       vhat <- residualCorrelation
     } else {
-      conditionNum <- ncol(randomMats$b)
+      # Identity-fallback: count conditions off `strong` so this code
+      # path works even when random is absent (it always was — and is
+      # required when residualCorrelation is NULL — but we read off
+      # strong for symmetry with the priorCovariances dimension check).
+      conditionNum <- ncol(strongMats$b)
       vhat <- diag(rep(1, conditionNum))
     }
   } else {
@@ -110,19 +133,41 @@ mashPipeline <- function(sumStatsList, alpha,
                                    V = vhat,
                                    alpha, zero_Bhat_Shat_reset = 1000)
 
-  # Canonical covariance matrices
-  U.can <- mashr::cov_canonical(mashData)
-  # PCA-based covariance matrices
-  if (is.null(nPcs)) {
-    nPcs <- ncol(mashData$Bhat) - 1
+  if (is.null(priorCovariances)) {
+    # Canonical covariance matrices
+    U.can <- mashr::cov_canonical(mashData)
+    # PCA-based covariance matrices
+    if (is.null(nPcs)) {
+      nPcs <- ncol(mashData$Bhat) - 1
+    }
+    U.pca <- mashr::cov_pca(mashData, npc = nPcs)
+    # Flash-based covariance matrices (factor analysis)
+    U.flash <- mashr::cov_flash(mashData)
+    # ED-based covariance matrices (initialized from all others)
+    U.ed <- mashr::cov_ed(mashData, Ulist_init = c(U.can, U.pca, U.flash))
+    # Combine all covariance matrices
+    U.all <- c(U.can, U.pca, U.flash, U.ed)
+  } else {
+    # Caller-supplied prior covariance matrices (e.g. pre-baked U from
+    # a reference dataset). Bypasses cov_canonical / cov_pca /
+    # cov_flash / cov_ed entirely; mashr only sees the supplied list.
+    if (!is.list(priorCovariances) || length(priorCovariances) == 0L ||
+        is.null(names(priorCovariances)) || any(names(priorCovariances) == "")) {
+      stop("mashPipeline: `priorCovariances` must be a non-empty named ",
+           "list of square covariance matrices.")
+    }
+    nCond <- ncol(mashData$Bhat)
+    bad <- !vapply(priorCovariances, function(M) {
+      is.matrix(M) && nrow(M) == nCond && ncol(M) == nCond
+    }, logical(1L))
+    if (any(bad)) {
+      stop(sprintf(paste0("mashPipeline: every `priorCovariances` entry must be ",
+                          "a %d x %d matrix; offenders: %s."),
+                   nCond, nCond,
+                   paste(names(priorCovariances)[bad], collapse = ", ")))
+    }
+    U.all <- priorCovariances
   }
-  U.pca <- mashr::cov_pca(mashData, npc = nPcs)
-  # Flash-based covariance matrices (factor analysis)
-  U.flash <- mashr::cov_flash(mashData)
-  # ED-based covariance matrices (initialized from all others)
-  U.ed <- mashr::cov_ed(mashData, Ulist_init = c(U.can, U.pca, U.flash))
-  # Combine all covariance matrices
-  U.all <- c(U.can, U.pca, U.flash, U.ed)
 
   # Fit mash to estimate mixture weights
   m <- mashr::mash(mashData, Ulist = U.all, outputlevel = 1)

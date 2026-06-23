@@ -246,6 +246,7 @@ reference:
   - subtitle: "SumStatsBase"
     contents:
       - getQcInfo
+      - getQcDiagnostics
 
   - subtitle: "TwasWeights"
     contents:
@@ -271,23 +272,29 @@ reference:
       End-to-end pipeline entry points. Each takes one or more S4
       input classes and returns a SumStats, FineMappingResult,
       TwasWeights collection, or a tabular summary.
-      `ctwasPipeline` is also exposed as four chainable steps
-      (`assembleCtwasInputs` → `estCtwasParam` → `screenCtwasRegions`
-      → `finemapCtwasRegions`) for users who want to override estimated
-      priors or run only part of the pipeline.
     contents:
       - causalInferencePipeline
       - colocboostPipeline
       - colocPipeline
       - ctwasPipeline
-      - assembleCtwasInputs
-      - estCtwasParam
-      - screenCtwasRegions
-      - finemapCtwasRegions
       - fineMappingPipeline
       - mashPipeline
       - qtlEnrichmentPipeline
       - twasWeightsPipeline
+
+  - title: "cTWAS"
+    desc: >
+      The four chainable steps that `ctwasPipeline` is built from:
+      `assembleCtwasInputs` → `estCtwasParam` → `screenCtwasRegions`
+      → `finemapCtwasRegions`. Use the steps directly when you want
+      to override the estimated priors (e.g. fall back to the prefit
+      EM values after an accurate-EM divergence), inspect the assembled
+      region data, or run only part of the pipeline.
+    contents:
+      - assembleCtwasInputs
+      - estCtwasParam
+      - screenCtwasRegions
+      - finemapCtwasRegions
 
   - title: "Quality control"
     desc: >

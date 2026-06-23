@@ -1,3 +1,37 @@
+#' @title sLDSC Postprocessing Pipeline
+#' @description Postprocess polyfun's per-trait sLDSC outputs (one
+#'   single-target run per target annotation, plus an optional joint
+#'   run) into a single results object with per-trait tau*, EnrichStat
+#'   with back-solved jackknife SE, and a DerSimonian-Laird random-
+#'   effects meta-analysis across traits.
+#' @param traitSinglePrefixes Named list of file prefixes for the
+#'   single-target polyfun runs (one entry per trait; each value is a
+#'   length-N character vector of `<dir>/<trait>` prefixes, one per
+#'   target annotation).
+#' @param traitJointPrefix Named list of file prefixes for the joint
+#'   polyfun runs (one entry per trait; each value a `<dir>/<trait>`
+#'   prefix into the joint LD-score dir). Pass an empty list to skip
+#'   the joint branch.
+#' @param targetAnnoDir Directory containing the target `.annot.gz`
+#'   files used for sd_C and binary detection (typically the joint dir).
+#' @param frqfileDir Optional directory of `.frq` files for the MAF
+#'   cutoff. Pass \code{NULL} to skip MAF filtering.
+#' @param plinkName File-name prefix of the PLINK reference panel
+#'   (default \code{"ADSP_chr"}; combined per-chromosome as
+#'   \code{paste0(plinkName, chrom)}).
+#' @param mafCutoff Numeric MAF cutoff applied via the `.frq` files.
+#'   Default \code{0.05}. Set to \code{0} to opt out.
+#' @param targetCategories Optional character vector of target
+#'   annotation names to retain. Auto-detected from the joint run when
+#'   \code{NULL}.
+#' @param targetLabels Optional display names, same length / order as
+#'   \code{targetCategories}, applied to every output column / tau*
+#'   block colname.
+#' @return A list with \code{per_trait} (per-trait standardised tables),
+#'   meta tables (\code{tau_star_meta}, \code{E_meta},
+#'   \code{enrich_stat_meta}), and a \code{params} record of the call
+#'   options.
+#' @export
 sldscPostprocessingPipeline <- function(traitSinglePrefixes,
                                         traitJointPrefix,
                                         targetAnnoDir,
