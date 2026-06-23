@@ -2835,7 +2835,12 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
   list(df = df, audit = audit)
 }
 
-# Apply ldMismatchQc (SLALOM/DENTIST) against the LD sketch.
+# Apply ldMismatchQc (SLALOM/DENTIST) against the LD sketch. Returns the
+# filtered df, outlier count, and the full per-variant diagnostics table
+# (the data.frame returned by ldMismatchQc(), prepended with a
+# variant_id column for downstream joins). Callers stamp `diagnostics`
+# into the entry's qcInfo audit so the per-variant detail is available
+# for plotting / postprocessing instead of just the outlier count.
 .applyLdMismatchQcToEntry <- function(df, ldSketch, method) {
   variantIds <- df$SNP
   if (is.null(variantIds) || any(is.na(variantIds)))
@@ -2852,7 +2857,22 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
   R <- computeLd(dosage, method = "sample")
   qc <- ldMismatchQc(zScore = df$Z, R = R, nSample = getNSamples(ldSketch),
                      method = method)
-  list(df = df[!qc$outlier, , drop = FALSE], outliers = sum(qc$outlier))
+  # slalom / dentist can leave NA in the outlier column when their
+  # per-variant statistic is undefined (e.g. a degenerate dentist
+  # chisq for variants effectively orthogonal to the lead). Treat NA as
+  # "no evidence of being an outlier" (conservative: keep the variant)
+  # so the downstream df / sum() / IRanges construction stay finite.
+  outlierFlags <- qc$outlier
+  outlierFlags[is.na(outlierFlags)] <- FALSE
+  # Attach the variant_id column so the diagnostics data.frame stays
+  # self-describing once it's separated from the input df.
+  diagnostics <- if (is.data.frame(qc)) {
+    cbind(variant_id = as.character(variantIds), qc,
+          stringsAsFactors = FALSE)
+  } else NULL
+  list(df = df[!outlierFlags, , drop = FALSE],
+       outliers = sum(outlierFlags),
+       diagnostics = diagnostics)
 }
 
 # Per-entry SER-based pip-screen (skip if no signal above the cutoff).
@@ -3031,6 +3051,12 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
     df <- ldQc$df
     entryAudit$ldMismatchOutliersDropped <- ldQc$outliers
     entryAudit$ldMismatchMethod          <- opts$zMismatchQc
+    # Preserve the full per-variant SLALOM/DENTIST diagnostics table for
+    # downstream plotting / postprocessing (the outlier-only summary kept
+    # historically dropped the per-variant detail). Stored as a data.frame
+    # on the entry's audit; absent when zMismatchQc = "none".
+    if (!is.null(ldQc$diagnostics))
+      entryAudit$ldMismatchDiagnostics <- ldQc$diagnostics
     qcCount$mismatchRemoved <- ldQc$outliers
     emit("QC track: ", opts$zMismatchQc, " removed ", ldQc$outliers, " of ",
          nMmIn, " LD-mismatch outlier(s).")

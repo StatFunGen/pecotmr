@@ -3297,6 +3297,42 @@ test_that(".applyLdMismatchQcToEntry: errors on variants absent from the sketch"
   )
 })
 
+test_that(".applyLdMismatchQcToEntry: NA outlier flags from slalom are kept (not dropped)", {
+  # Regression test: slalom (and dentist on degenerate inputs) can leave
+  # NA in the `outlier` column for variants whose per-variant statistic
+  # is undefined. Treating NA as TRUE would silently drop those rows;
+  # treating it as FALSE (current behavior) keeps them and yields a
+  # finite outlier count.
+  handle <- .ssh_makeHandle()
+  panel_ids <- as.character(getSnpInfo(handle)$SNP)
+  vids <- panel_ids[seq_len(min(4L, length(panel_ids)))]
+  df <- data.frame(SNP = vids, Z = c(1.0, 2.0, 0.5, 1.5),
+                   N = rep(1000L, length(vids)),
+                   stringsAsFactors = FALSE)
+  # Also mock extractBlockGenotypes: the entry-side helper extracts
+  # dosages from the LD sketch before delegating to ldMismatchQc, and the
+  # fixture handle points at a fake /tmp/sketch.gds path with no real
+  # GDS file behind it.
+  local_mocked_bindings(
+    extractBlockGenotypes = .ssh_mockExtractor(),
+    ldMismatchQc = function(zScore, R = NULL, X = NULL, nSample = NULL,
+                            method = c("slalom", "dentist"),
+                            ldMethod = "sample", ...) {
+      data.frame(original_z = zScore,
+                 outlier    = c(FALSE, TRUE, NA, NA),
+                 stringsAsFactors = FALSE)
+    },
+    .package = "pecotmr")
+  res <- pecotmr:::.applyLdMismatchQcToEntry(df, handle, method = "slalom")
+  # Only the explicit TRUE row should be dropped; the two NA rows survive.
+  expect_equal(nrow(res$df), 3L)
+  expect_false("v2" %in% as.character(res$df$SNP))   # v2 is the TRUE outlier
+  expect_equal(res$outliers, 1L)
+  # Diagnostics should preserve every row + add a variant_id column.
+  expect_equal(nrow(res$diagnostics), length(vids))
+  expect_true("variant_id" %in% names(res$diagnostics))
+})
+
 # ===========================================================================
 # .applyPipScreen
 # ===========================================================================

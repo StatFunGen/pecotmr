@@ -238,6 +238,26 @@ setGeneric("getGenome", function(x, ...) standardGeneric("getGenome"))
 #' @export
 setGeneric("getQcInfo", function(x, ...) standardGeneric("getQcInfo"))
 
+#' @title Get SLALOM / DENTIST Diagnostics
+#' @description Return the per-variant LD-mismatch diagnostics table
+#'   (SLALOM or DENTIST output) attached to a sumstats entry by
+#'   \code{\link{summaryStatsQc}} when \code{zMismatchQc} was not
+#'   \code{"none"}. Convenience accessor over
+#'   \code{getQcInfo(x)$entryAudit[[entry]]$ldMismatchDiagnostics}.
+#' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
+#' @param entry Integer index (default 1) of the entry whose diagnostics
+#'   table to return. When \code{NULL}, returns a named list of every
+#'   entry's diagnostics keyed by entry index.
+#' @param ... Unused.
+#' @return A \code{data.frame} of per-variant diagnostics (columns
+#'   include \code{variant_id} plus the SLALOM / DENTIST output
+#'   columns), \code{NULL} when no diagnostics were preserved for that
+#'   entry, or a named list of such data.frames when \code{entry =
+#'   NULL}.
+#' @export
+setGeneric("getQcDiagnostics",
+  function(x, entry = 1L, ...) standardGeneric("getQcDiagnostics"))
+
 #' @title Get LD Sketch
 #' @description Return the \code{GenotypeHandle} carrying the LD
 #'   reference for this collection. Defined on classes that embed an

@@ -118,15 +118,19 @@ context("fineMappingPipeline")
 }
 
 # Mocks for the SuSiE fitters + post-processor. Return tiny payloads keyed
-# only by the token so post-process knows what to wrap.
+# only by the token so post-process knows what to wrap. The `userArgs`
+# parameter (per-method kwargs merged in by .fmMergeUserArgs) is accepted
+# but ignored — the mocks don't simulate downstream susie behaviour.
 .fmp_mockFitIndiv <- function() {
-  function(X, y, token, chainFromInf = NULL, coverage = 0.95) {
+  function(X, y, token, chainFromInf = NULL, coverage = 0.95,
+           userArgs = NULL) {
     list(token = token, X_cols = ncol(X))
   }
 }
 
 .fmp_mockFitRss <- function() {
-  function(z, R, n, token, chainFromInf = NULL, coverage = 0.95) {
+  function(z, R, n, token, chainFromInf = NULL, coverage = 0.95,
+           userArgs = NULL) {
     list(token = token, n_variants = length(z))
   }
 }
@@ -159,18 +163,51 @@ context("fineMappingPipeline")
 # .fmNormalizeMethods
 # ===========================================================================
 
-test_that(".fmNormalizeMethods: rejects NULL / empty / non-character", {
+test_that(".fmNormalizeMethods: rejects NULL / empty / non-character/list", {
   expect_error(pecotmr:::.fmNormalizeMethods(NULL),
-               "non-empty character vector")
+               "non-empty character")
   expect_error(pecotmr:::.fmNormalizeMethods(character(0)),
-               "non-empty character vector")
+               "non-empty character")
   expect_error(pecotmr:::.fmNormalizeMethods(42L),
-               "must be a character vector")
+               "character vector or")
 })
 
-test_that(".fmNormalizeMethods: deduplicates", {
-  expect_equal(pecotmr:::.fmNormalizeMethods(c("susie", "susie", "susieInf")),
-               c("susie", "susieInf"))
+test_that(".fmNormalizeMethods: char-vector form deduplicates + empty methodArgs", {
+  res <- pecotmr:::.fmNormalizeMethods(c("susie", "susie", "susieInf"))
+  expect_equal(res$tokens, c("susie", "susieInf"))
+  expect_equal(names(res$methodArgs), c("susie", "susieInf"))
+  expect_true(all(vapply(res$methodArgs, length, integer(1)) == 0L))
+})
+
+test_that(".fmNormalizeMethods: named-list form carries per-method kwargs", {
+  res <- pecotmr:::.fmNormalizeMethods(
+    list(susie    = list(L = 1, refine = FALSE),
+         susieInf = list()))
+  expect_equal(res$tokens, c("susie", "susieInf"))
+  expect_equal(res$methodArgs$susie, list(L = 1, refine = FALSE))
+  expect_equal(res$methodArgs$susieInf, list())
+})
+
+test_that(".fmNormalizeMethods: list without names errors", {
+  expect_error(pecotmr:::.fmNormalizeMethods(list(list(L = 1), list())),
+               "must be named")
+})
+
+test_that(".fmNormalizeMethods: list with non-list child errors", {
+  expect_error(
+    pecotmr:::.fmNormalizeMethods(list(susie = 42, susieInf = list())),
+    "list of named kwargs")
+})
+
+test_that(".fmMergeUserArgs: user overrides win over capability defaults + base", {
+  # base sets convergence_method = "pip"; user overrides to "objective"
+  out <- pecotmr:::.fmMergeUserArgs(
+    list(z = 1:3, convergence_method = "pip"),
+    token    = "susie",
+    userArgs = list(convergence_method = "objective", L = 1))
+  expect_equal(out$convergence_method, "objective")
+  expect_equal(out$L, 1)
+  expect_identical(out$z, 1:3)
 })
 
 # ===========================================================================

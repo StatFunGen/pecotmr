@@ -57,6 +57,28 @@ setMethod("getGenome", "SumStatsBase", function(x, ...) x@genome)
 #' @export
 setMethod("getQcInfo", "SumStatsBase", function(x, ...) x@qcInfo)
 
+#' @rdname getQcDiagnostics
+#' @export
+setMethod("getQcDiagnostics", "SumStatsBase",
+  function(x, entry = 1L, ...) {
+    qc <- x@qcInfo
+    if (length(qc) == 0L) return(NULL)
+    audits <- qc$entryAudit
+    if (is.null(audits)) return(NULL)
+    if (is.null(entry)) {
+      out <- lapply(audits, function(a) a$ldMismatchDiagnostics)
+      keep <- !vapply(out, is.null, logical(1L))
+      if (!any(keep)) return(NULL)
+      setNames(out[keep], seq_along(audits)[keep])
+    } else {
+      if (!is.numeric(entry) || length(entry) != 1L ||
+          entry < 1L || entry > length(audits)) {
+        stop("`entry` must be a single integer in 1:", length(audits), ".")
+      }
+      audits[[as.integer(entry)]]$ldMismatchDiagnostics
+    }
+  })
+
 #' @rdname getLdSketch
 #' @export
 setMethod("getLdSketch", "SumStatsBase", function(x, ...) x@ldSketch)

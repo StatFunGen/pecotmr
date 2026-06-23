@@ -87,8 +87,11 @@
 #'         \code{susieR::susie} check externally if needed.
 #'   \item Diagnostic re-analysis paths
 #'         (\code{singleEffect} / \code{bayesianConditionalRegression}
-#'         reanalysis on the RSS path): these are not part of the
-#'         design-doc method menu and are dropped.
+#'         reanalysis on the RSS path): these are not exposed as
+#'         dedicated method tokens. Callers who want a single-effect
+#'         fit can request it via per-method kwargs, e.g.
+#'         \code{methods = list(susie = list(L = 1))} (see the
+#'         \code{methods} parameter).
 #'   \item \code{loadRssData} and explicit
 #'         \code{ldReferenceMetaFile} arguments: the new
 #'         \code{QtlSumStats} / \code{GwasSumStats} carry the
@@ -103,9 +106,23 @@
 #'
 #' @param data A \code{QtlDataset}, \code{MultiStudyQtlDataset},
 #'   \code{QtlSumStats}, or \code{GwasSumStats}.
-#' @param methods Character vector of method tokens (any subset of
-#'   \code{c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")}).
-#'   See description for per-class compatibility.
+#' @param methods Method specification. Accepts either:
+#'   \itemize{
+#'     \item A character vector of method tokens, e.g.
+#'           \code{c("susie", "susieInf", "mvsusie")} (any subset of
+#'           \code{c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")},
+#'           subject to per-class compatibility).
+#'     \item A named list keyed by method token, where each value is a
+#'           list of per-method kwargs to splice into the underlying
+#'           fitter, e.g.
+#'           \code{list(susie = list(L = 1, refine = FALSE),
+#'                      mvsusie = list(max_iter = 500))}. Mirrors the
+#'           convention of \code{\link{twasWeightsPipeline}}'s
+#'           \code{methods} argument. User-supplied kwargs override the
+#'           capability-table defaults and any base / chained args set
+#'           by the pipeline (e.g. you can override \code{model_init}
+#'           even when fitting from a susieInf chain).
+#'   }
 #' @param contexts Optional character vector of context names. Default
 #'   \code{NULL} (all contexts).
 #' @param traitId Optional character vector of trait names to restrict
@@ -214,52 +231,88 @@ setGeneric("fineMappingPipeline",
     sumstatImpl       = "susieR::susie_rss",
     multivariate      = FALSE,
     gwasAllowed       = TRUE,
-    unmappableEffects = "none"),
+    unmappableEffects = "none",
+    args              = list()),
   susieInf = list(
     individualImpl    = "susieR::susie",
     sumstatImpl       = "susieR::susie_rss",
     multivariate      = FALSE,
     gwasAllowed       = TRUE,
-    unmappableEffects = "inf"),
+    unmappableEffects = "inf",
+    args              = list()),
   susieAsh = list(
     individualImpl    = "susieR::susie",
     sumstatImpl       = "susieR::susie_rss",
     multivariate      = FALSE,
     gwasAllowed       = TRUE,
-    unmappableEffects = "ash"),
+    unmappableEffects = "ash",
+    args              = list()),
   mvsusie = list(
     individualImpl    = "mvsusieR::mvsusie",
     sumstatImpl       = "mvsusieR::mvsusie_rss",
     multivariate      = TRUE,
     gwasAllowed       = FALSE,
-    unmappableEffects = NA_character_),
+    unmappableEffects = NA_character_,
+    args              = list()),
   fsusie = list(
     individualImpl    = "fsusieR::susiF",
     sumstatImpl       = NULL,
     multivariate      = TRUE,
     gwasAllowed       = FALSE,
-    unmappableEffects = NA_character_),
+    unmappableEffects = NA_character_,
+    args              = list()),
   mrmash = list(
     individualImpl    = NULL,
     sumstatImpl       = NULL,
     multivariate      = TRUE,
     gwasAllowed       = FALSE,
-    unmappableEffects = NA_character_))
+    unmappableEffects = NA_character_,
+    args              = list()))
 
 
 # Normalize a user-supplied `methods` argument into a character vector of
 # canonical tokens. Mirrors `.twasNormalizeMethods` but the fine-mapping
 # pipeline takes only a character vector (no preset strings, no list form).
 # @noRd
+# Normalize a user-supplied `methods` argument into `(tokens, methodArgs)`.
+#
+# Accepts:
+#   * character vector  c("susie", "susieInf")            -> empty kwargs per token
+#   * named list        list(susie = list(L = 1), ...)    -> per-token kwargs
+#
+# Names of the returned `methodArgs` always equal `tokens` (one entry per
+# token, empty list when the user supplied none). The fitters then
+# `modifyList`-merge each entry into the base arg list before do.call.
+#
+# Mirrors the convention of .twasNormalizeMethods so the two pipelines
+# expose the same shape on the user side.
+# @noRd
 .fmNormalizeMethods <- function(methods) {
   if (is.null(methods) || length(methods) == 0L) {
-    stop("fineMappingPipeline: `methods` must be a non-empty character vector.")
+    stop("fineMappingPipeline: `methods` must be a non-empty character ",
+         "vector or named list of <token> = <kwargs> entries.")
   }
-  if (!is.character(methods)) {
-    stop("fineMappingPipeline: `methods` must be a character vector. ",
-         "Got class '", class(methods)[[1L]], "'.")
+  if (is.character(methods)) {
+    tokens     <- unique(methods)
+    methodArgs <- setNames(rep(list(list()), length(tokens)), tokens)
+  } else if (is.list(methods)) {
+    if (is.null(names(methods)) || any(names(methods) == "")) {
+      stop("fineMappingPipeline: when `methods` is a list it must be ",
+           "named (one entry per method token).")
+    }
+    nonListChild <- vapply(methods, function(x) !is.list(x), logical(1))
+    if (any(nonListChild)) {
+      stop("fineMappingPipeline: each entry of the `methods` list must ",
+           "itself be a list of named kwargs (got non-list value for: ",
+           paste(names(methods)[nonListChild], collapse = ", "), ").")
+    }
+    tokens     <- unique(names(methods))
+    methodArgs <- methods[tokens]
+  } else {
+    stop("fineMappingPipeline: `methods` must be a character vector or ",
+         "named list. Got class '", class(methods)[[1L]], "'.")
   }
-  unique(methods)
+  list(tokens = tokens, methodArgs = methodArgs)
 }
 
 
@@ -560,13 +613,33 @@ setGeneric("fineMappingPipeline",
 }
 
 
+# Merge per-method user kwargs onto a base arg list. `userArgs` is the
+# per-token kwargs supplied by the caller (e.g. `list(L = 1, refine =
+# FALSE)`); the capability table's `args` default fills in any keys the
+# user did not set. User-supplied values always win over base, capability
+# defaults, and chain-derived args. Returns the merged list.
+# @noRd
+.fmMergeUserArgs <- function(baseArgs, token, userArgs = NULL) {
+  if (is.null(userArgs)) userArgs <- list()
+  info <- .fineMappingMethodCapabilities[[token]]
+  capDefaults <- if (!is.null(info) && !is.null(info$args)) info$args else list()
+  # Order matters: base < capability defaults < user overrides.
+  if (length(capDefaults) > 0L) baseArgs <- modifyList(baseArgs, capDefaults)
+  if (length(userArgs)   > 0L) baseArgs <- modifyList(baseArgs, userArgs)
+  baseArgs
+}
+
+
 # Fit one of the SuSiE-family individual-level methods on (X, y). When
 # `chainFromInf` is non-NULL, the susieInf fit it points at is used as
 # initialisation (with prepareSusieFromInfArgs); otherwise a plain fit
-# with the requested `unmappable_effects` is performed.
+# with the requested `unmappable_effects` is performed. `userArgs` are
+# spliced via .fmMergeUserArgs (user wins over chain/base/capability
+# defaults), so the caller can override things like L, max_iter,
+# estimate_residual_method, refine, etc.
 # @noRd
 .fmFitSusieIndiv <- function(X, y, token, chainFromInf = NULL,
-                             coverage = 0.95) {
+                             coverage = 0.95, userArgs = NULL) {
   info <- .fineMappingMethodCapabilities[[token]]
   if (is.null(info) || identical(info$unmappableEffects, NA_character_)) {
     stop(".fmFitSusieIndiv: token '", token, "' is not a SuSiE-family method.")
@@ -590,16 +663,17 @@ setGeneric("fineMappingPipeline",
   } else if (token == "susieAsh") {
     baseArgs$convergence_method <- "pip"
   }
+  baseArgs <- .fmMergeUserArgs(baseArgs, token, userArgs)
   fit <- do.call(susieR::susie, baseArgs)
   .setFinemappingFitClass(fit, token)
 }
 
 
 # Sumstat counterpart of .fmFitSusieIndiv. Calls susieR::susie_rss with
-# the same unmappable_effects switch and chained init.
+# the same unmappable_effects switch, chained init, and userArgs merge.
 # @noRd
 .fmFitSusieRss <- function(z, R, n, token, chainFromInf = NULL,
-                           coverage = 0.95) {
+                           coverage = 0.95, userArgs = NULL) {
   info <- .fineMappingMethodCapabilities[[token]]
   if (is.null(info) || identical(info$unmappableEffects, NA_character_)) {
     stop(".fmFitSusieRss: token '", token, "' is not a SuSiE-family method.")
@@ -622,6 +696,7 @@ setGeneric("fineMappingPipeline",
   } else if (token == "susieAsh") {
     baseArgs$convergence_method <- "pip"
   }
+  baseArgs <- .fmMergeUserArgs(baseArgs, token, userArgs)
   fit <- do.call(susieR::susie_rss, baseArgs)
   # All susie_rss fits get the "susieRss" S3 class for post-processing
   # (this drives the Xcorr cs-input mode). Token-level distinction stays
@@ -674,7 +749,9 @@ setMethod("fineMappingPipeline", "QtlDataset",
            ...) {
     naAction <- match.arg(naAction)
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
-    tokens <- .fmNormalizeMethods(methods)
+    norm       <- .fmNormalizeMethods(methods)
+    tokens     <- norm$tokens
+    methodArgs <- norm$methodArgs
     .fmCheckMethodCapabilities(tokens, "QtlDataset")
 
     # Explicit jointSpecification path: run the per-spec axis dispatcher for
@@ -687,8 +764,10 @@ setMethod("fineMappingPipeline", "QtlDataset",
       jointResult <- .fmDispatchJointSpecsQtlDataset(
         parsedJointSpec, data, intersect(tokens, c("mvsusie", "fsusie")),
         contexts, traitId, cisWindow,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose)
+        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
+        methodArgs = methodArgs)
       tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
+      methodArgs <- methodArgs[tokens]
       if (length(tokens) == 0L) {
         if (is.null(jointResult))
           stop("fineMappingPipeline(QtlDataset): no joint fits produced. ",
@@ -805,7 +884,8 @@ setMethod("fineMappingPipeline", "QtlDataset",
             if (verbose >= 1)
               message(sprintf("Fitting susieInf for (context='%s', trait='%s') ...", ctx, tid))
             infFit <- .fmFitSusieIndiv(X, y, "susieInf",
-                                       coverage = coverage)
+                                       coverage = coverage,
+                                       userArgs = methodArgs[["susieInf"]])
           }
 
           for (tk in toRun) {
@@ -821,7 +901,8 @@ setMethod("fineMappingPipeline", "QtlDataset",
                                 tk, ctx, tid))
               fit <- .fmFitSusieIndiv(X, y, tk,
                                      chainFromInf = chainFrom,
-                                     coverage = coverage)
+                                     coverage = coverage,
+                                     userArgs = methodArgs[[tk]])
             }
             entry <- .fmPostprocessOne(
               fit = fit, method = tk,
@@ -913,10 +994,13 @@ setMethod("fineMappingPipeline", "QtlDataset",
 
           if (verbose >= 1)
             message(sprintf("Fitting mvsusie (multi-context) for trait='%s' ...", tid))
-          fit <- fitMvsusie(
+          mvBaseArgs <- list(
             X = X, Y = Y,
             prior_variance = mvsusieR::create_mixture_prior(R = ncol(Y)),
             coverage = coverage)
+          fit <- do.call(fitMvsusie,
+                         .fmMergeUserArgs(mvBaseArgs, "mvsusie",
+                                          methodArgs[["mvsusie"]]))
           fit <- .setFinemappingFitClass(fit, "mvsusie")
           entry <- .fmPostprocessOne(
             fit = fit, method = "mvsusie",
@@ -965,10 +1049,13 @@ setMethod("fineMappingPipeline", "QtlDataset",
 
           if (verbose >= 1)
             message(sprintf("Fitting mvsusie (multi-trait) for context='%s' ...", ctx))
-          fit <- fitMvsusie(
+          mvBaseArgs <- list(
             X = X, Y = Y,
             prior_variance = mvsusieR::create_mixture_prior(R = ncol(Y)),
             coverage = coverage)
+          fit <- do.call(fitMvsusie,
+                         .fmMergeUserArgs(mvBaseArgs, "mvsusie",
+                                          methodArgs[["mvsusie"]]))
           fit <- .setFinemappingFitClass(fit, "mvsusie")
           entry <- .fmPostprocessOne(
             fit = fit, method = "mvsusie",
@@ -1041,7 +1128,9 @@ setMethod("fineMappingPipeline", "QtlDataset",
         if (verbose >= 1)
           message(sprintf("Fitting fsusie for context='%s' (multi-trait, %d traits) ...",
                           ctx, length(traits)))
-        fit <- fitFsusie(X = X, Y = Y, pos = pos)
+        fit <- do.call(fitFsusie,
+                       .fmMergeUserArgs(list(X = X, Y = Y, pos = pos),
+                                        "fsusie", methodArgs[["fsusie"]]))
         fit <- .setFinemappingFitClass(fit, "fsusie")
         entry <- .fmPostprocessOne(
           fit = fit, method = "fsusie",
@@ -1103,7 +1192,9 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
            ...) {
     naAction <- match.arg(naAction)
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
-    tokens <- .fmNormalizeMethods(methods)
+    norm       <- .fmNormalizeMethods(methods)
+    tokens     <- norm$tokens
+    methodArgs <- norm$methodArgs
     .fmCheckMethodCapabilities(tokens, "MultiStudyQtlDataset")
 
     # Explicit jointSpecification path: run the per-component, per-spec
@@ -1114,9 +1205,14 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
       jointResult <- .fmDispatchJointSpecsMultiStudy(
         parsedJointSpec, data, intersect(tokens, c("mvsusie", "fsusie")),
         contexts, traitId, cisWindow,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose)
-      methods <- setdiff(methods, c("mvsusie", "fsusie"))
+        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
+        methodArgs = methodArgs)
+      # Forward the still-pending (non-joint) tokens + their kwargs to the
+      # per-QtlDataset recursion below, preserving the list shape so
+      # methodArgs land on the right tokens.
       tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
+      methodArgs <- methodArgs[tokens]
+      methods <- if (length(methodArgs) > 0L) methodArgs else tokens
       if (length(tokens) == 0L) {
         if (is.null(jointResult))
           stop("fineMappingPipeline(MultiStudyQtlDataset): no joint fits produced. ",
@@ -1223,7 +1319,9 @@ setMethod("fineMappingPipeline", "QtlSumStats",
            ...) {
     .fmAssertQcd(data)
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
-    tokens <- .fmNormalizeMethods(methods)
+    norm       <- .fmNormalizeMethods(methods)
+    tokens     <- norm$tokens
+    methodArgs <- norm$methodArgs
     .fmCheckMethodCapabilities(tokens, "QtlSumStats")
 
     jointResult <- NULL
@@ -1231,8 +1329,10 @@ setMethod("fineMappingPipeline", "QtlSumStats",
       jointResult <- .fmDispatchJointSpecsQtlSumStats(
         parsedJointSpec, data, intersect(tokens, "mvsusie"),
         contexts, traitId,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose)
+        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
+        methodArgs = methodArgs)
       tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
+      methodArgs <- methodArgs[tokens]
       if (length(tokens) == 0L) {
         if (is.null(jointResult))
           stop("fineMappingPipeline(QtlSumStats): no joint fits produced. ",
@@ -1315,7 +1415,8 @@ setMethod("fineMappingPipeline", "QtlSumStats",
           if (verbose >= 1)
             message(sprintf("Fitting susieInf (RSS) for (study='%s', context='%s', trait='%s') ...", st, ctx, tr))
           infFit <- .fmFitSusieRss(z, ldMat, n, "susieInf",
-                                   coverage = coverage)
+                                   coverage = coverage,
+                                   userArgs = methodArgs[["susieInf"]])
         }
         for (tk in toRun) {
           if (tk == "susieInf") {
@@ -1330,7 +1431,8 @@ setMethod("fineMappingPipeline", "QtlSumStats",
                               tk, st, ctx, tr))
             fit <- .fmFitSusieRss(z, ldMat, n, tk,
                                   chainFromInf = chainFrom,
-                                  coverage = coverage)
+                                  coverage = coverage,
+                                  userArgs = methodArgs[[tk]])
           }
           ent <- .fmPostprocessOne(
             fit = fit, method = "susieRss",
@@ -1400,10 +1502,13 @@ setMethod("fineMappingPipeline", "QtlSumStats",
         if (verbose >= 1)
           message(sprintf("Fitting mvsusie (RSS) for (study='%s', trait='%s', %d contexts) ...",
                           st, tr, length(ctxNames)))
-        fit <- fitMvsusieRss(
+        mvBaseArgs <- list(
           Z = Z, R = ldMat, N = as.numeric(stats::median(nVec)),
           prior_variance = mvsusieR::create_mixture_prior(R = ncol(Z)),
           coverage = coverage)
+        fit <- do.call(fitMvsusieRss,
+                       .fmMergeUserArgs(mvBaseArgs, "mvsusie",
+                                        methodArgs[["mvsusie"]]))
         fit <- .setFinemappingFitClass(fit, "mvsusie")
         ent <- .fmPostprocessOne(
           fit = fit, method = "mvsusie",
@@ -1452,7 +1557,9 @@ setMethod("fineMappingPipeline", "GwasSumStats",
            trim              = TRUE,
            ...) {
     .fmAssertQcd(data)
-    tokens <- .fmNormalizeMethods(methods)
+    norm       <- .fmNormalizeMethods(methods)
+    tokens     <- norm$tokens
+    methodArgs <- norm$methodArgs
     .fmCheckMethodCapabilities(tokens, "GwasSumStats")
 
     # Per the design contract, one GwasSumStats represents the GWAS
@@ -1518,7 +1625,8 @@ setMethod("fineMappingPipeline", "GwasSumStats",
           message(sprintf("Fitting susieInf (RSS) for GWAS (study='%s', region='%s') ...",
                           st, region_id))
         infFit <- .fmFitSusieRss(z, ldMat, n, "susieInf",
-                                 coverage = coverage)
+                                 coverage = coverage,
+                                 userArgs = methodArgs[["susieInf"]])
       }
       for (tk in toRun) {
         if (tk == "susieInf") {
@@ -1533,7 +1641,8 @@ setMethod("fineMappingPipeline", "GwasSumStats",
                             tk, st, region_id))
           fit <- .fmFitSusieRss(z, ldMat, n, tk,
                                 chainFromInf = chainFrom,
-                                coverage = coverage)
+                                coverage = coverage,
+                                userArgs = methodArgs[[tk]])
         }
         ent <- .fmPostprocessOne(
           fit = fit, method = "susieRss",

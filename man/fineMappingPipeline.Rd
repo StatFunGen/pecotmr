@@ -98,9 +98,23 @@ fineMappingPipeline(data, ...)
 
 \item{...}{Reserved for future per-method arguments.}
 
-\item{methods}{Character vector of method tokens (any subset of
-\code{c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")}).
-See description for per-class compatibility.}
+\item{methods}{Method specification. Accepts either:
+\itemize{
+  \item A character vector of method tokens, e.g.
+        \code{c("susie", "susieInf", "mvsusie")} (any subset of
+        \code{c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")},
+        subject to per-class compatibility).
+  \item A named list keyed by method token, where each value is a
+        list of per-method kwargs to splice into the underlying
+        fitter, e.g.
+        \code{list(susie = list(L = 1, refine = FALSE),
+                   mvsusie = list(max_iter = 500))}. Mirrors the
+        convention of \code{\link{twasWeightsPipeline}}'s
+        \code{methods} argument. User-supplied kwargs override the
+        capability-table defaults and any base / chained args set
+        by the pipeline (e.g. you can override \code{model_init}
+        even when fitting from a susieInf chain).
+}}
 
 \item{contexts}{Optional character vector of context names. Default
 \code{NULL} (all contexts).}
@@ -291,8 +305,11 @@ deliberately not ported here:
         \code{susieR::susie} check externally if needed.
   \item Diagnostic re-analysis paths
         (\code{singleEffect} / \code{bayesianConditionalRegression}
-        reanalysis on the RSS path): these are not part of the
-        design-doc method menu and are dropped.
+        reanalysis on the RSS path): these are not exposed as
+        dedicated method tokens. Callers who want a single-effect
+        fit can request it via per-method kwargs, e.g.
+        \code{methods = list(susie = list(L = 1))} (see the
+        \code{methods} parameter).
   \item \code{loadRssData} and explicit
         \code{ldReferenceMetaFile} arguments: the new
         \code{QtlSumStats} / \code{GwasSumStats} carry the

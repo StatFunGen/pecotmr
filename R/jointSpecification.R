@@ -811,7 +811,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                                cisWindow,
                                                coverage, secondaryCoverage,
                                                signalCutoff, minAbsCorr,
-                                               verbose) {
+                                               verbose,
+                                               methodArgs = list()) {
   jointMethods <- intersect(methods, "mvsusie")
   if (length(jointMethods) == 0L) return(NULL)
 
@@ -843,10 +844,13 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
       message(sprintf(
         "jointCrossContext: fitting mvsusie for (study='%s', trait='%s') across contexts (%s) ...",
         study, tid, paste(xy$perTraitContexts, collapse = ", ")))
-    fit <- fitMvsusie(
+    mvBaseArgs <- list(
       X = xy$X, Y = xy$Y,
       prior_variance = mvsusieR::create_mixture_prior(R = ncol(xy$Y)),
       coverage = coverage)
+    fit <- do.call(fitMvsusie,
+                   .fmMergeUserArgs(mvBaseArgs, "mvsusie",
+                                    methodArgs[["mvsusie"]]))
     fit <- .setFinemappingFitClass(fit, "mvsusie")
     entry <- .fmPostprocessOne(
       fit = fit, method = "mvsusie",
@@ -887,7 +891,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                              cisWindow,
                                              coverage, secondaryCoverage,
                                              signalCutoff, minAbsCorr,
-                                             verbose) {
+                                             verbose,
+                                             methodArgs = list()) {
   jointMethods <- intersect(methods, c("mvsusie", "fsusie"))
   if (length(jointMethods) == 0L) return(NULL)
 
@@ -914,10 +919,13 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
           "jointCrossTrait: fitting %s for (study='%s', context='%s') across traits (%s) ...",
           mm, study, cx, paste(xy$traitsHere, collapse = ", ")))
       if (mm == "mvsusie") {
-        fit <- fitMvsusie(
+        mvBaseArgs <- list(
           X = xy$X, Y = xy$Y,
           prior_variance = mvsusieR::create_mixture_prior(R = ncol(xy$Y)),
           coverage = coverage)
+        fit <- do.call(fitMvsusie,
+                       .fmMergeUserArgs(mvBaseArgs, "mvsusie",
+                                        methodArgs[["mvsusie"]]))
         fit <- .setFinemappingFitClass(fit, "mvsusie")
         entry <- .fmPostprocessOne(
           fit = fit, method = "mvsusie",
@@ -932,7 +940,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         ord <- match(colnames(xy$Y), rownames(xy$se))
         rr <- rr[ord]
         pos <- (GenomicRanges::start(rr) + GenomicRanges::end(rr)) / 2
-        fit <- fitFsusie(X = xy$X, Y = xy$Y, pos = pos)
+        fit <- do.call(fitFsusie,
+                       .fmMergeUserArgs(list(X = xy$X, Y = xy$Y, pos = pos),
+                                        "fsusie", methodArgs[["fsusie"]]))
         fit <- .setFinemappingFitClass(fit, "fsusie")
         entry <- .fmPostprocessOne(
           fit = fit, method = "fsusie",
@@ -974,7 +984,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                                 contexts, traitIds,
                                                 coverage, secondaryCoverage,
                                                 signalCutoff, minAbsCorr,
-                                                verbose) {
+                                                verbose,
+                                                methodArgs = list()) {
   jointMethods <- intersect(methods, "mvsusie")
   if (length(jointMethods) == 0L) return(NULL)
 
@@ -1018,10 +1029,13 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         message(sprintf(
           "jointCrossContext (QtlSumStats): fitting mvsusie_rss for (study='%s', trait='%s', %d contexts) ...",
           s, tid, length(ctxNames)))
-      fit <- fitMvsusieRss(
+      mvBaseArgs <- list(
         Z = jz$Z, R = ldMat, N = as.numeric(stats::median(jz$nVec)),
         prior_variance = mvsusieR::create_mixture_prior(R = ncol(jz$Z)),
         coverage = coverage)
+      fit <- do.call(fitMvsusieRss,
+                     .fmMergeUserArgs(mvBaseArgs, "mvsusie",
+                                      methodArgs[["mvsusie"]]))
       fit <- .setFinemappingFitClass(fit, "mvsusie")
       entry <- .fmPostprocessOne(
         fit = fit, method = "mvsusie",
@@ -1060,7 +1074,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                               contexts, traitIds,
                                               coverage, secondaryCoverage,
                                               signalCutoff, minAbsCorr,
-                                              verbose) {
+                                              verbose,
+                                              methodArgs = list()) {
   if ("fsusie" %in% methods)
     stop("jointCrossTrait (QtlSumStats): fsusie has no RSS variant; ",
          "fsusie cannot participate in sumstats-based joint fits.")
@@ -1100,10 +1115,13 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         message(sprintf(
           "jointCrossTrait (QtlSumStats): fitting mvsusie_rss for (study='%s', context='%s', %d traits) ...",
           s, cx, length(trNames)))
-      fit <- fitMvsusieRss(
+      mvBaseArgs <- list(
         Z = jz$Z, R = ldMat, N = as.numeric(stats::median(jz$nVec)),
         prior_variance = mvsusieR::create_mixture_prior(R = ncol(jz$Z)),
         coverage = coverage)
+      fit <- do.call(fitMvsusieRss,
+                     .fmMergeUserArgs(mvBaseArgs, "mvsusie",
+                                      methodArgs[["mvsusie"]]))
       fit <- .setFinemappingFitClass(fit, "mvsusie")
       entry <- .fmPostprocessOne(
         fit = fit, method = "mvsusie",
@@ -1143,7 +1161,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                               contexts, traitIds,
                                               coverage, secondaryCoverage,
                                               signalCutoff, minAbsCorr,
-                                              verbose) {
+                                              verbose,
+                                              methodArgs = list()) {
   if ("fsusie" %in% methods)
     stop("jointCrossStudy: fsusie cannot participate (no RSS variant).")
   jointMethods <- intersect(methods, "mvsusie")
@@ -1190,10 +1209,13 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         message(sprintf(
           "jointCrossStudy: fitting mvsusie_rss for (context='%s', trait='%s', %d studies) ...",
           cx, tid, length(stNames)))
-      fit <- fitMvsusieRss(
+      mvBaseArgs <- list(
         Z = jz$Z, R = ldMat, N = as.numeric(stats::median(jz$nVec)),
         prior_variance = mvsusieR::create_mixture_prior(R = ncol(jz$Z)),
         coverage = coverage)
+      fit <- do.call(fitMvsusieRss,
+                     .fmMergeUserArgs(mvBaseArgs, "mvsusie",
+                                      methodArgs[["mvsusie"]]))
       fit <- .setFinemappingFitClass(fit, "mvsusie")
       entry <- .fmPostprocessOne(
         fit = fit, method = "mvsusie",
@@ -1234,7 +1256,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                            contexts, traitIds, cisWindow,
                                            coverage, secondaryCoverage,
                                            signalCutoff, minAbsCorr,
-                                           verbose) {
+                                           verbose,
+                                           methodArgs = list()) {
   axes <- spec$axes
   if ("study" %in% axes)
     stop("composed jointSpecification (QtlDataset): axes including 'study' require sumstats input.")
@@ -1258,10 +1281,13 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     message(sprintf(
       "composed joint (QtlDataset): fitting mvsusie for study='%s' over %d (context, trait) columns ...",
       study, ncol(xy$Y)))
-  fit <- fitMvsusie(
+  mvBaseArgs <- list(
     X = xy$X, Y = xy$Y,
     prior_variance = mvsusieR::create_mixture_prior(R = ncol(xy$Y)),
     coverage = coverage)
+  fit <- do.call(fitMvsusie,
+                 .fmMergeUserArgs(mvBaseArgs, "mvsusie",
+                                  methodArgs[["mvsusie"]]))
   fit <- .setFinemappingFitClass(fit, "mvsusie")
   entry <- .fmPostprocessOne(
     fit = fit, method = "mvsusie",
@@ -1294,7 +1320,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                             contexts, traitIds,
                                             coverage, secondaryCoverage,
                                             signalCutoff, minAbsCorr,
-                                            verbose) {
+                                            verbose,
+                                            methodArgs = list()) {
   if ("fsusie" %in% methods)
     stop("composed jointSpecification (QtlSumStats): fsusie has no RSS variant.")
   jointMethods <- intersect(methods, "mvsusie")
@@ -1336,10 +1363,13 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
       message(sprintf(
         "composed joint (QtlSumStats): fitting mvsusie_rss for axes=(%s), %d columns ...",
         paste(axes, collapse = ", "), length(gIdx)))
-    fit <- fitMvsusieRss(
+    mvBaseArgs <- list(
       Z = jz$Z, R = ldMat, N = as.numeric(stats::median(jz$nVec)),
       prior_variance = mvsusieR::create_mixture_prior(R = ncol(jz$Z)),
       coverage = coverage)
+    fit <- do.call(fitMvsusieRss,
+                   .fmMergeUserArgs(mvBaseArgs, "mvsusie",
+                                    methodArgs[["mvsusie"]]))
     fit <- .setFinemappingFitClass(fit, "mvsusie")
     entry <- .fmPostprocessOne(
       fit = fit, method = "mvsusie",
@@ -1393,7 +1423,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                              cisWindow,
                                              coverage, secondaryCoverage,
                                              signalCutoff, minAbsCorr,
-                                             verbose) {
+                                             verbose,
+                                             methodArgs = list()) {
   out <- NULL
   for (i in seq_along(parsedJointSpec)) {
     spec <- parsedJointSpec[[i]]
@@ -1401,7 +1432,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     if (length(axes) > 1L) {
       res <- .fmDispatchComposedQtlDataset(
         spec, data, methods, contexts, traitIds, cisWindow,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose)
+        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
+        methodArgs = methodArgs)
       if (!is.null(res))
         out <- if (is.null(out)) res
                else .rbindFineMappingResult(out, res, ldSketch = NULL)
@@ -1411,10 +1443,12 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     res <- switch(axis,
       context = .fmDispatchCrossContextQtlDataset(
         spec, data, methods, contexts, traitIds, cisWindow,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose),
+        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
+        methodArgs = methodArgs),
       trait = .fmDispatchCrossTraitQtlDataset(
         spec, data, methods, contexts, traitIds, cisWindow,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose),
+        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
+        methodArgs = methodArgs),
       study = stop(
         "fineMappingPipeline(QtlDataset): jointSpecification with axes = 'study' requires sumstats input. ",
         "QtlDataset represents a single individual-level study; cross-study joints operate on the sumstats slot of MultiStudyQtlDataset or on QtlSumStats directly."),
@@ -1433,7 +1467,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                               methods, contexts, traitIds,
                                               coverage, secondaryCoverage,
                                               signalCutoff, minAbsCorr,
-                                              verbose) {
+                                              verbose,
+                                              methodArgs = list()) {
   out <- NULL
   for (i in seq_along(parsedJointSpec)) {
     spec <- parsedJointSpec[[i]]
@@ -1441,7 +1476,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     if (length(axes) > 1L) {
       res <- .fmDispatchComposedQtlSumStats(
         spec, data, methods, contexts, traitIds,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose)
+        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
+        methodArgs = methodArgs)
       if (!is.null(res))
         out <- if (is.null(out)) res
                else .rbindFineMappingResult(out, res, ldSketch = getLdSketch(data))
@@ -1451,13 +1487,16 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     res <- switch(axis,
       context = .fmDispatchCrossContextQtlSumStats(
         spec, data, methods, contexts, traitIds,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose),
+        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
+        methodArgs = methodArgs),
       trait = .fmDispatchCrossTraitQtlSumStats(
         spec, data, methods, contexts, traitIds,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose),
+        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
+        methodArgs = methodArgs),
       study = .fmDispatchCrossStudyQtlSumStats(
         spec, data, methods, contexts, traitIds,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose),
+        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
+        methodArgs = methodArgs),
       stop(sprintf("Unsupported axis: %s", axis)))
     if (!is.null(res))
       out <- if (is.null(out)) res
@@ -1478,7 +1517,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                              cisWindow,
                                              coverage, secondaryCoverage,
                                              signalCutoff, minAbsCorr,
-                                             verbose) {
+                                             verbose,
+                                             methodArgs = list()) {
   out <- NULL
   embeddedLd <- NULL
   qtlDatasets <- getQtlDatasets(data)
@@ -1500,7 +1540,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
       qd <- qtlDatasets[[qdName]]
       qdRes <- .fmDispatchJointSpecsQtlDataset(
         nonStudyAxisSpecs, qd, methods, contexts, traitIds, cisWindow,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose)
+        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
+        methodArgs = methodArgs)
       if (!is.null(qdRes))
         out <- if (is.null(out)) qdRes
                else .rbindFineMappingResult(out, qdRes, ldSketch = NULL)
@@ -1510,7 +1551,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
   if (!is.null(sumStats)) {
     ssRes <- .fmDispatchJointSpecsQtlSumStats(
       parsedJointSpec, sumStats, methods, contexts, traitIds,
-      coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose)
+      coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
+      methodArgs = methodArgs)
     if (!is.null(ssRes)) {
       embeddedLd <- getLdSketch(ssRes)
       out <- if (is.null(out)) ssRes
