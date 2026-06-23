@@ -4,26 +4,20 @@
 \alias{krigingOutlierQc}
 \title{Kriging-style LD-consistency outlier QC}
 \usage{
-krigingOutlierQc(
-  zScore,
-  R,
-  variantIds = NULL,
-  pThreshold = 5e-08,
-  ridge = 0.001
-)
+krigingOutlierQc(zScore, R, n, variantIds = NULL, pThreshold = 5e-08)
 }
 \arguments{
 \item{zScore}{Numeric vector of harmonized z-scores.}
 
 \item{R}{Square LD correlation matrix aligned to \code{zScore}.}
 
+\item{n}{Sample size, forwarded to \code{susieR::estimate_s_rss()} and
+\code{susieR::kriging_rss()}.}
+
 \item{variantIds}{Optional variant IDs for the diagnostics table.}
 
 \item{pThreshold}{Two-sided p-value cutoff for flagging an outlier
 (default \code{5e-8}).}
-
-\item{ridge}{Small diagonal added to \code{R} before inversion for numerical
-stability (default \code{1e-3}).}
 }
 \value{
 A list with \code{outlier} (logical vector) and \code{diagnostics}
@@ -32,12 +26,13 @@ A list with \code{outlier} (logical vector) and \code{diagnostics}
 }
 \description{
 Flags variants whose observed z-score is inconsistent with the value
-predicted from its LD neighbours. For \code{z ~ N(0, R)} the leave-one-out
-conditional distribution of \code{z_i} given the rest has mean
-\code{-(1/Omega_ii) * Omega_{i,-i} z_{-i}} and variance \code{1/Omega_ii},
-where \code{Omega = R^{-1}}. The standardized residual is ~\code{N(0,1)} when
-the z-scores and LD are mutually consistent, so a large residual marks an
-allele-flip / LD-mismatch outlier. RSS-only helper, opt-in via
-\code{alleleFlipKriging}; never wired into \code{alleleQc()} /
-\code{matchRefPanel()}.
+predicted from its LD neighbours, using susieR's kriging diagnostic.
+\code{susieR::kriging_rss()} computes the leave-one-out conditional
+distribution of each \code{z_i} given the rest, with the LD-mismatch scale
+\code{s} estimated by \code{susieR::estimate_s_rss()}; its standardized
+residual (\code{z_std_diff}) is ~\code{N(0,1)} when z-scores and LD agree, so
+a large residual marks an allele-flip / LD-mismatch outlier. RSS-only helper,
+opt-in via \code{alleleFlipKriging}; never wired into \code{alleleQc()} /
+\code{matchRefPanel()}. Requires a susieR that provides \code{kriging_rss()}
+and \code{estimate_s_rss()}.
 }

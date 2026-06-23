@@ -14,7 +14,7 @@ the pipeline's \code{trim} parameter).}
 
 \item{topLoci}{Per-variant \code{data.frame} in canonical schema:
 identity columns (\code{variant_id, chrom, pos, A1, A2}), context
-(\code{N, MAF}), marginal columns (\code{marginal_beta,
+(\code{N, af}; effect-allele frequency, never MAF), marginal columns (\code{marginal_beta,
 marginal_se, marginal_z, marginal_p}), posterior columns
 (\code{pip, posterior_mean, posterior_sd, cs_*, cs_*_purity}),
 pipeline stamps (\code{method, gene, event, grange_start,

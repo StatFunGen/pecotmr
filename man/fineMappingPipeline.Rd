@@ -25,6 +25,7 @@ fineMappingPipeline(data, ...)
   secondaryCoverage = c(0.7, 0.5),
   signalCutoff = 0.025,
   minAbsCorr = 0.8,
+  medianAbsCorr = NULL,
   fineMappingResult = NULL,
   naAction = c("drop", "impute"),
   verbose = 1,
@@ -43,12 +44,14 @@ fineMappingPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
+  jointRegions = FALSE,
   jointSpecification = NULL,
   addSusieInf = TRUE,
   coverage = 0.95,
   secondaryCoverage = c(0.7, 0.5),
   signalCutoff = 0.025,
   minAbsCorr = 0.8,
+  medianAbsCorr = NULL,
   fineMappingResult = NULL,
   naAction = c("drop", "impute"),
   verbose = 1,
@@ -71,6 +74,7 @@ fineMappingPipeline(data, ...)
   secondaryCoverage = c(0.7, 0.5),
   signalCutoff = 0.025,
   minAbsCorr = 0.8,
+  medianAbsCorr = NULL,
   fineMappingResult = NULL,
   verbose = 1,
   trim = TRUE,
@@ -85,6 +89,7 @@ fineMappingPipeline(data, ...)
   secondaryCoverage = c(0.7, 0.5),
   signalCutoff = 0.025,
   minAbsCorr = 0.8,
+  medianAbsCorr = NULL,
   fineMappingResult = NULL,
   verbose = 1,
   trim = TRUE,
@@ -165,6 +170,11 @@ Default \code{0.95}.}
 
 \item{minAbsCorr}{Minimum absolute correlation for credible-set
 purity. Default \code{0.8}.}
+
+\item{medianAbsCorr}{Optional median absolute correlation for
+credible-set purity, routed to \code{susieR::susie_get_cs}. A set is
+kept if it passes either \code{minAbsCorr} or \code{medianAbsCorr}
+(OR-logic). Default \code{NULL} (off).}
 
 \item{fineMappingResult}{Optional existing \code{FineMappingResult}
 to use as a resume cache; tuples already present are not refit.}

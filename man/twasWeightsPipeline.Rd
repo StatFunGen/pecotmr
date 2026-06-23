@@ -61,6 +61,7 @@ twasWeightsPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
+  jointRegions = FALSE,
   jointSpecification = NULL,
   fineMappingResult = NULL,
   twasWeights = NULL,
