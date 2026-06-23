@@ -8,6 +8,7 @@ mashPipeline(
   sumStatsList,
   alpha,
   residualCorrelation = NULL,
+  priorCovariances = NULL,
   nPcs = NULL,
   inputScale = c("auto", "beta", "z"),
   setSeed = 999
@@ -25,12 +26,25 @@ exponent forwarded to \code{mashr::mash_set_data()}. Use
 \code{alpha = 0} on the BETA scale, \code{alpha = 1} on the Z scale.}
 
 \item{residualCorrelation}{Optional pre-computed residual correlation
-matrix (\code{Vhat}). Only consulted when \code{sumStatsList$null}
-is absent; otherwise \code{Vhat} is estimated from the null slice
-via \code{mashr::estimate_null_correlation_simple()}.}
+matrix (\code{Vhat}). When supplied, replaces the inline
+\code{mashr::estimate_null_correlation_simple()} call entirely and
+the \code{"random"} slot of \code{sumStatsList} becomes optional
+(the function does not need it for anything else). Useful when
+\code{Vhat} was estimated previously on a larger reference and
+shipped as a static artefact (the legacy MWE pattern).}
+
+\item{priorCovariances}{Optional named list of square covariance
+matrices (the \code{Ulist} \code{mashr::mash()} consumes). When
+supplied, replaces the canonical + PCA + flash + ED chain
+(\code{cov_canonical} / \code{cov_pca} / \code{cov_flash} /
+\code{cov_ed}) entirely; mash sees only the supplied matrices.
+Every entry must be a \code{ncol(Bhat) x ncol(Bhat)} matrix.
+Useful when \code{U} was learnt on a larger reference and shipped
+as a static artefact (the legacy MWE pattern).}
 
 \item{nPcs}{Optional integer; number of principal components seeded
-into \code{mashr::cov_pca()}. Defaults to \code{ncol(Bhat) - 1}.}
+into \code{mashr::cov_pca()}. Defaults to \code{ncol(Bhat) - 1}.
+Ignored when \code{priorCovariances} is supplied.}
 
 \item{inputScale}{One of \code{"auto"} (default), \code{"beta"},
 \code{"z"}. Controls which (Bhat, Shat) pair is extracted from each
