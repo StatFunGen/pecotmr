@@ -2331,45 +2331,56 @@ ldMismatchQc <- function(zScore, R = NULL, X = NULL, nSample = NULL,
 #' Kriging-style LD-consistency outlier QC
 #'
 #' Flags variants whose observed z-score is inconsistent with the value
-#' predicted from its LD neighbours. For \code{z ~ N(0, R)} the leave-one-out
-#' conditional distribution of \code{z_i} given the rest has mean
-#' \code{-(1/Omega_ii) * Omega_{i,-i} z_{-i}} and variance \code{1/Omega_ii},
-#' where \code{Omega = R^{-1}}. The standardized residual is ~\code{N(0,1)} when
-#' the z-scores and LD are mutually consistent, so a large residual marks an
-#' allele-flip / LD-mismatch outlier. RSS-only helper, opt-in via
-#' \code{alleleFlipKriging}; never wired into \code{alleleQc()} /
-#' \code{matchRefPanel()}.
+#' predicted from its LD neighbours, using susieR's kriging diagnostic.
+#' \code{susieR::kriging_rss()} computes the leave-one-out conditional
+#' distribution of each \code{z_i} given the rest, with the LD-mismatch scale
+#' \code{s} estimated by \code{susieR::estimate_s_rss()}; its standardized
+#' residual (\code{z_std_diff}) is ~\code{N(0,1)} when z-scores and LD agree, so
+#' a large residual marks an allele-flip / LD-mismatch outlier. RSS-only helper,
+#' opt-in via \code{alleleFlipKriging}; never wired into \code{alleleQc()} /
+#' \code{matchRefPanel()}. Requires a susieR that provides \code{kriging_rss()}
+#' and \code{estimate_s_rss()}.
 #'
 #' @param zScore Numeric vector of harmonized z-scores.
 #' @param R Square LD correlation matrix aligned to \code{zScore}.
+#' @param n Sample size, forwarded to \code{susieR::estimate_s_rss()} and
+#'   \code{susieR::kriging_rss()}.
 #' @param variantIds Optional variant IDs for the diagnostics table.
 #' @param pThreshold Two-sided p-value cutoff for flagging an outlier
 #'   (default \code{5e-8}).
-#' @param ridge Small diagonal added to \code{R} before inversion for numerical
-#'   stability (default \code{1e-3}).
 #' @return A list with \code{outlier} (logical vector) and \code{diagnostics}
 #'   (data frame of per-variant predicted z, residual, statistic, p-value, and
 #'   outlier flag).
 #' @importFrom stats pnorm
 #' @export
-krigingOutlierQc <- function(zScore, R, variantIds = NULL,
-                             pThreshold = 5e-8, ridge = 1e-3) {
+krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
+                             pThreshold = 5e-8) {
   zScore <- as.numeric(zScore)
   m <- length(zScore)
   if (is.null(R) || !is.matrix(R) || nrow(R) != m || ncol(R) != m) {
     stop("krigingOutlierQc requires a square LD matrix aligned to zScore.")
   }
+  if (missing(n) || length(n) != 1L || is.na(n) || !is.finite(n) || n <= 0) {
+    stop("krigingOutlierQc requires a single positive sample size 'n'.")
+  }
+  if (!requireNamespace("susieR", quietly = TRUE) ||
+      !all(c("estimate_s_rss", "kriging_rss") %in% getNamespaceExports("susieR"))) {
+    stop("krigingOutlierQc requires a susieR that provides estimate_s_rss() and ",
+         "kriging_rss(); the installed susieR does not. Install a susieR with the ",
+         "kriging RSS diagnostic, or disable alleleFlipKriging.")
+  }
   if (is.null(variantIds)) variantIds <- rownames(R)
-  # Regularize so the precision matrix is well-defined for collinear panels.
-  Omega <- solve(R + diag(ridge, m))
-  d <- diag(Omega)
-  omegaZ <- as.numeric(Omega %*% zScore)
-  condMean <- -(omegaZ - d * zScore) / d
-  condVar <- 1 / d
-  residual <- zScore - condMean
-  statistic <- residual / sqrt(condVar)
-  pValue <- 2 * pnorm(-abs(statistic))
-  outlier <- !is.na(pValue) & pValue < pThreshold
+  # susieR's kriging RSS diagnostic: estimate the LD-mismatch scale, then take
+  # the per-variant conditional distribution. `z_std_diff` is the standardized
+  # residual we threshold (same p-value rule as before).
+  s  <- tryCatch(susieR::estimate_s_rss(z = zScore, R = R, n = n),
+                 error = function(e) 0)
+  cd <- susieR::kriging_rss(z = zScore, R = R, n = n, s = s)$conditional_dist
+  condMean  <- as.numeric(cd$condmean)
+  statistic <- as.numeric(cd$z_std_diff)
+  residual  <- zScore - condMean
+  pValue    <- 2 * stats::pnorm(-abs(statistic))
+  outlier   <- !is.na(pValue) & pValue < pThreshold
   list(
     outlier = outlier,
     diagnostics = data.frame(
@@ -3035,7 +3046,9 @@ krigingOutlierQc <- function(zScore, R, variantIds = NULL,
     dosage <- t(SummarizedExperiment::assay(block, "dosage"))
     colnames(dosage) <- df$SNP
     R <- computeLd(dosage, method = "sample")
-    kr <- krigingOutlierQc(df$Z, R, variantIds = df$SNP)
+    nKrig <- if (!is.null(opts$nForPip) && is.finite(opts$nForPip)) opts$nForPip
+             else stats::median(as.numeric(df$N), na.rm = TRUE)
+    kr <- krigingOutlierQc(df$Z, R, n = nKrig, variantIds = df$SNP)
     nKr <- sum(kr$outlier)
     if (nKr > 0L) df <- df[!kr$outlier, , drop = FALSE]
     entryAudit$krigingOutliersDropped <- nKr

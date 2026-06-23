@@ -67,6 +67,8 @@ test_that(".resolveZMismatchQc rejects stale rss_qc and other invalid tokens", {
 # ===========================================================================
 
 test_that("krigingOutlierQc flags an LD-inconsistent variant and spares the rest", {
+  skip_if_not("kriging_rss" %in% getNamespaceExports("susieR"),
+              "installed susieR has no kriging_rss")
   m <- 6
   rho <- 0.7
   R <- matrix(rho, m, m); diag(R) <- 1
@@ -74,12 +76,31 @@ test_that("krigingOutlierQc flags an LD-inconsistent variant and spares the rest
   rownames(R) <- colnames(R) <- ids
   z <- rep(3, m)
   z[3] <- -8                       # strongly inconsistent with its neighbours
-  kr <- krigingOutlierQc(z, R, variantIds = ids)
+  kr <- krigingOutlierQc(z, R, n = 1000, variantIds = ids)
   expect_true(kr$outlier[3])
   expect_false(any(kr$outlier[-3]))
   expect_equal(nrow(kr$diagnostics), m)
   expect_true(all(c("predicted", "residual", "statistic", "p_value") %in%
                     colnames(kr$diagnostics)))
+})
+
+test_that("krigingOutlierQc statistic matches susieR::kriging_rss z_std_diff", {
+  skip_if_not("kriging_rss" %in% getNamespaceExports("susieR"),
+              "installed susieR has no kriging_rss")
+  set.seed(7); m <- 10
+  R <- cov2cor(crossprod(matrix(rnorm(m * m), m)))
+  ids <- paste0("1:", seq_len(m) * 100, ":A:G")
+  rownames(R) <- colnames(R) <- ids
+  z <- as.numeric(R %*% rnorm(m)); z[4] <- 9
+  kr  <- krigingOutlierQc(z, R, n = 5000, variantIds = ids)
+  s   <- susieR::estimate_s_rss(z = z, R = R, n = 5000)
+  ref <- susieR::kriging_rss(z = z, R = R, n = 5000, s = s)$conditional_dist
+  expect_equal(kr$diagnostics$statistic, as.numeric(ref$z_std_diff), tolerance = 1e-8)
+  expect_equal(kr$diagnostics$predicted, as.numeric(ref$condmean),   tolerance = 1e-8)
+})
+
+test_that("krigingOutlierQc requires a positive sample size n", {
+  expect_error(krigingOutlierQc(c(1, 2, 3), diag(3)), "positive sample size")
 })
 
 
