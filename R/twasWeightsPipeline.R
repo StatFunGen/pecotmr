@@ -25,6 +25,98 @@
     ldSketch      = ldSketch)
 }
 
+# --- Multi-region (jointRegions) helpers for the QtlDataset method ----------
+
+# Label a region block for per-region reporting: the genomic coordinate of a
+# single-range window, or "cis" for the trait-derived (region = NULL) block.
+.twasRegionLabel <- function(rg) {
+  if (is.null(rg)) return("cis")
+  paste0(as.character(GenomicRanges::seqnames(rg))[[1L]], ":",
+         GenomicRanges::start(rg)[[1L]], "-", GenomicRanges::end(rg)[[1L]])
+}
+
+# Select the per-region fine-mapping fits for region block `i`. A
+# jointRegions=FALSE multi-region fine-mapping stores its per-region SuSiE fits
+# as a named list (region1, region2, ...); pick the matching element. With a
+# single block the fits are returned unchanged; a non-region-list fit under
+# multiple blocks cannot be aligned and is dropped (the method learns fresh).
+.twasFitsForRegion <- function(fits, i, nBlocks) {
+  if (length(fits) == 0L || nBlocks == 1L) return(fits)
+  out <- lapply(fits, function(f) {
+    if (is.list(f) && !is.null(names(f)) && length(f) > 0L &&
+        all(nzchar(names(f))) && all(startsWith(names(f), "region"))) {
+      if (i <= length(f)) f[[i]] else NULL
+    } else {
+      NULL
+    }
+  })
+  out[!vapply(out, is.null, logical(1))]
+}
+
+# Flat per-region cvPerformance reporting table: one row per region carrying the
+# region label plus that region's CV metric columns. Per-sample predictions are
+# intentionally omitted — this is a summary-reporting structure.
+.twasRegionCvDf <- function(entries, regionLabels) {
+  rows <- Map(function(e, lab) {
+    cv <- getCvPerformance(e)
+    if (is.null(cv) || is.null(cv$metrics)) return(NULL)
+    cbind(data.frame(region = lab, stringsAsFactors = FALSE),
+          as.data.frame(as.list(cv$metrics), check.names = FALSE))
+  }, entries, regionLabels)
+  rows <- rows[!vapply(rows, is.null, logical(1))]
+  if (length(rows) == 0L) return(NULL)
+  do.call(rbind, rows)
+}
+
+# Concatenate one method's per-region TwasWeightsEntry payloads into a single
+# entry. Variants/weights are stacked (regions are disjoint), the per-region
+# fits are kept as a named list, and cvPerformance becomes the flat per-region
+# reporting data.frame.
+.twasMergeRegionEntries <- function(entries, regionLabels) {
+  keep <- !vapply(entries, is.null, logical(1))
+  entries <- entries[keep]; regionLabels <- regionLabels[keep]
+  if (length(entries) == 0L) return(NULL)
+  if (length(entries) == 1L) return(entries[[1L]])
+  wList <- lapply(entries, getWeights)
+  weights <- if (is.matrix(wList[[1L]])) do.call(rbind, wList)
+             else unlist(wList, use.names = FALSE)
+  TwasWeightsEntry(
+    variantIds    = unlist(lapply(entries, getVariantIds), use.names = FALSE),
+    weights       = weights,
+    fits          = setNames(lapply(entries, getFits), regionLabels),
+    cvPerformance = .twasRegionCvDf(entries, regionLabels),
+    standardized  = getStandardized(entries[[1L]]),
+    dataType      = getDataType(entries[[1L]]))
+}
+
+# Merge per-region TwasWeights collections (same study/context/trait, same
+# methods) into one collection by concatenating each method's entry.
+.twasMergeRegions <- function(twList, regionLabels) {
+  keep <- !vapply(twList, is.null, logical(1))
+  twList <- twList[keep]; regionLabels <- regionLabels[keep]
+  if (length(twList) == 0L) return(NULL)
+  if (length(twList) == 1L) return(twList[[1L]])
+  base <- twList[[1L]]
+  mergedEntries <- lapply(seq_along(base$method), function(r) {
+    key <- c(as.character(base$study[[r]]),   as.character(base$context[[r]]),
+             as.character(base$trait[[r]]),    as.character(base$method[[r]]))
+    perRegion <- lapply(twList, function(tw) {
+      hit <- which(as.character(tw$study)   == key[[1L]] &
+                   as.character(tw$context) == key[[2L]] &
+                   as.character(tw$trait)   == key[[3L]] &
+                   as.character(tw$method)  == key[[4L]])
+      if (length(hit)) tw$entry[[hit[[1L]]]] else NULL
+    })
+    .twasMergeRegionEntries(perRegion, regionLabels)
+  })
+  TwasWeights(
+    study   = as.character(base$study),
+    context = as.character(base$context),
+    trait   = as.character(base$trait),
+    method  = as.character(base$method),
+    entry   = mergedEntries)
+}
+
 # Splice per-(method, outcome) cross-validated predictions and the 6-metric
 # performance row from a `twasWeightsCv()` result into the matching
 # `TwasWeightsEntry$cvPerformance` slot of every row in a TwasWeights
@@ -576,7 +668,14 @@
 #'   Mutually exclusive with \code{traitId}.
 #' @param cisWindow For QtlDataset: cis-window (bp) around each trait's
 #'   genomic position when extracting variants. Required when
-#'   \code{traitId} is supplied.
+#'   \code{traitId} is supplied. Mutually exclusive with \code{region}.
+#' @param jointRegions For QtlDataset with a multi-range \code{region}:
+#'   \code{FALSE} (default) learns weights for each range independently and
+#'   concatenates them into one entry per (study, context, trait, method);
+#'   the per-region fits are kept as a named list and per-region CV is
+#'   recorded as a flat \code{cvPerformance} data frame (one row per region).
+#'   \code{TRUE} concatenates the ranges' genotypes into one joint fit.
+#'   Ignored for a single-range / cis request.
 #' @param jointSpecification Optional joint-fit specification (NULL by
 #'   default). When NULL, the pipeline runs the implicit multi-trait /
 #'   multi-context mr.mash branches as before. When non-NULL, the
@@ -655,6 +754,7 @@ setMethod("twasWeightsPipeline", "QtlDataset",
            traitId                = NULL,
            region                 = NULL,
            cisWindow              = NULL,
+           jointRegions           = FALSE,
            jointSpecification     = NULL,
            fineMappingResult      = NULL,
            twasWeights            = NULL,
@@ -677,6 +777,14 @@ setMethod("twasWeightsPipeline", "QtlDataset",
            verbose                = 1,
            ...) {
     naAction <- match.arg(naAction)
+    # `cisWindow` expands a trait's own coordinates; `region` is literal.
+    # Supplying both signals a misunderstanding -> reject.
+    if (!is.null(region) && !is.null(cisWindow)) {
+      stop("twasWeightsPipeline(QtlDataset): specify either `region` or ",
+           "`cisWindow`, not both. `cisWindow` expands each trait's own ",
+           "coordinates, whereas `region` is the literal variant window.")
+    }
+    xRegions <- .makeXRegions(region, jointRegions)
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
     norm <- .twasNormalizeMethods(methods)
     .twasCheckMethodCapabilities(norm$tokens, "QtlDataset")
@@ -689,7 +797,7 @@ setMethod("twasWeightsPipeline", "QtlDataset",
     if (length(parsedJointSpec) > 0L) {
       jointResult <- .twasDispatchJointSpecsQtlDataset(
         parsedJointSpec, data, intersect(norm$tokens, "mrmash"),
-        contexts, traitId, cisWindow, dataType, verbose)
+        contexts, traitId, cisWindow, dataType, verbose, xRegions = xRegions)
       drop <- intersect(norm$tokens, "mrmash")
       keep <- setdiff(norm$tokens, drop)
       if (length(keep) == 0L) {
@@ -770,44 +878,57 @@ setMethod("twasWeightsPipeline", "QtlDataset",
         phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
         genotypeCovariatesToResidualize  = genotypeCovariatesToResidualize,
         naAction = naAction)
-      X <- .fmResidGeno(
-        data, contexts = ctx, traitId = tid,
-        cisWindow = cisWindow,
-        phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
-        genotypeCovariatesToResidualize  = genotypeCovariatesToResidualize,
-        samples = rownames(Y))
-      common <- intersect(rownames(X), rownames(Y))
-      if (length(common) < 2L) {
-        stop(sprintf(
-          "twasWeightsPipeline: too few shared samples between residualized X and Y for (context='%s', trait='%s').",
-          ctx, tid))
-      }
-      X <- X[common, , drop = FALSE]
-      Y <- Y[common, , drop = FALSE]
 
-      fittedModels <- .twasFineMappingFits(fineMappingResult,
-                                            study = study,
-                                            context = ctx,
-                                            trait = tid)
-      freshTw <- .twasWeightsPipelineMatrix(
-        X = X, y = Y,
-        study = study, context = ctx, trait = tid,
-        fittedModels = fittedModels,
-        cvFolds = cvFolds,
-        samplePartition = samplePartition,
-        weightMethods = remaining,
-        maxCvVariants = maxCvVariants,
-        cvThreads = cvThreads,
-        cvWeightMethods = cvWeightMethods,
-        ensemble = ensemble,
-        ensembleR2Threshold = ensembleR2Threshold,
-        ensembleSolver = ensembleSolver,
-        ensembleAlpha = ensembleAlpha,
-        estimatePi = estimatePi,
-        standardized = FALSE,
-        dataType = dataType,
-        ldSketch = NULL,
-        verbose = verbose)$twasWeights
+      # Fine-mapping fits for this (study, ctx, trait); a multi-region fit is a
+      # per-region list and is selected blockwise inside the loop.
+      allFits <- .twasFineMappingFits(fineMappingResult,
+                                      study = study, context = ctx, trait = tid)
+      nBlocks <- length(xRegions)
+      perBlockTw <- lapply(seq_len(nBlocks), function(bi) {
+        rg <- xRegions[[bi]]
+        X <- if (is.null(rg)) {
+          .fmResidGeno(
+            data, contexts = ctx, traitId = tid, cisWindow = cisWindow,
+            phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
+            genotypeCovariatesToResidualize  = genotypeCovariatesToResidualize,
+            samples = rownames(Y))
+        } else {
+          .fmResidGeno(
+            data, contexts = ctx, region = rg,
+            phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
+            genotypeCovariatesToResidualize  = genotypeCovariatesToResidualize,
+            samples = rownames(Y))
+        }
+        common <- intersect(rownames(X), rownames(Y))
+        if (length(common) < 2L) {
+          stop(sprintf(
+            "twasWeightsPipeline: too few shared samples between residualized X and Y for (context='%s', trait='%s').",
+            ctx, tid))
+        }
+        .twasWeightsPipelineMatrix(
+          X = X[common, , drop = FALSE], y = Y[common, , drop = FALSE],
+          study = study, context = ctx, trait = tid,
+          fittedModels = .twasFitsForRegion(allFits, bi, nBlocks),
+          cvFolds = cvFolds,
+          samplePartition = samplePartition,
+          weightMethods = remaining,
+          maxCvVariants = maxCvVariants,
+          cvThreads = cvThreads,
+          cvWeightMethods = cvWeightMethods,
+          ensemble = ensemble,
+          ensembleR2Threshold = ensembleR2Threshold,
+          ensembleSolver = ensembleSolver,
+          ensembleAlpha = ensembleAlpha,
+          estimatePi = estimatePi,
+          standardized = FALSE,
+          dataType = dataType,
+          ldSketch = NULL,
+          verbose = verbose)$twasWeights
+      })
+      # Single block (cis or jointRegions=TRUE) returns unchanged; multiple
+      # blocks (jointRegions=FALSE) concatenate per method into one entry.
+      freshTw <- .twasMergeRegions(
+        perBlockTw, vapply(xRegions, .twasRegionLabel, character(1)))
       if (is.null(cachedTw)) freshTw
       else .rbindTwasWeights(freshTw, cachedTw, ldSketch = NULL)
     }
@@ -815,19 +936,27 @@ setMethod("twasWeightsPipeline", "QtlDataset",
     runMultivariate <- function(traits) {
       # Joint over selected (contexts, traits): residualize, intersect
       # samples across contexts, drop subjects with any-NA in Y.
+      # Sample basis for Y construction (residualized genotypes are
+      # region-independent in their sample set): use the cis window when no
+      # explicit region is given, otherwise the first range.
       Xlist <- lapply(useCtx, function(ctx) {
-        .fmResidGeno(
-          data, contexts = ctx, traitId = traits,
-          cisWindow = cisWindow,
-          phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
-          genotypeCovariatesToResidualize  = genotypeCovariatesToResidualize)
+        if (is.null(region)) {
+          .fmResidGeno(
+            data, contexts = ctx, traitId = traits, cisWindow = cisWindow,
+            phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
+            genotypeCovariatesToResidualize  = genotypeCovariatesToResidualize)
+        } else {
+          .fmResidGeno(
+            data, contexts = ctx, region = region[1L],
+            phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
+            genotypeCovariatesToResidualize  = genotypeCovariatesToResidualize)
+        }
       })
       # Intersect samples across contexts.
       commonSamples <- Reduce(intersect, lapply(Xlist, rownames))
       if (length(commonSamples) < 2L) {
         stop("twasWeightsPipeline(QtlDataset, multivariate): insufficient samples shared across selected contexts.")
       }
-      X <- Xlist[[1L]][commonSamples, , drop = FALSE]
 
       Yres <- .fmResidPheno(
         data, contexts = useCtx, traitId = traits,
@@ -867,40 +996,53 @@ setMethod("twasWeightsPipeline", "QtlDataset",
         stop("twasWeightsPipeline(QtlDataset, multivariate): too few subjects with complete Y across selected (context, trait) columns.")
       }
       Y <- Y[keep, , drop = FALSE]
-      X <- X[rownames(Y), , drop = FALSE]
 
-      # mvsusie joint fits are stored once per (context, trait) row in
-      # the FineMappingResult; all rows of a single joint fit point at
-      # the same fit object. Pull the fit using the first (context,
-      # trait) of the joint group and thread it through.
-      jointFits <- .twasFineMappingFits(fineMappingResult,
-                                         study = study,
-                                         context = meta$context[[1L]],
-                                         trait   = meta$trait[[1L]])
-
-      # Build per-column identity tuples for learnTwasWeights so multi-
-      # outcome methods emit one row per (context, trait).
-      .twasWeightsPipelineMatrix(
-        X = X, y = Y,
-        study   = study,
-        context = meta$context,
-        trait   = meta$trait,
-        fittedModels = jointFits,
-        cvFolds = cvFolds,
-        samplePartition = samplePartition,
-        weightMethods = norm$methodList,
-        maxCvVariants = maxCvVariants,
-        cvThreads = cvThreads,
-        cvWeightMethods = cvWeightMethods,
-        ensemble = ensemble,
-        ensembleR2Threshold = ensembleR2Threshold,
-        ensembleSolver = ensembleSolver,
-        ensembleAlpha = ensembleAlpha,
-        estimatePi = estimatePi,
-        standardized = FALSE,
-        dataType = dataType,
-        ldSketch = NULL,
-        verbose = verbose)$twasWeights
+      # Per-region fit + merge. The cis block reuses the already-extracted
+      # genotypes; an explicit region re-extracts that window (genotype
+      # residualization is context-independent, so one context suffices).
+      # mvsusie/mr.mash joint fits are stored once per (context, trait) row in
+      # the FineMappingResult; pull via the first (context, trait) of the group
+      # and (for a multi-region fit) select the per-region element.
+      perBlockTw <- lapply(seq_along(xRegions), function(bi) {
+        rg <- xRegions[[bi]]
+        Xr <- if (is.null(rg)) {
+          Xlist[[1L]]
+        } else {
+          .fmResidGeno(
+            data, contexts = useCtx[[1L]], region = rg,
+            phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
+            genotypeCovariatesToResidualize  = genotypeCovariatesToResidualize)
+        }
+        Xr <- Xr[rownames(Y), , drop = FALSE]
+        jointFits <- .twasFitsForRegion(
+          .twasFineMappingFits(fineMappingResult, study = study,
+                               context = meta$context[[1L]],
+                               trait   = meta$trait[[1L]]),
+          bi, length(xRegions))
+        .twasWeightsPipelineMatrix(
+          X = Xr, y = Y,
+          study   = study,
+          context = meta$context,
+          trait   = meta$trait,
+          fittedModels = jointFits,
+          cvFolds = cvFolds,
+          samplePartition = samplePartition,
+          weightMethods = norm$methodList,
+          maxCvVariants = maxCvVariants,
+          cvThreads = cvThreads,
+          cvWeightMethods = cvWeightMethods,
+          ensemble = ensemble,
+          ensembleR2Threshold = ensembleR2Threshold,
+          ensembleSolver = ensembleSolver,
+          ensembleAlpha = ensembleAlpha,
+          estimatePi = estimatePi,
+          standardized = FALSE,
+          dataType = dataType,
+          ldSketch = NULL,
+          verbose = verbose)$twasWeights
+      })
+      .twasMergeRegions(
+        perBlockTw, vapply(xRegions, .twasRegionLabel, character(1)))
     }
 
     # Top-level dispatch within the QtlDataset method body.
@@ -1231,6 +1373,7 @@ setMethod("twasWeightsPipeline", "MultiStudyQtlDataset",
            traitId            = NULL,
            region             = NULL,
            cisWindow          = NULL,
+           jointRegions       = FALSE,
            jointSpecification = NULL,
            fineMappingResult  = NULL,
            twasWeights        = NULL,
@@ -1242,6 +1385,11 @@ setMethod("twasWeightsPipeline", "MultiStudyQtlDataset",
            residualizeGenotypeCovariates    = TRUE,
            ...) {
     naAction <- match.arg(naAction)
+    if (!is.null(region) && !is.null(cisWindow)) {
+      stop("twasWeightsPipeline(MultiStudyQtlDataset): specify either ",
+           "`region` or `cisWindow`, not both.")
+    }
+    xRegions <- .makeXRegions(region, jointRegions)
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
 
     # Gate fine-mapping methods early so the recursion into the embedded
@@ -1264,7 +1412,7 @@ setMethod("twasWeightsPipeline", "MultiStudyQtlDataset",
                                        names(methods)), "mrmash")
       jointResult <- .twasDispatchJointSpecsMultiStudy(
         parsedJointSpec, data, jointMethods,
-        contexts, traitId, cisWindow, NULL, verbose)
+        contexts, traitId, cisWindow, NULL, verbose, xRegions = xRegions)
       # Strip mrmash from the methods passed to the per-component recursion.
       if (is.character(methods)) methods <- setdiff(methods, "mrmash")
       else if (is.list(methods)) {
@@ -1293,6 +1441,7 @@ setMethod("twasWeightsPipeline", "MultiStudyQtlDataset",
         traitId            = traitId,
         region             = region,
         cisWindow          = cisWindow,
+        jointRegions       = jointRegions,
         jointSpecification = NULL,
         fineMappingResult  = fineMappingResult,
         twasWeights        = twasWeights,

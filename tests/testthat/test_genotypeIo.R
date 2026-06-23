@@ -1300,4 +1300,108 @@ test_that("extractBlockGenotypes returns SummarizedExperiment", {
   )
 }
 
+# ===========================================================================
+# One-file-per-chromosome (sharded) handle: extraction routing.
+# extractBlockGenotypes() routes each region to its per-chromosome payload and
+# assembles cross-chromosome requests. Fixtures: chr21 test_variants.* + chr22
+# test_variants_chr22.* (same 100 samples; CHR relabelled 22, SNP ids "_c22"),
+# available in all four backends.
+# ===========================================================================
+.shardDose <- function(h, idx)
+  unname(as.matrix(SummarizedExperiment::assay(
+    extractBlockGenotypes(h, idx), "dosage")))
+
+# Per-backend single-file constructor + per-chromosome genoMeta payloads.
+.shardBackends <- list(
+  plink1 = list(pkg = "snpStats",
+                ref = function(sfx) GenotypeHandle(
+                  plink1Prefix = file.path(test_data_dir, paste0("test_variants", sfx))),
+                p21 = file.path(test_data_dir, "test_variants"),
+                p22 = file.path(test_data_dir, "test_variants_chr22")),
+  # PLINK2 payloads carry the .pgen extension because the fixtures also ship a
+  # .bed at the same stem; an explicit extension (or format=) disambiguates.
+  plink2 = list(pkg = "pgenlibr",
+                ref = function(sfx) GenotypeHandle(
+                  plink2Prefix = file.path(test_data_dir, paste0("test_variants", sfx))),
+                p21 = file.path(test_data_dir, "test_variants.pgen"),
+                p22 = file.path(test_data_dir, "test_variants_chr22.pgen")),
+  vcf    = list(pkg = "VariantAnnotation",
+                ref = function(sfx) GenotypeHandle(
+                  path = file.path(test_data_dir, paste0("test_variants", sfx, ".vcf.gz"))),
+                p21 = file.path(test_data_dir, "test_variants.vcf.gz"),
+                p22 = file.path(test_data_dir, "test_variants_chr22.vcf.gz")),
+  gds    = list(pkg = "SNPRelate",
+                ref = function(sfx) GenotypeHandle(
+                  path = file.path(test_data_dir, paste0("test_variants", sfx, ".gds"))),
+                p21 = file.path(test_data_dir, "test_variants.gds"),
+                p22 = file.path(test_data_dir, "test_variants_chr22.gds"))
+)
+
+# Register the per-backend routing tests for one backend spec.
+.shardRoutingTests <- function(spec, label) {
+  test_that(sprintf("[%s] sharded handle routes per chromosome", label), {
+    skip_if_not_installed(spec$pkg)
+    ref21 <- spec$ref("")
+    ref22 <- spec$ref("_chr22")
+    shard <- GenotypeHandle(genoMeta = c("21" = spec$p21, "22" = spec$p22))
+    expect_s4_class(shard, "GenotypeHandle")
+    expect_equal(shard@format, ref21@format)
+    expect_equal(sort(names(shard@chromPaths)), c("21", "22"))
+    n21 <- nrow(ref21@snpInfo)
+    n22 <- nrow(ref22@snpInfo)
+    expect_equal(nrow(shard@snpInfo), n21 + n22)
+    # A chr21 request routes to the chr21 payload (== single-file chr21).
+    expect_equal(.shardDose(shard, 1:5), .shardDose(ref21, 1:5))
+    # A chr22 request routes to the chr22 payload, and the global->local index
+    # conversion lines up with the single-file chr22 handle. (PLINK2 is
+    # positional, so this is the key check for that backend.)
+    expect_equal(.shardDose(shard, (n21 + 1):(n21 + 5)), .shardDose(ref22, 1:5))
+  })
+
+  test_that(sprintf("[%s] cross-shard request assembles both chromosomes", label), {
+    skip_if_not_installed(spec$pkg)
+    ref21 <- spec$ref("")
+    ref22 <- spec$ref("_chr22")
+    shard <- GenotypeHandle(genoMeta = c("21" = spec$p21, "22" = spec$p22))
+    n21 <- nrow(ref21@snpInfo)
+    em <- extractBlockGenotypes(shard, c(1L, 2L, n21 + 1L, n21 + 2L))
+    dm <- unname(as.matrix(SummarizedExperiment::assay(em, "dosage")))
+    expect_equal(nrow(dm), 4L)
+    expect_equal(
+      as.character(GenomeInfoDb::seqnames(
+        SummarizedExperiment::rowRanges(em))),
+      c("chr21", "chr21", "chr22", "chr22"))
+    # Requested order preserved; each half matches its single-file source.
+    expect_equal(dm[1:2, ], .shardDose(ref21, 1:2))
+    expect_equal(dm[3:4, ], .shardDose(ref22, 1:2))
+  })
+}
+
+for (.bk in names(.shardBackends)) .shardRoutingTests(.shardBackends[[.bk]], .bk)
+
+test_that("single-shard sharded handle equals the single-file handle", {
+  skip_if_not_installed("snpStats")
+  ref <- GenotypeHandle(plink1Prefix = file.path(test_data_dir, "test_variants"))
+  sh  <- GenotypeHandle(genoMeta = c("21" = file.path(test_data_dir, "test_variants")))
+  expect_equal(length(sh@chromPaths), 1L)
+  expect_equal(nrow(sh@snpInfo), nrow(ref@snpInfo))
+  expect_equal(.shardDose(sh, 1:10), .shardDose(ref, 1:10))
+})
+
+test_that("genoMeta meta-file form matches the named-vector form", {
+  skip_if_not_installed("snpStats")
+  td_abs <- normalizePath(test_data_dir)
+  metafile <- tempfile(fileext = ".tsv")
+  writeLines(c("#chr\tpath",
+               paste0("21\t", file.path(td_abs, "test_variants")),
+               paste0("22\t", file.path(td_abs, "test_variants_chr22"))),
+             metafile)
+  hFile <- GenotypeHandle(genoMeta = metafile)
+  hVec  <- GenotypeHandle(genoMeta = c("21" = file.path(td_abs, "test_variants"),
+                                       "22" = file.path(td_abs, "test_variants_chr22")))
+  expect_equal(nrow(hFile@snpInfo), nrow(hVec@snpInfo))
+  expect_equal(sort(names(hFile@chromPaths)), sort(names(hVec@chromPaths)))
+  expect_equal(.shardDose(hFile, 1:5), .shardDose(hVec, 1:5))
+})
+
 

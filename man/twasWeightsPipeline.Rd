@@ -17,6 +17,7 @@ twasWeightsPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
+  jointRegions = FALSE,
   jointSpecification = NULL,
   fineMappingResult = NULL,
   twasWeights = NULL,
@@ -101,7 +102,15 @@ Mutually exclusive with \code{traitId}.}
 
 \item{cisWindow}{For QtlDataset: cis-window (bp) around each trait's
 genomic position when extracting variants. Required when
-\code{traitId} is supplied.}
+\code{traitId} is supplied. Mutually exclusive with \code{region}.}
+
+\item{jointRegions}{For QtlDataset with a multi-range \code{region}:
+\code{FALSE} (default) learns weights for each range independently and
+concatenates them into one entry per (study, context, trait, method);
+the per-region fits are kept as a named list and per-region CV is
+recorded as a flat \code{cvPerformance} data frame (one row per region).
+\code{TRUE} concatenates the ranges' genotypes into one joint fit.
+Ignored for a single-range / cis request.}
 
 \item{jointSpecification}{Optional joint-fit specification (NULL by
 default). When NULL, the pipeline runs the implicit multi-trait /

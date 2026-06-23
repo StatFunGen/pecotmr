@@ -2012,3 +2012,116 @@ test_that(".twasWeightsPipelineMatrix: empirical pi from mr.ash gets propagated"
   expect_true("empiricalPi" %in% names(res))
   expect_equal(as.numeric(res$empiricalPi), 1 - 0.8, tolerance = 1e-12)
 })
+
+# ===========================================================================
+# Multi-region / jointRegions (P3)
+# ===========================================================================
+
+test_that(".twasRegionLabel / .twasFitsForRegion select per-region fits", {
+  rg <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100, 350))
+  expect_equal(pecotmr:::.twasRegionLabel(rg), "chr1:100-350")
+  expect_equal(pecotmr:::.twasRegionLabel(NULL), "cis")
+  fits <- list(susie = list(region1 = "f1", region2 = "f2"))
+  expect_equal(pecotmr:::.twasFitsForRegion(fits, 2L, 2L), list(susie = "f2"))
+  # single block returns the fits unchanged
+  expect_identical(pecotmr:::.twasFitsForRegion(fits, 1L, 1L), fits)
+  # a non-region-list fit cannot align to a block and is dropped
+  expect_length(
+    pecotmr:::.twasFitsForRegion(list(susie = list(alpha = 1, pip = 2)), 1L, 2L),
+    0L)
+})
+
+test_that(".twasMergeRegionEntries stacks weights and builds a flat per-region CV df", {
+  mk <- function(vids, w, rsq) TwasWeightsEntry(
+    variantIds = vids, weights = w,
+    cvPerformance = list(samplePartition = NULL, predictions = NULL,
+                         metrics = c(rsq = rsq, pval = 0.01)))
+  e1 <- mk(c("v1", "v2"), c(0.1, 0.2), 0.3)
+  e2 <- mk(c("v3", "v4"), c(0.3, 0.4), 0.5)
+  m <- pecotmr:::.twasMergeRegionEntries(
+    list(e1, e2), c("chr1:1-100", "chr1:200-300"))
+  expect_s4_class(m, "TwasWeightsEntry")
+  expect_equal(getVariantIds(m), c("v1", "v2", "v3", "v4"))
+  expect_equal(unname(getWeights(m)), c(0.1, 0.2, 0.3, 0.4))
+  cv <- getCvPerformance(m)
+  expect_s3_class(cv, "data.frame")
+  expect_equal(cv$region, c("chr1:1-100", "chr1:200-300"))
+  expect_equal(cv$rsq, c(0.3, 0.5))
+  expect_equal(names(getFits(m)), c("chr1:1-100", "chr1:200-300"))
+})
+
+test_that(".twasMergeRegionEntries returns a single entry unchanged", {
+  e <- TwasWeightsEntry(variantIds = "v1", weights = 0.5)
+  expect_identical(
+    pecotmr:::.twasMergeRegionEntries(list(e), "chr1:1-100"), e)
+})
+
+test_that("twasWeightsPipeline(QtlDataset): region + cisWindow is rejected", {
+  qd <- .tp_makeQtlDataset(traits = "ENSG_A")
+  expect_error(
+    twasWeightsPipeline(
+      qd, methods = list(lasso_weights = list()),
+      region = GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 2000)),
+      cisWindow = 1000L),
+    "either `region` or `cisWindow`")
+})
+
+test_that("twasWeightsPipeline(QtlDataset): jointRegions=FALSE concatenates per-region weights", {
+  qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  do.call(local_mocked_bindings,
+          c(list(extractBlockGenotypes = .tp_mockExtractor()),
+            .tp_mockIndividualWeights(), list(.package = "pecotmr")))
+  regions <- GenomicRanges::GRanges("chr1",
+               IRanges::IRanges(c(50L, 1050L), c(1050L, 2050L)))
+  res <- suppressMessages(twasWeightsPipeline(
+    qd, methods = list(lasso_weights = list()),
+    traitId = "ENSG_A", region = regions, jointRegions = FALSE,
+    cvFolds = 0, ensemble = FALSE, estimatePi = FALSE, verbose = 0))
+  expect_s4_class(res, "TwasWeights")
+  # 1 ctx x 1 trait x 1 method -> a single merged row.
+  expect_equal(nrow(res), 1L)
+  w <- getWeights(res, study = "study1", context = "brain",
+                  trait = "ENSG_A", method = "lasso")
+  # union of both sub-ranges (v1..v10 + v11..v20).
+  expect_equal(length(w), 20L)
+})
+
+test_that("twasWeightsPipeline(QtlDataset): jointRegions=TRUE fits one concatenated block", {
+  qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  do.call(local_mocked_bindings,
+          c(list(extractBlockGenotypes = .tp_mockExtractor()),
+            .tp_mockIndividualWeights(), list(.package = "pecotmr")))
+  regions <- GenomicRanges::GRanges("chr1",
+               IRanges::IRanges(c(50L, 1050L), c(1050L, 2050L)))
+  res <- suppressMessages(twasWeightsPipeline(
+    qd, methods = list(lasso_weights = list()),
+    traitId = "ENSG_A", region = regions, jointRegions = TRUE,
+    cvFolds = 0, ensemble = FALSE, estimatePi = FALSE, verbose = 0))
+  expect_equal(nrow(res), 1L)
+  w <- getWeights(res, study = "study1", context = "brain",
+                  trait = "ENSG_A", method = "lasso")
+  expect_equal(length(w), 20L)
+})
+
+test_that("twasWeightsPipeline(QtlDataset): mr.mash jointRegions=FALSE concatenates per-region weights", {
+  qd <- .tp_makeQtlDataset(contexts = c("brain", "liver"),
+                            traits = c("ENSG_A", "ENSG_B"))
+  do.call(local_mocked_bindings,
+          c(list(extractBlockGenotypes = .tp_mockExtractor(),
+                 mrmashWeights = function(X, Y, ...)
+                   matrix(0, nrow = ncol(X), ncol = ncol(Y),
+                          dimnames = list(colnames(X), colnames(Y)))),
+            list(.package = "pecotmr")))
+  regions <- GenomicRanges::GRanges("chr1",
+               IRanges::IRanges(c(50L, 1050L), c(1050L, 2050L)))
+  res <- suppressMessages(suppressWarnings(twasWeightsPipeline(
+    qd, methods = "mrmash", traitId = c("ENSG_A", "ENSG_B"),
+    region = regions, jointRegions = FALSE,
+    cvFolds = 0, ensemble = FALSE, estimatePi = FALSE, verbose = 0)))
+  expect_s4_class(res, "TwasWeights")
+  # 2 contexts x 2 traits = 4 rows, each with weights concatenated over regions.
+  expect_equal(nrow(res), 4L)
+  w <- getWeights(res, study = "study1", context = "brain",
+                  trait = "ENSG_A", method = "mrmash")
+  expect_equal(NROW(w), 20L)
+})

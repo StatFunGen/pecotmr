@@ -16,6 +16,7 @@ GenotypeHandle(
   psam = NULL,
   ldMeta = NULL,
   region = NULL,
+  genoMeta = NULL,
   ...
 )
 }
@@ -45,6 +46,11 @@ supported here — use \code{\link{loadLdMatrix}} for that case.}
 \code{"chr:start-end"} string or a one-row data.frame with
 \code{chrom}, \code{start}, \code{end}.}
 
+\item{genoMeta}{One-file-per-chromosome specification: a path to a
+\code{#chr,path} meta file or a named character vector
+(names = chromosomes, values = payload paths/prefixes). Optionally pass
+\code{format} via \code{...} to force a single backend for every shard.}
+
 \item{...}{Additional arguments forwarded to the format-specific reader.}
 }
 \value{
@@ -67,6 +73,15 @@ Construct a \code{GenotypeHandle} from one of several input
       \code{plink1Prefix} or arrange symlinks at a common stem.}
     \item{\code{pgen} + \code{pvar} + \code{psam}}{Explicit PLINK2
       triplet. Same shared-stem requirement.}
+    \item{\code{genoMeta}}{One genotype file per chromosome. Either a path
+      to a whitespace/TSV meta file whose first column is the chromosome
+      (\code{#chr}) and second column the per-chromosome payload
+      (a \code{.bed}/\code{.pgen}/\code{.vcf[.gz]}/\code{.bcf}/\code{.gds}
+      file or a PLINK prefix; relative paths resolve against the meta
+      file's directory), or a named character vector mapping chromosome to
+      payload. All shards must share one format and identical sample IDs in
+      the same order. Extraction is routed to the correct file by the
+      requested region's chromosome.}
   }
   The constructor opens the file for metadata only (sample IDs and SNP
   info); dosage extraction is deferred until \code{extractBlockGenotypes()}

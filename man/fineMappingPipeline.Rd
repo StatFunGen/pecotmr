@@ -18,6 +18,7 @@ fineMappingPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
+  jointRegions = FALSE,
   jointSpecification = NULL,
   addSusieInf = TRUE,
   coverage = 0.95,
@@ -127,7 +128,15 @@ selection. Mutually exclusive with \code{traitId}.}
 
 \item{cisWindow}{For QtlDataset: cis-window (bp) around each trait's
 genomic position when extracting variants. Required when
-\code{traitId} is supplied.}
+\code{traitId} is supplied. Mutually exclusive with \code{region}.}
+
+\item{jointRegions}{For QtlDataset with a multi-range \code{region}:
+\code{FALSE} (default) fits each range independently and merges the
+per-range results into one entry per (study, context, trait, method) —
+the merged \code{susieFit} is a named list of per-region fits and
+credible-set labels are renumbered to stay unique. \code{TRUE}
+concatenates the ranges' genotypes into one joint fit. Ignored for a
+single-range / cis (\code{traitId} + \code{cisWindow}) request.}
 
 \item{jointSpecification}{Optional joint-fit specification (NULL by
 default). When NULL, the pipeline runs the implicit multi-context /

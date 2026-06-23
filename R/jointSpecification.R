@@ -636,7 +636,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # subset is too small to fit.
 # @noRd
 .buildIndividualCrossContextXY <- function(data, tid, scopedContexts,
-                                           cisWindow, verbose, label) {
+                                           cisWindow, verbose, label,
+                                           region = NULL) {
   perTraitContexts <- character(0)
   for (cx in scopedContexts) {
     se <- getPhenotypes(data, contexts = cx)
@@ -650,9 +651,12 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         label, tid, length(perTraitContexts)))
     return(NULL)
   }
-  X <- .fmResidGeno(
-    data, contexts = perTraitContexts, traitId = tid,
-    cisWindow = cisWindow)
+  X <- if (is.null(region)) {
+    .fmResidGeno(data, contexts = perTraitContexts, traitId = tid,
+                 cisWindow = cisWindow)
+  } else {
+    .fmResidGeno(data, contexts = perTraitContexts, region = region)
+  }
   Yres <- .fmResidPheno(
     data, contexts = perTraitContexts, traitId = tid)
   commonSamples <- Reduce(intersect,
@@ -689,7 +693,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # subset is too small.
 # @noRd
 .buildIndividualCrossTraitXY <- function(data, cx, scopedTraits,
-                                         cisWindow, verbose, label, study) {
+                                         cisWindow, verbose, label, study,
+                                         region = NULL) {
   se <- getPhenotypes(data, contexts = cx)
   traitsHere <- intersect(scopedTraits, rownames(se))
   if (length(traitsHere) < 2L) {
@@ -699,8 +704,12 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         label, cx, study, length(traitsHere)))
     return(NULL)
   }
-  X <- .fmResidGeno(
-    data, contexts = cx, traitId = traitsHere, cisWindow = cisWindow)
+  X <- if (is.null(region)) {
+    .fmResidGeno(data, contexts = cx, traitId = traitsHere,
+                 cisWindow = cisWindow)
+  } else {
+    .fmResidGeno(data, contexts = cx, region = region)
+  }
   Y <- .fmResidPheno(
     data, contexts = cx, traitId = traitsHere)
   common <- intersect(rownames(X), rownames(Y))
@@ -717,7 +726,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # QtlDataset. Returns list(X, Y, tuples) or NULL.
 # @noRd
 .buildComposedIndividualXY <- function(data, scope, study, cisWindow,
-                                       verbose, label) {
+                                       verbose, label, region = NULL) {
   scopedContexts <- scope$contexts[[study]]
   scopedTraits   <- scope$traits[[study]]
   tuples <- list()
@@ -736,8 +745,12 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
   }
   allContexts <- unique(vapply(tuples, function(t) t$context, character(1L)))
   allTraits   <- unique(vapply(tuples, function(t) t$trait,   character(1L)))
-  X <- .fmResidGeno(
-    data, contexts = allContexts, traitId = allTraits, cisWindow = cisWindow)
+  X <- if (is.null(region)) {
+    .fmResidGeno(data, contexts = allContexts, traitId = allTraits,
+                 cisWindow = cisWindow)
+  } else {
+    .fmResidGeno(data, contexts = allContexts, region = region)
+  }
   YresList <- .fmResidPheno(
     data, contexts = allContexts, traitId = allTraits)
   if (length(allContexts) == 1L) YresList <- setNames(list(YresList), allContexts)
@@ -812,7 +825,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                                coverage, secondaryCoverage,
                                                signalCutoff, minAbsCorr,
                                                verbose,
-                                               methodArgs = list()) {
+                                               methodArgs = list(),
+                                               region = NULL) {
   jointMethods <- intersect(methods, "mvsusie")
   if (length(jointMethods) == 0L) return(NULL)
 
@@ -837,7 +851,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
   for (tid in scopedTraits) {
     xy <- .buildIndividualCrossContextXY(
       data, tid, scopedContexts, cisWindow, verbose,
-      label = "jointCrossContext")
+      label = "jointCrossContext", region = region)
     if (is.null(xy)) next
 
     if (verbose >= 1)
@@ -892,7 +906,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                              coverage, secondaryCoverage,
                                              signalCutoff, minAbsCorr,
                                              verbose,
-                                             methodArgs = list()) {
+                                             methodArgs = list(),
+                                             region = NULL) {
   jointMethods <- intersect(methods, c("mvsusie", "fsusie"))
   if (length(jointMethods) == 0L) return(NULL)
 
@@ -910,7 +925,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
   for (cx in scopedContexts) {
     xy <- .buildIndividualCrossTraitXY(
       data, cx, scopedTraits, cisWindow, verbose,
-      label = "jointCrossTrait", study = study)
+      label = "jointCrossTrait", study = study, region = region)
     if (is.null(xy)) next
 
     for (mm in jointMethods) {
@@ -1257,7 +1272,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                            coverage, secondaryCoverage,
                                            signalCutoff, minAbsCorr,
                                            verbose,
-                                           methodArgs = list()) {
+                                           methodArgs = list(),
+                                           region = NULL) {
   axes <- spec$axes
   if ("study" %in% axes)
     stop("composed jointSpecification (QtlDataset): axes including 'study' require sumstats input.")
@@ -1274,7 +1290,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
   if (!(study %in% scope$studies)) return(NULL)
   xy <- .buildComposedIndividualXY(data, scope, study, cisWindow,
                                     verbose,
-                                    label = "composed joint (QtlDataset)")
+                                    label = "composed joint (QtlDataset)",
+                                    region = region)
   if (is.null(xy)) return(NULL)
 
   if (verbose >= 1)
@@ -1418,13 +1435,66 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 
 # Top-level joint dispatcher for fineMappingPipeline(QtlDataset).
 # @noRd
+# Merge per-region QtlFineMappingResult collections (same keys across regions)
+# into one by merging each (study, context, trait, method) row's entry via
+# .fmMergeEntries (per-region susieFit list + renumbered credible sets).
+# @noRd
+.fmMergeResultsByKey <- function(results) {
+  base <- results[[1L]]
+  n <- nrow(base)
+  if (n == 0L) return(base)
+  keyOf <- function(r) paste(as.character(r$study), as.character(r$context),
+                             as.character(r$trait), as.character(r$method),
+                             sep = "\r")
+  baseKeys <- keyOf(base)
+  mergedEntries <- lapply(seq_len(n), function(i) {
+    perRegion <- lapply(results, function(r) {
+      hit <- which(keyOf(r) == baseKeys[[i]])
+      if (length(hit)) r$entry[[hit[[1L]]]] else NULL
+    })
+    .fmMergeEntries(Filter(Negate(is.null), perRegion))
+  })
+  QtlFineMappingResult(
+    study = as.character(base$study), context = as.character(base$context),
+    trait = as.character(base$trait), method = as.character(base$method),
+    entry = mergedEntries,
+    jointStudies  = if ("jointStudies"  %in% names(base)) base$jointStudies  else NULL,
+    jointContexts = if ("jointContexts" %in% names(base)) base$jointContexts else NULL,
+    jointTraits   = if ("jointTraits"   %in% names(base)) base$jointTraits   else NULL,
+    ldSketch = NULL)
+}
+
 .fmDispatchJointSpecsQtlDataset <- function(parsedJointSpec, data,
                                              methods, contexts, traitIds,
                                              cisWindow,
                                              coverage, secondaryCoverage,
                                              signalCutoff, minAbsCorr,
                                              verbose,
-                                             methodArgs = list()) {
+                                             methodArgs = list(),
+                                             xRegions = list(NULL)) {
+  # Run the joint dispatch once per region block, then merge per
+  # (study, context, trait, method) across regions. A single block (cis or
+  # jointRegions=TRUE concatenated) returns its result directly.
+  perRegion <- lapply(xRegions, function(rg) {
+    .fmDispatchJointSpecsQtlDatasetOneRegion(
+      parsedJointSpec, data, methods, contexts, traitIds, cisWindow,
+      coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
+      methodArgs = methodArgs, region = rg)
+  })
+  perRegion <- Filter(Negate(is.null), perRegion)
+  if (length(perRegion) == 0L) return(NULL)
+  if (length(perRegion) == 1L) return(perRegion[[1L]])
+  .fmMergeResultsByKey(perRegion)
+}
+
+.fmDispatchJointSpecsQtlDatasetOneRegion <- function(parsedJointSpec, data,
+                                             methods, contexts, traitIds,
+                                             cisWindow,
+                                             coverage, secondaryCoverage,
+                                             signalCutoff, minAbsCorr,
+                                             verbose,
+                                             methodArgs = list(),
+                                             region = NULL) {
   out <- NULL
   for (i in seq_along(parsedJointSpec)) {
     spec <- parsedJointSpec[[i]]
@@ -1433,7 +1503,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
       res <- .fmDispatchComposedQtlDataset(
         spec, data, methods, contexts, traitIds, cisWindow,
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs)
+        methodArgs = methodArgs, region = region)
       if (!is.null(res))
         out <- if (is.null(out)) res
                else .rbindFineMappingResult(out, res, ldSketch = NULL)
@@ -1444,11 +1514,11 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
       context = .fmDispatchCrossContextQtlDataset(
         spec, data, methods, contexts, traitIds, cisWindow,
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs),
+        methodArgs = methodArgs, region = region),
       trait = .fmDispatchCrossTraitQtlDataset(
         spec, data, methods, contexts, traitIds, cisWindow,
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs),
+        methodArgs = methodArgs, region = region),
       study = stop(
         "fineMappingPipeline(QtlDataset): jointSpecification with axes = 'study' requires sumstats input. ",
         "QtlDataset represents a single individual-level study; cross-study joints operate on the sumstats slot of MultiStudyQtlDataset or on QtlSumStats directly."),
@@ -1518,7 +1588,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                              coverage, secondaryCoverage,
                                              signalCutoff, minAbsCorr,
                                              verbose,
-                                             methodArgs = list()) {
+                                             methodArgs = list(),
+                                             xRegions = list(NULL)) {
   out <- NULL
   embeddedLd <- NULL
   qtlDatasets <- getQtlDatasets(data)
@@ -1541,7 +1612,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
       qdRes <- .fmDispatchJointSpecsQtlDataset(
         nonStudyAxisSpecs, qd, methods, contexts, traitIds, cisWindow,
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs)
+        methodArgs = methodArgs, xRegions = xRegions)
       if (!is.null(qdRes))
         out <- if (is.null(out)) qdRes
                else .rbindFineMappingResult(out, qdRes, ldSketch = NULL)
@@ -1576,7 +1647,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 .twasDispatchCrossContextQtlDataset <- function(spec, data, methods,
                                                  contexts, traitIds,
                                                  cisWindow, dataType,
-                                                 verbose) {
+                                                 verbose, region = NULL) {
   jointMethods <- intersect(methods, "mrmash")
   if (length(jointMethods) == 0L) return(NULL)
 
@@ -1601,7 +1672,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
   for (tid in scopedTraits) {
     xy <- .buildIndividualCrossContextXY(
       data, tid, scopedContexts, cisWindow, verbose,
-      label = "jointCrossContext (twas QtlDataset)")
+      label = "jointCrossContext (twas QtlDataset)", region = region)
     if (is.null(xy)) next
 
     if (verbose >= 1)
@@ -1642,7 +1713,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 .twasDispatchCrossTraitQtlDataset <- function(spec, data, methods,
                                                contexts, traitIds,
                                                cisWindow, dataType,
-                                               verbose) {
+                                               verbose, region = NULL) {
   jointMethods <- intersect(methods, "mrmash")
   if (length(jointMethods) == 0L) return(NULL)
 
@@ -1660,7 +1731,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
   for (cx in scopedContexts) {
     xy <- .buildIndividualCrossTraitXY(
       data, cx, scopedTraits, cisWindow, verbose,
-      label = "jointCrossTrait (twas)", study = study)
+      label = "jointCrossTrait (twas)", study = study, region = region)
     if (is.null(xy)) next
 
     if (verbose >= 1)
@@ -2015,7 +2086,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # @noRd
 .twasDispatchComposedQtlDataset <- function(spec, data, methods,
                                              contexts, traitIds, cisWindow,
-                                             dataType, verbose) {
+                                             dataType, verbose,
+                                             region = NULL) {
   axes <- spec$axes
   if ("study" %in% axes)
     stop("composed jointSpecification (twas QtlDataset): axes including 'study' require sumstats input.")
@@ -2031,7 +2103,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
   if (!(study %in% scope$studies)) return(NULL)
   xy <- .buildComposedIndividualXY(data, scope, study, cisWindow,
                                     verbose,
-                                    label = "composed joint (twas QtlDataset)")
+                                    label = "composed joint (twas QtlDataset)",
+                                    region = region)
   if (is.null(xy)) return(NULL)
 
   if (verbose >= 1)
@@ -2061,17 +2134,64 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 
 # Top-level joint dispatcher for twasWeightsPipeline(QtlDataset).
 # @noRd
+# Merge per-region TwasWeights collections (same keys across regions) into one
+# by concatenating each (study, context, trait, method) row's entry via
+# .twasMergeRegionEntries (stacked weights + flat per-region cvPerformance).
+# @noRd
+.twasMergeResultsByKey <- function(results, regionLabels) {
+  base <- results[[1L]]
+  n <- length(base$method)
+  if (n == 0L) return(base)
+  keyOf <- function(r) paste(as.character(r$study), as.character(r$context),
+                             as.character(r$trait), as.character(r$method),
+                             sep = "\r")
+  baseKeys <- keyOf(base)
+  mergedEntries <- lapply(seq_len(n), function(i) {
+    perRegion <- lapply(results, function(r) {
+      hit <- which(keyOf(r) == baseKeys[[i]])
+      if (length(hit)) r$entry[[hit[[1L]]]] else NULL
+    })
+    keep <- !vapply(perRegion, is.null, logical(1))
+    .twasMergeRegionEntries(perRegion[keep], regionLabels[keep])
+  })
+  TwasWeights(
+    study = as.character(base$study), context = as.character(base$context),
+    trait = as.character(base$trait), method = as.character(base$method),
+    entry = mergedEntries)
+}
+
 .twasDispatchJointSpecsQtlDataset <- function(parsedJointSpec, data,
                                                methods, contexts, traitIds,
                                                cisWindow, dataType,
-                                               verbose) {
+                                               verbose, xRegions = list(NULL)) {
+  # Run the joint dispatch once per region block, then merge per
+  # (study, context, trait, method) across regions. A single block (cis or
+  # jointRegions=TRUE concatenated) returns its result directly.
+  perRegion <- lapply(xRegions, function(rg) {
+    .twasDispatchJointSpecsQtlDatasetOneRegion(
+      parsedJointSpec, data, methods, contexts, traitIds, cisWindow, dataType,
+      verbose, region = rg)
+  })
+  labs <- vapply(xRegions, .twasRegionLabel, character(1))
+  keep <- !vapply(perRegion, is.null, logical(1))
+  perRegion <- perRegion[keep]; labs <- labs[keep]
+  if (length(perRegion) == 0L) return(NULL)
+  if (length(perRegion) == 1L) return(perRegion[[1L]])
+  .twasMergeResultsByKey(perRegion, labs)
+}
+
+.twasDispatchJointSpecsQtlDatasetOneRegion <- function(parsedJointSpec, data,
+                                               methods, contexts, traitIds,
+                                               cisWindow, dataType,
+                                               verbose, region = NULL) {
   out <- NULL
   for (i in seq_along(parsedJointSpec)) {
     spec <- parsedJointSpec[[i]]
     axes <- spec$axes
     if (length(axes) > 1L) {
       res <- .twasDispatchComposedQtlDataset(
-        spec, data, methods, contexts, traitIds, cisWindow, dataType, verbose)
+        spec, data, methods, contexts, traitIds, cisWindow, dataType, verbose,
+        region = region)
       if (!is.null(res))
         out <- if (is.null(out)) res
                else .rbindTwasWeights(out, res, ldSketch = NULL)
@@ -2080,9 +2200,11 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     axis <- axes[[1L]]
     res <- switch(axis,
       context = .twasDispatchCrossContextQtlDataset(
-        spec, data, methods, contexts, traitIds, cisWindow, dataType, verbose),
+        spec, data, methods, contexts, traitIds, cisWindow, dataType, verbose,
+        region = region),
       trait = .twasDispatchCrossTraitQtlDataset(
-        spec, data, methods, contexts, traitIds, cisWindow, dataType, verbose),
+        spec, data, methods, contexts, traitIds, cisWindow, dataType, verbose,
+        region = region),
       study = stop(
         "twasWeightsPipeline(QtlDataset): jointSpecification with axes = 'study' requires sumstats input."),
       stop(sprintf("Unsupported axis: %s", axis)))
@@ -2132,7 +2254,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # @noRd
 .twasDispatchJointSpecsMultiStudy <- function(parsedJointSpec, data,
                                                methods, contexts, traitIds,
-                                               cisWindow, dataType, verbose) {
+                                               cisWindow, dataType, verbose,
+                                               xRegions = list(NULL)) {
   out <- NULL
   embeddedLd <- NULL
   qtlDatasets <- getQtlDatasets(data)
@@ -2154,7 +2277,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
       qd <- qtlDatasets[[qdName]]
       qdRes <- .twasDispatchJointSpecsQtlDataset(
         nonStudyAxisSpecs, qd, methods, contexts, traitIds, cisWindow,
-        dataType, verbose)
+        dataType, verbose, xRegions = xRegions)
       if (!is.null(qdRes))
         out <- if (is.null(out)) qdRes
                else .rbindTwasWeights(out, qdRes, ldSketch = NULL)

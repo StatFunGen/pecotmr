@@ -131,7 +131,14 @@
 #'   selection. Mutually exclusive with \code{traitId}.
 #' @param cisWindow For QtlDataset: cis-window (bp) around each trait's
 #'   genomic position when extracting variants. Required when
-#'   \code{traitId} is supplied.
+#'   \code{traitId} is supplied. Mutually exclusive with \code{region}.
+#' @param jointRegions For QtlDataset with a multi-range \code{region}:
+#'   \code{FALSE} (default) fits each range independently and merges the
+#'   per-range results into one entry per (study, context, trait, method) —
+#'   the merged \code{susieFit} is a named list of per-region fits and
+#'   credible-set labels are renumbered to stay unique. \code{TRUE}
+#'   concatenates the ranges' genotypes into one joint fit. Ignored for a
+#'   single-range / cis (\code{traitId} + \code{cisWindow}) request.
 #' @param addSusieInf Logical. When \code{susieInf} is in
 #'   \code{methods} alongside \code{susie} and/or \code{susieAsh},
 #'   controls whether the SuSiE-inf fit initialises the chained
@@ -624,6 +631,128 @@ setGeneric("fineMappingPipeline",
   out$finemappingEntry
 }
 
+# --- Multi-region (jointRegions) helpers ------------------------------------
+
+# Resolve the per-trait X windows from a (region, jointRegions) pair. The cis
+# path (region NULL) is a single trait-derived block; an explicit `region` is
+# taken literally as one joint block (jointRegions=TRUE -> concatenated
+# genotypes) or one block per range (jointRegions=FALSE -> independent fits
+# merged downstream). Shared by the QtlDataset / MultiStudyQtlDataset
+# fineMapping & twas methods.
+#' @keywords internal
+.makeXRegions <- function(region, jointRegions) {
+  if (is.null(region)) {
+    list(NULL)
+  } else if (isTRUE(jointRegions)) {
+    list(region)
+  } else {
+    lapply(seq_along(region), function(i) region[i])
+  }
+}
+
+# Fit every requested univariate token on one residualized (X, y) block,
+# returning a named list (token -> FineMappingEntry). Extracted from the
+# univariate dispatch so the same logic serves the cis path (one block), the
+# jointRegions=TRUE path (one concatenated block) and the jointRegions=FALSE
+# path (one block per region, merged afterwards via .fmMergeEntries).
+.fmFitXBlock <- function(X, y, toRun, addSusieInf, coverage,
+                         secondaryCoverage, signalCutoff, minAbsCorr,
+                         methodArgs, verbose, ctx, tid) {
+  chainLocal <- .fmResolveSusieChain(toRun, addSusieInf)
+  infFit <- NULL
+  if (chainLocal$runInf) {
+    if (verbose >= 1)
+      message(sprintf("Fitting susieInf for (context='%s', trait='%s') ...",
+                      ctx, tid))
+    infFit <- .fmFitSusieIndiv(X, y, "susieInf", coverage = coverage,
+                               userArgs = methodArgs[["susieInf"]])
+  }
+  out <- list()
+  for (tk in toRun) {
+    if (tk == "susieInf") {
+      if (!chainLocal$keepInf) next
+      fit <- infFit
+    } else {
+      chainFrom <- if ((tk == "susie"    && chainLocal$chainSusie) ||
+                       (tk == "susieAsh" && chainLocal$chainAsh))
+                     infFit else NULL
+      if (verbose >= 1)
+        message(sprintf("Fitting %s for (context='%s', trait='%s') ...",
+                        tk, ctx, tid))
+      fit <- .fmFitSusieIndiv(X, y, tk, chainFromInf = chainFrom,
+                              coverage = coverage, userArgs = methodArgs[[tk]])
+    }
+    out[[tk]] <- .fmPostprocessOne(
+      fit = fit, method = tk, dataX = X, dataY = y, coverage = coverage,
+      secondaryCoverage = secondaryCoverage, signalCutoff = signalCutoff,
+      minAbsCorr = minAbsCorr, csInput = "X")
+  }
+  out
+}
+
+# Extract integer credible-set indices from a "<method>_<idx>" vector.
+.fmCsIdx <- function(csVec) {
+  suppressWarnings(as.integer(sub("^.*_([0-9]+)$", "\\1", as.character(csVec))))
+}
+
+# Re-number credible-set membership labels by `offset`, preserving the
+# "<method>_0" (not-in-any-CS) sentinel.
+.fmRelabelCs <- function(csVec, offset) {
+  csVec <- as.character(csVec)
+  if (offset == 0L) return(csVec)
+  parts <- regmatches(csVec, regexec("^(.*)_([0-9]+)$", csVec))
+  vapply(seq_along(csVec), function(j) {
+    p <- parts[[j]]
+    if (length(p) != 3L) return(csVec[[j]])
+    idx <- as.integer(p[[3L]])
+    if (idx == 0L) csVec[[j]] else paste0(p[[2L]], "_", idx + offset)
+  }, character(1))
+}
+
+# Merge per-region FineMappingEntry payloads (same study/context/trait/method,
+# independent fits) into one entry: concatenate variants and topLoci rows,
+# renumber credible sets so per-region indices do not collide, and keep the
+# per-region SuSiE fits as a named list in `susieFit` (consumers needing a
+# single fit must iterate the list).
+.fmMergeEntries <- function(entries) {
+  entries <- entries[!vapply(entries, is.null, logical(1))]
+  if (length(entries) == 0L) return(NULL)
+  if (length(entries) == 1L) return(entries[[1L]])
+  variantIds <- unlist(lapply(entries, function(e) e@variantIds),
+                       use.names = FALSE)
+  tls <- lapply(entries, function(e) e@topLoci)
+  csCols <- grep("^cs_[0-9]+$",
+                 unique(unlist(lapply(tls, names))), value = TRUE)
+  offsets <- setNames(integer(length(csCols)), csCols)
+  for (i in seq_along(tls)) {
+    tl <- tls[[i]]
+    for (cc in csCols) {
+      if (!cc %in% names(tl)) next
+      idx <- .fmCsIdx(tl[[cc]])
+      tl[[cc]] <- .fmRelabelCs(tl[[cc]], offsets[[cc]])
+      offsets[[cc]] <- offsets[[cc]] + max(c(0L, idx), na.rm = TRUE)
+    }
+    tls[[i]] <- tl
+  }
+  topLoci <- do.call(rbind, tls)
+  rownames(topLoci) <- NULL
+  susieFit <- setNames(lapply(entries, function(e) e@susieFit),
+                       paste0("region", seq_along(entries)))
+  FineMappingEntry(variantIds = variantIds, susieFit = susieFit,
+                   topLoci = topLoci)
+}
+
+# Run a joint-method fit (mvsusie / fsusie) once per region block via the
+# method-specific `fitOneRegion(rg)` closure (returns one FineMappingEntry per
+# region), then merge across regions into a single shared entry. A single block
+# (cis or jointRegions=TRUE) returns its entry unchanged.
+.fmJointBlocks <- function(xRegions, fitOneRegion) {
+  ents <- lapply(seq_along(xRegions), function(i) fitOneRegion(xRegions[[i]]))
+  ents <- ents[!vapply(ents, is.null, logical(1))]
+  if (length(ents) == 0L) return(NULL)
+  if (length(ents) == 1L) ents[[1L]] else .fmMergeEntries(ents)
+}
+
 
 # Merge per-method user kwargs onto a base arg list. `userArgs` is the
 # per-token kwargs supplied by the caller (e.g. `list(L = 1, refine =
@@ -744,6 +873,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
            traitId            = NULL,
            region             = NULL,
            cisWindow          = NULL,
+           jointRegions       = FALSE,
            jointSpecification = NULL,
            addSusieInf        = TRUE,
            coverage           = 0.95,
@@ -761,6 +891,14 @@ setMethod("fineMappingPipeline", "QtlDataset",
            residualizeGenotypeCovariates    = TRUE,
            ...) {
     naAction <- match.arg(naAction)
+    # `cisWindow` expands a trait's own coordinates; `region` is taken
+    # literally. Supplying both signals a misunderstanding -> reject.
+    if (!is.null(region) && !is.null(cisWindow)) {
+      stop("fineMappingPipeline(QtlDataset): specify either `region` or ",
+           "`cisWindow`, not both. `cisWindow` expands each trait's own ",
+           "coordinates, whereas `region` is the literal variant window.")
+    }
+    xRegions <- .makeXRegions(region, jointRegions)
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
     norm       <- .fmNormalizeMethods(methods)
     tokens     <- norm$tokens
@@ -778,7 +916,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
         parsedJointSpec, data, intersect(tokens, c("mvsusie", "fsusie")),
         contexts, traitId, cisWindow,
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs)
+        methodArgs = methodArgs, xRegions = xRegions)
       tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
       methodArgs <- methodArgs[tokens]
       if (length(tokens) == 0L) {
@@ -861,6 +999,10 @@ setMethod("fineMappingPipeline", "QtlDataset",
     }
 
     # ---- Univariate dispatch: per (context, trait), per method.
+    # X is drawn from each window in `xRegions` (cis = one trait-derived block;
+    # multi-region = one block per range), fitted independently, then merged
+    # per token via .fmMergeEntries so every (study, context, trait, method)
+    # produces a single entry.
     if (length(univTokens) > 0L) {
       for (ctx in useCtx) {
         for (tid in perCtxTraits[[ctx]]) {
@@ -878,53 +1020,33 @@ setMethod("fineMappingPipeline", "QtlDataset",
 
           Y <- .fmResidPheno(
             data, contexts = ctx, traitId = tid, naAction = naAction)
-          X <- .fmResidGeno(
-            data, contexts = ctx, traitId = tid,
-            cisWindow = cisWindow, samples = rownames(Y))
-          common <- intersect(rownames(X), rownames(Y))
-          if (length(common) < 2L) {
-            stop(sprintf(
-              "fineMappingPipeline: too few shared samples between residualized X and Y for (context='%s', trait='%s').",
-              ctx, tid))
-          }
-          X <- X[common, , drop = FALSE]
-          y <- Y[common, , drop = FALSE]
-          if (ncol(y) > 1L) y <- y[, 1L, drop = TRUE] else y <- drop(y)
 
-          chainLocal <- .fmResolveSusieChain(toRun, addSusieInf)
-          infFit <- NULL
-          if (chainLocal$runInf) {
-            if (verbose >= 1)
-              message(sprintf("Fitting susieInf for (context='%s', trait='%s') ...", ctx, tid))
-            infFit <- .fmFitSusieIndiv(X, y, "susieInf",
-                                       coverage = coverage,
-                                       userArgs = methodArgs[["susieInf"]])
-          }
+          blockEntries <- lapply(xRegions, function(rg) {
+            X <- if (is.null(rg)) {
+              .fmResidGeno(data, contexts = ctx, traitId = tid,
+                           cisWindow = cisWindow, samples = rownames(Y))
+            } else {
+              .fmResidGeno(data, contexts = ctx, region = rg,
+                           samples = rownames(Y))
+            }
+            common <- intersect(rownames(X), rownames(Y))
+            if (length(common) < 2L) {
+              stop(sprintf(
+                "fineMappingPipeline: too few shared samples between residualized X and Y for (context='%s', trait='%s').",
+                ctx, tid))
+            }
+            X <- X[common, , drop = FALSE]
+            y <- Y[common, , drop = FALSE]
+            if (ncol(y) > 1L) y <- y[, 1L, drop = TRUE] else y <- drop(y)
+            .fmFitXBlock(X, y, toRun, addSusieInf, coverage,
+                         secondaryCoverage, signalCutoff, minAbsCorr,
+                         methodArgs, verbose, ctx, tid)
+          })
 
           for (tk in toRun) {
-            if (tk == "susieInf") {
-              if (!chainLocal$keepInf) next
-              fit <- infFit
-            } else {
-              chainFrom <- if ((tk == "susie"    && chainLocal$chainSusie) ||
-                               (tk == "susieAsh" && chainLocal$chainAsh))
-                            infFit else NULL
-              if (verbose >= 1)
-                message(sprintf("Fitting %s for (context='%s', trait='%s') ...",
-                                tk, ctx, tid))
-              fit <- .fmFitSusieIndiv(X, y, tk,
-                                     chainFromInf = chainFrom,
-                                     coverage = coverage,
-                                     userArgs = methodArgs[[tk]])
-            }
-            entry <- .fmPostprocessOne(
-              fit = fit, method = tk,
-              dataX = X, dataY = y,
-              coverage = coverage,
-              secondaryCoverage = secondaryCoverage,
-              signalCutoff = signalCutoff,
-              minAbsCorr = minAbsCorr,
-              csInput = "X")
+            ents <- lapply(blockEntries, function(be) be[[tk]])
+            if (any(vapply(ents, is.null, logical(1)))) next
+            entry <- if (length(ents) == 1L) ents[[1L]] else .fmMergeEntries(ents)
             pushRow(study, ctx, tid, tk, entry)
           }
         }
@@ -965,30 +1087,14 @@ setMethod("fineMappingPipeline", "QtlDataset",
       for (job in mvJobs) {
         if (identical(job$mode, "multiContext")) {
           tid <- job$trait
-          # Build Y matrix per context for this single trait. Sample
-          # intersection across contexts; phenotypeCovariates differ per
-          # context but getResidualizedPhenotypes already residualises.
+          # Joint Y across contexts for this single trait. X is drawn from each
+          # region block (cis or explicit region) and merged across regions.
           contextsHere <- job$contexts
-          # Use the union of per-context cis-windows for variant extraction.
           Yres <- .fmResidPheno(
             data, contexts = contextsHere, traitId = tid, naAction = naAction)
           if (length(contextsHere) == 1L)
             Yres <- setNames(list(Yres), contextsHere)
-          commonSamples <- Reduce(intersect, lapply(Yres, rownames))
-          X <- .fmResidGeno(
-            data, contexts = contextsHere, traitId = tid,
-            cisWindow = cisWindow, samples = commonSamples)
-          commonSamples <- intersect(commonSamples, rownames(X))
-          if (length(commonSamples) < 2L) {
-            stop("fineMappingPipeline(QtlDataset, mvsusie multi-context): ",
-                 "insufficient shared samples across selected contexts.")
-          }
-          X <- X[commonSamples, , drop = FALSE]
-          Y <- do.call(cbind, lapply(contextsHere, function(ctx) {
-            ym <- Yres[[ctx]][commonSamples, , drop = FALSE]
-            colnames(ym) <- ctx
-            ym
-          }))
+          baseSamples <- Reduce(intersect, lapply(Yres, rownames))
 
           # Resume cache: every (study, ctx, tid, mvsusie) row.
           allCached <- TRUE
@@ -1007,23 +1113,41 @@ setMethod("fineMappingPipeline", "QtlDataset",
 
           if (verbose >= 1)
             message(sprintf("Fitting mvsusie (multi-context) for trait='%s' ...", tid))
-          mvBaseArgs <- list(
-            X = X, Y = Y,
-            prior_variance = mvsusieR::create_mixture_prior(R = ncol(Y)),
-            coverage = coverage)
-          fit <- do.call(fitMvsusie,
-                         .fmMergeUserArgs(mvBaseArgs, "mvsusie",
-                                          methodArgs[["mvsusie"]]))
-          fit <- .setFinemappingFitClass(fit, "mvsusie")
-          entry <- .fmPostprocessOne(
-            fit = fit, method = "mvsusie",
-            dataX = X, dataY = NULL,
-            coverage = coverage,
-            secondaryCoverage = secondaryCoverage,
-            signalCutoff = signalCutoff,
-            minAbsCorr = minAbsCorr,
-            csInput = "X")
-          # Share the joint fit across contexts via copy-on-modify.
+          fitOneRegion <- function(rg) {
+            X <- if (is.null(rg)) {
+              .fmResidGeno(data, contexts = contextsHere, traitId = tid,
+                           cisWindow = cisWindow, samples = baseSamples)
+            } else {
+              .fmResidGeno(data, contexts = contextsHere, region = rg,
+                           samples = baseSamples)
+            }
+            cs <- intersect(baseSamples, rownames(X))
+            if (length(cs) < 2L) {
+              stop("fineMappingPipeline(QtlDataset, mvsusie multi-context): ",
+                   "insufficient shared samples across selected contexts.")
+            }
+            Xc <- X[cs, , drop = FALSE]
+            Yc <- do.call(cbind, lapply(contextsHere, function(ctx) {
+              ym <- Yres[[ctx]][cs, , drop = FALSE]
+              colnames(ym) <- ctx
+              ym
+            }))
+            mvBaseArgs <- list(
+              X = Xc, Y = Yc,
+              prior_variance = mvsusieR::create_mixture_prior(R = ncol(Yc)),
+              coverage = coverage)
+            fit <- do.call(fitMvsusie,
+                           .fmMergeUserArgs(mvBaseArgs, "mvsusie",
+                                            methodArgs[["mvsusie"]]))
+            fit <- .setFinemappingFitClass(fit, "mvsusie")
+            .fmPostprocessOne(
+              fit = fit, method = "mvsusie", dataX = Xc, dataY = NULL,
+              coverage = coverage, secondaryCoverage = secondaryCoverage,
+              signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
+              csInput = "X")
+          }
+          entry <- .fmJointBlocks(xRegions, fitOneRegion)
+          # Share the joint (merged) entry across contexts via copy-on-modify.
           for (ctx in contextsHere) {
             pushRow(study, ctx, tid, "mvsusie", entry)
           }
@@ -1048,36 +1172,40 @@ setMethod("fineMappingPipeline", "QtlDataset",
 
           Y <- .fmResidPheno(
             data, contexts = ctx, traitId = traits, naAction = naAction)
-          X <- .fmResidGeno(
-            data, contexts = ctx, traitId = traits,
-            cisWindow = cisWindow, samples = rownames(Y))
-          common <- intersect(rownames(X), rownames(Y))
-          if (length(common) < 2L) {
-            stop(sprintf(
-              "fineMappingPipeline(QtlDataset, mvsusie multi-trait): too few shared samples in context '%s'.",
-              ctx))
-          }
-          X <- X[common, , drop = FALSE]
-          Y <- Y[common, , drop = FALSE]
 
           if (verbose >= 1)
             message(sprintf("Fitting mvsusie (multi-trait) for context='%s' ...", ctx))
-          mvBaseArgs <- list(
-            X = X, Y = Y,
-            prior_variance = mvsusieR::create_mixture_prior(R = ncol(Y)),
-            coverage = coverage)
-          fit <- do.call(fitMvsusie,
-                         .fmMergeUserArgs(mvBaseArgs, "mvsusie",
-                                          methodArgs[["mvsusie"]]))
-          fit <- .setFinemappingFitClass(fit, "mvsusie")
-          entry <- .fmPostprocessOne(
-            fit = fit, method = "mvsusie",
-            dataX = X, dataY = NULL,
-            coverage = coverage,
-            secondaryCoverage = secondaryCoverage,
-            signalCutoff = signalCutoff,
-            minAbsCorr = minAbsCorr,
-            csInput = "X")
+          fitOneRegion <- function(rg) {
+            X <- if (is.null(rg)) {
+              .fmResidGeno(data, contexts = ctx, traitId = traits,
+                           cisWindow = cisWindow, samples = rownames(Y))
+            } else {
+              .fmResidGeno(data, contexts = ctx, region = rg,
+                           samples = rownames(Y))
+            }
+            common <- intersect(rownames(X), rownames(Y))
+            if (length(common) < 2L) {
+              stop(sprintf(
+                "fineMappingPipeline(QtlDataset, mvsusie multi-trait): too few shared samples in context '%s'.",
+                ctx))
+            }
+            Xc <- X[common, , drop = FALSE]
+            Yc <- Y[common, , drop = FALSE]
+            mvBaseArgs <- list(
+              X = Xc, Y = Yc,
+              prior_variance = mvsusieR::create_mixture_prior(R = ncol(Yc)),
+              coverage = coverage)
+            fit <- do.call(fitMvsusie,
+                           .fmMergeUserArgs(mvBaseArgs, "mvsusie",
+                                            methodArgs[["mvsusie"]]))
+            fit <- .setFinemappingFitClass(fit, "mvsusie")
+            .fmPostprocessOne(
+              fit = fit, method = "mvsusie", dataX = Xc, dataY = NULL,
+              coverage = coverage, secondaryCoverage = secondaryCoverage,
+              signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
+              csInput = "X")
+          }
+          entry <- .fmJointBlocks(xRegions, fitOneRegion)
           for (tid in traits) {
             pushRow(study, ctx, tid, "mvsusie", entry)
           }
@@ -1115,44 +1243,46 @@ setMethod("fineMappingPipeline", "QtlDataset",
 
         Y <- .fmResidPheno(
           data, contexts = ctx, traitId = traits, naAction = naAction)
-        X <- .fmResidGeno(
-          data, contexts = ctx, traitId = traits,
-          cisWindow = cisWindow, samples = rownames(Y))
-        common <- intersect(rownames(X), rownames(Y))
-        if (length(common) < 2L) {
-          stop(sprintf("fineMappingPipeline(QtlDataset, fsusie): too few shared samples in context '%s'.", ctx))
-        }
-        X <- X[common, , drop = FALSE]
-        Y <- Y[common, , drop = FALSE]
 
-        # Per-trait genomic positions for the wavelet model. Use the
-        # midpoint of each trait's rowRanges in this context.
+        # Per-trait genomic positions for the wavelet model. Region-independent
+        # (depends on the trait set / Y columns): midpoint of each trait range.
         se <- getPhenotypes(data, contexts = ctx, traitId = traits)
-        rr <- SummarizedExperiment::rowRanges(se)
-        # Reorder rr to the column order of Y.
         rrIds <- rownames(se)
         ord <- match(colnames(Y), rrIds)
         if (anyNA(ord)) {
           stop("fineMappingPipeline(QtlDataset, fsusie): unable to align trait positions to Y columns.")
         }
-        rr <- rr[ord]
+        rr <- SummarizedExperiment::rowRanges(se)[ord]
         pos <- (GenomicRanges::start(rr) + GenomicRanges::end(rr)) / 2
 
         if (verbose >= 1)
           message(sprintf("Fitting fsusie for context='%s' (multi-trait, %d traits) ...",
                           ctx, length(traits)))
-        fit <- do.call(fitFsusie,
-                       .fmMergeUserArgs(list(X = X, Y = Y, pos = pos),
-                                        "fsusie", methodArgs[["fsusie"]]))
-        fit <- .setFinemappingFitClass(fit, "fsusie")
-        entry <- .fmPostprocessOne(
-          fit = fit, method = "fsusie",
-          dataX = X, dataY = NULL,
-          coverage = coverage,
-          secondaryCoverage = secondaryCoverage,
-          signalCutoff = signalCutoff,
-          minAbsCorr = minAbsCorr,
-          csInput = "fsusie")
+        fitOneRegion <- function(rg) {
+          X <- if (is.null(rg)) {
+            .fmResidGeno(data, contexts = ctx, traitId = traits,
+                         cisWindow = cisWindow, samples = rownames(Y))
+          } else {
+            .fmResidGeno(data, contexts = ctx, region = rg,
+                         samples = rownames(Y))
+          }
+          common <- intersect(rownames(X), rownames(Y))
+          if (length(common) < 2L) {
+            stop(sprintf("fineMappingPipeline(QtlDataset, fsusie): too few shared samples in context '%s'.", ctx))
+          }
+          Xc <- X[common, , drop = FALSE]
+          Yc <- Y[common, , drop = FALSE]
+          fit <- do.call(fitFsusie,
+                         .fmMergeUserArgs(list(X = Xc, Y = Yc, pos = pos),
+                                          "fsusie", methodArgs[["fsusie"]]))
+          fit <- .setFinemappingFitClass(fit, "fsusie")
+          .fmPostprocessOne(
+            fit = fit, method = "fsusie", dataX = Xc, dataY = NULL,
+            coverage = coverage, secondaryCoverage = secondaryCoverage,
+            signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
+            csInput = "fsusie")
+        }
+        entry <- .fmJointBlocks(xRegions, fitOneRegion)
         for (tid in traits) {
           pushRow(study, ctx, tid, "fsusie", entry)
         }
@@ -1188,6 +1318,7 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
            traitId            = NULL,
            region             = NULL,
            cisWindow          = NULL,
+           jointRegions       = FALSE,
            jointSpecification = NULL,
            addSusieInf        = TRUE,
            coverage           = 0.95,
@@ -1205,6 +1336,11 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
            residualizeGenotypeCovariates    = TRUE,
            ...) {
     naAction <- match.arg(naAction)
+    if (!is.null(region) && !is.null(cisWindow)) {
+      stop("fineMappingPipeline(MultiStudyQtlDataset): specify either ",
+           "`region` or `cisWindow`, not both.")
+    }
+    xRegions <- .makeXRegions(region, jointRegions)
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
     norm       <- .fmNormalizeMethods(methods)
     tokens     <- norm$tokens
@@ -1220,7 +1356,7 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
         parsedJointSpec, data, intersect(tokens, c("mvsusie", "fsusie")),
         contexts, traitId, cisWindow,
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs)
+        methodArgs = methodArgs, xRegions = xRegions)
       # Forward the still-pending (non-joint) tokens + their kwargs to the
       # per-QtlDataset recursion below, preserving the list shape so
       # methodArgs land on the right tokens.
@@ -1249,6 +1385,7 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
         traitId            = traitId,
         region             = region,
         cisWindow          = cisWindow,
+        jointRegions       = jointRegions,
         jointSpecification = NULL,
         addSusieInf        = addSusieInf,
         coverage           = coverage,

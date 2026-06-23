@@ -208,6 +208,12 @@ setMethod("readGenotypes",
 #'   }
 #' @export
 extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
+  # One-file-per-chromosome handle: route by chromosome to the right file.
+  # `.genotypeChromPaths` tolerates handles deserialized before the slot
+  # existed (treated as single-file).
+  if (length(.genotypeChromPaths(handle)) > 0L) {
+    return(.extractBlockSharded(handle, snpIdx, meanImpute = meanImpute))
+  }
   fmt <- getFormat(handle)
   geno <- switch(fmt,
     "gds" = .extractBlockGds(handle, snpIdx),
@@ -249,6 +255,60 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     rowRanges = rowRanges,
     colData = colData
   )
+}
+
+# Extract a block from a one-file-per-chromosome (sharded) handle. The global
+# snpIdx index the unified @snpInfo; we group them by chromosome, route each
+# group to its per-chromosome payload via a transient single-file view (with
+# the chromosome-local snpInfo so positional backends like PLINK2 stay valid),
+# then row-bind across chromosomes (samples identical by construction) and
+# restore the requested order. A single-chromosome request — the common cis
+# case — returns its one SE directly.
+#' @keywords internal
+.extractBlockSharded <- function(handle, snpIdx, meanImpute = TRUE) {
+  sampleIds <- handle@sampleIds
+  if (length(snpIdx) == 0L) {
+    empty <- matrix(numeric(0), nrow = 0L, ncol = length(sampleIds),
+                    dimnames = list(character(0), sampleIds))
+    return(SummarizedExperiment(
+      assays = list(dosage = empty),
+      rowRanges = GRanges(),
+      colData = DataFrame(sampleId = sampleIds, row.names = sampleIds)))
+  }
+
+  unifiedChr <- .canonChr(handle@snpInfo$CHR)
+  reqChr <- unifiedChr[snpIdx]
+  groups <- split(seq_along(snpIdx), reqChr)
+
+  buildForChrom <- function(chrom, posInReq) {
+    if (!chrom %in% names(handle@chromPaths))
+      stop("extractBlockGenotypes: no per-chromosome file for chromosome '",
+           chrom, "' (have: ",
+           paste(names(handle@chromPaths), collapse = ", "), ").")
+    blockGlobal <- which(unifiedChr == chrom)        # file-order global indices
+    localIdx    <- match(snpIdx[posInReq], blockGlobal)
+    th <- handle
+    th@path       <- handle@chromPaths[[chrom]]
+    th@snpInfo    <- handle@snpInfo[blockGlobal, , drop = FALSE]
+    th@pgenPtr    <- NULL
+    th@chromPaths <- character(0)                     # treat as single-file
+    extractBlockGenotypes(th, localIdx, meanImpute = meanImpute)
+  }
+
+  ses <- Map(buildForChrom, names(groups), groups)
+  if (length(ses) == 1L) return(ses[[1L]])
+
+  # Combine at the assay/rowRanges level (rather than rbind-ing the SEs, which
+  # trips on disjoint seqlevels) and restore the requested snpIdx order.
+  ord <- order(unlist(groups, use.names = FALSE))
+  combinedDos <- do.call(rbind, lapply(ses, function(se)
+    SummarizedExperiment::assay(se, "dosage")))[ord, , drop = FALSE]
+  combinedGr <- suppressWarnings(
+    do.call(c, unname(lapply(ses, SummarizedExperiment::rowRanges))))[ord]
+  SummarizedExperiment(
+    assays    = list(dosage = combinedDos),
+    rowRanges = combinedGr,
+    colData   = SummarizedExperiment::colData(ses[[1L]]))
 }
 
 #' @keywords internal
@@ -320,6 +380,10 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
   # pointer errors out. Opening is cheap relative to dosage extraction.
   ptr <- getPgenPtr(handle)
   paths <- resolvePlink2Paths(getPath(handle))
+  # A sharded handle routes through a transient view with pgenPtr = NULL (one
+  # pgen per chromosome), and a deserialized pointer is stale; open a fresh
+  # pgen up front in those cases rather than provoking a caught read error.
+  if (is.null(ptr)) ptr <- pgenlibr::NewPgen(paths$pgen)
   geno <- tryCatch(
     pgenlibr::ReadList(ptr, variant_subset = snpIdx, meanimpute = FALSE),
     error = function(e) {

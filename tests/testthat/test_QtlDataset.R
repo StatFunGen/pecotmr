@@ -189,18 +189,22 @@ test_that(".qtlResolveVariantRegion: traits across chromosomes error", {
   )
 })
 
-test_that(".qtlResolveVariantRegion: region path requires single-range GRanges", {
+test_that(".qtlResolveVariantRegion: region must be a GRanges; multi-range is allowed", {
   qd <- .qh_makeDataset()
   expect_error(
     pecotmr:::.qtlResolveVariantRegion(qd, region = "chr1:100-200"),
     "must be a GRanges object"
   )
+  expect_error(
+    pecotmr:::.qtlResolveVariantRegion(qd, region = GenomicRanges::GRanges()),
+    "at least one range"
+  )
+  # A multi-range region is now taken literally (joint multi-region extraction).
   multi <- GenomicRanges::GRanges(c("chr1", "chr1"),
                                   IRanges::IRanges(c(1, 100), c(50, 200)))
-  expect_error(
-    pecotmr:::.qtlResolveVariantRegion(qd, region = multi),
-    "single range"
-  )
+  gr <- pecotmr:::.qtlResolveVariantRegion(qd, region = multi)
+  expect_s4_class(gr, "GRanges")
+  expect_equal(length(gr), 2L)
 })
 
 test_that(".qtlResolveVariantRegion: region path expands by cisWindow", {
@@ -1496,6 +1500,86 @@ test_that("show.MultiStudyQtlDataset reports sumstats studies when present", {
   mt <- MultiStudyQtlDataset(qtlDatasets = list(s1 = qd), sumStats = ss)
   out <- capture.output(show(mt))
   expect_true(any(grepl("Sumstats studies: s2", out)))
+})
+
+# ===========================================================================
+# Multi-region variant extraction: getGenotypes() with a multi-range region
+# (the mechanism behind jointRegions). Single-file (chr21) and sharded
+# (chr21+chr22) handles wrapped in a QtlDataset with a minimal phenotype SE.
+# ===========================================================================
+.mr_makeSE <- function(samples, chrom = "chr21", traits = c("g1", "g2")) {
+  rng <- GenomicRanges::GRanges(
+    chrom, IRanges::IRanges(
+      start = seq(1e6L, by = 1e5L, length.out = length(traits)), width = 1000L))
+  names(rng) <- traits
+  expr <- matrix(0, nrow = length(traits), ncol = length(samples),
+                 dimnames = list(traits, samples))
+  SummarizedExperiment::SummarizedExperiment(
+    assays = list(expression = expr), rowRanges = rng,
+    colData = S4Vectors::DataFrame(row.names = samples))
+}
+.mr_ncol <- function(qd, region) ncol(getGenotypes(qd, region = region))
+.mr_vids <- function(qd, region) colnames(getGenotypes(qd, region = region))
+
+test_that("multi-range region unions disjoint sub-ranges on one chromosome", {
+  skip_if_not_installed("snpStats")
+  h  <- GenotypeHandle(plink1Prefix = file.path(test_data_dir, "test_variants"))
+  qd <- QtlDataset(study = "S", genotypes = h,
+                   phenotypes = list(ctx = .mr_makeSE(h@sampleIds)))
+  bp <- h@snpInfo$BP
+  lo <- min(bp); hi <- max(bp); mid <- lo + (hi - lo) %/% 2L
+  rA <- GenomicRanges::GRanges("chr21", IRanges::IRanges(lo, mid))
+  rB <- GenomicRanges::GRanges("chr21", IRanges::IRanges(mid + 1L, hi))
+  rAB <- GenomicRanges::GRanges("chr21", IRanges::IRanges(c(lo, mid + 1L), c(mid, hi)))
+
+  nA <- .mr_ncol(qd, rA); nB <- .mr_ncol(qd, rB)
+  expect_gt(nA, 0L); expect_gt(nB, 0L)
+  expect_equal(.mr_ncol(qd, rAB), nA + nB)
+  expect_equal(.mr_vids(qd, rAB), c(.mr_vids(qd, rA), .mr_vids(qd, rB)))
+})
+
+test_that("multi-range region spans chromosomes on a sharded handle", {
+  skip_if_not_installed("snpStats")
+  hs <- GenotypeHandle(genoMeta = c(
+    "21" = file.path(test_data_dir, "test_variants"),
+    "22" = file.path(test_data_dir, "test_variants_chr22")))
+  qd <- QtlDataset(study = "S", genotypes = hs,
+                   phenotypes = list(ctx = .mr_makeSE(hs@sampleIds)))
+  bp <- GenotypeHandle(plink1Prefix = file.path(test_data_dir, "test_variants"))@snpInfo$BP
+  lo <- min(bp); hi <- max(bp)
+  r21 <- GenomicRanges::GRanges("chr21", IRanges::IRanges(lo, hi))
+  r22 <- GenomicRanges::GRanges("chr22", IRanges::IRanges(lo, hi))
+  rBoth <- GenomicRanges::GRanges(c("chr21", "chr22"),
+                                  IRanges::IRanges(c(lo, lo), c(hi, hi)))
+
+  n21 <- .mr_ncol(qd, r21); n22 <- .mr_ncol(qd, r22)
+  expect_gt(n21, 0L); expect_gt(n22, 0L)
+  expect_equal(.mr_ncol(qd, rBoth), n21 + n22)
+
+  gBoth <- getGenotypes(qd, region = rBoth)
+  g21   <- getGenotypes(qd, region = r21)
+  expect_equal(unname(gBoth[, seq_len(n21)]), unname(g21))
+  expect_true(all(grepl("_c22$", colnames(gBoth)[(n21 + 1):(n21 + n22)])))
+})
+
+test_that("multi-region: single-range extraction is unchanged (regression)", {
+  skip_if_not_installed("snpStats")
+  h  <- GenotypeHandle(plink1Prefix = file.path(test_data_dir, "test_variants"))
+  qd <- QtlDataset(study = "S", genotypes = h,
+                   phenotypes = list(ctx = .mr_makeSE(h@sampleIds)))
+  bp <- h@snpInfo$BP
+  r <- GenomicRanges::GRanges("chr21", IRanges::IRanges(min(bp), max(bp)))
+  expect_equal(.mr_ncol(qd, r), nrow(h@snpInfo))
+})
+
+test_that(".qtlResolveVariantRegion rejects a non-GRanges / empty region", {
+  skip_if_not_installed("snpStats")
+  h  <- GenotypeHandle(plink1Prefix = file.path(test_data_dir, "test_variants"))
+  qd <- QtlDataset(study = "S", genotypes = h,
+                   phenotypes = list(ctx = .mr_makeSE(h@sampleIds)))
+  expect_error(getGenotypes(qd, region = "chr21:1-2"), "must be a GRanges")
+  expect_error(getGenotypes(qd, region = GenomicRanges::GRanges()),
+               "at least one range")
 })
 
 

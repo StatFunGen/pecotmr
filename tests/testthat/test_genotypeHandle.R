@@ -328,4 +328,70 @@ test_that("GenotypeHandle rejects invalid format", {
   )
 })
 
+# ===========================================================================
+# One-file-per-chromosome (sharded) handle: constructor + validation.
+# genoMeta accepts a #chr,path meta file or a named chrom->path vector.
+# Extraction routing for sharded handles is covered in test_genotypeIo.R.
+# ===========================================================================
+test_that("genoMeta (named vector) builds a sharded handle", {
+  skip_if_not_installed("snpStats")
+  h <- GenotypeHandle(genoMeta = c(
+    "21" = file.path(test_data_dir, "test_variants"),
+    "22" = file.path(test_data_dir, "test_variants_chr22")))
+  expect_s4_class(h, "GenotypeHandle")
+  expect_equal(h@format, "plink1")
+  expect_equal(sort(names(h@chromPaths)), c("21", "22"))
+  expect_equal(nrow(h@snpInfo), 2L * 349L)
+})
+
+test_that("genoMeta meta-file resolves payloads relative to its own directory", {
+  skip_if_not_installed("snpStats")
+  # A meta file living in test_data referencing payloads by basename only.
+  metafile <- file.path(test_data_dir, "tmp_chrom_meta_relative.tsv")
+  on.exit(unlink(metafile), add = TRUE)
+  writeLines(c("#chr\tpath", "21\ttest_variants", "22\ttest_variants_chr22"),
+             metafile)
+  h <- GenotypeHandle(genoMeta = metafile)
+  expect_equal(sort(names(h@chromPaths)), c("21", "22"))
+  expect_equal(nrow(h@snpInfo), 2L * 349L)
+})
+
+test_that("genoMeta errors on mismatched samples across shards", {
+  skip_if_not_installed("snpStats")
+  # protocol_example.genotype is a different sample panel.
+  expect_error(
+    GenotypeHandle(genoMeta = c(
+      "21" = file.path(test_data_dir, "test_variants"),
+      "22" = file.path(test_data_dir, "protocol_example.genotype"))),
+    "identical sample IDs")
+})
+
+test_that("genoMeta errors on mixed formats across shards", {
+  skip_if_not_installed("snpStats")
+  skip_if_not_installed("SNPRelate")
+  expect_error(
+    GenotypeHandle(genoMeta = c(
+      "21" = file.path(test_data_dir, "test_variants"),
+      "22" = file.path(test_data_dir, "test_variants_chr22.gds"))),
+    "share one")
+})
+
+test_that("genoMeta errors when a chromosome appears in two files", {
+  skip_if_not_installed("snpStats")
+  expect_error(
+    GenotypeHandle(genoMeta = c(
+      "a" = file.path(test_data_dir, "test_variants"),
+      "b" = file.path(test_data_dir, "test_variants"))),
+    "more than one")
+})
+
+test_that("genoMeta sharded handle show() reports the layout", {
+  skip_if_not_installed("snpStats")
+  sh <- GenotypeHandle(genoMeta = c(
+    "21" = file.path(test_data_dir, "test_variants"),
+    "22" = file.path(test_data_dir, "test_variants_chr22")))
+  out <- paste(capture.output(show(sh)), collapse = "\n")
+  expect_match(out, "per-chromosome files")
+})
+
 

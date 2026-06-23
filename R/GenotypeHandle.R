@@ -13,13 +13,23 @@ NULL
 #' @description S4 container holding a path + format + metadata for lazy
 #'   genotype access. Supports PLINK1 (.bed/.bim/.fam), PLINK2
 #'   (.pgen/.pvar/.psam), VCF/BCF, and GDS.
-#' @slot path Character, file path.
+#' @slot path Character, file path. For a one-file-per-chromosome handle
+#'   this is the chrom-meta file path (a display/provenance value); the
+#'   per-chromosome payload files live in \code{chromPaths}.
 #' @slot format Character, one of \code{"plink1"}, \code{"plink2"},
 #'   \code{"vcf"}, \code{"gds"}.
-#' @slot snpInfo data.frame, SNP metadata read from the index/sidecar.
+#' @slot snpInfo data.frame, SNP metadata read from the index/sidecar. For a
+#'   sharded handle this is the union across chromosomes (row-bound in the
+#'   order the shards were supplied), so \code{snpIdx} stays a single global
+#'   index space.
 #' @slot nSamples Integer, number of samples.
 #' @slot sampleIds Character vector of sample identifiers.
 #' @slot pgenPtr Opaque pointer for PLINK2 reader state (NULL otherwise).
+#' @slot chromPaths Named character vector mapping canonical chromosome
+#'   (e.g. \code{"21"}, \code{"X"}) to the per-chromosome payload path/prefix.
+#'   Empty (\code{character(0)}) for a single-file handle; non-empty marks a
+#'   one-file-per-chromosome (sharded) handle whose extraction is routed by
+#'   chromosome.
 #' @export
 setClass("GenotypeHandle",
   representation(
@@ -28,7 +38,11 @@ setClass("GenotypeHandle",
     snpInfo = "data.frame",
     nSamples = "integer",
     sampleIds = "character",
-    pgenPtr = "ANY"
+    pgenPtr = "ANY",
+    chromPaths = "character"
+  ),
+  prototype = prototype(
+    chromPaths = character(0)
   ),
   validity = function(object) {
     errors <- character()
@@ -38,6 +52,12 @@ setClass("GenotypeHandle",
     if (!object@format %in% valid_formats)
       errors <- c(errors, paste("'format' must be one of:",
                                 paste(valid_formats, collapse = ", ")))
+    if (length(object@chromPaths) > 0L) {
+      nm <- names(object@chromPaths)
+      if (is.null(nm) || any(!nzchar(nm)) || anyDuplicated(nm))
+        errors <- c(errors, paste("'chromPaths' must be a uniquely-named",
+                                  "character vector (names = chromosomes)"))
+    }
     if (length(errors) == 0) TRUE else errors
   }
 )
@@ -45,7 +65,14 @@ setClass("GenotypeHandle",
 #' @export
 setMethod("show", "GenotypeHandle", function(object) {
   cat(sprintf("GenotypeHandle [%s]\n", object@format))
-  cat(sprintf("  Path: %s\n", object@path))
+  chromPaths <- .genotypeChromPaths(object)
+  if (length(chromPaths) > 0L) {
+    cat(sprintf("  Chrom-meta: %s\n", object@path))
+    cat(sprintf("  %d per-chromosome files: %s\n",
+                length(chromPaths), paste(names(chromPaths), collapse = ", ")))
+  } else {
+    cat(sprintf("  Path: %s\n", object@path))
+  }
   cat(sprintf("  %d samples, %d SNPs\n",
               object@nSamples, nrow(object@snpInfo)))
 })
@@ -67,6 +94,15 @@ setMethod("show", "GenotypeHandle", function(object) {
 #'       \code{plink1Prefix} or arrange symlinks at a common stem.}
 #'     \item{\code{pgen} + \code{pvar} + \code{psam}}{Explicit PLINK2
 #'       triplet. Same shared-stem requirement.}
+#'     \item{\code{genoMeta}}{One genotype file per chromosome. Either a path
+#'       to a whitespace/TSV meta file whose first column is the chromosome
+#'       (\code{#chr}) and second column the per-chromosome payload
+#'       (a \code{.bed}/\code{.pgen}/\code{.vcf[.gz]}/\code{.bcf}/\code{.gds}
+#'       file or a PLINK prefix; relative paths resolve against the meta
+#'       file's directory), or a named character vector mapping chromosome to
+#'       payload. All shards must share one format and identical sample IDs in
+#'       the same order. Extraction is routed to the correct file by the
+#'       requested region's chromosome.}
 #'   }
 #'   The constructor opens the file for metadata only (sample IDs and SNP
 #'   info); dosage extraction is deferred until \code{extractBlockGenotypes()}
@@ -90,6 +126,10 @@ setMethod("show", "GenotypeHandle", function(object) {
 #' @param region Region specification for \code{ldMeta} lookup:
 #'   \code{"chr:start-end"} string or a one-row data.frame with
 #'   \code{chrom}, \code{start}, \code{end}.
+#' @param genoMeta One-file-per-chromosome specification: a path to a
+#'   \code{#chr,path} meta file or a named character vector
+#'   (names = chromosomes, values = payload paths/prefixes). Optionally pass
+#'   \code{format} via \code{...} to force a single backend for every shard.
 #' @param ... Additional arguments forwarded to the format-specific reader.
 #' @return A \code{GenotypeHandle} object.
 #' @export
@@ -98,6 +138,7 @@ GenotypeHandle <- function(path = NULL,
                            bed = NULL, bim = NULL, fam = NULL,
                            pgen = NULL, pvar = NULL, psam = NULL,
                            ldMeta = NULL, region = NULL,
+                           genoMeta = NULL,
                            ...) {
   bedTrioGiven <- !is.null(bed) || !is.null(bim) || !is.null(fam)
   bedTrioComplete <- !is.null(bed) && !is.null(bim) && !is.null(fam)
@@ -123,13 +164,14 @@ GenotypeHandle <- function(path = NULL,
     plink2Prefix   = !is.null(plink2Prefix),
     plink1Triplet  = bedTrioComplete,
     plink2Triplet  = pgenTrioComplete,
-    ldMeta         = !is.null(ldMeta)
+    ldMeta         = !is.null(ldMeta),
+    genoMeta       = !is.null(genoMeta)
   )
   nSources <- sum(sources)
   if (nSources != 1L) {
     stop("Exactly one of `path`, `plink1Prefix`, `plink2Prefix`, the ",
-         "bed/bim/fam triplet, the pgen/pvar/psam triplet, or `ldMeta` ",
-         "must be specified (got ", nSources, ").")
+         "bed/bim/fam triplet, the pgen/pvar/psam triplet, `ldMeta`, or ",
+         "`genoMeta` must be specified (got ", nSources, ").")
   }
 
   if (sources[["path"]]) {
@@ -149,6 +191,9 @@ GenotypeHandle <- function(path = NULL,
   }
   if (sources[["ldMeta"]]) {
     return(.genotypeHandleFromLdMeta(ldMeta, region, ...))
+  }
+  if (sources[["genoMeta"]]) {
+    return(.genotypeHandleFromChromMeta(genoMeta, ...))
   }
 }
 
@@ -234,6 +279,138 @@ GenotypeHandle <- function(path = NULL,
          "`plink2Prefix` instead.")
   }
   .makePlink2Handle(unname(stems[1L]), ...)
+}
+
+# ---------------------------------------------------------------------------
+# One-file-per-chromosome (sharded) handle support
+# ---------------------------------------------------------------------------
+
+# Canonicalize a chromosome label to a bare token (strip a leading "chr").
+# Used as the routing key in @chromPaths and when matching @snpInfo$CHR.
+#' @keywords internal
+.canonChr <- function(x) sub("^chr", "", as.character(x), ignore.case = TRUE)
+
+# Per-chromosome shard map, tolerant of GenotypeHandle objects deserialized
+# from before the `chromPaths` slot existed (e.g. an RDS saved by an older
+# pecotmr). Such objects have no `chromPaths` slot, so a direct `@` access
+# errors; treat them as single-file handles.
+#' @keywords internal
+.genotypeChromPaths <- function(handle) {
+  tryCatch(handle@chromPaths, error = function(e) character(0))
+}
+
+# Parse the genoMeta input into a data.frame(chrom, path). Accepts either a
+# path to a #chr/path meta file (whitespace- or tab-delimited, with header)
+# or a named character vector (names = chromosomes). Relative payload paths
+# in a meta file are resolved against the meta file's own directory.
+#' @keywords internal
+.parseChromMeta <- function(genoMeta) {
+  isMetaFile <- is.character(genoMeta) && length(genoMeta) == 1L &&
+    is.null(names(genoMeta)) && file.exists(genoMeta)
+  if (isMetaFile) {
+    meta <- utils::read.table(genoMeta, header = TRUE, sep = "",
+                              comment.char = "", stringsAsFactors = FALSE,
+                              check.names = FALSE)
+    if (ncol(meta) < 2L)
+      stop("GenotypeHandle(genoMeta): meta file '", genoMeta,
+           "' must have at least 2 columns (chromosome, path).")
+    chrom <- as.character(meta[[1L]])
+    pth   <- as.character(meta[[2L]])
+    base  <- dirname(normalizePath(genoMeta))
+    pth <- vapply(pth, function(p) {
+      if (grepl("^(/|[A-Za-z]:)", p) || file.exists(p)) p else file.path(base, p)
+    }, character(1), USE.NAMES = FALSE)
+    return(data.frame(chrom = chrom, path = pth, stringsAsFactors = FALSE))
+  }
+  if (is.character(genoMeta) && length(genoMeta) >= 1L &&
+      !is.null(names(genoMeta))) {
+    return(data.frame(chrom = names(genoMeta), path = unname(genoMeta),
+                      stringsAsFactors = FALSE))
+  }
+  stop("GenotypeHandle(genoMeta): expected a path to a `#chr,path` meta file ",
+       "or a named character vector (names = chromosomes, values = paths).")
+}
+
+# Build a single-file GenotypeHandle for one shard payload, dispatching to the
+# right reader. `format` (optional) forces a backend; otherwise it is detected
+# from the file extension, falling back to PLINK prefix probing.
+#' @keywords internal
+.resolveGenotypeShard <- function(p, format = NULL) {
+  lower <- tolower(p)
+  if (!is.null(format)) {
+    if (format == "plink1") return(.makePlink1Handle(p))
+    if (format == "plink2") return(.makePlink2Handle(p))
+    return(readGenotypes(p, format = format))
+  }
+  if (grepl("\\.vcf(\\.b?gz)?$", lower) || endsWith(lower, ".bcf"))
+    return(readGenotypes(p, format = "vcf"))
+  if (endsWith(lower, ".gds")) return(readGenotypes(p, format = "gds"))
+  if (endsWith(lower, ".bed"))
+    return(.makePlink1Handle(sub("\\.bed$", "", p, ignore.case = TRUE)))
+  if (endsWith(lower, ".pgen"))
+    return(.makePlink2Handle(sub("\\.pgen$", "", p, ignore.case = TRUE)))
+  # No recognized extension: treat as a PLINK prefix, probe for the sidecar.
+  if (file.exists(paste0(p, ".bed"))) return(.makePlink1Handle(p))
+  if (file.exists(paste0(p, ".pgen"))) return(.makePlink2Handle(p))
+  stop("GenotypeHandle(genoMeta): cannot determine genotype format for '", p,
+       "'. Use a recognized extension (.bed/.pgen/.vcf[.gz]/.bcf/.gds), a ",
+       "PLINK prefix, or pass `format=`.")
+}
+
+# Assemble a sharded handle from a per-chromosome meta. Reads each shard's
+# metadata via the existing single-file readers, validates a single shared
+# format and identical sample IDs (same order, required for cross-shard
+# cbind), and row-binds the per-shard snpInfo into one global index space.
+#' @keywords internal
+.genotypeHandleFromChromMeta <- function(genoMeta, ...) {
+  dots   <- list(...)
+  format <- dots$format
+  parsed <- .parseChromMeta(genoMeta)
+  if (nrow(parsed) == 0L)
+    stop("GenotypeHandle(genoMeta): no chromosomes found in the meta input.")
+
+  shards <- lapply(parsed$path, .resolveGenotypeShard, format = format)
+
+  formats <- vapply(shards, function(h) h@format, character(1))
+  if (length(unique(formats)) != 1L)
+    stop("GenotypeHandle(genoMeta): all per-chromosome files must share one ",
+         "format; got: ", paste(unique(formats), collapse = ", "), ".")
+
+  sample0 <- shards[[1L]]@sampleIds
+  for (i in seq_along(shards)[-1L]) {
+    if (!identical(shards[[i]]@sampleIds, sample0))
+      stop("GenotypeHandle(genoMeta): all per-chromosome files must have ",
+           "identical sample IDs in the same order (mismatch at '",
+           parsed$path[[i]], "').")
+  }
+
+  unifiedSnpInfo <- do.call(rbind, lapply(shards, function(h) h@snpInfo))
+  rownames(unifiedSnpInfo) <- NULL
+
+  chromPaths <- character(0)
+  for (i in seq_along(shards)) {
+    chs <- unique(.canonChr(shards[[i]]@snpInfo$CHR))
+    for (ch in chs) {
+      if (ch %in% names(chromPaths))
+        stop("GenotypeHandle(genoMeta): chromosome '", ch, "' appears in ",
+             "more than one per-chromosome file.")
+      chromPaths[[ch]] <- shards[[i]]@path
+    }
+  }
+
+  metaPath <- if (is.character(genoMeta) && length(genoMeta) == 1L &&
+                  is.null(names(genoMeta)) && file.exists(genoMeta))
+    normalizePath(genoMeta) else "<chrom-meta>"
+
+  new("GenotypeHandle",
+    path       = metaPath,
+    format     = formats[[1L]],
+    snpInfo    = unifiedSnpInfo,
+    nSamples   = shards[[1L]]@nSamples,
+    sampleIds  = sample0,
+    pgenPtr    = NULL,
+    chromPaths = chromPaths
+  )
 }
 
 #' @rdname getSnpInfo

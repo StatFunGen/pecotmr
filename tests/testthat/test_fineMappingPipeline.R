@@ -733,6 +733,37 @@ test_that("fineMappingPipeline(MultiStudyQtlDataset): aggregates results across 
   expect_null(getLdSketch(res))
 })
 
+test_that("fineMappingPipeline(MultiStudyQtlDataset): jointRegions=FALSE merges per region in each study", {
+  qd1 <- QtlDataset(
+    study              = "s1",
+    genotypes          = .fmp_makeHandle(),
+    phenotypes         = list(brain = .fmp_makeSe(traits = "ENSG_A")),
+    genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0))
+  qd2 <- QtlDataset(
+    study              = "s2",
+    genotypes          = .fmp_makeHandle(),
+    phenotypes         = list(brain = .fmp_makeSe(traits = "ENSG_A")),
+    genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0))
+  mt <- MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1, s2 = qd2))
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieIndiv      = .fmp_mockFitIndiv(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  regions <- GenomicRanges::GRanges("chr1",
+               IRanges::IRanges(c(50L, 350L), c(350L, 650L)))
+  res <- suppressMessages(fineMappingPipeline(
+    mt, methods = "susie", traitId = "ENSG_A",
+    region = regions, jointRegions = FALSE, addSusieInf = FALSE))
+  expect_s4_class(res, "QtlFineMappingResult")
+  # one merged row per study (region collapsed into the entry).
+  expect_equal(nrow(res), 2L)
+  expect_setequal(getStudy(res), c("s1", "s2"))
+  fit <- getSusieFit(res, study = "s1", context = "brain",
+                     trait = "ENSG_A", method = "susie")
+  expect_equal(names(fit), c("region1", "region2"))
+})
+
 test_that("fineMappingPipeline(MultiStudyQtlDataset): with embedded QtlSumStats stamps the ldSketch", {
   qd <- QtlDataset(
     study              = "s1",
@@ -1350,3 +1381,153 @@ test_that(".fmResidGeno / .fmResidPheno forward picked-up flags to the real acce
 # with `getQcInfo()` populated); `FineMappingEntry(variantIds, ...)`;
 # `result$finemappingEntry` (was `result$finemappingResult`).
 # ===========================================================================
+
+# ===========================================================================
+# Multi-region / jointRegions (P3)
+# ===========================================================================
+
+test_that(".fmCsIdx / .fmRelabelCs parse and renumber <method>_<idx> labels", {
+  expect_equal(pecotmr:::.fmCsIdx(c("susie_0", "susie_1", "susie_2")),
+               c(0L, 1L, 2L))
+  expect_equal(pecotmr:::.fmRelabelCs(c("susie_0", "susie_1", "susie_2"), 3L),
+               c("susie_0", "susie_4", "susie_5"))
+  # offset 0 is a no-op; the "_0" not-in-CS sentinel is always preserved.
+  expect_equal(pecotmr:::.fmRelabelCs(c("susie_0", "susie_1"), 0L),
+               c("susie_0", "susie_1"))
+})
+
+test_that(".fmMergeEntries concatenates variants, renumbers CS, lists susieFit", {
+  mk <- function(vids, cs95, fit) FineMappingEntry(
+    variantIds = vids, susieFit = fit,
+    topLoci = data.frame(variant_id = vids, pip = rep(0.5, length(vids)),
+                         cs_95 = cs95, stringsAsFactors = FALSE))
+  e1 <- mk(c("a", "b"), c("susie_1", "susie_0"), list(tag = "f1"))
+  e2 <- mk(c("c", "d"), c("susie_1", "susie_1"), list(tag = "f2"))
+  m <- pecotmr:::.fmMergeEntries(list(e1, e2))
+  expect_s4_class(m, "FineMappingEntry")
+  expect_equal(m@variantIds, c("a", "b", "c", "d"))
+  expect_equal(as.character(m@topLoci$variant_id), c("a", "b", "c", "d"))
+  # e1's max CS index is 1, so e2's "susie_1" is renumbered to "susie_2".
+  expect_equal(m@topLoci$cs_95, c("susie_1", "susie_0", "susie_2", "susie_2"))
+  expect_true(is.list(m@susieFit))
+  expect_equal(names(m@susieFit), c("region1", "region2"))
+})
+
+test_that(".fmMergeEntries returns a single entry unchanged", {
+  e <- FineMappingEntry(variantIds = "a", susieFit = list(),
+                        topLoci = data.frame(variant_id = "a", pip = 0.5))
+  expect_identical(pecotmr:::.fmMergeEntries(list(e)), e)
+})
+
+test_that("fineMappingPipeline(QtlDataset): region + cisWindow is rejected", {
+  qd <- .fmp_makeQtlDataset()
+  expect_error(
+    fineMappingPipeline(
+      qd, methods = "susie",
+      region = GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 600)),
+      cisWindow = 1000L),
+    "either `region` or `cisWindow`")
+})
+
+test_that("fineMappingPipeline(QtlDataset): jointRegions=FALSE merges per-region fits", {
+  qd <- .fmp_makeQtlDataset(contexts = "brain", traits = c("ENSG_A", "ENSG_B"))
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieIndiv      = .fmp_mockFitIndiv(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  regions <- GenomicRanges::GRanges("chr1",
+               IRanges::IRanges(c(50L, 350L), c(350L, 650L)))
+  res <- suppressMessages(fineMappingPipeline(
+    qd, methods = "susie", traitId = "ENSG_A",
+    region = regions, jointRegions = FALSE, addSusieInf = FALSE))
+  expect_s4_class(res, "QtlFineMappingResult")
+  # 1 ctx x 1 trait x 1 method -> a single merged row, not one per region.
+  expect_equal(nrow(res), 1L)
+  fit <- getSusieFit(res, study = "study1", context = "brain",
+                     trait = "ENSG_A", method = "susie")
+  expect_equal(names(fit), c("region1", "region2"))  # per-region fit list
+})
+
+test_that("fineMappingPipeline(QtlDataset): jointRegions=TRUE fits one concatenated block", {
+  qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieIndiv      = .fmp_mockFitIndiv(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  regions <- GenomicRanges::GRanges("chr1",
+               IRanges::IRanges(c(50L, 350L), c(350L, 650L)))
+  res <- suppressMessages(fineMappingPipeline(
+    qd, methods = "susie", traitId = "ENSG_A",
+    region = regions, jointRegions = TRUE, addSusieInf = FALSE))
+  expect_equal(nrow(res), 1L)
+  fit <- getSusieFit(res, study = "study1", context = "brain",
+                     trait = "ENSG_A", method = "susie")
+  # one concatenated fit -> the mock fit object, not a per-region list.
+  expect_false(identical(names(fit), c("region1", "region2")))
+})
+
+test_that("fineMappingPipeline(QtlDataset): mvsusie jointRegions=FALSE merges per-region fits", {
+  qd <- .fmp_makeQtlDataset(contexts = "brain", traits = c("ENSG_A", "ENSG_B"))
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    mvsusie              = .fmp_mockMvsusie(),
+    create_mixture_prior = .fmp_mockMixturePrior(),
+    .package = "mvsusieR")
+  regions <- GenomicRanges::GRanges("chr1",
+               IRanges::IRanges(c(50L, 350L), c(350L, 650L)))
+  res <- suppressMessages(fineMappingPipeline(
+    qd, methods = "mvsusie", traitId = c("ENSG_A", "ENSG_B"),
+    region = regions, jointRegions = FALSE))
+  expect_equal(nrow(res), 2L)  # joint fit fanned out to both traits
+  fit <- getSusieFit(res, study = "study1", context = "brain",
+                     trait = "ENSG_A", method = "mvsusie")
+  expect_equal(names(fit), c("region1", "region2"))  # per-region merged fit list
+})
+
+test_that("fineMappingPipeline(QtlDataset): fsusie jointRegions=FALSE merges per-region fits", {
+  qd <- .fmp_makeQtlDataset(contexts = "brain", traits = c("ENSG_A", "ENSG_B"))
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  local_mocked_bindings(susiF = .fmp_mockSusiF(), .package = "fsusieR")
+  regions <- GenomicRanges::GRanges("chr1",
+               IRanges::IRanges(c(50L, 350L), c(350L, 650L)))
+  res <- suppressMessages(fineMappingPipeline(
+    qd, methods = "fsusie", traitId = c("ENSG_A", "ENSG_B"),
+    region = regions, jointRegions = FALSE))
+  expect_equal(nrow(res), 2L)
+  fit <- getSusieFit(res, study = "study1", context = "brain",
+                     trait = "ENSG_A", method = "fsusie")
+  expect_equal(names(fit), c("region1", "region2"))
+})
+
+test_that("fineMappingPipeline(QtlDataset): jointSpec + jointRegions=FALSE merges per region", {
+  qd <- .fmp_makeQtlDataset(contexts = c("brain", "liver"),
+                            traits = c("ENSG_A", "ENSG_B"))
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    mvsusie              = .fmp_mockMvsusie(),
+    create_mixture_prior = .fmp_mockMixturePrior(),
+    .package = "mvsusieR")
+  regions <- GenomicRanges::GRanges("chr1",
+               IRanges::IRanges(c(50L, 350L), c(350L, 650L)))
+  res <- suppressMessages(fineMappingPipeline(
+    qd, methods = "mvsusie", traitId = c("ENSG_A", "ENSG_B"),
+    region = regions, jointRegions = FALSE, jointSpecification = "context"))
+  expect_s4_class(res, "QtlFineMappingResult")
+  # cross-context joint -> one row per trait, context collapses to "joint".
+  expect_equal(nrow(res), 2L)
+  expect_true(all(as.character(res$context) == "joint"))
+  fit <- getSusieFit(res, study = "study1", context = "joint",
+                     trait = "ENSG_A", method = "mvsusie")
+  expect_equal(names(fit), c("region1", "region2"))  # merged across regions
+})

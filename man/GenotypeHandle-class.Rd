@@ -12,17 +12,28 @@ S4 container holding a path + format + metadata for lazy
 \section{Slots}{
 
 \describe{
-\item{\code{path}}{Character, file path.}
+\item{\code{path}}{Character, file path. For a one-file-per-chromosome handle
+this is the chrom-meta file path (a display/provenance value); the
+per-chromosome payload files live in \code{chromPaths}.}
 
 \item{\code{format}}{Character, one of \code{"plink1"}, \code{"plink2"},
 \code{"vcf"}, \code{"gds"}.}
 
-\item{\code{snpInfo}}{data.frame, SNP metadata read from the index/sidecar.}
+\item{\code{snpInfo}}{data.frame, SNP metadata read from the index/sidecar. For a
+sharded handle this is the union across chromosomes (row-bound in the
+order the shards were supplied), so \code{snpIdx} stays a single global
+index space.}
 
 \item{\code{nSamples}}{Integer, number of samples.}
 
 \item{\code{sampleIds}}{Character vector of sample identifiers.}
 
 \item{\code{pgenPtr}}{Opaque pointer for PLINK2 reader state (NULL otherwise).}
+
+\item{\code{chromPaths}}{Named character vector mapping canonical chromosome
+(e.g. \code{"21"}, \code{"X"}) to the per-chromosome payload path/prefix.
+Empty (\code{character(0)}) for a single-file handle; non-empty marks a
+one-file-per-chromosome (sharded) handle whose extraction is routed by
+chromosome.}
 }}
 

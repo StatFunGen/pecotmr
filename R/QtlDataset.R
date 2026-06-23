@@ -177,11 +177,13 @@ setMethod("getGenotypeCovariates", "QtlDataset",
 setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
 
 # --- Internal: resolve the variant-selection region for the genotype handle.
-# Returns a single GRanges. When `traitId` is supplied, expand each trait's
-# rowRange by `cisWindow` bp and take the union span (per the multi-trait rule:
-# `[min(start) - cisWindow, max(end) + cisWindow]`). When `region` is supplied,
-# extend by `cisWindow` if given. Exactly one of (traitId, region) may be
-# supplied; if neither is, return NULL meaning "all variants in handle".
+# Returns a GRanges (one or more ranges). When `traitId` is supplied, expand
+# each trait's rowRange by `cisWindow` bp and take the union span (per the
+# multi-trait rule: `[min(start) - cisWindow, max(end) + cisWindow]`). When
+# `region` is supplied it is taken literally and may contain multiple ranges
+# (e.g. for joint multi-region extraction), optionally extended per-range by
+# `cisWindow`. Exactly one of (traitId, region) may be supplied; if neither is,
+# return NULL meaning "all variants in handle".
 .qtlResolveVariantRegion <- function(x, traitId = NULL, region = NULL,
                                      cisWindow = NULL) {
   if (!is.null(traitId) && !is.null(region)) {
@@ -224,21 +226,22 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
       ranges   = IRanges::IRanges(start = spanStart, end = spanEnd)
     ))
   }
-  # region path
+  # region path (one or more ranges, taken literally)
   if (!methods::is(region, "GRanges")) {
     stop("`region` must be a GRanges object.")
   }
-  if (length(region) != 1L) {
-    stop("`region` must be a single range.")
+  if (length(region) == 0L) {
+    stop("`region` must contain at least one range.")
   }
   if (!is.null(cisWindow)) {
     if (length(cisWindow) != 1L || cisWindow < 0) {
       stop("`cisWindow` must be a single non-negative value.")
     }
+    # Extend every range by cisWindow (vectorised over a multi-range region).
     region <- GenomicRanges::GRanges(
       seqnames = GenomicRanges::seqnames(region),
       ranges   = IRanges::IRanges(
-        start = max(1L, GenomicRanges::start(region) - cisWindow),
+        start = pmax(1L, GenomicRanges::start(region) - cisWindow),
         end   = GenomicRanges::end(region) + cisWindow
       )
     )
@@ -246,20 +249,26 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
   region
 }
 
-# Internal: map a GRanges region into 1-based snpIdx into handle@snpInfo.
+# Internal: map a GRanges region (one or more ranges) into 1-based snpIdx into
+# handle@snpInfo. Indices are unioned across ranges in range order (first
+# occurrence wins), so overlapping ranges contribute each variant once.
 .qtlVariantIndices <- function(x, region = NULL) {
   handle <- x@genotypes
   if (is.null(region)) {
     return(seq_len(nrow(handle@snpInfo)))
   }
-  chr <- as.character(GenomicRanges::seqnames(region))[[1L]]
-  chrCanon <- sub("^chr", "", chr, ignore.case = TRUE)
   snpInfo <- handle@snpInfo
   siChr <- sub("^chr", "", as.character(snpInfo$CHR), ignore.case = TRUE)
   bp <- as.integer(snpInfo$BP)
-  start <- GenomicRanges::start(region)
-  end   <- GenomicRanges::end(region)
-  which(siChr == chrCanon & bp >= start & bp <= end)
+  rChr   <- sub("^chr", "", as.character(GenomicRanges::seqnames(region)),
+               ignore.case = TRUE)
+  rStart <- GenomicRanges::start(region)
+  rEnd   <- GenomicRanges::end(region)
+  idx <- integer(0)
+  for (i in seq_along(region)) {
+    idx <- c(idx, which(siChr == rChr[i] & bp >= rStart[i] & bp <= rEnd[i]))
+  }
+  unique(idx)
 }
 
 # Internal: extract the panel dosage block (samples x variants) for the
