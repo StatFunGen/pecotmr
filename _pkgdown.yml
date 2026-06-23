@@ -280,6 +280,7 @@ reference:
       - fineMappingPipeline
       - mashPipeline
       - qtlEnrichmentPipeline
+      - sldscPostprocessingPipeline
       - twasWeightsPipeline
 
   - title: "cTWAS"
