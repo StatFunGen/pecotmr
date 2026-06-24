@@ -3015,6 +3015,13 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
     removeDups            = TRUE)
   harmCounts <- attr(df, "qcCounts")
   attr(df, "qcCounts") <- NULL
+  # Re-key SNP to the harmonized id. .matchAgainstSketch rewrites variant_id to
+  # the panel's allele orientation (chr:pos:A2:A1) and sign-flips Z/BETA for
+  # swapped variants, but leaves the original SNP untouched. Every subsequent
+  # panel lookup keys on SNP (kriging, z-mismatch QC) as does the downstream
+  # fine-mapping LD lookup, so a stale SNP makes sign-flipped variants miss the
+  # panel. Sync it here so harmonized alleles and id stay consistent.
+  if (!is.null(df$variant_id)) df$SNP <- df$variant_id
   entryAudit$matchedAgainstSketch <- nrow(df)
   if (!is.null(harmCounts)) {
     qcCount$harmCorrSign   <- harmCounts$signFlip

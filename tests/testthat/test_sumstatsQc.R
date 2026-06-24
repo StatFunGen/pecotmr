@@ -2700,7 +2700,73 @@ test_that("summaryStatsQc: PIP screen off leaves the harmonized set intact", {
                      genome = "hg19", ldSketch = .ssQ_makeHandle())
   out <- summaryStatsQc(ss, pipCutoffToSkip = 0, nCutoff = 0)
   snps <- as.character(S4Vectors::mcols(out$entry[[1L]])$SNP)
-  expect_setequal(snps, c("rs1", "rs2", "rs3"))
+  # SNP is re-keyed to the panel-harmonized id (chr:pos:A2:A1) after
+  # harmonization; the panel is A1=A / A2=G, so the surviving three become
+  # chr1:<pos>:G:A.
+  expect_setequal(snps, c("chr1:100:G:A", "chr1:200:G:A", "chr1:300:G:A"))
+})
+
+# A panel whose SNP ids follow the formatVariantId convention (chr:pos:A2:A1),
+# as real genotype LD sketches do, so a re-keyed entry SNP resolves against it.
+.ssQ_makeHandleVid <- function(snp_n = 8L, n_samples = 60L) {
+  h <- .ssQ_makeHandle(snp_n, n_samples)
+  h@snpInfo$SNP <- paste0("chr1:", h@snpInfo$BP, ":G:A")
+  h
+}
+
+# Entry with one allele-swapped variant (pos 200: A1/A2 reversed vs the panel),
+# carrying its input-orientation SNP. Others are exact matches.
+.ssQ_makeFlipEntryGr <- function() {
+  gr <- GenomicRanges::GRanges(
+    seqnames = rep("chr1", 3L),
+    ranges   = IRanges::IRanges(start = c(100L, 200L, 300L), width = 1L))
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    SNP = c("chr1:100:G:A", "chr1:200:A:G", "chr1:300:G:A"),  # pos200 input-orientation
+    A1  = c("A", "G", "A"),   # pos200 swapped relative to panel (A1=A)
+    A2  = c("G", "A", "G"),
+    Z   = c(1.0, 2.0, 1.5),
+    N   = rep(1000L, 3L))
+  gr
+}
+
+test_that("summaryStatsQc: harmonization re-keys SNP to the panel id and sign-flips Z", {
+  # pos200 is allele-swapped vs the panel, so harmonization sign-flips its Z and
+  # the SNP must be re-keyed to the panel-orientation id (chr1:200:G:A), not
+  # left at the input-orientation chr1:200:A:G. Exact matches are unchanged.
+  ss <- GwasSumStats(study = "g1", entry = list(.ssQ_makeFlipEntryGr()),
+                     genome = "hg19", ldSketch = .ssQ_makeHandle())
+  out <- summaryStatsQc(ss, pipCutoffToSkip = 0, nCutoff = 0)
+  e <- out$entry[[1L]]
+  o <- order(GenomicRanges::start(e))
+  snp <- as.character(S4Vectors::mcols(e)$SNP)[o]
+  z   <- S4Vectors::mcols(e)$Z[o]
+  expect_equal(snp, c("chr1:100:G:A", "chr1:200:G:A", "chr1:300:G:A"))
+  expect_equal(z, c(1.0, -2.0, 1.5))   # only the swapped variant's Z flips
+})
+
+test_that("summaryStatsQc: slalom z-mismatch resolves sign-flipped variants against the panel", {
+  # Pre-fix regression: a sign-flipped variant kept its input-orientation SNP,
+  # which is absent from the panel, so .applyLdMismatchQcToEntry errored with
+  # "absent from the ldSketch panel". After the harmonization re-key the SNP
+  # matches the panel and slalom QC runs to completion.
+  ss <- GwasSumStats(study = "g1", entry = list(.ssQ_makeFlipEntryGr()),
+                     genome = "hg19", ldSketch = .ssQ_makeHandleVid())
+  local_mocked_bindings(
+    extractBlockGenotypes = .ssQ_mockExtractor(),
+    ldMismatchQc = function(zScore, R = NULL, X = NULL, nSample = NULL,
+                            method = c("slalom", "dentist"),
+                            ldMethod = "sample", ...) {
+      data.frame(original_z = zScore,
+                 outlier    = rep(FALSE, length(zScore)),
+                 stringsAsFactors = FALSE)
+    },
+    .package = "pecotmr")
+  expect_no_error(
+    out <- summaryStatsQc(ss, zMismatchQc = "slalom",
+                          pipCutoffToSkip = 0, nCutoff = 0))
+  snp <- as.character(S4Vectors::mcols(out$entry[[1L]])$SNP)
+  expect_true("chr1:200:G:A" %in% snp)   # the sign-flipped variant survived
+  expect_equal(length(out$entry[[1L]]), 3L)
 })
 
 test_that(".deriveBetaSeFromZ: derives BETA+SE when entry has Z+MAF+N only", {
@@ -2819,8 +2885,15 @@ test_that("summaryStatsQc: round-trips QtlSumStats inputs", {
 # ===========================================================================
 
 test_that("summaryStatsQc: zMismatchQc = 'dentist' walks the LD-mismatch branch", {
-  ss <- .ssQ_makeGwasSumStats(snp_ids = paste0("rs", 1:8),
-                              positions = seq(100L, by = 100L, length.out = 8L))
+  # Panel ids follow the chr:pos:A2:A1 convention (as real LD sketches do) so the
+  # post-harmonization re-keyed SNP resolves against the panel for z-mismatch QC.
+  ss <- GwasSumStats(
+    study  = "g1",
+    entry  = list(.ssQ_makeEntryGr(
+                    snp_ids   = paste0("rs", 1:8),
+                    positions = seq(100L, by = 100L, length.out = 8L))),
+    genome = "hg19",
+    ldSketch = .ssQ_makeHandleVid(snp_n = 8L))
   local_mocked_bindings(
     extractBlockGenotypes = .ssQ_mockExtractor(),
     .package = "pecotmr")
