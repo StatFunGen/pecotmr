@@ -826,7 +826,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                                signalCutoff, minAbsCorr,
                                                verbose,
                                                methodArgs = list(),
-                                               region = NULL) {
+                                               region = NULL,
+                                               twasWeights = NULL,
+                                               dataDrivenPriorWeightsCutoff = 1e-10) {
   jointMethods <- intersect(methods, "mvsusie")
   if (length(jointMethods) == 0L) return(NULL)
 
@@ -858,10 +860,17 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
       message(sprintf(
         "jointCrossContext: fitting mvsusie for (study='%s', trait='%s') across contexts (%s) ...",
         study, tid, paste(xy$perTraitContexts, collapse = ", ")))
+    # Reweighted prior from a cross-context mr.mash joint twas run, keyed on
+    # (study, trait=tid, context="joint"); conditions are the contexts.
+    mvPrior <- .buildMvsusieReweightedPrior(
+      .fmLookupMrmashFit(twasWeights, study, tid, context = "joint"),
+      colnames(xy$Y), dataDrivenPriorWeightsCutoff)
     mvBaseArgs <- list(
       X = xy$X, Y = xy$Y,
-      prior_variance = mvsusieR::create_mixture_prior(R = ncol(xy$Y)),
+      prior_variance = mvPrior$priorVariance,
       coverage = coverage)
+    if (!is.null(mvPrior$residualVariance))
+      mvBaseArgs$residual_variance <- mvPrior$residualVariance
     fit <- do.call(fitMvsusie,
                    .fmMergeUserArgs(mvBaseArgs, "mvsusie",
                                     methodArgs[["mvsusie"]]))
@@ -907,7 +916,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                              signalCutoff, minAbsCorr,
                                              verbose,
                                              methodArgs = list(),
-                                             region = NULL) {
+                                             region = NULL,
+                                             twasWeights = NULL,
+                                             dataDrivenPriorWeightsCutoff = 1e-10) {
   jointMethods <- intersect(methods, c("mvsusie", "fsusie"))
   if (length(jointMethods) == 0L) return(NULL)
 
@@ -934,10 +945,17 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
           "jointCrossTrait: fitting %s for (study='%s', context='%s') across traits (%s) ...",
           mm, study, cx, paste(xy$traitsHere, collapse = ", ")))
       if (mm == "mvsusie") {
+        # Reweighted prior from a cross-trait mr.mash joint twas run, keyed on
+        # (study, trait="joint", context=cx); conditions are the traits.
+        mvPrior <- .buildMvsusieReweightedPrior(
+          .fmLookupMrmashFit(twasWeights, study, "joint", context = cx),
+          colnames(xy$Y), dataDrivenPriorWeightsCutoff)
         mvBaseArgs <- list(
           X = xy$X, Y = xy$Y,
-          prior_variance = mvsusieR::create_mixture_prior(R = ncol(xy$Y)),
+          prior_variance = mvPrior$priorVariance,
           coverage = coverage)
+        if (!is.null(mvPrior$residualVariance))
+          mvBaseArgs$residual_variance <- mvPrior$residualVariance
         fit <- do.call(fitMvsusie,
                        .fmMergeUserArgs(mvBaseArgs, "mvsusie",
                                         methodArgs[["mvsusie"]]))
@@ -1000,7 +1018,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                                 coverage, secondaryCoverage,
                                                 signalCutoff, minAbsCorr,
                                                 verbose,
-                                                methodArgs = list()) {
+                                                methodArgs = list(),
+                                                twasWeights = NULL,
+                                                dataDrivenPriorWeightsCutoff = 1e-10) {
   jointMethods <- intersect(methods, "mvsusie")
   if (length(jointMethods) == 0L) return(NULL)
 
@@ -1044,10 +1064,17 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         message(sprintf(
           "jointCrossContext (QtlSumStats): fitting mvsusie_rss for (study='%s', trait='%s', %d contexts) ...",
           s, tid, length(ctxNames)))
+      # Reweighted prior from a cross-context mr.mash joint twas run, keyed on
+      # (study, trait=tid, context="joint"); conditions are the contexts.
+      mvPrior <- .buildMvsusieReweightedPrior(
+        .fmLookupMrmashFit(twasWeights, s, tid, context = "joint"),
+        colnames(jz$Z), dataDrivenPriorWeightsCutoff)
       mvBaseArgs <- list(
         Z = jz$Z, R = ldMat, N = as.numeric(stats::median(jz$nVec)),
-        prior_variance = mvsusieR::create_mixture_prior(R = ncol(jz$Z)),
+        prior_variance = mvPrior$priorVariance,
         coverage = coverage)
+      if (!is.null(mvPrior$residualVariance))
+        mvBaseArgs$residual_variance <- mvPrior$residualVariance
       fit <- do.call(fitMvsusieRss,
                      .fmMergeUserArgs(mvBaseArgs, "mvsusie",
                                       methodArgs[["mvsusie"]]))
@@ -1090,7 +1117,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                               coverage, secondaryCoverage,
                                               signalCutoff, minAbsCorr,
                                               verbose,
-                                              methodArgs = list()) {
+                                              methodArgs = list(),
+                                              twasWeights = NULL,
+                                              dataDrivenPriorWeightsCutoff = 1e-10) {
   if ("fsusie" %in% methods)
     stop("jointCrossTrait (QtlSumStats): fsusie has no RSS variant; ",
          "fsusie cannot participate in sumstats-based joint fits.")
@@ -1130,10 +1159,17 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         message(sprintf(
           "jointCrossTrait (QtlSumStats): fitting mvsusie_rss for (study='%s', context='%s', %d traits) ...",
           s, cx, length(trNames)))
+      # Reweighted prior from a cross-trait mr.mash joint twas run, keyed on
+      # (study, trait="joint", context=cx); conditions are the traits.
+      mvPrior <- .buildMvsusieReweightedPrior(
+        .fmLookupMrmashFit(twasWeights, s, "joint", context = cx),
+        colnames(jz$Z), dataDrivenPriorWeightsCutoff)
       mvBaseArgs <- list(
         Z = jz$Z, R = ldMat, N = as.numeric(stats::median(jz$nVec)),
-        prior_variance = mvsusieR::create_mixture_prior(R = ncol(jz$Z)),
+        prior_variance = mvPrior$priorVariance,
         coverage = coverage)
+      if (!is.null(mvPrior$residualVariance))
+        mvBaseArgs$residual_variance <- mvPrior$residualVariance
       fit <- do.call(fitMvsusieRss,
                      .fmMergeUserArgs(mvBaseArgs, "mvsusie",
                                       methodArgs[["mvsusie"]]))
@@ -1177,7 +1213,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                               coverage, secondaryCoverage,
                                               signalCutoff, minAbsCorr,
                                               verbose,
-                                              methodArgs = list()) {
+                                              methodArgs = list(),
+                                              twasWeights = NULL,
+                                              dataDrivenPriorWeightsCutoff = 1e-10) {
   if ("fsusie" %in% methods)
     stop("jointCrossStudy: fsusie cannot participate (no RSS variant).")
   jointMethods <- intersect(methods, "mvsusie")
@@ -1226,6 +1264,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
           cx, tid, length(stNames)))
       mvBaseArgs <- list(
         Z = jz$Z, R = ldMat, N = as.numeric(stats::median(jz$nVec)),
+        # TODO(mvsusie-prior): cross-study lookup key undecided; canonical prior for now
         prior_variance = mvsusieR::create_mixture_prior(R = ncol(jz$Z)),
         coverage = coverage)
       fit <- do.call(fitMvsusieRss,
@@ -1273,7 +1312,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                            signalCutoff, minAbsCorr,
                                            verbose,
                                            methodArgs = list(),
-                                           region = NULL) {
+                                           region = NULL,
+                                           twasWeights = NULL,
+                                           dataDrivenPriorWeightsCutoff = 1e-10) {
   axes <- spec$axes
   if ("study" %in% axes)
     stop("composed jointSpecification (QtlDataset): axes including 'study' require sumstats input.")
@@ -1298,10 +1339,18 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     message(sprintf(
       "composed joint (QtlDataset): fitting mvsusie for study='%s' over %d (context, trait) columns ...",
       study, ncol(xy$Y)))
+  # Reweighted prior from a composed mr.mash joint twas run, keyed on
+  # (study, trait="joint", context="joint"); conditions are the (context,trait)
+  # columns of the composed design.
+  mvPrior <- .buildMvsusieReweightedPrior(
+    .fmLookupMrmashFit(twasWeights, study, "joint", context = "joint"),
+    colnames(xy$Y), dataDrivenPriorWeightsCutoff)
   mvBaseArgs <- list(
     X = xy$X, Y = xy$Y,
-    prior_variance = mvsusieR::create_mixture_prior(R = ncol(xy$Y)),
+    prior_variance = mvPrior$priorVariance,
     coverage = coverage)
+  if (!is.null(mvPrior$residualVariance))
+    mvBaseArgs$residual_variance <- mvPrior$residualVariance
   fit <- do.call(fitMvsusie,
                  .fmMergeUserArgs(mvBaseArgs, "mvsusie",
                                   methodArgs[["mvsusie"]]))
@@ -1338,7 +1387,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                             coverage, secondaryCoverage,
                                             signalCutoff, minAbsCorr,
                                             verbose,
-                                            methodArgs = list()) {
+                                            methodArgs = list(),
+                                            twasWeights = NULL,
+                                            dataDrivenPriorWeightsCutoff = 1e-10) {
   if ("fsusie" %in% methods)
     stop("composed jointSpecification (QtlSumStats): fsusie has no RSS variant.")
   jointMethods <- intersect(methods, "mvsusie")
@@ -1380,10 +1431,18 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
       message(sprintf(
         "composed joint (QtlSumStats): fitting mvsusie_rss for axes=(%s), %d columns ...",
         paste(axes, collapse = ", "), length(gIdx)))
+    # Reweighted prior from a composed mr.mash joint twas run, keyed on
+    # (study, trait="joint", context="joint"); conditions are the joint columns.
+    mvPrior <- .buildMvsusieReweightedPrior(
+      .fmLookupMrmashFit(twasWeights, studyCol[gIdx[[1L]]], "joint",
+                         context = "joint"),
+      colnames(jz$Z), dataDrivenPriorWeightsCutoff)
     mvBaseArgs <- list(
       Z = jz$Z, R = ldMat, N = as.numeric(stats::median(jz$nVec)),
-      prior_variance = mvsusieR::create_mixture_prior(R = ncol(jz$Z)),
+      prior_variance = mvPrior$priorVariance,
       coverage = coverage)
+    if (!is.null(mvPrior$residualVariance))
+      mvBaseArgs$residual_variance <- mvPrior$residualVariance
     fit <- do.call(fitMvsusieRss,
                    .fmMergeUserArgs(mvBaseArgs, "mvsusie",
                                     methodArgs[["mvsusie"]]))
@@ -1471,7 +1530,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                              signalCutoff, minAbsCorr,
                                              verbose,
                                              methodArgs = list(),
-                                             xRegions = list(NULL)) {
+                                             xRegions = list(NULL),
+                                             twasWeights = NULL,
+                                             dataDrivenPriorWeightsCutoff = 1e-10) {
   # Run the joint dispatch once per region block, then merge per
   # (study, context, trait, method) across regions. A single block (cis or
   # jointRegions=TRUE concatenated) returns its result directly.
@@ -1479,7 +1540,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     .fmDispatchJointSpecsQtlDatasetOneRegion(
       parsedJointSpec, data, methods, contexts, traitIds, cisWindow,
       coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-      methodArgs = methodArgs, region = rg)
+      methodArgs = methodArgs, region = rg,
+      twasWeights = twasWeights,
+      dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff)
   })
   perRegion <- Filter(Negate(is.null), perRegion)
   if (length(perRegion) == 0L) return(NULL)
@@ -1494,16 +1557,22 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                              signalCutoff, minAbsCorr,
                                              verbose,
                                              methodArgs = list(),
-                                             region = NULL) {
+                                             region = NULL,
+                                             twasWeights = NULL,
+                                             dataDrivenPriorWeightsCutoff = 1e-10) {
+  # Bundle the data-driven mvSuSiE prior pass-through args once; every leaf
+  # dispatcher accepts the same pair.
+  priorArgs <- list(twasWeights = twasWeights,
+                    dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff)
   out <- NULL
   for (i in seq_along(parsedJointSpec)) {
     spec <- parsedJointSpec[[i]]
     axes <- spec$axes
     if (length(axes) > 1L) {
-      res <- .fmDispatchComposedQtlDataset(
+      res <- do.call(.fmDispatchComposedQtlDataset, c(list(
         spec, data, methods, contexts, traitIds, cisWindow,
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs, region = region)
+        methodArgs = methodArgs, region = region), priorArgs))
       if (!is.null(res))
         out <- if (is.null(out)) res
                else .rbindFineMappingResult(out, res, ldSketch = NULL)
@@ -1511,14 +1580,14 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     }
     axis <- axes[[1L]]
     res <- switch(axis,
-      context = .fmDispatchCrossContextQtlDataset(
+      context = do.call(.fmDispatchCrossContextQtlDataset, c(list(
         spec, data, methods, contexts, traitIds, cisWindow,
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs, region = region),
-      trait = .fmDispatchCrossTraitQtlDataset(
+        methodArgs = methodArgs, region = region), priorArgs)),
+      trait = do.call(.fmDispatchCrossTraitQtlDataset, c(list(
         spec, data, methods, contexts, traitIds, cisWindow,
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs, region = region),
+        methodArgs = methodArgs, region = region), priorArgs)),
       study = stop(
         "fineMappingPipeline(QtlDataset): jointSpecification with axes = 'study' requires sumstats input. ",
         "QtlDataset represents a single individual-level study; cross-study joints operate on the sumstats slot of MultiStudyQtlDataset or on QtlSumStats directly."),
@@ -1538,16 +1607,22 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                               coverage, secondaryCoverage,
                                               signalCutoff, minAbsCorr,
                                               verbose,
-                                              methodArgs = list()) {
+                                              methodArgs = list(),
+                                              twasWeights = NULL,
+                                              dataDrivenPriorWeightsCutoff = 1e-10) {
+  # Bundle the data-driven mvSuSiE prior pass-through args once; every leaf
+  # dispatcher accepts the same pair.
+  priorArgs <- list(twasWeights = twasWeights,
+                    dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff)
   out <- NULL
   for (i in seq_along(parsedJointSpec)) {
     spec <- parsedJointSpec[[i]]
     axes <- spec$axes
     if (length(axes) > 1L) {
-      res <- .fmDispatchComposedQtlSumStats(
+      res <- do.call(.fmDispatchComposedQtlSumStats, c(list(
         spec, data, methods, contexts, traitIds,
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs)
+        methodArgs = methodArgs), priorArgs))
       if (!is.null(res))
         out <- if (is.null(out)) res
                else .rbindFineMappingResult(out, res, ldSketch = getLdSketch(data))
@@ -1555,18 +1630,18 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     }
     axis <- axes[[1L]]
     res <- switch(axis,
-      context = .fmDispatchCrossContextQtlSumStats(
+      context = do.call(.fmDispatchCrossContextQtlSumStats, c(list(
         spec, data, methods, contexts, traitIds,
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs),
-      trait = .fmDispatchCrossTraitQtlSumStats(
+        methodArgs = methodArgs), priorArgs)),
+      trait = do.call(.fmDispatchCrossTraitQtlSumStats, c(list(
         spec, data, methods, contexts, traitIds,
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs),
-      study = .fmDispatchCrossStudyQtlSumStats(
+        methodArgs = methodArgs), priorArgs)),
+      study = do.call(.fmDispatchCrossStudyQtlSumStats, c(list(
         spec, data, methods, contexts, traitIds,
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs),
+        methodArgs = methodArgs), priorArgs)),
       stop(sprintf("Unsupported axis: %s", axis)))
     if (!is.null(res))
       out <- if (is.null(out)) res
@@ -1589,7 +1664,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                              signalCutoff, minAbsCorr,
                                              verbose,
                                              methodArgs = list(),
-                                             xRegions = list(NULL)) {
+                                             xRegions = list(NULL),
+                                             twasWeights = NULL,
+                                             dataDrivenPriorWeightsCutoff = 1e-10) {
   out <- NULL
   embeddedLd <- NULL
   qtlDatasets <- getQtlDatasets(data)
@@ -1612,7 +1689,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
       qdRes <- .fmDispatchJointSpecsQtlDataset(
         nonStudyAxisSpecs, qd, methods, contexts, traitIds, cisWindow,
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs, xRegions = xRegions)
+        methodArgs = methodArgs, xRegions = xRegions,
+        twasWeights = twasWeights,
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff)
       if (!is.null(qdRes))
         out <- if (is.null(out)) qdRes
                else .rbindFineMappingResult(out, qdRes, ldSketch = NULL)
@@ -1623,7 +1702,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     ssRes <- .fmDispatchJointSpecsQtlSumStats(
       parsedJointSpec, sumStats, methods, contexts, traitIds,
       coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-      methodArgs = methodArgs)
+      methodArgs = methodArgs,
+      twasWeights = twasWeights,
+      dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff)
     if (!is.null(ssRes)) {
       embeddedLd <- getLdSketch(ssRes)
       out <- if (is.null(out)) ssRes
@@ -1647,7 +1728,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 .twasDispatchCrossContextQtlDataset <- function(spec, data, methods,
                                                  contexts, traitIds,
                                                  cisWindow, dataType,
-                                                 verbose, region = NULL) {
+                                                 verbose, region = NULL,
+                                                 retainFit = TRUE,
+                                                 retainFitDetail = "slim") {
   jointMethods <- intersect(methods, "mrmash")
   if (length(jointMethods) == 0L) return(NULL)
 
@@ -1679,11 +1762,13 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
       message(sprintf(
         "jointCrossContext (twas QtlDataset): fitting mr.mash for (study='%s', trait='%s') across contexts (%s) ...",
         study, tid, paste(xy$perTraitContexts, collapse = ", ")))
-    weights <- mrmashWeights(X = xy$X, Y = xy$Y)
+    weights <- mrmashWeights(X = xy$X, Y = xy$Y,
+                             retainFit = retainFit, fitDetail = retainFitDetail)
     if (is.null(rownames(weights))) rownames(weights) <- colnames(xy$X)
     entry <- TwasWeightsEntry(
       variantIds   = rownames(weights),
       weights      = weights,
+      fits         = attr(weights, "fit"),
       standardized = FALSE,
       dataType     = dataType)
     rowStudy   <- c(rowStudy,   study)
@@ -1713,7 +1798,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 .twasDispatchCrossTraitQtlDataset <- function(spec, data, methods,
                                                contexts, traitIds,
                                                cisWindow, dataType,
-                                               verbose, region = NULL) {
+                                               verbose, region = NULL,
+                                               retainFit = TRUE,
+                                               retainFitDetail = "slim") {
   jointMethods <- intersect(methods, "mrmash")
   if (length(jointMethods) == 0L) return(NULL)
 
@@ -1738,11 +1825,13 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
       message(sprintf(
         "jointCrossTrait (twas): fitting mr.mash for (study='%s', context='%s') across traits (%s) ...",
         study, cx, paste(xy$traitsHere, collapse = ", ")))
-    weights <- mrmashWeights(X = xy$X, Y = xy$Y)
+    weights <- mrmashWeights(X = xy$X, Y = xy$Y,
+                             retainFit = retainFit, fitDetail = retainFitDetail)
     if (is.null(rownames(weights))) rownames(weights) <- colnames(xy$X)
     entry <- TwasWeightsEntry(
       variantIds   = rownames(weights),
       weights      = weights,
+      fits         = attr(weights, "fit"),
       standardized = FALSE,
       dataType     = dataType)
     rowStudy   <- c(rowStudy,   study)
@@ -1770,7 +1859,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # @noRd
 .twasDispatchCrossContextQtlSumStats <- function(spec, data, methods,
                                                   contexts, traitIds,
-                                                  dataType, verbose) {
+                                                  dataType, verbose,
+                                                  retainFit = TRUE,
+                                                  retainFitDetail = "slim") {
   jointMethods <- intersect(methods, "mrmash")
   if (length(jointMethods) == 0L) return(NULL)
 
@@ -1815,11 +1906,14 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         message(sprintf(
           "jointCrossContext (twas QtlSumStats): fitting mr.mash.rss for (study='%s', trait='%s', %d contexts) ...",
           s, tid, length(ctxNames)))
-      weights <- mrmashRssWeights(stat = stat, LD = ldMat)
+      weights <- mrmashRssWeights(stat = stat, LD = ldMat,
+                                  retainFit = retainFit,
+                                  fitDetail = retainFitDetail)
       if (is.null(rownames(weights))) rownames(weights) <- jz$variantIds
       entry <- TwasWeightsEntry(
         variantIds   = rownames(weights),
         weights      = weights,
+        fits         = attr(weights, "fit"),
         standardized = TRUE,
         dataType     = dataType)
       rowStudy   <- c(rowStudy,   s)
@@ -1848,7 +1942,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # @noRd
 .twasDispatchCrossTraitQtlSumStats <- function(spec, data, methods,
                                                 contexts, traitIds,
-                                                dataType, verbose) {
+                                                dataType, verbose,
+                                                retainFit = TRUE,
+                                                retainFitDetail = "slim") {
   jointMethods <- intersect(methods, "mrmash")
   if (length(jointMethods) == 0L) return(NULL)
 
@@ -1886,11 +1982,14 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         message(sprintf(
           "jointCrossTrait (twas QtlSumStats): fitting mr.mash.rss for (study='%s', context='%s', %d traits) ...",
           s, cx, length(trNames)))
-      weights <- mrmashRssWeights(stat = stat, LD = ldMat)
+      weights <- mrmashRssWeights(stat = stat, LD = ldMat,
+                                  retainFit = retainFit,
+                                  fitDetail = retainFitDetail)
       if (is.null(rownames(weights))) rownames(weights) <- jz$variantIds
       entry <- TwasWeightsEntry(
         variantIds   = rownames(weights),
         weights      = weights,
+        fits         = attr(weights, "fit"),
         standardized = TRUE,
         dataType     = dataType)
       rowStudy   <- c(rowStudy,   s)
@@ -1919,7 +2018,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # @noRd
 .twasDispatchCrossStudyQtlSumStats <- function(spec, data, methods,
                                                 contexts, traitIds,
-                                                dataType, verbose) {
+                                                dataType, verbose,
+                                                retainFit = TRUE,
+                                                retainFitDetail = "slim") {
   jointMethods <- intersect(methods, "mrmash")
   if (length(jointMethods) == 0L) return(NULL)
 
@@ -1965,11 +2066,14 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         message(sprintf(
           "jointCrossStudy (twas): fitting mr.mash.rss for (context='%s', trait='%s', %d studies) ...",
           cx, tid, length(stNames)))
-      weights <- mrmashRssWeights(stat = stat, LD = ldMat)
+      weights <- mrmashRssWeights(stat = stat, LD = ldMat,
+                                  retainFit = retainFit,
+                                  fitDetail = retainFitDetail)
       if (is.null(rownames(weights))) rownames(weights) <- jz$variantIds
       entry <- TwasWeightsEntry(
         variantIds   = rownames(weights),
         weights      = weights,
+        fits         = attr(weights, "fit"),
         standardized = TRUE,
         dataType     = dataType)
       rowStudy   <- c(rowStudy,   "joint")
@@ -1997,7 +2101,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # @noRd
 .twasDispatchComposedQtlSumStats <- function(spec, data, methods,
                                               contexts, traitIds,
-                                              dataType, verbose) {
+                                              dataType, verbose,
+                                              retainFit = TRUE,
+                                              retainFitDetail = "slim") {
   jointMethods <- intersect(methods, "mrmash")
   if (length(jointMethods) == 0L) return(NULL)
 
@@ -2038,11 +2144,14 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
       message(sprintf(
         "composed joint (twas QtlSumStats): fitting mr.mash.rss for axes=(%s), %d columns ...",
         paste(axes, collapse = ", "), length(gIdx)))
-    weights <- mrmashRssWeights(stat = stat, LD = ldMat)
+    weights <- mrmashRssWeights(stat = stat, LD = ldMat,
+                                retainFit = retainFit,
+                                fitDetail = retainFitDetail)
     if (is.null(rownames(weights))) rownames(weights) <- jz$variantIds
     entry <- TwasWeightsEntry(
       variantIds   = rownames(weights),
       weights      = weights,
+      fits         = attr(weights, "fit"),
       standardized = TRUE,
       dataType     = dataType)
 
@@ -2087,7 +2196,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 .twasDispatchComposedQtlDataset <- function(spec, data, methods,
                                              contexts, traitIds, cisWindow,
                                              dataType, verbose,
-                                             region = NULL) {
+                                             region = NULL,
+                                             retainFit = TRUE,
+                                             retainFitDetail = "slim") {
   axes <- spec$axes
   if ("study" %in% axes)
     stop("composed jointSpecification (twas QtlDataset): axes including 'study' require sumstats input.")
@@ -2111,11 +2222,13 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     message(sprintf(
       "composed joint (twas QtlDataset): fitting mr.mash for study='%s' over %d (context, trait) columns ...",
       study, ncol(xy$Y)))
-  weights <- mrmashWeights(X = xy$X, Y = xy$Y)
+  weights <- mrmashWeights(X = xy$X, Y = xy$Y,
+                           retainFit = retainFit, fitDetail = retainFitDetail)
   if (is.null(rownames(weights))) rownames(weights) <- colnames(xy$X)
   entry <- TwasWeightsEntry(
     variantIds   = rownames(weights),
     weights      = weights,
+    fits         = attr(weights, "fit"),
     standardized = FALSE,
     dataType     = dataType)
   TwasWeights(
@@ -2163,14 +2276,17 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 .twasDispatchJointSpecsQtlDataset <- function(parsedJointSpec, data,
                                                methods, contexts, traitIds,
                                                cisWindow, dataType,
-                                               verbose, xRegions = list(NULL)) {
+                                               verbose, xRegions = list(NULL),
+                                               retainFit = TRUE,
+                                               retainFitDetail = "slim") {
   # Run the joint dispatch once per region block, then merge per
   # (study, context, trait, method) across regions. A single block (cis or
   # jointRegions=TRUE concatenated) returns its result directly.
   perRegion <- lapply(xRegions, function(rg) {
     .twasDispatchJointSpecsQtlDatasetOneRegion(
       parsedJointSpec, data, methods, contexts, traitIds, cisWindow, dataType,
-      verbose, region = rg)
+      verbose, region = rg,
+      retainFit = retainFit, retainFitDetail = retainFitDetail)
   })
   labs <- vapply(xRegions, .twasRegionLabel, character(1))
   keep <- !vapply(perRegion, is.null, logical(1))
@@ -2183,7 +2299,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 .twasDispatchJointSpecsQtlDatasetOneRegion <- function(parsedJointSpec, data,
                                                methods, contexts, traitIds,
                                                cisWindow, dataType,
-                                               verbose, region = NULL) {
+                                               verbose, region = NULL,
+                                               retainFit = TRUE,
+                                               retainFitDetail = "slim") {
   out <- NULL
   for (i in seq_along(parsedJointSpec)) {
     spec <- parsedJointSpec[[i]]
@@ -2191,7 +2309,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     if (length(axes) > 1L) {
       res <- .twasDispatchComposedQtlDataset(
         spec, data, methods, contexts, traitIds, cisWindow, dataType, verbose,
-        region = region)
+        region = region,
+        retainFit = retainFit, retainFitDetail = retainFitDetail)
       if (!is.null(res))
         out <- if (is.null(out)) res
                else .rbindTwasWeights(out, res, ldSketch = NULL)
@@ -2201,10 +2320,12 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     res <- switch(axis,
       context = .twasDispatchCrossContextQtlDataset(
         spec, data, methods, contexts, traitIds, cisWindow, dataType, verbose,
-        region = region),
+        region = region,
+        retainFit = retainFit, retainFitDetail = retainFitDetail),
       trait = .twasDispatchCrossTraitQtlDataset(
         spec, data, methods, contexts, traitIds, cisWindow, dataType, verbose,
-        region = region),
+        region = region,
+        retainFit = retainFit, retainFitDetail = retainFitDetail),
       study = stop(
         "twasWeightsPipeline(QtlDataset): jointSpecification with axes = 'study' requires sumstats input."),
       stop(sprintf("Unsupported axis: %s", axis)))
@@ -2220,14 +2341,17 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # @noRd
 .twasDispatchJointSpecsQtlSumStats <- function(parsedJointSpec, data,
                                                 methods, contexts, traitIds,
-                                                dataType, verbose) {
+                                                dataType, verbose,
+                                                retainFit = TRUE,
+                                                retainFitDetail = "slim") {
   out <- NULL
   for (i in seq_along(parsedJointSpec)) {
     spec <- parsedJointSpec[[i]]
     axes <- spec$axes
     if (length(axes) > 1L) {
       res <- .twasDispatchComposedQtlSumStats(
-        spec, data, methods, contexts, traitIds, dataType, verbose)
+        spec, data, methods, contexts, traitIds, dataType, verbose,
+        retainFit = retainFit, retainFitDetail = retainFitDetail)
       if (!is.null(res))
         out <- if (is.null(out)) res
                else .rbindTwasWeights(out, res, ldSketch = getLdSketch(data))
@@ -2236,11 +2360,14 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     axis <- axes[[1L]]
     res <- switch(axis,
       context = .twasDispatchCrossContextQtlSumStats(
-        spec, data, methods, contexts, traitIds, dataType, verbose),
+        spec, data, methods, contexts, traitIds, dataType, verbose,
+        retainFit = retainFit, retainFitDetail = retainFitDetail),
       trait = .twasDispatchCrossTraitQtlSumStats(
-        spec, data, methods, contexts, traitIds, dataType, verbose),
+        spec, data, methods, contexts, traitIds, dataType, verbose,
+        retainFit = retainFit, retainFitDetail = retainFitDetail),
       study = .twasDispatchCrossStudyQtlSumStats(
-        spec, data, methods, contexts, traitIds, dataType, verbose),
+        spec, data, methods, contexts, traitIds, dataType, verbose,
+        retainFit = retainFit, retainFitDetail = retainFitDetail),
       stop(sprintf("Unsupported axis: %s", axis)))
     if (!is.null(res))
       out <- if (is.null(out)) res
@@ -2255,7 +2382,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 .twasDispatchJointSpecsMultiStudy <- function(parsedJointSpec, data,
                                                methods, contexts, traitIds,
                                                cisWindow, dataType, verbose,
-                                               xRegions = list(NULL)) {
+                                               xRegions = list(NULL),
+                                               retainFit = TRUE,
+                                               retainFitDetail = "slim") {
   out <- NULL
   embeddedLd <- NULL
   qtlDatasets <- getQtlDatasets(data)
@@ -2277,7 +2406,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
       qd <- qtlDatasets[[qdName]]
       qdRes <- .twasDispatchJointSpecsQtlDataset(
         nonStudyAxisSpecs, qd, methods, contexts, traitIds, cisWindow,
-        dataType, verbose, xRegions = xRegions)
+        dataType, verbose, xRegions = xRegions,
+        retainFit = retainFit, retainFitDetail = retainFitDetail)
       if (!is.null(qdRes))
         out <- if (is.null(out)) qdRes
                else .rbindTwasWeights(out, qdRes, ldSketch = NULL)
@@ -2287,7 +2417,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
   if (!is.null(sumStats)) {
     ssRes <- .twasDispatchJointSpecsQtlSumStats(
       parsedJointSpec, sumStats, methods, contexts, traitIds, dataType,
-      verbose)
+      verbose,
+      retainFit = retainFit, retainFitDetail = retainFitDetail)
     if (!is.null(ssRes)) {
       embeddedLd <- getLdSketch(ssRes)
       out <- if (is.null(out)) ssRes

@@ -547,6 +547,115 @@ test_that(".fmSerScreen: disables on 0, skips no-signal, keeps signal + adaptive
   expect_true(fn(X, yNull, NA))           # malformed cutoff -> advisory keep
 })
 
+test_that(".fmTopPcScores: clean matrix -> samples x min(nPCs, traits) topPC scores", {
+  set.seed(7)
+  n <- 30L
+  Y <- matrix(rnorm(n * 3L), nrow = n, ncol = 3L,
+              dimnames = list(paste0("s", seq_len(n)), c("ta", "tb", "tc")))
+  fn <- function(...) pecotmr:::.fmTopPcScores(...)
+  # (a) 3 traits, nPCs >= traits -> 3 columns named topPC1..topPC3, rows = samples.
+  sc <- fn(Y, 10L)
+  expect_true(is.matrix(sc))
+  expect_equal(ncol(sc), 3L)
+  expect_equal(colnames(sc), c("topPC1", "topPC2", "topPC3"))
+  expect_equal(nrow(sc), n)
+  expect_equal(rownames(sc), rownames(Y))
+  # (b) nPCs caps the number of returned columns.
+  sc2 <- fn(Y, 2L)
+  expect_equal(ncol(sc2), 2L)
+  expect_equal(colnames(sc2), c("topPC1", "topPC2"))
+  # (c) single-column Y -> NULL (PCA undefined for a single trait).
+  expect_null(fn(Y[, 1L, drop = FALSE], 10L))
+  # (d) a zero-variance trait is dropped; k reflects only the usable traits.
+  Yzv <- cbind(Y, td = rep(1, n))
+  scz <- fn(Yzv, 10L)
+  expect_equal(ncol(scz), 3L)            # td dropped -> still 3 usable traits
+  expect_equal(colnames(scz), c("topPC1", "topPC2", "topPC3"))
+  # (e) rows with any NA are dropped before PCA.
+  Yna <- Y
+  Yna[c(1L, 2L), 1L] <- NA
+  scn <- fn(Yna, 10L)
+  expect_equal(nrow(scn), n - 2L)
+  expect_false(any(c("s1", "s2") %in% rownames(scn)))
+})
+
+test_that("fineMappingPipeline(QtlDataset, usePCA): top-PC susie rows keyed topPC{i}", {
+  qd <- .fmp_makeQtlDataset(contexts = "brain",
+                            traits = c("ENSG_A", "ENSG_B", "ENSG_C"))
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieIndiv      = .fmp_mockFitIndiv(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  res <- suppressMessages(
+    fineMappingPipeline(qd, methods = "susie",
+                        cisWindow = 1000L, addSusieInf = FALSE,
+                        usePCA = TRUE, nPCs = 2L))
+  expect_s4_class(res, "QtlFineMappingResult")
+  expect_setequal(getMethodNames(res), "susie")
+  pcRows <- as.character(res$trait) %in% c("topPC1", "topPC2")
+  # 3 per-trait univariate susie rows + 2 top-PC rows = 5.
+  expect_equal(sum(pcRows), 2L)
+  expect_setequal(as.character(res$trait)[pcRows], c("topPC1", "topPC2"))
+  expect_setequal(as.character(res$method)[pcRows], "susie")
+})
+
+test_that(".buildMvsusieReweightedPrior: canonical fallback when no usable fit", {
+  bp <- function(...) pecotmr:::.buildMvsusieReweightedPrior(...)
+  # No fit at all -> canonical prior, residualVariance NULL.
+  p1 <- bp(NULL, c("c1", "c2"))
+  expect_false(is.null(p1$priorVariance))
+  expect_null(p1$residualVariance)
+  # Fit with no data-driven matrices -> canonical prior, but V carried through.
+  p2 <- bp(list(dataDrivenPriorMatrices = NULL, V = diag(2)), c("c1", "c2"))
+  expect_equal(p2$residualVariance, diag(2))
+})
+
+test_that(".buildMvsusieReweightedPrior: reweights matrices by rescaleCovW0(w0)", {
+  ddpm <- list(U = list(compA = diag(2), compB = diag(2) * 2),
+               w = c(compA = 0.5, compB = 0.5))
+  fit  <- list(dataDrivenPriorMatrices = ddpm,
+               w0 = c(compA_grid1 = 0.3, compB_grid1 = 0.7),
+               V  = diag(2) * 3)
+  captured <- NULL
+  # rescaleCovW0 collapses expanded w0 onto the original matrix names; mock it
+  # so the test asserts the wiring, not rescaleCovW0's internals.
+  local_mocked_bindings(
+    rescaleCovW0 = function(w0) c(compA = 0.4, compB = 0.6),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    create_mixture_prior = function(...) { captured <<- list(...); "PRIOR" },
+    .package = "mvsusieR")
+  res <- pecotmr:::.buildMvsusieReweightedPrior(fit, c("c1", "c2"),
+                                                weightsTol = 1e-8)
+  expect_identical(res$priorVariance, "PRIOR")
+  expect_equal(res$residualVariance, diag(2) * 3)
+  expect_equal(captured$mixture_prior$weights, c(compA = 0.4, compB = 0.6))
+  expect_equal(names(captured$mixture_prior$matrices), c("compA", "compB"))
+  expect_equal(captured$include_indices, c("c1", "c2"))
+  expect_equal(captured$weights_tol, 1e-8)
+})
+
+test_that(".fmLookupMrmashFit: finds the mr.mash fit by (study, trait)", {
+  mkEntry <- function(fits) TwasWeightsEntry(
+    variantIds = c("v1", "v2"), weights = c(0.1, 0.2), fits = fits)
+  payload <- list(dataDrivenPriorMatrices = list(U = list(a = diag(2))),
+                  w0 = c(a = 1), V = diag(2))
+  # The joint fit lives on the first mrmash row of the (study, trait) group;
+  # the other context row carries fits = NULL. A non-mrmash row is ignored.
+  tw <- TwasWeights(
+    study   = c("S", "S", "S"),
+    context = c("c1", "c2", "c1"),
+    trait   = c("G", "G", "G"),
+    method  = c("mrmash", "mrmash", "enet"),
+    entry   = list(mkEntry(payload), mkEntry(NULL), mkEntry(payload)))
+  lk <- function(...) pecotmr:::.fmLookupMrmashFit(...)
+  expect_identical(lk(tw, "S", "G"), payload)   # first non-NULL mrmash row
+  expect_null(lk(tw, "S", "OTHER"))             # no such trait
+  expect_null(lk(tw, "OTHER", "G"))             # no such study
+  expect_null(lk(NULL, "S", "G"))               # no TwasWeights supplied
+})
+
 test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip skips no-signal univariate traits", {
   qd <- .fmp_makeQtlDataset(contexts = "brain", traits = c("ENSG_A", "ENSG_B"))
   # Stateful screen: reject the first block (ENSG_A), keep the rest (ENSG_B).

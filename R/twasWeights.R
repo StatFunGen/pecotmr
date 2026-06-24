@@ -882,6 +882,7 @@ learnTwasWeights <- function(X, Y, weightMethods,
                              numThreads = 1,
                              fittedModels = NULL,
                              retainFits = FALSE,
+                             retainFitDetail = c("slim", "full"),
                              standardized = FALSE,
                              dataType = NULL,
                              ldSketch = NULL,
@@ -889,6 +890,7 @@ learnTwasWeights <- function(X, Y, weightMethods,
   if (!is.matrix(X) || (!is.matrix(Y) && !is.vector(Y))) {
     stop("X must be a matrix and Y must be a matrix or a vector.")
   }
+  retainFitDetail <- match.arg(retainFitDetail)
 
   if (is.vector(Y)) {
     Y <- matrix(Y, ncol = 1)
@@ -939,6 +941,11 @@ learnTwasWeights <- function(X, Y, weightMethods,
         args$retainFit <- TRUE
       } else if ("retain_fit" %in% fnFormals) {
         args$retain_fit <- TRUE
+      }
+      # Propagate the slim/full payload choice to producers that support it
+      # (mr.mash individual + RSS), unless the caller already set it per-method.
+      if ("fitDetail" %in% fnFormals && is.null(args$fitDetail)) {
+        args$fitDetail <- retainFitDetail
       }
     }
 

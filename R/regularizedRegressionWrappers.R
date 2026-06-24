@@ -448,13 +448,19 @@ susieAshRssWeights <- function(stat, LD, susieAshRssFit = NULL, retainFit = TRUE
 #'   weights) the parts of the mr.mash fit that `fineMappingPipeline` needs to
 #'   rebuild the mvSuSiE reweighted mixture prior + residual variance: the
 #'   original data-driven prior matrices (`dataDrivenPriorMatrices`), the fitted
-#'   mixture weights (`w0`) and the residual covariance (`V`). The heavy
-#'   coefficient matrix (`mu1`) is intentionally not retained. Default FALSE.
+#'   mixture weights (`w0`) and the residual covariance (`V`). Default FALSE.
+#' @param fitDetail How much of the fit to retain when `retainFit = TRUE`.
+#'   `"slim"` (default) keeps only the three reconstruction inputs above; the
+#'   heavy coefficient matrix (`mu1`) is already returned as the weights, so it
+#'   is not duplicated. `"full"` additionally retains the complete mr.mash fit
+#'   under `$fit` (consistent with how susie fits are kept), at the cost of a
+#'   larger payload.
 #' @param ... Additional arguments passed to `mrmashWrapper()` when fitting.
 #' @return Matrix of variant weights.
 #' @export
 mrmashWeights <- function(mrmashFit = NULL, X = NULL, Y = NULL,
-                          retainFit = FALSE, ...) {
+                          retainFit = FALSE, fitDetail = c("slim", "full"),
+                          ...) {
   if (!requireNamespace("mr.mashr", quietly = TRUE)) {
     stop("Package 'mr.mashr' is required. Install with: devtools::install_github('stephenslab/mr.mashr')")
   }
@@ -468,14 +474,18 @@ mrmashWeights <- function(mrmashFit = NULL, X = NULL, Y = NULL,
   }
   out <- mr.mashr::coef.mr.mash(mrmashFit)[-1, ]
   if (isTRUE(retainFit)) {
-    # Lean payload consumed by fineMappingPipeline to reproduce the legacy
-    # initializeMvsusiePrior reweighting (see the mvSuSiE-prior-from-mr.mash
-    # note). The original matrices are required for bit-identical results;
-    # rescaleCovW0(w0) collapses the expanded weights back onto them.
-    attr(out, "fit") <- list(
+    fitDetail <- match.arg(fitDetail)
+    # Reconstruction inputs for the mvSuSiE data-driven prior (see the
+    # mvSuSiE-prior-from-mr.mash note): the original matrices (required for
+    # bit-identical results -- rescaleCovW0(w0) collapses the expanded weights
+    # back onto them), w0, and V. mu1 is already returned as `out`, so "slim"
+    # does not duplicate it; "full" additionally keeps the whole fit.
+    fitList <- list(
       dataDrivenPriorMatrices = dotArgs$dataDrivenPriorMatrices,
       w0 = mrmashFit$w0,
       V  = mrmashFit$V)
+    if (fitDetail == "full") fitList$fit <- mrmashFit
+    attr(out, "fit") <- fitList
   }
   out
 }
@@ -709,8 +719,15 @@ fsusieWeights <- function(fsusieFit = NULL, X = NULL, Y = NULL,
 #'   defaults to the identity matrix of size K.
 #' @param covY Optional response covariance matrix (K x K). When NULL,
 #'   defaults to the identity matrix of size K.
-#' @param retainFit If TRUE, attaches the fitted object as the
-#'   \code{"fit"} attribute on the returned weights.
+#' @param retainFit If TRUE, attaches (as the \code{"fit"} attribute on the
+#'   returned weights) the inputs \code{fineMappingPipeline} needs to rebuild
+#'   the mvSuSiE reweighted prior: \code{dataDrivenPriorMatrices}, the fitted
+#'   \code{w0}, and the fitted \code{V}. Default FALSE.
+#' @param fitDetail How much to retain when \code{retainFit = TRUE}.
+#'   \code{"slim"} (default) keeps only those reconstruction inputs (the
+#'   coefficients are already the returned weights); \code{"full"} additionally
+#'   keeps the complete \code{mr.mash.rss} fit under \code{$fit}. Mirrors
+#'   \code{\link{mrmashWeights}}.
 #' @param ... Additional arguments forwarded to
 #'   \code{mr.mashr::mr.mash.rss}.
 #'
@@ -721,7 +738,8 @@ mrmashRssWeights <- function(stat, LD, mrmashRssFit = NULL,
                              dataDrivenPriorMatrices = NULL,
                              canonicalPriorMatrices = TRUE,
                              S0 = NULL, w0 = NULL, V = NULL, covY = NULL,
-                             retainFit = FALSE, ...) {
+                             retainFit = FALSE, fitDetail = c("slim", "full"),
+                             ...) {
   if (!requireNamespace("mr.mashr", quietly = TRUE)) {
     stop("Package 'mr.mashr' is required. ",
          "Install with: devtools::install_github('stephenslab/mr.mash.alpha')")
@@ -761,7 +779,18 @@ mrmashRssWeights <- function(stat, LD, mrmashRssFit = NULL,
   }
   # coef.mr.mash.rss returns nrow(Bhat) rows (no intercept). Do not strip.
   weights <- mr.mashr::coef.mr.mash.rss(mrmashRssFit)
-  if (retainFit) attr(weights, "fit") <- mrmashRssFit
+  if (retainFit) {
+    fitDetail <- match.arg(fitDetail)
+    # Mirror mrmashWeights(): the slim payload carries only the mvSuSiE-prior
+    # reconstruction inputs (the coefficients are already `weights`, so mu1 is
+    # not duplicated); "full" additionally keeps the whole mr.mash.rss fit.
+    fitList <- list(
+      dataDrivenPriorMatrices = dataDrivenPriorMatrices,
+      w0 = mrmashRssFit$w0,
+      V  = mrmashRssFit$V)
+    if (fitDetail == "full") fitList$fit <- mrmashRssFit
+    attr(weights, "fit") <- fitList
+  }
   weights
 }
 

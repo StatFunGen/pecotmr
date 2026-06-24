@@ -835,6 +835,8 @@ setMethod("twasWeightsPipeline", "QtlDataset",
            ensembleSolver         = "quadprog",
            ensembleAlpha          = 1,
            estimatePi             = TRUE,
+           retainFit              = TRUE,
+           retainFitDetail        = c("slim", "full"),
            phenotypeCovariatesToResidualize = NULL,
            genotypeCovariatesToResidualize  = NULL,
            residualizePhenotypeCovariates   = TRUE,
@@ -844,6 +846,7 @@ setMethod("twasWeightsPipeline", "QtlDataset",
            verbose                = 1,
            ...) {
     naAction <- match.arg(naAction)
+    retainFitDetail <- match.arg(retainFitDetail)
     # `cisWindow` expands a trait's own coordinates; `region` is literal.
     # Supplying both signals a misunderstanding -> reject.
     if (!is.null(region) && !is.null(cisWindow)) {
@@ -872,7 +875,8 @@ setMethod("twasWeightsPipeline", "QtlDataset",
     if (length(parsedJointSpec) > 0L) {
       jointResult <- .twasDispatchJointSpecsQtlDataset(
         parsedJointSpec, data, intersect(norm$tokens, "mrmash"),
-        contexts, traitId, cisWindow, dataType, verbose, xRegions = xRegions)
+        contexts, traitId, cisWindow, dataType, verbose, xRegions = xRegions,
+        retainFit = retainFit, retainFitDetail = retainFitDetail)
       drop <- intersect(norm$tokens, "mrmash")
       keep <- setdiff(norm$tokens, drop)
       if (length(keep) == 0L) {
@@ -1108,7 +1112,10 @@ setMethod("twasWeightsPipeline", "QtlDataset",
           # Retain the mr.mash fit parts ({dataDrivenPriorMatrices, w0, V}) on
           # the entry's `fits` slot so fineMappingPipeline can rebuild the
           # mvSuSiE reweighted prior + residual variance from this shared fit.
+          # `retainFitDetail` selects the slim payload (default) or the full
+          # mr.mash fit.
           retainFits = TRUE,
+          retainFitDetail = retainFitDetail,
           fittedModels = jointFits,
           cvFolds = cvFolds,
           samplePartition = samplePartition,
@@ -1165,9 +1172,12 @@ setMethod("twasWeightsPipeline", "QtlSumStats",
            jointSpecification = NULL,
            fineMappingResult  = NULL,
            twasWeights        = NULL,
+           retainFit          = TRUE,
+           retainFitDetail    = c("slim", "full"),
            dataType           = NULL,
            verbose            = 1L,
            ...) {
+    retainFitDetail <- match.arg(retainFitDetail)
     # summaryStatsQc() is mandatory before twasWeightsPipeline for SumStats
     # input; it also drops variants not present in the ldSketch, so by the
     # time we reach this method every entry's SNP set is a subset of the
@@ -1200,7 +1210,8 @@ setMethod("twasWeightsPipeline", "QtlSumStats",
     if (length(parsedJointSpec) > 0L) {
       jointResult <- .twasDispatchJointSpecsQtlSumStats(
         parsedJointSpec, data, intersect(tokens, "mrmash"),
-        contexts, traitId, dataType, verbose)
+        contexts, traitId, dataType, verbose,
+        retainFit = retainFit, retainFitDetail = retainFitDetail)
       keep <- setdiff(tokens, "mrmash")
       if (length(keep) == 0L) {
         if (is.null(jointResult))
@@ -1374,6 +1385,15 @@ setMethod("twasWeightsPipeline", "QtlSumStats",
                 else .twasMethodCapabilities[[tk]]$sumstatImpl
           userArgs <- methodArgs[[tk]]
           if (is.null(userArgs)) userArgs <- list()
+          # mr.mash (no fine-mapping adapter) is the producer of the mvSuSiE
+          # data-driven prior: retain its (slim by default) fit so a downstream
+          # mvsusie_rss fineMappingPipeline run can rebuild the reweighted prior.
+          # Mirrors the individual-level path, which hardcodes retainFits = TRUE.
+          # Respect an explicit caller override of either knob.
+          if (is.null(adapter) && tk == "mrmash") {
+            if (is.null(userArgs$retainFit)) userArgs$retainFit <- TRUE
+            if (is.null(userArgs$fitDetail)) userArgs$fitDetail <- retainFitDetail
+          }
           # mvsusie is fine-mapping; thread the pre-fit through. mr.mash is
           # not, so this branch only fires for mvsusie.
           if (!is.null(adapter)) {
@@ -1463,6 +1483,8 @@ setMethod("twasWeightsPipeline", "MultiStudyQtlDataset",
            jointSpecification = NULL,
            fineMappingResult  = NULL,
            twasWeights        = NULL,
+           retainFit          = TRUE,
+           retainFitDetail    = c("slim", "full"),
            naAction           = c("drop", "impute"),
            verbose            = 1,
            phenotypeCovariatesToResidualize = NULL,
@@ -1471,6 +1493,7 @@ setMethod("twasWeightsPipeline", "MultiStudyQtlDataset",
            residualizeGenotypeCovariates    = TRUE,
            ...) {
     naAction <- match.arg(naAction)
+    retainFitDetail <- match.arg(retainFitDetail)
     if (!is.null(region) && !is.null(cisWindow)) {
       stop("twasWeightsPipeline(MultiStudyQtlDataset): specify either ",
            "`region` or `cisWindow`, not both.")
@@ -1498,7 +1521,8 @@ setMethod("twasWeightsPipeline", "MultiStudyQtlDataset",
                                        names(methods)), "mrmash")
       jointResult <- .twasDispatchJointSpecsMultiStudy(
         parsedJointSpec, data, jointMethods,
-        contexts, traitId, cisWindow, NULL, verbose, xRegions = xRegions)
+        contexts, traitId, cisWindow, NULL, verbose, xRegions = xRegions,
+        retainFit = retainFit, retainFitDetail = retainFitDetail)
       # Strip mrmash from the methods passed to the per-component recursion.
       if (is.character(methods)) methods <- setdiff(methods, "mrmash")
       else if (is.list(methods)) {
@@ -1636,7 +1660,9 @@ setMethod("twasWeightsPipeline", "ANY",
                                 dataType = NULL,
                                 ldSketch = NULL,
                                 retainFits = FALSE,
+                                retainFitDetail = c("slim", "full"),
                                 verbose = 1) {
+  retainFitDetail <- match.arg(retainFitDetail)
   if (is.character(weightMethods)) {
     weightMethods <- .twasMethodLookup(weightMethods)
   }
@@ -1679,7 +1705,7 @@ setMethod("twasWeightsPipeline", "ANY",
   learnArgs <- list(
     study = study, context = context, trait = trait,
     standardized = standardized, dataType = dataType,
-    ldSketch = ldSketch)
+    ldSketch = ldSketch, retainFitDetail = retainFitDetail)
 
   if (needsPiEstimation) {
     # Run mr.ash first to estimate sparsity

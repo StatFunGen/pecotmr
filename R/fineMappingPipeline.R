@@ -178,6 +178,17 @@
 #'   summary-statistics analog lives in \code{summaryStatsQc()}. \code{0}
 #'   (default) disables the screen; a negative value uses the adaptive
 #'   \code{3 / nVariants} threshold.
+#' @param usePCA Logical (length 1). \code{QtlDataset} only. When
+#'   \code{TRUE} (default \code{FALSE}), each multi-trait context's
+#'   PCA-reduced phenotype is fine-mapped with univariate SuSiE on its
+#'   top principal components (ports the legacy \code{fsusie.R}
+#'   \code{susie_on_top_pc}). Each PC becomes a pseudo-trait row keyed
+#'   \code{trait = "topPC\{i\}"}, \code{method = "susie"}. Single-trait
+#'   contexts have no PCA and are skipped.
+#' @param nPCs Integer (length 1). \code{QtlDataset} only. Caps the
+#'   number of top principal components fine-mapped per context when
+#'   \code{usePCA = TRUE} (default \code{10}). The effective count is
+#'   \code{min(nPCs, usable traits)}.
 #' @param jointSpecification Optional joint-fit specification (NULL by
 #'   default). When NULL, the pipeline runs the implicit multi-context /
 #'   multi-trait mvSuSiE / fSuSiE branches as before. When non-NULL, the
@@ -697,6 +708,93 @@ setGeneric("fineMappingPipeline",
   }
 }
 
+# Rebuild the mvSuSiE data-driven *reweighted* mixture prior + residual variance
+# from a stored mr.mash fit -- the lean payload
+# (list(dataDrivenPriorMatrices, w0, V)) that mrmashWeights(retainFit = TRUE)
+# attaches and twasWeightsPipeline keeps on the mrmash TwasWeightsEntry. Shared
+# by the fine-mapping mvsusie consumer and the twas mvsusie_weights consumer.
+#
+# Reproduces the deleted multivariate_pipeline.R reweighting bit-identically:
+# rescaleCovW0(w0) collapses the expanded mr.mash weights onto the original
+# data-driven covariance matrices ($U), filters to surviving components, and
+# create_mixture_prior() wraps them, restricted to the fit's conditions
+# (`conditionNames` = colnames(Y)). `V` becomes mvsusie's residual_variance.
+# A NULL fit, NULL matrices, or no surviving component falls back to the
+# canonical create_mixture_prior(R), matching the legacy `else` branch.
+# Returns list(priorVariance, residualVariance) (residualVariance NULL only
+# when no fit was supplied at all).
+# @noRd
+.buildMvsusieReweightedPrior <- function(fitParts, conditionNames,
+                                         weightsTol = 1e-10) {
+  R <- length(conditionNames)
+  canonical <- function(V) list(
+    priorVariance    = mvsusieR::create_mixture_prior(
+      R = R, include_indices = conditionNames),
+    residualVariance = V)
+  if (is.null(fitParts)) return(canonical(NULL))
+  ddpm <- fitParts$dataDrivenPriorMatrices
+  if (is.null(ddpm) || is.null(ddpm$U)) return(canonical(fitParts$V))
+  w0Updated <- rescaleCovW0(fitParts$w0)
+  w0Updated <- w0Updated[names(w0Updated) %in% names(ddpm$U)]
+  if (length(w0Updated) == 0L) return(canonical(fitParts$V))
+  mixture <- list(matrices = ddpm$U[names(w0Updated)], weights = w0Updated)
+  list(
+    priorVariance    = mvsusieR::create_mixture_prior(
+      mixture_prior = mixture, weights_tol = weightsTol,
+      include_indices = conditionNames),
+    residualVariance = fitParts$V)
+}
+
+# Locate the retained mr.mash fit payload {dataDrivenPriorMatrices, w0, V} for
+# one (study, trait[, context]) inside a `TwasWeights` collection from a prior
+# mr.mash twasWeightsPipeline run (the producer side of the mvSuSiE data-driven
+# prior). The joint fit is attached to a single mrmash row of the group (the
+# other rows carry fits = NULL), so scan the matching mrmash rows and return the
+# first non-NULL payload. The fit may span more conditions than the mvsusie
+# block fits -- `.buildMvsusieReweightedPrior(include_indices=)` subsets it.
+#
+# `context` is optional and disambiguates joint fits, which key differently:
+#   * per-context / cross-context mvsusie -> (study, trait=tid)        [context = NULL]
+#   * cross-trait joint mvsusie           -> (study, trait="joint", context=cx)
+# Returns NULL when no TwasWeights is supplied or it carries no matching mr.mash
+# fit (caller then falls back to the canonical prior).
+# @noRd
+.fmLookupMrmashFit <- function(twasWeights, study, trait, context = NULL) {
+  if (is.null(twasWeights)) return(NULL)
+  sel <- as.character(twasWeights$study)  == study &
+         as.character(twasWeights$trait)  == trait &
+         as.character(twasWeights$method) == "mrmash"
+  if (!is.null(context))
+    sel <- sel & as.character(twasWeights$context) == context
+  for (i in which(sel)) {
+    f <- getFits(twasWeights$entry[[i]])
+    if (!is.null(f)) return(f)
+  }
+  NULL
+}
+
+# PCA-reduce a (samples x traits) phenotype matrix to its top `nPCs` principal
+# component scores, for the `usePCA` top-PC susie path. Centers + scales
+# (matching the legacy fsusie.R susie_on_top_pc), dropping incomplete rows and
+# zero-variance traits first (prcomp requires complete, non-degenerate columns).
+# Returns a (samples x k) score matrix, k = min(nPCs, usable traits), columns
+# named topPC1..topPCk and rows keyed by sample; NULL when < 2 usable traits or
+# samples (single-trait -> PCA undefined, so the caller skips).
+# @noRd
+.fmTopPcScores <- function(Y, nPCs) {
+  if (is.null(dim(Y)) || ncol(Y) < 2L) return(NULL)
+  Y <- Y[stats::complete.cases(Y), , drop = FALSE]
+  if (nrow(Y) < 2L) return(NULL)
+  Y <- Y[, apply(Y, 2L, stats::var) > 0, drop = FALSE]
+  if (ncol(Y) < 2L) return(NULL)
+  scores <- stats::prcomp(Y, center = TRUE, scale. = TRUE)$x
+  k <- min(as.integer(nPCs), ncol(scores))
+  if (k < 1L) return(NULL)
+  scores <- scores[, seq_len(k), drop = FALSE]
+  colnames(scores) <- paste0("topPC", seq_len(k))
+  scores
+}
+
 # Single-effect (SER) pre-screen, individual-level. Fits susie with L = 1 on a
 # residualized (X, y) block and reports whether any PIP clears `cutoff` -- i.e.
 # whether the block shows any potentially significant variant worth a full fit.
@@ -1032,7 +1130,8 @@ setGeneric("fineMappingPipeline",
 # tokens are fit independently (no chained init) per fold, matching
 # twasWeightsCv's per-fold refit. Returns NULL on failure (caller skips it).
 # @noRd
-.fmFoldWeights <- function(token, Xtr, Ytr, coverage, userArgs, pos) {
+.fmFoldWeights <- function(token, Xtr, Ytr, coverage, userArgs, pos,
+                           mvPrior = NULL) {
   asMat <- function(w) {
     if (is.matrix(w)) return(w)
     matrix(w, ncol = 1L, dimnames = list(names(w), NULL))
@@ -1050,11 +1149,18 @@ setGeneric("fineMappingPipeline",
     return(asMat(w))
   }
   if (token == "mvsusie") {
-    pv <- mvsusieR::create_mixture_prior(R = ncol(Ytr))
+    # Reuse the data-driven reweighted prior + residual covariance from the
+    # full-data mr.mash fit on every fold -- the prior is over conditions, which
+    # are identical across folds (only samples are held out). NULL mvPrior ->
+    # canonical prior (unchanged behavior).
+    baseArgs <- list(X = Xtr, Y = Ytr, coverage = coverage,
+                     prior_variance = if (is.null(mvPrior))
+                       mvsusieR::create_mixture_prior(R = ncol(Ytr))
+                     else mvPrior$priorVariance)
+    if (!is.null(mvPrior) && !is.null(mvPrior$residualVariance))
+      baseArgs$residual_variance <- mvPrior$residualVariance
     fit <- do.call(fitMvsusie,
-                   .fmMergeUserArgs(list(X = Xtr, Y = Ytr, prior_variance = pv,
-                                         coverage = coverage),
-                                    "mvsusie", userArgs))
+                   .fmMergeUserArgs(baseArgs, "mvsusie", userArgs))
     W <- as.matrix(mvsusieWeights(mvsusieFit = fit))
     if (is.null(rownames(W))) rownames(W) <- colnames(Xtr)
     return(W)
@@ -1076,7 +1182,7 @@ setGeneric("fineMappingPipeline",
 # @noRd
 .fmCrossValidate <- function(X, Y, tokens, methodArgs, fold,
                              samplePartition = NULL, coverage = 0.95,
-                             pos = NULL, verbose = 1) {
+                             pos = NULL, verbose = 1, mvPrior = NULL) {
   if (length(tokens) == 0L) return(NULL)
   if (!is.matrix(Y)) {
     Y <- matrix(Y, ncol = 1L,
@@ -1106,7 +1212,7 @@ setGeneric("fineMappingPipeline",
     XtrK <- Xtr[, keepCol, drop = FALSE]
     for (tk in tokens) {
       W <- tryCatch(
-        .fmFoldWeights(tk, XtrK, Ytr, coverage, methodArgs[[tk]], pos),
+        .fmFoldWeights(tk, XtrK, Ytr, coverage, methodArgs[[tk]], pos, mvPrior),
         error = function(e) {
           if (verbose >= 1)
             message(sprintf("  CV fold %s, method %s failed: %s",
@@ -1186,7 +1292,11 @@ setMethod("fineMappingPipeline", "QtlDataset",
            cvFolds            = 0,
            samplePartition    = NULL,
            pipCutoffToSkip    = 0,
+           usePCA             = FALSE,
+           nPCs               = 10L,
            seed               = NULL,
+           twasWeights        = NULL,
+           dataDrivenPriorWeightsCutoff = 1e-10,
            naAction           = c("drop", "impute"),
            verbose            = 1,
            trim               = TRUE,
@@ -1222,7 +1332,9 @@ setMethod("fineMappingPipeline", "QtlDataset",
         parsedJointSpec, data, intersect(tokens, c("mvsusie", "fsusie")),
         contexts, traitId, cisWindow,
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs, xRegions = xRegions)
+        methodArgs = methodArgs, xRegions = xRegions,
+        twasWeights = twasWeights,
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff)
       tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
       methodArgs <- methodArgs[tokens]
       if (length(tokens) == 0L) {
@@ -1372,6 +1484,54 @@ setMethod("fineMappingPipeline", "QtlDataset",
       }
     }
 
+    # ---- usePCA dispatch: PCA-reduce each multi-trait context's phenotype and
+    # fine-map the top PCs with univariate susie (ports the legacy fsusie.R
+    # susie_on_top_pc). Each PC is a pseudo-trait row (trait = topPC{i},
+    # method = "susie"); a single-trait context has no PCA and is skipped.
+    if (isTRUE(usePCA)) {
+      for (ctx in useCtx) {
+        traits <- perCtxTraits[[ctx]]
+        if (length(traits) < 2L) next
+        Yctx <- .fmResidPheno(data, contexts = ctx, traitId = traits,
+                              naAction = naAction)
+        scores <- .fmTopPcScores(Yctx, nPCs)
+        if (is.null(scores)) next
+        if (verbose >= 1)
+          message(sprintf(
+            "usePCA: fine-mapping %d top PC(s) of context='%s' (%d traits) ...",
+            ncol(scores), ctx, length(traits)))
+        for (pcName in colnames(scores)) {
+          cached <- .fmCacheLookup(fineMappingResult, study, ctx, pcName, "susie")
+          if (!is.null(cached)) { pushRow(study, ctx, pcName, "susie", cached); next }
+          pcY <- scores[, pcName]
+          blockEntries <- lapply(xRegions, function(rg) {
+            X <- if (is.null(rg)) {
+              .fmResidGeno(data, contexts = ctx, traitId = traits,
+                           cisWindow = cisWindow, samples = rownames(scores))
+            } else {
+              .fmResidGeno(data, contexts = ctx, region = rg,
+                           samples = rownames(scores))
+            }
+            common <- intersect(rownames(X), names(pcY))
+            if (length(common) < 2L) return(list())
+            Xb <- X[common, , drop = FALSE]
+            if (!.fmSerScreen(Xb, pcY[common], pipCutoffToSkip)) return(list())
+            afVec <- .fmAfForX(data, Xb, traitId = traits, region = rg,
+                               cisWindow = cisWindow)
+            .fmFitXBlock(Xb, pcY[common], "susie", FALSE, coverage,
+                         secondaryCoverage, signalCutoff, minAbsCorr,
+                         methodArgs, verbose, ctx, pcName,
+                         cvFolds = cvFolds, samplePartition = samplePartition,
+                         af = afVec)
+          })
+          ents <- lapply(blockEntries, function(be) be[["susie"]])
+          if (any(vapply(ents, is.null, logical(1)))) next
+          entry <- if (length(ents) == 1L) ents[[1L]] else .fmMergeEntries(ents)
+          pushRow(study, ctx, pcName, "susie", entry)
+        }
+      }
+    }
+
     # ---- mvsusie dispatch: joint over selected (contexts, traits).
     if (length(mvTokens) > 0L) {
       if (!requireNamespace("mvsusieR", quietly = TRUE)) {
@@ -1467,6 +1627,14 @@ setMethod("fineMappingPipeline", "QtlDataset",
 
           if (verbose >= 1)
             message(sprintf("Fitting mvsusie (multi-context) for trait='%s' ...", tid))
+          # Data-driven mvSuSiE prior: if a prior mr.mash run was supplied via
+          # `twasWeights`, reuse its fitted mixture weights + residual covariance
+          # for this (study, trait) -> reweighted create_mixture_prior; else the
+          # lookup returns NULL and `.buildMvsusieReweightedPrior` falls back to
+          # the canonical prior (unchanged behavior). Keyed on (study, trait):
+          # the fit may span more contexts than survive the SER pre-screen, and
+          # `include_indices = colnames(Yc)` subsets it to the fitted contexts.
+          mvFitParts <- .fmLookupMrmashFit(twasWeights, study, tid)
           fitOneRegion <- function(rg) {
             X <- if (is.null(rg)) {
               .fmResidGeno(data, contexts = contextsHere, traitId = tid,
@@ -1488,10 +1656,14 @@ setMethod("fineMappingPipeline", "QtlDataset",
               colnames(ym) <- ctx
               ym
             }))
+            mvPrior <- .buildMvsusieReweightedPrior(
+              mvFitParts, colnames(Yc), dataDrivenPriorWeightsCutoff)
             mvBaseArgs <- list(
               X = Xc, Y = Yc,
-              prior_variance = mvsusieR::create_mixture_prior(R = ncol(Yc)),
+              prior_variance = mvPrior$priorVariance,
               coverage = coverage)
+            if (!is.null(mvPrior$residualVariance))
+              mvBaseArgs$residual_variance <- mvPrior$residualVariance
             fit <- do.call(fitMvsusie,
                            .fmMergeUserArgs(mvBaseArgs, "mvsusie",
                                             methodArgs[["mvsusie"]]))
@@ -1504,7 +1676,8 @@ setMethod("fineMappingPipeline", "QtlDataset",
             if (cvFolds > 1L) {
               cv <- .fmCrossValidate(Xc, Yc, "mvsusie", methodArgs, cvFolds,
                                      samplePartition = samplePartition,
-                                     coverage = coverage, verbose = verbose)
+                                     coverage = coverage, verbose = verbose,
+                                     mvPrior = mvPrior)
               entry <- .fmAttachCv(entry, .fmSliceCv(cv, "mvsusie"))
             }
             entry
@@ -1591,6 +1764,10 @@ setMethod("fineMappingPipeline", "QtlDataset",
             Yc <- Y[common, , drop = FALSE]
             afVec <- .fmAfForX(data, Xc, traitId = traits, region = rg,
                                cisWindow = cisWindow)
+            # Multi-trait mvsusie conditions are traits (one context), so there
+            # is no mr.mash-over-contexts fit to reweight from -- the data-driven
+            # prior (keyed on a single (study, trait)) does not apply here. Keep
+            # the canonical prior.
             mvBaseArgs <- list(
               X = Xc, Y = Yc,
               prior_variance = mvsusieR::create_mixture_prior(R = ncol(Yc)),
@@ -1750,6 +1927,8 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
            minAbsCorr         = 0.8,
            medianAbsCorr      = NULL,
            fineMappingResult  = NULL,
+           twasWeights        = NULL,
+           dataDrivenPriorWeightsCutoff = 1e-10,
            cvFolds            = 0,
            samplePartition    = NULL,
            pipCutoffToSkip    = 0,
@@ -1783,7 +1962,9 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
         parsedJointSpec, data, intersect(tokens, c("mvsusie", "fsusie")),
         contexts, traitId, cisWindow,
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs, xRegions = xRegions)
+        methodArgs = methodArgs, xRegions = xRegions,
+        twasWeights = twasWeights,
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff)
       # Forward the still-pending (non-joint) tokens + their kwargs to the
       # per-QtlDataset recursion below, preserving the list shape so
       # methodArgs land on the right tokens.
@@ -1897,6 +2078,8 @@ setMethod("fineMappingPipeline", "QtlSumStats",
            minAbsCorr         = 0.8,
            medianAbsCorr      = NULL,
            fineMappingResult  = NULL,
+           twasWeights        = NULL,
+           dataDrivenPriorWeightsCutoff = 1e-10,
            verbose            = 1,
            trim               = TRUE,
            ...) {
@@ -1913,7 +2096,9 @@ setMethod("fineMappingPipeline", "QtlSumStats",
         parsedJointSpec, data, intersect(tokens, "mvsusie"),
         contexts, traitId,
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs)
+        methodArgs = methodArgs,
+        twasWeights = twasWeights,
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff)
       tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
       methodArgs <- methodArgs[tokens]
       if (length(tokens) == 0L) {
@@ -2091,10 +2276,19 @@ setMethod("fineMappingPipeline", "QtlSumStats",
         if (verbose >= 1)
           message(sprintf("Fitting mvsusie (RSS) for (study='%s', trait='%s', %d contexts) ...",
                           st, tr, length(ctxNames)))
+        # Data-driven reweighted prior from a prior mr.mash (RSS) run, looked up
+        # on (study, trait); mvsusie_rss takes the same create_mixture_prior +
+        # residual_variance (K x K condition residual covariance) as fitMvsusie.
+        # NULL twasWeights / no fit -> canonical prior (unchanged behavior).
+        mvPrior <- .buildMvsusieReweightedPrior(
+          .fmLookupMrmashFit(twasWeights, st, tr), colnames(Z),
+          dataDrivenPriorWeightsCutoff)
         mvBaseArgs <- list(
           Z = Z, R = ldMat, N = as.numeric(stats::median(nVec)),
-          prior_variance = mvsusieR::create_mixture_prior(R = ncol(Z)),
+          prior_variance = mvPrior$priorVariance,
           coverage = coverage)
+        if (!is.null(mvPrior$residualVariance))
+          mvBaseArgs$residual_variance <- mvPrior$residualVariance
         fit <- do.call(fitMvsusieRss,
                        .fmMergeUserArgs(mvBaseArgs, "mvsusie",
                                         methodArgs[["mvsusie"]]))

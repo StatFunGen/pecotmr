@@ -64,6 +64,30 @@ test_that("susieRssWeights retains fit when retainFit = TRUE", {
   expect_false(is.null(attr(w, "fit")))
 })
 
+test_that("mrmashWeights fitDetail: slim default omits the full fit, full keeps it", {
+  skip_if_not_installed("mr.mashr")
+  fakeFit <- list(w0 = c(a_1 = 0.5, a_2 = 0.5), V = diag(2))
+  ddpm <- list(U = list(a = diag(2)))
+  # Mock coef extraction so we exercise only the retain payload logic, not a
+  # real mr.mash fit. coef.mr.mash(fit)[-1, ] -> drop the intercept row.
+  local_mocked_bindings(
+    coef.mr.mash = function(object, ...) rbind(c(0, 0), c(0.1, 0.2)),
+    .package = "mr.mashr")
+  fitSlim <- attr(mrmashWeights(mrmashFit = fakeFit, retainFit = TRUE,
+                                dataDrivenPriorMatrices = ddpm), "fit")
+  expect_setequal(names(fitSlim), c("dataDrivenPriorMatrices", "w0", "V"))
+  expect_null(fitSlim$fit)                       # slim: no full fit
+  expect_identical(fitSlim$dataDrivenPriorMatrices, ddpm)
+  expect_identical(fitSlim$w0, fakeFit$w0)
+
+  fitFull <- attr(mrmashWeights(mrmashFit = fakeFit, retainFit = TRUE,
+                                fitDetail = "full",
+                                dataDrivenPriorMatrices = ddpm), "fit")
+  expect_true("fit" %in% names(fitFull))         # full: the whole fit retained
+  expect_identical(fitFull$fit, fakeFit)
+  expect_identical(fitFull$w0, fakeFit$w0)       # slim fields still present
+})
+
 test_that("susieInfRssWeights works", {
   skip_if_not_installed("susieR")
   set.seed(42)
