@@ -343,7 +343,9 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
     si <- x@genotypes@snpInfo
     snpMask <- nchar(as.character(si$A1[snpIdx])) == 1L &
                nchar(as.character(si$A2[snpIdx])) == 1L
-    snpIdx <- snpIdx[snpMask]
+    # which() (not snpMask directly) so any NA in the mask drops that variant
+    # rather than injecting an NA index that would corrupt the extracted block.
+    snpIdx <- snpIdx[which(snpMask)]
     if (length(snpIdx) == 0L) {
       return(list(
         geno       = matrix(numeric(0), nrow = 0L, ncol = 0L,

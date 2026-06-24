@@ -116,8 +116,12 @@ setMethod("readGenotypes",
       stop("Plink file not found: ", f)
   }
 
+  # colClasses = "character" so type.convert() never coerces a column: a bim
+  # whose allele column is uniformly "T"/"F" (e.g. all-A/T SNPs) would otherwise
+  # be read as logical TRUE/FALSE, silently corrupting A1/A2 (BP is cast to
+  # integer explicitly below).
   bim <- read.table(bimFile, header = FALSE,
-                            stringsAsFactors = FALSE,
+                            colClasses = "character",
                             col.names = c("CHR", "SNP", "CM", "BP", "A1", "A2"))
   fam <- read.table(famFile, header = FALSE, stringsAsFactors = FALSE)
   sampleIds <- as.character(fam[, 2])  # IID column
