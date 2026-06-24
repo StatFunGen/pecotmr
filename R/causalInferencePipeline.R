@@ -49,9 +49,33 @@
 #'   When supplied, drives the MR computation and (when
 #'   \code{twasWeights = NULL}) the TWAS-Z weights via the SuSiE-style
 #'   coefficients on each entry's \code{topLoci}.
-#' @param mrPipCutoff Numeric (length 1). PIP threshold for an entry's
-#'   \code{topLoci} variant to be used as an instrumental variable.
-#'   Used only when \code{mrMethod = "ivwPerVariant"}. Default \code{0.5}.
+#' @param rsqCutoff Numeric (length 1). When \code{> 0}, performs CV weight
+#'   selection (ports the legacy \code{twas_pipeline} \code{pick_best_model} +
+#'   \code{update_twas_method}): per \code{(study, context, trait, gwasStudy)}
+#'   keep only the method whose \code{cvPerformance} \code{rsqOption} metric is
+#'   highest among methods that clear both \code{rsqCutoff} and the
+#'   \code{rsqPvalCutoff} gate AND that produced a finite TWAS Z (the NA/Inf
+#'   re-selection); groups where no method clears the cutoffs are dropped. A
+#'   group whose methods carry no usable \code{cvPerformance} (the SS-TWAS
+#'   path) keeps all methods. Needs the \code{twasWeights} \code{cvPerformance},
+#'   so selection is a no-op on the fineMappingResult-only path. Default
+#'   \code{0} (no selection; score every method).
+#' @param rsqPvalCutoff Numeric (length 1). CV-p-value gate for weight
+#'   selection (ports legacy \code{rsq_pval_cutoff}): a method is eligible only
+#'   when its \code{cvPerformance} \code{rsqPvalOption} metric is
+#'   \code{< rsqPvalCutoff}. Default \code{Inf} (no p-value gate). A finite
+#'   value activates selection even when \code{rsqCutoff = 0}.
+#' @param rsqOption Character. Which \code{cvPerformance} metric is the
+#'   "r-squared" used for the cutoff and ranking (ports legacy
+#'   \code{rsq_option}); typically \code{"rsq"} or \code{"adj_rsq"}.
+#'   Default \code{"rsq"}.
+#' @param rsqPvalOption Character vector of candidate \code{cvPerformance}
+#'   metric names for the p-value gate (ports legacy \code{rsq_pval_option});
+#'   the first one present in a tuple's metrics is used. Default
+#'   \code{c("adj_rsq_pval", "pval")}.
+#' @param mrPipCutoff Numeric (length 1). PIP threshold for a \code{topLoci}
+#'   variant to be used as an instrumental variable. Used only when
+#'   \code{mrMethod = "ivwPerVariant"}. Default \code{0.5}.
 #' @param mrMethod One of \code{"ivwPerVariant"} (default) or
 #'   \code{"csAware"}. The IVW-per-variant method filters topLoci
 #'   variants by \code{pip > mrPipCutoff} and IVW-pools Wald ratios
@@ -63,6 +87,12 @@
 #' @param mrCpipCutoff Numeric (length 1). Cumulative-PIP cutoff for
 #'   retaining a credible set. Used only when
 #'   \code{mrMethod = "csAware"}. Default \code{0.5}.
+#' @param mrPvalCutoff Numeric (length 1). TWAS-p-value gate for running MR
+#'   (ports the legacy \code{twas_pipeline} \code{mr_pval_cutoff}): MR is
+#'   computed for a \code{(qtl tuple, gwas)} only when its \code{twasPval <
+#'   mrPvalCutoff}; otherwise the MR output columns are \code{NA}. Default
+#'   \code{1} (no gate; MR runs wherever a \code{fineMappingResult} entry
+#'   exists).
 #' @param combineMethods Optional character vector forwarded to
 #'   \code{\link{combinePValues}} for cross-method combination per
 #'   \code{(qtlStudy, context, trait, gwasStudy)} group. \code{NULL}
@@ -73,9 +103,14 @@
 causalInferencePipeline <- function(gwasSumStats,
                                     twasWeights = NULL,
                                     fineMappingResult = NULL,
+                                    rsqCutoff = 0,
+                                    rsqPvalCutoff = Inf,
+                                    rsqOption = "rsq",
+                                    rsqPvalOption = c("adj_rsq_pval", "pval"),
                                     mrPipCutoff = 0.5,
                                     mrMethod = c("ivwPerVariant", "csAware"),
                                     mrCpipCutoff = 0.5,
+                                    mrPvalCutoff = 1,
                                     combineMethods = NULL,
                                     ...) {
   mrMethod <- match.arg(mrMethod)
@@ -119,6 +154,28 @@ causalInferencePipeline <- function(gwasSumStats,
   }
   qtlRows$useFmrForWeights <- is.null(twasWeights)
 
+  # --- Optional CV weight selection (legacy pick_best_model + -----------
+  #     update_twas_method): filter to eligible methods now, but defer the
+  #     final best-method pick to AFTER the TWAS Z so the NA/Inf re-selection
+  #     can see which methods actually produced a finite Z.
+  selectionActive <- !is.null(twasWeights) &&
+    (rsqCutoff > 0 || is.finite(rsqPvalCutoff))
+  rsqLookup <- NULL
+  if (selectionActive) {
+    metricTab <- .cipMethodMetrics(qtlRows, twasWeights, rsqOption, rsqPvalOption)
+    rsqLookup <- stats::setNames(
+      metricTab$rsq,
+      paste(metricTab$qtlStudy, metricTab$context, metricTab$trait,
+            metricTab$method, sep = "\r"))
+    qtlRows <- .cipFilterEligibleMethods(qtlRows, metricTab,
+                                         rsqCutoff, rsqPvalCutoff)
+    if (nrow(qtlRows) == 0L) {
+      stop("causalInferencePipeline: every QTL tuple was filtered out by ",
+           "rsqCutoff = ", rsqCutoff, " / rsqPvalCutoff = ", rsqPvalCutoff,
+           " (no method cleared the CV cutoffs).")
+    }
+  }
+
   # --- Per-tuple loop: compute TWAS Z + (optional) MR --------------------
   outRows <- list()
   for (qi in seq_len(nrow(qtlRows))) {
@@ -156,7 +213,11 @@ causalInferencePipeline <- function(gwasSumStats,
         gwasDf  = gdf, gwasLd = gwasLd)
       if (is.null(twasOut)) next
 
-      mrOut <- if (!is.null(fmrEntry)) {
+      # Gate MR on the TWAS p-value (legacy mr_pval_cutoff): only run MR where
+      # the TWAS association is significant. mrPvalCutoff >= 1 disables the gate.
+      mrGateOpen <- mrPvalCutoff >= 1 ||
+        (!is.na(twasOut$pval) && twasOut$pval < mrPvalCutoff)
+      mrOut <- if (!is.null(fmrEntry) && mrGateOpen) {
         if (mrMethod == "csAware") {
           .cipComputeMrCsAware(fmrEntry = fmrEntry, gwasDf = gdf,
                                 cpipCutoff = mrCpipCutoff)
@@ -195,7 +256,15 @@ causalInferencePipeline <- function(gwasSumStats,
     stop("causalInferencePipeline: no (qtl, gwas) tuples produced a result.")
   }
 
-  out <- .cipRowsToGranges(outRows)
+  resultDf <- .cipRowsToDf(outRows)
+  # Final best-method pick + NA/Inf re-selection (legacy update_twas_method):
+  # per (qtlStudy, context, trait, gwasStudy) keep the highest-rsqOption
+  # eligible method whose TWAS Z is finite, falling back to the top-rsq method
+  # when none is finite. SS-TWAS groups (no usable rsq) keep all methods.
+  if (selectionActive) {
+    resultDf <- .cipSelectBestMethod(resultDf, rsqLookup)
+  }
+  out <- .cipDfToGranges(resultDf)
 
   if (!is.null(combineMethods)) {
     out <- .cipCombineAcrossMethods(out, methods = combineMethods)
@@ -236,6 +305,92 @@ causalInferencePipeline <- function(gwasSumStats,
       stringsAsFactors = FALSE)
   }
   df
+}
+
+# Resolve one CV metric (rsqOption / rsqPvalOption) for a single tuple from the
+# TwasWeights cvPerformance, which the individual-level CV path stores as a list
+# with a named $metrics vector (corr, rsq, adj_rsq, pval, RMSE, MAE); a bare
+# metrics vector / data frame is tolerated too. `which` is a vector of candidate
+# metric names; the first present is used. Returns NA when no usable metric.
+# @noRd
+.cipCvMetric <- function(twasWeights, study, context, trait, method, which) {
+  perf <- tryCatch(
+    getCvPerformance(twasWeights, study = study, context = context,
+                     trait = trait, method = method),
+    error = function(e) NULL)
+  if (is.null(perf)) return(NA_real_)
+  metrics <- if (is.list(perf) && !is.null(perf[["metrics"]]))
+               perf[["metrics"]] else perf
+  nm <- intersect(which, names(metrics))
+  if (length(nm) == 0L) return(NA_real_)
+  val <- suppressWarnings(as.numeric(metrics[[nm[[1L]]]]))
+  if (length(val) == 0L) NA_real_ else val[[1L]]
+}
+
+# Tabulate the rsqOption (rsq) and rsqPvalOption (pval) CV metrics for every
+# tuple in the work-list. Returns the identity columns plus `rsq`, `pval`.
+# @noRd
+.cipMethodMetrics <- function(qtlRows, twasWeights, rsqOption, rsqPvalOption) {
+  n <- nrow(qtlRows)
+  rsq <- vapply(seq_len(n), function(i)
+    .cipCvMetric(twasWeights, qtlRows$qtlStudy[[i]], qtlRows$context[[i]],
+                 qtlRows$trait[[i]], qtlRows$method[[i]], which = rsqOption),
+    numeric(1))
+  pval <- vapply(seq_len(n), function(i)
+    .cipCvMetric(twasWeights, qtlRows$qtlStudy[[i]], qtlRows$context[[i]],
+                 qtlRows$trait[[i]], qtlRows$method[[i]], which = rsqPvalOption),
+    numeric(1))
+  data.frame(
+    qtlStudy = qtlRows$qtlStudy, context = qtlRows$context,
+    trait = qtlRows$trait, method = qtlRows$method,
+    rsq = rsq, pval = pval, stringsAsFactors = FALSE)
+}
+
+# Eligibility filter (legacy pick_best_model gate): per (study, context, trait)
+# keep methods whose rsq >= rsqCutoff and (when the gate is finite) whose CV
+# p-value < rsqPvalCutoff. A group whose methods carry no usable rsq (all NA) is
+# the SS-TWAS path and keeps all its methods. Groups where no method clears the
+# cutoffs contribute nothing. Returns the filtered work-list (same columns).
+# @noRd
+.cipFilterEligibleMethods <- function(qtlRows, metricTab, rsqCutoff, rsqPvalCutoff) {
+  grp  <- paste(metricTab$qtlStudy, metricTab$context, metricTab$trait, sep = "\r")
+  keep <- logical(nrow(qtlRows))
+  pvalGate <- is.finite(rsqPvalCutoff)
+  for (g in unique(grp)) {
+    idx <- which(grp == g)
+    rsq <- metricTab$rsq[idx]
+    if (all(is.na(rsq))) { keep[idx] <- TRUE; next }   # SS-TWAS: keep all
+    elig <- !is.na(rsq) & rsq >= rsqCutoff
+    if (pvalGate)
+      elig <- elig & !is.na(metricTab$pval[idx]) & metricTab$pval[idx] < rsqPvalCutoff
+    keep[idx[elig]] <- TRUE
+  }
+  qtlRows[keep, , drop = FALSE]
+}
+
+# Final best-method pick + NA/Inf re-selection (legacy update_twas_method): per
+# (qtlStudy, context, trait, gwasStudy) rank the (already-eligible) methods by
+# rsqLookup descending and keep the first whose twasZ is finite; if none is
+# finite, keep the top-rsq method. A group with no usable rsq (SS-TWAS) keeps
+# all its rows. `rsqLookup` is keyed by study\rcontext\rtrait\rmethod.
+# @noRd
+.cipSelectBestMethod <- function(df, rsqLookup) {
+  if (nrow(df) == 0L) return(df)
+  key <- paste(df$qtlStudy, df$context, df$trait, df$method, sep = "\r")
+  rsq <- unname(rsqLookup[key])
+  grp <- paste(df$qtlStudy, df$context, df$trait, df$gwasStudy, sep = "\r")
+  keepRow <- logical(nrow(df))
+  for (g in unique(grp)) {
+    idx <- which(grp == g)
+    r   <- rsq[idx]
+    if (all(is.na(r))) { keepRow[idx] <- TRUE; next }  # SS-TWAS: keep all
+    ord <- idx[order(r, decreasing = TRUE)]            # NA sorts last
+    z   <- suppressWarnings(as.numeric(df$twasZ[ord]))
+    fin <- which(is.finite(z))
+    sel <- if (length(fin) > 0L) ord[[fin[[1L]]]] else ord[[1L]]
+    keepRow[sel] <- TRUE
+  }
+  df[keepRow, , drop = FALSE]
 }
 
 .cipFmrHasTuple <- function(fmr, study, context, trait, method) {
@@ -497,10 +652,14 @@ causalInferencePipeline <- function(gwasSumStats,
   1 / sqrt(2 * n * maf * (1 - maf))
 }
 
-# Convert the accumulated list of row records to a GRanges with mcols.
-.cipRowsToGranges <- function(rows) {
-  df <- do.call(rbind.data.frame, lapply(rows, as.data.frame,
-                                        stringsAsFactors = FALSE))
+# Convert the accumulated list of row records to a flat data.frame.
+.cipRowsToDf <- function(rows) {
+  do.call(rbind.data.frame, lapply(rows, as.data.frame,
+                                   stringsAsFactors = FALSE))
+}
+
+# Convert the assembled result data.frame to a GRanges with mcols.
+.cipDfToGranges <- function(df) {
   chr <- paste0("chr", sub("^chr", "", as.character(df$chrom),
                             ignore.case = TRUE))
   gr <- GenomicRanges::GRanges(

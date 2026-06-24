@@ -14,6 +14,7 @@ learnTwasWeights(
   numThreads = 1,
   fittedModels = NULL,
   retainFits = FALSE,
+  retainFitDetail = c("slim", "full"),
   standardized = FALSE,
   dataType = NULL,
   ldSketch = NULL,

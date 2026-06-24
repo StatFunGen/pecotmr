@@ -15,6 +15,7 @@ mrmashRssWeights(
   V = NULL,
   covY = NULL,
   retainFit = FALSE,
+  fitDetail = c("slim", "full"),
   ...
 )
 }
@@ -49,8 +50,16 @@ defaults to the identity matrix of size K.}
 \item{covY}{Optional response covariance matrix (K x K). When NULL,
 defaults to the identity matrix of size K.}
 
-\item{retainFit}{If TRUE, attaches the fitted object as the
-\code{"fit"} attribute on the returned weights.}
+\item{retainFit}{If TRUE, attaches (as the \code{"fit"} attribute on the
+returned weights) the inputs \code{fineMappingPipeline} needs to rebuild
+the mvSuSiE reweighted prior: \code{dataDrivenPriorMatrices}, the fitted
+\code{w0}, and the fitted \code{V}. Default FALSE.}
+
+\item{fitDetail}{How much to retain when \code{retainFit = TRUE}.
+\code{"slim"} (default) keeps only those reconstruction inputs (the
+coefficients are already the returned weights); \code{"full"} additionally
+keeps the complete \code{mr.mash.rss} fit under \code{$fit}. Mirrors
+\code{\link{mrmashWeights}}.}
 
 \item{...}{Additional arguments forwarded to
 \code{mr.mashr::mr.mash.rss}.}

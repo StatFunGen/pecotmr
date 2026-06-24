@@ -14,7 +14,8 @@ qtlEnrichment(
   doubleShrinkage = FALSE,
   besselCorrection = TRUE,
   numThreads = 1,
-  verbose = TRUE
+  verbose = TRUE,
+  alignNames = TRUE
 )
 }
 \arguments{
@@ -33,6 +34,13 @@ When it is set to 0, no shrinkage will be applied. A large value indicates stron
 \item{impN}{Rounds of multiple imputation to draw QTL from, default is 25.}
 
 \item{numThreads}{Number of Simultaneous running CPU threads for multiple imputation, default is 1.}
+
+\item{alignNames}{Logical; when TRUE (default) QTL pip names are aligned to
+the GWAS variant-naming convention via \code{alignVariantNames}. Set FALSE
+when the caller has already aligned them (e.g. \code{qtlEnrichmentPipeline}
+aligns each QTL tuple once against the union GWAS panel rather than
+re-aligning per GWAS study); only the cheap per-study unmatched set is then
+recomputed, skipping the costly \code{.matchRefPanel} pass.}
 }
 \value{
 A list of enrichment parameter estimates

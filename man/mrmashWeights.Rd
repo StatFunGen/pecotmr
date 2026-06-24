@@ -4,7 +4,14 @@
 \alias{mrmashWeights}
 \title{Compute mr.mash TWAS weights}
 \usage{
-mrmashWeights(mrmashFit = NULL, X = NULL, Y = NULL, retainFit = FALSE, ...)
+mrmashWeights(
+  mrmashFit = NULL,
+  X = NULL,
+  Y = NULL,
+  retainFit = FALSE,
+  fitDetail = c("slim", "full"),
+  ...
+)
 }
 \arguments{
 \item{mrmashFit}{Optional fitted mr.mash object.}
@@ -17,8 +24,14 @@ mrmashWeights(mrmashFit = NULL, X = NULL, Y = NULL, retainFit = FALSE, ...)
 weights) the parts of the mr.mash fit that `fineMappingPipeline` needs to
 rebuild the mvSuSiE reweighted mixture prior + residual variance: the
 original data-driven prior matrices (`dataDrivenPriorMatrices`), the fitted
-mixture weights (`w0`) and the residual covariance (`V`). The heavy
-coefficient matrix (`mu1`) is intentionally not retained. Default FALSE.}
+mixture weights (`w0`) and the residual covariance (`V`). Default FALSE.}
+
+\item{fitDetail}{How much of the fit to retain when `retainFit = TRUE`.
+`"slim"` (default) keeps only the three reconstruction inputs above; the
+heavy coefficient matrix (`mu1`) is already returned as the weights, so it
+is not duplicated. `"full"` additionally retains the complete mr.mash fit
+under `$fit` (consistent with how susie fits are kept), at the cost of a
+larger payload.}
 
 \item{...}{Additional arguments passed to `mrmashWrapper()` when fitting.}
 }

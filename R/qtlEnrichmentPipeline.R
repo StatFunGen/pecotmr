@@ -86,9 +86,52 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
     stop("qtlEnrichmentPipeline: no (gwasStudy, qtlStudy, qtlContext) ",
          "triples to compute (one of the inputs has zero rows).")
 
+  # Hoist the QTL-side work out of the gwasStudy loop. The variant-name
+  # alignment is independent of the GWAS study (all studies share one naming
+  # convention), so the original code re-ran the costly .matchRefPanel pass for
+  # every (gwasStudy, qtlTuple) pair. Instead: build each GWAS PIP vector once,
+  # derive the union variant-name panel, and align each QTL tuple's regions
+  # once against that union (memoised in `alignedByTuple`, reused across every
+  # gwasStudy). qtlEnrichment is then called with alignNames = FALSE, which
+  # skips the redundant alignment and only recomputes the cheap per-study
+  # "unmatched" set.
+  gwasPipByStudy <- lapply(gwasStudies, function(g)
+    .enrBuildGwasPipVector(gwasFineMappingResult, g))
+  names(gwasPipByStudy) <- gwasStudies
+  unionGwasNames <- unique(unlist(lapply(gwasPipByStudy, names),
+                                  use.names = FALSE))
+
+  qtlRegionsByTuple <- lapply(seq_len(nrow(qtlTuples)), function(k)
+    .enrBuildQtlRegionsList(qtlFineMappingResult,
+                            qtlTuples$qtlStudy[[k]],
+                            qtlTuples$qtlContext[[k]]))
+
+  # Align a tuple's regions to the union GWAS panel once and cache the result.
+  # Kept lazy (rather than a pre-loop lapply) so the alignment runs inside the
+  # per-tuple tryCatch below: a tuple whose names cannot be aligned is skipped
+  # with a warning instead of aborting the whole pipeline -- the behaviour
+  # before this optimization, where alignment lived inside qtlEnrichment. An
+  # empty union means no GWAS study has usable PIPs, so every study is skipped
+  # before this is ever reached (and the length guard keeps alignVariantNames
+  # from treating an empty reference as a convention mismatch).
+  alignedByTuple <- vector("list", nrow(qtlTuples))
+  alignTuple <- function(k) {
+    if (!is.null(alignedByTuple[[k]])) return(alignedByTuple[[k]])
+    aligned <- lapply(qtlRegionsByTuple[[k]], function(x) {
+      if (!is.null(names(x$pip)) && length(unionGwasNames) > 0L) {
+        names(x$pip) <- alignVariantNames(names(x$pip),
+                                          unionGwasNames)$alignedVariants
+      }
+      x
+    })
+    alignedByTuple[[k]] <<- aligned
+    aligned
+  }
+
   results <- list()
-  for (gStudy in gwasStudies) {
-    gwasPip <- .enrBuildGwasPipVector(gwasFineMappingResult, gStudy)
+  for (gi in seq_along(gwasStudies)) {
+    gStudy  <- gwasStudies[[gi]]
+    gwasPip <- gwasPipByStudy[[gi]]
     if (length(gwasPip) == 0L) {
       warning(sprintf(
         "qtlEnrichmentPipeline: no usable PIPs for gwasStudy='%s'; skipping.",
@@ -98,9 +141,7 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
     for (k in seq_len(nrow(qtlTuples))) {
       qStudy   <- qtlTuples$qtlStudy[[k]]
       qContext <- qtlTuples$qtlContext[[k]]
-      qtlRegions <- .enrBuildQtlRegionsList(qtlFineMappingResult,
-                                             qStudy, qContext)
-      if (length(qtlRegions) == 0L) {
+      if (length(qtlRegionsByTuple[[k]]) == 0L) {
         warning(sprintf(
           "qtlEnrichmentPipeline: no usable QTL regions for (qtlStudy='%s', qtlContext='%s'); skipping.",
           qStudy, qContext))
@@ -109,12 +150,13 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
       enr <- tryCatch(
         qtlEnrichment(
           gwasPip          = gwasPip,
-          susieQtlRegions  = qtlRegions,
+          susieQtlRegions  = alignTuple(k),
           numGwas          = numGwas,
           piQtl            = piQtl,
           lambda           = lambda,
           impN             = impN,
           numThreads       = numThreads,
+          alignNames       = FALSE,
           ...),
         error = function(e) {
           warning(sprintf(
@@ -292,6 +334,12 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
 #' When it is set to 0, no shrinkage will be applied. A large value indicates strong shrinkage. The default value is set to 1.0.
 #' @param impN Rounds of multiple imputation to draw QTL from, default is 25.
 #' @param numThreads Number of Simultaneous running CPU threads for multiple imputation, default is 1.
+#' @param alignNames Logical; when TRUE (default) QTL pip names are aligned to
+#'   the GWAS variant-naming convention via \code{alignVariantNames}. Set FALSE
+#'   when the caller has already aligned them (e.g. \code{qtlEnrichmentPipeline}
+#'   aligns each QTL tuple once against the union GWAS panel rather than
+#'   re-aligning per GWAS study); only the cheap per-study unmatched set is then
+#'   recomputed, skipping the costly \code{.matchRefPanel} pass.
 #' @return A list of enrichment parameter estimates
 #'
 #' @examples
@@ -334,7 +382,8 @@ qtlEnrichment <- function(gwasPip, susieQtlRegions,
                                  lambda = 1.0, impN = 25,
                                  doubleShrinkage = FALSE,
                                  besselCorrection = TRUE,
-                                 numThreads = 1, verbose = TRUE) {
+                                 numThreads = 1, verbose = TRUE,
+                                 alignNames = TRUE) {
   if (is.null(numGwas)) {
     warning("numGwas is not provided. Estimating piGwas from the data. Note that this estimate may be biased if the input gwasPip does not contain genome-wide variants.")
     piGwas <- sum(gwasPip) / length(gwasPip)
@@ -370,15 +419,31 @@ qtlEnrichment <- function(gwasPip, susieQtlRegions,
     stop("Variant names are missing in susieQtlRegions$pip. Please provide susieQtlRegions with named pip data.")
   }
 
-  # Align the names of susieQtlRegions$pip to gwasPip names and document unmatched variants
-  alignedSusieQtlRegions <- lapply(susieQtlRegions, function(x) {
-    alignmentResult <- alignVariantNames(names(x$pip), names(gwasPip))
-    names(x$pip) <- alignmentResult$alignedVariants
-    if (length(alignmentResult$unmatchedIndices) > 0) {
-      x$unmatched_variants <- names(x$pip)[alignmentResult$unmatchedIndices]
-    }
-    x
-  })
+  # Align the names of susieQtlRegions$pip to gwasPip names and document
+  # unmatched variants. With alignNames = FALSE the caller has already aligned
+  # the pip names to the GWAS naming convention (qtlEnrichmentPipeline aligns
+  # each QTL tuple once against the union GWAS panel), so the costly
+  # .matchRefPanel pass is skipped and only the per-study unmatched set is
+  # recomputed via a cheap set-membership test.
+  if (alignNames) {
+    alignedSusieQtlRegions <- lapply(susieQtlRegions, function(x) {
+      alignmentResult <- alignVariantNames(names(x$pip), names(gwasPip))
+      names(x$pip) <- alignmentResult$alignedVariants
+      if (length(alignmentResult$unmatchedIndices) > 0) {
+        x$unmatched_variants <- names(x$pip)[alignmentResult$unmatchedIndices]
+      }
+      x
+    })
+  } else {
+    gwasNameSet <- names(gwasPip)
+    alignedSusieQtlRegions <- lapply(susieQtlRegions, function(x) {
+      unmatchedIdx <- which(!(names(x$pip) %in% gwasNameSet))
+      if (length(unmatchedIdx) > 0) {
+        x$unmatched_variants <- names(x$pip)[unmatchedIdx]
+      }
+      x
+    })
+  }
   unmatchedVariants <- lapply(alignedSusieQtlRegions, function(x) x$unmatched_variants)
 
   # Update susieQtlRegions with the aligned variant names

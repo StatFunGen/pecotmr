@@ -273,6 +273,125 @@ test_that(".cipZToSe: falls back to vector of 1 when maf/n are NA", {
   expect_equal(res, c(1, 1))
 })
 
+test_that(".cipFilterEligibleMethods: rsq+pval gating, drop sub-cutoff groups, SS-TWAS keeps all", {
+  mkEntry <- function(rsq, pval = 0.01) TwasWeightsEntry(
+    variantIds = paste0("v", 1:3), weights = rep(0.1, 3),
+    cvPerformance = list(metrics = c(corr = 0.1, rsq = rsq, pval = pval)))
+  tw <- TwasWeights(
+    study   = rep("S", 4),
+    context = rep("c1", 4),
+    trait   = c("G", "G", "G", "G2"),
+    method  = c("susie", "enet", "lasso", "susie"),
+    entry   = list(mkEntry(0.20), mkEntry(0.05), mkEntry(0.50), mkEntry(0.01)))
+  qtlRows <- pecotmr:::.cipBuildQtlWorkList(tw, NULL)
+  mt <- pecotmr:::.cipMethodMetrics(qtlRows, tw, "rsq", c("adj_rsq_pval", "pval"))
+  # rsq gate only: G keeps susie(.20)+lasso(.50); enet(.05) out; G2(.01) dropped.
+  f1 <- pecotmr:::.cipFilterEligibleMethods(qtlRows, mt, rsqCutoff = 0.1,
+                                            rsqPvalCutoff = Inf)
+  expect_equal(sort(f1$method), c("lasso", "susie"))
+  expect_true(all(f1$trait == "G"))
+  # rsqCutoff above every method -> empty work-list.
+  expect_equal(nrow(pecotmr:::.cipFilterEligibleMethods(qtlRows, mt, 0.99, Inf)), 0L)
+  # pval gate: a high-rsq method with a bad CV p-value is excluded.
+  tw2 <- TwasWeights(
+    study = rep("S", 2), context = rep("c1", 2), trait = rep("G", 2),
+    method = c("susie", "lasso"),
+    entry = list(mkEntry(0.20, pval = 0.20), mkEntry(0.50, pval = 0.01)))
+  q2 <- pecotmr:::.cipBuildQtlWorkList(tw2, NULL)
+  m2 <- pecotmr:::.cipMethodMetrics(q2, tw2, "rsq", c("adj_rsq_pval", "pval"))
+  f2 <- pecotmr:::.cipFilterEligibleMethods(q2, m2, rsqCutoff = 0.1,
+                                            rsqPvalCutoff = 0.05)
+  expect_equal(f2$method, "lasso")
+  # SS-TWAS: no usable cvPerformance -> keep all methods in the group.
+  twss <- TwasWeights(
+    study = rep("S", 2), context = rep("c1", 2), trait = rep("G", 2),
+    method = c("susie", "lasso"),
+    entry = list(
+      TwasWeightsEntry(variantIds = paste0("v", 1:3), weights = rep(0.1, 3)),
+      TwasWeightsEntry(variantIds = paste0("v", 1:3), weights = rep(0.1, 3))))
+  qss <- pecotmr:::.cipBuildQtlWorkList(twss, NULL)
+  mss <- pecotmr:::.cipMethodMetrics(qss, twss, "rsq", c("adj_rsq_pval", "pval"))
+  expect_equal(
+    nrow(pecotmr:::.cipFilterEligibleMethods(qss, mss, 0.1, Inf)), 2L)
+})
+
+test_that(".cipSelectBestMethod: max-rsq finite Z, NA/Inf re-selection, SS-TWAS keeps all", {
+  lk <- c("S\rc1\rG\rsusie" = 0.5, "S\rc1\rG\rlasso" = 0.2)
+  df <- data.frame(
+    qtlStudy = "S", context = "c1", trait = "G", gwasStudy = "X",
+    method = c("susie", "lasso"), twasZ = c(2.0, 1.0),
+    stringsAsFactors = FALSE)
+  expect_equal(pecotmr:::.cipSelectBestMethod(df, lk)$method, "susie")
+  # top-rsq method has NA Z -> fall back to next-best (lasso).
+  df2 <- df; df2$twasZ <- c(NA_real_, 1.0)
+  expect_equal(pecotmr:::.cipSelectBestMethod(df2, lk)$method, "lasso")
+  # none finite -> keep the top-rsq method anyway.
+  df3 <- df; df3$twasZ <- c(NA_real_, Inf)
+  expect_equal(pecotmr:::.cipSelectBestMethod(df3, lk)$method, "susie")
+  # SS-TWAS group (rsq lookup all NA) -> keep all rows.
+  lkNA <- c("S\rc1\rG\rsusie" = NA_real_, "S\rc1\rG\rlasso" = NA_real_)
+  expect_equal(nrow(pecotmr:::.cipSelectBestMethod(df, lkNA)), 2L)
+})
+
+test_that("causalInferencePipeline: rsqCutoff selects the max-rsq method per group", {
+  tw <- TwasWeights(
+    study = rep("Q1", 2), context = rep("c1", 2), trait = rep("t1", 2),
+    method = c("susie", "lasso"),
+    entry = list(
+      TwasWeightsEntry(variantIds = paste0("v", 1:5),
+                       weights = c(0.1, 0.05, -0.2, 0.3, 0.0),
+                       cvPerformance = list(metrics = c(rsq = 0.2, pval = 0.001))),
+      TwasWeightsEntry(variantIds = paste0("v", 1:5),
+                       weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
+                       cvPerformance = list(metrics = c(rsq = 0.5, pval = 0.001)))),
+    ldSketch = .cip_makeHandle())
+  local_mocked_bindings(extractBlockGenotypes = .cip_mockExtractor(),
+                        .package = "pecotmr")
+  out <- causalInferencePipeline(gwasSumStats = .cip_makeGwasSumstats(),
+                                 twasWeights = tw, rsqCutoff = 0.1)
+  expect_equal(as.character(S4Vectors::mcols(out)$method), "lasso")
+})
+
+test_that("causalInferencePipeline: NA/Inf TWAS-Z triggers method re-selection", {
+  tw <- TwasWeights(
+    study = rep("Q1", 2), context = rep("c1", 2), trait = rep("t1", 2),
+    method = c("susie", "lasso"),
+    entry = list(
+      # top rsq but all-zero weights -> wᵀRw = 0 -> twasZ NaN
+      TwasWeightsEntry(variantIds = paste0("v", 1:5), weights = rep(0, 5),
+                       cvPerformance = list(metrics = c(rsq = 0.9, pval = 0.001))),
+      TwasWeightsEntry(variantIds = paste0("v", 1:5),
+                       weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
+                       cvPerformance = list(metrics = c(rsq = 0.5, pval = 0.001)))),
+    ldSketch = .cip_makeHandle())
+  local_mocked_bindings(extractBlockGenotypes = .cip_mockExtractor(),
+                        .package = "pecotmr")
+  out <- causalInferencePipeline(gwasSumStats = .cip_makeGwasSumstats(),
+                                 twasWeights = tw, rsqCutoff = 0.1)
+  expect_equal(as.character(S4Vectors::mcols(out)$method), "lasso")
+  expect_true(is.finite(S4Vectors::mcols(out)$twasZ))
+})
+
+test_that("causalInferencePipeline: rsqPvalCutoff gates out high-CV-pval methods", {
+  tw <- TwasWeights(
+    study = rep("Q1", 2), context = rep("c1", 2), trait = rep("t1", 2),
+    method = c("susie", "lasso"),
+    entry = list(
+      TwasWeightsEntry(variantIds = paste0("v", 1:5),
+                       weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
+                       cvPerformance = list(metrics = c(rsq = 0.9, pval = 0.5))),
+      TwasWeightsEntry(variantIds = paste0("v", 1:5),
+                       weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
+                       cvPerformance = list(metrics = c(rsq = 0.5, pval = 0.001)))),
+    ldSketch = .cip_makeHandle())
+  local_mocked_bindings(extractBlockGenotypes = .cip_mockExtractor(),
+                        .package = "pecotmr")
+  out <- causalInferencePipeline(gwasSumStats = .cip_makeGwasSumstats(),
+                                 twasWeights = tw, rsqCutoff = 0.1,
+                                 rsqPvalCutoff = 0.05)
+  expect_equal(as.character(S4Vectors::mcols(out)$method), "lasso")
+})
+
 
 context("twas: twasZ and harmonize deprecated wrappers")
 

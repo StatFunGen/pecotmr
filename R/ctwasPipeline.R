@@ -312,11 +312,14 @@ assembleCtwasInputs <- function(gwasSumStats, twasWeights,
 #' @param groupPriorVarStructure Pass-through.
 #' @param ncore Number of cores.
 #' @param fallbackToPrefit Logical (length 1). When \code{TRUE} (default
-#'   \code{FALSE}), if \code{ctwas::est_param}'s accurate EM diverges to
-#'   NaN and throws \code{"Estimated group_prior(_var)? contains NAs"},
-#'   re-run only the prefit step via \code{ctwas:::fit_EM} and return
-#'   those (typically finite) priors as the param. Mirrors the legacy
-#'   ctwas_2 workaround on toy data where the accurate EM saturates.
+#'   \code{FALSE}), if \code{ctwas::est_param}'s accurate EM fails on a
+#'   degenerate input, re-run only the prefit step via \code{ctwas:::fit_EM}
+#'   and return those (typically finite) priors as the param. Catches both
+#'   failure modes: ctwas <= 0.4.x diverging to NaN
+#'   (\code{"Estimated group_prior(_var)? contains NAs"}) and ctwas >= 0.6.0
+#'   selecting zero regions for the accurate pass
+#'   (\code{"No regions selected!"}). Mirrors the legacy ctwas_2 workaround on
+#'   toy data where the accurate EM cannot be estimated.
 #' @param ... Additional arguments forwarded to \code{ctwas::est_param}
 #'   (e.g. \code{min_p_single_effect}, \code{min_group_size}).
 #' @return The \code{inputs} list augmented with \code{region_data},
@@ -376,8 +379,16 @@ estCtwasParam <- function(inputs,
       group_prior_var_structure = groupPriorVarStructure,
       ncore                     = as.integer(ncore)), extra = list(...)),
     error = function(e) {
-      if (fallbackToPrefit && grepl("contains NAs", conditionMessage(e))) {
-        message("estCtwasParam: accurate EM diverged (",
+      # The accurate EM fails on degenerate (e.g. single-gene) inputs in two
+      # version-dependent ways: ctwas <= 0.4.x diverges to NaN ("contains
+      # NAs"); ctwas >= 0.6.0 instead selects zero regions for the accurate
+      # pass ("No regions selected!"). Both are recoverable by re-running the
+      # prefit EM only, which scores every region and skips the
+      # p(single effect) selection gate.
+      if (fallbackToPrefit &&
+          grepl("contains NAs|No regions selected", conditionMessage(e),
+                ignore.case = TRUE)) {
+        message("estCtwasParam: accurate EM unusable (",
                 conditionMessage(e), "); falling back to prefit estimates.")
         .ctwasFitPrefitEm(regionData,
                           niterPrefit            = as.integer(niterPrefit),

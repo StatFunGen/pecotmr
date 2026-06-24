@@ -30,7 +30,11 @@ fineMappingPipeline(data, ...)
   cvFolds = 0,
   samplePartition = NULL,
   pipCutoffToSkip = 0,
+  usePCA = FALSE,
+  nPCs = 10L,
   seed = NULL,
+  twasWeights = NULL,
+  dataDrivenPriorWeightsCutoff = 1e-10,
   naAction = c("drop", "impute"),
   verbose = 1,
   trim = TRUE,
@@ -57,6 +61,8 @@ fineMappingPipeline(data, ...)
   minAbsCorr = 0.8,
   medianAbsCorr = NULL,
   fineMappingResult = NULL,
+  twasWeights = NULL,
+  dataDrivenPriorWeightsCutoff = 1e-10,
   cvFolds = 0,
   samplePartition = NULL,
   pipCutoffToSkip = 0,
@@ -84,6 +90,8 @@ fineMappingPipeline(data, ...)
   minAbsCorr = 0.8,
   medianAbsCorr = NULL,
   fineMappingResult = NULL,
+  twasWeights = NULL,
+  dataDrivenPriorWeightsCutoff = 1e-10,
   verbose = 1,
   trim = TRUE,
   ...
@@ -210,6 +218,19 @@ when no PIP exceeds the cutoff (no potentially significant variant). The
 summary-statistics analog lives in \code{summaryStatsQc()}. \code{0}
 (default) disables the screen; a negative value uses the adaptive
 \code{3 / nVariants} threshold.}
+
+\item{usePCA}{Logical (length 1). \code{QtlDataset} only. When
+\code{TRUE} (default \code{FALSE}), each multi-trait context's
+PCA-reduced phenotype is fine-mapped with univariate SuSiE on its
+top principal components (ports the legacy \code{fsusie.R}
+\code{susie_on_top_pc}). Each PC becomes a pseudo-trait row keyed
+\code{trait = "topPC\{i\}"}, \code{method = "susie"}. Single-trait
+contexts have no PCA and are skipped.}
+
+\item{nPCs}{Integer (length 1). \code{QtlDataset} only. Caps the
+number of top principal components fine-mapped per context when
+\code{usePCA = TRUE} (default \code{10}). The effective count is
+\code{min(nPCs, usable traits)}.}
 
 \item{seed}{Optional integer. When non-NULL, \code{set.seed(seed)} is
 called once at the start of the call for reproducible fits. Default
