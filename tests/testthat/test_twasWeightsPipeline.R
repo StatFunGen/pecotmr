@@ -179,6 +179,28 @@ test_that("twasWeightsPipeline(QtlDataset): runs end-to-end with mocked solvers"
   expect_setequal(getTraits(res), c("ENSG_A", "ENSG_B"))
 })
 
+test_that("twasWeightsPipeline(QtlDataset): minTwasMaf/minTwasXvar tighten the variant set", {
+  qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  do.call(local_mocked_bindings,
+          c(list(extractBlockGenotypes = .tp_mockExtractor()),
+            .tp_mockIndividualWeights(), list(.package = "pecotmr")))
+  call <- function(...) suppressMessages(twasWeightsPipeline(
+    qd, methods = list(lasso_weights = list()), traitId = "ENSG_A",
+    cisWindow = 1000L, cvFolds = 0, ensemble = FALSE, estimatePi = FALSE,
+    verbose = 0, ...))
+  vcount <- function(res) length(getWeights(res, study = "study1",
+    context = "brain", trait = "ENSG_A", method = "lasso"))
+  # Baseline: all 20 mock variants are retained.
+  expect_equal(vcount(call()), 20L)
+  # Mock MAF spans 0.225..0.388; a 0.25 cutoff drops the 3 lowest-MAF variants
+  # while leaving the rest, so the TWAS variant set strictly shrinks.
+  tight <- vcount(call(minTwasMaf = 0.25))
+  expect_lt(tight, 20L)
+  expect_gt(tight, 0L)
+  # minTwasXvar is wired through the same elevation; a no-op value is accepted.
+  expect_s4_class(call(minTwasXvar = 0), "TwasWeights")
+})
+
 test_that("twasWeightsPipeline(QtlDataset): contexts filter restricts the per-context loop", {
   qd <- .tp_makeQtlDataset(contexts = c("brain", "liver"),
                             traits = "ENSG_A")
@@ -385,16 +407,19 @@ test_that("gate: mvsusie without fineMappingResult errors (QtlDataset)", {
     "are fine-mapping methods and may not be re-fit")
 })
 
-test_that("gate: fsusie has no TWAS-weight extractor (rejected by name)", {
-  qd <- .tp_makeQtlDataset(contexts = c("brain", "liver"),
-                            traits = c("ENSG_A", "ENSG_B"))
+test_that("gate: fsusie now has a TWAS-weight extractor (accepted with FMR)", {
   fmr <- .tp_makeStubFineMappingResult(
     study = "study1", contexts = c("brain", "liver"),
     traits = "ENSG_A", method = "fsusie")
-  # Even with a fineMappingResult, fsusie can't produce TWAS weights.
+  # fsusie is registered in .twasFineMappingMethodAdapters (fsusieWeights), so
+  # the gate accepts it when a FineMappingResult is supplied ...
+  expect_silent(
+    pecotmr:::.twasCheckFineMappingMethods("fsusie", fmr, "QtlDataset"))
+  # ... but still requires a FineMappingResult (it is a fine-mapping method and
+  # is not re-fit by twasWeightsPipeline).
   expect_error(
-    twasWeightsPipeline(qd, methods = "fsusie", fineMappingResult = fmr),
-    "have no TWAS-weight extractor")
+    pecotmr:::.twasCheckFineMappingMethods("fsusie", NULL, "QtlDataset"),
+    "may not be re-fit")
 })
 
 test_that("gate: fsusie on QtlSumStats delegates to .fmCheckMethodCapabilities", {
@@ -593,6 +618,40 @@ test_that("twasWeightsPipeline(QtlDataset): mr.mash multivariate path with 2 tra
   expect_setequal(getContexts(res), c("brain", "liver"))
   expect_setequal(getTraits(res), c("ENSG_A", "ENSG_B"))
   expect_setequal(getMethodNames(res), "mrmash")
+})
+
+test_that("twasWeightsPipeline(QtlDataset): mr.mash retains its fit parts in the fits slot", {
+  # The multivariate dispatch runs with retainFits=TRUE so the mr.mash fit
+  # parts (the shared fit fineMappingPipeline consumes to build the mvSuSiE
+  # prior) land on the entry's `fits` slot.
+  qd <- .tp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
+  ddpm <- list(U = list(comp = diag(2)))
+  mocks <- list(
+    extractBlockGenotypes = .tp_mockExtractor(),
+    mrmashWeights = function(X, Y, retainFit = FALSE, ...) {
+      w <- matrix(0, nrow = ncol(X), ncol = ncol(Y),
+                  dimnames = list(colnames(X), colnames(Y)))
+      if (isTRUE(retainFit)) {
+        dots <- list(...)
+        attr(w, "fit") <- list(
+          dataDrivenPriorMatrices = dots$dataDrivenPriorMatrices,
+          w0 = c(null = 0.5, comp = 0.5), V = diag(ncol(Y)))
+      }
+      w
+    })
+  do.call(local_mocked_bindings, c(mocks, list(.package = "pecotmr")))
+  res <- suppressMessages(suppressWarnings(
+    twasWeightsPipeline(
+      qd,
+      methods = list(mrmash_weights = list(dataDrivenPriorMatrices = ddpm)),
+      cisWindow = 1000L, cvFolds = 0, ensemble = FALSE,
+      estimatePi = FALSE, verbose = 0)))
+  fit <- getFits(res, study = "study1", context = "brain",
+                 trait = "ENSG_A", method = "mrmash")
+  expect_true(is.list(fit))
+  expect_identical(fit$dataDrivenPriorMatrices, ddpm)
+  expect_false(is.null(fit$w0))
+  expect_false(is.null(fit$V))
 })
 
 # ---------------------------------------------------------------------------
@@ -2124,4 +2183,74 @@ test_that("twasWeightsPipeline(QtlDataset): mr.mash jointRegions=FALSE concatena
   w <- getWeights(res, study = "study1", context = "brain",
                   trait = "ENSG_A", method = "mrmash")
   expect_equal(NROW(w), 20L)
+})
+
+# ===========================================================================
+# fineMapping -> TWAS cross-validation handoff: .twasCvResultFor merges the
+# per-method cvResult stashed on a fine-mapping tuple's entries, and
+# .twasWeightsPipelineMatrix adopts that partition + predictions instead of
+# refitting the handed-over methods.
+# ===========================================================================
+
+test_that(".twasCvResultFor merges per-method cvResult across a tuple's entries", {
+  tl <- data.frame(variant_id = "v1", pip = 0.5, stringsAsFactors = FALSE)
+  part <- data.frame(Sample = c("s1", "s2"), Fold = c(1L, 2L))
+  mkCv <- function(key) list(
+    samplePartition = part,
+    prediction = setNames(list(matrix(0, 2, 1)), paste0(key, "_predicted")),
+    performance = setNames(list(matrix(0, 1, 6)), paste0(key, "_performance")))
+  eSusie <- FineMappingEntry("v1", list(), tl, cvResult = mkCv("susie"))
+  eInf   <- FineMappingEntry("v1", list(), tl, cvResult = mkCv("susie_inf"))
+  fmr <- QtlFineMappingResult(
+    study = c("S", "S"), context = c("C", "C"), trait = c("T", "T"),
+    method = c("susie", "susieInf"), entry = list(eSusie, eInf))
+  merged <- pecotmr:::.twasCvResultFor(fmr, "S", "C", "T")
+  expect_setequal(names(merged$prediction),
+                  c("susie_predicted", "susie_inf_predicted"))
+  expect_setequal(names(merged$performance),
+                  c("susie_performance", "susie_inf_performance"))
+  expect_identical(merged$samplePartition, part)
+})
+
+test_that(".twasCvResultFor returns NULL when no entry carries CV", {
+  tl <- data.frame(variant_id = "v1", pip = 0.5, stringsAsFactors = FALSE)
+  e <- FineMappingEntry("v1", list(), tl)
+  fmr <- QtlFineMappingResult(study = "S", context = "C", trait = "T",
+                              method = "susie", entry = list(e))
+  expect_null(pecotmr:::.twasCvResultFor(fmr, "S", "C", "T"))
+})
+
+test_that(".twasWeightsPipelineMatrix merges fineMappingCv predictions and adopts its partition", {
+  skip_if_not_installed("glmnet")
+  set.seed(11)
+  n <- 50L; p <- 10L
+  X <- matrix(rnorm(n * p), n, p,
+              dimnames = list(paste0("s", seq_len(n)), paste0("v", seq_len(p))))
+  y <- X[, 1] * 1.2 + rnorm(n, sd = 0.6)
+  y <- matrix(y, ncol = 1L, dimnames = list(rownames(X), "ENSG_A"))
+
+  # Fine-mapping hands over a shared partition + out-of-fold "susie" predictions.
+  part <- pecotmr:::.fmMakeSamplePartition(rownames(X), fold = 3L)
+  susiePred <- matrix(X[, 1] * 0.9, ncol = 1L,
+                      dimnames = list(rownames(X), "ENSG_A"))
+  susiePerf <- matrix(c(0.5, 0.25, 0.24, 0.01, 0.4, 0.3), nrow = 1L,
+                      dimnames = list("ENSG_A",
+                        c("corr", "rsq", "adj_rsq", "pval", "RMSE", "MAE")))
+  fmCv <- list(samplePartition = part,
+               prediction = list(susie_predicted = susiePred),
+               performance = list(susie_performance = susiePerf))
+
+  res <- suppressMessages(pecotmr:::.twasWeightsPipelineMatrix(
+    X = X, y = y, study = "study1", context = "brain", trait = "ENSG_A",
+    weightMethods = list(lasso_weights = list()),
+    cvFolds = 3, fineMappingCv = fmCv, ensemble = FALSE, verbose = 0))
+
+  # lasso was refit here; susie came from the handoff (not refit).
+  expect_true("lasso_predicted" %in% names(res$twasCvResult$prediction))
+  expect_true("susie_predicted" %in% names(res$twasCvResult$prediction))
+  # The CV used fine-mapping's partition verbatim.
+  expect_identical(res$twasCvResult$samplePartition, part)
+  # The handed-over susie predictions were aligned to the pipeline samples.
+  expect_equal(rownames(res$twasCvResult$prediction$susie_predicted),
+               rownames(X))
 })

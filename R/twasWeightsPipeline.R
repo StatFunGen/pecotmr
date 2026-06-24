@@ -418,7 +418,8 @@
 # governed by .fineMappingMethodCapabilities) to its TWAS-weight extractor
 # wrapper. The wrapper names follow the *Weights / *RssWeights convention,
 # and the *Fit argument receives the pre-fitted fine-mapping object.
-# fSuSiE is intentionally absent: no TWAS-weight extractor exists for it.
+# fSuSiE is multivariate (it collapses a functional fit to a variants x
+# features weight matrix via fsusieWeights) and has no RSS counterpart.
 # @noRd
 .twasFineMappingMethodAdapters <- list(
   susie    = list(weightFn = "susieWeights",
@@ -440,7 +441,12 @@
                   rssWeightFn = "mvsusieRssWeights",
                   fitArg = "mvsusieFit",
                   rssFitArg = "mvsusieRssFit",
-                  methodKey = "mvsusie_weights"))
+                  methodKey = "mvsusie_weights"),
+  fsusie   = list(weightFn = "fsusieWeights",
+                  rssWeightFn = NULL,
+                  fitArg = "fsusieFit",
+                  rssFitArg = NULL,
+                  methodKey = "fsusie_weights"))
 
 # Canonical list of fine-mapping tokens recognised by twasWeightsPipeline.
 # Sourced from fineMappingPipeline's registry minus mrmash (which
@@ -581,7 +587,7 @@
   }
   out <- list()
   methods <- as.character(fineMappingResult$method)
-  for (canonical in c("susie", "susieInf", "susieAsh", "mvsusie")) {
+  for (canonical in c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")) {
     candidates <- c(canonical,
                     paste0(tolower(substring(canonical, 1L, 1L)),
                            substring(canonical, 2L)),
@@ -609,6 +615,46 @@
   fits <- .twasFineMappingFits(fineMappingResult,
                                 study = study, context = context, trait = trait)
   fits[[token]]
+}
+
+# Collect the cross-validation payload that fineMappingPipeline stored on the
+# FineMappingResult for one (study, context, trait) tuple. fineMapping records
+# one cvResult per (study, context, trait, method) entry (samplePartition +
+# per-fold predictions/metrics, keyed by the TWAS snake method name); this
+# merges them across the fine-mapping methods of the tuple into a single
+# twasWeightsCv()-shaped list so twasWeightsPipeline can reuse the partition and
+# feed those out-of-fold predictions into the SR-TWAS ensemble without re-
+# fitting the fine-mapping models. A multi-region entry stores cvResult as a
+# per-region list; the first region carrying CV is used. Returns NULL when no
+# fine-mapping entry for the tuple recorded CV.
+# @noRd
+.twasCvResultFor <- function(fineMappingResult, study, context, trait) {
+  if (is.null(fineMappingResult)) return(NULL)
+  if (!is(fineMappingResult, "FineMappingResultBase")) return(NULL)
+  idx <- which(as.character(fineMappingResult$study)   == study &
+               as.character(fineMappingResult$context) == context &
+               as.character(fineMappingResult$trait)   == trait)
+  if (length(idx) == 0L) return(NULL)
+  samplePartition <- NULL
+  prediction  <- list()
+  performance <- list()
+  for (i in idx) {
+    cv <- getCvResult(fineMappingResult$entry[[i]])
+    if (is.null(cv)) next
+    # Multi-region entries store cvResult as a named per-region list; pick the
+    # first region that carries a partition.
+    if (is.null(cv$samplePartition)) {
+      hit <- Filter(function(z) is.list(z) && !is.null(z$samplePartition), cv)
+      if (length(hit) == 0L) next
+      cv <- hit[[1L]]
+    }
+    if (is.null(samplePartition)) samplePartition <- cv$samplePartition
+    prediction  <- c(prediction,  cv$prediction)
+    performance <- c(performance, cv$performance)
+  }
+  if (length(prediction) == 0L) return(NULL)
+  list(samplePartition = samplePartition,
+       prediction = prediction, performance = performance)
 }
 
 #' TWAS Weights Pipeline
@@ -649,6 +695,16 @@
 #' / the RSS sub-pipelines via the \code{fittedModels} slot, avoiding
 #' a re-fit.
 #'
+#' When the supplied \code{FineMappingResult} was produced with
+#' cross-validation (\code{fineMappingPipeline(..., cvFolds > 1)}), each
+#' matching \code{(study, context, trait)} entry's \code{cvResult} is
+#' reused: its fold partition becomes the CV partition (unless
+#' \code{samplePartition} is given explicitly) and its per-fold out-of-fold
+#' predictions/metrics are fed directly into the SR-TWAS ensemble in place
+#' of re-fitting those fine-mapping methods here. Non-fine-mapping methods
+#' (lasso, enet, ...) are still cross-validated on the same shared
+#' partition.
+#'
 #' @param data A \code{QtlDataset}, \code{MultiStudyQtlDataset}, or
 #'   \code{QtlSumStats}. The \code{MultiStudyQtlDataset} method iterates
 #'   the embedded individual-level \code{QtlDataset} entries and the
@@ -669,6 +725,15 @@
 #' @param cisWindow For QtlDataset: cis-window (bp) around each trait's
 #'   genomic position when extracting variants. Required when
 #'   \code{traitId} is supplied. Mutually exclusive with \code{region}.
+#' @param minTwasMaf For QtlDataset: optional minimum minor-allele frequency
+#'   applied to the variant set used for TWAS weight learning, on top of the
+#'   dataset's construct-time \code{mafCutoff} (the effective cutoff is the
+#'   larger of the two). Lets the TWAS pass use a stricter MAF threshold than
+#'   fine mapping. \code{NULL} (default) leaves the construct-time cutoff in
+#'   place.
+#' @param minTwasXvar As \code{minTwasMaf} but for the per-variant genotype
+#'   variance cutoff (\code{xvarCutoff}). \code{NULL} (default) leaves the
+#'   construct-time cutoff in place.
 #' @param jointRegions For QtlDataset with a multi-range \code{region}:
 #'   \code{FALSE} (default) learns weights for each range independently and
 #'   concatenates them into one entry per (study, context, trait, method);
@@ -754,6 +819,8 @@ setMethod("twasWeightsPipeline", "QtlDataset",
            traitId                = NULL,
            region                 = NULL,
            cisWindow              = NULL,
+           minTwasMaf             = NULL,
+           minTwasXvar            = NULL,
            jointRegions           = FALSE,
            jointSpecification     = NULL,
            fineMappingResult      = NULL,
@@ -785,6 +852,14 @@ setMethod("twasWeightsPipeline", "QtlDataset",
            "coordinates, whereas `region` is the literal variant window.")
     }
     xRegions <- .makeXRegions(region, jointRegions)
+    # TWAS-specific variant filters: tighten the QtlDataset maf/xvar cutoffs for
+    # weight learning (distinct from the construct-time / fine-mapping cutoffs).
+    # Modifying the local `data` copy elevates them everywhere downstream
+    # (runOne, runMultivariate, and the jointSpec dispatcher all extract from it).
+    if (!is.null(minTwasMaf))
+      data@mafCutoff  <- max(data@mafCutoff,  as.numeric(minTwasMaf))
+    if (!is.null(minTwasXvar))
+      data@xvarCutoff <- max(data@xvarCutoff, as.numeric(minTwasXvar))
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
     norm <- .twasNormalizeMethods(methods)
     .twasCheckMethodCapabilities(norm$tokens, "QtlDataset")
@@ -850,10 +925,10 @@ setMethod("twasWeightsPipeline", "QtlDataset",
     nCtx <- length(useCtx)
     .twasCheckMultivariateY(norm$tokens, length(allTraits), nCtx)
 
-    multivariate <- any(vapply(norm$tokens, function(tk) {
-      info <- .twasMethodCapabilities[[tk]]
-      !is.null(info) && isTRUE(info$multivariate)
-    }, logical(1)))
+    # Multivariate if any requested token is multivariate in either the TWAS
+    # capability table (mrmash) or the fine-mapping one (mvsusie / fsusie).
+    multivariate <- any(vapply(norm$tokens, .twasIsMultivariateToken,
+                               logical(1)))
 
     runOne <- function(ctx, tid) {
       # Resume cache: per-method check against the supplied `twasWeights`
@@ -883,6 +958,9 @@ setMethod("twasWeightsPipeline", "QtlDataset",
       # per-region list and is selected blockwise inside the loop.
       allFits <- .twasFineMappingFits(fineMappingResult,
                                       study = study, context = ctx, trait = tid)
+      # Fine-mapping's own cross-validated predictions (shared fold partition),
+      # reused by the ensemble instead of re-fitting the fine-mapping methods.
+      fmCv <- .twasCvResultFor(fineMappingResult, study, ctx, tid)
       nBlocks <- length(xRegions)
       perBlockTw <- lapply(seq_len(nBlocks), function(bi) {
         rg <- xRegions[[bi]]
@@ -911,6 +989,7 @@ setMethod("twasWeightsPipeline", "QtlDataset",
           fittedModels = .twasFitsForRegion(allFits, bi, nBlocks),
           cvFolds = cvFolds,
           samplePartition = samplePartition,
+          fineMappingCv = fmCv,
           weightMethods = remaining,
           maxCvVariants = maxCvVariants,
           cvThreads = cvThreads,
@@ -1019,14 +1098,21 @@ setMethod("twasWeightsPipeline", "QtlDataset",
                                context = meta$context[[1L]],
                                trait   = meta$trait[[1L]]),
           bi, length(xRegions))
+        fmCv <- .twasCvResultFor(fineMappingResult, study,
+                                 meta$context[[1L]], meta$trait[[1L]])
         .twasWeightsPipelineMatrix(
           X = Xr, y = Y,
           study   = study,
           context = meta$context,
           trait   = meta$trait,
+          # Retain the mr.mash fit parts ({dataDrivenPriorMatrices, w0, V}) on
+          # the entry's `fits` slot so fineMappingPipeline can rebuild the
+          # mvSuSiE reweighted prior + residual variance from this shared fit.
+          retainFits = TRUE,
           fittedModels = jointFits,
           cvFolds = cvFolds,
           samplePartition = samplePartition,
+          fineMappingCv = fmCv,
           weightMethods = norm$methodList,
           maxCvVariants = maxCvVariants,
           cvThreads = cvThreads,
@@ -1536,6 +1622,7 @@ setMethod("twasWeightsPipeline", "ANY",
                                 fittedModels = NULL,
                                 cvFolds = 5,
                                 samplePartition = NULL,
+                                fineMappingCv = NULL,
                                 weightMethods = "default",
                                 maxCvVariants = -1,
                                 cvThreads = 1,
@@ -1548,6 +1635,7 @@ setMethod("twasWeightsPipeline", "ANY",
                                 standardized = FALSE,
                                 dataType = NULL,
                                 ldSketch = NULL,
+                                retainFits = FALSE,
                                 verbose = 1) {
   if (is.character(weightMethods)) {
     weightMethods <- .twasMethodLookup(weightMethods)
@@ -1618,7 +1706,8 @@ setMethod("twasWeightsPipeline", "ANY",
       remainingMethods <- weightMethods[remainingFnNames]
       remainingTw <- do.call(learnTwasWeights, c(
         list(X = X, Y = y, weightMethods = remainingMethods,
-             fittedModels = fittedModels, verbose = verbose),
+             fittedModels = fittedModels, retainFits = retainFits,
+             verbose = verbose),
         learnArgs))
       res$twasWeights <- .rbindTwasWeights(mrashWeights, remainingTw,
                                             ldSketch = ldSketch)
@@ -1642,7 +1731,8 @@ setMethod("twasWeightsPipeline", "ANY",
     # Run all methods at once
     res$twasWeights <- do.call(learnTwasWeights, c(
       list(X = X, Y = y, weightMethods = weightMethods,
-           fittedModels = fittedModels, verbose = verbose),
+           fittedModels = fittedModels, retainFits = retainFits,
+           verbose = verbose),
       learnArgs))
   }
   if (verbose >= 1) {
@@ -1672,6 +1762,44 @@ setMethod("twasWeightsPipeline", "ANY",
       cvWeightMethods <- .filterZeroWeightMethods(weightMethods, res$twasWeights)
     }
 
+    # Fine-mapping handoff: when fineMappingPipeline supplied cross-validated
+    # predictions for some methods (shared fold partition + per-fold out-of-
+    # fold predictions), reuse them rather than refitting those methods here.
+    # Drop them from the CV refit set, adopt the shared partition (unless the
+    # caller passed one explicitly), and merge their predictions/metrics into
+    # the CV result below so the SR-TWAS ensemble consumes fine-mapping's own
+    # cross-validation.
+    fmCvPrediction <- NULL; fmCvPerformance <- NULL
+    if (!is.null(fineMappingCv) && length(fineMappingCv$prediction) > 0L) {
+      if (is.null(samplePartition) && !is.null(fineMappingCv$samplePartition)) {
+        samplePartition <- fineMappingCv$samplePartition
+      }
+      fmBase <- sub("(_predicted|Predicted)$", "", names(fineMappingCv$prediction))
+      cvWeightMethods <- cvWeightMethods[
+        setdiff(names(cvWeightMethods), paste0(fmBase, "_weights"))]
+      yMat <- if (is.matrix(y)) y
+              else matrix(y, ncol = 1L, dimnames = list(names(y), NULL))
+      sampleNames  <- rownames(X)
+      outcomeNames <- colnames(yMat)
+      alignFmPred <- function(mat) {
+        out <- matrix(NA_real_, length(sampleNames),
+                      max(1L, length(outcomeNames)),
+                      dimnames = list(sampleNames, outcomeNames))
+        rs <- intersect(rownames(mat), sampleNames)
+        cs <- if (!is.null(colnames(mat)) && !is.null(outcomeNames))
+                intersect(colnames(mat), outcomeNames) else character(0)
+        if (length(cs) > 0L) {
+          out[rs, cs] <- mat[rs, cs, drop = FALSE]
+        } else if (ncol(mat) == ncol(out)) {
+          out[rs, ] <- mat[rs, , drop = FALSE]
+        }
+        out
+      }
+      fmCvPrediction <- setNames(lapply(fineMappingCv$prediction, alignFmPred),
+                                 names(fineMappingCv$prediction))
+      fmCvPerformance <- fineMappingCv$performance
+    }
+
     variantsForCv <- c()
     if (maxCvVariants <= 0) {
       maxCvVariants <- Inf
@@ -1680,25 +1808,47 @@ setMethod("twasWeightsPipeline", "ANY",
       variantsForCv <- sample(colnames(X), maxCvVariants, replace = FALSE)
     }
 
-    if (verbose >= 1) {
-      message("Performing cross-validation to assess TWAS weights ...")
-      tic()
+    if (length(cvWeightMethods) > 0L) {
+      if (verbose >= 1) {
+        message("Performing cross-validation to assess TWAS weights ...")
+        tic()
+      }
+      res$twasCvResult <- twasWeightsCv(
+        X,
+        y,
+        fold = cvFolds,
+        samplePartitions = samplePartition,
+        weightMethods = cvWeightMethods,
+        maxNumVariants = maxCvVariants,
+        numThreads = cvThreads,
+        verbose = verbose,
+        variantsToKeep = if (length(variantsForCv) > 0) variantsForCv else NULL
+      )
+      if (verbose >= 1) {
+        elapsed <- toc(quiet = TRUE)
+        message(sprintf("Cross-validation done in %.1fs", elapsed$toc - elapsed$tic))
+      }
+    } else {
+      # Every CV method came from fine-mapping; no refit needed here.
+      res$twasCvResult <- list(samplePartition = samplePartition,
+                               prediction = list(), performance = list())
     }
-    res$twasCvResult <- twasWeightsCv(
-      X,
-      y,
-      fold = cvFolds,
-      samplePartitions = samplePartition,
-      weightMethods = cvWeightMethods,
-      maxNumVariants = maxCvVariants,
-      numThreads = cvThreads,
-      verbose = verbose,
-      variantsToKeep = if (length(variantsForCv) > 0) variantsForCv else NULL
-    )
-    if (verbose >= 1) {
-      elapsed <- toc(quiet = TRUE)
-      message(sprintf("Cross-validation done in %.1fs", elapsed$toc - elapsed$tic))
+
+    # Merge fine-mapping's cross-validated predictions/metrics into the CV
+    # result so downstream splicing + ensemble treat them as first-class.
+    if (!is.null(fmCvPrediction)) {
+      res$twasCvResult$prediction  <- c(res$twasCvResult$prediction,
+                                         fmCvPrediction)
+      res$twasCvResult$performance <- c(res$twasCvResult$performance,
+                                        fmCvPerformance)
+      if (is.null(res$twasCvResult$samplePartition)) {
+        res$twasCvResult$samplePartition <- samplePartition
+      }
     }
+
+    # Number of methods participating in cross-validation / ensemble (refit
+    # here plus those handed over by fine-mapping).
+    nCvMethods <- length(res$twasCvResult$prediction)
 
     # Splice per-(method, outcome) CV predictions + metrics into the
     # corresponding TwasWeightsEntry$cvPerformance slot.
@@ -1707,11 +1857,11 @@ setMethod("twasWeightsPipeline", "ANY",
                                                  ldSketch = ldSketch)
 
     # Ensemble learning: learn optimal method combination via stacked regression
-    if (isTRUE(ensemble) && length(cvWeightMethods) <= 1) {
-      if (verbose >= 1) message("Ensemble model skipped: only ", length(cvWeightMethods),
+    if (isTRUE(ensemble) && nCvMethods <= 1) {
+      if (verbose >= 1) message("Ensemble model skipped: only ", nCvMethods,
               " weight method provided (need >= 2 for ensemble learning).")
     }
-    if (isTRUE(ensemble) && length(cvWeightMethods) > 1) {
+    if (isTRUE(ensemble) && nCvMethods > 1) {
       if (!is.null(res$twasCvResult$performance)) {
         # Extract R-squared for each method from CV performance table
         methodRsq <- vapply(res$twasCvResult$performance, function(perf) {

@@ -351,7 +351,8 @@ setMethod("show", "TwasWeights", function(object) {
     mcp = list(fn = "mcp_weights", impl = "mcpWeights", args = list()),
     l0learn = list(fn = "l0learn_weights", impl = "l0learnWeights", args = list()),
     mvsusie = list(fn = "mvsusie_weights", impl = "mvsusieWeights", args = list(L = 30, L_greedy = 5)),
-    mrmash = list(fn = "mrmash_weights", impl = "mrmashWeights", args = list())
+    mrmash = list(fn = "mrmash_weights", impl = "mrmashWeights", args = list()),
+    fsusie = list(fn = "fsusie_weights", impl = "fsusieWeights", args = list())
   )
 
   # Handle presets
@@ -691,7 +692,11 @@ twasWeightsCv <- function(X, Y, fold = NULL, samplePartitions = NULL, weightMeth
   if (is.null(weightMethods)) {
     return(list(samplePartition = samplePartition))
   } else {
-    # Hardcoded vector of multivariate weightMethods (accept both snake and camel)
+    # Hardcoded vector of multivariate weightMethods (accept both snake and camel).
+    # fSuSiE is excluded from the per-fold CV refit path: it is functional and
+    # cannot be refit from a bare (X, y) fold split, so its cross-validated
+    # predictions are supplied by fineMappingPipeline (FineMappingResult
+    # cvResult) rather than recomputed here.
     multivariateWeightMethods <- c("mrmash_weights", "mvsusie_weights",
                                     "mrmashWeights", "mvsusieWeights")
 
@@ -917,9 +922,13 @@ learnTwasWeights <- function(X, Y, weightMethods,
       tic()
     }
 
-    # Hardcoded vector of multivariate methods (accept both snake and camel)
+    # Hardcoded vector of multivariate methods (accept both snake and camel).
+    # fSuSiE is multivariate (variants x features weight matrix) but is never
+    # refit here — fsusieWeights extracts from the supplied fsusieFit.
     multivariateWeightMethods <- c("mrmash_weights", "mvsusie_weights",
-                                    "mrmashWeights", "mvsusieWeights")
+                                    "fsusie_weights",
+                                    "mrmashWeights", "mvsusieWeights",
+                                    "fsusieWeights")
     args <- weightMethods[[methodName]]
     fnName <- .resolveMethodFunction(methodName, args)
 

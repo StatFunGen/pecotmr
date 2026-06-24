@@ -29,11 +29,15 @@ setClass("FineMappingEntry",
   representation(
     variantIds = "character",
     susieFit   = "ANY",
-    topLoci    = "data.frame"
+    topLoci    = "data.frame",
+    cvResult   = "ANY"
   ),
   validity = function(object) {
     errors <- character()
     n <- length(object@variantIds)
+    if (!is.null(object@cvResult) && !is.list(object@cvResult))
+      errors <- c(errors,
+        "cvResult must be NULL or a list (samplePartition/predictions/performance)")
     if (nrow(object@topLoci) > 0L) {
       # Minimal contract: variant_id + pip. Canonical projector columns
       # (marginal_*, posterior_*, etc.) are pipeline-populated; tests
@@ -85,13 +89,17 @@ setClass("FineMappingEntry",
 #'   (\code{pip, posterior_mean, posterior_sd, cs_*, cs_*_purity}),
 #'   pipeline stamps (\code{method, gene, event, grange_start,
 #'   grange_end}). Unfiltered: one row per variant in the fit.
+#' @param cvResult Optional cross-validation payload (list with
+#'   \code{samplePartition}, \code{predictions}, \code{performance}) recorded
+#'   when fine-mapping is run with \code{cvFolds > 1}. \code{NULL} otherwise.
 #' @return A \code{FineMappingEntry} object.
 #' @export
-FineMappingEntry <- function(variantIds, susieFit, topLoci) {
+FineMappingEntry <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
   obj <- new("FineMappingEntry",
              variantIds = as.character(variantIds),
              susieFit   = susieFit,
-             topLoci    = as.data.frame(topLoci))
+             topLoci    = as.data.frame(topLoci),
+             cvResult   = cvResult)
   validObject(obj)
   obj
 }
@@ -109,6 +117,11 @@ setMethod("getVariantIds", "FineMappingEntry",
 #' @export
 setMethod("getSusieFit", "FineMappingEntry",
           function(x, ...) x@susieFit)
+
+#' @rdname getCvResult
+#' @export
+setMethod("getCvResult", "FineMappingEntry",
+          function(x, ...) x@cvResult)
 
 #' @rdname getTopLoci
 #' @export
@@ -223,10 +236,13 @@ setMethod("adjustPips", "FineMappingEntry",
         }
       }
     }
+    # cvResult is sample-indexed (partition + held-out predictions), not
+    # variant-indexed, so it carries through a variant-subsetting unchanged.
     new("FineMappingEntry",
         variantIds = common,
         susieFit   = fit,
-        topLoci    = newTopLoci)
+        topLoci    = newTopLoci,
+        cvResult   = x@cvResult)
   })
 
 #' @export

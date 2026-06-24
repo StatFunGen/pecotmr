@@ -232,4 +232,14 @@ source of pre-fit SuSiE / SuSiE-inf / SuSiE-ash objects; their
 \code{trimmedFit} payloads are passed through to \code{learnTwasWeights}
 / the RSS sub-pipelines via the \code{fittedModels} slot, avoiding
 a re-fit.
+
+When the supplied \code{FineMappingResult} was produced with
+cross-validation (\code{fineMappingPipeline(..., cvFolds > 1)}), each
+matching \code{(study, context, trait)} entry's \code{cvResult} is
+reused: its fold partition becomes the CV partition (unless
+\code{samplePartition} is given explicitly) and its per-fold out-of-fold
+predictions/metrics are fed directly into the SR-TWAS ensemble in place
+of re-fitting those fine-mapping methods here. Non-fine-mapping methods
+(lasso, enet, ...) are still cross-validated on the same shared
+partition.
 }

@@ -82,9 +82,6 @@
 #'         level QC lives on the \code{QtlDataset} constructor; sumstat
 #'         QC lives in \code{summaryStatsQc()}. No filtering happens
 #'         inside this pipeline.
-#'   \item \code{pipCutoffToSkip} pre-screen: this lived in the old
-#'         pipelines but is not ported. Callers can run a one-shot
-#'         \code{susieR::susie} check externally if needed.
 #'   \item Diagnostic re-analysis paths
 #'         (\code{singleEffect} / \code{bayesianConditionalRegression}
 #'         reanalysis on the RSS path): these are not exposed as
@@ -157,6 +154,30 @@
 #'   (OR-logic). Default \code{NULL} (off).
 #' @param fineMappingResult Optional existing \code{FineMappingResult}
 #'   to use as a resume cache; tuples already present are not refit.
+#' @param cvFolds Integer. Number of cross-validation folds. Default
+#'   \code{0} (no CV). When \code{> 1}, each method is refit on the
+#'   training samples of every fold and used to predict the held-out
+#'   samples; the fold partition plus per-fold out-of-fold predictions and
+#'   metrics are stored on each \code{FineMappingEntry}'s \code{cvResult}
+#'   slot (see \code{\link{getCvResult}}). \code{twasWeightsPipeline} reuses
+#'   this partition and feeds these predictions into the SR-TWAS ensemble.
+#'   Individual-level (\code{QtlDataset} / \code{MultiStudyQtlDataset})
+#'   input only; ignored for sumstat inputs.
+#' @param samplePartition Optional pre-defined CV partition
+#'   \code{data.frame} with columns \code{Sample} and \code{Fold}. When
+#'   supplied (and \code{cvFolds > 1}), every method reuses this exact
+#'   partition; otherwise a fresh partition is generated per
+#'   \code{(study, context, trait)}.
+#' @param seed Optional integer. When non-NULL, \code{set.seed(seed)} is
+#'   called once at the start of the call for reproducible fits. Default
+#'   \code{NULL} (no seeding).
+#' @param pipCutoffToSkip Numeric (length 1). Individual-level single-effect
+#'   (SER) pre-screen applied to each residualized \code{(X, y)} block before a
+#'   full fit: a susie model with \code{L = 1} is fit and the block is skipped
+#'   when no PIP exceeds the cutoff (no potentially significant variant). The
+#'   summary-statistics analog lives in \code{summaryStatsQc()}. \code{0}
+#'   (default) disables the screen; a negative value uses the adaptive
+#'   \code{3 / nVariants} threshold.
 #' @param jointSpecification Optional joint-fit specification (NULL by
 #'   default). When NULL, the pipeline runs the implicit multi-context /
 #'   multi-trait mvSuSiE / fSuSiE branches as before. When non-NULL, the
@@ -650,6 +671,52 @@ setGeneric("fineMappingPipeline",
   }
 }
 
+# Single-effect (SER) pre-screen, individual-level. Fits susie with L = 1 on a
+# residualized (X, y) block and reports whether any PIP clears `cutoff` -- i.e.
+# whether the block shows any potentially significant variant worth a full fit.
+# Ports the deleted multivariate_pipeline.R `skipConditions` / susie_twas
+# `pip_cutoff_to_skip` logic (the individual-level analog of the sumstat-path
+# `.applyPipScreen`):
+#   * `cutoff == 0` (or NULL/non-scalar) disables the screen -> always keep.
+#   * `cutoff < 0` uses the adaptive 3 / nVariants threshold.
+#   * NA entries of `y` are dropped before fitting.
+# The screen is advisory: too few samples/variants or a fit failure keeps the
+# block (returns TRUE) rather than discarding a potentially real signal.
+# @noRd
+.fmSerScreen <- function(X, y, cutoff) {
+  if (is.null(cutoff) || length(cutoff) != 1L || is.na(cutoff) || cutoff == 0)
+    return(TRUE)
+  ok <- !is.na(y)
+  if (sum(ok) < 2L || ncol(X) < 1L) return(TRUE)
+  Xs <- X[ok, , drop = FALSE]
+  ys <- y[ok]
+  thr <- if (cutoff < 0) 3 / ncol(Xs) else cutoff
+  pip <- tryCatch(suppressMessages(susieR::susie(Xs, ys, L = 1L))$pip,
+                  error = function(e) NULL)
+  if (is.null(pip)) return(TRUE)
+  any(pip > thr)
+}
+
+# Is the SER pre-screen enabled? Only a finite, non-zero scalar activates it;
+# this gates the extra screening extraction so the default (cutoff 0) costs
+# nothing.
+# @noRd
+.fmScreenActive <- function(cutoff) {
+  !is.null(cutoff) && length(cutoff) == 1L && !is.na(cutoff) && cutoff != 0
+}
+
+# Per-condition SER pre-screen for a joint (multi-context / multi-trait) fit:
+# returns a logical vector over the columns of `Y` (the conditions) marking
+# which show single-effect signal. The multivariate analog of `.fmSerScreen`
+# and a port of the deleted `skipConditions`: callers drop the FALSE columns
+# (null contexts / traits) before the joint mvSuSiE fit.
+# @noRd
+.fmSerScreenColumns <- function(X, Y, cutoff) {
+  vapply(seq_len(ncol(Y)),
+         function(j) .fmSerScreen(X, Y[, j], cutoff),
+         logical(1L))
+}
+
 # Fit every requested univariate token on one residualized (X, y) block,
 # returning a named list (token -> FineMappingEntry). Extracted from the
 # univariate dispatch so the same logic serves the cis path (one block), the
@@ -657,7 +724,8 @@ setGeneric("fineMappingPipeline",
 # path (one block per region, merged afterwards via .fmMergeEntries).
 .fmFitXBlock <- function(X, y, toRun, addSusieInf, coverage,
                          secondaryCoverage, signalCutoff, minAbsCorr,
-                         methodArgs, verbose, ctx, tid) {
+                         methodArgs, verbose, ctx, tid,
+                         cvFolds = 0, samplePartition = NULL) {
   chainLocal <- .fmResolveSusieChain(toRun, addSusieInf)
   infFit <- NULL
   if (chainLocal$runInf) {
@@ -686,6 +754,19 @@ setGeneric("fineMappingPipeline",
       fit = fit, method = tk, dataX = X, dataY = y, coverage = coverage,
       secondaryCoverage = secondaryCoverage, signalCutoff = signalCutoff,
       minAbsCorr = minAbsCorr, csInput = "X")
+  }
+  # Per-fold cross-validation across the fitted univariate methods; attach
+  # each method's out-of-fold predictions to its entry.
+  if (cvFolds > 1L && length(out) > 0L) {
+    if (verbose >= 1)
+      message(sprintf("Cross-validating (%d folds) for (context='%s', trait='%s') ...",
+                      cvFolds, ctx, tid))
+    cv <- .fmCrossValidate(X, y, names(out), methodArgs, cvFolds,
+                           samplePartition = samplePartition,
+                           coverage = coverage, verbose = verbose)
+    for (tk in names(out)) {
+      out[[tk]] <- .fmAttachCv(out[[tk]], .fmSliceCv(cv, tk))
+    }
   }
   out
 }
@@ -738,8 +819,14 @@ setGeneric("fineMappingPipeline",
   rownames(topLoci) <- NULL
   susieFit <- setNames(lapply(entries, function(e) e@susieFit),
                        paste0("region", seq_along(entries)))
+  # Per-region CV partitions/predictions share the same sample set; keep them
+  # per region under region* names so a multi-region entry retains each block's
+  # cross-validated predictions (NULL when no region carried CV).
+  cvList <- setNames(lapply(entries, function(e) e@cvResult),
+                     paste0("region", seq_along(entries)))
+  cvResult <- if (all(vapply(cvList, is.null, logical(1)))) NULL else cvList
   FineMappingEntry(variantIds = variantIds, susieFit = susieFit,
-                   topLoci = topLoci)
+                   topLoci = topLoci, cvResult = cvResult)
 }
 
 # Run a joint-method fit (mvsusie / fsusie) once per region block via the
@@ -861,6 +948,194 @@ setGeneric("fineMappingPipeline",
 
 
 # =============================================================================
+# Per-fold cross-validation of fine-mapping methods
+# -----------------------------------------------------------------------------
+# fineMappingPipeline mirrors twasWeightsPipeline's cross-validation: when
+# cvFolds > 1, each fine-mapping method is refit on the training samples of
+# every fold, its weights extracted and used to predict the held-out samples,
+# yielding out-of-fold predictions + per-outcome metrics. The partition and
+# predictions are stored on each FineMappingEntry's cvResult slot so
+# twasWeightsPipeline can (a) reuse the identical fold partition and (b) feed
+# fine-mapping's own cross-validated predictions straight into the SR-TWAS
+# ensemble instead of recomputing them. Output shape mirrors twasWeightsCv()
+# (samplePartition + per-method <key>_predicted / <key>_performance), keyed by
+# the TWAS snake method name (adapter methodKey) for a drop-in merge.
+# =============================================================================
+
+# Generate a Sample/Fold partition over the rows of X, matching the scheme in
+# twasWeightsCv() (shuffle samples, then cut into `fold` contiguous blocks).
+# @noRd
+.fmMakeSamplePartition <- function(sampleNames, fold) {
+  idx <- sample(length(sampleNames))
+  folds <- cut(seq_along(sampleNames), breaks = fold, labels = FALSE)
+  data.frame(Sample = sampleNames[idx], Fold = folds, stringsAsFactors = FALSE)
+}
+
+# Snake method key (e.g. "susie_inf") for a fine-mapping token, taken from the
+# shared adapter registry so fineMapping CV keys match the TwasWeights `method`
+# column and twasWeightsCv()'s prediction keys.
+# @noRd
+.fmTwasMethodKey <- function(token) {
+  adapter <- .twasFineMappingMethodAdapters[[token]]
+  if (is.null(adapter)) return(token)
+  sub("_weights$", "", adapter$methodKey)
+}
+
+# Compact CV metric row (corr, rsq, adj_rsq, pval, RMSE, MAE) for one outcome,
+# mirroring the metric block of twasWeightsCv().
+# @noRd
+.fmCvMetricRow <- function(pred, actual) {
+  out <- setNames(rep(NA_real_, 6L),
+                  c("corr", "rsq", "adj_rsq", "pval", "RMSE", "MAE"))
+  ok <- !is.na(pred) & !is.na(actual)
+  pred <- pred[ok]; actual <- actual[ok]
+  if (length(pred) < 3L || stats::sd(pred) == 0) return(out)
+  lmFit <- stats::lm(actual ~ pred); s <- summary(lmFit)
+  out["corr"]    <- stats::cor(actual, pred)
+  out["rsq"]     <- s$r.squared
+  out["adj_rsq"] <- s$adj.r.squared
+  out["pval"]    <- if (nrow(s$coefficients) >= 2L) s$coefficients[2L, 4L] else NA_real_
+  res <- actual - pred
+  out["RMSE"] <- sqrt(mean(res^2))
+  out["MAE"]  <- mean(abs(res))
+  out
+}
+
+# Fit one fine-mapping method on (Xtr, Ytr) for a CV fold and return a
+# variants x outcomes weight matrix (rownames = colnames(Xtr)). susie-family
+# tokens are fit independently (no chained init) per fold, matching
+# twasWeightsCv's per-fold refit. Returns NULL on failure (caller skips it).
+# @noRd
+.fmFoldWeights <- function(token, Xtr, Ytr, coverage, userArgs, pos) {
+  asMat <- function(w) {
+    if (is.matrix(w)) return(w)
+    matrix(w, ncol = 1L, dimnames = list(names(w), NULL))
+  }
+  if (token %in% c("susie", "susieInf", "susieAsh")) {
+    y <- if (is.matrix(Ytr)) Ytr[, 1L] else Ytr
+    fit <- .fmFitSusieIndiv(Xtr, y, token, coverage = coverage,
+                            userArgs = userArgs)
+    w <- switch(token,
+      susie    = susieWeights(susieFit = fit),
+      susieInf = susieInfWeights(susieInfFit = fit),
+      susieAsh = susieAshWeights(susieAshFit = fit))
+    w <- as.numeric(w)
+    names(w) <- colnames(Xtr)
+    return(asMat(w))
+  }
+  if (token == "mvsusie") {
+    pv <- mvsusieR::create_mixture_prior(R = ncol(Ytr))
+    fit <- do.call(fitMvsusie,
+                   .fmMergeUserArgs(list(X = Xtr, Y = Ytr, prior_variance = pv,
+                                         coverage = coverage),
+                                    "mvsusie", userArgs))
+    W <- as.matrix(mvsusieWeights(mvsusieFit = fit))
+    if (is.null(rownames(W))) rownames(W) <- colnames(Xtr)
+    return(W)
+  }
+  if (token == "fsusie") {
+    fit <- do.call(fitFsusie,
+                   .fmMergeUserArgs(list(X = Xtr, Y = Ytr, pos = pos),
+                                    "fsusie", userArgs))
+    W <- fsusieWeights(fsusieFit = fit, variantIds = colnames(Xtr))
+    return(as.matrix(W))
+  }
+  NULL
+}
+
+# Cross-validate a homogeneous set of fine-mapping `tokens` over (X, Y). For
+# univariate tokens Y is a single column; for mvsusie/fsusie Y carries one
+# column per condition/feature (and fsusie additionally needs `pos`). Returns
+# a list(samplePartition, prediction, performance) shaped like twasWeightsCv().
+# @noRd
+.fmCrossValidate <- function(X, Y, tokens, methodArgs, fold,
+                             samplePartition = NULL, coverage = 0.95,
+                             pos = NULL, verbose = 1) {
+  if (length(tokens) == 0L) return(NULL)
+  if (!is.matrix(Y)) {
+    Y <- matrix(Y, ncol = 1L,
+                dimnames = list(rownames(X), NULL))
+  }
+  if (is.null(rownames(Y))) rownames(Y) <- rownames(X)
+  sampleNames <- rownames(X)
+  if (is.null(samplePartition)) {
+    samplePartition <- .fmMakeSamplePartition(sampleNames, fold)
+  }
+  foldIds <- sort(unique(samplePartition$Fold))
+
+  preds <- setNames(
+    lapply(tokens, function(tk) {
+      matrix(NA_real_, nrow(Y), ncol(Y), dimnames = dimnames(Y))
+    }), tokens)
+
+  for (j in foldIds) {
+    testIds <- samplePartition$Sample[samplePartition$Fold == j]
+    isTest  <- rownames(X) %in% testIds
+    if (all(isTest) || !any(isTest)) next
+    Xtr <- X[!isTest, , drop = FALSE]
+    Xte <- X[isTest, , drop = FALSE]
+    Ytr <- Y[!isTest, , drop = FALSE]
+    # Drop columns with zero variance in this training fold.
+    keepCol <- .nonzeroVarColumns(Xtr)
+    XtrK <- Xtr[, keepCol, drop = FALSE]
+    for (tk in tokens) {
+      W <- tryCatch(
+        .fmFoldWeights(tk, XtrK, Ytr, coverage, methodArgs[[tk]], pos),
+        error = function(e) {
+          if (verbose >= 1)
+            message(sprintf("  CV fold %s, method %s failed: %s",
+                            j, tk, conditionMessage(e)))
+          NULL
+        })
+      if (is.null(W)) next
+      common <- intersect(colnames(Xte), rownames(W))
+      if (length(common) == 0L) next
+      yhat <- Xte[, common, drop = FALSE] %*% W[common, , drop = FALSE]
+      preds[[tk]][rownames(Xte), ] <- yhat
+    }
+  }
+
+  prediction  <- list()
+  performance <- list()
+  for (tk in tokens) {
+    key <- .fmTwasMethodKey(tk)
+    prediction[[paste0(key, "_predicted")]] <- preds[[tk]]
+    perf <- t(vapply(seq_len(ncol(Y)), function(r) {
+      .fmCvMetricRow(preds[[tk]][, r], Y[, r])
+    }, numeric(6L)))
+    rownames(perf) <- colnames(Y)
+    performance[[paste0(key, "_performance")]] <- perf
+  }
+  list(samplePartition = samplePartition,
+       prediction = prediction, performance = performance)
+}
+
+# Slice a full .fmCrossValidate() result down to one method's payload, keeping
+# the shared samplePartition. Stored on that method's FineMappingEntry.
+# @noRd
+.fmSliceCv <- function(cv, token) {
+  if (is.null(cv)) return(NULL)
+  key <- .fmTwasMethodKey(token)
+  pk <- paste0(key, "_predicted")
+  mk <- paste0(key, "_performance")
+  if (!pk %in% names(cv$prediction)) return(NULL)
+  list(samplePartition = cv$samplePartition,
+       prediction  = cv$prediction[pk],
+       performance = cv$performance[mk])
+}
+
+# Rebuild a FineMappingEntry with a cvResult attached (the class is immutable).
+# @noRd
+.fmAttachCv <- function(entry, cvResult) {
+  if (is.null(entry) || is.null(cvResult)) return(entry)
+  FineMappingEntry(variantIds = entry@variantIds,
+                   susieFit   = entry@susieFit,
+                   topLoci    = entry@topLoci,
+                   cvResult   = cvResult)
+}
+
+
+# =============================================================================
 # QtlDataset method
 # =============================================================================
 
@@ -882,6 +1157,10 @@ setMethod("fineMappingPipeline", "QtlDataset",
            minAbsCorr         = 0.8,
            medianAbsCorr      = NULL,
            fineMappingResult  = NULL,
+           cvFolds            = 0,
+           samplePartition    = NULL,
+           pipCutoffToSkip    = 0,
+           seed               = NULL,
            naAction           = c("drop", "impute"),
            verbose            = 1,
            trim               = TRUE,
@@ -891,6 +1170,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
            residualizeGenotypeCovariates    = TRUE,
            ...) {
     naAction <- match.arg(naAction)
+    if (!is.null(seed)) set.seed(as.integer(seed))
     # `cisWindow` expands a trait's own coordinates; `region` is taken
     # literally. Supplying both signals a misunderstanding -> reject.
     if (!is.null(region) && !is.null(cisWindow)) {
@@ -1038,9 +1318,19 @@ setMethod("fineMappingPipeline", "QtlDataset",
             X <- X[common, , drop = FALSE]
             y <- Y[common, , drop = FALSE]
             if (ncol(y) > 1L) y <- y[, 1L, drop = TRUE] else y <- drop(y)
+            # SER pre-screen: skip this block when a single-effect fit finds no
+            # PIP above pipCutoffToSkip (no potentially significant variant).
+            if (!.fmSerScreen(X, y, pipCutoffToSkip)) {
+              if (verbose >= 1)
+                message(sprintf(
+                  "Skipping (context='%s', trait='%s'): SER pre-screen found no PIP above pipCutoffToSkip.",
+                  ctx, tid))
+              return(list())
+            }
             .fmFitXBlock(X, y, toRun, addSusieInf, coverage,
                          secondaryCoverage, signalCutoff, minAbsCorr,
-                         methodArgs, verbose, ctx, tid)
+                         methodArgs, verbose, ctx, tid,
+                         cvFolds = cvFolds, samplePartition = samplePartition)
           })
 
           for (tk in toRun) {
@@ -1111,6 +1401,41 @@ setMethod("fineMappingPipeline", "QtlDataset",
             next
           }
 
+          # SER pre-screen: drop contexts with no single-effect signal before
+          # the joint fit (faithful port of skipConditions). Screen the first
+          # region block; skip the trait entirely when < 2 contexts survive.
+          if (.fmScreenActive(pipCutoffToSkip)) {
+            rg0  <- xRegions[[1L]]
+            Xscr <- if (is.null(rg0)) {
+              .fmResidGeno(data, contexts = contextsHere, traitId = tid,
+                           cisWindow = cisWindow, samples = baseSamples)
+            } else {
+              .fmResidGeno(data, contexts = contextsHere, region = rg0,
+                           samples = baseSamples)
+            }
+            csS <- intersect(baseSamples, rownames(Xscr))
+            if (length(csS) >= 2L) {
+              Yscr <- do.call(cbind, lapply(contextsHere,
+                function(ctx) Yres[[ctx]][csS, 1L]))
+              kept <- contextsHere[.fmSerScreenColumns(
+                Xscr[csS, , drop = FALSE], Yscr, pipCutoffToSkip)]
+              if (length(kept) < 2L) {
+                if (verbose >= 1)
+                  message(sprintf(
+                    "Skipping mvsusie (multi-context) for trait='%s': < 2 contexts pass the SER pre-screen.",
+                    tid))
+                next
+              }
+              if (length(kept) < length(contextsHere)) {
+                if (verbose >= 1)
+                  message(sprintf(
+                    "mvsusie (multi-context) trait='%s': SER pre-screen kept %d of %d contexts.",
+                    tid, length(kept), length(contextsHere)))
+                contextsHere <- kept
+              }
+            }
+          }
+
           if (verbose >= 1)
             message(sprintf("Fitting mvsusie (multi-context) for trait='%s' ...", tid))
           fitOneRegion <- function(rg) {
@@ -1140,11 +1465,18 @@ setMethod("fineMappingPipeline", "QtlDataset",
                            .fmMergeUserArgs(mvBaseArgs, "mvsusie",
                                             methodArgs[["mvsusie"]]))
             fit <- .setFinemappingFitClass(fit, "mvsusie")
-            .fmPostprocessOne(
+            entry <- .fmPostprocessOne(
               fit = fit, method = "mvsusie", dataX = Xc, dataY = NULL,
               coverage = coverage, secondaryCoverage = secondaryCoverage,
               signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
               csInput = "X")
+            if (cvFolds > 1L) {
+              cv <- .fmCrossValidate(Xc, Yc, "mvsusie", methodArgs, cvFolds,
+                                     samplePartition = samplePartition,
+                                     coverage = coverage, verbose = verbose)
+              entry <- .fmAttachCv(entry, .fmSliceCv(cv, "mvsusie"))
+            }
+            entry
           }
           entry <- .fmJointBlocks(xRegions, fitOneRegion)
           # Share the joint (merged) entry across contexts via copy-on-modify.
@@ -1173,6 +1505,41 @@ setMethod("fineMappingPipeline", "QtlDataset",
           Y <- .fmResidPheno(
             data, contexts = ctx, traitId = traits, naAction = naAction)
 
+          # SER pre-screen: drop traits with no single-effect signal before the
+          # joint fit (faithful port of skipConditions). Skip the context's
+          # mvsusie when < 2 traits survive.
+          if (.fmScreenActive(pipCutoffToSkip)) {
+            rg0  <- xRegions[[1L]]
+            Xscr <- if (is.null(rg0)) {
+              .fmResidGeno(data, contexts = ctx, traitId = traits,
+                           cisWindow = cisWindow, samples = rownames(Y))
+            } else {
+              .fmResidGeno(data, contexts = ctx, region = rg0,
+                           samples = rownames(Y))
+            }
+            csS <- intersect(rownames(Xscr), rownames(Y))
+            if (length(csS) >= 2L) {
+              keep <- .fmSerScreenColumns(
+                Xscr[csS, , drop = FALSE], Y[csS, , drop = FALSE],
+                pipCutoffToSkip)
+              if (sum(keep) < 2L) {
+                if (verbose >= 1)
+                  message(sprintf(
+                    "Skipping mvsusie (multi-trait) for context='%s': < 2 traits pass the SER pre-screen.",
+                    ctx))
+                next
+              }
+              if (sum(keep) < length(traits)) {
+                if (verbose >= 1)
+                  message(sprintf(
+                    "mvsusie (multi-trait) context='%s': SER pre-screen kept %d of %d traits.",
+                    ctx, sum(keep), length(traits)))
+                traits <- traits[keep]
+                Y <- Y[, keep, drop = FALSE]
+              }
+            }
+          }
+
           if (verbose >= 1)
             message(sprintf("Fitting mvsusie (multi-trait) for context='%s' ...", ctx))
           fitOneRegion <- function(rg) {
@@ -1199,11 +1566,18 @@ setMethod("fineMappingPipeline", "QtlDataset",
                            .fmMergeUserArgs(mvBaseArgs, "mvsusie",
                                             methodArgs[["mvsusie"]]))
             fit <- .setFinemappingFitClass(fit, "mvsusie")
-            .fmPostprocessOne(
+            entry <- .fmPostprocessOne(
               fit = fit, method = "mvsusie", dataX = Xc, dataY = NULL,
               coverage = coverage, secondaryCoverage = secondaryCoverage,
               signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
               csInput = "X")
+            if (cvFolds > 1L) {
+              cv <- .fmCrossValidate(Xc, Yc, "mvsusie", methodArgs, cvFolds,
+                                     samplePartition = samplePartition,
+                                     coverage = coverage, verbose = verbose)
+              entry <- .fmAttachCv(entry, .fmSliceCv(cv, "mvsusie"))
+            }
+            entry
           }
           entry <- .fmJointBlocks(xRegions, fitOneRegion)
           for (tid in traits) {
@@ -1275,12 +1649,26 @@ setMethod("fineMappingPipeline", "QtlDataset",
           fit <- do.call(fitFsusie,
                          .fmMergeUserArgs(list(X = Xc, Y = Yc, pos = pos),
                                           "fsusie", methodArgs[["fsusie"]]))
+          # Collapse the functional fit to a variants x features TWAS weight
+          # matrix now, while fitted_wc/csd_X are still present (trimming drops
+          # them). Stored on $coef so a trimmed fit can still yield weights.
+          fit$coef <- tryCatch(
+            fsusieWeights(fsusieFit = fit, variantIds = colnames(Xc)),
+            error = function(e) NULL)
           fit <- .setFinemappingFitClass(fit, "fsusie")
-          .fmPostprocessOne(
+          entry <- .fmPostprocessOne(
             fit = fit, method = "fsusie", dataX = Xc, dataY = NULL,
             coverage = coverage, secondaryCoverage = secondaryCoverage,
             signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
             csInput = "fsusie")
+          if (cvFolds > 1L) {
+            cv <- .fmCrossValidate(Xc, Yc, "fsusie", methodArgs, cvFolds,
+                                   samplePartition = samplePartition,
+                                   coverage = coverage, pos = pos,
+                                   verbose = verbose)
+            entry <- .fmAttachCv(entry, .fmSliceCv(cv, "fsusie"))
+          }
+          entry
         }
         entry <- .fmJointBlocks(xRegions, fitOneRegion)
         for (tid in traits) {
@@ -1327,6 +1715,10 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
            minAbsCorr         = 0.8,
            medianAbsCorr      = NULL,
            fineMappingResult  = NULL,
+           cvFolds            = 0,
+           samplePartition    = NULL,
+           pipCutoffToSkip    = 0,
+           seed               = NULL,
            naAction           = c("drop", "impute"),
            verbose            = 1,
            trim               = TRUE,
@@ -1393,6 +1785,10 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
         signalCutoff       = signalCutoff,
         minAbsCorr         = minAbsCorr,
         fineMappingResult  = fineMappingResult,
+        cvFolds            = cvFolds,
+        samplePartition    = samplePartition,
+        pipCutoffToSkip    = pipCutoffToSkip,
+        seed               = seed,
         naAction           = naAction,
         verbose            = verbose,
         ...)

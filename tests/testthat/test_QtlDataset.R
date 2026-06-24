@@ -546,6 +546,38 @@ test_that(".qtlExtractBlock: keepVariants with empty intersection returns empty 
   expect_equal(nrow(blk$geno), 0L)
 })
 
+test_that(".qtlExtractBlock: keepIndel = FALSE drops multi-base (indel) variants", {
+  qd <- .qh_makeDataset()
+  # Make rs2 (insertion) and rs4 (deletion) indels; the rest stay SNPs.
+  qd@genotypes@snpInfo$A1[2] <- "AT"
+  qd@genotypes@snpInfo$A2[4] <- "GC"
+  qd@keepIndel <- FALSE
+  local_mocked_bindings(
+    extractBlockGenotypes = .qh_mockExtractor(),
+    .package = "pecotmr")
+  blk <- pecotmr:::.qtlExtractBlock(qd)
+  expect_equal(blk$variantIds, c("rs1", "rs3", "rs5", "rs6"))
+})
+
+test_that(".qtlExtractBlock: keepIndel = TRUE (default) keeps indel variants", {
+  qd <- .qh_makeDataset()
+  qd@genotypes@snpInfo$A1[2] <- "AT"
+  expect_true(qd@keepIndel)  # default
+  local_mocked_bindings(
+    extractBlockGenotypes = .qh_mockExtractor(),
+    .package = "pecotmr")
+  blk <- pecotmr:::.qtlExtractBlock(qd)
+  expect_equal(length(blk$variantIds), 6L)
+})
+
+test_that("QtlDataset: keepIndel defaults to TRUE; validity rejects non-scalar", {
+  qd <- .qh_makeDataset()
+  expect_true(qd@keepIndel)
+  # The constructor coerces via isTRUE(); validity guards direct new()/slot sets.
+  qd@keepIndel <- c(TRUE, FALSE)
+  expect_error(validObject(qd), "keepIndel.*single logical")
+})
+
 test_that(".qtlExtractBlock: mafCutoff drops low-MAF variants", {
   qd <- .qh_makeDataset()
   # The mocked extractor returns binomial(0.3) dosages: realized MAFs hover

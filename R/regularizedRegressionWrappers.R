@@ -444,13 +444,21 @@ susieAshRssWeights <- function(stat, LD, susieAshRssFit = NULL, retainFit = TRUE
 #' @param mrmashFit Optional fitted mr.mash object.
 #' @param X Genotype matrix. Required when `mrmashFit` is NULL.
 #' @param Y Phenotype matrix. Required when `mrmashFit` is NULL.
+#' @param retainFit If TRUE, attach (as the `"fit"` attribute of the returned
+#'   weights) the parts of the mr.mash fit that `fineMappingPipeline` needs to
+#'   rebuild the mvSuSiE reweighted mixture prior + residual variance: the
+#'   original data-driven prior matrices (`dataDrivenPriorMatrices`), the fitted
+#'   mixture weights (`w0`) and the residual covariance (`V`). The heavy
+#'   coefficient matrix (`mu1`) is intentionally not retained. Default FALSE.
 #' @param ... Additional arguments passed to `mrmashWrapper()` when fitting.
 #' @return Matrix of variant weights.
 #' @export
-mrmashWeights <- function(mrmashFit = NULL, X = NULL, Y = NULL, ...) {
+mrmashWeights <- function(mrmashFit = NULL, X = NULL, Y = NULL,
+                          retainFit = FALSE, ...) {
   if (!requireNamespace("mr.mashr", quietly = TRUE)) {
     stop("Package 'mr.mashr' is required. Install with: devtools::install_github('stephenslab/mr.mashr')")
   }
+  dotArgs <- list(...)
   if (is.null(mrmashFit)) {
     message("mrmashFit is not provided; fitting mr.mash now ...")
     if (is.null(X) || is.null(Y)) {
@@ -458,7 +466,18 @@ mrmashWeights <- function(mrmashFit = NULL, X = NULL, Y = NULL, ...) {
     }
     mrmashFit <- mrmashWrapper(X, Y, ...)
   }
-  return(mr.mashr::coef.mr.mash(mrmashFit)[-1, ])
+  out <- mr.mashr::coef.mr.mash(mrmashFit)[-1, ]
+  if (isTRUE(retainFit)) {
+    # Lean payload consumed by fineMappingPipeline to reproduce the legacy
+    # initializeMvsusiePrior reweighting (see the mvSuSiE-prior-from-mr.mash
+    # note). The original matrices are required for bit-identical results;
+    # rescaleCovW0(w0) collapses the expanded weights back onto them.
+    attr(out, "fit") <- list(
+      dataDrivenPriorMatrices = dotArgs$dataDrivenPriorMatrices,
+      w0 = mrmashFit$w0,
+      V  = mrmashFit$V)
+  }
+  out
 }
 
 #' Compute mvSuSiE TWAS weights
@@ -499,6 +518,153 @@ mvsusieWeights <- function(mvsusieFit = NULL, X = NULL, Y = NULL,
     )
   }
   return(mvsusieR::coef.mvsusie(mvsusieFit)[-1, ])
+}
+
+# Build the wavelet synthesis (inverse-DWT) matrix S (n_wac x nFeat) for the
+# basis fSuSiE uses, by reconstructing each unit wavelet coefficient through the
+# SAME $D / $C assignment as out_prep.susiF (detail columns -> $D, the coarsest
+# scaling column -> last $C entry), then `wavethresh::wr`. A wavelet-coefficient
+# row `c` then maps to the feature domain as `c %*% S`. `scaleCols` is the
+# column index of the scaling coefficient(s) (per the prior family). fSuSiE's
+# default basis (DaubLeAsymm, filter 10) matches `wavethresh::wd`'s default, the
+# same one out_prep uses, so the plain `wd(rep(0, nWac))` template is consistent.
+# @noRd
+.fsusieSynthesisMatrix <- function(nWac, scaleCols) {
+  template <- wavethresh::wd(rep(0, nWac))
+  reconstructUnit <- function(k) {
+    coeffRow <- numeric(nWac)
+    coeffRow[k] <- 1
+    temp <- template
+    temp$D <- coeffRow[-scaleCols]
+    temp$C[length(temp$C)] <- sum(coeffRow[scaleCols])
+    as.numeric(wavethresh::wr(temp))
+  }
+  do.call(rbind, lapply(seq_len(nWac), reconstructUnit))
+}
+
+#' Compute fSuSiE feature-level TWAS weights
+#'
+#' Collapses a functional SuSiE (\code{fsusieR::susiF}) fit back to a
+#' \code{variants x features} weight matrix usable for TWAS prediction of each
+#' molecular feature. fSuSiE fits the regression in the wavelet domain, storing
+#' per-SNP posterior-mean wavelet effects \code{fitted_wc[[l]]}
+#' (\code{nSNP x n_wac}) and inclusion probabilities \code{alpha[[l]]}. Because
+#' the inverse wavelet transform \code{wr()} is linear, the posterior-mean
+#' prediction pushes through to a per-SNP, per-feature weight matrix:
+#' \deqn{W[j, f] = \sum_l alpha[[l]][j] \cdot
+#'   \mathrm{wr}\!\left(fitted\_wc[[l]][j, ] / csd\_X[j]\right)[f].}
+#' This is the exact analog of \code{coef.susie} for scalar SuSiE (all SNPs,
+#' alpha-weighted), which spreads weight across the credible set — more robust
+#' for out-of-sample TWAS than fSuSiE's in-sample lead-SNP summary
+#' (\code{update_cal_indf}).
+#'
+#' The reconstruction uses the raw posterior wavelet coefficients
+#' \code{fitted_wc}, so it is independent of the \code{post_processing} mode
+#' (\code{"smash"}/\code{"TI"}/\code{"HMM"}/\code{"none"}) — that smoothing only
+#' denoises the alpha-collapsed display curve \code{fitted_func}, never the
+#' per-SNP predictive coefficients. The \code{$D}/\code{$C} coefficient layout
+#' and wavelet basis mirror \code{out_prep.susiF}, so the feature-domain output
+#' matches fSuSiE's own conventions.
+#'
+#' @param fsusieFit A fitted \code{fsusieR::susiF} object. Must retain
+#'   \code{fitted_wc}, \code{alpha}, \code{csd_X}, \code{n_wac}, and
+#'   \code{outing_grid} (i.e. an untrimmed fit). Required.
+#' @param X,Y Accepted for call-compatibility with the multivariate
+#'   weight-method dispatch in \code{\link{learnTwasWeights}}, which invokes
+#'   every method as \code{fn(X = ., Y = ., ...)}. fSuSiE is a functional method
+#'   that cannot be refit from a bare \code{(X, Y)} pair (it needs feature
+#'   positions and the wavelet model), so these are ignored: a fitted
+#'   \code{fsusieFit} is always required.
+#' @param variantIds Optional character vector of variant IDs (length = number
+#'   of SNPs in the fit) for the matrix row names. Defaults to
+#'   \code{names(fsusieFit$csd_X)} / \code{names(fsusieFit$pip)}.
+#' @param featureNames Optional character vector of feature (outcome) names for
+#'   the matrix column names. Defaults to the fit's \code{outing_grid}.
+#' @param retainFit If TRUE, stores the fit as an attribute on the result.
+#' @return A numeric matrix of variant (rows) by feature (columns) weights.
+#' @export
+fsusieWeights <- function(fsusieFit = NULL, X = NULL, Y = NULL,
+                          variantIds = NULL, featureNames = NULL,
+                          retainFit = FALSE) {
+  if (is.null(fsusieFit)) {
+    stop("fsusieWeights: `fsusieFit` is required. fSuSiE is functional and ",
+         "cannot be refit from a bare (X, Y); fit it via fineMappingPipeline() ",
+         "and pass the fitted fsusieR::susiF object.")
+  }
+  # Fast path: a trimmed fit carries the precomputed variants x features weight
+  # matrix in `$coef` (fineMappingPipeline computes it eagerly while the full
+  # fit is in hand, because trimming drops fitted_wc/csd_X/...). Return it.
+  if (is.matrix(fsusieFit$coef) &&
+      is.null(fsusieFit$fitted_wc)) {
+    W <- fsusieFit$coef
+    if (!is.null(variantIds) && length(variantIds) == nrow(W))
+      rownames(W) <- variantIds
+    if (retainFit) attr(W, "fit") <- fsusieFit
+    return(W)
+  }
+  if (!requireNamespace("fsusieR", quietly = TRUE)) {
+    stop("Package 'fsusieR' is required for fsusieWeights().")
+  }
+  if (!requireNamespace("wavethresh", quietly = TRUE)) {
+    stop("Package 'wavethresh' is required for fsusieWeights().")
+  }
+  fit <- fsusieFit
+  missingSlots <- setdiff(c("fitted_wc", "alpha", "csd_X", "n_wac",
+                            "outing_grid"), names(fit))
+  if (length(missingSlots) > 0L) {
+    stop("fsusieWeights: the fSuSiE fit is missing required slot(s): ",
+         paste(missingSlots, collapse = ", "),
+         ". Pass an untrimmed fit (these are dropped when trimmed).")
+  }
+
+  csdX <- as.numeric(fit$csd_X)
+  p    <- length(csdX)
+  nWac <- fit$n_wac
+
+  # alpha may be a list (one vector per effect, the fsusieR::susiF default) or
+  # a matrix/data.frame (L x nSNP) after fsusieWrapper reshaping. Normalize to
+  # a list of per-effect vectors.
+  alpha <- fit$alpha
+  alphaList <- if (is.list(alpha) && !is.data.frame(alpha)) {
+    lapply(alpha, as.numeric)
+  } else {
+    am <- as.matrix(alpha)
+    lapply(seq_len(nrow(am)), function(l) as.numeric(am[l, ]))
+  }
+  L <- length(fit$fitted_wc)
+
+  # Scaling-coefficient column(s): the coarsest level for a per-scale prior,
+  # else the last column. Mirrors the two branches of out_prep.susiF.
+  perScale <- "mixture_normal_per_scale" %in% class(fsusieR::get_G_prior(fit))
+  indxLst <- fsusieR::gen_wavelet_indx(log2(length(fit$outing_grid)))
+  scaleCols <- if (perScale) indxLst[[length(indxLst)]]
+               else ncol(as.matrix(fit$fitted_wc[[1L]]))
+
+  # One inverse transform per wavelet coefficient (built once), then every SNP /
+  # effect is a matrix multiply: W = sum_l (alpha_l/csd_X-scaled fitted_wc_l) %*% S.
+  S <- .fsusieSynthesisMatrix(nWac, scaleCols)
+  nFeat <- ncol(S)
+  invCsd <- 1 / csdX
+
+  W <- matrix(0, nrow = p, ncol = nFeat)
+  for (l in seq_len(L)) {
+    wc <- as.matrix(fit$fitted_wc[[l]])
+    rowScale <- alphaList[[l]] * invCsd
+    W <- W + (rowScale * wc) %*% S
+  }
+
+  rn <- variantIds
+  if (is.null(rn)) rn <- names(fit$csd_X)
+  if (is.null(rn)) rn <- names(fit$pip)
+  if (!is.null(rn) && length(rn) == p) rownames(W) <- rn
+  cn <- featureNames
+  if (is.null(cn) && !is.null(fit$outing_grid) &&
+      length(fit$outing_grid) == nFeat) {
+    cn <- as.character(fit$outing_grid)
+  }
+  if (!is.null(cn) && length(cn) == nFeat) colnames(W) <- cn
+  if (retainFit) attr(W, "fit") <- fit
+  W
 }
 
 #' Compute mr.mash-RSS TWAS weights from summary statistics

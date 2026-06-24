@@ -851,6 +851,13 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
     if (!is.null(fit$conditional_lfsr)) trimmed$clfsr <- fit$conditional_lfsr[effectIdx, , , drop = FALSE]
   }
 
+  # fSuSiE: keep the precomputed variants x features TWAS weight matrix
+  # (fsusieWeights output, attached as $coef before trimming) so downstream
+  # TWAS can read it without the dropped wavelet slots.
+  if (method == "fsusie" && !is.null(fit$coef)) {
+    trimmed$coef <- fit$coef
+  }
+
   class(trimmed) <- unique(c(method, "susie"))
   trimmed
 }

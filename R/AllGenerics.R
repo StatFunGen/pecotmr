@@ -397,6 +397,21 @@ setGeneric("getPip", function(x, ...) standardGeneric("getPip"))
 #' @export
 setGeneric("getSusieFit", function(x, ...) standardGeneric("getSusieFit"))
 
+#' @title Get Cross-Validation Result
+#' @description Extract the cross-validation payload stored on a
+#'   \code{FineMappingEntry} (or the matching entry of a
+#'   \code{FineMappingResult}). The payload is a list with components
+#'   \code{samplePartition} (a \code{data.frame} of \code{Sample}/\code{Fold}
+#'   assignments), \code{predictions} (a named list of per-method out-of-fold
+#'   prediction matrices), and \code{performance} (a named list of per-method
+#'   metric matrices). \code{NULL} when fine-mapping was run without
+#'   cross-validation (\code{cvFolds <= 1}).
+#' @param x A \code{FineMappingEntry} or \code{FineMappingResult}.
+#' @param ... Class-specific selection arguments.
+#' @return A list (the CV payload) or \code{NULL}.
+#' @export
+setGeneric("getCvResult", function(x, ...) standardGeneric("getCvResult"))
+
 #' @title Get Marginal Effects
 #' @description Extract per-variant marginal univariate effects from a
 #'   fine-mapping entry or result. Returns a \code{data.frame} with

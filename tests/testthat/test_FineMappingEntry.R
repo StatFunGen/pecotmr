@@ -181,6 +181,30 @@ test_that("FineMappingEntry: validity errors when topLoci is missing required co
   )
 })
 
+
+# === cvResult slot (cross-validation payload) ===
+
+test_that("FineMappingEntry stores and returns a cvResult payload", {
+  tl <- data.frame(variant_id = c("v1", "v2"), pip = c(0.8, 0.2),
+                   stringsAsFactors = FALSE)
+  cv <- list(samplePartition = data.frame(Sample = c("s1", "s2"), Fold = c(1L, 2L)),
+             prediction = list(susie_predicted = matrix(0, 2, 1)),
+             performance = list(susie_performance = matrix(0, 1, 6)))
+  e <- FineMappingEntry(variantIds = tl$variant_id, susieFit = list(),
+                        topLoci = tl, cvResult = cv)
+  expect_identical(getCvResult(e), cv)
+})
+
+test_that("FineMappingEntry cvResult defaults to NULL and rejects non-list", {
+  tl <- data.frame(variant_id = "v1", pip = 0.5, stringsAsFactors = FALSE)
+  e <- FineMappingEntry(variantIds = "v1", susieFit = list(), topLoci = tl)
+  expect_null(getCvResult(e))
+  expect_error(
+    FineMappingEntry(variantIds = "v1", susieFit = list(), topLoci = tl,
+                     cvResult = 1:3),
+    "cvResult must be NULL or a list")
+})
+
 # ===========================================================================
 # TwasWeightsEntry
 # ===========================================================================

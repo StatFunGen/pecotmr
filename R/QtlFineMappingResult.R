@@ -165,6 +165,14 @@ setMethod("getCs", "QtlFineMappingResult",
     getCs(entry, coverage = coverage)
   })
 
+#' @rdname getCvResult
+#' @export
+setMethod("getCvResult", "QtlFineMappingResult",
+  function(x, study = NULL, context = NULL, trait = NULL, method = NULL, ...) {
+    entry <- getFineMappingResult(x, study, context, trait, method)
+    getCvResult(entry)
+  })
+
 #' @rdname getTopLoci
 #' @export
 setMethod("getTopLoci", "QtlFineMappingResult",

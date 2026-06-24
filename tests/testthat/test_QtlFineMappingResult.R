@@ -296,6 +296,20 @@ test_that("QtlFineMappingResult: getStudy/getContexts/getTraits/getMethodNames a
   expect_setequal(getMethodNames(res), c("susie", "susieRss"))
 })
 
+
+test_that("getCvResult works at the QtlFineMappingResult collection level", {
+  tl <- data.frame(variant_id = "v1", pip = 0.5, stringsAsFactors = FALSE)
+  cv <- list(samplePartition = data.frame(Sample = "s1", Fold = 1L),
+             prediction = list(susie_predicted = matrix(0, 1, 1)),
+             performance = list(susie_performance = matrix(0, 1, 6)))
+  e <- FineMappingEntry("v1", list(), tl, cvResult = cv)
+  fmr <- QtlFineMappingResult(study = "S", context = "C", trait = "T",
+                              method = "susie", entry = list(e))
+  expect_identical(
+    getCvResult(fmr, study = "S", context = "C", trait = "T", method = "susie"),
+    cv)
+})
+
 # ===========================================================================
 # GwasFineMappingResult collection accessors
 # ===========================================================================

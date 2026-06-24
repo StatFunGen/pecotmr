@@ -26,14 +26,18 @@ setClass("QtlDataset",
     xvarCutoff         = "numeric",
     imissCutoff        = "numeric",
     keepSamples        = "character",
-    keepVariants       = "character"
+    keepVariants       = "character",
+    keepIndel          = "logical"
   ),
+  prototype = prototype(keepIndel = TRUE),
   validity = function(object) {
     errors <- character()
     if (length(object@study) != 1L || !nzchar(object@study))
       errors <- c(errors, "'study' must be a single non-empty character string")
     if (length(object@scaleResiduals) != 1L)
       errors <- c(errors, "'scaleResiduals' must be a single logical value")
+    if (length(object@keepIndel) != 1L || is.na(object@keepIndel))
+      errors <- c(errors, "'keepIndel' must be a single logical value")
     for (nm in c("mafCutoff", "macCutoff", "xvarCutoff", "imissCutoff")) {
       v <- methods::slot(object, nm)
       if (length(v) != 1L || is.na(v) || !is.finite(v) || v < 0)
@@ -132,6 +136,9 @@ setClass("QtlDataset",
 #' @param genotypeCovariates Numeric matrix of genotype-derived covariates
 #'   (e.g., ancestry PCs); rows are samples.
 #' @param scaleResiduals Logical (length 1). Default \code{TRUE}.
+#' @param keepIndel Logical (length 1). When \code{FALSE}, variants whose
+#'   alleles are not single nucleotides (indels) are dropped at extraction.
+#'   Default \code{TRUE} (keep all variants).
 #' @return A \code{QtlDataset} object.
 #' @export
 QtlDataset <- function(study, genotypes, phenotypes,
@@ -142,7 +149,8 @@ QtlDataset <- function(study, genotypes, phenotypes,
                        xvarCutoff = 0,
                        imissCutoff = 0,
                        keepSamples = character(0),
-                       keepVariants = character(0)) {
+                       keepVariants = character(0),
+                       keepIndel = TRUE) {
   obj <- new("QtlDataset",
              study              = as.character(study),
              genotypes          = genotypes,
@@ -154,7 +162,8 @@ QtlDataset <- function(study, genotypes, phenotypes,
              xvarCutoff         = as.numeric(xvarCutoff),
              imissCutoff        = as.numeric(imissCutoff),
              keepSamples        = as.character(keepSamples),
-             keepVariants       = as.character(keepVariants))
+             keepVariants       = as.character(keepVariants),
+             keepIndel          = isTRUE(keepIndel))
   validObject(obj)
   obj
 }
@@ -271,6 +280,12 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
   unique(idx)
 }
 
+# Internal: keepIndel slot read, tolerant of QtlDataset objects serialized
+# before the slot existed (treat a missing slot as TRUE = keep indels).
+.qtlKeepIndel <- function(x) {
+  isTRUE(tryCatch(x@keepIndel, error = function(e) TRUE))
+}
+
 # Internal: extract the panel dosage block (samples x variants) for the
 # requested region, narrow to the requested sample set, and apply lazy QC
 # (per-sample imiss filter, then per-variant max(mafCutoff,
@@ -304,6 +319,24 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
     snpAll <- as.character(x@genotypes@snpInfo$SNP[snpIdx])
     keepMask <- snpAll %in% x@keepVariants
     snpIdx <- snpIdx[keepMask]
+    if (length(snpIdx) == 0L) {
+      return(list(
+        geno       = matrix(numeric(0), nrow = 0L, ncol = 0L,
+                            dimnames = list(character(0), character(0))),
+        variantIds = character(0),
+        sampleIds  = character(0),
+        maf        = numeric(0)
+      ))
+    }
+  }
+
+  # Drop indels (variants whose A1/A2 are not single nucleotides) unless kept,
+  # before materialization so we do not extract dosage we will immediately drop.
+  if (!.qtlKeepIndel(x)) {
+    si <- x@genotypes@snpInfo
+    snpMask <- nchar(as.character(si$A1[snpIdx])) == 1L &
+               nchar(as.character(si$A2[snpIdx])) == 1L
+    snpIdx <- snpIdx[snpMask]
     if (length(snpIdx) == 0L) {
       return(list(
         geno       = matrix(numeric(0), nrow = 0L, ncol = 0L,

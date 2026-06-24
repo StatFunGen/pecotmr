@@ -4,7 +4,7 @@
 \alias{FineMappingEntry}
 \title{Create a FineMappingEntry Object}
 \usage{
-FineMappingEntry(variantIds, susieFit, topLoci)
+FineMappingEntry(variantIds, susieFit, topLoci, cvResult = NULL)
 }
 \arguments{
 \item{variantIds}{Character vector of variant IDs in fit order.}
@@ -19,6 +19,10 @@ marginal_se, marginal_z, marginal_p}), posterior columns
 (\code{pip, posterior_mean, posterior_sd, cs_*, cs_*_purity}),
 pipeline stamps (\code{method, gene, event, grange_start,
 grange_end}). Unfiltered: one row per variant in the fit.}
+
+\item{cvResult}{Optional cross-validation payload (list with
+\code{samplePartition}, \code{predictions}, \code{performance}) recorded
+when fine-mapping is run with \code{cvFolds > 1}. \code{NULL} otherwise.}
 }
 \value{
 A \code{FineMappingEntry} object.

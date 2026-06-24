@@ -451,6 +451,166 @@ test_that("fineMappingPipeline(QtlDataset): runs univariate dispatch with mocked
   expect_setequal(getMethodNames(res), "susie")
 })
 
+test_that("fineMappingPipeline(QtlDataset): seed argument is accepted and runs", {
+  qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieIndiv      = .fmp_mockFitIndiv(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  res <- suppressMessages(
+    fineMappingPipeline(qd, methods = "susie", cisWindow = 1000L,
+                        addSusieInf = FALSE, seed = 42L))
+  expect_s4_class(res, "QtlFineMappingResult")
+  expect_equal(nrow(res), 1L)
+})
+
+test_that(".fmSerScreen: disables on 0, skips no-signal, keeps signal + adaptive", {
+  skip_if_not_installed("susieR")
+  set.seed(1)
+  n <- 150L; p <- 25L
+  X <- matrix(rnorm(n * p), n, p); colnames(X) <- paste0("v", seq_len(p))
+  yNull <- rnorm(n)                       # no association
+  ySig  <- X[, 1] * 2 + rnorm(n, sd = 0.3)  # strong single effect at v1
+  fn <- function(...) suppressMessages(pecotmr:::.fmSerScreen(...))
+  expect_true(fn(X, yNull, 0))            # cutoff 0 disables -> always keep
+  expect_false(fn(X, yNull, 0.5))         # no PIP that high -> skip
+  expect_true(fn(X, ySig, 0.5))           # strong signal clears 0.5 -> keep
+  expect_true(fn(X, ySig, -1))            # adaptive 3/p: signal keeps
+  expect_false(fn(X, yNull, -1))          # adaptive 3/p: null skips
+  expect_true(fn(X, yNull, NA))           # malformed cutoff -> advisory keep
+})
+
+test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip skips no-signal univariate traits", {
+  qd <- .fmp_makeQtlDataset(contexts = "brain", traits = c("ENSG_A", "ENSG_B"))
+  # Stateful screen: reject the first block (ENSG_A), keep the rest (ENSG_B).
+  seen <- 0L
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieIndiv      = .fmp_mockFitIndiv(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .fmSerScreen          = function(X, y, cutoff) { seen <<- seen + 1L; seen > 1L },
+    .package = "pecotmr")
+  res <- suppressMessages(
+    fineMappingPipeline(qd, methods = "susie", cisWindow = 1000L,
+                        addSusieInf = FALSE, pipCutoffToSkip = -1))
+  # ENSG_A screened out, ENSG_B kept -> a single row.
+  expect_equal(nrow(res), 1L)
+  expect_setequal(getTraits(res), "ENSG_B")
+})
+
+test_that("fineMappingPipeline(QtlDataset, cvFolds>1): attaches cvResult end to end", {
+  skip_if_not_installed("susieR")
+  qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  # Real susie fits drive CV; the genotype extraction and the full-data
+  # post-processor are mocked (the mock SNP ids are not chr:pos:a1:a2, which the
+  # real buildTopLoci requires). CV runs its own real .fmFitSusieIndiv, so the
+  # cvResult is genuine.
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  res <- suppressMessages(
+    fineMappingPipeline(qd, methods = "susie", cisWindow = 1000L,
+                        addSusieInf = FALSE, cvFolds = 3, verbose = 0))
+  cv <- getCvResult(res, study = "study1", context = "brain",
+                    trait = "ENSG_A", method = "susie")
+  expect_false(is.null(cv))
+  expect_setequal(colnames(cv$samplePartition), c("Sample", "Fold"))
+  expect_setequal(sort(unique(cv$samplePartition$Fold)), 1:3)
+  expect_true("susie_predicted" %in% names(cv$prediction))
+  expect_true("susie_performance" %in% names(cv$performance))
+  # One out-of-fold prediction per sample (no fold leaves a sample unscored).
+  expect_false(anyNA(cv$prediction[["susie_predicted"]]))
+})
+
+test_that("fineMappingPipeline(QtlDataset, cvFolds=0): leaves cvResult NULL", {
+  qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieIndiv      = .fmp_mockFitIndiv(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  res <- suppressMessages(
+    fineMappingPipeline(qd, methods = "susie", cisWindow = 1000L,
+                        addSusieInf = FALSE))
+  expect_null(getCvResult(res, study = "study1", context = "brain",
+                          trait = "ENSG_A", method = "susie"))
+})
+
+# ===========================================================================
+# Cross-validation internals: .fmMakeSamplePartition / .fmCrossValidate /
+# .fmSliceCv / .fmAttachCv (unit-level counterparts to the cvFolds end-to-end
+# tests above).
+# ===========================================================================
+
+test_that(".fmMakeSamplePartition partitions every sample into the requested folds", {
+  part <- pecotmr:::.fmMakeSamplePartition(paste0("s", 1:20), fold = 4L)
+  expect_setequal(part$Sample, paste0("s", 1:20))
+  expect_setequal(sort(unique(part$Fold)), 1:4)
+  expect_equal(nrow(part), 20L)
+})
+
+test_that(".fmCrossValidate returns twasWeightsCv-shaped output keyed by snake method", {
+  skip_if_not_installed("susieR")
+  set.seed(42)
+  n <- 60L; p <- 12L
+  X <- matrix(rnorm(n * p), n, p,
+              dimnames = list(paste0("s", seq_len(n)), paste0("v", seq_len(p))))
+  y <- X[, 2] * 1.5 + rnorm(n, sd = 0.5)
+  names(y) <- rownames(X)
+  cv <- pecotmr:::.fmCrossValidate(
+    X, y, tokens = "susie",
+    methodArgs = list(susie = list()), fold = 3L,
+    coverage = 0.95, verbose = 0)
+  expect_named(cv, c("samplePartition", "prediction", "performance"))
+  expect_setequal(colnames(cv$samplePartition), c("Sample", "Fold"))
+  # Keyed by the TWAS snake method name (adapter methodKey base).
+  expect_true("susie_predicted" %in% names(cv$prediction))
+  expect_true("susie_performance" %in% names(cv$performance))
+  pred <- cv$prediction[["susie_predicted"]]
+  expect_equal(dim(pred), c(n, 1L))
+  # Every sample is held out exactly once => no missing out-of-fold predictions.
+  expect_false(anyNA(pred))
+  perf <- cv$performance[["susie_performance"]]
+  expect_equal(colnames(perf), c("corr", "rsq", "adj_rsq", "pval", "RMSE", "MAE"))
+  # A real causal signal should yield positive out-of-fold correlation.
+  expect_gt(perf[1, "corr"], 0)
+})
+
+test_that(".fmCrossValidate reuses a supplied samplePartition verbatim", {
+  skip_if_not_installed("susieR")
+  set.seed(7)
+  n <- 40L; p <- 8L
+  X <- matrix(rnorm(n * p), n, p,
+              dimnames = list(paste0("s", seq_len(n)), paste0("v", seq_len(p))))
+  y <- X[, 1] + rnorm(n, sd = 0.5); names(y) <- rownames(X)
+  part <- pecotmr:::.fmMakeSamplePartition(rownames(X), fold = 4L)
+  cv <- pecotmr:::.fmCrossValidate(X, y, tokens = "susie",
+                                   methodArgs = list(susie = list()),
+                                   fold = 4L, samplePartition = part,
+                                   coverage = 0.95, verbose = 0)
+  expect_identical(cv$samplePartition, part)
+})
+
+test_that(".fmSliceCv / .fmAttachCv slice one method and round-trip onto an entry", {
+  full <- list(
+    samplePartition = data.frame(Sample = c("s1", "s2"), Fold = c(1L, 2L)),
+    prediction = list(susie_predicted = matrix(1, 2, 1),
+                      susie_inf_predicted = matrix(2, 2, 1)),
+    performance = list(susie_performance = matrix(0, 1, 6),
+                       susie_inf_performance = matrix(0, 1, 6)))
+  sl <- pecotmr:::.fmSliceCv(full, "susieInf")
+  expect_identical(names(sl$prediction), "susie_inf_predicted")
+  expect_identical(names(sl$performance), "susie_inf_performance")
+  expect_identical(sl$samplePartition, full$samplePartition)
+
+  tl <- data.frame(variant_id = "v1", pip = 0.5, stringsAsFactors = FALSE)
+  e <- FineMappingEntry("v1", list(), tl)
+  e2 <- pecotmr:::.fmAttachCv(e, sl)
+  expect_identical(getCvResult(e2), sl)
+})
+
 test_that("fineMappingPipeline(QtlDataset): RSS-only method rejected by capability check", {
   qd <- .fmp_makeQtlDataset()
   expect_error(
@@ -554,6 +714,50 @@ test_that("fineMappingPipeline(QtlDataset): mvsusie multi-context single-trait d
   expect_equal(nrow(res), 2L)
   expect_setequal(getContexts(res), c("brain", "liver"))
   expect_setequal(getTraits(res), "ENSG_A")
+})
+
+test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip drops null contexts before joint mvsusie", {
+  qd <- .fmp_makeQtlDataset(contexts = c("brain", "liver", "heart"),
+                            traits = "ENSG_A")
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    # Drop the middle context (liver); keep brain + heart.
+    .fmSerScreenColumns   = function(X, Y, cutoff) c(TRUE, FALSE, TRUE),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    mvsusie               = .fmp_mockMvsusie(),
+    create_mixture_prior  = .fmp_mockMixturePrior(),
+    .package = "mvsusieR")
+  res <- suppressMessages(
+    fineMappingPipeline(qd, methods = "mvsusie", cisWindow = 1000L,
+                        pipCutoffToSkip = -1))
+  # liver screened out -> the joint fit runs on brain + heart only.
+  expect_equal(nrow(res), 2L)
+  expect_setequal(getContexts(res), c("brain", "heart"))
+})
+
+test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip skips mvsusie when < 2 contexts survive", {
+  # susie runs alongside so the result still has rows after mvsusie is skipped.
+  qd <- .fmp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieIndiv      = .fmp_mockFitIndiv(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .fmSerScreen          = function(X, y, cutoff) TRUE,   # keep univariate susie
+    .fmSerScreenColumns   = function(X, Y, cutoff) c(TRUE, FALSE),  # only brain
+    .package = "pecotmr")
+  local_mocked_bindings(
+    mvsusie               = .fmp_mockMvsusie(),
+    create_mixture_prior  = .fmp_mockMixturePrior(),
+    .package = "mvsusieR")
+  res <- suppressMessages(
+    fineMappingPipeline(qd, methods = c("susie", "mvsusie"),
+                        cisWindow = 1000L, addSusieInf = FALSE,
+                        pipCutoffToSkip = -1))
+  # mvsusie skipped (only 1 context survives); susie still produced per-context.
+  expect_setequal(getMethodNames(res), "susie")
+  expect_false("mvsusie" %in% getMethodNames(res))
 })
 
 test_that("fineMappingPipeline(QtlDataset): mvsusie both multi falls back to per-context multi-trait", {
