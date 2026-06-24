@@ -15,7 +15,8 @@ QtlDataset(
   xvarCutoff = 0,
   imissCutoff = 0,
   keepSamples = character(0),
-  keepVariants = character(0)
+  keepVariants = character(0),
+  keepIndel = TRUE
 )
 }
 \arguments{
@@ -31,6 +32,10 @@ positions and \code{colData} carrying per-context phenotype covariates.}
 (e.g., ancestry PCs); rows are samples.}
 
 \item{scaleResiduals}{Logical (length 1). Default \code{TRUE}.}
+
+\item{keepIndel}{Logical (length 1). When \code{FALSE}, variants whose
+alleles are not single nucleotides (indels) are dropped at extraction.
+Default \code{TRUE} (keep all variants).}
 }
 \value{
 A \code{QtlDataset} object.

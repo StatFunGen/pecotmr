@@ -4,7 +4,7 @@
 \alias{mrmashWeights}
 \title{Compute mr.mash TWAS weights}
 \usage{
-mrmashWeights(mrmashFit = NULL, X = NULL, Y = NULL, ...)
+mrmashWeights(mrmashFit = NULL, X = NULL, Y = NULL, retainFit = FALSE, ...)
 }
 \arguments{
 \item{mrmashFit}{Optional fitted mr.mash object.}
@@ -12,6 +12,13 @@ mrmashWeights(mrmashFit = NULL, X = NULL, Y = NULL, ...)
 \item{X}{Genotype matrix. Required when `mrmashFit` is NULL.}
 
 \item{Y}{Phenotype matrix. Required when `mrmashFit` is NULL.}
+
+\item{retainFit}{If TRUE, attach (as the `"fit"` attribute of the returned
+weights) the parts of the mr.mash fit that `fineMappingPipeline` needs to
+rebuild the mvSuSiE reweighted mixture prior + residual variance: the
+original data-driven prior matrices (`dataDrivenPriorMatrices`), the fitted
+mixture weights (`w0`) and the residual covariance (`V`). The heavy
+coefficient matrix (`mu1`) is intentionally not retained. Default FALSE.}
 
 \item{...}{Additional arguments passed to `mrmashWrapper()` when fitting.}
 }

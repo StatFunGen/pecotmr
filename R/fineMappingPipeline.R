@@ -613,6 +613,32 @@ setGeneric("fineMappingPipeline",
           c(list(x = x, ...), .resPickFlags()))
 }
 
+# Directional effect-allele (A1) frequency for the variants in a fitted
+# genotype block `X` (samples x variants, post-residualization and post
+# sample-intersection). Re-extracts the allele frequency from the dataset
+# `data` over the SAME selection used to build `X` and aligns it to
+# `colnames(X)`; variants `getAf` does not return (e.g. dropped by a
+# borderline MAF re-check on the final sample set) come back as NA. Returns
+# NULL when `X` is empty or the dataset exposes no `getAf` (non-QtlDataset
+# sources whose entries already carry `af`). The branch mirrors the
+# `.fmResidGeno` call that built `X`: `region`-driven when a joint range is
+# given, else `traitId` + `cisWindow` for the cis window.
+.fmAfForX <- function(data, X, traitId = NULL, region = NULL,
+                      cisWindow = NULL) {
+  if (is.null(X) || ncol(X) == 0L || nrow(X) == 0L) return(NULL)
+  if (!is(data, "QtlDataset")) return(NULL)
+  afAll <- tryCatch(
+    if (is.null(region)) {
+      getAf(data, traitId = traitId, cisWindow = cisWindow,
+            samples = rownames(X))
+    } else {
+      getAf(data, region = region, samples = rownames(X))
+    },
+    error = function(e) NULL)
+  if (is.null(afAll) || length(afAll) == 0L) return(NULL)
+  unname(afAll[colnames(X)])
+}
+
 .fmPostprocessOne <- function(fit, method, dataX, dataY,
                               coverage, secondaryCoverage, signalCutoff,
                               minAbsCorr, csInput = NULL, af = NULL,
@@ -725,7 +751,7 @@ setGeneric("fineMappingPipeline",
 .fmFitXBlock <- function(X, y, toRun, addSusieInf, coverage,
                          secondaryCoverage, signalCutoff, minAbsCorr,
                          methodArgs, verbose, ctx, tid,
-                         cvFolds = 0, samplePartition = NULL) {
+                         cvFolds = 0, samplePartition = NULL, af = NULL) {
   chainLocal <- .fmResolveSusieChain(toRun, addSusieInf)
   infFit <- NULL
   if (chainLocal$runInf) {
@@ -753,7 +779,7 @@ setGeneric("fineMappingPipeline",
     out[[tk]] <- .fmPostprocessOne(
       fit = fit, method = tk, dataX = X, dataY = y, coverage = coverage,
       secondaryCoverage = secondaryCoverage, signalCutoff = signalCutoff,
-      minAbsCorr = minAbsCorr, csInput = "X")
+      minAbsCorr = minAbsCorr, af = af, csInput = "X")
   }
   # Per-fold cross-validation across the fitted univariate methods; attach
   # each method's out-of-fold predictions to its entry.
@@ -1327,10 +1353,13 @@ setMethod("fineMappingPipeline", "QtlDataset",
                   ctx, tid))
               return(list())
             }
+            afVec <- .fmAfForX(data, X, traitId = tid, region = rg,
+                               cisWindow = cisWindow)
             .fmFitXBlock(X, y, toRun, addSusieInf, coverage,
                          secondaryCoverage, signalCutoff, minAbsCorr,
                          methodArgs, verbose, ctx, tid,
-                         cvFolds = cvFolds, samplePartition = samplePartition)
+                         cvFolds = cvFolds, samplePartition = samplePartition,
+                         af = afVec)
           })
 
           for (tk in toRun) {
@@ -1452,6 +1481,8 @@ setMethod("fineMappingPipeline", "QtlDataset",
                    "insufficient shared samples across selected contexts.")
             }
             Xc <- X[cs, , drop = FALSE]
+            afVec <- .fmAfForX(data, Xc, traitId = tid, region = rg,
+                               cisWindow = cisWindow)
             Yc <- do.call(cbind, lapply(contextsHere, function(ctx) {
               ym <- Yres[[ctx]][cs, , drop = FALSE]
               colnames(ym) <- ctx
@@ -1469,7 +1500,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
               fit = fit, method = "mvsusie", dataX = Xc, dataY = NULL,
               coverage = coverage, secondaryCoverage = secondaryCoverage,
               signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
-              csInput = "X")
+              af = afVec, csInput = "X")
             if (cvFolds > 1L) {
               cv <- .fmCrossValidate(Xc, Yc, "mvsusie", methodArgs, cvFolds,
                                      samplePartition = samplePartition,
@@ -1558,6 +1589,8 @@ setMethod("fineMappingPipeline", "QtlDataset",
             }
             Xc <- X[common, , drop = FALSE]
             Yc <- Y[common, , drop = FALSE]
+            afVec <- .fmAfForX(data, Xc, traitId = traits, region = rg,
+                               cisWindow = cisWindow)
             mvBaseArgs <- list(
               X = Xc, Y = Yc,
               prior_variance = mvsusieR::create_mixture_prior(R = ncol(Yc)),
@@ -1570,7 +1603,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
               fit = fit, method = "mvsusie", dataX = Xc, dataY = NULL,
               coverage = coverage, secondaryCoverage = secondaryCoverage,
               signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
-              csInput = "X")
+              af = afVec, csInput = "X")
             if (cvFolds > 1L) {
               cv <- .fmCrossValidate(Xc, Yc, "mvsusie", methodArgs, cvFolds,
                                      samplePartition = samplePartition,
@@ -1646,6 +1679,8 @@ setMethod("fineMappingPipeline", "QtlDataset",
           }
           Xc <- X[common, , drop = FALSE]
           Yc <- Y[common, , drop = FALSE]
+          afVec <- .fmAfForX(data, Xc, traitId = traits, region = rg,
+                             cisWindow = cisWindow)
           fit <- do.call(fitFsusie,
                          .fmMergeUserArgs(list(X = Xc, Y = Yc, pos = pos),
                                           "fsusie", methodArgs[["fsusie"]]))
@@ -1660,7 +1695,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
             fit = fit, method = "fsusie", dataX = Xc, dataY = NULL,
             coverage = coverage, secondaryCoverage = secondaryCoverage,
             signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
-            csInput = "fsusie")
+            af = afVec, csInput = "fsusie")
           if (cvFolds > 1L) {
             cv <- .fmCrossValidate(Xc, Yc, "fsusie", methodArgs, cvFolds,
                                    samplePartition = samplePartition,

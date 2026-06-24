@@ -298,6 +298,11 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
 #   variantIds : character vector of kept variant IDs (= colnames(geno))
 #   sampleIds  : character vector of kept sample IDs (= rownames(geno))
 #   maf        : numeric vector of per-variant MAF for kept variants
+#   af         : numeric vector of per-variant effect-allele (A1) frequency
+#                for kept variants. Directional (NOT folded to the minor
+#                allele): the frequency of the dosage-counted allele, which
+#                is A1 by the same convention the marginal betas use. `maf`
+#                is `pmin(af, 1 - af)`.
 .qtlExtractBlock <- function(x, traitId = NULL, region = NULL,
                              cisWindow = NULL, samples = NULL) {
   gr <- .qtlResolveVariantRegion(x, traitId = traitId, region = region,
@@ -309,7 +314,8 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
                           dimnames = list(x@genotypes@sampleIds, character(0))),
       variantIds = character(0),
       sampleIds  = x@genotypes@sampleIds,
-      maf        = numeric(0)
+      maf        = numeric(0),
+      af         = numeric(0)
     ))
   }
 
@@ -325,7 +331,8 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
                             dimnames = list(character(0), character(0))),
         variantIds = character(0),
         sampleIds  = character(0),
-        maf        = numeric(0)
+        maf        = numeric(0),
+        af         = numeric(0)
       ))
     }
   }
@@ -343,7 +350,8 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
                             dimnames = list(character(0), character(0))),
         variantIds = character(0),
         sampleIds  = character(0),
-        maf        = numeric(0)
+        maf        = numeric(0),
+        af         = numeric(0)
       ))
     }
   }
@@ -368,7 +376,8 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
       geno       = dosage[integer(0), , drop = FALSE],
       variantIds = colnames(dosage),
       sampleIds  = character(0),
-      maf        = rep(NA_real_, ncol(dosage))
+      maf        = rep(NA_real_, ncol(dosage)),
+      af         = rep(NA_real_, ncol(dosage))
     ))
   }
   dosage <- dosage[keep, , drop = FALSE]
@@ -389,6 +398,10 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
     nObs <- colSums(!is.na(dosage))
     sumD <- colSums(dosage, na.rm = TRUE)
     p <- ifelse(nObs > 0L, sumD / (2 * nObs), NA_real_)
+    # `p` is the frequency of the dosage-counted allele (A1, the effect
+    # allele) -> exported directly as the directional `af`. `mafVec` folds
+    # it to the minor allele for the QC threshold and the `maf` accessor.
+    afVec <- p
     mafVec <- pmin(p, 1 - p)
     effectiveMaf <- max(x@mafCutoff, if (nSamp > 0L)
       x@macCutoff / (2 * nSamp) else 0)
@@ -404,8 +417,10 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
     }
     dosage <- dosage[, keepVarMask, drop = FALSE]
     mafVec <- mafVec[keepVarMask]
+    afVec  <- afVec[keepVarMask]
   } else {
     mafVec <- numeric(0)
+    afVec  <- numeric(0)
   }
 
   # Mean-impute remaining missing dosage cells so downstream linear
@@ -425,7 +440,8 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
     geno       = dosage,
     variantIds = colnames(dosage),
     sampleIds  = rownames(dosage),
-    maf        = mafVec
+    maf        = mafVec,
+    af         = afVec
   )
 }
 
@@ -445,6 +461,18 @@ setMethod("getMaf", "QtlDataset",
     block <- .qtlExtractBlock(x, traitId = NULL, region = region,
                               cisWindow = cisWindow, samples = samples)
     out <- block$maf
+    names(out) <- block$variantIds
+    out
+  })
+
+#' @rdname getAf
+#' @export
+setMethod("getAf", "QtlDataset",
+  function(x, traitId = NULL, region = NULL, cisWindow = NULL,
+           samples = NULL, ...) {
+    block <- .qtlExtractBlock(x, traitId = traitId, region = region,
+                              cisWindow = cisWindow, samples = samples)
+    out <- block$af
     names(out) <- block$variantIds
     out
   })

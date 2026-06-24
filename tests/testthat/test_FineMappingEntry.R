@@ -171,6 +171,22 @@ test_that("FineMappingEntry: getCs filters to rows in any credible set", {
 })
 
 
+test_that("FineMappingEntry: getCs/getTopLoci surface the directional af column", {
+  # Regression: the posterior view must carry the topLoci `af` (effect-allele
+  # frequency) through to getCs() / getTopLoci(), not drop it to NA. The
+  # value is directional (0.87 > 0.5), so a folded MAF would be a bug.
+  entry <- .sc_makeFineMappingEntry(3)
+  cs <- getCs(entry)
+  expect_true("af" %in% names(cs))
+  expect_equal(unname(cs$af), rep(0.87, nrow(cs)))
+  expect_false(anyNA(cs$af))
+
+  tl <- getTopLoci(entry, signalCutoff = 0)
+  expect_true("af" %in% names(tl))
+  expect_equal(unname(tl$af), rep(0.87, nrow(tl)))
+})
+
+
 test_that("FineMappingEntry: validity errors when topLoci is missing required cols", {
   expect_error(
     FineMappingEntry(

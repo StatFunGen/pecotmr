@@ -17,6 +17,8 @@ twasWeightsPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
+  minTwasMaf = NULL,
+  minTwasXvar = NULL,
   jointRegions = FALSE,
   jointSpecification = NULL,
   fineMappingResult = NULL,
@@ -104,6 +106,17 @@ Mutually exclusive with \code{traitId}.}
 \item{cisWindow}{For QtlDataset: cis-window (bp) around each trait's
 genomic position when extracting variants. Required when
 \code{traitId} is supplied. Mutually exclusive with \code{region}.}
+
+\item{minTwasMaf}{For QtlDataset: optional minimum minor-allele frequency
+applied to the variant set used for TWAS weight learning, on top of the
+dataset's construct-time \code{mafCutoff} (the effective cutoff is the
+larger of the two). Lets the TWAS pass use a stricter MAF threshold than
+fine mapping. \code{NULL} (default) leaves the construct-time cutoff in
+place.}
+
+\item{minTwasXvar}{As \code{minTwasMaf} but for the per-variant genotype
+variance cutoff (\code{xvarCutoff}). \code{NULL} (default) leaves the
+construct-time cutoff in place.}
 
 \item{jointRegions}{For QtlDataset with a multi-range \code{region}:
 \code{FALSE} (default) learns weights for each range independently and

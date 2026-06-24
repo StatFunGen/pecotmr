@@ -142,6 +142,20 @@ setGeneric("getN", function(x, ...) standardGeneric("getN"))
 #' @export
 setGeneric("getMaf", function(x, ...) standardGeneric("getMaf"))
 
+#' @title Get Effect-Allele Frequencies
+#' @description Extract the directional effect-allele (A1) frequency vector
+#'   for a \code{QtlDataset}. Unlike \code{\link{getMaf}}, the value is
+#'   \emph{not} folded to the minor allele: it is the frequency of the
+#'   dosage-counted allele (A1, the effect allele), matching the allele the
+#'   marginal effect sizes and the fine-mapping \code{af} column report.
+#' @param x A \code{QtlDataset} object.
+#' @param ... Class-specific selection arguments (e.g., \code{traitId},
+#'   \code{region}, \code{cisWindow}, \code{samples} for \code{QtlDataset}).
+#' @return Named numeric vector of effect-allele frequencies (names are
+#'   variant IDs), or an empty vector when no variants are selected.
+#' @export
+setGeneric("getAf", function(x, ...) standardGeneric("getAf"))
+
 #' @title Get Number of SNPs
 #' @description Number of SNPs in a \code{GwasSumStats} or
 #'   \code{QtlSumStats} entry, selected by its identity tuple.

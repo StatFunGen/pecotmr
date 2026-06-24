@@ -29,6 +29,8 @@ fineMappingPipeline(data, ...)
   fineMappingResult = NULL,
   cvFolds = 0,
   samplePartition = NULL,
+  pipCutoffToSkip = 0,
+  seed = NULL,
   naAction = c("drop", "impute"),
   verbose = 1,
   trim = TRUE,
@@ -57,6 +59,8 @@ fineMappingPipeline(data, ...)
   fineMappingResult = NULL,
   cvFolds = 0,
   samplePartition = NULL,
+  pipCutoffToSkip = 0,
+  seed = NULL,
   naAction = c("drop", "impute"),
   verbose = 1,
   trim = TRUE,
@@ -199,6 +203,18 @@ supplied (and \code{cvFolds > 1}), every method reuses this exact
 partition; otherwise a fresh partition is generated per
 \code{(study, context, trait)}.}
 
+\item{pipCutoffToSkip}{Numeric (length 1). Individual-level single-effect
+(SER) pre-screen applied to each residualized \code{(X, y)} block before a
+full fit: a susie model with \code{L = 1} is fit and the block is skipped
+when no PIP exceeds the cutoff (no potentially significant variant). The
+summary-statistics analog lives in \code{summaryStatsQc()}. \code{0}
+(default) disables the screen; a negative value uses the adaptive
+\code{3 / nVariants} threshold.}
+
+\item{seed}{Optional integer. When non-NULL, \code{set.seed(seed)} is
+called once at the start of the call for reproducible fits. Default
+\code{NULL} (no seeding).}
+
 \item{verbose}{Verbosity (0 silent, 1 default). Default \code{1}.}
 
 \item{trim}{Logical (length 1). When \code{TRUE} (default) the
@@ -339,9 +355,6 @@ deliberately not ported here:
         level QC lives on the \code{QtlDataset} constructor; sumstat
         QC lives in \code{summaryStatsQc()}. No filtering happens
         inside this pipeline.
-  \item \code{pipCutoffToSkip} pre-screen: this lived in the old
-        pipelines but is not ported. Callers can run a one-shot
-        \code{susieR::susie} check externally if needed.
   \item Diagnostic re-analysis paths
         (\code{singleEffect} / \code{bayesianConditionalRegression}
         reanalysis on the RSS path): these are not exposed as

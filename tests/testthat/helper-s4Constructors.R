@@ -28,7 +28,7 @@ context("s4Constructors")
     A1             = rep("G", n),
     A2             = rep("A", n),
     N              = rep(1000, n),
-    MAF            = rep(0.1, n),
+    af             = rep(0.87, n),  # directional effect-allele freq (> 0.5)
     marginal_beta  = rep(0.1, n),
     marginal_se    = rep(0.05, n),
     marginal_z     = rep(2.0, n),

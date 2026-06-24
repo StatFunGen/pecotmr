@@ -451,6 +451,72 @@ test_that("fineMappingPipeline(QtlDataset): runs univariate dispatch with mocked
   expect_setequal(getMethodNames(res), "susie")
 })
 
+test_that(".fmAfForX: returns directional effect-allele af aligned to colnames(X)", {
+  qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .package = "pecotmr")
+  region <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1L, 100000L))
+  # The helper aligns af to dimnames; values come from getAf over the same
+  # selection. Columns deliberately reordered to test name-based alignment.
+  X <- matrix(0, nrow = 5L, ncol = 3L,
+              dimnames = list(paste0("s", 1:5), c("v3", "v1", "v2")))
+  af <- pecotmr:::.fmAfForX(qd, X, region = region)
+  expect_length(af, 3L)
+  expect_false(anyNA(af))  # region matched -> every fitted variant has an af
+  expect_equal(
+    af,
+    unname(getAf(qd, region = region, samples = rownames(X))[colnames(X)]))
+})
+
+test_that(".fmAfForX: returns NULL for an empty block or a non-QtlDataset source", {
+  qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  emptyX <- matrix(numeric(0), nrow = 0L, ncol = 0L)
+  expect_null(pecotmr:::.fmAfForX(qd, emptyX))
+  X <- matrix(0, nrow = 2L, ncol = 1L,
+              dimnames = list(c("s1", "s2"), "v1"))
+  expect_null(pecotmr:::.fmAfForX(list(not = "a dataset"), X))
+})
+
+test_that("fineMappingPipeline(QtlDataset): threads directional af into postprocess", {
+  # Regression for af = NA in getCs: the individual-level univariate path must
+  # forward a non-NULL, directional effect-allele frequency to the
+  # post-processor (which writes it into the topLoci `af` column).
+  qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  captured <- new.env(parent = emptyenv())
+  captured$af   <- "UNSET"
+  captured$cols <- NULL
+  recordingPostprocess <- function(fit, method, dataX, dataY, coverage,
+                                   secondaryCoverage, signalCutoff, minAbsCorr,
+                                   csInput = NULL, af = NULL, region = NULL) {
+    captured$af   <- af
+    captured$cols <- colnames(dataX)
+    vids <- colnames(dataX)
+    FineMappingEntry(
+      variantIds = vids,
+      susieFit   = list(method = method),
+      topLoci    = data.frame(variant_id = vids,
+                              pip = seq(0.9, by = -0.1,
+                                        length.out = length(vids)),
+                              af  = af,
+                              stringsAsFactors = FALSE))
+  }
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieIndiv      = .fmp_mockFitIndiv(),
+    .fmPostprocessOne     = recordingPostprocess,
+    .package = "pecotmr")
+  suppressMessages(
+    fineMappingPipeline(qd, methods = "susie", cisWindow = 1000L,
+                        addSusieInf = FALSE))
+  # af forwarded (not left at the NULL default), one value per fitted variant.
+  expect_false(identical(captured$af, "UNSET"))
+  expect_false(is.null(captured$af))
+  expect_length(captured$af, length(captured$cols))
+  expect_true(any(!is.na(captured$af)))
+  expect_true(all(captured$af >= 0 & captured$af <= 1, na.rm = TRUE))
+})
+
 test_that("fineMappingPipeline(QtlDataset): seed argument is accepted and runs", {
   qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
   local_mocked_bindings(
