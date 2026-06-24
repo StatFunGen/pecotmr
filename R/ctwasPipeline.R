@@ -517,7 +517,116 @@ finemapCtwasRegions <- function(screenResult,
     susie_alpha_res = fmRes$susie_alpha_res,
     region_data     = screenResult$region_data,
     boundary_genes  = screenResult$boundary_genes,
-    screen_res      = screenResult$screen_res)
+    screen_res      = screenResult$screen_res,
+    # Carried forward so mergeCtwasBoundaryRegions() can re-finemap the merged
+    # boundary regions without re-deriving the assembled inputs.
+    region_info        = screenResult$region_info,
+    z_snp              = screenResult$z_snp,
+    weights            = screenResult$weights,
+    snp_map            = screenResult$snp_map,
+    LD_map             = screenResult$LD_map,
+    LD_loader_fun      = screenResult$LD_loader_fun,
+    snpinfo_loader_fun = screenResult$snpinfo_loader_fun)
+}
+
+#' Merge boundary cTWAS regions and re-fine-map
+#'
+#' @description Optional step 4 of the cTWAS pipeline (default-off region
+#'   merging). A gene whose cis window straddles an LD-block boundary
+#'   (a \code{boundary_genes} member) is split across two regions in the
+#'   first-pass fine-mapping. This step selects the high-PIP boundary genes,
+#'   merges each one's adjacent regions into a single region, re-runs
+#'   fine-mapping on the merged regions, and splices the updated results back
+#'   into the \code{\link{finemapCtwasRegions}} output. Thin wrapper over
+#'   \code{ctwas::postprocess_region_merging()} (or
+#'   \code{ctwas::postprocess_region_merging_noLD()} when the inputs carry no
+#'   LD loaders).
+#'
+#' @param finemapResult A list returned by \code{\link{finemapCtwasRegions}}.
+#'   Must carry \code{finemap_res}, \code{susie_alpha_res},
+#'   \code{region_data}, \code{region_info}, \code{z_snp}, \code{z_gene},
+#'   \code{weights}, \code{snp_map}, \code{param}, and — on the LD path —
+#'   \code{LD_map} plus the \code{LD_loader_fun} / \code{snpinfo_loader_fun}
+#'   closures (all retained by \code{finemapCtwasRegions}).
+#' @param pipThresh Numeric (length 1). PIP threshold for selecting which
+#'   boundary genes to merge (\code{select_boundary_genes} \code{pip_thresh}).
+#'   Default \code{0.5}.
+#' @param filterCs Logical (length 1). Require the gene to be in a credible set
+#'   to be selected (\code{select_boundary_genes} \code{filter_cs}). Default
+#'   \code{FALSE}.
+#' @param maxSNP Numeric (length 1). Per-merged-region SNP cap. Default
+#'   \code{Inf}.
+#' @param L Integer. Max number of single effects for the merged-region
+#'   re-fine-mapping (LD path only). Default \code{5}.
+#' @param ncore Number of cores. Default \code{1}.
+#' @param ... Forwarded to the underlying ctwas postprocess function.
+#' @return The \code{finemapResult} list with \code{finemap_res},
+#'   \code{susie_alpha_res}, \code{region_data}, \code{region_info},
+#'   \code{LD_map}, and \code{snp_map} replaced by the post-merge ("updated")
+#'   values, plus a \code{merge_res} element carrying the full ctwas postprocess
+#'   output. When no boundary gene clears \code{pipThresh}, ctwas returns the
+#'   inputs as the "updated" values, so the result is effectively unchanged.
+#' @export
+mergeCtwasBoundaryRegions <- function(finemapResult,
+                                      pipThresh = 0.5,
+                                      filterCs  = FALSE,
+                                      maxSNP    = Inf,
+                                      L         = 5L,
+                                      ncore     = 1L,
+                                      ...) {
+  if (!requireNamespace("ctwas", quietly = TRUE))
+    stop("Package 'ctwas' is required for mergeCtwasBoundaryRegions.")
+  fmRes <- finemapResult$finemap_res
+  if (is.null(fmRes) || nrow(fmRes) == 0L) {
+    message("mergeCtwasBoundaryRegions: no first-pass finemap result; ",
+            "returning unchanged.")
+    return(finemapResult)
+  }
+
+  hasLd <- !is.null(finemapResult$LD_loader_fun)
+  common <- list(
+    region_info     = finemapResult$region_info,
+    region_data     = finemapResult$region_data,
+    z_snp           = finemapResult$z_snp,
+    z_gene          = finemapResult$z_gene,
+    weights         = finemapResult$weights,
+    snp_map         = finemapResult$snp_map,
+    finemap_res     = fmRes,
+    susie_alpha_res = finemapResult$susie_alpha_res,
+    group_prior     = finemapResult$param$group_prior,
+    group_prior_var = finemapResult$param$group_prior_var,
+    pip_thresh      = pipThresh,
+    filter_cs       = filterCs,
+    maxSNP          = maxSNP,
+    ncore           = as.integer(ncore))
+
+  # ctwas's postprocess_*() forward `...` into finemap_regions, so the LD
+  # loader closures must ride in the explicit arg list (not through
+  # .ctwasInvoke, which would filter them to postprocess's own formals).
+  if (hasLd) {
+    fn   <- ctwas::postprocess_region_merging
+    args <- c(common, list(
+      LD_map             = finemapResult$LD_map,
+      L                  = as.integer(L),
+      LD_format          = "custom",
+      LD_loader_fun      = finemapResult$LD_loader_fun,
+      snpinfo_loader_fun = finemapResult$snpinfo_loader_fun))
+  } else {
+    fn   <- ctwas::postprocess_region_merging_noLD
+    args <- common
+  }
+  userExtra <- list(...)
+  userExtra <- userExtra[setdiff(names(userExtra), names(args))]
+  res <- do.call(fn, c(args, userExtra))
+
+  finemapResult$finemap_res     <- res$updated_finemap_res
+  finemapResult$susie_alpha_res <- res$updated_susie_alpha_res
+  if (!is.null(res$updated_region_data)) finemapResult$region_data <- res$updated_region_data
+  if (!is.null(res$updated_region_info)) finemapResult$region_info <- res$updated_region_info
+  if (!is.null(res$updated_LD_map))      finemapResult$LD_map      <- res$updated_LD_map
+  if (!is.null(res$updated_snp_map))     finemapResult$snp_map     <- res$updated_snp_map
+  finemapResult$merge_res <- res
+  finemapResult
 }
 
 # Invoke a ctwas function with a fixed `args` list plus optional `extra`

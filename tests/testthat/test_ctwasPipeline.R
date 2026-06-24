@@ -806,7 +806,9 @@ test_that("ctwasPipeline: dispatches assemble → est → screen → finemap and
   expect_setequal(
     names(out),
     c("z_gene", "param", "finemap_res", "susie_alpha_res",
-      "region_data", "boundary_genes", "screen_res"))
+      "region_data", "boundary_genes", "screen_res",
+      "region_info", "z_snp", "weights", "snp_map",
+      "LD_map", "LD_loader_fun", "snpinfo_loader_fun"))
 })
 
 test_that("estCtwasParam: fallbackToPrefit recovers from accurate-EM NaN divergence", {
@@ -881,7 +883,9 @@ test_that("estCtwasParam / screenCtwasRegions / finemapCtwasRegions can be calle
   expect_setequal(
     names(final),
     c("z_gene", "param", "finemap_res", "susie_alpha_res",
-      "region_data", "boundary_genes", "screen_res"))
+      "region_data", "boundary_genes", "screen_res",
+      "region_info", "z_snp", "weights", "snp_map",
+      "LD_map", "LD_loader_fun", "snpinfo_loader_fun"))
 })
 
 # ===========================================================================
@@ -927,7 +931,9 @@ test_that("ctwasPipeline: real-engine end-to-end on the bundled example panel", 
 
   # ctwas_sumstats returns these 7 elements on success.
   expect_named(res, c("z_gene", "param", "finemap_res", "susie_alpha_res",
-                       "region_data", "boundary_genes", "screen_res"),
+                       "region_data", "boundary_genes", "screen_res",
+                       "region_info", "z_snp", "weights", "snp_map",
+                       "LD_map", "LD_loader_fun", "snpinfo_loader_fun"),
                 ignore.order = TRUE)
   # The gene we passed in came through.
   expect_true(any(grepl("study1\\|brain\\|ENSG_example\\|susie", res$z_gene$id)))
@@ -1044,4 +1050,72 @@ test_that(".ctwasBuildWeights: twasWeightCutoff drops low-magnitude variants", {
   wl <- pecotmr:::.ctwasBuildWeights(tw, ldPanel, twasWeightCutoff = 0.01)
   expect_equal(wl[[1L]]$n_wgt, 3L)
   expect_setequal(rownames(wl[[1L]]$wgt), vids[c(2L, 4L, 5L)])
+})
+
+# ===========================================================================
+# mergeCtwasBoundaryRegions (step 4: boundary-gene region merging)
+# ===========================================================================
+
+test_that("mergeCtwasBoundaryRegions: no first-pass finemap_res returns unchanged", {
+  fmr <- list(finemap_res = NULL, region_data = "rd")
+  expect_identical(mergeCtwasBoundaryRegions(fmr), fmr)
+  fmr0 <- list(finemap_res = data.frame()[0, ], region_data = "rd")
+  expect_identical(mergeCtwasBoundaryRegions(fmr0), fmr0)
+})
+
+test_that("mergeCtwasBoundaryRegions: LD path forwards carried state + splices updated_*", {
+  captured <- NULL
+  local_mocked_bindings(
+    postprocess_region_merging = function(...) {
+      captured <<- list(...)
+      list(updated_finemap_res     = data.frame(id = "g", susie_pip = 0.9),
+           updated_susie_alpha_res = "ua_new",
+           updated_region_data     = "rd_new",
+           updated_region_info     = "ri_new",
+           updated_LD_map          = "ld_new",
+           updated_snp_map         = "sm_new",
+           selected_boundary_genes = data.frame(id = "g"))
+    },
+    .package = "ctwas")
+  fmr <- list(
+    finemap_res     = data.frame(id = "g", type = "gene", susie_pip = 0.6),
+    susie_alpha_res = "ua0", region_data = "rd", region_info = "ri",
+    z_snp = "zs", z_gene = data.frame(id = "g"), weights = "w", snp_map = "sm",
+    LD_map = "ld", LD_loader_fun = function() NULL,
+    snpinfo_loader_fun = function() NULL,
+    param = list(group_prior = 0.1, group_prior_var = 5))
+  out <- mergeCtwasBoundaryRegions(fmr, pipThresh = 0.5, maxSNP = 100)
+  # dispatched to the LD path carrying the loaders + first-pass state
+  expect_true(all(c("LD_map", "LD_loader_fun", "snpinfo_loader_fun") %in% names(captured)))
+  expect_equal(captured$pip_thresh, 0.5)
+  expect_equal(captured$maxSNP, 100)
+  expect_identical(captured$region_data, "rd")
+  expect_equal(captured$group_prior, 0.1)
+  # updated_* spliced back into the result
+  expect_equal(out$finemap_res$susie_pip, 0.9)
+  expect_identical(out$region_data, "rd_new")
+  expect_identical(out$region_info, "ri_new")
+  expect_identical(out$LD_map, "ld_new")
+  expect_identical(out$snp_map, "sm_new")
+  expect_identical(out$susie_alpha_res, "ua_new")
+  expect_identical(out$merge_res$selected_boundary_genes$id, "g")
+})
+
+test_that("mergeCtwasBoundaryRegions: no-LD path used when LD loaders are absent", {
+  called <- NULL
+  local_mocked_bindings(
+    postprocess_region_merging_noLD = function(...) {
+      called <<- "noLD"
+      list(updated_finemap_res = data.frame(id = "g"),
+           updated_susie_alpha_res = NULL)
+    },
+    .package = "ctwas")
+  fmr <- list(
+    finemap_res = data.frame(id = "g", type = "gene", susie_pip = 0.6),
+    susie_alpha_res = NULL, region_data = "rd", region_info = "ri",
+    z_snp = "zs", z_gene = data.frame(id = "g"), weights = "w", snp_map = "sm",
+    LD_map = NULL, LD_loader_fun = NULL, snpinfo_loader_fun = NULL,
+    param = list(group_prior = 0.1, group_prior_var = 5))
+  out <- mergeCtwasBoundaryRegions(fmr)
+  expect_equal(called, "noLD")
 })
