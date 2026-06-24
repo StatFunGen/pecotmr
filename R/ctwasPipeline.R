@@ -239,7 +239,7 @@ assembleCtwasInputs <- function(gwasSumStats, twasWeights,
     ldFileByRegion[[rid]] <- ldKey
 
     zSnpPieces[[rid]]       <- .ctwasBuildZSnp(gss)
-    regionInfoPieces[[rid]] <- .ctwasBuildSingleRegionInfo(rid, gwasLd)
+    regionInfoPieces[[rid]] <- .ctwasBuildSingleRegionInfo(rid, gss)
     snpMap[[rid]] <- .ctwasSnpInfoForGwasBlock(gss, ldPanel$snpInfo)
   }
 
@@ -312,13 +312,14 @@ assembleCtwasInputs <- function(gwasSumStats, twasWeights,
 #' @param groupPriorVarStructure Pass-through.
 #' @param ncore Number of cores.
 #' @param fallbackToPrefit Logical (length 1). When \code{TRUE} (default
-#'   \code{FALSE}), if \code{ctwas::est_param}'s accurate EM fails on a
-#'   degenerate input, re-run only the prefit step via \code{ctwas:::fit_EM}
-#'   and return those (typically finite) priors as the param. Catches both
-#'   failure modes: ctwas <= 0.4.x diverging to NaN
-#'   (\code{"Estimated group_prior(_var)? contains NAs"}) and ctwas >= 0.6.0
-#'   selecting zero regions for the accurate pass
-#'   (\code{"No regions selected!"}). Mirrors the legacy ctwas_2 workaround on
+#'   \code{FALSE}), if \code{ctwas::est_param}'s accurate EM fails for ANY
+#'   reason on a degenerate input, re-run only the prefit step via
+#'   \code{ctwas:::fit_EM} and return those (typically finite) priors as the
+#'   param. The accurate-EM failure mode is version-dependent (ctwas <= 0.4.x:
+#'   \code{"contains NAs"}; ctwas >= 0.6.0: \code{"No regions selected!"} or a
+#'   NaN-loglik \code{"missing value where TRUE/FALSE needed"}), so the catch is
+#'   deliberately broad; a genuinely broken input still surfaces because the
+#'   prefit re-run will itself error. Mirrors the legacy ctwas_2 workaround on
 #'   toy data where the accurate EM cannot be estimated.
 #' @param ... Additional arguments forwarded to \code{ctwas::est_param}
 #'   (e.g. \code{min_p_single_effect}, \code{min_group_size}).
@@ -379,15 +380,16 @@ estCtwasParam <- function(inputs,
       group_prior_var_structure = groupPriorVarStructure,
       ncore                     = as.integer(ncore)), extra = list(...)),
     error = function(e) {
-      # The accurate EM fails on degenerate (e.g. single-gene) inputs in two
-      # version-dependent ways: ctwas <= 0.4.x diverges to NaN ("contains
-      # NAs"); ctwas >= 0.6.0 instead selects zero regions for the accurate
-      # pass ("No regions selected!"). Both are recoverable by re-running the
-      # prefit EM only, which scores every region and skips the
-      # p(single effect) selection gate.
-      if (fallbackToPrefit &&
-          grepl("contains NAs|No regions selected", conditionMessage(e),
-                ignore.case = TRUE)) {
+      # The accurate EM fails on degenerate (e.g. single-gene) inputs in
+      # several version-dependent ways: ctwas <= 0.4.x throws "contains NAs";
+      # ctwas >= 0.6.0 throws "No regions selected!" (zero regions clear the
+      # accurate pass) or "missing value where TRUE/FALSE needed" (NaN
+      # log-likelihood in the EM convergence test). Rather than enumerate
+      # brittle, version-specific messages, fall back on ANY accurate-EM error
+      # when fallbackToPrefit is set: re-run the prefit EM only, which scores
+      # every region and skips the p(single effect) selection gate. A genuinely
+      # broken input still surfaces, because the prefit re-run will itself error.
+      if (fallbackToPrefit) {
         message("estCtwasParam: accurate EM unusable (",
                 conditionMessage(e), "); falling back to prefit estimates.")
         .ctwasFitPrefitEm(regionData,
@@ -676,19 +678,32 @@ finemapCtwasRegions <- function(screenResult,
 # (min/max BP per chromosome). The sketch is assumed to cover exactly
 # one block.
 # @noRd
-.ctwasBuildSingleRegionInfo <- function(regionId, gwasLd) {
-  snpInfo <- getSnpInfo(gwasLd)
-  chr <- unique(as.integer(sub("^chr", "", as.character(snpInfo$CHR),
-                                ignore.case = TRUE)))
+.ctwasBuildSingleRegionInfo <- function(regionId, gss) {
+  # Derive the block's [start, stop] from the GWAS variants actually in this
+  # block (the GwasSumStats entry GRanges) — NOT the LD sketch. When many
+  # blocks share one whole-chromosome LD payload (the common one-file-per-chr
+  # layout), getSnpInfo(ldSketch) spans the entire chromosome, so every region
+  # would collapse to the same whole-chromosome [start, stop] and every SNP
+  # would be assigned to every region (inflating SNP group_size N-fold and
+  # diluting the gene prior to ~0).
+  pos <- integer(0); chrs <- character(0)
+  for (i in seq_len(nrow(gss))) {
+    gr   <- gss$entry[[i]]
+    pos  <- c(pos, as.integer(GenomicRanges::start(gr)))
+    chrs <- c(chrs, as.character(GenomicRanges::seqnames(gr)))
+  }
+  chr <- unique(as.integer(sub("^chr", "", chrs, ignore.case = TRUE)))
   if (length(chr) != 1L)
-    stop("ctwasPipeline: gwasSumStats LD sketch spans multiple ",
-         "chromosomes (", paste(chr, collapse = ", "),
-         "). ctwasPipeline assumes a single LD block per call.")
+    stop("ctwasPipeline: GwasSumStats block '", regionId, "' spans multiple ",
+         "chromosomes (", paste(chr, collapse = ", "), ").")
+  if (length(pos) == 0L)
+    stop("ctwasPipeline: GwasSumStats block '", regionId,
+         "' has no variants to define region bounds.")
   data.frame(
     region_id = regionId,
     chrom     = chr,
-    start     = min(as.integer(snpInfo$BP)),
-    stop      = max(as.integer(snpInfo$BP)),
+    start     = min(pos),
+    stop      = max(pos),
     stringsAsFactors = FALSE)
 }
 

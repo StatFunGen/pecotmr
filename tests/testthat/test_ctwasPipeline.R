@@ -274,19 +274,44 @@ test_that(".ctwasBuildZSnp: produces a flat data.frame keyed by SNP/study", {
   expect_setequal(unique(df$study), "G1")
 })
 
-test_that(".ctwasBuildSingleRegionInfo: pulls chrom + bp span from the ldSketch", {
-  ri <- pecotmr:::.ctwasBuildSingleRegionInfo("block1", .ctp_makeHandle())
+test_that(".ctwasBuildSingleRegionInfo: pulls chrom + bp span from the GWAS block entry", {
+  # Bounds come from the block's GWAS variants (the GwasSumStats entry), NOT
+  # the LD sketch — many blocks can share one whole-chromosome LD payload.
+  ri <- pecotmr:::.ctwasBuildSingleRegionInfo("block1", .ctp_makeGwasSumstats())
   expect_equal(ri$region_id, "block1")
   expect_equal(ri$chrom, 1L)
   expect_equal(ri$start, 100L)
   expect_equal(ri$stop, 600L)
 })
 
-test_that(".ctwasBuildSingleRegionInfo: multi-chromosome sketch errors", {
-  h <- .ctp_makeHandle()
-  h@snpInfo$CHR[1:3] <- "2"
+test_that(".ctwasBuildSingleRegionInfo: uses the block entry span, not the wider shared LD sketch", {
+  # Regression: many LD blocks can share one whole-chromosome LD payload, so
+  # the sketch span (here BP 100-600) is NOT the block's span. The entry here
+  # covers only 200-400; region bounds must follow the entry, otherwise every
+  # block collapses to the whole-chromosome span and every SNP is assigned to
+  # every region (inflating SNP group_size and crushing the gene PIP).
+  gr <- GenomicRanges::GRanges(
+    seqnames = "chr1",
+    ranges   = IRanges::IRanges(start = c(200L, 300L, 400L), width = 1L))
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    SNP = c("a", "b", "c"), A1 = "A", A2 = "G", Z = 0, N = 1000L)
+  gss <- GwasSumStats(study = "G1", entry = list(gr), genome = "hg19",
+                      ldSketch = .ctp_makeHandle(), qcInfo = list(step1 = "ok"))
+  ri <- pecotmr:::.ctwasBuildSingleRegionInfo("blockX", gss)
+  expect_equal(ri$start, 200L)   # entry min, not sketch min (100)
+  expect_equal(ri$stop,  400L)   # entry max, not sketch max (600)
+})
+
+test_that(".ctwasBuildSingleRegionInfo: multi-chromosome block entry errors", {
+  gr <- GenomicRanges::GRanges(
+    seqnames = c("chr1", "chr1", "chr2"),
+    ranges   = IRanges::IRanges(start = c(100L, 200L, 300L), width = 1L))
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    SNP = c("a", "b", "c"), A1 = "A", A2 = "G", Z = 0, N = 1000L)
+  gss <- GwasSumStats(study = "G1", entry = list(gr), genome = "hg19",
+                      ldSketch = .ctp_makeHandle(), qcInfo = list(step1 = "ok"))
   expect_error(
-    pecotmr:::.ctwasBuildSingleRegionInfo("block1", h),
+    pecotmr:::.ctwasBuildSingleRegionInfo("block1", gss),
     "spans multiple chromosomes"
   )
 })
