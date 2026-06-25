@@ -10,6 +10,8 @@ GwasSumStats(
   genome,
   ldSketch,
   varY = NA_real_,
+  nCase = NULL,
+  nControl = NULL,
   qcInfo = list(),
   ...
 )
@@ -29,6 +31,15 @@ because all entries share the same LD sketch.}
 \item{varY}{Optional numeric vector of per-study phenotype variances
 (\code{NA_real_} entries allowed). Used by the sufficient-statistic
 interface; z-score RSS analyses should leave entries as NA.}
+
+\item{nCase, nControl}{Optional per-study case / control counts. The
+columns are attached \strong{only when supplied} (default \code{NULL}),
+so quantitative-trait collections keep the original schema. When given,
+pass length 1 or length(study) (use \code{NA} for the non-case/control
+studies in a mixed collection). For case/control GWAS, downstream
+consumers (e.g. \code{\link{colocboostPipeline}}) use the effective
+sample size \code{4 / (1/nCase + 1/nControl)} in place of the
+per-variant \code{N}.}
 
 \item{...}{Additional per-study columns to attach to the collection.}
 }

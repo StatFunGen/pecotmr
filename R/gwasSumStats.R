@@ -86,11 +86,20 @@ NULL
 #' @param varY Optional numeric vector of per-study phenotype variances
 #'   (\code{NA_real_} entries allowed). Used by the sufficient-statistic
 #'   interface; z-score RSS analyses should leave entries as NA.
+#' @param nCase,nControl Optional per-study case / control counts. The
+#'   columns are attached \strong{only when supplied} (default \code{NULL}),
+#'   so quantitative-trait collections keep the original schema. When given,
+#'   pass length 1 or length(study) (use \code{NA} for the non-case/control
+#'   studies in a mixed collection). For case/control GWAS, downstream
+#'   consumers (e.g. \code{\link{colocboostPipeline}}) use the effective
+#'   sample size \code{4 / (1/nCase + 1/nControl)} in place of the
+#'   per-variant \code{N}.
 #' @param ... Additional per-study columns to attach to the collection.
 #' @return A \code{GwasSumStats} object.
 #' @export
 GwasSumStats <- function(study, entry, genome, ldSketch,
-                          varY = NA_real_, qcInfo = list(), ...) {
+                          varY = NA_real_, nCase = NULL,
+                          nControl = NULL, qcInfo = list(), ...) {
   if (missing(study) || missing(entry) || missing(genome) || missing(ldSketch)) {
     stop("`study`, `entry`, `genome`, and `ldSketch` are all required.")
   }
@@ -105,18 +114,26 @@ GwasSumStats <- function(study, entry, genome, ldSketch,
     stop("length(entry) (", length(entry),
          ") must equal length(study) (", length(study), ").")
   }
-  if (length(varY) == 1L && length(study) > 1L) {
-    varY <- rep(varY, length(study))
+  # Per-study scalars: recycle a single value to one-per-study.
+  recycle <- function(v, nm) {
+    if (length(v) == 1L && length(study) > 1L) v <- rep(v, length(study))
+    if (length(v) != length(study))
+      stop("`", nm, "` must have length 1 or length(study).")
+    as.numeric(v)
   }
-  if (length(varY) != length(study)) {
-    stop("`varY` must have length 1 or length(study).")
-  }
+  varY <- recycle(varY, "varY")
 
   cols <- list(
     study = as.character(study),
     entry = S4Vectors::SimpleList(entry),
-    varY  = as.numeric(varY)
+    varY  = varY
   )
+  # nCase / nControl are OPTIONAL: the columns are attached only when
+  # supplied (default NULL), so quantitative-trait GwasSumStats keep the
+  # original schema. Provide a vector (length = n studies) with NA for the
+  # non-case/control studies in a mixed collection.
+  if (!is.null(nCase))    cols$nCase    <- recycle(nCase, "nCase")
+  if (!is.null(nControl)) cols$nControl <- recycle(nControl, "nControl")
   extras <- list(...)
   for (nm in names(extras)) cols[[nm]] <- extras[[nm]]
   df <- do.call(S4Vectors::DataFrame, c(cols, list(check.names = FALSE)))

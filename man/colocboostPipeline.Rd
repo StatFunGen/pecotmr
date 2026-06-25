@@ -22,6 +22,7 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   jointGwas = FALSE,
   separateGwas = FALSE,
   samples = NULL,
+  pipCutoffToSkip = 0,
   ...
 )
 
@@ -51,6 +52,7 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   jointGwas = FALSE,
   separateGwas = FALSE,
   samples = NULL,
+  pipCutoffToSkip = 0,
   ...
 )
 
@@ -91,6 +93,15 @@ as the focal outcome.}
 
 \item{xqtlColoc, jointGwas, separateGwas}{Logical flags selecting which
 colocboost variants to run.}
+
+\item{pipCutoffToSkip}{Individual-level pre-filter (ports the legacy
+\code{pip_cutoff_to_skip_ind}). Scalar (applied to every context) or a
+context-named numeric vector. For each context, every outcome is fit
+with a single-effect SuSiE (\code{L = 1}) and dropped unless some
+variant's PIP exceeds the cutoff; a context with no surviving outcome is
+skipped. \code{0} (default) disables it; a negative value uses
+\code{3 / n_variants}. (Summary-statistic skipping is handled upstream by
+\code{\link{summaryStatsQc}}'s own \code{pipCutoffToSkip}.)}
 }
 \value{
 A list with elements \code{xqtl_coloc}, \code{joint_gwas},

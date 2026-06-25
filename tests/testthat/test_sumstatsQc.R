@@ -4464,3 +4464,15 @@ test_that("autoDecision assigns SER for single CS", {
   expect_false(result$tagged_cs[1])
   expect_equal(result$method, "SER")
 })
+
+test_that("summaryStatsQc: preserves optional nCase/nControl columns through QC", {
+  gr <- .ssQ_makeEntryGr(paste0("rs", 1:4), c(100L, 200L, 300L, 400L))
+  ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
+                     ldSketch = .ssQ_makeHandle(),
+                     nCase = 500, nControl = 1500)
+  expect_true(all(c("nCase", "nControl") %in% names(ss)))
+  out <- summaryStatsQc(ss, pipCutoffToSkip = 0, nCutoff = 0)
+  expect_true(all(c("nCase", "nControl") %in% names(out)))
+  expect_equal(out$nCase, 500)
+  expect_equal(out$nControl, 1500)
+})

@@ -72,6 +72,14 @@
 #'   as the focal outcome.
 #' @param xqtlColoc,jointGwas,separateGwas Logical flags selecting which
 #'   colocboost variants to run.
+#' @param pipCutoffToSkip Individual-level pre-filter (ports the legacy
+#'   \code{pip_cutoff_to_skip_ind}). Scalar (applied to every context) or a
+#'   context-named numeric vector. For each context, every outcome is fit
+#'   with a single-effect SuSiE (\code{L = 1}) and dropped unless some
+#'   variant's PIP exceeds the cutoff; a context with no surviving outcome is
+#'   skipped. \code{0} (default) disables it; a negative value uses
+#'   \code{3 / n_variants}. (Summary-statistic skipping is handled upstream by
+#'   \code{\link{summaryStatsQc}}'s own \code{pipCutoffToSkip}.)
 #' @param ... Additional arguments forwarded to
 #'   \code{\link[colocboost]{colocboost}} (e.g., \code{M}, \code{L},
 #'   \code{output_level}).
@@ -144,16 +152,56 @@ setGeneric("colocboostPipeline",
   invisible(NULL)
 }
 
+# Resolve the per-context pipCutoffToSkip from either a scalar (applies to
+# every context) or a named vector keyed by context. Default 0 (no skip).
+.cbResolveCutoff <- function(pipCutoffToSkip, ctx) {
+  if (is.null(pipCutoffToSkip) || length(pipCutoffToSkip) == 0L) return(0)
+  if (!is.null(names(pipCutoffToSkip))) {
+    if (ctx %in% names(pipCutoffToSkip)) return(pipCutoffToSkip[[ctx]])
+    return(0)
+  }
+  pipCutoffToSkip[[1L]]
+}
+
+# Per-outcome single-trait skip (ports the legacy qc_individual_data
+# pip_cutoff_to_skip): for each outcome column of Y, fit a single-effect
+# SuSiE (L = 1, max_iter = 100) on (X, Y[, j]) and keep the outcome only if
+# any variant's PIP exceeds the cutoff. A cutoff < 0 means 3 / n_variants.
+# Returns the retained Y (NULL when no outcome clears the threshold).
+.cbPipSkipOutcomes <- function(X, Y, cutoff) {
+  if (is.null(cutoff) || is.na(cutoff) || cutoff == 0) return(Y)
+  if (!requireNamespace("susieR", quietly = TRUE)) {
+    warning("susieR not available; pipCutoffToSkip filter not applied.")
+    return(Y)
+  }
+  if (!is.double(X)) storage.mode(X) <- "double"  # susieR needs double X
+  thr <- if (cutoff < 0) 3 / ncol(X) else cutoff
+  keep <- logical(ncol(Y))
+  for (j in seq_len(ncol(Y))) {
+    obs <- !is.na(Y[, j])
+    if (sum(obs) < 2L) next
+    pip <- tryCatch(
+      susieR::susie(X[obs, , drop = FALSE], Y[obs, j],
+                    L = 1, max_iter = 100)$pip,
+      error = function(e) NULL)
+    if (!is.null(pip) && any(pip > thr, na.rm = TRUE)) keep[[j]] <- TRUE
+  }
+  if (!any(keep)) return(NULL)
+  Y[, keep, drop = FALSE]
+}
+
 # Materialise an individual-level QtlDataset into the colocboost
 # (X, Y, dict_YX, outcome_names) bundle. Each context becomes one X /
 # Y pair; the YA matrices are split into single-trait columns and
 # dict_YX maps each split column back to its X. Returns NULL when no
-# context survives selection.
+# context survives selection. pipCutoffToSkip (scalar or context-named
+# vector) optionally drops weak-signal outcomes / contexts up front.
 .cbIndividualBundle <- function(qd, contexts = NULL,
                                 traitId = NULL,
                                 region = NULL,
                                 cisWindow = NULL,
-                                samples = NULL) {
+                                samples = NULL,
+                                pipCutoffToSkip = 0) {
   if (is.null(contexts) || length(contexts) == 0L) {
     contexts <- getContexts(qd)
   } else {
@@ -198,6 +246,15 @@ setGeneric("colocboostPipeline",
     }
     X <- X[common, , drop = FALSE]
     Y <- Y[common, , drop = FALSE]
+    cutoffCtx <- .cbResolveCutoff(pipCutoffToSkip, ctx)
+    if (!is.null(cutoffCtx) && !is.na(cutoffCtx) && cutoffCtx != 0) {
+      Y <- .cbPipSkipOutcomes(X, Y, cutoffCtx)
+      if (is.null(Y) || ncol(Y) == 0L) {
+        message("colocboostPipeline: skipping context '", ctx,
+                "' (no outcome cleared pipCutoffToSkip = ", cutoffCtx, ").")
+        next
+      }
+    }
     XperCtx[[ctx]] <- X
     YperCtx[[ctx]] <- Y
   }
@@ -257,7 +314,8 @@ setGeneric("colocboostPipeline",
 # Build a single (sumstat data.frame, LD correlation matrix) pair from a
 # QtlSumStats / GwasSumStats entry. Returns NULL when the entry has no
 # variants overlapping the ldSketch panel.
-.cbSumstatPair <- function(df, ldSketch, varY = NULL) {
+.cbSumstatPair <- function(df, ldSketch, varY = NULL,
+                           nCase = NULL, nControl = NULL) {
   if (is.null(df) || nrow(df) == 0L) return(NULL)
   variantIds <- df$variant_id
   if (anyNA(variantIds)) {
@@ -278,9 +336,16 @@ setGeneric("colocboostPipeline",
   df <- df[keep, , drop = FALSE]
   variantIds <- keptIds
 
+  # Case/control GWAS: use the effective sample size
+  # 4 / (1/nCase + 1/nControl); otherwise the per-variant N.
+  okCC <- !is.null(nCase) && !is.null(nControl) &&
+          !is.na(nCase) && !is.na(nControl) &&
+          nCase > 0 && nControl > 0
+  nVal <- if (okCC) 4 / (1 / nCase + 1 / nControl)
+          else if (!is.null(df$N)) df$N else NA_real_
   ss <- data.frame(
     z       = df$z,
-    n       = if (!is.null(df$N)) df$N else NA_real_,
+    n       = nVal,
     variant = variantIds,
     stringsAsFactors = FALSE)
   if (!is.null(varY) && !is.na(varY)) {
@@ -332,7 +397,9 @@ setGeneric("colocboostPipeline",
     pair <- .cbSumstatPair(
       df       = getSumstatDf(gws, study = st, require = "Z"),
       ldSketch = ldSketch,
-      varY     = if ("varY" %in% names(gws)) gws$varY[[i]] else NA_real_)
+      varY     = if ("varY" %in% names(gws)) gws$varY[[i]] else NA_real_,
+      nCase    = if ("nCase" %in% names(gws)) gws$nCase[[i]] else NA_real_,
+      nControl = if ("nControl" %in% names(gws)) gws$nControl[[i]] else NA_real_)
     if (!is.null(pair)) bundle[[st]] <- pair
   }
   bundle
@@ -540,6 +607,7 @@ setMethod("colocboostPipeline", "QtlDataset",
            jointGwas = FALSE,
            separateGwas = FALSE,
            samples = NULL,
+           pipCutoffToSkip = 0,
            ...) {
     dotArgs <- list(...)
     indBundle <- .cbIndividualBundle(
@@ -548,7 +616,8 @@ setMethod("colocboostPipeline", "QtlDataset",
       traitId      = traitId,
       region       = region,
       cisWindow    = cisWindow,
-      samples      = samples)
+      samples      = samples,
+      pipCutoffToSkip = pipCutoffToSkip)
     .cbDriver(indBundle, qtlPairs = list(), gwasSumStats,
               xqtlColoc, jointGwas, separateGwas,
               focalTrait, dotArgs)
@@ -591,6 +660,7 @@ setMethod("colocboostPipeline", "MultiStudyQtlDataset",
            jointGwas = FALSE,
            separateGwas = FALSE,
            samples = NULL,
+           pipCutoffToSkip = 0,
            ...) {
     dotArgs <- list(...)
 
@@ -611,7 +681,8 @@ setMethod("colocboostPipeline", "MultiStudyQtlDataset",
         traitId      = traitId,
         region       = region,
         cisWindow    = cisWindow,
-        samples      = samples)
+        samples      = samples,
+        pipCutoffToSkip = pipCutoffToSkip)
       if (is.null(sub)) next
       xOffset <- length(combinedX)
       yOffset <- length(combinedY)

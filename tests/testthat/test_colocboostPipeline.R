@@ -422,3 +422,73 @@ test_that("colocboostPipeline: GWAS ldSketch mismatch errors during the driver",
     "different sample sets"
   )
 })
+
+# ===========================================================================
+# GWAS case/control: optional nCase/nControl columns + effective-N wiring
+# ===========================================================================
+
+test_that("GwasSumStats: nCase/nControl are optional columns (absent by default)", {
+  gr <- GenomicRanges::GRanges(
+    seqnames = "chr1",
+    ranges = IRanges::IRanges(start = seq(100L, by = 100L, length.out = 5L),
+                              width = 1L))
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    SNP = paste0("v", 1:5), A1 = "A", A2 = "G", Z = rnorm(5), N = rep(1000L, 5))
+  base <- list(study = "G1", entry = list(gr), genome = "hg19",
+               ldSketch = .cbp_makeHandle(), qcInfo = list(ok = 1))
+  g0 <- do.call(GwasSumStats, base)
+  expect_false(any(c("nCase", "nControl") %in% names(g0)))
+  g1 <- do.call(GwasSumStats, c(base, list(nCase = 500, nControl = 1500)))
+  expect_true(all(c("nCase", "nControl") %in% names(g1)))
+  expect_equal(g1$nCase, 500)
+  expect_equal(g1$nControl, 1500)
+})
+
+test_that("colocboost GWAS bundle: effective N for case/control, per-variant N otherwise", {
+  gr <- GenomicRanges::GRanges(
+    seqnames = "chr1",
+    ranges = IRanges::IRanges(start = seq(100L, by = 100L, length.out = 5L),
+                              width = 1L))
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    SNP = paste0("v", 1:5), A1 = "A", A2 = "G", Z = rnorm(5), N = rep(1000L, 5))
+  base <- list(study = "G1", entry = list(gr), genome = "hg19",
+               ldSketch = .cbp_makeHandle(), qcInfo = list(ok = 1))
+  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
+                        .package = "pecotmr")
+  # case/control -> effective N = 4 / (1/500 + 1/1500) = 1500
+  gcc <- do.call(GwasSumStats, c(base, list(nCase = 500, nControl = 1500)))
+  bcc <- pecotmr:::.cbGwasSumStatsBundle(gcc)
+  expect_true(all(bcc[["G1"]]$sumstat$n == 4 / (1/500 + 1/1500)))
+  # quantitative (no nCase/nControl) -> per-variant N (1000)
+  bq <- pecotmr:::.cbGwasSumStatsBundle(do.call(GwasSumStats, base))
+  expect_true(all(bq[["G1"]]$sumstat$n == 1000L))
+})
+
+# ===========================================================================
+# pipCutoffToSkip: per-context single-trait (L=1 SuSiE) outcome skip
+# ===========================================================================
+
+test_that(".cbPipSkipOutcomes: keeps signal outcomes, drops noise, honours cutoff", {
+  skip_if_not_installed("susieR")
+  set.seed(1)
+  n <- 200L; p <- 20L
+  X <- matrix(rbinom(n * p, 2, 0.3), n, p,
+              dimnames = list(paste0("s", 1:n), paste0("v", 1:p)))
+  Y <- cbind(sig   = X[, 1] * 1.5 + rnorm(n, sd = 0.3),  # strong signal at v1
+             noise = rnorm(n))                            # null
+  # cutoff 0 -> no-op
+  expect_identical(pecotmr:::.cbPipSkipOutcomes(X, Y, 0), Y)
+  # cutoff 0.5 -> keep the signal outcome, drop the noise outcome
+  kept <- pecotmr:::.cbPipSkipOutcomes(X, Y, 0.5)
+  expect_equal(colnames(kept), "sig")
+  # all-noise -> NULL (whole context would be skipped)
+  Yn <- cbind(n1 = rnorm(n), n2 = rnorm(n))
+  expect_null(pecotmr:::.cbPipSkipOutcomes(X, Yn, 0.5))
+})
+
+test_that(".cbResolveCutoff: scalar applies to all; named vector is per-context", {
+  expect_equal(pecotmr:::.cbResolveCutoff(0.5, "brain"), 0.5)
+  expect_equal(pecotmr:::.cbResolveCutoff(c(brain = 0.3, blood = 0.7), "blood"), 0.7)
+  expect_equal(pecotmr:::.cbResolveCutoff(c(brain = 0.3), "missing"), 0)
+  expect_equal(pecotmr:::.cbResolveCutoff(NULL, "brain"), 0)
+})

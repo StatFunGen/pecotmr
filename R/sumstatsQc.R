@@ -3424,6 +3424,11 @@ summaryStatsQc <- function(sumstats,
       genome   = getGenome(sumstats),
       ldSketch = getLdSketch(sumstats),
       varY     = as.numeric(sumstats$varY),
+      # Preserve the optional per-study case/control counts through QC.
+      nCase    = if ("nCase" %in% names(sumstats))
+                   as.numeric(sumstats$nCase) else NULL,
+      nControl = if ("nControl" %in% names(sumstats))
+                   as.numeric(sumstats$nControl) else NULL,
       qcInfo   = qcInfo)
   } else {
     QtlSumStats(
