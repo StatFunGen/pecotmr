@@ -138,7 +138,7 @@ context("fineMappingPipeline")
 .fmp_mockPostprocess <- function() {
   function(fit, method, dataX, dataY, coverage, secondaryCoverage,
            signalCutoff, minAbsCorr, csInput = NULL, af = NULL,
-           region = NULL) {
+           region = NULL, conditionIdx = NULL) {
     # Capture the requesting method on the FineMappingEntry so the test can
     # verify the right dispatch happened.
     if (is.matrix(dataX)) {
@@ -172,20 +172,34 @@ test_that(".fmNormalizeMethods: rejects NULL / empty / non-character/list", {
                "character vector or")
 })
 
-test_that(".fmNormalizeMethods: char-vector form deduplicates + empty methodArgs", {
+test_that(".fmNormalizeMethods: char-vector form deduplicates + seeds susie L defaults", {
   res <- pecotmr:::.fmNormalizeMethods(c("susie", "susie", "susieInf"))
   expect_equal(res$tokens, c("susie", "susieInf"))
   expect_equal(names(res$methodArgs), c("susie", "susieInf"))
-  expect_true(all(vapply(res$methodArgs, length, integer(1)) == 0L))
+  # SuSiE-family tokens get the pipeline L / L_greedy defaults (pecotmr owns
+  # these, not the CLI wrappers).
+  expect_equal(res$methodArgs$susie$L, 20L)
+  expect_equal(res$methodArgs$susie$L_greedy, 5L)
+  expect_equal(res$methodArgs$susieInf$L, 20L)
+  # Non-susie-family tokens are left untouched.
+  expect_length(pecotmr:::.fmNormalizeMethods("mvsusie")$methodArgs$mvsusie, 0L)
 })
 
-test_that(".fmNormalizeMethods: named-list form carries per-method kwargs", {
+test_that(".fmNormalizeMethods: named-list keeps kwargs + fills missing susie L", {
   res <- pecotmr:::.fmNormalizeMethods(
     list(susie    = list(L = 1, refine = FALSE),
          susieInf = list()))
   expect_equal(res$tokens, c("susie", "susieInf"))
-  expect_equal(res$methodArgs$susie, list(L = 1, refine = FALSE))
-  expect_equal(res$methodArgs$susieInf, list())
+  expect_equal(res$methodArgs$susie$L, 1)           # explicit kwarg wins
+  expect_false(res$methodArgs$susie$refine)
+  expect_equal(res$methodArgs$susie$L_greedy, 5L)   # filled-in default
+  expect_equal(res$methodArgs$susieInf$L, 20L)      # both filled
+})
+
+test_that(".fmNormalizeMethods: L / Lgreedy args override the susie defaults", {
+  res <- pecotmr:::.fmNormalizeMethods(c("susie"), L = 30L, Lgreedy = 7L)
+  expect_equal(res$methodArgs$susie$L, 30L)
+  expect_equal(res$methodArgs$susie$L_greedy, 7L)
 })
 
 test_that(".fmNormalizeMethods: list without names errors", {
@@ -240,6 +254,20 @@ test_that(".fmCheckMethodCapabilities: mvsusie on GwasSumStats rejected", {
     pecotmr:::.fmCheckMethodCapabilities("mvsusie", "GwasSumStats"),
     "not supported on GwasSumStats"
   )
+})
+
+test_that(".fmTraitsInRegion: keeps genes overlapping the region; NULL keeps all", {
+  # g1: 1000-1500, g2: 2000-2500, g3: 3000-3500 (width 500).
+  se <- .fmp_makeSe(traits = c("g1", "g2", "g3"),
+                    starts = c(1000L, 2000L, 3000L))
+  r1  <- GenomicRanges::GRanges("chr1", IRanges::IRanges(900L, 1600L))  # g1 only
+  r12 <- GenomicRanges::GRanges("chr1", IRanges::IRanges(900L, 2600L))  # g1 + g2
+  expect_equal(pecotmr:::.fmTraitsInRegion(se, c("g1", "g2", "g3"), r1), "g1")
+  expect_setequal(pecotmr:::.fmTraitsInRegion(se, c("g1", "g2", "g3"), r12),
+                  c("g1", "g2"))
+  # NULL region (gene/cisWindow mode) leaves the set unchanged.
+  expect_setequal(pecotmr:::.fmTraitsInRegion(se, c("g1", "g2", "g3"), NULL),
+                  c("g1", "g2", "g3"))
 })
 
 # ===========================================================================
@@ -488,7 +516,8 @@ test_that("fineMappingPipeline(QtlDataset): threads directional af into postproc
   captured$cols <- NULL
   recordingPostprocess <- function(fit, method, dataX, dataY, coverage,
                                    secondaryCoverage, signalCutoff, minAbsCorr,
-                                   csInput = NULL, af = NULL, region = NULL) {
+                                   csInput = NULL, af = NULL, region = NULL,
+                                   conditionIdx = NULL) {
     captured$af   <- af
     captured$cols <- colnames(dataX)
     vids <- colnames(dataX)
@@ -654,6 +683,86 @@ test_that(".fmLookupMrmashFit: finds the mr.mash fit by (study, trait)", {
   expect_null(lk(tw, "S", "OTHER"))             # no such trait
   expect_null(lk(tw, "OTHER", "G"))             # no such study
   expect_null(lk(NULL, "S", "G"))               # no TwasWeights supplied
+})
+
+test_that(".fmLookupMrmashCv: finds the per-fold CV payload by (study, trait)", {
+  mkEntry <- function(cv) TwasWeightsEntry(
+    variantIds = c("v1", "v2"), weights = c(0.1, 0.2), cvResult = cv)
+  cv <- list(samplePartition = data.frame(Sample = "s1", Fold = 1L),
+             foldFits = list(fold_1 = list(w0 = 1)))
+  tw <- TwasWeights(
+    study = c("S", "S"), context = c("c1", "c2"), trait = c("G", "G"),
+    method = c("mrmash", "mrmash"), entry = list(mkEntry(cv), mkEntry(NULL)))
+  lk <- function(...) pecotmr:::.fmLookupMrmashCv(...)
+  expect_identical(lk(tw, "S", "G"), cv)
+  expect_null(lk(tw, "S", "OTHER"))
+  expect_null(lk(NULL, "S", "G"))
+  # A cvResult without foldFits is not a per-fold prior payload -> NULL.
+  tw2 <- TwasWeights(study = "S", context = "c1", trait = "G", method = "mrmash",
+                     entry = list(mkEntry(list(predictions = 1))))
+  expect_null(lk(tw2, "S", "G"))
+})
+
+test_that(".buildMvsusieReweightedPrior: overrideU swaps matrices, keeps fit w0/V", {
+  fit <- list(dataDrivenPriorMatrices = list(U = list(K = diag(2)), w = c(K = 1)),
+              w0 = c(K_grid1 = 1), V = diag(2) * 7)
+  override <- list(U = list(K = diag(2) * 5))
+  captured <- NULL
+  local_mocked_bindings(rescaleCovW0 = function(w0) c(K = 1), .package = "pecotmr")
+  local_mocked_bindings(
+    create_mixture_prior = function(...) { captured <<- list(...); "PRIOR" },
+    .package = "mvsusieR")
+  res <- pecotmr:::.buildMvsusieReweightedPrior(fit, c("c1", "c2"),
+                                                overrideU = override)
+  expect_equal(captured$mixture_prior$matrices$K, diag(2) * 5)  # the override U
+  expect_equal(res$residualVariance, diag(2) * 7)               # the fit's own V
+})
+
+test_that(".fmBuildMvsusiePriorCv: mode B reweights each fold's own fit", {
+  sp <- data.frame(Sample = paste0("s", 1:6), Fold = rep(1:3, each = 2),
+                   stringsAsFactors = FALSE)
+  mkFold <- function(uname, v) list(
+    dataDrivenPriorMatrices = list(U = setNames(list(diag(2)), uname),
+                                   w = setNames(0.5, uname)),
+    w0 = setNames(0.5, paste0(uname, "_grid1")),
+    V  = diag(2) * v)
+  mvCv <- list(samplePartition = sp, foldFits = list(
+    fold_1 = mkFold("A", 10), fold_2 = mkFold("B", 20), fold_3 = mkFold("C", 30)))
+  local_mocked_bindings(
+    rescaleCovW0 = function(w0) setNames(1, sub("_grid1$", "", names(w0))),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    create_mixture_prior = function(...) "PRIOR", .package = "mvsusieR")
+  out <- pecotmr:::.fmBuildMvsusiePriorCv(mvCv, fullFitParts = NULL,
+                                          conditionNames = c("c1", "c2"))
+  expect_equal(names(out), c("1", "2", "3"))
+  expect_equal(out[["1"]]$residualVariance, diag(2) * 10)  # fold 1's own V
+  expect_equal(out[["3"]]$residualVariance, diag(2) * 30)  # fold 3's own V
+})
+
+test_that(".fmBuildMvsusiePriorCv: mode C reuses full-fit w0/V with per-fold U", {
+  sp <- data.frame(Sample = paste0("s", 1:4), Fold = rep(1:2, each = 2),
+                   stringsAsFactors = FALSE)
+  full <- list(dataDrivenPriorMatrices = list(U = list(Z = diag(2)), w = c(Z = 1)),
+               w0 = c(Z_grid1 = 1), V = diag(2) * 99)
+  # Fold stubs carry only U (no w0) -> mode C: override the full fit's U.
+  mvCv <- list(samplePartition = sp, foldFits = list(
+    fold_1 = list(dataDrivenPriorMatrices = list(U = list(Z = diag(2) * 2))),
+    fold_2 = list(dataDrivenPriorMatrices = list(U = list(Z = diag(2) * 3)))))
+  captured <- list()
+  local_mocked_bindings(
+    rescaleCovW0 = function(w0) setNames(1, sub("_grid1$", "", names(w0))),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    create_mixture_prior = function(...) {
+      captured[[length(captured) + 1L]] <<- list(...); "PRIOR" },
+    .package = "mvsusieR")
+  out <- pecotmr:::.fmBuildMvsusiePriorCv(mvCv, fullFitParts = full,
+                                          conditionNames = c("c1", "c2"))
+  expect_equal(names(out), c("1", "2"))
+  expect_equal(out[["1"]]$residualVariance, diag(2) * 99)        # full fit's V
+  expect_equal(captured[[1]]$mixture_prior$matrices$Z, diag(2) * 2)  # fold 1's U
+  expect_equal(captured[[2]]$mixture_prior$matrices$Z, diag(2) * 3)  # fold 2's U
 })
 
 test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip skips no-signal univariate traits", {
@@ -950,6 +1059,99 @@ test_that("fineMappingPipeline(QtlDataset): mvsusie both multi falls back to per
     fineMappingPipeline(qd, methods = "mvsusie", cisWindow = 1000L))
   # 2 contexts * 2 traits = 4 rows (joint fit reused per context).
   expect_equal(nrow(res), 4L)
+  # Auto-detection now routes through the joint engine: each per-context group
+  # is cross-trait, so every row tags its co-fit trait membership.
+  expect_true("jointTraits" %in% names(res))
+  expect_true(all(grepl("ENSG_A;ENSG_B|ENSG_B;ENSG_A",
+                        as.character(res$jointTraits))))
+})
+
+test_that("fineMappingPipeline(QtlDataset): multi-trait auto-detection USES the data-driven mr.mash prior", {
+  # Regression for the original bug: the old multi-trait path hardcoded the
+  # canonical create_mixture_prior(R=ncol). Routed through the engine, it now
+  # looks up a prior cross-trait mr.mash fit (study, context fixed; trait
+  # match-any) and reweights from it.
+  qd <- .fmp_makeQtlDataset(contexts = "brain", traits = c("ENSG_A", "ENSG_B"))
+  fitParts <- list(dataDrivenPriorMatrices = list(U = list(K = diag(2)),
+                                                  w = c(K = 1)),
+                   w0 = c(K_grid1 = 1), V = diag(2))
+  mkE <- function() TwasWeightsEntry(variantIds = c("v1", "v2"),
+                                     weights = c(0.1, 0.2), fits = fitParts)
+  # What twasWeightsPipeline(jointSpecification='trait') emits: per-trait rows
+  # each carrying the SHARED joint fit for (study1, brain).
+  tw <- TwasWeights(study = c("study1", "study1"), context = c("brain", "brain"),
+                    trait = c("ENSG_A", "ENSG_B"), method = c("mrmash", "mrmash"),
+                    entry = list(mkE(), mkE()))
+  sawMixturePrior <- FALSE
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    rescaleCovW0          = function(w0) c(K = 1),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    mvsusie              = function(X, Y, prior_variance, coverage, ...)
+      list(token = "mvsusie"),
+    create_mixture_prior = function(...) {
+      if (!is.null(list(...)$mixture_prior)) sawMixturePrior <<- TRUE
+      "PRIOR"
+    },
+    .package = "mvsusieR")
+  res <- suppressMessages(
+    fineMappingPipeline(qd, methods = "mvsusie", cisWindow = 1000L,
+                        twasWeights = tw))
+  expect_equal(nrow(res), 2L)
+  expect_true(sawMixturePrior)   # data-driven prior built, not canonical
+})
+
+test_that("fineMappingPipeline(QtlDataset): multi-trait without twasWeights keeps the canonical prior", {
+  qd <- .fmp_makeQtlDataset(contexts = "brain", traits = c("ENSG_A", "ENSG_B"))
+  sawMixturePrior <- FALSE; sawCanonical <- FALSE
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    mvsusie              = .fmp_mockMvsusie(),
+    create_mixture_prior = function(...) {
+      a <- list(...)
+      if (!is.null(a$mixture_prior)) sawMixturePrior <<- TRUE
+      if (!is.null(a$R))             sawCanonical    <<- TRUE
+      "PRIOR"
+    },
+    .package = "mvsusieR")
+  res <- suppressMessages(
+    fineMappingPipeline(qd, methods = "mvsusie", cisWindow = 1000L))
+  expect_false(sawMixturePrior)
+  expect_true(sawCanonical)
+})
+
+test_that("fineMappingPipeline(QtlDataset): mvsusie resume cache short-circuits the joint fitter", {
+  # All conditions of the cross-trait group are already in the prior partial
+  # result -> the engine reuses the cached entries and never calls mvsusie.
+  qd <- .fmp_makeQtlDataset(contexts = "brain", traits = c("ENSG_A", "ENSG_B"))
+  cachedEntry <- function() FineMappingEntry(
+    variantIds = paste0("v", 1:3),
+    susieFit = list(token = "mvsusie_cached"),
+    topLoci  = data.frame(variant_id = paste0("v", 1:3),
+                          pip = c(0.9, 0.5, 0.1), stringsAsFactors = FALSE))
+  cache <- QtlFineMappingResult(
+    study = c("study1", "study1"), context = c("brain", "brain"),
+    trait = c("ENSG_A", "ENSG_B"), method = c("mvsusie", "mvsusie"),
+    entry = list(cachedEntry(), cachedEntry()))
+  mv_calls <- 0
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    mvsusie              = function(...) { mv_calls <<- mv_calls + 1L; list() },
+    create_mixture_prior = .fmp_mockMixturePrior(),
+    .package = "mvsusieR")
+  res <- suppressMessages(
+    fineMappingPipeline(qd, methods = "mvsusie", cisWindow = 1000L,
+                        fineMappingResult = cache))
+  expect_equal(mv_calls, 0L)        # cache hit -> fitter never called
+  expect_equal(nrow(res), 2L)
 })
 
 test_that("fineMappingPipeline(QtlDataset): jointSpec='context' produces one joint row per trait", {
@@ -967,10 +1169,11 @@ test_that("fineMappingPipeline(QtlDataset): jointSpec='context' produces one joi
     fineMappingPipeline(qd, methods = "mvsusie", cisWindow = 1000L,
                         jointSpecification = "context"))
   expect_s4_class(res, "QtlFineMappingResult")
-  # One joint row per trait (context column collapses to "joint")
-  expect_equal(nrow(res), 2L)
+  # Per-context rows: each trait's 2-context joint emits 2 rows (4 total),
+  # sharing the joint fit; jointContexts tags each with the co-fit membership.
+  expect_equal(nrow(res), 4L)
   expect_true("jointContexts" %in% names(res))
-  expect_true(all(as.character(res$context) == "joint"))
+  expect_setequal(as.character(res$context), c("brain", "liver"))
   expect_setequal(getTraits(res), c("ENSG_A", "ENSG_B"))
   expect_true(all(grepl("brain;liver|liver;brain",
                         as.character(res$jointContexts))))
@@ -992,14 +1195,15 @@ test_that("fineMappingPipeline(QtlDataset): jointSpec='context' + univariate com
     fineMappingPipeline(qd, methods = c("susie", "mvsusie"), cisWindow = 1000L,
                         jointSpecification = "context",
                         addSusieInf = FALSE))
-  # susie -> 2 univariate rows (one per context); mvsusie -> 1 joint row.
-  expect_equal(nrow(res), 3L)
-  expect_equal(sum(as.character(res$method) == "mvsusie"), 1L)
+  # susie -> 2 univariate rows (one per context); mvsusie joint over 2 contexts
+  # -> 2 per-context rows sharing the joint fit. 4 rows total.
+  expect_equal(nrow(res), 4L)
+  expect_equal(sum(as.character(res$method) == "mvsusie"), 2L)
   expect_equal(sum(as.character(res$method) == "susie"), 2L)
-  # Univariate rows have NA in jointContexts; joint row has the membership.
+  # Univariate rows have NA in jointContexts; both mvsusie rows carry membership.
   jc <- as.character(res$jointContexts)
   expect_equal(sum(is.na(jc)), 2L)
-  expect_equal(sum(!is.na(jc)), 1L)
+  expect_equal(sum(!is.na(jc)), 2L)
 })
 
 test_that("fineMappingPipeline(QtlDataset): jointSpec='context' with only one context skips with message", {
@@ -1035,10 +1239,10 @@ test_that("fineMappingPipeline(QtlDataset): jointSpec='trait' produces one joint
     fineMappingPipeline(qd, methods = "mvsusie", cisWindow = 1000L,
                         jointSpecification = "trait"))
   expect_s4_class(res, "QtlFineMappingResult")
-  # One joint row per context (trait collapses to "joint")
-  expect_equal(nrow(res), 2L)
+  # Per-trait rows: each context's 2-trait joint emits 2 rows (4 total).
+  expect_equal(nrow(res), 4L)
   expect_true("jointTraits" %in% names(res))
-  expect_true(all(as.character(res$trait) == "joint"))
+  expect_setequal(as.character(res$trait), c("ENSG_A", "ENSG_B"))
   expect_setequal(as.character(res$context), c("brain", "liver"))
 })
 
@@ -1056,9 +1260,10 @@ test_that("fineMappingPipeline(QtlDataset): jointSpec='trait' with fsusie wires 
     fineMappingPipeline(qd, methods = "fsusie", cisWindow = 1000L,
                         jointSpecification = "trait"))
   expect_s4_class(res, "QtlFineMappingResult")
-  expect_equal(nrow(res), 1L)
-  expect_equal(as.character(res$method), "fsusie")
-  expect_equal(as.character(res$trait), "joint")
+  # fsusie over 2 traits emits one per-trait row each (shared functional fit).
+  expect_equal(nrow(res), 2L)
+  expect_true(all(as.character(res$method) == "fsusie"))
+  expect_setequal(as.character(res$trait), c("ENSG_A", "ENSG_B"))
   expect_true("jointTraits" %in% names(res))
 })
 
@@ -1422,6 +1627,28 @@ test_that("fineMappingPipeline(QtlSumStats): mvsusie rejected when every (study,
     fineMappingPipeline(ss, methods = "mvsusie"),
     "mvsusie requires at least two"
   )
+})
+
+test_that("fineMappingPipeline(QtlSumStats): mvsusie auto-detection fits cross-context per (study, trait)", {
+  # Multi-context (c1, c2) single-trait collection: mvsusie without an explicit
+  # jointSpecification routes through the joint engine -> per-context rows that
+  # share the cross-context RSS fit, each tagged with the co-fit membership.
+  ss <- .fmp_makeMultiCtxQtlSumStats()
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  local_mocked_bindings(
+    mvsusie_rss          = function(Z, R, N, prior_variance, coverage, ...)
+      list(token = "mvsusie_rss"),
+    create_mixture_prior = .fmp_mockMixturePrior(),
+    .package = "mvsusieR")
+  res <- suppressMessages(fineMappingPipeline(ss, methods = "mvsusie"))
+  expect_s4_class(res, "QtlFineMappingResult")
+  expect_equal(nrow(res), 2L)
+  expect_setequal(as.character(res$context), c("c1", "c2"))
+  expect_true("jointContexts" %in% names(res))
+  expect_true(all(grepl("c1;c2|c2;c1", as.character(res$jointContexts))))
 })
 
 test_that("fineMappingPipeline(QtlSumStats): cache hit short-circuits the RSS fitter", {
@@ -1903,10 +2130,11 @@ test_that("fineMappingPipeline(QtlDataset): jointSpec + jointRegions=FALSE merge
     qd, methods = "mvsusie", traitId = c("ENSG_A", "ENSG_B"),
     region = regions, jointRegions = FALSE, jointSpecification = "context"))
   expect_s4_class(res, "QtlFineMappingResult")
-  # cross-context joint -> one row per trait, context collapses to "joint".
-  expect_equal(nrow(res), 2L)
-  expect_true(all(as.character(res$context) == "joint"))
-  fit <- getSusieFit(res, study = "study1", context = "joint",
+  # cross-context joint -> per-context rows (2 contexts x 2 traits = 4), each
+  # merged across the 2 regions.
+  expect_equal(nrow(res), 4L)
+  expect_setequal(as.character(res$context), c("brain", "liver"))
+  fit <- getSusieFit(res, study = "study1", context = "brain",
                      trait = "ENSG_A", method = "mvsusie")
   expect_equal(names(fit), c("region1", "region2"))  # merged across regions
 })

@@ -1213,167 +1213,10 @@ test_that("ensembleWeights: end-to-end with twasWeightsCv output", {
 #  twasWeightsPipeline ensemble integration
 # ===========================================================================
 
-test_that("pipeline: ensemble=TRUE with only 1 method prints skip message", {
-  skip_if_not_installed("glmnet")
 
-  set.seed(42)
-  n <- 100
-  p <- 20
-  X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-  colnames(X) <- paste0("var_", seq_len(p))
-  rownames(X) <- paste0("sample_", seq_len(n))
 
-  beta <- c(1.5, -1.0, 0.8, rep(0, p - 3))
-  y <- as.numeric(X %*% beta + rnorm(n, sd = 0.5))
 
-  msgs <- testthat::capture_messages(
-    res <- pecotmr:::.twasWeightsPipelineMatrix(
-      X, y, cvFolds = 3,
-      weightMethods = list(lassoWeights = list()),
-      ensemble = TRUE
-    )
-  )
 
-  # Should see the skip message
-  expect_true(any(grepl("Ensemble model skipped.*only 1 weight method provided", msgs)))
-
-  # No ensemble result should be present
-  expect_null(res$ensemble)
-  expect_false("ensemble" %in% getMethodNames(res$twasWeights))
-})
-
-test_that("pipeline: ensemble=TRUE skips when methods fail R^2 cutoff", {
-  skip_if_not_installed("glmnet")
-
-  set.seed(42)
-  n <- 100
-  p <- 20
-  X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-  colnames(X) <- paste0("var_", seq_len(p))
-  rownames(X) <- paste0("sample_", seq_len(n))
-
-  # Use signal so methods produce non-zero weights, but set threshold very high
-  beta <- c(1.5, -1.0, 0.8, rep(0, p - 3))
-  y <- as.numeric(X %*% beta + rnorm(n, sd = 0.5))
-
-  msgs <- testthat::capture_messages(
-    res <- pecotmr:::.twasWeightsPipelineMatrix(
-      X, y, cvFolds = 3,
-      weightMethods = list(lassoWeights = list(), enetWeights = list()),
-      ensemble = TRUE,
-      ensembleR2Threshold = 0.99  # impossibly high threshold
-    )
-  )
-
-  expect_true(any(grepl("Ensemble TWAS skipped", msgs)))
-  expect_null(res$ensemble)
-  expect_false("ensemble" %in% getMethodNames(res$twasWeights))
-})
-
-test_that("pipeline: ensemble=TRUE succeeds and adds ensembleWeights", {
-  skip_if_not_installed("glmnet")
-
-  set.seed(42)
-  n <- 100
-  p <- 20
-  X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-  colnames(X) <- paste0("var_", seq_len(p))
-  rownames(X) <- paste0("sample_", seq_len(n))
-
-  beta <- c(1.5, -1.0, 0.8, rep(0, p - 3))
-  y <- as.numeric(X %*% beta + rnorm(n, sd = 0.5))
-
-  msgs <- testthat::capture_messages(
-    res <- pecotmr:::.twasWeightsPipelineMatrix(
-      X, y, cvFolds = 3,
-      weightMethods = list(lassoWeights = list(), enetWeights = list()),
-      ensemble = TRUE
-    )
-  )
-
-  expect_true(any(grepl("Computing ensemble TWAS weights", msgs)))
-
-  # Ensemble weights added alongside individual methods
-  expect_true("ensemble" %in% getMethodNames(res$twasWeights))
-  expect_true("lasso" %in% getMethodNames(res$twasWeights))
-  expect_true("enet" %in% getMethodNames(res$twasWeights))
-
-  # Ensemble predictions added
-  expect_true("ensemble_predicted" %in% names(res$twasPredictions))
-
-  # Ensemble result metadata present
-  expect_false(is.null(res$ensemble))
-  expect_true(all(res$ensemble$methodCoef >= 0))
-  expect_equal(sum(res$ensemble$methodCoef), 1, tolerance = 1e-6)
-
-  # Ensemble weights should have same length as individual weights
-  expect_equal(length(getWeights(res$twasWeights,
-                                 study = "", context = "", trait = "",
-                                 method = "ensemble")),
-               length(getWeights(res$twasWeights,
-                                 study = "", context = "", trait = "",
-                                 method = "lasso")))
-})
-
-test_that("pipeline: ensemble=FALSE does not run ensemble", {
-  skip_if_not_installed("glmnet")
-
-  set.seed(42)
-  n <- 100
-  p <- 20
-  X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-  colnames(X) <- paste0("var_", seq_len(p))
-  rownames(X) <- paste0("sample_", seq_len(n))
-
-  beta <- c(1.5, -1.0, 0.8, rep(0, p - 3))
-  y <- as.numeric(X %*% beta + rnorm(n, sd = 0.5))
-
-  res <- suppressMessages(pecotmr:::.twasWeightsPipelineMatrix(
-    X, y, cvFolds = 3,
-    weightMethods = list(lassoWeights = list(), enetWeights = list()),
-    ensemble = FALSE
-  ))
-
-  expect_null(res$ensemble)
-  expect_false("ensemble" %in% getMethodNames(res$twasWeights))
-})
-
-test_that("pipeline: ensemble_r2_threshold filters methods for ensemble", {
-  skip_if_not_installed("glmnet")
-
-  set.seed(42)
-  n <- 100
-  p <- 20
-  X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-  colnames(X) <- paste0("var_", seq_len(p))
-  rownames(X) <- paste0("sample_", seq_len(n))
-
-  beta <- c(1.5, -1.0, 0.8, rep(0, p - 3))
-  y <- as.numeric(X %*% beta + rnorm(n, sd = 0.5))
-
-  # Run with very low threshold - both methods should pass
-  msgs_low <- testthat::capture_messages(
-    res_low <- pecotmr:::.twasWeightsPipelineMatrix(
-      X, y, cvFolds = 3,
-      weightMethods = list(lassoWeights = list(), enetWeights = list()),
-      ensemble = TRUE,
-      ensembleR2Threshold = 0.001
-    )
-  )
-  expect_false(is.null(res_low$ensemble))
-
-  # Run with very high threshold - neither should pass
-  msgs_high <- testthat::capture_messages(
-    res_high <- pecotmr:::.twasWeightsPipelineMatrix(
-      X, y, cvFolds = 3,
-      weightMethods = list(lassoWeights = list(), enetWeights = list()),
-      ensemble = TRUE,
-      ensembleR2Threshold = 0.99
-    )
-  )
-  expect_true(any(grepl("Ensemble TWAS skipped", msgs_high)))
-  expect_null(res_high$ensemble)
-})
 
 # ===========================================================================
 #  Solver alternatives
@@ -1433,90 +1276,8 @@ test_that("ensembleWeights: invalid solver errors", {
                "arg")
 })
 
-test_that("pipeline: ensemble_solver='nnls' works end-to-end", {
-  skip_if_not_installed("glmnet")
-  skip_if_not_installed("nnls")
 
-  set.seed(42)
-  n <- 100
-  p <- 20
-  X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-  colnames(X) <- paste0("var_", seq_len(p))
-  rownames(X) <- paste0("sample_", seq_len(n))
 
-  beta <- c(1.5, -1.0, 0.8, rep(0, p - 3))
-  y <- as.numeric(X %*% beta + rnorm(n, sd = 0.5))
-
-  msgs <- testthat::capture_messages(
-    res <- pecotmr:::.twasWeightsPipelineMatrix(
-      X, y, cvFolds = 3,
-      weightMethods = list(lassoWeights = list(), enetWeights = list()),
-      ensemble = TRUE,
-      ensembleSolver = "nnls"
-    )
-  )
-
-  expect_true(any(grepl("Computing ensemble TWAS weights", msgs)))
-  expect_true("ensemble" %in% getMethodNames(res$twasWeights))
-  expect_true(all(res$ensemble$methodCoef >= 0))
-  expect_equal(sum(res$ensemble$methodCoef), 1, tolerance = 1e-6)
-})
-
-test_that("pipeline: ensemble_solver='lbfgsb' works end-to-end", {
-  skip_if_not_installed("glmnet")
-
-  set.seed(42)
-  n <- 100
-  p <- 20
-  X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-  colnames(X) <- paste0("var_", seq_len(p))
-  rownames(X) <- paste0("sample_", seq_len(n))
-
-  beta <- c(1.5, -1.0, 0.8, rep(0, p - 3))
-  y <- as.numeric(X %*% beta + rnorm(n, sd = 0.5))
-
-  msgs <- testthat::capture_messages(
-    res <- pecotmr:::.twasWeightsPipelineMatrix(
-      X, y, cvFolds = 3,
-      weightMethods = list(lassoWeights = list(), enetWeights = list()),
-      ensemble = TRUE,
-      ensembleSolver = "lbfgsb"
-    )
-  )
-
-  expect_true(any(grepl("Computing ensemble TWAS weights", msgs)))
-  expect_true("ensemble" %in% getMethodNames(res$twasWeights))
-  expect_true(all(res$ensemble$methodCoef >= 0))
-  expect_equal(sum(res$ensemble$methodCoef), 1, tolerance = 1e-6)
-})
-
-test_that("pipeline: ensemble_solver='glmnet' works end-to-end", {
-  skip_if_not_installed("glmnet")
-
-  set.seed(42)
-  n <- 100
-  p <- 20
-  X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-  colnames(X) <- paste0("var_", seq_len(p))
-  rownames(X) <- paste0("sample_", seq_len(n))
-
-  beta <- c(1.5, -1.0, 0.8, rep(0, p - 3))
-  y <- as.numeric(X %*% beta + rnorm(n, sd = 0.5))
-
-  msgs <- testthat::capture_messages(
-    res <- pecotmr:::.twasWeightsPipelineMatrix(
-      X, y, cvFolds = 3,
-      weightMethods = list(lassoWeights = list(), enetWeights = list()),
-      ensemble = TRUE,
-      ensembleSolver = "glmnet"
-    )
-  )
-
-  expect_true(any(grepl("Computing ensemble TWAS weights", msgs)))
-  expect_true("ensemble" %in% getMethodNames(res$twasWeights))
-  expect_true(all(res$ensemble$methodCoef >= 0))
-  expect_equal(sum(res$ensemble$methodCoef), 1, tolerance = 1e-6)
-})
 
 test_that("ensembleWeights: solver='glmnet' respects alpha parameter", {
   skip_if_not_installed("glmnet")
@@ -2005,72 +1766,11 @@ test_that(".twasLdFromSketch: returns a square LD matrix named by variantIds", {
 # .twasWeightsPipelineMatrix: susieFit pre-fit pass-through
 # ===========================================================================
 
-test_that(".twasWeightsPipelineMatrix: susieFit pre-fit is recorded in res", {
-  set.seed(0)
-  n <- 30; p <- 5
-  X <- matrix(rnorm(n * p), n, p,
-              dimnames = list(paste0("s", 1:n), paste0("v", 1:p)))
-  y <- as.numeric(X %*% c(1.0, -0.5, 0, 0, 0) + rnorm(n, sd = 0.2))
-
-  # Build a stub susie fit shape; the pipeline records its intermediate.
-  fake_susie <- list(
-    alpha = matrix(1/p, nrow = 2, ncol = p),
-    mu    = matrix(0,    nrow = 2, ncol = p),
-    X_column_scale_factors = rep(1, p),
-    pip   = rep(0.1, p))
-
-  # The intermediate-recording branch keys on snake_case `susie_weights`.
-  res <- suppressMessages(
-    pecotmr:::.twasWeightsPipelineMatrix(
-      X = X, y = y,
-      susieFit = fake_susie,
-      cvFolds = 0,
-      weightMethods = list(susie_weights = list()),
-      estimatePi = FALSE,
-      verbose = 0))
-  expect_true("susieWeightsIntermediate" %in% names(res))
-  expect_true("twasWeights" %in% names(res))
-})
 
 # ===========================================================================
 # .twasWeightsPipelineMatrix: empirical pi path via mr.ash (mocked)
 # ===========================================================================
 
-test_that(".twasWeightsPipelineMatrix: empirical pi from mr.ash gets propagated", {
-  set.seed(1)
-  n <- 30; p <- 5
-  X <- matrix(rnorm(n * p), n, p,
-              dimnames = list(paste0("s", 1:n), paste0("v", 1:p)))
-  y <- as.numeric(X %*% c(0.5, 0, 0, 0, 0) + rnorm(n, sd = 0.2))
-
-  # Mock mrashWeights to return a fake matrix carrying a fit$pi attribute.
-  local_mocked_bindings(
-    mrashWeights = function(X, y, ...) {
-      out <- matrix(rep(0.05, ncol(X)), ncol = 1)
-      attr(out, "fit") <- list(pi = c(0.8, 0.1, 0.1))
-      rownames(out) <- colnames(X)
-      out
-    },
-    bayesCWeights = function(X, y, pi, ...) {
-      # Capture the pi the pipeline injected.
-      out <- matrix(pi, nrow = ncol(X), ncol = 1)
-      rownames(out) <- colnames(X)
-      out
-    },
-    .package = "pecotmr"
-  )
-
-  res <- suppressMessages(
-    pecotmr:::.twasWeightsPipelineMatrix(
-      X = X, y = y,
-      cvFolds = 0,
-      weightMethods = list(mrash_weights = list(),
-                           bayes_c_weights = list()),
-      estimatePi = TRUE,
-      verbose = 0))
-  expect_true("empiricalPi" %in% names(res))
-  expect_equal(as.numeric(res$empiricalPi), 1 - 0.8, tolerance = 1e-12)
-})
 
 # ===========================================================================
 # Multi-region / jointRegions (P3)
@@ -2093,7 +1793,7 @@ test_that(".twasRegionLabel / .twasFitsForRegion select per-region fits", {
 test_that(".twasMergeRegionEntries stacks weights and builds a flat per-region CV df", {
   mk <- function(vids, w, rsq) TwasWeightsEntry(
     variantIds = vids, weights = w,
-    cvPerformance = list(samplePartition = NULL, predictions = NULL,
+    cvResult = list(samplePartition = NULL, predictions = NULL,
                          metrics = c(rsq = rsq, pval = 0.01)))
   e1 <- mk(c("v1", "v2"), c(0.1, 0.2), 0.3)
   e2 <- mk(c("v3", "v4"), c(0.3, 0.4), 0.5)
@@ -2102,7 +1802,7 @@ test_that(".twasMergeRegionEntries stacks weights and builds a flat per-region C
   expect_s4_class(m, "TwasWeightsEntry")
   expect_equal(getVariantIds(m), c("v1", "v2", "v3", "v4"))
   expect_equal(unname(getWeights(m)), c(0.1, 0.2, 0.3, 0.4))
-  cv <- getCvPerformance(m)
+  cv <- getCvResult(m)
   expect_s3_class(cv, "data.frame")
   expect_equal(cv$region, c("chr1:1-100", "chr1:200-300"))
   expect_equal(cv$rsq, c(0.3, 0.5))
@@ -2220,37 +1920,38 @@ test_that(".twasCvResultFor returns NULL when no entry carries CV", {
   expect_null(pecotmr:::.twasCvResultFor(fmr, "S", "C", "T"))
 })
 
-test_that(".twasWeightsPipelineMatrix merges fineMappingCv predictions and adopts its partition", {
-  skip_if_not_installed("glmnet")
-  set.seed(11)
-  n <- 50L; p <- 10L
-  X <- matrix(rnorm(n * p), n, p,
-              dimnames = list(paste0("s", seq_len(n)), paste0("v", seq_len(p))))
-  y <- X[, 1] * 1.2 + rnorm(n, sd = 0.6)
-  y <- matrix(y, ncol = 1L, dimnames = list(rownames(X), "ENSG_A"))
 
-  # Fine-mapping hands over a shared partition + out-of-fold "susie" predictions.
-  part <- pecotmr:::.fmMakeSamplePartition(rownames(X), fold = 3L)
-  susiePred <- matrix(X[, 1] * 0.9, ncol = 1L,
-                      dimnames = list(rownames(X), "ENSG_A"))
-  susiePerf <- matrix(c(0.5, 0.25, 0.24, 0.01, 0.4, 0.3), nrow = 1L,
-                      dimnames = list("ENSG_A",
-                        c("corr", "rsq", "adj_rsq", "pval", "RMSE", "MAE")))
-  fmCv <- list(samplePartition = part,
-               prediction = list(susie_predicted = susiePred),
-               performance = list(susie_performance = susiePerf))
+test_that(".unpackMashPrior routes a MashPrior into the internal CV arguments", {
+  unpack <- pecotmr:::.unpackMashPrior
+  U  <- list(U1 = diag(2))
+  sp <- data.frame(Sample = paste0("s", 1:6), Fold = rep(1:3, each = 2),
+                   stringsAsFactors = FALSE)
+  spX <- data.frame(Sample = paste0("s", 1:6), Fold = rep(c(1, 2), 3),
+                    stringsAsFactors = FALSE)
+  pf <- list(list(U = U), list(U = U), list(U = U))
 
-  res <- suppressMessages(pecotmr:::.twasWeightsPipelineMatrix(
-    X = X, y = y, study = "study1", context = "brain", trait = "ENSG_A",
-    weightMethods = list(lasso_weights = list()),
-    cvFolds = 3, fineMappingCv = fmCv, ensemble = FALSE, verbose = 0))
+  # NULL -> all NULL, but the explicitly supplied partition is preserved.
+  r1 <- unpack(NULL, sp)
+  expect_null(r1$fullPrior)
+  expect_null(r1$dataDrivenPriorMatricesCv)
+  expect_identical(r1$samplePartition, sp)
 
-  # lasso was refit here; susie came from the handoff (not refit).
-  expect_true("lasso_predicted" %in% names(res$twasCvResult$prediction))
-  expect_true("susie_predicted" %in% names(res$twasCvResult$prediction))
-  # The CV used fine-mapping's partition verbatim.
-  expect_identical(res$twasCvResult$samplePartition, part)
-  # The handed-over susie predictions were aligned to the pipeline samples.
-  expect_equal(rownames(res$twasCvResult$prediction$susie_predicted),
-               rownames(X))
+  # full-only.
+  r2 <- unpack(MashPrior(fullFit = list(U = U)), NULL)
+  expect_identical(r2$fullPrior$U, U)
+  expect_null(r2$dataDrivenPriorMatricesCv)
+
+  # cv -> per-fold priors + the partition the priors were computed on.
+  mpC <- MashPrior(cvFits = list(samplePartition = sp, perFoldFits = pf))
+  r3 <- unpack(mpC, NULL)
+  expect_length(r3$dataDrivenPriorMatricesCv, 3L)
+  expect_identical(r3$samplePartition, sp)
+
+  # An explicit partition wins over the bundle's.
+  expect_identical(unpack(mpC, spX)$samplePartition, spX)
+
+  # A non-MashPrior is rejected.
+  expect_error(unpack(list(U = U)), "MashPrior")
 })
+
+

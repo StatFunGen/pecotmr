@@ -7,14 +7,14 @@ test_that("TwasWeightsEntry: constructor and accessors round-trip", {
     variantIds    = c("v1", "v2", "v3"),
     weights       = c(0.1, -0.2, 0.05),
     fits          = list(model = "lasso"),
-    cvPerformance = list(rsq = 0.4),
+    cvResult = list(rsq = 0.4),
     standardized  = TRUE,
     dataType      = "expression")
   expect_s4_class(e, "TwasWeightsEntry")
   expect_equal(getVariantIds(e), c("v1", "v2", "v3"))
   expect_equal(getWeights(e), c(0.1, -0.2, 0.05))
   expect_equal(getFits(e), list(model = "lasso"))
-  expect_equal(getCvPerformance(e), list(rsq = 0.4))
+  expect_equal(getCvResult(e), list(rsq = 0.4))
   expect_true(getStandardized(e))
   expect_equal(getDataType(e), "expression")
 })

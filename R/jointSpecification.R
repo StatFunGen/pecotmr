@@ -687,6 +687,18 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 }
 
 
+# Subset `traits` to those whose phenotype coordinates overlap `region`
+# (the genes at a locus). region = NULL -> all `traits` unchanged (gene/cisWindow
+# mode does not region-filter). Mirrors fineMappingPipeline's univariate region
+# trait selection (ids[overlapsAny(rowRanges(se), region)]) so the joint-engine
+# region path joins the same gene set.
+# @noRd
+.fmTraitsInRegion <- function(se, traits, region) {
+  if (is.null(region) || length(traits) == 0L) return(traits)
+  rr <- SummarizedExperiment::rowRanges(se)
+  traits[IRanges::overlapsAny(rr[traits], region)]
+}
+
 # Build a multi-trait Y matrix for a single (study, context) from an
 # individual-level QtlDataset. Returns list(X, Y, traitsHere, se) or NULL
 # when fewer than 2 traits live in the context or the sample / complete-Y
@@ -696,6 +708,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                          cisWindow, verbose, label, study,
                                          region = NULL) {
   se <- getPhenotypes(data, contexts = cx)
+  # scopedTraits is already region-restricted upstream (.runJointSpecs) when
+  # region mode is used without an explicit traitId.
   traitsHere <- intersect(scopedTraits, rownames(se))
   if (length(traitsHere) < 2L) {
     if (verbose >= 1)
@@ -732,6 +746,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
   tuples <- list()
   for (cx in scopedContexts) {
     se <- getPhenotypes(data, contexts = cx)
+    # scopedTraits is region-restricted upstream (.runJointSpecs) when needed.
     for (tid in intersect(scopedTraits, rownames(se))) {
       tuples[[length(tuples) + 1L]] <- list(context = cx, trait = tid)
     }
@@ -814,684 +829,6 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # Fine-mapping dispatchers
 # =============================================================================
 
-# Cross-context joint dispatcher for QtlDataset. For each trait in scope
-# with >= 2 contexts in scope, fits mvsusieR::mvsusie on the multi-column
-# Y matrix and emits ONE result row with context = "joint" and
-# jointContexts = "ctx1;ctx2;...".
-# @noRd
-.fmDispatchCrossContextQtlDataset <- function(spec, data, methods,
-                                               contexts, traitIds,
-                                               cisWindow,
-                                               coverage, secondaryCoverage,
-                                               signalCutoff, minAbsCorr,
-                                               verbose,
-                                               methodArgs = list(),
-                                               region = NULL,
-                                               twasWeights = NULL,
-                                               dataDrivenPriorWeightsCutoff = 1e-10) {
-  jointMethods <- intersect(methods, "mvsusie")
-  if (length(jointMethods) == 0L) return(NULL)
-
-  scope <- .fmResolveSpecScope(spec, data, contexts = contexts,
-                                traitIds = traitIds)
-  study <- getStudy(data)
-  if (!(study %in% scope$studies)) return(NULL)
-  scopedContexts <- scope$contexts[[study]]
-  scopedTraits   <- scope$traits[[study]]
-  if (length(scopedContexts) < 2L) {
-    if (verbose >= 1)
-      message(sprintf(
-        "jointCrossContext: study '%s' has %d context(s) in scope; skipping cross-context fits.",
-        study, length(scopedContexts)))
-    return(NULL)
-  }
-
-  rowStudy <- character(0); rowContext <- character(0)
-  rowTrait <- character(0); rowMethod <- character(0)
-  rowEntries <- list(); rowJointContexts <- character(0)
-
-  for (tid in scopedTraits) {
-    xy <- .buildIndividualCrossContextXY(
-      data, tid, scopedContexts, cisWindow, verbose,
-      label = "jointCrossContext", region = region)
-    if (is.null(xy)) next
-
-    if (verbose >= 1)
-      message(sprintf(
-        "jointCrossContext: fitting mvsusie for (study='%s', trait='%s') across contexts (%s) ...",
-        study, tid, paste(xy$perTraitContexts, collapse = ", ")))
-    # Reweighted prior from a cross-context mr.mash joint twas run, keyed on
-    # (study, trait=tid, context="joint"); conditions are the contexts.
-    mvPrior <- .buildMvsusieReweightedPrior(
-      .fmLookupMrmashFit(twasWeights, study, tid, context = "joint"),
-      colnames(xy$Y), dataDrivenPriorWeightsCutoff)
-    mvBaseArgs <- list(
-      X = xy$X, Y = xy$Y,
-      prior_variance = mvPrior$priorVariance,
-      coverage = coverage)
-    if (!is.null(mvPrior$residualVariance))
-      mvBaseArgs$residual_variance <- mvPrior$residualVariance
-    fit <- do.call(fitMvsusie,
-                   .fmMergeUserArgs(mvBaseArgs, "mvsusie",
-                                    methodArgs[["mvsusie"]]))
-    fit <- .setFinemappingFitClass(fit, "mvsusie")
-    entry <- .fmPostprocessOne(
-      fit = fit, method = "mvsusie",
-      dataX = xy$X, dataY = NULL,
-      coverage = coverage,
-      secondaryCoverage = secondaryCoverage,
-      signalCutoff = signalCutoff,
-      minAbsCorr = minAbsCorr,
-      csInput = "X")
-    rowStudy   <- c(rowStudy,   study)
-    rowContext <- c(rowContext, "joint")
-    rowTrait   <- c(rowTrait,   tid)
-    rowMethod  <- c(rowMethod,  "mvsusie")
-    rowEntries[[length(rowEntries) + 1L]] <- entry
-    rowJointContexts <- c(rowJointContexts,
-                          paste(xy$perTraitContexts, collapse = ";"))
-  }
-
-  if (length(rowStudy) == 0L) return(NULL)
-  QtlFineMappingResult(
-    study         = rowStudy,
-    context       = rowContext,
-    trait         = rowTrait,
-    method        = rowMethod,
-    entry         = rowEntries,
-    jointContexts = rowJointContexts,
-    ldSketch      = NULL)
-}
-
-
-# Cross-trait joint dispatcher for QtlDataset. Per (study, context), fits
-# mvsusieR::mvsusie or fsusieR::susiF (when in `methods`) jointly across
-# the scoped traits within that context. Emits ONE result row per
-# (study, context, method) with trait = "joint" and jointTraits populated.
-# @noRd
-.fmDispatchCrossTraitQtlDataset <- function(spec, data, methods,
-                                             contexts, traitIds,
-                                             cisWindow,
-                                             coverage, secondaryCoverage,
-                                             signalCutoff, minAbsCorr,
-                                             verbose,
-                                             methodArgs = list(),
-                                             region = NULL,
-                                             twasWeights = NULL,
-                                             dataDrivenPriorWeightsCutoff = 1e-10) {
-  jointMethods <- intersect(methods, c("mvsusie", "fsusie"))
-  if (length(jointMethods) == 0L) return(NULL)
-
-  scope <- .fmResolveSpecScope(spec, data, contexts = contexts,
-                                traitIds = traitIds)
-  study <- getStudy(data)
-  if (!(study %in% scope$studies)) return(NULL)
-  scopedContexts <- scope$contexts[[study]]
-  scopedTraits   <- scope$traits[[study]]
-
-  rowStudy <- character(0); rowContext <- character(0)
-  rowTrait <- character(0); rowMethod <- character(0)
-  rowEntries <- list(); rowJointTraits <- character(0)
-
-  for (cx in scopedContexts) {
-    xy <- .buildIndividualCrossTraitXY(
-      data, cx, scopedTraits, cisWindow, verbose,
-      label = "jointCrossTrait", study = study, region = region)
-    if (is.null(xy)) next
-
-    for (mm in jointMethods) {
-      if (verbose >= 1)
-        message(sprintf(
-          "jointCrossTrait: fitting %s for (study='%s', context='%s') across traits (%s) ...",
-          mm, study, cx, paste(xy$traitsHere, collapse = ", ")))
-      if (mm == "mvsusie") {
-        # Reweighted prior from a cross-trait mr.mash joint twas run, keyed on
-        # (study, trait="joint", context=cx); conditions are the traits.
-        mvPrior <- .buildMvsusieReweightedPrior(
-          .fmLookupMrmashFit(twasWeights, study, "joint", context = cx),
-          colnames(xy$Y), dataDrivenPriorWeightsCutoff)
-        mvBaseArgs <- list(
-          X = xy$X, Y = xy$Y,
-          prior_variance = mvPrior$priorVariance,
-          coverage = coverage)
-        if (!is.null(mvPrior$residualVariance))
-          mvBaseArgs$residual_variance <- mvPrior$residualVariance
-        fit <- do.call(fitMvsusie,
-                       .fmMergeUserArgs(mvBaseArgs, "mvsusie",
-                                        methodArgs[["mvsusie"]]))
-        fit <- .setFinemappingFitClass(fit, "mvsusie")
-        entry <- .fmPostprocessOne(
-          fit = fit, method = "mvsusie",
-          dataX = xy$X, dataY = NULL,
-          coverage = coverage,
-          secondaryCoverage = secondaryCoverage,
-          signalCutoff = signalCutoff,
-          minAbsCorr = minAbsCorr,
-          csInput = "X")
-      } else {
-        rr <- SummarizedExperiment::rowRanges(xy$se)
-        ord <- match(colnames(xy$Y), rownames(xy$se))
-        rr <- rr[ord]
-        pos <- (GenomicRanges::start(rr) + GenomicRanges::end(rr)) / 2
-        fit <- do.call(fitFsusie,
-                       .fmMergeUserArgs(list(X = xy$X, Y = xy$Y, pos = pos),
-                                        "fsusie", methodArgs[["fsusie"]]))
-        fit <- .setFinemappingFitClass(fit, "fsusie")
-        entry <- .fmPostprocessOne(
-          fit = fit, method = "fsusie",
-          dataX = xy$X, dataY = NULL,
-          coverage = coverage,
-          secondaryCoverage = secondaryCoverage,
-          signalCutoff = signalCutoff,
-          minAbsCorr = minAbsCorr,
-          csInput = "fsusie")
-      }
-      rowStudy   <- c(rowStudy,   study)
-      rowContext <- c(rowContext, cx)
-      rowTrait   <- c(rowTrait,   "joint")
-      rowMethod  <- c(rowMethod,  mm)
-      rowEntries[[length(rowEntries) + 1L]] <- entry
-      rowJointTraits <- c(rowJointTraits,
-                          paste(xy$traitsHere, collapse = ";"))
-    }
-  }
-
-  if (length(rowStudy) == 0L) return(NULL)
-  QtlFineMappingResult(
-    study       = rowStudy,
-    context     = rowContext,
-    trait       = rowTrait,
-    method      = rowMethod,
-    entry       = rowEntries,
-    jointTraits = rowJointTraits,
-    ldSketch    = NULL)
-}
-
-
-# Cross-context joint dispatcher for QtlSumStats input. Groups the
-# selected sumstats rows by (study, trait); each group with >= 2 contexts
-# in scope produces one mvsusie_rss fit and one result row with context =
-# "joint" and jointContexts populated.
-# @noRd
-.fmDispatchCrossContextQtlSumStats <- function(spec, data, methods,
-                                                contexts, traitIds,
-                                                coverage, secondaryCoverage,
-                                                signalCutoff, minAbsCorr,
-                                                verbose,
-                                                methodArgs = list(),
-                                                twasWeights = NULL,
-                                                dataDrivenPriorWeightsCutoff = 1e-10) {
-  jointMethods <- intersect(methods, "mvsusie")
-  if (length(jointMethods) == 0L) return(NULL)
-
-  scope <- .fmResolveSpecScope(spec, data, contexts = contexts,
-                                traitIds = traitIds)
-  ldSketch <- getLdSketch(data)
-  studyCol   <- as.character(data$study)
-  contextCol <- as.character(data$context)
-  traitCol   <- as.character(data$trait)
-
-  rowStudy <- character(0); rowContext <- character(0)
-  rowTrait <- character(0); rowMethod <- character(0)
-  rowEntries <- list(); rowJointContexts <- character(0)
-
-  for (s in scope$studies) {
-    scopedContexts <- scope$contexts[[s]]
-    scopedTraits   <- scope$traits[[s]]
-    if (length(scopedContexts) < 2L) {
-      if (verbose >= 1)
-        message(sprintf(
-          "jointCrossContext (QtlSumStats): study '%s' has %d context(s) in scope; skipping.",
-          s, length(scopedContexts)))
-      next
-    }
-    for (tid in scopedTraits) {
-      tupleRows <- which(studyCol == s & traitCol == tid &
-                         contextCol %in% scopedContexts)
-      if (length(tupleRows) < 2L) {
-        if (verbose >= 1)
-          message(sprintf(
-            "jointCrossContext (QtlSumStats): (study='%s', trait='%s') has %d scoped context(s); skipping.",
-            s, tid, length(tupleRows)))
-        next
-      }
-      ctxNames <- contextCol[tupleRows]
-      jz <- .buildJointSumstatZMatrix(
-        data, tupleRows, ctxNames,
-        errorLabel = "jointCrossContext (QtlSumStats)")
-      ldMat <- .fmLdFromSketch(ldSketch, jz$variantIds)
-      if (verbose >= 1)
-        message(sprintf(
-          "jointCrossContext (QtlSumStats): fitting mvsusie_rss for (study='%s', trait='%s', %d contexts) ...",
-          s, tid, length(ctxNames)))
-      # Reweighted prior from a cross-context mr.mash joint twas run, keyed on
-      # (study, trait=tid, context="joint"); conditions are the contexts.
-      mvPrior <- .buildMvsusieReweightedPrior(
-        .fmLookupMrmashFit(twasWeights, s, tid, context = "joint"),
-        colnames(jz$Z), dataDrivenPriorWeightsCutoff)
-      mvBaseArgs <- list(
-        Z = jz$Z, R = ldMat, N = as.numeric(stats::median(jz$nVec)),
-        prior_variance = mvPrior$priorVariance,
-        coverage = coverage)
-      if (!is.null(mvPrior$residualVariance))
-        mvBaseArgs$residual_variance <- mvPrior$residualVariance
-      fit <- do.call(fitMvsusieRss,
-                     .fmMergeUserArgs(mvBaseArgs, "mvsusie",
-                                      methodArgs[["mvsusie"]]))
-      fit <- .setFinemappingFitClass(fit, "mvsusie")
-      entry <- .fmPostprocessOne(
-        fit = fit, method = "mvsusie",
-        dataX = ldMat, dataY = NULL,
-        coverage = coverage,
-        secondaryCoverage = secondaryCoverage,
-        signalCutoff = signalCutoff,
-        minAbsCorr = minAbsCorr,
-        csInput = "Xcorr")
-      rowStudy   <- c(rowStudy,   s)
-      rowContext <- c(rowContext, "joint")
-      rowTrait   <- c(rowTrait,   tid)
-      rowMethod  <- c(rowMethod,  "mvsusie")
-      rowEntries[[length(rowEntries) + 1L]] <- entry
-      rowJointContexts <- c(rowJointContexts,
-                            paste(ctxNames, collapse = ";"))
-    }
-  }
-
-  if (length(rowStudy) == 0L) return(NULL)
-  QtlFineMappingResult(
-    study         = rowStudy,
-    context       = rowContext,
-    trait         = rowTrait,
-    method        = rowMethod,
-    entry         = rowEntries,
-    jointContexts = rowJointContexts,
-    ldSketch      = ldSketch)
-}
-
-
-# Cross-trait joint dispatcher for QtlSumStats: groups by (study, context),
-# requires >= 2 scoped traits per group. mvsusie_rss only -- no RSS fsusie.
-# @noRd
-.fmDispatchCrossTraitQtlSumStats <- function(spec, data, methods,
-                                              contexts, traitIds,
-                                              coverage, secondaryCoverage,
-                                              signalCutoff, minAbsCorr,
-                                              verbose,
-                                              methodArgs = list(),
-                                              twasWeights = NULL,
-                                              dataDrivenPriorWeightsCutoff = 1e-10) {
-  if ("fsusie" %in% methods)
-    stop("jointCrossTrait (QtlSumStats): fsusie has no RSS variant; ",
-         "fsusie cannot participate in sumstats-based joint fits.")
-  jointMethods <- intersect(methods, "mvsusie")
-  if (length(jointMethods) == 0L) return(NULL)
-
-  scope <- .fmResolveSpecScope(spec, data, contexts = contexts,
-                                traitIds = traitIds)
-  ldSketch <- getLdSketch(data)
-  studyCol   <- as.character(data$study)
-  contextCol <- as.character(data$context)
-  traitCol   <- as.character(data$trait)
-
-  rowStudy <- character(0); rowContext <- character(0)
-  rowTrait <- character(0); rowMethod <- character(0)
-  rowEntries <- list(); rowJointTraits <- character(0)
-
-  for (s in scope$studies) {
-    scopedContexts <- scope$contexts[[s]]
-    scopedTraits   <- scope$traits[[s]]
-    for (cx in scopedContexts) {
-      tupleRows <- which(studyCol == s & contextCol == cx &
-                         traitCol %in% scopedTraits)
-      if (length(tupleRows) < 2L) {
-        if (verbose >= 1)
-          message(sprintf(
-            "jointCrossTrait (QtlSumStats): (study='%s', context='%s') has %d scoped trait(s); skipping.",
-            s, cx, length(tupleRows)))
-        next
-      }
-      trNames <- traitCol[tupleRows]
-      jz <- .buildJointSumstatZMatrix(
-        data, tupleRows, trNames,
-        errorLabel = "jointCrossTrait (QtlSumStats)")
-      ldMat <- .fmLdFromSketch(ldSketch, jz$variantIds)
-      if (verbose >= 1)
-        message(sprintf(
-          "jointCrossTrait (QtlSumStats): fitting mvsusie_rss for (study='%s', context='%s', %d traits) ...",
-          s, cx, length(trNames)))
-      # Reweighted prior from a cross-trait mr.mash joint twas run, keyed on
-      # (study, trait="joint", context=cx); conditions are the traits.
-      mvPrior <- .buildMvsusieReweightedPrior(
-        .fmLookupMrmashFit(twasWeights, s, "joint", context = cx),
-        colnames(jz$Z), dataDrivenPriorWeightsCutoff)
-      mvBaseArgs <- list(
-        Z = jz$Z, R = ldMat, N = as.numeric(stats::median(jz$nVec)),
-        prior_variance = mvPrior$priorVariance,
-        coverage = coverage)
-      if (!is.null(mvPrior$residualVariance))
-        mvBaseArgs$residual_variance <- mvPrior$residualVariance
-      fit <- do.call(fitMvsusieRss,
-                     .fmMergeUserArgs(mvBaseArgs, "mvsusie",
-                                      methodArgs[["mvsusie"]]))
-      fit <- .setFinemappingFitClass(fit, "mvsusie")
-      entry <- .fmPostprocessOne(
-        fit = fit, method = "mvsusie",
-        dataX = ldMat, dataY = NULL,
-        coverage = coverage,
-        secondaryCoverage = secondaryCoverage,
-        signalCutoff = signalCutoff,
-        minAbsCorr = minAbsCorr,
-        csInput = "Xcorr")
-      rowStudy   <- c(rowStudy,   s)
-      rowContext <- c(rowContext, cx)
-      rowTrait   <- c(rowTrait,   "joint")
-      rowMethod  <- c(rowMethod,  "mvsusie")
-      rowEntries[[length(rowEntries) + 1L]] <- entry
-      rowJointTraits <- c(rowJointTraits,
-                          paste(trNames, collapse = ";"))
-    }
-  }
-  if (length(rowStudy) == 0L) return(NULL)
-  QtlFineMappingResult(
-    study       = rowStudy,
-    context     = rowContext,
-    trait       = rowTrait,
-    method      = rowMethod,
-    entry       = rowEntries,
-    jointTraits = rowJointTraits,
-    ldSketch    = ldSketch)
-}
-
-
-# Cross-study joint dispatcher for QtlSumStats: groups by (context, trait),
-# requires >= 2 scoped studies per group. Sumstats-only by definition;
-# individual-level studies are excluded with a message at the caller.
-# mvsusie_rss only.
-# @noRd
-.fmDispatchCrossStudyQtlSumStats <- function(spec, data, methods,
-                                              contexts, traitIds,
-                                              coverage, secondaryCoverage,
-                                              signalCutoff, minAbsCorr,
-                                              verbose,
-                                              methodArgs = list(),
-                                              twasWeights = NULL,
-                                              dataDrivenPriorWeightsCutoff = 1e-10) {
-  if ("fsusie" %in% methods)
-    stop("jointCrossStudy: fsusie cannot participate (no RSS variant).")
-  jointMethods <- intersect(methods, "mvsusie")
-  if (length(jointMethods) == 0L) return(NULL)
-
-  scope <- .fmResolveSpecScope(spec, data, contexts = contexts,
-                                traitIds = traitIds)
-  ldSketch <- getLdSketch(data)
-  studyCol   <- as.character(data$study)
-  contextCol <- as.character(data$context)
-  traitCol   <- as.character(data$trait)
-
-  allCtxs <- unique(unlist(scope$contexts, use.names = FALSE))
-  allTrs  <- unique(unlist(scope$traits,   use.names = FALSE))
-
-  rowStudy <- character(0); rowContext <- character(0)
-  rowTrait <- character(0); rowMethod <- character(0)
-  rowEntries <- list(); rowJointStudies <- character(0)
-
-  for (cx in allCtxs) {
-    for (tid in allTrs) {
-      tupleRows <- which(contextCol == cx & traitCol == tid &
-                         studyCol %in% scope$studies)
-      keep <- logical(length(tupleRows))
-      for (k in seq_along(tupleRows)) {
-        s <- studyCol[tupleRows[k]]
-        keep[k] <- (cx %in% scope$contexts[[s]]) &&
-                   (tid %in% scope$traits[[s]])
-      }
-      tupleRows <- tupleRows[keep]
-      if (length(tupleRows) < 2L) {
-        if (length(tupleRows) > 0L && verbose >= 1)
-          message(sprintf(
-            "jointCrossStudy: (context='%s', trait='%s') has %d study(ies) in scope; skipping.",
-            cx, tid, length(tupleRows)))
-        next
-      }
-      stNames <- studyCol[tupleRows]
-      jz <- .buildJointSumstatZMatrix(
-        data, tupleRows, stNames,
-        errorLabel = "jointCrossStudy")
-      ldMat <- .fmLdFromSketch(ldSketch, jz$variantIds)
-      if (verbose >= 1)
-        message(sprintf(
-          "jointCrossStudy: fitting mvsusie_rss for (context='%s', trait='%s', %d studies) ...",
-          cx, tid, length(stNames)))
-      mvBaseArgs <- list(
-        Z = jz$Z, R = ldMat, N = as.numeric(stats::median(jz$nVec)),
-        # TODO(mvsusie-prior): cross-study lookup key undecided; canonical prior for now
-        prior_variance = mvsusieR::create_mixture_prior(R = ncol(jz$Z)),
-        coverage = coverage)
-      fit <- do.call(fitMvsusieRss,
-                     .fmMergeUserArgs(mvBaseArgs, "mvsusie",
-                                      methodArgs[["mvsusie"]]))
-      fit <- .setFinemappingFitClass(fit, "mvsusie")
-      entry <- .fmPostprocessOne(
-        fit = fit, method = "mvsusie",
-        dataX = ldMat, dataY = NULL,
-        coverage = coverage,
-        secondaryCoverage = secondaryCoverage,
-        signalCutoff = signalCutoff,
-        minAbsCorr = minAbsCorr,
-        csInput = "Xcorr")
-      rowStudy   <- c(rowStudy,   "joint")
-      rowContext <- c(rowContext, cx)
-      rowTrait   <- c(rowTrait,   tid)
-      rowMethod  <- c(rowMethod,  "mvsusie")
-      rowEntries[[length(rowEntries) + 1L]] <- entry
-      rowJointStudies <- c(rowJointStudies,
-                           paste(stNames, collapse = ";"))
-    }
-  }
-  if (length(rowStudy) == 0L) return(NULL)
-  QtlFineMappingResult(
-    study        = rowStudy,
-    context      = rowContext,
-    trait        = rowTrait,
-    method       = rowMethod,
-    entry        = rowEntries,
-    jointStudies = rowJointStudies,
-    ldSketch     = ldSketch)
-}
-
-
-# Composed multi-axis joint dispatcher for QtlDataset. Only axes =
-# c("context", "trait") is meaningful for a single-study individual-
-# level input. Iterates per (study) (just one), enumerates the
-# (context, trait) tuples in scope where the trait exists in the
-# context, and fits one mvsusie joint over those tuples.
-# @noRd
-.fmDispatchComposedQtlDataset <- function(spec, data, methods,
-                                           contexts, traitIds, cisWindow,
-                                           coverage, secondaryCoverage,
-                                           signalCutoff, minAbsCorr,
-                                           verbose,
-                                           methodArgs = list(),
-                                           region = NULL,
-                                           twasWeights = NULL,
-                                           dataDrivenPriorWeightsCutoff = 1e-10) {
-  axes <- spec$axes
-  if ("study" %in% axes)
-    stop("composed jointSpecification (QtlDataset): axes including 'study' require sumstats input.")
-  if (!setequal(axes, c("context", "trait")))
-    stop(sprintf(
-      "composed jointSpecification (QtlDataset): unsupported axes (%s) for individual-level input.",
-      paste(axes, collapse = ", ")))
-  jointMethods <- intersect(methods, "mvsusie")
-  if (length(jointMethods) == 0L) return(NULL)
-
-  scope <- .fmResolveSpecScope(spec, data, contexts = contexts,
-                                traitIds = traitIds)
-  study <- getStudy(data)
-  if (!(study %in% scope$studies)) return(NULL)
-  xy <- .buildComposedIndividualXY(data, scope, study, cisWindow,
-                                    verbose,
-                                    label = "composed joint (QtlDataset)",
-                                    region = region)
-  if (is.null(xy)) return(NULL)
-
-  if (verbose >= 1)
-    message(sprintf(
-      "composed joint (QtlDataset): fitting mvsusie for study='%s' over %d (context, trait) columns ...",
-      study, ncol(xy$Y)))
-  # Reweighted prior from a composed mr.mash joint twas run, keyed on
-  # (study, trait="joint", context="joint"); conditions are the (context,trait)
-  # columns of the composed design.
-  mvPrior <- .buildMvsusieReweightedPrior(
-    .fmLookupMrmashFit(twasWeights, study, "joint", context = "joint"),
-    colnames(xy$Y), dataDrivenPriorWeightsCutoff)
-  mvBaseArgs <- list(
-    X = xy$X, Y = xy$Y,
-    prior_variance = mvPrior$priorVariance,
-    coverage = coverage)
-  if (!is.null(mvPrior$residualVariance))
-    mvBaseArgs$residual_variance <- mvPrior$residualVariance
-  fit <- do.call(fitMvsusie,
-                 .fmMergeUserArgs(mvBaseArgs, "mvsusie",
-                                  methodArgs[["mvsusie"]]))
-  fit <- .setFinemappingFitClass(fit, "mvsusie")
-  entry <- .fmPostprocessOne(
-    fit = fit, method = "mvsusie",
-    dataX = xy$X, dataY = NULL,
-    coverage = coverage,
-    secondaryCoverage = secondaryCoverage,
-    signalCutoff = signalCutoff,
-    minAbsCorr = minAbsCorr,
-    csInput = "X")
-  QtlFineMappingResult(
-    study         = study,
-    context       = "joint",
-    trait         = "joint",
-    method        = "mvsusie",
-    entry         = list(entry),
-    jointContexts = paste(vapply(xy$tuples, function(t) t$context,
-                                  character(1)), collapse = ";"),
-    jointTraits   = paste(vapply(xy$tuples, function(t) t$trait,
-                                  character(1)), collapse = ";"),
-    ldSketch      = NULL)
-}
-
-
-# Composed multi-axis joint dispatcher for QtlSumStats. Handles any
-# `axes` subset of {study, context, trait} of size >= 2 by iterating the
-# complement-axis Cartesian product and emitting one joint fit per
-# iteration unit.
-# @noRd
-.fmDispatchComposedQtlSumStats <- function(spec, data, methods,
-                                            contexts, traitIds,
-                                            coverage, secondaryCoverage,
-                                            signalCutoff, minAbsCorr,
-                                            verbose,
-                                            methodArgs = list(),
-                                            twasWeights = NULL,
-                                            dataDrivenPriorWeightsCutoff = 1e-10) {
-  if ("fsusie" %in% methods)
-    stop("composed jointSpecification (QtlSumStats): fsusie has no RSS variant.")
-  jointMethods <- intersect(methods, "mvsusie")
-  if (length(jointMethods) == 0L) return(NULL)
-
-  scope <- .fmResolveSpecScope(spec, data, contexts = contexts,
-                                traitIds = traitIds)
-  ldSketch <- getLdSketch(data)
-  groupInfo <- .enumerateComposedSumstatGroups(spec, data, scope)
-  if (is.null(groupInfo)) return(NULL)
-  axes <- groupInfo$axes
-  studyCol <- groupInfo$studyCol
-  contextCol <- groupInfo$contextCol
-  traitCol <- groupInfo$traitCol
-
-  rowStudy <- character(0); rowContext <- character(0)
-  rowTrait <- character(0); rowMethod <- character(0)
-  rowEntries <- list()
-  rowJointStudies  <- character(0)
-  rowJointContexts <- character(0)
-  rowJointTraits   <- character(0)
-
-  for (gIdx in groupInfo$groups) {
-    if (length(gIdx) < 2L) {
-      if (verbose >= 1)
-        message(sprintf(
-          "composed joint (QtlSumStats): group has %d row(s); skipping.",
-          length(gIdx)))
-      next
-    }
-    colLabels <- vapply(gIdx, function(i)
-      paste(studyCol[i], contextCol[i], traitCol[i], sep = ":"),
-      character(1L))
-    jz <- .buildJointSumstatZMatrix(
-      data, gIdx, colLabels,
-      errorLabel = "composed joint (QtlSumStats)")
-    ldMat <- .fmLdFromSketch(ldSketch, jz$variantIds)
-    if (verbose >= 1)
-      message(sprintf(
-        "composed joint (QtlSumStats): fitting mvsusie_rss for axes=(%s), %d columns ...",
-        paste(axes, collapse = ", "), length(gIdx)))
-    # Reweighted prior from a composed mr.mash joint twas run, keyed on
-    # (study, trait="joint", context="joint"); conditions are the joint columns.
-    mvPrior <- .buildMvsusieReweightedPrior(
-      .fmLookupMrmashFit(twasWeights, studyCol[gIdx[[1L]]], "joint",
-                         context = "joint"),
-      colnames(jz$Z), dataDrivenPriorWeightsCutoff)
-    mvBaseArgs <- list(
-      Z = jz$Z, R = ldMat, N = as.numeric(stats::median(jz$nVec)),
-      prior_variance = mvPrior$priorVariance,
-      coverage = coverage)
-    if (!is.null(mvPrior$residualVariance))
-      mvBaseArgs$residual_variance <- mvPrior$residualVariance
-    fit <- do.call(fitMvsusieRss,
-                   .fmMergeUserArgs(mvBaseArgs, "mvsusie",
-                                    methodArgs[["mvsusie"]]))
-    fit <- .setFinemappingFitClass(fit, "mvsusie")
-    entry <- .fmPostprocessOne(
-      fit = fit, method = "mvsusie",
-      dataX = ldMat, dataY = NULL,
-      coverage = coverage,
-      secondaryCoverage = secondaryCoverage,
-      signalCutoff = signalCutoff,
-      minAbsCorr = minAbsCorr,
-      csInput = "Xcorr")
-
-    repStudy   <- if ("study"   %in% axes) "joint" else studyCol[gIdx[[1L]]]
-    repContext <- if ("context" %in% axes) "joint" else contextCol[gIdx[[1L]]]
-    repTrait   <- if ("trait"   %in% axes) "joint" else traitCol[gIdx[[1L]]]
-    rowStudy   <- c(rowStudy,   repStudy)
-    rowContext <- c(rowContext, repContext)
-    rowTrait   <- c(rowTrait,   repTrait)
-    rowMethod  <- c(rowMethod,  "mvsusie")
-    rowEntries[[length(rowEntries) + 1L]] <- entry
-    rowJointStudies <- c(rowJointStudies,
-      if ("study" %in% axes) paste(studyCol[gIdx], collapse = ";")
-      else NA_character_)
-    rowJointContexts <- c(rowJointContexts,
-      if ("context" %in% axes) paste(contextCol[gIdx], collapse = ";")
-      else NA_character_)
-    rowJointTraits <- c(rowJointTraits,
-      if ("trait" %in% axes) paste(traitCol[gIdx], collapse = ";")
-      else NA_character_)
-  }
-
-  if (length(rowStudy) == 0L) return(NULL)
-  jsArg <- if (all(is.na(rowJointStudies))) NULL else rowJointStudies
-  jcArg <- if (all(is.na(rowJointContexts))) NULL else rowJointContexts
-  jtArg <- if (all(is.na(rowJointTraits))) NULL else rowJointTraits
-  QtlFineMappingResult(
-    study         = rowStudy,
-    context       = rowContext,
-    trait         = rowTrait,
-    method        = rowMethod,
-    entry         = rowEntries,
-    jointStudies  = jsArg,
-    jointContexts = jcArg,
-    jointTraits   = jtArg,
-    ldSketch      = ldSketch)
-}
-
-
 # Top-level joint dispatcher for fineMappingPipeline(QtlDataset).
 # @noRd
 # Merge per-region QtlFineMappingResult collections (same keys across regions)
@@ -1523,6 +860,23 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     ldSketch = NULL)
 }
 
+# Synthesize a jointSpecification for the AUTO-DETECTION path (no explicit
+# jointSpecification supplied): route mvsusie / fsusie over the data's natural
+# multi-axis shape through the SAME engine as an explicit jointSpecification,
+# matching the historical mvJobs / runMultivariate detection. >= 2 traits ->
+# cross-trait (covers multi-trait single-context AND both-multi, since the
+# cross-trait enumerator iterates contexts -> per-context multi-trait fits);
+# else >= 2 contexts (single trait) -> cross-context. Single context & single
+# trait -> no joint (the caller's multivariate guard already rejects mvsusie /
+# fsusie there). Returns a list of parsed specs (full scope) or list().
+# @noRd
+.fmSynthesizeJointSpec <- function(nCtx, nTraits) {
+  if (nTraits >= 2L) list(list(axes = "trait", scope = NULL))
+  else if (nCtx >= 2L) list(list(axes = "context", scope = NULL))
+  else list()
+}
+
+
 .fmDispatchJointSpecsQtlDataset <- function(parsedJointSpec, data,
                                              methods, contexts, traitIds,
                                              cisWindow,
@@ -1532,7 +886,10 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                              methodArgs = list(),
                                              xRegions = list(NULL),
                                              twasWeights = NULL,
-                                             dataDrivenPriorWeightsCutoff = 1e-10) {
+                                             dataDrivenPriorWeightsCutoff = 1e-10,
+                                             cvFolds = 0, samplePartition = NULL,
+                                             pipCutoffToSkip = 0,
+                                             fineMappingResult = NULL) {
   # Run the joint dispatch once per region block, then merge per
   # (study, context, trait, method) across regions. A single block (cis or
   # jointRegions=TRUE concatenated) returns its result directly.
@@ -1542,7 +899,10 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
       coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
       methodArgs = methodArgs, region = rg,
       twasWeights = twasWeights,
-      dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff)
+      dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+      cvFolds = cvFolds, samplePartition = samplePartition,
+      pipCutoffToSkip = pipCutoffToSkip,
+      fineMappingResult = fineMappingResult)
   })
   perRegion <- Filter(Negate(is.null), perRegion)
   if (length(perRegion) == 0L) return(NULL)
@@ -1559,44 +919,27 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                              methodArgs = list(),
                                              region = NULL,
                                              twasWeights = NULL,
-                                             dataDrivenPriorWeightsCutoff = 1e-10) {
-  # Bundle the data-driven mvSuSiE prior pass-through args once; every leaf
-  # dispatcher accepts the same pair.
-  priorArgs <- list(twasWeights = twasWeights,
-                    dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff)
-  out <- NULL
-  for (i in seq_along(parsedJointSpec)) {
-    spec <- parsedJointSpec[[i]]
-    axes <- spec$axes
-    if (length(axes) > 1L) {
-      res <- do.call(.fmDispatchComposedQtlDataset, c(list(
-        spec, data, methods, contexts, traitIds, cisWindow,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs, region = region), priorArgs))
-      if (!is.null(res))
-        out <- if (is.null(out)) res
-               else .rbindFineMappingResult(out, res, ldSketch = NULL)
-      next
-    }
-    axis <- axes[[1L]]
-    res <- switch(axis,
-      context = do.call(.fmDispatchCrossContextQtlDataset, c(list(
-        spec, data, methods, contexts, traitIds, cisWindow,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs, region = region), priorArgs)),
-      trait = do.call(.fmDispatchCrossTraitQtlDataset, c(list(
-        spec, data, methods, contexts, traitIds, cisWindow,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs, region = region), priorArgs)),
-      study = stop(
-        "fineMappingPipeline(QtlDataset): jointSpecification with axes = 'study' requires sumstats input. ",
-        "QtlDataset represents a single individual-level study; cross-study joints operate on the sumstats slot of MultiStudyQtlDataset or on QtlSumStats directly."),
-      stop(sprintf("Unsupported axis: %s", axis)))
-    if (!is.null(res))
-      out <- if (is.null(out)) res
-             else .rbindFineMappingResult(out, res, ldSketch = NULL)
-  }
-  out
+                                             dataDrivenPriorWeightsCutoff = 1e-10,
+                                             cvFolds = 0, samplePartition = NULL,
+                                             pipCutoffToSkip = 0,
+                                             fineMappingResult = NULL) {
+  # Engine routing (jointEngine.R); one region block (the caller loops regions).
+  .jointRejectStudyOnIndividual(parsedJointSpec)
+  pipeline <- new("FmJointPipeline", config = list(
+    coverage = coverage, secondaryCoverage = secondaryCoverage,
+    signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
+    dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+    cvFolds = cvFolds, samplePartition = samplePartition,
+    verbose = verbose, ldSketch = NULL))
+  .runJointSpecs(parsedJointSpec, data, dataForm = "individual", pipeline = pipeline,
+                 jointMethods = intersect(methods, c("mvsusie", "fsusie")),
+                 contexts = contexts, traitIds = traitIds,
+                 args = list(twasWeights = twasWeights,
+                             dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+                             methodArgs = methodArgs, cisWindow = cisWindow,
+                             region = region, verbose = verbose,
+                             pipCutoffToSkip = pipCutoffToSkip,
+                             cache = fineMappingResult))
 }
 
 
@@ -1609,46 +952,24 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                               verbose,
                                               methodArgs = list(),
                                               twasWeights = NULL,
-                                              dataDrivenPriorWeightsCutoff = 1e-10) {
-  # Bundle the data-driven mvSuSiE prior pass-through args once; every leaf
-  # dispatcher accepts the same pair.
-  priorArgs <- list(twasWeights = twasWeights,
-                    dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff)
-  out <- NULL
-  for (i in seq_along(parsedJointSpec)) {
-    spec <- parsedJointSpec[[i]]
-    axes <- spec$axes
-    if (length(axes) > 1L) {
-      res <- do.call(.fmDispatchComposedQtlSumStats, c(list(
-        spec, data, methods, contexts, traitIds,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs), priorArgs))
-      if (!is.null(res))
-        out <- if (is.null(out)) res
-               else .rbindFineMappingResult(out, res, ldSketch = getLdSketch(data))
-      next
-    }
-    axis <- axes[[1L]]
-    res <- switch(axis,
-      context = do.call(.fmDispatchCrossContextQtlSumStats, c(list(
-        spec, data, methods, contexts, traitIds,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs), priorArgs)),
-      trait = do.call(.fmDispatchCrossTraitQtlSumStats, c(list(
-        spec, data, methods, contexts, traitIds,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs), priorArgs)),
-      study = do.call(.fmDispatchCrossStudyQtlSumStats, c(list(
-        spec, data, methods, contexts, traitIds,
-        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
-        methodArgs = methodArgs), priorArgs)),
-      stop(sprintf("Unsupported axis: %s", axis)))
-    if (!is.null(res))
-      out <- if (is.null(out)) res
-             else .rbindFineMappingResult(out, res,
-                                          ldSketch = getLdSketch(data))
-  }
-  out
+                                              dataDrivenPriorWeightsCutoff = 1e-10,
+                                              fineMappingResult = NULL) {
+  # Engine routing (jointEngine.R): the marker carries the fine-mapping config
+  # and result type; the dispatch table + .runJointCell replace the per-axis
+  # switch + the cross-context/trait/study/composed leaf dispatchers. RSS has no
+  # sample folds (no cvFolds / samplePartition); SER pre-screen is individual-only.
+  pipeline <- new("FmJointPipeline", config = list(
+    coverage = coverage, secondaryCoverage = secondaryCoverage,
+    signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
+    dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+    cvFolds = 0L, verbose = verbose, ldSketch = getLdSketch(data)))
+  .runJointSpecs(parsedJointSpec, data, dataForm = "sumstats", pipeline = pipeline,
+                 jointMethods = intersect(methods, c("mvsusie", "fsusie")),
+                 contexts = contexts, traitIds = traitIds,
+                 args = list(twasWeights = twasWeights,
+                             dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+                             methodArgs = methodArgs, verbose = verbose,
+                             cache = fineMappingResult))
 }
 
 
@@ -1722,534 +1043,11 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # TWAS-weights dispatchers
 # =============================================================================
 
-# Cross-context joint dispatcher for QtlDataset (twas). Mr.mash across
-# scoped contexts per (study, trait).
-# @noRd
-.twasDispatchCrossContextQtlDataset <- function(spec, data, methods,
-                                                 contexts, traitIds,
-                                                 cisWindow, dataType,
-                                                 verbose, region = NULL,
-                                                 retainFit = TRUE,
-                                                 retainFitDetail = "slim") {
-  jointMethods <- intersect(methods, "mrmash")
-  if (length(jointMethods) == 0L) return(NULL)
-
-  scope <- .fmResolveSpecScope(spec, data, contexts = contexts,
-                                traitIds = traitIds)
-  study <- getStudy(data)
-  if (!(study %in% scope$studies)) return(NULL)
-  scopedContexts <- scope$contexts[[study]]
-  scopedTraits   <- scope$traits[[study]]
-  if (length(scopedContexts) < 2L) {
-    if (verbose >= 1)
-      message(sprintf(
-        "jointCrossContext (twas QtlDataset): study '%s' has %d context(s) in scope; skipping.",
-        study, length(scopedContexts)))
-    return(NULL)
-  }
-
-  rowStudy <- character(0); rowContext <- character(0)
-  rowTrait <- character(0); rowMethod <- character(0)
-  rowEntries <- list(); rowJointContexts <- character(0)
-
-  for (tid in scopedTraits) {
-    xy <- .buildIndividualCrossContextXY(
-      data, tid, scopedContexts, cisWindow, verbose,
-      label = "jointCrossContext (twas QtlDataset)", region = region)
-    if (is.null(xy)) next
-
-    if (verbose >= 1)
-      message(sprintf(
-        "jointCrossContext (twas QtlDataset): fitting mr.mash for (study='%s', trait='%s') across contexts (%s) ...",
-        study, tid, paste(xy$perTraitContexts, collapse = ", ")))
-    weights <- mrmashWeights(X = xy$X, Y = xy$Y,
-                             retainFit = retainFit, fitDetail = retainFitDetail)
-    if (is.null(rownames(weights))) rownames(weights) <- colnames(xy$X)
-    entry <- TwasWeightsEntry(
-      variantIds   = rownames(weights),
-      weights      = weights,
-      fits         = attr(weights, "fit"),
-      standardized = FALSE,
-      dataType     = dataType)
-    rowStudy   <- c(rowStudy,   study)
-    rowContext <- c(rowContext, "joint")
-    rowTrait   <- c(rowTrait,   tid)
-    rowMethod  <- c(rowMethod,  "mrmash")
-    rowEntries[[length(rowEntries) + 1L]] <- entry
-    rowJointContexts <- c(rowJointContexts,
-                          paste(xy$perTraitContexts, collapse = ";"))
-  }
-
-  if (length(rowStudy) == 0L) return(NULL)
-  TwasWeights(
-    study         = rowStudy,
-    context       = rowContext,
-    trait         = rowTrait,
-    method        = rowMethod,
-    entry         = rowEntries,
-    jointContexts = rowJointContexts,
-    ldSketch      = NULL)
-}
-
-
-# Cross-trait joint dispatcher for QtlDataset (twas). Mr.mash per
-# (study, context) across scoped traits.
-# @noRd
-.twasDispatchCrossTraitQtlDataset <- function(spec, data, methods,
-                                               contexts, traitIds,
-                                               cisWindow, dataType,
-                                               verbose, region = NULL,
-                                               retainFit = TRUE,
-                                               retainFitDetail = "slim") {
-  jointMethods <- intersect(methods, "mrmash")
-  if (length(jointMethods) == 0L) return(NULL)
-
-  scope <- .fmResolveSpecScope(spec, data, contexts = contexts,
-                                traitIds = traitIds)
-  study <- getStudy(data)
-  if (!(study %in% scope$studies)) return(NULL)
-  scopedContexts <- scope$contexts[[study]]
-  scopedTraits   <- scope$traits[[study]]
-
-  rowStudy <- character(0); rowContext <- character(0)
-  rowTrait <- character(0); rowMethod <- character(0)
-  rowEntries <- list(); rowJointTraits <- character(0)
-
-  for (cx in scopedContexts) {
-    xy <- .buildIndividualCrossTraitXY(
-      data, cx, scopedTraits, cisWindow, verbose,
-      label = "jointCrossTrait (twas)", study = study, region = region)
-    if (is.null(xy)) next
-
-    if (verbose >= 1)
-      message(sprintf(
-        "jointCrossTrait (twas): fitting mr.mash for (study='%s', context='%s') across traits (%s) ...",
-        study, cx, paste(xy$traitsHere, collapse = ", ")))
-    weights <- mrmashWeights(X = xy$X, Y = xy$Y,
-                             retainFit = retainFit, fitDetail = retainFitDetail)
-    if (is.null(rownames(weights))) rownames(weights) <- colnames(xy$X)
-    entry <- TwasWeightsEntry(
-      variantIds   = rownames(weights),
-      weights      = weights,
-      fits         = attr(weights, "fit"),
-      standardized = FALSE,
-      dataType     = dataType)
-    rowStudy   <- c(rowStudy,   study)
-    rowContext <- c(rowContext, cx)
-    rowTrait   <- c(rowTrait,   "joint")
-    rowMethod  <- c(rowMethod,  "mrmash")
-    rowEntries[[length(rowEntries) + 1L]] <- entry
-    rowJointTraits <- c(rowJointTraits,
-                        paste(xy$traitsHere, collapse = ";"))
-  }
-  if (length(rowStudy) == 0L) return(NULL)
-  TwasWeights(
-    study       = rowStudy,
-    context     = rowContext,
-    trait       = rowTrait,
-    method      = rowMethod,
-    entry       = rowEntries,
-    jointTraits = rowJointTraits,
-    ldSketch    = NULL)
-}
-
-
-# Cross-context joint dispatcher for QtlSumStats (twas). Mr.mash.rss per
-# (study, trait).
-# @noRd
-.twasDispatchCrossContextQtlSumStats <- function(spec, data, methods,
-                                                  contexts, traitIds,
-                                                  dataType, verbose,
-                                                  retainFit = TRUE,
-                                                  retainFitDetail = "slim") {
-  jointMethods <- intersect(methods, "mrmash")
-  if (length(jointMethods) == 0L) return(NULL)
-
-  scope <- .fmResolveSpecScope(spec, data, contexts = contexts,
-                                traitIds = traitIds)
-  ldSketch <- getLdSketch(data)
-  studyCol   <- as.character(data$study)
-  contextCol <- as.character(data$context)
-  traitCol   <- as.character(data$trait)
-
-  rowStudy <- character(0); rowContext <- character(0)
-  rowTrait <- character(0); rowMethod <- character(0)
-  rowEntries <- list(); rowJointContexts <- character(0)
-
-  for (s in scope$studies) {
-    scopedContexts <- scope$contexts[[s]]
-    scopedTraits   <- scope$traits[[s]]
-    if (length(scopedContexts) < 2L) {
-      if (verbose >= 1)
-        message(sprintf(
-          "jointCrossContext (twas QtlSumStats): study '%s' has %d context(s) in scope; skipping.",
-          s, length(scopedContexts)))
-      next
-    }
-    for (tid in scopedTraits) {
-      tupleRows <- which(studyCol == s & traitCol == tid &
-                         contextCol %in% scopedContexts)
-      if (length(tupleRows) < 2L) {
-        if (verbose >= 1)
-          message(sprintf(
-            "jointCrossContext (twas QtlSumStats): (study='%s', trait='%s') has %d scoped context(s); skipping.",
-            s, tid, length(tupleRows)))
-        next
-      }
-      ctxNames <- contextCol[tupleRows]
-      jz <- .buildJointSumstatZMatrix(
-        data, tupleRows, ctxNames,
-        errorLabel = "jointCrossContext (twas QtlSumStats)")
-      ldMat <- .fmLdFromSketch(ldSketch, jz$variantIds)
-      stat <- list(z = jz$Z, N = jz$nVec)
-      if (verbose >= 1)
-        message(sprintf(
-          "jointCrossContext (twas QtlSumStats): fitting mr.mash.rss for (study='%s', trait='%s', %d contexts) ...",
-          s, tid, length(ctxNames)))
-      weights <- mrmashRssWeights(stat = stat, LD = ldMat,
-                                  retainFit = retainFit,
-                                  fitDetail = retainFitDetail)
-      if (is.null(rownames(weights))) rownames(weights) <- jz$variantIds
-      entry <- TwasWeightsEntry(
-        variantIds   = rownames(weights),
-        weights      = weights,
-        fits         = attr(weights, "fit"),
-        standardized = TRUE,
-        dataType     = dataType)
-      rowStudy   <- c(rowStudy,   s)
-      rowContext <- c(rowContext, "joint")
-      rowTrait   <- c(rowTrait,   tid)
-      rowMethod  <- c(rowMethod,  "mrmash")
-      rowEntries[[length(rowEntries) + 1L]] <- entry
-      rowJointContexts <- c(rowJointContexts,
-                            paste(ctxNames, collapse = ";"))
-    }
-  }
-  if (length(rowStudy) == 0L) return(NULL)
-  TwasWeights(
-    study         = rowStudy,
-    context       = rowContext,
-    trait         = rowTrait,
-    method        = rowMethod,
-    entry         = rowEntries,
-    jointContexts = rowJointContexts,
-    ldSketch      = ldSketch)
-}
-
-
-# Cross-trait joint dispatcher for QtlSumStats (twas). Mr.mash.rss per
-# (study, context).
-# @noRd
-.twasDispatchCrossTraitQtlSumStats <- function(spec, data, methods,
-                                                contexts, traitIds,
-                                                dataType, verbose,
-                                                retainFit = TRUE,
-                                                retainFitDetail = "slim") {
-  jointMethods <- intersect(methods, "mrmash")
-  if (length(jointMethods) == 0L) return(NULL)
-
-  scope <- .fmResolveSpecScope(spec, data, contexts = contexts,
-                                traitIds = traitIds)
-  ldSketch <- getLdSketch(data)
-  studyCol   <- as.character(data$study)
-  contextCol <- as.character(data$context)
-  traitCol   <- as.character(data$trait)
-
-  rowStudy <- character(0); rowContext <- character(0)
-  rowTrait <- character(0); rowMethod <- character(0)
-  rowEntries <- list(); rowJointTraits <- character(0)
-
-  for (s in scope$studies) {
-    scopedContexts <- scope$contexts[[s]]
-    scopedTraits   <- scope$traits[[s]]
-    for (cx in scopedContexts) {
-      tupleRows <- which(studyCol == s & contextCol == cx &
-                         traitCol %in% scopedTraits)
-      if (length(tupleRows) < 2L) {
-        if (verbose >= 1)
-          message(sprintf(
-            "jointCrossTrait (twas QtlSumStats): (study='%s', context='%s') has %d scoped trait(s); skipping.",
-            s, cx, length(tupleRows)))
-        next
-      }
-      trNames <- traitCol[tupleRows]
-      jz <- .buildJointSumstatZMatrix(
-        data, tupleRows, trNames,
-        errorLabel = "jointCrossTrait (twas QtlSumStats)")
-      ldMat <- .fmLdFromSketch(ldSketch, jz$variantIds)
-      stat <- list(z = jz$Z, N = jz$nVec)
-      if (verbose >= 1)
-        message(sprintf(
-          "jointCrossTrait (twas QtlSumStats): fitting mr.mash.rss for (study='%s', context='%s', %d traits) ...",
-          s, cx, length(trNames)))
-      weights <- mrmashRssWeights(stat = stat, LD = ldMat,
-                                  retainFit = retainFit,
-                                  fitDetail = retainFitDetail)
-      if (is.null(rownames(weights))) rownames(weights) <- jz$variantIds
-      entry <- TwasWeightsEntry(
-        variantIds   = rownames(weights),
-        weights      = weights,
-        fits         = attr(weights, "fit"),
-        standardized = TRUE,
-        dataType     = dataType)
-      rowStudy   <- c(rowStudy,   s)
-      rowContext <- c(rowContext, cx)
-      rowTrait   <- c(rowTrait,   "joint")
-      rowMethod  <- c(rowMethod,  "mrmash")
-      rowEntries[[length(rowEntries) + 1L]] <- entry
-      rowJointTraits <- c(rowJointTraits,
-                          paste(trNames, collapse = ";"))
-    }
-  }
-  if (length(rowStudy) == 0L) return(NULL)
-  TwasWeights(
-    study       = rowStudy,
-    context     = rowContext,
-    trait       = rowTrait,
-    method      = rowMethod,
-    entry       = rowEntries,
-    jointTraits = rowJointTraits,
-    ldSketch    = ldSketch)
-}
-
-
-# Cross-study joint dispatcher for QtlSumStats (twas). Mr.mash.rss per
-# (context, trait).
-# @noRd
-.twasDispatchCrossStudyQtlSumStats <- function(spec, data, methods,
-                                                contexts, traitIds,
-                                                dataType, verbose,
-                                                retainFit = TRUE,
-                                                retainFitDetail = "slim") {
-  jointMethods <- intersect(methods, "mrmash")
-  if (length(jointMethods) == 0L) return(NULL)
-
-  scope <- .fmResolveSpecScope(spec, data, contexts = contexts,
-                                traitIds = traitIds)
-  ldSketch <- getLdSketch(data)
-  studyCol   <- as.character(data$study)
-  contextCol <- as.character(data$context)
-  traitCol   <- as.character(data$trait)
-
-  allCtxs <- unique(unlist(scope$contexts, use.names = FALSE))
-  allTrs  <- unique(unlist(scope$traits,   use.names = FALSE))
-
-  rowStudy <- character(0); rowContext <- character(0)
-  rowTrait <- character(0); rowMethod <- character(0)
-  rowEntries <- list(); rowJointStudies <- character(0)
-
-  for (cx in allCtxs) {
-    for (tid in allTrs) {
-      tupleRows <- which(contextCol == cx & traitCol == tid &
-                         studyCol %in% scope$studies)
-      keep <- logical(length(tupleRows))
-      for (k in seq_along(tupleRows)) {
-        s <- studyCol[tupleRows[k]]
-        keep[k] <- (cx %in% scope$contexts[[s]]) &&
-                   (tid %in% scope$traits[[s]])
-      }
-      tupleRows <- tupleRows[keep]
-      if (length(tupleRows) < 2L) {
-        if (length(tupleRows) > 0L && verbose >= 1)
-          message(sprintf(
-            "jointCrossStudy (twas): (context='%s', trait='%s') has %d study(ies) in scope; skipping.",
-            cx, tid, length(tupleRows)))
-        next
-      }
-      stNames <- studyCol[tupleRows]
-      jz <- .buildJointSumstatZMatrix(
-        data, tupleRows, stNames,
-        errorLabel = "jointCrossStudy (twas)")
-      ldMat <- .fmLdFromSketch(ldSketch, jz$variantIds)
-      stat <- list(z = jz$Z, N = jz$nVec)
-      if (verbose >= 1)
-        message(sprintf(
-          "jointCrossStudy (twas): fitting mr.mash.rss for (context='%s', trait='%s', %d studies) ...",
-          cx, tid, length(stNames)))
-      weights <- mrmashRssWeights(stat = stat, LD = ldMat,
-                                  retainFit = retainFit,
-                                  fitDetail = retainFitDetail)
-      if (is.null(rownames(weights))) rownames(weights) <- jz$variantIds
-      entry <- TwasWeightsEntry(
-        variantIds   = rownames(weights),
-        weights      = weights,
-        fits         = attr(weights, "fit"),
-        standardized = TRUE,
-        dataType     = dataType)
-      rowStudy   <- c(rowStudy,   "joint")
-      rowContext <- c(rowContext, cx)
-      rowTrait   <- c(rowTrait,   tid)
-      rowMethod  <- c(rowMethod,  "mrmash")
-      rowEntries[[length(rowEntries) + 1L]] <- entry
-      rowJointStudies <- c(rowJointStudies,
-                           paste(stNames, collapse = ";"))
-    }
-  }
-  if (length(rowStudy) == 0L) return(NULL)
-  TwasWeights(
-    study        = rowStudy,
-    context      = rowContext,
-    trait        = rowTrait,
-    method       = rowMethod,
-    entry        = rowEntries,
-    jointStudies = rowJointStudies,
-    ldSketch     = ldSketch)
-}
-
-
-# Composed multi-axis joint dispatcher for QtlSumStats (twas).
-# @noRd
-.twasDispatchComposedQtlSumStats <- function(spec, data, methods,
-                                              contexts, traitIds,
-                                              dataType, verbose,
-                                              retainFit = TRUE,
-                                              retainFitDetail = "slim") {
-  jointMethods <- intersect(methods, "mrmash")
-  if (length(jointMethods) == 0L) return(NULL)
-
-  scope <- .fmResolveSpecScope(spec, data, contexts = contexts,
-                                traitIds = traitIds)
-  ldSketch <- getLdSketch(data)
-  groupInfo <- .enumerateComposedSumstatGroups(spec, data, scope)
-  if (is.null(groupInfo)) return(NULL)
-  axes <- groupInfo$axes
-  studyCol <- groupInfo$studyCol
-  contextCol <- groupInfo$contextCol
-  traitCol <- groupInfo$traitCol
-
-  rowStudy <- character(0); rowContext <- character(0)
-  rowTrait <- character(0); rowMethod <- character(0)
-  rowEntries <- list()
-  rowJointStudies  <- character(0)
-  rowJointContexts <- character(0)
-  rowJointTraits   <- character(0)
-
-  for (gIdx in groupInfo$groups) {
-    if (length(gIdx) < 2L) {
-      if (verbose >= 1)
-        message(sprintf(
-          "composed joint (twas QtlSumStats): group has %d row(s); skipping.",
-          length(gIdx)))
-      next
-    }
-    colLabels <- vapply(gIdx, function(i)
-      paste(studyCol[i], contextCol[i], traitCol[i], sep = ":"),
-      character(1L))
-    jz <- .buildJointSumstatZMatrix(
-      data, gIdx, colLabels,
-      errorLabel = "composed joint (twas QtlSumStats)")
-    ldMat <- .fmLdFromSketch(ldSketch, jz$variantIds)
-    stat <- list(z = jz$Z, N = jz$nVec)
-    if (verbose >= 1)
-      message(sprintf(
-        "composed joint (twas QtlSumStats): fitting mr.mash.rss for axes=(%s), %d columns ...",
-        paste(axes, collapse = ", "), length(gIdx)))
-    weights <- mrmashRssWeights(stat = stat, LD = ldMat,
-                                retainFit = retainFit,
-                                fitDetail = retainFitDetail)
-    if (is.null(rownames(weights))) rownames(weights) <- jz$variantIds
-    entry <- TwasWeightsEntry(
-      variantIds   = rownames(weights),
-      weights      = weights,
-      fits         = attr(weights, "fit"),
-      standardized = TRUE,
-      dataType     = dataType)
-
-    repStudy   <- if ("study"   %in% axes) "joint" else studyCol[gIdx[[1L]]]
-    repContext <- if ("context" %in% axes) "joint" else contextCol[gIdx[[1L]]]
-    repTrait   <- if ("trait"   %in% axes) "joint" else traitCol[gIdx[[1L]]]
-    rowStudy   <- c(rowStudy,   repStudy)
-    rowContext <- c(rowContext, repContext)
-    rowTrait   <- c(rowTrait,   repTrait)
-    rowMethod  <- c(rowMethod,  "mrmash")
-    rowEntries[[length(rowEntries) + 1L]] <- entry
-    rowJointStudies <- c(rowJointStudies,
-      if ("study" %in% axes) paste(studyCol[gIdx], collapse = ";")
-      else NA_character_)
-    rowJointContexts <- c(rowJointContexts,
-      if ("context" %in% axes) paste(contextCol[gIdx], collapse = ";")
-      else NA_character_)
-    rowJointTraits <- c(rowJointTraits,
-      if ("trait" %in% axes) paste(traitCol[gIdx], collapse = ";")
-      else NA_character_)
-  }
-  if (length(rowStudy) == 0L) return(NULL)
-  jsArg <- if (all(is.na(rowJointStudies))) NULL else rowJointStudies
-  jcArg <- if (all(is.na(rowJointContexts))) NULL else rowJointContexts
-  jtArg <- if (all(is.na(rowJointTraits))) NULL else rowJointTraits
-  TwasWeights(
-    study         = rowStudy,
-    context       = rowContext,
-    trait         = rowTrait,
-    method        = rowMethod,
-    entry         = rowEntries,
-    jointStudies  = jsArg,
-    jointContexts = jcArg,
-    jointTraits   = jtArg,
-    ldSketch      = ldSketch)
-}
-
-
-# Composed multi-axis joint dispatcher for QtlDataset (twas). axes =
-# c("context", "trait") only.
-# @noRd
-.twasDispatchComposedQtlDataset <- function(spec, data, methods,
-                                             contexts, traitIds, cisWindow,
-                                             dataType, verbose,
-                                             region = NULL,
-                                             retainFit = TRUE,
-                                             retainFitDetail = "slim") {
-  axes <- spec$axes
-  if ("study" %in% axes)
-    stop("composed jointSpecification (twas QtlDataset): axes including 'study' require sumstats input.")
-  if (!setequal(axes, c("context", "trait")))
-    stop(sprintf("composed jointSpecification (twas QtlDataset): unsupported axes (%s) for individual-level input.",
-                 paste(axes, collapse = ", ")))
-  jointMethods <- intersect(methods, "mrmash")
-  if (length(jointMethods) == 0L) return(NULL)
-
-  scope <- .fmResolveSpecScope(spec, data, contexts = contexts,
-                                traitIds = traitIds)
-  study <- getStudy(data)
-  if (!(study %in% scope$studies)) return(NULL)
-  xy <- .buildComposedIndividualXY(data, scope, study, cisWindow,
-                                    verbose,
-                                    label = "composed joint (twas QtlDataset)",
-                                    region = region)
-  if (is.null(xy)) return(NULL)
-
-  if (verbose >= 1)
-    message(sprintf(
-      "composed joint (twas QtlDataset): fitting mr.mash for study='%s' over %d (context, trait) columns ...",
-      study, ncol(xy$Y)))
-  weights <- mrmashWeights(X = xy$X, Y = xy$Y,
-                           retainFit = retainFit, fitDetail = retainFitDetail)
-  if (is.null(rownames(weights))) rownames(weights) <- colnames(xy$X)
-  entry <- TwasWeightsEntry(
-    variantIds   = rownames(weights),
-    weights      = weights,
-    fits         = attr(weights, "fit"),
-    standardized = FALSE,
-    dataType     = dataType)
-  TwasWeights(
-    study         = study,
-    context       = "joint",
-    trait         = "joint",
-    method        = "mrmash",
-    entry         = list(entry),
-    jointContexts = paste(vapply(xy$tuples, function(t) t$context,
-                                  character(1)), collapse = ";"),
-    jointTraits   = paste(vapply(xy$tuples, function(t) t$trait,
-                                  character(1)), collapse = ";"),
-    ldSketch      = NULL)
-}
-
-
 # Top-level joint dispatcher for twasWeightsPipeline(QtlDataset).
 # @noRd
 # Merge per-region TwasWeights collections (same keys across regions) into one
 # by concatenating each (study, context, trait, method) row's entry via
-# .twasMergeRegionEntries (stacked weights + flat per-region cvPerformance).
+# .twasMergeRegionEntries (stacked weights + flat per-region cvResult).
 # @noRd
 .twasMergeResultsByKey <- function(results, regionLabels) {
   base <- results[[1L]]
@@ -2302,38 +1100,16 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                                verbose, region = NULL,
                                                retainFit = TRUE,
                                                retainFitDetail = "slim") {
-  out <- NULL
-  for (i in seq_along(parsedJointSpec)) {
-    spec <- parsedJointSpec[[i]]
-    axes <- spec$axes
-    if (length(axes) > 1L) {
-      res <- .twasDispatchComposedQtlDataset(
-        spec, data, methods, contexts, traitIds, cisWindow, dataType, verbose,
-        region = region,
-        retainFit = retainFit, retainFitDetail = retainFitDetail)
-      if (!is.null(res))
-        out <- if (is.null(out)) res
-               else .rbindTwasWeights(out, res, ldSketch = NULL)
-      next
-    }
-    axis <- axes[[1L]]
-    res <- switch(axis,
-      context = .twasDispatchCrossContextQtlDataset(
-        spec, data, methods, contexts, traitIds, cisWindow, dataType, verbose,
-        region = region,
-        retainFit = retainFit, retainFitDetail = retainFitDetail),
-      trait = .twasDispatchCrossTraitQtlDataset(
-        spec, data, methods, contexts, traitIds, cisWindow, dataType, verbose,
-        region = region,
-        retainFit = retainFit, retainFitDetail = retainFitDetail),
-      study = stop(
-        "twasWeightsPipeline(QtlDataset): jointSpecification with axes = 'study' requires sumstats input."),
-      stop(sprintf("Unsupported axis: %s", axis)))
-    if (!is.null(res))
-      out <- if (is.null(out)) res
-             else .rbindTwasWeights(out, res, ldSketch = NULL)
-  }
-  out
+  # Engine routing (jointEngine.R); one region block (the caller loops regions).
+  .jointRejectStudyOnIndividual(parsedJointSpec)
+  pipeline <- new("TwasJointPipeline", config = list(
+    retainFitDetail = retainFitDetail, dataType = dataType,
+    cvFolds = 0L, fitFullData = TRUE, standardized = FALSE, ldSketch = NULL))
+  .runJointSpecs(parsedJointSpec, data, dataForm = "individual", pipeline = pipeline,
+                 jointMethods = intersect(methods, "mrmash"),
+                 contexts = contexts, traitIds = traitIds,
+                 args = list(methodArgs = list(), cisWindow = cisWindow,
+                             region = region, verbose = verbose))
 }
 
 
@@ -2344,36 +1120,15 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                                 dataType, verbose,
                                                 retainFit = TRUE,
                                                 retainFitDetail = "slim") {
-  out <- NULL
-  for (i in seq_along(parsedJointSpec)) {
-    spec <- parsedJointSpec[[i]]
-    axes <- spec$axes
-    if (length(axes) > 1L) {
-      res <- .twasDispatchComposedQtlSumStats(
-        spec, data, methods, contexts, traitIds, dataType, verbose,
-        retainFit = retainFit, retainFitDetail = retainFitDetail)
-      if (!is.null(res))
-        out <- if (is.null(out)) res
-               else .rbindTwasWeights(out, res, ldSketch = getLdSketch(data))
-      next
-    }
-    axis <- axes[[1L]]
-    res <- switch(axis,
-      context = .twasDispatchCrossContextQtlSumStats(
-        spec, data, methods, contexts, traitIds, dataType, verbose,
-        retainFit = retainFit, retainFitDetail = retainFitDetail),
-      trait = .twasDispatchCrossTraitQtlSumStats(
-        spec, data, methods, contexts, traitIds, dataType, verbose,
-        retainFit = retainFit, retainFitDetail = retainFitDetail),
-      study = .twasDispatchCrossStudyQtlSumStats(
-        spec, data, methods, contexts, traitIds, dataType, verbose,
-        retainFit = retainFit, retainFitDetail = retainFitDetail),
-      stop(sprintf("Unsupported axis: %s", axis)))
-    if (!is.null(res))
-      out <- if (is.null(out)) res
-             else .rbindTwasWeights(out, res, ldSketch = getLdSketch(data))
-  }
-  out
+  # Engine routing (jointEngine.R).
+  pipeline <- new("TwasJointPipeline", config = list(
+    retainFitDetail = retainFitDetail, dataType = dataType,
+    cvFolds = 0L, fitFullData = TRUE, standardized = TRUE,
+    ldSketch = getLdSketch(data)))
+  .runJointSpecs(parsedJointSpec, data, dataForm = "sumstats", pipeline = pipeline,
+                 jointMethods = intersect(methods, "mrmash"),
+                 contexts = contexts, traitIds = traitIds,
+                 args = list(methodArgs = list(), verbose = verbose))
 }
 
 

@@ -52,24 +52,24 @@
 #' @param rsqCutoff Numeric (length 1). When \code{> 0}, performs CV weight
 #'   selection (ports the legacy \code{twas_pipeline} \code{pick_best_model} +
 #'   \code{update_twas_method}): per \code{(study, context, trait, gwasStudy)}
-#'   keep only the method whose \code{cvPerformance} \code{rsqOption} metric is
+#'   keep only the method whose \code{cvResult} \code{rsqOption} metric is
 #'   highest among methods that clear both \code{rsqCutoff} and the
 #'   \code{rsqPvalCutoff} gate AND that produced a finite TWAS Z (the NA/Inf
 #'   re-selection); groups where no method clears the cutoffs are dropped. A
-#'   group whose methods carry no usable \code{cvPerformance} (the SS-TWAS
-#'   path) keeps all methods. Needs the \code{twasWeights} \code{cvPerformance},
+#'   group whose methods carry no usable \code{cvResult} (the SS-TWAS
+#'   path) keeps all methods. Needs the \code{twasWeights} \code{cvResult},
 #'   so selection is a no-op on the fineMappingResult-only path. Default
 #'   \code{0} (no selection; score every method).
 #' @param rsqPvalCutoff Numeric (length 1). CV-p-value gate for weight
 #'   selection (ports legacy \code{rsq_pval_cutoff}): a method is eligible only
-#'   when its \code{cvPerformance} \code{rsqPvalOption} metric is
+#'   when its \code{cvResult} \code{rsqPvalOption} metric is
 #'   \code{< rsqPvalCutoff}. Default \code{Inf} (no p-value gate). A finite
 #'   value activates selection even when \code{rsqCutoff = 0}.
-#' @param rsqOption Character. Which \code{cvPerformance} metric is the
+#' @param rsqOption Character. Which \code{cvResult} metric is the
 #'   "r-squared" used for the cutoff and ranking (ports legacy
 #'   \code{rsq_option}); typically \code{"rsq"} or \code{"adj_rsq"}.
 #'   Default \code{"rsq"}.
-#' @param rsqPvalOption Character vector of candidate \code{cvPerformance}
+#' @param rsqPvalOption Character vector of candidate \code{cvResult}
 #'   metric names for the p-value gate (ports legacy \code{rsq_pval_option});
 #'   the first one present in a tuple's metrics is used. Default
 #'   \code{c("adj_rsq_pval", "pval")}.
@@ -308,14 +308,14 @@ causalInferencePipeline <- function(gwasSumStats,
 }
 
 # Resolve one CV metric (rsqOption / rsqPvalOption) for a single tuple from the
-# TwasWeights cvPerformance, which the individual-level CV path stores as a list
+# TwasWeights cvResult, which the individual-level CV path stores as a list
 # with a named $metrics vector (corr, rsq, adj_rsq, pval, RMSE, MAE); a bare
 # metrics vector / data frame is tolerated too. `which` is a vector of candidate
 # metric names; the first present is used. Returns NA when no usable metric.
 # @noRd
 .cipCvMetric <- function(twasWeights, study, context, trait, method, which) {
   perf <- tryCatch(
-    getCvPerformance(twasWeights, study = study, context = context,
+    getCvResult(twasWeights, study = study, context = context,
                      trait = trait, method = method),
     error = function(e) NULL)
   if (is.null(perf)) return(NA_real_)

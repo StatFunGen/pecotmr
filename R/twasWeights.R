@@ -201,13 +201,13 @@ setMethod("getWeights", "TwasWeights",
     getWeights(entry)
   })
 
-#' @rdname getCvPerformance
+#' @rdname getCvResult
 #' @export
-setMethod("getCvPerformance", "TwasWeights",
+setMethod("getCvResult", "TwasWeights",
   function(x, study = NULL, context = NULL, trait = NULL, method = NULL,
            ...) {
     entry <- getTwasWeights(x, study, context, trait, method)
-    getCvPerformance(entry)
+    getCvResult(entry)
   })
 
 #' @rdname getFits
@@ -351,7 +351,7 @@ setMethod("show", "TwasWeights", function(object) {
     mcp = list(fn = "mcp_weights", impl = "mcpWeights", args = list()),
     l0learn = list(fn = "l0learn_weights", impl = "l0learnWeights", args = list()),
     mvsusie = list(fn = "mvsusie_weights", impl = "mvsusieWeights", args = list(L = 30, L_greedy = 5)),
-    mrmash = list(fn = "mrmash_weights", impl = "mrmashWeights", args = list()),
+    mrmash = list(fn = "mrmash_weights", impl = "mrmashWeights", args = list(canonicalPriorMatrices = TRUE)),
     fsusie = list(fn = "fsusie_weights", impl = "fsusieWeights", args = list())
   )
 
@@ -422,6 +422,82 @@ setMethod("show", "TwasWeights", function(object) {
   methodKey
 }
 
+# Normalize a cross-validation fold specification into the canonical
+# samplePartition data.frame(Sample, Fold) used throughout the CV machinery, so
+# callers can pass folds in any of three forms and downstream code has a single
+# source of truth. Accepts:
+#   * cvFolds an integer k: k-fold auto-partition (returned as NULL so the
+#     partition is generated per (study, context, trait) downstream).
+#   * cvFolds a list of vectors: each element defines one fold's SAMPLES, as
+#     numeric column indices into `sampleNames` or character sample names.
+#   * samplePartition a data.frame(Sample, Fold): used as-is.
+# A list-form `cvFolds` and an explicit `samplePartition` are mutually exclusive.
+# When `sampleNames` is supplied, the resolved partition is validated to
+# reference only known samples, assign each sample to one fold, and cover every
+# sample (a proper partition). Returns list(samplePartition, nFolds).
+.normalizeCvFolds <- function(cvFolds = 0, samplePartition = NULL,
+                              sampleNames = NULL) {
+  isListFolds <- is.list(cvFolds) && !is.data.frame(cvFolds)
+  if (isListFolds && !is.null(samplePartition))
+    stop("Provide either a list-form `cvFolds` or an explicit ",
+         "`samplePartition`, not both.")
+
+  validatePartition <- function(df) {
+    if (!all(c("Sample", "Fold") %in% names(df)))
+      stop("samplePartition must have columns `Sample` and `Fold`.")
+    df$Sample <- as.character(df$Sample)
+    dup <- unique(df$Sample[duplicated(df$Sample)])
+    if (length(dup) > 0L)
+      stop("Fold partition assigns sample(s) to more than one fold: ",
+           paste(dup, collapse = ", "))
+    if (!is.null(sampleNames)) {
+      unknown <- setdiff(df$Sample, sampleNames)
+      if (length(unknown) > 0L)
+        stop("Fold partition references unknown sample(s): ",
+             paste(unknown, collapse = ", "))
+      uncovered <- setdiff(sampleNames, df$Sample)
+      if (length(uncovered) > 0L)
+        stop("Fold partition does not cover ", length(uncovered),
+             " sample(s) (folds must partition all samples), e.g. ",
+             paste(utils::head(uncovered, 5L), collapse = ", "))
+    }
+    df
+  }
+
+  if (!is.null(samplePartition)) {
+    df <- validatePartition(as.data.frame(samplePartition,
+                                          stringsAsFactors = FALSE))
+    return(list(samplePartition = df, nFolds = length(unique(df$Fold))))
+  }
+
+  if (isListFolds) {
+    if (length(cvFolds) < 2L)
+      stop("A list-form `cvFolds` must define at least 2 folds.")
+    rows <- lapply(seq_along(cvFolds), function(k) {
+      ids <- cvFolds[[k]]
+      if (is.numeric(ids)) {
+        if (is.null(sampleNames))
+          stop("Numeric fold vectors require `sampleNames` to resolve ",
+               "column indices.")
+        if (any(ids < 1L | ids > length(sampleNames)))
+          stop("Fold ", k, " has out-of-range sample column index/indices.")
+        ids <- sampleNames[as.integer(ids)]
+      } else {
+        ids <- as.character(ids)
+      }
+      data.frame(Sample = ids, Fold = k, stringsAsFactors = FALSE)
+    })
+    df <- validatePartition(do.call(rbind, rows))
+    return(list(samplePartition = df, nFolds = length(cvFolds)))
+  }
+
+  k <- suppressWarnings(as.integer(cvFolds))
+  if (length(k) != 1L || is.na(k))
+    stop("`cvFolds` must be a single integer, a list of fold vectors, or ",
+         "paired with `samplePartition`.")
+  list(samplePartition = NULL, nFolds = k)
+}
+
 # Identify non-zero-variance columns of X. Returns a logical vector.
 #' @importFrom matrixStats colSds
 #' @noRd
@@ -443,46 +519,6 @@ setMethod("show", "TwasWeights", function(object) {
   if (!is.null(YColnames)) colnames(full) <- YColnames
   full[validColumns, ] <- weightsMatrix
   full
-}
-
-# Filter weight methods that produced all-zero weights from CV.
-# Returns filtered weightMethods list and warns about removed methods.
-# @noRd
-.filterZeroWeightMethods <- function(weightMethods, twasWeightsRes) {
-  if (is(twasWeightsRes, "TwasWeights")) {
-    methodTokens <- as.character(twasWeightsRes$method)
-    perMethodAllZero <- vapply(seq_len(nrow(twasWeightsRes)), function(i) {
-      w <- getWeights(twasWeightsRes$entry[[i]])
-      all(w == 0, na.rm = TRUE)
-    }, logical(1))
-    methodToZero <- tapply(perMethodAllZero, methodTokens, all)
-    methodKeys <- names(weightMethods)
-    methodBase <- sub("(_weights|Weights)$", "", methodKeys)
-    isAllZero <- vapply(methodBase, function(mb) {
-      if (mb %in% names(methodToZero)) isTRUE(methodToZero[[mb]]) else FALSE
-    }, logical(1))
-  } else {
-    wl <- twasWeightsRes
-    isAllZero <- vapply(wl, function(w) all(w == 0, na.rm = TRUE), logical(1))
-  }
-  removed <- names(weightMethods)[isAllZero]
-  if (length(removed) > 0) {
-    warning(sprintf(
-      "Methods %s are removed from CV because all their weights are zeros.",
-      paste(removed, collapse = ", ")
-    ))
-  }
-  weightMethods[!isAllZero]
-}
-
-.susieWeightIntermediate <- function(fit, X) {
-  keep <- intersect(c("mu", "lbf_variable", "X_column_scale_factors", "pip", "theta"), names(fit))
-  intermediate <- fit[keep]
-  if (!is.null(fit$sets$cs)) {
-    intermediate$csVariants <- setNames(lapply(fit$sets$cs, function(L) colnames(X)[L]), names(fit$sets$cs))
-    intermediate$csPurity <- .translateSusiePurity(fit$sets$purity)
-  }
-  intermediate
 }
 
 .prepareSusieWeightMethods <- function(X, Y, weightMethods, fittedModels = NULL) {
@@ -574,7 +610,7 @@ setMethod("show", "TwasWeights", function(object) {
 #' @importFrom BiocParallel bplapply bpworkers MulticoreParam
 #' @importFrom quadprog solve.QP
 #' @export
-twasWeightsCv <- function(X, Y, fold = NULL, samplePartitions = NULL, weightMethods = NULL, maxNumVariants = NULL, variantsToKeep = NULL, numThreads = 1, verbose = 1, ...) {
+twasWeightsCv <- function(X, Y, fold = NULL, samplePartitions = NULL, weightMethods = NULL, maxNumVariants = NULL, variantsToKeep = NULL, numThreads = 1, verbose = 1, retainFits = FALSE, ...) {
   splitData <- function(X, Y, samplePartition, fold) {
     testIds <- samplePartition[which(samplePartition$Fold == fold), "Sample"]
     Xtrain <- X[!(rownames(X) %in% testIds), , drop = FALSE]
@@ -731,30 +767,40 @@ twasWeightsCv <- function(X, Y, fold = NULL, samplePartitions = NULL, weightMeth
       # Xtest <- Xtest[, validColumns, drop=FALSE]
       foldWeightMethods <- .prepareSusieWeightMethods(Xtrain, Ytrain, weightMethods)
 
-      foldPreds <- setNames(lapply(names(foldWeightMethods), function(method) {
+      foldOut <- setNames(lapply(names(foldWeightMethods), function(method) {
         args <- foldWeightMethods[[method]]
         fnName <- .resolveMethodFunction(method, args)
+        capturedFit <- NULL
 
         if (method %in% multivariateWeightMethods) {
-          # Apply multivariate method to entire Y for this fold
-          if (!is.null(cvArgs$data_driven_prior_matrices_cv)) {
-            if (method %in% c("mrmash_weights", "mrmashWeights")) {
-              args$data_driven_prior_matrices <- cvArgs$data_driven_prior_matrices_cv[[j]]
-            }
-            if (method %in% c("mvsusie_weights", "mvsusieWeights")) {
-              args$prior_variance <- cvArgs$reweightedMixturePriorCv[[j]]
-            }
+          # Apply multivariate method to entire Y for this fold. Per-fold priors
+          # bind to the fitter's camelCase args: the fold's mr.mash data-driven
+          # prior, and the fold's reweighted mvSuSiE prior.
+          if (!is.null(cvArgs$data_driven_prior_matrices_cv) &&
+              method %in% c("mrmash_weights", "mrmashWeights")) {
+            args$dataDrivenPriorMatrices <- cvArgs$data_driven_prior_matrices_cv[[j]]
+          }
+          if (!is.null(cvArgs$reweightedMixturePriorCv) &&
+              method %in% c("mvsusie_weights", "mvsusieWeights")) {
+            args$prior_variance <- cvArgs$reweightedMixturePriorCv[[j]]
+          }
+          # Retain the per-fold fitted model (e.g. the fold's mr.mash fit) when
+          # asked and supported, so a caller can reuse it as that fold's prior
+          # (full-CV mvSuSiE). No extra fitting -- it is the model fit here.
+          if (isTRUE(retainFits) && "retainFit" %in% names(formals(fnName))) {
+            args$retainFit <- TRUE
           }
           weightsMatrix <- if (verbose < 2) {
             .quietEval(do.call(fnName, c(list(X = Xtrain, Y = Ytrain), args)))
           } else {
             do.call(fnName, c(list(X = Xtrain, Y = Ytrain), args))
           }
+          capturedFit <- attr(weightsMatrix, "fit")
+          attr(weightsMatrix, "fit") <- NULL
           rownames(weightsMatrix) <- colnames(Xtrain)
           fullWeightsMatrix <- .embedWeights(weightsMatrix[validColumns, , drop = FALSE], validColumns, ncol(X), ncol(Y), colnames(X), colnames(Y))
           Ypred <- Xtest %*% fullWeightsMatrix
           rownames(Ypred) <- rownames(Xtest)
-          return(Ypred)
         } else {
           Ypred <- sapply(1:ncol(Ytrain), function(k) {
             weights <- if (verbose < 2) {
@@ -770,14 +816,15 @@ twasWeightsCv <- function(X, Y, fold = NULL, samplePartitions = NULL, weightMeth
             Xtest %*% fullWeights
           })
           rownames(Ypred) <- rownames(Xtest)
-          return(Ypred)
         }
+        list(pred = Ypred, fit = capturedFit)
       }), names(foldWeightMethods))
       if (verbose >= 1) {
         elapsed <- toc(quiet = TRUE)
         message(sprintf("  CV fold %d/%d done in %.1fs", j, fold, elapsed$toc - elapsed$tic))
       }
-      foldPreds
+      list(preds = lapply(foldOut, `[[`, "pred"),
+           fits  = lapply(foldOut, `[[`, "fit"))
     }
 
     if (numCores >= 2) {
@@ -796,7 +843,7 @@ twasWeightsCv <- function(X, Y, fold = NULL, samplePartitions = NULL, weightMeth
     Ypred <- setNames(lapply(weightMethods, function(x) `dimnames<-`(matrix(NA, nrow(Y), ncol(Y)), dimnames(Y))), names(weightMethods))
     for (j in seq_along(foldResults)) {
       for (method in names(weightMethods)) {
-        Ypred[[method]][rownames(foldResults[[j]][[method]]), ] <- foldResults[[j]][[method]]
+        Ypred[[method]][rownames(foldResults[[j]]$preds[[method]]), ] <- foldResults[[j]]$preds[[method]]
       }
     }
 
@@ -847,7 +894,14 @@ twasWeightsCv <- function(X, Y, fold = NULL, samplePartitions = NULL, weightMeth
       }
     }
     names(metricsTable) <- .renameSuffix(names(metricsTable), "performance")
-    return(list(samplePartition = samplePartition, prediction = Ypred, performance = metricsTable, timeElapsed = proc.time() - st))
+    # Per-fold retained fits (e.g. mr.mash), keyed [[fold]][[method]] with NULL
+    # entries dropped; empty per fold when retainFits = FALSE. Lets full-CV
+    # callers reuse each fold's fit as that fold's prior.
+    foldFits <- setNames(lapply(seq_along(foldResults), function(j) {
+      ff <- foldResults[[j]]$fits
+      ff[!vapply(ff, is.null, logical(1))]
+    }), paste0("fold_", seq_along(foldResults)))
+    return(list(samplePartition = samplePartition, prediction = Ypred, performance = metricsTable, foldFits = foldFits, timeElapsed = proc.time() - st))
   }
 }
 
@@ -1043,7 +1097,7 @@ learnTwasWeights <- function(X, Y, weightMethods,
             variantIds    = variantIds,
             weights       = wMat[, k],
             fits          = if (retainFits) fitVal else NULL,
-            cvPerformance = NULL,
+            cvResult = NULL,
             standardized  = isTRUE(standardized),
             dataType      = dataType)
         }
@@ -1057,7 +1111,7 @@ learnTwasWeights <- function(X, Y, weightMethods,
           variantIds    = variantIds,
           weights       = wPayload,
           fits          = if (retainFits) fitVal else NULL,
-          cvPerformance = NULL,
+          cvResult = NULL,
           standardized  = isTRUE(standardized),
           dataType      = dataType)
       }

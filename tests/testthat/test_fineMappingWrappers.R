@@ -629,6 +629,34 @@ test_that("buildTopLoci returns the exact 22-column schema in order with stable 
   expect_true(is.integer(out$grange_end))
 })
 
+test_that("buildTopLoci: conditionIdx slices the 3-D mvsusie posterior per condition", {
+  set.seed(1); L <- 2L; p <- 3L; R <- 2L
+  alpha <- matrix(c(0.7, 0.2, 0.1, 0.6, 0.2, 0.2), nrow = L, ncol = p)
+  mu  <- array(rnorm(L * p * R), dim = c(L, p, R))
+  mu2 <- mu^2 + 0.1
+  fit <- list(alpha = alpha, mu = mu, mu2 = mu2,
+              pip = 1 - apply(1 - alpha, 2, prod))
+  vids <- c("1:100:A:G", "1:200:C:T", "1:300:G:A")
+  cst <- list(list(sets = list(cs = list())),
+              list(sets = list(cs = list())),
+              list(sets = list(cs = list())))
+  attr(cst, "coverage") <- c(0.95, 0.70, 0.50)
+  tl1 <- buildTopLoci(fit, cst, variantNames = vids, method = "mvsusie",
+                      conditionIdx = 1L)
+  tl2 <- buildTopLoci(fit, cst, variantNames = vids, method = "mvsusie",
+                      conditionIdx = 2L)
+  tl0 <- buildTopLoci(fit, cst, variantNames = vids, method = "mvsusie")
+  # Each conditionIdx yields THAT condition's posterior (colSums(alpha*mu[,,r])).
+  expect_equal(tl1$posterior_mean, colSums(alpha * mu[, , 1]))
+  expect_equal(tl2$posterior_mean, colSums(alpha * mu[, , 2]))
+  expect_false(isTRUE(all.equal(tl1$posterior_mean, tl2$posterior_mean)))
+  expect_true(all(is.finite(tl1$posterior_sd)))
+  # PIP is shared across conditions (mvSuSiE inclusion is joint).
+  expect_equal(tl1$pip, tl2$pip)
+  # A 3-D fit without a conditionIdx leaves the per-variant posterior NA.
+  expect_true(all(is.na(tl0$posterior_mean)))
+})
+
 test_that("buildTopLoci emits 22 columns in the fixed order on a non-empty fit", {
   variant_ids <- c("chr1:100:A:G", "chr1:200:C:T")
   inp <- .fake_fit_and_cs(variant_ids,

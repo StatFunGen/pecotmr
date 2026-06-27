@@ -15,7 +15,7 @@ setClass("TwasWeightsEntry",
     variantIds    = "character",
     weights       = "ANY",
     fits          = "ANY",
-    cvPerformance = "ANY",
+    cvResult      = "ANY",
     standardized  = "logical",
     dataType      = "ANY"
   ),
@@ -81,20 +81,25 @@ setClass("TwasWeightsEntry",
 #'   collection.
 #' @param variantIds Character vector of variant IDs.
 #' @param weights Numeric vector or matrix.
-#' @param fits Optional method-specific fit object.
-#' @param cvPerformance Optional list of CV metrics.
+#' @param fits Optional method-specific fit object (the full-data fit; e.g. the
+#'   mr.mash fit's \code{{dataDrivenPriorMatrices, w0, V}}).
+#' @param cvResult Optional cross-validation payload: a list mirroring
+#'   \code{FineMappingEntry@cvResult} with \code{samplePartition},
+#'   \code{predictions}, \code{performance}, and (mr.mash only) \code{foldFits}
+#'   — the per-fold fits that \code{fineMappingPipeline}'s mvSuSiE path consumes
+#'   as per-fold priors.
 #' @param standardized Logical (length 1).
 #' @param dataType Optional data-type tag.
 #' @return A \code{TwasWeightsEntry} object.
 #' @export
 TwasWeightsEntry <- function(variantIds, weights, fits = NULL,
-                             cvPerformance = NULL, standardized = FALSE,
+                             cvResult = NULL, standardized = FALSE,
                              dataType = NULL) {
   obj <- new("TwasWeightsEntry",
              variantIds    = as.character(variantIds),
              weights       = weights,
              fits          = fits,
-             cvPerformance = cvPerformance,
+             cvResult      = cvResult,
              standardized  = isTRUE(standardized),
              dataType      = dataType)
   validObject(obj)
@@ -116,10 +121,10 @@ setMethod("getVariantIds", "TwasWeightsEntry",
 setMethod("getFits", "TwasWeightsEntry",
           function(x, ...) x@fits)
 
-#' @rdname getCvPerformance
+#' @rdname getCvResult
 #' @export
-setMethod("getCvPerformance", "TwasWeightsEntry",
-          function(x, ...) x@cvPerformance)
+setMethod("getCvResult", "TwasWeightsEntry",
+          function(x, ...) x@cvResult)
 
 #' @rdname getStandardized
 #' @export
@@ -135,6 +140,6 @@ setMethod("getDataType", "TwasWeightsEntry",
 setMethod("show", "TwasWeightsEntry", function(object) {
   cat(sprintf("TwasWeightsEntry: %d variants, standardized=%s\n",
               length(object@variantIds), object@standardized))
-  hasCv <- !is.null(object@cvPerformance)
+  hasCv <- !is.null(object@cvResult)
   cat(sprintf("  CV performance: %s\n", hasCv))
 })

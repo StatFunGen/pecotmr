@@ -53,12 +53,12 @@
   out[!vapply(out, is.null, logical(1))]
 }
 
-# Flat per-region cvPerformance reporting table: one row per region carrying the
+# Flat per-region cvResult reporting table: one row per region carrying the
 # region label plus that region's CV metric columns. Per-sample predictions are
 # intentionally omitted — this is a summary-reporting structure.
 .twasRegionCvDf <- function(entries, regionLabels) {
   rows <- Map(function(e, lab) {
-    cv <- getCvPerformance(e)
+    cv <- getCvResult(e)
     if (is.null(cv) || is.null(cv$metrics)) return(NULL)
     cbind(data.frame(region = lab, stringsAsFactors = FALSE),
           as.data.frame(as.list(cv$metrics), check.names = FALSE))
@@ -70,7 +70,7 @@
 
 # Concatenate one method's per-region TwasWeightsEntry payloads into a single
 # entry. Variants/weights are stacked (regions are disjoint), the per-region
-# fits are kept as a named list, and cvPerformance becomes the flat per-region
+# fits are kept as a named list, and cvResult becomes the flat per-region
 # reporting data.frame.
 .twasMergeRegionEntries <- function(entries, regionLabels) {
   keep <- !vapply(entries, is.null, logical(1))
@@ -84,7 +84,7 @@
     variantIds    = unlist(lapply(entries, getVariantIds), use.names = FALSE),
     weights       = weights,
     fits          = setNames(lapply(entries, getFits), regionLabels),
-    cvPerformance = .twasRegionCvDf(entries, regionLabels),
+    cvResult = .twasRegionCvDf(entries, regionLabels),
     standardized  = getStandardized(entries[[1L]]),
     dataType      = getDataType(entries[[1L]]))
 }
@@ -117,83 +117,31 @@
     entry   = mergedEntries)
 }
 
-# Splice per-(method, outcome) cross-validated predictions and the 6-metric
-# performance row from a `twasWeightsCv()` result into the matching
-# `TwasWeightsEntry$cvPerformance` slot of every row in a TwasWeights
-# collection. Rebuilds the collection because TwasWeightsEntry is treated
-# as immutable. Rows for which no CV result is available (method not in
-# the CV run, or trait not in the CV prediction matrix's columns) are
-# emitted unchanged.
-#
-# The CV result keys carry a method suffix (`<m>_predicted`,
-# `<m>_performance` in snake form, or `<m>Predicted`, `<m>Performance` in
-# camel form); the TwasWeights `method` column carries the bare token
-# (e.g. "lasso"). The trait column carries the outcome name, which must
-# match the column name of the CV prediction matrix.
+# Unpack a MashPrior input into the internal twasWeightsPipeline arguments:
+#   $fullPrior                  -> mr.mash full-data dataDrivenPriorMatrices
+#   $dataDrivenPriorMatricesCv  -> per-fold priors for twasWeightsCv
+#   $samplePartition            -> the CV folds (an explicit `samplePartition`
+#                                  arg wins; otherwise the partition the per-fold
+#                                  priors were computed on)
+# NULL input returns all-NULL, preserving the supplied samplePartition.
 # @noRd
-.spliceCvIntoTwasWeights <- function(twasWeights, twasCvResult,
-                                      ldSketch = NULL) {
-  if (is.null(twasCvResult) || is.null(twasCvResult$prediction) ||
-      is.null(twasCvResult$performance)) {
-    return(twasWeights)
+.unpackMashPrior <- function(mashPrior, samplePartition = NULL) {
+  if (is.null(mashPrior)) {
+    return(list(fullPrior = NULL, dataDrivenPriorMatricesCv = NULL,
+                samplePartition = samplePartition))
   }
-  predKeyBase <- sub("(_predicted|Predicted)$", "",
-                     names(twasCvResult$prediction))
-  perfKeyBase <- sub("(_performance|Performance)$", "",
-                     names(twasCvResult$performance))
-
-  pickKey <- function(bare, keys, base) {
-    hit <- which(base == bare)
-    if (length(hit) == 0L) NA_character_ else keys[[hit[[1L]]]]
+  if (!is(mashPrior, "MashPrior")) {
+    stop("`mashPrior` must be a MashPrior object (see ?MashPrior).")
   }
-
-  studies   <- as.character(twasWeights$study)
-  contexts  <- as.character(twasWeights$context)
-  traits    <- as.character(twasWeights$trait)
-  methodsV  <- as.character(twasWeights$method)
-  newEntries <- as.list(twasWeights$entry)
-
-  for (i in seq_along(newEntries)) {
-    bare <- methodsV[[i]]
-    pKey <- pickKey(bare, names(twasCvResult$prediction), predKeyBase)
-    mKey <- pickKey(bare, names(twasCvResult$performance), perfKeyBase)
-    if (is.na(pKey) || is.na(mKey)) next
-    predMat <- twasCvResult$prediction[[pKey]]
-    perfMat <- twasCvResult$performance[[mKey]]
-    if (is.null(predMat) || is.null(perfMat)) next
-
-    tr  <- traits[[i]]
-    predCols <- colnames(predMat)
-    perfRows <- rownames(perfMat)
-    colHit <- if (!is.null(predCols) && tr %in% predCols) tr
-              else if (ncol(predMat) == 1L) 1L else NA_integer_
-    rowHit <- if (!is.null(perfRows) && tr %in% perfRows) tr
-              else if (nrow(perfMat) == 1L) 1L else NA_integer_
-    if (is.na(colHit) || is.na(rowHit)) next
-
-    predVec <- predMat[, colHit, drop = TRUE]
-    metRow  <- perfMat[rowHit, , drop = TRUE]
-    cv <- list(
-      samplePartition = twasCvResult$samplePartition,
-      predictions     = predVec,
-      metrics         = metRow)
-    entry <- newEntries[[i]]
-    newEntries[[i]] <- TwasWeightsEntry(
-      variantIds    = getVariantIds(entry),
-      weights       = getWeights(entry),
-      fits          = getFits(entry),
-      cvPerformance = cv,
-      standardized  = getStandardized(entry),
-      dataType      = getDataType(entry))
+  cvFits  <- getCvFits(mashPrior)
+  perFold <- if (!is.null(cvFits)) cvFits$perFoldFits else NULL
+  sp <- samplePartition
+  if (is.null(sp) && !is.null(cvFits) && !is.null(cvFits$samplePartition)) {
+    sp <- cvFits$samplePartition
   }
-
-  TwasWeights(
-    study    = studies,
-    context  = contexts,
-    trait    = traits,
-    method   = methodsV,
-    entry    = newEntries,
-    ldSketch = ldSketch)
+  list(fullPrior = getFullFit(mashPrior),
+       dataDrivenPriorMatricesCv = perFold,
+       samplePartition = sp)
 }
 
 # Mapping from short / canonical TWAS weight-method name to dispatch
@@ -325,7 +273,27 @@
     # keys in methodList are an internal detail of learnTwasWeights.
     tokens <- unique(methods)
   } else if (is.list(methods)) {
-    methodList <- methods
+    # Normalize a user-supplied named list the same way the character branch
+    # does: re-key each entry to its canonical `<token>_weights` name, merge the
+    # caller's kwargs over the method's defaults, and carry the token->impl map
+    # as an "impl" attribute. Without this, named-list entries keep their bare
+    # token key with no "impl" attribute, and downstream function resolution in
+    # `.resolveMethodFunction` falls back to the bare token (e.g. "mrmash"),
+    # which is not a function (the implementation is `mrmashWeights`).
+    methodList <- list()
+    for (tk in names(methods)) {
+      base <- tryCatch(.twasMethodLookup(tk), error = function(e) NULL)
+      if (is.null(base)) {
+        # Fine-mapping-only / unknown token with no learner default: keep as-is
+        # (the downstream capability gate produces a method-specific message).
+        methodList[[tk]] <- methods[[tk]]
+        next
+      }
+      snake <- names(base)[[1L]]
+      merged <- modifyList(base[[snake]], methods[[tk]])
+      attr(merged, "impl") <- attr(base[[snake]], "impl")
+      methodList[[snake]] <- merged
+    }
     tokens <- .twasTokensFromMethodList(methodList)
   } else {
     stop("`methods` must be a character vector, preset string, or named list.")
@@ -448,12 +416,12 @@
                   rssFitArg = NULL,
                   methodKey = "fsusie_weights"))
 
-# Canonical list of fine-mapping tokens recognised by twasWeightsPipeline.
-# Sourced from fineMappingPipeline's registry minus mrmash (which
-# fineMappingPipeline hard-rejects as a TWAS-only method).
+# Canonical list of fine-mapping tokens recognised by twasWeightsPipeline:
+# fineMappingPipeline's registry, which now contains only fine-mapping methods
+# (mr.mash is a TWAS method, kept out of that registry).
 # @noRd
 .twasFineMappingTokens <- function() {
-  setdiff(names(.fineMappingMethodCapabilities), "mrmash")
+  names(.fineMappingMethodCapabilities)
 }
 
 # Reject fine-mapping methods (susie / susieInf / susieAsh / mvsusie /
@@ -738,7 +706,7 @@
 #'   \code{FALSE} (default) learns weights for each range independently and
 #'   concatenates them into one entry per (study, context, trait, method);
 #'   the per-region fits are kept as a named list and per-region CV is
-#'   recorded as a flat \code{cvPerformance} data frame (one row per region).
+#'   recorded as a flat \code{cvResult} data frame (one row per region).
 #'   \code{TRUE} concatenates the ranges' genotypes into one joint fit.
 #'   Ignored for a single-range / cis request.
 #' @param jointSpecification Optional joint-fit specification (NULL by
@@ -825,8 +793,10 @@ setMethod("twasWeightsPipeline", "QtlDataset",
            jointSpecification     = NULL,
            fineMappingResult      = NULL,
            twasWeights            = NULL,
+           mashPrior              = NULL,
            cvFolds                = 5,
            samplePartition        = NULL,
+           fitFullData            = TRUE,
            maxCvVariants          = -1,
            cvThreads              = 1,
            cvWeightMethods        = NULL,
@@ -867,6 +837,24 @@ setMethod("twasWeightsPipeline", "QtlDataset",
     norm <- .twasNormalizeMethods(methods)
     .twasCheckMethodCapabilities(norm$tokens, "QtlDataset")
     .twasCheckFineMappingMethods(norm$tokens, fineMappingResult, "QtlDataset")
+
+    # fitFullData = FALSE (CV-only) is meaningful only with cross-validation.
+    if (!isTRUE(fitFullData) && cvFolds <= 1L) {
+      stop("twasWeightsPipeline: fitFullData = FALSE requires cross-validation ",
+           "(cvFolds > 1).")
+    }
+    # Unpack the MashPrior bundle: route the full-data prior into the mr.mash
+    # method args, the per-fold priors + fold partition into the CV machinery.
+    mp <- .unpackMashPrior(mashPrior, samplePartition)
+    samplePartition <- mp$samplePartition
+    dataDrivenPriorMatricesCv <- mp$dataDrivenPriorMatricesCv
+    if (!is.null(mashPrior) && !"mrmash" %in% norm$tokens) {
+      warning("`mashPrior` was supplied but 'mrmash' is not among `methods`; ",
+              "the data-driven prior is ignored.")
+    }
+    if (!is.null(mp$fullPrior) && "mrmash_weights" %in% names(norm$methodList)) {
+      norm$methodList$mrmash_weights$dataDrivenPriorMatrices <- mp$fullPrior
+    }
 
     # Explicit jointSpecification path: run the per-spec axis dispatcher for
     # mr.mash. Other (univariate) methods continue through the existing
@@ -934,208 +922,38 @@ setMethod("twasWeightsPipeline", "QtlDataset",
     multivariate <- any(vapply(norm$tokens, .twasIsMultivariateToken,
                                logical(1)))
 
-    runOne <- function(ctx, tid) {
-      # Resume cache: per-method check against the supplied `twasWeights`
-      # collection. Methods present in the cache for (study, ctx, tid)
-      # are pulled directly; the remaining methods (if any) are fit via
-      # .twasWeightsPipelineMatrix with a subset weightMethods list.
-      cachedRows <- list()
-      remaining  <- norm$methodList
-      for (mName in names(norm$methodList)) {
-        shortMethod <- sub("(_weights|Weights)$", "", mName)
-        cached <- .twasCacheLookup(twasWeights, study, ctx, tid, shortMethod)
-        if (!is.null(cached)) {
-          cachedRows[[shortMethod]] <- cached
-          remaining[[mName]] <- NULL
-        }
-      }
-      cachedTw <- .twasBuildFromCachedRows(cachedRows, study, ctx, tid)
-      if (length(remaining) == 0L) return(cachedTw)
-
-      Y <- .fmResidPheno(
-        data, contexts = ctx, traitId = tid,
-        phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
-        genotypeCovariatesToResidualize  = genotypeCovariatesToResidualize,
-        naAction = naAction)
-
-      # Fine-mapping fits for this (study, ctx, trait); a multi-region fit is a
-      # per-region list and is selected blockwise inside the loop.
-      allFits <- .twasFineMappingFits(fineMappingResult,
-                                      study = study, context = ctx, trait = tid)
-      # Fine-mapping's own cross-validated predictions (shared fold partition),
-      # reused by the ensemble instead of re-fitting the fine-mapping methods.
-      fmCv <- .twasCvResultFor(fineMappingResult, study, ctx, tid)
-      nBlocks <- length(xRegions)
-      perBlockTw <- lapply(seq_len(nBlocks), function(bi) {
-        rg <- xRegions[[bi]]
-        X <- if (is.null(rg)) {
-          .fmResidGeno(
-            data, contexts = ctx, traitId = tid, cisWindow = cisWindow,
-            phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
-            genotypeCovariatesToResidualize  = genotypeCovariatesToResidualize,
-            samples = rownames(Y))
-        } else {
-          .fmResidGeno(
-            data, contexts = ctx, region = rg,
-            phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
-            genotypeCovariatesToResidualize  = genotypeCovariatesToResidualize,
-            samples = rownames(Y))
-        }
-        common <- intersect(rownames(X), rownames(Y))
-        if (length(common) < 2L) {
-          stop(sprintf(
-            "twasWeightsPipeline: too few shared samples between residualized X and Y for (context='%s', trait='%s').",
-            ctx, tid))
-        }
-        .twasWeightsPipelineMatrix(
-          X = X[common, , drop = FALSE], y = Y[common, , drop = FALSE],
-          study = study, context = ctx, trait = tid,
-          fittedModels = .twasFitsForRegion(allFits, bi, nBlocks),
-          cvFolds = cvFolds,
-          samplePartition = samplePartition,
-          fineMappingCv = fmCv,
-          weightMethods = remaining,
-          maxCvVariants = maxCvVariants,
-          cvThreads = cvThreads,
-          cvWeightMethods = cvWeightMethods,
-          ensemble = ensemble,
-          ensembleR2Threshold = ensembleR2Threshold,
-          ensembleSolver = ensembleSolver,
-          ensembleAlpha = ensembleAlpha,
-          estimatePi = estimatePi,
-          standardized = FALSE,
-          dataType = dataType,
-          ldSketch = NULL,
-          verbose = verbose)$twasWeights
-      })
-      # Single block (cis or jointRegions=TRUE) returns unchanged; multiple
-      # blocks (jointRegions=FALSE) concatenate per method into one entry.
-      freshTw <- .twasMergeRegions(
-        perBlockTw, vapply(xRegions, .twasRegionLabel, character(1)))
-      if (is.null(cachedTw)) freshTw
-      else .rbindTwasWeights(freshTw, cachedTw, ldSketch = NULL)
-    }
-
+    # Multivariate (mr.mash / mvsusie / ... + any univariate methods) joint fit
+    # over the (context, trait) grid, ROUTED THROUGH THE JOINT ENGINE: one
+    # composed group per region -> per-method fit (the engine twas fitter) +
+    # SR-TWAS ensemble layer, merged across regions. The SAME engine + fitter +
+    # ensemble as every other multivariate path -- no separate fitting code.
     runMultivariate <- function(traits) {
-      # Joint over selected (contexts, traits): residualize, intersect
-      # samples across contexts, drop subjects with any-NA in Y.
-      # Sample basis for Y construction (residualized genotypes are
-      # region-independent in their sample set): use the cis window when no
-      # explicit region is given, otherwise the first range.
-      Xlist <- lapply(useCtx, function(ctx) {
-        if (is.null(region)) {
-          .fmResidGeno(
-            data, contexts = ctx, traitId = traits, cisWindow = cisWindow,
-            phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
-            genotypeCovariatesToResidualize  = genotypeCovariatesToResidualize)
-        } else {
-          .fmResidGeno(
-            data, contexts = ctx, region = region[1L],
-            phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
-            genotypeCovariatesToResidualize  = genotypeCovariatesToResidualize)
-        }
+      marker <- new("TwasJointPipeline", config = list(
+        cvFolds = cvFolds, samplePartition = samplePartition,
+        fitFullData = fitFullData, dataType = dataType,
+        retainFitDetail = retainFitDetail, standardized = FALSE,
+        ensemble = ensemble, ensembleR2Threshold = ensembleR2Threshold,
+        ensembleSolver = ensembleSolver, ensembleAlpha = ensembleAlpha,
+        maxCvVariants = maxCvVariants, cvThreads = cvThreads,
+        estimatePi = estimatePi, verbose = verbose, ldSketch = NULL))
+      synthSpec <- list(list(axes = c("context", "trait"), scope = NULL))
+      labs <- vapply(xRegions, .twasRegionLabel, character(1))
+      perRegion <- lapply(seq_along(xRegions), function(bi) {
+        .runJointSpecs(synthSpec, data, dataForm = "individual", pipeline = marker,
+                       jointMethods = norm$tokens, contexts = useCtx,
+                       traitIds = traits,
+                       args = list(methodList = norm$methodList,
+                                   fineMappingResult = fineMappingResult,
+                                   dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
+                                   cisWindow = cisWindow, region = xRegions[[bi]],
+                                   regionIndex = bi, nRegions = length(xRegions),
+                                   verbose = verbose))
       })
-      # Intersect samples across contexts.
-      commonSamples <- Reduce(intersect, lapply(Xlist, rownames))
-      if (length(commonSamples) < 2L) {
-        stop("twasWeightsPipeline(QtlDataset, multivariate): insufficient samples shared across selected contexts.")
-      }
-
-      Yres <- .fmResidPheno(
-        data, contexts = useCtx, traitId = traits,
-        phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
-        genotypeCovariatesToResidualize  = genotypeCovariatesToResidualize,
-        naAction = naAction)
-      if (length(useCtx) == 1L) Yres <- setNames(list(Yres), useCtx)
-      # Concatenate per-context residualized phenotypes column-wise,
-      # restricting to commonSamples. Column names become
-      # "<context>__<trait>".
-      Ymats <- list()
-      colMeta <- list()
-      for (ctx in names(Yres)) {
-        rn <- intersect(commonSamples, rownames(Yres[[ctx]]))
-        Ym <- Yres[[ctx]][rn, , drop = FALSE]
-        # Pad missing rows so columns line up across contexts.
-        if (length(rn) < length(commonSamples)) {
-          full <- matrix(NA_real_, nrow = length(commonSamples),
-                         ncol = ncol(Ym),
-                         dimnames = list(commonSamples, colnames(Ym)))
-          full[rn, ] <- Ym
-          Ym <- full
-        } else {
-          Ym <- Ym[commonSamples, , drop = FALSE]
-        }
-        colnames(Ym) <- paste(ctx, colnames(Ym), sep = "__")
-        Ymats[[ctx]] <- Ym
-        colMeta[[ctx]] <- data.frame(
-          context = ctx, trait = colnames(Yres[[ctx]]),
-          stringsAsFactors = FALSE)
-      }
-      Y <- do.call(cbind, Ymats)
-      meta <- do.call(rbind, colMeta)
-      # Drop subjects with any NA across Y columns (joint over contexts).
-      keep <- complete.cases(Y)
-      if (sum(keep) < 2L) {
-        stop("twasWeightsPipeline(QtlDataset, multivariate): too few subjects with complete Y across selected (context, trait) columns.")
-      }
-      Y <- Y[keep, , drop = FALSE]
-
-      # Per-region fit + merge. The cis block reuses the already-extracted
-      # genotypes; an explicit region re-extracts that window (genotype
-      # residualization is context-independent, so one context suffices).
-      # mvsusie/mr.mash joint fits are stored once per (context, trait) row in
-      # the FineMappingResult; pull via the first (context, trait) of the group
-      # and (for a multi-region fit) select the per-region element.
-      perBlockTw <- lapply(seq_along(xRegions), function(bi) {
-        rg <- xRegions[[bi]]
-        Xr <- if (is.null(rg)) {
-          Xlist[[1L]]
-        } else {
-          .fmResidGeno(
-            data, contexts = useCtx[[1L]], region = rg,
-            phenotypeCovariatesToResidualize = phenotypeCovariatesToResidualize,
-            genotypeCovariatesToResidualize  = genotypeCovariatesToResidualize)
-        }
-        Xr <- Xr[rownames(Y), , drop = FALSE]
-        jointFits <- .twasFitsForRegion(
-          .twasFineMappingFits(fineMappingResult, study = study,
-                               context = meta$context[[1L]],
-                               trait   = meta$trait[[1L]]),
-          bi, length(xRegions))
-        fmCv <- .twasCvResultFor(fineMappingResult, study,
-                                 meta$context[[1L]], meta$trait[[1L]])
-        .twasWeightsPipelineMatrix(
-          X = Xr, y = Y,
-          study   = study,
-          context = meta$context,
-          trait   = meta$trait,
-          # Retain the mr.mash fit parts ({dataDrivenPriorMatrices, w0, V}) on
-          # the entry's `fits` slot so fineMappingPipeline can rebuild the
-          # mvSuSiE reweighted prior + residual variance from this shared fit.
-          # `retainFitDetail` selects the slim payload (default) or the full
-          # mr.mash fit.
-          retainFits = TRUE,
-          retainFitDetail = retainFitDetail,
-          fittedModels = jointFits,
-          cvFolds = cvFolds,
-          samplePartition = samplePartition,
-          fineMappingCv = fmCv,
-          weightMethods = norm$methodList,
-          maxCvVariants = maxCvVariants,
-          cvThreads = cvThreads,
-          cvWeightMethods = cvWeightMethods,
-          ensemble = ensemble,
-          ensembleR2Threshold = ensembleR2Threshold,
-          ensembleSolver = ensembleSolver,
-          ensembleAlpha = ensembleAlpha,
-          estimatePi = estimatePi,
-          standardized = FALSE,
-          dataType = dataType,
-          ldSketch = NULL,
-          verbose = verbose)$twasWeights
-      })
-      .twasMergeRegions(
-        perBlockTw, vapply(xRegions, .twasRegionLabel, character(1)))
+      keep <- !vapply(perRegion, is.null, logical(1))
+      perRegion <- perRegion[keep]; labs <- labs[keep]
+      if (length(perRegion) == 0L) return(NULL)
+      if (length(perRegion) == 1L) return(perRegion[[1L]])
+      .twasMergeResultsByKey(perRegion, labs)
     }
 
     # Top-level dispatch within the QtlDataset method body.
@@ -1144,15 +962,38 @@ setMethod("twasWeightsPipeline", "QtlDataset",
       # we already rejected above via .twasCheckMultivariateY.
       tw <- runMultivariate(allTraits)
     } else {
-      # Univariate methods: sequential over (context, trait).
-      out <- NULL
-      for (ctx in useCtx) {
-        for (tid in perCtxTraits[[ctx]]) {
-          twi <- runOne(ctx, tid)
-          out <- if (is.null(out)) twi else .rbindTwasWeights(out, twi, ldSketch = NULL)
-        }
-      }
-      tw <- out
+      # Univariate methods ROUTED THROUGH THE ENGINE: one 1-condition group per
+      # (context, trait), per region -> the SAME per-method fitter (+ ensemble
+      # layer for >= 2 methods + resume cache) as the joint paths, merged across
+      # regions. No separate per-(context, trait) fitting loop.
+      marker <- new("TwasJointPipeline", config = list(
+        cvFolds = cvFolds, samplePartition = samplePartition,
+        fitFullData = fitFullData, dataType = dataType,
+        retainFitDetail = retainFitDetail, standardized = FALSE,
+        ensemble = ensemble, ensembleR2Threshold = ensembleR2Threshold,
+        ensembleSolver = ensembleSolver, ensembleAlpha = ensembleAlpha,
+        maxCvVariants = maxCvVariants, cvThreads = cvThreads,
+        estimatePi = estimatePi, verbose = verbose, ldSketch = NULL))
+      univCell <- .lookupJointCell("univariate", "individual")
+      scope <- list(studies = study,
+                    contexts = setNames(list(useCtx), study),
+                    traits   = setNames(list(allTraits), study))
+      labs <- vapply(xRegions, .twasRegionLabel, character(1))
+      perRegion <- lapply(seq_along(xRegions), function(bi) {
+        .runJointCell(univCell, marker, data, scope, norm$tokens,
+                      args = list(methodList = norm$methodList,
+                                  fineMappingResult = fineMappingResult,
+                                  cache = twasWeights,
+                                  dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
+                                  cisWindow = cisWindow, region = xRegions[[bi]],
+                                  regionIndex = bi, nRegions = length(xRegions),
+                                  naAction = naAction, verbose = verbose))
+      })
+      keep <- !vapply(perRegion, is.null, logical(1))
+      perRegion <- perRegion[keep]; labs <- labs[keep]
+      tw <- if (length(perRegion) == 0L) NULL
+            else if (length(perRegion) == 1L) perRegion[[1L]]
+            else .twasMergeResultsByKey(perRegion, labs)
     }
     if (is.null(tw) && is.null(jointResult)) {
       stop("twasWeightsPipeline(QtlDataset): no (context, trait) pair produced any weights.")
@@ -1333,7 +1174,7 @@ setMethod("twasWeightsPipeline", "QtlSumStats",
           variantIds    = variantIds,
           weights       = as.numeric(weights),
           fits          = fitAttr,
-          cvPerformance = NULL,        # Q5: no CV on the sumstat path
+          cvResult = NULL,        # Q5: no CV on the sumstat path
           standardized  = TRUE,        # Q4: sumstat-derived weights are standardized
           dataType      = dataType)
       }
@@ -1434,7 +1275,7 @@ setMethod("twasWeightsPipeline", "QtlSumStats",
               # Share the underlying joint fit on the first row only;
               # remaining rows reference the same fit by leaving fits NULL.
               fits          = if (kk == 1L) fitAttr else NULL,
-              cvPerformance = NULL,
+              cvResult = NULL,
               standardized  = TRUE,
               dataType      = dataType)
           }
@@ -1618,397 +1459,9 @@ setMethod("twasWeightsPipeline", "ANY",
   })
 
 # =============================================================================
-# Internal matrix-driven TWAS weights pipeline
+# SR-TWAS ensemble stacking solvers (used by ensembleWeights, the primitive the
+# engine's .twasEnsembleLayer calls per context)
 # =============================================================================
-#
-# This is the legacy matrix-based pipeline retained as an internal worker.
-# The exported, S4-dispatched `twasWeightsPipeline` defined above extracts
-# (X, Y) blocks from QtlDataset / QtlSumStats / GwasSumStats and calls this
-# function per (study, context, trait) tuple. It returns a single-tuple
-# `TwasWeights` collection (one row per method, plus an optional ensemble
-# row) along with auxiliary state used during stacking.
-#
-# Method restrictions imposed at the dispatch layer:
-# - PRS-CS, lassosumRss, sdpr, susieRss, susieInfRss, susieAshRss,
-#   mrAshRss, mrmashRss, mvsusieRss: RSS-only (refuse QtlDataset).
-# - bglrWeights / qgg methods (bayesA/B/C/L/N/R, bLasso, dpr*): individual
-#   level only (refuse QtlSumStats / GwasSumStats).
-# - mr.mash / mvsusie: multi-trait / multi-context (same rule family as
-#   the fine-mapping mvSuSiE family in the design doc).
-#
-# @noRd
-.twasWeightsPipelineMatrix <- function(X,
-                                y,
-                                study = "",
-                                context = "",
-                                trait = "",
-                                susieFit = NULL,
-                                fittedModels = NULL,
-                                cvFolds = 5,
-                                samplePartition = NULL,
-                                fineMappingCv = NULL,
-                                weightMethods = "default",
-                                maxCvVariants = -1,
-                                cvThreads = 1,
-                                cvWeightMethods = NULL,
-                                ensemble = TRUE,
-                                ensembleR2Threshold = 0.01,
-                                ensembleSolver = "quadprog",
-                                ensembleAlpha = 1,
-                                estimatePi = TRUE,
-                                standardized = FALSE,
-                                dataType = NULL,
-                                ldSketch = NULL,
-                                retainFits = FALSE,
-                                retainFitDetail = c("slim", "full"),
-                                verbose = 1) {
-  retainFitDetail <- match.arg(retainFitDetail)
-  if (is.character(weightMethods)) {
-    weightMethods <- .twasMethodLookup(weightMethods)
-  }
-  if (is.null(fittedModels)) fittedModels <- list()
-  if (!is.null(susieFit)) fittedModels[["susie"]] <- susieFit
-
-  # Inject precomputed fine-mapping fits into the per-method args so the
-  # corresponding *Weights wrapper extracts coefficients from the fit
-  # rather than refitting. The adapter table (.twasFineMappingMethodAdapters)
-  # gives the snake_case methodList key and the *Fit argument name for
-  # each fine-mapping method.
-  for (canonical in names(.twasFineMappingMethodAdapters)) {
-    adapter <- .twasFineMappingMethodAdapters[[canonical]]
-    if (!is.null(fittedModels[[canonical]]) &&
-        !is.null(weightMethods[[adapter$methodKey]]) &&
-        is.null(weightMethods[[adapter$methodKey]][[adapter$fitArg]])) {
-      weightMethods[[adapter$methodKey]][[adapter$fitArg]] <-
-        fittedModels[[canonical]]
-    }
-  }
-
-  res <- list()
-  st <- proc.time()
-  if (verbose >= 1) {
-    message("Performing TWAS weights computation for univariate analysis methods ...")
-    tic()
-  }
-
-  if (!is.null(fittedModels[["susie"]]) && !is.null(weightMethods$susie_weights)) {
-    res$susieWeightsIntermediate <- .susieWeightIntermediate(fittedModels[["susie"]], X)
-  }
-
-  # Check if empirical pi estimation is needed for spike-and-slab methods
-  bayesCneedsPi <- "bayes_c_weights" %in% names(weightMethods) &&
-    !"pi" %in% names(weightMethods$bayes_c_weights)
-  bayesBneedsPi <- "bayes_b_weights" %in% names(weightMethods) &&
-    !"probIn" %in% names(weightMethods$bayes_b_weights)
-  needsPiEstimation <- (bayesCneedsPi || bayesBneedsPi) && estimatePi
-
-  learnArgs <- list(
-    study = study, context = context, trait = trait,
-    standardized = standardized, dataType = dataType,
-    ldSketch = ldSketch, retainFitDetail = retainFitDetail)
-
-  if (needsPiEstimation) {
-    # Run mr.ash first to estimate sparsity
-    mrashMethods <- list(mrash_weights = weightMethods[["mrash_weights"]] %||% list())
-
-    if (verbose >= 1) message("  Estimating sparsity from mr.ash ...")
-    mrashWeights <- do.call(learnTwasWeights, c(
-      list(X = X, Y = y, weightMethods = mrashMethods,
-           retainFits = TRUE, verbose = verbose),
-      learnArgs))
-
-    empiricalPi <- estimateSparsity(mrashWeights)
-    if (verbose >= 1) message(sprintf("  Empirical sparsity estimate: %.4f", empiricalPi))
-    res$empiricalPi <- empiricalPi
-
-    # Inject into spike-and-slab methods that need it
-    if (bayesCneedsPi) weightMethods$bayes_c_weights$pi <- as.numeric(empiricalPi)
-    if (bayesBneedsPi) weightMethods$bayes_b_weights$probIn <- as.numeric(empiricalPi)
-
-    # Run remaining methods (those not already computed)
-    remainingFnNames <- setdiff(names(weightMethods), "mrash_weights")
-
-    if (length(remainingFnNames) > 0) {
-      remainingMethods <- weightMethods[remainingFnNames]
-      remainingTw <- do.call(learnTwasWeights, c(
-        list(X = X, Y = y, weightMethods = remainingMethods,
-             fittedModels = fittedModels, retainFits = retainFits,
-             verbose = verbose),
-        learnArgs))
-      res$twasWeights <- .rbindTwasWeights(mrashWeights, remainingTw,
-                                            ldSketch = ldSketch)
-    } else {
-      res$twasWeights <- mrashWeights
-    }
-
-    # Remove mr.ash if it was not in the original weightMethods
-    if (!"mrash_weights" %in% names(weightMethods)) {
-      tw <- res$twasWeights
-      keep <- as.character(tw$method) != "mrash"
-      res$twasWeights <- TwasWeights(
-        study   = as.character(tw$study)[keep],
-        context = as.character(tw$context)[keep],
-        trait   = as.character(tw$trait)[keep],
-        method  = as.character(tw$method)[keep],
-        entry   = as.list(tw$entry)[keep],
-        ldSketch = ldSketch)
-    }
-  } else {
-    # Run all methods at once
-    res$twasWeights <- do.call(learnTwasWeights, c(
-      list(X = X, Y = y, weightMethods = weightMethods,
-           fittedModels = fittedModels, retainFits = retainFits,
-           verbose = verbose),
-      learnArgs))
-  }
-  if (verbose >= 1) {
-    elapsed <- toc(quiet = TRUE)
-    message(sprintf("TWAS weights fitting done in %.1fs", elapsed$toc - elapsed$tic))
-  }
-  res$twasPredictions <- twasPredict(X, res$twasWeights)
-
-  if (cvFolds > 1) {
-    # A few cutting corners to run CV faster at the disadvantage of SuSiE and mr.ash:
-    # 1. reset SuSiE to not using refine or adaptive L but to use L from previous analysis
-    # 2. at most 100 iterations for mr.ash allowed
-    # 3. only use a subset of variants randomly selected to avoid bias
-    if (!is.null(fittedModels[["susieInf"]]) && !is.null(weightMethods$susie_inf_weights)) {
-      weightMethods$susie_inf_weights$L <- length(fittedModels[["susieInf"]]$V)
-      weightMethods$susie_inf_weights$refine <- FALSE
-    }
-    if (!is.null(weightMethods$susie_weights)) {
-      susieCvFit <- fittedModels[["susie"]]
-      if (is.null(susieCvFit)) susieCvFit <- fittedModels[["susieInf"]]
-      if (!is.null(susieCvFit)) {
-        weightMethods$susie_weights$L <- length(susieCvFit$V)
-        weightMethods$susie_weights$refine <- FALSE
-      }
-    }
-    if (is.null(cvWeightMethods)) {
-      cvWeightMethods <- .filterZeroWeightMethods(weightMethods, res$twasWeights)
-    }
-
-    # Fine-mapping handoff: when fineMappingPipeline supplied cross-validated
-    # predictions for some methods (shared fold partition + per-fold out-of-
-    # fold predictions), reuse them rather than refitting those methods here.
-    # Drop them from the CV refit set, adopt the shared partition (unless the
-    # caller passed one explicitly), and merge their predictions/metrics into
-    # the CV result below so the SR-TWAS ensemble consumes fine-mapping's own
-    # cross-validation.
-    fmCvPrediction <- NULL; fmCvPerformance <- NULL
-    if (!is.null(fineMappingCv) && length(fineMappingCv$prediction) > 0L) {
-      if (is.null(samplePartition) && !is.null(fineMappingCv$samplePartition)) {
-        samplePartition <- fineMappingCv$samplePartition
-      }
-      fmBase <- sub("(_predicted|Predicted)$", "", names(fineMappingCv$prediction))
-      cvWeightMethods <- cvWeightMethods[
-        setdiff(names(cvWeightMethods), paste0(fmBase, "_weights"))]
-      yMat <- if (is.matrix(y)) y
-              else matrix(y, ncol = 1L, dimnames = list(names(y), NULL))
-      sampleNames  <- rownames(X)
-      outcomeNames <- colnames(yMat)
-      alignFmPred <- function(mat) {
-        out <- matrix(NA_real_, length(sampleNames),
-                      max(1L, length(outcomeNames)),
-                      dimnames = list(sampleNames, outcomeNames))
-        rs <- intersect(rownames(mat), sampleNames)
-        cs <- if (!is.null(colnames(mat)) && !is.null(outcomeNames))
-                intersect(colnames(mat), outcomeNames) else character(0)
-        if (length(cs) > 0L) {
-          out[rs, cs] <- mat[rs, cs, drop = FALSE]
-        } else if (ncol(mat) == ncol(out)) {
-          out[rs, ] <- mat[rs, , drop = FALSE]
-        }
-        out
-      }
-      fmCvPrediction <- setNames(lapply(fineMappingCv$prediction, alignFmPred),
-                                 names(fineMappingCv$prediction))
-      fmCvPerformance <- fineMappingCv$performance
-    }
-
-    variantsForCv <- c()
-    if (maxCvVariants <= 0) {
-      maxCvVariants <- Inf
-    }
-    if (ncol(X) > maxCvVariants) {
-      variantsForCv <- sample(colnames(X), maxCvVariants, replace = FALSE)
-    }
-
-    if (length(cvWeightMethods) > 0L) {
-      if (verbose >= 1) {
-        message("Performing cross-validation to assess TWAS weights ...")
-        tic()
-      }
-      res$twasCvResult <- twasWeightsCv(
-        X,
-        y,
-        fold = cvFolds,
-        samplePartitions = samplePartition,
-        weightMethods = cvWeightMethods,
-        maxNumVariants = maxCvVariants,
-        numThreads = cvThreads,
-        verbose = verbose,
-        variantsToKeep = if (length(variantsForCv) > 0) variantsForCv else NULL
-      )
-      if (verbose >= 1) {
-        elapsed <- toc(quiet = TRUE)
-        message(sprintf("Cross-validation done in %.1fs", elapsed$toc - elapsed$tic))
-      }
-    } else {
-      # Every CV method came from fine-mapping; no refit needed here.
-      res$twasCvResult <- list(samplePartition = samplePartition,
-                               prediction = list(), performance = list())
-    }
-
-    # Merge fine-mapping's cross-validated predictions/metrics into the CV
-    # result so downstream splicing + ensemble treat them as first-class.
-    if (!is.null(fmCvPrediction)) {
-      res$twasCvResult$prediction  <- c(res$twasCvResult$prediction,
-                                         fmCvPrediction)
-      res$twasCvResult$performance <- c(res$twasCvResult$performance,
-                                        fmCvPerformance)
-      if (is.null(res$twasCvResult$samplePartition)) {
-        res$twasCvResult$samplePartition <- samplePartition
-      }
-    }
-
-    # Number of methods participating in cross-validation / ensemble (refit
-    # here plus those handed over by fine-mapping).
-    nCvMethods <- length(res$twasCvResult$prediction)
-
-    # Splice per-(method, outcome) CV predictions + metrics into the
-    # corresponding TwasWeightsEntry$cvPerformance slot.
-    res$twasWeights <- .spliceCvIntoTwasWeights(res$twasWeights,
-                                                 res$twasCvResult,
-                                                 ldSketch = ldSketch)
-
-    # Ensemble learning: learn optimal method combination via stacked regression
-    if (isTRUE(ensemble) && nCvMethods <= 1) {
-      if (verbose >= 1) message("Ensemble model skipped: only ", nCvMethods,
-              " weight method provided (need >= 2 for ensemble learning).")
-    }
-    if (isTRUE(ensemble) && nCvMethods > 1) {
-      if (!is.null(res$twasCvResult$performance)) {
-        # Extract R-squared for each method from CV performance table
-        methodRsq <- vapply(res$twasCvResult$performance, function(perf) {
-          perf[1, "rsq"]
-        }, numeric(1))
-        names(methodRsq) <- sub("(_performance|Performance)$", "", names(methodRsq))
-
-        # NA R-squared already implies the method is unusable for the ensemble: a
-        # method whose CV predictions are degenerate (zero variance across all
-        # held-out folds) yields cor(predictions, y) = NA and therefore rsq = NA.
-        # So !is.na(methodRsq) is sufficient to drop both NA-rsq and degenerate
-        # methods - no separate variance check needed.
-        passing <- !is.na(methodRsq) & methodRsq >= ensembleR2Threshold
-        nPassing <- sum(passing)
-
-        if (nPassing < 2) {
-          # Ensemble (stacked regression) requires at least 2 base learners.
-          # Build a per-method status line so the user can see which methods
-          # dropped out and why (NA R-squared from degenerate CV predictions,
-          # or simply R-squared below the cutoff).
-          reason <- ifelse(passing, "(passed)",
-                    ifelse(is.na(methodRsq),
-                           "(dropped: NA R-squared - likely degenerate CV predictions)",
-                           "(dropped: R-squared below cutoff)"))
-          passedInfo <- paste0("  ", names(methodRsq), ": R-squared = ",
-                               round(methodRsq, 4), " ", reason)
-          surviving <- if (nPassing == 1) {
-            paste0(" Use the surviving method's weights directly: ",
-                   names(methodRsq)[passing], ".")
-          } else ""
-          if (verbose >= 1) message("Ensemble TWAS skipped: ", nPassing, " of ", length(methodRsq),
-                  " methods passed the R-squared cutoff of ", ensembleR2Threshold,
-                  " (need >= 2).", surviving, "\n",
-                  "Method R-squared values:\n",
-                  paste(passedInfo, collapse = "\n"))
-        } else {
-          passingBase <- names(methodRsq)[passing]
-
-          # Subset cvResults predictions to passing methods, matching on the
-          # base name regardless of whether the prediction key uses snake
-          # ("lasso_predicted") or camel ("lassoPredicted") form.
-          filteredCv <- res$twasCvResult
-          predBaseNames <- sub("(_predicted|Predicted)$", "", names(filteredCv$prediction))
-          filteredCv$prediction <- filteredCv$prediction[match(passingBase, predBaseNames)]
-
-          # Subset twas_weights to passing methods.
-          # Method names on a TwasWeights collection are stored as bare
-          # tokens (e.g. "lasso") in the `method` column; the ensemble
-          # helper wants snake_case "<method>_weights" keys.
-          tw <- res$twasWeights
-          twMethodNames <- as.character(tw$method)
-          filteredWeights <- setNames(
-            lapply(passingBase, function(bn) {
-              idx <- which(twMethodNames == bn)
-              if (length(idx) == 0L) return(NULL)
-              w <- getWeights(tw$entry[[idx[[1L]]]])
-              if (!is.matrix(w)) w <- matrix(w, ncol = 1)
-              w
-            }),
-            paste0(passingBase, "_weights"))
-          filteredWeights <- Filter(Negate(is.null), filteredWeights)
-
-          if (verbose >= 1) {
-            message("Computing ensemble TWAS weights via stacked regression ",
-                    "using ", nPassing, " methods: ",
-                    paste(passingBase, collapse = ", "), " ...")
-            tic()
-          }
-          ensResult <- ensembleWeights(
-            cvResults = filteredCv,
-            Y = y,
-            twasWeightList = filteredWeights,
-            solver = ensembleSolver,
-            alpha = ensembleAlpha
-          )
-          if (verbose >= 1) {
-            elapsed <- toc(quiet = TRUE)
-            message(sprintf("Ensemble learning done in %.1fs", elapsed$toc - elapsed$tic))
-          }
-
-          # Add ensemble weights alongside individual method weights as a
-          # new row in the TwasWeights collection.
-          if (!is.null(ensResult$ensembleTwasWeights)) {
-            ensWt <- ensResult$ensembleTwasWeights
-            if (!is.matrix(ensWt)) ensWt <- matrix(ensWt, ncol = 1)
-            tw <- res$twasWeights
-            # Use the first existing row's (study, context, trait) as the
-            # identity tuple for the ensemble row.
-            existingStudy   <- as.character(tw$study)[1L]
-            existingContext <- as.character(tw$context)[1L]
-            existingTrait   <- as.character(tw$trait)[1L]
-            existingStd     <- getStandardized(tw$entry[[1L]])
-            ensWtVec <- if (ncol(ensWt) == 1L) drop(ensWt) else ensWt
-            ensVarIds <- if (!is.null(rownames(ensWt))) rownames(ensWt)
-                         else colnames(X)
-            ensEntry <- TwasWeightsEntry(
-              variantIds   = ensVarIds,
-              weights      = ensWtVec,
-              cvPerformance = list(
-                methodCoef        = ensResult$methodCoef,
-                methodPerformance = ensResult$methodPerformance),
-              standardized = existingStd)
-            ensRow <- TwasWeights(
-              study   = existingStudy,
-              context = existingContext,
-              trait   = existingTrait,
-              method  = "ensemble",
-              entry   = list(ensEntry),
-              ldSketch = ldSketch)
-            res$twasWeights <- .rbindTwasWeights(tw, ensRow, ldSketch = ldSketch)
-            res$twasPredictions$ensemble_predicted <- X %*% ensWt
-          }
-          res$ensemble <- ensResult
-        }
-      }
-    }
-  }
-  res$totalTimeElapsed <- proc.time() - st
-
-  return(res)
-}
 
 # Solve ensemble stacking via quadprog (constrained QP with sum-to-1 and non-negativity).
 # @param Pvalid Matrix of CV predictions for valid methods (n x Kvalid).

@@ -334,15 +334,28 @@ test_that("parseMethods: rejects multi-axis methods at per-trait level", {
     "per-trait")
 })
 
-test_that("parseMethods: rejects user-rejected tokens (mrmash in fineMapping)", {
+test_that("parseMethods: a TWAS-only token (mrmash) is unknown to the fine-mapping grammar", {
+  # mr.mash is not in the fine-mapping capability table (it is TWAS-only), so it
+  # is rejected as an unknown fine-mapping token.
   qd <- .js_makeQtlDataset()
   expect_error(
     pecotmr:::parseMethods(
       methods = "mrmash",
       data = qd,
       caps = pecotmr:::.fineMappingMethodCapabilities,
+      multivariateMethods = c("mvsusie", "fsusie")),
+    "unknown method token")
+})
+
+test_that("parseMethods: rejectedAtUser tokens are refused", {
+  qd <- .js_makeQtlDataset()
+  expect_error(
+    pecotmr:::parseMethods(
+      methods = "mvsusie",
+      data = qd,
+      caps = pecotmr:::.fineMappingMethodCapabilities,
       multivariateMethods = c("mvsusie", "fsusie"),
-      rejectedAtUser = "mrmash"),
+      rejectedAtUser = "mvsusie"),
     "cannot be user-requested")
 })
 
@@ -649,7 +662,7 @@ context("joint dispatchers (fineMappingDispatcher / twasDispatcher)")
 .jd_mockPostprocess <- function() {
   function(fit, method, dataX, dataY, coverage, secondaryCoverage,
            signalCutoff, minAbsCorr, csInput = NULL, af = NULL,
-           region = NULL) {
+           region = NULL, conditionIdx = NULL) {
     if (is.matrix(dataX)) {
       vids <- colnames(dataX)
     } else if (is.list(dataY) && !is.null(dataY$z)) {
@@ -708,9 +721,9 @@ test_that("fineMappingPipeline(QtlSumStats): jointSpec='context' fits one joint 
     fineMappingPipeline(ss, methods = "mvsusie",
                         jointSpecification = "context"))
   expect_s4_class(res, "QtlFineMappingResult")
-  expect_equal(nrow(res), 1L)
-  expect_equal(as.character(res$context), "joint")
-  expect_true(grepl("c1;c2|c2;c1", as.character(res$jointContexts)))
+  expect_equal(nrow(res), 2L)                                # per-context rows
+  expect_setequal(as.character(res$context), c("c1", "c2")) # REAL contexts
+  expect_true(all(grepl("c1;c2|c2;c1", as.character(res$jointContexts))))
 })
 
 test_that("fineMappingPipeline(QtlSumStats): jointSpec='context' with only one context skips", {
@@ -746,8 +759,8 @@ test_that("fineMappingPipeline(QtlSumStats): jointSpec='trait' fits one joint pe
     fineMappingPipeline(ss, methods = "mvsusie",
                         jointSpecification = "trait"))
   expect_s4_class(res, "QtlFineMappingResult")
-  expect_equal(nrow(res), 1L)
-  expect_equal(as.character(res$trait), "joint")
+  expect_equal(nrow(res), 2L)                                # per-trait rows
+  expect_setequal(as.character(res$trait), c("t1", "t2"))
 })
 
 test_that("fineMappingPipeline(QtlSumStats): jointSpec='trait' with fsusie errors (no RSS variant)", {
@@ -775,8 +788,8 @@ test_that("fineMappingPipeline(QtlSumStats): jointSpec='study' fits one joint pe
     fineMappingPipeline(ss, methods = "mvsusie",
                         jointSpecification = "study"))
   expect_s4_class(res, "QtlFineMappingResult")
-  expect_equal(nrow(res), 1L)
-  expect_equal(as.character(res$study), "joint")
+  expect_equal(nrow(res), 2L)                                # per-study rows
+  expect_setequal(as.character(res$study), c("Q1", "Q2"))
 })
 
 test_that("fineMappingPipeline(QtlSumStats): composed jointSpec axes={'study','context'} fits", {
@@ -797,8 +810,9 @@ test_that("fineMappingPipeline(QtlSumStats): composed jointSpec axes={'study','c
   expect_s4_class(res, "QtlFineMappingResult")
   expect_true("jointStudies"  %in% names(res))
   expect_true("jointContexts" %in% names(res))
-  expect_true(any(as.character(res$study)   == "joint"))
-  expect_true(any(as.character(res$context) == "joint"))
+  expect_equal(nrow(res), 4L)                               # study x context
+  expect_setequal(as.character(res$study), c("Q1", "Q2"))   # both vary -> real
+  expect_setequal(as.character(res$context), c("c1", "c2"))
 })
 
 test_that("fineMappingPipeline(QtlSumStats): composed jointSpec rejects fsusie", {
@@ -863,7 +877,8 @@ test_that("twasWeightsPipeline(QtlDataset): jointSpec='context' fits mr.mash per
     twasWeightsPipeline(qd, methods = "mrmash", cisWindow = 1000L,
                         jointSpecification = "context"))
   expect_s4_class(res, "TwasWeights")
-  expect_equal(as.character(res$context), "joint")
+  expect_equal(nrow(res), 2L)                                # per-context rows
+  expect_setequal(as.character(res$context), c("c1", "c2"))
   expect_true("jointContexts" %in% names(res))
 })
 
@@ -895,7 +910,8 @@ test_that("twasWeightsPipeline(QtlDataset): jointSpec='trait' fits mr.mash per c
     twasWeightsPipeline(qd, methods = "mrmash", cisWindow = 1000L,
                         jointSpecification = "trait"))
   expect_s4_class(res, "TwasWeights")
-  expect_equal(as.character(res$trait), "joint")
+  expect_equal(nrow(res), 2L)                                # per-trait rows
+  expect_setequal(as.character(res$trait), c("t1", "t2"))
   expect_true("jointTraits" %in% names(res))
 })
 
@@ -922,8 +938,9 @@ test_that("twasWeightsPipeline(QtlDataset): composed jointSpec axes=c('context',
     twasWeightsPipeline(qd, methods = "mrmash", cisWindow = 1000L,
                         jointSpecification = list(c("context", "trait"))))
   expect_s4_class(res, "TwasWeights")
-  expect_equal(as.character(res$context), "joint")
-  expect_equal(as.character(res$trait), "joint")
+  expect_equal(nrow(res), 4L)                                # context x trait
+  expect_setequal(as.character(res$context), c("c1", "c2"))
+  expect_setequal(as.character(res$trait), c("t1", "t2"))
 })
 
 test_that("twasWeightsPipeline(QtlDataset): composed jointSpec including 'study' errors", {
@@ -952,7 +969,8 @@ test_that("twasWeightsPipeline(QtlSumStats): jointSpec='context' fits mr.mash.rs
     twasWeightsPipeline(ss, methods = "mrmash",
                         jointSpecification = "context"))
   expect_s4_class(res, "TwasWeights")
-  expect_equal(as.character(res$context), "joint")
+  expect_equal(nrow(res), 2L)                                # per-context rows
+  expect_setequal(as.character(res$context), c("c1", "c2"))
   expect_true("jointContexts" %in% names(res))
 })
 
@@ -967,7 +985,8 @@ test_that("twasWeightsPipeline(QtlSumStats): jointSpec='trait' fits mr.mash.rss 
     twasWeightsPipeline(ss, methods = "mrmash",
                         jointSpecification = "trait"))
   expect_s4_class(res, "TwasWeights")
-  expect_equal(as.character(res$trait), "joint")
+  expect_equal(nrow(res), 2L)                                # per-trait rows
+  expect_setequal(as.character(res$trait), c("t1", "t2"))
 })
 
 test_that("twasWeightsPipeline(QtlSumStats): jointSpec='study' fits mr.mash.rss per (context, trait)", {
@@ -981,7 +1000,8 @@ test_that("twasWeightsPipeline(QtlSumStats): jointSpec='study' fits mr.mash.rss 
     twasWeightsPipeline(ss, methods = "mrmash",
                         jointSpecification = "study"))
   expect_s4_class(res, "TwasWeights")
-  expect_equal(as.character(res$study), "joint")
+  expect_equal(nrow(res), 2L)                                # per-study rows
+  expect_setequal(as.character(res$study), c("Q1", "Q2"))
 })
 
 test_that("twasWeightsPipeline(QtlSumStats): composed jointSpec axes=c('study','context') fits", {
@@ -998,4 +1018,7 @@ test_that("twasWeightsPipeline(QtlSumStats): composed jointSpec axes=c('study','
   expect_s4_class(res, "TwasWeights")
   expect_true("jointStudies"  %in% names(res))
   expect_true("jointContexts" %in% names(res))
+  expect_equal(nrow(res), 4L)                                # study x context
+  expect_setequal(as.character(res$study), c("Q1", "Q2"))
+  expect_setequal(as.character(res$context), c("c1", "c2"))
 })

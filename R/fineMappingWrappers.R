@@ -259,6 +259,7 @@ postprocessFinemappingFits <- function(fits, dataX, dataY = NULL,
                                        minAbsCorr = 0.8,
                                        medianAbsCorr = NULL,
                                        csInput = NULL,
+                                       conditionIdx = NULL,
                                        trim = TRUE) {
   fits <- fits[!vapply(fits, is.null, logical(1))]
   if (length(fits) == 0) stop("At least one fine-mapping fit must be supplied.")
@@ -280,6 +281,7 @@ postprocessFinemappingFits <- function(fits, dataX, dataY = NULL,
       priorEffTol = priorEffTol, minAbsCorr = minAbsCorr,
       medianAbsCorr = medianAbsCorr,
       csInput = csInput,
+      conditionIdx = conditionIdx,
       trim = trim
     )
   })
@@ -349,6 +351,7 @@ postprocessFinemappingFit.susiF <- function(fit, method = "fsusie", csInput = NU
                                              trim = TRUE,
                                              minAbsCorr = 0.8,
                                              medianAbsCorr = NULL,
+                                             conditionIdx = NULL,
                                              csInput = c("X", "Xcorr", "fsusie")) {
   csInput <- match.arg(csInput)
   variantNames <- extractVariantNames(fit)
@@ -367,7 +370,7 @@ postprocessFinemappingFit.susiF <- function(fit, method = "fsusie", csInput = NU
     fit, csTables, variantNames = variantNames, sumstats = sumstats,
     af = af, method = method, signalCutoff = 0,
     dataX = dataX, dataY = dataY, otherQuantities = otherQuantities,
-    region = region
+    region = region, conditionIdx = conditionIdx
   )
 
   # When `trim = TRUE` we store a minimal subset of the fit on the
@@ -570,7 +573,7 @@ buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
                          af = NULL, method, signalCutoff = 0,
                          dataX = NULL, dataY = NULL,
                          otherQuantities = NULL,
-                         region = NULL) {
+                         region = NULL, conditionIdx = NULL) {
   if (missing(method) || is.null(method) ||
       length(method) != 1L || is.na(method) || !nzchar(method)) {
     stop("buildTopLoci: `method` is required (e.g. \"susie\", \"susieInf\").")
@@ -591,10 +594,22 @@ buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
   } else NA_character_
   grange <- .parseGrange(region)
 
-  # Per-variant posterior effect / SE, computed once across all variants.
+  # Per-variant posterior effect / SE. For a multi-condition (mvsusie) fit `mu`/
+  # `mu2` are 3-D (L x variants x conditions); `conditionIdx` selects one
+  # condition's slice so the 2-D collapse below yields THAT condition's posterior
+  # (the per-context-row representation). conditionIdx = NULL keeps the 2-D path
+  # (univariate); a 3-D fit without a conditionIdx leaves posterior NA.
   alpha <- as.matrix(fit$alpha)
-  mu    <- if (!is.null(fit$mu))  as.matrix(fit$mu)  else NULL
-  mu2   <- if (!is.null(fit$mu2)) as.matrix(fit$mu2) else NULL
+  sliceCond <- function(arr) {
+    if (is.null(arr)) return(NULL)
+    if (length(dim(arr)) == 3L) {
+      if (is.null(conditionIdx)) return(NULL)
+      return(as.matrix(arr[, , conditionIdx]))
+    }
+    as.matrix(arr)
+  }
+  mu  <- sliceCond(fit$mu)
+  mu2 <- sliceCond(fit$mu2)
   postMean <- if (!is.null(mu) && all(dim(alpha) == dim(mu))) {
     colSums(alpha * mu)
   } else rep(NA_real_, length(variantNames))

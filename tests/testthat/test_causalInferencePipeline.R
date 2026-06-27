@@ -276,7 +276,7 @@ test_that(".cipZToSe: falls back to vector of 1 when maf/n are NA", {
 test_that(".cipFilterEligibleMethods: rsq+pval gating, drop sub-cutoff groups, SS-TWAS keeps all", {
   mkEntry <- function(rsq, pval = 0.01) TwasWeightsEntry(
     variantIds = paste0("v", 1:3), weights = rep(0.1, 3),
-    cvPerformance = list(metrics = c(corr = 0.1, rsq = rsq, pval = pval)))
+    cvResult = list(metrics = c(corr = 0.1, rsq = rsq, pval = pval)))
   tw <- TwasWeights(
     study   = rep("S", 4),
     context = rep("c1", 4),
@@ -302,7 +302,7 @@ test_that(".cipFilterEligibleMethods: rsq+pval gating, drop sub-cutoff groups, S
   f2 <- pecotmr:::.cipFilterEligibleMethods(q2, m2, rsqCutoff = 0.1,
                                             rsqPvalCutoff = 0.05)
   expect_equal(f2$method, "lasso")
-  # SS-TWAS: no usable cvPerformance -> keep all methods in the group.
+  # SS-TWAS: no usable cvResult -> keep all methods in the group.
   twss <- TwasWeights(
     study = rep("S", 2), context = rep("c1", 2), trait = rep("G", 2),
     method = c("susie", "lasso"),
@@ -340,10 +340,10 @@ test_that("causalInferencePipeline: rsqCutoff selects the max-rsq method per gro
     entry = list(
       TwasWeightsEntry(variantIds = paste0("v", 1:5),
                        weights = c(0.1, 0.05, -0.2, 0.3, 0.0),
-                       cvPerformance = list(metrics = c(rsq = 0.2, pval = 0.001))),
+                       cvResult = list(metrics = c(rsq = 0.2, pval = 0.001))),
       TwasWeightsEntry(variantIds = paste0("v", 1:5),
                        weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
-                       cvPerformance = list(metrics = c(rsq = 0.5, pval = 0.001)))),
+                       cvResult = list(metrics = c(rsq = 0.5, pval = 0.001)))),
     ldSketch = .cip_makeHandle())
   local_mocked_bindings(extractBlockGenotypes = .cip_mockExtractor(),
                         .package = "pecotmr")
@@ -359,10 +359,10 @@ test_that("causalInferencePipeline: NA/Inf TWAS-Z triggers method re-selection",
     entry = list(
       # top rsq but all-zero weights -> wᵀRw = 0 -> twasZ NaN
       TwasWeightsEntry(variantIds = paste0("v", 1:5), weights = rep(0, 5),
-                       cvPerformance = list(metrics = c(rsq = 0.9, pval = 0.001))),
+                       cvResult = list(metrics = c(rsq = 0.9, pval = 0.001))),
       TwasWeightsEntry(variantIds = paste0("v", 1:5),
                        weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
-                       cvPerformance = list(metrics = c(rsq = 0.5, pval = 0.001)))),
+                       cvResult = list(metrics = c(rsq = 0.5, pval = 0.001)))),
     ldSketch = .cip_makeHandle())
   local_mocked_bindings(extractBlockGenotypes = .cip_mockExtractor(),
                         .package = "pecotmr")
@@ -379,10 +379,10 @@ test_that("causalInferencePipeline: rsqPvalCutoff gates out high-CV-pval methods
     entry = list(
       TwasWeightsEntry(variantIds = paste0("v", 1:5),
                        weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
-                       cvPerformance = list(metrics = c(rsq = 0.9, pval = 0.5))),
+                       cvResult = list(metrics = c(rsq = 0.9, pval = 0.5))),
       TwasWeightsEntry(variantIds = paste0("v", 1:5),
                        weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
-                       cvPerformance = list(metrics = c(rsq = 0.5, pval = 0.001)))),
+                       cvResult = list(metrics = c(rsq = 0.5, pval = 0.001)))),
     ldSketch = .cip_makeHandle())
   local_mocked_bindings(extractBlockGenotypes = .cip_mockExtractor(),
                         .package = "pecotmr")

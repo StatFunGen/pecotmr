@@ -48,7 +48,7 @@ context("show methods")
   TwasWeightsEntry(
     variantIds   = paste0("v", seq_len(p)),
     weights      = rep(0.1, p),
-    cvPerformance = list(rsq = 0.5),
+    cvResult = list(rsq = 0.5),
     standardized = standardized)
 }
 

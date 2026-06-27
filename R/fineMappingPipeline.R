@@ -263,9 +263,9 @@ setGeneric("fineMappingPipeline",
 #                     susieR::susie_rss to switch between susie / susieInf /
 #                     susieAsh variants. NA for non-SuSiE-family methods.
 #
-# `mrmash` is intentionally listed with both impls NULL so the capability
-# checker emits a clear rejection ("mr.mash is a TWAS-weight-oriented
-# method — use twasWeightsPipeline()").
+# This table lists ONLY fine-mapping methods. TWAS-weight-oriented tokens
+# (e.g. mr.mash) are not here -- they live in .fmTwasOnlyTokens and are rejected
+# with a clear pointer to twasWeightsPipeline() (see .fmCheckMethodCapabilities).
 #
 # @noRd
 .fineMappingMethodCapabilities <- list(
@@ -303,14 +303,12 @@ setGeneric("fineMappingPipeline",
     multivariate      = TRUE,
     gwasAllowed       = FALSE,
     unmappableEffects = NA_character_,
-    args              = list()),
-  mrmash = list(
-    individualImpl    = NULL,
-    sumstatImpl       = NULL,
-    multivariate      = TRUE,
-    gwasAllowed       = FALSE,
-    unmappableEffects = NA_character_,
     args              = list()))
+
+# TWAS-weight-oriented method tokens. NOT fine-mapping methods (they belong to
+# twasWeightsPipeline); enumerated only so .fmCheckMethodCapabilities rejects
+# them with a clear pointer rather than an "unknown token" error.
+.fmTwasOnlyTokens <- c("mrmash")
 
 
 # Normalize a user-supplied `methods` argument into a character vector of
@@ -330,7 +328,7 @@ setGeneric("fineMappingPipeline",
 # Mirrors the convention of .twasNormalizeMethods so the two pipelines
 # expose the same shape on the user side.
 # @noRd
-.fmNormalizeMethods <- function(methods) {
+.fmNormalizeMethods <- function(methods, L = 20L, Lgreedy = 5L) {
   if (is.null(methods) || length(methods) == 0L) {
     stop("fineMappingPipeline: `methods` must be a non-empty character ",
          "vector or named list of <token> = <kwargs> entries.")
@@ -355,35 +353,43 @@ setGeneric("fineMappingPipeline",
     stop("fineMappingPipeline: `methods` must be a character vector or ",
          "named list. Got class '", class(methods)[[1L]], "'.")
   }
+  # SuSiE-family fit defaults live here (the single source of truth), not in
+  # CLI wrappers: seed L / L_greedy on every susie-family token whose kwargs did
+  # not already set them.
+  for (tk in intersect(tokens, c("susie", "susieInf", "susieAsh"))) {
+    if (is.null(methodArgs[[tk]][["L"]]))        methodArgs[[tk]][["L"]]        <- L
+    if (is.null(methodArgs[[tk]][["L_greedy"]])) methodArgs[[tk]][["L_greedy"]] <- Lgreedy
+  }
   list(tokens = tokens, methodArgs = methodArgs)
 }
 
 
 # Enforce input-class / method compatibility against the fine-mapping
-# capability table. Hard-rejects `mrmash` (a TWAS-weight-oriented
-# method). Routes the input class through individual / sumstat / GWAS
-# branches and emits a single error listing every offending token.
+# capability table. Rejects TWAS-weight-oriented tokens (.fmTwasOnlyTokens,
+# e.g. mr.mash) with a clear pointer to twasWeightsPipeline(). Routes the input
+# class through individual / sumstat / GWAS branches and emits a single error
+# listing every offending token.
 # @noRd
 .fmCheckMethodCapabilities <- function(tokens, inputKind) {
   if (length(tokens) == 0L) return(invisible(NULL))
   caps <- .fineMappingMethodCapabilities
-  unknown <- setdiff(tokens, names(caps))
+  unknown <- setdiff(tokens, c(names(caps), .fmTwasOnlyTokens))
   if (length(unknown) > 0L) {
     stop(sprintf(
       "fineMappingPipeline: unknown method token(s): %s. Known tokens: %s.",
       paste(unknown, collapse = ", "),
       paste(names(caps), collapse = ", ")))
   }
-  hardRejections <- list(
-    mrmash = "mr.mash is a TWAS-weight-oriented method; use twasWeightsPipeline()")
   individualKinds <- c("QtlDataset", "MultiStudyQtlDataset")
   bad <- character(0); reason <- character(0)
   for (tk in tokens) {
-    info <- caps[[tk]]
-    if (tk %in% names(hardRejections)) {
-      bad <- c(bad, tk); reason <- c(reason, hardRejections[[tk]])
+    if (tk %in% .fmTwasOnlyTokens) {
+      bad <- c(bad, tk)
+      reason <- c(reason,
+        "is a TWAS-weight-oriented method; use twasWeightsPipeline()")
       next
     }
+    info <- caps[[tk]]
     if (inputKind %in% individualKinds) {
       if (is.null(info$individualImpl)) {
         bad <- c(bad, tk)
@@ -654,7 +660,7 @@ setGeneric("fineMappingPipeline",
                               coverage, secondaryCoverage, signalCutoff,
                               minAbsCorr, csInput = NULL, af = NULL,
                               region = NULL, trim = NULL,
-                              medianAbsCorr = NULL) {
+                              medianAbsCorr = NULL, conditionIdx = NULL) {
   # Inherit `trim` from the calling method's frame if not passed in
   # explicitly. The 10 internal call sites don't currently forward it
   # (they predate the trim knob) so we look it up from the caller. This
@@ -678,7 +684,7 @@ setGeneric("fineMappingPipeline",
     signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
     medianAbsCorr = medianAbsCorr,
     region = region,
-    csInput = csInput, trim = isTRUE(trim))
+    csInput = csInput, conditionIdx = conditionIdx, trim = isTRUE(trim))
   out <- formatFinemappingOutput(post, primaryMethod = method)
   # `formatFinemappingOutput` returns a list with $finemappingEntry as a
   # bare FineMappingEntry per the helper's contract.
@@ -725,14 +731,18 @@ setGeneric("fineMappingPipeline",
 # when no fit was supplied at all).
 # @noRd
 .buildMvsusieReweightedPrior <- function(fitParts, conditionNames,
-                                         weightsTol = 1e-10) {
+                                         weightsTol = 1e-10, overrideU = NULL) {
   R <- length(conditionNames)
   canonical <- function(V) list(
     priorVariance    = mvsusieR::create_mixture_prior(
       R = R, include_indices = conditionNames),
     residualVariance = V)
   if (is.null(fitParts)) return(canonical(NULL))
-  ddpm <- fitParts$dataDrivenPriorMatrices
+  # `overrideU` (mode C / hybrid): reuse this fit's reweighted mixture weights
+  # (w0) and residual variance (V) but swap in a different set of data-driven
+  # covariance matrices -- the per-fold mash prior U. Components are matched to
+  # w0 by name, so the override U must share component names with the fit.
+  ddpm <- if (!is.null(overrideU)) overrideU else fitParts$dataDrivenPriorMatrices
   if (is.null(ddpm) || is.null(ddpm$U)) return(canonical(fitParts$V))
   w0Updated <- rescaleCovW0(fitParts$w0)
   w0Updated <- w0Updated[names(w0Updated) %in% names(ddpm$U)]
@@ -753,24 +763,80 @@ setGeneric("fineMappingPipeline",
 # first non-NULL payload. The fit may span more conditions than the mvsusie
 # block fits -- `.buildMvsusieReweightedPrior(include_indices=)` subsets it.
 #
-# `context` is optional and disambiguates joint fits, which key differently:
-#   * per-context / cross-context mvsusie -> (study, trait=tid)        [context = NULL]
-#   * cross-trait joint mvsusie           -> (study, trait="joint", context=cx)
-# Returns NULL when no TwasWeights is supplied or it carries no matching mr.mash
-# fit (caller then falls back to the canonical prior).
+# Each axis is optional: a NULL axis is NOT filtered (match-any). A joint fit is
+# shared across all its per-context rows, so the consumer fixes the constant axes
+# and leaves the jointed (varying) axis NULL -- e.g. cross-context mvsusie keys on
+# (study, trait) with context = NULL; cross-trait keys on (study, context) with
+# trait = NULL (see .jointPriorKey). Returns NULL when no TwasWeights is supplied
+# or it carries no matching mr.mash fit (caller falls back to the canonical prior).
 # @noRd
-.fmLookupMrmashFit <- function(twasWeights, study, trait, context = NULL) {
+.fmLookupMrmashFit <- function(twasWeights, study = NULL, trait = NULL,
+                               context = NULL) {
   if (is.null(twasWeights)) return(NULL)
-  sel <- as.character(twasWeights$study)  == study &
-         as.character(twasWeights$trait)  == trait &
-         as.character(twasWeights$method) == "mrmash"
-  if (!is.null(context))
-    sel <- sel & as.character(twasWeights$context) == context
+  # Each per-context mr.mash row of a joint group carries the SHARED joint fit,
+  # so the consumer matches the FIXED axes and leaves the jointed axis NULL
+  # (match-any). study/trait/context = NULL means "do not filter that axis".
+  sel <- as.character(twasWeights$method) == "mrmash"
+  if (!is.null(study))   sel <- sel & as.character(twasWeights$study)   == study
+  if (!is.null(trait))   sel <- sel & as.character(twasWeights$trait)   == trait
+  if (!is.null(context)) sel <- sel & as.character(twasWeights$context) == context
   for (i in which(sel)) {
     f <- getFits(twasWeights$entry[[i]])
     if (!is.null(f)) return(f)
   }
   NULL
+}
+
+# Locate the retained per-fold mr.mash CV payload for one (study, trait[,
+# context]) inside a `TwasWeights` collection: the mrmash entry's `cvResult`,
+# carrying `foldFits` (per-fold lean payloads) + `samplePartition` (the folds
+# the per-fold priors were computed on). These let the mvSuSiE CV use an honest
+# per-fold prior instead of reusing the full-data prior on every fold. Returns
+# NULL when no TwasWeights / no matching mr.mash CV result with fold fits.
+# @noRd
+.fmLookupMrmashCv <- function(twasWeights, study = NULL, trait = NULL,
+                              context = NULL) {
+  if (is.null(twasWeights)) return(NULL)
+  sel <- as.character(twasWeights$method) == "mrmash"
+  if (!is.null(study))   sel <- sel & as.character(twasWeights$study)   == study
+  if (!is.null(trait))   sel <- sel & as.character(twasWeights$trait)   == trait
+  if (!is.null(context)) sel <- sel & as.character(twasWeights$context) == context
+  for (i in which(sel)) {
+    cv <- getCvResult(twasWeights$entry[[i]])
+    if (!is.null(cv) && !is.null(cv$foldFits)) return(cv)
+  }
+  NULL
+}
+
+# Build the per-fold mvSuSiE reweighted priors for cross-validation from a
+# TwasWeights mr.mash CV payload (`mvCv` from .fmLookupMrmashCv). For each fold:
+#   * full per-fold fit (carries its own w0) -> reweight that fit       [mode B]
+#   * prior-only stub (U but no w0)          -> reuse `fullFitParts` w0/V with
+#                                               the fold's U via overrideU [mode C]
+# Returns a list named by fold id (as character, matching samplePartition$Fold);
+# each element a list(priorVariance, residualVariance). NULL if no fold fits.
+# @noRd
+.fmBuildMvsusiePriorCv <- function(mvCv, fullFitParts, conditionNames,
+                                   weightsTol = 1e-10) {
+  if (is.null(mvCv) || is.null(mvCv$foldFits)) return(NULL)
+  foldFits <- mvCv$foldFits
+  sp <- mvCv$samplePartition
+  foldIds <- if (!is.null(sp)) sort(unique(sp$Fold)) else seq_along(foldFits)
+  out <- setNames(vector("list", length(foldIds)), as.character(foldIds))
+  for (i in seq_along(foldIds)) {
+    # Match the fold fit by name ("fold_<id>") when available, else by position.
+    nm <- paste0("fold_", foldIds[[i]])
+    ff <- if (!is.null(names(foldFits)) && nm %in% names(foldFits)) foldFits[[nm]]
+          else if (length(foldFits) >= i) foldFits[[i]] else NULL
+    if (is.null(ff)) next
+    out[[i]] <- if (!is.null(ff$w0)) {
+      .buildMvsusieReweightedPrior(ff, conditionNames, weightsTol)
+    } else {
+      .buildMvsusieReweightedPrior(fullFitParts, conditionNames, weightsTol,
+                                   overrideU = ff$dataDrivenPriorMatrices)
+    }
+  }
+  out
 }
 
 # PCA-reduce a (samples x traits) phenotype matrix to its top `nPCs` principal
@@ -1182,7 +1248,8 @@ setGeneric("fineMappingPipeline",
 # @noRd
 .fmCrossValidate <- function(X, Y, tokens, methodArgs, fold,
                              samplePartition = NULL, coverage = 0.95,
-                             pos = NULL, verbose = 1, mvPrior = NULL) {
+                             pos = NULL, verbose = 1, mvPrior = NULL,
+                             mvPriorCv = NULL) {
   if (length(tokens) == 0L) return(NULL)
   if (!is.matrix(Y)) {
     Y <- matrix(Y, ncol = 1L,
@@ -1207,12 +1274,19 @@ setGeneric("fineMappingPipeline",
     Xtr <- X[!isTest, , drop = FALSE]
     Xte <- X[isTest, , drop = FALSE]
     Ytr <- Y[!isTest, , drop = FALSE]
+    # Honest per-fold mvSuSiE prior when supplied (the fold's own mr.mash-derived
+    # prior); otherwise the single full-data prior is reused on every fold.
+    mvPriorThisFold <- if (!is.null(mvPriorCv)) {
+      p <- mvPriorCv[[as.character(j)]]
+      if (is.null(p)) mvPrior else p
+    } else mvPrior
     # Drop columns with zero variance in this training fold.
     keepCol <- .nonzeroVarColumns(Xtr)
     XtrK <- Xtr[, keepCol, drop = FALSE]
     for (tk in tokens) {
       W <- tryCatch(
-        .fmFoldWeights(tk, XtrK, Ytr, coverage, methodArgs[[tk]], pos, mvPrior),
+        .fmFoldWeights(tk, XtrK, Ytr, coverage, methodArgs[[tk]], pos,
+                       mvPriorThisFold),
         error = function(e) {
           if (verbose >= 1)
             message(sprintf("  CV fold %s, method %s failed: %s",
@@ -1283,6 +1357,8 @@ setMethod("fineMappingPipeline", "QtlDataset",
            jointRegions       = FALSE,
            jointSpecification = NULL,
            addSusieInf        = TRUE,
+           L                  = 20L,
+           Lgreedy            = 5L,
            coverage           = 0.95,
            secondaryCoverage  = c(0.7, 0.5),
            signalCutoff       = 0.025,
@@ -1316,7 +1392,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
     }
     xRegions <- .makeXRegions(region, jointRegions)
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
-    norm       <- .fmNormalizeMethods(methods)
+    norm       <- .fmNormalizeMethods(methods, L = L, Lgreedy = Lgreedy)
     tokens     <- norm$tokens
     methodArgs <- norm$methodArgs
     .fmCheckMethodCapabilities(tokens, "QtlDataset")
@@ -1334,7 +1410,10 @@ setMethod("fineMappingPipeline", "QtlDataset",
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
         methodArgs = methodArgs, xRegions = xRegions,
         twasWeights = twasWeights,
-        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff)
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+        cvFolds = cvFolds, samplePartition = samplePartition,
+        pipCutoffToSkip = pipCutoffToSkip,
+        fineMappingResult = fineMappingResult)
       tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
       methodArgs <- methodArgs[tokens]
       if (length(tokens) == 0L) {
@@ -1532,361 +1611,30 @@ setMethod("fineMappingPipeline", "QtlDataset",
       }
     }
 
-    # ---- mvsusie dispatch: joint over selected (contexts, traits).
-    if (length(mvTokens) > 0L) {
-      if (!requireNamespace("mvsusieR", quietly = TRUE)) {
-        stop("mvsusie requires the mvsusieR package. Install with: ",
-             "devtools::install_github('stephenslab/mvsusieR')")
-      }
-      # Detection: when multiple contexts AND single trait => multi-context
-      # mvsusie (group by trait). When single context AND multiple traits =>
-      # multi-trait mvsusie (group by context). When both multi, iterate per
-      # context for the multi-trait fit (same convention as the design doc:
-      # "sequential per-context multi-trait when both are multi").
-      mvJobs <- list()
-      if (nCtx >= 2L && nTraits == 1L) {
-        # Single trait across many contexts.
-        mvJobs[[length(mvJobs) + 1L]] <- list(
-          mode = "multiContext", trait = allTraits[[1L]],
-          contexts = useCtx)
-      } else if (nCtx == 1L && nTraits >= 2L) {
-        mvJobs[[length(mvJobs) + 1L]] <- list(
-          mode = "multiTrait", context = useCtx[[1L]],
-          traits = perCtxTraits[[useCtx[[1L]]]])
-      } else {
-        # Both multi => sequential per-context multi-trait fit.
-        for (ctx in useCtx) {
-          tr <- perCtxTraits[[ctx]]
-          if (length(tr) < 2L) next
-          mvJobs[[length(mvJobs) + 1L]] <- list(
-            mode = "multiTrait", context = ctx, traits = tr)
-        }
-      }
-
-      for (job in mvJobs) {
-        if (identical(job$mode, "multiContext")) {
-          tid <- job$trait
-          # Joint Y across contexts for this single trait. X is drawn from each
-          # region block (cis or explicit region) and merged across regions.
-          contextsHere <- job$contexts
-          Yres <- .fmResidPheno(
-            data, contexts = contextsHere, traitId = tid, naAction = naAction)
-          if (length(contextsHere) == 1L)
-            Yres <- setNames(list(Yres), contextsHere)
-          baseSamples <- Reduce(intersect, lapply(Yres, rownames))
-
-          # Resume cache: every (study, ctx, tid, mvsusie) row.
-          allCached <- TRUE
-          for (ctx in contextsHere) {
-            if (is.null(.fmCacheLookup(fineMappingResult, study, ctx, tid, "mvsusie"))) {
-              allCached <- FALSE; break
-            }
-          }
-          if (allCached) {
-            for (ctx in contextsHere) {
-              pushRow(study, ctx, tid, "mvsusie",
-                .fmCacheLookup(fineMappingResult, study, ctx, tid, "mvsusie"))
-            }
-            next
-          }
-
-          # SER pre-screen: drop contexts with no single-effect signal before
-          # the joint fit (faithful port of skipConditions). Screen the first
-          # region block; skip the trait entirely when < 2 contexts survive.
-          if (.fmScreenActive(pipCutoffToSkip)) {
-            rg0  <- xRegions[[1L]]
-            Xscr <- if (is.null(rg0)) {
-              .fmResidGeno(data, contexts = contextsHere, traitId = tid,
-                           cisWindow = cisWindow, samples = baseSamples)
-            } else {
-              .fmResidGeno(data, contexts = contextsHere, region = rg0,
-                           samples = baseSamples)
-            }
-            csS <- intersect(baseSamples, rownames(Xscr))
-            if (length(csS) >= 2L) {
-              Yscr <- do.call(cbind, lapply(contextsHere,
-                function(ctx) Yres[[ctx]][csS, 1L]))
-              kept <- contextsHere[.fmSerScreenColumns(
-                Xscr[csS, , drop = FALSE], Yscr, pipCutoffToSkip)]
-              if (length(kept) < 2L) {
-                if (verbose >= 1)
-                  message(sprintf(
-                    "Skipping mvsusie (multi-context) for trait='%s': < 2 contexts pass the SER pre-screen.",
-                    tid))
-                next
-              }
-              if (length(kept) < length(contextsHere)) {
-                if (verbose >= 1)
-                  message(sprintf(
-                    "mvsusie (multi-context) trait='%s': SER pre-screen kept %d of %d contexts.",
-                    tid, length(kept), length(contextsHere)))
-                contextsHere <- kept
-              }
-            }
-          }
-
-          if (verbose >= 1)
-            message(sprintf("Fitting mvsusie (multi-context) for trait='%s' ...", tid))
-          # Data-driven mvSuSiE prior: if a prior mr.mash run was supplied via
-          # `twasWeights`, reuse its fitted mixture weights + residual covariance
-          # for this (study, trait) -> reweighted create_mixture_prior; else the
-          # lookup returns NULL and `.buildMvsusieReweightedPrior` falls back to
-          # the canonical prior (unchanged behavior). Keyed on (study, trait):
-          # the fit may span more contexts than survive the SER pre-screen, and
-          # `include_indices = colnames(Yc)` subsets it to the fitted contexts.
-          mvFitParts <- .fmLookupMrmashFit(twasWeights, study, tid)
-          fitOneRegion <- function(rg) {
-            X <- if (is.null(rg)) {
-              .fmResidGeno(data, contexts = contextsHere, traitId = tid,
-                           cisWindow = cisWindow, samples = baseSamples)
-            } else {
-              .fmResidGeno(data, contexts = contextsHere, region = rg,
-                           samples = baseSamples)
-            }
-            cs <- intersect(baseSamples, rownames(X))
-            if (length(cs) < 2L) {
-              stop("fineMappingPipeline(QtlDataset, mvsusie multi-context): ",
-                   "insufficient shared samples across selected contexts.")
-            }
-            Xc <- X[cs, , drop = FALSE]
-            afVec <- .fmAfForX(data, Xc, traitId = tid, region = rg,
-                               cisWindow = cisWindow)
-            Yc <- do.call(cbind, lapply(contextsHere, function(ctx) {
-              ym <- Yres[[ctx]][cs, , drop = FALSE]
-              colnames(ym) <- ctx
-              ym
-            }))
-            mvPrior <- .buildMvsusieReweightedPrior(
-              mvFitParts, colnames(Yc), dataDrivenPriorWeightsCutoff)
-            mvBaseArgs <- list(
-              X = Xc, Y = Yc,
-              prior_variance = mvPrior$priorVariance,
-              coverage = coverage)
-            if (!is.null(mvPrior$residualVariance))
-              mvBaseArgs$residual_variance <- mvPrior$residualVariance
-            fit <- do.call(fitMvsusie,
-                           .fmMergeUserArgs(mvBaseArgs, "mvsusie",
-                                            methodArgs[["mvsusie"]]))
-            fit <- .setFinemappingFitClass(fit, "mvsusie")
-            entry <- .fmPostprocessOne(
-              fit = fit, method = "mvsusie", dataX = Xc, dataY = NULL,
-              coverage = coverage, secondaryCoverage = secondaryCoverage,
-              signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
-              af = afVec, csInput = "X")
-            if (cvFolds > 1L) {
-              cv <- .fmCrossValidate(Xc, Yc, "mvsusie", methodArgs, cvFolds,
-                                     samplePartition = samplePartition,
-                                     coverage = coverage, verbose = verbose,
-                                     mvPrior = mvPrior)
-              entry <- .fmAttachCv(entry, .fmSliceCv(cv, "mvsusie"))
-            }
-            entry
-          }
-          entry <- .fmJointBlocks(xRegions, fitOneRegion)
-          # Share the joint (merged) entry across contexts via copy-on-modify.
-          for (ctx in contextsHere) {
-            pushRow(study, ctx, tid, "mvsusie", entry)
-          }
-
-        } else {  # multiTrait
-          ctx <- job$context
-          traits <- job$traits
-          # Resume cache: every (study, ctx, trait, mvsusie) row.
-          allCached <- TRUE
-          for (tid in traits) {
-            if (is.null(.fmCacheLookup(fineMappingResult, study, ctx, tid, "mvsusie"))) {
-              allCached <- FALSE; break
-            }
-          }
-          if (allCached) {
-            for (tid in traits) {
-              pushRow(study, ctx, tid, "mvsusie",
-                .fmCacheLookup(fineMappingResult, study, ctx, tid, "mvsusie"))
-            }
-            next
-          }
-
-          Y <- .fmResidPheno(
-            data, contexts = ctx, traitId = traits, naAction = naAction)
-
-          # SER pre-screen: drop traits with no single-effect signal before the
-          # joint fit (faithful port of skipConditions). Skip the context's
-          # mvsusie when < 2 traits survive.
-          if (.fmScreenActive(pipCutoffToSkip)) {
-            rg0  <- xRegions[[1L]]
-            Xscr <- if (is.null(rg0)) {
-              .fmResidGeno(data, contexts = ctx, traitId = traits,
-                           cisWindow = cisWindow, samples = rownames(Y))
-            } else {
-              .fmResidGeno(data, contexts = ctx, region = rg0,
-                           samples = rownames(Y))
-            }
-            csS <- intersect(rownames(Xscr), rownames(Y))
-            if (length(csS) >= 2L) {
-              keep <- .fmSerScreenColumns(
-                Xscr[csS, , drop = FALSE], Y[csS, , drop = FALSE],
-                pipCutoffToSkip)
-              if (sum(keep) < 2L) {
-                if (verbose >= 1)
-                  message(sprintf(
-                    "Skipping mvsusie (multi-trait) for context='%s': < 2 traits pass the SER pre-screen.",
-                    ctx))
-                next
-              }
-              if (sum(keep) < length(traits)) {
-                if (verbose >= 1)
-                  message(sprintf(
-                    "mvsusie (multi-trait) context='%s': SER pre-screen kept %d of %d traits.",
-                    ctx, sum(keep), length(traits)))
-                traits <- traits[keep]
-                Y <- Y[, keep, drop = FALSE]
-              }
-            }
-          }
-
-          if (verbose >= 1)
-            message(sprintf("Fitting mvsusie (multi-trait) for context='%s' ...", ctx))
-          fitOneRegion <- function(rg) {
-            X <- if (is.null(rg)) {
-              .fmResidGeno(data, contexts = ctx, traitId = traits,
-                           cisWindow = cisWindow, samples = rownames(Y))
-            } else {
-              .fmResidGeno(data, contexts = ctx, region = rg,
-                           samples = rownames(Y))
-            }
-            common <- intersect(rownames(X), rownames(Y))
-            if (length(common) < 2L) {
-              stop(sprintf(
-                "fineMappingPipeline(QtlDataset, mvsusie multi-trait): too few shared samples in context '%s'.",
-                ctx))
-            }
-            Xc <- X[common, , drop = FALSE]
-            Yc <- Y[common, , drop = FALSE]
-            afVec <- .fmAfForX(data, Xc, traitId = traits, region = rg,
-                               cisWindow = cisWindow)
-            # Multi-trait mvsusie conditions are traits (one context), so there
-            # is no mr.mash-over-contexts fit to reweight from -- the data-driven
-            # prior (keyed on a single (study, trait)) does not apply here. Keep
-            # the canonical prior.
-            mvBaseArgs <- list(
-              X = Xc, Y = Yc,
-              prior_variance = mvsusieR::create_mixture_prior(R = ncol(Yc)),
-              coverage = coverage)
-            fit <- do.call(fitMvsusie,
-                           .fmMergeUserArgs(mvBaseArgs, "mvsusie",
-                                            methodArgs[["mvsusie"]]))
-            fit <- .setFinemappingFitClass(fit, "mvsusie")
-            entry <- .fmPostprocessOne(
-              fit = fit, method = "mvsusie", dataX = Xc, dataY = NULL,
-              coverage = coverage, secondaryCoverage = secondaryCoverage,
-              signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
-              af = afVec, csInput = "X")
-            if (cvFolds > 1L) {
-              cv <- .fmCrossValidate(Xc, Yc, "mvsusie", methodArgs, cvFolds,
-                                     samplePartition = samplePartition,
-                                     coverage = coverage, verbose = verbose)
-              entry <- .fmAttachCv(entry, .fmSliceCv(cv, "mvsusie"))
-            }
-            entry
-          }
-          entry <- .fmJointBlocks(xRegions, fitOneRegion)
-          for (tid in traits) {
-            pushRow(study, ctx, tid, "mvsusie", entry)
-          }
-        }
-      }
-    }
-
-    # ---- fsusie dispatch: joint multi-trait per context.
-    if (length(fsTokens) > 0L) {
-      if (!requireNamespace("fsusieR", quietly = TRUE)) {
-        stop("fsusie requires the fsusieR package. Install with: ",
-             "devtools::install_github('stephenslab/fsusieR')")
-      }
-      for (ctx in useCtx) {
-        traits <- perCtxTraits[[ctx]]
-        if (length(traits) < 2L) {
-          stop(sprintf(
-            "fineMappingPipeline(QtlDataset, fsusie): context '%s' has %d trait(s); fsusie needs at least 2 within a context.",
-            ctx, length(traits)))
-        }
-        # Resume cache.
-        allCached <- TRUE
-        for (tid in traits) {
-          if (is.null(.fmCacheLookup(fineMappingResult, study, ctx, tid, "fsusie"))) {
-            allCached <- FALSE; break
-          }
-        }
-        if (allCached) {
-          for (tid in traits) {
-            pushRow(study, ctx, tid, "fsusie",
-              .fmCacheLookup(fineMappingResult, study, ctx, tid, "fsusie"))
-          }
-          next
-        }
-
-        Y <- .fmResidPheno(
-          data, contexts = ctx, traitId = traits, naAction = naAction)
-
-        # Per-trait genomic positions for the wavelet model. Region-independent
-        # (depends on the trait set / Y columns): midpoint of each trait range.
-        se <- getPhenotypes(data, contexts = ctx, traitId = traits)
-        rrIds <- rownames(se)
-        ord <- match(colnames(Y), rrIds)
-        if (anyNA(ord)) {
-          stop("fineMappingPipeline(QtlDataset, fsusie): unable to align trait positions to Y columns.")
-        }
-        rr <- SummarizedExperiment::rowRanges(se)[ord]
-        pos <- (GenomicRanges::start(rr) + GenomicRanges::end(rr)) / 2
-
-        if (verbose >= 1)
-          message(sprintf("Fitting fsusie for context='%s' (multi-trait, %d traits) ...",
-                          ctx, length(traits)))
-        fitOneRegion <- function(rg) {
-          X <- if (is.null(rg)) {
-            .fmResidGeno(data, contexts = ctx, traitId = traits,
-                         cisWindow = cisWindow, samples = rownames(Y))
-          } else {
-            .fmResidGeno(data, contexts = ctx, region = rg,
-                         samples = rownames(Y))
-          }
-          common <- intersect(rownames(X), rownames(Y))
-          if (length(common) < 2L) {
-            stop(sprintf("fineMappingPipeline(QtlDataset, fsusie): too few shared samples in context '%s'.", ctx))
-          }
-          Xc <- X[common, , drop = FALSE]
-          Yc <- Y[common, , drop = FALSE]
-          afVec <- .fmAfForX(data, Xc, traitId = traits, region = rg,
-                             cisWindow = cisWindow)
-          fit <- do.call(fitFsusie,
-                         .fmMergeUserArgs(list(X = Xc, Y = Yc, pos = pos),
-                                          "fsusie", methodArgs[["fsusie"]]))
-          # Collapse the functional fit to a variants x features TWAS weight
-          # matrix now, while fitted_wc/csd_X are still present (trimming drops
-          # them). Stored on $coef so a trimmed fit can still yield weights.
-          fit$coef <- tryCatch(
-            fsusieWeights(fsusieFit = fit, variantIds = colnames(Xc)),
-            error = function(e) NULL)
-          fit <- .setFinemappingFitClass(fit, "fsusie")
-          entry <- .fmPostprocessOne(
-            fit = fit, method = "fsusie", dataX = Xc, dataY = NULL,
-            coverage = coverage, secondaryCoverage = secondaryCoverage,
-            signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
-            af = afVec, csInput = "fsusie")
-          if (cvFolds > 1L) {
-            cv <- .fmCrossValidate(Xc, Yc, "fsusie", methodArgs, cvFolds,
-                                   samplePartition = samplePartition,
-                                   coverage = coverage, pos = pos,
-                                   verbose = verbose)
-            entry <- .fmAttachCv(entry, .fmSliceCv(cv, "fsusie"))
-          }
-          entry
-        }
-        entry <- .fmJointBlocks(xRegions, fitOneRegion)
-        for (tid in traits) {
-          pushRow(study, ctx, tid, "fsusie", entry)
-        }
-      }
+    # ---- Multivariate dispatch via the joint engine (auto-detected shape).
+    # mvsusie / fsusie WITHOUT an explicit jointSpecification: synthesize the
+    # natural joint spec from the data shape (.fmSynthesizeJointSpec) and route
+    # through the SAME engine as an explicit jointSpecification. This unifies the
+    # two formerly-separate joint paths and gives the multi-trait fit the data-
+    # driven mr.mash prior the old auto-detection path lacked. (When an explicit
+    # jointSpecification ran above, mvsusie/fsusie were already removed from the
+    # token set, so mvTokens/fsTokens are empty here.) Univariate tokens kept
+    # their per-(context, trait) iteration above; their rows merge below.
+    if (length(mvTokens) > 0L || length(fsTokens) > 0L) {
+      autoJoint <- .fmDispatchJointSpecsQtlDataset(
+        .fmSynthesizeJointSpec(nCtx, nTraits), data,
+        c(mvTokens, fsTokens), contexts, traitId, cisWindow,
+        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
+        methodArgs = methodArgs, xRegions = xRegions,
+        twasWeights = twasWeights,
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+        cvFolds = cvFolds, samplePartition = samplePartition,
+        pipCutoffToSkip = pipCutoffToSkip,
+        fineMappingResult = fineMappingResult)
+      jointResult <- if (is.null(jointResult)) autoJoint
+                     else if (is.null(autoJoint)) jointResult
+                     else .rbindFineMappingResult(jointResult, autoJoint,
+                                                  ldSketch = NULL)
     }
 
     perTupleResult <- if (length(rowEntries) > 0L)
@@ -2098,7 +1846,8 @@ setMethod("fineMappingPipeline", "QtlSumStats",
         coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
         methodArgs = methodArgs,
         twasWeights = twasWeights,
-        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff)
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+        fineMappingResult = fineMappingResult)
       tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
       methodArgs <- methodArgs[tokens]
       if (length(tokens) == 0L) {
@@ -2224,87 +1973,26 @@ setMethod("fineMappingPipeline", "QtlSumStats",
       }
     }
 
-    # ---- mvsusie dispatch: per (study, trait) across selected contexts.
+    # ---- Multivariate dispatch via the joint engine (auto-detected shape).
+    # mvsusie WITHOUT an explicit jointSpecification: route the cross-context RSS
+    # joint (one fit per (study, trait) with >= 2 contexts) through the SAME
+    # engine as an explicit jointSpecification, replacing the duplicated per-
+    # group mvsusie_rss loop. The guard above already rejected the all-single-
+    # context case; the cross-context enumerator skips any 1-context group. (When
+    # an explicit jointSpecification ran above, mvTokens is empty here.)
     if (length(mvTokens) > 0L) {
-      if (!requireNamespace("mvsusieR", quietly = TRUE)) {
-        stop("mvsusie requires the mvsusieR package. Install with: ",
-             "devtools::install_github('stephenslab/mvsusieR')")
-      }
-      groupKey <- paste(studyCol[selRows], traitCol[selRows], sep = "||")
-      groups <- split(selRows, groupKey)
-      for (gkey in names(groups)) {
-        gIdx <- groups[[gkey]]
-        if (length(gIdx) < 2L) next
-        st <- studyCol[gIdx[[1L]]]
-        tr <- traitCol[gIdx[[1L]]]
-        ctxNames <- contextCol[gIdx]
-
-        # Resume cache.
-        allCached <- TRUE
-        for (ctx in ctxNames) {
-          if (is.null(.fmCacheLookup(fineMappingResult, st, ctx, tr, "mvsusie"))) {
-            allCached <- FALSE; break
-          }
-        }
-        if (allCached) {
-          for (ctx in ctxNames) {
-            pushRow(st, ctx, tr, "mvsusie",
-              .fmCacheLookup(fineMappingResult, st, ctx, tr, "mvsusie"))
-          }
-          next
-        }
-
-        firstMc <- S4Vectors::mcols(data$entry[[gIdx[[1L]]]])
-        if (!"SNP" %in% colnames(firstMc))
-          stop("fineMappingPipeline(QtlSumStats, mvsusie): entry has no SNP mcol.")
-        variantIds <- as.character(firstMc$SNP)
-        Z <- matrix(NA_real_, nrow = length(variantIds), ncol = length(gIdx),
-                    dimnames = list(variantIds, ctxNames))
-        nVec <- numeric(length(gIdx))
-        for (kk in seq_along(gIdx)) {
-          mc <- S4Vectors::mcols(data$entry[[gIdx[kk]]])
-          if (!identical(as.character(mc$SNP), variantIds)) {
-            stop("fineMappingPipeline(QtlSumStats, mvsusie): every entry in ",
-                 "the (study='", st, "', trait='", tr, "') group must share an ",
-                 "identical SNP order after summaryStatsQc().")
-          }
-          Z[, kk] <- as.numeric(mc$Z)
-          nVec[kk] <- stats::median(as.numeric(mc$N), na.rm = TRUE)
-        }
-        ldMat <- .fmLdFromSketch(ldSketch, variantIds)
-
-        if (verbose >= 1)
-          message(sprintf("Fitting mvsusie (RSS) for (study='%s', trait='%s', %d contexts) ...",
-                          st, tr, length(ctxNames)))
-        # Data-driven reweighted prior from a prior mr.mash (RSS) run, looked up
-        # on (study, trait); mvsusie_rss takes the same create_mixture_prior +
-        # residual_variance (K x K condition residual covariance) as fitMvsusie.
-        # NULL twasWeights / no fit -> canonical prior (unchanged behavior).
-        mvPrior <- .buildMvsusieReweightedPrior(
-          .fmLookupMrmashFit(twasWeights, st, tr), colnames(Z),
-          dataDrivenPriorWeightsCutoff)
-        mvBaseArgs <- list(
-          Z = Z, R = ldMat, N = as.numeric(stats::median(nVec)),
-          prior_variance = mvPrior$priorVariance,
-          coverage = coverage)
-        if (!is.null(mvPrior$residualVariance))
-          mvBaseArgs$residual_variance <- mvPrior$residualVariance
-        fit <- do.call(fitMvsusieRss,
-                       .fmMergeUserArgs(mvBaseArgs, "mvsusie",
-                                        methodArgs[["mvsusie"]]))
-        fit <- .setFinemappingFitClass(fit, "mvsusie")
-        ent <- .fmPostprocessOne(
-          fit = fit, method = "mvsusie",
-          dataX = ldMat, dataY = NULL,
-          coverage = coverage,
-          secondaryCoverage = secondaryCoverage,
-          signalCutoff = signalCutoff,
-          minAbsCorr = minAbsCorr,
-          csInput = "Xcorr")
-        for (ctx in ctxNames) {
-          pushRow(st, ctx, tr, "mvsusie", ent)
-        }
-      }
+      autoJoint <- .fmDispatchJointSpecsQtlSumStats(
+        list(list(axes = "context", scope = NULL)), data, mvTokens,
+        contexts, traitId,
+        coverage, secondaryCoverage, signalCutoff, minAbsCorr, verbose,
+        methodArgs = methodArgs,
+        twasWeights = twasWeights,
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+        fineMappingResult = fineMappingResult)
+      jointResult <- if (is.null(jointResult)) autoJoint
+                     else if (is.null(autoJoint)) jointResult
+                     else .rbindFineMappingResult(jointResult, autoJoint,
+                                                  ldSketch = ldSketch)
     }
 
     perTupleResult <- if (length(rowEntries) > 0L)
@@ -2331,6 +2019,8 @@ setMethod("fineMappingPipeline", "GwasSumStats",
   function(data,
            methods,
            addSusieInf       = TRUE,
+           L                 = 20L,
+           Lgreedy           = 5L,
            coverage          = 0.95,
            secondaryCoverage = c(0.7, 0.5),
            signalCutoff      = 0.025,
@@ -2341,7 +2031,7 @@ setMethod("fineMappingPipeline", "GwasSumStats",
            trim              = TRUE,
            ...) {
     .fmAssertQcd(data)
-    norm       <- .fmNormalizeMethods(methods)
+    norm       <- .fmNormalizeMethods(methods, L = L, Lgreedy = Lgreedy)
     tokens     <- norm$tokens
     methodArgs <- norm$methodArgs
     .fmCheckMethodCapabilities(tokens, "GwasSumStats")

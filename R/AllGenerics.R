@@ -495,15 +495,6 @@ setGeneric("getWeights", function(x, ...) standardGeneric("getWeights"))
 setGeneric("getStandardized",
   function(x, ...) standardGeneric("getStandardized"))
 
-#' @title Get CV Performance
-#' @description Extract cross-validation performance metrics.
-#' @param x A \code{TwasWeightsEntry} or \code{TwasWeights}.
-#' @param ... Class-specific selection arguments.
-#' @return Method-specific (typically a list).
-#' @export
-setGeneric("getCvPerformance",
-  function(x, ...) standardGeneric("getCvPerformance"))
-
 #' @title Get Model Fits
 #' @description Extract fitted model objects.
 #' @param x A \code{TwasWeightsEntry} or \code{TwasWeights}.
@@ -511,6 +502,24 @@ setGeneric("getCvPerformance",
 #' @return Method-specific (typically a list).
 #' @export
 setGeneric("getFits", function(x, ...) standardGeneric("getFits"))
+
+#' @title Get the Full-Data Prior from a MashPrior
+#' @description Accessor for the \code{fullFit} slot (the full-data data-driven
+#'   prior payload).
+#' @param x A \code{MashPrior} object.
+#' @param ... Unused.
+#' @return The full-data prior payload, or \code{NULL}.
+#' @export
+setGeneric("getFullFit", function(x, ...) standardGeneric("getFullFit"))
+
+#' @title Get the Per-Fold Priors from a MashPrior
+#' @description Accessor for the \code{cvFits} slot (per-fold priors +
+#'   \code{samplePartition}).
+#' @param x A \code{MashPrior} object.
+#' @param ... Unused.
+#' @return The \code{cvFits} list, or \code{NULL}.
+#' @export
+setGeneric("getCvFits", function(x, ...) standardGeneric("getCvFits"))
 
 #' @title Get Method Names
 #' @description Extract method names from a collection class.
@@ -846,3 +855,21 @@ setGeneric("getTauBlocks", function(x) standardGeneric("getTauBlocks"))
 #' @return Numeric (length 1).
 #' @export
 setGeneric("getH2", function(x) standardGeneric("getH2"))
+
+# Internal generics for the unified joint-analysis engine (see R/JointGroup.R
+# and dev/jointSpecification-s4-refactor.md). Not exported: the engine and its
+# fitters are package-internal machinery.
+
+# fitJointGroup(group, pipeline, token, args) -- multiple dispatch on
+# (JointGroup subclass, JointPipeline subclass). The 4 irreducible joint fits
+# (individual/sumstats x fm/twas). Returns one fit entry (FineMappingEntry or
+# TwasWeightsEntry).
+setGeneric("fitJointGroup",
+  function(group, pipeline, token, args) standardGeneric("fitJointGroup"))
+
+# construct(pipeline, rows) -- assemble the per-pipeline result collection
+# (QtlFineMappingResult vs TwasWeights) from accumulated joint rows. The joint
+# row identity (which axes collapse to "joint" + jointStudies/Contexts/Traits)
+# is derived from each group's `conditions` by the rows accumulator.
+setGeneric("construct",
+  function(pipeline, rows, ...) standardGeneric("construct"))
