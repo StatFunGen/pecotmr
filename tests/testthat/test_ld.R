@@ -2649,6 +2649,725 @@ test_that("computeLd with shrinkage > 0", {
 
 
 # =============================================================================
+# Additional coverage: findIntersectionRows / getRegionalLdMeta edge cases
+# =============================================================================
+
+test_that("findIntersectionRows errors when region falls in a coverage gap", {
+  # Chromosome exists but there is a gap between the two blocks; after
+  # clamping, no single row covers the query start -> stop (line 33).
+  gd <- data.frame(chrom = c(1, 1), start = c(100, 300), end = c(150, 350))
+  expect_error(
+    pecotmr:::findIntersectionRows(gd, 1, 200, 250),
+    "not covered by any rows"
+  )
+})
+
+test_that("getRegionalLdMeta handles whole-chromosome 0:0 sentinel rows", {
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_wholechrom_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("1", "0", "0",
+            "LD_block_1.chr1_1000_1200.float16.txt.xz,LD_block_1.chr1_1000_1200.float16.bim",
+            sep = "\t"), "\n", file = meta_file, append = TRUE)
+  result <- pecotmr:::getRegionalLdMeta(meta_file, "chr1:1000-1190")
+  expect_true(length(result$intersections$LD_file_paths) >= 1)
+  expect_true(all(file.exists(result$intersections$LD_file_paths)))
+  # 0:0 sentinel row should have had its end set to Inf internally (line 103)
+  expect_true(is.infinite(max(result$ldMetaData$end)))
+})
+
+test_that("getRegionalLdMeta validates complete coverage when required", {
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_complete_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  lines <- c(
+    paste("chrom", "start", "end", "path", sep = "\t"),
+    paste("1", "1000", "1200",
+          "LD_block_1.chr1_1000_1200.float16.txt.xz,LD_block_1.chr1_1000_1200.float16.bim",
+          sep = "\t")
+  )
+  writeLines(lines, meta_file)
+  # Region fully inside block 1 -> validateSelectedRegion passes (line 122)
+  result <- pecotmr:::getRegionalLdMeta(meta_file, "chr1:1050-1150",
+                                        completeCoverageRequired = TRUE)
+  expect_true(length(result$intersections$LD_file_paths) >= 1)
+})
+
+# =============================================================================
+# Additional coverage: processLdMatrix variant-file auto-detect / pvar / symm
+# =============================================================================
+
+test_that("processLdMatrix auto-detects companion .bim when snpFilePath is NULL", {
+  tmp_xz <- tempfile(fileext = ".txt.xz")
+  on.exit(unlink(c(tmp_xz, paste0(tmp_xz, ".bim"))), add = TRUE)
+  file.copy(file.path(geno_test_data_dir, "LD_block_1.chr1_1000_1200.float16.txt.xz"),
+            tmp_xz)
+  # Place the companion at "<ldfile>.bim" so the auto-detector finds it
+  file.copy(file.path(geno_test_data_dir, "LD_block_1.chr1_1000_1200.float16.bim"),
+            paste0(tmp_xz, ".bim"))
+  result <- pecotmr:::processLdMatrix(tmp_xz, snpFilePath = NULL)
+  expect_equal(nrow(result$ldMatrix), 5L)
+  expect_true(all(grepl("^chr1:", rownames(result$ldMatrix))))
+})
+
+test_that("processLdMatrix errors when no companion variant file is found", {
+  tmp_xz <- tempfile(fileext = ".txt.xz")
+  on.exit(unlink(tmp_xz), add = TRUE)
+  file.copy(file.path(geno_test_data_dir, "LD_block_1.chr1_1000_1200.float16.txt.xz"),
+            tmp_xz)
+  expect_error(
+    pecotmr:::processLdMatrix(tmp_xz, snpFilePath = NULL),
+    "No variant file found"
+  )
+})
+
+test_that("processLdMatrix reads .pvar metadata and symmetrizes an upper-triangular matrix", {
+  skip_if_not_installed("pgenlibr")
+  pvar <- file.path(geno_test_data_dir, "test_harmonize_regions.pvar")  # 8 variants
+  # Build an 8x8 upper-triangular matrix (lower triangle exactly zero) so the
+  # lower.tri == 0 branch fires (line 183).
+  set.seed(1)
+  n <- 8
+  U <- diag(n)
+  U[upper.tri(U)] <- round(runif(sum(upper.tri(U)), -0.4, 0.8), 3)
+  expect_true(all(U[lower.tri(U)] == 0))
+  tmp_xz <- tempfile(fileext = ".txt.xz")
+  on.exit(unlink(tmp_xz), add = TRUE)
+  con <- xzfile(tmp_xz, "w")
+  writeLines(paste(as.vector(t(U)), collapse = " "), con)  # row-major order
+  close(con)
+
+  result <- pecotmr:::processLdMatrix(tmp_xz, pvar)
+  expect_equal(nrow(result$ldMatrix), n)
+  expect_true(isSymmetric(result$ldMatrix))
+  # .pvar metadata has no gpos column; pos is derived from the variant id
+  expect_false("gpos" %in% names(result$ldVariants))
+  expect_true(all(grepl("^chr21:", rownames(result$ldMatrix))))
+})
+
+# =============================================================================
+# Additional coverage: createLdMatrix empty entry / loadLdMatrix dedup
+# =============================================================================
+
+test_that("createLdMatrix skips empty variant-list entries", {
+  m1 <- matrix(c(1, 0.5, 0.5, 1), 2, 2,
+               dimnames = list(c("v1", "v2"), c("v1", "v2")))
+  variants <- list(
+    data.frame(variants = character(0)),  # empty -> next (line 229)
+    data.frame(variants = c("v1", "v2"))
+  )
+  result <- pecotmr:::createLdMatrix(list(matrix(0, 0, 0), m1), variants)
+  expect_equal(nrow(result), 2L)
+  expect_equal(rownames(result), c("v1", "v2"))
+  expect_equal(result["v1", "v2"], 0.5)
+})
+
+test_that("loadLdMatrix removes duplicate variants from the backend result", {
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_dedup_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("1", "1000", "1200",
+            "LD_block_1.chr1_1000_1200.float16.txt.xz,LD_block_1.chr1_1000_1200.float16.bim",
+            sep = "\t"), "\n", file = meta_file, append = TRUE)
+
+  # Build an LdData whose variant IDs contain a duplicate (index 3 == index 1)
+  variant_ids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:100:A:G")
+  ref <- data.frame(chrom = c(1, 1, 1), pos = c(100, 200, 100),
+                    A2 = c("A", "C", "A"), A1 = c("G", "T", "G"),
+                    variant_id = variant_ids, stringsAsFactors = FALSE)
+  gr <- pecotmr:::.refPanelToGranges(ref)
+  R <- matrix(c(1, 0.5, 0.9, 0.5, 1, 0.4, 0.9, 0.4, 1), 3, 3)
+  rownames(R) <- colnames(R) <- variant_ids
+  bm <- data.frame(blockId = 1L, chrom = "1", blockStart = 100L, blockEnd = 200L,
+                   size = 3L, startIdx = 1L, endIdx = 3L, stringsAsFactors = FALSE)
+  dup_ld <- LdData(correlation = R, variants = gr, blockMetadata = bm)
+
+  local_mocked_bindings(
+    loadLdFromBlocks = function(ldMetaFilePath, region, extractCoordinates = NULL,
+                                nSample = NULL) dup_ld,
+    .package = "pecotmr"
+  )
+  result <- loadLdMatrix(meta_file, "chr1:100-200")
+  ids <- getVariantIds(result)
+  expect_equal(length(ids), 2L)
+  expect_false(any(duplicated(ids)))
+  expect_equal(dim(getCorrelation(result)), c(2L, 2L))
+})
+
+# =============================================================================
+# Additional coverage: resolveLdSource column check
+# =============================================================================
+
+test_that("resolveLdSource errors when metadata has fewer than 4 columns", {
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_3col_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", sep = "\t"), meta_file)
+  cat(paste("1", "1000", "1200", sep = "\t"), "\n", file = meta_file, append = TRUE)
+  expect_error(pecotmr:::resolveLdSource(meta_file), "at least 4 columns")
+})
+
+# =============================================================================
+# Additional coverage: loadLdFromGenotype .afreq mismatch warning
+# =============================================================================
+
+test_that("loadLdFromGenotype warns when .afreq is missing some variants", {
+  skip_if_not_installed("pgenlibr")
+  plink_prefix <- file.path(geno_test_data_dir, "test_variants")
+  local_mocked_bindings(
+    readAfreq = function(prefix) {
+      data.frame(id = "no_such_variant", alt_freq = 0.1, stringsAsFactors = FALSE)
+    },
+    .package = "pecotmr"
+  )
+  expect_warning(
+    pecotmr:::loadLdFromGenotype(plink_prefix, geno_region_all),
+    "no allele frequency"
+  )
+})
+
+# =============================================================================
+# Additional coverage: .ldFromSketch onMissing="drop"
+# =============================================================================
+
+test_that(".ldFromSketch drops variants absent from the panel when onMissing='drop'", {
+  skip_if_not_installed("pgenlibr")
+  h <- readGenotypes(file.path(geno_test_data_dir, "test_variants"), format = "plink2")
+  si <- getSnpInfo(h)
+  ids <- c(as.character(si$SNP[1]), "bogus:999:A:G", as.character(si$SNP[3]))
+  m <- pecotmr:::.ldFromSketch(h, ids, onMissing = "drop")
+  expect_equal(dim(m), c(2L, 2L))
+  expect_equal(attr(m, "keptVariantIds"),
+               c(as.character(si$SNP[1]), as.character(si$SNP[3])))
+  expect_equal(unname(diag(m)), c(1, 1))
+})
+
+# =============================================================================
+# Additional coverage: .requireMatchingLdSketches error paths
+# =============================================================================
+
+test_that(".requireMatchingLdSketches errors when slots are not GenotypeHandle", {
+  expect_error(
+    pecotmr:::.requireMatchingLdSketches(list(a = 1), list(b = 2), "testPipeline"),
+    "must both be GenotypeHandle"
+  )
+})
+
+test_that(".requireMatchingLdSketches errors when panels differ in a column", {
+  skip_if_not_installed("pgenlibr")
+  h <- readGenotypes(file.path(geno_test_data_dir, "test_variants"), format = "plink2")
+  si <- getSnpInfo(h)
+  si2 <- si
+  si2$A1[1] <- if (identical(si2$A1[1], "A")) "C" else "A"  # mutate one allele
+  h2 <- new("GenotypeHandle", path = h@path, format = h@format,
+            snpInfo = si2, nSamples = h@nSamples, sampleIds = h@sampleIds,
+            pgenPtr = NULL, chromPaths = character(0))
+  expect_error(
+    pecotmr:::.requireMatchingLdSketches(h, h2, "testPipeline"),
+    "differ in column"
+  )
+})
+
+# =============================================================================
+# Additional coverage: loadLdSketch non-LdData guard
+# =============================================================================
+
+test_that("loadLdSketch errors when loadLdMatrix does not return an LdData", {
+  local_mocked_bindings(
+    loadLdMatrix = function(ldMetaFilePath, region, returnGenotype = FALSE,
+                            nSample = NULL, ...) list(),
+    .package = "pecotmr"
+  )
+  expect_error(
+    pecotmr::loadLdSketch("fake_path.tsv", "chr1:1-100"),
+    "must return an LdData"
+  )
+})
+
+# =============================================================================
+# Additional coverage: loadLdFromBlocks empty-block handling
+# =============================================================================
+
+test_that("loadLdFromBlocks drops empty blocks and keeps non-empty ones", {
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_emptyblock_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  lines <- c(
+    paste("chrom", "start", "end", "path", sep = "\t"),
+    paste("1", "1000", "1200",
+          "LD_block_1.chr1_1000_1200.float16.txt.xz,LD_block_1.chr1_1000_1200.float16.bim",
+          sep = "\t"),
+    paste("1", "1200", "1400",
+          "LD_block_2.chr1_1200_1400.float16.txt.xz,LD_block_2.chr1_1200_1400.float16.bim",
+          sep = "\t")
+  )
+  writeLines(lines, meta_file)
+  # Region 1180-1260: block 1 (variants 1000..1160) is empty; block 2 keeps 1200,1240
+  expect_message(
+    result <- pecotmr:::loadLdFromBlocks(meta_file, "chr1:1180-1260"),
+    "Removing 1 empty LD block"
+  )
+  ids <- getVariantIds(result)
+  expect_true(length(ids) >= 1)
+  expect_true(all(grepl("^chr1:12", ids)))
+})
+
+test_that("loadLdFromBlocks errors when no block has variants in the region", {
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_noblockvar_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  lines <- c(
+    paste("chrom", "start", "end", "path", sep = "\t"),
+    paste("1", "1000", "1200",
+          "LD_block_1.chr1_1000_1200.float16.txt.xz,LD_block_1.chr1_1000_1200.float16.bim",
+          sep = "\t")
+  )
+  writeLines(lines, meta_file)
+  # Region 1165-1175 falls between block-1 variants 1160 and the next block
+  expect_error(
+    pecotmr:::loadLdFromBlocks(meta_file, "chr1:1165-1175"),
+    "No variants found in any LD block"
+  )
+})
+
+test_that("loadLdFromBlocks derives variance from allele_freq + nSample when variance is NA", {
+  # 9-column bim with NA variance but a present allele_freq column.
+  bim_file <- file.path(geno_test_data_dir, "LD_block_1_navar_tmp.bim")
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_navar_tmp.tsv")
+  on.exit(unlink(c(bim_file, meta_file)), add = TRUE)
+  bim_lines <- c(
+    "1\tchr1:1000_A_G\t0\t1000\tA\tG\tNA\t0.3\t500",
+    "1\tchr1:1040_A_G\t0\t1040\tA\tG\tNA\t0.4\t500",
+    "1\tchr1:1080_A_G\t0\t1080\tA\tG\tNA\t0.2\t500",
+    "1\tchr1:1120_A_G\t0\t1120\tA\tG\tNA\t0.5\t500",
+    "1\tchr1:1160_A_G\t0\t1160\tA\tG\tNA\t0.15\t500"
+  )
+  writeLines(bim_lines, bim_file)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("1", "1000", "1200",
+            paste0("LD_block_1.chr1_1000_1200.float16.txt.xz,", basename(bim_file)),
+            sep = "\t"), "\n", file = meta_file, append = TRUE)
+
+  result <- loadLdMatrix(meta_file, "chr1:1000-1190", nSample = 500L)
+  ref_mcols <- S4Vectors::mcols(getVariantInfo(result))
+  expect_true("variance" %in% names(ref_mcols))
+  expect_true(all(!is.na(ref_mcols$variance)))
+  expect_true(all(ref_mcols$variance > 0))
+  expect_equal(ref_mcols$n_nomiss, rep(500, length(ref_mcols$variance)))
+})
+
+# =============================================================================
+# Additional coverage: filterVariantsByLdReference keepIndel = FALSE
+# =============================================================================
+
+test_that("filterVariantsByLdReference with keepIndel=FALSE drops indels", {
+  meta_file <- file.path(geno_test_data_dir, "ld_meta_filtind_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  lines <- c(
+    paste("chrom", "start", "end", "path", sep = "\t"),
+    paste("1", "1000", "1200",
+          "LD_block_1.chr1_1000_1200.float16.txt.xz,LD_block_1.chr1_1000_1200.float16.bim",
+          sep = "\t")
+  )
+  writeLines(lines, meta_file)
+  # All three positions are on the reference panel, but the middle one is an indel.
+  variant_ids <- c("chr1:1000:A:G", "chr1:1040:AT:A", "chr1:1080:A:G")
+  result <- suppressMessages(
+    filterVariantsByLdReference(variant_ids, meta_file, keepIndel = FALSE)
+  )
+  expect_false("chr1:1040:AT:A" %in% result$data)
+  expect_true("chr1:1000:A:G" %in% result$data)
+  expect_true("chr1:1080:A:G" %in% result$data)
+})
+
+# =============================================================================
+# Additional coverage: partitionLdMatrix / validateBlockStructure / extractBlockMatrices
+# =============================================================================
+
+test_that("partitionLdMatrix accepts LdBlocks blockMetadata", {
+  variant_ids <- paste0("chr1:", c(100, 200, 300, 400), ":A:G")
+  R <- diag(4)
+  rownames(R) <- colnames(R) <- variant_ids
+  gr_blocks <- GenomicRanges::GRanges("chr1",
+    IRanges::IRanges(start = c(100, 300), end = c(200, 400)))
+  S4Vectors::mcols(gr_blocks) <- S4Vectors::DataFrame(
+    blockId = c(1L, 2L), chrom = c("1", "1"), size = c(2L, 2L),
+    startIdx = c(1L, 3L), endIdx = c(2L, 4L),
+    blockStart = c(100L, 300L), blockEnd = c(200L, 400L)
+  )
+  ldb <- new("LdBlocks", blocks = gr_blocks, genome = "hg38")
+  ref <- pecotmr:::parseVariantId(variant_ids)
+  ref$variant_id <- variant_ids
+  gr_vars <- pecotmr:::.refPanelToGranges(ref)
+  ld <- LdData(correlation = R, variants = gr_vars, blockMetadata = ldb)
+  result <- pecotmr:::partitionLdMatrix(ld, mergeSmallBlocks = FALSE)
+  expect_length(result$ldMatrices, 2)
+  expect_equal(nrow(result$ldMatrices[[1]]), 2L)
+})
+
+test_that("partitionLdMatrix errors on an empty correlation matrix", {
+  variant_ids <- "chr1:100:A:G"
+  ref <- pecotmr:::parseVariantId(variant_ids)
+  ref$variant_id <- variant_ids
+  gr <- pecotmr:::.refPanelToGranges(ref)
+  empty_R <- matrix(numeric(0), 0, 0)
+  bm <- data.frame(blockId = 1L, chrom = "1", blockStart = 100L, blockEnd = 100L,
+                   size = 1L, startIdx = 1L, endIdx = 1L, stringsAsFactors = FALSE)
+  ld <- LdData(correlation = empty_R, variants = gr, blockMetadata = bm)
+  expect_error(pecotmr:::partitionLdMatrix(ld), "Empty or NULL LD matrix")
+})
+
+test_that("partitionLdMatrix errors when all blocks have invalid indices", {
+  variant_ids <- paste0("chr1:", c(100, 200, 300), ":A:G")
+  R <- diag(3)
+  rownames(R) <- colnames(R) <- variant_ids
+  ref <- pecotmr:::parseVariantId(variant_ids)
+  ref$variant_id <- variant_ids
+  gr <- pecotmr:::.refPanelToGranges(ref)
+  bm <- data.frame(blockId = 1L, chrom = "1", blockStart = 100L, blockEnd = 300L,
+                   size = 3L, startIdx = 10L, endIdx = 20L, stringsAsFactors = FALSE)
+  ld <- LdData(correlation = R, variants = gr, blockMetadata = bm)
+  expect_error(pecotmr:::partitionLdMatrix(ld), "No valid LD blocks found")
+})
+
+test_that("partitionLdMatrix removes blocks with invalid indices and reindexes", {
+  variant_ids <- paste0("chr1:", seq(100, 600, by = 100), ":A:G")  # 6 variants
+  R <- diag(6)
+  rownames(R) <- colnames(R) <- variant_ids
+  ref <- pecotmr:::parseVariantId(variant_ids)
+  ref$variant_id <- variant_ids
+  gr <- pecotmr:::.refPanelToGranges(ref)
+  bm <- data.frame(
+    blockId = c(1L, 2L), chrom = c("1", "1"),
+    blockStart = c(100L, 400L), blockEnd = c(300L, 600L),
+    size = c(3L, 3L), startIdx = c(1L, 50L), endIdx = c(3L, 60L),
+    stringsAsFactors = FALSE
+  )
+  ld <- LdData(correlation = R, variants = gr, blockMetadata = bm)
+  expect_message(
+    result <- pecotmr:::partitionLdMatrix(ld, mergeSmallBlocks = FALSE),
+    "Removing 1 LD block"
+  )
+  expect_length(result$ldMatrices, 1)
+  expect_equal(nrow(result$ldMatrices[[1]]), 3L)
+})
+
+test_that("validateBlockStructure flags out-of-range block indices", {
+  mat <- diag(4)
+  vnames <- paste0("v", 1:4)
+  rownames(mat) <- colnames(mat) <- vnames
+  bm <- data.frame(blockId = c(1L, 2L), chrom = c("1", "1"), size = c(2L, 2L),
+                   startIdx = c(1L, 10L), endIdx = c(2L, 12L))
+  expect_error(
+    pecotmr:::validateBlockStructure(mat, bm, vnames),
+    "Block indices out of range"
+  )
+})
+
+test_that("extractBlockMatrices skips blocks where endIdx < startIdx", {
+  mat <- diag(4)
+  vnames <- paste0("v", 1:4)
+  rownames(mat) <- colnames(mat) <- vnames
+  bm <- data.frame(
+    blockId = c(1L, 2L), startIdx = c(1L, 3L), endIdx = c(2L, 2L),
+    chrom = c("1", "1"), blockStart = c(1L, 3L), blockEnd = c(2L, 4L),
+    size = c(2L, 1L), stringsAsFactors = FALSE
+  )
+  result <- pecotmr:::extractBlockMatrices(mat, bm, vnames)
+  valid <- result$ldMatrices[!sapply(result$ldMatrices, is.null)]
+  expect_length(valid, 1)
+  expect_equal(nrow(valid[[1]]), 2L)
+})
+
+# =============================================================================
+# Additional coverage: ldPruneByCorrelation snprelate backend
+# =============================================================================
+
+test_that("ldPruneByCorrelation snprelate backend prunes correlated columns", {
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  set.seed(42)
+  n <- 100; p <- 6
+  X <- matrix(rbinom(n * p, 2, 0.3), n, p)
+  X[, 2] <- X[, 1]  # perfect LD between columns 1 and 2
+  colnames(X) <- paste0("snp", 1:p)
+  result <- suppressMessages(
+    ldPruneByCorrelation(X, corThres = 0.5, backend = "snprelate", verbose = TRUE)
+  )
+  expect_true(ncol(result$X.new) <= p)
+  expect_equal(length(result$filter.id), ncol(result$X.new))
+  expect_true(all(result$filter.id %in% seq_len(p)))
+})
+
+# =============================================================================
+# Additional coverage: dropCollinearColumns verbose messages
+# =============================================================================
+
+test_that("dropCollinearColumns prints verbose messages for each strategy", {
+  set.seed(7)
+  X <- matrix(rnorm(100 * 4), 100, 4)
+  colnames(X) <- c("a", "b", "c", "d")
+  X[, "c"] <- X[, "c"] * 0.001  # lowest variance
+  y <- X[, "a"] * 2 + rnorm(100, sd = 0.1)
+
+  expect_message(
+    pecotmr:::dropCollinearColumns(X, "b", strategy = "correlation", verbose = TRUE),
+    "removing single column"
+  )
+  expect_message(
+    pecotmr:::dropCollinearColumns(X, c("a", "b", "c"), strategy = "variance",
+                                   verbose = TRUE),
+    "smallest variance"
+  )
+  expect_message(
+    pecotmr:::dropCollinearColumns(X, c("a", "b"), strategy = "correlation",
+                                   verbose = TRUE),
+    "two candidates"
+  )
+  expect_message(
+    pecotmr:::dropCollinearColumns(X, c("a", "b", "c"), strategy = "correlation",
+                                   verbose = TRUE),
+    "highest sum"
+  )
+  expect_message(
+    pecotmr:::dropCollinearColumns(X, c("a", "b", "c"),
+                                   strategy = "response_correlation",
+                                   response = y, verbose = TRUE),
+    "smallest .* with response"
+  )
+})
+
+# =============================================================================
+# Additional coverage: enforceDesignFullRank verbose / fallback branches
+# =============================================================================
+
+test_that("enforceDesignFullRank verbose: batch-removal success + iterative path", {
+  set.seed(11)
+  X <- matrix(rnorm(80 * 4), 80, 4)
+  X[, 4] <- X[, 1] + X[, 2]  # rank deficient, fixable by removing one column
+  colnames(X) <- c("a", "b", "c", "d")
+  C <- matrix(rnorm(80), 80, 1)
+  expect_message(
+    result <- enforceDesignFullRank(X, C, strategy = "variance", verbose = TRUE),
+    "enforceDesignFullRank"
+  )
+  full_design <- cbind(1, result, C)
+  expect_equal(qr(full_design)$rank, ncol(full_design))
+})
+
+test_that("enforceDesignFullRank verbose: constant covariate triggers fallback", {
+  set.seed(12)
+  X <- matrix(rnorm(60 * 3), 60, 3)  # X itself is full rank
+  colnames(X) <- c("a", "b", "c")
+  C <- matrix(1, 60, 1)  # constant -> collinear with intercept, not fixable via X
+  # Iterative path finds no removable X column (break), then the correlation
+  # fallback runs over each threshold; design stays rank-deficient throughout.
+  expect_message(
+    result <- enforceDesignFullRank(X, C, strategy = "correlation", verbose = TRUE),
+    "ldPruneByCorrelation fallback"
+  )
+  expect_true(is.matrix(result))
+})
+
+test_that("enforceDesignFullRank verbose: batch removal insufficient path", {
+  set.seed(13)
+  X <- matrix(rnorm(60 * 3), 60, 3)
+  X <- cbind(X, X[, 1])             # duplicate of column 1
+  colnames(X) <- c("a", "b", "c", "d")
+  C <- matrix(1, 60, 1)            # constant covariate keeps design deficient
+  # Removing the QR-flagged X column cannot restore full rank (C is constant),
+  # so the batch-removal "insufficient" branch fires and skips iterative pruning.
+  expect_message(
+    result <- enforceDesignFullRank(X, C, strategy = "correlation", verbose = TRUE),
+    "batch removal insufficient"
+  )
+  expect_true(is.matrix(result))
+})
+
+# =============================================================================
+# Additional coverage: ldClumpByScore verbose + FBM input
+# =============================================================================
+
+test_that("ldClumpByScore prints verbose message for single-variant input", {
+  skip_if_not_installed("bigsnpr")
+  skip_if_not_installed("bigstatsr")
+  X <- matrix(c(0, 1, 2, 1, 0), ncol = 1)
+  expect_message(
+    ldClumpByScore(X, score = 1.0, chr = 1L, pos = 100L, verbose = TRUE),
+    "single variant"
+  )
+})
+
+test_that("ldClumpByScore accepts a pre-built FBM and reports retained count (verbose)", {
+  skip_if_not_installed("bigsnpr")
+  skip_if_not_installed("bigstatsr")
+  set.seed(1)
+  n <- 200; p <- 8
+  X <- matrix(rbinom(n * p, 2, 0.3), n, p)
+  X[, 2] <- X[, 1]  # perfect LD
+  G <- bigstatsr::FBM.code256(nrow = n, ncol = p, init = X,
+                              code = c(0, 1, 2, rep(NA_real_, 253L)))
+  score <- c(2, 1, runif(p - 2))
+  chr <- rep(1L, p)
+  pos <- seq_len(p) * 1000L
+  expect_message(
+    keep <- ldClumpByScore(G, score = score, chr = chr, pos = pos, r2 = 0.2,
+                           verbose = TRUE),
+    "variants retained"
+  )
+  expect_true(1L %in% keep)
+  expect_false(2L %in% keep)
+})
+
+# =============================================================================
+# Additional coverage: extractLdMatrix
+# =============================================================================
+
+test_that("extractLdMatrix errors on non-LdData input", {
+  expect_error(pecotmr:::extractLdMatrix(list()), "must be an LdData object")
+})
+
+test_that("extractLdMatrix returns the genotype matrix when wantGenotype=TRUE", {
+  variant_ids <- paste0("chr1:", c(100, 200, 300), ":A:G")
+  X <- matrix(rnorm(15), 5, 3)
+  colnames(X) <- variant_ids
+  ref <- pecotmr:::parseVariantId(variant_ids)
+  ref$variant_id <- variant_ids
+  gr <- pecotmr:::.refPanelToGranges(ref)
+  bm <- data.frame(blockId = 1L, chrom = "1", blockStart = 100L, blockEnd = 300L,
+                   size = 3L, startIdx = 1L, endIdx = 3L, stringsAsFactors = FALSE)
+  ld <- LdData(genotypeHandle = X, variants = gr, blockMetadata = bm)
+  result <- pecotmr:::extractLdMatrix(ld, wantGenotype = TRUE)
+  expect_equal(result, X)
+})
+
+# =============================================================================
+# Additional coverage: ldLoader region-mode subsample/scale + ldInfo auto-detect
+# =============================================================================
+
+test_that("ldLoader region mode subsamples and scales genotype matrices", {
+  skip_if_not_installed("pgenlibr")
+  meta_file <- file.path(test_data_dir, "ld_meta_region_geno_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("21", "0", "0", "test_variants", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  set.seed(1)
+  loader <- ldLoader(ldMetaPath = meta_file, regions = geno_region_all,
+                     returnGenotype = TRUE, maxVariants = 20)
+  mat <- loader(1)
+  expect_equal(ncol(mat), 20L)
+  expect_equal(nrow(mat), 100L)  # samples
+  expect_true(all(is.finite(mat)))  # scaled, NAs replaced with 0
+})
+
+test_that("ldLoader region mode subsamples a correlation matrix", {
+  skip_if_not_installed("pgenlibr")
+  meta_file <- file.path(test_data_dir, "ld_meta_region_corr_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("21", "0", "0", "test_variants", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  set.seed(2)
+  loader <- ldLoader(ldMetaPath = meta_file, regions = geno_region_all,
+                     returnGenotype = FALSE, maxVariants = 15)
+  mat <- loader(1)
+  expect_equal(dim(mat), c(15L, 15L))
+})
+
+test_that("ldLoader ldInfo auto-detects companion file when SNP_file is absent", {
+  ld_file <- file.path(test_data_dir, "LD_block_1.chr1_1000_1200.float16.txt.xz")
+  bim_file <- file.path(test_data_dir, "LD_block_1.chr1_1000_1200.float16.bim")
+  real_process <- pecotmr:::processLdMatrix
+  local_mocked_bindings(
+    processLdMatrix = function(LD_file_path, snp_file_path = NULL) {
+      # In the SNP_file-absent branch, snp_file_path is NULL (auto-detect).
+      result <- real_process(LD_file_path, bim_file)
+      variant_ids <- result$ldVariants$variants
+      ref <- pecotmr:::parseVariantId(variant_ids)
+      ref$variant_id <- variant_ids
+      gr <- pecotmr:::.refPanelToGranges(ref)
+      bm <- data.frame(
+        blockId = 1L, chrom = as.character(ref$chrom[1]),
+        blockStart = min(ref$pos), blockEnd = max(ref$pos),
+        size = length(variant_ids), startIdx = 1L,
+        endIdx = length(variant_ids), stringsAsFactors = FALSE
+      )
+      LdData(correlation = result$ldMatrix, variants = gr, blockMetadata = bm)
+    },
+    .package = "pecotmr"
+  )
+  loader <- ldLoader(ldInfo = data.frame(LD_file = ld_file))  # no SNP_file column
+  mat <- loader(1)
+  expect_true(is.matrix(mat))
+  expect_true(isSymmetric(mat))
+  expect_true(nrow(mat) > 0)
+})
+
+# =============================================================================
+# Additional coverage: computeLd alternative backends + guard rails
+# =============================================================================
+
+test_that("computeLd snprelate backend returns a valid correlation matrix", {
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  set.seed(1)
+  X <- matrix(rbinom(100 * 5, 2, 0.3), 100, 5)
+  colnames(X) <- paste0("rs", 1:5)
+  R <- suppressMessages(computeLd(X, method = "sample", backend = "snprelate"))
+  expect_equal(dim(R), c(5L, 5L))
+  expect_equal(unname(diag(R)), rep(1, 5))
+  expect_true(all(is.finite(R)))
+  expect_equal(colnames(R), colnames(X))
+})
+
+test_that("computeLd snpstats backend returns a valid correlation matrix", {
+  skip_if_not_installed("snpStats")
+  set.seed(1)
+  X <- matrix(rbinom(100 * 5, 2, 0.3), 100, 5)
+  colnames(X) <- paste0("rs", 1:5)
+  R <- computeLd(X, method = "sample", backend = "snpstats")
+  expect_equal(dim(R), c(5L, 5L))
+  expect_equal(unname(diag(R)), rep(1, 5))
+  expect_true(all(is.finite(R)))
+})
+
+test_that("computeLd errors when a non-internal backend is paired with non-sample method", {
+  set.seed(1)
+  X <- matrix(rbinom(100 * 3, 2, 0.3), 100, 3)
+  colnames(X) <- paste0("rs", 1:3)
+  expect_error(
+    computeLd(X, method = "population", backend = "snprelate"),
+    "only supported with method='sample'"
+  )
+  expect_error(
+    computeLd(X, method = "gcta", backend = "snpstats"),
+    "only supported with method='sample'"
+  )
+})
+
+# The Rfast-absent fallback branches (computeLd's `R <- cor(X_imp)` and
+# ldPruneByCorrelation's `cor.X <- cor(X)`) are reachable by mocking the *base*
+# `requireNamespace` (so it reports Rfast missing) for the duration of the call.
+test_that("ldPruneByCorrelation and computeLd fall back to base cor() when Rfast is absent", {
+  with_mocked_bindings(
+    {
+      set.seed(1)
+      X <- matrix(rnorm(50 * 4), 50, 4)
+      colnames(X) <- paste0("s", 1:4)
+      pruned <- ldPruneByCorrelation(X, corThres = 0.9)            # hits cor(X) at ld.R:1207
+      R <- computeLd(X, method = "sample", backend = "internal")   # hits cor(X_imp) at ld.R:1816
+      expect_true(is.list(pruned))
+      expect_true(all(c("X.new", "filter.id") %in% names(pruned)))
+      expect_equal(dim(R), c(4L, 4L))
+      expect_equal(unname(diag(R)), rep(1, 4), tolerance = 1e-8)
+      expect_true(isSymmetric(unname(R)))
+      # base cor() fallback must agree with the direct base computation.
+      expect_equal(unname(R), unname(cor(X)), tolerance = 1e-10)
+    },
+    requireNamespace = function(package, ...)
+      if (identical(package, "Rfast")) FALSE
+      else base::requireNamespace(package, ...),
+    .package = "base")
+})
+
+# =============================================================================
 # detectVariantConvention — uncovered line 586
 # =============================================================================
 

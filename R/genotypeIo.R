@@ -40,10 +40,12 @@ setMethod("readGenotypes",
 
 #' @keywords internal
 .makeGdsHandle <- function(path) {
+  # nocov start
   if (!requireNamespace("SNPRelate", quietly = TRUE))
     stop("Package 'SNPRelate' is required for reading GDS files.")
   if (!requireNamespace("gdsfmt", quietly = TRUE))
     stop("Package 'gdsfmt' is required for reading GDS files.")
+  # nocov end
   if (!file.exists(path))
     stop("GDS file not found: ", path)
 
@@ -67,8 +69,10 @@ setMethod("readGenotypes",
 
 #' @keywords internal
 .makeVcfHandle <- function(path, ...) {
+  # nocov start
   if (!requireNamespace("VariantAnnotation", quietly = TRUE))
     stop("Package 'VariantAnnotation' is required for reading VCF files.")
+  # nocov end
   if (!file.exists(path))
     stop("VCF file not found: ", path)
 
@@ -103,8 +107,10 @@ setMethod("readGenotypes",
 
 #' @keywords internal
 .makePlink1Handle <- function(path, ...) {
+  # nocov start
   if (!requireNamespace("snpStats", quietly = TRUE))
     stop("Package 'snpStats' is required for reading plink1 files.")
+  # nocov end
 
   stem <- .plinkStem(path)
   bedFile <- paste0(stem, ".bed")
@@ -150,8 +156,10 @@ setMethod("readGenotypes",
 
 #' @keywords internal
 .makePlink2Handle <- function(path, ...) {
+  # nocov start
   if (!requireNamespace("pgenlibr", quietly = TRUE))
     stop("Package 'pgenlibr' is required for reading plink2 files.")
+  # nocov end
 
   stem <- .plinkStem(path)
 
@@ -624,7 +632,9 @@ readFam <- function(bed) {
 # open bed/bim/fam: A PLINK 1 .bed is a valid .pgen
 openBed <- function(bed) {
   if (!requireNamespace("pgenlibr", quietly = TRUE)) {
+    # nocov start
     stop("To use this function, please install pgenlibr: https://cran.r-project.org/web/packages/pgenlibr/index.html")
+    # nocov end
   }
   rawSCt <- nrow(readFam(bed))
   return(pgenlibr::NewPgen(bed, raw_sample_ct = rawSCt))
@@ -798,7 +808,9 @@ resolvePlink2Paths <- function(prefix) {
 #' @noRd
 readPvar <- function(pvarPath) {
   if (!requireNamespace("pgenlibr", quietly = TRUE)) {
+    # nocov start
     stop("pgenlibr is required. Install from https://cran.r-project.org/web/packages/pgenlibr/index.html")
+    # nocov end
   }
   pvar <- pgenlibr::NewPvar(pvarPath)
   on.exit(pgenlibr::ClosePvar(pvar), add = TRUE)

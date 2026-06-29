@@ -107,17 +107,20 @@
   if (is(data, "MultiStudyQtlDataset")) {
     indDatasets <- getQtlDatasets(data)
     ss <- getSumStats(data)
-    if (!is.null(study) && study %in% names(indDatasets))
-      return(.spListTraits(indDatasets[[study]], context = context))
-    if (!is.null(ss) &&
-        (is.null(study) || study %in% unique(as.character(ss$study))))
-      return(.spListTraits(ss, study = study, context = context))
+    # No study filter: aggregate traits across every component (individual +
+    # sumstats). This must precede the per-study branches -- otherwise a present
+    # sumStats slot short-circuits and shadows the individual-level studies'
+    # traits when study = NULL.
     if (is.null(study)) {
       out <- character(0)
-      for (qd in indDatasets) out <- c(out, .spListTraits(qd))
-      if (!is.null(ss)) out <- c(out, .spListTraits(ss))
+      for (qd in indDatasets) out <- c(out, .spListTraits(qd, context = context))
+      if (!is.null(ss)) out <- c(out, .spListTraits(ss, context = context))
       return(unique(out))
     }
+    if (study %in% names(indDatasets))
+      return(.spListTraits(indDatasets[[study]], context = context))
+    if (!is.null(ss) && study %in% unique(as.character(ss$study)))
+      return(.spListTraits(ss, study = study, context = context))
     return(character(0))
   }
   stop(".spListTraits: unsupported class: ", class(data)[[1L]])

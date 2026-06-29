@@ -873,3 +873,50 @@ setGeneric("fitJointGroup",
 # is derived from each group's `conditions` by the rows accumulator.
 setGeneric("construct",
   function(pipeline, rows, ...) standardGeneric("construct"))
+
+# ---- SldscData accessors ----
+#' @title Get the annotation table from an SldscData
+#' @param x An \code{\link{SldscData}} object.
+#' @return A \code{data.frame} of annotations (CHR, SNP, annotation columns).
+#' @rdname getAnnotData
+#' @export
+setGeneric("getAnnotData", function(x) standardGeneric("getAnnotData"))
+
+#' @title Get the allele-frequency table from an SldscData
+#' @param x An \code{\link{SldscData}} object.
+#' @return A \code{data.frame} of reference-panel frequencies (SNP, MAF).
+#' @rdname getFrqData
+#' @export
+setGeneric("getFrqData", function(x) standardGeneric("getFrqData"))
+
+#' @title Get the per-trait runs list from an SldscData
+#' @param x An \code{\link{SldscData}} object.
+#' @return The named list of per-trait \code{single}/\code{joint} runs.
+#' @rdname getTraitRuns
+#' @export
+setGeneric("getTraitRuns", function(x) standardGeneric("getTraitRuns"))
+
+#' @title Get the trait names from an SldscData
+#' @param x An \code{\link{SldscData}} object.
+#' @return A character vector of trait names.
+#' @rdname getTraitNames
+#' @export
+setGeneric("getTraitNames", function(x) standardGeneric("getTraitNames"))
+
+#' @title Get the annotation column names from an SldscData
+#' @param x An \code{\link{SldscData}} object.
+#' @return A character vector of annotation column names.
+#' @rdname getAnnotCols
+#' @export
+setGeneric("getAnnotCols", function(x) standardGeneric("getAnnotCols"))
+
+#' @title Get one trait's run from an SldscData
+#' @param x An \code{\link{SldscData}} object.
+#' @param trait Character. Trait name.
+#' @param ... Further arguments: \code{mode} (\code{"single"}/\code{"joint"})
+#'   and \code{idx} (which single run).
+#' @return A single run list, the list of single runs, or \code{NULL}.
+#' @rdname getTraitRun
+#' @export
+setGeneric("getTraitRun",
+  function(x, trait, ...) standardGeneric("getTraitRun"))

@@ -142,8 +142,10 @@ colocPipeline <- function(qtlFineMappingResult,
            paste(missingCols, collapse = ", "))
   }
   if (!requireNamespace("coloc", quietly = TRUE)) {
+    # nocov start
     stop("Package 'coloc' is required for colocPipeline. ",
          "Install with: install.packages('coloc').")
+    # nocov end
   }
   if (!methods::is(qtlFineMappingResult, "QtlFineMappingResult")) {
     stop("`qtlFineMappingResult` must be a QtlFineMappingResult ",

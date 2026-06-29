@@ -1053,7 +1053,9 @@ fsusieGetCs <- function(fsusieObj, X, requestedCoverage = 0.95) {
 fsusieWrapper <- function(X, Y, pos, L, prior, maxSnpEm, covLev, minPurity, maxScale, ...) {
   # Make sure fsusieR installed
   if (!requireNamespace("fsusieR", quietly = TRUE)) {
+    # nocov start
     stop("To use this function, please install fsusieR: https://github.com/stephenslab/fsusieR")
+    # nocov end
   }
   # Run fsusie
   fsusieObj <- fsusieR::susiF(
@@ -1143,4 +1145,604 @@ fitMvsusieRss <- function(Z, R, N, prior_variance, coverage = 0.95, ...) {
 #' @export
 fitFsusie <- function(X, Y, pos, ...) {
   fsusieR::susiF(X = X, Y = Y, pos = pos, ...)
+}
+
+# =============================================================================
+# SuSiE / mvSuSiE / fSuSiE TWAS weight extractors
+# (relocated from regularizedRegressionWrappers.R: the SuSiE-family weight
+#  extractors live with the rest of the fine-mapping/SuSiE wrappers).
+# =============================================================================
+
+# Shared helper for susie/susieAsh/susieInf weight extraction.
+# @param fit A susie fit object (or NULL to fit from X, y).
+# @param X Genotype matrix (optional).
+# @param y Phenotype vector (optional).
+# @param requiredFields Fields that must be present in the fit to extract weights.
+# @param fitArgs Extra arguments passed to susieR::susie when fit is NULL.
+# @param ... Additional arguments forwarded to susieR::susie.
+#' @importFrom susieR coef.susie susie
+#' @noRd
+.susieExtractWeights <- function(fit, X, y, requiredFields, fitArgs = list(), retainFit = FALSE, ...) {
+  if (is.null(fit)) {
+    fit <- do.call(susie, c(list(X = X, y = y), fitArgs, list(...)))
+  }
+  if (!is.null(X) && length(fit$pip) != ncol(X)) {
+    stop(paste0(
+      "Dimension mismatch on number of variant in susie fit ", length(fit$pip),
+      " and TWAS weights ", ncol(X), ". "
+    ))
+  }
+  if (all(requiredFields %in% names(fit))) {
+    fit$intercept <- 0
+    weights <- coef.susie(fit)[-1]
+  } else {
+    weights <- rep(0, length(fit$pip))
+  }
+  if (retainFit) attr(weights, "fit") <- fit
+  return(weights)
+}
+
+#' Compute SuSiE TWAS weights
+#'
+#' Extracts coefficients from an existing SuSiE fit or fits `susieR::susie()`
+#' from `X` and `y` before extracting weights.
+#'
+#' @param X Genotype matrix. Required when `susieFit` is NULL.
+#' @param y Phenotype vector. Required when `susieFit` is NULL.
+#' @param susieFit Optional fitted SuSiE object.
+#' @param retainFit If TRUE, stores the fitted object as an attribute on the returned weights.
+#' @param ... Additional arguments passed to `susieR::susie()` when fitting.
+#' @return Numeric vector of variant weights.
+#' @export
+susieWeights <- function(X = NULL, y = NULL, susieFit = NULL, retainFit = FALSE, ...) {
+  .susieExtractWeights(susieFit, X, y,
+    requiredFields = c("alpha", "mu", "X_column_scale_factors"),
+    retainFit = retainFit, ...)
+}
+
+#' Compute SuSiE-ASH TWAS weights
+#'
+#' Extracts coefficients from an existing SuSiE-ASH fit or fits `susieR::susie()`
+#' with `unmappable_effects = "ash"`.
+#'
+#' @param X Genotype matrix. Required when `susieAshFit` is NULL.
+#' @param y Phenotype vector. Required when `susieAshFit` is NULL.
+#' @param susieAshFit Optional fitted SuSiE-ASH object.
+#' @param retainFit If TRUE, stores the fitted object as an attribute on the returned weights.
+#' @param ... Additional arguments passed to `susieR::susie()` when fitting.
+#' @return Numeric vector of variant weights.
+#' @export
+susieAshWeights <- function(X = NULL, y = NULL, susieAshFit = NULL, retainFit = FALSE, ...) {
+  .susieExtractWeights(susieAshFit, X, y,
+    requiredFields = c("alpha", "mu", "theta", "X_column_scale_factors"),
+    fitArgs = list(unmappable_effects = "ash", convergence_method = "pip"),
+    retainFit = retainFit, ...)
+}
+
+#' Compute SuSiE-inf TWAS weights
+#'
+#' Extracts coefficients from an existing SuSiE-inf fit or fits `susieR::susie()`
+#' with `unmappable_effects = "inf"`.
+#'
+#' @section Non-zero weights with zero PIPs:
+#' SuSiE-inf decomposes effects into a mappable component (driven by `alpha *
+#' mu`, reported as per-variant PIPs) and an infinitesimal component (driven by
+#' `theta`). When the fit converges with no mappable effects -- all `V` and `mu`
+#' zero, so every `pip == 0` -- the returned weights are still non-zero because
+#' `susieR::coef.susie` adds `theta / X_column_scale_factors` to the mappable
+#' coefficient. This is intentional: it captures diffuse polygenic signal that
+#' the mappable component could not localize to any credible set. Consumers
+#' that interpret per-variant PIPs as a gate on whether to use the weights
+#' should be aware that low or zero PIPs do not imply zero TWAS weights here.
+#'
+#' @param X Genotype matrix. Required when `susieInfFit` is NULL.
+#' @param y Phenotype vector. Required when `susieInfFit` is NULL.
+#' @param susieInfFit Optional fitted SuSiE-inf object.
+#' @param retainFit If TRUE, stores the fitted object as an attribute on the returned weights.
+#' @param ... Additional arguments passed to `susieR::susie()` when fitting.
+#' @return Numeric vector of variant weights.
+#' @export
+susieInfWeights <- function(X = NULL, y = NULL, susieInfFit = NULL, retainFit = FALSE, ...) {
+  .susieExtractWeights(susieInfFit, X, y,
+    requiredFields = c("alpha", "mu", "theta", "X_column_scale_factors"),
+    fitArgs = list(unmappable_effects = "inf", convergence_method = "pip"),
+    retainFit = retainFit, ...)
+}
+# Internal helper: extract weights from a susieRss fit.
+# Mirrors .susie_extract_weights but uses the RSS interface.
+#' @importFrom susieR coef.susie susie_rss
+#' @noRd
+.susieRssExtractWeights <- function(fit, z, R, n,
+                                    requiredFields, fitArgs = list(),
+                                    retainFit = FALSE) {
+  if (is.null(fit)) {
+    fit <- do.call(susie_rss, c(list(z = z, R = R, n = n), fitArgs))
+  }
+  if (length(fit$pip) != nrow(R)) {
+    stop(paste0(
+      "Dimension mismatch: susieRss fit has ", length(fit$pip),
+      " variants but R has ", nrow(R), " rows."))
+  }
+  if (all(requiredFields %in% names(fit))) {
+    fit$intercept <- 0
+    weights <- coef.susie(fit)[-1]
+  } else {
+    weights <- rep(0, length(fit$pip))
+  }
+  if (retainFit) attr(weights, "fit") <- fit
+  return(weights)
+}
+
+#' Compute SuSiE-RSS TWAS weights
+#'
+#' Extracts coefficients from an existing SuSiE-RSS fit or fits
+#' \code{susieR::susie_rss()} from summary statistics and LD.
+#'
+#' @param stat List with components \code{z} (z-scores), \code{n} (sample sizes).
+#' @param LD LD correlation matrix.
+#' @param susieRssFit Optional pre-fitted SuSiE-RSS object.
+#' @param retainFit If TRUE, stores the fitted object as an attribute.
+#' @param methodArgs Named list of additional arguments passed to
+#'   \code{susieR::susie_rss()}. Use this instead of \code{...} to avoid
+#'   partial matching of short argument names (e.g. \code{L}) to the
+#'   \code{LD} parameter.
+#' @return Numeric vector of variant weights.
+#' @export
+susieRssWeights <- function(stat, LD, susieRssFit = NULL, retainFit = TRUE,
+                            methodArgs = list()) {
+  .susieRssExtractWeights(fit = susieRssFit, z = stat$z, R = LD, n = median(stat$n),
+    requiredFields = c("alpha", "mu", "X_column_scale_factors"),
+    fitArgs = methodArgs,
+    retainFit = retainFit)
+}
+
+#' Compute SuSiE-inf-RSS TWAS weights
+#'
+#' Extracts coefficients from an existing SuSiE-inf-RSS fit or fits
+#' \code{susieR::susie_rss()} with \code{unmappable_effects = "inf"}.
+#'
+#' @inheritParams susieRssWeights
+#' @param susieInfRssFit Optional pre-fitted SuSiE-inf-RSS object.
+#' @return Numeric vector of variant weights.
+#' @export
+susieInfRssWeights <- function(stat, LD, susieInfRssFit = NULL, retainFit = TRUE,
+                               methodArgs = list()) {
+  .susieRssExtractWeights(fit = susieInfRssFit, z = stat$z, R = LD, n = median(stat$n),
+    requiredFields = c("alpha", "mu", "theta", "X_column_scale_factors"),
+    fitArgs = c(list(unmappable_effects = "inf", convergence_method = "pip"), methodArgs),
+    retainFit = retainFit)
+}
+
+#' Compute SuSiE-ASH-RSS TWAS weights
+#'
+#' Extracts coefficients from an existing SuSiE-ASH-RSS fit or fits
+#' \code{susieR::susie_rss()} with \code{unmappable_effects = "ash"}.
+#'
+#' @inheritParams susieRssWeights
+#' @param susieAshRssFit Optional pre-fitted SuSiE-ASH-RSS object.
+#' @return Numeric vector of variant weights.
+#' @export
+susieAshRssWeights <- function(stat, LD, susieAshRssFit = NULL, retainFit = TRUE,
+                               methodArgs = list()) {
+  .susieRssExtractWeights(fit = susieAshRssFit, z = stat$z, R = LD, n = median(stat$n),
+    requiredFields = c("alpha", "mu", "theta", "X_column_scale_factors"),
+    fitArgs = c(list(unmappable_effects = "ash", convergence_method = "pip"), methodArgs),
+    retainFit = retainFit)
+}
+#' Compute mvSuSiE TWAS weights
+#'
+#' Extracts coefficients from an existing mvSuSiE fit or fits `fitMvsusie()`
+#' from `X` and `Y`.
+#'
+#' @param mvsusieFit Optional fitted mvSuSiE object.
+#' @param X Genotype matrix. Required when `mvsusieFit` is NULL.
+#' @param Y Phenotype matrix. Required when `mvsusieFit` is NULL.
+#' @param priorVariance Optional mvSuSiE prior variance list.
+#' @param residualVariance Optional residual variance matrix.
+#' @param L Maximum number of components.
+#' @param LGreedy Initial greedy number of components.
+#' @param verbose If TRUE, prints mvSuSiE fitting progress.
+#' @param ... Additional arguments passed to `fitMvsusie()` when fitting.
+#' @return Matrix of variant weights.
+#' @export
+mvsusieWeights <- function(mvsusieFit = NULL, X = NULL, Y = NULL,
+                           priorVariance = NULL, residualVariance = NULL,
+                           L = 30, LGreedy = 5, verbose = FALSE, ...) {
+  if (!requireNamespace("mvsusieR", quietly = TRUE)) {
+    # nocov start
+    stop("Package 'mvsusieR' is required. Install with: devtools::install_github('stephenslab/mvsusieR')")
+    # nocov end
+  }
+  if (is.null(mvsusieFit)) {
+    message("mvsusieFit is not provided; fitting mvSuSiE now ...")
+    if (is.null(X) || is.null(Y)) {
+      stop("Both X and Y must be provided if mvsusieFit is NULL.")
+    }
+    if (is.null(priorVariance)) priorVariance <- mvsusieR::create_mixture_prior(R = ncol(Y))
+    if (!is.null(LGreedy)) LGreedy <- min(LGreedy, L)
+
+    mvsusieFit <- fitMvsusie(
+      X = X, Y = Y, L = L, L_greedy = LGreedy, prior_variance = priorVariance,
+      residual_variance = residualVariance,
+      estimate_residual_variance = TRUE,
+      verbose = verbose, ...
+    )
+  }
+  return(mvsusieR::coef.mvsusie(mvsusieFit)[-1, ])
+}
+
+# Build the wavelet synthesis (inverse-DWT) matrix S (n_wac x nFeat) for the
+# basis fSuSiE uses, by reconstructing each unit wavelet coefficient through the
+# SAME $D / $C assignment as out_prep.susiF (detail columns -> $D, the coarsest
+# scaling column -> last $C entry), then `wavethresh::wr`. A wavelet-coefficient
+# row `c` then maps to the feature domain as `c %*% S`. `scaleCols` is the
+# column index of the scaling coefficient(s) (per the prior family). fSuSiE's
+# default basis (DaubLeAsymm, filter 10) matches `wavethresh::wd`'s default, the
+# same one out_prep uses, so the plain `wd(rep(0, nWac))` template is consistent.
+# @noRd
+.fsusieSynthesisMatrix <- function(nWac, scaleCols) {
+  template <- wavethresh::wd(rep(0, nWac))
+  reconstructUnit <- function(k) {
+    coeffRow <- numeric(nWac)
+    coeffRow[k] <- 1
+    temp <- template
+    temp$D <- coeffRow[-scaleCols]
+    temp$C[length(temp$C)] <- sum(coeffRow[scaleCols])
+    as.numeric(wavethresh::wr(temp))
+  }
+  do.call(rbind, lapply(seq_len(nWac), reconstructUnit))
+}
+
+#' Compute fSuSiE feature-level TWAS weights
+#'
+#' Collapses a functional SuSiE (\code{fsusieR::susiF}) fit back to a
+#' \code{variants x features} weight matrix usable for TWAS prediction of each
+#' molecular feature. fSuSiE fits the regression in the wavelet domain, storing
+#' per-SNP posterior-mean wavelet effects \code{fitted_wc[[l]]}
+#' (\code{nSNP x n_wac}) and inclusion probabilities \code{alpha[[l]]}. Because
+#' the inverse wavelet transform \code{wr()} is linear, the posterior-mean
+#' prediction pushes through to a per-SNP, per-feature weight matrix:
+#' \deqn{W[j, f] = \sum_l alpha[[l]][j] \cdot
+#'   \mathrm{wr}\!\left(fitted\_wc[[l]][j, ] / csd\_X[j]\right)[f].}
+#' This is the exact analog of \code{coef.susie} for scalar SuSiE (all SNPs,
+#' alpha-weighted), which spreads weight across the credible set — more robust
+#' for out-of-sample TWAS than fSuSiE's in-sample lead-SNP summary
+#' (\code{update_cal_indf}).
+#'
+#' The reconstruction uses the raw posterior wavelet coefficients
+#' \code{fitted_wc}, so it is independent of the \code{post_processing} mode
+#' (\code{"smash"}/\code{"TI"}/\code{"HMM"}/\code{"none"}) — that smoothing only
+#' denoises the alpha-collapsed display curve \code{fitted_func}, never the
+#' per-SNP predictive coefficients. The \code{$D}/\code{$C} coefficient layout
+#' and wavelet basis mirror \code{out_prep.susiF}, so the feature-domain output
+#' matches fSuSiE's own conventions.
+#'
+#' @param fsusieFit A fitted \code{fsusieR::susiF} object. Must retain
+#'   \code{fitted_wc}, \code{alpha}, \code{csd_X}, \code{n_wac}, and
+#'   \code{outing_grid} (i.e. an untrimmed fit). Required.
+#' @param X,Y Accepted for call-compatibility with the multivariate
+#'   weight-method dispatch in \code{\link{learnTwasWeights}}, which invokes
+#'   every method as \code{fn(X = ., Y = ., ...)}. fSuSiE is a functional method
+#'   that cannot be refit from a bare \code{(X, Y)} pair (it needs feature
+#'   positions and the wavelet model), so these are ignored: a fitted
+#'   \code{fsusieFit} is always required.
+#' @param variantIds Optional character vector of variant IDs (length = number
+#'   of SNPs in the fit) for the matrix row names. Defaults to
+#'   \code{names(fsusieFit$csd_X)} / \code{names(fsusieFit$pip)}.
+#' @param featureNames Optional character vector of feature (outcome) names for
+#'   the matrix column names. Defaults to the fit's \code{outing_grid}.
+#' @param retainFit If TRUE, stores the fit as an attribute on the result.
+#' @return A numeric matrix of variant (rows) by feature (columns) weights.
+#' @export
+fsusieWeights <- function(fsusieFit = NULL, X = NULL, Y = NULL,
+                          variantIds = NULL, featureNames = NULL,
+                          retainFit = FALSE) {
+  if (is.null(fsusieFit)) {
+    stop("fsusieWeights: `fsusieFit` is required. fSuSiE is functional and ",
+         "cannot be refit from a bare (X, Y); fit it via fineMappingPipeline() ",
+         "and pass the fitted fsusieR::susiF object.")
+  }
+  # Fast path: a trimmed fit carries the precomputed variants x features weight
+  # matrix in `$coef` (fineMappingPipeline computes it eagerly while the full
+  # fit is in hand, because trimming drops fitted_wc/csd_X/...). Return it.
+  if (is.matrix(fsusieFit$coef) &&
+      is.null(fsusieFit$fitted_wc)) {
+    W <- fsusieFit$coef
+    if (!is.null(variantIds) && length(variantIds) == nrow(W))
+      rownames(W) <- variantIds
+    if (retainFit) attr(W, "fit") <- fsusieFit
+    return(W)
+  }
+  if (!requireNamespace("fsusieR", quietly = TRUE)) {
+    # nocov start
+    stop("Package 'fsusieR' is required for fsusieWeights().")
+    # nocov end
+  }
+  if (!requireNamespace("wavethresh", quietly = TRUE)) {
+    # nocov start
+    stop("Package 'wavethresh' is required for fsusieWeights().")
+    # nocov end
+  }
+  fit <- fsusieFit
+  missingSlots <- setdiff(c("fitted_wc", "alpha", "csd_X", "n_wac",
+                            "outing_grid"), names(fit))
+  if (length(missingSlots) > 0L) {
+    stop("fsusieWeights: the fSuSiE fit is missing required slot(s): ",
+         paste(missingSlots, collapse = ", "),
+         ". Pass an untrimmed fit (these are dropped when trimmed).")
+  }
+
+  csdX <- as.numeric(fit$csd_X)
+  p    <- length(csdX)
+  nWac <- fit$n_wac
+
+  # alpha may be a list (one vector per effect, the fsusieR::susiF default) or
+  # a matrix/data.frame (L x nSNP) after fsusieWrapper reshaping. Normalize to
+  # a list of per-effect vectors.
+  alpha <- fit$alpha
+  alphaList <- if (is.list(alpha) && !is.data.frame(alpha)) {
+    lapply(alpha, as.numeric)
+  } else {
+    am <- as.matrix(alpha)
+    lapply(seq_len(nrow(am)), function(l) as.numeric(am[l, ]))
+  }
+  L <- length(fit$fitted_wc)
+
+  # Scaling-coefficient column(s): the coarsest level for a per-scale prior,
+  # else the last column. Mirrors the two branches of out_prep.susiF.
+  perScale <- "mixture_normal_per_scale" %in% class(fsusieR::get_G_prior(fit))
+  indxLst <- fsusieR::gen_wavelet_indx(log2(length(fit$outing_grid)))
+  scaleCols <- if (perScale) indxLst[[length(indxLst)]]
+               else ncol(as.matrix(fit$fitted_wc[[1L]]))
+
+  # One inverse transform per wavelet coefficient (built once), then every SNP /
+  # effect is a matrix multiply: W = sum_l (alpha_l/csd_X-scaled fitted_wc_l) %*% S.
+  S <- .fsusieSynthesisMatrix(nWac, scaleCols)
+  nFeat <- ncol(S)
+  invCsd <- 1 / csdX
+
+  W <- matrix(0, nrow = p, ncol = nFeat)
+  for (l in seq_len(L)) {
+    wc <- as.matrix(fit$fitted_wc[[l]])
+    rowScale <- alphaList[[l]] * invCsd
+    W <- W + (rowScale * wc) %*% S
+  }
+
+  rn <- variantIds
+  if (is.null(rn)) rn <- names(fit$csd_X)
+  if (is.null(rn)) rn <- names(fit$pip)
+  if (!is.null(rn) && length(rn) == p) rownames(W) <- rn
+  cn <- featureNames
+  if (is.null(cn) && !is.null(fit$outing_grid) &&
+      length(fit$outing_grid) == nFeat) {
+    cn <- as.character(fit$outing_grid)
+  }
+  if (!is.null(cn) && length(cn) == nFeat) colnames(W) <- cn
+  if (retainFit) attr(W, "fit") <- fit
+  W
+}
+#' Compute mvSuSiE-RSS TWAS weights from summary statistics
+#'
+#' Multi-context summary-statistics analog of \code{\link{mvsusieWeights}}:
+#' extracts coefficients from an existing \code{mvsusieR::mvsusie_rss} fit,
+#' or fits one from \code{stat$z} (variants x conditions) and \code{LD}.
+#'
+#' Follows the \code{*_rss_weights(stat, LD, ...)} contract. Expects
+#' \code{stat$z} to be a numeric matrix (variants x conditions) and
+#' \code{stat$n} a per-context vector or scalar.
+#'
+#' @param stat A list with \code{z} (matrix variants x conditions) and
+#'   \code{n} (numeric vector or scalar).
+#' @param LD LD correlation matrix.
+#' @param mvsusieRssFit Optional pre-fitted \code{mvsusieRss} object.
+#' @param priorVariance Optional mvSuSiE prior variance specification.
+#'   When NULL, \code{mvsusieR::create_mixture_prior()} is used with
+#'   \code{R = ncol(stat$z)}.
+#' @param residualVariance Optional residual covariance matrix.
+#' @param L Maximum number of single effects (default 30).
+#' @param LGreedy Initial greedy effect count (default 5).
+#' @param retainFit If TRUE, attaches the fitted object as an attribute.
+#' @param ... Additional arguments forwarded to \code{mvsusieR::mvsusie_rss}.
+#'
+#' @return A numeric matrix of per-variant per-context weights
+#'   (variants x conditions).
+#' @export
+mvsusieRssWeights <- function(stat, LD, mvsusieRssFit = NULL,
+                              priorVariance = NULL,
+                              residualVariance = NULL,
+                              L = 30, LGreedy = 5,
+                              retainFit = FALSE, ...) {
+  if (!requireNamespace("mvsusieR", quietly = TRUE)) {
+    # nocov start
+    stop("Package 'mvsusieR' is required. ",
+         "Install with: devtools::install_github('stephenslab/mvsusieR')")
+    # nocov end
+  }
+  if (is.null(mvsusieRssFit)) {
+    Z <- if (is.matrix(stat$z)) stat$z else as.matrix(stat$z)
+    if (ncol(Z) < 2) {
+      stop("mvsusieRssWeights expects stat$z to have >= 2 columns ",
+           "(one per context). For single-context use susieRssWeights().")
+    }
+    # mvsusieR::mvsusie_rss expects N to be a single scalar
+    nScalar <- as.numeric(stats::median(stat$n))
+    if (is.null(priorVariance)) {
+      priorVariance <- mvsusieR::create_mixture_prior(R = ncol(Z))
+    }
+    if (!is.null(LGreedy)) LGreedy <- min(LGreedy, L)
+    mvsusieRssFit <- fitMvsusieRss(
+      Z = Z, R = LD, N = nScalar,
+      prior_variance = priorVariance,
+      residual_variance = residualVariance, ...
+    )
+  }
+  weights <- mvsusieR::coef.mvsusie(mvsusieRssFit)[-1, , drop = FALSE]
+  if (retainFit) attr(weights, "fit") <- mvsusieRssFit
+  weights
+}
+
+# =============================================================================
+# Cross-condition credible-set merging
+# =============================================================================
+
+#' Merge SuSiE credible sets across conditions
+#'
+#' Reconciles per-condition (univariate) SuSiE fine-mapping into a single set of
+#' merged credible sets. Each row of the supplied
+#' \code{\link{QtlFineMappingResult}} is treated as one condition (its
+#' \code{topLoci} carrying that condition's credible sets); credible sets that
+#' share variants across conditions are unioned via connected components, and
+#' every variant is reported with its merged credible-set label plus the maximum
+#' and median PIP across the conditions it appears in. A typical use is selecting
+#' a representative lead variant per merged credible set to assemble the
+#' \code{"strong"} input for \code{\link{mashPipeline}}.
+#'
+#' @param fineMappingResult A \code{\link{QtlFineMappingResult}} (or any
+#'   \code{FineMappingResult}) produced by per-condition SuSiE fine-mapping. Each
+#'   entry's \code{topLoci} must carry a credible-set column
+#'   (\code{cs_<coverage*100>}, e.g. \code{cs_95}, with values such as
+#'   \code{"susie_1"} where the trailing integer is the set index and \code{_0}
+#'   means "not in a credible set") and a PIP column.
+#' @param coverage Credible-set coverage level selecting the \code{cs_*} column
+#'   (default \code{0.95} -> \code{cs_95}).
+#' @return A \code{data.frame} with one row per variant: \code{variant_id},
+#'   \code{credibleSetNames} (the merged credible-set label), \code{maxPip} and
+#'   \code{medianPip}; or \code{NULL} when no credible sets are present.
+#' @seealso \code{\link{fineMappingPipeline}}, \code{\link{mashPipeline}}
+#' @importFrom purrr map_dfr
+#' @importFrom stats median
+#' @export
+mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
+  if (!is(fineMappingResult, "FineMappingResultBase")) {
+    stop("`fineMappingResult` must be a QtlFineMappingResult (or FineMappingResult).")
+  }
+  csCol <- paste0("cs_", as.integer(round(coverage * 100)))
+
+  # Identify variant IDs that are associated with more than one credible set.
+  identifyOverlapSets <- function(variantsSetsAndPipsList) {
+    overlapSets <- list()
+    for (variantId in names(variantsSetsAndPipsList)) {
+      sets <- variantsSetsAndPipsList[[variantId]][["sets"]]
+      if (length(sets) > 1) {
+        overlapSets[[variantId]] <- sets
+      }
+    }
+    return(overlapSets)
+  }
+  # Merge overlapping credible sets using connected components.
+  mergeAndUpdateOverlapSets <- function(variantsSetsAndPipsList, overlapSets) {
+    allSets <- unique(unlist(overlapSets))
+    if (length(allSets) == 0) return(list())
+
+    parent <- setNames(allSets, allSets)
+    findRoot <- function(x) {
+      while (!identical(parent[[x]], x)) x <- parent[[x]]
+      x
+    }
+    unionSets <- function(a, b) {
+      rootA <- findRoot(a)
+      rootB <- findRoot(b)
+      if (!identical(rootA, rootB)) parent[[rootB]] <<- rootA
+    }
+
+    for (sets in overlapSets) {
+      if (length(sets) > 1) {
+        for (s in sets[-1]) unionSets(sets[[1]], s)
+      }
+    }
+
+    components <- split(names(parent), vapply(names(parent), findRoot, character(1)))
+    setNameMap <- list()
+    for (members in components) {
+      label <- paste(sort(members), collapse = ",")
+      for (s in members) {
+        setNameMap[[s]] <- label
+      }
+    }
+
+    # Update each variant's credible set names
+    updatedCredibleSets <- lapply(
+      setNames(names(variantsSetsAndPipsList), names(variantsSetsAndPipsList)),
+      function(variantId) {
+        currentSets <- variantsSetsAndPipsList[[variantId]][["sets"]]
+        mapped <- intersect(currentSets, names(setNameMap))
+        if (length(mapped) > 0) {
+          setNameMap[[mapped[1]]]
+        } else {
+          paste(sort(unique(currentSets)), collapse = ",")
+        }
+      }
+    )
+    return(updatedCredibleSets)
+  }
+
+  # Each row (entry) of the fine-mapping result is one condition. Build a flat
+  # data frame of (variant_id, pip, set_name) across conditions, giving each
+  # condition's credible sets a unique "cs_<conditionIdx>_<setIdx>" label.
+  extractTopLoci <- function() {
+    entries <- fineMappingResult$entry
+    rows <- map_dfr(seq_along(entries), function(i) {
+      topLoci <- .translateLegacyTopLociCsColumns(getTopLoci(entries[[i]]))
+      if (is.null(topLoci) || nrow(topLoci) == 0 || !(csCol %in% names(topLoci)))
+        return(NULL)
+      pipCol <- resolvePipColumn(topLoci)
+      if (is.null(pipCol)) return(NULL)
+      csIdx <- .fmCsIdx(topLoci[[csCol]])
+      setNum <- unique(csIdx)
+      setNum <- setNum[!is.na(setNum) & setNum != 0]
+      if (length(setNum) == 0) return(NULL)
+
+      map_dfr(setNum, function(sn) {
+        keep <- !is.na(csIdx) & csIdx == sn
+        df <- topLoci[keep, c("variant_id", pipCol), drop = FALSE]
+        names(df)[names(df) == pipCol] <- "pip"
+        df$set_name <- paste0("cs_", i, "_", sn)
+        df
+      })
+    })
+
+    if (is.null(rows) || nrow(rows) == 0) return(list())
+
+    # Aggregate by variant_id preserving first-seen order.
+    seenOrder <- unique(rows$variant_id)
+    splitRows <- split(rows, factor(rows$variant_id, levels = seenOrder))
+    lapply(splitRows, function(df) {
+      list(sets = df$set_name, pips = df$pip)
+    })
+  }
+
+  combineTopLoci <- function(extractedResult) {
+    if (length(extractedResult) == 0) return(NULL)
+
+    overlapSets <- identifyOverlapSets(extractedResult)
+    hasOverlaps <- length(overlapSets) != 0
+    mergedSets <- if (hasOverlaps) {
+      mergeAndUpdateOverlapSets(extractedResult, overlapSets = overlapSets)
+    } else {
+      NULL
+    }
+
+    topLociDf <- do.call(rbind, lapply(names(extractedResult), function(variantId) {
+      maxPip <- max(unlist(extractedResult[[variantId]]$pips))
+      medianPip <- median(unlist(extractedResult[[variantId]]$pips))
+      credibleSetNames <- if (hasOverlaps) {
+        mergedSets[[variantId]]
+      } else {
+        paste(sort(unique(unlist(extractedResult[[variantId]]$sets))), collapse = ",")
+      }
+      data.frame(
+        variant_id = variantId, credibleSetNames = credibleSetNames,
+        maxPip = maxPip, medianPip = medianPip, stringsAsFactors = FALSE
+      )
+    }))
+    return(topLociDf)
+  }
+
+  extractedTopLoci <- extractTopLoci()
+  if (length(extractedTopLoci) == 0) return(NULL)
+  combinedTopLociDf <- combineTopLoci(extractedTopLoci)
+  if (is.null(combinedTopLociDf) || nrow(combinedTopLociDf) == 0) return(NULL)
+  combinedTopLociDf <- combinedTopLociDf[!duplicated(combinedTopLociDf$variant_id), ]
+  rownames(combinedTopLociDf) <- NULL
+  return(combinedTopLociDf)
 }

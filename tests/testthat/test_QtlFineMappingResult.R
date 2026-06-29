@@ -317,6 +317,25 @@ test_that("getCvResult works at the QtlFineMappingResult collection level", {
     cv)
 })
 
+
+test_that("QtlFineMappingResult: getMarginalEffects with tuple selectors", {
+  e1 <- .ca_makeFmEntry(3)
+  e2 <- .ca_makeFmEntry(4)
+  res <- QtlFineMappingResult(
+    study   = c("s1", "s1"),
+    context = c("c1", "c2"),
+    trait   = c("t1", "t1"),
+    method  = c("susie", "susie"),
+    entry   = list(e1, e2))
+  # Collection-level selection picks the (s1, c2, t1, susie) entry, then
+  # delegates to the entry-level getMarginalEffects.
+  me <- getMarginalEffects(res, study = "s1", context = "c2",
+                           trait = "t1", method = "susie")
+  expect_s3_class(me, "data.frame")
+  expect_equal(nrow(me), 4L)
+  expect_true(all(c("variant_id", "beta", "se", "z", "p") %in% names(me)))
+})
+
 # ===========================================================================
 # GwasFineMappingResult collection accessors
 # ===========================================================================

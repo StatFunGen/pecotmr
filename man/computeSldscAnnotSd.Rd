@@ -4,26 +4,13 @@
 \alias{computeSldscAnnotSd}
 \title{Compute per-annotation standard deviation, MAF-restricted}
 \usage{
-computeSldscAnnotSd(
-  targetAnnoDir,
-  frqfileDir = NULL,
-  plinkName = "ADSP_chr",
-  mafCutoff = 0.05,
-  annotCols = NULL
-)
+computeSldscAnnotSd(sldscData, mafCutoff = 0.05, annotCols = NULL)
 }
 \arguments{
-\item{targetAnnoDir}{Character. Directory containing target annotation files
-(one per chromosome) in polyfun's `.annot.gz` format.}
+\item{sldscData}{An \code{\link{SldscData}} object (its \code{annot} and
+\code{frq} slots supply the annotation values and MAF, respectively).}
 
-\item{frqfileDir}{Character or NULL. Directory containing PLINK `.frq` files
-for the reference panel. Required when `mafCutoff > 0`; the function
-errors if missing.}
-
-\item{plinkName}{Character. Filename prefix of the `.frq` files
-(e.g. `"ADSP_chr"`). Files are expected at `{plinkName}{chr}.frq`.}
-
-\item{mafCutoff}{Numeric, default `0.05`.}
+\item{mafCutoff}{Numeric, default `0.05`. Requires frq data when > 0.}
 
 \item{annotCols}{Character or integer vector, default NULL. Annotation columns
 to compute sd for. If NULL, all annotation columns are used.}

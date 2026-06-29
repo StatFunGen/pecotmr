@@ -59,10 +59,12 @@ filterRelatedness <- function(
     maxIterations = 20L,
     verbose = FALSE) {
 
+  # nocov start
   if (!requireNamespace("igraph", quietly = TRUE))
     stop("Package 'igraph' is required for filterRelatedness")
   if (!requireNamespace("plinkQC", quietly = TRUE))
     stop("Package 'plinkQC' is required for filterRelatedness")
+  # nocov end
 
   analysisType <- match.arg(analysisType)
   relatedness <- as.data.frame(relatedness)

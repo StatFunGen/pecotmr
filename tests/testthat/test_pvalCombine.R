@@ -220,6 +220,85 @@ test_that("combinePValues: errors when named R is missing entries", {
 })
 
 # ===========================================================================
+# Dispatch branches of .combinePvalSingle, pvalAcat non-finite guard, and
+# .combinePvalAlignR matrix guards
+# ===========================================================================
+
+test_that("pvalAcat returns NA when the Cauchy statistic is non-finite", {
+  # naRm = FALSE keeps the NaN, which propagates to a non-finite mean and
+  # trips the `!is.finite(stat)` guard.
+  expect_true(is.na(pecotmr:::pvalAcat(c(0.1, 0.2, NaN), naRm = FALSE)))
+})
+
+test_that(".combinePvalAlignR rejects a non-matrix R", {
+  expect_error(pecotmr:::.combinePvalAlignR(5, c("a", "b")),
+               "must be a matrix")
+})
+
+test_that(".combinePvalAlignR rejects R whose rownames and colnames differ", {
+  m <- matrix(1, 2, 2)
+  rownames(m) <- c("a", "b")
+  colnames(m) <- c("x", "y")
+  expect_error(pecotmr:::.combinePvalAlignR(m, c("a", "b")),
+               "rownames and colnames must be identical")
+})
+
+test_that(".combinePvalSingle errors on an unknown method", {
+  # Unreachable through combinePValues (the known-method guard fires first),
+  # so the default switch arm is exercised directly here.
+  expect_error(
+    pecotmr:::.combinePvalSingle("bogus", pvals = c(0.1, 0.2),
+                                 zScores = NULL, R = NULL),
+    "Unknown combination method"
+  )
+})
+
+test_that("combinePValues dispatches HMP through the unified menu", {
+  skip_if_not_installed("harmonicmeanp")
+  res <- combinePValues(pvals = c(0.01, 0.05, 0.1), methods = "hmp")
+  expect_equal(res$results$hmp$method, "hmp")
+  expect_true(is.finite(res$results$hmp$pval))
+  expect_gt(res$results$hmp$pval, 0)
+  expect_lte(res$results$hmp$pval, 1)
+})
+
+test_that("combinePValues dispatches poolr methods (fisher/stouffer/invchisq)", {
+  skip_if_not_installed("poolr")
+  res <- combinePValues(pvals = c(0.01, 0.05, 0.1),
+                        methods = c("fisher", "stouffer", "invchisq"),
+                        R = diag(3))
+  for (m in c("fisher", "stouffer", "invchisq")) {
+    expect_true(is.finite(res$results[[m]]$pval))
+    expect_gt(res$results[[m]]$pval, 0)
+    expect_lt(res$results[[m]]$pval, 1)
+  }
+})
+
+test_that("combinePValues dispatches the GBJ-family methods", {
+  skip_if_not_installed("GBJ")
+  z <- c(2.5, 1.8, 3.0)
+  methods <- c("gbj", "bj", "hc", "ghc", "minp", "gbj_omni")
+  res <- combinePValues(zScores = z, methods = methods, R = diag(3))
+  for (m in methods) {
+    expect_true(is.numeric(res$results[[m]]$pval))
+    expect_gte(res$results[[m]]$pval, 0)
+    expect_lte(res$results[[m]]$pval, 1)
+  }
+})
+
+test_that("combinePValues dispatches aSPU and GATES", {
+  skip_if_not_installed("aSPU")
+  set.seed(42)
+  res <- combinePValues(zScores = c(2.5, 1.8, 3.0),
+                        pvals = c(0.01, 0.05, 0.1),
+                        methods = c("aspu", "gates"), R = diag(3))
+  expect_gte(res$results$aspu$pval, 0)
+  expect_lte(res$results$aspu$pval, 1)
+  expect_gte(res$results$gates$pval, 0)
+  expect_lte(res$results$gates$pval, 1)
+})
+
+# ===========================================================================
 # Tests migrated from test_misc.R (p-value combiners + waldTestPval)
 # ===========================================================================
 

@@ -370,3 +370,256 @@ test_that(".colocEmptyResult(enriched=TRUE): includes enrichment + p12Used schem
   expect_true(all(c("enrichment", "p12Used") %in% colnames(out)))
 })
 
+
+# ===========================================================================
+# Additional coverage (appended)
+# ===========================================================================
+
+# Minimal canonical topLoci (variant_id + pip) for skeletal entries.
+.cp_tl <- function(vids, pip = rep(0.1, length(vids))) {
+  data.frame(variant_id = as.character(vids),
+             pip        = pip,
+             stringsAsFactors = FALSE)
+}
+
+# --- enrichment= argument validation ---------------------------------------
+
+test_that("colocPipeline: rejects a non-data.frame enrichment", {
+  qfmr <- .cp_makeQtlFmr()
+  gfmr <- .cp_makeGwasFmr()
+  expect_error(
+    colocPipeline(qtlFineMappingResult = qfmr,
+                  gwasInput            = gfmr,
+                  enrichment           = "not a data frame"),
+    "must be a data.frame")
+})
+
+test_that("colocPipeline: rejects enrichment missing required columns", {
+  qfmr <- .cp_makeQtlFmr()
+  gfmr <- .cp_makeGwasFmr()
+  bad  <- data.frame(gwasStudy = "G1", qtlStudy = "Q1",
+                     stringsAsFactors = FALSE)  # missing qtlContext + enrichment
+  expect_error(
+    colocPipeline(qtlFineMappingResult = qfmr,
+                  gwasInput            = gfmr,
+                  enrichment           = bad),
+    "is missing column")
+})
+
+# --- enrichment end-to-end (lookup + p12 scaling + output columns) ----------
+
+test_that("colocPipeline: enrichment hit scales p12 and emits enrichment/p12Used", {
+  qfmr <- .cp_makeQtlFmr()   # Q1 / c1 / t1 / susie
+  gfmr <- .cp_makeGwasFmr()  # G1 / susie
+  enr  <- data.frame(gwasStudy  = "G1",
+                     qtlStudy   = "Q1",
+                     qtlContext = "c1",
+                     enrichment = 2.0,
+                     stringsAsFactors = FALSE)
+  local_mocked_bindings(coloc.bf_bf = .cp_mockColocBfBf(), .package = "coloc")
+  out <- suppressWarnings(
+    colocPipeline(qtlFineMappingResult = qfmr,
+                  gwasInput            = gfmr,
+                  enrichment           = enr))
+  expect_equal(nrow(out), 1L)
+  expect_true(all(c("enrichment", "p12Used") %in% colnames(out)))
+  expect_equal(unique(out$enrichment), 2.0)
+  # min(p12 * (1 + enrichment), p12Max) = min(5e-6 * 3, 1e-3) = 1.5e-5
+  expect_equal(unique(out$p12Used), min(5e-6 * 3, 1e-3))
+})
+
+test_that("colocPipeline: enrichment miss warns and falls back to baseline p12", {
+  qfmr <- .cp_makeQtlFmr()
+  gfmr <- .cp_makeGwasFmr()
+  enr  <- data.frame(gwasStudy  = "OTHER",  # no row matches gwasStudy 'G1'
+                     qtlStudy   = "Q1",
+                     qtlContext = "c1",
+                     enrichment = 2.0,
+                     stringsAsFactors = FALSE)
+  local_mocked_bindings(coloc.bf_bf = .cp_mockColocBfBf(), .package = "coloc")
+  w <- testthat::capture_warnings(
+    out <- colocPipeline(qtlFineMappingResult = qfmr,
+                         gwasInput            = gfmr,
+                         enrichment           = enr))
+  expect_match(w, "no enrichment entry", all = FALSE)
+  expect_equal(nrow(out), 1L)
+  expect_equal(unique(out$enrichment), 0)      # enRow reset to 0 on miss
+  expect_equal(unique(out$p12Used), 5e-6)      # baseline p12 unchanged
+})
+
+# --- returnGwasFineMapping attached on the empty-pair early return (~205) ----
+
+test_that("colocPipeline: attaches gwasFineMapping when no pairs survive", {
+  qfmr <- .cp_makeQtlFmr()
+  gss  <- .cp_makeGwasSumstats()
+  # Resolved GWAS FMR whose only entry has no usable LBF (V filtered to 0
+  # rows) -> .colocPreextractGwasLbf returns an empty list -> early return.
+  emptyFit <- list(alpha = matrix(0, 1, 1), pip = c(v1 = 0), V = 0,
+                   lbf_variable = matrix(NA_real_, 1, 1))
+  e <- FineMappingEntry(variantIds = "v1", susieFit = emptyFit,
+                        topLoci = .cp_tl("v1", pip = 0))
+  resolved <- GwasFineMappingResult(study = "G1", method = "susie",
+                                    entry = list(e),
+                                    ldSketch = .cp_makeHandle())
+  local_mocked_bindings(coloc.bf_bf = .cp_mockColocBfBf(), .package = "coloc")
+  local_mocked_bindings(
+    fineMappingPipeline = function(data, methods, ...) resolved,
+    .package = "pecotmr")
+  out <- suppressWarnings(
+    colocPipeline(qtlFineMappingResult  = qfmr,
+                  gwasInput             = gss,
+                  returnGwasFineMapping = TRUE,
+                  adjustPips            = FALSE))
+  expect_equal(nrow(out), 0L)
+  expect_identical(attr(out, "gwasFineMapping"), resolved)
+})
+
+# --- per-pair loop skips: no usable QTL LBF (~223) and no overlap (~233) -----
+
+test_that("colocPipeline: skips a QTL entry with no usable LBF", {
+  badFit <- list(alpha = matrix(0, 1, 1), pip = c(v1 = 0), V = 0,
+                 lbf_variable = matrix(NA_real_, 1, 1))
+  badEntry  <- FineMappingEntry(variantIds = "v1", susieFit = badFit,
+                                topLoci = .cp_tl("v1", pip = 0))
+  goodEntry <- .cp_makeFmEntry()
+  qfmr <- .cp_makeQtlFmr(tuples  = list(c("Q1", "c1", "t1", "susie"),
+                                        c("Q1", "c2", "t1", "susie")),
+                         entries = list(badEntry, goodEntry))
+  gfmr <- .cp_makeGwasFmr()
+  local_mocked_bindings(coloc.bf_bf = .cp_mockColocBfBf(), .package = "coloc")
+  out <- suppressWarnings(
+    colocPipeline(qtlFineMappingResult = qfmr,
+                  gwasInput            = gfmr,
+                  adjustPips           = FALSE))
+  # bad entry (c1) skipped; only the good entry (c2) yields a row.
+  expect_equal(nrow(out), 1L)
+  expect_equal(unique(out$context), "c2")
+})
+
+test_that("colocPipeline: skips a pair with no shared variants", {
+  qEntry <- .cp_makeFmEntry(variant_ids = paste0("chr1:", 100 * (1:5), ":A:G"))
+  gEntry <- .cp_makeFmEntry(variant_ids = paste0("chr2:", 100 * (1:5), ":A:G"))
+  qfmr <- .cp_makeQtlFmr(entries = list(qEntry))
+  gfmr <- .cp_makeGwasFmr(entries = list(gEntry))
+  local_mocked_bindings(coloc.bf_bf = .cp_mockColocBfBf(), .package = "coloc")
+  out <- suppressWarnings(
+    colocPipeline(qtlFineMappingResult = qfmr,
+                  gwasInput            = gfmr,
+                  adjustPips           = FALSE))
+  expect_equal(nrow(out), 0L)
+})
+
+# --- .colocFilterCsByConcentration (~324-331) -------------------------------
+
+test_that(".colocFilterCsByConcentration: keeps narrow CS, drops diffuse ones", {
+  fit <- list(alpha = matrix(0.1, nrow = 3, ncol = 10))  # 10 variants
+  # maxSize = ncol * coverage * concentration = 10 * 0.5 * 0.5 = 2.5
+  local_mocked_bindings(
+    susie_get_cs = function(s, coverage = 0.5, dedup = TRUE, ...)
+      list(cs = list(L1 = c(1L, 2L),  # size 2  -> keep
+                     L2 = 1:8,        # size 8  -> drop
+                     L3 = 3L)),       # size 1  -> keep
+    .package = "pecotmr")
+  keep <- pecotmr:::.colocFilterCsByConcentration(fit, coverage = 0.5,
+                                                  concentration = 0.5)
+  expect_setequal(keep, c(1, 3))
+})
+
+# --- .colocExtractLbfFromEntry branches -------------------------------------
+
+test_that(".colocExtractLbfFromEntry: stacks fSuSiE lBF list into a matrix", {
+  m1 <- matrix(rnorm(8), 2, 4, dimnames = list(NULL, paste0("v", 1:4)))
+  m2 <- matrix(rnorm(8), 2, 4, dimnames = list(NULL, paste0("v", 1:4)))
+  fit <- list(fsusie_result = list(lBF = list(m1, m2)))
+  e <- FineMappingEntry(variantIds = paste0("v", 1:4), susieFit = fit,
+                        topLoci = .cp_tl(paste0("v", 1:4)))
+  out <- pecotmr:::.colocExtractLbfFromEntry(
+    e, filterLbfCs = FALSE, filterLbfCsSecondary = NULL,
+    filterLbfCsConcentration = 0.5, priorTol = 1e-9)
+  expect_equal(nrow(out$lbf), 4L)  # 2 + 2 stacked
+  expect_setequal(colnames(out$lbf), paste0("v", 1:4))
+})
+
+test_that(".colocExtractLbfFromEntry: stacks nested fSuSiE lBF (fit[[1]] path)", {
+  m1 <- matrix(rnorm(8), 2, 4, dimnames = list(NULL, paste0("v", 1:4)))
+  fit <- list(list(fsusie_result = list(lBF = list(m1))))
+  e <- FineMappingEntry(variantIds = paste0("v", 1:4), susieFit = fit,
+                        topLoci = .cp_tl(paste0("v", 1:4)))
+  out <- pecotmr:::.colocExtractLbfFromEntry(
+    e, filterLbfCs = FALSE, filterLbfCsSecondary = NULL,
+    filterLbfCsConcentration = 0.5, priorTol = 1e-9)
+  expect_equal(nrow(out$lbf), 2L)
+})
+
+test_that(".colocExtractLbfFromEntry: warns + NULL when fit carries no LBF slot", {
+  fit <- list(notLbf = list(a = 1))  # fit[[1]] is a list -> $ access is safe
+  e <- FineMappingEntry(variantIds = "v1", susieFit = fit,
+                        topLoci = .cp_tl("v1"))
+  expect_warning(
+    out <- pecotmr:::.colocExtractLbfFromEntry(
+      e, filterLbfCs = FALSE, filterLbfCsSecondary = NULL,
+      filterLbfCsConcentration = 0.5, priorTol = 1e-9),
+    "no lbf_variable")
+  expect_null(out)
+})
+
+test_that(".colocExtractLbfFromEntry: warns + NULL on an empty LBF matrix", {
+  fit <- list(lbf_variable = matrix(numeric(0), nrow = 0, ncol = 3,
+                                    dimnames = list(NULL, paste0("v", 1:3))))
+  e <- FineMappingEntry(variantIds = paste0("v", 1:3), susieFit = fit,
+                        topLoci = .cp_tl(paste0("v", 1:3)))
+  expect_warning(
+    out <- pecotmr:::.colocExtractLbfFromEntry(
+      e, filterLbfCs = FALSE, filterLbfCsSecondary = NULL,
+      filterLbfCsConcentration = 0.5, priorTol = 1e-9),
+    "LBF matrix is empty")
+  expect_null(out)
+})
+
+test_that(".colocExtractLbfFromEntry: secondary CS filter subsets rows", {
+  fit <- list(lbf_variable = matrix(1:12, 3, 4,
+                                    dimnames = list(NULL, paste0("v", 1:4))),
+              alpha = matrix(0.25, 3, 4))
+  e <- FineMappingEntry(variantIds = paste0("v", 1:4), susieFit = fit,
+                        topLoci = .cp_tl(paste0("v", 1:4)))
+  local_mocked_bindings(
+    .colocFilterCsByConcentration = function(fit, coverage, concentration) 2L,
+    .package = "pecotmr")
+  out <- pecotmr:::.colocExtractLbfFromEntry(
+    e, filterLbfCs = FALSE, filterLbfCsSecondary = 0.95,
+    filterLbfCsConcentration = 0.5, priorTol = 1e-9)
+  expect_equal(nrow(out$lbf), 1L)
+  expect_equal(as.numeric(out$lbf), c(2, 5, 8, 11))  # row 2 of matrix(1:12, 3, 4)
+})
+
+test_that(".colocExtractLbfFromEntry: assigns colnames from variantIds when fit lacks them", {
+  fit <- list(lbf_variable = matrix(1:8, 2, 4))  # no dimnames
+  e <- FineMappingEntry(variantIds = paste0("v", 1:4), susieFit = fit,
+                        topLoci = .cp_tl(paste0("v", 1:4)))
+  out <- pecotmr:::.colocExtractLbfFromEntry(
+    e, filterLbfCs = FALSE, filterLbfCsSecondary = NULL,
+    filterLbfCsConcentration = 0.5, priorTol = 1e-9)
+  expect_equal(colnames(out$lbf), paste0("v", 1:4))
+})
+
+test_that(".colocExtractLbfFromEntry: NULL when every variant column is NA-named", {
+  fit <- list(lbf_variable = matrix(1:8, 2, 4,
+                                    dimnames = list(NULL, rep(NA_character_, 4))))
+  # variantIds length (1) != ncol (4) so colnames are NOT back-filled, and the
+  # NA-named columns are dropped, leaving a 0-column matrix.
+  e <- FineMappingEntry(variantIds = "v1", susieFit = fit,
+                        topLoci = .cp_tl("v1"))
+  out <- pecotmr:::.colocExtractLbfFromEntry(
+    e, filterLbfCs = FALSE, filterLbfCsSecondary = NULL,
+    filterLbfCsConcentration = 0.5, priorTol = 1e-9)
+  expect_null(out)
+})
+
+# --- .colocAlignLbf no-overlap branch (~479) --------------------------------
+
+test_that(".colocAlignLbf: returns NULL when there are no shared variants", {
+  q <- matrix(0, 2, 3, dimnames = list(NULL, paste0("chr1:", 100 * (1:3), ":A:G")))
+  g <- matrix(0, 2, 3, dimnames = list(NULL, paste0("chr2:", 100 * (1:3), ":A:G")))
+  expect_null(pecotmr:::.colocAlignLbf(q, g))
+})
+

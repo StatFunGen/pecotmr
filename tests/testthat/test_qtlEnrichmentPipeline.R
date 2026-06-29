@@ -414,3 +414,225 @@ test_that("qtlEnrichment: tracks unmatched QTL variants in the output", {
 })
 
 
+# ===========================================================================
+# qtlEnrichment(): verbose messages + alignNames = FALSE branch
+# ===========================================================================
+
+test_that("qtlEnrichment: verbose=TRUE emits 'Estimated piGwas'/'Estimated piQtl' messages", {
+  # numGwas = NULL and piQtl = NULL both trigger data-estimation paths;
+  # with verbose = TRUE each emits a message (lines 391 and 407).
+  fx <- .qep_makeRealKernelInputs(nSnps = 30, causalIdx = c(5, 15))
+  msgs <- testthat::capture_messages(
+    suppressWarnings(qtlEnrichment(
+      gwasPip = fx$gwasPip, susieQtlRegions = fx$susieQtlRegions,
+      impN = 5, numThreads = 1, verbose = TRUE)))
+  allMsgs <- paste(msgs, collapse = "\n")
+  expect_match(allMsgs, "Estimated piGwas")
+  expect_match(allMsgs, "Estimated piQtl")
+})
+
+test_that("qtlEnrichment: alignNames=FALSE recomputes only the unmatched set", {
+  # Exercises the cheap set-membership branch (lines 438-444) used by
+  # qtlEnrichmentPipeline after it has already aligned QTL names against
+  # the union GWAS panel. Two injected names are absent from gwasPip, so
+  # the unmatched-variant accumulation (lines 441-442) runs.
+  fx <- .qep_makeRealKernelInputs(nSnps = 30, causalIdx = c(5, 15))
+  newNames <- names(fx$susieQtlRegions$fit1$pip)
+  newNames[1:2] <- c("1:9999:A:G", "1:9998:A:G")
+  names(fx$susieQtlRegions$fit1$pip) <- newNames
+  colnames(fx$susieQtlRegions$fit1$alpha) <- newNames
+  res <- qtlEnrichment(
+    gwasPip = fx$gwasPip, susieQtlRegions = fx$susieQtlRegions,
+    numGwas = 3000, piQtl = 0.5, impN = 5, numThreads = 1,
+    verbose = FALSE, alignNames = FALSE)
+  expect_true("unused_xqtl_variants" %in% names(res))
+  expect_true(any(c("1:9999:A:G", "1:9998:A:G") %in%
+                  unlist(res$unused_xqtl_variants)))
+})
+
+
+# ===========================================================================
+# .enrFlattenEnrichment(): shape coercion + NA fallbacks
+# ===========================================================================
+
+test_that(".enrFlattenEnrichment: numeric scalar falls back to all-NA", {
+  out <- pecotmr:::.enrFlattenEnrichment(1.5)
+  expect_equal(out, list(enrichment = NA_real_, enrichmentSe = NA_real_,
+                         enrichmentLogOdds = NA_real_))
+})
+
+test_that(".enrFlattenEnrichment: plain list picks named scalar fields", {
+  out <- pecotmr:::.enrFlattenEnrichment(
+    list(enrichment = 2.0, enrichmentSe = 0.1, enrichmentLogOdds = log(2)))
+  expect_equal(out$enrichment, 2.0)
+  expect_equal(out$enrichmentSe, 0.1)
+  expect_equal(out$enrichmentLogOdds, log(2))
+})
+
+test_that(".enrFlattenEnrichment: non-empty matrix picks columns by name", {
+  m <- matrix(c(2.0, 0.1, log(2)), nrow = 1)
+  colnames(m) <- c("enrichment", "enrichmentSe", "enrichmentLogOdds")
+  out <- pecotmr:::.enrFlattenEnrichment(m)
+  expect_equal(out$enrichment, 2.0)
+  expect_equal(out$enrichmentSe, 0.1)
+  expect_equal(out$enrichmentLogOdds, log(2))
+})
+
+test_that(".enrFlattenEnrichment: empty data.frame falls back to all-NA", {
+  df <- data.frame(enrichment = numeric(0), enrichmentSe = numeric(0),
+                   enrichmentLogOdds = numeric(0))
+  out <- pecotmr:::.enrFlattenEnrichment(df)
+  expect_equal(out, list(enrichment = NA_real_, enrichmentSe = NA_real_,
+                         enrichmentLogOdds = NA_real_))
+})
+
+test_that(".enrFlattenEnrichment: non-empty data.frame resolves alternate column names", {
+  df <- data.frame(Enrichment = 3.0, se = 0.2, log_odds = 1.1)
+  out <- pecotmr:::.enrFlattenEnrichment(df)
+  expect_equal(out$enrichment, 3.0)
+  expect_equal(out$enrichmentSe, 0.2)
+  expect_equal(out$enrichmentLogOdds, 1.1)
+})
+
+
+# ===========================================================================
+# .enrPickColumn(): candidate column resolution
+# ===========================================================================
+
+test_that(".enrPickColumn: returns the first matching column's value", {
+  df <- data.frame(se = 0.5, enrichment = 2.5)
+  expect_equal(pecotmr:::.enrPickColumn(df, c("enrichment", "Enrichment")), 2.5)
+})
+
+test_that(".enrPickColumn: returns NA_real_ when no candidate matches", {
+  df <- data.frame(foo = 1, bar = 2)
+  expect_identical(
+    pecotmr:::.enrPickColumn(df, c("enrichment", "Enrichment")), NA_real_)
+})
+
+
+# ===========================================================================
+# .enrBuildGwasPipVector(): empty-index + length-mismatch skip branches
+# ===========================================================================
+
+test_that(".enrBuildGwasPipVector: unknown study yields numeric(0)", {
+  gfmr <- .qep_makeGwasFmr()
+  expect_identical(pecotmr:::.enrBuildGwasPipVector(gfmr, "GHOST"), numeric(0))
+})
+
+test_that(".enrBuildGwasPipVector: skips a block whose pip length disagrees with variantIds", {
+  # Unnamed pip of length 2 against 3 variant ids -> ids come from
+  # getVariantIds and length(ids) != length(pip) -> the block is skipped,
+  # leaving no pieces -> numeric(0).
+  badEntry <- FineMappingEntry(
+    variantIds = c("v1", "v2", "v3"),
+    susieFit   = list(pip = c(0.1, 0.2)),
+    topLoci    = data.frame(variant_id = c("v1", "v2", "v3"),
+                            pip = c(0.5, 0.3, 0.2),
+                            stringsAsFactors = FALSE))
+  g <- GwasFineMappingResult(
+    study = "G1", method = "susie", entry = list(badEntry),
+    ldSketch = .qep_makeHandle())
+  expect_identical(pecotmr:::.enrBuildGwasPipVector(g, "G1"), numeric(0))
+})
+
+
+# ===========================================================================
+# .enrBuildQtlRegionsList(): incomplete-fit / no-prior / unnamed-pip branches
+# ===========================================================================
+
+test_that(".enrBuildQtlRegionsList: skips an entry whose fit lacks alpha/pip", {
+  badEntry <- FineMappingEntry(
+    variantIds = "v1", susieFit = list(),
+    topLoci = data.frame(variant_id = "v1", pip = 0.1,
+                         stringsAsFactors = FALSE))
+  qfmr <- QtlFineMappingResult(
+    study = "Q1", context = "c1", trait = "t1", method = "susie",
+    entry = list(badEntry), ldSketch = NULL)
+  expect_equal(length(pecotmr:::.enrBuildQtlRegionsList(qfmr, "Q1", "c1")), 0L)
+})
+
+test_that(".enrBuildQtlRegionsList: skips a fit with no V and no prior_variance", {
+  noVfit <- list(
+    alpha = matrix(c(0.6, 0.4), nrow = 1),
+    pip   = setNames(c(0.6, 0.4), c("v1", "v2")))
+  entry <- FineMappingEntry(
+    variantIds = c("v1", "v2"), susieFit = noVfit,
+    topLoci = data.frame(variant_id = c("v1", "v2"), pip = c(0.6, 0.4),
+                         stringsAsFactors = FALSE))
+  qfmr <- QtlFineMappingResult(
+    study = "Q1", context = "c1", trait = "t1", method = "susie",
+    entry = list(entry), ldSketch = NULL)
+  expect_equal(length(pecotmr:::.enrBuildQtlRegionsList(qfmr, "Q1", "c1")), 0L)
+})
+
+test_that(".enrBuildQtlRegionsList: names an unnamed pip from the entry's variant ids", {
+  unnamedPipFit <- list(
+    alpha = matrix(c(0.6, 0.4), nrow = 1),
+    pip   = c(0.6, 0.4),   # unnamed -> names assigned from getVariantIds
+    V     = 0.1)
+  entry <- FineMappingEntry(
+    variantIds = c("v1", "v2"), susieFit = unnamedPipFit,
+    topLoci = data.frame(variant_id = c("v1", "v2"), pip = c(0.6, 0.4),
+                         stringsAsFactors = FALSE))
+  qfmr <- QtlFineMappingResult(
+    study = "Q1", context = "c1", trait = "t1", method = "susie",
+    entry = list(entry), ldSketch = NULL)
+  out <- pecotmr:::.enrBuildQtlRegionsList(qfmr, "Q1", "c1")
+  expect_equal(length(out), 1L)
+  expect_equal(names(out[[1L]]$pip), c("v1", "v2"))
+  expect_equal(out[[1L]]$prior_variance, 0.1)
+})
+
+
+# ===========================================================================
+# qtlEnrichmentPipeline(): no-triples error, alignTuple cache reuse,
+# and the per-tuple "no usable QTL regions" skip
+# ===========================================================================
+
+test_that("qtlEnrichmentPipeline: empty QTL collection errors with the no-triples message", {
+  gfmr <- .qep_makeGwasFmr()
+  qfmrEmpty <- QtlFineMappingResult(
+    study = character(0), context = character(0), trait = character(0),
+    method = character(0), entry = list(), ldSketch = NULL)
+  expect_error(
+    qtlEnrichmentPipeline(gwasFineMappingResult = gfmr,
+                          qtlFineMappingResult  = qfmrEmpty),
+    "triples to compute")
+})
+
+test_that("qtlEnrichmentPipeline: alignTuple cache is reused across GWAS studies", {
+  # Two GWAS studies -> each QTL tuple's alignment is computed for the
+  # first study (cache miss) and served from cache for the second
+  # (alignTuple early-return branch, line 119).
+  e1 <- .qep_makeFmEntry(variant_ids = paste0("v", 1:3), pip = c(0.5, 0.2, 0.1))
+  e2 <- .qep_makeFmEntry(variant_ids = paste0("v", 1:3), pip = c(0.4, 0.3, 0.2))
+  gfmr <- GwasFineMappingResult(
+    study = c("G1", "G2"), method = c("susie", "susie"),
+    entry = list(e1, e2), ldSketch = .qep_makeHandle())
+  qfmr <- .qep_makeQtlFmr()
+  local_mocked_bindings(qtlEnrichment = .qep_mockEnrichment(2.0),
+                        .package = "pecotmr")
+  out <- qtlEnrichmentPipeline(gwasFineMappingResult = gfmr,
+                                qtlFineMappingResult  = qfmr)
+  expect_equal(nrow(out), 2L)  # 2 GWAS studies * 1 QTL tuple
+  expect_setequal(out$gwasStudy, c("G1", "G2"))
+})
+
+test_that("qtlEnrichmentPipeline: a tuple with no usable QTL regions warns and is skipped", {
+  gfmr <- .qep_makeGwasFmr()
+  emptyQtlEntry <- FineMappingEntry(
+    variantIds = "v1", susieFit = list(),
+    topLoci = data.frame(variant_id = "v1", pip = 0.1,
+                         stringsAsFactors = FALSE))
+  qfmr <- QtlFineMappingResult(
+    study = "Q1", context = "c1", trait = "t1", method = "susie",
+    entry = list(emptyQtlEntry), ldSketch = .qep_makeHandle())
+  expect_warning(
+    out <- qtlEnrichmentPipeline(gwasFineMappingResult = gfmr,
+                                  qtlFineMappingResult  = qfmr),
+    "no usable QTL regions")
+  expect_equal(nrow(out), 0L)
+})
+
+

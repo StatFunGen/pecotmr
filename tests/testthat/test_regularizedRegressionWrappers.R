@@ -23,46 +23,8 @@ context("SS-TWAS: weights, pipeline, and omnibus combination")
 # SuSiE-RSS weight extraction
 # =============================================================================
 
-test_that(".susie_rss_extract_weights returns correct-length vector", {
-  skip_if_not_installed("susieR")
-  set.seed(42)
-  p <- 20
-  n <- 500
-  R <- diag(p)
-  z <- rnorm(p)
-  w <- pecotmr:::.susieRssExtractWeights(
-    fit = NULL, z = z, R = R, n = n,
-    requiredFields = c("alpha", "mu", "X_column_scale_factors"),
-    fitArgs = list(L = 5)
-  )
-  expect_equal(length(w), p)
-  expect_true(all(is.finite(w)))
-})
 
-test_that("susieRssWeights follows (stat, LD) convention", {
-  skip_if_not_installed("susieR")
-  set.seed(42)
-  p <- 20
-  n <- 500
-  R <- diag(p)
-  z <- rnorm(p)
-  stat <- list(b = z / sqrt(n), cor = z / sqrt(n), z = z, n = rep(n, p))
-  w <- susieRssWeights(stat, R, methodArgs = list(L = 5))
-  expect_equal(length(w), p)
-  expect_true(all(is.finite(w)))
-})
 
-test_that("susieRssWeights retains fit when retainFit = TRUE", {
-  skip_if_not_installed("susieR")
-  set.seed(42)
-  p <- 20
-  n <- 500
-  R <- diag(p)
-  z <- rnorm(p)
-  stat <- list(b = z / sqrt(n), cor = z / sqrt(n), z = z, n = rep(n, p))
-  w <- susieRssWeights(stat, R, retainFit = TRUE, methodArgs = list(L = 5))
-  expect_false(is.null(attr(w, "fit")))
-})
 
 test_that("mrmashWeights fitDetail: slim default omits the full fit, full keeps it", {
   skip_if_not_installed("mr.mashr")
@@ -88,18 +50,6 @@ test_that("mrmashWeights fitDetail: slim default omits the full fit, full keeps 
   expect_identical(fitFull$w0, fakeFit$w0)       # slim fields still present
 })
 
-test_that("susieInfRssWeights works", {
-  skip_if_not_installed("susieR")
-  set.seed(42)
-  p <- 20
-  n <- 500
-  R <- diag(p)
-  z <- rnorm(p)
-  stat <- list(b = z / sqrt(n), cor = z / sqrt(n), z = z, n = rep(n, p))
-  w <- susieInfRssWeights(stat, R, methodArgs = list(L = 5))
-  expect_equal(length(w), p)
-  expect_true(all(is.finite(w)))
-})
 
 # =============================================================================
 # Two-stage SuSiE-RSS fitting
@@ -410,3 +360,332 @@ test_that("computeCoefficientsUnivGlmnet handles NA in Y", {
 # The seed-check message on line 107-108 would require removing .Random.seed
 # from the global environment, which is not safe to do in tests.
 
+# =============================================================================
+# Real-fit coverage for the solver wrappers in R/regularizedRegressionWrappers.R
+# -----------------------------------------------------------------------------
+# The fine-mapping / TWAS pipelines MOCK these wrappers, so their bodies are
+# otherwise untested. Here we drive each wrapper on a SMALL real fixture and
+# assert the return shape (weight length == #variants; matrix for multivariate;
+# attr(.,"fit") when retainFit = TRUE). Bayesian/MCMC iterations are kept tiny.
+# fsusieWeights and the mock-based mrmash/mvsusie payload tests live in
+# test_rrMrmashMvsusie.R and are not duplicated here.
+# =============================================================================
+
+# (Shared .rrwXy / .rrwStatLd / .rrwMulti fixtures live in helper-rrwFixtures.R
+#  so test_fineMappingWrappers.R can reuse them for the SuSiE weight extractors.)
+
+# -------------------------------- individual --------------------------------
+
+test_that("lassoWeights / enetWeights (glmnet) return length-p weights", {
+  skip_if_not_installed("glmnet")
+  f <- .rrwXy()
+  expect_length(as.numeric(lassoWeights(f$X, f$y)), f$p)
+  expect_length(as.numeric(enetWeights(f$X, f$y)), f$p)
+})
+
+test_that("scadWeights / mcpWeights (ncvreg) return length-p weights", {
+  skip_if_not_installed("ncvreg")
+  f <- .rrwXy()
+  expect_length(as.numeric(scadWeights(f$X, f$y)), f$p)
+  expect_length(as.numeric(mcpWeights(f$X, f$y)), f$p)
+})
+
+test_that("l0learnWeights returns length-p weights", {
+  skip_if_not_installed("L0Learn")
+  f <- .rrwXy()
+  expect_length(as.numeric(l0learnWeights(f$X, f$y)), f$p)
+})
+
+test_that("mrashWeights returns length-p weights and can retain the fit", {
+  skip_if_not_installed("susieR")
+  skip_if_not_installed("glmnet")
+  f <- .rrwXy()
+  w <- mrashWeights(f$X, f$y, retainFit = TRUE)
+  expect_length(w, f$p)
+  expect_false(is.null(attr(w, "fit")))
+})
+
+test_that("qgg Bayes-alphabet weights (N/L/A/C/R) return length-p weights", {
+  skip_if_not_installed("qgg")
+  f <- .rrwXy()
+  mc <- list(nit = 200, nburn = 20, nthin = 1)
+  expect_length(do.call(bayesNWeights, c(list(f$X, f$y), mc)), f$p)
+  expect_length(do.call(bayesLWeights, c(list(f$X, f$y), mc)), f$p)
+  expect_length(do.call(bayesAWeights, c(list(f$X, f$y), mc)), f$p)
+  expect_length(do.call(bayesCWeights, c(list(f$X, f$y), mc)), f$p)
+  expect_length(do.call(bayesRWeights, c(list(f$X, f$y), mc)), f$p)
+})
+
+test_that("bayesAlphabetWeights validates matching row counts before fitting", {
+  skip_if_not_installed("qgg")
+  f <- .rrwXy()
+  expect_error(bayesAlphabetWeights(f$X, f$y[-1], method = "bayesN"),
+               "same number of rows")
+  expect_error(
+    bayesAlphabetWeights(f$X, f$y, method = "bayesN", Z = matrix(1, f$n - 1, 1)),
+    "same number of rows")
+})
+
+test_that("bayesBWeights / bLassoWeights (BGLR) return length-p weights", {
+  skip_if_not_installed("BGLR")
+  f <- .rrwXy()
+  expect_length(bayesBWeights(f$X, f$y, nIter = 200, burnIn = 20, thin = 1), f$p)
+  expect_length(bLassoWeights(f$X, f$y, nIter = 200, burnIn = 20, thin = 1), f$p)
+})
+
+test_that("dprVbWeights returns length-p weights and retains the fit", {
+  skip_if_not_installed("RcppDPR")
+  f <- .rrwXy()
+  w <- dprVbWeights(f$X, f$y, retainFit = TRUE)
+  expect_length(w, f$p)
+  expect_false(is.null(attr(w, "fit")))
+})
+
+test_that("dprGibbsWeights returns length-p weights", {
+  skip_if_not_installed("RcppDPR")
+  f <- .rrwXy()
+  invisible(capture.output(w <- dprGibbsWeights(f$X, f$y, sStep = 200)))
+  expect_length(w, f$p)
+})
+
+test_that("dprAdaptiveGibbsWeights returns length-p weights", {
+  skip_if_not_installed("RcppDPR")
+  f <- .rrwXy()
+  invisible(capture.output(w <- dprAdaptiveGibbsWeights(f$X, f$y, s_step = 100)))
+  expect_length(w, f$p)
+})
+
+test_that("mrmashWeights fits from (X, Y) and returns p x K weights", {
+  skip_if_not_installed("mr.mashr")
+  skip_if_not_installed("glmnet")
+  set.seed(3)
+  m <- .rrwMulti(n = 60, p = 6, K = 3)
+  w <- suppressMessages(mrmashWeights(X = m$X, Y = m$Y, canonicalPriorMatrices = TRUE))
+  expect_equal(dim(w), c(m$p, m$K))
+  expect_true(all(is.finite(w)))
+})
+
+
+# ----------------------------- RSS solvers (C++) ----------------------------
+
+test_that("lassosumRss returns a p x nlambda beta matrix", {
+  f <- .rrwStatLd()
+  out <- lassosumRss(f$stat$b, list(blk1 = f$LD), f$n)
+  expect_equal(nrow(out$beta), f$p)
+  expect_equal(ncol(out$beta), length(out$lambda))
+  expect_length(out$conv, length(out$lambda))
+})
+
+test_that("penalizedRss traces a solution path for MCP / SCAD / L0", {
+  f <- .rrwStatLd()
+  for (pen in c("MCP", "SCAD")) {
+    out <- penalizedRss(f$stat$b, list(blk1 = f$LD), f$n, penalty = pen)
+    expect_equal(nrow(out$beta), f$p)
+  }
+  outL0 <- penalizedRss(f$stat$b, list(blk1 = f$LD), f$n,
+                        penalty = "L0", lambda0 = 0.01, lambda = c(0))
+  expect_equal(nrow(outL0$beta), f$p)
+})
+
+test_that("prsCs returns posterior betaEst of length p", {
+  f <- .rrwStatLd()
+  out <- prsCs(f$stat$b, list(blk1 = f$LD), f$n, nIter = 100, nBurnin = 20, thin = 1)
+  expect_length(out$betaEst, f$p)
+  expect_true(all(is.finite(out$betaEst)))
+})
+
+test_that("sdpr returns betaEst of length p", {
+  f <- .rrwStatLd()
+  out <- sdpr(f$stat$b, list(blk1 = f$LD), f$n,
+              iter = 100, burn = 20, thin = 1, verbose = FALSE)
+  expect_length(out$betaEst, f$p)
+})
+
+test_that("RSS solvers validate their LD-list / sample-size / length inputs", {
+  f <- .rrwStatLd()
+  expect_error(prsCs(f$stat$b, f$LD, f$n), "list of LD blocks")
+  expect_error(prsCs(f$stat$b, list(blk1 = f$LD), -1), "sample size")
+  expect_error(prsCs(f$stat$b[-1], list(blk1 = f$LD), f$n), "same as the sum")
+  expect_error(sdpr(f$stat$b[-1], list(blk1 = f$LD), f$n), "same as the length")
+  expect_error(sdpr(f$stat$b, list(blk1 = f$LD), f$n, M = 2), "at least 4")
+  expect_error(lassosumRss(f$stat$b, f$LD, f$n), "list of LD blocks")
+  expect_error(penalizedRss(f$stat$b, f$LD, f$n), "list of LD blocks")
+})
+
+# --------------------------- RSS weight wrappers ----------------------------
+
+test_that("lassosumRssWeights returns length-p weights and records the selection", {
+  f <- .rrwStatLd()
+  w <- lassosumRssWeights(f$stat, f$LD)
+  expect_length(w, f$p)
+  expect_equal(unname(attr(w, "lassosum_selection")["mode"]), "ld_quadratic")
+  expect_length(lassosumRssWeights(f$stat, f$LD, selection = "min_fbeta"), f$p)
+})
+
+test_that("scadRssWeights / mcpRssWeights / l0learnRssWeights return length-p weights", {
+  f <- .rrwStatLd()
+  expect_length(scadRssWeights(f$stat, f$LD), f$p)
+  expect_length(mcpRssWeights(f$stat, f$LD), f$p)
+  expect_length(l0learnRssWeights(f$stat, f$LD), f$p)
+})
+
+test_that("prsCsWeights and sdprWeights follow the (stat, LD) contract", {
+  f <- .rrwStatLd()
+  expect_length(prsCsWeights(f$stat, f$LD, nIter = 100, nBurnin = 20, thin = 1), f$p)
+  expect_length(
+    sdprWeights(f$stat, f$LD, iter = 100, burn = 20, thin = 1, verbose = FALSE), f$p)
+})
+
+test_that("mrAshRssWeights returns posterior-mean weights of length p", {
+  skip_if_not_installed("susieR")
+  f <- .rrwStatLd()
+  w <- mrAshRssWeights(f$stat, f$LD, varY = 1, sigma2E = 1,
+                       s0 = c(0, 0.01, 0.1, 0.5, 1), w0 = rep(1 / 5, 5))
+  expect_length(w, f$p)
+  expect_true(all(is.finite(w)))
+})
+
+
+test_that("mrmashRssWeights fits mr.mash.rss and returns p x K weights", {
+  skip_if_not_installed("mr.mashr")
+  m <- .rrwMulti(n = 60, p = 6, K = 3)
+  w <- mrmashRssWeights(m$stat, m$LD)
+  expect_equal(dim(w), c(m$p, m$K))
+  expect_true(all(is.finite(w)))
+})
+
+test_that("mrmashRssWeights errors on single-context stat$z", {
+  skip_if_not_installed("mr.mashr")
+  f <- .rrwStatLd()
+  oneCol <- list(z = matrix(f$stat$z, ncol = 1), n = f$n)
+  expect_error(mrmashRssWeights(oneCol, f$LD), ">= 2 columns")
+})
+
+
+
+# ------------------------------- pure helpers -------------------------------
+
+test_that(".lassosumCorFromStat reads cor / z / b and validates length", {
+  f <- .rrwStatLd()
+  expect_length(pecotmr:::.lassosumCorFromStat(list(cor = f$stat$cor), n = f$n, p = f$p), f$p)
+  expect_equal(pecotmr:::.lassosumCorFromStat(list(z = f$stat$z), n = f$n, p = f$p),
+               as.numeric(f$stat$z) / sqrt(f$n))
+  expect_equal(pecotmr:::.lassosumCorFromStat(list(b = f$stat$b), n = f$n, p = f$p),
+               as.numeric(f$stat$b))
+  expect_error(pecotmr:::.lassosumCorFromStat(list(), n = f$n, p = f$p), "one of")
+  expect_error(pecotmr:::.lassosumCorFromStat(list(z = f$stat$z[-1]), n = f$n, p = f$p),
+               "must equal")
+})
+
+test_that(".lassosumClampCor scales values with |cor| >= 1 below 1", {
+  expect_equal(pecotmr:::.lassosumClampCor(c(0.1, 0.5)), c(0.1, 0.5))
+  expect_lt(max(abs(pecotmr:::.lassosumClampCor(c(0.5, 1.5, -2)))), 1)
+})
+
+test_that(".lassosumFirstMax returns the first index of the maximum", {
+  expect_equal(pecotmr:::.lassosumFirstMax(c(1, 3, 3, 2)), 2L)
+  expect_equal(pecotmr:::.lassosumFirstMax(c(5, 1, 2)), 1L)
+})
+
+test_that(".lassosumSelectMinFbeta picks the minimum-fbeta candidate", {
+  set.seed(7)
+  cb <- matrix(rnorm(6 * 4), 6, 4)
+  r <- pecotmr:::.lassosumSelectMinFbeta(cb, data.frame(fbeta = c(3, 1, 2, 4)))
+  expect_equal(r$index, 2)
+  expect_equal(r$mode, "min_fbeta")
+  expect_equal(r$beta, cb[, 2])
+})
+
+test_that(".lassosumSelectLdQuadratic scores candidates by c'b / sqrt(b'Rb)", {
+  f <- .rrwStatLd()
+  set.seed(8)
+  cb <- matrix(rnorm(f$p * 4), f$p, 4)
+  r <- pecotmr:::.lassosumSelectLdQuadratic(cb, f$stat$b, f$LD)
+  expect_equal(r$mode, "ld_quadratic")
+  expect_true(r$index %in% seq_len(4))
+  expect_equal(r$beta, cb[, r$index])
+})
+
+test_that("computeCovDiag returns a diagonal condition covariance", {
+  m <- .rrwMulti(n = 60, p = 6, K = 3)
+  cv <- computeCovDiag(m$Y)
+  expect_equal(dim(cv), c(m$K, m$K))
+  expect_equal(cv[upper.tri(cv)], rep(0, sum(upper.tri(cv))))
+  expect_equal(unname(diag(cv)), unname(apply(m$Y, 2, var)))
+})
+
+test_that("computeCovFlash returns a finite K x K covariance from FLASH", {
+  skip_if_not_installed("flashier")
+  skip_if_not_installed("ebnm")
+  m <- .rrwMulti(n = 80, p = 6, K = 3)
+  cv <- computeCovFlash(m$Y)
+  expect_equal(dim(cv), c(m$K, m$K))
+  expect_true(all(is.finite(cv)))
+})
+
+test_that("buildMrmashPriorMatrices builds an expanded S0 list and a prior grid", {
+  skip_if_not_installed("mr.mashr")
+  set.seed(9)
+  res <- buildMrmashPriorMatrices(
+    Bhat = matrix(rnorm(18), 6, 3), Shat = matrix(0.2, 6, 3), K = 3)
+  expect_true(is.list(res$S0))
+  expect_gt(length(res$S0), 1)
+  expect_true(is.numeric(res$priorGrid))
+  expect_true(all(vapply(res$S0, function(s) all(dim(s) == c(3, 3)), logical(1))))
+})
+
+test_that("buildMrmashPriorMatrices errors without canonical or data-driven priors", {
+  skip_if_not_installed("mr.mashr")
+  expect_error(
+    buildMrmashPriorMatrices(Bhat = matrix(rnorm(6), 3, 2), Shat = matrix(0.2, 3, 2),
+                             K = 2, canonicalPriorMatrices = FALSE),
+    "dataDrivenPriorMatrices")
+})
+
+
+# ===========================================================================
+# mr.mash weight tests (relocated from test_rrMrmashMvsusie.R)
+# ===========================================================================
+
+# ---- mrmashWeights ----
+test_that("mrmashWeights errors when mr.mashr package is not available", {
+  skip_if(requireNamespace("mr.mashr", quietly = TRUE),
+          "mr.mashr is installed; skipping missing-package test")
+
+  expect_error(
+    mrmashWeights(mrmashFit = NULL, X = matrix(1, 10, 5), Y = matrix(1, 10, 3)),
+    "mr\\.mash\\.alpha"
+  )
+})
+
+test_that("mrmashWeights errors when X and Y are NULL and fit is NULL", {
+  skip_if_not(requireNamespace("mr.mashr", quietly = TRUE),
+              "mr.mashr not installed")
+  expect_error(mrmashWeights(mrmashFit = NULL, X = NULL, Y = NULL),
+               "Both X and Y must be provided")
+})
+
+test_that("mrmashWeights(retainFit=TRUE) attaches {dataDrivenPriorMatrices, w0, V}", {
+  skip_if_not(requireNamespace("mr.mashr", quietly = TRUE),
+              "mr.mashr not installed")
+  # These are exactly the parts fineMappingPipeline needs to rebuild the
+  # mvSuSiE reweighted mixture prior (w0 -> rescaleCovW0, original $U) and the
+  # residual variance (V); the heavy mu1 coefficient matrix is not retained.
+  ddpm    <- list(U = list(comp = diag(2)))
+  fakeFit <- structure(
+    list(w0 = c(null = 0.4, comp_grid1 = 0.6), V = diag(2) * 2),
+    class = "mr.mash")
+  fakeCoef <- matrix(0.1, nrow = 5, ncol = 2)
+  local_mocked_bindings(coef.mr.mash = function(object, ...) fakeCoef,
+                        .package = "mr.mashr")
+  w <- mrmashWeights(mrmashFit = fakeFit,
+                     dataDrivenPriorMatrices = ddpm, retainFit = TRUE)
+  fit <- attr(w, "fit")
+  expect_true(is.list(fit))
+  expect_identical(fit$dataDrivenPriorMatrices, ddpm)
+  expect_identical(fit$w0, fakeFit$w0)
+  expect_identical(fit$V,  fakeFit$V)
+  # Default (retainFit = FALSE) leaves the weights free of the fit attribute.
+  expect_null(attr(
+    mrmashWeights(mrmashFit = fakeFit, dataDrivenPriorMatrices = ddpm), "fit"))
+})

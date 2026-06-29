@@ -15,7 +15,8 @@ buildTopLoci(
   dataX = NULL,
   dataY = NULL,
   otherQuantities = NULL,
-  region = NULL
+  region = NULL,
+  conditionIdx = NULL
 )
 }
 \arguments{

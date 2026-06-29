@@ -71,11 +71,14 @@ test_that("large component pre-pruning removes individuals", {
   )
   threshold <- 0.125
 
+  # verbose = TRUE exercises the graph pre-pruning progress messages and the
+  # final exclusion-count message.
   result <- filterRelatedness(
     relatedness = rel,
     relatednessThreshold = threshold,
     analysisType = "maximize_unrelated",
-    maxComponentSize = 10
+    maxComponentSize = 10,
+    verbose = TRUE
   )
 
   expect_type(result, "character")
@@ -143,4 +146,69 @@ test_that("maximize_cases errors without pheno_data", {
     ),
     "Must provide phenoData"
   )
+})
+
+test_that("maximize_cases excludes a control listed as IID1 paired with a kept case", {
+  skip_if_not_installed("igraph")
+  skip_if_not_installed("plinkQC")
+
+  # X1-C1 is a control(IID1)-case(IID2) pair, exercising the mirror branch of
+  # the case/control exclusion loop. C1-C2 keeps both cases (sub-threshold);
+  # X2-X3 gives the control-control step a non-empty input.
+  rel <- data.frame(
+    IID1 = c("X1", "C1", "X2"),
+    IID2 = c("C1", "C2", "X3"),
+    PI_HAT = c(0.25, 0.05, 0.20),
+    stringsAsFactors = FALSE
+  )
+  pheno <- data.frame(
+    IID = c("C1", "C2", "X1", "X2", "X3"),
+    pheno = c(1, 1, 0, 0, 0),
+    stringsAsFactors = FALSE
+  )
+
+  result <- filterRelatedness(
+    relatedness = rel,
+    relatednessThreshold = 0.125,
+    analysisType = "maximize_cases",
+    phenoData = pheno
+  )
+
+  expect_type(result, "character")
+  # X1 is a control related to the retained case C1, so it must be excluded.
+  expect_true("X1" %in% result)
+})
+
+test_that("iterative cleanup loops and warns when related pairs persist", {
+  skip_if_not_installed("igraph")
+  skip_if_not_installed("plinkQC")
+
+  # Force plinkQC to exclude nobody, so related pairs survive Phase 2 and the
+  # Phase-3 iterative cleanup loop runs to exhaustion, emitting the warning.
+  local_mocked_bindings(
+    relatednessFilter = function(...)
+      list(failIDs = data.frame(IID = character(0), stringsAsFactors = FALSE)),
+    .package = "plinkQC"
+  )
+
+  rel <- data.frame(
+    IID1 = c("A", "B", "C"),
+    IID2 = c("B", "C", "D"),
+    PI_HAT = c(0.30, 0.30, 0.30),
+    stringsAsFactors = FALSE
+  )
+
+  expect_warning(
+    result <- filterRelatedness(
+      relatedness = rel,
+      relatednessThreshold = 0.125,
+      analysisType = "maximize_unrelated",
+      maxIterations = 2L,
+      verbose = TRUE
+    ),
+    "related pairs remain"
+  )
+  # Nobody is excluded because the (mocked) filter never fails anyone.
+  expect_type(result, "character")
+  expect_equal(length(result), 0L)
 })

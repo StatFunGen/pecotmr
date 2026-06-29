@@ -394,4 +394,127 @@ test_that("genoMeta sharded handle show() reports the layout", {
   expect_match(out, "per-chromosome files")
 })
 
+# ===========================================================================
+# .genotypeHandleFromLdMeta: row-resolution error branches.
+# The real getRegionalLdMeta errors earlier for genuinely-uncovered regions
+# (see the "region with no covering row" test above), so we mock it to drive
+# the post-resolution branches (0 rows, >1 row, unsupported payload ext)
+# without crafting whole on-disk meta layouts.
+# ===========================================================================
+
+test_that(".genotypeHandleFromLdMeta errors when no LD-meta row covers the region", {
+  local_mocked_bindings(
+    getRegionalLdMeta = function(...) list(
+      intersections = list(LD_file_paths = character(0), bimFilePaths = NULL)),
+    .package = "pecotmr")
+  expect_error(
+    pecotmr:::.genotypeHandleFromLdMeta("dummy.tsv", "chr1:1-100"),
+    "no LD-meta row covers")
+})
+
+test_that(".genotypeHandleFromLdMeta errors when the region spans multiple rows", {
+  local_mocked_bindings(
+    getRegionalLdMeta = function(...) list(
+      intersections = list(
+        LD_file_paths = c("/tmp/a.bed", "/tmp/b.bed"), bimFilePaths = NULL)),
+    .package = "pecotmr")
+  expect_error(
+    pecotmr:::.genotypeHandleFromLdMeta("dummy.tsv", "chr1:1-100"),
+    "spans multiple LD-meta")
+})
+
+test_that(".genotypeHandleFromLdMeta errors on an unsupported payload extension", {
+  local_mocked_bindings(
+    getRegionalLdMeta = function(...) list(
+      intersections = list(LD_file_paths = "/tmp/foo.txt", bimFilePaths = NULL)),
+    .package = "pecotmr")
+  expect_error(
+    pecotmr:::.genotypeHandleFromLdMeta("dummy.tsv", "chr1:1-100"),
+    "unsupported LD-meta file extension")
+})
+
+# ===========================================================================
+# .parseChromMeta: input-shape validation (no shard reads).
+# ===========================================================================
+
+test_that(".parseChromMeta errors on a meta file with fewer than 2 columns", {
+  f <- tempfile(fileext = ".tsv")
+  on.exit(unlink(f), add = TRUE)
+  writeLines(c("chr", "21", "22"), f)
+  expect_error(pecotmr:::.parseChromMeta(f), "must have at least 2 columns")
+})
+
+test_that(".parseChromMeta errors on an unrecognized genoMeta shape", {
+  # An unnamed multi-element character vector (names forgotten) is neither a
+  # meta-file path nor a chrom->path map.
+  expect_error(pecotmr:::.parseChromMeta(c("21", "22")),
+               "expected a path to a")
+})
+
+# ===========================================================================
+# .genotypeHandleFromChromMeta: empty meta input.
+# ===========================================================================
+
+test_that(".genotypeHandleFromChromMeta errors when the meta has no rows", {
+  f <- tempfile(fileext = ".tsv")
+  on.exit(unlink(f), add = TRUE)
+  writeLines("#chr\tpath", f)  # header only -> zero data rows
+  expect_error(pecotmr:::.genotypeHandleFromChromMeta(f),
+               "no chromosomes found")
+})
+
+# ===========================================================================
+# .resolveGenotypeShard: explicit-format dispatch, extension auto-detection,
+# prefix sidecar probing, and the unresolvable-format error.
+# ===========================================================================
+
+test_that(".resolveGenotypeShard honours explicit plink1 format and .bed extension", {
+  skip_if_not_installed("snpStats")
+  h1 <- pecotmr:::.resolveGenotypeShard(plink_prefix, format = "plink1")
+  expect_s4_class(h1, "GenotypeHandle")
+  expect_equal(h1@format, "plink1")
+  h2 <- pecotmr:::.resolveGenotypeShard(paste0(plink_prefix, ".bed"))
+  expect_equal(h2@format, "plink1")
+})
+
+test_that(".resolveGenotypeShard honours explicit plink2 format and .pgen extension", {
+  skip_if_not_installed("pgenlibr")
+  h1 <- pecotmr:::.resolveGenotypeShard(plink_prefix, format = "plink2")
+  expect_s4_class(h1, "GenotypeHandle")
+  expect_equal(h1@format, "plink2")
+  h2 <- pecotmr:::.resolveGenotypeShard(paste0(plink_prefix, ".pgen"))
+  expect_equal(h2@format, "plink2")
+})
+
+test_that(".resolveGenotypeShard dispatches gds via explicit format and .gds extension", {
+  skip_if_not_installed("SNPRelate")
+  h1 <- pecotmr:::.resolveGenotypeShard(gds_path, format = "gds")
+  expect_equal(h1@format, "gds")
+  h2 <- pecotmr:::.resolveGenotypeShard(gds_path)
+  expect_equal(h2@format, "gds")
+})
+
+test_that(".resolveGenotypeShard dispatches vcf by extension", {
+  skip_if_not_installed("VariantAnnotation")
+  h <- pecotmr:::.resolveGenotypeShard(vcf_path)
+  expect_equal(h@format, "vcf")
+})
+
+test_that(".resolveGenotypeShard probes the .pgen sidecar for an extension-less prefix", {
+  # Only a .pgen sidecar exists (no .bed) so the prefix-probe routes to
+  # plink2; mock the reader so we exercise the dispatch, not real IO.
+  p <- tempfile()
+  on.exit(unlink(paste0(p, ".pgen")), add = TRUE)
+  file.create(paste0(p, ".pgen"))
+  local_mocked_bindings(.makePlink2Handle = function(...) "STUB_PLINK2",
+                        .package = "pecotmr")
+  expect_identical(pecotmr:::.resolveGenotypeShard(p), "STUB_PLINK2")
+})
+
+test_that(".resolveGenotypeShard errors when the format cannot be determined", {
+  # No recognized extension and no .bed/.pgen sidecar to probe.
+  expect_error(pecotmr:::.resolveGenotypeShard(tempfile()),
+               "cannot determine genotype format")
+})
+
 

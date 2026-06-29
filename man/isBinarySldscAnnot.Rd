@@ -4,11 +4,10 @@
 \alias{isBinarySldscAnnot}
 \title{Detect whether each annotation is binary or continuous}
 \usage{
-isBinarySldscAnnot(targetAnnoDir, annotCols = NULL)
+isBinarySldscAnnot(sldscData, annotCols = NULL)
 }
 \arguments{
-\item{targetAnnoDir}{Character. Directory containing the target `.annot.gz`
-files (one per chromosome).}
+\item{sldscData}{An \code{\link{SldscData}} object.}
 
 \item{annotCols}{Character or integer vector, default NULL.}
 }

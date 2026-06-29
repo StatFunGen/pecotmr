@@ -5,24 +5,32 @@
 \title{Standardize tau and compute EnrichStat for one polyfun run}
 \usage{
 standardizeSldscTrait(
-  traitData,
+  sldscData,
+  trait,
+  mode = c("single", "joint"),
+  idx = NULL,
   sdAnnot,
   MRef,
-  targetCategories = NULL,
-  mode = c("single", "joint")
+  targetCategories = NULL
 )
 }
 \arguments{
-\item{traitData}{List from \code{\link{readSldscTrait}}.}
+\item{sldscData}{An \code{\link{SldscData}} object (the run is pulled from it
+via \code{getTraitRun}).}
+
+\item{trait}{Character. Trait name (a key of the SldscData traits list).}
+
+\item{mode}{Character: `"single"` or `"joint"`.}
+
+\item{idx}{Integer or NULL. For `mode = "single"`, which of the trait's
+single-target runs to standardize.}
 
 \item{sdAnnot}{Named numeric vector from \code{\link{computeSldscAnnotSd}}.}
 
 \item{MRef}{Scalar from \code{\link{computeSldscMRef}}.}
 
-\item{targetCategories}{Character vector or NULL. If NULL, intersects
-`traitData$categories` with `names(sdAnnot)`.}
-
-\item{mode}{Character: `"single"` or `"joint"`.}
+\item{targetCategories}{Character vector or NULL. If NULL, intersects the
+run's `categories` with `names(sdAnnot)`.}
 }
 \value{
 A list with `summary` (data frame), `tau_star_blocks` (matrix),

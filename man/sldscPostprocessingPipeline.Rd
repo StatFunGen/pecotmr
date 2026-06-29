@@ -5,58 +5,44 @@
 \title{sLDSC Postprocessing Pipeline}
 \usage{
 sldscPostprocessingPipeline(
-  traitSinglePrefixes,
-  traitJointPrefix,
-  targetAnnoDir,
-  frqfileDir = NULL,
-  plinkName = "ADSP_chr",
+  sldscData,
   mafCutoff = 0.05,
   targetCategories = NULL,
   targetLabels = NULL
 )
 }
 \arguments{
-\item{traitSinglePrefixes}{Named list of file prefixes for the
-single-target polyfun runs (one entry per trait; each value is a
-length-N character vector of `<dir>/<trait>` prefixes, one per
-target annotation).}
+\item{sldscData}{An \code{\link{SldscData}} object bundling the annotation
+table, the reference-panel allele frequencies, and the per-trait
+single/joint polyfun runs.}
 
-\item{traitJointPrefix}{Named list of file prefixes for the joint
-polyfun runs (one entry per trait; each value a `<dir>/<trait>`
-prefix into the joint LD-score dir). Pass an empty list to skip
-the joint branch.}
+\item{mafCutoff}{Numeric MAF cutoff applied via the object's frq table.
+Default \code{0.05}. Set to \code{0} to opt out (requires frq data when
+\code{> 0}).}
 
-\item{targetAnnoDir}{Directory containing the target `.annot.gz`
-files used for sd_C and binary detection (typically the joint dir).}
-
-\item{frqfileDir}{Optional directory of `.frq` files for the MAF
-cutoff. Pass \code{NULL} to skip MAF filtering.}
-
-\item{plinkName}{File-name prefix of the PLINK reference panel
-(default \code{"ADSP_chr"}; combined per-chromosome as
-\code{paste0(plinkName, chrom)}).}
-
-\item{mafCutoff}{Numeric MAF cutoff applied via the `.frq` files.
-Default \code{0.05}. Set to \code{0} to opt out.}
-
-\item{targetCategories}{Optional character vector of target
-annotation names to retain. Auto-detected from the joint run when
+\item{targetCategories}{Optional character vector of target annotation names
+to retain. Auto-detected from the joint run (or first single run) when
 \code{NULL}.}
 
 \item{targetLabels}{Optional display names, same length / order as
-\code{targetCategories}, applied to every output column / tau*
-block colname.}
+\code{targetCategories}, applied to every output column / tau* block
+colname.}
 }
 \value{
-A list with \code{per_trait} (per-trait standardised tables),
-  meta tables (\code{tau_star_meta}, \code{E_meta},
-  \code{enrich_stat_meta}), and a \code{params} record of the call
-  options.
+A list with \code{per_trait} (per-trait standardised tables), meta
+  tables (\code{tauStar}, \code{enrichment}, \code{enrichstat}), and a
+  \code{params} record of the call options.
 }
 \description{
-Postprocess polyfun's per-trait sLDSC outputs (one
-  single-target run per target annotation, plus an optional joint
-  run) into a single results object with per-trait tau*, EnrichStat
-  with back-solved jackknife SE, and a DerSimonian-Laird random-
-  effects meta-analysis across traits.
+Postprocess polyfun's per-trait sLDSC outputs (already loaded
+  into an \code{\link{SldscData}} object) into a single results object with
+  per-trait tau*, EnrichStat with back-solved jackknife SE, and a
+  DerSimonian-Laird random-effects meta-analysis across traits. All file I/O
+  is done up front by the reader functions (\code{\link{readSldscAnnot}},
+  \code{\link{readSldscFrq}}, \code{\link{readSldscTrait}}); this pipeline is
+  pure computation over the in-memory \code{SldscData}.
+}
+\seealso{
+\code{\link{SldscData}}, \code{\link{readSldscAnnot}},
+  \code{\link{readSldscFrq}}, \code{\link{readSldscTrait}}
 }

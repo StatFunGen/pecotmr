@@ -4,21 +4,11 @@
 \alias{computeSldscMRef}
 \title{Reference-panel SNP count (the M_ref used to standardise tau*)}
 \usage{
-computeSldscMRef(
-  targetAnnoDir = NULL,
-  frqfileDir = NULL,
-  plinkName = "ADSP_chr",
-  mafCutoff = 0.05
-)
+computeSldscMRef(sldscData, mafCutoff = 0.05)
 }
 \arguments{
-\item{targetAnnoDir}{Character or NULL. Fallback only - directory of
-`.l2.ldscore` files. Used only when `frqfileDir` is unavailable.}
-
-\item{frqfileDir}{Character or NULL. Directory of PLINK `.frq` files; the
-preferred (recommended) source of M_ref.}
-
-\item{plinkName}{Character. Filename prefix of `.frq` files.}
+\item{sldscData}{An \code{\link{SldscData}} object (its \code{frq} slot is
+the reference-panel SNP set).}
 
 \item{mafCutoff}{Numeric, default `0.05`.}
 }
@@ -37,7 +27,6 @@ Scalar integer.
     \item `mafCutoff == 0` (all-M variant): count ALL SNPs across all
       `.frq` files (the same set polyfun's `.l2.M` sums).
   }
-  `targetAnnoDir` is a fallback only, used when no `.frq` directory is
-  given; that fallback counts `.l2.ldscore` rows and is WRONG when the target
-  was HM3-subsetted (it then yields the regression SNP count, not M_ref).
+  When no frq data is present, `mafCutoff == 0` falls back to the number of
+  annotation rows; `mafCutoff > 0` errors (a MAF-restricted count needs frq).
 }

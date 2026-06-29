@@ -99,6 +99,76 @@ readSldscTrait <- function(prefix) {
 }
 
 
+#' @title Read target annotation files (.annot.gz) into one table
+#'
+#' @description Reads the per-chromosome polyfun `.annot.gz` files in a
+#'   directory and stacks them into a single \code{data.frame} of \code{CHR},
+#'   \code{SNP}, and the annotation columns. This is the I/O step feeding the
+#'   \code{annot} slot of \code{\link{SldscData}}; the computation
+#'   (\code{\link{computeSldscAnnotSd}}, \code{\link{isBinarySldscAnnot}}) then
+#'   runs on the loaded table, not on paths.
+#'
+#' @param targetAnnoDir Character. Directory of `.annot.gz` files.
+#' @param annotCols Character or integer vector, default NULL. Annotation
+#'   columns to keep. NULL keeps all non-standard columns (auto-detected).
+#' @return A \code{data.frame}: \code{CHR}, \code{SNP}, and annotation columns.
+#' @importFrom vroom vroom
+#' @importFrom tidyselect all_of
+#' @export
+readSldscAnnot <- function(targetAnnoDir, annotCols = NULL) {
+  if (!dir.exists(targetAnnoDir))
+    stop("readSldscAnnot: targetAnnoDir does not exist: ", targetAnnoDir)
+  annoFiles <- list.files(targetAnnoDir, pattern = "\\.annot\\.gz$",
+                          full.names = TRUE)
+  if (length(annoFiles) == 0L)
+    stop("readSldscAnnot: no .annot.gz files in: ", targetAnnoDir)
+
+  detected <- .sldscDetectAnnotCols(annoFiles[1])
+  colsUse <- if (is.null(annotCols)) detected
+             else if (is.numeric(annotCols)) detected[annotCols]
+             else annotCols
+  if (length(colsUse) == 0L)
+    stop("readSldscAnnot: no annotation columns to read.")
+
+  parts <- lapply(annoFiles, function(f) {
+    as.data.frame(vroom(f, col_select = all_of(c("CHR", "SNP", colsUse)),
+                        show_col_types = FALSE))
+  })
+  do.call(rbind, parts)
+}
+
+
+#' @title Read PLINK allele-frequency files (.frq) into one table
+#'
+#' @description Reads the per-chromosome PLINK `.frq` files for the reference
+#'   panel and stacks them into a single \code{data.frame} of \code{CHR},
+#'   \code{SNP}, \code{MAF}. Feeds the \code{frq} slot of \code{\link{SldscData}}.
+#'
+#' @param frqfileDir Character. Directory of `.frq` files.
+#' @param plinkName Character. Filename prefix (files at `{plinkName}{chr}.frq`).
+#'   Falls back to all `*.frq` in the directory when the prefix matches nothing.
+#' @return A \code{data.frame}: \code{CHR}, \code{SNP}, \code{MAF}.
+#' @importFrom vroom vroom
+#' @importFrom tidyselect all_of
+#' @export
+readSldscFrq <- function(frqfileDir, plinkName = "ADSP_chr") {
+  if (!dir.exists(frqfileDir))
+    stop("readSldscFrq: frqfileDir does not exist: ", frqfileDir)
+  pat <- paste0("^", gsub("([.])", "\\\\\\1", plinkName), "[0-9]+\\.frq$")
+  frqFiles <- list.files(frqfileDir, pattern = pat, full.names = TRUE)
+  if (length(frqFiles) == 0L)
+    frqFiles <- list.files(frqfileDir, pattern = "\\.frq$", full.names = TRUE)
+  if (length(frqFiles) == 0L)
+    stop("readSldscFrq: no .frq files in: ", frqfileDir)
+
+  parts <- lapply(frqFiles, function(f) {
+    as.data.frame(vroom(f, col_select = all_of(c("CHR", "SNP", "MAF")),
+                        show_col_types = FALSE))
+  })
+  do.call(rbind, parts)
+}
+
+
 #' @title Compute per-annotation standard deviation, MAF-restricted
 #'
 #' @description Computes the standard deviation of each annotation column in the
@@ -106,61 +176,41 @@ readSldscTrait <- function(prefix) {
 #'   `.frq` files. Required for internal consistency with polyfun's regression,
 #'   which operates on MAF > cutoff SNPs by default.
 #'
-#' @param targetAnnoDir Character. Directory containing target annotation files
-#'   (one per chromosome) in polyfun's `.annot.gz` format.
-#' @param frqfileDir Character or NULL. Directory containing PLINK `.frq` files
-#'   for the reference panel. Required when `mafCutoff > 0`; the function
-#'   errors if missing.
-#' @param plinkName Character. Filename prefix of the `.frq` files
-#'   (e.g. `"ADSP_chr"`). Files are expected at `{plinkName}{chr}.frq`.
-#' @param mafCutoff Numeric, default `0.05`.
+#' @param sldscData An \code{\link{SldscData}} object (its \code{annot} and
+#'   \code{frq} slots supply the annotation values and MAF, respectively).
+#' @param mafCutoff Numeric, default `0.05`. Requires frq data when > 0.
 #' @param annotCols Character or integer vector, default NULL. Annotation columns
 #'   to compute sd for. If NULL, all annotation columns are used.
 #'
 #' @return Named numeric vector of \eqn{sd_C} values, one per annotation.
 #'
 #' @importFrom stats setNames var
+#' @importFrom methods is
 #' @export
-computeSldscAnnotSd <- function(targetAnnoDir, frqfileDir = NULL,
-                                plinkName = "ADSP_chr",
-                                mafCutoff = 0.05, annotCols = NULL) {
-  if (mafCutoff > 0 && (is.null(frqfileDir) || !dir.exists(frqfileDir))) {
+computeSldscAnnotSd <- function(sldscData, mafCutoff = 0.05, annotCols = NULL) {
+  if (!is(sldscData, "SldscData"))
+    stop("computeSldscAnnotSd: `sldscData` must be an SldscData object.")
+  annot <- getAnnotData(sldscData)
+  frq   <- getFrqData(sldscData)
+  if (mafCutoff > 0 && nrow(frq) == 0L)
     stop("computeSldscAnnotSd: mafCutoff = ", mafCutoff,
-         " requires frqfileDir, but '", frqfileDir, "' is not a directory.")
-  }
-  if (!dir.exists(targetAnnoDir)) {
-    stop("computeSldscAnnotSd: targetAnnoDir does not exist: ", targetAnnoDir)
-  }
+         " requires frq data (read via readSldscFrq); none present.")
 
-  annoFiles <- list.files(targetAnnoDir, pattern = "\\.annot\\.gz$", full.names = TRUE)
-  if (length(annoFiles) == 0L)
-    stop("computeSldscAnnotSd: no .annot.gz files in: ", targetAnnoDir)
-
-  detected <- .sldscDetectAnnotCols(annoFiles[1])
-  if (is.null(annotCols)) {
-    colsUse <- detected
-  } else if (is.numeric(annotCols)) {
-    colsUse <- detected[annotCols]
-  } else {
-    colsUse <- annotCols
-  }
+  colsUse <- if (is.null(annotCols)) getAnnotCols(sldscData)
+             else if (is.numeric(annotCols)) getAnnotCols(sldscData)[annotCols]
+             else annotCols
   if (length(colsUse) == 0L)
     stop("computeSldscAnnotSd: no annotation columns to process.")
 
   num <- setNames(numeric(length(colsUse)), colsUse)
   den <- 0
 
-  for (annoFile in annoFiles) {
-    dat <- vroom(annoFile, show_col_types = FALSE)
+  # Pool within-chromosome variance (matches polyfun's per-file accumulation).
+  for (chrom in unique(annot$CHR)) {
+    dat <- annot[annot$CHR == chrom, , drop = FALSE]
     if (mafCutoff > 0) {
-      chrom <- .sldscChromFromFilename(annoFile)
-      if (is.na(chrom))
-        stop("computeSldscAnnotSd: could not parse chromosome from: ", annoFile)
-      frqFile <- file.path(frqfileDir, paste0(plinkName, chrom, ".frq"))
-      if (!file.exists(frqFile))
-        stop("computeSldscAnnotSd: .frq file not found: ", frqFile)
-      frq <- vroom(frqFile, col_select = c("SNP", "MAF"), show_col_types = FALSE)
-      dat <- merge(dat, frq, by = "SNP", all.x = FALSE, all.y = FALSE)
+      dat <- merge(dat, frq[, c("SNP", "MAF")], by = "SNP",
+                   all.x = FALSE, all.y = FALSE)
       dat <- dat[!is.na(dat$MAF) & dat$MAF > mafCutoff, ]
     }
     if (nrow(dat) <= 1L) next
@@ -192,64 +242,29 @@ computeSldscAnnotSd <- function(targetAnnoDir, frqfileDir = NULL,
 #'     \item `mafCutoff == 0` (all-M variant): count ALL SNPs across all
 #'       `.frq` files (the same set polyfun's `.l2.M` sums).
 #'   }
-#'   `targetAnnoDir` is a fallback only, used when no `.frq` directory is
-#'   given; that fallback counts `.l2.ldscore` rows and is WRONG when the target
-#'   was HM3-subsetted (it then yields the regression SNP count, not M_ref).
+#'   When no frq data is present, `mafCutoff == 0` falls back to the number of
+#'   annotation rows; `mafCutoff > 0` errors (a MAF-restricted count needs frq).
 #'
-#' @param targetAnnoDir Character or NULL. Fallback only - directory of
-#'   `.l2.ldscore` files. Used only when `frqfileDir` is unavailable.
-#' @param frqfileDir Character or NULL. Directory of PLINK `.frq` files; the
-#'   preferred (recommended) source of M_ref.
-#' @param plinkName Character. Filename prefix of `.frq` files.
+#' @param sldscData An \code{\link{SldscData}} object (its \code{frq} slot is
+#'   the reference-panel SNP set).
 #' @param mafCutoff Numeric, default `0.05`.
 #'
 #' @return Scalar integer.
 #'
+#' @importFrom methods is
 #' @export
-computeSldscMRef <- function(targetAnnoDir = NULL, frqfileDir = NULL,
-                             plinkName = "ADSP_chr", mafCutoff = 0.05) {
-  ## --- preferred path: count reference-panel SNPs from the .frq files ---
-  if (!is.null(frqfileDir) && dir.exists(frqfileDir)) {
-    pat <- paste0("^", gsub("([.])", "\\\\\\1", plinkName), "[0-9]+\\.frq$")
-    frqFiles <- list.files(frqfileDir, pattern = pat, full.names = TRUE)
-    if (length(frqFiles) == 0L)
-      frqFiles <- list.files(frqfileDir, pattern = "\\.frq$", full.names = TRUE)
-    if (length(frqFiles) > 0L) {
-      total <- 0L
-      for (f in frqFiles) {
-        frq <- vroom(f, col_select = "MAF", show_col_types = FALSE)
-        total <- total + if (mafCutoff > 0)
-          sum(!is.na(frq$MAF) & frq$MAF > mafCutoff) else nrow(frq)
-      }
-      return(as.integer(total))
-    }
+computeSldscMRef <- function(sldscData, mafCutoff = 0.05) {
+  if (!is(sldscData, "SldscData"))
+    stop("computeSldscMRef: `sldscData` must be an SldscData object.")
+  frq <- getFrqData(sldscData)
+  if (nrow(frq) > 0L) {
+    return(as.integer(if (mafCutoff > 0)
+      sum(!is.na(frq$MAF) & frq$MAF > mafCutoff) else nrow(frq)))
   }
-
-  ## --- fallback only (no .frq dir): count target .l2.ldscore rows ---
   if (mafCutoff > 0)
     stop("computeSldscMRef: mafCutoff = ", mafCutoff,
-         " requires frqfileDir (to count MAF>cutoff reference-panel SNPs).")
-  if (is.null(targetAnnoDir) || !dir.exists(targetAnnoDir))
-    stop("computeSldscMRef: need frqfileDir, or targetAnnoDir as fallback.")
-  files <- list.files(targetAnnoDir,
-                      pattern = "\\.l2\\.ldscore\\.(gz|parquet)$",
-                      full.names = TRUE)
-  if (length(files) == 0L)
-    stop("computeSldscMRef: no .frq files and no .l2.ldscore files found.")
-  warning("computeSldscMRef: no .frq dir given; counting target .l2.ldscore ",
-          "rows as M_ref. If the target was HM3-subsetted this UNDERCOUNTS the ",
-          "reference panel and shrinks tau*. Pass frqfileDir instead.")
-  total <- 0L
-  for (f in files) {
-    if (endsWith(f, ".parquet")) {
-      if (!requireNamespace("arrow", quietly = TRUE))
-        stop("computeSldscMRef: install 'arrow' to read .parquet files.")
-      total <- total + nrow(arrow::read_parquet(f))
-    } else {
-      total <- total + nrow(vroom(f, show_col_types = FALSE))
-    }
-  }
-  as.integer(total)
+         " requires frq data (read via readSldscFrq); none present.")
+  as.integer(nrow(getAnnotData(sldscData)))
 }
 
 
@@ -258,40 +273,27 @@ computeSldscMRef <- function(targetAnnoDir = NULL, frqfileDir = NULL,
 #' @description Inspects each annotation column and returns whether its values
 #'   lie in \{0, 1\} (binary) or take other values (continuous).
 #'
-#' @param targetAnnoDir Character. Directory containing the target `.annot.gz`
-#'   files (one per chromosome).
+#' @param sldscData An \code{\link{SldscData}} object.
 #' @param annotCols Character or integer vector, default NULL.
 #'
 #' @return Named logical vector: TRUE for binary, FALSE for continuous.
 #'
-#' @importFrom stats setNames
+#' @importFrom stats setNames na.omit
+#' @importFrom methods is
 #' @export
-isBinarySldscAnnot <- function(targetAnnoDir, annotCols = NULL) {
-  annoFiles <- list.files(targetAnnoDir, pattern = "\\.annot\\.gz$", full.names = TRUE)
-  if (length(annoFiles) == 0L)
-    stop("isBinarySldscAnnot: no .annot.gz files in: ", targetAnnoDir)
-
-  detected <- .sldscDetectAnnotCols(annoFiles[1])
-  if (is.null(annotCols)) {
-    colsUse <- detected
-  } else if (is.numeric(annotCols)) {
-    colsUse <- detected[annotCols]
-  } else {
-    colsUse <- annotCols
-  }
+isBinarySldscAnnot <- function(sldscData, annotCols = NULL) {
+  if (!is(sldscData, "SldscData"))
+    stop("isBinarySldscAnnot: `sldscData` must be an SldscData object.")
+  annot <- getAnnotData(sldscData)
+  colsUse <- if (is.null(annotCols)) getAnnotCols(sldscData)
+             else if (is.numeric(annotCols)) getAnnotCols(sldscData)[annotCols]
+             else annotCols
 
   isBinary <- setNames(rep(TRUE, length(colsUse)), colsUse)
-
-  for (f in annoFiles) {
-    dat <- vroom(f, col_select = all_of(colsUse), show_col_types = FALSE)
-    for (col in colsUse) {
-      if (!isBinary[[col]]) next
-      vals <- unique(na.omit(as.numeric(dat[[col]])))
-      if (any(!(vals %in% c(0, 1)))) isBinary[[col]] <- FALSE
-    }
-    if (!any(isBinary)) break
+  for (col in colsUse) {
+    vals <- unique(na.omit(as.numeric(annot[[col]])))
+    if (any(!(vals %in% c(0, 1)))) isBinary[[col]] <- FALSE
   }
-
   isBinary
 }
 
@@ -304,22 +306,33 @@ isBinarySldscAnnot <- function(targetAnnoDir, annotCols = NULL) {
 #'   EnrichStat and back-solves its standard error from polyfun's reported
 #'   `Enrichment_p` using \eqn{|Z| = \Phi^{-1}(1 - p/2)}.
 #'
-#' @param traitData List from \code{\link{readSldscTrait}}.
+#' @param sldscData An \code{\link{SldscData}} object (the run is pulled from it
+#'   via \code{getTraitRun}).
+#' @param trait Character. Trait name (a key of the SldscData traits list).
+#' @param mode Character: `"single"` or `"joint"`.
+#' @param idx Integer or NULL. For `mode = "single"`, which of the trait's
+#'   single-target runs to standardize.
 #' @param sdAnnot Named numeric vector from \code{\link{computeSldscAnnotSd}}.
 #' @param MRef Scalar from \code{\link{computeSldscMRef}}.
-#' @param targetCategories Character vector or NULL. If NULL, intersects
-#'   `traitData$categories` with `names(sdAnnot)`.
-#' @param mode Character: `"single"` or `"joint"`.
+#' @param targetCategories Character vector or NULL. If NULL, intersects the
+#'   run's `categories` with `names(sdAnnot)`.
 #'
 #' @return A list with `summary` (data frame), `tau_star_blocks` (matrix),
 #'   `h2g`, `nBlocks`, `mode`.
 #'
 #' @importFrom stats qnorm var
+#' @importFrom methods is
 #' @export
-standardizeSldscTrait <- function(traitData, sdAnnot, MRef,
-                                  targetCategories = NULL,
-                                  mode = c("single", "joint")) {
+standardizeSldscTrait <- function(sldscData, trait, mode = c("single", "joint"),
+                                  idx = NULL, sdAnnot, MRef,
+                                  targetCategories = NULL) {
+  if (!is(sldscData, "SldscData"))
+    stop("standardizeSldscTrait: `sldscData` must be an SldscData object.")
   mode <- match.arg(mode)
+  traitData <- getTraitRun(sldscData, trait, mode, idx)
+  if (is.null(traitData))
+    stop("standardizeSldscTrait: no ", mode, " run for trait '", trait, "'",
+         if (!is.null(idx)) paste0(" (idx=", idx, ")") else "", ".")
   if (is.null(targetCategories))
     targetCategories <- intersect(traitData$categories, names(sdAnnot))
   if (length(targetCategories) == 0L)
@@ -503,36 +516,3 @@ metaSldscRandom <- function(perTraitEstimates, category,
     list(summary = newDf)
   })
 }
-
-
-#' @title End-to-end S-LDSC post-processing across traits, single + joint in one pass
-#'
-#' @description Top-level orchestration. Reads polyfun outputs (one single-target
-#'   run per target plus, when available, one joint run per trait), standardizes
-#'   both modes, and runs the default random-effects meta across all traits.
-#'
-#' @param traitSinglePrefixes Named list. For each trait, a character vector
-#'   of length \eqn{N} giving the polyfun output prefixes for the \eqn{N}
-#'   single-target runs (order must match `targetCategories`).
-#' @param traitJointPrefix Named character. For each trait, the polyfun output
-#'   prefix for the joint run. Pass `NA` (or `""`) for a trait without a joint run.
-#' @param targetAnnoDir Character. Directory of target `.annot.gz` files used
-#'   for `sd_C` and binary detection (typically the joint-mode dir).
-#' @param frqfileDir Character or NULL.
-#' @param plinkName Character. Default `"ADSP_chr"`.
-#' @param mafCutoff Numeric, default `0.05`.
-#' @param targetCategories Character vector or NULL. Auto-detected from the
-#'   first available run if NULL.
-#' @param targetLabels Character vector or NULL. Optional user-friendly display
-#'   names for the target annotations, same length and order as the resolved
-#'   `targetCategories` (e.g. `c("quantile_eQTL", "eQTL")` to replace the
-#'   polyfun `.results` names `c("ANNOT_1_0", "ANNOT_2_0")`). When given, every
-#'   `target` column and `tau*`-block column name in the output is renamed;
-#'   `params$target_categories` then holds the labels and
-#'   `params$target_categories_orig` keeps the original polyfun names. When NULL
-#'   (default), nothing is renamed - the original `.results` category names are
-#'   used as before.
-#'
-#' @return List with `per_trait`, `meta` (three frames), `params`.
-#'
-#' @export

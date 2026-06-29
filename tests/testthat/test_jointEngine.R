@@ -563,3 +563,578 @@ test_that("fitJointGroup(twas): FM-derived method reuses fine-mapping's CV (hand
   expect_false(cvCalled)                        # handoff used, no re-CV
   expect_false(is.null(getCvResult(entries[[1L]])$predictions))
 })
+
+# =============================================================================
+# Enumerators (pattern x dataForm -> list<JointGroup>)
+# -----------------------------------------------------------------------------
+# The dispatch table stores each enumerator in a JointDispatchCell@enumerate
+# slot; the pipeline reaches them via `cell@enumerate(...)`. covr cannot trace a
+# function invoked through such a stored reference, so these call the enumerators
+# DIRECTLY (pecotmr:::.enum*) with the per-group X/Y/Z builders mocked, asserting
+# the enumeration wiring (scope gating + per-group conditions).
+# =============================================================================
+
+# A QtlSumStats-shaped data.frame: the sumstat enumerators only touch
+# data$study / data$context / data$trait and nrow(data).
+.je_ssDf <- function(studies = "S", contexts = c("c1", "c2"), traits = "t1") {
+  expand.grid(study = studies, context = contexts, trait = traits,
+              stringsAsFactors = FALSE)
+}
+# Mock .buildJointSumstatZMatrix: a (p x k) Z plus n vector, keyed by colLabels.
+.je_mockJointZ <- function(data, tupleRows, colLabels, errorLabel) {
+  p <- 3L
+  list(Z = matrix(seq_len(p * length(colLabels)), p, length(colLabels),
+                  dimnames = list(paste0("v", seq_len(p)), colLabels)),
+       nVec = rep(100, length(colLabels)),
+       variantIds = paste0("v", seq_len(p)))
+}
+.je_mockLd <- function(sketch, vids)
+  matrix(0, length(vids), length(vids), dimnames = list(vids, vids))
+
+# A real SE (rowRanges carry the trait coordinates fsusie's `pos` needs).
+.je_mkSe <- function(traits = c("G1", "G2"), n = 6L) {
+  rng <- GenomicRanges::GRanges("chr1",
+    IRanges::IRanges(start = seq(100L, by = 100L, length.out = length(traits)),
+                     width = 1L))
+  names(rng) <- traits
+  SummarizedExperiment::SummarizedExperiment(
+    assays = list(e = matrix(0, length(traits), n,
+                  dimnames = list(traits, paste0("s", seq_len(n))))),
+    rowRanges = rng)
+}
+
+test_that(".enumCrossContextIndividual: one group per trait in >= 2 contexts", {
+  scope <- list(studies = "S", contexts = list(S = c("c1", "c2")),
+                traits = list(S = c("G1", "G2")))
+  local_mocked_bindings(
+    getStudy = function(data) "S",
+    .buildIndividualCrossContextXY = function(data, tid, scopedContexts,
+                                              cisWindow, verbose, label,
+                                              region = NULL) {
+      if (tid == "G2") return(NULL)                       # skip branch (461)
+      X <- matrix(0, 4, 2, dimnames = list(paste0("s", 1:4), c("v1", "v2")))
+      Y <- matrix(0, 4, 2, dimnames = list(paste0("s", 1:4), c("c1", "c2")))
+      list(X = X, Y = Y, perTraitContexts = c("c1", "c2"))
+    },
+    .package = "pecotmr")
+  g <- pecotmr:::.enumCrossContextIndividual(NULL, scope)
+  expect_length(g, 1L)                                    # only G1 survives
+  expect_s4_class(g[[1L]], "IndividualJointGroup")
+  expect_equal(as.character(g[[1L]]@conditions$context), c("c1", "c2"))
+  expect_equal(as.character(g[[1L]]@conditions$trait), c("G1", "G1"))
+})
+
+test_that(".enumCrossContextIndividual: study not in scope / < 2 contexts -> empty", {
+  local_mocked_bindings(getStudy = function(data) "S", .package = "pecotmr")
+  expect_length(pecotmr:::.enumCrossContextIndividual(
+    NULL, list(studies = "OTHER", contexts = list(), traits = list())), 0L)
+  expect_length(pecotmr:::.enumCrossContextIndividual(
+    NULL, list(studies = "S", contexts = list(S = "c1"),
+               traits = list(S = "G1"))), 0L)
+})
+
+test_that(".enumCrossContextSumstats: groups per (study, trait) with >= 2 contexts", {
+  df <- .je_ssDf(studies = "S", contexts = c("c1", "c2"), traits = "t1")
+  scope <- list(studies = "S", contexts = list(S = c("c1", "c2")),
+                traits = list(S = "t1"))
+  local_mocked_bindings(
+    getLdSketch = function(x) "SKETCH",
+    .buildJointSumstatZMatrix = .je_mockJointZ, .fmLdFromSketch = .je_mockLd,
+    .package = "pecotmr")
+  g <- pecotmr:::.enumCrossContextSumstats(df, scope)
+  expect_length(g, 1L)
+  expect_s4_class(g[[1L]], "SumStatsJointGroup")
+  expect_equal(as.character(g[[1L]]@conditions$context), c("c1", "c2"))
+})
+
+test_that(".enumCrossContextSumstats: < 2 contexts and < 2 tuple rows skip", {
+  local_mocked_bindings(
+    getLdSketch = function(x) "SKETCH",
+    .buildJointSumstatZMatrix = .je_mockJointZ, .fmLdFromSketch = .je_mockLd,
+    .package = "pecotmr")
+  # study scoped to two contexts but only one row present -> < 2 tupleRows skip
+  df <- .je_ssDf(studies = "S", contexts = "c1", traits = "t1")
+  scope <- list(studies = "S", contexts = list(S = c("c1", "c2")),
+                traits = list(S = "t1"))
+  expect_length(pecotmr:::.enumCrossContextSumstats(df, scope), 0L)
+  # < 2 scoped contexts -> skip
+  scope2 <- list(studies = "S", contexts = list(S = "c1"),
+                 traits = list(S = "t1"))
+  expect_length(pecotmr:::.enumCrossContextSumstats(df, scope2), 0L)
+})
+
+test_that(".enumCrossTraitIndividual: one group per context with >= 2 traits + pos", {
+  scope <- list(studies = "S", contexts = list(S = c("c1", "c2")),
+                traits = list(S = c("G1", "G2")))
+  local_mocked_bindings(
+    getStudy = function(data) "S",
+    .buildIndividualCrossTraitXY = function(data, cx, scopedTraits, cisWindow,
+                                            verbose, label, study,
+                                            region = NULL) {
+      if (cx == "c2") return(NULL)                        # skip branch (511)
+      X <- matrix(0, 4, 2, dimnames = list(paste0("s", 1:4), c("v1", "v2")))
+      Y <- matrix(0, 4, 2, dimnames = list(paste0("s", 1:4), c("G1", "G2")))
+      list(X = X, Y = Y, traitsHere = c("G1", "G2"), se = .je_mkSe())
+    },
+    .package = "pecotmr")
+  g <- pecotmr:::.enumCrossTraitIndividual(NULL, scope)
+  expect_length(g, 1L)
+  expect_equal(as.character(g[[1L]]@conditions$context), c("c1", "c1"))
+  expect_equal(as.character(g[[1L]]@conditions$trait), c("G1", "G2"))
+  expect_equal(g[[1L]]@pos, c(100, 200))                  # rowRanges midpoints
+})
+
+test_that(".enumCrossTraitIndividual: study not in scope -> empty", {
+  local_mocked_bindings(getStudy = function(data) "S", .package = "pecotmr")
+  expect_length(pecotmr:::.enumCrossTraitIndividual(
+    NULL, list(studies = "X", contexts = list(), traits = list())), 0L)
+})
+
+test_that(".enumCrossTraitSumstats: groups per (study, context) with >= 2 traits", {
+  df <- .je_ssDf(studies = "S", contexts = "c1", traits = c("t1", "t2"))
+  scope <- list(studies = "S", contexts = list(S = "c1"),
+                traits = list(S = c("t1", "t2")))
+  local_mocked_bindings(
+    getLdSketch = function(x) "SKETCH",
+    .buildJointSumstatZMatrix = .je_mockJointZ, .fmLdFromSketch = .je_mockLd,
+    .package = "pecotmr")
+  g <- pecotmr:::.enumCrossTraitSumstats(df, scope)
+  expect_length(g, 1L)
+  expect_equal(as.character(g[[1L]]@conditions$trait), c("t1", "t2"))
+  # < 2 traits present -> skip
+  df1 <- .je_ssDf(studies = "S", contexts = "c1", traits = "t1")
+  expect_length(pecotmr:::.enumCrossTraitSumstats(df1, scope), 0L)
+})
+
+test_that(".enumCrossStudySumstats: group per (context, trait) in >= 2 studies", {
+  df <- .je_ssDf(studies = c("S1", "S2"), contexts = "c1", traits = "t1")
+  scope <- list(studies = c("S1", "S2"),
+                contexts = list(S1 = "c1", S2 = "c1"),
+                traits = list(S1 = "t1", S2 = "t1"))
+  local_mocked_bindings(
+    getLdSketch = function(x) "SKETCH",
+    .buildJointSumstatZMatrix = .je_mockJointZ, .fmLdFromSketch = .je_mockLd,
+    .package = "pecotmr")
+  g <- pecotmr:::.enumCrossStudySumstats(df, scope)
+  expect_length(g, 1L)
+  expect_equal(as.character(g[[1L]]@conditions$study), c("S1", "S2"))
+  # only one study in scope for the tuple -> filtered to < 2 -> skip
+  scope1 <- list(studies = c("S1", "S2"),
+                 contexts = list(S1 = "c1", S2 = "other"),
+                 traits = list(S1 = "t1", S2 = "t1"))
+  expect_length(pecotmr:::.enumCrossStudySumstats(df, scope1), 0L)
+})
+
+test_that(".enumComposedIndividual: one group joining every (context, trait) tuple", {
+  scope <- list(studies = "S", contexts = list(S = c("c1", "c2")),
+                traits = list(S = c("gA", "gB")))
+  local_mocked_bindings(
+    getStudy = function(data) "S",
+    .buildComposedIndividualXY = function(data, scope, study, cisWindow,
+                                          verbose, label, region = NULL) {
+      Y <- matrix(0, 4, 3, dimnames = list(paste0("s", 1:4),
+                                           c("c1:gA", "c1:gB", "c2:gA")))
+      X <- matrix(0, 4, 2, dimnames = list(paste0("s", 1:4), c("v1", "v2")))
+      list(X = X, Y = Y, tuples = list())
+    },
+    .package = "pecotmr")
+  g <- pecotmr:::.enumComposedIndividual(NULL, scope)
+  expect_length(g, 1L)
+  expect_equal(as.character(g[[1L]]@conditions$context), c("c1", "c1", "c2"))
+  expect_equal(as.character(g[[1L]]@conditions$trait), c("gA", "gB", "gA"))
+})
+
+test_that(".enumComposedIndividual: study not in scope / NULL xy -> empty", {
+  local_mocked_bindings(getStudy = function(data) "S",
+    .buildComposedIndividualXY = function(...) NULL, .package = "pecotmr")
+  expect_length(pecotmr:::.enumComposedIndividual(
+    NULL, list(studies = "X")), 0L)                       # study not in scope
+  expect_length(pecotmr:::.enumComposedIndividual(
+    NULL, list(studies = "S", contexts = list(S = "c1"),
+               traits = list(S = "gA"))), 0L)             # xy NULL
+})
+
+test_that(".enumUnivariateIndividual: one 1-condition group per (context, trait)", {
+  scope <- list(studies = "S", contexts = list(S = c("c1", "c2")),
+                traits = list(S = c("G1", "G2")))
+  samp <- paste0("s", 1:5)
+  local_mocked_bindings(
+    getStudy = function(data) "S",
+    getPhenotypes = function(data, contexts) .je_mkSe(c("G1", "G2")),
+    .fmResidPheno = function(data, contexts, traitId, naAction = "drop")
+      matrix(0, 5, 1, dimnames = list(samp, traitId)),
+    .fmResidGeno = function(data, contexts, traitId = NULL, cisWindow = NULL,
+                            region = NULL)
+      matrix(0, 5, 2, dimnames = list(samp, c("v1", "v2"))),
+    .package = "pecotmr")
+  g <- pecotmr:::.enumUnivariateIndividual(NULL, scope)
+  expect_length(g, 4L)                                    # 2 ctx x 2 traits
+  expect_true(all(vapply(g, function(x) nrow(x@conditions), integer(1)) == 1L))
+})
+
+test_that(".enumUnivariateIndividual: too few shared samples skips the tuple", {
+  scope <- list(studies = "S", contexts = list(S = "c1"),
+                traits = list(S = "G1"))
+  local_mocked_bindings(
+    getStudy = function(data) "S",
+    getPhenotypes = function(data, contexts) .je_mkSe("G1"),
+    .fmResidPheno = function(data, contexts, traitId, naAction = "drop")
+      matrix(0, 1, 1, dimnames = list("s1", traitId)),     # one sample
+    .fmResidGeno = function(data, contexts, traitId = NULL, cisWindow = NULL,
+                            region = NULL)
+      matrix(0, 1, 2, dimnames = list("s1", c("v1", "v2"))),
+    .package = "pecotmr")
+  expect_length(pecotmr:::.enumUnivariateIndividual(NULL, scope), 0L)
+})
+
+test_that(".enumUnivariateIndividual: study not in scope -> empty", {
+  local_mocked_bindings(getStudy = function(data) "S", .package = "pecotmr")
+  expect_length(pecotmr:::.enumUnivariateIndividual(
+    NULL, list(studies = "OTHER")), 0L)
+})
+
+test_that(".enumComposedSumstats: one group per fixed-axis row block", {
+  df <- .je_ssDf(studies = "S", contexts = c("c1", "c2"), traits = "t1")
+  scope <- list(studies = "S", contexts = list(S = c("c1", "c2")),
+                traits = list(S = "t1"))
+  local_mocked_bindings(
+    getLdSketch = function(x) "SKETCH",
+    .enumerateComposedSumstatGroups = function(spec, data, scope)
+      list(groups = list(c(1L, 2L)),
+           studyCol = c("S", "S"), contextCol = c("c1", "c2"),
+           traitCol = c("t1", "t1")),
+    .buildJointSumstatZMatrix = .je_mockJointZ, .fmLdFromSketch = .je_mockLd,
+    .package = "pecotmr")
+  g <- pecotmr:::.enumComposedSumstats(df, scope, args = list(axes = c("context", "trait")))
+  expect_length(g, 1L)
+  expect_equal(as.character(g[[1L]]@conditions$context), c("c1", "c2"))
+})
+
+test_that(".enumComposedSumstats: NULL group index and singleton blocks skip", {
+  local_mocked_bindings(getLdSketch = function(x) "SKETCH",
+    .enumerateComposedSumstatGroups = function(spec, data, scope) NULL,
+    .package = "pecotmr")
+  expect_length(pecotmr:::.enumComposedSumstats(
+    .je_ssDf(), list(studies = "S")), 0L)                 # gi NULL (646)
+  local_mocked_bindings(getLdSketch = function(x) "SKETCH",
+    .enumerateComposedSumstatGroups = function(spec, data, scope)
+      list(groups = list(1L), studyCol = "S", contextCol = "c1",
+           traitCol = "t1"),
+    .buildJointSumstatZMatrix = .je_mockJointZ, .fmLdFromSketch = .je_mockLd,
+    .package = "pecotmr")
+  expect_length(pecotmr:::.enumComposedSumstats(
+    .je_ssDf(), list(studies = "S"),
+    args = list(axes = c("context", "trait"))), 0L)       # < 2 gIdx (649)
+})
+
+# =============================================================================
+# fitJointGroup branches not covered by the happy-path tests above
+# =============================================================================
+
+test_that("fitJointGroup(Individual, Fm): fsusie honest per-fold CV is attached", {
+  set.seed(20); n <- 8L
+  X <- matrix(rnorm(n * 2), n, 2, dimnames = list(paste0("s", 1:n), c("v1", "v2")))
+  Y <- matrix(rnorm(n * 2), n, 2, dimnames = list(paste0("s", 1:n), c("G1", "G2")))
+  grp <- new("IndividualJointGroup",
+    conditions = data.frame(study = "S", context = "brain",
+                            trait = c("G1", "G2"), stringsAsFactors = FALSE),
+    X = X, Y = Y, pos = c(100, 200))
+  pipe <- new("FmJointPipeline", config = list(coverage = 0.95, cvFolds = 3))
+  cvCalled <- FALSE
+  local_mocked_bindings(
+    fitFsusie         = function(...) list(),
+    fsusieWeights     = function(fsusieFit, variantIds) NULL,
+    .fmPostprocessOne = .je_mockPostprocess,
+    .fmCrossValidate  = function(X, Y, token, methodArgs, fold, ...) {
+      cvCalled <<- TRUE; list(samplePartition = NULL) },
+    .fmSliceCv        = function(cv, token) list(prediction = NULL),
+    .fmAttachCv       = function(e, cv) e,
+    .package = "pecotmr")
+  entries <- pecotmr:::fitJointGroup(grp, pipe, "fsusie", list())
+  expect_true(cvCalled)                                   # CV path exercised
+  expect_length(entries, 2L)
+})
+
+test_that("fitJointGroup(Individual, Fm): SER pre-screen skips when < 2 survivors", {
+  g <- .je_mkGroup("G1")
+  pipe <- new("FmJointPipeline", config = list(coverage = 0.95, verbose = 1))
+  local_mocked_bindings(
+    .fmScreenActive    = function(cut) TRUE,
+    .fmSerScreenColumns = function(X, Y, cut) c(TRUE, FALSE),  # 1 survivor
+    .package = "pecotmr")
+  entries <- suppressMessages(
+    pecotmr:::fitJointGroup(g, pipe, "mvsusie", list(pipCutoffToSkip = 0.8)))
+  expect_length(entries, 2L)                              # one per ORIGINAL cond
+  expect_true(all(vapply(entries, is.null, logical(1))))  # all-NULL (skipped)
+})
+
+test_that("fitJointGroup(Individual, Fm): SER pre-screen keeps a subset of conditions", {
+  set.seed(21); n <- 10L
+  X <- matrix(rnorm(n * 2), n, 2, dimnames = list(paste0("s", 1:n), c("v1", "v2")))
+  Y <- matrix(rnorm(n * 3), n, 3,
+              dimnames = list(paste0("s", 1:n), c("c1", "c2", "c3")))
+  g <- new("IndividualJointGroup",
+    conditions = data.frame(study = "S", context = c("c1", "c2", "c3"),
+                            trait = "G1", stringsAsFactors = FALSE), X = X, Y = Y)
+  pipe <- new("FmJointPipeline", config = list(coverage = 0.95, verbose = 1))
+  local_mocked_bindings(create_mixture_prior = function(...) "PRIOR",
+                        .package = "mvsusieR")
+  local_mocked_bindings(
+    .fmScreenActive     = function(cut) TRUE,
+    .fmSerScreenColumns = function(X, Y, cut) c(TRUE, FALSE, TRUE),  # drop c2
+    fitMvsusie          = function(...) list(),
+    .fmPostprocessOne   = .je_mockPostprocess,
+    .package = "pecotmr")
+  entries <- suppressMessages(
+    pecotmr:::fitJointGroup(g, pipe, "mvsusie", list(pipCutoffToSkip = 0.8)))
+  expect_length(entries, 3L)
+  expect_null(entries[[2L]])                              # screened-out condition
+  expect_s4_class(entries[[1L]], "FineMappingEntry")
+  expect_s4_class(entries[[3L]], "FineMappingEntry")
+})
+
+test_that("fitJointGroup(SumStats, Fm): fsusie and unknown tokens error", {
+  grp <- .je_mkSsGroup("G1")
+  pipe <- new("FmJointPipeline", config = list(coverage = 0.95))
+  expect_error(pecotmr:::fitJointGroup(grp, pipe, "fsusie", list()),
+               "no RSS variant")
+  expect_error(pecotmr:::fitJointGroup(grp, pipe, "bogus", list()),
+               "unsupported")
+})
+
+test_that("fitJointGroup(SumStats, Fm): a reweighted-prior residual variance is threaded", {
+  grp <- .je_mkSsGroup("G1")
+  pipe <- new("FmJointPipeline", config = list(coverage = 0.95))
+  captured <- NULL
+  local_mocked_bindings(
+    .buildMvsusieReweightedPrior = function(fitParts, conditions, ddCut)
+      list(priorVariance = "PV", residualVariance = diag(2)),
+    fitMvsusieRss = function(Z, R, N, prior_variance, coverage,
+                             residual_variance = NULL, ...) {
+      captured <<- residual_variance; list() },
+    .fmPostprocessOne = .je_mockPostprocess,
+    .package = "pecotmr")
+  pecotmr:::fitJointGroup(grp, pipe, "mvsusie", list())
+  expect_false(is.null(captured))                         # residual_variance set
+})
+
+test_that("fitJointGroup(twas): spike-and-slab pi feeds bayes_b probIn", {
+  set.seed(22); n <- 30L
+  X <- matrix(rnorm(n * 3), n, 3, dimnames = list(paste0("s", 1:n), paste0("v", 1:3)))
+  Y <- matrix(rnorm(n), n, 1, dimnames = list(paste0("s", 1:n), "c1"))
+  g <- new("IndividualJointGroup",
+           conditions = data.frame(study = "S", context = "c1", trait = "g",
+                                   stringsAsFactors = FALSE), X = X, Y = Y)
+  pipe <- new("TwasJointPipeline",
+              config = list(cvFolds = 0L, ensemble = FALSE, estimatePi = TRUE))
+  capturedProbIn <- NULL
+  local_mocked_bindings(
+    mrashWeights = function(X, y, ...) {
+      out <- matrix(0.05, ncol(X), 1L, dimnames = list(colnames(X), NULL))
+      attr(out, "fit") <- list(pi = c(0.7, 0.2, 0.1)); out
+    },
+    bayesBWeights = function(X, y, probIn, ...) {
+      capturedProbIn <<- probIn
+      matrix(0, ncol(X), 1L, dimnames = list(colnames(X), NULL))
+    },
+    .package = "pecotmr")
+  pecotmr:::fitJointGroup(g, pipe, "bayes_b",
+                          list(methodList = list(bayes_b_weights = list())))
+  expect_equal(as.numeric(capturedProbIn), 1 - 0.7, tolerance = 1e-8)
+})
+
+test_that("fitJointGroup(SumStats, twas): a vector weight without rownames falls back to Z rows", {
+  grp <- .je_mkSsGroup("G1", p = 3L, k = 2L)
+  pipe <- new("TwasJointPipeline", config = list())
+  local_mocked_bindings(
+    mrmashRssWeights = function(stat, LD, retainFit, fitDetail) {
+      # Return a bare numeric vector (one column collapsed) with no names.
+      w <- as.numeric(rep(0.2, nrow(LD) * ncol(stat$z)))
+      attr(w, "fit") <- .je_fakeMrmashFit(); w
+    },
+    .package = "pecotmr")
+  res <- pecotmr:::.runJointCell(
+    .je_ssCell(list(grp)), pipe, data = NULL, scope = NULL, tokens = "mrmash")
+  expect_s4_class(res, "TwasWeights")
+  expect_equal(getVariantIds(res$entry[[1L]]), rownames(grp@Z))  # fallback vids
+})
+
+# =============================================================================
+# .runJointCell + ensemble-layer branches
+# =============================================================================
+
+test_that(".runJointCell: empty enumeration -> NULL", {
+  emptyCell <- new("JointDispatchCell", pattern = "context",
+                   dataForm = "individual",
+                   enumerate = function(data, scope, args) list(), minGroup = 2L)
+  pipe <- new("FmJointPipeline", config = list(coverage = 0.95))
+  expect_null(pecotmr:::.runJointCell(emptyCell, pipe, NULL, NULL, "mvsusie"))
+})
+
+test_that(".runJointCell: a fitter returning all-NULL entries yields no rows -> NULL", {
+  cell <- .je_synthCell(list(.je_mkGroup("G1")))
+  pipe <- new("FmJointPipeline", config = list(coverage = 0.95))
+  local_mocked_bindings(create_mixture_prior = function(...) "PRIOR",
+                        .package = "mvsusieR")
+  # fitJointGroup returns a list of NULLs (every condition screened out).
+  local_mocked_bindings(
+    fitJointGroup = function(group, pipeline, token, args)
+      vector("list", nrow(group@conditions)),
+    .package = "pecotmr")
+  expect_null(pecotmr:::.runJointCell(cell, pipe, NULL, NULL, "mvsusie"))
+})
+
+test_that(".runJointCell: twas ensemble layer adds 'ensemble' rows on top of >= 2 methods", {
+  set.seed(30)
+  cell <- .je_synthCell(list(.je_ensGroup(n = 40L, nCond = 2L)))
+  pipe <- new("TwasJointPipeline", config = list(
+    cvFolds = 2L, ensemble = TRUE, ensembleR2Threshold = 0.01,
+    ensembleSolver = "quadprog", ensembleAlpha = 1, standardized = FALSE))
+  # Two methods, each returning per-condition entries with CV predictions.
+  local_mocked_bindings(
+    fitJointGroup = function(group, pipeline, token, args)
+      .je_ensEntries(group, if (token == "lasso") 0.85 else 0.7),
+    .package = "pecotmr")
+  res <- pecotmr:::.runJointCell(cell, pipe, NULL, NULL,
+                                 tokens = c("lasso", "enet"))
+  expect_s4_class(res, "TwasWeights")
+  expect_true("ensemble" %in% as.character(res$method))
+})
+
+test_that(".twasEnsembleLayer: entries lacking CV predictions are skipped", {
+  set.seed(31); g <- .je_ensGroup(nCond = 1L)
+  good <- .je_ensEntries(g, 0.85)
+  # A method whose entry carries no CV predictions -> contributes nothing.
+  noCv <- list(TwasWeightsEntry(variantIds = colnames(g@X),
+                                weights = rnorm(ncol(g@X)), cvResult = NULL))
+  ens <- pecotmr:::.twasEnsembleLayer(
+    g, list(a = good, b = noCv, c = NULL),
+    list(ensembleR2Threshold = 0.01, ensembleSolver = "quadprog",
+         ensembleAlpha = 1, standardized = FALSE))
+  expect_true(all(vapply(ens, is.null, logical(1))))      # < 2 usable -> NULL
+})
+
+test_that(".twasEnsembleLayer: ensembleWeights returning NULL -> NULL entry", {
+  set.seed(32); g <- .je_ensGroup(nCond = 1L)
+  pte <- list(lasso = .je_ensEntries(g, 0.85), enet = .je_ensEntries(g, 0.70))
+  local_mocked_bindings(ensembleWeights = function(...) NULL, .package = "pecotmr")
+  ens <- pecotmr:::.twasEnsembleLayer(g, pte, list(
+    ensembleR2Threshold = 0.01, ensembleSolver = "quadprog",
+    ensembleAlpha = 1, standardized = FALSE))
+  expect_true(all(vapply(ens, is.null, logical(1))))
+})
+
+test_that(".twasEnsembleLayer: unnamed ensemble weights fall back to a method's variant ids", {
+  set.seed(33); g <- .je_ensGroup(nCond = 1L)
+  pte <- list(lasso = .je_ensEntries(g, 0.85), enet = .je_ensEntries(g, 0.70))
+  local_mocked_bindings(
+    ensembleWeights = function(cvResults, Y, twasWeightList, contextIndex,
+                               solver, alpha)
+      list(ensembleTwasWeights = as.numeric(rep(0.1, ncol(g@X))),  # no names
+           methodCoef = c(0.5, 0.5), methodPerformance = c(0.8, 0.7)),
+    .package = "pecotmr")
+  ens <- pecotmr:::.twasEnsembleLayer(g, pte, list(
+    ensembleR2Threshold = 0.01, ensembleSolver = "quadprog",
+    ensembleAlpha = 1, standardized = FALSE))
+  expect_s4_class(ens[[1L]], "TwasWeightsEntry")
+  expect_equal(getVariantIds(ens[[1L]]), colnames(g@X))   # fallback ids
+})
+
+# =============================================================================
+# Small slicers, .jointTwasCvResult, .twasFmHandoffCv, construct, .runJointSpecs
+# =============================================================================
+
+test_that(".fmSliceCvCondition / .sliceTwasCvResultToCondition: NULL passes through", {
+  expect_null(pecotmr:::.fmSliceCvCondition(NULL, 1L))
+  expect_null(pecotmr:::.sliceTwasCvResultToCondition(NULL, 1L))
+})
+
+test_that(".jointTwasCvResult: NULL cv and empty/absent payloads degrade gracefully", {
+  expect_null(pecotmr:::.jointTwasCvResult(NULL, "mrmash"))
+  # Empty prediction/performance lists and all-NULL foldFits -> NULL components.
+  cv <- list(samplePartition = data.frame(Sample = "s1", Fold = 1L),
+             prediction = list(), performance = list(),
+             foldFits = list(fold_1 = list(other = 1)))
+  out <- pecotmr:::.jointTwasCvResult(cv, "mrmash")
+  expect_null(out$predictions)                            # pickByBase empty (252)
+  expect_null(out$foldFits)                               # all-NULL ffKey (260)
+  # A method token absent from a non-empty prediction list -> NULL (255).
+  cv2 <- list(samplePartition = NULL,
+              prediction = list(lasso_predicted = matrix(0, 1, 1)),
+              performance = list())
+  expect_null(pecotmr:::.jointTwasCvResult(cv2, "mrmash")$predictions)
+})
+
+test_that(".twasFmHandoffCv: a token absent from the FM CV predictions -> NULL", {
+  fmCv <- list(samplePartition = data.frame(Sample = "s1", Fold = 1L),
+               prediction = list(susie_predicted = matrix(0, 1, 1)),
+               performance = list())
+  expect_null(pecotmr:::.twasFmHandoffCv(fmCv, "mvsusie"))
+  expect_null(pecotmr:::.twasFmHandoffCv(NULL, "mvsusie"))
+})
+
+test_that("construct: empty rows -> NULL for both pipelines", {
+  empty <- pecotmr:::.jointRows()
+  expect_null(pecotmr:::construct(new("FmJointPipeline", config = list()), empty))
+  expect_null(pecotmr:::construct(new("TwasJointPipeline", config = list()), empty))
+})
+
+test_that(".runJointSpecs: no methods or no specs -> NULL", {
+  pipe <- new("FmJointPipeline", config = list(ldSketch = NULL))
+  expect_null(pecotmr:::.runJointSpecs(list(), NULL, "individual", pipe,
+                                       jointMethods = "mvsusie",
+                                       contexts = NULL, traitIds = NULL))
+  expect_null(pecotmr:::.runJointSpecs(list(list(axes = "context")), NULL,
+                                       "individual", pipe,
+                                       jointMethods = character(0),
+                                       contexts = NULL, traitIds = NULL))
+})
+
+# =============================================================================
+# Remaining branches: .twasGroupArgs CV-partition handoff, a token whose fit
+# is NULL, and .runJointSpecs' region-mode trait restriction.
+# =============================================================================
+
+test_that(".twasGroupArgs: takes the CV partition from the fine-mapping CV when none is set", {
+  g <- .je_mkGroup("G1")                                  # IndividualJointGroup
+  pipe <- new("TwasJointPipeline", config = list(cvFolds = 2L))
+  sp <- data.frame(Sample = rownames(g@X),
+                   Fold = rep(1:2, length.out = nrow(g@X)),
+                   stringsAsFactors = FALSE)
+  local_mocked_bindings(
+    .twasFineMappingFits = function(fineMappingResult, study, context, trait)
+      list(),
+    .twasCvResultFor = function(fmRes, s, c, t) list(samplePartition = sp),
+    .package = "pecotmr")
+  out <- pecotmr:::.twasGroupArgs(g, pipe, list(fineMappingResult = "FMR"))
+  expect_identical(out$samplePartition, sp)               # line 692
+})
+
+test_that(".runJointCell: a token whose fitter returns NULL is skipped", {
+  cell <- .je_synthCell(list(.je_mkGroup("G1")))
+  pipe <- new("FmJointPipeline", config = list(coverage = 0.95))
+  local_mocked_bindings(fitJointGroup = function(...) NULL, .package = "pecotmr")
+  expect_null(pecotmr:::.runJointCell(cell, pipe, NULL, NULL, "mvsusie"))  # 755
+})
+
+test_that(".runJointSpecs: region mode without traitId restricts scoped traits to the locus", {
+  pipe <- new("FmJointPipeline", config = list(ldSketch = NULL))
+  region <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 100))
+  captured <- NULL
+  local_mocked_bindings(
+    # S2 has no scoped contexts -> the region-restriction loop skips it (873).
+    .fmResolveSpecScope = function(spec, data, contexts, traitIds)
+      list(studies = c("S", "S2"),
+           contexts = list(S = c("c1", "c2"), S2 = character(0)),
+           traits = list(S = c("g1", "g2"), S2 = "g9")),
+    getPhenotypes = function(data, contexts) .je_mkSe(c("g1", "g2")),
+    .fmTraitsInRegion = function(se, traits, region) { captured <<- traits; "g1" },
+    .lookupJointCell = function(pattern, dataForm) .je_synthCell(list()),
+    .package = "pecotmr")
+  res <- pecotmr:::.runJointSpecs(
+    list(list(axes = "context", scope = NULL)), data = NULL,
+    dataForm = "individual", pipeline = pipe, jointMethods = "mvsusie",
+    contexts = NULL, traitIds = NULL, args = list(region = region))
+  expect_null(res)                                        # empty cell -> NULL
+  expect_equal(captured, c("g1", "g2"))                   # 871-875 ran
+})

@@ -11,8 +11,10 @@ NULL
 #' @export
 setMethod("writeSumstatsVcf", signature("GwasSumStats"),
   function(x, outputPath, sampleName = NULL, study = NULL, ...) {
+    # nocov start
     if (!requireNamespace("VariantAnnotation", quietly = TRUE))
       stop("Package 'VariantAnnotation' is required for writeSumstatsVcf")
+    # nocov end
 
     # Select which study to write (the new GwasSumStats can hold many).
     if (is.null(study)) {
@@ -63,8 +65,10 @@ setMethod("writeSumstatsVcf", signature("FineMappingResultBase"),
            study = NULL, context = NULL, trait = NULL, method = NULL,
            splitByContext = FALSE, splitByTrait = FALSE,
            ...) {
+  # nocov start
   if (!requireNamespace("VariantAnnotation", quietly = TRUE))
     stop("Package 'VariantAnnotation' is required for writeSumstatsVcf")
+  # nocov end
 
   # Resolve the set of rows to write. With both selectors NULL and no
   # split flags, the collection must have exactly one row. Splitting
@@ -171,8 +175,8 @@ setMethod("writeSumstatsVcf", signature("FineMappingResultBase"),
   }
   if (any(!is.na(marginal$N)))
     addGeno("SS", as.integer(marginal$N), "Integer", "Sample size")
-  if (any(!is.na(marginal$MAF)))
-    addGeno("AF", marginal$MAF, "Float", "Minor allele frequency")
+  if (any(!is.na(marginal$af)))
+    addGeno("AF", marginal$af, "Float", "Allele frequency (effect allele)")
 
   genoHeader <- DataFrame(
     Number = hdrNum, Type = hdrType, Description = hdrDesc,

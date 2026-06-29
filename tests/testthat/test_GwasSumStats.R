@@ -175,3 +175,73 @@ test_that("show.GwasSumStats prints nrow and genome build", {
 # === Tests migrated from test_h2ClassesSumstats.R (showMethods) ===
 
 
+# =============================================================================
+# GwasSumStats() constructor validation + accessor error branches
+# (.sh_makeQtlSumstatsGr / .sh_makeGenotypeHandle come from
+# helper-showMethods.R)
+# =============================================================================
+
+test_that("GwasSumStats() errors when required args are missing", {
+  expect_error(GwasSumStats(study = "g1"), "are all required")
+})
+
+test_that("GwasSumStats() errors when genome is not a single string", {
+  expect_error(
+    GwasSumStats(study = "g1", entry = list(.sh_makeQtlSumstatsGr()),
+                 genome = c("hg19", "hg38"),
+                 ldSketch = .sh_makeGenotypeHandle()),
+    "single character string")
+})
+
+test_that("GwasSumStats() errors when entry is not a list", {
+  expect_error(
+    GwasSumStats(study = "g1", entry = "not_a_list",
+                 genome = "hg19", ldSketch = .sh_makeGenotypeHandle()),
+    "must be a list")
+})
+
+test_that("GwasSumStats() errors when length(entry) != length(study)", {
+  expect_error(
+    GwasSumStats(study = c("g1", "g2"),
+                 entry = list(.sh_makeQtlSumstatsGr()),
+                 genome = "hg19", ldSketch = .sh_makeGenotypeHandle()),
+    "must equal length")
+})
+
+test_that("GwasSumStats() errors when a per-study column has a bad length", {
+  expect_error(
+    GwasSumStats(study = c("g1", "g2"),
+                 entry = list(.sh_makeQtlSumstatsGr(),
+                              .sh_makeQtlSumstatsGr()),
+                 genome = "hg19", ldSketch = .sh_makeGenotypeHandle(),
+                 nCase = c(1, 2, 3)),
+    "must have length 1 or length")
+})
+
+test_that("GwasSumStats() attaches extra per-study columns via ...", {
+  obj <- GwasSumStats(
+    study = c("g1", "g2"),
+    entry = list(.sh_makeQtlSumstatsGr(), .sh_makeQtlSumstatsGr()),
+    genome = "hg19", ldSketch = .sh_makeGenotypeHandle(),
+    cohort = c("UKB", "FinnGen"))
+  expect_equal(as.character(obj$cohort), c("UKB", "FinnGen"))
+})
+
+test_that("getSumStats() errors on an empty GwasSumStats", {
+  empty <- GwasSumStats(
+    study = character(0), entry = list(),
+    genome = "hg19", ldSketch = .sh_makeGenotypeHandle(),
+    varY = numeric(0))
+  expect_equal(nrow(empty), 0L)
+  expect_error(getSumStats(empty), "has no rows")
+})
+
+test_that("getSumStats() on a multi-study GwasSumStats needs a study selector", {
+  two <- GwasSumStats(
+    study = c("g1", "g2"),
+    entry = list(.sh_makeQtlSumstatsGr(), .sh_makeQtlSumstatsGr()),
+    genome = "hg19", ldSketch = .sh_makeGenotypeHandle())
+  expect_error(getSumStats(two), "studies. Pass")
+  expect_error(getSumStats(two, study = "ghost"), "Unknown study")
+})
+

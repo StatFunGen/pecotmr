@@ -60,12 +60,16 @@ mashPipeline <- function(sumStatsList, alpha,
                           setSeed = 999) {
   inputScale <- match.arg(inputScale)
   if (!requireNamespace("mashr", quietly = TRUE)) {
+    # nocov start
     stop("To use this function, please install mashr: ",
          "https://cran.r-project.org/web/packages/mashr/index.html")
+    # nocov end
   }
   if (!requireNamespace("flashier", quietly = TRUE)) {
+    # nocov start
     stop("To use this function, please install flashier: ",
          "https://github.com/willwerscheid/flashier")
+    # nocov end
   }
 
   # Accept either a base list or a S4Vectors::SimpleList.

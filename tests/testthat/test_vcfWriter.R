@@ -292,3 +292,166 @@ test_that("writeSumstatsVcf(FineMappingResult): multi-row without split flags re
   expect_error(writeSumstatsVcf(fmr, out),
                "2 matching rows")
 })
+
+# =============================================================================
+# GwasSumStats: multi-study selection, MAF/AF field, .gz rename
+# =============================================================================
+
+.make_two_study_gwas_sumstats <- function(n = 3, withMaf = FALSE) {
+  mkGr <- function() {
+    gr <- GenomicRanges::GRanges(
+      "chr1",
+      IRanges::IRanges(start = seq(100, by = 100, length.out = n), width = 1))
+    mc <- S4Vectors::DataFrame(
+      SNP = paste0("rs", seq_len(n)), A1 = rep("A", n), A2 = rep("T", n),
+      Z = seq(1.5, by = -0.5, length.out = n), N = rep(1000L, n))
+    if (withMaf) mc$MAF <- rep(0.2, n)
+    S4Vectors::mcols(gr) <- mc
+    gr
+  }
+  GwasSumStats(
+    study = c("studyA", "studyB"), entry = list(mkGr(), mkGr()),
+    genome = "hg38", ldSketch = make_test_genotype_handle())
+}
+
+test_that("writeSumstatsVcf(GwasSumStats): multi-study without `study` selector errors", {
+  skip_if_not_installed("VariantAnnotation")
+  ss2 <- .make_two_study_gwas_sumstats()
+  out <- tempfile(fileext = ".vcf")
+  expect_error(writeSumstatsVcf(ss2, out), "2 studies")
+})
+
+test_that("writeSumstatsVcf(GwasSumStats): `study` selector writes the chosen study", {
+  skip_if_not_installed("VariantAnnotation")
+  skip_if_not_installed("Biostrings")
+  ss2 <- .make_two_study_gwas_sumstats()
+  out <- tempfile(fileext = ".vcf")
+  on.exit(unlink(out), add = TRUE)
+  res <- writeSumstatsVcf(ss2, out, study = "studyB")
+  expect_equal(res, out)
+  expect_true(file.exists(out))
+})
+
+test_that("writeSumstatsVcf(GwasSumStats): emits the AF genotype field when MAF present", {
+  skip_if_not_installed("VariantAnnotation")
+  skip_if_not_installed("Biostrings")
+  ss <- GwasSumStats(
+    study = "t",
+    entry = list(local({
+      gr <- GenomicRanges::GRanges(
+        "chr1", IRanges::IRanges(start = c(100, 200, 300, 400), width = 1))
+      S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = paste0("rs", 1:4), A1 = rep("A", 4), A2 = rep("T", 4),
+        Z = c(1.5, 1.0, 0.5, 0.0), N = rep(1000L, 4), MAF = rep(0.2, 4))
+      gr
+    })),
+    genome = "hg38", ldSketch = make_test_genotype_handle())
+  out <- tempfile(fileext = ".vcf")
+  on.exit(unlink(out), add = TRUE)
+  writeSumstatsVcf(ss, out)
+  expect_true(file.exists(out))
+  # The AF FORMAT field is declared in the header when MAF is present.
+  expect_true(any(grepl("ID=AF", readLines(out))))
+})
+
+test_that("writeSumstatsVcf(GwasSumStats): .vcf.gz output is renamed from writeVcf's .bgz", {
+  skip_if_not_installed("VariantAnnotation")
+  skip_if_not_installed("Biostrings")
+  ss <- make_test_gwas_sumstats(5)
+  out <- tempfile(fileext = ".vcf.gz")
+  on.exit(unlink(c(out, paste0(out, ".tbi")), force = TRUE), add = TRUE)
+  res <- writeSumstatsVcf(ss, out)
+  expect_equal(res, out)
+  # writeVcf always emits .bgz; the writer renames it to the requested .gz.
+  expect_true(file.exists(out))
+  expect_false(file.exists(sub("\\.gz$", ".bgz", out)))
+})
+
+# =============================================================================
+# FineMappingResult: explicit selectors, no-match error, composite/empty tags
+# =============================================================================
+
+test_that("writeSumstatsVcf(FineMappingResult): explicit selectors pick a single row", {
+  skip_if_not_installed("VariantAnnotation")
+  skip_if_not_installed("Biostrings")
+  fmr <- .make_multi_tuple_qtl_fmr()
+  out <- tempfile(fileext = ".vcf")
+  on.exit(unlink(out), add = TRUE)
+  res <- writeSumstatsVcf(fmr, out, study = "study1", context = "brain",
+                          trait = "ENSG_A", method = "susie")
+  expect_equal(res, out)
+  expect_true(file.exists(out))
+})
+
+test_that("writeSumstatsVcf(FineMappingResult): no matching rows errors", {
+  skip_if_not_installed("VariantAnnotation")
+  skip_if_not_installed("Biostrings")
+  fmr <- .make_multi_tuple_qtl_fmr()
+  out <- tempfile(fileext = ".vcf")
+  expect_error(writeSumstatsVcf(fmr, out, study = "does_not_exist"),
+               "no rows match")
+})
+
+test_that("writeSumstatsVcf(FineMappingResult): splitByContext decorates composite .vcf.bgz paths", {
+  skip_if_not_installed("VariantAnnotation")
+  skip_if_not_installed("Biostrings")
+  fmr <- .make_multi_tuple_qtl_fmr()
+  baseOut <- tempfile(fileext = ".vcf.bgz")
+  stem <- tools::file_path_sans_ext(tools::file_path_sans_ext(baseOut))
+  on.exit(unlink(list.files(dirname(baseOut), pattern = basename(stem),
+                            full.names = TRUE), force = TRUE), add = TRUE)
+  paths <- writeSumstatsVcf(fmr, baseOut, splitByContext = TRUE)
+  expect_length(paths, 2L)
+  # Composite extension is preserved while the context tag is injected before it.
+  expect_true(all(grepl("\\.vcf\\.bgz$", paths)))
+  expect_true(any(grepl("\\.brain\\.vcf\\.bgz$", paths)))
+  expect_true(any(grepl("\\.blood\\.vcf\\.bgz$", paths)))
+})
+
+test_that("writeSumstatsVcf(FineMappingResult): splitByContext on a context-less result keeps the path", {
+  skip_if_not_installed("VariantAnnotation")
+  skip_if_not_installed("Biostrings")
+  # GwasFineMappingResult has no context/trait axes, so the split tag set is
+  # empty and the original output path is used unchanged.
+  fm <- make_test_finemapping_result(5)
+  out <- tempfile(fileext = ".vcf")
+  on.exit(unlink(out), add = TRUE)
+  paths <- writeSumstatsVcf(fm, out, splitByContext = TRUE)
+  expect_length(paths, 1L)
+  expect_equal(paths[[1L]], out)
+  expect_true(file.exists(out))
+})
+
+test_that("writeSumstatsVcf(FineMappingResult): emits AF from the topLoci `af` column", {
+  skip_if_not_installed("VariantAnnotation")
+  skip_if_not_installed("Biostrings")
+  # The marginal view projects allele frequency to a column named `af`, so a
+  # topLoci carrying `af` must surface as the AF genotype field.
+  n <- 3
+  tl <- data.frame(
+    variant_id     = paste0("chr1:", c(100, 200, 300), ":T:A"),
+    chrom          = rep("1", n),
+    pos            = c(100L, 200L, 300L),
+    A1             = rep("A", n),
+    A2             = rep("T", n),
+    N              = rep(1000, n),
+    af             = c(0.1, 0.2, 0.3),
+    marginal_beta  = c(0.3, -0.2, 0.1),
+    marginal_se    = rep(0.05, n),
+    marginal_z     = c(6.0, -4.0, 2.0),
+    marginal_p     = c(1e-9, 6e-5, 0.045),
+    pip            = c(0.9, 0.7, 0.5),
+    posterior_mean = rep(0.05, n),
+    posterior_sd   = rep(0.02, n),
+    cs_95          = paste0("susie_", c(1L, 0L, 2L)),
+    stringsAsFactors = FALSE)
+  entry <- FineMappingEntry(variantIds = tl$variant_id, susieFit = list(),
+                            topLoci = tl)
+  fm <- GwasFineMappingResult(study = "s", method = "susie",
+                              entry = list(entry))
+  out <- tempfile(fileext = ".vcf")
+  on.exit(unlink(out), add = TRUE)
+  writeSumstatsVcf(fm, out)
+  expect_true(file.exists(out))
+  expect_true(any(grepl("ID=AF", readLines(out))))
+})

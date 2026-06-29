@@ -254,3 +254,88 @@ test_that("show.FineMappingEntry reports variant count and CS count", {
 })
 
 
+# === getMarginalEffects maxPval filter ===
+
+test_that("FineMappingEntry: getMarginalEffects applies the maxPval filter", {
+  tl <- data.frame(
+    variant_id = c("v1", "v2", "v3"),
+    pip        = c(0.9, 0.5, 0.1),
+    marginal_p = c(0.001, 0.5, NA_real_),
+    stringsAsFactors = FALSE)
+  entry <- FineMappingEntry(variantIds = tl$variant_id,
+                            susieFit = list(), topLoci = tl)
+  out <- getMarginalEffects(entry, maxPval = 0.01)
+  # Drops the p = 0.5 row and the NA-p row; keeps only v1.
+  expect_equal(nrow(out), 1L)
+  expect_equal(out$variant_id, "v1")
+})
+
+
+# === getCs empty / cs-less topLoci projections ===
+
+test_that("FineMappingEntry: getCs returns empty posterior view when topLoci is empty", {
+  entry <- FineMappingEntry(
+    variantIds = character(0),
+    susieFit = list(),
+    topLoci = data.frame(variant_id = character(0), pip = numeric(0),
+                         stringsAsFactors = FALSE))
+  res <- getCs(entry)
+  expect_s3_class(res, "data.frame")
+  expect_equal(nrow(res), 0L)
+  expect_true(all(c("variant_id", "pip") %in% names(res)))
+})
+
+
+test_that("FineMappingEntry: getCs returns empty posterior view when the cs column is absent", {
+  tl <- data.frame(variant_id = c("a", "b"), pip = c(0.1, 0.2),
+                   stringsAsFactors = FALSE)
+  entry <- FineMappingEntry(variantIds = c("a", "b"),
+                            susieFit = list(), topLoci = tl)
+  res <- getCs(entry)  # no cs_95 column -> empty view
+  expect_s3_class(res, "data.frame")
+  expect_equal(nrow(res), 0L)
+})
+
+
+# === adjustPips: missing lbf_variable + mu2-driven posterior recompute ===
+
+test_that("FineMappingEntry: adjustPips errors when susieFit lacks lbf_variable", {
+  tl <- data.frame(variant_id = c("v1", "v2"), pip = c(0.6, 0.4),
+                   stringsAsFactors = FALSE)
+  entry <- FineMappingEntry(variantIds = c("v1", "v2"),
+                            susieFit = list(), topLoci = tl)
+  expect_error(adjustPips(entry, c("v1", "v2")),
+               "no `lbf_variable` matrix")
+})
+
+
+test_that("FineMappingEntry: adjustPips subsets mu2 and recomputes posterior_sd", {
+  vids <- paste0("chr1:", 1:5, ":A:G")
+  p <- length(vids); L <- 2L
+  set.seed(101L)
+  lbf <- matrix(rnorm(L * p), nrow = L, ncol = p)
+  colnames(lbf) <- vids
+  alpha <- lbfToAlpha(lbf)
+  pip <- as.numeric(1 - apply(1 - alpha, 2, prod))
+  mu  <- matrix(rnorm(L * p), L, p)
+  mu2 <- mu^2 + 1                      # plausible second moment (>= mean^2)
+  entry <- FineMappingEntry(
+    variantIds = vids,
+    susieFit = list(pip = pip, alpha = alpha, lbf_variable = lbf,
+                    mu = mu, mu2 = mu2,
+                    X_column_scale_factors = rep(1, p)),
+    topLoci = data.frame(variant_id = vids, pip = pip,
+                         stringsAsFactors = FALSE))
+  keep <- vids[2:4]
+  adj <- adjustPips(entry, keep)
+  expect_s4_class(adj, "FineMappingEntry")
+  # mu2 carried through the variant subsetting alongside lbf/mu.
+  expect_equal(ncol(adj@susieFit$mu2), 3L)
+  # posterior_mean / posterior_sd recomputed from the subset alpha/mu/mu2.
+  expect_equal(nrow(adj@topLoci), 3L)
+  expect_true("posterior_sd" %in% names(adj@topLoci))
+  expect_equal(length(adj@topLoci$posterior_sd), 3L)
+  expect_true(all(adj@topLoci$posterior_sd >= 0))
+})
+
+

@@ -57,3 +57,23 @@ test_that("MultiStudyQtlDataset: rejects trait/position conflicts across studies
   )
 })
 
+
+test_that("getSumStats(MultiStudyQtlDataset) rejects selection arguments", {
+  # Compose one individual-level QtlDataset with a QtlSumStats of
+  # summary-statistic-only studies (1 + 1 = 2 studies total).
+  gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100L, width = 1L))
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    SNP = "rs1", A1 = "A", A2 = "G", Z = 1.0, N = 1000L)
+  ss <- QtlSumStats(study = "s3", context = "c1", trait = "t1",
+                    entry = list(gr), genome = "hg19",
+                    ldSketch = .sc_makeGenotypeHandle())
+  qd1 <- QtlDataset(study = "s1", genotypes = .sc_makeGenotypeHandle(),
+                    phenotypes = list(brain = .sc_makeSe()))
+  mt <- MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1), sumStats = ss)
+
+  # Bare call returns the embedded QtlSumStats collection ...
+  expect_s4_class(getSumStats(mt), "QtlSumStats")
+  # ... but any selection argument is rejected.
+  expect_error(getSumStats(mt, study = "s1"), "does not accept selection")
+})
+

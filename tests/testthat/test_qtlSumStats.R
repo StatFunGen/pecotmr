@@ -309,3 +309,16 @@ test_that("show prints entry count and genome build", {
   expect_output(show(obj),
                 "QtlSumStats: 1 entries, genome build hg19")
 })
+
+# ===========================================================================
+# Empty-collection + duplicate-tuple selector error branches
+# ===========================================================================
+
+test_that("getSumStats errors on an empty QtlSumStats collection", {
+  empty <- QtlSumStats(
+    study = character(0), context = character(0), trait = character(0),
+    entry = list(), genome = "hg19",
+    ldSketch = .qtlMakeGenotypeHandle(), varY = numeric(0))
+  expect_equal(nrow(empty), 0L)
+  expect_error(getSumStats(empty), "has no rows")
+})

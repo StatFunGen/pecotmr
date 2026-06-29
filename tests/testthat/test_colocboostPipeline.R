@@ -492,3 +492,125 @@ test_that(".cbResolveCutoff: scalar applies to all; named vector is per-context"
   expect_equal(pecotmr:::.cbResolveCutoff(c(brain = 0.3), "missing"), 0)
   expect_equal(pecotmr:::.cbResolveCutoff(NULL, "brain"), 0)
 })
+
+# ===========================================================================
+# Additional coverage: MultiStudy method, engine-failure path, multi-context
+# bundle building, and sumstat-bundle helper early returns.
+# ===========================================================================
+
+.cbp_makeMultiStudy <- function() MultiStudyQtlDataset(
+  qtlDatasets = list(study1 = .cbp_makeQtlDataset(contexts = "brain",
+                                                  traits = "ENSG_A")),
+  sumStats = .cbp_makeQtlSumStats())
+
+test_that("colocboostPipeline(MultiStudyQtlDataset): combines per-study bundles + embedded sumstats", {
+  mt <- .cbp_makeMultiStudy()
+  capturedArgs <- NULL
+  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
+                        .package = "pecotmr")
+  local_mocked_bindings(
+    colocboost = function(...) { capturedArgs <<- list(...); list(stub = TRUE) },
+    .package = "colocboost")
+  out <- suppressMessages(colocboostPipeline(mt, xqtlColoc = TRUE,
+                                             jointGwas = FALSE, separateGwas = FALSE))
+  expect_type(out, "list")
+  expect_true(!is.null(out$xqtl_coloc))
+  # The individual study's outcome is prefixed "study1:" in the combined bundle.
+  expect_true(any(grepl("study1:", names(capturedArgs$Y))))
+})
+
+test_that(".cbRun: an engine failure is caught -> message + NULL", {
+  qd <- .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
+                        .package = "pecotmr")
+  local_mocked_bindings(colocboost = function(...) stop("engine boom"),
+                        .package = "colocboost")
+  out <- suppressMessages(colocboostPipeline(qd, xqtlColoc = TRUE))
+  expect_null(out$xqtl_coloc)                                # .cbRun caught (123-124)
+})
+
+test_that(".cbIndividualBundle: multi-context bundle names + prefixes outcomes", {
+  qd <- .cbp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
+  capturedArgs <- NULL
+  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
+                        .package = "pecotmr")
+  local_mocked_bindings(
+    colocboost = function(...) { capturedArgs <<- list(...); list(stub = TRUE) },
+    .package = "colocboost")
+  out <- suppressMessages(colocboostPipeline(qd, xqtlColoc = TRUE))
+  expect_true(!is.null(out$xqtl_coloc))
+  # Two contexts -> two context-prefixed outcomes (covers the xMatch + naming).
+  expect_gte(length(capturedArgs$Y), 2L)
+})
+
+test_that("colocboostPipeline(QtlDataset): unknown context errors", {
+  qd <- .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
+                        .package = "pecotmr")
+  expect_error(colocboostPipeline(qd, contexts = "ghost", xqtlColoc = TRUE),
+               "Unknown context")                            # 209
+})
+
+test_that("colocboostPipeline(QtlDataset): pipCutoffToSkip dropping every outcome -> empty", {
+  qd <- .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
+                        .package = "pecotmr")
+  out <- suppressMessages(suppressWarnings(
+    colocboostPipeline(qd, xqtlColoc = TRUE, pipCutoffToSkip = 0.9999)))
+  expect_null(out$xqtl_coloc)                                # 249-253 skip -> empty
+})
+
+test_that(".cbPipSkipOutcomes: an outcome with < 2 observations is skipped", {
+  set.seed(4)
+  X <- matrix(rnorm(60), 30, 2, dimnames = list(paste0("s", 1:30), c("v1", "v2")))
+  Y <- cbind(a = c(1, rep(NA, 29)), b = rnorm(30))          # col a: 1 obs (< 2)
+  res <- pecotmr:::.cbPipSkipOutcomes(X, Y, cutoff = 0.5)
+  expect_true(is.null(res) || is.matrix(res))               # col a -> next (180)
+})
+
+test_that(".cbSumstatPair: NULL / empty df -> NULL", {
+  expect_null(pecotmr:::.cbSumstatPair(NULL, .cbp_makeHandle()))     # 317
+  expect_null(pecotmr:::.cbSumstatPair(data.frame(), .cbp_makeHandle()))
+})
+
+test_that(".cbQtlSumStatsBundle: NULL / context / trait filters and empty result", {
+  ss <- .cbp_makeQtlSumStats()
+  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
+                        .package = "pecotmr")
+  expect_equal(pecotmr:::.cbQtlSumStatsBundle(NULL), list())         # 359
+  expect_length(pecotmr:::.cbQtlSumStatsBundle(ss, contexts = "c1"), 1L)  # 363
+  expect_length(pecotmr:::.cbQtlSumStatsBundle(ss, traitId = "t1"), 1L)   # 366
+  expect_equal(pecotmr:::.cbQtlSumStatsBundle(ss, contexts = "ghost"), list())  # 368
+})
+
+test_that(".cbGwasSumStatsBundle: NULL -> empty list", {
+  expect_equal(pecotmr:::.cbGwasSumStatsBundle(NULL), list())         # 390
+})
+
+test_that(".cbSumstatPair: varY attaches var_y; NA variant ids fall back to chr:pos", {
+  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
+                        .package = "pecotmr")
+  h <- .cbp_makeHandle()                                    # panel SNPs v1..v6
+  df <- data.frame(variant_id = c("v1", "v2", "v3"), z = c(1, -1, 0.5),
+                   N = rep(1000, 3), stringsAsFactors = FALSE)
+  pair <- pecotmr:::.cbSumstatPair(df, h, varY = 0.7)
+  expect_true("var_y" %in% names(pair$sumstat))             # 350
+  expect_equal(unique(pair$sumstat$var_y), 0.7)
+  # NA variant_id -> formatVariantId fallback (322-323); no panel overlap -> NULL (330)
+  dfNA <- data.frame(variant_id = NA_character_, chrom = "chr1", pos = 999999L,
+                     A2 = "G", A1 = "A", z = 1, N = 1000, stringsAsFactors = FALSE)
+  expect_null(pecotmr:::.cbSumstatPair(dfNA, h))
+})
+
+test_that("colocboostPipeline(MultiStudyQtlDataset): a study with no usable bundle is skipped", {
+  mt <- .cbp_makeMultiStudy()              # qd (study1, ENSG_A) + ss (Q1, t1)
+  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
+                        .package = "pecotmr")
+  local_mocked_bindings(colocboost = function(...) list(stub = TRUE),
+                        .package = "colocboost")
+  # traitId="t1" matches the embedded sumstats but not the QtlDataset -> its
+  # per-study bundle is NULL and skipped (684); the sumstat side still runs.
+  out <- suppressMessages(suppressWarnings(
+    colocboostPipeline(mt, traitId = "t1", xqtlColoc = TRUE)))
+  expect_type(out, "list")
+})

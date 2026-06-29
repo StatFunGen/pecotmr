@@ -929,3 +929,142 @@ test_that("twasZ: error when weights and z have different lengths", {
 # Phase 2: loadLdSketch() and standardize_genotype_hwe()
 
 
+
+# ===========================================================================
+# Direct unit tests for the MR / metric helpers (mock getTopLoci to feed
+# controlled topLoci frames; gwasDf is a plain data.frame as produced by
+# getSumstatDf upstream).
+# ===========================================================================
+
+.cip_gwasDf <- function(vids = paste0("v", 1:5),
+                        z = rep_len(c(2, -1.5, 1.8, 0.5, -2.2), length(vids))) {
+  data.frame(variant_id = vids, z = z, N = rep(1000, length(vids)),
+             maf = rep(0.3, length(vids)), chrom = "chr1",
+             pos = seq(100L, by = 100L, length.out = length(vids)),
+             stringsAsFactors = FALSE)
+}
+
+test_that(".cipCalcI2: degenerate Q / single group -> 0; normal Q -> clamped", {
+  expect_equal(pecotmr:::.cipCalcI2(0, 3L), 0)            # Q <= 1e-3
+  expect_equal(pecotmr:::.cipCalcI2(NA_real_, 3L), 0)     # non-finite Q
+  expect_equal(pecotmr:::.cipCalcI2(10, 1L), 0)           # nGroups <= 1
+  expect_equal(pecotmr:::.cipCalcI2(10, 3L), (10 - 2) / 10)
+  expect_equal(pecotmr:::.cipCalcI2(1.5, 5L), 0)          # negative -> clamp to 0
+})
+
+test_that(".cipComputeMr: IVW Wald-ratio over PIP-passing instruments", {
+  tl <- data.frame(variant_id = paste0("v", 1:4),
+                   pip = c(0.9, 0.8, 0.1, 0.7),
+                   beta = c(0.3, -0.2, 0.5, 0.25), se = rep(0.05, 4),
+                   stringsAsFactors = FALSE)
+  local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
+  res <- pecotmr:::.cipComputeMr(NULL,
+    .cip_gwasDf(paste0("v", 1:4), c(2, -1.5, 1, 1.8)), pipCutoff = 0.5)
+  expect_true(is.finite(res$waldRatio))
+  expect_true(is.finite(res$mrPval))
+  expect_equal(res$nIV, 3L)                                # v1, v2, v4 pass + overlap
+})
+
+test_that(".cipComputeMr: NA on empty / missing-col / no-IV / no-overlap / zero-beta", {
+  g <- .cip_gwasDf(paste0("v", 1:4))
+  isNa <- function(r) { expect_true(is.na(r$waldRatio)); expect_equal(r$nIV, 0L) }
+  local_mocked_bindings(getTopLoci = function(x) data.frame(), .package = "pecotmr")
+  isNa(pecotmr:::.cipComputeMr(NULL, g, 0.5))                              # empty
+  local_mocked_bindings(getTopLoci = function(x)                          # no beta/se
+    data.frame(variant_id = paste0("v", 1:4), pip = rep(0.9, 4)), .package = "pecotmr")
+  isNa(pecotmr:::.cipComputeMr(NULL, g, 0.5))
+  local_mocked_bindings(getTopLoci = function(x)                          # none pass
+    data.frame(variant_id = paste0("v", 1:4), pip = rep(0.1, 4),
+               beta = rep(0.2, 4), se = rep(0.05, 4)), .package = "pecotmr")
+  isNa(pecotmr:::.cipComputeMr(NULL, g, 0.5))
+  local_mocked_bindings(getTopLoci = function(x)                          # no overlap
+    data.frame(variant_id = paste0("z", 1:4), pip = rep(0.9, 4),
+               beta = rep(0.2, 4), se = rep(0.05, 4)), .package = "pecotmr")
+  isNa(pecotmr:::.cipComputeMr(NULL, g, 0.5))
+  local_mocked_bindings(getTopLoci = function(x)                          # zero beta
+    data.frame(variant_id = paste0("v", 1:4), pip = rep(0.9, 4),
+               beta = rep(0, 4), se = rep(0.05, 4)), .package = "pecotmr")
+  isNa(pecotmr:::.cipComputeMr(NULL, g, 0.5))
+})
+
+test_that(".cipComputeMrCsAware: CS-aware composite Wald + heterogeneity", {
+  tl <- data.frame(variant_id = paste0("v", 1:4),
+                   cs = c(1L, 1L, 2L, 2L), pip = c(0.5, 0.4, 0.6, 0.3),
+                   beta = c(0.3, 0.2, -0.25, -0.15), se = rep(0.05, 4),
+                   stringsAsFactors = FALSE)
+  local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
+  res <- pecotmr:::.cipComputeMrCsAware(NULL,
+    .cip_gwasDf(paste0("v", 1:4), c(2, -1.5, 1.8, -1.2)), cpipCutoff = 0.5)
+  expect_true(is.finite(res$waldRatio))
+  expect_true(is.finite(res$I2))
+  expect_equal(res$nCs, 2L)                                # both CSs clear cpip
+})
+
+test_that(".cipComputeMrCsAware: credible-set column found via the ^cs fallback", {
+  tl <- data.frame(variant_id = paste0("v", 1:2), cs_0.95 = c(1L, 1L),
+                   pip = c(0.5, 0.4), beta = c(0.3, 0.2), se = rep(0.05, 2),
+                   stringsAsFactors = FALSE)
+  local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
+  res <- pecotmr:::.cipComputeMrCsAware(NULL,
+    .cip_gwasDf(paste0("v", 1:2), c(2, -1.5)), cpipCutoff = 0.5)
+  expect_true(is.finite(res$waldRatio))                    # cs_0.95 via grep("^cs")
+})
+
+test_that(".cipComputeMrCsAware: naResult on empty / missing-col / no-CS / no-overlap / low-cpip", {
+  g <- .cip_gwasDf(paste0("v", 1:4))
+  isNa <- function(r) expect_true(is.na(r$waldRatio))
+  local_mocked_bindings(getTopLoci = function(x) data.frame(), .package = "pecotmr")
+  isNa(pecotmr:::.cipComputeMrCsAware(NULL, g, 0.5))                       # empty
+  local_mocked_bindings(getTopLoci = function(x)                          # no pip col
+    data.frame(variant_id = paste0("v", 1:4), cs = rep(1L, 4),
+               beta = rep(0.2, 4), se = rep(0.05, 4)), .package = "pecotmr")
+  isNa(pecotmr:::.cipComputeMrCsAware(NULL, g, 0.5))
+  local_mocked_bindings(getTopLoci = function(x)                          # cs all 0
+    data.frame(variant_id = paste0("v", 1:4), cs = rep(0L, 4),
+               pip = rep(0.5, 4), beta = rep(0.2, 4), se = rep(0.05, 4)),
+    .package = "pecotmr")
+  isNa(pecotmr:::.cipComputeMrCsAware(NULL, g, 0.5))
+  local_mocked_bindings(getTopLoci = function(x)                          # no overlap
+    data.frame(variant_id = paste0("z", 1:4), cs = rep(1L, 4),
+               pip = rep(0.5, 4), beta = rep(0.2, 4), se = rep(0.05, 4)),
+    .package = "pecotmr")
+  isNa(pecotmr:::.cipComputeMrCsAware(NULL, g, 0.5))
+  local_mocked_bindings(getTopLoci = function(x)                          # cpip < cutoff
+    data.frame(variant_id = paste0("v", 1:4), cs = 1:4,
+               pip = rep(0.1, 4), beta = rep(0.2, 4), se = rep(0.05, 4)),
+    .package = "pecotmr")
+  isNa(pecotmr:::.cipComputeMrCsAware(NULL, g, cpipCutoff = 0.5))
+})
+
+test_that(".cipExtractWeights: NULL on missing tuples and bad topLoci", {
+  tw  <- .cip_makeTwasWeights(method = "susie")
+  fmr <- .cip_makeQtlFmr()
+  # TwasWeights / FMR: tuple absent.
+  expect_null(pecotmr:::.cipExtractWeights(tw, NULL, "Q1", "c1", "t1",
+                                           "absent", useFmr = FALSE))
+  expect_null(pecotmr:::.cipExtractWeights(NULL, fmr, "Q1", "c1", "t1",
+                                           "absent", useFmr = TRUE))
+  # FMR path: tuple present but topLoci empty / no beta column / all-NA.
+  local_mocked_bindings(getTopLoci = function(x) data.frame(), .package = "pecotmr")
+  expect_null(pecotmr:::.cipExtractWeights(NULL, fmr, "Q1", "c1", "t1",
+                                           "susie", useFmr = TRUE))
+  local_mocked_bindings(getTopLoci = function(x) data.frame(variant_id = "v1"),
+                        .package = "pecotmr")
+  expect_null(pecotmr:::.cipExtractWeights(NULL, fmr, "Q1", "c1", "t1",
+                                           "susie", useFmr = TRUE))
+  local_mocked_bindings(
+    getTopLoci = function(x) data.frame(variant_id = NA_character_, beta = NA_real_),
+    .package = "pecotmr")
+  expect_null(pecotmr:::.cipExtractWeights(NULL, fmr, "Q1", "c1", "t1",
+                                           "susie", useFmr = TRUE))
+})
+
+test_that(".cipCombineAcrossMethods: a single-method group yields no combined rows", {
+  gr <- pecotmr:::.cipDfToGranges(data.frame(
+    qtlStudy = "Q1", context = "c1", trait = "t1", method = "susie",
+    gwasStudy = "G1", twasZ = 2.0, twasPval = 0.05, waldRatio = NA_real_,
+    waldRatioSe = NA_real_, mrPval = NA_real_, nIV = NA_integer_,
+    Q = NA_real_, I2 = NA_real_, nCs = NA_integer_,
+    chrom = "chr1", startPos = 100L, endPos = 200L, stringsAsFactors = FALSE))
+  expect_identical(pecotmr:::.cipCombineAcrossMethods(gr, c("acat")), gr)
+})

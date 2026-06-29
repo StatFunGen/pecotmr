@@ -1243,7 +1243,9 @@ ldPruneByCorrelation <- function(X, corThres = 0.8,
 .ldPruneSnprelate <- function(X, corThres, verbose) {
   if (!requireNamespace("SNPRelate", quietly = TRUE) ||
       !requireNamespace("gdsfmt", quietly = TRUE)) {
+    # nocov start
     stop("Packages 'SNPRelate' and 'gdsfmt' are required for backend='snprelate'.")
+    # nocov end
   }
   p <- ncol(X)
   snpNames <- colnames(X) %||% paste0("snp", seq_len(p))
@@ -1555,10 +1557,14 @@ enforceDesignFullRank <- function(X, C,
 ldClumpByScore <- function(X, score, chr, pos, r2 = 0.2,
                               windowKb = 100 / r2, verbose = FALSE) {
   if (!requireNamespace("bigsnpr", quietly = TRUE)) {
+    # nocov start
     stop("Package 'bigsnpr' is required. Install from CRAN: install.packages('bigsnpr')")
+    # nocov end
   }
   if (!requireNamespace("bigstatsr", quietly = TRUE)) {
+    # nocov start
     stop("Package 'bigstatsr' is required. Install from CRAN: install.packages('bigstatsr')")
+    # nocov end
   }
 
   if (ncol(X) < 1L) stop("ldClumpByScore: X must have at least one column")
@@ -1924,10 +1930,12 @@ computeLd <- function(X, method = c("sample", "population", "gcta"),
 #' @return Correlation matrix.
 #' @noRd
 .computeLdSnprelate <- function(X) {
+  # nocov start
   if (!requireNamespace("SNPRelate", quietly = TRUE))
     stop("Package 'SNPRelate' is required for backend='snprelate'")
   if (!requireNamespace("gdsfmt", quietly = TRUE))
     stop("Package 'gdsfmt' is required for backend='snprelate'")
+  # nocov end
 
   tmpGds <- tempfile(fileext = ".gds")
   on.exit(unlink(tmpGds), add = TRUE)
@@ -1962,8 +1970,10 @@ computeLd <- function(X, method = c("sample", "population", "gcta"),
 #' @return Correlation matrix (r, not r²).
 #' @noRd
 .computeLdSnpstats <- function(X) {
+  # nocov start
   if (!requireNamespace("snpStats", quietly = TRUE))
     stop("Package 'snpStats' is required for backend='snpstats'")
+  # nocov end
 
   # snpStats expects counts of the B allele as raw codes: 1=AA, 2=AB, 3=BB, 0=NA
   # pecotmr dosage is ALT count (0/1/2), so map: 0->1, 1->2, 2->3, NA->0

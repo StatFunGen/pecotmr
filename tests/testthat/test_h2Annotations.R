@@ -435,6 +435,82 @@ test_that("readannotations with multiple files creates multi-column matrix", {
 })
 
 # =============================================================================
+# AnnotationMatrix argument guards, BigWig reader, LDSC CHR/BP guard
+# =============================================================================
+
+test_that("AnnotationMatrix rejects a non-data.frame annotationMeta", {
+  gr <- make_test_granges(10)
+  expect_error(
+    AnnotationMatrix(matrix(0, 10, 3), gr, annotationMeta = list(a = 1)),
+    "annotationMeta must be a data.frame"
+  )
+})
+
+test_that("AnnotationMatrix rejects annotationMeta missing required columns", {
+  gr <- make_test_granges(10)
+  bad_meta <- data.frame(foo = c("a", "b", "c"), stringsAsFactors = FALSE)
+  expect_error(
+    AnnotationMatrix(matrix(0, 10, 3), gr, annotationMeta = bad_meta),
+    "must have columns: name, tier, type"
+  )
+})
+
+test_that(".readBigwigAtSnps returns the mean BigWig score at each SNP", {
+  skip_if_not_installed("rtracklayer")
+  gr <- GenomicRanges::GRanges(
+    "chr1",
+    IRanges::IRanges(start = c(1, 201, 401), end = c(200, 400, 600)),
+    score = c(1.5, 2.5, 3.5))
+  GenomeInfoDb::seqlengths(gr) <- c(chr1 = 1000L)
+  bw <- tempfile(fileext = ".bw")
+  on.exit(unlink(bw), add = TRUE)
+  rtracklayer::export(gr, bw, format = "bigWig")
+
+  snp_gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(start = c(100, 300, 500, 800), width = 1))
+  result <- pecotmr:::.readBigwigAtSnps(bw, snp_gr)
+  # Positions 100/300/500 fall in the three scored intervals; 800 has no
+  # coverage and defaults to 0.
+  expect_equal(result, c(1.5, 2.5, 3.5, 0))
+})
+
+test_that("readAnnotations reads a BigWig file as a continuous annotation", {
+  skip_if_not_installed("rtracklayer")
+  gr <- GenomicRanges::GRanges(
+    "chr1",
+    IRanges::IRanges(start = c(1, 201, 401), end = c(200, 400, 600)),
+    score = c(1.5, 2.5, 3.5))
+  GenomeInfoDb::seqlengths(gr) <- c(chr1 = 1000L)
+  bw <- tempfile(fileext = ".bw")
+  on.exit(unlink(bw), add = TRUE)
+  rtracklayer::export(gr, bw, format = "bigWig")
+
+  snp_gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(start = c(100, 300, 800), width = 1))
+  result <- readAnnotations(c(cons = bw), snp_gr)
+  expect_s4_class(result, "AnnotationMatrix")
+  # A .bw file is auto-detected as a continuous annotation.
+  expect_equal(result@annotationMeta$type, "continuous")
+  expect_equal(as.numeric(result@annotations[, 1]), c(1.5, 2.5, 0))
+})
+
+test_that(".readLdscAnnot errors when CHR/BP columns are absent", {
+  # The annotation column is present but the positional CHR/BP columns are not.
+  annot_df <- data.frame(
+    SNP = c("rs1", "rs2"), CM = 0, my_annot = c(1, 0),
+    stringsAsFactors = FALSE)
+  annot_file <- tempfile(fileext = ".annot")
+  on.exit(unlink(annot_file), add = TRUE)
+  write.table(annot_df, annot_file, sep = "\t", row.names = FALSE, quote = FALSE)
+  snp_gr <- GenomicRanges::GRanges(
+    "chr1", IRanges::IRanges(start = 100, width = 1))
+  expect_error(
+    pecotmr:::.readLdscAnnot(annot_file, snp_gr, "my_annot"),
+    "must contain CHR and BP columns"
+  )
+})
+
+# =============================================================================
 # readsumstats edge cases (h2_sumstats.R)
 # =============================================================================
 

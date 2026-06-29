@@ -23,8 +23,10 @@ twasWeightsPipeline(data, ...)
   jointSpecification = NULL,
   fineMappingResult = NULL,
   twasWeights = NULL,
+  mashPrior = NULL,
   cvFolds = 5,
   samplePartition = NULL,
+  fitFullData = TRUE,
   maxCvVariants = -1,
   cvThreads = 1,
   cvWeightMethods = NULL,
@@ -128,7 +130,7 @@ construct-time cutoff in place.}
 \code{FALSE} (default) learns weights for each range independently and
 concatenates them into one entry per (study, context, trait, method);
 the per-region fits are kept as a named list and per-region CV is
-recorded as a flat \code{cvPerformance} data frame (one row per region).
+recorded as a flat \code{cvResult} data frame (one row per region).
 \code{TRUE} concatenates the ranges' genotypes into one joint fit.
 Ignored for a single-range / cis request.}
 

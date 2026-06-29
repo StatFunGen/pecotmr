@@ -47,3 +47,11 @@ test_that("MashPrior: validity rejects malformed bundles", {
                             perFoldFits = list(list(U = U)))),
     "Sample")
 })
+
+test_that("MashPrior: show reports 'cvFits: none' for a full-only bundle", {
+  U  <- list(U1 = diag(2))
+  mp <- MashPrior(fullFit = list(U = U, w = c(0.5, 0.5)))  # cvFits NULL
+  out <- capture.output(show(mp))
+  expect_true(any(grepl("cvFits: none", out)))
+  expect_true(any(grepl("fullFit: present", out)))
+})

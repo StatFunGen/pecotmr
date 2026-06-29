@@ -1364,3 +1364,340 @@ test_that("gldscUnivariate with annotations returns scoreStats", {
   expect_true("annotationNames" %in% names(res$scoreStats))
   expect_equal(res$scoreStats$annotationNames, "candidate1")
 })
+
+# ===========================================================================
+# Coverage-gap tests (appended)
+#
+# Targets the specific uncovered branches in R/h2EstimationWrappers.R:
+#   bplapplyBlocks, checkGenomeBuild (unknown type), weightedLsRidge
+#   (vector X ridge path), metaRandomEffects (length mismatch), .fglsSolve
+#   (diagonal path), .gldscLocal (fine-grained blocks), .hdlLocal (p<3 and
+#   tau=NULL), .lderLocalH2 (small block + baseline path), .hdlSeFisher-
+#   Stratified / .hdlJackknifeTau (lambda>0 + singular fallback), the
+#   multi-candidate (cor) and no-candidate (NULL) paths of the stratified
+#   score-statistic helpers, h2EstimateToSldscTrait (unnamed tauBlocks), and
+#   the multi-study estimateH2 dispatch error.
+# ===========================================================================
+
+# Flexible annotation builder: one baseline column (all-ones or spatial
+# half-on/half-off) plus `nCand` random binary candidate columns.
+makeCoverageAnnot <- function(n_snps, baseline = "ones", nCand = 1L,
+                              seed = 321) {
+  set.seed(seed)
+  snp_gr <- GenomicRanges::GRanges(
+    seqnames = rep("chr1", n_snps),
+    ranges = IRanges::IRanges(
+      start = seq(50, by = 100, length.out = n_snps), width = 1L))
+  base_col <- if (identical(baseline, "spatial")) {
+    as.numeric(seq_len(n_snps) <= n_snps / 2)
+  } else {
+    rep(1, n_snps)
+  }
+  mat <- matrix(base_col, ncol = 1)
+  meta <- data.frame(name = "baseline1", tier = "baseline",
+                     type = "binary", stringsAsFactors = FALSE)
+  if (nCand > 0L) {
+    cand <- vapply(seq_len(nCand),
+                   function(k) as.numeric(rbinom(n_snps, 1, 0.3 + 0.1 * k)),
+                   numeric(n_snps))
+    mat <- cbind(mat, cand)
+    meta <- rbind(meta, data.frame(
+      name = paste0("cand", seq_len(nCand)),
+      tier = "candidate", type = "binary", stringsAsFactors = FALSE))
+  }
+  colnames(mat) <- meta$name
+  AnnotationMatrix(mat, snp_gr, meta, genome = "hg19")
+}
+
+# ---------------------------------------------------------------------------
+# bplapplyBlocks
+# ---------------------------------------------------------------------------
+
+test_that("bplapplyBlocks applies FUN per block with default BPPARAM", {
+  skip_if_not_installed("BiocParallel")
+  res <- pecotmr:::bplapplyBlocks(list(1, 2, 3), function(i, ...) i^2)
+  expect_equal(res, list(1, 4, 9))
+})
+
+test_that("bplapplyBlocks works with SerialParam and extra args", {
+  skip_if_not_installed("BiocParallel")
+  res <- pecotmr:::bplapplyBlocks(
+    list(2, 3), function(i, k) i + k,
+    BPPARAM = BiocParallel::SerialParam(), k = 10)
+  expect_equal(res, list(12, 13))
+})
+
+# ---------------------------------------------------------------------------
+# checkGenomeBuild — unknown object type branch
+# ---------------------------------------------------------------------------
+
+test_that("checkGenomeBuild errors on an unrecognized object type", {
+  expect_error(
+    pecotmr:::checkGenomeBuild(list(genome = "hg19")),
+    "Unknown object type"
+  )
+})
+
+# ---------------------------------------------------------------------------
+# weightedLsRidge — vector X inside the ridge (lambda > 0) path
+# ---------------------------------------------------------------------------
+
+test_that("weightedLsRidge converts a vector X to a matrix in the ridge path", {
+  set.seed(1)
+  n <- 40
+  x <- rnorm(n)
+  y <- 2 * x + rnorm(n, sd = 0.1)
+  w <- rep(1, n)
+  res <- pecotmr:::weightedLsRidge(y, x, w, lambda = 5)
+  expect_length(res$coef, 1)
+  expect_true(is.finite(res$coef[1]))
+  # single column => penalized (p > 1 is FALSE), so coef is shrunk vs OLS
+  res0 <- pecotmr:::weightedLsRidge(y, x, w, lambda = 0)
+  expect_true(abs(res$coef[1]) < abs(res0$coef[1]))
+})
+
+# ---------------------------------------------------------------------------
+# metaRandomEffects — length-mismatch error
+# ---------------------------------------------------------------------------
+
+test_that("metaRandomEffects errors when means and ses differ in length", {
+  expect_error(
+    pecotmr:::metaRandomEffects(c(1, 2), c(1, 2, 3)),
+    "must have the same length"
+  )
+})
+
+# ---------------------------------------------------------------------------
+# .fglsSolve — diagonal (numeric) precision path
+# ---------------------------------------------------------------------------
+
+test_that(".fglsSolve with numeric (diagonal) weights matches weightedLs", {
+  set.seed(2)
+  n <- 30
+  X <- cbind(rnorm(n), 1)
+  y <- X %*% c(1.5, 0.5) + rnorm(n, sd = 0.1)
+  w <- rep(1, n)
+  res <- pecotmr:::.fglsSolve(y, X, w)
+  ref <- pecotmr:::weightedLs(y, X, w)
+  expect_equal(res$coef, ref$coef)
+})
+
+test_that(".fglsSolve converts a vector X to a matrix", {
+  set.seed(3)
+  n <- 20
+  x <- rnorm(n)
+  y <- 2 * x + rnorm(n, sd = 0.1)
+  res <- pecotmr:::.fglsSolve(y, x, rep(1, n))
+  expect_length(res$coef, 1)
+  expect_true(is.finite(res$coef[1]))
+})
+
+# ---------------------------------------------------------------------------
+# .gldscLocal — fine-grained (> 22) LD blocks
+# ---------------------------------------------------------------------------
+
+test_that(".gldscLocal computes per-block local h2 with fine-grained blocks", {
+  ld_ref <- make_test_score_ref(nSnps = 46, nBlocks = 23)
+  set.seed(7)
+  z <- rnorm(46)
+  res <- pecotmr:::.gldscLocal(z, n = 50000, ldRef = ld_ref,
+                               h2 = 0.3, intercept = 0.001)
+  expect_s3_class(res, "data.frame")
+  expect_true(all(c("blockId", "h2Local", "h2LocalSe") %in% colnames(res)))
+  expect_equal(nrow(res), 23L)
+  expect_true(all(is.finite(res$h2Local)))
+  expect_true(all(res$h2LocalSe > 0))
+})
+
+# ---------------------------------------------------------------------------
+# .hdlLocal — p < 3 (NA row) and tau = NULL (no-baseline) branches
+# ---------------------------------------------------------------------------
+
+test_that(".hdlLocal returns an NA row for blocks with fewer than 3 SNPs", {
+  bd_small <- list(zRot = c(0.5, -0.3), d = c(1.2, 0.8),
+                   ldAnnot = NULL, snpIdx = 1:2, p = 2)
+  res <- pecotmr:::.hdlLocal(list(bd_small), n = 50000, M = 100,
+                             tau = 0.3, baselineMat = NULL)
+  expect_true(is.na(res$h2Local[1]))
+  expect_true(is.na(res$h2LocalSe[1]))
+})
+
+test_that(".hdlLocal handles tau = NULL (no baseline sigma2) path", {
+  set.seed(8)
+  bd <- list(zRot = rnorm(5), d = c(2, 1.5, 1, 0.8, 0.5),
+             ldAnnot = NULL, snpIdx = 1:5, p = 5)
+  res <- pecotmr:::.hdlLocal(list(bd), n = 1000, M = 100,
+                             tau = NULL, baselineMat = NULL)
+  expect_s3_class(res, "data.frame")
+  expect_true(is.finite(res$h2Local[1]))
+  expect_true(is.finite(res$h2LocalSe[1]))
+})
+
+# ---------------------------------------------------------------------------
+# .lderLocalH2 — small block (< 3 eigenvalues) + baseline path via top-level
+# ---------------------------------------------------------------------------
+
+test_that(".lderLocalH2 returns NA for blocks with fewer than 3 eigenvalues", {
+  bd <- list(list(n_snps = 2, eigenvalues = c(1.1, 0.9),
+                  chi2Rot = c(1.5, 0.8), ldAnnot = NULL))
+  res <- pecotmr:::.lderLocalH2(bd, n = 50000, M = 100, tau = 0.3,
+                                aGlobal = 0, baselineMat = NULL)
+  expect_true(is.na(res$h2Local[1]))
+  expect_true(is.na(res$h2LocalSe[1]))
+})
+
+test_that("lderUnivariate with annotations and local = TRUE returns local h2", {
+  annot <- makeCoverageAnnot(dat_annot$n_snps, baseline = "ones", nCand = 1L)
+  res <- pecotmr:::lderUnivariate(dat_annot$z, dat_annot$n,
+                                  dat_annot$eigen_ref,
+                                  annotations = annot, local = TRUE)
+  expect_true(is.data.frame(res$local))
+  expect_true("h2Local" %in% colnames(res$local))
+  expect_equal(nrow(res$local), 5L)
+})
+
+# ---------------------------------------------------------------------------
+# .hdlSeFisherStratified / .hdlJackknifeTau — lambda > 0 ridge penalty
+# ---------------------------------------------------------------------------
+
+test_that("hdlUnivariate with annotations and lambda > 0 exercises ridge penalty", {
+  annot <- makeCoverageAnnot(dat_annot$n_snps, baseline = "ones", nCand = 1L)
+  suppressWarnings(
+    res <- pecotmr:::hdlUnivariate(dat_annot$z, dat_annot$n,
+                                   dat_annot$eigen_ref,
+                                   annotations = annot, lambda = 1)
+  )
+  expect_true(is.finite(res$h2))
+  expect_true(is.matrix(res$tauBlocks))
+  expect_true(all(is.finite(res$tauSe)))
+})
+
+# ---------------------------------------------------------------------------
+# .hdlSeFisherStratified / .hdlJackknifeTau — singular info-matrix fallback
+# (zero eigenvalues => zero Fisher information => solve() fails)
+# ---------------------------------------------------------------------------
+
+test_that(".hdlSeFisherStratified falls back when the info matrix is singular", {
+  bd <- list(list(zRot = c(0.1, 0.2), d = c(0, 0),
+                  ldAnnot = matrix(1, nrow = 2, ncol = 2)))
+  baselineMat <- matrix(1, nrow = 2, ncol = 2)
+  res <- pecotmr:::.hdlSeFisherStratified(
+    tau = c(0.1, 0.1), blockData = bd, n = 1000, M = 100,
+    baselineMat = baselineMat, lambda = 0)
+  expect_true(all(is.finite(res$tauSe)))
+  expect_true(is.finite(res$h2Se))
+})
+
+test_that(".hdlJackknifeTau falls back when the info matrix is singular", {
+  bd <- list(
+    list(zRot = c(0.1, 0.2), d = c(0, 0), ldAnnot = matrix(1, 2, 2)),
+    list(zRot = c(0.3, 0.1), d = c(0, 0), ldAnnot = matrix(1, 2, 2)))
+  res <- pecotmr:::.hdlJackknifeTau(
+    tau = c(0.1, 0.1), blockData = bd, n = 1000, M = 100,
+    baselineMat = matrix(1, nrow = 4, ncol = 2), lambda = 0)
+  expect_true(is.matrix(res$looEstimates))
+  expect_true(all(is.finite(res$tauSe)))
+})
+
+# ---------------------------------------------------------------------------
+# Stratified score helpers — multiple-candidate (cor) branch
+# ---------------------------------------------------------------------------
+
+test_that("lderUnivariate with 2 candidates returns a 2x2 score correlation", {
+  annot <- makeCoverageAnnot(dat_annot$n_snps, baseline = "ones", nCand = 2L)
+  res <- pecotmr:::lderUnivariate(dat_annot$z, dat_annot$n,
+                                  dat_annot$eigen_ref, annotations = annot)
+  expect_length(res$scoreStats$z, 2L)
+  expect_equal(dim(res$scoreStats$R), c(2L, 2L))
+})
+
+test_that("hdlUnivariate with 2 candidates returns a 2x2 score correlation", {
+  annot <- makeCoverageAnnot(dat_annot$n_snps, baseline = "ones", nCand = 2L)
+  suppressWarnings(
+    res <- pecotmr:::hdlUnivariate(dat_annot$z, dat_annot$n,
+                                   dat_annot$eigen_ref, annotations = annot)
+  )
+  expect_length(res$scoreStats$z, 2L)
+  expect_equal(dim(res$scoreStats$R), c(2L, 2L))
+})
+
+test_that("gldscUnivariate with 2 candidates returns a 2x2 score correlation", {
+  annot <- makeCoverageAnnot(dat_annot$n_snps, baseline = "spatial", nCand = 2L)
+  res <- pecotmr:::gldscUnivariate(dat_annot$z, dat_annot$n,
+                                   dat_annot$ld_score_ref, annotations = annot)
+  expect_length(res$scoreStats$z, 2L)
+  expect_equal(dim(res$scoreStats$R), c(2L, 2L))
+})
+
+# ---------------------------------------------------------------------------
+# Stratified score helpers — no-candidate (NULL scoreStats) branch
+# ---------------------------------------------------------------------------
+
+test_that("lderUnivariate with baseline-only annotations yields NULL scoreStats", {
+  annot <- makeCoverageAnnot(dat_annot$n_snps, baseline = "ones", nCand = 0L)
+  res <- pecotmr:::lderUnivariate(dat_annot$z, dat_annot$n,
+                                  dat_annot$eigen_ref, annotations = annot)
+  expect_null(res$scoreStats)
+})
+
+test_that("hdlUnivariate with baseline-only annotations yields NULL scoreStats", {
+  annot <- makeCoverageAnnot(dat_annot$n_snps, baseline = "ones", nCand = 0L)
+  suppressWarnings(
+    res <- pecotmr:::hdlUnivariate(dat_annot$z, dat_annot$n,
+                                   dat_annot$eigen_ref, annotations = annot)
+  )
+  expect_null(res$scoreStats)
+})
+
+test_that("gldscUnivariate with baseline-only annotations yields NULL scoreStats", {
+  annot <- makeCoverageAnnot(dat_annot$n_snps, baseline = "spatial", nCand = 0L)
+  res <- pecotmr:::gldscUnivariate(dat_annot$z, dat_annot$n,
+                                   dat_annot$ld_score_ref, annotations = annot)
+  expect_null(res$scoreStats)
+})
+
+# ---------------------------------------------------------------------------
+# h2EstimateToSldscTrait — tauBlocks present but without column names
+# ---------------------------------------------------------------------------
+
+test_that("h2EstimateToSldscTrait assigns category names to unnamed tauBlocks", {
+  h2_obj <- make_test_h2estimate(with_enrichment = TRUE)
+  tb <- h2_obj@tauBlocks
+  colnames(tb) <- NULL
+  h2_obj@tauBlocks <- tb
+  result <- h2EstimateToSldscTrait(h2_obj)
+  expect_equal(colnames(result$tauBlocks), c("annot1", "annot2"))
+  expect_equal(result$nBlocks, 10L)
+})
+
+# ---------------------------------------------------------------------------
+# estimateH2 dispatch — `study` required for a multi-study collection
+# ---------------------------------------------------------------------------
+
+test_that("estimateH2 errors when study is omitted for a multi-study collection", {
+  eigen_ref <- make_test_eigen_ref()
+  n_snps <- nrow(eigen_ref@snpInfo)
+  set.seed(321)
+  df <- data.frame(
+    SNP = eigen_ref@snpInfo$SNP,
+    CHR = sub("^chr", "", eigen_ref@snpInfo$CHR),
+    BP = eigen_ref@snpInfo$BP,
+    A1 = eigen_ref@snpInfo$A1,
+    A2 = eigen_ref@snpInfo$A2,
+    Z = rnorm(n_snps),
+    N = rep(50000, n_snps),
+    stringsAsFactors = FALSE
+  )
+  gr <- .dfToGwasGr(df)
+  ss2 <- GwasSumStats(
+    study = c("studyA", "studyB"),
+    entry = list(gr, gr),
+    genome = "hg19",
+    ldSketch = make_test_gwas_genotype_handle(),
+    varY = NA_real_
+  )
+  expect_error(
+    estimateH2(ss2, eigen_ref, method = "lder"),
+    "is required when"
+  )
+})

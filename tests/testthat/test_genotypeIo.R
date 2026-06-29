@@ -19,13 +19,13 @@ test_that("readBim dummy data works",{
 
 test_that("readFam dummy data works",{
     example_path <- "test_data/protocol_example.genotype.bed"
-    res <- readFam(example_path)
+    res <- pecotmr:::readFam(example_path)
     expect_equal(nrow(res), 100)
 })
 
 test_that("openBed dummy data works",{
     example_path <- "test_data/protocol_example.genotype.bed"
-    res <- openBed(example_path)
+    res <- pecotmr:::openBed(example_path)
     expect_equal(res$class, "pgen")
 })
 
@@ -741,7 +741,7 @@ test_that("matchVariantsToKeep filters to specified variants", {
   keep_df <- vi[c(1, 5, 10), c("chrom", "pos", "A2", "A1")]
   vroom::vroom_write(keep_df, keep_file, delim = "\t")
 
-  mask <- matchVariantsToKeep(vi, keep_file)
+  mask <- pecotmr:::matchVariantsToKeep(vi, keep_file)
   expect_type(mask, "logical")
   expect_equal(sum(mask), 3L)
   expect_true(mask[1])
@@ -761,7 +761,7 @@ test_that("matchVariantsToKeep returns all FALSE for non-matching variants", {
                         A2 = c("A", "C"), A1 = c("T", "G"))
   vroom::vroom_write(keep_df, keep_file, delim = "\t")
 
-  mask <- matchVariantsToKeep(vi, keep_file)
+  mask <- pecotmr:::matchVariantsToKeep(vi, keep_file)
   expect_true(all(!mask))
 })
 
@@ -776,7 +776,7 @@ test_that("readVariantMetadata reads 6-column bim file", {
     "1\trs1\t0\t100\tA\tG",
     "1\trs2\t0\t200\tC\tT"
   ), tmp)
-  res <- readVariantMetadata(tmp)
+  res <- pecotmr:::readVariantMetadata(tmp)
   expect_equal(nrow(res), 2)
   expect_true("gpos" %in% names(res))
   expect_equal(as.character(res$chrom), c("1", "1"))
@@ -790,14 +790,14 @@ test_that("readVariantMetadata reads 9-column bim file", {
     "1\trs1\t0\t100\tA\tG\t0.5\t0.3\t100",
     "1\trs2\t0\t200\tC\tT\t0.4\t0.2\t99"
   ), tmp)
-  res <- readVariantMetadata(tmp)
+  res <- pecotmr:::readVariantMetadata(tmp)
   expect_equal(nrow(res), 2)
   expect_true(all(c("variance", "allele_freq", "n_nomiss") %in% names(res)))
 })
 
 test_that("readVariantMetadata delegates to readPvar for .pvar files", {
   pvar_path <- test_path("test_data", "test_variants.pvar")
-  res <- readVariantMetadata(pvar_path)
+  res <- pecotmr:::readVariantMetadata(pvar_path)
   expect_true(all(c("chrom", "id", "pos", "A1", "A2") %in% names(res)))
   expect_false("gpos" %in% names(res))
 })
@@ -806,7 +806,7 @@ test_that("readVariantMetadata errors on unexpected column count", {
   tmp <- tempfile(fileext = ".bim")
   on.exit(unlink(tmp), add = TRUE)
   writeLines(c("1\trs1\t0\t100\tA"), tmp)
-  expect_error(readVariantMetadata(tmp), "Unexpected number of columns")
+  expect_error(pecotmr:::readVariantMetadata(tmp), "Unexpected number of columns")
 })
 
 # ===========================================================================
@@ -821,7 +821,7 @@ test_that("matchVariantsToKeep works with single-column variant ID file", {
   on.exit(unlink(keep_file), add = TRUE)
   writeLines(c("1:100:A:G", "1:300:G:A"), keep_file)
 
-  mask <- matchVariantsToKeep(vi, keep_file)
+  mask <- pecotmr:::matchVariantsToKeep(vi, keep_file)
   expect_type(mask, "logical")
   expect_equal(sum(mask), 2L)
   expect_true(mask[1])
@@ -840,7 +840,7 @@ test_that("matchVariantsToKeep uses position-only matching when no alleles", {
   keep_df <- vi[c(1, 5), c("chrom", "pos")]
   vroom::vroom_write(keep_df, keep_file, delim = "\t")
 
-  mask <- matchVariantsToKeep(vi, keep_file)
+  mask <- pecotmr:::matchVariantsToKeep(vi, keep_file)
   expect_type(mask, "logical")
   expect_equal(sum(mask), 2L)
   expect_true(mask[1])
@@ -1402,6 +1402,352 @@ test_that("genoMeta meta-file form matches the named-vector form", {
   expect_equal(nrow(hFile@snpInfo), nrow(hVec@snpInfo))
   expect_equal(sort(names(hFile@chromPaths)), sort(names(hVec@chromPaths)))
   expect_equal(.shardDose(hFile, 1:5), .shardDose(hVec, 1:5))
+})
+
+# ===========================================================================
+# Coverage top-ups for R/genotypeIo.R: dispatch/handle error stops, empty- and
+# missing-chromosome block paths, format-specific extractor edge cases, the
+# GDS LD path, .h2DetectFormat / .plinkStem branches, resolvePlink2Paths
+# validation, readAfreq zstd guard, readStochasticMeta validation, the plink1
+# getRefVariantInfo path with a multi-row region, and the non-integer-dosage
+# warning in loadGenotypeRegion.
+# ===========================================================================
+
+# --- readGenotypes dispatch + handle-constructor file-not-found stops --------
+
+test_that("readGenotypes errors on unsupported format", {
+  expect_error(
+    readGenotypes("/whatever/path", format = "bogusFormat"),
+    "Unsupported genotype format: bogusFormat")
+})
+
+test_that(".makeGdsHandle errors when GDS file is absent", {
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  expect_error(
+    pecotmr:::.makeGdsHandle("/no/such/file.gds"),
+    "GDS file not found")
+})
+
+test_that(".makeVcfHandle errors when VCF file is absent", {
+  skip_if_not_installed("VariantAnnotation")
+  expect_error(
+    pecotmr:::.makeVcfHandle("/no/such/file.vcf.gz"),
+    "VCF file not found")
+})
+
+test_that(".makePlink1Handle errors when plink1 trio is absent", {
+  skip_if_not_installed("snpStats")
+  expect_error(
+    pecotmr:::.makePlink1Handle(file.path(tempdir(), "missingPlink1Prefix")),
+    "Plink file not found")
+})
+
+# --- extractBlockGenotypes: NULL-from-extractor guard (line 237) -------------
+
+test_that("extractBlockGenotypes returns NULL when extractor yields NULL", {
+  skip_if_not_installed("VariantAnnotation")
+  td <- test_path("test_data")
+  handle <- readGenotypes(file.path(td, "test_variants.vcf.gz"), format = "vcf")
+  # Force the format-specific extractor to return NULL so the early-return
+  # guard in extractBlockGenotypes is exercised.
+  testthat::local_mocked_bindings(
+    .extractBlockVcf = function(handle, snpIdx) NULL, .package = "pecotmr")
+  expect_null(extractBlockGenotypes(handle, 1:3))
+})
+
+# --- .extractBlockSharded: empty block + missing-chromosome stop -------------
+
+test_that("extractBlockGenotypes on a sharded handle handles an empty block", {
+  skip_if_not_installed("snpStats")
+  td <- test_path("test_data")
+  shard <- GenotypeHandle(genoMeta = c(
+    "21" = file.path(td, "test_variants"),
+    "22" = file.path(td, "test_variants_chr22")))
+  se <- extractBlockGenotypes(shard, integer(0))
+  expect_s4_class(se, "SummarizedExperiment")
+  dosage <- SummarizedExperiment::assay(se, "dosage")
+  expect_equal(nrow(dosage), 0L)
+  expect_equal(ncol(dosage), shard@nSamples)
+  expect_equal(colnames(dosage), shard@sampleIds)
+})
+
+test_that("sharded extraction errors for a chromosome with no payload", {
+  skip_if_not_installed("snpStats")
+  td <- test_path("test_data")
+  shard <- GenotypeHandle(genoMeta = c(
+    "21" = file.path(td, "test_variants"),
+    "22" = file.path(td, "test_variants_chr22")))
+  # Drop the chr22 payload but keep its variants in @snpInfo, so routing a
+  # chr22 request finds no per-chromosome file.
+  shard@chromPaths <- shard@chromPaths["21"]
+  idx22 <- which(pecotmr:::.canonChr(shard@snpInfo$CHR) == "22")[1]
+  expect_error(
+    extractBlockGenotypes(shard, idx22),
+    "no per-chromosome file for chromosome")
+})
+
+# --- .extractBlockGds: NULL/empty result guard (line 336) --------------------
+
+test_that(".extractBlockGds returns NULL when snpgdsGetGeno yields NULL", {
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  td <- test_path("test_data")
+  handle <- readGenotypes(file.path(td, "test_variants.gds"), format = "gds")
+  testthat::local_mocked_bindings(
+    snpgdsGetGeno = function(...) NULL, .package = "SNPRelate")
+  expect_null(pecotmr:::.extractBlockGds(handle, 1:3))
+})
+
+# --- .extractBlockVcf: missing-genotype ("./.") parsing (line 361) -----------
+
+.gioMakeMissingGtVcf <- function() {
+  dir <- tempfile("gioVcf_")
+  dir.create(dir)
+  plain <- file.path(dir, "mini.vcf")
+  writeLines(c(
+    "##fileformat=VCFv4.2",
+    "##contig=<ID=21>",
+    "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">",
+    paste("#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO",
+          "FORMAT", "S1", "S2", "S3", sep = "\t"),
+    paste("21", "1000", "v1", "A", "G", ".", ".", ".", "GT",
+          "0/1", "./.", "1/1", sep = "\t"),
+    paste("21", "2000", "v2", "C", "T", ".", ".", ".", "GT",
+          "0|0", "1|1", "./.", sep = "\t")), plain)
+  bg <- Rsamtools::bgzip(plain, paste0(plain, ".gz"), overwrite = TRUE)
+  Rsamtools::indexTabix(bg, format = "vcf")
+  bg
+}
+
+test_that(".extractBlockVcf parses missing genotypes as NA", {
+  skip_if_not_installed("VariantAnnotation")
+  skip_if_not_installed("Rsamtools")
+  bg <- .gioMakeMissingGtVcf()
+  handle <- readGenotypes(bg, format = "vcf")
+  expect_equal(nrow(handle@snpInfo), 2L)
+  # meanImpute=FALSE keeps the "./." dosages as NA
+  se <- extractBlockGenotypes(handle, 1:2, meanImpute = FALSE)
+  dosage <- SummarizedExperiment::assay(se, "dosage")
+  expect_true(any(is.na(dosage)))
+  # Exactly the two "./." entries become NA (one per variant)
+  expect_equal(sum(is.na(dosage)), 2L)
+})
+
+# --- .extractBlockPlink2: stale-pointer reopen path (lines 402-403) ----------
+
+test_that("plink2 extraction reopens a stale (deserialized) pgen pointer", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+  ref <- SummarizedExperiment::assay(extractBlockGenotypes(handle, 1:5), "dosage")
+  # Round-tripping through saveRDS/readRDS staleness the cached @pgenPtr; the
+  # first ReadList errors and the tryCatch reopen path takes over.
+  tf <- tempfile(fileext = ".rds")
+  on.exit(unlink(tf), add = TRUE)
+  saveRDS(handle, tf)
+  reloaded <- readRDS(tf)
+  got <- SummarizedExperiment::assay(extractBlockGenotypes(reloaded, 1:5), "dosage")
+  expect_equal(got, ref)
+})
+
+# --- computeBlockLdCor: GDS internal path, NULL guard, single-col, computeLd --
+
+test_that("computeBlockLdCor uses the native GDS path for internal backend", {
+  skip_if_not_installed("SNPRelate")
+  skip_if_not_installed("gdsfmt")
+  td <- test_path("test_data")
+  handle <- readGenotypes(file.path(td, "test_variants.gds"), format = "gds")
+  R <- computeBlockLdCor(handle, 1:6, backend = "internal")
+  expect_equal(dim(R), c(6L, 6L))
+  expect_true(all(is.finite(R)))
+  expect_false(anyNA(R))
+  expect_equal(diag(R), rep(1, 6), tolerance = 1e-6)
+})
+
+test_that("computeBlockLdCor returns identity when extraction is NULL", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+  testthat::local_mocked_bindings(
+    extractBlockGenotypes = function(...) NULL, .package = "pecotmr")
+  R <- computeBlockLdCor(handle, 1:4, backend = "internal")
+  expect_equal(R, diag(4))
+})
+
+test_that("computeBlockLdCor returns identity for a single-variant block", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+  R <- computeBlockLdCor(handle, 1L, backend = "internal")
+  expect_equal(R, diag(1))
+})
+
+test_that("computeBlockLdCor computes a correlation matrix via the general path", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+  R <- computeBlockLdCor(handle, 1:5, backend = "internal")
+  expect_equal(dim(R), c(5L, 5L))
+  expect_equal(unname(diag(R)), rep(1, 5), tolerance = 1e-6)
+})
+
+# --- .h2DetectFormat branches ------------------------------------------------
+
+test_that(".h2DetectFormat detects .annot.gz as ldsc_annot", {
+  expect_equal(pecotmr:::.h2DetectFormat("something.annot.gz"), "ldsc_annot")
+})
+
+test_that(".h2DetectFormat detects a plink1 prefix by .bed sidecar", {
+  td <- test_path("test_data")
+  # protocol_example.genotype has .bed/.bim/.fam but no .pgen
+  expect_equal(
+    pecotmr:::.h2DetectFormat(file.path(td, "protocol_example.genotype")),
+    "plink1")
+})
+
+test_that(".h2DetectFormat detects a gds-only prefix", {
+  stem <- tempfile("gioGdsStem_")
+  file.create(paste0(stem, ".gds"))
+  on.exit(unlink(paste0(stem, ".gds")), add = TRUE)
+  expect_equal(pecotmr:::.h2DetectFormat(stem), "gds")
+})
+
+test_that(".h2DetectFormat errors on an unknown extension", {
+  expect_error(
+    pecotmr:::.h2DetectFormat(file.path(tempdir(), "thing.qzx")),
+    "Cannot detect format from extension")
+})
+
+test_that(".h2DetectFormat errors on an extensionless path with no sidecars", {
+  expect_error(
+    pecotmr:::.h2DetectFormat(file.path(tempdir(), "noSuchStemXyz")),
+    "Cannot detect genotype format for path")
+})
+
+# --- .plinkStem strips a recognized plink extension --------------------------
+
+test_that(".plinkStem strips a known plink extension", {
+  td <- test_path("test_data")
+  expect_equal(
+    pecotmr:::.plinkStem(file.path(td, "test_variants.bed")),
+    file.path(td, "test_variants"))
+})
+
+# --- resolvePlink2Paths: .pvar.zst fallback + missing pvar/psam stops --------
+
+.gioMakePlink2Stub <- function(which = c("pgen", "pvar", "pvarZst", "psam")) {
+  dir <- tempfile("gioP2_")
+  dir.create(dir)
+  prefix <- file.path(dir, "g")
+  if ("pgen"    %in% which) file.create(paste0(prefix, ".pgen"))
+  if ("pvar"    %in% which) file.create(paste0(prefix, ".pvar"))
+  if ("pvarZst" %in% which) file.create(paste0(prefix, ".pvar.zst"))
+  if ("psam"    %in% which) file.create(paste0(prefix, ".psam"))
+  prefix
+}
+
+test_that("resolvePlink2Paths falls back to .pvar.zst", {
+  prefix <- .gioMakePlink2Stub(c("pgen", "pvarZst", "psam"))
+  paths <- pecotmr:::resolvePlink2Paths(prefix)
+  expect_equal(paths$pvar, paste0(prefix, ".pvar.zst"))
+  expect_equal(paths$pgen, paste0(prefix, ".pgen"))
+  expect_equal(paths$psam, paste0(prefix, ".psam"))
+})
+
+test_that("resolvePlink2Paths errors when no .pvar/.pvar.zst exists", {
+  prefix <- .gioMakePlink2Stub(c("pgen", "psam"))
+  expect_error(
+    pecotmr:::resolvePlink2Paths(prefix),
+    "PLINK2 .pvar\\[.zst\\] file not found")
+})
+
+test_that("resolvePlink2Paths errors when .psam is missing", {
+  prefix <- .gioMakePlink2Stub(c("pgen", "pvar"))
+  expect_error(
+    pecotmr:::resolvePlink2Paths(prefix),
+    "PLINK2 .psam file not found")
+})
+
+# --- readAfreq: zstd CLI guard (line 655) ------------------------------------
+
+test_that("readAfreq errors for .afreq.zst when zstd CLI is unavailable", {
+  skip_if_not_installed("withr")
+  td <- test_path("test_data")
+  zdir <- tempfile("gioZst_")
+  dir.create(zdir)
+  file.copy(file.path(td, "test_harmonize_regions.afreq.zst"),
+            file.path(zdir, "g.afreq.zst"))
+  # Empty PATH makes Sys.which("zstd") return "" so the guard fires before any
+  # subprocess is launched.
+  withr::local_envvar(PATH = "")
+  expect_error(
+    readAfreq(file.path(zdir, "g")),
+    "zstd CLI is required")
+})
+
+# --- readStochasticMeta: generic format missing required columns -------------
+
+test_that("readStochasticMeta errors when generic file lacks required columns", {
+  tmp <- tempfile(fileext = ".tsv")
+  on.exit(unlink(tmp), add = TRUE)
+  writeLines(c("foo\tbar", "1\t2"), tmp)
+  expect_error(
+    pecotmr:::readStochasticMeta(tmp),
+    "must contain columns")
+})
+
+# --- getRefVariantInfo: plink1 .bed path + multi-row region filter -----------
+
+test_that("getRefVariantInfo reads variant info from a plink1 source", {
+  td <- test_path("test_data")
+  meta_file <- file.path(td, "ld_meta_refinfo_plink1_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("22", "0", "0", "protocol_example.genotype", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  info <- getRefVariantInfo(meta_file)  # no region -> all variants
+  expect_true(is.data.frame(info))
+  expect_true(all(c("chrom", "id", "pos", "A2", "A1") %in% names(info)))
+  expect_gt(nrow(info), 0L)
+})
+
+test_that("getRefVariantInfo applies a multi-row data.frame region filter", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  meta_file <- file.path(td, "ld_meta_refinfo_multirow_tmp.tsv")
+  on.exit(unlink(meta_file), add = TRUE)
+  writeLines(paste("chrom", "start", "end", "path", sep = "\t"), meta_file)
+  cat(paste("21", "0", "0", "test_variants", sep = "\t"), "\n",
+      file = meta_file, append = TRUE)
+  # A two-row region (both chr21) drives the multi-row branch of the filter
+  # loop; together the rows cover the full block.
+  region_df <- data.frame(
+    chrom = c("21", "21"),
+    start = c(17513228L, 17550001L),
+    end   = c(17550000L, 17592874L),
+    stringsAsFactors = FALSE)
+  info <- getRefVariantInfo(meta_file, region = region_df)
+  expect_true(is.data.frame(info))
+  expect_equal(nrow(info), 349L)
+  expect_true(all(info$pos >= 17513228 & info$pos <= 17592874))
+})
+
+# --- loadGenotypeRegion: non-integer dosages without a sidecar (warning) -----
+
+test_that("loadGenotypeRegion warns on non-integer dosages without a sidecar", {
+  skip_if_not_installed("pgenlibr")
+  td <- test_path("test_data")
+  # dummy_data is a plink2 fixture with no .afreq / .stochastic_meta sidecar.
+  # Inject fractional dosages via the extractor so the no-sidecar branch sees
+  # non-integer values and emits its warning.
+  testthat::local_mocked_bindings(
+    .extractBlockPlink2 = function(handle, snpIdx)
+      matrix(0.5, nrow = handle@nSamples, ncol = length(snpIdx)),
+    .package = "pecotmr")
+  expect_warning(
+    loadGenotypeRegion(file.path(td, "dummy_data")),
+    "Non-integer genotype values detected")
 })
 
 

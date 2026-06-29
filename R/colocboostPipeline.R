@@ -111,7 +111,9 @@ setGeneric("colocboostPipeline",
 # Run colocboost() with tryCatch + timing.
 .cbRun <- function(label, args) {
   if (!requireNamespace("colocboost", quietly = TRUE)) {
+    # nocov start
     stop("The colocboost package is required for colocboostPipeline().")
+    # nocov end
   }
   t1 <- Sys.time()
   args <- Filter(Negate(is.null), args)
@@ -170,10 +172,6 @@ setGeneric("colocboostPipeline",
 # Returns the retained Y (NULL when no outcome clears the threshold).
 .cbPipSkipOutcomes <- function(X, Y, cutoff) {
   if (is.null(cutoff) || is.na(cutoff) || cutoff == 0) return(Y)
-  if (!requireNamespace("susieR", quietly = TRUE)) {
-    warning("susieR not available; pipCutoffToSkip filter not applied.")
-    return(Y)
-  }
   if (!is.double(X)) storage.mode(X) <- "double"  # susieR needs double X
   thr <- if (cutoff < 0) 3 / ncol(X) else cutoff
   keep <- logical(ncol(Y))

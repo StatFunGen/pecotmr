@@ -20,6 +20,7 @@ postprocessFinemappingFits(
   minAbsCorr = 0.8,
   medianAbsCorr = NULL,
   csInput = NULL,
+  conditionIdx = NULL,
   trim = TRUE
 )
 }

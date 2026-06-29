@@ -14,6 +14,7 @@ twasWeightsCv(
   variantsToKeep = NULL,
   numThreads = 1,
   verbose = 1,
+  retainFits = FALSE,
   ...
 )
 }

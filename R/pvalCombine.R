@@ -47,7 +47,9 @@ pvalAcat <- function(pvals, naRm = TRUE) {
 pvalHmp <- function(pvals) {
   # Make sure harmonicmeanp is installed
   if (!requireNamespace("harmonicmeanp", quietly = TRUE)) {
+    # nocov start
     stop("To use this function, please install harmonicmeanp: https://cran.r-project.org/web/packages/harmonicmeanp/index.html")
+    # nocov end
   }
   # https://search.r-project.org/CRAN/refmans/harmonicmeanp/html/pLandau.html
   L <- length(pvals)
@@ -61,7 +63,9 @@ pvalHmp <- function(pvals) {
 
 pvalPoolr <- function(pvals, method, R) {
   if (!requireNamespace("poolr", quietly = TRUE)) {
+    # nocov start
     stop("To use this method, please install poolr: install.packages('poolr')")
+    # nocov end
   }
   fn <- switch(method,
     fisher = poolr::fisher,
@@ -74,7 +78,9 @@ pvalPoolr <- function(pvals, method, R) {
 
 pvalGbj <- function(zScores, R, method) {
   if (!requireNamespace("GBJ", quietly = TRUE)) {
+    # nocov start
     stop("To use this method, please install GBJ: install.packages('GBJ')")
+    # nocov end
   }
   result <- switch(method,
     gbj = GBJ::GBJ(test_stats = zScores, cor_mat = R),
@@ -98,7 +104,9 @@ pvalGbj <- function(zScores, R, method) {
 
 pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
   if (!requireNamespace("aSPU", quietly = TRUE)) {
+    # nocov start
     stop("To use this method, please install aSPU: install.packages('aSPU')")
+    # nocov end
   }
   switch(method,
     aspu = {

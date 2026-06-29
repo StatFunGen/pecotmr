@@ -163,8 +163,10 @@ assembleCtwasInputs <- function(gwasSumStats, twasWeights,
                                 minPipCutoff       = 0,
                                 maxNumVariants     = Inf) {
   if (!requireNamespace("ctwas", quietly = TRUE)) {
+    # nocov start
     stop("Package 'ctwas' is required for the cTWAS pipeline. ",
          "Install from https://github.com/xinhe-lab/ctwas .")
+    # nocov end
   }
   if (missing(gwasSumStats) || !is.list(gwasSumStats) ||
       methods::is(gwasSumStats, "GwasSumStats"))
@@ -339,7 +341,9 @@ estCtwasParam <- function(inputs,
                           fallbackToPrefit        = FALSE,
                           ...) {
   if (!requireNamespace("ctwas", quietly = TRUE)) {
+    # nocov start
     stop("Package 'ctwas' is required for estCtwasParam.")
+    # nocov end
   }
   groupPriorVarStructure <- match.arg(groupPriorVarStructure)
   # ctwas::assemble_region_data assumes z_gene is non-NULL; when the
@@ -440,7 +444,9 @@ screenCtwasRegions <- function(estResult,
                                ncore = 1L,
                                ...) {
   if (!requireNamespace("ctwas", quietly = TRUE)) {
+    # nocov start
     stop("Package 'ctwas' is required for screenCtwasRegions.")
+    # nocov end
   }
   # ctwas::screen_regions requires thin = 1 region_data; expand the
   # thinned set first when assemble_region_data was called with thin < 1
@@ -492,7 +498,9 @@ finemapCtwasRegions <- function(screenResult,
                                 ncore = 1L,
                                 ...) {
   if (!requireNamespace("ctwas", quietly = TRUE)) {
+    # nocov start
     stop("Package 'ctwas' is required for finemapCtwasRegions.")
+    # nocov end
   }
   rd <- screenResult$screened_region_data
   fmRes <- if (length(rd) == 0L) {
@@ -574,8 +582,10 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
                                       L         = 5L,
                                       ncore     = 1L,
                                       ...) {
+  # nocov start
   if (!requireNamespace("ctwas", quietly = TRUE))
     stop("Package 'ctwas' is required for mergeCtwasBoundaryRegions.")
+  # nocov end
   fmRes <- finemapResult$finemap_res
   if (is.null(fmRes) || nrow(fmRes) == 0L) {
     message("mergeCtwasBoundaryRegions: no first-pass finemap result; ",

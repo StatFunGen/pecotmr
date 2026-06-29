@@ -8,7 +8,7 @@ TwasWeightsEntry(
   variantIds,
   weights,
   fits = NULL,
-  cvPerformance = NULL,
+  cvResult = NULL,
   standardized = FALSE,
   dataType = NULL
 )
@@ -18,9 +18,14 @@ TwasWeightsEntry(
 
 \item{weights}{Numeric vector or matrix.}
 
-\item{fits}{Optional method-specific fit object.}
+\item{fits}{Optional method-specific fit object (the full-data fit; e.g. the
+mr.mash fit's \code{{dataDrivenPriorMatrices, w0, V}}).}
 
-\item{cvPerformance}{Optional list of CV metrics.}
+\item{cvResult}{Optional cross-validation payload: a list mirroring
+\code{FineMappingEntry@cvResult} with \code{samplePartition},
+\code{predictions}, \code{performance}, and (mr.mash only) \code{foldFits}
+— the per-fold fits that \code{fineMappingPipeline}'s mvSuSiE path consumes
+as per-fold priors.}
 
 \item{standardized}{Logical (length 1).}
 

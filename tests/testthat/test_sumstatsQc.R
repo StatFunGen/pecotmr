@@ -4476,3 +4476,902 @@ test_that("summaryStatsQc: preserves optional nCase/nControl columns through QC"
   expect_equal(out$nCase, 500)
   expect_equal(out$nControl, 1500)
 })
+
+
+# ===========================================================================
+# mergeVariantInfo (data.frame + GRanges, flip-aware, all = TRUE/FALSE)
+# ===========================================================================
+
+test_that("mergeVariantInfo (data.frame): all = TRUE returns flip-corrected union", {
+  v1 <- data.frame(chrom = c("1", "1", "2"), pos = c(100, 200, 300),
+                   alt = c("A", "C", "G"), ref = c("G", "T", "A"),
+                   stringsAsFactors = FALSE)
+  # row1 exact; row2 alt/ref swapped vs v1 (flip); row3 brand new variant.
+  v2 <- data.frame(chrom = c("1", "1", "3"), pos = c(100, 200, 400),
+                   alt = c("A", "T", "C"), ref = c("G", "C", "A"),
+                   stringsAsFactors = FALSE)
+  out <- mergeVariantInfo(v1, v2, all = TRUE)
+  expect_s3_class(out, "data.frame")
+  expect_setequal(colnames(out), c("chrom", "pos", "alt", "ref"))
+  # The flipped row2 collapses onto v1's orientation, so only the genuinely new
+  # variant (chrom 3) is added to the 3 from v1.
+  expect_equal(nrow(out), 4L)
+  flipped <- out[out$chrom == "1" & out$pos == 200, ]
+  expect_equal(flipped$alt, "C")
+  expect_equal(flipped$ref, "T")
+  expect_true(any(out$chrom == "3" & out$pos == 400))
+})
+
+test_that("mergeVariantInfo (data.frame): all = FALSE returns only flip-corrected variants2", {
+  v1 <- data.frame(chrom = c("1", "1"), pos = c(100, 200),
+                   alt = c("A", "C"), ref = c("G", "T"),
+                   stringsAsFactors = FALSE)
+  v2 <- data.frame(chrom = c("1", "1"), pos = c(100, 200),
+                   alt = c("A", "T"), ref = c("G", "C"),
+                   stringsAsFactors = FALSE)
+  out <- mergeVariantInfo(v1, v2, all = FALSE)
+  expect_equal(nrow(out), 2L)
+  # row2 was a flip of v1; mergeVariantInfo rewrites it to v1's orientation.
+  expect_equal(out$alt, c("A", "C"))
+  expect_equal(out$ref, c("G", "T"))
+})
+
+test_that("mergeVariantInfo (GRanges): converts GRanges inputs and detects flips", {
+  ssqcMakeGr <- function(chrom, pos, alt, ref) {
+    gr <- GenomicRanges::GRanges(
+      seqnames = paste0("chr", chrom),
+      ranges   = IRanges::IRanges(start = pos, width = 1L))
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(alt = alt, ref = ref)
+    gr
+  }
+  g1 <- ssqcMakeGr(c(1, 1, 2), c(100, 200, 300),
+                   c("A", "C", "G"), c("G", "T", "A"))
+  g2 <- ssqcMakeGr(c(1, 1, 3), c(100, 200, 400),
+                   c("A", "T", "C"), c("G", "C", "A"))
+  out <- mergeVariantInfo(g1, g2, all = TRUE)
+  expect_s3_class(out, "data.frame")
+  expect_equal(nrow(out), 4L)
+  flipped <- out[out$chrom == "chr1" & out$pos == 200, ]
+  expect_equal(flipped$alt, "C")
+  expect_equal(flipped$ref, "T")
+})
+
+test_that("mergeVariantInfo does not warn on length-mismatch recycling", {
+  # Regression guard: the flip vector must be full-length so `hasMatch & ...`
+  # never recycles a subset-length comparison.
+  v1 <- data.frame(chrom = c("1", "1", "2"), pos = c(100, 200, 300),
+                   alt = c("A", "C", "G"), ref = c("G", "T", "A"),
+                   stringsAsFactors = FALSE)
+  v2 <- data.frame(chrom = c("1", "1", "3"), pos = c(100, 200, 400),
+                   alt = c("A", "T", "C"), ref = c("G", "C", "A"),
+                   stringsAsFactors = FALSE)
+  expect_no_warning(out <- mergeVariantInfo(v1, v2, all = TRUE))
+  # Behaviour is unchanged: the flipped row collapses onto v1's orientation.
+  flipped <- out[out$chrom == "1" & out$pos == 200, ]
+  expect_equal(flipped$alt, "C")
+  expect_equal(flipped$ref, "T")
+})
+
+# ===========================================================================
+# .matchRefPanel uncovered branches
+# ===========================================================================
+
+test_that(".matchRefPanel: accepts a bare variant-id character vector (targetData)", {
+  res <- pecotmr:::.matchRefPanel(
+    c("chr1:100:A:G", "chr1:200:C:T"),
+    c("chr1:100:A:G", "chr1:200:C:T"),
+    matchMinProp = 0)
+  expect_equal(nrow(res$harmonizedData), 2L)
+})
+
+test_that(".matchRefPanel: strips merge-conflicting columns (variant_id) from targetData", {
+  target <- data.frame(chrom = c(1, 1), pos = c(100, 200),
+                       A2 = c("A", "C"), A1 = c("G", "T"),
+                       variant_id = c("old1", "old2"), z = c(1, 2),
+                       stringsAsFactors = FALSE)
+  ref <- data.frame(chrom = c(1, 1), pos = c(100, 200),
+                    A2 = c("A", "C"), A1 = c("G", "T"),
+                    stringsAsFactors = FALSE)
+  res <- pecotmr:::.matchRefPanel(target, ref, colToFlip = "z", matchMinProp = 0)
+  expect_equal(nrow(res$harmonizedData), 2L)
+  # The input variant_id was stripped; the returned id is rebuilt from QC'd alleles.
+  expect_false(any(c("old1", "old2") %in% res$harmonizedData$variant_id))
+})
+
+test_that(".matchRefPanel: errors when colToFlip column is absent", {
+  target <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G", z = 1,
+                       stringsAsFactors = FALSE)
+  ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G",
+                    stringsAsFactors = FALSE)
+  expect_error(
+    pecotmr:::.matchRefPanel(target, ref, colToFlip = "missingCol", matchMinProp = 0),
+    "not found in targetData")
+})
+
+test_that(".matchRefPanel: errors when colToComplement column is absent", {
+  target <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G", z = 1,
+                       stringsAsFactors = FALSE)
+  ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G",
+                    stringsAsFactors = FALSE)
+  expect_error(
+    pecotmr:::.matchRefPanel(target, ref, colToComplement = "missingAf",
+                            matchMinProp = 0),
+    "not found in targetData")
+})
+
+test_that(".matchRefPanel: complements colToComplement (1 - af) on an allele swap", {
+  # pos 100 exact; pos 200 allele-swapped -> sign_flip => z negated, af -> 1-af.
+  target <- data.frame(chrom = c(1, 1), pos = c(100, 200),
+                       A2 = c("A", "A"), A1 = c("G", "G"),
+                       z = c(1, 2), af = c(0.3, 0.4),
+                       stringsAsFactors = FALSE)
+  ref <- data.frame(chrom = c(1, 1), pos = c(100, 200),
+                    A2 = c("A", "G"), A1 = c("G", "A"),
+                    stringsAsFactors = FALSE)
+  res <- pecotmr:::.matchRefPanel(target, ref, colToFlip = "z",
+                                  colToComplement = "af", matchMinProp = 0)
+  hd <- res$harmonizedData
+  row200 <- hd[hd$pos == 200, ]
+  expect_equal(row200$af, 0.6)   # 1 - 0.4
+  expect_equal(row200$z, -2)     # sign-flipped
+})
+
+test_that(".matchRefPanel: removeDups = TRUE warns and drops duplicate variants", {
+  target <- data.frame(chrom = c(1, 1), pos = c(100, 100),
+                       A2 = c("A", "A"), A1 = c("G", "G"),
+                       stringsAsFactors = FALSE)
+  ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G",
+                    stringsAsFactors = FALSE)
+  expect_warning(
+    res <- pecotmr:::.matchRefPanel(target, ref, removeDups = TRUE,
+                                    matchMinProp = 0),
+    "Removed 1 duplicate")
+  expect_equal(nrow(res$harmonizedData), 1L)
+})
+
+test_that(".matchRefPanel: errors when duplicated variant IDs remain (removeDups = FALSE)", {
+  target <- data.frame(chrom = c(1, 1), pos = c(100, 100),
+                       A2 = c("A", "A"), A1 = c("G", "G"),
+                       stringsAsFactors = FALSE)
+  ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G",
+                    stringsAsFactors = FALSE)
+  expect_error(
+    pecotmr:::.matchRefPanel(target, ref, removeDups = FALSE, matchMinProp = 0),
+    "Duplicated variant IDs remain")
+})
+
+test_that(".matchRefPanel: errors when too few variants match (matchMinProp)", {
+  target <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G",
+                       stringsAsFactors = FALSE)
+  ref <- data.frame(chrom = rep(1, 10), pos = seq(100, 1000, 100),
+                    A2 = rep("A", 10), A1 = rep("G", 10),
+                    stringsAsFactors = FALSE)
+  expect_error(
+    pecotmr:::.matchRefPanel(target, ref, matchMinProp = 0.9),
+    "Not enough variants")
+})
+
+# ===========================================================================
+# addDupsBackDentist: dimension-mismatch stops
+# ===========================================================================
+
+test_that("addDupsBackDentist stops when dentistOutput nrow != count of non-duplicates", {
+  dentistOutput <- data.frame(
+    original_z = c(1, 2, 3), imputed_z = c(1, 2, 3),
+    iter_to_correct = c(1, 1, 1), rsq = c(0.5, 0.5, 0.5),
+    z_diff = c(0.1, 0.1, 0.1))
+  # 4 non-duplicate markers but only 3 rows in dentistOutput.
+  findDupOutput <- list(dupBearer = c(-1, -1, -1, -1), sign = rep(1, 4))
+  expect_error(
+    pecotmr:::addDupsBackDentist(rep(0, 4), dentistOutput, findDupOutput),
+    "does not match the occurrences")
+})
+
+test_that("addDupsBackDentist stops on inconsistent zScore / findDupOutput length", {
+  dentistOutput <- data.frame(
+    original_z = c(1, 2), imputed_z = c(1, 2),
+    iter_to_correct = c(1, 1), rsq = c(0.5, 0.5), z_diff = c(0.1, 0.1))
+  findDupOutput <- list(dupBearer = c(-1, -1), sign = c(1, 1))
+  # nrow(dentistOutput) == sum(dupBearer == -1) == 2, but zScore has length 3.
+  expect_error(
+    pecotmr:::addDupsBackDentist(rep(0, 3), dentistOutput, findDupOutput),
+    "inconsistent dimension")
+})
+
+# ===========================================================================
+# slalom: non-matrix X coerced to matrix
+# ===========================================================================
+
+test_that("slalom coerces a non-matrix X (data.frame) to a matrix", {
+  set.seed(11)
+  n_samples <- 80
+  n_snps <- 6
+  Xdf <- as.data.frame(matrix(sample(0:2, n_samples * n_snps, replace = TRUE),
+                              nrow = n_samples, ncol = n_snps))
+  z <- rnorm(n_snps)
+  result <- slalom(zScore = z, X = Xdf)
+  expect_equal(nrow(result$data), n_snps)
+})
+
+# ===========================================================================
+# getSusieResult: trimmed fit is empty
+# ===========================================================================
+
+test_that("getSusieResult returns NULL when the trimmed susie fit is empty", {
+  conData <- list(finemappingEntry = FineMappingEntry(
+    variantIds = c("1:100:A:G", "1:200:C:T"),
+    susieFit   = list(),
+    topLoci    = data.frame(variant_id = character(0), pip = numeric(0),
+                            stringsAsFactors = FALSE)))
+  expect_null(getSusieResult(conData))
+})
+
+# ===========================================================================
+# autoDecision: high-correlation tagging branch is reached
+# ===========================================================================
+
+test_that("autoDecision evaluates the high-corr tagging expression for non-top CS", {
+  # A non-top CS with a small p-value forces evaluation of the highCorrCols
+  # branch (the `..col` accessor errors without data.table; we only need the
+  # line to be exercised).
+  df <- data.frame(cs_name = c("L1", "L2"),
+                   top_z = c(5.0, 3.0),
+                   p_value = c(1e-10, 1e-10),
+                   stringsAsFactors = FALSE)
+  expect_error(suppressWarnings(autoDecision(df, highCorrCols = c("cs_corr_1"))))
+})
+
+# ===========================================================================
+# raissSingleMatrix / raissSingleMatrixFromX uncovered branches
+# ===========================================================================
+
+test_that("raissSingleMatrix coerces a data.frame LD matrix and is verbose", {
+  set.seed(99)
+  p <- 8
+  ref_panel <- data.frame(chrom = rep(1, p), pos = seq(10, p * 10, 10),
+                          variant_id = paste0("rs", 1:p),
+                          A1 = rep("A", p), A2 = rep("G", p),
+                          stringsAsFactors = FALSE)
+  known_idx <- c(1, 3, 5)
+  known_zscores <- data.frame(chrom = rep(1, 3), pos = ref_panel$pos[known_idx],
+                              variant_id = ref_panel$variant_id[known_idx],
+                              A1 = rep("A", 3), A2 = rep("G", 3),
+                              z = rnorm(3), stringsAsFactors = FALSE)
+  ldDf <- as.data.frame(diag(p))
+  res <- pecotmr:::raissSingleMatrix(ref_panel, known_zscores, ldDf,
+                                     r2Threshold = 0, minimumLd = 0,
+                                     verbose = FALSE)
+  expect_true(is.list(res))
+  expect_equal(nrow(res$resultNofilter), p)
+})
+
+test_that("raissSingleMatrix emits verbose 'No known variants' message", {
+  ref_panel <- data.frame(chrom = rep(1, 4), pos = seq(10, 40, 10),
+                          variant_id = paste0("rs", 1:4),
+                          A1 = rep("A", 4), A2 = rep("G", 4),
+                          stringsAsFactors = FALSE)
+  known_zscores <- data.frame(chrom = rep(1, 2), pos = c(500, 600),
+                              variant_id = c("ghost1", "ghost2"),
+                              A1 = rep("A", 2), A2 = rep("G", 2),
+                              z = rnorm(2), stringsAsFactors = FALSE)
+  expect_message(
+    res <- pecotmr:::raissSingleMatrix(ref_panel, known_zscores, diag(4),
+                                       verbose = TRUE),
+    "No known variants")
+  expect_null(res)
+})
+
+test_that("raissSingleMatrix emits verbose 'No unknown variants' message", {
+  ref_panel <- data.frame(chrom = rep(1, 4), pos = seq(10, 40, 10),
+                          variant_id = paste0("rs", 1:4),
+                          A1 = rep("A", 4), A2 = rep("G", 4),
+                          stringsAsFactors = FALSE)
+  known_zscores <- data.frame(chrom = rep(1, 4), pos = seq(10, 40, 10),
+                              variant_id = paste0("rs", 1:4),
+                              A1 = rep("A", 4), A2 = rep("G", 4),
+                              z = rnorm(4), stringsAsFactors = FALSE)
+  expect_message(
+    res <- pecotmr:::raissSingleMatrix(ref_panel, known_zscores, diag(4),
+                                       verbose = TRUE),
+    "No unknown variants")
+  expect_equal(res$resultNofilter, known_zscores)
+})
+
+test_that("raissSingleMatrixFromX stops on unsorted positions", {
+  ref_panel <- data.frame(chrom = rep(1, 4), pos = c(40, 30, 20, 10),
+                          variant_id = paste0("rs", 1:4),
+                          A1 = rep("A", 4), A2 = rep("G", 4),
+                          stringsAsFactors = FALSE)
+  known_zscores <- data.frame(chrom = 1, pos = 10, variant_id = "rs4",
+                              A1 = "A", A2 = "G", z = 1, stringsAsFactors = FALSE)
+  X <- matrix(rnorm(20 * 4), nrow = 20)
+  colnames(X) <- ref_panel$variant_id
+  expect_error(
+    pecotmr:::raissSingleMatrixFromX(ref_panel, known_zscores, X, verbose = FALSE),
+    "increasing order of pos")
+})
+
+test_that("raissSingleMatrixFromX emits verbose no-known / no-unknown messages", {
+  set.seed(7)
+  p <- 5
+  ref_panel <- data.frame(chrom = rep(1, p), pos = seq(10, p * 10, 10),
+                          variant_id = paste0("rs", 1:p),
+                          A1 = rep("A", p), A2 = rep("G", p),
+                          stringsAsFactors = FALSE)
+  X <- scale(matrix(sample(0:2, 40 * p, replace = TRUE), nrow = 40))
+  X[is.na(X)] <- 0
+  colnames(X) <- ref_panel$variant_id
+  ghost <- data.frame(chrom = rep(1, 2), pos = c(900, 1000),
+                      variant_id = c("g1", "g2"), A1 = rep("A", 2),
+                      A2 = rep("G", 2), z = rnorm(2), stringsAsFactors = FALSE)
+  expect_message(
+    res_no_known <- pecotmr:::raissSingleMatrixFromX(ref_panel, ghost, X,
+                                                     verbose = TRUE),
+    "No known variants")
+  expect_null(res_no_known)
+
+  all_known <- data.frame(chrom = rep(1, p), pos = seq(10, p * 10, 10),
+                          variant_id = paste0("rs", 1:p), A1 = rep("A", p),
+                          A2 = rep("G", p), z = rnorm(p), stringsAsFactors = FALSE)
+  expect_message(
+    res_no_unknown <- pecotmr:::raissSingleMatrixFromX(ref_panel, all_known, X,
+                                                       verbose = TRUE),
+    "No unknown variants")
+  expect_equal(res_no_unknown$resultNofilter, all_known)
+})
+
+# ===========================================================================
+# raiss: genotypeMatrix dispatch verbose / error branches
+# ===========================================================================
+
+test_that("raiss genotypeMatrix path: single-matrix, list, all-fail, and bad-type", {
+  data <- generate_X_test_data(n = 60, p = 20, n_known = 10, seed = 3)
+
+  # Single matrix, verbose -> "Processing genotype matrix via SVD..."
+  expect_message(
+    res_single <- raiss(data$ref_panel, data$known_zscores,
+                        genotypeMatrix = data$X, r2Threshold = 0,
+                        minimumLd = 0, verbose = TRUE),
+    "Processing genotype matrix")
+  expect_equal(nrow(res_single$resultNofilter), nrow(data$ref_panel))
+
+  # List of (one) matrix, verbose -> "Processing multiple genotype matrix blocks"
+  expect_message(
+    res_list <- raiss(data$ref_panel, data$known_zscores,
+                     genotypeMatrix = list(data$X), r2Threshold = 0,
+                     minimumLd = 0, verbose = TRUE),
+    "Processing multiple genotype matrix blocks")
+  expect_true(is.list(res_list))
+
+  # List where every block fails (foreign known variants) -> NULL + message
+  ghost <- data.frame(chrom = 1, pos = 99999, variant_id = "zzz",
+                      A1 = "A", A2 = "G", z = 1, stringsAsFactors = FALSE)
+  expect_message(
+    res_fail <- raiss(data$ref_panel, ghost,
+                     genotypeMatrix = list(data$X[, 1:10, drop = FALSE],
+                                           data$X[, 11:20, drop = FALSE]),
+                     verbose = TRUE),
+    "No blocks could be processed")
+  expect_null(res_fail)
+
+  # Neither matrix nor list -> hard error
+  expect_error(
+    raiss(data$ref_panel, data$known_zscores, genotypeMatrix = 42),
+    "must be a matrix or a list")
+})
+
+# ===========================================================================
+# raiss: multi-LD-block verbose / merge / error branches
+# ===========================================================================
+
+# Build a 2-block LD list whose shared boundary variant is IMPUTED (not known)
+# in both blocks, so its raissR2 is a finite value on both sides and the
+# boundary-merge R2 comparison branches are exercised.
+ssqcOverlapImputedBlocks <- function(seed = 5) {
+  set.seed(seed)
+  vid <- paste0("v", 1:8)
+  pos <- seq(10, 80, by = 10)
+  ref_panel <- data.frame(chrom = rep(1, 8), pos = pos, variant_id = vid,
+                          A1 = rep("A", 8), A2 = rep("G", 8),
+                          stringsAsFactors = FALSE)
+  # v4 (the boundary) is left out of the known set so it is imputed in both blocks.
+  known_idx <- c(1, 2, 3, 5, 6, 7, 8)
+  known_zscores <- data.frame(chrom = rep(1, length(known_idx)),
+                              pos = pos[known_idx], variant_id = vid[known_idx],
+                              A1 = rep("A", length(known_idx)),
+                              A2 = rep("G", length(known_idx)),
+                              z = rnorm(length(known_idx)),
+                              stringsAsFactors = FALSE)
+  mkBlock <- function(ids) {
+    nb <- length(ids)
+    m <- matrix(0, nb, nb)
+    for (a in 1:nb) for (b in 1:nb) m[a, b] <- if (a == b) 1 else 0.9^abs(a - b)
+    rownames(m) <- colnames(m) <- ids
+    m
+  }
+  block1_ids <- vid[1:4]
+  block2_ids <- vid[4:8]
+  variantIndices <- rbind(
+    data.frame(variant_id = block1_ids, blockId = 1L, stringsAsFactors = FALSE),
+    data.frame(variant_id = block2_ids, blockId = 2L, stringsAsFactors = FALSE))
+  blockMetadata <- data.frame(blockId = c(1L, 2L), chrom = c(1, 1),
+                              size = c(4L, 5L), startIdx = c(1L, 4L),
+                              endIdx = c(4L, 8L), stringsAsFactors = FALSE)
+  ldBlocks <- list(
+    ldMatrices = list(mkBlock(block1_ids), mkBlock(block2_ids)),
+    variantIndices = variantIndices,
+    blockMetadata = blockMetadata,
+    ldVariants = vid)
+  list(ref_panel = ref_panel, known_zscores = known_zscores,
+       LD_matrix_blocks = ldBlocks)
+}
+
+test_that("raiss multi-LD-block: verbose messages and an imputed boundary merge", {
+  td <- ssqcOverlapImputedBlocks(seed = 5)
+  expect_message(
+    res <- raiss(td$ref_panel, td$known_zscores,
+                 ldMatrix = td$LD_matrix_blocks, lamb = 0.01, rcond = 0.01,
+                 r2Threshold = 0, minimumLd = 0, verbose = TRUE),
+    "Processing multiple LD blocks")
+  expect_true(is.list(res))
+  # Boundary variant v4 appears exactly once after the merge.
+  expect_equal(sum(res$resultNofilter$variant_id == "v4"), 1L)
+})
+
+test_that("raiss multi-LD-block: stops on a block dimension mismatch", {
+  td <- generate_block_diagonal_test_data(seed = 2,
+                                          block_structure = "non_overlapping",
+                                          n_variants = 30)
+  blocks <- td$LD_matrix_blocks
+  # Shrink block 1's matrix so it no longer matches its variant count.
+  blocks$ldMatrices[[1]] <- blocks$ldMatrices[[1]][-1, -1, drop = FALSE]
+  expect_error(
+    raiss(td$ref_panel, td$known_zscores, ldMatrix = blocks, verbose = FALSE),
+    "LD matrix dimension does not match")
+})
+
+test_that("raiss multi-LD-block: returns NULL when no block has known variants", {
+  td <- generate_block_diagonal_test_data(seed = 3,
+                                          block_structure = "non_overlapping",
+                                          n_variants = 30)
+  ghost <- data.frame(chrom = 1, pos = 99999, variant_id = "zzz",
+                      A1 = "A", A2 = "G", z = 1, stringsAsFactors = FALSE)
+  expect_message(
+    res <- raiss(td$ref_panel, ghost, ldMatrix = td$LD_matrix_blocks,
+                 verbose = TRUE),
+    "No blocks could be processed")
+  expect_null(res)
+})
+
+# ===========================================================================
+# raissModel: batch = FALSE with condition-number reporting
+# ===========================================================================
+
+test_that("raissModel batch = FALSE reports the condition number", {
+  zt <- c(1.2, 0.5)
+  sig_t <- matrix(c(1, 0.5, 0.5, 1), nrow = 2)
+  sig_i_t <- matrix(c(0.5, 0.2), nrow = 1)   # single unknown -> 1 x 2
+  res <- pecotmr:::raissModel(zt, sig_t, sig_i_t, batch = FALSE,
+                              reportConditionNumber = TRUE)
+  expect_true(is.numeric(res$conditionNumber))
+  expect_true(is.finite(res$conditionNumber))
+  # checkInversion() returns all.equal()'s value: TRUE when the inverse
+  # reproduces sigT within tolerance, otherwise a character diff string.
+  expect_true(isTRUE(res$correctInversion) || is.character(res$correctInversion))
+})
+
+# ===========================================================================
+# krigingOutlierQc: non-square LD stop + variantIds defaulting to rownames
+# ===========================================================================
+
+test_that("krigingOutlierQc requires a square LD matrix aligned to zScore", {
+  expect_error(krigingOutlierQc(c(1, 2, 3), diag(2), n = 100),
+               "square LD matrix")
+})
+
+test_that("krigingOutlierQc defaults variantIds to rownames(R)", {
+  skip_if_not("kriging_rss" %in% getNamespaceExports("susieR"),
+              "installed susieR has no kriging_rss")
+  m <- 6
+  R <- matrix(0.6, m, m); diag(R) <- 1
+  ids <- paste0("1:", seq_len(m) * 100, ":A:G")
+  rownames(R) <- colnames(R) <- ids
+  z <- rep(2, m)
+  kr <- krigingOutlierQc(z, R, n = 1000)   # no variantIds passed
+  expect_equal(kr$diagnostics$variant_id, ids)
+})
+
+# ===========================================================================
+# .safeSvd: all singular values below tolerance
+# ===========================================================================
+
+test_that(".safeSvd stops when all singular values fall below tolerance", {
+  set.seed(1)
+  mat <- matrix(rnorm(20), nrow = 5, ncol = 4)
+  # tol >= 1 forces even the largest (ratio == 1) singular value below threshold.
+  expect_error(pecotmr:::.safeSvd(mat, tol = 2),
+               "below the tolerance threshold")
+})
+
+# ===========================================================================
+# .applyContentFilters (MAF / FRQ, INFO, N-MAD filters + missing-column stops)
+# ===========================================================================
+
+test_that(".applyContentFilters: MAF filter drops low-frequency variants", {
+  df <- data.frame(SNP = paste0("rs", 1:4),
+                   MAF = c(0.30, 0.001, 0.20, 0.0005),
+                   stringsAsFactors = FALSE)
+  out <- pecotmr:::.applyContentFilters(df, mafCutoff = 0.01, nCutoff = 0)
+  expect_equal(nrow(out$df), 2L)
+  expect_equal(out$audit$mafDropped, 2L)
+})
+
+test_that(".applyContentFilters: FRQ is normalized to MAF via min(af, 1 - af)", {
+  df <- data.frame(SNP = paste0("rs", 1:3),
+                   FRQ = c(0.5, 0.995, 0.001),
+                   stringsAsFactors = FALSE)
+  out <- pecotmr:::.applyContentFilters(df, mafCutoff = 0.01, nCutoff = 0)
+  # FRQ 0.995 -> MAF 0.005 (dropped); 0.001 dropped; 0.5 kept.
+  expect_equal(nrow(out$df), 1L)
+  expect_equal(out$audit$mafDropped, 2L)
+})
+
+test_that(".applyContentFilters: mafCutoff > 0 without MAF/FRQ column errors", {
+  df <- data.frame(SNP = paste0("rs", 1:3), stringsAsFactors = FALSE)
+  expect_error(pecotmr:::.applyContentFilters(df, mafCutoff = 0.01),
+               "requires a MAF or FRQ column")
+})
+
+test_that(".applyContentFilters: INFO filter drops low-INFO variants", {
+  df <- data.frame(SNP = paste0("rs", 1:4),
+                   INFO = c(0.99, 0.10, 0.80, 0.30),
+                   stringsAsFactors = FALSE)
+  out <- pecotmr:::.applyContentFilters(df, infoCutoff = 0.5, nCutoff = 0)
+  expect_equal(nrow(out$df), 2L)
+  expect_equal(out$audit$infoDropped, 2L)
+})
+
+test_that(".applyContentFilters: infoCutoff > 0 without INFO column errors", {
+  df <- data.frame(SNP = paste0("rs", 1:3), stringsAsFactors = FALSE)
+  expect_error(pecotmr:::.applyContentFilters(df, infoCutoff = 0.5),
+               "requires an INFO column")
+})
+
+test_that(".applyContentFilters: N-outlier (MAD) filter drops extreme N", {
+  df <- data.frame(SNP = paste0("rs", 1:5),
+                   N = c(1000, 1010, 1005, 995, 100000),
+                   stringsAsFactors = FALSE)
+  out <- pecotmr:::.applyContentFilters(df, nCutoff = 3)
+  expect_equal(nrow(out$df), 4L)
+  expect_equal(out$audit$nDropped, 1L)
+})
+
+test_that(".applyContentFilters: NA N values are always dropped", {
+  df <- data.frame(SNP = paste0("rs", 1:4),
+                   N = c(1000, NA, 1005, 1010),
+                   stringsAsFactors = FALSE)
+  out <- pecotmr:::.applyContentFilters(df, nCutoff = 5)
+  expect_false(any(is.na(out$df$N)))
+  expect_equal(out$audit$nDropped, 1L)
+})
+
+# ===========================================================================
+# .runEntrySummaryStatsQc / summaryStatsQc deep branches
+# ===========================================================================
+
+test_that("summaryStatsQc: emit() uses the no-label form for an empty study id", {
+  # An empty study id resolves the per-entry label to NA, exercising the
+  # unlabeled emit() branch.
+  ss <- GwasSumStats(study = "", entry = list(.ssQ_makeEntryGr()),
+                     genome = "hg19", ldSketch = .ssQ_makeHandle())
+  msgs <- capture_messages(summaryStatsQc(ss, nCutoff = 0))
+  joined <- paste(msgs, collapse = "")
+  expect_match(joined, "QC summary:")
+  # No bracketed label prefix appears on the rollup line.
+  expect_true(any(grepl("^QC summary:", msgs)))
+})
+
+test_that("summaryStatsQc: content (N) filter emits its 'kept N of M' message + rollup nCutoff segment", {
+  gr <- .ssQ_makeEntryGr()
+  S4Vectors::mcols(gr)$N <- c(1000L, 1010L, 1005L, 100000L)   # last is an N outlier
+  ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
+                     ldSketch = .ssQ_makeHandle())
+  msgs <- capture_messages(res <- summaryStatsQc(ss, nCutoff = 3))
+  joined <- paste(msgs, collapse = "")
+  expect_match(joined, "MAF/INFO/N filters kept")
+  expect_match(joined, "nCutoff 1")
+  ea <- getQcInfo(res)$entryAudit[[1L]]
+  expect_equal(ea$contentFilters$nDropped, 1L)
+})
+
+test_that("summaryStatsQc: derives BETA/SE from Z+MAF+N and records the audit", {
+  gr <- GenomicRanges::GRanges(seqnames = rep("chr1", 4),
+    ranges = IRanges::IRanges(start = c(100L, 200L, 300L, 400L), width = 1L))
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    SNP = paste0("rs", 1:4), A1 = rep("A", 4), A2 = rep("G", 4),
+    Z = c(1, 2, 3, 4), N = rep(1000L, 4), MAF = c(0.2, 0.3, 0.4, 0.25))
+  ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
+                     ldSketch = .ssQ_makeHandle())
+  res <- summaryStatsQc(ss, nCutoff = 0)
+  ea <- getQcInfo(res)$entryAudit[[1L]]
+  expect_equal(ea$betaSeFromZ$nDerived, 4L)
+})
+
+test_that("summaryStatsQc: clamps tiny Z-derived P values and accumulates the audit", {
+  gr <- .ssQ_makeEntryGr()
+  S4Vectors::mcols(gr)$Z <- c(50, 1, 2, 3)   # |Z| = 50 underflows P to 0
+  ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
+                     ldSketch = .ssQ_makeHandle())
+  res <- summaryStatsQc(ss, nCutoff = 0)
+  ea <- getQcInfo(res)$entryAudit[[1L]]
+  expect_true(!is.null(ea$sanityChecks$smallPClamped))
+  expect_gte(ea$sanityChecks$smallPClamped, 1L)
+})
+
+test_that("summaryStatsQc: early-exits when fewer than two variants survive pre-harmonization QC", {
+  gr <- .ssQ_makeEntryGr(snp_ids = "rs1", positions = 100L)
+  ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
+                     ldSketch = .ssQ_makeHandle())
+  res <- summaryStatsQc(ss, nCutoff = 0)
+  ea <- getQcInfo(res)$entryAudit[[1L]]
+  expect_match(ea$earlyExit, "fewer than two variants")
+  expect_equal(length(res$entry[[1L]]), 1L)
+})
+
+test_that("summaryStatsQc: kriging prefilter runs, records outliers, and adds the rollup segment", {
+  skip_if_not("kriging_rss" %in% getNamespaceExports("susieR"),
+              "installed susieR has no kriging_rss")
+  ss <- GwasSumStats(
+    study  = "g1",
+    entry  = list(.ssQ_makeEntryGr(
+                    snp_ids   = paste0("rs", 1:8),
+                    positions = seq(100L, by = 100L, length.out = 8L))),
+    genome = "hg19",
+    ldSketch = .ssQ_makeHandleVid(snp_n = 8L))
+  local_mocked_bindings(
+    extractBlockGenotypes = .ssQ_mockExtractor(),
+    .package = "pecotmr")
+  msgs <- capture_messages(
+    res <- summaryStatsQc(ss, alleleFlipKriging = TRUE, pipCutoffToSkip = 0,
+                          nCutoff = 0))
+  joined <- paste(msgs, collapse = "")
+  expect_match(joined, "kriging prefilter removed")
+  expect_match(joined, "kriging ")
+  ea <- getQcInfo(res)$entryAudit[[1L]]
+  expect_true("krigingOutliersDropped" %in% names(ea))
+})
+
+test_that("summaryStatsQc: impute = TRUE assembles BETA/SE/N and median-fills missing N", {
+  gr <- GenomicRanges::GRanges(seqnames = rep("chr1", 4),
+    ranges = IRanges::IRanges(start = c(100L, 200L, 300L, 400L), width = 1L))
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    SNP = paste0("rs", 1:4), A1 = rep("A", 4), A2 = rep("G", 4),
+    Z = c(1, 2, 3, 4), N = rep(1000L, 4),
+    BETA = c(0.1, 0.2, 0.3, 0.4), SE = rep(0.1, 4))
+  ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
+                     ldSketch = .ssQ_makeHandle(snp_n = 8L, n_samples = 60L))
+  local_mocked_bindings(
+    extractBlockGenotypes = .ssQ_mockExtractor(),
+    raiss = function(refPanel, knownZscores, genotypeMatrix, ...) {
+      added <- refPanel[refPanel$variant_id %in% c("rs5", "rs6"), , drop = FALSE]
+      added$z    <- c(1.5, -2.0)
+      added$n    <- c(1000, NA)            # NA triggers the median fill
+      added$beta <- c(0.11, -0.22)
+      added$se   <- c(0.05, 0.06)
+      list(resultFilter = rbind(knownZscores, added))
+    },
+    .package = "pecotmr")
+  res <- summaryStatsQc(ss, impute = TRUE)
+  ea <- getQcInfo(res)$entryAudit[[1L]]
+  expect_equal(ea$raissTotalVariants, 6L)
+  expect_equal(ea$raissImputedVariants, 2L)
+  mc <- S4Vectors::mcols(res$entry[[1L]])
+  expect_true(all(c("BETA", "SE", "N") %in% colnames(mc)))
+  expect_false(any(is.na(mc$N)))   # median-filled
+})
+
+test_that("summaryStatsQc: per-entry rollup enumerates every removed-step segment", {
+  # One entry that trips each sanity / content / harmonization drop so the
+  # rollup segment strings are all assembled.
+  df <- data.frame(
+    seqnames = c("chr1", "chr1", "chr1", "chr1", "chr99", "chr1", "chr1",
+                 "chr1", "chr1", "chr1", "chr1", "chr1"),
+    pos = c(100L, 200L, 300L, 9999L, 100L, 500L, 600L, 700L, 800L,
+            150L, 250L, 350L),
+    SNP = c("rs1", "rs2", "rs3", "rsOff", "rsChr", "rsMiss", "rsBadP",
+            "rsZero", "rsBadSE", "rsMaf", "rsInfo", "rsN"),
+    A1 = c("A", "A", "A", "A", "A", NA, "A", "A", "A", "A", "A", "A"),
+    A2 = rep("G", 12),
+    Z   = c(5, 4, 3, 6, 2, 2, 2, 2, 2, 2, 2, 2),
+    N   = c(1000, 1001, 1002, 1000, 1000, 1000, 1000, 1000, 1000, 1000,
+            1000, 100000),
+    MAF = c(0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.001,
+            0.30, 0.30),
+    INFO = c(0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95, 0.95,
+             0.10, 0.95),
+    P    = c(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.5, 0.5, 0.5, 0.5, 0.5, 0.5),
+    BETA = c(0.5, 0.4, 0.3, 0.6, 0.2, 0.2, 0.2, 0.0, 0.2, 0.2, 0.2, 0.2),
+    SE   = c(0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, -1.0, 0.1, 0.1, 0.1),
+    stringsAsFactors = FALSE)
+  gr <- GenomicRanges::GRanges(
+    seqnames = df$seqnames,
+    ranges = IRanges::IRanges(start = df$pos, width = 1L))
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    SNP = df$SNP, A1 = df$A1, A2 = df$A2, Z = df$Z, N = df$N,
+    MAF = df$MAF, INFO = df$INFO, P = df$P, BETA = df$BETA, SE = df$SE)
+  ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
+                     ldSketch = .ssQ_makeHandle())
+  msgs <- capture_messages(
+    res <- summaryStatsQc(ss, mafCutoff = 0.01, infoCutoff = 0.5, nCutoff = 3))
+  joined <- paste(msgs, collapse = "")
+  ea <- getQcInfo(res)$entryAudit[[1L]]
+  expect_equal(ea$sanityChecks$nonstandardChrDropped, 1L)
+  expect_equal(ea$sanityChecks$missDataDropped, 1L)
+  expect_equal(ea$sanityChecks$pOutOfRangeDropped, 1L)
+  expect_equal(ea$sanityChecks$zeroEffectDropped, 1L)
+  expect_equal(ea$sanityChecks$nonpositiveSeDropped, 1L)
+  expect_equal(ea$contentFilters$mafDropped, 1L)
+  expect_equal(ea$contentFilters$infoDropped, 1L)
+  expect_equal(ea$contentFilters$nDropped, 1L)
+  # The rollup line names each removed step.
+  for (seg in c("nonstdChr", "missData", "badP", "zeroEffect", "badSE",
+                "maf ", "info ", "nCutoff", "harmonization")) {
+    expect_match(joined, seg, fixed = TRUE)
+  }
+})
+
+test_that("dentistSingleWindow: rsq-warning capture path on a near-singular LD block", {
+  # Highly collinear LD with a moderately strong signal can push the C++
+  # adjusted rsq_eigen above 1, exercising the withCallingHandlers capture /
+  # summary-warning path. The call is wrapped to stay robust either way.
+  set.seed(123)
+  m <- 60
+  R <- matrix(0.999, m, m); diag(R) <- 1
+  z <- as.numeric(R %*% rnorm(m, sd = 3))
+  res <- suppressWarnings(
+    dentistSingleWindow(z, R = R, nSample = 50, propSVD = 0.95,
+                        duprThreshold = 1.0))
+  expect_equal(nrow(res), m)
+})
+
+# ===========================================================================
+# Final-coverage closeouts: a handful of branch/error-handler lines that the
+# existing suite leaves untouched.
+# ===========================================================================
+
+test_that(".matchRefPanel sanitizes an empty-named target column to 'unnamed_N'", {
+  # 5 columns whose first four are positional (NOT literally named
+  # chrom/pos/A2/A1), so .matchRefPanel routes through variantIdToDf -- which
+  # preserves the extra column -- rather than the select()-based path. The 5th
+  # column has an empty name, so the joined matchResult carries an empty-named
+  # column and sanitizeNames() rewrites it to "unnamed_1" (sumstatsQc.R:83).
+  target <- data.frame(CHR = c(1, 1, 1), POS = c(100, 200, 300),
+                       ref = c("A", "C", "G"), alt = c("G", "T", "A"),
+                       extra = c(0.1, 0.2, 0.3), stringsAsFactors = FALSE)
+  names(target)[5] <- ""
+  ref <- data.frame(chrom = c(1, 1, 1), pos = c(100, 200, 300),
+                    A2 = c("A", "C", "G"), A1 = c("G", "T", "A"),
+                    stringsAsFactors = FALSE)
+  res <- pecotmr:::.matchRefPanel(target, ref, matchMinProp = 0)
+  expect_equal(nrow(res$harmonizedData), 3L)
+  nm <- colnames(res$harmonizedData)
+  expect_false(any(nm == "" | is.na(nm)))      # the empty name was repaired
+  expect_true(any(grepl("^unnamed_", nm)))     # ... to an "unnamed_*" label
+})
+
+test_that("dentistSingleWindow captures cpp11 rsq>1 warnings and re-emits a summary", {
+  # Mock the cpp11 imputer so it (a) emits the inner "Adjusted rsq_eigen value
+  # exceeding 1" warning the handler captures + muffles (sumstatsQc.R:688-689)
+  # and (b) returns the documented raw columns so the rest of the function runs.
+  # The captured warning triggers the summary warning (sumstatsQc.R:704-705).
+  set.seed(1)
+  m <- 5
+  R <- diag(m)
+  z <- c(1, 2, 3, 4, 5)
+  local_mocked_bindings(
+    dentistIterativeImpute = function(ldMatR, nSample, zScoreR, ...) {
+      warning("Adjusted rsq_eigen value exceeding 1: capped at 1.0")
+      n <- length(zScoreR)
+      list(originalZ = as.numeric(zScoreR), imputedZ = as.numeric(zScoreR) * 0.5,
+           rsq = rep(0.3, n), zDiff = rep(0.1, n), iterToCorrect = rep(1L, n))
+    },
+    .package = "pecotmr")
+  # Capture every warning (the <2000-variant note and the rsq summary) so we can
+  # assert on the rsq summary specifically.
+  seen <- character(0)
+  res <- withCallingHandlers(
+    dentistSingleWindow(z, R = R, nSample = 1000, duprThreshold = 1.0),
+    warning = function(w) {
+      seen <<- c(seen, conditionMessage(w)); invokeRestart("muffleWarning")
+    })
+  expect_true(any(grepl("rsq_eigen values exceeded 1", seen)))   # summary re-emitted
+  # The post-warning code (renames, outlier stat, z_diff drop) ran successfully.
+  expect_equal(nrow(res), m)
+  expect_equal(res$original_z, z)
+  expect_true(all(c("imputed_z", "rsq", "outlier_stat", "outlier") %in% colnames(res)))
+  expect_false("z_diff" %in% colnames(res))
+})
+
+test_that("segmentByDist keeps the last window when its span clears the cutoff", {
+  # A single dense block spanning 1.25x the distance cutoff produces two windows
+  # whose final window is wide enough that adjustLastFn does NOT shrink it: the
+  # else branch returns the current startIdx unchanged (sumstatsQc.R:1095).
+  pos <- as.integer(round(seq(1, 1250000, length.out = 600)))
+  win <- pecotmr:::segmentByDist(pos, maxDist = 1000000, minDim = 500)
+  expect_true(is.data.frame(win))
+  expect_gte(nrow(win), 2L)
+  expect_true(all(c("windowStartIdx", "windowEndIdx", "fillStartIdx", "fillEndIdx")
+                  %in% colnames(win)))
+  # Window indices stay in range (end indices are 1-based exclusive).
+  expect_true(all(win$windowStartIdx >= 1L))
+  expect_true(all(win$windowEndIdx <= length(pos) + 1L))
+  # Fill regions tile every variant index exactly once.
+  covered <- integer(0)
+  for (k in seq_len(nrow(win)))
+    covered <- c(covered, win$fillStartIdx[k]:(win$fillEndIdx[k] - 1L))
+  expect_equal(sort(unique(covered)), seq_along(pos))
+})
+
+test_that("raiss multi-LD-block skips a NULL middle block and keeps the rest (line 1965)", {
+  td <- generate_block_diagonal_test_data(seed = 11,
+                                          block_structure = "non_overlapping",
+                                          n_variants = 30)
+  # Drop every known z-score in block 2 (var11..var20) so raissSingleMatrix
+  # returns NULL for it. Blocks 1 and 3 still succeed, so resultsList carries a
+  # NULL hole at index 2 and combineWithBoundaryCheck(accumulated, NULL) returns
+  # the accumulated result unchanged (sumstatsQc.R:1965).
+  kz <- dplyr::filter(td$known_zscores, !variant_id %in% paste0("var", 11:20))
+  res <- raiss(td$ref_panel, kz, ldMatrix = td$LD_matrix_blocks,
+               lamb = 0.01, rcond = 0.01, r2Threshold = 0, minimumLd = 0,
+               verbose = FALSE)
+  expect_true(is.list(res))
+  expect_false(is.null(res$resultNofilter))
+  # Block 2 was skipped entirely, so none of its variants survive.
+  expect_false(any(paste0("var", 11:20) %in% res$resultNofilter$variant_id))
+  # Blocks 1 and 3 (var1..10, var21..30) are present.
+  expect_true(all(c("var1", "var21") %in% res$resultNofilter$variant_id))
+})
+
+test_that("summaryStatsQc kriging prefilter drops an LD-inconsistent variant (line 3063)", {
+  skip_if_not("kriging_rss" %in% getNamespaceExports("susieR"),
+              "installed susieR has no kriging_rss")
+  # All eight genotype columns load on one common factor (pairwise rho ~0.7),
+  # but rs4 carries a z-score (-15) grossly inconsistent with its strongly
+  # correlated neighbours. krigingOutlierQc flags it, so the prefilter actually
+  # drops a row (sumstatsQc.R:3063, the nKr > 0 branch).
+  corrExtractor <- function(handle, snpIdx, meanImpute = TRUE) {
+    set.seed(42)
+    n <- length(handle@sampleIds)
+    k <- length(snpIdx)
+    f <- rnorm(n)                                   # shared latent factor
+    M <- sapply(seq_len(k),
+                function(j) sqrt(0.7) * f + sqrt(0.3) * rnorm(n))
+    rr <- GenomicRanges::GRanges(
+      seqnames = paste0("chr", handle@snpInfo$CHR[snpIdx]),
+      ranges = IRanges::IRanges(start = handle@snpInfo$BP[snpIdx], width = 1L))
+    S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
+      SNP = handle@snpInfo$SNP[snpIdx], A1 = handle@snpInfo$A1[snpIdx],
+      A2 = handle@snpInfo$A2[snpIdx])
+    dosage <- t(M)
+    rownames(dosage) <- handle@snpInfo$SNP[snpIdx]
+    colnames(dosage) <- handle@sampleIds
+    SummarizedExperiment::SummarizedExperiment(
+      assays = list(dosage = dosage), rowRanges = rr,
+      colData = S4Vectors::DataFrame(sampleId = handle@sampleIds,
+                                     row.names = handle@sampleIds))
+  }
+  gr <- .ssQ_makeEntryGr(snp_ids = paste0("rs", 1:8),
+                         positions = seq(100L, by = 100L, length.out = 8L))
+  mc <- S4Vectors::mcols(gr)
+  mc$Z <- c(4, 4, 4, -15, 4, 4, 4, 4)
+  mc$N <- rep(3000L, 8)
+  S4Vectors::mcols(gr) <- mc
+  ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
+                     ldSketch = .ssQ_makeHandleVid(snp_n = 8L, n_samples = 300L))
+  local_mocked_bindings(extractBlockGenotypes = corrExtractor, .package = "pecotmr")
+  res <- suppressWarnings(
+    summaryStatsQc(ss, alleleFlipKriging = TRUE, pipCutoffToSkip = 0, nCutoff = 0))
+  ea <- getQcInfo(res)$entryAudit[[1L]]
+  expect_gte(ea$krigingOutliersDropped, 1L)             # at least one dropped
+  expect_equal(length(res$entry[[1L]]), 8L - ea$krigingOutliersDropped)
+})

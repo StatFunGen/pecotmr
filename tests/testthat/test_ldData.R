@@ -492,3 +492,33 @@ test_that("LdData: mixtureWeights must be non-negative and sum to 1", {
 }
 
 
+# ===========================================================================
+# getGenotypeHandle / getMixtureWeights / getSnpIdx accessors
+# ===========================================================================
+
+test_that("LdData: getGenotypeHandle / getMixtureWeights / getSnpIdx return their slots", {
+  gh1 <- .ld_makeHandle(path = "/tmp/h1.gds")
+  gh2 <- .ld_makeHandle(path = "/tmp/h2.gds")
+  ld <- LdData(correlation = NULL,
+               genotypeHandle = list(gh1, gh2),
+               snpIdx         = 1:4,
+               variants       = .ld_makeVariants(),
+               blockMetadata  = S4Vectors::DataFrame(x = 1),
+               mixtureWeights = c(0.3, 0.7))
+  expect_identical(getGenotypeHandle(ld), list(gh1, gh2))
+  expect_equal(getMixtureWeights(ld), c(0.3, 0.7))
+  expect_equal(getSnpIdx(ld), 1:4)
+})
+
+test_that("getCorrelation: errors when neither correlation nor genotypeHandle is set", {
+  # LdData validity forbids this state at construction, so build a valid
+  # object and drop the correlation slot post-hoc to reach the defensive
+  # runtime stop().
+  ld <- LdData(correlation = diag(4), variants = .ld_makeVariants(),
+               blockMetadata = S4Vectors::DataFrame(x = 1))
+  ld@correlation <- NULL
+  expect_error(getCorrelation(ld),
+               "No correlation matrix or genotype handle available")
+})
+
+

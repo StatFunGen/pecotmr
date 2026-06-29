@@ -16,304 +16,6 @@ context("mash_wrapper")
 }
 
 # ===========================================================================
-# mergeSusieCs
-# ===========================================================================
-
-test_that("mergeSusieCs merges credible sets correctly", {
-  # Test case 1: No overlapping credible sets
-  susie_fit_1 <- list(
-    list(
-      condition_1 = list(
-        top_loci = data.frame(
-          variant_id = c("variant1", "variant2"),
-          pip = c(0.8, 0.6),
-          CS_95_susie = c(1, 1)
-        )
-      ),
-      condition_2 = list(
-        top_loci = data.frame(
-          variant_id = c("variant3", "variant4"),
-          pip = c(0.9, 0.7),
-          CS_95_susie = c(1, 2)
-        )
-      )
-    )
-  )
-
-  expected_output_1 <- data.frame(
-    variant_id = c("variant1", "variant2", "variant3", "variant4"),
-    credibleSetNames = c("cs_1_1", "cs_1_1", "cs_2_1", "cs_2_2"),
-    maxPip = c(0.8, 0.6, 0.9, 0.7),
-    medianPip = c(0.8, 0.6, 0.9, 0.7),
-    stringsAsFactors = FALSE
-  )
-
-  expect_equal(mergeSusieCs(susie_fit_1), expected_output_1)
-
-  # Test case 2: Overlapping credible sets
-  susie_fit_2 <- list(
-    list(
-      condition_1 = list(
-        top_loci = data.frame(
-          variant_id = c("variant1", "variant2"),
-          pip = c(0.8, 0.6),
-          CS_95_susie = c(1, 1)
-        )
-      ),
-      condition_2 = list(
-        top_loci = data.frame(
-          variant_id = c("variant2", "variant3"),
-          pip = c(0.7, 0.9),
-          CS_95_susie = c(2, 2)
-        )
-      )
-    )
-  )
-
-  expected_output_2 <- data.frame(
-    variant_id = c("variant1", "variant2", "variant3"),
-    credibleSetNames = c("cs_1_1,cs_2_2", "cs_1_1,cs_2_2", "cs_1_1,cs_2_2"),
-    maxPip = c(0.8, 0.7, 0.9),
-    medianPip = c(0.8, 0.65, 0.9),
-    stringsAsFactors = FALSE
-  )
-
-  expect_equal(mergeSusieCs(susie_fit_2), expected_output_2)
-
-  # Test case 3: Empty input
-  susie_fit_3 <- list(condition_1 = list(top_loci = data.frame(
-    variant_id = character(),
-    credibleSetNames = character(),
-    maxPip = numeric(),
-    medianPip = numeric(),
-    stringsAsFactors = FALSE
-  )))
-
-  expected_output_3 <- NULL
-
-  expect_equal(mergeSusieCs(susie_fit_3), expected_output_3)
-
-  # Test case 4: Different coverage parameter
-  susie_fit_5 <- list(
-    list(
-      condition_1 = list(
-        top_loci = data.frame(
-          variant_id = c("variant1", "variant2"),
-          pip = c(0.8, 0.6),
-          CS_90_susie = c(1, 1)
-        )
-      ),
-      condition_2 = list(
-        top_loci = data.frame(
-          variant_id = c("variant3", "variant4"),
-          pip = c(0.9, 0.7),
-          CS_90_susie = c(2, 2)
-        )
-      )
-    )
-  )
-
-  expected_output_5 <- data.frame(
-    variant_id = c("variant1", "variant2", "variant3", "variant4"),
-    credibleSetNames = c("cs_1_1", "cs_1_1", "cs_2_2", "cs_2_2"),
-    maxPip = c(0.8, 0.6, 0.9, 0.7),
-    medianPip = c(0.8, 0.6, 0.9, 0.7),
-    stringsAsFactors = FALSE
-  )
-
-  expect_equal(mergeSusieCs(susie_fit_5, coverage = "CS_90_susie"), expected_output_5)
-
-  # Test case 6: Multiple top_loci tables with mixed coverage indices
-  susie_fit_6 <- list(
-    list(
-      condition_1 = list(
-        top_loci = data.frame(
-          variant_id = c("variant1", "variant2", "variant3"),
-          pip = c(0.8, 0.6, 0.7),
-          CS_95_susie = c(1, 1, 2)
-        )
-      ),
-      condition_2 = list(
-        top_loci = data.frame(
-          variant_id = c("variant4", "variant5"),
-          pip = c(0.9, 0.7),
-          CS_95_susie = c(2, 3)
-        )
-      ),
-      condition_3 = list(
-        top_loci = data.frame(
-          variant_id = c("variant6", "variant7", "variant8"),
-          pip = c(0.85, 0.75, 0.8),
-          CS_95_susie = c(1, 3, 2)
-        )
-      )
-    )
-  )
-
-  expected_output_6 <- data.frame(
-    variant_id = c("variant1", "variant2", "variant3", "variant4", "variant5", "variant6", "variant7", "variant8"),
-    credibleSetNames = c("cs_1_1", "cs_1_1", "cs_1_2", "cs_2_2", "cs_2_3", "cs_3_1", "cs_3_3", "cs_3_2"),
-    maxPip = c(0.8, 0.6, 0.7, 0.9, 0.7, 0.85, 0.75, 0.8),
-    medianPip = c(0.8, 0.6, 0.7, 0.9, 0.7, 0.85, 0.75, 0.8),
-    stringsAsFactors = FALSE
-  )
-
-  expect_equal(mergeSusieCs(susie_fit_6), expected_output_6)
-
-  # Test case 7: Multiple top_loci tables with overlapping sets and mixed coverage indices
-  susie_fit_7 <- list(
-    list(
-      condition_1 = list(
-        top_loci = data.frame(
-          variant_id = c("variant1", "variant2", "variant3"),
-          pip = c(0.8, 0.6, 0.7),
-          CS_95_susie = c(1, 1, 2)
-        )
-      ),
-      condition_2 = list(
-        top_loci = data.frame(
-          variant_id = c("variant2", "variant3", "variant4"),
-          pip = c(0.7, 0.9, 0.85),
-          CS_95_susie = c(2, 2, 1)
-        )
-      ),
-      condition_3 = list(
-        top_loci = data.frame(
-          variant_id = c("variant4", "variant5"),
-          pip = c(0.75, 0.8),
-          CS_95_susie = c(3, 2)
-        )
-      )
-    )
-  )
-
-  expected_output_7 <- data.frame(
-    variant_id = c("variant1", "variant2", "variant3", "variant4", "variant5"),
-    credibleSetNames = c("cs_1_1,cs_1_2,cs_2_2", "cs_1_1,cs_1_2,cs_2_2", "cs_1_1,cs_1_2,cs_2_2","cs_2_1,cs_3_3", "cs_3_2"),
-    maxPip = c(0.8, 0.7, 0.9, 0.85, 0.8),
-    medianPip = c(0.8, 0.65, 0.8, 0.8, 0.8),
-    stringsAsFactors = FALSE
-  )
-
-  expect_equal(mergeSusieCs(susie_fit_7), expected_output_7)
-
-  # Test case 8: Multiple top_loci tables with different coverage indices and no overlapping sets
-  susie_fit_8 <- list(
-    list(
-      condition_1 = list(
-        top_loci = data.frame(
-          variant_id = c("variant1", "variant2", "variant3"),
-          pip = c(0.8, 0.6, 0.7),
-          CS_95_susie = c(1, 2, 3)
-        )
-      ),
-      condition_2 = list(
-        top_loci = data.frame(
-          variant_id = c("variant4", "variant5"),
-          pip = c(0.9, 0.7),
-          CS_95_susie = c(3, 1)
-        )
-      ),
-      condition_3 = list(
-        top_loci = data.frame(
-          variant_id = c("variant6", "variant7", "variant8"),
-          pip = c(0.85, 0.75, 0.8),
-          CS_95_susie = c(2, 3, 1)
-        )
-      )
-    )
-  )
-
-  expected_output_8 <- data.frame(
-    variant_id = c("variant1", "variant2", "variant3", "variant4", "variant5", "variant6", "variant7", "variant8"),
-    credibleSetNames = c("cs_1_1", "cs_1_2", "cs_1_3", "cs_2_3", "cs_2_1", "cs_3_2", "cs_3_3", "cs_3_1"),
-    maxPip = c(0.8, 0.6, 0.7, 0.9, 0.7, 0.85, 0.75, 0.8),
-    medianPip = c(0.8, 0.6, 0.7, 0.9, 0.7, 0.85, 0.75, 0.8),
-    stringsAsFactors = FALSE
-  )
-
-  expect_equal(mergeSusieCs(susie_fit_8), expected_output_8)
-
-  # Test case 9: Single top_loci table with mixed coverage indices
-  susie_fit_9 <- list(
-    list(
-      condition_1 = list(
-        top_loci = data.frame(
-          variant_id = c("variant1", "variant2", "variant3", "variant4", "variant5"),
-          pip = c(0.8, 0.6, 0.7, 0.9, 0.85),
-          CS_95_susie = c(1, 1, 2, 3, 2)
-        )
-      )
-    )
-  )
-
-  expected_output_9 <- data.frame(
-    variant_id = c("variant1", "variant2", "variant3", "variant5", "variant4"),
-    credibleSetNames = c("cs_1_1", "cs_1_1", "cs_1_2", "cs_1_2", "cs_1_3"),
-    maxPip = c(0.8, 0.6, 0.7, 0.85, 0.9),
-    medianPip = c(0.8, 0.6, 0.7, 0.85, 0.9),
-    stringsAsFactors = FALSE
-  )
-
-  expect_equal(mergeSusieCs(susie_fit_9), expected_output_9)
-
-  # Test case 10: Multiple top_loci tables with mixed coverage indices and overlapping sets
-  susie_fit_10 <- list(
-    list(
-      condition_1 = list(
-        top_loci = data.frame(
-          variant_id = c("variant1", "variant2", "variant3"),
-          pip = c(0.8, 0.6, 0.7),
-          CS_95_susie = c(1, 2, 1)
-        )
-      ),
-      condition_2 = list(
-        top_loci = data.frame(
-          variant_id = c("variant2", "variant4", "variant5"),
-          pip = c(0.75, 0.9, 0.85),
-          CS_95_susie = c(2, 1, 3)
-        )
-      ),
-      condition_3 = list(
-        top_loci = data.frame(
-          variant_id = c("variant3", "variant5", "variant6"),
-          pip = c(0.65, 0.8, 0.7),
-          CS_95_susie = c(3, 2, 1)
-        )
-      )
-    )
-  )
-
-  expected_output_10 <- data.frame(
-    variant_id = c("variant1", "variant3", "variant2", "variant4", "variant5", "variant6"),
-    credibleSetNames = c("cs_1_1,cs_3_3", "cs_1_1,cs_3_3", "cs_1_2,cs_2_2", "cs_2_1", "cs_2_3,cs_3_2", "cs_3_1"),
-    maxPip = c(0.8, 0.7, 0.75, 0.9, 0.85, 0.7),
-    medianPip = c(0.8, 0.675, 0.675, 0.9, 0.825, 0.7),
-    stringsAsFactors = FALSE
-  )
-
-  expect_equal(mergeSusieCs(susie_fit_10), expected_output_10)
-})
-
-test_that("mergeSusieCs handles single condition with single CS", {
-  susie_fit <- list(list(
-    cond1 = list(
-      top_loci = data.frame(
-        variant_id = c("1:100:A:G", "1:200:C:T"),
-        pip = c(0.9, 0.1),
-        CS_95_susie = c(1, 1),
-        stringsAsFactors = FALSE
-      )
-    )
-  ))
-
-  result <- pecotmr:::mergeSusieCs(susie_fit)
-  expect_s3_class(result, "data.frame")
-  expect_true("variant_id" %in% colnames(result))
-  expect_true("maxPip" %in% colnames(result))
-})
-
-# ===========================================================================
 # filterInvalidSummaryStat
 # ===========================================================================
 
@@ -1144,4 +846,107 @@ test_that(".mashSumStatsToMatrices errors when entry lacks SNP mcol", {
   expect_error(
     pecotmr:::.mashSumStatsToMatrices(ss, "strong", inputScale = "auto"),
     "SNP")
+})
+
+# ===========================================================================
+# .mashSumStatsToMatrices — GwasSumStats path + input-validation errors
+# ===========================================================================
+
+test_that(".mashSumStatsToMatrices on GwasSumStats: studies become columns", {
+  set.seed(11L)
+  gh <- new("GenotypeHandle",
+    path = "/tmp/sketch.gds", format = "gds",
+    snpInfo = data.frame(SNP = paste0("v", 1:3), CHR = "1",
+                         BP = c(100L, 200L, 300L),
+                         A1 = "A", A2 = "G", stringsAsFactors = FALSE),
+    nSamples = 50L, sampleIds = paste0("s", seq_len(50L)), pgenPtr = NULL)
+  mkGr <- function(snpIds) {
+    gr <- GenomicRanges::GRanges(
+      seqnames = "chr1",
+      ranges = IRanges::IRanges(
+        start = seq(100L, by = 100L, length.out = length(snpIds)), width = 1L))
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+      SNP = snpIds, A1 = "A", A2 = "G",
+      Z = rnorm(length(snpIds)),
+      BETA = rnorm(length(snpIds), sd = 0.1),
+      SE   = rep(0.05, length(snpIds)))
+    gr
+  }
+  # Each study is its own (study) block; columns of the mash matrix are the
+  # studies, so the result is block-diagonal with NA-fill off the diagonal.
+  ss <- GwasSumStats(
+    study = c("studyA", "studyB"),
+    entry = list(mkGr(paste0("v", 1:3)), mkGr(paste0("v", 1:3))),
+    genome = "hg19", ldSketch = gh,
+    qcInfo = list(prebuilt = "synthetic"))
+  out <- pecotmr:::.mashSumStatsToMatrices(ss, "strong", inputScale = "auto")
+  expect_equal(ncol(out$b), 2L)
+  expect_equal(colnames(out$b), c("studyA", "studyB"))
+  # 2 studies x 3 variants = 6 rows; rownames prefixed by the study block key.
+  expect_equal(nrow(out$b), 6L)
+  expect_setequal(rownames(out$b),
+                  c(paste0("studyA::v", 1:3), paste0("studyB::v", 1:3)))
+  # studyA's rows are absent from studyB's column -> bhat 0 / shat 1000 fill.
+  studyArows <- grep("^studyA::", rownames(out$b))
+  expect_equal(unname(out$b[studyArows, "studyB"]), rep(0, 3))
+  expect_equal(unname(out$s[studyArows, "studyB"]), rep(1000, 3))
+  # On the BETA scale, the present cells carry the small generated SEs.
+  expect_true(all(out$s[studyArows, "studyA"] < 1))
+})
+
+test_that(".mashSumStatsToMatrices errors on a non-SumStats input", {
+  expect_error(
+    pecotmr:::.mashSumStatsToMatrices(list(a = 1), "strong"),
+    "must be a QtlSumStats or GwasSumStats")
+})
+
+test_that(".mashSumStatsToMatrices errors when SumStats has empty QC info", {
+  gh <- new("GenotypeHandle",
+    path = "/tmp/sketch.gds", format = "gds",
+    snpInfo = data.frame(SNP = paste0("v", 1:3), CHR = "1",
+                         BP = c(100L, 200L, 300L),
+                         A1 = "A", A2 = "G", stringsAsFactors = FALSE),
+    nSamples = 50L, sampleIds = paste0("s", seq_len(50L)), pgenPtr = NULL)
+  gr <- GenomicRanges::GRanges(
+    seqnames = "chr1",
+    ranges = IRanges::IRanges(start = c(100L, 200L, 300L), width = 1L))
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    SNP = paste0("v", 1:3), A1 = "A", A2 = "G",
+    Z = rnorm(3), BETA = rnorm(3, sd = 0.1), SE = rep(0.05, 3))
+  ss <- QtlSumStats(study = "s1", context = "c1", trait = "g1",
+                    entry = list(gr), genome = "hg19", ldSketch = gh,
+                    qcInfo = list())  # empty QC info
+  expect_error(
+    pecotmr:::.mashSumStatsToMatrices(ss, "strong"),
+    "no QC info")
+})
+
+test_that(".mashSumStatsToMatrices errors when SumStats has zero entries", {
+  gh <- new("GenotypeHandle",
+    path = "/tmp/sketch.gds", format = "gds",
+    snpInfo = data.frame(SNP = paste0("v", 1:3), CHR = "1",
+                         BP = c(100L, 200L, 300L),
+                         A1 = "A", A2 = "G", stringsAsFactors = FALSE),
+    nSamples = 50L, sampleIds = paste0("s", seq_len(50L)), pgenPtr = NULL)
+  ss <- QtlSumStats(study = character(0), context = character(0),
+                    trait = character(0), entry = list(), genome = "hg19",
+                    ldSketch = gh, varY = numeric(0),
+                    qcInfo = list(prebuilt = "synthetic"))
+  expect_error(
+    pecotmr:::.mashSumStatsToMatrices(ss, "strong"),
+    "no entries")
+})
+
+# ===========================================================================
+# mergeMashData — oneData-empty branch (returns resData unchanged)
+# ===========================================================================
+
+test_that("mergeMashData returns resData when oneData is NULL", {
+  d1 <- list(random = data.frame(a = 1:3, b = 4:6))
+  expect_equal(mergeMashData(d1, NULL), d1)
+})
+
+test_that("mergeMashData returns resData when oneData is an empty list", {
+  d1 <- list(random = data.frame(a = 1:3))
+  expect_equal(mergeMashData(d1, list()), d1)
 })

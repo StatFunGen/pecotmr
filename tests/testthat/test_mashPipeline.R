@@ -284,3 +284,187 @@ test_that("mashPipeline runs end-to-end on qtl_sumstats_multicontext_example", {
   expect_type(res$w, "double")
   expect_equal(sum(res$w), 1, tolerance = 1e-6)
 })
+
+# ---------------------------------------------------------------------------
+# fitMashContrast — condition grouping (>2 conditions, grouped replicates)
+# ---------------------------------------------------------------------------
+
+test_that("fitMashContrast applies deviation + pairwise group adjustments", {
+  conds <- c("a", "b", "c", "d")
+  origMean <- matrix(c(0.5, 0.3, -0.2, 0.4), nrow = 1,
+                     dimnames = list("v1", conds))
+  pm <- matrix(c(0.5, 0.3, -0.2, 0.4), nrow = 1,
+               dimnames = list("v1", conds))
+  pv <- array(0, dim = c(4, 4, 1), dimnames = list(conds, conds, NULL))
+  pv[, , 1] <- diag(4) * 0.1
+  # a,b share group 1 (replicates); c is its own group 2; d ungrouped (0).
+  # Non-NULL grouping triggers `grouping <- grouping[tested]`, the >2-condition
+  # deviation re-weighting loop, and the pairwise group-adjustment loop.
+  grouping <- setNames(c(1L, 1L, 2L, 0L), conds)
+  out <- fitMashContrast(1L, origMean, pm, pv, grouping = grouping)
+  expect_s3_class(out, "data.frame")
+  expect_equal(nrow(out), 1L)
+  # 4 deviation + choose(4,2)=6 pairwise = 10 contrasts -> 30 columns.
+  expect_equal(ncol(out), 30L)
+  contrastSuffix <- sub("^(mean|se|p)_contrast_", "", names(out))
+  expect_true(any(grepl("_deviation$", contrastSuffix)))
+  expect_true(any(grepl("_vs_", contrastSuffix)))
+  expect_true(all(is.finite(unlist(out))))
+})
+
+# ---------------------------------------------------------------------------
+# updateMashModelCov — named data-driven cov matrices (the `[samples, samples]`
+# else branch, distinct from the no-dimnames positional-slice branch)
+# ---------------------------------------------------------------------------
+
+test_that("updateMashModelCov slices named data-driven cov matrices by sample", {
+  allSamples <- c("brain", "blood", "muscle")
+  ddMat <- matrix(seq_len(9), 3, 3, dimnames = list(allSamples, allSamples))
+  U  <- list(identity = diag(1, 3), dataDriven = ddMat)
+  pi <- setNames(c(0.5, 0.5), c("identity.scale1", "dataDriven.scale1"))
+  m  <- list(fitted_g = list(Ulist = U, pi = pi))
+  m2 <- updateMashModelCov(m, allSamples = allSamples,
+                           samples = c("brain", "muscle"))
+  # The named data-driven matrix is sliced by name: cov[[d]][samples, samples].
+  expect_equal(dim(m2$fitted_g$Ulist$dataDriven), c(2L, 2L))
+  expect_equal(m2$fitted_g$Ulist$dataDriven,
+               ddMat[c("brain", "muscle"), c("brain", "muscle")])
+  # identity collapses to a single 1 in the top-left corner.
+  expect_equal(m2$fitted_g$Ulist$identity[1, 1], 1)
+  expect_equal(sum(m2$fitted_g$Ulist$identity), 1)
+})
+
+# ---------------------------------------------------------------------------
+# metaAnalysisPerCell — cells matching no contrast column are skipped
+# ---------------------------------------------------------------------------
+
+test_that("metaAnalysisPerCell skips cells whose name matches no column", {
+  # The condition "x$y" yields a derived cell name "x$y"; used as a grep()
+  # pattern the embedded `$` anchor matches nothing, exercising the
+  # `if (length(cellIdx) == 0) next` skip branch.
+  cols <- "mean_contrast_x$y_vs_z"
+  es <- matrix(c(0.3, 0.5), nrow = 2, dimnames = list(c("v1", "v2"), cols))
+  se <- matrix(c(0.1, 0.1), nrow = 2, dimnames = list(c("v1", "v2"), cols))
+  out <- metaAnalysisPerCell(es, se)
+  # "x$y" is skipped; only the "z" cell survives.
+  expect_false("x$y" %in% out$cell)
+  expect_true("z" %in% out$cell)
+  expect_equal(nrow(out), 1L)
+})
+
+# ---------------------------------------------------------------------------
+# mashPipeline — input validation (errors fire before any mashr call).
+# Guarded by skips because the requireNamespace() checks run first; without
+# mashr/flashier the function stops with an install message instead.
+# ---------------------------------------------------------------------------
+
+test_that("mashPipeline rejects a sumStatsList that is not a named list", {
+  skip_if_not_installed("mashr")
+  skip_if_not_installed("flashier")
+  expect_error(mashPipeline(list(1, 2), alpha = 0),
+               "must be a named list")
+})
+
+test_that("mashPipeline errors when a required entry is missing", {
+  skip_if_not_installed("mashr")
+  skip_if_not_installed("flashier")
+  expect_error(mashPipeline(list(strong = 1), alpha = 0),
+               "missing required entr")
+})
+
+test_that("mashPipeline errors on unrecognised entries", {
+  skip_if_not_installed("mashr")
+  skip_if_not_installed("flashier")
+  expect_error(
+    mashPipeline(list(strong = 1, random = 1, bogus = 1), alpha = 0),
+    "unrecognised entries")
+})
+
+test_that("mashPipeline coerces a SimpleList before validating its names", {
+  skip_if_not_installed("mashr")
+  skip_if_not_installed("flashier")
+  skip_if_not_installed("S4Vectors")
+  # A SimpleList is converted to a base list first (the as.list branch), then
+  # validation runs; here it is missing both required entries.
+  expect_error(
+    mashPipeline(S4Vectors::SimpleList(bogus = 1), alpha = 0),
+    "missing required entr")
+})
+
+# ---------------------------------------------------------------------------
+# mashPipeline — priorCovariances validation + bypass path.
+# Supplying residualCorrelation makes random/null optional and short-circuits
+# null-correlation estimation, so the supplied Vhat branch is also exercised.
+# ---------------------------------------------------------------------------
+
+test_that("mashPipeline rejects priorCovariances not a non-empty named list", {
+  skip_if_not_installed("mashr")
+  skip_if_not_installed("flashier")
+  data(qtl_sumstats_multicontext_example)
+  ss <- qtl_sumstats_multicontext_example
+  vhat <- diag(3)
+  # Empty list.
+  expect_error(suppressMessages(suppressWarnings(
+    mashPipeline(list(strong = ss), alpha = 0,
+                 residualCorrelation = vhat, priorCovariances = list()))),
+    "non-empty named")
+  # Unnamed list.
+  expect_error(suppressMessages(suppressWarnings(
+    mashPipeline(list(strong = ss), alpha = 0,
+                 residualCorrelation = vhat,
+                 priorCovariances = list(diag(3))))),
+    "non-empty named")
+})
+
+test_that("mashPipeline rejects priorCovariances with wrong dimensions", {
+  skip_if_not_installed("mashr")
+  skip_if_not_installed("flashier")
+  data(qtl_sumstats_multicontext_example)
+  ss <- qtl_sumstats_multicontext_example
+  vhat <- diag(3)
+  expect_error(suppressMessages(suppressWarnings(
+    mashPipeline(list(strong = ss), alpha = 0,
+                 residualCorrelation = vhat,
+                 priorCovariances = list(myU = diag(2))))),
+    "3 x 3 matrix")
+})
+
+test_that("mashPipeline passes supplied residualCorrelation + priorCovariances through", {
+  skip_if_not_installed("mashr")
+  skip_if_not_installed("flashier")
+  data(qtl_sumstats_multicontext_example)
+  ss <- qtl_sumstats_multicontext_example
+  vhat <- diag(3)
+  U0 <- list(identity = diag(3), effectA = diag(c(1, 0, 0)))
+  res <- suppressMessages(suppressWarnings(
+    mashPipeline(list(strong = ss), alpha = 0,
+                 residualCorrelation = vhat, priorCovariances = U0)))
+  expect_named(res, c("U", "w"))
+  # priorCovariances passed straight through as the covariance list (bypass of
+  # the cov_canonical / cov_pca / cov_flash / cov_ed chain).
+  expect_identical(res$U, U0)
+  expect_type(res$w, "double")
+  expect_equal(sum(res$w), 1, tolerance = 1e-6)
+})
+
+# ---------------------------------------------------------------------------
+# mashPipeline — null-based Vhat estimation + default nPcs
+# ---------------------------------------------------------------------------
+
+test_that("mashPipeline estimates Vhat from a null set and defaults nPcs", {
+  skip_if_not_installed("mashr")
+  skip_if_not_installed("flashier")
+  data(qtl_sumstats_multicontext_example)
+  ss <- qtl_sumstats_multicontext_example
+  # Supplying `null` triggers estimate_null_correlation_simple; leaving nPcs
+  # NULL exercises the `nPcs <- ncol(Bhat) - 1` default in the cov_* chain.
+  res <- suppressMessages(suppressWarnings(
+    mashPipeline(list(strong = ss, random = ss, null = ss),
+                 alpha = 0, setSeed = 1L)))
+  expect_named(res, c("U", "w"))
+  expect_gt(length(res$U), 0L)
+  expect_true(all(vapply(res$U,
+                         function(m) all(dim(m) == c(3L, 3L)),
+                         logical(1))))
+  expect_equal(sum(res$w), 1, tolerance = 1e-6)
+})

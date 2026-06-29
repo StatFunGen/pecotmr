@@ -1471,8 +1471,10 @@ setMethod("twasWeightsPipeline", "ANY",
 # @noRd
 .solveEnsembleQuadprog <- function(Pvalid, yObs, Kvalid) {
   if (!requireNamespace("quadprog", quietly = TRUE)) {
+    # nocov start
     stop("Package 'quadprog' is required for solver='quadprog'. ",
          "Install with: install.packages('quadprog')")
+    # nocov end
   }
 
   Dmat <- crossprod(Pvalid)
@@ -1517,8 +1519,10 @@ setMethod("twasWeightsPipeline", "ANY",
 # @noRd
 .solveEnsembleNnls <- function(Pvalid, yObs, Kvalid) {
   if (!requireNamespace("nnls", quietly = TRUE)) {
+    # nocov start
     stop("Package 'nnls' is required for solver='nnls'. ",
          "Install with: install.packages('nnls')")
+    # nocov end
   }
 
   fit <- tryCatch(
@@ -1595,8 +1599,10 @@ setMethod("twasWeightsPipeline", "ANY",
 # @noRd
 .solveEnsembleGlmnet <- function(Pvalid, yObs, Kvalid, alpha = 1) {
   if (!requireNamespace("glmnet", quietly = TRUE)) {
+    # nocov start
     stop("Package 'glmnet' is required for solver='glmnet'. ",
          "Install with: install.packages('glmnet')")
+    # nocov end
   }
 
   fit <- tryCatch(

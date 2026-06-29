@@ -149,9 +149,12 @@ QtlSumStats <- function(study, context, trait, entry, genome, ldSketch,
       study, context, trait))
   }
   if (length(idx) > 1L) {
+    # Unreachable: the class validity enforces (study, context, trait) uniqueness.
+    # nocov start
     stop(sprintf(
-      "Multiple entries match (study='%s', context='%s', trait='%s'); ",
-      "tuple uniqueness violation."))
+      "Multiple entries match (study='%s', context='%s', trait='%s'); tuple uniqueness violation.",
+      study, context, trait))
+    # nocov end
   }
   idx
 }

@@ -173,3 +173,19 @@ test_that("GwasFineMappingResult: getStudy/getMethodNames inherit from base", {
   expect_setequal(getMethodNames(res), c("susie", "susieRss"))
 })
 
+
+test_that("GwasFineMappingResult: getMarginalEffects with study/method selectors", {
+  e1 <- .ca_makeFmEntry(3)
+  e2 <- .ca_makeFmEntry(4)
+  res <- GwasFineMappingResult(
+    study  = c("g1", "g2"),
+    method = c("susie", "susie"),
+    entry  = list(e1, e2))
+  # Collection-level selection picks the g2 entry, then delegates to the
+  # entry-level getMarginalEffects.
+  me <- getMarginalEffects(res, study = "g2", method = "susie")
+  expect_s3_class(me, "data.frame")
+  expect_equal(nrow(me), 4L)
+  expect_true(all(c("variant_id", "beta", "se", "z", "p") %in% names(me)))
+})
+

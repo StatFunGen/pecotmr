@@ -1,87 +1,66 @@
 #' @title sLDSC Postprocessing Pipeline
-#' @description Postprocess polyfun's per-trait sLDSC outputs (one
-#'   single-target run per target annotation, plus an optional joint
-#'   run) into a single results object with per-trait tau*, EnrichStat
-#'   with back-solved jackknife SE, and a DerSimonian-Laird random-
-#'   effects meta-analysis across traits.
-#' @param traitSinglePrefixes Named list of file prefixes for the
-#'   single-target polyfun runs (one entry per trait; each value is a
-#'   length-N character vector of `<dir>/<trait>` prefixes, one per
-#'   target annotation).
-#' @param traitJointPrefix Named list of file prefixes for the joint
-#'   polyfun runs (one entry per trait; each value a `<dir>/<trait>`
-#'   prefix into the joint LD-score dir). Pass an empty list to skip
-#'   the joint branch.
-#' @param targetAnnoDir Directory containing the target `.annot.gz`
-#'   files used for sd_C and binary detection (typically the joint dir).
-#' @param frqfileDir Optional directory of `.frq` files for the MAF
-#'   cutoff. Pass \code{NULL} to skip MAF filtering.
-#' @param plinkName File-name prefix of the PLINK reference panel
-#'   (default \code{"ADSP_chr"}; combined per-chromosome as
-#'   \code{paste0(plinkName, chrom)}).
-#' @param mafCutoff Numeric MAF cutoff applied via the `.frq` files.
-#'   Default \code{0.05}. Set to \code{0} to opt out.
-#' @param targetCategories Optional character vector of target
-#'   annotation names to retain. Auto-detected from the joint run when
+#' @description Postprocess polyfun's per-trait sLDSC outputs (already loaded
+#'   into an \code{\link{SldscData}} object) into a single results object with
+#'   per-trait tau*, EnrichStat with back-solved jackknife SE, and a
+#'   DerSimonian-Laird random-effects meta-analysis across traits. All file I/O
+#'   is done up front by the reader functions (\code{\link{readSldscAnnot}},
+#'   \code{\link{readSldscFrq}}, \code{\link{readSldscTrait}}); this pipeline is
+#'   pure computation over the in-memory \code{SldscData}.
+#' @param sldscData An \code{\link{SldscData}} object bundling the annotation
+#'   table, the reference-panel allele frequencies, and the per-trait
+#'   single/joint polyfun runs.
+#' @param mafCutoff Numeric MAF cutoff applied via the object's frq table.
+#'   Default \code{0.05}. Set to \code{0} to opt out (requires frq data when
+#'   \code{> 0}).
+#' @param targetCategories Optional character vector of target annotation names
+#'   to retain. Auto-detected from the joint run (or first single run) when
 #'   \code{NULL}.
 #' @param targetLabels Optional display names, same length / order as
-#'   \code{targetCategories}, applied to every output column / tau*
-#'   block colname.
-#' @return A list with \code{per_trait} (per-trait standardised tables),
-#'   meta tables (\code{tau_star_meta}, \code{E_meta},
-#'   \code{enrich_stat_meta}), and a \code{params} record of the call
-#'   options.
+#'   \code{targetCategories}, applied to every output column / tau* block
+#'   colname.
+#' @return A list with \code{per_trait} (per-trait standardised tables), meta
+#'   tables (\code{tauStar}, \code{enrichment}, \code{enrichstat}), and a
+#'   \code{params} record of the call options.
+#' @seealso \code{\link{SldscData}}, \code{\link{readSldscAnnot}},
+#'   \code{\link{readSldscFrq}}, \code{\link{readSldscTrait}}
+#' @importFrom stats median
+#' @importFrom methods is
+#' @include SldscData.R
 #' @export
-sldscPostprocessingPipeline <- function(traitSinglePrefixes,
-                                        traitJointPrefix,
-                                        targetAnnoDir,
-                                        frqfileDir = NULL,
-                                        plinkName = "ADSP_chr",
+sldscPostprocessingPipeline <- function(sldscData,
                                         mafCutoff = 0.05,
                                         targetCategories = NULL,
                                         targetLabels = NULL) {
-  traitNames <- names(traitSinglePrefixes)
-  if (is.null(traitNames))
-    stop("sldscPostprocessingPipeline: traitSinglePrefixes must be a named list.")
+  if (!is(sldscData, "SldscData"))
+    stop("sldscPostprocessingPipeline: `sldscData` must be an SldscData object.")
+  traitNames <- getTraitNames(sldscData)
+  if (length(traitNames) == 0L)
+    stop("sldscPostprocessingPipeline: SldscData has no traits.")
 
   message("[sldsc] Computing M_ref...")
-  MRef <- computeSldscMRef(targetAnnoDir = targetAnnoDir,
-                           frqfileDir = frqfileDir,
-                           plinkName = plinkName,
-                           mafCutoff = mafCutoff)
+  MRef <- computeSldscMRef(sldscData, mafCutoff = mafCutoff)
   message(sprintf("[sldsc]   M_ref = %d (MAF cutoff %g)", MRef, mafCutoff))
 
   message("[sldsc] Computing per-annotation sd...")
-  sdAnnotFull <- computeSldscAnnotSd(targetAnnoDir = targetAnnoDir,
-                                     frqfileDir = frqfileDir,
-                                     plinkName = plinkName,
-                                     mafCutoff = mafCutoff)
+  sdAnnotFull <- computeSldscAnnotSd(sldscData, mafCutoff = mafCutoff)
   message(sprintf("[sldsc]   sd computed for %d annotation columns",
                   length(sdAnnotFull)))
 
   message("[sldsc] Detecting binary vs continuous annotations...")
-  isBinaryFull <- isBinarySldscAnnot(targetAnnoDir = targetAnnoDir)
+  isBinaryFull <- isBinarySldscAnnot(sldscData)
 
   # Polyfun renames target columns to `<col>_0` (file_idx=0 in --ref-ld-chr);
-  # mirror that suffix so intersect() with pivotRun$categories matches.
+  # mirror that suffix so intersect() with a run's categories matches.
   names(sdAnnotFull)  <- paste0(names(sdAnnotFull),  "_0")
   names(isBinaryFull) <- paste0(names(isBinaryFull), "_0")
 
-  # Auto-detect target categories from a representative run.
+  # A representative run for auto-detection: the first trait's joint run when
+  # present, otherwise its first single run.
+  pivotRun <- getTraitRun(sldscData, traitNames[1], "joint")
+  if (is.null(pivotRun))
+    pivotRun <- getTraitRun(sldscData, traitNames[1], "single", 1L)
+
   if (is.null(targetCategories)) {
-    pivotRun <- NULL
-    if (!is.null(traitJointPrefix) && length(traitJointPrefix) > 0) {
-      jp <- traitJointPrefix[[1]]
-      if (is.character(jp) && length(jp) == 1L && !is.na(jp) && nzchar(jp)) {
-        pivotRun <- tryCatch(readSldscTrait(jp), error = function(e) NULL)
-      }
-    }
-    if (is.null(pivotRun) &&
-        length(traitSinglePrefixes) > 0L &&
-        length(traitSinglePrefixes[[1]]) > 0L) {
-      pivotRun <- tryCatch(readSldscTrait(traitSinglePrefixes[[1]][1]),
-                           error = function(e) NULL)
-    }
     if (is.null(pivotRun))
       stop("sldscPostprocessingPipeline: cannot auto-detect targetCategories.")
     targetCategories <- intersect(pivotRun$categories, names(sdAnnotFull))
@@ -112,25 +91,21 @@ sldscPostprocessingPipeline <- function(traitSinglePrefixes,
         nBaseline, baselinePreview,
         if (nBaseline > 3L) ", ..." else ""))
     }
-    message(sprintf("[sldsc] Auto-detected %d target categories", length(targetCategories)))
+    message(sprintf("[sldsc] Auto-detected %d target categories",
+                    length(targetCategories)))
   }
 
   baselineCategories <- character(0)
-  if (!is.null(traitJointPrefix) && length(traitJointPrefix) > 0L) {
-    jp <- traitJointPrefix[[1]]
-    if (is.character(jp) && length(jp) == 1L && !is.na(jp) && nzchar(jp)) {
-      pivot <- tryCatch(readSldscTrait(jp), error = function(e) NULL)
-      if (!is.null(pivot))
-        baselineCategories <- setdiff(pivot$categories, targetCategories)
-    }
-  }
+  jointPivot <- getTraitRun(sldscData, traitNames[1], "joint")
+  if (!is.null(jointPivot))
+    baselineCategories <- setdiff(jointPivot$categories, targetCategories)
   if (length(baselineCategories) > 0L) {
     msgHead <- paste(head(baselineCategories, 5), collapse = ", ")
     msgTail <- if (length(baselineCategories) > 5) ", ..." else ""
     message(sprintf("[sldsc] Detected %d baseline annotations: %s%s",
                     length(baselineCategories), msgHead, msgTail))
   } else {
-    message("[sldsc] No baseline annotations detected (joint-run prefix missing or unreadable).")
+    message("[sldsc] No baseline annotations detected (no joint run on the first trait).")
   }
 
   sdAnnot <- sdAnnotFull[targetCategories]
@@ -145,19 +120,15 @@ sldscPostprocessingPipeline <- function(traitSinglePrefixes,
     singleSummaries <- list()
     singleBlocks    <- list()
     singleH2gs      <- numeric(0)
-    singPrefs <- traitSinglePrefixes[[trait]]
+    singleRuns <- getTraitRun(sldscData, trait, "single")
+    if (is.null(singleRuns)) singleRuns <- list()
     for (i in seq_along(targetCategories)) {
       catName <- targetCategories[i]
-      if (i > length(singPrefs)) break
-      pref <- singPrefs[i]
-      run  <- tryCatch(readSldscTrait(pref), error = function(e) {
-        warning(sprintf("[sldsc] Failed to read single %s for %s: %s",
-                        catName, trait, e$message)); NULL
-      })
-      if (is.null(run)) next
+      if (i > length(singleRuns)) break
       std <- tryCatch(
-        standardizeSldscTrait(run, sdAnnot[catName], MRef,
-                              targetCategories = catName, mode = "single"),
+        standardizeSldscTrait(sldscData, trait, mode = "single", idx = i,
+                              sdAnnot = sdAnnot[catName], MRef = MRef,
+                              targetCategories = catName),
         error = function(e) {
           warning(sprintf("[sldsc] Failed to standardize single %s for %s: %s",
                           catName, trait, e$message)); NULL
@@ -177,29 +148,20 @@ sldscPostprocessingPipeline <- function(traitSinglePrefixes,
     blocksJoint   <- NULL
     jointH2g      <- NA_real_
     nBlocksTrait  <- NA_integer_
-    if (!is.null(traitJointPrefix) && trait %in% names(traitJointPrefix)) {
-      jp <- traitJointPrefix[[trait]]
-      if (is.character(jp) && length(jp) == 1L && !is.na(jp) && nzchar(jp)) {
-        run <- tryCatch(readSldscTrait(jp), error = function(e) {
-          warning(sprintf("[sldsc] Failed to read joint for %s: %s",
+    if (!is.null(getTraitRun(sldscData, trait, "joint"))) {
+      std <- tryCatch(
+        standardizeSldscTrait(sldscData, trait, mode = "joint",
+                              sdAnnot = sdAnnot, MRef = MRef,
+                              targetCategories = targetCategories),
+        error = function(e) {
+          warning(sprintf("[sldsc] Failed to standardize joint for %s: %s",
                           trait, e$message)); NULL
         })
-        if (!is.null(run)) {
-          std <- tryCatch(
-            standardizeSldscTrait(run, sdAnnot, MRef,
-                                  targetCategories = targetCategories,
-                                  mode = "joint"),
-            error = function(e) {
-              warning(sprintf("[sldsc] Failed to standardize joint for %s: %s",
-                              trait, e$message)); NULL
-            })
-          if (!is.null(std)) {
-            jointDf       <- std$summary
-            blocksJoint   <- std$tau_star_blocks
-            jointH2g      <- std$h2g
-            nBlocksTrait  <- std$nBlocks
-          }
-        }
+      if (!is.null(std)) {
+        jointDf       <- std$summary
+        blocksJoint   <- std$tau_star_blocks
+        jointH2g      <- std$h2g
+        nBlocksTrait  <- std$nBlocks
       }
     }
 

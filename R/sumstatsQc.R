@@ -405,9 +405,10 @@ mergeVariantInfo <- function(variants1, variants2, all = TRUE) {
   matchIdx <- match(key2, key1)
   hasMatch <- !is.na(matchIdx)
 
-  flip <- hasMatch &
-    df2$alt[hasMatch] == df1$ref[matchIdx[hasMatch]] &
-    df2$ref[hasMatch] == df1$alt[matchIdx[hasMatch]]
+  flip <- rep(FALSE, nrow(df2))
+  mi <- matchIdx[hasMatch]
+  flip[hasMatch] <- df2$alt[hasMatch] == df1$ref[mi] &
+                    df2$ref[hasMatch] == df1$alt[mi]
 
   # Apply flips to df2
   flipRows <- which(hasMatch)[flip[hasMatch]]
@@ -2365,9 +2366,11 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   }
   if (!requireNamespace("susieR", quietly = TRUE) ||
       !all(c("estimate_s_rss", "kriging_rss") %in% getNamespaceExports("susieR"))) {
+    # nocov start
     stop("krigingOutlierQc requires a susieR that provides estimate_s_rss() and ",
          "kriging_rss(); the installed susieR does not. Install a susieR with the ",
          "kriging RSS diagnostic, or disable alleleFlipKriging.")
+    # nocov end
   }
   if (is.null(variantIds)) variantIds <- rownames(R)
   # susieR's kriging RSS diagnostic: estimate the LD-mismatch scale, then take
