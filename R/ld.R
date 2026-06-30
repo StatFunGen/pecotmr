@@ -548,7 +548,21 @@ loadLdFromGenotype <- function(genotypePath, region,
   }
   onMissing <- match.arg(onMissing)
   snpInfo <- getSnpInfo(ldSketch)
-  idx <- match(variantIds, as.character(snpInfo$SNP))
+  # Reconcile a pure chr-prefix mismatch between the requested ids and the
+  # panel (ensureChrMatch, variantId.R) before matching, so variants that
+  # differ only by a leading "chr" still resolve instead of reading as absent.
+  # The caller's original variantIds are kept for the returned labels; only the
+  # match keys are normalized. Fall back to the raw ids if normalization can't
+  # parse them (e.g. an rsID panel), preserving prior behavior.
+  matchIds <- variantIds
+  panelIds <- as.character(snpInfo$SNP)
+  reconciled <- tryCatch(ensureChrMatch(variantIds, panelIds),
+                         error = function(e) NULL)
+  if (!is.null(reconciled)) {
+    matchIds <- reconciled$idsA
+    panelIds <- reconciled$idsB
+  }
+  idx <- match(matchIds, panelIds)
   if (anyNA(idx)) {
     if (onMissing == "error") {
       stop(sprintf("%s: %d variant id(s) not present in the LD sketch panel.",

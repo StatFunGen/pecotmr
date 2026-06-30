@@ -2841,6 +2841,50 @@ test_that(".ldFromSketch drops variants absent from the panel when onMissing='dr
 })
 
 # =============================================================================
+# Additional coverage: .ldFromSketch reconciles chr-prefix conventions
+# =============================================================================
+
+test_that(".ldFromSketch resolves chr-prefixed request ids against a non-prefixed panel", {
+  skip_if_not_installed("pgenlibr")
+  h <- readGenotypes(file.path(geno_test_data_dir, "test_variants"), format = "plink2")
+  pid <- as.character(getSnpInfo(h)$SNP)            # chr-prefixed (chr21_..._C_G)
+  h@snpInfo$SNP <- sub("^chr", "", pid)             # panel now lacks the prefix
+  m <- pecotmr:::.ldFromSketch(h, pid[1:3])         # request keeps the prefix
+  expect_equal(dim(m), c(3L, 3L))
+  expect_equal(rownames(m), pid[1:3])               # caller's labels preserved
+  expect_equal(unname(diag(m)), c(1, 1, 1))
+})
+
+test_that(".ldFromSketch resolves non-prefixed request ids against a chr-prefixed panel", {
+  skip_if_not_installed("pgenlibr")
+  h <- readGenotypes(file.path(geno_test_data_dir, "test_variants"), format = "plink2")
+  pid <- as.character(getSnpInfo(h)$SNP)
+  req <- sub("^chr", "", pid[1:3])                  # request drops the prefix
+  m <- pecotmr:::.ldFromSketch(h, req)
+  expect_equal(dim(m), c(3L, 3L))
+  expect_equal(rownames(m), req)                    # caller's labels preserved
+})
+
+test_that(".ldFromSketch is unchanged when request and panel share a convention", {
+  skip_if_not_installed("pgenlibr")
+  h <- readGenotypes(file.path(geno_test_data_dir, "test_variants"), format = "plink2")
+  pid <- as.character(getSnpInfo(h)$SNP)
+  m <- pecotmr:::.ldFromSketch(h, pid[1:3])
+  expect_equal(dim(m), c(3L, 3L))
+  expect_equal(rownames(m), pid[1:3])
+})
+
+test_that(".ldFromSketch still errors on a genuinely-absent variant after reconciliation", {
+  skip_if_not_installed("pgenlibr")
+  h <- readGenotypes(file.path(geno_test_data_dir, "test_variants"), format = "plink2")
+  pid <- as.character(getSnpInfo(h)$SNP)
+  # request the prefix-stripped form (forces reconciliation) plus one truly-absent variant
+  req <- c(sub("^chr", "", pid[1]), "21_99999999_A_G")
+  expect_error(pecotmr:::.ldFromSketch(h, req),
+               "not present in the LD sketch panel")
+})
+
+# =============================================================================
 # Additional coverage: .requireMatchingLdSketches error paths
 # =============================================================================
 
