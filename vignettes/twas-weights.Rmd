@@ -81,7 +81,7 @@ head(getWeights(entry))
 CV performance:
 
 ```{r individual-cv}
-entry@cvPerformance
+getCvResult(entry)
 ```
 
 The entry's `variantIds` slot lists the LD-aligned variant set the
@@ -232,7 +232,8 @@ Each entry exposes:
 - `weights` — per-variant coefficients (named numeric vector or matrix
   for multivariate methods)
 - `variantIds` — variant IDs the weights are aligned to
-- `cvPerformance` — list with `rsq`, `r`, predicted values, etc.
+- `cvResult` — list with `rsq`, `r`, predicted values, etc. (access
+  with `getCvResult()`)
 - `standardized` — whether weights are on the standardized
   (`y ~ scale(X)`) or original scale
 - `dataType` — string tag carried through for reporting (e.g.

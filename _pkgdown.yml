@@ -95,7 +95,9 @@ reference:
       - LdEigen-class
       - LdScore-class
       - LdStatistic-class
+      - MashPrior-class
       - MultiStudyQtlDataset-class
+      - SldscData-class
       - SumStatsBase-class
 
   - title: "Class constructors"
@@ -111,10 +113,12 @@ reference:
       - GwasFineMappingResult
       - GwasSumStats
       - LdData
+      - MashPrior
       - MultiStudyQtlDataset
       - QtlDataset
       - QtlFineMappingResult
       - QtlSumStats
+      - SldscData
       - TwasWeights
       - TwasWeightsEntry
 
@@ -226,6 +230,7 @@ reference:
 
   - subtitle: "QtlDataset"
     contents:
+      - getAf
       - getGenotypeCovariates
       - getGenotypes
       - getPhenotypeCovariates
@@ -248,9 +253,23 @@ reference:
       - getQcInfo
       - getQcDiagnostics
 
+  - subtitle: "SldscData"
+    contents:
+      - getAnnotData
+      - getFrqData
+      - getTraitRuns
+      - getTraitNames
+      - getAnnotCols
+      - getTraitRun
+
+  - subtitle: "MashPrior"
+    contents:
+      - getCvFits
+      - getFullFit
+
   - subtitle: "TwasWeights"
     contents:
-      - getCvPerformance
+      - getCvResult
       - getDataType
       - getFits
       - getStandardized
@@ -260,7 +279,7 @@ reference:
   - subtitle: "TwasWeightsEntry"
     contents:
       # Same generic surface as TwasWeights — dispatches on per-row entries.
-      - getCvPerformance
+      - getCvResult
       - getDataType
       - getFits
       - getStandardized
@@ -313,6 +332,7 @@ reference:
       - autoDecision
       - raiss
       - mergeVariantInfo
+      - mergeSusieCs
       - parseCsCorr
       - filterRelatedness
 
@@ -370,6 +390,7 @@ reference:
       - susieAshRssWeights
       - mvsusieWeights
       - mvsusieRssWeights
+      - fsusieWeights
       - fitMvsusie
       - fitMvsusieRss
       - fitFsusie
@@ -470,6 +491,8 @@ reference:
       - computeSldscMRef
       - readAnnotations
       - readSldscTrait
+      - readSldscAnnot
+      - readSldscFrq
       - standardizeSldscTrait
       - h2EstimateToSldscTrait
       - isBinarySldscAnnot
@@ -511,6 +534,7 @@ reference:
       - enlocPipeline
       - ctwasBimfileLoader
       - getCtwasMetaData
+      - mergeCtwasBoundaryRegions
       - loadRegionalAssociationData
       - loadRegionalUnivariateData
       - loadRegionalRegressionData
