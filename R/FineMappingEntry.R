@@ -190,11 +190,16 @@ setMethod("getCs", "FineMappingEntry",
 setMethod("adjustPips", "FineMappingEntry",
   function(x, keepVariants, ...) {
     keepVariants <- as.character(keepVariants)
-    common <- intersect(x@variantIds, keepVariants)
-    if (!length(common))
+    # Match the entry's variants to `keepVariants` by (chrom, pos, allele) so a
+    # chr-prefix / separator difference does not read as no-overlap. PIP / LBF
+    # are coding-invariant, so this is pure identity (no sign). keepIdx is kept
+    # in the entry's variant order so the fit-matrix subsetting is unchanged.
+    m <- matchVariants(x@variantIds, keepVariants)
+    if (!length(m$idxA))
       stop("adjustPips: intersection of entry variants with `keepVariants` ",
            "is empty.")
-    keepIdx <- match(common, x@variantIds)
+    keepIdx <- sort(m$idxA)
+    common  <- x@variantIds[keepIdx]
     fit <- x@susieFit
     if (is.null(fit$lbf_variable))
       stop("adjustPips: entry's susieFit has no `lbf_variable` matrix; ",

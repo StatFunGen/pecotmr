@@ -828,7 +828,10 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
 
 # Per-block SNP info table (chrom, id, pos, alt, ref). ctwas requires
 # these exact column names (read_snp_info_files asserts them). `alt`
-# maps to A1 (effect allele) and `ref` to A2.
+# maps to A1 (effect allele) and `ref` to A2. NOTE: cTWAS requires an integer
+# chrom, so the as.integer() cast below is intentional (an output-boundary
+# format requirement) and this path is autosomal-only -- X/Y/MT are not
+# supported by the downstream cTWAS model.
 # @noRd
 .ctwasSnpInfoForBlock <- function(gwasLd) {
   snpInfo <- getSnpInfo(gwasLd)
@@ -867,7 +870,7 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
 }
 
 # Harmonize TWAS weight variants against the LD reference panel. Same
-# allele-matching semantics as the GWAS-side `.matchRefPanel` flow:
+# allele-matching semantics as the GWAS-side `harmonizeAlleles` flow:
 # match by (chrom, pos), accept exact A1/A2 frame, sign-flip the weight
 # when alleles are swapped, drop unmatched / strand-ambiguous variants.
 # Returns a data.frame with columns:
@@ -889,7 +892,7 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
     origIdx = seq_along(origVids),
     stringsAsFactors = FALSE)
   res <- tryCatch(
-    .matchRefPanel(
+    harmonizeAlleles(
       targetData            = targetDf,
       refVariants           = refVariants,
       colToFlip             = "w",
@@ -975,7 +978,7 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
   }
   panelInfo <- ldPanel$snpInfo
   # Reference frame for allele-harmonization: panel variant info with
-  # the column shape `.matchRefPanel` expects (chrom/pos/A2/A1).
+  # the column shape `harmonizeAlleles` expects (chrom/pos/A2/A1).
   refVariants <- data.frame(
     chrom      = as.integer(panelInfo$chrom),
     pos        = as.integer(panelInfo$pos),
@@ -992,7 +995,7 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
     if (length(origVids) == 0L || length(origVids) != length(origW)) next
 
     # --- Step 1: allele-harmonize against the LD panel -------------
-    # Parses chr:pos:A2:A1 IDs into the data.frame `.matchRefPanel`
+    # Parses chr:pos:A2:A1 IDs into the data.frame `harmonizeAlleles`
     # expects, then matches by (chrom, pos) with exact / sign-flip /
     # strand-flip detection. Returned canonical variant IDs are in the
     # panel's A1/A2 frame; weights are sign-flipped for variants whose

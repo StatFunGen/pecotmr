@@ -602,6 +602,61 @@ test_that(".cbSumstatPair: varY attaches var_y; NA variant ids fall back to chr:
   expect_null(pecotmr:::.cbSumstatPair(dfNA, h))
 })
 
+test_that(".cbSumstatPair canonicalizes variant ids to chr-prefixed for name alignment", {
+  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
+                        .package = "pecotmr")
+  h <- .cbp_makeHandle(snp_n = 3L)
+  h@snpInfo$SNP <- c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G")   # chr-prefixed panel
+  # sumstat carries the same variants without the "chr" prefix; the pipeline
+  # should canonicalize them so the sumstat / LD ids align by name with other
+  # sources (previously the returned ids kept the caller's convention).
+  df <- data.frame(variant_id = c("1:100:A:G", "1:200:A:G", "1:300:A:G"),
+                   z = c(1, -1, 0.5), N = rep(1000, 3), stringsAsFactors = FALSE)
+  pair <- pecotmr:::.cbSumstatPair(df, h)
+  expect_equal(pair$sumstat$variant,
+               c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"))
+  expect_identical(colnames(pair$LD), pair$sumstat$variant)
+})
+
+test_that(".cbFlipPairToCanonical flips z + LD for swapped variants, relabels to canonical", {
+  ss <- data.frame(z = c(2, -1), n = c(1000, 1000),
+                   variant = c("chr1:100:A:G", "chr1:200:C:T"),
+                   stringsAsFactors = FALSE)
+  LD <- matrix(c(1, 0.5, 0.5, 1), 2, dimnames = list(ss$variant, ss$variant))
+  p <- list(sumstat = ss, LD = LD, variantIds = ss$variant)
+  canonical <- c("chr1:100:G:A", "chr1:200:C:T")   # variant 1 swapped, 2 identical
+  out <- pecotmr:::.cbFlipPairToCanonical(p, canonical)
+  expect_equal(out$sumstat$variant, c("chr1:100:G:A", "chr1:200:C:T"))
+  expect_equal(out$sumstat$z, c(-2, -1))            # v1 z flipped; v2 unchanged
+  expect_equal(out$LD["chr1:100:G:A", "chr1:200:C:T"], -0.5)   # one endpoint flipped
+  expect_equal(unname(diag(out$LD)), c(1, 1))       # diagonal preserved
+})
+
+test_that(".cbFlipMatrixToCanonical negates residualized dosage for swapped columns", {
+  X <- matrix(c(1, -1, 2, 0.5, -0.5, 1), nrow = 3,
+              dimnames = list(paste0("s", 1:3),
+                              c("chr1:100:A:G", "chr1:200:C:T")))
+  canonical <- c("chr1:100:G:A", "chr1:200:C:T")   # col 1 swapped, col 2 identical
+  out <- pecotmr:::.cbFlipMatrixToCanonical(X, canonical)
+  expect_equal(colnames(out), c("chr1:100:G:A", "chr1:200:C:T"))
+  expect_equal(unname(out[, "chr1:100:G:A"]), -c(1, -1, 2))   # negated
+  expect_equal(unname(out[, "chr1:200:C:T"]), c(0.5, -0.5, 1))
+})
+
+test_that(".cbHarmonizeAlleles aligns opposite-coded sumstats to one canonical (invariance)", {
+  mkPair <- function(v, z) {
+    ss <- data.frame(z = z, n = 1000, variant = v, stringsAsFactors = FALSE)
+    list(sumstat = ss, LD = matrix(1, 1, 1, dimnames = list(v, v)), variantIds = v)
+  }
+  # Same locus, opposite ref/alt coding across two sumstats, same underlying z.
+  pairs <- list(A = mkPair("chr1:100:A:G", 3), B = mkPair("chr1:100:G:A", 3))
+  h <- pecotmr:::.cbHarmonizeAlleles(NULL, pairs)
+  expect_equal(h$pairs$A$sumstat$variant, "chr1:100:A:G")   # first-seen = canonical
+  expect_equal(h$pairs$B$sumstat$variant, "chr1:100:A:G")   # B relabeled to it
+  expect_equal(h$pairs$A$sumstat$z, 3)                       # A already canonical
+  expect_equal(h$pairs$B$sumstat$z, -3)                      # B flipped to match
+})
+
 test_that("colocboostPipeline(MultiStudyQtlDataset): a study with no usable bundle is skipped", {
   mt <- .cbp_makeMultiStudy()              # qd (study1, ENSG_A) + ss (Q1, t1)
   local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),

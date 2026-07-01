@@ -288,7 +288,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
       colData = DataFrame(sampleId = sampleIds, row.names = sampleIds)))
   }
 
-  unifiedChr <- .canonChr(handle@snpInfo$CHR)
+  unifiedChr <- canonChrom(handle@snpInfo$CHR)
   reqChr <- unifiedChr[snpIdx]
   groups <- split(seq_along(snpIdx), reqChr)
 
@@ -964,7 +964,7 @@ matchVariantsToKeep <- function(variantInfo, keepVariantsPath) {
     ids <- read_lines(keepVariantsPath)
     keepVariants <- parseVariantId(ids)
   }
-  viChrom <- as.integer(stripChrPrefix(variantInfo$chrom))
+  viChrom <- canonChrom(variantInfo$chrom)
   hasAlleles <- "A1" %in% names(keepVariants) && "A2" %in% names(keepVariants) &&
     !any(is.na(keepVariants$A1)) && !any(is.na(keepVariants$A2))
   if (hasAlleles) {

@@ -19,6 +19,7 @@ colocPipeline(
   enrichment = NULL,
   p12Max = 0.001,
   adjustPips = TRUE,
+  alleleFlip = TRUE,
   ...
 )
 }
@@ -94,6 +95,11 @@ user declined to impute missing variants in the GWAS \code{SumStats}
 and the QTL fine-mapping input has additional variants; (2) the GWAS
 fine-mapping result contains variants not present in the QTL
 fine-mapping result. Pass \code{FALSE} to use the FMRs as supplied.}
+
+\item{alleleFlip}{Logical, default \code{TRUE}. When TRUE, align LBF columns
+between the QTL and GWAS by (chrom, pos) with ref/alt swaps recognized
+(LBF is coding-invariant, so no sign change is needed); when FALSE, match
+on exact alleles only, so a ref/alt swap is treated as a distinct variant.}
 
 \item{...}{Additional arguments forwarded to
 \code{coloc::coloc.bf_bf}.}

@@ -285,10 +285,9 @@ GenotypeHandle <- function(path = NULL,
 # One-file-per-chromosome (sharded) handle support
 # ---------------------------------------------------------------------------
 
-# Canonicalize a chromosome label to a bare token (strip a leading "chr").
-# Used as the routing key in @chromPaths and when matching @snpInfo$CHR.
-#' @keywords internal
-.canonChr <- function(x) sub("^chr", "", as.character(x), ignore.case = TRUE)
+# Chromosome labels are canonicalized via canonChrom() (variantId.R) -- the
+# single chromosome normalizer used for @chromPaths routing keys and for
+# @snpInfo$CHR lookups, so both sides stay consistent (and X/Y/MT survive).
 
 # Per-chromosome shard map, tolerant of GenotypeHandle objects deserialized
 # from before the `chromPaths` slot existed (e.g. an RDS saved by an older
@@ -389,7 +388,7 @@ GenotypeHandle <- function(path = NULL,
 
   chromPaths <- character(0)
   for (i in seq_along(shards)) {
-    chs <- unique(.canonChr(shards[[i]]@snpInfo$CHR))
+    chs <- unique(canonChrom(shards[[i]]@snpInfo$CHR))
     for (ch in chs) {
       if (ch %in% names(chromPaths))
         stop("GenotypeHandle(genoMeta): chromosome '", ch, "' appears in ",

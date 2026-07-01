@@ -80,6 +80,11 @@
 #'   skipped. \code{0} (default) disables it; a negative value uses
 #'   \code{3 / n_variants}. (Summary-statistic skipping is handled upstream by
 #'   \code{\link{summaryStatsQc}}'s own \code{pipCutoffToSkip}.)
+#' @param alleleFlip Logical, default \code{TRUE}. When TRUE, harmonize variants
+#'   across the individual X, sumstats, and LD by (chrom, pos) with ref/alt
+#'   swaps recognized (flipping z / residualized dosage / LD to a shared
+#'   coding); when FALSE, match on exact alleles only (names-only), so a ref/alt
+#'   swap is treated as a distinct variant.
 #' @param ... Additional arguments forwarded to
 #'   \code{\link[colocboost]{colocboost}} (e.g., \code{M}, \code{L},
 #'   \code{output_level}).
@@ -236,6 +241,12 @@ setGeneric("colocboostPipeline",
         NULL
       })
     if (is.null(X) || ncol(X) == 0L) next
+    # Canonicalize variant colnames (chr-prefix + separator, allele order
+    # preserved; rsIDs passed through) so colocboost's name-based matching
+    # aligns them with the sumstat / LD ids and across studies. A genuine
+    # ref/alt swap stays a distinct id -- names are aligned here, allele
+    # *coding* is not harmonized.
+    colnames(X) <- normalizeVariantId(colnames(X))
     common <- intersect(rownames(X), rownames(Y))
     if (length(common) == 0L) {
       message("colocboostPipeline: skipping context '", ctx,
@@ -322,6 +333,10 @@ setGeneric("colocboostPipeline",
     variantIds <- formatVariantId(df$chrom, df$pos, df$A2, df$A1)
     df$variant_id <- variantIds
   }
+  # Canonicalize ids (chr-prefix + separator, allele order preserved; rsIDs
+  # passed through) so the sumstat `variant` column and the LD dimnames align
+  # by name with the individual X colnames and across studies/sumstats.
+  variantIds <- normalizeVariantId(variantIds)
   # Use the shared `.ldFromSketch` helper in "drop" mode so missing-from-
   # panel variants are silently filtered (the colocboost path expects to
   # operate only on the overlap).
@@ -555,13 +570,87 @@ setGeneric("colocboostPipeline",
   results
 }
 
+# =============================================================================
+# Allele harmonization (the alleleFlip = TRUE path)
+# =============================================================================
+
+# Relabel a residualized genotype matrix's columns to the canonical coding,
+# negating columns whose allele order is swapped relative to canonical. For a
+# centered / residualized dosage, negation IS the allele flip (flipping the
+# counted allele negates the centered genotype). Columns with no canonical
+# match (e.g. a multi-allelic secondary allele) are dropped.
+# @noRd
+.cbFlipMatrixToCanonical <- function(m, canonical) {
+  mm <- matchVariants(colnames(m), canonical)
+  if (length(mm$idxA) == 0L) return(m[, integer(0), drop = FALSE])
+  o  <- order(mm$idxA)
+  ia <- mm$idxA[o]; ib <- mm$idxB[o]; sgn <- mm$sign[o]
+  out <- m[, ia, drop = FALSE]
+  flip <- which(sgn == -1)
+  if (length(flip) > 0L) out[, flip] <- -out[, flip]
+  colnames(out) <- canonical[ib]
+  out
+}
+
+# Relabel a (sumstat, LD) pair to the canonical coding: flip the z-score and the
+# LD sign-submatrix for variants swapped relative to canonical
+# (LD_ij -> sign_i * sign_j * LD_ij), drop unmatched variants, and relabel to
+# canonical. The sumstat and its LD share one sign vector, so they stay
+# consistent. Returns NULL when no variant matches.
+# @noRd
+.cbFlipPairToCanonical <- function(p, canonical) {
+  mm <- matchVariants(p$sumstat$variant, canonical)
+  if (length(mm$idxA) == 0L) return(NULL)
+  o  <- order(mm$idxA)
+  ia <- mm$idxA[o]; ib <- mm$idxB[o]; sgn <- mm$sign[o]
+  ss <- p$sumstat[ia, , drop = FALSE]
+  ss$z <- ss$z * sgn
+  ss$variant <- canonical[ib]
+  ld <- p$LD[ia, ia, drop = FALSE] * outer(sgn, sgn)
+  dimnames(ld) <- list(canonical[ib], canonical[ib])
+  list(sumstat = ss, LD = ld, variantIds = canonical[ib])
+}
+
+# Harmonize the allele coding of every colocboost input (individual X columns,
+# each sumstat's z / variant, and its LD) to a single per-locus canonical
+# coding, so a variant that appears with opposite ref/alt across sources is
+# combined with a consistent sign rather than dropped or silently mis-signed.
+# The canonical id for a (chrom, pos) locus is the first-seen id across all
+# sources (its ref/alt order becomes the shared coding); rsIDs are their own
+# locus. Only invoked when alleleFlip = TRUE.
+# @noRd
+.cbHarmonizeAlleles <- function(individualBundle, pairs) {
+  ids <- character(0)
+  if (!is.null(individualBundle)) {
+    ids <- c(ids, unlist(lapply(individualBundle$X, colnames), use.names = FALSE))
+  }
+  ids <- c(ids, unlist(lapply(pairs, function(p) p$sumstat$variant),
+                       use.names = FALSE))
+  ids <- unique(ids[!is.na(ids)])
+  if (length(ids) == 0L) {
+    return(list(individualBundle = individualBundle, pairs = pairs))
+  }
+  parsed <- parseVariantId(ids)
+  ok     <- !is.na(parsed$chrom) & !is.na(parsed$pos)
+  locus  <- ifelse(ok, paste(parsed$chrom, parsed$pos, sep = ":"), ids)
+  canonical <- ids[!duplicated(locus)]
+  if (!is.null(individualBundle)) {
+    individualBundle$X <- lapply(individualBundle$X,
+                                 .cbFlipMatrixToCanonical, canonical = canonical)
+  }
+  pairs <- lapply(pairs, .cbFlipPairToCanonical, canonical = canonical)
+  pairs <- pairs[!vapply(pairs, is.null, logical(1))]
+  list(individualBundle = individualBundle, pairs = pairs)
+}
+
 # Top-level driver shared by all input methods. qtlPairs and gwasPairs
 # are per-tuple lists of `list(sumstat, LD)` produced by the per-class
 # bundle helpers; they are merged here so dict_sumstatLD can dedupe
 # identical LD matrices across QTL and GWAS sides.
 .cbDriver <- function(individualBundle, qtlPairs, gwasSumStats,
                       xqtlColoc, jointGwas, separateGwas,
-                      focalTrait, dotArgs, qtlLdSketch = NULL) {
+                      focalTrait, dotArgs, qtlLdSketch = NULL,
+                      alleleFlip = TRUE) {
   if (!isTRUE(xqtlColoc) && !isTRUE(jointGwas) && !isTRUE(separateGwas)) {
     message("colocboostPipeline: no analysis flag is TRUE; nothing to do.")
     return(.cbEmptyResult())
@@ -582,6 +671,15 @@ setGeneric("colocboostPipeline",
       }
       combinedPairs[[key]] <- gwasPairs[[label]]
     }
+  }
+  # Harmonize allele coding across all sources to a shared per-locus canonical
+  # so swapped variants are combined with a consistent sign (alleleFlip = TRUE);
+  # alleleFlip = FALSE leaves the names-only canonicalization done at the source
+  # builders, which keeps swapped variants distinct.
+  if (isTRUE(alleleFlip)) {
+    harmonized       <- .cbHarmonizeAlleles(individualBundle, combinedPairs)
+    individualBundle <- harmonized$individualBundle
+    combinedPairs    <- harmonized$pairs
   }
   sumstatBundle <- .cbMergeSumstatBundles(combinedPairs)
 
@@ -606,6 +704,7 @@ setMethod("colocboostPipeline", "QtlDataset",
            separateGwas = FALSE,
            samples = NULL,
            pipCutoffToSkip = 0,
+           alleleFlip = TRUE,
            ...) {
     dotArgs <- list(...)
     indBundle <- .cbIndividualBundle(
@@ -618,7 +717,7 @@ setMethod("colocboostPipeline", "QtlDataset",
       pipCutoffToSkip = pipCutoffToSkip)
     .cbDriver(indBundle, qtlPairs = list(), gwasSumStats,
               xqtlColoc, jointGwas, separateGwas,
-              focalTrait, dotArgs)
+              focalTrait, dotArgs, alleleFlip = alleleFlip)
   })
 
 #' @rdname colocboostPipeline
@@ -631,6 +730,7 @@ setMethod("colocboostPipeline", "QtlSumStats",
            xqtlColoc = TRUE,
            jointGwas = FALSE,
            separateGwas = FALSE,
+           alleleFlip = TRUE,
            ...) {
     .cbRequireSumStatsQc(qtlData, "qtlData")
     dotArgs <- list(...)
@@ -644,7 +744,8 @@ setMethod("colocboostPipeline", "QtlSumStats",
               separateGwas     = separateGwas,
               focalTrait       = focalTrait,
               dotArgs          = dotArgs,
-              qtlLdSketch      = getLdSketch(qtlData))
+              qtlLdSketch      = getLdSketch(qtlData),
+              alleleFlip       = alleleFlip)
   })
 
 #' @rdname colocboostPipeline
@@ -659,6 +760,7 @@ setMethod("colocboostPipeline", "MultiStudyQtlDataset",
            separateGwas = FALSE,
            samples = NULL,
            pipCutoffToSkip = 0,
+           alleleFlip = TRUE,
            ...) {
     dotArgs <- list(...)
 
@@ -719,7 +821,8 @@ setMethod("colocboostPipeline", "MultiStudyQtlDataset",
     .cbDriver(indBundle, qtlPairs, gwasSumStats,
               xqtlColoc, jointGwas, separateGwas,
               focalTrait, dotArgs,
-              qtlLdSketch = qtlLdSketch)
+              qtlLdSketch = qtlLdSketch,
+              alleleFlip = alleleFlip)
   })
 
 #' @rdname colocboostPipeline

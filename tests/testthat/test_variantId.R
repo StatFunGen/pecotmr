@@ -7,7 +7,7 @@ context("variantId")
 test_that("parseVariantId: canonical colon format with chr prefix", {
   res <- parseVariantId(c("chr1:100:A:G", "chr2:200:T:C"))
   expect_s3_class(res, "data.frame")
-  expect_equal(res$chrom, c(1L, 2L))
+  expect_equal(res$chrom, c("1", "2"))
   expect_equal(res$pos, c(100L, 200L))
   expect_equal(res$A2, c("A", "T"))
   expect_equal(res$A1, c("G", "C"))
@@ -15,14 +15,14 @@ test_that("parseVariantId: canonical colon format with chr prefix", {
 
 test_that("parseVariantId: canonical colon format without chr prefix", {
   res <- parseVariantId(c("1:100:A:G", "2:200:T:C"))
-  expect_equal(res$chrom, c(1L, 2L))
+  expect_equal(res$chrom, c("1", "2"))
   expect_equal(res$pos, c(100L, 200L))
   expect_equal(attr(res, "convention")$hasChr, FALSE)
 })
 
 test_that("parseVariantId: underscore separator format", {
   res <- parseVariantId(c("chr1_100_A_G", "1_200_T_C"))
-  expect_equal(res$chrom, c(1L, 1L))
+  expect_equal(res$chrom, c("1", "1"))
   expect_equal(res$pos, c(100L, 200L))
   expect_equal(res$A2, c("A", "T"))
   expect_equal(res$A1, c("G", "C"))
@@ -30,7 +30,7 @@ test_that("parseVariantId: underscore separator format", {
 
 test_that("parseVariantId: mixed colon-underscore format", {
   res <- parseVariantId("chr1:100_A_G")
-  expect_equal(res$chrom, 1L)
+  expect_equal(res$chrom, "1")
   expect_equal(res$pos, 100L)
   expect_equal(res$A2, "A")
   expect_equal(res$A1, "G")
@@ -55,7 +55,7 @@ test_that("parseVariantId: data.frame input with chrom/pos/A2/A1 returns as-is",
   df <- data.frame(chrom = "chr1", pos = 100L, A2 = "A", A1 = "G",
                    stringsAsFactors = FALSE)
   res <- parseVariantId(df)
-  expect_equal(res$chrom, 1L)
+  expect_equal(res$chrom, "1")
   expect_equal(res$pos, 100L)
   expect_equal(attr(res, "convention")$hasChr, TRUE)
 })
@@ -64,7 +64,7 @@ test_that("parseVariantId: data.frame input with >=4 columns assigns positional 
   df <- data.frame(c1 = "1", c2 = "100", c3 = "A", c4 = "G", extra = "x",
                    stringsAsFactors = FALSE)
   res <- parseVariantId(df)
-  expect_equal(res$chrom, 1L)
+  expect_equal(res$chrom, "1")
   expect_equal(res$pos, 100L)
   expect_equal(res$A2, "A")
   expect_equal(res$A1, "G")
@@ -141,19 +141,19 @@ test_that("parseRegion: returns non-character input unchanged", {
 
 test_that("regionToDf: parses chrom_start_end LD region IDs", {
   res <- regionToDf(c("1_100_200", "2_300_400"))
-  expect_equal(res$chrom, c(1L, 2L))
+  expect_equal(res$chrom, c("1", "2"))
   expect_equal(res$start, c(100L, 300L))
   expect_equal(res$end,   c(200L, 400L))
 })
 
 test_that("regionToDf: strips chr prefix from chromosome", {
   res <- regionToDf("chr5_1000_2000")
-  expect_equal(res$chrom, 5L)
+  expect_equal(res$chrom, "5")
 })
 
 test_that("regionToDf: accepts colon/dash separators", {
   res <- regionToDf("chr1:100-200")
-  expect_equal(res$chrom, 1L)
+  expect_equal(res$chrom, "1")
   expect_equal(res$start, 100L)
   expect_equal(res$end, 200L)
 })
@@ -323,7 +323,7 @@ test_that("parseRegion returns non-single-string input unchanged", {
 
 test_that("parseVariantId parses single variant with chr prefix", {
   result <- parseVariantId("chr1:12345:A:G")
-  expect_equal(result$chrom, 1L)
+  expect_equal(result$chrom, "1")
   expect_equal(result$pos, 12345L)
   expect_equal(result$A2, "A")
   expect_equal(result$A1, "G")
@@ -335,7 +335,7 @@ test_that("parseVariantId parses single variant with chr prefix", {
 
 test_that("parseVariantId parses single variant without chr prefix", {
   result <- parseVariantId("5:12345:A:G")
-  expect_equal(result$chrom, 5L)
+  expect_equal(result$chrom, "5")
   expect_equal(result$pos, 12345L)
   expect_equal(result$A2, "A")
   expect_equal(result$A1, "G")
@@ -348,7 +348,7 @@ test_that("parseVariantId parses multiple variants", {
   ids <- c("chr1:100:A:G", "chr2:200:C:T", "chr3:300:G:A")
   result <- parseVariantId(ids)
   expect_equal(nrow(result), 3)
-  expect_equal(result$chrom, c(1L, 2L, 3L))
+  expect_equal(result$chrom, c("1", "2", "3"))
   expect_equal(result$pos, c(100L, 200L, 300L))
   expect_equal(result$A2, c("A", "C", "G"))
   expect_equal(result$A1, c("G", "T", "A"))
@@ -397,6 +397,14 @@ test_that("normalizeVariantId normalizes various formats", {
   expect_equal(normalizeVariantId("1:200:C:T", convention = conv), "chr1:200_C_T")
 })
 
+
+test_that("normalizeVariantId leaves unparseable ids (rsIDs) unchanged", {
+  expect_equal(
+    normalizeVariantId(c("rs123", "1:100:A:G", "chr2:200_C_T")),
+    c("rs123", "chr1:100:A:G", "chr2:200:C:T"))          # rsID passes through
+  expect_equal(normalizeVariantId("rs1"), "rs1")         # all-unparseable input
+})
+
 # =============================================================================
 # variantIdToDf
 # =============================================================================
@@ -406,7 +414,7 @@ test_that("variantIdToDf handles colon-separated format", {
   ids <- c("1:100:A:G", "2:200:C:T")
   result <- pecotmr:::variantIdToDf(ids)
   expect_equal(nrow(result), 2)
-  expect_equal(result$chrom, c(1L, 2L))
+  expect_equal(result$chrom, c("1", "2"))
   expect_equal(result$pos, c(100L, 200L))
   expect_equal(result$A2, c("A", "C"))
   expect_equal(result$A1, c("G", "T"))
@@ -424,7 +432,7 @@ test_that("variantIdToDf handles underscore-separated format", {
 test_that("variantIdToDf strips chr prefix", {
   ids <- c("chr1:100:A:G", "chr2:200:C:T")
   result <- pecotmr:::variantIdToDf(ids)
-  expect_equal(result$chrom, c(1L, 2L))
+  expect_equal(result$chrom, c("1", "2"))
 })
 
 
@@ -432,7 +440,7 @@ test_that("variantIdToDf handles data.frame input with named columns", {
   df <- data.frame(chrom = c("chr1", "2"), pos = c(100, 200),
                    A2 = c("A", "C"), A1 = c("G", "T"))
   suppressWarnings(result <- pecotmr:::variantIdToDf(df))
-  expect_equal(result$chrom, c(1L, 2L))
+  expect_equal(result$chrom, c("1", "2"))
   expect_equal(result$pos, c(100L, 200L))
 })
 
@@ -442,7 +450,7 @@ test_that("variantIdToDf handles 5-part IDs with build suffix", {
   result <- pecotmr:::variantIdToDf(ids)
   expect_equal(ncol(result), 4)
   expect_equal(colnames(result), c("chrom", "pos", "A2", "A1"))
-  expect_equal(result$chrom, c(1L, 2L))
+  expect_equal(result$chrom, c("1", "2"))
   expect_equal(result$A2, c("A", "T"))
   expect_equal(result$A1, c("G", "C"))
 })
@@ -486,7 +494,7 @@ test_that("parseVariantId handles data.frame with generic column names", {
   )
   result <- parseVariantId(df)
   expect_equal(names(result)[1:4], c("chrom", "pos", "A2", "A1"))
-  expect_equal(result$chrom, c(1L, 2L))
+  expect_equal(result$chrom, c("1", "2"))
   expect_equal(result$pos, c(100L, 200L))
   expect_equal(result$A2, c("A", "T"))
   expect_equal(result$A1, c("G", "C"))
@@ -601,35 +609,141 @@ test_that("classifyVariantType accepts data.frame input", {
   expect_equal(result, c("SNP", "deletion"))
 })
 
-# =============================================================================
-# ensureChrMatch
-# =============================================================================
+# ===========================================================================
+# canonChrom / chromOrder / non-autosomal chromosomes (string chrom contract)
+# ===========================================================================
 
-
-test_that("ensureChrMatch returns unchanged when both have chr prefix", {
-  idsA <- c("chr1:100:A:G", "chr1:200:C:T")
-  idsB <- c("chr1:150:A:G", "chr1:250:C:T")
-  result <- pecotmr:::ensureChrMatch(idsA, idsB)
-  expect_equal(result$idsA, idsA)
-  expect_equal(result$idsB, idsB)
+test_that("canonChrom normalizes prefixes, case, and synonyms to strings", {
+  expect_equal(
+    pecotmr:::canonChrom(c("chr1", "CHR2", "chrX", "x", "23", "24", "M", "chrMT", "MT")),
+    c("1", "2", "X", "X", "X", "Y", "MT", "MT", "MT"))
+  # never coerces to integer -- non-autosomes survive
+  expect_type(pecotmr:::canonChrom("chrX"), "character")
 })
 
-
-test_that("ensureChrMatch normalizes when prefixes mismatch", {
-  idsA <- c("chr1:100:A:G", "chr1:200:C:T")
-  idsB <- c("1:150:A:G", "1:250:C:T")
-  result <- pecotmr:::ensureChrMatch(idsA, idsB)
-  expect_true(all(grepl("^chr", result$idsA)))
-  expect_true(all(grepl("^chr", result$idsB)))
+test_that("parseVariantId keeps non-autosomal chromosomes as strings", {
+  res <- parseVariantId(c("chrX:100:A:G", "chr23:200:T:C", "chrM:5:G:A", "chrY:9:C:T"))
+  expect_equal(res$chrom, c("X", "X", "MT", "Y"))
+  expect_equal(res$pos, c(100L, 200L, 5L, 9L))
 })
 
+test_that("formatVariantId emits non-autosomal ids without 'chrNA'", {
+  expect_equal(pecotmr:::formatVariantId("X", 100, "A", "G"), "chrX:100:A:G")
+  expect_equal(pecotmr:::formatVariantId("23", 100, "A", "G"), "chrX:100:A:G")
+  expect_false(grepl("NA", pecotmr:::formatVariantId("chrMT", 5, "G", "A")))
+})
 
-test_that("ensureChrMatch returns unchanged when both lack chr prefix", {
-  idsA <- c("1:100:A:G", "1:200:C:T")
-  idsB <- c("1:150:A:G", "1:250:C:T")
-  result <- pecotmr:::ensureChrMatch(idsA, idsB)
-  # Both already match (no prefix), so returned unchanged
-  expect_equal(result$idsA, idsA)
-  expect_equal(result$idsB, idsB)
+test_that("normalizeVariantId round-trips non-autosomal chromosomes", {
+  expect_equal(normalizeVariantId("23:100:A:G"), "chrX:100:A:G")
+  expect_equal(normalizeVariantId("chrX:100:A:G"), "chrX:100:A:G")
+  expect_equal(normalizeVariantId("chrM:5:G:A"), "chrMT:5:G:A")
+})
+
+test_that("chromOrder sorts autosomes then X/Y/MT", {
+  ord <- pecotmr:::chromOrder(c("MT", "X", "2", "1", "22", "Y"))
+  expect_equal(as.character(sort(ord)), c("1", "2", "22", "X", "Y", "MT"))
+})
+
+test_that("regionToDf keeps chrom as a string and positions as integers", {
+  res <- regionToDf("chrX_1000_2000")
+  expect_equal(res$chrom, "X")
+  expect_type(res$start, "integer")
+  expect_equal(res$start, 1000L)
+})
+
+# ===========================================================================
+# matchVariants -- allele-aware matcher (match on chrom/pos/ref/alt)
+# ===========================================================================
+
+test_that("matchVariants matches exact pairs and reports sign +1", {
+  a <- c("chr1:100:A:G", "chr2:200:C:T")
+  b <- c("chr2:200:C:T", "chr1:100:A:G")
+  m <- pecotmr:::matchVariants(a, b)
+  ord <- order(m$idxA)
+  expect_equal(m$idxA[ord], c(1L, 2L))
+  expect_equal(m$idxB[ord], c(2L, 1L))   # a[1]->b[2], a[2]->b[1]
+  expect_equal(m$sign[ord], c(1, 1))
+})
+
+test_that("matchVariants is robust to chr-prefix and separator differences", {
+  m <- pecotmr:::matchVariants("chr1:100:A:G", "1_100_A_G")
+  expect_equal(m$idxA, 1L)
+  expect_equal(m$idxB, 1L)
+  expect_equal(m$sign, 1)
+})
+
+test_that("matchVariants reports sign -1 for an allele swap", {
+  m <- pecotmr:::matchVariants("chr1:100:A:G", "chr1:100:G:A")
+  expect_equal(m$idxA, 1L)
+  expect_equal(m$idxB, 1L)
+  expect_equal(m$sign, -1)
+})
+
+test_that("matchVariants handles strand-ambiguous (A/T) swaps with the QC heuristic", {
+  # A lone A/T swap has no unambiguous strand flip to corroborate a strand
+  # interpretation, so (mirroring summaryStatsQc) it is treated as a plain
+  # allele swap and kept with sign -1, not dropped.
+  m <- pecotmr:::matchVariants("chr1:100:A:T", "chr1:100:T:A")
+  expect_equal(m$idxA, 1L)
+  expect_equal(m$sign, -1)
+
+  # When the batch contains a genuine unambiguous strand flip ([1]), the
+  # ambiguous A/T swap ([2]) is dropped as untrustworthy by default ...
+  a <- c("chr1:100:A:C", "chr2:200:A:T")
+  b <- c("chr1:100:T:G", "chr2:200:T:A")
+  expect_equal(pecotmr:::matchVariants(a, b)$idxA, 1L)
+  # ... but is kept when ambiguity checking is disabled.
+  expect_equal(sort(pecotmr:::matchVariants(a, b, removeStrandAmbiguous = FALSE)$idxA),
+               c(1L, 2L))
+})
+
+test_that("matchVariants matches non-autosomal variants (chrX, chr23 synonym)", {
+  m <- pecotmr:::matchVariants(c("chrX:100:A:G", "chr23:200:C:T"),
+                               c("X:100:A:G", "X:200:C:T"))
+  ord <- order(m$idxA)
+  expect_equal(m$idxA[ord], c(1L, 2L))
+  expect_equal(m$idxB[ord], c(1L, 2L))
+})
+
+test_that("matchVariants falls back to exact string match for rsIDs", {
+  m <- pecotmr:::matchVariants(c("rs1", "rs2", "rs3"), c("rs3", "rs1"))
+  ord <- order(m$idxA)
+  expect_equal(m$idxA[ord], c(1L, 3L))
+  expect_equal(m$idxB[ord], c(2L, 1L))
+  expect_equal(m$sign[ord], c(1, 1))
+})
+
+test_that("matchVariants disambiguates a multi-allelic site by allele", {
+  m <- pecotmr:::matchVariants("chr1:100:A:G",
+                               c("chr1:100:A:T", "chr1:100:A:G"))
+  expect_equal(m$idxA, 1L)
+  expect_equal(m$idxB, 2L)               # the A:G ref, not A:T
+  expect_equal(m$sign, 1)
+})
+
+test_that("matchVariants returns empty on no overlap", {
+  m <- pecotmr:::matchVariants("chr1:100:A:G", "chr2:200:C:T")
+  expect_length(m$idxA, 0)
+  expect_length(m$idxB, 0)
+  expect_length(m$sign, 0)
+})
+
+test_that("matchVariants accepts data.frame (chrom/pos/A2/A1) input", {
+  a <- data.frame(chrom = "1", pos = 100L, A2 = "A", A1 = "G",
+                  stringsAsFactors = FALSE)
+  m <- pecotmr:::matchVariants(a, "chr1:100:A:G")
+  expect_equal(m$idxA, 1L)
+  expect_equal(m$idxB, 1L)
+  expect_equal(m$sign, 1)
+})
+
+test_that("matchVariants allowFlip = FALSE matches exact alleles only (no swap)", {
+  # chr-prefix / separator still reconcile ...
+  m1 <- pecotmr:::matchVariants("chr1:100:A:G", "1_100_A_G", allowFlip = FALSE)
+  expect_equal(m1$idxA, 1L)
+  expect_equal(m1$sign, 1)
+  # ... but a ref/alt swap is NOT matched when flipping is disabled.
+  m2 <- pecotmr:::matchVariants("chr1:100:A:G", "chr1:100:G:A", allowFlip = FALSE)
+  expect_length(m2$idxA, 0)
 })
 

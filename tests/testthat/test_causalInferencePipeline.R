@@ -965,6 +965,76 @@ test_that(".cipComputeMr: IVW Wald-ratio over PIP-passing instruments", {
   expect_equal(res$nIV, 3L)                                # v1, v2, v4 pass + overlap
 })
 
+# ---------------------------------------------------------------------------
+# Phase 3: tuple-based (chrom/pos/allele) matching of QTL exposure to GWAS.
+# Positional ids exercise matchVariants' tuple path (the v1.. fixtures above
+# use the rsID string-fallback). Previously these joins used intersect()/match
+# on the raw id string, so a chr-prefix or allele-swap difference silently
+# dropped the variant.
+# ---------------------------------------------------------------------------
+
+test_that(".cipComputeMr matches across a chr-prefix difference (tuple match)", {
+  tl <- data.frame(variant_id = c("chr1:100:A:G", "chr1:200:A:G"),
+                   pip = c(0.9, 0.9), beta = c(0.3, 0.2), se = c(0.05, 0.05),
+                   stringsAsFactors = FALSE)
+  local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
+  # GWAS carries the same variants without the "chr" prefix.
+  g <- .cip_gwasDf(c("1:100:A:G", "1:200:A:G"), z = c(2, 1.5))
+  res <- pecotmr:::.cipComputeMr(NULL, g, pipCutoff = 0.5)
+  expect_equal(res$nIV, 2L)                 # matched despite chr-prefix mismatch
+  expect_true(is.finite(res$waldRatio))
+})
+
+test_that(".cipComputeMr includes an allele-swapped GWAS variant and flips the sign", {
+  tl <- data.frame(variant_id = "chr1:100:A:G",
+                   pip = 0.9, beta = 0.3, se = 0.05, stringsAsFactors = FALSE)
+  local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
+  rSame <- pecotmr:::.cipComputeMr(NULL, .cip_gwasDf("chr1:100:A:G", z = 2.0),
+                                   pipCutoff = 0.5)
+  # Same locus, ref/alt swapped on the GWAS side (same |z|): previously dropped
+  # (id-string mismatch); now matched with sign -1, negating the Wald ratio.
+  rSwap <- pecotmr:::.cipComputeMr(NULL, .cip_gwasDf("chr1:100:G:A", z = 2.0),
+                                   pipCutoff = 0.5)
+  expect_equal(rSwap$nIV, 1L)
+  expect_equal(rSwap$waldRatio, -rSame$waldRatio)
+})
+
+test_that(".cipComputeMr with alleleFlip = FALSE drops an allele-swapped GWAS variant", {
+  tl <- data.frame(variant_id = "chr1:100:A:G", pip = 0.9, beta = 0.3, se = 0.05,
+                   stringsAsFactors = FALSE)
+  local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
+  # GWAS variant is the ref/alt swap; with flipping disabled it is not matched.
+  rSwap <- pecotmr:::.cipComputeMr(NULL, .cip_gwasDf("chr1:100:G:A", z = 2.0),
+                                   pipCutoff = 0.5, alleleFlip = FALSE)
+  expect_equal(rSwap$nIV, 0L)
+  expect_true(is.na(rSwap$waldRatio))
+})
+
+test_that(".cipComputeMrCsAware matches across a chr-prefix difference", {
+  tl <- data.frame(variant_id = c("chr1:100:A:G", "chr1:200:A:G"),
+                   cs = c(1L, 1L), pip = c(0.6, 0.4),
+                   beta = c(0.3, 0.2), se = c(0.05, 0.05), stringsAsFactors = FALSE)
+  local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
+  g <- .cip_gwasDf(c("1:100:A:G", "1:200:A:G"), z = c(2, 1.5))
+  res <- pecotmr:::.cipComputeMrCsAware(NULL, g, cpipCutoff = 0.5)
+  expect_equal(res$nCs, 1L)
+  expect_true(is.finite(res$waldRatio))
+})
+
+test_that(".cipComputeTwasZ reconciles a chr-prefix mismatch (previously dropped)", {
+  idsGwas <- c("1:100:A:G", "1:200:A:G", "1:300:A:G")        # GWAS / panel coding
+  idsWt   <- c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G")  # QTL weight ids
+  h <- .cip_makeHandle(snp_n = 3L)
+  h@snpInfo$SNP <- idsGwas
+  h@snpInfo$A2  <- rep("A", 3); h@snpInfo$A1 <- rep("G", 3)
+  g <- .cip_gwasDf(idsGwas, z = c(2, -1.5, 0.8))
+  local_mocked_bindings(extractBlockGenotypes = .cip_mockExtractor(),
+                        .package = "pecotmr")
+  res <- pecotmr:::.cipComputeTwasZ(c(0.2, -0.1, 0.3), idsWt, g, h)
+  expect_false(is.null(res))                # intersect() would have returned NULL
+  expect_true(is.finite(res$Z))
+})
+
 test_that(".cipComputeMr: NA on empty / missing-col / no-IV / no-overlap / zero-beta", {
   g <- .cip_gwasDf(paste0("v", 1:4))
   isNa <- function(r) { expect_true(is.na(r$waldRatio)); expect_equal(r$nIV, 0L) }

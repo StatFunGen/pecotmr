@@ -90,8 +90,8 @@ setClass("MultiStudyQtlDataset",
         shared <- intersect(names(a), names(b))
         for (tid in shared) {
           if (!isTRUE(all.equal(
-                as.character(GenomicRanges::seqnames(a[[tid]])),
-                as.character(GenomicRanges::seqnames(b[[tid]])))) ||
+                canonChrom(GenomicRanges::seqnames(a[[tid]])),
+                canonChrom(GenomicRanges::seqnames(b[[tid]])))) ||
               GenomicRanges::start(a[[tid]]) != GenomicRanges::start(b[[tid]]) ||
               GenomicRanges::end(a[[tid]]) != GenomicRanges::end(b[[tid]])) {
             errors <- c(errors, sprintf(

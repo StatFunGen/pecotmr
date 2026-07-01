@@ -124,7 +124,7 @@ columns; clamp tiny P; normalize CHR; coerce signed columns to
 numeric), variant-content filters (MAF / INFO / N) via
 \code{.applyContentFilters}, optional \code{skipRegion} drop, optional
 PIP screen, panel-vs-sumstats allele harmonization against the
-\code{ldSketch} via \code{.matchRefPanel} (which handles indels,
+\code{ldSketch} via \code{harmonizeAlleles} (which handles indels,
 strand-ambiguous variants, sign / strand flips, and duplicate drops in
 a single sweep), optional SLALOM/DENTIST LD-mismatch QC, and optional
 RAISS imputation. No Bioconductor genome / dbSNP packages required.

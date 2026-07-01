@@ -102,6 +102,10 @@
 #'   and the QTL fine-mapping input has additional variants; (2) the GWAS
 #'   fine-mapping result contains variants not present in the QTL
 #'   fine-mapping result. Pass \code{FALSE} to use the FMRs as supplied.
+#' @param alleleFlip Logical, default \code{TRUE}. When TRUE, align LBF columns
+#'   between the QTL and GWAS by (chrom, pos) with ref/alt swaps recognized
+#'   (LBF is coding-invariant, so no sign change is needed); when FALSE, match
+#'   on exact alleles only, so a ref/alt swap is treated as a distinct variant.
 #' @param ... Additional arguments forwarded to
 #'   \code{coloc::coloc.bf_bf}.
 #' @return A data frame with one row per (QTL tuple, GWAS tuple,
@@ -128,6 +132,7 @@ colocPipeline <- function(qtlFineMappingResult,
                           enrichment               = NULL,
                           p12Max                   = 1e-3,
                           adjustPips               = TRUE,
+                          alleleFlip               = TRUE,
                           ...) {
   useEnrichment <- !is.null(enrichment)
   if (useEnrichment) {
@@ -227,9 +232,9 @@ colocPipeline <- function(qtlFineMappingResult,
       gInfo  <- gwasLbfByPair[[gKey]]
       gLbf   <- gInfo$lbf
 
-      # Align variants between QTL and GWAS LBF matrices via the legacy
-      # alignVariantNames + intersect-and-drop pattern.
-      aligned <- .colocAlignLbf(qLbf, gLbf)
+      # Align variants between the QTL and GWAS LBF matrices by (chrom, pos,
+      # allele) tuple via matchVariants (see .colocAlignLbf).
+      aligned <- .colocAlignLbf(qLbf, gLbf, alleleFlip = alleleFlip)
       if (is.null(aligned)) next
       qAligned <- aligned$qtl
       gAligned <- aligned$gwas
@@ -461,24 +466,26 @@ colocPipeline <- function(qtlFineMappingResult,
   do.call(rbind, padded)
 }
 
-# Align column names between a QTL and a (combined) GWAS LBF matrix,
-# intersect to the common variants, and return both restricted to that
-# common set in the same order. Mirrors alignVariantNames +
-# intersect-and-drop in the legacy code.
+# Align column names between a QTL and a (combined) GWAS LBF matrix by
+# (chrom, pos, allele) tuple (via matchVariants), returning both restricted to
+# the common variants under one shared id so coloc.bf_bf can align them.
 # @noRd
-.colocAlignLbf <- function(qtlLbf, gwasLbf) {
+.colocAlignLbf <- function(qtlLbf, gwasLbf, alleleFlip = TRUE) {
   qids <- colnames(qtlLbf)
   gids <- colnames(gwasLbf)
-  aligned <- tryCatch(alignVariantNames(qids, gids),
-                      error = function(e) NULL)
-  if (!is.null(aligned)) {
-    qids <- aligned$alignedVariants
-    colnames(qtlLbf) <- qids
-  }
-  common <- intersect(qids, gids)
-  if (length(common) == 0L) return(NULL)
-  list(qtl  = qtlLbf[, common, drop = FALSE],
-       gwas = gwasLbf[, common, drop = FALSE])
+  # Match LBF columns by (chrom, pos, allele) tuple rather than by raw id
+  # string, so chr-prefix / separator / allele-order differences resolve. LBF
+  # is allele-coding-invariant, so this is pure identity alignment (no sign);
+  # with alleleFlip = FALSE, ref/alt-swapped columns are not treated as shared.
+  m <- matchVariants(qids, gids, allowFlip = alleleFlip)
+  if (length(m$idxA) == 0L) return(NULL)
+  # Relabel both matrices to one shared id so coloc.bf_bf sees identical names.
+  sharedIds <- gids[m$idxB]
+  qSub <- qtlLbf[, m$idxA, drop = FALSE]
+  gSub <- gwasLbf[, m$idxB, drop = FALSE]
+  colnames(qSub) <- sharedIds
+  colnames(gSub) <- sharedIds
+  list(qtl = qSub, gwas = gSub)
 }
 
 # A blank result data frame for the no-pair case so callers downstream

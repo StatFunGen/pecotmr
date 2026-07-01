@@ -104,151 +104,6 @@ test_that("krigingOutlierQc requires a positive sample size n", {
 })
 
 
-test_that("alignVariantNames correctly aligns variant names", {
-  # Test case 1: Matching variant names
-  source1 <- c("1:123:A:C", "2:456:G:T", "3:789:C:A")
-  reference1 <- c("1:123:A:C", "2:456:T:G", "3:789:C:A")
-  expected_aligned1 <- c("1:123:A:C", "2:456:T:G", "3:789:C:A")
-  expected_unmatched1 <- integer(0)
-
-  result1 <- alignVariantNames(source1, reference1)
-  expect_equal(result1$alignedVariants, expected_aligned1)
-  expect_equal(result1$unmatchedIndices, expected_unmatched1)
-
-  # Test case 2: Unmatched variant names
-  source2 <- c("1:123:A:C", "2:456:G:T", "3:789:C:A", "4:101:G:C")
-  reference2 <- c("1:123:A:C", "2:456:T:G", "3:789:C:A")
-  expected_aligned2 <- c("1:123:A:C", "2:456:T:G", "3:789:C:A", "4:101:G:C")
-  expected_unmatched2 <- 4
-
-  result2 <- alignVariantNames(source2, reference2)
-  expect_equal(result2$alignedVariants, expected_aligned2)
-  expect_equal(result2$unmatchedIndices, expected_unmatched2)
-
-  # Test case 3: Different variant name formats
-  source3 <- c("1:123:A:C", "2:456_G_T", "3:789:C:A")
-  reference3 <- c("1:123:A:C", "2:456:T:G", "3:789:C:A")
-  expected_aligned3 <- c("1:123:A:C", "2:456:T:G", "3:789:C:A")
-  expected_unmatched3 <- integer(0)
-
-  result3 <- alignVariantNames(source3, reference3)
-  expect_equal(result3$alignedVariants, expected_aligned3)
-  expect_equal(result3$unmatchedIndices, expected_unmatched3)
-})
-
-test_that("alignVariantNames correctly aligns variant names with different flip patterns", {
-  # Test case 4: Strand flip
-  source4 <- c("1:123:A:C", "2:456:G:T", "3:789:C:A")
-  reference4 <- c("1:123:T:G", "2:456:A:C", "3:789:C:A")
-  expected_aligned4 <- c("1:123:T:G", "2:456:A:C", "3:789:C:A")
-  expected_unmatched4 <- integer(0)
-
-  result4 <- alignVariantNames(source4, reference4)
-  expect_equal(result4$alignedVariants, expected_aligned4)
-  expect_equal(result4$unmatchedIndices, expected_unmatched4)
-
-  # Test case 5: Strand ambiguous variants
-  source5 <- c("1:123:A:T", "2:456:G:C", "3:789:C:A")
-  reference5 <- c("1:123:A:T", "2:456:G:C", "3:789:C:A")
-  expected_aligned5 <- c("1:123:A:T", "2:456:G:C", "3:789:C:A")
-  expected_unmatched5 <- integer(0)
-
-  result5 <- alignVariantNames(source5, reference5)
-  expect_equal(result5$alignedVariants, expected_aligned5)
-  expect_equal(result5$unmatchedIndices, expected_unmatched5)
-
-  # Test case 6: Sign flip
-  source6 <- c("1:123:A:C", "2:456:G:T", "3:789:C:A")
-  reference6 <- c("1:123:C:A", "2:456:T:G", "3:789:C:A")
-  expected_aligned6 <- c("1:123:C:A", "2:456:T:G", "3:789:C:A")
-  expected_unmatched6 <- integer(0)
-
-  result6 <- alignVariantNames(source6, reference6)
-  expect_equal(result6$alignedVariants, expected_aligned6)
-  expect_equal(result6$unmatchedIndices, expected_unmatched6)
-
-  # Test case 7: Strand and sign flip
-  source7 <- c("1:123:A:C", "2:456:G:T", "3:789:C:A")
-  reference7 <- c("1:123:G:T", "2:456:A:C", "3:789:C:A")
-  expected_aligned7 <- c("1:123:G:T", "2:456:A:C", "3:789:C:A")
-  expected_unmatched7 <- integer(0)
-
-  result7 <- alignVariantNames(source7, reference7)
-  expect_equal(result7$alignedVariants, expected_aligned7)
-  expect_equal(result7$unmatchedIndices, expected_unmatched7)
-
-  # Test case 8: Indels
-  source8 <- c("1:123:A:C", "2:456:G:T", "3:789:C:A", "4:101:G:GATC")
-  reference8 <- c("1:123:A:C", "2:456:T:G", "3:789:C:A", "4:101:GATC:G")
-  expected_aligned8 <- c("1:123:A:C", "2:456:T:G", "3:789:C:A", "4:101:GATC:G")
-  expected_unmatched8 <- integer(0)
-
-  result8 <- alignVariantNames(source8, reference8)
-  expect_equal(result8$alignedVariants, expected_aligned8)
-  expect_equal(result8$unmatchedIndices, expected_unmatched8)
-})
-
-test_that("alignVariantNames correctly aligns variant names with different chr prefix conventions", {
-  # Test case 9: Original without chr prefix, reference with chr prefix
-  source9 <- c("1:123:A:C", "2:456:G:T", "3:789:C:A")
-  reference9 <- c("chr1:123:A:C", "chr2:456:T:G", "chr3:789:C:A")
-  expected_aligned9 <- c("chr1:123:A:C", "chr2:456:T:G", "chr3:789:C:A")
-  expected_unmatched9 <- integer(0)
-
-  result9 <- alignVariantNames(source9, reference9)
-  expect_equal(result9$alignedVariants, expected_aligned9)
-  expect_equal(result9$unmatchedIndices, expected_unmatched9)
-
-  # Test case 10: Original with chr prefix, reference without chr prefix
-  source10 <- c("chr1:123:A:C", "chr2:456:G:T", "chr3:789:C:A")
-  reference10 <- c("1:123:A:C", "2:456:T:G", "3:789:C:A")
-  expected_aligned10 <- c("1:123:A:C", "2:456:T:G", "3:789:C:A")
-  expected_unmatched10 <- integer(0)
-
-  result10 <- alignVariantNames(source10, reference10)
-  expect_equal(result10$alignedVariants, expected_aligned10)
-  expect_equal(result10$unmatchedIndices, expected_unmatched10)
-})
-
-test_that("alignVariantNames warns on non-standard format", {
-  source <- c("rs12345")
-  reference <- c("rs67890")
-  expect_warning(
-    alignVariantNames(source, reference),
-    "do not follow the expected"
-  )
-})
-
-test_that("alignVariantNames errors on mixed formats", {
-  source <- c("1:100:A:G")
-  reference <- c("rs12345")
-  expect_error(
-    alignVariantNames(source, reference),
-    "different variant naming conventions"
-  )
-})
-
-test_that("alignVariantNames strips build suffix", {
-  source <- c("1:100:A:G:b38")
-  reference <- c("1:100:A:G")
-  result <- alignVariantNames(source, reference, removeBuildSuffix = TRUE)
-  expect_length(result$alignedVariants, 1)
-})
-
-test_that("alignVariantNames: disjoint source/reference returns source unchanged", {
-  # Bug fix: when no variants harmonize, paste0() over length-0 components
-  # used to collapse to a single "chr:::" placeholder. Verify the output
-  # now preserves source length and flags every position as unmatched.
-  src <- c("chr1:10:A:G", "chr1:20:A:G", "chr1:30:A:G")
-  ref <- c("chr2:40:A:G", "chr2:50:A:G", "chr2:60:A:G")
-  out <- suppressWarnings(alignVariantNames(src, ref))
-  expect_equal(length(out$alignedVariants), length(src))
-  expect_equal(out$alignedVariants, src)
-  expect_equal(out$unmatchedIndices, seq_along(src))
-})
-
-
-
 context("raiss")
 library(tidyverse)
 library(MASS)
@@ -2769,6 +2624,29 @@ test_that("summaryStatsQc: slalom z-mismatch resolves sign-flipped variants agai
   expect_equal(length(out$entry[[1L]]), 3L)
 })
 
+test_that("summaryStatsQc: zMismatchQc reconciles a chr-prefix difference vs the panel", {
+  # Panel SNP ids are non-chr-prefixed positional; QC re-keys the entry to the
+  # canonical chr-prefixed form, so the opt-in z-mismatch panel match must
+  # reconcile the prefix (previously errored "absent from the ldSketch panel").
+  h <- .ssQ_makeHandle()
+  h@snpInfo$SNP <- paste0("1:", h@snpInfo$BP, ":G:A")   # non-chr-prefixed
+  ss <- GwasSumStats(study = "g1", entry = list(.ssQ_makeEntryGr()),
+                     genome = "hg19", ldSketch = h)
+  local_mocked_bindings(
+    extractBlockGenotypes = .ssQ_mockExtractor(),
+    ldMismatchQc = function(zScore, R = NULL, X = NULL, nSample = NULL,
+                            method = c("slalom", "dentist"),
+                            ldMethod = "sample", ...) {
+      data.frame(original_z = zScore, outlier = rep(FALSE, length(zScore)),
+                 stringsAsFactors = FALSE)
+    },
+    .package = "pecotmr")
+  expect_no_error(
+    out <- summaryStatsQc(ss, zMismatchQc = "slalom",
+                          pipCutoffToSkip = 0, nCutoff = 0))
+  expect_gte(length(out$entry[[1L]]), 1L)
+})
+
 test_that(".deriveBetaSeFromZ: derives BETA+SE when entry has Z+MAF+N only", {
   df <- data.frame(
     SNP = paste0("rs", 1:3),
@@ -2961,7 +2839,7 @@ test_that("summaryStatsQc: impute = TRUE with raiss returning NULL records 0 imp
 # summaryStatsQc: per-step QC counter logging (concept salvaged from PR #520)
 # ===========================================================================
 
-test_that(".matchRefPanel surfaces sign/strand/dropped counts via qcCounts attribute", {
+test_that("harmonizeAlleles surfaces sign/strand/dropped counts via qcCounts attribute", {
   # 4 shared positions: 100 exact, 200 sign-flip, 300 strand-flip (A/G
   # unambiguous), 400 allele mismatch (dropped).
   target <- data.frame(
@@ -2972,7 +2850,7 @@ test_that(".matchRefPanel surfaces sign/strand/dropped counts via qcCounts attri
     chrom = c(1, 1, 1, 1), pos = c(100, 200, 300, 400),
     A2 = c("A", "G", "T", "C"), A1 = c("G", "A", "C", "A"),
     stringsAsFactors = FALSE)
-  res <- pecotmr:::.matchRefPanel(target, ref, colToFlip = "z",
+  res <- pecotmr:::harmonizeAlleles(target, ref, colToFlip = "z",
                                    matchMinProp = 0)
   # Default return shape unchanged.
   expect_named(res, c("harmonizedData", "qcSummary"))
@@ -4553,18 +4431,18 @@ test_that("mergeVariantInfo does not warn on length-mismatch recycling", {
 })
 
 # ===========================================================================
-# .matchRefPanel uncovered branches
+# harmonizeAlleles uncovered branches
 # ===========================================================================
 
-test_that(".matchRefPanel: accepts a bare variant-id character vector (targetData)", {
-  res <- pecotmr:::.matchRefPanel(
+test_that("harmonizeAlleles: accepts a bare variant-id character vector (targetData)", {
+  res <- pecotmr:::harmonizeAlleles(
     c("chr1:100:A:G", "chr1:200:C:T"),
     c("chr1:100:A:G", "chr1:200:C:T"),
     matchMinProp = 0)
   expect_equal(nrow(res$harmonizedData), 2L)
 })
 
-test_that(".matchRefPanel: strips merge-conflicting columns (variant_id) from targetData", {
+test_that("harmonizeAlleles: strips merge-conflicting columns (variant_id) from targetData", {
   target <- data.frame(chrom = c(1, 1), pos = c(100, 200),
                        A2 = c("A", "C"), A1 = c("G", "T"),
                        variant_id = c("old1", "old2"), z = c(1, 2),
@@ -4572,34 +4450,34 @@ test_that(".matchRefPanel: strips merge-conflicting columns (variant_id) from ta
   ref <- data.frame(chrom = c(1, 1), pos = c(100, 200),
                     A2 = c("A", "C"), A1 = c("G", "T"),
                     stringsAsFactors = FALSE)
-  res <- pecotmr:::.matchRefPanel(target, ref, colToFlip = "z", matchMinProp = 0)
+  res <- pecotmr:::harmonizeAlleles(target, ref, colToFlip = "z", matchMinProp = 0)
   expect_equal(nrow(res$harmonizedData), 2L)
   # The input variant_id was stripped; the returned id is rebuilt from QC'd alleles.
   expect_false(any(c("old1", "old2") %in% res$harmonizedData$variant_id))
 })
 
-test_that(".matchRefPanel: errors when colToFlip column is absent", {
+test_that("harmonizeAlleles: errors when colToFlip column is absent", {
   target <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G", z = 1,
                        stringsAsFactors = FALSE)
   ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G",
                     stringsAsFactors = FALSE)
   expect_error(
-    pecotmr:::.matchRefPanel(target, ref, colToFlip = "missingCol", matchMinProp = 0),
+    pecotmr:::harmonizeAlleles(target, ref, colToFlip = "missingCol", matchMinProp = 0),
     "not found in targetData")
 })
 
-test_that(".matchRefPanel: errors when colToComplement column is absent", {
+test_that("harmonizeAlleles: errors when colToComplement column is absent", {
   target <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G", z = 1,
                        stringsAsFactors = FALSE)
   ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G",
                     stringsAsFactors = FALSE)
   expect_error(
-    pecotmr:::.matchRefPanel(target, ref, colToComplement = "missingAf",
+    pecotmr:::harmonizeAlleles(target, ref, colToComplement = "missingAf",
                             matchMinProp = 0),
     "not found in targetData")
 })
 
-test_that(".matchRefPanel: complements colToComplement (1 - af) on an allele swap", {
+test_that("harmonizeAlleles: complements colToComplement (1 - af) on an allele swap", {
   # pos 100 exact; pos 200 allele-swapped -> sign_flip => z negated, af -> 1-af.
   target <- data.frame(chrom = c(1, 1), pos = c(100, 200),
                        A2 = c("A", "A"), A1 = c("G", "G"),
@@ -4608,7 +4486,7 @@ test_that(".matchRefPanel: complements colToComplement (1 - af) on an allele swa
   ref <- data.frame(chrom = c(1, 1), pos = c(100, 200),
                     A2 = c("A", "G"), A1 = c("G", "A"),
                     stringsAsFactors = FALSE)
-  res <- pecotmr:::.matchRefPanel(target, ref, colToFlip = "z",
+  res <- pecotmr:::harmonizeAlleles(target, ref, colToFlip = "z",
                                   colToComplement = "af", matchMinProp = 0)
   hd <- res$harmonizedData
   row200 <- hd[hd$pos == 200, ]
@@ -4616,38 +4494,38 @@ test_that(".matchRefPanel: complements colToComplement (1 - af) on an allele swa
   expect_equal(row200$z, -2)     # sign-flipped
 })
 
-test_that(".matchRefPanel: removeDups = TRUE warns and drops duplicate variants", {
+test_that("harmonizeAlleles: removeDups = TRUE warns and drops duplicate variants", {
   target <- data.frame(chrom = c(1, 1), pos = c(100, 100),
                        A2 = c("A", "A"), A1 = c("G", "G"),
                        stringsAsFactors = FALSE)
   ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G",
                     stringsAsFactors = FALSE)
   expect_warning(
-    res <- pecotmr:::.matchRefPanel(target, ref, removeDups = TRUE,
+    res <- pecotmr:::harmonizeAlleles(target, ref, removeDups = TRUE,
                                     matchMinProp = 0),
     "Removed 1 duplicate")
   expect_equal(nrow(res$harmonizedData), 1L)
 })
 
-test_that(".matchRefPanel: errors when duplicated variant IDs remain (removeDups = FALSE)", {
+test_that("harmonizeAlleles: errors when duplicated variant IDs remain (removeDups = FALSE)", {
   target <- data.frame(chrom = c(1, 1), pos = c(100, 100),
                        A2 = c("A", "A"), A1 = c("G", "G"),
                        stringsAsFactors = FALSE)
   ref <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G",
                     stringsAsFactors = FALSE)
   expect_error(
-    pecotmr:::.matchRefPanel(target, ref, removeDups = FALSE, matchMinProp = 0),
+    pecotmr:::harmonizeAlleles(target, ref, removeDups = FALSE, matchMinProp = 0),
     "Duplicated variant IDs remain")
 })
 
-test_that(".matchRefPanel: errors when too few variants match (matchMinProp)", {
+test_that("harmonizeAlleles: errors when too few variants match (matchMinProp)", {
   target <- data.frame(chrom = 1, pos = 100, A2 = "A", A1 = "G",
                        stringsAsFactors = FALSE)
   ref <- data.frame(chrom = rep(1, 10), pos = seq(100, 1000, 100),
                     A2 = rep("A", 10), A1 = rep("G", 10),
                     stringsAsFactors = FALSE)
   expect_error(
-    pecotmr:::.matchRefPanel(target, ref, matchMinProp = 0.9),
+    pecotmr:::harmonizeAlleles(target, ref, matchMinProp = 0.9),
     "Not enough variants")
 })
 
@@ -5239,9 +5117,9 @@ test_that("dentistSingleWindow: rsq-warning capture path on a near-singular LD b
 # existing suite leaves untouched.
 # ===========================================================================
 
-test_that(".matchRefPanel sanitizes an empty-named target column to 'unnamed_N'", {
+test_that("harmonizeAlleles sanitizes an empty-named target column to 'unnamed_N'", {
   # 5 columns whose first four are positional (NOT literally named
-  # chrom/pos/A2/A1), so .matchRefPanel routes through variantIdToDf -- which
+  # chrom/pos/A2/A1), so harmonizeAlleles routes through variantIdToDf -- which
   # preserves the extra column -- rather than the select()-based path. The 5th
   # column has an empty name, so the joined matchResult carries an empty-named
   # column and sanitizeNames() rewrites it to "unnamed_1" (sumstatsQc.R:83).
@@ -5252,7 +5130,7 @@ test_that(".matchRefPanel sanitizes an empty-named target column to 'unnamed_N'"
   ref <- data.frame(chrom = c(1, 1, 1), pos = c(100, 200, 300),
                     A2 = c("A", "C", "G"), A1 = c("G", "T", "A"),
                     stringsAsFactors = FALSE)
-  res <- pecotmr:::.matchRefPanel(target, ref, matchMinProp = 0)
+  res <- pecotmr:::harmonizeAlleles(target, ref, matchMinProp = 0)
   expect_equal(nrow(res$harmonizedData), 3L)
   nm <- colnames(res$harmonizedData)
   expect_false(any(nm == "" | is.na(nm)))      # the empty name was repaired

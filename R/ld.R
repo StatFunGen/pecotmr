@@ -3,9 +3,9 @@
 #' @importFrom magrittr %>%
 #' @noRd
 orderDedupRegions <- function(df) {
-  df$chrom <- as.integer(stripChrPrefix(df$chrom))
+  df$chrom <- canonChrom(df$chrom)
   df <- distinct(df, chrom, start, .keep_all = TRUE) %>%
-    arrange(chrom, start)
+    arrange(chromOrder(chrom), start)
   df
 }
 
@@ -167,7 +167,7 @@ processLdMatrix <- function(ldFilePath, snpFilePath = NULL) {
   ldVariants <- readVariantMetadata(snpFilePath)
   isPvar <- !("gpos" %in% names(ldVariants))
   ldVariants <- ldVariants %>%
-    mutate(chrom = as.character(as.integer(stripChrPrefix(chrom))),
+    mutate(chrom = canonChrom(chrom),
            variants = normalizeVariantId(id))
   if (isPvar) {
     ldVariants <- rename(ldVariants, GD = pos)
@@ -203,10 +203,10 @@ extractLdForRegion <- function(ldMatrix, variants, region, extractCoordinates) {
 
   if (!is.null(extractCoordinates)) {
     extractCoordinates <- extractCoordinates %>%
-      mutate(chrom = as.integer(stripChrPrefix(chrom))) %>%
+      mutate(chrom = canonChrom(chrom)) %>%
       select(chrom, pos)
     extracted <- extracted %>%
-      mutate(chrom = as.integer(stripChrPrefix(chrom))) %>%
+      mutate(chrom = canonChrom(chrom)) %>%
       merge(extractCoordinates, by = c("chrom", "pos"))
     keepCols <- intersect(c("chrom", "variants", "pos", "GD", "A1", "A2",
                              "variance", "allele_freq", "n_nomiss"), names(extracted))
@@ -421,8 +421,8 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
   parsed <- parseRegion(region)
   meta <- as.data.frame(vroom(metaPath, show_col_types = FALSE))
   colnames(meta) <- c("chrom", "start", "end", "path")
-  meta$chrom <- as.integer(stripChrPrefix(meta$chrom))
-  queryChrom <- as.integer(stripChrPrefix(parsed$chrom))
+  meta$chrom <- canonChrom(meta$chrom)
+  queryChrom <- canonChrom(parsed$chrom)
 
   matching <- meta[meta$chrom == queryChrom, , drop = FALSE]
   if (nrow(matching) == 0) {
@@ -548,47 +548,41 @@ loadLdFromGenotype <- function(genotypePath, region,
   }
   onMissing <- match.arg(onMissing)
   snpInfo <- getSnpInfo(ldSketch)
-  # Reconcile a pure chr-prefix mismatch between the requested ids and the
-  # panel (ensureChrMatch, variantId.R) before matching, so variants that
-  # differ only by a leading "chr" still resolve instead of reading as absent.
-  # The caller's original variantIds are kept for the returned labels; only the
-  # match keys are normalized. Fall back to the raw ids if normalization can't
-  # parse them (e.g. an rsID panel), preserving prior behavior.
-  matchIds <- variantIds
-  panelIds <- as.character(snpInfo$SNP)
-  reconciled <- tryCatch(ensureChrMatch(variantIds, panelIds),
-                         error = function(e) NULL)
-  if (!is.null(reconciled)) {
-    matchIds <- reconciled$idsA
-    panelIds <- reconciled$idsB
+  # Match the requested ids to the panel by (chrom, pos, allele) tuple, with an
+  # exact id-string fallback for rsID panels (matchVariants does both). This
+  # resolves a pure chr-prefix / separator difference between the requested ids
+  # and the panel that a raw string match would read as "absent". The caller's
+  # original ids are kept as the returned labels, in the requested order.
+  m <- matchVariants(variantIds, as.character(snpInfo$SNP),
+                     removeStrandAmbiguous = FALSE)
+  nMissing <- length(variantIds) - length(m$idxA)
+  if (nMissing > 0L && onMissing == "error") {
+    stop(sprintf("%s: %d variant id(s) not present in the LD sketch panel.",
+                 label, nMissing))
   }
-  idx <- match(matchIds, panelIds)
-  if (anyNA(idx)) {
-    if (onMissing == "error") {
-      stop(sprintf("%s: %d variant id(s) not present in the LD sketch panel.",
-                   label, sum(is.na(idx))))
-    }
-    keep <- !is.na(idx)
-    if (!any(keep)) return(NULL)
-    variantIds <- variantIds[keep]
-    idx <- idx[keep]
-  }
+  if (length(m$idxA) == 0L) return(NULL)
+  o       <- order(m$idxA)            # restore the caller's requested order
+  keptIds <- variantIds[m$idxA[o]]
+  idx     <- m$idxB[o]
   block <- extractBlockGenotypes(ldSketch, idx, meanImpute = TRUE)
   geno  <- t(SummarizedExperiment::assay(block, "dosage"))
-  colnames(geno) <- variantIds
+  colnames(geno) <- keptIds
   ldMat <- computeLd(geno, method = "sample")
-  dimnames(ldMat) <- list(variantIds, variantIds)
+  dimnames(ldMat) <- list(keptIds, keptIds)
   if (onMissing == "drop") {
-    attr(ldMat, "keptVariantIds") <- variantIds
+    attr(ldMat, "keptVariantIds") <- keptIds
   }
   ldMat
 }
 
 # ---------- LD sketch: cross-pipeline LD-panel equality check ----------
 
-# Internal: assert that two `GenotypeHandle` LD sketches describe exactly the
-# same reference panel (same snpInfo: SNP, CHR, BP, A1, A2, in the same
-# order; same sampleIds). Shared by causalInferencePipeline, colocPipeline,
+# Internal: assert that two `GenotypeHandle` LD sketches describe the same
+# reference panel: same variant identity (chr-agnostic CHR via canonChrom,
+# exact BP/A1/A2, in the same order) and the same sampleIds. The SNP label is
+# not compared, so a pure chr-prefix difference does not fail; an allele swap
+# (different A1/A2) still does, since it means a different LD coding. Shared by
+# causalInferencePipeline, colocPipeline,
 # qtlEnrichmentPipeline, ctwasPipeline, and
 # colocboostPipeline.
 #
@@ -631,7 +625,11 @@ loadLdFromGenotype <- function(genotypePath, region,
          nrow(qSnp), " vs ", nrow(gSnp), " variants)", between,
          "; the two ldSketch GenotypeHandles must match exactly.")
   }
-  for (col in c("SNP", "CHR", "BP", "A1", "A2")) {
+  if (!identical(canonChrom(qSnp$CHR), canonChrom(gSnp$CHR))) {
+    stop(pipelineName, ": ldSketch panels differ in column CHR", between,
+         "; use the same ldSketch on both.")
+  }
+  for (col in c("BP", "A1", "A2")) {
     if (!identical(as.character(qSnp[[col]]),
                    as.character(gSnp[[col]]))) {
       stop(pipelineName, ": ldSketch panels differ in column ",
@@ -836,7 +834,7 @@ filterVariantsByLdReference <- function(variantIds, ldReferenceMetaFile, keepInd
 
   # Use shared helper -- no genotype loading
   refInfo <- getRefVariantInfo(ldReferenceMetaFile, regionDf)
-  refChrom <- as.integer(stripChrPrefix(refInfo$chrom))
+  refChrom <- canonChrom(refInfo$chrom)
   refKey <- paste0(refChrom, ":", refInfo$pos)
 
   variantKey <- paste0(variantsDf$chrom, ":", variantsDf$pos)

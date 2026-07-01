@@ -97,6 +97,10 @@
 #'   \code{\link{combinePValues}} for cross-method combination per
 #'   \code{(qtlStudy, context, trait, gwasStudy)} group. \code{NULL}
 #'   (default) skips combination.
+#' @param alleleFlip Logical, default \code{TRUE}. When TRUE, match QTL variants
+#'   to the GWAS by (chrom, pos) with ref/alt swaps recognized and the exposure
+#'   effect / weight sign-flipped accordingly; when FALSE, match on exact
+#'   alleles only, so a ref/alt swap is treated as a distinct variant.
 #' @param ... Reserved.
 #' @return A \code{GRanges} as described above.
 #' @export
@@ -112,6 +116,7 @@ causalInferencePipeline <- function(gwasSumStats,
                                     mrCpipCutoff = 0.5,
                                     mrPvalCutoff = 1,
                                     combineMethods = NULL,
+                                    alleleFlip = TRUE,
                                     ...) {
   mrMethod <- match.arg(mrMethod)
   # --- Input validation --------------------------------------------------
@@ -210,7 +215,7 @@ causalInferencePipeline <- function(gwasSumStats,
                              require = c("SNP", "Z"))
       twasOut <- .cipComputeTwasZ(
         weights = wVec, variantIds = wVariantIds,
-        gwasDf  = gdf, gwasLd = gwasLd)
+        gwasDf  = gdf, gwasLd = gwasLd, alleleFlip = alleleFlip)
       if (is.null(twasOut)) next
 
       # Gate MR on the TWAS p-value (legacy mr_pval_cutoff): only run MR where
@@ -220,10 +225,10 @@ causalInferencePipeline <- function(gwasSumStats,
       mrOut <- if (!is.null(fmrEntry) && mrGateOpen) {
         if (mrMethod == "csAware") {
           .cipComputeMrCsAware(fmrEntry = fmrEntry, gwasDf = gdf,
-                                cpipCutoff = mrCpipCutoff)
+                                cpipCutoff = mrCpipCutoff, alleleFlip = alleleFlip)
         } else {
           .cipComputeMr(fmrEntry = fmrEntry, gwasDf = gdf,
-                        pipCutoff = mrPipCutoff)
+                        pipCutoff = mrPipCutoff, alleleFlip = alleleFlip)
         }
       } else {
         list(waldRatio = NA_real_, waldRatioSe = NA_real_,
@@ -436,23 +441,29 @@ causalInferencePipeline <- function(gwasSumStats,
 # Compute the per-tuple TWAS Z from a single GwasSumStats tuple's
 # unpacked data.frame (produced by getSumstatDf upstream). Returns
 # NULL when the overlap is too small.
-.cipComputeTwasZ <- function(weights, variantIds, gwasDf, gwasLd) {
-  common <- intersect(variantIds, gwasDf$variant_id)
-  if (length(common) < 2L) return(NULL)
+.cipComputeTwasZ <- function(weights, variantIds, gwasDf, gwasLd,
+                             alleleFlip = TRUE) {
+  # Match QTL weights to the GWAS sumstats by (chrom, pos, allele) rather than
+  # by raw id string, so chr-prefix / separator / allele-swap differences are
+  # reconciled instead of silently dropped. sign = -1 marks an allele swap;
+  # weights[idxA] * sign brings the weight into the GWAS allele coding, which
+  # the GWAS z and the GWAS-panel LD already share.
+  m <- matchVariants(variantIds, gwasDf$variant_id, allowFlip = alleleFlip)
+  if (length(m$idxA) < 2L) return(NULL)
 
-  wSub <- weights[match(common, variantIds)]
-  zSub <- gwasDf$z[match(common, gwasDf$variant_id)]
-  ldMat <- .cipLdFromSketch(gwasLd, common)
+  wSub    <- weights[m$idxA] * m$sign
+  zSub    <- gwasDf$z[m$idxB]
+  gwasIds <- gwasDf$variant_id[m$idxB]
+  ldMat   <- .cipLdFromSketch(gwasLd, gwasIds)
 
   res <- twasZ(weights = wSub, z = zSub, R = ldMat)
   zMat <- res$Z
   zVal <- as.numeric(zMat[1L, "Z"])
   pVal <- as.numeric(zMat[1L, "pval"])
   # Position the row at the variant span.
-  idx <- match(common, gwasDf$variant_id)
-  chrom    <- gwasDf$chrom[[idx[[1L]]]]
-  startPos <- min(gwasDf$pos[idx])
-  endPos   <- max(gwasDf$pos[idx])
+  chrom    <- gwasDf$chrom[[m$idxB[[1L]]]]
+  startPos <- min(gwasDf$pos[m$idxB])
+  endPos   <- max(gwasDf$pos[m$idxB])
   list(Z = zVal, pval = pVal,
        chrom = chrom, startPos = startPos, endPos = endPos)
 }
@@ -469,7 +480,7 @@ causalInferencePipeline <- function(gwasSumStats,
 # variant with PIP > pipCutoff contributes one ratio = beta_y / beta_x.
 # Returns list(waldRatio, waldRatioSe, mrPval, nIV) with NA fields when
 # no IVs survive.
-.cipComputeMr <- function(fmrEntry, gwasDf, pipCutoff) {
+.cipComputeMr <- function(fmrEntry, gwasDf, pipCutoff, alleleFlip = TRUE) {
   tl <- getTopLoci(fmrEntry)
   if (is.null(tl) || nrow(tl) == 0L)
     return(list(waldRatio = NA_real_, waldRatioSe = NA_real_,
@@ -487,12 +498,15 @@ causalInferencePipeline <- function(gwasSumStats,
                 mrPval = NA_real_, nIV = 0L))
   betaX <- as.numeric(tl[[betaCol[[1L]]]])[keep]
   seX   <- as.numeric(tl[[seCol[[1L]]]])[keep]
-  gIdx  <- match(ivVars, gwasDf$variant_id)
-  ok    <- !is.na(gIdx)
-  if (sum(ok) == 0L)
+  m <- matchVariants(ivVars, gwasDf$variant_id, allowFlip = alleleFlip)
+  if (length(m$idxA) == 0L)
     return(list(waldRatio = NA_real_, waldRatioSe = NA_real_,
                 mrPval = NA_real_, nIV = 0L))
-  betaX <- betaX[ok]; seX <- seX[ok]; gIdx <- gIdx[ok]
+  # Align the QTL exposure effect to the GWAS allele coding (sign = -1 on an
+  # allele swap) so the Wald ratio betaY / betaX has the correct sign.
+  betaX <- betaX[m$idxA] * m$sign
+  seX   <- seX[m$idxA]
+  gIdx  <- m$idxB
   gZ <- gwasDf$z[gIdx]
   gN <- if (!is.null(gwasDf$N)) gwasDf$N[gIdx]
         else rep(NA_real_, length(gIdx))
@@ -546,7 +560,8 @@ causalInferencePipeline <- function(gwasSumStats,
 # Returns list(waldRatio, waldRatioSe, mrPval, nIV, Q, I2, nCs) with NA
 # fields when no usable CS survives.
 # @noRd
-.cipComputeMrCsAware <- function(fmrEntry, gwasDf, cpipCutoff) {
+.cipComputeMrCsAware <- function(fmrEntry, gwasDf, cpipCutoff,
+                                 alleleFlip = TRUE) {
   naResult <- list(waldRatio = NA_real_, waldRatioSe = NA_real_,
                    mrPval = NA_real_, nIV = 0L,
                    Q = NA_real_, I2 = NA_real_, nCs = 0L)
@@ -578,13 +593,13 @@ causalInferencePipeline <- function(gwasSumStats,
   cs   <- cs[ok];   pip  <- pip[ok]
   bhatX <- bhatX[ok]; sbhatX <- sbhatX[ok]; vids <- vids[ok]
 
-  # Match GWAS-side beta/se via the existing helpers.
-  gIdx <- match(vids, gwasDf$variant_id)
-  ok   <- !is.na(gIdx)
-  if (!any(ok)) return(naResult)
-  cs <- cs[ok]; pip <- pip[ok]
-  bhatX <- bhatX[ok]; sbhatX <- sbhatX[ok]
-  gIdx <- gIdx[ok]; vids <- vids[ok]
+  # Match the exposure variants to the GWAS sumstats by (chrom, pos, allele),
+  # aligning the exposure effect to the GWAS coding (sign = -1 on a swap).
+  m <- matchVariants(vids, gwasDf$variant_id, allowFlip = alleleFlip)
+  if (length(m$idxA) == 0L) return(naResult)
+  cs <- cs[m$idxA]; pip <- pip[m$idxA]
+  bhatX <- bhatX[m$idxA] * m$sign; sbhatX <- sbhatX[m$idxA]
+  gIdx <- m$idxB; vids <- vids[m$idxA]
 
   gZ <- gwasDf$z[gIdx]
   gN <- if (!is.null(gwasDf$N)) gwasDf$N[gIdx]

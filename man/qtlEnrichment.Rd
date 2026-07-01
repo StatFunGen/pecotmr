@@ -36,11 +36,11 @@ When it is set to 0, no shrinkage will be applied. A large value indicates stron
 \item{numThreads}{Number of Simultaneous running CPU threads for multiple imputation, default is 1.}
 
 \item{alignNames}{Logical; when TRUE (default) QTL pip names are aligned to
-the GWAS variant-naming convention via \code{alignVariantNames}. Set FALSE
+the GWAS variant-naming convention via \code{matchVariants}. Set FALSE
 when the caller has already aligned them (e.g. \code{qtlEnrichmentPipeline}
 aligns each QTL tuple once against the union GWAS panel rather than
 re-aligning per GWAS study); only the cheap per-study unmatched set is then
-recomputed, skipping the costly \code{.matchRefPanel} pass.}
+recomputed, skipping the costly \code{harmonizeAlleles} pass.}
 }
 \value{
 A list of enrichment parameter estimates
