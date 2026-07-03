@@ -361,10 +361,8 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
     }
   }
 
-  block <- extractBlockGenotypes(x@genotypes, snpIdx, meanImpute = FALSE)
-  # `block` is variants x samples (Bioc convention); transpose to
-  # samples x variants for analysis-style operations.
-  dosage <- t(SummarizedExperiment::assay(block, "dosage"))
+  # samples x variants dosage for analysis-style operations.
+  dosage <- .dosageMatrix(x@genotypes, snpIdx, meanImpute = FALSE)
 
   # Resolve the requested sample set: keepSamples (panel-level) intersected
   # with the per-call samples arg, then intersected with the panel sample IDs.

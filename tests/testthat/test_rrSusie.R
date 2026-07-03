@@ -63,7 +63,8 @@ test_that("susieWeights calls susie when susie_fit is NULL", {
   local_mocked_bindings(
     susie = function(...) {
       list(pip = rep(0.1, p))
-    }
+    },
+    .package = "susieR"
   )
   result <- susieWeights(X = X, y = y)
   expect_equal(result, rep(0, p))
@@ -107,7 +108,8 @@ test_that("susieAshWeights calls susie when fit is NULL", {
   local_mocked_bindings(
     susie = function(...) {
       list(pip = rep(0.1, p))
-    }
+    },
+    .package = "susieR"
   )
   result <- susieAshWeights(X = X, y = y)
   expect_equal(result, rep(0, p))
@@ -151,7 +153,8 @@ test_that("susieInfWeights calls susie when fit is NULL", {
   local_mocked_bindings(
     susie = function(...) {
       list(pip = rep(0.1, p))
-    }
+    },
+    .package = "susieR"
   )
   result <- susieInfWeights(X = X, y = y)
   expect_equal(result, rep(0, p))

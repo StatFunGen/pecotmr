@@ -747,3 +747,112 @@ test_that("matchVariants allowFlip = FALSE matches exact alleles only (no swap)"
   expect_length(m2$idxA, 0)
 })
 
+# ===========================================================================
+# harmonizeAlleles -- direct tests for branches no caller exercises (every
+# caller uses flipStrand = FALSE, removeUnmatched = TRUE, a valid colToFlip,
+# and matchMinProp = 0, so these paths are otherwise unreached).
+# ===========================================================================
+
+.vid_df <- function(chrom, pos, A2, A1, ...)
+  data.frame(chrom = as.character(chrom), pos = as.integer(pos),
+             A2 = A2, A1 = A1, ..., stringsAsFactors = FALSE)
+
+test_that("harmonizeAlleles warns and returns empty when nothing overlaps", {
+  res <- suppressWarnings(pecotmr:::harmonizeAlleles(
+    .vid_df("1", 100, "A", "G"), .vid_df("1", 999, "A", "G")))
+  expect_equal(nrow(res$harmonizedData), 0L)
+  expect_equal(attr(res, "qcCounts")$considered, 0L)
+})
+
+test_that("harmonizeAlleles removeUnmatched = FALSE retains unmatched target variants", {
+  tgt <- .vid_df(c("1", "1"), c(100, 200), c("A", "A"), c("G", "G"))
+  res <- pecotmr:::harmonizeAlleles(tgt, .vid_df("1", 100, "A", "G"),
+                                    removeUnmatched = FALSE, matchMinProp = 0)
+  expect_equal(nrow(res$harmonizedData), 2L)
+})
+
+test_that("harmonizeAlleles flipStrand = TRUE runs the strand-flip branch", {
+  # target T/C is the unambiguous strand flip of ref A/G.
+  res <- pecotmr:::harmonizeAlleles(
+    .vid_df("1", 100, "T", "C"), .vid_df("1", 100, "A", "G"),
+    flipStrand = TRUE, matchMinProp = 0)
+  expect_equal(nrow(res$harmonizedData), 1L)
+})
+
+test_that("harmonizeAlleles complements colToComplement on an allele swap", {
+  # target G/A is the ref/alt swap of ref A/G, so an effect-allele freq
+  # complements to 1 - af.
+  tgt <- .vid_df("1", 100, "G", "A", af = 0.3)
+  res <- pecotmr:::harmonizeAlleles(tgt, .vid_df("1", 100, "A", "G"),
+                                    colToComplement = "af", matchMinProp = 0)
+  expect_equal(res$harmonizedData$af, 0.7)
+})
+
+test_that("harmonizeAlleles errors when colToFlip / colToComplement are absent", {
+  tgt <- .vid_df("1", 100, "A", "G")
+  expect_error(pecotmr:::harmonizeAlleles(tgt, tgt, colToFlip = "nope",
+                                          matchMinProp = 0), "not found in targetData")
+  expect_error(pecotmr:::harmonizeAlleles(tgt, tgt, colToComplement = "nope",
+                                          matchMinProp = 0), "not found in targetData")
+})
+
+test_that("harmonizeAlleles errors when too few variants clear matchMinProp", {
+  ref <- .vid_df("1", c(100, 200, 300, 400, 500), "A", "G")
+  expect_error(
+    pecotmr:::harmonizeAlleles(.vid_df("1", 100, "A", "G"), ref, matchMinProp = 0.5),
+    "Not enough variants")
+})
+
+test_that("harmonizeAlleles errors on duplicate variant IDs when removeDups = FALSE", {
+  tgt <- .vid_df(c("1", "1"), c(100, 100), c("A", "A"), c("G", "G"))
+  expect_error(
+    pecotmr:::harmonizeAlleles(tgt, .vid_df("1", 100, "A", "G"), matchMinProp = 0),
+    "Duplicated variant IDs")
+})
+
+test_that("harmonizeAlleles removeDups = TRUE drops duplicates with a warning", {
+  tgt <- .vid_df(c("1", "1"), c(100, 100), c("A", "A"), c("G", "G"))
+  expect_warning(
+    res <- pecotmr:::harmonizeAlleles(tgt, .vid_df("1", 100, "A", "G"),
+                                      removeDups = TRUE, matchMinProp = 0),
+    "duplicate")
+  expect_equal(nrow(res$harmonizedData), 1L)
+})
+
+test_that("harmonizeAlleles removeIndels = TRUE drops indels", {
+  tgt <- .vid_df(c("1", "1"), c(100, 200), c("A", "AT"), c("G", "A"))
+  res <- pecotmr:::harmonizeAlleles(tgt, tgt, removeIndels = TRUE, matchMinProp = 0)
+  expect_equal(nrow(res$harmonizedData), 1L)
+})
+
+# ===========================================================================
+# withChrPrefix + asGranges error paths
+# ===========================================================================
+
+test_that("withChrPrefix adds a lowercase chr prefix case-insensitively", {
+  expect_equal(pecotmr:::withChrPrefix(c("1", "chr2", "CHR3", "X")),
+               c("chr1", "chr2", "chr3", "chrX"))
+})
+
+test_that("asGranges errors on malformed input", {
+  expect_error(pecotmr:::asGranges(data.frame(foo = 1)), "must have columns")
+  expect_error(pecotmr:::asGranges(list(1)), "character vector or data.frame")
+})
+
+test_that("matchVariants allowFlip = FALSE accepts data.frame input", {
+  a <- .vid_df("1", 100, "A", "G")
+  b <- .vid_df("1", 100, "A", "G")
+  m <- pecotmr:::matchVariants(a, b, allowFlip = FALSE)
+  expect_equal(m$idxA, 1L)
+  expect_equal(m$idxB, 1L)
+  expect_equal(m$sign, 1)
+})
+
+test_that("matchVariants returns empty for unparseable data.frame input", {
+  # NA chrom / pos -> unparseable; with a data.frame there is no id string to
+  # fall back to, so the matcher returns empty.
+  a <- .vid_df(NA_character_, NA_integer_, "A", "G")
+  m <- pecotmr:::matchVariants(a, .vid_df("1", 100, "A", "G"))
+  expect_length(m$idxA, 0)
+})
+

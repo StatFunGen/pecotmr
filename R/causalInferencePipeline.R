@@ -429,7 +429,7 @@ causalInferencePipeline <- function(gwasSumStats,
                               method = method)
   tl <- getTopLoci(ent)
   if (is.null(tl) || nrow(tl) == 0L) return(NULL)
-  betaCol <- intersect(c("betahat", "beta", "bhat_x"), colnames(tl))
+  betaCol <- .cipTlCols(tl)$beta
   if (length(betaCol) == 0L) return(NULL)
   vids <- as.character(tl$variant_id)
   w    <- as.numeric(tl[[betaCol[[1L]]]])
@@ -485,9 +485,10 @@ causalInferencePipeline <- function(gwasSumStats,
   if (is.null(tl) || nrow(tl) == 0L)
     return(list(waldRatio = NA_real_, waldRatioSe = NA_real_,
                 mrPval = NA_real_, nIV = 0L))
-  pipCol  <- intersect(c("pip", "PIP"), colnames(tl))
-  betaCol <- intersect(c("betahat", "beta", "bhat_x"), colnames(tl))
-  seCol   <- intersect(c("sebetahat", "se", "sbhat_x"), colnames(tl))
+  cols    <- .cipTlCols(tl)
+  pipCol  <- cols$pip
+  betaCol <- cols$beta
+  seCol   <- cols$se
   if (length(pipCol) == 0L || length(betaCol) == 0L || length(seCol) == 0L)
     return(list(waldRatio = NA_real_, waldRatioSe = NA_real_,
                 mrPval = NA_real_, nIV = 0L))
@@ -517,18 +518,13 @@ causalInferencePipeline <- function(gwasSumStats,
   ratio <- betaY / betaX
   # Standard Wald-ratio SE via delta method.
   rSe   <- sqrt((seY / betaX)^2 + (betaY * seX / betaX^2)^2)
-  # IVW pooling: weight by 1/rSe^2; pooled SE = 1/sqrt(sum(w)).
-  w <- 1 / rSe^2
-  validW <- is.finite(w) & w > 0
-  if (sum(validW) == 0L)
+  # IVW pooling of the per-instrument Wald ratios.
+  pooled <- .ivwPool(ratio, rSe)
+  if (pooled$n == 0L)
     return(list(waldRatio = NA_real_, waldRatioSe = NA_real_,
                 mrPval = NA_real_, nIV = 0L))
-  ratio <- ratio[validW]; rSe <- rSe[validW]; w <- w[validW]
-  meta  <- sum(w * ratio) / sum(w)
-  metaSe <- 1 / sqrt(sum(w))
-  pval  <- 2 * stats::pnorm(-abs(meta / metaSe))
-  list(waldRatio = meta, waldRatioSe = metaSe,
-       mrPval = pval, nIV = length(ratio))
+  list(waldRatio = pooled$effect, waldRatioSe = pooled$se,
+       mrPval = pooled$pval, nIV = pooled$n)
 }
 
 # Cochran's Q-based I-squared heterogeneity statistic. Ported from
@@ -569,15 +565,11 @@ causalInferencePipeline <- function(gwasSumStats,
   tl <- getTopLoci(fmrEntry)
   if (is.null(tl) || nrow(tl) == 0L) return(naResult)
 
-  pipCol  <- intersect(c("pip", "PIP"), colnames(tl))
-  betaCol <- intersect(c("betahat", "beta", "bhat_x"), colnames(tl))
-  seCol   <- intersect(c("sebetahat", "se", "sbhat_x"), colnames(tl))
-  csCol   <- intersect(c("cs"), colnames(tl))
-  if (length(csCol) == 0L) {
-    # Look for any column starting with "cs" (e.g. cs_0.95, cs_susie).
-    csCandidates <- grep("^cs", colnames(tl), value = TRUE)
-    if (length(csCandidates) > 0L) csCol <- csCandidates[[1L]]
-  }
+  cols    <- .cipTlCols(tl)
+  pipCol  <- cols$pip
+  betaCol <- cols$beta
+  seCol   <- cols$se
+  csCol   <- cols$cs
   if (length(pipCol) == 0L || length(betaCol) == 0L ||
       length(seCol) == 0L || length(csCol) == 0L) return(naResult)
 
@@ -638,12 +630,12 @@ causalInferencePipeline <- function(gwasSumStats,
   if (length(composite_bhat) == 0L) return(naResult)
 
   # IVW meta across CSs.
-  wv <- 1 / composite_sbhat^2
-  metaEff <- sum(wv * composite_bhat) / sum(wv)
-  metaSe  <- sqrt(1 / sum(wv))
-  Q       <- sum(wv * (composite_bhat - metaEff)^2)
-  I2      <- .cipCalcI2(Q, length(composite_bhat))
-  metaPval <- 2 * stats::pnorm(-abs(metaEff / metaSe))
+  pooled  <- .ivwPool(composite_bhat, composite_sbhat)
+  metaEff <- pooled$effect
+  metaSe  <- pooled$se
+  Q       <- pooled$Q
+  I2      <- .cipCalcI2(Q, pooled$n)
+  metaPval <- pooled$pval
 
   list(waldRatio = metaEff,
        waldRatioSe = metaSe,
@@ -654,17 +646,52 @@ causalInferencePipeline <- function(gwasSumStats,
 }
 
 
-# Derive beta from z using maf + n. beta = z * se. With se = 1/sqrt(2*n*p*q),
-# beta = z / sqrt(2*n*p*q).
+# Derive beta / se from z using maf + n via the shared zToBetaSe() (model-exact
+# se = 1/sqrt(2*p*q*(N + z^2)), beta = z*se). Fall back to z as a beta surrogate
+# / se = 1 when maf or n is unavailable.
 .cipZToBeta <- function(z, maf, n) {
   if (any(is.na(maf)) || any(is.na(n)))
     return(z)  # fall back to z as a beta surrogate when no maf/n
-  z / sqrt(2 * n * maf * (1 - maf))
+  .zToBetaSe(z, maf, n)$beta
 }
 .cipZToSe <- function(z, maf, n) {
   if (any(is.na(maf)) || any(is.na(n)))
     return(rep(1, length(z)))
-  1 / sqrt(2 * n * maf * (1 - maf))
+  .zToBetaSe(z, maf, n)$se
+}
+
+# Fixed-effect inverse-variance-weighted (IVW) pooling of per-instrument
+# effects. Weights 1/se^2, drops non-finite / non-positive weights, and
+# returns the pooled effect, its SE (1/sqrt(sum w)), two-tailed p-value,
+# Cochran's Q, and the number pooled (n = 0 when nothing is poolable).
+.ivwPool <- function(effect, se) {
+  w  <- 1 / se^2
+  ok <- is.finite(w) & w > 0
+  if (!any(ok))
+    return(list(effect = NA_real_, se = NA_real_, pval = NA_real_,
+                Q = NA_real_, n = 0L))
+  effect <- effect[ok]; w <- w[ok]
+  metaEff <- sum(w * effect) / sum(w)
+  metaSe  <- 1 / sqrt(sum(w))
+  list(effect = metaEff, se = metaSe,
+       pval = .zToPvalue(metaEff / metaSe),
+       Q = sum(w * (effect - metaEff)^2), n = length(effect))
+}
+
+# Resolve the topLoci column aliases used across the CIP MR helpers. Returns the
+# first matching column name for each role (character(0) if absent); `cs` also
+# falls back to any column whose name starts with "cs" (e.g. cs_0.95).
+.cipTlCols <- function(tl) {
+  cn <- colnames(tl)
+  cs <- intersect("cs", cn)
+  if (length(cs) == 0L) {
+    csCand <- grep("^cs", cn, value = TRUE)
+    if (length(csCand) > 0L) cs <- csCand[[1L]]
+  }
+  list(pip  = intersect(c("pip", "PIP"), cn),
+       beta = intersect(c("betahat", "beta", "bhat_x"), cn),
+       se   = intersect(c("sebetahat", "se", "sbhat_x"), cn),
+       cs   = cs)
 }
 
 # Convert the accumulated list of row records to a flat data.frame.
@@ -675,8 +702,7 @@ causalInferencePipeline <- function(gwasSumStats,
 
 # Convert the assembled result data.frame to a GRanges with mcols.
 .cipDfToGranges <- function(df) {
-  chr <- paste0("chr", sub("^chr", "", as.character(df$chrom),
-                            ignore.case = TRUE))
+  chr <- withChrPrefix(df$chrom)
   gr <- GenomicRanges::GRanges(
     seqnames = chr,
     ranges   = IRanges::IRanges(start = as.integer(df$startPos),
@@ -853,7 +879,7 @@ twasZ <- function(weights, z, R = NULL, X = NULL,
   ySd  <- sqrt(diag(covY))
   stats <- as.numeric(crossprod(weights, as.numeric(z)))
   zVec <- stats / ySd
-  pVec <- 2 * pnorm(-abs(zVec))
+  pVec <- .zToPvalue(zVec)
 
   zMatrix <- cbind(Z = zVec, pval = pVec)
   rownames(zMatrix) <- colnames(weights)

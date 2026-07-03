@@ -177,18 +177,12 @@ setGeneric("colocboostPipeline",
 # Returns the retained Y (NULL when no outcome clears the threshold).
 .cbPipSkipOutcomes <- function(X, Y, cutoff) {
   if (is.null(cutoff) || is.na(cutoff) || cutoff == 0) return(Y)
-  if (!is.double(X)) storage.mode(X) <- "double"  # susieR needs double X
-  thr <- if (cutoff < 0) 3 / ncol(X) else cutoff
-  keep <- logical(ncol(Y))
-  for (j in seq_len(ncol(Y))) {
-    obs <- !is.na(Y[, j])
-    if (sum(obs) < 2L) next
-    pip <- tryCatch(
-      susieR::susie(X[obs, , drop = FALSE], Y[obs, j],
-                    L = 1, max_iter = 100)$pip,
-      error = function(e) NULL)
-    if (!is.null(pip) && any(pip > thr, na.rm = TRUE)) keep[[j]] <- TRUE
-  }
+  # Single-effect screen per outcome, sharing the L = 1 SuSiE pre-screen
+  # (.fmSerScreen) with the fine-mapping pipeline. fallback = FALSE: an outcome
+  # that cannot be screened (too few samples / fit failure) is dropped.
+  keep <- vapply(seq_len(ncol(Y)),
+                 function(j) .fmSerScreen(X, Y[, j], cutoff, fallback = FALSE),
+                 logical(1L))
   if (!any(keep)) return(NULL)
   Y[, keep, drop = FALSE]
 }

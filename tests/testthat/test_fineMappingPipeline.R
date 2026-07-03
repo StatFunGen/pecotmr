@@ -135,6 +135,12 @@ context("fineMappingPipeline")
   }
 }
 
+.fmp_mockFitSer <- function() {
+  function(z, n, coverage = 0.95, userArgs = NULL) {
+    list(token = "ser", n_variants = length(z))
+  }
+}
+
 .fmp_mockPostprocess <- function() {
   function(fit, method, dataX, dataY, coverage, secondaryCoverage,
            signalCutoff, minAbsCorr, csInput = NULL, af = NULL,
@@ -1436,6 +1442,62 @@ test_that("fineMappingPipeline(GwasSumStats): non-RSS family rejected by capabil
     fineMappingPipeline(gss, methods = "fsusie"),
     "not supported on GwasSumStats"
   )
+})
+
+# ---- ser (LD-free single-effect regression); sumstat-only, not GWAS-only ----
+
+test_that("fineMappingPipeline(QtlSumStats): ser dispatches via .fmFitSusieSer", {
+  ss <- .fmp_makeQtlSumStats()
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieSer        = .fmp_mockFitSer(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  res <- suppressMessages(fineMappingPipeline(ss, methods = "ser"))
+  expect_s4_class(res, "QtlFineMappingResult")
+  expect_setequal(getMethodNames(res), "ser")
+})
+
+test_that("fineMappingPipeline(GwasSumStats): ser dispatches via .fmFitSusieSer", {
+  gss <- .fmp_makeGwasSumStats()
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieSer        = .fmp_mockFitSer(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  res <- suppressMessages(fineMappingPipeline(gss, methods = "ser"))
+  expect_s4_class(res, "GwasFineMappingResult")
+  expect_setequal(getMethodNames(res), "ser")
+})
+
+test_that("ser is sumstat-only: rejected on QtlDataset, allowed on all sumstat kinds", {
+  expect_error(pecotmr:::.fmCheckMethodCapabilities("ser", "QtlDataset"),
+               "sumstat-only")
+  expect_silent(pecotmr:::.fmCheckMethodCapabilities("ser", "QtlSumStats"))
+  expect_silent(pecotmr:::.fmCheckMethodCapabilities("ser", "GwasSumStats"))
+  expect_silent(pecotmr:::.fmCheckMethodCapabilities("ser", "MultiStudyQtlDataset"))
+})
+
+test_that(".fmFitSusieSer calls susieR::susie_ser with z + n and no R / L", {
+  captured <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    susie_ser = function(z, n, coverage = 0.95, ...) {
+      captured$args <- list(z = z, n = n, coverage = coverage, dots = list(...))
+      list(pip = rep(0.1, length(z)))
+    },
+    .package = "susieR")
+  fit <- pecotmr:::.fmFitSusieSer(z = rnorm(5), n = 1000)
+  expect_equal(captured$args$n, 1000)
+  expect_length(captured$args$z, 5)
+  expect_null(captured$args$dots$R)
+  expect_null(captured$args$dots$L)
+  expect_true("susieRss" %in% class(fit))
+})
+
+test_that(".fmNormalizeMethods does not inject L / L_greedy for ser", {
+  norm <- pecotmr:::.fmNormalizeMethods("ser", L = 20L, Lgreedy = 5L)
+  expect_null(norm$methodArgs[["ser"]][["L"]])
+  expect_null(norm$methodArgs[["ser"]][["L_greedy"]])
 })
 
 # ===========================================================================

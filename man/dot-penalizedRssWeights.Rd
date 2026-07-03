@@ -24,9 +24,11 @@
 Numeric weight vector of length \code{nrow(LD)}.
 }
 \description{
-Shared implementation for \code{scadRssWeights()}, \code{mcpRssWeights()},
-and \code{l0learnRssWeights()}.  Searches over a shrinkage grid \code{s}
-(LD matrix shrinkage \code{(1-s)R + sI}) and selects the best candidate via
-LD-quadratic pseudovalidation or minimum penalized objective.
+Shared implementation for \code{scadRssWeights()} and \code{mcpRssWeights()}.
+(\code{l0learnRssWeights()} uses the lower-level \code{.rssShrinkGridWeights}
+scaffold directly, since it sweeps an additional \code{lambda0} path.)
+Searches over a shrinkage grid \code{s} (LD matrix shrinkage
+\code{(1-s)R + sI}) and selects the best candidate via LD-quadratic
+pseudovalidation or minimum penalized objective.
 }
 \keyword{internal}

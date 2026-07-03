@@ -321,6 +321,13 @@ S4-dispatched per-region fine-mapping entry point that
           variant of the same.}
     \item{\code{susieAsh}}{\code{unmappable_effects = "ash"}
           variant of the same.}
+    \item{\code{ser}}{Single-effect regression via
+          \code{susieR::susie_ser} on summary statistics
+          (\code{z}, \code{n}); LD-free (no \code{R}, no \code{L}),
+          so distinct from \code{susie} with \code{L = 1}. Sumstat
+          input only (\code{QtlSumStats} / \code{GwasSumStats}, or the
+          sumstat side of a \code{MultiStudyQtlDataset}); rejected on
+          individual-level \code{QtlDataset}.}
     \item{\code{mvsusie}}{\code{mvsusieR::mvsusie} on individual-
           level input (requires multi-trait OR multi-context Y),
           \code{mvsusieR::mvsusie_rss} on sumstat input (requires

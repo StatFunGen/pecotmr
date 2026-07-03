@@ -1626,7 +1626,7 @@ test_that(".susie_rss_extract_weights returns correct-length vector", {
   w <- pecotmr:::.susieRssExtractWeights(
     fit = NULL, z = z, R = R, n = n,
     requiredFields = c("alpha", "mu", "X_column_scale_factors"),
-    fitArgs = list(L = 5)
+    userArgs = list(L = 5)
   )
   expect_equal(length(w), p)
   expect_true(all(is.finite(w)))

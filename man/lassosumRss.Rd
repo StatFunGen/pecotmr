@@ -6,7 +6,7 @@
 \usage{
 lassosumRss(
   bhat,
-  LD,
+  R,
   n,
   lambda = exp(seq(log(1e-04), log(0.1), length.out = 20)),
   thr = 1e-04,
@@ -16,7 +16,7 @@ lassosumRss(
 \arguments{
 \item{bhat}{A vector of marginal effect sizes.}
 
-\item{LD}{A list of LD blocks, where each element is a matrix representing an LD block.
+\item{R}{The LD correlation matrix (a single matrix over the analysed window), as in \code{susieR::susie_rss()}.
 If shrinkage is desired, apply it before passing (e.g., \code{(1-s)*R + s*I}).}
 
 \item{n}{Sample size of the GWAS.}
@@ -56,6 +56,5 @@ for (i in 1:(p - 1)) {
   R[i, i + 1] <- 0.3
   R[i + 1, i] <- 0.3
 }
-LD <- list(blk1 = R)
-out <- lassosumRss(bhat, LD, n)
+out <- lassosumRss(bhat, R, n)
 }

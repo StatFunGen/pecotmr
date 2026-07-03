@@ -6,7 +6,7 @@
 \usage{
 prsCs(
   bhat,
-  LD,
+  R,
   n,
   a = 1,
   b = 0.5,
@@ -22,7 +22,7 @@ prsCs(
 \arguments{
 \item{bhat}{A vector of marginal effect sizes.}
 
-\item{LD}{A list of LD blocks, where each element is a matrix representing an LD block.}
+\item{R}{The LD correlation matrix (a single matrix over the analysed window), as in \code{susieR::susie_rss()}.}
 
 \item{n}{Sample size of the GWAS.}
 
@@ -93,8 +93,7 @@ sigmasq_init <- 1.5
 
 # Run PRS CS
 maf <- rep(0.5, length(b.hat)) # fake MAF
-LD <- list(blk1 = R.hat)
-out <- prsCs(b.hat, LD, n, maf = maf)
+out <- prsCs(b.hat, R.hat, n, maf = maf)
 # In sample prediction correlations
 cor(X \%*\% out$betaEst, y) # 0.9944553
 }

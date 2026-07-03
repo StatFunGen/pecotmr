@@ -451,7 +451,7 @@ metaSldscRandom <- function(perTraitEstimates, category,
   }
   meta <- metaRandomEffects(means, ses)
   z    <- meta$mean / meta$se
-  p    <- 2 * pnorm(-abs(z))
+  p    <- .zToPvalue(z)
   list(
     mean        = meta$mean,
     se          = meta$se,

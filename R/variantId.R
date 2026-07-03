@@ -38,6 +38,18 @@ canonChrom <- function(x) {
   x
 }
 
+#' Ensure a leading chr prefix on a chromosome identifier.
+#'
+#' Case-insensitive additive companion to \code{canonChrom} (which strips the
+#' prefix): \code{"1"}, \code{"chr1"}, \code{"CHR1"} all become \code{"chr1"}.
+#' Does not remap 23/24/M.
+#' @param x Character or numeric vector of chromosome identifiers.
+#' @return Character vector with a lowercase \code{"chr"} prefix.
+#' @noRd
+withChrPrefix <- function(x) {
+  paste0("chr", sub("^chr", "", as.character(x), ignore.case = TRUE))
+}
+
 #' Order key for chromosome identifiers.
 #'
 #' Returns an ordered factor placing autosomes 1..22 first, then X, Y, XY, MT,

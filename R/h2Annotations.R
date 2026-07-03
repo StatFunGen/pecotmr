@@ -175,7 +175,7 @@ setMethod("readAnnotations",
 
   # Build GRanges from the annot file positions
   annotGr <- GRanges(
-    seqnames = paste0("chr", sub("^chr", "", dt$CHR)),
+    seqnames = withChrPrefix(dt$CHR),
     ranges = IRanges(start = dt$BP, width = 1L)
   )
 

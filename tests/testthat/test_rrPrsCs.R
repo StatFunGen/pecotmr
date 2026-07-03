@@ -1,27 +1,27 @@
 context("regularized_regression - prsCs")
 
 # ---- prsCs ----
-test_that("prsCs errors on invalid LD input", {
-  expect_error(prsCs(bhat = rnorm(5), LD = "not_a_list", n = 100),
-               "valid list of LD blocks")
+test_that("prsCs errors on non-matrix R input", {
+  expect_error(prsCs(bhat = rnorm(5), R = "not_a_matrix", n = 100),
+               "as a matrix")
 })
 
 test_that("prsCs errors on non-positive sample size", {
-  expect_error(prsCs(bhat = rnorm(5), LD = list(blk1 = diag(5)), n = -1),
+  expect_error(prsCs(bhat = rnorm(5), R = diag(5), n = -1),
                "valid sample size")
 })
 
 test_that("prsCs errors on mismatched maf length", {
   expect_error(
-    prsCs(bhat = rnorm(5), LD = list(blk1 = diag(5)), n = 100, maf = rep(0.3, 3)),
+    prsCs(bhat = rnorm(5), R = diag(5), n = 100, maf = rep(0.3, 3)),
     "same as 'maf'"
   )
 })
 
-test_that("prsCs errors on mismatched bhat and LD dimensions", {
+test_that("prsCs errors on mismatched bhat and R dimensions", {
   expect_error(
-    prsCs(bhat = rnorm(10), LD = list(blk1 = diag(5)), n = 100),
-    "same as the sum"
+    prsCs(bhat = rnorm(10), R = diag(5), n = 100),
+    "number of rows of 'R'"
   )
 })
 
@@ -35,33 +35,8 @@ test_that("prsCs runs successfully with valid input", {
     R[i, i + 1] <- 0.3
     R[i + 1, i] <- 0.3
   }
-  result <- prsCs(bhat = bhat, LD = list(blk1 = R), n = n,
+  result <- prsCs(bhat = bhat, R = R, n = n,
                    maf = rep(0.3, p), nIter = 50, nBurnin = 10, thin = 2)
-  expect_type(result, "list")
-  expect_true("betaEst" %in% names(result))
-  expect_equal(length(result$betaEst), p)
-  expect_true(all(is.finite(result$betaEst)))
-})
-
-test_that("prsCs accepts multiple LD blocks whose dimensions sum to length of bhat", {
-  set.seed(42)
-  p1 <- 5
-  p2 <- 5
-  p <- p1 + p2
-  n <- 100
-
-  bhat <- rnorm(p, sd = 0.1)
-  R1 <- diag(p1)
-  R2 <- diag(p2)
-
-  result <- prsCs(
-    bhat = bhat,
-    LD = list(blk1 = R1, blk2 = R2),
-    n = n,
-    maf = rep(0.3, p),
-    nIter = 50, nBurnin = 10, thin = 2
-  )
-
   expect_type(result, "list")
   expect_true("betaEst" %in% names(result))
   expect_equal(length(result$betaEst), p)
@@ -73,7 +48,7 @@ test_that("prsCs with phi = NULL estimates phi automatically", {
   p <- 10; n <- 100
   bhat <- rnorm(p, sd = 0.1)
   R <- diag(p)
-  result <- prsCs(bhat = bhat, LD = list(blk1 = R), n = n,
+  result <- prsCs(bhat = bhat, R = R, n = n,
                    phi = NULL, maf = rep(0.3, p),
                    nIter = 50, nBurnin = 10, thin = 2)
   expect_true("phiEst" %in% names(result))
@@ -84,7 +59,7 @@ test_that("prsCs with explicit phi value", {
   p <- 10; n <- 100
   bhat <- rnorm(p, sd = 0.1)
   R <- diag(p)
-  result <- prsCs(bhat = bhat, LD = list(blk1 = R), n = n,
+  result <- prsCs(bhat = bhat, R = R, n = n,
                    phi = 0.01, maf = rep(0.3, p),
                    nIter = 50, nBurnin = 10, thin = 2)
   expect_true("phiEst" %in% names(result))
@@ -97,7 +72,7 @@ test_that("prsCs works without maf (maf = NULL)", {
   p <- 10; n <- 100
   bhat <- rnorm(p, sd = 0.1)
   R <- diag(p)
-  result <- prsCs(bhat = bhat, LD = list(blk1 = R), n = n,
+  result <- prsCs(bhat = bhat, R = R, n = n,
                    maf = NULL, nIter = 50, nBurnin = 10, thin = 2)
   expect_equal(length(result$betaEst), p)
 })
@@ -109,7 +84,7 @@ test_that("prsCs with verbose = TRUE produces output", {
   bhat <- rnorm(p, sd = 0.1)
   R <- diag(p)
   # n_iter >= 100 triggers the verbose print inside the MCMC loop
-  result <- prsCs(bhat = bhat, LD = list(blk1 = R), n = n,
+  result <- prsCs(bhat = bhat, R = R, n = n,
                    maf = rep(0.3, p), nIter = 110, nBurnin = 10, thin = 2,
                    verbose = TRUE, seed = 42L)
   expect_type(result, "list")
@@ -122,7 +97,7 @@ test_that("prsCs verbose with phi = NULL shows estimated phi", {
   p <- 10; n <- 100
   bhat <- rnorm(p, sd = 0.1)
   R <- diag(p)
-  result <- prsCs(bhat = bhat, LD = list(blk1 = R), n = n,
+  result <- prsCs(bhat = bhat, R = R, n = n,
                    phi = NULL, maf = rep(0.3, p),
                    nIter = 110, nBurnin = 10, thin = 2,
                    verbose = TRUE, seed = 42L)
@@ -141,7 +116,7 @@ test_that("prsCs recovers signal direction on simulated genotype data", {
   y <- X %*% beta_true + rnorm(n)
   bhat <- as.vector(cor(y, X))
   R <- cor(X)
-  result <- prsCs(bhat = bhat, LD = list(blk1 = R), n = n,
+  result <- prsCs(bhat = bhat, R = R, n = n,
                    nIter = 1000, nBurnin = 500, thin = 5, seed = 42)
   expect_true("betaEst" %in% names(result))
   expect_equal(length(result$betaEst), p)

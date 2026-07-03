@@ -3299,7 +3299,7 @@ test_that(".applyLdMismatchQcToEntry: errors on variants absent from the sketch"
                    stringsAsFactors = FALSE)
   expect_error(
     pecotmr:::.applyLdMismatchQcToEntry(df, .ssh_makeHandle(), method = "dentist"),
-    "are absent from the ldSketch panel"
+    "not present in the LD sketch panel"
   )
 })
 

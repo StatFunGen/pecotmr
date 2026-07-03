@@ -6,7 +6,7 @@
 \usage{
 penalizedRss(
   bhat,
-  LD,
+  R,
   n,
   penalty = c("lasso", "MCP", "SCAD", "L0", "L0L1", "L0L2"),
   lambda = exp(seq(log(1e-04), log(0.1), length.out = 20)),
@@ -22,8 +22,8 @@ penalizedRss(
 \arguments{
 \item{bhat}{Numeric vector of marginal effect estimates (length p).}
 
-\item{LD}{A list of LD correlation matrices (one per block), as in
-\code{lassosumRss()}.}
+\item{R}{The LD correlation matrix (a single matrix over the analysed
+window), as in \code{lassosumRss()}.}
 
 \item{n}{GWAS sample size (positive scalar).}
 
@@ -78,11 +78,11 @@ p <- 10; n <- 100
 bhat <- rnorm(p, sd = 0.1)
 R <- diag(p)
 # MCP
-penalizedRss(bhat, list(blk1 = R), n, penalty = "MCP")
+penalizedRss(bhat, R, n, penalty = "MCP")
 # SCAD
-penalizedRss(bhat, list(blk1 = R), n, penalty = "SCAD")
+penalizedRss(bhat, R, n, penalty = "SCAD")
 # L0
-penalizedRss(bhat, list(blk1 = R), n, penalty = "L0", lambda0 = 0.01,
+penalizedRss(bhat, R, n, penalty = "L0", lambda0 = 0.01,
               lambda = c(0))
 }
 }

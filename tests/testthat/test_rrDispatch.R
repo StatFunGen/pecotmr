@@ -17,9 +17,9 @@ test_that("prsCsWeights dispatches to prsCs with correct arguments", {
   stat <- list(b = bhat, n = c(10, 20, 30, 40, 50, 60, 70, 80, 90, 1000))
   captured <- new.env(parent = emptyenv())
   local_mocked_bindings(
-    prsCs = function(bhat, LD, n, ...) {
+    prsCs = function(bhat, R, n, ...) {
       captured$bhat <- bhat
-      captured$LD <- LD
+      captured$R <- R
       captured$n <- n
       captured$dots <- list(...)
       list(betaEst = seq_len(length(bhat)) * 0.01)
@@ -27,7 +27,7 @@ test_that("prsCsWeights dispatches to prsCs with correct arguments", {
   )
   result <- prsCsWeights(stat = stat, LD = R, maf = rep(0.3, p), nIter = 17)
   expect_equal(captured$bhat, bhat)
-  expect_equal(captured$LD, list(blk1 = R))
+  expect_equal(captured$R, R)
   expect_equal(captured$n, 55) # median of stat$n, NOT mean (145)
   expect_equal(captured$dots$maf, rep(0.3, p))
   expect_equal(captured$dots$nIter, 17)
@@ -42,9 +42,9 @@ test_that("sdprWeights dispatches to sdpr with correct arguments", {
   stat <- list(b = bhat, n = rep(456, p))
   captured <- new.env(parent = emptyenv())
   local_mocked_bindings(
-    sdpr = function(bhat, LD, n, ...) {
+    sdpr = function(bhat, R, n, ...) {
       captured$bhat <- bhat
-      captured$LD <- LD
+      captured$R <- R
       captured$n <- n
       captured$dots <- list(...)
       list(betaEst = seq_len(length(bhat)) * 0.02)
@@ -52,7 +52,7 @@ test_that("sdprWeights dispatches to sdpr with correct arguments", {
   )
   result <- sdprWeights(stat = stat, LD = R, iter = 19, burn = 3)
   expect_equal(captured$bhat, bhat)
-  expect_equal(captured$LD, list(blk1 = R))
+  expect_equal(captured$R, R)
   expect_equal(captured$n, 456)
   expect_equal(captured$dots$iter, 19)
   expect_equal(captured$dots$burn, 3)
@@ -72,9 +72,9 @@ test_that("lassosumRssWeights dispatches to lassosumRss once per s value", {
   call_log <- new.env(parent = emptyenv())
   call_log$calls <- list()
   local_mocked_bindings(
-    lassosumRss = function(bhat, LD, n, ...) {
+    lassosumRss = function(bhat, R, n, ...) {
       call_log$calls <- c(call_log$calls,
-                          list(list(bhat = bhat, LD = LD, n = n)))
+                          list(list(bhat = bhat, R = R, n = n)))
       list(
         beta = cbind(rep(0, length(bhat)), rep(0.05, length(bhat))),
         lambda = c(0.05, 0.01),
@@ -86,8 +86,8 @@ test_that("lassosumRssWeights dispatches to lassosumRss once per s value", {
   expect_equal(length(call_log$calls), 2L)
   expect_equal(call_log$calls[[1]]$n, 100)
   expect_equal(length(call_log$calls[[1]]$bhat), p)
-  # LD should differ between calls because s is different
-  expect_false(identical(call_log$calls[[1]]$LD, call_log$calls[[2]]$LD))
+  # R should differ between calls because s is different
+  expect_false(identical(call_log$calls[[1]]$R, call_log$calls[[2]]$R))
 })
 
 test_that("lassosumRssWeights defaults to LD-quadratic selection", {
@@ -99,7 +99,7 @@ test_that("lassosumRssWeights defaults to LD-quadratic selection", {
   expected <- c(1, 0, 0, 0)
 
   local_mocked_bindings(
-    lassosumRss = function(bhat, LD, n, ...) {
+    lassosumRss = function(bhat, R, n, ...) {
       list(
         beta = cbind(expected, c(1, 1, 0, 0)),
         lambda = c(0.05, 0.01),
@@ -119,7 +119,7 @@ test_that("lassosumRssWeights uses first-max tie behavior for LD-quadratic selec
   R <- diag(p)
 
   local_mocked_bindings(
-    lassosumRss = function(bhat, LD, n, ...) {
+    lassosumRss = function(bhat, R, n, ...) {
       list(
         beta = cbind(c(1, 0, 0), c(0, 1, 0)),
         lambda = c(0.05, 0.01),
@@ -140,7 +140,7 @@ test_that("lassosumRssWeights still supports explicit min(fbeta)", {
   expected <- c(1, 1, 0, 0)
 
   local_mocked_bindings(
-    lassosumRss = function(bhat, LD, n, ...) {
+    lassosumRss = function(bhat, R, n, ...) {
       list(
         beta = cbind(c(1, 0, 0, 0), expected),
         lambda = c(0.05, 0.01),
@@ -277,7 +277,8 @@ test_that("susieWeights actually calls susie when fit is NULL", {
       captured$X <- X
       captured$y <- y
       list(pip = rep(0.1, ncol(X)))
-    }
+    },
+    .package = "susieR"
   )
   susieWeights(X = X, y = y)
   expect_true(captured$called)
@@ -298,7 +299,8 @@ test_that("susieAshWeights calls susie with ash dispatch arguments", {
       captured$unmappable_effects <- unmappable_effects
       captured$convergence_method <- convergence_method
       list(pip = rep(0.1, ncol(X)))
-    }
+    },
+    .package = "susieR"
   )
   susieAshWeights(X = X, y = y)
   expect_true(captured$called)
@@ -319,7 +321,8 @@ test_that("susieInfWeights calls susie with inf dispatch arguments", {
       captured$unmappable_effects <- unmappable_effects
       captured$convergence_method <- convergence_method
       list(pip = rep(0.1, ncol(X)))
-    }
+    },
+    .package = "susieR"
   )
   susieInfWeights(X = X, y = y)
   expect_true(captured$called)

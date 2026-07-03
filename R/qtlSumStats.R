@@ -168,33 +168,8 @@ setMethod("getSumStats", signature(x = "QtlSumStats"),
   }
 )
 
-#' @rdname getZ
-#' @export
-setMethod("getZ", "QtlSumStats",
-  function(x, study = NULL, context = NULL, trait = NULL) {
-    gr <- getSumStats(x, study = study, context = context, trait = trait)
-    mcols(gr)$Z
-  }
-)
-
-#' @rdname getN
-#' @export
-setMethod("getN", "QtlSumStats",
-  function(x, study = NULL, context = NULL, trait = NULL) {
-    gr <- getSumStats(x, study = study, context = context, trait = trait)
-    mcols(gr)$N
-  }
-)
-
-#' @rdname getMaf
-#' @export
-setMethod("getMaf", "QtlSumStats",
-  function(x, study = NULL, context = NULL, trait = NULL, ...) {
-    gr <- getSumStats(x, study = study, context = context, trait = trait)
-    mc <- mcols(gr)
-    if ("MAF" %in% colnames(mc)) mc$MAF else NULL
-  }
-)
+# getZ / getN / getMaf / nSnps are provided once by SumStatsBase (AllClasses.R);
+# they only delegate to getSumStats().
 
 #' @rdname getSumstatDf
 #' @export
@@ -217,19 +192,10 @@ setMethod("getSumstatDf", "QtlSumStats",
   }
 )
 
-#' @rdname nSnps
-#' @export
-setMethod("nSnps", "QtlSumStats",
-  function(x, study = NULL, context = NULL, trait = NULL) {
-    gr <- getSumStats(x, study = study, context = context, trait = trait)
-    length(gr)
-  }
-)
-
 #' @rdname subsetChr
 #' @export
 setMethod("subsetChr", "QtlSumStats", function(x, chr) {
-  chrName <- paste0("chr", sub("^chr", "", as.character(chr)))
+  chrName <- withChrPrefix(chr)
   newEntries <- lapply(seq_len(nrow(x)), function(i) {
     gr <- x$entry[[i]]
     idx <- as.character(seqnames(gr)) == chrName

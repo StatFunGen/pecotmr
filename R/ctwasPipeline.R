@@ -681,16 +681,7 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
     niter                     = as.integer(niterPrefit),
     group_prior_var_structure = groupPriorVarStructure,
     ncore                     = as.integer(ncore))
-  if (length(extra) > 0L) {
-    formalsFn <- tryCatch(names(formals(fitEm)), error = function(e) NULL)
-    if (!is.null(formalsFn)) {
-      explicitFormals <- setdiff(formalsFn, "...")
-      extra <- extra[setdiff(names(extra), names(fitArgs))]
-      extra <- extra[intersect(names(extra), explicitFormals)]
-    }
-    fitArgs <- c(fitArgs, extra)
-  }
-  prefit <- do.call(fitEm, fitArgs)
+  prefit <- .ctwasInvoke(fitEm, fitArgs, extra)
   groupPrior <- prefit$group_prior
   groupSize  <- prefit$group_size
   if (thin != 1) {
@@ -859,9 +850,7 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
 # @noRd
 .ctwasComputeFullPanelLd <- function(gwasLd) {
   snpInfoCtwas <- .ctwasSnpInfoForBlock(gwasLd)
-  block <- extractBlockGenotypes(gwasLd, seq_len(nrow(snpInfoCtwas)),
-                                  meanImpute = TRUE)
-  geno  <- t(SummarizedExperiment::assay(block, "dosage"))
+  geno  <- .dosageMatrix(gwasLd, seq_len(nrow(snpInfoCtwas)), meanImpute = TRUE)
   R <- computeLd(geno, method = "sample")
   snpIds <- snpInfoCtwas$id
   dimnames(R) <- list(snpIds, snpIds)

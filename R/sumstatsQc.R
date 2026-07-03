@@ -2049,7 +2049,7 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   condMean  <- as.numeric(cd$condmean)
   statistic <- as.numeric(cd$z_std_diff)
   residual  <- zScore - condMean
-  pValue    <- 2 * stats::pnorm(-abs(statistic))
+  pValue    <- .zToPvalue(statistic)
   outlier   <- !is.na(pValue) & pValue < pThreshold
   list(
     outlier = outlier,
@@ -2104,7 +2104,7 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
     gr <- GenomicRanges::GRanges()
     return(gr)
   }
-  chr <- paste0("chr", sub("^chr", "", chrRaw, ignore.case = TRUE))
+  chr <- withChrPrefix(chrRaw)
   gr <- GenomicRanges::GRanges(
     seqnames = chr,
     ranges   = IRanges::IRanges(start = as.integer(df$pos), width = 1L))
@@ -2178,11 +2178,8 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
 # Requires Z, MAF, and N to all be present in `df`. No-op if BETA and SE
 # are already there, or if any required column is missing. Returns:
 #   list(df = <data.frame>, audit = NULL | list(nDerived = <int>))
-# Internal: two-tailed normal p-value from a signed Z.
-# Returns NA where z is NA. Values |z| > ~37 underflow to 0 (R's pnorm
-# limit); that's expected behaviour for the regime where p-values are
-# meaningless anyway.
-.zToPvalue <- function(z) 2 * pnorm(-abs(z))
+# .zToPvalue (two-tailed normal p-value from a signed Z) is defined once in
+# pvalCombine.R and shared package-wide.
 
 # Internal: thin SVD with numerical-stability filtering. Drops singular
 # values below `tol * max(d)` and caps the retained rank at `maxRank`.
@@ -2255,9 +2252,9 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   z   <- as.numeric(df$Z)
   maf <- as.numeric(df$MAF)
   n   <- as.numeric(df$N)
-  varTerm <- 2 * maf * (1 - maf) * (n + z * z)
-  se   <- 1 / sqrt(varTerm)
-  beta <- z * se
+  bs   <- .zToBetaSe(z, maf, n)
+  se   <- bs$se
+  beta <- bs$beta
   if (!hasBeta) df$BETA <- beta
   if (!hasSe)   df$SE   <- se
   list(df = df, audit = list(nDerived = sum(!is.na(se))))
@@ -2526,18 +2523,10 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   variantIds <- df$SNP
   if (is.null(variantIds) || any(is.na(variantIds)))
     stop("summaryStatsQc: ldMismatchQc requires SNP column on the entry.")
-  # Match the entry variants to the panel by (chrom, pos, allele) tuple so a
-  # chr-prefix / separator difference does not read as "absent".
-  m <- matchVariants(variantIds, as.character(getSnpInfo(ldSketch)$SNP))
-  if (length(m$idxA) < length(variantIds))
-    stop("summaryStatsQc: ", length(variantIds) - length(m$idxA),
-         " variant(s) in entry are absent from the ldSketch panel; ",
-         "harmonize / impute before calling zMismatchQc.")
-  snpIdx <- m$idxB[order(m$idxA)]        # panel rows, in entry order
-  block <- extractBlockGenotypes(ldSketch, snpIdx, meanImpute = TRUE)
-  dosage <- t(SummarizedExperiment::assay(block, "dosage"))
-  colnames(dosage) <- variantIds
-  R <- computeLd(dosage, method = "sample")
+  # Panel LD for the entry variants via the shared LD-from-sketch helper (tuple
+  # match with chr-prefix tolerance, strand-ambiguous variants kept; errors if
+  # any variant is absent from the panel).
+  R <- .ldFromSketch(ldSketch, variantIds, label = "summaryStatsQc: zMismatchQc")
   qc <- ldMismatchQc(zScore = df$Z, R = R, nSample = getNSamples(ldSketch),
                      method = method)
   # slalom / dentist can leave NA in the outlier column when their
@@ -2720,16 +2709,8 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   # 6. Optional kriging prefilter.
   if (isTRUE(opts$alleleFlipKriging) && nrow(df) >= 2L) {
     nKrIn <- nrow(df)
-    m <- matchVariants(df$SNP, as.character(getSnpInfo(ldSketch)$SNP))
-    if (length(m$idxA) < nrow(df))
-      stop("summaryStatsQc: ", nrow(df) - length(m$idxA),
-           " variant(s) absent from the ldSketch panel; harmonize / impute ",
-           "before the kriging prefilter.")
-    snpIdx <- m$idxB[order(m$idxA)]      # panel rows, in entry order
-    block <- extractBlockGenotypes(ldSketch, snpIdx, meanImpute = TRUE)
-    dosage <- t(SummarizedExperiment::assay(block, "dosage"))
-    colnames(dosage) <- df$SNP
-    R <- computeLd(dosage, method = "sample")
+    R <- .ldFromSketch(ldSketch, df$SNP,
+                       label = "summaryStatsQc: kriging prefilter")
     nKrig <- if (!is.null(opts$nForPip) && is.finite(opts$nForPip)) opts$nForPip
              else stats::median(as.numeric(df$N), na.rm = TRUE)
     kr <- krigingOutlierQc(df$Z, R, n = nKrig, variantIds = df$SNP)
@@ -2786,9 +2767,8 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
 
     # Materialize the full panel dosage in panel-order matching refPanel.
     sketchSnpInfo <- getSnpInfo(ldSketch)
-    block <- extractBlockGenotypes(
-      ldSketch, seq_len(nrow(sketchSnpInfo)), meanImpute = TRUE)
-    dosage <- t(SummarizedExperiment::assay(block, "dosage"))
+    dosage <- .dosageMatrix(ldSketch, seq_len(nrow(sketchSnpInfo)),
+                            meanImpute = TRUE)
     colnames(dosage) <- normalizeVariantId(as.character(sketchSnpInfo$SNP))
     dosage <- dosage[, refPanel$variant_id, drop = FALSE]
     scaledDosage <- scale(dosage)

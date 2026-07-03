@@ -161,54 +161,13 @@ setMethod("getPip", "GwasFineMappingResult",
     getPip(x$entry[[idx]])
   })
 
-#' @rdname getCs
-#' @export
-setMethod("getCs", "GwasFineMappingResult",
+# Row selector for the base delegating accessors (getCs / getTopLoci /
+# getMarginalEffects / getSusieFit / getVariantIds live on
+# FineMappingResultBase, AllClasses.R). The Gwas selector threads `region`.
+setMethod(".fmrSelectEntry", "GwasFineMappingResult",
   function(x, study = NULL, context = NULL, trait = NULL, method = NULL,
-           region = NULL, ...) {
-    idx <- .tupleSelectRowGwasFmr(x, study, method, region)
-    getCs(x$entry[[idx]])
-  })
-
-#' @rdname getTopLoci
-#' @export
-setMethod("getTopLoci", "GwasFineMappingResult",
-  function(x, type = c("data.frame", "GRanges"),
-           signalCutoff = 0.025,
-           study = NULL, context = NULL, trait = NULL, method = NULL,
-           region = NULL, ...) {
-    idx <- .tupleSelectRowGwasFmr(x, study, method, region)
-    getTopLoci(x$entry[[idx]], type = match.arg(type),
-               signalCutoff = signalCutoff)
-  })
-
-#' @rdname getMarginalEffects
-#' @export
-setMethod("getMarginalEffects", "GwasFineMappingResult",
-  function(x, maxPval = NULL,
-           study = NULL, context = NULL, trait = NULL, method = NULL,
-           region = NULL, ...) {
-    idx <- .tupleSelectRowGwasFmr(x, study, method, region)
-    getMarginalEffects(x$entry[[idx]], maxPval = maxPval)
-  })
-
-#' @rdname getSusieFit
-#' @export
-setMethod("getSusieFit", "GwasFineMappingResult",
-  function(x, study = NULL, context = NULL, trait = NULL, method = NULL,
-           region = NULL, ...) {
-    idx <- .tupleSelectRowGwasFmr(x, study, method, region)
-    getSusieFit(x$entry[[idx]])
-  })
-
-#' @rdname getVariantIds
-#' @export
-setMethod("getVariantIds", "GwasFineMappingResult",
-  function(x, study = NULL, context = NULL, trait = NULL, method = NULL,
-           region = NULL, ...) {
-    idx <- .tupleSelectRowGwasFmr(x, study, method, region)
-    getVariantIds(x$entry[[idx]])
-  })
+           region = NULL, ...)
+    x$entry[[.tupleSelectRowGwasFmr(x, study, method, region)]])
 
 
 #' @export

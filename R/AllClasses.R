@@ -20,10 +20,10 @@ NULL
 # -----------------------------------------------------------------------------
 # Shared parent of the QTL and GWAS summary statistics collections.
 # Concrete subclasses (QtlSumStats, GwasSumStats) inherit from DFrame and
-# share the ldSketch / genome / qcInfo slots. Class-specific accessors
-# (getZ / getN / getMaf / nSnps / subsetChr / getVarY / getSumStats)
-# stay on the concrete subclass because they rely on the tuple shape
-# (3-tuple for QtlSumStats, 1-tuple for GwasSumStats).
+# share the ldSketch / genome / qcInfo slots. getZ / getN / getMaf / nSnps are
+# defined once on SumStatsBase (they only delegate to getSumStats); subsetChr /
+# getVarY / getSumStats / getSumstatDf stay on the concrete subclass because
+# they rely on the tuple shape (3-tuple QtlSumStats, 1-tuple GwasSumStats).
 # =============================================================================
 
 #' @title Summary Statistics Base Class
@@ -88,6 +88,28 @@ setMethod("getLdSketch", "SumStatsBase", function(x, ...) x@ldSketch)
 setMethod("getStudy", "SumStatsBase",
           function(x) unique(as.character(x$study)))
 
+# getZ / getN / getMaf / nSnps delegate purely to getSumStats (which the
+# concrete subclass dispatches with its own tuple shape), so they live once on
+# the base and forward `...` through.
+#' @rdname getZ
+#' @export
+setMethod("getZ", "SumStatsBase", function(x, ...) mcols(getSumStats(x, ...))$Z)
+
+#' @rdname getN
+#' @export
+setMethod("getN", "SumStatsBase", function(x, ...) mcols(getSumStats(x, ...))$N)
+
+#' @rdname getMaf
+#' @export
+setMethod("getMaf", "SumStatsBase", function(x, ...) {
+  mc <- mcols(getSumStats(x, ...))
+  if ("MAF" %in% colnames(mc)) mc$MAF else NULL
+})
+
+#' @rdname nSnps
+#' @export
+setMethod("nSnps", "SumStatsBase", function(x, ...) length(getSumStats(x, ...)))
+
 # =============================================================================
 # FineMappingResultBase
 # -----------------------------------------------------------------------------
@@ -144,4 +166,61 @@ setMethod("adjustPips", "FineMappingResultBase",
     }
     x@listData$entry <- entries
     x
+  })
+
+# Select the single FineMappingEntry addressed by a (tuple / region) key. Each
+# concrete subclass implements this with its own row selector; the delegating
+# accessors below then live once on the base and route through it.
+setGeneric(".fmrSelectEntry", function(x, ...) standardGeneric(".fmrSelectEntry"))
+
+#' @rdname getCs
+#' @export
+setMethod("getCs", "FineMappingResultBase",
+  function(x, study = NULL, context = NULL, trait = NULL, method = NULL,
+           region = NULL, coverage = 0.95, ...) {
+    getCs(.fmrSelectEntry(x, study = study, context = context, trait = trait,
+                          method = method, region = region),
+          coverage = coverage)
+  })
+
+#' @rdname getTopLoci
+#' @export
+setMethod("getTopLoci", "FineMappingResultBase",
+  function(x, type = c("data.frame", "GRanges"), signalCutoff = 0.025,
+           study = NULL, context = NULL, trait = NULL, method = NULL,
+           region = NULL, ...) {
+    getTopLoci(.fmrSelectEntry(x, study = study, context = context,
+                               trait = trait, method = method, region = region),
+               type = match.arg(type), signalCutoff = signalCutoff)
+  })
+
+#' @rdname getMarginalEffects
+#' @export
+setMethod("getMarginalEffects", "FineMappingResultBase",
+  function(x, maxPval = NULL,
+           study = NULL, context = NULL, trait = NULL, method = NULL,
+           region = NULL, ...) {
+    getMarginalEffects(.fmrSelectEntry(x, study = study, context = context,
+                                       trait = trait, method = method,
+                                       region = region), maxPval = maxPval)
+  })
+
+#' @rdname getSusieFit
+#' @export
+setMethod("getSusieFit", "FineMappingResultBase",
+  function(x, study = NULL, context = NULL, trait = NULL, method = NULL,
+           region = NULL, ...) {
+    getSusieFit(.fmrSelectEntry(x, study = study, context = context,
+                                trait = trait, method = method,
+                                region = region))
+  })
+
+#' @rdname getVariantIds
+#' @export
+setMethod("getVariantIds", "FineMappingResultBase",
+  function(x, study = NULL, context = NULL, trait = NULL, method = NULL,
+           region = NULL, ...) {
+    getVariantIds(.fmrSelectEntry(x, study = study, context = context,
+                                  trait = trait, method = method,
+                                  region = region))
   })
