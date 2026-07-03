@@ -58,6 +58,30 @@ test_that("MultiStudyQtlDataset: rejects trait/position conflicts across studies
 })
 
 
+test_that("MultiStudyQtlDataset: tolerates chr-prefix-only seqname differences across studies", {
+  # se1 uses "chr1"; se2 is the SAME locus (chr1:1000-1499) but seqnames "1".
+  se1 <- .sc_makeSe(traits = "ENSG1")
+  rng2 <- GenomicRanges::GRanges(
+    seqnames = "1",
+    ranges = IRanges::IRanges(start = 1000L, width = 500L))
+  names(rng2) <- "ENSG1"
+  expr2 <- matrix(rnorm(10), nrow = 1, ncol = 10,
+                  dimnames = list("ENSG1", paste0("s", 1:10)))
+  cd2 <- S4Vectors::DataFrame(sex = rep(c("M", "F"), 5),
+                              row.names = paste0("s", 1:10))
+  se2 <- SummarizedExperiment::SummarizedExperiment(
+    assays = list(expression = expr2),
+    rowRanges = rng2, colData = cd2)
+  qd1 <- QtlDataset(study = "s1", genotypes = .sc_makeGenotypeHandle(),
+                    phenotypes = list(brain = se1))
+  qd2 <- QtlDataset(study = "s2", genotypes = .sc_makeGenotypeHandle(),
+                    phenotypes = list(brain = se2))
+  expect_s4_class(
+    MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1, s2 = qd2)),
+    "MultiStudyQtlDataset")
+})
+
+
 test_that("getSumStats(MultiStudyQtlDataset) rejects selection arguments", {
   # Compose one individual-level QtlDataset with a QtlSumStats of
   # summary-statistic-only studies (1 + 1 = 2 studies total).

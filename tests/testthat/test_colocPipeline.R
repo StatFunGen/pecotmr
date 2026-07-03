@@ -306,6 +306,17 @@ test_that(".colocAlignLbf: aligned matrices share the common variant set", {
   expect_setequal(colnames(aligned$gwas), c("chr1:20:A:G", "chr1:30:A:G"))
 })
 
+test_that(".colocAlignLbf aligns non-autosomal columns across a chr-prefix difference", {
+  # chrX ids: alignVariantNames' numeric-chrom regex could not parse these and
+  # fell back to a raw intersect (no overlap); tuple matching resolves them.
+  q <- matrix(0, 2, 2, dimnames = list(NULL, c("chrX:100:A:G", "chrX:200:C:T")))
+  g <- matrix(0, 2, 2, dimnames = list(NULL, c("X:100:A:G", "X:200:C:T")))
+  aligned <- pecotmr:::.colocAlignLbf(q, g)
+  expect_false(is.null(aligned))
+  expect_equal(ncol(aligned$qtl), 2L)
+  expect_identical(colnames(aligned$qtl), colnames(aligned$gwas))
+})
+
 test_that(".colocRbindLbf: rbinds matrices with union of columns, NAs filled with 0", {
   a <- matrix(1, 2, 2, dimnames = list(NULL, c("v1", "v2")))
   b <- matrix(2, 2, 2, dimnames = list(NULL, c("v2", "v3")))

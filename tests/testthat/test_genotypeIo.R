@@ -1481,7 +1481,7 @@ test_that("sharded extraction errors for a chromosome with no payload", {
   # Drop the chr22 payload but keep its variants in @snpInfo, so routing a
   # chr22 request finds no per-chromosome file.
   shard@chromPaths <- shard@chromPaths["21"]
-  idx22 <- which(pecotmr:::.canonChr(shard@snpInfo$CHR) == "22")[1]
+  idx22 <- which(pecotmr:::canonChrom(shard@snpInfo$CHR) == "22")[1]
   expect_error(
     extractBlockGenotypes(shard, idx22),
     "no per-chromosome file for chromosome")

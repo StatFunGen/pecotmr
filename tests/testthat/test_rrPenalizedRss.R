@@ -2,23 +2,23 @@ context("regularized_regression — penalizedRss")
 
 # ---- penalizedRss (low-level solver) ----
 
-test_that("penalizedRss errors on invalid LD input", {
-  expect_error(penalizedRss(bhat = rnorm(5), LD = "not_a_list", n = 100,
+test_that("penalizedRss errors on non-matrix R input", {
+  expect_error(penalizedRss(bhat = rnorm(5), R = "not_a_matrix", n = 100,
                              penalty = "MCP"),
-               "valid list of LD blocks")
+               "as a matrix")
 })
 
 test_that("penalizedRss errors on non-positive sample size", {
-  expect_error(penalizedRss(bhat = rnorm(5), LD = list(blk1 = diag(5)),
+  expect_error(penalizedRss(bhat = rnorm(5), R = diag(5),
                              n = -1, penalty = "SCAD"),
                "valid sample size")
 })
 
-test_that("penalizedRss errors on mismatched bhat and LD dimensions", {
+test_that("penalizedRss errors on mismatched bhat and R dimensions", {
   expect_error(
-    penalizedRss(bhat = rnorm(10), LD = list(blk1 = diag(5)), n = 100,
+    penalizedRss(bhat = rnorm(10), R = diag(5), n = 100,
                   penalty = "MCP"),
-    "same as the sum"
+    "number of rows of 'R'"
   )
 })
 
@@ -26,7 +26,7 @@ test_that("penalizedRss with large lambda gives all-zero betas (MCP)", {
   set.seed(42)
   p <- 10; n <- 100
   bhat <- rnorm(p, sd = 0.1)
-  result <- penalizedRss(bhat = bhat, LD = list(blk1 = diag(p)), n = n,
+  result <- penalizedRss(bhat = bhat, R = diag(p), n = n,
                           penalty = "MCP", lambda = c(100))
   expect_true(all(result$betaEst == 0))
 })
@@ -35,7 +35,7 @@ test_that("penalizedRss with large lambda gives all-zero betas (SCAD)", {
   set.seed(42)
   p <- 10; n <- 100
   bhat <- rnorm(p, sd = 0.1)
-  result <- penalizedRss(bhat = bhat, LD = list(blk1 = diag(p)), n = n,
+  result <- penalizedRss(bhat = bhat, R = diag(p), n = n,
                           penalty = "SCAD", lambda = c(100))
   expect_true(all(result$betaEst == 0))
 })
@@ -44,7 +44,7 @@ test_that("penalizedRss with large lambda0 gives all-zero betas (L0)", {
   set.seed(42)
   p <- 10; n <- 100
   bhat <- rnorm(p, sd = 0.1)
-  result <- penalizedRss(bhat = bhat, LD = list(blk1 = diag(p)), n = n,
+  result <- penalizedRss(bhat = bhat, R = diag(p), n = n,
                           penalty = "L0", lambda = c(0), lambda0 = 1e6)
   expect_true(all(result$betaEst == 0))
 })
@@ -58,7 +58,7 @@ test_that("penalizedRss runs with MCP and returns correct structure", {
     R[i, i + 1] <- 0.3
     R[i + 1, i] <- 0.3
   }
-  result <- penalizedRss(bhat = bhat, LD = list(blk1 = R), n = n,
+  result <- penalizedRss(bhat = bhat, R = R, n = n,
                           penalty = "MCP")
   expect_type(result, "list")
   expect_true("betaEst" %in% names(result))
@@ -74,7 +74,7 @@ test_that("penalizedRss runs with SCAD and returns correct structure", {
   p <- 10; n <- 100
   bhat <- rnorm(p, sd = 0.1)
   R <- diag(p)
-  result <- penalizedRss(bhat = bhat, LD = list(blk1 = R), n = n,
+  result <- penalizedRss(bhat = bhat, R = R, n = n,
                           penalty = "SCAD")
   expect_type(result, "list")
   expect_equal(length(result$betaEst), p)
@@ -86,20 +86,9 @@ test_that("penalizedRss runs with L0 and returns correct structure", {
   p <- 10; n <- 100
   bhat <- rnorm(p, sd = 0.1)
   R <- diag(p)
-  result <- penalizedRss(bhat = bhat, LD = list(blk1 = R), n = n,
+  result <- penalizedRss(bhat = bhat, R = R, n = n,
                           penalty = "L0", lambda = c(0), lambda0 = 0.01)
   expect_type(result, "list")
-  expect_equal(length(result$betaEst), p)
-  expect_true(all(is.finite(result$betaEst)))
-})
-
-test_that("penalizedRss accepts multiple LD blocks", {
-  set.seed(42)
-  p1 <- 5; p2 <- 5; p <- p1 + p2; n <- 100
-  bhat <- rnorm(p, sd = 0.1)
-  result <- penalizedRss(bhat = bhat,
-                          LD = list(blk1 = diag(p1), blk2 = diag(p2)),
-                          n = n, penalty = "MCP")
   expect_equal(length(result$betaEst), p)
   expect_true(all(is.finite(result$betaEst)))
 })
@@ -110,9 +99,9 @@ test_that("penalizedRss LASSO matches lassosumRss on identity LD", {
   bhat <- rnorm(p, sd = 0.2)
   R <- diag(p)
   lam <- exp(seq(log(0.001), log(0.1), length.out = 5))
-  res_lasso <- penalizedRss(bhat = bhat, LD = list(blk1 = R), n = n,
+  res_lasso <- penalizedRss(bhat = bhat, R = R, n = n,
                              penalty = "lasso", lambda = lam)
-  res_lassosum <- lassosumRss(bhat = bhat, LD = list(blk1 = R), n = n,
+  res_lassosum <- lassosumRss(bhat = bhat, R = R, n = n,
                                lambda = lam)
   expect_equal(res_lasso$beta, res_lassosum$beta, tolerance = 1e-4)
 })

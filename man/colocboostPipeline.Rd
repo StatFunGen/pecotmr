@@ -23,6 +23,7 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   separateGwas = FALSE,
   samples = NULL,
   pipCutoffToSkip = 0,
+  alleleFlip = TRUE,
   ...
 )
 
@@ -37,6 +38,7 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   xqtlColoc = TRUE,
   jointGwas = FALSE,
   separateGwas = FALSE,
+  alleleFlip = TRUE,
   ...
 )
 
@@ -53,6 +55,7 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   separateGwas = FALSE,
   samples = NULL,
   pipCutoffToSkip = 0,
+  alleleFlip = TRUE,
   ...
 )
 
@@ -102,6 +105,12 @@ variant's PIP exceeds the cutoff; a context with no surviving outcome is
 skipped. \code{0} (default) disables it; a negative value uses
 \code{3 / n_variants}. (Summary-statistic skipping is handled upstream by
 \code{\link{summaryStatsQc}}'s own \code{pipCutoffToSkip}.)}
+
+\item{alleleFlip}{Logical, default \code{TRUE}. When TRUE, harmonize variants
+across the individual X, sumstats, and LD by (chrom, pos) with ref/alt
+swaps recognized (flipping z / residualized dosage / LD to a shared
+coding); when FALSE, match on exact alleles only (names-only), so a ref/alt
+swap is treated as a distinct variant.}
 }
 \value{
 A list with elements \code{xqtl_coloc}, \code{joint_gwas},

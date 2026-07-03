@@ -160,9 +160,7 @@ setMethod("getCorrelation", "LdData", function(x) {
            "Construct LdData with mixtureWeights = <numeric vector> ",
            "when supplying a list of GenotypeHandles.")
     perPanel <- lapply(x@genotypeHandle, function(h) {
-      geno <- extractBlockGenotypes(h, x@snpIdx)
-      X <- t(assay(geno, "dosage"))
-      computeLd(X, method = "sample")
+      computeLd(.dosageMatrix(h, x@snpIdx), method = "sample")
     })
     dims <- vapply(perPanel, function(R) nrow(R), integer(1))
     if (length(unique(dims)) != 1L)
@@ -175,9 +173,7 @@ setMethod("getCorrelation", "LdData", function(x) {
     dimnames(R) <- dimnames(perPanel[[1L]])
     return(R)
   }
-  geno <- extractBlockGenotypes(x@genotypeHandle, x@snpIdx)
-  X <- t(assay(geno, "dosage"))
-  computeLd(X, method = "sample")
+  computeLd(.dosageMatrix(x@genotypeHandle, x@snpIdx), method = "sample")
 })
 
 #' @rdname getGenotypes
@@ -186,13 +182,9 @@ setMethod("getGenotypes", "LdData", function(x, ...) {
   if (is.null(x@genotypeHandle)) return(NULL)
   if (is.matrix(x@genotypeHandle)) return(x@genotypeHandle)
   if (is.list(x@genotypeHandle)) {
-    lapply(x@genotypeHandle, function(h) {
-      geno <- extractBlockGenotypes(h, x@snpIdx)
-      t(assay(geno, "dosage"))
-    })
+    lapply(x@genotypeHandle, function(h) .dosageMatrix(h, x@snpIdx))
   } else {
-    geno <- extractBlockGenotypes(x@genotypeHandle, x@snpIdx)
-    t(assay(geno, "dosage"))
+    .dosageMatrix(x@genotypeHandle, x@snpIdx)
   }
 })
 

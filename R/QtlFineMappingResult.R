@@ -156,14 +156,12 @@ setMethod("getPip", "QtlFineMappingResult",
     pip
   })
 
-#' @rdname getCs
-#' @export
-setMethod("getCs", "QtlFineMappingResult",
-  function(x, study = NULL, context = NULL, trait = NULL, method = NULL,
-           coverage = 0.95, ...) {
-    entry <- getFineMappingResult(x, study, context, trait, method)
-    getCs(entry, coverage = coverage)
-  })
+# Row selector for the base delegating accessors (getCs / getTopLoci /
+# getMarginalEffects / getSusieFit / getVariantIds now live on
+# FineMappingResultBase, AllClasses.R).
+setMethod(".fmrSelectEntry", "QtlFineMappingResult",
+  function(x, study = NULL, context = NULL, trait = NULL, method = NULL, ...)
+    getFineMappingResult(x, study, context, trait, method))
 
 #' @rdname getCvResult
 #' @export
@@ -173,43 +171,8 @@ setMethod("getCvResult", "QtlFineMappingResult",
     getCvResult(entry)
   })
 
-#' @rdname getTopLoci
-#' @export
-setMethod("getTopLoci", "QtlFineMappingResult",
-  function(x, type = c("data.frame", "GRanges"),
-           signalCutoff = 0.025,
-           study = NULL, context = NULL, trait = NULL, method = NULL,
-           ...) {
-    entry <- getFineMappingResult(x, study, context, trait, method)
-    getTopLoci(entry, type = match.arg(type), signalCutoff = signalCutoff)
-  })
-
-#' @rdname getMarginalEffects
-#' @export
-setMethod("getMarginalEffects", "QtlFineMappingResult",
-  function(x, maxPval = NULL,
-           study = NULL, context = NULL, trait = NULL, method = NULL, ...) {
-    entry <- getFineMappingResult(x, study, context, trait, method)
-    getMarginalEffects(entry, maxPval = maxPval)
-  })
-
-#' @rdname getSusieFit
-#' @export
-setMethod("getSusieFit", "QtlFineMappingResult",
-  function(x, study = NULL, context = NULL, trait = NULL, method = NULL,
-           ...) {
-    entry <- getFineMappingResult(x, study, context, trait, method)
-    getSusieFit(entry)
-  })
-
-#' @rdname getVariantIds
-#' @export
-setMethod("getVariantIds", "QtlFineMappingResult",
-  function(x, study = NULL, context = NULL, trait = NULL, method = NULL,
-           ...) {
-    entry <- getFineMappingResult(x, study, context, trait, method)
-    getVariantIds(entry)
-  })
+# getTopLoci / getMarginalEffects / getSusieFit / getVariantIds are defined once
+# on FineMappingResultBase (AllClasses.R), routing through .fmrSelectEntry.
 
 #' @rdname getContexts
 #' @export

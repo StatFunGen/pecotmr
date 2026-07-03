@@ -153,26 +153,24 @@ fitSusieInfThenSusie <- function(X, y, args = list(),
                                  susieInfArgs = list(),
                                  susieArgs = list(),
                                  fittedModels = NULL) {
+  # Two-stage chain built from the shared per-token fitter (.fmFitSusieIndiv),
+  # so the susieInf fit arguments and the susieInf -> susie initialisation live
+  # in one place rather than being duplicated here and in the pipeline.
   if (is.null(fittedModels)) fittedModels <- list()
   susieInfFit <- fittedModels[["susieInf"]]
-  susieFit <- fittedModels[["susie"]]
-
   if (is.null(susieInfFit)) {
-    fitArgs <- modifyList(args, susieInfArgs)
-    fitArgs <- modifyList(fitArgs, list(
-      X = X, y = y, unmappable_effects = "inf",
-      convergence_method = "pip", refine = FALSE, model_init = NULL
-    ))
-    susieInfFit <- do.call(susie, fitArgs)
+    susieInfFit <- .fmFitSusieIndiv(X, y, "susieInf",
+                                    userArgs = modifyList(args, susieInfArgs))
+  } else {
+    susieInfFit <- .setFinemappingFitClass(susieInfFit, "susieInf")
   }
-  susieInfFit <- .setFinemappingFitClass(susieInfFit, "susieInf")
-
+  susieFit <- fittedModels[["susie"]]
   if (is.null(susieFit)) {
-    fitArgs <- prepareSusieFromInfArgs(modifyList(args, susieArgs), susieInfFit, refineDefault = TRUE)
-    susieFit <- do.call(susie, c(list(X = X, y = y), fitArgs))
+    susieFit <- .fmFitSusieIndiv(X, y, "susie", chainFromInf = susieInfFit,
+                                 userArgs = modifyList(args, susieArgs))
+  } else {
+    susieFit <- .setFinemappingFitClass(susieFit, "susie")
   }
-  susieFit <- .setFinemappingFitClass(susieFit, "susie")
-
   list(susie = susieFit, susieInf = susieInfFit)
 }
 
@@ -198,23 +196,20 @@ fitSusieInfThenSusieRss <- function(z, R, n, args = list(),
                                     susieInfArgs = list(),
                                     susieArgs = list(),
                                     fittedModels = NULL) {
+  # RSS analog of fitSusieInfThenSusie, built from the shared per-token RSS
+  # fitter (.fmFitSusieRss). .fmFitSusieRss tags every fit "susieRss", so the
+  # inf fit is re-tagged "susieInf" to preserve this wrapper's contract.
   if (is.null(fittedModels)) fittedModels <- list()
   susieInfFit <- fittedModels[["susieInf"]]
-  susieFit <- fittedModels[["susie"]]
-
   if (is.null(susieInfFit)) {
-    fitArgs <- modifyList(args, susieInfArgs)
-    fitArgs <- modifyList(fitArgs, list(
-      z = z, R = R, n = n, unmappable_effects = "inf",
-      convergence_method = "pip", refine = FALSE, model_init = NULL
-    ))
-    susieInfFit <- do.call(susie_rss, fitArgs)
+    susieInfFit <- .fmFitSusieRss(z, R, n, "susieInf",
+                                  userArgs = modifyList(args, susieInfArgs))
   }
   susieInfFit <- .setFinemappingFitClass(susieInfFit, "susieInf")
-
+  susieFit <- fittedModels[["susie"]]
   if (is.null(susieFit)) {
-    fitArgs <- prepareSusieFromInfArgs(modifyList(args, susieArgs), susieInfFit, refineDefault = TRUE)
-    susieFit <- do.call(susie_rss, c(list(z = z, R = R, n = n), fitArgs))
+    susieFit <- .fmFitSusieRss(z, R, n, "susie", chainFromInf = susieInfFit,
+                               userArgs = modifyList(args, susieArgs))
   }
   susieFit <- .setFinemappingFitClass(susieFit, "susieRss")
 
@@ -1157,14 +1152,25 @@ fitFsusie <- function(X, Y, pos, ...) {
 # @param fit A susie fit object (or NULL to fit from X, y).
 # @param X Genotype matrix (optional).
 # @param y Phenotype vector (optional).
+# Drop-intercept TWAS coefficient weights from a fitted SuSiE(-RSS) model
+# (zero the intercept, then coef.susie without the intercept row).
+# @noRd
+.susieCoefWeights <- function(fit) {
+  fit$intercept <- 0
+  coef.susie(fit)[-1]
+}
+
 # @param requiredFields Fields that must be present in the fit to extract weights.
-# @param fitArgs Extra arguments passed to susieR::susie when fit is NULL.
-# @param ... Additional arguments forwarded to susieR::susie.
+# @param token SuSiE-family token ("susie" / "susieInf" / "susieAsh") selecting
+#   the unmappable_effects mode. The fit is delegated to .fmFitSusieIndiv so the
+#   package keeps a single susie-invocation point.
+# @param userArgs Extra arguments forwarded to susieR::susie via .fmFitSusieIndiv.
 #' @importFrom susieR coef.susie susie
 #' @noRd
-.susieExtractWeights <- function(fit, X, y, requiredFields, fitArgs = list(), retainFit = FALSE, ...) {
+.susieExtractWeights <- function(fit, X, y, requiredFields, token = "susie",
+                                 userArgs = list(), retainFit = FALSE) {
   if (is.null(fit)) {
-    fit <- do.call(susie, c(list(X = X, y = y), fitArgs, list(...)))
+    fit <- .fmFitSusieIndiv(X, y, token, userArgs = userArgs)
   }
   if (!is.null(X) && length(fit$pip) != ncol(X)) {
     stop(paste0(
@@ -1173,8 +1179,7 @@ fitFsusie <- function(X, Y, pos, ...) {
     ))
   }
   if (all(requiredFields %in% names(fit))) {
-    fit$intercept <- 0
-    weights <- coef.susie(fit)[-1]
+    weights <- .susieCoefWeights(fit)
   } else {
     weights <- rep(0, length(fit$pip))
   }
@@ -1197,7 +1202,7 @@ fitFsusie <- function(X, Y, pos, ...) {
 susieWeights <- function(X = NULL, y = NULL, susieFit = NULL, retainFit = FALSE, ...) {
   .susieExtractWeights(susieFit, X, y,
     requiredFields = c("alpha", "mu", "X_column_scale_factors"),
-    retainFit = retainFit, ...)
+    token = "susie", userArgs = list(...), retainFit = retainFit)
 }
 
 #' Compute SuSiE-ASH TWAS weights
@@ -1215,8 +1220,7 @@ susieWeights <- function(X = NULL, y = NULL, susieFit = NULL, retainFit = FALSE,
 susieAshWeights <- function(X = NULL, y = NULL, susieAshFit = NULL, retainFit = FALSE, ...) {
   .susieExtractWeights(susieAshFit, X, y,
     requiredFields = c("alpha", "mu", "theta", "X_column_scale_factors"),
-    fitArgs = list(unmappable_effects = "ash", convergence_method = "pip"),
-    retainFit = retainFit, ...)
+    token = "susieAsh", userArgs = list(...), retainFit = retainFit)
 }
 
 #' Compute SuSiE-inf TWAS weights
@@ -1245,18 +1249,17 @@ susieAshWeights <- function(X = NULL, y = NULL, susieAshFit = NULL, retainFit = 
 susieInfWeights <- function(X = NULL, y = NULL, susieInfFit = NULL, retainFit = FALSE, ...) {
   .susieExtractWeights(susieInfFit, X, y,
     requiredFields = c("alpha", "mu", "theta", "X_column_scale_factors"),
-    fitArgs = list(unmappable_effects = "inf", convergence_method = "pip"),
-    retainFit = retainFit, ...)
+    token = "susieInf", userArgs = list(...), retainFit = retainFit)
 }
 # Internal helper: extract weights from a susieRss fit.
 # Mirrors .susie_extract_weights but uses the RSS interface.
 #' @importFrom susieR coef.susie susie_rss
 #' @noRd
 .susieRssExtractWeights <- function(fit, z, R, n,
-                                    requiredFields, fitArgs = list(),
-                                    retainFit = FALSE) {
+                                    requiredFields, token = "susie",
+                                    userArgs = list(), retainFit = FALSE) {
   if (is.null(fit)) {
-    fit <- do.call(susie_rss, c(list(z = z, R = R, n = n), fitArgs))
+    fit <- .fmFitSusieRss(z, R, n, token, userArgs = userArgs)
   }
   if (length(fit$pip) != nrow(R)) {
     stop(paste0(
@@ -1264,8 +1267,7 @@ susieInfWeights <- function(X = NULL, y = NULL, susieInfFit = NULL, retainFit = 
       " variants but R has ", nrow(R), " rows."))
   }
   if (all(requiredFields %in% names(fit))) {
-    fit$intercept <- 0
-    weights <- coef.susie(fit)[-1]
+    weights <- .susieCoefWeights(fit)
   } else {
     weights <- rep(0, length(fit$pip))
   }
@@ -1292,7 +1294,7 @@ susieRssWeights <- function(stat, LD, susieRssFit = NULL, retainFit = TRUE,
                             methodArgs = list()) {
   .susieRssExtractWeights(fit = susieRssFit, z = stat$z, R = LD, n = median(stat$n),
     requiredFields = c("alpha", "mu", "X_column_scale_factors"),
-    fitArgs = methodArgs,
+    token = "susie", userArgs = methodArgs,
     retainFit = retainFit)
 }
 
@@ -1309,7 +1311,7 @@ susieInfRssWeights <- function(stat, LD, susieInfRssFit = NULL, retainFit = TRUE
                                methodArgs = list()) {
   .susieRssExtractWeights(fit = susieInfRssFit, z = stat$z, R = LD, n = median(stat$n),
     requiredFields = c("alpha", "mu", "theta", "X_column_scale_factors"),
-    fitArgs = c(list(unmappable_effects = "inf", convergence_method = "pip"), methodArgs),
+    token = "susieInf", userArgs = methodArgs,
     retainFit = retainFit)
 }
 
@@ -1326,7 +1328,7 @@ susieAshRssWeights <- function(stat, LD, susieAshRssFit = NULL, retainFit = TRUE
                                methodArgs = list()) {
   .susieRssExtractWeights(fit = susieAshRssFit, z = stat$z, R = LD, n = median(stat$n),
     requiredFields = c("alpha", "mu", "theta", "X_column_scale_factors"),
-    fitArgs = c(list(unmappable_effects = "ash", convergence_method = "pip"), methodArgs),
+    token = "susieAsh", userArgs = methodArgs,
     retainFit = retainFit)
 }
 #' Compute mvSuSiE TWAS weights
@@ -1745,4 +1747,208 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
   combinedTopLociDf <- combinedTopLociDf[!duplicated(combinedTopLociDf$variant_id), ]
   rownames(combinedTopLociDf) <- NULL
   return(combinedTopLociDf)
+}
+
+
+# =============================================================================
+# SuSiE-family fitters (single-fit wrappers + per-block dispatch)
+# -----------------------------------------------------------------------------
+# Relocated here from fineMappingPipeline.R so all method-fitting wrappers live
+# in one file, alongside fitMvsusie / fitFsusie / fitSusieInfThenSusie.
+# `.fmFitSusie{Indiv,Rss,Ser}` each invoke a single susieR entry point;
+# `.fmFit{X,Rss}Block` fit every requested token on one (X, y) / (z, R, n)
+# block. They call orchestration helpers that remain in fineMappingPipeline.R
+# (.fmResolveSusieChain / .fmPostprocessOne / .fmMergeUserArgs /
+# .fineMappingMethodCapabilities); all resolve within the package namespace.
+# =============================================================================
+
+# Fit one of the SuSiE-family individual-level methods on (X, y). When
+# `chainFromInf` is non-NULL, the susieInf fit it points at is used as
+# initialisation (with prepareSusieFromInfArgs); otherwise a plain fit
+# with the requested `unmappable_effects` is performed. `userArgs` are
+# spliced via .fmMergeUserArgs (user wins over chain/base/capability
+# defaults), so the caller can override things like L, max_iter,
+# estimate_residual_method, refine, etc.
+# @noRd
+.fmFitSusieIndiv <- function(X, y, token, chainFromInf = NULL,
+                             coverage = 0.95, userArgs = NULL) {
+  info <- .fineMappingMethodCapabilities[[token]]
+  if (is.null(info) || identical(info$unmappableEffects, NA_character_)) {
+    stop(".fmFitSusieIndiv: token '", token, "' is not a SuSiE-family method.")
+  }
+  baseArgs <- list(X = X, y = y, coverage = coverage,
+                   unmappable_effects = info$unmappableEffects)
+  if (!is.null(chainFromInf) && token != "susieInf") {
+    # SuSiE(-ash) initialised from a SuSiE-inf fit. userArgs are folded into the
+    # arg prep (not merged afterwards) so L_greedy is clamped to
+    # min(#inf effects, L) rather than passed through raw.
+    chainedArgs <- prepareSusieFromInfArgs(
+      .fmMergeUserArgs(list(), token, userArgs),
+      chainFromInf,
+      refineDefault = if (token == "susie") TRUE else NULL,
+      unmappableEffects = if (token == "susieAsh") "ash" else "none")
+    baseArgs <- modifyList(baseArgs, chainedArgs)
+    baseArgs$X <- X; baseArgs$y <- y; baseArgs$coverage <- coverage
+  } else {
+    if (token == "susieInf") {
+      baseArgs$convergence_method <- "pip"
+      baseArgs$refine <- FALSE
+      baseArgs$model_init <- NULL
+    } else if (token == "susieAsh") {
+      baseArgs$convergence_method <- "pip"
+    }
+    baseArgs <- .fmMergeUserArgs(baseArgs, token, userArgs)
+  }
+  fit <- do.call(susieR::susie, baseArgs)
+  .setFinemappingFitClass(fit, token)
+}
+
+
+# Sumstat counterpart of .fmFitSusieIndiv. Calls susieR::susie_rss with
+# the same unmappable_effects switch, chained init, and userArgs merge.
+# @noRd
+.fmFitSusieRss <- function(z, R, n, token, chainFromInf = NULL,
+                           coverage = 0.95, userArgs = NULL) {
+  info <- .fineMappingMethodCapabilities[[token]]
+  if (is.null(info) || identical(info$unmappableEffects, NA_character_)) {
+    stop(".fmFitSusieRss: token '", token, "' is not a SuSiE-family method.")
+  }
+  baseArgs <- list(z = z, R = R, n = n, coverage = coverage,
+                   unmappable_effects = info$unmappableEffects)
+  if (!is.null(chainFromInf) && token != "susieInf") {
+    # SuSiE-RSS(-ash) initialised from a SuSiE-inf fit; userArgs folded into the
+    # arg prep so L_greedy is clamped rather than passed through raw.
+    chainedArgs <- prepareSusieFromInfArgs(
+      .fmMergeUserArgs(list(), token, userArgs),
+      chainFromInf,
+      refineDefault = if (token == "susie") TRUE else NULL,
+      unmappableEffects = if (token == "susieAsh") "ash" else "none")
+    baseArgs <- modifyList(baseArgs, chainedArgs)
+    baseArgs$z <- z; baseArgs$R <- R; baseArgs$n <- n
+    baseArgs$coverage <- coverage
+  } else {
+    if (token == "susieInf") {
+      baseArgs$convergence_method <- "pip"
+      baseArgs$refine <- FALSE
+      baseArgs$model_init <- NULL
+    } else if (token == "susieAsh") {
+      baseArgs$convergence_method <- "pip"
+    }
+    baseArgs <- .fmMergeUserArgs(baseArgs, token, userArgs)
+  }
+  fit <- do.call(susieR::susie_rss, baseArgs)
+  # All susie_rss fits get the "susieRss" S3 class for post-processing
+  # (this drives the Xcorr cs-input mode). Token-level distinction stays
+  # in the `method` column of the FineMappingResult.
+  .setFinemappingFitClass(fit, "susieRss")
+}
+
+# Single-effect (SER) sumstat fit via susieR::susie_ser on z + n. LD-free (no R,
+# no L, no unmappable_effects), so it cannot reuse .fmFitSusieRss. Tagged
+# "susieRss" so the shared post-processing (credible sets + purity against the
+# LD sketch) applies unchanged.
+# @noRd
+.fmFitSusieSer <- function(z, n, coverage = 0.95, userArgs = NULL) {
+  baseArgs <- .fmMergeUserArgs(list(z = z, n = n, coverage = coverage),
+                               "ser", userArgs)
+  .setFinemappingFitClass(do.call(susieR::susie_ser, baseArgs), "susieRss")
+}
+
+# Fit every requested univariate token on one residualized (X, y) block,
+# returning a named list (token -> FineMappingEntry). Extracted from the
+# univariate dispatch so the same logic serves the cis path (one block), the
+# jointRegions=TRUE path (one concatenated block) and the jointRegions=FALSE
+# path (one block per region, merged afterwards via .fmMergeEntries).
+.fmFitXBlock <- function(X, y, toRun, addSusieInf, coverage,
+                         secondaryCoverage, signalCutoff, minAbsCorr,
+                         methodArgs, verbose, ctx, tid,
+                         cvFolds = 0, samplePartition = NULL, af = NULL) {
+  chainLocal <- .fmResolveSusieChain(toRun, addSusieInf)
+  infFit <- NULL
+  if (chainLocal$runInf) {
+    if (verbose >= 1)
+      message(sprintf("Fitting susieInf for (context='%s', trait='%s') ...",
+                      ctx, tid))
+    infFit <- .fmFitSusieIndiv(X, y, "susieInf", coverage = coverage,
+                               userArgs = methodArgs[["susieInf"]])
+  }
+  out <- list()
+  for (tk in toRun) {
+    if (tk == "susieInf") {
+      if (!chainLocal$keepInf) next
+      fit <- infFit
+    } else {
+      chainFrom <- if ((tk == "susie"    && chainLocal$chainSusie) ||
+                       (tk == "susieAsh" && chainLocal$chainAsh))
+                     infFit else NULL
+      if (verbose >= 1)
+        message(sprintf("Fitting %s for (context='%s', trait='%s') ...",
+                        tk, ctx, tid))
+      fit <- .fmFitSusieIndiv(X, y, tk, chainFromInf = chainFrom,
+                              coverage = coverage, userArgs = methodArgs[[tk]])
+    }
+    out[[tk]] <- .fmPostprocessOne(
+      fit = fit, method = tk, dataX = X, dataY = y, coverage = coverage,
+      secondaryCoverage = secondaryCoverage, signalCutoff = signalCutoff,
+      minAbsCorr = minAbsCorr, af = af, csInput = "X")
+  }
+  # Per-fold cross-validation across the fitted univariate methods; attach
+  # each method's out-of-fold predictions to its entry.
+  if (cvFolds > 1L && length(out) > 0L) {
+    if (verbose >= 1)
+      message(sprintf("Cross-validating (%d folds) for (context='%s', trait='%s') ...",
+                      cvFolds, ctx, tid))
+    cv <- .fmCrossValidate(X, y, names(out), methodArgs, cvFolds,
+                           samplePartition = samplePartition,
+                           coverage = coverage, verbose = verbose)
+    for (tk in names(out)) {
+      out[[tk]] <- .fmAttachCv(out[[tk]], .fmSliceCv(cv, tk))
+    }
+  }
+  out
+}
+
+# Fit every requested RSS token on one (z, R, n) sumstat block, returning a
+# named list (token -> FineMappingEntry). The sumstat analog of .fmFitXBlock:
+# the QtlSumStats and GwasSumStats methods both call it and differ only in how
+# they push the returned entries (tuple shape) and the progress `label`.
+.fmFitRssBlock <- function(z, R, n, toRun, addSusieInf, coverage,
+                           secondaryCoverage, signalCutoff, minAbsCorr,
+                           methodArgs, verbose, label, af = NULL) {
+  chainLocal <- .fmResolveSusieChain(toRun, addSusieInf)
+  infFit <- NULL
+  if (chainLocal$runInf) {
+    if (verbose >= 1)
+      message(sprintf("Fitting susieInf (RSS) for %s ...", label))
+    infFit <- .fmFitSusieRss(z, R, n, "susieInf", coverage = coverage,
+                             userArgs = methodArgs[["susieInf"]])
+  }
+  out <- list()
+  for (tk in toRun) {
+    if (tk == "susieInf") {
+      if (!chainLocal$keepInf) next
+      fit <- infFit
+    } else if (tk == "ser") {
+      # LD-free single-effect regression (susieR::susie_ser): z + n only, no R,
+      # no L, no chaining.
+      if (verbose >= 1)
+        message(sprintf("Fitting ser (RSS single-effect) for %s ...", label))
+      fit <- .fmFitSusieSer(z, n, coverage = coverage,
+                            userArgs = methodArgs[["ser"]])
+    } else {
+      chainFrom <- if ((tk == "susie"    && chainLocal$chainSusie) ||
+                       (tk == "susieAsh" && chainLocal$chainAsh))
+                    infFit else NULL
+      if (verbose >= 1)
+        message(sprintf("Fitting %s (RSS) for %s ...", tk, label))
+      fit <- .fmFitSusieRss(z, R, n, tk, chainFromInf = chainFrom,
+                            coverage = coverage, userArgs = methodArgs[[tk]])
+    }
+    out[[tk]] <- .fmPostprocessOne(
+      fit = fit, method = "susieRss", dataX = R, dataY = list(z = z),
+      coverage = coverage, secondaryCoverage = secondaryCoverage,
+      signalCutoff = signalCutoff, minAbsCorr = minAbsCorr, af = af,
+      csInput = "Xcorr")
+  }
+  out
 }

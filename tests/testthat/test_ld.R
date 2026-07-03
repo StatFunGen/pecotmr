@@ -425,7 +425,15 @@ test_that("orderDedupRegions orders and deduplicates across chromosomes", {
 test_that("orderDedupRegions strips chr prefix", {
   df <- data.frame(chrom = c("chr1", "chr2"), start = c(100, 200), end = c(200, 300))
   result <- pecotmr:::orderDedupRegions(df)
-  expect_true(all(result$chrom %in% c(1L, 2L)))
+  expect_equal(result$chrom, c("1", "2"))   # normalized to a bare string, not integer
+})
+
+test_that("orderDedupRegions sorts X/Y/MT after autosomes and keeps chrom a string", {
+  df <- data.frame(chrom = c("chrX", "chr2", "chr1", "chrMT"),
+                   start = c(1L, 1L, 1L, 1L), end = c(2L, 2L, 2L, 2L))
+  result <- pecotmr:::orderDedupRegions(df)
+  expect_equal(result$chrom, c("1", "2", "X", "MT"))   # genomic order, not NA-collapsed
+  expect_type(result$chrom, "character")
 })
 
 # ---- findIntersectionRows ----
@@ -2908,6 +2916,21 @@ test_that(".requireMatchingLdSketches errors when panels differ in a column", {
     pecotmr:::.requireMatchingLdSketches(h, h2, "testPipeline"),
     "differ in column"
   )
+})
+
+test_that(".requireMatchingLdSketches tolerates a chr-prefix-only difference", {
+  si1 <- data.frame(SNP = c("1:100:A:G", "1:200:C:T"), CHR = c("1", "1"),
+                    BP = c(100L, 200L), A1 = c("A", "C"), A2 = c("G", "T"),
+                    stringsAsFactors = FALSE)
+  si2 <- si1
+  si2$CHR <- c("chr1", "chr1")
+  si2$SNP <- c("chr1:100:A:G", "chr1:200:C:T")   # same panel, chr-prefixed
+  mk <- function(si) new("GenotypeHandle", path = "/tmp/x", format = "gds",
+                         snpInfo = si, nSamples = 3L,
+                         sampleIds = paste0("s", 1:3), pgenPtr = NULL,
+                         chromPaths = character(0))
+  expect_null(
+    pecotmr:::.requireMatchingLdSketches(mk(si1), mk(si2), "testPipeline"))
 })
 
 # =============================================================================

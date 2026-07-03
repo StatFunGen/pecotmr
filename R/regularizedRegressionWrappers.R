@@ -18,7 +18,7 @@ mrAshRssWeights <- function(stat, LD, varY, sigma2E, s0, w0, z = numeric(0), ...
 #' and infers posterior SNP effect sizes using Bayesian regression with continuous shrinkage priors.
 #'
 #' @param bhat A vector of marginal effect sizes.
-#' @param LD A list of LD blocks, where each element is a matrix representing an LD block.
+#' @param R The LD correlation matrix (a single matrix over the analysed window), as in \code{susieR::susie_rss()}.
 #' @param n Sample size of the GWAS.
 #' @param a Shape parameter for the prior distribution of psi. Default is 1.
 #' @param b Scale parameter for the prior distribution of psi. Default is 0.5.
@@ -73,39 +73,25 @@ mrAshRssWeights <- function(stat, LD, varY, sigma2E, s0, w0, z = numeric(0), ...
 #'
 #' # Run PRS CS
 #' maf <- rep(0.5, length(b.hat)) # fake MAF
-#' LD <- list(blk1 = R.hat)
-#' out <- prsCs(b.hat, LD, n, maf = maf)
+#' out <- prsCs(b.hat, R.hat, n, maf = maf)
 #' # In sample prediction correlations
 #' cor(X %*% out$betaEst, y) # 0.9944553
 #' @export
-prsCs <- function(bhat, LD, n,
+prsCs <- function(bhat, R, n,
                   a = 1, b = 0.5, phi = NULL,
                   maf = NULL, nIter = 1000, nBurnin = 500,
                   thin = 5, verbose = FALSE, seed = NULL) {
-  # Check input parameters
-  if (missing(LD) || !is.list(LD)) {
-    stop("Please provide a valid list of LD blocks using 'LD'.")
-  }
-  if (missing(n) || n <= 0) {
-    stop("Please provide a valid sample size using 'n'.")
-  }
-
-  # Check if maf is provided and its length matches that of bhat
+  # Shared LD-matrix validation, then the prsCs-specific maf length check.
+  .rssValidateInputs(bhat, R, n)
   if (!is.null(maf) && length(bhat) != length(maf)) {
     stop("The length of 'bhat' must be the same as 'maf'.")
-  }
-
-  # Check if the length of bhat matches the sum of the nrow of all elements in the LD list
-  totalRowsInLd <- sum(sapply(LD, nrow))
-  if (length(bhat) != totalRowsInLd) {
-    stop("The length of 'bhat' must be the same as the sum of the number of rows of all elements in the 'LD' list.")
   }
 
   # Run PRS-CS
   # cpp11 requires exact integer types for int parameters
   result <- prsCsRcpp(
     a = a, b = b, phi = phi, bhat = bhat, maf = maf,
-    n = as.integer(n), ldBlk = LD,
+    n = as.integer(n), ldBlk = list(blk1 = R),
     nIter = as.integer(nIter), nBurnin = as.integer(nBurnin), thin = as.integer(thin),
     verbose = verbose, seed = seed
   )
@@ -123,7 +109,7 @@ prsCs <- function(bhat, LD, n,
 #' @return A numeric vector of the posterior SNP coefficients.
 #' @export
 prsCsWeights <- function(stat, LD, ...) {
-  model <- prsCs(bhat = stat$b, LD = list(blk1 = LD), n = median(stat$n), ...)
+  model <- prsCs(bhat = stat$b, R = LD, n = median(stat$n), ...)
 
   return(model$betaEst)
 }
@@ -134,7 +120,7 @@ prsCsWeights <- function(stat, LD, ...) {
 #' for estimating effect sizes and heritability based on summary statistics and reference LD matrices.
 #'
 #' @param bhat A vector of marginal beta values for each SNP.
-#' @param LD A list of LD matrices, where each matrix corresponds to a subset of SNPs.
+#' @param R The LD correlation matrix (a single matrix over the analysed window).
 #' @param n The total sample size of the GWAS.
 #' @param perVariantSampleSize (Optional) A vector of sample sizes for each SNP. If NULL (default), it will be initialized
 #'                    to a vector of length equal to `bhat`, with all values set to `n`.
@@ -192,8 +178,7 @@ prsCsWeights <- function(stat, LD, ...) {
 #' sigmasq_init <- 1.5
 #'
 #' # Run SDPR
-#' LD <- list(blk1 = R.hat)
-#' out <- sdpr(b.hat, LD, n)
+#' out <- sdpr(b.hat, R.hat, n)
 #' # In sample prediction correlations
 #' cor(X %*% out$betaEst, y) #
 #'
@@ -202,18 +187,10 @@ prsCsWeights <- function(stat, LD, ...) {
 #'       https://htmlpreview.github.io/?https://github.com/eldronzhou/SDPR/blob/main/doc/Manual.html
 #'
 #' @export
-sdpr <- function(bhat, LD, n, perVariantSampleSize = NULL, array = NULL, a = 0.1, c = 1.0, M = 1000,
+sdpr <- function(bhat, R, n, perVariantSampleSize = NULL, array = NULL, a = 0.1, c = 1.0, M = 1000,
                  a0k = 0.5, b0k = 0.5, iter = 1000, burn = 200, thin = 5, nThreads = 1,
                  optLlk = 1, verbose = TRUE, seed = NULL) {
-  # Check if the sum of the rows in LD list is the same as length of bhat
-  if (sum(sapply(LD, nrow)) != length(bhat)) {
-    stop("The sum of the rows in LD list must be the same as the length of bhat.")
-  }
-
-  # Check if total sample size n is a positive integer
-  if (missing(n) || n <= 0) {
-    stop("The total sample size 'n' must be a positive integer.")
-  }
+  .rssValidateInputs(bhat, R, n)
 
   # M must be >= 4 (SDPR uses M-2 indexing in sample_V; M < 4 causes buffer overflow)
   if (M < 4) {
@@ -233,8 +210,9 @@ sdpr <- function(bhat, LD, n, perVariantSampleSize = NULL, array = NULL, a = 0.1
   # cpp11 requires exact integer types for int parameters and sexp-wrapped vectors
   if (!is.null(array)) array <- as.integer(array)
   # Call the sdprRcpp function
+  # C++ backend takes a block list; wrap the single-window matrix R as one block.
   result <- sdprRcpp(
-    bhatR = bhat, LD = LD, n = as.integer(n),
+    bhatR = bhat, LD = list(blk1 = R), n = as.integer(n),
     perVariantSampleSize = perVariantSampleSize, array = array,
     a = a, c = c, M = as.integer(M),
     a0k = a0k, b0k = b0k,
@@ -250,7 +228,7 @@ sdpr <- function(bhat, LD, n, perVariantSampleSize = NULL, array = NULL, a = 0.1
 #' @return A numeric vector of the posterior SNP coefficients.
 #' @export
 sdprWeights <- function(stat, LD, ...) {
-  model <- sdpr(bhat = stat$b, LD = list(blk1 = LD), n = median(stat$n), ...)
+  model <- sdpr(bhat = stat$b, R = LD, n = median(stat$n), ...)
 
   return(model$betaEst)
 }
@@ -294,23 +272,29 @@ mrmashWeights <- function(mrmashFit = NULL, X = NULL, Y = NULL,
     mrmashFit <- mrmashWrapper(X, Y, ...)
   }
   out <- mr.mashr::coef.mr.mash(mrmashFit)[-1, ]
-  if (isTRUE(retainFit)) {
-    fitDetail <- match.arg(fitDetail)
-    # Reconstruction inputs for the mvSuSiE data-driven prior (see the
-    # mvSuSiE-prior-from-mr.mash note): the original matrices (required for
-    # bit-identical results -- rescaleCovW0(w0) collapses the expanded weights
-    # back onto them), w0, and V. mu1 is already returned as `out`, so "slim"
-    # does not duplicate it; "full" additionally keeps the whole fit.
-    fitList <- list(
-      dataDrivenPriorMatrices = dotArgs$dataDrivenPriorMatrices,
-      w0 = mrmashFit$w0,
-      V  = mrmashFit$V)
-    if (fitDetail == "full") fitList$fit <- mrmashFit
-    attr(out, "fit") <- fitList
-  }
-  out
+  # mu1 (= out) is already the returned weights; the payload carries only the
+  # mvSuSiE data-driven-prior reconstruction inputs (w0, V, and the raw prior
+  # matrices), plus the whole fit when fitDetail = "full".
+  .mrmashAttachFit(out, mrmashFit, dotArgs$dataDrivenPriorMatrices,
+                   retainFit, fitDetail)
 }
 
+
+# Attach the mvSuSiE-prior reconstruction payload as the "fit" attribute,
+# shared by mrmashWeights (individual) and mrmashRssWeights (summary stats):
+# the data-driven prior matrices + fitted w0 + V, and -- when fitDetail =
+# "full" -- the whole fit. The coefficients are already the returned `weights`,
+# so mu1 is not duplicated. Returns `weights` unchanged unless retainFit is TRUE.
+.mrmashAttachFit <- function(weights, fit, dataDrivenPriorMatrices,
+                             retainFit, fitDetail = c("slim", "full")) {
+  if (!isTRUE(retainFit)) return(weights)
+  fitDetail <- match.arg(fitDetail)
+  fitList <- list(dataDrivenPriorMatrices = dataDrivenPriorMatrices,
+                  w0 = fit$w0, V = fit$V)
+  if (fitDetail == "full") fitList$fit <- fit
+  attr(weights, "fit") <- fitList
+  weights
+}
 
 #' Compute mr.mash-RSS TWAS weights from summary statistics
 #'
@@ -416,19 +400,8 @@ mrmashRssWeights <- function(stat, LD, mrmashRssFit = NULL,
   }
   # coef.mr.mash.rss returns nrow(Bhat) rows (no intercept). Do not strip.
   weights <- mr.mashr::coef.mr.mash.rss(mrmashRssFit)
-  if (retainFit) {
-    fitDetail <- match.arg(fitDetail)
-    # Mirror mrmashWeights(): the slim payload carries only the mvSuSiE-prior
-    # reconstruction inputs (the coefficients are already `weights`, so mu1 is
-    # not duplicated); "full" additionally keeps the whole mr.mash.rss fit.
-    fitList <- list(
-      dataDrivenPriorMatrices = dataDrivenPriorMatrices,
-      w0 = mrmashRssFit$w0,
-      V  = mrmashRssFit$V)
-    if (fitDetail == "full") fitList$fit <- mrmashRssFit
-    attr(weights, "fit") <- fitList
-  }
-  weights
+  .mrmashAttachFit(weights, mrmashRssFit, dataDrivenPriorMatrices,
+                   retainFit, fitDetail)
 }
 
 
@@ -900,7 +873,7 @@ bayesRWeights <- function(X, y, Z = NULL, ...) {
 #' Genetic Epidemiology 41(6):469-480.
 #'
 #' @param bhat A vector of marginal effect sizes.
-#' @param LD A list of LD blocks, where each element is a matrix representing an LD block.
+#' @param R The LD correlation matrix (a single matrix over the analysed window), as in \code{susieR::susie_rss()}.
 #'   If shrinkage is desired, apply it before passing (e.g., \code{(1-s)*R + s*I}).
 #' @param n Sample size of the GWAS.
 #' @param lambda A vector of L1 penalty values. Default: 20 values from 0.001 to 0.1 on log scale.
@@ -926,41 +899,16 @@ bayesRWeights <- function(X, y, Z = NULL, ...) {
 #'   R[i, i + 1] <- 0.3
 #'   R[i + 1, i] <- 0.3
 #' }
-#' LD <- list(blk1 = R)
-#' out <- lassosumRss(bhat, LD, n)
+#' out <- lassosumRss(bhat, R, n)
 #' @export
-lassosumRss <- function(bhat, LD, n,
+lassosumRss <- function(bhat, R, n,
                         lambda = exp(seq(log(0.0001), log(0.1), length.out = 20)),
                         thr = 1e-4, maxiter = 10000) {
-  if (!is.list(LD)) {
-    stop("Please provide a valid list of LD blocks using 'LD'.")
-  }
-  if (missing(n) || n <= 0) {
-    stop("Please provide a valid sample size using 'n'.")
-  }
-  totalRowsInLd <- sum(sapply(LD, nrow))
-  if (length(bhat) != totalRowsInLd) {
-    stop("The length of 'bhat' must be the same as the sum of the number of rows of all elements in the 'LD' list.")
-  }
-
-  z <- bhat / sqrt(n)
-  order <- order(lambda, decreasing = TRUE)
-  # cpp11 requires exact integer types for int parameters
-  result <- lassosumRssRcpp(zR = z, LD = LD, lambdaR = lambda[order],
-                            thr = thr, maxiter = as.integer(maxiter))
-
-  # Reorder back to original lambda order.
-  # Must use inverse permutation to unsort: if order[i]=j, then
-  # the result at position j in the sorted output goes to position i.
-  invOrder <- order(order)
-  result$beta  <- result$beta[, invOrder, drop = FALSE]
-  result$conv  <- result$conv[invOrder]
-  result$loss  <- result$loss[invOrder]
-  result$fbeta <- result$fbeta[invOrder]
-  result$lambda <- lambda
-  result$nparams <- as.integer(colSums(result$beta != 0))
-  result$betaEst <- as.numeric(result$beta[, which.min(result$fbeta)])
-  result
+  # cpp11 requires exact integer types; the C++ backend takes a block list, so
+  # the single-window matrix R is wrapped as one block here.
+  .rssSolvePath(bhat, R, n, lambda, function(z, lam)
+    lassosumRssRcpp(zR = z, LD = list(blk1 = R), lambdaR = lam,
+                    thr = thr, maxiter = as.integer(maxiter)))
 }
 
 .lassosumCorFromStat <- function(stat, n, p) {
@@ -1016,6 +964,80 @@ lassosumRss <- function(bhat, LD, n,
   )
 }
 
+# Validate the (bhat, R, n) inputs shared by the RSS solvers (lassosumRss /
+# penalizedRss via .rssSolvePath, prsCs, and sdpr). R is a single LD correlation
+# matrix over one cis-window, matching susieR::susie_rss; bhat must match
+# nrow(R). missing() guards turn an omitted R / n into a clear message instead
+# of an "argument is missing" error, and propagate through the public wrappers
+# (verified two levels deep). Method-specific checks -- prsCs's maf length,
+# sdpr's M / perVariantSampleSize / array -- stay in the caller.
+.rssValidateInputs <- function(bhat, R, n) {
+  if (missing(R) || !is.matrix(R)) {
+    stop("Please provide the LD correlation matrix 'R' as a matrix.")
+  }
+  if (missing(n) || n <= 0) {
+    stop("Please provide a valid sample size using 'n'.")
+  }
+  if (length(bhat) != nrow(R)) {
+    stop("The length of 'bhat' must equal the number of rows of 'R'.")
+  }
+  invisible(NULL)
+}
+
+# Validate (bhat, LD, n), run a decreasing-lambda coordinate-descent sweep via
+# `solveFn` (the penalty-specific Rcpp backend), then reorder back to the input
+# lambda order via the inverse permutation and assemble the standard result
+# list. Shared by lassosumRss and penalizedRss, which differ only in which Rcpp
+# solver they pass as `solveFn` (and penalizedRss's per-penalty gamma default).
+.rssSolvePath <- function(bhat, R, n, lambda, solveFn) {
+  .rssValidateInputs(bhat, R, n)
+  z <- bhat / sqrt(n)
+  order <- order(lambda, decreasing = TRUE)
+  result <- solveFn(z, lambda[order])
+  # Reorder back to original lambda order via the inverse permutation.
+  invOrder <- order(order)
+  result$beta   <- result$beta[, invOrder, drop = FALSE]
+  result$conv   <- result$conv[invOrder]
+  result$loss   <- result$loss[invOrder]
+  result$fbeta  <- result$fbeta[invOrder]
+  result$lambda <- lambda
+  result$nparams <- as.integer(colSums(result$beta != 0))
+  result$betaEst <- as.numeric(result$beta[, which.min(result$fbeta)])
+  result
+}
+
+# Shared scaffold for the RSS shrinkage-grid weight functions
+# (lassosumRssWeights / .penalizedRssWeights / l0learnRssWeights). Standardizes
+# the stat -> solverInput conversion, the outer LD-shrinkage grid over `s`, the
+# candidate accumulation, and the ld_quadratic / min_fbeta selection. `fitOne`
+# supplies the per-`s` fit as list(beta, meta); any inner grid (e.g. l0learn's
+# lambda0 sweep) lives inside it. `finalize` stamps the function-specific
+# selection attribute onto the returned coefficient vector.
+.rssShrinkGridWeights <- function(stat, LD, s, fitOne, finalize,
+                                  selection = c("ld_quadratic", "min_fbeta")) {
+  selection <- match.arg(selection)
+  n <- median(stat$n)
+  p <- nrow(LD)
+  corInput <- .lassosumClampCor(.lassosumCorFromStat(stat, n = n, p = p))
+  solverInput <- corInput * sqrt(n)
+  candidateBeta <- NULL
+  candidateMeta <- list()
+  for (sVal in s) {
+    LDs <- (1 - sVal) * LD + sVal * diag(p)
+    one <- fitOne(solverInput, LDs, n, sVal)
+    candidateBeta <- cbind(candidateBeta, one$beta)
+    candidateMeta[[length(candidateMeta) + 1L]] <- one$meta
+  }
+  candidateMeta <- do.call(rbind, candidateMeta)
+  selectorResult <- if (selection == "ld_quadratic") {
+    .lassosumSelectLdQuadratic(candidateBeta, corInput, LD)
+  } else {
+    .lassosumSelectMinFbeta(candidateBeta, candidateMeta)
+  }
+  bestBeta <- as.numeric(selectorResult$beta)
+  finalize(bestBeta, selectorResult, candidateMeta)
+}
+
 #' Extract weights from lassosumRss with shrinkage grid search
 #'
 #' Searches over a grid of shrinkage parameters \code{s} (default:
@@ -1051,40 +1073,23 @@ lassosumRssWeights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
                                selection = c("ld_quadratic", "min_fbeta"),
                                ...) {
   selection <- match.arg(selection)
-  n <- median(stat$n)
-  p <- nrow(LD)
-  corInput <- .lassosumClampCor(.lassosumCorFromStat(stat, n = n, p = p))
-  solverInput <- corInput * sqrt(n)
-  candidateBeta <- NULL
-  candidateMeta <- list()
-
-  for (sVal in s) {
-    LDs <- (1 - sVal) * LD + sVal * diag(p)
-    model <- lassosumRss(bhat = solverInput, LD = list(blk1 = LDs), n = n, ...)
-    candidateBeta <- cbind(candidateBeta, model$beta)
-    candidateMeta[[length(candidateMeta) + 1L]] <- data.frame(
-      s = rep(sVal, length(model$lambda)),
-      lambda = model$lambda,
-      fbeta = model$fbeta,
-      stringsAsFactors = FALSE
-    )
+  dotArgs <- list(...)
+  fitOne <- function(solverInput, LDs, n, sVal) {
+    model <- do.call(lassosumRss,
+                     c(list(bhat = solverInput, R = LDs, n = n),
+                       dotArgs))
+    list(beta = model$beta,
+         meta = data.frame(s = rep(sVal, length(model$lambda)),
+                           lambda = model$lambda, fbeta = model$fbeta,
+                           stringsAsFactors = FALSE))
   }
-  candidateMeta <- do.call(rbind, candidateMeta)
-
-  selectorResult <- if (selection == "ld_quadratic") {
-    .lassosumSelectLdQuadratic(candidateBeta, corInput, LD)
-  } else {
-    .lassosumSelectMinFbeta(candidateBeta, candidateMeta)
+  finalize <- function(bestBeta, sel, meta) {
+    attr(bestBeta, "lassosum_selection") <- c(
+      mode = sel$mode, index = sel$index,
+      s = meta$s[sel$index], lambda = meta$lambda[sel$index])
+    bestBeta
   }
-
-  bestBeta <- as.numeric(selectorResult$beta)
-  attr(bestBeta, "lassosum_selection") <- c(
-    mode = selectorResult$mode,
-    index = selectorResult$index,
-    s = candidateMeta$s[selectorResult$index],
-    lambda = candidateMeta$lambda[selectorResult$index]
-  )
-  bestBeta
+  .rssShrinkGridWeights(stat, LD, s, fitOne, finalize, selection)
 }
 
 #' Penalized Regression on RSS (Summary Statistics) Objective
@@ -1095,8 +1100,8 @@ lassosumRssWeights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
 #' where \eqn{R} is a (possibly pre-shrunk) LD matrix and \eqn{z = \hat\beta / \sqrt{n}}.
 #'
 #' @param bhat Numeric vector of marginal effect estimates (length p).
-#' @param LD A list of LD correlation matrices (one per block), as in
-#'   \code{lassosumRss()}.
+#' @param R The LD correlation matrix (a single matrix over the analysed
+#'   window), as in \code{lassosumRss()}.
 #' @param n GWAS sample size (positive scalar).
 #' @param penalty Penalty type: \code{"lasso"}, \code{"MCP"}, \code{"SCAD"},
 #'   \code{"L0"}, \code{"L0L1"}, or \code{"L0L2"}.
@@ -1134,32 +1139,21 @@ lassosumRssWeights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
 #' bhat <- rnorm(p, sd = 0.1)
 #' R <- diag(p)
 #' # MCP
-#' penalizedRss(bhat, list(blk1 = R), n, penalty = "MCP")
+#' penalizedRss(bhat, R, n, penalty = "MCP")
 #' # SCAD
-#' penalizedRss(bhat, list(blk1 = R), n, penalty = "SCAD")
+#' penalizedRss(bhat, R, n, penalty = "SCAD")
 #' # L0
-#' penalizedRss(bhat, list(blk1 = R), n, penalty = "L0", lambda0 = 0.01,
+#' penalizedRss(bhat, R, n, penalty = "L0", lambda0 = 0.01,
 #'               lambda = c(0))
 #' }
 #' @export
-penalizedRss <- function(bhat, LD, n,
+penalizedRss <- function(bhat, R, n,
                          penalty = c("lasso", "MCP", "SCAD", "L0", "L0L1", "L0L2"),
                          lambda = exp(seq(log(0.0001), log(0.1), length.out = 20)),
                          gamma = NULL, alpha = 1.0,
                          lambda0 = 0, lambda2 = 0,
                          thr = 1e-4, maxiter = 10000, maxSwaps = 100) {
   penalty <- match.arg(penalty)
-  if (!is.list(LD)) {
-    stop("Please provide a valid list of LD blocks using 'LD'.")
-  }
-  if (missing(n) || n <= 0) {
-    stop("Please provide a valid sample size using 'n'.")
-  }
-  totalRowsInLd <- sum(sapply(LD, nrow))
-  if (length(bhat) != totalRowsInLd) {
-    stop("The length of 'bhat' must be the same as the sum of the number of rows of all elements in the 'LD' list.")
-  }
-
   # Default gamma per penalty
   if (is.null(gamma)) {
     gamma <- switch(penalty,
@@ -1167,35 +1161,24 @@ penalizedRss <- function(bhat, LD, n,
                     MCP  = 3.0,
                     0.0)
   }
-
-  z <- bhat / sqrt(n)
-  order <- order(lambda, decreasing = TRUE)
-
-  result <- penalizedRssRcpp(zR = z, LD = LD, lambdaR = lambda[order],
-                             penaltyStr = penalty,
-                             gamma = gamma, alpha = alpha,
-                             lambda0 = lambda0, lambda2 = lambda2,
-                             thr = thr, maxiter = as.integer(maxiter),
-                             maxSwaps = as.integer(maxSwaps))
-
-  # Reorder back to original lambda order
-  invOrder <- order(order)
-  result$beta   <- result$beta[, invOrder, drop = FALSE]
-  result$conv   <- result$conv[invOrder]
-  result$loss   <- result$loss[invOrder]
-  result$fbeta  <- result$fbeta[invOrder]
-  result$lambda <- lambda
-  result$nparams <- as.integer(colSums(result$beta != 0))
-  result$betaEst <- as.numeric(result$beta[, which.min(result$fbeta)])
-  result
+  # C++ backend takes a block list; wrap the single-window matrix R as one block.
+  .rssSolvePath(bhat, R, n, lambda, function(z, lam)
+    penalizedRssRcpp(zR = z, LD = list(blk1 = R), lambdaR = lam,
+                     penaltyStr = penalty,
+                     gamma = gamma, alpha = alpha,
+                     lambda0 = lambda0, lambda2 = lambda2,
+                     thr = thr, maxiter = as.integer(maxiter),
+                     maxSwaps = as.integer(maxSwaps)))
 }
 
 #' RSS Weights Helper for Penalized Methods
 #'
-#' Shared implementation for \code{scadRssWeights()}, \code{mcpRssWeights()},
-#' and \code{l0learnRssWeights()}.  Searches over a shrinkage grid \code{s}
-#' (LD matrix shrinkage \code{(1-s)R + sI}) and selects the best candidate via
-#' LD-quadratic pseudovalidation or minimum penalized objective.
+#' Shared implementation for \code{scadRssWeights()} and \code{mcpRssWeights()}.
+#' (\code{l0learnRssWeights()} uses the lower-level \code{.rssShrinkGridWeights}
+#' scaffold directly, since it sweeps an additional \code{lambda0} path.)
+#' Searches over a shrinkage grid \code{s} (LD matrix shrinkage
+#' \code{(1-s)R + sI}) and selects the best candidate via LD-quadratic
+#' pseudovalidation or minimum penalized objective.
 #'
 #' @param stat,LD,s,selection,penalty,gamma,alpha,lambda0,lambda2,...
 #'   See the public wrappers for details.
@@ -1208,43 +1191,24 @@ penalizedRss <- function(bhat, LD, n,
                                  selection = c("ld_quadratic", "min_fbeta"),
                                  ...) {
   selection <- match.arg(selection)
-  n <- median(stat$n)
-  p <- nrow(LD)
-  corInput <- .lassosumClampCor(.lassosumCorFromStat(stat, n = n, p = p))
-  solverInput <- corInput * sqrt(n)
-  candidateBeta <- NULL
-  candidateMeta <- list()
-
-  for (sVal in s) {
-    LDs <- (1 - sVal) * LD + sVal * diag(p)
-    model <- penalizedRss(bhat = solverInput, LD = list(blk1 = LDs), n = n,
-                          penalty = penalty, gamma = gamma, alpha = alpha,
-                          lambda0 = lambda0, lambda2 = lambda2, ...)
-    candidateBeta <- cbind(candidateBeta, model$beta)
-    candidateMeta[[length(candidateMeta) + 1L]] <- data.frame(
-      s = rep(sVal, length(model$lambda)),
-      lambda = model$lambda,
-      fbeta = model$fbeta,
-      stringsAsFactors = FALSE
-    )
+  dotArgs <- list(...)
+  fitOne <- function(solverInput, LDs, n, sVal) {
+    model <- do.call(penalizedRss,
+                     c(list(bhat = solverInput, R = LDs, n = n,
+                            penalty = penalty, gamma = gamma, alpha = alpha,
+                            lambda0 = lambda0, lambda2 = lambda2), dotArgs))
+    list(beta = model$beta,
+         meta = data.frame(s = rep(sVal, length(model$lambda)),
+                           lambda = model$lambda, fbeta = model$fbeta,
+                           stringsAsFactors = FALSE))
   }
-  candidateMeta <- do.call(rbind, candidateMeta)
-
-  selectorResult <- if (selection == "ld_quadratic") {
-    .lassosumSelectLdQuadratic(candidateBeta, corInput, LD)
-  } else {
-    .lassosumSelectMinFbeta(candidateBeta, candidateMeta)
+  finalize <- function(bestBeta, sel, meta) {
+    attr(bestBeta, "penalized_rss_selection") <- c(
+      mode = sel$mode, index = sel$index, penalty = penalty,
+      s = meta$s[sel$index], lambda = meta$lambda[sel$index])
+    bestBeta
   }
-
-  bestBeta <- as.numeric(selectorResult$beta)
-  attr(bestBeta, "penalized_rss_selection") <- c(
-    mode = selectorResult$mode,
-    index = selectorResult$index,
-    penalty = penalty,
-    s = candidateMeta$s[selectorResult$index],
-    lambda = candidateMeta$lambda[selectorResult$index]
-  )
-  bestBeta
+  .rssShrinkGridWeights(stat, LD, s, fitOne, finalize, selection)
 }
 
 #' Compute SCAD-Penalized Weights from Summary Statistics
@@ -1343,49 +1307,35 @@ l0learnRssWeights <- function(stat, LD,
     }
   }
 
-  n <- median(stat$n)
-  p <- nrow(LD)
-  corInput <- .lassosumClampCor(.lassosumCorFromStat(stat, n = n, p = p))
-  solverInput <- corInput * sqrt(n)
-  candidateBeta <- NULL
-  candidateMeta <- list()
-
-  # Grid search over s and lambda0
-  for (sVal in s) {
-    LDs <- (1 - sVal) * LD + sVal * diag(p)
+  dotArgs <- list(...)
+  # Inner sweep over the lambda0 (L0) path for each shrinkage level; the outer
+  # `s` grid, selection, and bestBeta live in .rssShrinkGridWeights.
+  fitOne <- function(solverInput, LDs, n, sVal) {
+    beta <- NULL
+    meta <- list()
     for (l0Val in lambda0) {
-      model <- penalizedRss(bhat = solverInput, LD = list(blk1 = LDs), n = n,
-                            penalty = penalty, lambda = lambda,
-                            lambda0 = l0Val, lambda2 = lambda2,
-                            maxSwaps = maxSwaps, ...)
-      candidateBeta <- cbind(candidateBeta, model$beta)
-      candidateMeta[[length(candidateMeta) + 1L]] <- data.frame(
+      model <- do.call(penalizedRss,
+                       c(list(bhat = solverInput, R = LDs, n = n,
+                              penalty = penalty, lambda = lambda,
+                              lambda0 = l0Val, lambda2 = lambda2,
+                              maxSwaps = maxSwaps), dotArgs))
+      beta <- cbind(beta, model$beta)
+      meta[[length(meta) + 1L]] <- data.frame(
         s = rep(sVal, length(model$lambda)),
         lambda0 = rep(l0Val, length(model$lambda)),
-        lambda = model$lambda,
-        fbeta = model$fbeta,
-        stringsAsFactors = FALSE
-      )
+        lambda = model$lambda, fbeta = model$fbeta,
+        stringsAsFactors = FALSE)
     }
+    list(beta = beta, meta = do.call(rbind, meta))
   }
-  candidateMeta <- do.call(rbind, candidateMeta)
-
-  selectorResult <- if (selection == "ld_quadratic") {
-    .lassosumSelectLdQuadratic(candidateBeta, corInput, LD)
-  } else {
-    .lassosumSelectMinFbeta(candidateBeta, candidateMeta)
+  finalize <- function(bestBeta, sel, meta) {
+    attr(bestBeta, "penalized_rss_selection") <- c(
+      mode = sel$mode, index = sel$index, penalty = penalty,
+      s = meta$s[sel$index], lambda0 = meta$lambda0[sel$index],
+      lambda = meta$lambda[sel$index])
+    bestBeta
   }
-
-  bestBeta <- as.numeric(selectorResult$beta)
-  attr(bestBeta, "penalized_rss_selection") <- c(
-    mode = selectorResult$mode,
-    index = selectorResult$index,
-    penalty = penalty,
-    s = candidateMeta$s[selectorResult$index],
-    lambda0 = candidateMeta$lambda0[selectorResult$index],
-    lambda = candidateMeta$lambda[selectorResult$index]
-  )
-  bestBeta
+  .rssShrinkGridWeights(stat, LD, s, fitOne, finalize, selection)
 }
 
 #' Compute Weights Using ncvreg with SCAD or MCP Penalty

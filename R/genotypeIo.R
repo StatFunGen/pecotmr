@@ -51,10 +51,8 @@ setMethod("readGenotypes",
 
   snpInfo <- .gdsSnpInfo(path)
 
-  gds <- SNPRelate::snpgdsOpen(path, readonly = TRUE)
-  on.exit(SNPRelate::snpgdsClose(gds))
-  sampleIds <- as.character(gdsfmt::read.gdsn(
-    gdsfmt::index.gdsn(gds, "sample.id")))
+  sampleIds <- .withGds(path, function(gds) as.character(gdsfmt::read.gdsn(
+    gdsfmt::index.gdsn(gds, "sample.id"))))
   nSamples <- length(sampleIds)
 
   new("GenotypeHandle",
@@ -288,7 +286,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
       colData = DataFrame(sampleId = sampleIds, row.names = sampleIds)))
   }
 
-  unifiedChr <- .canonChr(handle@snpInfo$CHR)
+  unifiedChr <- canonChrom(handle@snpInfo$CHR)
   reqChr <- unifiedChr[snpIdx]
   groups <- split(seq_along(snpIdx), reqChr)
 
@@ -325,20 +323,17 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 
 #' @keywords internal
 .extractBlockGds <- function(handle, snpIdx) {
-  gds <- SNPRelate::snpgdsOpen(getPath(handle), readonly = TRUE,
-                                allow.fork = TRUE)
-  on.exit(SNPRelate::snpgdsClose(gds))
-
-  snpIds <- getSnpInfo(handle)$SNP[snpIdx]
-  # Use snpgdsGetGeno for proper non-contiguous SNP selection
-  geno <- SNPRelate::snpgdsGetGeno(gds, snp.id = snpIds,
-                                    with.id = FALSE, verbose = FALSE)
-  if (is.null(geno) || length(geno) == 0) return(NULL)
-
-  # snpgdsGetGeno returns count of the first allele in snp.allele,
-  # which we label A1 in .gdsSnpInfo. No flip needed.
-  storage.mode(geno) <- "double"
-  geno
+  .withGds(getPath(handle), allow.fork = TRUE, fn = function(gds) {
+    snpIds <- getSnpInfo(handle)$SNP[snpIdx]
+    # Use snpgdsGetGeno for proper non-contiguous SNP selection
+    geno <- SNPRelate::snpgdsGetGeno(gds, snp.id = snpIds,
+                                     with.id = FALSE, verbose = FALSE)
+    if (is.null(geno) || length(geno) == 0) return(NULL)
+    # snpgdsGetGeno returns count of the first allele in snp.allele,
+    # which we label A1 in .gdsSnpInfo. No flip needed.
+    storage.mode(geno) <- "double"
+    geno
+  })
 }
 
 #' @keywords internal
@@ -445,20 +440,36 @@ computeBlockLdCor <- function(handle, snpIdx, backend = "internal",
   computeLd(geno, method = method, backend = backend, ...)
 }
 
+# Samples x variants dosage matrix for a genotype block: extract via the
+# GenotypeHandle pipeline and transpose out of the Bioc variants x samples
+# layout. The shared form of the t(assay(extractBlockGenotypes(...))) idiom.
+# @noRd
+.dosageMatrix <- function(handle, snpIdx, meanImpute = TRUE) {
+  t(SummarizedExperiment::assay(
+    extractBlockGenotypes(handle, snpIdx, meanImpute = meanImpute), "dosage"))
+}
+
+# Open a GDS read-only, guarantee it is closed on exit, and return fn(gds).
+# The shared form of the snpgdsOpen(...) + on.exit(snpgdsClose(gds)) idiom
+# used across the GDS readers.
+# @noRd
+.withGds <- function(path, fn, readonly = TRUE, allow.fork = FALSE) {
+  gds <- SNPRelate::snpgdsOpen(path, readonly = readonly, allow.fork = allow.fork)
+  on.exit(SNPRelate::snpgdsClose(gds))
+  fn(gds)
+}
+
 #' @keywords internal
 .computeBlockLdGds <- function(handle, snpIdx) {
-  gds <- SNPRelate::snpgdsOpen(getPath(handle), readonly = TRUE,
-                                allow.fork = TRUE)
-  on.exit(SNPRelate::snpgdsClose(gds))
-
-  snpIds <- getSnpInfo(handle)$SNP[snpIdx]
-  ldMat <- SNPRelate::snpgdsLDMat(
-    gds, snp.id = snpIds, method = "corr",
-    slide = -1, verbose = FALSE
-  )
-  R <- ldMat$LD
-  R[is.na(R)] <- 0
-  R
+  .withGds(getPath(handle), allow.fork = TRUE, fn = function(gds) {
+    snpIds <- getSnpInfo(handle)$SNP[snpIdx]
+    ldMat <- SNPRelate::snpgdsLDMat(
+      gds, snp.id = snpIds, method = "corr",
+      slide = -1, verbose = FALSE)
+    R <- ldMat$LD
+    R[is.na(R)] <- 0
+    R
+  })
 }
 
 # =============================================================================
@@ -512,28 +523,24 @@ computeBlockLdCor <- function(handle, snpIdx, backend = "internal",
 
 #' @keywords internal
 .gdsSnpInfo <- function(gdsPath) {
-  gds <- SNPRelate::snpgdsOpen(gdsPath, readonly = TRUE)
-  on.exit(SNPRelate::snpgdsClose(gds))
-
-  snpId <- gdsfmt::read.gdsn(gdsfmt::index.gdsn(gds, "snp.id"))
-  chr <- gdsfmt::read.gdsn(gdsfmt::index.gdsn(gds, "snp.chromosome"))
-  pos <- gdsfmt::read.gdsn(gdsfmt::index.gdsn(gds, "snp.position"))
-  allele <- gdsfmt::read.gdsn(gdsfmt::index.gdsn(gds, "snp.allele"))
-
-  allelesSplit <- strsplit(allele, "/")
-  # snpgdsGetGeno counts copies of the first allele in snp.allele.
-  # Label the first allele as A1 so dosage = count of A1.
-  a1 <- vapply(allelesSplit, `[`, character(1), 1L)
-  a2 <- vapply(allelesSplit, `[`, character(1), 2L)
-
-  data.frame(
-    SNP = snpId,
-    CHR = as.character(chr),
-    BP = as.integer(pos),
-    A1 = a1,
-    A2 = a2,
-    stringsAsFactors = FALSE
-  )
+  .withGds(gdsPath, function(gds) {
+    snpId <- gdsfmt::read.gdsn(gdsfmt::index.gdsn(gds, "snp.id"))
+    chr <- gdsfmt::read.gdsn(gdsfmt::index.gdsn(gds, "snp.chromosome"))
+    pos <- gdsfmt::read.gdsn(gdsfmt::index.gdsn(gds, "snp.position"))
+    allele <- gdsfmt::read.gdsn(gdsfmt::index.gdsn(gds, "snp.allele"))
+    allelesSplit <- strsplit(allele, "/")
+    # snpgdsGetGeno counts copies of the first allele in snp.allele.
+    # Label the first allele as A1 so dosage = count of A1.
+    a1 <- vapply(allelesSplit, `[`, character(1), 1L)
+    a2 <- vapply(allelesSplit, `[`, character(1), 2L)
+    data.frame(
+      SNP = snpId,
+      CHR = as.character(chr),
+      BP = as.integer(pos),
+      A1 = a1,
+      A2 = a2,
+      stringsAsFactors = FALSE)
+  })
 }
 
 #' @title Detect File Format from Extension
@@ -964,7 +971,7 @@ matchVariantsToKeep <- function(variantInfo, keepVariantsPath) {
     ids <- read_lines(keepVariantsPath)
     keepVariants <- parseVariantId(ids)
   }
-  viChrom <- as.integer(stripChrPrefix(variantInfo$chrom))
+  viChrom <- canonChrom(variantInfo$chrom)
   hasAlleles <- "A1" %in% names(keepVariants) && "A2" %in% names(keepVariants) &&
     !any(is.na(keepVariants$A1)) && !any(is.na(keepVariants$A2))
   if (hasAlleles) {
@@ -1038,9 +1045,8 @@ loadGenotypeRegion <- function(genotype, region = NULL, keepIndel = TRUE,
   }
 
   # --- Extract genotypes (no mean imputation — callers handle missing) ---
-  rse <- extractBlockGenotypes(handle, snpIdx, meanImpute = FALSE)
-  # Convert RSE to samples x variants matrix for pecotmr convention
-  X <- t(assay(rse, "dosage"))
+  # Samples x variants matrix (pecotmr convention); callers handle missing.
+  X <- .dosageMatrix(handle, snpIdx, meanImpute = FALSE)
   variantInfo <- .snpInfoToVariantInfo(
     handleSnpInfo[snpIdx, , drop = FALSE])
 

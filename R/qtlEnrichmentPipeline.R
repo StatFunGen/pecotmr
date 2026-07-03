@@ -88,7 +88,7 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
 
   # Hoist the QTL-side work out of the gwasStudy loop. The variant-name
   # alignment is independent of the GWAS study (all studies share one naming
-  # convention), so the original code re-ran the costly .matchRefPanel pass for
+  # convention), so the original code re-ran the costly harmonizeAlleles pass for
   # every (gwasStudy, qtlTuple) pair. Instead: build each GWAS PIP vector once,
   # derive the union variant-name panel, and align each QTL tuple's regions
   # once against that union (memoised in `alignedByTuple`, reused across every
@@ -112,15 +112,19 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
   # with a warning instead of aborting the whole pipeline -- the behaviour
   # before this optimization, where alignment lived inside qtlEnrichment. An
   # empty union means no GWAS study has usable PIPs, so every study is skipped
-  # before this is ever reached (and the length guard keeps alignVariantNames
-  # from treating an empty reference as a convention mismatch).
+  # before this is ever reached (and the length guard skips relabeling entirely
+  # when the union GWAS panel is empty).
   alignedByTuple <- vector("list", nrow(qtlTuples))
   alignTuple <- function(k) {
     if (!is.null(alignedByTuple[[k]])) return(alignedByTuple[[k]])
     aligned <- lapply(qtlRegionsByTuple[[k]], function(x) {
       if (!is.null(names(x$pip)) && length(unionGwasNames) > 0L) {
-        names(x$pip) <- alignVariantNames(names(x$pip),
-                                          unionGwasNames)$alignedVariants
+        # Relabel matched pip names to the GWAS convention via the shared
+        # matcher (tuple match; unmatched names kept as-is).
+        mm <- matchVariants(names(x$pip), unionGwasNames)
+        nm <- names(x$pip)
+        nm[mm$idxA] <- unionGwasNames[mm$idxB]
+        names(x$pip) <- nm
       }
       x
     })
@@ -335,11 +339,11 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
 #' @param impN Rounds of multiple imputation to draw QTL from, default is 25.
 #' @param numThreads Number of Simultaneous running CPU threads for multiple imputation, default is 1.
 #' @param alignNames Logical; when TRUE (default) QTL pip names are aligned to
-#'   the GWAS variant-naming convention via \code{alignVariantNames}. Set FALSE
+#'   the GWAS variant-naming convention via \code{matchVariants}. Set FALSE
 #'   when the caller has already aligned them (e.g. \code{qtlEnrichmentPipeline}
 #'   aligns each QTL tuple once against the union GWAS panel rather than
 #'   re-aligning per GWAS study); only the cheap per-study unmatched set is then
-#'   recomputed, skipping the costly \code{.matchRefPanel} pass.
+#'   recomputed, skipping the costly \code{harmonizeAlleles} pass.
 #' @return A list of enrichment parameter estimates
 #'
 #' @examples
@@ -423,14 +427,18 @@ qtlEnrichment <- function(gwasPip, susieQtlRegions,
   # unmatched variants. With alignNames = FALSE the caller has already aligned
   # the pip names to the GWAS naming convention (qtlEnrichmentPipeline aligns
   # each QTL tuple once against the union GWAS panel), so the costly
-  # .matchRefPanel pass is skipped and only the per-study unmatched set is
+  # harmonizeAlleles pass is skipped and only the per-study unmatched set is
   # recomputed via a cheap set-membership test.
   if (alignNames) {
     alignedSusieQtlRegions <- lapply(susieQtlRegions, function(x) {
-      alignmentResult <- alignVariantNames(names(x$pip), names(gwasPip))
-      names(x$pip) <- alignmentResult$alignedVariants
-      if (length(alignmentResult$unmatchedIndices) > 0) {
-        x$unmatched_variants <- names(x$pip)[alignmentResult$unmatchedIndices]
+      # Relabel matched pip names to the GWAS convention via the shared matcher.
+      mm <- matchVariants(names(x$pip), names(gwasPip))
+      nm <- names(x$pip)
+      nm[mm$idxA] <- names(gwasPip)[mm$idxB]
+      names(x$pip) <- nm
+      unmatchedIdx <- setdiff(seq_along(x$pip), mm$idxA)
+      if (length(unmatchedIdx) > 0) {
+        x$unmatched_variants <- names(x$pip)[unmatchedIdx]
       }
       x
     })

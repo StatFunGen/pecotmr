@@ -8,6 +8,25 @@
 #' @importFrom magrittr %>%
 NULL
 
+# Internal: two-tailed normal p-value from a signed Z. The single shared helper
+# across the sumstats-QC, TWAS, h2, mash and S-LDSC paths. Uses the numerically
+# stable 2 * pnorm(-|z|) form (1 - pnorm(|z|) underflows earlier at large |z|).
+# Returns NA where z is NA; |z| > ~37 underflows to 0 (R's pnorm limit).
+# @noRd
+.zToPvalue <- function(z) 2 * pnorm(-abs(z))
+
+# Derive effect size + standard error from a signed Z, allele frequency (maf),
+# and sample size (n) for a standardized phenotype, using the model-exact
+# relationship  se = 1 / sqrt(2*maf*(1-maf)*(n + z^2)),  beta = z * se. The
+# (n + z^2) term accounts for the residual-variance reduction from the SNP's own
+# effect (residual = n/(n + z^2)); dropping z^2 is the weak-effect limit. Shared
+# by the RAISS imputation (summaryStatsQc) and the CIP MR helpers.
+# @noRd
+.zToBetaSe <- function(z, maf, n) {
+  se <- 1 / sqrt(2 * maf * (1 - maf) * (n + z * z))
+  list(beta = z * se, se = se)
+}
+
 #' @export
 waldTestPval <- function(beta, se, n) {
   # Calculate the t statistic

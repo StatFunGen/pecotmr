@@ -6,7 +6,7 @@
 \usage{
 sdpr(
   bhat,
-  LD,
+  R,
   n,
   perVariantSampleSize = NULL,
   array = NULL,
@@ -27,7 +27,7 @@ sdpr(
 \arguments{
 \item{bhat}{A vector of marginal beta values for each SNP.}
 
-\item{LD}{A list of LD matrices, where each matrix corresponds to a subset of SNPs.}
+\item{R}{The LD correlation matrix (a single matrix over the analysed window).}
 
 \item{n}{The total sample size of the GWAS.}
 
@@ -110,8 +110,7 @@ var_y <- var(y)
 sigmasq_init <- 1.5
 
 # Run SDPR
-LD <- list(blk1 = R.hat)
-out <- sdpr(b.hat, LD, n)
+out <- sdpr(b.hat, R.hat, n)
 # In sample prediction correlations
 cor(X \%*\% out$betaEst, y) #
 

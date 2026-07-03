@@ -460,7 +460,7 @@ test_that(".ctwasBuildWeights: standardized weights bypass variance scaling", {
 })
 
 # Build an LD-panel fixture with realistic chr:pos:A2:A1 variant IDs so
-# `.ctwasHarmonizeWeights` (which calls parseVariantId + .matchRefPanel)
+# `.ctwasHarmonizeWeights` (which calls parseVariantId + harmonizeAlleles)
 # can do real allele matching.
 .ctp_makeAllelePanel <- function() {
   ids <- c("1:100:C:T", "1:200:G:A", "1:300:A:G", "1:400:T:C")
@@ -1231,8 +1231,8 @@ test_that(".ctwasHarmonizeWeights: returns NULL when there is nothing to parse",
     origVids = character(0), origW = numeric(0), refVariants = refVariants))
 })
 
-test_that(".ctwasHarmonizeWeights: returns NULL when .matchRefPanel fails", {
-  local_mocked_bindings(.matchRefPanel = function(...) NULL,
+test_that(".ctwasHarmonizeWeights: returns NULL when harmonizeAlleles fails", {
+  local_mocked_bindings(harmonizeAlleles = function(...) NULL,
                         .package = "pecotmr")
   panel <- .ctp_makeAllelePanel()
   refVariants <- data.frame(

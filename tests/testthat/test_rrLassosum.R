@@ -1,20 +1,20 @@
 context("regularized_regression - lassosumRss")
 
 # ---- lassosumRss ----
-test_that("lassosumRss errors on invalid LD input", {
-  expect_error(lassosumRss(bhat = rnorm(5), LD = "not_a_list", n = 100),
-               "valid list of LD blocks")
+test_that("lassosumRss errors on non-matrix R input", {
+  expect_error(lassosumRss(bhat = rnorm(5), R = "not_a_matrix", n = 100),
+               "as a matrix")
 })
 
 test_that("lassosumRss errors on non-positive sample size", {
-  expect_error(lassosumRss(bhat = rnorm(5), LD = list(blk1 = diag(5)), n = -1),
+  expect_error(lassosumRss(bhat = rnorm(5), R = diag(5), n = -1),
                "valid sample size")
 })
 
-test_that("lassosumRss errors on mismatched bhat and LD dimensions", {
+test_that("lassosumRss errors on mismatched bhat and R dimensions", {
   expect_error(
-    lassosumRss(bhat = rnorm(10), LD = list(blk1 = diag(5)), n = 100),
-    "same as the sum"
+    lassosumRss(bhat = rnorm(10), R = diag(5), n = 100),
+    "number of rows of 'R'"
   )
 })
 
@@ -28,7 +28,7 @@ test_that("lassosumRss runs successfully with valid input", {
     R[i, i + 1] <- 0.3
     R[i + 1, i] <- 0.3
   }
-  result <- lassosumRss(bhat = bhat, LD = list(blk1 = R), n = n)
+  result <- lassosumRss(bhat = bhat, R = R, n = n)
   expect_type(result, "list")
   expect_true("betaEst" %in% names(result))
   expect_equal(length(result$betaEst), p)
@@ -37,29 +37,13 @@ test_that("lassosumRss runs successfully with valid input", {
   expect_equal(ncol(result$beta), 20)
 })
 
-test_that("lassosumRss accepts multiple LD blocks", {
-  set.seed(42)
-  p1 <- 5
-  p2 <- 5
-  p <- p1 + p2
-  n <- 100
-  bhat <- rnorm(p, sd = 0.1)
-  R1 <- diag(p1)
-  R2 <- diag(p2)
-  result <- lassosumRss(bhat = bhat, LD = list(blk1 = R1, blk2 = R2), n = n)
-  expect_type(result, "list")
-  expect_true("betaEst" %in% names(result))
-  expect_equal(length(result$betaEst), p)
-  expect_true(all(is.finite(result$betaEst)))
-})
-
 test_that("lassosumRss with large lambda gives all-zero betas", {
   set.seed(42)
   p <- 10
   n <- 100
   bhat <- rnorm(p, sd = 0.1)
   R <- diag(p)
-  result <- lassosumRss(bhat = bhat, LD = list(blk1 = R), n = n,
+  result <- lassosumRss(bhat = bhat, R = R, n = n,
                          lambda = c(100))
   expect_true(all(result$betaEst == 0))
 })
@@ -78,7 +62,7 @@ test_that("lassosumRssWeights calls lassosumRss and returns betaEst", {
   stat <- list(b = bhat, n = rep(n, p))
   expected <- seq_len(p) * 0.02
   local_mocked_bindings(
-    lassosumRss = function(bhat, LD, n, ...) {
+    lassosumRss = function(bhat, R, n, ...) {
       list(
         beta = cbind(rep(0, length(bhat)), expected),
         lambda = c(0.05, 0.01),
@@ -103,7 +87,7 @@ test_that("lassosumRssWeights clamps correlation input before scaling", {
   stat <- list(b = bhat, n = rep(n, p))
   captured <- NULL
   local_mocked_bindings(
-    lassosumRss = function(bhat, LD, n, ...) {
+    lassosumRss = function(bhat, R, n, ...) {
       captured <<- bhat
       list(
         beta = matrix(0, nrow = length(bhat), ncol = 2),

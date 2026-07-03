@@ -304,7 +304,7 @@ fitMashContrast <- function(index, origMean, posteriorMean, posteriorVcov,
   contrastDiff <- drop(t(contrastDesign) %*% pm)
   contrastVcov <- t(contrastDesign) %*% pv %*% contrastDesign
   contrastSe <- sqrt(diag(contrastVcov))
-  contrastP <- 2 * (1 - pnorm(abs(contrastDiff) / contrastSe))
+  contrastP <- .zToPvalue(contrastDiff / contrastSe)
 
   # Build output data.frame
   cnames <- colnames(contrastDesign)
@@ -477,7 +477,7 @@ metaAnalysisPerCell <- function(effectSizes, seValues,
           cell = cell,
           condition = cellConditions[i],
           meta_pvalue = if (length(es) == 1) {
-            2 * pnorm(abs(es / se), lower.tail = FALSE)
+            .zToPvalue(es / se)
           } else NA_real_,
           meta_effect = if (length(es) == 1) es else NA_real_,
           meta_se = if (length(es) == 1) se else NA_real_,
@@ -492,7 +492,7 @@ metaAnalysisPerCell <- function(effectSizes, seValues,
       results[[length(results) + 1]] <- tibble(
         cell = cell,
         condition = cellConditions[i],
-        meta_pvalue = 2 * pnorm(abs(z), lower.tail = FALSE),
+        meta_pvalue = .zToPvalue(z),
         meta_effect = ma$mean,
         meta_se = ma$se,
         tau2 = ma$tau2,

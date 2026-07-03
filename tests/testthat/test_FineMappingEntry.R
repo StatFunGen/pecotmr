@@ -106,6 +106,17 @@ test_that("adjustPips errors when the intersection is empty", {
 })
 
 
+test_that("adjustPips tolerates a chr-prefix difference between entry and keepVariants", {
+  vids <- paste0("chr1:", 1:6, ":A:G")
+  entry <- .makeAdjustEntry(vids)
+  keep <- paste0("1:", 2:5, ":A:G")            # same variants, no "chr" prefix
+  adj <- adjustPips(entry, keep)
+  expect_s4_class(adj, "FineMappingEntry")
+  expect_equal(adj@variantIds, vids[2:5])      # entry keeps its own labels
+  expect_equal(ncol(adj@susieFit$lbf_variable), 4)
+})
+
+
 test_that("adjustPips on a FineMappingResultBase collection renormalizes each entry", {
   vidsA <- paste0("chr1:", 1:6, ":A:G")
   vidsB <- paste0("chr1:", 3:8, ":A:G")

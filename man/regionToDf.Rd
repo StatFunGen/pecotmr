@@ -10,5 +10,7 @@ regionToDf(ldRegionId, colnames = c("chrom", "start", "end"))
 \item{ldRegionId}{A string of region in the format of chrom_start_end.}
 }
 \description{
-Utility function to convert LD region_ids to `region of interest` dataframe
+The first field is treated as the chromosome and kept as a normalized string
+(via \code{canonChrom}) so X/Y/MT survive; the remaining fields are genomic
+positions and are returned as integers.
 }

@@ -78,8 +78,8 @@ setClass("QtlDataset",
             traitToRange[[tid]] <- this
           } else {
             if (!isTRUE(all.equal(
-                  as.character(GenomicRanges::seqnames(prev)),
-                  as.character(GenomicRanges::seqnames(this))
+                  canonChrom(GenomicRanges::seqnames(prev)),
+                  canonChrom(GenomicRanges::seqnames(this))
                 )) ||
                 GenomicRanges::start(prev) != GenomicRanges::start(this) ||
                 GenomicRanges::end(prev) != GenomicRanges::end(this)) {
@@ -267,10 +267,9 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
     return(seq_len(nrow(handle@snpInfo)))
   }
   snpInfo <- handle@snpInfo
-  siChr <- sub("^chr", "", as.character(snpInfo$CHR), ignore.case = TRUE)
+  siChr <- canonChrom(snpInfo$CHR)
   bp <- as.integer(snpInfo$BP)
-  rChr   <- sub("^chr", "", as.character(GenomicRanges::seqnames(region)),
-               ignore.case = TRUE)
+  rChr   <- canonChrom(GenomicRanges::seqnames(region))
   rStart <- GenomicRanges::start(region)
   rEnd   <- GenomicRanges::end(region)
   idx <- integer(0)
@@ -323,7 +322,11 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
   # extract dosage we will immediately drop.
   if (length(x@keepVariants) > 0L) {
     snpAll <- as.character(x@genotypes@snpInfo$SNP[snpIdx])
-    keepMask <- snpAll %in% x@keepVariants
+    # Match by (chrom, pos, allele) so user-supplied keepVariants reconcile with
+    # the genotype handle's ids across chr-prefix / separator differences.
+    km <- matchVariants(snpAll, as.character(x@keepVariants))
+    keepMask <- logical(length(snpAll))
+    keepMask[km$idxA] <- TRUE
     snpIdx <- snpIdx[keepMask]
     if (length(snpIdx) == 0L) {
       return(list(
@@ -358,10 +361,8 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
     }
   }
 
-  block <- extractBlockGenotypes(x@genotypes, snpIdx, meanImpute = FALSE)
-  # `block` is variants x samples (Bioc convention); transpose to
-  # samples x variants for analysis-style operations.
-  dosage <- t(SummarizedExperiment::assay(block, "dosage"))
+  # samples x variants dosage for analysis-style operations.
+  dosage <- .dosageMatrix(x@genotypes, snpIdx, meanImpute = FALSE)
 
   # Resolve the requested sample set: keepSamples (panel-level) intersected
   # with the per-call samples arg, then intersected with the panel sample IDs.

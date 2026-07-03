@@ -1378,72 +1378,20 @@ setMethod("twasWeightsPipeline", "MultiStudyQtlDataset",
       }
     }
 
-    qtlDatasets <- getQtlDatasets(data)
-    sumStats <- getSumStats(data)
-
-    out <- NULL
-    embeddedLd <- NULL
-    for (qdName in names(qtlDatasets)) {
-      qd <- qtlDatasets[[qdName]]
-      res <- twasWeightsPipeline(
-        data               = qd,
-        methods            = methods,
-        contexts           = contexts,
-        traitId            = traitId,
-        region             = region,
-        cisWindow          = cisWindow,
-        jointRegions       = jointRegions,
-        jointSpecification = NULL,
-        fineMappingResult  = fineMappingResult,
-        twasWeights        = twasWeights,
-        naAction           = naAction,
-        verbose            = verbose,
-        ...)
-      out <- if (is.null(out)) res
-             else .rbindTwasWeights(out, res, ldSketch = NULL)
-    }
-
-    if (!is.null(sumStats)) {
-      ssRes <- twasWeightsPipeline(
-        data               = sumStats,
-        methods            = methods,
-        contexts           = contexts,
-        traitId            = traitId,
-        jointSpecification = NULL,
-        fineMappingResult  = fineMappingResult,
-        twasWeights        = twasWeights,
-        verbose            = verbose,
-        ...)
-      embeddedLd <- getLdSketch(ssRes)
-      out <- if (is.null(out)) ssRes
-             else .rbindTwasWeights(out, ssRes, ldSketch = embeddedLd)
-    }
-
-    perTupleResult <- if (!is.null(out)) {
-      # ldSketch: NULL when all studies are individual-level; the embedded
-      # sumStats's ldSketch otherwise.
-      TwasWeights(
-        study         = as.character(out$study),
-        context       = as.character(out$context),
-        trait         = as.character(out$trait),
-        method        = as.character(out$method),
-        entry         = as.list(out$entry),
-        jointStudies  = if ("jointStudies"  %in% names(out))
-                          as.character(out$jointStudies)  else NULL,
-        jointContexts = if ("jointContexts" %in% names(out))
-                          as.character(out$jointContexts) else NULL,
-        jointTraits   = if ("jointTraits"   %in% names(out))
-                          as.character(out$jointTraits)   else NULL,
-        ldSketch      = embeddedLd)
-    } else NULL
-
-    if (is.null(jointResult)) {
-      if (is.null(perTupleResult))
-        stop("twasWeightsPipeline(MultiStudyQtlDataset): no entries produced weights.")
-      return(perTupleResult)
-    }
-    if (is.null(perTupleResult)) return(jointResult)
-    .rbindTwasWeights(perTupleResult, jointResult, ldSketch = embeddedLd)
+    dotArgs <- list(...)
+    perStudyFn <- function(qd) do.call(twasWeightsPipeline, c(list(
+      data = qd, methods = methods, contexts = contexts, traitId = traitId,
+      region = region, cisWindow = cisWindow, jointRegions = jointRegions,
+      jointSpecification = NULL, fineMappingResult = fineMappingResult,
+      twasWeights = twasWeights, naAction = naAction, verbose = verbose),
+      dotArgs))
+    sumStatsFn <- function(ss) do.call(twasWeightsPipeline, c(list(
+      data = ss, methods = methods, contexts = contexts, traitId = traitId,
+      jointSpecification = NULL, fineMappingResult = fineMappingResult,
+      twasWeights = twasWeights, verbose = verbose), dotArgs))
+    .multiStudyPipelineDriver(
+      data, jointResult, perStudyFn, sumStatsFn,
+      .rbindTwasWeights, TwasWeights, "twasWeightsPipeline", noun = "weights")
   })
 
 

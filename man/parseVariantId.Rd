@@ -11,14 +11,17 @@ parseVariantId(ids)
 "chrom", "pos", and allele columns (A2/A1 or ref/alt or any 4-column layout).}
 }
 \value{
-A data.frame with columns "chrom" (integer), "pos" (integer), "A2"
-  (character), "A1" (character). The detected convention is stored as
+A data.frame with columns "chrom" (character, normalized), "pos"
+  (integer), "A2" (character), "A1" (character). The detected convention is
+  stored as
   \code{attr(result, "convention")}.
 }
 \description{
 Converts variant IDs from any supported string format or data.frame into a
-standardized data.frame with integer chrom, integer pos, and character allele
-columns (A2, A1). Supports colon-separated ("chr1:100:A:G"), underscore-separated
+standardized data.frame with a normalized character chrom, integer pos, and
+character allele columns (A2, A1). The chrom is canonicalized (chr stripped,
+uppercased, 23 -> X / 24 -> Y / M -> MT) but kept as a string so X/Y/MT
+survive. Supports colon-separated ("chr1:100:A:G"), underscore-separated
 ("1_100_A_G"), with or without "chr" prefix, and with optional build suffix
 (":b38" or "_b38"). The detected input convention is stored as an attribute.
 }

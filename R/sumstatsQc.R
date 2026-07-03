@@ -5,7 +5,7 @@
 # top-level entry point is `summaryStatsQc()` (below), which orchestrates
 # the individual passes:
 #
-#   * Allele harmonization (matchRefPanel / alignVariantNames)
+#   * Allele harmonization (harmonizeAlleles, in R/variantId.R)
 #   * RAISS sumstats imputation (fills variants present on the LD panel
 #     but missing from sumstats)
 #   * SLALoM (single-causal-variant ABF outlier detection)
@@ -21,343 +21,10 @@
 #' @importFrom S4Vectors mcols
 NULL
 
-#' Match target data alleles against a reference panel
-#'
-#' Match by ("chrom", "A1", "A2" and "pos"), accounting for possible
-#' strand flips and major/minor allele flips (opposite effects and zscores).
-#' Flips specified columns when alleles are swapped relative to the reference.
-#'
-#' @param targetData A data frame with columns "chrom", "pos", "A2", "A1" (and optionally other columns like "beta" or "z"),
-#'   or a vector of strings in the format of "chr:pos:A2:A1"/"chr:pos_A2_A1". Can be automatically converted to a data frame if a vector.
-#' @param refVariants A data frame with columns "chrom", "pos", "A2", "A1" or strings in the format of "chr:pos:A2:A1"/"chr:pos_A2_A1".
-#' @param colToFlip The name of the column in targetData where flips are to be applied.
-#'   On an allele swap these columns are sign-flipped (multiplied by -1), the
-#'   correct operation for signed quantities like \code{beta} and \code{z}.
-#' @param colToComplement Names of columns in targetData to complement
-#'   (\code{1 - x}) on an allele swap, the correct operation for an
-#'   effect-allele frequency like \code{af}. Default \code{character()} does no
-#'   complementing, so non-RSS callers are unchanged. Distinct from
-#'   \code{colToFlip}: frequencies are complemented, signed effects are
-#'   sign-flipped.
-#' @param matchMinProp Minimum proportion of variants in the smallest data
-#'   to be matched, otherwise stops with an error. Default is 20%.
-#' @param removeDups Whether to remove duplicates, default is TRUE.
-#' @param removeIndels Whether to remove INDELs, default is FALSE.
-#' @param flip Whether the alleles must be flipped: A <--> T & C <--> G, in which case
-#'   corresponding `colToFlip` are multiplied by -1. Default is `TRUE`.
-#' @param removeStrandAmbiguous Whether to remove strand SNPs (if any). Default is `TRUE`.
-#' @param flipStrand Whether to output the variants after strand flip. Default is `FALSE`.
-#' @param removeUnmatched Whether to remove unmatched variants. Default is `TRUE`.
-#' @return An \code{AlleleQcResult} S4 object. Use
-#'   \code{$harmonizedData} to recover the post-QC variant
-#'   data.frame and \code{$qcSummary} to inspect the per-variant
-#'   merge/flip/strand diagnostics.
-#' @importFrom magrittr %>%
-#' @importFrom dplyr mutate inner_join filter pull select everything row_number if_else any_of all_of rename
-#' @importFrom vctrs vec_duplicate_detect
-#' @importFrom tidyr separate
-#' @keywords internal
-#' @noRd
-#' @details
-#' Pure panel-vs-sumstats allele harmonization: match by (chrom, pos),
-#' detect A1/A2 swap, sign-flip \code{colToFlip} columns and complement
-#' \code{colToComplement} columns on swap. Variant-allele filters
-#' (indels, strand-ambiguous, duplicates) are applied here directly when
-#' the corresponding \code{removeIndels} / \code{removeStrandAmbiguous} /
-#' \code{removeDups} flags are set; MAF / INFO / N column-numeric filters
-#' run in \code{.applyContentFilters()} before this function.
-.matchRefPanel <- function(targetData, refVariants, colToFlip = NULL,
-                           matchMinProp = 0.2, flipStrand = FALSE,
-                           removeUnmatched = TRUE,
-                           removeIndels = FALSE,
-                           removeStrandAmbiguous = TRUE,
-                           removeDups = FALSE,
-                           colToComplement = character(), ...) {
-  strandFlip <- function(ref) chartr("ATCG", "TAGC", ref)
-
-  sanitizeNames <- function(df) {
-    nm <- colnames(df)
-    if (is.null(nm)) nm <- rep("unnamed", ncol(df))
-    emptyIdx <- is.na(nm) | nm == ""
-    if (any(emptyIdx))
-      nm[emptyIdx] <- paste0("unnamed_", seq_len(sum(emptyIdx)))
-    colnames(df) <- make.unique(nm, sep = "_")
-    df
-  }
-
-  if (is.data.frame(targetData)) {
-    if (ncol(targetData) > 4 &&
-        all(c("chrom", "pos", "A2", "A1") %in% names(targetData))) {
-      variantCols <- c("chrom", "pos", "A2", "A1")
-      variantDf <- targetData %>% select(all_of(variantCols))
-      otherCols <- targetData %>% select(-all_of(variantCols))
-      targetData <- cbind(variantIdToDf(variantDf), otherCols)
-    } else {
-      targetData <- variantIdToDf(targetData)
-    }
-  } else {
-    targetData <- variantIdToDf(targetData)
-  }
-  refVariants <- variantIdToDf(refVariants)
-
-  # Strip merge-conflicting columns; keep target A1/A2. `variant_id` is also
-  # stripped from `refVariants` because the post-harmonization variant_id is
-  # rebuilt from the QC'd alleles further down (`variants_id_qced`), and
-  # leaving the input variant_id on either side causes the final rename to
-  # collide on duplicate names.
-  columnsToRemove <- c("chromosome", "position", "ref", "alt", "variant_id")
-  if (any(columnsToRemove %in% colnames(targetData)))
-    targetData <- select(targetData, -any_of(columnsToRemove))
-  if ("variant_id" %in% colnames(refVariants))
-    refVariants <- select(refVariants, -any_of("variant_id"))
-
-  matchResult <- inner_join(targetData, refVariants,
-                            by = c("chrom", "pos"),
-                            suffix = c(".target", ".ref")) %>%
-                 as.data.frame() %>%
-                 sanitizeNames()
-
-  if (nrow(matchResult) == 0) {
-    warning("No matching variants found between target data and reference variants.")
-    emptyOut <- list(harmonizedData = matchResult, qcSummary = matchResult)
-    attr(emptyOut, "qcCounts") <- list(
-      considered = 0L, signFlip = 0L, strandFlip = 0L, kept = 0L,
-      dropped = 0L, droppedIndel = 0L, droppedAmbiguous = 0L,
-      droppedOther = 0L)
-    return(emptyOut)
-  }
-
-  matchResult <- matchResult %>%
-    mutate(variants_id_original = formatVariantId(chrom, pos, A2.target, A1.target),
-           variants_id_qced     = formatVariantId(chrom, pos, A2.ref, A1.ref)) %>%
-    mutate(across(c(A1.target, A2.target, A1.ref, A2.ref), toupper)) %>%
-    mutate(flip1.ref = strandFlip(A1.ref),
-           flip2.ref = strandFlip(A2.ref)) %>%
-    # AT / CG pairs cannot be distinguished from strand-flip without external
-    # context; the keep rule below relies on this flag as a safety guard for
-    # callers that may not have removed strand-ambiguous variants upstream.
-    mutate(strand_unambiguous = if_else(
-      (A1.target == "A" & A2.target == "T") |
-      (A1.target == "T" & A2.target == "A") |
-      (A1.target == "C" & A2.target == "G") |
-      (A1.target == "G" & A2.target == "C"),
-      FALSE, TRUE)) %>%
-    mutate(exact_match = A1.target == A1.ref & A2.target == A2.ref) %>%
-    mutate(sign_flip   = ((A1.target == A2.ref & A2.target == A1.ref) |
-                         (A1.target == flip2.ref & A2.target == flip1.ref)) &
-                        (A1.target != A1.ref & A2.target != A2.ref)) %>%
-    mutate(strand_flip = ((A1.target == flip1.ref & A2.target == flip2.ref) |
-                         (A1.target == flip2.ref & A2.target == flip1.ref)) &
-                        (A1.target != A1.ref & A2.target != A2.ref)) %>%
-    # INDEL detection: explicit "I"/"D" notation, or any allele wider than 1bp.
-    mutate(INDEL = (A2.target == "I" | A2.target == "D" |
-                   nchar(A2.target) > 1L | nchar(A1.target) > 1L)) %>%
-    # ID_match: an indel encoded as I/D on the target side matches an indel
-    # on the reference side (where the reference uses multi-base alleles).
-    mutate(ID_match = ((A2.target == "D" | A2.target == "I") &
-                      (nchar(A1.ref) > 1L | nchar(A2.ref) > 1L)))
-
-  # When removeStrandAmbiguous = FALSE, the A/T - C/G safety guard is
-  # disabled: ambiguous variants are treated as exact/sign-flip cases.
-  if (!removeStrandAmbiguous)
-    matchResult$strand_unambiguous <- TRUE
-
-  # If no strand_flip survives the unambiguous test, the remaining ambiguous
-  # variants can be treated as exact/sign-flip cases rather than dropped.
-  if (!any(matchResult$strand_flip & matchResult$strand_unambiguous))
-    matchResult$strand_unambiguous <- TRUE
-
-  matchResult <- matchResult %>%
-    mutate(keep = if_else(strand_flip,
-                          true  = strand_unambiguous | exact_match | ID_match,
-                          false = exact_match | sign_flip | ID_match))
-
-  if (removeIndels)
-    matchResult <- matchResult %>%
-      mutate(keep = if_else(INDEL, FALSE, keep))
-
-  if (!is.null(colToFlip)) {
-    missing <- setdiff(colToFlip, colnames(matchResult))
-    if (length(missing) > 0L)
-      stop("Column(s) '", paste(missing, collapse = "', '"),
-           "' not found in targetData.")
-    matchResult[matchResult$sign_flip, colToFlip] <-
-      -1 * matchResult[matchResult$sign_flip, colToFlip]
-  }
-  # A frequency tracks the effect allele, so an allele swap takes af -> 1 - af
-  # (not a sign flip). Kept independent of colToFlip so signed columns are
-  # untouched here.
-  if (length(colToComplement) > 0L) {
-    missing <- setdiff(colToComplement, colnames(matchResult))
-    if (length(missing) > 0L)
-      stop("Column(s) '", paste(missing, collapse = "', '"),
-           "' not found in targetData.")
-    matchResult[matchResult$sign_flip, colToComplement] <-
-      1 - matchResult[matchResult$sign_flip, colToComplement]
-  }
-  if (flipStrand) {
-    sIdx <- which(matchResult$strand_flip)
-    matchResult[sIdx, "A1.target"] <- strandFlip(matchResult[sIdx, "A1.target"])
-    matchResult[sIdx, "A2.target"] <- strandFlip(matchResult[sIdx, "A2.target"])
-  }
-
-  # Per-step QC counts (used by .runEntrySummaryStatsQc for "kept N of M
-  # (corrected: sign-flipped A, strand-flipped B; dropped C)" logging).
-  # Computed from the per-variant flags before they are stripped from the
-  # returned data frame so callers reading the data frame are unaffected.
-  qcCounts <- list(
-    considered = nrow(matchResult),
-    signFlip   = sum(matchResult$sign_flip   & matchResult$keep, na.rm = TRUE),
-    strandFlip = sum(matchResult$strand_flip & matchResult$keep, na.rm = TRUE),
-    kept       = sum(matchResult$keep,  na.rm = TRUE),
-    dropped    = sum(!matchResult$keep, na.rm = TRUE))
-  if ("INDEL" %in% colnames(matchResult)) {
-    qcCounts$droppedIndel <- sum(!matchResult$keep & matchResult$INDEL,
-                                  na.rm = TRUE)
-  } else {
-    qcCounts$droppedIndel <- 0L
-  }
-  qcCounts$droppedAmbiguous <- sum(
-    !matchResult$keep & matchResult$strand_flip &
-    !matchResult$strand_unambiguous &
-    if ("INDEL" %in% colnames(matchResult)) !matchResult$INDEL else TRUE,
-    na.rm = TRUE)
-  qcCounts$droppedOther <- qcCounts$dropped - qcCounts$droppedIndel -
-                           qcCounts$droppedAmbiguous
-
-  result <- matchResult[matchResult$keep, , drop = FALSE]
-
-  qcCols <- c("flip1.ref", "flip2.ref", "strand_unambiguous",
-              "exact_match", "sign_flip", "strand_flip", "INDEL",
-              "ID_match", "keep")
-  result <- result %>%
-    select(-any_of(qcCols), -A1.target, -A2.target) %>%
-    rename(A1 = A1.ref, A2 = A2.ref, variant_id = variants_id_qced)
-
-  # removeDups: drop duplicate variant rows (same chrom/pos/qced ID).
-  # Default FALSE keeps the existing strict behavior (error on dups).
-  if (removeDups) {
-    dups <- duplicated(result[, c("chrom", "pos", "variant_id")])
-    if (any(dups)) {
-      warning(sprintf("Removed %d duplicate variant(s), keeping first occurrence.",
-                      sum(dups)))
-      result <- result[!dups, , drop = FALSE]
-    }
-  }
-
-  if (!removeUnmatched) {
-    matchVariant <- result %>% pull(variants_id_original)
-    matchResult <- matchResult %>%
-      select(-any_of(qcCols), -variants_id_original, -A1.target, -A2.target) %>%
-      rename(A1 = A1.ref, A2 = A2.ref, variant_id = variants_id_qced)
-    targetData <- targetData %>%
-      mutate(variant_id = formatVariantId(chrom, pos, A2, A1))
-    if (length(setdiff(targetData %>% pull(variant_id), matchVariant)) > 0L) {
-      unmatchData <- targetData %>% filter(!variant_id %in% matchVariant)
-      result <- rbind(result,
-                      unmatchData %>% mutate(variants_id_original = variant_id))
-      result <- result[match(targetData$variant_id,
-                             result$variants_id_original), ] %>%
-                select(-variants_id_original)
-    }
-  }
-
-  if (nrow(result) < matchMinProp * nrow(refVariants))
-    stop("Not enough variants have been matched.")
-  if (any(duplicated(result$variant_id)))
-    stop("Duplicated variant IDs remain after harmonization; pass ",
-         "removeDups = TRUE or deduplicate upstream before calling ",
-         ".matchRefPanel.")
-
-  out <- list(harmonizedData = result, qcSummary = matchResult)
-  attr(out, "qcCounts") <- qcCounts
-  out
-}
-
-#' Align Variant Names
-#'
-#' This function aligns variant names from two strings containing variant names in the format of
-#' "chr:pos:A1:A2" or "chr:pos_A1_A2". The first string should be the "source" and the second
-#' should be the "reference".
-#'
-#' @param source A character vector of variant names in the format "chr:pos:A2:A1" or "chr:pos_A2_A1".
-#' @param reference A character vector of variant names in the format "chr:pos:A2:A1" or "chr:pos_A2_A1".
-#' @param removeBuildSuffix Whether to strip trailing genome build suffixes like ":b38" or "_b38" before alignment. Default TRUE.
-#'
-#' @return A list with two elements:
-#' - alignedVariants: A character vector of aligned variant names.
-#' - unmatchedIndices: A vector of indices for the variants in the source that could not be matched.
-#'
-#' @examples
-#' source <- c("1:123:A:C", "2:456:G:T", "3:789:C:A")
-#' reference <- c("1:123:A:C", "2:456:T:G", "4:101:G:C")
-#' alignVariantNames(source, reference)
-#'
-#' @export
-alignVariantNames <- function(source, reference, removeIndels = FALSE, removeBuildSuffix = TRUE) {
-  # Optionally strip build suffix like :b38 or _b38 from both sides for robust alignment
-  if (removeBuildSuffix) {
-    source <- gsub("(:|_)b[0-9]+$", "", source)
-    reference <- gsub("(:|_)b[0-9]+$", "", reference)
-  }
-  # Check if source and reference follow the expected pattern
-  sourcePattern <- grepl("^(chr)?[0-9]+[_:][0-9]+[_:][ATCG*]+[_:][ATCG*]+$", source)
-  referencePattern <- grepl("^(chr)?[0-9]+[_:][0-9]+[_:][ATCG*]+[_:][ATCG*]+$", reference)
-
-  if (!all(sourcePattern) && !all(referencePattern)) {
-    warning("Cannot unify variant names because they do not follow the expected variant naming convention chr:pos:A2:A1 or chr:pos_A2_A1.")
-    return(list(alignedVariants = source, unmatchedIndices = integer(0)))
-  }
-
-  if ((!all(sourcePattern) && all(referencePattern)) || (all(sourcePattern) && !all(referencePattern))) {
-    stop("Source and reference have different variant naming conventions. They cannot be aligned.")
-  }
-
-  # Detect reference convention to preserve in output
-  refConvention <- detectVariantConvention(reference)
-
-  sourceDf <- parseVariantId(source)
-  referenceDf <- parseVariantId(reference)
-
-  qcResult <- .matchRefPanel(
-    targetData = sourceDf,
-    refVariants = referenceDf,
-    colToFlip = NULL,
-    matchMinProp = 0,
-    removeDups = FALSE,
-    flipStrand = TRUE,
-    removeIndels = removeIndels,
-    removeStrandAmbiguous = FALSE,
-    removeUnmatched = FALSE
-  )
-
-  alignedDf <- qcResult$harmonizedData
-
-  # When no variants harmonize against the reference, return the source
-  # unchanged with every position flagged as unmatched. paste0() with all
-  # length-0 components otherwise collapses to a single "chr:::"-style
-  # placeholder that callers then assign back to colnames with wrong length.
-  if (nrow(alignedDf) == 0L) {
-    return(list(alignedVariants = source,
-                unmatchedIndices = seq_along(source)))
-  }
-
-  # Format output using reference convention (preserving user's format automatically)
-  alignedVariants <- formatVariantId(
-    alignedDf$chrom, alignedDf$pos, alignedDf$A2, alignedDf$A1,
-    convention = refConvention
-  )
-  names(alignedVariants) <- NULL
-
-  # Normalize reference to the same output format for accurate matching
-  refNormalized <- normalizeVariantId(reference, convention = refConvention)
-  unmatchedIndices <- which(match(alignedVariants, refNormalized, nomatch = 0) == 0)
-
-  list(
-    alignedVariants = alignedVariants,
-    unmatchedIndices = unmatchedIndices
-  )
-}
+# Allele harmonization (harmonizeAlleles) now lives in R/variantId.R, alongside
+# the other variant-matching primitives (parseVariantId, matchVariants). It is
+# package-internal and called from here (.matchAgainstSketch), ctwasPipeline,
+# and the pipeline join sites.
 
 #' Merge variant info from two sources with allele-flip-aware matching
 #'
@@ -2382,7 +2049,7 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   condMean  <- as.numeric(cd$condmean)
   statistic <- as.numeric(cd$z_std_diff)
   residual  <- zScore - condMean
-  pValue    <- 2 * stats::pnorm(-abs(statistic))
+  pValue    <- .zToPvalue(statistic)
   outlier   <- !is.na(pValue) & pValue < pThreshold
   list(
     outlier = outlier,
@@ -2401,7 +2068,7 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
 # =============================================================================
 
 # Convert one entry's GRanges into a flat data.frame with the column shape
-# .matchRefPanel expects (lower-case chrom/pos plus the CapsCase mcols).
+# harmonizeAlleles expects (lower-case chrom/pos plus the CapsCase mcols).
 .entryGrangesToDf <- function(gr) {
   mc <- as.data.frame(S4Vectors::mcols(gr), stringsAsFactors = FALSE)
   out <- data.frame(
@@ -2413,7 +2080,7 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
 }
 
 # Build a refVariants data.frame (chrom, pos, A1, A2, variant_id) from the
-# ldSketch GenotypeHandle's snpInfo so .matchRefPanel can join by (chrom, pos).
+# ldSketch GenotypeHandle's snpInfo so harmonizeAlleles can join by (chrom, pos).
 .refVariantsFromSketch <- function(handle) {
   si <- getSnpInfo(handle)
   chr <- sub("^chr", "", as.character(si$CHR), ignore.case = TRUE)
@@ -2437,7 +2104,7 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
     gr <- GenomicRanges::GRanges()
     return(gr)
   }
-  chr <- paste0("chr", sub("^chr", "", chrRaw, ignore.case = TRUE))
+  chr <- withChrPrefix(chrRaw)
   gr <- GenomicRanges::GRanges(
     seqnames = chr,
     ranges   = IRanges::IRanges(start = as.integer(df$pos), width = 1L))
@@ -2511,11 +2178,8 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
 # Requires Z, MAF, and N to all be present in `df`. No-op if BETA and SE
 # are already there, or if any required column is missing. Returns:
 #   list(df = <data.frame>, audit = NULL | list(nDerived = <int>))
-# Internal: two-tailed normal p-value from a signed Z.
-# Returns NA where z is NA. Values |z| > ~37 underflow to 0 (R's pnorm
-# limit); that's expected behaviour for the regime where p-values are
-# meaningless anyway.
-.zToPvalue <- function(z) 2 * pnorm(-abs(z))
+# .zToPvalue (two-tailed normal p-value from a signed Z) is defined once in
+# pvalCombine.R and shared package-wide.
 
 # Internal: thin SVD with numerical-stability filtering. Drops singular
 # values below `tol * max(d)` and caps the retained rank at `maxRank`.
@@ -2588,9 +2252,9 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   z   <- as.numeric(df$Z)
   maf <- as.numeric(df$MAF)
   n   <- as.numeric(df$N)
-  varTerm <- 2 * maf * (1 - maf) * (n + z * z)
-  se   <- 1 / sqrt(varTerm)
-  beta <- z * se
+  bs   <- .zToBetaSe(z, maf, n)
+  se   <- bs$se
+  beta <- bs$beta
   if (!hasBeta) df$BETA <- beta
   if (!hasSe)   df$SE   <- se
   list(df = df, audit = list(nDerived = sum(!is.na(se))))
@@ -2633,7 +2297,7 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
 }
 
 # Apply the panel-vs-sumstats allele harmonization using the slim
-# .matchRefPanel against the ldSketch's variant info. Threads the
+# harmonizeAlleles against the ldSketch's variant info. Threads the
 # variant-level filters (indels, strand-ambiguous, duplicates) through
 # so the LD-panel-anchored pass handles them in a single sweep.
 .matchAgainstSketch <- function(df, ldSketch, matchMinProp,
@@ -2649,7 +2313,7 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   colToComplement <- intersect("MAF", colnames(df))
   if (!"A1" %in% colnames(df) || !"A2" %in% colnames(df))
     stop("summaryStatsQc: input entry must contain A1 and A2 columns.")
-  res <- .matchRefPanel(
+  res <- harmonizeAlleles(
     targetData            = df,
     refVariants           = refVariants,
     colToFlip             = colToFlip,
@@ -2859,16 +2523,10 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   variantIds <- df$SNP
   if (is.null(variantIds) || any(is.na(variantIds)))
     stop("summaryStatsQc: ldMismatchQc requires SNP column on the entry.")
-  # Extract the panel block for these variants.
-  snpIdx <- match(variantIds, as.character(getSnpInfo(ldSketch)$SNP))
-  if (anyNA(snpIdx))
-    stop("summaryStatsQc: ", sum(is.na(snpIdx)), " variant(s) in entry are ",
-         "absent from the ldSketch panel; harmonize / impute before ",
-         "calling zMismatchQc.")
-  block <- extractBlockGenotypes(ldSketch, snpIdx, meanImpute = TRUE)
-  dosage <- t(SummarizedExperiment::assay(block, "dosage"))
-  colnames(dosage) <- variantIds
-  R <- computeLd(dosage, method = "sample")
+  # Panel LD for the entry variants via the shared LD-from-sketch helper (tuple
+  # match with chr-prefix tolerance, strand-ambiguous variants kept; errors if
+  # any variant is absent from the panel).
+  R <- .ldFromSketch(ldSketch, variantIds, label = "summaryStatsQc: zMismatchQc")
   qc <- ldMismatchQc(zScore = df$Z, R = R, nSample = getNSamples(ldSketch),
                      method = method)
   # slalom / dentist can leave NA in the outlier column when their
@@ -2948,7 +2606,7 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
 
   # 2. Variant-content filters (MAF / INFO / N). Pure column-numeric
   # filters; the indel / strand-ambiguous variant-allele filtering happens
-  # inside .matchAgainstSketch via .matchRefPanel against the LD panel.
+  # inside .matchAgainstSketch via harmonizeAlleles against the LD panel.
   nFiltIn <- nrow(df)
   contentFiltered <- .applyContentFilters(
     df,
@@ -3051,11 +2709,8 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   # 6. Optional kriging prefilter.
   if (isTRUE(opts$alleleFlipKriging) && nrow(df) >= 2L) {
     nKrIn <- nrow(df)
-    snpIdx <- match(df$SNP, as.character(getSnpInfo(ldSketch)$SNP))
-    block <- extractBlockGenotypes(ldSketch, snpIdx, meanImpute = TRUE)
-    dosage <- t(SummarizedExperiment::assay(block, "dosage"))
-    colnames(dosage) <- df$SNP
-    R <- computeLd(dosage, method = "sample")
+    R <- .ldFromSketch(ldSketch, df$SNP,
+                       label = "summaryStatsQc: kriging prefilter")
     nKrig <- if (!is.null(opts$nForPip) && is.finite(opts$nForPip)) opts$nForPip
              else stats::median(as.numeric(df$N), na.rm = TRUE)
     kr <- krigingOutlierQc(df$Z, R, n = nKrig, variantIds = df$SNP)
@@ -3089,6 +2744,10 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   if (isTRUE(opts$impute) && nrow(df) >= 1L) {
     qcCount$imputeBefore <- nrow(df)
     refPanel <- .refVariantsFromSketch(ldSketch)
+    # Canonicalize the panel ids so they align with the QC'd entry ids (df$SNP
+    # is already canonical) across chr-prefix / separator differences -- raiss()
+    # matches knownZscores$variant_id against refPanel$variant_id by string.
+    refPanel$variant_id <- normalizeVariantId(refPanel$variant_id)
     refPanel <- refPanel[order(refPanel$pos), , drop = FALSE]
 
     knownVariantIds <- if (!is.null(df$SNP)) as.character(df$SNP)
@@ -3108,10 +2767,9 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
 
     # Materialize the full panel dosage in panel-order matching refPanel.
     sketchSnpInfo <- getSnpInfo(ldSketch)
-    block <- extractBlockGenotypes(
-      ldSketch, seq_len(nrow(sketchSnpInfo)), meanImpute = TRUE)
-    dosage <- t(SummarizedExperiment::assay(block, "dosage"))
-    colnames(dosage) <- as.character(sketchSnpInfo$SNP)
+    dosage <- .dosageMatrix(ldSketch, seq_len(nrow(sketchSnpInfo)),
+                            meanImpute = TRUE)
+    colnames(dosage) <- normalizeVariantId(as.character(sketchSnpInfo$SNP))
     dosage <- dosage[, refPanel$variant_id, drop = FALSE]
     scaledDosage <- scale(dosage)
     scaledDosage[is.na(scaledDosage)] <- 0
@@ -3223,7 +2881,7 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
 #' numeric), variant-content filters (MAF / INFO / N) via
 #' \code{.applyContentFilters}, optional \code{skipRegion} drop, optional
 #' PIP screen, panel-vs-sumstats allele harmonization against the
-#' \code{ldSketch} via \code{.matchRefPanel} (which handles indels,
+#' \code{ldSketch} via \code{harmonizeAlleles} (which handles indels,
 #' strand-ambiguous variants, sign / strand flips, and duplicate drops in
 #' a single sweep), optional SLALOM/DENTIST LD-mismatch QC, and optional
 #' RAISS imputation. No Bioconductor genome / dbSNP packages required.

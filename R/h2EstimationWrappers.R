@@ -202,7 +202,7 @@ computeBaselineEnrichment <- function(tau, tauSe, tauBlocks,
 
   # P-value from z-score
   enrichmentZ <- enrichment / enrichmentSe
-  enrichmentP <- 2 * pnorm(-abs(enrichmentZ))
+  enrichmentP <- .zToPvalue(enrichmentZ)
 
   data.frame(
     annotation = annotNames,
@@ -679,21 +679,20 @@ lderUnivariate <- function(z, n, eigenRef, annotations = NULL,
     R <- matrix(1, 1, 1)
   }
 
-  candMeta <- getAnnotationMeta(candidateAnnot)
-  enrichmentDf <- data.frame(
-    annotation = candMeta$name,
-    scoreZ = scoreZ,
-    scoreP = 2 * pnorm(-abs(scoreZ)),
-    stringsAsFactors = FALSE
-  )
+  .buildEnrichmentResult(getAnnotationMeta(candidateAnnot), scoreZ, R)
+}
 
-  scoreStatsList <- list(
-    z = scoreZ,
-    R = R,
-    annotationNames = candMeta$name
-  )
-
-  list(enrichment = enrichmentDf, scoreStats = scoreStatsList)
+# Assemble the enrichment result shared by the h2 enrichment helpers: a
+# per-annotation table (z + two-tailed p) plus the scoreStats bundle
+# (z, R, annotation names) consumed downstream.
+.buildEnrichmentResult <- function(candMeta, scoreZ, R) {
+  list(
+    enrichment = data.frame(
+      annotation = candMeta$name,
+      scoreZ = scoreZ,
+      scoreP = .zToPvalue(scoreZ),
+      stringsAsFactors = FALSE),
+    scoreStats = list(z = scoreZ, R = R, annotationNames = candMeta$name))
 }
 
 
@@ -1115,19 +1114,7 @@ gldscUnivariate <- function(z, n, ldRef, annotations = NULL,
     R <- matrix(1, 1, 1)
   }
 
-  candMeta <- getAnnotationMeta(candidate)
-  list(
-    enrichment = data.frame(
-      annotation = candMeta$name,
-      scoreZ = scoreZ,
-      scoreP = 2 * pnorm(-abs(scoreZ)),
-      stringsAsFactors = FALSE
-    ),
-    scoreStats = list(
-      z = scoreZ, R = R,
-      annotationNames = candMeta$name
-    )
-  )
+  .buildEnrichmentResult(getAnnotationMeta(candidate), scoreZ, R)
 }
 
 
@@ -1536,17 +1523,7 @@ hdlUnivariate <- function(z, n, eigenRef, annotations = NULL,
     R <- diag(nCand)
   }
 
-  candMeta <- getAnnotationMeta(candidate)
-  list(
-    enrichment = data.frame(
-      annotation = candMeta$name,
-      scoreZ = scoreZ,
-      scoreP = 2 * pnorm(-abs(scoreZ)),
-      stringsAsFactors = FALSE
-    ),
-    scoreStats = list(z = scoreZ, R = R,
-                       annotationNames = candMeta$name)
-  )
+  .buildEnrichmentResult(getAnnotationMeta(candidate), scoreZ, R)
 }
 
 

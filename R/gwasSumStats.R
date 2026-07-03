@@ -185,27 +185,7 @@ setMethod("getSumStats", signature(x = "GwasSumStats"),
   }
 )
 
-#' @rdname getZ
-#' @export
-setMethod("getZ", "GwasSumStats", function(x, study = NULL) {
-  gr <- getSumStats(x, study = study)
-  mcols(gr)$Z
-})
-
-#' @rdname getN
-#' @export
-setMethod("getN", "GwasSumStats", function(x, study = NULL) {
-  gr <- getSumStats(x, study = study)
-  mcols(gr)$N
-})
-
-#' @rdname getMaf
-#' @export
-setMethod("getMaf", "GwasSumStats", function(x, study = NULL, ...) {
-  gr <- getSumStats(x, study = study)
-  mc <- mcols(gr)
-  if ("MAF" %in% colnames(mc)) mc$MAF else NULL
-})
+# getZ / getN / getMaf / nSnps are provided once by SumStatsBase (AllClasses.R).
 
 #' @rdname getSumstatDf
 #' @export
@@ -225,17 +205,10 @@ setMethod("getSumstatDf", "GwasSumStats",
                                               else study))
   })
 
-#' @rdname nSnps
-#' @export
-setMethod("nSnps", "GwasSumStats", function(x, study = NULL) {
-  gr <- getSumStats(x, study = study)
-  length(gr)
-})
-
 #' @rdname subsetChr
 #' @export
 setMethod("subsetChr", "GwasSumStats", function(x, chr) {
-  chrName <- paste0("chr", sub("^chr", "", as.character(chr)))
+  chrName <- withChrPrefix(chr)
   newEntries <- lapply(seq_len(nrow(x)), function(i) {
     gr <- x$entry[[i]]
     idx <- as.character(seqnames(gr)) == chrName

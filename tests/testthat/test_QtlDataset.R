@@ -1546,6 +1546,28 @@ test_that("QtlDataset: rejects shared traits with inconsistent rowRanges", {
   )
 })
 
+
+test_that("QtlDataset: tolerates chr-prefix-only seqname differences for a shared trait", {
+  se1 <- .sc_makeSe(traits = c("ENSG1"))                  # ENSG1 at chr1:1000-1499
+  # se2 is the SAME locus but with a non-prefixed seqname ("1" vs "chr1");
+  # canonChrom() reconciliation should treat these as the same trait position.
+  rng2 <- GenomicRanges::GRanges(
+    seqnames = "1",
+    ranges = IRanges::IRanges(start = 1000L, width = 500L))
+  names(rng2) <- "ENSG1"
+  expr2 <- matrix(rnorm(10), nrow = 1, ncol = 10,
+                  dimnames = list("ENSG1", paste0("s", 1:10)))
+  cd2 <- S4Vectors::DataFrame(sex = rep(c("M", "F"), 5),
+                              row.names = paste0("s", 1:10))
+  se2 <- SummarizedExperiment::SummarizedExperiment(
+    assays = list(expression = expr2),
+    rowRanges = rng2, colData = cd2)
+  expect_s4_class(
+    QtlDataset(study = "s1", genotypes = .sc_makeGenotypeHandle(),
+               phenotypes = list(brain = se1, liver = se2)),
+    "QtlDataset")
+})
+
 # ===========================================================================
 # MultiStudyQtlDataset
 # ===========================================================================

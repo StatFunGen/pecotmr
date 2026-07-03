@@ -2,7 +2,7 @@
 % Please edit documentation in R/variantId.R
 \name{normalizeVariantId}
 \alias{normalizeVariantId}
-\title{Normalize variant IDs to canonical format}
+\title{Re-format variant IDs to a chosen output convention}
 \usage{
 normalizeVariantId(ids, chrPrefix = TRUE, convention = NULL)
 }
@@ -17,11 +17,20 @@ Ignored if \code{convention} is provided.}
 output format is driven automatically by the detected convention.}
 }
 \value{
-A character vector of normalized variant IDs.
+A character vector of re-formatted variant IDs. Unparseable ids
+  (e.g. rsIDs) are returned unchanged.
 }
 \description{
-One-step convenience function: parses variant IDs in any supported format
-and re-formats them. By default, outputs the canonical format
-(\code{"chr{N}:{pos}:{A2}:{A1}"}). When a \code{convention} object is
-provided, the output preserves the user's original format automatically.
+Output-only convenience: parses variant IDs and re-emits them in a single
+format. By default produces the canonical format
+(\code{"chr{N}:{pos}:{A2}:{A1}"}); pass a \code{convention} to preserve the
+input format instead.
+}
+\details{
+This normalizes only the textual \emph{format} (chr prefix and field
+separators); it does NOT reorder alleles, so it is not a matching/identity
+operation -- two records that differ by a ref/alt swap remain distinct
+strings. For identity, match on the (chrom, pos, ref, alt) tuple via the
+variant matcher; use this only for display, file output, or relabeling for
+name-based downstream consumers.
 }

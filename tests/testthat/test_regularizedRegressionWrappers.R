@@ -470,7 +470,7 @@ test_that("mrmashWeights fits from (X, Y) and returns p x K weights", {
 
 test_that("lassosumRss returns a p x nlambda beta matrix", {
   f <- .rrwStatLd()
-  out <- lassosumRss(f$stat$b, list(blk1 = f$LD), f$n)
+  out <- lassosumRss(f$stat$b, f$LD, f$n)
   expect_equal(nrow(out$beta), f$p)
   expect_equal(ncol(out$beta), length(out$lambda))
   expect_length(out$conv, length(out$lambda))
@@ -479,37 +479,38 @@ test_that("lassosumRss returns a p x nlambda beta matrix", {
 test_that("penalizedRss traces a solution path for MCP / SCAD / L0", {
   f <- .rrwStatLd()
   for (pen in c("MCP", "SCAD")) {
-    out <- penalizedRss(f$stat$b, list(blk1 = f$LD), f$n, penalty = pen)
+    out <- penalizedRss(f$stat$b, f$LD, f$n, penalty = pen)
     expect_equal(nrow(out$beta), f$p)
   }
-  outL0 <- penalizedRss(f$stat$b, list(blk1 = f$LD), f$n,
+  outL0 <- penalizedRss(f$stat$b, f$LD, f$n,
                         penalty = "L0", lambda0 = 0.01, lambda = c(0))
   expect_equal(nrow(outL0$beta), f$p)
 })
 
 test_that("prsCs returns posterior betaEst of length p", {
   f <- .rrwStatLd()
-  out <- prsCs(f$stat$b, list(blk1 = f$LD), f$n, nIter = 100, nBurnin = 20, thin = 1)
+  out <- prsCs(f$stat$b, f$LD, f$n, nIter = 100, nBurnin = 20, thin = 1)
   expect_length(out$betaEst, f$p)
   expect_true(all(is.finite(out$betaEst)))
 })
 
 test_that("sdpr returns betaEst of length p", {
   f <- .rrwStatLd()
-  out <- sdpr(f$stat$b, list(blk1 = f$LD), f$n,
+  out <- sdpr(f$stat$b, f$LD, f$n,
               iter = 100, burn = 20, thin = 1, verbose = FALSE)
   expect_length(out$betaEst, f$p)
 })
 
-test_that("RSS solvers validate their LD-list / sample-size / length inputs", {
+test_that("RSS solvers validate their R-matrix / sample-size / length inputs", {
   f <- .rrwStatLd()
-  expect_error(prsCs(f$stat$b, f$LD, f$n), "list of LD blocks")
-  expect_error(prsCs(f$stat$b, list(blk1 = f$LD), -1), "sample size")
-  expect_error(prsCs(f$stat$b[-1], list(blk1 = f$LD), f$n), "same as the sum")
-  expect_error(sdpr(f$stat$b[-1], list(blk1 = f$LD), f$n), "same as the length")
-  expect_error(sdpr(f$stat$b, list(blk1 = f$LD), f$n, M = 2), "at least 4")
-  expect_error(lassosumRss(f$stat$b, f$LD, f$n), "list of LD blocks")
-  expect_error(penalizedRss(f$stat$b, f$LD, f$n), "list of LD blocks")
+  # A list (the old block-list contract) is now rejected: R must be a matrix.
+  expect_error(prsCs(f$stat$b, list(blk1 = f$LD), f$n), "as a matrix")
+  expect_error(lassosumRss(f$stat$b, list(blk1 = f$LD), f$n), "as a matrix")
+  expect_error(penalizedRss(f$stat$b, list(blk1 = f$LD), f$n), "as a matrix")
+  expect_error(prsCs(f$stat$b, f$LD, -1), "sample size")
+  expect_error(prsCs(f$stat$b[-1], f$LD, f$n), "number of rows of 'R'")
+  expect_error(sdpr(f$stat$b[-1], f$LD, f$n), "number of rows of 'R'")
+  expect_error(sdpr(f$stat$b, f$LD, f$n, M = 2), "at least 4")
 })
 
 # --------------------------- RSS weight wrappers ----------------------------

@@ -781,6 +781,14 @@ test_that("twasWeights: SuSiE-inf is fitted before and initializes ordinary SuSi
   susie_calls <- list()
 
   local_mocked_bindings(
+    susieInfWeights = function(X, y, ...) rep(0, ncol(X)),
+    susieWeights = function(X, y, ...) {
+      rep(0, ncol(X))
+    }
+  )
+  # The two chained SuSiE fits now run through .fmFitSusieIndiv, which calls
+  # susieR::susie, so capture at the susieR namespace.
+  local_mocked_bindings(
     susie = function(...) {
       args <- list(...)
       susie_calls[[length(susie_calls) + 1]] <<- args
@@ -790,10 +798,7 @@ test_that("twasWeights: SuSiE-inf is fitted before and initializes ordinary SuSi
         inf = identical(args$unmappable_effects, "inf")
       )
     },
-    susieInfWeights = function(X, y, ...) rep(0, ncol(X)),
-    susieWeights = function(X, y, ...) {
-      rep(0, ncol(X))
-    }
+    .package = "susieR"
   )
 
   result <- learnTwasWeights(

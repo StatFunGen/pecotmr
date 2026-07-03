@@ -36,7 +36,7 @@ matchRefPanel <- function(targetData, refVariants, ...) {
     msg = paste(
       "matchRefPanel() is deprecated; allele harmonization now runs",
       "inside summaryStatsQc() as part of the SumStats QC pass."))
-  .matchRefPanel(targetData = targetData, refVariants = refVariants, ...)
+  invisible(NULL)
 }
 
 #' @rdname matchRefPanel
@@ -46,7 +46,25 @@ alleleQc <- function(targetData, refVariants, ...) {
     msg = paste(
       "alleleQc() is deprecated; allele harmonization now runs inside",
       "summaryStatsQc() as part of the SumStats QC pass."))
-  .matchRefPanel(targetData = targetData, refVariants = refVariants, ...)
+  invisible(NULL)
+}
+
+#' (Deprecated) Align variant names to a reference convention
+#'
+#' \strong{Deprecated.} Match with \code{\link{matchVariants}} and relabel
+#' directly, e.g. \code{m <- matchVariants(source, reference)} then
+#' \code{source[m$idxA] <- reference[m$idxB]}.
+#'
+#' @param source,reference Character vectors of variant ids.
+#' @param ... Ignored.
+#' @return \code{NULL} (invisibly).
+#' @export
+alignVariantNames <- function(source, reference, ...) {
+  .Deprecated(new = "matchVariants", package = "pecotmr",
+    msg = paste(
+      "alignVariantNames() is deprecated; match with matchVariants() and",
+      "relabel via source[idxA] <- reference[idxB]."))
+  invisible(NULL)
 }
 
 

@@ -853,14 +853,72 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     })
     .fmMergeEntries(Filter(Negate(is.null), perRegion))
   })
-  QtlFineMappingResult(
-    study = as.character(base$study), context = as.character(base$context),
-    trait = as.character(base$trait), method = as.character(base$method),
-    entry = mergedEntries,
-    jointStudies  = if ("jointStudies"  %in% names(base)) base$jointStudies  else NULL,
-    jointContexts = if ("jointContexts" %in% names(base)) base$jointContexts else NULL,
-    jointTraits   = if ("jointTraits"   %in% names(base)) base$jointTraits   else NULL,
-    ldSketch = NULL)
+  do.call(QtlFineMappingResult, c(
+    list(study = as.character(base$study), context = as.character(base$context),
+         trait = as.character(base$trait), method = as.character(base$method),
+         entry = mergedEntries),
+    .jointCols(base),
+    list(ldSketch = NULL)))
+}
+
+# The three optional joint-key columns (jointStudies / jointContexts /
+# jointTraits) of a per-tuple result row, as a named list (NULL for any absent
+# column). Spliced into the QtlFineMappingResult / TwasWeights constructors.
+.jointCols <- function(df) {
+  pick <- function(nm) if (nm %in% names(df)) as.character(df[[nm]]) else NULL
+  list(jointStudies  = pick("jointStudies"),
+       jointContexts = pick("jointContexts"),
+       jointTraits   = pick("jointTraits"))
+}
+
+# Shared tail of the MultiStudyQtlDataset fineMapping / twasWeights pipeline
+# methods: recurse into each embedded QtlDataset then the embedded QtlSumStats,
+# row-bind the per-study results, build the per-tuple result object, and combine
+# it with any joint-specification result. `perStudyFn` / `sumStatsFn` are the
+# (method-specific) single-study recursions; `rbindFn` / `resultCtor` /
+# `pipelineName` supply the per-pipeline pieces. Each method keeps its own
+# (divergent) method-gating / joint-dispatch preamble and passes the computed
+# `jointResult` in.
+# @noRd
+.multiStudyPipelineDriver <- function(data, jointResult, perStudyFn, sumStatsFn,
+                                      rbindFn, resultCtor, pipelineName,
+                                      noun = "a result") {
+  qtlDatasets <- getQtlDatasets(data)
+  sumStats    <- getSumStats(data)
+  out <- NULL
+  embeddedLd <- NULL
+  for (qdName in names(qtlDatasets)) {
+    res <- perStudyFn(qtlDatasets[[qdName]])
+    if (!is.null(res))
+      out <- if (is.null(out)) res else rbindFn(out, res, ldSketch = NULL)
+  }
+  if (!is.null(sumStats)) {
+    ssRes <- sumStatsFn(sumStats)
+    if (!is.null(ssRes)) {
+      embeddedLd <- getLdSketch(ssRes)
+      out <- if (is.null(out)) ssRes else rbindFn(out, ssRes, ldSketch = embeddedLd)
+    }
+  }
+  perTupleResult <- if (!is.null(out)) {
+    # ldSketch: NULL if all studies were individual-level; the embedded
+    # sumStats's ldSketch otherwise.
+    do.call(resultCtor, c(
+      list(study   = as.character(out$study),
+           context = as.character(out$context),
+           trait   = as.character(out$trait),
+           method  = as.character(out$method),
+           entry   = as.list(out$entry)),
+      .jointCols(out),
+      list(ldSketch = embeddedLd)))
+  } else NULL
+  if (is.null(jointResult)) {
+    if (is.null(perTupleResult))
+      stop(sprintf("%s(MultiStudyQtlDataset): no entries produced %s.",
+                   pipelineName, noun))
+    return(perTupleResult)
+  }
+  if (is.null(perTupleResult)) return(jointResult)
+  rbindFn(perTupleResult, jointResult, ldSketch = embeddedLd)
 }
 
 # Synthesize a jointSpecification for the AUTO-DETECTION path (no explicit
