@@ -4,7 +4,7 @@ author: "pecotmr authors"
 date: "`r Sys.Date()`"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Constructing QtlSumStats and GwasSumStats objects}
+  %\VignetteIndexEntry{Building QtlSumStats and GwasSumStats objects}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---

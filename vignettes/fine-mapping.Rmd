@@ -4,7 +4,7 @@ author: "pecotmr authors"
 date: "`r Sys.Date()`"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Fine-mapping with the pecotmr S4 pipeline}
+  %\VignetteIndexEntry{Fine-mapping with pecotmr}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---

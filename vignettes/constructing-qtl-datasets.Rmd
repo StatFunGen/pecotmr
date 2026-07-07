@@ -4,7 +4,7 @@ author: "pecotmr authors"
 date: "`r Sys.Date()`"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Constructing QtlDataset and MultiStudyQtlDataset objects}
+  %\VignetteIndexEntry{Building QtlDataset and MultiStudyQtlDataset objects}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -116,6 +116,13 @@ manifest <- data.frame(
   genotypePath  = genoPrefix,
   stringsAsFactors = FALSE)
 
+# The path columns hold absolute paths; show basenames for readability
+# (the real `manifest` keeps the full paths the loader needs).
+transform(manifest,
+          phenotypePath = basename(phenotypePath),
+          covariatePath = basename(covariatePath),
+          genotypePath  = basename(genotypePath))
+
 qd <- loadQtlDatasetFromManifest(manifest)
 qd
 ```
@@ -125,6 +132,7 @@ extension (read as TSV):
 
 ```{r qtl-manifest-file}
 manifestPath <- file.path(workdir, "qtl_manifest.tsv")
+readr::write_tsv(manifest, manifestPath)
 qd <- loadQtlDatasetFromManifest(manifestPath)
 ```
 
@@ -222,7 +230,7 @@ dim(SummarizedExperiment::assay(getPhenotypes(qd, contexts = "Muscle")))
 ```
 
 `QtlDataset` and `MultiStudyQtlDataset` are direct inputs to
-`fineMappingPipeline()`, `twasWeightsPipeline()` and `colocBoostPipeline()`— see the *Fine-mapping with pecotmr*, *Learning TWAS weights* and *Multi-trait colocalization with ColocBoost* vignettes.
+`fineMappingPipeline()`, `twasWeightsPipeline()` and `colocBoostPipeline()`— see the *Fine-mapping with pecotmr*, *Learning TWAS weights with pecotmr* and *Multi-trait colocalization with ColocBoost* vignettes.
 
 ```{r session-info}
 sessionInfo()

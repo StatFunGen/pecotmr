@@ -45,6 +45,13 @@ navbar:
    aria-label: View source on GitHub
 
 articles:
+  - title: "Building input objects"
+    desc: >
+      Constructing the individual-level and summary-statistic S4 containers
+      from manifests or by hand.
+    contents:
+    - constructing-qtl-datasets
+    - constructing-sumstats
   - title: "Quality Control"
     desc: >
       Allele alignment and LD-mismatch QC for GWAS and QTL summary
@@ -121,6 +128,17 @@ reference:
       - SldscData
       - TwasWeights
       - TwasWeightsEntry
+
+  - title: "Manifest loaders"
+    desc: >
+      Build the individual-level and summary-statistic containers from a
+      manifest (a data.frame or a delimited file) that points at the
+      phenotype / genotype / summary-statistic sources.
+    contents:
+      - loadQtlDatasetFromManifest
+      - loadMultiStudyQtlDatasetFromManifest
+      - loadQtlSumStatsFromManifest
+      - loadGwasSumStatsFromManifest
 
   - title: "Class methods"
     desc: >
@@ -499,14 +517,12 @@ reference:
       - metaSldscRandom
       - qtlEnrichment
 
-  - title: "Bundled datasets and example helpers"
+  - title: "Bundled example datasets"
     desc: >
       Synthetic data shipped with the package for vignettes and
-      tests. `fixupExampleGenotypePaths()` re-points the bundled
-      GenotypeHandle paths at the install-time `inst/extdata/`
-      location.
+      tests. Their bundled GenotypeHandle paths resolve to the installed
+      `inst/extdata/` location automatically at extraction time.
     contents:
-      - fixupExampleGenotypePaths
       - qtl_dataset_example
       - qtl_sumstats_example
       - qtl_sumstats_multicontext_example

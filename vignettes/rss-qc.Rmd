@@ -38,7 +38,7 @@ library(pecotmr)
 ## Running QC
 
 `summaryStatsQc()` operates on a `GwasSumStats` or `QtlSumStats` object
-See *Constructing QtlSumStats and GwasSumStats objects* vignette for details on how to make these objects.
+See the *Building QtlSumStats and GwasSumStats objects* vignette for details on how to make these objects.
 In this example the object is `GwasSumStats` object called `gws`, but the interface is the same for `QtlSumStats`.
 
 `summaryStatsQc()` provides many options for the user to tweak:
