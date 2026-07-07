@@ -1,0 +1,237 @@
+---
+title: "Building QtlDataset and MultiStudyQtlDataset objects"
+author: "pecotmr authors"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Building QtlDataset and MultiStudyQtlDataset objects}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 4.5)
+```
+
+## Overview
+
+A `QtlDataset` is an individual-level container for a **single study**: one
+genotype source plus a per-context set of molecular phenotypes.
+`MultiStudyQtlDataset` bundles several `QtlDataset`s (optionally alongside a
+summary-statistics-only `QtlSumStats`) so a molecular trait measured across multiple studies can
+be analyzed with downstream pipelines together.
+
+| Slot | Holds |
+|---|---|
+| `study` | study identifier (length-1 character) |
+| `genotypes` | a `GenotypeHandle` (lazy PLINK1/PLINK2/VCF/GDS handle) |
+| `phenotypes` | a **named list of `SummarizedExperiment`s**, one per context; assay = traits x samples, `rowRanges` = trait positions, `colData` = per-context covariates |
+| `genotypeCovariates` | numeric matrix (samples x covariates), e.g. genotype PCs, applied to every context |
+| QC thresholds | `mafCutoff`, `macCutoff`, `xvarCutoff`, `imissCutoff`, `keepIndel`, `keepSamples`, `keepVariants`, `scaleResiduals` — stored as **lazy** filters, applied at genotype-extraction time |
+
+There are two ways to build a `QtlDataset`:
+
+* **From a manifest** — `loadQtlDatasetFromManifest()` reads a table (`data.frame`
+  or file) that points at the phenotype / covariate / genotype files and
+  assembles the object for you. This is the recommended route for real data.
+* **Manually** — build the per-context `SummarizedExperiment`s and the
+  `GenotypeHandle` yourself and call the `QtlDataset()` constructor. Useful when
+  your data is already in memory.
+
+```{r load-packages}
+library(pecotmr)
+```
+
+## Toy data for this vignette
+
+We will reuse the `toy_ref` PLINK1 panel shipped with the package as the genotype
+source, take its first few samples as our phenotyped individuals, and write two
+small per-context phenotype BED files (TensorQTL-style layout: `#chr`, `start`, `end`,
+`gene_id`, then one column per sample) plus a covariate table to a temporary
+directory.
+
+```{r toy-data}
+genoPrefix <- sub("\\.bed$", "",
+                  system.file("extdata", "toy_ref.bed", package = "pecotmr"))
+samples <- head(getSampleIds(GenotypeHandle(plink1Prefix = genoPrefix)), 40)
+
+workdir <- file.path(tempdir(), "qtl-vignette")
+dir.create(workdir, showWarnings = FALSE)
+
+# Two genes on chr22, positioned inside the toy_ref variant span so a cis
+# window captures nearby variants.
+writePhenoBed <- function(path, seed) {
+  set.seed(seed)
+  bed <- data.frame(
+    `#chr`  = c("chr22", "chr22"),
+    start   = c(14600000L, 14900000L),
+    end     = c(14600001L, 14900001L),
+    gene_id = c("GENE1", "GENE2"),
+    check.names = FALSE)
+  for (s in samples) bed[[s]] <- round(rnorm(2), 3)
+  readr::write_tsv(bed, path)
+  path
+}
+muscleBed <- writePhenoBed(file.path(workdir, "Muscle.bed"), 1)
+bloodBed  <- writePhenoBed(file.path(workdir, "Blood.bed"),  2)
+
+# Per-context covariate table: samples as rows, covariate columns after an ID
+# column (here two genotype PCs).
+covPath <- file.path(workdir, "covariates.tsv")
+set.seed(3)
+readr::write_tsv(
+  data.frame(sample = samples,
+             PC1 = round(rnorm(length(samples)), 3),
+             PC2 = round(rnorm(length(samples)), 3),
+             check.names = FALSE),
+  covPath)
+```
+
+## Constructing a QtlDataset from a manifest
+
+The QtlDataset manifest has **one row per context**. Canonical column names
+are camelCase; snake_case aliases such as `cond`, `cov_path`, `genotype_prefix`
+are also accepted and normalized on read.
+
+| Column | Required | Meaning |
+|---|---|---|
+| `context` (alias `cond`) | yes | context / condition label |
+| `phenotypePath` (alias `path`) | yes | bgzipped or plain BED phenotype file |
+| `covariatePath` (alias `cov_path`) | no | per-context covariate table |
+| `study` | single-valued | study identifier (may also be an argument) |
+| `genotypePath` (alias `genotype_prefix`) | single-valued | genotype file or PLINK prefix (may also be an argument) |
+| `genotypeCovariatePath` | no, single-valued | genotype-derived covariates applied to all contexts |
+
+`study` and `genotypePath` are single-valued for the whole dataset, so you can
+supply them either as a constant manifest column **or** as an argument; if you
+give both, they must agree.
+
+```{r qtl-from-manifest}
+manifest <- data.frame(
+  context       = c("Muscle", "Blood"),
+  phenotypePath = c(muscleBed, bloodBed),
+  covariatePath = c(covPath, covPath),
+  study         = "GTEx_toy",
+  genotypePath  = genoPrefix,
+  stringsAsFactors = FALSE)
+
+# The path columns hold absolute paths; show basenames for readability
+# (the real `manifest` keeps the full paths the loader needs).
+transform(manifest,
+          phenotypePath = basename(phenotypePath),
+          covariatePath = basename(covariatePath),
+          genotypePath  = basename(genotypePath))
+
+qd <- loadQtlDatasetFromManifest(manifest)
+qd
+```
+
+The manifest can equally be a path to a `.csv` (read as CSV) or any other
+extension (read as TSV):
+
+```{r qtl-manifest-file}
+manifestPath <- file.path(workdir, "qtl_manifest.tsv")
+readr::write_tsv(manifest, manifestPath)
+qd <- loadQtlDatasetFromManifest(manifestPath)
+```
+
+The QC thresholds are ordinary arguments (they are stored as lazy filters, not
+applied at load), for example:
+
+```{r qtl-manifest-qc}
+qdFiltered <- loadQtlDatasetFromManifest(
+  manifest, mafCutoff = 0.01, imissCutoff = 0.05, keepIndel = FALSE)
+```
+
+## Constructing a QtlDataset manually
+
+The manifest loader is a thin wrapper over the `QtlDataset()` constructor. Doing
+it by hand shows exactly what the object contains: a named list of
+`SummarizedExperiment`s and a `GenotypeHandle`.
+
+```{r qtl-manual}
+# One SummarizedExperiment per context. Rows are traits, columns are samples;
+# rowRanges carries each trait's position, colData carries per-context
+# covariates.
+buildSE <- function(bedPath) {
+  bed <- as.data.frame(readr::read_tsv(bedPath, show_col_types = FALSE),
+                       check.names = FALSE)
+  sampleCols <- setdiff(names(bed), c("#chr", "start", "end", "gene_id"))
+  expr <- as.matrix(bed[, sampleCols, drop = FALSE])
+  rownames(expr) <- bed$gene_id
+  rr <- GenomicRanges::GRanges(
+    seqnames = bed$`#chr`,
+    ranges   = IRanges::IRanges(start = bed$start + 1L, end = bed$end))
+  names(rr) <- bed$gene_id
+  cov <- as.data.frame(readr::read_tsv(covPath, show_col_types = FALSE),
+                       check.names = FALSE)
+  cd <- S4Vectors::DataFrame(cov[match(sampleCols, cov$sample),
+                                 c("PC1", "PC2"), drop = FALSE],
+                             row.names = sampleCols)
+  SummarizedExperiment::SummarizedExperiment(
+    assays = list(expression = expr), rowRanges = rr, colData = cd)
+}
+
+phenotypes <- list(Muscle = buildSE(muscleBed), Blood = buildSE(bloodBed))
+genotypes  <- GenotypeHandle(plink1Prefix = genoPrefix)
+
+qdManual <- QtlDataset(
+  study      = "GTEx_toy",
+  genotypes  = genotypes,
+  phenotypes = phenotypes)
+qdManual
+```
+
+This approach gives users more flexibility if they need to make more modifications to the molecular phenotype data after loading it from a file but before making a `QtlDataset`
+
+## MultiStudyQtlDataset
+
+A `MultiStudyQtlDataset` needs at least two studies in total - at least two individual-level studies or at least one individual-level study and one summary-only study. When loading from a manifest,
+a **`qtlDatasetsManifest`** with `study` and `genotypePath` must be provided where rows 
+are grouped by `study` and one `QtlDataset` is built per group. A `sumStatsManifest` describing summary-only studies can also be provided (see the *Constructing
+QtlSumStats and GwasSumStats objects* vignette).
+
+```{r multistudy-manifest}
+multiManifest <- data.frame(
+  study         = c("StudyA", "StudyB"),
+  context       = c("Muscle", "Muscle"),
+  phenotypePath = c(muscleBed, bloodBed),
+  genotypePath  = genoPrefix,
+  stringsAsFactors = FALSE)
+
+msd <- loadMultiStudyQtlDatasetFromManifest(multiManifest)
+msd
+```
+
+A MultiStudyQtlDataset can be manually constructed by building a named list of `QtlDataset`s and passing it to the constructor:
+
+```{r multistudy-manual}
+msdManual <- MultiStudyQtlDataset(
+  qtlDatasets = list(StudyA = qd, StudyB = qdManual))
+names(msdManual@qtlDatasets)
+```
+
+To attach a summary-only study, pass a `QtlSumStats` object to the `sumStats` argument.
+manifest form, supply `sumStatsManifest`, `genome`, and `ldSketch`).
+
+## Next steps
+
+Once built, the accessors extract data lazily, applying the stored QC filters
+at extraction time:
+
+```{r accessors}
+getStudy(qd)
+getContexts(qd)
+# Cis genotypes around a trait (+/- a window), QC applied on the fly:
+dim(getGenotypes(qd, traitId = "GENE1", cisWindow = 1e6))
+# Phenotype matrix for one context:
+dim(SummarizedExperiment::assay(getPhenotypes(qd, contexts = "Muscle")))
+```
+
+`QtlDataset` and `MultiStudyQtlDataset` are direct inputs to
+`fineMappingPipeline()`, `twasWeightsPipeline()` and `colocBoostPipeline()`— see the *Fine-mapping with pecotmr*, *Learning TWAS weights with pecotmr* and *Multi-trait colocalization with ColocBoost* vignettes.
+
+```{r session-info}
+sessionInfo()
+```

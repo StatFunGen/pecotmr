@@ -2315,19 +2315,17 @@ test_that("twasWeightsPipeline(QtlSumStats): multivariate mr.mash returns a colu
   expect_equal(nrow(res), 2L)                  # one row per context
 })
 
-test_that("twasWeightsPipeline(QtlSumStats): mvsusie with no matching FM fit warns and skips", {
+test_that("twasWeightsPipeline(QtlSumStats): fine-mapping method absent from fineMappingResult errors", {
   ss <- .tp_makeQtlSumStats(n_entries = 2L)
-  # FineMappingResult that does NOT contain an mvsusie fit for (s1, t1).
+  # FineMappingResult that does NOT contain an mvsusie fit (only susie).
   fmr <- .tp_makeStubFineMappingResult(study = "s1", contexts = "c1",
                                        traits = "t1", method = "susie")
-  do.call(local_mocked_bindings,
-          c(list(extractBlockGenotypes = .tp_mockExtractor()),
-            .tp_mockSumstatWeights(), list(.package = "pecotmr")))
+  # The gate rejects the request before any fitting: a requested fine-mapping
+  # method must be present in the supplied fineMappingResult.
   expect_error(
-    suppressWarnings(suppressMessages(
-      twasWeightsPipeline(ss, methods = "mvsusie", fineMappingResult = fmr,
-                          verbose = 0))),
-    "no entries produced weights")
+    twasWeightsPipeline(ss, methods = "mvsusie", fineMappingResult = fmr,
+                        verbose = 0),
+    "contains no such fine-mapping fit")
 })
 
 # -----------------------------------------------------------------------------

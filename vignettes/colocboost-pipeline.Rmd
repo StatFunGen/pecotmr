@@ -18,8 +18,8 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
 
 `colocboostPipeline()` runs the [colocboost](https://github.com/StatFunGen/colocboost)
 multi-trait variable-selection model on QTL data — optionally with one
-or more GWAS studies layered on top. It dispatches on the QTL input
-class:
+or more GWAS studies layered on top. It accepts inputs from the QTL input
+classes:
 
 | QTL input | What it is |
 |---|---|
@@ -43,30 +43,21 @@ data(qtl_dataset_example,
      qtl_sumstats_example,
      gwas_sumstats_s4_example,
      multi_study_qtl_dataset_example)
-qtl_dataset_example             <- fixupExampleGenotypePaths(qtl_dataset_example)
-qtl_sumstats_example            <- fixupExampleGenotypePaths(qtl_sumstats_example)
-gwas_sumstats_s4_example        <- fixupExampleGenotypePaths(gwas_sumstats_s4_example)
-multi_study_qtl_dataset_example <- fixupExampleGenotypePaths(multi_study_qtl_dataset_example)
 ```
 
 ## Three analysis variants
 
 ColocBoost can run three different model flavours in one call.
 
-```{r cb-flags-table, echo=FALSE}
-df <- data.frame(
-  Flag            = c("`xqtlColoc`",   "`jointGwas`",         "`separateGwas`"),
-  Default         = c("TRUE",          "FALSE",                "FALSE"),
-  What            = c("QTL-only colocboost across the QTL contexts.",
-                      "Single non-focal colocboost model that stacks all QTL contexts/studies with every supplied GWAS study.",
-                      "One focal colocboost model per GWAS study (the GWAS is the focal outcome)."),
-  stringsAsFactors = FALSE)
-knitr::kable(df)
-```
+| Flag | Default | What |
+|---|---|---|
+| `xqtlColoc` | TRUE | QTL-only colocboost across the QTL contexts. |
+| `jointGwas` | FALSE | Single non-focal colocboost model that stacks all QTL contexts/studies with every supplied GWAS study. |
+| `separateGwas` | FALSE | One focal colocboost model per GWAS study (the GWAS is the focal outcome). |
 
 ## xQTL-only colocalization
 
-The default — run colocboost over the contexts in the QTL data with no
+The default call runs colocboost over the contexts in the QTL data with no
 GWAS layer.
 
 ```{r xqtl-only}
@@ -167,7 +158,7 @@ the `QtlDataset` (`keepSamples`, `keepVariants`, the per-context
 `SummarizedExperiment` row selection); the pipeline parameters above
 are the per-call refinements.
 
-## QC contract
+## QC requirements
 
 - **Individual-level (`QtlDataset` / `MultiStudyQtlDataset`)**: QC
   (MAF / MAC / X-variance / per-sample missingness, sample / variant
@@ -178,11 +169,3 @@ are the per-call refinements.
   variant filters, panel harmonization, LD-mismatch detection, and
   RAISS imputation live in [`summaryStatsQc()`](rss-qc.html). The
   pipeline rejects inputs whose `getQcInfo()` is empty.
-
-## Next steps
-
-- For pairwise QTL ↔ GWAS coloc with the classic
-  `coloc.bf_bf` model (instead of multi-trait ColocBoost), see
-  [`colocPipeline`](coloc-pipeline.html).
-- To compose colocboost results with a per-gene TWAS Z + MR analysis,
-  see [`causalInferencePipeline`](twas-zscore.html).

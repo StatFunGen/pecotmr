@@ -1,10 +1,10 @@
 ---
-title: "Fine-mapping with the pecotmr S4 pipeline"
+title: "Fine-mapping with pecotmr"
 author: "pecotmr authors"
 date: "`r Sys.Date()`"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Fine-mapping with the pecotmr S4 pipeline}
+  %\VignetteIndexEntry{Fine-mapping with pecotmr}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -16,17 +16,16 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
 
 ## Overview
 
-`fineMappingPipeline()` is a single S4 generic that dispatches on the
-input class:
+`fineMappingPipeline()` is a single pipeline that can accept any of the following inputs:
 
 | Input class | What it represents | Methods supported |
 |---|---|---|
-| `QtlDataset` | Single-study individual-level data: genotypes + per-context phenotypes | susie, susieInf, susieAsh, mvsusie, fsusie |
-| `MultiStudyQtlDataset` | Multiple `QtlDataset`s (optionally with an embedded `QtlSumStats`) | Same as above; runs per study |
-| `QtlSumStats` | QTL summary statistics keyed by `(study, context, trait)` | susie, susieInf, susieAsh (RSS implementation auto-dispatched) |
-| `GwasSumStats` | GWAS summary statistics keyed by `study` | susie, susieInf, susieAsh (RSS implementation auto-dispatched) |
+| `QtlDataset` | Single-study individual-level data | susie, susieInf, susieAsh, mvsusie, fsusie, susieSer |
+| `MultiStudyQtlDataset` | Multiple `QtlDataset` objects (optionally with an embedded `QtlSumStats`) | susie, susieInf, susieAsh, mvsusie, fsusie (individual-level only), susieSer (individual-level only)|
+| `QtlSumStats` | QTL summary statistics annotated by `(study, context, trait)` | susie, susieInf, susieAsh, mvsusie |
+| `GwasSumStats` | GWAS summary statistics annotated by `study` | susie, susieInf, susieAsh, mvsusie |
 
-Method tokens are the same across input classes; `fineMappingPipeline()`
+Method arguments are the same across input classes; `fineMappingPipeline()`
 routes `methods = "susie"` to `susieR::susie` for individual-level data
 and to `susieR::susie_rss` for summary-statistics inputs automatically.
 
@@ -44,12 +43,6 @@ data(qtl_dataset_example,
      qtl_sumstats_example,
      gwas_sumstats_s4_example,
      multi_study_qtl_dataset_example)
-# The bundled objects carry relative GenotypeHandle paths; this helper
-# resolves them to the installed inst/extdata location.
-qtl_dataset_example             <- fixupExampleGenotypePaths(qtl_dataset_example)
-qtl_sumstats_example            <- fixupExampleGenotypePaths(qtl_sumstats_example)
-gwas_sumstats_s4_example        <- fixupExampleGenotypePaths(gwas_sumstats_s4_example)
-multi_study_qtl_dataset_example <- fixupExampleGenotypePaths(multi_study_qtl_dataset_example)
 
 qtl_dataset_example
 ```
@@ -99,7 +92,7 @@ head(getTopLoci(fmr, study = "study1", context = "brain",
 
 ## Multi-study fine-mapping
 
-A `MultiStudyQtlDataset` runs the per-study pipeline in turn and
+A `MultiStudyQtlDataset` runs the pipeline per-study and
 concatenates the results into a single `QtlFineMappingResult`:
 
 ```{r multistudy-fm}
@@ -117,7 +110,7 @@ fmrSs
 ```
 
 The `QtlSumStats` collection carries an `ldSketch` `GenotypeHandle`; the
-pipeline pulls the per-block LD from there automatically.
+pipeline pulls the per-region LD from there automatically.
 
 ## GWAS summary-statistics fine-mapping
 
@@ -127,8 +120,7 @@ fmrGwas <- fineMappingPipeline(gwas_sumstats_s4_example,
 fmrGwas
 ```
 
-The GWAS path is essentially the QTL-sumstats path with the 1-tuple
-`(study)` key instead of the 4-tuple `(study, context, trait, method)`.
+The GWAS path is similar to the QTL-sumstats path but only annotates by study.
 
 ## Common parameters
 
@@ -163,7 +155,7 @@ fineMappingPipeline(
 ## Joint multi-context / multi-trait fits
 
 `jointSpecification` triggers the dispatch for cross-axis joint
-methods (`mvsusie` for cross-context, `fsusie` for ordered-trait):
+methods (`mvsusie` for cross-context, `mvsusie` or `fsusie` for multi-trait):
 
 ```{r fm-joint, eval=FALSE}
 fineMappingPipeline(
@@ -173,7 +165,7 @@ fineMappingPipeline(
                              contexts = c("brain", "liver")))
 ```
 
-See `?jointSpecification` for the spec grammar.
+See `?jointSpecification` for the specification grammar.
 
 ## Reading the result
 
@@ -199,11 +191,7 @@ Each entry carries:
 
 ## Next steps
 
-- Hand a `QtlFineMappingResult` to
-  [`colocPipeline`](coloc-pipeline.html) for cross-study colocalization.
-- Pass `fineMappingPipeline()` output to
-  [`twasWeightsPipeline`](twas-weights.html) so the susie weights are
-  contributed to the TWAS ensemble alongside other weight methods.
-- Run the full
-  [`causalInferencePipeline`](twas-zscore.html) (TWAS + MR) on top of a
-  fine-mapping result and GWAS sumstats.
+- `QtlFineMappingResult` is used by [`colocPipeline`](coloc-pipeline.html) for QTL-GWAS colocalization 
+  and by [`twasWeightsPipeline`](twas-weights.html) so that fine-mapping weights are
+  contributed to the TWAS ensemble weights model alongside regularized regression methods.
+- Run the full [`causalInferencePipeline`](twas-zscore.html) (TWAS + MR) with a `FineMappingResult` and `GwasSumStats`.

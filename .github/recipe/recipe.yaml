@@ -84,6 +84,7 @@ requirements:
     - r-vctrs
     - r-vroom
     - r-xgboost
+    - r-yaml
   run:
     - bioconductor-biocparallel
     - bioconductor-genomicranges
@@ -145,6 +146,7 @@ requirements:
     - r-vctrs
     - r-vroom
     - r-xgboost
+    - r-yaml
 
 tests:
   - script:

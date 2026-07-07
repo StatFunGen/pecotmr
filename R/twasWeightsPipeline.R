@@ -424,6 +424,24 @@
   names(.fineMappingMethodCapabilities)
 }
 
+# Canonical fine-mapping tokens actually present as methods in a
+# FineMappingResult, matched tolerantly across canonical / camelCase /
+# snake_case spellings (mirrors the candidate logic in .twasFineMappingFits).
+# @noRd
+.twasFineMappingMethodsPresent <- function(fineMappingResult) {
+  if (is.null(fineMappingResult)) return(character(0))
+  methods <- tolower(as.character(fineMappingResult$method))
+  present <- character(0)
+  for (canonical in .twasFineMappingTokens()) {
+    candidates <- tolower(c(
+      canonical,
+      paste0(tolower(substring(canonical, 1L, 1L)), substring(canonical, 2L)),
+      gsub("([A-Z])", "_\\1", canonical)))
+    if (any(methods %in% candidates)) present <- c(present, canonical)
+  }
+  present
+}
+
 # Reject fine-mapping methods (susie / susieInf / susieAsh / mvsusie /
 # fsusie) when no FineMappingResult is supplied. twasWeightsPipeline is
 # not allowed to re-fit fine-mapping models from scratch; users must run
@@ -458,6 +476,16 @@
   }
   if (!is(fineMappingResult, "FineMappingResultBase")) {
     stop("`fineMappingResult` must be a FineMappingResult or NULL.")
+  }
+  # A supplied fineMappingResult must actually contain each requested
+  # fine-mapping method; twasWeightsPipeline never re-fits them from scratch.
+  missingMethods <- setdiff(fmTokens,
+                            .twasFineMappingMethodsPresent(fineMappingResult))
+  if (length(missingMethods) > 0L) {
+    stop(sprintf(
+      "twasWeightsPipeline: method(s) %s were requested but the supplied fineMappingResult contains no such fine-mapping fit. Run fineMappingPipeline() with method(s) %s first and pass the result via `fineMappingResult = <FineMappingResult>`.",
+      paste(unique(missingMethods), collapse = ", "),
+      paste(unique(missingMethods), collapse = ", ")))
   }
   invisible(NULL)
 }

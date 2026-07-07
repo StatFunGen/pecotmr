@@ -323,7 +323,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 
 #' @keywords internal
 .extractBlockGds <- function(handle, snpIdx) {
-  .withGds(getPath(handle), allow.fork = TRUE, fn = function(gds) {
+  .withGds(.genotypeReadPath(handle), allow.fork = TRUE, fn = function(gds) {
     snpIds <- getSnpInfo(handle)$SNP[snpIdx]
     # Use snpgdsGetGeno for proper non-contiguous SNP selection
     geno <- SNPRelate::snpgdsGetGeno(gds, snp.id = snpIds,
@@ -345,7 +345,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
   )
   param <- VariantAnnotation::ScanVcfParam(which = gr, fixed = NA,
                                             info = NA, geno = "GT")
-  vcf <- VariantAnnotation::readVcf(getPath(handle), genome = "", param = param)
+  vcf <- VariantAnnotation::readVcf(.genotypeReadPath(handle), genome = "", param = param)
   gt <- VariantAnnotation::geno(vcf)$GT
 
   # Convert GT strings to ALT dosage (A1 dosage)
@@ -365,7 +365,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 #' @keywords internal
 .extractBlockPlink1 <- function(handle, snpIdx) {
   snpIds <- getSnpInfo(handle)$SNP[snpIdx]
-  pathStem <- getPath(handle)
+  pathStem <- .genotypeReadPath(handle)
   plinkData <- snpStats::read.plink(
     bed = paste0(pathStem, ".bed"),
     bim = paste0(pathStem, ".bim"),
@@ -386,7 +386,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
   # become stale), so we re-open from getPath() on the fly if the cached
   # pointer errors out. Opening is cheap relative to dosage extraction.
   ptr <- getPgenPtr(handle)
-  paths <- resolvePlink2Paths(getPath(handle))
+  paths <- resolvePlink2Paths(.genotypeReadPath(handle))
   # A sharded handle routes through a transient view with pgenPtr = NULL (one
   # pgen per chromosome), and a deserialized pointer is stale; open a fresh
   # pgen up front in those cases rather than provoking a caught read error.
@@ -461,7 +461,7 @@ computeBlockLdCor <- function(handle, snpIdx, backend = "internal",
 
 #' @keywords internal
 .computeBlockLdGds <- function(handle, snpIdx) {
-  .withGds(getPath(handle), allow.fork = TRUE, fn = function(gds) {
+  .withGds(.genotypeReadPath(handle), allow.fork = TRUE, fn = function(gds) {
     snpIds <- getSnpInfo(handle)$SNP[snpIdx]
     ldMat <- SNPRelate::snpgdsLDMat(
       gds, snp.id = snpIds, method = "corr",
@@ -1052,7 +1052,7 @@ loadGenotypeRegion <- function(genotype, region = NULL, keepIndel = TRUE,
 
   # --- Attach allele frequency from .afreq sidecar (plink2 only) ---
   if (getFormat(handle) == "plink2") {
-    afreq <- readAfreq(getPath(handle))
+    afreq <- readAfreq(.genotypeReadPath(handle))
     if (!is.null(afreq)) {
       afreqCols <- intersect(c("id", "alt_freq", "obs_ct"), colnames(afreq))
       variantInfo <- merge(variantInfo, afreq[, afreqCols, drop = FALSE],

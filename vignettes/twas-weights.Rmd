@@ -1,10 +1,10 @@
 ---
-title: "Learning TWAS weights with the pecotmr S4 pipeline"
+title: "Learning TWAS weights with pecotmr"
 author: "pecotmr authors"
 date: "`r Sys.Date()`"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Learning TWAS weights with the pecotmr S4 pipeline}
+  %\VignetteIndexEntry{Learning TWAS weights with pecotmr}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -18,20 +18,19 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
 
 TWAS weights are per-variant coefficients that predict a molecular
 phenotype (gene expression, splicing, protein abundance) from genotype.
-Once learned, the weights are applied to GWAS summary statistics to
+Once learned, the weights are combined with GWAS summary statistics to
 compute per-gene TWAS Z-scores (covered in the
 [TWAS Z-score + causal inference vignette](twas-zscore.html)).
 
-`twasWeightsPipeline()` is a single S4 generic that dispatches on the
-input class. The output is always a `TwasWeights` collection (DFrame
+`twasWeightsPipeline()` is a single that accepts multiple input types. The output is always a `TwasWeights` collection (DFrame
 subclass keyed by `(study, context, trait, method)` with per-tuple
 `TwasWeightsEntry` payloads).
 
 | Input class | Methods supported |
 |---|---|
-| `QtlDataset` | Univariate: susie, susieInf, glmnet (lasso/enet/ridge), mr.ash, MCP, SCAD, L0Learn, Bayesian alphabet methods. Multivariate (multi-context): mr.mash, mvsusie |
-| `MultiStudyQtlDataset` | Iterates the embedded studies; same methods as `QtlDataset` |
-| `QtlSumStats` | RSS-only: susieRss, lassosum-RSS, PRS-CS, SDPR, mr.ash-RSS, P+T, MCP-RSS, ... |
+| `QtlDataset` | Univariate: LASSO, elastic net, mr.ash, MCP, SCAD, L0Learn, Bayesian alphabet, DPR. Multivariate: mr.mash, mvsusie |
+| `MultiStudyQtlDataset` | Iterates over embedded studies; same methods as `QtlDataset` |
+| `QtlSumStats` | RSS-only: LASSO, mr.ash, MCP, SCAD, L0Learn, DPR, PRS-CS, P+T. Multivariate: mr.mash, mvsusie |
 
 ```{r load-packages}
 library(pecotmr)
@@ -43,25 +42,18 @@ library(pecotmr)
 data(qtl_dataset_example,
      qtl_sumstats_example,
      multi_study_qtl_dataset_example)
-qtl_dataset_example             <- fixupExampleGenotypePaths(qtl_dataset_example)
-qtl_sumstats_example            <- fixupExampleGenotypePaths(qtl_sumstats_example)
-multi_study_qtl_dataset_example <- fixupExampleGenotypePaths(multi_study_qtl_dataset_example)
 ```
 
 ## Individual-level weights
 
-The simplest call learns a single regression-based weight set from a
-`QtlDataset`. Cross-validation is on by default (`cvFolds = 5`). Like
+The simplest individual-level call learns a single regression-based weight set from a
+`QtlDataset`. Cross-validation is enabled by default (`cvFolds = 5`). Like
 `fineMappingPipeline()`, you need to tell it which genotype window to
 extract — `cisWindow` (per trait) is the most common choice.
 
 Fine-mapping methods (`susie`, `susieInf`, `susieAsh`, `mvsusie`,
-`fsusie`) are intentionally NOT runnable here on their own:
-`twasWeightsPipeline()` will not re-fit fine-mapping models from
-scratch. Run `fineMappingPipeline()` first and pass the result via
-`fineMappingResult = …` (see the next section). The quickstart below
-uses `lasso`, a TWAS-regression method that has no fine-mapping
-dependency.
+`fsusie`) are not re-fit by `twasWeightsPipeline()` - instead run fine-mapping models with `fineMappingPipeline()` first and pass the result via
+`fineMappingResult = …` (see the next section).
 
 ```{r individual-quickstart}
 tw <- twasWeightsPipeline(qtl_dataset_example,
@@ -93,13 +85,11 @@ length(getVariantIds(entry))
 
 ## Including a fine-mapping susie fit in the TWAS ensemble
 
-A susie/susieInf/susieAsh fine-mapping fit is itself a set of per-variant
+The posterior effect estimates of SuSiE fine-mapping models are themselves a set of per-variant
 weight estimates. When you pass an existing `FineMappingResult` to
 `twasWeightsPipeline()`, the trimmed susie fit for each matching
-`(study, context, trait)` tuple is added to the ensemble as a `"susie"`
-weights row instead of being re-fit from scratch — so the susie-derived
-predictions can be compared and combined against the other weight
-methods (glmnet, mr.ash, …) without paying the susie fit cost twice.
+`(study, context, trait)` tuple is added to the ensemble as an additional
+weights row instead of being re-fit.
 
 ```{r individual-with-fmr}
 fmr <- fineMappingPipeline(qtl_dataset_example, methods = "susie",
@@ -110,10 +100,6 @@ tw2 <- twasWeightsPipeline(qtl_dataset_example,
                             fineMappingResult  = fmr)
 ```
 
-The matching is on the canonical method token (`susie`, `susieInf`,
-`susieAsh`) and the `(study, context, trait)` tuple; tuples without a
-matching fine-mapping row fit the susie weights from scratch as normal.
-
 ## Multi-study weights
 
 ```{r multistudy}
@@ -123,13 +109,14 @@ msTw <- twasWeightsPipeline(multi_study_qtl_dataset_example,
 table(msTw$study)
 ```
 
+The call for iterating over the studies of a MultiStudyQtlDataset is identical to the call for a single QtlDataset.
+
 ## Multiple weight methods at once
 
 Pass a character vector to fit several methods on the same fold split
 and return them as separate `(method)` rows in the collection.
 Fine-mapping methods (`susie`, `susieInf`, `susieAsh`, `mvsusie`) can
-ride along when a `fineMappingResult` is supplied; without one, restrict
-the list to the TWAS-regression methods:
+only be included if their results are present in the object passed to the `fineMappingResult` argument:
 
 ```{r multimethod, eval=FALSE}
 # TWAS-regression only — no fineMappingResult needed.
@@ -154,17 +141,13 @@ twSs <- twasWeightsPipeline(qtl_sumstats_example, methods = "lasso")
 twSs
 ```
 
-The RSS path uses the `ldSketch` `GenotypeHandle` carried on the
-`QtlSumStats` collection to compute / fetch LD as needed. The fine-
-mapping methods (`susie`, `susieInf`, `susieAsh`, `mvsusie`) follow the
-same `fineMappingResult` gate as the individual-level path — call
-`fineMappingPipeline()` on the `QtlSumStats` first, then pass the
-result into `twasWeightsPipeline(..., fineMappingResult = ...)`.
+The RSS path uses the `ldSketch` `GenotypeHandle` inside the
+`QtlSumStats` collection to compute LD as needed. The same 
 
 ## Multivariate (multi-context) weights
 
 When you have multiple contexts for the same trait (e.g. multi-tissue
-expression), pass `methods = "mrmash"` or `"mvsusie"`:
+expression), pass `methods = "mrmash"` to do a joint multivariate fit:
 
 ```{r multivariate, eval=FALSE}
 twasWeightsPipeline(
@@ -209,8 +192,8 @@ twasWeightsPipeline(
 ```
 
 - `ensemble = TRUE` adds an additional `ensembleWeights` row to the
-  collection — a quadprog-fitted weighted combination of the individual
-  methods' CV predictions, gated by `ensembleR2Threshold`.
+  collection — a weighted combination of the individual
+  methods' CV predictions filterd by `ensembleR2Threshold`.
 - `naAction` is forwarded to `getResidualizedPhenotypes()` (see the
   [fine-mapping vignette](fine-mapping.html#common-parameters) for
   semantics).
@@ -244,8 +227,4 @@ Each entry exposes:
 
 - Combine the learned weights with a GWAS via
   [`causalInferencePipeline`](twas-zscore.html) to compute per-gene
-  TWAS Z-scores and MR estimates.
-- Skip the standalone TWAS step if you want
-  [`colocPipeline`](coloc-pipeline.html) or
-  [`colocboostPipeline`](colocboost-pipeline.html) directly on the
-  fine-mapping result.
+  TWAS Z-scores.
