@@ -103,3 +103,4 @@ r45 = {features = ["r45"]}
 "r-vctrs" = "*"
 "r-vroom" = "*"
 "r-xgboost" = "*"
+"r-yaml" = "*"

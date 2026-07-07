@@ -245,21 +245,23 @@ qtl_sumstats_multicontext_example <- QtlSumStats(
   qcInfo   = list(prebuilt = "synthetic multi-context example; QC bypassed"))
 
 # -----------------------------------------------------------------------------
-# 7. Strip the GenotypeHandle paths down to bare basenames so the bundled
-#    .rda objects don't carry source-tree-absolute paths. Vignettes /
-#    users resolve them at use-time via fixupExampleGenotypePaths().
+# 7. Rewrite the GenotypeHandle paths to a portable bundled-resource reference
+#    ("pecotmr://extdata/<stem>") so the .rda objects carry no source-tree
+#    absolute path. The genotype readers resolve this via system.file() at
+#    extraction time, so no user-facing fixup step is required.
 # -----------------------------------------------------------------------------
-qtl_dataset_example@genotypes@path <- basename(
+asResource <- function(p) paste0("pecotmr://extdata/", basename(p))
+qtl_dataset_example@genotypes@path <- asResource(
   qtl_dataset_example@genotypes@path)
-qtl_sumstats_example@ldSketch@path <- basename(
+qtl_sumstats_example@ldSketch@path <- asResource(
   qtl_sumstats_example@ldSketch@path)
-qtl_sumstats_multicontext_example@ldSketch@path <- basename(
+qtl_sumstats_multicontext_example@ldSketch@path <- asResource(
   qtl_sumstats_multicontext_example@ldSketch@path)
-gwas_sumstats_s4_example@ldSketch@path <- basename(
+gwas_sumstats_s4_example@ldSketch@path <- asResource(
   gwas_sumstats_s4_example@ldSketch@path)
 for (nm in names(multi_study_qtl_dataset_example@qtlDatasets))
   multi_study_qtl_dataset_example@qtlDatasets[[nm]]@genotypes@path <-
-    basename(multi_study_qtl_dataset_example@qtlDatasets[[nm]]@genotypes@path)
+    asResource(multi_study_qtl_dataset_example@qtlDatasets[[nm]]@genotypes@path)
 
 # -----------------------------------------------------------------------------
 # 8. Save.

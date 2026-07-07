@@ -424,6 +424,34 @@ setMethod("getFormat", "GenotypeHandle", function(x) x@format)
 #' @export
 setMethod("getPath", "GenotypeHandle", function(x) x@path)
 
+# Resolve a portable bundled-resource reference of the form
+# "pecotmr://extdata/<stem>" to a concrete filesystem path via
+# `system.file()`; any ordinary path is returned unchanged. This lets the
+# packaged example objects (which cannot bake an install-specific absolute
+# path into their serialized GenotypeHandle) carry a portable reference that
+# resolves at extraction time, on whatever machine the package is installed.
+.resolveGenotypeResourcePath <- function(path) {
+  if (length(path) != 1L || is.na(path)) return(path)
+  m <- regmatches(path, regexec("^pecotmr://extdata/(.+)$", path))[[1L]]
+  if (length(m) != 2L) return(path)
+  stem <- m[[2L]]
+  bed <- system.file("extdata", paste0(stem, ".bed"), package = "pecotmr")
+  if (nzchar(bed)) return(sub("\\.bed$", "", bed))
+  resolved <- system.file("extdata", stem, package = "pecotmr")
+  if (!nzchar(resolved))
+    stop("cannot resolve bundled genotype resource '", stem,
+         "' under inst/extdata/ (package 'pecotmr').")
+  resolved
+}
+
+# The concrete filesystem path/stem to open for a handle's data. Resolves a
+# bundled-resource reference; ordinary paths pass through. Used by the block
+# extractors and LD-panel keying, so `getPath()` keeps returning the stored
+# (portable) value for display/provenance while file access resolves it.
+.genotypeReadPath <- function(handle) {
+  .resolveGenotypeResourcePath(getPath(handle))
+}
+
 #' @rdname getSampleIds
 #' @export
 setMethod("getSampleIds", "GenotypeHandle", function(x) x@sampleIds)

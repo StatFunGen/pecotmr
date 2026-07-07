@@ -1,10 +1,10 @@
 ---
-title: "Causal inference: TWAS Z-scores + Wald-ratio MR"
+title: "Causal inference with pecotmr: TWAS Z-scores and MR"
 author: "pecotmr authors"
 date: "`r Sys.Date()`"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Causal inference: TWAS Z-scores + Wald-ratio MR}
+  %\VignetteIndexEntry{Causal inference with pecotmr: TWAS Z-scores and MR}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -16,13 +16,12 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
 
 ## Overview
 
-`causalInferencePipeline()` pairs QTL-side weights and/or a QTL
-fine-mapping result with one or more GWAS studies to produce, per
+`causalInferencePipeline()` pairs QTL fine-mapping and/or regularized regression weights one or more GWAS studies to produce, per
 `(qtlStudy, context, trait, method, gwasStudy)` tuple:
 
 - a **TWAS Z-score** (and p-value), and
-- when `fineMappingResult` is supplied, a **Wald-ratio Mendelian
-  Randomization** estimate over the QTL credible sets.
+- when `fineMappingResult` is supplied, a **Mendelian
+  Randomization Wald-ratio** estimate over the QTL credible sets.
 
 Three valid input combinations:
 
@@ -40,8 +39,6 @@ library(pecotmr)
 
 ```{r bundled}
 data(qtl_dataset_example, gwas_sumstats_s4_example)
-qtl_dataset_example      <- fixupExampleGenotypePaths(qtl_dataset_example)
-gwas_sumstats_s4_example <- fixupExampleGenotypePaths(gwas_sumstats_s4_example)
 
 # Pre-compute the QTL-side products from the bundled QtlDataset.
 fmr <- fineMappingPipeline(qtl_dataset_example, methods = "susie",
@@ -61,7 +58,7 @@ res <- causalInferencePipeline(
 head(S4Vectors::mcols(res))
 ```
 
-The result is a `GRanges` positioned at the variant span of each QTL
+The result is a `GRanges` object positioned at the variant span of each QTL
 weight set, with identity columns (`qtlStudy`, `context`, `trait`,
 `method`, `gwasStudy`) and the TWAS columns (`twasZ`, `twasPval`).
 MR columns are `NA` in this mode.
@@ -85,7 +82,7 @@ S4Vectors::mcols(res2)[, c("twasZ", "twasPval", "waldRatio",
 
 ## MR variants: per-variant vs CS-aware IVW
 
-| `mrMethod` | What it does | Extra knobs |
+| `mrMethod` | What it does | Extra filters |
 |---|---|---|
 | `"ivwPerVariant"` (default) | Treats every `topLoci` variant with `pip > mrPipCutoff` as an IV; pools their Wald ratios via inverse-variance weighting. | `mrPipCutoff` |
 | `"csAware"` | Groups variants by credible set (column `cs` in `topLoci`), forms a PIP-weighted composite Wald ratio per CS (subject to per-CS cumulative-PIP cutoff `mrCpipCutoff`), then IVW-pools across CSs. Reports Cochran's Q and I-squared. | `mrCpipCutoff` |
@@ -115,14 +112,14 @@ causalInferencePipeline(
   combineMethods = c("acat", "hmp"))
 ```
 
-Accepted method tokens for `combineMethods`: `acat`, `hmp`,
+Accepted values for `combineMethods`: `acat`, `hmp`,
 `bonferroni`, `fisher`, `stouffer`, `invchisq`, `gbj`, `bj`, `hc`,
 `ghc`, `minp`, `gbj_omni`, `aspu`, `gates` (see `?combinePValues`).
 
 ## LD-sketch consistency
 
 Both `twasWeights` and `fineMappingResult` carry an `ldSketch` slot.
-When they're non-`NULL`, they must reference the same LD panel as
+When provided, they must reference the same LD panel as
 `gwasSumStats`. The pipeline errors on mismatch.
 
 A QTL input with `ldSketch = NULL` (e.g. weights learned from
@@ -154,12 +151,3 @@ mc <- as.data.frame(S4Vectors::mcols(res2))
 # Significant TWAS hits at Bonferroni alpha = 0.05 across rows
 mc[mc$twasPval < 0.05 / nrow(mc), ]
 ```
-
-## Next steps
-
-- Pair TWAS hits with coloc evidence via
-  [`colocPipeline`](coloc-pipeline.html) or
-  [`colocboostPipeline`](colocboost-pipeline.html).
-- Refine the input weight ensemble by re-running
-  [`twasWeightsPipeline`](twas-weights.html) with a richer `methods`
-  vector and the same `fineMappingResult`.

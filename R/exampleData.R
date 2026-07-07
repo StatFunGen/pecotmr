@@ -288,59 +288,6 @@ NULL
 NULL
 
 
-#' @title Resolve bundled-example GenotypeHandle paths
-#'
-#' @description The bundled S4 example objects (\code{qtl_dataset_example},
-#' \code{qtl_sumstats_example}, \code{qtl_sumstats_multicontext_example},
-#' \code{gwas_sumstats_s4_example}, \code{multi_study_qtl_dataset_example})
-#' store a relative-style path to the bundled
-#' \code{inst/extdata/toy_canonical} PLINK1 reference.
-#' Call this helper once at the top of a vignette to re-point each
-#' contained \code{GenotypeHandle} at the installed path resolved via
-#' \code{system.file()}.
-#'
-#' @param x A bundled \code{QtlDataset}, \code{MultiStudyQtlDataset},
-#'   \code{QtlSumStats}, or \code{GwasSumStats} example object.
-#' @return The same object with \code{GenotypeHandle@@path} rewritten
-#'   to the resolved install path.
-#' @export
-fixupExampleGenotypePaths <- function(x) {
-  resolve <- function(handle) {
-    bn <- basename(handle@path)
-    # PLINK1 / PLINK2 are stems (no extension); resolve via the .bed
-    # (or .pgen) sidecar and strip the extension back off.
-    bedPath <- system.file("extdata", paste0(bn, ".bed"),
-                            package = "pecotmr")
-    if (nzchar(bedPath)) {
-      handle@path <- sub("\\.bed$", "", bedPath)
-      return(handle)
-    }
-    new <- system.file("extdata", bn, package = "pecotmr")
-    if (!nzchar(new))
-      stop("fixupExampleGenotypePaths: cannot resolve '", bn,
-           "' under inst/extdata/")
-    handle@path <- new
-    handle
-  }
-  if (methods::is(x, "QtlDataset")) {
-    x@genotypes <- resolve(x@genotypes)
-  } else if (methods::is(x, "MultiStudyQtlDataset")) {
-    for (nm in names(x@qtlDatasets))
-      x@qtlDatasets[[nm]]@genotypes <-
-        resolve(x@qtlDatasets[[nm]]@genotypes)
-    if (!is.null(x@sumStats))
-      x@sumStats@ldSketch <- resolve(x@sumStats@ldSketch)
-  } else if (methods::is(x, "QtlSumStats") ||
-             methods::is(x, "GwasSumStats")) {
-    x@ldSketch <- resolve(x@ldSketch)
-  } else {
-    stop("fixupExampleGenotypePaths: unsupported class '",
-         class(x)[[1L]], "'.")
-  }
-  x
-}
-
-
 #' @name multi_study_qtl_dataset_example
 #'
 #' @title Example MultiStudyQtlDataset (S4)

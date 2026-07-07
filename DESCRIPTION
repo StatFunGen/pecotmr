@@ -39,7 +39,8 @@ Imports:
     tictoc,
     tidyr,
     vctrs,
-    vroom
+    vroom,
+    yaml
 Suggests:
     aSPU,
     arrow,
@@ -124,19 +125,20 @@ Collate:
     'jointEngine.R'
     'jointSpecification.R'
     'ld.R'
+    'sumstatsQc.R'
+    'variantId.R'
+    'qtlSumStats.R'
+    'manifestLoaders.R'
     'mashPipeline.R'
     'mashWrapper.R'
     'pvalCombine.R'
     'qtlEnrichmentPipeline.R'
-    'qtlSumStats.R'
     'regularizedRegressionWrappers.R'
     'relatednessQc.R'
     'sldscPostprocessingPipeline.R'
     'sldscWrapper.R'
-    'sumstatsQc.R'
     'twasWeights.R'
     'twasWeightsPipeline.R'
-    'variantId.R'
     'vcfWriter.R'
 Depends: 
     R (>= 3.5)

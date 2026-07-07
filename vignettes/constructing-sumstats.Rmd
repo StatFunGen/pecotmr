@@ -1,0 +1,294 @@
+---
+title: "Building QtlSumStats and GwasSumStats objects"
+author: "pecotmr authors"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Constructing QtlSumStats and GwasSumStats objects}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 4.5)
+hasVA <- requireNamespace("VariantAnnotation", quietly = TRUE)
+```
+
+## Overview
+
+`GwasSumStats` and `QtlSumStats` are `DFrame`-subclass collections of
+summary statistics. Each **row** carries one `entry` — a `GRanges` of
+per-variant statistics — annotated by an identity tuple:
+
+| Class | Row key | One row is |
+|---|---|---|
+| `GwasSumStats` | `study` | one GWAS study over a region |
+| `QtlSumStats` | `(study, context, trait)` | one molecular trait in one context |
+
+Every `entry` GRanges must carry these `mcols`: `SNP`, `A1` (effect /
+dosage-counted allele), `A2` (other allele), `Z`, `N`; optionally `MAF`,
+`INFO`, `BETA`, `SE`, `P`. Two settings apply to the whole collection and are
+stored in slots, not columns:
+
+* `genome` — the build label (e.g. `"GRCh38"`).
+* `ldSketch` — a `GenotypeHandle` giving the LD reference used for QC and downstream analyses.
+
+Optional per-row columns: `varY` (phenotype variance) and, for case/control
+GWAS, `nCase` / `nControl`.
+
+`QtlSumStats` and `GwasSumStats` can be constructed in two ways:
+
+* **From a manifest** — `loadGwasSumStatsFromManifest()` /
+  `loadQtlSumStatsFromManifest()` read a table pointing at the sumstats files
+  and assemble the collection.
+* **Manually** — build the `entry` GRanges yourself and call the
+  `GwasSumStats()` / `QtlSumStats()` constructor.
+
+> **The loaders run no QC.** They build the raw collection with an empty
+> `qcInfo` slot. Allele harmonization, MAF/INFO/N filtering, and LD-mismatch QC
+> are a separate, mandatory step — `summaryStatsQc()` — documented in the
+> *Quality Control for GWAS and QTL Summary Statistics* vignette. Downstream
+> pipelines reject collections whose `qcInfo` is empty.
+
+```{r load-packages}
+library(pecotmr)
+```
+
+## Toy data for this vignette
+
+We will use the `toy_ref` PLINK1 panel (chr22) as the LD reference, and a handful of
+its variants as our summary statistics so the LD-overlap check succeeds.
+
+```{r toy-data}
+genoPrefix <- sub("\\.bed$", "",
+                  system.file("extdata", "toy_ref.bed", package = "pecotmr"))
+ldSketch <- GenotypeHandle(plink1Prefix = genoPrefix)
+
+# Five real toy_ref chr22 sites (positions and alleles taken from the panel).
+sumstatsDf <- data.frame(
+  chrom      = rep("22", 5),
+  pos        = c(14560203, 14564328, 14850625, 14870204, 14878387),
+  variant_id = c("rs11089128", "rs7288972", "rs11167319", "rs8138488", "rs2186521"),
+  A1         = c("G", "C", "G", "C", "A"),
+  A2         = c("A", "T", "T", "T", "G"),
+  z          = c(1.20, -0.42, 2.13, 0.05, -1.83),
+  n_sample   = rep(10000L, 5),
+  stringsAsFactors = FALSE)
+
+workdir <- file.path(tempdir(), "sumstats-vignette")
+dir.create(workdir, showWarnings = FALSE)
+gwasTsv <- file.path(workdir, "study1.tsv")
+readr::write_tsv(sumstatsDf, gwasTsv)
+```
+
+## GwasSumStats from a manifest
+
+The GWAS manifest has **one row per study**. `genome` and `ldSketch` are
+collection-level, so they are supplied as arguments (or as constant
+`genome` / `ldSketchPath` columns).
+
+| Column | Required | Meaning |
+|---|---|---|
+| `study` (alias `study_id`) | yes, unique | study identifier |
+| `sumStatsPath` (aliases `path`, `file_path`) | yes | sumstats file |
+| `columnMapping` (alias `column_mapping`) | no | YAML column map (see below) |
+| `nCase` / `nControl` | no | case / control counts |
+| `varY` | no | phenotype variance |
+| `genome`, `ldSketchPath` | single-valued | may instead be arguments |
+
+```{r gwas-from-manifest}
+gwasManifest <- data.frame(
+  study        = "MyGWAS",
+  sumStatsPath = gwasTsv,
+  stringsAsFactors = FALSE)
+
+gws <- loadGwasSumStatsFromManifest(
+  gwasManifest, genome = "GRCh38", ldSketch = ldSketch)
+gws
+S4Vectors::mcols(gws$entry[[1]])
+```
+
+The `ldSketch` argument also accepts a path/prefix or a chromosome-sharded
+`genoMeta` specification (see `?GenotypeHandle`), so a genome-wide reference can
+be supplied as a `#chr,path` meta file rather than a single handle.
+
+## GwasSumStats manually
+
+The loader is a wrapper over the `GwasSumStats()` constructor. Built by hand,
+the pattern is: make one `GRanges` per study with the required `mcols`, then
+call the constructor with the shared `genome` and `ldSketch`.
+
+```{r gwas-manual}
+entry <- GenomicRanges::GRanges(
+  seqnames = paste0("chr", sumstatsDf$chrom),
+  ranges   = IRanges::IRanges(start = sumstatsDf$pos, width = 1L))
+S4Vectors::mcols(entry) <- S4Vectors::DataFrame(
+  SNP = sumstatsDf$variant_id,
+  A1  = sumstatsDf$A1, A2 = sumstatsDf$A2,
+  Z   = sumstatsDf$z,  N  = sumstatsDf$n_sample)
+
+gwsManual <- GwasSumStats(
+  study    = "MyGWAS",
+  entry    = list(entry),
+  genome   = "GRCh38",
+  ldSketch = ldSketch)
+gwsManual
+```
+
+For a case/control study, pass `nCase` / `nControl`; for sufficient statistics interface with continuous traits, pass `varY`.
+
+## QtlSumStats from a manifest
+
+The QTL manifest has **one row per `(study, context, trait)` tuple**. Each row
+points at a sumstats file for that trait.
+
+| Column | Required | Meaning |
+|---|---|---|
+| `study` | yes | study identifier |
+| `context` (alias `cond`) | yes | context / condition |
+| `trait` (alias `gene_id`) | yes | molecular trait id |
+| `sumStatsPath` (alias `path`) | yes | sumstats file for this trait |
+| `columnMapping`, `varY` | no | as for GWAS |
+| `genome`, `ldSketchPath` | single-valued | may instead be arguments |
+
+```{r qtl-from-manifest}
+qtlManifest <- data.frame(
+  study        = "MyQTL",
+  context      = "Blood",
+  trait        = "ENSG00000001",
+  sumStatsPath = gwasTsv,           # reuse the toy table for one gene
+  stringsAsFactors = FALSE)
+
+qts <- loadQtlSumStatsFromManifest(
+  qtlManifest, genome = "GRCh38", ldSketch = ldSketch)
+qts
+```
+
+## QtlSumStats manually
+
+```{r qtl-manual}
+qtsManual <- QtlSumStats(
+  study    = "MyQTL",
+  context  = "Blood",
+  trait    = "ENSG00000001",
+  entry    = list(entry),
+  genome   = "GRCh38",
+  ldSketch = ldSketch)
+qtsManual
+```
+
+For a multi-context collection (e.g. as input to `mash`), pass parallel
+`study` / `context` / `trait` vectors and a matching list of `entry` GRanges —
+one element per tuple.
+
+## Reading from files
+
+### Column mapping (YAML)
+
+When columns in a  sumstats file don't match the standard names, supply a
+`columnMapping` — a YAML file of `standardName: sourceName` entries (the
+xqtl-protocol format), either per-row in the manifest or as a default argument.
+Standard keys are `chrom`, `pos`, `variant_id`, `A1`, `A2`, `z`, `n_sample`
+(and optional `beta`, `se`, `p`, `maf`, `info`).
+
+```{r column-mapping}
+oddDf <- sumstatsDf
+names(oddDf) <- c("CHR", "POS", "RSID", "EA", "OA", "ZSCORE", "SAMPLE_N")
+oddTsv <- file.path(workdir, "odd_columns.tsv")
+readr::write_tsv(oddDf, oddTsv)
+
+mapPath <- file.path(workdir, "column_map.yaml")
+yaml::write_yaml(list(chrom = "CHR", pos = "POS", variant_id = "RSID",
+                      A1 = "EA", A2 = "OA", z = "ZSCORE",
+                      n_sample = "SAMPLE_N"), mapPath)
+
+gwsMapped <- loadGwasSumStatsFromManifest(
+  data.frame(study = "MyGWAS", sumStatsPath = oddTsv, columnMapping = mapPath),
+  genome = "GRCh38", ldSketch = ldSketch)
+length(gwsMapped$entry[[1]])
+```
+
+### Region-restricted reads (tabix)
+
+If a `region` is supplied and the sumstats file is **compressed with bgzip and
+indexed with tabix** (a `<file>.tbi` must exist in the same directory), only that region is read.
+Plain-text files are read whole and the region is ignored with a warning. The
+tabix header line must begin with `#` so its column names can be recovered.
+
+```{r tabix-region}
+tabixDf <- sumstatsDf
+names(tabixDf)[1] <- "#chrom"      # tabix header convention
+tabixTsv <- file.path(workdir, "study1.sorted.tsv")
+readr::write_tsv(tabixDf, tabixTsv)
+gz <- Rsamtools::bgzip(tabixTsv, dest = paste0(tabixTsv, ".gz"), overwrite = TRUE)
+Rsamtools::indexTabix(gz, seq = 1L, start = 2L, end = 2L, comment = "#")
+
+gwsRegion <- loadGwasSumStatsFromManifest(
+  data.frame(study = "MyGWAS", sumStatsPath = gz),
+  genome = "GRCh38", ldSketch = ldSketch,
+  region = "22:14560000-14565000")
+length(gwsRegion$entry[[1]])   # only the two variants in the region
+```
+
+### GWAS-VCF
+
+VCF summary statistics are read as **GWAS-VCF**: the effect allele `A1` is the
+`ALT` allele, `A2` is `REF`, and the statistics come from the per-study FORMAT
+fields `ES`, `SE`, `LP`, `SS`, `EAF` (`Z = ES / SE`, `N = SS`, `P = 10^-LP`,
+`MAF = fold(EAF)`). Reading only a specific requires the VCF to be compressed with bgzip and indexed with tabix. **BCF is
+not supported** — convert to a bgzipped VCF first. Support for reading VCFs requires the
+`VariantAnnotation` package.
+
+```{r gwas-vcf, eval=hasVA}
+vcfLines <- c(
+  "##fileformat=VCFv4.2",
+  '##FORMAT=<ID=ES,Number=A,Type=Float,Description="effect size">',
+  '##FORMAT=<ID=SE,Number=A,Type=Float,Description="standard error">',
+  '##FORMAT=<ID=LP,Number=A,Type=Float,Description="-log10 p">',
+  '##FORMAT=<ID=SS,Number=A,Type=Float,Description="sample size">',
+  "##contig=<ID=22>",
+  paste("#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO",
+        "FORMAT", "MyGWAS", sep = "\t"))
+for (i in seq_len(nrow(sumstatsDf))) {
+  vcfLines <- c(vcfLines, paste(
+    "22", sumstatsDf$pos[i], sumstatsDf$variant_id[i],
+    sumstatsDf$A2[i], sumstatsDf$A1[i],   # REF = A2, ALT = A1
+    ".", "PASS", ".", "ES:SE:LP:SS",
+    sprintf("%.3f:0.100:1.000:10000", sumstatsDf$z[i] * 0.1), sep = "\t"))
+}
+vcfPath <- file.path(workdir, "study1.vcf")
+writeLines(vcfLines, vcfPath)
+
+gwsVcf <- loadGwasSumStatsFromManifest(
+  data.frame(study = "MyGWAS", sumStatsPath = vcfPath),
+  genome = "GRCh38", ldSketch = ldSketch)
+S4Vectors::mcols(gwsVcf$entry[[1]])[, c("SNP", "A1", "A2", "Z", "N")]
+```
+
+For a multi-sample GWAS-VCF, pass `sampleSelect = "<column>"` to pick the
+study; override the FORMAT tag names with `formatMapping` if they differ from
+`ES`/`SE`/`LP`/`SS`/`EAF`.
+
+## Next steps
+
+The collections carry no QC yet. Run `summaryStatsQc()` before any downstream
+analysis (it populates `qcInfo`; downstream pipelines require it):
+
+```{r qc, eval=FALSE}
+gws_qcd <- summaryStatsQc(gws, zMismatchQc = "slalom")
+```
+
+See the *Quality Control for GWAS and QTL Summary Statistics* vignette for the
+full QC pipeline. `QtlSumStats` and `GwasSumStats` are direct inputs to
+`fineMappingPipeline()`, `twasWeightsPipeline()` (`QtlSumStats` only) and `colocBoostPipeline()`— see the *Fine-mapping with pecotmr*, *Learning TWAS weights with pecotmr* and *Multi-trait colocalization with ColocBoost* vignettes.
+
+```{r accessors}
+getGenome(gws)
+as.character(gws$study)
+length(getSumStats(gws))   # variants in the first entry
+```
+
+```{r session-info}
+sessionInfo()
+```

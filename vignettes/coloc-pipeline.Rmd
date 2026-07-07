@@ -24,10 +24,10 @@ across many QTL outcomes in one model, use
 
 Inputs:
 
-- **QTL side** — a `QtlFineMappingResult` produced by
+- **QTL input** — a `QtlFineMappingResult` produced by
   [`fineMappingPipeline`](fine-mapping.html).
-- **GWAS side** — either a `GwasFineMappingResult` (used directly) or a
-  `GwasSumStats` (the pipeline fine-maps it inline first).
+- **GWAS input** — either a `GwasSumStats` (fine-mapping run internally) or a
+`GwasFineMappingResult` (used directly).
 
 The output is a long-format data frame with one row per
 `(QTL tuple, GWAS tuple, credible-set pair)` combination and the
@@ -41,8 +41,6 @@ library(pecotmr)
 
 ```{r bundled}
 data(qtl_dataset_example, gwas_sumstats_s4_example)
-qtl_dataset_example      <- fixupExampleGenotypePaths(qtl_dataset_example)
-gwas_sumstats_s4_example <- fixupExampleGenotypePaths(gwas_sumstats_s4_example)
 
 # Build a QtlFineMappingResult from the bundled QtlDataset.
 qtlFmr <- fineMappingPipeline(qtl_dataset_example, methods = "susie",
@@ -51,9 +49,9 @@ qtlFmr <- fineMappingPipeline(qtl_dataset_example, methods = "susie",
 
 ## QTL FMR + GWAS sumstats (inline GWAS fine-mapping)
 
-The simplest call: hand `colocPipeline()` the QTL fine-mapping result
-and a GWAS `SumStats`. The pipeline runs `fineMappingPipeline()`
-internally on the GWAS sumstats (with `finemappingMethods`), then runs
+The recommend approach is to provide `colocPipeline()` a `QtlFineMappingResult`
+and a `GwasSumStats`. The pipeline runs `fineMappingPipeline()`
+internally on the GWAS sumstats (with `finemappingMethods`) over the exact window used in the `QtlFineMappingResult`, then runs
 `coloc.bf_bf` per (QTL, GWAS) pair.
 
 ```{r coloc-quickstart}
@@ -75,11 +73,11 @@ res2 <- colocPipeline(
 attr(res2, "gwasFineMapping")
 ```
 
+If the QTL `FineMappingResult` has an LD sketch because it was run on summary statistics it must match the LD sketch for the `GWASSumStats`.
+
 ## QTL FMR + pre-computed GWAS FMR
 
-If you already have a `GwasFineMappingResult` (e.g. computed once and
-reused), pass it directly — the pipeline skips the inline fine-mapping
-step:
+If you already have a `GwasFineMappingResult` (typically computed over LD blocks), you can use that fine-mapping result directly:
 
 ```{r coloc-precomputed-fmr, eval=FALSE}
 gwasFmr <- fineMappingPipeline(gwas_sumstats_s4_example, methods = "susie")
@@ -87,28 +85,22 @@ colocPipeline(qtlFineMappingResult = qtlFmr,
               gwasInput            = gwasFmr)
 ```
 
+The disadvantage of this approach is that LD blocks will not align with cis-QTL windows.  Ultimately this means that the variable
+selection in the QTL and GWAS fine-mapping will have been done over different variant sets, which may reduce the sensitivity for
+colocalizations, particuarly in areas with complex LD.
+
 ## Filtering effects fed into coloc
 
-`coloc::coloc.bf_bf` accepts one LBF matrix per side. By default, every
+`coloc::coloc.bf_bf` accepts one LBF matrix for the QTL and one for hte GWAS. By default, every
 effect with non-trivial prior variance (`V > priorTol`) gets included.
-Two opt-in filters tighten this:
+Two opt-in filters can adjust this:
 
-```{r coloc-filters-table, echo=FALSE}
-df <- data.frame(
-  Knob = c("`filterLbfCs`", "`filterLbfCsSecondary`",
-           "`filterLbfCsConcentration`", "`priorTol`"),
-  When = c("`filterLbfCsSecondary` is NULL",
-           "`filterLbfCsSecondary` is non-NULL (overrides `filterLbfCs`)",
-           "only with `filterLbfCsSecondary`",
-           "default filter (no `filterLbfCs*`)"),
-  What = c("TRUE keeps only effects that produced a credible set (`trimmedFit$sets$cs_index`).",
-           "Numeric coverage in (0,1). Runs a CS-concentration filter at that coverage.",
-           "Numeric in (0,1). Concentration factor: a CS at coverage X is kept only if it spans fewer than `nVariants * X * concentration` variants.",
-           "Drop effects whose estimated prior variance is at or below this threshold."),
-  Default = c("FALSE", "NULL", "0.5", "1e-9"),
-  stringsAsFactors = FALSE)
-knitr::kable(df)
-```
+| Filter | Description | Default |
+|---|---|---|
+| `filterLbfCs` | TRUE keeps only effects that produced a credible set (`trimmedFit$sets$cs_index`). | FALSE |
+| `filterLbfCsSecondary` | Numeric coverage in (0,1). Runs a CS-concentration filter at that coverage. | NULL |
+| `filterLbfCsConcentration` | Numeric in (0,1). Concentration factor: a CS at coverage X is kept only if it spans fewer than `nVariants * X * concentration` variants. | 0.5 |
+| `priorTol` | Drop effects whose estimated prior variance is at or below this threshold. | 1e-9 |
 
 ```{r coloc-filter-example, eval=FALSE}
 colocPipeline(
@@ -150,7 +142,7 @@ colocPipeline(
 When the QTL and GWAS fine-mapping results were fit on different
 variant sets (common when the user declines RAISS imputation, or when
 the GWAS FMR carries variants the QTL FMR doesn't), `adjustPips = TRUE`
-(default) renormalizes each side's PIPs to the cross-FMR variant
+(default) renormalizes the PIPs for each objectl to the cross-FMR variant
 intersection before any per-pair inference. Pass `FALSE` to use the
 FMRs as supplied.
 
@@ -160,13 +152,6 @@ colocPipeline(
   gwasInput            = gwas_sumstats_s4_example,
   adjustPips           = TRUE)   # default
 ```
-
-## LD-sketch consistency
-
-The QTL `FineMappingResult` and the GWAS `SumStats`/FMR must share an
-LD sketch (or the QTL side's `ldSketch` must be `NULL` — indicating an
-individual-level fit, in which case the check is skipped on the QTL
-side). Mismatch is a hard error.
 
 ## Common parameters
 
@@ -199,11 +184,3 @@ Each row is one CS-pair combination; in particular the `idx1` /
 `idx2` columns identify the QTL / GWAS effect indices within the
 respective LBF matrices, and `PP.H4.abf` is the standard coloc
 shared-signal posterior.
-
-## Next steps
-
-- For multi-trait colocalization across many QTL outcomes
-  simultaneously, see
-  [`colocboostPipeline`](colocboost-pipeline.html).
-- Couple coloc evidence with per-gene TWAS Z + MR via
-  [`causalInferencePipeline`](twas-zscore.html).

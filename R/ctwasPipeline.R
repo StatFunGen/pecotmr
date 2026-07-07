@@ -1242,7 +1242,7 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
 # @noRd
 .ctwasLdPanelKey <- function(handle) {
   fmt <- getFormat(handle)
-  stem <- getPath(handle)
+  stem <- .genotypeReadPath(handle)
   candidates <- switch(fmt,
     "plink2" = c(paste0(stem, ".pgen")),
     "plink1" = c(paste0(stem, ".bed")),

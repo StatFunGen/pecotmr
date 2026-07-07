@@ -899,8 +899,8 @@ test_that("ctwasPipeline: real-engine end-to-end on the bundled example panel", 
   skip_if_not_installed("ctwas")
   data(gwas_sumstats_s4_example)
   data(qtl_dataset_example)
-  gss <- fixupExampleGenotypePaths(gwas_sumstats_s4_example)
-  qd  <- fixupExampleGenotypePaths(qtl_dataset_example)
+  gss <- gwas_sumstats_s4_example
+  qd  <- qtl_dataset_example
   gh  <- qd@genotypes
 
   # 5-variant synthetic gene from the bundled panel.
@@ -1015,7 +1015,7 @@ test_that(".ctwasFilterVariants: returns NULL when no variants survive", {
 
 test_that(".ctwasBuildWeights: maxNumVariants caps the per-gene weight matrix", {
   data(qtl_dataset_example)
-  qd <- fixupExampleGenotypePaths(qtl_dataset_example)
+  qd <- qtl_dataset_example
   gh <- qd@genotypes
   vids <- gh@snpInfo$SNP[1:5]
   ent <- TwasWeightsEntry(
@@ -1035,7 +1035,7 @@ test_that(".ctwasBuildWeights: maxNumVariants caps the per-gene weight matrix", 
 
 test_that(".ctwasBuildWeights: twasWeightCutoff drops low-magnitude variants", {
   data(qtl_dataset_example)
-  qd <- fixupExampleGenotypePaths(qtl_dataset_example)
+  qd <- qtl_dataset_example
   gh <- qd@genotypes
   vids <- gh@snpInfo$SNP[1:5]
   ent <- TwasWeightsEntry(
