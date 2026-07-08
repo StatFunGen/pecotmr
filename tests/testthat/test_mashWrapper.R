@@ -457,7 +457,7 @@ test_that("mashRandNullSample errors when excludeCondition not found (bhat path)
   )
 })
 
-test_that("mashRandNullSample excludeCondition with column names errors due to numeric indexing", {
+test_that("mashRandNullSample drops excluded condition by column name", {
   dat <- list(
     z = data.frame(
       cond1 = c(0.1, 0.2, 0.3, 0.4, 0.5),
@@ -465,11 +465,11 @@ test_that("mashRandNullSample excludeCondition with column names errors due to n
       cond3 = c(0.3, 0.3, 0.3, 0.3, 0.3)
     )
   )
-  expect_error(
-    mashRandNullSample(dat, nRandom = 3, nNull = 2,
-                           excludeCondition = "cond3", seed = 42),
-    "invalid argument to unary operator"
-  )
+  result <- mashRandNullSample(dat, nRandom = 3, nNull = 2,
+                                   excludeCondition = "cond3", seed = 42)
+  expect_equal(colnames(result$random$z), c("cond1", "cond2"))
+  expect_equal(colnames(result$null$z), c("cond1", "cond2"))
+  expect_false("cond3" %in% colnames(result$random$z))
 })
 
 test_that("mashRandNullSample extracts null data with z scores when enough null variants exist", {
