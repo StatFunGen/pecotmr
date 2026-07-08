@@ -36,7 +36,14 @@ setClass("GwasFineMappingResult",
       if (!all(entryTypes))
         errors <- c(errors,
           "every element of the `entry` column must be a FineMappingEntry")
-      keyDf <- as.data.frame(object[, c("study", "method", "region_id")])
+      # Extract key columns directly rather than via `object[, keyCols]`:
+      # column-subsetting preserves the GwasFineMappingResult class while
+      # dropping the required `entry` column, and older S4Vectors revalidates
+      # that intermediate, spuriously failing with "missing columns: entry".
+      keyCols <- c("study", "method", "region_id")
+      keyDf <- as.data.frame(
+        lapply(keyCols, function(cn) object[[cn]]),
+        col.names = keyCols, stringsAsFactors = FALSE)
       if (anyDuplicated(keyDf))
         errors <- c(errors,
           "(study, method, region_id) tuple uniqueness violated")

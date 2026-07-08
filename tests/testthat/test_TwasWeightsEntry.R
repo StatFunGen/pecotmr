@@ -57,6 +57,19 @@ test_that("TwasWeights: rejects non-TwasWeightsEntry rows", {
 })
 
 
+test_that("TwasWeights: validity does not recurse on key subset (#546)", {
+  # Building the tuple-uniqueness key via `object[, keyCols]` preserves the
+  # TwasWeights class while dropping the required `entry` column; older
+  # S4Vectors revalidates that intermediate and fails with "missing columns".
+  e <- .sc_makeTwasWeightsEntry(p = 5L)
+  res <- TwasWeights(
+    study = "s1", context = "c1", trait = "t1", method = "lasso",
+    entry = list(e))
+  expect_s4_class(res, "TwasWeights")
+  expect_true(validObject(res))
+})
+
+
 
 # === Tests migrated from test_showMethods.R (TwasWeightsEntry) ===
 

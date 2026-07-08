@@ -14,6 +14,23 @@ test_that("GwasFineMappingResult: builds a collection keyed by 2-tuple", {
 })
 
 
+test_that("GwasFineMappingResult: validity does not recurse on key subset (#546)", {
+  # The validity method builds a key-column data.frame to check tuple
+  # uniqueness. Doing so via `object[, keyCols]` preserves the
+  # GwasFineMappingResult class while dropping the required `entry` column;
+  # older S4Vectors revalidates that intermediate and fails with
+  # "missing columns: entry".
+  e <- .sc_makeFineMappingEntry(3)
+  res <- GwasFineMappingResult(study = "g1", method = "susie",
+                               entry = list(e))
+  expect_s4_class(res, "GwasFineMappingResult")
+  expect_true(validObject(res))
+
+  sub <- res[, c("study", "method", "region_id")]
+  expect_false("entry" %in% names(sub))
+})
+
+
 test_that("GwasFineMappingResult: errors on length mismatch", {
   e <- .sc_makeFineMappingEntry(3)
   expect_error(
