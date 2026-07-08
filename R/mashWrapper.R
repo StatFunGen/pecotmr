@@ -199,7 +199,8 @@ mashRandNullSample <- function(dat, nRandom, nNull, excludeCondition, seed = NUL
       stop(paste("Error: excludeCondition are not present in", dat$region))
     }
     for (key in intersect(names(dat), c("z", "bhat", "sbhat"))) {
-      dat[[key]] <- dat[[key]][, -excludeCondition, drop = FALSE]
+      keep <- setdiff(colnames(dat[[key]]), excludeCondition)
+      dat[[key]] <- dat[[key]][, keep, drop = FALSE]
     }
   }
 
