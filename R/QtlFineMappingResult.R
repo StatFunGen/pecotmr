@@ -42,7 +42,13 @@ setClass("QtlFineMappingResult",
             "'%s' column must be character (got %s)", jc, class(vals)[[1L]]))
       }
       keyCols <- c("study", "context", "trait", "method", jointCols)
-      keyDf <- as.data.frame(object[, keyCols, drop = FALSE])
+      # Extract key columns directly rather than via `object[, keyCols]`:
+      # column-subsetting preserves the QtlFineMappingResult class while
+      # dropping the required `entry` column, and older S4Vectors revalidates
+      # that intermediate, spuriously failing with "missing columns: entry".
+      keyDf <- as.data.frame(
+        lapply(keyCols, function(cn) object[[cn]]),
+        col.names = keyCols, stringsAsFactors = FALSE)
       if (anyDuplicated(keyDf))
         errors <- c(errors,
           "(study, context, trait, method[, joint*]) tuple uniqueness violated")

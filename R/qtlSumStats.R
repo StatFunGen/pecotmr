@@ -35,7 +35,14 @@ setClass("QtlSumStats",
       if (!all(entryTypes))
         errors <- c(errors,
           "every element of the `entry` column must be a GRanges")
-      keyDf <- as.data.frame(object[, c("study", "context", "trait")])
+      # Extract key columns directly rather than via `object[, keyCols]`:
+      # column-subsetting preserves the QtlSumStats class while dropping the
+      # required `entry` column, and older S4Vectors revalidates that
+      # intermediate, spuriously failing with "missing columns: entry".
+      keyCols <- c("study", "context", "trait")
+      keyDf <- as.data.frame(
+        lapply(keyCols, function(cn) object[[cn]]),
+        col.names = keyCols, stringsAsFactors = FALSE)
       if (anyDuplicated(keyDf))
         errors <- c(errors,
           "(study, context, trait) tuple uniqueness violated")

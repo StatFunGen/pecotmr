@@ -17,6 +17,26 @@ test_that("QtlFineMappingResult: builds a collection keyed by 4-tuple", {
 })
 
 
+test_that("QtlFineMappingResult: validity does not recurse on key subset (#546)", {
+  # The validity method builds a key-column data.frame to check tuple
+  # uniqueness. Doing so via `object[, keyCols]` preserves the
+  # QtlFineMappingResult class while dropping the required `entry` column;
+  # older S4Vectors revalidates that intermediate and fails with
+  # "missing columns: entry". Guard the reporter's exact scenario.
+  e <- .sc_makeFineMappingEntry(3)
+  res <- QtlFineMappingResult(
+    study = "s", context = "c", trait = "t", method = "qsusie",
+    entry = list(e), ldSketch = NULL)
+  expect_s4_class(res, "QtlFineMappingResult")
+  expect_true(validObject(res))
+
+  # A bare key-column subset is itself an invalid QtlFineMappingResult;
+  # validity must never re-run over it.
+  sub <- res[, c("study", "context", "trait", "method"), drop = FALSE]
+  expect_false("entry" %in% names(sub))
+})
+
+
 test_that("QtlFineMappingResult: stores an LD sketch when supplied", {
   e <- .sc_makeFineMappingEntry(3)
   gh <- .sc_makeGenotypeHandle()
