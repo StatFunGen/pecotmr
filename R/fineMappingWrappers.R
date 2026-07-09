@@ -1898,7 +1898,7 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
     if (verbose >= 1)
       message(sprintf("Cross-validating (%d folds) for (context='%s', trait='%s') ...",
                       cvFolds, ctx, tid))
-    cv <- .fmCrossValidate(X, y, names(out), methodArgs, cvFolds,
+    cv <- .fmWeightsCv(X, y, names(out), methodArgs, cvFolds,
                            samplePartition = samplePartition,
                            coverage = coverage, verbose = verbose)
     for (tk in names(out)) {

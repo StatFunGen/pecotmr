@@ -285,6 +285,27 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
   isTRUE(tryCatch(x@keepIndel, error = function(e) TRUE))
 }
 
+# Internal: return a copy of a QtlDataset with the supplied filter cutoffs /
+# keep-lists REPLACING the stored slot values (NULL = leave the stored value
+# untouched). This lets a pipeline accept per-call filter overrides as ordinary
+# arguments instead of forcing callers to mutate @slots directly (which bypasses
+# the class's validity checks). Applied against a validated copy.
+.qtlApplyFilterOverrides <- function(data,
+                                     mafCutoff = NULL, macCutoff = NULL,
+                                     xvarCutoff = NULL, imissCutoff = NULL,
+                                     keepIndel = NULL,
+                                     keepSamples = NULL, keepVariants = NULL) {
+  if (!is.null(mafCutoff))    data@mafCutoff    <- as.numeric(mafCutoff)
+  if (!is.null(macCutoff))    data@macCutoff    <- as.numeric(macCutoff)
+  if (!is.null(xvarCutoff))   data@xvarCutoff   <- as.numeric(xvarCutoff)
+  if (!is.null(imissCutoff))  data@imissCutoff  <- as.numeric(imissCutoff)
+  if (!is.null(keepIndel))    data@keepIndel    <- as.logical(keepIndel)
+  if (!is.null(keepSamples))  data@keepSamples  <- as.character(keepSamples)
+  if (!is.null(keepVariants)) data@keepVariants <- as.character(keepVariants)
+  methods::validObject(data)
+  data
+}
+
 # Internal: extract the panel dosage block (samples x variants) for the
 # requested region, narrow to the requested sample set, and apply lazy QC
 # (per-sample imiss filter, then per-variant max(mafCutoff,

@@ -179,7 +179,7 @@ test_that("twasWeightsPipeline(QtlDataset): runs end-to-end with mocked solvers"
   expect_setequal(getTraits(res), c("ENSG_A", "ENSG_B"))
 })
 
-test_that("twasWeightsPipeline(QtlDataset): minTwasMaf/minTwasXvar tighten the variant set", {
+test_that("twasWeightsPipeline(QtlDataset): mafCutoff/xvarCutoff overrides tighten the variant set", {
   qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
   do.call(local_mocked_bindings,
           c(list(extractBlockGenotypes = .tp_mockExtractor()),
@@ -193,12 +193,13 @@ test_that("twasWeightsPipeline(QtlDataset): minTwasMaf/minTwasXvar tighten the v
   # Baseline: all 20 mock variants are retained.
   expect_equal(vcount(call()), 20L)
   # Mock MAF spans 0.225..0.388; a 0.25 cutoff drops the 3 lowest-MAF variants
-  # while leaving the rest, so the TWAS variant set strictly shrinks.
-  tight <- vcount(call(minTwasMaf = 0.25))
+  # while leaving the rest, so the variant set strictly shrinks. The filter is
+  # the same one fine-mapping uses (unified QtlDataset QC), not TWAS-specific.
+  tight <- vcount(call(mafCutoff = 0.25))
   expect_lt(tight, 20L)
   expect_gt(tight, 0L)
-  # minTwasXvar is wired through the same elevation; a no-op value is accepted.
-  expect_s4_class(call(minTwasXvar = 0), "TwasWeights")
+  # xvarCutoff overrides the per-variant variance slot; a no-op value is accepted.
+  expect_s4_class(call(xvarCutoff = 0), "TwasWeights")
 })
 
 test_that("twasWeightsPipeline(QtlDataset): contexts filter restricts the per-context loop", {

@@ -122,7 +122,7 @@ setMethod("fitJointGroup", signature("IndividualJointGroup", "FmJointPipeline"),
       cvM <- NULL
       cvFolds <- if (is.null(cfg$cvFolds)) 0L else cfg$cvFolds
       if (cvFolds > 1L) {
-        cv <- .fmCrossValidate(Xc, Yc, "fsusie", args$methodArgs, cvFolds,
+        cv <- .fmWeightsCv(Xc, Yc, "fsusie", args$methodArgs, cvFolds,
                                samplePartition = cfg$samplePartition,
                                coverage = cfg$coverage, pos = group@pos,
                                verbose = verbose)
@@ -187,7 +187,7 @@ setMethod("fitJointGroup", signature("IndividualJointGroup", "FmJointPipeline"),
       sp <- cfg$samplePartition
       if (is.null(sp) && !is.null(mvCv)) sp <- mvCv$samplePartition
       mvPriorCv <- .fmBuildMvsusiePriorCv(mvCv, mvFitParts, colnames(Ys), ddCut)
-      cv <- .fmCrossValidate(Xc, Ys, "mvsusie", args$methodArgs, cvFolds,
+      cv <- .fmWeightsCv(Xc, Ys, "mvsusie", args$methodArgs, cvFolds,
                              samplePartition = sp, coverage = cfg$coverage,
                              verbose = verbose, mvPrior = mvPrior,
                              mvPriorCv = mvPriorCv)

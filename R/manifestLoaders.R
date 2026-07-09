@@ -311,7 +311,12 @@ NULL
   lines <- unlist(Rsamtools::scanTabix(tf, param = gr), use.names = FALSE)
   if (length(lines) == 0L) return(emptyDf)
   txt <- paste(c(colLine, lines), collapse = "\n")
-  as.data.frame(readr::read_tsv(I(txt), show_col_types = FALSE, progress = FALSE),
+  # Read every column as character; .resolveSumstatCols() coerces each field to
+  # its target type. This prevents readr from type-guessing an allele/ID column
+  # that is uniformly T/F within the region as logical (the allele "T" -> TRUE),
+  # which would corrupt the variant id and break LD-containment matching.
+  as.data.frame(readr::read_tsv(I(txt), show_col_types = FALSE, progress = FALSE,
+                                col_types = readr::cols(.default = readr::col_character())),
                 check.names = FALSE)
 }
 
@@ -531,7 +536,11 @@ NULL
       warning(label, ": '", path, "' is not tabix-indexed; ",
               "region ignored, reading the whole file.")
     }
-    as.data.frame(readr::read_tsv(path, show_col_types = FALSE, progress = FALSE),
+    # Read every column as character; .resolveSumstatCols() coerces each field
+    # to its target type. This prevents readr from type-guessing an allele/ID
+    # column that is uniformly T/F as logical (the allele "T" -> TRUE).
+    as.data.frame(readr::read_tsv(path, show_col_types = FALSE, progress = FALSE,
+                                  col_types = readr::cols(.default = readr::col_character())),
                   check.names = FALSE)
   }
   .resolveSumstatCols(raw, columnMapping, label)
