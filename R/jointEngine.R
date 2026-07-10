@@ -69,29 +69,44 @@ NULL
        foldFits    = cvRes$foldFits)
 }
 
-# Mutable accumulator for the joint rows the engine assembles; each add()
-# appends one fitted group as one result row, deriving its identity + joint*
-# members from the group's conditions.
+# Mutable accumulator for the joint rows the engine assembles. Each add(...)
+# stores one fitted group as a per-row RECORD (a named list of column values
+# whose names match the target collection constructor's parameters). Nothing
+# here enumerates columns, so adding a column needs only that it be passed to
+# add(); construct() folds the records into a collection via .buildJointResult.
 .jointRows <- function() {
   e <- new.env(parent = emptyenv())
-  e$study <- character(0); e$context <- character(0); e$trait <- character(0)
-  e$method <- character(0); e$entries <- list()
-  e$jointStudies <- character(0); e$jointContexts <- character(0)
-  e$jointTraits <- character(0)
-  e$add <- function(study, context, trait, method, entry,
-                    jointStudies = NA_character_,
-                    jointContexts = NA_character_,
-                    jointTraits = NA_character_) {
-    e$study   <- c(e$study, study)
-    e$context <- c(e$context, context)
-    e$trait   <- c(e$trait, trait)
-    e$method  <- c(e$method, method)
-    e$entries[[length(e$entries) + 1L]] <- entry
-    e$jointStudies  <- c(e$jointStudies,  jointStudies)
-    e$jointContexts <- c(e$jointContexts, jointContexts)
-    e$jointTraits   <- c(e$jointTraits,   jointTraits)
-  }
+  e$records <- list()
+  e$add <- function(...) e$records[[length(e$records) + 1L]] <- list(...)
   e
+}
+
+# Genomic anchor of one trait for the `region` provenance column: the trait's
+# own coordinates for a QtlDataset (phenotype rowRanges), or the variant-span
+# window of the matching entry for a QtlSumStats (an approximation -- summary
+# stats carry no gene coordinate). Returns a length-1 GRanges, or NULL when the
+# anchor cannot be determined (the accumulator then records a chrUn sentinel).
+.jointTraitRegion <- function(data, context, trait) {
+  if (methods::is(data, "QtlDataset")) {
+    se <- tryCatch(getPhenotypes(data, contexts = context),
+                   error = function(e) NULL)
+    if (is.null(se)) return(NULL)
+    rr <- SummarizedExperiment::rowRanges(se)
+    if (!(trait %in% names(rr))) return(NULL)
+    return(GenomicRanges::granges(rr[trait])[1L])
+  }
+  if (methods::is(data, "QtlSumStats")) {
+    idx <- which(as.character(data$context) == context &
+                 as.character(data$trait) == trait)
+    if (length(idx) == 0L) return(NULL)
+    gr <- data$entry[[idx[[1L]]]]
+    if (length(gr) == 0L) return(NULL)
+    return(GenomicRanges::GRanges(
+      as.character(GenomicRanges::seqnames(gr))[[1L]],
+      IRanges::IRanges(min(GenomicRanges::start(gr)),
+                       max(GenomicRanges::end(gr)))))
+  }
+  NULL
 }
 
 # ---- fitters (fitJointGroup) ------------------------------------------------
@@ -122,10 +137,11 @@ setMethod("fitJointGroup", signature("IndividualJointGroup", "FmJointPipeline"),
       cvM <- NULL
       cvFolds <- if (is.null(cfg$cvFolds)) 0L else cfg$cvFolds
       if (cvFolds > 1L) {
-        cv <- .fmCrossValidate(Xc, Yc, "fsusie", args$methodArgs, cvFolds,
+        cv <- .fmWeightsCv(Xc, Yc, "fsusie", args$methodArgs, cvFolds,
                                samplePartition = cfg$samplePartition,
                                coverage = cfg$coverage, pos = group@pos,
-                               verbose = verbose)
+                               verbose = verbose,
+                               numThreads = if (is.null(cfg$cvThreads)) 1L else cfg$cvThreads)
         cvM <- .fmSliceCv(cv, "fsusie")
       }
       return(lapply(seq_len(nCond), function(r) {
@@ -187,10 +203,11 @@ setMethod("fitJointGroup", signature("IndividualJointGroup", "FmJointPipeline"),
       sp <- cfg$samplePartition
       if (is.null(sp) && !is.null(mvCv)) sp <- mvCv$samplePartition
       mvPriorCv <- .fmBuildMvsusiePriorCv(mvCv, mvFitParts, colnames(Ys), ddCut)
-      cv <- .fmCrossValidate(Xc, Ys, "mvsusie", args$methodArgs, cvFolds,
+      cv <- .fmWeightsCv(Xc, Ys, "mvsusie", args$methodArgs, cvFolds,
                              samplePartition = sp, coverage = cfg$coverage,
                              verbose = verbose, mvPrior = mvPrior,
-                             mvPriorCv = mvPriorCv)
+                             mvPriorCv = mvPriorCv,
+                             numThreads = if (is.null(cfg$cvThreads)) 1L else cfg$cvThreads)
       cvM <- .fmSliceCv(cv, "mvsusie")
     }
     # One per-context entry per ORIGINAL condition: NULL for screened-out columns
@@ -420,27 +437,33 @@ setMethod("fitJointGroup", signature("SumStatsJointGroup", "TwasJointPipeline"),
 # Both pipelines assemble identically-shaped joint rows; only the result
 # collection differs (the axis-3 divergence the markers encode). Only the joint*
 # columns for axes that actually vary are attached.
-.constructJointArgs <- function(pipeline, rows) {
-  a <- list(study = rows$study, context = rows$context, trait = rows$trait,
-            method = rows$method, entry = rows$entries,
-            ldSketch = pipeline@config$ldSketch)
-  if (any(!is.na(rows$jointStudies)))  a$jointStudies  <- rows$jointStudies
-  if (any(!is.na(rows$jointContexts))) a$jointContexts <- rows$jointContexts
-  if (any(!is.na(rows$jointTraits)))   a$jointTraits   <- rows$jointTraits
-  a
+# Fold the accumulator's per-row records into one collection: build each record
+# into a 1-row collection via `constructor`, then union them with the generic
+# .rbindCollections (which aligns optional columns and sets the ldSketch slot).
+# The only per-row transforms are: wrap `entry` in a list, and drop an NA joint*
+# value so the 1-row collection omits that column (the union re-adds it, padded,
+# only when some row is joint). Every other field -- study/context/trait/method,
+# region, and any future column -- flows through untouched.
+.buildJointResult <- function(constructor, records, ldSketch = NULL) {
+  if (length(records) == 0L) return(NULL)
+  parts <- lapply(records, function(rec) {
+    rec$entry <- list(rec$entry)
+    for (jc in c("jointStudies", "jointContexts", "jointTraits"))
+      if (!is.null(rec[[jc]]) && length(rec[[jc]]) == 1L && is.na(rec[[jc]]))
+        rec[[jc]] <- NULL
+    do.call(constructor, rec)
+  })
+  .rbindCollections(parts, ldSketch = ldSketch)
 }
 
 setMethod("construct", "FmJointPipeline",
-  function(pipeline, rows, ...) {
-    if (length(rows$entries) == 0L) return(NULL)
-    do.call(QtlFineMappingResult, .constructJointArgs(pipeline, rows))
-  })
+  function(pipeline, rows, ...)
+    .buildJointResult(QtlFineMappingResult, rows$records,
+                      pipeline@config$ldSketch))
 
 setMethod("construct", "TwasJointPipeline",
-  function(pipeline, rows, ...) {
-    if (length(rows$entries) == 0L) return(NULL)
-    do.call(TwasWeights, .constructJointArgs(pipeline, rows))
-  })
+  function(pipeline, rows, ...)
+    .buildJointResult(TwasWeights, rows$records, pipeline@config$ldSketch))
 
 # ---- enumerators (pattern x dataForm -> list<JointGroup>) --------------------
 
@@ -721,11 +744,14 @@ setMethod("construct", "TwasJointPipeline",
       for (i in seq_len(min(length(entries), nrow(cond)))) {
         e <- entries[[i]]
         if (is.null(e)) next
+        ctx <- as.character(cond$context[[i]])
+        tid <- as.character(cond$trait[[i]])
+        reg <- .jointTraitRegion(data, ctx, tid)
         rows$add(study = as.character(cond$study[[i]]),
-                 context = as.character(cond$context[[i]]),
-                 trait = as.character(cond$trait[[i]]),
+                 context = ctx, trait = tid,
                  method = method, entry = e,
-                 jointStudies = js, jointContexts = jc, jointTraits = jt)
+                 jointStudies = js, jointContexts = jc, jointTraits = jt,
+                 region = reg)
       }
     }
     # Twas: resolve this group's fine-mapping fits + CV (keyed on its first

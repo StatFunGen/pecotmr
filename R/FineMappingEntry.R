@@ -113,6 +113,44 @@ FineMappingEntry <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 setMethod("getVariantIds", "FineMappingEntry",
           function(x, ...) x@variantIds)
 
+# cTWAS weight-source accessors for a FineMappingEntry. resolveWeights returns
+# the topLoci posterior effect colSums(alpha * mu) (buildTopLoci), which is on
+# the STANDARDIZED scale -- unlike susieWeights / the cTWAS renorm, it does NOT
+# divide by X_column_scale_factors. So:
+#   getStandardized -> TRUE   skip cTWAS's per-variant variance scaling, which
+#                             would double-standardize the effect (RSS and
+#                             individual fits alike -- posterior_mean is always
+#                             colSums(alpha*mu)).
+#   getFits         -> NULL   skip cTWAS's alpha renormalisation, which recomputes
+#                             an UNstandardized weight (÷ scale factors) that is
+#                             inconsistent with the standardized posterior effect.
+# This lands on the same scale as the susie-TwasWeights path: an unstandardized
+# susie weight (mu / scale) x sqrt(var) = mu = the standardized posterior effect.
+# (getSusieFit still exposes the fit for non-weight uses.)
+#' @rdname getFits
+#' @export
+setMethod("getFits", "FineMappingEntry", function(x, ...) NULL)
+
+#' @rdname getStandardized
+#' @export
+setMethod("getStandardized", "FineMappingEntry", function(x, ...) TRUE)
+
+#' @rdname resolveWeights
+#' @export
+setMethod("resolveWeights", "FineMappingEntry", function(x, ...) {
+  empty <- list(variantIds = character(0), weights = numeric(0))
+  # getTopLoci projects the posterior effect to `beta` (= posterior_mean);
+  # use it as the per-variant weight, aligned with variant_id.
+  tl <- getTopLoci(x)
+  if (is.null(tl) || nrow(tl) == 0L ||
+      !all(c("variant_id", "beta") %in% names(tl))) return(empty)
+  vids <- as.character(tl$variant_id)
+  w    <- as.numeric(tl$beta)
+  ok   <- !is.na(vids) & !is.na(w)
+  if (!any(ok)) return(empty)
+  list(variantIds = vids[ok], weights = w[ok])
+})
+
 #' @rdname getSusieFit
 #' @export
 setMethod("getSusieFit", "FineMappingEntry",

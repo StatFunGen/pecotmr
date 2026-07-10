@@ -298,10 +298,36 @@ GenotypeHandle <- function(path = NULL,
   tryCatch(handle@chromPaths, error = function(e) character(0))
 }
 
+# Case-insensitive match of the first of `aliases` present in `cols`; falls
+# back to the `default` column position when none of the aliases are present.
+.metaMatchCol <- function(cols, aliases, default) {
+  hit <- which(tolower(cols) %in% tolower(aliases))
+  if (length(hit) > 0L) hit[[1L]] else default
+}
+
+# Enforce one payload per chromosome key: LD sketches / sharded genotypes are
+# genome-wide or per-chromosome, never sub-chromosomal, so a chromosome mapping
+# to two distinct payloads is an error. Returns the data.frame unchanged.
+.metaCheckUniqueChrom <- function(df) {
+  byChr <- split(df$path, df$chrom)
+  multi <- names(byChr)[vapply(byChr, function(p) length(unique(p)) > 1L,
+                               logical(1L))]
+  if (length(multi) > 0L)
+    stop("GenotypeHandle(genoMeta): chromosome(s) ",
+         paste(multi, collapse = ", "),
+         " map to multiple genotype payloads; each chromosome must map to ",
+         "exactly one payload (no sub-chromosomal blocks).")
+  df
+}
+
 # Parse the genoMeta input into a data.frame(chrom, path). Accepts either a
-# path to a #chr/path meta file (whitespace- or tab-delimited, with header)
-# or a named character vector (names = chromosomes). Relative payload paths
-# in a meta file are resolved against the meta file's own directory.
+# path to a meta file (whitespace- or tab-delimited, with header) or a named
+# character vector (names = chromosomes). In a meta file the chromosome and
+# path columns are matched BY NAME -- chromosome from #chr/#chrom/chr/chrom and
+# path from path/payload/prefix/genotype -- so extra columns (e.g. legacy
+# start/end) and non-standard column order are tolerated; the first two columns
+# are used only when the header carries none of those aliases. Relative payload
+# paths are resolved against the meta file's own directory.
 #' @keywords internal
 .parseChromMeta <- function(genoMeta) {
   isMetaFile <- is.character(genoMeta) && length(genoMeta) == 1L &&
@@ -313,18 +339,25 @@ GenotypeHandle <- function(path = NULL,
     if (ncol(meta) < 2L)
       stop("GenotypeHandle(genoMeta): meta file '", genoMeta,
            "' must have at least 2 columns (chromosome, path).")
-    chrom <- as.character(meta[[1L]])
-    pth   <- as.character(meta[[2L]])
+    chromCol <- .metaMatchCol(names(meta),
+                              c("#chr", "#chrom", "chr", "chrom"), default = 1L)
+    pathCol  <- .metaMatchCol(names(meta),
+                              c("path", "payload", "prefix", "genotype"),
+                              default = 2L)
+    chrom <- as.character(meta[[chromCol]])
+    pth   <- as.character(meta[[pathCol]])
     base  <- dirname(normalizePath(genoMeta))
     pth <- vapply(pth, function(p) {
       if (grepl("^(/|[A-Za-z]:)", p) || file.exists(p)) p else file.path(base, p)
     }, character(1), USE.NAMES = FALSE)
-    return(data.frame(chrom = chrom, path = pth, stringsAsFactors = FALSE))
+    return(.metaCheckUniqueChrom(
+      data.frame(chrom = chrom, path = pth, stringsAsFactors = FALSE)))
   }
   if (is.character(genoMeta) && length(genoMeta) >= 1L &&
       !is.null(names(genoMeta))) {
-    return(data.frame(chrom = names(genoMeta), path = unname(genoMeta),
-                      stringsAsFactors = FALSE))
+    return(.metaCheckUniqueChrom(
+      data.frame(chrom = names(genoMeta), path = unname(genoMeta),
+                 stringsAsFactors = FALSE)))
   }
   stop("GenotypeHandle(genoMeta): expected a path to a `#chr,path` meta file ",
        "or a named character vector (names = chromosomes, values = paths).")

@@ -178,9 +178,12 @@ setGeneric(".fmrSelectEntry", function(x, ...) standardGeneric(".fmrSelectEntry"
 setMethod("getCs", "FineMappingResultBase",
   function(x, study = NULL, context = NULL, trait = NULL, method = NULL,
            region = NULL, coverage = 0.95, ...) {
-    getCs(.fmrSelectEntry(x, study = study, context = context, trait = trait,
-                          method = method, region = region),
-          coverage = coverage)
+    # Selectors pinning one entry -> that entry's bare credible-set table; no /
+    # partial selectors -> aggregate every matching entry's credible sets,
+    # prefixed with the row identity (study/context/trait/region_id/method).
+    .fmrAggregateView(x, study = study, context = context, trait = trait,
+      method = method, region = region,
+      perEntry = function(e) getCs(e, coverage = coverage))
   })
 
 #' @rdname getTopLoci
@@ -189,9 +192,27 @@ setMethod("getTopLoci", "FineMappingResultBase",
   function(x, type = c("data.frame", "GRanges"), signalCutoff = 0.025,
            study = NULL, context = NULL, trait = NULL, method = NULL,
            region = NULL, ...) {
-    getTopLoci(.fmrSelectEntry(x, study = study, context = context,
-                               trait = trait, method = method, region = region),
-               type = match.arg(type), signalCutoff = signalCutoff)
+    type <- match.arg(type)
+    # type = "GRanges" can only be honored for a single pinned entry; the
+    # aggregate (identity-prefixed) form is data.frame-only.
+    if (type == "GRanges") {
+      sel <- tryCatch(
+        .fmrSelectEntry(x, study = study, context = context, trait = trait,
+                        method = method, region = region),
+        error = function(e) e)
+      if (inherits(sel, "error")) {
+        stop("getTopLoci: aggregating across multiple entries requires ",
+             "type = 'data.frame'.")
+      }
+      return(getTopLoci(sel, type = "GRanges", signalCutoff = signalCutoff))
+    }
+    # data.frame: bare per-variant table when selectors pin one entry, else the
+    # per-variant tables of every matching row stacked with row identity
+    # (study / context / trait / region_id / method) columns.
+    .fmrAggregateView(x, study = study, context = context, trait = trait,
+      method = method, region = region,
+      perEntry = function(e) getTopLoci(e, type = "data.frame",
+                                        signalCutoff = signalCutoff))
   })
 
 #' @rdname getMarginalEffects
@@ -200,10 +221,17 @@ setMethod("getMarginalEffects", "FineMappingResultBase",
   function(x, maxPval = NULL,
            study = NULL, context = NULL, trait = NULL, method = NULL,
            region = NULL, ...) {
-    getMarginalEffects(.fmrSelectEntry(x, study = study, context = context,
-                                       trait = trait, method = method,
-                                       region = region), maxPval = maxPval)
+    # Selectors pinning one entry -> that entry's bare marginal table; no /
+    # partial selectors -> aggregate every matching entry's marginals, prefixed
+    # with the row identity (study/context/trait/region_id/method).
+    .fmrAggregateView(x, study = study, context = context, trait = trait,
+      method = method, region = region,
+      perEntry = function(e) getMarginalEffects(e, maxPval = maxPval))
   })
+
+#' @rdname getRegion
+#' @export
+setMethod("getRegion", "FineMappingResultBase", function(x, ...) .getRegionColumn(x))
 
 #' @rdname getSusieFit
 #' @export

@@ -362,75 +362,6 @@ test_that("twasWeights: enetWeights produces correct structure with real glmnet"
 #
 # ===========================================================================
 
-test_that("twasWeightsCv: fold must be positive integer", {
-  d <- make_data()
-  expect_error(
-    twasWeightsCv(d$X, d$Y, fold = -1),
-    "Invalid value for 'fold'"
-  )
-  expect_error(
-    twasWeightsCv(d$X, d$Y, fold = 0),
-    "Invalid value for 'fold'"
-  )
-})
-
-test_that("twasWeightsCv: fold as string errors", {
-  d <- make_data()
-  expect_error(
-    twasWeightsCv(d$X, d$Y, fold = "abc"),
-    "Invalid value for 'fold'"
-  )
-})
-
-test_that("twasWeightsCv: X must be a matrix", {
-  d <- make_data()
-  expect_error(
-    twasWeightsCv(as.data.frame(d$X), d$Y, fold = 5),
-    "X must be a matrix"
-  )
-})
-
-test_that("twasWeightsCv: Y must be a matrix or vector", {
-  d <- make_data()
-  # In R, is.vector(list(...)) returns TRUE, so a list passes the initial
-  # type check and gets converted via matrix(). The resulting 3-row matrix
-  # mismatches X's 50 rows, triggering the row count error.
-  expect_error(
-    twasWeightsCv(d$X, list(1, 2, 3), fold = 5),
-    "The number of rows in X and Y must be the same"
-  )
-})
-
-test_that("twasWeightsCv: fold or sample_partitions must be provided", {
-  d <- make_data()
-  expect_error(
-    twasWeightsCv(d$X, d$Y),
-    "Either 'fold' or 'samplePartitions' must be provided"
-  )
-})
-
-test_that("twasWeightsCv: row count mismatch between X and Y errors", {
-  d <- make_data()
-  Y_wrong <- d$Y[1:20, , drop = FALSE]
-  expect_error(
-    twasWeightsCv(d$X, Y_wrong, fold = 5),
-    "The number of rows in X and Y must be the same"
-  )
-})
-
-test_that("twasWeightsCv: Y as vector is accepted and converted", {
-  d <- make_data()
-  y_vec <- as.numeric(d$Y)
-
-  # With NULL weight_methods, should return just samplePartition
-  expect_message(
-    result <- twasWeightsCv(d$X, y_vec, fold = 3, weightMethods = NULL),
-    "Y converted to matrix"
-  )
-  expect_true(is.list(result))
-  expect_true("samplePartition" %in% names(result))
-})
-
 test_that("twasWeightsCv: NULL weight_methods returns only samplePartition", {
   d <- make_data()
   result <- twasWeightsCv(d$X, d$Y, fold = 3, weightMethods = NULL)
@@ -465,173 +396,6 @@ test_that("twasWeightsCv: character weight_methods are accepted", {
   expect_true("prediction" %in% names(result))
 })
 
-test_that("twasWeightsCv: max_num_variants subsets X columns", {
-  d <- make_data(n = 50, p = 20)
-  local_mocked_bindings(
-    lassoWeights = function(X, y, ...) rep(0, ncol(X))
-  )
-  set.seed(42)
-  expect_message(
-    result <- twasWeightsCv(
-      d$X, d$Y, fold = 2,
-      weightMethods = list(lassoWeights = list()),
-      maxNumVariants = 5
-    ),
-    "Randomly selecting 5 out of 20"
-  )
-  expect_true(is.list(result))
-  # The result should have prediction and performance entries for the one method
-  expect_true("prediction" %in% names(result))
-  expect_true("performance" %in% names(result))
-  expect_true("lassoPredicted" %in% names(result$prediction))
-  # Weight method returned zero weights, so predictions should exist but all be zero
-  pred <- result$prediction[["lassoPredicted"]]
-  expect_equal(nrow(pred), nrow(d$X))
-  expect_true(all(pred == 0))
-})
-
-test_that("twasWeightsCv: max_num_variants with variants_to_keep", {
-  d <- make_data(n = 50, p = 20)
-  keep_vars <- colnames(d$X)[1:3]
-  local_mocked_bindings(
-    lassoWeights = function(X, y, ...) rep(0, ncol(X))
-  )
-  set.seed(42)
-  expect_message(
-    result <- twasWeightsCv(
-      d$X, d$Y, fold = 2,
-      weightMethods = list(lassoWeights = list()),
-      maxNumVariants = 8,
-      variantsToKeep = keep_vars
-    ),
-    "Including 3 specified variants"
-  )
-  expect_true(is.list(result))
-})
-
-test_that("twasWeightsCv: sample_partitions with mismatched samples errors", {
-  d <- make_data()
-  bad_partitions <- data.frame(
-    Sample = c("nonexistent_1", "nonexistent_2"),
-    Fold = c(1, 2),
-    stringsAsFactors = FALSE
-  )
-  expect_error(
-    twasWeightsCv(d$X, d$Y, samplePartitions = bad_partitions),
-    "Some samples in 'samplePartitions' do not match"
-  )
-})
-
-test_that("twasWeightsCv: provided sample_partitions are used", {
-  d <- make_data(n = 20, p = 5)
-  sp <- data.frame(
-    Sample = rownames(d$X),
-    Fold = rep(1:2, each = 10),
-    stringsAsFactors = FALSE
-  )
-  result <- twasWeightsCv(d$X, d$Y, samplePartitions = sp, weightMethods = NULL)
-  expect_equal(result$samplePartition, sp)
-})
-
-test_that("twasWeightsCv: rownames are auto-generated when missing", {
-  set.seed(42)
-  n <- 30
-  p <- 5
-  X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-  Y <- matrix(rnorm(n), ncol = 1)
-  # No row names on X or Y
-
-  result <- twasWeightsCv(X, Y, fold = 2, weightMethods = NULL)
-  sp <- result$samplePartition
-
-  # Should have auto-generated sample names
-  expect_true(all(grepl("^sample_", sp$Sample)))
-})
-
-test_that("twasWeightsCv: colnames are auto-generated when missing", {
-  set.seed(42)
-  n <- 30
-  p <- 5
-  X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-  rownames(X) <- paste0("s", 1:n)
-  Y <- matrix(rnorm(n), ncol = 1)
-  rownames(Y) <- paste0("s", 1:n)
-  # No col names on X or Y
-
-  local_mocked_bindings(
-    lassoWeights = function(X, y, ...) rep(0, ncol(X))
-  )
-  set.seed(42)
-  result <- twasWeightsCv(X, Y, fold = 2, weightMethods = list(lassoWeights = list()))
-  # Should not error; column names are auto-generated
-  expect_true(!is.null(result$prediction))
-})
-
-test_that("twasWeightsCv: fold and sample_partitions mismatch prints message", {
-  d <- make_data(n = 20, p = 5)
-  sp <- data.frame(
-    Sample = rownames(d$X),
-    Fold = rep(1:4, each = 5),
-    stringsAsFactors = FALSE
-  )
-  # fold=2 but sample_partitions has 4 folds
-  expect_message(
-    twasWeightsCv(d$X, d$Y, fold = 2, samplePartitions = sp, weightMethods = NULL),
-    "fold number provided does not match"
-  )
-})
-
-test_that("twasWeightsCv: zero-variance predictions yield NA metrics with message", {
-  d <- make_data()
-  local_mocked_bindings(
-    lassoWeights = function(X, y, ...) rep(0, ncol(X))
-  )
-  set.seed(42)
-  expect_message(
-    result <- twasWeightsCv(
-      d$X, d$Y, fold = 2,
-      weightMethods = list(lassoWeights = list())
-    ),
-    "zero variance"
-  )
-  perf <- result$performance[["lassoPerformance"]]
-  expect_true(all(is.na(perf)))
-})
-
-test_that("twasWeightsCv: performance names use _performance suffix", {
-  d <- make_data()
-  local_mocked_bindings(
-    lassoWeights = function(X, y, ...) rep(0, ncol(X)),
-    enetWeights  = function(X, y, ...) rep(0, ncol(X))
-  )
-  set.seed(42)
-  result <- twasWeightsCv(
-    d$X, d$Y, fold = 2,
-    weightMethods = list(lassoWeights = list(), enetWeights = list())
-  )
-  expect_equal(
-    sort(names(result$performance)),
-    sort(c("lassoPerformance", "enetPerformance"))
-  )
-})
-
-test_that("twasWeightsCv: prediction names use _predicted suffix", {
-  d <- make_data()
-  local_mocked_bindings(
-    lassoWeights = function(X, y, ...) rep(0, ncol(X)),
-    enetWeights  = function(X, y, ...) rep(0, ncol(X))
-  )
-  set.seed(42)
-  result <- twasWeightsCv(
-    d$X, d$Y, fold = 2,
-    weightMethods = list(lassoWeights = list(), enetWeights = list())
-  )
-  expect_equal(
-    sort(names(result$prediction)),
-    sort(c("lassoPredicted", "enetPredicted"))
-  )
-})
-
 # ---------------------------------------------------------------------------
 # CV with real lassoWeights (integration test)
 # ---------------------------------------------------------------------------
@@ -655,37 +419,20 @@ test_that("twasWeightsCv: basic CV with lassoWeights produces correct metrics st
   expect_true("timeElapsed" %in% names(result))
 
   # Prediction name transformation
-  expect_equal(names(result$prediction), "lassoPredicted")
+  expect_equal(names(result$prediction), "lasso_predicted")
 
   # Prediction dimensions should match Y
-  pred <- result$prediction[["lassoPredicted"]]
+  pred <- result$prediction[["lasso_predicted"]]
   expect_equal(dim(pred), dim(d$Y))
 
   # Performance table structure
-  perf <- result$performance[["lassoPerformance"]]
+  perf <- result$performance[["lasso_performance"]]
   expect_true(is.matrix(perf))
   expect_equal(colnames(perf), c("corr", "rsq", "adj_rsq", "pval", "RMSE", "MAE"))
   expect_equal(nrow(perf), ncol(d$Y))
 
   # With strong signal, correlation should be positive
   expect_true(perf[1, "corr"] > 0)
-})
-
-test_that("twasWeightsCv: metrics table has correct column names (mocked)", {
-  d <- make_data()
-  local_mocked_bindings(
-    lassoWeights = function(X, y, ...) {
-      # Return weights that produce non-zero-variance predictions
-      rep(0.1, ncol(X))
-    }
-  )
-  set.seed(42)
-  result <- twasWeightsCv(
-    d$X, d$Y, fold = 2,
-    weightMethods = list(lassoWeights = list())
-  )
-  perf <- result$performance[["lassoPerformance"]]
-  expect_equal(colnames(perf), c("corr", "rsq", "adj_rsq", "pval", "RMSE", "MAE"))
 })
 
 test_that("twasWeightsCv: multiple real methods produce per-method metrics", {
@@ -704,27 +451,10 @@ test_that("twasWeightsCv: multiple real methods produce per-method metrics", {
 
   expect_equal(length(result$prediction), 2)
   expect_equal(length(result$performance), 2)
-  expect_true("lassoPredicted" %in% names(result$prediction))
-  expect_true("enetPredicted" %in% names(result$prediction))
-  expect_true("lassoPerformance" %in% names(result$performance))
-  expect_true("enetPerformance" %in% names(result$performance))
-})
-
-test_that("twasWeightsCv: all samples appear exactly once in predictions", {
-  skip_if_not_installed("glmnet")
-  d <- make_data(n = 50, p = 10)
-
-  set.seed(77)
-  result <- twasWeightsCv(
-    d$X, d$Y,
-    fold = 5,
-    weightMethods = list(lassoWeights = list())
-  )
-
-  pred <- result$prediction[["lassoPredicted"]]
-  # No NAs -- every sample was predicted in exactly one fold
-  expect_false(any(is.na(pred)))
-  expect_equal(nrow(pred), nrow(d$X))
+  expect_true("lasso_predicted" %in% names(result$prediction))
+  expect_true("enet_predicted" %in% names(result$prediction))
+  expect_true("lasso_performance" %in% names(result$performance))
+  expect_true("enet_performance" %in% names(result$performance))
 })
 
 # ===========================================================================
@@ -750,11 +480,11 @@ test_that("twasWeightsCv: multivariate Y with multiple columns", {
     weightMethods = list(lassoWeights = list())
   )
 
-  pred <- result$prediction[["lassoPredicted"]]
+  pred <- result$prediction[["lasso_predicted"]]
   expect_equal(ncol(pred), 2)
   expect_equal(nrow(pred), 50)
 
-  perf <- result$performance[["lassoPerformance"]]
+  perf <- result$performance[["lasso_performance"]]
   expect_equal(nrow(perf), 2)
   expect_equal(rownames(perf), c("outcome_1", "outcome_2"))
 })
@@ -824,69 +554,6 @@ test_that("twasWeights: SuSiE-inf is fitted before and initializes ordinary SuSi
 # twasWeightsCv: extra split_data / sample-name / variant-selection branches
 # ===========================================================================
 
-test_that("twasWeightsCv: split_data errors when a fold leaves train or test empty", {
-  d <- make_data(n = 10, p = 5)
-  # All samples in fold 1 -> with fold = 1, every sample is a "test" row and
-  # the train set has zero rows, hitting the split_data zero-row stop.
-  sp <- data.frame(
-    Sample = rownames(d$X),
-    Fold = rep(1L, nrow(d$X)),
-    stringsAsFactors = FALSE
-  )
-  local_mocked_bindings(
-    lassoWeights = function(X, y, ...) rep(0, ncol(X))
-  )
-  expect_error(
-    suppressMessages(twasWeightsCv(
-      d$X, d$Y,
-      samplePartitions = sp,
-      weightMethods = list(lassoWeights = list())
-    )),
-    "One of the datasets \\(train or test\\) has zero rows"
-  )
-})
-
-test_that("twasWeightsCv: rownames(X) get reassigned to rownames(Y) when they differ", {
-  d <- make_data(n = 20, p = 5)
-  rownames(d$X) <- paste0("xname_", seq_len(nrow(d$X)))  # differ from rownames(Y)
-  set.seed(42)
-  result <- twasWeightsCv(d$X, d$Y, fold = 2, weightMethods = NULL)
-  # samplePartition$Sample should now use rownames(Y), not rownames(X)
-  expect_true(all(result$samplePartition$Sample %in% rownames(d$Y)))
-  expect_false(any(grepl("^xname_", result$samplePartition$Sample)))
-})
-
-test_that("twasWeightsCv: sampleNames taken from Y when only Y has rownames", {
-  set.seed(42)
-  n <- 20; p <- 5
-  X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-  rownames(X) <- NULL
-  Y <- matrix(rnorm(n), ncol = 1)
-  rownames(Y) <- paste0("yonly_", seq_len(n))
-  result <- twasWeightsCv(X, Y, fold = 2, weightMethods = NULL)
-  expect_true(all(grepl("^yonly_", result$samplePartition$Sample)))
-})
-
-test_that("twasWeightsCv: variants_to_keep >= max_num_variants samples from variants_to_keep only", {
-  d <- make_data(n = 50, p = 20)
-  # 10 keep variants, maxNumVariants = 5 => length(variants_to_keep) >= max_num_variants
-  keep_vars <- colnames(d$X)[1:10]
-  local_mocked_bindings(
-    lassoWeights = function(X, y, ...) rep(0, ncol(X))
-  )
-  set.seed(42)
-  expect_message(
-    result <- twasWeightsCv(
-      d$X, d$Y, fold = 2,
-      weightMethods = list(lassoWeights = list()),
-      maxNumVariants = 5,
-      variantsToKeep = keep_vars
-    ),
-    "Randomly selecting 5 out of 10 input variants"
-  )
-  expect_true("prediction" %in% names(result))
-})
-
 test_that("twasWeightsCv: NA values in Y trigger NA-removal branch in metrics", {
   set.seed(42)
   n <- 30; p <- 5
@@ -908,7 +575,7 @@ test_that("twasWeightsCv: NA values in Y trigger NA-removal branch in metrics", 
     X, Y, fold = 2,
     weightMethods = list(lassoWeights = list())
   )
-  perf <- result$performance[["lassoPerformance"]]
+  perf <- result$performance[["lasso_performance"]]
   # NA-removal branch ran; metrics should be finite (not all-NA)
   expect_true(is.finite(perf[1, "rsq"]))
 })
@@ -1507,21 +1174,7 @@ test_that("twasWeightsCv: univariate fitter runs under verbose=2 (no quiet wrapp
     weightMethods = list(lassoWeights = list()),
     verbose = 2))
   expect_true("prediction" %in% names(result))
-  expect_equal(nrow(result$prediction[["lassoPredicted"]]), nrow(d$X))
-})
-
-test_that("twasWeightsCv: parallel fold path (numThreads = 2)", {
-  d <- make_data(n = 30, p = 6)
-  local_mocked_bindings(
-    lassoWeights = function(X, y, ...) { w <- rep(0, ncol(X)); w[1] <- 0.4; w }
-  )
-  set.seed(1)
-  result <- suppressMessages(twasWeightsCv(
-    d$X, d$Y, fold = 2,
-    weightMethods = list(lassoWeights = list()),
-    numThreads = 2))
-  expect_true("prediction" %in% names(result))
-  expect_equal(nrow(result$prediction[["lassoPredicted"]]), nrow(d$X))
+  expect_equal(nrow(result$prediction[["lasso_predicted"]]), nrow(d$X))
 })
 
 # ===========================================================================

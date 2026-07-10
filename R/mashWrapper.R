@@ -232,6 +232,96 @@ mergeMashData <- function(resData, oneData) {
   return(combinedData)
 }
 
+#' @title Build a QtlSumStats from a Z-score matrix
+#' @description Assemble a per-condition \code{\link{QtlSumStats}} from a
+#'   \code{variants x conditions} Z-score matrix -- the input shape the mash
+#'   pipeline uses when only Z is available. Each column is one condition, and
+#'   conditions are distinguished by \code{context}, \code{trait}, or both: the
+#'   columns may be different cell types / tissues (contexts), different
+#'   molecular phenotypes (traits), or arbitrary context x trait pairs.
+#'   Chromosome / position are decoded from the row (variant) identifiers via
+#'   \code{\link{parseVariantId}} (with a synthetic-position fallback for ids
+#'   that do not encode coordinates); \code{A1} / \code{A2} / \code{N} are
+#'   placeholders because a Z-only input carries no alleles or sample sizes
+#'   (mash reads only Z). A pass-through \code{qcInfo} record is set so the
+#'   result clears the mash QC gate.
+#' @param z Numeric matrix (variants x conditions). \code{rownames(z)} are
+#'   variant ids (ideally \code{chr:pos:A2:A1}); \code{colnames(z)} label the
+#'   conditions.
+#' @param study Study identifier (recycled across conditions).
+#' @param ldSketch A \code{\link{GenotypeHandle}} embedded in the collection.
+#' @param context Condition context label(s): a single value recycled across
+#'   every column, or a length-\code{ncol(z)} vector (one per condition).
+#'   Defaults to \code{colnames(z)} -- one context per column.
+#' @param trait Condition trait label(s): a single value recycled across every
+#'   column, or a length-\code{ncol(z)} vector. Default \code{"mash"}. Pass
+#'   \code{colnames(z)} here (with a constant \code{context}) when the columns
+#'   are traits rather than contexts.
+#' @param genome Genome build. Default \code{"GRCh38"}.
+#' @param n Placeholder per-variant sample size. Default \code{1000}.
+#' @param a1,a2 Placeholder alleles. Defaults \code{"A"} / \code{"G"}.
+#' @param role Tag stored in the \code{qcInfo} record. Default \code{"mash"}.
+#' @return A \code{\link{QtlSumStats}} with one entry per condition (column).
+#' @importFrom GenomicRanges GRanges
+#' @importFrom IRanges IRanges
+#' @export
+qtlSumStatsFromZMatrix <- function(z, study, ldSketch,
+                                   context = colnames(z), trait = "mash",
+                                   genome = "GRCh38", n = 1000L,
+                                   a1 = "A", a2 = "G", role = "mash") {
+  if (!is.matrix(z) || !is.numeric(z)) {
+    stop("qtlSumStatsFromZMatrix: `z` must be a numeric variants x conditions matrix.")
+  }
+  nCond <- ncol(z)
+  context <- .qszmRecycle(context, nCond, "context")
+  trait   <- .qszmRecycle(trait,   nCond, "trait")
+  vids <- rownames(z)
+  if (is.null(vids)) vids <- paste0("var", seq_len(nrow(z)))
+  # Decode chrom/pos from the variant ids; synthesise where they do not parse.
+  parsed <- tryCatch(suppressWarnings(parseVariantId(vids)),
+                     error = function(e) NULL)
+  chrom <- if (!is.null(parsed)) as.character(parsed$chrom)
+           else rep(NA_character_, length(vids))
+  pos <- if (!is.null(parsed)) suppressWarnings(as.integer(parsed$pos))
+         else rep(NA_integer_, length(vids))
+  chrom[is.na(chrom) | !nzchar(chrom)] <- "chr1"
+  pos[is.na(pos)] <- seq_along(pos)[is.na(pos)]
+  entries <- lapply(seq_len(nCond), function(j) {
+    gr <- GenomicRanges::GRanges(
+      seqnames = chrom, ranges = IRanges::IRanges(start = pos, width = 1L))
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+      SNP = vids, A1 = rep(a1, length(vids)), A2 = rep(a2, length(vids)),
+      Z = as.numeric(z[, j]), N = rep(as.integer(n), length(vids)))
+    gr
+  })
+  QtlSumStats(
+    study    = rep(as.character(study), nCond),
+    context  = context,
+    trait    = trait,
+    entry    = entries,
+    genome   = genome,
+    ldSketch = ldSketch,
+    qcInfo   = list(role = role, entryAudit = vector("list", nCond)))
+}
+
+# Internal: recycle a condition-label argument (context / trait) to one value
+# per column of the Z matrix. Accepts a single value (recycled to every column)
+# or a vector of length ncol(z); errors otherwise -- including NULL, which is
+# how `context = colnames(z)` arrives when the matrix has no column names.
+.qszmRecycle <- function(v, n, what) {
+  if (is.null(v)) {
+    stop(sprintf(paste0("qtlSumStatsFromZMatrix: `%s` is NULL; pass a length-1 ",
+                        "or length-%d value (or give `z` column names)."),
+                 what, n))
+  }
+  v <- as.character(v)
+  if (length(v) == 1L) return(rep(v, n))
+  if (length(v) == n) return(v)
+  stop(sprintf(
+    "qtlSumStatsFromZMatrix: `%s` must be length 1 or ncol(z)=%d, got %d.",
+    what, n, length(v)))
+}
+
 # Internal: convert a single SumStats object (post-QC) into a (Bhat, Shat)
 # pair of matrices keyed by context. Each row of the matrix corresponds to
 # one (variantId × (study, trait)) cell from the SumStats entries; each

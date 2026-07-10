@@ -150,3 +150,42 @@ test_that("FineMappingResultBase: adjustPips on a zero-row collection returns th
   out <- adjustPips(empty, character(0))
   expect_identical(out, empty)
 })
+
+# ===========================================================================
+# getTopLoci(type = "GRanges") + aggregate-view branches on FineMappingResultBase
+# ===========================================================================
+.alc_makeFmr2 <- function() {
+  QtlFineMappingResult(
+    study = c("Q1", "Q1"), context = c("c1", "c1"), trait = c("t1", "t2"),
+    method = c("susie", "susie"),
+    entry = list(.alc_makeFmEntry(), .alc_makeFmEntry()),
+    ldSketch = .alc_makeHandle())
+}
+
+test_that("getTopLoci(type='GRanges'): a pinned single entry returns a GRanges", {
+  fmr <- .alc_makeFmr2()
+  gr <- getTopLoci(fmr, type = "GRanges",
+                   study = "Q1", context = "c1", trait = "t1", method = "susie")
+  expect_s4_class(gr, "GRanges")
+})
+
+test_that("getTopLoci(type='GRanges'): aggregating >1 entry is rejected", {
+  expect_error(getTopLoci(.alc_makeFmr2(), type = "GRanges"),
+               "requires type = 'data.frame'")
+})
+
+test_that("FineMappingResultBase aggregate view: empty per-entry views -> 0-row frame", {
+  # .alc_makeFmEntry has no credible sets, so getCs aggregates to nothing.
+  expect_equal(nrow(getCs(.alc_makeFmr2())), 0L)
+})
+
+test_that("FineMappingResultBase aggregate view: a no-match selector re-raises the selection error", {
+  expect_error(getCs(.alc_makeFmr2(), study = "nope"), "entries")
+})
+
+test_that("FineMappingResultBase aggregate view: an empty collection yields a 0-row frame", {
+  empty <- QtlFineMappingResult(study = character(0), context = character(0),
+    trait = character(0), method = character(0), entry = list(),
+    ldSketch = .alc_makeHandle())
+  expect_equal(nrow(getCs(empty)), 0L)
+})

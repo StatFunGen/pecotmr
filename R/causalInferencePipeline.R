@@ -404,9 +404,11 @@ causalInferencePipeline <- function(gwasSumStats,
                                trait = trait, method = method))) > 0L
 }
 
-# Extract the per-tuple weights vector. From TwasWeights: read the
-# TwasWeightsEntry. From FineMappingResult: extract the SuSiE-style
-# coefficient (betahat) from topLoci.
+# Fetch the per-tuple weight-source entry (a TwasWeightsEntry from
+# `twasWeights`, or a FineMappingEntry from `fineMappingResult`) and resolve it
+# to an aligned (variantIds, weights) pair via the shared `resolveWeights` --
+# the SuSiE-style posterior effect for the FMR path. Returns NULL when the tuple
+# is absent or has no usable weights.
 .cipExtractWeights <- function(twasWeights, fineMappingResult,
                                study, context, trait, method, useFmr) {
   if (!useFmr) {
@@ -414,28 +416,18 @@ causalInferencePipeline <- function(gwasSumStats,
                                list(study = study, context = context,
                                     trait = trait, method = method))) == 0L)
       return(NULL)
-    twEntry <- getTwasWeights(twasWeights, study = study, context = context,
-                              trait = trait, method = method)
-    vids <- getVariantIds(twEntry)
-    w    <- as.numeric(getWeights(twEntry))
-    if (length(vids) != length(w) || length(vids) == 0L) return(NULL)
-    return(list(variantIds = vids, weights = w))
+    ent <- getTwasWeights(twasWeights, study = study, context = context,
+                          trait = trait, method = method)
+  } else {
+    if (!.cipFmrHasTuple(fineMappingResult, study, context, trait, method))
+      return(NULL)
+    ent <- getFineMappingResult(fineMappingResult, study = study,
+                                context = context, trait = trait,
+                                method = method)
   }
-  # FMR-based weights: pull from the entry's topLoci$betahat column.
-  if (!.cipFmrHasTuple(fineMappingResult, study, context, trait, method))
-    return(NULL)
-  ent <- getFineMappingResult(fineMappingResult, study = study,
-                              context = context, trait = trait,
-                              method = method)
-  tl <- getTopLoci(ent)
-  if (is.null(tl) || nrow(tl) == 0L) return(NULL)
-  betaCol <- .cipTlCols(tl)$beta
-  if (length(betaCol) == 0L) return(NULL)
-  vids <- as.character(tl$variant_id)
-  w    <- as.numeric(tl[[betaCol[[1L]]]])
-  ok   <- !is.na(vids) & !is.na(w)
-  if (sum(ok) == 0L) return(NULL)
-  list(variantIds = vids[ok], weights = w[ok])
+  wr <- resolveWeights(ent)
+  if (length(wr$variantIds) == 0L) return(NULL)
+  wr
 }
 
 # Compute the per-tuple TWAS Z from a single GwasSumStats tuple's

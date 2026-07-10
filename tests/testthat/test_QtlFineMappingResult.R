@@ -290,6 +290,94 @@ test_that("QtlFineMappingResult: getTopLoci returns the entry's topLoci (project
   expect_equal(tl$variant_id, .ca_makeTopLoci(3)$variant_id)
 })
 
+test_that("QtlFineMappingResult: getTopLoci aggregates entries when selectors do not pin one", {
+  # Two entries, no selectors: the old behaviour errored ("2 entries; pass
+  # study/context/trait/method"). Now it stacks the per-variant tables,
+  # prefixed with the row identity so variants stay attributable.
+  e1 <- .sc_makeFineMappingEntry(3); e2 <- .sc_makeFineMappingEntry(2)
+  res <- QtlFineMappingResult(
+    study = c("s1", "s1"), context = c("c1", "c2"),
+    trait = c("t1", "t1"), method = c("susie", "susie"),
+    entry = list(e1, e2))
+  agg <- getTopLoci(res, signalCutoff = 0)
+  expect_equal(nrow(agg), 5L)
+  expect_true(all(c("study", "context", "trait", "region_id", "method") %in%
+                  names(agg)))
+  expect_equal(agg$context, c("c1", "c1", "c1", "c2", "c2"))
+  expect_true("variant_id" %in% names(agg))
+  # QTL results key on context/trait, so region_id is NA-filled.
+  expect_true(all(is.na(agg$region_id)))
+  # the stamped per-variant `method` must not duplicate the identity column
+  expect_equal(sum(names(agg) == "method"), 1L)
+})
+
+test_that("QtlFineMappingResult: getTopLoci with a full tuple keeps the bare (id-free) table", {
+  e1 <- .sc_makeFineMappingEntry(3); e2 <- .sc_makeFineMappingEntry(2)
+  res <- QtlFineMappingResult(
+    study = c("s1", "s1"), context = c("c1", "c2"),
+    trait = c("t1", "t1"), method = c("susie", "susie"),
+    entry = list(e1, e2))
+  tl <- getTopLoci(res, study = "s1", context = "c1", trait = "t1",
+                   method = "susie", signalCutoff = 0)
+  expect_equal(nrow(tl), 3L)
+  expect_false("context" %in% names(tl))   # single-entry fast path, unchanged
+})
+
+test_that("QtlFineMappingResult: getTopLoci aggregates only the matching subset", {
+  e1 <- .sc_makeFineMappingEntry(3); e2 <- .sc_makeFineMappingEntry(2)
+  res <- QtlFineMappingResult(
+    study = c("s1", "s1"), context = c("c1", "c2"),
+    trait = c("t1", "t1"), method = c("susie", "susie"),
+    entry = list(e1, e2))
+  sub <- getTopLoci(res, context = "c2", signalCutoff = 0)
+  expect_equal(nrow(sub), 2L)
+  expect_equal(unique(sub$context), "c2")
+})
+
+test_that("QtlFineMappingResult: getTopLoci on a single-row collection still carries identity columns", {
+  # A no-selector call takes the aggregate path even for one row, so the PIP
+  # table has a uniform shape (identity columns present) whatever the row count
+  # -- callers don't special-case single-entry results.
+  res <- QtlFineMappingResult(study = "s1", context = "c1", trait = "t1",
+                              method = "susie",
+                              entry = list(.sc_makeFineMappingEntry(4)))
+  tl <- getTopLoci(res, signalCutoff = 0)
+  expect_equal(nrow(tl), 4L)
+  expect_true(all(c("study", "context", "trait", "method", "variant_id") %in%
+                  names(tl)))
+  expect_equal(unique(tl$context), "c1")
+})
+
+test_that("QtlFineMappingResult: getCs aggregates every entry's credible sets with identity columns", {
+  # e1 (n=3) has cs_95 = susie_1/susie_1/susie_0 -> 2 CS members; e2 (n=2) -> 2.
+  e1 <- .sc_makeFineMappingEntry(3); e2 <- .sc_makeFineMappingEntry(2)
+  res <- QtlFineMappingResult(
+    study = c("s1", "s1"), context = c("c1", "c2"),
+    trait = c("t1", "t1"), method = c("susie", "susie"),
+    entry = list(e1, e2))
+  cs <- getCs(res)
+  expect_equal(nrow(cs), 4L)
+  expect_true(all(c("study", "context", "trait", "region_id", "method",
+                    "variant_id") %in% names(cs)))
+  expect_equal(cs$context, c("c1", "c1", "c2", "c2"))
+  # full tuple still returns the bare per-entry credible-set table
+  bare <- getCs(res, study = "s1", context = "c1", trait = "t1", method = "susie")
+  expect_false("context" %in% names(bare))
+  expect_equal(nrow(bare), 2L)
+})
+
+test_that("QtlFineMappingResult: getMarginalEffects aggregates every entry with identity columns", {
+  e1 <- .sc_makeFineMappingEntry(3); e2 <- .sc_makeFineMappingEntry(2)
+  res <- QtlFineMappingResult(
+    study = c("s1", "s1"), context = c("c1", "c2"),
+    trait = c("t1", "t1"), method = c("susie", "susie"),
+    entry = list(e1, e2))
+  me <- getMarginalEffects(res)
+  expect_equal(nrow(me), 5L)                       # all topLoci rows (no CS filter)
+  expect_true(all(c("study", "context", "trait", "method") %in% names(me)))
+  expect_equal(unique(me$context), c("c1", "c2"))
+})
+
 
 test_that("QtlFineMappingResult: getSusieFit reads the entry's trimmedFit", {
   e <- .ca_makeFmEntry(3)

@@ -948,7 +948,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                              xRegions = list(NULL),
                                              twasWeights = NULL,
                                              dataDrivenPriorWeightsCutoff = 1e-10,
-                                             cvFolds = 0, samplePartition = NULL,
+                                             cvFolds = 0, cvThreads = 1,
+                                             samplePartition = NULL,
                                              pipCutoffToSkip = 0,
                                              fineMappingResult = NULL) {
   # Run the joint dispatch once per region block, then merge per
@@ -961,7 +962,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
       methodArgs = methodArgs, region = rg,
       twasWeights = twasWeights,
       dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
-      cvFolds = cvFolds, samplePartition = samplePartition,
+      cvFolds = cvFolds, cvThreads = cvThreads, samplePartition = samplePartition,
       pipCutoffToSkip = pipCutoffToSkip,
       fineMappingResult = fineMappingResult)
   })
@@ -981,7 +982,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                              region = NULL,
                                              twasWeights = NULL,
                                              dataDrivenPriorWeightsCutoff = 1e-10,
-                                             cvFolds = 0, samplePartition = NULL,
+                                             cvFolds = 0, cvThreads = 1,
+                                             samplePartition = NULL,
                                              pipCutoffToSkip = 0,
                                              fineMappingResult = NULL) {
   # Engine routing (jointEngine.R); one region block (the caller loops regions).
@@ -990,7 +992,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     coverage = coverage, secondaryCoverage = secondaryCoverage,
     signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
     dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
-    cvFolds = cvFolds, samplePartition = samplePartition,
+    cvFolds = cvFolds, cvThreads = cvThreads, samplePartition = samplePartition,
     verbose = verbose, ldSketch = NULL))
   .runJointSpecs(parsedJointSpec, data, dataForm = "individual", pipeline = pipeline,
                  jointMethods = intersect(methods, c("mvsusie", "fsusie")),

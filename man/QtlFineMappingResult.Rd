@@ -13,6 +13,7 @@ QtlFineMappingResult(
   jointStudies = NULL,
   jointContexts = NULL,
   jointTraits = NULL,
+  region = NULL,
   ldSketch = NULL
 )
 }
@@ -41,6 +42,11 @@ Same shape as \code{jointStudies}.}
 
 \item{jointTraits}{Optional character vector for cross-trait joints.
 Same shape as \code{jointStudies}.}
+
+\item{region}{Optional \code{GRanges} (length \code{length(study)}) giving
+the genomic anchor of each row's trait (its own coordinates). Carried
+forward as provenance (e.g. for cTWAS LD-block placement); not part of the
+identity key. \code{NULL} (default) omits the column.}
 
 \item{ldSketch}{An optional \code{GenotypeHandle} (the LD reference for
 RSS-derived fits), or \code{NULL} for individual-level fits.}

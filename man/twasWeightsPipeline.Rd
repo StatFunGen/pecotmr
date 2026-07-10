@@ -17,8 +17,13 @@ twasWeightsPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
-  minTwasMaf = NULL,
-  minTwasXvar = NULL,
+  mafCutoff = NULL,
+  macCutoff = NULL,
+  xvarCutoff = NULL,
+  imissCutoff = NULL,
+  keepIndel = NULL,
+  keepSamples = NULL,
+  keepVariants = NULL,
   jointRegions = FALSE,
   jointSpecification = NULL,
   fineMappingResult = NULL,
@@ -108,23 +113,21 @@ processing to (QtlDataset / QtlSumStats inputs). Default \code{NULL}
 restrict processing to (QtlDataset / QtlSumStats inputs). Default
 \code{NULL}.}
 
-\item{region}{Optional \code{GRanges} for QtlDataset trait selection.
-Mutually exclusive with \code{traitId}.}
+\item{region}{Optional variant window for QtlDataset trait selection: a
+\code{GRanges}, a \code{"chr:start-end"} string, or a one-row data.frame
+with \code{chrom}/\code{start}/\code{end}. Mutually exclusive with
+\code{traitId}.}
 
 \item{cisWindow}{For QtlDataset: cis-window (bp) around each trait's
 genomic position when extracting variants. Required when
 \code{traitId} is supplied. Mutually exclusive with \code{region}.}
 
-\item{minTwasMaf}{For QtlDataset: optional minimum minor-allele frequency
-applied to the variant set used for TWAS weight learning, on top of the
-dataset's construct-time \code{mafCutoff} (the effective cutoff is the
-larger of the two). Lets the TWAS pass use a stricter MAF threshold than
-fine mapping. \code{NULL} (default) leaves the construct-time cutoff in
-place.}
-
-\item{minTwasXvar}{As \code{minTwasMaf} but for the per-variant genotype
-variance cutoff (\code{xvarCutoff}). \code{NULL} (default) leaves the
-construct-time cutoff in place.}
+\item{mafCutoff, macCutoff, xvarCutoff, imissCutoff, keepIndel, keepSamples, keepVariants}{For QtlDataset: optional per-call genotype-filter overrides. Each replaces
+the corresponding construct-time \code{\link{QtlDataset}} slot for this
+call only (applied to a validated copy); \code{NULL} (default) leaves the
+stored value in place. Variant QC is a property of the data, so these are
+applied identically here and in \code{\link{fineMappingPipeline}} -- there
+is deliberately no TWAS-specific variant filter.}
 
 \item{jointRegions}{For QtlDataset with a multi-range \code{region}:
 \code{FALSE} (default) learns weights for each range independently and

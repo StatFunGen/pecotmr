@@ -950,3 +950,94 @@ test_that("mergeMashData returns resData when oneData is an empty list", {
   d1 <- list(random = data.frame(a = 1:3))
   expect_equal(mergeMashData(d1, list()), d1)
 })
+
+# ===========================================================================
+# qtlSumStatsFromZMatrix
+# ===========================================================================
+
+.qszm_gh <- function() {
+  new("GenotypeHandle",
+    path = "/tmp/sketch.gds", format = "gds",
+    snpInfo = data.frame(SNP = "v1", CHR = "1", BP = 100L,
+                         A1 = "A", A2 = "G", stringsAsFactors = FALSE),
+    nSamples = 10L, sampleIds = paste0("s", seq_len(10L)), pgenPtr = NULL)
+}
+
+test_that("qtlSumStatsFromZMatrix: one row per context, Z preserved verbatim", {
+  z <- matrix(c(1.1, -2.2, 0.3, 0.4, -0.5, 0.6), nrow = 3,
+              dimnames = list(c("chr1:100:A:G", "chr1:200:C:T", "chr2:50:A:T"),
+                              c("brain", "liver")))
+  qss <- qtlSumStatsFromZMatrix(z, study = "s1", ldSketch = .qszm_gh())
+  expect_s4_class(qss, "QtlSumStats")
+  expect_equal(nrow(qss), 2L)
+  expect_equal(as.character(qss$context), c("brain", "liver"))
+  expect_equal(unique(as.character(qss$study)), "s1")
+  expect_equal(unique(as.character(qss$trait)), "mash")
+  # Z column for each context matches the input matrix column (values only;
+  # the mcols column is unnamed whereas z[, j] carries the row ids as names).
+  expect_equal(S4Vectors::mcols(qss$entry[[1]])$Z, unname(z[, 1]))
+  expect_equal(S4Vectors::mcols(qss$entry[[2]])$Z, unname(z[, 2]))
+})
+
+test_that("qtlSumStatsFromZMatrix: decodes chrom/pos from ids, synthesises when they don't parse", {
+  z <- matrix(rnorm(2), ncol = 1,
+              dimnames = list(c("chr1:250:A:G", "not_a_variant"), "ctx"))
+  qss <- qtlSumStatsFromZMatrix(z, study = "s1", ldSketch = .qszm_gh())
+  e <- qss$entry[[1]]
+  expect_equal(GenomicRanges::start(e)[1], 250L)          # decoded
+  expect_true(GenomicRanges::start(e)[2] >= 1L)           # synthetic fallback
+  # un-parseable chrom falls back to chr1 (never NA)
+  expect_false(any(is.na(as.character(GenomicRanges::seqnames(e)))))
+  # SNP ids are carried through unchanged
+  expect_equal(S4Vectors::mcols(e)$SNP, rownames(z))
+})
+
+test_that("qtlSumStatsFromZMatrix: NULL rownames get synthetic variant ids", {
+  z <- matrix(rnorm(4), nrow = 2, dimnames = list(NULL, c("a", "b")))
+  qss <- qtlSumStatsFromZMatrix(z, study = "s1", ldSketch = .qszm_gh())
+  expect_equal(S4Vectors::mcols(qss$entry[[1]])$SNP, c("var1", "var2"))
+})
+
+test_that("qtlSumStatsFromZMatrix: placeholders and pass-through qcInfo are set", {
+  z <- matrix(rnorm(6), nrow = 3, dimnames = list(NULL, c("x", "y")))
+  qss <- qtlSumStatsFromZMatrix(z, study = "s1", ldSketch = .qszm_gh(),
+                                n = 500L, a1 = "T", a2 = "C", role = "strong")
+  mc <- S4Vectors::mcols(qss$entry[[1]])
+  expect_equal(unique(mc$A1), "T")
+  expect_equal(unique(mc$A2), "C")
+  expect_equal(unique(mc$N), 500L)
+  expect_equal(qss@qcInfo$role, "strong")
+  expect_equal(length(qss@qcInfo$entryAudit), 2L)   # one slot per context
+})
+
+test_that("qtlSumStatsFromZMatrix: columns can map to traits or context x trait pairs", {
+  z <- matrix(rnorm(6), nrow = 3, dimnames = list(NULL, c("geneA", "geneB")))
+  # columns as traits: constant context, one trait per column
+  qss <- qtlSumStatsFromZMatrix(z, study = "s1", ldSketch = .qszm_gh(),
+                                context = "brain", trait = colnames(z))
+  expect_equal(as.character(qss$context), c("brain", "brain"))
+  expect_equal(as.character(qss$trait), c("geneA", "geneB"))
+  # columns as (context, trait) pairs
+  qss2 <- qtlSumStatsFromZMatrix(z, study = "s1", ldSketch = .qszm_gh(),
+                                 context = c("brain", "liver"),
+                                 trait   = c("geneA", "geneA"))
+  expect_equal(as.character(qss2$context), c("brain", "liver"))
+  expect_equal(as.character(qss2$trait), c("geneA", "geneA"))
+})
+
+test_that("qtlSumStatsFromZMatrix: a condition label of the wrong length errors", {
+  z <- matrix(rnorm(6), nrow = 3, dimnames = list(NULL, c("a", "b")))
+  expect_error(
+    qtlSumStatsFromZMatrix(z, study = "s1", ldSketch = .qszm_gh(),
+                           trait = c("t1", "t2", "t3")),
+    "must be length 1 or ncol")
+})
+
+test_that("qtlSumStatsFromZMatrix: rejects non-matrix input and unlabelled conditions", {
+  expect_error(qtlSumStatsFromZMatrix(1:5, study = "s1", ldSketch = .qszm_gh()),
+               "variants x conditions matrix")
+  # no colnames -> the default context = colnames(z) is NULL
+  z <- matrix(rnorm(4), nrow = 2)
+  expect_error(qtlSumStatsFromZMatrix(z, study = "s1", ldSketch = .qszm_gh()),
+               "column names")
+})

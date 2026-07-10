@@ -164,6 +164,19 @@ test_that("FineMappingEntry: getPip returns named pip vector keyed by variant_id
                paste0("chr1:", 100 * 1:3, ":A:G"))
 })
 
+test_that("FineMappingEntry: resolveWeights returns topLoci posterior effect aligned to variant_id", {
+  entry <- .sc_makeFineMappingEntry(3)   # topLoci posterior_mean = 0.05 for all
+  wr <- resolveWeights(entry)
+  expect_equal(wr$variantIds, paste0("chr1:", 100 * 1:3, ":A:G"))
+  expect_equal(wr$weights, rep(0.05, 3))
+  expect_equal(length(wr$variantIds), length(wr$weights))
+  # empty topLoci -> empty pair
+  empty <- FineMappingEntry(variantIds = character(0), susieFit = list(),
+    topLoci = data.frame(variant_id = character(0), pip = numeric(0),
+                         stringsAsFactors = FALSE))
+  expect_length(resolveWeights(empty)$variantIds, 0L)
+})
+
 
 test_that("FineMappingEntry: getPip returns numeric(0) when topLoci is empty", {
   entry <- FineMappingEntry(

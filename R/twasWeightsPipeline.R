@@ -2,27 +2,50 @@
 # Helpers + S4 dispatch surface for twasWeightsPipeline
 # =============================================================================
 
-# Concatenate two TwasWeights collections row-wise. `rbind` on DFrame
-# subclasses does not reliably preserve the `ldSketch` slot, so this
-# helper rebuilds via the constructor. Optional joint columns
-# (`jointStudies`, `jointContexts`, `jointTraits`) are carried through
-# via .combineJointCol() so a mixed rbind of joint + non-joint rows
-# pads the non-joint side with NA_character_.
+# Concatenate two TwasWeights collections row-wise, carrying forward every
+# column (delegates to the generic `.rbindCollections`, which unions columns
+# and pads a side lacking an optional column such as joint* / region).
 # @noRd
 .rbindTwasWeights <- function(a, b, ldSketch = NULL) {
   if (!is(a, "TwasWeights") || !is(b, "TwasWeights")) {
     stop(".rbindTwasWeights expects two TwasWeights inputs.")
   }
-  TwasWeights(
-    study         = c(as.character(a$study),   as.character(b$study)),
-    context       = c(as.character(a$context), as.character(b$context)),
-    trait         = c(as.character(a$trait),   as.character(b$trait)),
-    method        = c(as.character(a$method),  as.character(b$method)),
-    entry         = c(as.list(a$entry), as.list(b$entry)),
-    jointStudies  = .combineJointCol(a, b, "jointStudies"),
-    jointContexts = .combineJointCol(a, b, "jointContexts"),
-    jointTraits   = .combineJointCol(a, b, "jointTraits"),
-    ldSketch      = ldSketch)
+  # Carry forward every column (joint*, region, ...) via the generic combine.
+  .rbindCollections(list(a, b), ldSketch = ldSketch)
+}
+
+# Normalize combine() varargs: accept either N objects or a single list of
+# them; drop NULLs; require at least one input of the expected class `cls`.
+.asCombineList <- function(parts, cls, fn) {
+  if (length(parts) == 1L && is.list(parts[[1L]]) &&
+      !methods::is(parts[[1L]], cls)) {
+    parts <- parts[[1L]]
+  }
+  parts <- parts[!vapply(parts, is.null, logical(1L))]
+  if (length(parts) == 0L)
+    stop(fn, ": nothing to combine (need at least one ", cls, ").")
+  if (!all(vapply(parts, function(p) methods::is(p, cls), logical(1L))))
+    stop(fn, ": every input must be a ", cls, ".")
+  parts
+}
+
+#' Combine TwasWeights collections
+#'
+#' Row-bind two or more \code{\link{TwasWeights}} collections into one -- e.g.
+#' assembling per-gene weight sets into a single per-region collection for
+#' cTWAS. Joint-specification metadata columns are carried through.
+#'
+#' @param ... Two or more \code{TwasWeights} objects, or a single \code{list}
+#'   of them.
+#' @param ldSketch Optional \code{\link{GenotypeHandle}} to attach to the
+#'   combined collection. Default \code{NULL}. Applied when combining two or
+#'   more inputs; a single input is returned unchanged.
+#' @return A single combined \code{TwasWeights}.
+#' @seealso \code{\link{combineFineMappingResults}}
+#' @export
+combineTwasWeights <- function(..., ldSketch = NULL) {
+  parts <- .asCombineList(list(...), "TwasWeights", "combineTwasWeights")
+  Reduce(function(a, b) .rbindTwasWeights(a, b, ldSketch = ldSketch), parts)
 }
 
 # --- Multi-region (jointRegions) helpers for the QtlDataset method ----------
@@ -716,20 +739,20 @@
 #' @param traitId Optional character vector of trait identifiers to
 #'   restrict processing to (QtlDataset / QtlSumStats inputs). Default
 #'   \code{NULL}.
-#' @param region Optional \code{GRanges} for QtlDataset trait selection.
-#'   Mutually exclusive with \code{traitId}.
+#' @param region Optional variant window for QtlDataset trait selection: a
+#'   \code{GRanges}, a \code{"chr:start-end"} string, or a one-row data.frame
+#'   with \code{chrom}/\code{start}/\code{end}. Mutually exclusive with
+#'   \code{traitId}.
 #' @param cisWindow For QtlDataset: cis-window (bp) around each trait's
 #'   genomic position when extracting variants. Required when
 #'   \code{traitId} is supplied. Mutually exclusive with \code{region}.
-#' @param minTwasMaf For QtlDataset: optional minimum minor-allele frequency
-#'   applied to the variant set used for TWAS weight learning, on top of the
-#'   dataset's construct-time \code{mafCutoff} (the effective cutoff is the
-#'   larger of the two). Lets the TWAS pass use a stricter MAF threshold than
-#'   fine mapping. \code{NULL} (default) leaves the construct-time cutoff in
-#'   place.
-#' @param minTwasXvar As \code{minTwasMaf} but for the per-variant genotype
-#'   variance cutoff (\code{xvarCutoff}). \code{NULL} (default) leaves the
-#'   construct-time cutoff in place.
+#' @param mafCutoff,macCutoff,xvarCutoff,imissCutoff,keepIndel,keepSamples,keepVariants
+#'   For QtlDataset: optional per-call genotype-filter overrides. Each replaces
+#'   the corresponding construct-time \code{\link{QtlDataset}} slot for this
+#'   call only (applied to a validated copy); \code{NULL} (default) leaves the
+#'   stored value in place. Variant QC is a property of the data, so these are
+#'   applied identically here and in \code{\link{fineMappingPipeline}} -- there
+#'   is deliberately no TWAS-specific variant filter.
 #' @param jointRegions For QtlDataset with a multi-range \code{region}:
 #'   \code{FALSE} (default) learns weights for each range independently and
 #'   concatenates them into one entry per (study, context, trait, method);
@@ -815,8 +838,16 @@ setMethod("twasWeightsPipeline", "QtlDataset",
            traitId                = NULL,
            region                 = NULL,
            cisWindow              = NULL,
-           minTwasMaf             = NULL,
-           minTwasXvar            = NULL,
+           # Per-call genotype-filter overrides; NULL = use the QtlDataset's
+           # construct-time slot value. Variant QC is a data property, so these
+           # match fineMappingPipeline exactly -- there is no TWAS-specific filter.
+           mafCutoff              = NULL,
+           macCutoff              = NULL,
+           xvarCutoff             = NULL,
+           imissCutoff            = NULL,
+           keepIndel              = NULL,
+           keepSamples            = NULL,
+           keepVariants           = NULL,
            jointRegions           = FALSE,
            jointSpecification     = NULL,
            fineMappingResult      = NULL,
@@ -853,14 +884,12 @@ setMethod("twasWeightsPipeline", "QtlDataset",
            "coordinates, whereas `region` is the literal variant window.")
     }
     xRegions <- .makeXRegions(region, jointRegions)
-    # TWAS-specific variant filters: tighten the QtlDataset maf/xvar cutoffs for
-    # weight learning (distinct from the construct-time / fine-mapping cutoffs).
-    # Modifying the local `data` copy elevates them everywhere downstream
-    # (runOne, runMultivariate, and the jointSpec dispatcher all extract from it).
-    if (!is.null(minTwasMaf))
-      data@mafCutoff  <- max(data@mafCutoff,  as.numeric(minTwasMaf))
-    if (!is.null(minTwasXvar))
-      data@xvarCutoff <- max(data@xvarCutoff, as.numeric(minTwasXvar))
+    # Per-call filter overrides replace the construct-time slot values on a
+    # validated copy. Variant QC is a data property applied identically to
+    # fine-mapping and TWAS -- there is no TWAS-specific variant filter.
+    data <- .qtlApplyFilterOverrides(data, mafCutoff, macCutoff, xvarCutoff,
+                                     imissCutoff, keepIndel, keepSamples,
+                                     keepVariants)
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
     norm <- .twasNormalizeMethods(methods)
     .twasCheckMethodCapabilities(norm$tokens, "QtlDataset")

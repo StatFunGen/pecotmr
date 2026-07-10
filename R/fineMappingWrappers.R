@@ -1862,7 +1862,8 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
 .fmFitXBlock <- function(X, y, toRun, addSusieInf, coverage,
                          secondaryCoverage, signalCutoff, minAbsCorr,
                          methodArgs, verbose, ctx, tid,
-                         cvFolds = 0, samplePartition = NULL, af = NULL) {
+                         cvFolds = 0, cvThreads = 1, samplePartition = NULL,
+                         af = NULL) {
   chainLocal <- .fmResolveSusieChain(toRun, addSusieInf)
   infFit <- NULL
   if (chainLocal$runInf) {
@@ -1898,9 +1899,10 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
     if (verbose >= 1)
       message(sprintf("Cross-validating (%d folds) for (context='%s', trait='%s') ...",
                       cvFolds, ctx, tid))
-    cv <- .fmCrossValidate(X, y, names(out), methodArgs, cvFolds,
+    cv <- .fmWeightsCv(X, y, names(out), methodArgs, cvFolds,
                            samplePartition = samplePartition,
-                           coverage = coverage, verbose = verbose)
+                           coverage = coverage, verbose = verbose,
+                           numThreads = cvThreads)
     for (tk in names(out)) {
       out[[tk]] <- .fmAttachCv(out[[tk]], .fmSliceCv(cv, tk))
     }

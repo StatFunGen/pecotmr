@@ -116,6 +116,16 @@ setMethod("getWeights", "TwasWeightsEntry",
 setMethod("getVariantIds", "TwasWeightsEntry",
           function(x, ...) x@variantIds)
 
+#' @rdname resolveWeights
+#' @export
+setMethod("resolveWeights", "TwasWeightsEntry", function(x, ...) {
+  vids <- as.character(getVariantIds(x))
+  w    <- as.numeric(getWeights(x))
+  if (length(vids) == 0L || length(vids) != length(w))
+    return(list(variantIds = character(0), weights = numeric(0)))
+  list(variantIds = vids, weights = w)
+})
+
 #' @rdname getFits
 #' @export
 setMethod("getFits", "TwasWeightsEntry",

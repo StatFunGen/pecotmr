@@ -19,6 +19,18 @@ test_that("TwasWeightsEntry: constructor and accessors round-trip", {
   expect_equal(getDataType(e), "expression")
 })
 
+test_that("TwasWeightsEntry: resolveWeights returns the aligned (variantIds, weights) pair", {
+  e <- TwasWeightsEntry(variantIds = c("v1", "v2", "v3"),
+                        weights = c(0.1, -0.2, 0.05))
+  wr <- resolveWeights(e)
+  expect_equal(wr$variantIds, c("v1", "v2", "v3"))
+  expect_equal(wr$weights, c(0.1, -0.2, 0.05))
+  # length mismatch (defensive) -> empty
+  e2 <- TwasWeightsEntry(variantIds = c("v1", "v2"), weights = c(0.1, -0.2))
+  e2@weights <- matrix(0, 2, 2)   # flattens to length 4 != 2 ids
+  expect_length(resolveWeights(e2)$variantIds, 0L)
+})
+
 
 test_that("TwasWeightsEntry: standardized is coerced via isTRUE() semantics", {
   # isTRUE() only returns TRUE for a length-1 logical TRUE. Non-TRUE

@@ -83,10 +83,10 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", 
     rescaleCovW0      = function(w0) c(K = 1),
     fitMvsusie        = function(...) list(),
     .fmPostprocessOne = .je_mockPostprocess,
-    .fmCrossValidate  = function(X, Y, tokens, methodArgs, fold,
+    .fmWeightsCv      = function(X, Y, tokens, methodArgs, fold,
                                  samplePartition = NULL, coverage = 0.95,
                                  pos = NULL, verbose = 1, mvPrior = NULL,
-                                 mvPriorCv = NULL) {
+                                 mvPriorCv = NULL, numThreads = 1) {
       captured <<- list(mvPriorCv = mvPriorCv, samplePartition = samplePartition)
       list(samplePartition = samplePartition, prediction = list(),
            performance = list())
@@ -845,7 +845,7 @@ test_that("fitJointGroup(Individual, Fm): fsusie honest per-fold CV is attached"
     fitFsusie         = function(...) list(),
     fsusieWeights     = function(fsusieFit, variantIds) NULL,
     .fmPostprocessOne = .je_mockPostprocess,
-    .fmCrossValidate  = function(X, Y, token, methodArgs, fold, ...) {
+    .fmWeightsCv      = function(X, Y, token, methodArgs, fold, ...) {
       cvCalled <<- TRUE; list(samplePartition = NULL) },
     .fmSliceCv        = function(cv, token) list(prediction = NULL),
     .fmAttachCv       = function(e, cv) e,

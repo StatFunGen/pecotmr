@@ -839,6 +839,17 @@ test_that("asGranges errors on malformed input", {
   expect_error(pecotmr:::asGranges(list(1)), "character vector or data.frame")
 })
 
+test_that("asGranges (exported) converts region strings and data.frames", {
+  gr <- asGranges("chr1:100-200")
+  expect_s4_class(gr, "GRanges")
+  expect_equal(as.character(GenomicRanges::seqnames(gr)), "chr1")
+  expect_equal(GenomicRanges::start(gr), 100L)
+  expect_equal(GenomicRanges::end(gr), 200L)
+  # numeric chrom gets a chr prefix; data.frame input is accepted too
+  gr2 <- asGranges(data.frame(chrom = "2", start = 5, end = 9))
+  expect_equal(as.character(GenomicRanges::seqnames(gr2)), "chr2")
+})
+
 test_that("matchVariants allowFlip = FALSE accepts data.frame input", {
   a <- .vid_df("1", 100, "A", "G")
   b <- .vid_df("1", 100, "A", "G")

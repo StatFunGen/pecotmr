@@ -36,6 +36,7 @@ setClass("GwasFineMappingResult",
       if (!all(entryTypes))
         errors <- c(errors,
           "every element of the `entry` column must be a FineMappingEntry")
+      errors <- c(errors, .validateRegionColumn(object))
       # Extract key columns directly rather than via `object[, keyCols]`:
       # column-subsetting preserves the GwasFineMappingResult class while
       # dropping the required `entry` column, and older S4Vectors revalidates
@@ -102,11 +103,18 @@ setClass("GwasFineMappingResult",
 #'   (\code{study}, \code{method}, \code{region_id}) triple is unique.
 #'   Supplying meaningful labels (e.g. \code{"chr22_10516173_17414263"})
 #'   is preferred for downstream consumers that join on region.
+#' @param region Optional \code{GRanges} (length \code{length(study)}) genomic
+#'   anchor per row. When \code{NULL} (default) it is derived from
+#'   \code{region_id} (parsing \code{chr_start_end} / \code{chr:start-end}; a
+#'   0-width \code{chrUn} sentinel for ids that do not encode coordinates).
+#'   Carried forward as provenance (e.g. for cTWAS LD-block placement); not
+#'   part of the identity key.
 #' @param ldSketch An optional \code{GenotypeHandle}.
 #' @return A \code{GwasFineMappingResult} object.
 #' @export
 GwasFineMappingResult <- function(study, method, entry,
                                   region_id = NULL,
+                                  region = NULL,
                                   ldSketch = NULL) {
   n <- length(study)
   if (length(method) != n || length(entry) != n) {
@@ -124,11 +132,35 @@ GwasFineMappingResult <- function(study, method, entry,
     region_id = as.character(region_id),
     entry     = S4Vectors::SimpleList(entry)
   )
+  if (is.null(region)) region <- .regionFromIds(region_id)
+  cols <- .appendRegionCol(cols, region, n)
   df <- do.call(S4Vectors::DataFrame,
                 c(cols, list(check.names = FALSE)))
   obj <- new("GwasFineMappingResult", df, ldSketch = ldSketch)
   validObject(obj)
   obj
+}
+
+# Internal: parse region_id strings (chr_start_end / chr:start-end) into a
+# per-row GRanges, using the canonical `asGranges` parser; a 0-width chrUn
+# sentinel for ids (e.g. synthetic "region_1") that carry no coordinates.
+# Built from vectors so mixed seqlevels do not emit a seqinfo-merge warning.
+.regionFromIds <- function(ids) {
+  n <- length(ids)
+  chrom <- character(n); start <- integer(n); end <- integer(n)
+  for (i in seq_len(n)) {
+    g <- tryCatch(
+      asGranges(sub("_([0-9]+)_([0-9]+)$", ":\\1-\\2", as.character(ids[[i]]))),
+      error = function(e) NULL)
+    if (!is.null(g) && length(g) >= 1L) {
+      chrom[[i]] <- as.character(GenomicRanges::seqnames(g))[[1L]]
+      start[[i]] <- GenomicRanges::start(g)[[1L]]
+      end[[i]]   <- GenomicRanges::end(g)[[1L]]
+    } else {
+      chrom[[i]] <- "chrUn"; start[[i]] <- 1L; end[[i]] <- 0L
+    }
+  }
+  GenomicRanges::GRanges(chrom, IRanges::IRanges(start = start, end = end))
 }
 
 # Internal: return integer row indices of `x` where every (column, value)

@@ -356,6 +356,40 @@ test_that("genoMeta meta-file resolves payloads relative to its own directory", 
   expect_equal(nrow(h@snpInfo), 2L * 349L)
 })
 
+test_that(".parseChromMeta matches chrom/path columns by name (order- and extra-column-tolerant)", {
+  mk <- function(lines) { f <- tempfile(fileext = ".tsv"); writeLines(lines, f); f }
+  # extra legacy start/end columns + path not in position 2
+  m1 <- pecotmr:::.parseChromMeta(
+    mk(c("#chrom\tstart\tend\tpath", "21\t1\t9\t/abs/a.bed", "22\t1\t9\t/abs/b.bed")))
+  expect_equal(m1$chrom, c("21", "22"))
+  expect_equal(m1$path,  c("/abs/a.bed", "/abs/b.bed"))
+  # reordered header (path first) + alias column names
+  m2 <- pecotmr:::.parseChromMeta(
+    mk(c("genotype\tchr", "/abs/a.bed\t21", "/abs/b.bed\t22")))
+  expect_equal(m2$chrom, c("21", "22"))
+  expect_equal(m2$path,  c("/abs/a.bed", "/abs/b.bed"))
+})
+
+test_that(".parseChromMeta falls back to the first two columns when no alias header matches", {
+  mk <- function(lines) { f <- tempfile(fileext = ".tsv"); writeLines(lines, f); f }
+  m <- pecotmr:::.parseChromMeta(
+    mk(c("foo\tbar", "21\t/abs/a.bed", "22\t/abs/b.bed")))
+  expect_equal(m$chrom, c("21", "22"))
+  expect_equal(m$path,  c("/abs/a.bed", "/abs/b.bed"))
+})
+
+test_that(".parseChromMeta errors when a chromosome maps to multiple payloads", {
+  mk <- function(lines) { f <- tempfile(fileext = ".tsv"); writeLines(lines, f); f }
+  expect_error(
+    pecotmr:::.parseChromMeta(
+      mk(c("#chr\tpath", "21\t/abs/a.bed", "21\t/abs/b.bed"))),
+    "map to multiple genotype payloads")
+  # same guard on the named-vector path
+  expect_error(
+    pecotmr:::.parseChromMeta(c("21" = "/abs/a.bed", "21" = "/abs/b.bed")),
+    "map to multiple genotype payloads")
+})
+
 test_that("genoMeta errors on mismatched samples across shards", {
   skip_if_not_installed("snpStats")
   # protocol_example.genotype is a different sample panel.

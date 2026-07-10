@@ -516,3 +516,53 @@ metaSldscRandom <- function(perTraitEstimates, category,
     list(summary = newDf)
   })
 }
+
+#' Random-effects meta-analysis over a subset of sLDSC traits
+#'
+#' Re-run the DerSimonian-Laird random-effects meta-analysis on a chosen subset
+#' of the per-trait standardised tables produced by
+#' \code{\link{sldscPostprocessingPipeline}} -- no regression is re-run, only the
+#' already-standardised per-trait estimates are re-meta'd. Powers a "meta on a
+#' subset of traits" workflow: pick traits, pick target annotation categories,
+#' and get the per-category tau* / enrichment / enrichstat meta results back.
+#'
+#' @param postprocessResult The list returned by
+#'   \code{\link{sldscPostprocessingPipeline}}. Must carry a \code{$per_trait}
+#'   element; \code{$params$target_categories} is used when
+#'   \code{targetCategories} is \code{NULL}.
+#' @param subsetTraits Character vector of trait ids to meta over; every id must
+#'   be present in \code{postprocessResult$per_trait}.
+#' @param targetCategories Optional character vector of target annotation names.
+#'   Defaults to \code{postprocessResult$params$target_categories}.
+#' @return A list with \code{tau_star_single}, \code{tau_star_joint},
+#'   \code{enrichment}, and \code{enrichstat}; each is a per-category named list
+#'   of \code{\link{metaSldscRandom}} results.
+#' @seealso \code{\link{sldscPostprocessingPipeline}}, \code{\link{metaSldscRandom}}
+#' @export
+sldscSubsetMeta <- function(postprocessResult, subsetTraits,
+                            targetCategories = NULL) {
+  perTrait <- postprocessResult$per_trait
+  if (is.null(perTrait))
+    stop("sldscSubsetMeta: `postprocessResult` has no `per_trait` element.")
+  if (is.null(targetCategories))
+    targetCategories <- postprocessResult$params$target_categories
+  if (is.null(targetCategories) || length(targetCategories) == 0L)
+    stop("sldscSubsetMeta: no `targetCategories` supplied and none found in ",
+         "`postprocessResult$params$target_categories`.")
+  missingTraits <- setdiff(subsetTraits, names(perTrait))
+  if (length(missingTraits) > 0L)
+    stop("sldscSubsetMeta: trait(s) absent from `per_trait`: ",
+         paste(missingTraits, collapse = ", "))
+  sub <- perTrait[subsetTraits]
+  viewSingle <- .sldscViewForMeta(sub, "single")
+  viewJoint  <- .sldscViewForMeta(sub, "joint")
+  perCategory <- function(view, quantity)
+    setNames(lapply(targetCategories,
+                    function(cat) metaSldscRandom(view, cat, quantity)),
+             targetCategories)
+  list(
+    tau_star_single = perCategory(viewSingle, "tauStar"),
+    tau_star_joint  = perCategory(viewJoint,  "tauStar"),
+    enrichment      = perCategory(viewSingle, "enrichment"),
+    enrichstat      = perCategory(viewSingle, "enrichstat"))
+}
