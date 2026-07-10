@@ -22,6 +22,11 @@ ctwasPipeline(
   minPipCutoff = 0,
   maxNumVariants = Inf,
   fallbackToPrefit = FALSE,
+  keepSnps = FALSE,
+  mergeBoundary = FALSE,
+  mergePipThresh = 0.5,
+  mergeFilterCs = FALSE,
+  mergeMaxSNP = Inf,
   ...
 )
 }
@@ -30,12 +35,19 @@ ctwasPipeline(
 by \code{region_id} (at least two entries). Each must have
 \code{getQcInfo()} non-empty.}
 
-\item{twasWeights}{NAMED LIST of \code{\link{TwasWeights}} keyed by
-\code{region_id}. Keys must be a SUBSET of \code{gwasSumStats}'s
-keys: blocks without any TWAS weights still contribute their
-SNP-level signal to ctwas's joint group prior estimate (matches
-the legacy whole-chromosome pattern where only a few of many LD
-blocks carry gene weights).}
+\item{twasWeights}{The per-gene weight source. Either (a) a FLAT
+\code{\link{TwasWeights}} / \code{QtlFineMappingResult} (or a
+homogeneous list of them) carrying \code{region} provenance — each
+gene is placed into its home LD block internally by
+\code{start(region)} (matching cTWAS's \code{p0} assignment rule);
+or (b) a pre-bucketed NAMED LIST keyed by \code{region_id} (keys a
+SUBSET of \code{gwasSumStats}'s), used as-is. Blocks without any
+TWAS weights still contribute their SNP-level signal to ctwas's
+joint group prior estimate (the legacy whole-chromosome pattern
+where only a few of many LD blocks carry gene weights). A gene whose
+cis span straddles a block boundary is homed by its single anchor;
+the cross-block signal is cTWAS's boundary-gene concern
+(\code{\link{mergeCtwasBoundaryRegions}}), not placement.}
 
 \item{twasZ}{Optional \code{GRanges} of TWAS Z-scores (output of
 \code{\link{causalInferencePipeline}}). When supplied, the
@@ -53,10 +65,11 @@ credible-set membership data used by the CS / PIP rescue filters
 \item{method}{Optional character (length 1). Picks which TWAS
 method's weights to feed into ctwas for each (study, context,
 trait) gene. When \code{NULL} (default): use \code{"ensemble"} if
-that method is present across the TwasWeights; otherwise use the
-sole method when only one is present; otherwise error. Passing
-the name explicitly (e.g. \code{"mrash"}) overrides the default
-resolution.}
+that method is present across the weight sources; otherwise use the
+sole method when only one is present; otherwise run \strong{every}
+method as an independent cTWAS run (one \code{CtwasResult} row-set
+per method). Passing the name explicitly (e.g. \code{"mrash"})
+restricts the run to that single method.}
 
 \item{thin, niterPrefit, niter, L}{Pass-throughs to
 \code{ctwas::ctwas_sumstats}.}
@@ -94,12 +107,49 @@ NaN failure is recovered by falling back to the prefit estimates
 (mirrors the legacy ctwas_2 workaround on underpowered data).
 Default \code{FALSE}.}
 
+\item{keepSnps}{Logical (length 1). When \code{TRUE}, retain the
+context-agnostic SNP background of each run as one extra
+\code{CtwasResult} row (\code{study = context = "SNP"}, mirroring
+cTWAS's own \code{"SNP"} group) so the full ctwas output is
+reconstructable from \code{\link{getFinemap}} / \code{getSusieAlpha}.
+Default \code{FALSE} — the SNP rows are the null background and are
+dropped from the structured gene-level result.}
+
+\item{mergeBoundary}{Logical (length 1). When \code{TRUE}, run
+\code{\link{mergeCtwasBoundaryRegions}} after fine-mapping each
+run: a high-PIP gene whose cis window straddles an LD-block boundary
+has its adjacent regions merged and re-fine-mapped (the legacy
+default-off \code{ctwas_3} post-processing). Default \code{FALSE}.}
+
+\item{mergePipThresh}{Numeric (length 1). PIP threshold for selecting
+which boundary genes to merge (\code{\link{mergeCtwasBoundaryRegions}}
+\code{pipThresh}). Default \code{0.5}. Ignored unless
+\code{mergeBoundary = TRUE}.}
+
+\item{mergeFilterCs}{Logical (length 1). Require the boundary gene to
+be in a credible set to be selected. Default \code{FALSE}. Ignored
+unless \code{mergeBoundary = TRUE}.}
+
+\item{mergeMaxSNP}{Numeric (length 1). Per-merged-region SNP cap.
+Default \code{Inf}. Ignored unless \code{mergeBoundary = TRUE}.}
+
 \item{...}{Additional arguments forwarded to
 \code{ctwas::ctwas_sumstats}.}
 }
 \value{
-Whatever \code{ctwas::ctwas_sumstats} returns (a list with
-  \code{susie_alpha_res}, \code{param}, and other diagnostics).
+A \code{\link{CtwasResult}} collection: one row per
+  \code{(gwasStudy, study, context, method)}. A single-context run is
+  one row per method; a multi-context (joint) run emits per-context
+  rows sharing the same \code{jointContexts} set and the
+  jointly-estimated group priors. Each row's
+  \code{\link{CtwasResultEntry}} payload carries that context's
+  per-gene fine-mapping posteriors (\code{finemap}), the run's
+  \code{param}, and its \code{regionInfo}. For the raw
+  \code{ctwas::finemap_regions} list (e.g. to feed
+  \code{\link{mergeCtwasBoundaryRegions}}), call the granular
+  \code{\link{assembleCtwasInputs}} \eqn{\to} \code{\link{estCtwasParam}}
+  \eqn{\to} \code{\link{screenCtwasRegions}} \eqn{\to}
+  \code{\link{finemapCtwasRegions}} path instead.
 }
 \description{
 Pipeline that hands a per-block set of

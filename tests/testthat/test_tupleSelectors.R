@@ -167,3 +167,104 @@ test_that(".tupleSelectRowGwasFmr: ambiguous multi-match (no region) lists candi
     pecotmr:::.tupleSelectRowGwasFmr(multi, study = "g1", method = "susie"),
     "pass `region` to disambiguate")
 })
+
+# ===========================================================================
+# .fmrRowsMatching (aggregate row selector -- never errors on ambiguity)
+# ===========================================================================
+
+test_that(".fmrRowsMatching: no selectors returns every row", {
+  df <- data.frame(study = c("s1", "s1"), context = c("c1", "c2"),
+                   trait = c("t1", "t1"), method = c("susie", "susie"),
+                   stringsAsFactors = FALSE)
+  expect_equal(pecotmr:::.fmrRowsMatching(df), c(1L, 2L))
+})
+
+test_that(".fmrRowsMatching: matches a subset without erroring on ambiguity", {
+  df <- data.frame(study = c("s1", "s1", "s2"), context = c("c1", "c2", "c1"),
+                   trait = c("t1", "t1", "t1"), method = c("susie", "susie", "susie"),
+                   stringsAsFactors = FALSE)
+  expect_equal(pecotmr:::.fmrRowsMatching(df, study = "s1"), c(1L, 2L))
+  expect_equal(pecotmr:::.fmrRowsMatching(df, context = "c1"), c(1L, 3L))
+})
+
+test_that(".fmrRowsMatching: selectors on absent columns are ignored", {
+  # GWAS-shaped frame has no context/trait column; passing context must not
+  # error and must not constrain the result.
+  gwas <- data.frame(study = c("g1", "g1"), method = c("susie", "susie"),
+                     region_id = c("r1", "r2"), stringsAsFactors = FALSE)
+  expect_equal(pecotmr:::.fmrRowsMatching(gwas, context = "c1"), c(1L, 2L))
+})
+
+test_that(".fmrRowsMatching: `region` matches the region_id column", {
+  gwas <- data.frame(study = c("g1", "g1"), method = c("susie", "susie"),
+                     region_id = c("r1", "r2"), stringsAsFactors = FALSE)
+  expect_equal(pecotmr:::.fmrRowsMatching(gwas, region = "r2"), 2L)
+})
+
+test_that(".fmrRowsMatching: a vector selector matches any listed value", {
+  df <- data.frame(study = c("s1", "s2", "s3"), context = c("c1", "c2", "c3"),
+                   trait = c("t1", "t1", "t1"), method = c("susie", "susie", "susie"),
+                   stringsAsFactors = FALSE)
+  expect_equal(pecotmr:::.fmrRowsMatching(df, study = c("s1", "s3")), c(1L, 3L))
+})
+
+# ===========================================================================
+# .fmrRowMetadata (stable 5-column identity frame)
+# ===========================================================================
+
+test_that(".fmrRowMetadata: emits all five identity columns, NA-filling absent ones", {
+  qtl <- data.frame(study = c("s1", "s1"), context = c("c1", "c2"),
+                    trait = c("t1", "t1"), method = c("susie", "susie"),
+                    stringsAsFactors = FALSE)
+  m <- pecotmr:::.fmrRowMetadata(qtl)
+  expect_equal(names(m),
+               c("study", "context", "trait", "region_id", "method"))
+  expect_equal(m$context, c("c1", "c2"))
+  expect_true(all(is.na(m$region_id)))  # QTL frame has no region_id
+})
+
+test_that(".fmrRowMetadata: GWAS frame NA-fills context/trait, keeps region_id", {
+  gwas <- data.frame(study = c("g1", "g1"), method = c("susie", "susie"),
+                     region_id = c("r1", "r2"), stringsAsFactors = FALSE)
+  m <- pecotmr:::.fmrRowMetadata(gwas)
+  expect_equal(m$region_id, c("r1", "r2"))
+  expect_true(all(is.na(m$context)))
+  expect_true(all(is.na(m$trait)))
+})
+
+test_that(".fmrRowMetadata: zero-row input yields a zero-row 5-column frame", {
+  empty <- data.frame(study = character(0), method = character(0),
+                      region_id = character(0), stringsAsFactors = FALSE)
+  m <- pecotmr:::.fmrRowMetadata(empty)
+  expect_equal(nrow(m), 0L)
+  expect_equal(names(m),
+               c("study", "context", "trait", "region_id", "method"))
+})
+
+# ===========================================================================
+# .rbindAligned (union-of-columns rbind)
+# ===========================================================================
+
+test_that(".rbindAligned: a single part is returned unchanged", {
+  df <- data.frame(a = 1:2, b = c("x", "y"), stringsAsFactors = FALSE)
+  expect_identical(pecotmr:::.rbindAligned(list(df)), df)
+})
+
+test_that(".rbindAligned: identical columns rbind and preserve type", {
+  p1 <- data.frame(a = 1L, b = "x", stringsAsFactors = FALSE)
+  p2 <- data.frame(a = 2L, b = "y", stringsAsFactors = FALSE)
+  out <- pecotmr:::.rbindAligned(list(p1, p2))
+  expect_equal(nrow(out), 2L)
+  expect_type(out$a, "integer")
+  expect_equal(out$b, c("x", "y"))
+})
+
+test_that(".rbindAligned: differing columns align on the union, NA-filling gaps", {
+  p1 <- data.frame(a = 1L, b = "x", stringsAsFactors = FALSE)
+  p2 <- data.frame(a = 2L, c = "z", stringsAsFactors = FALSE)
+  out <- pecotmr:::.rbindAligned(list(p1, p2))
+  expect_equal(sort(names(out)), c("a", "b", "c"))
+  expect_equal(out$a, c(1L, 2L))
+  expect_equal(out$b, c("x", NA))
+  expect_equal(out$c, c(NA, "z"))
+})

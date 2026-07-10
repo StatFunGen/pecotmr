@@ -131,8 +131,10 @@
 #'   \code{NULL} (all contexts).
 #' @param traitId Optional character vector of trait names to restrict
 #'   processing to.
-#' @param region Optional \code{GRanges} for QtlDataset trait
-#'   selection. Mutually exclusive with \code{traitId}.
+#' @param region Optional variant window for QtlDataset trait selection: a
+#'   \code{GRanges}, a \code{"chr:start-end"} string, or a one-row data.frame
+#'   with \code{chrom}/\code{start}/\code{end}. Mutually exclusive with
+#'   \code{traitId}.
 #' @param cisWindow For QtlDataset: cis-window (bp) around each trait's
 #'   genomic position when extracting variants. Required when
 #'   \code{traitId} is supplied. Mutually exclusive with \code{region}.
@@ -170,6 +172,10 @@
 #'   this partition and feeds these predictions into the SR-TWAS ensemble.
 #'   Individual-level (\code{QtlDataset} / \code{MultiStudyQtlDataset})
 #'   input only; ignored for sumstat inputs.
+#' @param cvThreads Integer. Number of parallel workers for the
+#'   cross-validation fold refits (passed to the shared CV engine's
+#'   \code{numThreads}). Default \code{1} (serial); \code{-1} uses all cores.
+#'   Only consulted when \code{cvFolds > 1}.
 #' @param samplePartition Optional pre-defined CV partition
 #'   \code{data.frame} with columns \code{Sample} and \code{Fold}. When
 #'   supplied (and \code{cvFolds > 1}), every method reuses this exact
@@ -565,26 +571,8 @@ setGeneric("fineMappingPipeline",
     ldSketch  = ldSketch)
 }
 
-# Combine an optional joint column across two collections. Returns NULL
-# when neither input carries the column (so the rebuilt collection
-# omits it too); otherwise pads the missing side with NA_character_ so
-# both halves contribute a same-length character vector.
-# @noRd
-.combineJointCol <- function(a, b, colName) {
-  hasA <- colName %in% names(a)
-  hasB <- colName %in% names(b)
-  if (!hasA && !hasB) return(NULL)
-  aVals <- if (hasA) as.character(a[[colName]])
-           else rep(NA_character_, nrow(a))
-  bVals <- if (hasB) as.character(b[[colName]])
-           else rep(NA_character_, nrow(b))
-  c(aVals, bVals)
-}
-
-# Concatenate two FineMappingResult collections row-wise. Routes to the
-# right constructor based on input class. rbind() on a DFrame subclass
-# does not reliably preserve the ldSketch slot, so this helper rebuilds
-# the collection via the constructor.
+# Concatenate two same-class FineMappingResult collections row-wise, carrying
+# forward every column (delegates to the generic `.rbindCollections`).
 # @noRd
 .rbindFineMappingResult <- function(a, b, ldSketch = NULL) {
   if (!is(a, "FineMappingResultBase") || !is(b, "FineMappingResultBase")) {
@@ -594,25 +582,32 @@ setGeneric("fineMappingPipeline",
     stop(".rbindFineMappingResult: inputs must be the same concrete class ",
          "(got '", class(a)[[1L]], "' and '", class(b)[[1L]], "').")
   }
-  if (is(a, "QtlFineMappingResult")) {
-    QtlFineMappingResult(
-      study         = c(as.character(a$study),   as.character(b$study)),
-      context       = c(as.character(a$context), as.character(b$context)),
-      trait         = c(as.character(a$trait),   as.character(b$trait)),
-      method        = c(as.character(a$method),  as.character(b$method)),
-      entry         = c(as.list(a$entry), as.list(b$entry)),
-      jointStudies  = .combineJointCol(a, b, "jointStudies"),
-      jointContexts = .combineJointCol(a, b, "jointContexts"),
-      jointTraits   = .combineJointCol(a, b, "jointTraits"),
-      ldSketch      = ldSketch)
-  } else {
-    GwasFineMappingResult(
-      study     = c(as.character(a$study),     as.character(b$study)),
-      method    = c(as.character(a$method),    as.character(b$method)),
-      region_id = c(as.character(a$region_id), as.character(b$region_id)),
-      entry     = c(as.list(a$entry), as.list(b$entry)),
-      ldSketch  = ldSketch)
-  }
+  # Carry forward every column (region_id / joint* / ...) via the generic
+  # combine; the concrete class (QTL vs GWAS) is preserved automatically.
+  .rbindCollections(list(a, b), ldSketch = ldSketch)
+}
+
+#' Combine FineMappingResult collections
+#'
+#' Row-bind two or more fine-mapping result collections of the SAME concrete
+#' class (all \code{\link{QtlFineMappingResult}} or all
+#' \code{\link{GwasFineMappingResult}}) into one -- e.g. per-block GWAS results
+#' into a genome-wide collection for cTWAS. Mixing the two concrete classes is
+#' an error.
+#'
+#' @param ... Two or more \code{FineMappingResultBase} objects, or a single
+#'   \code{list} of them.
+#' @param ldSketch Optional \code{\link{GenotypeHandle}} to attach to the
+#'   combined collection. Default \code{NULL}. Applied when combining two or
+#'   more inputs; a single input is returned unchanged.
+#' @return A single combined fine-mapping result of the shared concrete class.
+#' @seealso \code{\link{combineTwasWeights}}
+#' @export
+combineFineMappingResults <- function(..., ldSketch = NULL) {
+  parts <- .asCombineList(list(...), "FineMappingResultBase",
+                          "combineFineMappingResults")
+  Reduce(function(a, b) .rbindFineMappingResult(a, b, ldSketch = ldSketch),
+         parts)
 }
 
 
@@ -743,6 +738,9 @@ setGeneric("fineMappingPipeline",
 # fineMapping & twas methods.
 #' @keywords internal
 .makeXRegions <- function(region, jointRegions) {
+  # Accept a "chr:start-end" string / one-row data.frame as well as a GRanges
+  # (a GRanges passes through unchanged), so pipeline callers need not pre-parse.
+  if (!is.null(region)) region <- .asGRegion(region)
   if (is.null(region)) {
     list(NULL)
   } else if (isTRUE(jointRegions)) {
@@ -1234,6 +1232,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
            medianAbsCorr      = NULL,
            fineMappingResult  = NULL,
            cvFolds            = 0,
+           cvThreads          = 1,
            samplePartition    = NULL,
            pipCutoffToSkip    = 0,
            usePCA             = FALSE,
@@ -1284,7 +1283,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
         methodArgs = methodArgs, xRegions = xRegions,
         twasWeights = twasWeights,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
-        cvFolds = cvFolds, samplePartition = samplePartition,
+        cvFolds = cvFolds, cvThreads = cvThreads, samplePartition = samplePartition,
         pipCutoffToSkip = pipCutoffToSkip,
         fineMappingResult = fineMappingResult)
       tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
@@ -1425,7 +1424,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
             .fmFitXBlock(X, y, toRun, addSusieInf, coverage,
                          secondaryCoverage, signalCutoff, minAbsCorr,
                          methodArgs, verbose, ctx, tid,
-                         cvFolds = cvFolds, samplePartition = samplePartition,
+                         cvFolds = cvFolds, cvThreads = cvThreads, samplePartition = samplePartition,
                          af = afVec)
           })
 
@@ -1476,7 +1475,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
             .fmFitXBlock(Xb, pcY[common], "susie", FALSE, coverage,
                          secondaryCoverage, signalCutoff, minAbsCorr,
                          methodArgs, verbose, ctx, pcName,
-                         cvFolds = cvFolds, samplePartition = samplePartition,
+                         cvFolds = cvFolds, cvThreads = cvThreads, samplePartition = samplePartition,
                          af = afVec)
           })
           ents <- lapply(blockEntries, function(be) be[["susie"]])
@@ -1504,7 +1503,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
         methodArgs = methodArgs, xRegions = xRegions,
         twasWeights = twasWeights,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
-        cvFolds = cvFolds, samplePartition = samplePartition,
+        cvFolds = cvFolds, cvThreads = cvThreads, samplePartition = samplePartition,
         pipCutoffToSkip = pipCutoffToSkip,
         fineMappingResult = fineMappingResult)
       jointResult <- if (is.null(jointResult)) autoJoint
@@ -1554,6 +1553,7 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
            twasWeights        = NULL,
            dataDrivenPriorWeightsCutoff = 1e-10,
            cvFolds            = 0,
+           cvThreads          = 1,
            samplePartition    = NULL,
            pipCutoffToSkip    = 0,
            seed               = NULL,
@@ -1616,7 +1616,7 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
         jointSpecification = NULL, addSusieInf = addSusieInf, coverage = coverage,
         secondaryCoverage = secondaryCoverage, signalCutoff = signalCutoff,
         minAbsCorr = minAbsCorr, fineMappingResult = fineMappingResult,
-        cvFolds = cvFolds, samplePartition = samplePartition,
+        cvFolds = cvFolds, cvThreads = cvThreads, samplePartition = samplePartition,
         pipCutoffToSkip = pipCutoffToSkip, seed = seed, naAction = naAction,
         verbose = verbose), dotArgs))
     }

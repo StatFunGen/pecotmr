@@ -4,7 +4,14 @@
 \alias{GwasFineMappingResult}
 \title{TWAS Weights Collection}
 \usage{
-GwasFineMappingResult(study, method, entry, region_id = NULL, ldSketch = NULL)
+GwasFineMappingResult(
+  study,
+  method,
+  entry,
+  region_id = NULL,
+  region = NULL,
+  ldSketch = NULL
+)
 }
 \arguments{
 \item{study}{Character vector of study identifiers (per tuple).}
@@ -19,6 +26,13 @@ id (\code{"region_1"}, \code{"region_2"}, ...) so the
 (\code{study}, \code{method}, \code{region_id}) triple is unique.
 Supplying meaningful labels (e.g. \code{"chr22_10516173_17414263"})
 is preferred for downstream consumers that join on region.}
+
+\item{region}{Optional \code{GRanges} (length \code{length(study)}) genomic
+anchor per row. When \code{NULL} (default) it is derived from
+\code{region_id} (parsing \code{chr_start_end} / \code{chr:start-end}; a
+0-width \code{chrUn} sentinel for ids that do not encode coordinates).
+Carried forward as provenance (e.g. for cTWAS LD-block placement); not
+part of the identity key.}
 
 \item{ldSketch}{An optional \code{GenotypeHandle}.}
 }

@@ -448,6 +448,44 @@ test_that("metaSldscRandom works for enrichstat", {
   expect_true(is.finite(result$mean))
 })
 
+# A per-trait $summary carrying the wide (Single/Joint) columns that
+# sldscPostprocessingPipeline emits and .sldscViewForMeta consumes.
+.sms_makeWideTrait <- function() list(summary = data.frame(
+  target = c("A_0", "B_0"),
+  tauStarSingle = c(2, 3), tauStarSeSingle = c(.5, .5),
+  enrichmentSingle = c(1.5, 2), enrichmentSeSingle = c(.3, .3),
+  enrichmentPSingle = c(.01, .02),
+  enrichstatSingle = c(1, 1.2), enrichstatSeSingle = c(.2, .2),
+  tauStarJoint = c(1.8, 2.5), tauStarSeJoint = c(.4, .4),
+  enrichmentJoint = c(1.4, 1.9), enrichmentSeJoint = c(.3, .3),
+  enrichmentPJoint = c(.02, .03),
+  enrichstatJoint = c(.9, 1.1), enrichstatSeJoint = c(.2, .2),
+  stringsAsFactors = FALSE))
+
+test_that("sldscSubsetMeta metas a chosen trait/category subset with the four blocks", {
+  res <- list(
+    per_trait = list(t1 = .sms_makeWideTrait(), t2 = .sms_makeWideTrait(),
+                     t3 = .sms_makeWideTrait()),
+    params = list(target_categories = c("A_0", "B_0")))
+  out <- sldscSubsetMeta(res, c("t1", "t2"), targetCategories = "A_0")
+  expect_setequal(names(out),
+                  c("tau_star_single", "tau_star_joint", "enrichment", "enrichstat"))
+  expect_equal(names(out$tau_star_single), "A_0")     # only the chosen category
+  expect_equal(out$tau_star_single[["A_0"]]$nTraits, 2L)  # only the chosen traits
+  expect_true(is.finite(out$tau_star_joint[["A_0"]]$mean))
+})
+
+test_that("sldscSubsetMeta defaults categories from params and validates traits", {
+  res <- list(
+    per_trait = list(t1 = .sms_makeWideTrait(), t2 = .sms_makeWideTrait()),
+    params = list(target_categories = c("A_0", "B_0")))
+  out <- sldscSubsetMeta(res, c("t1", "t2"))          # targetCategories = NULL
+  expect_setequal(names(out$enrichment), c("A_0", "B_0"))
+  expect_error(sldscSubsetMeta(res, c("t1", "ghost")), "absent from")
+  expect_error(sldscSubsetMeta(list(per_trait = res$per_trait), c("t1")),
+               "no `targetCategories`")
+})
+
 test_that("metaSldscRandom returns NA with < 2 traits", {
   pt <- .make_per_trait_meta(nTraits = 1)
   result <- metaSldscRandom(pt, "A_0", "tauStar")

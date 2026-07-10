@@ -13,6 +13,20 @@ test_that("GwasFineMappingResult: builds a collection keyed by 2-tuple", {
   expect_equal(nrow(res), 2L)
 })
 
+test_that("GwasFineMappingResult: region is auto-derived from region_id", {
+  e1 <- .sc_makeFineMappingEntry(3); e2 <- .sc_makeFineMappingEntry(2)
+  res <- GwasFineMappingResult(
+    study = c("g1", "g1"), method = c("susie", "susie"),
+    region_id = c("chr1_1_500", "chr2_600_900"), entry = list(e1, e2))
+  reg <- getRegion(res)
+  expect_equal(as.character(GenomicRanges::seqnames(reg)), c("chr1", "chr2"))
+  expect_equal(GenomicRanges::start(reg), c(1L, 600L))
+  expect_equal(GenomicRanges::end(reg), c(500L, 900L))
+  # synthetic region_id (no coordinates) -> a chrUn 0-width sentinel
+  res2 <- GwasFineMappingResult(study = "g1", method = "susie", entry = list(e1))
+  expect_equal(as.character(GenomicRanges::seqnames(getRegion(res2))), "chrUn")
+})
+
 
 test_that("GwasFineMappingResult: validity does not recurse on key subset (#546)", {
   # The validity method builds a key-column data.frame to check tuple
@@ -162,6 +176,50 @@ test_that("GwasFineMappingResult: getCs/getTopLoci/getSusieFit/getVariantIds dis
   expect_equal(tl$variant_id, .ca_makeTopLoci(3)$variant_id)
   expect_equal(getSusieFit(res), list(payload = "fit_n=3"))
   expect_equal(length(getVariantIds(res)), 3L)
+})
+
+test_that("GwasFineMappingResult: getTopLoci aggregates per-block rows genome-wide", {
+  # A genome-wide collection: same (study, method) across two region blocks.
+  # With no selectors getTopLoci now stacks both blocks, tagging each variant
+  # with its region_id; context/trait are NA-filled (GWAS keys on region).
+  e1 <- .sc_makeFineMappingEntry(3); e2 <- .sc_makeFineMappingEntry(2)
+  res <- GwasFineMappingResult(
+    study = c("g1", "g1"), method = c("susie", "susie"),
+    region_id = c("chr1:1-100", "chr1:200-300"), entry = list(e1, e2))
+  agg <- getTopLoci(res, signalCutoff = 0)
+  expect_equal(nrow(agg), 5L)
+  expect_equal(agg$region_id, c("chr1:1-100", "chr1:1-100", "chr1:1-100",
+                                "chr1:200-300", "chr1:200-300"))
+  expect_true(all(is.na(agg$context)))
+  expect_true(all(is.na(agg$trait)))
+  expect_true("variant_id" %in% names(agg))
+})
+
+test_that("GwasFineMappingResult: getTopLoci region= selects a single block", {
+  e1 <- .sc_makeFineMappingEntry(3); e2 <- .sc_makeFineMappingEntry(2)
+  res <- GwasFineMappingResult(
+    study = c("g1", "g1"), method = c("susie", "susie"),
+    region_id = c("chr1:1-100", "chr1:200-300"), entry = list(e1, e2))
+  # region= pins one row, so this hits the single-entry fast path (bare table).
+  tl <- getTopLoci(res, study = "g1", method = "susie",
+                   region = "chr1:200-300", signalCutoff = 0)
+  expect_equal(nrow(tl), 2L)
+  expect_false("region_id" %in% names(tl))
+})
+
+test_that("GwasFineMappingResult: getCs aggregates per-block credible sets tagged by region_id", {
+  e1 <- .sc_makeFineMappingEntry(3); e2 <- .sc_makeFineMappingEntry(2)
+  res <- GwasFineMappingResult(
+    study = c("g1", "g1"), method = c("susie", "susie"),
+    region_id = c("chr1:1-100", "chr1:200-300"), entry = list(e1, e2))
+  cs <- getCs(res)
+  expect_equal(nrow(cs), 4L)                         # 2 CS members per block
+  expect_equal(cs$region_id,
+               c("chr1:1-100", "chr1:1-100", "chr1:200-300", "chr1:200-300"))
+  expect_true(all(is.na(cs$context)))
+  # region= pins one block -> bare table
+  bare <- getCs(res, study = "g1", method = "susie", region = "chr1:1-100")
+  expect_false("region_id" %in% names(bare))
 })
 
 

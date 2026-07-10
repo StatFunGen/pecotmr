@@ -177,6 +177,13 @@ test_that("twasWeightsPipeline(QtlDataset): runs end-to-end with mocked solvers"
   expect_equal(nrow(res), 4L)
   expect_setequal(getMethodNames(res), c("lasso", "enet"))
   expect_setequal(getTraits(res), c("ENSG_A", "ENSG_B"))
+  # region provenance is populated from each trait's rowRanges and aligned per
+  # row (.tp_makeSe: ENSG_A -> chr1:1000-1499, ENSG_B -> chr1:2000-2499).
+  reg <- getRegion(res)
+  expect_s4_class(reg, "GRanges")
+  expect_equal(length(reg), 4L)
+  expect_true(all(GenomicRanges::start(reg)[res$trait == "ENSG_A"] == 1000L))
+  expect_true(all(GenomicRanges::start(reg)[res$trait == "ENSG_B"] == 2000L))
 })
 
 test_that("twasWeightsPipeline(QtlDataset): mafCutoff/xvarCutoff overrides tighten the variant set", {
@@ -1981,6 +1988,16 @@ test_that(".rbindTwasWeights: concatenates two collections and rejects non-TwasW
   expect_setequal(as.character(out$method), c("lasso", "enet"))
   expect_error(pecotmr:::.rbindTwasWeights(list(), .tp_tw()),
                "expects two TwasWeights")
+})
+
+test_that("combineTwasWeights: variadic and list forms row-bind; guards empty/mixed", {
+  tw1 <- .tp_tw(trait = "g1"); tw2 <- .tp_tw(trait = "g2"); tw3 <- .tp_tw(trait = "g3")
+  expect_equal(nrow(combineTwasWeights(tw1, tw2)), 2L)             # variadic
+  expect_equal(nrow(combineTwasWeights(list(tw1, tw2, tw3))), 3L)  # single list
+  expect_equal(nrow(combineTwasWeights(tw1)), 1L)                  # single -> as-is
+  expect_s4_class(combineTwasWeights(tw1, tw2), "TwasWeights")
+  expect_error(combineTwasWeights(), "nothing to combine")
+  expect_error(combineTwasWeights(tw1, "nope"), "must be a TwasWeights")
 })
 
 # -----------------------------------------------------------------------------

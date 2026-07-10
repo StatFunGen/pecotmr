@@ -436,6 +436,24 @@ test_that(".rbindFineMappingResult: concatenates two GwasFineMappingResult colle
   expect_equal(nrow(out), 2L)
 })
 
+test_that("combineFineMappingResults: row-binds same-class collections; rejects mixed class/empty", {
+  e <- FineMappingEntry(
+    variantIds = "v1", susieFit = list(token = "susie"),
+    topLoci = data.frame(variant_id = "v1", pip = 0.5, stringsAsFactors = FALSE))
+  g1 <- GwasFineMappingResult(study = "g1", method = "susie",
+                              region_id = "r1", entry = list(e))
+  g2 <- GwasFineMappingResult(study = "g1", method = "susie",
+                              region_id = "r2", entry = list(e))
+  out <- combineFineMappingResults(g1, g2)                 # variadic
+  expect_s4_class(out, "GwasFineMappingResult")
+  expect_equal(nrow(out), 2L)
+  expect_equal(nrow(combineFineMappingResults(list(g1, g2))), 2L)  # list form
+  q <- QtlFineMappingResult(study = "s1", context = "c1", trait = "t1",
+                            method = "susie", entry = list(e))
+  expect_error(combineFineMappingResults(g1, q), "same concrete class")
+  expect_error(combineFineMappingResults(), "nothing to combine")
+})
+
 # ===========================================================================
 # .fmExtractZN
 # ===========================================================================
@@ -829,19 +847,19 @@ test_that("fineMappingPipeline(QtlDataset, cvFolds=0): leaves cvResult NULL", {
 })
 
 # ===========================================================================
-# Cross-validation internals: .fmMakeSamplePartition / .fmCrossValidate /
+# Cross-validation internals: .cvSamplePartition / .fmWeightsCv /
 # .fmSliceCv / .fmAttachCv (unit-level counterparts to the cvFolds end-to-end
 # tests above).
 # ===========================================================================
 
-test_that(".fmMakeSamplePartition partitions every sample into the requested folds", {
-  part <- pecotmr:::.fmMakeSamplePartition(paste0("s", 1:20), fold = 4L)
+test_that(".cvSamplePartition partitions every sample into the requested folds", {
+  part <- pecotmr:::.cvSamplePartition(paste0("s", 1:20), fold = 4L)
   expect_setequal(part$Sample, paste0("s", 1:20))
   expect_setequal(sort(unique(part$Fold)), 1:4)
   expect_equal(nrow(part), 20L)
 })
 
-test_that(".fmCrossValidate returns twasWeightsCv-shaped output keyed by snake method", {
+test_that(".fmWeightsCv returns twasWeightsCv-shaped output keyed by snake method", {
   skip_if_not_installed("susieR")
   set.seed(42)
   n <- 60L; p <- 12L
@@ -849,7 +867,7 @@ test_that(".fmCrossValidate returns twasWeightsCv-shaped output keyed by snake m
               dimnames = list(paste0("s", seq_len(n)), paste0("v", seq_len(p))))
   y <- X[, 2] * 1.5 + rnorm(n, sd = 0.5)
   names(y) <- rownames(X)
-  cv <- pecotmr:::.fmCrossValidate(
+  cv <- pecotmr:::.fmWeightsCv(
     X, y, tokens = "susie",
     methodArgs = list(susie = list()), fold = 3L,
     coverage = 0.95, verbose = 0)
@@ -868,15 +886,15 @@ test_that(".fmCrossValidate returns twasWeightsCv-shaped output keyed by snake m
   expect_gt(perf[1, "corr"], 0)
 })
 
-test_that(".fmCrossValidate reuses a supplied samplePartition verbatim", {
+test_that(".fmWeightsCv reuses a supplied samplePartition verbatim", {
   skip_if_not_installed("susieR")
   set.seed(7)
   n <- 40L; p <- 8L
   X <- matrix(rnorm(n * p), n, p,
               dimnames = list(paste0("s", seq_len(n)), paste0("v", seq_len(p))))
   y <- X[, 1] + rnorm(n, sd = 0.5); names(y) <- rownames(X)
-  part <- pecotmr:::.fmMakeSamplePartition(rownames(X), fold = 4L)
-  cv <- pecotmr:::.fmCrossValidate(X, y, tokens = "susie",
+  part <- pecotmr:::.cvSamplePartition(rownames(X), fold = 4L)
+  cv <- pecotmr:::.fmWeightsCv(X, y, tokens = "susie",
                                    methodArgs = list(susie = list()),
                                    fold = 4L, samplePartition = part,
                                    coverage = 0.95, verbose = 0)
@@ -2297,9 +2315,9 @@ test_that(".fmTwasMethodKey: bare token without adapter returned unchanged", {
   expect_equal(pecotmr:::.fmTwasMethodKey("susie"), "susie")        # adapter -> stripped
 })
 
-test_that(".fmCvMetricRow: < 3 usable predictions -> all-NA row", {
-  expect_true(all(is.na(pecotmr:::.fmCvMetricRow(c(1, 2), c(1, 2)))))  # < 3 (1182)
-  ok <- pecotmr:::.fmCvMetricRow(c(1, 2, 3, 4, 5), c(1.1, 2, 2.9, 4, 5))
+test_that(".cvMetricRow: < 3 usable predictions -> all-NA row", {
+  expect_true(all(is.na(pecotmr:::.cvMetricRow(c(1, 2), c(1, 2)))))  # < 3 (1182)
+  ok <- pecotmr:::.cvMetricRow(c(1, 2, 3, 4, 5), c(1.1, 2, 2.9, 4, 5))
   expect_false(is.na(ok[["rsq"]]))
 })
 
@@ -2391,10 +2409,10 @@ test_that(".fmRelabelCs returns non-matching labels unchanged", {
   expect_equal(out, c("susie_3", "nomatch", "susie_0"))
 })
 
-test_that(".fmCrossValidate + .fmFoldWeights cover the mvSuSiE CV path (mocked fitter)", {
+test_that(".fmWeightsCv + .fmFoldWeights cover the mvSuSiE CV path (mocked fitter)", {
   # Mock one level below the orchestration: fitMvsusie/mvsusieWeights return
   # canned outputs (sized to the per-fold training columns), so the real
-  # .fmFoldWeights mvsusie branch + .fmCrossValidate fold loop run at ~no cost.
+  # .fmFoldWeights mvsusie branch + .fmWeightsCv fold loop run at ~no cost.
   local_mocked_bindings(
     fitMvsusie = function(X, Y, ...) list(vn = colnames(X), R = ncol(as.matrix(Y))),
     mvsusieWeights = function(mvsusieFit = NULL, ...)
@@ -2407,7 +2425,7 @@ test_that(".fmCrossValidate + .fmFoldWeights cover the mvSuSiE CV path (mocked f
               dimnames = list(paste0("s", 1:n), paste0("v", 1:p)))
   Y <- matrix(rnorm(n * R), n, R,
               dimnames = list(rownames(X), c("c1", "c2")))
-  cv <- pecotmr:::.fmCrossValidate(
+  cv <- pecotmr:::.fmWeightsCv(
     X, Y, tokens = "mvsusie", methodArgs = list(mvsusie = list()),
     fold = 3L, coverage = 0.95, verbose = 0)
   expect_named(cv, c("samplePartition", "prediction", "performance"))
@@ -2480,7 +2498,7 @@ test_that(".fmPostprocessOne errors when output carries no FineMappingEntry", {
     "FineMappingEntry payload")
 })
 
-test_that(".fmCrossValidate covers per-fold prior, NULL-weights, and no-overlap branches", {
+test_that(".fmWeightsCv covers per-fold prior, NULL-weights, and no-overlap branches", {
   # mvPriorCv supplies a prior for fold "1" only: fold 1 takes the per-fold
   # prior (else-branch) and returns weights whose rownames don't overlap the
   # test columns (no-common `next`); fold 2 has no prior, so .fmFoldWeights
@@ -2495,7 +2513,7 @@ test_that(".fmCrossValidate covers per-fold prior, NULL-weights, and no-overlap 
   X <- matrix(rbinom(40, 2, 0.4), 20, 2,
               dimnames = list(paste0("s", 1:20), c("v1", "v2")))
   Y <- matrix(rnorm(40), 20, 2, dimnames = list(rownames(X), c("c1", "c2")))
-  cv <- pecotmr:::.fmCrossValidate(
+  cv <- pecotmr:::.fmWeightsCv(
     X, Y, tokens = "mvsusie", methodArgs = list(mvsusie = list()),
     fold = 2L, coverage = 0.95, verbose = 0,
     mvPriorCv = list("1" = list(priorVariance = diag(2))))
@@ -2549,31 +2567,31 @@ test_that(".fmFoldWeights covers mvPrior residual var, missing rownames, unknown
   expect_null(pecotmr:::.fmFoldWeights("bogus", X, Y, 0.95, list(), NULL))
 })
 
-test_that(".fmCrossValidate returns NULL for empty tokens", {
+test_that(".fmWeightsCv returns NULL for empty tokens", {
   X <- matrix(0, 10, 2, dimnames = list(paste0("s", 1:10), c("v1", "v2")))
-  expect_null(pecotmr:::.fmCrossValidate(
+  expect_null(pecotmr:::.fmWeightsCv(
     X, matrix(0, 10, 1), tokens = character(0), methodArgs = list(), fold = 2L))
 })
 
-test_that(".fmCrossValidate fills Y rownames and reports per-fold fit failures", {
+test_that(".fmWeightsCv fills Y rownames and reports per-fold fit failures", {
   local_mocked_bindings(.fmFoldWeights = function(...) stop("boom"),
                         .package = "pecotmr")
   X <- matrix(rbinom(40, 2, 0.4), 20, 2,
               dimnames = list(paste0("s", 1:20), c("v1", "v2")))
   Y <- matrix(rnorm(20), 20, 1)   # no rownames -> filled from X (1258)
   expect_message(
-    cv <- suppressWarnings(pecotmr:::.fmCrossValidate(
+    cv <- suppressWarnings(pecotmr:::.fmWeightsCv(
       X, Y, tokens = "susie", methodArgs = list(susie = list()),
       fold = 2L, verbose = 1)),
     "CV fold .* failed")            # 1291-1294
 })
 
-test_that(".fmCrossValidate skips a fold that holds out every sample", {
+test_that(".fmWeightsCv skips a fold that holds out every sample", {
   X <- matrix(rbinom(40, 2, 0.4), 20, 2,
               dimnames = list(paste0("s", 1:20), c("v1", "v2")))
   Y <- matrix(rnorm(20), 20, 1, dimnames = list(rownames(X), NULL))
   sp <- data.frame(Sample = rownames(X), Fold = 1L)   # single fold = all test -> 1273
-  cv <- pecotmr:::.fmCrossValidate(
+  cv <- pecotmr:::.fmWeightsCv(
     X, Y, tokens = "susie", methodArgs = list(susie = list()), fold = 1L,
     samplePartition = sp, verbose = 0)
   expect_true(all(is.na(cv$prediction[["susie_predicted"]])))

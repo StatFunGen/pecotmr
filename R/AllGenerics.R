@@ -486,6 +486,50 @@ setGeneric("getCs", function(x, ...) standardGeneric("getCs"))
 #' @export
 setGeneric("getWeights", function(x, ...) standardGeneric("getWeights"))
 
+#' @title Resolve Per-Variant Weights From a Weight Source
+#' @description Return an aligned \code{(variantIds, weights)} pair from a single
+#'   weight-source entry, so cTWAS and \code{\link{causalInferencePipeline}}
+#'   extract weights identically whether the source is a
+#'   \code{TwasWeightsEntry} (its learned weight vector) or a
+#'   \code{FineMappingEntry} (its topLoci posterior effect).
+#' @param x A \code{TwasWeightsEntry} or \code{FineMappingEntry}.
+#' @param ... Reserved for future use.
+#' @return A \code{list} with \code{variantIds} (character) and \code{weights}
+#'   (numeric) of equal length; both empty when no usable weights are present.
+#' @export
+setGeneric("resolveWeights", function(x, ...) standardGeneric("resolveWeights"))
+
+#' @title Get cTWAS Fine-mapping Posteriors
+#' @description Return the per-gene (and per-SNP) fine-mapping posterior table
+#'   from a \code{\link{CtwasResultEntry}} or a \code{\link{CtwasResult}}
+#'   collection (aggregated across rows, tagged with run identity).
+#' @param x A \code{CtwasResultEntry} or \code{CtwasResult}.
+#' @param ... Class-specific selection arguments.
+#' @return A \code{data.frame} of posteriors (or \code{NULL} when absent).
+#' @export
+setGeneric("getFinemap", function(x, ...) standardGeneric("getFinemap"))
+
+#' @title Get cTWAS Per-effect Susie Alpha Table
+#' @description Return the full per-effect susie alpha table
+#'   (\code{ctwas::finemap_regions} \code{susie_alpha_res} shape) from a
+#'   \code{\link{CtwasResultEntry}} or a \code{\link{CtwasResult}} collection
+#'   (aggregated across rows, tagged with run identity). This is the fuller
+#'   cTWAS output retained so the raw run is reconstructable.
+#' @param x A \code{CtwasResultEntry} or \code{CtwasResult}.
+#' @param ... Class-specific selection arguments.
+#' @return A \code{data.frame} of per-effect alphas (or \code{NULL} when absent).
+#' @export
+setGeneric("getSusieAlpha", function(x, ...) standardGeneric("getSusieAlpha"))
+
+#' @title Get cTWAS Group Prior Parameters
+#' @description Return the estimated \code{group_prior} / \code{group_prior_var}
+#'   of a \code{\link{CtwasResultEntry}}.
+#' @param x A \code{CtwasResultEntry}.
+#' @param ... Reserved for future use.
+#' @return The stored parameter object (typically a list), or \code{NULL}.
+#' @export
+setGeneric("getCtwasParam", function(x, ...) standardGeneric("getCtwasParam"))
+
 #' @title Get Standardized Flag
 #' @description Check whether weights are on the standardized scale.
 #' @param x A \code{TwasWeightsEntry} or \code{TwasWeights}.
@@ -590,6 +634,18 @@ setGeneric("getContexts", function(x) standardGeneric("getContexts"))
 #' @return Character vector of unique trait names.
 #' @export
 setGeneric("getTraits", function(x) standardGeneric("getTraits"))
+
+#' @title Get Per-Row Genomic Regions
+#' @description Return the genomic anchor of each row of a per-tuple collection
+#'   as a \code{GRanges} with one range per row -- the trait's own region for a
+#'   \code{TwasWeights}, or the fine-mapping window for a \code{FineMappingResult}.
+#'   This is location provenance (e.g. for cTWAS LD-block placement).
+#' @param x The object.
+#' @param ... Reserved for future use.
+#' @return A \code{GRanges} with one range per row of \code{x}, or an empty
+#'   \code{GRanges} when the collection carries no region provenance.
+#' @export
+setGeneric("getRegion", function(x, ...) standardGeneric("getRegion"))
 
 #' @title Get Residualized Genotypes
 #' @description Residualize the genotype matrix against the per-context

@@ -33,6 +33,7 @@ setClass("QtlFineMappingResult",
       if (!all(entryTypes))
         errors <- c(errors,
           "every element of the `entry` column must be a FineMappingEntry")
+      errors <- c(errors, .validateRegionColumn(object))
       jointCols <- intersect(
         c("jointStudies", "jointContexts", "jointTraits"), names(object))
       for (jc in jointCols) {
@@ -96,6 +97,10 @@ setClass("QtlFineMappingResult",
 #'   Same shape as \code{jointStudies}.
 #' @param jointTraits Optional character vector for cross-trait joints.
 #'   Same shape as \code{jointStudies}.
+#' @param region Optional \code{GRanges} (length \code{length(study)}) giving
+#'   the genomic anchor of each row's trait (its own coordinates). Carried
+#'   forward as provenance (e.g. for cTWAS LD-block placement); not part of the
+#'   identity key. \code{NULL} (default) omits the column.
 #' @param ldSketch An optional \code{GenotypeHandle} (the LD reference for
 #'   RSS-derived fits), or \code{NULL} for individual-level fits.
 #' @return A \code{QtlFineMappingResult} object.
@@ -104,6 +109,7 @@ QtlFineMappingResult <- function(study, context, trait, method, entry,
                                  jointStudies = NULL,
                                  jointContexts = NULL,
                                  jointTraits = NULL,
+                                 region = NULL,
                                  ldSketch = NULL) {
   n <- length(study)
   if (length(context) != n || length(trait) != n || length(method) != n ||
@@ -127,6 +133,7 @@ QtlFineMappingResult <- function(study, context, trait, method, entry,
       stop("`", pair[[1L]], "` must have the same length as `study`.")
     cols[[pair[[2L]]]] <- as.character(val)
   }
+  cols <- .appendRegionCol(cols, region, n)
   df <- do.call(S4Vectors::DataFrame,
                 c(cols, list(check.names = FALSE)))
   obj <- new("QtlFineMappingResult", df, ldSketch = ldSketch)

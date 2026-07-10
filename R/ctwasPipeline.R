@@ -24,12 +24,19 @@
 #' @param gwasSumStats NAMED LIST of \code{\link{GwasSumStats}} keyed
 #'   by \code{region_id} (at least two entries). Each must have
 #'   \code{getQcInfo()} non-empty.
-#' @param twasWeights NAMED LIST of \code{\link{TwasWeights}} keyed by
-#'   \code{region_id}. Keys must be a SUBSET of \code{gwasSumStats}'s
-#'   keys: blocks without any TWAS weights still contribute their
-#'   SNP-level signal to ctwas's joint group prior estimate (matches
-#'   the legacy whole-chromosome pattern where only a few of many LD
-#'   blocks carry gene weights).
+#' @param twasWeights The per-gene weight source. Either (a) a FLAT
+#'   \code{\link{TwasWeights}} / \code{QtlFineMappingResult} (or a
+#'   homogeneous list of them) carrying \code{region} provenance — each
+#'   gene is placed into its home LD block internally by
+#'   \code{start(region)} (matching cTWAS's \code{p0} assignment rule);
+#'   or (b) a pre-bucketed NAMED LIST keyed by \code{region_id} (keys a
+#'   SUBSET of \code{gwasSumStats}'s), used as-is. Blocks without any
+#'   TWAS weights still contribute their SNP-level signal to ctwas's
+#'   joint group prior estimate (the legacy whole-chromosome pattern
+#'   where only a few of many LD blocks carry gene weights). A gene whose
+#'   cis span straddles a block boundary is homed by its single anchor;
+#'   the cross-block signal is cTWAS's boundary-gene concern
+#'   (\code{\link{mergeCtwasBoundaryRegions}}), not placement.
 #' @param twasZ Optional \code{GRanges} of TWAS Z-scores (output of
 #'   \code{\link{causalInferencePipeline}}). When supplied, the
 #'   per-(trait, context) Z is used as the \code{z_gene} input to
@@ -44,10 +51,11 @@
 #' @param method Optional character (length 1). Picks which TWAS
 #'   method's weights to feed into ctwas for each (study, context,
 #'   trait) gene. When \code{NULL} (default): use \code{"ensemble"} if
-#'   that method is present across the TwasWeights; otherwise use the
-#'   sole method when only one is present; otherwise error. Passing
-#'   the name explicitly (e.g. \code{"mrash"}) overrides the default
-#'   resolution.
+#'   that method is present across the weight sources; otherwise use the
+#'   sole method when only one is present; otherwise run \strong{every}
+#'   method as an independent cTWAS run (one \code{CtwasResult} row-set
+#'   per method). Passing the name explicitly (e.g. \code{"mrash"})
+#'   restricts the run to that single method.
 #' @param thin,niterPrefit,niter,L Pass-throughs to
 #'   \code{ctwas::ctwas_sumstats}.
 #' @param groupPriorVarStructure Pass-through (defaults
@@ -76,10 +84,42 @@
 #'   NaN failure is recovered by falling back to the prefit estimates
 #'   (mirrors the legacy ctwas_2 workaround on underpowered data).
 #'   Default \code{FALSE}.
+#' @param keepSnps Logical (length 1). When \code{TRUE}, retain the
+#'   context-agnostic SNP background of each run as one extra
+#'   \code{CtwasResult} row (\code{study = context = "SNP"}, mirroring
+#'   cTWAS's own \code{"SNP"} group) so the full ctwas output is
+#'   reconstructable from \code{\link{getFinemap}} / \code{getSusieAlpha}.
+#'   Default \code{FALSE} — the SNP rows are the null background and are
+#'   dropped from the structured gene-level result.
+#' @param mergeBoundary Logical (length 1). When \code{TRUE}, run
+#'   \code{\link{mergeCtwasBoundaryRegions}} after fine-mapping each
+#'   run: a high-PIP gene whose cis window straddles an LD-block boundary
+#'   has its adjacent regions merged and re-fine-mapped (the legacy
+#'   default-off \code{ctwas_3} post-processing). Default \code{FALSE}.
+#' @param mergePipThresh Numeric (length 1). PIP threshold for selecting
+#'   which boundary genes to merge (\code{\link{mergeCtwasBoundaryRegions}}
+#'   \code{pipThresh}). Default \code{0.5}. Ignored unless
+#'   \code{mergeBoundary = TRUE}.
+#' @param mergeFilterCs Logical (length 1). Require the boundary gene to
+#'   be in a credible set to be selected. Default \code{FALSE}. Ignored
+#'   unless \code{mergeBoundary = TRUE}.
+#' @param mergeMaxSNP Numeric (length 1). Per-merged-region SNP cap.
+#'   Default \code{Inf}. Ignored unless \code{mergeBoundary = TRUE}.
 #' @param ... Additional arguments forwarded to
 #'   \code{ctwas::ctwas_sumstats}.
-#' @return Whatever \code{ctwas::ctwas_sumstats} returns (a list with
-#'   \code{susie_alpha_res}, \code{param}, and other diagnostics).
+#' @return A \code{\link{CtwasResult}} collection: one row per
+#'   \code{(gwasStudy, study, context, method)}. A single-context run is
+#'   one row per method; a multi-context (joint) run emits per-context
+#'   rows sharing the same \code{jointContexts} set and the
+#'   jointly-estimated group priors. Each row's
+#'   \code{\link{CtwasResultEntry}} payload carries that context's
+#'   per-gene fine-mapping posteriors (\code{finemap}), the run's
+#'   \code{param}, and its \code{regionInfo}. For the raw
+#'   \code{ctwas::finemap_regions} list (e.g. to feed
+#'   \code{\link{mergeCtwasBoundaryRegions}}), call the granular
+#'   \code{\link{assembleCtwasInputs}} \eqn{\to} \code{\link{estCtwasParam}}
+#'   \eqn{\to} \code{\link{screenCtwasRegions}} \eqn{\to}
+#'   \code{\link{finemapCtwasRegions}} path instead.
 #' @export
 ctwasPipeline <- function(gwasSumStats,
                           twasWeights,
@@ -101,37 +141,58 @@ ctwasPipeline <- function(gwasSumStats,
                           minPipCutoff            = 0,
                           maxNumVariants          = Inf,
                           fallbackToPrefit        = FALSE,
+                          keepSnps                = FALSE,
+                          mergeBoundary           = FALSE,
+                          mergePipThresh          = 0.5,
+                          mergeFilterCs           = FALSE,
+                          mergeMaxSNP             = Inf,
                           ...) {
   groupPriorVarStructure <- match.arg(groupPriorVarStructure)
-  inputs <- assembleCtwasInputs(
-    gwasSumStats       = gwasSumStats,
-    twasWeights        = twasWeights,
-    twasZ              = twasZ,
-    fineMappingResult  = fineMappingResult,
-    method             = method,
-    twasWeightCutoff   = twasWeightCutoff,
-    csMinCor           = csMinCor,
-    minPipCutoff       = minPipCutoff,
-    maxNumVariants     = maxNumVariants)
-  est <- estCtwasParam(
-    inputs,
-    thin                    = thin,
-    niterPrefit             = niterPrefit,
-    niter                   = niter,
-    groupPriorVarStructure  = groupPriorVarStructure,
-    ncore                   = ncore,
-    fallbackToPrefit        = fallbackToPrefit,
-    ...)
-  screened <- screenCtwasRegions(
-    est,
-    L     = L,
-    ncore = ncore,
-    ...)
-  finemapCtwasRegions(
-    screened,
-    L     = L,
-    ncore = ncore,
-    ...)
+  .ctwasRequireNamedLists(gwasSumStats, twasWeights)
+  methods   <- .ctwasResolveMethods(twasWeights, method)
+  gwasStudy <- .ctwasGwasStudy(gwasSumStats)
+
+  # One independent cTWAS run per method (weights are homogeneous within a run),
+  # each decomposed into per-context CtwasResult row-specs.
+  rows <- list()
+  for (m in methods) {
+    inputs <- assembleCtwasInputs(
+      gwasSumStats       = gwasSumStats,
+      twasWeights        = twasWeights,
+      twasZ              = twasZ,
+      fineMappingResult  = fineMappingResult,
+      method             = m,
+      twasWeightCutoff   = twasWeightCutoff,
+      csMinCor           = csMinCor,
+      minPipCutoff       = minPipCutoff,
+      maxNumVariants     = maxNumVariants)
+    est <- estCtwasParam(
+      inputs,
+      thin                    = thin,
+      niterPrefit             = niterPrefit,
+      niter                   = niter,
+      groupPriorVarStructure  = groupPriorVarStructure,
+      ncore                   = ncore,
+      fallbackToPrefit        = fallbackToPrefit,
+      ...)
+    screened <- screenCtwasRegions(est, L = L, ncore = ncore, ...)
+    finemap  <- finemapCtwasRegions(screened, L = L, ncore = ncore, ...)
+    # Optional boundary-gene region merging: a gene whose cis window straddles an
+    # LD-block boundary is split across two regions in the first-pass fine-map;
+    # this merges each high-PIP straddler's adjacent regions and re-fine-maps.
+    # The decomposition below is merge-transparent (it keys by gene id).
+    if (mergeBoundary)
+      finemap <- mergeCtwasBoundaryRegions(
+        finemap, pipThresh = mergePipThresh, filterCs = mergeFilterCs,
+        maxSNP = mergeMaxSNP, L = L, ncore = ncore, ...)
+    rows <- c(rows, .ctwasRunToRows(finemap, gwasStudy = gwasStudy, method = m,
+                                    keepSnps = keepSnps))
+  }
+  if (length(rows) == 0L)
+    stop("ctwasPipeline: no genes were modeled (the weight sources produced no ",
+         "usable gene weights for method(s): ",
+         paste(methods, collapse = ", "), ").")
+  .ctwasRowsToResult(rows)
 }
 
 #' Assemble cTWAS inputs from S4 GwasSumStats / TwasWeights
@@ -174,15 +235,17 @@ assembleCtwasInputs <- function(gwasSumStats, twasWeights,
          "region_id (got ", class(gwasSumStats)[[1L]], "). cTWAS's EM ",
          "requires multi-block context to converge; single-block calls ",
          "are no longer supported.")
-  if (missing(twasWeights) || !is.list(twasWeights) ||
-      methods::is(twasWeights, "TwasWeights"))
-    stop("`twasWeights` must be a NAMED LIST of TwasWeights keyed by ",
-         "region_id.")
   if (is.null(names(gwasSumStats)) || any(!nzchar(names(gwasSumStats))))
     stop("`gwasSumStats` must be a named list keyed by region_id (got an ",
          "unnamed or empty-named list).")
+  if (missing(twasWeights) || is.null(twasWeights))
+    stop("`twasWeights` is required (a TwasWeights / QtlFineMappingResult ",
+         "weight source, or a per-region named list keyed by region_id).")
+  # Place a FLAT weight source into its home LD blocks by start(region)
+  # (cTWAS's p0 rule); a pre-bucketed per-region named list passes through.
+  twasWeights <- .ctwasResolveWeightBuckets(twasWeights, gwasSumStats)
   if (is.null(names(twasWeights)) || any(!nzchar(names(twasWeights))))
-    stop("`twasWeights` must be a named list keyed by region_id (got an ",
+    stop("`twasWeights` must resolve to a named list keyed by region_id (got an ",
          "unnamed or empty-named list).")
   extra_tw_keys <- setdiff(names(twasWeights), names(gwasSumStats))
   if (length(extra_tw_keys) > 0L)
@@ -200,8 +263,10 @@ assembleCtwasInputs <- function(gwasSumStats, twasWeights,
            "']] has no QC record. Call summaryStatsQc() first.")
   }
   for (rid in names(twasWeights)) {
-    if (!methods::is(twasWeights[[rid]], "TwasWeights"))
-      stop("twasWeights[['", rid, "']] is not a TwasWeights.")
+    if (!methods::is(twasWeights[[rid]], "TwasWeights") &&
+        !methods::is(twasWeights[[rid]], "QtlFineMappingResult"))
+      stop("twasWeights[['", rid, "']] must be a TwasWeights or ",
+           "QtlFineMappingResult (the per-gene weight source).")
   }
   if (!is.null(twasZ) && !methods::is(twasZ, "GRanges"))
     stop("`twasZ` must be a GRanges (output of causalInferencePipeline) ",
@@ -743,6 +808,359 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
        "pick one (e.g. method = \"mrash\").")
 }
 
+# Fail fast on the two cTWAS inputs. `gwasSumStats` defines the LD-block grid, so
+# it must be a NAMED LIST keyed by region_id (a bare S4 collection is the common
+# mistake). `twasWeights` may be a FLAT weight source (a single TwasWeights /
+# QtlFineMappingResult, or a list of them) — placed into blocks internally by
+# `assembleCtwasInputs` — or a pre-bucketed per-region named list.
+# @noRd
+.ctwasRequireNamedLists <- function(gwasSumStats, twasWeights) {
+  if (!is.list(gwasSumStats) || methods::is(gwasSumStats, "GwasSumStats"))
+    stop("`gwasSumStats` must be a NAMED LIST of GwasSumStats keyed by ",
+         "region_id (got ", class(gwasSumStats)[[1L]], "). cTWAS's EM ",
+         "requires multi-block context to converge; single-block calls ",
+         "are no longer supported.")
+  okTw <- methods::is(twasWeights, "TwasWeights") ||
+          methods::is(twasWeights, "QtlFineMappingResult") || is.list(twasWeights)
+  if (!okTw)
+    stop("`twasWeights` must be a TwasWeights / QtlFineMappingResult weight ",
+         "source (placed into LD blocks internally by region), or a per-region ",
+         "named list keyed by region_id (got ", class(twasWeights)[[1L]], ").")
+}
+
+# Strip a leading "chr" and case so region_id-derived seqnames ("chr22") and
+# phenotype rowRanges seqnames ("22" / "chr22") compare equal for placement.
+# @noRd
+.ctwasChrKey <- function(x) sub("^chr", "", tolower(as.character(x)))
+
+# TRUE when `tw` is ALREADY a per-region named list (the pre-bucketed contract):
+# a NAMED plain list (not an S4 collection) of weight collections. Its keys are
+# validated against the block grid downstream (the `extra_tw_keys` check). A
+# flat collection or an UNNAMED list is instead treated as a flat weight source
+# to place internally by region.
+# @noRd
+.ctwasIsPreBucketed <- function(tw, gwasSumStats) {
+  is.list(tw) && !methods::is(tw, "DFrame") && length(tw) > 0L &&
+    !is.null(names(tw)) && all(nzchar(names(tw))) &&
+    all(vapply(tw, function(x) methods::is(x, "TwasWeights") ||
+                                methods::is(x, "QtlFineMappingResult"), logical(1)))
+}
+
+# Combine a flat weight source into ONE collection. Accepts a single
+# TwasWeights / QtlFineMappingResult, or a homogeneous list of one kind.
+# @noRd
+.ctwasCombineWeightSources <- function(weights) {
+  if (methods::is(weights, "TwasWeights") ||
+      methods::is(weights, "QtlFineMappingResult"))
+    return(weights)
+  if (is.list(weights)) {
+    weights <- weights[!vapply(weights, is.null, logical(1))]
+    if (length(weights) == 0L)
+      stop("assembleCtwasInputs: `twasWeights` is an empty weight source.")
+    if (all(vapply(weights, methods::is, logical(1), "TwasWeights")))
+      return(do.call(combineTwasWeights, unname(weights)))
+    if (all(vapply(weights, methods::is, logical(1), "QtlFineMappingResult")))
+      return(do.call(combineFineMappingResults, unname(weights)))
+  }
+  stop("assembleCtwasInputs: `twasWeights` must be a TwasWeights or ",
+       "QtlFineMappingResult (or a homogeneous list of one kind), or a ",
+       "per-region named list keyed by region_id.")
+}
+
+# Place each gene (row) of a flat weight source into its home LD block. The
+# anchor is start(region) -- matching cTWAS's own `assign_region_data` rule,
+# which homes a gene by its p0 (single point) into the block where
+# p0 in [start, stop). Returns a region_id per row (NA when the anchor falls in
+# no block). A gene whose cis SPAN straddles a boundary is still homed by its
+# single anchor here; the cross-block signal is cTWAS's boundary-gene concern
+# (get_boundary_genes / postprocess_region_merging), not placement.
+# @noRd
+.ctwasPlaceByAnchor <- function(region, gwasSumStats) {
+  ids     <- names(gwasSumStats)
+  blockGr <- .regionFromIds(ids)
+  aChr <- .ctwasChrKey(as.character(GenomicRanges::seqnames(region)))
+  aPos <- GenomicRanges::start(region)
+  bChr <- .ctwasChrKey(as.character(GenomicRanges::seqnames(blockGr)))
+  bS   <- GenomicRanges::start(blockGr)
+  bE   <- GenomicRanges::end(blockGr)
+  vapply(seq_along(aPos), function(i) {
+    if (is.na(aPos[[i]])) return(NA_character_)
+    hit <- which(bChr == aChr[[i]] & aPos[[i]] >= bS & aPos[[i]] < bE)
+    if (length(hit) > 0L) ids[[hit[[1L]]]] else NA_character_
+  }, character(1))
+}
+
+# Bucket a flat weight source into a per-region named list keyed to the block
+# grid, homing each gene by start(region). Each per-block sub-collection carries
+# that block's GWAS LD sketch (the panel its weights are harmonized against, and
+# what the downstream match-check expects).
+# @noRd
+.ctwasBucketWeights <- function(weights, gwasSumStats) {
+  combined <- .ctwasCombineWeightSources(weights)
+  if (!("region" %in% names(combined)))
+    stop("assembleCtwasInputs: the weight source carries no `region` ",
+         "provenance, which internal LD-block placement requires (produced by ",
+         "twasWeightsPipeline / fineMappingPipeline). Supply a pre-bucketed ",
+         "per-region named list if placement was done upstream.")
+  home     <- .ctwasPlaceByAnchor(getRegion(combined), gwasSumStats)
+  unplaced <- sum(is.na(home))
+  if (unplaced > 0L)
+    warning(sprintf(paste0("assembleCtwasInputs: %d gene(s) whose region anchor ",
+                           "fell in no LD block were dropped."), unplaced))
+  out <- list()
+  for (rid in names(gwasSumStats)) {
+    idx <- which(home == rid)
+    if (length(idx) == 0L) next
+    sub <- combined[idx, ]
+    sub@ldSketch <- getLdSketch(gwasSumStats[[rid]])
+    out[[rid]] <- sub
+  }
+  if (length(out) == 0L)
+    stop("assembleCtwasInputs: no gene placed into any LD block. Check that the ",
+         "weight `region`s and the gwasSumStats region_id keys share a ",
+         "coordinate system (e.g. 'chr22_1_1000000').")
+  out
+}
+
+# Resolve `twasWeights` to a per-region named list: pass a pre-bucketed list
+# through, otherwise place a flat weight source by region.
+# @noRd
+.ctwasResolveWeightBuckets <- function(twasWeights, gwasSumStats) {
+  if (.ctwasIsPreBucketed(twasWeights, gwasSumStats)) return(twasWeights)
+  .ctwasBucketWeights(twasWeights, gwasSumStats)
+}
+
+# Resolve the LIST of TWAS methods a `ctwasPipeline` run should iterate over
+# (one independent cTWAS run per method — weights are homogeneous within a run).
+#   - explicit `method`: exactly that one (validated present).
+#   - NULL + an "ensemble" method present: just "ensemble" (the pre-combined
+#     weight, the historical default).
+#   - NULL + a single method present: that one.
+#   - NULL + MULTIPLE methods, no "ensemble": ALL of them (the singular
+#     `.ctwasResolveMethod` errors here; the pipeline instead fans out).
+# @noRd
+.ctwasResolveMethods <- function(twasWeightsList, method = NULL) {
+  methodsOf <- function(tw) if (is.null(tw)) NULL else as.character(tw$method)
+  available <- unique(
+    if (methods::is(twasWeightsList, "TwasWeights") ||
+        methods::is(twasWeightsList, "QtlFineMappingResult"))
+      methodsOf(twasWeightsList)                      # a flat weight source
+    else unlist(lapply(twasWeightsList, methodsOf)))  # a list of them
+  if (length(available) == 0L)
+    stop("ctwasPipeline: weight sources carry no method entries.")
+  if (!is.null(method) && nzchar(method)) {
+    if (!method %in% available)
+      stop("ctwasPipeline: method '", method, "' not present in the weight ",
+           "sources (available: ", paste(available, collapse = ", "), ").")
+    return(method)
+  }
+  if ("ensemble" %in% available) return("ensemble")
+  available   # single -> length-1 (one run); multiple -> iterate over all
+}
+
+# The single GWAS (disease) study a cTWAS run models. cTWAS solves one disease
+# per run (the z_snp carries a single z per SNP), so the input blocks must all
+# reference the same GWAS study.
+# @noRd
+.ctwasGwasStudy <- function(gwasSumStats) {
+  studies <- unique(unlist(lapply(gwasSumStats, function(g)
+    as.character(g$study))))
+  studies <- studies[!is.na(studies) & nzchar(studies)]
+  if (length(studies) == 0L) return(NA_character_)
+  if (length(studies) > 1L)
+    stop("ctwasPipeline: the input blocks reference multiple GWAS studies (",
+         paste(studies, collapse = ", "), "); cTWAS models one disease per run.")
+  studies
+}
+
+# Parse the cTWAS gene ids (`region|study|context|trait|method`) that name the
+# assembled weights list into their identity components. `method` is the LAST
+# field and `trait` everything between context and method, so a trait that
+# itself contains "|" is preserved.
+# @noRd
+.ctwasParseGeneIds <- function(ids) {
+  parts <- strsplit(ids, "|", fixed = TRUE)
+  n <- lengths(parts)
+  if (any(n < 5L))
+    stop("ctwasPipeline: malformed cTWAS gene id(s): ",
+         paste(ids[n < 5L], collapse = ", "),
+         " (expected 'region|study|context|trait|method').")
+  pick <- function(i) vapply(parts, function(p) p[[i]], character(1))
+  data.frame(
+    id      = ids,
+    rid     = pick(1L),
+    study   = pick(2L),
+    context = pick(3L),
+    trait   = mapply(function(p, k) paste(p[4:(k - 1L)], collapse = "|"),
+                     parts, n, USE.NAMES = FALSE),
+    method  = mapply(function(p, k) p[[k]], parts, n, USE.NAMES = FALSE),
+    stringsAsFactors = FALSE)
+}
+
+# Enforce the multi-context joint-model invariant: every context in a run must
+# carry the SAME set of genes (traits). A cTWAS joint fit couples the contexts
+# through shared group priors; contexts with disjoint gene sets make the joint
+# model meaningless. No-op for a single-context run.
+# @noRd
+.ctwasAssertSharedGenes <- function(parsed) {
+  byCtx <- split(parsed$trait, parsed$context)
+  if (length(byCtx) < 2L) return(invisible())
+  geneSets <- lapply(byCtx, function(g) sort(unique(g)))
+  ref      <- geneSets[[1L]]
+  mismatch <- names(geneSets)[
+    !vapply(geneSets, function(s) identical(s, ref), logical(1))]
+  if (length(mismatch) > 0L)
+    stop("ctwasPipeline: multi-context cTWAS requires the SAME gene set in ",
+         "every context (the joint model is only meaningful when genes are ",
+         "shared across contexts). Context(s) differing from the reference '",
+         names(geneSets)[[1L]], "' (", length(ref), " gene(s)): ",
+         paste(mismatch, collapse = ", "), ".")
+  invisible()
+}
+
+# Subset a ctwas result frame (finemap_res / susie_alpha_res) to the rows whose
+# `id` is in `ids`. Returns NULL when the frame is absent or nothing matches.
+# @noRd
+.ctwasSubsetById <- function(df, ids) {
+  if (is.null(df)) return(NULL)
+  sub <- df[as.character(df$id) %in% ids, , drop = FALSE]
+  if (nrow(sub) == 0L) NULL else `rownames<-`(sub, NULL)
+}
+
+# Subset a ctwas result frame to its SNP rows (type == "SNP"; anno_susie tags
+# the non-gene background this way). Returns NULL when absent or none present.
+# @noRd
+.ctwasSubsetSnp <- function(df) {
+  if (is.null(df) || is.null(df$type)) return(NULL)
+  sub <- df[as.character(df$type) == "SNP", , drop = FALSE]
+  if (nrow(sub) == 0L) NULL else `rownames<-`(sub, NULL)
+}
+
+# Decompose one cTWAS run (a `finemapCtwasRegions` output) into per-context
+# row-specs for a CtwasResult. The row skeleton comes from the ASSEMBLED weights
+# (so every modeled (study, context) appears even if no gene reached
+# fine-mapping); each row's finemap / susieAlpha payloads are the subsets whose
+# gene id belongs to that context. Multi-context runs are annotated with the
+# shared `jointContexts` set and share the jointly-estimated `param`.
+#
+# `keepSnps` (default FALSE) additionally retains the context-agnostic SNP
+# background as ONE extra row (study = context = "SNP"), mirroring cTWAS's own
+# "SNP" group in `group_prior`. Kept off by default because the SNP rows are the
+# null background and bloat the structured gene-level result; when on, the full
+# ctwas run is reconstructable from `getFinemap()` / `getSusieAlpha()`.
+# @noRd
+.ctwasRunToRows <- function(runResult, gwasStudy, method, keepSnps = FALSE) {
+  geneIds <- names(runResult$weights)
+  if (is.null(geneIds) || length(geneIds) == 0L) return(list())
+  parsed   <- .ctwasParseGeneIds(geneIds)
+  contexts <- unique(parsed$context)
+  .ctwasAssertSharedGenes(parsed)
+  jointStr <- if (length(contexts) > 1L)
+    paste(sort(unique(contexts)), collapse = ",") else NA_character_
+  fmDf <- if (is.null(runResult$finemap_res)) NULL else
+    as.data.frame(runResult$finemap_res)
+  saDf <- if (is.null(runResult$susie_alpha_res)) NULL else
+    as.data.frame(runResult$susie_alpha_res)
+  mkEntry <- function(fm, sa) CtwasResultEntry(
+    finemap = fm, susieAlpha = sa, param = runResult$param,
+    regionInfo = runResult$region_info)
+
+  rows <- lapply(contexts, function(cx) {
+    inCx    <- parsed$context == cx
+    studyCx <- unique(parsed$study[inCx])
+    if (length(studyCx) != 1L)
+      stop("ctwasPipeline: context '", cx, "' mixes multiple QTL studies (",
+           paste(studyCx, collapse = ", "), "); one study per context.")
+    idsCx <- parsed$id[inCx]
+    list(gwasStudy = gwasStudy, study = studyCx, context = cx, method = method,
+         jointContexts = jointStr,
+         entry = mkEntry(.ctwasSubsetById(fmDf, idsCx),
+                         .ctwasSubsetById(saDf, idsCx)))
+  })
+
+  if (keepSnps) {
+    snpFm <- .ctwasSubsetSnp(fmDf)
+    snpSa <- .ctwasSubsetSnp(saDf)
+    if (!is.null(snpFm) || !is.null(snpSa))
+      rows <- c(rows, list(list(
+        gwasStudy = gwasStudy, study = "SNP", context = "SNP", method = method,
+        jointContexts = jointStr, entry = mkEntry(snpFm, snpSa))))
+  }
+  rows
+}
+
+# Assemble accumulated per-run row-specs (from .ctwasRunToRows) into a single
+# CtwasResult; the jointContexts column is omitted when every row is
+# single-context. Shared by ctwasPipeline (across methods) and asCtwasResult.
+# @noRd
+.ctwasRowsToResult <- function(rows) {
+  if (length(rows) == 0L)
+    stop("cTWAS: no genes were modeled (the weight source produced no usable ",
+         "gene weights).")
+  jointContexts <- vapply(rows, function(r) r$jointContexts, character(1))
+  CtwasResult(
+    gwasStudy     = vapply(rows, function(r) r$gwasStudy, character(1)),
+    study         = vapply(rows, function(r) r$study,     character(1)),
+    context       = vapply(rows, function(r) r$context,   character(1)),
+    method        = vapply(rows, function(r) r$method,    character(1)),
+    entry         = lapply(rows, function(r) r$entry),
+    jointContexts = if (any(!is.na(jointContexts))) jointContexts else NULL)
+}
+
+# The single GWAS study a finemap result models, read from z_snp$study (which
+# `.ctwasBuildZSnp` stamps per row). Errors on multiple; NA when absent.
+# @noRd
+.ctwasGwasStudyFromZSnp <- function(zSnp) {
+  if (is.null(zSnp) || is.null(zSnp$study)) return(NA_character_)
+  s <- unique(as.character(zSnp$study))
+  s <- s[!is.na(s) & nzchar(s)]
+  if (length(s) == 0L) return(NA_character_)
+  if (length(s) > 1L)
+    stop("asCtwasResult: z_snp references multiple GWAS studies (",
+         paste(s, collapse = ", "), "); cTWAS models one disease per run.")
+  s
+}
+
+# The single weight method a finemap result was built for, read from the
+# assembled weight ids. Errors on a mix (the granular path is one method/run).
+# @noRd
+.ctwasMethodFromWeights <- function(weights) {
+  if (is.null(weights) || length(weights) == 0L)
+    stop("asCtwasResult: the finemap result carries no weights to derive a ",
+         "method from.")
+  m <- unique(.ctwasParseGeneIds(names(weights))$method)
+  if (length(m) != 1L)
+    stop("asCtwasResult: the finemap result mixes weight methods (",
+         paste(m, collapse = ", "), "); expected one per run.")
+  m
+}
+
+#' @title Structure a granular cTWAS finemap result as a CtwasResult
+#' @description Decompose the raw list returned by
+#'   \code{\link{finemapCtwasRegions}} (optionally after
+#'   \code{\link{mergeCtwasBoundaryRegions}}) into the structured, per-(study,
+#'   context) \code{\link{CtwasResult}} — the same decomposition
+#'   \code{\link{ctwasPipeline}} applies to its one-shot output, exposed for the
+#'   granular \code{assembleCtwasInputs} \eqn{\to} \code{estCtwasParam} \eqn{\to}
+#'   \code{screenCtwasRegions} \eqn{\to} \code{finemapCtwasRegions} path. The
+#'   GWAS study is read from \code{z_snp$study} and the (single) weight method
+#'   from the gene ids.
+#' @param finemapResult A list from \code{\link{finemapCtwasRegions}} or
+#'   \code{\link{mergeCtwasBoundaryRegions}}.
+#' @param keepSnps Logical (length 1). Retain the context-agnostic SNP
+#'   background as one extra \code{study = context = "SNP"} row. Default
+#'   \code{FALSE}. See \code{\link{ctwasPipeline}}.
+#' @return A \code{\link{CtwasResult}}.
+#' @seealso \code{\link{ctwasPipeline}}, \code{\link{finemapCtwasRegions}}
+#' @export
+asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
+  gwasStudy <- .ctwasGwasStudyFromZSnp(finemapResult$z_snp)
+  method    <- .ctwasMethodFromWeights(finemapResult$weights)
+  rows <- .ctwasRunToRows(finemapResult, gwasStudy = gwasStudy, method = method,
+                          keepSnps = keepSnps)
+  .ctwasRowsToResult(rows)
+}
+
 # Subset a TwasWeights collection to rows whose `method` matches the
 # resolved method. Used to enforce the "one ctwas gene per (study,
 # context, trait)" semantics — the legacy pipeline fed a single
@@ -752,13 +1170,11 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
 .ctwasFilterMethod <- function(tw, method) {
   keep <- which(as.character(tw$method) == method)
   if (length(keep) == 0L) return(NULL)
-  TwasWeights(
-    study    = as.character(tw$study)[keep],
-    context  = as.character(tw$context)[keep],
-    trait    = as.character(tw$trait)[keep],
-    method   = as.character(tw$method)[keep],
-    entry    = as.list(tw$entry[keep]),
-    ldSketch = getLdSketch(tw))
+  # Row subset carries every column forward (joint* / region / ...); the old
+  # hand-listed rebuild silently dropped them.
+  out <- tw[keep, ]
+  out@ldSketch <- getLdSketch(tw)
+  out
 }
 
 # Build the per-variant Z data.frame ctwas expects from a GwasSumStats.
@@ -979,9 +1395,12 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
   out <- list()
   for (i in seq_len(nrow(twasWeights))) {
     entry    <- twasWeights$entry[[i]]
-    origVids <- getVariantIds(entry)
-    origW    <- as.numeric(getWeights(entry))
-    if (length(origVids) == 0L || length(origVids) != length(origW)) next
+    # Shared resolver: aligned (variantIds, weights) from either a
+    # TwasWeightsEntry or a FineMappingEntry (topLoci posterior effect).
+    wr       <- resolveWeights(entry)
+    origVids <- wr$variantIds
+    origW    <- wr$weights
+    if (length(origVids) == 0L) next
 
     # --- Step 1: allele-harmonize against the LD panel -------------
     # Parses chr:pos:A2:A1 IDs into the data.frame `harmonizeAlleles`

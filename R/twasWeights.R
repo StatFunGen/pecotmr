@@ -33,6 +33,8 @@ setClass("TwasWeights",
       if (!all(entryTypes))
         errors <- c(errors,
           "every element of the `entry` column must be a TwasWeightsEntry")
+      # Optional `region` provenance (one genomic anchor per row; non-key).
+      errors <- c(errors, .validateRegionColumn(object))
       jointCols <- intersect(
         c("jointStudies", "jointContexts", "jointTraits"), names(object))
       for (jc in jointCols) {
@@ -137,6 +139,12 @@ setClass("TwasWeights",
 #'   Same shape as \code{jointStudies}.
 #' @param jointTraits Optional character vector for cross-trait joints.
 #'   Same shape as \code{jointStudies}.
+#' @param region Optional \code{GRanges} (length \code{length(study)}) giving
+#'   the genomic anchor of each row's trait -- the trait's own coordinates when
+#'   built from a \code{QtlDataset}, or the summary-stat variant-span window
+#'   when built from a \code{QtlSumStats}. Carried forward as provenance (e.g.
+#'   for cTWAS LD-block placement); not part of the identity key. \code{NULL}
+#'   (default) omits the column.
 #' @param ldSketch An optional \code{GenotypeHandle}, or \code{NULL} for
 #'   individual-level fits.
 #' @return A \code{TwasWeights} object.
@@ -145,6 +153,7 @@ TwasWeights <- function(study, context, trait, method, entry,
                         jointStudies = NULL,
                         jointContexts = NULL,
                         jointTraits = NULL,
+                        region = NULL,
                         ldSketch = NULL) {
   n <- length(study)
   if (length(context) != n || length(trait) != n || length(method) != n ||
@@ -168,12 +177,17 @@ TwasWeights <- function(study, context, trait, method, entry,
       stop("`", pair[[1L]], "` must have the same length as `study`.")
     cols[[pair[[2L]]]] <- as.character(val)
   }
+  cols <- .appendRegionCol(cols, region, n)
   df <- do.call(S4Vectors::DataFrame,
                 c(cols, list(check.names = FALSE)))
   obj <- new("TwasWeights", df, ldSketch = ldSketch)
   validObject(obj)
   obj
 }
+
+#' @rdname getRegion
+#' @export
+setMethod("getRegion", "TwasWeights", function(x, ...) .getRegionColumn(x))
 
 #' @title Get a Single TWAS Weights Entry
 #' @description Return the \code{TwasWeightsEntry} for one

@@ -675,7 +675,7 @@ regionToDf <- function(ldRegionId, colnames = c("chrom", "start", "end")) {
 #' @param regions A region string, character vector, or data.frame with
 #'   chrom/start/end columns.
 #' @return A \code{GRanges} object.
-#' @noRd
+#' @export
 asGranges <- function(regions) {
   if (is.character(regions)) {
     df <- regionToDf(regions)

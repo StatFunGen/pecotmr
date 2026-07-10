@@ -18,6 +18,13 @@ fineMappingPipeline(data, ...)
   traitId = NULL,
   region = NULL,
   cisWindow = NULL,
+  mafCutoff = NULL,
+  macCutoff = NULL,
+  xvarCutoff = NULL,
+  imissCutoff = NULL,
+  keepIndel = NULL,
+  keepSamples = NULL,
+  keepVariants = NULL,
   jointRegions = FALSE,
   jointSpecification = NULL,
   addSusieInf = TRUE,
@@ -30,6 +37,7 @@ fineMappingPipeline(data, ...)
   medianAbsCorr = NULL,
   fineMappingResult = NULL,
   cvFolds = 0,
+  cvThreads = 1,
   samplePartition = NULL,
   pipCutoffToSkip = 0,
   usePCA = FALSE,
@@ -66,6 +74,7 @@ fineMappingPipeline(data, ...)
   twasWeights = NULL,
   dataDrivenPriorWeightsCutoff = 1e-10,
   cvFolds = 0,
+  cvThreads = 1,
   samplePartition = NULL,
   pipCutoffToSkip = 0,
   seed = NULL,
@@ -148,8 +157,10 @@ fineMappingPipeline(data, ...)
 \item{traitId}{Optional character vector of trait names to restrict
 processing to.}
 
-\item{region}{Optional \code{GRanges} for QtlDataset trait
-selection. Mutually exclusive with \code{traitId}.}
+\item{region}{Optional variant window for QtlDataset trait selection: a
+\code{GRanges}, a \code{"chr:start-end"} string, or a one-row data.frame
+with \code{chrom}/\code{start}/\code{end}. Mutually exclusive with
+\code{traitId}.}
 
 \item{cisWindow}{For QtlDataset: cis-window (bp) around each trait's
 genomic position when extracting variants. Required when
@@ -208,6 +219,11 @@ slot (see \code{\link{getCvResult}}). \code{twasWeightsPipeline} reuses
 this partition and feeds these predictions into the SR-TWAS ensemble.
 Individual-level (\code{QtlDataset} / \code{MultiStudyQtlDataset})
 input only; ignored for sumstat inputs.}
+
+\item{cvThreads}{Integer. Number of parallel workers for the
+cross-validation fold refits (passed to the shared CV engine's
+\code{numThreads}). Default \code{1} (serial); \code{-1} uses all cores.
+Only consulted when \code{cvFolds > 1}.}
 
 \item{samplePartition}{Optional pre-defined CV partition
 \code{data.frame} with columns \code{Sample} and \code{Fold}. When

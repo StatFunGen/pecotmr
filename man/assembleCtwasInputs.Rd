@@ -21,12 +21,19 @@ assembleCtwasInputs(
 by \code{region_id} (at least two entries). Each must have
 \code{getQcInfo()} non-empty.}
 
-\item{twasWeights}{NAMED LIST of \code{\link{TwasWeights}} keyed by
-\code{region_id}. Keys must be a SUBSET of \code{gwasSumStats}'s
-keys: blocks without any TWAS weights still contribute their
-SNP-level signal to ctwas's joint group prior estimate (matches
-the legacy whole-chromosome pattern where only a few of many LD
-blocks carry gene weights).}
+\item{twasWeights}{The per-gene weight source. Either (a) a FLAT
+\code{\link{TwasWeights}} / \code{QtlFineMappingResult} (or a
+homogeneous list of them) carrying \code{region} provenance — each
+gene is placed into its home LD block internally by
+\code{start(region)} (matching cTWAS's \code{p0} assignment rule);
+or (b) a pre-bucketed NAMED LIST keyed by \code{region_id} (keys a
+SUBSET of \code{gwasSumStats}'s), used as-is. Blocks without any
+TWAS weights still contribute their SNP-level signal to ctwas's
+joint group prior estimate (the legacy whole-chromosome pattern
+where only a few of many LD blocks carry gene weights). A gene whose
+cis span straddles a block boundary is homed by its single anchor;
+the cross-block signal is cTWAS's boundary-gene concern
+(\code{\link{mergeCtwasBoundaryRegions}}), not placement.}
 
 \item{twasZ}{Optional \code{GRanges} of TWAS Z-scores (output of
 \code{\link{causalInferencePipeline}}). When supplied, the
@@ -44,10 +51,11 @@ credible-set membership data used by the CS / PIP rescue filters
 \item{method}{Optional character (length 1). Picks which TWAS
 method's weights to feed into ctwas for each (study, context,
 trait) gene. When \code{NULL} (default): use \code{"ensemble"} if
-that method is present across the TwasWeights; otherwise use the
-sole method when only one is present; otherwise error. Passing
-the name explicitly (e.g. \code{"mrash"}) overrides the default
-resolution.}
+that method is present across the weight sources; otherwise use the
+sole method when only one is present; otherwise run \strong{every}
+method as an independent cTWAS run (one \code{CtwasResult} row-set
+per method). Passing the name explicitly (e.g. \code{"mrash"})
+restricts the run to that single method.}
 
 \item{twasWeightCutoff}{Numeric (length 1). Drop variants with
 \code{|weight| < twasWeightCutoff} from each gene's weight matrix
