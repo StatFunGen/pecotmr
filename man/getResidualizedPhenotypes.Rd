@@ -19,6 +19,7 @@ getResidualizedPhenotypes(x, ...)
   residualizePhenotypeCovariatesFromPhenotypes = NULL,
   residualizeGenotypeCovariatesFromPhenotypes = NULL,
   naAction = c("keep", "drop", "impute"),
+  covariateNaAction = c("impute", "drop"),
   outlierAction = c("keep", "drop"),
   outlierPvalThreshold = 0.001,
   ...
@@ -30,7 +31,9 @@ getResidualizedPhenotypes(x, ...)
 \item{...}{Selection arguments: \code{contexts} (required),
 \code{traitId}, \code{region},
 \code{phenotypeCovariatesToRemove},
-\code{genotypeCovariatesToRemove}.}
+\code{genotypeCovariatesToRemove}, and \code{covariateNaAction}
+(\code{"impute"}, the default, mean-imputes missing covariate cells;
+\code{"drop"} removes samples with any missing covariate).}
 }
 \value{
 A named list of numeric matrices keyed by context.

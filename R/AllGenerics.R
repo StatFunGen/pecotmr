@@ -655,7 +655,9 @@ setGeneric("getRegion", function(x, ...) standardGeneric("getRegion"))
 #' @param x A \code{QtlDataset} object.
 #' @param ... Selection arguments: \code{traitId}, \code{region},
 #'   \code{cisWindow}, \code{phenotypeCovariatesToRemove},
-#'   \code{genotypeCovariatesToRemove}.
+#'   \code{genotypeCovariatesToRemove}, and \code{covariateNaAction}
+#'   (\code{"impute"}, the default, mean-imputes missing covariate cells;
+#'   \code{"drop"} removes samples with any missing covariate).
 #' @return A numeric matrix (samples x variants).
 #' @export
 setGeneric("getResidualizedGenotypes",
@@ -669,7 +671,9 @@ setGeneric("getResidualizedGenotypes",
 #' @param ... Selection arguments: \code{contexts} (required),
 #'   \code{traitId}, \code{region},
 #'   \code{phenotypeCovariatesToRemove},
-#'   \code{genotypeCovariatesToRemove}.
+#'   \code{genotypeCovariatesToRemove}, and \code{covariateNaAction}
+#'   (\code{"impute"}, the default, mean-imputes missing covariate cells;
+#'   \code{"drop"} removes samples with any missing covariate).
 #' @return A named list of numeric matrices keyed by context.
 #' @export
 setGeneric("getResidualizedPhenotypes",

@@ -844,6 +844,37 @@ setMethod("getPhenotypeCovariates", "QtlDataset",
   do.call(cbind, blocks)
 }
 
+# Internal: resolve missing values in the residualization covariate matrix
+# `C` (samples x covariates) before it reaches `stats::lm.fit`, which does
+# not tolerate NA in the design and would otherwise error. Two strategies:
+#   - "impute" (default): replace each covariate column's NA cells with that
+#     column's observed (non-NA) mean. A wholly-missing column has an
+#     undefined mean and is filled with 0, so it contributes nothing to the
+#     fit rather than poisoning every row.
+#   - "drop": complete-case -- remove any sample (row) carrying an NA in any
+#     covariate. The caller's downstream sample intersection then narrows the
+#     response matrix (G or Y) to the retained samples.
+# Returns the cleaned matrix (fewer rows possible under "drop"), or `C`
+# unchanged when it is NULL or already NA-free.
+.qtlHandleCovariateNa <- function(C, action = c("impute", "drop")) {
+  action <- match.arg(action)
+  if (is.null(C) || !anyNA(C)) return(C)
+  if (action == "drop") {
+    keep <- rowSums(is.na(C)) == 0L
+    return(C[keep, , drop = FALSE])
+  }
+  for (j in seq_len(ncol(C))) {
+    col <- C[, j]
+    na <- is.na(col)
+    if (any(na)) {
+      mu <- mean(col[!na])
+      col[na] <- if (is.finite(mu)) mu else 0
+      C[, j] <- col
+    }
+  }
+  C
+}
+
 # Internal: resolve a (convenience, precise) flag pair to a single boolean.
 # `missing*` arguments are passed as the result of `missing()` evaluated in
 # the calling method to detect whether the user explicitly set the value.
@@ -879,7 +910,9 @@ setMethod("getResidualizedGenotypes", "QtlDataset",
            residualizeGenotypeCovariates  = TRUE,
            residualizePhenotypeCovariatesFromGenotypes = NULL,
            residualizeGenotypeCovariatesFromGenotypes  = NULL,
+           covariateNaAction = c("impute", "drop"),
            ...) {
+    covariateNaAction <- match.arg(covariateNaAction)
     if (missing(contexts) || is.null(contexts) || length(contexts) == 0L) {
       stop("`contexts` is required for getResidualizedGenotypes(QtlDataset). ",
            "Use getContexts(x) to list the available contexts. ",
@@ -924,6 +957,7 @@ setMethod("getResidualizedGenotypes", "QtlDataset",
       genoSelection  = genoSel,
       includePheno   = includePheno,
       includeGeno    = includeGeno)
+    C <- .qtlHandleCovariateNa(C, covariateNaAction)
     if (!is.null(C)) {
       common <- intersect(rownames(G), rownames(C))
       if (length(common) == 0L) {
@@ -948,10 +982,12 @@ setMethod("getResidualizedPhenotypes", "QtlDataset",
            residualizePhenotypeCovariatesFromPhenotypes = NULL,
            residualizeGenotypeCovariatesFromPhenotypes  = NULL,
            naAction = c("keep", "drop", "impute"),
+           covariateNaAction = c("impute", "drop"),
            outlierAction = c("keep", "drop"),
            outlierPvalThreshold = 1e-3,
            ...) {
     naAction <- match.arg(naAction)
+    covariateNaAction <- match.arg(covariateNaAction)
     outlierAction <- match.arg(outlierAction)
     if (missing(contexts) || is.null(contexts) || length(contexts) == 0L) {
       stop("`contexts` is required for getResidualizedPhenotypes().")
@@ -994,6 +1030,7 @@ setMethod("getResidualizedPhenotypes", "QtlDataset",
       genoSelection  = genoSel,
       includePheno   = includePheno,
       includeGeno    = includeGeno)
+    C <- .qtlHandleCovariateNa(C, covariateNaAction)
 
     out <- lapply(contexts, function(ctx) {
       se <- Yraw[[ctx]]
