@@ -1873,3 +1873,111 @@ test_that(".ctwasSnpInfoForGwasBlock: returns an empty frame when the block has 
   expect_equal(nrow(out), 0L)
   expect_setequal(colnames(out), colnames(panelInfo))
 })
+
+# ===========================================================================
+# Coverage: internal error / edge branches
+# ===========================================================================
+test_that(".ctwasCombineWeightSources: type + emptiness guards; FMR list", {
+  expect_error(pecotmr:::.ctwasCombineWeightSources(42), "must be a TwasWeights")
+  expect_error(pecotmr:::.ctwasCombineWeightSources(list(NULL)), "empty weight source")
+  fmr <- .ctp_makeFmrWeightSource()                    # a QtlFineMappingResult
+  expect_s4_class(pecotmr:::.ctwasCombineWeightSources(list(fmr)),
+                  "QtlFineMappingResult")
+})
+
+test_that(".ctwasGwasStudy / .ctwasGwasStudyFromZSnp: NA when no study present", {
+  expect_true(is.na(pecotmr:::.ctwasGwasStudy(list(a = data.frame(study = NA_character_)))))
+  expect_true(is.na(pecotmr:::.ctwasGwasStudyFromZSnp(NULL)))
+  expect_true(is.na(pecotmr:::.ctwasGwasStudyFromZSnp(data.frame(study = character(0)))))
+})
+
+test_that(".ctwasSubsetById / .ctwasSubsetSnp: NULL on empty / no type column", {
+  df <- data.frame(id = c("a", "b"), type = c("gene", "SNP"), stringsAsFactors = FALSE)
+  expect_null(pecotmr:::.ctwasSubsetById(df, "zzz"))
+  expect_null(pecotmr:::.ctwasSubsetById(NULL, "a"))
+  expect_null(pecotmr:::.ctwasSubsetSnp(data.frame(id = "a")))   # no type column
+  expect_equal(nrow(pecotmr:::.ctwasSubsetSnp(df)), 1L)
+})
+
+test_that(".ctwasRowsToResult / .ctwasMethodFromWeights: empty-input guards", {
+  expect_error(pecotmr:::.ctwasRowsToResult(list()), "no genes were modeled")
+  expect_error(pecotmr:::.ctwasMethodFromWeights(NULL), "carries no weights")
+  expect_error(pecotmr:::.ctwasMethodFromWeights(setNames(list(1, 2),
+                 c("blk|Q1|c1|gA|susie", "blk|Q1|c1|gB|lasso"))),
+               "mixes weight methods")
+})
+
+test_that(".ctwasRunToRows: empty weights -> no rows; a context mixing studies errors", {
+  expect_equal(
+    pecotmr:::.ctwasRunToRows(list(weights = setNames(list(), character(0))),
+                              "D1", "susie"), list())
+  run <- list(weights = setNames(list(1, 2),
+                c("blk|Q1|c1|gA|susie", "blk|Q2|c1|gB|susie")),
+              finemap_res = NULL, susie_alpha_res = NULL, param = list(),
+              region_info = NULL)
+  expect_error(pecotmr:::.ctwasRunToRows(run, "D1", "susie"),
+               "mixes multiple QTL studies")
+})
+
+test_that(".ctwasBucketWeights: unplaced genes warn + drop; empty blocks skipped", {
+  mkE <- function() TwasWeightsEntry(
+    variantIds = vapply(1:5, .ctp_snpId, character(1)),
+    weights = c(0.1, 0.05, -0.2, 0.3, 0.0))
+  tw <- TwasWeights(
+    study = c("Q1", "Q1"), context = c("c1", "c1"), trait = c("gA", "gX"),
+    method = c("susie", "susie"), entry = list(mkE(), mkE()),
+    region = GenomicRanges::GRanges(c("chr1", "chr9"),
+                                    IRanges::IRanges(c(100, 100), c(150, 150))),
+    ldSketch = .ctp_makeHandle())
+  grid <- list(chr1_1_350 = .ctp_makeGwasSumstats(),
+               chr1_350_700 = .ctp_makeGwasSumstats())
+  b <- expect_warning(pecotmr:::.ctwasBucketWeights(tw, grid), "fell in no LD block")
+  expect_named(b, "chr1_1_350")                       # 2nd block empty -> skipped
+  expect_equal(as.character(b[["chr1_1_350"]]$trait), "gA")
+})
+
+test_that(".ctwasBucketWeights: errors when no gene lands in any block", {
+  mkE <- function() TwasWeightsEntry(
+    variantIds = vapply(1:5, .ctp_snpId, character(1)),
+    weights = c(0.1, 0.05, -0.2, 0.3, 0.0))
+  twOff <- TwasWeights(
+    study = "Q1", context = "c1", trait = "gX", method = "susie",
+    entry = list(mkE()),
+    region = GenomicRanges::GRanges("chr9", IRanges::IRanges(100, 150)),
+    ldSketch = .ctp_makeHandle())
+  grid <- list(chr1_1_350 = .ctp_makeGwasSumstats(),
+               chr1_350_700 = .ctp_makeGwasSumstats())
+  expect_error(suppressWarnings(pecotmr:::.ctwasBucketWeights(twOff, grid)),
+               "no gene placed")
+})
+
+test_that("assembleCtwasInputs: bare gwasSumStats + NULL twasWeights guards", {
+  skip_if_not_installed("ctwas")
+  ss <- .ctp_makeGwasSumstats()
+  expect_error(assembleCtwasInputs(ss, .ctp_makeTwasWeights()),
+               "NAMED LIST of GwasSumStats")
+  expect_error(assembleCtwasInputs(list(b1 = ss, b2 = ss), NULL),
+               "twasWeights` is required")
+})
+
+test_that("weight-source / method / gwas-study guards reject degenerate input", {
+  expect_error(pecotmr:::.ctwasRequireNamedLists(list(a = 1, b = 2), 42),
+               "must be a TwasWeights")
+  expect_error(pecotmr:::.ctwasResolveMethods(list()), "no method entries")
+  expect_error(pecotmr:::.ctwasGwasStudyFromZSnp(data.frame(study = c("D1", "D2"))),
+               "multiple GWAS studies")
+})
+
+test_that("finemapCtwasRegions: an empty screened-region set returns a NULL finemap", {
+  skip_if_not_installed("ctwas")
+  screenStub <- list(
+    screened_region_data = list(),
+    z_gene = NULL, region_data = list(), boundary_genes = NULL, screen_res = NULL,
+    param = list(group_prior = c(g = 0.1), group_prior_var = c(g = 5)),
+    region_info = data.frame(), z_snp = data.frame(), weights = list(),
+    snp_map = list(), LD_map = data.frame(),
+    LD_loader_fun = NULL, snpinfo_loader_fun = NULL)
+  out <- finemapCtwasRegions(screenStub)
+  expect_null(out$finemap_res)
+  expect_null(out$susie_alpha_res)
+})

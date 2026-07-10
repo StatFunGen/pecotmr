@@ -268,3 +268,36 @@ test_that(".rbindAligned: differing columns align on the union, NA-filling gaps"
   expect_equal(out$b, c("x", NA))
   expect_equal(out$c, c(NA, "z"))
 })
+
+# ===========================================================================
+# Coverage: region-column + rbind helpers
+# ===========================================================================
+test_that(".naLikeColumn: a non-character/non-GRanges exemplar pads with logical NA", {
+  expect_identical(pecotmr:::.naLikeColumn(TRUE, 3L), rep(NA, 3L))
+})
+
+test_that(".rbindCollections: all-NULL input returns NULL", {
+  expect_null(pecotmr:::.rbindCollections(list(NULL, NULL)))
+})
+
+test_that(".getRegionColumn: an absent region column yields an empty GRanges", {
+  gr <- pecotmr:::.getRegionColumn(S4Vectors::DataFrame(a = 1:2))
+  expect_s4_class(gr, "GRanges")
+  expect_length(gr, 0L)
+})
+
+test_that(".appendRegionCol: region must be a GRanges of matching length", {
+  expect_error(pecotmr:::.appendRegionCol(list(), "notgranges", 1L),
+               "must be a GRanges")
+  expect_error(
+    pecotmr:::.appendRegionCol(list(),
+      GenomicRanges::GRanges(c("chr1", "chr1"), IRanges::IRanges(1:2, 1:2)), 1L),
+    "same length as")
+})
+
+test_that(".validateRegionColumn: reports a non-GRanges region column", {
+  expect_equal(
+    pecotmr:::.validateRegionColumn(S4Vectors::DataFrame(region = c("x", "y"))),
+    "'region' column must be a GRanges")
+  expect_length(pecotmr:::.validateRegionColumn(S4Vectors::DataFrame(a = 1L)), 0L)
+})

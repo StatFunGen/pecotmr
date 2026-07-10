@@ -77,3 +77,39 @@ test_that("CtwasResult: rejects a non-CtwasResultEntry payload", {
                 method = "susie", entry = list("not an entry")),
     "must be a CtwasResultEntry")
 })
+
+test_that("CtwasResult: constructor rejects mismatched core-vector lengths", {
+  expect_error(
+    CtwasResult(gwasStudy = c("D1", "D1"), study = "Q1", context = "brain",
+                method = "susie", entry = list(.cr_entry())),
+    "same length")
+})
+
+test_that("CtwasResult: a joint column of the wrong length is rejected", {
+  expect_error(
+    CtwasResult(gwasStudy = "D1", study = "Q1", context = "brain",
+                method = "susie", entry = list(.cr_entry()),
+                jointContexts = c("a", "b")),
+    "same length as")
+})
+
+test_that("CtwasResult: getFinemap/getSusieAlpha are NULL when empty or all-NULL", {
+  empty <- CtwasResult(gwasStudy = character(0), study = character(0),
+                       context = character(0), method = character(0),
+                       entry = list())
+  expect_null(getFinemap(empty))
+  expect_null(getSusieAlpha(empty))
+  nullE <- CtwasResult(gwasStudy = "D1", study = "Q1", context = "brain",
+                       method = "susie",
+                       entry = list(CtwasResultEntry(finemap = NULL,
+                                                     susieAlpha = NULL)))
+  expect_null(getFinemap(nullE))
+  expect_null(getSusieAlpha(nullE))
+})
+
+test_that("CtwasResult: show() prints a one-line-per-run summary", {
+  cr <- CtwasResult(gwasStudy = "D1", study = "Q1", context = "brain",
+                    method = "susie", entry = list(.cr_entry()))
+  expect_output(show(cr), "CtwasResult: 1 run")
+  expect_output(show(cr), "susie")
+})

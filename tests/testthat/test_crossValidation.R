@@ -146,3 +146,31 @@ test_that("retainFits collects per-fold fits only when requested", {
                               retainFits = TRUE))
   expect_equal(r_on$foldFits[["fold_1"]][["mock"]]$fold, 1L)
 })
+
+test_that("X without rownames inherits the sample names (from Y)", {
+  d <- mk_xy()
+  X2 <- d$X; rownames(X2) <- NULL
+  r <- suppressMessages(cv(X2, d$Y, fold = 3, fitFold = mock_fit_fold))
+  expect_equal(rownames(r$prediction$mock_predicted), rownames(d$Y))
+})
+
+test_that("maxNumVariants subsamples from variantsToKeep when it already exceeds the cap", {
+  d <- mk_xy(p = 6)
+  expect_message(
+    cv(d$X, d$Y, fold = 2, fitFold = mock_fit_fold, maxNumVariants = 2,
+       variantsToKeep = c("v1", "v2", "v3"), verbose = 1),
+    "Randomly selecting 2 out of 3")
+})
+
+test_that("a NULL per-method weight matrix yields an all-NA prediction, not an error", {
+  d <- mk_xy()
+  fit_with_null <- function(Xtr, Ytr, j)
+    list(weights = list(
+           mock  = matrix(1, ncol(Xtr), ncol(Ytr),
+                          dimnames = list(colnames(Xtr), NULL)),
+           empty = NULL),                      # NULL W -> skipped per fold
+         fits = list())
+  r <- suppressMessages(cv(d$X, d$Y, fold = 3, fitFold = fit_with_null))
+  expect_true(all(is.na(r$prediction$empty_predicted)))
+  expect_false(all(is.na(r$prediction$mock_predicted)))
+})
