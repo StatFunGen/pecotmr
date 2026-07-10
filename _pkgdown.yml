@@ -115,6 +115,8 @@ reference:
       reference.
     contents:
       - AnnotationMatrix
+      - CtwasResult
+      - CtwasResultEntry
       - FineMappingEntry
       - GenotypeHandle
       - GwasFineMappingResult
@@ -125,6 +127,7 @@ reference:
       - QtlDataset
       - QtlFineMappingResult
       - QtlSumStats
+      - qtlSumStatsFromZMatrix
       - SldscData
       - TwasWeights
       - TwasWeightsEntry
@@ -167,13 +170,21 @@ reference:
       - getSusieFit
       - getTopLoci
       - getVariantIds
+      - resolveWeights
 
   - subtitle: "FineMappingResultBase"
     contents:
       - getLdSketch
       - getMethodNames
+      - getRegion
       - getStudy
       - writeSumstatsVcf
+
+  - subtitle: "CtwasResult / CtwasResultEntry"
+    contents:
+      - getCtwasParam
+      - getFinemap
+      - getSusieAlpha
 
   - subtitle: "GenotypeHandle"
     contents:
@@ -333,6 +344,7 @@ reference:
       - estCtwasParam
       - screenCtwasRegions
       - finemapCtwasRegions
+      - asCtwasResult
 
   - title: "Quality control"
     desc: >
@@ -391,6 +403,7 @@ reference:
       - regionToDf
       - regionsOverlap
       - findOverlappingRegions
+      - asGranges
 
   - title: "Fine-mapping"
     desc: >
@@ -422,6 +435,7 @@ reference:
       - formatFinemappingOutput
       - lbfToAlpha
       - postprocessFinemappingFits
+      - combineFineMappingResults
 
   - title: "TWAS"
     desc: >
@@ -475,6 +489,7 @@ reference:
     contents:
       - learnTwasWeights
       - ensembleWeights
+      - combineTwasWeights
       - twasWeightsCv
       - twasPredict
       - twasZ
@@ -515,6 +530,7 @@ reference:
       - h2EstimateToSldscTrait
       - isBinarySldscAnnot
       - metaSldscRandom
+      - sldscSubsetMeta
       - qtlEnrichment
 
   - title: "Bundled example datasets"

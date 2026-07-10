@@ -20,6 +20,7 @@ getResidualizedGenotypes(x, ...)
   residualizeGenotypeCovariates = TRUE,
   residualizePhenotypeCovariatesFromGenotypes = NULL,
   residualizeGenotypeCovariatesFromGenotypes = NULL,
+  covariateNaAction = c("impute", "drop"),
   ...
 )
 }
@@ -28,7 +29,9 @@ getResidualizedGenotypes(x, ...)
 
 \item{...}{Selection arguments: \code{traitId}, \code{region},
 \code{cisWindow}, \code{phenotypeCovariatesToRemove},
-\code{genotypeCovariatesToRemove}.}
+\code{genotypeCovariatesToRemove}, and \code{covariateNaAction}
+(\code{"impute"}, the default, mean-imputes missing covariate cells;
+\code{"drop"} removes samples with any missing covariate).}
 }
 \value{
 A numeric matrix (samples x variants).

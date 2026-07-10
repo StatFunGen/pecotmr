@@ -796,6 +796,49 @@ test_that(".qtlResolveResidualizationFlag: both set + conflicting errors", {
 })
 
 # ===========================================================================
+# .qtlHandleCovariateNa (covariate missing-value strategy)
+# ===========================================================================
+
+test_that(".qtlHandleCovariateNa: NULL and NA-free inputs pass through unchanged", {
+  expect_null(pecotmr:::.qtlHandleCovariateNa(NULL))
+  C <- matrix(c(1, 2, 3, 4), nrow = 2)
+  expect_identical(pecotmr:::.qtlHandleCovariateNa(C), C)
+  expect_identical(pecotmr:::.qtlHandleCovariateNa(C, "drop"), C)
+})
+
+test_that(".qtlHandleCovariateNa: impute (default) fills NA with column mean", {
+  C <- matrix(c(1, NA, 3,    # col1 observed mean = (1 + 3)/2 = 2
+                10, 20, NA), # col2 observed mean = (10 + 20)/2 = 15
+              nrow = 3, ncol = 2,
+              dimnames = list(c("s1", "s2", "s3"), c("a", "b")))
+  out <- pecotmr:::.qtlHandleCovariateNa(C)
+  expect_false(anyNA(out))
+  expect_equal(dim(out), dim(C))
+  expect_equal(out["s2", "a"], 2)
+  expect_equal(out["s3", "b"], 15)
+  # observed cells are untouched
+  expect_equal(out["s1", "a"], 1)
+})
+
+test_that(".qtlHandleCovariateNa: impute fills a wholly-missing column with 0", {
+  C <- matrix(c(NA_real_, NA_real_, 5, 7), nrow = 2, ncol = 2,
+              dimnames = list(c("s1", "s2"), c("a", "b")))
+  out <- pecotmr:::.qtlHandleCovariateNa(C, "impute")
+  expect_false(anyNA(out))
+  expect_equal(out[, "a"], c(s1 = 0, s2 = 0))
+})
+
+test_that(".qtlHandleCovariateNa: drop removes any sample with a missing covariate", {
+  C <- matrix(c(1, NA, 3,
+                4, 5, 6),
+              nrow = 3, ncol = 2,
+              dimnames = list(c("s1", "s2", "s3"), c("a", "b")))
+  out <- pecotmr:::.qtlHandleCovariateNa(C, "drop")
+  expect_equal(rownames(out), c("s1", "s3"))
+  expect_false(anyNA(out))
+})
+
+# ===========================================================================
 # getResidualizedGenotypes (QtlDataset)
 # ===========================================================================
 
@@ -912,6 +955,34 @@ test_that("getResidualizedGenotypes: includes genotype covariates when supplied"
     expect_lt(abs(cor(G[, j], gc[rownames(G), 1])), 1e-6)
     expect_lt(abs(cor(G[, j], gc[rownames(G), 2])), 1e-6)
   }
+})
+
+test_that("getResidualizedGenotypes: mean-imputes missing covariates by default", {
+  gc <- matrix(rnorm(12 * 2), nrow = 12, ncol = 2,
+               dimnames = list(paste0("s", 1:12), c("pc1", "pc2")))
+  gc[3, "pc1"] <- NA  # missing covariate cell
+  qd <- .qr_makeDataset(contexts = "brain", geno_cov = gc)
+  local_mocked_bindings(extractBlockGenotypes = .qr_mockExtractor(),
+                        .package = "pecotmr")
+  # Default covariateNaAction = "impute": no error, all 12 samples retained.
+  G <- getResidualizedGenotypes(qd, contexts = "brain",
+                                genotypeCovariatesToResidualize = c("pc1", "pc2"))
+  expect_equal(nrow(G), 12L)
+  expect_false(anyNA(G))
+})
+
+test_that("getResidualizedGenotypes: covariateNaAction='drop' removes samples with missing covariates", {
+  gc <- matrix(rnorm(12 * 2), nrow = 12, ncol = 2,
+               dimnames = list(paste0("s", 1:12), c("pc1", "pc2")))
+  gc[3, "pc1"] <- NA
+  qd <- .qr_makeDataset(contexts = "brain", geno_cov = gc)
+  local_mocked_bindings(extractBlockGenotypes = .qr_mockExtractor(),
+                        .package = "pecotmr")
+  G <- getResidualizedGenotypes(qd, contexts = "brain",
+                                genotypeCovariatesToResidualize = c("pc1", "pc2"),
+                                covariateNaAction = "drop")
+  expect_equal(nrow(G), 11L)
+  expect_false("s3" %in% rownames(G))
 })
 
 # ===========================================================================
