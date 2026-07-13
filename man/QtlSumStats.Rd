@@ -10,9 +10,10 @@ QtlSumStats(
   trait,
   entry,
   genome,
-  ldSketch,
+  ldSketch = NULL,
   varY = NA_real_,
   qcInfo = list(),
+  traitPos = NULL,
   ...
 )
 }

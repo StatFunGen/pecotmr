@@ -77,6 +77,30 @@ test_that("QtlSumStats: multi-tuple object is keyed by (study, context, trait)",
   expect_equal(getTraits(obj), "t1")
 })
 
+test_that("QtlSumStats: getTraitPosition returns NA when no trait position supplied", {
+  obj <- .qtlMakeOne(trait = "ENSG001")
+  # traitPos cannot be inferred from summary statistics, so an unsupplied
+  # position reports NA rather than a fabricated range.
+  expect_identical(getTraitPosition(obj), NA)
+  expect_identical(getTraitPosition(obj, "ENSG001"), NA)
+})
+
+test_that("QtlSumStats: getTraitPosition returns the supplied trait position", {
+  tpos <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1000L, 1500L))
+  obj <- QtlSumStats(
+    study = "s1", context = "c1", trait = "ENSGX",
+    entry = list(.qtlMakeEntryGr(5)),
+    genome = "hg19", ldSketch = .qtlMakeGenotypeHandle(),
+    traitPos = tpos)
+  tp <- getTraitPosition(obj)
+  expect_s4_class(tp, "GRanges")
+  expect_equal(GenomicRanges::start(tp), 1000L)
+  expect_equal(GenomicRanges::end(tp), 1500L)
+  expect_equal(GenomicRanges::start(getTraitPosition(obj, "ENSGX")), 1000L)
+  # a trait not in the collection -> NA
+  expect_identical(getTraitPosition(obj, "nope"), NA)
+})
+
 test_that("QtlSumStats: errors when required args are missing", {
   expect_error(QtlSumStats(study = "s1", context = "c1"),
                "all required")
@@ -321,4 +345,20 @@ test_that("getSumStats errors on an empty QtlSumStats collection", {
     ldSketch = .qtlMakeGenotypeHandle(), varY = numeric(0))
   expect_equal(nrow(empty), 0L)
   expect_error(getSumStats(empty), "has no rows")
+})
+
+test_that("QtlSumStats: ldSketch is optional (NULL for LD-free workflows)", {
+  obj <- QtlSumStats(
+    study = "s1", context = "c1", trait = "t1",
+    entry = list(.qtlMakeEntryGr(1)), genome = "hg19")   # ldSketch omitted
+  expect_null(getLdSketch(obj))
+  expect_output(show(obj), "none \\(LD-free\\)")
+})
+
+test_that("QtlSumStats: a non-GenotypeHandle ldSketch is rejected", {
+  expect_error(
+    QtlSumStats(study = "s1", context = "c1", trait = "t1",
+                entry = list(.qtlMakeEntryGr(1)), genome = "hg19",
+                ldSketch = "not_a_handle"),
+    "GenotypeHandle or NULL")
 })

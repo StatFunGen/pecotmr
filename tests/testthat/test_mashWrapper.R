@@ -726,6 +726,68 @@ test_that(".mashSumStatsToMatrices: errors when no usable scale", {
     "no usable scale")
 })
 
+test_that(".mashSumStatsToMatrices: inputScale='z' errors when Z missing", {
+  ss <- .mssm_makeQtlSumStats(function(i, n)
+    list(SNP = paste0("v", seq_len(n)), A1 = "A", A2 = "G",
+         BETA = rnorm(n, sd = 0.1),
+         SE   = abs(rnorm(n, sd = 0.05)) + 0.01))   # BETA/SE but no Z
+  expect_error(
+    pecotmr:::.mashSumStatsToMatrices(ss, "strong", inputScale = "z"),
+    "carry a Z mcol")
+})
+
+# ===========================================================================
+# .mashObjectMatrices / .mashObjectPartitions
+# ===========================================================================
+
+test_that(".mashObjectMatrices errors when marginal effects lack the required columns", {
+  res <- QtlFineMappingResult(study = "s", context = "brain", trait = "t",
+                              method = "susie", entry = list(.sc_makeFineMappingEntry(3)))
+  # Force a marginal-effects table with no `context` column (as an mv/f-SuSiE
+  # result trimmed of marginal sumstats would yield): mash cannot pivot it.
+  testthat::local_mocked_bindings(
+    getMarginalEffects = function(x, ...) data.frame(variant_id = "v", beta = 1, se = 1),
+    .package = "pecotmr")
+  expect_error(
+    pecotmr:::.mashObjectMatrices(res, inputScale = "auto", coverage = 0.95),
+    ">= 2 contexts")
+})
+
+test_that(".mashObjectMatrices warns and pins the first method on a multi-method result", {
+  res <- QtlFineMappingResult(
+    study = c("s", "s"), context = c("brain", "liver"), trait = c("t", "t"),
+    method = c("susie", "mvsusie"),
+    entry = list(.sc_makeFineMappingEntry(3), .sc_makeFineMappingEntry(3)))
+  expect_warning(
+    pecotmr:::.mashObjectMatrices(res, inputScale = "auto", coverage = 0.95),
+    "multiple methods")
+})
+
+test_that(".mashObjectPartitions errors when < 2 conditions remain after excludeCondition", {
+  ss <- .mssm_makeQtlSumStats(function(i, n)
+    list(SNP = paste0("v", seq_len(n)), A1 = "A", A2 = "G",
+         BETA = rnorm(n, sd = 0.1), SE = abs(rnorm(n, sd = 0.05)) + 0.01))
+  expect_error(
+    pecotmr:::.mashObjectPartitions(ss, nRandom = 3, nNull = 3,
+      excludeCondition = "liver", coverage = 0.95, inputScale = "auto", seed = 1),
+    "fewer than 2 conditions")
+})
+
+test_that(".mashObjectPartitions warns when no variants match the independent-variant list", {
+  ss <- .mssm_makeQtlSumStats(function(i, n)
+    list(SNP = paste0("v", seq_len(n)), A1 = "A", A2 = "G",
+         BETA = rnorm(n, sd = 0.1), SE = abs(rnorm(n, sd = 0.05)) + 0.01))
+  # No independent variant matches the panel, so the random/null background is
+  # empty for this object; the warning fires before the (empty) sampling.
+  expect_warning(
+    tryCatch(
+      pecotmr:::.mashObjectPartitions(ss, nRandom = 2, nNull = 2,
+        excludeCondition = character(0), coverage = 0.95, inputScale = "auto",
+        seed = 1, independentVariants = c("chrX:999999:N:N")),
+      error = function(e) invisible(NULL)),
+    "no variants matched")
+})
+
 # ===========================================================================
 # .mashSumStatsToMatrices — matrix assembly behaviour (NA fill,
 #   rowname disambiguation, multi-context shape) on the bundled fixture
@@ -1040,4 +1102,207 @@ test_that("qtlSumStatsFromZMatrix: rejects non-matrix input and unlabelled condi
   z <- matrix(rnorm(4), nrow = 2)
   expect_error(qtlSumStatsFromZMatrix(z, study = "s1", ldSketch = .qszm_gh()),
                "column names")
+})
+
+# ===========================================================================
+# qtlSumStatsFromBetaMatrix (beta-scale sibling of qtlSumStatsFromZMatrix)
+# ===========================================================================
+
+.qszmBeta <- function() {
+  rn <- c("chr1:100:A:G", "chr1:200:C:T", "chr2:50:A:T")
+  cn <- c("brain", "liver")
+  list(bhat = matrix(c(0.5, -0.3, 0.2, 0.1, 0.4, -0.6), nrow = 3,
+                     dimnames = list(rn, cn)),
+       shat = matrix(c(0.1, 0.2, 0.15, 0.12, 0.09, 0.2), nrow = 3,
+                     dimnames = list(rn, cn)))
+}
+
+test_that("qtlSumStatsFromBetaMatrix: one entry per context, BETA/SE/Z mcols set", {
+  d <- .qszmBeta()
+  qss <- qtlSumStatsFromBetaMatrix(d$bhat, d$shat, study = "s1",
+                                   ldSketch = .qszm_gh())
+  expect_s4_class(qss, "QtlSumStats")
+  expect_equal(nrow(qss), 2L)
+  expect_equal(as.character(qss$context), c("brain", "liver"))
+  mc <- S4Vectors::mcols(qss$entry[[1]])
+  expect_true(all(c("BETA", "SE", "Z") %in% colnames(mc)))
+  expect_equal(mc$BETA, unname(d$bhat[, 1]))
+  expect_equal(mc$SE, unname(d$shat[, 1]))
+  expect_equal(mc$Z, unname(d$bhat[, 1] / d$shat[, 1]))
+})
+
+test_that("qtlSumStatsFromBetaMatrix: feeds .mashSumStatsToMatrices on both scales", {
+  d <- .qszmBeta()
+  qss <- qtlSumStatsFromBetaMatrix(d$bhat, d$shat, study = "s1",
+                                   ldSketch = .qszm_gh())
+  mb <- .mashSumStatsToMatrices(qss, "strong", inputScale = "beta")
+  expect_equal(unname(mb$b), unname(d$bhat))
+  expect_equal(unname(mb$s), unname(d$shat))
+  mz <- .mashSumStatsToMatrices(qss, "strong", inputScale = "z")
+  expect_equal(unname(mz$b), unname(d$bhat / d$shat))
+})
+
+test_that("qtlSumStatsFromBetaMatrix: validates matrices and matching dimensions", {
+  d <- .qszmBeta()
+  expect_error(qtlSumStatsFromBetaMatrix(1:5, d$shat, "s1", .qszm_gh()),
+               "`bhat` must be a numeric")
+  expect_error(qtlSumStatsFromBetaMatrix(d$bhat, 1:5, "s1", .qszm_gh()),
+               "`shat` must be a numeric")
+  expect_error(qtlSumStatsFromBetaMatrix(d$bhat, d$shat[1:2, ], "s1", .qszm_gh()),
+               "identical dimensions")
+})
+
+test_that("qtlSumStatsFromBetaMatrix: NULL rownames -> synthetic ids; placeholders set", {
+  bhat <- matrix(rnorm(4), nrow = 2, dimnames = list(NULL, c("x", "y")))
+  shat <- matrix(abs(rnorm(4)) + 0.1, nrow = 2, dimnames = list(NULL, c("x", "y")))
+  qss <- qtlSumStatsFromBetaMatrix(bhat, shat, study = "s1", ldSketch = .qszm_gh(),
+                                   n = 500L, a1 = "T", a2 = "C", role = "strong")
+  mc <- S4Vectors::mcols(qss$entry[[1]])
+  expect_equal(mc$SNP, c("var1", "var2"))
+  expect_equal(unique(mc$A1), "T")
+  expect_equal(unique(mc$N), 500L)
+  expect_equal(qss@qcInfo$role, "strong")
+})
+
+# ===========================================================================
+# mashInput  (unified strong/random/null assembly from S4 objects)
+# ===========================================================================
+
+# A multi-context QtlFineMappingResult fixture: two contexts sharing the same
+# 6 variants, each with one credible set whose lead (max PIP) is a distinct
+# variant, plus low-signal background for random/null sampling.
+.mi_makeFmr <- function() {
+  mkTL <- function(zvec, csIdx) {
+    n <- length(zvec)
+    data.frame(
+      variant_id = paste0("chr1:", 100 * seq_len(n), ":A:G"),
+      chrom = "1", pos = as.integer(100 * seq_len(n)), A1 = "G", A2 = "A",
+      N = 1000, MAF = 0.2,
+      marginal_beta = zvec * 0.05, marginal_se = 0.05, marginal_z = zvec,
+      marginal_p = 2 * pnorm(-abs(zvec)),
+      pip = { p <- rep(0.05, n); p[csIdx] <- seq(0.9, by = -0.2,
+              length.out = length(csIdx)); p },
+      posterior_mean = zvec * 0.05, posterior_sd = 0.02,
+      cs_95 = { cc <- rep("susie_0", n); cc[csIdx] <- "susie_1"; cc },
+      stringsAsFactors = FALSE)
+  }
+  vids <- paste0("chr1:", 100 * seq_len(6), ":A:G")
+  e1 <- FineMappingEntry(variantIds = vids, susieFit = list(x = 1),
+                         topLoci = mkTL(c(0.5, -1, 6.0, 0.2, 1.1, -0.3), c(3, 2)))
+  e2 <- FineMappingEntry(variantIds = vids, susieFit = list(x = 1),
+                         topLoci = mkTL(c(-0.4, 0.7, 0.1, 5.0, -1.2, 0.6), c(4, 5)))
+  QtlFineMappingResult(study = c("s1", "s1"), context = c("brain", "blood"),
+                       trait = c("t1", "t1"), method = c("susie", "susie"),
+                       entry = list(e1, e2))
+}
+
+test_that("mashInput: QtlSumStats path returns the flat b/s/z + XtX contract", {
+  data(qtl_sumstats_multicontext_example)
+  ss <- qtl_sumstats_multicontext_example
+  out <- mashInput(list(geneA = ss), nRandom = 5, nNull = 5, seed = 1)
+  for (k in c("strong.b", "strong.s", "strong.z", "random.b", "random.s",
+              "random.z", "null.b", "null.s", "null.z", "XtX")) {
+    expect_true(k %in% names(out), info = k)
+  }
+  nCond <- ncol(out$strong.z)
+  expect_equal(nrow(out$random.z), 5L)
+  expect_equal(nrow(out$null.z), 5L)
+  # XtX is conditions x conditions and symmetric
+  expect_equal(dim(out$XtX), c(nCond, nCond))
+  expect_equal(unname(out$XtX), unname(t(out$XtX)))
+})
+
+test_that("mashInput: FineMappingResult strong = CS lead (max PIP) per condition", {
+  fmr <- .mi_makeFmr()
+  out <- mashInput(list(geneA = fmr), nRandom = 4, nNull = 4, coverage = 0.95,
+                   sigPCutoff = 0.5, seed = 7)
+  expect_equal(colnames(out$strong.z), c("brain", "blood"))
+  # brain CS lead = variant 3 (chr1:300), blood CS lead = variant 4 (chr1:400)
+  expect_setequal(sub("_geneA$", "", rownames(out$strong.z)),
+                  c("chr1:300:A:G", "chr1:400:A:G"))
+  expect_equal(nrow(out$random.z), 4L)
+})
+
+test_that("mashInput: a FineMappingResult with no credible set yields no strong", {
+  vids <- paste0("chr1:", 100 * seq_len(6), ":A:G")
+  noCsTL <- function(zvec) data.frame(
+    variant_id = vids, chrom = "1", pos = as.integer(100 * seq_len(6)),
+    A1 = "G", A2 = "A", N = 1000, MAF = 0.2,
+    marginal_beta = zvec * 0.05, marginal_se = 0.05, marginal_z = zvec,
+    marginal_p = 2 * pnorm(-abs(zvec)),
+    pip = rep(0.05, 6), posterior_mean = zvec * 0.05, posterior_sd = 0.02,
+    cs_95 = rep("susie_0", 6), stringsAsFactors = FALSE)
+  e1 <- FineMappingEntry(variantIds = vids, susieFit = list(x = 1),
+                         topLoci = noCsTL(rnorm(6)))
+  e2 <- FineMappingEntry(variantIds = vids, susieFit = list(x = 1),
+                         topLoci = noCsTL(rnorm(6)))
+  fmr <- QtlFineMappingResult(study = c("s1", "s1"),
+                              context = c("brain", "blood"),
+                              trait = c("t1", "t1"),
+                              method = c("susie", "susie"), entry = list(e1, e2))
+  out <- mashInput(list(g = fmr), nRandom = 3, nNull = 3, seed = 2)
+  expect_null(out$strong.z)
+  expect_equal(nrow(out$random.z), 3L)
+})
+
+test_that("mashInput: multiple regions accumulate rows and disambiguate names", {
+  fmr <- .mi_makeFmr()
+  one <- mashInput(list(a = fmr), nRandom = 4, nNull = 4, sigPCutoff = 0.5, seed = 7)
+  two <- mashInput(list(a = fmr, b = fmr), nRandom = 4, nNull = 4,
+                   sigPCutoff = 0.5, seed = 7)
+  expect_equal(nrow(two$strong.z), 2L * nrow(one$strong.z))
+  expect_equal(nrow(two$random.z), 2L * nrow(one$random.z))
+  expect_false(any(duplicated(rownames(two$random.z))))
+})
+
+test_that("mashInput: zOnly = TRUE drops the .b/.s matrices", {
+  fmr <- .mi_makeFmr()
+  out <- mashInput(list(g = fmr), nRandom = 3, nNull = 3, zOnly = TRUE,
+                   sigPCutoff = 0.5, seed = 7)
+  expect_false(any(grepl("\\.(b|s)$", names(out))))
+  expect_true(all(c("strong.z", "random.z", "null.z", "XtX") %in% names(out)))
+})
+
+test_that("mashInput: excludeCondition drops the condition column everywhere", {
+  # Exclude one of three conditions (mash needs >= 2), leaving brain + blood.
+  data(qtl_sumstats_multicontext_example)
+  ss <- qtl_sumstats_multicontext_example
+  out <- mashInput(list(g = ss), nRandom = 4, nNull = 4,
+                   excludeCondition = "muscle", seed = 7)
+  expect_false("muscle" %in% colnames(out$random.z))
+  expect_setequal(colnames(out$random.z), c("brain", "blood"))
+})
+
+test_that("mashInput: rejects a non-SumStats/non-FineMapping element", {
+  expect_error(mashInput(list(1L)),
+               "must be a QtlSumStats, GwasSumStats, or FineMappingResult")
+  expect_error(mashInput(list()), "non-empty list")
+})
+
+test_that("mashInput: independentVariants restricts random/null pool (strong untouched)", {
+  fmr <- .mi_makeFmr()                       # 6 variants chr1:100..600, 2 contexts
+  vids <- paste0("chr1:", 100 * seq_len(6), ":A:G")
+  indep <- vids[1:3]                         # only the first three are "independent"
+  out <- mashInput(list(g = fmr), nRandom = 3, nNull = 3,
+                   independentVariants = indep, sigPCutoff = 0.5, seed = 7)
+  # random / null variant ids (strip the "_g" region suffix) must lie in indep.
+  rn_ids <- sub("_g$", "", rownames(out$random.z))
+  expect_true(length(rn_ids) > 0L && all(rn_ids %in% indep))
+  if (!is.null(out$null.z)) {
+    expect_true(all(sub("_g$", "", rownames(out$null.z)) %in% indep))
+  }
+  # strong is NOT filtered -- its CS lead may lie outside the independent set.
+  expect_true(nrow(out$strong.z) >= 1L)
+})
+
+test_that("mashInput: independentVariants matches across allele flip + chr prefix", {
+  fmr <- .mi_makeFmr()
+  # same positions as the first three variants, but ref/alt swapped and the
+  # chr prefix dropped -- matchVariants must still match them (not a string cmp).
+  indep_flipped <- c("1:100:G:A", "1:200:G:A", "1:300:G:A")
+  out <- mashInput(list(g = fmr), nRandom = 3, nNull = 3,
+                   independentVariants = indep_flipped, sigPCutoff = 0.5, seed = 7)
+  rn_ids <- sub("_g$", "", rownames(out$random.z))
+  expect_true(length(rn_ids) > 0L)
+  expect_true(all(rn_ids %in% paste0("chr1:", c(100, 200, 300), ":A:G")))
 })

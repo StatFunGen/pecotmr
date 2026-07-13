@@ -362,4 +362,28 @@ test_that("FineMappingEntry: adjustPips subsets mu2 and recomputes posterior_sd"
   expect_true(all(adj@topLoci$posterior_sd >= 0))
 })
 
+test_that("getCs / getTopLoci minPurity filters CS by purity, independent of coverage + pip", {
+  # Two 0.95 credible sets: CS1 (v1,v2) pure (0.9), CS2 (v3,v4) impure (0.3); v5 non-CS.
+  vn <- paste0("chr1:", (1:5) * 100, ":A:G")
+  L <- 2L; P <- 5L
+  alpha <- matrix(0.1, L, P); alpha[1, 1:2] <- c(0.5, 0.4); alpha[2, 3:4] <- c(0.5, 0.4)
+  fit <- list(alpha = alpha, mu = matrix(0.3, L, P), mu2 = matrix(1.2, L, P),
+              pip = c(0.6, 0.5, 0.4, 0.4, 0.02))
+  class(fit) <- "susie"
+  cst <- list(list(sets = list(cs = list(L1 = c(1L, 2L), L2 = c(3L, 4L)),
+                               purity = data.frame(min.abs.corr = c(0.9, 0.3)))),
+              list(sets = list(cs = list())), list(sets = list(cs = list())))
+  attr(cst, "coverage") <- c(0.95, 0.70, 0.50)
+  tl <- buildTopLoci(fit, cst, variantNames = vn, method = "susie")
+  e  <- FineMappingEntry(variantIds = vn, susieFit = fit, topLoci = tl)
+
+  # getCs: minPurity is orthogonal to coverage -> keeps only the pure CS members
+  expect_equal(nrow(getCs(e, coverage = 0.95)), 4L)
+  expect_equal(getCs(e, coverage = 0.95, minPurity = 0.8)$variant_id, vn[1:2])
+  # getTopLoci: minPurity is orthogonal to the pip cutoff -> drops impure-CS
+  # variants (v3,v4), keeps pure-CS (v1,v2) and non-CS (v5)
+  expect_setequal(getTopLoci(e, signalCutoff = 0, minPurity = 0.8)$variant_id, vn[c(1, 2, 5)])
+  expect_equal(nrow(getTopLoci(e, signalCutoff = 0)), 5L)  # default (NULL) unchanged
+})
+
 

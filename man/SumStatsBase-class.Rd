@@ -14,7 +14,9 @@ Virtual base class for QTL and GWAS summary statistics
 
 \describe{
 \item{\code{ldSketch}}{The \code{GenotypeHandle} the QC pipeline harmonized
-against. Required: \code{summaryStatsQc()} sets it.}
+against, or \code{NULL}. Optional: LD-free workflows (e.g. mash, which
+operates across conditions per variant) carry \code{NULL}; pipelines that
+need LD validate its presence when they consume the collection.}
 
 \item{\code{genome}}{Character, genome build label.}
 

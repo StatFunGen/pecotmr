@@ -24,7 +24,6 @@ requirements:
     - ${{ compiler('cxx') }}
   host:
     - bioconductor-biocparallel
-    - bioconductor-biostrings
     - bioconductor-genomicranges
     - bioconductor-iranges
     - bioconductor-qvalue
@@ -43,6 +42,7 @@ requirements:
     - r-coda
     - r-coloc
     - r-colocboost
+    - r-corshrink
     - r-cpp11
     - r-cpp11armadillo
     - r-ctwas
@@ -59,6 +59,7 @@ requirements:
     - r-mashr
     - r-matrix
     - r-matrixstats
+    - r-metafor
     - r-mr.ash.alpha
     - r-mr.mashr
     - r-mvsusier
@@ -81,6 +82,7 @@ requirements:
     - r-tibble
     - r-tictoc
     - r-tidyr
+    - r-udr
     - r-vctrs
     - r-vroom
     - r-xgboost
@@ -105,6 +107,7 @@ requirements:
     - r-coda
     - r-coloc
     - r-colocboost
+    - r-corshrink
     - r-cpp11
     - r-cpp11armadillo
     - r-ctwas
@@ -121,6 +124,7 @@ requirements:
     - r-mashr
     - r-matrix
     - r-matrixstats
+    - r-metafor
     - r-mr.ash.alpha
     - r-mr.mashr
     - r-mvsusier
@@ -143,6 +147,7 @@ requirements:
     - r-tibble
     - r-tictoc
     - r-tidyr
+    - r-udr
     - r-vctrs
     - r-vroom
     - r-xgboost

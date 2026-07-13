@@ -647,6 +647,23 @@ setGeneric("getTraits", function(x) standardGeneric("getTraits"))
 #' @export
 setGeneric("getRegion", function(x, ...) standardGeneric("getRegion"))
 
+#' @title Get Per-Row Trait Positions
+#' @description Return the molecular feature's OWN genomic coordinates (the gene
+#'   / peak range; TSS = \code{start()}) for each row of a per-tuple collection,
+#'   as a \code{GRanges} with one range per row. Distinct from
+#'   \code{\link{getRegion}} (the fine-mapping window for a
+#'   \code{FineMappingResult}): the true trait position cannot be inferred from
+#'   summary statistics, so it is threaded from the QtlDataset \code{rowRanges}
+#'   or an explicit QtlSumStats trait-position and carried as provenance onto
+#'   \code{QtlFineMappingResult} and \code{TwasWeights}.
+#' @param x The object.
+#' @param ... Reserved for future use.
+#' @return A \code{GRanges} with one range per row of \code{x}, or an empty
+#'   \code{GRanges} when the collection carries no trait-position provenance.
+#' @export
+setGeneric("getTraitPosition",
+  function(x, ...) standardGeneric("getTraitPosition"))
+
 #' @title Get Residualized Genotypes
 #' @description Residualize the genotype matrix against the per-context
 #'   phenotype covariates and the genotype covariates, optionally

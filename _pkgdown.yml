@@ -127,6 +127,7 @@ reference:
       - QtlDataset
       - QtlFineMappingResult
       - QtlSumStats
+      - qtlSumStatsFromBetaMatrix
       - qtlSumStatsFromZMatrix
       - SldscData
       - TwasWeights
@@ -164,7 +165,11 @@ reference:
   - subtitle: "FineMappingEntry"
     contents:
       - adjustPips
+      - fsusieAffectedRegions
+      - fsusieCredibleBand
+      - getCredibleSetSummary
       - getCs
+      - getLbf
       - getMarginalEffects
       - getPip
       - getSusieFit
@@ -267,6 +272,7 @@ reference:
       - getResidualizedGenotypes
       - getResidualizedPhenotypes
       - getScaleResiduals
+      - getTraitPosition
 
   - subtitle: "QtlFineMappingResult"
     contents:
@@ -429,13 +435,13 @@ reference:
       - fsusieGetCs
       - fsusieWrapper
       - getSusieResult
-      - buildTopLoci
       - extractCsInfo
       - extractTopPipInfo
       - formatFinemappingOutput
       - lbfToAlpha
       - postprocessFinemappingFits
       - combineFineMappingResults
+      - overlapTopLoci
 
   - title: "TWAS"
     desc: >
@@ -499,14 +505,28 @@ reference:
     contents:
       - combinePValues
 
-  - title: "mash helpers"
+  - title: "mash"
     desc: >
-      Utilities exposed by the mash track for posterior contrast
-      construction, mixture management, and meta-analysis.
+      The mash (multivariate adaptive shrinkage) track: the chainable steps
+      \code{mashInput} -> \code{mashResidualCorrelation} ->
+      \code{mashPriorCovariances} (or \code{mashCovarianceComponents}) ->
+      \code{mashModelFit} -> \code{mashPosterior} that \code{mashPipeline} is
+      built from, the posterior-contrast + feature-score layer, and the
+      supporting utilities for contrast construction and meta-analysis.
     contents:
+      - mashInput
+      - mashResidualCorrelation
+      - mashCovarianceComponents
+      - mashPriorCovariances
+      - mashModelFit
+      - mashPosterior
+      - mashPosteriorContrast
+      - calculateFeatureScores
+      - nSignificantScore
+      - scoreFromCs
       - makePairwiseContrastCol
       - fitMashContrast
-      - metaAnalysisPerCell
+      - metaAnalysisPerCondition
       - sanitizeMashData
       - sliceMashData
       - updateMashModelCov
@@ -594,6 +614,7 @@ reference:
       # Implementation details with .Rd topics but no front-facing role.
       - as.data.frame.GwasSumStats
       - rescaleCovW0
+      - ".fullFitColumns"
       - "getSumStats,GwasSumStats-method"
 
 footer:

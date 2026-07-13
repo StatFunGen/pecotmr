@@ -35,6 +35,7 @@ setClass("TwasWeights",
           "every element of the `entry` column must be a TwasWeightsEntry")
       # Optional `region` provenance (one genomic anchor per row; non-key).
       errors <- c(errors, .validateRegionColumn(object))
+      errors <- c(errors, .validateTraitPosColumn(object))
       jointCols <- intersect(
         c("jointStudies", "jointContexts", "jointTraits"), names(object))
       for (jc in jointCols) {
@@ -154,6 +155,7 @@ TwasWeights <- function(study, context, trait, method, entry,
                         jointContexts = NULL,
                         jointTraits = NULL,
                         region = NULL,
+                        traitPos = NULL,
                         ldSketch = NULL) {
   n <- length(study)
   if (length(context) != n || length(trait) != n || length(method) != n ||
@@ -178,6 +180,7 @@ TwasWeights <- function(study, context, trait, method, entry,
     cols[[pair[[2L]]]] <- as.character(val)
   }
   cols <- .appendRegionCol(cols, region, n)
+  cols <- .appendTraitPosCol(cols, traitPos, n)
   df <- do.call(S4Vectors::DataFrame,
                 c(cols, list(check.names = FALSE)))
   obj <- new("TwasWeights", df, ldSketch = ldSketch)
@@ -188,6 +191,10 @@ TwasWeights <- function(study, context, trait, method, entry,
 #' @rdname getRegion
 #' @export
 setMethod("getRegion", "TwasWeights", function(x, ...) .getRegionColumn(x))
+
+#' @rdname getTraitPosition
+#' @export
+setMethod("getTraitPosition", "TwasWeights", function(x, ...) .getTraitPosColumn(x))
 
 #' @title Get a Single TWAS Weights Entry
 #' @description Return the \code{TwasWeightsEntry} for one

@@ -16,6 +16,9 @@ setClass("QtlSumStats",
   contains = "SumStatsBase",
   validity = function(object) {
     errors <- character()
+    if (!is.null(object@ldSketch) &&
+        !methods::is(object@ldSketch, "GenotypeHandle"))
+      errors <- c(errors, "'ldSketch' must be a GenotypeHandle or NULL")
     required <- c("study", "context", "trait", "entry")
     missingCols <- setdiff(required, names(object))
     if (length(missingCols) > 0L)
@@ -26,6 +29,7 @@ setClass("QtlSumStats",
         "'genome' slot must be a single non-empty character string")
     if (!is.list(object@qcInfo))
       errors <- c(errors, "'qcInfo' slot must be a list")
+    errors <- c(errors, .validateTraitPosColumn(object))
     if (length(errors) == 0L) {
       if (length(object$entry) != nrow(object))
         errors <- c(errors,
@@ -88,11 +92,11 @@ NULL
 #' @param ... Additional per-tuple columns to attach to the collection.
 #' @return A \code{QtlSumStats} object.
 #' @export
-QtlSumStats <- function(study, context, trait, entry, genome, ldSketch,
-                        varY = NA_real_, qcInfo = list(), ...) {
+QtlSumStats <- function(study, context, trait, entry, genome, ldSketch = NULL,
+                        varY = NA_real_, qcInfo = list(), traitPos = NULL, ...) {
   if (missing(study) || missing(context) || missing(trait) ||
-      missing(entry) || missing(genome) || missing(ldSketch)) {
-    stop("`study`, `context`, `trait`, `entry`, `genome`, and `ldSketch` ",
+      missing(entry) || missing(genome)) {
+    stop("`study`, `context`, `trait`, `entry`, and `genome` ",
          "are all required.")
   }
   if (length(genome) != 1L) {
@@ -119,6 +123,10 @@ QtlSumStats <- function(study, context, trait, entry, genome, ldSketch,
     entry   = S4Vectors::SimpleList(entry),
     varY    = as.numeric(varY)
   )
+  # Optional trait-position provenance (one GRanges per trait; TSS = start()),
+  # carried forward into QtlFineMappingResult / TwasWeights since the true trait
+  # position cannot be inferred from summary statistics alone.
+  cols <- .appendTraitPosCol(cols, traitPos, n)
   extras <- list(...)
   for (nm in names(extras)) cols[[nm]] <- extras[[nm]]
   df <- do.call(S4Vectors::DataFrame, c(cols, list(check.names = FALSE)))
@@ -239,6 +247,20 @@ setMethod("getContexts", "QtlSumStats",
 setMethod("getTraits", "QtlSumStats",
   function(x) unique(as.character(x$trait)))
 
+# Trait position provenance. Optional for a QtlSumStats -- it cannot be inferred
+# from summary statistics, so it is only present when the caller supplied it.
+# Returns the traitPos GRanges (whole column, or the rows matching `traitId`),
+# or a scalar NA when no trait position was supplied.
+#' @rdname getTraitPosition
+#' @export
+setMethod("getTraitPosition", "QtlSumStats", function(x, traitId = NULL, ...) {
+  tp <- .getTraitPosColumn(x)
+  if (!methods::is(tp, "GRanges") || is.null(traitId)) return(tp)
+  idx <- which(as.character(x$trait) %in% as.character(traitId))
+  if (length(idx) == 0L) return(NA)
+  tp[idx]
+})
+
 # =============================================================================
 # Show method
 # =============================================================================
@@ -254,5 +276,7 @@ setMethod("show", "QtlSumStats", function(object) {
                 length(unique(object$trait))))
   }
   ld <- getLdSketch(object)
-  cat(sprintf("  LD sketch: %s @ %s\n", getFormat(ld), getPath(ld)))
+  cat(sprintf("  LD sketch: %s\n",
+              if (is.null(ld)) "none (LD-free)"
+              else sprintf("%s @ %s", getFormat(ld), getPath(ld))))
 })

@@ -168,6 +168,40 @@
   character(0)
 }
 
+# Internal: trait-position provenance. One GRanges per trait carrying the
+# molecular feature's OWN genomic coordinates (gene/peak range; TSS = start()),
+# distinct from the fine-mapping `region`. The true trait position cannot be
+# inferred from summary statistics, so it is threaded from QtlDataset rowRanges
+# / an explicit QtlSumStats trait-position and carried onto QtlFineMappingResult
+# and TwasWeights. Mirrors the `region` helpers above; absent for GWAS.
+# traitPos is optional provenance: always known for a QtlDataset, but only known
+# for a QtlSumStats when the caller supplied it (it cannot be inferred from
+# summary statistics). When the column is absent we return a scalar NA rather
+# than an empty GRanges, so getTraitPosition() reports "no trait position"
+# honestly instead of a zero-length range.
+.getTraitPosColumn <- function(x) {
+  if ("traitPos" %in% names(x)) x[["traitPos"]] else NA
+}
+
+.appendTraitPosCol <- function(cols, traitPos, n) {
+  if (is.null(traitPos)) return(cols)
+  if (!methods::is(traitPos, "GRanges"))
+    stop("`traitPos` must be a GRanges (one range per row) or NULL.")
+  if (length(traitPos) != n)
+    stop("`traitPos` must have the same length as `study`.")
+  cols[["traitPos"]] <- traitPos
+  cols
+}
+
+.validateTraitPosColumn <- function(object) {
+  if (!("traitPos" %in% names(object))) return(character(0))
+  if (!methods::is(object[["traitPos"]], "GRanges"))
+    return("'traitPos' column must be a GRanges")
+  if (length(object[["traitPos"]]) != nrow(object))
+    return("'traitPos' column must have one range per row")
+  character(0)
+}
+
 # Internal: a length-n "unknown" column matching the type of `exemplar`, used
 # to pad a collection that lacks an optional column before a union row-bind.
 # Character -> NA; GRanges -> a 0-width chrUn sentinel range; else NA.
@@ -193,7 +227,7 @@
   allCols <- Reduce(union, lapply(parts, names))
   exemplar <- function(cn) {
     for (p in parts) if (cn %in% names(p)) return(p[[cn]])
-    NULL
+    NULL # nocov  (unreachable: cn is always drawn from allCols, so some part has it)
   }
   combined <- lapply(allCols, function(cn) {
     pieces <- lapply(parts, function(p)

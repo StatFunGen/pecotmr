@@ -15,6 +15,9 @@ setClass("GwasSumStats",
   contains = "SumStatsBase",
   validity = function(object) {
     errors <- character()
+    if (!is.null(object@ldSketch) &&
+        !methods::is(object@ldSketch, "GenotypeHandle"))
+      errors <- c(errors, "'ldSketch' must be a GenotypeHandle or NULL")
     required <- c("study", "entry")
     missingCols <- setdiff(required, names(object))
     if (length(missingCols) > 0L)
@@ -45,8 +48,10 @@ setClass("GwasSumStats",
 setMethod("show", "GwasSumStats", function(object) {
   cat(sprintf("GwasSumStats: %d studies, genome build %s\n",
               nrow(object), object@genome))
-  cat(sprintf("  LD sketch: %s @ %s\n",
-              object@ldSketch@format, object@ldSketch@path))
+  ld <- object@ldSketch
+  cat(sprintf("  LD sketch: %s\n",
+              if (is.null(ld)) "none (LD-free)"
+              else sprintf("%s @ %s", ld@format, ld@path)))
 })
 
 
@@ -97,11 +102,11 @@ NULL
 #' @param ... Additional per-study columns to attach to the collection.
 #' @return A \code{GwasSumStats} object.
 #' @export
-GwasSumStats <- function(study, entry, genome, ldSketch,
+GwasSumStats <- function(study, entry, genome, ldSketch = NULL,
                           varY = NA_real_, nCase = NULL,
                           nControl = NULL, qcInfo = list(), ...) {
-  if (missing(study) || missing(entry) || missing(genome) || missing(ldSketch)) {
-    stop("`study`, `entry`, `genome`, and `ldSketch` are all required.")
+  if (missing(study) || missing(entry) || missing(genome)) {
+    stop("`study`, `entry`, and `genome` are all required.")
   }
   if (length(genome) != 1L) {
     stop("`genome` must be a single character string (one build per ",

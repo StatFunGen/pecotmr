@@ -240,7 +240,7 @@ fitSusieInfThenSusieRss <- function(z, R, n, args = list(),
 #' @return A list with \code{finemappingResults} (per-method post-processed
 #'   objects, each carrying a trimmed fit and method-specific intermediates)
 #'   and a single unified \code{top_loci} table in the fixed 22-column shape
-#'   (see \code{\link{buildTopLoci}}). Per-method contributions are
+#'   (see the internal \code{buildTopLoci}). Per-method contributions are
 #'   row-bound into \code{top_loci} by an outer method for-loop.
 #' @export
 postprocessFinemappingFits <- function(fits, dataX, dataY = NULL,
@@ -255,7 +255,10 @@ postprocessFinemappingFits <- function(fits, dataX, dataY = NULL,
                                        medianAbsCorr = NULL,
                                        csInput = NULL,
                                        conditionIdx = NULL,
-                                       trim = TRUE) {
+                                       trim = TRUE,
+                                       fullFit = FALSE,
+                                       fullFitAlphaOnly = TRUE,
+                                       includeAllCs = FALSE) {
   fits <- fits[!vapply(fits, is.null, logical(1))]
   if (length(fits) == 0) stop("At least one fine-mapping fit must be supplied.")
   if (is.null(names(fits)) || any(names(fits) == "")) {
@@ -277,7 +280,9 @@ postprocessFinemappingFits <- function(fits, dataX, dataY = NULL,
       medianAbsCorr = medianAbsCorr,
       csInput = csInput,
       conditionIdx = conditionIdx,
-      trim = trim
+      trim = trim,
+      fullFit = fullFit, fullFitAlphaOnly = fullFitAlphaOnly,
+      includeAllCs = includeAllCs
     )
   })
   names(posts) <- names(fits)
@@ -347,6 +352,9 @@ postprocessFinemappingFit.susiF <- function(fit, method = "fsusie", csInput = NU
                                              minAbsCorr = 0.8,
                                              medianAbsCorr = NULL,
                                              conditionIdx = NULL,
+                                             fullFit = FALSE,
+                                             fullFitAlphaOnly = TRUE,
+                                             includeAllCs = FALSE,
                                              csInput = c("X", "Xcorr", "fsusie")) {
   csInput <- match.arg(csInput)
   variantNames <- extractVariantNames(fit)
@@ -365,7 +373,9 @@ postprocessFinemappingFit.susiF <- function(fit, method = "fsusie", csInput = NU
     fit, csTables, variantNames = variantNames, sumstats = sumstats,
     af = af, method = method, signalCutoff = 0,
     dataX = dataX, dataY = dataY, otherQuantities = otherQuantities,
-    region = region, conditionIdx = conditionIdx
+    region = region, conditionIdx = conditionIdx,
+    fullFit = fullFit, fullFitAlphaOnly = fullFitAlphaOnly,
+    includeAllCs = includeAllCs
   )
 
   # When `trim = TRUE` we store a minimal subset of the fit on the
@@ -491,10 +501,22 @@ computeCsTable <- function(fit, dataX, coverage, csInput = c("X", "Xcorr", "fsus
     }
     tmp <- fit
     tmp$sets <- sets
-    csCorr <- if (requireNamespace("fsusieR", quietly = TRUE)) {
-      tryCatch(fsusieR::cal_cor_cs(tmp, dataX), error = function(e) NULL)
-    } else {
-      NULL
+    csCorr <- NULL
+    if (requireNamespace("fsusieR", quietly = TRUE)) {
+      # Credible-set PURITY is the min |correlation| WITHIN each CS's variants,
+      # which fsusieR computes with cal_purity(). (cal_cor_cs() computes the
+      # BETWEEN-CS correlation and returns the whole fit object, so it is the
+      # wrong quantity for purity.) Stamp it as sets$purity$min.abs.corr so the
+      # canonical .csPurityVec() reads it directly (the susieR path shape).
+      purity <- tryCatch(
+        as.numeric(unlist(fsusieR:::cal_purity(sets$cs, dataX))),
+        error = function(e) NULL)
+      if (!is.null(purity) && length(purity) == length(sets$cs)) {
+        sets$purity <- data.frame(min.abs.corr = purity)
+      }
+      # Keep the between-CS correlation matrix (not the whole fit) for callers
+      # that use it to decide whether credible sets are distinct.
+      csCorr <- tryCatch(fsusieR::cal_cor_cs(tmp, dataX)$cs_cor, error = function(e) NULL)
     }
     return(list(sets = sets, cs_corr = csCorr, pip = fit$pip))
   }
@@ -564,11 +586,64 @@ computeCsTable <- function(fit, dataX, coverage, csInput = c("X", "Xcorr", "fsus
 #' @return A data frame in the fixed 22-column shape for this fit and method,
 #'   or an empty data frame if nothing is retained.
 #' @export
+# Per-effect (per credible set) variant-level columns from the susie fit. Always
+# returns `within_cs_pip` (the variant's alpha in the single effect of its
+# assigned primary-coverage CS; NA for non-CS variants -- alpha is a probability,
+# no scaling). With fullFit = TRUE it also widens the per-effect matrices, one
+# column set per CS: `within_cs_pip_<lab>` (alpha) and -- unless fullFitAlphaOnly --
+# `cs_logbf_<lab>` (lbf_variable), `cs_effect_<lab>` (mu / X_column_scale_factors)
+# and `cs_effect_var_<lab>` ((mu2 - mu^2) / scale^2). includeAllCs = TRUE widens
+# EVERY effect (label `L<k>`), else only effects that produced a passing CS
+# (label `cs<pos>`, matching the cs_<cov> columns). alpha/mu/mu2/lbf are L x p
+# per-effect matrices (mu/mu2 already condition-sliced upstream); missing on a
+# trimmed / fSuSiE fit, in which case the values are NA.
+# @noRd
+.fullFitColumns <- function(alpha, mu, mu2, lbfMat, scale, primaryCsPos, effectOf,
+                            fullFit = FALSE, fullFitAlphaOnly = TRUE,
+                            includeAllCs = FALSE) {
+  nV <- if (is.null(alpha) || length(dim(alpha)) < 2L) length(primaryCsPos) else ncol(alpha)
+  withinPip <- rep(NA_real_, nV)
+  hasAlpha <- !is.null(alpha) && length(dim(alpha)) == 2L && nrow(alpha) > 0L
+  if (hasAlpha && length(primaryCsPos) == nV && length(effectOf) > 0L) {
+    for (v in seq_len(nV)) {
+      cp <- primaryCsPos[[v]]
+      if (!is.na(cp) && cp >= 1L && cp <= length(effectOf)) {
+        L <- effectOf[[cp]]
+        if (!is.na(L) && L >= 1L && L <= nrow(alpha)) withinPip[[v]] <- alpha[L, v]
+      }
+    }
+  }
+  cols <- data.frame(within_cs_pip = withinPip, stringsAsFactors = FALSE)
+  if (!isTRUE(fullFit) || !hasAlpha) return(cols)
+  if (isTRUE(includeAllCs)) {
+    effs <- seq_len(nrow(alpha)); labs <- paste0("L", effs)
+  } else {
+    keep <- which(!is.na(effectOf) & effectOf >= 1L & effectOf <= nrow(alpha))
+    effs <- effectOf[keep]; labs <- paste0("cs", keep)
+  }
+  if (is.null(scale) || length(scale) != nV) scale <- rep(1, nV)
+  for (i in seq_along(effs)) {
+    L <- effs[[i]]; lab <- labs[[i]]
+    cols[[paste0("within_cs_pip_", lab)]] <- alpha[L, ]
+    if (!isTRUE(fullFitAlphaOnly)) {
+      if (!is.null(lbfMat) && L <= nrow(lbfMat))
+        cols[[paste0("cs_logbf_", lab)]] <- lbfMat[L, ]
+      if (!is.null(mu) && L <= nrow(mu))
+        cols[[paste0("cs_effect_", lab)]] <- mu[L, ] / scale
+      if (!is.null(mu) && !is.null(mu2) && L <= nrow(mu2))
+        cols[[paste0("cs_effect_var_", lab)]] <- (mu2[L, ] - mu[L, ]^2) / scale^2
+    }
+  }
+  cols
+}
+
 buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
                          af = NULL, method, signalCutoff = 0,
                          dataX = NULL, dataY = NULL,
                          otherQuantities = NULL,
-                         region = NULL, conditionIdx = NULL) {
+                         region = NULL, conditionIdx = NULL,
+                         fullFit = FALSE, fullFitAlphaOnly = TRUE,
+                         includeAllCs = FALSE) {
   if (missing(method) || is.null(method) ||
       length(method) != 1L || is.na(method) || !nzchar(method)) {
     stop("buildTopLoci: `method` is required (e.g. \"susie\", \"susieInf\").")
@@ -610,6 +685,16 @@ buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
   } else rep(NA_real_, length(variantNames))
   postSd <- if (!is.null(mu2) && all(dim(alpha) == dim(mu2))) {
     sqrt(pmax(colSums(alpha * mu2) - postMean^2, 0))
+  } else rep(NA_real_, length(variantNames))
+  # Per-variant log Bayes factor: the strongest single-effect lbf across effects
+  # (from `lbf_variable`, or fSuSiE's `lBF`). NA when the fit carries no lbf
+  # matrix. Replaces the legacy semicolon-joined per-effect `log10_base_factor`
+  # with one tidy numeric per variant.
+  lbfMat <- .asLbfMatrix(fit)
+  logBF <- if (!is.null(lbfMat) && ncol(lbfMat) == length(variantNames)) {
+    apply(lbfMat, 2, function(x) {
+      x <- x[is.finite(x)]; if (length(x) == 0L) NA_real_ else max(x)
+    })
   } else rep(NA_real_, length(variantNames))
 
   # Parse variant IDs into chrom/pos/A1/A2 (one row per variant).
@@ -660,46 +745,139 @@ buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
     }
     out
   }
-  idx95 <- csIdxAtCoverage(0.95)
-  idx70 <- csIdxAtCoverage(0.70)
-  idx50 <- csIdxAtCoverage(0.50)
-
-  # 0.95-coverage CS purity, per-variant (0 for non-CS variants).
-  purityPerCs <- {
-    h <- which(abs(coverageValues - 0.95) < 1e-12)
-    if (length(h) > 0L) .csPurityVec(csTables[[h[1L]]]) else numeric()
+  # Per-variant CS purity at a coverage (0 for non-CS variants). Purity
+  # (min.abs.corr) is a CS-quality measure, independent of the coverage
+  # (confidence) level; the accessors expose an independent `minPurity` filter
+  # over these columns.
+  purityAtCoverage <- function(targetCov, idxVec) {
+    h <- which(abs(coverageValues - targetCov) < 1e-12)
+    pv <- if (length(h) > 0L) .csPurityVec(csTables[[h[1L]]]) else numeric()
+    vapply(idxVec, function(i) {
+      if (i <= 0L || i > length(pv)) return(0)
+      v <- pv[i]; if (is.na(v)) 0 else as.numeric(v)
+    }, numeric(1))
   }
-  cs95Purity <- vapply(idx95, function(i) {
-    if (i <= 0L || i > length(purityPerCs)) return(0)
-    v <- purityPerCs[i]; if (is.na(v)) 0 else as.numeric(v)
-  }, numeric(1))
+  # Derive CS membership + purity for EVERY coverage the pipeline actually
+  # produced (attr(csTables, "coverage")), rather than assuming fixed
+  # 0.95/0.70/0.50 levels — otherwise a non-default secondaryCoverage would be
+  # silently dropped. Ordered high -> low so the primary CS leads; the column
+  # names match getCs's `cs_<coverage*100>` lookup.
+  covSorted     <- sort(unique(coverageValues[is.finite(coverageValues)]),
+                        decreasing = TRUE)
+  csIdxByCov    <- lapply(covSorted, csIdxAtCoverage)
+  csPurityByCov <- Map(purityAtCoverage, covSorted, csIdxByCov)
+  csColNames    <- paste0("cs_", covSorted * 100)
+
+  # Per-condition posterior conditional effect + local false sign rate for
+  # multivariate (mvsusie) fits. `conditional_effect` is the effect conditional
+  # on the variant being causal (coef / pip) for this condition; `lfsr` is the
+  # variant's conditional lfsr within its 0.95 credible set for this condition
+  # (from the fit's `clfsr`, an L x variants x conditions array). Both stay NA
+  # for univariate fits (conditionIdx = NULL) and are only attached to `out`
+  # below when a conditionIdx is supplied, so the univariate schema is
+  # unchanged (the projector whitelist picks them up only when present).
+  condEffect <- rep(NA_real_, nV)
+  condLfsr   <- rep(NA_real_, nV)
+  if (!is.null(conditionIdx)) {
+    # The raw (pre-trim) mvsusie fit exposes coefficients via coef.mvsusie()
+    # and stores lfsr as `conditional_lfsr`; the trimmed fit stores `$coef`
+    # (variants x conditions, intercept dropped) and `$clfsr`. Accept either.
+    coefMat <- if (!is.null(fit$coef)) {
+      as.matrix(fit$coef)
+    } else if (identical(method, "mvsusie") &&
+               requireNamespace("mvsusieR", quietly = TRUE)) {
+      cm <- tryCatch(mvsusieR::coef.mvsusie(fit), error = function(e) NULL)
+      if (!is.null(cm)) as.matrix(cm)[-1L, , drop = FALSE] else NULL
+    } else NULL
+    if (!is.null(coefMat) && nrow(coefMat) == nV && ncol(coefMat) >= conditionIdx) {
+      pipVec <- as.numeric(fit$pip)
+      condEffect <- ifelse(pipVec > 0, coefMat[, conditionIdx] / pipVec, NA_real_)
+    }
+    clf <- if (!is.null(fit$clfsr)) fit$clfsr else fit$conditional_lfsr
+    if (!is.null(clf) && length(dim(clf)) == 3L && dim(clf)[3L] >= conditionIdx &&
+        length(covSorted) > 0L) {
+      # Map each variant to its effect (L) via the PRIMARY (highest-coverage)
+      # credible set, then read that effect's conditional lfsr for this condition.
+      hPrim <- which(abs(coverageValues - covSorted[1L]) < 1e-12)
+      if (length(hPrim) > 0L) {
+        setsPrim <- csTables[[hPrim[1L]]]$sets$cs
+        if (!is.null(setsPrim) && length(setsPrim) > 0L) {
+          effectOf <- suppressWarnings(as.integer(sub("^L", "", names(setsPrim))))
+          for (csPos in seq_along(setsPrim)) {
+            L <- effectOf[csPos]
+            if (is.na(L) || L < 1L || L > dim(clf)[1L]) next
+            vi <- as.integer(setsPrim[[csPos]])
+            vi <- vi[vi >= 1L & vi <= nV]
+            if (length(vi) > 0L) condLfsr[vi] <- as.numeric(clf[L, vi, conditionIdx])
+          }
+        }
+      }
+    }
+  }
 
   methodTag <- .camelToSnakeMethod(method)
-  out <- data.frame(
-    variant_id     = as.character(variantNames),
-    chrom          = parsed$chrom,
-    pos            = as.integer(parsed$pos),
-    A1             = parsed$A1,
-    A2             = parsed$A2,
-    N              = rep(fitN, nV),
-    af             = if (is.null(af)) rep(NA_real_, nV) else as.numeric(af),
-    marginal_beta  = marginalBeta,
-    marginal_se    = marginalSe,
-    marginal_z     = marginalZ,
-    marginal_p     = marginalP,
-    pip            = as.numeric(fit$pip),
-    posterior_mean = postMean,
-    posterior_sd   = postSd,
-    cs_95          = paste0(methodTag, "_", idx95),
-    cs_70          = paste0(methodTag, "_", idx70),
-    cs_50          = paste0(methodTag, "_", idx50),
-    cs_95_purity   = cs95Purity,
-    method         = rep(method, nV),
-    gene           = rep(fitGene, nV),
-    event          = rep(fitEvent, nV),
-    grange_start   = rep(grange[["start"]], nV),
-    grange_end     = rep(grange[["end"]],   nV),
-    stringsAsFactors = FALSE)
+  # Dynamic CS block: memberships (cs_<C>) then purities (cs_<C>_purity), one
+  # pair per coverage present, high -> low. For the default coverages this is
+  # cs_95, cs_70, cs_50, cs_95_purity, cs_70_purity, cs_50_purity.
+  csList <- c(
+    setNames(lapply(csIdxByCov, function(ix) paste0(methodTag, "_", ix)), csColNames),
+    setNames(csPurityByCov, paste0(csColNames, "_purity")))
+  csBlock <- if (length(csList) > 0L) {
+    as.data.frame(csList, stringsAsFactors = FALSE, check.names = FALSE)
+  } else data.frame(matrix(nrow = nV, ncol = 0))
+
+  # Per-CS variant-level (within_cs_pip + optional fullFit wide) block. Map each
+  # variant to the effect of its primary-coverage CS (position -> effect via the
+  # sets$cs names "L<k>"), then read the per-effect fit matrices.
+  primaryCsPos <- if (length(csIdxByCov) > 0L) csIdxByCov[[1L]] else integer(nV)
+  effectOfPrim <- integer(0)
+  if (length(covSorted) > 0L) {
+    hP <- which(abs(coverageValues - covSorted[1L]) < 1e-12)
+    if (length(hP) > 0L) {
+      spP <- csTables[[hP[1L]]]$sets$cs
+      if (!is.null(spP) && length(spP) > 0L)
+        effectOfPrim <- suppressWarnings(as.integer(sub("^L", "", names(spP))))
+    }
+  }
+  fullFitBlock <- .fullFitColumns(
+    alpha, mu, mu2, .asLbfMatrix(fit), fit$X_column_scale_factors,
+    primaryCsPos, effectOfPrim,
+    fullFit = fullFit, fullFitAlphaOnly = fullFitAlphaOnly,
+    includeAllCs = includeAllCs)
+  out <- cbind(
+    data.frame(
+      variant_id     = as.character(variantNames),
+      chrom          = parsed$chrom,
+      pos            = as.integer(parsed$pos),
+      A1             = parsed$A1,
+      A2             = parsed$A2,
+      N              = rep(fitN, nV),
+      af             = if (is.null(af)) rep(NA_real_, nV) else as.numeric(af),
+      marginal_beta  = marginalBeta,
+      marginal_se    = marginalSe,
+      marginal_z     = marginalZ,
+      marginal_p     = marginalP,
+      pip            = as.numeric(fit$pip),
+      posterior_mean = postMean,
+      posterior_sd   = postSd,
+      logBF          = logBF,
+      stringsAsFactors = FALSE),
+    csBlock,
+    fullFitBlock,
+    data.frame(
+      method         = rep(method, nV),
+      gene           = rep(fitGene, nV),
+      event          = rep(fitEvent, nV),
+      grange_start   = rep(grange[["start"]], nV),
+      grange_end     = rep(grange[["end"]],   nV),
+      stringsAsFactors = FALSE))
+  # Attach per-condition posterior quantities only for multi-condition fits, so
+  # the univariate top-loci schema is unchanged (kept long + numeric: one row
+  # per (variant, condition), never a semicolon-collapsed string).
+  if (!is.null(conditionIdx)) {
+    out$conditional_effect <- condEffect
+    out$lfsr               <- condLfsr
+  }
   if (!is.null(signalCutoff) && signalCutoff > 0) {
     keep <- !is.na(out$pip) & out$pip > signalCutoff
     out <- out[keep, , drop = FALSE]
@@ -760,10 +938,14 @@ buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
     pip            = numeric(),
     posterior_mean = numeric(),
     posterior_sd   = numeric(),
+    logBF          = numeric(),
     cs_95          = character(),
     cs_70          = character(),
     cs_50          = character(),
     cs_95_purity   = numeric(),
+    cs_70_purity   = numeric(),
+    cs_50_purity   = numeric(),
+    within_cs_pip  = numeric(),
     method         = character(),
     gene           = character(),
     event          = character(),
@@ -1863,7 +2045,8 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
                          secondaryCoverage, signalCutoff, minAbsCorr,
                          methodArgs, verbose, ctx, tid,
                          cvFolds = 0, cvThreads = 1, samplePartition = NULL,
-                         af = NULL) {
+                         af = NULL, fullFit = FALSE, fullFitAlphaOnly = TRUE,
+                         includeAllCs = FALSE) {
   chainLocal <- .fmResolveSusieChain(toRun, addSusieInf)
   infFit <- NULL
   if (chainLocal$runInf) {
@@ -1891,7 +2074,8 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
     out[[tk]] <- .fmPostprocessOne(
       fit = fit, method = tk, dataX = X, dataY = y, coverage = coverage,
       secondaryCoverage = secondaryCoverage, signalCutoff = signalCutoff,
-      minAbsCorr = minAbsCorr, af = af, csInput = "X")
+      minAbsCorr = minAbsCorr, af = af, csInput = "X", fullFit = fullFit,
+      fullFitAlphaOnly = fullFitAlphaOnly, includeAllCs = includeAllCs)
   }
   # Per-fold cross-validation across the fitted univariate methods; attach
   # each method's out-of-fold predictions to its entry.
@@ -1916,7 +2100,9 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
 # they push the returned entries (tuple shape) and the progress `label`.
 .fmFitRssBlock <- function(z, R, n, toRun, addSusieInf, coverage,
                            secondaryCoverage, signalCutoff, minAbsCorr,
-                           methodArgs, verbose, label, af = NULL) {
+                           methodArgs, verbose, label, af = NULL,
+                           fullFit = FALSE, fullFitAlphaOnly = TRUE,
+                           includeAllCs = FALSE) {
   chainLocal <- .fmResolveSusieChain(toRun, addSusieInf)
   infFit <- NULL
   if (chainLocal$runInf) {
@@ -1950,7 +2136,8 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
       fit = fit, method = "susieRss", dataX = R, dataY = list(z = z),
       coverage = coverage, secondaryCoverage = secondaryCoverage,
       signalCutoff = signalCutoff, minAbsCorr = minAbsCorr, af = af,
-      csInput = "Xcorr")
+      csInput = "Xcorr", fullFit = fullFit,
+      fullFitAlphaOnly = fullFitAlphaOnly, includeAllCs = includeAllCs)
   }
   out
 }

@@ -48,6 +48,9 @@ fineMappingPipeline(data, ...)
   naAction = c("drop", "impute"),
   verbose = 1,
   trim = TRUE,
+  fullFit = FALSE,
+  fullFitAlphaOnly = TRUE,
+  includeAllCs = FALSE,
   phenotypeCovariatesToResidualize = NULL,
   genotypeCovariatesToResidualize = NULL,
   residualizePhenotypeCovariates = TRUE,
@@ -81,6 +84,9 @@ fineMappingPipeline(data, ...)
   naAction = c("drop", "impute"),
   verbose = 1,
   trim = TRUE,
+  fullFit = FALSE,
+  fullFitAlphaOnly = TRUE,
+  includeAllCs = FALSE,
   phenotypeCovariatesToResidualize = NULL,
   genotypeCovariatesToResidualize = NULL,
   residualizePhenotypeCovariates = TRUE,
@@ -105,6 +111,9 @@ fineMappingPipeline(data, ...)
   dataDrivenPriorWeightsCutoff = 1e-10,
   verbose = 1,
   trim = TRUE,
+  fullFit = FALSE,
+  fullFitAlphaOnly = TRUE,
+  includeAllCs = FALSE,
   ...
 )
 
@@ -122,6 +131,9 @@ fineMappingPipeline(data, ...)
   fineMappingResult = NULL,
   verbose = 1,
   trim = TRUE,
+  fullFit = FALSE,
+  fullFitAlphaOnly = TRUE,
+  includeAllCs = FALSE,
   ...
 )
 
@@ -268,6 +280,26 @@ downstream pipelines). When \code{FALSE} the full untrimmed
 (\code{lbf_variable}, \code{mu}, \code{mu2}, \code{V}). The
 per-variant \code{topLoci} table is always fully populated
 regardless of \code{trim}.}
+
+\item{fullFit}{Logical (length 1, default \code{FALSE}). Master switch for
+per-credible-set variant-level export in \code{topLoci}. When \code{FALSE},
+only the always-on \code{within_cs_pip} scalar column is added (each
+variant's \code{alpha} in its assigned primary-coverage credible set; NA
+when not in a set). When \code{TRUE}, wide per-CS columns are added, one
+set of columns per credible set (labelled \code{cs<k>}).}
+
+\item{fullFitAlphaOnly}{Logical (length 1, default \code{TRUE}). No-op when
+\code{fullFit=FALSE}. When \code{TRUE}, only \code{alpha} is widened
+(\code{within_cs_pip_cs<k>}). When \code{FALSE}, all four per-effect
+matrices are widened: \code{within_cs_pip_cs<k>} (alpha),
+\code{cs_logbf_cs<k>} (lbf_variable), \code{cs_effect_cs<k>} (mu, unscaled)
+and \code{cs_effect_var_cs<k>} (posterior variance, unscaled).}
+
+\item{includeAllCs}{Logical (length 1, default \code{FALSE}). No-op when
+\code{fullFit=FALSE}. When \code{FALSE}, only effects that produced a
+passing (purity/coverage-filtered) credible set are widened. When
+\code{TRUE}, every effect \code{L} is widened (including filtered-out ones,
+labelled \code{L<k>} instead of \code{cs<k>}).}
 
 \item{phenotypeCovariatesToResidualize}{Character vector (or
 \code{NULL}) of phenotype-covariate names to residualize against.

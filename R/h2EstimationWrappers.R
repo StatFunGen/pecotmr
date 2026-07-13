@@ -319,64 +319,54 @@ standardizeTauStar <- function(tau, tauBlocks, sdAnnot, MRef, h2g) {
 # DerSimonian-Laird random-effects meta-analysis
 # =============================================================================
 
-#' @title Random-Effects Meta-Analysis (DerSimonian-Laird)
-#' @description Perform a DerSimonian-Laird random-effects meta-analysis
-#'   from a set of study-level point estimates and standard errors.
+#' @title Random-Effects Meta-Analysis (metafor wrapper)
+#' @description Thin convenience wrapper around \code{metafor::rma()}. pecotmr
+#'   does not implement its own meta-analysis engine -- this helper only guards
+#'   the degenerate 0- and 1-study cases (where \code{rma} is undefined) and
+#'   reshapes the \code{metafor} fit into a small list. The between-study
+#'   variance estimator is chosen by \code{method} and passed straight through.
 #' @param means Numeric vector of study-level point estimates.
 #' @param ses Numeric vector of study-level standard errors (must be
 #'   positive and finite).
-#' @return A list with:
-#'   \describe{
-#'     \item{mean}{Pooled meta-analytic mean.}
-#'     \item{se}{Standard error of the pooled mean.}
-#'     \item{tau2}{Estimated between-study variance.}
-#'     \item{I2}{Higgins I-squared heterogeneity statistic (proportion of
-#'       total variance due to between-study variance), in [0, 1].}
-#'     \item{Q}{Cochran's Q statistic for heterogeneity.}
-#'   }
-#' @keywords internal
-metaRandomEffects <- function(means, ses) {
+#' @param method Between-study variance estimator forwarded to
+#'   \code{metafor::rma(method = )} (e.g. \code{"DL"} (default), \code{"REML"},
+#'   \code{"ML"}, \code{"EB"}).
+#' @return A list with \code{mean}, \code{se}, \code{tau2}, \code{I2} (a [0, 1]
+#'   proportion) and \code{Q} (Cochran's Q).
+#' @importFrom metafor rma
+#' @noRd
+.rmaMeta <- function(means, ses, method = "DL") {
   k <- length(means)
   if (k != length(ses)) {
-    stop("metaRandomEffects: means and ses must have the same length.")
+    stop(".rmaMeta: means and ses must have the same length.")
   }
   if (k == 0L) {
     return(list(mean = NA_real_, se = NA_real_, tau2 = NA_real_,
                 I2 = NA_real_, Q = NA_real_))
   }
   if (k == 1L) {
-    return(list(mean = means[1], se = ses[1], tau2 = 0,
-                I2 = 0, Q = 0))
+    return(list(mean = means[1], se = ses[1], tau2 = 0, I2 = 0, Q = 0))
   }
   if (any(!is.finite(ses) | ses <= 0)) {
-    stop("metaRandomEffects: all ses must be positive and finite.")
+    stop(".rmaMeta: all ses must be positive and finite.")
   }
 
-  # Fixed-effect weights
-  wFe <- 1 / ses^2
-
-  # Fixed-effect pooled estimate
-  muFe <- sum(wFe * means) / sum(wFe)
-
-  # Cochran's Q
-  Q <- sum(wFe * (means - muFe)^2)
-
-  # DerSimonian-Laird tau-squared estimator
-  cDl <- sum(wFe) - sum(wFe^2) / sum(wFe)
-  tau2 <- max(0, (Q - (k - 1)) / cDl)
-
-  # Random-effects weights
-
-  wRe <- 1 / (ses^2 + tau2)
-
-  # Pooled random-effects estimate
-  muRe <- sum(wRe * means) / sum(wRe)
-  seRe <- sqrt(1 / sum(wRe))
-
-  # Higgins I-squared
-  I2 <- max(0, (Q - (k - 1)) / Q)
-
-  list(mean = muRe, se = seRe, tau2 = tau2, I2 = I2, Q = Q)
+  # Delegate the estimator to metafor::rma (metafor is a hard dependency).
+  # Iterative estimators (REML / ML / EB / ...) can fail to converge on small
+  # or near-homogeneous inputs; fall back to the closed-form DerSimonian-Laird
+  # (which never iterates) so callers get a valid random-effects fit instead of
+  # an error. metafor reports I-squared as a percentage; rescale to [0, 1].
+  fit <- tryCatch(
+    metafor::rma(yi = means, sei = ses, method = method),
+    error = function(e) {
+      if (identical(method, "DL")) stop(e)
+      warning(".rmaMeta: metafor::rma(method = '", method, "') failed (",
+              conditionMessage(e), "); falling back to DL.", call. = FALSE)
+      metafor::rma(yi = means, sei = ses, method = "DL")
+    })
+  list(mean = as.numeric(fit$b), se = as.numeric(fit$se),
+       tau2 = as.numeric(fit$tau2), I2 = as.numeric(fit$I2) / 100,
+       Q = as.numeric(fit$QE))
 }
 
 

@@ -511,8 +511,12 @@ if (!exists(".make_univariate_data", inherits = FALSE)) {
   "variant_id", "chrom", "pos", "A1", "A2",
   "N", "af",
   "marginal_beta", "marginal_se", "marginal_z", "marginal_p",
-  "pip", "posterior_mean", "posterior_sd",
-  "cs_95", "cs_70", "cs_50", "cs_95_purity",
+  "pip", "posterior_mean", "posterior_sd", "logBF",
+  # CS columns are derived from the coverages the pipeline produced; for the
+  # default coverages (0.95/0.70/0.50) memberships lead, then purities.
+  "cs_95", "cs_70", "cs_50", "cs_95_purity", "cs_70_purity", "cs_50_purity",
+  # per-CS variant-level default column (alpha in the assigned CS's effect)
+  "within_cs_pip",
   "method", "gene", "event", "grange_start", "grange_end"
 )
 
@@ -657,6 +661,103 @@ test_that("buildTopLoci: conditionIdx slices the 3-D mvsusie posterior per condi
   expect_true(all(is.na(tl0$posterior_mean)))
 })
 
+test_that("buildTopLoci stamps per-condition lfsr + conditional_effect for mvsusie (long + numeric)", {
+  L <- 2L; p <- 4L; R <- 2L
+  vids  <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A", "chr1:400:T:C")
+  alpha <- matrix(0.1, L, p); alpha[1, 1:2] <- c(0.6, 0.3)
+  mu    <- array(0.3, c(L, p, R)); mu2 <- array(1.2, c(L, p, R))
+  pip   <- c(0.6, 0.4, 0.05, 0.04)
+  coef  <- matrix(c(0.5, 0.4, 0.1, 0.05, 0.2, 0.1, 0.02, 0.01), p, R,
+                  dimnames = list(vids, c("c1", "c2")))
+  # conditional_lfsr is the raw-fit field name (trimmed fits rename it `clfsr`).
+  clfsr <- array(0.5, c(L, p, R))
+  clfsr[1, 1, 1] <- 0.001; clfsr[1, 2, 1] <- 0.02
+  clfsr[1, 1, 2] <- 0.30;  clfsr[1, 2, 2] <- 0.40
+  fit <- list(pip = pip, alpha = alpha, mu = mu, mu2 = mu2,
+              coef = coef, conditional_lfsr = clfsr, V = rep(1, L))
+  class(fit) <- c("mvsusie", "susie")
+  cst <- list(list(sets = list(cs = list(L1 = c(1L, 2L)),
+                               purity = data.frame(min.abs.corr = 0.9))),
+              list(sets = list(cs = list())),
+              list(sets = list(cs = list())))
+  attr(cst, "coverage") <- c(0.95, 0.70, 0.50)
+
+  tl1 <- buildTopLoci(fit, cst, variantNames = vids, method = "mvsusie", conditionIdx = 1L)
+  expect_true(all(c("conditional_effect", "lfsr") %in% names(tl1)))
+  expect_true(is.numeric(tl1$conditional_effect) && is.numeric(tl1$lfsr))
+  # conditional_effect = coef[, condition] / pip, for every variant
+  expect_equal(unname(tl1$conditional_effect), unname(coef[, 1] / pip))
+  # lfsr populated ONLY for the 0.95 CS variants, pulled from clfsr[L, variant, condition]
+  expect_equal(tl1$lfsr[1:2], c(0.001, 0.02))
+  expect_true(all(is.na(tl1$lfsr[3:4])))
+  # conditionIdx = 2 selects the other condition's coef + clfsr slice
+  tl2 <- buildTopLoci(fit, cst, variantNames = vids, method = "mvsusie", conditionIdx = 2L)
+  expect_equal(unname(tl2$conditional_effect), unname(coef[, 2] / pip))
+  expect_equal(tl2$lfsr[1:2], c(0.30, 0.40))
+  # univariate fit (no conditionIdx) keeps the base schema, no extra columns
+  tl0 <- buildTopLoci(fit, cst, variantNames = vids, method = "susie")
+  expect_false(any(c("conditional_effect", "lfsr") %in% names(tl0)))
+})
+
+test_that("getTopLoci surfaces mvsusie conditional_effect + lfsr through the projector", {
+  tl <- data.frame(
+    variant_id = c("chr1:100:A:G", "chr1:200:C:T"),
+    chrom = "1", pos = c(100L, 200L), A1 = c("A", "C"), A2 = c("G", "T"),
+    pip = c(0.6, 0.4), posterior_mean = c(0.1, 0.2), posterior_sd = c(0.05, 0.05),
+    cs_95 = c("mvsusie_1", "mvsusie_1"),
+    conditional_effect = c(0.3, -0.2), lfsr = c(0.001, 0.02),
+    stringsAsFactors = FALSE)
+  e <- FineMappingEntry(variantIds = tl$variant_id,
+                        susieFit = list(pip = tl$pip), topLoci = tl)
+  out <- getTopLoci(e, signalCutoff = 0)
+  expect_true(all(c("conditional_effect", "lfsr") %in% names(out)))
+  expect_equal(out$lfsr, c(0.001, 0.02))
+  expect_equal(out$conditional_effect, c(0.3, -0.2))
+})
+
+test_that("buildTopLoci derives CS columns from the ACTUAL coverages (no hardcoded 0.95/0.70/0.50)", {
+  vids  <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+  fit   <- list(alpha = matrix(c(0.7, 0.2, 0.1), 1, 3),
+                mu = matrix(0.3, 1, 3), mu2 = matrix(1.2, 1, 3),
+                pip = c(0.7, 0.2, 0.1))
+  class(fit) <- "susie"
+  mkCt <- function(cs, pu) list(sets = list(cs = cs, purity = data.frame(min.abs.corr = pu)))
+  # Non-default coverages must NOT be silently dropped or mislabeled as 0.95/0.70/0.50.
+  cst <- list(mkCt(list(L1 = c(1L, 2L)), 0.85), mkCt(list(), numeric()))
+  attr(cst, "coverage") <- c(0.9, 0.8)
+  tl <- buildTopLoci(fit, cst, variantNames = vids, method = "susie")
+  expect_true(all(c("cs_90", "cs_80", "cs_90_purity", "cs_80_purity") %in% names(tl)))
+  expect_false(any(c("cs_95", "cs_70", "cs_50") %in% names(tl)))
+  expect_equal(tl$cs_90, c("susie_1", "susie_1", "susie_0"))
+  expect_equal(tl$cs_90_purity, c(0.85, 0.85, 0))
+  # Default coverages still yield cs_95/70/50 plus a purity column per coverage.
+  cst2 <- list(mkCt(list(L1 = c(1L, 2L)), 0.9),
+               mkCt(list(), numeric()), mkCt(list(), numeric()))
+  attr(cst2, "coverage") <- c(0.95, 0.70, 0.50)
+  tl2 <- buildTopLoci(fit, cst2, variantNames = vids, method = "susie")
+  expect_true(all(c("cs_95", "cs_70", "cs_50",
+                    "cs_95_purity", "cs_70_purity", "cs_50_purity") %in% names(tl2)))
+})
+
+test_that("buildTopLoci stamps per-variant logBF (max single-effect lbf; replaces log10_base_factor)", {
+  vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+  lbf  <- matrix(c(2.0, 0.1, -1.0,
+                   0.5, 3.0,  0.2), nrow = 2, byrow = TRUE)   # L=2 effects x p=3
+  fit  <- list(alpha = matrix(c(0.7, 0.2, 0.1, 0.3, 0.4, 0.3), 2, 3),
+               mu = matrix(0.3, 2, 3), mu2 = matrix(1.2, 2, 3),
+               pip = c(0.7, 0.5, 0.3), lbf_variable = lbf)
+  class(fit) <- "susie"
+  cst <- list(list(sets = list(cs = list())), list(sets = list(cs = list())),
+              list(sets = list(cs = list())))
+  attr(cst, "coverage") <- c(0.95, 0.70, 0.50)
+  tl <- buildTopLoci(fit, cst, variantNames = vids, method = "susie")
+  expect_true("logBF" %in% names(tl))
+  expect_equal(tl$logBF, apply(lbf, 2, max))   # c(2.0, 3.0, 0.2)
+  # surfaced through getTopLoci's projection too
+  e <- FineMappingEntry(variantIds = vids, susieFit = fit, topLoci = tl)
+  expect_true("logBF" %in% names(getTopLoci(e, signalCutoff = 0)))
+})
+
 test_that("buildTopLoci emits 22 columns in the fixed order on a non-empty fit", {
   variant_ids <- c("chr1:100:A:G", "chr1:200:C:T")
   inp <- .fake_fit_and_cs(variant_ids,
@@ -678,6 +779,81 @@ test_that("buildTopLoci emits 22 columns in the fixed order on a non-empty fit",
   expect_equal(unique(out$grange_end),   14348298L)
   expect_equal(unique(out$N), 419L)
   expect_equal(unique(out$method), "susie")
+})
+
+test_that("buildTopLoci fullFit: within_cs_pip default + wide per-CS matrices", {
+  vn <- paste0("chr1:", (1:5) * 100, ":A:G"); L <- 2L; P <- 5L
+  alpha <- matrix(0.1, L, P); alpha[1, 1:2] <- c(0.5, 0.4); alpha[2, 3:4] <- c(0.5, 0.4)
+  lbf <- matrix(c(3, 2.5, 0.1, 0.1, 0,  0.1, 0.1, 2, 1.8, 0), L, P, byrow = TRUE)
+  # NON-UNIT, per-variant scale factors so the mu/scale (and mu2/scale^2)
+  # UNSCALING is actually exercised — rep(1, P) would let a multiply-vs-divide
+  # or per-variant misalignment bug pass silently.
+  scale <- c(2, 4, 0.5, 1, 5)
+  fit <- list(alpha = alpha, mu = matrix(0.3, L, P), mu2 = matrix(1.2, L, P),
+              pip = c(0.6, 0.5, 0.4, 0.4, 0.02), V = c(0.8, 0.5), lbf_variable = lbf,
+              X_column_scale_factors = scale,
+              sets = list(purity = data.frame(min.abs.corr = c(0.9, 0.3),
+                mean.abs.corr = c(0.95, 0.4), row.names = c("L1", "L2"))))
+  class(fit) <- "susie"
+  cst <- list(list(sets = list(cs = list(L1 = c(1L, 2L), L2 = c(3L, 4L)),
+                               purity = data.frame(min.abs.corr = c(0.9, 0.3)))),
+              list(sets = list(cs = list())), list(sets = list(cs = list())))
+  attr(cst, "coverage") <- c(0.95, 0.7, 0.5)
+
+  # Default: within_cs_pip = alpha in the assigned CS's effect (NA for non-CS row 5).
+  tl0 <- buildTopLoci(fit, cst, variantNames = vn, method = "susie")
+  expect_true("within_cs_pip" %in% names(tl0))
+  expect_false(any(grepl("_cs[0-9]", names(tl0))))
+  expect_equal(tl0$within_cs_pip, c(0.5, 0.4, 0.5, 0.4, NA_real_))
+
+  # fullFit + all matrices: wide per-CS alpha / lbf / effect / effect-variance.
+  tl1 <- buildTopLoci(fit, cst, variantNames = vn, method = "susie",
+                      fullFit = TRUE, fullFitAlphaOnly = FALSE)
+  expect_equal(tl1$within_cs_pip_cs1, alpha[1, ])
+  expect_equal(tl1$cs_logbf_cs1, lbf[1, ])
+  expect_equal(tl1$cs_effect_cs1, 0.3 / scale)                 # mu / scale
+  expect_equal(tl1$cs_effect_var_cs1, (1.2 - 0.09) / scale^2)  # (mu2 - mu^2) / scale^2
+
+  # fullFitAlphaOnly (default TRUE): only alpha widened, both passing CS.
+  tl2 <- buildTopLoci(fit, cst, variantNames = vn, method = "susie", fullFit = TRUE)
+  expect_false(any(grepl("^cs_logbf_|^cs_effect_", names(tl2))))
+  expect_setequal(grep("^within_cs_pip_", names(tl2), value = TRUE),
+                  c("within_cs_pip_cs1", "within_cs_pip_cs2"))
+})
+
+test_that("buildTopLoci fullFit on the committed qtl_finemapping_example (real CS)", {
+  # A genuine chr22 SuSiE fit shipped as a package dataset: region_1/context_1
+  # carries a real 42-variant credible set. Exercises within_cs_pip + the
+  # alpha-wide column on REAL data (the synthetic case above pins the exact
+  # arithmetic; this pins that it flows on a real fit). The dataset fit is
+  # trimmed to alpha/pip/V/sets, so requesting the full matrices must degrade
+  # gracefully rather than error.
+  e <- new.env()
+  data("qtl_finemapping_example", package = "pecotmr", envir = e)
+  fit <- e$qtl_finemapping_example$region_1$context_1$susie_result_trimmed
+  vn  <- colnames(fit$alpha)
+  member <- fit$sets$cs$L1                       # 42 real CS member indices
+  expect_gt(length(member), 1L)
+
+  csTables <- list(list(sets = fit$sets, cs_corr = fit$cs_corr, pip = fit$pip))
+  names(csTables) <- formatCsColumn(0.95, method = "susie")
+  attr(csTables, "coverage") <- 0.95
+
+  tl <- as.data.frame(buildTopLoci(fit, csTables, variantNames = vn,
+    method = "susie", signalCutoff = 0, fullFit = TRUE, fullFitAlphaOnly = TRUE))
+  # within_cs_pip is populated for exactly the CS members, = their L1 alpha.
+  expect_equal(sum(!is.na(tl$within_cs_pip)), length(member))
+  expect_equal(tl$within_cs_pip[match(vn[member], tl$variant_id)],
+               as.numeric(fit$alpha[1, member]))
+  # alpha-wide column carries the full effect-1 posterior inclusion vector.
+  expect_equal(tl$within_cs_pip_cs1, as.numeric(fit$alpha[1, ]))
+
+  # Trimmed fit (no mu / mu2 / lbf_variable): full-matrix request is a no-op for
+  # the effect columns, not an error.
+  tlF <- as.data.frame(buildTopLoci(fit, csTables, variantNames = vn,
+    method = "susie", signalCutoff = 0, fullFit = TRUE, fullFitAlphaOnly = FALSE))
+  expect_false(any(grepl("^cs_logbf_|^cs_effect_", names(tlF))))
+  expect_true("within_cs_pip_cs1" %in% names(tlF))
 })
 
 test_that("buildTopLoci exports af (not MAF) and carries the supplied af values", {
@@ -1801,6 +1977,20 @@ test_that("fsusieWeights returns a variants x features matrix with variant rowna
   expect_equal(nrow(W), ncol(obj$X))
   expect_equal(ncol(W), ncol(obj$Y))
   expect_equal(rownames(W), colnames(obj$X))
+})
+
+test_that("computeCsTable (fsusie) stamps WITHIN-CS purity via cal_purity, not cal_cor_cs (regression)", {
+  skip_if_not_installed("fsusieR"); skip_if_not_installed("wavethresh")
+  obj <- .fw_makeFsusieFit()
+  ct  <- computeCsTable(obj$fit, obj$X, coverage = 0.95, csInput = "fsusie")
+  # purity is stamped as min.abs.corr (the susieR-path shape .csPurityVec reads)
+  expect_true(!is.null(ct$sets$purity) && "min.abs.corr" %in% names(ct$sets$purity))
+  calP <- as.numeric(unlist(fsusieR:::cal_purity(ct$sets$cs, obj$X)))
+  pv   <- .csPurityVec(ct)
+  # exactly one purity per CS (bug: previously iterated the fit's ~36 slots), and
+  # equal to fsusieR's own cal_purity (min |corr| within each CS)
+  expect_equal(length(pv), length(ct$sets$cs))
+  expect_equal(pv, calP, tolerance = 1e-6)
 })
 
 test_that("fsusieWeights matches fsusieR's own out_prep reconstruction (post_processing='none')", {

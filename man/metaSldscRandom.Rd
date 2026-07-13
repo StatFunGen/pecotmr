@@ -22,8 +22,9 @@ metaSldscRandom(
 List with `mean`, `se`, `p`, `nTraits`, `traitsUsed`, `tau2`.
 }
 \description{
-DerSimonian-Laird random-effects meta-analysis of one S-LDSC
-  quantity for one annotation across multiple traits.
+Random-effects meta-analysis (DerSimonian-Laird, via
+  \code{metafor::rma}) of one S-LDSC quantity for one annotation across
+  multiple traits.
 }
 \details{
 Per-trait \eqn{SE_i} sources:

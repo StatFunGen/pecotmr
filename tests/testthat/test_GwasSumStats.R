@@ -245,3 +245,17 @@ test_that("getSumStats() on a multi-study GwasSumStats needs a study selector", 
   expect_error(getSumStats(two, study = "ghost"), "Unknown study")
 })
 
+test_that("GwasSumStats: ldSketch is optional (NULL for LD-free workflows)", {
+  ss <- GwasSumStats(study = "g1", entry = list(.sh_makeQtlSumstatsGr()),
+                     genome = "hg19")   # ldSketch omitted -> NULL
+  expect_null(getLdSketch(ss))
+  expect_output(show(ss), "none \\(LD-free\\)")
+})
+
+test_that("GwasSumStats: a non-GenotypeHandle ldSketch is rejected", {
+  expect_error(
+    GwasSumStats(study = "g1", entry = list(.sh_makeQtlSumstatsGr()),
+                 genome = "hg19", ldSketch = "not_a_handle"),
+    "GenotypeHandle or NULL")
+})
+

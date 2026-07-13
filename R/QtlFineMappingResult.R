@@ -34,6 +34,7 @@ setClass("QtlFineMappingResult",
         errors <- c(errors,
           "every element of the `entry` column must be a FineMappingEntry")
       errors <- c(errors, .validateRegionColumn(object))
+      errors <- c(errors, .validateTraitPosColumn(object))
       jointCols <- intersect(
         c("jointStudies", "jointContexts", "jointTraits"), names(object))
       for (jc in jointCols) {
@@ -110,6 +111,7 @@ QtlFineMappingResult <- function(study, context, trait, method, entry,
                                  jointContexts = NULL,
                                  jointTraits = NULL,
                                  region = NULL,
+                                 traitPos = NULL,
                                  ldSketch = NULL) {
   n <- length(study)
   if (length(context) != n || length(trait) != n || length(method) != n ||
@@ -134,6 +136,7 @@ QtlFineMappingResult <- function(study, context, trait, method, entry,
     cols[[pair[[2L]]]] <- as.character(val)
   }
   cols <- .appendRegionCol(cols, region, n)
+  cols <- .appendTraitPosCol(cols, traitPos, n)
   df <- do.call(S4Vectors::DataFrame,
                 c(cols, list(check.names = FALSE)))
   obj <- new("QtlFineMappingResult", df, ldSketch = ldSketch)

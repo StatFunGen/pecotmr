@@ -120,6 +120,28 @@ test_that("writeSumstatsVcf writes FineMappingResult to uncompressed VCF", {
   expect_gt(file.info(out)$size, 0)
 })
 
+test_that("writeSumstatsVcf(FineMappingResult): emits PIP + CS posterior FORMAT fields", {
+  skip_if_not_installed("VariantAnnotation")
+  skip_if_not_installed("Biostrings")
+
+  fm <- make_test_finemapping_result(5)
+  out <- tempfile(fileext = ".vcf")
+  on.exit(unlink(out), add = TRUE)
+  writeSumstatsVcf(fm, out)
+  ln <- readLines(out)
+  # The posterior fields the legacy create_vcf carried must be present. The CS
+  # field is DYNAMIC (CS<coverage>) -- the fixture carries cs_95 -> CS95.
+  expect_true(any(grepl("ID=PIP,", ln, fixed = TRUE)))
+  expect_true(any(grepl("ID=CS95,", ln, fixed = TRUE)))
+  data1 <- ln[!grepl("^#", ln)][[1L]]
+  fmtKeys <- strsplit(strsplit(data1, "\t")[[1L]][[9L]], ":")[[1L]]
+  expect_true("PIP" %in% fmtKeys)
+  expect_true("CS95" %in% fmtKeys)
+  # cs_95 "susie_<k>" -> integer CS index; fixture row 1 is in CS 1.
+  vals <- strsplit(strsplit(data1, "\t")[[1L]][[10L]], ":")[[1L]]
+  expect_equal(vals[[which(fmtKeys == "CS95")]], "1")
+})
+
 # =============================================================================
 # FineMappingResult to BCF
 # =============================================================================
@@ -454,4 +476,48 @@ test_that("writeSumstatsVcf(FineMappingResult): emits AF from the topLoci `af` c
   writeSumstatsVcf(fm, out)
   expect_true(file.exists(out))
   expect_true(any(grepl("ID=AF", readLines(out))))
+})
+
+test_that("writeSumstatsVcf(FineMappingResult): emits LBF / LFSR / PUR / fullFit FORMAT fields", {
+  skip_if_not_installed("VariantAnnotation")
+  skip_if_not_installed("Biostrings")
+  # A rich topLoci exercises every posterior FORMAT field: per-variant logBF (LBF),
+  # local false sign rate (LFSR), per-CS purity (PUR<cov>), and the wide fullFit
+  # columns (within_cs_pip / cs_logbf_<lab> / cs_effect_<lab>).
+  n <- 3
+  tl <- data.frame(
+    variant_id = paste0("chr1:", c(100, 200, 300), ":T:A"), chrom = rep("1", n),
+    pos = c(100L, 200L, 300L), A1 = rep("A", n), A2 = rep("T", n), N = rep(1000, n),
+    marginal_beta = c(0.3, -0.2, 0.1), marginal_se = rep(0.05, n),
+    marginal_z = c(6, -4, 2), marginal_p = c(1e-9, 6e-5, 0.045),
+    pip = c(0.9, 0.7, 0.5), posterior_mean = rep(0.05, n), posterior_sd = rep(0.02, n),
+    logBF = c(3.1, 1.2, 0.4), lfsr = c(0.01, 0.2, 0.4),
+    cs_95 = paste0("susie_", c(1L, 0L, 2L)), cs_95_purity = c(0.95, 0, 0.88),
+    within_cs_pip = c(0.6, 0, 0.5), cs_logbf_susie_1 = c(2.2, NA, NA),
+    cs_effect_susie_1 = c(0.4, NA, NA),
+    stringsAsFactors = FALSE)
+  entry <- FineMappingEntry(variantIds = tl$variant_id, susieFit = list(), topLoci = tl)
+  fm <- GwasFineMappingResult(study = "s", method = "susie", entry = list(entry))
+  out <- tempfile(fileext = ".vcf")
+  on.exit(unlink(out), add = TRUE)
+  writeSumstatsVcf(fm, out)
+  ln <- readLines(out)
+  for (id in c("ID=LBF", "ID=LFSR", "ID=PUR95", "ID=WITHIN_CS_PIP",
+               "ID=CS_LOGBF_SUSIE_1", "ID=CS_EFFECT_SUSIE_1"))
+    expect_true(any(grepl(id, ln, fixed = TRUE)), info = id)
+})
+
+test_that("writeSumstatsVcf(FineMappingResult): falls back to marginal sumstats when no posterior", {
+  skip_if_not_installed("VariantAnnotation")
+  skip_if_not_installed("Biostrings")
+  fm <- make_test_finemapping_result(5)
+  # Simulate an entry whose posterior table is unavailable (empty getTopLoci) so
+  # the marginal univariate sumstats alone drive the VCF body (the else-if branch).
+  testthat::local_mocked_bindings(
+    getTopLoci = function(x, ...) data.frame(), .package = "pecotmr")
+  out <- tempfile(fileext = ".vcf")
+  on.exit(unlink(out), add = TRUE)
+  writeSumstatsVcf(fm, out)
+  expect_true(file.exists(out))
+  expect_true(any(grepl("ID=ES", readLines(out), fixed = TRUE)))   # marginal beta -> ES
 })

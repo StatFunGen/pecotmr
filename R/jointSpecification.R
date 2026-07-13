@@ -861,14 +861,22 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     list(ldSketch = NULL)))
 }
 
-# The three optional joint-key columns (jointStudies / jointContexts /
-# jointTraits) of a per-tuple result row, as a named list (NULL for any absent
-# column). Spliced into the QtlFineMappingResult / TwasWeights constructors.
+# The optional passthrough columns of a per-tuple result row, as a named list
+# (NULL for any absent column): the three joint-key columns (jointStudies /
+# jointContexts / jointTraits) plus the GRanges provenance columns (region /
+# traitPos). Spliced into the QtlFineMappingResult / TwasWeights constructors so
+# by-key / cross-study rebuilds preserve them.
 .jointCols <- function(df) {
-  pick <- function(nm) if (nm %in% names(df)) as.character(df[[nm]]) else NULL
+  pick    <- function(nm) if (nm %in% names(df)) as.character(df[[nm]]) else NULL
+  # region / traitPos are GRanges provenance columns: carry them through
+  # uncoerced so by-key / cross-study rebuilds keep the fine-mapping window and
+  # trait position instead of silently dropping them.
+  pickCol <- function(nm) if (nm %in% names(df)) df[[nm]] else NULL
   list(jointStudies  = pick("jointStudies"),
        jointContexts = pick("jointContexts"),
-       jointTraits   = pick("jointTraits"))
+       jointTraits   = pick("jointTraits"),
+       region        = pickCol("region"),
+       traitPos      = pickCol("traitPos"))
 }
 
 # Shared tail of the MultiStudyQtlDataset fineMapping / twasWeights pipeline
@@ -951,7 +959,10 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                              cvFolds = 0, cvThreads = 1,
                                              samplePartition = NULL,
                                              pipCutoffToSkip = 0,
-                                             fineMappingResult = NULL) {
+                                             fineMappingResult = NULL,
+                                             fullFit = FALSE,
+                                             fullFitAlphaOnly = TRUE,
+                                             includeAllCs = FALSE) {
   # Run the joint dispatch once per region block, then merge per
   # (study, context, trait, method) across regions. A single block (cis or
   # jointRegions=TRUE concatenated) returns its result directly.
@@ -964,7 +975,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
       dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
       cvFolds = cvFolds, cvThreads = cvThreads, samplePartition = samplePartition,
       pipCutoffToSkip = pipCutoffToSkip,
-      fineMappingResult = fineMappingResult)
+      fineMappingResult = fineMappingResult,
+      fullFit = fullFit, fullFitAlphaOnly = fullFitAlphaOnly,
+      includeAllCs = includeAllCs)
   })
   perRegion <- Filter(Negate(is.null), perRegion)
   if (length(perRegion) == 0L) return(NULL)
@@ -985,7 +998,10 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                              cvFolds = 0, cvThreads = 1,
                                              samplePartition = NULL,
                                              pipCutoffToSkip = 0,
-                                             fineMappingResult = NULL) {
+                                             fineMappingResult = NULL,
+                                             fullFit = FALSE,
+                                             fullFitAlphaOnly = TRUE,
+                                             includeAllCs = FALSE) {
   # Engine routing (jointEngine.R); one region block (the caller loops regions).
   .jointRejectStudyOnIndividual(parsedJointSpec)
   pipeline <- new("FmJointPipeline", config = list(
@@ -993,7 +1009,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
     dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
     cvFolds = cvFolds, cvThreads = cvThreads, samplePartition = samplePartition,
-    verbose = verbose, ldSketch = NULL))
+    verbose = verbose, ldSketch = NULL,
+    fullFit = fullFit, fullFitAlphaOnly = fullFitAlphaOnly,
+    includeAllCs = includeAllCs))
   .runJointSpecs(parsedJointSpec, data, dataForm = "individual", pipeline = pipeline,
                  jointMethods = intersect(methods, c("mvsusie", "fsusie")),
                  contexts = contexts, traitIds = traitIds,
@@ -1016,7 +1034,10 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                                               methodArgs = list(),
                                               twasWeights = NULL,
                                               dataDrivenPriorWeightsCutoff = 1e-10,
-                                              fineMappingResult = NULL) {
+                                              fineMappingResult = NULL,
+                                              fullFit = FALSE,
+                                              fullFitAlphaOnly = TRUE,
+                                              includeAllCs = FALSE) {
   # Engine routing (jointEngine.R): the marker carries the fine-mapping config
   # and result type; the dispatch table + .runJointCell replace the per-axis
   # switch + the cross-context/trait/study/composed leaf dispatchers. RSS has no
@@ -1025,7 +1046,9 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     coverage = coverage, secondaryCoverage = secondaryCoverage,
     signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
     dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
-    cvFolds = 0L, verbose = verbose, ldSketch = getLdSketch(data)))
+    cvFolds = 0L, verbose = verbose, ldSketch = getLdSketch(data),
+    fullFit = fullFit, fullFitAlphaOnly = fullFitAlphaOnly,
+    includeAllCs = includeAllCs))
   .runJointSpecs(parsedJointSpec, data, dataForm = "sumstats", pipeline = pipeline,
                  jointMethods = intersect(methods, c("mvsusie", "fsusie")),
                  contexts = contexts, traitIds = traitIds,
@@ -1128,10 +1151,14 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     keep <- !vapply(perRegion, is.null, logical(1))
     .twasMergeRegionEntries(perRegion[keep], regionLabels[keep])
   })
-  TwasWeights(
-    study = as.character(base$study), context = as.character(base$context),
-    trait = as.character(base$trait), method = as.character(base$method),
-    entry = mergedEntries)
+  # Passthrough columns (joint keys + region + traitPos) are per-row properties
+  # of `base`, which aligns row-for-row with mergedEntries; splice them so a
+  # multi-region merge preserves provenance instead of dropping it.
+  do.call(TwasWeights, c(
+    list(study = as.character(base$study), context = as.character(base$context),
+         trait = as.character(base$trait), method = as.character(base$method),
+         entry = mergedEntries),
+    .jointCols(base)))
 }
 
 .twasDispatchJointSpecsQtlDataset <- function(parsedJointSpec, data,

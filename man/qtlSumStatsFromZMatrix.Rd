@@ -7,7 +7,7 @@
 qtlSumStatsFromZMatrix(
   z,
   study,
-  ldSketch,
+  ldSketch = NULL,
   context = colnames(z),
   trait = "mash",
   genome = "GRCh38",
@@ -24,7 +24,9 @@ conditions.}
 
 \item{study}{Study identifier (recycled across conditions).}
 
-\item{ldSketch}{A \code{\link{GenotypeHandle}} embedded in the collection.}
+\item{ldSketch}{A \code{\link{GenotypeHandle}} embedded in the collection, or
+\code{NULL} (default) -- mash operates across conditions per variant and
+needs no LD reference.}
 
 \item{context}{Condition context label(s): a single value recycled across
 every column, or a length-\code{ncol(z)} vector (one per condition).

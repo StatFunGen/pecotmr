@@ -177,13 +177,22 @@ test_that("twasWeightsPipeline(QtlDataset): runs end-to-end with mocked solvers"
   expect_equal(nrow(res), 4L)
   expect_setequal(getMethodNames(res), c("lasso", "enet"))
   expect_setequal(getTraits(res), c("ENSG_A", "ENSG_B"))
-  # region provenance is populated from each trait's rowRanges and aligned per
-  # row (.tp_makeSe: ENSG_A -> chr1:1000-1499, ENSG_B -> chr1:2000-2499).
-  reg <- getRegion(res)
-  expect_s4_class(reg, "GRanges")
-  expect_equal(length(reg), 4L)
-  expect_true(all(GenomicRanges::start(reg)[res$trait == "ENSG_A"] == 1000L))
-  expect_true(all(GenomicRanges::start(reg)[res$trait == "ENSG_B"] == 2000L))
+  # Provenance, aligned per row (.tp_makeSe: ENSG_A -> chr1:1000-1499,
+  # ENSG_B -> chr1:2000-2499). traitPos = the bare trait position (no
+  # cis-window); region = that position expanded by cisWindow (1000), start
+  # clamped at 1.
+  reg <- getRegion(res); tp <- getTraitPosition(res)
+  expect_s4_class(reg, "GRanges"); expect_s4_class(tp, "GRanges")
+  expect_equal(length(reg), 4L);  expect_equal(length(tp), 4L)
+  # traitPos: the trait's own coordinates.
+  expect_true(all(GenomicRanges::start(tp)[res$trait == "ENSG_A"] == 1000L))
+  expect_true(all(GenomicRanges::end(tp)[res$trait == "ENSG_A"]   == 1499L))
+  expect_true(all(GenomicRanges::start(tp)[res$trait == "ENSG_B"] == 2000L))
+  # region: traitPos +/- cisWindow.
+  expect_true(all(GenomicRanges::start(reg)[res$trait == "ENSG_A"] == 1L))    # 1000-1000 -> clamp
+  expect_true(all(GenomicRanges::end(reg)[res$trait == "ENSG_A"]   == 2499L)) # 1499+1000
+  expect_true(all(GenomicRanges::start(reg)[res$trait == "ENSG_B"] == 1000L)) # 2000-1000
+  expect_true(all(GenomicRanges::end(reg)[res$trait == "ENSG_B"]   == 3499L)) # 2499+1000
 })
 
 test_that("twasWeightsPipeline(QtlDataset): mafCutoff/xvarCutoff overrides tighten the variant set", {
