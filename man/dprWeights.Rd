@@ -30,7 +30,7 @@ A numeric vector of length `ncol(X)` of variant weights.
 \description{
 Fits a Dirichlet Process Regression model via `RcppDPR::fit_model` and
 returns the per-variant weights, computed as `beta + alpha` (matching
-`RcppDPR:::predict.DPR_Model`, which uses `(beta + alpha) %*% x_new + pheno_mean`).
+RcppDPR's internal `predict.DPR_Model`, which uses `(beta + alpha) %*% x_new + pheno_mean`).
 }
 \details{
 By default the variational Bayes (`VB`) fitting method is used, which is

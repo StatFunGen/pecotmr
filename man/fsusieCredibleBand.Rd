@@ -25,7 +25,7 @@ A long \code{data.frame}: \code{cs, chrom, pos, effect, lower, upper}
 For a functional-SuSiE (\code{fsusieR::susiF}) fine-mapping entry, returns the
 fitted effect curve and its credible band over the functional grid, one row
 per (credible set, grid position). Wraps the upstream fSuSiE band computation
-(\code{fsusieR:::update_cal_credible_band.susiF} + \code{get_fitted_effect}).
+(fsusieR's internal \code{update_cal_credible_band.susiF} + \code{get_fitted_effect}).
 Requires an UNtrimmed fit (the wavelet slots are dropped by trimming);
 degrades to zero rows for non-fSuSiE or trimmed fits.
 }
