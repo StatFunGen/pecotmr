@@ -1271,7 +1271,7 @@ test_that("estCtwasParam: fallbackToPrefit recovers from accurate-EM NaN diverge
     get_boundary_genes   = function(...) data.frame(id = "t1", n_regions = 2L),
     compute_gene_z = function(...) data.frame(id = "t1", z = 1.0),
     est_param = function(...) stop("Estimated group_prior_var contains NAs!"),
-    # ctwas:::fit_EM is internal — mock via the same `ctwas` namespace.
+    # fit_EM is internal to ctwas — mock via the same `ctwas` namespace.
     fit_EM = function(region_data, ...) list(
       group_prior     = c(g = 0.05, SNP = 1e-4),
       group_prior_var = c(g = 4.0, SNP = 5.0),

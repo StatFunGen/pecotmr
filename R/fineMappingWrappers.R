@@ -509,7 +509,7 @@ computeCsTable <- function(fit, dataX, coverage, csInput = c("X", "Xcorr", "fsus
       # wrong quantity for purity.) Stamp it as sets$purity$min.abs.corr so the
       # canonical .csPurityVec() reads it directly (the susieR path shape).
       purity <- tryCatch(
-        as.numeric(unlist(fsusieR:::cal_purity(sets$cs, dataX))),
+        as.numeric(unlist(fsusieR::cal_purity(sets$cs, dataX))),
         error = function(e) NULL)
       if (!is.null(purity) && length(purity) == length(sets$cs)) {
         sets$purity <- data.frame(min.abs.corr = purity)

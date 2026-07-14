@@ -1985,7 +1985,7 @@ test_that("computeCsTable (fsusie) stamps WITHIN-CS purity via cal_purity, not c
   ct  <- computeCsTable(obj$fit, obj$X, coverage = 0.95, csInput = "fsusie")
   # purity is stamped as min.abs.corr (the susieR-path shape .csPurityVec reads)
   expect_true(!is.null(ct$sets$purity) && "min.abs.corr" %in% names(ct$sets$purity))
-  calP <- as.numeric(unlist(fsusieR:::cal_purity(ct$sets$cs, obj$X)))
+  calP <- as.numeric(unlist(fsusieR::cal_purity(ct$sets$cs, obj$X)))
   pv   <- .csPurityVec(ct)
   # exactly one purity per CS (bug: previously iterated the fit's ~36 slots), and
   # equal to fsusieR's own cal_purity (min |corr| within each CS)

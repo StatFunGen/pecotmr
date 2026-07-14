@@ -1543,7 +1543,7 @@ bLassoWeights <- function(X, y, nIter = 10000, burnIn = 2000, thin = 5, ...) {
 #'
 #' Fits a Dirichlet Process Regression model via `RcppDPR::fit_model` and
 #' returns the per-variant weights, computed as `beta + alpha` (matching
-#' `RcppDPR:::predict.DPR_Model`, which uses `(beta + alpha) %*% x_new + pheno_mean`).
+#' RcppDPR's internal `predict.DPR_Model`, which uses `(beta + alpha) %*% x_new + pheno_mean`).
 #'
 #' By default the variational Bayes (`VB`) fitting method is used, which is
 #' fast and deterministic. The user may switch to `Gibbs` or `Adaptive_Gibbs`

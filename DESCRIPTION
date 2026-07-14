@@ -50,6 +50,7 @@ Suggests:
     bigstatsr,
     coda,
     CorShrink,
+    ctwas,
     flashier,
     fsusieR,
     GBJ,
@@ -59,7 +60,6 @@ Suggests:
     igraph,
     knitr,
     L0Learn,
-    lassosum,
     mashr,
     mr.mashr,
     mvsusieR,
@@ -81,9 +81,12 @@ Suggests:
     udr,
     VariantAnnotation
 Remotes:
+    kkdey/CorShrink,
     stephenslab/fsusieR,
     stephenslab/mvsusieR,
     stephenslab/susieR,
+    stephenslab/udr,
+    xinhe-lab/multigroup_ctwas,
 LinkingTo:
     cpp11,
     cpp11armadillo

@@ -2,7 +2,6 @@ src/*.o
 src/*.gcda
 src/*.so
 src/*.dylib
-src/Makevars
 **/.ipynb_checkpoints
 .Rproj.user
 **/.DS_Store

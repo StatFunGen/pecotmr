@@ -384,7 +384,7 @@ assembleCtwasInputs <- function(gwasSumStats, twasWeights,
 #' @param fallbackToPrefit Logical (length 1). When \code{TRUE} (default
 #'   \code{FALSE}), if \code{ctwas::est_param}'s accurate EM fails for ANY
 #'   reason on a degenerate input, re-run only the prefit step via
-#'   \code{ctwas:::fit_EM} and return those (typically finite) priors as the
+#'   ctwas's internal \code{fit_EM} and return those (typically finite) priors as the
 #'   param. The accurate-EM failure mode is version-dependent (ctwas <= 0.4.x:
 #'   \code{"contains NAs"}; ctwas >= 0.6.0: \code{"No regions selected!"} or a
 #'   NaN-loglik \code{"missing value where TRUE/FALSE needed"}), so the catch is
@@ -738,7 +738,7 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
 # param list shaped like ctwas::est_param normally produces. Used as
 # the fallback path when est_param's accurate EM diverges to NaN on
 # toy / underpowered data (matches the legacy ctwas_2 workaround).
-# Calls ctwas's internal `fit_EM` (via ::: getFromNamespace) with
+# Calls ctwas's internal `fit_EM` (via getFromNamespace) with
 # niter = niter_prefit, then applies the same thin-adjustment to the
 # SNP group_prior that est_param applies. p_single_effect is left as
 # NA since the accurate EM never ran.

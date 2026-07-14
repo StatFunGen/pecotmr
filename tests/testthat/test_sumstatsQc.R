@@ -2328,7 +2328,7 @@ test_that("realistic LD: no outliers when z perfectly matches LD structure", {
 })
 
 # ============================================================================
-# Internal function access (resolveLdInput via :::)
+# Internal function access (resolveLdInput, pecotmr internal)
 # ============================================================================
 
 test_that("resolveLdInput returns R when R is provided", {
