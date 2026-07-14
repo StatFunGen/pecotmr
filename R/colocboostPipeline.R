@@ -1,3 +1,4 @@
+#' @include qtlSumStats.R
 #' @title ColocBoost multi-trait colocalization pipeline (S4)
 #' @description Protocol-level multi-trait colocalization analysis using
 #'   \pkg{colocboost}. Dispatches on the QTL input type:

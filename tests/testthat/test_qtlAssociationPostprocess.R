@@ -287,3 +287,37 @@ test_that("qtlAssociationPostprocess skips genes whose entry has no variants", {
   expect_true(is.na(pmin1[1]))          # empty gene -> NA Bonferroni min
   expect_true(all(!is.na(pmin1[-1])))   # every other gene is finite
 })
+
+test_that("FILTERED Bonferroni drops MAF/cis-failing variants + uses n_variants_filtered", {
+  # Fixture entries: af = (.30, .20, .005, .40), tss/tes_distance = (0, 500, 9e5, 2e6).
+  # With mafCutoff 0.01 + cisWindow 1e6 the filtered set keeps only v1, v2
+  # (v3 fails MAF, v4 is outside the cis window); the filtered count is 30.
+  x <- .qapFixture()
+  r <- qtlAssociationPostprocess(x, mafCutoff = 0.01, cisWindow = 1e6,
+                                 methods = "bonferroni")
+  P <- lapply(seq_len(nrow(x)), function(i) S4Vectors::mcols(x$entry[[i]])$P)
+  expFilt <- vapply(P, function(p) min(pmin(1, p[1:2] * 30)), numeric(1))   # v1,v2 @ n=30
+  expOrig <- vapply(P, function(p) min(pmin(1, p * 50)), numeric(1))         # all @ n=50
+  expect_equal(as.numeric(r$p_bonferroni_min_filtered), expFilt)
+  expect_equal(as.numeric(r$p_bonferroni_min_original), expOrig)
+  # A smaller test count makes the filtered flavour no less significant.
+  expect_true(all(r$p_bonferroni_min_filtered <= r$p_bonferroni_min_original + 1e-12))
+})
+
+test_that("getSignificantQtls(bonferroni_filtered) applies the derived rule on the filtered set", {
+  x <- .qapFixture()
+  r <- qtlAssociationPostprocess(x, mafCutoff = 0.01, cisWindow = 1e6,
+                                 methods = "bonferroni")
+  sig <- getSignificantQtls(r, "bonferroni_filtered", threshold = 0.5)
+  expect_s4_class(sig, "GRanges")
+  fdr <- as.numeric(r$fdr_bonferroni_min_filtered)
+  sigGenes <- which(!is.na(fdr) & fdr < 0.5)
+  expect_gt(length(sigGenes), 0)                          # signal genes pass
+  varThr <- max(as.numeric(r$p_bonferroni_min_filtered)[sigGenes])
+  # only MAF/cis-passing variants (v1,v2) with P*n_filtered <= threshold qualify
+  expN <- sum(vapply(seq_len(nrow(r)), function(i) {
+    p <- S4Vectors::mcols(r$entry[[i]])$P[1:2]
+    sum(pmin(1, p * 30) <= varThr)
+  }, integer(1)))
+  expect_equal(length(sig), expN)
+})

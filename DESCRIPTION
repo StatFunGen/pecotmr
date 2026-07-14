@@ -90,7 +90,6 @@ LinkingTo:
 NeedsCompilation: yes
 VignetteBuilder: knitr
 Config/roxygen2/version: 8.0.0
-RoxygenNote: 7.3.3
 Collate:
     'AllGenerics.R'
     'GenotypeHandle.R'
@@ -116,6 +115,7 @@ Collate:
     'TwasWeightsEntry.R'
     'causalInferencePipeline.R'
     'colocPipeline.R'
+    'qtlSumStats.R'
     'colocboostPipeline.R'
     'cpp11.R'
     'credibleSetSummary.R'
@@ -123,12 +123,12 @@ Collate:
     'ctwasPipeline.R'
     'deprecated.R'
     'exampleData.R'
+    'gwasSumStats.R'
     'fineMappingPipeline.R'
     'fineMappingWrappers.R'
     'fsusieAccessors.R'
     'genotypeIo.R'
     'getLbf.R'
-    'gwasSumStats.R'
     'h2Annotations.R'
     'h2EstimationWrappers.R'
     'jointEngine.R'
@@ -136,7 +136,6 @@ Collate:
     'ld.R'
     'sumstatsQc.R'
     'variantId.R'
-    'qtlSumStats.R'
     'manifestLoaders.R'
     'mashPipeline.R'
     'mashWrapper.R'

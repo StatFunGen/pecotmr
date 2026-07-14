@@ -1,3 +1,4 @@
+#' @include qtlSumStats.R gwasSumStats.R
 #' @title Fine-Mapping Pipeline
 #' @description S4-dispatched per-region fine-mapping entry point that
 #'   replaces the deprecated \code{univariateAnalysisPipeline},

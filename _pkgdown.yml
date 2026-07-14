@@ -573,7 +573,7 @@ reference:
       - gwas_sumstats_example
       - gwas_finemapping_example
       - qtl_finemapping_example
-      - multitraite_data
+      - multitrait_data
 
   - title: internal
     desc: >
