@@ -124,7 +124,7 @@ NULL
 #' names(qtl_finemapping_example[["region_1"]][["context_1"]])
 #'
 NULL
-#' @name multitraite_data
+#' @name multitrait_data
 #'
 #' @title Simulated Multi-condition Data for TWAS analysis
 #'
@@ -137,7 +137,7 @@ NULL
 #' TWAS analysis. Genotype matrix is centered and scaled, expression matrix is
 #' normalized.
 #'
-#' @format \code{multitraite_data} is a list with the following elements:
+#' @format \code{multitrait_data} is a list with the following elements:
 #'
 #' \describe{
 #'
@@ -177,7 +177,7 @@ NULL
 #'   PLoS Genetics 19(7): e1010539. https://doi.org/10.1371/journal.pgen.1010539
 #'
 #' @examples
-#' data(multitraite_data)
+#' data(multitrait_data)
 #'
 NULL
 

@@ -89,3 +89,75 @@ setMethod("getSnpRanges", "AnnotationMatrix", function(x) x@snpRanges)
 #' @rdname getGenome
 #' @export
 setMethod("getGenome", "AnnotationMatrix", function(x, ...) x@genome)
+
+# =============================================================================
+# Constructor
+# =============================================================================
+
+#' @title Create an AnnotationMatrix Object
+#' @description Construct an \code{AnnotationMatrix} from a matrix and metadata.
+#' @param annotations A numeric matrix or sparse matrix (SNPs x annotations).
+#' @param snpRanges A \code{GRanges} object with SNP positions.
+#' @param annotationMeta A data.frame with columns: name, tier, type.
+#' @param genome Character, genome build.
+#' @return An \code{AnnotationMatrix} object.
+#' @export
+AnnotationMatrix <- function(annotations, snpRanges, annotationMeta,
+                             genome = "hg19") {
+  # Validate annotationMeta
+  if (!is.data.frame(annotationMeta))
+    stop("annotationMeta must be a data.frame")
+
+  requiredCols <- c("name", "tier", "type")
+  if (!all(requiredCols %in% colnames(annotationMeta)))
+    stop("annotationMeta must have columns: name, tier, type")
+
+  # Set column names on matrix
+  if (is.null(colnames(annotations)))
+    colnames(annotations) <- annotationMeta$name
+
+  new("AnnotationMatrix",
+    snpRanges = snpRanges,
+    annotations = annotations,
+    annotationMeta = annotationMeta,
+    genome = genome
+  )
+}
+
+# =============================================================================
+# Tier accessors
+# =============================================================================
+
+#' @title Get Baseline Annotations
+#' @description Extract only baseline-tier annotations from an
+#'   \code{AnnotationMatrix}.
+#' @param annot An \code{AnnotationMatrix} object.
+#' @return An \code{AnnotationMatrix} with only baseline annotations.
+#' @export
+getBaseline <- function(annot) {
+  meta <- getAnnotationMeta(annot)
+  idx <- meta$tier == "baseline"
+  AnnotationMatrix(
+    annotations = getAnnotations(annot)[, idx, drop = FALSE],
+    snpRanges = getSnpRanges(annot),
+    annotationMeta = meta[idx, , drop = FALSE],
+    genome = getGenome(annot)
+  )
+}
+
+#' @title Get Candidate Annotations
+#' @description Extract only candidate-tier annotations from an
+#'   \code{AnnotationMatrix}.
+#' @param annot An \code{AnnotationMatrix} object.
+#' @return An \code{AnnotationMatrix} with only candidate annotations.
+#' @export
+getCandidates <- function(annot) {
+  meta <- getAnnotationMeta(annot)
+  idx <- meta$tier == "candidate"
+  AnnotationMatrix(
+    annotations = getAnnotations(annot)[, idx, drop = FALSE],
+    snpRanges = getSnpRanges(annot),
+    annotationMeta = meta[idx, , drop = FALSE],
+    genome = getGenome(annot)
+  )
+}

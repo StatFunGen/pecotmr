@@ -24,7 +24,8 @@ A list with \code{tau_star_single}, \code{tau_star_joint},
   of \code{\link{metaSldscRandom}} results.
 }
 \description{
-Re-run the DerSimonian-Laird random-effects meta-analysis on a chosen subset
+Re-run the random-effects meta-analysis (DerSimonian-Laird, via
+\code{metafor::rma}) on a chosen subset
 of the per-trait standardised tables produced by
 \code{\link{sldscPostprocessingPipeline}} -- no regression is re-run, only the
 already-standardised per-trait estimates are re-meta'd. Powers a "meta on a

@@ -10,6 +10,7 @@ GwasFineMappingResult(
   entry,
   region_id = NULL,
   region = NULL,
+  traitPos = NULL,
   ldSketch = NULL
 )
 }

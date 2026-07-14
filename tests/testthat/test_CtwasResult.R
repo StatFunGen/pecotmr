@@ -1,4 +1,7 @@
-context("CtwasResult / CtwasResultEntry")
+context("CtwasResult")
+
+# CtwasResultEntry (the per-row payload class) is tested in
+# test_CtwasResultEntry.R; this file covers the CtwasResult collection.
 
 .cr_entry <- function(ids = c("g1", "g2"), pip = c(0.9, 0.1), prior = NULL) {
   CtwasResultEntry(
@@ -7,17 +10,6 @@ context("CtwasResult / CtwasResultEntry")
     param      = prior,
     regionInfo = data.frame(region_id = "r1", stringsAsFactors = FALSE))
 }
-
-test_that("CtwasResultEntry: constructor + accessors round-trip", {
-  e <- .cr_entry(prior = list(group_prior = c(brain = 0.01)))
-  expect_s4_class(e, "CtwasResultEntry")
-  expect_equal(nrow(getFinemap(e)), 2L)
-  expect_equal(nrow(getSusieAlpha(e)), 2L)
-  expect_equal(getCtwasParam(e)$group_prior, c(brain = 0.01))
-  # empty entry is valid; accessors return NULL
-  expect_null(getFinemap(CtwasResultEntry()))
-  expect_null(getSusieAlpha(CtwasResultEntry()))
-})
 
 test_that("CtwasResult: constructor keyed by (gwasStudy, study, context, method)", {
   cr <- CtwasResult(

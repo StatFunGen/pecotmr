@@ -37,6 +37,7 @@ setClass("GwasFineMappingResult",
         errors <- c(errors,
           "every element of the `entry` column must be a FineMappingEntry")
       errors <- c(errors, .validateRegionColumn(object))
+      errors <- c(errors, .validateTraitPosColumn(object))
       # Extract key columns directly rather than via `object[, keyCols]`:
       # column-subsetting preserves the GwasFineMappingResult class while
       # dropping the required `entry` column, and older S4Vectors revalidates
@@ -115,6 +116,7 @@ setClass("GwasFineMappingResult",
 GwasFineMappingResult <- function(study, method, entry,
                                   region_id = NULL,
                                   region = NULL,
+                                  traitPos = NULL,
                                   ldSketch = NULL) {
   n <- length(study)
   if (length(method) != n || length(entry) != n) {
@@ -134,6 +136,7 @@ GwasFineMappingResult <- function(study, method, entry,
   )
   if (is.null(region)) region <- .regionFromIds(region_id)
   cols <- .appendRegionCol(cols, region, n)
+  cols <- .appendTraitPosCol(cols, traitPos, n)
   df <- do.call(S4Vectors::DataFrame,
                 c(cols, list(check.names = FALSE)))
   obj <- new("GwasFineMappingResult", df, ldSketch = ldSketch)

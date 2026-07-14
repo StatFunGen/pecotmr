@@ -81,12 +81,19 @@ NULL
   e
 }
 
-# Genomic anchor of one trait for the `region` provenance column: the trait's
-# own coordinates for a QtlDataset (phenotype rowRanges), or the variant-span
-# window of the matching entry for a QtlSumStats (an approximation -- summary
-# stats carry no gene coordinate). Returns a length-1 GRanges, or NULL when the
-# anchor cannot be determined (the accumulator then records a chrUn sentinel).
-.jointTraitRegion <- function(data, context, trait) {
+# --- Trait-position and fine-mapping-region provenance ----------------------
+# Two DISTINCT per-row anchors, kept separate because they mean different things
+# and diverge by input type:
+#   traitPos = the bare trait position, NO cis-window. QtlDataset -> the trait's
+#              own phenotype rowRanges; QtlSumStats -> the SUPPLIED `traitPos`
+#              column (NULL when absent -- the true position cannot be inferred
+#              from summary statistics alone).
+#   region   = the fine-mapping window. QtlDataset -> traitPos +/- cisWindow;
+#              QtlSumStats -> the entry's variant span (sumstats carry no
+#              cis-window, so the fitted span IS the region).
+# Each returns a length-1 GRanges, or NULL when the anchor is unavailable (the
+# accumulator / builder then records a chrUn sentinel).
+.traitPosFor <- function(data, context, trait) {
   if (methods::is(data, "QtlDataset")) {
     se <- tryCatch(getPhenotypes(data, contexts = context),
                    error = function(e) NULL)
@@ -94,6 +101,28 @@ NULL
     rr <- SummarizedExperiment::rowRanges(se)
     if (!(trait %in% names(rr))) return(NULL)
     return(GenomicRanges::granges(rr[trait])[1L])
+  }
+  if (methods::is(data, "QtlSumStats")) {
+    if (!("traitPos" %in% names(data))) return(NULL)
+    idx <- which(as.character(data$context) == context &
+                 as.character(data$trait) == trait)
+    if (length(idx) == 0L) return(NULL)
+    tp <- data$traitPos[idx[[1L]]]
+    if (length(tp) == 0L) return(NULL)
+    return(GenomicRanges::granges(tp)[1L])
+  }
+  NULL
+}
+
+.fitRegionFor <- function(data, context, trait, cisWindow = NULL) {
+  if (methods::is(data, "QtlDataset")) {
+    tp <- .traitPosFor(data, context, trait)
+    if (is.null(tp)) return(NULL)
+    w <- if (is.null(cisWindow)) 0L else as.integer(cisWindow)
+    return(GenomicRanges::GRanges(
+      as.character(GenomicRanges::seqnames(tp))[[1L]],
+      IRanges::IRanges(max(1L, GenomicRanges::start(tp) - w),
+                       GenomicRanges::end(tp) + w)))
   }
   if (methods::is(data, "QtlSumStats")) {
     idx <- which(as.character(data$context) == context &
@@ -107,6 +136,34 @@ NULL
                        max(GenomicRanges::end(gr)))))
   }
   NULL
+}
+
+# Vectorised per-row anchors for the pushRow builders: map the scalar helper
+# over aligned (context, trait) vectors and assemble ONE GRanges of length n,
+# using a chrUn sentinel where the anchor is unavailable. Built from plain
+# chr/start/end vectors so mixed seqlevels never trip seqinfo merging.
+.anchorVector <- function(data, contexts, traits,
+                          kind = c("traitPos", "region"), cisWindow = NULL) {
+  kind <- match.arg(kind)
+  n <- length(traits)
+  chrs <- rep("chrUn", n); starts <- rep(1L, n); ends <- rep(1L, n)
+  anyFound <- FALSE
+  for (i in seq_len(n)) {
+    g <- if (kind == "traitPos") .traitPosFor(data, contexts[[i]], traits[[i]])
+         else .fitRegionFor(data, contexts[[i]], traits[[i]], cisWindow)
+    if (!is.null(g)) {
+      anyFound  <- TRUE
+      chrs[i]   <- as.character(GenomicRanges::seqnames(g))[[1L]]
+      starts[i] <- GenomicRanges::start(g)[[1L]]
+      ends[i]   <- GenomicRanges::end(g)[[1L]]
+    }
+  }
+  # Nothing resolved (e.g. a QtlSumStats with no supplied traitPos): return NULL
+  # so the builder omits the column entirely and getTraitPosition() reports NA,
+  # rather than a column full of chrUn sentinels.
+  if (!anyFound) return(NULL)
+  GenomicRanges::GRanges(chrs,
+    IRanges::IRanges(start = starts, end = pmax(ends, starts)))
 }
 
 # ---- fitters (fitJointGroup) ------------------------------------------------
@@ -149,7 +206,9 @@ setMethod("fitJointGroup", signature("IndividualJointGroup", "FmJointPipeline"),
           fit = fit, method = "fsusie", dataX = Xc, dataY = NULL, conditionIdx = r,
           coverage = cfg$coverage, secondaryCoverage = cfg$secondaryCoverage,
           signalCutoff = cfg$signalCutoff, minAbsCorr = cfg$minAbsCorr,
-          csInput = "fsusie")
+          csInput = "fsusie",
+          fullFit = cfg$fullFit, fullFitAlphaOnly = cfg$fullFitAlphaOnly,
+          includeAllCs = cfg$includeAllCs)
         if (!is.null(cvM)) e <- .fmAttachCv(e, .fmSliceCvCondition(cvM, r))
         e
       }))
@@ -220,7 +279,9 @@ setMethod("fitJointGroup", signature("IndividualJointGroup", "FmJointPipeline"),
         fit = fit, method = "mvsusie", dataX = Xc, dataY = NULL, conditionIdx = r,
         coverage = cfg$coverage, secondaryCoverage = cfg$secondaryCoverage,
         signalCutoff = cfg$signalCutoff, minAbsCorr = cfg$minAbsCorr,
-        csInput = "X")
+        csInput = "X",
+        fullFit = cfg$fullFit, fullFitAlphaOnly = cfg$fullFitAlphaOnly,
+        includeAllCs = cfg$includeAllCs)
       if (!is.null(cvM)) e <- .fmAttachCv(e, .fmSliceCvCondition(cvM, r))
       e
     })
@@ -257,7 +318,9 @@ setMethod("fitJointGroup", signature("SumStatsJointGroup", "FmJointPipeline"),
       fit = fit, method = "mvsusie", dataX = group@R, dataY = NULL,
       conditionIdx = r, coverage = cfg$coverage,
       secondaryCoverage = cfg$secondaryCoverage, signalCutoff = cfg$signalCutoff,
-      minAbsCorr = cfg$minAbsCorr, csInput = "Xcorr"))
+      minAbsCorr = cfg$minAbsCorr, csInput = "Xcorr",
+      fullFit = cfg$fullFit, fullFitAlphaOnly = cfg$fullFitAlphaOnly,
+      includeAllCs = cfg$includeAllCs))
   })
 
 # Reshape a twasWeightsCv() result into the single joint entry's cvResult: the
@@ -746,12 +809,17 @@ setMethod("construct", "TwasJointPipeline",
         if (is.null(e)) next
         ctx <- as.character(cond$context[[i]])
         tid <- as.character(cond$trait[[i]])
-        reg <- .jointTraitRegion(data, ctx, tid)
+        # region = the fine-mapping window (cis-window-expanded for a QtlDataset,
+        # variant span for a QtlSumStats); traitPos = the bare trait position
+        # (NULL when a QtlSumStats caller supplied none -> the column is omitted
+        # and getTraitPosition() reports NA).
+        reg  <- .fitRegionFor(data, ctx, tid, args$cisWindow)
+        tpos <- .traitPosFor(data, ctx, tid)
         rows$add(study = as.character(cond$study[[i]]),
                  context = ctx, trait = tid,
                  method = method, entry = e,
                  jointStudies = js, jointContexts = jc, jointTraits = jt,
-                 region = reg)
+                 region = reg, traitPos = tpos)
       }
     }
     # Twas: resolve this group's fine-mapping fits + CV (keyed on its first

@@ -16,6 +16,9 @@
 # Group ordering: by deprecation target (which active API replaces them).
 # =============================================================================
 
+# nocov start
+# This entire file holds deprecated stubs scheduled for removal; it is excluded
+# from coverage so the retired surface does not dilute the active-code metric.
 
 # -----------------------------------------------------------------------------
 # Allele harmonization (matchRefPanel / alleleQc → summaryStatsQc)
@@ -696,3 +699,4 @@ loadMultitraitRSumstat <- function(...) {
       "for harmonization, then pass them to mashPipeline()."))
   invisible(NULL)
 }
+# nocov end

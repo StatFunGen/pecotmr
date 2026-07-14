@@ -21,7 +21,10 @@ postprocessFinemappingFits(
   medianAbsCorr = NULL,
   csInput = NULL,
   conditionIdx = NULL,
-  trim = TRUE
+  trim = TRUE,
+  fullFit = FALSE,
+  fullFitAlphaOnly = TRUE,
+  includeAllCs = FALSE
 )
 }
 \arguments{
@@ -57,7 +60,7 @@ MAF). Default NULL.}
 A list with \code{finemappingResults} (per-method post-processed
   objects, each carrying a trimmed fit and method-specific intermediates)
   and a single unified \code{top_loci} table in the fixed 22-column shape
-  (see \code{\link{buildTopLoci}}). Per-method contributions are
+  (see the internal \code{buildTopLoci}). Per-method contributions are
   row-bound into \code{top_loci} by an outer method for-loop.
 }
 \description{

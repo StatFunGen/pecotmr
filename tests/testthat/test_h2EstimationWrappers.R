@@ -730,7 +730,7 @@ test_that("standardize_tau_star returns list with tauStar and tauStarSe", {
 # =============================================================================
 
 test_that("meta_random_effects returns all NA with k=0", {
-  res <- pecotmr:::metaRandomEffects(numeric(0), numeric(0))
+  res <- pecotmr:::.rmaMeta(numeric(0), numeric(0))
   expect_true(is.na(res$mean))
   expect_true(is.na(res$se))
   expect_true(is.na(res$tau2))
@@ -739,7 +739,7 @@ test_that("meta_random_effects returns all NA with k=0", {
 })
 
 test_that("meta_random_effects with k=1 returns input values", {
-  res <- pecotmr:::metaRandomEffects(5.0, 1.0)
+  res <- pecotmr:::.rmaMeta(5.0, 1.0)
   expect_equal(res$mean, 5.0)
   expect_equal(res$se, 1.0)
   expect_equal(res$tau2, 0)
@@ -748,7 +748,7 @@ test_that("meta_random_effects with k=1 returns input values", {
 test_that("meta_random_effects with identical means gives tau2=0", {
   means <- rep(3.0, 5)
   ses <- rep(1.0, 5)
-  res <- pecotmr:::metaRandomEffects(means, ses)
+  res <- pecotmr:::.rmaMeta(means, ses)
   expect_equal(res$tau2, 0)
   expect_equal(res$mean, 3.0)
 })
@@ -757,7 +757,7 @@ test_that("meta_random_effects returns correct structure", {
   set.seed(42)
   means <- rnorm(5, mean = 2, sd = 0.5)
   ses <- rep(0.5, 5)
-  res <- pecotmr:::metaRandomEffects(means, ses)
+  res <- pecotmr:::.rmaMeta(means, ses)
   expect_true(is.list(res))
   expect_named(res, c("mean", "se", "tau2", "I2", "Q"))
   expect_true(res$se > 0)
@@ -768,11 +768,11 @@ test_that("meta_random_effects returns correct structure", {
 
 test_that("meta_random_effects errors with non-positive ses", {
   expect_error(
-    pecotmr:::metaRandomEffects(c(1, 2), c(1, 0)),
+    pecotmr:::.rmaMeta(c(1, 2), c(1, 0)),
     "all ses must be positive and finite"
   )
   expect_error(
-    pecotmr:::metaRandomEffects(c(1, 2), c(1, -1)),
+    pecotmr:::.rmaMeta(c(1, 2), c(1, -1)),
     "all ses must be positive and finite"
   )
 })
@@ -781,7 +781,7 @@ test_that("meta_random_effects known DerSimonian-Laird example", {
   # Three studies with known values
   means <- c(0.5, 0.8, 0.3)
   ses <- c(0.2, 0.3, 0.15)
-  res <- pecotmr:::metaRandomEffects(means, ses)
+  res <- pecotmr:::.rmaMeta(means, ses)
 
   # Fixed-effect weights
   w_fe <- 1 / ses^2
@@ -1370,7 +1370,7 @@ test_that("gldscUnivariate with annotations returns scoreStats", {
 #
 # Targets the specific uncovered branches in R/h2EstimationWrappers.R:
 #   bplapplyBlocks, checkGenomeBuild (unknown type), weightedLsRidge
-#   (vector X ridge path), metaRandomEffects (length mismatch), .fglsSolve
+#   (vector X ridge path), .rmaMeta (length mismatch), .fglsSolve
 #   (diagonal path), .gldscLocal (fine-grained blocks), .hdlLocal (p<3 and
 #   tau=NULL), .lderLocalH2 (small block + baseline path), .hdlSeFisher-
 #   Stratified / .hdlJackknifeTau (lambda>0 + singular fallback), the
@@ -1457,12 +1457,12 @@ test_that("weightedLsRidge converts a vector X to a matrix in the ridge path", {
 })
 
 # ---------------------------------------------------------------------------
-# metaRandomEffects — length-mismatch error
+# .rmaMeta — length-mismatch error
 # ---------------------------------------------------------------------------
 
-test_that("metaRandomEffects errors when means and ses differ in length", {
+test_that(".rmaMeta errors when means and ses differ in length", {
   expect_error(
-    pecotmr:::metaRandomEffects(c(1, 2), c(1, 2, 3)),
+    pecotmr:::.rmaMeta(c(1, 2), c(1, 2, 3)),
     "must have the same length"
   )
 })

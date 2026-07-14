@@ -11,13 +11,29 @@ getSumStats(x, ...)
 
 \S4method{getSumStats}{MultiStudyQtlDataset}(x, ...)
 
-\S4method{getSumStats}{QtlSumStats}(x, study = NULL, context = NULL, trait = NULL, ...)
+\S4method{getSumStats}{QtlSumStats}(
+  x,
+  study = NULL,
+  context = NULL,
+  trait = NULL,
+  annotateSignificance = NULL,
+  ...
+)
 }
 \arguments{
 \item{x}{A \code{GwasSumStats}, \code{QtlSumStats}, or
 \code{MultiStudyQtlDataset} object.}
 
 \item{...}{Class-specific selection arguments (see above).}
+
+\item{annotateSignificance}{Optional correction-method name
+(\code{"permutation"} / \code{"bonferroni_original"} /
+\code{"bonferroni_filtered"} / \code{"qvalue"}). When set on a QtlSumStats
+enriched by \code{\link{qtlAssociationPostprocess}}, a logical
+\code{significant} mcol for that method is added to the returned entry (the
+significance is derived on the fly, not stored). Flat export flattens this
+full entry GRanges (all mcols) directly; note \code{\link{getSumstatDf}} is
+a fixed GWAS-schema view and does not carry the association columns.}
 }
 \value{
 A \code{GRanges}, a \code{QtlSumStats}, or \code{NULL}.

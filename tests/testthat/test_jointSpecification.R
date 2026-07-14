@@ -662,7 +662,7 @@ context("joint dispatchers (fineMappingDispatcher / twasDispatcher)")
 .jd_mockPostprocess <- function() {
   function(fit, method, dataX, dataY, coverage, secondaryCoverage,
            signalCutoff, minAbsCorr, csInput = NULL, af = NULL,
-           region = NULL, conditionIdx = NULL) {
+           region = NULL, conditionIdx = NULL, ...) {
     if (is.matrix(dataX)) {
       vids <- colnames(dataX)
     } else if (is.list(dataY) && !is.null(dataY$z)) {

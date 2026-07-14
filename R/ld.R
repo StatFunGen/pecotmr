@@ -543,6 +543,11 @@ loadLdFromGenotype <- function(genotypePath, region,
 .ldFromSketch <- function(ldSketch, variantIds,
                           label = ".ldFromSketch",
                           onMissing = c("error", "drop")) {
+  if (is.null(ldSketch)) {
+    stop(sprintf(paste0("%s: the SumStats/collection carries no ldSketch ",
+                        "(ldSketch = NULL); this step needs an LD reference."),
+                 label))
+  }
   if (!methods::is(ldSketch, "GenotypeHandle")) {
     stop(sprintf("%s: ldSketch must be a GenotypeHandle.", label))
   }
@@ -564,8 +569,7 @@ loadLdFromGenotype <- function(genotypePath, region,
   o       <- order(m$idxA)            # restore the caller's requested order
   keptIds <- variantIds[m$idxA[o]]
   idx     <- m$idxB[o]
-  block <- extractBlockGenotypes(ldSketch, idx, meanImpute = TRUE)
-  geno  <- t(SummarizedExperiment::assay(block, "dosage"))
+  geno  <- .dosageMatrix(ldSketch, idx, meanImpute = TRUE)
   colnames(geno) <- keptIds
   ldMat <- computeLd(geno, method = "sample")
   dimnames(ldMat) <- list(keptIds, keptIds)

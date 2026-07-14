@@ -14,6 +14,7 @@ TwasWeights(
   jointContexts = NULL,
   jointTraits = NULL,
   region = NULL,
+  traitPos = NULL,
   ldSketch = NULL
 )
 }

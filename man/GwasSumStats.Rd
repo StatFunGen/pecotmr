@@ -8,7 +8,7 @@ GwasSumStats(
   study,
   entry,
   genome,
-  ldSketch,
+  ldSketch = NULL,
   varY = NA_real_,
   nCase = NULL,
   nControl = NULL,

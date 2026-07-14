@@ -165,7 +165,7 @@ setMethod("getCvResult", "FineMappingEntry",
 #' @export
 setMethod("getTopLoci", "FineMappingEntry",
   function(x, type = c("data.frame", "GRanges"),
-           signalCutoff = 0.025, ...) {
+           signalCutoff = 0.025, minPurity = NULL, ...) {
     type <- match.arg(type)
     tl <- x@topLoci
     if (nrow(tl) == 0L) {
@@ -175,6 +175,22 @@ setMethod("getTopLoci", "FineMappingEntry",
         rep(TRUE, nrow(tl))
       } else {
         !is.na(tl$pip) & tl$pip > signalCutoff
+      }
+      # Independent purity filter, orthogonal to the pip `signalCutoff`: drop
+      # variants that belong to a below-`minPurity` primary (highest-coverage)
+      # credible set. Variants not in a CS are unaffected.
+      if (!is.null(minPurity)) {
+        purCols <- grep("^cs_[0-9.]+_purity$", names(tl), value = TRUE)
+        if (length(purCols) > 0L) {
+          covs <- suppressWarnings(as.numeric(sub("_purity$", "",
+                                                  sub("^cs_", "", purCols))))
+          primaryPur <- purCols[which.max(covs)]
+          csCol <- sub("_purity$", "", primaryPur)
+          inCs <- if (csCol %in% names(tl)) !grepl("_0$", tl[[csCol]]) else
+            rep(FALSE, nrow(tl))
+          pur  <- as.numeric(tl[[primaryPur]])
+          keep <- keep & !(inCs & !is.na(pur) & pur < minPurity)
+        }
       }
       out <- .projectPosteriorView(tl[keep, , drop = FALSE])
     }
@@ -213,13 +229,25 @@ setMethod("getPip", "FineMappingEntry", function(x, ...) {
 #' @rdname getCs
 #' @export
 setMethod("getCs", "FineMappingEntry",
-  function(x, coverage = 0.95, ...) {
+  function(x, coverage = 0.95, minPurity = NULL, ...) {
     tl <- x@topLoci
     if (nrow(tl) == 0L) return(.projectPosteriorView(tl))
     csCol <- grep(paste0("^cs_", coverage * 100, "$"), names(tl), value = TRUE)
     if (length(csCol) == 0L) return(.projectPosteriorView(tl[FALSE, , drop = FALSE]))
     keep <- !is.na(tl[[csCol[1L]]]) & nzchar(tl[[csCol[1L]]]) &
             !grepl("_0$", tl[[csCol[1L]]])
+    # Independent purity filter (min.abs.corr), orthogonal to `coverage`: drop
+    # CS members whose credible set at THIS coverage is below `minPurity`.
+    if (!is.null(minPurity)) {
+      purCol <- paste0(csCol[1L], "_purity")
+      if (purCol %in% names(tl)) {
+        pur <- as.numeric(tl[[purCol]])
+        keep <- keep & !is.na(pur) & pur >= minPurity
+      } else {
+        warning("getCs: no purity column '", purCol, "' for coverage ",
+                coverage, "; minPurity filter skipped.")
+      }
+    }
     .projectPosteriorView(tl[keep, , drop = FALSE])
   })
 
@@ -338,7 +366,7 @@ setMethod("show", "FineMappingEntry", function(object) {
       variant_id = character(0), chrom = character(0), pos = integer(0),
       A1 = character(0), A2 = character(0),
       N = numeric(0), af = numeric(0),
-      beta = numeric(0), se = numeric(0), pip = numeric(0),
+      beta = numeric(0), se = numeric(0), pip = numeric(0), logBF = numeric(0),
       stringsAsFactors = FALSE))
   }
   out <- data.frame(
@@ -352,11 +380,19 @@ setMethod("show", "FineMappingEntry", function(object) {
     beta            = .tlCol(tl, "posterior_mean", "numeric"),
     se              = .tlCol(tl, "posterior_sd",   "numeric"),
     pip             = .tlCol(tl, "pip",        "numeric"),
+    logBF           = .tlCol(tl, "logBF",      "numeric"),
     stringsAsFactors = FALSE)
-  # Pass through CS columns (cs_95, cs_70, cs_50, cs_95_purity) and
-  # pipeline stamps (method, gene, event, grange_*) when present.
+  # Pass through the dynamic CS columns (cs_<C> membership / cs_<C>_purity for
+  # any coverage the pipeline produced), the per-condition posterior quantities
+  # for multi-condition fits (conditional_effect, lfsr; long + numeric, never
+  # collapsed), and pipeline stamps (method, gene, event, grange_*) when present.
+  csCols <- grep("^cs_[0-9.]+(_purity)?$", colnames(tl), value = TRUE)
+  # Per-CS variant-level fullFit columns: within_cs_pip (default scalar) +, when
+  # built with fullFit=TRUE, the wide within_cs_pip_<lab> / cs_logbf_<lab> /
+  # cs_effect_<lab> / cs_effect_var_<lab> sets.
+  fullFitCols <- grep("^(within_cs_pip|cs_logbf_|cs_effect_)", colnames(tl), value = TRUE)
   extraCols <- intersect(
-    c("cs_95", "cs_70", "cs_50", "cs_95_purity",
+    c(csCols, fullFitCols, "conditional_effect", "lfsr",
       "method", "gene", "event", "grange_start", "grange_end"),
     colnames(tl))
   for (cc in extraCols) out[[cc]] <- tl[[cc]]

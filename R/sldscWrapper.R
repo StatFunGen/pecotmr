@@ -400,8 +400,9 @@ standardizeSldscTrait <- function(sldscData, trait, mode = c("single", "joint"),
 
 #' @title Random-effects meta-analysis of S-LDSC quantities across traits
 #'
-#' @description DerSimonian-Laird random-effects meta-analysis of one S-LDSC
-#'   quantity for one annotation across multiple traits.
+#' @description Random-effects meta-analysis (DerSimonian-Laird, via
+#'   \code{metafor::rma}) of one S-LDSC quantity for one annotation across
+#'   multiple traits.
 #'
 #' @details Per-trait \eqn{SE_i} sources:
 #'   - `quantity = "tauStar"`: jackknife SE from per-block \eqn{\tau^*}.
@@ -449,7 +450,7 @@ metaSldscRandom <- function(perTraitEstimates, category,
                 nTraits = length(means), traitsUsed = used,
                 tau2 = NA_real_))
   }
-  meta <- metaRandomEffects(means, ses)
+  meta <- .rmaMeta(means, ses)
   z    <- meta$mean / meta$se
   p    <- .zToPvalue(z)
   list(
@@ -519,7 +520,8 @@ metaSldscRandom <- function(perTraitEstimates, category,
 
 #' Random-effects meta-analysis over a subset of sLDSC traits
 #'
-#' Re-run the DerSimonian-Laird random-effects meta-analysis on a chosen subset
+#' Re-run the random-effects meta-analysis (DerSimonian-Laird, via
+#' \code{metafor::rma}) on a chosen subset
 #' of the per-trait standardised tables produced by
 #' \code{\link{sldscPostprocessingPipeline}} -- no regression is re-run, only the
 #' already-standardised per-trait estimates are re-meta'd. Powers a "meta on a

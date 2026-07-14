@@ -301,3 +301,32 @@ test_that(".validateRegionColumn: reports a non-GRanges region column", {
     "'region' column must be a GRanges")
   expect_length(pecotmr:::.validateRegionColumn(S4Vectors::DataFrame(a = 1L)), 0L)
 })
+
+test_that(".validateRegionColumn: reports a region column of the wrong length", {
+  # DataFrame [[<- enforces column length, so mutate @listData directly to build
+  # the malformed object the defensive validity check guards against.
+  bad <- S4Vectors::DataFrame(a = 1:2)                       # nrow 2
+  bad@listData$region <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 1))  # length 1
+  expect_equal(pecotmr:::.validateRegionColumn(bad),
+               "'region' column must have one range per row")
+})
+
+test_that(".appendTraitPosCol: traitPos must be a GRanges of matching length", {
+  expect_error(pecotmr:::.appendTraitPosCol(list(), "notgranges", 1L),
+               "must be a GRanges")
+  expect_error(
+    pecotmr:::.appendTraitPosCol(list(),
+      GenomicRanges::GRanges(c("chr1", "chr1"), IRanges::IRanges(1:2, 1:2)), 1L),
+    "same length as")
+})
+
+test_that(".validateTraitPosColumn: reports non-GRanges and wrong-length traitPos", {
+  expect_equal(
+    pecotmr:::.validateTraitPosColumn(S4Vectors::DataFrame(traitPos = c("x", "y"))),
+    "'traitPos' column must be a GRanges")
+  bad <- S4Vectors::DataFrame(a = 1:2)
+  bad@listData$traitPos <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 1))
+  expect_equal(pecotmr:::.validateTraitPosColumn(bad),
+               "'traitPos' column must have one range per row")
+  expect_length(pecotmr:::.validateTraitPosColumn(S4Vectors::DataFrame(a = 1L)), 0L)
+})

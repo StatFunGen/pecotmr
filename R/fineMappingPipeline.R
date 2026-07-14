@@ -1,3 +1,4 @@
+#' @include qtlSumStats.R gwasSumStats.R
 #' @title Fine-Mapping Pipeline
 #' @description S4-dispatched per-region fine-mapping entry point that
 #'   replaces the deprecated \code{univariateAnalysisPipeline},
@@ -247,6 +248,23 @@
 #'   (\code{lbf_variable}, \code{mu}, \code{mu2}, \code{V}). The
 #'   per-variant \code{topLoci} table is always fully populated
 #'   regardless of \code{trim}.
+#' @param fullFit Logical (length 1, default \code{FALSE}). Master switch for
+#'   per-credible-set variant-level export in \code{topLoci}. When \code{FALSE},
+#'   only the always-on \code{within_cs_pip} scalar column is added (each
+#'   variant's \code{alpha} in its assigned primary-coverage credible set; NA
+#'   when not in a set). When \code{TRUE}, wide per-CS columns are added, one
+#'   set of columns per credible set (labelled \code{cs<k>}).
+#' @param fullFitAlphaOnly Logical (length 1, default \code{TRUE}). No-op when
+#'   \code{fullFit=FALSE}. When \code{TRUE}, only \code{alpha} is widened
+#'   (\code{within_cs_pip_cs<k>}). When \code{FALSE}, all four per-effect
+#'   matrices are widened: \code{within_cs_pip_cs<k>} (alpha),
+#'   \code{cs_logbf_cs<k>} (lbf_variable), \code{cs_effect_cs<k>} (mu, unscaled)
+#'   and \code{cs_effect_var_cs<k>} (posterior variance, unscaled).
+#' @param includeAllCs Logical (length 1, default \code{FALSE}). No-op when
+#'   \code{fullFit=FALSE}. When \code{FALSE}, only effects that produced a
+#'   passing (purity/coverage-filtered) credible set are widened. When
+#'   \code{TRUE}, every effect \code{L} is widened (including filtered-out ones,
+#'   labelled \code{L<k>} instead of \code{cs<k>}).
 #' @param ... Reserved for future per-method arguments.
 #'
 #' @return A \code{\link{FineMappingResult}} collection keyed by
@@ -534,6 +552,8 @@ setGeneric("fineMappingPipeline",
                               jointStudies  = NULL,
                               jointContexts = NULL,
                               jointTraits   = NULL,
+                              region        = NULL,
+                              traitPos      = NULL,
                               ldSketch      = NULL) {
   if (length(entries) == 0L) {
     stop("fineMappingPipeline: no (study, context, trait, method) tuples ",
@@ -548,6 +568,8 @@ setGeneric("fineMappingPipeline",
     jointStudies  = jointStudies,
     jointContexts = jointContexts,
     jointTraits   = jointTraits,
+    region        = region,
+    traitPos      = traitPos,
     ldSketch      = ldSketch)
 }
 
@@ -693,7 +715,9 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
                               coverage, secondaryCoverage, signalCutoff,
                               minAbsCorr, csInput = NULL, af = NULL,
                               region = NULL, trim = NULL,
-                              medianAbsCorr = NULL, conditionIdx = NULL) {
+                              medianAbsCorr = NULL, conditionIdx = NULL,
+                              fullFit = NULL, fullFitAlphaOnly = NULL,
+                              includeAllCs = NULL) {
   # Inherit `trim` from the calling method's frame if not passed in
   # explicitly. The 10 internal call sites don't currently forward it
   # (they predate the trim knob) so we look it up from the caller. This
@@ -709,6 +733,15 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     medianAbsCorr <- tryCatch(get("medianAbsCorr", envir = parent.frame()),
                               error = function(e) NULL)
   }
+  # fullFit / fullFitAlphaOnly / includeAllCs are threaded explicitly by every
+  # internal caller: the univariate/RSS block fitters (.fmFitXBlock /
+  # .fmFitRssBlock) forward the setMethod params, and the joint engine passes
+  # them from the pipeline config (its fitJointGroup frame does not lexically
+  # see the method's params). NULL here is only a defensive default for a bare
+  # direct call, so the safe/minimal behavior applies.
+  if (is.null(fullFit)) fullFit <- FALSE
+  if (is.null(fullFitAlphaOnly)) fullFitAlphaOnly <- TRUE
+  if (is.null(includeAllCs)) includeAllCs <- FALSE
   fits <- setNames(list(fit), method)
   post <- postprocessFinemappingFits(
     fits = fits, dataX = dataX, dataY = dataY,
@@ -717,7 +750,9 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     signalCutoff = signalCutoff, minAbsCorr = minAbsCorr,
     medianAbsCorr = medianAbsCorr,
     region = region,
-    csInput = csInput, conditionIdx = conditionIdx, trim = isTRUE(trim))
+    csInput = csInput, conditionIdx = conditionIdx, trim = isTRUE(trim),
+    fullFit = isTRUE(fullFit), fullFitAlphaOnly = isTRUE(fullFitAlphaOnly),
+    includeAllCs = isTRUE(includeAllCs))
   out <- formatFinemappingOutput(post, primaryMethod = method)
   # `formatFinemappingOutput` returns a list with $finemappingEntry as a
   # bare FineMappingEntry per the helper's contract.
@@ -1243,6 +1278,9 @@ setMethod("fineMappingPipeline", "QtlDataset",
            naAction           = c("drop", "impute"),
            verbose            = 1,
            trim               = TRUE,
+           fullFit            = FALSE,
+           fullFitAlphaOnly   = TRUE,
+           includeAllCs       = FALSE,
            phenotypeCovariatesToResidualize = NULL,
            genotypeCovariatesToResidualize  = NULL,
            residualizePhenotypeCovariates   = TRUE,
@@ -1285,7 +1323,9 @@ setMethod("fineMappingPipeline", "QtlDataset",
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
         cvFolds = cvFolds, cvThreads = cvThreads, samplePartition = samplePartition,
         pipCutoffToSkip = pipCutoffToSkip,
-        fineMappingResult = fineMappingResult)
+        fineMappingResult = fineMappingResult,
+        fullFit = fullFit, fullFitAlphaOnly = fullFitAlphaOnly,
+        includeAllCs = includeAllCs)
       tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
       methodArgs <- methodArgs[tokens]
       if (length(tokens) == 0L) {
@@ -1425,7 +1465,8 @@ setMethod("fineMappingPipeline", "QtlDataset",
                          secondaryCoverage, signalCutoff, minAbsCorr,
                          methodArgs, verbose, ctx, tid,
                          cvFolds = cvFolds, cvThreads = cvThreads, samplePartition = samplePartition,
-                         af = afVec)
+                         af = afVec, fullFit = fullFit,
+                         fullFitAlphaOnly = fullFitAlphaOnly, includeAllCs = includeAllCs)
           })
 
           for (tk in toRun) {
@@ -1476,7 +1517,8 @@ setMethod("fineMappingPipeline", "QtlDataset",
                          secondaryCoverage, signalCutoff, minAbsCorr,
                          methodArgs, verbose, ctx, pcName,
                          cvFolds = cvFolds, cvThreads = cvThreads, samplePartition = samplePartition,
-                         af = afVec)
+                         af = afVec, fullFit = fullFit,
+                         fullFitAlphaOnly = fullFitAlphaOnly, includeAllCs = includeAllCs)
           })
           ents <- lapply(blockEntries, function(be) be[["susie"]])
           if (any(vapply(ents, is.null, logical(1)))) next
@@ -1505,7 +1547,9 @@ setMethod("fineMappingPipeline", "QtlDataset",
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
         cvFolds = cvFolds, cvThreads = cvThreads, samplePartition = samplePartition,
         pipCutoffToSkip = pipCutoffToSkip,
-        fineMappingResult = fineMappingResult)
+        fineMappingResult = fineMappingResult,
+        fullFit = fullFit, fullFitAlphaOnly = fullFitAlphaOnly,
+        includeAllCs = includeAllCs)
       jointResult <- if (is.null(jointResult)) autoJoint
                      else if (is.null(autoJoint)) jointResult
                      else .rbindFineMappingResult(jointResult, autoJoint,
@@ -1514,6 +1558,13 @@ setMethod("fineMappingPipeline", "QtlDataset",
 
     perTupleResult <- if (length(rowEntries) > 0L)
       .fmBuildQtlResult(rowStudy, rowContext, rowTrait, rowMethod, rowEntries,
+                        region   = tryCatch(
+                          .anchorVector(data, rowContext, rowTrait, "region",
+                                        cisWindow),
+                          error = function(e) NULL),
+                        traitPos = tryCatch(
+                          .anchorVector(data, rowContext, rowTrait, "traitPos"),
+                          error = function(e) NULL),
                         ldSketch = NULL)
       else NULL
 
@@ -1560,6 +1611,9 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
            naAction           = c("drop", "impute"),
            verbose            = 1,
            trim               = TRUE,
+           fullFit            = FALSE,
+           fullFitAlphaOnly   = TRUE,
+           includeAllCs       = FALSE,
            phenotypeCovariatesToResidualize = NULL,
            genotypeCovariatesToResidualize  = NULL,
            residualizePhenotypeCovariates   = TRUE,
@@ -1659,6 +1713,9 @@ setMethod("fineMappingPipeline", "QtlSumStats",
            dataDrivenPriorWeightsCutoff = 1e-10,
            verbose            = 1,
            trim               = TRUE,
+           fullFit            = FALSE,
+           fullFitAlphaOnly   = TRUE,
+           includeAllCs       = FALSE,
            ...) {
     .fmAssertQcd(data)
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
@@ -1676,7 +1733,9 @@ setMethod("fineMappingPipeline", "QtlSumStats",
         methodArgs = methodArgs,
         twasWeights = twasWeights,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
-        fineMappingResult = fineMappingResult)
+        fineMappingResult = fineMappingResult,
+        fullFit = fullFit, fullFitAlphaOnly = fullFitAlphaOnly,
+        includeAllCs = includeAllCs)
       tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
       methodArgs <- methodArgs[tokens]
       if (length(tokens) == 0L) {
@@ -1766,7 +1825,8 @@ setMethod("fineMappingPipeline", "QtlSumStats",
           z, ldMat, n, toRun, addSusieInf, coverage, secondaryCoverage,
           signalCutoff, minAbsCorr, methodArgs, verbose,
           label = sprintf("(study='%s', context='%s', trait='%s')", st, ctx, tr),
-          af = afByVar)
+          af = afByVar, fullFit = fullFit,
+          fullFitAlphaOnly = fullFitAlphaOnly, includeAllCs = includeAllCs)
         # The method column carries the bare token, independent of the
         # postprocess class.
         for (tk in names(ents)) pushRow(st, ctx, tr, tk, ents[[tk]])
@@ -1788,7 +1848,9 @@ setMethod("fineMappingPipeline", "QtlSumStats",
         methodArgs = methodArgs,
         twasWeights = twasWeights,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
-        fineMappingResult = fineMappingResult)
+        fineMappingResult = fineMappingResult,
+        fullFit = fullFit, fullFitAlphaOnly = fullFitAlphaOnly,
+        includeAllCs = includeAllCs)
       jointResult <- if (is.null(jointResult)) autoJoint
                      else if (is.null(autoJoint)) jointResult
                      else .rbindFineMappingResult(jointResult, autoJoint,
@@ -1797,6 +1859,15 @@ setMethod("fineMappingPipeline", "QtlSumStats",
 
     perTupleResult <- if (length(rowEntries) > 0L)
       .fmBuildQtlResult(rowStudy, rowContext, rowTrait, rowMethod, rowEntries,
+                        # QtlSumStats: region = the entry's variant span (no
+                        # cis-window); traitPos = the supplied column or NULL
+                        # (omitted -> getTraitPosition() returns NA).
+                        region   = tryCatch(
+                          .anchorVector(data, rowContext, rowTrait, "region"),
+                          error = function(e) NULL),
+                        traitPos = tryCatch(
+                          .anchorVector(data, rowContext, rowTrait, "traitPos"),
+                          error = function(e) NULL),
                         ldSketch = ldSketch)
       else NULL
     if (is.null(jointResult)) {
@@ -1829,6 +1900,9 @@ setMethod("fineMappingPipeline", "GwasSumStats",
            fineMappingResult = NULL,
            verbose           = 1,
            trim              = TRUE,
+           fullFit           = FALSE,
+           fullFitAlphaOnly  = TRUE,
+           includeAllCs      = FALSE,
            ...) {
     .fmAssertQcd(data)
     norm       <- .fmNormalizeMethods(methods, L = L, Lgreedy = Lgreedy)
@@ -1902,7 +1976,8 @@ setMethod("fineMappingPipeline", "GwasSumStats",
         z, ldMat, n, toRun, addSusieInf, coverage, secondaryCoverage,
         signalCutoff, minAbsCorr, methodArgs, verbose,
         label = sprintf("GWAS (study='%s', region='%s')", st, region_id),
-        af = afByVar)
+        af = afByVar, fullFit = fullFit,
+        fullFitAlphaOnly = fullFitAlphaOnly, includeAllCs = includeAllCs)
       for (tk in names(ents)) pushRow(st, tk, region_id, ents[[tk]])
     }
 

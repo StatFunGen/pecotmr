@@ -28,6 +28,7 @@ Imports:
     dplyr,
     magrittr,
     matrixStats,
+    metafor,
     methods,
     purrr,
     quadprog,
@@ -48,6 +49,8 @@ Suggests:
     bigsnpr,
     bigstatsr,
     coda,
+    CorShrink,
+    ctwas,
     flashier,
     fsusieR,
     GBJ,
@@ -57,7 +60,6 @@ Suggests:
     igraph,
     knitr,
     L0Learn,
-    lassosum,
     mashr,
     mr.mashr,
     mvsusieR,
@@ -76,18 +78,21 @@ Suggests:
     SNPRelate,
     snpStats,
     testthat,
+    udr,
     VariantAnnotation
 Remotes:
+    kkdey/CorShrink,
     stephenslab/fsusieR,
     stephenslab/mvsusieR,
     stephenslab/susieR,
+    stephenslab/udr,
+    xinhe-lab/multigroup_ctwas,
 LinkingTo:
     cpp11,
     cpp11armadillo
 NeedsCompilation: yes
 VignetteBuilder: knitr
 Config/roxygen2/version: 8.0.0
-RoxygenNote: 7.3.3
 Collate:
     'AllGenerics.R'
     'GenotypeHandle.R'
@@ -113,16 +118,20 @@ Collate:
     'TwasWeightsEntry.R'
     'causalInferencePipeline.R'
     'colocPipeline.R'
+    'qtlSumStats.R'
     'colocboostPipeline.R'
     'cpp11.R'
+    'credibleSetSummary.R'
     'crossValidation.R'
     'ctwasPipeline.R'
     'deprecated.R'
     'exampleData.R'
+    'gwasSumStats.R'
     'fineMappingPipeline.R'
     'fineMappingWrappers.R'
+    'fsusieAccessors.R'
     'genotypeIo.R'
-    'gwasSumStats.R'
+    'getLbf.R'
     'h2Annotations.R'
     'h2EstimationWrappers.R'
     'jointEngine.R'
@@ -130,11 +139,12 @@ Collate:
     'ld.R'
     'sumstatsQc.R'
     'variantId.R'
-    'qtlSumStats.R'
     'manifestLoaders.R'
     'mashPipeline.R'
     'mashWrapper.R'
+    'overlapTopLoci.R'
     'pvalCombine.R'
+    'qtlAssociationPostprocess.R'
     'qtlEnrichmentPipeline.R'
     'regularizedRegressionWrappers.R'
     'relatednessQc.R'

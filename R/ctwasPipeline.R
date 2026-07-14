@@ -295,6 +295,9 @@ assembleCtwasInputs <- function(gwasSumStats, twasWeights,
     gss    <- gwasSumStats[[rid]]
     tw     <- twasWeights[[rid]]   # may be NULL for SNP-only blocks
     gwasLd <- getLdSketch(gss)
+    if (is.null(gwasLd))
+      stop("ctwasPipeline: GwasSumStats for region '", rid, "' carries no ",
+           "ldSketch (ldSketch = NULL); cTWAS requires an LD reference.")
     if (!is.null(tw))
       .ctwasRequireMatchingLdSketches(getLdSketch(tw), gwasLd)
 
@@ -381,7 +384,7 @@ assembleCtwasInputs <- function(gwasSumStats, twasWeights,
 #' @param fallbackToPrefit Logical (length 1). When \code{TRUE} (default
 #'   \code{FALSE}), if \code{ctwas::est_param}'s accurate EM fails for ANY
 #'   reason on a degenerate input, re-run only the prefit step via
-#'   \code{ctwas:::fit_EM} and return those (typically finite) priors as the
+#'   ctwas's internal \code{fit_EM} and return those (typically finite) priors as the
 #'   param. The accurate-EM failure mode is version-dependent (ctwas <= 0.4.x:
 #'   \code{"contains NAs"}; ctwas >= 0.6.0: \code{"No regions selected!"} or a
 #'   NaN-loglik \code{"missing value where TRUE/FALSE needed"}), so the catch is
@@ -583,6 +586,9 @@ finemapCtwasRegions <- function(screenResult,
       snpinfo_loader_fun = screenResult$snpinfo_loader_fun,
       ncore              = as.integer(ncore)), extra = list(...))
   }
+  # Repair cTWAS's molecular_id mislabel (first-"|" split of our composite id).
+  fmRes$finemap_res     <- .ctwasFixMolecularId(fmRes$finemap_res)
+  fmRes$susie_alpha_res <- .ctwasFixMolecularId(fmRes$susie_alpha_res)
   list(
     z_gene          = screenResult$z_gene,
     param           = screenResult$param,
@@ -732,7 +738,7 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
 # param list shaped like ctwas::est_param normally produces. Used as
 # the fallback path when est_param's accurate EM diverges to NaN on
 # toy / underpowered data (matches the legacy ctwas_2 workaround).
-# Calls ctwas's internal `fit_EM` (via ::: getFromNamespace) with
+# Calls ctwas's internal `fit_EM` (via getFromNamespace) with
 # niter = niter_prefit, then applies the same thin-adjustment to the
 # SNP group_prior that est_param applies. p_single_effect is left as
 # NA since the accurate EM never ran.
@@ -995,6 +1001,21 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
                      parts, n, USE.NAMES = FALSE),
     method  = mapply(function(p, k) p[[k]], parts, n, USE.NAMES = FALSE),
     stringsAsFactors = FALSE)
+}
+
+# cTWAS's finemap_regions derives `molecular_id` by splitting the gene id on the
+# FIRST "|", which mislabels our composite `region|study|context|trait|method`
+# id (it takes the region as the molecular_id). Restore the true trait for gene
+# rows; SNP-background rows (variant ids, no "|") are left untouched.
+# @noRd
+.ctwasFixMolecularId <- function(df) {
+  if (is.null(df) || !is.data.frame(df) || nrow(df) == 0L ||
+      !all(c("id", "molecular_id") %in% names(df))) return(df)
+  isGene <- lengths(strsplit(as.character(df$id), "|", fixed = TRUE)) >= 5L
+  if (any(isGene))
+    df$molecular_id[isGene] <-
+      .ctwasParseGeneIds(as.character(df$id)[isGene])$trait
+  df
 }
 
 # Enforce the multi-context joint-model invariant: every context in a run must

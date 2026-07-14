@@ -144,15 +144,32 @@ setMethod("writeSumstatsVcf", signature("FineMappingResultBase"),
                                  spec$study, spec$context %||% "_",
                                  spec$trait %||% "_", spec$method)
 
-  # Body of the VCF is exclusively marginal univariate effects — no
-  # posterior output. By design the fine-mapping write-out emits the
-  # marginal sumstats so consumers can run their own downstream
-  # analysis (coloc, TWAS, etc.) on a uniform per-variant table.
-  marginal <- getMarginalEffects(entry)
-  if (nrow(marginal) == 0)
+  # Per-variant body: the fine-mapping POSTERIOR (getTopLoci at signalCutoff 0 =
+  # every fitted variant, carrying pip / CS membership / conditional effect),
+  # joined to the MARGINAL univariate sumstats (getMarginalEffects) where those
+  # exist. mvSuSiE / fSuSiE have no marginal sumstats, so the posterior drives
+  # the variant set and supplies ES=conditional_effect + PIP + CS; univariate
+  # susie adds marginal ES=beta / SE / LP / AF on top. This restores the legacy
+  # create_vcf fields (ES / CS / PIP) the mv_susie cell wrote.
+  post <- tryCatch(as.data.frame(getTopLoci(entry, signalCutoff = 0)),
+                   error = function(e) NULL)
+  marg <- tryCatch(as.data.frame(getMarginalEffects(entry)),
+                   error = function(e) NULL)
+  hasPost <- !is.null(post) && nrow(post) > 0L
+  hasMarg <- !is.null(marg) && nrow(marg) > 0L
+  if (hasPost) {
+    base <- post
+    m <- if (hasMarg) marg[match(base$variant_id, marg$variant_id), , drop = FALSE]
+         else NULL
+  } else if (hasMarg) {
+    base <- marg; m <- marg
+  } else {
     stop("writeSumstatsVcf: entry [", sn, "] has no variants to write")
+  }
+  nSnps <- nrow(base)
+  col <- function(df, nm) if (!is.null(df) && nm %in% names(df)) df[[nm]]
+                          else rep(NA, nSnps)
 
-  nSnps <- nrow(marginal)
   geno <- list()
   hdrRows <- character(0); hdrNum <- character(0)
   hdrType <- character(0); hdrDesc <- character(0)
@@ -161,33 +178,78 @@ setMethod("writeSumstatsVcf", signature("FineMappingResultBase"),
     hdrRows <<- c(hdrRows, name); hdrNum <<- c(hdrNum, "A")
     hdrType <<- c(hdrType, type); hdrDesc <<- c(hdrDesc, desc)
   }
-  if (any(!is.na(marginal$beta)))
-    addGeno("ES", marginal$beta, "Float",
-            "Marginal univariate effect-size estimate (effect allele)")
-  if (any(!is.na(marginal$se)))
-    addGeno("SE", marginal$se, "Float",
-            "Standard error of the marginal effect-size estimate")
-  if (any(!is.na(marginal$p))) {
-    lp <- ifelse(is.na(marginal$p) | marginal$p <= 0,
-                 NA_real_, -log10(marginal$p))
-    addGeno("LP", lp, "Float",
-            "-log10 p-value of the marginal univariate effect")
+  # ES: posterior conditional effect (mvSuSiE/fSuSiE) when present, else the
+  # marginal univariate beta (univariate susie).
+  es <- col(base, "conditional_effect")
+  if (all(is.na(es))) es <- col(m, "beta")
+  if (any(!is.na(es)))
+    addGeno("ES", es, "Float",
+            "Effect size (posterior conditional effect, else marginal beta), effect allele")
+  se <- col(m, "se")
+  if (any(!is.na(se)))
+    addGeno("SE", se, "Float", "Standard error of the marginal effect-size estimate")
+  p <- col(m, "p")
+  if (any(!is.na(p))) {
+    lp <- ifelse(is.na(p) | p <= 0, NA_real_, -log10(p))
+    addGeno("LP", lp, "Float", "-log10 p-value of the marginal univariate effect")
   }
-  if (any(!is.na(marginal$N)))
-    addGeno("SS", as.integer(marginal$N), "Integer", "Sample size")
-  if (any(!is.na(marginal$af)))
-    addGeno("AF", marginal$af, "Float", "Allele frequency (effect allele)")
+  if (any(!is.na(col(m, "N"))))
+    addGeno("SS", as.integer(col(m, "N")), "Integer", "Sample size")
+  af <- col(base, "af"); if (all(is.na(af))) af <- col(m, "af")
+  if (any(!is.na(af)))
+    addGeno("AF", af, "Float", "Allele frequency (effect allele)")
+  # Posterior fields, only when a posterior table is available.
+  if (hasPost) {
+    pip <- col(base, "pip")
+    if (any(!is.na(pip)))
+      addGeno("PIP", pip, "Float", "Posterior inclusion probability")
+    lbf <- col(base, "logBF")
+    if (any(!is.na(lbf)))
+      addGeno("LBF", lbf, "Float", "Per-variant log Bayes factor (max single effect)")
+    lfsr <- col(base, "lfsr")
+    if (any(!is.na(lfsr)))
+      addGeno("LFSR", lfsr, "Float", "Local false sign rate (per-condition posterior)")
+    # Credible sets are DYNAMIC: pecotmr does not assume any fixed coverage, so
+    # we emit a CS<coverage> (+ PUR<coverage>) field for every cs_<coverage>
+    # column the pipeline actually produced (e.g. cs_95 -> CS95 / PUR95). The
+    # 50/70/95 defaults are an xqtl-protocol pipeline choice, not baked in here.
+    csCols <- grep("^cs_[0-9.]+$", names(base), value = TRUE)
+    for (cc in csCols) {
+      cov <- sub("^cs_", "", cc)
+      idx <- suppressWarnings(as.integer(sub(".*_", "", as.character(base[[cc]]))))
+      idx[is.na(idx)] <- 0L
+      addGeno(paste0("CS", cov), idx, "Integer",
+              sprintf("Credible-set index at %s%% coverage (0 = not captured)", cov))
+      pc <- paste0(cc, "_purity")
+      if (pc %in% names(base)) {
+        pur <- suppressWarnings(as.numeric(base[[pc]]))
+        if (any(!is.na(pur)))
+          addGeno(paste0("PUR", cov), pur, "Float",
+                  sprintf("Purity (min abs corr) of the %s%% credible set", cov))
+      }
+    }
+    # Per-CS variant-level fullFit columns (within_cs_pip default scalar, and the
+    # wide within_cs_pip_<lab> / cs_logbf_<lab> / cs_effect_<lab> / cs_effect_var_<lab>
+    # sets when the topLoci was built with fullFit=TRUE). Emit each as an
+    # uppercase FORMAT field.
+    for (cc in grep("^(within_cs_pip|cs_logbf_|cs_effect_)", names(base), value = TRUE)) {
+      v <- suppressWarnings(as.numeric(base[[cc]]))
+      if (any(!is.na(v)))
+        addGeno(toupper(cc), v, "Float",
+                sprintf("Per-credible-set variant statistic (%s)", cc))
+    }
+  }
 
   genoHeader <- DataFrame(
     Number = hdrNum, Type = hdrType, Description = hdrDesc,
     row.names = hdrRows)
 
   .writeVcfImpl(
-    chrom = marginal$chrom,
-    pos = marginal$pos,
-    ref = marginal$A2,
-    alt = marginal$A1,
-    snpIds = marginal$variant_id,
+    chrom = col(base, "chrom"),
+    pos = col(base, "pos"),
+    ref = col(base, "A2"),
+    alt = col(base, "A1"),
+    snpIds = col(base, "variant_id"),
     geno = geno,
     genoHeader = genoHeader,
     sampleName = sn,

@@ -32,7 +32,9 @@ NULL
 #'   \code{GwasSumStats}) inherit from \code{DFrame} and share the
 #'   \code{ldSketch} / \code{genome} / \code{qcInfo} slots.
 #' @slot ldSketch The \code{GenotypeHandle} the QC pipeline harmonized
-#'   against. Required: \code{summaryStatsQc()} sets it.
+#'   against, or \code{NULL}. Optional: LD-free workflows (e.g. mash, which
+#'   operates across conditions per variant) carry \code{NULL}; pipelines that
+#'   need LD validate its presence when they consume the collection.
 #' @slot genome Character, genome build label.
 #' @slot qcInfo A \code{list} recording which QC steps ran. Empty
 #'   \code{list()} on construction; populated by \code{summaryStatsQc()}
@@ -44,7 +46,7 @@ NULL
 setClass("SumStatsBase",
   contains = c("VIRTUAL", "DFrame"),
   representation(
-    ldSketch = "GenotypeHandle",
+    ldSketch = "ANY",
     genome   = "character",
     qcInfo   = "list"
   ))
@@ -98,6 +100,22 @@ setMethod("getZ", "SumStatsBase", function(x, ...) mcols(getSumStats(x, ...))$Z)
 #' @rdname getN
 #' @export
 setMethod("getN", "SumStatsBase", function(x, ...) mcols(getSumStats(x, ...))$N)
+
+# getP / getBeta / getSE are first-class alongside getZ / getN: they read the
+# optional P / BETA / SE mcols and return NULL when the entry does not carry
+# them (DataFrame `$` semantics), so a p-value-primary sumstats (e.g. TensorQTL
+# cis output) is an equal citizen to a Z-primary GWAS sumstats.
+#' @rdname getP
+#' @export
+setMethod("getP", "SumStatsBase", function(x, ...) mcols(getSumStats(x, ...))$P)
+
+#' @rdname getBeta
+#' @export
+setMethod("getBeta", "SumStatsBase", function(x, ...) mcols(getSumStats(x, ...))$BETA)
+
+#' @rdname getSE
+#' @export
+setMethod("getSE", "SumStatsBase", function(x, ...) mcols(getSumStats(x, ...))$SE)
 
 #' @rdname getMaf
 #' @export
@@ -177,13 +195,14 @@ setGeneric(".fmrSelectEntry", function(x, ...) standardGeneric(".fmrSelectEntry"
 #' @export
 setMethod("getCs", "FineMappingResultBase",
   function(x, study = NULL, context = NULL, trait = NULL, method = NULL,
-           region = NULL, coverage = 0.95, ...) {
+           region = NULL, coverage = 0.95, minPurity = NULL, ...) {
     # Selectors pinning one entry -> that entry's bare credible-set table; no /
     # partial selectors -> aggregate every matching entry's credible sets,
     # prefixed with the row identity (study/context/trait/region_id/method).
+    # `minPurity` is an independent CS-quality filter, orthogonal to coverage.
     .fmrAggregateView(x, study = study, context = context, trait = trait,
       method = method, region = region,
-      perEntry = function(e) getCs(e, coverage = coverage))
+      perEntry = function(e) getCs(e, coverage = coverage, minPurity = minPurity))
   })
 
 #' @rdname getTopLoci
@@ -191,10 +210,11 @@ setMethod("getCs", "FineMappingResultBase",
 setMethod("getTopLoci", "FineMappingResultBase",
   function(x, type = c("data.frame", "GRanges"), signalCutoff = 0.025,
            study = NULL, context = NULL, trait = NULL, method = NULL,
-           region = NULL, ...) {
+           region = NULL, minPurity = NULL, ...) {
     type <- match.arg(type)
     # type = "GRanges" can only be honored for a single pinned entry; the
-    # aggregate (identity-prefixed) form is data.frame-only.
+    # aggregate (identity-prefixed) form is data.frame-only. `minPurity` is an
+    # independent CS-quality filter, orthogonal to the pip `signalCutoff`.
     if (type == "GRanges") {
       sel <- tryCatch(
         .fmrSelectEntry(x, study = study, context = context, trait = trait,
@@ -204,7 +224,8 @@ setMethod("getTopLoci", "FineMappingResultBase",
         stop("getTopLoci: aggregating across multiple entries requires ",
              "type = 'data.frame'.")
       }
-      return(getTopLoci(sel, type = "GRanges", signalCutoff = signalCutoff))
+      return(getTopLoci(sel, type = "GRanges", signalCutoff = signalCutoff,
+                        minPurity = minPurity))
     }
     # data.frame: bare per-variant table when selectors pin one entry, else the
     # per-variant tables of every matching row stacked with row identity
@@ -212,7 +233,8 @@ setMethod("getTopLoci", "FineMappingResultBase",
     .fmrAggregateView(x, study = study, context = context, trait = trait,
       method = method, region = region,
       perEntry = function(e) getTopLoci(e, type = "data.frame",
-                                        signalCutoff = signalCutoff))
+                                        signalCutoff = signalCutoff,
+                                        minPurity = minPurity))
   })
 
 #' @rdname getMarginalEffects
@@ -232,6 +254,11 @@ setMethod("getMarginalEffects", "FineMappingResultBase",
 #' @rdname getRegion
 #' @export
 setMethod("getRegion", "FineMappingResultBase", function(x, ...) .getRegionColumn(x))
+
+#' @rdname getTraitPosition
+#' @export
+setMethod("getTraitPosition", "FineMappingResultBase",
+          function(x, ...) .getTraitPosColumn(x))
 
 #' @rdname getSusieFit
 #' @export

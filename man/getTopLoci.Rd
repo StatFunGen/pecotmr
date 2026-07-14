@@ -18,10 +18,17 @@ getTopLoci(x, type = c("data.frame", "GRanges"), signalCutoff = 0.025, ...)
   trait = NULL,
   method = NULL,
   region = NULL,
+  minPurity = NULL,
   ...
 )
 
-\S4method{getTopLoci}{FineMappingEntry}(x, type = c("data.frame", "GRanges"), signalCutoff = 0.025, ...)
+\S4method{getTopLoci}{FineMappingEntry}(
+  x,
+  type = c("data.frame", "GRanges"),
+  signalCutoff = 0.025,
+  minPurity = NULL,
+  ...
+)
 }
 \arguments{
 \item{x}{A \code{FineMappingEntry} or \code{FineMappingResult}.}

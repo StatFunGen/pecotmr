@@ -77,6 +77,30 @@ test_that("QtlSumStats: multi-tuple object is keyed by (study, context, trait)",
   expect_equal(getTraits(obj), "t1")
 })
 
+test_that("QtlSumStats: getTraitPosition returns NA when no trait position supplied", {
+  obj <- .qtlMakeOne(trait = "ENSG001")
+  # traitPos cannot be inferred from summary statistics, so an unsupplied
+  # position reports NA rather than a fabricated range.
+  expect_identical(getTraitPosition(obj), NA)
+  expect_identical(getTraitPosition(obj, "ENSG001"), NA)
+})
+
+test_that("QtlSumStats: getTraitPosition returns the supplied trait position", {
+  tpos <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1000L, 1500L))
+  obj <- QtlSumStats(
+    study = "s1", context = "c1", trait = "ENSGX",
+    entry = list(.qtlMakeEntryGr(5)),
+    genome = "hg19", ldSketch = .qtlMakeGenotypeHandle(),
+    traitPos = tpos)
+  tp <- getTraitPosition(obj)
+  expect_s4_class(tp, "GRanges")
+  expect_equal(GenomicRanges::start(tp), 1000L)
+  expect_equal(GenomicRanges::end(tp), 1500L)
+  expect_equal(GenomicRanges::start(getTraitPosition(obj, "ENSGX")), 1000L)
+  # a trait not in the collection -> NA
+  expect_identical(getTraitPosition(obj, "nope"), NA)
+})
+
 test_that("QtlSumStats: errors when required args are missing", {
   expect_error(QtlSumStats(study = "s1", context = "c1"),
                "all required")
@@ -321,4 +345,84 @@ test_that("getSumStats errors on an empty QtlSumStats collection", {
     ldSketch = .qtlMakeGenotypeHandle(), varY = numeric(0))
   expect_equal(nrow(empty), 0L)
   expect_error(getSumStats(empty), "has no rows")
+})
+
+test_that("QtlSumStats: ldSketch is optional (NULL for LD-free workflows)", {
+  obj <- QtlSumStats(
+    study = "s1", context = "c1", trait = "t1",
+    entry = list(.qtlMakeEntryGr(1)), genome = "hg19")   # ldSketch omitted
+  expect_null(getLdSketch(obj))
+  expect_output(show(obj), "none \\(LD-free\\)")
+})
+
+test_that("QtlSumStats: a non-GenotypeHandle ldSketch is rejected", {
+  expect_error(
+    QtlSumStats(study = "s1", context = "c1", trait = "t1",
+                entry = list(.qtlMakeEntryGr(1)), genome = "hg19",
+                ldSketch = "not_a_handle"),
+    "GenotypeHandle or NULL")
+})
+
+# ===========================================================================
+# First-class summary-statistic accessors: getP / getBeta / getSE
+# ===========================================================================
+
+test_that("getP / getBeta / getSE read the optional P/BETA/SE mcols", {
+  gr <- .qtlMakeEntryGr(4)
+  S4Vectors::mcols(gr)$P    <- c(0.1, 0.01, 1e-4, 0.5)
+  S4Vectors::mcols(gr)$BETA <- c(0.2, -0.3, 0.4, 0.05)
+  S4Vectors::mcols(gr)$SE   <- rep(0.1, 4)
+  x <- QtlSumStats(study = "s", context = "c", trait = "g",
+                   entry = list(gr), genome = "hg19")
+  expect_equal(getP(x),    c(0.1, 0.01, 1e-4, 0.5))
+  expect_equal(getBeta(x), c(0.2, -0.3, 0.4, 0.05))
+  expect_equal(getSE(x),   rep(0.1, 4))
+})
+
+test_that("getP / getBeta / getSE return NULL when the entry omits them", {
+  y <- .qtlMakeOne(n = 4)                       # Z/N-only entry
+  expect_null(getP(y))
+  expect_null(getBeta(y))
+  expect_null(getSE(y))
+  expect_equal(getZ(y), seq(1.0, by = 0.5, length.out = 4))   # Z still works
+})
+
+# ===========================================================================
+# Constructor auto-fills tss_distance / tes_distance from traitPos
+# ===========================================================================
+
+test_that("constructor derives tss/tes distance from a point trait position", {
+  gr <- .qtlMakeEntryGr(5, start_at = 100L, step = 100L)      # 100..500
+  tp <- GenomicRanges::GRanges("chr1", IRanges::IRanges(250L, width = 1L))
+  x  <- QtlSumStats(study = "s", context = "c", trait = "g",
+                    entry = list(gr), genome = "hg19", traitPos = tp)
+  mc <- S4Vectors::mcols(getSumStats(x))
+  expect_equal(mc$tss_distance, c(100, 200, 300, 400, 500) - 250)
+  # 1bp trait -> tss and tes distance are identical
+  expect_equal(mc$tss_distance, mc$tes_distance)
+})
+
+test_that("constructor derives distinct tss/tes distance for a multi-base trait", {
+  gr <- .qtlMakeEntryGr(3, start_at = 100L, step = 100L)      # 100,200,300
+  tp <- GenomicRanges::GRanges("chr1", IRanges::IRanges(200L, 400L))  # TSS 200, TES 400
+  x  <- QtlSumStats(study = "s", context = "c", trait = "g",
+                    entry = list(gr), genome = "hg19", traitPos = tp)
+  mc <- S4Vectors::mcols(getSumStats(x))
+  expect_equal(mc$tss_distance, c(100, 200, 300) - 200)
+  expect_equal(mc$tes_distance, c(100, 200, 300) - 400)
+})
+
+test_that("no traitPos -> no distance columns; existing distance is preserved", {
+  z <- .qtlMakeOne(n = 3)
+  expect_null(S4Vectors::mcols(getSumStats(z))$tss_distance)
+
+  gr <- .qtlMakeEntryGr(2, start_at = 100L, step = 100L)
+  S4Vectors::mcols(gr)$tss_distance <- c(-999L, -888L)          # pre-existing
+  w <- QtlSumStats(study = "s", context = "c", trait = "g",
+                   entry = list(gr), genome = "hg19",
+                   traitPos = GenomicRanges::GRanges(
+                     "chr1", IRanges::IRanges(250L, width = 1L)))
+  mc <- S4Vectors::mcols(getSumStats(w))
+  expect_equal(mc$tss_distance, c(-999L, -888L))               # not clobbered
+  expect_equal(mc$tes_distance, c(100, 200) - 250)             # absent -> filled
 })

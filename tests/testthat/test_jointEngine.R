@@ -26,7 +26,7 @@
 .je_mockPostprocess <- function(fit, method, dataX, dataY, coverage,
                                 secondaryCoverage, signalCutoff, minAbsCorr,
                                 csInput = NULL, af = NULL, region = NULL,
-                                conditionIdx = NULL) {
+                                conditionIdx = NULL, ...) {
   vids <- colnames(dataX)
   FineMappingEntry(
     variantIds = vids,
@@ -55,6 +55,42 @@ test_that(".runJointCell: cross-context FM expands to per-context rows", {
   expect_equal(as.character(res$trait), c("G1", "G1", "G2", "G2"))
   expect_equal(as.character(res$method), rep("mvsusie", 4L))
   expect_equal(as.character(res$jointContexts), rep("c1;c2", 4L))     # provenance
+})
+
+test_that(".runJointCell (mvsusie): fullFit config threads to postprocess", {
+  # The joint engine's fitJointGroup frame does not lexically see the pipeline
+  # method's fullFit params, so they must ride the FmJointPipeline config.
+  # Assert the three flags reach .fmPostprocessOne verbatim (buildTopLoci's own
+  # fullFit column construction is covered in test_fineMappingWrappers.R).
+  set.seed(1)
+  cell <- .je_synthCell(list(.je_mkGroup("G1")))
+  pipe <- new("FmJointPipeline", config = list(
+    coverage = 0.95, cvFolds = 0,
+    fullFit = TRUE, fullFitAlphaOnly = FALSE, includeAllCs = TRUE))
+  local_mocked_bindings(create_mixture_prior = function(...) "PRIOR",
+                        .package = "mvsusieR")
+  captured <- new.env(parent = emptyenv())
+  capturingPostprocess <- function(fit, method, dataX, dataY, coverage,
+                                   secondaryCoverage, signalCutoff, minAbsCorr,
+                                   csInput = NULL, af = NULL, region = NULL,
+                                   conditionIdx = NULL, fullFit = NULL,
+                                   fullFitAlphaOnly = NULL, includeAllCs = NULL,
+                                   ...) {
+    captured$fullFit          <- fullFit
+    captured$fullFitAlphaOnly <- fullFitAlphaOnly
+    captured$includeAllCs     <- includeAllCs
+    .je_mockPostprocess(fit, method, dataX, dataY, coverage, secondaryCoverage,
+                        signalCutoff, minAbsCorr, csInput = csInput, af = af,
+                        region = region, conditionIdx = conditionIdx)
+  }
+  local_mocked_bindings(fitMvsusie = function(...) list(),
+                        .fmPostprocessOne = capturingPostprocess,
+                        .package = "pecotmr")
+  pecotmr:::.runJointCell(cell, pipe, data = NULL, scope = NULL,
+                          tokens = "mvsusie")
+  expect_true(isTRUE(captured$fullFit))            # threaded, not the FALSE default
+  expect_false(isTRUE(captured$fullFitAlphaOnly))  # widen all four matrices
+  expect_true(isTRUE(captured$includeAllCs))       # keep filtered-out CS
 })
 
 test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", {

@@ -249,6 +249,61 @@ test_that(".qtlVariantIndices: returns integer(0) when no overlap", {
 })
 
 # ===========================================================================
+# getTraitPosition / .qtlTraitPos
+# ===========================================================================
+
+test_that("getTraitPosition returns each trait's union genomic span across contexts", {
+  # .qh_makeSe places ENSG1 @ chr1:1000-1500 and ENSG2 @ chr1:2000-2500 in every
+  # context, so each trait's cross-context union span is that single interval.
+  qd <- .qh_makeDataset(contexts = c("brain", "liver"))
+  gr <- getTraitPosition(qd)
+  expect_s4_class(gr, "GRanges")
+  expect_setequal(names(gr), c("ENSG1", "ENSG2"))
+  expect_equal(as.character(GenomicRanges::seqnames(gr["ENSG1"])), "chr1")
+  expect_equal(GenomicRanges::start(gr["ENSG1"]), 1000L)
+  expect_equal(GenomicRanges::end(gr["ENSG1"]),   1499L)   # start 1000 + width 500 - 1
+  expect_equal(GenomicRanges::start(gr["ENSG2"]), 2000L)
+  # single-trait selection routes through the traitId branch of the method
+  one <- getTraitPosition(qd, traitId = "ENSG2")
+  expect_equal(names(one), "ENSG2")
+  expect_equal(GenomicRanges::start(one), 2000L)
+})
+
+test_that("getTraitPosition emits a chrUn sentinel for a trait absent from every context", {
+  qd <- .qh_makeDataset(contexts = "brain")
+  gr <- getTraitPosition(qd, traitId = "NOPE")
+  expect_equal(names(gr), "NOPE")
+  expect_equal(as.character(GenomicRanges::seqnames(gr)), "chrUn")
+})
+
+# (QtlDataset validity requires a trait's rowRanges to be identical across
+# contexts, so the cross-context min/max union in .qtlTraitPos only ever sees
+# matching ranges; the two-context fixture above already exercises that loop.)
+
+# ===========================================================================
+# .qtlApplyFilterOverrides
+# ===========================================================================
+
+test_that(".qtlApplyFilterOverrides replaces every supplied slot on a validated copy", {
+  qd <- .qh_makeDataset(contexts = "brain")
+  out <- pecotmr:::.qtlApplyFilterOverrides(
+    qd, mafCutoff = 0.05, macCutoff = 10, xvarCutoff = 0.01, imissCutoff = 0.1,
+    keepIndel = FALSE, keepSamples = c("s1", "s2"), keepVariants = c("rs1", "rs2"))
+  expect_equal(out@mafCutoff, 0.05)
+  expect_equal(out@macCutoff, 10)
+  expect_equal(out@xvarCutoff, 0.01)
+  expect_equal(out@imissCutoff, 0.1)
+  expect_false(out@keepIndel)
+  expect_equal(out@keepSamples, c("s1", "s2"))
+  expect_equal(out@keepVariants, c("rs1", "rs2"))
+})
+
+test_that(".qtlApplyFilterOverrides leaves stored slots untouched when args are NULL", {
+  qd <- .qh_makeDataset(contexts = "brain")
+  expect_identical(pecotmr:::.qtlApplyFilterOverrides(qd), qd)
+})
+
+# ===========================================================================
 # .qtlResolvePhenoSelection
 # ===========================================================================
 

@@ -258,6 +258,46 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
   region
 }
 
+# Per-trait genomic position: each trait's OWN rowRanges span across contexts
+# (union min-start to max-end), WITHOUT the cisWindow expansion. One range per
+# traitId (a 0-width chrUn sentinel for a trait absent from every context), for
+# threading trait-position provenance onto QtlFineMappingResult / TwasWeights.
+# @noRd
+.qtlTraitPos <- function(x, traitIds) {
+  # Extract chrom/start/end as plain vectors per trait (union span across
+  # contexts), then build ONE fresh GRanges at the end. Combining per-context
+  # GRanges with do.call(c, .) can trip S4 seqinfo reconciliation in some
+  # GenomeInfoDb builds, so we avoid it entirely.
+  n <- length(traitIds)
+  chrs <- rep("chrUn", n); starts <- rep(1L, n); ends <- rep(1L, n)
+  for (i in seq_len(n)) {
+    tid <- traitIds[[i]]; st <- Inf; en <- -Inf; ch <- NA_character_
+    for (se in x@phenotypes) {
+      h <- match(tid, rownames(se)); h <- h[!is.na(h)]
+      if (length(h) == 0L) next
+      rr <- SummarizedExperiment::rowRanges(se)[h]
+      ch <- as.character(GenomicRanges::seqnames(rr))[1L]
+      st <- min(st, GenomicRanges::start(rr))
+      en <- max(en, GenomicRanges::end(rr))
+    }
+    if (!is.na(ch)) {
+      chrs[i] <- ch; starts[i] <- as.integer(st); ends[i] <- as.integer(en)
+    }
+  }
+  gr <- GenomicRanges::GRanges(
+    chrs, IRanges::IRanges(start = starts, end = pmax(ends, starts)))
+  names(gr) <- traitIds
+  gr
+}
+
+#' @rdname getTraitPosition
+#' @export
+setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
+  tids <- if (is.null(traitId)) unique(unlist(lapply(x@phenotypes, rownames)))
+          else as.character(traitId)
+  .qtlTraitPos(x, tids)
+})
+
 # Internal: map a GRanges region (one or more ranges) into 1-based snpIdx into
 # handle@snpInfo. Indices are unioned across ranges in range order (first
 # occurrence wins), so overlapping ranges contribute each variant once.
@@ -443,8 +483,12 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
     mafVec <- mafVec[keepVarMask]
     afVec  <- afVec[keepVarMask]
   } else {
+    # nocov start  (unreachable: every zero-variant path returns early above, so
+    # ncol(dosage) is always >= 1 here; kept so mafVec/afVec stay defined if a
+    # future refactor removes one of those guards)
     mafVec <- numeric(0)
     afVec  <- numeric(0)
+    # nocov end
   }
 
   # Mean-impute remaining missing dosage cells so downstream linear

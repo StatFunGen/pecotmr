@@ -17,10 +17,11 @@ getCs(x, ...)
   method = NULL,
   region = NULL,
   coverage = 0.95,
+  minPurity = NULL,
   ...
 )
 
-\S4method{getCs}{FineMappingEntry}(x, coverage = 0.95, ...)
+\S4method{getCs}{FineMappingEntry}(x, coverage = 0.95, minPurity = NULL, ...)
 }
 \arguments{
 \item{x}{A \code{FineMappingEntry} or \code{FineMappingResult}.}

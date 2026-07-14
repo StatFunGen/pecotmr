@@ -144,7 +144,7 @@ context("fineMappingPipeline")
 .fmp_mockPostprocess <- function() {
   function(fit, method, dataX, dataY, coverage, secondaryCoverage,
            signalCutoff, minAbsCorr, csInput = NULL, af = NULL,
-           region = NULL, conditionIdx = NULL) {
+           region = NULL, conditionIdx = NULL, ...) {
     # Capture the requesting method on the FineMappingEntry so the test can
     # verify the right dispatch happened.
     if (is.matrix(dataX)) {
@@ -503,6 +503,41 @@ test_that("fineMappingPipeline(QtlDataset): runs univariate dispatch with mocked
   expect_setequal(getMethodNames(res), "susie")
 })
 
+test_that("fineMappingPipeline(QtlDataset): threads real trait positions into traitPos provenance", {
+  qd <- .fmp_makeQtlDataset(contexts = "brain", traits = c("ENSG_A", "ENSG_B"))
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieIndiv      = .fmp_mockFitIndiv(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  res <- suppressMessages(
+    fineMappingPipeline(qd, methods = "susie",
+                        cisWindow = 1000L,
+                        addSusieInf = FALSE))
+  tp <- getTraitPosition(res)
+  expect_s4_class(tp, "GRanges")
+  expect_length(tp, nrow(res))
+  expect_true(all(as.character(GenomicRanges::seqnames(tp)) == "chr1"))
+  # TSS (start) is the trait's own rowRanges start from the QtlDataset
+  # (.fmp_makeSe: ENSG_A -> 1000, ENSG_B -> 2000, width 500), NOT the
+  # cisWindow-expanded fit region. Map by the row's trait column.
+  tss <- setNames(GenomicRanges::start(tp), res$trait)
+  ent <- setNames(GenomicRanges::end(tp), res$trait)
+  expect_equal(tss[["ENSG_A"]], 1000L)
+  expect_equal(tss[["ENSG_B"]], 2000L)
+  expect_equal(ent[["ENSG_A"]], 1499L)
+  expect_equal(ent[["ENSG_B"]], 2499L)
+  # region is the SAME trait span expanded by cisWindow (1000), start clamped at
+  # 1 -- distinct from the bare traitPos above.
+  reg <- getRegion(res)
+  rs <- setNames(GenomicRanges::start(reg), res$trait)
+  re <- setNames(GenomicRanges::end(reg),   res$trait)
+  expect_equal(rs[["ENSG_A"]], 1L)      # 1000 - 1000 -> clamp
+  expect_equal(re[["ENSG_A"]], 2499L)   # 1499 + 1000
+  expect_equal(rs[["ENSG_B"]], 1000L)   # 2000 - 1000
+  expect_equal(re[["ENSG_B"]], 3499L)   # 2499 + 1000
+})
+
 test_that(".fmAfForX: returns directional effect-allele af aligned to colnames(X)", {
   qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
   local_mocked_bindings(
@@ -541,7 +576,7 @@ test_that("fineMappingPipeline(QtlDataset): threads directional af into postproc
   recordingPostprocess <- function(fit, method, dataX, dataY, coverage,
                                    secondaryCoverage, signalCutoff, minAbsCorr,
                                    csInput = NULL, af = NULL, region = NULL,
-                                   conditionIdx = NULL) {
+                                   conditionIdx = NULL, ...) {
     captured$af   <- af
     captured$cols <- colnames(dataX)
     vids <- colnames(dataX)
@@ -1003,6 +1038,18 @@ test_that("fineMappingPipeline(QtlDataset): mvsusie multi-trait single-context d
   expect_equal(nrow(res), 2L)
   expect_setequal(getTraits(res), c("ENSG_A", "ENSG_B"))
   expect_setequal(getMethodNames(res), "mvsusie")
+  # Engine-built (multivariate) FM rows carry BOTH provenance columns, derived in
+  # the shared .runJointCell seam: traitPos = the bare trait position, region =
+  # traitPos +/- cisWindow (1000). This is the path the univariate pushRow
+  # threading never touches, so it is the regression guard for the engine fix.
+  tp <- getTraitPosition(res); reg <- getRegion(res)
+  expect_s4_class(tp, "GRanges"); expect_s4_class(reg, "GRanges")
+  tpS  <- setNames(GenomicRanges::start(tp),  res$trait)
+  regS <- setNames(GenomicRanges::start(reg), res$trait)
+  regE <- setNames(GenomicRanges::end(reg),   res$trait)
+  expect_equal(tpS[["ENSG_A"]], 1000L);  expect_equal(tpS[["ENSG_B"]], 2000L)
+  expect_equal(regS[["ENSG_A"]], 1L);    expect_equal(regE[["ENSG_A"]], 2499L)
+  expect_equal(regS[["ENSG_B"]], 1000L); expect_equal(regE[["ENSG_B"]], 3499L)
 })
 
 test_that("fineMappingPipeline(QtlDataset): mvsusie multi-context single-trait dispatch", {

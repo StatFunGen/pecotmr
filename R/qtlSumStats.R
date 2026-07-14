@@ -16,6 +16,9 @@ setClass("QtlSumStats",
   contains = "SumStatsBase",
   validity = function(object) {
     errors <- character()
+    if (!is.null(object@ldSketch) &&
+        !methods::is(object@ldSketch, "GenotypeHandle"))
+      errors <- c(errors, "'ldSketch' must be a GenotypeHandle or NULL")
     required <- c("study", "context", "trait", "entry")
     missingCols <- setdiff(required, names(object))
     if (length(missingCols) > 0L)
@@ -26,6 +29,7 @@ setClass("QtlSumStats",
         "'genome' slot must be a single non-empty character string")
     if (!is.list(object@qcInfo))
       errors <- c(errors, "'qcInfo' slot must be a list")
+    errors <- c(errors, .validateTraitPosColumn(object))
     if (length(errors) == 0L) {
       if (length(object$entry) != nrow(object))
         errors <- c(errors,
@@ -88,11 +92,11 @@ NULL
 #' @param ... Additional per-tuple columns to attach to the collection.
 #' @return A \code{QtlSumStats} object.
 #' @export
-QtlSumStats <- function(study, context, trait, entry, genome, ldSketch,
-                        varY = NA_real_, qcInfo = list(), ...) {
+QtlSumStats <- function(study, context, trait, entry, genome, ldSketch = NULL,
+                        varY = NA_real_, qcInfo = list(), traitPos = NULL, ...) {
   if (missing(study) || missing(context) || missing(trait) ||
-      missing(entry) || missing(genome) || missing(ldSketch)) {
-    stop("`study`, `context`, `trait`, `entry`, `genome`, and `ldSketch` ",
+      missing(entry) || missing(genome)) {
+    stop("`study`, `context`, `trait`, `entry`, and `genome` ",
          "are all required.")
   }
   if (length(genome) != 1L) {
@@ -112,6 +116,14 @@ QtlSumStats <- function(study, context, trait, entry, genome, ldSketch,
     stop("`varY` must have length 1 or length(study).")
   }
 
+  # Auto-fill tss_distance / tes_distance on each entry from the trait position
+  # when supplied (builds on the traitPos provenance). The authoritative
+  # traitPos shape check happens in .appendTraitPosCol below.
+  if (!is.null(traitPos) && methods::is(traitPos, "GRanges") &&
+      length(traitPos) == n) {
+    entry <- .appendTraitDistances(entry, traitPos)
+  }
+
   cols <- list(
     study   = as.character(study),
     context = as.character(context),
@@ -119,6 +131,10 @@ QtlSumStats <- function(study, context, trait, entry, genome, ldSketch,
     entry   = S4Vectors::SimpleList(entry),
     varY    = as.numeric(varY)
   )
+  # Optional trait-position provenance (one GRanges per trait; TSS = start()),
+  # carried forward into QtlFineMappingResult / TwasWeights since the true trait
+  # position cannot be inferred from summary statistics alone.
+  cols <- .appendTraitPosCol(cols, traitPos, n)
   extras <- list(...)
   for (nm in names(extras)) cols[[nm]] <- extras[[nm]]
   df <- do.call(S4Vectors::DataFrame, c(cols, list(check.names = FALSE)))
@@ -129,6 +145,31 @@ QtlSumStats <- function(study, context, trait, entry, genome, ldSketch,
                      qcInfo   = as.list(qcInfo))
   methods::validObject(obj)
   obj
+}
+
+# Annotate each entry's variants with tss_distance / tes_distance from the
+# trait-position GRanges (one range per tuple, aligned to `entry`): variant
+# position minus the trait's TSS (= start of the trait-position range) and TES
+# (= end). For a single-base trait position start() == end(), so the two are
+# identical (as expected for point positions). Existing tss_distance /
+# tes_distance mcols are preserved (not clobbered). `@noRd`
+.appendTraitDistances <- function(entry, traitPos) {
+  if (is.null(traitPos)) return(entry)
+  lapply(seq_along(entry), function(i) {
+    gr <- entry[[i]]
+    if (length(gr) == 0L) return(gr)
+    tp <- traitPos[i]
+    tssPos <- suppressWarnings(GenomicRanges::start(tp))
+    tesPos <- suppressWarnings(GenomicRanges::end(tp))
+    if (length(tssPos) == 0L || is.na(tssPos)) return(gr)
+    pos <- GenomicRanges::start(gr)
+    mc <- S4Vectors::mcols(gr)
+    if (is.null(mc) || ncol(mc) == 0L) mc <- S4Vectors::DataFrame(row.names = NULL)
+    if (is.null(mc[["tss_distance"]])) mc[["tss_distance"]] <- pos - tssPos
+    if (is.null(mc[["tes_distance"]])) mc[["tes_distance"]] <- pos - tesPos
+    S4Vectors::mcols(gr) <- mc
+    gr
+  })
 }
 
 # =============================================================================
@@ -167,11 +208,27 @@ QtlSumStats <- function(study, context, trait, entry, genome, ldSketch,
 }
 
 #' @rdname getSumStats
+#' @param annotateSignificance Optional correction-method name
+#'   (\code{"permutation"} / \code{"bonferroni_original"} /
+#'   \code{"bonferroni_filtered"} / \code{"qvalue"}). When set on a QtlSumStats
+#'   enriched by \code{\link{qtlAssociationPostprocess}}, a logical
+#'   \code{significant} mcol for that method is added to the returned entry (the
+#'   significance is derived on the fly, not stored). Flat export flattens this
+#'   full entry GRanges (all mcols) directly; note \code{\link{getSumstatDf}} is
+#'   a fixed GWAS-schema view and does not carry the association columns.
 #' @export
 setMethod("getSumStats", signature(x = "QtlSumStats"),
-  function(x, study = NULL, context = NULL, trait = NULL, ...) {
+  function(x, study = NULL, context = NULL, trait = NULL,
+           annotateSignificance = NULL, ...) {
     idx <- .qtlSumStatsSelectRow(x, study, context, trait)
-    x$entry[[idx]]
+    gr  <- x$entry[[idx]]
+    if (!is.null(annotateSignificance)) {
+      m <- match.arg(annotateSignificance,
+                     c("permutation", "bonferroni_original",
+                       "bonferroni_filtered", "qvalue"))
+      S4Vectors::mcols(gr)[["significant"]] <- .qapSignificanceMask(x, m)[[idx]]
+    }
+    gr
   }
 )
 
@@ -239,6 +296,20 @@ setMethod("getContexts", "QtlSumStats",
 setMethod("getTraits", "QtlSumStats",
   function(x) unique(as.character(x$trait)))
 
+# Trait position provenance. Optional for a QtlSumStats -- it cannot be inferred
+# from summary statistics, so it is only present when the caller supplied it.
+# Returns the traitPos GRanges (whole column, or the rows matching `traitId`),
+# or a scalar NA when no trait position was supplied.
+#' @rdname getTraitPosition
+#' @export
+setMethod("getTraitPosition", "QtlSumStats", function(x, traitId = NULL, ...) {
+  tp <- .getTraitPosColumn(x)
+  if (!methods::is(tp, "GRanges") || is.null(traitId)) return(tp)
+  idx <- which(as.character(x$trait) %in% as.character(traitId))
+  if (length(idx) == 0L) return(NA)
+  tp[idx]
+})
+
 # =============================================================================
 # Show method
 # =============================================================================
@@ -254,5 +325,7 @@ setMethod("show", "QtlSumStats", function(object) {
                 length(unique(object$trait))))
   }
   ld <- getLdSketch(object)
-  cat(sprintf("  LD sketch: %s @ %s\n", getFormat(ld), getPath(ld)))
+  cat(sprintf("  LD sketch: %s\n",
+              if (is.null(ld)) "none (LD-free)"
+              else sprintf("%s @ %s", getFormat(ld), getPath(ld))))
 })
