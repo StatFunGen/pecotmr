@@ -133,6 +133,37 @@ setGeneric("getZ", function(x, ...) standardGeneric("getZ"))
 #' @export
 setGeneric("getN", function(x, ...) standardGeneric("getN"))
 
+#' @title Get Association P-values
+#' @description Extract the association p-value vector from a
+#'   \code{GwasSumStats} or \code{QtlSumStats} entry, selected by its identity
+#'   tuple. Part of the first-class summary-statistic column set alongside
+#'   \code{\link{getZ}} / \code{\link{getBeta}} / \code{\link{getSE}}.
+#' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
+#' @param ... Class-specific selection arguments.
+#' @return Numeric vector of p-values, or \code{NULL} if not available.
+#' @export
+setGeneric("getP", function(x, ...) standardGeneric("getP"))
+
+#' @title Get Marginal Effect Sizes
+#' @description Extract the marginal effect-size (beta) vector from a
+#'   \code{GwasSumStats} or \code{QtlSumStats} entry, selected by its identity
+#'   tuple.
+#' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
+#' @param ... Class-specific selection arguments.
+#' @return Numeric vector of effect sizes, or \code{NULL} if not available.
+#' @export
+setGeneric("getBeta", function(x, ...) standardGeneric("getBeta"))
+
+#' @title Get Effect-Size Standard Errors
+#' @description Extract the effect-size standard-error vector from a
+#'   \code{GwasSumStats} or \code{QtlSumStats} entry, selected by its identity
+#'   tuple.
+#' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
+#' @param ... Class-specific selection arguments.
+#' @return Numeric vector of standard errors, or \code{NULL} if not available.
+#' @export
+setGeneric("getSE", function(x, ...) standardGeneric("getSE"))
+
 #' @title Get Minor Allele Frequencies
 #' @description Extract MAF vector from a GwasSumStats object.
 #' @param x A \code{GwasSumStats} or \code{QtlDataset} object.
@@ -164,6 +195,31 @@ setGeneric("getAf", function(x, ...) standardGeneric("getAf"))
 #' @return Integer.
 #' @export
 setGeneric("nSnps", function(x, ...) standardGeneric("nSnps"))
+
+#' @title Hierarchical Multiple-Testing Correction for cis-QTL Association
+#' @description Apply hierarchical (local per-gene + global across-gene)
+#'   multiple-testing correction to a per-gene \code{QtlSumStats} of cis-QTL
+#'   association statistics (one row per gene/trait), returning the same object
+#'   enriched with the corrected-statistic columns. See
+#'   \code{\link{qtlAssociationPostprocess}}.
+#' @param x A \code{QtlSumStats}.
+#' @param ... Correction arguments.
+#' @return The input \code{QtlSumStats} with added correction columns.
+#' @export
+setGeneric("qtlAssociationPostprocess",
+           function(x, ...) standardGeneric("qtlAssociationPostprocess"))
+
+#' @title Extract Significant cis-QTL Variants
+#' @description Derive the significant variants under a given correction method
+#'   and FDR threshold from a \code{QtlSumStats} enriched by
+#'   \code{\link{qtlAssociationPostprocess}} (significance is computed on demand,
+#'   never stored).
+#' @param x A \code{QtlSumStats}.
+#' @param ... Selection arguments (\code{method}, \code{threshold}).
+#' @return A \code{GRanges} (or list of GRanges) of the significant variants.
+#' @export
+setGeneric("getSignificantQtls",
+           function(x, ...) standardGeneric("getSignificantQtls"))
 
 #' @title Subset by Chromosome
 #' @description Extract a chromosome-specific subset of a GwasSumStats object.

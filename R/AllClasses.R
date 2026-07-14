@@ -101,6 +101,22 @@ setMethod("getZ", "SumStatsBase", function(x, ...) mcols(getSumStats(x, ...))$Z)
 #' @export
 setMethod("getN", "SumStatsBase", function(x, ...) mcols(getSumStats(x, ...))$N)
 
+# getP / getBeta / getSE are first-class alongside getZ / getN: they read the
+# optional P / BETA / SE mcols and return NULL when the entry does not carry
+# them (DataFrame `$` semantics), so a p-value-primary sumstats (e.g. TensorQTL
+# cis output) is an equal citizen to a Z-primary GWAS sumstats.
+#' @rdname getP
+#' @export
+setMethod("getP", "SumStatsBase", function(x, ...) mcols(getSumStats(x, ...))$P)
+
+#' @rdname getBeta
+#' @export
+setMethod("getBeta", "SumStatsBase", function(x, ...) mcols(getSumStats(x, ...))$BETA)
+
+#' @rdname getSE
+#' @export
+setMethod("getSE", "SumStatsBase", function(x, ...) mcols(getSumStats(x, ...))$SE)
+
 #' @rdname getMaf
 #' @export
 setMethod("getMaf", "SumStatsBase", function(x, ...) {

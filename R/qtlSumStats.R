@@ -116,6 +116,14 @@ QtlSumStats <- function(study, context, trait, entry, genome, ldSketch = NULL,
     stop("`varY` must have length 1 or length(study).")
   }
 
+  # Auto-fill tss_distance / tes_distance on each entry from the trait position
+  # when supplied (builds on the traitPos provenance). The authoritative
+  # traitPos shape check happens in .appendTraitPosCol below.
+  if (!is.null(traitPos) && methods::is(traitPos, "GRanges") &&
+      length(traitPos) == n) {
+    entry <- .appendTraitDistances(entry, traitPos)
+  }
+
   cols <- list(
     study   = as.character(study),
     context = as.character(context),
@@ -137,6 +145,31 @@ QtlSumStats <- function(study, context, trait, entry, genome, ldSketch = NULL,
                      qcInfo   = as.list(qcInfo))
   methods::validObject(obj)
   obj
+}
+
+# Annotate each entry's variants with tss_distance / tes_distance from the
+# trait-position GRanges (one range per tuple, aligned to `entry`): variant
+# position minus the trait's TSS (= start of the trait-position range) and TES
+# (= end). For a single-base trait position start() == end(), so the two are
+# identical (as expected for point positions). Existing tss_distance /
+# tes_distance mcols are preserved (not clobbered). `@noRd`
+.appendTraitDistances <- function(entry, traitPos) {
+  if (is.null(traitPos)) return(entry)
+  lapply(seq_along(entry), function(i) {
+    gr <- entry[[i]]
+    if (length(gr) == 0L) return(gr)
+    tp <- traitPos[i]
+    tssPos <- suppressWarnings(GenomicRanges::start(tp))
+    tesPos <- suppressWarnings(GenomicRanges::end(tp))
+    if (length(tssPos) == 0L || is.na(tssPos)) return(gr)
+    pos <- GenomicRanges::start(gr)
+    mc <- S4Vectors::mcols(gr)
+    if (is.null(mc) || ncol(mc) == 0L) mc <- S4Vectors::DataFrame(row.names = NULL)
+    if (is.null(mc[["tss_distance"]])) mc[["tss_distance"]] <- pos - tssPos
+    if (is.null(mc[["tes_distance"]])) mc[["tes_distance"]] <- pos - tesPos
+    S4Vectors::mcols(gr) <- mc
+    gr
+  })
 }
 
 # =============================================================================
@@ -175,11 +208,27 @@ QtlSumStats <- function(study, context, trait, entry, genome, ldSketch = NULL,
 }
 
 #' @rdname getSumStats
+#' @param annotateSignificance Optional correction-method name
+#'   (\code{"permutation"} / \code{"bonferroni_original"} /
+#'   \code{"bonferroni_filtered"} / \code{"qvalue"}). When set on a QtlSumStats
+#'   enriched by \code{\link{qtlAssociationPostprocess}}, a logical
+#'   \code{significant} mcol for that method is added to the returned entry (the
+#'   significance is derived on the fly, not stored). Flat export flattens this
+#'   full entry GRanges (all mcols) directly; note \code{\link{getSumstatDf}} is
+#'   a fixed GWAS-schema view and does not carry the association columns.
 #' @export
 setMethod("getSumStats", signature(x = "QtlSumStats"),
-  function(x, study = NULL, context = NULL, trait = NULL, ...) {
+  function(x, study = NULL, context = NULL, trait = NULL,
+           annotateSignificance = NULL, ...) {
     idx <- .qtlSumStatsSelectRow(x, study, context, trait)
-    x$entry[[idx]]
+    gr  <- x$entry[[idx]]
+    if (!is.null(annotateSignificance)) {
+      m <- match.arg(annotateSignificance,
+                     c("permutation", "bonferroni_original",
+                       "bonferroni_filtered", "qvalue"))
+      S4Vectors::mcols(gr)[["significant"]] <- .qapSignificanceMask(x, m)[[idx]]
+    }
+    gr
   }
 )
 

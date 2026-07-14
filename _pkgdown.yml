@@ -209,8 +209,11 @@ reference:
 
   - subtitle: "GwasSumStats"
     contents:
+      - getBeta
       - getMaf
       - getN
+      - getP
+      - getSE
       - getSumStats
       - getSumstatDf
       - getVarY
@@ -281,7 +284,9 @@ reference:
   - subtitle: "QtlSumStats"
     contents:
       - getContexts
+      - getSignificantQtls
       - getTraits
+      - qtlAssociationPostprocess
 
   - subtitle: "SumStatsBase"
     contents:

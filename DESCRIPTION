@@ -142,6 +142,7 @@ Collate:
     'mashWrapper.R'
     'overlapTopLoci.R'
     'pvalCombine.R'
+    'qtlAssociationPostprocess.R'
     'qtlEnrichmentPipeline.R'
     'regularizedRegressionWrappers.R'
     'relatednessQc.R'
