@@ -4,35 +4,48 @@
 \alias{krigingOutlierQc}
 \title{Kriging-style LD-consistency outlier QC}
 \usage{
-krigingOutlierQc(zScore, R, n, variantIds = NULL, pThreshold = 5e-08)
+krigingOutlierQc(
+  zScore,
+  R,
+  n,
+  variantIds = NULL,
+  zThreshold = 2,
+  logLRThreshold = 2
+)
 }
 \arguments{
 \item{zScore}{Numeric vector of harmonized z-scores.}
 
 \item{R}{Square LD correlation matrix aligned to \code{zScore}.}
 
-\item{n}{Sample size, forwarded to \code{susieR::estimate_s_rss()} and
-\code{susieR::kriging_rss()}.}
+\item{n}{Sample size, forwarded to \code{susieR::kriging_rss()} (whose
+default \code{s} is \code{susieR::estimate_s_rss()}).}
 
 \item{variantIds}{Optional variant IDs for the diagnostics table.}
 
-\item{pThreshold}{Two-sided p-value cutoff for flagging an outlier
-(default \code{5e-8}).}
+\item{zThreshold}{Absolute-z cutoff for the allele-switch rule
+(default \code{2}, matching susieR).}
+
+\item{logLRThreshold}{Log-likelihood-ratio cutoff for the allele-switch rule
+(default \code{2}, matching susieR).}
 }
 \value{
-A list with \code{outlier} (logical vector) and \code{diagnostics}
-  (data frame of per-variant predicted z, residual, statistic, p-value, and
-  outlier flag).
+A list with \code{flip} (logical vector; \code{TRUE} = allele switch,
+  z-score should be sign-flipped) and \code{diagnostics} (data frame of
+  per-variant \code{z}, \code{condmean}, \code{z_std_diff}, \code{logLR}, and
+  the \code{flipped} flag).
 }
 \description{
 Flags variants whose observed z-score is inconsistent with the value
 predicted from its LD neighbours, using susieR's kriging diagnostic.
 \code{susieR::kriging_rss()} computes the leave-one-out conditional
-distribution of each \code{z_i} given the rest, with the LD-mismatch scale
-\code{s} estimated by \code{susieR::estimate_s_rss()}; its standardized
-residual (\code{z_std_diff}) is ~\code{N(0,1)} when z-scores and LD agree, so
-a large residual marks an allele-flip / LD-mismatch outlier. RSS-only helper,
-opt-in via \code{alleleFlipKriging}; never wired into \code{alleleQc()} /
+distribution of each \code{z_i} given the rest (with the LD-mismatch scale
+\code{s} defaulting to \code{susieR::estimate_s_rss()}) and a per-variant
+\code{logLR} for the allele-switch hypothesis. This helper reuses susieR's
+own allele-switch rule --- \code{logLR > logLRThreshold & abs(z) > zThreshold}
+(the same \code{logLR > 2 & |z| > 2} used in \code{susie_rss_utils}) --- to
+flag variants whose sign should be flipped. RSS-only helper, opt-in via
+\code{alleleFlipKriging}; never wired into \code{alleleQc()} /
 \code{matchRefPanel()}. Requires a susieR that provides \code{kriging_rss()}
 and \code{estimate_s_rss()}.
 }

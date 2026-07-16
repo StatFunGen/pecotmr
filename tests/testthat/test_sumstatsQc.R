@@ -66,25 +66,34 @@ test_that(".resolveZMismatchQc rejects stale rss_qc and other invalid tokens", {
 # krigingOutlierQc
 # ===========================================================================
 
-test_that("krigingOutlierQc flags an LD-inconsistent variant and spares the rest", {
-  skip_if_not("kriging_rss" %in% getNamespaceExports("susieR"),
-              "installed susieR has no kriging_rss")
-  m <- 6
-  rho <- 0.7
-  R <- matrix(rho, m, m); diag(R) <- 1
+# An allele switch (what the flip rule targets) is an LD-CONSISTENT z with one
+# entry's sign reversed -- not a magnitude outlier. Build z = R %*% b (a single
+# causal SNP) then negate a strongly-tagged neighbour, so susieR's logLR fires.
+.kr_switchScenario <- function() {
+  m <- 10; rho <- 0.9
+  R <- outer(seq_len(m), seq_len(m), function(i, j) rho^abs(i - j))
   ids <- paste0("1:", seq_len(m) * 100, ":A:G")
   rownames(R) <- colnames(R) <- ids
-  z <- rep(3, m)
-  z[3] <- -8                       # strongly inconsistent with its neighbours
-  kr <- krigingOutlierQc(z, R, n = 1000, variantIds = ids)
-  expect_true(kr$outlier[3])
-  expect_false(any(kr$outlier[-3]))
-  expect_equal(nrow(kr$diagnostics), m)
-  expect_true(all(c("predicted", "residual", "statistic", "p_value") %in%
+  b <- numeric(m); b[5] <- 6
+  z <- as.numeric(R %*% b)
+  z[6] <- -z[6]                    # flip a strongly-tagged neighbour of the causal
+  list(z = z, R = R, ids = ids, flipped = 6L)
+}
+
+test_that("krigingOutlierQc flags an allele-switched variant and spares the rest", {
+  skip_if_not("kriging_rss" %in% getNamespaceExports("susieR"),
+              "installed susieR has no kriging_rss")
+  s  <- .kr_switchScenario()
+  kr <- krigingOutlierQc(s$z, s$R, n = 1000, variantIds = s$ids)
+  expect_true(kr$flip[s$flipped])
+  expect_equal(sum(kr$flip), 1L)
+  expect_equal(nrow(kr$diagnostics), length(s$z))
+  expect_true(all(c("z", "condmean", "z_std_diff", "logLR", "flipped") %in%
                     colnames(kr$diagnostics)))
+  expect_identical(kr$diagnostics$flipped, kr$flip)
 })
 
-test_that("krigingOutlierQc statistic matches susieR::kriging_rss z_std_diff", {
+test_that("krigingOutlierQc flip == susieR's logLR>2 & |z|>2 selection", {
   skip_if_not("kriging_rss" %in% getNamespaceExports("susieR"),
               "installed susieR has no kriging_rss")
   set.seed(7); m <- 10
@@ -93,10 +102,28 @@ test_that("krigingOutlierQc statistic matches susieR::kriging_rss z_std_diff", {
   rownames(R) <- colnames(R) <- ids
   z <- as.numeric(R %*% rnorm(m)); z[4] <- 9
   kr  <- krigingOutlierQc(z, R, n = 5000, variantIds = ids)
-  s   <- susieR::estimate_s_rss(z = z, R = R, n = 5000)
-  ref <- susieR::kriging_rss(z = z, R = R, n = 5000, s = s)$conditional_dist
-  expect_equal(kr$diagnostics$statistic, as.numeric(ref$z_std_diff), tolerance = 1e-8)
-  expect_equal(kr$diagnostics$predicted, as.numeric(ref$condmean),   tolerance = 1e-8)
+  ref <- susieR::kriging_rss(z = z, R = R, n = 5000)$conditional_dist
+  # susieR's own allele-switch rule (susie_rss_utils.R): logLR > 2 & |z| > 2.
+  expected <- as.numeric(ref$logLR) > 2 & abs(z) > 2
+  expect_identical(kr$flip, expected)
+  expect_equal(kr$diagnostics$logLR,      as.numeric(ref$logLR),     tolerance = 1e-8)
+  expect_equal(kr$diagnostics$z_std_diff, as.numeric(ref$z_std_diff), tolerance = 1e-8)
+  expect_equal(kr$diagnostics$condmean,   as.numeric(ref$condmean),   tolerance = 1e-8)
+})
+
+test_that("krigingOutlierQc thresholds are configurable", {
+  skip_if_not("kriging_rss" %in% getNamespaceExports("susieR"),
+              "installed susieR has no kriging_rss")
+  s <- .kr_switchScenario()
+  # The switch fires at the default logLRThreshold = 2 ...
+  expect_true(krigingOutlierQc(s$z, s$R, n = 1000,
+                               variantIds = s$ids)$flip[s$flipped])
+  # ... and an impossibly high logLR threshold suppresses every flip.
+  expect_false(any(krigingOutlierQc(s$z, s$R, n = 1000, variantIds = s$ids,
+                                    logLRThreshold = 1e6)$flip))
+  # A |z| threshold above the switched z also suppresses it.
+  expect_false(any(krigingOutlierQc(s$z, s$R, n = 1000, variantIds = s$ids,
+                                    zThreshold = 1e6)$flip))
 })
 
 test_that("krigingOutlierQc requires a positive sample size n", {
@@ -4996,7 +5023,7 @@ test_that("summaryStatsQc: early-exits when fewer than two variants survive pre-
   expect_equal(length(res$entry[[1L]]), 1L)
 })
 
-test_that("summaryStatsQc: kriging prefilter runs, records outliers, and adds the rollup segment", {
+test_that("summaryStatsQc: kriging QC runs, records the flip audit, and adds the rollup segment", {
   skip_if_not("kriging_rss" %in% getNamespaceExports("susieR"),
               "installed susieR has no kriging_rss")
   ss <- GwasSumStats(
@@ -5013,10 +5040,16 @@ test_that("summaryStatsQc: kriging prefilter runs, records outliers, and adds th
     res <- summaryStatsQc(ss, alleleFlipKriging = TRUE, pipCutoffToSkip = 0,
                           nCutoff = 0))
   joined <- paste(msgs, collapse = "")
-  expect_match(joined, "kriging prefilter removed")
-  expect_match(joined, "kriging ")
+  expect_match(joined, "kriging sign-flipped")
+  expect_match(joined, "kriging-flip ")
   ea <- getQcInfo(res)$entryAudit[[1L]]
-  expect_true("krigingOutliersDropped" %in% names(ea))
+  expect_true("krigingFlipped" %in% names(ea))
+  expect_true("krigingDiagnostics" %in% names(ea))
+  kd <- ea$krigingDiagnostics
+  expect_true(is.data.frame(kd))
+  expect_true(all(c("variant_id", "z", "condmean", "z_std_diff", "logLR",
+                    "flipped") %in% colnames(kd)))
+  expect_identical(sum(kd$flipped), ea$krigingFlipped)
 })
 
 test_that("summaryStatsQc: impute = TRUE assembles BETA/SE/N and median-fills missing N", {
@@ -5210,13 +5243,14 @@ test_that("raiss multi-LD-block skips a NULL middle block and keeps the rest (li
   expect_true(all(c("var1", "var21") %in% res$resultNofilter$variant_id))
 })
 
-test_that("summaryStatsQc kriging prefilter drops an LD-inconsistent variant (line 3063)", {
+test_that("summaryStatsQc kriging QC sign-flips an LD-inconsistent variant and retains it", {
   skip_if_not("kriging_rss" %in% getNamespaceExports("susieR"),
               "installed susieR has no kriging_rss")
   # All eight genotype columns load on one common factor (pairwise rho ~0.7),
-  # but rs4 carries a z-score (-15) grossly inconsistent with its strongly
-  # correlated neighbours. krigingOutlierQc flags it, so the prefilter actually
-  # drops a row (sumstatsQc.R:3063, the nKr > 0 branch).
+  # so LD predicts a shared sign. rs4's z has the opposite sign to its strongly
+  # correlated neighbours -- a genuine allele switch. krigingOutlierQc flags it,
+  # so the QC step sign-flips its Z in place (the nKr > 0 branch) and RETAINS
+  # the row.
   corrExtractor <- function(handle, snpIdx, meanImpute = TRUE) {
     set.seed(42)
     n <- length(handle@sampleIds)
@@ -5241,7 +5275,9 @@ test_that("summaryStatsQc kriging prefilter drops an LD-inconsistent variant (li
   gr <- .ssQ_makeEntryGr(snp_ids = paste0("rs", 1:8),
                          positions = seq(100L, by = 100L, length.out = 8L))
   mc <- S4Vectors::mcols(gr)
-  mc$Z <- c(4, 4, 4, -15, 4, 4, 4, 4)
+  # LD-consistent block (all +4) with rs4's sign reversed -- a genuine allele
+  # switch (logLR > 2 & |z| > 2), which the kriging QC sign-flips back to +4.
+  mc$Z <- c(4, 4, 4, -4, 4, 4, 4, 4)
   mc$N <- rep(3000L, 8)
   S4Vectors::mcols(gr) <- mc
   ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
@@ -5250,6 +5286,12 @@ test_that("summaryStatsQc kriging prefilter drops an LD-inconsistent variant (li
   res <- suppressWarnings(
     summaryStatsQc(ss, alleleFlipKriging = TRUE, pipCutoffToSkip = 0, nCutoff = 0))
   ea <- getQcInfo(res)$entryAudit[[1L]]
-  expect_gte(ea$krigingOutliersDropped, 1L)             # at least one dropped
-  expect_equal(length(res$entry[[1L]]), 8L - ea$krigingOutliersDropped)
+  expect_gte(ea$krigingFlipped, 1L)                     # at least one flipped
+  expect_equal(length(res$entry[[1L]]), 8L)             # retained, not dropped
+  # rs4's -15 flips to +15; its neighbours were +4, so every retained Z is now
+  # positive.
+  zout <- S4Vectors::mcols(res$entry[[1L]])$Z
+  expect_true(all(zout > 0))
+  # the audit's flip count equals the diagnostics rows marked flipped.
+  expect_identical(sum(ea$krigingDiagnostics$flipped), ea$krigingFlipped)
 })

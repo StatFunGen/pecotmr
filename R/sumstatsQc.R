@@ -2001,28 +2001,33 @@ ldMismatchQc <- function(zScore, R = NULL, X = NULL, nSample = NULL,
 #' Flags variants whose observed z-score is inconsistent with the value
 #' predicted from its LD neighbours, using susieR's kriging diagnostic.
 #' \code{susieR::kriging_rss()} computes the leave-one-out conditional
-#' distribution of each \code{z_i} given the rest, with the LD-mismatch scale
-#' \code{s} estimated by \code{susieR::estimate_s_rss()}; its standardized
-#' residual (\code{z_std_diff}) is ~\code{N(0,1)} when z-scores and LD agree, so
-#' a large residual marks an allele-flip / LD-mismatch outlier. RSS-only helper,
-#' opt-in via \code{alleleFlipKriging}; never wired into \code{alleleQc()} /
+#' distribution of each \code{z_i} given the rest (with the LD-mismatch scale
+#' \code{s} defaulting to \code{susieR::estimate_s_rss()}) and a per-variant
+#' \code{logLR} for the allele-switch hypothesis. This helper reuses susieR's
+#' own allele-switch rule --- \code{logLR > logLRThreshold & abs(z) > zThreshold}
+#' (the same \code{logLR > 2 & |z| > 2} used in \code{susie_rss_utils}) --- to
+#' flag variants whose sign should be flipped. RSS-only helper, opt-in via
+#' \code{alleleFlipKriging}; never wired into \code{alleleQc()} /
 #' \code{matchRefPanel()}. Requires a susieR that provides \code{kriging_rss()}
 #' and \code{estimate_s_rss()}.
 #'
 #' @param zScore Numeric vector of harmonized z-scores.
 #' @param R Square LD correlation matrix aligned to \code{zScore}.
-#' @param n Sample size, forwarded to \code{susieR::estimate_s_rss()} and
-#'   \code{susieR::kriging_rss()}.
+#' @param n Sample size, forwarded to \code{susieR::kriging_rss()} (whose
+#'   default \code{s} is \code{susieR::estimate_s_rss()}).
 #' @param variantIds Optional variant IDs for the diagnostics table.
-#' @param pThreshold Two-sided p-value cutoff for flagging an outlier
-#'   (default \code{5e-8}).
-#' @return A list with \code{outlier} (logical vector) and \code{diagnostics}
-#'   (data frame of per-variant predicted z, residual, statistic, p-value, and
-#'   outlier flag).
+#' @param zThreshold Absolute-z cutoff for the allele-switch rule
+#'   (default \code{2}, matching susieR).
+#' @param logLRThreshold Log-likelihood-ratio cutoff for the allele-switch rule
+#'   (default \code{2}, matching susieR).
+#' @return A list with \code{flip} (logical vector; \code{TRUE} = allele switch,
+#'   z-score should be sign-flipped) and \code{diagnostics} (data frame of
+#'   per-variant \code{z}, \code{condmean}, \code{z_std_diff}, \code{logLR}, and
+#'   the \code{flipped} flag).
 #' @importFrom stats pnorm
 #' @export
 krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
-                             pThreshold = 5e-8) {
+                             zThreshold = 2, logLRThreshold = 2) {
   zScore <- as.numeric(zScore)
   m <- length(zScore)
   if (is.null(R) || !is.matrix(R) || nrow(R) != m || ncol(R) != m) {
@@ -2040,23 +2045,22 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
     # nocov end
   }
   if (is.null(variantIds)) variantIds <- rownames(R)
-  # susieR's kriging RSS diagnostic: estimate the LD-mismatch scale, then take
-  # the per-variant conditional distribution. `z_std_diff` is the standardized
-  # residual we threshold (same p-value rule as before).
-  s  <- tryCatch(susieR::estimate_s_rss(z = zScore, R = R, n = n),
-                 error = function(e) 0)
-  cd <- susieR::kriging_rss(z = zScore, R = R, n = n, s = s)$conditional_dist
-  condMean  <- as.numeric(cd$condmean)
-  statistic <- as.numeric(cd$z_std_diff)
-  residual  <- zScore - condMean
-  pValue    <- .zToPvalue(statistic)
-  outlier   <- !is.na(pValue) & pValue < pThreshold
+  # susieR's kriging RSS diagnostic. Called exactly as the single-panel/notebook
+  # call (`kriging_rss(z, R, n)`), so `s` defaults to estimate_s_rss() and the
+  # returned `logLR` matches susieR's own allele-switch selection.
+  cd <- susieR::kriging_rss(z = zScore, R = R, n = n)$conditional_dist
+  condMean <- as.numeric(cd$condmean)
+  zStdDiff <- as.numeric(cd$z_std_diff)
+  logLR    <- as.numeric(cd$logLR)
+  # susieR's allele-switch rule (susie_rss_utils.R): logLR > 2 & |z| > 2.
+  flip <- !is.na(logLR) & !is.na(zScore) &
+    logLR > logLRThreshold & abs(zScore) > zThreshold
   list(
-    outlier = outlier,
+    flip = flip,
     diagnostics = data.frame(
       variant_id = if (is.null(variantIds)) seq_len(m) else variantIds,
-      z = zScore, predicted = condMean, residual = residual,
-      statistic = statistic, p_value = pValue, outlier = outlier,
+      z = zScore, condmean = condMean, z_std_diff = zStdDiff, logLR = logLR,
+      flipped = flip,
       stringsAsFactors = FALSE
     )
   )
@@ -2570,7 +2574,7 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   # from the rollup.
   qcCount <- list(
     harmCorrSign = 0L, harmCorrStrand = 0L, harmDropped = 0L,
-    krigingRemoved = 0L, mismatchRemoved = 0L,
+    krigingFlipped = 0L, mismatchRemoved = 0L,
     imputeBefore = NA_integer_, imputeAfter = NA_integer_)
   lbl <- if (!is.null(entryLabel) && nzchar(entryLabel)) entryLabel
          else NA_character_
@@ -2706,7 +2710,9 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
     if (isTRUE(pip$skipped)) entryAudit$pipScreenReason <- pip$reason
   }
 
-  # 6. Optional kriging prefilter.
+  # 6. Optional kriging allele-flip QC. Uses susieR's allele-switch rule
+  #    (logLR > 2 & |z| > 2) to sign-flip inconsistent z-scores in place --
+  #    variants are corrected and RETAINED, not dropped.
   if (isTRUE(opts$alleleFlipKriging) && nrow(df) >= 2L) {
     nKrIn <- nrow(df)
     R <- .ldFromSketch(ldSketch, df$SNP,
@@ -2714,11 +2720,15 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
     nKrig <- if (!is.null(opts$nForPip) && is.finite(opts$nForPip)) opts$nForPip
              else stats::median(as.numeric(df$N), na.rm = TRUE)
     kr <- krigingOutlierQc(df$Z, R, n = nKrig, variantIds = df$SNP)
-    nKr <- sum(kr$outlier)
-    if (nKr > 0L) df <- df[!kr$outlier, , drop = FALSE]
-    entryAudit$krigingOutliersDropped <- nKr
-    qcCount$krigingRemoved <- nKr
-    emit("QC track: kriging prefilter removed ", nKr, " of ", nKrIn,
+    nKr <- sum(kr$flip)
+    if (nKr > 0L) {
+      df$Z[kr$flip] <- -df$Z[kr$flip]
+      if ("BETA" %in% colnames(df)) df$BETA[kr$flip] <- -df$BETA[kr$flip]
+    }
+    entryAudit$krigingFlipped <- nKr
+    entryAudit$krigingDiagnostics <- kr$diagnostics
+    qcCount$krigingFlipped <- nKr
+    emit("QC track: kriging sign-flipped ", nKr, " of ", nKrIn,
          " LD-inconsistent variant(s).")
   }
 
@@ -2849,14 +2859,14 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   if (qcCount$harmDropped > 0L)
     removedSegs <- c(removedSegs,
                      paste0("harmonization ", qcCount$harmDropped))
-  if (isTRUE(opts$alleleFlipKriging))
-    removedSegs <- c(removedSegs,
-                     paste0("kriging ", qcCount$krigingRemoved))
   if (!identical(opts$zMismatchQc, "none"))
     removedSegs <- c(removedSegs,
                      paste0("mismatch ", qcCount$mismatchRemoved))
   correctedSeg <- paste0("sign-flip ", qcCount$harmCorrSign,
                           ", strand-flip ", qcCount$harmCorrStrand)
+  if (isTRUE(opts$alleleFlipKriging))
+    correctedSeg <- paste0(correctedSeg,
+                           ", kriging-flip ", qcCount$krigingFlipped)
   impSeg <- if (isTRUE(opts$impute) && !is.na(qcCount$imputeAfter)) {
     paste0(" | imputed ",
            sprintf("%+d", qcCount$imputeAfter - qcCount$imputeBefore))
