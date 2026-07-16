@@ -265,6 +265,36 @@
 #'   passing (purity/coverage-filtered) credible set are widened. When
 #'   \code{TRUE}, every effect \code{L} is widened (including filtered-out ones,
 #'   labelled \code{L<k>} instead of \code{cs<k>}).
+#' @param serFallback Logical (length 1, default \code{FALSE}).
+#'   \code{GwasSumStats} only. When \code{TRUE}, after each standard
+#'   multi-effect SuSiE-RSS fit (\code{susie} / \code{susieAsh}) the pipeline
+#'   reads susieR's finite-sample R diagnostics and, if
+#'   \code{fit$R_finite_diagnostics$R_reliability_flag} is \code{TRUE}, reports
+#'   the single-effect (\code{ser_model}) result for that region instead of the
+#'   multi-effect fit. Defaults \code{FALSE} so QTL and other callers are
+#'   unchanged. See \code{keepFullFit} for retaining the multi-effect fit.
+#' @param rFinite \code{GwasSumStats} only. Finite-sample size for susieR's
+#'   \code{R_finite} correction, forwarded to \code{susieR::susie_rss()}.
+#'   \code{NULL} (default) uses susieR's default, except when a finite/EB mode
+#'   is active (\code{serFallback=TRUE} or \code{rMismatch != "none"}) and
+#'   \code{rFinite} is \code{NULL}, in which case it defaults to the LD-panel
+#'   sample size \code{getNSamples(ldSketch)}.
+#' @param rMismatch \code{GwasSumStats} only. LD-mismatch mode forwarded to
+#'   \code{susieR::susie_rss()} as \code{R_mismatch} (e.g. \code{"eb"} for
+#'   empirical Bayes). Default \code{"none"} (susieR's default).
+#' @param rMismatchMethod \code{GwasSumStats} only. Optional
+#'   \code{R_mismatch_method} forwarded to \code{susieR::susie_rss()} when
+#'   non-\code{NULL}.
+#' @param checkPrior \code{GwasSumStats} only. Optional \code{check_prior}
+#'   forwarded to \code{susieR::susie_rss()} when non-\code{NULL}.
+#' @param keepFullFit \code{GwasSumStats} only. Controls retention of the
+#'   pre-fallback multi-effect SuSiE-RSS fit when \code{serFallback=TRUE}:
+#'   \code{"fallback"} (default) keeps it only for regions that fell back to
+#'   SER; \code{"all"} keeps it for every region; \code{"none"} keeps none. The
+#'   retained fit and the decision are stored on the entry's SuSiE fit and read
+#'   via \code{getSusieFit(res)$multiEffectFit},
+#'   \code{getSusieFit(res)$R_reliability_flag}, and
+#'   \code{getSusieFit(res)$serFallbackUsed}.
 #' @param ... Reserved for future per-method arguments.
 #'
 #' @return A \code{\link{FineMappingResult}} collection keyed by
@@ -1903,6 +1933,12 @@ setMethod("fineMappingPipeline", "GwasSumStats",
            fullFit           = FALSE,
            fullFitAlphaOnly  = TRUE,
            includeAllCs      = FALSE,
+           serFallback       = FALSE,
+           rFinite           = NULL,
+           rMismatch         = "none",
+           rMismatchMethod   = NULL,
+           checkPrior        = NULL,
+           keepFullFit       = "fallback",
            ...) {
     .fmAssertQcd(data)
     norm       <- .fmNormalizeMethods(methods, L = L, Lgreedy = Lgreedy)
@@ -1917,6 +1953,12 @@ setMethod("fineMappingPipeline", "GwasSumStats",
     # across the entire entry's variant set; no in-pipeline LD-block
     # partitioning.
     ldSketch <- getLdSketch(data)
+    # When a finite-sample R / EB LD-mismatch mode is active (serFallback on, or
+    # rMismatch other than "none") and rFinite is unset, default it to the
+    # LD-panel sample size (the notebook's `B`).
+    rFiniteResolved <- if (is.null(rFinite) &&
+                           (isTRUE(serFallback) || !identical(rMismatch, "none")))
+      getNSamples(ldSketch) else rFinite
     studyCol <- as.character(data$study)
 
     rowStudy   <- character(0)
@@ -1977,7 +2019,10 @@ setMethod("fineMappingPipeline", "GwasSumStats",
         signalCutoff, minAbsCorr, methodArgs, verbose,
         label = sprintf("GWAS (study='%s', region='%s')", st, region_id),
         af = afByVar, fullFit = fullFit,
-        fullFitAlphaOnly = fullFitAlphaOnly, includeAllCs = includeAllCs)
+        fullFitAlphaOnly = fullFitAlphaOnly, includeAllCs = includeAllCs,
+        serFallback = serFallback, rFinite = rFiniteResolved,
+        rMismatch = rMismatch, rMismatchMethod = rMismatchMethod,
+        checkPrior = checkPrior, keepFullFit = keepFullFit)
       for (tk in names(ents)) pushRow(st, tk, region_id, ents[[tk]])
     }
 
