@@ -1516,7 +1516,7 @@ test_that("fineMappingPipeline(GwasSumStats): runs end-to-end with mocked RSS fi
   expect_setequal(getMethodNames(res), "susie")
 })
 
-# ---- SER fallback (GwasSumStats-only) ----
+# ---- SER fallback (shared sumstat SuSiE-RSS path: GwasSumStats + QtlSumStats) ----
 
 test_that("fineMappingPipeline(GwasSumStats): serFallback + reliable R keeps multi-effect", {
   gss <- .fmp_makeGwasSumStats()
@@ -1620,7 +1620,7 @@ test_that("fineMappingPipeline(GwasSumStats): keepFullFit='all' retains fit on n
   expect_equal(sf$multiEffectFit$multiTag, "multi")
 })
 
-test_that("fineMappingPipeline(QtlSumStats): SER-fallback args do not affect the QTL path", {
+test_that("fineMappingPipeline(QtlSumStats): serFallback=FALSE default leaves the QTL path unchanged", {
   ss <- .fmp_makeQtlSumStats()
   cap <- new.env(parent = emptyenv())
   local_mocked_bindings(
@@ -1631,18 +1631,102 @@ test_that("fineMappingPipeline(QtlSumStats): SER-fallback args do not affect the
   res <- suppressMessages(
     fineMappingPipeline(ss, methods = "susie", addSusieInf = FALSE))
   expect_s4_class(res, "QtlFineMappingResult")
-  # QTL path leaves the finite/EB knobs at defaults (no fallback, no rFinite):
-  # the shared block never fires the fallback nor forwards a non-default
-  # rFinite/rMismatch, so the reported result is unchanged.
+  # With serFallback off (the default), the shared block never fires the
+  # fallback nor forwards a non-default rFinite/rMismatch -- even though the
+  # mock flags the fit unreliable -- so the result is byte-identical to before.
   expect_null(cap$rFinite)
   expect_equal(cap$rMismatch, "none")
   sf <- getSusieFit(res, study = "Q1", context = "c1", trait = "t1",
                     method = "susie")
-  # QTL path always runs with serFallback off: the entry's susieFit carries NO
-  # diagnostic fields (unaffected by this change).
   expect_false("R_reliability_flag" %in% names(sf))
   expect_false("serFallbackUsed" %in% names(sf))
   expect_false("multiEffectFit" %in% names(sf))
+})
+
+test_that("fineMappingPipeline(QtlSumStats): serFallback + reliable R keeps multi-effect", {
+  ss <- .fmp_makeQtlSumStats()
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieRss        = .fmp_mockFitRssDiag(flag = FALSE),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  res <- suppressMessages(
+    fineMappingPipeline(ss, methods = "susie", addSusieInf = FALSE,
+                        serFallback = TRUE, rMismatch = "eb"))
+  sf <- getSusieFit(res, study = "Q1", context = "c1", trait = "t1",
+                    method = "susie")
+  # Multi-effect fit reported (payload keeps the multi tag, not the ser tag).
+  expect_equal(sf$payload$multiTag, "multi")
+  expect_false(sf$serFallbackUsed)
+  expect_false(sf$R_reliability_flag)
+  # keepFullFit="fallback": non-fallback region carries no retained fit.
+  expect_null(sf$multiEffectFit)
+})
+
+test_that("fineMappingPipeline(QtlSumStats): serFallback + unreliable R falls back to SER", {
+  ss <- .fmp_makeQtlSumStats()
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieRss        = .fmp_mockFitRssDiag(flag = TRUE),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  res <- suppressMessages(
+    fineMappingPipeline(ss, methods = "susie", addSusieInf = FALSE,
+                        serFallback = TRUE, rMismatch = "eb"))
+  sf <- getSusieFit(res, study = "Q1", context = "c1", trait = "t1",
+                    method = "susie")
+  # Reported result is the single-effect ser_model.
+  expect_equal(sf$payload$serTag, "ser")
+  expect_true(sf$serFallbackUsed)
+  expect_true(sf$R_reliability_flag)
+  # Fallback region retains the pre-fallback multi-effect fit.
+  expect_false(is.null(sf$multiEffectFit))
+  expect_equal(sf$multiEffectFit$multiTag, "multi")
+})
+
+test_that("fineMappingPipeline(QtlSumStats): rFinite/rMismatch forwarded; rFinite defaults to panel N", {
+  ss <- .fmp_makeQtlSumStats()
+  cap <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieRss        = .fmp_mockFitRssDiag(flag = FALSE, capture = cap),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  suppressMessages(
+    fineMappingPipeline(ss, methods = "susie", addSusieInf = FALSE,
+                        serFallback = TRUE, rMismatch = "eb"))
+  # rFinite defaulted to the LD-panel sample size (40 in .fmp_makeHandle).
+  expect_equal(cap$rFinite, 40L)
+  expect_equal(cap$rMismatch, "eb")
+
+  # Explicit rFinite is forwarded verbatim.
+  cap2 <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieRss        = .fmp_mockFitRssDiag(flag = FALSE, capture = cap2),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  suppressMessages(
+    fineMappingPipeline(ss, methods = "susie", addSusieInf = FALSE,
+                        serFallback = TRUE, rFinite = 12345, rMismatch = "eb"))
+  expect_equal(cap2$rFinite, 12345)
+})
+
+test_that("fineMappingPipeline(QtlSumStats): keepFullFit='all' retains fit on non-fallback region", {
+  ss <- .fmp_makeQtlSumStats()
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieRss        = .fmp_mockFitRssDiag(flag = FALSE),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  res <- suppressMessages(
+    fineMappingPipeline(ss, methods = "susie", addSusieInf = FALSE,
+                        serFallback = TRUE, rMismatch = "eb",
+                        keepFullFit = "all"))
+  sf <- getSusieFit(res, study = "Q1", context = "c1", trait = "t1",
+                    method = "susie")
+  expect_false(is.null(sf$multiEffectFit))
+  expect_equal(sf$multiEffectFit$multiTag, "multi")
 })
 
 test_that("fineMappingPipeline(GwasSumStats): un-QCd input rejected", {

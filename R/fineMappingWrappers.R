@@ -2178,8 +2178,8 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
     if (isStd && isTRUE(serFallback)) {
       # Record the reliability decision (and, per keepFullFit, the retained
       # multi-effect fit) on the entry's susieFit list. Gated on serFallback so
-      # that with the feature off the entry is byte-identical to before this
-      # change (no extra fields on QtlSumStats or default GWAS runs).
+      # that with the feature off (the default on every sumstat path) the entry
+      # is byte-identical to before this change (no extra diagnostic fields).
       sf <- ent@susieFit
       sf$R_reliability_flag <- flag
       sf$serFallbackUsed <- isTRUE(flag)

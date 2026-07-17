@@ -266,33 +266,35 @@
 #'   \code{TRUE}, every effect \code{L} is widened (including filtered-out ones,
 #'   labelled \code{L<k>} instead of \code{cs<k>}).
 #' @param serFallback Logical (length 1, default \code{FALSE}).
-#'   \code{GwasSumStats} only. When \code{TRUE}, after each standard
-#'   multi-effect SuSiE-RSS fit (\code{susie} / \code{susieAsh}) the pipeline
-#'   reads susieR's finite-sample R diagnostics and, if
+#'   \code{QtlSumStats} / \code{GwasSumStats} (summary-statistics SuSiE-RSS
+#'   paths) only. When \code{TRUE}, after each standard multi-effect SuSiE-RSS
+#'   fit (\code{susie} / \code{susieAsh}) the pipeline reads susieR's
+#'   finite-sample R diagnostics and, if
 #'   \code{fit$R_finite_diagnostics$R_reliability_flag} is \code{TRUE}, reports
 #'   the single-effect (\code{ser_model}) result for that region instead of the
-#'   multi-effect fit. Defaults \code{FALSE} so QTL and other callers are
-#'   unchanged. See \code{keepFullFit} for retaining the multi-effect fit.
-#' @param rFinite \code{GwasSumStats} only. Finite-sample size for susieR's
-#'   \code{R_finite} correction, forwarded to \code{susieR::susie_rss()}.
-#'   \code{NULL} (default) uses susieR's default, except when a finite/EB mode
-#'   is active (\code{serFallback=TRUE} or \code{rMismatch != "none"}) and
-#'   \code{rFinite} is \code{NULL}, in which case it defaults to the LD-panel
-#'   sample size \code{getNSamples(ldSketch)}.
-#' @param rMismatch \code{GwasSumStats} only. LD-mismatch mode forwarded to
-#'   \code{susieR::susie_rss()} as \code{R_mismatch} (e.g. \code{"eb"} for
-#'   empirical Bayes). Default \code{"none"} (susieR's default).
-#' @param rMismatchMethod \code{GwasSumStats} only. Optional
+#'   multi-effect fit. Defaults \code{FALSE} so existing callers are unchanged.
+#'   See \code{keepFullFit} for retaining the multi-effect fit.
+#' @param rFinite \code{QtlSumStats} / \code{GwasSumStats} only. Finite-sample
+#'   size for susieR's \code{R_finite} correction, forwarded to
+#'   \code{susieR::susie_rss()}. \code{NULL} (default) uses susieR's default,
+#'   except when a finite/EB mode is active (\code{serFallback=TRUE} or
+#'   \code{rMismatch != "none"}) and \code{rFinite} is \code{NULL}, in which
+#'   case it defaults to the LD-panel sample size \code{getNSamples(ldSketch)}.
+#' @param rMismatch \code{QtlSumStats} / \code{GwasSumStats} only. LD-mismatch
+#'   mode forwarded to \code{susieR::susie_rss()} as \code{R_mismatch} (e.g.
+#'   \code{"eb"} for empirical Bayes). Default \code{"none"} (susieR's default).
+#' @param rMismatchMethod \code{QtlSumStats} / \code{GwasSumStats} only. Optional
 #'   \code{R_mismatch_method} forwarded to \code{susieR::susie_rss()} when
 #'   non-\code{NULL}.
-#' @param checkPrior \code{GwasSumStats} only. Optional \code{check_prior}
-#'   forwarded to \code{susieR::susie_rss()} when non-\code{NULL}.
-#' @param keepFullFit \code{GwasSumStats} only. Controls retention of the
-#'   pre-fallback multi-effect SuSiE-RSS fit when \code{serFallback=TRUE}:
-#'   \code{"fallback"} (default) keeps it only for regions that fell back to
-#'   SER; \code{"all"} keeps it for every region; \code{"none"} keeps none. The
-#'   retained fit and the decision are stored on the entry's SuSiE fit and read
-#'   via \code{getSusieFit(res)$multiEffectFit},
+#' @param checkPrior \code{QtlSumStats} / \code{GwasSumStats} only. Optional
+#'   \code{check_prior} forwarded to \code{susieR::susie_rss()} when
+#'   non-\code{NULL}.
+#' @param keepFullFit \code{QtlSumStats} / \code{GwasSumStats} only. Controls
+#'   retention of the pre-fallback multi-effect SuSiE-RSS fit when
+#'   \code{serFallback=TRUE}: \code{"fallback"} (default) keeps it only for
+#'   regions that fell back to SER; \code{"all"} keeps it for every region;
+#'   \code{"none"} keeps none. The retained fit and the decision are stored on
+#'   the entry's SuSiE fit and read via \code{getSusieFit(res)$multiEffectFit},
 #'   \code{getSusieFit(res)$R_reliability_flag}, and
 #'   \code{getSusieFit(res)$serFallbackUsed}.
 #' @param ... Reserved for future per-method arguments.
@@ -1746,6 +1748,12 @@ setMethod("fineMappingPipeline", "QtlSumStats",
            fullFit            = FALSE,
            fullFitAlphaOnly   = TRUE,
            includeAllCs       = FALSE,
+           serFallback        = FALSE,
+           rFinite            = NULL,
+           rMismatch          = "none",
+           rMismatchMethod    = NULL,
+           checkPrior         = NULL,
+           keepFullFit        = "fallback",
            ...) {
     .fmAssertQcd(data)
     parsedJointSpec <- parseJointSpecification(jointSpecification, data)
@@ -1806,6 +1814,12 @@ setMethod("fineMappingPipeline", "QtlSumStats",
     }
 
     ldSketch <- getLdSketch(data)
+    # When a finite-sample R / EB LD-mismatch mode is active (serFallback on, or
+    # rMismatch other than "none") and rFinite is unset, default it to the
+    # LD-panel sample size (mirrors the GwasSumStats method).
+    rFiniteResolved <- if (is.null(rFinite) &&
+                           (isTRUE(serFallback) || !identical(rMismatch, "none")))
+      getNSamples(ldSketch) else rFinite
 
     rowStudy   <- character(0)
     rowContext <- character(0)
@@ -1856,7 +1870,10 @@ setMethod("fineMappingPipeline", "QtlSumStats",
           signalCutoff, minAbsCorr, methodArgs, verbose,
           label = sprintf("(study='%s', context='%s', trait='%s')", st, ctx, tr),
           af = afByVar, fullFit = fullFit,
-          fullFitAlphaOnly = fullFitAlphaOnly, includeAllCs = includeAllCs)
+          fullFitAlphaOnly = fullFitAlphaOnly, includeAllCs = includeAllCs,
+          serFallback = serFallback, rFinite = rFiniteResolved,
+          rMismatch = rMismatch, rMismatchMethod = rMismatchMethod,
+          checkPrior = checkPrior, keepFullFit = keepFullFit)
         # The method column carries the bare token, independent of the
         # postprocess class.
         for (tk in names(ents)) pushRow(st, ctx, tr, tk, ents[[tk]])
