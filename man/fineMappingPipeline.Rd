@@ -114,6 +114,12 @@ fineMappingPipeline(data, ...)
   fullFit = FALSE,
   fullFitAlphaOnly = TRUE,
   includeAllCs = FALSE,
+  serFallback = FALSE,
+  rFinite = NULL,
+  rMismatch = "none",
+  rMismatchMethod = NULL,
+  checkPrior = NULL,
+  keepFullFit = "fallback",
   ...
 )
 
@@ -134,6 +140,12 @@ fineMappingPipeline(data, ...)
   fullFit = FALSE,
   fullFitAlphaOnly = TRUE,
   includeAllCs = FALSE,
+  serFallback = FALSE,
+  rFinite = NULL,
+  rMismatch = "none",
+  rMismatchMethod = NULL,
+  checkPrior = NULL,
+  keepFullFit = "fallback",
   ...
 )
 
@@ -324,6 +336,44 @@ residualized \code{X} / \code{Y}.}
 \code{TRUE} (default) residualize against the genotype-side
 covariates listed in \code{genotypeCovariatesToResidualize}. Set
 \code{FALSE} to disable.}
+
+\item{serFallback}{Logical (length 1, default \code{FALSE}).
+\code{QtlSumStats} / \code{GwasSumStats} (summary-statistics SuSiE-RSS
+paths) only. When \code{TRUE}, after each standard multi-effect SuSiE-RSS
+fit (\code{susie} / \code{susieAsh}) the pipeline reads susieR's
+finite-sample R diagnostics and, if
+\code{fit$R_finite_diagnostics$R_reliability_flag} is \code{TRUE}, reports
+the single-effect (\code{ser_model}) result for that region instead of the
+multi-effect fit. Defaults \code{FALSE} so existing callers are unchanged.
+See \code{keepFullFit} for retaining the multi-effect fit.}
+
+\item{rFinite}{\code{QtlSumStats} / \code{GwasSumStats} only. Finite-sample
+size for susieR's \code{R_finite} correction, forwarded to
+\code{susieR::susie_rss()}. \code{NULL} (default) uses susieR's default,
+except when a finite/EB mode is active (\code{serFallback=TRUE} or
+\code{rMismatch != "none"}) and \code{rFinite} is \code{NULL}, in which
+case it defaults to the LD-panel sample size \code{getNSamples(ldSketch)}.}
+
+\item{rMismatch}{\code{QtlSumStats} / \code{GwasSumStats} only. LD-mismatch
+mode forwarded to \code{susieR::susie_rss()} as \code{R_mismatch} (e.g.
+\code{"eb"} for empirical Bayes). Default \code{"none"} (susieR's default).}
+
+\item{rMismatchMethod}{\code{QtlSumStats} / \code{GwasSumStats} only. Optional
+\code{R_mismatch_method} forwarded to \code{susieR::susie_rss()} when
+non-\code{NULL}.}
+
+\item{checkPrior}{\code{QtlSumStats} / \code{GwasSumStats} only. Optional
+\code{check_prior} forwarded to \code{susieR::susie_rss()} when
+non-\code{NULL}.}
+
+\item{keepFullFit}{\code{QtlSumStats} / \code{GwasSumStats} only. Controls
+retention of the pre-fallback multi-effect SuSiE-RSS fit when
+\code{serFallback=TRUE}: \code{"fallback"} (default) keeps it only for
+regions that fell back to SER; \code{"all"} keeps it for every region;
+\code{"none"} keeps none. The retained fit and the decision are stored on
+the entry's SuSiE fit and read via \code{getSusieFit(res)$multiEffectFit},
+\code{getSusieFit(res)$R_reliability_flag}, and
+\code{getSusieFit(res)$serFallbackUsed}.}
 
 \item{ldBlocks}{For \code{GwasSumStats} input only: an
 \code{LdBlocks} object describing the LD-block partition. The
