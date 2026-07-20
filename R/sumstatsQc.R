@@ -1996,6 +1996,33 @@ ldMismatchQc <- function(zScore, R = NULL, X = NULL, nSample = NULL,
   match.arg(zMismatchQc, c("none", "slalom", "dentist"))
 }
 
+#' Effective sample size for a case/control study
+#'
+#' Computes the effective sample size
+#' \code{N_eff = 4 / (1/nCase + 1/nControl) = 4 * nCase * nControl /
+#' (nCase + nControl)} for case/control GWAS. Balanced studies
+#' (\code{nCase == nControl}) recover the total \code{nCase + nControl};
+#' imbalanced studies give a smaller value, which is the statistically
+#' correct sample size for the RSS likelihood, residual-variance estimation,
+#' kriging, and the N-cutoff filter. Vectorized over \code{nCase} /
+#' \code{nControl}; entries where either count is \code{NA} or \code{<= 0}
+#' return \code{NA_real_}.
+#'
+#' @param nCase Numeric vector of case counts.
+#' @param nControl Numeric vector of control counts.
+#' @return Numeric vector of effective sample sizes (\code{NA_real_} where a
+#'   count is missing or non-positive).
+#' @references Privé et al., "Identifying and correcting for misspecifications
+#'   in GWAS summary statistics and polygenic scores", HGG Advances 2022.
+#' @export
+effectiveN <- function(nCase, nControl) {
+  nCase <- as.numeric(nCase)
+  nControl <- as.numeric(nControl)
+  out <- 4 / (1 / nCase + 1 / nControl)
+  out[is.na(nCase) | is.na(nControl) | nCase <= 0 | nControl <= 0] <- NA_real_
+  out
+}
+
 #' Kriging-style LD-consistency outlier QC
 #'
 #' Flags variants whose observed z-score is inconsistent with the value
@@ -2114,7 +2141,7 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
     ranges   = IRanges::IRanges(start = as.integer(df$pos), width = 1L))
   if (!is.null(df$variant_id) && is.null(df$SNP)) df$SNP <- df$variant_id
   baseCols <- c("SNP", "A1", "A2", "Z", "N")
-  optCols  <- c("MAF", "INFO", "BETA", "SE", "P")
+  optCols  <- c("MAF", "INFO", "BETA", "SE", "P", "N_CASE", "N_CONTROL")
   use <- intersect(c(baseCols, optCols), colnames(df))
   S4Vectors::mcols(gr) <- S4Vectors::DataFrame(df[, use, drop = FALSE])
   gr
@@ -2564,6 +2591,58 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   list(df = df, skipped = FALSE)
 }
 
+# Internal: canonicalize the working per-variant `N` to the effective sample
+# size for case/control input. Counts are resolved by priority --- per-variant
+# N_CASE / N_CONTROL columns first, else study-level nCase / nControl scalars.
+# Returns list(df=, nSource=). nSource is one of "effective" (N set from
+# counts), "column" (existing N used as-is), "total" (raw total from counts,
+# escape hatch), or NA_character_ (no counts and no N). `emit` logs the
+# counts-win override.
+.resolveEffectiveN <- function(df, opts, emit) {
+  hasCols <- all(c("N_CASE", "N_CONTROL") %in% colnames(df))
+  hasScalar <- !is.null(opts$nCase) && !is.null(opts$nControl) &&
+    length(opts$nCase) == 1L && length(opts$nControl) == 1L &&
+    is.finite(opts$nCase) && is.finite(opts$nControl) &&
+    opts$nCase > 0 && opts$nControl > 0
+  hasN <- "N" %in% colnames(df)
+  nRow <- nrow(df)
+
+  if (!isTRUE(opts$effectiveN)) {
+    # Escape hatch: use the N column as-is; when there is no N but counts are
+    # present, fall back to the raw total (n_case + n_control), no override.
+    if (!hasN && (hasCols || hasScalar)) {
+      if (hasCols) {
+        df$N <- as.numeric(df$N_CASE) + as.numeric(df$N_CONTROL)
+      } else {
+        df$N <- rep(opts$nCase + opts$nControl, nRow)
+      }
+      return(list(df = df, nSource = "total"))
+    }
+    return(list(df = df, nSource = if (hasN) "column" else NA_character_))
+  }
+
+  # Default on: derive the effective sample size from the counts when present.
+  if (hasCols) {
+    neff <- effectiveN(df$N_CASE, df$N_CONTROL)
+    if (hasN) {
+      emit("QC track: N overridden by effective N from per-variant ",
+           "n_case/n_control.")
+    }
+    df$N <- neff
+    return(list(df = df, nSource = "effective"))
+  }
+  if (hasScalar) {
+    neff <- rep(effectiveN(opts$nCase, opts$nControl), nRow)
+    if (hasN) {
+      emit("QC track: N overridden by effective N from study ",
+           "nCase/nControl.")
+    }
+    df$N <- neff
+    return(list(df = df, nSource = "effective"))
+  }
+  list(df = df, nSource = if (hasN) "column" else NA_character_)
+}
+
 # Internal: per-entry pipeline. Returns the cleaned GRanges and an audit list.
 .runEntrySummaryStatsQc <- function(gr, ldSketch, refGenome, opts,
                                     entryLabel = NULL) {
@@ -2607,6 +2686,18 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
     emit("QC track: sanity checks kept ", nrow(df), " of ", nSanIn,
          " variant(s).")
   }
+
+  # Canonicalize N to the effective sample size for case/control input,
+  # BEFORE the N-cutoff filter so the filter, kriging (median df$N), and the
+  # rebuilt entry all consume N_eff. No-op for quantitative traits (no counts).
+  nRes <- .resolveEffectiveN(df, opts, emit)
+  df <- nRes$df
+  entryAudit$nSource <- nRes$nSource
+  # Keep the PIP-screen / kriging sample size consistent with the canonicalized
+  # N: when effective (or total) N was applied, nForPip (set upstream from the
+  # entry's raw N) must follow the same N the N-filter/fit use.
+  if (isTRUE(nRes$nSource %in% c("effective", "total")) && "N" %in% colnames(df))
+    opts$nForPip <- stats::median(as.numeric(df$N), na.rm = TRUE)
 
   # 2. Variant-content filters (MAF / INFO / N). Pure column-numeric
   # filters; the indel / strand-ambiguous variant-allele filtering happens
@@ -2935,6 +3026,20 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
 #' @param alleleFlipKriging Logical (length 1). Opt-in kriging
 #'   LD-consistency prefilter run before SLALOM/DENTIST. Default
 #'   \code{FALSE}.
+#' @param effectiveN Logical (length 1). When \code{TRUE} (default) and the
+#'   input carries case/control counts --- per-variant \code{N_CASE} /
+#'   \code{N_CONTROL} mcols, else the study-level \code{nCase} /
+#'   \code{nControl} scalars --- the working per-variant \code{N} is set to
+#'   the effective sample size \code{effectiveN(nCase, nControl)} BEFORE the
+#'   N-cutoff filter, so the filter, kriging, and the downstream fit all use
+#'   \code{N_eff}. When both counts and an \code{N} column are present the
+#'   counts win: \code{N} is overridden and the override is logged. Inputs
+#'   with no counts (quantitative traits) are unchanged. The escape hatch
+#'   \code{effectiveN = FALSE} restores the raw \code{N} column (or, when
+#'   there is no \code{N}, the raw total \code{nCase + nControl}) with no
+#'   override. \code{qcInfo$options$effectiveN} records the setting and each
+#'   entry's \code{nSource} is one of \code{"effective"}, \code{"column"},
+#'   \code{"total"}, or \code{NA}.
 #' @param impute Logical (length 1). Run RAISS imputation against the
 #'   \code{ldSketch}. Default \code{FALSE}. (Note: RAISS against the
 #'   sketch is not yet fully wired for the new path; the option is
@@ -2980,6 +3085,7 @@ summaryStatsQc <- function(sumstats,
                            zMismatchQc            = c("none", "slalom",
                                                      "dentist"),
                            alleleFlipKriging      = FALSE,
+                           effectiveN             = TRUE,
                            impute                 = FALSE,
                            imputeOpts             = list(rcond = 0.01,
                                                         r2Threshold = 0.6,
@@ -3024,6 +3130,9 @@ summaryStatsQc <- function(sumstats,
     pipCutoffToSkip        = pipCutoffToSkip,
     zMismatchQc            = zMismatchQc,
     alleleFlipKriging      = alleleFlipKriging,
+    effectiveN             = effectiveN,
+    nCase                  = NULL,
+    nControl               = NULL,
     impute                 = impute,
     imputeOpts             = imputeOpts,
     matchMinProp           = matchMinProp,
@@ -3045,6 +3154,10 @@ summaryStatsQc <- function(sumstats,
     opts$nForPip <- if ("N" %in% colnames(S4Vectors::mcols(sumstats$entry[[i]])))
       stats::median(S4Vectors::mcols(sumstats$entry[[i]])$N, na.rm = TRUE)
     else NULL
+    # Per-entry study-level case/control counts (used only when the entry has
+    # no per-variant N_CASE / N_CONTROL columns). NULL for quantitative traits.
+    opts$nCase    <- if ("nCase"    %in% names(sumstats)) as.numeric(sumstats$nCase)[[i]]    else NULL
+    opts$nControl <- if ("nControl" %in% names(sumstats)) as.numeric(sumstats$nControl)[[i]] else NULL
     # Per-entry label woven into QC log messages and the rollup. For
     # QtlSumStats it's (study/context/trait); for GwasSumStats it's the
     # study identifier.
@@ -3075,6 +3188,7 @@ summaryStatsQc <- function(sumstats,
       nCutoff               = nCutoff,
       zMismatchQc           = zMismatchQc,
       alleleFlipKriging     = alleleFlipKriging,
+      effectiveN            = effectiveN,
       impute                = impute,
       coerceNumeric         = coerceNumeric,
       normalizeChr          = normalizeChr,
