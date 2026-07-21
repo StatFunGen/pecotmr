@@ -216,6 +216,35 @@ test_that("loadGwasSumStatsFromManifest resolves a YAML column mapping", {
                c("G", "C", "G", "C", "A"))
 })
 
+# ---------------------------------------------------------------------------
+# Case/control counts -> effective sample size
+# ---------------------------------------------------------------------------
+
+test_that("loadGwasSumStatsFromManifest reads per-variant N_CASE/N_CONTROL (no N)", {
+  tmp <- withr::local_tempdir()
+  df <- .toyGwasDf(5)
+  df$n_sample  <- NULL                # no N column ...
+  df$n_case    <- rep(1000L, 5)       # ... only per-variant case/control counts
+  df$n_control <- rep(2000L, 5)
+  ssPath <- .writeSumstatsTsv(df, file.path(tmp, "cc.tsv"))
+  manifest <- data.frame(study = "cc", sumStatsPath = ssPath,
+                         stringsAsFactors = FALSE)
+  obj <- loadGwasSumStatsFromManifest(manifest, genome = "hg38",
+                                      ldSketch = .toyLdSketch())
+  expect_s4_class(obj, "GwasSumStats")
+  mc <- S4Vectors::mcols(obj$entry[[1L]])
+  expect_true(all(c("N_CASE", "N_CONTROL") %in% colnames(mc)))
+  expect_false("N" %in% colnames(mc))  # effective N is derived later by summaryStatsQc
+  expect_equal(as.integer(mc$N_CASE), rep(1000L, 5))
+})
+
+test_that(".resolveSumstatCols requires an N field or N_CASE + N_CONTROL", {
+  df <- .toyGwasDf(3)
+  df$n_sample <- NULL                  # drop the only sample-size source
+  expect_error(pecotmr:::.resolveSumstatCols(df, NULL, "lbl"),
+               "N_CASE + N_CONTROL", fixed = TRUE)
+})
+
 test_that(".readColumnMapping accepts a named list and a YAML file alike", {
   tmp <- withr::local_tempdir()
   mp <- file.path(tmp, "m.yaml")

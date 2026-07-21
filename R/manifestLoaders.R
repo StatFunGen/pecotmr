@@ -330,6 +330,8 @@ NULL
   A2         = c("A2", "a2"),
   Z          = c("z", "Z"),
   N          = c("n_sample", "N", "n"),
+  N_CASE     = c("N_CASE", "n_case", "ncase"),
+  N_CONTROL  = c("N_CONTROL", "n_control", "ncontrol"),
   BETA       = c("beta", "BETA"),
   SE         = c("se", "SE"),
   P          = c("p", "P", "pvalue", "pval"),
@@ -347,6 +349,8 @@ NULL
   A2         = c("A2", "a2"),
   Z          = c("z", "Z"),
   N          = c("n_sample", "N", "n"),
+  N_CASE     = c("n_case", "N_CASE", "ncase"),
+  N_CONTROL  = c("n_control", "N_CONTROL", "ncontrol"),
   BETA       = c("beta", "BETA"),
   SE         = c("se", "SE"),
   P          = c("p", "P", "pvalue"),
@@ -382,7 +386,9 @@ NULL
 
 # Standardise the columns of a raw sumstats data.frame into the canonical
 # schema expected by .dfToEntryGranges: chrom, pos, SNP, A1, A2, Z, N (+
-# optional BETA, SE, P, MAF, INFO). `mapping` (named std -> source) overrides
+# optional N_CASE, N_CONTROL, BETA, SE, P, MAF, INFO). N is required UNLESS
+# per-variant N_CASE + N_CONTROL are both present, from which summaryStatsQc
+# derives the effective sample size. `mapping` (named std -> source) overrides
 # the default aliases per key.
 .resolveSumstatCols <- function(df, columnMapping, label) {
   # Strip a leading '#' from the first column name so a '#CHR'-style header
@@ -407,13 +413,28 @@ NULL
     }
     intersect(.sumstatColumnAliases[[key]], names(df))[1L]
   }
-  required <- c("chrom", "pos", "variant_id", "A1", "A2", "Z", "N")
+  required <- c("chrom", "pos", "variant_id", "A1", "A2", "Z")
   resolved <- setNames(lapply(required, resolveKey), required)
   missingKeys <- required[vapply(resolved, function(x) is.na(x) || is.null(x), logical(1))]
   if (length(missingKeys) > 0L) {
     stop(label, ": sumstats file is missing required field(s): ",
          paste(missingKeys, collapse = ", "),
          " (supply a columnMapping if the source names differ).")
+  }
+  # Sample size: an N column, OR per-variant N_CASE + N_CONTROL counts (from
+  # which summaryStatsQc(effectiveN=) derives the effective sample size). At
+  # least one is required; both may be present (N_CASE/N_CONTROL take priority
+  # downstream when effectiveN is on).
+  nSrc        <- resolveKey("N")
+  ncaseSrc    <- resolveKey("N_CASE")
+  ncontrolSrc <- resolveKey("N_CONTROL")
+  hasN      <- !is.na(nSrc)        && !is.null(nSrc)
+  hasCounts <- !is.na(ncaseSrc)    && !is.null(ncaseSrc) &&
+               !is.na(ncontrolSrc) && !is.null(ncontrolSrc)
+  if (!hasN && !hasCounts) {
+    stop(label, ": sumstats file needs an N field (n_sample/N/n), or ",
+         "N_CASE + N_CONTROL columns for the effective sample size ",
+         "(supply a columnMapping if the source names differ).")
   }
   out <- data.frame(
     chrom = as.character(df[[resolved$chrom]]),
@@ -422,8 +443,14 @@ NULL
     A1    = as.character(df[[resolved$A1]]),
     A2    = as.character(df[[resolved$A2]]),
     Z     = as.numeric(df[[resolved$Z]]),
-    N     = as.numeric(df[[resolved$N]]),
     stringsAsFactors = FALSE)
+  if (hasN) out$N <- as.numeric(df[[nSrc]])
+  # Per-variant case/control counts -> N_CASE / N_CONTROL (kept by
+  # .dfToEntryGranges; summaryStatsQc(effectiveN=) consumes them).
+  if (hasCounts) {
+    out$N_CASE    <- as.numeric(df[[ncaseSrc]])
+    out$N_CONTROL <- as.numeric(df[[ncontrolSrc]])
+  }
   for (key in c("BETA", "SE", "P", "MAF", "INFO")) {
     src <- resolveKey(key)
     if (!is.na(src) && !is.null(src)) out[[key]] <- as.numeric(df[[src]])
