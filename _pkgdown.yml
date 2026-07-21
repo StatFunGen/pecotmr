@@ -364,6 +364,7 @@ reference:
       and relatedness checks.
     contents:
       - summaryStatsQc
+      - effectiveN
       - alignVariantNames
       - ldMismatchQc
       - krigingOutlierQc
