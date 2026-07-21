@@ -16,6 +16,7 @@ summaryStatsQc(
   pipCutoffToSkip = 0,
   zMismatchQc = c("none", "slalom", "dentist"),
   alleleFlipKriging = FALSE,
+  effectiveN = TRUE,
   impute = FALSE,
   imputeOpts = list(rcond = 0.01, r2Threshold = 0.6, minimumLd = 5, lamb = 0.01),
   matchMinProp = 0,
@@ -69,6 +70,21 @@ Default 0 (no screen).}
 \item{alleleFlipKriging}{Logical (length 1). Opt-in kriging
 LD-consistency prefilter run before SLALOM/DENTIST. Default
 \code{FALSE}.}
+
+\item{effectiveN}{Logical (length 1). When \code{TRUE} (default) and the
+input carries case/control counts --- per-variant \code{N_CASE} /
+\code{N_CONTROL} mcols, else the study-level \code{nCase} /
+\code{nControl} scalars --- the working per-variant \code{N} is set to
+the effective sample size \code{effectiveN(nCase, nControl)} BEFORE the
+N-cutoff filter, so the filter, kriging, and the downstream fit all use
+\code{N_eff}. When both counts and an \code{N} column are present the
+counts win: \code{N} is overridden and the override is logged. Inputs
+with no counts (quantitative traits) are unchanged. The escape hatch
+\code{effectiveN = FALSE} restores the raw \code{N} column (or, when
+there is no \code{N}, the raw total \code{nCase + nControl}) with no
+override. \code{qcInfo$options$effectiveN} records the setting and each
+entry's \code{nSource} is one of \code{"effective"}, \code{"column"},
+\code{"total"}, or \code{NA}.}
 
 \item{impute}{Logical (length 1). Run RAISS imputation against the
 \code{ldSketch}. Default \code{FALSE}. (Note: RAISS against the

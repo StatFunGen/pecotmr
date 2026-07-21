@@ -2786,6 +2786,138 @@ test_that("summaryStatsQc: round-trips QtlSumStats inputs", {
 })
 
 # ===========================================================================
+# effectiveN helper + case/control N canonicalization in summaryStatsQc
+# ===========================================================================
+
+# Build a GwasSumStats entry carrying per-variant N_CASE / N_CONTROL mcols
+# (optionally an N column too). Panel-matched (A1=A / A2=G at BP 100..) so the
+# variants survive harmonization against .ssQ_makeHandle().
+.ssQ_makeCCEntry <- function(nCase, nControl, includeN = FALSE,
+                             snp_ids = paste0("rs", 1:4),
+                             positions = c(100L, 200L, 300L, 400L)) {
+  m <- length(snp_ids)
+  gr <- GenomicRanges::GRanges(
+    seqnames = rep("chr1", m),
+    ranges = IRanges::IRanges(start = positions, width = 1L))
+  mc <- S4Vectors::DataFrame(
+    SNP = snp_ids,
+    A1  = rep("A", m),
+    A2  = rep("G", m),
+    Z   = seq(1.0, by = 0.5, length.out = m),
+    N_CASE    = as.numeric(rep_len(nCase, m)),
+    N_CONTROL = as.numeric(rep_len(nControl, m)))
+  if (includeN) mc$N <- rep(1000L, m)
+  S4Vectors::mcols(gr) <- mc
+  gr
+}
+
+# Entry N ordered by genomic position (harmonization can reorder rows).
+.ssQ_entryNByPos <- function(entry) {
+  o <- order(GenomicRanges::start(entry))
+  as.numeric(S4Vectors::mcols(entry)$N[o])
+}
+
+test_that("effectiveN: balanced equals total, imbalanced is smaller, guards NA/<=0", {
+  # Balanced: 4/(1/500 + 1/500) == 1000 == total.
+  expect_equal(effectiveN(500, 500), 1000)
+  # Imbalanced: 4*100*900/1000 = 360 < 1000.
+  expect_equal(effectiveN(100, 900), 360)
+  expect_lt(effectiveN(100, 900), 100 + 900)
+  # NA / non-positive counts -> NA_real_.
+  expect_true(is.na(effectiveN(NA, 500)))
+  expect_true(is.na(effectiveN(500, NA)))
+  expect_true(is.na(effectiveN(0, 500)))
+  expect_true(is.na(effectiveN(-5, 500)))
+  # Vectorized, element-wise.
+  expect_equal(effectiveN(c(500, 100, 0), c(500, 900, 500)),
+               c(1000, 360, NA_real_))
+})
+
+test_that("summaryStatsQc(effectiveN=TRUE): per-variant counts, no N -> N == N_eff", {
+  gr <- .ssQ_makeCCEntry(nCase    = c(100, 200, 150, 250),
+                         nControl = c(900, 800, 850, 750))
+  ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
+                     ldSketch = .ssQ_makeHandle())
+  res <- summaryStatsQc(ss)
+  # 4*case*control/(case+control) per variant.
+  expect_equal(.ssQ_entryNByPos(res$entry[[1L]]), c(360, 640, 510, 750))
+  expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "effective")
+})
+
+test_that("summaryStatsQc(effectiveN=TRUE): counts + N -> counts win, override logged", {
+  gr <- .ssQ_makeCCEntry(nCase    = c(100, 200, 150, 250),
+                         nControl = c(900, 800, 850, 750),
+                         includeN = TRUE)
+  ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
+                     ldSketch = .ssQ_makeHandle())
+  expect_message(summaryStatsQc(ss), "overridden by effective N")
+  res <- summaryStatsQc(ss)
+  # N (was 1000) is replaced by the per-variant N_eff.
+  expect_equal(.ssQ_entryNByPos(res$entry[[1L]]), c(360, 640, 510, 750))
+  expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "effective")
+})
+
+test_that("summaryStatsQc(effectiveN=TRUE): N only, no counts -> used as-is", {
+  ss <- .ssQ_makeGwasSumStats()   # entry carries N = 1000, no counts
+  res <- summaryStatsQc(ss)
+  expect_true(all(.ssQ_entryNByPos(res$entry[[1L]]) == 1000))
+  expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "column")
+})
+
+test_that("summaryStatsQc(effectiveN=FALSE): counts + N -> raw N, no override", {
+  gr <- .ssQ_makeCCEntry(nCase    = c(100, 200, 150, 250),
+                         nControl = c(900, 800, 850, 750),
+                         includeN = TRUE)
+  ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
+                     ldSketch = .ssQ_makeHandle())
+  res <- summaryStatsQc(ss, effectiveN = FALSE)
+  expect_true(all(.ssQ_entryNByPos(res$entry[[1L]]) == 1000))
+  expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "column")
+})
+
+test_that("summaryStatsQc(effectiveN=FALSE): counts only -> raw total, nSource='total'", {
+  gr <- .ssQ_makeCCEntry(nCase    = c(100, 200, 150, 250),
+                         nControl = c(900, 800, 850, 750))
+  ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
+                     ldSketch = .ssQ_makeHandle())
+  res <- summaryStatsQc(ss, effectiveN = FALSE)
+  # Raw total n_case + n_control per variant.
+  expect_equal(.ssQ_entryNByPos(res$entry[[1L]]), c(1000, 1000, 1000, 1000))
+  expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "total")
+})
+
+test_that("summaryStatsQc(effectiveN=TRUE): study-level scalars applied to all variants", {
+  # Entry has an N column but NO per-variant N_CASE/N_CONTROL; the scalars win.
+  gr <- .ssQ_makeEntryGr()
+  ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
+                     ldSketch = .ssQ_makeHandle(),
+                     nCase = 100, nControl = 900)
+  expect_message(summaryStatsQc(ss), "from study")
+  res <- summaryStatsQc(ss)
+  # 4*100*900/1000 = 360 for every variant.
+  expect_true(all(.ssQ_entryNByPos(res$entry[[1L]]) == 360))
+  expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "effective")
+})
+
+test_that("summaryStatsQc: effectiveN recorded in qcInfo options", {
+  ss <- .ssQ_makeGwasSumStats()
+  expect_true(getQcInfo(summaryStatsQc(ss))$options$effectiveN)
+  expect_false(getQcInfo(summaryStatsQc(ss, effectiveN = FALSE))$options$effectiveN)
+})
+
+test_that("summaryStatsQc: quantitative QtlSumStats is a no-op for effective N", {
+  # No counts anywhere; entry carries an N column -> used as-is (nSource
+  # "column"), N untouched.
+  gr <- .ssQ_makeEntryGr()
+  ss <- QtlSumStats(study = "s1", context = "c1", trait = "t1",
+                    entry = list(gr), genome = "hg19",
+                    ldSketch = .ssQ_makeHandle())
+  res <- summaryStatsQc(ss)
+  expect_true(all(.ssQ_entryNByPos(res$entry[[1L]]) == 1000))
+  expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "column")
+})
+
+# ===========================================================================
 # summaryStatsQc with LD-mismatch QC enabled (mocked extractor)
 # ===========================================================================
 

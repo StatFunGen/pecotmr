@@ -349,7 +349,7 @@ setGeneric("colocboostPipeline",
   okCC <- !is.null(nCase) && !is.null(nControl) &&
           !is.na(nCase) && !is.na(nControl) &&
           nCase > 0 && nControl > 0
-  nVal <- if (okCC) 4 / (1 / nCase + 1 / nControl)
+  nVal <- if (okCC) effectiveN(nCase, nControl)
           else if (!is.null(df$N)) df$N else NA_real_
   ss <- data.frame(
     z       = df$z,
