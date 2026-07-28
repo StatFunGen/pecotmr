@@ -387,10 +387,12 @@ NULL
 # Standardise the columns of a raw sumstats data.frame into the canonical
 # schema expected by .dfToEntryGranges: chrom, pos, SNP, A1, A2, Z, N (+
 # optional N_CASE, N_CONTROL, BETA, SE, P, MAF, INFO). N is required UNLESS
-# per-variant N_CASE + N_CONTROL are both present, from which summaryStatsQc
-# derives the effective sample size. `mapping` (named std -> source) overrides
-# the default aliases per key.
-.resolveSumstatCols <- function(df, columnMapping, label) {
+# per-variant N_CASE + N_CONTROL are both present (from which summaryStatsQc
+# derives the effective sample size), OR `allowNoN = TRUE` because the caller
+# has a study-level scalar (nCase/nControl or nSample) that summaryStatsQc will
+# fill N from. `mapping` (named std -> source) overrides the default aliases
+# per key.
+.resolveSumstatCols <- function(df, columnMapping, label, allowNoN = FALSE) {
   # Strip a leading '#' from the first column name so a '#CHR'-style header
   # (common in GWAS TSVs) resolves the same way on the plain-text and tabix
   # read paths, and so explicit columnMapping values match the bare name.
@@ -431,9 +433,10 @@ NULL
   hasN      <- !is.na(nSrc)        && !is.null(nSrc)
   hasCounts <- !is.na(ncaseSrc)    && !is.null(ncaseSrc) &&
                !is.na(ncontrolSrc) && !is.null(ncontrolSrc)
-  if (!hasN && !hasCounts) {
+  if (!hasN && !hasCounts && !allowNoN) {
     stop(label, ": sumstats file needs an N field (n_sample/N/n), or ",
-         "N_CASE + N_CONTROL columns for the effective sample size ",
+         "N_CASE + N_CONTROL columns for the effective sample size, or a ",
+         "study-level scalar (nCase/nControl or nSample) in the manifest ",
          "(supply a columnMapping if the source names differ).")
   }
   out <- data.frame(
@@ -554,7 +557,8 @@ NULL
 
 # Read one delimited-text sumstats file. Region reads only when a <path>.tbi
 # sidecar exists; otherwise the whole file is read and any region is ignored.
-.readSumStatsText <- function(path, region, columnMapping, label) {
+.readSumStatsText <- function(path, region, columnMapping, label,
+                              allowNoN = FALSE) {
   hasTbi <- file.exists(paste0(path, ".tbi"))
   raw <- if (!is.null(region) && hasTbi) {
     .readTabixRegion(path, region)
@@ -570,29 +574,31 @@ NULL
                                   col_types = readr::cols(.default = readr::col_character())),
                   check.names = FALSE)
   }
-  .resolveSumstatCols(raw, columnMapping, label)
+  .resolveSumstatCols(raw, columnMapping, label, allowNoN = allowNoN)
 }
 
 # Dispatch a sumstats file to the text or GWAS-VCF reader. BCF is rejected.
 .readSumStatsFile <- function(path, region, columnMapping, sampleSelect,
-                              formatMapping, label) {
+                              formatMapping, label, allowNoN = FALSE) {
   lower <- tolower(path)
   if (endsWith(lower, ".bcf")) {
     stop(label, ": BCF sumstats are not supported; convert '", path,
          "' to a bgzipped, tabix-indexed VCF.")
   }
   if (grepl("\\.vcf(\\.b?gz)?$", lower)) {
+    # GWAS-VCF always carries an SS (sample-size) FORMAT field, so the study
+    # scalar never has to stand in for a per-variant N here.
     .readSumStatsVcf(path, region, sampleSelect, formatMapping, label)
   } else {
-    .readSumStatsText(path, region, columnMapping, label)
+    .readSumStatsText(path, region, columnMapping, label, allowNoN = allowNoN)
   }
 }
 
 # Read one sumstats source into an entry GRanges (canonical mcols).
 .loadSumStatsEntry <- function(path, region, columnMapping, sampleSelect,
-                               formatMapping, label) {
+                               formatMapping, label, allowNoN = FALSE) {
   df <- .readSumStatsFile(path, region, columnMapping, sampleSelect,
-                          formatMapping, label)
+                          formatMapping, label, allowNoN = allowNoN)
   .dfToEntryGranges(df)
 }
 
@@ -802,6 +808,7 @@ loadQtlDatasetFromManifest <- function(manifest, study = NULL,
                     "columnMappingFile"),
   nCase         = c("nCase", "n_case"),
   nControl      = c("nControl", "n_control"),
+  nSample       = c("nSample", "n_sample"),
   varY          = c("varY", "var_y"),
   genome        = c("genome"),
   ldSketchPath  = c("ldSketchPath", "ld_sketch_path", "ld_sketch"))
@@ -824,8 +831,11 @@ loadQtlDatasetFromManifest <- function(manifest, study = NULL,
 #' @param manifest A data.frame or path. Columns (snake_case aliases accepted):
 #'   \code{study} (required, unique), \code{sumStatsPath} (required),
 #'   \code{columnMapping} (optional), \code{nCase} / \code{nControl}
-#'   (optional), \code{varY} (optional), and the single-valued \code{genome} /
-#'   \code{ldSketchPath}.
+#'   (optional), \code{nSample} (optional study-level total N), \code{varY}
+#'   (optional), and the single-valued \code{genome} / \code{ldSketchPath}.
+#'   When a row supplies a study-level scalar (\code{nCase} + \code{nControl},
+#'   or \code{nSample}), its sumstats file need not carry a per-variant \code{N}
+#'   column; \code{\link{summaryStatsQc}} fills \code{N} from the scalar.
 #' @param genome Genome build; reconciled with a \code{genome} column.
 #' @param ldSketch A \code{\link{GenotypeHandle}} or a spec
 #'   (path/prefix/genoMeta); reconciled with an \code{ldSketchPath} column.
@@ -859,6 +869,20 @@ loadGwasSumStatsFromManifest <- function(manifest, genome = NULL,
   genome <- .reconcileScalar(df$genome, genome, "genome")
   ldSketch <- .resolveLdSketchInput(df, ldSketch, base)
 
+  # Study-level sample-size scalars (from the manifest). When a row carries a
+  # usable scalar (n_case + n_control, or n_sample), the sumstats file need not
+  # supply a per-variant N: summaryStatsQc fills N from the scalar. Compute the
+  # per-row scalar presence up front so it can gate the entry reader's N check.
+  nCaseCol    <- if ("nCase" %in% names(df))    as.numeric(df$nCase)    else NULL
+  nControlCol <- if ("nControl" %in% names(df)) as.numeric(df$nControl) else NULL
+  nSampleCol  <- if ("nSample" %in% names(df))  as.numeric(df$nSample)  else NULL
+  hasStudyScalar <- function(i) {
+    ccOk <- !is.null(nCaseCol) && !is.null(nControlCol) &&
+            is.finite(nCaseCol[[i]]) && is.finite(nControlCol[[i]])
+    nOk  <- !is.null(nSampleCol) && is.finite(nSampleCol[[i]])
+    isTRUE(ccOk) || isTRUE(nOk)
+  }
+
   entries <- lapply(seq_len(nrow(df)), function(i) {
     label <- paste0("GwasSumStats[study=", df$study[[i]], "]")
     mapping <- if ("columnMapping" %in% names(df) &&
@@ -869,16 +893,18 @@ loadGwasSumStatsFromManifest <- function(manifest, genome = NULL,
       columnMapping
     }
     gr <- .loadSumStatsEntry(.resolveRel(as.character(df$sumStatsPath[[i]]), base),
-                             region, mapping, sampleSelect, formatMapping, label)
+                             region, mapping, sampleSelect, formatMapping, label,
+                             allowNoN = hasStudyScalar(i))
     .checkLdContainment(ldSketch, gr, minLdOverlapWarn, label)
     gr
   })
 
   args <- list(study = as.character(df$study), entry = entries,
                genome = genome, ldSketch = ldSketch)
-  if ("nCase" %in% names(df))    args$nCase    <- as.numeric(df$nCase)
-  if ("nControl" %in% names(df)) args$nControl <- as.numeric(df$nControl)
-  if ("varY" %in% names(df))     args$varY     <- as.numeric(df$varY)
+  if (!is.null(nCaseCol))    args$nCase    <- nCaseCol
+  if (!is.null(nControlCol)) args$nControl <- nControlCol
+  if (!is.null(nSampleCol))  args$nSample  <- nSampleCol
+  if ("varY" %in% names(df)) args$varY     <- as.numeric(df$varY)
   do.call(GwasSumStats, args)
 }
 

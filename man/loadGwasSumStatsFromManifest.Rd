@@ -19,8 +19,11 @@ loadGwasSumStatsFromManifest(
 \item{manifest}{A data.frame or path. Columns (snake_case aliases accepted):
 \code{study} (required, unique), \code{sumStatsPath} (required),
 \code{columnMapping} (optional), \code{nCase} / \code{nControl}
-(optional), \code{varY} (optional), and the single-valued \code{genome} /
-\code{ldSketchPath}.}
+(optional), \code{nSample} (optional study-level total N), \code{varY}
+(optional), and the single-valued \code{genome} / \code{ldSketchPath}.
+When a row supplies a study-level scalar (\code{nCase} + \code{nControl},
+or \code{nSample}), its sumstats file need not carry a per-variant \code{N}
+column; \code{\link{summaryStatsQc}} fills \code{N} from the scalar.}
 
 \item{genome}{Genome build; reconciled with a \code{genome} column.}
 

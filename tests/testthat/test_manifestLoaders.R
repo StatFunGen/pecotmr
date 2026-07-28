@@ -245,6 +245,55 @@ test_that(".resolveSumstatCols requires an N field or N_CASE + N_CONTROL", {
                "N_CASE + N_CONTROL", fixed = TRUE)
 })
 
+test_that(".resolveSumstatCols allows no N when allowNoN = TRUE (study scalar)", {
+  df <- .toyGwasDf(3)
+  df$n_sample <- NULL                  # no per-variant N, no counts
+  out <- pecotmr:::.resolveSumstatCols(df, NULL, "lbl", allowNoN = TRUE)
+  expect_false("N" %in% colnames(out))            # built without N ...
+  expect_true(all(c("SNP", "A1", "A2", "Z") %in% colnames(out)))  # ... core kept
+})
+
+test_that("loadGwasSumStatsFromManifest builds from a study nSample scalar (no per-variant N)", {
+  tmp <- withr::local_tempdir()
+  df <- .toyGwasDf(5)
+  df$n_sample <- NULL                  # sumstats has no per-variant N and no counts
+  ssPath <- .writeSumstatsTsv(df, file.path(tmp, "studyn.tsv"))
+  manifest <- data.frame(study = "sn", sumStatsPath = ssPath,
+                         n_sample = 487511, stringsAsFactors = FALSE)
+  obj <- loadGwasSumStatsFromManifest(manifest, genome = "hg38",
+                                      ldSketch = .toyLdSketch())
+  expect_s4_class(obj, "GwasSumStats")
+  expect_false("N" %in% colnames(S4Vectors::mcols(obj$entry[[1L]])))
+  expect_equal(as.numeric(obj$nSample), 487511)   # forwarded to the slot
+})
+
+test_that("loadGwasSumStatsFromManifest builds from study case/control scalars (no per-variant N)", {
+  tmp <- withr::local_tempdir()
+  df <- .toyGwasDf(5)
+  df$n_sample <- NULL
+  ssPath <- .writeSumstatsTsv(df, file.path(tmp, "studycc.tsv"))
+  manifest <- data.frame(study = "cc", sumStatsPath = ssPath,
+                         n_case = 5000, n_control = 15000, stringsAsFactors = FALSE)
+  obj <- loadGwasSumStatsFromManifest(manifest, genome = "hg38",
+                                      ldSketch = .toyLdSketch())
+  expect_s4_class(obj, "GwasSumStats")
+  expect_false("N" %in% colnames(S4Vectors::mcols(obj$entry[[1L]])))
+  expect_equal(as.numeric(obj$nCase), 5000)
+  expect_equal(as.numeric(obj$nControl), 15000)
+})
+
+test_that("loadGwasSumStatsFromManifest still errors when a study has no N source at all", {
+  tmp <- withr::local_tempdir()
+  df <- .toyGwasDf(5)
+  df$n_sample <- NULL                  # no per-variant N, no counts ...
+  ssPath <- .writeSumstatsTsv(df, file.path(tmp, "non.tsv"))
+  manifest <- data.frame(study = "x", sumStatsPath = ssPath,
+                         stringsAsFactors = FALSE)   # ... and no study scalar either
+  expect_error(loadGwasSumStatsFromManifest(manifest, genome = "hg38",
+                                            ldSketch = .toyLdSketch()),
+               "needs an N field")
+})
+
 test_that(".readColumnMapping accepts a named list and a YAML file alike", {
   tmp <- withr::local_tempdir()
   mp <- file.path(tmp, "m.yaml")
