@@ -2899,6 +2899,36 @@ test_that("summaryStatsQc(effectiveN=TRUE): study-level scalars applied to all v
   expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "effective")
 })
 
+test_that("summaryStatsQc: study nSample is the level-4 fallback (no counts, no per-variant N)", {
+  # Entry with NO per-variant N and NO case/control; only a study nSample scalar.
+  gr <- .ssQ_makeEntryGr()
+  mc <- S4Vectors::mcols(gr)
+  mc$N <- NULL                                    # remove per-variant N
+  S4Vectors::mcols(gr) <- mc
+  ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
+                     ldSketch = .ssQ_makeHandle(), nSample = 4321)
+  res <- summaryStatsQc(ss)
+  expect_true(all(.ssQ_entryNByPos(res$entry[[1L]]) == 4321))
+  expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "study-n")
+})
+
+test_that("summaryStatsQc: level precedence -- per-variant counts beat nSample; N column beats nSample", {
+  # per-variant counts present alongside nSample -> counts win (effective).
+  gr1 <- .ssQ_makeCCEntry(nCase = c(100, 200, 150, 250),
+                          nControl = c(900, 800, 850, 750))
+  ss1 <- GwasSumStats(study = "g1", entry = list(gr1), genome = "hg19",
+                      ldSketch = .ssQ_makeHandle(), nSample = 4321)
+  res1 <- summaryStatsQc(ss1)
+  expect_equal(.ssQ_entryNByPos(res1$entry[[1L]]), c(360, 640, 510, 750))
+  expect_identical(getQcInfo(res1)$entryAudit[[1L]]$nSource, "effective")
+  # per-variant N column present alongside nSample (no counts) -> N wins (column).
+  ss2 <- GwasSumStats(study = "g1", entry = list(.ssQ_makeEntryGr()), genome = "hg19",
+                      ldSketch = .ssQ_makeHandle(), nSample = 4321)
+  res2 <- summaryStatsQc(ss2)   # .ssQ_makeEntryGr carries N = 1000
+  expect_true(all(.ssQ_entryNByPos(res2$entry[[1L]]) == 1000))
+  expect_identical(getQcInfo(res2)$entryAudit[[1L]]$nSource, "column")
+})
+
 test_that("summaryStatsQc: effectiveN recorded in qcInfo options", {
   ss <- .ssQ_makeGwasSumStats()
   expect_true(getQcInfo(summaryStatsQc(ss))$options$effectiveN)
