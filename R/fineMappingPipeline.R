@@ -282,13 +282,10 @@
 #'   case it defaults to the LD-panel sample size \code{getNSamples(ldSketch)}.
 #' @param rMismatch \code{QtlSumStats} / \code{GwasSumStats} only. LD-mismatch
 #'   mode forwarded to \code{susieR::susie_rss()} as \code{R_mismatch} (e.g.
-#'   \code{"eb"} for empirical Bayes). Default \code{"none"} (susieR's default).
-#' @param rMismatchMethod \code{QtlSumStats} / \code{GwasSumStats} only. Optional
-#'   \code{R_mismatch_method} forwarded to \code{susieR::susie_rss()} when
-#'   non-\code{NULL}.
-#' @param checkPrior \code{QtlSumStats} / \code{GwasSumStats} only. Optional
-#'   \code{check_prior} forwarded to \code{susieR::susie_rss()} when
-#'   non-\code{NULL}.
+#'   \code{"eb"} for empirical Bayes, \code{"eb_mix"} for residual-mixture EB in
+#'   susieR >= 0.16.6). Default \code{"none"} (susieR's default). (\code{R_mismatch_method}
+#'   and \code{check_prior} are susie_rss_control() settings in susieR >= 0.16.6 and
+#'   are left at their defaults.)
 #' @param keepFullFit \code{QtlSumStats} / \code{GwasSumStats} only. Controls
 #'   retention of the pre-fallback multi-effect SuSiE-RSS fit when
 #'   \code{serFallback=TRUE}: \code{"fallback"} (default) keeps it only for
@@ -1751,8 +1748,6 @@ setMethod("fineMappingPipeline", "QtlSumStats",
            serFallback        = FALSE,
            rFinite            = NULL,
            rMismatch          = "none",
-           rMismatchMethod    = NULL,
-           checkPrior         = NULL,
            keepFullFit        = "fallback",
            ...) {
     .fmAssertQcd(data)
@@ -1872,8 +1867,7 @@ setMethod("fineMappingPipeline", "QtlSumStats",
           af = afByVar, fullFit = fullFit,
           fullFitAlphaOnly = fullFitAlphaOnly, includeAllCs = includeAllCs,
           serFallback = serFallback, rFinite = rFiniteResolved,
-          rMismatch = rMismatch, rMismatchMethod = rMismatchMethod,
-          checkPrior = checkPrior, keepFullFit = keepFullFit)
+          rMismatch = rMismatch, keepFullFit = keepFullFit)
         # The method column carries the bare token, independent of the
         # postprocess class.
         for (tk in names(ents)) pushRow(st, ctx, tr, tk, ents[[tk]])
@@ -1953,8 +1947,6 @@ setMethod("fineMappingPipeline", "GwasSumStats",
            serFallback       = FALSE,
            rFinite           = NULL,
            rMismatch         = "none",
-           rMismatchMethod   = NULL,
-           checkPrior        = NULL,
            keepFullFit       = "fallback",
            ...) {
     .fmAssertQcd(data)
@@ -2038,8 +2030,7 @@ setMethod("fineMappingPipeline", "GwasSumStats",
         af = afByVar, fullFit = fullFit,
         fullFitAlphaOnly = fullFitAlphaOnly, includeAllCs = includeAllCs,
         serFallback = serFallback, rFinite = rFiniteResolved,
-        rMismatch = rMismatch, rMismatchMethod = rMismatchMethod,
-        checkPrior = checkPrior, keepFullFit = keepFullFit)
+        rMismatch = rMismatch, keepFullFit = keepFullFit)
       for (tk in names(ents)) pushRow(st, tk, region_id, ents[[tk]])
     }
 
