@@ -282,10 +282,12 @@
 #'   case it defaults to the LD-panel sample size \code{getNSamples(ldSketch)}.
 #' @param rMismatch \code{QtlSumStats} / \code{GwasSumStats} only. LD-mismatch
 #'   mode forwarded to \code{susieR::susie_rss()} as \code{R_mismatch} (e.g.
-#'   \code{"eb"} for empirical Bayes, \code{"eb_mix"} for residual-mixture EB in
-#'   susieR >= 0.16.6). Default \code{"none"} (susieR's default). (\code{R_mismatch_method}
-#'   and \code{check_prior} are susie_rss_control() settings in susieR >= 0.16.6 and
-#'   are left at their defaults.)
+#'   \code{"eb"} for empirical Bayes, \code{"eb_mix"} for residual-mixture EB;
+#'   \code{"eb_mix"} requires susieR >= 0.16.6). Default \code{"none"} (susieR's
+#'   default). \code{R_mismatch_method} and \code{check_prior} are no longer set
+#'   here: they became \code{susie_rss_control()} settings in susieR >= 0.16.6
+#'   and are left at their control defaults, so this package works with
+#'   susieR 0.16.4+.
 #' @param keepFullFit \code{QtlSumStats} / \code{GwasSumStats} only. Controls
 #'   retention of the pre-fallback multi-effect SuSiE-RSS fit when
 #'   \code{serFallback=TRUE}: \code{"fallback"} (default) keeps it only for
