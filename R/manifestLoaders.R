@@ -390,8 +390,9 @@ NULL
 # per-variant N_CASE + N_CONTROL are both present (from which summaryStatsQc
 # derives the effective sample size), OR `allowNoN = TRUE` because the caller
 # has a study-level scalar (nCase/nControl or nSample) that summaryStatsQc will
-# fill N from. `mapping` (named std -> source) overrides the default aliases
-# per key.
+# fill N from. Z is required UNLESS BETA + SE are both present, in which case
+# the Wald z (Z = BETA / SE) is derived; a supplied Z always takes precedence.
+# `mapping` (named std -> source) overrides the default aliases per key.
 .resolveSumstatCols <- function(df, columnMapping, label, allowNoN = FALSE) {
   # Strip a leading '#' from the first column name so a '#CHR'-style header
   # (common in GWAS TSVs) resolves the same way on the plain-text and tabix
@@ -415,13 +416,27 @@ NULL
     }
     intersect(.sumstatColumnAliases[[key]], names(df))[1L]
   }
-  required <- c("chrom", "pos", "variant_id", "A1", "A2", "Z")
+  required <- c("chrom", "pos", "variant_id", "A1", "A2")
   resolved <- setNames(lapply(required, resolveKey), required)
   missingKeys <- required[vapply(resolved, function(x) is.na(x) || is.null(x), logical(1))]
   if (length(missingKeys) > 0L) {
     stop(label, ": sumstats file is missing required field(s): ",
          paste(missingKeys, collapse = ", "),
          " (supply a columnMapping if the source names differ).")
+  }
+  # z-score: a Z column, OR BETA + SE (from which the Wald z = beta/se is
+  # derived, matching susie_rss()'s z_method="wald"). At least one is required;
+  # when both a Z column and BETA/SE are present, the Z column takes precedence.
+  zSrc      <- resolveKey("Z")
+  betaSrc   <- resolveKey("BETA")
+  seSrc     <- resolveKey("SE")
+  hasZ      <- !is.na(zSrc)    && !is.null(zSrc)
+  hasBetaSe <- !is.na(betaSrc) && !is.null(betaSrc) &&
+               !is.na(seSrc)   && !is.null(seSrc)
+  if (!hasZ && !hasBetaSe) {
+    stop(label, ": sumstats file needs a z field (z/Z), or beta + se to derive ",
+         "the Wald z-score beta/se (supply a columnMapping if the source names ",
+         "differ).")
   }
   # Sample size: an N column, OR per-variant N_CASE + N_CONTROL counts (from
   # which summaryStatsQc(effectiveN=) derives the effective sample size). At
@@ -445,8 +460,10 @@ NULL
     SNP   = as.character(df[[resolved$variant_id]]),
     A1    = as.character(df[[resolved$A1]]),
     A2    = as.character(df[[resolved$A2]]),
-    Z     = as.numeric(df[[resolved$Z]]),
     stringsAsFactors = FALSE)
+  # Z takes precedence when present; otherwise derive the Wald z from beta/se.
+  out$Z <- if (hasZ) as.numeric(df[[zSrc]]) else
+             as.numeric(df[[betaSrc]]) / as.numeric(df[[seSrc]])
   if (hasN) out$N <- as.numeric(df[[nSrc]])
   # Per-variant case/control counts -> N_CASE / N_CONTROL (kept by
   # .dfToEntryGranges; summaryStatsQc(effectiveN=) consumes them).
@@ -827,7 +844,10 @@ loadQtlDatasetFromManifest <- function(manifest, study = NULL,
 
 #' @title Load a GwasSumStats collection from a manifest
 #' @description Build a \code{\link{GwasSumStats}} from a manifest with one row
-#'   per study. No QC is run (the result carries \code{qcInfo = list()}).
+#'   per study. No QC is run (the result carries \code{qcInfo = list()}). Each
+#'   sumstats file needs a \code{z} column, or \code{beta}+\code{se} from which
+#'   the Wald z (\code{z = beta/se}) is derived when \code{z} is absent (a
+#'   supplied \code{z} takes precedence).
 #' @param manifest A data.frame or path. Columns (snake_case aliases accepted):
 #'   \code{study} (required, unique), \code{sumStatsPath} (required),
 #'   \code{columnMapping} (optional), \code{nCase} / \code{nControl}

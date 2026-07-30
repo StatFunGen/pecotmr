@@ -1783,6 +1783,10 @@ test_that(".fmFitSusieRss rejects a non-named-list rssControl", {
 })
 
 test_that(".fmFitSusieRss forwards rssControl to susie_rss as control", {
+  # susie_rss_control() only exists in susieR >= 0.16.6; on older susieR the
+  # mock binding can't resolve. rssControl is a 0.16.6-only feature anyway.
+  skip_if_not("susie_rss_control" %in% getNamespaceExports("susieR"),
+              "susieR < 0.16.6 has no susie_rss_control")
   cap <- new.env(parent = emptyenv())
   local_mocked_bindings(
     susie_rss_control = function(...) list(.tag = "ctrl", ...),

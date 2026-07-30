@@ -245,6 +245,47 @@ test_that(".resolveSumstatCols requires an N field or N_CASE + N_CONTROL", {
                "N_CASE + N_CONTROL", fixed = TRUE)
 })
 
+test_that(".resolveSumstatCols derives the Wald z from beta/se when z is absent", {
+  df <- .toyGwasDf(4)
+  df$beta <- df$z * 0.5                 # se = 0.5 -> beta/se reproduces z
+  df$se   <- rep(0.5, 4)
+  df$z    <- NULL                       # no z column
+  out <- pecotmr:::.resolveSumstatCols(df, NULL, "lbl")
+  expect_equal(out$Z, .toyGwasDf(4)$z)  # Z == beta/se
+  expect_true(all(c("BETA", "SE") %in% colnames(out)))  # beta/se still attached
+})
+
+test_that(".resolveSumstatCols keeps a supplied z (beta/se do not overwrite it)", {
+  df <- .toyGwasDf(4)
+  df$beta <- rep(99, 4); df$se <- rep(1, 4)   # beta/se = 99, must be ignored
+  out <- pecotmr:::.resolveSumstatCols(df, NULL, "lbl")
+  expect_equal(out$Z, .toyGwasDf(4)$z)        # z column wins, not 99
+})
+
+test_that(".resolveSumstatCols errors when neither z nor beta+se is present", {
+  df <- .toyGwasDf(3)
+  df$z <- NULL                          # no z, no beta/se
+  expect_error(pecotmr:::.resolveSumstatCols(df, NULL, "lbl"),
+               "needs a z field", fixed = TRUE)
+})
+
+test_that("loadGwasSumStatsFromManifest builds from beta/se with no z column", {
+  tmp <- withr::local_tempdir()
+  df <- .toyGwasDf(5)
+  df$beta <- df$z * 2; df$se <- rep(2, 5)     # beta/se reproduces z
+  z_expected <- df$z
+  df$z <- NULL
+  ssPath <- .writeSumstatsTsv(df, file.path(tmp, "betase.tsv"))
+  manifest <- data.frame(study = "bs", sumStatsPath = ssPath,
+                         stringsAsFactors = FALSE)
+  obj <- loadGwasSumStatsFromManifest(manifest, genome = "hg38",
+                                      ldSketch = .toyLdSketch())
+  expect_s4_class(obj, "GwasSumStats")
+  mc <- S4Vectors::mcols(obj$entry[[1L]])
+  expect_true("Z" %in% colnames(mc))
+  expect_equal(as.numeric(mc$Z), z_expected)  # derived Wald z
+})
+
 test_that(".resolveSumstatCols allows no N when allowNoN = TRUE (study scalar)", {
   df <- .toyGwasDf(3)
   df$n_sample <- NULL                  # no per-variant N, no counts
