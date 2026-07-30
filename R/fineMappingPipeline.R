@@ -281,13 +281,14 @@
 #'   \code{rMismatch != "none"}) and \code{rFinite} is \code{NULL}, in which
 #'   case it defaults to the LD-panel sample size \code{getNSamples(ldSketch)}.
 #' @param rMismatch \code{QtlSumStats} / \code{GwasSumStats} only. LD-mismatch
-#'   mode forwarded to \code{susieR::susie_rss()} as \code{R_mismatch} (e.g.
-#'   \code{"eb"} for empirical Bayes, \code{"eb_mix"} for residual-mixture EB;
-#'   \code{"eb_mix"} requires susieR >= 0.16.6). Default \code{"none"} (susieR's
-#'   default). \code{R_mismatch_method} and \code{check_prior} are no longer set
-#'   here: they became \code{susie_rss_control()} settings in susieR >= 0.16.6
-#'   and are left at their control defaults, so this package works with
-#'   susieR 0.16.4+.
+#'   correction mode forwarded to \code{susieR::susie_rss()} as
+#'   \code{R_mismatch}: \code{"none"} (default), \code{"eb"} (empirical Bayes),
+#'   or \code{"eb_mix"} (residual-mixture EB).
+#' @param rssControl \code{QtlSumStats} / \code{GwasSumStats} only. Optional
+#'   named list of \code{susieR::susie_rss_control()} settings (e.g.
+#'   \code{check_prior}, \code{mismatch_estimator}), forwarded as
+#'   \code{susie_rss()}'s \code{control} argument. Default \code{NULL} leaves
+#'   the \code{susie_rss_control()} defaults in place.
 #' @param keepFullFit \code{QtlSumStats} / \code{GwasSumStats} only. Controls
 #'   retention of the pre-fallback multi-effect SuSiE-RSS fit when
 #'   \code{serFallback=TRUE}: \code{"fallback"} (default) keeps it only for
@@ -1750,6 +1751,7 @@ setMethod("fineMappingPipeline", "QtlSumStats",
            serFallback        = FALSE,
            rFinite            = NULL,
            rMismatch          = "none",
+           rssControl         = NULL,
            keepFullFit        = "fallback",
            ...) {
     .fmAssertQcd(data)
@@ -1869,7 +1871,8 @@ setMethod("fineMappingPipeline", "QtlSumStats",
           af = afByVar, fullFit = fullFit,
           fullFitAlphaOnly = fullFitAlphaOnly, includeAllCs = includeAllCs,
           serFallback = serFallback, rFinite = rFiniteResolved,
-          rMismatch = rMismatch, keepFullFit = keepFullFit)
+          rMismatch = rMismatch, rssControl = rssControl,
+          keepFullFit = keepFullFit)
         # The method column carries the bare token, independent of the
         # postprocess class.
         for (tk in names(ents)) pushRow(st, ctx, tr, tk, ents[[tk]])
@@ -1949,6 +1952,7 @@ setMethod("fineMappingPipeline", "GwasSumStats",
            serFallback       = FALSE,
            rFinite           = NULL,
            rMismatch         = "none",
+           rssControl        = NULL,
            keepFullFit       = "fallback",
            ...) {
     .fmAssertQcd(data)
@@ -2032,7 +2036,8 @@ setMethod("fineMappingPipeline", "GwasSumStats",
         af = afByVar, fullFit = fullFit,
         fullFitAlphaOnly = fullFitAlphaOnly, includeAllCs = includeAllCs,
         serFallback = serFallback, rFinite = rFiniteResolved,
-        rMismatch = rMismatch, keepFullFit = keepFullFit)
+        rMismatch = rMismatch, rssControl = rssControl,
+        keepFullFit = keepFullFit)
       for (tk in names(ents)) pushRow(st, tk, region_id, ents[[tk]])
     }
 
