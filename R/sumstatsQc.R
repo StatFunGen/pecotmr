@@ -2591,56 +2591,63 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   list(df = df, skipped = FALSE)
 }
 
-# Internal: canonicalize the working per-variant `N` to the effective sample
-# size for case/control input. Counts are resolved by priority --- per-variant
-# N_CASE / N_CONTROL columns first, else study-level nCase / nControl scalars.
-# Returns list(df=, nSource=). nSource is one of "effective" (N set from
-# counts), "column" (existing N used as-is), "total" (raw total from counts,
-# escape hatch), or NA_character_ (no counts and no N). `emit` logs the
-# counts-win override.
+# Internal: canonicalize the working per-variant `N`. The N source is resolved
+# by a four-level priority: (1) per-variant N_CASE / N_CONTROL columns, (2) study
+# -level nCase / nControl scalars, (3) a per-variant N column, (4) a study-level
+# nSample scalar (total N). Levels 1-2 give the effective sample size (default)
+# or the raw total (escape hatch). Returns list(df=, nSource=), where nSource is
+# "effective" | "column" | "total" | "study-n" | NA_character_ (no source).
+# `emit` logs the counts-win override. A study-level scalar fills `df$N` even
+# when the entry has no per-variant N column.
 .resolveEffectiveN <- function(df, opts, emit) {
   hasCols <- all(c("N_CASE", "N_CONTROL") %in% colnames(df))
   hasScalar <- !is.null(opts$nCase) && !is.null(opts$nControl) &&
     length(opts$nCase) == 1L && length(opts$nControl) == 1L &&
     is.finite(opts$nCase) && is.finite(opts$nControl) &&
     opts$nCase > 0 && opts$nControl > 0
+  hasNSample <- !is.null(opts$nSample) && length(opts$nSample) == 1L &&
+    is.finite(opts$nSample) && opts$nSample > 0
   hasN <- "N" %in% colnames(df)
   nRow <- nrow(df)
 
   if (!isTRUE(opts$effectiveN)) {
-    # Escape hatch: use the N column as-is; when there is no N but counts are
-    # present, fall back to the raw total (n_case + n_control), no override.
-    if (!hasN && (hasCols || hasScalar)) {
-      if (hasCols) {
-        df$N <- as.numeric(df$N_CASE) + as.numeric(df$N_CONTROL)
-      } else {
-        df$N <- rep(opts$nCase + opts$nControl, nRow)
-      }
+    # Escape hatch: prefer the raw N column; else raw total from counts; else the
+    # study-level total N. No effective-N conversion, no override.
+    if (hasN)       return(list(df = df, nSource = "column"))
+    if (hasCols) {
+      df$N <- as.numeric(df$N_CASE) + as.numeric(df$N_CONTROL)
       return(list(df = df, nSource = "total"))
     }
-    return(list(df = df, nSource = if (hasN) "column" else NA_character_))
+    if (hasScalar) {
+      df$N <- rep(opts$nCase + opts$nControl, nRow)
+      return(list(df = df, nSource = "total"))
+    }
+    if (hasNSample) {
+      df$N <- rep(opts$nSample, nRow)
+      return(list(df = df, nSource = "study-n"))
+    }
+    return(list(df = df, nSource = NA_character_))
   }
 
-  # Default on: derive the effective sample size from the counts when present.
+  # Default: per-variant c/c -> study c/c -> per-variant N -> study nSample.
   if (hasCols) {
-    neff <- effectiveN(df$N_CASE, df$N_CONTROL)
-    if (hasN) {
-      emit("QC track: N overridden by effective N from per-variant ",
-           "n_case/n_control.")
-    }
-    df$N <- neff
+    if (hasN) emit("QC track: N overridden by effective N from per-variant ",
+                   "n_case/n_control.")
+    df$N <- effectiveN(df$N_CASE, df$N_CONTROL)
     return(list(df = df, nSource = "effective"))
   }
   if (hasScalar) {
-    neff <- rep(effectiveN(opts$nCase, opts$nControl), nRow)
-    if (hasN) {
-      emit("QC track: N overridden by effective N from study ",
-           "nCase/nControl.")
-    }
-    df$N <- neff
+    if (hasN) emit("QC track: N overridden by effective N from study ",
+                   "nCase/nControl.")
+    df$N <- rep(effectiveN(opts$nCase, opts$nControl), nRow)
     return(list(df = df, nSource = "effective"))
   }
-  list(df = df, nSource = if (hasN) "column" else NA_character_)
+  if (hasN) return(list(df = df, nSource = "column"))
+  if (hasNSample) {
+    df$N <- rep(opts$nSample, nRow)
+    return(list(df = df, nSource = "study-n"))
+  }
+  list(df = df, nSource = NA_character_)
 }
 
 # Internal: per-entry pipeline. Returns the cleaned GRanges and an audit list.
@@ -3158,6 +3165,9 @@ summaryStatsQc <- function(sumstats,
     # no per-variant N_CASE / N_CONTROL columns). NULL for quantitative traits.
     opts$nCase    <- if ("nCase"    %in% names(sumstats)) as.numeric(sumstats$nCase)[[i]]    else NULL
     opts$nControl <- if ("nControl" %in% names(sumstats)) as.numeric(sumstats$nControl)[[i]] else NULL
+    # Study-level total N: the level-4 fallback used when the entry has no
+    # per-variant N_CASE/N_CONTROL, no study nCase/nControl, and no N column.
+    opts$nSample  <- if ("nSample"  %in% names(sumstats)) as.numeric(sumstats$nSample)[[i]]  else NULL
     # Per-entry label woven into QC log messages and the rollup. For
     # QtlSumStats it's (study/context/trait); for GwasSumStats it's the
     # study identifier.
@@ -3214,6 +3224,8 @@ summaryStatsQc <- function(sumstats,
                    as.numeric(sumstats$nCase) else NULL,
       nControl = if ("nControl" %in% names(sumstats))
                    as.numeric(sumstats$nControl) else NULL,
+      nSample  = if ("nSample" %in% names(sumstats))
+                   as.numeric(sumstats$nSample) else NULL,
       qcInfo   = qcInfo)
   } else {
     QtlSumStats(

@@ -99,12 +99,19 @@ NULL
 #'   consumers (e.g. \code{\link{colocboostPipeline}}) use the effective
 #'   sample size \code{4 / (1/nCase + 1/nControl)} in place of the
 #'   per-variant \code{N}.
+#' @param nSample Optional per-study total sample size (numeric; default
+#'   \code{NULL}). Attached only when supplied (length 1 or length(study)).
+#'   Used as the study-level fallback for the per-variant \code{N} when a study
+#'   has no per-variant \code{N} column and no case/control counts. Named
+#'   \code{nSample} to avoid clashing with \code{getNSamples()} (the LD-panel
+#'   sample size).
 #' @param ... Additional per-study columns to attach to the collection.
 #' @return A \code{GwasSumStats} object.
 #' @export
 GwasSumStats <- function(study, entry, genome, ldSketch = NULL,
                           varY = NA_real_, nCase = NULL,
-                          nControl = NULL, qcInfo = list(), ...) {
+                          nControl = NULL, nSample = NULL,
+                          qcInfo = list(), ...) {
   if (missing(study) || missing(entry) || missing(genome)) {
     stop("`study`, `entry`, and `genome` are all required.")
   }
@@ -139,6 +146,7 @@ GwasSumStats <- function(study, entry, genome, ldSketch = NULL,
   # non-case/control studies in a mixed collection.
   if (!is.null(nCase))    cols$nCase    <- recycle(nCase, "nCase")
   if (!is.null(nControl)) cols$nControl <- recycle(nControl, "nControl")
+  if (!is.null(nSample))  cols$nSample  <- recycle(nSample, "nSample")
   extras <- list(...)
   for (nm in names(extras)) cols[[nm]] <- extras[[nm]]
   df <- do.call(S4Vectors::DataFrame, c(cols, list(check.names = FALSE)))
