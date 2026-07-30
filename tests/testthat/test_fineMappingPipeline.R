@@ -131,7 +131,7 @@ context("fineMappingPipeline")
 .fmp_mockFitRss <- function() {
   function(z, R, n, token, chainFromInf = NULL, coverage = 0.95,
            userArgs = NULL, rFinite = NULL, rMismatch = "none",
-           rMismatchMethod = NULL, checkPrior = NULL) {
+           rssControl = NULL) {
     list(token = token, n_variants = length(z))
   }
 }
@@ -143,12 +143,11 @@ context("fineMappingPipeline")
 .fmp_mockFitRssDiag <- function(flag = FALSE, capture = NULL) {
   function(z, R, n, token, chainFromInf = NULL, coverage = 0.95,
            userArgs = NULL, rFinite = NULL, rMismatch = "none",
-           rMismatchMethod = NULL, checkPrior = NULL) {
+           rssControl = NULL) {
     if (!is.null(capture)) {
       capture$rFinite <- rFinite
       capture$rMismatch <- rMismatch
-      capture$rMismatchMethod <- rMismatchMethod
-      capture$checkPrior <- checkPrior
+      capture$rssControl <- rssControl
     }
     fit <- list(token = token, n_variants = length(z), multiTag = "multi")
     fit$R_finite_diagnostics <- list(
@@ -1602,6 +1601,42 @@ test_that("fineMappingPipeline(GwasSumStats): rFinite/rMismatch forwarded; rFini
     fineMappingPipeline(gss, methods = "susie", addSusieInf = FALSE,
                         serFallback = TRUE, rFinite = 12345, rMismatch = "eb"))
   expect_equal(cap2$rFinite, 12345)
+
+  # eb_mix (susieR >= 0.16.6) is passed through to R_mismatch unrestricted.
+  cap3 <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieRss        = .fmp_mockFitRssDiag(flag = FALSE, capture = cap3),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  suppressMessages(
+    fineMappingPipeline(gss, methods = "susie", addSusieInf = FALSE,
+                        serFallback = TRUE, rMismatch = "eb_mix"))
+  expect_equal(cap3$rMismatch, "eb_mix")
+
+  # rssControl (susie_rss_control() settings) forwarded through to the fitter.
+  cap4 <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieRss        = .fmp_mockFitRssDiag(flag = FALSE, capture = cap4),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  suppressMessages(
+    fineMappingPipeline(gss, methods = "susie", addSusieInf = FALSE,
+                        rssControl = list(check_prior = TRUE,
+                                          mismatch_estimator = "map")))
+  expect_equal(cap4$rssControl, list(check_prior = TRUE,
+                                     mismatch_estimator = "map"))
+  # default: no rssControl -> fitter sees NULL
+  cap5 <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieRss        = .fmp_mockFitRssDiag(flag = FALSE, capture = cap5),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  suppressMessages(
+    fineMappingPipeline(gss, methods = "susie", addSusieInf = FALSE))
+  expect_null(cap5$rssControl)
 })
 
 test_that("fineMappingPipeline(GwasSumStats): keepFullFit='all' retains fit on non-fallback region", {

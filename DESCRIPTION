@@ -35,7 +35,7 @@ Imports:
     readr,
     rlang,
     stringr,
-    susieR (>= 0.16.2),
+    susieR (>= 0.16.4),
     tibble,
     tictoc,
     tidyr,

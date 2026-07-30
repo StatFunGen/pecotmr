@@ -117,8 +117,7 @@ fineMappingPipeline(data, ...)
   serFallback = FALSE,
   rFinite = NULL,
   rMismatch = "none",
-  rMismatchMethod = NULL,
-  checkPrior = NULL,
+  rssControl = NULL,
   keepFullFit = "fallback",
   ...
 )
@@ -143,8 +142,7 @@ fineMappingPipeline(data, ...)
   serFallback = FALSE,
   rFinite = NULL,
   rMismatch = "none",
-  rMismatchMethod = NULL,
-  checkPrior = NULL,
+  rssControl = NULL,
   keepFullFit = "fallback",
   ...
 )
@@ -355,16 +353,15 @@ except when a finite/EB mode is active (\code{serFallback=TRUE} or
 case it defaults to the LD-panel sample size \code{getNSamples(ldSketch)}.}
 
 \item{rMismatch}{\code{QtlSumStats} / \code{GwasSumStats} only. LD-mismatch
-mode forwarded to \code{susieR::susie_rss()} as \code{R_mismatch} (e.g.
-\code{"eb"} for empirical Bayes). Default \code{"none"} (susieR's default).}
+correction mode forwarded to \code{susieR::susie_rss()} as
+\code{R_mismatch}: \code{"none"} (default), \code{"eb"} (empirical Bayes),
+or \code{"eb_mix"} (residual-mixture EB).}
 
-\item{rMismatchMethod}{\code{QtlSumStats} / \code{GwasSumStats} only. Optional
-\code{R_mismatch_method} forwarded to \code{susieR::susie_rss()} when
-non-\code{NULL}.}
-
-\item{checkPrior}{\code{QtlSumStats} / \code{GwasSumStats} only. Optional
-\code{check_prior} forwarded to \code{susieR::susie_rss()} when
-non-\code{NULL}.}
+\item{rssControl}{\code{QtlSumStats} / \code{GwasSumStats} only. Optional
+named list of \code{susieR::susie_rss_control()} settings (e.g.
+\code{check_prior}, \code{mismatch_estimator}), forwarded as
+\code{susie_rss()}'s \code{control} argument. Default \code{NULL} leaves
+the \code{susie_rss_control()} defaults in place.}
 
 \item{keepFullFit}{\code{QtlSumStats} / \code{GwasSumStats} only. Controls
 retention of the pre-fallback multi-effect SuSiE-RSS fit when

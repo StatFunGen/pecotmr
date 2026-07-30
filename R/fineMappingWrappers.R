@@ -1992,7 +1992,7 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
 .fmFitSusieRss <- function(z, R, n, token, chainFromInf = NULL,
                            coverage = 0.95, userArgs = NULL,
                            rFinite = NULL, rMismatch = "none",
-                           rMismatchMethod = NULL, checkPrior = NULL) {
+                           rssControl = NULL) {
   info <- .fineMappingMethodCapabilities[[token]]
   if (is.null(info) || identical(info$unmappableEffects, NA_character_)) {
     stop(".fmFitSusieRss: token '", token, "' is not a SuSiE-family method.")
@@ -2006,8 +2006,16 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
   # methodArgs (folded in after) still override them.
   baseArgs$R_finite <- rFinite
   baseArgs$R_mismatch <- rMismatch
-  if (!is.null(rMismatchMethod)) baseArgs$R_mismatch_method <- rMismatchMethod
-  if (!is.null(checkPrior)) baseArgs$check_prior <- checkPrior
+  # Optional susie_rss_control() settings (e.g. check_prior, mismatch_estimator),
+  # supplied as a named list and forwarded as susie_rss()'s `control` argument.
+  if (!is.null(rssControl)) {
+    if (!is.list(rssControl) || is.null(names(rssControl)) ||
+        any(!nzchar(names(rssControl)))) {
+      stop(".fmFitSusieRss: `rssControl` must be a named list of ",
+           "susieR::susie_rss_control() settings.")
+    }
+    baseArgs$control <- do.call(susieR::susie_rss_control, rssControl)
+  }
   if (!is.null(chainFromInf) && token != "susieInf") {
     # SuSiE-RSS(-ash) initialised from a SuSiE-inf fit; userArgs folded into the
     # arg prep so L_greedy is clamped rather than passed through raw.
@@ -2115,8 +2123,8 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
                            fullFit = FALSE, fullFitAlphaOnly = TRUE,
                            includeAllCs = FALSE,
                            serFallback = FALSE, rFinite = NULL,
-                           rMismatch = "none", rMismatchMethod = NULL,
-                           checkPrior = NULL, keepFullFit = "fallback") {
+                           rMismatch = "none", rssControl = NULL,
+                           keepFullFit = "fallback") {
   chainLocal <- .fmResolveSusieChain(toRun, addSusieInf)
   infFit <- NULL
   if (chainLocal$runInf) {
@@ -2125,8 +2133,7 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
     infFit <- .fmFitSusieRss(z, R, n, "susieInf", coverage = coverage,
                              userArgs = methodArgs[["susieInf"]],
                              rFinite = rFinite, rMismatch = rMismatch,
-                             rMismatchMethod = rMismatchMethod,
-                             checkPrior = checkPrior)
+                             rssControl = rssControl)
   }
   out <- list()
   for (tk in toRun) {
@@ -2156,8 +2163,7 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
       fit <- .fmFitSusieRss(z, R, n, tk, chainFromInf = chainFrom,
                             coverage = coverage, userArgs = methodArgs[[tk]],
                             rFinite = rFinite, rMismatch = rMismatch,
-                            rMismatchMethod = rMismatchMethod,
-                            checkPrior = checkPrior)
+                            rssControl = rssControl)
       rfd <- fit$R_finite_diagnostics
       flag <- if (!is.null(rfd) && !is.null(rfd$R_reliability_flag))
                 isTRUE(rfd$R_reliability_flag) else NA

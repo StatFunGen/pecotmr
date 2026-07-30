@@ -1768,6 +1768,36 @@ test_that("fitMvsusie forwards arguments to mvsusieR::mvsusie", {
   expect_equal(r$coverage, 0.9)
 })
 
+test_that(".fmFitSusieRss rejects a non-named-list rssControl", {
+  z <- c(0.5, -1.2, 2.0); R <- diag(3)
+  expect_error(
+    pecotmr:::.fmFitSusieRss(z, R, n = 1000, token = "susie", rssControl = "nope"),
+    "named list", fixed = TRUE)
+  expect_error(
+    pecotmr:::.fmFitSusieRss(z, R, n = 1000, token = "susie", rssControl = list(1, 2)),
+    "named list", fixed = TRUE)
+  expect_error(  # partially named
+    pecotmr:::.fmFitSusieRss(z, R, n = 1000, token = "susie",
+                             rssControl = list(check_prior = TRUE, 2)),
+    "named list", fixed = TRUE)
+})
+
+test_that(".fmFitSusieRss forwards rssControl to susie_rss as control", {
+  cap <- new.env(parent = emptyenv())
+  local_mocked_bindings(
+    susie_rss_control = function(...) list(.tag = "ctrl", ...),
+    susie_rss = function(...) { args <- list(...); cap$control <- args$control
+                                list(sets = list(), pip = numeric()) },
+    .package = "susieR")
+  z <- c(0.5, -1.2, 2.0); R <- diag(3)
+  pecotmr:::.fmFitSusieRss(z, R, n = 1000, token = "susie",
+                           rssControl = list(check_prior = TRUE,
+                                             mismatch_estimator = "map"))
+  expect_equal(cap$control$.tag, "ctrl")
+  expect_true(cap$control$check_prior)
+  expect_equal(cap$control$mismatch_estimator, "map")
+})
+
 test_that("fitMvsusieRss forwards arguments to mvsusieR::mvsusie_rss", {
   skip_if_not_installed("mvsusieR")
   local_mocked_bindings(
