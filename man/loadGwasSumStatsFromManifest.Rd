@@ -51,5 +51,8 @@ A \code{GwasSumStats} object.
 }
 \description{
 Build a \code{\link{GwasSumStats}} from a manifest with one row
-  per study. No QC is run (the result carries \code{qcInfo = list()}).
+  per study. No QC is run (the result carries \code{qcInfo = list()}). Each
+  sumstats file needs a \code{z} column, or \code{beta}+\code{se} from which
+  the Wald z (\code{z = beta/se}) is derived when \code{z} is absent (a
+  supplied \code{z} takes precedence).
 }
