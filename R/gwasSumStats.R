@@ -233,6 +233,11 @@ setMethod("subsetChr", "GwasSumStats", function(x, chr) {
     genome   = x@genome,
     ldSketch = x@ldSketch,
     varY     = as.numeric(x$varY),
+    # Preserve the optional per-study case/control counts + total N through the
+    # chromosome subset (they are study-level scalars, not per-variant).
+    nCase    = if ("nCase"    %in% names(x)) as.numeric(x$nCase)    else NULL,
+    nControl = if ("nControl" %in% names(x)) as.numeric(x$nControl) else NULL,
+    nSample  = if ("nSample"  %in% names(x)) as.numeric(x$nSample)  else NULL,
     qcInfo   = x@qcInfo)
 })
 

@@ -838,6 +838,7 @@ loadQtlDatasetFromManifest <- function(manifest, study = NULL,
                     "filePath"),
   columnMapping = c("columnMapping", "column_mapping", "column_mapping_file",
                     "columnMappingFile"),
+  nSample       = c("nSample", "n_sample"),
   varY          = c("varY", "var_y"),
   genome        = c("genome"),
   ldSketchPath  = c("ldSketchPath", "ld_sketch_path", "ld_sketch"))
@@ -928,10 +929,14 @@ loadGwasSumStatsFromManifest <- function(manifest, genome = NULL,
   do.call(GwasSumStats, args)
 }
 
-# Build the entry list + tuple vectors for a QtlSumStats manifest.
+# Build the entry list + tuple vectors for a QtlSumStats manifest. `allowNoN`
+# is an optional per-row logical vector: when TRUE for a row, its sumstats file
+# need not carry a per-variant N (a study-level nSample scalar fills it later in
+# summaryStatsQc). NULL (default) requires a per-variant N on every row.
 .loadQtlSumStatsEntries <- function(df, base, region, ldSketch,
                                     minLdOverlapWarn, columnMapping,
-                                    sampleSelect, formatMapping) {
+                                    sampleSelect, formatMapping,
+                                    allowNoN = NULL) {
   lapply(seq_len(nrow(df)), function(i) {
     label <- paste0("QtlSumStats[", df$study[[i]], "/", df$context[[i]], "/",
                     df$trait[[i]], "]")
@@ -943,7 +948,8 @@ loadGwasSumStatsFromManifest <- function(manifest, genome = NULL,
       columnMapping
     }
     gr <- .loadSumStatsEntry(.resolveRel(as.character(df$sumStatsPath[[i]]), base),
-                             region, mapping, sampleSelect, formatMapping, label)
+                             region, mapping, sampleSelect, formatMapping, label,
+                             allowNoN = !is.null(allowNoN) && isTRUE(allowNoN[[i]]))
     if (!is.null(ldSketch)) {
       .checkLdContainment(ldSketch, gr, minLdOverlapWarn, label)
     }
@@ -953,11 +959,19 @@ loadGwasSumStatsFromManifest <- function(manifest, genome = NULL,
 
 #' @title Load a QtlSumStats collection from a manifest
 #' @description Build a \code{\link{QtlSumStats}} from a manifest with one row
-#'   per \code{(study, context, trait)} tuple. No QC is run.
+#'   per \code{(study, context, trait)} tuple. No QC is run. Each sumstats file
+#'   needs a \code{z} column, or \code{beta}+\code{se} from which the Wald z
+#'   (\code{z = beta/se}) is derived when \code{z} is absent (a supplied
+#'   \code{z} takes precedence).
 #' @param manifest A data.frame or path. Columns (snake_case aliases accepted):
 #'   \code{study}, \code{context}, \code{trait} (required), \code{sumStatsPath}
-#'   (required), \code{columnMapping} (optional), \code{varY} (optional), and
-#'   the single-valued \code{genome} / \code{ldSketchPath}.
+#'   (required), \code{columnMapping} (optional), \code{nSample} (optional
+#'   tuple-level total N), \code{varY} (optional), and the single-valued
+#'   \code{genome} / \code{ldSketchPath}. When a row supplies \code{nSample},
+#'   its sumstats file need not carry a per-variant \code{N} column;
+#'   \code{\link{summaryStatsQc}} fills \code{N} from the scalar. (Unlike the
+#'   GWAS loader, there are no \code{nCase}/\code{nControl} columns: molecular
+#'   QTL traits are quantitative.)
 #' @param genome Genome build; reconciled with a \code{genome} column.
 #' @param ldSketch A \code{\link{GenotypeHandle}} or spec; reconciled with an
 #'   \code{ldSketchPath} column.
@@ -979,14 +993,23 @@ loadQtlSumStatsFromManifest <- function(manifest, genome = NULL,
                            label = "QtlSumStats")
   genome <- .reconcileScalar(df$genome, genome, "genome")
   ldSketch <- .resolveLdSketchInput(df, ldSketch, base)
+
+  # Tuple-level total-N scalar (from the manifest). When a row carries a usable
+  # nSample the sumstats file need not supply a per-variant N: summaryStatsQc
+  # fills N from the scalar. Gate the entry reader's N check per row on it.
+  nSampleCol <- if ("nSample" %in% names(df)) as.numeric(df$nSample) else NULL
+  allowNoN   <- if (!is.null(nSampleCol)) is.finite(nSampleCol) else NULL
+
   entries <- .loadQtlSumStatsEntries(df, base, region, ldSketch,
                                      minLdOverlapWarn, columnMapping,
-                                     sampleSelect, formatMapping)
+                                     sampleSelect, formatMapping,
+                                     allowNoN = allowNoN)
   args <- list(study = as.character(df$study),
                context = as.character(df$context),
                trait = as.character(df$trait),
                entry = entries, genome = genome, ldSketch = ldSketch)
-  if ("varY" %in% names(df)) args$varY <- as.numeric(df$varY)
+  if (!is.null(nSampleCol))  args$nSample <- nSampleCol
+  if ("varY" %in% names(df)) args$varY    <- as.numeric(df$varY)
   do.call(QtlSumStats, args)
 }
 

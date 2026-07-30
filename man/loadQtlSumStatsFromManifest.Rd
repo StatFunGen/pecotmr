@@ -18,8 +18,13 @@ loadQtlSumStatsFromManifest(
 \arguments{
 \item{manifest}{A data.frame or path. Columns (snake_case aliases accepted):
 \code{study}, \code{context}, \code{trait} (required), \code{sumStatsPath}
-(required), \code{columnMapping} (optional), \code{varY} (optional), and
-the single-valued \code{genome} / \code{ldSketchPath}.}
+(required), \code{columnMapping} (optional), \code{nSample} (optional
+tuple-level total N), \code{varY} (optional), and the single-valued
+\code{genome} / \code{ldSketchPath}. When a row supplies \code{nSample},
+its sumstats file need not carry a per-variant \code{N} column;
+\code{\link{summaryStatsQc}} fills \code{N} from the scalar. (Unlike the
+GWAS loader, there are no \code{nCase}/\code{nControl} columns: molecular
+QTL traits are quantitative.)}
 
 \item{genome}{Genome build; reconciled with a \code{genome} column.}
 
@@ -34,5 +39,8 @@ A \code{QtlSumStats} object.
 }
 \description{
 Build a \code{\link{QtlSumStats}} from a manifest with one row
-  per \code{(study, context, trait)} tuple. No QC is run.
+  per \code{(study, context, trait)} tuple. No QC is run. Each sumstats file
+  needs a \code{z} column, or \code{beta}+\code{se} from which the Wald z
+  (\code{z = beta/se}) is derived when \code{z} is absent (a supplied
+  \code{z} takes precedence).
 }
