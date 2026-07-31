@@ -91,7 +91,11 @@ entry's \code{nSource} is one of \code{"effective"}, \code{"column"},
 sketch is not yet fully wired for the new path; the option is
 accepted but currently emits a warning and is skipped.)}
 
-\item{imputeOpts}{Named list of RAISS parameters.}
+\item{imputeOpts}{Named list of RAISS parameters. RAISS imputation scopes its
+reference panel to the analysis-region window (so a per-chromosome /
+genome-wide \code{ldSketch} does not materialize its full dosage);
+\code{flank} (default 0) widens that window by the given number of base
+pairs on each side to retain LD context for edge variants.}
 
 \item{matchMinProp}{Minimum proportion of LD panel variants that must
 be matched by the sumstats; default 0.}
