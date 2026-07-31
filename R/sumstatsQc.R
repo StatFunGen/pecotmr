@@ -3236,6 +3236,9 @@ summaryStatsQc <- function(sumstats,
       genome   = getGenome(sumstats),
       ldSketch = getLdSketch(sumstats),
       varY     = as.numeric(sumstats$varY),
+      # Preserve the optional per-tuple study-level total N through QC.
+      nSample  = if ("nSample" %in% names(sumstats))
+                   as.numeric(sumstats$nSample) else NULL,
       qcInfo   = qcInfo)
   }
 }

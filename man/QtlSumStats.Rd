@@ -12,6 +12,7 @@ QtlSumStats(
   genome,
   ldSketch = NULL,
   varY = NA_real_,
+  nSample = NULL,
   qcInfo = list(),
   traitPos = NULL,
   ...
@@ -35,6 +36,14 @@ because all entries share the same LD sketch.}
 
 \item{varY}{Optional numeric vector of per-tuple phenotype variances
 (\code{NA_real_} entries allowed).}
+
+\item{nSample}{Optional per-tuple total sample size (numeric; default
+\code{NULL}). Attached only when supplied (length 1 or length(study)).
+Used as the study-level fallback for the per-variant \code{N} when a tuple
+has no per-variant \code{N} column. Named \code{nSample} to avoid clashing
+with \code{getNSamples()} (the LD-panel sample size). Unlike GWAS, QTL
+collections carry no case/control counts (molecular traits are
+quantitative), so only this total-N fallback is exposed.}
 
 \item{...}{Additional per-tuple columns to attach to the collection.}
 }

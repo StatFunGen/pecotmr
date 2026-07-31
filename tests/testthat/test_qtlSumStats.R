@@ -190,6 +190,45 @@ test_that("QtlSumStats: errors when varY length is neither 1 nor n", {
   )
 })
 
+test_that("QtlSumStats: optional nSample column is absent by default, attached and recycled when supplied", {
+  bare <- .qtlMakeOne()
+  expect_false("nSample" %in% names(bare))         # schema unchanged by default
+  obj <- QtlSumStats(
+    study   = c("s1", "s2"),
+    context = c("c1", "c1"),
+    trait   = c("t1", "t1"),
+    entry   = list(.qtlMakeEntryGr(2), .qtlMakeEntryGr(2)),
+    genome  = "hg19",
+    ldSketch = .qtlMakeGenotypeHandle(),
+    nSample = 838)                                 # scalar recycled to both tuples
+  expect_equal(as.numeric(obj$nSample), c(838, 838))
+  expect_true(methods::validObject(obj))
+})
+
+test_that("QtlSumStats: errors when nSample length is neither 1 nor n", {
+  expect_error(
+    QtlSumStats(
+      study   = c("s1", "s2"),
+      context = c("c1", "c1"),
+      trait   = c("t1", "t1"),
+      entry   = list(.qtlMakeEntryGr(2), .qtlMakeEntryGr(2)),
+      genome  = "hg19",
+      ldSketch = .qtlMakeGenotypeHandle(),
+      nSample = c(1, 2, 3)),
+    "length 1 or length\\(study\\)"
+  )
+})
+
+test_that("QtlSumStats: subsetChr preserves the nSample column", {
+  gr <- .qtlMakeEntryGr(4, chr = "chr1")
+  obj <- QtlSumStats(
+    study = "s1", context = "c1", trait = "t1",
+    entry = list(gr), genome = "hg19",
+    ldSketch = .qtlMakeGenotypeHandle(), nSample = 838)
+  sub <- subsetChr(obj, "chr1")
+  expect_equal(as.numeric(sub$nSample), 838)
+})
+
 test_that("QtlSumStats: accepts and stores extra per-tuple columns via ...", {
   obj <- QtlSumStats(
     study   = c("s1", "s2"),

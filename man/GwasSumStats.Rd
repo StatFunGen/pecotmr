@@ -43,10 +43,11 @@ sample size \code{4 / (1/nCase + 1/nControl)} in place of the
 per-variant \code{N}.}
 
 \item{nSample}{Optional per-study total sample size (numeric; default
-\code{NULL}). Attached only when supplied (length 1 or length(study)). Used as
-the study-level fallback for the per-variant \code{N} when a study has no
-per-variant \code{N} column and no case/control counts. Named \code{nSample} to
-avoid clashing with \code{getNSamples()} (the LD-panel sample size).}
+\code{NULL}). Attached only when supplied (length 1 or length(study)).
+Used as the study-level fallback for the per-variant \code{N} when a study
+has no per-variant \code{N} column and no case/control counts. Named
+\code{nSample} to avoid clashing with \code{getNSamples()} (the LD-panel
+sample size).}
 
 \item{...}{Additional per-study columns to attach to the collection.}
 }

@@ -127,6 +127,28 @@ test_that("subsetchr() filters correctly", {
 })
 
 
+test_that("subsetChr() preserves study-level nCase/nControl/nSample scalars", {
+  # Regression: the chromosome subset rebuilds the GwasSumStats and previously
+  # dropped the optional per-study case/control counts + total N.
+  gr <- GenomicRanges::GRanges(
+    c("chr1", "chr1", "chr2"),
+    IRanges::IRanges(start = c(100L, 200L, 300L), width = 1L))
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    SNP = paste0("rs", 1:3), A1 = rep("A", 3), A2 = rep("G", 3),
+    Z = c(1.0, -0.5, 2.0), N = rep(100L, 3))
+  obj <- GwasSumStats(
+    study = "g1", entry = list(gr), genome = "hg19",
+    ldSketch = .sh_makeGenotypeHandle(),
+    nCase = 5000, nControl = 15000, nSample = 20000)
+
+  sub <- subsetChr(obj, "chr1")
+  expect_equal(nSnps(sub), 2)
+  expect_equal(as.numeric(sub$nCase), 5000)
+  expect_equal(as.numeric(sub$nControl), 15000)
+  expect_equal(as.numeric(sub$nSample), 20000)
+})
+
+
 test_that("getvary() returns var_y and NULL cases", {
   df <- make_test_sumstats_df(5)
 

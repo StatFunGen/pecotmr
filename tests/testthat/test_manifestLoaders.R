@@ -364,6 +364,52 @@ test_that("loadQtlSumStatsFromManifest builds a per-tuple collection", {
   expect_equal(as.character(obj$context), "Whole_Blood")
 })
 
+test_that("loadQtlSumStatsFromManifest derives the Wald z from beta/se (no z column)", {
+  tmp <- withr::local_tempdir()
+  df <- .toyGwasDf(5)
+  z_expected <- df$z
+  df$beta <- df$z * 2; df$se <- rep(2, 5)   # beta/se reproduces z
+  df$z <- NULL                              # ... but no z column
+  ssPath <- .writeSumstatsTsv(df, file.path(tmp, "geneA.tsv"))
+  manifest <- data.frame(study = "eqtl", context = "Whole_Blood",
+                         trait = "geneA", sumStatsPath = ssPath,
+                         stringsAsFactors = FALSE)
+  obj <- loadQtlSumStatsFromManifest(manifest, genome = "hg38",
+                                     ldSketch = .toyLdSketch())
+  expect_s4_class(obj, "QtlSumStats")
+  mc <- S4Vectors::mcols(obj$entry[[1L]])
+  expect_equal(as.numeric(mc$Z), z_expected)            # derived Wald z
+  expect_true(all(c("BETA", "SE") %in% colnames(mc)))   # beta/se still attached
+})
+
+test_that("loadQtlSumStatsFromManifest builds from a tuple nSample scalar (no per-variant N)", {
+  tmp <- withr::local_tempdir()
+  df <- .toyGwasDf(5)
+  df$n_sample <- NULL                       # sumstats has no per-variant N
+  ssPath <- .writeSumstatsTsv(df, file.path(tmp, "geneA.tsv"))
+  manifest <- data.frame(study = "eqtl", context = "Whole_Blood",
+                         trait = "geneA", sumStatsPath = ssPath,
+                         n_sample = 838, stringsAsFactors = FALSE)
+  obj <- loadQtlSumStatsFromManifest(manifest, genome = "hg38",
+                                     ldSketch = .toyLdSketch())
+  expect_s4_class(obj, "QtlSumStats")
+  expect_false("N" %in% colnames(S4Vectors::mcols(obj$entry[[1L]])))
+  expect_equal(as.numeric(obj$nSample), 838)   # forwarded to the slot
+})
+
+test_that("loadQtlSumStatsFromManifest still errors when a tuple has no N source at all", {
+  tmp <- withr::local_tempdir()
+  df <- .toyGwasDf(5)
+  df$n_sample <- NULL                       # no per-variant N ...
+  ssPath <- .writeSumstatsTsv(df, file.path(tmp, "geneA.tsv"))
+  manifest <- data.frame(study = "eqtl", context = "Whole_Blood",
+                         trait = "geneA", sumStatsPath = ssPath,
+                         stringsAsFactors = FALSE)   # ... and no nSample scalar
+  expect_error(loadQtlSumStatsFromManifest(manifest, genome = "hg38",
+                                           ldSketch = .toyLdSketch()),
+               "needs an N field")
+})
+
 # ---------------------------------------------------------------------------
 # QtlDataset loader
 # ---------------------------------------------------------------------------

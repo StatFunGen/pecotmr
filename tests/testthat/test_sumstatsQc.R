@@ -2912,6 +2912,24 @@ test_that("summaryStatsQc: study nSample is the level-4 fallback (no counts, no 
   expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "study-n")
 })
 
+test_that("summaryStatsQc: QtlSumStats tuple nSample is the level-4 fallback too", {
+  # Parity with the GWAS study-n fallback: a QtlSumStats carrying only a
+  # tuple-level nSample (no per-variant N) fills N from the scalar and is
+  # preserved on the QC'd object.
+  gr <- .ssQ_makeEntryGr()
+  mc <- S4Vectors::mcols(gr)
+  mc$N <- NULL                                    # remove per-variant N
+  S4Vectors::mcols(gr) <- mc
+  ss <- QtlSumStats(study = "s1", context = "c1", trait = "t1",
+                    entry = list(gr), genome = "hg19",
+                    ldSketch = .ssQ_makeHandle(), nSample = 838)
+  res <- summaryStatsQc(ss)
+  expect_s4_class(res, "QtlSumStats")
+  expect_true(all(.ssQ_entryNByPos(res$entry[[1L]]) == 838))
+  expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "study-n")
+  expect_equal(as.numeric(res$nSample), 838)      # slot preserved through QC
+})
+
 test_that("summaryStatsQc: level precedence -- per-variant counts beat nSample; N column beats nSample", {
   # per-variant counts present alongside nSample -> counts win (effective).
   gr1 <- .ssQ_makeCCEntry(nCase = c(100, 200, 150, 250),

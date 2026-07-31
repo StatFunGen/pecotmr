@@ -89,11 +89,19 @@ NULL
 #' @param ldSketch A \code{GenotypeHandle} carrying the LD reference.
 #' @param varY Optional numeric vector of per-tuple phenotype variances
 #'   (\code{NA_real_} entries allowed).
+#' @param nSample Optional per-tuple total sample size (numeric; default
+#'   \code{NULL}). Attached only when supplied (length 1 or length(study)).
+#'   Used as the study-level fallback for the per-variant \code{N} when a tuple
+#'   has no per-variant \code{N} column. Named \code{nSample} to avoid clashing
+#'   with \code{getNSamples()} (the LD-panel sample size). Unlike GWAS, QTL
+#'   collections carry no case/control counts (molecular traits are
+#'   quantitative), so only this total-N fallback is exposed.
 #' @param ... Additional per-tuple columns to attach to the collection.
 #' @return A \code{QtlSumStats} object.
 #' @export
 QtlSumStats <- function(study, context, trait, entry, genome, ldSketch = NULL,
-                        varY = NA_real_, qcInfo = list(), traitPos = NULL, ...) {
+                        varY = NA_real_, nSample = NULL, qcInfo = list(),
+                        traitPos = NULL, ...) {
   if (missing(study) || missing(context) || missing(trait) ||
       missing(entry) || missing(genome)) {
     stop("`study`, `context`, `trait`, `entry`, and `genome` ",
@@ -131,6 +139,17 @@ QtlSumStats <- function(study, context, trait, entry, genome, ldSketch = NULL,
     entry   = S4Vectors::SimpleList(entry),
     varY    = as.numeric(varY)
   )
+  # nSample is OPTIONAL (per-tuple study-level total sample size): the column is
+  # attached only when supplied (default NULL), so QTL collections without it
+  # keep the original schema. summaryStatsQc() fills a missing per-variant N
+  # from this scalar. Provide length 1 or length(study).
+  if (!is.null(nSample)) {
+    if (length(nSample) == 1L && n > 1L) nSample <- rep(nSample, n)
+    if (length(nSample) != n) {
+      stop("`nSample` must have length 1 or length(study).")
+    }
+    cols$nSample <- as.numeric(nSample)
+  }
   # Optional trait-position provenance (one GRanges per trait; TSS = start()),
   # carried forward into QtlFineMappingResult / TwasWeights since the true trait
   # position cannot be inferred from summary statistics alone.
@@ -273,6 +292,7 @@ setMethod("subsetChr", "QtlSumStats", function(x, chr) {
     genome   = x@genome,
     ldSketch = x@ldSketch,
     varY     = as.numeric(x$varY),
+    nSample  = if ("nSample" %in% names(x)) as.numeric(x$nSample) else NULL,
     qcInfo   = x@qcInfo)
 })
 
