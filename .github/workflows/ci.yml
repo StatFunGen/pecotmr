@@ -19,11 +19,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, macos-latest]
+        runner: [ubuntu-latest, macos-latest, ubuntu-24.04-arm]
         environment: ["r44", "r45"]
         include:
           - runner: ubuntu-latest
             platform: linux-64
+          - runner: ubuntu-24.04-arm
+            platform: linux-aarch64
           - runner: macos-latest
             platform: osx-arm64
     
