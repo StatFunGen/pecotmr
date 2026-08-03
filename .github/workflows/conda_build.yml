@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, macos-latest]
+        runner: [ubuntu-latest, macos-latest, ubuntu-24.04-arm]
         variant: ["r44", "r45"]
         include:
           - runner: ubuntu-latest
