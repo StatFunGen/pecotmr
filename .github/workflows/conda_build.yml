@@ -14,7 +14,7 @@ on:
 
 jobs:
   build_package:
-    name: Build conda package (${{ matrix.platform }} / ${{ matrix.environment }})
+    name: Build conda package (${{ matrix.platform }} / ${{ matrix.variant }})
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
