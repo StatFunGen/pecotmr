@@ -3016,10 +3016,36 @@ test_that("summaryStatsQc: impute = TRUE invokes RAISS and records the audit cou
       list(resultFilter = rbind(knownZscores, added))
     },
     .package = "pecotmr")
-  res <- summaryStatsQc(ss, impute = TRUE)
+  # rs5/rs6 (pos 500/600) sit beyond the observed range (100-400); impute now
+  # scopes to the region window, so widen it with a flank to reach them.
+  res <- summaryStatsQc(ss, impute = TRUE, imputeOpts = list(flank = 500))
   ea <- getQcInfo(res)$entryAudit[[1L]]
   expect_equal(ea$raissTotalVariants, 6L)
   expect_equal(ea$raissImputedVariants, 2L)
+})
+
+test_that("summaryStatsQc: impute scopes the reference panel/dosage to the region window", {
+  # Sketch spans rs1..rs8 (pos 100..800); the entry observes only rs1..rs4
+  # (100..400). With the default flank the impute window is [100, 400], so the
+  # dosage must be materialized for just those 4 panel variants -- NOT the whole
+  # 8-variant sketch (the bug that makes --impute unusable on a per-chromosome
+  # sketch: it built dosage for seq_len(nrow(sketchSnpInfo))).
+  cap <- new.env(parent = emptyenv())
+  ss <- GwasSumStats(
+    study = "g1",
+    entry = list(.ssQ_makeEntryGr(paste0("rs", 1:4), c(100L, 200L, 300L, 400L))),
+    genome = "hg19",
+    ldSketch = .ssQ_makeHandle(snp_n = 8L, n_samples = 60L))
+  local_mocked_bindings(
+    .dosageMatrix = function(handle, snpIdx, meanImpute = TRUE) {
+      cap$snpIdx <- snpIdx
+      matrix(0, nrow = handle@nSamples, ncol = length(snpIdx))
+    },
+    raiss = function(...) NULL,
+    .package = "pecotmr")
+  suppressWarnings(summaryStatsQc(ss, impute = TRUE, nCutoff = 0))
+  expect_equal(length(cap$snpIdx), 4L)     # region window, not the full 8-SNP sketch
+  expect_true(all(cap$snpIdx %in% 1:4))    # only the in-window panel indices
 })
 
 test_that("summaryStatsQc: impute = TRUE with raiss returning NULL records 0 imputed", {
@@ -5252,7 +5278,8 @@ test_that("summaryStatsQc: impute = TRUE assembles BETA/SE/N and median-fills mi
       list(resultFilter = rbind(knownZscores, added))
     },
     .package = "pecotmr")
-  res <- summaryStatsQc(ss, impute = TRUE)
+  # rs5/rs6 (pos 500/600) are beyond the observed range; widen the impute window.
+  res <- summaryStatsQc(ss, impute = TRUE, imputeOpts = list(flank = 500))
   ea <- getQcInfo(res)$entryAudit[[1L]]
   expect_equal(ea$raissTotalVariants, 6L)
   expect_equal(ea$raissImputedVariants, 2L)

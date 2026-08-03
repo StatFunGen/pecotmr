@@ -2851,75 +2851,99 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   # 8. Optional RAISS imputation against the ldSketch.
   if (isTRUE(opts$impute) && nrow(df) >= 1L) {
     qcCount$imputeBefore <- nrow(df)
-    refPanel <- .refVariantsFromSketch(ldSketch)
-    # Canonicalize the panel ids so they align with the QC'd entry ids (df$SNP
-    # is already canonical) across chr-prefix / separator differences -- raiss()
-    # matches knownZscores$variant_id against refPanel$variant_id by string.
-    refPanel$variant_id <- normalizeVariantId(refPanel$variant_id)
-    refPanel <- refPanel[order(refPanel$pos), , drop = FALSE]
-
-    knownVariantIds <- if (!is.null(df$SNP)) as.character(df$SNP)
-                       else as.character(df$variant_id)
-    knownZ <- data.frame(
-      chrom      = as.character(df$chrom),
-      pos        = as.integer(df$pos),
-      variant_id = knownVariantIds,
-      A1         = as.character(df$A1),
-      A2         = as.character(df$A2),
-      z          = as.numeric(df$Z),
-      stringsAsFactors = FALSE)
-    if ("N"    %in% colnames(df)) knownZ$n    <- as.numeric(df$N)
-    if ("BETA" %in% colnames(df)) knownZ$beta <- as.numeric(df$BETA)
-    if ("SE"   %in% colnames(df)) knownZ$se   <- as.numeric(df$SE)
-    knownZ <- knownZ[order(knownZ$pos), , drop = FALSE]
-
-    # Materialize the full panel dosage in panel-order matching refPanel.
+    # Scope the reference panel + dosage to the analysis-region window. RAISS
+    # imputation is local (each missing variant is filled from its LD
+    # neighbours), so a per-chromosome / genome-wide sketch must NOT materialize
+    # its full dosage here -- restrict to [min(pos) - flank, max(pos) + flank] on
+    # the region chromosome, mirroring the region-scoping every other QC step
+    # (harmonization, kriging, LD-mismatch) already does via df$SNP.
+    flank    <- if (is.null(opts$imputeOpts$flank)) 0L
+                else as.integer(opts$imputeOpts$flank)
+    regChrom <- unique(sub("^chr", "", as.character(df$chrom), ignore.case = TRUE))
+    lo <- min(as.integer(df$pos), na.rm = TRUE) - flank
+    hi <- max(as.integer(df$pos), na.rm = TRUE) + flank
     sketchSnpInfo <- getSnpInfo(ldSketch)
-    dosage <- .dosageMatrix(ldSketch, seq_len(nrow(sketchSnpInfo)),
-                            meanImpute = TRUE)
-    colnames(dosage) <- normalizeVariantId(as.character(sketchSnpInfo$SNP))
-    dosage <- dosage[, refPanel$variant_id, drop = FALSE]
-    scaledDosage <- scale(dosage)
-    scaledDosage[is.na(scaledDosage)] <- 0
+    skChrom   <- sub("^chr", "", as.character(sketchSnpInfo$CHR), ignore.case = TRUE)
+    windowIdx <- which(skChrom %in% regChrom &
+                       as.integer(sketchSnpInfo$BP) >= lo &
+                       as.integer(sketchSnpInfo$BP) <= hi)
 
-    imputed <- raiss(
-      refPanel       = refPanel,
-      knownZscores   = knownZ,
-      genotypeMatrix = scaledDosage,
-      svdTol         = if (is.null(opts$imputeOpts$svdTol)) 1e-12
-                       else opts$imputeOpts$svdTol,
-      lamb           = if (is.null(opts$imputeOpts$lamb)) 0.01
-                       else opts$imputeOpts$lamb,
-      r2Threshold    = if (is.null(opts$imputeOpts$r2Threshold)) 0.6
-                       else opts$imputeOpts$r2Threshold,
-      minimumLd      = if (is.null(opts$imputeOpts$minimumLd)) 5
-                       else opts$imputeOpts$minimumLd,
-      verbose        = FALSE)
-    if (!is.null(imputed) && !is.null(imputed$resultFilter)) {
-      impDf <- imputed$resultFilter
-      out <- data.frame(
-        chrom = impDf$chrom,
-        pos   = impDf$pos,
-        SNP   = impDf$variant_id,
-        A1    = impDf$A1,
-        A2    = impDf$A2,
-        Z     = impDf$z,
-        stringsAsFactors = FALSE)
-      if ("n"    %in% colnames(impDf)) out$N    <- impDf$n
-      if ("beta" %in% colnames(impDf)) out$BETA <- impDf$beta
-      if ("se"   %in% colnames(impDf)) out$SE   <- impDf$se
-      if ("N" %in% colnames(out) && any(is.na(out$N)))
-        out$N[is.na(out$N)] <- stats::median(out$N, na.rm = TRUE)
-      entryAudit$raissTotalVariants    <- nrow(out)
-      entryAudit$raissImputedVariants  <- nrow(out) - nrow(knownZ)
-      df <- out
-    } else {
+    if (length(windowIdx) == 0L) {
+      emit("QC track: RAISS imputation skipped (no LD-panel variants in the ",
+           "region window).")
       entryAudit$raissImputedVariants <- 0L
+      qcCount$imputeAfter <- nrow(df)
+    } else {
+      # Canonicalize the (windowed) panel ids so they align with the QC'd entry
+      # ids (df$SNP is already canonical) across chr-prefix / separator
+      # differences -- raiss() matches knownZscores$variant_id against
+      # refPanel$variant_id by string.
+      refPanel <- .refVariantsFromSketch(ldSketch)[windowIdx, , drop = FALSE]
+      refPanel$variant_id <- normalizeVariantId(refPanel$variant_id)
+      refPanel <- refPanel[order(refPanel$pos), , drop = FALSE]
+
+      knownVariantIds <- if (!is.null(df$SNP)) as.character(df$SNP)
+                         else as.character(df$variant_id)
+      knownZ <- data.frame(
+        chrom      = as.character(df$chrom),
+        pos        = as.integer(df$pos),
+        variant_id = knownVariantIds,
+        A1         = as.character(df$A1),
+        A2         = as.character(df$A2),
+        z          = as.numeric(df$Z),
+        stringsAsFactors = FALSE)
+      if ("N"    %in% colnames(df)) knownZ$n    <- as.numeric(df$N)
+      if ("BETA" %in% colnames(df)) knownZ$beta <- as.numeric(df$BETA)
+      if ("SE"   %in% colnames(df)) knownZ$se   <- as.numeric(df$SE)
+      knownZ <- knownZ[order(knownZ$pos), , drop = FALSE]
+
+      # Materialize dosage for the region window only, in panel-order matching
+      # refPanel.
+      dosage <- .dosageMatrix(ldSketch, windowIdx, meanImpute = TRUE)
+      colnames(dosage) <- normalizeVariantId(as.character(sketchSnpInfo$SNP[windowIdx]))
+      dosage <- dosage[, refPanel$variant_id, drop = FALSE]
+      scaledDosage <- scale(dosage)
+      scaledDosage[is.na(scaledDosage)] <- 0
+
+      imputed <- raiss(
+        refPanel       = refPanel,
+        knownZscores   = knownZ,
+        genotypeMatrix = scaledDosage,
+        svdTol         = if (is.null(opts$imputeOpts$svdTol)) 1e-12
+                         else opts$imputeOpts$svdTol,
+        lamb           = if (is.null(opts$imputeOpts$lamb)) 0.01
+                         else opts$imputeOpts$lamb,
+        r2Threshold    = if (is.null(opts$imputeOpts$r2Threshold)) 0.6
+                         else opts$imputeOpts$r2Threshold,
+        minimumLd      = if (is.null(opts$imputeOpts$minimumLd)) 5
+                         else opts$imputeOpts$minimumLd,
+        verbose        = FALSE)
+      if (!is.null(imputed) && !is.null(imputed$resultFilter)) {
+        impDf <- imputed$resultFilter
+        out <- data.frame(
+          chrom = impDf$chrom,
+          pos   = impDf$pos,
+          SNP   = impDf$variant_id,
+          A1    = impDf$A1,
+          A2    = impDf$A2,
+          Z     = impDf$z,
+          stringsAsFactors = FALSE)
+        if ("n"    %in% colnames(impDf)) out$N    <- impDf$n
+        if ("beta" %in% colnames(impDf)) out$BETA <- impDf$beta
+        if ("se"   %in% colnames(impDf)) out$SE   <- impDf$se
+        if ("N" %in% colnames(out) && any(is.na(out$N)))
+          out$N[is.na(out$N)] <- stats::median(out$N, na.rm = TRUE)
+        entryAudit$raissTotalVariants    <- nrow(out)
+        entryAudit$raissImputedVariants  <- nrow(out) - nrow(knownZ)
+        df <- out
+      } else {
+        entryAudit$raissImputedVariants <- 0L
+      }
+      qcCount$imputeAfter <- nrow(df)
+      emit("QC track: RAISS imputation ", qcCount$imputeBefore, " -> ",
+           qcCount$imputeAfter, " variant(s) (net ",
+           sprintf("%+d", qcCount$imputeAfter - qcCount$imputeBefore), ").")
     }
-    qcCount$imputeAfter <- nrow(df)
-    emit("QC track: RAISS imputation ", qcCount$imputeBefore, " -> ",
-         qcCount$imputeAfter, " variant(s) (net ",
-         sprintf("%+d", qcCount$imputeAfter - qcCount$imputeBefore), ").")
   }
 
   # Per-entry QC rollup: corrected (sign/strand flip, retained), removed
@@ -3051,7 +3075,11 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
 #'   \code{ldSketch}. Default \code{FALSE}. (Note: RAISS against the
 #'   sketch is not yet fully wired for the new path; the option is
 #'   accepted but currently emits a warning and is skipped.)
-#' @param imputeOpts Named list of RAISS parameters.
+#' @param imputeOpts Named list of RAISS parameters. RAISS imputation scopes its
+#'   reference panel to the analysis-region window (so a per-chromosome /
+#'   genome-wide \code{ldSketch} does not materialize its full dosage);
+#'   \code{flank} (default 0) widens that window by the given number of base
+#'   pairs on each side to retain LD context for edge variants.
 #' @param matchMinProp Minimum proportion of LD panel variants that must
 #'   be matched by the sumstats; default 0.
 #' @param coerceNumeric Logical. Coerce signed columns
