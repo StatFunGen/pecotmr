@@ -1515,6 +1515,70 @@ test_that("fineMappingPipeline(GwasSumStats): runs end-to-end with mocked RSS fi
   expect_setequal(getMethodNames(res), "susie")
 })
 
+# ---- PIP-screen graceful skip: a screened region -> empty result, not error ----
+
+# A GwasSumStats whose (single) entry was emptied by summaryStatsQc's PIP screen:
+# 0-variant entry + qcInfo$entryAudit[[1]]$pipScreenSkipped = TRUE (+ reason).
+.fmp_makeScreenedGwas <- function(study  = "G1",
+                                  reason = "no signals above PIP threshold 0.025") {
+  GwasSumStats(
+    study    = study,
+    entry    = list(GenomicRanges::GRanges()),
+    genome   = "hg19",
+    ldSketch = .fmp_makeHandle(),
+    qcInfo   = list(entryAudit = list(list(pipScreenSkipped = TRUE,
+                                           pipScreenReason  = reason))))
+}
+
+test_that("fineMappingPipeline(GwasSumStats): a PIP-screened region yields an empty result, not an error", {
+  gss <- .fmp_makeScreenedGwas()
+  expect_message(
+    res <- fineMappingPipeline(gss, methods = "susie", addSusieInf = FALSE),
+    "region skipped")
+  expect_s4_class(res, "GwasFineMappingResult")
+  expect_equal(nrow(res), 0L)   # graceful skip, not stop("no ... tuples")
+})
+
+test_that("fineMappingPipeline(GwasSumStats): mixed screened + real keeps only the real region", {
+  gss <- GwasSumStats(
+    study    = c("Gskip", "Greal"),
+    entry    = list(GenomicRanges::GRanges(), .fmp_makeSumstatsGr()),
+    genome   = "hg19",
+    ldSketch = .fmp_makeHandle(),
+    qcInfo   = list(entryAudit = list(
+      list(pipScreenSkipped = TRUE, pipScreenReason = "no signal"), list())))
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieRss        = .fmp_mockFitRss(),
+    .fmPostprocessOne     = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  res <- suppressMessages(
+    fineMappingPipeline(gss, methods = "susie", addSusieInf = FALSE))
+  expect_equal(unique(as.character(res$study)), "Greal")   # screened study absent
+  expect_gt(nrow(res), 0L)
+})
+
+test_that("fineMappingPipeline(GwasSumStats): a 0-variant entry is skipped even without the flag", {
+  gss <- GwasSumStats(study = "G1", entry = list(GenomicRanges::GRanges()),
+    genome = "hg19", ldSketch = .fmp_makeHandle(), qcInfo = list(step1 = "ok"))
+  res <- suppressMessages(
+    fineMappingPipeline(gss, methods = "susie", addSusieInf = FALSE))
+  expect_s4_class(res, "GwasFineMappingResult")
+  expect_equal(nrow(res), 0L)
+})
+
+test_that("fineMappingPipeline(QtlSumStats): a screened trait is skipped gracefully", {
+  qss <- QtlSumStats(study = "Q1", context = "c1", trait = "t1",
+    entry = list(GenomicRanges::GRanges()), genome = "hg19",
+    ldSketch = .fmp_makeHandle(),
+    qcInfo = list(entryAudit = list(list(pipScreenSkipped = TRUE,
+                                         pipScreenReason = "no signal"))))
+  res <- suppressMessages(
+    fineMappingPipeline(qss, methods = "susie", addSusieInf = FALSE))
+  expect_s4_class(res, "QtlFineMappingResult")
+  expect_equal(nrow(res), 0L)
+})
+
 # ---- SER fallback (shared sumstat SuSiE-RSS path: GwasSumStats + QtlSumStats) ----
 
 test_that("fineMappingPipeline(GwasSumStats): serFallback + reliable R keeps multi-effect", {

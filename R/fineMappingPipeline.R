@@ -107,6 +107,11 @@
 #'         carries the bare token (\code{"susie"},
 #'         \code{"susieInf"}, \code{"mvsusie"}, ...) only. QC
 #'         provenance is recorded on the sumstats' \code{qcInfo}.
+#'   \item An entry that \code{summaryStatsQc(pipCutoffToSkip = ...)} screened
+#'         out (recorded as \code{qcInfo$entryAudit[[i]]$pipScreenSkipped}, and
+#'         emptied to 0 variants) is \strong{skipped}, not fit: it produces no
+#'         row and a message with the screen reason. An all-screened collection
+#'         yields a valid empty result rather than an error.
 #' }
 #'
 #' @param data A \code{QtlDataset}, \code{MultiStudyQtlDataset},
@@ -586,8 +591,9 @@ setGeneric("fineMappingPipeline",
                               jointTraits   = NULL,
                               region        = NULL,
                               traitPos      = NULL,
-                              ldSketch      = NULL) {
-  if (length(entries) == 0L) {
+                              ldSketch      = NULL,
+                              allowEmpty    = FALSE) {
+  if (length(entries) == 0L && !allowEmpty) {
     stop("fineMappingPipeline: no (study, context, trait, method) tuples ",
          "produced a fine-mapping result.")
   }
@@ -612,8 +618,9 @@ setGeneric("fineMappingPipeline",
 # pass them explicitly so downstream consumers can join on region.
 # @noRd
 .fmBuildGwasResult <- function(studies, methods, entries,
-                               region_ids = NULL, ldSketch = NULL) {
-  if (length(entries) == 0L) {
+                               region_ids = NULL, ldSketch = NULL,
+                               allowEmpty = FALSE) {
+  if (length(entries) == 0L && !allowEmpty) {
     stop("fineMappingPipeline: no (study, method, region_id) tuples produced a ",
          "fine-mapping result.")
   }
@@ -1118,6 +1125,25 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
   list(variantIds = df$variant_id,
        z = df$z,
        n = stats::median(df$N, na.rm = TRUE))
+}
+
+# Whether entry `i` of a QC'd SumStats was deliberately screened out (and why),
+# so fineMappingPipeline can skip it gracefully instead of erroring on a
+# 0-variant entry. `summaryStatsQc(pipCutoffToSkip = ...)` empties a no-signal
+# region and records qcInfo$entryAudit[[i]]$pipScreenSkipped (+ pipScreenReason);
+# an entry may also be empty for other reasons. Returns list(skipped, reason).
+.fmEntrySkipInfo <- function(data, i) {
+  ea <- tryCatch(getQcInfo(data)$entryAudit[[i]], error = function(e) NULL)
+  screened <- isTRUE(ea$pipScreenSkipped)
+  entry    <- data$entry[[i]]
+  empty    <- is.null(entry) || length(entry) == 0L
+  reason <-
+    if (!is.null(ea$pipScreenReason) && nzchar(as.character(ea$pipScreenReason)))
+      as.character(ea$pipScreenReason)
+    else if (screened) "no signal above the PIP pre-screen cutoff"
+    else if (empty)    "empty entry (no variants)"
+    else NA_character_
+  list(skipped = isTRUE(screened || empty), reason = reason)
 }
 
 
@@ -1825,6 +1851,7 @@ setMethod("fineMappingPipeline", "QtlSumStats",
     rowTrait   <- character(0)
     rowMethod  <- character(0)
     rowEntries <- list()
+    nSkipped   <- 0L
     pushRow <- function(st, ctx, tr, mt, ent) {
       rowStudy   <<- c(rowStudy,   st)
       rowContext <<- c(rowContext, ctx)
@@ -1850,6 +1877,17 @@ setMethod("fineMappingPipeline", "QtlSumStats",
         }
         if (length(toRun) == 0L) next
 
+        # A trait screened out by summaryStatsQc(pipCutoffToSkip) is empty here;
+        # skip it gracefully (no row, no error) rather than tripping .fmExtractZN.
+        skip <- .fmEntrySkipInfo(data, i)
+        if (isTRUE(skip$skipped)) {
+          nSkipped <- nSkipped + 1L
+          if (verbose >= 1)
+            message(sprintf(
+              "fineMappingPipeline(QtlSumStats): entry %d (study='%s', context='%s', trait='%s') skipped: %s",
+              i, st, ctx, tr, skip$reason))
+          next
+        }
         entry <- data$entry[[i]]
         zn <- .fmExtractZN(entry,
           sprintf("fineMappingPipeline(QtlSumStats): entry %d (study='%s', context='%s', trait='%s')", i, st, ctx, tr))
@@ -1917,8 +1955,15 @@ setMethod("fineMappingPipeline", "QtlSumStats",
                         ldSketch = ldSketch)
       else NULL
     if (is.null(jointResult)) {
-      if (is.null(perTupleResult))
+      if (is.null(perTupleResult)) {
+        # All traits screened out by summaryStatsQc(pipCutoffToSkip) -> a valid
+        # empty result, not an error.
+        if (nSkipped > 0L)
+          return(.fmBuildQtlResult(character(0), character(0), character(0),
+                                   character(0), list(), ldSketch = ldSketch,
+                                   allowEmpty = TRUE))
         stop("fineMappingPipeline(QtlSumStats): no entries produced a result.")
+      }
       return(perTupleResult)
     }
     if (is.null(perTupleResult)) return(jointResult)
@@ -1980,6 +2025,7 @@ setMethod("fineMappingPipeline", "GwasSumStats",
     rowMethod  <- character(0)
     rowRegion  <- character(0)
     rowEntries <- list()
+    nSkipped   <- 0L
     pushRow <- function(st, mt, rg, ent) {
       rowStudy   <<- c(rowStudy,   st)
       rowMethod  <<- c(rowMethod,  mt)
@@ -1990,6 +2036,17 @@ setMethod("fineMappingPipeline", "GwasSumStats",
     for (i in seq_len(nrow(data))) {
       st <- studyCol[[i]]
       gr <- data$entry[[i]]
+      # A region screened out by summaryStatsQc(pipCutoffToSkip) is empty here;
+      # skip it gracefully (no row, no error) rather than tripping .fmExtractZN.
+      skip <- .fmEntrySkipInfo(data, i)
+      if (isTRUE(skip$skipped)) {
+        nSkipped <- nSkipped + 1L
+        if (verbose >= 1)
+          message(sprintf(
+            "fineMappingPipeline(GwasSumStats): study='%s' region skipped: %s",
+            st, skip$reason))
+        next
+      }
       zn <- .fmExtractZN(gr,
         sprintf("fineMappingPipeline(GwasSumStats): study='%s'", st))
       variantIds <- zn$variantIds
@@ -2041,9 +2098,12 @@ setMethod("fineMappingPipeline", "GwasSumStats",
       for (tk in names(ents)) pushRow(st, tk, region_id, ents[[tk]])
     }
 
+    # An all-screened (or empty-input) collection legitimately yields a 0-row
+    # result -- allow it instead of erroring "no ... tuples produced a result".
     .fmBuildGwasResult(rowStudy, rowMethod, rowEntries,
                        region_ids = rowRegion,
-                       ldSketch   = ldSketch)
+                       ldSketch   = ldSketch,
+                       allowEmpty = (nSkipped > 0L || nrow(data) == 0L))
   })
 
 
