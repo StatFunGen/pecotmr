@@ -403,10 +403,10 @@ test_that("QtlSumStats: a non-GenotypeHandle ldSketch is rejected", {
 })
 
 # ===========================================================================
-# First-class summary-statistic accessors: getP / getBeta / getSE
+# First-class summary-statistic accessors: getP / getBeta / getSe
 # ===========================================================================
 
-test_that("getP / getBeta / getSE read the optional P/BETA/SE mcols", {
+test_that("getP / getBeta / getSe read the optional P/BETA/SE mcols", {
   gr <- .qtlMakeEntryGr(4)
   S4Vectors::mcols(gr)$P    <- c(0.1, 0.01, 1e-4, 0.5)
   S4Vectors::mcols(gr)$BETA <- c(0.2, -0.3, 0.4, 0.05)
@@ -415,14 +415,14 @@ test_that("getP / getBeta / getSE read the optional P/BETA/SE mcols", {
                    entry = list(gr), genome = "hg19")
   expect_equal(getP(x),    c(0.1, 0.01, 1e-4, 0.5))
   expect_equal(getBeta(x), c(0.2, -0.3, 0.4, 0.05))
-  expect_equal(getSE(x),   rep(0.1, 4))
+  expect_equal(getSe(x),   rep(0.1, 4))
 })
 
-test_that("getP / getBeta / getSE return NULL when the entry omits them", {
+test_that("getP / getBeta / getSe return NULL when the entry omits them", {
   y <- .qtlMakeOne(n = 4)                       # Z/N-only entry
   expect_null(getP(y))
   expect_null(getBeta(y))
-  expect_null(getSE(y))
+  expect_null(getSe(y))
   expect_equal(getZ(y), seq(1.0, by = 0.5, length.out = 4))   # Z still works
 })
 

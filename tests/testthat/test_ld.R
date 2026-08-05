@@ -1644,18 +1644,18 @@ test_that("ldLoader errors when multiple sources are provided", {
 # ldLoader: R_list branch
 # ===========================================================================
 
-test_that("ldLoader with R_list returns a function", {
+test_that("ldLoader with rList returns an ldLoaderSpec", {
   R <- list(matrix(c(1, 0.5, 0.5, 1), 2, 2))
-  loader <- ldLoader(rList = R)
-  expect_type(loader, "closure")
+  spec <- ldLoader(rList = R)
+  expect_s3_class(spec, "ldLoaderSpec")
 })
 
 test_that("ldLoader R_list returns correct matrix", {
   R1 <- matrix(c(1, 0.3, 0.3, 1), 2, 2)
   R2 <- matrix(c(1, 0.8, 0.8, 1), 2, 2)
   loader <- ldLoader(rList = list(R1, R2))
-  expect_equal(loader(1), R1)
-  expect_equal(loader(2), R2)
+  expect_equal(loadLdBlock(loader, 1), R1)
+  expect_equal(loadLdBlock(loader, 2), R2)
 })
 
 test_that("ldLoader R_list with max_variants downsamples", {
@@ -1663,7 +1663,7 @@ test_that("ldLoader R_list with max_variants downsamples", {
   R <- matrix(0.1, 10, 10)
   diag(R) <- 1
   loader <- ldLoader(rList = list(R), maxVariants = 5)
-  result <- loader(1)
+  result <- loadLdBlock(loader, 1)
   expect_equal(nrow(result), 5)
   expect_equal(ncol(result), 5)
 })
@@ -1672,7 +1672,7 @@ test_that("ldLoader R_list without max_variants returns full matrix", {
   R <- matrix(0.1, 10, 10)
   diag(R) <- 1
   loader <- ldLoader(rList = list(R))
-  result <- loader(1)
+  result <- loadLdBlock(loader, 1)
   expect_equal(nrow(result), 10)
 })
 
@@ -1680,7 +1680,7 @@ test_that("ldLoader R_list max_variants larger than matrix returns full matrix",
   R <- matrix(0.1, 3, 3)
   diag(R) <- 1
   loader <- ldLoader(rList = list(R), maxVariants = 100)
-  result <- loader(1)
+  result <- loadLdBlock(loader, 1)
   expect_equal(nrow(result), 3)
 })
 
@@ -1688,25 +1688,25 @@ test_that("ldLoader R_list max_variants larger than matrix returns full matrix",
 # ldLoader: X_list branch
 # ===========================================================================
 
-test_that("ldLoader with X_list returns a function", {
+test_that("ldLoader with xList returns an ldLoaderSpec", {
   X <- list(matrix(rnorm(30), 10, 3))
-  loader <- ldLoader(xList = X)
-  expect_type(loader, "closure")
+  spec <- ldLoader(xList = X)
+  expect_s3_class(spec, "ldLoaderSpec")
 })
 
 test_that("ldLoader X_list returns correct matrix", {
   X1 <- matrix(1:12, 4, 3)
   X2 <- matrix(1:8, 4, 2)
   loader <- ldLoader(xList = list(X1, X2))
-  expect_equal(loader(1), X1)
-  expect_equal(loader(2), X2)
+  expect_equal(loadLdBlock(loader, 1), X1)
+  expect_equal(loadLdBlock(loader, 2), X2)
 })
 
 test_that("ldLoader X_list with max_variants downsamples columns", {
   set.seed(42)
   X <- matrix(rnorm(50), 10, 5)
   loader <- ldLoader(xList = list(X), maxVariants = 3)
-  result <- loader(1)
+  result <- loadLdBlock(loader, 1)
   expect_equal(nrow(result), 10)
   expect_equal(ncol(result), 3)
 })
@@ -1714,7 +1714,7 @@ test_that("ldLoader X_list with max_variants downsamples columns", {
 test_that("ldLoader X_list max_variants larger than ncol returns full matrix", {
   X <- matrix(rnorm(12), 4, 3)
   loader <- ldLoader(xList = list(X), maxVariants = 100)
-  result <- loader(1)
+  result <- loadLdBlock(loader, 1)
   expect_equal(ncol(result), 3)
 })
 
@@ -1757,7 +1757,7 @@ test_that("ldLoader ldInfo loads LD from PLINK2 files", {
   skip_if_not_installed("pgenlibr")
   plink_prefix <- file.path(test_data_dir, "test_variants")
   loader <- ldLoader(ldInfo = data.frame(LD_file = plink_prefix))
-  mat <- loader(1)
+  mat <- loadLdBlock(loader, 1)
   expect_true(is.matrix(mat))
   expect_equal(nrow(mat), 349L)
   expect_equal(ncol(mat), 349L)
@@ -1769,7 +1769,7 @@ test_that("ldLoader ldInfo loads LD from VCF file", {
   skip_if_not_installed("VariantAnnotation")
   vcf_path <- file.path(test_data_dir, "test_variants.vcf.gz")
   loader <- ldLoader(ldInfo = data.frame(LD_file = vcf_path))
-  mat <- suppressWarnings(loader(1))
+  mat <- suppressWarnings(loadLdBlock(loader, 1))
   expect_true(is.matrix(mat))
   expect_equal(nrow(mat), 349L)
   expect_true(isSymmetric(mat))
@@ -1780,7 +1780,7 @@ test_that("ldLoader ldInfo loads LD from GDS file", {
   skip_if_not_installed("gdsfmt")
   gds_path <- file.path(test_data_dir, "test_variants.gds")
   loader <- ldLoader(ldInfo = data.frame(LD_file = gds_path))
-  mat <- loader(1)
+  mat <- loadLdBlock(loader, 1)
   expect_true(is.matrix(mat))
   expect_equal(nrow(mat), 349L)
   expect_true(isSymmetric(mat))
@@ -1790,7 +1790,7 @@ test_that("ldLoader ldInfo loads LD from PLINK1 files", {
   skip_if_not_installed("snpStats")
   plink1_prefix <- file.path(test_data_dir, "protocol_example.genotype")
   loader <- ldLoader(ldInfo = data.frame(LD_file = plink1_prefix))
-  mat <- loader(1)
+  mat <- loadLdBlock(loader, 1)
   expect_true(is.matrix(mat))
   expect_true(isSymmetric(mat))
 })
@@ -1822,7 +1822,7 @@ test_that("ldLoader ldInfo loads pre-computed .cor.xz blocks", {
   )
 
   loader <- ldLoader(ldInfo = data.frame(LD_file = ld_file, SNP_file = bim_file))
-  mat <- loader(1)
+  mat <- loadLdBlock(loader, 1)
   expect_true(is.matrix(mat))
   expect_true(isSymmetric(mat))
   expect_true(nrow(mat) > 0)
@@ -1833,7 +1833,7 @@ test_that("ldLoader ldInfo with max_variants subsamples", {
   plink_prefix <- file.path(test_data_dir, "test_variants")
   set.seed(42)
   loader <- ldLoader(ldInfo = data.frame(LD_file = plink_prefix), maxVariants = 20)
-  mat <- loader(1)
+  mat <- loadLdBlock(loader, 1)
   expect_equal(nrow(mat), 20L)
   expect_equal(ncol(mat), 20L)
 })
@@ -1846,8 +1846,8 @@ test_that("ldLoader ldInfo returns consistent LD across formats", {
   gds_path <- file.path(test_data_dir, "test_variants.gds")
   loader_plink <- ldLoader(ldInfo = data.frame(LD_file = plink_prefix))
   loader_gds <- ldLoader(ldInfo = data.frame(LD_file = gds_path))
-  mat_plink <- loader_plink(1)
-  mat_gds <- loader_gds(1)
+  mat_plink <- loadLdBlock(loader_plink, 1)
+  mat_gds <- loadLdBlock(loader_gds, 1)
   expect_equal(dim(mat_plink), dim(mat_gds))
 })
 
@@ -1867,7 +1867,7 @@ test_that("ldLoader ld_meta_path loads LD from PLINK2 metadata", {
       file = meta_file, append = TRUE)
   region <- "chr21:17513228-17592874"
   loader <- ldLoader(ldMetaPath = meta_file, regions = region)
-  mat <- loader(1)
+  mat <- loadLdBlock(loader, 1)
   expect_true(is.matrix(mat))
   expect_equal(nrow(mat), 349L)
   expect_equal(ncol(mat), 349L)
@@ -1885,7 +1885,7 @@ test_that("ldLoader ld_meta_path loads LD from VCF metadata", {
       file = meta_file, append = TRUE)
   region <- "chr21:17513228-17592874"
   loader <- ldLoader(ldMetaPath = meta_file, regions = region)
-  mat <- suppressWarnings(loader(1))
+  mat <- suppressWarnings(loadLdBlock(loader, 1))
   expect_true(is.matrix(mat))
   expect_equal(nrow(mat), 349L)
 })
@@ -3318,7 +3318,7 @@ test_that("ldLoader region mode subsamples and scales genotype matrices", {
   set.seed(1)
   loader <- ldLoader(ldMetaPath = meta_file, regions = geno_region_all,
                      returnGenotype = TRUE, maxVariants = 20)
-  mat <- loader(1)
+  mat <- loadLdBlock(loader, 1)
   expect_equal(ncol(mat), 20L)
   expect_equal(nrow(mat), 100L)  # samples
   expect_true(all(is.finite(mat)))  # scaled, NAs replaced with 0
@@ -3334,7 +3334,7 @@ test_that("ldLoader region mode subsamples a correlation matrix", {
   set.seed(2)
   loader <- ldLoader(ldMetaPath = meta_file, regions = geno_region_all,
                      returnGenotype = FALSE, maxVariants = 15)
-  mat <- loader(1)
+  mat <- loadLdBlock(loader, 1)
   expect_equal(dim(mat), c(15L, 15L))
 })
 
@@ -3361,7 +3361,7 @@ test_that("ldLoader ldInfo auto-detects companion file when SNP_file is absent",
     .package = "pecotmr"
   )
   loader <- ldLoader(ldInfo = data.frame(LD_file = ld_file))  # no SNP_file column
-  mat <- loader(1)
+  mat <- loadLdBlock(loader, 1)
   expect_true(is.matrix(mat))
   expect_true(isSymmetric(mat))
   expect_true(nrow(mat) > 0)

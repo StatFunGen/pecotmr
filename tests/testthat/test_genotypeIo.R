@@ -392,12 +392,12 @@ test_that("readBim returns correct columns and types", {
 
 
 # ===========================================================================
-# NoSNPsError / NoPhenotypeError custom conditions
+# NoSnpsError / NoPhenotypeError custom conditions
 # ===========================================================================
 
-test_that("NoSNPsError creates proper error condition", {
-  err <- NoSNPsError("test message")
-  expect_true(inherits(err, "NoSNPsError"))
+test_that("NoSnpsError creates proper error condition", {
+  err <- NoSnpsError("test message")
+  expect_true(inherits(err, "NoSnpsError"))
   expect_true(inherits(err, "error"))
   expect_true(inherits(err, "condition"))
   expect_equal(err$message, "test message")
@@ -1748,6 +1748,38 @@ test_that("loadGenotypeRegion warns on non-integer dosages without a sidecar", {
   expect_warning(
     loadGenotypeRegion(file.path(td, "dummy_data")),
     "Non-integer genotype values detected")
+})
+
+# ---- fileIdx + snpInfo subsetting (memory-safe LD-sketch trimming) -----------
+
+test_that(".withFileIdx + readers attach a sequential fileIdx to snpInfo", {
+  h  <- readGenotypes(test_path("test_data/test_variants"), format = "plink2")
+  si <- getSnpInfo(h)
+  expect_true("fileIdx" %in% names(si))
+  expect_identical(si$fileIdx, seq_len(nrow(si)))
+})
+
+test_that(".subsetGenotypeHandle keeps PLINK2 reads correct for kept variants", {
+  h  <- readGenotypes(test_path("test_data/test_variants"), format = "plink2")
+  si <- getSnpInfo(h)
+  want    <- c(2L, 4L, 5L, 9L)
+  dosFull <- pecotmr:::.dosageMatrix(h, want, meanImpute = TRUE)
+  # Keep a reordered superset so the wanted variants move to NEW row positions;
+  # fileIdx must rescue the (now-shifted) positional PLINK2 read.
+  keep <- c(9L, 5L, 4L, 2L, 7L, 1L)
+  hSub <- pecotmr:::.subsetGenotypeHandle(h, keep)
+  expect_equal(nrow(getSnpInfo(hSub)), length(keep))
+  expect_identical(getSnpInfo(hSub)$fileIdx, keep)   # original file order retained
+  wantSub <- match(want, keep)
+  dosSub  <- pecotmr:::.dosageMatrix(hSub, wantSub, meanImpute = TRUE)
+  expect_equal(unname(dosFull), unname(dosSub))
+})
+
+test_that(".subsetGenotypeHandle is NULL-safe and a no-op when nothing dropped", {
+  expect_null(pecotmr:::.subsetGenotypeHandle(NULL, TRUE))
+  h <- readGenotypes(test_path("test_data/test_variants"), format = "plink2")
+  expect_identical(
+    pecotmr:::.subsetGenotypeHandle(h, seq_len(nrow(getSnpInfo(h)))), h)
 })
 
 

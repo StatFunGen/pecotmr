@@ -829,6 +829,33 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 setGeneric("twasWeightsPipeline",
   function(data, ...) standardGeneric("twasWeightsPipeline"))
 
+# Run the multivariate joint TWAS-weight fit over the (context, trait) grid for
+# `traits`: dispatch each cis-region through the joint engine and merge per-region
+# results. `marker` = the TwasJointPipeline config; `ctx` bundles the shared state
+# (xRegions, data, norm, useCtx, fineMappingResult, dataDrivenPriorMatricesCv,
+# cisWindow, verbose).
+# @noRd
+.twasRunMultivariateGrid <- function(traits, marker, ctx) {
+  synthSpec <- list(list(axes = c("context", "trait"), scope = NULL))
+  labs <- vapply(ctx$xRegions, .twasRegionLabel, character(1))
+  perRegion <- lapply(seq_along(ctx$xRegions), function(bi) {
+    .runJointSpecs(synthSpec, ctx$data, dataForm = "individual", pipeline = marker,
+                   jointMethods = ctx$norm$tokens, contexts = ctx$useCtx,
+                   traitIds = traits,
+                   args = list(methodList = ctx$norm$methodList,
+                               fineMappingResult = ctx$fineMappingResult,
+                               dataDrivenPriorMatricesCv = ctx$dataDrivenPriorMatricesCv,
+                               cisWindow = ctx$cisWindow, region = ctx$xRegions[[bi]],
+                               regionIndex = bi, nRegions = length(ctx$xRegions),
+                               verbose = ctx$verbose))
+  })
+  keep <- !vapply(perRegion, is.null, logical(1))
+  perRegion <- perRegion[keep]; labs <- labs[keep]
+  if (length(perRegion) == 0L) return(NULL)
+  if (length(perRegion) == 1L) return(perRegion[[1L]])
+  .twasMergeResultsByKey(perRegion, labs)
+}
+
 #' @rdname twasWeightsPipeline
 #' @export
 setMethod("twasWeightsPipeline", "QtlDataset",
@@ -984,53 +1011,32 @@ setMethod("twasWeightsPipeline", "QtlDataset",
     # composed group per region -> per-method fit (the engine twas fitter) +
     # SR-TWAS ensemble layer, merged across regions. The SAME engine + fitter +
     # ensemble as every other multivariate path -- no separate fitting code.
-    runMultivariate <- function(traits) {
-      marker <- new("TwasJointPipeline", config = list(
-        cvFolds = cvFolds, samplePartition = samplePartition,
-        fitFullData = fitFullData, dataType = dataType,
-        retainFitDetail = retainFitDetail, standardized = FALSE,
-        ensemble = ensemble, ensembleR2Threshold = ensembleR2Threshold,
-        ensembleSolver = ensembleSolver, ensembleAlpha = ensembleAlpha,
-        maxCvVariants = maxCvVariants, cvThreads = cvThreads,
-        estimatePi = estimatePi, verbose = verbose, ldSketch = NULL))
-      synthSpec <- list(list(axes = c("context", "trait"), scope = NULL))
-      labs <- vapply(xRegions, .twasRegionLabel, character(1))
-      perRegion <- lapply(seq_along(xRegions), function(bi) {
-        .runJointSpecs(synthSpec, data, dataForm = "individual", pipeline = marker,
-                       jointMethods = norm$tokens, contexts = useCtx,
-                       traitIds = traits,
-                       args = list(methodList = norm$methodList,
-                                   fineMappingResult = fineMappingResult,
-                                   dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
-                                   cisWindow = cisWindow, region = xRegions[[bi]],
-                                   regionIndex = bi, nRegions = length(xRegions),
-                                   verbose = verbose))
-      })
-      keep <- !vapply(perRegion, is.null, logical(1))
-      perRegion <- perRegion[keep]; labs <- labs[keep]
-      if (length(perRegion) == 0L) return(NULL)
-      if (length(perRegion) == 1L) return(perRegion[[1L]])
-      .twasMergeResultsByKey(perRegion, labs)
-    }
+    # The joint-pipeline marker (config) + shared grid context are built once and
+    # used by both the multivariate grid (.twasRunMultivariateGrid) and the
+    # univariate engine path below.
+    marker <- new("TwasJointPipeline", config = list(
+      cvFolds = cvFolds, samplePartition = samplePartition,
+      fitFullData = fitFullData, dataType = dataType,
+      retainFitDetail = retainFitDetail, standardized = FALSE,
+      ensemble = ensemble, ensembleR2Threshold = ensembleR2Threshold,
+      ensembleSolver = ensembleSolver, ensembleAlpha = ensembleAlpha,
+      maxCvVariants = maxCvVariants, cvThreads = cvThreads,
+      estimatePi = estimatePi, verbose = verbose, ldSketch = NULL))
+    twasGridCtx <- list(xRegions = xRegions, data = data, norm = norm,
+                        useCtx = useCtx, fineMappingResult = fineMappingResult,
+                        dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
+                        cisWindow = cisWindow, verbose = verbose)
 
     # Top-level dispatch within the QtlDataset method body.
     if (multivariate) {
       # mvsusie / mr.mash: joint fit. If both nCtx == 1 and nTraits == 1
       # we already rejected above via .twasCheckMultivariateY.
-      tw <- runMultivariate(allTraits)
+      tw <- .twasRunMultivariateGrid(allTraits, marker, twasGridCtx)
     } else {
       # Univariate methods ROUTED THROUGH THE ENGINE: one 1-condition group per
       # (context, trait), per region -> the SAME per-method fitter (+ ensemble
       # layer for >= 2 methods + resume cache) as the joint paths, merged across
       # regions. No separate per-(context, trait) fitting loop.
-      marker <- new("TwasJointPipeline", config = list(
-        cvFolds = cvFolds, samplePartition = samplePartition,
-        fitFullData = fitFullData, dataType = dataType,
-        retainFitDetail = retainFitDetail, standardized = FALSE,
-        ensemble = ensemble, ensembleR2Threshold = ensembleR2Threshold,
-        ensembleSolver = ensembleSolver, ensembleAlpha = ensembleAlpha,
-        maxCvVariants = maxCvVariants, cvThreads = cvThreads,
-        estimatePi = estimatePi, verbose = verbose, ldSketch = NULL))
       univCell <- .lookupJointCell("univariate", "individual")
       scope <- list(studies = study,
                     contexts = setNames(list(useCtx), study),
@@ -1368,6 +1374,23 @@ setMethod("twasWeightsPipeline", "QtlSumStats",
 # rbind'd; the joint columns (when populated by either phase) are carried
 # through .rbindTwasWeights.
 
+# Per-embedded-study TWAS-weights worker for .multiStudyPipelineDriver: recurse
+# twasWeightsPipeline on one QtlDataset. `cfg` bundles the parent's forwarded args.
+# @noRd
+.twasPerStudy <- function(qd, cfg) do.call(twasWeightsPipeline, c(list(
+  data = qd, methods = cfg$methods, contexts = cfg$contexts, traitId = cfg$traitId,
+  region = cfg$region, cisWindow = cfg$cisWindow, jointRegions = cfg$jointRegions,
+  jointSpecification = NULL, fineMappingResult = cfg$fineMappingResult,
+  twasWeights = cfg$twasWeights, naAction = cfg$naAction, verbose = cfg$verbose),
+  cfg$dotArgs))
+
+# Embedded-sumstats TWAS-weights worker for .multiStudyPipelineDriver.
+# @noRd
+.twasSumStats <- function(ss, cfg) do.call(twasWeightsPipeline, c(list(
+  data = ss, methods = cfg$methods, contexts = cfg$contexts, traitId = cfg$traitId,
+  jointSpecification = NULL, fineMappingResult = cfg$fineMappingResult,
+  twasWeights = cfg$twasWeights, verbose = cfg$verbose), cfg$dotArgs))
+
 #' @rdname twasWeightsPipeline
 #' @export
 setMethod("twasWeightsPipeline", "MultiStudyQtlDataset",
@@ -1436,18 +1459,12 @@ setMethod("twasWeightsPipeline", "MultiStudyQtlDataset",
     }
 
     dotArgs <- list(...)
-    perStudyFn <- function(qd) do.call(twasWeightsPipeline, c(list(
-      data = qd, methods = methods, contexts = contexts, traitId = traitId,
-      region = region, cisWindow = cisWindow, jointRegions = jointRegions,
-      jointSpecification = NULL, fineMappingResult = fineMappingResult,
-      twasWeights = twasWeights, naAction = naAction, verbose = verbose),
-      dotArgs))
-    sumStatsFn <- function(ss) do.call(twasWeightsPipeline, c(list(
-      data = ss, methods = methods, contexts = contexts, traitId = traitId,
-      jointSpecification = NULL, fineMappingResult = fineMappingResult,
-      twasWeights = twasWeights, verbose = verbose), dotArgs))
+    cfg <- list(methods = methods, contexts = contexts, traitId = traitId,
+                region = region, cisWindow = cisWindow, jointRegions = jointRegions,
+                fineMappingResult = fineMappingResult, twasWeights = twasWeights,
+                naAction = naAction, verbose = verbose, dotArgs = dotArgs)
     .multiStudyPipelineDriver(
-      data, jointResult, perStudyFn, sumStatsFn,
+      data, jointResult, .twasPerStudy, .twasSumStats, cfg,
       .rbindTwasWeights, TwasWeights, "twasWeightsPipeline", noun = "weights")
   })
 
@@ -1552,6 +1569,16 @@ setMethod("twasWeightsPipeline", "ANY",
   zetaValid / zetaSum
 }
 
+# Ensemble stacking objective (sum of squared residuals). `...` absorbs the
+# gradient's extra optim args (PtP, Pty).
+# @noRd
+.ensembleObj <- function(z, Pvalid, yObs, ...) sum((yObs - Pvalid %*% z)^2)
+
+# Gradient of the ensemble stacking objective. `...` absorbs the objective's
+# extra optim args (Pvalid, yObs).
+# @noRd
+.ensembleGrad <- function(z, PtP, Pty, ...) as.vector(2 * (PtP %*% z - Pty))
+
 # Solve ensemble stacking via L-BFGS-B (box-constrained optimization, then normalize).
 # Uses base R optim() with analytical gradient. No extra dependencies.
 # @param Pvalid Matrix of CV predictions for valid methods (n x Kvalid).
@@ -1563,13 +1590,11 @@ setMethod("twasWeightsPipeline", "ANY",
   PtP <- crossprod(Pvalid)
   Pty <- as.vector(crossprod(Pvalid, yObs))
 
-  fn <- function(z) sum((yObs - Pvalid %*% z)^2)
-  gr <- function(z) as.vector(2 * (PtP %*% z - Pty))
-
   fit <- tryCatch(
     optim(
       par = rep(1 / Kvalid, Kvalid),
-      fn = fn, gr = gr,
+      fn = .ensembleObj, gr = .ensembleGrad,
+      Pvalid = Pvalid, yObs = yObs, PtP = PtP, Pty = Pty,
       method = "L-BFGS-B",
       lower = rep(0, Kvalid)
     ),

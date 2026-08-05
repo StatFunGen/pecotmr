@@ -503,6 +503,14 @@ setGeneric("fineMappingPipeline",
   }
 }
 
+# TRUE if method token `tk` is unknown (kept; validated elsewhere) or its
+# capability advertises a non-NULL `capField`.
+# @noRd
+.fmMethodOk <- function(tk, capField, caps) {
+  info <- caps[[tk]]
+  is.null(info) || !is.null(info[[capField]])
+}
+
 # Keep only the tokens in `methods` whose capability has a non-NULL `capField`
 # (individualImpl / sumstatImpl), so a sumstat-only method (e.g. ser) is dropped
 # from the individual-level recursion and an individual-only method from the
@@ -510,9 +518,8 @@ setGeneric("fineMappingPipeline",
 # of per-token args; unknown tokens pass through (handled elsewhere).
 .fmFilterMethodsForKind <- function(methods, capField) {
   caps <- .fineMappingMethodCapabilities
-  ok <- function(tk) { info <- caps[[tk]]; is.null(info) || !is.null(info[[capField]]) }
-  if (is.character(methods)) methods[vapply(methods, ok, logical(1))]
-  else if (is.list(methods)) methods[vapply(names(methods), ok, logical(1))]
+  if (is.character(methods)) methods[vapply(methods, .fmMethodOk, logical(1), capField, caps)]
+  else if (is.list(methods)) methods[vapply(names(methods), .fmMethodOk, logical(1), capField, caps)]
   else methods
 }
 
@@ -578,6 +585,26 @@ setGeneric("fineMappingPipeline",
   fineMappingResult$entry[[idx[[1L]]]]
 }
 
+
+# Append one QTL-side result row to the accumulator env `acc` (holds the parallel
+# rowStudy/rowContext/rowTrait/rowMethod vectors + rowEntries list).
+# @noRd
+.fmPushQtlRow <- function(acc, st, ctx, tr, mt, ent) {
+  acc$rowStudy   <- c(acc$rowStudy,   st)
+  acc$rowContext <- c(acc$rowContext, ctx)
+  acc$rowTrait   <- c(acc$rowTrait,   tr)
+  acc$rowMethod  <- c(acc$rowMethod,  mt)
+  acc$rowEntries[[length(acc$rowEntries) + 1L]] <- ent
+}
+
+# Append one GWAS-side result row (region-keyed) to the accumulator env `acc`.
+# @noRd
+.fmPushGwasRow <- function(acc, st, mt, rg, ent) {
+  acc$rowStudy   <- c(acc$rowStudy,   st)
+  acc$rowMethod  <- c(acc$rowMethod,  mt)
+  acc$rowRegion  <- c(acc$rowRegion,  rg)
+  acc$rowEntries[[length(acc$rowEntries) + 1L]] <- ent
+}
 
 # Build a QtlFineMappingResult collection from per-tuple parallel vectors.
 # `jointStudies`, `jointContexts`, `jointTraits` are optional character
@@ -824,6 +851,14 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
   }
 }
 
+# The canonical (non-reweighted) mvSuSiE mixture prior for residual variance `V`:
+# create_mixture_prior(R) restricted to the group's conditions.
+# @noRd
+.fmCanonicalPrior <- function(V, conditionNames, R) list(
+  priorVariance    = mvsusieR::create_mixture_prior(
+    R = R, include_indices = conditionNames),
+  residualVariance = V)
+
 # Rebuild the mvSuSiE data-driven *reweighted* mixture prior + residual variance
 # from a stored mr.mash fit -- the lean payload
 # (list(dataDrivenPriorMatrices, w0, V)) that mrmashWeights(retainFit = TRUE)
@@ -843,20 +878,16 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 .buildMvsusieReweightedPrior <- function(fitParts, conditionNames,
                                          weightsTol = 1e-10, overrideU = NULL) {
   R <- length(conditionNames)
-  canonical <- function(V) list(
-    priorVariance    = mvsusieR::create_mixture_prior(
-      R = R, include_indices = conditionNames),
-    residualVariance = V)
-  if (is.null(fitParts)) return(canonical(NULL))
+  if (is.null(fitParts)) return(.fmCanonicalPrior(NULL, conditionNames, R))
   # `overrideU` (mode C / hybrid): reuse this fit's reweighted mixture weights
   # (w0) and residual variance (V) but swap in a different set of data-driven
   # covariance matrices -- the per-fold mash prior U. Components are matched to
   # w0 by name, so the override U must share component names with the fit.
   ddpm <- if (!is.null(overrideU)) overrideU else fitParts$dataDrivenPriorMatrices
-  if (is.null(ddpm) || is.null(ddpm$U)) return(canonical(fitParts$V))
+  if (is.null(ddpm) || is.null(ddpm$U)) return(.fmCanonicalPrior(fitParts$V, conditionNames, R))
   w0Updated <- rescaleCovW0(fitParts$w0)
   w0Updated <- w0Updated[names(w0Updated) %in% names(ddpm$U)]
-  if (length(w0Updated) == 0L) return(canonical(fitParts$V))
+  if (length(w0Updated) == 0L) return(.fmCanonicalPrior(fitParts$V, conditionNames, R))
   mixture <- list(matrices = ddpm$U[names(w0Updated)], weights = w0Updated)
   list(
     priorVariance    = mvsusieR::create_mixture_prior(
@@ -1118,7 +1149,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 # GwasSumStats entry GRanges. Errors when Z or N is missing. Wraps the
 # shared `.entryToSumstatDf` helper (R/sumstatsQc.R).
 # @noRd
-.fmExtractZN <- function(gr, label) {
+.fmExtractZn <- function(gr, label) {
   df <- .entryToSumstatDf(gr,
                           require = c("SNP", "Z", "N"),
                           label = label)
@@ -1172,6 +1203,14 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
   sub("_weights$", "", adapter$methodKey)
 }
 
+# Coerce a weight vector to a single-column matrix (rows named by the vector's
+# names); pass matrices through unchanged.
+# @noRd
+.fmAsMat <- function(w) {
+  if (is.matrix(w)) return(w)
+  matrix(w, ncol = 1L, dimnames = list(names(w), NULL))
+}
+
 # Fit one fine-mapping method on (Xtr, Ytr) for a CV fold and return a
 # variants x outcomes weight matrix (rownames = colnames(Xtr)). susie-family
 # tokens are fit independently (no chained init) per fold, matching
@@ -1179,10 +1218,6 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 # @noRd
 .fmFoldWeights <- function(token, Xtr, Ytr, coverage, userArgs, pos,
                            mvPrior = NULL) {
-  asMat <- function(w) {
-    if (is.matrix(w)) return(w)
-    matrix(w, ncol = 1L, dimnames = list(names(w), NULL))
-  }
   if (token %in% c("susie", "susieInf", "susieAsh")) {
     y <- if (is.matrix(Ytr)) Ytr[, 1L] else Ytr
     fit <- .fmFitSusieIndiv(Xtr, y, token, coverage = coverage,
@@ -1193,7 +1228,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
       susieAsh = susieAshWeights(susieAshFit = fit))
     w <- as.numeric(w)
     names(w) <- colnames(Xtr)
-    return(asMat(w))
+    return(.fmAsMat(w))
   }
   if (token == "mvsusie") {
     # Reuse the data-driven reweighted prior + residual covariance from the
@@ -1222,6 +1257,34 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
   NULL
 }
 
+# Per-fold fine-mapping fit for the CV engine. `ctx` carries mvPrior, mvPriorCv,
+# tokens, coverage, methodArgs, pos, verbose. Weights keyed by canonical method key.
+# @noRd
+.fmFitFold <- function(Xtr, Ytr, j, ctx) {
+  mvPrior <- ctx$mvPrior; mvPriorCv <- ctx$mvPriorCv; tokens <- ctx$tokens
+  coverage <- ctx$coverage; methodArgs <- ctx$methodArgs; pos <- ctx$pos
+  verbose <- ctx$verbose
+  # Honest per-fold mvSuSiE prior when supplied (the fold's own mr.mash-derived
+  # prior); otherwise the single full-data prior is reused on every fold.
+  mvPriorThisFold <- if (!is.null(mvPriorCv)) {
+    p <- mvPriorCv[[as.character(j)]]
+    if (is.null(p)) mvPrior else p
+  } else mvPrior
+  weights <- list()
+  for (tk in tokens) {
+    weights[[.fmTwasMethodKey(tk)]] <- tryCatch(
+      .fmFoldWeights(tk, Xtr, Ytr, coverage, methodArgs[[tk]], pos,
+                     mvPriorThisFold),
+      error = function(e) {
+        if (verbose >= 1)
+          message(sprintf("  CV fold %s, method %s failed: %s",
+                          j, tk, conditionMessage(e)))
+        NULL
+      })
+  }
+  list(weights = weights, fits = list())
+}
+
 # Cross-validate a homogeneous set of fine-mapping `tokens` over (X, Y) via the
 # shared .crossValidateWeights() engine. For univariate tokens Y is a single
 # column; for mvsusie/fsusie Y carries one column per condition/feature (and
@@ -1235,33 +1298,16 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
                          pos = NULL, verbose = 1, mvPrior = NULL,
                          mvPriorCv = NULL, numThreads = 1) {
   if (length(tokens) == 0L) return(NULL)
-  # Per-fold fit: the engine has already dropped zero-variance training columns.
-  # Weights are keyed by the canonical method key so <key>_predicted /
-  # <key>_performance line up with the TwasWeights method column.
-  fitFold <- function(Xtr, Ytr, j) {
-    # Honest per-fold mvSuSiE prior when supplied (the fold's own mr.mash-derived
-    # prior); otherwise the single full-data prior is reused on every fold.
-    mvPriorThisFold <- if (!is.null(mvPriorCv)) {
-      p <- mvPriorCv[[as.character(j)]]
-      if (is.null(p)) mvPrior else p
-    } else mvPrior
-    weights <- list()
-    for (tk in tokens) {
-      weights[[.fmTwasMethodKey(tk)]] <- tryCatch(
-        .fmFoldWeights(tk, Xtr, Ytr, coverage, methodArgs[[tk]], pos,
-                       mvPriorThisFold),
-        error = function(e) {
-          if (verbose >= 1)
-            message(sprintf("  CV fold %s, method %s failed: %s",
-                            j, tk, conditionMessage(e)))
-          NULL
-        })
-    }
-    list(weights = weights, fits = list())
-  }
+  # Per-fold fit context passed to the shared engine's top-level fitter
+  # (.fmFitFold). Weights are keyed by the canonical method key so
+  # <key>_predicted / <key>_performance line up with the TwasWeights method column.
+  cvFitCtx <- list(mvPrior = mvPrior, mvPriorCv = mvPriorCv, tokens = tokens,
+                   coverage = coverage, methodArgs = methodArgs, pos = pos,
+                   verbose = verbose)
   res <- .crossValidateWeights(
     X, Y, fold = fold, samplePartitions = samplePartition,
-    fitFold = fitFold, numThreads = numThreads, verbose = verbose)
+    fitFold = .fmFitFold, fitFoldCtx = cvFitCtx,
+    numThreads = numThreads, verbose = verbose)
   list(samplePartition = res$samplePartition,
        prediction = res$prediction, performance = res$performance)
 }
@@ -1454,19 +1500,12 @@ setMethod("fineMappingPipeline", "QtlDataset",
 
     chain <- .fmResolveSusieChain(univTokens, addSusieInf)
 
-    rowStudy   <- character(0)
-    rowContext <- character(0)
-    rowTrait   <- character(0)
-    rowMethod  <- character(0)
-    rowEntries <- list()
-
-    pushRow <- function(st, ctx, tr, mt, ent) {
-      rowStudy   <<- c(rowStudy,   st)
-      rowContext <<- c(rowContext, ctx)
-      rowTrait   <<- c(rowTrait,   tr)
-      rowMethod  <<- c(rowMethod,  mt)
-      rowEntries[[length(rowEntries) + 1L]] <<- ent
-    }
+    acc <- new.env(parent = emptyenv())
+    acc$rowStudy   <- character(0)
+    acc$rowContext <- character(0)
+    acc$rowTrait   <- character(0)
+    acc$rowMethod  <- character(0)
+    acc$rowEntries <- list()
 
     # ---- Univariate dispatch: per (context, trait), per method.
     # X is drawn from each window in `xRegions` (cis = one trait-derived block;
@@ -1481,7 +1520,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
           for (tk in univTokens) {
             cached <- .fmCacheLookup(fineMappingResult, study, ctx, tid, tk)
             if (!is.null(cached)) {
-              pushRow(study, ctx, tid, tk, cached)
+              .fmPushQtlRow(acc, study, ctx, tid, tk, cached)
             } else {
               toRun <- c(toRun, tk)
             }
@@ -1531,7 +1570,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
             ents <- lapply(blockEntries, function(be) be[[tk]])
             if (any(vapply(ents, is.null, logical(1)))) next
             entry <- if (length(ents) == 1L) ents[[1L]] else .fmMergeEntries(ents)
-            pushRow(study, ctx, tid, tk, entry)
+            .fmPushQtlRow(acc, study, ctx, tid, tk, entry)
           }
         }
       }
@@ -1555,7 +1594,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
             ncol(scores), ctx, length(traits)))
         for (pcName in colnames(scores)) {
           cached <- .fmCacheLookup(fineMappingResult, study, ctx, pcName, "susie")
-          if (!is.null(cached)) { pushRow(study, ctx, pcName, "susie", cached); next }
+          if (!is.null(cached)) { .fmPushQtlRow(acc, study, ctx, pcName, "susie", cached); next }
           pcY <- scores[, pcName]
           blockEntries <- lapply(xRegions, function(rg) {
             X <- if (is.null(rg)) {
@@ -1581,7 +1620,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
           ents <- lapply(blockEntries, function(be) be[["susie"]])
           if (any(vapply(ents, is.null, logical(1)))) next
           entry <- if (length(ents) == 1L) ents[[1L]] else .fmMergeEntries(ents)
-          pushRow(study, ctx, pcName, "susie", entry)
+          .fmPushQtlRow(acc, study, ctx, pcName, "susie", entry)
         }
       }
     }
@@ -1614,6 +1653,9 @@ setMethod("fineMappingPipeline", "QtlDataset",
                                                   ldSketch = NULL)
     }
 
+    rowStudy <- acc$rowStudy; rowContext <- acc$rowContext
+    rowTrait <- acc$rowTrait; rowMethod <- acc$rowMethod
+    rowEntries <- acc$rowEntries
     perTupleResult <- if (length(rowEntries) > 0L)
       .fmBuildQtlResult(rowStudy, rowContext, rowTrait, rowMethod, rowEntries,
                         region   = tryCatch(
@@ -1640,6 +1682,38 @@ setMethod("fineMappingPipeline", "QtlDataset",
 # =============================================================================
 # MultiStudyQtlDataset method
 # =============================================================================
+
+# Per-embedded-study fine-mapping worker for .multiStudyPipelineDriver: recurse
+# fineMappingPipeline on one QtlDataset with the individual-capable methods.
+# `cfg` bundles the parent call's forwarded arguments.
+# @noRd
+.fmPerStudy <- function(qd, cfg) {
+  m <- .fmFilterMethodsForKind(cfg$methods, "individualImpl")
+  if (length(m) == 0L) return(NULL)
+  do.call(fineMappingPipeline, c(list(
+    data = qd, methods = m, contexts = cfg$contexts, traitId = cfg$traitId,
+    region = cfg$region, cisWindow = cfg$cisWindow, jointRegions = cfg$jointRegions,
+    jointSpecification = NULL, addSusieInf = cfg$addSusieInf, coverage = cfg$coverage,
+    secondaryCoverage = cfg$secondaryCoverage, signalCutoff = cfg$signalCutoff,
+    minAbsCorr = cfg$minAbsCorr, fineMappingResult = cfg$fineMappingResult,
+    cvFolds = cfg$cvFolds, cvThreads = cfg$cvThreads,
+    samplePartition = cfg$samplePartition, pipCutoffToSkip = cfg$pipCutoffToSkip,
+    seed = cfg$seed, naAction = cfg$naAction, verbose = cfg$verbose), cfg$dotArgs))
+}
+
+# Embedded-sumstats fine-mapping worker for .multiStudyPipelineDriver: recurse
+# fineMappingPipeline on the QtlSumStats with the sumstat-capable methods.
+# @noRd
+.fmSumStats <- function(ss, cfg) {
+  m <- .fmFilterMethodsForKind(cfg$methods, "sumstatImpl")
+  if (length(m) == 0L) return(NULL)
+  do.call(fineMappingPipeline, c(list(
+    data = ss, methods = m, contexts = cfg$contexts, traitId = cfg$traitId,
+    jointSpecification = NULL, addSusieInf = cfg$addSusieInf, coverage = cfg$coverage,
+    secondaryCoverage = cfg$secondaryCoverage, signalCutoff = cfg$signalCutoff,
+    minAbsCorr = cfg$minAbsCorr, fineMappingResult = cfg$fineMappingResult,
+    verbose = cfg$verbose), cfg$dotArgs))
+}
 
 #' @rdname fineMappingPipeline
 #' @export
@@ -1719,31 +1793,16 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
     # Route each method to the components it supports: individual-capable
     # methods to the per-study QtlDatasets, sumstat-capable methods (incl. the
     # sumstat-only `ser`) to the embedded QtlSumStats.
-    perStudyFn <- function(qd) {
-      m <- .fmFilterMethodsForKind(methods, "individualImpl")
-      if (length(m) == 0L) return(NULL)
-      do.call(fineMappingPipeline, c(list(
-        data = qd, methods = m, contexts = contexts, traitId = traitId,
-        region = region, cisWindow = cisWindow, jointRegions = jointRegions,
-        jointSpecification = NULL, addSusieInf = addSusieInf, coverage = coverage,
-        secondaryCoverage = secondaryCoverage, signalCutoff = signalCutoff,
-        minAbsCorr = minAbsCorr, fineMappingResult = fineMappingResult,
-        cvFolds = cvFolds, cvThreads = cvThreads, samplePartition = samplePartition,
-        pipCutoffToSkip = pipCutoffToSkip, seed = seed, naAction = naAction,
-        verbose = verbose), dotArgs))
-    }
-    sumStatsFn <- function(ss) {
-      m <- .fmFilterMethodsForKind(methods, "sumstatImpl")
-      if (length(m) == 0L) return(NULL)
-      do.call(fineMappingPipeline, c(list(
-        data = ss, methods = m, contexts = contexts, traitId = traitId,
-        jointSpecification = NULL, addSusieInf = addSusieInf, coverage = coverage,
-        secondaryCoverage = secondaryCoverage, signalCutoff = signalCutoff,
-        minAbsCorr = minAbsCorr, fineMappingResult = fineMappingResult,
-        verbose = verbose), dotArgs))
-    }
+    cfg <- list(methods = methods, contexts = contexts, traitId = traitId,
+                region = region, cisWindow = cisWindow, jointRegions = jointRegions,
+                addSusieInf = addSusieInf, coverage = coverage,
+                secondaryCoverage = secondaryCoverage, signalCutoff = signalCutoff,
+                minAbsCorr = minAbsCorr, fineMappingResult = fineMappingResult,
+                cvFolds = cvFolds, cvThreads = cvThreads,
+                samplePartition = samplePartition, pipCutoffToSkip = pipCutoffToSkip,
+                seed = seed, naAction = naAction, verbose = verbose, dotArgs = dotArgs)
     .multiStudyPipelineDriver(
-      data, jointResult, perStudyFn, sumStatsFn,
+      data, jointResult, .fmPerStudy, .fmSumStats, cfg,
       .rbindFineMappingResult, QtlFineMappingResult, "fineMappingPipeline")
   })
 
@@ -1846,19 +1905,13 @@ setMethod("fineMappingPipeline", "QtlSumStats",
                            (isTRUE(serFallback) || !identical(rMismatch, "none")))
       getNSamples(ldSketch) else rFinite
 
-    rowStudy   <- character(0)
-    rowContext <- character(0)
-    rowTrait   <- character(0)
-    rowMethod  <- character(0)
-    rowEntries <- list()
+    acc <- new.env(parent = emptyenv())
+    acc$rowStudy   <- character(0)
+    acc$rowContext <- character(0)
+    acc$rowTrait   <- character(0)
+    acc$rowMethod  <- character(0)
+    acc$rowEntries <- list()
     nSkipped   <- 0L
-    pushRow <- function(st, ctx, tr, mt, ent) {
-      rowStudy   <<- c(rowStudy,   st)
-      rowContext <<- c(rowContext, ctx)
-      rowTrait   <<- c(rowTrait,   tr)
-      rowMethod  <<- c(rowMethod,  mt)
-      rowEntries[[length(rowEntries) + 1L]] <<- ent
-    }
 
     # ---- Univariate dispatch: per (study, context, trait), per method.
     if (length(univTokens) > 0L) {
@@ -1870,7 +1923,7 @@ setMethod("fineMappingPipeline", "QtlSumStats",
         for (tk in univTokens) {
           cached <- .fmCacheLookup(fineMappingResult, st, ctx, tr, tk)
           if (!is.null(cached)) {
-            pushRow(st, ctx, tr, tk, cached)
+            .fmPushQtlRow(acc, st, ctx, tr, tk, cached)
           } else {
             toRun <- c(toRun, tk)
           }
@@ -1878,7 +1931,7 @@ setMethod("fineMappingPipeline", "QtlSumStats",
         if (length(toRun) == 0L) next
 
         # A trait screened out by summaryStatsQc(pipCutoffToSkip) is empty here;
-        # skip it gracefully (no row, no error) rather than tripping .fmExtractZN.
+        # skip it gracefully (no row, no error) rather than tripping .fmExtractZn.
         skip <- .fmEntrySkipInfo(data, i)
         if (isTRUE(skip$skipped)) {
           nSkipped <- nSkipped + 1L
@@ -1889,7 +1942,7 @@ setMethod("fineMappingPipeline", "QtlSumStats",
           next
         }
         entry <- data$entry[[i]]
-        zn <- .fmExtractZN(entry,
+        zn <- .fmExtractZn(entry,
           sprintf("fineMappingPipeline(QtlSumStats): entry %d (study='%s', context='%s', trait='%s')", i, st, ctx, tr))
         variantIds <- zn$variantIds
         z <- zn$z
@@ -1913,7 +1966,7 @@ setMethod("fineMappingPipeline", "QtlSumStats",
           keepFullFit = keepFullFit)
         # The method column carries the bare token, independent of the
         # postprocess class.
-        for (tk in names(ents)) pushRow(st, ctx, tr, tk, ents[[tk]])
+        for (tk in names(ents)) .fmPushQtlRow(acc, st, ctx, tr, tk, ents[[tk]])
       }
     }
 
@@ -1941,6 +1994,9 @@ setMethod("fineMappingPipeline", "QtlSumStats",
                                                   ldSketch = ldSketch)
     }
 
+    rowStudy <- acc$rowStudy; rowContext <- acc$rowContext
+    rowTrait <- acc$rowTrait; rowMethod <- acc$rowMethod
+    rowEntries <- acc$rowEntries
     perTupleResult <- if (length(rowEntries) > 0L)
       .fmBuildQtlResult(rowStudy, rowContext, rowTrait, rowMethod, rowEntries,
                         # QtlSumStats: region = the entry's variant span (no
@@ -2021,23 +2077,18 @@ setMethod("fineMappingPipeline", "GwasSumStats",
       getNSamples(ldSketch) else rFinite
     studyCol <- as.character(data$study)
 
-    rowStudy   <- character(0)
-    rowMethod  <- character(0)
-    rowRegion  <- character(0)
-    rowEntries <- list()
+    acc <- new.env(parent = emptyenv())
+    acc$rowStudy   <- character(0)
+    acc$rowMethod  <- character(0)
+    acc$rowRegion  <- character(0)
+    acc$rowEntries <- list()
     nSkipped   <- 0L
-    pushRow <- function(st, mt, rg, ent) {
-      rowStudy   <<- c(rowStudy,   st)
-      rowMethod  <<- c(rowMethod,  mt)
-      rowRegion  <<- c(rowRegion,  rg)
-      rowEntries[[length(rowEntries) + 1L]] <<- ent
-    }
 
     for (i in seq_len(nrow(data))) {
       st <- studyCol[[i]]
       gr <- data$entry[[i]]
       # A region screened out by summaryStatsQc(pipCutoffToSkip) is empty here;
-      # skip it gracefully (no row, no error) rather than tripping .fmExtractZN.
+      # skip it gracefully (no row, no error) rather than tripping .fmExtractZn.
       skip <- .fmEntrySkipInfo(data, i)
       if (isTRUE(skip$skipped)) {
         nSkipped <- nSkipped + 1L
@@ -2047,7 +2098,7 @@ setMethod("fineMappingPipeline", "GwasSumStats",
             st, skip$reason))
         next
       }
-      zn <- .fmExtractZN(gr,
+      zn <- .fmExtractZn(gr,
         sprintf("fineMappingPipeline(GwasSumStats): study='%s'", st))
       variantIds <- zn$variantIds
       z <- zn$z
@@ -2077,7 +2128,7 @@ setMethod("fineMappingPipeline", "GwasSumStats",
           .fmCacheLookupGwas(fineMappingResult, st, tk, region_id)
         } else NULL
         if (!is.null(cached)) {
-          pushRow(st, tk, region_id, cached)
+          .fmPushGwasRow(acc, st, tk, region_id, cached)
         } else {
           toRun <- c(toRun, tk)
         }
@@ -2095,11 +2146,13 @@ setMethod("fineMappingPipeline", "GwasSumStats",
         serFallback = serFallback, rFinite = rFiniteResolved,
         rMismatch = rMismatch, rssControl = rssControl,
         keepFullFit = keepFullFit)
-      for (tk in names(ents)) pushRow(st, tk, region_id, ents[[tk]])
+      for (tk in names(ents)) .fmPushGwasRow(acc, st, tk, region_id, ents[[tk]])
     }
 
     # An all-screened (or empty-input) collection legitimately yields a 0-row
     # result -- allow it instead of erroring "no ... tuples produced a result".
+    rowStudy <- acc$rowStudy; rowMethod <- acc$rowMethod
+    rowRegion <- acc$rowRegion; rowEntries <- acc$rowEntries
     .fmBuildGwasResult(rowStudy, rowMethod, rowEntries,
                        region_ids = rowRegion,
                        ldSketch   = ldSketch,

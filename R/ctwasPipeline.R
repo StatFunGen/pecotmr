@@ -936,6 +936,11 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
   .ctwasBucketWeights(twasWeights, gwasSumStats)
 }
 
+# Extract the character vector of method names carried by a weight source
+# (NULL-safe: a NULL source contributes no methods).
+# @noRd
+.ctwasMethodsOf <- function(tw) if (is.null(tw)) NULL else as.character(tw$method)
+
 # Resolve the LIST of TWAS methods a `ctwasPipeline` run should iterate over
 # (one independent cTWAS run per method — weights are homogeneous within a run).
 #   - explicit `method`: exactly that one (validated present).
@@ -946,12 +951,11 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
 #     `.ctwasResolveMethod` errors here; the pipeline instead fans out).
 # @noRd
 .ctwasResolveMethods <- function(twasWeightsList, method = NULL) {
-  methodsOf <- function(tw) if (is.null(tw)) NULL else as.character(tw$method)
   available <- unique(
     if (methods::is(twasWeightsList, "TwasWeights") ||
         methods::is(twasWeightsList, "QtlFineMappingResult"))
-      methodsOf(twasWeightsList)                      # a flat weight source
-    else unlist(lapply(twasWeightsList, methodsOf)))  # a list of them
+      .ctwasMethodsOf(twasWeightsList)                # a flat weight source
+    else unlist(lapply(twasWeightsList, .ctwasMethodsOf)))  # a list of them
   if (length(available) == 0L)
     stop("ctwasPipeline: weight sources carry no method entries.")
   if (!is.null(method) && nzchar(method)) {
@@ -979,6 +983,11 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
   studies
 }
 
+# Extract field `i` (as character) from each `region|study|context|trait|method`
+# split in `parts`.
+# @noRd
+.ctwasPickField <- function(i, parts) vapply(parts, function(p) p[[i]], character(1))
+
 # Parse the cTWAS gene ids (`region|study|context|trait|method`) that name the
 # assembled weights list into their identity components. `method` is the LAST
 # field and `trait` everything between context and method, so a trait that
@@ -991,12 +1000,11 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
     stop("ctwasPipeline: malformed cTWAS gene id(s): ",
          paste(ids[n < 5L], collapse = ", "),
          " (expected 'region|study|context|trait|method').")
-  pick <- function(i) vapply(parts, function(p) p[[i]], character(1))
   data.frame(
     id      = ids,
-    rid     = pick(1L),
-    study   = pick(2L),
-    context = pick(3L),
+    rid     = .ctwasPickField(1L, parts),
+    study   = .ctwasPickField(2L, parts),
+    context = .ctwasPickField(3L, parts),
     trait   = mapply(function(p, k) paste(p[4:(k - 1L)], collapse = "|"),
                      parts, n, USE.NAMES = FALSE),
     method  = mapply(function(p, k) p[[k]], parts, n, USE.NAMES = FALSE),
@@ -1057,6 +1065,13 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
   if (nrow(sub) == 0L) NULL else `rownames<-`(sub, NULL)
 }
 
+# Build a CtwasResultEntry from a finemap + susieAlpha slice, stamping the run's
+# param + region_info.
+# @noRd
+.ctwasMkEntry <- function(fm, sa, runResult) CtwasResultEntry(
+  finemap = fm, susieAlpha = sa, param = runResult$param,
+  regionInfo = runResult$region_info)
+
 # Decompose one cTWAS run (a `finemapCtwasRegions` output) into per-context
 # row-specs for a CtwasResult. The row skeleton comes from the ASSEMBLED weights
 # (so every modeled (study, context) appears even if no gene reached
@@ -1082,10 +1097,6 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
     as.data.frame(runResult$finemap_res)
   saDf <- if (is.null(runResult$susie_alpha_res)) NULL else
     as.data.frame(runResult$susie_alpha_res)
-  mkEntry <- function(fm, sa) CtwasResultEntry(
-    finemap = fm, susieAlpha = sa, param = runResult$param,
-    regionInfo = runResult$region_info)
-
   rows <- lapply(contexts, function(cx) {
     inCx    <- parsed$context == cx
     studyCx <- unique(parsed$study[inCx])
@@ -1095,8 +1106,8 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
     idsCx <- parsed$id[inCx]
     list(gwasStudy = gwasStudy, study = studyCx, context = cx, method = method,
          jointContexts = jointStr,
-         entry = mkEntry(.ctwasSubsetById(fmDf, idsCx),
-                         .ctwasSubsetById(saDf, idsCx)))
+         entry = .ctwasMkEntry(.ctwasSubsetById(fmDf, idsCx),
+                         .ctwasSubsetById(saDf, idsCx), runResult))
   })
 
   if (keepSnps) {
@@ -1105,7 +1116,7 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
     if (!is.null(snpFm) || !is.null(snpSa))
       rows <- c(rows, list(list(
         gwasStudy = gwasStudy, study = "SNP", context = "SNP", method = method,
-        jointContexts = jointStr, entry = mkEntry(snpFm, snpSa))))
+        jointContexts = jointStr, entry = .ctwasMkEntry(snpFm, snpSa, runResult))))
   }
   rows
 }

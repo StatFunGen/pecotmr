@@ -1006,14 +1006,71 @@ lassosumRss <- function(bhat, R, n,
   result
 }
 
+# Per-`s` fit for one RSS method (`method` selects the solver + which `config`
+# fields apply). Returns list(beta, meta); l0learn's inner lambda0 sweep is here.
+# @noRd
+.rssFitOne <- function(method, solverInput, LDs, n, sVal, config) {
+  switch(method,
+    lassosum = {
+      model <- do.call(lassosumRss,
+                       c(list(bhat = solverInput, R = LDs, n = n), config$dotArgs))
+      list(beta = model$beta,
+           meta = data.frame(s = rep(sVal, length(model$lambda)),
+                             lambda = model$lambda, fbeta = model$fbeta,
+                             stringsAsFactors = FALSE))
+    },
+    penalized = {
+      model <- do.call(penalizedRss,
+                       c(list(bhat = solverInput, R = LDs, n = n,
+                              penalty = config$penalty, gamma = config$gamma,
+                              alpha = config$alpha, lambda0 = config$lambda0,
+                              lambda2 = config$lambda2), config$dotArgs))
+      list(beta = model$beta,
+           meta = data.frame(s = rep(sVal, length(model$lambda)),
+                             lambda = model$lambda, fbeta = model$fbeta,
+                             stringsAsFactors = FALSE))
+    },
+    l0learn = {
+      beta <- NULL
+      meta <- list()
+      for (l0Val in config$lambda0) {
+        model <- do.call(penalizedRss,
+                         c(list(bhat = solverInput, R = LDs, n = n,
+                                penalty = config$penalty, lambda = config$lambda,
+                                lambda0 = l0Val, lambda2 = config$lambda2,
+                                maxSwaps = config$maxSwaps), config$dotArgs))
+        beta <- cbind(beta, model$beta)
+        meta[[length(meta) + 1L]] <- data.frame(
+          s = rep(sVal, length(model$lambda)),
+          lambda0 = rep(l0Val, length(model$lambda)),
+          lambda = model$lambda, fbeta = model$fbeta,
+          stringsAsFactors = FALSE)
+      }
+      list(beta = beta, meta = do.call(rbind, meta))
+    })
+}
+
+# Stamp the method-specific selection attribute onto the chosen coefficient vector.
+# @noRd
+.rssFinalize <- function(method, bestBeta, sel, meta, config) {
+  base <- c(mode = sel$mode, index = sel$index)
+  attr(bestBeta, if (method == "lassosum") "lassosum_selection"
+                 else "penalized_rss_selection") <- switch(method,
+    lassosum  = c(base, s = meta$s[sel$index], lambda = meta$lambda[sel$index]),
+    penalized = c(base, penalty = config$penalty,
+                  s = meta$s[sel$index], lambda = meta$lambda[sel$index]),
+    l0learn   = c(base, penalty = config$penalty,
+                  s = meta$s[sel$index], lambda0 = meta$lambda0[sel$index],
+                  lambda = meta$lambda[sel$index]))
+  bestBeta
+}
+
 # Shared scaffold for the RSS shrinkage-grid weight functions
 # (lassosumRssWeights / .penalizedRssWeights / l0learnRssWeights). Standardizes
 # the stat -> solverInput conversion, the outer LD-shrinkage grid over `s`, the
-# candidate accumulation, and the ld_quadratic / min_fbeta selection. `fitOne`
-# supplies the per-`s` fit as list(beta, meta); any inner grid (e.g. l0learn's
-# lambda0 sweep) lives inside it. `finalize` stamps the function-specific
-# selection attribute onto the returned coefficient vector.
-.rssShrinkGridWeights <- function(stat, LD, s, fitOne, finalize,
+# candidate accumulation, and the ld_quadratic / min_fbeta selection. `method` +
+# `config` pick the per-`s` solver (.rssFitOne) and the finalizer (.rssFinalize).
+.rssShrinkGridWeights <- function(stat, LD, s, method, config,
                                   selection = c("ld_quadratic", "min_fbeta")) {
   selection <- match.arg(selection)
   n <- median(stat$n)
@@ -1024,7 +1081,7 @@ lassosumRss <- function(bhat, R, n,
   candidateMeta <- list()
   for (sVal in s) {
     LDs <- (1 - sVal) * LD + sVal * diag(p)
-    one <- fitOne(solverInput, LDs, n, sVal)
+    one <- .rssFitOne(method, solverInput, LDs, n, sVal, config)
     candidateBeta <- cbind(candidateBeta, one$beta)
     candidateMeta[[length(candidateMeta) + 1L]] <- one$meta
   }
@@ -1035,7 +1092,7 @@ lassosumRss <- function(bhat, R, n,
     .lassosumSelectMinFbeta(candidateBeta, candidateMeta)
   }
   bestBeta <- as.numeric(selectorResult$beta)
-  finalize(bestBeta, selectorResult, candidateMeta)
+  .rssFinalize(method, bestBeta, selectorResult, candidateMeta, config)
 }
 
 #' Extract weights from lassosumRss with shrinkage grid search
@@ -1073,23 +1130,8 @@ lassosumRssWeights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0),
                                selection = c("ld_quadratic", "min_fbeta"),
                                ...) {
   selection <- match.arg(selection)
-  dotArgs <- list(...)
-  fitOne <- function(solverInput, LDs, n, sVal) {
-    model <- do.call(lassosumRss,
-                     c(list(bhat = solverInput, R = LDs, n = n),
-                       dotArgs))
-    list(beta = model$beta,
-         meta = data.frame(s = rep(sVal, length(model$lambda)),
-                           lambda = model$lambda, fbeta = model$fbeta,
-                           stringsAsFactors = FALSE))
-  }
-  finalize <- function(bestBeta, sel, meta) {
-    attr(bestBeta, "lassosum_selection") <- c(
-      mode = sel$mode, index = sel$index,
-      s = meta$s[sel$index], lambda = meta$lambda[sel$index])
-    bestBeta
-  }
-  .rssShrinkGridWeights(stat, LD, s, fitOne, finalize, selection)
+  .rssShrinkGridWeights(stat, LD, s, "lassosum",
+                        list(dotArgs = list(...)), selection)
 }
 
 #' Penalized Regression on RSS (Summary Statistics) Objective
@@ -1191,24 +1233,10 @@ penalizedRss <- function(bhat, R, n,
                                  selection = c("ld_quadratic", "min_fbeta"),
                                  ...) {
   selection <- match.arg(selection)
-  dotArgs <- list(...)
-  fitOne <- function(solverInput, LDs, n, sVal) {
-    model <- do.call(penalizedRss,
-                     c(list(bhat = solverInput, R = LDs, n = n,
-                            penalty = penalty, gamma = gamma, alpha = alpha,
-                            lambda0 = lambda0, lambda2 = lambda2), dotArgs))
-    list(beta = model$beta,
-         meta = data.frame(s = rep(sVal, length(model$lambda)),
-                           lambda = model$lambda, fbeta = model$fbeta,
-                           stringsAsFactors = FALSE))
-  }
-  finalize <- function(bestBeta, sel, meta) {
-    attr(bestBeta, "penalized_rss_selection") <- c(
-      mode = sel$mode, index = sel$index, penalty = penalty,
-      s = meta$s[sel$index], lambda = meta$lambda[sel$index])
-    bestBeta
-  }
-  .rssShrinkGridWeights(stat, LD, s, fitOne, finalize, selection)
+  .rssShrinkGridWeights(stat, LD, s, "penalized",
+                        list(penalty = penalty, gamma = gamma, alpha = alpha,
+                             lambda0 = lambda0, lambda2 = lambda2,
+                             dotArgs = list(...)), selection)
 }
 
 #' Compute SCAD-Penalized Weights from Summary Statistics
@@ -1307,35 +1335,10 @@ l0learnRssWeights <- function(stat, LD,
     }
   }
 
-  dotArgs <- list(...)
-  # Inner sweep over the lambda0 (L0) path for each shrinkage level; the outer
-  # `s` grid, selection, and bestBeta live in .rssShrinkGridWeights.
-  fitOne <- function(solverInput, LDs, n, sVal) {
-    beta <- NULL
-    meta <- list()
-    for (l0Val in lambda0) {
-      model <- do.call(penalizedRss,
-                       c(list(bhat = solverInput, R = LDs, n = n,
-                              penalty = penalty, lambda = lambda,
-                              lambda0 = l0Val, lambda2 = lambda2,
-                              maxSwaps = maxSwaps), dotArgs))
-      beta <- cbind(beta, model$beta)
-      meta[[length(meta) + 1L]] <- data.frame(
-        s = rep(sVal, length(model$lambda)),
-        lambda0 = rep(l0Val, length(model$lambda)),
-        lambda = model$lambda, fbeta = model$fbeta,
-        stringsAsFactors = FALSE)
-    }
-    list(beta = beta, meta = do.call(rbind, meta))
-  }
-  finalize <- function(bestBeta, sel, meta) {
-    attr(bestBeta, "penalized_rss_selection") <- c(
-      mode = sel$mode, index = sel$index, penalty = penalty,
-      s = meta$s[sel$index], lambda0 = meta$lambda0[sel$index],
-      lambda = meta$lambda[sel$index])
-    bestBeta
-  }
-  .rssShrinkGridWeights(stat, LD, s, fitOne, finalize, selection)
+  .rssShrinkGridWeights(stat, LD, s, "l0learn",
+                        list(penalty = penalty, lambda = lambda, lambda0 = lambda0,
+                             lambda2 = lambda2, maxSwaps = maxSwaps,
+                             dotArgs = list(...)), selection)
 }
 
 #' Compute Weights Using ncvreg with SCAD or MCP Penalty
@@ -1823,34 +1826,37 @@ computeCoefficientsGlasso <- function(X, Y, standardize, nthreads, Xnew = NULL) 
 }
 
 
+# Fit a cv.glmnet for outcome column `i` on its non-missing rows and return the
+# lambda.min coefficients (plus predictions on `Xnew` when supplied).
+# @noRd
+.linreg <- function(i, X, Y, alpha, standardize, nthreads, Xnew) {
+  samplesKept <- which(!is.na(Y[, i]))
+  Ynomiss <- Y[samplesKept, i, drop = FALSE]
+  Xnomiss <- X[samplesKept, , drop = FALSE]
+
+  cvfit <- glmnet::cv.glmnet(
+    x = Xnomiss, y = Ynomiss, family = "gaussian", alpha = alpha,
+    standardize = standardize, parallel = FALSE
+  )
+  coeffic <- as.vector(coef(cvfit, s = "lambda.min"))
+  lambdaSeq <- cvfit$lambda
+
+  # Make predictions if requested
+  if (!is.null(Xnew)) {
+    yhatGlmnet <- drop(predict(cvfit, newx = Xnew, s = "lambda.min"))
+    res <- list(bhat = coeffic, lambda_seq = lambdaSeq, yhat_new = yhatGlmnet)
+  } else {
+    res <- list(bhat = coeffic, lambda_seq = lambdaSeq)
+  }
+
+  return(res)
+}
+
 ### Function to compute coefficients for univariate glmnet
 computeCoefficientsUnivGlmnet <- function(X, Y, alpha, standardize, nthreads, Xnew = NULL) {
   r <- ncol(Y)
 
-  linreg <- function(i, X, Y, alpha, standardize, nthreads, Xnew) {
-    samplesKept <- which(!is.na(Y[, i]))
-    Ynomiss <- Y[samplesKept, i, drop = FALSE]
-    Xnomiss <- X[samplesKept, , drop = FALSE]
-
-    cvfit <- glmnet::cv.glmnet(
-      x = Xnomiss, y = Ynomiss, family = "gaussian", alpha = alpha,
-      standardize = standardize, parallel = FALSE
-    )
-    coeffic <- as.vector(coef(cvfit, s = "lambda.min"))
-    lambdaSeq <- cvfit$lambda
-
-    # Make predictions if requested
-    if (!is.null(Xnew)) {
-      yhatGlmnet <- drop(predict(cvfit, newx = Xnew, s = "lambda.min"))
-      res <- list(bhat = coeffic, lambda_seq = lambdaSeq, yhat_new = yhatGlmnet)
-    } else {
-      res <- list(bhat = coeffic, lambda_seq = lambdaSeq)
-    }
-
-    return(res)
-  }
-
-  out <- lapply(1:r, linreg, X, Y, alpha, standardize, nthreads, Xnew)
+  out <- lapply(1:r, .linreg, X, Y, alpha, standardize, nthreads, Xnew)
 
   Bhat <- sapply(out, "[[", "bhat")
 

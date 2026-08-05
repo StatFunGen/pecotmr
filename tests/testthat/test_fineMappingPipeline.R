@@ -477,16 +477,16 @@ test_that("combineFineMappingResults: row-binds same-class collections; rejects 
 })
 
 # ===========================================================================
-# .fmExtractZN
+# .fmExtractZn
 # ===========================================================================
 
-test_that(".fmExtractZN: errors on missing SNP / Z / N columns", {
+test_that(".fmExtractZn: errors on missing SNP / Z / N columns", {
   gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100, 100))
-  expect_error(pecotmr:::.fmExtractZN(gr, "x"), "no SNP mcol")
+  expect_error(pecotmr:::.fmExtractZn(gr, "x"), "no SNP mcol")
   S4Vectors::mcols(gr)$SNP <- "v1"
-  expect_error(pecotmr:::.fmExtractZN(gr, "x"), "no Z mcol")
+  expect_error(pecotmr:::.fmExtractZn(gr, "x"), "no Z mcol")
   S4Vectors::mcols(gr)$Z <- 1.0
-  expect_error(pecotmr:::.fmExtractZN(gr, "x"), "no N mcol")
+  expect_error(pecotmr:::.fmExtractZn(gr, "x"), "no N mcol")
 })
 
 # ===========================================================================

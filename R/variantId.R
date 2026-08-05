@@ -288,6 +288,23 @@ variantIdToDf <- function(variantId) {
   parseVariantId(variantId)
 }
 
+# Complement a DNA allele string (A<->T, C<->G) for strand flipping.
+# @noRd
+.strandFlip <- function(ref) chartr("ATCG", "TAGC", ref)
+
+# Ensure a data.frame has unique, non-empty column names (blanks become
+# `unnamed_<i>`, duplicates de-duplicated with make.unique).
+# @noRd
+.sanitizeNames <- function(df) {
+  nm <- colnames(df)
+  if (is.null(nm)) nm <- rep("unnamed", ncol(df))
+  emptyIdx <- is.na(nm) | nm == ""
+  if (any(emptyIdx))
+    nm[emptyIdx] <- paste0("unnamed_", seq_len(sum(emptyIdx)))
+  colnames(df) <- make.unique(nm, sep = "_")
+  df
+}
+
 #' Harmonize variant alleles against a reference
 #'
 #' The allele-harmonization engine for the package (used by summary-statistics
@@ -343,18 +360,6 @@ harmonizeAlleles <- function(targetData, refVariants, colToFlip = NULL,
                            removeStrandAmbiguous = TRUE,
                            removeDups = FALSE,
                            colToComplement = character(), ...) {
-  strandFlip <- function(ref) chartr("ATCG", "TAGC", ref)
-
-  sanitizeNames <- function(df) {
-    nm <- colnames(df)
-    if (is.null(nm)) nm <- rep("unnamed", ncol(df))
-    emptyIdx <- is.na(nm) | nm == ""
-    if (any(emptyIdx))
-      nm[emptyIdx] <- paste0("unnamed_", seq_len(sum(emptyIdx)))
-    colnames(df) <- make.unique(nm, sep = "_")
-    df
-  }
-
   if (is.data.frame(targetData)) {
     if (ncol(targetData) > 4 &&
         all(c("chrom", "pos", "A2", "A1") %in% names(targetData))) {
@@ -385,7 +390,7 @@ harmonizeAlleles <- function(targetData, refVariants, colToFlip = NULL,
                             by = c("chrom", "pos"),
                             suffix = c(".target", ".ref")) %>%
                  as.data.frame() %>%
-                 sanitizeNames()
+                 .sanitizeNames()
 
   if (nrow(matchResult) == 0) {
     warning("No matching variants found between target data and reference variants.")
@@ -401,8 +406,8 @@ harmonizeAlleles <- function(targetData, refVariants, colToFlip = NULL,
     mutate(variants_id_original = formatVariantId(chrom, pos, A2.target, A1.target),
            variants_id_qced     = formatVariantId(chrom, pos, A2.ref, A1.ref)) %>%
     mutate(across(c(A1.target, A2.target, A1.ref, A2.ref), toupper)) %>%
-    mutate(flip1.ref = strandFlip(A1.ref),
-           flip2.ref = strandFlip(A2.ref)) %>%
+    mutate(flip1.ref = .strandFlip(A1.ref),
+           flip2.ref = .strandFlip(A2.ref)) %>%
     # AT / CG pairs cannot be distinguished from strand-flip without external
     # context; the keep rule below relies on this flag as a safety guard for
     # callers that may not have removed strand-ambiguous variants upstream.
@@ -467,8 +472,8 @@ harmonizeAlleles <- function(targetData, refVariants, colToFlip = NULL,
   }
   if (flipStrand) {
     sIdx <- which(matchResult$strand_flip)
-    matchResult[sIdx, "A1.target"] <- strandFlip(matchResult[sIdx, "A1.target"])
-    matchResult[sIdx, "A2.target"] <- strandFlip(matchResult[sIdx, "A2.target"])
+    matchResult[sIdx, "A1.target"] <- .strandFlip(matchResult[sIdx, "A1.target"])
+    matchResult[sIdx, "A2.target"] <- .strandFlip(matchResult[sIdx, "A2.target"])
   }
 
   # Per-step QC counts (used by .runEntrySummaryStatsQc for "kept N of M
@@ -544,6 +549,15 @@ harmonizeAlleles <- function(targetData, refVariants, colToFlip = NULL,
   out
 }
 
+# Canonical per-id key for allele-aware matching: data.frame -> chrom/pos/A2/A1
+# formatted id (keeps allele order, so a ref/alt swap does NOT match); character
+# vector -> normalized id.
+# @noRd
+.matchVariantKeyOf <- function(x) if (is.data.frame(x)) {
+  p <- parseVariantId(x)
+  formatVariantId(p$chrom, p$pos, p$A2, p$A1)
+} else normalizeVariantId(x)
+
 #' Allele-aware variant matcher (match by chrom/pos/ref/alt, not id string)
 #'
 #' The single matching primitive for the package: given two sets of variant
@@ -584,11 +598,7 @@ matchVariants <- function(idsA, idsB, allowFlip = TRUE,
     # Exact-allele matching: canonicalize the id FORMAT (chr-prefix + separator,
     # rsID-safe) but keep allele order, then match by exact string identity, so
     # a ref/alt swap does NOT match (sign is always +1).
-    keyOf <- function(x) if (is.data.frame(x)) {
-        p <- parseVariantId(x)
-        formatVariantId(p$chrom, p$pos, p$A2, p$A1)
-      } else normalizeVariantId(x)
-    idxB <- match(keyOf(idsA), keyOf(idsB))
+    idxB <- match(.matchVariantKeyOf(idsA), .matchVariantKeyOf(idsB))
     matched <- which(!is.na(idxB))
     return(list(idxA = matched, idxB = idxB[matched],
                 sign = rep(1, length(matched))))

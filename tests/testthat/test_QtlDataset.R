@@ -61,18 +61,18 @@ context("QtlDataset internal helpers")
 }
 
 # ===========================================================================
-# .qtlResidualizeQR — pure linear algebra
+# .qtlResidualizeQr — pure linear algebra
 # ===========================================================================
 
-test_that(".qtlResidualizeQR: intercept-only residualization centers Y", {
+test_that(".qtlResidualizeQr: intercept-only residualization centers Y", {
   set.seed(0)
   Y <- matrix(rnorm(20) + 5, nrow = 10, ncol = 2)
-  res <- pecotmr:::.qtlResidualizeQR(Y, C = NULL, scaleResiduals = FALSE)
+  res <- pecotmr:::.qtlResidualizeQr(Y, C = NULL, scaleResiduals = FALSE)
   # After removing the intercept, columns should have zero mean.
   expect_equal(unname(colMeans(res)), c(0, 0), tolerance = 1e-10)
 })
 
-test_that(".qtlResidualizeQR: covariate residualization removes the covariate signal", {
+test_that(".qtlResidualizeQr: covariate residualization removes the covariate signal", {
   set.seed(1)
   n <- 50
   C <- matrix(rnorm(n * 2), nrow = n, ncol = 2,
@@ -80,7 +80,7 @@ test_that(".qtlResidualizeQR: covariate residualization removes the covariate si
   # Y = 0.5 * c1 - 0.3 * c2 + noise
   Y <- matrix(0.5 * C[, 1] - 0.3 * C[, 2] + rnorm(n, sd = 0.1),
               nrow = n, ncol = 1)
-  res <- pecotmr:::.qtlResidualizeQR(Y, C = C, scaleResiduals = FALSE)
+  res <- pecotmr:::.qtlResidualizeQr(Y, C = C, scaleResiduals = FALSE)
   # Residuals should be near-zero (only contain the noise).
   expect_lt(max(abs(res)), 0.5)
   # And uncorrelated with the covariates.
@@ -88,22 +88,22 @@ test_that(".qtlResidualizeQR: covariate residualization removes the covariate si
   expect_lt(abs(cor(res[, 1], C[, 2])), 1e-8)
 })
 
-test_that(".qtlResidualizeQR: scaleResiduals = TRUE gives unit variance per column", {
+test_that(".qtlResidualizeQr: scaleResiduals = TRUE gives unit variance per column", {
   set.seed(2)
   Y <- matrix(rnorm(30), nrow = 10, ncol = 3)
-  res <- pecotmr:::.qtlResidualizeQR(Y, C = NULL, scaleResiduals = TRUE)
+  res <- pecotmr:::.qtlResidualizeQr(Y, C = NULL, scaleResiduals = TRUE)
   sds <- apply(res, 2, sd)
   expect_equal(sds, c(1, 1, 1), tolerance = 1e-10)
 })
 
-test_that(".qtlResidualizeQR: constant residual columns survive the rescale step", {
+test_that(".qtlResidualizeQr: constant residual columns survive the rescale step", {
   # Y is exactly its own mean -> residuals are 0, sd is 0 (and clamped to 1).
   Y <- matrix(5, nrow = 5, ncol = 1)
-  res <- pecotmr:::.qtlResidualizeQR(Y, C = NULL, scaleResiduals = TRUE)
+  res <- pecotmr:::.qtlResidualizeQr(Y, C = NULL, scaleResiduals = TRUE)
   expect_true(all(abs(res) < 1e-10))
 })
 
-test_that(".qtlResidualizeQR: rank-deficient covariates are dropped by pivoted QR", {
+test_that(".qtlResidualizeQr: rank-deficient covariates are dropped by pivoted QR", {
   set.seed(3)
   n <- 30
   c1 <- rnorm(n)
@@ -111,7 +111,7 @@ test_that(".qtlResidualizeQR: rank-deficient covariates are dropped by pivoted Q
               dimnames = list(NULL, c("a", "b", "c")))
   Y <- matrix(rnorm(n), nrow = n, ncol = 1)
   # Even though `a` and `b` are collinear, the QR should not error.
-  expect_no_error(pecotmr:::.qtlResidualizeQR(Y, C = C, scaleResiduals = FALSE))
+  expect_no_error(pecotmr:::.qtlResidualizeQr(Y, C = C, scaleResiduals = FALSE))
 })
 
 # ===========================================================================
@@ -931,7 +931,7 @@ test_that("getResidualizedGenotypes: produces residualized matrix shape", {
   expect_equal(nrow(G), 12L)
   expect_equal(ncol(G), 6L)
   # When scaleResiduals = TRUE (the default), kept columns should have unit sd
-  # (constant columns are clamped to zero in .qtlResidualizeQR).
+  # (constant columns are clamped to zero in .qtlResidualizeQr).
   sds <- apply(G, 2L, sd)
   nonZero <- sds > 1e-6
   expect_true(all(abs(sds[nonZero] - 1) < 1e-6))

@@ -644,7 +644,7 @@ test_that(".enumCrossContextIndividual: one group per trait in >= 2 contexts", {
                 traits = list(S = c("G1", "G2")))
   local_mocked_bindings(
     getStudy = function(data) "S",
-    .buildIndividualCrossContextXY = function(data, tid, scopedContexts,
+    .buildIndividualCrossContextXy = function(data, tid, scopedContexts,
                                               cisWindow, verbose, label,
                                               region = NULL) {
       if (tid == "G2") return(NULL)                       # skip branch (461)
@@ -704,7 +704,7 @@ test_that(".enumCrossTraitIndividual: one group per context with >= 2 traits + p
                 traits = list(S = c("G1", "G2")))
   local_mocked_bindings(
     getStudy = function(data) "S",
-    .buildIndividualCrossTraitXY = function(data, cx, scopedTraits, cisWindow,
+    .buildIndividualCrossTraitXy = function(data, cx, scopedTraits, cisWindow,
                                             verbose, label, study,
                                             region = NULL) {
       if (cx == "c2") return(NULL)                        # skip branch (511)
@@ -766,7 +766,7 @@ test_that(".enumComposedIndividual: one group joining every (context, trait) tup
                 traits = list(S = c("gA", "gB")))
   local_mocked_bindings(
     getStudy = function(data) "S",
-    .buildComposedIndividualXY = function(data, scope, study, cisWindow,
+    .buildComposedIndividualXy = function(data, scope, study, cisWindow,
                                           verbose, label, region = NULL) {
       Y <- matrix(0, 4, 3, dimnames = list(paste0("s", 1:4),
                                            c("c1:gA", "c1:gB", "c2:gA")))
@@ -782,7 +782,7 @@ test_that(".enumComposedIndividual: one group joining every (context, trait) tup
 
 test_that(".enumComposedIndividual: study not in scope / NULL xy -> empty", {
   local_mocked_bindings(getStudy = function(data) "S",
-    .buildComposedIndividualXY = function(...) NULL, .package = "pecotmr")
+    .buildComposedIndividualXy = function(...) NULL, .package = "pecotmr")
   expect_length(pecotmr:::.enumComposedIndividual(
     NULL, list(studies = "X")), 0L)                       # study not in scope
   expect_length(pecotmr:::.enumComposedIndividual(
@@ -1109,8 +1109,8 @@ test_that(".twasFmHandoffCv: a token absent from the FM CV predictions -> NULL",
   expect_null(pecotmr:::.twasFmHandoffCv(NULL, "mvsusie"))
 })
 
-test_that("construct: empty rows -> NULL for both pipelines", {
-  empty <- pecotmr:::.jointRows()
+test_that("construct: empty records -> NULL for both pipelines", {
+  empty <- list()
   expect_null(pecotmr:::construct(new("FmJointPipeline", config = list()), empty))
   expect_null(pecotmr:::construct(new("TwasJointPipeline", config = list()), empty))
 })

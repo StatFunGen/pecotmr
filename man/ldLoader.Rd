@@ -41,8 +41,8 @@ default).}
 blocks larger than this to control memory usage.}
 }
 \value{
-A function \code{loader(g)} that, given a block index \code{g},
-  returns the corresponding LD matrix or genotype matrix.
+An \code{ldLoaderSpec} object (an opaque list describing the source).
+  Pass it with a block index to \code{\link{loadLdBlock}} to load one block.
 }
 \description{
 Constructs a loader function that retrieves per-block LD matrices on
@@ -69,8 +69,11 @@ Four modes are supported:
 # List mode with pre-computed LD
 R1 <- diag(10)
 R2 <- diag(15)
-loader <- ldLoader(rList = list(R1, R2))
-loader(1)  # returns R1
-loader(2)  # returns R2
+spec <- ldLoader(rList = list(R1, R2))
+loadLdBlock(spec, 1)  # returns R1
+loadLdBlock(spec, 2)  # returns R2
 
+}
+\seealso{
+\code{\link{loadLdBlock}}
 }

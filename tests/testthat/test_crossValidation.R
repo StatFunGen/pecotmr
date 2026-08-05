@@ -10,7 +10,7 @@ cv <- function(...) pecotmr:::.crossValidateWeights(...)
 
 # One "mock" method whose weights are all 1s over the training columns, so a
 # held-out prediction is the row sum of that sample's (training-column) dosages.
-mock_fit_fold <- function(Xtr, Ytr, j) {
+mock_fit_fold <- function(Xtr, Ytr, j, ...) {
   list(weights = list(mock = matrix(1, ncol(Xtr), ncol(Ytr),
                                     dimnames = list(colnames(Xtr), NULL))),
        fits = list())
@@ -111,7 +111,7 @@ test_that("a degenerate fold (empty train/test) is skipped, not errored", {
 
 test_that("zero-variance predictions yield NA metrics with a message", {
   d <- mk_xy()
-  zero_fit <- function(Xtr, Ytr, j) {
+  zero_fit <- function(Xtr, Ytr, j, ...) {
     list(weights = list(mock = matrix(0, ncol(Xtr), ncol(Ytr),
                                       dimnames = list(colnames(Xtr), NULL))),
          fits = list())
@@ -134,7 +134,7 @@ test_that("the parallel fold path matches the serial one", {
 
 test_that("retainFits collects per-fold fits only when requested", {
   d <- mk_xy()
-  fit_with_model <- function(Xtr, Ytr, j) {
+  fit_with_model <- function(Xtr, Ytr, j, ...) {
     list(weights = list(mock = matrix(1, ncol(Xtr), ncol(Ytr),
                                       dimnames = list(colnames(Xtr), NULL))),
          fits = list(mock = list(fold = j)))
@@ -164,7 +164,7 @@ test_that("maxNumVariants subsamples from variantsToKeep when it already exceeds
 
 test_that("a NULL per-method weight matrix yields an all-NA prediction, not an error", {
   d <- mk_xy()
-  fit_with_null <- function(Xtr, Ytr, j)
+  fit_with_null <- function(Xtr, Ytr, j, ...)
     list(weights = list(
            mock  = matrix(1, ncol(Xtr), ncol(Ytr),
                           dimnames = list(colnames(Xtr), NULL)),

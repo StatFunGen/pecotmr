@@ -213,6 +213,14 @@
   rep(NA, n)
 }
 
+# First existing value for column `cn` across `parts` (a type exemplar used for
+# NA-filling); NULL if no part has it.
+# @noRd
+.exemplarColumn <- function(cn, parts) {
+  for (p in parts) if (cn %in% names(p)) return(p[[cn]])
+  NULL # nocov  (unreachable: cn is always drawn from allCols, so some part has it)
+}
+
 # Internal: row-bind two or more per-tuple collection objects (TwasWeights /
 # FineMappingResult subclasses), carrying forward EVERY column. Columns are
 # unioned, and a collection lacking an optional column (e.g. jointContexts or
@@ -225,13 +233,9 @@
   if (length(parts) == 0L) return(NULL)
   cls     <- class(parts[[1L]])[[1L]]
   allCols <- Reduce(union, lapply(parts, names))
-  exemplar <- function(cn) {
-    for (p in parts) if (cn %in% names(p)) return(p[[cn]])
-    NULL # nocov  (unreachable: cn is always drawn from allCols, so some part has it)
-  }
   combined <- lapply(allCols, function(cn) {
     pieces <- lapply(parts, function(p)
-      if (cn %in% names(p)) p[[cn]] else .naLikeColumn(exemplar(cn), nrow(p)))
+      if (cn %in% names(p)) p[[cn]] else .naLikeColumn(.exemplarColumn(cn, parts), nrow(p)))
     suppressWarnings(do.call(c, pieces))  # GRanges concat may warn on seqinfo
   })
   names(combined) <- allCols

@@ -137,7 +137,7 @@ setGeneric("getN", function(x, ...) standardGeneric("getN"))
 #' @description Extract the association p-value vector from a
 #'   \code{GwasSumStats} or \code{QtlSumStats} entry, selected by its identity
 #'   tuple. Part of the first-class summary-statistic column set alongside
-#'   \code{\link{getZ}} / \code{\link{getBeta}} / \code{\link{getSE}}.
+#'   \code{\link{getZ}} / \code{\link{getBeta}} / \code{\link{getSe}}.
 #' @param x A \code{GwasSumStats} or \code{QtlSumStats} object.
 #' @param ... Class-specific selection arguments.
 #' @return Numeric vector of p-values, or \code{NULL} if not available.
@@ -162,7 +162,7 @@ setGeneric("getBeta", function(x, ...) standardGeneric("getBeta"))
 #' @param ... Class-specific selection arguments.
 #' @return Numeric vector of standard errors, or \code{NULL} if not available.
 #' @export
-setGeneric("getSE", function(x, ...) standardGeneric("getSE"))
+setGeneric("getSe", function(x, ...) standardGeneric("getSe"))
 
 #' @title Get Minor Allele Frequencies
 #' @description Extract MAF vector from a GwasSumStats object.
@@ -1000,12 +1000,13 @@ setGeneric("getH2", function(x) standardGeneric("getH2"))
 setGeneric("fitJointGroup",
   function(group, pipeline, token, args) standardGeneric("fitJointGroup"))
 
-# construct(pipeline, rows) -- assemble the per-pipeline result collection
-# (QtlFineMappingResult vs TwasWeights) from accumulated joint rows. The joint
-# row identity (which axes collapse to "joint" + jointStudies/Contexts/Traits)
-# is derived from each group's `conditions` by the rows accumulator.
+# construct(pipeline, records) -- assemble the per-pipeline result collection
+# (QtlFineMappingResult vs TwasWeights) from the driver's list of per-row
+# records. The joint row identity (which axes collapse to "joint" +
+# jointStudies/Contexts/Traits) is carried on each record, derived from each
+# group's `conditions`.
 setGeneric("construct",
-  function(pipeline, rows, ...) standardGeneric("construct"))
+  function(pipeline, records, ...) standardGeneric("construct"))
 
 # ---- SldscData accessors ----
 #' @title Get the annotation table from an SldscData

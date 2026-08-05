@@ -637,6 +637,47 @@ computeCsTable <- function(fit, dataX, coverage, csInput = c("X", "Xcorr", "fsus
   cols
 }
 
+# Slice a susie posterior array to the active condition (3-D fit) or coerce a
+# 2-D array to matrix; NULL for a 3-D fit with no conditionIdx.
+# @noRd
+.fmSliceCond <- function(arr, conditionIdx) {
+  if (is.null(arr)) return(NULL)
+  if (length(dim(arr)) == 3L) {
+    if (is.null(conditionIdx)) return(NULL)
+    return(as.matrix(arr[, , conditionIdx]))
+  }
+  as.matrix(arr)
+}
+
+# Per-variant CS index at coverage `targetCov` (0 = not in any CS; on overlap the
+# smallest cs_idx wins).
+# @noRd
+.fmCsIdxAtCoverage <- function(targetCov, coverageValues, csTables, nV) {
+  out <- integer(nV)
+  hit <- which(abs(coverageValues - targetCov) < 1e-12)
+  if (length(hit) == 0L) return(out)
+  sets <- csTables[[hit[1L]]]$sets$cs
+  if (is.null(sets) || length(sets) == 0L) return(out)
+  for (csIdx in seq_along(sets)) {
+    vi <- as.integer(sets[[csIdx]])
+    vi <- vi[vi >= 1L & vi <= nV & out[vi] == 0L]
+    out[vi] <- csIdx
+  }
+  out
+}
+
+# Per-variant CS purity (min.abs.corr) at coverage `targetCov`; 0 for non-CS
+# variants.
+# @noRd
+.fmPurityAtCoverage <- function(targetCov, idxVec, coverageValues, csTables) {
+  h <- which(abs(coverageValues - targetCov) < 1e-12)
+  pv <- if (length(h) > 0L) .csPurityVec(csTables[[h[1L]]]) else numeric()
+  vapply(idxVec, function(i) {
+    if (i <= 0L || i > length(pv)) return(0)
+    v <- pv[i]; if (is.na(v)) 0 else as.numeric(v)
+  }, numeric(1))
+}
+
 buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
                          af = NULL, method, signalCutoff = 0,
                          dataX = NULL, dataY = NULL,
@@ -670,16 +711,8 @@ buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
   # (the per-context-row representation). conditionIdx = NULL keeps the 2-D path
   # (univariate); a 3-D fit without a conditionIdx leaves posterior NA.
   alpha <- as.matrix(fit$alpha)
-  sliceCond <- function(arr) {
-    if (is.null(arr)) return(NULL)
-    if (length(dim(arr)) == 3L) {
-      if (is.null(conditionIdx)) return(NULL)
-      return(as.matrix(arr[, , conditionIdx]))
-    }
-    as.matrix(arr)
-  }
-  mu  <- sliceCond(fit$mu)
-  mu2 <- sliceCond(fit$mu2)
+  mu  <- .fmSliceCond(fit$mu, conditionIdx)
+  mu2 <- .fmSliceCond(fit$mu2, conditionIdx)
   postMean <- if (!is.null(mu) && all(dim(alpha) == dim(mu))) {
     colSums(alpha * mu)
   } else rep(NA_real_, length(variantNames))
@@ -732,31 +765,10 @@ buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
   # Per-coverage CS membership: for each variant, which CS at each
   # coverage level (cs_idx, or 0 if not in any). If a variant belongs
   # to multiple CSs at a given coverage, the smallest cs_idx wins.
-  csIdxAtCoverage <- function(targetCov) {
-    out <- integer(nV)
-    hit <- which(abs(coverageValues - targetCov) < 1e-12)
-    if (length(hit) == 0L) return(out)
-    sets <- csTables[[hit[1L]]]$sets$cs
-    if (is.null(sets) || length(sets) == 0L) return(out)
-    for (csIdx in seq_along(sets)) {
-      vi <- as.integer(sets[[csIdx]])
-      vi <- vi[vi >= 1L & vi <= nV & out[vi] == 0L]
-      out[vi] <- csIdx
-    }
-    out
-  }
   # Per-variant CS purity at a coverage (0 for non-CS variants). Purity
   # (min.abs.corr) is a CS-quality measure, independent of the coverage
   # (confidence) level; the accessors expose an independent `minPurity` filter
   # over these columns.
-  purityAtCoverage <- function(targetCov, idxVec) {
-    h <- which(abs(coverageValues - targetCov) < 1e-12)
-    pv <- if (length(h) > 0L) .csPurityVec(csTables[[h[1L]]]) else numeric()
-    vapply(idxVec, function(i) {
-      if (i <= 0L || i > length(pv)) return(0)
-      v <- pv[i]; if (is.na(v)) 0 else as.numeric(v)
-    }, numeric(1))
-  }
   # Derive CS membership + purity for EVERY coverage the pipeline actually
   # produced (attr(csTables, "coverage")), rather than assuming fixed
   # 0.95/0.70/0.50 levels — otherwise a non-default secondaryCoverage would be
@@ -764,8 +776,11 @@ buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
   # names match getCs's `cs_<coverage*100>` lookup.
   covSorted     <- sort(unique(coverageValues[is.finite(coverageValues)]),
                         decreasing = TRUE)
-  csIdxByCov    <- lapply(covSorted, csIdxAtCoverage)
-  csPurityByCov <- Map(purityAtCoverage, covSorted, csIdxByCov)
+  csIdxByCov    <- lapply(covSorted, .fmCsIdxAtCoverage, coverageValues, csTables, nV)
+  csPurityByCov <- mapply(.fmPurityAtCoverage, covSorted, csIdxByCov,
+                          MoreArgs = list(coverageValues = coverageValues,
+                                          csTables = csTables),
+                          SIMPLIFY = FALSE)
   csColNames    <- paste0("cs_", covSorted * 100)
 
   # Per-condition posterior conditional effect + local false sign rate for
@@ -1555,6 +1570,18 @@ mvsusieWeights <- function(mvsusieFit = NULL, X = NULL, Y = NULL,
   return(mvsusieR::coef.mvsusie(mvsusieFit)[-1, ])
 }
 
+# One wavelet basis row: inverse-DWT (wr) of the unit coefficient vector e_k,
+# using the fit's template DWT object.
+# @noRd
+.fmReconstructUnit <- function(k, nWac, scaleCols, template) {
+  coeffRow <- numeric(nWac)
+  coeffRow[k] <- 1
+  temp <- template
+  temp$D <- coeffRow[-scaleCols]
+  temp$C[length(temp$C)] <- sum(coeffRow[scaleCols])
+  as.numeric(wavethresh::wr(temp))
+}
+
 # Build the wavelet synthesis (inverse-DWT) matrix S (n_wac x nFeat) for the
 # basis fSuSiE uses, by reconstructing each unit wavelet coefficient through the
 # SAME $D / $C assignment as out_prep.susiF (detail columns -> $D, the coarsest
@@ -1566,15 +1593,7 @@ mvsusieWeights <- function(mvsusieFit = NULL, X = NULL, Y = NULL,
 # @noRd
 .fsusieSynthesisMatrix <- function(nWac, scaleCols) {
   template <- wavethresh::wd(rep(0, nWac))
-  reconstructUnit <- function(k) {
-    coeffRow <- numeric(nWac)
-    coeffRow[k] <- 1
-    temp <- template
-    temp$D <- coeffRow[-scaleCols]
-    temp$C[length(temp$C)] <- sum(coeffRow[scaleCols])
-    as.numeric(wavethresh::wr(temp))
-  }
-  do.call(rbind, lapply(seq_len(nWac), reconstructUnit))
+  do.call(rbind, lapply(seq_len(nWac), .fmReconstructUnit, nWac, scaleCols, template))
 }
 
 #' Compute fSuSiE feature-level TWAS weights
@@ -1769,6 +1788,141 @@ mvsusieRssWeights <- function(stat, LD, mvsusieRssFit = NULL,
 # Cross-condition credible-set merging
 # =============================================================================
 
+# Identify variant IDs that are associated with more than one credible set.
+# @noRd
+.identifyOverlapSets <- function(variantsSetsAndPipsList) {
+  overlapSets <- list()
+  for (variantId in names(variantsSetsAndPipsList)) {
+    sets <- variantsSetsAndPipsList[[variantId]][["sets"]]
+    if (length(sets) > 1) {
+      overlapSets[[variantId]] <- sets
+    }
+  }
+  return(overlapSets)
+}
+
+# Union-find root of `x` following the `parent` map.
+# @noRd
+.ufFindRoot <- function(x, parent) {
+  while (!identical(parent[[x]], x)) x <- parent[[x]]
+  x
+}
+
+# Union-find merge of `a` and `b` in `parent`; returns the updated parent map.
+# @noRd
+.ufUnion <- function(a, b, parent) {
+  rootA <- .ufFindRoot(a, parent)
+  rootB <- .ufFindRoot(b, parent)
+  if (!identical(rootA, rootB)) parent[[rootB]] <- rootA
+  parent
+}
+
+# Merge overlapping credible sets using connected components (union-find).
+# @noRd
+.mergeAndUpdateOverlapSets <- function(variantsSetsAndPipsList, overlapSets) {
+  allSets <- unique(unlist(overlapSets))
+  if (length(allSets) == 0) return(list())
+
+  parent <- setNames(allSets, allSets)
+  for (sets in overlapSets) {
+    if (length(sets) > 1) {
+      for (s in sets[-1]) parent <- .ufUnion(sets[[1]], s, parent)
+    }
+  }
+
+  components <- split(names(parent),
+                      vapply(names(parent), .ufFindRoot, character(1), parent))
+  setNameMap <- list()
+  for (members in components) {
+    label <- paste(sort(members), collapse = ",")
+    for (s in members) {
+      setNameMap[[s]] <- label
+    }
+  }
+
+  # Update each variant's credible set names
+  updatedCredibleSets <- lapply(
+    setNames(names(variantsSetsAndPipsList), names(variantsSetsAndPipsList)),
+    function(variantId) {
+      currentSets <- variantsSetsAndPipsList[[variantId]][["sets"]]
+      mapped <- intersect(currentSets, names(setNameMap))
+      if (length(mapped) > 0) {
+        setNameMap[[mapped[1]]]
+      } else {
+        paste(sort(unique(currentSets)), collapse = ",")
+      }
+    }
+  )
+  return(updatedCredibleSets)
+}
+
+# Collapse the per-variant extracted-CS map into a top-loci data frame: merge
+# overlapping credible sets, then one row per variant with its merged CS label,
+# max PIP and median PIP.
+# @noRd
+.combineTopLoci <- function(extractedResult) {
+  if (length(extractedResult) == 0) return(NULL)
+
+  overlapSets <- .identifyOverlapSets(extractedResult)
+  hasOverlaps <- length(overlapSets) != 0
+  mergedSets <- if (hasOverlaps) {
+    .mergeAndUpdateOverlapSets(extractedResult, overlapSets = overlapSets)
+  } else {
+    NULL
+  }
+
+  topLociDf <- do.call(rbind, lapply(names(extractedResult), function(variantId) {
+    maxPip <- max(unlist(extractedResult[[variantId]]$pips))
+    medianPip <- median(unlist(extractedResult[[variantId]]$pips))
+    credibleSetNames <- if (hasOverlaps) {
+      mergedSets[[variantId]]
+    } else {
+      paste(sort(unique(unlist(extractedResult[[variantId]]$sets))), collapse = ",")
+    }
+    data.frame(
+      variant_id = variantId, credibleSetNames = credibleSetNames,
+      maxPip = maxPip, medianPip = medianPip, stringsAsFactors = FALSE
+    )
+  }))
+  return(topLociDf)
+}
+
+# Build the per-variant extracted-CS map from a fine-mapping result: for each
+# entry, one record per (variant, credible set) labelled cs_<entry>_<set>,
+# aggregated by variant preserving first-seen order.
+# @noRd
+.fmExtractTopLoci <- function(fineMappingResult, csCol) {
+  entries <- fineMappingResult$entry
+  rows <- map_dfr(seq_along(entries), function(i) {
+    topLoci <- .translateLegacyTopLociCsColumns(getTopLoci(entries[[i]]))
+    if (is.null(topLoci) || nrow(topLoci) == 0 || !(csCol %in% names(topLoci)))
+      return(NULL)
+    pipCol <- resolvePipColumn(topLoci)
+    if (is.null(pipCol)) return(NULL)
+    csIdx <- .fmCsIdx(topLoci[[csCol]])
+    setNum <- unique(csIdx)
+    setNum <- setNum[!is.na(setNum) & setNum != 0]
+    if (length(setNum) == 0) return(NULL)
+
+    map_dfr(setNum, function(sn) {
+      keep <- !is.na(csIdx) & csIdx == sn
+      df <- topLoci[keep, c("variant_id", pipCol), drop = FALSE]
+      names(df)[names(df) == pipCol] <- "pip"
+      df$set_name <- paste0("cs_", i, "_", sn)
+      df
+    })
+  })
+
+  if (is.null(rows) || nrow(rows) == 0) return(list())
+
+  # Aggregate by variant_id preserving first-seen order.
+  seenOrder <- unique(rows$variant_id)
+  splitRows <- split(rows, factor(rows$variant_id, levels = seenOrder))
+  lapply(splitRows, function(df) {
+    list(sets = df$set_name, pips = df$pip)
+  })
+}
+
 #' Merge SuSiE credible sets across conditions
 #'
 #' Reconciles per-condition (univariate) SuSiE fine-mapping into a single set of
@@ -1802,129 +1956,12 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
   }
   csCol <- paste0("cs_", as.integer(round(coverage * 100)))
 
-  # Identify variant IDs that are associated with more than one credible set.
-  identifyOverlapSets <- function(variantsSetsAndPipsList) {
-    overlapSets <- list()
-    for (variantId in names(variantsSetsAndPipsList)) {
-      sets <- variantsSetsAndPipsList[[variantId]][["sets"]]
-      if (length(sets) > 1) {
-        overlapSets[[variantId]] <- sets
-      }
-    }
-    return(overlapSets)
-  }
-  # Merge overlapping credible sets using connected components.
-  mergeAndUpdateOverlapSets <- function(variantsSetsAndPipsList, overlapSets) {
-    allSets <- unique(unlist(overlapSets))
-    if (length(allSets) == 0) return(list())
-
-    parent <- setNames(allSets, allSets)
-    findRoot <- function(x) {
-      while (!identical(parent[[x]], x)) x <- parent[[x]]
-      x
-    }
-    unionSets <- function(a, b) {
-      rootA <- findRoot(a)
-      rootB <- findRoot(b)
-      if (!identical(rootA, rootB)) parent[[rootB]] <<- rootA
-    }
-
-    for (sets in overlapSets) {
-      if (length(sets) > 1) {
-        for (s in sets[-1]) unionSets(sets[[1]], s)
-      }
-    }
-
-    components <- split(names(parent), vapply(names(parent), findRoot, character(1)))
-    setNameMap <- list()
-    for (members in components) {
-      label <- paste(sort(members), collapse = ",")
-      for (s in members) {
-        setNameMap[[s]] <- label
-      }
-    }
-
-    # Update each variant's credible set names
-    updatedCredibleSets <- lapply(
-      setNames(names(variantsSetsAndPipsList), names(variantsSetsAndPipsList)),
-      function(variantId) {
-        currentSets <- variantsSetsAndPipsList[[variantId]][["sets"]]
-        mapped <- intersect(currentSets, names(setNameMap))
-        if (length(mapped) > 0) {
-          setNameMap[[mapped[1]]]
-        } else {
-          paste(sort(unique(currentSets)), collapse = ",")
-        }
-      }
-    )
-    return(updatedCredibleSets)
-  }
-
   # Each row (entry) of the fine-mapping result is one condition. Build a flat
   # data frame of (variant_id, pip, set_name) across conditions, giving each
   # condition's credible sets a unique "cs_<conditionIdx>_<setIdx>" label.
-  extractTopLoci <- function() {
-    entries <- fineMappingResult$entry
-    rows <- map_dfr(seq_along(entries), function(i) {
-      topLoci <- .translateLegacyTopLociCsColumns(getTopLoci(entries[[i]]))
-      if (is.null(topLoci) || nrow(topLoci) == 0 || !(csCol %in% names(topLoci)))
-        return(NULL)
-      pipCol <- resolvePipColumn(topLoci)
-      if (is.null(pipCol)) return(NULL)
-      csIdx <- .fmCsIdx(topLoci[[csCol]])
-      setNum <- unique(csIdx)
-      setNum <- setNum[!is.na(setNum) & setNum != 0]
-      if (length(setNum) == 0) return(NULL)
-
-      map_dfr(setNum, function(sn) {
-        keep <- !is.na(csIdx) & csIdx == sn
-        df <- topLoci[keep, c("variant_id", pipCol), drop = FALSE]
-        names(df)[names(df) == pipCol] <- "pip"
-        df$set_name <- paste0("cs_", i, "_", sn)
-        df
-      })
-    })
-
-    if (is.null(rows) || nrow(rows) == 0) return(list())
-
-    # Aggregate by variant_id preserving first-seen order.
-    seenOrder <- unique(rows$variant_id)
-    splitRows <- split(rows, factor(rows$variant_id, levels = seenOrder))
-    lapply(splitRows, function(df) {
-      list(sets = df$set_name, pips = df$pip)
-    })
-  }
-
-  combineTopLoci <- function(extractedResult) {
-    if (length(extractedResult) == 0) return(NULL)
-
-    overlapSets <- identifyOverlapSets(extractedResult)
-    hasOverlaps <- length(overlapSets) != 0
-    mergedSets <- if (hasOverlaps) {
-      mergeAndUpdateOverlapSets(extractedResult, overlapSets = overlapSets)
-    } else {
-      NULL
-    }
-
-    topLociDf <- do.call(rbind, lapply(names(extractedResult), function(variantId) {
-      maxPip <- max(unlist(extractedResult[[variantId]]$pips))
-      medianPip <- median(unlist(extractedResult[[variantId]]$pips))
-      credibleSetNames <- if (hasOverlaps) {
-        mergedSets[[variantId]]
-      } else {
-        paste(sort(unique(unlist(extractedResult[[variantId]]$sets))), collapse = ",")
-      }
-      data.frame(
-        variant_id = variantId, credibleSetNames = credibleSetNames,
-        maxPip = maxPip, medianPip = medianPip, stringsAsFactors = FALSE
-      )
-    }))
-    return(topLociDf)
-  }
-
-  extractedTopLoci <- extractTopLoci()
+  extractedTopLoci <- .fmExtractTopLoci(fineMappingResult, csCol)
   if (length(extractedTopLoci) == 0) return(NULL)
-  combinedTopLociDf <- combineTopLoci(extractedTopLoci)
+  combinedTopLociDf <- .combineTopLoci(extractedTopLoci)
   if (is.null(combinedTopLociDf) || nrow(combinedTopLociDf) == 0) return(NULL)
   combinedTopLociDf <- combinedTopLociDf[!duplicated(combinedTopLociDf$variant_id), ]
   rownames(combinedTopLociDf) <- NULL

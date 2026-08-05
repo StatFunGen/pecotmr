@@ -722,7 +722,7 @@ setMethod("getPhenotypeCovariates", "QtlDataset",
 # the redundant columns automatically. Optionally rescales each residual
 # column to unit standard deviation; constant-valued columns are left
 # unchanged.
-.qtlResidualizeQR <- function(Y, C, scaleResiduals = TRUE) {
+.qtlResidualizeQr <- function(Y, C, scaleResiduals = TRUE) {
   X <- if (is.null(C) || ncol(C) == 0L) {
     matrix(1, nrow = nrow(Y), ncol = 1L,
            dimnames = list(rownames(Y), "intercept"))
@@ -751,6 +751,23 @@ setMethod("getPhenotypeCovariates", "QtlDataset",
   res
 }
 
+# Resolve the phenotype-covariate selection for one context: NULL requested ->
+# all available covariates; otherwise validate the requested names are present.
+# @noRd
+.qtlResolveOne <- function(ctx, requested, x) {
+  se <- x@phenotypes[[ctx]]
+  avail <- colnames(SummarizedExperiment::colData(se))
+  if (is.null(requested)) return(avail)
+  keep <- intersect(requested, avail)
+  if (length(keep) != length(requested)) {
+    missingNames <- setdiff(requested, avail)
+    stop(sprintf(
+      "phenotypeCovariatesToResidualize: context '%s' has no covariate(s) named: %s",
+      ctx, paste(missingNames, collapse = ", ")))
+  }
+  keep
+}
+
 # Internal: validate and resolve the `*ToResidualize` argument against a
 # set of contexts and the covariates actually present in those contexts'
 # colData. Accepts either NULL (use all), a character vector (apply to all
@@ -762,21 +779,8 @@ setMethod("getPhenotypeCovariates", "QtlDataset",
 #     (per the rule: named-list keys must equal `contexts`)
 #   - an explicitly requested name matches no actual covariate
 .qtlResolvePhenoSelection <- function(x, contexts, toResidualize) {
-  resolveOne <- function(ctx, requested) {
-    se <- x@phenotypes[[ctx]]
-    avail <- colnames(SummarizedExperiment::colData(se))
-    if (is.null(requested)) return(avail)
-    keep <- intersect(requested, avail)
-    if (length(keep) != length(requested)) {
-      missingNames <- setdiff(requested, avail)
-      stop(sprintf(
-        "phenotypeCovariatesToResidualize: context '%s' has no covariate(s) named: %s",
-        ctx, paste(missingNames, collapse = ", ")))
-    }
-    keep
-  }
   if (is.null(toResidualize)) {
-    out <- lapply(contexts, resolveOne, requested = NULL)
+    out <- lapply(contexts, .qtlResolveOne, requested = NULL, x = x)
     names(out) <- contexts
     return(out)
   }
@@ -798,12 +802,12 @@ setMethod("getPhenotypeCovariates", "QtlDataset",
            "context set as `contexts`. Missing keys: ",
            paste(missingKeys, collapse = ", "))
     }
-    out <- lapply(contexts, function(ctx) resolveOne(ctx, toResidualize[[ctx]]))
+    out <- lapply(contexts, function(ctx) .qtlResolveOne(ctx, toResidualize[[ctx]], x))
     names(out) <- contexts
     return(out)
   }
   if (is.character(toResidualize)) {
-    out <- lapply(contexts, resolveOne, requested = toResidualize)
+    out <- lapply(contexts, .qtlResolveOne, requested = toResidualize, x = x)
     names(out) <- contexts
     return(out)
   }
@@ -1012,7 +1016,7 @@ setMethod("getResidualizedGenotypes", "QtlDataset",
       G <- G[common, , drop = FALSE]
       C <- C[common, , drop = FALSE]
     }
-    .qtlResidualizeQR(G, C, scaleResiduals = x@scaleResiduals)
+    .qtlResidualizeQr(G, C, scaleResiduals = x@scaleResiduals)
   })
 
 #' @rdname getResidualizedPhenotypes
@@ -1091,7 +1095,7 @@ setMethod("getResidualizedPhenotypes", "QtlDataset",
       } else {
         Cctx <- NULL
       }
-      Yres <- .qtlResidualizeQR(Y, Cctx, scaleResiduals = x@scaleResiduals)
+      Yres <- .qtlResidualizeQr(Y, Cctx, scaleResiduals = x@scaleResiduals)
       # Outlier detection on the residualized scale (samples whose
       # residualized phenotype is unusual *given* their covariates).
       if (outlierAction != "keep") {

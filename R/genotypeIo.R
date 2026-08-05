@@ -38,6 +38,37 @@ setMethod("readGenotypes",
 # Handle constructors — read metadata, defer genotype loading
 # =============================================================================
 
+# Record each variant's original 1-based position in the genotype file. This
+# lets @snpInfo be row-subset (e.g. to the range of a study's summary stats)
+# while genotype reads that index BY FILE POSITION still resolve correctly:
+# PLINK2's ReadList(variant_subset=) and the per-chromosome PLINK2 view inside
+# sharded routing read fileIdx[snpIdx]; the by-id backends (plink1/gds/vcf) look
+# up snpInfo$SNP[snpIdx] / $BP[snpIdx] and ignore fileIdx entirely. For a full
+# (unsubset) handle fileIdx == seq_len(nrow), so reads are unchanged.
+# @noRd
+.withFileIdx <- function(snpInfo) {
+  snpInfo$fileIdx <- seq_len(nrow(snpInfo))
+  snpInfo
+}
+
+# Restrict a GenotypeHandle's @snpInfo to `keep` (a logical mask or integer row
+# indices into @snpInfo). Genotype reads stay correct because fileIdx carries
+# each kept variant's original file position; everything else (path/format/
+# pgenPtr/chromPaths/samples) is preserved. NULL-safe; a no-op when nothing is
+# dropped. Handles built before the fileIdx column existed are NOT subset (the
+# read path would be positional) -- return them unchanged.
+# @noRd
+.subsetGenotypeHandle <- function(handle, keep) {
+  if (is.null(handle)) return(NULL)
+  si <- handle@snpInfo
+  keepIdx <- if (is.logical(keep)) which(keep) else as.integer(keep)
+  if (length(keepIdx) >= nrow(si)) return(handle)     # nothing dropped
+  if (!"fileIdx" %in% names(si)) return(handle)        # legacy handle: unsafe
+  handle@snpInfo <- si[keepIdx, , drop = FALSE]
+  rownames(handle@snpInfo) <- NULL
+  handle
+}
+
 #' @keywords internal
 .makeGdsHandle <- function(path) {
   # nocov start
@@ -58,7 +89,7 @@ setMethod("readGenotypes",
   new("GenotypeHandle",
     path = path,
     format = "gds",
-    snpInfo = snpInfo,
+    snpInfo = .withFileIdx(snpInfo),
     nSamples = as.integer(nSamples),
     sampleIds = sampleIds,
     pgenPtr = NULL
@@ -96,7 +127,7 @@ setMethod("readGenotypes",
   new("GenotypeHandle",
     path = normalizePath(path),
     format = "vcf",
-    snpInfo = snpInfo,
+    snpInfo = .withFileIdx(snpInfo),
     nSamples = as.integer(nSamples),
     sampleIds = sampleIds,
     pgenPtr = NULL
@@ -145,7 +176,7 @@ setMethod("readGenotypes",
   new("GenotypeHandle",
     path = stem,
     format = "plink1",
-    snpInfo = snpInfo,
+    snpInfo = .withFileIdx(snpInfo),
     nSamples = as.integer(nSamples),
     sampleIds = sampleIds,
     pgenPtr = NULL
@@ -188,7 +219,7 @@ setMethod("readGenotypes",
   new("GenotypeHandle",
     path = stem,
     format = "plink2",
-    snpInfo = snpInfo,
+    snpInfo = .withFileIdx(snpInfo),
     nSamples = as.integer(nSamples),
     sampleIds = sampleIds,
     pgenPtr = pgen
@@ -267,6 +298,24 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
   )
 }
 
+# Extract one chromosome's block from a sharded handle: reslice the handle to
+# that chrom's file + SNP subset and delegate to extractBlockGenotypes.
+# @noRd
+.extractBlockForChrom <- function(chrom, posInReq, handle, snpIdx, unifiedChr, meanImpute) {
+  if (!chrom %in% names(handle@chromPaths))
+    stop("extractBlockGenotypes: no per-chromosome file for chromosome '",
+         chrom, "' (have: ",
+         paste(names(handle@chromPaths), collapse = ", "), ").")
+  blockGlobal <- which(unifiedChr == chrom)        # file-order global indices
+  localIdx    <- match(snpIdx[posInReq], blockGlobal)
+  th <- handle
+  th@path       <- handle@chromPaths[[chrom]]
+  th@snpInfo    <- handle@snpInfo[blockGlobal, , drop = FALSE]
+  th@pgenPtr    <- NULL
+  th@chromPaths <- character(0)                     # treat as single-file
+  extractBlockGenotypes(th, localIdx, meanImpute = meanImpute)
+}
+
 # Extract a block from a one-file-per-chromosome (sharded) handle. The global
 # snpIdx index the unified @snpInfo; we group them by chromosome, route each
 # group to its per-chromosome payload via a transient single-file view (with
@@ -290,22 +339,10 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
   reqChr <- unifiedChr[snpIdx]
   groups <- split(seq_along(snpIdx), reqChr)
 
-  buildForChrom <- function(chrom, posInReq) {
-    if (!chrom %in% names(handle@chromPaths))
-      stop("extractBlockGenotypes: no per-chromosome file for chromosome '",
-           chrom, "' (have: ",
-           paste(names(handle@chromPaths), collapse = ", "), ").")
-    blockGlobal <- which(unifiedChr == chrom)        # file-order global indices
-    localIdx    <- match(snpIdx[posInReq], blockGlobal)
-    th <- handle
-    th@path       <- handle@chromPaths[[chrom]]
-    th@snpInfo    <- handle@snpInfo[blockGlobal, , drop = FALSE]
-    th@pgenPtr    <- NULL
-    th@chromPaths <- character(0)                     # treat as single-file
-    extractBlockGenotypes(th, localIdx, meanImpute = meanImpute)
-  }
-
-  ses <- Map(buildForChrom, names(groups), groups)
+  ses <- mapply(.extractBlockForChrom, names(groups), groups,
+                MoreArgs = list(handle = handle, snpIdx = snpIdx,
+                                unifiedChr = unifiedChr, meanImpute = meanImpute),
+                SIMPLIFY = FALSE)
   if (length(ses) == 1L) return(ses[[1L]])
 
   # Combine at the assay/rowRanges level (rather than rbind-ing the SEs, which
@@ -387,15 +424,21 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
   # pointer errors out. Opening is cheap relative to dosage extraction.
   ptr <- getPgenPtr(handle)
   paths <- resolvePlink2Paths(.genotypeReadPath(handle))
+  # `variant_subset` indexes the .pgen by FILE position. `snpIdx` is a position
+  # into @snpInfo, which may have been row-subset; translate through fileIdx to
+  # recover the true .pgen index. For a full handle fileIdx == seq_len(nrow), so
+  # this is a no-op. Older RDS handles predate the column -> fall back to snpIdx.
+  fileIdx <- getSnpInfo(handle)$fileIdx
+  variantSubset <- if (is.null(fileIdx)) snpIdx else fileIdx[snpIdx]
   # A sharded handle routes through a transient view with pgenPtr = NULL (one
   # pgen per chromosome), and a deserialized pointer is stale; open a fresh
   # pgen up front in those cases rather than provoking a caught read error.
   if (is.null(ptr)) ptr <- pgenlibr::NewPgen(paths$pgen)
   geno <- tryCatch(
-    pgenlibr::ReadList(ptr, variant_subset = snpIdx, meanimpute = FALSE),
+    pgenlibr::ReadList(ptr, variant_subset = variantSubset, meanimpute = FALSE),
     error = function(e) {
       reopened <- pgenlibr::NewPgen(paths$pgen)
-      pgenlibr::ReadList(reopened, variant_subset = snpIdx, meanimpute = FALSE)
+      pgenlibr::ReadList(reopened, variant_subset = variantSubset, meanimpute = FALSE)
     })
   storage.mode(geno) <- "double"
   geno
@@ -983,8 +1026,8 @@ matchVariantsToKeep <- function(variantInfo, keepVariantsPath) {
   }
 }
 
-NoSNPsError <- function(message) {
-  structure(list(message = message), class = c("NoSNPsError", "error", "condition"))
+NoSnpsError <- function(message) {
+  structure(list(message = message), class = c("NoSnpsError", "error", "condition"))
 }
 
 
@@ -1038,7 +1081,7 @@ loadGenotypeRegion <- function(genotype, region = NULL, keepIndel = TRUE,
   if (!is.null(region)) {
     snpIdx <- .regionToSnpIdx(handleSnpInfo, region)
     if (length(snpIdx) == 0) {
-      stop(NoSNPsError(paste("No SNPs found in the specified region", region)))
+      stop(NoSnpsError(paste("No SNPs found in the specified region", region)))
     }
   } else {
     snpIdx <- seq_len(nrow(handleSnpInfo))

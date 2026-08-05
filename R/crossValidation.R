@@ -48,9 +48,42 @@
   out
 }
 
+# One CV fold: split train/test by fold `j`, drop zero-variance training columns,
+# fit via `fitFold(Xtr, Ytr, j, fitFoldCtx)`, and predict the held-out samples.
+# @noRd
+.cvRunFold <- function(j, cv) {
+  X <- cv$X; Y <- cv$Y; samplePartition <- cv$samplePartition
+  foldIds <- cv$foldIds; fitFold <- cv$fitFold; fitFoldCtx <- cv$fitFoldCtx
+  retainFits <- cv$retainFits; verbose <- cv$verbose
+  if (verbose >= 1) message(sprintf("  CV fold %s/%s ...", j, length(foldIds)))
+  testIds <- samplePartition$Sample[samplePartition$Fold == j]
+  isTest  <- rownames(X) %in% testIds
+  if (all(isTest) || !any(isTest)) return(list(preds = list(), fits = list()))
+  Xtr <- X[!isTest, , drop = FALSE]
+  Xte <- X[isTest, , drop = FALSE]
+  Ytr <- Y[!isTest, , drop = FALSE]
+  keep <- .nonzeroVarColumns(Xtr)
+  Xtr <- Xtr[, keep, drop = FALSE]
+  ff <- fitFold(Xtr, Ytr, j, fitFoldCtx)
+  preds <- lapply(ff$weights, function(W) {
+    if (is.null(W)) return(NULL)
+    W[is.na(W)] <- 0
+    common <- intersect(colnames(Xte), rownames(W))
+    if (length(common) == 0L) return(NULL)
+    yhat <- Xte[, common, drop = FALSE] %*% W[common, , drop = FALSE]
+    rownames(yhat) <- rownames(Xte)
+    yhat
+  })
+  list(preds = preds, fits = if (isTRUE(retainFits)) ff$fits else list())
+}
+
+# No-op fold fitter: used when the caller only wants the fold partition.
+# @noRd
+.cvNoopFitFold <- function(Xtr, Ytr, j, fitFoldCtx) list(weights = list(), fits = list())
+
 # Shared K-fold cross-validation engine.
 #
-# `fitFold(Xtrain, Ytrain, foldIndex)` must return
+# `fitFold(Xtrain, Ytrain, foldIndex, fitFoldCtx)` must return
 #   list(weights = <named list: methodKey -> (variants x outcomes) weight matrix,
 #                   rownames indexing colnames(Xtrain)>,
 #        fits    = <named list: methodKey -> fitted model or NULL>)
@@ -64,9 +97,9 @@
 #' @importFrom stats sd lm cor
 #' @noRd
 .crossValidateWeights <- function(X, Y, fold = NULL, samplePartitions = NULL,
-                                  fitFold, numThreads = 1, maxNumVariants = NULL,
-                                  variantsToKeep = NULL, retainFits = FALSE,
-                                  verbose = 1) {
+                                  fitFold, fitFoldCtx = NULL, numThreads = 1,
+                                  maxNumVariants = NULL, variantsToKeep = NULL,
+                                  retainFits = FALSE, verbose = 1) {
   if (!is.null(fold) && (!is.numeric(fold) || fold <= 0)) {
     stop("Invalid value for 'fold'. It must be a positive integer.")
   }
@@ -136,36 +169,16 @@
   foldIds <- sort(unique(samplePartition$Fold))
 
   st <- proc.time()
-  runFold <- function(j) {
-    if (verbose >= 1) message(sprintf("  CV fold %s/%s ...", j, length(foldIds)))
-    testIds <- samplePartition$Sample[samplePartition$Fold == j]
-    isTest  <- rownames(X) %in% testIds
-    if (all(isTest) || !any(isTest)) return(list(preds = list(), fits = list()))
-    Xtr <- X[!isTest, , drop = FALSE]
-    Xte <- X[isTest, , drop = FALSE]
-    Ytr <- Y[!isTest, , drop = FALSE]
-    keep <- .nonzeroVarColumns(Xtr)
-    Xtr <- Xtr[, keep, drop = FALSE]
-    ff <- fitFold(Xtr, Ytr, j)
-    preds <- lapply(ff$weights, function(W) {
-      if (is.null(W)) return(NULL)
-      W[is.na(W)] <- 0
-      common <- intersect(colnames(Xte), rownames(W))
-      if (length(common) == 0L) return(NULL)
-      yhat <- Xte[, common, drop = FALSE] %*% W[common, , drop = FALSE]
-      rownames(yhat) <- rownames(Xte)
-      yhat
-    })
-    list(preds = preds, fits = if (isTRUE(retainFits)) ff$fits else list())
-  }
-
   numCores <- if (numThreads == -1) bpworkers(MulticoreParam()) else numThreads
   numCores <- min(numCores, bpworkers(MulticoreParam()))
+  cvState <- list(X = X, Y = Y, samplePartition = samplePartition,
+                  foldIds = foldIds, fitFold = fitFold, fitFoldCtx = fitFoldCtx,
+                  retainFits = retainFits, verbose = verbose)
   foldResults <- if (numCores >= 2) {
-    bplapply(foldIds, runFold,
+    bplapply(foldIds, .cvRunFold, cv = cvState,
              BPPARAM = MulticoreParam(workers = numCores, RNGseed = 1L))
   } else {
-    lapply(foldIds, runFold)
+    lapply(foldIds, .cvRunFold, cv = cvState)
   }
 
   metricNames <- c("corr", "rsq", "adj_rsq", "pval", "RMSE", "MAE")

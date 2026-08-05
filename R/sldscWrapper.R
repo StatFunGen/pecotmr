@@ -464,6 +464,26 @@ metaSldscRandom <- function(perTraitEstimates, category,
 }
 
 
+# Append the single/joint enrichment columns (suffix-capitalized) to `out`,
+# aligned to out$target; missing sources fill NA.
+# @noRd
+.sldscAddCols <- function(out, src, suffix) {
+  colsToAdd <- c("tau", "tauSe", "tauStar", "tauStarSe",
+                 "enrichment", "enrichmentSe", "enrichmentP",
+                 "enrichstat", "enrichstatSe")
+  suffixCap <- paste0(toupper(substring(suffix, 1, 1)),
+                      substring(suffix, 2))
+  for (c in colsToAdd) {
+    newcol <- paste0(c, suffixCap)
+    if (!is.null(src) && c %in% names(src)) {
+      out[[newcol]] <- src[[c]][match(out$target, src$target)]
+    } else {
+      out[[newcol]] <- NA_real_
+    }
+  }
+  out
+}
+
 # Internal helper: assemble a wide per-trait summary frame with single + joint
 # columns side by side.
 .sldscAssembleTraitSummary <- function(singleDf, jointDf, targetCategories,
@@ -474,24 +494,8 @@ metaSldscRandom <- function(perTraitEstimates, category,
                     isBinary = unname(isBinaryVec[rows]),
                     stringsAsFactors = FALSE)
 
-  addCols <- function(out, src, suffix) {
-    colsToAdd <- c("tau", "tauSe", "tauStar", "tauStarSe",
-                   "enrichment", "enrichmentSe", "enrichmentP",
-                   "enrichstat", "enrichstatSe")
-    suffixCap <- paste0(toupper(substring(suffix, 1, 1)),
-                        substring(suffix, 2))
-    for (c in colsToAdd) {
-      newcol <- paste0(c, suffixCap)
-      if (!is.null(src) && c %in% names(src)) {
-        out[[newcol]] <- src[[c]][match(out$target, src$target)]
-      } else {
-        out[[newcol]] <- NA_real_
-      }
-    }
-    out
-  }
-  out <- addCols(out, singleDf, "single")
-  out <- addCols(out, jointDf,  "joint")
+  out <- .sldscAddCols(out, singleDf, "single")
+  out <- .sldscAddCols(out, jointDf,  "joint")
   out
 }
 
@@ -517,6 +521,14 @@ metaSldscRandom <- function(perTraitEstimates, category,
     list(summary = newDf)
   })
 }
+
+# Meta-analyze `quantity` across all target categories for one view, returning a
+# per-category named list of metaSldscRandom results.
+# @noRd
+.sldscPerCategory <- function(view, quantity, targetCategories)
+  setNames(lapply(targetCategories,
+                  function(cat) metaSldscRandom(view, cat, quantity)),
+           targetCategories)
 
 #' Random-effects meta-analysis over a subset of sLDSC traits
 #'
@@ -558,13 +570,9 @@ sldscSubsetMeta <- function(postprocessResult, subsetTraits,
   sub <- perTrait[subsetTraits]
   viewSingle <- .sldscViewForMeta(sub, "single")
   viewJoint  <- .sldscViewForMeta(sub, "joint")
-  perCategory <- function(view, quantity)
-    setNames(lapply(targetCategories,
-                    function(cat) metaSldscRandom(view, cat, quantity)),
-             targetCategories)
   list(
-    tau_star_single = perCategory(viewSingle, "tauStar"),
-    tau_star_joint  = perCategory(viewJoint,  "tauStar"),
-    enrichment      = perCategory(viewSingle, "enrichment"),
-    enrichstat      = perCategory(viewSingle, "enrichstat"))
+    tau_star_single = .sldscPerCategory(viewSingle, "tauStar", targetCategories),
+    tau_star_joint  = .sldscPerCategory(viewJoint,  "tauStar", targetCategories),
+    enrichment      = .sldscPerCategory(viewSingle, "enrichment", targetCategories),
+    enrichstat      = .sldscPerCategory(viewSingle, "enrichstat", targetCategories))
 }

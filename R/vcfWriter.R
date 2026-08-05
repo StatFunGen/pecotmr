@@ -129,6 +129,21 @@ setMethod("writeSumstatsVcf", signature("FineMappingResultBase"),
     method  = as.character(x$method)[r])
 }
 
+# Extract column `nm` from `df`, or an all-NA vector of length nSnps when absent.
+# @noRd
+.vcfCol <- function(df, nm, nSnps) {
+  if (!is.null(df) && nm %in% names(df)) df[[nm]] else rep(NA, nSnps)
+}
+
+# Append one FORMAT field to the VCF geno accumulator `acc` (an environment
+# holding geno + the header columns, plus nSnps for the matrix reshape).
+# @noRd
+.vcfAddGeno <- function(acc, name, vec, type, desc) {
+  acc$geno[[name]] <- matrix(vec, acc$nSnps)
+  acc$hdrRows <- c(acc$hdrRows, name); acc$hdrNum <- c(acc$hdrNum, "A")
+  acc$hdrType <- c(acc$hdrType, type); acc$hdrDesc <- c(acc$hdrDesc, desc)
+}
+
 # Internal worker: write one (study, context, trait, method) tuple to a
 # single VCF. When `splitByContext` / `splitByTrait` is in play the
 # output path is decorated with the corresponding tag(s) so multiple
@@ -167,48 +182,43 @@ setMethod("writeSumstatsVcf", signature("FineMappingResultBase"),
     stop("writeSumstatsVcf: entry [", sn, "] has no variants to write")
   }
   nSnps <- nrow(base)
-  col <- function(df, nm) if (!is.null(df) && nm %in% names(df)) df[[nm]]
-                          else rep(NA, nSnps)
 
-  geno <- list()
-  hdrRows <- character(0); hdrNum <- character(0)
-  hdrType <- character(0); hdrDesc <- character(0)
-  addGeno <- function(name, vec, type, desc) {
-    geno[[name]] <<- matrix(vec, nSnps)
-    hdrRows <<- c(hdrRows, name); hdrNum <<- c(hdrNum, "A")
-    hdrType <<- c(hdrType, type); hdrDesc <<- c(hdrDesc, desc)
-  }
+  acc <- new.env(parent = emptyenv())
+  acc$nSnps <- nSnps
+  acc$geno <- list()
+  acc$hdrRows <- character(0); acc$hdrNum <- character(0)
+  acc$hdrType <- character(0); acc$hdrDesc <- character(0)
   # ES: posterior conditional effect (mvSuSiE/fSuSiE) when present, else the
   # marginal univariate beta (univariate susie).
-  es <- col(base, "conditional_effect")
-  if (all(is.na(es))) es <- col(m, "beta")
+  es <- .vcfCol(base, "conditional_effect", nSnps)
+  if (all(is.na(es))) es <- .vcfCol(m, "beta", nSnps)
   if (any(!is.na(es)))
-    addGeno("ES", es, "Float",
+    .vcfAddGeno(acc, "ES", es, "Float",
             "Effect size (posterior conditional effect, else marginal beta), effect allele")
-  se <- col(m, "se")
+  se <- .vcfCol(m, "se", nSnps)
   if (any(!is.na(se)))
-    addGeno("SE", se, "Float", "Standard error of the marginal effect-size estimate")
-  p <- col(m, "p")
+    .vcfAddGeno(acc, "SE", se, "Float", "Standard error of the marginal effect-size estimate")
+  p <- .vcfCol(m, "p", nSnps)
   if (any(!is.na(p))) {
     lp <- ifelse(is.na(p) | p <= 0, NA_real_, -log10(p))
-    addGeno("LP", lp, "Float", "-log10 p-value of the marginal univariate effect")
+    .vcfAddGeno(acc, "LP", lp, "Float", "-log10 p-value of the marginal univariate effect")
   }
-  if (any(!is.na(col(m, "N"))))
-    addGeno("SS", as.integer(col(m, "N")), "Integer", "Sample size")
-  af <- col(base, "af"); if (all(is.na(af))) af <- col(m, "af")
+  if (any(!is.na(.vcfCol(m, "N", nSnps))))
+    .vcfAddGeno(acc, "SS", as.integer(.vcfCol(m, "N", nSnps)), "Integer", "Sample size")
+  af <- .vcfCol(base, "af", nSnps); if (all(is.na(af))) af <- .vcfCol(m, "af", nSnps)
   if (any(!is.na(af)))
-    addGeno("AF", af, "Float", "Allele frequency (effect allele)")
+    .vcfAddGeno(acc, "AF", af, "Float", "Allele frequency (effect allele)")
   # Posterior fields, only when a posterior table is available.
   if (hasPost) {
-    pip <- col(base, "pip")
+    pip <- .vcfCol(base, "pip", nSnps)
     if (any(!is.na(pip)))
-      addGeno("PIP", pip, "Float", "Posterior inclusion probability")
-    lbf <- col(base, "logBF")
+      .vcfAddGeno(acc, "PIP", pip, "Float", "Posterior inclusion probability")
+    lbf <- .vcfCol(base, "logBF", nSnps)
     if (any(!is.na(lbf)))
-      addGeno("LBF", lbf, "Float", "Per-variant log Bayes factor (max single effect)")
-    lfsr <- col(base, "lfsr")
+      .vcfAddGeno(acc, "LBF", lbf, "Float", "Per-variant log Bayes factor (max single effect)")
+    lfsr <- .vcfCol(base, "lfsr", nSnps)
     if (any(!is.na(lfsr)))
-      addGeno("LFSR", lfsr, "Float", "Local false sign rate (per-condition posterior)")
+      .vcfAddGeno(acc, "LFSR", lfsr, "Float", "Local false sign rate (per-condition posterior)")
     # Credible sets are DYNAMIC: pecotmr does not assume any fixed coverage, so
     # we emit a CS<coverage> (+ PUR<coverage>) field for every cs_<coverage>
     # column the pipeline actually produced (e.g. cs_95 -> CS95 / PUR95). The
@@ -218,13 +228,13 @@ setMethod("writeSumstatsVcf", signature("FineMappingResultBase"),
       cov <- sub("^cs_", "", cc)
       idx <- suppressWarnings(as.integer(sub(".*_", "", as.character(base[[cc]]))))
       idx[is.na(idx)] <- 0L
-      addGeno(paste0("CS", cov), idx, "Integer",
+      .vcfAddGeno(acc, paste0("CS", cov), idx, "Integer",
               sprintf("Credible-set index at %s%% coverage (0 = not captured)", cov))
       pc <- paste0(cc, "_purity")
       if (pc %in% names(base)) {
         pur <- suppressWarnings(as.numeric(base[[pc]]))
         if (any(!is.na(pur)))
-          addGeno(paste0("PUR", cov), pur, "Float",
+          .vcfAddGeno(acc, paste0("PUR", cov), pur, "Float",
                   sprintf("Purity (min abs corr) of the %s%% credible set", cov))
       }
     }
@@ -235,22 +245,22 @@ setMethod("writeSumstatsVcf", signature("FineMappingResultBase"),
     for (cc in grep("^(within_cs_pip|cs_logbf_|cs_effect_)", names(base), value = TRUE)) {
       v <- suppressWarnings(as.numeric(base[[cc]]))
       if (any(!is.na(v)))
-        addGeno(toupper(cc), v, "Float",
+        .vcfAddGeno(acc, toupper(cc), v, "Float",
                 sprintf("Per-credible-set variant statistic (%s)", cc))
     }
   }
 
   genoHeader <- DataFrame(
-    Number = hdrNum, Type = hdrType, Description = hdrDesc,
-    row.names = hdrRows)
+    Number = acc$hdrNum, Type = acc$hdrType, Description = acc$hdrDesc,
+    row.names = acc$hdrRows)
 
   .writeVcfImpl(
-    chrom = col(base, "chrom"),
-    pos = col(base, "pos"),
-    ref = col(base, "A2"),
-    alt = col(base, "A1"),
-    snpIds = col(base, "variant_id"),
-    geno = geno,
+    chrom = .vcfCol(base, "chrom", nSnps),
+    pos = .vcfCol(base, "pos", nSnps),
+    ref = .vcfCol(base, "A2", nSnps),
+    alt = .vcfCol(base, "A1", nSnps),
+    snpIds = .vcfCol(base, "variant_id", nSnps),
+    geno = acc$geno,
     genoHeader = genoHeader,
     sampleName = sn,
     outputPath = finalPath)
