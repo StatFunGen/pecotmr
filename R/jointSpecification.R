@@ -404,6 +404,24 @@ parseTraitIds <- function(traitId, data) {
   out
 }
 
+# Validate one leaf method vector: non-empty character, all tokens known (in
+# `caps`), and none in `rejectedAtUser`.
+# @noRd
+.jointValidateLeafVec <- function(vec, label, caps, rejectedAtUser) {
+  if (!is.character(vec) || length(vec) == 0L)
+    stop(label, ": method vector must be a non-empty character vector")
+  bad <- setdiff(vec, names(caps))
+  if (length(bad) > 0L)
+    stop(label, ": unknown method token(s): ",
+         paste(bad, collapse = ", "),
+         ". Known tokens: ", paste(names(caps), collapse = ", "))
+  rejected <- intersect(vec, rejectedAtUser)
+  if (length(rejected) > 0L)
+    stop(label, ": method(s) cannot be user-requested on this pipeline: ",
+         paste(rejected, collapse = ", "))
+  invisible(NULL)
+}
+
 # @noRd
 parseMethods <- function(methods,
                          sumStatsMethods   = NULL,
@@ -430,24 +448,9 @@ parseMethods <- function(methods,
       stop("`qtlDatasetMethods` must be a non-empty character vector.")
   }
 
-  validateLeafVec <- function(vec, label) {
-    if (!is.character(vec) || length(vec) == 0L)
-      stop(label, ": method vector must be a non-empty character vector")
-    bad <- setdiff(vec, names(caps))
-    if (length(bad) > 0L)
-      stop(label, ": unknown method token(s): ",
-           paste(bad, collapse = ", "),
-           ". Known tokens: ", paste(names(caps), collapse = ", "))
-    rejected <- intersect(vec, rejectedAtUser)
-    if (length(rejected) > 0L)
-      stop(label, ": method(s) cannot be user-requested on this pipeline: ",
-           paste(rejected, collapse = ", "))
-    invisible(NULL)
-  }
-
   if (splitGiven) {
-    validateLeafVec(sumStatsMethods,   "sumStatsMethods")
-    validateLeafVec(qtlDatasetMethods, "qtlDatasetMethods")
+    .jointValidateLeafVec(sumStatsMethods,   "sumStatsMethods", caps, rejectedAtUser)
+    .jointValidateLeafVec(qtlDatasetMethods, "qtlDatasetMethods", caps, rejectedAtUser)
   } else {
     walked <- .spWalkMethods(methods, label = "methods", maxDepth = 3L)
     studyNames <- .spListStudies(data)
@@ -455,7 +458,7 @@ parseMethods <- function(methods,
       lab <- sprintf("methods[[%s]]",
                      paste0("'", leaf$path, "'", collapse = "$"))
       if (length(leaf$path) == 0L) lab <- "methods"
-      validateLeafVec(leaf$methods, lab)
+      .jointValidateLeafVec(leaf$methods, lab, caps, rejectedAtUser)
       # Multi-axis methods may not appear at per-context or per-trait levels.
       if (leaf$depth >= 2L) {
         bad <- intersect(leaf$methods, multivariateMethods)
@@ -638,7 +641,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # NULL when fewer than 2 contexts carry `tid` or the sample / complete-Y
 # subset is too small to fit.
 # @noRd
-.buildIndividualCrossContextXY <- function(data, tid, scopedContexts,
+.buildIndividualCrossContextXy <- function(data, tid, scopedContexts,
                                            cisWindow, verbose, label,
                                            region = NULL) {
   perTraitContexts <- character(0)
@@ -707,7 +710,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # when fewer than 2 traits live in the context or the sample / complete-Y
 # subset is too small.
 # @noRd
-.buildIndividualCrossTraitXY <- function(data, cx, scopedTraits,
+.buildIndividualCrossTraitXy <- function(data, cx, scopedTraits,
                                          cisWindow, verbose, label, study,
                                          region = NULL) {
   se <- getPhenotypes(data, contexts = cx)
@@ -742,7 +745,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # Build a composed-axes (context, trait) X/Y for individual-level
 # QtlDataset. Returns list(X, Y, tuples) or NULL.
 # @noRd
-.buildComposedIndividualXY <- function(data, scope, study, cisWindow,
+.buildComposedIndividualXy <- function(data, scope, study, cisWindow,
                                        verbose, label, region = NULL) {
   scopedContexts <- scope$contexts[[study]]
   scopedTraits   <- scope$traits[[study]]
@@ -832,6 +835,13 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # Fine-mapping dispatchers
 # =============================================================================
 
+# Identity-tuple key (study/context/trait/method joined by "\r"), used to align
+# per-region result entries when merging. Shared by the fm/twas mergers.
+# @noRd
+.mergeResultKeyOf <- function(r) paste(as.character(r$study), as.character(r$context),
+                                       as.character(r$trait), as.character(r$method),
+                                       sep = "\r")
+
 # Top-level joint dispatcher for fineMappingPipeline(QtlDataset).
 # @noRd
 # Merge per-region QtlFineMappingResult collections (same keys across regions)
@@ -842,13 +852,10 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
   base <- results[[1L]]
   n <- nrow(base)
   if (n == 0L) return(base)
-  keyOf <- function(r) paste(as.character(r$study), as.character(r$context),
-                             as.character(r$trait), as.character(r$method),
-                             sep = "\r")
-  baseKeys <- keyOf(base)
+  baseKeys <- .mergeResultKeyOf(base)
   mergedEntries <- lapply(seq_len(n), function(i) {
     perRegion <- lapply(results, function(r) {
-      hit <- which(keyOf(r) == baseKeys[[i]])
+      hit <- which(.mergeResultKeyOf(r) == baseKeys[[i]])
       if (length(hit)) r$entry[[hit[[1L]]]] else NULL
     })
     .fmMergeEntries(Filter(Negate(is.null), perRegion))
@@ -861,22 +868,30 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     list(ldSketch = NULL)))
 }
 
+# One passthrough column of a joint result row as a character vector (the joint-
+# key columns), or NULL when absent.
+# @noRd
+.jointStrCol <- function(nm, df) if (nm %in% names(df)) as.character(df[[nm]]) else NULL
+
+# One passthrough column carried through UNCOERCED (GRanges provenance columns
+# region / traitPos), or NULL when absent.
+# @noRd
+.jointRawCol <- function(nm, df) if (nm %in% names(df)) df[[nm]] else NULL
+
 # The optional passthrough columns of a per-tuple result row, as a named list
 # (NULL for any absent column): the three joint-key columns (jointStudies /
 # jointContexts / jointTraits) plus the GRanges provenance columns (region /
 # traitPos). Spliced into the QtlFineMappingResult / TwasWeights constructors so
 # by-key / cross-study rebuilds preserve them.
 .jointCols <- function(df) {
-  pick    <- function(nm) if (nm %in% names(df)) as.character(df[[nm]]) else NULL
   # region / traitPos are GRanges provenance columns: carry them through
   # uncoerced so by-key / cross-study rebuilds keep the fine-mapping window and
   # trait position instead of silently dropping them.
-  pickCol <- function(nm) if (nm %in% names(df)) df[[nm]] else NULL
-  list(jointStudies  = pick("jointStudies"),
-       jointContexts = pick("jointContexts"),
-       jointTraits   = pick("jointTraits"),
-       region        = pickCol("region"),
-       traitPos      = pickCol("traitPos"))
+  list(jointStudies  = .jointStrCol("jointStudies", df),
+       jointContexts = .jointStrCol("jointContexts", df),
+       jointTraits   = .jointStrCol("jointTraits", df),
+       region        = .jointRawCol("region", df),
+       traitPos      = .jointRawCol("traitPos", df))
 }
 
 # Shared tail of the MultiStudyQtlDataset fineMapping / twasWeights pipeline
@@ -889,19 +904,19 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # `jointResult` in.
 # @noRd
 .multiStudyPipelineDriver <- function(data, jointResult, perStudyFn, sumStatsFn,
-                                      rbindFn, resultCtor, pipelineName,
+                                      cfg, rbindFn, resultCtor, pipelineName,
                                       noun = "a result") {
   qtlDatasets <- getQtlDatasets(data)
   sumStats    <- getSumStats(data)
   out <- NULL
   embeddedLd <- NULL
   for (qdName in names(qtlDatasets)) {
-    res <- perStudyFn(qtlDatasets[[qdName]])
+    res <- perStudyFn(qtlDatasets[[qdName]], cfg)
     if (!is.null(res))
       out <- if (is.null(out)) res else rbindFn(out, res, ldSketch = NULL)
   }
   if (!is.null(sumStats)) {
-    ssRes <- sumStatsFn(sumStats)
+    ssRes <- sumStatsFn(sumStats, cfg)
     if (!is.null(ssRes)) {
       embeddedLd <- getLdSketch(ssRes)
       out <- if (is.null(out)) ssRes else rbindFn(out, ssRes, ldSketch = embeddedLd)
@@ -1139,13 +1154,10 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
   base <- results[[1L]]
   n <- length(base$method)
   if (n == 0L) return(base)
-  keyOf <- function(r) paste(as.character(r$study), as.character(r$context),
-                             as.character(r$trait), as.character(r$method),
-                             sep = "\r")
-  baseKeys <- keyOf(base)
+  baseKeys <- .mergeResultKeyOf(base)
   mergedEntries <- lapply(seq_len(n), function(i) {
     perRegion <- lapply(results, function(r) {
-      hit <- which(keyOf(r) == baseKeys[[i]])
+      hit <- which(.mergeResultKeyOf(r) == baseKeys[[i]])
       if (length(hit)) r$entry[[hit[[1L]]]] else NULL
     })
     keep <- !vapply(perRegion, is.null, logical(1))

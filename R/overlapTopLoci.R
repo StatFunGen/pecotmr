@@ -24,6 +24,32 @@
 #' @seealso \code{\link{getTopLoci}}, \code{\link{matchVariants}}
 #' @include AllGenerics.R AllClasses.R QtlFineMappingResult.R GwasFineMappingResult.R
 #' @export
+# Prefix a top-loci frame's NON-key columns with `pfx` (key columns unchanged).
+# @noRd
+.overlapPrefixNonKey <- function(df, pfx, keyCols)
+  stats::setNames(df, ifelse(names(df) %in% keyCols, names(df),
+                             paste0(pfx, names(df))))
+
+# The zero-row merged frame returned when either side has no signal: an
+# identity-only join on variant_id (GWAS contributes only its non-coord cols).
+# @noRd
+.overlapEmptyMerge <- function(qtlTl, gwasTl, coordCols, keyCols) {
+  qp <- .overlapPrefixNonKey(qtlTl[0, , drop = FALSE], "qtl_", keyCols)
+  gp <- .overlapPrefixNonKey(
+    gwasTl[0, setdiff(names(gwasTl), coordCols), drop = FALSE], "gwas_", keyCols)
+  # A collection with no signal above the cutoff yields an identity-only
+  # getTopLoci frame (study/context/trait/method) that carries no
+  # variant_id; restore the join key so the empty merge still resolves
+  # instead of erroring in merge()'s `by` check.
+  if (!"variant_id" %in% names(qp)) qp$variant_id <- character(0)
+  if (!"variant_id" %in% names(gp)) gp$variant_id <- character(0)
+  merge(qp, gp, by = "variant_id")
+}
+
+# Convert the merged frame to the requested output type.
+# @noRd
+.overlapFinish <- function(df, type) if (type == "GRanges") .overlapToGRanges(df) else df
+
 setGeneric("overlapTopLoci",
   function(qtl, gwas, ...) standardGeneric("overlapTopLoci"))
 
@@ -40,33 +66,16 @@ setMethod("overlapTopLoci",
     qtlTl  <- as.data.frame(getTopLoci(qtl,  signalCutoff = signalCutoff))
     gwasTl <- as.data.frame(getTopLoci(gwas, signalCutoff = signalCutoff))
 
-    prefixNonKey <- function(df, pfx)
-      stats::setNames(df, ifelse(names(df) %in% keyCols, names(df),
-                                 paste0(pfx, names(df))))
-    # The GWAS side contributes only variant_id (the join key) + its non-key
-    # columns; the shared coordinate columns come from the QTL side.
-    emptyMerge <- function() {
-      qp <- prefixNonKey(qtlTl[0, , drop = FALSE], "qtl_")
-      gp <- prefixNonKey(
-        gwasTl[0, setdiff(names(gwasTl), coordCols), drop = FALSE], "gwas_")
-      # A collection with no signal above the cutoff yields an identity-only
-      # getTopLoci frame (study/context/trait/method) that carries no
-      # variant_id; restore the join key so the empty merge still resolves
-      # instead of erroring in merge()'s `by` check.
-      if (!"variant_id" %in% names(qp)) qp$variant_id <- character(0)
-      if (!"variant_id" %in% names(gp)) gp$variant_id <- character(0)
-      merge(qp, gp, by = "variant_id")
-    }
-    finish <- function(df) if (type == "GRanges") .overlapToGRanges(df) else df
-
-    if (nrow(qtlTl) == 0L || nrow(gwasTl) == 0L) return(finish(emptyMerge()))
+    if (nrow(qtlTl) == 0L || nrow(gwasTl) == 0L)
+      return(.overlapFinish(.overlapEmptyMerge(qtlTl, gwasTl, coordCols, keyCols), type))
 
     # Allele-aware correspondence between the unique QTL and GWAS variant sets.
     # target = GWAS, ref = QTL, so `sign` is the flip applied to the GWAS side.
     uq <- unique(qtlTl$variant_id)
     ug <- unique(gwasTl$variant_id)
     m  <- matchVariants(ug, uq, allowFlip = TRUE)
-    if (length(m$idxA) == 0L) return(finish(emptyMerge()))
+    if (length(m$idxA) == 0L)
+      return(.overlapFinish(.overlapEmptyMerge(qtlTl, gwasTl, coordCols, keyCols), type))
     map <- data.frame(gwas_vid = ug[m$idxA], canon_vid = uq[m$idxB],
                       .sign = as.numeric(m$sign), stringsAsFactors = FALSE)
 
@@ -75,7 +84,8 @@ setMethod("overlapTopLoci",
     g <- merge(gwasTl, map, by.x = "variant_id", by.y = "gwas_vid")
     # Unreachable defensive guard: map$gwas_vid is drawn from gwasTl$variant_id,
     # so this inner merge can never drop every row (length(m$idxA) > 0 here).
-    if (nrow(g) == 0L) return(finish(emptyMerge())) # nocov
+    if (nrow(g) == 0L)
+      return(.overlapFinish(.overlapEmptyMerge(qtlTl, gwasTl, coordCols, keyCols), type)) # nocov
     for (cc in intersect(c("beta", "z", "conditional_effect"), names(g)))
       g[[cc]] <- g[[cc]] * g$.sign
     if ("af" %in% names(g))
@@ -84,12 +94,12 @@ setMethod("overlapTopLoci",
     g <- g[, setdiff(names(g), c(coordCols, "canon_vid", ".sign")), drop = FALSE]
 
     # Wide cross-product per shared variant, variant key kept once (QTL side).
-    merged <- merge(prefixNonKey(qtlTl, "qtl_"), prefixNonKey(g, "gwas_"),
-                    by = "variant_id")
+    merged <- merge(.overlapPrefixNonKey(qtlTl, "qtl_", keyCols),
+                    .overlapPrefixNonKey(g, "gwas_", keyCols), by = "variant_id")
     # Restore key-column order (merge puts the `by` column first).
     ordered <- c(intersect(keyCols, names(merged)),
                  setdiff(names(merged), keyCols))
-    finish(merged[, ordered, drop = FALSE])
+    .overlapFinish(merged[, ordered, drop = FALSE], type)
   })
 
 # Build a GRanges from an overlap table: variants as width-1 ranges, all other

@@ -108,26 +108,22 @@ filterRelatedness <- function(
     !(relatedness[[relatednessIid2]] %in% highRelatedIndiv), ]
 
   # --- Phase 2: plinkQC-based filtering ----
-  runPlinkqc <- function(relDf) {
-    plinkQC::relatednessFilter(
-      relatedness = relDf,
-      otherCriterion = otherCriterion,
-      relatednessTh = relatednessThreshold,
-      relatednessIID1 = relatednessIid1,
-      relatednessIID2 = relatednessIid2,
-      otherCriterionTh = otherCriterionThreshold,
-      otherCriterionThDirection = otherCriterionDirection,
-      relatednessFID1 = relatednessFid1,
-      relatednessFID2 = relatednessFid2,
-      relatednessRelatedness = relatednessValue,
-      otherCriterionIID = otherCriterionIid,
-      otherCriterionMeasure = otherCriterionMeasure,
-      verbose = verbose
-    )$failIDs
-  }
+  plinkqcArgs <- list(
+    otherCriterion            = otherCriterion,
+    relatednessTh             = relatednessThreshold,
+    relatednessIID1           = relatednessIid1,
+    relatednessIID2           = relatednessIid2,
+    otherCriterionTh          = otherCriterionThreshold,
+    otherCriterionThDirection = otherCriterionDirection,
+    relatednessFID1           = relatednessFid1,
+    relatednessFID2           = relatednessFid2,
+    relatednessRelatedness    = relatednessValue,
+    otherCriterionIID         = otherCriterionIid,
+    otherCriterionMeasure     = otherCriterionMeasure,
+    verbose                   = verbose)
 
   if (analysisType == "maximize_unrelated") {
-    rel <- runPlinkqc(kin)
+    rel <- .relatednessRunPlinkqc(kin, plinkqcArgs)
     allExclude <- rel$IID
 
   } else {
@@ -149,7 +145,7 @@ filterRelatedness <- function(
     caseKin <- kin[
       kin[[relatednessIid1]] %in% relatedCases &
       kin[[relatednessIid2]] %in% relatedCases, ]
-    relCases <- runPlinkqc(caseKin)
+    relCases <- .relatednessRunPlinkqc(caseKin, plinkqcArgs)
     casesKeep <- setdiff(relatedCases, relCases$IID)
 
     # Step 2: Remove controls related to retained cases
@@ -169,7 +165,7 @@ filterRelatedness <- function(
     controlKin <- kin[
       kin[[relatednessIid1]] %in% controlsKeep &
       kin[[relatednessIid2]] %in% controlsKeep, ]
-    relControls <- runPlinkqc(controlKin)
+    relControls <- .relatednessRunPlinkqc(controlKin, plinkqcArgs)
 
     allExclude <- c(relCases$IID, controlsExclude, relControls$IID)
   }
@@ -184,7 +180,7 @@ filterRelatedness <- function(
   while (nrow(remaining) > 0 && iter < maxIterations) {
     if (verbose)
       message("Iteration ", iter + 1L, ": ", nrow(remaining), " related pairs remaining.")
-    additional <- runPlinkqc(remaining)
+    additional <- .relatednessRunPlinkqc(remaining, plinkqcArgs)
     allExclude <- c(allExclude, additional$IID)
     remaining <- kin[
       !(kin[[relatednessIid1]] %in% allExclude) &
@@ -205,4 +201,12 @@ filterRelatedness <- function(
             relatednessThreshold)
 
   allExclude
+}
+
+# Run plinkQC::relatednessFilter with the pre-bound column names + thresholds
+# (`args`), returning its $failIDs.
+# @noRd
+.relatednessRunPlinkqc <- function(relDf, args) {
+  do.call(plinkQC::relatednessFilter,
+          c(list(relatedness = relDf), args))$failIDs
 }

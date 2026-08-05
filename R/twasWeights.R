@@ -422,6 +422,13 @@ setMethod("show", "TwasWeights", function(object) {
   result
 }
 
+# TRUE if `name` is a function visible in the search path or in namespace `ns`.
+# @noRd
+.functionExistsInNs <- function(name, ns) {
+  exists(name, mode = "function") ||
+    exists(name, mode = "function", envir = ns, inherits = FALSE)
+}
+
 # Resolve the actual function name for a method key. Honors an "impl" attribute
 # on the per-method args list (set by .twasMethodLookup), and otherwise applies
 # a snake_case -> camelCase transformation as a fallback for user-supplied
@@ -430,23 +437,44 @@ setMethod("show", "TwasWeights", function(object) {
   # Search pecotmr's namespace explicitly so this works equally well when the
   # function is called either from inside the package or from a user session.
   ns <- asNamespace("pecotmr")
-  fnExists <- function(name) {
-    exists(name, mode = "function") ||
-      exists(name, mode = "function", envir = ns, inherits = FALSE)
-  }
   impl <- if (!is.null(methodArgs)) attr(methodArgs, "impl") else NULL
-  if (!is.null(impl) && nzchar(impl) && fnExists(impl)) {
+  if (!is.null(impl) && nzchar(impl) && .functionExistsInNs(impl, ns)) {
     return(impl)
   }
   # Direct match (e.g. caller already passed camelCase)
-  if (fnExists(methodKey)) return(methodKey)
+  if (.functionExistsInNs(methodKey, ns)) return(methodKey)
   # snake_case_weights -> camelCaseWeights
   parts <- strsplit(methodKey, "_", fixed = TRUE)[[1]]
   capRest <- paste0(toupper(substring(parts[-1], 1, 1)),
                     substring(parts[-1], 2))
   candidate <- paste0(parts[1], paste0(capRest, collapse = ""))
-  if (fnExists(candidate)) return(candidate)
+  if (.functionExistsInNs(candidate, ns)) return(candidate)
   methodKey
+}
+
+# Validate a Sample/Fold partition data frame: required columns, no sample in
+# two folds, and (when `sampleNames` given) exact coverage of all samples.
+# @noRd
+.validateFoldPartition <- function(df, sampleNames) {
+  if (!all(c("Sample", "Fold") %in% names(df)))
+    stop("samplePartition must have columns `Sample` and `Fold`.")
+  df$Sample <- as.character(df$Sample)
+  dup <- unique(df$Sample[duplicated(df$Sample)])
+  if (length(dup) > 0L)
+    stop("Fold partition assigns sample(s) to more than one fold: ",
+         paste(dup, collapse = ", "))
+  if (!is.null(sampleNames)) {
+    unknown <- setdiff(df$Sample, sampleNames)
+    if (length(unknown) > 0L)
+      stop("Fold partition references unknown sample(s): ",
+           paste(unknown, collapse = ", "))
+    uncovered <- setdiff(sampleNames, df$Sample)
+    if (length(uncovered) > 0L)
+      stop("Fold partition does not cover ", length(uncovered),
+           " sample(s) (folds must partition all samples), e.g. ",
+           paste(utils::head(uncovered, 5L), collapse = ", "))
+  }
+  df
 }
 
 # Normalize a cross-validation fold specification into the canonical
@@ -469,31 +497,10 @@ setMethod("show", "TwasWeights", function(object) {
     stop("Provide either a list-form `cvFolds` or an explicit ",
          "`samplePartition`, not both.")
 
-  validatePartition <- function(df) {
-    if (!all(c("Sample", "Fold") %in% names(df)))
-      stop("samplePartition must have columns `Sample` and `Fold`.")
-    df$Sample <- as.character(df$Sample)
-    dup <- unique(df$Sample[duplicated(df$Sample)])
-    if (length(dup) > 0L)
-      stop("Fold partition assigns sample(s) to more than one fold: ",
-           paste(dup, collapse = ", "))
-    if (!is.null(sampleNames)) {
-      unknown <- setdiff(df$Sample, sampleNames)
-      if (length(unknown) > 0L)
-        stop("Fold partition references unknown sample(s): ",
-             paste(unknown, collapse = ", "))
-      uncovered <- setdiff(sampleNames, df$Sample)
-      if (length(uncovered) > 0L)
-        stop("Fold partition does not cover ", length(uncovered),
-             " sample(s) (folds must partition all samples), e.g. ",
-             paste(utils::head(uncovered, 5L), collapse = ", "))
-    }
-    df
-  }
 
   if (!is.null(samplePartition)) {
-    df <- validatePartition(as.data.frame(samplePartition,
-                                          stringsAsFactors = FALSE))
+    df <- .validateFoldPartition(as.data.frame(samplePartition,
+                                          stringsAsFactors = FALSE), sampleNames)
     return(list(samplePartition = df, nFolds = length(unique(df$Fold))))
   }
 
@@ -514,7 +521,7 @@ setMethod("show", "TwasWeights", function(object) {
       }
       data.frame(Sample = ids, Fold = k, stringsAsFactors = FALSE)
     })
-    df <- validatePartition(do.call(rbind, rows))
+    df <- .validateFoldPartition(do.call(rbind, rows), sampleNames)
     return(list(samplePartition = df, nFolds = length(cvFolds)))
   }
 
@@ -596,6 +603,61 @@ setMethod("show", "TwasWeights", function(object) {
   weightMethods
 }
 
+# Per-fold TWAS weight fit for the CV engine. `ctx` carries weightMethods,
+# multivariateWeightMethods, cvArgs, retainFits, verbose. Weights are keyed by the
+# canonical method key; captured fits keep the full method name.
+# @noRd
+.weightFitFold <- function(Xtr, Ytr, j, ctx) {
+  weightMethods <- ctx$weightMethods
+  multivariateWeightMethods <- ctx$multivariateWeightMethods
+  cvArgs <- ctx$cvArgs; retainFits <- ctx$retainFits; verbose <- ctx$verbose
+  foldWeightMethods <- .prepareSusieWeightMethods(Xtr, Ytr, weightMethods)
+  weights <- list()
+  fits <- list()
+  for (method in names(foldWeightMethods)) {
+    args <- foldWeightMethods[[method]]
+    fnName <- .resolveMethodFunction(method, args)
+    mk <- sub("_weights$|Weights$", "", method)
+    capturedFit <- NULL
+    if (method %in% multivariateWeightMethods) {
+      # Per-fold priors bind to the fitter's camelCase args.
+      if (!is.null(cvArgs$data_driven_prior_matrices_cv) &&
+          method %in% c("mrmash_weights", "mrmashWeights")) {
+        args$dataDrivenPriorMatrices <- cvArgs$data_driven_prior_matrices_cv[[j]]
+      }
+      if (!is.null(cvArgs$reweightedMixturePriorCv) &&
+          method %in% c("mvsusie_weights", "mvsusieWeights")) {
+        args$prior_variance <- cvArgs$reweightedMixturePriorCv[[j]]
+      }
+      if (isTRUE(retainFits) && "retainFit" %in% names(formals(fnName))) {
+        args$retainFit <- TRUE
+      }
+      W <- if (verbose < 2) {
+        .quietEval(do.call(fnName, c(list(X = Xtr, Y = Ytr), args)))
+      } else {
+        do.call(fnName, c(list(X = Xtr, Y = Ytr), args))
+      }
+      capturedFit <- attr(W, "fit")
+      attr(W, "fit") <- NULL
+      rownames(W) <- colnames(Xtr)
+    } else {
+      Wcols <- lapply(seq_len(ncol(Ytr)), function(k) {
+        w <- if (verbose < 2) {
+          .quietEval(do.call(fnName, c(list(X = Xtr, y = Ytr[, k]), args)))
+        } else {
+          do.call(fnName, c(list(X = Xtr, y = Ytr[, k]), args))
+        }
+        as.numeric(w)
+      })
+      W <- do.call(cbind, Wcols)
+      rownames(W) <- colnames(Xtr)
+    }
+    weights[[mk]] <- W
+    fits[[method]] <- capturedFit
+  }
+  list(weights = weights, fits = fits)
+}
+
 #' Cross-Validation for weights selection in Transcriptome-Wide Association Studies (TWAS)
 #'
 #' Performs cross-validation for TWAS, supporting both univariate and multivariate methods.
@@ -652,62 +714,18 @@ twasWeightsCv <- function(X, Y, fold = NULL, samplePartitions = NULL, weightMeth
   multivariateWeightMethods <- c("mrmash_weights", "mvsusie_weights",
                                  "mrmashWeights", "mvsusieWeights")
 
-  # Per-fold fit passed to the shared engine. Weights are keyed by the canonical
-  # method key (drives the <key>_predicted / <key>_performance output); captured
+  # Per-fold fit context passed to the shared engine's top-level fitter
+  # (.weightFitFold). Weights are keyed by the canonical method key; captured
   # fits keep the full method name (foldFits back-compat).
-  weightFitFold <- function(Xtr, Ytr, j) {
-    foldWeightMethods <- .prepareSusieWeightMethods(Xtr, Ytr, weightMethods)
-    weights <- list()
-    fits <- list()
-    for (method in names(foldWeightMethods)) {
-      args <- foldWeightMethods[[method]]
-      fnName <- .resolveMethodFunction(method, args)
-      mk <- sub("_weights$|Weights$", "", method)
-      capturedFit <- NULL
-      if (method %in% multivariateWeightMethods) {
-        # Per-fold priors bind to the fitter's camelCase args.
-        if (!is.null(cvArgs$data_driven_prior_matrices_cv) &&
-            method %in% c("mrmash_weights", "mrmashWeights")) {
-          args$dataDrivenPriorMatrices <- cvArgs$data_driven_prior_matrices_cv[[j]]
-        }
-        if (!is.null(cvArgs$reweightedMixturePriorCv) &&
-            method %in% c("mvsusie_weights", "mvsusieWeights")) {
-          args$prior_variance <- cvArgs$reweightedMixturePriorCv[[j]]
-        }
-        if (isTRUE(retainFits) && "retainFit" %in% names(formals(fnName))) {
-          args$retainFit <- TRUE
-        }
-        W <- if (verbose < 2) {
-          .quietEval(do.call(fnName, c(list(X = Xtr, Y = Ytr), args)))
-        } else {
-          do.call(fnName, c(list(X = Xtr, Y = Ytr), args))
-        }
-        capturedFit <- attr(W, "fit")
-        attr(W, "fit") <- NULL
-        rownames(W) <- colnames(Xtr)
-      } else {
-        Wcols <- lapply(seq_len(ncol(Ytr)), function(k) {
-          w <- if (verbose < 2) {
-            .quietEval(do.call(fnName, c(list(X = Xtr, y = Ytr[, k]), args)))
-          } else {
-            do.call(fnName, c(list(X = Xtr, y = Ytr[, k]), args))
-          }
-          as.numeric(w)
-        })
-        W <- do.call(cbind, Wcols)
-        rownames(W) <- colnames(Xtr)
-      }
-      weights[[mk]] <- W
-      fits[[method]] <- capturedFit
-    }
-    list(weights = weights, fits = fits)
-  }
+  cvFitCtx <- list(weightMethods = weightMethods,
+                   multivariateWeightMethods = multivariateWeightMethods,
+                   cvArgs = cvArgs, retainFits = retainFits, verbose = verbose)
 
   # No weight methods: the caller only wants the fold partition.
   if (is.null(weightMethods)) {
     res <- .crossValidateWeights(
       X, Y, fold = fold, samplePartitions = samplePartitions,
-      fitFold = function(Xtr, Ytr, j) list(weights = list(), fits = list()),
+      fitFold = .cvNoopFitFold,
       numThreads = numThreads, maxNumVariants = maxNumVariants,
       variantsToKeep = variantsToKeep, retainFits = retainFits, verbose = verbose)
     return(list(samplePartition = res$samplePartition))
@@ -715,9 +733,143 @@ twasWeightsCv <- function(X, Y, fold = NULL, samplePartitions = NULL, weightMeth
 
   .crossValidateWeights(
     X, Y, fold = fold, samplePartitions = samplePartitions,
-    fitFold = weightFitFold, numThreads = numThreads,
+    fitFold = .weightFitFold, fitFoldCtx = cvFitCtx, numThreads = numThreads,
     maxNumVariants = maxNumVariants, variantsToKeep = variantsToKeep,
     retainFits = retainFits, verbose = verbose)
+}
+
+# Fit one TWAS weight method by name against the filtered design matrix, embedding
+# the fitted weights back into the full variant space. `ctx` carries the shared
+# fit state (X, Y, Xfiltered, validColumns, retainFits, retainFitDetail, verbose).
+# @noRd
+.computeMethodWeights <- function(methodName, weightMethods, ctx) {
+  X <- ctx$X; Y <- ctx$Y; Xfiltered <- ctx$Xfiltered
+  validColumns <- ctx$validColumns; retainFits <- ctx$retainFits
+  retainFitDetail <- ctx$retainFitDetail; verbose <- ctx$verbose
+  shortName <- sub("_weights$", "", methodName)
+  if (verbose >= 1) {
+    message(sprintf("  Fitting %s ...", shortName))
+    tic()
+  }
+
+  # Hardcoded vector of multivariate methods (accept both snake and camel).
+  # fSuSiE is multivariate (variants x features weight matrix) but is never
+  # refit here — fsusieWeights extracts from the supplied fsusieFit.
+  multivariateWeightMethods <- c("mrmash_weights", "mvsusie_weights",
+                                  "fsusie_weights",
+                                  "mrmashWeights", "mvsusieWeights",
+                                  "fsusieWeights")
+  args <- weightMethods[[methodName]]
+  fnName <- .resolveMethodFunction(methodName, args)
+
+  # Only pass retainFit (or its legacy snake_case alias) to functions that accept it
+  if (retainFits) {
+    fnFormals <- names(formals(fnName))
+    if ("retainFit" %in% fnFormals) {
+      args$retainFit <- TRUE
+    } else if ("retain_fit" %in% fnFormals) {
+      args$retain_fit <- TRUE
+    }
+    # Propagate the slim/full payload choice to producers that support it
+    # (mr.mash individual + RSS), unless the caller already set it per-method.
+    if ("fitDetail" %in% fnFormals && is.null(args$fitDetail)) {
+      args$fitDetail <- retainFitDetail
+    }
+  }
+
+  methodFit <- NULL
+  if (methodName %in% multivariateWeightMethods) {
+    # Apply multivariate method
+    weightsMatrix <- if (verbose < 2) {
+      .quietEval(do.call(fnName, c(list(X = Xfiltered, Y = Y), args)))
+    } else {
+      do.call(fnName, c(list(X = Xfiltered, Y = Y), args))
+    }
+    if (retainFits) methodFit <- attr(weightsMatrix, "fit")
+    if (nrow(weightsMatrix) != length(validColumns)) weightsMatrix <- weightsMatrix[names(validColumns), , drop = FALSE]
+  } else {
+    # Apply univariate method to each column of Y
+    # Initialize it with zeros to avoid NA
+    weightsMatrix <- matrix(0, nrow = ncol(Xfiltered), ncol = ncol(Y))
+
+    for (k in 1:ncol(Y)) {
+      weightsVector <- if (verbose < 2) {
+        .quietEval(do.call(fnName, c(list(X = Xfiltered, y = Y[, k]), args)))
+      } else {
+        do.call(fnName, c(list(X = Xfiltered, y = Y[, k]), args))
+      }
+      if (retainFits && is.null(methodFit)) {
+        methodFit <- attr(weightsVector, "fit")
+      }
+      if (is.matrix(weightsVector)) weightsVector <- weightsVector[, k]
+      weightsMatrix[, k] <- weightsVector
+    }
+  }
+
+  result <- .embedWeights(weightsMatrix, validColumns, ncol(X), ncol(Y), colnames(X), colnames(Y))
+  if (!is.null(methodFit)) attr(result, "fit") <- methodFit
+  if (verbose >= 1) {
+    elapsed <- toc(quiet = TRUE)
+    message(sprintf("  Fitting %s done in %.1fs", shortName, elapsed$toc - elapsed$tic))
+  }
+  return(result)
+}
+
+# Assemble the (study, context, trait, method, entry) row vectors for the
+# TwasWeights collection from the fitted `weightsList`. `ctx` carries the shared
+# identity + flags (study, context, trait, Y, retainFits, standardized, dataType).
+# @noRd
+.buildTwasWeightEntries <- function(weightsList, variantIds, ctx) {
+  Y <- ctx$Y; study <- ctx$study; context <- ctx$context; trait <- ctx$trait
+  retainFits <- ctx$retainFits; standardized <- ctx$standardized; dataType <- ctx$dataType
+  studies   <- character(0)
+  contexts  <- character(0)
+  traits    <- character(0)
+  methodsV  <- character(0)
+  entries   <- list()
+  for (m in names(weightsList)) {
+    wMat <- weightsList[[m]]
+    fitVal <- attr(wMat, "fit")
+    attr(wMat, "fit") <- NULL
+    shortMethod <- sub("(_weights|Weights)$", "", m)
+    # When trait/context were supplied per-row (length == ncol(Y)), emit
+    # one row per (method, outcome). Otherwise emit one row per method
+    # and carry the (possibly multi-column) weights matrix as-is.
+    perOutcome <- length(trait) == ncol(Y) &&
+                  length(context) %in% c(1L, ncol(Y))
+    if (perOutcome) {
+      contextV <- if (length(context) == 1L) rep(context, ncol(Y)) else context
+      studyV   <- if (length(study) == 1L) rep(study, ncol(Y)) else study
+      for (k in seq_len(ncol(Y))) {
+        studies  <- c(studies,  studyV[k])
+        contexts <- c(contexts, contextV[k])
+        traits   <- c(traits,   trait[k])
+        methodsV <- c(methodsV, shortMethod)
+        entries[[length(entries) + 1L]] <- TwasWeightsEntry(
+          variantIds    = variantIds,
+          weights       = wMat[, k],
+          fits          = if (retainFits) fitVal else NULL,
+          cvResult = NULL,
+          standardized  = isTRUE(standardized),
+          dataType      = dataType)
+      }
+    } else {
+      studies  <- c(studies,  study[1L])
+      contexts <- c(contexts, context[1L])
+      traits   <- c(traits,   trait[1L])
+      methodsV <- c(methodsV, shortMethod)
+      wPayload <- if (ncol(wMat) == 1L) drop(wMat) else wMat
+      entries[[length(entries) + 1L]] <- TwasWeightsEntry(
+        variantIds    = variantIds,
+        weights       = wPayload,
+        fits          = if (retainFits) fitVal else NULL,
+        cvResult = NULL,
+        standardized  = isTRUE(standardized),
+        dataType      = dataType)
+    }
+  }
+  list(study = studies, context = contexts, trait = traits,
+       method = methodsV, entry = entries)
 }
 
 #' Run multiple TWAS weight methods
@@ -786,83 +938,19 @@ learnTwasWeights <- function(X, Y, weightMethods,
     Xfiltered, Y, weightMethods, fittedModels
   )
 
-  computeMethodWeights <- function(methodName, weightMethods) {
-    shortName <- sub("_weights$", "", methodName)
-    if (verbose >= 1) {
-      message(sprintf("  Fitting %s ...", shortName))
-      tic()
-    }
-
-    # Hardcoded vector of multivariate methods (accept both snake and camel).
-    # fSuSiE is multivariate (variants x features weight matrix) but is never
-    # refit here — fsusieWeights extracts from the supplied fsusieFit.
-    multivariateWeightMethods <- c("mrmash_weights", "mvsusie_weights",
-                                    "fsusie_weights",
-                                    "mrmashWeights", "mvsusieWeights",
-                                    "fsusieWeights")
-    args <- weightMethods[[methodName]]
-    fnName <- .resolveMethodFunction(methodName, args)
-
-    # Only pass retainFit (or its legacy snake_case alias) to functions that accept it
-    if (retainFits) {
-      fnFormals <- names(formals(fnName))
-      if ("retainFit" %in% fnFormals) {
-        args$retainFit <- TRUE
-      } else if ("retain_fit" %in% fnFormals) {
-        args$retain_fit <- TRUE
-      }
-      # Propagate the slim/full payload choice to producers that support it
-      # (mr.mash individual + RSS), unless the caller already set it per-method.
-      if ("fitDetail" %in% fnFormals && is.null(args$fitDetail)) {
-        args$fitDetail <- retainFitDetail
-      }
-    }
-
-    methodFit <- NULL
-    if (methodName %in% multivariateWeightMethods) {
-      # Apply multivariate method
-      weightsMatrix <- if (verbose < 2) {
-        .quietEval(do.call(fnName, c(list(X = Xfiltered, Y = Y), args)))
-      } else {
-        do.call(fnName, c(list(X = Xfiltered, Y = Y), args))
-      }
-      if (retainFits) methodFit <- attr(weightsMatrix, "fit")
-      if (nrow(weightsMatrix) != length(validColumns)) weightsMatrix <- weightsMatrix[names(validColumns), , drop = FALSE]
-    } else {
-      # Apply univariate method to each column of Y
-      # Initialize it with zeros to avoid NA
-      weightsMatrix <- matrix(0, nrow = ncol(Xfiltered), ncol = ncol(Y))
-
-      for (k in 1:ncol(Y)) {
-        weightsVector <- if (verbose < 2) {
-          .quietEval(do.call(fnName, c(list(X = Xfiltered, y = Y[, k]), args)))
-        } else {
-          do.call(fnName, c(list(X = Xfiltered, y = Y[, k]), args))
-        }
-        if (retainFits && is.null(methodFit)) {
-          methodFit <- attr(weightsVector, "fit")
-        }
-        if (is.matrix(weightsVector)) weightsVector <- weightsVector[, k]
-        weightsMatrix[, k] <- weightsVector
-      }
-    }
-
-    result <- .embedWeights(weightsMatrix, validColumns, ncol(X), ncol(Y), colnames(X), colnames(Y))
-    if (!is.null(methodFit)) attr(result, "fit") <- methodFit
-    if (verbose >= 1) {
-      elapsed <- toc(quiet = TRUE)
-      message(sprintf("  Fitting %s done in %.1fs", shortName, elapsed$toc - elapsed$tic))
-    }
-    return(result)
-  }
+  # Shared fit context threaded to the top-level per-method worker + entry builder.
+  ctx <- list(X = X, Y = Y, Xfiltered = Xfiltered, validColumns = validColumns,
+              study = study, context = context, trait = trait,
+              retainFits = retainFits, retainFitDetail = retainFitDetail,
+              standardized = standardized, dataType = dataType, verbose = verbose)
 
   if (numCores >= 2) {
     bpParam <- MulticoreParam(workers = numCores,
                               RNGseed = 1L)
     weightsList <- bplapply(names(weightMethods),
-      computeMethodWeights, weightMethods, BPPARAM = bpParam)
+      .computeMethodWeights, weightMethods, ctx, BPPARAM = bpParam)
   } else {
-    weightsList <- names(weightMethods) %>% map(computeMethodWeights, weightMethods)
+    weightsList <- names(weightMethods) %>% map(.computeMethodWeights, weightMethods, ctx)
   }
   names(weightsList) <- names(weightMethods)
 
@@ -884,58 +972,8 @@ learnTwasWeights <- function(X, Y, weightMethods,
   # carries the matrix for that method across outcomes via a single
   # `trait` value taken from the input `trait` arg (when length 1) or the
   # corresponding Y column name when `trait` matches `colnames(Y)`.
-  buildEntries <- function() {
-    studies   <- character(0)
-    contexts  <- character(0)
-    traits    <- character(0)
-    methodsV  <- character(0)
-    entries   <- list()
-    for (m in names(weightsList)) {
-      wMat <- weightsList[[m]]
-      fitVal <- attr(wMat, "fit")
-      attr(wMat, "fit") <- NULL
-      shortMethod <- sub("(_weights|Weights)$", "", m)
-      # When trait/context were supplied per-row (length == ncol(Y)), emit
-      # one row per (method, outcome). Otherwise emit one row per method
-      # and carry the (possibly multi-column) weights matrix as-is.
-      perOutcome <- length(trait) == ncol(Y) &&
-                    length(context) %in% c(1L, ncol(Y))
-      if (perOutcome) {
-        contextV <- if (length(context) == 1L) rep(context, ncol(Y)) else context
-        studyV   <- if (length(study) == 1L) rep(study, ncol(Y)) else study
-        for (k in seq_len(ncol(Y))) {
-          studies  <- c(studies,  studyV[k])
-          contexts <- c(contexts, contextV[k])
-          traits   <- c(traits,   trait[k])
-          methodsV <- c(methodsV, shortMethod)
-          entries[[length(entries) + 1L]] <- TwasWeightsEntry(
-            variantIds    = variantIds,
-            weights       = wMat[, k],
-            fits          = if (retainFits) fitVal else NULL,
-            cvResult = NULL,
-            standardized  = isTRUE(standardized),
-            dataType      = dataType)
-        }
-      } else {
-        studies  <- c(studies,  study[1L])
-        contexts <- c(contexts, context[1L])
-        traits   <- c(traits,   trait[1L])
-        methodsV <- c(methodsV, shortMethod)
-        wPayload <- if (ncol(wMat) == 1L) drop(wMat) else wMat
-        entries[[length(entries) + 1L]] <- TwasWeightsEntry(
-          variantIds    = variantIds,
-          weights       = wPayload,
-          fits          = if (retainFits) fitVal else NULL,
-          cvResult = NULL,
-          standardized  = isTRUE(standardized),
-          dataType      = dataType)
-      }
-    }
-    list(study = studies, context = contexts, trait = traits,
-         method = methodsV, entry = entries)
-  }
 
-  rows <- buildEntries()
+  rows <- .buildTwasWeightEntries(weightsList, variantIds, ctx)
   TwasWeights(
     study   = rows$study,
     context = rows$context,

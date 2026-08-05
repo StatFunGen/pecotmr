@@ -217,23 +217,25 @@ extractLdForRegion <- function(ldMatrix, variants, region, extractCoordinates) {
   list(extractedLdMatrix = mat, extractedLdVariants = extracted)
 }
 
+# Concatenate per-block variant-id lists into one deduplicated vector, dropping a
+# repeated boundary variant shared between adjacent blocks.
+# @noRd
+.ldMergeVariants <- function(variantList) {
+  merged <- character(0)
+  for (v in variantList) {
+    ids <- if (is.list(v) && !is.null(v$variants)) v$variants else v
+    if (length(ids) == 0) next
+    if (length(merged) > 0 && tail(merged, 1) == ids[1]) ids <- ids[-1]
+    merged <- c(merged, ids)
+  }
+  merged
+}
+
 #' Combine multiple block-level LD matrices into one, handling boundary overlaps.
 #' @importFrom utils tail
 #' @noRd
 createLdMatrix <- function(ldMatrices, variants) {
-  # Merge variant lists, deduplicating boundary overlaps
-  mergeVariants <- function(variantList) {
-    merged <- character(0)
-    for (v in variantList) {
-      ids <- if (is.list(v) && !is.null(v$variants)) v$variants else v
-      if (length(ids) == 0) next
-      if (length(merged) > 0 && tail(merged, 1) == ids[1]) ids <- ids[-1]
-      merged <- c(merged, ids)
-    }
-    merged
-  }
-
-  allVariants <- mergeVariants(variants)
+  allVariants <- .ldMergeVariants(variants)
   combined <- matrix(0, nrow = length(allVariants), ncol = length(allVariants),
                      dimnames = list(allVariants, allVariants))
 
@@ -1387,6 +1389,14 @@ dropCollinearColumns <- function(X, problematicCols,
   X[, !(colnames(X) %in% colToRemove), drop = FALSE]
 }
 
+# Design matrix [1 | X | C] with the intercept + X columns named.
+# @noRd
+.ldBuildDesign <- function(X, C) {
+  XD <- cbind(1, X, C)
+  colnames(XD)[seq_len(ncol(X) + 1L)] <- c("Intercept", colnames(X))
+  XD
+}
+
 #' Iteratively enforce full column rank on a design matrix
 #'
 #' Given a candidate predictor matrix \code{X} and an optional unnamed
@@ -1437,13 +1447,7 @@ enforceDesignFullRank <- function(X, C,
   initialNcol <- ncol(X)
   iteration <- 0L
 
-  buildDesign <- function(X) {
-    XD <- cbind(1, X, C)
-    colnames(XD)[seq_len(ncol(X) + 1L)] <- c("Intercept", colnames(X))
-    XD
-  }
-
-  Xdesign <- buildDesign(X)
+  Xdesign <- .ldBuildDesign(X, C)
   matrixRank <- qr(Xdesign)$rank
   if (verbose) {
     message("enforceDesignFullRank: initial rank ", matrixRank,
@@ -1461,7 +1465,7 @@ enforceDesignFullRank <- function(X, C,
 
     if (length(problematicColnames) > 0) {
       Xtemp <- X[, !(colnames(X) %in% problematicColnames), drop = FALSE]
-      if (qr(buildDesign(Xtemp))$rank == ncol(buildDesign(Xtemp))) {
+      if (qr(.ldBuildDesign(Xtemp, C))$rank == ncol(.ldBuildDesign(Xtemp, C))) {
         if (verbose) {
           message("enforceDesignFullRank: full rank after batch-removing ",
                   length(problematicColnames), " column(s)")
@@ -1489,7 +1493,7 @@ enforceDesignFullRank <- function(X, C,
       X <- dropCollinearColumns(X, problematicColnames, strategy = strategy,
                                   response = response, verbose = verbose)
 
-      Xdesign <- buildDesign(X)
+      Xdesign <- .ldBuildDesign(X, C)
       matrixRank <- qr(Xdesign)$rank
       iteration <- iteration + 1L
       if (verbose) {
@@ -1504,7 +1508,7 @@ enforceDesignFullRank <- function(X, C,
   }
 
   # Correlation-threshold fallback.
-  Xdesign <- buildDesign(X)
+  Xdesign <- .ldBuildDesign(X, C)
   matrixRank <- qr(Xdesign)$rank
   if (matrixRank < ncol(Xdesign)) {
     if (verbose) {
@@ -1514,7 +1518,7 @@ enforceDesignFullRank <- function(X, C,
       filterResult <- ldPruneByCorrelation(X, corThres = threshold,
                                                verbose = verbose)
       X <- filterResult$X.new
-      Xdesign <- buildDesign(X)
+      Xdesign <- .ldBuildDesign(X, C)
       matrixRank <- qr(Xdesign)$rank
       if (verbose) {
         message("enforceDesignFullRank: threshold ", threshold,
@@ -1686,16 +1690,17 @@ extractLdMatrix <- function(ld, wantGenotype = FALSE) {
 #' @param maxVariants Integer or \code{NULL}. If set, randomly subsample
 #'   blocks larger than this to control memory usage.
 #'
-#' @return A function \code{loader(g)} that, given a block index \code{g},
-#'   returns the corresponding LD matrix or genotype matrix.
+#' @return An \code{ldLoaderSpec} object (an opaque list describing the source).
+#'   Pass it with a block index to \code{\link{loadLdBlock}} to load one block.
 #'
+#' @seealso \code{\link{loadLdBlock}}
 #' @examples
 #' # List mode with pre-computed LD
 #' R1 <- diag(10)
 #' R2 <- diag(15)
-#' loader <- ldLoader(rList = list(R1, R2))
-#' loader(1)  # returns R1
-#' loader(2)  # returns R2
+#' spec <- ldLoader(rList = list(R1, R2))
+#' loadLdBlock(spec, 1)  # returns R1
+#' loadLdBlock(spec, 2)  # returns R2
 #'
 #' @export
 ldLoader <- function(rList = NULL, xList = NULL,
@@ -1703,90 +1708,131 @@ ldLoader <- function(rList = NULL, xList = NULL,
                      ldInfo = NULL,
                      returnGenotype = FALSE,
                      maxVariants = NULL) {
-  # Validate: exactly one source
+  # Validate eagerly, at spec construction: exactly one source, plus the
+  # per-mode requirements the branch loaders used to check lazily.
   nSources <- sum(!is.null(rList), !is.null(xList),
                   !is.null(ldMetaPath), !is.null(ldInfo))
   if (nSources != 1)
     stop("Provide exactly one of rList, xList, ldMetaPath, or ldInfo.")
+  if (!is.null(ldMetaPath) && is.null(regions))
+    stop("'regions' is required when using ldMetaPath.")
+  if (!is.null(ldInfo) && (!is.data.frame(ldInfo) ||
+                           !"LD_file" %in% colnames(ldInfo)))
+    stop("ldInfo must be a data.frame with column 'LD_file'.")
 
-  if (!is.null(rList)) {
-    # List mode (R matrices)
-    loader <- function(g) {
-      R <- rList[[g]]
-      if (!is.null(maxVariants) && ncol(R) > maxVariants) {
-        keep <- sort(sample(ncol(R), maxVariants))
-        R <- R[keep, keep]
-      }
-      R
-    }
-  } else if (!is.null(xList)) {
-    # List mode (genotype matrices)
-    loader <- function(g) {
-      X <- xList[[g]]
-      if (!is.null(maxVariants) && ncol(X) > maxVariants) {
-        keep <- sort(sample(ncol(X), maxVariants))
-        X <- X[, keep]
-      }
-      X
-    }
-  } else if (!is.null(ldMetaPath)) {
-    # Region mode: load on the fly via loadLdMatrix()
-    if (is.null(regions))
-      stop("'regions' is required when using ldMetaPath.")
+  mode <- if (!is.null(rList)) "rList"
+          else if (!is.null(xList)) "xList"
+          else if (!is.null(ldMetaPath)) "meta"
+          else "info"
+  structure(
+    list(mode = mode, rList = rList, xList = xList,
+         ldMetaPath = ldMetaPath, regions = regions, ldInfo = ldInfo,
+         returnGenotype = returnGenotype, maxVariants = maxVariants),
+    class = "ldLoaderSpec")
+}
 
-    loader <- function(g) {
-      ld <- loadLdMatrix(ldMetaPath, region = regions[g],
-                         returnGenotype = returnGenotype)
-      mat <- extractLdMatrix(ld, wantGenotype = returnGenotype)
-      if (!is.null(maxVariants) && ncol(mat) > maxVariants) {
-        keep <- sort(sample(ncol(mat), maxVariants))
-        if (returnGenotype || nrow(mat) > ncol(mat)) {
-          mat <- mat[, keep]
-        } else {
-          mat <- mat[keep, keep]
-        }
-      }
-      # Center and scale genotype matrices
-      if (returnGenotype || nrow(mat) > ncol(mat)) {
-        mat <- scale(mat)
-        mat[is.na(mat)] <- 0
-      }
-      mat
-    }
-  } else {
-    # ldInfo mode: load LD blocks by index from file paths
-    # Supports all genotype formats (PLINK2, PLINK1, VCF, GDS) and
-    # pre-computed .cor.xz + .bim/.pvar blocks
-    if (!is.data.frame(ldInfo) || !"LD_file" %in% colnames(ldInfo))
-      stop("ldInfo must be a data.frame with column 'LD_file'.")
 
-    loader <- function(g) {
-      ldPath <- ldInfo$LD_file[g]
+# ---- Per-block loaders (one per ldLoader source mode) -----------------------
+# Top-level workers dispatched by .ldLoadBlock() on the spec's $mode; formerly
+# branch closures inside ldLoader().
 
-      # Auto-detect format: genotype source or pre-computed block
-      if (isGenotypeSource(ldPath)) {
-        geno <- loadGenotypeRegion(ldPath)
-        mat <- computeLd(geno)
-      } else {
-        # Pre-computed .cor.xz block
-        snpFile <- if ("SNP_file" %in% colnames(ldInfo)) {
-          ldInfo$SNP_file[g]
-        } else {
-          NULL  # let processLdMatrix auto-detect .bim/.pvar/.pvar.zst
-        }
-        ld <- processLdMatrix(ldPath, snpFile)
-        mat <- extractLdMatrix(ld)
-      }
+# @noRd
+.ldLoadRList <- function(g, rList, maxVariants) {
+  R <- rList[[g]]
+  if (!is.null(maxVariants) && ncol(R) > maxVariants) {
+    keep <- sort(sample(ncol(R), maxVariants))
+    R <- R[keep, keep]
+  }
+  R
+}
 
-      if (!is.null(maxVariants) && ncol(mat) > maxVariants) {
-        keep <- sort(sample(ncol(mat), maxVariants))
-        mat <- mat[keep, keep]
-      }
-      mat
+# @noRd
+.ldLoadXList <- function(g, xList, maxVariants) {
+  X <- xList[[g]]
+  if (!is.null(maxVariants) && ncol(X) > maxVariants) {
+    keep <- sort(sample(ncol(X), maxVariants))
+    X <- X[, keep]
+  }
+  X
+}
+
+# @noRd
+.ldLoadRegionMeta <- function(g, ldMetaPath, regions, returnGenotype,
+                              maxVariants) {
+  ld <- loadLdMatrix(ldMetaPath, region = regions[g],
+                     returnGenotype = returnGenotype)
+  mat <- extractLdMatrix(ld, wantGenotype = returnGenotype)
+  if (!is.null(maxVariants) && ncol(mat) > maxVariants) {
+    keep <- sort(sample(ncol(mat), maxVariants))
+    if (returnGenotype || nrow(mat) > ncol(mat)) {
+      mat <- mat[, keep]
+    } else {
+      mat <- mat[keep, keep]
     }
   }
+  # Center and scale genotype matrices
+  if (returnGenotype || nrow(mat) > ncol(mat)) {
+    mat <- scale(mat)
+    mat[is.na(mat)] <- 0
+  }
+  mat
+}
 
-  loader
+# @noRd
+.ldLoadIdInfo <- function(g, ldInfo, maxVariants) {
+  ldPath <- ldInfo$LD_file[g]
+
+  # Auto-detect format: genotype source or pre-computed block
+  if (isGenotypeSource(ldPath)) {
+    geno <- loadGenotypeRegion(ldPath)
+    mat <- computeLd(geno)
+  } else {
+    # Pre-computed .cor.xz block
+    snpFile <- if ("SNP_file" %in% colnames(ldInfo)) {
+      ldInfo$SNP_file[g]
+    } else {
+      NULL  # let processLdMatrix auto-detect .bim/.pvar/.pvar.zst
+    }
+    ld <- processLdMatrix(ldPath, snpFile)
+    mat <- extractLdMatrix(ld)
+  }
+
+  if (!is.null(maxVariants) && ncol(mat) > maxVariants) {
+    keep <- sort(sample(ncol(mat), maxVariants))
+    mat <- mat[keep, keep]
+  }
+  mat
+}
+
+# Dispatch a single block load by the spec's source mode.
+# @noRd
+.ldLoadBlock <- function(spec, g) {
+  switch(spec$mode,
+    rList = .ldLoadRList(g, spec$rList, spec$maxVariants),
+    xList = .ldLoadXList(g, spec$xList, spec$maxVariants),
+    meta  = .ldLoadRegionMeta(g, spec$ldMetaPath, spec$regions,
+                              spec$returnGenotype, spec$maxVariants),
+    info  = .ldLoadIdInfo(g, spec$ldInfo, spec$maxVariants))
+}
+
+#' Load one LD block from an ldLoader spec
+#'
+#' Given an \code{ldLoaderSpec} (from \code{\link{ldLoader}}) and a block index
+#' \code{g}, load the corresponding LD correlation matrix (or the genotype
+#' matrix, in region mode with \code{returnGenotype = TRUE}).
+#'
+#' @param spec An \code{ldLoaderSpec} object returned by \code{\link{ldLoader}}.
+#' @param g Integer block index (1-based).
+#' @return The LD correlation matrix or genotype matrix for block \code{g}.
+#' @seealso \code{\link{ldLoader}}
+#' @examples
+#' spec <- ldLoader(rList = list(diag(10), diag(15)))
+#' loadLdBlock(spec, 1)
+#' @export
+loadLdBlock <- function(spec, g) {
+  if (!inherits(spec, "ldLoaderSpec"))
+    stop("`spec` must be an ldLoaderSpec (from ldLoader()).")
+  .ldLoadBlock(spec, g)
 }
 
 

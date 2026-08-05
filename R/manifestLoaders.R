@@ -384,6 +384,28 @@ NULL
   }
 }
 
+# Resolve one canonical sumstats field to its source column: honor an explicit
+# columnMapping (under any accepted key spelling), else fall back to known column
+# aliases; NA when unresolved.
+# @noRd
+.resolveSumstatKey <- function(key, df, mapping, label) {
+  # Look the field up in the mapping under any accepted standard-key spelling
+  # (`z`/`Z`, `n_sample`/`N`, ...). `intersect` avoids the "subscript out of
+  # bounds" a named character vector throws for an absent `[[` key.
+  if (!is.null(mapping)) {
+    cand <- intersect(.sumstatMappingKeys[[key]], names(mapping))
+    if (length(cand) >= 1L) {
+      src <- mapping[[cand[[1L]]]]
+      if (!(src %in% names(df))) {
+        stop(label, ": columnMapping['", cand[[1L]], "'] = '", src,
+             "' is not a column in the sumstats file.")
+      }
+      return(src)
+    }
+  }
+  intersect(.sumstatColumnAliases[[key]], names(df))[1L]
+}
+
 # Standardise the columns of a raw sumstats data.frame into the canonical
 # schema expected by .dfToEntryGranges: chrom, pos, SNP, A1, A2, Z, N (+
 # optional N_CASE, N_CONTROL, BETA, SE, P, MAF, INFO). N is required UNLESS
@@ -399,25 +421,8 @@ NULL
   # read paths, and so explicit columnMapping values match the bare name.
   if (ncol(df) > 0L) names(df)[1L] <- sub("^#", "", names(df)[1L])
   mapping <- .readColumnMapping(columnMapping)
-  resolveKey <- function(key) {
-    # Look the field up in the mapping under any accepted standard-key spelling
-    # (`z`/`Z`, `n_sample`/`N`, ...). `intersect` avoids the "subscript out of
-    # bounds" a named character vector throws for an absent `[[` key.
-    if (!is.null(mapping)) {
-      cand <- intersect(.sumstatMappingKeys[[key]], names(mapping))
-      if (length(cand) >= 1L) {
-        src <- mapping[[cand[[1L]]]]
-        if (!(src %in% names(df))) {
-          stop(label, ": columnMapping['", cand[[1L]], "'] = '", src,
-               "' is not a column in the sumstats file.")
-        }
-        return(src)
-      }
-    }
-    intersect(.sumstatColumnAliases[[key]], names(df))[1L]
-  }
   required <- c("chrom", "pos", "variant_id", "A1", "A2")
-  resolved <- setNames(lapply(required, resolveKey), required)
+  resolved <- setNames(lapply(required, .resolveSumstatKey, df, mapping, label), required)
   missingKeys <- required[vapply(resolved, function(x) is.na(x) || is.null(x), logical(1))]
   if (length(missingKeys) > 0L) {
     stop(label, ": sumstats file is missing required field(s): ",
@@ -427,9 +432,9 @@ NULL
   # z-score: a Z column, OR BETA + SE (from which the Wald z = beta/se is
   # derived, matching susie_rss()'s z_method="wald"). At least one is required;
   # when both a Z column and BETA/SE are present, the Z column takes precedence.
-  zSrc      <- resolveKey("Z")
-  betaSrc   <- resolveKey("BETA")
-  seSrc     <- resolveKey("SE")
+  zSrc      <- .resolveSumstatKey("Z", df, mapping, label)
+  betaSrc   <- .resolveSumstatKey("BETA", df, mapping, label)
+  seSrc     <- .resolveSumstatKey("SE", df, mapping, label)
   hasZ      <- !is.na(zSrc)    && !is.null(zSrc)
   hasBetaSe <- !is.na(betaSrc) && !is.null(betaSrc) &&
                !is.na(seSrc)   && !is.null(seSrc)
@@ -442,9 +447,9 @@ NULL
   # which summaryStatsQc(effectiveN=) derives the effective sample size). At
   # least one is required; both may be present (N_CASE/N_CONTROL take priority
   # downstream when effectiveN is on).
-  nSrc        <- resolveKey("N")
-  ncaseSrc    <- resolveKey("N_CASE")
-  ncontrolSrc <- resolveKey("N_CONTROL")
+  nSrc        <- .resolveSumstatKey("N", df, mapping, label)
+  ncaseSrc    <- .resolveSumstatKey("N_CASE", df, mapping, label)
+  ncontrolSrc <- .resolveSumstatKey("N_CONTROL", df, mapping, label)
   hasN      <- !is.na(nSrc)        && !is.null(nSrc)
   hasCounts <- !is.na(ncaseSrc)    && !is.null(ncaseSrc) &&
                !is.na(ncontrolSrc) && !is.null(ncontrolSrc)
@@ -472,7 +477,7 @@ NULL
     out$N_CONTROL <- as.numeric(df[[ncontrolSrc]])
   }
   for (key in c("BETA", "SE", "P", "MAF", "INFO")) {
-    src <- resolveKey(key)
+    src <- .resolveSumstatKey(key, df, mapping, label)
     if (!is.na(src) && !is.null(src)) out[[key]] <- as.numeric(df[[src]])
   }
   out
@@ -499,6 +504,17 @@ NULL
        "); pass `sampleSelect` to choose the study column.")
 }
 
+# Read column `tag` from the GWAS-VCF geno matrix for one sample as numeric, or
+# NULL when the tag is absent/unmapped.
+# @noRd
+.vcfGetField <- function(tag, geno, sample) {
+  if (!is.null(tag) && tag %in% names(geno)) {
+    as.numeric(geno[[tag]][, sample])
+  } else {
+    NULL
+  }
+}
+
 # Convert a VCF (GWAS-VCF format) into the canonical sumstats data.frame. The
 # effect allele (A1) is ALT; the other allele (A2) is REF. Stats come from the
 # per-study FORMAT fields ES/SE/LP/SS/EAF, with Z = ES / SE.
@@ -511,18 +527,11 @@ NULL
   ref <- as.character(VariantAnnotation::ref(vcf))
   geno <- VariantAnnotation::geno(vcf)
   sample <- .pickVcfSample(colnames(vcf), sampleSelect, label)
-  getField <- function(tag) {
-    if (!is.null(tag) && tag %in% names(geno)) {
-      as.numeric(geno[[tag]][, sample])
-    } else {
-      NULL
-    }
-  }
-  es  <- getField(fmap$BETA)
-  se  <- getField(fmap$SE)
-  lp  <- getField(fmap$P)
-  ss  <- getField(fmap$N)
-  eaf <- getField(fmap$MAF)
+  es  <- .vcfGetField(fmap$BETA, geno, sample)
+  se  <- .vcfGetField(fmap$SE, geno, sample)
+  lp  <- .vcfGetField(fmap$P, geno, sample)
+  ss  <- .vcfGetField(fmap$N, geno, sample)
+  eaf <- .vcfGetField(fmap$MAF, geno, sample)
   if (is.null(es) || is.null(se)) {
     stop(label, ": GWAS-VCF must carry ES and SE FORMAT fields to derive Z ",
          "(configure via `formatMapping`).")
@@ -843,6 +852,16 @@ loadQtlDatasetFromManifest <- function(manifest, study = NULL,
   genome        = c("genome"),
   ldSketchPath  = c("ldSketchPath", "ld_sketch_path", "ld_sketch"))
 
+# TRUE if study `i` has usable case/control counts OR a total-N scalar, so a
+# missing per-variant N is acceptable for that study.
+# @noRd
+.manifestHasStudyScalar <- function(i, nCaseCol, nControlCol, nSampleCol) {
+  ccOk <- !is.null(nCaseCol) && !is.null(nControlCol) &&
+          is.finite(nCaseCol[[i]]) && is.finite(nControlCol[[i]])
+  nOk  <- !is.null(nSampleCol) && is.finite(nSampleCol[[i]])
+  isTRUE(ccOk) || isTRUE(nOk)
+}
+
 #' @title Load a GwasSumStats collection from a manifest
 #' @description Build a \code{\link{GwasSumStats}} from a manifest with one row
 #'   per study. No QC is run (the result carries \code{qcInfo = list()}). Each
@@ -897,13 +916,6 @@ loadGwasSumStatsFromManifest <- function(manifest, genome = NULL,
   nCaseCol    <- if ("nCase" %in% names(df))    as.numeric(df$nCase)    else NULL
   nControlCol <- if ("nControl" %in% names(df)) as.numeric(df$nControl) else NULL
   nSampleCol  <- if ("nSample" %in% names(df))  as.numeric(df$nSample)  else NULL
-  hasStudyScalar <- function(i) {
-    ccOk <- !is.null(nCaseCol) && !is.null(nControlCol) &&
-            is.finite(nCaseCol[[i]]) && is.finite(nControlCol[[i]])
-    nOk  <- !is.null(nSampleCol) && is.finite(nSampleCol[[i]])
-    isTRUE(ccOk) || isTRUE(nOk)
-  }
-
   entries <- lapply(seq_len(nrow(df)), function(i) {
     label <- paste0("GwasSumStats[study=", df$study[[i]], "]")
     mapping <- if ("columnMapping" %in% names(df) &&
@@ -915,10 +927,14 @@ loadGwasSumStatsFromManifest <- function(manifest, genome = NULL,
     }
     gr <- .loadSumStatsEntry(.resolveRel(as.character(df$sumStatsPath[[i]]), base),
                              region, mapping, sampleSelect, formatMapping, label,
-                             allowNoN = hasStudyScalar(i))
+                             allowNoN = .manifestHasStudyScalar(i, nCaseCol, nControlCol, nSampleCol))
     .checkLdContainment(ldSketch, gr, minLdOverlapWarn, label)
     gr
   })
+
+  # Trim a genome-wide LD sketch to the summary stats' per-chromosome position
+  # span so the object doesn't carry a full-genome snpInfo.
+  ldSketch <- .subsetSketchToRange(ldSketch, entries)
 
   args <- list(study = as.character(df$study), entry = entries,
                genome = genome, ldSketch = ldSketch)
@@ -1004,6 +1020,9 @@ loadQtlSumStatsFromManifest <- function(manifest, genome = NULL,
                                      minLdOverlapWarn, columnMapping,
                                      sampleSelect, formatMapping,
                                      allowNoN = allowNoN)
+  # Trim a genome-wide LD sketch to the summary stats' per-chromosome position
+  # span so the object doesn't carry a full-genome snpInfo.
+  ldSketch <- .subsetSketchToRange(ldSketch, entries)
   args <- list(study = as.character(df$study),
                context = as.character(df$context),
                trait = as.character(df$trait),

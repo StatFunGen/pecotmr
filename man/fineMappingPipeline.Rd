@@ -499,6 +499,11 @@ deliberately not ported here:
         carries the bare token (\code{"susie"},
         \code{"susieInf"}, \code{"mvsusie"}, ...) only. QC
         provenance is recorded on the sumstats' \code{qcInfo}.
+  \item An entry that \code{summaryStatsQc(pipCutoffToSkip = ...)} screened
+        out (recorded as \code{qcInfo$entryAudit[[i]]$pipScreenSkipped}, and
+        emptied to 0 variants) is \strong{skipped}, not fit: it produces no
+        row and a message with the screen reason. An all-screened collection
+        yields a valid empty result rather than an error.
 }
 }
 

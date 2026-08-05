@@ -114,23 +114,8 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
   # empty union means no GWAS study has usable PIPs, so every study is skipped
   # before this is ever reached (and the length guard skips relabeling entirely
   # when the union GWAS panel is empty).
-  alignedByTuple <- vector("list", nrow(qtlTuples))
-  alignTuple <- function(k) {
-    if (!is.null(alignedByTuple[[k]])) return(alignedByTuple[[k]])
-    aligned <- lapply(qtlRegionsByTuple[[k]], function(x) {
-      if (!is.null(names(x$pip)) && length(unionGwasNames) > 0L) {
-        # Relabel matched pip names to the GWAS convention via the shared
-        # matcher (tuple match; unmatched names kept as-is).
-        mm <- matchVariants(names(x$pip), unionGwasNames)
-        nm <- names(x$pip)
-        nm[mm$idxA] <- unionGwasNames[mm$idxB]
-        names(x$pip) <- nm
-      }
-      x
-    })
-    alignedByTuple[[k]] <<- aligned
-    aligned
-  }
+  alignCache <- new.env(parent = emptyenv())
+  alignCache$byTuple <- vector("list", nrow(qtlTuples))
 
   results <- list()
   for (gi in seq_along(gwasStudies)) {
@@ -154,7 +139,7 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
       enr <- tryCatch(
         qtlEnrichment(
           gwasPip          = gwasPip,
-          susieQtlRegions  = alignTuple(k),
+          susieQtlRegions  = .enrAlignTuple(k, alignCache, qtlRegionsByTuple, unionGwasNames),
           numGwas          = numGwas,
           piQtl            = piQtl,
           lambda           = lambda,
@@ -198,6 +183,26 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
 # =============================================================================
 # Internal helpers
 # =============================================================================
+
+# Align (memoized) the QTL regions of tuple `k` to the GWAS naming convention,
+# caching the result in the `cache` environment's `byTuple` list.
+# @noRd
+.enrAlignTuple <- function(k, cache, qtlRegionsByTuple, unionGwasNames) {
+  if (!is.null(cache$byTuple[[k]])) return(cache$byTuple[[k]])
+  aligned <- lapply(qtlRegionsByTuple[[k]], function(x) {
+    if (!is.null(names(x$pip)) && length(unionGwasNames) > 0L) {
+      # Relabel matched pip names to the GWAS convention via the shared
+      # matcher (tuple match; unmatched names kept as-is).
+      mm <- matchVariants(names(x$pip), unionGwasNames)
+      nm <- names(x$pip)
+      nm[mm$idxA] <- unionGwasNames[mm$idxB]
+      names(x$pip) <- nm
+    }
+    x
+  })
+  cache$byTuple[[k]] <- aligned
+  aligned
+}
 
 # Build a named GWAS PIP vector for one study. Walks every row of the
 # GwasFineMappingResult tagged with that study, extracts the per-row
@@ -269,6 +274,15 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
   out
 }
 
+# Pull one enrichment field from qtlEnrichment's list output as a scalar numeric
+# (NA when absent).
+# @noRd
+.enrPickScalar <- function(field, enr) {
+  v <- enr[[field]]
+  if (is.null(v)) NA_real_
+  else as.numeric(v[[1L]])
+}
+
 # Coerce qtlEnrichment's variable-shape output into a single-row
 # named list with the canonical columns the caller documents. The
 # underlying estimator returns either a list with named numeric scalars
@@ -277,15 +291,10 @@ qtlEnrichmentPipeline <- function(gwasFineMappingResult,
 # @noRd
 .enrFlattenEnrichment <- function(enr) {
   if (is.list(enr) && is.null(dim(enr))) {
-    pickScalar <- function(field) {
-      v <- enr[[field]]
-      if (is.null(v)) NA_real_
-      else as.numeric(v[[1L]])
-    }
     list(
-      enrichment        = pickScalar("enrichment"),
-      enrichmentSe      = pickScalar("enrichmentSe"),
-      enrichmentLogOdds = pickScalar("enrichmentLogOdds"))
+      enrichment        = .enrPickScalar("enrichment", enr),
+      enrichmentSe      = .enrPickScalar("enrichmentSe", enr),
+      enrichmentLogOdds = .enrPickScalar("enrichmentLogOdds", enr))
   } else if (is.matrix(enr) || is.data.frame(enr)) {
     df <- as.data.frame(enr, stringsAsFactors = FALSE)
     if (nrow(df) == 0L) {

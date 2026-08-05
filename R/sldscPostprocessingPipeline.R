@@ -182,33 +182,10 @@ sldscPostprocessingPipeline <- function(sldscData,
   ptViewSingle <- .sldscViewForMeta(perTrait, "single")
   ptViewJoint  <- .sldscViewForMeta(perTrait, "joint")
 
-  buildTable <- function(quantity, view, label) {
-    rows <- list()
-    for (cat in targetCategories) {
-      m <- metaSldscRandom(view, cat, quantity)
-      rows[[cat]] <- data.frame(
-        target    = cat,
-        isBinary = unname(isBinary[cat]),
-        mean      = m$mean,
-        se        = m$se,
-        p         = m$p,
-        nTraits  = m$nTraits,
-        stringsAsFactors = FALSE
-      )
-    }
-    df <- do.call(rbind, rows)
-    rownames(df) <- NULL
-    nmOld <- c("mean", "se", "p")
-    nmNew <- paste0(label, toupper(substring(nmOld, 1, 1)),
-                    substring(nmOld, 2))
-    names(df)[names(df) %in% nmOld] <- nmNew
-    df
-  }
-
-  metaTauStarSingle <- buildTable("tauStar",   ptViewSingle, "single")
-  metaTauStarJoint  <- buildTable("tauStar",   ptViewJoint,  "joint")
-  metaESingle       <- buildTable("enrichment", ptViewSingle, "single")
-  metaEsSingle      <- buildTable("enrichstat", ptViewSingle, "single")
+  metaTauStarSingle <- .sldscBuildTable("tauStar",   ptViewSingle, "single", isBinary, targetCategories)
+  metaTauStarJoint  <- .sldscBuildTable("tauStar",   ptViewJoint,  "joint", isBinary, targetCategories)
+  metaESingle       <- .sldscBuildTable("enrichment", ptViewSingle, "single", isBinary, targetCategories)
+  metaEsSingle      <- .sldscBuildTable("enrichstat", ptViewSingle, "single", isBinary, targetCategories)
 
   # Combine tauStar single + joint into one wide frame.
   metaTauStar <- metaTauStarSingle
@@ -252,21 +229,20 @@ sldscPostprocessingPipeline <- function(sldscData,
                    length(targetLabels), length(targetCategories),
                    paste(targetCategories, collapse = ", ")))
     relab    <- setNames(targetLabels, targetCategories)
-    relabVec <- function(x) { y <- unname(relab[x]); y[is.na(y)] <- x[is.na(y)]; y }
 
     for (t in names(res$per_trait)) {
       pt <- res$per_trait[[t]]
       if (!is.null(pt$summary) && "target" %in% names(pt$summary))
-        res$per_trait[[t]]$summary$target <- relabVec(pt$summary$target)
+        res$per_trait[[t]]$summary$target <- .sldscRelabVec(pt$summary$target, relab)
       for (bn in c("tau_star_blocks_single", "tau_star_blocks_joint")) {
         b <- pt[[bn]]
         if (!is.null(b) && !is.null(colnames(b)))
-          colnames(res$per_trait[[t]][[bn]]) <- relabVec(colnames(b))
+          colnames(res$per_trait[[t]][[bn]]) <- .sldscRelabVec(colnames(b), relab)
       }
     }
     for (mn in names(res$meta)) {
       if (!is.null(res$meta[[mn]]) && "target" %in% names(res$meta[[mn]]))
-        res$meta[[mn]]$target <- relabVec(res$meta[[mn]]$target)
+        res$meta[[mn]]$target <- .sldscRelabVec(res$meta[[mn]]$target, relab)
     }
     res$params$target_categories_orig <- res$params$target_categories
     res$params$target_categories      <- unname(relab[targetCategories])
@@ -277,3 +253,34 @@ sldscPostprocessingPipeline <- function(sldscData,
 
   res
 }
+
+# Build a per-category meta table for one quantity/view, with `label`-prefixed
+# mean/se/p columns and an isBinary flag.
+# @noRd
+.sldscBuildTable <- function(quantity, view, label, isBinary, targetCategories) {
+  rows <- list()
+  for (cat in targetCategories) {
+    m <- metaSldscRandom(view, cat, quantity)
+    rows[[cat]] <- data.frame(
+      target    = cat,
+      isBinary = unname(isBinary[cat]),
+      mean      = m$mean,
+      se        = m$se,
+      p         = m$p,
+      nTraits  = m$nTraits,
+      stringsAsFactors = FALSE
+    )
+  }
+  df <- do.call(rbind, rows)
+  rownames(df) <- NULL
+  nmOld <- c("mean", "se", "p")
+  nmNew <- paste0(label, toupper(substring(nmOld, 1, 1)),
+                  substring(nmOld, 2))
+  names(df)[names(df) %in% nmOld] <- nmNew
+  df
+}
+
+# Relabel a target-category vector via the `relab` map, leaving unmapped values
+# unchanged.
+# @noRd
+.sldscRelabVec <- function(x, relab) { y <- unname(relab[x]); y[is.na(y)] <- x[is.na(y)]; y }

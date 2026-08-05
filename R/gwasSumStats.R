@@ -71,6 +71,16 @@ NULL
 # Constructor
 # =============================================================================
 
+# Recycle a length-1 per-study scalar to one value per study (or validate an
+# already-per-study vector), coerced to numeric.
+# @noRd
+.recyclePerStudy <- function(v, nm, study) {
+  if (length(v) == 1L && length(study) > 1L) v <- rep(v, length(study))
+  if (length(v) != length(study))
+    stop("`", nm, "` must have length 1 or length(study).")
+  as.numeric(v)
+}
+
 #' @title Create a GwasSumStats Collection Object
 #' @description Construct a \code{GwasSumStats} S4 DFrame-subclass
 #'   collection from per-study tuple vectors and a list of \code{GRanges}
@@ -126,14 +136,7 @@ GwasSumStats <- function(study, entry, genome, ldSketch = NULL,
     stop("length(entry) (", length(entry),
          ") must equal length(study) (", length(study), ").")
   }
-  # Per-study scalars: recycle a single value to one-per-study.
-  recycle <- function(v, nm) {
-    if (length(v) == 1L && length(study) > 1L) v <- rep(v, length(study))
-    if (length(v) != length(study))
-      stop("`", nm, "` must have length 1 or length(study).")
-    as.numeric(v)
-  }
-  varY <- recycle(varY, "varY")
+  varY <- .recyclePerStudy(varY, "varY", study)
 
   cols <- list(
     study = as.character(study),
@@ -144,9 +147,9 @@ GwasSumStats <- function(study, entry, genome, ldSketch = NULL,
   # supplied (default NULL), so quantitative-trait GwasSumStats keep the
   # original schema. Provide a vector (length = n studies) with NA for the
   # non-case/control studies in a mixed collection.
-  if (!is.null(nCase))    cols$nCase    <- recycle(nCase, "nCase")
-  if (!is.null(nControl)) cols$nControl <- recycle(nControl, "nControl")
-  if (!is.null(nSample))  cols$nSample  <- recycle(nSample, "nSample")
+  if (!is.null(nCase))    cols$nCase    <- .recyclePerStudy(nCase, "nCase", study)
+  if (!is.null(nControl)) cols$nControl <- .recyclePerStudy(nControl, "nControl", study)
+  if (!is.null(nSample))  cols$nSample  <- .recyclePerStudy(nSample, "nSample", study)
   extras <- list(...)
   for (nm in names(extras)) cols[[nm]] <- extras[[nm]]
   df <- do.call(S4Vectors::DataFrame, c(cols, list(check.names = FALSE)))

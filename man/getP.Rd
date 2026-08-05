@@ -21,5 +21,5 @@ Numeric vector of p-values, or \code{NULL} if not available.
 Extract the association p-value vector from a
   \code{GwasSumStats} or \code{QtlSumStats} entry, selected by its identity
   tuple. Part of the first-class summary-statistic column set alongside
-  \code{\link{getZ}} / \code{\link{getBeta}} / \code{\link{getSE}}.
+  \code{\link{getZ}} / \code{\link{getBeta}} / \code{\link{getSe}}.
 }

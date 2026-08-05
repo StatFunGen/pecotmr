@@ -5502,3 +5502,38 @@ test_that("summaryStatsQc kriging QC sign-flips an LD-inconsistent variant and r
   # the audit's flip count equals the diagnostics rows marked flipped.
   expect_identical(sum(ea$krigingDiagnostics$flipped), ea$krigingFlipped)
 })
+
+# ---- LD-sketch trimming to the summary-stats range / final variants ----------
+
+test_that(".subsetSketchToRange keeps only panel variants in the entries' per-chrom span", {
+  h  <- readGenotypes(test_path("test_data/test_variants"), format = "plink2")
+  si <- getSnpInfo(h)
+  ch    <- names(sort(table(si$CHR), decreasing = TRUE))[1]     # busiest chromosome
+  chIdx <- which(si$CHR == ch)
+  slice <- si[chIdx[seq_len(min(30L, length(chIdx)))], , drop = FALSE]
+  gr <- GenomicRanges::GRanges(paste0("chr", slice$CHR),
+          IRanges::IRanges(as.integer(slice$BP), width = 1L))
+  S4Vectors::mcols(gr)$SNP <- slice$SNP
+  sub <- getSnpInfo(pecotmr:::.subsetSketchToRange(h, list(gr)))
+  lo <- min(slice$BP); hi <- max(slice$BP)
+  expected <- si$SNP[pecotmr:::canonChrom(si$CHR) == pecotmr:::canonChrom(ch) &
+                     as.integer(si$BP) >= lo & as.integer(si$BP) <= hi]
+  expect_setequal(sub$SNP, expected)
+  expect_lt(nrow(sub), nrow(si))
+})
+
+test_that(".subsetSketchToIds keeps exactly the entries' variants", {
+  h  <- readGenotypes(test_path("test_data/test_variants"), format = "plink2")
+  si <- getSnpInfo(h)
+  sel <- c(3L, 10L, 40L, 200L)
+  gr <- GenomicRanges::GRanges(paste0("chr", si$CHR[sel]),
+          IRanges::IRanges(as.integer(si$BP[sel]), width = 1L))
+  S4Vectors::mcols(gr)$SNP <- si$SNP[sel]
+  sub <- getSnpInfo(pecotmr:::.subsetSketchToIds(h, list(gr)))
+  expect_setequal(normalizeVariantId(sub$SNP), normalizeVariantId(si$SNP[sel]))
+})
+
+test_that(".subsetSketchToRange / .subsetSketchToIds are NULL-safe", {
+  expect_null(pecotmr:::.subsetSketchToRange(NULL, list()))
+  expect_null(pecotmr:::.subsetSketchToIds(NULL, list()))
+})

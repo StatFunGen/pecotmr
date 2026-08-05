@@ -20,18 +20,23 @@ NULL
 
 # ---- identity derivation ----------------------------------------------------
 
+# A group's constant value on axis `ax` (study/context/trait), or NULL when the
+# axis varies (jointed) so the prior lookup matches any value there.
+# @noRd
+.jointAxisVal <- function(ax, conditions) {
+  u <- unique(as.character(conditions[[ax]]))
+  if (length(u) > 1L) NULL else u[[1L]]
+}
+
 # The data-driven-prior LOOKUP key for a group's conditions: a varying (jointed)
 # axis -> NULL (match-any, because the shared joint mr.mash fit lives on every
 # per-context row), a constant axis -> its single value. Used only to find the
 # mr.mash fit; the OUTPUT rows carry each condition's REAL (study, context,
 # trait).
 .jointPriorKey <- function(conditions) {
-  axisVal <- function(ax) {
-    u <- unique(as.character(conditions[[ax]]))
-    if (length(u) > 1L) NULL else u[[1L]]
-  }
-  list(study = axisVal("study"), context = axisVal("context"),
-       trait = axisVal("trait"))
+  list(study = .jointAxisVal("study", conditions),
+       context = .jointAxisVal("context", conditions),
+       trait = .jointAxisVal("trait", conditions))
 }
 
 # The ";"-joined distinct members of a varying axis (the per-row provenance tag
@@ -69,17 +74,11 @@ NULL
        foldFits    = cvRes$foldFits)
 }
 
-# Mutable accumulator for the joint rows the engine assembles. Each add(...)
-# stores one fitted group as a per-row RECORD (a named list of column values
-# whose names match the target collection constructor's parameters). Nothing
-# here enumerates columns, so adding a column needs only that it be passed to
-# add(); construct() folds the records into a collection via .buildJointResult.
-.jointRows <- function() {
-  e <- new.env(parent = emptyenv())
-  e$records <- list()
-  e$add <- function(...) e$records[[length(e$records) + 1L]] <- list(...)
-  e
-}
+# The engine assembles one per-row RECORD per fitted entry: a named list whose
+# names match the target collection constructor's parameters (see
+# .jointEntryRecords()). The driver collects these into a plain list and
+# construct() folds them into a collection via .buildJointResult(). Nothing here
+# enumerates columns, so adding a column needs only that it be put in the record.
 
 # --- Trait-position and fine-mapping-region provenance ----------------------
 # Two DISTINCT per-row anchors, kept separate because they mean different things
@@ -323,25 +322,29 @@ setMethod("fitJointGroup", signature("SumStatsJointGroup", "FmJointPipeline"),
       includeAllCs = cfg$includeAllCs))
   })
 
+# Select the list element whose name (stripped of a _predicted/_performance
+# suffix) matches `token`; NULL if none.
+# @noRd
+.jointPickByBase <- function(lst, token) {
+  if (is.null(lst) || length(lst) == 0L) return(NULL)
+  bare <- sub("(_predicted|Predicted|_performance|Performance)$", "", names(lst))
+  hit <- which(bare == token)
+  if (length(hit) == 0L) NULL else lst[[hit[[1L]]]]
+}
+
 # Reshape a twasWeightsCv() result into the single joint entry's cvResult: the
 # out-of-fold prediction matrix, the per-condition metric rows, and the per-fold
 # mr.mash fits (named fold_<j>) that fineMappingPipeline's mvSuSiE path consumes.
 .jointTwasCvResult <- function(cv, token) {
   if (is.null(cv)) return(NULL)
-  pickByBase <- function(lst) {
-    if (is.null(lst) || length(lst) == 0L) return(NULL)
-    bare <- sub("(_predicted|Predicted|_performance|Performance)$", "", names(lst))
-    hit <- which(bare == token)
-    if (length(hit) == 0L) NULL else lst[[hit[[1L]]]]
-  }
   ffKey <- paste0(token, "_weights")
   foldFits <- if (!is.null(cv$foldFits)) {
     ff <- lapply(cv$foldFits, function(f) f[[ffKey]])
     if (all(vapply(ff, is.null, logical(1)))) NULL else ff
   } else NULL
   list(samplePartition = cv$samplePartition,
-       predictions     = pickByBase(cv$prediction),
-       metrics         = pickByBase(cv$performance),
+       predictions     = .jointPickByBase(cv$prediction, token),
+       metrics         = .jointPickByBase(cv$performance, token),
        foldFits        = foldFits)
 }
 
@@ -520,13 +523,13 @@ setMethod("fitJointGroup", signature("SumStatsJointGroup", "TwasJointPipeline"),
 }
 
 setMethod("construct", "FmJointPipeline",
-  function(pipeline, rows, ...)
-    .buildJointResult(QtlFineMappingResult, rows$records,
+  function(pipeline, records, ...)
+    .buildJointResult(QtlFineMappingResult, records,
                       pipeline@config$ldSketch))
 
 setMethod("construct", "TwasJointPipeline",
-  function(pipeline, rows, ...)
-    .buildJointResult(TwasWeights, rows$records, pipeline@config$ldSketch))
+  function(pipeline, records, ...)
+    .buildJointResult(TwasWeights, records, pipeline@config$ldSketch))
 
 # ---- enumerators (pattern x dataForm -> list<JointGroup>) --------------------
 
@@ -541,7 +544,7 @@ setMethod("construct", "TwasJointPipeline",
   verbose <- if (is.null(args$verbose)) 1 else args$verbose
   groups <- list()
   for (tid in scopedTraits) {
-    xy <- .buildIndividualCrossContextXY(
+    xy <- .buildIndividualCrossContextXy(
       data, tid, scopedContexts, args$cisWindow, verbose,
       label = "jointCrossContext", region = args$region)
     if (is.null(xy)) next
@@ -591,7 +594,7 @@ setMethod("construct", "TwasJointPipeline",
   verbose <- if (is.null(args$verbose)) 1 else args$verbose
   groups <- list()
   for (cx in scopedContexts) {
-    xy <- .buildIndividualCrossTraitXY(
+    xy <- .buildIndividualCrossTraitXy(
       data, cx, scopedTraits, args$cisWindow, verbose,
       label = "jointCrossTrait", study = study, region = args$region)
     if (is.null(xy)) next
@@ -677,7 +680,7 @@ setMethod("construct", "TwasJointPipeline",
   study <- getStudy(data)
   if (!(study %in% scope$studies)) return(list())
   verbose <- if (is.null(args$verbose)) 1 else args$verbose
-  xy <- .buildComposedIndividualXY(
+  xy <- .buildComposedIndividualXy(
     data, scope, study, args$cisWindow, verbose,
     label = "composed", region = args$region)
   if (is.null(xy)) return(list())
@@ -783,6 +786,32 @@ setMethod("construct", "TwasJointPipeline",
   out
 }
 
+# Append one output record per (condition, method) to the joint-rows accumulator
+# `rows` (mutated by reference), resolving each condition's fine-mapping region +
+# trait position. `grp` bundles the per-group invariants list(cond, js, jc, jt).
+# @noRd
+.jointEntryRecords <- function(entries, method, grp, data, cisWindow) {
+  cond <- grp$cond
+  recs <- lapply(seq_len(min(length(entries), nrow(cond))), function(i) {
+    e <- entries[[i]]
+    if (is.null(e)) return(NULL)
+    ctx <- as.character(cond$context[[i]])
+    tid <- as.character(cond$trait[[i]])
+    # region = the fine-mapping window (cis-window-expanded for a QtlDataset,
+    # variant span for a QtlSumStats); traitPos = the bare trait position
+    # (NULL when a QtlSumStats caller supplied none -> the column is omitted
+    # and getTraitPosition() reports NA).
+    reg  <- .fitRegionFor(data, ctx, tid, cisWindow)
+    tpos <- .traitPosFor(data, ctx, tid)
+    list(study = as.character(cond$study[[i]]),
+         context = ctx, trait = tid,
+         method = method, entry = e,
+         jointStudies = grp$js, jointContexts = grp$jc, jointTraits = grp$jt,
+         region = reg, traitPos = tpos)
+  })
+  Filter(Negate(is.null), recs)
+}
+
 # Run one dispatch cell: enumerate joint groups, fit each method (S4 dispatch on
 # the group x pipeline pair) per group, accumulate per-context rows, build the
 # per-pipeline result. The loop is GROUP-outer / token-inner so the twas ensemble
@@ -795,40 +824,22 @@ setMethod("construct", "TwasJointPipeline",
   if (length(groups) == 0L) return(NULL)
   doEnsemble <- is(pipeline, "TwasJointPipeline") &&
                 isTRUE(pipeline@config$ensemble)
-  rows <- .jointRows()
+  records <- list()
   for (g in groups) {
     cond <- g@conditions
     # Provenance: the ";"-joined members of each varying axis, identical on every
     # per-context row of this joint group.
-    js <- .jointAxisMembers(cond, "study")
-    jc <- .jointAxisMembers(cond, "context")
-    jt <- .jointAxisMembers(cond, "trait")
-    addEntries <- function(entries, method) {
-      for (i in seq_len(min(length(entries), nrow(cond)))) {
-        e <- entries[[i]]
-        if (is.null(e)) next
-        ctx <- as.character(cond$context[[i]])
-        tid <- as.character(cond$trait[[i]])
-        # region = the fine-mapping window (cis-window-expanded for a QtlDataset,
-        # variant span for a QtlSumStats); traitPos = the bare trait position
-        # (NULL when a QtlSumStats caller supplied none -> the column is omitted
-        # and getTraitPosition() reports NA).
-        reg  <- .fitRegionFor(data, ctx, tid, args$cisWindow)
-        tpos <- .traitPosFor(data, ctx, tid)
-        rows$add(study = as.character(cond$study[[i]]),
-                 context = ctx, trait = tid,
-                 method = method, entry = e,
-                 jointStudies = js, jointContexts = jc, jointTraits = jt,
-                 region = reg, traitPos = tpos)
-      }
-    }
+    grp <- list(cond = cond,
+                js = .jointAxisMembers(cond, "study"),
+                jc = .jointAxisMembers(cond, "context"),
+                jt = .jointAxisMembers(cond, "trait"))
     # Twas: resolve this group's fine-mapping fits + CV (keyed on its first
     # condition; the joint fit is shared across conditions) and fix ONE fold
     # partition up front, so every method's out-of-fold CV predictions are
     # aligned for the ensemble layer. FM leaves args untouched.
     fitArgs <- .twasGroupArgs(g, pipeline, args)
-    # Per-method fit -> per-condition entries -> rows (shared FM + twas). Retain
-    # each method's entries so the twas ensemble layer can combine them.
+    # Per-method fit -> per-condition entries -> records (shared FM + twas).
+    # Retain each method's entries so the twas ensemble layer can combine them.
     perTokenEntries <- list()
     for (token in tokens) {
       # Resume cache: if every condition of this group is already present in the
@@ -848,17 +859,19 @@ setMethod("construct", "TwasJointPipeline",
       if (is.null(entries)) entries <- fitJointGroup(g, pipeline, token, fitArgs)
       if (is.null(entries) || length(entries) == 0L) next
       perTokenEntries[[token]] <- entries
-      addEntries(entries, token)
+      records <- c(records,
+                   .jointEntryRecords(entries, token, grp, data, args$cisWindow))
     }
     # SR-TWAS ensemble layer: combine the group's per-method per-condition fits
     # (CV predictions + weights) into ensemble per-context rows -- built ON TOP
     # of the shared per-method fitting above, never inside it.
     if (doEnsemble && length(perTokenEntries) >= 2L) {
-      addEntries(.twasEnsembleLayer(g, perTokenEntries, pipeline@config),
-                 "ensemble")
+      records <- c(records, .jointEntryRecords(
+        .twasEnsembleLayer(g, perTokenEntries, pipeline@config),
+        "ensemble", grp, data, args$cisWindow))
     }
   }
-  construct(pipeline, rows)
+  construct(pipeline, records)
 }
 
 # SR-TWAS ensemble LAYER (twas only): combine a group's per-method per-condition

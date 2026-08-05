@@ -6,20 +6,37 @@ filterBySignificance <- function(zMatrix, sigPCutoff) {
   which(apply(zMatrix, 1, function(row) any(abs(row) >= zThreshold)))
 }
 
+# Coerce every column to numeric, then replace NaN/Inf/NA with `replaceWith`.
+# @noRd
+.mashReplaceValues <- function(df, replaceWith) {
+  df <- df %>%
+    mutate(across(everything(), as.numeric)) %>%
+    mutate(across(everything(), ~ replace(., is.nan(.) | is.infinite(.) | is.na(.), replaceWith)))
+}
+
+# Coerce z-scores to a matrix (NaN/Inf/NA -> 0) and, when a missing-rate
+# threshold is given, drop rows falling below it.
+# @noRd
+.mashProcessZ <- function(zData, filterByMissingRate) {
+  zData <- as.matrix(.mashReplaceValues(zData, 0))
+
+  if (!is.null(filterByMissingRate)) {
+    proportionNonzero <- apply(zData, 1, function(row) mean(row != 0))
+    zData <- zData[proportionNonzero >= filterByMissingRate, , drop = FALSE]
+  }
+
+  return(zData)
+}
+
 #' @importFrom vroom vroom
 #' @export
 filterInvalidSummaryStat <- function(datList, bhat = NULL, sbhat = NULL, z = NULL, btoz = FALSE, sigPCutoff = 1E-6, filterByMissingRate = 0.2) {
-  replaceValues <- function(df, replaceWith) {
-    df <- df %>%
-      mutate(across(everything(), as.numeric)) %>%
-      mutate(across(everything(), ~ replace(., is.nan(.) | is.infinite(.) | is.na(.), replaceWith)))
-  }
   # Function to process bhat, sbhat
   if (!is.null(bhat) && !is.null(sbhat) && all(c(bhat, sbhat) %in% names(datList))) {
     # If the element is a list with 'bhat' and 'sbhat'
     if (!is.null(datList[[bhat]]) && !is.null(datList[[sbhat]])) {
-      datList[[bhat]] <- as.matrix(replaceValues(datList[[bhat]], 0))
-      datList[[sbhat]] <- as.matrix(replaceValues(datList[[sbhat]], 1000))
+      datList[[bhat]] <- as.matrix(.mashReplaceValues(datList[[bhat]], 0))
+      datList[[sbhat]] <- as.matrix(.mashReplaceValues(datList[[sbhat]], 1000))
       if (("null.b" %in% names(datList)) || ("random.b" %in% names(datList))) {
         if (!is.null(filterByMissingRate)) {
           proportionNonzero <- apply(datList[[bhat]], 1, function(row) {
@@ -58,21 +75,10 @@ filterInvalidSummaryStat <- function(datList, bhat = NULL, sbhat = NULL, z = NUL
   }
   # Function to process z-scores and filter directly
   if (!is.null(z)) {
-    processZ <- function(zData) {
-      zData <- as.matrix(replaceValues(zData, 0))
-
-      if (!is.null(filterByMissingRate)) {
-        proportionNonzero <- apply(zData, 1, function(row) mean(row != 0))
-        zData <- zData[proportionNonzero >= filterByMissingRate, , drop = FALSE]
-      }
-
-      return(zData)
-    }
-
     # Process each component if it exists
     for (comp in c("strong", "random", "null")) {
       if (!is.null(datList[[comp]]) && !is.null(datList[[comp]]$z)) {
-        datList[[comp]]$z <- processZ(datList[[comp]]$z)
+        datList[[comp]]$z <- .mashProcessZ(datList[[comp]]$z, filterByMissingRate)
       }
     }
 
@@ -137,58 +143,59 @@ filterMixtureComponents <- function(conditionsToKeep, U, w = NULL, wCutoff = 1e-
 }
 
 
-#' @export
-mashRandNullSample <- function(dat, nRandom, nNull, excludeCondition, seed = NULL) {
-  # Function to extract one data set
-  extractOneData <- function(dat, nRandom, nNull) {
-    if (is.null(dat)) {
-      return(NULL)
-    }
-
-    if ("z" %in% names(dat)) {
-      absZ <- abs(dat$z)
-      zData <- dat$z
-    } else {
-      absZ <- abs(dat$bhat / dat$sbhat)
-      zData <- NULL
-    }
-
-    sampleIdx <- 1:nrow(absZ)
-    randomIdx <- sample(sampleIdx, min(nRandom, length(sampleIdx)), replace = FALSE)
-
-    if (!is.null(zData)) {
-      random <- list(z = zData[randomIdx, , drop = FALSE])
-    } else {
-      random <- list(
-        bhat = dat$bhat[randomIdx, , drop = FALSE],
-        sbhat = dat$sbhat[randomIdx, , drop = FALSE]
-      )
-    }
-
-    null.id <- which(apply(absZ, 1, max) < 2)
-    if (length(null.id) == 0) {
-      warning(paste("no variants are included in the null dataset because absZ > 2 for all variants in", dat$region))
-      null <- list()
-    } else {
-      if (length(null.id) < ncol(absZ)) {
-        warning(paste("not enough null data to estimate null correlation in", dat$region))
-        null <- list()
-      } else {
-        nullIdx <- sample(null.id, min(nNull, length(null.id)), replace = FALSE)
-        if (!is.null(zData)) {
-          null <- list(z = zData[nullIdx, , drop = FALSE])
-        } else {
-          null <- list(
-            bhat = dat$bhat[nullIdx, , drop = FALSE],
-            sbhat = dat$sbhat[nullIdx, , drop = FALSE]
-          )
-        }
-      }
-    }
-    dat <- list(random = random, null = null)
-    return(dat)
+# Draw the random + null sub-samples used to estimate the null correlation.
+# @noRd
+.mashExtractOneData <- function(dat, nRandom, nNull) {
+  if (is.null(dat)) {
+    return(NULL)
   }
 
+  if ("z" %in% names(dat)) {
+    absZ <- abs(dat$z)
+    zData <- dat$z
+  } else {
+    absZ <- abs(dat$bhat / dat$sbhat)
+    zData <- NULL
+  }
+
+  sampleIdx <- 1:nrow(absZ)
+  randomIdx <- sample(sampleIdx, min(nRandom, length(sampleIdx)), replace = FALSE)
+
+  if (!is.null(zData)) {
+    random <- list(z = zData[randomIdx, , drop = FALSE])
+  } else {
+    random <- list(
+      bhat = dat$bhat[randomIdx, , drop = FALSE],
+      sbhat = dat$sbhat[randomIdx, , drop = FALSE]
+    )
+  }
+
+  null.id <- which(apply(absZ, 1, max) < 2)
+  if (length(null.id) == 0) {
+    warning(paste("no variants are included in the null dataset because absZ > 2 for all variants in", dat$region))
+    null <- list()
+  } else {
+    if (length(null.id) < ncol(absZ)) {
+      warning(paste("not enough null data to estimate null correlation in", dat$region))
+      null <- list()
+    } else {
+      nullIdx <- sample(null.id, min(nNull, length(null.id)), replace = FALSE)
+      if (!is.null(zData)) {
+        null <- list(z = zData[nullIdx, , drop = FALSE])
+      } else {
+        null <- list(
+          bhat = dat$bhat[nullIdx, , drop = FALSE],
+          sbhat = dat$sbhat[nullIdx, , drop = FALSE]
+        )
+      }
+    }
+  }
+  dat <- list(random = random, null = null)
+  return(dat)
+}
+
+#' @export
+mashRandNullSample <- function(dat, nRandom, nNull, excludeCondition, seed = NULL) {
   if (!is.null(seed)) {
     set.seed(seed)
   }
@@ -204,7 +211,7 @@ mashRandNullSample <- function(dat, nRandom, nNull, excludeCondition, seed = NUL
     }
   }
 
-  result <- extractOneData(dat, nRandom, nNull)
+  result <- .mashExtractOneData(dat, nRandom, nNull)
   return(result)
 }
 

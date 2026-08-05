@@ -1239,19 +1239,19 @@ test_that(".buildJointSumstatZMatrix: a mismatched SNP order across entries erro
 # Individual X/Y builders: the skip paths (return NULL / message branches)
 # -----------------------------------------------------------------------------
 
-test_that(".buildIndividualCrossContextXY: skips when a trait spans < 2 contexts", {
+test_that(".buildIndividualCrossContextXy: skips when a trait spans < 2 contexts", {
   se1 <- .js_makeSe(traits = "g1")                  # g1 present
   se0 <- .js_makeSe(traits = "other")               # g1 absent
   local_mocked_bindings(
     getPhenotypes = function(data, contexts)
       if (identical(contexts, "c1")) se1 else se0,
     .package = "pecotmr")
-  expect_null(suppressMessages(pecotmr:::.buildIndividualCrossContextXY(
+  expect_null(suppressMessages(pecotmr:::.buildIndividualCrossContextXy(
     NULL, "g1", c("c1", "c2"), cisWindow = 1000L, verbose = 1,
     label = "X")))
 })
 
-test_that(".buildIndividualCrossContextXY: region path + complete-case skip", {
+test_that(".buildIndividualCrossContextXy: region path + complete-case skip", {
   se <- .js_makeSe(traits = "g1", samples = paste0("s", 1:6))
   samp <- paste0("s", 1:6)
   region <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 10000))
@@ -1266,12 +1266,12 @@ test_that(".buildIndividualCrossContextXY: region path + complete-case skip", {
            c2 = ym(rnorm(6)))
     },
     .package = "pecotmr")
-  expect_null(suppressMessages(pecotmr:::.buildIndividualCrossContextXY(
+  expect_null(suppressMessages(pecotmr:::.buildIndividualCrossContextXy(
     NULL, "g1", c("c1", "c2"), cisWindow = NULL, verbose = 1,
     label = "X", region = region)))
 })
 
-test_that(".buildIndividualCrossContextXY: too few shared samples skips", {
+test_that(".buildIndividualCrossContextXy: too few shared samples skips", {
   se <- .js_makeSe(traits = "g1", samples = paste0("s", 1:6))
   local_mocked_bindings(
     getPhenotypes = function(data, contexts) se,
@@ -1282,7 +1282,7 @@ test_that(".buildIndividualCrossContextXY: too few shared samples skips", {
       list(c1 = matrix(0, 6, 1, dimnames = list(paste0("s", 1:6), "g1")),
            c2 = matrix(0, 6, 1, dimnames = list(paste0("s", 1:6), "g1"))),
     .package = "pecotmr")
-  expect_null(suppressMessages(pecotmr:::.buildIndividualCrossContextXY(
+  expect_null(suppressMessages(pecotmr:::.buildIndividualCrossContextXy(
     NULL, "g1", c("c1", "c2"), cisWindow = 1000L, verbose = 1, label = "X")))
 })
 
@@ -1294,13 +1294,13 @@ test_that(".fmTraitsInRegion: filters traits by phenotype overlap with the regio
                c("g1", "g2"))                       # NULL region -> unchanged
 })
 
-test_that(".buildIndividualCrossTraitXY: skip branches (< 2 traits, region, complete)", {
+test_that(".buildIndividualCrossTraitXy: skip branches (< 2 traits, region, complete)", {
   se2 <- .js_makeSe(traits = c("g1", "g2"), samples = paste0("s", 1:6))
   samp <- paste0("s", 1:6)
   # < 2 scoped traits in the context -> NULL.
   local_mocked_bindings(getPhenotypes = function(data, contexts) se2,
                         .package = "pecotmr")
-  expect_null(suppressMessages(pecotmr:::.buildIndividualCrossTraitXY(
+  expect_null(suppressMessages(pecotmr:::.buildIndividualCrossTraitXy(
     NULL, "cx", "g1", cisWindow = 1000L, verbose = 1, label = "X",
     study = "S")))
   # region path + < 2 complete cases.
@@ -1313,13 +1313,13 @@ test_that(".buildIndividualCrossTraitXY: skip branches (< 2 traits, region, comp
       cbind(g1 = c(NA, NA, NA, NA, NA, 1), g2 = rnorm(6)) |>
         `rownames<-`(samp),
     .package = "pecotmr")
-  expect_null(suppressMessages(pecotmr:::.buildIndividualCrossTraitXY(
+  expect_null(suppressMessages(pecotmr:::.buildIndividualCrossTraitXy(
     NULL, "cx", c("g1", "g2"), cisWindow = NULL, verbose = 1, label = "X",
     study = "S", region = GenomicRanges::GRanges("chr1",
                                                  IRanges::IRanges(1, 9999)))))
 })
 
-test_that(".buildComposedIndividualXY: skip branches and single-context wrap", {
+test_that(".buildComposedIndividualXy: skip branches and single-context wrap", {
   se <- .js_makeSe(traits = c("g1", "g2"), samples = paste0("s", 1:6))
   samp <- paste0("s", 1:6)
   scope <- list(contexts = list(S = "c1"), traits = list(S = c("g1", "g2")))
@@ -1332,7 +1332,7 @@ test_that(".buildComposedIndividualXY: skip branches and single-context wrap", {
     .fmResidPheno = function(x, contexts, traitId = NULL, ...)
       matrix(rnorm(12), 6, 2, dimnames = list(samp, c("g1", "g2"))),
     .package = "pecotmr")
-  out <- suppressMessages(pecotmr:::.buildComposedIndividualXY(
+  out <- suppressMessages(pecotmr:::.buildComposedIndividualXy(
     NULL, scope, "S", cisWindow = 1000L, verbose = 1, label = "X"))
   expect_equal(ncol(out$Y), 2L)
   expect_setequal(colnames(out$Y), c("c1:g1", "c1:g2"))
@@ -1340,7 +1340,7 @@ test_that(".buildComposedIndividualXY: skip branches and single-context wrap", {
   scope1 <- list(contexts = list(S = "c1"), traits = list(S = "g1"))
   local_mocked_bindings(getPhenotypes = function(data, contexts)
     .js_makeSe(traits = "g1"), .package = "pecotmr")
-  expect_null(suppressMessages(pecotmr:::.buildComposedIndividualXY(
+  expect_null(suppressMessages(pecotmr:::.buildComposedIndividualXy(
     NULL, scope1, "S", cisWindow = 1000L, verbose = 1, label = "X")))
 })
 
@@ -1538,7 +1538,7 @@ test_that("validateMethodsVsJointSpec: per-study methods with a context joint pa
     mp, list(list(axes = "context"))))                                  # 542
 })
 
-test_that(".buildIndividualCrossTraitXY: disjoint X/Y samples skip the context", {
+test_that(".buildIndividualCrossTraitXy: disjoint X/Y samples skip the context", {
   se <- .js_makeSe(traits = c("g1", "g2"), samples = paste0("s", 1:6))
   local_mocked_bindings(
     getPhenotypes = function(data, contexts) se,
@@ -1548,12 +1548,12 @@ test_that(".buildIndividualCrossTraitXY: disjoint X/Y samples skip the context",
     .fmResidPheno = function(x, contexts, traitId = NULL, ...)
       matrix(0, 6, 2, dimnames = list(paste0("s", 1:6), c("g1", "g2"))),
     .package = "pecotmr")
-  expect_null(suppressMessages(pecotmr:::.buildIndividualCrossTraitXY(
+  expect_null(suppressMessages(pecotmr:::.buildIndividualCrossTraitXy(
     NULL, "cx", c("g1", "g2"), cisWindow = 1000L, verbose = 1, label = "X",
     study = "S")))                                                      # 730
 })
 
-test_that(".buildComposedIndividualXY: disjoint samples / missing trait col / NA rows skip", {
+test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA rows skip", {
   samp <- paste0("s", 1:6)
   se <- .js_makeSe(traits = c("g1", "g2"), samples = samp)
   scope <- list(contexts = list(S = c("c1", "c2")),
@@ -1569,7 +1569,7 @@ test_that(".buildComposedIndividualXY: disjoint samples / missing trait col / NA
         matrix(rnorm(12), 6, 2, dimnames = list(samp, c("g1", "g2")))),
         c("c1", "c2")),
     .package = "pecotmr")
-  expect_null(suppressMessages(pecotmr:::.buildComposedIndividualXY(
+  expect_null(suppressMessages(pecotmr:::.buildComposedIndividualXy(
     NULL, scope, "S", cisWindow = 1000L, verbose = 1, label = "X")))    # 774
   # (b) one context's Y lacks the trait column -> tuple skipped -> < 2 yCols (779/785).
   local_mocked_bindings(
@@ -1581,7 +1581,7 @@ test_that(".buildComposedIndividualXY: disjoint samples / missing trait col / NA
       list(c1 = matrix(0, 6, 1, dimnames = list(samp, "g1")),
            c2 = matrix(0, 6, 1, dimnames = list(samp, "zzz"))),   # no g1/g2
     .package = "pecotmr")
-  expect_null(suppressMessages(pecotmr:::.buildComposedIndividualXY(
+  expect_null(suppressMessages(pecotmr:::.buildComposedIndividualXy(
     NULL, list(contexts = list(S = c("c1", "c2")),
                traits = list(S = "g1")),
     "S", cisWindow = 1000L, verbose = 1, label = "X")))                 # 779/785
@@ -1597,7 +1597,7 @@ test_that(".buildComposedIndividualXY: disjoint samples / missing trait col / NA
            c2 = matrix(c(NA, NA, NA, NA, NA, 1), 6, 1,
                        dimnames = list(samp, "g1"))),
     .package = "pecotmr")
-  expect_null(suppressMessages(pecotmr:::.buildComposedIndividualXY(
+  expect_null(suppressMessages(pecotmr:::.buildComposedIndividualXy(
     NULL, list(contexts = list(S = c("c1", "c2")),
                traits = list(S = "g1")),
     "S", cisWindow = 1000L, verbose = 1, label = "X")))                 # 788

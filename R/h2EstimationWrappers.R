@@ -1129,6 +1129,72 @@ NULL
 # Univariate HDL
 # =============================================================================
 
+# Per-eigenvalue variance sigma2_i = n/M * sum_a(tau_a * d_i * ldAnnot_{a,i}) + 1
+# (scalar-tau fallback when the block carries no annotation matrix).
+# @noRd
+.hdlComputeSigma2 <- function(tau, bd, n, M) {
+  if (!is.null(bd$ldAnnot)) {
+    n / M * bd$d * as.vector(bd$ldAnnot %*% tau) + 1
+  } else {
+    n * tau[1] * bd$d / M + 1
+  }
+}
+
+# HDL stratified negative log-likelihood as a function of the tau vector (with
+# optional L2 penalty `lambda`); `...` absorbs the gradient's extra optim args.
+# @noRd
+.hdlNll <- function(tau, blockData, n, M, lambda, ...) {
+  val <- 0
+  for (bd in blockData) {
+    sigma2 <- .hdlComputeSigma2(tau, bd, n, M)
+    if (any(sigma2 <= 0)) return(1e10)
+    val <- val + 0.5 * sum(log(sigma2) + bd$zRot^2 / sigma2)
+  }
+  if (lambda > 0) val <- val + lambda * sum(tau^2)
+  val
+}
+
+# Gradient of the HDL stratified negative log-likelihood w.r.t. tau.
+# @noRd
+.hdlNllGrad <- function(tau, blockData, n, M, lambda, nTau) {
+  grad <- numeric(nTau)
+  for (bd in blockData) {
+    sigma2 <- .hdlComputeSigma2(tau, bd, n, M)
+    if (any(sigma2 <= 0)) return(rep(0, nTau))
+    # dsigma2/dtau_a = n/M * d_i * ld_annot_{a,i}
+    dsig <- n / M * bd$d * bd$ldAnnot  # (nEigen x nTau)
+    # dNLL/dsigma2_i = 0.5 * (1/sigma2_i - z_rot_i^2/sigma2_i^2)
+    dNLL_dsig <- 0.5 * (1 / sigma2 - bd$zRot^2 / sigma2^2)
+    grad <- grad + as.vector(crossprod(dsig, dNLL_dsig))
+  }
+  if (lambda > 0) grad <- grad + 2 * lambda * tau
+  grad
+}
+
+# Single-parameter HDL negative log-likelihood (unstratified scalar h2).
+# @noRd
+.hdlNllScalar <- function(h2, blockData, n, M) {
+  val <- 0
+  for (bd in blockData) {
+    sigma2 <- n * h2 * bd$d / M + 1
+    val <- val + 0.5 * sum(log(sigma2) + bd$zRot^2 / sigma2)
+  }
+  val
+}
+
+# Local HDL negative log-likelihood: a local deviation deltaH2 on top of the
+# block's baseline variance.
+# @noRd
+.hdlNllLocal <- function(deltaH2, sigma2Baseline, bd, n, M) {
+  if (!is.null(sigma2Baseline)) {
+    sigma2 <- sigma2Baseline + n * deltaH2 * bd$d / M
+  } else {
+    sigma2 <- n * deltaH2 * bd$d / M + 1
+  }
+  if (any(sigma2 <= 0)) return(1e10)
+  0.5 * sum(log(sigma2) + bd$zRot^2 / sigma2)
+}
+
 #' @title Univariate HDL
 #' @description Estimate h2 via HDL likelihood.
 #' @param z Numeric vector of z-scores.
@@ -1173,67 +1239,23 @@ hdlUnivariate <- function(z, n, eigenRef, annotations = NULL,
          snpIdx = idx, p = length(idx))
   })
 
-  # Compute per-eigenvalue variance: sigma2_i = n/M * sum_a(tau_a * d_i * ld_annot_{a,i}) + 1
-  .computeSigma2 <- function(tau, bd) {
-    if (!is.null(bd$ldAnnot)) {
-      n / M * bd$d * as.vector(bd$ldAnnot %*% tau) + 1
-    } else {
-      n * tau[1] * bd$d / M + 1
-    }
-  }
-
   if (!is.null(baselineMat)) {
     nTau <- ncol(baselineMat)
-
-    # Negative log-likelihood as function of tau vector (with optional L2 penalty)
-    nll <- function(tau) {
-      val <- 0
-      for (bd in blockData) {
-        sigma2 <- .computeSigma2(tau, bd)
-        if (any(sigma2 <= 0)) return(1e10)
-        val <- val + 0.5 * sum(log(sigma2) + bd$zRot^2 / sigma2)
-      }
-      if (lambda > 0) val <- val + lambda * sum(tau^2)
-      val
-    }
-
-    # Gradient of negative log-likelihood
-    nllGrad <- function(tau) {
-      grad <- numeric(nTau)
-      for (bd in blockData) {
-        sigma2 <- .computeSigma2(tau, bd)
-        if (any(sigma2 <= 0)) return(rep(0, nTau))
-        # dsigma2/dtau_a = n/M * d_i * ld_annot_{a,i}
-        dsig <- n / M * bd$d * bd$ldAnnot  # (nEigen x nTau)
-        # dNLL/dsigma2_i = 0.5 * (1/sigma2_i - z_rot_i^2/sigma2_i^2)
-        dNLL_dsig <- 0.5 * (1 / sigma2 - bd$zRot^2 / sigma2^2)
-        grad <- grad + as.vector(crossprod(dsig, dNLL_dsig))
-      }
-      if (lambda > 0) grad <- grad + 2 * lambda * tau
-      grad
-    }
 
     # Initialize with uniform h2 across annotations
     tauInit <- rep(0.5 / nTau, nTau)
 
-    opt <- optim(tauInit, nll, gr = nllGrad, method = "BFGS",
-                        control = list(maxit = 200, reltol = 1e-8))
+    opt <- optim(tauInit, .hdlNll, gr = .hdlNllGrad,
+                 blockData = blockData, n = n, M = M, lambda = lambda, nTau = nTau,
+                 method = "BFGS", control = list(maxit = 200, reltol = 1e-8))
     tau <- opt$par
 
     # h2 = sum_a tau_a * M_a
     h2 <- sum(tau * colSums(baselineMat))
   } else {
     # Single-parameter case: use optimize (current behavior)
-    nll <- function(h2) {
-      val <- 0
-      for (bd in blockData) {
-        sigma2 <- n * h2 * bd$d / M + 1
-        val <- val + 0.5 * sum(log(sigma2) + bd$zRot^2 / sigma2)
-      }
-      val
-    }
-
-    opt <- optimize(nll, interval = c(-0.5, 1.5), tol = 1e-8)
+    opt <- optimize(.hdlNllScalar, interval = c(-0.5, 1.5),
+                    blockData = blockData, n = n, M = M, tol = 1e-8)
     h2 <- opt$minimum
     tau <- h2  # scalar, used by downstream functions
   }
@@ -1407,16 +1429,8 @@ hdlUnivariate <- function(z, n, eigenRef, annotations = NULL,
 
     # Local likelihood: optimize a local deviation deltaH2
     # sigma2_i = sigma2_baseline_i + n * delta_h2 * d_i / M
-    nllLocal <- function(deltaH2) {
-      if (!is.null(sigma2Baseline)) {
-        sigma2 <- sigma2Baseline + n * deltaH2 * bd$d / M
-      } else {
-        sigma2 <- n * deltaH2 * bd$d / M + 1
-      }
-      if (any(sigma2 <= 0)) return(1e10)
-      0.5 * sum(log(sigma2) + bd$zRot^2 / sigma2)
-    }
-    opt <- optimize(nllLocal, interval = c(-0.5, 0.5), tol = 1e-8)
+    opt <- optimize(.hdlNllLocal, interval = c(-0.5, 0.5),
+                    sigma2Baseline = sigma2Baseline, bd = bd, n = n, M = M, tol = 1e-8)
     deltaH2 <- opt$minimum
 
     # Total local h2 = global baseline contribution + local deviation
