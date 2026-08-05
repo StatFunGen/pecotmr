@@ -213,7 +213,7 @@ reference:
       - getMaf
       - getN
       - getP
-      - getSE
+      - getSe
       - getSumStats
       - getSumstatDf
       - getVarY
@@ -389,6 +389,7 @@ reference:
       - enforceDesignFullRank
       - ldClumpByScore
       - ldLoader
+      - loadLdBlock
       - ldPruneByCorrelation
       - filterVariantsByLdReference
 
@@ -620,7 +621,7 @@ reference:
       # Implementation details with .Rd topics but no front-facing role.
       - as.data.frame.GwasSumStats
       - rescaleCovW0
-      - ".fullFitColumns"
+      - buildTopLoci
       - "getSumStats,GwasSumStats-method"
 
 footer:

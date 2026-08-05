@@ -1,29 +1,3 @@
-#' Overlap QTL and GWAS top loci by allele-aware variant matching
-#'
-#' Intersect the top-loci tables of a \code{QtlFineMappingResult} and a
-#' \code{GwasFineMappingResult} on shared variants, matched with pecotmr's
-#' allele-aware \code{\link{matchVariants}} (handling strand flips / ref-alt
-#' swaps rather than naive id equality). The GWAS side is harmonized to the QTL
-#' orientation: its signed effect columns (\code{beta}, \code{z},
-#' \code{conditional_effect}) are sign-flipped and its effect-allele frequency
-#' (\code{af}) is complemented wherever a swap occurred. The result keeps the
-#' variant key columns once (from the QTL, the reference orientation) and
-#' prefixes every other column \code{qtl_} / \code{gwas_}. A variant shared
-#' across several QTL contexts and/or GWAS studies yields one row per
-#' (QTL entry x GWAS entry) pair (a wide cross-product per variant).
-#'
-#' @param qtl A \code{QtlFineMappingResult}.
-#' @param gwas A \code{GwasFineMappingResult}.
-#' @param signalCutoff PIP cutoff forwarded to \code{\link{getTopLoci}} for both
-#'   inputs. Default 0.025.
-#' @param type \code{"data.frame"} (default) or \code{"GRanges"}.
-#' @param ... Ignored.
-#' @return A \code{data.frame} (or \code{GRanges}) keyed on the QTL variant
-#'   (\code{variant_id, chrom, pos, A1, A2}) with all other columns prefixed
-#'   \code{qtl_} / \code{gwas_}. Zero rows when there is no allele-aware overlap.
-#' @seealso \code{\link{getTopLoci}}, \code{\link{matchVariants}}
-#' @include AllGenerics.R AllClasses.R QtlFineMappingResult.R GwasFineMappingResult.R
-#' @export
 # Prefix a top-loci frame's NON-key columns with `pfx` (key columns unchanged).
 # @noRd
 .overlapPrefixNonKey <- function(df, pfx, keyCols)
@@ -50,6 +24,32 @@
 # @noRd
 .overlapFinish <- function(df, type) if (type == "GRanges") .overlapToGRanges(df) else df
 
+#' Overlap QTL and GWAS top loci by allele-aware variant matching
+#'
+#' Intersect the top-loci tables of a \code{QtlFineMappingResult} and a
+#' \code{GwasFineMappingResult} on shared variants, matched with pecotmr's
+#' allele-aware \code{\link{matchVariants}} (handling strand flips / ref-alt
+#' swaps rather than naive id equality). The GWAS side is harmonized to the QTL
+#' orientation: its signed effect columns (\code{beta}, \code{z},
+#' \code{conditional_effect}) are sign-flipped and its effect-allele frequency
+#' (\code{af}) is complemented wherever a swap occurred. The result keeps the
+#' variant key columns once (from the QTL, the reference orientation) and
+#' prefixes every other column \code{qtl_} / \code{gwas_}. A variant shared
+#' across several QTL contexts and/or GWAS studies yields one row per
+#' (QTL entry x GWAS entry) pair (a wide cross-product per variant).
+#'
+#' @param qtl A \code{QtlFineMappingResult}.
+#' @param gwas A \code{GwasFineMappingResult}.
+#' @param signalCutoff PIP cutoff forwarded to \code{\link{getTopLoci}} for both
+#'   inputs. Default 0.025.
+#' @param type \code{"data.frame"} (default) or \code{"GRanges"}.
+#' @param ... Ignored.
+#' @return A \code{data.frame} (or \code{GRanges}) keyed on the QTL variant
+#'   (\code{variant_id, chrom, pos, A1, A2}) with all other columns prefixed
+#'   \code{qtl_} / \code{gwas_}. Zero rows when there is no allele-aware overlap.
+#' @seealso \code{\link{getTopLoci}}, \code{\link{matchVariants}}
+#' @include AllGenerics.R AllClasses.R QtlFineMappingResult.R GwasFineMappingResult.R
+#' @export
 setGeneric("overlapTopLoci",
   function(qtl, gwas, ...) standardGeneric("overlapTopLoci"))
 

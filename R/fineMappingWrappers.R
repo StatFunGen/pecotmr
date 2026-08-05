@@ -539,53 +539,6 @@ computeCsTable <- function(fit, dataX, coverage, csInput = c("X", "Xcorr", "fsus
   out
 }
 
-#' Build the unified top-loci table for one fit and one method.
-#'
-#' Returns the per-fit, per-method contribution to the unified \code{top_loci}
-#' table in the fixed 22-column shape. \code{postprocessFinemappingFits()}
-#' calls this once per method per fit and row-binds the results into the
-#' single \code{top_loci} returned by \code{formatFinemappingOutput()}.
-#'
-#' Output columns, in order: \code{#chr}, \code{start}, \code{end}, \code{a1},
-#' \code{a2}, \code{variant}, \code{gene}, \code{event}, \code{n}, \code{af},
-#' \code{beta}, \code{se}, \code{pip}, \code{posterior_effect_mean},
-#' \code{posterior_effect_se}, \code{cs_95}, \code{cs_70}, \code{cs_50},
-#' \code{cs_95_purity}, \code{method}, \code{grange_start}, \code{grange_end}.
-#'
-#' \code{cs_95} / \code{cs_70} / \code{cs_50} are character strings of the
-#' form \code{"<method>_<cs_index>"} where each method numbers credible sets
-#' independently from 1. Variants retained by the PIP cutoff but not in any
-#' credible set at a coverage carry \code{"<method>_0"}. \code{cs_95_purity}
-#' is the 0.95-coverage purity for the row's \code{(method, cs_95)}; rows
-#' whose \code{cs_95} is \code{"<method>_0"} carry \code{0}.
-#'
-#' Row uniqueness is \code{(variant, gene, cs_membership)} at the given
-#' \code{method}; overlapping CS within the same method produces one row per
-#' CS.
-#'
-#' @param fit Fitted SuSiE-family object (must expose \code{alpha},
-#'   \code{mu}, \code{mu2}, \code{pip}).
-#' @param csTables List of CS tables (one per coverage) from
-#'   \code{computeCsTables()}.
-#' @param variantNames Character vector of variant IDs
-#'   (\code{chr:pos:A2:A1}).
-#' @param sumstats Optional marginal-association summary (\code{betahat},
-#'   \code{sebetahat}) filling \code{beta} / \code{se}.
-#' @param af Optional numeric vector of effect-allele frequencies (frequency of
-#'   the final effect allele / \code{a1} after allele harmonization against the
-#'   LD/reference variants). Exported directly as the \code{af} column. MAF is
-#'   never exported; derive it from \code{af} at filter time. Default NULL ->
-#'   \code{af = NA_real_}.
-#' @param method Method name (e.g. \code{"susie"}, \code{"susieInf"}). Required.
-#' @param signalCutoff PIP cutoff for retaining PIP-only (non-CS) variants.
-#' @param dataX Optional regional genotype matrix.
-#' @param dataY Optional regional phenotype matrix; \code{nrow(dataY)} fills
-#'   \code{n}, \code{colnames(dataY)[1]} fills \code{gene}.
-#' @param otherQuantities Optional list. Default is NULL.
-#' @param region Optional \code{"chr:start-end"} string. Default is NULL.
-#' @return A data frame in the fixed 22-column shape for this fit and method,
-#'   or an empty data frame if nothing is retained.
-#' @export
 # Per-effect (per credible set) variant-level columns from the susie fit. Always
 # returns `within_cs_pip` (the variant's alpha in the single effect of its
 # assigned primary-coverage CS; NA for non-CS variants -- alpha is a probability,
@@ -678,6 +631,53 @@ computeCsTable <- function(fit, dataX, coverage, csInput = c("X", "Xcorr", "fsus
   }, numeric(1))
 }
 
+#' Build the unified top-loci table for one fit and one method.
+#'
+#' Returns the per-fit, per-method contribution to the unified \code{top_loci}
+#' table in the fixed 22-column shape. \code{postprocessFinemappingFits()}
+#' calls this once per method per fit and row-binds the results into the
+#' single \code{top_loci} returned by \code{formatFinemappingOutput()}.
+#'
+#' Output columns, in order: \code{#chr}, \code{start}, \code{end}, \code{a1},
+#' \code{a2}, \code{variant}, \code{gene}, \code{event}, \code{n}, \code{af},
+#' \code{beta}, \code{se}, \code{pip}, \code{posterior_effect_mean},
+#' \code{posterior_effect_se}, \code{cs_95}, \code{cs_70}, \code{cs_50},
+#' \code{cs_95_purity}, \code{method}, \code{grange_start}, \code{grange_end}.
+#'
+#' \code{cs_95} / \code{cs_70} / \code{cs_50} are character strings of the
+#' form \code{"<method>_<cs_index>"} where each method numbers credible sets
+#' independently from 1. Variants retained by the PIP cutoff but not in any
+#' credible set at a coverage carry \code{"<method>_0"}. \code{cs_95_purity}
+#' is the 0.95-coverage purity for the row's \code{(method, cs_95)}; rows
+#' whose \code{cs_95} is \code{"<method>_0"} carry \code{0}.
+#'
+#' Row uniqueness is \code{(variant, gene, cs_membership)} at the given
+#' \code{method}; overlapping CS within the same method produces one row per
+#' CS.
+#'
+#' @param fit Fitted SuSiE-family object (must expose \code{alpha},
+#'   \code{mu}, \code{mu2}, \code{pip}).
+#' @param csTables List of CS tables (one per coverage) from
+#'   \code{computeCsTables()}.
+#' @param variantNames Character vector of variant IDs
+#'   (\code{chr:pos:A2:A1}).
+#' @param sumstats Optional marginal-association summary (\code{betahat},
+#'   \code{sebetahat}) filling \code{beta} / \code{se}.
+#' @param af Optional numeric vector of effect-allele frequencies (frequency of
+#'   the final effect allele / \code{a1} after allele harmonization against the
+#'   LD/reference variants). Exported directly as the \code{af} column. MAF is
+#'   never exported; derive it from \code{af} at filter time. Default NULL ->
+#'   \code{af = NA_real_}.
+#' @param method Method name (e.g. \code{"susie"}, \code{"susieInf"}). Required.
+#' @param signalCutoff PIP cutoff for retaining PIP-only (non-CS) variants.
+#' @param dataX Optional regional genotype matrix.
+#' @param dataY Optional regional phenotype matrix; \code{nrow(dataY)} fills
+#'   \code{n}, \code{colnames(dataY)[1]} fills \code{gene}.
+#' @param otherQuantities Optional list. Default is NULL.
+#' @param region Optional \code{"chr:start-end"} string. Default is NULL.
+#' @return A data frame in the fixed 22-column shape for this fit and method,
+#'   or an empty data frame if nothing is retained.
+#' @export
 buildTopLoci <- function(fit, csTables, variantNames, sumstats = NULL,
                          af = NULL, method, signalCutoff = 0,
                          dataX = NULL, dataY = NULL,
