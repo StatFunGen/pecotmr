@@ -747,8 +747,26 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
                               groupPriorVarStructure, thin, ncore,
                               extra = list()) {
   fitEm <- getFromNamespace("fit_EM", "ctwas")
+  # Mirror ctwas::est_param's degenerate-region skip before fitting. est_param
+  # drops regions with fewer than `min_var` total variables or fewer than
+  # `min_gene` genes -- whose per-region `sid` is unset -- and runs its prefit
+  # fit_EM only on the survivors. This prefit-only fallback bypasses est_param's
+  # p(single effect) selection gate, but it must apply the SAME filter, or
+  # ctwas::fit_EM errors inside extract_region_data ("regiondata$sid ... target
+  # is NULL") on a skipped region. Honor min_var / min_gene forwarded via `...`.
+  minVar  <- if (!is.null(extra$min_var))  as.integer(extra$min_var)  else 2L
+  minGene <- if (!is.null(extra$min_gene)) as.integer(extra$min_gene) else 1L
+  allRegionIds <- names(region_data)
+  nGid <- vapply(region_data, function(x) length(x$gid), integer(1L))
+  nSid <- vapply(region_data, function(x) length(x$sid), integer(1L))
+  keep <- rep(TRUE, length(region_data))
+  if (minVar  > 0L) keep <- keep & (nSid + nGid) >= minVar
+  if (minGene > 0L) keep <- keep & nGid >= minGene
+  fitRegionData <- region_data[keep]
+  if (length(fitRegionData) == 0L)
+    stop("No regions selected!")
   fitArgs <- list(
-    region_data               = region_data,
+    region_data               = fitRegionData,
     niter                     = as.integer(niterPrefit),
     group_prior_var_structure = groupPriorVarStructure,
     ncore                     = as.integer(ncore))
@@ -771,7 +789,7 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
     group_prior_var_structure = groupPriorVarStructure,
     group_size                = groupSize,
     p_single_effect           = data.frame(
-      region_id        = names(region_data),
+      region_id        = allRegionIds,
       p_single_effect  = NA_real_,
       stringsAsFactors = FALSE))
 }

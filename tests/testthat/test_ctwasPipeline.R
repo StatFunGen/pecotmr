@@ -1267,7 +1267,8 @@ test_that("estCtwasParam: fallbackToPrefit recovers from accurate-EM NaN diverge
   # produce a stub prefit result. Verify estCtwasParam catches the
   # NaN error AND that the returned param is the prefit estimate.
   local_mocked_bindings(
-    assemble_region_data = function(...) list(block1 = list(stub = TRUE)),
+    assemble_region_data = function(...) list(block1 = list(
+      gid = "t1", sid = c("s1", "s2"), stub = TRUE)),
     get_boundary_genes   = function(...) data.frame(id = "t1", n_regions = 2L),
     compute_gene_z = function(...) data.frame(id = "t1", z = 1.0),
     est_param = function(...) stop("Estimated group_prior_var contains NAs!"),
@@ -1293,6 +1294,61 @@ test_that("estCtwasParam: fallbackToPrefit recovers from accurate-EM NaN diverge
     fallbackToPrefit = TRUE)
   expect_equal(unname(est$param$group_prior),     c(0.05, 1e-5))
   expect_equal(unname(est$param$group_prior_var), c(4.0, 5.0))
+})
+
+test_that("estCtwasParam fallback drops degenerate regions before fit_EM", {
+  # Regression for the ctwas >= 0.6.0 breakage: the prefit fallback used to hand
+  # ALL regions to ctwas::fit_EM, so a degenerate region (empty gid/sid, whose
+  # `sid` ctwas::extract_region_data now requires) crashed with
+  # "regiondata$sid ... target is NULL". The fallback must mirror est_param's
+  # min_var / min_gene skip and fit only the qualifying regions.
+  skip_if_not_installed("ctwas")
+  inp  <- .ctp_makeMultiBlockInputs()
+  seen <- NULL
+  local_mocked_bindings(
+    assemble_region_data = function(...) list(
+      good       = list(gid = "t1", sid = c("s1", "s2")),  # 1 gene + 2 SNPs -> kept
+      degenerate = list(gid = character(0), sid = NULL)),  # no variables    -> dropped
+    get_boundary_genes = function(...) data.frame(id = "t1", n_regions = 2L),
+    compute_gene_z     = function(...) data.frame(id = "t1", z = 1.0),
+    est_param          = function(...) stop("No regions selected!"),
+    fit_EM = function(region_data, ...) {
+      seen <<- names(region_data)
+      list(group_prior     = c(g = 0.05, SNP = 1e-4),
+           group_prior_var = c(g = 4.0,  SNP = 5.0),
+           group_size      = c(g = 1,    SNP = 100))
+    },
+    .package = "ctwas")
+  local_mocked_bindings(extractBlockGenotypes = .ctp_mockExtractor(),
+                        .package = "pecotmr")
+  est <- estCtwasParam(
+    assembleCtwasInputs(inp$gwasSumStats, inp$twasWeights),
+    fallbackToPrefit = TRUE)
+  # only the qualifying region reached fit_EM; the degenerate region was filtered
+  expect_equal(seen, "good")
+  # ...but every region is still accounted for in the returned p_single_effect
+  expect_setequal(est$param$p_single_effect$region_id, c("good", "degenerate"))
+})
+
+test_that("(real ctwas) prefit fallback skips a degenerate region fit_EM would reject", {
+  # No-mock guard for the ctwas >= 0.6.0 contract. Runs the REAL ctwas::fit_EM
+  # (via .ctwasFitPrefitEm) on a genuine assemble_region_data fixture with one
+  # valid region (1 gene, 108 SNPs) and one degenerate region (0 genes/SNPs,
+  # unset `sid`). Handing the degenerate region to fit_EM crashes ctwas >= 0.6.0
+  # in extract_region_data ("regiondata$sid ... target is NULL"); the fallback
+  # must filter it. Unlike the mocked tests above, this exercises the real engine,
+  # so it would catch a FUTURE ctwas contract change (which the mocks cannot).
+  skip_if_not_installed("ctwas")
+  region_data <- readRDS(test_path("test_data", "ctwas_region_data_degenerate.rds"))
+  expect_length(region_data, 2L)
+  res <- .ctwasFitPrefitEm(
+    region_data, niterPrefit = 3L,
+    groupPriorVarStructure = "shared_all", thin = 1, ncore = 1L)
+  # the prefit EM ran on the valid region only and returns finite real group priors
+  expect_true("SNP" %in% names(res$group_prior))
+  expect_true(all(is.finite(res$group_prior)))
+  # every region (valid + degenerate) is still listed in p_single_effect
+  expect_setequal(res$p_single_effect$region_id, names(region_data))
 })
 
 test_that("estCtwasParam / screenCtwasRegions / finemapCtwasRegions can be called independently", {
