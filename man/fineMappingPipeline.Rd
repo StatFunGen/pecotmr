@@ -40,6 +40,9 @@ fineMappingPipeline(data, ...)
   cvThreads = 1,
   samplePartition = NULL,
   pipCutoffToSkip = 0,
+  absZCutoffToSkip = 0,
+  bfCutoffToSkip = 0,
+  logBfCutoffToSkip = 0,
   usePCA = FALSE,
   nPCs = 10L,
   seed = NULL,
@@ -80,6 +83,9 @@ fineMappingPipeline(data, ...)
   cvThreads = 1,
   samplePartition = NULL,
   pipCutoffToSkip = 0,
+  absZCutoffToSkip = 0,
+  bfCutoffToSkip = 0,
+  logBfCutoffToSkip = 0,
   seed = NULL,
   naAction = c("drop", "impute"),
   verbose = 1,
@@ -260,6 +266,15 @@ when no PIP exceeds the cutoff (no potentially significant variant). The
 summary-statistics analog lives in \code{summaryStatsQc()}. \code{0}
 (default) disables the screen; a negative value uses the adaptive
 \code{3 / nVariants} threshold.}
+
+\item{absZCutoffToSkip, bfCutoffToSkip, logBfCutoffToSkip}{Numeric (length 1).
+Alternative individual-level pre-screen metrics, in place of
+\code{pipCutoffToSkip}: skip a block unless its maximum marginal
+\code{|z|} (\code{absZCutoffToSkip}), or its maximum per-variant
+single-effect Bayes factor (\code{bfCutoffToSkip}) / log Bayes factor
+(\code{logBfCutoffToSkip}) from the \code{L = 1} fit, exceeds the cutoff.
+Each defaults to 0 (off). Exactly one of the four \code{*CutoffToSkip}
+arguments may be non-zero (one screening metric at a time).}
 
 \item{usePCA}{Logical (length 1). \code{QtlDataset} only. When
 \code{TRUE} (default \code{FALSE}), each multi-trait context's

@@ -14,6 +14,9 @@ summaryStatsQc(
   keepVariants = NULL,
   skipRegion = NULL,
   pipCutoffToSkip = 0,
+  absZCutoffToSkip = 0,
+  bfCutoffToSkip = 0,
+  logBfCutoffToSkip = 0,
   zMismatchQc = c("none", "slalom", "dentist"),
   alleleFlipKriging = FALSE,
   effectiveN = TRUE,
@@ -63,6 +66,23 @@ strings, or a \code{GRanges}, of regions to drop.}
 LD-independent single-effect SER screen and skip the entry if no
 PIP exceeds the cutoff. \code{< 0} resolves to \code{3 / nVariants}.
 Default 0 (no screen).}
+
+\item{absZCutoffToSkip}{Numeric (length 1). Alternative signal screen:
+skip the entry when \code{max(abs(Z))} does not exceed the cutoff. No
+model fit. Default 0 (off).}
+
+\item{bfCutoffToSkip}{Numeric (length 1). Alternative signal screen: skip
+the entry when the largest per-variant single-effect Bayes factor (from
+the same \code{susie_ser} fit as the PIP screen) does not exceed the
+cutoff. Compared in log space (\code{maxlogBF > log(cutoff)}). Must be
+\code{> 0}. Default 0 (off).}
+
+\item{logBfCutoffToSkip}{Numeric (length 1). As \code{bfCutoffToSkip} but
+the cutoff is on the log Bayes factor scale (\code{maxlogBF > cutoff}).
+Default 0 (off).
+Exactly one of \code{pipCutoffToSkip} / \code{absZCutoffToSkip} /
+\code{bfCutoffToSkip} / \code{logBfCutoffToSkip} may be non-zero (one
+screening metric at a time); enabling more than one is an error.}
 
 \item{zMismatchQc}{One of \code{"none"} (default), \code{"slalom"},
 \code{"dentist"}.}

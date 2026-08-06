@@ -130,6 +130,16 @@ setMethod("show", "GenotypeHandle", function(object) {
 #'   \code{#chr,path} meta file or a named character vector
 #'   (names = chromosomes, values = payload paths/prefixes). Optionally pass
 #'   \code{format} via \code{...} to force a single backend for every shard.
+#' @param chroms Optional character vector of chromosomes. With \code{genoMeta}
+#'   (a sharded, one-file-per-chromosome panel) only the shards whose
+#'   chromosome is listed are read, skipping the rest -- an I/O optimisation
+#'   when the panel is genome-wide but only a few chromosomes are needed.
+#'   Chromosome labels are compared canonically (\code{"chr1"}/\code{"1"} match,
+#'   \code{23}/\code{X} etc.). If none of the requested chromosomes are present
+#'   in the panel, every shard is read (so the caller's own absence check can
+#'   report the mismatch). Only meaningful with \code{genoMeta}; supplying it
+#'   with any other source is an error (a single-file panel has no per-chromosome
+#'   shards to skip).
 #' @param ... Additional arguments forwarded to the format-specific reader.
 #' @return A \code{GenotypeHandle} object.
 #' @export
@@ -138,7 +148,7 @@ GenotypeHandle <- function(path = NULL,
                            bed = NULL, bim = NULL, fam = NULL,
                            pgen = NULL, pvar = NULL, psam = NULL,
                            ldMeta = NULL, region = NULL,
-                           genoMeta = NULL,
+                           genoMeta = NULL, chroms = NULL,
                            ...) {
   bedTrioGiven <- !is.null(bed) || !is.null(bim) || !is.null(fam)
   bedTrioComplete <- !is.null(bed) && !is.null(bim) && !is.null(fam)
@@ -173,6 +183,10 @@ GenotypeHandle <- function(path = NULL,
          "bed/bim/fam triplet, the pgen/pvar/psam triplet, `ldMeta`, or ",
          "`genoMeta` must be specified (got ", nSources, ").")
   }
+  if (!is.null(chroms) && !sources[["genoMeta"]]) {
+    stop("`chroms` restricts which per-chromosome shards are read and is only ",
+         "supported with `genoMeta` (a single-file panel has no shards to skip).")
+  }
 
   if (sources[["path"]]) {
     return(readGenotypes(path, ...))
@@ -193,7 +207,7 @@ GenotypeHandle <- function(path = NULL,
     return(.genotypeHandleFromLdMeta(ldMeta, region, ...))
   }
   if (sources[["genoMeta"]]) {
-    return(.genotypeHandleFromChromMeta(genoMeta, ...))
+    return(.genotypeHandleFromChromMeta(genoMeta, chroms = chroms, ...))
   }
 }
 
@@ -393,13 +407,27 @@ GenotypeHandle <- function(path = NULL,
 # metadata via the existing single-file readers, validates a single shared
 # format and identical sample IDs (same order, required for cross-shard
 # cbind), and row-binds the per-shard snpInfo into one global index space.
+# `chroms` (optional) restricts the read to the shards for those chromosomes:
+# the other per-chromosome files are never opened, which is the I/O win when a
+# genome-wide panel backs summary statistics on only a few chromosomes.
 #' @keywords internal
-.genotypeHandleFromChromMeta <- function(genoMeta, ...) {
+.genotypeHandleFromChromMeta <- function(genoMeta, chroms = NULL, ...) {
   dots   <- list(...)
   format <- dots$format
   parsed <- .parseChromMeta(genoMeta)
   if (nrow(parsed) == 0L)
     stop("GenotypeHandle(genoMeta): no chromosomes found in the meta input.")
+
+  # Keep only the shards whose (meta-declared) chromosome was requested, so the
+  # rest are never read. If nothing matches -- the requested chromosomes are
+  # absent from the panel -- fall back to reading every shard, leaving the
+  # caller's own containment/absence check to produce the usual diagnostic
+  # instead of a confusing empty-handle error here.
+  if (!is.null(chroms)) {
+    keep <- canonChrom(as.character(parsed$chrom)) %in%
+            canonChrom(as.character(chroms))
+    if (any(keep)) parsed <- parsed[keep, , drop = FALSE]
+  }
 
   shards <- lapply(parsed$path, .resolveGenotypeShard, format = format)
 
