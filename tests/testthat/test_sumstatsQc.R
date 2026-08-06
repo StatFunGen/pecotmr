@@ -3601,6 +3601,100 @@ test_that(".applyPipScreen: retains entry when signal clears the cutoff", {
   expect_identical(out$df, df)
 })
 
+# ===========================================================================
+# Signal screen: metric resolver + absZ / bf / logBf metrics
+# ===========================================================================
+
+test_that(".resolveScreenMetric enforces one metric at a time and sane cutoffs", {
+  expect_null(pecotmr:::.resolveScreenMetric())                     # all 0 -> off
+  expect_equal(pecotmr:::.resolveScreenMetric(pipCutoffToSkip = 0.5),
+               list(metric = "pip", cutoff = 0.5))
+  expect_equal(pecotmr:::.resolveScreenMetric(absZCutoffToSkip = 5),
+               list(metric = "absZ", cutoff = 5))
+  expect_equal(pecotmr:::.resolveScreenMetric(bfCutoffToSkip = 100),
+               list(metric = "bf", cutoff = 100))
+  expect_equal(pecotmr:::.resolveScreenMetric(logBfCutoffToSkip = 3),
+               list(metric = "logBf", cutoff = 3))
+  expect_error(pecotmr:::.resolveScreenMetric(pipCutoffToSkip = 0.5,
+                                              absZCutoffToSkip = 5),
+               "one signal screen")
+  expect_error(pecotmr:::.resolveScreenMetric(absZCutoffToSkip = -1), "must be > 0")
+  expect_error(pecotmr:::.resolveScreenMetric(bfCutoffToSkip = -1), "must be > 0")
+})
+
+test_that(".asScreen canonicalizes screen specs", {
+  expect_null(pecotmr:::.asScreen(NULL))
+  expect_null(pecotmr:::.asScreen(0))
+  expect_null(pecotmr:::.asScreen(c(0.1, 0.2)))        # non-scalar numeric -> off
+  expect_equal(pecotmr:::.asScreen(0.9), list(metric = "pip", cutoff = 0.9))
+  sc <- list(metric = "logBf", cutoff = 3)
+  expect_identical(pecotmr:::.asScreen(sc), sc)
+  expect_null(pecotmr:::.asScreen(list(metric = "bf", cutoff = 0)))  # explicit off
+})
+
+test_that(".applyEntryScreen: absZ screen skips / retains on max|Z| (no model fit)", {
+  weak <- data.frame(Z = c(0.2, 0.3, 0.1), stringsAsFactors = FALSE)
+  out <- pecotmr:::.applyEntryScreen(weak, n = 1000,
+                                     screen = list(metric = "absZ", cutoff = 5))
+  expect_true(out$skipped)
+  expect_match(out$reason, "|Z| above 5", fixed = TRUE)
+  expect_equal(nrow(out$df), 0L)
+
+  strong <- data.frame(Z = c(0.2, 6, 0.1), stringsAsFactors = FALSE)
+  out2 <- pecotmr:::.applyEntryScreen(strong, n = 1000,
+                                      screen = list(metric = "absZ", cutoff = 5))
+  expect_false(out2$skipped)
+  expect_identical(out2$df, strong)
+})
+
+test_that(".applyEntryScreen: bf / logBf screens use the SER lbf_variable", {
+  weak   <- data.frame(Z = rep(0.1, 10), stringsAsFactors = FALSE)
+  strong <- data.frame(Z = c(10, 0.1, 0.1, 0.1, 0.1), stringsAsFactors = FALSE)
+  expect_true(pecotmr:::.applyEntryScreen(weak, 1000,
+                list(metric = "logBf", cutoff = 3))$skipped)
+  expect_false(pecotmr:::.applyEntryScreen(strong, 1000,
+                list(metric = "logBf", cutoff = 3))$skipped)
+  expect_true(pecotmr:::.applyEntryScreen(weak, 1000,
+                list(metric = "bf", cutoff = 100))$skipped)
+  expect_false(pecotmr:::.applyEntryScreen(strong, 1000,
+                list(metric = "bf", cutoff = 100))$skipped)
+})
+
+test_that("summaryStatsQc: absZ / bf / logBf screens skip a no-signal entry", {
+  mk <- function() {
+    gr <- .ssQ_makeEntryGr()
+    S4Vectors::mcols(gr)$Z <- rep(0.1, length(gr))
+    GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
+                 ldSketch = .ssQ_makeHandle())
+  }
+  for (arg in list(list(absZCutoffToSkip = 5),
+                   list(bfCutoffToSkip = 100),
+                   list(logBfCutoffToSkip = 5))) {
+    res <- do.call(summaryStatsQc, c(list(mk()), arg, list(nCutoff = 0)))
+    ea <- getQcInfo(res)$entryAudit[[1L]]
+    expect_true(isTRUE(ea$pipScreenSkipped))
+    expect_equal(length(res$entry[[1L]]), 0L)
+  }
+})
+
+test_that("summaryStatsQc: absZ screen retains an entry with a strong marginal Z", {
+  gr <- .ssQ_makeEntryGr()
+  z <- rep(0.1, length(gr)); z[1] <- 8
+  S4Vectors::mcols(gr)$Z <- z
+  ss <- GwasSumStats(study = "g1", entry = list(gr), genome = "hg19",
+                     ldSketch = .ssQ_makeHandle())
+  res <- summaryStatsQc(ss, absZCutoffToSkip = 5, nCutoff = 0)
+  ea <- getQcInfo(res)$entryAudit[[1L]]
+  expect_false(isTRUE(ea$pipScreenSkipped))
+  expect_gt(length(res$entry[[1L]]), 0L)
+})
+
+test_that("summaryStatsQc: enabling two screens at once errors", {
+  ss <- .ssQ_makeGwasSumStats()
+  expect_error(summaryStatsQc(ss, pipCutoffToSkip = 0.5, absZCutoffToSkip = 5),
+               "one signal screen")
+})
+
 
 context("dentist_qc")
 library(MASS)

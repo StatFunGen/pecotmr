@@ -142,11 +142,14 @@ NULL
 # Turn an ldSketch specification into a GenotypeHandle. Accepts a prebuilt
 # handle, a named chrom -> path vector (genoMeta), or a single string that is
 # either a genotype file/prefix or a chrom-sharded genoMeta meta file.
-.resolveLdSketch <- function(spec) {
+# `chroms` (optional) restricts a chrom-sharded panel to those chromosomes so
+# the other per-chromosome shards are never read; it is ignored for a single
+# genotype file (which has no shards to skip).
+.resolveLdSketch <- function(spec, chroms = NULL) {
   if (is.null(spec)) return(NULL)
   if (methods::is(spec, "GenotypeHandle")) return(spec)
   if (is.character(spec) && !is.null(names(spec))) {
-    return(GenotypeHandle(genoMeta = spec))
+    return(GenotypeHandle(genoMeta = spec, chroms = chroms))
   }
   if (is.character(spec) && length(spec) == 1L) {
     lower <- tolower(spec)
@@ -156,13 +159,18 @@ NULL
       file.exists(paste0(spec, ".bed")) || file.exists(paste0(spec, ".pgen"))
     if (looksLikeGenotype) return(.detectGenotypeFormat(spec))
     # Otherwise treat it as a chrom-sharded genoMeta meta file.
-    return(GenotypeHandle(genoMeta = spec))
+    return(GenotypeHandle(genoMeta = spec, chroms = chroms))
   }
   stop("`ldSketch` must be a GenotypeHandle, a genotype path/prefix, or a ",
        "genoMeta spec (named chrom->path vector or meta-file path).")
 }
 
-# Resolve the LD sketch from the (argument, ldSketchPath column) pair.
+# Resolve the LD sketch SPEC from the (argument, ldSketchPath column) pair,
+# without reading any genotype metadata yet. Returns a prebuilt GenotypeHandle
+# (when the caller passed one), or the reconciled spec (a path/prefix or a
+# genoMeta path/named-vector) for later materialisation. Deferring the read to
+# `.materializeLdSketch` lets the loader first learn which chromosomes the
+# summary statistics cover and skip the panel's other per-chromosome shards.
 .resolveLdSketchInput <- function(df, ldSketch, base) {
   if (methods::is(ldSketch, "GenotypeHandle")) return(ldSketch)
   colSpec <- NULL
@@ -181,7 +189,28 @@ NULL
   if (is.null(spec)) {
     stop("`ldSketch` must be provided as an argument or an `ldSketchPath` column.")
   }
-  .resolveLdSketch(spec)
+  spec
+}
+
+# Materialise a resolved ldSketch spec into a GenotypeHandle, reading only the
+# shards for `chroms` when the spec is a chrom-sharded panel. A spec that is
+# already a GenotypeHandle (the caller passed a prebuilt handle) is returned
+# unchanged: its snpInfo is already in memory, so there is no read to restrict.
+.materializeLdSketch <- function(spec, chroms) {
+  if (is.null(spec)) return(NULL)
+  if (methods::is(spec, "GenotypeHandle")) return(spec)
+  .resolveLdSketch(spec, chroms = chroms)
+}
+
+# Canonical chromosomes present across a list of sumstats entry GRanges. NULL /
+# empty entries contribute nothing; NA seqnames are dropped. Always returns a
+# character vector (character(0) when nothing is present, never NULL).
+.entriesChroms <- function(entries) {
+  ch <- as.character(unlist(lapply(entries, function(gr) {
+    if (is.null(gr) || length(gr) == 0L) return(character(0))
+    canonChrom(as.character(GenomicRanges::seqnames(gr)))
+  }), use.names = FALSE))
+  unique(ch[!is.na(ch)])
 }
 
 # =============================================================================
@@ -907,7 +936,7 @@ loadGwasSumStatsFromManifest <- function(manifest, genome = NULL,
     stop("GwasSumStats manifest `study` values must be unique.")
   }
   genome <- .reconcileScalar(df$genome, genome, "genome")
-  ldSketch <- .resolveLdSketchInput(df, ldSketch, base)
+  ldSketchSpec <- .resolveLdSketchInput(df, ldSketch, base)
 
   # Study-level sample-size scalars (from the manifest). When a row carries a
   # usable scalar (n_case + n_control, or n_sample), the sumstats file need not
@@ -925,12 +954,20 @@ loadGwasSumStatsFromManifest <- function(manifest, genome = NULL,
     } else {
       columnMapping
     }
-    gr <- .loadSumStatsEntry(.resolveRel(as.character(df$sumStatsPath[[i]]), base),
-                             region, mapping, sampleSelect, formatMapping, label,
-                             allowNoN = .manifestHasStudyScalar(i, nCaseCol, nControlCol, nSampleCol))
-    .checkLdContainment(ldSketch, gr, minLdOverlapWarn, label)
-    gr
+    .loadSumStatsEntry(.resolveRel(as.character(df$sumStatsPath[[i]]), base),
+                       region, mapping, sampleSelect, formatMapping, label,
+                       allowNoN = .manifestHasStudyScalar(i, nCaseCol, nControlCol, nSampleCol))
   })
+
+  # Materialise the LD sketch reading only the chromosomes the summary stats
+  # cover -- for a chrom-sharded panel this skips the shards for every other
+  # chromosome. Then run the per-study containment checks (deferred until the
+  # sketch exists).
+  ldSketch <- .materializeLdSketch(ldSketchSpec, .entriesChroms(entries))
+  for (i in seq_len(nrow(df))) {
+    .checkLdContainment(ldSketch, entries[[i]], minLdOverlapWarn,
+                        paste0("GwasSumStats[study=", df$study[[i]], "]"))
+  }
 
   # Trim a genome-wide LD sketch to the summary stats' per-chromosome position
   # span so the object doesn't carry a full-genome snpInfo.
@@ -945,12 +982,13 @@ loadGwasSumStatsFromManifest <- function(manifest, genome = NULL,
   do.call(GwasSumStats, args)
 }
 
-# Build the entry list + tuple vectors for a QtlSumStats manifest. `allowNoN`
-# is an optional per-row logical vector: when TRUE for a row, its sumstats file
-# need not carry a per-variant N (a study-level nSample scalar fills it later in
-# summaryStatsQc). NULL (default) requires a per-variant N on every row.
-.loadQtlSumStatsEntries <- function(df, base, region, ldSketch,
-                                    minLdOverlapWarn, columnMapping,
+# Build the entry list for a QtlSumStats manifest. `allowNoN` is an optional
+# per-row logical vector: when TRUE for a row, its sumstats file need not carry
+# a per-variant N (a study-level nSample scalar fills it later in
+# summaryStatsQc). NULL (default) requires a per-variant N on every row. The LD
+# containment check is deferred to the caller so the sketch can first be read
+# restricted to the chromosomes these entries cover.
+.loadQtlSumStatsEntries <- function(df, base, region, columnMapping,
                                     sampleSelect, formatMapping,
                                     allowNoN = NULL) {
   lapply(seq_len(nrow(df)), function(i) {
@@ -963,13 +1001,9 @@ loadGwasSumStatsFromManifest <- function(manifest, genome = NULL,
     } else {
       columnMapping
     }
-    gr <- .loadSumStatsEntry(.resolveRel(as.character(df$sumStatsPath[[i]]), base),
-                             region, mapping, sampleSelect, formatMapping, label,
-                             allowNoN = !is.null(allowNoN) && isTRUE(allowNoN[[i]]))
-    if (!is.null(ldSketch)) {
-      .checkLdContainment(ldSketch, gr, minLdOverlapWarn, label)
-    }
-    gr
+    .loadSumStatsEntry(.resolveRel(as.character(df$sumStatsPath[[i]]), base),
+                       region, mapping, sampleSelect, formatMapping, label,
+                       allowNoN = !is.null(allowNoN) && isTRUE(allowNoN[[i]]))
   })
 }
 
@@ -1008,7 +1042,7 @@ loadQtlSumStatsFromManifest <- function(manifest, genome = NULL,
                                         "sumStatsPath"),
                            label = "QtlSumStats")
   genome <- .reconcileScalar(df$genome, genome, "genome")
-  ldSketch <- .resolveLdSketchInput(df, ldSketch, base)
+  ldSketchSpec <- .resolveLdSketchInput(df, ldSketch, base)
 
   # Tuple-level total-N scalar (from the manifest). When a row carries a usable
   # nSample the sumstats file need not supply a per-variant N: summaryStatsQc
@@ -1016,10 +1050,21 @@ loadQtlSumStatsFromManifest <- function(manifest, genome = NULL,
   nSampleCol <- if ("nSample" %in% names(df)) as.numeric(df$nSample) else NULL
   allowNoN   <- if (!is.null(nSampleCol)) is.finite(nSampleCol) else NULL
 
-  entries <- .loadQtlSumStatsEntries(df, base, region, ldSketch,
-                                     minLdOverlapWarn, columnMapping,
+  entries <- .loadQtlSumStatsEntries(df, base, region, columnMapping,
                                      sampleSelect, formatMapping,
                                      allowNoN = allowNoN)
+
+  # Materialise the LD sketch reading only the chromosomes the summary stats
+  # cover (skips other shards of a chrom-sharded panel), then check containment.
+  ldSketch <- .materializeLdSketch(ldSketchSpec, .entriesChroms(entries))
+  if (!is.null(ldSketch)) {
+    for (i in seq_len(nrow(df))) {
+      .checkLdContainment(ldSketch, entries[[i]], minLdOverlapWarn,
+                          paste0("QtlSumStats[", df$study[[i]], "/",
+                                 df$context[[i]], "/", df$trait[[i]], "]"))
+    }
+  }
+
   # Trim a genome-wide LD sketch to the summary stats' per-chromosome position
   # span so the object doesn't carry a full-genome snpInfo.
   ldSketch <- .subsetSketchToRange(ldSketch, entries)

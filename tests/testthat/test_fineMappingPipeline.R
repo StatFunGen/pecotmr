@@ -846,6 +846,38 @@ test_that(".fmBuildMvsusiePriorCv: mode C reuses full-fit w0/V with per-fold U",
   expect_equal(captured[[2]]$mixture_prior$matrices$Z, diag(2) * 3)  # fold 2's U
 })
 
+test_that(".fmSerScreen supports absZ / bf / logBf metrics and the legacy pip scalar", {
+  skip_if_not_installed("susieR")
+  set.seed(11)
+  n <- 200L; p <- 6L
+  X <- matrix(stats::rnorm(n * p), n, p)
+  yStrong <- X[, 2] * 0.6 + stats::rnorm(n)   # column 2 strongly associated
+  yNull   <- stats::rnorm(n)                  # no association
+
+  # absZ: max marginal |z| (no susie fit).
+  expect_true(pecotmr:::.fmSerScreen(X, yStrong, list(metric = "absZ", cutoff = 3)))
+  expect_false(pecotmr:::.fmSerScreen(X, yNull, list(metric = "absZ", cutoff = 3)))
+  # bf / logBf from the L = 1 susie lbf_variable.
+  expect_true(pecotmr:::.fmSerScreen(X, yStrong, list(metric = "logBf", cutoff = 2)))
+  expect_false(pecotmr:::.fmSerScreen(X, yNull,  list(metric = "logBf", cutoff = 5)))
+  expect_true(pecotmr:::.fmSerScreen(X, yStrong, list(metric = "bf", cutoff = 10)))
+  # Legacy scalar spec still screens on PIP; 0 disables (always keep).
+  expect_true(pecotmr:::.fmSerScreen(X, yStrong, 0.5))
+  expect_true(pecotmr:::.fmSerScreen(X, yNull, 0))
+  # Too few samples -> advisory fallback (keep by default).
+  expect_true(pecotmr:::.fmSerScreen(X[1, , drop = FALSE], yStrong[1],
+                                     list(metric = "absZ", cutoff = 3)))
+})
+
+test_that("fineMappingPipeline(QtlDataset): enabling two screen metrics errors", {
+  qd <- .fmp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  # The resolver runs before any fitting, so this fails fast on the public call.
+  expect_error(
+    fineMappingPipeline(qd, methods = "susie", cisWindow = 1000L,
+                        pipCutoffToSkip = 0.5, absZCutoffToSkip = 5),
+    "one signal screen")
+})
+
 test_that("fineMappingPipeline(QtlDataset): pipCutoffToSkip skips no-signal univariate traits", {
   qd <- .fmp_makeQtlDataset(contexts = "brain", traits = c("ENSG_A", "ENSG_B"))
   # Stateful screen: reject the first block (ENSG_A), keep the rest (ENSG_B).
@@ -2659,7 +2691,7 @@ test_that(".fmSerScreen / .fmScreenActive / .fmSerScreenColumns", {
   set.seed(2)
   X <- matrix(rnorm(40), 20, 2, dimnames = list(paste0("s", 1:20), c("v1", "v2")))
   y <- rnorm(20)
-  expect_true(pecotmr:::.fmSerScreen(X, y, cutoff = 0))              # disabled
+  expect_true(pecotmr:::.fmSerScreen(X, y, 0))                       # disabled
   expect_true(pecotmr:::.fmSerScreen(X, c(1, rep(NA, 19)), 0.5))     # < 2 obs (880)
   expect_type(pecotmr:::.fmSerScreen(X, y, 0.5), "logical")          # real susie fit
   local_mocked_bindings(susie = function(...) stop("boom"), .package = "susieR")

@@ -2614,17 +2614,103 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
        diagnostics = diagnostics)
 }
 
-# Per-entry SER-based pip-screen (skip if no signal above the cutoff).
-.applyPipScreen <- function(df, n, cutoff) {
-  if (cutoff <= 0) return(list(df = df, skipped = FALSE))
-  effectiveCutoff <- if (cutoff < 0) 3 / nrow(df) else cutoff
-  pip <- susieR::susie_ser(z = df$Z, n = n, coverage = NULL)$pip
-  if (!any(pip > effectiveCutoff)) {
+# -----------------------------------------------------------------------------
+# Signal screen: skip an entry/block with no strong signal by a chosen metric.
+# -----------------------------------------------------------------------------
+# The screen is driven by ONE metric at a time (enforced by .resolveScreenMetric):
+#   pip   : max single-effect PIP                (susie_ser $pip); cutoff<0 => 3/nVar
+#   absZ  : max |Z|                              (no model fit)
+#   logBf : max per-variant single-effect logBF  (susie_ser $lbf_variable)
+#   bf    : same evidence on the raw BF scale    (compare maxlogBF > log(cutoff))
+# A "screen spec" flowing through the pipelines is EITHER a legacy PIP cutoff
+# (numeric scalar, 0 = off -- the historical `pipCutoffToSkip`) OR a resolved
+# screen object `list(metric, cutoff)`. .asScreen() canonicalizes either into
+# `list(metric, cutoff)` or NULL (no screen); the pipeline channels stay
+# untyped so only the screen primitives need to interpret the spec.
+
+# Canonicalize a screen spec into list(metric, cutoff) or NULL (no screen).
+.asScreen <- function(spec) {
+  if (is.null(spec)) return(NULL)
+  if (is.list(spec)) {                                   # already a screen object
+    if (is.null(spec$metric) || is.null(spec$cutoff) ||
+        is.na(spec$cutoff) || spec$cutoff == 0) return(NULL)
+    return(spec)
+  }
+  # Legacy numeric: a PIP cutoff. Only a non-zero scalar activates it (a
+  # non-scalar / NA / 0 means no screen), matching the historical behaviour.
+  if (length(spec) != 1L || is.na(spec) || spec == 0) return(NULL)
+  list(metric = "pip", cutoff = as.numeric(spec))
+}
+
+# Turn the four public cutoff arguments into a single screen object (or NULL).
+# Enforces one-metric-at-a-time and rejects meaningless negative cutoffs. The
+# pip metric keeps its `< 0 => 3 / nVariants` adaptive convention (resolved at
+# screen time); absZ / bf must be > 0; logBf may be any non-zero value.
+.resolveScreenMetric <- function(pipCutoffToSkip = 0, absZCutoffToSkip = 0,
+                                 bfCutoffToSkip = 0, logBfCutoffToSkip = 0) {
+  scalar <- function(x) if (is.null(x) || length(x) != 1L || is.na(x)) 0 else as.numeric(x)
+  cuts <- c(pip = scalar(pipCutoffToSkip), absZ = scalar(absZCutoffToSkip),
+            bf = scalar(bfCutoffToSkip), logBf = scalar(logBfCutoffToSkip))
+  on <- cuts[cuts != 0]
+  if (length(on) == 0L) return(NULL)
+  if (length(on) > 1L)
+    stop("Only one signal screen may be enabled at a time, but these are ",
+         "non-zero: ", paste(sprintf("%s=%g", names(on), on), collapse = ", "),
+         ". Set all but one of pipCutoffToSkip / absZCutoffToSkip / ",
+         "bfCutoffToSkip / logBfCutoffToSkip to 0.")
+  metric <- names(on); cutoff <- unname(on[[1L]])
+  if (metric == "absZ" && cutoff < 0)
+    stop("absZCutoffToSkip must be > 0 (it screens on max|Z|).")
+  if (metric == "bf" && cutoff < 0)
+    stop("bfCutoffToSkip must be > 0 (Bayes factors are positive).")
+  list(metric = metric, cutoff = cutoff)
+}
+
+# Decide whether the z-scores of one entry clear the chosen screen. Returns
+# list(ok = logical, reason = character). susie_ser is fit at most once, and
+# only for the metrics that need it (absZ stays model-free).
+.entryScreenPass <- function(z, n, nVar, scr) {
+  metric <- scr$metric; cutoff <- scr$cutoff
+  if (metric == "absZ") {
+    m <- suppressWarnings(max(abs(as.numeric(z)), na.rm = TRUE))
+    return(list(ok = is.finite(m) && m > cutoff,
+                reason = sprintf("no variant with |Z| above %g (max |Z| = %g)",
+                                 cutoff, m)))
+  }
+  ser <- susieR::susie_ser(z = z, n = n, coverage = NULL)
+  if (metric == "pip") {
+    eff <- if (cutoff < 0) 3 / nVar else cutoff
+    return(list(ok = any(ser$pip > eff),
+                reason = sprintf("no signals above PIP threshold %g", eff)))
+  }
+  maxLbf <- suppressWarnings(max(as.numeric(ser$lbf_variable), na.rm = TRUE))
+  if (metric == "logBf")
+    return(list(ok = is.finite(maxLbf) && maxLbf > cutoff,
+                reason = sprintf("no variant with logBF above %g (max logBF = %g)",
+                                 cutoff, maxLbf)))
+  # metric == "bf": compare in log space to avoid overflow of exp(maxLbf).
+  list(ok = is.finite(maxLbf) && maxLbf > log(cutoff),
+       reason = sprintf("no variant with BF above %g (max BF = %g)",
+                        cutoff, exp(maxLbf)))
+}
+
+# Per-entry signal screen. `screen` is a screen spec (see .asScreen). Skips
+# (empties) the entry when the chosen metric shows no signal above its cutoff.
+.applyEntryScreen <- function(df, n, screen) {
+  scr <- .asScreen(screen)
+  if (is.null(scr)) return(list(df = df, skipped = FALSE))
+  res <- .entryScreenPass(df$Z, n = n, nVar = nrow(df), scr = scr)
+  if (!res$ok) {
     return(list(df = df[FALSE, , drop = FALSE], skipped = TRUE,
-                reason = sprintf("no signals above PIP threshold %g",
-                                 effectiveCutoff)))
+                reason = res$reason))
   }
   list(df = df, skipped = FALSE)
+}
+
+# Back-compat thin wrapper for the original PIP-only screen (a bare numeric
+# cutoff, 0 = off). Delegates to the generalized screen via .asScreen.
+.applyPipScreen <- function(df, n, cutoff) {
+  .applyEntryScreen(df, n = n, screen = cutoff)
 }
 
 # Prefix QC-track log lines with the entry label `lbl` (as `[lbl] ...`), or emit
@@ -2839,12 +2925,13 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
          " variant(s).")
   }
 
-  # 5. Optional PIP screen (after harmonization, on panel-aligned variants).
-  if (opts$pipCutoffToSkip != 0) {
-    pip <- .applyPipScreen(df, n = opts$nForPip, cutoff = opts$pipCutoffToSkip)
-    df <- pip$df
-    entryAudit$pipScreenSkipped <- isTRUE(pip$skipped)
-    if (isTRUE(pip$skipped)) entryAudit$pipScreenReason <- pip$reason
+  # 5. Optional signal screen (after harmonization, on panel-aligned variants).
+  #    One metric at a time: PIP / max|Z| / max BF / max logBF (opts$screen).
+  if (!is.null(opts$screen)) {
+    scr <- .applyEntryScreen(df, n = opts$nForPip, screen = opts$screen)
+    df <- scr$df
+    entryAudit$pipScreenSkipped <- isTRUE(scr$skipped)
+    if (isTRUE(scr$skipped)) entryAudit$pipScreenReason <- scr$reason
   }
 
   # 6. Optional kriging allele-flip QC. Uses susieR's allele-switch rule
@@ -3140,6 +3227,20 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
 #'   LD-independent single-effect SER screen and skip the entry if no
 #'   PIP exceeds the cutoff. \code{< 0} resolves to \code{3 / nVariants}.
 #'   Default 0 (no screen).
+#' @param absZCutoffToSkip Numeric (length 1). Alternative signal screen:
+#'   skip the entry when \code{max(abs(Z))} does not exceed the cutoff. No
+#'   model fit. Default 0 (off).
+#' @param bfCutoffToSkip Numeric (length 1). Alternative signal screen: skip
+#'   the entry when the largest per-variant single-effect Bayes factor (from
+#'   the same \code{susie_ser} fit as the PIP screen) does not exceed the
+#'   cutoff. Compared in log space (\code{maxlogBF > log(cutoff)}). Must be
+#'   \code{> 0}. Default 0 (off).
+#' @param logBfCutoffToSkip Numeric (length 1). As \code{bfCutoffToSkip} but
+#'   the cutoff is on the log Bayes factor scale (\code{maxlogBF > cutoff}).
+#'   Default 0 (off).
+#'   Exactly one of \code{pipCutoffToSkip} / \code{absZCutoffToSkip} /
+#'   \code{bfCutoffToSkip} / \code{logBfCutoffToSkip} may be non-zero (one
+#'   screening metric at a time); enabling more than one is an error.
 #' @param zMismatchQc One of \code{"none"} (default), \code{"slalom"},
 #'   \code{"dentist"}.
 #' @param alleleFlipKriging Logical (length 1). Opt-in kriging
@@ -3205,6 +3306,9 @@ summaryStatsQc <- function(sumstats,
                            keepVariants           = NULL,
                            skipRegion             = NULL,
                            pipCutoffToSkip        = 0,
+                           absZCutoffToSkip       = 0,
+                           bfCutoffToSkip         = 0,
+                           logBfCutoffToSkip      = 0,
                            zMismatchQc            = c("none", "slalom",
                                                      "dentist"),
                            alleleFlipKriging      = FALSE,
@@ -3250,7 +3354,10 @@ summaryStatsQc <- function(sumstats,
     nCutoff                = nCutoff,
     keepVariants           = as.character(keepVariants),
     skipRegion             = skipRegion,
-    pipCutoffToSkip        = pipCutoffToSkip,
+    screen                 = .resolveScreenMetric(pipCutoffToSkip,
+                                                  absZCutoffToSkip,
+                                                  bfCutoffToSkip,
+                                                  logBfCutoffToSkip),
     zMismatchQc            = zMismatchQc,
     alleleFlipKriging      = alleleFlipKriging,
     effectiveN             = effectiveN,
@@ -3312,6 +3419,10 @@ summaryStatsQc <- function(sumstats,
       mafCutoff             = mafCutoff,
       infoCutoff            = infoCutoff,
       nCutoff               = nCutoff,
+      pipCutoffToSkip       = pipCutoffToSkip,
+      absZCutoffToSkip      = absZCutoffToSkip,
+      bfCutoffToSkip        = bfCutoffToSkip,
+      logBfCutoffToSkip     = logBfCutoffToSkip,
       zMismatchQc           = zMismatchQc,
       alleleFlipKriging     = alleleFlipKriging,
       effectiveN            = effectiveN,

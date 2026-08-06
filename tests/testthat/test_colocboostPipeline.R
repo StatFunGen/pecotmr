@@ -220,6 +220,32 @@ test_that(".cbBuildLdArgs: empty list returns empty list", {
   expect_equal(pecotmr:::.cbBuildLdArgs(list()), list())
 })
 
+test_that(".cbScreenSpec enforces one metric and threads the right spec", {
+  expect_error(pecotmr:::.cbScreenSpec(0.5, 5, 0, 0), "one signal screen")
+  expect_equal(pecotmr:::.cbScreenSpec(0, 5, 0, 0), list(metric = "absZ", cutoff = 5))
+  expect_equal(pecotmr:::.cbScreenSpec(0, 0, 100, 0), list(metric = "bf", cutoff = 100))
+  expect_equal(pecotmr:::.cbScreenSpec(0.3, 0, 0, 0), 0.3)          # legacy pip scalar
+  expect_equal(pecotmr:::.cbScreenSpec(c(brain = 0.3), 0, 0, 0),
+               c(brain = 0.3))                                       # context-named pass-through
+})
+
+test_that(".cbResolveCutoff passes a screen object through uniformly", {
+  sc <- list(metric = "absZ", cutoff = 5)
+  expect_identical(pecotmr:::.cbResolveCutoff(sc, "brain"), sc)
+  expect_identical(pecotmr:::.cbResolveCutoff(sc, "blood"), sc)
+  expect_equal(pecotmr:::.cbResolveCutoff(c(brain = 0.3), "brain"), 0.3)
+  expect_equal(pecotmr:::.cbResolveCutoff(c(brain = 0.3), "blood"), 0)  # unlisted ctx
+  expect_equal(pecotmr:::.cbResolveCutoff(0.5, "any"), 0.5)
+})
+
+test_that("colocboostPipeline(QtlDataset): enabling two screen metrics errors", {
+  qd <- .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+  # .cbScreenSpec runs before the bundle/engine, so this fails fast.
+  expect_error(
+    colocboostPipeline(qd, pipCutoffToSkip = 0.5, bfCutoffToSkip = 100),
+    "one signal screen")
+})
+
 test_that(".cbRequireSumStatsQc: un-QCd input errors", {
   ss <- .cbp_makeQtlSumStats(qc = FALSE)
   expect_error(
@@ -564,7 +590,7 @@ test_that(".cbPipSkipOutcomes: an outcome with < 2 observations is skipped", {
   set.seed(4)
   X <- matrix(rnorm(60), 30, 2, dimnames = list(paste0("s", 1:30), c("v1", "v2")))
   Y <- cbind(a = c(1, rep(NA, 29)), b = rnorm(30))          # col a: 1 obs (< 2)
-  res <- pecotmr:::.cbPipSkipOutcomes(X, Y, cutoff = 0.5)
+  res <- pecotmr:::.cbPipSkipOutcomes(X, Y, 0.5)
   expect_true(is.null(res) || is.matrix(res))               # col a -> next (180)
 })
 

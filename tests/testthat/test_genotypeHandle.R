@@ -429,6 +429,62 @@ test_that("genoMeta sharded handle show() reports the layout", {
 })
 
 # ===========================================================================
+# genoMeta `chroms`: read only the requested per-chromosome shards (I/O win).
+# ===========================================================================
+test_that("genoMeta chroms reads only the requested shard", {
+  skip_if_not_installed("snpStats")
+  meta <- c("21" = file.path(test_data_dir, "test_variants"),
+            "22" = file.path(test_data_dir, "test_variants_chr22"))
+  full   <- GenotypeHandle(genoMeta = meta)
+  only21 <- GenotypeHandle(genoMeta = meta, chroms = "21")
+  expect_equal(names(only21@chromPaths), "21")
+  expect_equal(nrow(only21@snpInfo), 349L)
+  # chr21 is the first shard, so the kept rows/fileIdx match the full handle's.
+  expect_equal(only21@snpInfo$SNP,     full@snpInfo$SNP[1:349])
+  expect_equal(only21@snpInfo$fileIdx, full@snpInfo$fileIdx[1:349])
+})
+
+test_that("genoMeta chroms canonicalises chromosome labels", {
+  skip_if_not_installed("snpStats")
+  # "chr21" canonicalises to the panel's declared "21" shard.
+  h <- GenotypeHandle(
+    genoMeta = c("21" = file.path(test_data_dir, "test_variants"),
+                 "22" = file.path(test_data_dir, "test_variants_chr22")),
+    chroms = "chr21")
+  expect_equal(names(h@chromPaths), "21")
+})
+
+test_that("genoMeta chroms falls back to all shards when none match", {
+  skip_if_not_installed("snpStats")
+  # chr9 is absent from the panel: rather than build an empty handle, read all
+  # so the caller's own absence check can report the mismatch.
+  h <- GenotypeHandle(
+    genoMeta = c("21" = file.path(test_data_dir, "test_variants"),
+                 "22" = file.path(test_data_dir, "test_variants_chr22")),
+    chroms = "9")
+  expect_equal(sort(names(h@chromPaths)), c("21", "22"))
+})
+
+test_that("genoMeta chroms skips a shard whose file does not exist", {
+  skip_if_not_installed("snpStats")
+  # A bogus chr21 payload proves the skip: restricting to chr22 must never open
+  # it, while requesting chr21 too fails on the missing files.
+  meta <- c("22" = file.path(test_data_dir, "test_variants_chr22"),
+            "21" = "/no/such/chr21/prefix")
+  h <- GenotypeHandle(genoMeta = meta, chroms = "22")
+  expect_equal(names(h@chromPaths), "22")
+  expect_error(GenotypeHandle(genoMeta = meta, chroms = c("22", "21")))
+})
+
+test_that("chroms is rejected for a non-genoMeta source", {
+  skip_if_not_installed("snpStats")
+  expect_error(
+    GenotypeHandle(plink1Prefix = file.path(test_data_dir, "test_variants"),
+                   chroms = "21"),
+    "only supported with .genoMeta")
+})
+
+# ===========================================================================
 # .genotypeHandleFromLdMeta: row-resolution error branches.
 # The real getRegionalLdMeta errors earlier for genuinely-uncovered regions
 # (see the "region with no covering row" test above), so we mock it to drive

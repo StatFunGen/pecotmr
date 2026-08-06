@@ -81,6 +81,14 @@
 #'   skipped. \code{0} (default) disables it; a negative value uses
 #'   \code{3 / n_variants}. (Summary-statistic skipping is handled upstream by
 #'   \code{\link{summaryStatsQc}}'s own \code{pipCutoffToSkip}.)
+#' @param absZCutoffToSkip,bfCutoffToSkip,logBfCutoffToSkip Alternative
+#'   individual-level pre-filter metrics used in place of
+#'   \code{pipCutoffToSkip}: drop an outcome unless its maximum marginal
+#'   \code{|z|} (\code{absZCutoffToSkip}), or its maximum per-variant
+#'   single-effect Bayes factor (\code{bfCutoffToSkip}) / log Bayes factor
+#'   (\code{logBfCutoffToSkip}) from the \code{L = 1} fit, exceeds the cutoff.
+#'   Scalars, each defaulting to 0 (off). Exactly one screening metric may be
+#'   enabled: setting any of these requires \code{pipCutoffToSkip = 0}.
 #' @param alleleFlip Logical, default \code{TRUE}. When TRUE, harmonize variants
 #'   across the individual X, sumstats, and LD by (chrom, pos) with ref/alt
 #'   swaps recognized (flipping z / residualized dosage / LD to a shared
@@ -160,10 +168,13 @@ setGeneric("colocboostPipeline",
   invisible(NULL)
 }
 
-# Resolve the per-context pipCutoffToSkip from either a scalar (applies to
-# every context) or a named vector keyed by context. Default 0 (no skip).
+# Resolve the per-context screen spec. The `pipCutoffToSkip` channel carries
+# EITHER a resolved screen object (list(metric, cutoff) for absZ/bf/logBf/pip --
+# applies uniformly to every context) OR the legacy PIP cutoff as a scalar (all
+# contexts) or a named vector keyed by context. Default 0 (no screen).
 .cbResolveCutoff <- function(pipCutoffToSkip, ctx) {
   if (is.null(pipCutoffToSkip) || length(pipCutoffToSkip) == 0L) return(0)
+  if (is.list(pipCutoffToSkip)) return(pipCutoffToSkip)   # uniform screen object
   if (!is.null(names(pipCutoffToSkip))) {
     if (ctx %in% names(pipCutoffToSkip)) return(pipCutoffToSkip[[ctx]])
     return(0)
@@ -171,18 +182,35 @@ setGeneric("colocboostPipeline",
   pipCutoffToSkip[[1L]]
 }
 
+# Combine the four colocboost screen cutoffs into a single spec to thread
+# through the pipCutoffToSkip channel: a resolved screen object when a new
+# metric (absZ / bf / logBf) is set, otherwise the (possibly context-named)
+# legacy pipCutoffToSkip. Enforces one screening metric at a time.
+.cbScreenSpec <- function(pipCutoffToSkip, absZCutoffToSkip,
+                          bfCutoffToSkip, logBfCutoffToSkip) {
+  newScreen <- .resolveScreenMetric(0, absZCutoffToSkip,
+                                    bfCutoffToSkip, logBfCutoffToSkip)
+  pipOn <- !is.null(pipCutoffToSkip) && length(pipCutoffToSkip) > 0L &&
+           any(as.numeric(pipCutoffToSkip) != 0, na.rm = TRUE)
+  if (!is.null(newScreen) && pipOn)
+    stop("colocboostPipeline: only one signal screen may be enabled at a time; ",
+         "unset pipCutoffToSkip to use absZCutoffToSkip / bfCutoffToSkip / ",
+         "logBfCutoffToSkip.")
+  if (!is.null(newScreen)) newScreen else pipCutoffToSkip
+}
+
 # Per-outcome single-trait skip (ports the legacy qc_individual_data
 # pip_cutoff_to_skip): for each outcome column of Y, fit a single-effect
 # SuSiE (L = 1, max_iter = 100) on (X, Y[, j]) and keep the outcome only if
 # any variant's PIP exceeds the cutoff. A cutoff < 0 means 3 / n_variants.
 # Returns the retained Y (NULL when no outcome clears the threshold).
-.cbPipSkipOutcomes <- function(X, Y, cutoff) {
-  if (is.null(cutoff) || is.na(cutoff) || cutoff == 0) return(Y)
+.cbPipSkipOutcomes <- function(X, Y, spec) {
+  if (is.null(.asScreen(spec))) return(Y)
   # Single-effect screen per outcome, sharing the L = 1 SuSiE pre-screen
   # (.fmSerScreen) with the fine-mapping pipeline. fallback = FALSE: an outcome
   # that cannot be screened (too few samples / fit failure) is dropped.
   keep <- vapply(seq_len(ncol(Y)),
-                 function(j) .fmSerScreen(X, Y[, j], cutoff, fallback = FALSE),
+                 function(j) .fmSerScreen(X, Y[, j], spec, fallback = FALSE),
                  logical(1L))
   if (!any(keep)) return(NULL)
   Y[, keep, drop = FALSE]
@@ -251,11 +279,11 @@ setGeneric("colocboostPipeline",
     X <- X[common, , drop = FALSE]
     Y <- Y[common, , drop = FALSE]
     cutoffCtx <- .cbResolveCutoff(pipCutoffToSkip, ctx)
-    if (!is.null(cutoffCtx) && !is.na(cutoffCtx) && cutoffCtx != 0) {
+    if (!is.null(.asScreen(cutoffCtx))) {
       Y <- .cbPipSkipOutcomes(X, Y, cutoffCtx)
       if (is.null(Y) || ncol(Y) == 0L) {
         message("colocboostPipeline: skipping context '", ctx,
-                "' (no outcome cleared pipCutoffToSkip = ", cutoffCtx, ").")
+                "' (no outcome cleared the signal screen).")
         next
       }
     }
@@ -699,9 +727,14 @@ setMethod("colocboostPipeline", "QtlDataset",
            separateGwas = FALSE,
            samples = NULL,
            pipCutoffToSkip = 0,
+           absZCutoffToSkip = 0,
+           bfCutoffToSkip = 0,
+           logBfCutoffToSkip = 0,
            alleleFlip = TRUE,
            ...) {
     dotArgs <- list(...)
+    screenSpec <- .cbScreenSpec(pipCutoffToSkip, absZCutoffToSkip,
+                                bfCutoffToSkip, logBfCutoffToSkip)
     indBundle <- .cbIndividualBundle(
       qtlData,
       contexts     = contexts,
@@ -709,7 +742,7 @@ setMethod("colocboostPipeline", "QtlDataset",
       region       = region,
       cisWindow    = cisWindow,
       samples      = samples,
-      pipCutoffToSkip = pipCutoffToSkip)
+      pipCutoffToSkip = screenSpec)
     .cbDriver(indBundle, qtlPairs = list(), gwasSumStats,
               xqtlColoc, jointGwas, separateGwas,
               focalTrait, dotArgs, alleleFlip = alleleFlip)
@@ -755,9 +788,14 @@ setMethod("colocboostPipeline", "MultiStudyQtlDataset",
            separateGwas = FALSE,
            samples = NULL,
            pipCutoffToSkip = 0,
+           absZCutoffToSkip = 0,
+           bfCutoffToSkip = 0,
+           logBfCutoffToSkip = 0,
            alleleFlip = TRUE,
            ...) {
     dotArgs <- list(...)
+    screenSpec <- .cbScreenSpec(pipCutoffToSkip, absZCutoffToSkip,
+                                bfCutoffToSkip, logBfCutoffToSkip)
 
     # Aggregate the individual-level bundles across all QtlDataset
     # members. Per-study trait names are prefixed with "{study}:" so
@@ -777,7 +815,7 @@ setMethod("colocboostPipeline", "MultiStudyQtlDataset",
         region       = region,
         cisWindow    = cisWindow,
         samples      = samples,
-        pipCutoffToSkip = pipCutoffToSkip)
+        pipCutoffToSkip = screenSpec)
       if (is.null(sub)) next
       xOffset <- length(combinedX)
       yOffset <- length(combinedY)

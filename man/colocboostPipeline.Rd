@@ -23,6 +23,9 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   separateGwas = FALSE,
   samples = NULL,
   pipCutoffToSkip = 0,
+  absZCutoffToSkip = 0,
+  bfCutoffToSkip = 0,
+  logBfCutoffToSkip = 0,
   alleleFlip = TRUE,
   ...
 )
@@ -55,6 +58,9 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   separateGwas = FALSE,
   samples = NULL,
   pipCutoffToSkip = 0,
+  absZCutoffToSkip = 0,
+  bfCutoffToSkip = 0,
+  logBfCutoffToSkip = 0,
   alleleFlip = TRUE,
   ...
 )
@@ -105,6 +111,15 @@ variant's PIP exceeds the cutoff; a context with no surviving outcome is
 skipped. \code{0} (default) disables it; a negative value uses
 \code{3 / n_variants}. (Summary-statistic skipping is handled upstream by
 \code{\link{summaryStatsQc}}'s own \code{pipCutoffToSkip}.)}
+
+\item{absZCutoffToSkip, bfCutoffToSkip, logBfCutoffToSkip}{Alternative
+individual-level pre-filter metrics used in place of
+\code{pipCutoffToSkip}: drop an outcome unless its maximum marginal
+\code{|z|} (\code{absZCutoffToSkip}), or its maximum per-variant
+single-effect Bayes factor (\code{bfCutoffToSkip}) / log Bayes factor
+(\code{logBfCutoffToSkip}) from the \code{L = 1} fit, exceeds the cutoff.
+Scalars, each defaulting to 0 (off). Exactly one screening metric may be
+enabled: setting any of these requires \code{pipCutoffToSkip = 0}.}
 
 \item{alleleFlip}{Logical, default \code{TRUE}. When TRUE, harmonize variants
 across the individual X, sumstats, and LD by (chrom, pos) with ref/alt

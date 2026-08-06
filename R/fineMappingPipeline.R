@@ -197,6 +197,14 @@
 #'   summary-statistics analog lives in \code{summaryStatsQc()}. \code{0}
 #'   (default) disables the screen; a negative value uses the adaptive
 #'   \code{3 / nVariants} threshold.
+#' @param absZCutoffToSkip,bfCutoffToSkip,logBfCutoffToSkip Numeric (length 1).
+#'   Alternative individual-level pre-screen metrics, in place of
+#'   \code{pipCutoffToSkip}: skip a block unless its maximum marginal
+#'   \code{|z|} (\code{absZCutoffToSkip}), or its maximum per-variant
+#'   single-effect Bayes factor (\code{bfCutoffToSkip}) / log Bayes factor
+#'   (\code{logBfCutoffToSkip}) from the \code{L = 1} fit, exceeds the cutoff.
+#'   Each defaults to 0 (off). Exactly one of the four \code{*CutoffToSkip}
+#'   arguments may be non-zero (one screening metric at a time).
 #' @param usePCA Logical (length 1). \code{QtlDataset} only. When
 #'   \code{TRUE} (default \code{FALSE}), each multi-trait context's
 #'   PCA-reduced phenotype is fine-mapped with univariate SuSiE on its
@@ -1002,14 +1010,25 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
   scores
 }
 
-# Single-effect (SER) pre-screen, individual-level. Fits susie with L = 1 on a
-# residualized (X, y) block and reports whether any PIP clears `cutoff` -- i.e.
-# whether the block shows any potentially significant variant worth a full fit.
-# Ports the deleted multivariate_pipeline.R `skipConditions` / susie_twas
-# `pip_cutoff_to_skip` logic (the individual-level analog of the sumstat-path
-# `.applyPipScreen`):
-#   * `cutoff == 0` (or NULL/non-scalar) disables the screen -> always keep.
-#   * `cutoff < 0` uses the adaptive 3 / nVariants threshold.
+# Per-column marginal-association z-scores of y on each column of X (univariate
+# regression z = betahat / sebetahat), used by the individual-level absZ screen.
+# @noRd
+.marginalZ <- function(X, y) {
+  ur <- susieR::univariate_regression(X, y)
+  ur$betahat / ur$sebetahat
+}
+
+# Single-effect (SER) pre-screen, individual-level. Reports whether a
+# residualized (X, y) block shows a strong enough signal (by the chosen metric)
+# to be worth a full fit. `screen` is a screen spec (see .asScreen): a legacy
+# PIP cutoff (numeric scalar, 0 = off) OR a resolved list(metric, cutoff) for
+# one of pip / absZ / bf / logBf. Ports the deleted multivariate_pipeline.R
+# `skipConditions` / susie_twas `pip_cutoff_to_skip` logic (the individual-level
+# analog of the sumstat-path `.applyEntryScreen`):
+#   * no screen (NULL / 0 / non-scalar numeric) -> always keep.
+#   * pip cutoff < 0 uses the adaptive 3 / nVariants threshold.
+#   * absZ needs no susie fit; pip/bf/logBf fit susie L = 1 once (its
+#     $lbf_variable gives the per-variant logBF for bf/logBf, $pip for pip).
 #   * NA entries of `y` are dropped before fitting.
 # The screen is advisory: too few samples/variants or a fit failure returns
 # `fallback` -- TRUE (default) keeps the block rather than discard a potentially
@@ -1017,26 +1036,39 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 # outcome it cannot screen. This is the single L = 1 SuSiE pre-screen shared by
 # .fmSerScreenColumns (joint) and .cbPipSkipOutcomes (colocboost).
 # @noRd
-.fmSerScreen <- function(X, y, cutoff, fallback = TRUE) {
-  if (is.null(cutoff) || length(cutoff) != 1L || is.na(cutoff) || cutoff == 0)
-    return(TRUE)
+.fmSerScreen <- function(X, y, screen, fallback = TRUE) {
+  scr <- .asScreen(screen)
+  if (is.null(scr)) return(TRUE)
   ok <- !is.na(y)
   if (sum(ok) < 2L || ncol(X) < 1L) return(fallback)
   Xs <- X[ok, , drop = FALSE]
   if (!is.double(Xs)) storage.mode(Xs) <- "double"   # susieR needs double X
-  thr <- if (cutoff < 0) 3 / ncol(Xs) else cutoff
-  pip <- tryCatch(suppressMessages(susieR::susie(Xs, y[ok], L = 1L))$pip,
+  ys <- y[ok]
+  metric <- scr$metric; cutoff <- scr$cutoff
+  if (metric == "absZ") {
+    z <- tryCatch(.marginalZ(Xs, ys), error = function(e) NULL)
+    if (is.null(z)) return(fallback)
+    return(any(abs(z) > cutoff, na.rm = TRUE))
+  }
+  fit <- tryCatch(suppressMessages(susieR::susie(Xs, ys, L = 1L)),
                   error = function(e) NULL)
-  if (is.null(pip)) return(fallback)
-  any(pip > thr, na.rm = TRUE)
+  if (is.null(fit)) return(fallback)
+  if (metric == "pip") {
+    thr <- if (cutoff < 0) 3 / ncol(Xs) else cutoff
+    return(any(fit$pip > thr, na.rm = TRUE))
+  }
+  maxLbf <- suppressWarnings(max(as.numeric(fit$lbf_variable), na.rm = TRUE))
+  if (!is.finite(maxLbf)) return(fallback)
+  # bf: cutoff on the raw BF scale -> compare in log space; logBf: log scale.
+  maxLbf > (if (metric == "bf") log(cutoff) else cutoff)
 }
 
-# Is the SER pre-screen enabled? Only a finite, non-zero scalar activates it;
-# this gates the extra screening extraction so the default (cutoff 0) costs
-# nothing.
+# Is a signal screen enabled? Any spec that .asScreen resolves to a screen
+# object (a non-zero pip cutoff or a resolved metric) activates it; this gates
+# the extra screening extraction so the default (no screen) costs nothing.
 # @noRd
-.fmScreenActive <- function(cutoff) {
-  !is.null(cutoff) && length(cutoff) == 1L && !is.na(cutoff) && cutoff != 0
+.fmScreenActive <- function(screen) {
+  !is.null(.asScreen(screen))
 }
 
 # Per-condition SER pre-screen for a joint (multi-context / multi-trait) fit:
@@ -1045,9 +1077,9 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 # and a port of the deleted `skipConditions`: callers drop the FALSE columns
 # (null contexts / traits) before the joint mvSuSiE fit.
 # @noRd
-.fmSerScreenColumns <- function(X, Y, cutoff) {
+.fmSerScreenColumns <- function(X, Y, screen) {
   vapply(seq_len(ncol(Y)),
-         function(j) .fmSerScreen(X, Y[, j], cutoff),
+         function(j) .fmSerScreen(X, Y[, j], screen),
          logical(1L))
 }
 
@@ -1374,6 +1406,9 @@ setMethod("fineMappingPipeline", "QtlDataset",
            cvThreads          = 1,
            samplePartition    = NULL,
            pipCutoffToSkip    = 0,
+           absZCutoffToSkip   = 0,
+           bfCutoffToSkip     = 0,
+           logBfCutoffToSkip  = 0,
            usePCA             = FALSE,
            nPCs               = 10L,
            seed               = NULL,
@@ -1392,6 +1427,10 @@ setMethod("fineMappingPipeline", "QtlDataset",
            ...) {
     naAction <- match.arg(naAction)
     if (!is.null(seed)) set.seed(as.integer(seed))
+    # Resolve the single active signal screen (pip / absZ / bf / logBf) once and
+    # thread the resolved spec through the existing pipCutoffToSkip channels.
+    screen <- .resolveScreenMetric(pipCutoffToSkip, absZCutoffToSkip,
+                                   bfCutoffToSkip, logBfCutoffToSkip)
     # Apply any per-call filter overrides to a validated copy of the dataset
     # (replaces the construct-time slot values for this call only).
     data <- .qtlApplyFilterOverrides(data, mafCutoff, macCutoff, xvarCutoff,
@@ -1426,7 +1465,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
         twasWeights = twasWeights,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
         cvFolds = cvFolds, cvThreads = cvThreads, samplePartition = samplePartition,
-        pipCutoffToSkip = pipCutoffToSkip,
+        pipCutoffToSkip = screen,
         fineMappingResult = fineMappingResult,
         fullFit = fullFit, fullFitAlphaOnly = fullFitAlphaOnly,
         includeAllCs = includeAllCs)
@@ -1547,12 +1586,12 @@ setMethod("fineMappingPipeline", "QtlDataset",
             X <- X[common, , drop = FALSE]
             y <- Y[common, , drop = FALSE]
             if (ncol(y) > 1L) y <- y[, 1L, drop = TRUE] else y <- drop(y)
-            # SER pre-screen: skip this block when a single-effect fit finds no
-            # PIP above pipCutoffToSkip (no potentially significant variant).
-            if (!.fmSerScreen(X, y, pipCutoffToSkip)) {
+            # SER pre-screen: skip this block when the chosen signal screen
+            # finds no strong-enough variant (no potentially significant signal).
+            if (!.fmSerScreen(X, y, screen)) {
               if (verbose >= 1)
                 message(sprintf(
-                  "Skipping (context='%s', trait='%s'): SER pre-screen found no PIP above pipCutoffToSkip.",
+                  "Skipping (context='%s', trait='%s'): SER pre-screen found no signal above the cutoff.",
                   ctx, tid))
               return(list())
             }
@@ -1607,7 +1646,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
             common <- intersect(rownames(X), names(pcY))
             if (length(common) < 2L) return(list())
             Xb <- X[common, , drop = FALSE]
-            if (!.fmSerScreen(Xb, pcY[common], pipCutoffToSkip)) return(list())
+            if (!.fmSerScreen(Xb, pcY[common], screen)) return(list())
             afVec <- .fmAfForX(data, Xb, traitId = traits, region = rg,
                                cisWindow = cisWindow)
             .fmFitXBlock(Xb, pcY[common], "susie", FALSE, coverage,
@@ -1643,7 +1682,7 @@ setMethod("fineMappingPipeline", "QtlDataset",
         twasWeights = twasWeights,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
         cvFolds = cvFolds, cvThreads = cvThreads, samplePartition = samplePartition,
-        pipCutoffToSkip = pipCutoffToSkip,
+        pipCutoffToSkip = screen,
         fineMappingResult = fineMappingResult,
         fullFit = fullFit, fullFitAlphaOnly = fullFitAlphaOnly,
         includeAllCs = includeAllCs)
@@ -1698,6 +1737,8 @@ setMethod("fineMappingPipeline", "QtlDataset",
     minAbsCorr = cfg$minAbsCorr, fineMappingResult = cfg$fineMappingResult,
     cvFolds = cfg$cvFolds, cvThreads = cfg$cvThreads,
     samplePartition = cfg$samplePartition, pipCutoffToSkip = cfg$pipCutoffToSkip,
+    absZCutoffToSkip = cfg$absZCutoffToSkip, bfCutoffToSkip = cfg$bfCutoffToSkip,
+    logBfCutoffToSkip = cfg$logBfCutoffToSkip,
     seed = cfg$seed, naAction = cfg$naAction, verbose = cfg$verbose), cfg$dotArgs))
 }
 
@@ -1739,6 +1780,9 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
            cvThreads          = 1,
            samplePartition    = NULL,
            pipCutoffToSkip    = 0,
+           absZCutoffToSkip   = 0,
+           bfCutoffToSkip     = 0,
+           logBfCutoffToSkip  = 0,
            seed               = NULL,
            naAction           = c("drop", "impute"),
            verbose            = 1,
@@ -1800,6 +1844,8 @@ setMethod("fineMappingPipeline", "MultiStudyQtlDataset",
                 minAbsCorr = minAbsCorr, fineMappingResult = fineMappingResult,
                 cvFolds = cvFolds, cvThreads = cvThreads,
                 samplePartition = samplePartition, pipCutoffToSkip = pipCutoffToSkip,
+                absZCutoffToSkip = absZCutoffToSkip, bfCutoffToSkip = bfCutoffToSkip,
+                logBfCutoffToSkip = logBfCutoffToSkip,
                 seed = seed, naAction = naAction, verbose = verbose, dotArgs = dotArgs)
     .multiStudyPipelineDriver(
       data, jointResult, .fmPerStudy, .fmSumStats, cfg,

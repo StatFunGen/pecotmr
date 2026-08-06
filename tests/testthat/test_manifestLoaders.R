@@ -545,6 +545,43 @@ test_that(".resolveLdSketch accepts a genoMeta vector, a path, and rejects bad i
   expect_error(pecotmr:::.resolveLdSketch(42L), "must be a GenotypeHandle")
 })
 
+test_that(".entriesChroms collects canonical chromosomes across entries", {
+  a <- pecotmr:::.dfToEntryGranges(.toyGwasDf(3))            # chr22
+  b <- .toyGwasDf(2); b$chrom <- "1"
+  b <- pecotmr:::.dfToEntryGranges(b)
+  expect_setequal(pecotmr:::.entriesChroms(list(a, b)), c("22", "1"))
+  expect_equal(pecotmr:::.entriesChroms(list()), character(0))
+  expect_equal(pecotmr:::.entriesChroms(list(NULL)), character(0))
+})
+
+test_that(".materializeLdSketch passes a handle through and restricts spec shards", {
+  h <- .toyLdSketch()
+  expect_identical(pecotmr:::.materializeLdSketch(h, "22"), h)  # already in memory
+  expect_null(pecotmr:::.materializeLdSketch(NULL, "22"))
+  # A chrom-sharded spec with a bogus chr21 payload: restricting to chr22 must
+  # skip (never open) the chr21 shard; requesting chr21 too fails on it.
+  spec <- c("22" = .toyRefPrefix(), "21" = "/no/such/chr21/prefix")
+  restricted <- pecotmr:::.materializeLdSketch(spec, "22")
+  expect_s4_class(restricted, "GenotypeHandle")
+  expect_equal(names(restricted@chromPaths), "22")
+  expect_error(pecotmr:::.materializeLdSketch(spec, c("22", "21")))
+})
+
+test_that("loadGwasSumStatsFromManifest reads only the sumstats chromosomes' shards", {
+  skip_if_not_installed("snpStats")
+  tmp <- withr::local_tempdir()
+  ssPath <- .writeSumstatsTsv(.toyGwasDf(5), file.path(tmp, "study1.tsv"))
+  manifest <- data.frame(study = "study1", sumStatsPath = ssPath,
+                         stringsAsFactors = FALSE)
+  # Sharded ldSketch: chr22 real (toy_ref), chr21 a bogus path. The sumstats are
+  # all chr22, so the loader must skip the chr21 shard -- opening it would fail.
+  obj <- loadGwasSumStatsFromManifest(
+    manifest, genome = "hg38",
+    ldSketch = c("22" = .toyRefPrefix(), "21" = "/no/such/chr21/prefix"))
+  expect_s4_class(obj, "GwasSumStats")
+  expect_true(methods::validObject(obj))
+})
+
 test_that("ldSketch is resolved from an ldSketchPath column and conflicts error", {
   tmp <- withr::local_tempdir()
   ssPath <- .writeSumstatsTsv(.toyGwasDf(5), file.path(tmp, "s.tsv"))
