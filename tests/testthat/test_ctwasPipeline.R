@@ -1342,7 +1342,7 @@ test_that("(real ctwas) prefit fallback skips a degenerate region fit_EM would r
   region_data <- readRDS(test_path("test_data", "ctwas_region_data_degenerate.rds"))
   expect_length(region_data, 2L)
   res <- .ctwasFitPrefitEm(
-    region_data, niterPrefit = 3L,
+    region_data, niter = 3L,
     groupPriorVarStructure = "shared_all", thin = 1, ncore = 1L)
   # the prefit EM ran on the valid region only and returns finite real group priors
   expect_true("SNP" %in% names(res$group_prior))
