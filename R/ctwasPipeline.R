@@ -464,8 +464,11 @@ estCtwasParam <- function(inputs,
       if (fallbackToPrefit) {
         message("estCtwasParam: accurate EM unusable (",
                 conditionMessage(e), "); falling back to prefit estimates.")
+        # Run the prefit EM to CONVERGENCE (full `niter`), not the rough
+        # niter_prefit warm-up count -- this is now the final prior, so an
+        # under-iterated fit would depress downstream gene PIPs.
         .ctwasFitPrefitEm(regionData,
-                          niterPrefit            = as.integer(niterPrefit),
+                          niter                  = as.integer(niter),
                           groupPriorVarStructure = groupPriorVarStructure,
                           thin                   = thin,
                           ncore                  = as.integer(ncore),
@@ -738,12 +741,16 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
 # param list shaped like ctwas::est_param normally produces. Used as
 # the fallback path when est_param's accurate EM diverges to NaN on
 # toy / underpowered data (matches the legacy ctwas_2 workaround).
-# Calls ctwas's internal `fit_EM` (via getFromNamespace) with
-# niter = niter_prefit, then applies the same thin-adjustment to the
-# SNP group_prior that est_param applies. p_single_effect is left as
+# Calls ctwas's internal `fit_EM` (via getFromNamespace) for `niter`
+# iterations -- run to convergence, because this fallback prior is the
+# FINAL estimate (the accurate EM never ran), not a warm-up. `niter` here
+# is the caller's full accurate-EM count, NOT niter_prefit; running only
+# niter_prefit (a rough warm-up, e.g. 3) leaves the prior under-converged
+# and depresses downstream gene PIPs. Then applies the same thin-adjustment
+# to the SNP group_prior that est_param applies. p_single_effect is left as
 # NA since the accurate EM never ran.
 # @noRd
-.ctwasFitPrefitEm <- function(region_data, niterPrefit,
+.ctwasFitPrefitEm <- function(region_data, niter,
                               groupPriorVarStructure, thin, ncore,
                               extra = list()) {
   fitEm <- getFromNamespace("fit_EM", "ctwas")
@@ -767,7 +774,7 @@ mergeCtwasBoundaryRegions <- function(finemapResult,
     stop("No regions selected!")
   fitArgs <- list(
     region_data               = fitRegionData,
-    niter                     = as.integer(niterPrefit),
+    niter                     = as.integer(niter),
     group_prior_var_structure = groupPriorVarStructure,
     ncore                     = as.integer(ncore))
   prefit <- .ctwasInvoke(fitEm, fitArgs, extra)
