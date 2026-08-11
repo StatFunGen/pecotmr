@@ -5627,6 +5627,43 @@ test_that(".subsetSketchToIds keeps exactly the entries' variants", {
   expect_setequal(normalizeVariantId(sub$SNP), normalizeVariantId(si$SNP[sel]))
 })
 
+test_that("zero-variant entries empty the sketch (both trimmers), not keep the full panel", {
+  h    <- readGenotypes(test_path("test_data/test_variants"), format = "plink2")
+  full <- nrow(getSnpInfo(h))
+  expect_gt(full, 0L)
+  # an empty list and a zero-range GRanges both represent zero variants.
+  for (entries in list(list(), list(GenomicRanges::GRanges()))) {
+    r <- pecotmr:::.subsetSketchToRange(h, entries)
+    i <- pecotmr:::.subsetSketchToIds(h, entries)
+    expect_identical(nrow(getSnpInfo(r)), 0L)
+    expect_identical(nrow(getSnpInfo(i)), 0L)
+    expect_identical(getNSamples(r), getNSamples(h))  # other slots preserved
+    expect_true(validObject(r))
+  }
+})
+
+test_that(".subsetSketchToIds stays conservative when entries have ranges but no SNP mcol", {
+  h   <- readGenotypes(test_path("test_data/test_variants"), format = "plink2")
+  si  <- getSnpInfo(h)
+  sel <- c(3L, 10L, 40L)
+  gr  <- GenomicRanges::GRanges(paste0("chr", si$CHR[sel]),
+           IRanges::IRanges(as.integer(si$BP[sel]), width = 1L))  # no SNP mcol
+  # ranges present (not zero-variant), ids unextractable -> full sketch, not emptied.
+  expect_identical(nrow(getSnpInfo(pecotmr:::.subsetSketchToIds(h, list(gr)))),
+                   nrow(si))
+})
+
+test_that(".emptySketch zeros snpInfo, preserves slots, is NULL-safe and idempotent", {
+  h <- readGenotypes(test_path("test_data/test_variants"), format = "plink2")
+  e <- pecotmr:::.emptySketch(h)
+  expect_identical(nrow(getSnpInfo(e)), 0L)
+  expect_identical(getNSamples(e), getNSamples(h))
+  expect_identical(getFormat(e),   getFormat(h))
+  expect_true(validObject(e))
+  expect_identical(nrow(getSnpInfo(pecotmr:::.emptySketch(e))), 0L)  # idempotent
+  expect_null(pecotmr:::.emptySketch(NULL))
+})
+
 test_that(".subsetSketchToRange / .subsetSketchToIds are NULL-safe", {
   expect_null(pecotmr:::.subsetSketchToRange(NULL, list()))
   expect_null(pecotmr:::.subsetSketchToIds(NULL, list()))

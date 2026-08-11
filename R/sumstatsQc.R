@@ -3132,13 +3132,33 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   list(gr = .dfToEntryGranges(df), audit = entryAudit)
 }
 
+# Return `ldSketch` trimmed to zero variants (empty @snpInfo), preserving every
+# other slot (path / format / nSamples / sampleIds / chromPaths). Used when an
+# entry set genuinely carries no variants: the object references no LD, so the
+# correct retained panel is empty rather than the full genome-wide sketch. Edits
+# @snpInfo directly (not .subsetGenotypeHandle) because a zero-variant sketch is
+# never read for extraction, so the fileIdx read-safety guard does not apply --
+# this keeps the empty correct even on a legacy sketch with no fileIdx column.
+# NULL-safe; a no-op when the sketch is already empty.
+# @noRd
+.emptySketch <- function(ldSketch) {
+  if (is.null(ldSketch)) return(NULL)
+  si <- getSnpInfo(ldSketch)
+  if (nrow(si) == 0L) return(ldSketch)
+  ldSketch@snpInfo <- si[integer(0), , drop = FALSE]
+  rownames(ldSketch@snpInfo) <- NULL
+  ldSketch
+}
+
 # Shrink an LD-sketch GenotypeHandle to the panel variants inside the summary
 # statistics' per-chromosome position span. `entries` is a list/SimpleList of
 # per-study (or per-tuple) GRanges. A genome-wide sketch otherwise carries a
 # full-genome snpInfo; only variants inside [min,max] BP of each represented
 # chromosome are reachable by harmonization or within-range imputation, so the
-# rest is dropped at load time. NULL-safe; a no-op when the span already covers
-# the panel. See [[.subsetGenotypeHandle]] for why this is read-safe.
+# rest is dropped at load time. With zero variants there is no span to keep, so
+# the sketch is emptied (a zero-variant object references no LD). NULL-safe; a
+# no-op when the span already covers the panel. See [[.subsetGenotypeHandle]] for
+# why this is read-safe.
 # @noRd
 .subsetSketchToRange <- function(ldSketch, entries) {
   if (is.null(ldSketch)) return(NULL)
@@ -3148,7 +3168,7 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
     as.integer(GenomicRanges::start(gr))), use.names = FALSE)
   ok <- !is.na(chrom) & !is.na(pos)
   chrom <- chrom[ok]; pos <- pos[ok]
-  if (length(pos) == 0L) return(ldSketch)
+  if (length(pos) == 0L) return(.emptySketch(ldSketch))
   lo <- tapply(pos, chrom, min)
   hi <- tapply(pos, chrom, max)
   si <- getSnpInfo(ldSketch)
@@ -3163,10 +3183,19 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
 # Shrink an LD-sketch GenotypeHandle to EXACTLY the variants present across the
 # QC'd `entries` (imputation may have added variants; QC may have dropped some),
 # matched by canonical variant id. Applied at the end of summaryStatsQc so the
-# retained sketch mirrors the object's final variant set. NULL-safe.
+# retained sketch mirrors the object's final variant set. When the entries carry
+# zero variants (e.g. a study that early-exited QC) the sketch is emptied rather
+# than left full. NULL-safe.
 # @noRd
 .subsetSketchToIds <- function(ldSketch, entries) {
   if (is.null(ldSketch)) return(NULL)
+  # Genuine variant count (ranges) across entries, independent of the SNP mcol:
+  # zero ranges means the object references no LD, so the panel is emptied. This
+  # is distinct from the pathological "ranges present but SNP mcol absent" case
+  # below, which stays conservative (full sketch) rather than blanking.
+  nRanges <- sum(vapply(entries, function(gr)
+    if (is.null(gr)) 0L else length(gr), integer(1)))
+  if (nRanges == 0L) return(.emptySketch(ldSketch))
   ids <- unlist(lapply(entries, function(gr) {
     if (is.null(gr)) return(character(0))
     snp <- S4Vectors::mcols(gr)$SNP
