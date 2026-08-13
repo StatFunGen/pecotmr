@@ -715,6 +715,22 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
   .ldFromSketch(ldSketch, variantIds, label = ".fmLdFromSketch")
 }
 
+# A flip-twin region makes .ldFromSketch return an LD matrix over the
+# deduplicated panel variants (a variant and its ref/alt-swapped twin collapse to
+# one), fewer than requested, with the survivors in attr(,"keptVariantIds").
+# Realign the association vectors (z / n / af) to those survivors so the LD matrix
+# and z/N stay in lockstep before the RSS fit. A no-op when nothing collapsed.
+# @noRd
+.fmAlignToKeptLd <- function(ldMat, variantIds, z, n, af = NULL) {
+  kept <- attr(ldMat, "keptVariantIds")
+  if (is.null(kept) || length(kept) == length(variantIds))
+    return(list(ldMat = ldMat, variantIds = variantIds, z = z, n = n, af = af))
+  ki <- match(kept, variantIds)
+  list(ldMat = ldMat, variantIds = kept, z = z[ki],
+       n  = if (length(n)  == length(variantIds)) n[ki]  else n,
+       af = if (!is.null(af) && length(af) == length(variantIds)) af[ki] else af)
+}
+
 
 # Wrap one finemapping fit into a FineMappingEntry via the surviving
 # post-processing helpers (postprocessFinemappingFits +
@@ -1999,6 +2015,9 @@ setMethod("fineMappingPipeline", "QtlSumStats",
         afByVar <- if ("MAF" %in% colnames(.qmc))
           setNames(as.numeric(.qmc$MAF), as.character(.qmc$SNP))[variantIds] else NULL
         ldMat <- .fmLdFromSketch(ldSketch, variantIds)
+        .al <- .fmAlignToKeptLd(ldMat, variantIds, z, n, afByVar)
+        ldMat <- .al$ldMat; variantIds <- .al$variantIds
+        z <- .al$z; n <- .al$n; afByVar <- .al$af
         names(z) <- variantIds
 
         ents <- .fmFitRssBlock(
@@ -2182,6 +2201,9 @@ setMethod("fineMappingPipeline", "GwasSumStats",
       if (length(toRun) == 0L) next
 
       ldMat <- .fmLdFromSketch(ldSketch, variantIds)
+      .al <- .fmAlignToKeptLd(ldMat, variantIds, z, n, afByVar)
+      ldMat <- .al$ldMat; variantIds <- .al$variantIds
+      z <- .al$z; n <- .al$n; afByVar <- .al$af
       names(z) <- variantIds
       ents <- .fmFitRssBlock(
         z, ldMat, n, toRun, addSusieInf, coverage, secondaryCoverage,

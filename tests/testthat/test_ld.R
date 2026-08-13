@@ -2849,6 +2849,49 @@ test_that(".ldFromSketch drops variants absent from the panel when onMissing='dr
 })
 
 # =============================================================================
+# Additional coverage: .ldFromSketch tolerates flip-twin collapse (not fatal)
+# =============================================================================
+
+test_that(".ldFromSketch tolerates a flip-twin in the request under onMissing='error'", {
+  skip_if_not_installed("pgenlibr")
+  h  <- readGenotypes(file.path(geno_test_data_dir, "test_variants"), format = "plink2")
+  si <- getSnpInfo(h)
+  swap <- function(id) { p <- strsplit(id, "_")[[1]]; k <- length(p)
+                         paste(c(p[seq_len(k - 2)], p[k], p[k - 1]), collapse = "_") }
+  v <- as.character(si$SNP[1:3])
+  # request carries v[1] AND its ref/alt swap: matchVariants(allowFlip) collapses
+  # the pair. Both resolve to the same panel position, so default onMissing="error"
+  # must NOT stop -- the twin is deduplicated, not absent.
+  m <- pecotmr:::.ldFromSketch(h, c(v[1], swap(v[1]), v[2], v[3]), label = "flip-twin")
+  expect_equal(dim(m), c(3L, 3L))
+  expect_equal(attr(m, "keptVariantIds"), v)             # swapped twin dropped
+  expect_false(swap(v[1]) %in% attr(m, "keptVariantIds"))
+})
+
+test_that(".ldFromSketch still errors on a genuine absence under onMissing='error'", {
+  skip_if_not_installed("pgenlibr")
+  h  <- readGenotypes(file.path(geno_test_data_dir, "test_variants"), format = "plink2")
+  si <- getSnpInfo(h)
+  # a variant whose (chrom, pos) is not on the panel at all is a real absence.
+  absent <- paste("chr21", "999999999", "A", "G", sep = "_")
+  expect_error(
+    pecotmr:::.ldFromSketch(h, c(as.character(si$SNP[1]), absent), label = "absent"),
+    "not present in the LD sketch panel")
+})
+
+test_that("matchVariants collapses only ref/alt swaps, not distinct ALTs at one position", {
+  a   <- "chr21_17513228_C_G"
+  p   <- strsplit(a, "_")[[1]]
+  swp <- paste(c(p[1:2], p[4], p[3]), collapse = "_")     # ref/alt swap of a
+  alt <- paste(c(p[1:3], "T"), collapse = "_")            # different ALT, same pos
+  # a + its swap collapse to one; a + a-different-alt stay two (distinct variants).
+  expect_equal(length(pecotmr:::matchVariants(c(a, swp), c(a, swp),
+                 removeStrandAmbiguous = FALSE)$idxA), 1L)
+  expect_equal(length(pecotmr:::matchVariants(c(a, alt), c(a, alt),
+                 removeStrandAmbiguous = FALSE)$idxA), 2L)
+})
+
+# =============================================================================
 # Additional coverage: .ldFromSketch reconciles chr-prefix conventions
 # =============================================================================
 

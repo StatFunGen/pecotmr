@@ -562,10 +562,27 @@ loadLdFromGenotype <- function(genotypePath, region,
   # original ids are kept as the returned labels, in the requested order.
   m <- matchVariants(variantIds, as.character(snpInfo$SNP),
                      removeStrandAmbiguous = FALSE)
-  nMissing <- length(variantIds) - length(m$idxA)
-  if (nMissing > 0L && onMissing == "error") {
-    stop(sprintf("%s: %d variant id(s) not present in the LD sketch panel.",
-                 label, nMissing))
+  # An unmatched requested id falls into one of two very different cases:
+  #   (a) genuine absence  -- its (chrom, pos) is not on the panel at all;
+  #   (b) flip-twin collapse -- its (chrom, pos) IS on the panel, but
+  #       matchVariants(allowFlip) treats a variant and its ref/alt-swapped twin
+  #       as the same variant and keeps the sibling, so the pair merged to one
+  #       match. This happens when the requested set carries both orientations of
+  #       one variant (e.g. a panel that stores both, imputed by RAISS as two).
+  # Case (a) is a real data problem; case (b) is benign -- the variant is present,
+  # just deduplicated. Only (a) counts toward the onMissing="error" stop. The LD
+  # matrix is built on the matched (deduplicated) set either way, and the survivors
+  # are exposed via keptVariantIds so callers can realign their z/N vectors.
+  unmatched <- setdiff(seq_along(variantIds), m$idxA)
+  if (length(unmatched) > 0L) {
+    reqP     <- parseVariantId(variantIds[unmatched])
+    reqKey   <- paste(canonChrom(as.character(reqP$chrom)), reqP$pos)
+    panelKey <- paste(canonChrom(as.character(snpInfo$CHR)), snpInfo$BP)
+    nAbsent  <- sum(!(reqKey %in% panelKey))   # (chrom,pos) truly not on panel
+    if (nAbsent > 0L && onMissing == "error") {
+      stop(sprintf("%s: %d variant id(s) not present in the LD sketch panel.",
+                   label, nAbsent))
+    }
   }
   if (length(m$idxA) == 0L) return(NULL)
   o       <- order(m$idxA)            # restore the caller's requested order
@@ -575,9 +592,9 @@ loadLdFromGenotype <- function(genotypePath, region,
   colnames(geno) <- keptIds
   ldMat <- computeLd(geno, method = "sample")
   dimnames(ldMat) <- list(keptIds, keptIds)
-  if (onMissing == "drop") {
-    attr(ldMat, "keptVariantIds") <- keptIds
-  }
+  # Always expose the retained ids: a flip-twin collapse drops entries even in
+  # "error" mode, so every caller needs to be able to realign to the survivors.
+  attr(ldMat, "keptVariantIds") <- keptIds
   ldMat
 }
 

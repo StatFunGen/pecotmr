@@ -1547,6 +1547,61 @@ test_that("fineMappingPipeline(GwasSumStats): runs end-to-end with mocked RSS fi
   expect_setequal(getMethodNames(res), "susie")
 })
 
+test_that(".fmAlignToKeptLd realigns z/n/af to keptVariantIds (no-op when nothing collapsed)", {
+  vids <- c("1_100_A_G", "1_100_G_A", "1_200_A_G")   # middle is a flip-twin of the first
+  z <- c(1.1, -1.1, 2.2); n <- c(1000L, 1000L, 2000L); af <- c(0.1, 0.9, 0.2)
+  # no collapse: keptVariantIds == vids -> everything passes through unchanged.
+  m0 <- matrix(0, 3, 3); attr(m0, "keptVariantIds") <- vids
+  a0 <- pecotmr:::.fmAlignToKeptLd(m0, vids, z, n, af)
+  expect_identical(a0$variantIds, vids); expect_identical(a0$z, z)
+  expect_identical(a0$n, n); expect_identical(a0$af, af)
+  # collapse: the twin dropped -> z/n/af subset to the survivors, in kept order.
+  kept <- c("1_100_A_G", "1_200_A_G"); m1 <- matrix(0, 2, 2)
+  attr(m1, "keptVariantIds") <- kept
+  a1 <- pecotmr:::.fmAlignToKeptLd(m1, vids, z, n, af)
+  expect_identical(a1$variantIds, kept)
+  expect_identical(a1$z, c(1.1, 2.2))
+  expect_identical(a1$n, c(1000L, 2000L))
+  expect_identical(a1$af, c(0.1, 0.2))
+  # a scalar n (per-study) is passed through unchanged.
+  a2 <- pecotmr:::.fmAlignToKeptLd(m1, vids, z, n = 5000L, af = NULL)
+  expect_identical(a2$n, 5000L); expect_null(a2$af)
+})
+
+test_that("fineMappingPipeline(GwasSumStats): a flip-twin region fits on the deduplicated set", {
+  # panel carries one orientation per position (parseable chr_pos_ref_alt ids).
+  pan <- new("GenotypeHandle", path = "/tmp/ft.gds", format = "gds",
+    snpInfo = data.frame(
+      SNP = c("1_100_A_G", "1_200_A_G", "1_300_A_G"),
+      CHR = rep("1", 3), BP = c(100L, 200L, 300L),
+      A1 = rep("G", 3), A2 = rep("A", 3), stringsAsFactors = FALSE),
+    nSamples = 40L, sampleIds = paste0("s", seq_len(40L)), pgenPtr = NULL)
+  # entry carries 1_100_A_G AND its ref/alt swap 1_100_G_A -> a flip-twin.
+  gr <- GenomicRanges::GRanges("chr1",
+    IRanges::IRanges(c(100L, 100L, 200L, 300L), width = 1L))
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    SNP = c("1_100_A_G", "1_100_G_A", "1_200_A_G", "1_300_A_G"),
+    A1 = c("G", "A", "G", "G"), A2 = c("A", "G", "A", "A"),
+    Z = c(1.5, -1.5, 2.0, 0.5), N = rep(1000L, 4))
+  gss <- GwasSumStats(study = "G1", entry = list(gr), genome = "hg19",
+                      ldSketch = pan, qcInfo = list(step1 = "ok"))
+  cap <- new.env()
+  local_mocked_bindings(
+    extractBlockGenotypes = .fmp_mockExtractor(),
+    .fmFitSusieRss = function(z, R, n, token, ...) {
+      cap$zlen <- length(z); cap$rdim <- dim(R)
+      list(token = token, n_variants = length(z)) },
+    .fmPostprocessOne = .fmp_mockPostprocess(),
+    .package = "pecotmr")
+  # must NOT stop with "not present in the LD sketch panel"; the twin collapses.
+  res <- suppressMessages(
+    fineMappingPipeline(gss, methods = "susie", addSusieInf = FALSE))
+  expect_s4_class(res, "GwasFineMappingResult")
+  # 4 requested variants -> 3 after the flip-twin dedup; z and R stay consistent.
+  expect_equal(cap$zlen, 3L)
+  expect_equal(cap$rdim, c(3L, 3L))
+})
+
 # ---- PIP-screen graceful skip: a screened region -> empty result, not error ----
 
 # A GwasSumStats whose (single) entry was emptied by summaryStatsQc's PIP screen:

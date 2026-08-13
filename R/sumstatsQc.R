@@ -2594,6 +2594,13 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
   # match with chr-prefix tolerance, strand-ambiguous variants kept; errors if
   # any variant is absent from the panel).
   R <- .ldFromSketch(ldSketch, variantIds, label = "summaryStatsQc: zMismatchQc")
+  # A flip-twin collapse leaves R over the deduplicated survivors; drop the
+  # collapsed duplicate rows from df so df$Z and R align for ldMismatchQc.
+  kept <- attr(R, "keptVariantIds")
+  if (!is.null(kept) && length(kept) != length(variantIds)) {
+    df <- df[match(kept, df$SNP), , drop = FALSE]
+    variantIds <- kept
+  }
   qc <- ldMismatchQc(zScore = df$Z, R = R, nSample = getNSamples(ldSketch),
                      method = method)
   # slalom / dentist can leave NA in the outlier column when their
@@ -2941,6 +2948,12 @@ krigingOutlierQc <- function(zScore, R, n, variantIds = NULL,
     nKrIn <- nrow(df)
     R <- .ldFromSketch(ldSketch, df$SNP,
                        label = "summaryStatsQc: kriging prefilter")
+    # A flip-twin (a variant and its ref/alt swap both present) collapses in the
+    # panel match, so R covers the deduplicated survivors; drop the collapsed
+    # duplicate rows from df so df and R stay aligned for krigingOutlierQc.
+    .kept <- attr(R, "keptVariantIds")
+    if (!is.null(.kept) && length(.kept) != nrow(df))
+      df <- df[match(.kept, df$SNP), , drop = FALSE]
     nKrig <- if (!is.null(opts$nForPip) && is.finite(opts$nForPip)) opts$nForPip
              else stats::median(as.numeric(df$N), na.rm = TRUE)
     kr <- krigingOutlierQc(df$Z, R, n = nKrig, variantIds = df$SNP)
