@@ -156,12 +156,18 @@ generate_dummy_data <- function(seed=1, ref_panel_ordered=TRUE, known_zscores_or
     )
 
     n_known <- 50
+    # Known z-scores are a consistent subset of the panel: variant_id / pos / A1 /
+    # A2 come from the SAME sampled rows (a real observed variant's id encodes its
+    # position). Sampling them independently would put a known variant_id at a
+    # foreign position, which the RAISS observed-position guard rightly treats as
+    # a distinct typed site.
+    known_idx <- sample(n_variants, n_known)
     known_zscores <- data.frame(
         chrom = rep(1, n_known),
-        pos = sample(ref_panel$pos, n_known),
-        variant_id = sample(ref_panel$variant_id, n_known),
-        A1 = sample(c("A", "T", "G", "C"), n_known, replace = TRUE),
-        A2 = sample(c("A", "T", "G", "C"), n_known, replace = TRUE),
+        pos = ref_panel$pos[known_idx],
+        variant_id = ref_panel$variant_id[known_idx],
+        A1 = ref_panel$A1[known_idx],
+        A2 = ref_panel$A2[known_idx],
         z = rnorm(n_known)
     )
 
@@ -198,6 +204,42 @@ test_that("Default parameters for raiss work correctly", {
     expect_true(nrow(result$resultFilter) <= nrow(result$resultNofilter))
     # ldMat should be a matrix
     expect_true(is.matrix(result$ldMat))
+})
+
+test_that("raissSingleMatrix does not impute at positions already typed in the GWAS", {
+  refPanel <- data.frame(
+    chrom = rep("1", 5), pos = c(100, 100, 200, 300, 300),
+    variant_id = c("1:100:A:G", "1:100:A:T", "1:200:A:G", "1:300:A:G", "1:300:A:T"),
+    A1 = c("G", "T", "G", "G", "T"), A2 = rep("A", 5), stringsAsFactors = FALSE)
+  known <- data.frame(chrom = "1", pos = 100, variant_id = "1:100:A:G",
+                      A1 = "G", A2 = "A", z = 3.0, stringsAsFactors = FALSE)
+  ld <- diag(5)
+  ld[1, 3] <- ld[3, 1] <- 0.6; ld[1, 4] <- ld[4, 1] <- 0.5
+  ld[1, 5] <- ld[5, 1] <- 0.45; ld[1, 2] <- ld[2, 1] <- 0.7  # would impute the twin if selected
+  r <- pecotmr:::raissSingleMatrix(refPanel, known, ld, verbose = FALSE)
+  imp <- setdiff(r$resultNofilter$variant_id, known$variant_id)
+  # the second allele at the typed position (1:100:A:T) is NOT imputed ...
+  expect_false("1:100:A:T" %in% imp)
+  # ... while un-observed positions (incl. the multi-allelic 1:300) still are.
+  expect_true(all(c("1:200:A:G", "1:300:A:G", "1:300:A:T") %in% imp))
+  expect_true("1:100:A:G" %in% r$resultNofilter$variant_id)   # the typed variant retained
+})
+
+test_that("raissSingleMatrixFromX applies the same observed-position guard", {
+  set.seed(1); n <- 300
+  g1 <- rbinom(n, 2, 0.3)
+  X <- cbind(g1, 2 - g1,
+             pmin(2, pmax(0, g1 + rbinom(n, 1, 0.15))),
+             pmin(2, pmax(0, g1 + rbinom(n, 1, 0.20))))
+  refPanel <- data.frame(chrom = rep("1", 4), pos = c(100, 100, 200, 300),
+    variant_id = c("1:100:A:G", "1:100:A:T", "1:200:A:G", "1:300:A:G"),
+    A1 = c("G", "T", "G", "G"), A2 = rep("A", 4), stringsAsFactors = FALSE)
+  known <- data.frame(chrom = "1", pos = 100, variant_id = "1:100:A:G",
+                      A1 = "G", A2 = "A", z = 3.0, stringsAsFactors = FALSE)
+  r <- pecotmr:::raissSingleMatrixFromX(refPanel, known, X, verbose = FALSE)
+  imp <- setdiff(r$resultNofilter$variant_id, known$variant_id)
+  expect_false("1:100:A:T" %in% imp)                  # typed position guarded
+  expect_true(all(c("1:200:A:G", "1:300:A:G") %in% imp))
 })
 
 test_that("Test Default Parameters for raissModel", {

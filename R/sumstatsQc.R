@@ -1360,10 +1360,16 @@ raissSingleMatrix <- function(refPanel, knownZscores, ldMatrix, lamb = 0.01, rco
     ldMatrix <- as.matrix(ldMatrix)
   }
 
-  # Define knowns and unknowns
+  # Define knowns and unknowns. Observed-position guard: impute a panel variant
+  # only when its position is NOT already typed in the GWAS -- do not impute a
+  # second allele / opposite orientation at a site the GWAS already measured
+  # (imputation fills *un-observed* variants). Positions with no GWAS observation,
+  # including genuinely multi-allelic sites, still impute all their panel forms.
   knownsId <- intersect(knownZscores$variant_id, refPanel$variant_id)
   knowns <- which(refPanel$variant_id %in% knownsId)
-  unknowns <- which(!refPanel$variant_id %in% knownsId)
+  knownPos <- paste(canonChrom(as.character(knownZscores$chrom)), knownZscores$pos)
+  panelPos <- paste(canonChrom(as.character(refPanel$chrom)),     refPanel$pos)
+  unknowns <- which(!(refPanel$variant_id %in% knownsId) & !(panelPos %in% knownPos))
 
   # Handle edge cases
   if (length(knowns) == 0) {
@@ -1447,10 +1453,13 @@ raissSingleMatrixFromX <- function(refPanel, knownZscores, X, lamb = 0.01,
 
   nSamples <- nrow(X)
 
-  # Define knowns and unknowns (same logic as raissSingleMatrix)
+  # Define knowns and unknowns (same logic as raissSingleMatrix, including the
+  # observed-position guard: do not impute at positions already typed in the GWAS).
   knownsId <- intersect(knownZscores$variant_id, refPanel$variant_id)
   knowns <- which(refPanel$variant_id %in% knownsId)
-  unknowns <- which(!refPanel$variant_id %in% knownsId)
+  knownPos <- paste(canonChrom(as.character(knownZscores$chrom)), knownZscores$pos)
+  panelPos <- paste(canonChrom(as.character(refPanel$chrom)),     refPanel$pos)
+  unknowns <- which(!(refPanel$variant_id %in% knownsId) & !(panelPos %in% knownPos))
 
   # Handle edge cases
   if (length(knowns) == 0) {
