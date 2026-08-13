@@ -9,22 +9,33 @@ fitMvsusie(X, Y, prior_variance, coverage = 0.95, ...)
 \arguments{
 \item{X}{Numeric matrix of genotypes (samples x variants).}
 
-\item{Y}{Numeric matrix of multi-trait / multi-context outcomes
-(samples x conditions).}
+\item{Y}{Numeric matrix of multi-trait / multi-context outcomes (samples x
+conditions).}
 
 \item{prior_variance}{Prior variance matrix; pass the output of
-\code{mvsusieR::create_mixture_prior(R = ncol(Y))} unless you have
-a domain-specific prior.}
+\code{mvsusieR::create_mixture_prior(R = ncol(Y))} unless you have a
+domain-specific prior.}
 
 \item{coverage}{Credible set coverage (default 0.95).}
 
-\item{...}{Additional arguments forwarded to
-\code{mvsusieR::mvsusie}.}
+\item{...}{Additional arguments forwarded to \code{mvsusieR::mvsusie}.}
 }
 \value{
 The fit object returned by \code{mvsusieR::mvsusie}.
 }
 \description{
-Wrapper around \code{mvsusieR::mvsusie} with the canonical argument
-set used inside fine-mapping and TWAS-weight pipelines.
+Wrapper around \code{mvsusieR::mvsusie} with the canonical argument set used
+inside fine-mapping and TWAS-weight pipelines.
+}
+\examples{
+\donttest{
+# mvsusieR 0.3.0 calls susieR::block_coordinate_ascent unqualified, so
+# susieR must be attached until mvsusieR adds the NAMESPACE import.
+library(susieR)
+data(multiTraitData)
+X <- multiTraitData$X[, 1:60]
+Y <- multiTraitData$Y
+fitMvsusie(X, Y,
+  prior_variance = mvsusieR::create_mixture_prior(R = ncol(Y)))
+}
 }

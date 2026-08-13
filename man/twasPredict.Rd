@@ -7,27 +7,35 @@
 twasPredict(X, weightsList)
 }
 \arguments{
-\item{X}{A matrix or data frame of predictors where each row is an observation and each
-column is a variable.}
+\item{X}{A matrix or data frame of predictors where each row is an
+observation and each column is a variable.}
 
-\item{weightsList}{A list of numeric vectors representing the weights for each predictor.
-The names of the list elements should follow the pattern \code{[outcome]_weights}, where
-\code{[outcome]} is the name of the outcome variable that the weights are associated with.}
+\item{weightsList}{A list of numeric vectors representing the weights for
+each predictor. The names of the list elements should follow the pattern
+\code{[outcome]_weights}, where \code{[outcome]} is the name of the outcome
+variable that the weights are associated with.}
 }
 \value{
-A named list of numeric vectors, where each vector is the predicted outcome for the
-corresponding set of weights in \code{weightsList}. The names of the list elements are
-derived from the names in \code{weightsList} by replacing "_weights" with "_predicted".
+A named list of numeric vectors, where each vector is the predicted
+  outcome for the corresponding set of weights in \code{weightsList}. The
+  names of the list elements are derived from the names in \code{weightsList}
+  by replacing "_weights" with "_predicted".
 }
 \description{
-This function takes a matrix of predictors (\code{X}) and a list of TWAS (transcriptome-wide
-association studies) weights (\code{weightsList}), and calculates the predicted outcomes by
-multiplying \code{X} by each set of weights in \code{weightsList}. The names of the elements
-in the output list are derived from the names in \code{weightsList}, with "_weights" replaced
-by "_predicted".
+This function takes a matrix of predictors (\code{X}) and a list of TWAS
+(transcriptome-wide association studies) weights (\code{weightsList}), and
+calculates the predicted outcomes by multiplying \code{X} by each set of
+weights in \code{weightsList}. The names of the elements in the output list
+are derived from the names in \code{weightsList}, with "_weights" replaced by
+"_predicted".
 }
 \examples{
-# Assuming `X` is your matrix of predictors and `weightsList` is your list of weights:
-predicted_outcomes <- twasPredict(X, weightsList)
-print(predicted_outcomes)
+data(multiTraitData)
+X <- multiTraitData$X[, 1:4]
+colnames(X) <- paste0("v", 1:4)
+twe <- TwasWeightsEntry(variantIds = paste0("v", 1:4),
+  weights = rep(0.1, 4), cvResult = list(rsq = 0.5), standardized = FALSE)
+tw <- TwasWeights(study = "s1", context = "brain", trait = "g1",
+  method = "susie", entry = list(twe))
+twasPredict(X, tw)
 }

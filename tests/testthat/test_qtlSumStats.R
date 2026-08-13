@@ -5,50 +5,65 @@ context("qtlSumStats")
 # ===========================================================================
 
 .qtlMakeGenotypeHandle <- function() {
-  new("GenotypeHandle",
-    path = "/tmp/test.gds",
-    format = "gds",
-    snpInfo = data.frame(),
-    nSamples = 0L,
-    sampleIds = character(),
-    pgenPtr = NULL)
+    new(
+        "GenotypeHandle",
+        path = "/tmp/test.gds",
+        format = "gds",
+        snpInfo = data.frame(),
+        nSamples = 0L,
+        sampleIds = character(),
+        pgenPtr = NULL
+    )
 }
 
-.qtlMakeEntryGr <- function(n = 5, chr = "chr1",
-                            start_at = 100L, step = 100L,
-                            with_maf = FALSE) {
-  gr <- GenomicRanges::GRanges(
-    seqnames = rep(chr, n),
-    ranges = IRanges::IRanges(
-      start = seq(start_at, by = step, length.out = n),
-      width = 1L)
-  )
-  mcols_list <- list(
-    SNP = paste0("rs", seq_len(n)),
-    A1  = rep("A", n),
-    A2  = rep("G", n),
-    Z   = seq(1.0, by = 0.5, length.out = n),
-    N   = rep(1000L, n)
-  )
-  if (with_maf)
-    mcols_list$MAF <- seq(0.05, by = 0.01, length.out = n)
-  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(mcols_list)
-  gr
+.qtlMakeEntryGr <- function(
+    n = 5,
+    chr = "chr1",
+    start_at = 100L,
+    step = 100L,
+    with_maf = FALSE
+) {
+    gr <- GenomicRanges::GRanges(
+        seqnames = rep(chr, n),
+        ranges = IRanges::IRanges(
+            start = seq(start_at, by = step, length.out = n),
+            width = 1L
+        )
+    )
+    mcols_list <- list(
+        SNP = paste0("rs", seq_len(n)),
+        A1 = rep("A", n),
+        A2 = rep("G", n),
+        Z = seq(1.0, by = 0.5, length.out = n),
+        N = rep(1000L, n)
+    )
+    if (with_maf) {
+        mcols_list$MAF <- seq(0.05, by = 0.01, length.out = n)
+    }
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(mcols_list)
+    gr
 }
 
-.qtlMakeOne <- function(study = "study1", context = "Cortex",
-                        trait = "ENSG001", n = 5, varY = NA_real_,
-                        with_maf = FALSE, qcInfo = list(),
-                        genome = "hg19") {
-  QtlSumStats(
-    study    = study,
-    context  = context,
-    trait    = trait,
-    entry    = list(.qtlMakeEntryGr(n, with_maf = with_maf)),
-    genome   = genome,
-    ldSketch = .qtlMakeGenotypeHandle(),
-    varY     = varY,
-    qcInfo   = qcInfo)
+.qtlMakeOne <- function(
+    study = "study1",
+    context = "Cortex",
+    trait = "ENSG001",
+    n = 5,
+    varY = NA_real_,
+    with_maf = FALSE,
+    qcInfo = list(),
+    genome = "hg19"
+) {
+    QtlSumStats(
+        study = study,
+        context = context,
+        trait = trait,
+        entry = list(.qtlMakeEntryGr(n, with_maf = with_maf)),
+        genome = genome,
+        ldSketch = .qtlMakeGenotypeHandle(),
+        varY = varY,
+        qcInfo = qcInfo
+    )
 }
 
 # ===========================================================================
@@ -56,189 +71,217 @@ context("qtlSumStats")
 # ===========================================================================
 
 test_that("QtlSumStats: minimal single-tuple object builds and validates", {
-  obj <- .qtlMakeOne()
-  expect_s4_class(obj, "QtlSumStats")
-  expect_true(methods::validObject(obj))
-  expect_equal(nrow(obj), 1L)
+    obj <- .qtlMakeOne()
+    expect_s4_class(obj, "QtlSumStats")
+    expect_true(methods::validObject(obj))
+    expect_equal(nrow(obj), 1L)
 })
 
 test_that("QtlSumStats: multi-tuple object is keyed by (study, context, trait)", {
-  obj <- QtlSumStats(
-    study   = c("s1", "s1", "s2"),
-    context = c("c1", "c2", "c1"),
-    trait   = c("t1", "t1", "t1"),
-    entry   = list(.qtlMakeEntryGr(3),
-                   .qtlMakeEntryGr(4),
-                   .qtlMakeEntryGr(5)),
-    genome   = "hg38",
-    ldSketch = .qtlMakeGenotypeHandle())
-  expect_equal(nrow(obj), 3L)
-  expect_setequal(getContexts(obj), c("c1", "c2"))
-  expect_equal(getTraits(obj), "t1")
+    obj <- QtlSumStats(
+        study = c("s1", "s1", "s2"),
+        context = c("c1", "c2", "c1"),
+        trait = c("t1", "t1", "t1"),
+        entry = list(
+            .qtlMakeEntryGr(3),
+            .qtlMakeEntryGr(4),
+            .qtlMakeEntryGr(5)
+        ),
+        genome = "hg38",
+        ldSketch = .qtlMakeGenotypeHandle()
+    )
+    expect_equal(nrow(obj), 3L)
+    expect_setequal(getContexts(obj), c("c1", "c2"))
+    expect_equal(getTraits(obj), "t1")
 })
 
 test_that("QtlSumStats: getTraitPosition returns NA when no trait position supplied", {
-  obj <- .qtlMakeOne(trait = "ENSG001")
-  # traitPos cannot be inferred from summary statistics, so an unsupplied
-  # position reports NA rather than a fabricated range.
-  expect_identical(getTraitPosition(obj), NA)
-  expect_identical(getTraitPosition(obj, "ENSG001"), NA)
+    obj <- .qtlMakeOne(trait = "ENSG001")
+    # traitPos cannot be inferred from summary statistics, so an unsupplied
+    # position reports NA rather than a fabricated range.
+    expect_identical(getTraitPosition(obj), NA)
+    expect_identical(getTraitPosition(obj, "ENSG001"), NA)
 })
 
 test_that("QtlSumStats: getTraitPosition returns the supplied trait position", {
-  tpos <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1000L, 1500L))
-  obj <- QtlSumStats(
-    study = "s1", context = "c1", trait = "ENSGX",
-    entry = list(.qtlMakeEntryGr(5)),
-    genome = "hg19", ldSketch = .qtlMakeGenotypeHandle(),
-    traitPos = tpos)
-  tp <- getTraitPosition(obj)
-  expect_s4_class(tp, "GRanges")
-  expect_equal(GenomicRanges::start(tp), 1000L)
-  expect_equal(GenomicRanges::end(tp), 1500L)
-  expect_equal(GenomicRanges::start(getTraitPosition(obj, "ENSGX")), 1000L)
-  # a trait not in the collection -> NA
-  expect_identical(getTraitPosition(obj, "nope"), NA)
+    tpos <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1000L, 1500L))
+    obj <- QtlSumStats(
+        study = "s1",
+        context = "c1",
+        trait = "ENSGX",
+        entry = list(.qtlMakeEntryGr(5)),
+        genome = "hg19",
+        ldSketch = .qtlMakeGenotypeHandle(),
+        traitPos = tpos
+    )
+    tp <- getTraitPosition(obj)
+    expect_s4_class(tp, "GRanges")
+    expect_equal(GenomicRanges::start(tp), 1000L)
+    expect_equal(GenomicRanges::end(tp), 1500L)
+    expect_equal(GenomicRanges::start(getTraitPosition(obj, "ENSGX")), 1000L)
+    # a trait not in the collection -> NA
+    expect_identical(getTraitPosition(obj, "nope"), NA)
 })
 
 test_that("QtlSumStats: errors when required args are missing", {
-  expect_error(QtlSumStats(study = "s1", context = "c1"),
-               "all required")
+    expect_error(QtlSumStats(study = "s1", context = "c1"), "all required")
 })
 
 test_that("QtlSumStats: errors on length mismatch among study/context/trait/entry", {
-  expect_error(
-    QtlSumStats(
-      study = c("s1", "s2"),
-      context = c("c1"),
-      trait = c("t1"),
-      entry = list(.qtlMakeEntryGr(1)),
-      genome = "hg19",
-      ldSketch = .qtlMakeGenotypeHandle()),
-    "same length"
-  )
+    expect_error(
+        QtlSumStats(
+            study = c("s1", "s2"),
+            context = c("c1"),
+            trait = c("t1"),
+            entry = list(.qtlMakeEntryGr(1)),
+            genome = "hg19",
+            ldSketch = .qtlMakeGenotypeHandle()
+        ),
+        "same length"
+    )
 })
 
 test_that("QtlSumStats: errors when entry is not a list", {
-  expect_error(
-    QtlSumStats(
-      study = "s1", context = "c1", trait = "t1",
-      entry = "not_a_list",
-      genome = "hg19", ldSketch = .qtlMakeGenotypeHandle()),
-    "must be a list"
-  )
+    expect_error(
+        QtlSumStats(
+            study = "s1",
+            context = "c1",
+            trait = "t1",
+            entry = "not_a_list",
+            genome = "hg19",
+            ldSketch = .qtlMakeGenotypeHandle()
+        ),
+        "must be a list"
+    )
 })
 
 test_that("QtlSumStats: errors on non-singleton genome", {
-  expect_error(
-    QtlSumStats(
-      study = "s1", context = "c1", trait = "t1",
-      entry = list(.qtlMakeEntryGr(1)),
-      genome = c("hg19", "hg38"),
-      ldSketch = .qtlMakeGenotypeHandle()),
-    "single character string"
-  )
+    expect_error(
+        QtlSumStats(
+            study = "s1",
+            context = "c1",
+            trait = "t1",
+            entry = list(.qtlMakeEntryGr(1)),
+            genome = c("hg19", "hg38"),
+            ldSketch = .qtlMakeGenotypeHandle()
+        ),
+        "single character string"
+    )
 })
 
 test_that("QtlSumStats: errors on duplicate (study, context, trait) tuple", {
-  expect_error(
-    QtlSumStats(
-      study   = c("s1", "s1"),
-      context = c("c1", "c1"),
-      trait   = c("t1", "t1"),
-      entry   = list(.qtlMakeEntryGr(1), .qtlMakeEntryGr(1)),
-      genome  = "hg19",
-      ldSketch = .qtlMakeGenotypeHandle()),
-    "uniqueness violated"
-  )
+    expect_error(
+        QtlSumStats(
+            study = c("s1", "s1"),
+            context = c("c1", "c1"),
+            trait = c("t1", "t1"),
+            entry = list(.qtlMakeEntryGr(1), .qtlMakeEntryGr(1)),
+            genome = "hg19",
+            ldSketch = .qtlMakeGenotypeHandle()
+        ),
+        "uniqueness violated"
+    )
 })
 
 test_that("QtlSumStats: errors when entry list contains non-GRanges", {
-  expect_error(
-    QtlSumStats(
-      study = "s1", context = "c1", trait = "t1",
-      entry = list("not_a_granges"),
-      genome = "hg19",
-      ldSketch = .qtlMakeGenotypeHandle()),
-    "must be a GRanges"
-  )
+    expect_error(
+        QtlSumStats(
+            study = "s1",
+            context = "c1",
+            trait = "t1",
+            entry = list("not_a_granges"),
+            genome = "hg19",
+            ldSketch = .qtlMakeGenotypeHandle()
+        ),
+        "must be a GRanges"
+    )
 })
 
 test_that("QtlSumStats: scalar varY is recycled across tuples", {
-  obj <- QtlSumStats(
-    study   = c("s1", "s2"),
-    context = c("c1", "c1"),
-    trait   = c("t1", "t1"),
-    entry   = list(.qtlMakeEntryGr(2), .qtlMakeEntryGr(2)),
-    genome  = "hg19",
-    ldSketch = .qtlMakeGenotypeHandle(),
-    varY    = 1.5)
-  expect_equal(obj$varY, c(1.5, 1.5))
+    obj <- QtlSumStats(
+        study = c("s1", "s2"),
+        context = c("c1", "c1"),
+        trait = c("t1", "t1"),
+        entry = list(.qtlMakeEntryGr(2), .qtlMakeEntryGr(2)),
+        genome = "hg19",
+        ldSketch = .qtlMakeGenotypeHandle(),
+        varY = 1.5
+    )
+    expect_equal(obj$varY, c(1.5, 1.5))
 })
 
 test_that("QtlSumStats: errors when varY length is neither 1 nor n", {
-  expect_error(
-    QtlSumStats(
-      study   = c("s1", "s2"),
-      context = c("c1", "c1"),
-      trait   = c("t1", "t1"),
-      entry   = list(.qtlMakeEntryGr(2), .qtlMakeEntryGr(2)),
-      genome  = "hg19",
-      ldSketch = .qtlMakeGenotypeHandle(),
-      varY    = c(1, 2, 3)),
-    "length 1 or length\\(study\\)"
-  )
+    expect_error(
+        QtlSumStats(
+            study = c("s1", "s2"),
+            context = c("c1", "c1"),
+            trait = c("t1", "t1"),
+            entry = list(.qtlMakeEntryGr(2), .qtlMakeEntryGr(2)),
+            genome = "hg19",
+            ldSketch = .qtlMakeGenotypeHandle(),
+            varY = c(1, 2, 3)
+        ),
+        "length 1 or length\\(study\\)"
+    )
 })
 
 test_that("QtlSumStats: optional nSample column is absent by default, attached and recycled when supplied", {
-  bare <- .qtlMakeOne()
-  expect_false("nSample" %in% names(bare))         # schema unchanged by default
-  obj <- QtlSumStats(
-    study   = c("s1", "s2"),
-    context = c("c1", "c1"),
-    trait   = c("t1", "t1"),
-    entry   = list(.qtlMakeEntryGr(2), .qtlMakeEntryGr(2)),
-    genome  = "hg19",
-    ldSketch = .qtlMakeGenotypeHandle(),
-    nSample = 838)                                 # scalar recycled to both tuples
-  expect_equal(as.numeric(obj$nSample), c(838, 838))
-  expect_true(methods::validObject(obj))
+    bare <- .qtlMakeOne()
+    expect_false("nSample" %in% names(bare)) # schema unchanged by default
+    obj <- QtlSumStats(
+        study = c("s1", "s2"),
+        context = c("c1", "c1"),
+        trait = c("t1", "t1"),
+        entry = list(.qtlMakeEntryGr(2), .qtlMakeEntryGr(2)),
+        genome = "hg19",
+        ldSketch = .qtlMakeGenotypeHandle(),
+        nSample = 838
+    ) # scalar recycled to both tuples
+    expect_equal(as.numeric(obj$nSample), c(838, 838))
+    expect_true(methods::validObject(obj))
 })
 
 test_that("QtlSumStats: errors when nSample length is neither 1 nor n", {
-  expect_error(
-    QtlSumStats(
-      study   = c("s1", "s2"),
-      context = c("c1", "c1"),
-      trait   = c("t1", "t1"),
-      entry   = list(.qtlMakeEntryGr(2), .qtlMakeEntryGr(2)),
-      genome  = "hg19",
-      ldSketch = .qtlMakeGenotypeHandle(),
-      nSample = c(1, 2, 3)),
-    "length 1 or length\\(study\\)"
-  )
+    expect_error(
+        QtlSumStats(
+            study = c("s1", "s2"),
+            context = c("c1", "c1"),
+            trait = c("t1", "t1"),
+            entry = list(.qtlMakeEntryGr(2), .qtlMakeEntryGr(2)),
+            genome = "hg19",
+            ldSketch = .qtlMakeGenotypeHandle(),
+            nSample = c(1, 2, 3)
+        ),
+        "length 1 or length\\(study\\)"
+    )
 })
 
 test_that("QtlSumStats: subsetChr preserves the nSample column", {
-  gr <- .qtlMakeEntryGr(4, chr = "chr1")
-  obj <- QtlSumStats(
-    study = "s1", context = "c1", trait = "t1",
-    entry = list(gr), genome = "hg19",
-    ldSketch = .qtlMakeGenotypeHandle(), nSample = 838)
-  sub <- subsetChr(obj, "chr1")
-  expect_equal(as.numeric(sub$nSample), 838)
+    gr <- .qtlMakeEntryGr(4, chr = "chr1")
+    obj <- QtlSumStats(
+        study = "s1",
+        context = "c1",
+        trait = "t1",
+        entry = list(gr),
+        genome = "hg19",
+        ldSketch = .qtlMakeGenotypeHandle(),
+        nSample = 838
+    )
+    sub <- subsetChr(obj, "chr1")
+    expect_equal(as.numeric(sub$nSample), 838)
 })
 
 test_that("QtlSumStats: accepts and stores extra per-tuple columns via ...", {
-  obj <- QtlSumStats(
-    study   = c("s1", "s2"),
-    context = c("c1", "c1"),
-    trait   = c("t1", "t1"),
-    entry   = list(.qtlMakeEntryGr(2), .qtlMakeEntryGr(2)),
-    genome  = "hg19",
-    ldSketch = .qtlMakeGenotypeHandle(),
-    cohort  = c("UKB", "FinnGen"))
-  expect_equal(as.character(obj$cohort), c("UKB", "FinnGen"))
+    obj <- QtlSumStats(
+        study = c("s1", "s2"),
+        context = c("c1", "c1"),
+        trait = c("t1", "t1"),
+        entry = list(.qtlMakeEntryGr(2), .qtlMakeEntryGr(2)),
+        genome = "hg19",
+        ldSketch = .qtlMakeGenotypeHandle(),
+        cohort = c("UKB", "FinnGen")
+    )
+    expect_equal(as.character(obj$cohort), c("UKB", "FinnGen"))
 })
 
 # ===========================================================================
@@ -246,76 +289,85 @@ test_that("QtlSumStats: accepts and stores extra per-tuple columns via ...", {
 # ===========================================================================
 
 test_that("getSumStats / getZ / getN return values from the single-tuple entry", {
-  obj <- .qtlMakeOne(n = 4)
-  expect_s4_class(getSumStats(obj), "GRanges")
-  expect_equal(length(getSumStats(obj)), 4L)
-  expect_equal(getZ(obj), seq(1.0, by = 0.5, length.out = 4))
-  expect_equal(getN(obj), rep(1000L, 4))
+    obj <- .qtlMakeOne(n = 4)
+    expect_s4_class(getSumStats(obj), "GRanges")
+    expect_equal(length(getSumStats(obj)), 4L)
+    expect_equal(getZ(obj), seq(1.0, by = 0.5, length.out = 4))
+    expect_equal(getN(obj), rep(1000L, 4))
 })
 
 test_that("getMaf returns NULL when MAF column is absent, vector when present", {
-  obj_no_maf <- .qtlMakeOne(with_maf = FALSE)
-  expect_null(getMaf(obj_no_maf))
+    obj_no_maf <- .qtlMakeOne(with_maf = FALSE)
+    expect_null(getMaf(obj_no_maf))
 
-  obj_maf <- .qtlMakeOne(n = 4, with_maf = TRUE)
-  expect_equal(length(getMaf(obj_maf)), 4L)
+    obj_maf <- .qtlMakeOne(n = 4, with_maf = TRUE)
+    expect_equal(length(getMaf(obj_maf)), 4L)
 })
 
 test_that("nSnps reports the number of variants in the selected entry", {
-  obj <- .qtlMakeOne(n = 7)
-  expect_equal(nSnps(obj), 7L)
+    obj <- .qtlMakeOne(n = 7)
+    expect_equal(nSnps(obj), 7L)
 })
 
 test_that("getVarY returns numeric value or NULL when NA", {
-  obj_na <- .qtlMakeOne(varY = NA_real_)
-  expect_null(getVarY(obj_na))
+    obj_na <- .qtlMakeOne(varY = NA_real_)
+    expect_null(getVarY(obj_na))
 
-  obj_v  <- .qtlMakeOne(varY = 2.5)
-  expect_equal(getVarY(obj_v), 2.5)
+    obj_v <- .qtlMakeOne(varY = 2.5)
+    expect_equal(getVarY(obj_v), 2.5)
 })
 
 test_that("getContexts / getTraits return unique values across tuples", {
-  obj <- QtlSumStats(
-    study   = c("s1", "s1", "s2"),
-    context = c("c1", "c2", "c1"),
-    trait   = c("t1", "t1", "t2"),
-    entry   = list(.qtlMakeEntryGr(1), .qtlMakeEntryGr(1), .qtlMakeEntryGr(1)),
-    genome  = "hg19",
-    ldSketch = .qtlMakeGenotypeHandle())
-  expect_setequal(getContexts(obj), c("c1", "c2"))
-  expect_setequal(getTraits(obj), c("t1", "t2"))
+    obj <- QtlSumStats(
+        study = c("s1", "s1", "s2"),
+        context = c("c1", "c2", "c1"),
+        trait = c("t1", "t1", "t2"),
+        entry = list(
+            .qtlMakeEntryGr(1),
+            .qtlMakeEntryGr(1),
+            .qtlMakeEntryGr(1)
+        ),
+        genome = "hg19",
+        ldSketch = .qtlMakeGenotypeHandle()
+    )
+    expect_setequal(getContexts(obj), c("c1", "c2"))
+    expect_setequal(getTraits(obj), c("t1", "t2"))
 })
 
 test_that("accessors require (study, context, trait) when collection has >1 entry", {
-  obj <- QtlSumStats(
-    study   = c("s1", "s2"),
-    context = c("c1", "c1"),
-    trait   = c("t1", "t1"),
-    entry   = list(.qtlMakeEntryGr(1), .qtlMakeEntryGr(1)),
-    genome  = "hg19",
-    ldSketch = .qtlMakeGenotypeHandle())
-  expect_error(getSumStats(obj),
-               "Pass `study`, `context`, and `trait` to select one")
+    obj <- QtlSumStats(
+        study = c("s1", "s2"),
+        context = c("c1", "c1"),
+        trait = c("t1", "t1"),
+        entry = list(.qtlMakeEntryGr(1), .qtlMakeEntryGr(1)),
+        genome = "hg19",
+        ldSketch = .qtlMakeGenotypeHandle()
+    )
+    expect_error(
+        getSumStats(obj),
+        "Pass `study`, `context`, and `trait` to select one"
+    )
 
-  expect_s4_class(
-    getSumStats(obj, study = "s1", context = "c1", trait = "t1"),
-    "GRanges")
+    expect_s4_class(
+        getSumStats(obj, study = "s1", context = "c1", trait = "t1"),
+        "GRanges"
+    )
 })
 
 test_that("accessors error on unknown tuple", {
-  obj <- .qtlMakeOne(study = "s1", context = "c1", trait = "t1")
-  expect_error(
-    getSumStats(obj, study = "ghost", context = "c1", trait = "t1"),
-    "No entry"
-  )
+    obj <- .qtlMakeOne(study = "s1", context = "c1", trait = "t1")
+    expect_error(
+        getSumStats(obj, study = "ghost", context = "c1", trait = "t1"),
+        "No entry"
+    )
 })
 
 test_that("accessors require length-1 selection args", {
-  obj <- .qtlMakeOne()
-  expect_error(
-    getSumStats(obj, study = c("s1", "s2"), context = "c1", trait = "t1"),
-    "must each be length 1"
-  )
+    obj <- .qtlMakeOne()
+    expect_error(
+        getSumStats(obj, study = c("s1", "s2"), context = "c1", trait = "t1"),
+        "must each be length 1"
+    )
 })
 
 # ===========================================================================
@@ -323,44 +375,51 @@ test_that("accessors require length-1 selection args", {
 # ===========================================================================
 
 test_that("subsetChr keeps only variants on the requested chromosome", {
-  # Multi-chromosome entry: 3 on chr1, 2 on chr2. Built in one shot so
-  # the resulting GRanges already shares seqlevels across rows.
-  gr <- GenomicRanges::GRanges(
-    seqnames = c(rep("chr1", 3), rep("chr2", 2)),
-    ranges = IRanges::IRanges(
-      start = c(100L, 200L, 300L, 1000L, 1100L), width = 1L))
-  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-    SNP = paste0("rs", seq_along(gr)),
-    A1  = rep("A", length(gr)),
-    A2  = rep("G", length(gr)),
-    Z   = seq(1.0, by = 0.5, length.out = length(gr)),
-    N   = rep(1000L, length(gr)))
-  obj <- QtlSumStats(
-    study = "s1", context = "c1", trait = "t1",
-    entry = list(gr),
-    genome = "hg19",
-    ldSketch = .qtlMakeGenotypeHandle())
+    # Multi-chromosome entry: 3 on chr1, 2 on chr2. Built in one shot so
+    # the resulting GRanges already shares seqlevels across rows.
+    gr <- GenomicRanges::GRanges(
+        seqnames = c(rep("chr1", 3), rep("chr2", 2)),
+        ranges = IRanges::IRanges(
+            start = c(100L, 200L, 300L, 1000L, 1100L),
+            width = 1L
+        )
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = paste0("rs", seq_along(gr)),
+        A1 = rep("A", length(gr)),
+        A2 = rep("G", length(gr)),
+        Z = seq(1.0, by = 0.5, length.out = length(gr)),
+        N = rep(1000L, length(gr))
+    )
+    obj <- QtlSumStats(
+        study = "s1",
+        context = "c1",
+        trait = "t1",
+        entry = list(gr),
+        genome = "hg19",
+        ldSketch = .qtlMakeGenotypeHandle()
+    )
 
-  chr1_only <- subsetChr(obj, "1")
-  expect_equal(nSnps(chr1_only), 3L)
+    chr1_only <- subsetChr(obj, "1")
+    expect_equal(nSnps(chr1_only), 3L)
 
-  # The "chr" prefix is accepted equivalently.
-  chr2_only <- subsetChr(obj, "chr2")
-  expect_equal(nSnps(chr2_only), 2L)
+    # The "chr" prefix is accepted equivalently.
+    chr2_only <- subsetChr(obj, "chr2")
+    expect_equal(nSnps(chr2_only), 2L)
 })
 
 test_that("subsetChr returns empty entry when no variants on chromosome", {
-  obj <- .qtlMakeOne(n = 4)
-  empty <- subsetChr(obj, "22")
-  expect_equal(nSnps(empty), 0L)
+    obj <- .qtlMakeOne(n = 4)
+    empty <- subsetChr(obj, "22")
+    expect_equal(nSnps(empty), 0L)
 })
 
 test_that("subsetChr preserves class-level slots (genome, ldSketch, qcInfo)", {
-  obj <- .qtlMakeOne(qcInfo = list(step1 = "ok"))
-  res <- subsetChr(obj, "1")
-  expect_equal(getGenome(res), getGenome(obj))
-  expect_equal(getQcInfo(res), getQcInfo(obj))
-  expect_identical(getLdSketch(res), getLdSketch(obj))
+    obj <- .qtlMakeOne(qcInfo = list(step1 = "ok"))
+    res <- subsetChr(obj, "1")
+    expect_equal(getGenome(res), getGenome(obj))
+    expect_equal(getQcInfo(res), getQcInfo(obj))
+    expect_identical(getLdSketch(res), getLdSketch(obj))
 })
 
 # ===========================================================================
@@ -368,9 +427,8 @@ test_that("subsetChr preserves class-level slots (genome, ldSketch, qcInfo)", {
 # ===========================================================================
 
 test_that("show prints entry count and genome build", {
-  obj <- .qtlMakeOne()
-  expect_output(show(obj),
-                "QtlSumStats: 1 entries, genome build hg19")
+    obj <- .qtlMakeOne()
+    expect_output(show(obj), "QtlSumStats: 1 entries, genome build hg19")
 })
 
 # ===========================================================================
@@ -378,28 +436,43 @@ test_that("show prints entry count and genome build", {
 # ===========================================================================
 
 test_that("getSumStats errors on an empty QtlSumStats collection", {
-  empty <- QtlSumStats(
-    study = character(0), context = character(0), trait = character(0),
-    entry = list(), genome = "hg19",
-    ldSketch = .qtlMakeGenotypeHandle(), varY = numeric(0))
-  expect_equal(nrow(empty), 0L)
-  expect_error(getSumStats(empty), "has no rows")
+    empty <- QtlSumStats(
+        study = character(0),
+        context = character(0),
+        trait = character(0),
+        entry = list(),
+        genome = "hg19",
+        ldSketch = .qtlMakeGenotypeHandle(),
+        varY = numeric(0)
+    )
+    expect_equal(nrow(empty), 0L)
+    expect_error(getSumStats(empty), "has no rows")
 })
 
 test_that("QtlSumStats: ldSketch is optional (NULL for LD-free workflows)", {
-  obj <- QtlSumStats(
-    study = "s1", context = "c1", trait = "t1",
-    entry = list(.qtlMakeEntryGr(1)), genome = "hg19")   # ldSketch omitted
-  expect_null(getLdSketch(obj))
-  expect_output(show(obj), "none \\(LD-free\\)")
+    obj <- QtlSumStats(
+        study = "s1",
+        context = "c1",
+        trait = "t1",
+        entry = list(.qtlMakeEntryGr(1)),
+        genome = "hg19"
+    ) # ldSketch omitted
+    expect_null(getLdSketch(obj))
+    expect_output(show(obj), "none \\(LD-free\\)")
 })
 
 test_that("QtlSumStats: a non-GenotypeHandle ldSketch is rejected", {
-  expect_error(
-    QtlSumStats(study = "s1", context = "c1", trait = "t1",
-                entry = list(.qtlMakeEntryGr(1)), genome = "hg19",
-                ldSketch = "not_a_handle"),
-    "GenotypeHandle or NULL")
+    expect_error(
+        QtlSumStats(
+            study = "s1",
+            context = "c1",
+            trait = "t1",
+            entry = list(.qtlMakeEntryGr(1)),
+            genome = "hg19",
+            ldSketch = "not_a_handle"
+        ),
+        "GenotypeHandle or NULL"
+    )
 })
 
 # ===========================================================================
@@ -407,23 +480,28 @@ test_that("QtlSumStats: a non-GenotypeHandle ldSketch is rejected", {
 # ===========================================================================
 
 test_that("getP / getBeta / getSe read the optional P/BETA/SE mcols", {
-  gr <- .qtlMakeEntryGr(4)
-  S4Vectors::mcols(gr)$P    <- c(0.1, 0.01, 1e-4, 0.5)
-  S4Vectors::mcols(gr)$BETA <- c(0.2, -0.3, 0.4, 0.05)
-  S4Vectors::mcols(gr)$SE   <- rep(0.1, 4)
-  x <- QtlSumStats(study = "s", context = "c", trait = "g",
-                   entry = list(gr), genome = "hg19")
-  expect_equal(getP(x),    c(0.1, 0.01, 1e-4, 0.5))
-  expect_equal(getBeta(x), c(0.2, -0.3, 0.4, 0.05))
-  expect_equal(getSe(x),   rep(0.1, 4))
+    gr <- .qtlMakeEntryGr(4)
+    S4Vectors::mcols(gr)$P <- c(0.1, 0.01, 1e-4, 0.5)
+    S4Vectors::mcols(gr)$BETA <- c(0.2, -0.3, 0.4, 0.05)
+    S4Vectors::mcols(gr)$SE <- rep(0.1, 4)
+    x <- QtlSumStats(
+        study = "s",
+        context = "c",
+        trait = "g",
+        entry = list(gr),
+        genome = "hg19"
+    )
+    expect_equal(getP(x), c(0.1, 0.01, 1e-4, 0.5))
+    expect_equal(getBeta(x), c(0.2, -0.3, 0.4, 0.05))
+    expect_equal(getSe(x), rep(0.1, 4))
 })
 
 test_that("getP / getBeta / getSe return NULL when the entry omits them", {
-  y <- .qtlMakeOne(n = 4)                       # Z/N-only entry
-  expect_null(getP(y))
-  expect_null(getBeta(y))
-  expect_null(getSe(y))
-  expect_equal(getZ(y), seq(1.0, by = 0.5, length.out = 4))   # Z still works
+    y <- .qtlMakeOne(n = 4) # Z/N-only entry
+    expect_null(getP(y))
+    expect_null(getBeta(y))
+    expect_null(getSe(y))
+    expect_equal(getZ(y), seq(1.0, by = 0.5, length.out = 4)) # Z still works
 })
 
 # ===========================================================================
@@ -431,37 +509,56 @@ test_that("getP / getBeta / getSe return NULL when the entry omits them", {
 # ===========================================================================
 
 test_that("constructor derives tss/tes distance from a point trait position", {
-  gr <- .qtlMakeEntryGr(5, start_at = 100L, step = 100L)      # 100..500
-  tp <- GenomicRanges::GRanges("chr1", IRanges::IRanges(250L, width = 1L))
-  x  <- QtlSumStats(study = "s", context = "c", trait = "g",
-                    entry = list(gr), genome = "hg19", traitPos = tp)
-  mc <- S4Vectors::mcols(getSumStats(x))
-  expect_equal(mc$tss_distance, c(100, 200, 300, 400, 500) - 250)
-  # 1bp trait -> tss and tes distance are identical
-  expect_equal(mc$tss_distance, mc$tes_distance)
+    gr <- .qtlMakeEntryGr(5, start_at = 100L, step = 100L) # 100..500
+    tp <- GenomicRanges::GRanges("chr1", IRanges::IRanges(250L, width = 1L))
+    x <- QtlSumStats(
+        study = "s",
+        context = "c",
+        trait = "g",
+        entry = list(gr),
+        genome = "hg19",
+        traitPos = tp
+    )
+    mc <- S4Vectors::mcols(getSumStats(x))
+    expect_equal(mc$tss_distance, c(100, 200, 300, 400, 500) - 250)
+    # 1bp trait -> tss and tes distance are identical
+    expect_equal(mc$tss_distance, mc$tes_distance)
 })
 
 test_that("constructor derives distinct tss/tes distance for a multi-base trait", {
-  gr <- .qtlMakeEntryGr(3, start_at = 100L, step = 100L)      # 100,200,300
-  tp <- GenomicRanges::GRanges("chr1", IRanges::IRanges(200L, 400L))  # TSS 200, TES 400
-  x  <- QtlSumStats(study = "s", context = "c", trait = "g",
-                    entry = list(gr), genome = "hg19", traitPos = tp)
-  mc <- S4Vectors::mcols(getSumStats(x))
-  expect_equal(mc$tss_distance, c(100, 200, 300) - 200)
-  expect_equal(mc$tes_distance, c(100, 200, 300) - 400)
+    gr <- .qtlMakeEntryGr(3, start_at = 100L, step = 100L) # 100,200,300
+    tp <- GenomicRanges::GRanges("chr1", IRanges::IRanges(200L, 400L)) # TSS 200, TES 400
+    x <- QtlSumStats(
+        study = "s",
+        context = "c",
+        trait = "g",
+        entry = list(gr),
+        genome = "hg19",
+        traitPos = tp
+    )
+    mc <- S4Vectors::mcols(getSumStats(x))
+    expect_equal(mc$tss_distance, c(100, 200, 300) - 200)
+    expect_equal(mc$tes_distance, c(100, 200, 300) - 400)
 })
 
 test_that("no traitPos -> no distance columns; existing distance is preserved", {
-  z <- .qtlMakeOne(n = 3)
-  expect_null(S4Vectors::mcols(getSumStats(z))$tss_distance)
+    z <- .qtlMakeOne(n = 3)
+    expect_null(S4Vectors::mcols(getSumStats(z))$tss_distance)
 
-  gr <- .qtlMakeEntryGr(2, start_at = 100L, step = 100L)
-  S4Vectors::mcols(gr)$tss_distance <- c(-999L, -888L)          # pre-existing
-  w <- QtlSumStats(study = "s", context = "c", trait = "g",
-                   entry = list(gr), genome = "hg19",
-                   traitPos = GenomicRanges::GRanges(
-                     "chr1", IRanges::IRanges(250L, width = 1L)))
-  mc <- S4Vectors::mcols(getSumStats(w))
-  expect_equal(mc$tss_distance, c(-999L, -888L))               # not clobbered
-  expect_equal(mc$tes_distance, c(100, 200) - 250)             # absent -> filled
+    gr <- .qtlMakeEntryGr(2, start_at = 100L, step = 100L)
+    S4Vectors::mcols(gr)$tss_distance <- c(-999L, -888L) # pre-existing
+    w <- QtlSumStats(
+        study = "s",
+        context = "c",
+        trait = "g",
+        entry = list(gr),
+        genome = "hg19",
+        traitPos = GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(250L, width = 1L)
+        )
+    )
+    mc <- S4Vectors::mcols(getSumStats(w))
+    expect_equal(mc$tss_distance, c(-999L, -888L)) # not clobbered
+    expect_equal(mc$tes_distance, c(100, 200) - 250) # absent -> filled
 })

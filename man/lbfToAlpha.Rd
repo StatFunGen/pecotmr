@@ -2,8 +2,7 @@
 % Please edit documentation in R/fineMappingWrappers.R
 \name{lbfToAlpha}
 \alias{lbfToAlpha}
-\title{Applies the 'lbfToAlphaVector' function row-wise to a matrix of log Bayes factors
-to convert them to Single Effect PIP values.}
+\title{Convert a log-Bayes-factor matrix to Single Effect PIPs}
 \usage{
 lbfToAlpha(lbf)
 }
@@ -11,11 +10,12 @@ lbfToAlpha(lbf)
 \item{lbf}{Matrix of log Bayes factors.}
 }
 \value{
-A matrix of alpha values with the same dimensions as the input LBF matrix.
+A matrix of alpha values with the same dimensions as the input LBF
+  matrix.
 }
 \description{
-Applies the 'lbfToAlphaVector' function row-wise to a matrix of log Bayes factors
-to convert them to Single Effect PIP values.
+Applies the 'lbfToAlphaVector' function row-wise to a matrix of
+  log Bayes factors to convert them to Single Effect PIP values.
 }
 \examples{
 lbfMatrix <- matrix(c(-0.5, 1.2, 0.3, 0.7, -1.1, 0.4), nrow = 2)

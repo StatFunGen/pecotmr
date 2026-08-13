@@ -12,23 +12,26 @@ getQcDiagnostics(x, entry = 1L, ...)
 \arguments{
 \item{x}{A \code{GwasSumStats} or \code{QtlSumStats} object.}
 
-\item{entry}{Integer index (default 1) of the entry whose diagnostics
-table to return. When \code{NULL}, returns a named list of every
-entry's diagnostics keyed by entry index.}
+\item{entry}{Integer index (default 1) of the entry whose diagnostics table
+to return. When \code{NULL}, returns a named list of every entry's
+diagnostics keyed by entry index.}
 
 \item{...}{Unused.}
 }
 \value{
-A \code{data.frame} of per-variant diagnostics (columns
-  include \code{variant_id} plus the SLALOM / DENTIST output
-  columns), \code{NULL} when no diagnostics were preserved for that
-  entry, or a named list of such data.frames when \code{entry =
-  NULL}.
+A \code{data.frame} of per-variant diagnostics (columns include
+  \code{variant_id} plus the SLALOM / DENTIST output columns), \code{NULL}
+  when no diagnostics were preserved for that entry, or a named list of such
+  data.frames when \code{entry = NULL}.
 }
 \description{
-Return the per-variant LD-mismatch diagnostics table
-  (SLALOM or DENTIST output) attached to a sumstats entry by
-  \code{\link{summaryStatsQc}} when \code{zMismatchQc} was not
-  \code{"none"}. Convenience accessor over
+Return the per-variant LD-mismatch diagnostics table (SLALOM or
+  DENTIST output) attached to a sumstats entry by
+  \code{\link{summaryStatsQc}} when \code{zMismatchQc} was not \code{"none"}.
+  Convenience accessor over
   \code{getQcInfo(x)$entryAudit[[entry]]$ldMismatchDiagnostics}.
+}
+\examples{
+data(qtlSumStatsExample)
+getQcDiagnostics(qtlSumStatsExample)
 }

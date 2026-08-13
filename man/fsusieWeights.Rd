@@ -48,16 +48,31 @@ prediction pushes through to a per-SNP, per-feature weight matrix:
 \deqn{W[j, f] = \sum_l alpha[[l]][j] \cdot
   \mathrm{wr}\!\left(fitted\_wc[[l]][j, ] / csd\_X[j]\right)[f].}
 This is the exact analog of \code{coef.susie} for scalar SuSiE (all SNPs,
-alpha-weighted), which spreads weight across the credible set — more robust
+alpha-weighted), which spreads weight across the credible set -- more robust
 for out-of-sample TWAS than fSuSiE's in-sample lead-SNP summary
 (\code{update_cal_indf}).
 }
 \details{
 The reconstruction uses the raw posterior wavelet coefficients
 \code{fitted_wc}, so it is independent of the \code{post_processing} mode
-(\code{"smash"}/\code{"TI"}/\code{"HMM"}/\code{"none"}) — that smoothing only
-denoises the alpha-collapsed display curve \code{fitted_func}, never the
+(\code{"smash"}/\code{"TI"}/\code{"HMM"}/\code{"none"}) -- that smoothing
+only denoises the alpha-collapsed display curve \code{fitted_func}, never the
 per-SNP predictive coefficients. The \code{$D}/\code{$C} coefficient layout
 and wavelet basis mirror \code{out_prep.susiF}, so the feature-domain output
 matches fSuSiE's own conventions.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:50]
+n <- nrow(X)
+nPos <- 16
+base <- sin(seq(0, 2 * pi, length.out = nPos))
+Y <- matrix(rep(base, each = n), n, nPos) +
+  X[, 1] \%o\% (0.5 * cos(seq(0, pi, length.out = nPos)))
+pos <- seq_len(nPos)
+fit <- fsusieWrapper(X, Y, pos = pos, L = 2,
+  prior = "mixture_normal_per_scale", maxSnpEm = 10,
+  covLev = 0.95, minPurity = 0.5, maxScale = 6)
+fsusieWeights(fsusieFit = fit, X = X, Y = Y,
+  variantIds = colnames(X))
 }

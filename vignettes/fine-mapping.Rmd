@@ -10,13 +10,19 @@ vignette: >
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
-                      fig.width = 7, fig.height = 4.5)
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    fig.width = 7,
+    fig.height = 4.5
+)
 ```
 
 ## Overview
 
-`fineMappingPipeline()` is a single pipeline that can accept any of the following inputs:
+`fineMappingPipeline()` is a single pipeline that can accept any of the
+following inputs:
 
 | Input class | What it represents | Methods supported |
 |---|---|---|
@@ -39,12 +45,14 @@ library(pecotmr)
 ## Bundled inputs
 
 ```{r bundled-inputs}
-data(qtl_dataset_example,
-     qtl_sumstats_example,
-     gwas_sumstats_s4_example,
-     multi_study_qtl_dataset_example)
+data(
+    qtlDatasetExample,
+    qtlSumStatsExample,
+    gwasSumStatsS4Example,
+    multiStudyQtlDatasetExample
+)
 
-qtl_dataset_example
+qtlDatasetExample
 ```
 
 The `*_sumstats_example` objects ship with a non-empty `qcInfo` slot so
@@ -61,33 +69,54 @@ basepairs around each trait's TSS), supply an explicit `region`, or
 set both per-call.
 
 ```{r individual-fm}
-fmr <- fineMappingPipeline(qtl_dataset_example,
-                            methods   = "susie",
-                            cisWindow = 1e6)
+fmr <- fineMappingPipeline(
+    qtlDatasetExample,
+    methods = "susie",
+    cisWindow = 1e6
+)
 fmr
 ```
 
 Per-tuple PIPs:
 
 ```{r individual-pips}
-pip <- getPip(fmr, study = "study1", context = "brain",
-              trait = "ENSG_example", method = "susie")
+pip <- getPip(
+    fmr,
+    study = "study1",
+    context = "brain",
+    trait = "ENSG_example",
+    method = "susie"
+)
 head(sort(pip, decreasing = TRUE), 5)
 ```
 
 Credible sets:
 
 ```{r individual-cs}
-getCs(fmr, study = "study1", context = "brain",
-      trait = "ENSG_example", method = "susie", coverage = 0.95)
+getCs(
+    fmr,
+    study = "study1",
+    context = "brain",
+    trait = "ENSG_example",
+    method = "susie",
+    coverage = 0.95
+)
 ```
 
 The `top_loci` table consolidates per-method PIPs, CS membership, and
 sumstats into one long-format data.frame:
 
 ```{r individual-toploci}
-head(getTopLoci(fmr, study = "study1", context = "brain",
-                trait = "ENSG_example", method = "susie"), 5)
+head(
+    getTopLoci(
+        fmr,
+        study = "study1",
+        context = "brain",
+        trait = "ENSG_example",
+        method = "susie"
+    ),
+    5
+)
 ```
 
 ## Multi-study fine-mapping
@@ -96,16 +125,18 @@ A `MultiStudyQtlDataset` runs the pipeline per-study and
 concatenates the results into a single `QtlFineMappingResult`:
 
 ```{r multistudy-fm}
-msFmr <- fineMappingPipeline(multi_study_qtl_dataset_example,
-                              methods   = "susie",
-                              cisWindow = 1e6)
+msFmr <- fineMappingPipeline(
+    multiStudyQtlDatasetExample,
+    methods = "susie",
+    cisWindow = 1e6
+)
 table(msFmr$study)
 ```
 
 ## QTL summary-statistics fine-mapping
 
 ```{r sumstats-qtl}
-fmrSs <- fineMappingPipeline(qtl_sumstats_example, methods = "susie")
+fmrSs <- fineMappingPipeline(qtlSumStatsExample, methods = "susie")
 fmrSs
 ```
 
@@ -115,8 +146,7 @@ pipeline pulls the per-region LD from there automatically.
 ## GWAS summary-statistics fine-mapping
 
 ```{r sumstats-gwas}
-fmrGwas <- fineMappingPipeline(gwas_sumstats_s4_example,
-                                methods = "susie")
+fmrGwas <- fineMappingPipeline(gwasSumStatsS4Example, methods = "susie")
 fmrGwas
 ```
 
@@ -126,31 +156,31 @@ The GWAS path is similar to the QTL-sumstats path but only annotates by study.
 
 ```{r fm-params, eval=FALSE}
 fineMappingPipeline(
-  qtl_dataset_example,
-  methods            = c("susie", "susieInf"),
-  contexts           = "brain",
-  traitId            = "ENSG_example",
-  region             = "chr22:25000000-26000000",
-  cisWindow          = 5e5,
-  coverage           = 0.95,
-  secondaryCoverage  = c(0.7, 0.5),
-  signalCutoff       = 0.025,
-  minAbsCorr         = 0.8,
-  addSusieInf        = TRUE,
-  naAction           = "drop",   # "drop" (default) or "impute"
-  verbose            = 1)
+    qtlDatasetExample,
+    methods = c("susie", "susieInf"),
+    contexts = "brain",
+    traitId = "ENSG_example",
+    region = "chr22:25000000-26000000",
+    cisWindow = 5e5,
+    coverage = 0.95,
+    secondaryCoverage = c(0.7, 0.5),
+    signalCutoff = 0.025,
+    minAbsCorr = 0.8,
+    addSusieInf = TRUE,
+    naAction = "drop", # "drop" (default) or "impute"
+    verbose = 1
+)
 ```
 
-- `naAction` controls how phenotype NAs are handled by
-  `getResidualizedPhenotypes()`: `"drop"` removes samples with any NA
-  across the requested traits, `"impute"` mean-imputes each trait
-  independently.
-- `addSusieInf = TRUE` runs SuSiE-inf first and uses its result to
-  initialise the susie fit, which improves credible-set purity in
-  regions with background polygenic signal.
-- `secondaryCoverage` adds secondary CS columns at the requested
-  coverages (alongside the primary `coverage`); useful when you want
-  both narrow and broad CS reports.
+-  `naAction` controls how phenotype NAs are handled by
+    `getResidualizedPhenotypes()`: `"drop"` removes samples with any NA across
+    the requested traits, `"impute"` mean-imputes each trait independently.
+-  `addSusieInf = TRUE` runs SuSiE-inf first and uses its result to initialise
+    the susie fit, which improves credible-set purity in regions with
+    background polygenic signal.
+-  `secondaryCoverage` adds secondary CS columns at the requested coverages
+    (alongside the primary `coverage`); useful when you want both narrow and
+    broad CS reports.
 
 ## Joint multi-context / multi-trait fits
 
@@ -159,10 +189,10 @@ methods (`mvsusie` for cross-context, `mvsusie` or `fsusie` for multi-trait):
 
 ```{r fm-joint, eval=FALSE}
 fineMappingPipeline(
-  multi_study_qtl_dataset_example,
-  methods            = "mvsusie",
-  jointSpecification = list(axis = "context",
-                             contexts = c("brain", "liver")))
+    multiStudyQtlDatasetExample,
+    methods = "mvsusie",
+    jointSpecification = list(axis = "context", contexts = c("brain", "liver"))
+)
 ```
 
 See `?jointSpecification` for the specification grammar.
@@ -183,15 +213,17 @@ slotNames(entry)
 Each entry carries:
 
 - `variantIds` — the LD-aligned variant set the fit was computed on
-- `trimmedFit` — a slim list containing `alpha`, `lbf_variable`, `mu`,
-  `mu2`, `X_column_scale_factors`, `pip`, and credible-set metadata
-- `topLoci` — the long-format per-variant summary used by downstream
-  pipelines and `vcfWriter`
+-  `trimmedFit` — a slim list containing `alpha`, `lbf_variable`, `mu`, `mu2`,
+    `X_column_scale_factors`, `pip`, and credible-set metadata
+-  `topLoci` — the long-format per-variant summary used by downstream pipelines
+    and `vcfWriter`
 - `sumstats` — optional sumstats passed through for reporting
 
 ## Next steps
 
-- `QtlFineMappingResult` is used by [`colocPipeline`](coloc-pipeline.html) for QTL-GWAS colocalization 
-  and by [`twasWeightsPipeline`](twas-weights.html) so that fine-mapping weights are
-  contributed to the TWAS ensemble weights model alongside regularized regression methods.
-- Run the full [`causalInferencePipeline`](twas-zscore.html) (TWAS + MR) with a `FineMappingResult` and `GwasSumStats`.
+-  `QtlFineMappingResult` is used by [`colocPipeline`](coloc-pipeline.html) for
+    QTL-GWAS colocalization and by [`twasWeightsPipeline`](twas-weights.html)
+    so that fine-mapping weights are contributed to the TWAS ensemble weights
+    model alongside regularized regression methods.
+-  Run the full [`causalInferencePipeline`](twas-zscore.html) (TWAS + MR) with
+    a `FineMappingResult` and `GwasSumStats`.

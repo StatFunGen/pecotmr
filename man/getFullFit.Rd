@@ -21,3 +21,8 @@ The full-data prior payload, or \code{NULL}.
 Accessor for the \code{fullFit} slot (the full-data data-driven
   prior payload).
 }
+\examples{
+U <- list(shared = diag(3), singleton = matrix(0.3, 3, 3) + diag(0.7, 3))
+mp <- MashPrior(fullFit = list(U = U, w = c(0.5, 0.5)))
+getFullFit(mp)
+}

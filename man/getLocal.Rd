@@ -18,3 +18,7 @@ A \code{data.frame} of local estimates, or NULL.
 \description{
 Extract per-block local estimates from a result object.
 }
+\examples{
+data(h2EstimateExample)
+getLocal(h2EstimateExample)
+}

@@ -9,27 +9,34 @@ fitMashContrast(index, origMean, posteriorMean, posteriorVcov, grouping = NULL)
 \arguments{
 \item{index}{Integer row index of the variant in the posterior matrices.}
 
-\item{origMean}{Matrix of original effect sizes (variants x conditions).
-Used to determine which conditions are "tested" (non-zero).}
+\item{origMean}{Matrix of original effect sizes (variants x conditions). Used
+to determine which conditions are "tested" (non-zero).}
 
 \item{posteriorMean}{Matrix of mash posterior means (variants x conditions).}
 
-\item{posteriorVcov}{3D array of posterior covariance matrices
-(conditions x conditions x variants).}
+\item{posteriorVcov}{3D array of posterior covariance matrices (conditions x
+conditions x variants).}
 
 \item{grouping}{Named integer vector mapping condition names to group IDs.
-Conditions with the same positive group ID are treated as replicates
-(e.g., multiple datasets for the same cell type). Use 0 for ungrouped.
-If NULL (default), all conditions are treated independently.}
+Conditions with the same positive group ID are treated as replicates (e.g.,
+multiple datasets for the same cell type). Use 0 for ungrouped. If NULL
+(default), all conditions are treated independently.}
 }
 \value{
-A single-row data.frame with columns
-  \code{mean_contrast_*}, \code{se_contrast_*}, \code{p_contrast_*} for
-  both deviation and pairwise contrasts. Returns NULL if fewer than 2
-  tested conditions.
+A single-row data.frame with columns \code{mean_contrast_*},
+  \code{se_contrast_*}, \code{p_contrast_*} for both deviation and pairwise
+  contrasts. Returns NULL if fewer than 2 tested conditions.
 }
 \description{
 For a single variant (row index), computes deviation contrasts (each
 condition vs grand mean) and all pairwise contrasts from the mash posterior
 mean and covariance. Supports condition grouping for weighted contrasts.
+}
+\examples{
+om <- matrix(c(0.1, 0.2, 0.3), 1, 3, dimnames = list("v1", c("a", "b", "c")))
+pm <- matrix(c(0.5, 0.3, -0.2), 1, 3,
+  dimnames = list("v1", c("a", "b", "c")))
+pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
+dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
+fitMashContrast(1L, om, pm, pv)
 }

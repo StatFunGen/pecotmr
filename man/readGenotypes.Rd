@@ -12,8 +12,8 @@ readGenotypes(path, format = NULL, ...)
 \arguments{
 \item{path}{Character, path to the genotype file.}
 
-\item{format}{Character, one of "vcf", "plink1", "plink2", "gds".
-If NULL, inferred from file extension.}
+\item{format}{Character, one of "vcf", "plink1", "plink2", "gds". If NULL,
+inferred from file extension.}
 
 \item{...}{Additional arguments.}
 }
@@ -21,7 +21,12 @@ If NULL, inferred from file extension.}
 A \code{GenotypeHandle} object.
 }
 \description{
-Read genotype data from various formats (VCF, plink1,
-  plink2, GDS) and return a \code{GenotypeHandle} for deferred
-  genotype loading.
+Read genotype data from various formats (VCF, plink1, plink2,
+  GDS) and return a \code{GenotypeHandle} for deferred genotype loading.
+}
+\examples{
+gh <- readGenotypes(
+  system.file("extdata", "toy_ref.bed", package = "pecotmr")
+)
+gh
 }

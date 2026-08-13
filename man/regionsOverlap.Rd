@@ -18,3 +18,6 @@ Logical scalar: TRUE if the regions share at least one base pair.
 \description{
 Test whether two genomic regions overlap
 }
+\examples{
+regionsOverlap("chr1:100-200", "chr1:150-250")
+}

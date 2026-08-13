@@ -28,8 +28,12 @@ getGenome(x, ...)
 Character (length 1).
 }
 \description{
-Return the genome build that the collection's LD sketch
-  and every entry are aligned to. Because all entries in a
-  \code{GwasSumStats} or \code{QtlSumStats} share the LD sketch, the
-  genome build is a single value at the collection level.
+Return the genome build that the collection's LD sketch and
+  every entry are aligned to. Because all entries in a \code{GwasSumStats} or
+  \code{QtlSumStats} share the LD sketch, the genome build is a single value
+  at the collection level.
+}
+\examples{
+data(qtlSumStatsExample)
+getGenome(qtlSumStatsExample)
 }

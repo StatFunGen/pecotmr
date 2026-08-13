@@ -100,7 +100,8 @@ double minusLogPvalueChisq2(double stat) {
 // eigenvalues in ascending order, so the logic is identical.
 void oneIteration(const mat& LD_mat, const std::vector<size_t>& idx, const std::vector<size_t>& idx2,
                   const vec& zScore, vec& imputedZ, vec& rsqList, vec& zScore_e,
-                  size_t nSample, float probSVD, int ncpus, bool verbose) {
+                  size_t nSample, float probSVD, int ncpus, bool verbose,
+                  std::vector<double>& rsqExceed) {
 	if (verbose) {
 		Rprintf("LD_mat: %lux%lu idx: %lu idx2: %lu\n",
 		        (unsigned long)LD_mat.n_rows, (unsigned long)LD_mat.n_cols,
@@ -179,7 +180,10 @@ void oneIteration(const mat& LD_mat, const std::vector<size_t>& idx, const std::
 		rsqList[idx2[i]] = rsq_vec(i);
 		if (rsq_vec(i) >= 1) {
 			rsqList[idx2[i]] = std::min(rsq_vec(i), 1.0);
-			cpp11::warning("Adjusted rsq value exceeding 1: %g", rsq_vec(i));
+			// Collect the exceeding value; returned to R (rsq_exceed) which
+			// summarizes them into a single warning, instead of emitting a
+			// per-occurrence warning from here.
+			rsqExceed.push_back(rsq_vec(i));
 		}
 		size_t j = idx2[i];
 		double denom_sq = LD_mat(j, j) - rsqList[j];
@@ -278,6 +282,8 @@ cpp11::writable::list dentistIterativeImpute(const doubles_matrix<>& ldMatR, int
 
 	std::vector<double> diff(idx2.size());
 	std::vector<size_t> grouping_tmp(idx2.size());
+	// Rsq values that exceeded 1 (capped at 1.0); returned to R as rsq_exceed.
+	std::vector<double> rsqExceed;
 
 	for (int t = 0; t < nIter; ++t) {
 		// Perform iteration with current subsets
@@ -288,7 +294,7 @@ cpp11::writable::list dentistIterativeImpute(const doubles_matrix<>& ldMatR, int
 			Rprintf("Performing oneIteration()\n");
 		}
 
-		oneIteration(LD_mat, idx, idx2, zScore, imputedZ, rsq, zScore_e, nSample, propSVD, ncpus, verbose);
+		oneIteration(LD_mat, idx, idx2, zScore, imputedZ, rsq, zScore_e, nSample, propSVD, ncpus, verbose, rsqExceed);
 
 		diff.resize(idx2.size());
 		grouping_tmp.resize(idx2.size());
@@ -366,7 +372,7 @@ cpp11::writable::list dentistIterativeImpute(const doubles_matrix<>& ldMatR, int
 			Rprintf("Performing oneIteration() with updated sets of indices\n");
 		}
 
-		oneIteration(LD_mat, idx2_QCed, idx, zScore, imputedZ, rsq, zScore_e, nSample, propSVD, ncpus, verbose);
+		oneIteration(LD_mat, idx2_QCed, idx, zScore, imputedZ, rsq, zScore_e, nSample, propSVD, ncpus, verbose, rsqExceed);
 
 		if (verbose) {
 			Rprintf("Recalculating differences and groupings after the iteration\n");
@@ -492,7 +498,8 @@ cpp11::writable::list dentistIterativeImpute(const doubles_matrix<>& ldMatR, int
 		"imputedZ"_nm = as_doubles(imputedZ),
 		"rsq"_nm = as_doubles(rsq),
 		"zDiff"_nm = as_doubles(zScore_e),
-		"iterToCorrect"_nm = as_integers(iterID)
+		"iterToCorrect"_nm = as_integers(iterID),
+		"rsqExceed"_nm = as_doubles(vec(rsqExceed))
 	});
 
 	return result;

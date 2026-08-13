@@ -12,15 +12,22 @@ getTwasWeights(x, study = NULL, context = NULL, trait = NULL, method = NULL)
 \arguments{
 \item{x}{A \code{TwasWeights} object.}
 
-\item{study, context, trait, method}{Single character identifiers. All
-required when the collection has more than one row; optional when
-the collection has a single row.}
+\item{study, context, trait, method}{Single character identifiers. All required
+when the collection has more than one row; optional when the collection has
+a single row.}
 }
 \value{
 A \code{TwasWeightsEntry} object.
 }
 \description{
-Return the \code{TwasWeightsEntry} for one
-  \code{(study, context, trait, method)} row of a \code{TwasWeights}
-  collection.
+Return the \code{TwasWeightsEntry} for one \code{(study,
+  context, trait, method)} row of a \code{TwasWeights} collection.
+}
+\examples{
+twe <- TwasWeightsEntry(variantIds = paste0("v", 1:4), weights = rep(0.1, 4),
+  cvResult = list(rsq = 0.5), standardized = FALSE)
+tw <- TwasWeights(study = "s1", context = "brain", trait = "g1",
+  method = "susie", entry = list(twe))
+getTwasWeights(tw, study = "s1", context = "brain", trait = "g1",
+  method = "susie")
 }

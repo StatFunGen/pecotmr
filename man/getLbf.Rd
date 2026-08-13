@@ -23,11 +23,16 @@ A \code{data.frame}: \code{variant_id} + \code{lbf_L1..lbf_LL} (the
 }
 \description{
 The variant x effect matrix of single-effect log Bayes factors
-(\code{lbf_variable}, or fSuSiE's \code{lBF}) from the stored fit: one row per
-variant, one \code{lbf_L<k>} column per effect. The per-variant scalar summary
-(max across effects) is the \code{logBF} column of \code{\link{getTopLoci}};
-this accessor keeps the full per-effect breakdown. Across entries with
-different effect counts the collection method NA-fills the ragged columns.
+(\code{lbf_variable}, or fSuSiE's \code{lBF}) from the stored fit: one row
+per variant, one \code{lbf_L<k>} column per effect. The per-variant scalar
+summary (max across effects) is the \code{logBF} column of
+\code{\link{getTopLoci}}; this accessor keeps the full per-effect breakdown.
+Across entries with different effect counts the collection method NA-fills
+the ragged columns.
+}
+\examples{
+data(qtlFineMappingExample)
+getLbf(qtlFineMappingExample)
 }
 \seealso{
 \code{\link{getTopLoci}} (the scalar \code{logBF} column)

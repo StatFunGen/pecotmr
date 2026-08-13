@@ -7,7 +7,8 @@
 makePairwiseContrastCol(pair, template)
 }
 \arguments{
-\item{pair}{A length-2 character vector naming the two conditions to contrast.}
+\item{pair}{A length-2 character vector naming the two conditions to
+contrast.}
 
 \item{template}{A named numeric vector of zeros with names matching all
 conditions.}
@@ -17,6 +18,9 @@ The template vector with +1 at \code{pair[1]} and -1 at
   \code{pair[2]}.
 }
 \description{
-Sets +1 for the first condition and -1 for the second in a zero vector.
-Used as a building block for contrast design matrices.
+Sets +1 for the first condition and -1 for the second in a zero vector. Used
+as a building block for contrast design matrices.
+}
+\examples{
+makePairwiseContrastCol(c("a", "b"), "mean_contrast_")
 }

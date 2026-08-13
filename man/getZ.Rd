@@ -23,3 +23,7 @@ Numeric vector of z-scores.
 Extract z-score vector from a \code{GwasSumStats} or
   \code{QtlSumStats} entry, selected by its identity tuple.
 }
+\examples{
+data(qtlSumStatsExample)
+getZ(qtlSumStatsExample)
+}

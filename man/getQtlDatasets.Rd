@@ -16,6 +16,10 @@ getQtlDatasets(x)
 A named list of \code{QtlDataset} objects.
 }
 \description{
-Return the named list of \code{QtlDataset} objects
-  carried by a \code{MultiStudyQtlDataset}.
+Return the named list of \code{QtlDataset} objects carried by a
+  \code{MultiStudyQtlDataset}.
+}
+\examples{
+data(multiStudyQtlDatasetExample)
+getQtlDatasets(multiStudyQtlDatasetExample)
 }

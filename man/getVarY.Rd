@@ -17,6 +17,15 @@ getVarY(x, ...)
 \item{x}{A \code{GwasSumStats} or \code{QtlSumStats} object.}
 
 \item{...}{Class-specific selection arguments.}
+
+\item{study}{Character (length 1) or \code{NULL}. Restrict the selection to
+this study; \code{NULL} matches all studies.}
+
+\item{context}{Character (length 1) or \code{NULL}. Restrict the selection to
+this context; \code{NULL} matches all contexts.}
+
+\item{trait}{Character (length 1) or \code{NULL}. Restrict the selection to
+this trait; \code{NULL} matches all traits.}
 }
 \value{
 Numeric phenotype variance, or NULL.
@@ -25,4 +34,8 @@ Numeric phenotype variance, or NULL.
 Extract phenotype variance from a \code{GwasSumStats} or
   \code{QtlSumStats} entry, selected by its identity tuple. Returns
   \code{NULL} when the entry has no \code{varY} recorded.
+}
+\examples{
+data(qtlSumStatsExample)
+getVarY(qtlSumStatsExample)
 }

@@ -25,12 +25,12 @@ QtlSumStats(
 
 \item{trait}{Character vector of trait identifiers (per tuple).}
 
-\item{entry}{A list / \code{SimpleList} of \code{GRanges}, one per
-tuple. Same length as \code{study}, \code{context}, and \code{trait}.}
+\item{entry}{A list / \code{SimpleList} of \code{GRanges}, one per tuple.
+Same length as \code{study}, \code{context}, and \code{trait}.}
 
-\item{genome}{Single character string giving the genome build
-(e.g., \code{"hg19"}, \code{"hg38"}). Uniform across the collection
-because all entries share the same LD sketch.}
+\item{genome}{Single character string giving the genome build (e.g.,
+\code{"hg19"}, \code{"hg38"}). Uniform across the collection because all
+entries share the same LD sketch.}
 
 \item{ldSketch}{A \code{GenotypeHandle} carrying the LD reference.}
 
@@ -38,12 +38,21 @@ because all entries share the same LD sketch.}
 (\code{NA_real_} entries allowed).}
 
 \item{nSample}{Optional per-tuple total sample size (numeric; default
-\code{NULL}). Attached only when supplied (length 1 or length(study)).
-Used as the study-level fallback for the per-variant \code{N} when a tuple
-has no per-variant \code{N} column. Named \code{nSample} to avoid clashing
-with \code{getNSamples()} (the LD-panel sample size). Unlike GWAS, QTL
+\code{NULL}). Attached only when supplied (length 1 or length(study)). Used
+as the study-level fallback for the per-variant \code{N} when a tuple has
+no per-variant \code{N} column. Named \code{nSample} to avoid clashing with
+\code{getNSamples()} (the LD-panel sample size). Unlike GWAS, QTL
 collections carry no case/control counts (molecular traits are
 quantitative), so only this total-N fallback is exposed.}
+
+\item{qcInfo}{A \code{list} recording which QC steps ran. Empty \code{list()}
+on construction; populated by \code{summaryStatsQc()} with a per-step audit
+record. Fine-mapping / TWAS pipelines reject inputs where
+\code{length(getQcInfo(x)) == 0}.}
+
+\item{traitPos}{Optional per-row trait genomic anchor (a \code{GRanges} or
+\code{NULL}), carried forward as provenance; not part of the identity key.
+\code{NULL} (default) omits the column.}
 
 \item{...}{Additional per-tuple columns to attach to the collection.}
 }
@@ -51,11 +60,20 @@ quantitative), so only this total-N fallback is exposed.}
 A \code{QtlSumStats} object.
 }
 \description{
-Construct a \code{QtlSumStats} S4 DFrame-subclass
-  collection from per-tuple vectors and a list of \code{GRanges}
-  entries (one per tuple), plus a single LD sketch handle and a
-  single genome build that apply to the whole collection. Each
-  \code{GRanges} entry must carry per-variant statistics in its
-  mcols (\code{SNP}, \code{A1}, \code{A2}, \code{Z}, \code{N}; plus
-  optional \code{MAF}, \code{INFO}, \code{BETA}, \code{SE}, \code{P}).
+Construct a \code{QtlSumStats} S4 DFrame-subclass collection
+  from per-tuple vectors and a list of \code{GRanges} entries (one per
+  tuple), plus a single LD sketch handle and a single genome build that apply
+  to the whole collection. Each \code{GRanges} entry must carry per-variant
+  statistics in its mcols (\code{SNP}, \code{A1}, \code{A2}, \code{Z},
+  \code{N}; plus optional \code{MAF}, \code{INFO}, \code{BETA}, \code{SE},
+  \code{P}).
+}
+\examples{
+gh <- readGenotypes(
+  system.file("extdata", "toy_ref.bed", package = "pecotmr"))
+gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100 * 1:3, width = 1))
+S4Vectors::mcols(gr) <- S4Vectors::DataFrame(SNP = paste0("rs", 1:3),
+  A1 = "A", A2 = "G", Z = rnorm(3), N = 100L)
+QtlSumStats(study = "s1", context = "brain", trait = "g1", entry = list(gr),
+  genome = "hg38", ldSketch = gh)
 }

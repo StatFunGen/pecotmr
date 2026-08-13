@@ -11,11 +11,13 @@
 
 \item{study}{Character (length 1) study identifier. Optional when the
 collection has a single row.}
+
+\item{...}{Additional arguments (currently unused).}
 }
 \value{
 A \code{GRanges} object.
 }
 \description{
-Return the per-variant \code{GRanges} of summary
-  statistics for one study in a \code{GwasSumStats} collection.
+Return the per-variant \code{GRanges} of summary statistics for
+  one study in a \code{GwasSumStats} collection.
 }

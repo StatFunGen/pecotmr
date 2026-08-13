@@ -18,3 +18,7 @@ A list with \code{z} and \code{R}, or NULL.
 \description{
 Extract score statistics for candidate annotations.
 }
+\examples{
+data(h2EstimateExample)
+getScoreStats(h2EstimateExample)
+}

@@ -37,12 +37,35 @@ getPip(x, ...)
 \item{x}{A \code{FineMappingEntry} or \code{FineMappingResult}.}
 
 \item{...}{Class-specific selection arguments.}
+
+\item{study}{Character (length 1) or \code{NULL}. Restrict the selection to
+this study; \code{NULL} matches all studies.}
+
+\item{context}{Character (length 1) or \code{NULL}. Restrict the selection to
+this context; \code{NULL} matches all contexts.}
+
+\item{trait}{Character (length 1) or \code{NULL}. Restrict the selection to
+this trait; \code{NULL} matches all traits.}
+
+\item{method}{Character (length 1) or \code{NULL}. Restrict the selection to
+this fine-mapping / weight method; \code{NULL} matches all methods.}
+
+\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
+Restrict variants to this region; \code{NULL} uses the full cis window /
+all regions.}
+
+\item{returnList}{Logical. If \code{TRUE}, return a per-entry list keyed by
+identity tuple instead of a single flattened vector.}
 }
 \value{
 A named numeric vector of PIPs.
 }
 \description{
 Extract posterior inclusion probabilities from a single
-  \code{FineMappingEntry} or from one entry of a
-  \code{FineMappingResult} (selected by its identity tuple).
+  \code{FineMappingEntry} or from one entry of a \code{FineMappingResult}
+  (selected by its identity tuple).
+}
+\examples{
+data(qtlFineMappingExample)
+getPip(qtlFineMappingExample)
 }

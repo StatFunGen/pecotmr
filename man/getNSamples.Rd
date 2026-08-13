@@ -16,6 +16,11 @@ getNSamples(x)
 Integer (length 1).
 }
 \description{
-Return the number of samples carried by a
-  \code{GenotypeHandle}.
+Return the number of samples carried by a \code{GenotypeHandle}.
+}
+\examples{
+gh <- readGenotypes(
+  system.file("extdata", "toy_ref.bed", package = "pecotmr")
+)
+getNSamples(gh)
 }

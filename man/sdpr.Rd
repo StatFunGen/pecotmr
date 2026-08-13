@@ -2,7 +2,8 @@
 % Please edit documentation in R/regularizedRegressionWrappers.R
 \name{sdpr}
 \alias{sdpr}
-\title{SDPR (Summary-Statistics-Based Dirichelt Process Regression for Polygenic Risk Prediction)}
+\title{SDPR (Summary-Statistics-Based Dirichelt Process Regression for Polygenic
+Risk Prediction)}
 \usage{
 sdpr(
   bhat,
@@ -27,15 +28,18 @@ sdpr(
 \arguments{
 \item{bhat}{A vector of marginal beta values for each SNP.}
 
-\item{R}{The LD correlation matrix (a single matrix over the analysed window).}
+\item{R}{The LD correlation matrix (a single matrix over the analysed
+window).}
 
 \item{n}{The total sample size of the GWAS.}
 
-\item{perVariantSampleSize}{(Optional) A vector of sample sizes for each SNP. If NULL (default), it will be initialized
-to a vector of length equal to `bhat`, with all values set to `n`.}
+\item{perVariantSampleSize}{(Optional) A vector of sample sizes for each SNP.
+If NULL (default), it will be initialized to a vector of length equal to
+`bhat`, with all values set to `n`.}
 
-\item{array}{(Optional) A vector of genotyping array information for each SNP. If NULL (default), it will be
-initialized to a vector of 1's with length equal to `bhat`.}
+\item{array}{(Optional) A vector of genotyping array information for each
+SNP. If NULL (default), it will be initialized to a vector of 1's with
+length equal to `bhat`.}
 
 \item{a}{Factor to shrink the reference LD matrix. Default is 0.1.}
 
@@ -55,21 +59,27 @@ initialized to a vector of 1's with length equal to `bhat`.}
 
 \item{nThreads}{Number of threads to use. Default is 1.}
 
-\item{optLlk}{Which likelihood to evaluate. 1 for equation 6 (slightly shrink the correlation of SNPs)
-and 2 for equation 5 (SNPs genotyped on different arrays in a separate cohort).
-Default is 1.}
+\item{optLlk}{Which likelihood to evaluate. 1 for equation 6 (slightly shrink
+the correlation of SNPs) and 2 for equation 5 (SNPs genotyped on different
+arrays in a separate cohort). Default is 1.}
 
 \item{verbose}{Whether to print verbose output. Default is true.}
+
+\item{seed}{Integer or \code{NULL}. Random seed for the Gibbs sampler;
+\code{NULL} leaves the RNG state unchanged.}
 }
 \value{
-A list containing the estimated effect sizes (beta) and heritability (h2).
+A list containing the estimated effect sizes (beta) and heritability
+  (h2).
 }
 \description{
-This function is a wrapper for the SDPR C++ implementation, which performs Markov Chain Monte Carlo (MCMC)
-for estimating effect sizes and heritability based on summary statistics and reference LD matrices.
+This function is a wrapper for the SDPR C++ implementation, which performs
+Markov Chain Monte Carlo (MCMC) for estimating effect sizes and heritability
+based on summary statistics and reference LD matrices.
 }
 \note{
-This function is a wrapper for the SDPR C++ implementation, which is a rewritten and adopted version
+This function is a wrapper for the SDPR C++ implementation, which is a
+rewritten and adopted version
       of the SDPR package. The original SDPR documentation is available at
       https://htmlpreview.github.io/?https://github.com/eldronzhou/SDPR/blob/main/doc/Manual.html
 }

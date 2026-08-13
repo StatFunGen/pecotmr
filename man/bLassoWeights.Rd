@@ -25,12 +25,18 @@ A numeric vector of length `ncol(X)` of variant weights.
 \description{
 Fits a Bayesian LASSO linear regression model via `BGLR::BGLR` (the "BL"
 model, Park & Casella 2008) and returns the posterior mean of the marker
-effects. This is the same "B-Lasso" implementation benchmarked in Kim et
-al. (2022). Note that this is distinct from `bayesLWeights`, which uses a
+effects. This is the same "B-Lasso" implementation benchmarked in Kim et al.
+(2022). Note that this is distinct from `bayesLWeights`, which uses a
 different Bayesian LASSO implementation backed by `qgg`.
 }
 \details{
 Defaults for `nIter`, `burnIn`, and `thin` are larger than BGLR's package
-defaults to better accommodate high-LD cis-eQTL windows; override to
-recover the package defaults.
+defaults to better accommodate high-LD cis-eQTL windows; override to recover
+the package defaults.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+bLassoWeights(X, y)
 }

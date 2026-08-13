@@ -25,3 +25,7 @@ Character vector.
 \description{
 Extract method names from a collection class.
 }
+\examples{
+data(qtlFineMappingExample)
+getMethodNames(qtlFineMappingExample)
+}

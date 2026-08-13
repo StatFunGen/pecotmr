@@ -2,7 +2,8 @@
 % Please edit documentation in R/qtlEnrichmentPipeline.R
 \name{qtlEnrichment}
 \alias{qtlEnrichment}
-\title{Implementation of enrichment analysis described in https://doi.org/10.1371/journal.pgen.1006646}
+\title{Implementation of enrichment analysis described in
+  https://doi.org/10.1371/journal.pgen.1006646}
 \usage{
 qtlEnrichment(
   gwasPip,
@@ -21,23 +22,39 @@ qtlEnrichment(
 \arguments{
 \item{gwasPip}{This is a vector of GWAS PIP, genome-wide.}
 
-\item{susieQtlRegions}{This is a list of SuSiE fitted objects per QTL unit analyzed}
+\item{susieQtlRegions}{This is a list of SuSiE fitted objects per QTL unit
+analyzed}
 
-\item{numGwas}{This parameter is highly important if GWAS input does not contain all SNPs interrogated (e.g., in some cases, only fine-mapped geomic regions are included).
-Then users must pick a value of total_variants and estimate piGwas beforehand by: sum(gwasPip$pip)/numGwas. If numGwas is null, piGwas would be sum(gwasPip$pip)/total_variants.}
+\item{numGwas}{This parameter is highly important if GWAS input does not
+contain all SNPs interrogated (e.g., in some cases, only fine-mapped geomic
+regions are included). Then users must pick a value of total_variants and
+estimate piGwas beforehand by: sum(gwasPip$pip)/numGwas. If numGwas is
+null, piGwas would be sum(gwasPip$pip)/total_variants.}
 
-\item{piQtl}{This parameter can be safely left to default if your input QTL data has enough regions to estimate it.}
+\item{piQtl}{This parameter can be safely left to default if your input QTL
+data has enough regions to estimate it.}
 
-\item{lambda}{Similar to the shrinkage parameter used in ridge regression. It takes any non-negative value and shrinks the enrichment estimate towards 0.
-When it is set to 0, no shrinkage will be applied. A large value indicates strong shrinkage. The default value is set to 1.0.}
+\item{lambda}{Similar to the shrinkage parameter used in ridge regression. It
+takes any non-negative value and shrinks the enrichment estimate towards 0.
+When it is set to 0, no shrinkage will be applied. A large value indicates
+strong shrinkage. The default value is set to 1.0.}
 
 \item{impN}{Rounds of multiple imputation to draw QTL from, default is 25.}
 
-\item{numThreads}{Number of Simultaneous running CPU threads for multiple imputation, default is 1.}
+\item{doubleShrinkage}{Logical. Apply the double-shrinkage correction to the
+enrichment estimate. Default \code{FALSE}.}
+
+\item{besselCorrection}{Logical. Apply Bessel's correction when estimating
+the sampling variance. Default \code{TRUE}.}
+
+\item{numThreads}{Number of Simultaneous running CPU threads for multiple
+imputation, default is 1.}
+
+\item{verbose}{Logical. Print progress messages. Default \code{TRUE}.}
 
 \item{alignNames}{Logical; when TRUE (default) QTL pip names are aligned to
-the GWAS variant-naming convention via \code{matchVariants}. Set FALSE
-when the caller has already aligned them (e.g. \code{qtlEnrichmentPipeline}
+the GWAS variant-naming convention via \code{matchVariants}. Set FALSE when
+the caller has already aligned them (e.g. \code{qtlEnrichmentPipeline}
 aligns each QTL tuple once against the union GWAS panel rather than
 re-aligning per GWAS study); only the cheap per-study unmatched set is then
 recomputed, skipping the costly \code{harmonizeAlleles} pass.}
@@ -46,16 +63,20 @@ recomputed, skipping the costly \code{harmonizeAlleles} pass.}
 A list of enrichment parameter estimates
 }
 \description{
-Largely follows from fastenloc https://github.com/xqwen/fastenloc
-but uses `susieR` fitted objects as input to estimate prior for use with `coloc` package (coloc v5, aka SuSiE-coloc).
-The main differences are 1) now enrichment is based on all QTL variants whether or not they are inside signal clusters;
-2) Causal QTL are sampled from SuSiE single effects, not signal clusters;
-3) Allow a variant to be QTL for not only multiple conditions (eg cell types) but also multiple regions (eg genes).
-Other minor improvements include 1) Make GSL RNG thread-safe; 2) Release memory from QTL binary annotation samples immediately after they are used.
+Largely follows from fastenloc
+  https://github.com/xqwen/fastenloc but uses `susieR` fitted objects as
+  input to estimate prior for use with `coloc` package (coloc v5, aka
+  SuSiE-coloc). The main differences are 1) now enrichment is based on all
+  QTL variants whether or not they are inside signal clusters; 2) Causal QTL
+  are sampled from SuSiE single effects, not signal clusters; 3) Allow a
+  variant to be QTL for not only multiple conditions (eg cell types) but also
+  multiple regions (eg genes). Other minor improvements include 1) Make GSL
+  RNG thread-safe; 2) Release memory from QTL binary annotation samples
+  immediately after they are used.
 }
 \details{
-Uses output of \code{\link[susieR]{susie}} from the
-  \code{susieR} package.
+Uses output of \code{\link[susieR]{susie}} from the \code{susieR}
+  package.
 }
 \examples{
 
@@ -63,7 +84,6 @@ Uses output of \code{\link[susieR]{susie}} from the
 nGwasPip <- 1000
 gwasPip <- runif(nGwasPip)
 names(gwasPip) <- paste0("snp", 1:nGwasPip)
-gwasFit <- list(pip = gwasPip)
 # Simulate fake data for a single SuSiEFit object
 simulateSusiefit <- function(n, p) {
   pip <- runif(n)
@@ -78,7 +98,8 @@ simulateSusiefit <- function(n, p) {
 }
 # Simulate multiple SuSiEFit objects
 nSusieFits <- 2
-susieFits <- replicate(nSusieFits, simulateSusiefit(nGwasPip, 10), simplify = FALSE)
+susieFits <- replicate(
+  nSusieFits, simulateSusiefit(nGwasPip, 10), simplify = FALSE)
 # Add these fits to a list, providing names to each element
 names(susieFits) <- paste0("fit", 1:length(susieFits))
 # Set other parameters
@@ -86,7 +107,9 @@ impN <- 10
 lambda <- 1
 numThreads <- 1
 library(pecotmr)
-en <- qtlEnrichment(gwasFit, susieFits, lambda = lambda, impN = impN, numThreads = numThreads)
+en <- qtlEnrichment(
+  gwasPip, susieFits, lambda = lambda, impN = impN,
+  numThreads = numThreads)
 
 }
 \seealso{

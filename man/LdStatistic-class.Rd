@@ -19,8 +19,8 @@ Abstract container for pre-computed LD statistics. Subclasses
 
 \item{\code{nRef}}{Integer, sample size of the LD reference panel.}
 
-\item{\code{inSample}}{Logical, whether the LD reference is from the same
-cohort as the GWAS (affects bias correction).}
+\item{\code{inSample}}{Logical, whether the LD reference is from the same cohort as
+the GWAS (affects bias correction).}
 
 \item{\code{genome}}{Character string for genome build.}
 }}

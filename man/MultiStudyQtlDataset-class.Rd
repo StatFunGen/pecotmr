@@ -5,26 +5,25 @@
 \alias{MultiStudyQtlDataset-class}
 \title{Multi-Study QTL Dataset}
 \description{
-S4 container for a multi-study QTL analysis: a collection
-  of individual-level \code{QtlDataset} studies, optionally combined
-  with a \code{QtlSumStats} collection of summary-statistic-only
-  studies. Used as the input to multi-study fine-mapping and
-  colocboost-style analyses.
+S4 container for a multi-study QTL analysis: a collection of
+  individual-level \code{QtlDataset} studies, optionally combined with a
+  \code{QtlSumStats} collection of summary-statistic-only studies. Used as
+  the input to multi-study fine-mapping and colocboost-style analyses.
 
-  At least two studies must be present in total, counting
-  \code{qtlDatasets} entries plus the studies in \code{sumStats}.
+At least two studies must be present in total, counting \code{qtlDatasets}
+entries plus the studies in \code{sumStats}.
 
-  For traits that appear in more than one \code{qtlDatasets} entry,
-  the per-trait genomic positions must agree across the entries
-  (enforced by validity). No cross-checking is performed against
-  \code{sumStats} variant positions, since summary statistics are
-  already computed and cannot be re-aligned at construction time.
+For traits that appear in more than one \code{qtlDatasets} entry, the
+per-trait genomic positions must agree across the entries (enforced by
+validity). No cross-checking is performed against \code{sumStats} variant
+positions, since summary statistics are already computed and cannot be
+re-aligned at construction time.
 }
 \section{Slots}{
 
 \describe{
-\item{\code{qtlDatasets}}{A named list of \code{QtlDataset} objects, keyed by
-study identifier.}
+\item{\code{qtlDatasets}}{A named list of \code{QtlDataset} objects, keyed by study
+identifier.}
 
 \item{\code{sumStats}}{An optional \code{QtlSumStats} carrying additional
 summary-statistic-only studies. \code{NULL} when absent.}

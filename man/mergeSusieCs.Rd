@@ -8,8 +8,8 @@ mergeSusieCs(fineMappingResult, coverage = 0.95)
 }
 \arguments{
 \item{fineMappingResult}{A \code{\link{QtlFineMappingResult}} (or any
-\code{FineMappingResult}) produced by per-condition SuSiE fine-mapping. Each
-entry's \code{topLoci} must carry a credible-set column
+\code{FineMappingResult}) produced by per-condition SuSiE fine-mapping.
+Each entry's \code{topLoci} must carry a credible-set column
 (\code{cs_<coverage*100>}, e.g. \code{cs_95}, with values such as
 \code{"susie_1"} where the trailing integer is the set index and \code{_0}
 means "not in a credible set") and a PIP column.}
@@ -29,9 +29,13 @@ merged credible sets. Each row of the supplied
 \code{topLoci} carrying that condition's credible sets); credible sets that
 share variants across conditions are unioned via connected components, and
 every variant is reported with its merged credible-set label plus the maximum
-and median PIP across the conditions it appears in. A typical use is selecting
-a representative lead variant per merged credible set to assemble the
-\code{"strong"} input for \code{\link{mashPipeline}}.
+and median PIP across the conditions it appears in. A typical use is
+selecting a representative lead variant per merged credible set to assemble
+the \code{"strong"} input for \code{\link{mashPipeline}}.
+}
+\examples{
+data(qtlFineMappingExample)
+mergeSusieCs(fineMappingResult = qtlFineMappingExample)
 }
 \seealso{
 \code{\link{fineMappingPipeline}}, \code{\link{mashPipeline}}

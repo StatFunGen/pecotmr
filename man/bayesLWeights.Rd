@@ -2,10 +2,27 @@
 % Please edit documentation in R/regularizedRegressionWrappers.R
 \name{bayesLWeights}
 \alias{bayesLWeights}
-\title{Use laplace/double exponential distribution as prior. This is equivalent to Bayesian LASSO.}
+\title{BayesL TWAS weights (Laplace prior, LASSO-equivalent)}
 \usage{
 bayesLWeights(X, y, Z = NULL, ...)
 }
+\arguments{
+\item{X}{Numeric genotype / design matrix (samples x variants).}
+
+\item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}.}
+
+\item{Z}{Optional numeric matrix of fixed-effect covariates, or \code{NULL}.}
+
+\item{...}{Additional arguments forwarded to \code{bayesAlphabetWeights} /
+\code{qgg}.}
+}
 \description{
-Use laplace/double exponential distribution as prior. This is equivalent to Bayesian LASSO.
+Use laplace/double exponential distribution as prior. This is
+  equivalent to Bayesian LASSO.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+bayesLWeights(X, y)
 }

@@ -71,45 +71,47 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
 \item{qtlData}{One of \code{QtlDataset}, \code{QtlSumStats}, or
 \code{MultiStudyQtlDataset}.}
 
-\item{gwasSumStats}{Optional \code{GwasSumStats} with the GWAS
-studies to colocalize against. \code{NULL} to skip GWAS
-colocalization.}
+\item{gwasSumStats}{Optional \code{GwasSumStats} with the GWAS studies to
+colocalize against. \code{NULL} to skip GWAS colocalization.}
 
 \item{...}{Additional arguments forwarded to
 \code{\link[colocboost]{colocboost}} (e.g., \code{M}, \code{L},
 \code{output_level}).}
 
-\item{contexts}{Optional character vector of context names to
-restrict the individual-level / QtlSumStats QTL analysis to. When
-\code{NULL} (default), every context present is used.}
+\item{contexts}{Optional character vector of context names to restrict the
+individual-level / QtlSumStats QTL analysis to. When \code{NULL} (default),
+every context present is used.}
 
-\item{traitId}{Optional character vector of trait identifiers to
-restrict the analysis to. When supplied with an individual-level
-\code{QtlDataset} input, \code{cisWindow} is required (passed to
+\item{traitId}{Optional character vector of trait identifiers to restrict the
+analysis to. When supplied with an individual-level \code{QtlDataset}
+input, \code{cisWindow} is required (passed to
 \code{getResidualizedGenotypes} / \code{getPhenotypes} for the
 variant-window selection).}
 
-\item{region}{Optional single-range \code{GRanges} describing the
-analysis window. Mutually exclusive with \code{traitId} (see the
-\code{QtlDataset} accessors).}
+\item{region}{Optional single-range \code{GRanges} describing the analysis
+window. Mutually exclusive with \code{traitId} (see the \code{QtlDataset}
+accessors).}
 
 \item{cisWindow}{Optional cis window in basepairs; required with
 \code{traitId}, optional with \code{region}.}
 
-\item{focalTrait}{Optional trait name; when supplied and present in
-the assembled outcome list, the colocboost xQTL-only run uses it
-as the focal outcome.}
+\item{focalTrait}{Optional trait name; when supplied and present in the
+assembled outcome list, the colocboost xQTL-only run uses it as the focal
+outcome.}
 
 \item{xqtlColoc, jointGwas, separateGwas}{Logical flags selecting which
 colocboost variants to run.}
 
+\item{samples}{Optional character vector of sample IDs to restrict the
+analysis to; \code{NULL} (default) uses all samples.}
+
 \item{pipCutoffToSkip}{Individual-level pre-filter (ports the legacy
 \code{pip_cutoff_to_skip_ind}). Scalar (applied to every context) or a
-context-named numeric vector. For each context, every outcome is fit
-with a single-effect SuSiE (\code{L = 1}) and dropped unless some
-variant's PIP exceeds the cutoff; a context with no surviving outcome is
-skipped. \code{0} (default) disables it; a negative value uses
-\code{3 / n_variants}. (Summary-statistic skipping is handled upstream by
+context-named numeric vector. For each context, every outcome is fit with a
+single-effect SuSiE (\code{L = 1}) and dropped unless some variant's PIP
+exceeds the cutoff; a context with no surviving outcome is skipped.
+\code{0} (default) disables it; a negative value uses \code{3 /
+n_variants}. (Summary-statistic skipping is handled upstream by
 \code{\link{summaryStatsQc}}'s own \code{pipCutoffToSkip}.)}
 
 \item{absZCutoffToSkip, bfCutoffToSkip, logBfCutoffToSkip}{Alternative
@@ -135,24 +137,23 @@ A list with elements \code{xqtl_coloc}, \code{joint_gwas},
 Protocol-level multi-trait colocalization analysis using
   \pkg{colocboost}. Dispatches on the QTL input type:
   \itemize{
-    \item \code{QtlDataset} — single-study, individual-level
+    \item \code{QtlDataset} -- single-study, individual-level
           multi-context data. Per-context residualized X / Y are
           extracted from the dataset (filtering knobs on the
           constructor apply lazily inside the accessors).
-    \item \code{QtlSumStats} — summary-statistic-only QTL data with a
+    \item \code{QtlSumStats} -- summary-statistic-only QTL data with a
           shared LD reference (\code{ldSketch}). Must already have
           been passed through \code{\link{summaryStatsQc}} (the
           pipeline rejects inputs whose \code{getQcInfo()} is empty).
-    \item \code{MultiStudyQtlDataset} — a mixture of one or more
+    \item \code{MultiStudyQtlDataset} -- a mixture of one or more
           individual-level \code{QtlDataset} studies and an optional
           \code{QtlSumStats} collection.
   }
   GWAS is optional and always passed separately as a
   \code{GwasSumStats} object (must also be QC'd).
 
-  \code{colocboostPipeline} does \strong{not} accept a
-  \code{FineMappingResult} for either side; colocboost has its own
-  variable-selection algorithm.
+\code{colocboostPipeline} does \strong{not} accept a \code{FineMappingResult}
+for either side; colocboost has its own variable-selection algorithm.
 }
 \section{QC contract}{
 
@@ -186,3 +187,7 @@ Protocol-level multi-trait colocalization analysis using
   }
 }
 
+\examples{
+data(qtlDatasetExample)
+colocboostPipeline(qtlDatasetExample, xqtlColoc = TRUE)
+}

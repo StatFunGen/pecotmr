@@ -30,20 +30,41 @@ getSumstatDf(x, ...)
 \arguments{
 \item{x}{A \code{GwasSumStats} or \code{QtlSumStats} object.}
 
-\item{...}{Class-specific selectors (\code{study} for
-\code{GwasSumStats}; \code{study}, \code{context}, \code{trait}
-for \code{QtlSumStats}) plus pass-throughs \code{require},
-\code{derive}, \code{keepChrPrefix} forwarded to the underlying
-unpacker.}
+\item{...}{Class-specific selectors (\code{study} for \code{GwasSumStats};
+\code{study}, \code{context}, \code{trait} for \code{QtlSumStats}) plus
+pass-throughs \code{require}, \code{derive}, \code{keepChrPrefix} forwarded
+to the underlying unpacker.}
+
+\item{study}{Character (length 1) or \code{NULL}. Restrict the selection to
+this study; \code{NULL} matches all studies.}
+
+\item{context}{Character (length 1) or \code{NULL}. Restrict the selection to
+this context; \code{NULL} matches all contexts.}
+
+\item{trait}{Character (length 1) or \code{NULL}. Restrict the selection to
+this trait; \code{NULL} matches all traits.}
+
+\item{require}{Character vector. Columns that must be present (derived if
+necessary) in the returned summary-statistics data frame.}
+
+\item{derive}{Logical. Whether to derive missing standard columns (e.g. Z,
+BETA, SE) from the available ones.}
+
+\item{keepChrPrefix}{Logical. If \code{TRUE}, keep the \code{chr} prefix on
+chromosome names; otherwise strip it.}
 }
 \value{
 A \code{data.frame}.
 }
 \description{
-Return a per-tuple summary-statistics \code{data.frame}
-  in the standardized layout \code{variant_id, chrom, pos, A1, A2,
-  z, beta, se, N, maf} (optional columns omitted when absent on the
-  entry). Combines tuple-keyed row selection (\code{getSumStats})
-  with mcols unpacking; replaces the pre-S4 idiom of pulling
-  \code{S4Vectors::mcols(entry)$<col>} directly inside pipelines.
+Return a per-tuple summary-statistics \code{data.frame} in the
+  standardized layout \code{variant_id, chrom, pos, A1, A2, z, beta, se, N,
+  maf} (optional columns omitted when absent on the entry). Combines
+  tuple-keyed row selection (\code{getSumStats}) with mcols unpacking;
+  replaces the pre-S4 idiom of pulling \code{S4Vectors::mcols(entry)$<col>}
+  directly inside pipelines.
+}
+\examples{
+data(qtlSumStatsExample)
+getSumstatDf(qtlSumStatsExample)
 }

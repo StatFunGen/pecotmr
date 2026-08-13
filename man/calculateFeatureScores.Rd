@@ -7,9 +7,10 @@
 calculateFeatureScores(contrastResult, metaMethod = "REML")
 }
 \arguments{
-\item{contrastResult}{A contrast table from \code{\link{mashPosteriorContrast}}
-(variants x contrasts) carrying \code{mean_contrast_*_deviation} and
-\code{se_contrast_*_deviation} columns.}
+\item{contrastResult}{A contrast table from
+\code{\link{mashPosteriorContrast}} (variants x contrasts) carrying
+\code{mean_contrast_*_deviation} and \code{se_contrast_*_deviation}
+columns.}
 
 \item{metaMethod}{Between-study variance estimator forwarded to
 \code{metafor::rma} (default \code{"REML"}).}
@@ -22,6 +23,15 @@ For each condition's deviation contrast, meta-analyzes the per-variant
 absolute effect sizes (random-effects, via \code{metafor::rma}) and returns
 the pooled Z-score (\eqn{\hat\mu / \mathrm{se}}). One score per condition --
 the "meta" feature score of \code{mash_posterior.ipynb}.
+}
+\examples{
+om <- matrix(c(0.1, 0.2, 0.3), 1, 3, dimnames = list("v1", c("a", "b", "c")))
+pm <- matrix(c(0.5, 0.3, -0.2), 1, 3,
+  dimnames = list("v1", c("a", "b", "c")))
+pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
+dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
+cr <- fitMashContrast(1L, om, pm, pv)
+calculateFeatureScores(cr, metaMethod = "mean")
 }
 \seealso{
 \code{\link{nSignificantScore}}, \code{\link{scoreFromCs}}

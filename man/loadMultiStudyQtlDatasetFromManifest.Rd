@@ -33,17 +33,32 @@ loadMultiStudyQtlDatasetFromManifest(
 \item{sumStatsManifest}{Optional QtlSumStats manifest (see
 \code{\link{loadQtlSumStatsFromManifest}}).}
 
-\item{genome, ldSketch, region, minLdOverlapWarn, columnMapping, sampleSelect, formatMapping}{Passed to the QtlSumStats loader for \code{sumStatsManifest}.}
+\item{genome, ldSketch, region, minLdOverlapWarn}{Passed to the QtlSumStats
+loader for \code{sumStatsManifest}.}
+
+\item{columnMapping, sampleSelect, formatMapping}{Passed to the QtlSumStats
+loader for \code{sumStatsManifest}.}
 
 \item{transposeCovariates}{Transpose covariate TSVs (QTLtools layout).}
 
-\item{scaleResiduals, mafCutoff, macCutoff, xvarCutoff, imissCutoff, keepSamples, keepVariants, keepIndel}{Pass-through \code{\link{QtlDataset}} arguments applied to every study.}
+\item{scaleResiduals, mafCutoff, macCutoff, xvarCutoff}{Pass-through
+\code{\link{QtlDataset}} arguments applied to every study.}
+
+\item{imissCutoff, keepSamples, keepVariants, keepIndel}{Pass-through
+\code{\link{QtlDataset}} arguments applied to every study.}
 }
 \value{
 A \code{MultiStudyQtlDataset} object.
 }
 \description{
 Build a \code{\link{MultiStudyQtlDataset}} from a QtlDataset
-  manifest (individual-level studies) and, optionally, a QtlSumStats
-  manifest (summary-only studies).
+  manifest (individual-level studies) and, optionally, a QtlSumStats manifest
+  (summary-only studies).
+}
+\examples{
+d <- system.file("extdata", "qtl_mini", package = "pecotmr")
+manifest <- data.frame(study = c("s1", "s2"), context = "brain",
+  phenotypePath = file.path(d, "example_geneexpr.bed.gz"),
+  genotypePath = file.path(d, "example.chr22"))
+loadMultiStudyQtlDatasetFromManifest(qtlDatasetsManifest = manifest)
 }

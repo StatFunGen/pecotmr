@@ -7,8 +7,8 @@
 combineTwasWeights(..., ldSketch = NULL)
 }
 \arguments{
-\item{...}{Two or more \code{TwasWeights} objects, or a single \code{list}
-of them.}
+\item{...}{Two or more \code{TwasWeights} objects, or a single \code{list} of
+them.}
 
 \item{ldSketch}{Optional \code{\link{GenotypeHandle}} to attach to the
 combined collection. Default \code{NULL}. Applied when combining two or
@@ -21,6 +21,15 @@ A single combined \code{TwasWeights}.
 Row-bind two or more \code{\link{TwasWeights}} collections into one -- e.g.
 assembling per-gene weight sets into a single per-region collection for
 cTWAS. Joint-specification metadata columns are carried through.
+}
+\examples{
+twe <- TwasWeightsEntry(variantIds = paste0("v", 1:4), weights = rep(0.1, 4),
+  cvResult = list(rsq = 0.5), standardized = FALSE)
+tw1 <- TwasWeights(study = "s1", context = "brain", trait = "g1",
+  method = "susie", entry = list(twe))
+tw2 <- TwasWeights(study = "s2", context = "brain", trait = "g1",
+  method = "susie", entry = list(twe))
+combineTwasWeights(tw1, tw2)
 }
 \seealso{
 \code{\link{combineFineMappingResults}}

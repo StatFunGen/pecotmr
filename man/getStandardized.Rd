@@ -20,10 +20,27 @@ getStandardized(x, ...)
 \item{x}{A \code{TwasWeightsEntry} or \code{TwasWeights}.}
 
 \item{...}{Class-specific selection arguments.}
+
+\item{study}{Character (length 1) or \code{NULL}. Restrict the selection to
+this study; \code{NULL} matches all studies.}
+
+\item{context}{Character (length 1) or \code{NULL}. Restrict the selection to
+this context; \code{NULL} matches all contexts.}
+
+\item{trait}{Character (length 1) or \code{NULL}. Restrict the selection to
+this trait; \code{NULL} matches all traits.}
+
+\item{method}{Character (length 1) or \code{NULL}. Restrict the selection to
+this fine-mapping / weight method; \code{NULL} matches all methods.}
 }
 \value{
 Logical.
 }
 \description{
 Check whether weights are on the standardized scale.
+}
+\examples{
+data(qtlFineMappingExample)
+fe <- getFineMappingResult(qtlFineMappingExample)
+getStandardized(fe)
 }

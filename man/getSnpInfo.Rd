@@ -20,6 +20,12 @@ getSnpInfo(x)
 A data.frame.
 }
 \description{
-Return the cached SNP metadata data.frame
-  (columns: SNP, CHR, BP, A1, A2, optionally MAF).
+Return the cached SNP metadata data.frame (columns: SNP, CHR,
+  BP, A1, A2, optionally MAF).
+}
+\examples{
+gh <- readGenotypes(
+  system.file("extdata", "toy_ref.bed", package = "pecotmr")
+)
+getSnpInfo(gh)
 }

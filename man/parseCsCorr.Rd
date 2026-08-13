@@ -7,29 +7,38 @@
 parseCsCorr(df)
 }
 \arguments{
-\item{df}{Data frame. The output from `extractCsInfo()` function,
-containing a `cs_corr` column with correlation information.}
+\item{df}{Data frame. The output from `extractCsInfo()` function, containing
+a `cs_corr` column with correlation information.}
 }
 \value{
 A data frame with the original columns from the input, plus:
-  \item{cs_corr_1, cs_corr_2, ...}{Individual correlation values, with column names
+  \item{cs_corr_1, cs_corr_2, ...}{Individual correlation values, with
+  column names
         based on their position in the original string}
   \item{cs_corr_max}{Maximum absolute correlation value (excluding 1)}
   \item{cs_corr_min}{Minimum absolute correlation value}
 }
 \description{
-This function takes the output from `extractCsInfo()` and expands the `cs_corr` column
-into multiple columns, preserving the original order of correlations. It also
-calculates maximum and minimum correlation values for each Credible Set.
+This function takes the output from `extractCsInfo()` and expands the
+`cs_corr` column into multiple columns, preserving the original order of
+correlations. It also calculates maximum and minimum correlation values for
+each Credible Set.
 }
 \details{
-The function splits the `cs_corr` column, which typically contains correlation
-values separated by '|', into individual columns. It preserves the order of
-these correlations, allowing for easy interpretation in a matrix-like format.
+The function splits the `cs_corr` column, which typically contains
+  correlation values separated by '|', into individual columns. It preserves
+  the order of these correlations, allowing for easy interpretation in a
+  matrix-like format.
 }
 \note{
-- This function converts the input to a data frame if it isn't already one.
-- It handles cases where correlation values might be missing or not in the expected format.
-- The function assumes that correlation values of 1 represent self-correlations and excludes
-  these when calculating max and min correlations.
+- This function converts the input to a data frame if it isn't already
+  one. - It handles cases where correlation values might be missing or not in
+  the expected format. - The function assumes that correlation values of 1
+  represent self-correlations and excludes these when calculating max and min
+  correlations.
+}
+\examples{
+parseCsCorr(data.frame(
+  cs_name = c("L1", "L2"), cs_corr = c("1,0.3", "0.3,1")
+))
 }

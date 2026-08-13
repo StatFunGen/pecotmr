@@ -12,8 +12,8 @@ computeSldscAnnotSd(sldscData, mafCutoff = 0.05, annotCols = NULL)
 
 \item{mafCutoff}{Numeric, default `0.05`. Requires frq data when > 0.}
 
-\item{annotCols}{Character or integer vector, default NULL. Annotation columns
-to compute sd for. If NULL, all annotation columns are used.}
+\item{annotCols}{Character or integer vector, default NULL. Annotation
+columns to compute sd for. If NULL, all annotation columns are used.}
 }
 \value{
 Named numeric vector of \eqn{sd_C} values, one per annotation.
@@ -23,4 +23,30 @@ Computes the standard deviation of each annotation column in the
   target annotation files, restricted to SNPs above a MAF cutoff via PLINK
   `.frq` files. Required for internal consistency with polyfun's regression,
   which operates on MAF > cutoff SNPs by default.
+}
+\examples{
+mkRun <- function(cats) {
+  n <- length(cats)
+  list(categories = cats, tau = setNames(rep(1e-7, n), cats),
+    tauSe = setNames(rep(3e-8, n), cats),
+    enrichment = setNames(rep(2, n), cats),
+    enrichmentSe = setNames(rep(0.4, n), cats),
+    enrichmentP = setNames(rep(0.01, n), cats),
+    propH2 = setNames(rep(0.2, n), cats),
+    propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
+    tauBlocks = matrix(1e-7, 10, n, dimnames = list(NULL, cats)),
+    nBlocks = 10L)
+annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
+  annot_A = c(1, 0, 1, 0, 1, 0), annot_B = c(2.1, 1.8, 2.5, 1.9, 2.3, 2))
+frq <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
+  MAF = rep(0.2, 6))
+mkTrait <- function() {
+  list(single = list(mkRun(c("annot_A_0", "baselineLD_0")),
+    mkRun(c("annot_B_0", "baselineLD_0"))),
+    joint = mkRun(c("annot_A_0", "annot_B_0", "baselineLD_0")))
+}
+traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
+sd <- SldscData(annot = annot, frq = frq, traits = traits)
+computeSldscAnnotSd(sldscData = sd)
+}
 }

@@ -4,17 +4,22 @@
 \alias{pecotmr-h2-hdl}
 \title{HDL/sHDL: High-Definition Likelihood}
 \description{
-Estimate heritability using eigenvalue-based likelihood
-  maximization (Ning et al. 2020) with stratified extensions (sHDL,
-  Kim et al. 2023).
+Estimate heritability by maximizing the eigenvalue-based
+  Gaussian likelihood of GWAS z-scores (Ning et al. 2020). Within each LD
+  block the z-scores are rotated into the eigenbasis; rotated coordinate
+  \eqn{i} (in \eqn{b^* = V'z/\sqrt{N}} units) has modeled variance
+  \deqn{h2/M \cdot \lambda_i^2 - h2 \cdot \lambda_i / N_{ref} +
+    a \cdot \lambda_i / N,}
+  where the middle term corrects for the finite LD reference panel of size
+  \eqn{N_{ref}}. The stratified extension replaces the constant genetic
+  density \eqn{h2/M} with a per-eigenvalue density
+  \eqn{s_i = \sum_a \tau_a \ell_{ia}} using the stratified eigenvalue scores
+  \eqn{\ell_{ia} = \sum_j A_{ja} V_{ji}^2}; it reduces exactly to the
+  univariate model when there is a single genome-wide annotation.
 }
 \references{
 Ning Z, Pawitan Y, Shen X (2020). High-definition likelihood
   inference of genetic correlations across human complex traits.
   Nat Genet, 52:859-864.
-
-  Kim SS, Dey KK, Weissbrod O, et al. (2023). Leveraging LD
-  eigenvalue regression to improve the estimation of SNP heritability
-  and functional enrichment. medRxiv.
 }
 \keyword{internal}

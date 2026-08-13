@@ -27,10 +27,36 @@ getCs(x, ...)
 \item{x}{A \code{FineMappingEntry} or \code{FineMappingResult}.}
 
 \item{...}{Class-specific selection arguments plus \code{coverage}.}
+
+\item{study}{Character (length 1) or \code{NULL}. Restrict the selection to
+this study; \code{NULL} matches all studies.}
+
+\item{context}{Character (length 1) or \code{NULL}. Restrict the selection to
+this context; \code{NULL} matches all contexts.}
+
+\item{trait}{Character (length 1) or \code{NULL}. Restrict the selection to
+this trait; \code{NULL} matches all traits.}
+
+\item{method}{Character (length 1) or \code{NULL}. Restrict the selection to
+this fine-mapping / weight method; \code{NULL} matches all methods.}
+
+\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
+Restrict variants to this region; \code{NULL} uses the full cis window /
+all regions.}
+
+\item{coverage}{Numeric in (0, 1). Credible-set coverage level. Default
+\code{0.95}.}
+
+\item{minPurity}{Numeric or \code{NULL}. Minimum credible-set purity to
+retain; \code{NULL} applies no purity filter.}
 }
 \value{
 A data.frame of credible set information.
 }
 \description{
 Extract credible set assignments at the requested coverage.
+}
+\examples{
+data(qtlFineMappingExample)
+getCs(qtlFineMappingExample)
 }

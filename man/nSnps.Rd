@@ -18,6 +18,10 @@ nSnps(x, ...)
 Integer.
 }
 \description{
-Number of SNPs in a \code{GwasSumStats} or
-  \code{QtlSumStats} entry, selected by its identity tuple.
+Number of SNPs in a \code{GwasSumStats} or \code{QtlSumStats}
+  entry, selected by its identity tuple.
+}
+\examples{
+data(qtlSumStatsExample)
+nSnps(qtlSumStatsExample)
 }

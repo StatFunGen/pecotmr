@@ -17,7 +17,7 @@ summary table (\code{ctwas::finemap_regions} \code{finemap_res} shape), or
 \code{NULL}.}
 
 \item{susieAlpha}{The per-effect susie alpha table
-(\code{ctwas::finemap_regions} \code{susie_alpha_res} shape) — the fuller
+(\code{ctwas::finemap_regions} \code{susie_alpha_res} shape) -- the fuller
 cTWAS output retained so the raw run is reconstructable, or \code{NULL}.}
 
 \item{param}{The estimated \code{group_prior} / \code{group_prior_var} for
@@ -33,4 +33,10 @@ Per-run cTWAS payload wrapping the fine-mapping posterior table,
   the full per-effect susie alpha table, the estimated group prior(s), and
   region metadata. Held in every row of a \code{\link{CtwasResult}}
   collection.
+}
+\examples{
+cre <- CtwasResultEntry(
+  finemap = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
+  susieAlpha = data.frame(id = c("g1", "g2"), alpha = c(0.9, 0.1)))
+cre
 }

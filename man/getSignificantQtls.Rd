@@ -31,6 +31,27 @@ A \code{GRanges} (or list of GRanges) of the significant variants.
 \description{
 Derive the significant variants under a given correction method
   and FDR threshold from a \code{QtlSumStats} enriched by
-  \code{\link{qtlAssociationPostprocess}} (significance is computed on demand,
-  never stored).
+  \code{\link{qtlAssociationPostprocess}} (significance is computed on
+  demand, never stored).
+}
+\examples{
+pBeta <- c(10^(-c(8, 7, 6, 5, 4, 3)), stats::ppoints(54))
+G <- length(pBeta)
+entries <- lapply(seq_len(G), function(i) {
+  gr <- GenomicRanges::GRanges("chr1",
+    IRanges::IRanges(seq(1000L, by = 50L, length.out = 4L), width = 1L))
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    SNP = paste0("g", i, "_v", 1:4), A1 = "A", A2 = "G",
+    P = c(pBeta[i] / 5, 0.2, 0.5, 0.8),
+    af = c(0.3, 0.2, 0.005, 0.4),
+    tss_distance = c(0L, 500L, 900000L, 2000000L),
+    tes_distance = c(0L, 500L, 900000L, 2000000L))
+  gr
+})
+qss <- QtlSumStats(study = rep("s", G), context = rep("brain", G),
+  trait = paste0("g", seq_len(G)), entry = entries, genome = "hg19",
+  n_variants = rep(50L, G), n_variants_filtered = rep(30L, G),
+  p_beta = pBeta, beta_shape1 = rep(1, G), beta_shape2 = rep(200, G))
+pp <- qtlAssociationPostprocess(qss)
+getSignificantQtls(pp)
 }

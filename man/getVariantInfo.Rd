@@ -16,6 +16,15 @@ getVariantInfo(x)
 A \code{GRanges}.
 }
 \description{
-Return the variant metadata \code{GRanges} of an
-  \code{LdData}.
+Return the variant metadata \code{GRanges} of an \code{LdData}.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:8]
+gr <- GenomicRanges::GRanges("22",
+  IRanges::IRanges(seq(1L, by = 100L, length.out = 8), width = 1L))
+ld <- LdData(correlation = cor(X), variants = gr,
+  blockMetadata = S4Vectors::DataFrame(
+    chrom = "22", start = 1L, end = 1000L))
+getVariantInfo(ld)
 }

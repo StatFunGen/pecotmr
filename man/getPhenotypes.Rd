@@ -23,14 +23,36 @@ getPhenotypes(x, ...)
 
 \item{...}{Class-specific selection arguments (e.g., \code{contexts},
 \code{traitId}, \code{region}).}
+
+\item{contexts}{Character vector. Context(s) whose data to extract.}
+
+\item{traitId}{Character or \code{NULL}. Molecular trait / feature identifier
+to select; \code{NULL} matches all traits in the dataset.}
+
+\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
+Restrict variants to this region; \code{NULL} uses the full cis window /
+all regions.}
+
+\item{naAction}{Character. How to handle missing phenotype values: one of
+\code{"keep"}, \code{"drop"}, or \code{"impute"}.}
+
+\item{outlierAction}{Character. How to handle phenotype outliers: one of
+\code{"keep"} or \code{"drop"}.}
+
+\item{outlierPvalThreshold}{Numeric. Two-sided p-value threshold for flagging
+phenotype outliers. Default \code{1e-3}.}
 }
 \value{
-A named list of phenotype matrices or
-  \code{SummarizedExperiment} objects.
+A named list of phenotype matrices or \code{SummarizedExperiment}
+  objects.
 }
 \description{
-Extract phenotype data from an object that carries it.
-  For a \code{QtlDataset}, the user can optionally select specific
-  contexts, traits, or a region (see method documentation for the
-  per-class selection arguments).
+Extract phenotype data from an object that carries it. For a
+  \code{QtlDataset}, the user can optionally select specific contexts,
+  traits, or a region (see method documentation for the per-class selection
+  arguments).
+}
+\examples{
+data(qtlDatasetExample)
+getPhenotypes(qtlDatasetExample, contexts = "brain")
 }

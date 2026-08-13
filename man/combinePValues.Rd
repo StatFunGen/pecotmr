@@ -7,19 +7,19 @@
 combinePValues(pvals = NULL, zScores = NULL, methods, R = NULL, naRm = TRUE)
 }
 \arguments{
-\item{pvals}{Optional numeric vector of p-values. Required for
-methods that work on p-values; derivable from \code{zScores}.}
+\item{pvals}{Optional numeric vector of p-values. Required for methods that
+work on p-values; derivable from \code{zScores}.}
 
 \item{zScores}{Optional numeric vector of signed z-scores.}
 
-\item{methods}{Character vector of combination method names; see
-above for the menu (lowercase).}
+\item{methods}{Character vector of combination method names; see above for
+the menu (lowercase).}
 
 \item{R}{Optional correlation matrix aligned to \code{pvals} /
 \code{zScores}. Required for the correlation-adjusted methods.}
 
-\item{naRm}{Logical; if \code{TRUE} (default), drop NA p-values
-before combination.}
+\item{naRm}{Logical; if \code{TRUE} (default), drop NA p-values before
+combination.}
 }
 \value{
 A list with two elements:
@@ -32,31 +32,32 @@ A list with two elements:
   }
 }
 \description{
-Unified dispatcher for combining a vector of p-values (and/or z-scores)
-into a single combined p-value. Supports independent-test methods
-(ACAT, HMP, Bonferroni) and correlation-adjusted methods (Fisher /
-Stouffer / inverse-chi-square via \code{poolr}; GBJ / BJ / HC / GHC /
-minP / GBJ-omnibus via \code{GBJ}; aSPU / GATES via \code{aSPU}).
-Multiple methods may be requested in a single call; the function
-returns a per-method result list keyed by method name.
+Unified dispatcher for combining a vector of p-values (and/or z-scores) into
+a single combined p-value. Supports independent-test methods (ACAT, HMP,
+Bonferroni) and correlation-adjusted methods (Fisher / Stouffer /
+inverse-chi-square via \code{poolr}; GBJ / BJ / HC / GHC / minP / GBJ-omnibus
+via \code{GBJ}; aSPU / GATES via \code{aSPU}). Multiple methods may be
+requested in a single call; the function returns a per-method result list
+keyed by method name.
 }
 \details{
-Either \code{pvals} or \code{zScores} may be supplied. If only
-\code{zScores} is given, two-sided p-values are derived as
-\code{p = 2 * (1 - pnorm(|z|))}. Methods that require signed
-\code{zScores} (\code{gbj}, \code{bj}, \code{hc}, \code{ghc},
-\code{minp}, \code{gbj_omni}, \code{aspu}) cannot be derived from
+Either \code{pvals} or \code{zScores} may be supplied. If only \code{zScores}
+is given, two-sided p-values are derived as \code{p = 2 * (1 - pnorm(|z|))}.
+Methods that require signed \code{zScores} (\code{gbj}, \code{bj}, \code{hc},
+\code{ghc}, \code{minp}, \code{gbj_omni}, \code{aspu}) cannot be derived from
 p-values alone and error if \code{zScores} is missing.
 
-Methods that require a correlation matrix \code{R}
-(\code{fisher}, \code{stouffer}, \code{invchisq}, \code{gbj},
-\code{bj}, \code{hc}, \code{ghc}, \code{minp}, \code{gbj_omni},
-\code{aspu}, \code{gates}) error if \code{R} is missing. Methods that
-do not use \code{R} silently ignore it. When \code{R} is named, it is
-realigned to match the order of \code{pvals} / \code{zScores}, with a
-hard error if any entry is missing from \code{R}'s names.
+Methods that require a correlation matrix \code{R} (\code{fisher},
+\code{stouffer}, \code{invchisq}, \code{gbj}, \code{bj}, \code{hc},
+\code{ghc}, \code{minp}, \code{gbj_omni}, \code{aspu}, \code{gates}) error if
+\code{R} is missing. Methods that do not use \code{R} silently ignore it.
+When \code{R} is named, it is realigned to match the order of \code{pvals} /
+\code{zScores}, with a hard error if any entry is missing from \code{R}'s
+names.
 
-An internal validity filter drops entries where
-\code{!is.finite(pvals) | pvals <= 0 | pvals >= 1}; a warning is
-emitted when any are dropped.
+An internal validity filter drops entries where \code{!is.finite(pvals) |
+pvals <= 0 | pvals >= 1}; a warning is emitted when any are dropped.
+}
+\examples{
+combinePValues(pvals = c(0.01, 0.2, 0.5), methods = "fisher", R = diag(3))
 }

@@ -1,4 +1,4 @@
-#' @name gwas_sumstats_example
+#' @name gwasSumStatsExample
 #'
 #' @title Example GWAS Summary Statistics
 #'
@@ -25,13 +25,13 @@
 #' @keywords data
 #'
 #' @examples
-#' data(gwas_sumstats_example)
-#' head(gwas_sumstats_example)
+#' data(gwasSumStatsExample)
+#' head(gwasSumStatsExample)
 #'
 NULL
 
 
-#' @name eqtl_region_example
+#' @name eqtlRegionExample
 #'
 #' @title Example eQTL Region Data (Individual-Level)
 #'
@@ -47,97 +47,91 @@ NULL
 #' \describe{
 #'   \item{X}{Numeric matrix (415 samples x 2,828 variants). Genotype dosage
 #'     matrix with synthetic sample and variant names.}
-#'   \item{y_res}{Named numeric vector (length 415). Residualized molecular
+#'   \item{yRes}{Named numeric vector (length 415). Residualized molecular
 #'     phenotype values with synthetic sample names.}
 #' }
 #'
 #' @keywords data
 #'
 #' @examples
-#' data(eqtl_region_example)
-#' dim(eqtl_region_example$X)
-#' length(eqtl_region_example$y_res)
+#' data(eqtlRegionExample)
+#' dim(eqtlRegionExample$X)
+#' length(eqtlRegionExample$yRes)
 #'
 NULL
 
 
-#' @name gwas_finemapping_example
+#' @name gwasFineMappingExample
 #'
 #' @title Example GWAS Fine-Mapping Results (SuSiE)
 #'
 #' @docType data
 #'
-#' @description SuSiE RSS fine-mapping results for de-identified GWAS summary
-#' statistics. Suitable for use with \code{\link{qtlEnrichment}}. All variant
-#' identifiers are synthetic.
+#' @description A \code{\link{GwasFineMappingResult}} S4 collection holding
+#' SuSiE-RSS fine-mapping output for de-identified GWAS summary statistics (one
+#' study), carrying the LD-reference \code{ldSketch}. Suitable as the GWAS input
+#' to \code{\link{qtlEnrichmentPipeline}}. All variant identifiers are
+#' synthetic.
 #'
-#' @format A list of length 1, where the first element is a trimmed SuSiE
-#' result list containing:
-#'
-#' \describe{
-#'   \item{alpha}{Numeric matrix (L x p). Single-effect assignment
-#'     probabilities.}
-#'   \item{pip}{Named numeric vector (length 2,828). Posterior inclusion
-#'     probabilities with synthetic variant names.}
-#'   \item{V}{Numeric vector. Estimated prior variances for each single
-#'     effect.}
-#'   \item{sets}{List. Credible set information from SuSiE.}
-#' }
+#' @format A \code{\link{GwasFineMappingResult}} object: a \code{DFrame}-backed
+#' collection with one row carrying a \code{\link{FineMappingEntry}} payload
+#' (the
+#' variant ids, the SuSiE-RSS fit, and a per-variant \code{topLoci} table with
+#' \code{variant_id}, \code{pip}, and \code{cs} columns for 2,828 variants) plus
+#' a non-\code{NULL} \code{ldSketch} \code{\link{GenotypeHandle}}.
 #'
 #' @keywords data
 #'
 #' @examples
-#' data(gwas_finemapping_example)
-#' length(gwas_finemapping_example[[1]]$pip)
+#' data(gwasFineMappingExample)
+#' gwasFineMappingExample
+#' head(getTopLoci(gwasFineMappingExample))
 #'
 NULL
 
 
-#' @name qtl_finemapping_example
+#' @name qtlFineMappingExample
 #'
 #' @title Example QTL Fine-Mapping Results (SuSiE)
 #'
 #' @docType data
 #'
-#' @description SuSiE fine-mapping results for de-identified eQTL
-#' individual-level data. Stored as a nested list matching the format expected
-#' by \code{\link{xqtl_enrichment_wrapper}}. All variant identifiers and
+#' @description A \code{\link{QtlFineMappingResult}} S4 collection holding SuSiE
+#' fine-mapping output for de-identified individual-level eQTL data, for a
+#' single
+#' \code{(study, context, trait)} tuple. Suitable as the QTL input to
+#' \code{\link{qtlEnrichmentPipeline}}. All variant identifiers and
 #' region/context names are synthetic.
 #'
-#' @format A nested list with structure
-#' \code{[[region]][[context]]}, where each context contains:
-#'
-#' \describe{
-#'   \item{susie_result_trimmed}{List. Trimmed SuSiE result with elements
-#'     \code{alpha}, \code{pip}, \code{V}, and \code{sets}. (Legacy key; new
-#'     code should use the \code{FineMappingResult} S4 object.)}
-#'   \item{variantNames}{Character vector (length 2,828). Synthetic variant
-#'     identifiers matching the variant names in the SuSiE result.
-#'     (Legacy key; new code should use the \code{FineMappingResult} S4 object.)}
-#' }
+#' @format A \code{\link{QtlFineMappingResult}} object: a \code{DFrame}-backed
+#' collection with one row carrying a \code{\link{FineMappingEntry}} payload
+#' (the
+#' variant ids, the SuSiE fit, and a per-variant \code{topLoci} table with
+#' \code{variant_id}, \code{pip}, and \code{cs} columns for 2,828 variants).
 #'
 #' @keywords data
 #'
 #' @examples
-#' data(qtl_finemapping_example)
-#' names(qtl_finemapping_example)
-#' names(qtl_finemapping_example[["region_1"]][["context_1"]])
+#' data(qtlFineMappingExample)
+#' qtlFineMappingExample
+#' head(getTopLoci(qtlFineMappingExample))
 #'
 NULL
-#' @name multitrait_data
+#' @name multiTraitData
 #'
 #' @title Simulated Multi-condition Data for TWAS analysis
 #'
 #' @docType data
 #'
-#' @description Simulated data of a gene with multi-conditions (cell-type/tissues)
+#' @description Simulated data of a gene with multi-conditions
+#' (cell-type/tissues)
 #' gene expression level matrix(Y) and genotype matrix(X) from 400 individuals,
 #' plus mixure prior matrices, prior grid, as well as summary statistics from
 #' univariate regression and GWAS summary statistics that is ready for use for
 #' TWAS analysis. Genotype matrix is centered and scaled, expression matrix is
 #' normalized.
 #'
-#' @format \code{multitrait_data} is a list with the following elements:
+#' @format \code{multiTraitData} is a list with the following elements:
 #'
 #' \describe{
 #'
@@ -148,41 +142,45 @@ NULL
 #'       total number of individuals and r is the total number of conditions
 #'       (tissue/cell-types).}
 #'
-#'   \item{prior_matrices}{A list of data-driven covariance matrices.}
+#'   \item{priorMatrices}{A list of data-driven covariance matrices.}
 #'
 #'   \item{prior_grid}{A vector of scaling factors to be used in fitting
 #'         mr.mash model.}
 #'
-#'   \item{prior_matrices_cv}{A list of list containing data-driven covariance
+#'   \item{priorMatricesCv}{A list of list containing data-driven covariance
 #'         matrices for 5-fold cross validation.}
 #'
 #'   \item{prior_grid_cv}{A list of vectors of scaling factors for 5-fold
 #'         cross validation via sample partition.}
 #'
-#'   \item{gwas_sumstats}{A data frame for GWAS summary statistics.}
+#'   \item{gwasSumStats}{A data frame for GWAS summary statistics.}
 #'
 #'   \item{sumstat}{Summary statistics of Bhat and Sbhat from univariate
 #'         regression for a gene.}
 #'
-#'    \item{sumstat_cv}{A list of 5 fold cross-validation summary statistics based
+#'    \item{sumstat_cv}{A list of 5 fold cross-validation summary statistics
+#'    based
 #'         on sample partition for a gene.}
 #' }
 #'
 #' @keywords data
 #'
 #' @references
-#' Morgante, F., Carbonetto, P., Wang, G., Zou, Y., Sarkar, A. & Stephens, M. (2023).
-#'   A flexible empirical Bayes approach to multivariate multiple regression, and
-#'   its improved accuracy in predicting multi-tissue gene expression from genotypes.
+#' Morgante, F., Carbonetto, P., Wang, G., Zou, Y., Sarkar, A. & Stephens, M.
+#' (2023).
+#'   A flexible empirical Bayes approach to multivariate multiple regression,
+#'   and
+#'   its improved accuracy in predicting multi-tissue gene expression from
+#'   genotypes.
 #'   PLoS Genetics 19(7): e1010539. https://doi.org/10.1371/journal.pgen.1010539
 #'
 #' @examples
-#' data(multitrait_data)
+#' data(multiTraitData)
 #'
 NULL
 
 
-#' @name qtl_dataset_example
+#' @name qtlDatasetExample
 #'
 #' @title Example QtlDataset (S4)
 #'
@@ -203,20 +201,20 @@ NULL
 #' @keywords data
 #'
 #' @examples
-#' data(qtl_dataset_example)
-#' qtl_dataset_example
+#' data(qtlDatasetExample)
+#' qtlDatasetExample
 #'
 NULL
 
 
-#' @name qtl_sumstats_example
+#' @name qtlSumStatsExample
 #'
 #' @title Example QtlSumStats (S4)
 #'
 #' @docType data
 #'
 #' @description A pre-QC'd \code{\link{QtlSumStats}} collection covering the
-#' same (study, context, trait) tuple as \code{\link{qtl_dataset_example}};
+#' same (study, context, trait) tuple as \code{\link{qtlDatasetExample}};
 #' the per-variant Z / BETA / SE / N values were computed from the synthetic
 #' phenotype by per-variant linear regression. The \code{ldSketch} slot
 #' references the same toy PLINK1 panel.
@@ -227,13 +225,13 @@ NULL
 #' @keywords data
 #'
 #' @examples
-#' data(qtl_sumstats_example)
-#' qtl_sumstats_example
+#' data(qtlSumStatsExample)
+#' qtlSumStatsExample
 #'
 NULL
 
 
-#' @name qtl_sumstats_multicontext_example
+#' @name qtlSumStatsMulticontextExample
 #'
 #' @title Example multi-context QtlSumStats (S4) for mash demos
 #'
@@ -242,7 +240,7 @@ NULL
 #' @description A \code{\link{QtlSumStats}} collection covering one trait
 #' (\code{"ENSG_example"}) across three synthetic contexts (\code{brain},
 #' \code{blood}, \code{muscle}) on the same toy PLINK1 panel used by
-#' \code{\link{qtl_sumstats_example}}. The signal pattern is wired for
+#' \code{\link{qtlSumStatsExample}}. The signal pattern is wired for
 #' mash pattern recovery: one variant is causal in all three contexts
 #' (the shared eQTL), one is brain-only, one is blood-only, and muscle
 #' carries only the shared signal. Per-variant \code{BETA}, \code{SE},
@@ -256,14 +254,14 @@ NULL
 #' @keywords data
 #'
 #' @examples
-#' data(qtl_sumstats_multicontext_example)
-#' qtl_sumstats_multicontext_example
-#' getContexts(qtl_sumstats_multicontext_example)
+#' data(qtlSumStatsMulticontextExample)
+#' qtlSumStatsMulticontextExample
+#' getContexts(qtlSumStatsMulticontextExample)
 #'
 NULL
 
 
-#' @name gwas_sumstats_s4_example
+#' @name gwasSumStatsS4Example
 #'
 #' @title Example GwasSumStats (S4)
 #'
@@ -271,7 +269,7 @@ NULL
 #'
 #' @description A pre-QC'd \code{\link{GwasSumStats}} collection for one
 #' synthetic trait (\code{"trait1"}, N = 50,000). The signal pattern shares
-#' one causal variant with \code{\link{qtl_sumstats_example}} (for
+#' one causal variant with \code{\link{qtlSumStatsExample}} (for
 #' colocalization demos) and adds a second GWAS-only causal variant.
 #' The \code{ldSketch} slot references the same toy PLINK1 panel used
 #' for the QTL example.
@@ -282,13 +280,13 @@ NULL
 #' @keywords data
 #'
 #' @examples
-#' data(gwas_sumstats_s4_example)
-#' gwas_sumstats_s4_example
+#' data(gwasSumStatsS4Example)
+#' gwasSumStatsS4Example
 #'
 NULL
 
 
-#' @name multi_study_qtl_dataset_example
+#' @name multiStudyQtlDatasetExample
 #'
 #' @title Example MultiStudyQtlDataset (S4)
 #'
@@ -307,7 +305,358 @@ NULL
 #' @keywords data
 #'
 #' @examples
-#' data(multi_study_qtl_dataset_example)
-#' multi_study_qtl_dataset_example
+#' data(multiStudyQtlDatasetExample)
+#' multiStudyQtlDatasetExample
+#'
+NULL
+
+
+#' @name qtlFineMappingLbfExample
+#'
+#' @title Example QTL Fine-Mapping Results with LBF (SuSiE)
+#'
+#' @docType data
+#'
+#' @description A \code{\link{QtlFineMappingResult}} whose per-entry SuSiE fit
+#' carries the full single-effect log-Bayes-factor matrix
+#' (\code{lbf_variable}), posterior inclusion probabilities, and credible sets.
+#' Unlike \code{\link{qtlFineMappingExample}} (a lightweight fit), this object
+#' supports LBF-based downstream analysis such as \code{\link{colocPipeline}}.
+#' Derived from the de-identified \code{protocol_example} toy data
+#' (gene ENSG00000283047, chr22); all identifiers are synthetic.
+#'
+#' @format A \code{QtlFineMappingResult} with two rows (contexts
+#'   \code{context1} and \code{context2}) for trait \code{ENSG00000283047},
+#'   method \code{susie}. Each entry's \code{susieFit} carries
+#'   \code{lbf_variable} (single effects x variants), \code{alpha}, \code{pip},
+#'   and credible-set membership.
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(qtlFineMappingLbfExample)
+#' qtlFineMappingLbfExample
+#' head(getTopLoci(qtlFineMappingLbfExample))
+#'
+NULL
+
+
+#' @name fsusieFineMappingExample
+#'
+#' @title Example Functional-SuSiE Fine-Mapping Result
+#'
+#' @docType data
+#'
+#' @description A \code{\link{QtlFineMappingResult}} produced by the functional
+#' SuSiE (\code{fsusie}) method, for demonstrating the \code{fsusie} accessors
+#' and weight extraction. Derived from the de-identified
+#' \code{protocol_example} toy data; all identifiers are synthetic.
+#'
+#' @format A \code{QtlFineMappingResult} with one row, method \code{fsusie}.
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(fsusieFineMappingExample)
+#' fsusieFineMappingExample
+#'
+NULL
+
+
+#' @name mvsusieFineMappingExample
+#'
+#' @title Example Multivariate-SuSiE Fine-Mapping Result
+#'
+#' @docType data
+#'
+#' @description A \code{\link{QtlFineMappingResult}} produced by multivariate
+#' SuSiE (\code{mvsusie}), for demonstrating the multivariate accessors and
+#' weight extraction. Derived from the de-identified \code{protocol_example}
+#' toy data; all identifiers are synthetic.
+#'
+#' @format A \code{QtlFineMappingResult} with two rows, method \code{mvsusie}.
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(mvsusieFineMappingExample)
+#' mvsusieFineMappingExample
+#'
+NULL
+
+
+#' @name twasWeightsExample
+#'
+#' @title Example TWAS Weights (Multiple Methods)
+#'
+#' @docType data
+#'
+#' @description A \code{\link{TwasWeights}} collection holding per-variant TWAS
+#' weights learned by several regression / fine-mapping methods for one gene.
+#' Derived from the de-identified \code{protocol_example} toy data
+#' (gene ENSG00000130538, chr22); all identifiers are synthetic.
+#'
+#' @format A \code{TwasWeights} collection with 11 rows (one per method:
+#'   \code{mrash}, \code{susie}, \code{susie_inf}, \code{enet}, \code{lasso},
+#'   \code{mcp}, \code{scad}, \code{l0learn}, \code{bayes_r}, \code{bayes_c},
+#'   \code{ensemble}).
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(twasWeightsExample)
+#' twasWeightsExample
+#'
+NULL
+
+
+#' @name ctwasWeightsExample
+#'
+#' @title Example cTWAS-formatted TWAS Weights
+#'
+#' @docType data
+#'
+#' @description A \code{\link{TwasWeights}} collection formatted for the cTWAS
+#' workflow (weights, LD, and variant provenance aligned for LD-block
+#' placement). Derived from the de-identified \code{protocol_example} toy data
+#' (chr22); all identifiers are synthetic.
+#'
+#' @format A \code{TwasWeights} collection with one row, method \code{susie}.
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(ctwasWeightsExample)
+#' ctwasWeightsExample
+#'
+NULL
+
+
+#' @name mashInputExample
+#'
+#' @title Example mash Input Matrices (Multi-Condition)
+#'
+#' @docType data
+#'
+#' @description A named list of \code{mashr}-style input matrices (strong /
+#' random / null subsets of effect sizes \code{.b}, standard errors \code{.s},
+#' and z-scores \code{.z}) across eight brain cell-type conditions. Drives the
+#' mash model workflow (\code{\link{mashModelFit}}, \code{\link{mashPosterior}})
+#' via \code{\link{qtlSumStatsFromBetaMatrix}}. Derived from the de-identified
+#' \code{protocol_example} toy data; all identifiers are synthetic.
+#'
+#' @format A list. The effect-size / standard-error / z-score elements
+#'   (\code{strong.b}, \code{strong.s}, \code{strong.z}, and the \code{random.*}
+#'   / \code{null.*} counterparts) are each a variants x 8-condition matrix
+#'   (conditions \code{ALL, Ast, End, Exc, Inh, Mic, OPC, Oli}); the
+#'   \code{.b} / \code{.s} / \code{.z} suffixes follow the \code{mashr}
+#'   naming contract.
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(mashInputExample)
+#' names(mashInputExample)
+#' dim(mashInputExample$strong.b)
+#'
+NULL
+
+
+#' @name mashPosteriorExample
+#'
+#' @title Example mash Posterior Bundle
+#'
+#' @docType data
+#'
+#' @description A small bundle of mash posterior outputs on a strong-variant
+#' set: the posterior means / covariances, the original effect estimates, and a
+#' toy credible-set assignment. Intended for the pairwise-contrast and
+#' feature-score helpers. Derived from the de-identified \code{protocol_example}
+#' toy data; all identifiers are synthetic.
+#'
+#' @format A list with elements \code{posterior} (a list of
+#'   \code{PosteriorMean} and \code{PosteriorCov}), \code{orig} (a list of
+#'   \code{bhat} and \code{sbhat}), and \code{fineMapping} (a data frame of
+#'   variant ids, credible-set order, and pip).
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(mashPosteriorExample)
+#' names(mashPosteriorExample)
+#'
+NULL
+
+
+#' @name gwasFineMappingLbfExample
+#'
+#' @title Example GWAS Fine-Mapping Result with LBF (SuSiE)
+#'
+#' @docType data
+#'
+#' @description A \code{\link{GwasFineMappingResult}} whose SuSiE fit carries
+#' the single-effect log-Bayes-factor matrix (\code{lbf_variable}), covering the
+#' same synthetic region as \code{\link{qtlFineMappingLbfExample}}. The pair is
+#' the intended input to \code{\link{colocPipeline}} (LBF-based
+#' colocalization). Derived from the de-identified \code{protocol_example} toy
+#' data; all identifiers are synthetic.
+#'
+#' @format A \code{GwasFineMappingResult} with one row (study \code{gwas1},
+#'   method \code{susie}) whose \code{susieFit} carries \code{lbf_variable},
+#'   \code{alpha}, and \code{pip}.
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(gwasFineMappingLbfExample)
+#' gwasFineMappingLbfExample
+#'
+NULL
+
+
+#' @name ctwasInputsExample
+#'
+#' @title Example Assembled cTWAS Inputs
+#'
+#' @docType data
+#'
+#' @description The assembled cTWAS input list produced by
+#' \code{\link{assembleCtwasInputs}} over a two-LD-block chr22 grid with one
+#' gene, ready for \code{\link{estCtwasParam}}. Self-contained (no external LD
+#' files needed for parameter estimation). Derived from the de-identified
+#' \code{protocol_example} toy data; all identifiers are synthetic.
+#'
+#' @format A list with the cTWAS input components \code{z_snp}, \code{z_gene},
+#'   \code{weights}, \code{region_info}, \code{snp_map}, \code{LD_map}, and the
+#'   LD / SNP-info loader closures.
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(ctwasInputsExample)
+#' names(ctwasInputsExample)
+#'
+NULL
+
+
+#' @name ctwasEstExample
+#'
+#' @title Example cTWAS Parameter-Estimation State
+#'
+#' @docType data
+#'
+#' @description The augmented cTWAS state returned by
+#' \code{\link{estCtwasParam}} (the assembled inputs plus estimated
+#' group priors and per-region data), ready for
+#' \code{\link{screenCtwasRegions}}. Derived from the de-identified
+#' \code{protocol_example} toy data; all identifiers are synthetic.
+#'
+#' @format A list carrying the \code{\link{ctwasInputsExample}} components plus
+#'   the estimated \code{group_prior} / \code{group_prior_var} and per-region
+#'   data.
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(ctwasEstExample)
+#' names(ctwasEstExample)
+#'
+NULL
+
+
+#' @name ctwasFinemapExample
+#'
+#' @title Example cTWAS Fine-Mapping Result
+#'
+#' @docType data
+#'
+#' @description The fine-mapped cTWAS result returned by
+#' \code{\link{finemapCtwasRegions}}, ready for \code{\link{asCtwasResult}} or
+#' \code{\link{mergeCtwasBoundaryRegions}}. Derived from the de-identified
+#' \code{protocol_example} toy data; all identifiers are synthetic.
+#'
+#' @format A list of per-region cTWAS fine-mapping output (susie alpha / PIP
+#'   tables and region provenance).
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(ctwasFinemapExample)
+#' asCtwasResult(ctwasFinemapExample)
+#'
+NULL
+
+
+#' @name ldEigenExample
+#'
+#' @title Example LD Eigen-Decomposition Reference
+#'
+#' @docType data
+#'
+#' @description A small synthetic \code{LdEigen} reference (per-block LD
+#' eigen-decompositions over 20 SNPs in 2 blocks) for the heritability
+#' estimators (\code{\link{estimateH2}} with \code{method = "lder"} or
+#' \code{"hdl"}, and \code{\link{computeLdScores}}). All identifiers are
+#' synthetic.
+#'
+#' @format An \code{LdEigen} object (extends \code{LdStatistic}) with an
+#'   \code{eigenList} of per-block \code{values} / \code{vectors} /
+#'   \code{snpIdx}
+#'   over 20 SNPs in 2 LD blocks.
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(ldEigenExample)
+#' ldEigenExample
+#'
+NULL
+
+
+#' @name ldScoreExample
+#'
+#' @title Example LD-Score Reference
+#'
+#' @docType data
+#'
+#' @description A small synthetic \code{LdScore} reference (per-SNP LD scores,
+#' weights, and per-block LD matrices over 20 SNPs in 2 blocks) for the
+#' heritability estimators (\code{\link{estimateH2}} with
+#' \code{method = "gldsc"}). All identifiers are synthetic.
+#'
+#' @format An \code{LdScore} object (extends \code{LdStatistic}) carrying
+#'   \code{ldScores}, \code{ldScoreWeights}, and \code{ldMatrixList} over 20
+#'   SNPs
+#'   in 2 LD blocks.
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(ldScoreExample)
+#' ldScoreExample
+#'
+NULL
+
+
+#' @name h2EstimateExample
+#'
+#' @title Example Heritability Estimate
+#'
+#' @docType data
+#'
+#' @description A small synthetic \code{H2Estimate} (the output of
+#' \code{\link{estimateH2}}) carrying the SNP heritability, intercept, and a
+#' per-annotation enrichment table. Intended for the \code{H2Estimate}
+#' accessors and \code{\link{h2EstimateToSldscTrait}}. All identifiers are
+#' synthetic.
+#'
+#' @format An \code{H2Estimate} object with \code{h2}, \code{h2Se},
+#'   \code{intercept}, an \code{enrichment} data frame, and \code{tauBlocks}.
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(h2EstimateExample)
+#' h2EstimateExample
 #'
 NULL

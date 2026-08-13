@@ -22,8 +22,7 @@ collection has a single row.}
 A data.frame.
 }
 \description{
-Extracts the per-variant statistics for one study
-  (selected by \code{study}) into a plain data.frame with columns
-  SNP, CHR, BP, A1, A2, Z, N (and any optional columns such as MAF,
-  BETA, SE, P).
+Extracts the per-variant statistics for one study (selected by
+  \code{study}) into a plain data.frame with columns SNP, CHR, BP, A1, A2, Z,
+  N (and any optional columns such as MAF, BETA, SE, P).
 }

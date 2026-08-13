@@ -41,13 +41,32 @@ getVariantIds(x, ...)
 \item{x}{The object.}
 
 \item{...}{Class-specific selection arguments.}
+
+\item{study}{Character (length 1) or \code{NULL}. Restrict the selection to
+this study; \code{NULL} matches all studies.}
+
+\item{context}{Character (length 1) or \code{NULL}. Restrict the selection to
+this context; \code{NULL} matches all contexts.}
+
+\item{trait}{Character (length 1) or \code{NULL}. Restrict the selection to
+this trait; \code{NULL} matches all traits.}
+
+\item{method}{Character (length 1) or \code{NULL}. Restrict the selection to
+this fine-mapping / weight method; \code{NULL} matches all methods.}
+
+\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
+Restrict variants to this region; \code{NULL} uses the full cis window /
+all regions.}
 }
 \value{
 Character vector of variant IDs.
 }
 \description{
-Extract variant ID vector from an object that carries one
-  (e.g., \code{LdData}, \code{FineMappingEntry}, \code{TwasWeightsEntry})
-  or from one entry of a collection class selected by its identity
-  tuple.
+Extract variant ID vector from an object that carries one (e.g.,
+  \code{LdData}, \code{FineMappingEntry}, \code{TwasWeightsEntry}) or from
+  one entry of a collection class selected by its identity tuple.
+}
+\examples{
+data(qtlFineMappingExample)
+getVariantIds(qtlFineMappingExample)
 }

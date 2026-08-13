@@ -9,3 +9,5 @@
 ^.covrignore
 ^.claude
 ^data-raw$
+^docs$
+^air.toml

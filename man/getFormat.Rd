@@ -18,3 +18,9 @@ Character (length 1): one of "gds", "vcf", "plink1", "plink2".
 \description{
 Return the detected genotype storage format.
 }
+\examples{
+gh <- readGenotypes(
+  system.file("extdata", "toy_ref.bed", package = "pecotmr")
+)
+getFormat(gh)
+}

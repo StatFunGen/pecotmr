@@ -16,6 +16,10 @@ getLdScoreWeights(x)
 Numeric vector.
 }
 \description{
-Return the per-SNP regression weights vector carried by
-  an \code{LdScore} object.
+Return the per-SNP regression weights vector carried by an
+  \code{LdScore} object.
+}
+\examples{
+data(ldScoreExample)
+getLdScoreWeights(ldScoreExample)
 }

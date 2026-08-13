@@ -19,3 +19,13 @@ A \code{GRanges} object.
 Return the per-SNP \code{GRanges} carried by an
   \code{AnnotationMatrix}.
 }
+\examples{
+snpRanges <- GenomicRanges::GRanges(
+  "22", IRanges::IRanges((1:10) * 100, width = 1))
+annotations <- matrix(rbinom(50, 1, 0.3), 10, 5,
+  dimnames = list(NULL, paste0("annot", 1:5)))
+meta <- data.frame(name = paste0("annot", 1:5), tier = "baseline",
+  type = "binary")
+am <- AnnotationMatrix(annotations, snpRanges, annotationMeta = meta)
+getSnpRanges(am)
+}

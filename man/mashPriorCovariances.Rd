@@ -19,8 +19,8 @@ mashPriorCovariances(
 )
 }
 \arguments{
-\item{sumStatsList}{Named list (or \code{S4Vectors::SimpleList}) with at least
-\code{"strong"} (the discovery set the covariances are learned on).}
+\item{sumStatsList}{Named list (or \code{S4Vectors::SimpleList}) with at
+least \code{"strong"} (the discovery set the covariances are learned on).}
 
 \item{alpha}{mash \code{alpha}.}
 
@@ -47,11 +47,12 @@ named list of \code{nCond x nCond} matrices. When supplied, the covariance
 chain is bypassed and only the mixture-weight fit runs.}
 
 \item{priorComponents}{Optional caller-supplied raw covariance components (a
-non-empty named list, e.g. the concatenated \code{\link{mashCovarianceComponents}}
-outputs). When supplied, these are refined by \code{engine} instead of being
-rebuilt internally -- the mixture-prior pipeline where separate steps built
-the components. \code{components} / \code{nPcs} are then ignored. Distinct
-from \code{priorCovariances}, which bypasses the engine entirely.}
+non-empty named list, e.g. the concatenated
+\code{\link{mashCovarianceComponents}} outputs). When supplied, these are
+refined by \code{engine} instead of being rebuilt internally -- the
+mixture-prior pipeline where separate steps built the components.
+\code{components} / \code{nPcs} are then ignored. Distinct from
+\code{priorCovariances}, which bypasses the engine entirely.}
 
 \item{udControl}{Named list overriding the \pkg{udr} controls for the
 \code{"ud"} / \code{"ud_ted"} engines: \code{n_unconstrained} (data-driven
@@ -61,7 +62,8 @@ few-condition data), \code{maxiter} (default 1000), \code{tol},
 
 \item{inputScale}{SumStats -> matrix conversion scale.}
 
-\item{setSeed}{Integer seed, or \code{NULL} to leave the ambient RNG untouched.}
+\item{setSeed}{Integer seed, or \code{NULL} to leave the ambient RNG
+untouched.}
 }
 \value{
 \code{list(U, w, loglik)}: the covariance list, the
@@ -69,12 +71,19 @@ few-condition data), \code{maxiter} (default 1000), \code{tol},
   log-likelihood (\code{NULL} for the \code{cov_ed} engine).
 }
 \description{
-Build the mash prior covariance list \code{U} and mixture weights
-  \code{w} from a \code{{strong[, random, null]}} SumStats collection. Split
-  out of \code{\link{mashPipeline}} so the covariance-estimation chain lives in
-  one place. The default builds every non-udr covariance component
-  (\code{canonical + pca + flash + flash_nonneg}) and refines them with mashr
-  extreme deconvolution (\code{cov_ed}).
+Build the mash prior covariance list \code{U} and mixture
+  weights \code{w} from a \code{{strong[, random, null]}} SumStats
+  collection. Split out of \code{\link{mashPipeline}} so the
+  covariance-estimation chain lives in one place. The default builds every
+  non-udr covariance component (\code{canonical + pca + flash +
+  flash_nonneg}) and refines them with mashr extreme deconvolution
+  (\code{cov_ed}).
+}
+\examples{
+data(qtlSumStatsMulticontextExample)
+ss <- qtlSumStatsMulticontextExample
+sumStatsList <- list(strong = ss, random = ss)
+mashPriorCovariances(sumStatsList, alpha = 0)
 }
 \seealso{
 \code{\link{mashPipeline}}, \code{\link{mashResidualCorrelation}}

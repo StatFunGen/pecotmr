@@ -13,12 +13,12 @@ S4 container for LD information. Stores either a pre-computed
 
 \describe{
 \item{\code{correlation}}{A correlation matrix, a list of per-block matrices
-(block-diagonal LD), or NULL if genotypes are available and R should
-be computed on demand.}
+(block-diagonal LD), or NULL if genotypes are available and R should be
+computed on demand.}
 
 \item{\code{genotypeHandle}}{A \code{GenotypeHandle}, a list of
-\code{GenotypeHandle}s (for mixture panels), or NULL when only
-pre-computed R is available.}
+\code{GenotypeHandle}s (for mixture panels), or NULL when only pre-computed
+R is available.}
 
 \item{\code{snpIdx}}{Integer vector of 1-based SNP indices into the handle's
 \code{snpInfo}. NULL when correlation is pre-computed.}
@@ -26,17 +26,16 @@ pre-computed R is available.}
 \item{\code{variants}}{A \code{GRanges} object with variant metadata (A1, A2,
 variant_id, and optionally allele_freq, variance, n_nomiss).}
 
-\item{\code{blockMetadata}}{An \code{LdBlocks} object or a \code{data.frame}
-with block boundary information.}
+\item{\code{blockMetadata}}{An \code{LdBlocks} object or a \code{data.frame} with
+block boundary information.}
 
 \item{\code{nRef}}{Integer, reference panel sample size.}
 
 \item{\code{mixtureWeights}}{NULL when \code{genotypeHandle} is a single
-\code{GenotypeHandle}; a numeric vector of mixing proportions (one
-per panel, summing to 1) when \code{genotypeHandle} is a list of
-\code{GenotypeHandle}s. Used by \code{getCorrelation()} to compute
-a weighted-average mixture LD matrix; required whenever
-\code{genotypeHandle} is a list and \code{getCorrelation()} will be
-called.}
+\code{GenotypeHandle}; a numeric vector of mixing proportions (one per
+panel, summing to 1) when \code{genotypeHandle} is a list of
+\code{GenotypeHandle}s. Used by \code{getCorrelation()} to compute a
+weighted-average mixture LD matrix; required whenever \code{genotypeHandle}
+is a list and \code{getCorrelation()} will be called.}
 }}
 

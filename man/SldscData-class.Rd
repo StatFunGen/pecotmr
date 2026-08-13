@@ -5,8 +5,8 @@
 \title{S-LDSC input data container}
 \description{
 An in-memory bundle of the loaded S-LDSC inputs, produced from
-  the reader functions (\code{\link{readSldscAnnot}}, \code{\link{readSldscFrq}},
-  \code{\link{readSldscTrait}}) and consumed by
+  the reader functions (\code{\link{readSldscAnnot}},
+  \code{\link{readSldscFrq}}, \code{\link{readSldscTrait}}) and consumed by
   \code{\link{sldscPostprocessingPipeline}}. The class itself performs no
   file I/O: the user runs the readers, then constructs an \code{SldscData}
   from those in-memory objects, and the pipeline does all computation on it.

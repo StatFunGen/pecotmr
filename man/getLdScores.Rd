@@ -16,6 +16,10 @@ getLdScores(x)
 Numeric matrix (SNPs x annotations+1).
 }
 \description{
-Return the per-SNP LD score matrix carried by an
-  \code{LdScore} object.
+Return the per-SNP LD score matrix carried by an \code{LdScore}
+  object.
+}
+\examples{
+data(ldScoreExample)
+getLdScores(ldScoreExample)
 }

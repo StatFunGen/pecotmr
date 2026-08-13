@@ -13,7 +13,8 @@ lassosumRssWeights(
 )
 }
 \arguments{
-\item{stat}{A list with \code{$b} (effect sizes) and \code{$n} (per-variant sample sizes).}
+\item{stat}{A list with \code{$b} (effect sizes) and \code{$n} (per-variant
+sample sizes).}
 
 \item{LD}{LD correlation matrix R (single matrix, NOT pre-shrunk).}
 
@@ -27,7 +28,8 @@ lassosumRssWeights(
 \item{...}{Additional arguments passed to \code{lassosumRss()}.}
 }
 \value{
-A numeric vector of the posterior SNP coefficients at the best (s, lambda).
+A numeric vector of the posterior SNP coefficients at the best (s,
+  lambda).
 }
 \description{
 Searches over a grid of shrinkage parameters \code{s} (default:
@@ -47,4 +49,18 @@ same per-variant scale:
 \deqn{\mathrm{score}(\beta) = \frac{c^T \beta}{\sqrt{\beta^T R \beta}}.}
 This implementation therefore uses the supplied LD matrix directly for
 selection. \code{min(fbeta)} is retained only as an explicit debug option.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+ss <- lapply(
+  seq_len(ncol(X)), function(j) coef(summary(lm(y ~ X[, j])))[2, 1:2])
+stat <- list(
+  b = vapply(ss, `[`, numeric(1), 1L),
+  seb = vapply(ss, `[`, numeric(1), 2L),
+  n = rep(nrow(X), ncol(X))
+)
+LD <- cor(X)
+lassosumRssWeights(stat, LD)
 }

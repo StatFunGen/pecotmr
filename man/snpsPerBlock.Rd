@@ -15,7 +15,7 @@ snpsPerBlock(snpInfo, ldBlocks)
 A list of integer vectors, one per block.
 }
 \description{
-For each LD block, find the SNP indices from a reference
-  that fall within the block boundaries.
+For each LD block, find the SNP indices from a reference that
+  fall within the block boundaries.
 }
 \keyword{internal}

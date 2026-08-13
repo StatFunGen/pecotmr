@@ -2,10 +2,29 @@
 % Please edit documentation in R/regularizedRegressionWrappers.R
 \name{bayesCWeights}
 \alias{bayesCWeights}
-\title{Use a rounded spike prior (low-variance Gaussian).}
+\title{BayesC TWAS weights (rounded-spike prior)}
 \usage{
 bayesCWeights(X, y, Z = NULL, pi = 0.1, ...)
 }
+\arguments{
+\item{X}{Numeric genotype / design matrix (samples x variants).}
+
+\item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}.}
+
+\item{Z}{Optional numeric matrix of fixed-effect covariates, or \code{NULL}.}
+
+\item{pi}{Numeric in (0, 1). Prior proportion of non-null effects for the
+BayesC mixture. Default \code{0.1}.}
+
+\item{...}{Additional arguments forwarded to \code{bayesAlphabetWeights} /
+\code{qgg}.}
+}
 \description{
 Use a rounded spike prior (low-variance Gaussian).
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+bayesCWeights(X, y)
 }

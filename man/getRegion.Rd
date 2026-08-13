@@ -24,6 +24,11 @@ A \code{GRanges} with one range per row of \code{x}, or an empty
 \description{
 Return the genomic anchor of each row of a per-tuple collection
   as a \code{GRanges} with one range per row -- the trait's own region for a
-  \code{TwasWeights}, or the fine-mapping window for a \code{FineMappingResult}.
-  This is location provenance (e.g. for cTWAS LD-block placement).
+  \code{TwasWeights}, or the fine-mapping window for a
+  \code{FineMappingResult}. This is location provenance (e.g. for cTWAS
+  LD-block placement).
+}
+\examples{
+data(qtlFineMappingExample)
+getRegion(qtlFineMappingExample)
 }

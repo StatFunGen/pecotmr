@@ -21,21 +21,35 @@ bayesAlphabetWeights(
 
 \item{y}{A numeric vector of phenotypes.}
 
-\item{method}{A character string declaring the method/prior to be used. Options are
-bayesN, bayesL, bayesA, bayesC, or bayesR.}
+\item{method}{A character string declaring the method/prior to be used.
+Options are bayesN, bayesL, bayesA, bayesC, or bayesR.}
 
 \item{Z}{An optional numeric matrix of covariates.}
+
+\item{h2}{Numeric or \code{NULL}. Prior heritability for the sampler;
+\code{NULL} lets \code{qgg} estimate it.}
+
+\item{nit}{Integer. Total number of MCMC iterations. Default \code{5000}.}
+
+\item{nburn}{Integer. Number of burn-in iterations discarded. Default
+\code{1000}.}
+
+\item{nthin}{Integer. Thinning interval for retained MCMC samples. Default
+\code{5}.}
+
+\item{...}{Additional arguments forwarded to \code{qgg::gbayes}.}
 }
 \value{
 A vector containing the weights to be applied to each genotype in
   predicting the phenotype.
 }
 \description{
-This function performs Bayesian linear regression using the `gbayes` function from
-the `qgg` package. It then returns the estimated slopes.
+This function performs Bayesian linear regression using the `gbayes` function
+from the `qgg` package. It then returns the estimated slopes.
 }
 \details{
-This function fits a Bayesian linear regression model with a range of priors.
+This function fits a Bayesian linear regression model with a range
+  of priors.
 }
 \examples{
 X <- matrix(rnorm(100000), nrow = 1000)

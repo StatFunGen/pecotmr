@@ -23,31 +23,29 @@ ldLoader(
 \code{\link{loadLdMatrix}}).}
 
 \item{regions}{Character vector of G region strings (e.g.,
-\code{"chr22:17238266-19744294"}). Required when \code{ldMetaPath}
-is used.}
+\code{"chr22:17238266-19744294"}). Required when \code{ldMetaPath} is used.}
 
-\item{ldInfo}{A data.frame with column \code{LD_file} (paths to
-genotype files or \code{.cor.xz} LD matrix files) and optionally
-\code{SNP_file} (paths to companion \code{.bim} files for pre-computed
-blocks; defaults to \code{paste0(LD_file, ".bim")} if absent).
-Genotype paths can be PLINK2 prefixes, PLINK1 prefixes, VCF files,
-or GDS files. As returned by cTWAS meta-data utilities.}
+\item{ldInfo}{A data.frame with column \code{LD_file} (paths to genotype
+files or \code{.cor.xz} LD matrix files) and optionally \code{SNP_file}
+(paths to companion \code{.bim} files for pre-computed blocks; defaults to
+\code{paste0(LD_file, ".bim")} if absent). Genotype paths can be PLINK2
+prefixes, PLINK1 prefixes, VCF files, or GDS files. As returned by cTWAS
+meta-data utilities.}
 
-\item{returnGenotype}{Logical. When using region mode, return the
-genotype matrix X (\code{TRUE}) or LD correlation R (\code{FALSE},
-default).}
+\item{returnGenotype}{Logical. When using region mode, return the genotype
+matrix X (\code{TRUE}) or LD correlation R (\code{FALSE}, default).}
 
-\item{maxVariants}{Integer or \code{NULL}. If set, randomly subsample
-blocks larger than this to control memory usage.}
+\item{maxVariants}{Integer or \code{NULL}. If set, randomly subsample blocks
+larger than this to control memory usage.}
 }
 \value{
 An \code{ldLoaderSpec} object (an opaque list describing the source).
   Pass it with a block index to \code{\link{loadLdBlock}} to load one block.
 }
 \description{
-Constructs a loader function that retrieves per-block LD matrices on
-demand. This avoids loading all blocks into memory simultaneously,
-which is critical for genome-wide analyses with hundreds of blocks.
+Constructs a loader function that retrieves per-block LD matrices on demand.
+This avoids loading all blocks into memory simultaneously, which is critical
+for genome-wide analyses with hundreds of blocks.
 }
 \details{
 Four modes are supported:

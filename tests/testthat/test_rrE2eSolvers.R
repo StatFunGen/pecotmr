@@ -16,139 +16,145 @@ context("regularized_regression - end-to-end solver verification")
 #    the parameter and then raises a sentinel error that the test catches.
 
 test_that("glmnetWeights forwards alpha to glmnet::cv.glmnet", {
-  skip_if_not_installed("glmnet")
-  set.seed(42)
-  X <- matrix(rnorm(50), nrow = 10)
-  y <- rnorm(10)
-  captured <- new.env(parent = emptyenv())
-  local_mocked_bindings(
-    cv.glmnet = function(x, y, alpha, ...) {
-      captured$alpha <- alpha
-      stop("STOP_AFTER_CAPTURE")
-    },
-    .package = "glmnet"
-  )
-  expect_error(lassoWeights(X, y), "STOP_AFTER_CAPTURE")
-  expect_equal(captured$alpha, 1)
+    skip_if_not_installed("glmnet")
+    set.seed(42)
+    X <- matrix(rnorm(50), nrow = 10)
+    y <- rnorm(10)
+    captured <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        cv.glmnet = function(x, y, alpha, ...) {
+            captured$alpha <- alpha
+            stop("STOP_AFTER_CAPTURE")
+        },
+        .package = "glmnet"
+    )
+    expect_error(lassoWeights(X, y), "STOP_AFTER_CAPTURE")
+    expect_equal(captured$alpha, 1)
 
-  expect_error(enetWeights(X, y), "STOP_AFTER_CAPTURE")
-  expect_equal(captured$alpha, 0.5)
+    expect_error(enetWeights(X, y), "STOP_AFTER_CAPTURE")
+    expect_equal(captured$alpha, 0.5)
 })
 
 test_that("ncvreg_weights forwards penalty to ncvreg::cv.ncvreg", {
-  skip_if_not_installed("ncvreg")
-  set.seed(42)
-  X <- matrix(rnorm(50), nrow = 10)
-  y <- rnorm(10)
-  captured <- new.env(parent = emptyenv())
-  local_mocked_bindings(
-    cv.ncvreg = function(X, y, penalty, nfolds = 5, ...) {
-      captured$penalty <- penalty
-      captured$nfolds <- nfolds
-      stop("STOP_AFTER_CAPTURE")
-    },
-    .package = "ncvreg"
-  )
-  expect_error(scadWeights(X, y, nfolds = 7), "STOP_AFTER_CAPTURE")
-  expect_equal(captured$penalty, "SCAD")
-  expect_equal(captured$nfolds, 7)
+    skip_if_not_installed("ncvreg")
+    set.seed(42)
+    X <- matrix(rnorm(50), nrow = 10)
+    y <- rnorm(10)
+    captured <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        cv.ncvreg = function(X, y, penalty, nfolds = 5, ...) {
+            captured$penalty <- penalty
+            captured$nfolds <- nfolds
+            stop("STOP_AFTER_CAPTURE")
+        },
+        .package = "ncvreg"
+    )
+    expect_error(scadWeights(X, y, nfolds = 7), "STOP_AFTER_CAPTURE")
+    expect_equal(captured$penalty, "SCAD")
+    expect_equal(captured$nfolds, 7)
 
-  expect_error(mcpWeights(X, y, nfolds = 9), "STOP_AFTER_CAPTURE")
-  expect_equal(captured$penalty, "MCP")
-  expect_equal(captured$nfolds, 9)
+    expect_error(mcpWeights(X, y, nfolds = 9), "STOP_AFTER_CAPTURE")
+    expect_equal(captured$penalty, "MCP")
+    expect_equal(captured$nfolds, 9)
 })
 
 test_that("l0learnWeights forwards penalty to L0Learn::L0Learn.cvfit", {
-  skip_if_not_installed("L0Learn")
-  set.seed(42)
-  X <- matrix(rnorm(50), nrow = 10)
-  y <- rnorm(10)
-  captured <- new.env(parent = emptyenv())
-  local_mocked_bindings(
-    L0Learn.cvfit = function(x, y, penalty, nFolds = 5, ...) {
-      captured$penalty <- penalty
-      captured$nFolds <- nFolds
-      stop("STOP_AFTER_CAPTURE")
-    },
-    .package = "L0Learn"
-  )
-  expect_error(l0learnWeights(X, y), "STOP_AFTER_CAPTURE")
-  expect_equal(captured$penalty, "L0")
+    skip_if_not_installed("L0Learn")
+    set.seed(42)
+    X <- matrix(rnorm(50), nrow = 10)
+    y <- rnorm(10)
+    captured <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        L0Learn.cvfit = function(x, y, penalty, nFolds = 5, ...) {
+            captured$penalty <- penalty
+            captured$nFolds <- nFolds
+            stop("STOP_AFTER_CAPTURE")
+        },
+        .package = "L0Learn"
+    )
+    expect_error(l0learnWeights(X, y), "STOP_AFTER_CAPTURE")
+    expect_equal(captured$penalty, "L0")
 
-  expect_error(l0learnWeights(X, y, penalty = "L0L2", nFolds = 8),
-               "STOP_AFTER_CAPTURE")
-  expect_equal(captured$penalty, "L0L2")
-  expect_equal(captured$nFolds, 8)
+    expect_error(
+        l0learnWeights(X, y, penalty = "L0L2", nFolds = 8),
+        "STOP_AFTER_CAPTURE"
+    )
+    expect_equal(captured$penalty, "L0L2")
+    expect_equal(captured$nFolds, 8)
 })
 
 test_that("bLassoWeights forwards model = 'BL' all the way to BGLR::BGLR", {
-  skip_if_not_installed("BGLR")
-  set.seed(42)
-  X <- matrix(rnorm(50), nrow = 10)
-  y <- rnorm(10)
-  captured <- new.env(parent = emptyenv())
-  local_mocked_bindings(
-    BGLR = function(y, ETA, nIter, burnIn, thin, ...) {
-      captured$model <- ETA[[1]]$model
-      captured$nIter <- nIter
-      captured$burnIn <- burnIn
-      captured$thin <- thin
-      list(ETA = list(list(b = rep(0, ncol(ETA[[1]]$X)))))
-    },
-    .package = "BGLR"
-  )
-  bLassoWeights(X, y, nIter = 77, burnIn = 11, thin = 3)
-  expect_equal(captured$model, "BL")
-  expect_equal(captured$nIter, 77)
-  expect_equal(captured$burnIn, 11)
-  expect_equal(captured$thin, 3)
+    skip_if_not_installed("BGLR")
+    set.seed(42)
+    X <- matrix(rnorm(50), nrow = 10)
+    y <- rnorm(10)
+    captured <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        BGLR = function(y, ETA, nIter, burnIn, thin, ...) {
+            captured$model <- ETA[[1]]$model
+            captured$nIter <- nIter
+            captured$burnIn <- burnIn
+            captured$thin <- thin
+            list(ETA = list(list(b = rep(0, ncol(ETA[[1]]$X)))))
+        },
+        .package = "BGLR"
+    )
+    bLassoWeights(X, y, nIter = 77, burnIn = 11, thin = 3)
+    expect_equal(captured$model, "BL")
+    expect_equal(captured$nIter, 77)
+    expect_equal(captured$burnIn, 11)
+    expect_equal(captured$thin, 3)
 })
 
 test_that("bayesAlphabetWeights forwards method to qgg::gbayes for all alphabet variants", {
-  skip_if_not_installed("qgg")
-  set.seed(42)
-  X <- matrix(rnorm(50), nrow = 10)
-  y <- rnorm(10)
-  Z <- matrix(rnorm(20), nrow = 10)
-  captured <- new.env(parent = emptyenv())
-  local_mocked_bindings(
-    gbayes = function(y, W, X = NULL, method, nit, nburn, ...) {
-      captured$method <- method
-      captured$nit <- nit
-      captured$nburn <- nburn
-      captured$X <- X
-      list(bm = rep(0, ncol(W)))
-    },
-    .package = "qgg"
-  )
-  for (m in c("bayesN", "bayesL", "bayesA", "bayesC", "bayesR")) {
-    bayesAlphabetWeights(X, y, method = m, Z = Z, nit = 17, nburn = 4)
-    expect_equal(captured$method, m, info = paste("method =", m))
-    expect_equal(captured$nit, 17)
-    expect_equal(captured$nburn, 4)
-    # Z is forwarded to qgg::gbayes via the X argument.
-    expect_equal(captured$X, Z, info = paste("Z forwarding for method =", m))
-  }
+    skip_if_not_installed("qgg")
+    set.seed(42)
+    X <- matrix(rnorm(50), nrow = 10)
+    y <- rnorm(10)
+    Z <- matrix(rnorm(20), nrow = 10)
+    captured <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        gbayes = function(y, W, X = NULL, method, nit, nburn, ...) {
+            captured$method <- method
+            captured$nit <- nit
+            captured$nburn <- nburn
+            captured$X <- X
+            list(bm = rep(0, ncol(W)))
+        },
+        .package = "qgg"
+    )
+    for (m in c("bayesN", "bayesL", "bayesA", "bayesC", "bayesR")) {
+        bayesAlphabetWeights(X, y, method = m, Z = Z, nit = 17, nburn = 4)
+        expect_equal(captured$method, m, info = paste("method =", m))
+        expect_equal(captured$nit, 17)
+        expect_equal(captured$nburn, 4)
+        # Z is forwarded to qgg::gbayes via the X argument.
+        expect_equal(
+            captured$X,
+            Z,
+            info = paste("Z forwarding for method =", m)
+        )
+    }
 })
 
 test_that("dprWeights forwards fitting_method to RcppDPR::fit_model", {
-  skip_if_not_installed("RcppDPR")
-  set.seed(42)
-  X <- matrix(rnorm(50), nrow = 10)
-  y <- rnorm(10)
-  captured <- new.env(parent = emptyenv())
-  local_mocked_bindings(
-    fit_model = function(y, w, x, rotate_variables, fitting_method, ...) {
-      captured$fitting_method <- fitting_method
-      captured$rotate_variables <- rotate_variables
-      list(beta = rep(0, ncol(x)), alpha = rep(0, ncol(x)))
-    },
-    .package = "RcppDPR"
-  )
-  dprWeights(X, y, fittingMethod = "VB")
-  expect_equal(captured$fitting_method, "VB")
-  expect_false(captured$rotate_variables)
+    skip_if_not_installed("RcppDPR")
+    set.seed(42)
+    X <- matrix(rnorm(50), nrow = 10)
+    y <- rnorm(10)
+    captured <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        fit_model = function(y, w, x, rotate_variables, fitting_method, ...) {
+            captured$fitting_method <- fitting_method
+            captured$rotate_variables <- rotate_variables
+            list(beta = rep(0, ncol(x)), alpha = rep(0, ncol(x)))
+        },
+        .package = "RcppDPR"
+    )
+    dprWeights(X, y, fittingMethod = "VB")
+    expect_equal(captured$fitting_method, "VB")
+    expect_false(captured$rotate_variables)
 
-  dprWeights(X, y, fittingMethod = "Gibbs")
-  expect_equal(captured$fitting_method, "Gibbs")
+    dprWeights(X, y, fittingMethod = "Gibbs")
+    expect_equal(captured$fitting_method, "Gibbs")
 })

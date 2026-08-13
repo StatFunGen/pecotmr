@@ -50,10 +50,16 @@ delegated calls).}
 A conditions x conditions residual correlation matrix.
 }
 \description{
-Estimate the residual (null) correlation matrix \eqn{\hat V} that
-  \code{mashr::mash_set_data()} consumes as \code{V}. Split out of
-  \code{\link{mashPipeline}} so the estimation logic lives in one place and is
-  reusable by the mixture-prior workflows.
+Estimate the residual (null) correlation matrix \eqn{\hat V}
+  that \code{mashr::mash_set_data()} consumes as \code{V}. Split out of
+  \code{\link{mashPipeline}} so the estimation logic lives in one place and
+  is reusable by the mixture-prior workflows.
+}
+\examples{
+data(qtlSumStatsMulticontextExample)
+ss <- qtlSumStatsMulticontextExample
+mashResidualCorrelation(list(strong = ss, random = ss), alpha = 0,
+  method = "identity")
 }
 \seealso{
 \code{\link{mashPipeline}}, \code{\link{mashPriorCovariances}}

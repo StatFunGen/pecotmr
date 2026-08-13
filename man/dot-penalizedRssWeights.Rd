@@ -18,7 +18,8 @@
 )
 }
 \arguments{
-\item{stat, LD, s, selection, penalty, gamma, alpha, lambda0, lambda2, ...}{See the public wrappers for details.}
+\item{stat, LD, s, selection, penalty, gamma, alpha, lambda0, lambda2, ...}{See the
+public wrappers for details.}
 }
 \value{
 Numeric weight vector of length \code{nrow(LD)}.
@@ -27,8 +28,8 @@ Numeric weight vector of length \code{nrow(LD)}.
 Shared implementation for \code{scadRssWeights()} and \code{mcpRssWeights()}.
 (\code{l0learnRssWeights()} uses the lower-level \code{.rssShrinkGridWeights}
 scaffold directly, since it sweeps an additional \code{lambda0} path.)
-Searches over a shrinkage grid \code{s} (LD matrix shrinkage
-\code{(1-s)R + sI}) and selects the best candidate via LD-quadratic
-pseudovalidation or minimum penalized objective.
+Searches over a shrinkage grid \code{s} (LD matrix shrinkage \code{(1-s)R +
+sI}) and selects the best candidate via LD-quadratic pseudovalidation or
+minimum penalized objective.
 }
 \keyword{internal}

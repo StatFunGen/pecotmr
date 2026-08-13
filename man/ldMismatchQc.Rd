@@ -20,7 +20,7 @@ ldMismatchQc(
 \item{R}{Square LD correlation matrix. Provide either \code{R} or \code{X}.}
 
 \item{X}{Genotype matrix (samples x SNPs). If provided, LD is computed via
-\code{\link{computeLd}} and \code{nSample} defaults to \code{nrow(X)}.}
+\code{computeLd} and \code{nSample} defaults to \code{nrow(X)}.}
 
 \item{nSample}{Number of samples in the LD reference panel. Required when
 \code{R} is provided and \code{method = "dentist"}; inferred from \code{X}
@@ -30,8 +30,9 @@ when \code{X} is provided.}
 (default) or \code{"dentist"}.}
 
 \item{ldMethod}{Character string specifying the LD computation method when
-\code{X} is provided. One of \code{"sample"} (default), \code{"population"},
-or \code{"gcta"}. Ignored when \code{R} is provided directly.}
+\code{X} is provided. One of \code{"sample"} (default),
+\code{"population"}, or \code{"gcta"}. Ignored when \code{R} is provided
+directly.}
 
 \item{...}{Additional arguments passed to the underlying QC method
 (\code{\link{dentistSingleWindow}} or \code{\link{slalom}}).}
@@ -45,6 +46,11 @@ A data frame with at least a logical \code{outlier} column indicating
 Unified wrapper for detecting outlier variants due to LD-summary statistic
 mismatches. Dispatches to either \code{\link{dentistSingleWindow}} or
 \code{\link{slalom}} based on the \code{method} argument.
+}
+\examples{
+data(eqtlRegionExample)
+R <- cor(eqtlRegionExample$X[, 1:20])
+ldMismatchQc(zScore = rnorm(20), R = R, nSample = 415)
 }
 \seealso{
 \code{\link{dentistSingleWindow}}, \code{\link{slalom}},

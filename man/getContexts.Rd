@@ -33,7 +33,11 @@ getContexts(x)
 Character vector of context names.
 }
 \description{
-Return the names of all contexts carried by an object
-  (e.g., the keys of the \code{phenotypes} list on a \code{QtlDataset},
-  or the unique \code{context} values of a \code{QtlSumStats}).
+Return the names of all contexts carried by an object (e.g., the
+  keys of the \code{phenotypes} list on a \code{QtlDataset}, or the unique
+  \code{context} values of a \code{QtlSumStats}).
+}
+\examples{
+data(qtlDatasetExample)
+getContexts(qtlDatasetExample)
 }

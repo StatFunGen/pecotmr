@@ -20,35 +20,34 @@ mrmashRssWeights(
 )
 }
 \arguments{
-\item{stat}{A list with \code{z} (variants x conditions matrix) and
-\code{n} (per-context numeric vector or scalar). May also include
-\code{Bhat}, \code{Shat} matrices.}
+\item{stat}{A list with \code{z} (variants x conditions matrix) and \code{n}
+(per-context numeric vector or scalar). May also include \code{Bhat},
+\code{Shat} matrices.}
 
 \item{LD}{LD correlation matrix.}
 
-\item{mrmashRssFit}{Optional pre-fitted \code{mr.mash.rss} object;
-skips fitting when supplied.}
+\item{mrmashRssFit}{Optional pre-fitted \code{mr.mash.rss} object; skips
+fitting when supplied.}
 
-\item{dataDrivenPriorMatrices}{Optional list with element \code{U}
-(list of raw covariance matrices). Passed directly to
-\code{mr.mashr::expand_covs()} alongside the canonical mixture.}
+\item{dataDrivenPriorMatrices}{Optional list with element \code{U} (list of
+raw covariance matrices). Passed directly to \code{mr.mashr::expand_covs()}
+alongside the canonical mixture.}
 
-\item{canonicalPriorMatrices}{Logical. When TRUE (default), include
-the standard canonical mixture from
-\code{mr.mashr::compute_canonical_covs()}. When FALSE,
-\code{dataDrivenPriorMatrices} must be supplied.}
+\item{canonicalPriorMatrices}{Logical. When TRUE (default), include the
+standard canonical mixture from \code{mr.mashr::compute_canonical_covs()}.
+When FALSE, \code{dataDrivenPriorMatrices} must be supplied.}
 
-\item{S0}{Optional pre-built list of prior covariance matrices,
-bypassing the canonical / data-driven construction.}
+\item{S0}{Optional pre-built list of prior covariance matrices, bypassing the
+canonical / data-driven construction.}
 
-\item{w0}{Optional prior mixture weights; defaults to
-\code{\link{computeW0}(Bhat, length(S0))}.}
+\item{w0}{Optional prior mixture weights; defaults to \code{computeW0(Bhat,
+length(S0))}.}
 
-\item{V}{Optional residual covariance matrix (K x K). When NULL,
-defaults to the identity matrix of size K.}
+\item{V}{Optional residual covariance matrix (K x K). When NULL, defaults to
+the identity matrix of size K.}
 
-\item{covY}{Optional response covariance matrix (K x K). When NULL,
-defaults to the identity matrix of size K.}
+\item{covY}{Optional response covariance matrix (K x K). When NULL, defaults
+to the identity matrix of size K.}
 
 \item{retainFit}{If TRUE, attaches (as the \code{"fit"} attribute on the
 returned weights) the inputs \code{fineMappingPipeline} needs to rebuild
@@ -61,31 +60,40 @@ coefficients are already the returned weights); \code{"full"} additionally
 keeps the complete \code{mr.mash.rss} fit under \code{$fit}. Mirrors
 \code{\link{mrmashWeights}}.}
 
-\item{...}{Additional arguments forwarded to
-\code{mr.mashr::mr.mash.rss}.}
+\item{...}{Additional arguments forwarded to \code{mr.mashr::mr.mash.rss}.}
 }
 \value{
-A numeric matrix of per-variant per-context weights
-  (variants x conditions).
+A numeric matrix of per-variant per-context weights (variants x
+  conditions).
 }
 \description{
 Multi-context summary-statistics analog of \code{\link{mrmashWeights}}:
-extracts coefficients from an existing \code{mr.mashr::mr.mash.rss} fit,
-or fits one from \code{stat} (variants x conditions) and \code{LD}.
+extracts coefficients from an existing \code{mr.mashr::mr.mash.rss} fit, or
+fits one from \code{stat} (variants x conditions) and \code{LD}.
 }
 \details{
 Follows the \code{*_rss_weights(stat, LD, ...)} contract. Expects
 \code{stat$z} to be a numeric matrix (variants x conditions) and
-\code{stat$n} a per-context numeric vector or scalar. \code{stat$Bhat}
-and \code{stat$Shat} are used if present; otherwise derived from Z and
-n.
+\code{stat$n} a per-context numeric vector or scalar. \code{stat$Bhat} and
+\code{stat$Shat} are used if present; otherwise derived from Z and n.
 
 Prior construction reuses the same infrastructure as the individual-level
-\code{\link{mrmashWrapper}}: \code{\link{computeGrid}} +
-\code{mr.mashr::compute_canonical_covs()} +
-\code{mr.mashr::expand_covs()} for \code{S0}, and
-\code{\link{computeW0}} for the mixture weights. Supply
-\code{dataDrivenPriorMatrices} (e.g. from
-\code{\link{computeCovFlash}} / \code{\link{computeCovDiag}}) to add
-data-driven covariance components alongside the canonical mixture.
+\code{\link{mrmashWrapper}}: \code{computeGrid} +
+\code{mr.mashr::compute_canonical_covs()} + \code{mr.mashr::expand_covs()}
+for \code{S0}, and \code{computeW0} for the mixture weights. Supply
+\code{dataDrivenPriorMatrices} (e.g. from \code{\link{computeCovFlash}} /
+\code{\link{computeCovDiag}}) to add data-driven covariance components
+alongside the canonical mixture.
+}
+\examples{
+data(eqtlRegionExample)
+data(multiTraitData)
+X <- eqtlRegionExample$X[, 1:30]
+cond <- c("brain", "blood", "muscle")
+zmat <- matrix(rnorm(30 * 3), 30, 3,
+  dimnames = list(colnames(X), cond))
+stat <- list(z = zmat, n = matrix(nrow(X), 30, 3))
+mrmashRssWeights(stat, cor(X),
+  dataDrivenPriorMatrices = multiTraitData$priorMatrices,
+  canonicalPriorMatrices = TRUE)
 }

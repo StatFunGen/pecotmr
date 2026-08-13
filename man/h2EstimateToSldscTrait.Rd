@@ -28,7 +28,10 @@ A named list matching the format of \code{\link{readSldscTrait}}:
 \description{
 Convert an \code{H2Estimate} object into the list format
   expected by \code{\link{standardizeSldscTrait}} and
-  \code{\link{metaSldscRandom}}. This bridges the h2 estimation
-  methods (LDER, gLDSC, HDL) into the sldscWrapper.R postprocessing
-  pipeline.
+  \code{\link{metaSldscRandom}}. This bridges the h2 estimation methods
+  (LDER, gLDSC, HDL) into the sldscWrapper.R postprocessing pipeline.
+}
+\examples{
+data(h2EstimateExample)
+h2EstimateToSldscTrait(h2EstimateExample)
 }

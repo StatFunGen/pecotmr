@@ -23,3 +23,7 @@ Extract the association p-value vector from a
   tuple. Part of the first-class summary-statistic column set alongside
   \code{\link{getZ}} / \code{\link{getBeta}} / \code{\link{getSe}}.
 }
+\examples{
+data(qtlSumStatsExample)
+getP(qtlSumStatsExample)
+}

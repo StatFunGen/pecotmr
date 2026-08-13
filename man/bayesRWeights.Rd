@@ -2,12 +2,27 @@
 % Please edit documentation in R/regularizedRegressionWrappers.R
 \name{bayesRWeights}
 \alias{bayesRWeights}
-\title{Use a hierarchical Bayesian mixture model with four Gaussian components. Variances are scaled
-by 0, 0.0001 , 0.001 , and 0.01 .}
+\title{BayesR TWAS weights (hierarchical mixture prior)}
 \usage{
 bayesRWeights(X, y, Z = NULL, ...)
 }
+\arguments{
+\item{X}{Numeric genotype / design matrix (samples x variants).}
+
+\item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}.}
+
+\item{Z}{Optional numeric matrix of fixed-effect covariates, or \code{NULL}.}
+
+\item{...}{Additional arguments forwarded to \code{bayesAlphabetWeights} /
+\code{qgg}.}
+}
 \description{
-Use a hierarchical Bayesian mixture model with four Gaussian components. Variances are scaled
-by 0, 0.0001 , 0.001 , and 0.01 .
+Use a hierarchical Bayesian mixture model with four Gaussian
+  components. Variances are scaled by 0, 0.0001, 0.001, and 0.01.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+bayesRWeights(X, y)
 }

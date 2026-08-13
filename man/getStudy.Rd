@@ -34,3 +34,7 @@ Character (length 1).
 \description{
 Return the study identifier carried by a \code{QtlDataset}.
 }
+\examples{
+data(qtlDatasetExample)
+getStudy(qtlDatasetExample)
+}

@@ -25,13 +25,41 @@ A list with \code{tau_star_single}, \code{tau_star_joint},
 }
 \description{
 Re-run the random-effects meta-analysis (DerSimonian-Laird, via
-\code{metafor::rma}) on a chosen subset
-of the per-trait standardised tables produced by
-\code{\link{sldscPostprocessingPipeline}} -- no regression is re-run, only the
-already-standardised per-trait estimates are re-meta'd. Powers a "meta on a
-subset of traits" workflow: pick traits, pick target annotation categories,
-and get the per-category tau* / enrichment / enrichstat meta results back.
+\code{metafor::rma}) on a chosen subset of the per-trait standardised tables
+produced by \code{\link{sldscPostprocessingPipeline}} -- no regression is
+re-run, only the already-standardised per-trait estimates are re-meta'd.
+Powers a "meta on a subset of traits" workflow: pick traits, pick target
+annotation categories, and get the per-category tau* / enrichment /
+enrichstat meta results back.
+}
+\examples{
+mkRun <- function(cats) {
+  n <- length(cats)
+  list(categories = cats, tau = setNames(rep(1e-7, n), cats),
+    tauSe = setNames(rep(3e-8, n), cats),
+    enrichment = setNames(rep(2, n), cats),
+    enrichmentSe = setNames(rep(0.4, n), cats),
+    enrichmentP = setNames(rep(0.01, n), cats),
+    propH2 = setNames(rep(0.2, n), cats),
+    propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
+    tauBlocks = matrix(1e-7, 10, n, dimnames = list(NULL, cats)),
+    nBlocks = 10L)
+}
+annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
+  annot_A = c(1, 0, 1, 0, 1, 0), annot_B = c(2.1, 1.8, 2.5, 1.9, 2.3, 2))
+frq <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
+  MAF = rep(0.2, 6))
+mkTrait <- function() {
+  list(single = list(mkRun(c("annot_A_0", "baselineLD_0")),
+    mkRun(c("annot_B_0", "baselineLD_0"))),
+    joint = mkRun(c("annot_A_0", "annot_B_0", "baselineLD_0")))
+}
+traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
+sd <- SldscData(annot = annot, frq = frq, traits = traits)
+pp <- sldscPostprocessingPipeline(sd)
+sldscSubsetMeta(pp, subsetTraits = "traitX")
 }
 \seealso{
-\code{\link{sldscPostprocessingPipeline}}, \code{\link{metaSldscRandom}}
+\code{\link{sldscPostprocessingPipeline}},
+  \code{\link{metaSldscRandom}}
 }

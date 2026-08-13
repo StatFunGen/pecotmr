@@ -22,32 +22,68 @@ learnTwasWeights(
 )
 }
 \arguments{
-\item{X}{A matrix of samples by features, where each row represents a sample and each column a feature.}
+\item{X}{A matrix of samples by features, where each row represents a sample
+and each column a feature.}
 
-\item{Y}{A matrix (or vector, which will be converted to a matrix) of samples by outcomes, where each row corresponds to a sample.}
+\item{Y}{A matrix (or vector, which will be converted to a matrix) of samples
+by outcomes, where each row corresponds to a sample.}
 
-\item{weightMethods}{A list of methods and their specific arguments, formatted as list(method1 = method1_args, method2 = method2_args), or alternatively a character vector of method names (eg, c("susie_weights", "enet_weights")) in which case default arguments will be used for all methods.
-methods in the list can be either univariate (applied to each column of Y) or multivariate (applied to the entire Y matrix).}
+\item{weightMethods}{A list of methods and their specific arguments,
+formatted as list(method1 = method1_args, method2 = method2_args), or
+alternatively a character vector of method names (eg, c("susie_weights",
+"enet_weights")) in which case default arguments will be used for all
+methods. methods in the list can be either univariate (applied to each
+column of Y) or multivariate (applied to the entire Y matrix).}
 
-\item{numThreads}{The number of threads to use for parallel processing.
-If set to -1, the function uses all available cores.
-If set to 0 or 1, no parallel processing is performed.
-If set to 2 or more, parallel processing is enabled with that many threads.}
+\item{study}{Character. Study identity label recorded on the resulting
+weights.}
+
+\item{context}{Character. Context identity label recorded on the resulting
+weights.}
+
+\item{trait}{Character. Trait identity label recorded on the resulting
+weights.}
+
+\item{numThreads}{The number of threads to use for parallel processing. If
+set to -1, the function uses all available cores. If set to 0 or 1, no
+parallel processing is performed. If set to 2 or more, parallel processing
+is enabled with that many threads.}
 
 \item{fittedModels}{Optional named list of fitted SuSiE-family models.}
 
 \item{retainFits}{If TRUE, retain fitted model objects as attributes on
 returned weight matrices when supported by the weight method.}
 
-\item{verbose}{Integer controlling verbosity level: 0 = suppress all messages,
-1 = suppress external package messages (default),
-2 = show all messages including those from external packages.}
+\item{retainFitDetail}{Character. Level of fit detail to retain:
+\code{"slim"} (default) or \code{"full"}.}
+
+\item{standardized}{Logical. Whether the supplied \code{X} / \code{Y} are
+already standardized. Default \code{FALSE}.}
+
+\item{dataType}{Character or \code{NULL}. Data-type label recorded on the
+weights (e.g. \code{"individual"}).}
+
+\item{ldSketch}{A \code{GenotypeHandle} LD sketch to record on the weights,
+or \code{NULL}.}
+
+\item{verbose}{Integer controlling verbosity level: 0 = suppress all
+messages, 1 = suppress external package messages (default), 2 = show all
+messages including those from external packages.}
 }
 \value{
-A list where each element is named after a method and contains the weight matrix produced by that method.
+A list where each element is named after a method and contains the
+  weight matrix produced by that method.
 }
 \description{
-Applies specified weight methods to the datasets X and Y, returning weight matrices for each method.
-Handles both univariate and multivariate methods, and filters out columns in X with zero standard error.
-This function utilizes parallel processing to handle multiple methods.
+Applies specified weight methods to the datasets X and Y, returning weight
+matrices for each method. Handles both univariate and multivariate methods,
+and filters out columns in X with zero standard error. This function utilizes
+parallel processing to handle multiple methods.
+}
+\examples{
+data(multiTraitData)
+X <- multiTraitData$X[, 1:80]
+Y <- multiTraitData$Y
+learnTwasWeights(X, Y[, 1, drop = FALSE],
+  weightMethods = list(susie_weights = list()))
 }

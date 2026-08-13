@@ -16,6 +16,10 @@ getInSample(x)
 Logical (length 1).
 }
 \description{
-Whether the LD reference panel is from the same cohort
-  as the GWAS (affects bias correction).
+Whether the LD reference panel is from the same cohort as the
+  GWAS (affects bias correction).
+}
+\examples{
+data(ldEigenExample)
+getInSample(ldEigenExample)
 }

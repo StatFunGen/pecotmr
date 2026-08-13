@@ -1,4 +1,4 @@
-#include "qtl_enrichment.hpp"
+#include "qtl_enrichment.h"
 
 [[cpp11::register]]
 cpp11::writable::list qtlEnrichmentRcpp(

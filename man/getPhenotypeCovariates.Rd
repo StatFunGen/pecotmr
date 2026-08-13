@@ -19,6 +19,10 @@ getPhenotypeCovariates(x, contexts)
 A named list of matrices keyed by context.
 }
 \description{
-Return per-context phenotype covariate matrices, taken
-  from the \code{colData} of each context's \code{SummarizedExperiment}.
+Return per-context phenotype covariate matrices, taken from the
+  \code{colData} of each context's \code{SummarizedExperiment}.
+}
+\examples{
+data(qtlDatasetExample)
+getPhenotypeCovariates(qtlDatasetExample, contexts = "brain")
 }

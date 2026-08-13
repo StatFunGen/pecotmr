@@ -16,10 +16,40 @@ getTraitRun(x, trait, ...)
 
 \item{...}{Further arguments: \code{mode} (\code{"single"}/\code{"joint"})
 and \code{idx} (which single run).}
+
+\item{mode}{Character. Trait-run selection mode.}
+
+\item{idx}{Integer. Index of the trait run to select.}
 }
 \value{
 A single run list, the list of single runs, or \code{NULL}.
 }
 \description{
 Get one trait's run from an SldscData
+}
+\examples{
+mkRun <- function(cats) {
+  n <- length(cats)
+  list(categories = cats, tau = setNames(rep(1e-7, n), cats),
+    tauSe = setNames(rep(3e-8, n), cats),
+    enrichment = setNames(rep(2, n), cats),
+    enrichmentSe = setNames(rep(0.4, n), cats),
+    enrichmentP = setNames(rep(0.01, n), cats),
+    propH2 = setNames(rep(0.2, n), cats),
+    propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
+    tauBlocks = matrix(1e-7, 10, n, dimnames = list(NULL, cats)),
+    nBlocks = 10L)
+}
+annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
+  annot_A = c(1, 0, 1, 0, 1, 0), annot_B = c(2.1, 1.8, 2.5, 1.9, 2.3, 2))
+frq <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
+  MAF = rep(0.2, 6))
+mkTrait <- function() {
+  list(single = list(mkRun(c("annot_A_0", "baselineLD_0")),
+    mkRun(c("annot_B_0", "baselineLD_0"))),
+    joint = mkRun(c("annot_A_0", "annot_B_0", "baselineLD_0")))
+}
+traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
+sd <- SldscData(annot = annot, frq = frq, traits = traits)
+getTraitRun(sd, "traitX")
 }

@@ -6,6 +6,7 @@ S3method(postprocessFinemappingFit,susiF)
 S3method(postprocessFinemappingFit,susie)
 S3method(postprocessFinemappingFit,susieInf)
 S3method(postprocessFinemappingFit,susieRss)
+export(.fmResolveRFinite)
 export(AnnotationMatrix)
 export(CtwasResult)
 export(CtwasResultEntry)
@@ -23,14 +24,11 @@ export(SldscData)
 export(TwasWeights)
 export(TwasWeightsEntry)
 export(adjustPips)
-export(alignVariantNames)
-export(alleleQc)
 export(asCtwasResult)
 export(asGranges)
 export(assembleCtwasInputs)
 export(autoDecision)
 export(bLassoWeights)
-export(batchLoadTwasWeights)
 export(bayesAWeights)
 export(bayesAlphabetWeights)
 export(bayesBWeights)
@@ -45,8 +43,6 @@ export(causalInferencePipeline)
 export(checkLd)
 export(classifyVariantType)
 export(colocPipeline)
-export(colocPostProcessor)
-export(colocWrapper)
 export(colocboostPipeline)
 export(combineFineMappingResults)
 export(combinePValues)
@@ -55,11 +51,10 @@ export(computeBlockLdCor)
 export(computeCoefficientsGlasso)
 export(computeCovDiag)
 export(computeCovFlash)
+export(computeCsTables)
 export(computeLdScores)
-export(computeQtlEnrichment)
 export(computeSldscAnnotSd)
 export(computeSldscMRef)
-export(ctwasBimfileLoader)
 export(ctwasPipeline)
 export(dentist)
 export(dentistSingleWindow)
@@ -70,7 +65,6 @@ export(dprWeights)
 export(effectiveN)
 export(enetWeights)
 export(enforceDesignFullRank)
-export(enlocPipeline)
 export(ensembleWeights)
 export(estCtwasParam)
 export(estimateH2)
@@ -110,7 +104,6 @@ export(getContexts)
 export(getCorrelation)
 export(getCredibleSetSummary)
 export(getCs)
-export(getCtwasMetaData)
 export(getCtwasParam)
 export(getCvFits)
 export(getCvResult)
@@ -187,8 +180,6 @@ export(getWeights)
 export(getZ)
 export(glmnetWeights)
 export(h2EstimateToSldscTrait)
-export(harmonizeGwas)
-export(harmonizeTwas)
 export(hasGenotypes)
 export(invertMinmaxScaling)
 export(isBinarySldscAnnot)
@@ -210,20 +201,8 @@ export(loadLdBlock)
 export(loadLdMatrix)
 export(loadLdSketch)
 export(loadMultiStudyQtlDatasetFromManifest)
-export(loadMultitaskRegionalData)
-export(loadMultitraitRSumstat)
-export(loadMultitraitTensorqtlSumstat)
 export(loadQtlDatasetFromManifest)
 export(loadQtlSumStatsFromManifest)
-export(loadRegionalAssociationData)
-export(loadRegionalFunctionalData)
-export(loadRegionalMultivariateData)
-export(loadRegionalRegressionData)
-export(loadRegionalUnivariateData)
-export(loadRssData)
-export(loadStudyLd)
-export(loadTsvRegion)
-export(loadTwasWeights)
 export(makePairwiseContrastCol)
 export(mashCovarianceComponents)
 export(mashInput)
@@ -234,7 +213,6 @@ export(mashPosteriorContrast)
 export(mashPriorCovariances)
 export(mashRandNullSample)
 export(mashResidualCorrelation)
-export(matchRefPanel)
 export(mcpRssWeights)
 export(mcpWeights)
 export(mergeCtwasBoundaryRegions)
@@ -248,7 +226,6 @@ export(mrashWeights)
 export(mrmashRssWeights)
 export(mrmashWeights)
 export(mrmashWrapper)
-export(multivariateAnalysisPipeline)
 export(mvsusieRssWeights)
 export(mvsusieWeights)
 export(nSignificantScore)
@@ -274,12 +251,9 @@ export(readGenotypes)
 export(readSldscAnnot)
 export(readSldscFrq)
 export(readSldscTrait)
-export(regionDataToIndInput)
-export(regionDataToRssInput)
 export(regionToDf)
 export(regionsOverlap)
 export(resolveWeights)
-export(rssAnalysisPipeline)
 export(sanitizeMashData)
 export(scadRssWeights)
 export(scadWeights)
@@ -291,7 +265,6 @@ export(slalom)
 export(sldscPostprocessingPipeline)
 export(sldscSubsetMeta)
 export(sliceMashData)
-export(standardiseSumstatsColumns)
 export(standardizeSldscTrait)
 export(subsetChr)
 export(summaryStatsQc)
@@ -299,22 +272,18 @@ export(susieAshRssWeights)
 export(susieAshWeights)
 export(susieInfRssWeights)
 export(susieInfWeights)
-export(susieRssPipeline)
 export(susieRssWeights)
 export(susieWeights)
-export(twasMultivariateWeightsPipeline)
-export(twasPipeline)
 export(twasPredict)
 export(twasWeightsCv)
 export(twasWeightsPipeline)
 export(twasZ)
-export(univariateAnalysisPipeline)
 export(updateMashModelCov)
 export(variantIdToDf)
 export(waldTestPval)
 export(writeSumstatsVcf)
-export(xqtlEnrichmentWrapper)
 exportClasses(AnnotationMatrix)
+exportClasses(FineMappingEntry)
 exportClasses(FineMappingResultBase)
 exportClasses(GenotypeHandle)
 exportClasses(H2Estimate)
@@ -324,6 +293,7 @@ exportClasses(LdScore)
 exportClasses(LdStatistic)
 exportClasses(MashPrior)
 exportClasses(MultiStudyQtlDataset)
+exportClasses(QtlDataset)
 exportClasses(SldscData)
 exportClasses(SumStatsBase)
 exportMethods(adjustPips)
@@ -428,110 +398,165 @@ exportMethods(show)
 exportMethods(subsetChr)
 exportMethods(twasWeightsPipeline)
 exportMethods(writeSumstatsVcf)
-importFrom(BiocParallel,MulticoreParam)
-importFrom(BiocParallel,bplapply)
-importFrom(BiocParallel,bpparam)
-importFrom(BiocParallel,bpworkers)
-importFrom(Biostrings,DNAStringSet)
-importFrom(Biostrings,DNAStringSetList)
-importFrom(GenomicRanges,GRanges)
-importFrom(GenomicRanges,end)
-importFrom(GenomicRanges,seqnames)
-importFrom(GenomicRanges,start)
-importFrom(IRanges,DataFrameList)
-importFrom(IRanges,IRanges)
-importFrom(IRanges,findOverlaps)
+importFrom(BiocParallel,
+  MulticoreParam,
+  bplapply,
+  bpparam,
+  bpworkers
+)
+importFrom(Biostrings,
+  DNAStringSet,
+  DNAStringSetList
+)
+importFrom(GenomicRanges,
+  GRanges,
+  end,
+  seqnames,
+  start
+)
+importFrom(IRanges,
+  DataFrameList,
+  IRanges,
+  findOverlaps
+)
 importFrom(MASS,ginv)
-importFrom(Rsamtools,TabixFile)
-importFrom(Rsamtools,asBcf)
-importFrom(Rsamtools,headerTabix)
-importFrom(Rsamtools,scanTabix)
-importFrom(Rsamtools,seqnamesTabix)
-importFrom(S4Vectors,"mcols<-")
-importFrom(S4Vectors,DataFrame)
-importFrom(S4Vectors,SimpleList)
-importFrom(S4Vectors,mcols)
-importFrom(S4Vectors,queryHits)
-importFrom(S4Vectors,subjectHits)
-importFrom(SummarizedExperiment,SummarizedExperiment)
-importFrom(SummarizedExperiment,assay)
-importFrom(SummarizedExperiment,rowRanges)
-importFrom(dplyr,all_of)
-importFrom(dplyr,any_of)
-importFrom(dplyr,arrange)
-importFrom(dplyr,bind_rows)
-importFrom(dplyr,case_when)
-importFrom(dplyr,distinct)
-importFrom(dplyr,everything)
-importFrom(dplyr,filter)
-importFrom(dplyr,group_by)
-importFrom(dplyr,if_else)
-importFrom(dplyr,inner_join)
-importFrom(dplyr,matches)
-importFrom(dplyr,mutate)
-importFrom(dplyr,pull)
-importFrom(dplyr,rename)
-importFrom(dplyr,row_number)
-importFrom(dplyr,select)
-importFrom(dplyr,slice)
-importFrom(dplyr,summarise)
+importFrom(Rsamtools,
+  TabixFile,
+  asBcf,
+  headerTabix,
+  scanTabix,
+  seqnamesTabix
+)
+importFrom(S4Vectors,
+  "mcols<-",
+  DataFrame,
+  SimpleList,
+  mcols,
+  queryHits,
+  subjectHits
+)
+importFrom(SummarizedExperiment,
+  SummarizedExperiment,
+  assay,
+  rowRanges
+)
+importFrom(dplyr,
+  across,
+  all_of,
+  any_of,
+  arrange,
+  bind_rows,
+  case_when,
+  desc,
+  distinct,
+  everything,
+  filter,
+  group_by,
+  if_else,
+  inner_join,
+  matches,
+  mutate,
+  pull,
+  rename,
+  row_number,
+  select,
+  slice,
+  summarise
+)
 importFrom(magrittr,"%>%")
 importFrom(matrixStats,colSds)
 importFrom(metafor,rma)
-importFrom(methods,as)
-importFrom(methods,is)
-importFrom(methods,new)
-importFrom(methods,setClass)
-importFrom(methods,setGeneric)
-importFrom(methods,setMethod)
-importFrom(methods,validObject)
-importFrom(purrr,exec)
-importFrom(purrr,keep)
-importFrom(purrr,map)
-importFrom(purrr,map_dfr)
-importFrom(purrr,map_lgl)
+importFrom(methods,
+  as,
+  is,
+  new,
+  setClass,
+  setGeneric,
+  setMethod,
+  show,
+  validObject
+)
+importFrom(purrr,
+  compact,
+  exec,
+  imap,
+  keep,
+  list_c,
+  list_flatten,
+  list_modify,
+  list_rbind,
+  map,
+  map2,
+  map_chr,
+  map_dbl,
+  map_dfr,
+  map_int,
+  map_lgl,
+  reduce,
+  set_names
+)
 importFrom(quadprog,solve.QP)
 importFrom(readr,read_lines)
 importFrom(rlang,"!!!")
-importFrom(stats,as.dist)
-importFrom(stats,coef)
-importFrom(stats,complete.cases)
-importFrom(stats,cor)
-importFrom(stats,cutree)
-importFrom(stats,hclust)
-importFrom(stats,lm)
-importFrom(stats,median)
-importFrom(stats,na.omit)
-importFrom(stats,optim)
-importFrom(stats,optimize)
-importFrom(stats,pnorm)
-importFrom(stats,predict)
-importFrom(stats,qnorm)
-importFrom(stats,sd)
-importFrom(stats,setNames)
-importFrom(stats,var)
-importFrom(stringr,str_remove_all)
-importFrom(stringr,str_replace)
-importFrom(stringr,str_split)
-importFrom(susieR,coef.susie)
-importFrom(susieR,get_cs_correlation)
-importFrom(susieR,mr.ash)
-importFrom(susieR,mr.ash.rss)
-importFrom(susieR,susie)
-importFrom(susieR,susie_get_cs)
-importFrom(susieR,susie_rss)
-importFrom(susieR,univariate_regression)
+importFrom(stats,
+  as.dist,
+  coef,
+  complete.cases,
+  cor,
+  cov2cor,
+  cutree,
+  hclust,
+  lm,
+  lm.fit,
+  median,
+  na.omit,
+  optim,
+  optimize,
+  pcauchy,
+  pchisq,
+  pnorm,
+  predict,
+  pt,
+  qnorm,
+  quantile,
+  sd,
+  setNames,
+  var
+)
+importFrom(stringr,
+  str_remove_all,
+  str_replace,
+  str_split
+)
+importFrom(susieR,
+  coef.susie,
+  get_cs_correlation,
+  mr.ash,
+  mr.ash.rss,
+  susie,
+  susie_get_cs,
+  susie_rss,
+  univariate_regression
+)
 importFrom(tibble,tibble)
-importFrom(tictoc,tic)
-importFrom(tictoc,toc)
+importFrom(tictoc,
+  tic,
+  toc
+)
 importFrom(tidyr,separate)
 importFrom(tidyselect,all_of)
-importFrom(tools,file_ext)
-importFrom(tools,file_path_sans_ext)
-importFrom(utils,combn)
-importFrom(utils,head)
-importFrom(utils,read.table)
-importFrom(utils,tail)
+importFrom(tools,
+  file_ext,
+  file_path_sans_ext
+)
+importFrom(utils,
+  combn,
+  head,
+  modifyList,
+  read.table,
+  strcapture,
+  tail
+)
 importFrom(vctrs,vec_duplicate_detect)
 importFrom(vroom,vroom)
 useDynLib(pecotmr, .registration = TRUE)

@@ -23,6 +23,9 @@ getTraitPosition(x, ...)
 \item{x}{The object.}
 
 \item{...}{Reserved for future use.}
+
+\item{traitId}{Character or \code{NULL}. Molecular trait / feature identifier
+to select; \code{NULL} matches all traits in the dataset.}
 }
 \value{
 A \code{GRanges} with one range per row of \code{x}, or an empty
@@ -37,4 +40,8 @@ Return the molecular feature's OWN genomic coordinates (the gene
   summary statistics, so it is threaded from the QtlDataset \code{rowRanges}
   or an explicit QtlSumStats trait-position and carried as provenance onto
   \code{QtlFineMappingResult} and \code{TwasWeights}.
+}
+\examples{
+data(qtlDatasetExample)
+getTraitPosition(qtlDatasetExample)
 }

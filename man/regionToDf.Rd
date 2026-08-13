@@ -8,9 +8,15 @@ regionToDf(ldRegionId, colnames = c("chrom", "start", "end"))
 }
 \arguments{
 \item{ldRegionId}{A string of region in the format of chrom_start_end.}
+
+\item{colnames}{Character vector of length 3 giving output column names for
+chromosome, start and end. Default \code{c("chrom", "start", "end")}.}
 }
 \description{
 The first field is treated as the chromosome and kept as a normalized string
 (via \code{canonChrom}) so X/Y/MT survive; the remaining fields are genomic
 positions and are returned as integers.
+}
+\examples{
+regionToDf(c("1_100_200", "2_300_400"))
 }

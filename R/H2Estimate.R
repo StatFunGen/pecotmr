@@ -9,20 +9,20 @@
 # =============================================================================
 
 #' @title Heritability Estimate
-#' @description Container for univariate heritability estimation results.
-#'   Holds global, local, and annotation-stratified estimates.
+#' @description Container for univariate heritability estimation results. Holds
+#'   global, local, and annotation-stratified estimates.
 #' @slot h2 Numeric, global SNP heritability estimate.
 #' @slot h2Se Numeric, standard error of global h2.
-#' @slot intercept Numeric, confounding intercept estimate (NA if method
-#'   does not estimate one).
+#' @slot intercept Numeric, confounding intercept estimate (NA if method does
+#'   not estimate one).
 #' @slot interceptSe Numeric, SE of intercept.
-#' @slot local A \code{data.frame} with per-block local heritability
-#'   estimates (columns: \code{blockId}, \code{h2Local}, \code{h2LocalSe}).
-#'   NULL if \code{local = FALSE}.
+#' @slot local A \code{data.frame} with per-block local heritability estimates
+#'   (columns: \code{blockId}, \code{h2Local}, \code{h2LocalSe}). NULL if
+#'   \code{local = FALSE}.
 #' @slot enrichment A \code{data.frame} with baseline annotation enrichment
 #'   estimates (columns: \code{annotation}, \code{tau}, \code{tauSe},
-#'   \code{enrichment}, \code{enrichmentSe}, \code{enrichmentP},
-#'   \code{propH2}, \code{propSnps}). NULL if unstratified.
+#'   \code{enrichment}, \code{enrichmentSe}, \code{enrichmentP}, \code{propH2},
+#'   \code{propSnps}). NULL if unstratified.
 #' @slot tauBlocks A numeric matrix (nBlocks x n_annotations) of per-block
 #'   jackknife tau values. Required for Gazal tauStar standardization
 #'   downstream. NULL if not available (e.g., unstratified analysis).
@@ -38,20 +38,21 @@
 #' @slot nSnps Integer, number of SNPs used in estimation.
 #' @slot traitName Character string for trait identifier.
 #' @export
-setClass("H2Estimate",
-  representation(
-    h2 = "numeric",
-    h2Se = "numeric",
-    intercept = "numeric",
-    interceptSe = "numeric",
-    local = "ANY",        # data.frame or NULL
-    enrichment = "ANY",   # data.frame or NULL
-    tauBlocks = "ANY",    # matrix or NULL
-    scoreStats = "ANY",   # list or NULL
-    method = "character",
-    nSnps = "integer",
-    traitName = "character"
-  )
+setClass(
+    "H2Estimate",
+    representation(
+        h2 = "numeric",
+        h2Se = "numeric",
+        intercept = "numeric",
+        interceptSe = "numeric",
+        local = "ANY", # data.frame or NULL
+        enrichment = "ANY", # data.frame or NULL
+        tauBlocks = "ANY", # matrix or NULL
+        scoreStats = "ANY", # list or NULL
+        method = "character",
+        nSnps = "integer",
+        traitName = "character"
+    )
 )
 
 
@@ -70,19 +71,19 @@ setMethod("getTauBlocks", "H2Estimate", function(x) x@tauBlocks)
 #' @rdname getLocal
 #' @export
 setMethod("getLocal", "H2Estimate", function(object) {
-  object@local
+    object@local
 })
 
 #' @rdname getEnrichment
 #' @export
 setMethod("getEnrichment", "H2Estimate", function(object) {
-  object@enrichment
+    object@enrichment
 })
 
 #' @rdname getScoreStats
 #' @export
 setMethod("getScoreStats", "H2Estimate", function(object) {
-  object@scoreStats
+    object@scoreStats
 })
 
 
@@ -90,18 +91,30 @@ setMethod("getScoreStats", "H2Estimate", function(object) {
 # Show
 # =============================================================================
 
+#' @rdname show-methods
 #' @export
 setMethod("show", "H2Estimate", function(object) {
-  cat(sprintf("H2Estimate for '%s' (method: %s)\n",
-              object@traitName, object@method))
-  cat(sprintf("  h2 = %.4f (SE = %.4f)\n", object@h2, object@h2Se))
-  if (!is.na(object@intercept))
-    cat(sprintf("  intercept = %.4f (SE = %.4f)\n",
-                object@intercept, object@interceptSe))
-  has_local <- !is.null(object@local)
-  has_enrich <- !is.null(object@enrichment)
-  has_tau_blocks <- !is.null(object@tauBlocks)
-  cat(sprintf("  Local: %s, Enrichment: %s, tauBlocks: %s\n",
-              has_local, has_enrich, has_tau_blocks))
-  cat(sprintf("  N SNPs: %d\n", object@nSnps))
+    cat(sprintf(
+        "H2Estimate for '%s' (method: %s)\n",
+        object@traitName,
+        object@method
+    ))
+    cat(sprintf("  h2 = %.4f (SE = %.4f)\n", object@h2, object@h2Se))
+    if (!is.na(object@intercept)) {
+        cat(sprintf(
+            "  intercept = %.4f (SE = %.4f)\n",
+            object@intercept,
+            object@interceptSe
+        ))
+    }
+    has_local <- !is.null(object@local)
+    has_enrich <- !is.null(object@enrichment)
+    has_tau_blocks <- !is.null(object@tauBlocks)
+    cat(sprintf(
+        "  Local: %s, Enrichment: %s, tauBlocks: %s\n",
+        has_local,
+        has_enrich,
+        has_tau_blocks
+    ))
+    cat(sprintf("  N SNPs: %d\n", object@nSnps))
 })

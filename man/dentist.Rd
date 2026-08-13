@@ -24,50 +24,60 @@ dentist(
 )
 }
 \arguments{
-\item{sumStat}{A data frame containing summary statistics, including 'pos' or 'position' and 'z' or 'zscore' columns.}
+\item{sumStat}{A data frame containing summary statistics, including 'pos' or
+'position' and 'z' or 'zscore' columns.}
 
 \item{R}{Square LD correlation matrix. Provide either \code{R} or \code{X}.}
 
 \item{X}{Genotype matrix (samples x SNPs). If provided, LD is computed via
 \code{computeLd(X)} and \code{nSample} defaults to \code{nrow(X)}.}
 
-\item{nSample}{The number of samples in the LD reference panel (NOT the GWAS sample
-size). This controls the SVD truncation rank K = min(idx_size, nSample) * propSVD.
-Required when \code{R} is provided; inferred from \code{X} when \code{X} is provided.}
+\item{nSample}{The number of samples in the LD reference panel (NOT the GWAS
+sample size). This controls the SVD truncation rank K = min(idx_size,
+nSample) * propSVD. Required when \code{R} is provided; inferred from
+\code{X} when \code{X} is provided.}
 
-\item{windowSize}{The size of the window for dividing the genomic region
-in distance mode (base pairs). Default is 2000000 (2 Mb). Only used when
+\item{windowSize}{The size of the window for dividing the genomic region in
+distance mode (base pairs). Default is 2000000 (2 Mb). Only used when
 \code{windowMode = "distance"}.}
 
 \item{windowMode}{Character string specifying the windowing strategy:
 \code{"distance"} (default) creates windows by physical distance using
-\code{\link{segmentByDist}} (C++ \code{--wind-dist}), and
-\code{"count"} creates windows by variant count using
-\code{\link{segmentByCount}} (C++ \code{--wind}).}
+\code{segmentByDist} (C++ \code{--wind-dist}), and \code{"count"} creates
+windows by variant count using \code{segmentByCount} (C++ \code{--wind}).}
 
-\item{pValueThreshold}{The p-value threshold for significance. Default is 5e-8.}
+\item{pValueThreshold}{The p-value threshold for significance. Default is
+5e-8.}
 
-\item{propSVD}{The proportion of singular value decomposition (SVD) to use. Default is 0.4.}
+\item{propSVD}{The proportion of singular value decomposition (SVD) to use.
+Default is 0.4.}
 
-\item{gcControl}{Logical indicating whether genomic control should be applied. Default is FALSE.}
+\item{gcControl}{Logical indicating whether genomic control should be
+applied. Default is FALSE.}
 
-\item{nIter}{The number of iterations for the Dentist algorithm. Default is 10.}
+\item{nIter}{The number of iterations for the Dentist algorithm. Default is
+10.}
 
-\item{gPvalueThreshold}{The genomic p-value threshold for significance. Default is 0.05.}
+\item{gPvalueThreshold}{The genomic p-value threshold for significance.
+Default is 0.05.}
 
-\item{duprThreshold}{The absolute correlation r value threshold to be considered duplicate. Default is 0.99.}
+\item{duprThreshold}{The absolute correlation r value threshold to be
+considered duplicate. Default is 0.99.}
 
-\item{ncpus}{The number of CPU cores to use for parallel processing. Default is 1.}
+\item{ncpus}{The number of CPU cores to use for parallel processing. Default
+is 1.}
 
-\item{correctChenEtAlBug}{Logical indicating whether to correct the Chen et al. bug. Default is TRUE.}
+\item{correctChenEtAlBug}{Logical indicating whether to correct the Chen et
+al. bug. Default is TRUE.}
 
-\item{minDim}{In distance mode: minimum number of SNPs per block (default 2000).
-In count mode: the number of variants per window (i.e., the window size).}
+\item{minDim}{In distance mode: minimum number of SNPs per block (default
+2000). In count mode: the number of variants per window (i.e., the window
+size).}
 
 \item{ldMethod}{Character string specifying the LD computation method when
-\code{X} is provided. Passed to \code{\link{computeLd}}. One of
-\code{"sample"} (default), \code{"population"}, or \code{"gcta"}.
-Ignored when \code{R} is provided directly.}
+\code{X} is provided. Passed to \code{computeLd}. One of \code{"sample"}
+(default), \code{"population"}, or \code{"gcta"}. Ignored when \code{R} is
+provided directly.}
 }
 \value{
 A data frame containing the imputed result and detected outliers.
@@ -75,31 +85,40 @@ A data frame containing the imputed result and detected outliers.
 The returned data frame includes the following columns:
 
 \describe{
-  \item{\code{original_z}}{The original z-score values from the input \code{sumStat}.}
-  \item{\code{imputed_z}}{The imputed z-score values computed by the Dentist algorithm.}
-  \item{\code{rsq}}{The coefficient of determination (R-squared) between original and imputed z-scores.}
-  \item{\code{iter_to_correct}}{The number of iterations required to correct the z-scores, if applicable.}
-  \item{\code{index_within_window}}{The index of the observation within the window.}
+  \item{\code{original_z}}{The original z-score values from the input
+  \code{sumStat}.}
+  \item{\code{imputed_z}}{The imputed z-score values computed by the Dentist
+  algorithm.}
+  \item{\code{rsq}}{The coefficient of determination (R-squared) between
+  original and imputed z-scores.}
+  \item{\code{iter_to_correct}}{The number of iterations required to correct
+  the z-scores, if applicable.}
+  \item{\code{index_within_window}}{The index of the observation within the
+  window.}
   \item{\code{index_global}}{The global index of the observation.}
-  \item{\code{outlier_stat}}{The computed statistical value based on the original and imputed z-scores and R-squared.}
-  \item{\code{outlier}}{A logical indicator specifying whether the observation is identified as an outlier based on the statistical test.}
+  \item{\code{outlier_stat}}{The computed statistical value based on the
+  original and imputed z-scores and R-squared.}
+  \item{\code{outlier}}{A logical indicator specifying whether the
+  observation is identified as an outlier based on the statistical test.}
 }
 }
 \description{
-DENTIST (Detecting Errors iN analyses of summary staTISTics) is a quality control
-tool for GWAS summary data. It uses linkage disequilibrium (LD) information from a reference
-panel to identify and correct problematic variants by comparing observed GWAS statistics to
-predicted values. It can detect errors in genotyping/imputation, allelic errors, and
-heterogeneity between GWAS and LD reference samples.
+DENTIST (Detecting Errors iN analyses of summary staTISTics) is a quality
+control tool for GWAS summary data. It uses linkage disequilibrium (LD)
+information from a reference panel to identify and correct problematic
+variants by comparing observed GWAS statistics to predicted values. It can
+detect errors in genotyping/imputation, allelic errors, and heterogeneity
+between GWAS and LD reference samples.
 }
 \details{
 Windowing supports two modes matching the original DENTIST C++ binary:
 \itemize{
-  \item \code{"distance"} (default): Uses the \code{segmentingByDist} algorithm
-    (C++ \code{--wind-dist}), implemented in \code{\link{segmentByDist}}.
+  \item \code{"distance"} (default): Uses the \code{segmentingByDist}
+  algorithm
+    (C++ \code{--wind-dist}), implemented in \code{segmentByDist}.
     Windows span a fixed physical distance (\code{windowSize} bp).
   \item \code{"count"}: Uses the \code{segmentedQCed} algorithm
-    (C++ \code{--wind}), implemented in \code{\link{segmentByCount}}.
+    (C++ \code{--wind}), implemented in \code{segmentByCount}.
     Windows contain a fixed number of variants (\code{minDim}).
     Useful when regions have sparse variants where distance-based windows
     would create windows with too few variants.
@@ -107,12 +126,20 @@ Windowing supports two modes matching the original DENTIST C++ binary:
 The \code{correctChenEtAlBug} parameter affects the iterative filtering
 in two ways:
 \enumerate{
-  \item Comparison between iteration index \code{t} and \code{nIter} (explained in source code)
+  \item Comparison between iteration index \code{t} and \code{nIter}
+  (explained in source code)
   \item The \code{!grouping_tmp} operator bug (explained in source code)
 }
 }
 \examples{
-# Example usage of dentist
-dentist(sumStat, R = ldMat, nSample = nSample)
+# Simulate summary statistics for 100 variants and an LD matrix estimated
+# from a 500-sample reference panel, then screen for LD-outlier variants.
+set.seed(1)
+nSample <- 500
+geno <- matrix(rbinom(nSample * 100, 2, 0.3), nrow = nSample, ncol = 100)
+ldMat <- cor(geno)
+sumStat <- data.frame(pos = seq_len(100), z = rnorm(100))
+result <- dentist(sumStat, R = ldMat, nSample = nSample)
+head(result)
 
 }

@@ -15,13 +15,13 @@ Input container packaging a full-data data-driven prior with
 \section{Slots}{
 
 \describe{
-\item{\code{fullFit}}{The full-data data-driven prior payload — the
+\item{\code{fullFit}}{The full-data data-driven prior payload -- the
 \code{mashPipeline()} output \code{list(U, w)}; fed to mr.mash as
 \code{dataDrivenPriorMatrices} for the full-data fit. \code{NULL} when only
 per-fold priors are supplied (a CV-only run).}
 
 \item{\code{cvFits}}{\code{NULL}, or a list with \code{samplePartition}
-(\code{data.frame(Sample, Fold)}) and \code{perFoldFits} (a list of per-fold
-prior payloads, \code{perFoldFits[[j]]} for fold \code{j}).}
+(\code{data.frame(Sample, Fold)}) and \code{perFoldFits} (a list of
+per-fold prior payloads, \code{perFoldFits[[j]]} for fold \code{j}).}
 }}
 

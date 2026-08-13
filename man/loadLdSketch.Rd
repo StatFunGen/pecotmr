@@ -9,20 +9,27 @@ loadLdSketch(ldMetaFilePath, region, nSample = NULL)
 \arguments{
 \item{ldMetaFilePath}{Path to the LD metadata TSV file.}
 
-\item{region}{Region of interest: "chr:start-end" string or data.frame with chrom/start/end.}
+\item{region}{Region of interest: "chr:start-end" string or data.frame with
+chrom/start/end.}
 
-\item{nSample}{Optional original panel sample size for computing variance
-(= 2*p*(1-p)*n/(n-1)). Passed through to \code{loadLdMatrix()}.}
+\item{nSample}{Optional original panel sample size for computing variance (=
+2*p*(1-p)*n/(n-1)). Passed through to \code{loadLdMatrix()}.}
 }
 \value{
 An \code{LdData} S4 object with monomorphic variants removed.
-  Consumers should use S4 accessors: \code{getGenotypes()}, \code{getRefPanel()},
-  \code{getVariantIds()}. The number of sketch samples is
-  \code{nrow(getGenotypes(result))}.
+  Consumers should use S4 accessors: \code{getGenotypes()},
+  \code{getRefPanel()}, \code{getVariantIds()}. The number of sketch samples
+  is \code{nrow(getGenotypes(result))}.
 }
 \description{
 Loads genotype data for a region via \code{loadLdMatrix(returnGenotype=TRUE)}
-and removes monomorphic variants. Returns the raw genotype matrix and metadata,
-which callers can use to derive either a correlation matrix R (for summary-based
-weight training or fine-mapping) or an SVD (for TWAS z-score computation).
+and removes monomorphic variants. Returns the raw genotype matrix and
+metadata, which callers can use to derive either a correlation matrix R (for
+summary-based weight training or fine-mapping) or an SVD (for TWAS z-score
+computation).
+}
+\examples{
+meta <- system.file("extdata", "ld_reference", "ld_meta_file.tsv",
+  package = "pecotmr")
+loadLdSketch(ldMetaFilePath = meta, region = "chr22:16000000-18000000")
 }

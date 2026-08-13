@@ -24,10 +24,13 @@ getLdSketch(x, ...)
 A \code{GenotypeHandle} or \code{NULL}.
 }
 \description{
-Return the \code{GenotypeHandle} carrying the LD
-  reference for this collection. Defined on classes that embed an
-  \code{ldSketch} slot: \code{GwasSumStats}, \code{QtlSumStats},
-  \code{FineMappingResult}, \code{TwasWeights}. Returns \code{NULL}
-  when the slot is unset (e.g. a \code{TwasWeights} fit from
-  individual-level data via \code{QtlDataset}).
+Return the \code{GenotypeHandle} carrying the LD reference for
+  this collection. Defined on classes that embed an \code{ldSketch} slot:
+  \code{GwasSumStats}, \code{QtlSumStats}, \code{FineMappingResult},
+  \code{TwasWeights}. Returns \code{NULL} when the slot is unset (e.g. a
+  \code{TwasWeights} fit from individual-level data via \code{QtlDataset}).
+}
+\examples{
+data(qtlSumStatsExample)
+getLdSketch(qtlSumStatsExample)
 }

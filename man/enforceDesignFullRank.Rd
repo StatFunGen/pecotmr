@@ -21,34 +21,33 @@ pruning).}
 \item{C}{Numeric matrix of covariates (can be unnamed) that will be kept.
 Pass \code{NULL} or a zero-column matrix when there are no covariates.}
 
-\item{strategy}{Passed through to \code{\link{dropCollinearColumns}}.}
+\item{strategy}{Passed through to \code{dropCollinearColumns}.}
 
-\item{response}{Passed through to \code{\link{dropCollinearColumns}}
-when \code{strategy = "response_correlation"}.}
+\item{response}{Passed through to \code{dropCollinearColumns} when
+\code{strategy = "response_correlation"}.}
 
-\item{maxIterations}{Integer. Hard cap on the iterative-prune loop.
-Default 300.}
+\item{maxIterations}{Integer. Hard cap on the iterative-prune loop. Default
+300.}
 
 \item{corrThresholds}{Numeric vector of |cor| thresholds used for the
-\code{\link{ldPruneByCorrelation}} fallback, tried in order.
-Default \code{seq(0.75, 0.5, by = -0.05)}.}
+\code{\link{ldPruneByCorrelation}} fallback, tried in order. Default
+\code{seq(0.75, 0.5, by = -0.05)}.}
 
-\item{verbose}{Logical. If TRUE, print per-iteration progress. Default
-FALSE.}
+\item{verbose}{Logical. If TRUE, print per-iteration progress. Default FALSE.}
 }
 \value{
 The pruned predictor matrix \code{X} (covariates \code{C} are not
   modified).
 }
 \description{
-Given a candidate predictor matrix \code{X} and an optional unnamed
-covariate matrix \code{C}, builds the design \code{[1, X, C]} and removes
+Given a candidate predictor matrix \code{X} and an optional unnamed covariate
+matrix \code{C}, builds the design \code{[1, X, C]} and removes
 rank-deficient columns from \code{X} until the design has full column rank.
-Rank-deficient columns are identified via the pivot of
-\code{qr([1, X, C])}. On each iteration, one problematic column is dropped
-using \code{\link{dropCollinearColumns}}. If iterative pruning does not
-achieve full rank, falls back to \code{\link{ldPruneByCorrelation}} at a
-descending sequence of correlation thresholds.
+Rank-deficient columns are identified via the pivot of \code{qr([1, X, C])}.
+On each iteration, one problematic column is dropped using
+\code{dropCollinearColumns}. If iterative pruning does not achieve full rank,
+falls back to \code{\link{ldPruneByCorrelation}} at a descending sequence of
+correlation thresholds.
 }
 \examples{
 set.seed(1)

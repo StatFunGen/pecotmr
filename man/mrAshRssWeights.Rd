@@ -6,9 +6,43 @@
 \usage{
 mrAshRssWeights(stat, LD, varY, sigma2E, s0, w0, z = numeric(0), ...)
 }
+\arguments{
+\item{stat}{A list of summary statistics with elements \code{b} (effect
+sizes), \code{seb} (standard errors) and \code{n} (per-variant sample
+sizes).}
+
+\item{LD}{Numeric LD (correlation) matrix aligned to the variants in
+\code{stat}.}
+
+\item{varY}{Numeric. Variance of the phenotype.}
+
+\item{sigma2E}{Numeric. Residual error variance estimate.}
+
+\item{s0}{Numeric vector of prior mixture standard deviations (the sigma0
+grid).}
+
+\item{w0}{Numeric vector of prior mixture weights (summing to 1).}
+
+\item{z}{Optional numeric vector of z-scores; defaults to \code{numeric(0)}
+(derived from \code{stat}).}
+
+\item{...}{Additional arguments forwarded to \code{mr.ash.rss}.}
+}
 \value{
 A numeric vector of the posterior mean of the coefficients.
 }
 \description{
 Extract weights from mr.ash.rss (susieR)
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+ss <- lapply(seq_len(ncol(X)), function(j) {
+  coef(summary(lm(y ~ X[, j])))[2, 1:2]
+})
+stat <- list(b = vapply(ss, `[`, numeric(1), 1L),
+  seb = vapply(ss, `[`, numeric(1), 2L), n = rep(nrow(X), ncol(X)))
+mrAshRssWeights(stat, cor(X), varY = var(y), sigma2E = var(y),
+  s0 = c(0, 0.1, 0.5), w0 = c(0.8, 0.1, 0.1))
 }

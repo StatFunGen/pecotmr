@@ -22,22 +22,21 @@ buildMrmashPriorMatrices(
 
 \item{K}{Number of conditions. When NULL, inferred from \code{ncol(Bhat)}.}
 
-\item{dataDrivenPriorMatrices}{Optional list with element \code{U}
-(list of raw covariance matrices) computed e.g. by
-\code{\link{computeCovFlash}} / \code{\link{computeCovDiag}}.}
+\item{dataDrivenPriorMatrices}{Optional list with element \code{U} (list of
+raw covariance matrices) computed e.g. by \code{\link{computeCovFlash}} /
+\code{\link{computeCovDiag}}.}
 
-\item{canonicalPriorMatrices}{Logical. When TRUE (default for RSS),
-include the standard canonical mixture from
+\item{canonicalPriorMatrices}{Logical. When TRUE (default for RSS), include
+the standard canonical mixture from
 \code{mr.mashr::compute_canonical_covs()}. When FALSE,
 \code{dataDrivenPriorMatrices} must be supplied.}
 
-\item{priorGrid}{Optional pre-computed scaling grid (numeric vector).
-When NULL, derived from \code{Bhat}, \code{Shat} via
-\code{computeGrid()}.}
+\item{priorGrid}{Optional pre-computed scaling grid (numeric vector). When
+NULL, derived from \code{Bhat}, \code{Shat} via \code{computeGrid()}.}
 
 \item{hetgrid}{Heterogeneity grid passed to
-\code{mr.mashr::compute_canonical_covs()}. Default
-\code{c(0, 0.25, 0.5, 0.75, 1)}, matching the individual-level wrapper.}
+\code{mr.mashr::compute_canonical_covs()}. Default \code{c(0, 0.25, 0.5,
+0.75, 1)}, matching the individual-level wrapper.}
 
 \item{singletons}{Whether to include single-condition prior components.
 Default TRUE.}
@@ -48,11 +47,16 @@ A list with components \code{S0} (the expanded list of prior
   used).
 }
 \description{
-Shared helper used by both \code{\link{mrmashWrapper}} (individual-level)
-and \code{\link{mrmashRssWeights}} (summary statistics). Constructs the
-\code{S0} list of prior covariance matrices via the canonical mixture
-(\code{mr.mashr::compute_canonical_covs}) and optional data-driven
-matrices, expanded over a scaling grid via
-\code{mr.mashr::expand_covs}. The prior grid is derived from \code{Bhat}
-and \code{Shat} via \code{\link{computeGrid}} when not supplied.
+Shared helper used by both \code{\link{mrmashWrapper}} (individual-level) and
+\code{\link{mrmashRssWeights}} (summary statistics). Constructs the \code{S0}
+list of prior covariance matrices via the canonical mixture
+(\code{mr.mashr::compute_canonical_covs}) and optional data-driven matrices,
+expanded over a scaling grid via \code{mr.mashr::expand_covs}. The prior grid
+is derived from \code{Bhat} and \code{Shat} via \code{computeGrid} when not
+supplied.
+}
+\examples{
+Bhat <- matrix(rnorm(15), 5, 3)
+Shat <- matrix(abs(rnorm(15)) + 0.1, 5, 3)
+buildMrmashPriorMatrices(Bhat = Bhat, Shat = Shat)
 }

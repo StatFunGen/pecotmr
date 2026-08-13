@@ -4,7 +4,7 @@
 \alias{pecotmr-h2-annotations}
 \title{Annotation Handling for Stratified Heritability}
 \description{
-Read and manage genomic annotations for stratified
-  heritability analysis. Supports BED, BigWig, and LDSC .annot formats.
+Read and manage genomic annotations for stratified heritability
+  analysis. Supports BED, BigWig, and LDSC .annot formats.
 }
 \keyword{internal}

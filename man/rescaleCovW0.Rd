@@ -7,7 +7,8 @@
 rescaleCovW0(w0)
 }
 \arguments{
-\item{w0}{is the weight of mr.mash prior matrices that was generated from mr.mash() function.}
+\item{w0}{is the weight of mr.mash prior matrices that was generated from
+mr.mash() function.}
 }
 \description{
 Re-normalize mrmash weight w0 to have total weight sum to 1

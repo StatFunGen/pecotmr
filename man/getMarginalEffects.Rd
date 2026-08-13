@@ -25,20 +25,38 @@ getMarginalEffects(x, maxPval = NULL, ...)
 \arguments{
 \item{x}{A \code{FineMappingEntry} or \code{FineMappingResult}.}
 
-\item{maxPval}{Optional numeric (length 1). When non-\code{NULL},
-filter rows where \code{p > maxPval}. Default \code{NULL}
-(no filter).}
+\item{maxPval}{Optional numeric (length 1). When non-\code{NULL}, filter rows
+where \code{p > maxPval}. Default \code{NULL} (no filter).}
 
 \item{...}{Class-specific selection arguments.}
+
+\item{study}{Character (length 1) or \code{NULL}. Restrict the selection to
+this study; \code{NULL} matches all studies.}
+
+\item{context}{Character (length 1) or \code{NULL}. Restrict the selection to
+this context; \code{NULL} matches all contexts.}
+
+\item{trait}{Character (length 1) or \code{NULL}. Restrict the selection to
+this trait; \code{NULL} matches all traits.}
+
+\item{method}{Character (length 1) or \code{NULL}. Restrict the selection to
+this fine-mapping / weight method; \code{NULL} matches all methods.}
+
+\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
+Restrict variants to this region; \code{NULL} uses the full cis window /
+all regions.}
 }
 \value{
 A \code{data.frame}.
 }
 \description{
 Extract per-variant marginal univariate effects from a
-  fine-mapping entry or result. Returns a \code{data.frame} with
-  identity columns (\code{variant_id, chrom, pos, A1, A2}), context
-  (\code{N, MAF}), and the marginal effect columns
-  (\code{beta, se, z, p}). Populated uniformly across the
-  individual-level and RSS paths.
+  fine-mapping entry or result. Returns a \code{data.frame} with identity
+  columns (\code{variant_id, chrom, pos, A1, A2}), context (\code{N, MAF}),
+  and the marginal effect columns (\code{beta, se, z, p}). Populated
+  uniformly across the individual-level and RSS paths.
+}
+\examples{
+data(qtlFineMappingExample)
+getMarginalEffects(qtlFineMappingExample)
 }

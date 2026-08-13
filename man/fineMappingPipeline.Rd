@@ -5,7 +5,7 @@
 \alias{fineMappingPipeline,QtlDataset-method}
 \alias{fineMappingPipeline,MultiStudyQtlDataset-method}
 \alias{fineMappingPipeline,QtlSumStats-method}
-\alias{fineMappingPipeline,GwasSumStats-method}
+\alias{.fmResolveRFinite}
 \alias{fineMappingPipeline,ANY-method}
 \title{Fine-Mapping Pipeline}
 \usage{
@@ -128,30 +128,7 @@ fineMappingPipeline(data, ...)
   ...
 )
 
-\S4method{fineMappingPipeline}{GwasSumStats}(
-  data,
-  methods,
-  addSusieInf = TRUE,
-  L = 20L,
-  Lgreedy = 5L,
-  coverage = 0.95,
-  secondaryCoverage = c(0.7, 0.5),
-  signalCutoff = 0.025,
-  minAbsCorr = 0.8,
-  medianAbsCorr = NULL,
-  fineMappingResult = NULL,
-  verbose = 1,
-  trim = TRUE,
-  fullFit = FALSE,
-  fullFitAlphaOnly = TRUE,
-  includeAllCs = FALSE,
-  serFallback = FALSE,
-  rFinite = NULL,
-  rMismatch = "none",
-  rssControl = NULL,
-  keepFullFit = "fallback",
-  ...
-)
+.fmResolveRFinite(rFinite, serFallback, rMismatch, ldSketch)
 
 \S4method{fineMappingPipeline}{ANY}(data, ...)
 }
@@ -190,121 +167,160 @@ processing to.}
 with \code{chrom}/\code{start}/\code{end}. Mutually exclusive with
 \code{traitId}.}
 
-\item{cisWindow}{For QtlDataset: cis-window (bp) around each trait's
-genomic position when extracting variants. Required when
-\code{traitId} is supplied. Mutually exclusive with \code{region}.}
+\item{cisWindow}{For QtlDataset: cis-window (bp) around each trait's genomic
+position when extracting variants. Required when \code{traitId} is
+supplied. Mutually exclusive with \code{region}.}
+
+\item{mafCutoff}{Numeric or \code{NULL}. Per-call override of the
+\code{QtlDataset} minor-allele-frequency filter; \code{NULL} uses the
+dataset's stored value.}
+
+\item{macCutoff}{Numeric or \code{NULL}. Per-call override of the
+\code{QtlDataset} minor-allele-count filter; \code{NULL} uses the dataset's
+stored value.}
+
+\item{xvarCutoff}{Numeric or \code{NULL}. Per-call override of the
+\code{QtlDataset} per-variant variance filter; \code{NULL} uses the
+dataset's stored value.}
+
+\item{imissCutoff}{Numeric or \code{NULL}. Per-call override of the
+\code{QtlDataset} per-sample missingness filter; \code{NULL} uses the
+dataset's stored value.}
+
+\item{keepIndel}{Logical or \code{NULL}. Per-call override of the
+\code{QtlDataset} indel-retention flag; \code{NULL} uses the dataset's
+stored value.}
+
+\item{keepSamples}{Character vector or \code{NULL}. Per-call override of the
+\code{QtlDataset} sample allow-list; \code{NULL} uses the dataset's stored
+value.}
+
+\item{keepVariants}{Character vector or \code{NULL}. Per-call override of the
+\code{QtlDataset} variant allow-list; \code{NULL} uses the dataset's stored
+value.}
 
 \item{jointRegions}{For QtlDataset with a multi-range \code{region}:
 \code{FALSE} (default) fits each range independently and merges the
-per-range results into one entry per (study, context, trait, method) —
-the merged \code{susieFit} is a named list of per-region fits and
-credible-set labels are renumbered to stay unique. \code{TRUE}
-concatenates the ranges' genotypes into one joint fit. Ignored for a
-single-range / cis (\code{traitId} + \code{cisWindow}) request.}
+per-range results into one entry per (study, context, trait, method) -- the
+merged \code{susieFit} is a named list of per-region fits and credible-set
+labels are renumbered to stay unique. \code{TRUE} concatenates the ranges'
+genotypes into one joint fit. Ignored for a single-range / cis
+(\code{traitId} + \code{cisWindow}) request.}
 
-\item{jointSpecification}{Optional joint-fit specification (NULL by
-default). When NULL, the pipeline runs the implicit multi-context /
-multi-trait mvSuSiE / fSuSiE branches as before. When non-NULL, the
-argument is parsed and validated via the joint-spec grammar
-documented under \code{parseJointSpecification} (a character vector
-of axes, or a list of \code{list(axes, scope)} specs); the
-per-spec axis dispatcher implementation is in progress and a
-non-NULL value currently errors with an informative message.
-See the design notes in \code{R/jointSpecification.R} for the
-accepted grammar.}
+\item{jointSpecification}{Optional joint-fit specification (NULL by default).
+When NULL, the pipeline runs the implicit multi-context / multi-trait
+mvSuSiE / fSuSiE branches as before. When non-NULL, the argument is parsed
+and validated via the joint-spec grammar documented under
+\code{parseJointSpecification} (a character vector of axes, or a list of
+\code{list(axes, scope)} specs); the per-spec axis dispatcher
+implementation is in progress and a non-NULL value currently errors with an
+informative message. See the design notes in \code{R/jointSpecification.R}
+for the accepted grammar.}
 
-\item{addSusieInf}{Logical. When \code{susieInf} is in
-\code{methods} alongside \code{susie} and/or \code{susieAsh},
-controls whether the SuSiE-inf fit initialises the chained
-downstream method(s). Default \code{TRUE}.}
+\item{addSusieInf}{Logical. When \code{susieInf} is in \code{methods}
+alongside \code{susie} and/or \code{susieAsh}, controls whether the
+SuSiE-inf fit initialises the chained downstream method(s). Default
+\code{TRUE}.}
 
-\item{coverage}{Primary credible-set coverage (numeric, length 1).
-Default \code{0.95}.}
+\item{L}{Integer. Maximum number of SuSiE single effects. Default \code{20}.}
+
+\item{Lgreedy}{Integer. Number of greedily-added effects in the SuSiE-inf
+refinement. Default \code{5}.}
+
+\item{coverage}{Primary credible-set coverage (numeric, length 1). Default
+\code{0.95}.}
 
 \item{secondaryCoverage}{Secondary coverages forwarded to
 \code{postprocessFinemappingFits}. Default \code{c(0.7, 0.5)}.}
 
-\item{signalCutoff}{PIP cutoff for top-loci selection. Default
-\code{0.025}.}
+\item{signalCutoff}{PIP cutoff for top-loci selection. Default \code{0.025}.}
 
-\item{minAbsCorr}{Minimum absolute correlation for credible-set
-purity. Default \code{0.8}.}
+\item{minAbsCorr}{Minimum absolute correlation for credible-set purity.
+Default \code{0.8}.}
 
-\item{medianAbsCorr}{Optional median absolute correlation for
-credible-set purity, routed to \code{susieR::susie_get_cs}. A set is
-kept if it passes either \code{minAbsCorr} or \code{medianAbsCorr}
-(OR-logic). Default \code{NULL} (off).}
+\item{medianAbsCorr}{Optional median absolute correlation for credible-set
+purity, routed to \code{susieR::susie_get_cs}. A set is kept if it passes
+either \code{minAbsCorr} or \code{medianAbsCorr} (OR-logic). Default
+\code{NULL} (off).}
 
-\item{fineMappingResult}{Optional existing \code{FineMappingResult}
-to use as a resume cache; tuples already present are not refit.}
+\item{fineMappingResult}{Optional existing \code{FineMappingResult} to use as
+a resume cache; tuples already present are not refit.}
 
-\item{cvFolds}{Integer. Number of cross-validation folds. Default
-\code{0} (no CV). When \code{> 1}, each method is refit on the
-training samples of every fold and used to predict the held-out
-samples; the fold partition plus per-fold out-of-fold predictions and
-metrics are stored on each \code{FineMappingEntry}'s \code{cvResult}
-slot (see \code{\link{getCvResult}}). \code{twasWeightsPipeline} reuses
-this partition and feeds these predictions into the SR-TWAS ensemble.
-Individual-level (\code{QtlDataset} / \code{MultiStudyQtlDataset})
-input only; ignored for sumstat inputs.}
+\item{cvFolds}{Integer. Number of cross-validation folds. Default \code{0}
+(no CV). When \code{> 1}, each method is refit on the training samples of
+every fold and used to predict the held-out samples; the fold partition
+plus per-fold out-of-fold predictions and metrics are stored on each
+\code{FineMappingEntry}'s \code{cvResult} slot (see
+\code{\link{getCvResult}}). \code{twasWeightsPipeline} reuses this
+partition and feeds these predictions into the SR-TWAS ensemble.
+Individual-level (\code{QtlDataset} / \code{MultiStudyQtlDataset}) input
+only; ignored for sumstat inputs.}
 
-\item{cvThreads}{Integer. Number of parallel workers for the
-cross-validation fold refits (passed to the shared CV engine's
-\code{numThreads}). Default \code{1} (serial); \code{-1} uses all cores.
-Only consulted when \code{cvFolds > 1}.}
+\item{cvThreads}{Integer. Number of parallel workers for the cross-validation
+fold refits (passed to the shared CV engine's \code{numThreads}). Default
+\code{1} (serial); \code{-1} uses all cores. Only consulted when
+\code{cvFolds > 1}.}
 
-\item{samplePartition}{Optional pre-defined CV partition
-\code{data.frame} with columns \code{Sample} and \code{Fold}. When
-supplied (and \code{cvFolds > 1}), every method reuses this exact
-partition; otherwise a fresh partition is generated per
-\code{(study, context, trait)}.}
+\item{samplePartition}{Optional pre-defined CV partition \code{data.frame}
+with columns \code{Sample} and \code{Fold}. When supplied (and
+\code{cvFolds > 1}), every method reuses this exact partition; otherwise a
+fresh partition is generated per \code{(study, context, trait)}.}
 
 \item{pipCutoffToSkip}{Numeric (length 1). Individual-level single-effect
 (SER) pre-screen applied to each residualized \code{(X, y)} block before a
 full fit: a susie model with \code{L = 1} is fit and the block is skipped
 when no PIP exceeds the cutoff (no potentially significant variant). The
 summary-statistics analog lives in \code{summaryStatsQc()}. \code{0}
-(default) disables the screen; a negative value uses the adaptive
-\code{3 / nVariants} threshold.}
+(default) disables the screen; a negative value uses the adaptive \code{3 /
+nVariants} threshold.}
 
 \item{absZCutoffToSkip, bfCutoffToSkip, logBfCutoffToSkip}{Numeric (length 1).
 Alternative individual-level pre-screen metrics, in place of
-\code{pipCutoffToSkip}: skip a block unless its maximum marginal
-\code{|z|} (\code{absZCutoffToSkip}), or its maximum per-variant
-single-effect Bayes factor (\code{bfCutoffToSkip}) / log Bayes factor
+\code{pipCutoffToSkip}: skip a block unless its maximum marginal \code{|z|}
+(\code{absZCutoffToSkip}), or its maximum per-variant single-effect Bayes
+factor (\code{bfCutoffToSkip}) / log Bayes factor
 (\code{logBfCutoffToSkip}) from the \code{L = 1} fit, exceeds the cutoff.
 Each defaults to 0 (off). Exactly one of the four \code{*CutoffToSkip}
 arguments may be non-zero (one screening metric at a time).}
 
-\item{usePCA}{Logical (length 1). \code{QtlDataset} only. When
-\code{TRUE} (default \code{FALSE}), each multi-trait context's
-PCA-reduced phenotype is fine-mapped with univariate SuSiE on its
-top principal components (ports the legacy \code{fsusie.R}
-\code{susie_on_top_pc}). Each PC becomes a pseudo-trait row keyed
-\code{trait = "topPC\{i\}"}, \code{method = "susie"}. Single-trait
-contexts have no PCA and are skipped.}
+\item{usePCA}{Logical (length 1). \code{QtlDataset} only. When \code{TRUE}
+(default \code{FALSE}), each multi-trait context's PCA-reduced phenotype is
+fine-mapped with univariate SuSiE on its top principal components (ports
+the legacy \code{fsusie.R} \code{susie_on_top_pc}). Each PC becomes a
+pseudo-trait row keyed \code{trait = "topPC\{i\}"}, \code{method =
+"susie"}. Single-trait contexts have no PCA and are skipped.}
 
-\item{nPCs}{Integer (length 1). \code{QtlDataset} only. Caps the
-number of top principal components fine-mapped per context when
-\code{usePCA = TRUE} (default \code{10}). The effective count is
-\code{min(nPCs, usable traits)}.}
+\item{nPCs}{Integer (length 1). \code{QtlDataset} only. Caps the number of
+top principal components fine-mapped per context when \code{usePCA = TRUE}
+(default \code{10}). The effective count is \code{min(nPCs, usable
+traits)}.}
 
-\item{seed}{Optional integer. When non-NULL, \code{set.seed(seed)} is
-called once at the start of the call for reproducible fits. Default
-\code{NULL} (no seeding).}
+\item{seed}{Optional integer. When non-NULL,
+\code{withr::local_seed(seed)} is called at the start of the call for
+reproducible fits; the global RNG state is restored on return. Default
+\code{NULL}
+(no seeding).}
+
+\item{twasWeights}{Optional \code{\link{TwasWeights}} resume cache to reuse
+previously fitted weights; \code{NULL} fits fresh.}
+
+\item{dataDrivenPriorWeightsCutoff}{Numeric or \code{NULL}. Cutoff below
+which data-driven prior weights are zeroed; \code{NULL} disables the
+cutoff.}
+
+\item{naAction}{Character. How to handle missing values in the extracted
+phenotype/genotype data.}
 
 \item{verbose}{Verbosity (0 silent, 1 default). Default \code{1}.}
 
 \item{trim}{Logical (length 1). When \code{TRUE} (default) the
-\code{susieFit} slot on each output \code{FineMappingEntry} carries
-a trimmed view of the SuSiE fit (the minimal subset needed by
-downstream pipelines). When \code{FALSE} the full untrimmed
-\code{susie()} return is retained so accessors like
-\code{getSusieFit()} and non-default-coverage queries through
-\code{getCs()} can read the full posterior matrices
-(\code{lbf_variable}, \code{mu}, \code{mu2}, \code{V}). The
-per-variant \code{topLoci} table is always fully populated
-regardless of \code{trim}.}
+\code{susieFit} slot on each output \code{FineMappingEntry} carries a
+trimmed view of the SuSiE fit (the minimal subset needed by downstream
+pipelines). When \code{FALSE} the full untrimmed \code{susie()} return is
+retained so accessors like \code{getSusieFit()} and non-default-coverage
+queries through \code{getCs()} can read the full posterior matrices
+(\code{lbf_variable}, \code{mu}, \code{mu2}, \code{V}). The per-variant
+\code{topLoci} table is always fully populated regardless of \code{trim}.}
 
 \item{fullFit}{Logical (length 1, default \code{FALSE}). Master switch for
 per-credible-set variant-level export in \code{topLoci}. When \code{FALSE},
@@ -326,29 +342,27 @@ passing (purity/coverage-filtered) credible set are widened. When
 \code{TRUE}, every effect \code{L} is widened (including filtered-out ones,
 labelled \code{L<k>} instead of \code{cs<k>}).}
 
-\item{phenotypeCovariatesToResidualize}{Character vector (or
-\code{NULL}) of phenotype-covariate names to residualize against.
-\code{NULL} (default) uses every available phenotype covariate.
-Only meaningful when the input is a \code{QtlDataset} /
-\code{MultiStudyQtlDataset} (ignored for sumstat inputs).}
+\item{phenotypeCovariatesToResidualize}{Character vector (or \code{NULL}) of
+phenotype-covariate names to residualize against. \code{NULL} (default)
+uses every available phenotype covariate. Only meaningful when the input is
+a \code{QtlDataset} / \code{MultiStudyQtlDataset} (ignored for sumstat
+inputs).}
 
-\item{genotypeCovariatesToResidualize}{Character vector (or
-\code{NULL}) of genotype-covariate column names to residualize
-against. \code{NULL} uses every available genotype covariate.}
+\item{genotypeCovariatesToResidualize}{Character vector (or \code{NULL}) of
+genotype-covariate column names to residualize against. \code{NULL} uses
+every available genotype covariate.}
 
-\item{residualizePhenotypeCovariates}{Logical (length 1). When
-\code{TRUE} (default) residualize against the phenotype-side
-covariates listed in \code{phenotypeCovariatesToResidualize}. Set
-\code{FALSE} to disable phenotype-covariate residualization
-entirely. The marginal univariate effects stored on each
-\code{FineMappingEntry} obey the same residualization choice as
-the SuSiE fit itself — they are computed against the same
-residualized \code{X} / \code{Y}.}
+\item{residualizePhenotypeCovariates}{Logical (length 1). When \code{TRUE}
+(default) residualize against the phenotype-side covariates listed in
+\code{phenotypeCovariatesToResidualize}. Set \code{FALSE} to disable
+phenotype-covariate residualization entirely. The marginal univariate
+effects stored on each \code{FineMappingEntry} obey the same
+residualization choice as the SuSiE fit itself -- they are computed against
+the same residualized \code{X} / \code{Y}.}
 
-\item{residualizeGenotypeCovariates}{Logical (length 1). When
-\code{TRUE} (default) residualize against the genotype-side
-covariates listed in \code{genotypeCovariatesToResidualize}. Set
-\code{FALSE} to disable.}
+\item{residualizeGenotypeCovariates}{Logical (length 1). When \code{TRUE}
+(default) residualize against the genotype-side covariates listed in
+\code{genotypeCovariatesToResidualize}. Set \code{FALSE} to disable.}
 
 \item{serFallback}{Logical (length 1, default \code{FALSE}).
 \code{QtlSumStats} / \code{GwasSumStats} (summary-statistics SuSiE-RSS
@@ -386,18 +400,13 @@ regions that fell back to SER; \code{"all"} keeps it for every region;
 the entry's SuSiE fit and read via \code{getSusieFit(res)$multiEffectFit},
 \code{getSusieFit(res)$R_reliability_flag}, and
 \code{getSusieFit(res)$serFallbackUsed}.}
-
-\item{ldBlocks}{For \code{GwasSumStats} input only: an
-\code{LdBlocks} object describing the LD-block partition. The
-pipeline performs SuSiE-RSS fine-mapping per (study, ldBlock).
-Required for the GwasSumStats method.}
 }
 \value{
-A \code{\link{FineMappingResult}} collection keyed by
-  \code{(study, context, trait, method)}. The \code{ldSketch} slot
-  is set automatically: \code{NULL} for individual-level
-  (QtlDataset / all-individual-level MultiStudyQtlDataset) fits, the
-  input's \code{ldSketch} for RSS-derived fits.
+A \code{FineMappingResult} collection keyed by \code{(study, context,
+  trait, method)}. The \code{ldSketch} slot is set automatically: \code{NULL}
+  for individual-level (QtlDataset / all-individual-level
+  MultiStudyQtlDataset) fits, the input's \code{ldSketch} for RSS-derived
+  fits.
 }
 \description{
 S4-dispatched per-region fine-mapping entry point that
@@ -452,35 +461,30 @@ S4-dispatched per-region fine-mapping entry point that
   }
 }
 \section{Chained initialisation}{
-
-When \code{susieInf} is requested alongside \code{susie} and/or
-\code{susieAsh} and \code{addSusieInf = TRUE} (default), the
-SuSiE-inf fit is computed first and used as initialisation for
-the SuSiE / SuSiE-ash fits, mirroring the legacy
-\code{univariateAnalysisPipeline} / \code{susieRssPipeline} chained
-init behaviour. SuSiE-inf is dropped from the final result when
-the caller did not explicitly request it (only used as init).
+ When \code{susieInf} is requested alongside
+  \code{susie} and/or \code{susieAsh} and \code{addSusieInf = TRUE}
+  (default), the SuSiE-inf fit is computed first and used as initialisation
+  for the SuSiE / SuSiE-ash fits, mirroring the legacy
+  \code{univariateAnalysisPipeline} / \code{susieRssPipeline} chained init
+  behaviour. SuSiE-inf is dropped from the final result when the caller did
+  not explicitly request it (only used as init).
 }
 
 \section{QC contract}{
-
-All \code{QtlSumStats} and \code{GwasSumStats} inputs must have
-been QC'd via \code{\link{summaryStatsQc}}; the pipeline errors on
-inputs where \code{length(getQcInfo(x)) == 0L}.
-\code{summaryStatsQc} also drops variants absent from the
-\code{ldSketch}, so by the time per-entry processing runs every
-variant is guaranteed to be present in the LD panel and a local LD
-matrix can be built with \code{extractBlockGenotypes} +
-\code{computeLd("sample")}.
+ All \code{QtlSumStats} and \code{GwasSumStats} inputs
+  must have been QC'd via \code{\link{summaryStatsQc}}; the pipeline errors
+  on inputs where \code{length(getQcInfo(x)) == 0L}. \code{summaryStatsQc}
+  also drops variants absent from the \code{ldSketch}, so by the time
+  per-entry processing runs every variant is guaranteed to be present in the
+  LD panel and a local LD matrix can be built with
+  \code{extractBlockGenotypes} + \code{computeLd("sample")}.
 }
 
 \section{Optional resume cache}{
-
-Supplying \code{fineMappingResult} of an existing
-\code{FineMappingResult} skips re-fitting any
-\code{(study, context, trait, method)} tuple that already has a
-matching row; cached entries are merged with the newly-fit entries
-in the returned collection.
+ Supplying \code{fineMappingResult} of an
+  existing \code{FineMappingResult} skips re-fitting any \code{(study,
+  context, trait, method)} tuple that already has a matching row; cached
+  entries are merged with the newly-fit entries in the returned collection.
 }
 
 \section{Intentional behaviours dropped from the pre-stub pipelines}{
@@ -522,3 +526,7 @@ deliberately not ported here:
 }
 }
 
+\examples{
+data(qtlDatasetExample)
+fineMappingPipeline(qtlDatasetExample, methods = "susie", cisWindow = 1e6)
+}

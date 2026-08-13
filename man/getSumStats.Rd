@@ -26,6 +26,15 @@ getSumStats(x, ...)
 
 \item{...}{Class-specific selection arguments (see above).}
 
+\item{study}{Character (length 1) or \code{NULL}. Restrict the selection to
+this study; \code{NULL} matches all studies.}
+
+\item{context}{Character (length 1) or \code{NULL}. Restrict the selection to
+this context; \code{NULL} matches all contexts.}
+
+\item{trait}{Character (length 1) or \code{NULL}. Restrict the selection to
+this trait; \code{NULL} matches all traits.}
+
 \item{annotateSignificance}{Optional correction-method name
 (\code{"permutation"} / \code{"bonferroni_original"} /
 \code{"bonferroni_filtered"} / \code{"qvalue"}). When set on a QtlSumStats
@@ -50,4 +59,8 @@ Behavior depends on the class of \code{x}:
       studies), or \code{NULL} when absent. No selection arguments
       are accepted in this case.}
   }
+}
+\examples{
+data(qtlSumStatsExample)
+getSumStats(qtlSumStatsExample)
 }

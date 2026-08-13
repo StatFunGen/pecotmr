@@ -28,11 +28,12 @@ dentistSingleWindow(
 \item{X}{Genotype matrix (samples x SNPs). If provided, LD is computed via
 \code{computeLd(X)} and \code{nSample} defaults to \code{nrow(X)}.}
 
-\item{nSample}{Number of samples in the LD reference panel (NOT the GWAS sample
-size). Controls the SVD truncation rank. Required when \code{R} is provided;
-inferred from \code{X} when \code{X} is provided.}
+\item{nSample}{Number of samples in the LD reference panel (NOT the GWAS
+sample size). Controls the SVD truncation rank. Required when \code{R} is
+provided; inferred from \code{X} when \code{X} is provided.}
 
-\item{pValueThreshold}{P-value threshold for outlier detection. Default is 5e-8.}
+\item{pValueThreshold}{P-value threshold for outlier detection. Default is
+5e-8.}
 
 \item{propSVD}{SVD truncation proportion. Default is 0.4.}
 
@@ -46,21 +47,27 @@ inferred from \code{X} when \code{X} is provided.}
 
 \item{ncpus}{Number of CPU cores. Default is 1.}
 
-\item{correctChenEtAlBug}{Correct the original DENTIST operator! bug. Default is TRUE.}
+\item{correctChenEtAlBug}{Correct the original DENTIST operator! bug. Default
+is TRUE.}
 
 \item{ldMethod}{Character string specifying the LD computation method when
-\code{X} is provided. Passed to \code{\link{computeLd}}. One of
-\code{"sample"} (default), \code{"population"}, or \code{"gcta"}.
-Ignored when \code{R} is provided directly.}
+\code{X} is provided. Passed to \code{computeLd}. One of \code{"sample"}
+(default), \code{"population"}, or \code{"gcta"}. Ignored when \code{R} is
+provided directly.}
 }
 \value{
 Data frame with columns: original_z, imputed_z, iter_to_correct, rsq,
   is_duplicate, outlier_stat, outlier.
 }
 \description{
-Detect outliers in GWAS summary statistics using LD-based iterative imputation.
-Provide either an LD correlation matrix \code{R} or a genotype matrix \code{X}
-(from which LD and sample size are derived automatically).
+Detect outliers in GWAS summary statistics using LD-based iterative
+imputation. Provide either an LD correlation matrix \code{R} or a genotype
+matrix \code{X} (from which LD and sample size are derived automatically).
+}
+\examples{
+data(eqtlRegionExample)
+R <- cor(eqtlRegionExample$X[, 1:20])
+dentistSingleWindow(zScore = rnorm(20), R = R, nSample = 415)
 }
 \references{
 \url{https://github.com/Yves-CHEN/DENTIST}

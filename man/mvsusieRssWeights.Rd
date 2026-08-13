@@ -17,16 +17,16 @@ mvsusieRssWeights(
 )
 }
 \arguments{
-\item{stat}{A list with \code{z} (matrix variants x conditions) and
-\code{n} (numeric vector or scalar).}
+\item{stat}{A list with \code{z} (matrix variants x conditions) and \code{n}
+(numeric vector or scalar).}
 
 \item{LD}{LD correlation matrix.}
 
 \item{mvsusieRssFit}{Optional pre-fitted \code{mvsusieRss} object.}
 
-\item{priorVariance}{Optional mvSuSiE prior variance specification.
-When NULL, \code{mvsusieR::create_mixture_prior()} is used with
-\code{R = ncol(stat$z)}.}
+\item{priorVariance}{Optional mvSuSiE prior variance specification. When
+NULL, \code{mvsusieR::create_mixture_prior()} is used with \code{R =
+ncol(stat$z)}.}
 
 \item{residualVariance}{Optional residual covariance matrix.}
 
@@ -39,16 +39,33 @@ When NULL, \code{mvsusieR::create_mixture_prior()} is used with
 \item{...}{Additional arguments forwarded to \code{mvsusieR::mvsusie_rss}.}
 }
 \value{
-A numeric matrix of per-variant per-context weights
-  (variants x conditions).
+A numeric matrix of per-variant per-context weights (variants x
+  conditions).
 }
 \description{
 Multi-context summary-statistics analog of \code{\link{mvsusieWeights}}:
-extracts coefficients from an existing \code{mvsusieR::mvsusie_rss} fit,
-or fits one from \code{stat$z} (variants x conditions) and \code{LD}.
+extracts coefficients from an existing \code{mvsusieR::mvsusie_rss} fit, or
+fits one from \code{stat$z} (variants x conditions) and \code{LD}.
 }
 \details{
 Follows the \code{*_rss_weights(stat, LD, ...)} contract. Expects
 \code{stat$z} to be a numeric matrix (variants x conditions) and
 \code{stat$n} a per-context vector or scalar.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+ss <- lapply(seq_len(ncol(X)), function(j) {
+  coef(summary(lm(y ~ X[, j])))[2, 1:2]
+})
+stat <- list(
+  bhat = vapply(ss, `[`, numeric(1), 1L),
+  shat = vapply(ss, `[`, numeric(1), 2L),
+  z = vapply(ss, function(s) s[1] / s[2], numeric(1)),
+  n = rep(nrow(X), ncol(X)))
+LD <- cor(X)
+fit <- fitMvsusieRss(Z = stat$z, R = LD, N = nrow(X),
+  prior_variance = 1)
+mvsusieRssWeights(stat, LD, mvsusieRssFit = fit)
 }

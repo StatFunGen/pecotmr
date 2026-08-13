@@ -24,24 +24,47 @@ writeSumstatsVcf(x, outputPath, sampleName = NULL, ...)
 )
 }
 \arguments{
-\item{x}{Input data: a \code{GwasSumStats} object, a
-\code{FineMappingResult} object, or a data.frame with columns
-\code{chrom}, \code{pos}, \code{ref}, \code{alt}.}
+\item{x}{Input data: a \code{GwasSumStats} object, a \code{FineMappingResult}
+object, or a data.frame with columns \code{chrom}, \code{pos}, \code{ref},
+\code{alt}.}
 
 \item{outputPath}{File path for output. Extension determines format:
-\code{.vcf.gz} or \code{.vcf.bgz} for bgzipped VCF,
-\code{.bcf} for BCF, \code{.vcf} for uncompressed VCF.}
+\code{.vcf.gz} or \code{.vcf.bgz} for bgzipped VCF, \code{.bcf} for BCF,
+\code{.vcf} for uncompressed VCF.}
 
 \item{sampleName}{Name for the VCF sample column (default: trait name or
 method name from the S4 object).}
 
 \item{...}{Additional arguments passed to methods.}
+
+\item{study}{Character or \code{NULL}. Restrict the written records to this
+study; \code{NULL} includes all studies.}
+
+\item{context}{Character or \code{NULL}. Restrict the written records to this
+context; \code{NULL} includes all contexts.}
+
+\item{trait}{Character or \code{NULL}. Restrict the written records to this
+trait; \code{NULL} includes all traits.}
+
+\item{method}{Character or \code{NULL}. Restrict the written records to this
+method; \code{NULL} includes all methods.}
+
+\item{splitByContext}{Logical. If \code{TRUE}, write one VCF per context.
+Default \code{FALSE}.}
+
+\item{splitByTrait}{Logical. If \code{TRUE}, write one VCF per trait. Default
+\code{FALSE}.}
 }
 \value{
 Invisible path to the written file.
 }
 \description{
-Creates a VCF object from GWAS summary statistics or fine-mapping results
-and writes it to disk. Supports bgzipped VCF (.vcf.gz/.vcf.bgz) and
-BCF (.bcf) output formats via VariantAnnotation and Rsamtools.
+Creates a VCF object from GWAS summary statistics or fine-mapping results and
+writes it to disk. Supports bgzipped VCF (.vcf.gz/.vcf.bgz) and BCF (.bcf)
+output formats via VariantAnnotation and Rsamtools.
+}
+\examples{
+data(gwasSumStatsS4Example)
+writeSumstatsVcf(
+  gwasSumStatsS4Example, outputPath = tempfile(fileext = ".vcf"))
 }

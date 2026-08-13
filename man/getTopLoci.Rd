@@ -35,22 +35,44 @@ getTopLoci(x, type = c("data.frame", "GRanges"), signalCutoff = 0.025, ...)
 
 \item{type}{One of \code{"data.frame"} (default) or \code{"GRanges"}.}
 
-\item{signalCutoff}{Numeric (length 1). Drop rows where
-\code{pip <= signalCutoff}. Default \code{0.025}. Use
-\code{signalCutoff = 0} to keep every variant.}
+\item{signalCutoff}{Numeric (length 1). Drop rows where \code{pip <=
+signalCutoff}. Default \code{0.025}. Use \code{signalCutoff = 0} to keep
+every variant.}
 
 \item{...}{Class-specific selection arguments.}
+
+\item{study}{Character (length 1) or \code{NULL}. Restrict the selection to
+this study; \code{NULL} matches all studies.}
+
+\item{context}{Character (length 1) or \code{NULL}. Restrict the selection to
+this context; \code{NULL} matches all contexts.}
+
+\item{trait}{Character (length 1) or \code{NULL}. Restrict the selection to
+this trait; \code{NULL} matches all traits.}
+
+\item{method}{Character (length 1) or \code{NULL}. Restrict the selection to
+this fine-mapping / weight method; \code{NULL} matches all methods.}
+
+\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
+Restrict variants to this region; \code{NULL} uses the full cis window /
+all regions.}
+
+\item{minPurity}{Numeric or \code{NULL}. Minimum credible-set purity to
+retain; \code{NULL} applies no purity filter.}
 }
 \value{
 A \code{data.frame} or a \code{GRanges}.
 }
 \description{
-Extract the per-variant posterior fine-mapping payload
-  as either a \code{data.frame} (default) or a \code{GRanges}.
-  Returns identity columns (\code{variant_id, chrom, pos, A1, A2}),
-  context (\code{N, MAF}), the posterior effect columns
-  (\code{beta = posterior_mean, se = posterior_sd}), \code{pip},
-  and credible-set membership columns (\code{cs_95}, etc.).
-  Rows are filtered by PIP by default — set \code{signalCutoff = 0}
-  to return every variant.
+Extract the per-variant posterior fine-mapping payload as either
+  a \code{data.frame} (default) or a \code{GRanges}. Returns identity columns
+  (\code{variant_id, chrom, pos, A1, A2}), context (\code{N, MAF}), the
+  posterior effect columns (\code{beta = posterior_mean, se = posterior_sd}),
+  \code{pip}, and credible-set membership columns (\code{cs_95}, etc.). Rows
+  are filtered by PIP by default -- set \code{signalCutoff = 0} to return
+  every variant.
+}
+\examples{
+data(qtlFineMappingExample)
+getTopLoci(qtlFineMappingExample)
 }

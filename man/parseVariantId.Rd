@@ -8,13 +8,13 @@ parseVariantId(ids)
 }
 \arguments{
 \item{ids}{A character vector of variant IDs, or a data.frame with columns
-"chrom", "pos", and allele columns (A2/A1 or ref/alt or any 4-column layout).}
+"chrom", "pos", and allele columns (A2/A1 or ref/alt or any 4-column
+layout).}
 }
 \value{
 A data.frame with columns "chrom" (character, normalized), "pos"
   (integer), "A2" (character), "A1" (character). The detected convention is
-  stored as
-  \code{attr(result, "convention")}.
+  stored as \code{attr(result, "convention")}.
 }
 \description{
 Converts variant IDs from any supported string format or data.frame into a
@@ -24,4 +24,7 @@ uppercased, 23 -> X / 24 -> Y / M -> MT) but kept as a string so X/Y/MT
 survive. Supports colon-separated ("chr1:100:A:G"), underscore-separated
 ("1_100_A_G"), with or without "chr" prefix, and with optional build suffix
 (":b38" or "_b38"). The detected input convention is stored as an attribute.
+}
+\examples{
+parseVariantId(c("chr1:100:A:G", "chr2:200:T:C"))
 }

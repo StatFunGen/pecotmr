@@ -33,6 +33,12 @@ mixture prior on each marker effect, with a scaled-t slab.
 Defaults for `nIter`, `burnIn`, and `thin` are larger than BGLR's package
 defaults to better accommodate the high LD typical of cis-eQTL windows; see
 Kim et al. (2022) which observed that the BGLR defaults can be inadequate
-under correlated predictors. Override these arguments to recover the
-package defaults if desired.
+under correlated predictors. Override these arguments to recover the package
+defaults if desired.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+bayesBWeights(X, y)
 }

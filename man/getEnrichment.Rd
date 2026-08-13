@@ -18,3 +18,7 @@ A \code{data.frame} of enrichment estimates, or NULL.
 \description{
 Extract annotation enrichment estimates from a result object.
 }
+\examples{
+data(h2EstimateExample)
+getEnrichment(h2EstimateExample)
+}

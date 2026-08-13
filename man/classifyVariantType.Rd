@@ -7,8 +7,8 @@
 classifyVariantType(ids)
 }
 \arguments{
-\item{ids}{A character vector of variant IDs in "chr:pos:ref:alt" format,
-or a data.frame with A2 (ref) and A1 (alt) columns (e.g., from
+\item{ids}{A character vector of variant IDs in "chr:pos:ref:alt" format, or
+a data.frame with A2 (ref) and A1 (alt) columns (e.g., from
 \code{\link{parseVariantId}}).}
 }
 \value{
@@ -18,4 +18,7 @@ A character vector with one of "SNP", "insertion", "deletion", or
 \description{
 Determines whether each variant is a SNP, insertion, deletion, or
 multi-nucleotide polymorphism (MNP) based on the allele lengths.
+}
+\examples{
+classifyVariantType(c("chr1:100:A:G", "chr1:200:AT:A"))
 }

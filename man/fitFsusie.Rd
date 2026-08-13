@@ -21,3 +21,14 @@ The fit object returned by \code{fsusieR::susiF}.
 \description{
 Thin wrapper around \code{fsusieR::susiF}.
 }
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:50]
+n <- nrow(X)
+nPos <- 16
+base <- sin(seq(0, 2 * pi, length.out = nPos))
+Y <- matrix(rep(base, each = n), n, nPos) +
+  X[, 1] \%o\% (0.5 * cos(seq(0, pi, length.out = nPos)))
+pos <- seq_len(nPos)
+fitFsusie(X, Y, pos = pos, L = 2)
+}

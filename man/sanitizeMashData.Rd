@@ -16,3 +16,6 @@ The data list with sanitized values.
 Replaces NaN in \code{bhat} with 0 and NaN/Inf in \code{sbhat} with 1e3
 (indicating high uncertainty).
 }
+\examples{
+sanitizeMashData(list(strong = list(z = matrix(rnorm(9), 3, 3))))
+}

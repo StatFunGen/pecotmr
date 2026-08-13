@@ -35,7 +35,8 @@ full model \code{\link{mashPosterior}} consumes).}
 
 \item{inputScale}{SumStats -> matrix conversion scale.}
 
-\item{setSeed}{Integer seed, or \code{NULL} to leave the ambient RNG untouched.}
+\item{setSeed}{Integer seed, or \code{NULL} to leave the ambient RNG
+untouched.}
 }
 \value{
 The fitted \pkg{mashr} model (the \code{mashr::mash()} object).
@@ -47,6 +48,23 @@ Fit a \pkg{mashr} model on a chosen partition using a supplied
   2019 the mixture weights are learned on the representative \code{"random"}
   partition, and the resulting model is then applied to the strong / target
   set by \code{\link{mashPosterior}}.
+}
+\examples{
+data(mashInputExample)
+mi <- mashInputExample
+mk <- function(b, s) {
+  qtlSumStatsFromBetaMatrix(as.matrix(mi[[b]]), as.matrix(mi[[s]]),
+    study = "mash")
+}
+ssl <- list(strong = mk("strong.b", "strong.s"),
+  random = mk("random.b", "random.s"), null = mk("null.b", "null.s"))
+conds <- colnames(mi$strong.b)
+vhat <- diag(length(conds))
+dimnames(vhat) <- list(conds, conds)
+prior <- mashPriorCovariances(ssl, alpha = 0, vhat = vhat,
+  components = "canonical")
+model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior$U,
+  vhat = vhat)
 }
 \seealso{
 \code{\link{mashPosterior}}, \code{\link{mashPriorCovariances}}

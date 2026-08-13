@@ -15,16 +15,17 @@ scadRssWeights(
 )
 }
 \arguments{
-\item{stat}{A list with \code{$b} (effect sizes) and \code{$n} (per-variant sample sizes).}
+\item{stat}{A list with \code{$b} (effect sizes) and \code{$n} (per-variant
+sample sizes).}
 
 \item{LD}{LD correlation matrix R (single matrix, NOT pre-shrunk).}
 
-\item{s}{Numeric vector of LD shrinkage parameters.  Default:
-\code{c(0.2, 0.5, 0.9, 1.0)}.}
+\item{s}{Numeric vector of LD shrinkage parameters. Default: \code{c(0.2,
+0.5, 0.9, 1.0)}.}
 
-\item{gamma}{SCAD concavity parameter.  Default 3.7.}
+\item{gamma}{SCAD concavity parameter. Default 3.7.}
 
-\item{alpha}{Elastic-net mixing (1 = pure L1).  Default 1.}
+\item{alpha}{Elastic-net mixing (1 = pure L1). Default 1.}
 
 \item{selection}{Selection strategy: \code{"ld_quadratic"} (default) or
 \code{"min_fbeta"}.}
@@ -36,6 +37,20 @@ A numeric vector of SNP coefficient weights.
 }
 \description{
 Fits SCAD-penalized regression on the RSS objective, searching over a
-shrinkage grid \code{s} and lambda path.  Model selection uses LD-quadratic
+shrinkage grid \code{s} and lambda path. Model selection uses LD-quadratic
 pseudovalidation by default.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+ss <- lapply(
+  seq_len(ncol(X)), function(j) coef(summary(lm(y ~ X[, j])))[2, 1:2])
+stat <- list(
+  b = vapply(ss, `[`, numeric(1), 1L),
+  seb = vapply(ss, `[`, numeric(1), 2L),
+  n = rep(nrow(X), ncol(X))
+)
+LD <- cor(X)
+scadRssWeights(stat, LD)
 }

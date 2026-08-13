@@ -28,11 +28,10 @@ mcols, plus A1, A2).}
 
 \item{nRef}{Integer, reference panel sample size.}
 
-\item{mixtureWeights}{Optional numeric vector of mixing proportions,
-one per panel in \code{genotypeHandle} when it is a list. Must be
-non-negative and sum to 1. Required whenever
-\code{genotypeHandle} is a list and downstream code will call
-\code{getCorrelation()}.}
+\item{mixtureWeights}{Optional numeric vector of mixing proportions, one per
+panel in \code{genotypeHandle} when it is a list. Must be non-negative and
+sum to 1. Required whenever \code{genotypeHandle} is a list and downstream
+code will call \code{getCorrelation()}.}
 }
 \value{
 An \code{LdData} object.
@@ -40,4 +39,14 @@ An \code{LdData} object.
 \description{
 Construct an \code{LdData} from a correlation matrix and/or
   genotype handle, plus variant metadata as a GRanges.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:8]
+gr <- GenomicRanges::GRanges("22",
+  IRanges::IRanges(seq(1L, by = 100L, length.out = 8), width = 1L))
+ld <- LdData(correlation = cor(X), variants = gr,
+  blockMetadata = S4Vectors::DataFrame(
+    chrom = "22", start = 1L, end = 1000L))
+ld
 }

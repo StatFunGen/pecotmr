@@ -18,3 +18,9 @@ Character (length 1).
 \description{
 Return the underlying genotype file path or stem.
 }
+\examples{
+gh <- readGenotypes(
+  system.file("extdata", "toy_ref.bed", package = "pecotmr")
+)
+getPath(gh)
+}

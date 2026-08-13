@@ -4,10 +4,14 @@
 \alias{extractTopPipInfo}
 \title{Extract Information for Top Variant from Finemapping Results}
 \usage{
-extractTopPipInfo(conData)
+extractTopPipInfo(finemappingEntry, sumstats)
 }
 \arguments{
-\item{conData}{List. The method layer data from a finemapping RDS file.}
+\item{finemappingEntry}{A \code{\link{FineMappingEntry}} carrying the SuSiE
+fit and variant ids (e.g. from \code{\link{getFineMappingResult}}).}
+
+\item{sumstats}{A list or data frame carrying a \code{z} element aligned to
+the fit's variants (\code{sumstats$z}).}
 }
 \value{
 A data frame with one row containing the following columns:
@@ -21,22 +25,32 @@ A data frame with one row containing the following columns:
   \item{cs_corr}{NA (as no CS correlation is available)}
 }
 \description{
-This function extracts information about the variant with the highest Posterior 
-Inclusion Probability (PIP) from finemapping results, typically used when no 
-Credible Sets (CS) are identified in the analysis.
+This function extracts information about the variant with the highest
+Posterior Inclusion Probability (PIP) from finemapping results, typically
+used when no Credible Sets (CS) are identified in the analysis.
 }
 \details{
-This function is designed to be used when no Credible Sets are identified in 
-the finemapping results, but information about the most significant variant 
-is still desired. It identifies the variant with the highest PIP and extracts 
-relevant statistical information.
+This function is designed to be used when no Credible Sets are
+  identified in the finemapping results, but information about the most
+  significant variant is still desired. It identifies the variant with the
+  highest PIP and extracts relevant statistical information.
 }
 \note{
-This function is particularly useful for capturing information about potentially 
-important variants that might be included in Credible Sets under different 
-analysis parameters or lower coverage. It maintains a structure similar to 
-the output of `extract_cs_info()` for consistency in downstream analyses.
+This function is particularly useful for capturing information about
+  potentially important variants that might be included in Credible Sets
+  under different analysis parameters or lower coverage. It maintains a
+  structure similar to the output of `extract_cs_info()` for consistency in
+  downstream analyses.
+}
+\examples{
+vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+fit <- list(pip = c(0.1, 0.7, 0.2))
+tl <- data.frame(variant_id = vids, pip = c(0.1, 0.7, 0.2))
+fe <- FineMappingEntry(variantIds = vids, susieFit = fit, topLoci = tl)
+extractTopPipInfo(fe, sumstats = list(z = c(1.0, 3.5, -0.5)))
+
 }
 \seealso{
-\code{\link{extractCsInfo}} for processing when Credible Sets are present.
+\code{\link{extractCsInfo}} for processing when Credible Sets are
+  present.
 }

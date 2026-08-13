@@ -20,12 +20,12 @@ GwasSumStats(
 \arguments{
 \item{study}{Character vector of study identifiers (must be unique).}
 
-\item{entry}{A \code{SimpleList} or \code{list} of \code{GRanges},
-one per study.}
+\item{entry}{A \code{SimpleList} or \code{list} of \code{GRanges}, one per
+study.}
 
-\item{genome}{Single character string giving the genome build
-(e.g., \code{"hg19"}, \code{"hg38"}). Uniform across the collection
-because all entries share the same LD sketch.}
+\item{genome}{Single character string giving the genome build (e.g.,
+\code{"hg19"}, \code{"hg38"}). Uniform across the collection because all
+entries share the same LD sketch.}
 
 \item{ldSketch}{A \code{GenotypeHandle} carrying the LD reference.}
 
@@ -33,21 +33,25 @@ because all entries share the same LD sketch.}
 (\code{NA_real_} entries allowed). Used by the sufficient-statistic
 interface; z-score RSS analyses should leave entries as NA.}
 
-\item{nCase, nControl}{Optional per-study case / control counts. The
-columns are attached \strong{only when supplied} (default \code{NULL}),
-so quantitative-trait collections keep the original schema. When given,
-pass length 1 or length(study) (use \code{NA} for the non-case/control
-studies in a mixed collection). For case/control GWAS, downstream
-consumers (e.g. \code{\link{colocboostPipeline}}) use the effective
-sample size \code{4 / (1/nCase + 1/nControl)} in place of the
-per-variant \code{N}.}
+\item{nCase, nControl}{Optional per-study case / control counts. The columns
+are attached \strong{only when supplied} (default \code{NULL}), so
+quantitative-trait collections keep the original schema. When given, pass
+length 1 or length(study) (use \code{NA} for the non-case/control studies
+in a mixed collection). For case/control GWAS, downstream consumers (e.g.
+\code{\link{colocboostPipeline}}) use the effective sample size \code{4 /
+(1/nCase + 1/nControl)} in place of the per-variant \code{N}.}
 
 \item{nSample}{Optional per-study total sample size (numeric; default
-\code{NULL}). Attached only when supplied (length 1 or length(study)).
-Used as the study-level fallback for the per-variant \code{N} when a study
-has no per-variant \code{N} column and no case/control counts. Named
+\code{NULL}). Attached only when supplied (length 1 or length(study)). Used
+as the study-level fallback for the per-variant \code{N} when a study has
+no per-variant \code{N} column and no case/control counts. Named
 \code{nSample} to avoid clashing with \code{getNSamples()} (the LD-panel
 sample size).}
+
+\item{qcInfo}{A \code{list} recording which QC steps ran. Empty \code{list()}
+on construction; populated by \code{summaryStatsQc()} with a per-step audit
+record. Fine-mapping / TWAS pipelines reject inputs where
+\code{length(getQcInfo(x)) == 0}.}
 
 \item{...}{Additional per-study columns to attach to the collection.}
 }
@@ -55,13 +59,20 @@ sample size).}
 A \code{GwasSumStats} object.
 }
 \description{
-Construct a \code{GwasSumStats} S4 DFrame-subclass
-  collection from per-study tuple vectors and a list of \code{GRanges}
-  entries (one per study), plus a single LD sketch handle and a
-  single genome build that apply to the whole collection.
+Construct a \code{GwasSumStats} S4 DFrame-subclass collection
+  from per-study tuple vectors and a list of \code{GRanges} entries (one per
+  study), plus a single LD sketch handle and a single genome build that apply
+  to the whole collection.
 
-  Each \code{GRanges} entry must carry per-variant statistics in its
-  mcols (at minimum \code{SNP}, \code{A1}, \code{A2}, \code{Z},
-  \code{N}; optionally \code{MAF}, \code{INFO}, \code{BETA}, \code{SE},
-  \code{P}).
+Each \code{GRanges} entry must carry per-variant statistics in its mcols (at
+minimum \code{SNP}, \code{A1}, \code{A2}, \code{Z}, \code{N}; optionally
+\code{MAF}, \code{INFO}, \code{BETA}, \code{SE}, \code{P}).
+}
+\examples{
+gh <- readGenotypes(
+  system.file("extdata", "toy_ref.bed", package = "pecotmr"))
+gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100 * 1:3, width = 1))
+S4Vectors::mcols(gr) <- S4Vectors::DataFrame(SNP = paste0("rs", 1:3),
+  A1 = "A", A2 = "G", Z = rnorm(3), N = 100L)
+GwasSumStats(study = "t1", entry = list(gr), genome = "hg38", ldSketch = gh)
 }

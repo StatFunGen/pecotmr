@@ -62,3 +62,11 @@ Assemble a per-condition \code{\link{QtlSumStats}} from a
   (mash reads only Z). A pass-through \code{qcInfo} record is set so the
   result clears the mash QC gate.
 }
+\examples{
+gh <- readGenotypes(
+  system.file("extdata", "toy_ref.bed", package = "pecotmr"))
+z <- matrix(rnorm(6), 2, 3, dimnames = list(
+  c("chr22:1:A:G", "chr22:2:A:G"), c("brain", "blood", "muscle")))
+qtlSumStatsFromZMatrix(z = z, study = "s1", ldSketch = gh,
+  context = colnames(z), trait = "g1", genome = "hg38", n = 100)
+}

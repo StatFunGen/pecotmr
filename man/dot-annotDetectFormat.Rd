@@ -14,7 +14,7 @@ Character, one of "bigwig", "ldsc_annot", or "bed".
 }
 \description{
 Detect annotation file format from extension. This is separate
-  from \code{.h2DetectFormat} because BED annotation files (genomic
-  intervals for rtracklayer) must be distinguished from plink BED files.
+  from \code{.h2DetectFormat} because BED annotation files (genomic intervals
+  for rtracklayer) must be distinguished from plink BED files.
 }
 \keyword{internal}

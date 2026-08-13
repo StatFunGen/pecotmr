@@ -19,7 +19,8 @@ getSusieAlpha(x, ...)
 \item{...}{Class-specific selection arguments.}
 }
 \value{
-A \code{data.frame} of per-effect alphas (or \code{NULL} when absent).
+A \code{data.frame} of per-effect alphas (or \code{NULL} when
+  absent).
 }
 \description{
 Return the full per-effect susie alpha table
@@ -27,4 +28,10 @@ Return the full per-effect susie alpha table
   \code{\link{CtwasResultEntry}} or a \code{\link{CtwasResult}} collection
   (aggregated across rows, tagged with run identity). This is the fuller
   cTWAS output retained so the raw run is reconstructable.
+}
+\examples{
+cre <- CtwasResultEntry(
+  finemap = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
+  susieAlpha = data.frame(id = c("g1", "g2"), alpha = c(0.9, 0.1)))
+getSusieAlpha(cre)
 }

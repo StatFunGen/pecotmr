@@ -8,7 +8,8 @@ scoreFromCs(fineMapping, contrastResults, condition)
 }
 \arguments{
 \item{fineMapping}{A fine-mapping \code{data.frame} with \code{cs_order},
-\code{pip} and \code{variants} columns (credible-set index 0 = not in a CS).}
+\code{pip} and \code{variants} columns (credible-set index 0 = not in a
+CS).}
 
 \item{contrastResults}{A contrast table from
 \code{\link{mashPosteriorContrast}} with variant row names.}
@@ -26,4 +27,15 @@ variant of each credible set, intersects with the contrast variants, picks
 the least-significant lead by deviation p-value, and returns the maximum
 pairwise \eqn{|\mathrm{mean}| / \mathrm{se}} at that variant -- the "finemap"
 feature score of \code{mash_posterior.ipynb}.
+}
+\examples{
+data(mashPosteriorExample)
+om <- matrix(c(0.1, 0.2, 0.3), 1, 3, dimnames = list("v1", c("a", "b", "c")))
+pm <- matrix(c(0.5, 0.3, -0.2), 1, 3,
+  dimnames = list("v1", c("a", "b", "c")))
+pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
+dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
+cr <- fitMashContrast(1L, om, pm, pv)
+scoreFromCs(fineMapping = mashPosteriorExample$fineMapping,
+  contrastResults = cr, condition = "a")
 }

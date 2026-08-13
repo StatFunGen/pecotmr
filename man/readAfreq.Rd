@@ -10,9 +10,14 @@ readAfreq(prefix)
 \item{prefix}{File prefix (without .afreq extension).}
 }
 \value{
-A data.frame with columns: chrom, id, A2 (REF), A1 (ALT), alt_freq, obs_ct.
-  alt_freq is the frequency of the A1 (ALT/effect) allele.
+A data.frame with columns: chrom, id, A2 (REF), A1 (ALT), alt_freq,
+  obs_ct. alt_freq is the frequency of the A1 (ALT/effect) allele.
 }
 \description{
 Read a PLINK2 allele frequency file (.afreq or .afreq.zst)
+}
+\examples{
+stem <- file.path(system.file("extdata", "ld_reference", "chr22",
+  package = "pecotmr"), "protocol_example.LD.chr22")
+readAfreq(stem)
 }

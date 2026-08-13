@@ -16,11 +16,11 @@ mergeCtwasBoundaryRegions(
 }
 \arguments{
 \item{finemapResult}{A list returned by \code{\link{finemapCtwasRegions}}.
-Must carry \code{finemap_res}, \code{susie_alpha_res},
-\code{region_data}, \code{region_info}, \code{z_snp}, \code{z_gene},
-\code{weights}, \code{snp_map}, \code{param}, and — on the LD path —
-\code{LD_map} plus the \code{LD_loader_fun} / \code{snpinfo_loader_fun}
-closures (all retained by \code{finemapCtwasRegions}).}
+Must carry \code{finemap_res}, \code{susie_alpha_res}, \code{region_data},
+\code{region_info}, \code{z_snp}, \code{z_gene}, \code{weights},
+\code{snp_map}, \code{param}, and -- on the LD path -- \code{LD_map} plus
+the \code{LD_loader_fun} / \code{snpinfo_loader_fun} closures (all retained
+by \code{finemapCtwasRegions}).}
 
 \item{pipThresh}{Numeric (length 1). PIP threshold for selecting which
 boundary genes to merge (\code{select_boundary_genes} \code{pip_thresh}).
@@ -50,13 +50,17 @@ The \code{finemapResult} list with \code{finemap_res},
 }
 \description{
 Optional step 4 of the cTWAS pipeline (default-off region
-  merging). A gene whose cis window straddles an LD-block boundary
-  (a \code{boundary_genes} member) is split across two regions in the
-  first-pass fine-mapping. This step selects the high-PIP boundary genes,
-  merges each one's adjacent regions into a single region, re-runs
-  fine-mapping on the merged regions, and splices the updated results back
-  into the \code{\link{finemapCtwasRegions}} output. Thin wrapper over
+  merging). A gene whose cis window straddles an LD-block boundary (a
+  \code{boundary_genes} member) is split across two regions in the first-pass
+  fine-mapping. This step selects the high-PIP boundary genes, merges each
+  one's adjacent regions into a single region, re-runs fine-mapping on the
+  merged regions, and splices the updated results back into the
+  \code{\link{finemapCtwasRegions}} output. Thin wrapper over
   \code{ctwas::postprocess_region_merging()} (or
-  \code{ctwas::postprocess_region_merging_noLD()} when the inputs carry no
-  LD loaders).
+  \code{ctwas::postprocess_region_merging_noLD()} when the inputs carry no LD
+  loaders).
+}
+\examples{
+data(ctwasFinemapExample)
+mergeCtwasBoundaryRegions(ctwasFinemapExample)
 }

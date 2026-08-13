@@ -9,16 +9,16 @@ FineMappingEntry(variantIds, susieFit, topLoci, cvResult = NULL)
 \arguments{
 \item{variantIds}{Character vector of variant IDs in fit order.}
 
-\item{susieFit}{The SuSiE fit object (full or trimmed; controlled by
-the pipeline's \code{trim} parameter).}
+\item{susieFit}{The SuSiE fit object (full or trimmed; controlled by the
+pipeline's \code{trim} parameter).}
 
-\item{topLoci}{Per-variant \code{data.frame} in canonical schema:
-identity columns (\code{variant_id, chrom, pos, A1, A2}), context
-(\code{N, af}; effect-allele frequency, never MAF), marginal columns (\code{marginal_beta,
-marginal_se, marginal_z, marginal_p}), posterior columns
-(\code{pip, posterior_mean, posterior_sd, cs_*, cs_*_purity}),
-pipeline stamps (\code{method, gene, event, grange_start,
-grange_end}). Unfiltered: one row per variant in the fit.}
+\item{topLoci}{Per-variant \code{data.frame} in canonical schema: identity
+columns (\code{variant_id, chrom, pos, A1, A2}), context (\code{N, af};
+effect-allele frequency, never MAF), marginal columns (\code{marginal_beta,
+marginal_se, marginal_z, marginal_p}), posterior columns (\code{pip,
+posterior_mean, posterior_sd, cs_*, cs_*_purity}), pipeline stamps
+(\code{method, gene, event, grange_start, grange_end}). Unfiltered: one row
+per variant in the fit.}
 
 \item{cvResult}{Optional cross-validation payload (list with
 \code{samplePartition}, \code{predictions}, \code{performance}) recorded
@@ -29,6 +29,11 @@ A \code{FineMappingEntry} object.
 }
 \description{
 Construct a \code{FineMappingEntry} payload for one
-  \code{(study, context, trait, method)} row of a
-  \code{FineMappingResult} collection.
+  \code{(study, context, trait, method)} row of a \code{FineMappingResult}
+  collection.
+}
+\examples{
+tl <- data.frame(variant_id = paste0("chr1:", 100 * 1:3, ":A:G"),
+  pip = c(0.9, 0.5, 0.1), cs = c(1L, 1L, NA))
+FineMappingEntry(variantIds = tl$variant_id, susieFit = list(), topLoci = tl)
 }

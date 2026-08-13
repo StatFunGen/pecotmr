@@ -16,25 +16,25 @@ twasZ(
 )
 }
 \arguments{
-\item{weights}{Numeric vector of weights (single tuple) or a numeric
-matrix with one column per tuple (method / context). When a
-vector, the column name defaults to \code{"method1"}.}
+\item{weights}{Numeric vector of weights (single tuple) or a numeric matrix
+with one column per tuple (method / context). When a vector, the column
+name defaults to \code{"method1"}.}
 
 \item{z}{Numeric vector of GWAS Z-scores aligned to the rows of
 \code{weights}.}
 
 \item{R}{Optional LD correlation matrix.}
 
-\item{X}{Optional genotype matrix used to compute \code{R} when
-\code{R} is missing.}
+\item{X}{Optional genotype matrix used to compute \code{R} when \code{R} is
+missing.}
 
-\item{V, D, nSketch}{SVD components of the LD sketch (right-singular
-vectors, singular values, panel sample size). Supplying all three
-selects the SVD path.}
+\item{V, D, nSketch}{SVD components of the LD sketch (right-singular vectors,
+singular values, panel sample size). Supplying all three selects the SVD
+path.}
 
-\item{combineMethods}{Optional character vector of method names to
-forward to \code{\link{combinePValues}} for cross-tuple
-combination. \code{NULL} (default) skips combination.}
+\item{combineMethods}{Optional character vector of method names to forward to
+\code{\link{combinePValues}} for cross-tuple combination. \code{NULL}
+(default) skips combination.}
 }
 \value{
 A list with:
@@ -48,18 +48,18 @@ A list with:
 }
 }
 \description{
-Unified TWAS Z-statistic: accepts a weight vector (single
-method/context) or a (variants x K) weight matrix, computes the
-per-tuple TWAS Z-score and two-sided p-value, and optionally
-delegates cross-tuple p-value combination to
-\code{\link{combinePValues}}.
+Unified TWAS Z-statistic: accepts a weight vector (single method/context) or
+a (variants x K) weight matrix, computes the per-tuple TWAS Z-score and
+two-sided p-value, and optionally delegates cross-tuple p-value combination
+to \code{\link{combinePValues}}.
 }
 \details{
 For each column k of \code{weights}:
 \itemize{
-  \item \code{stat_k = w_kᵀ z}
-  \item \code{denom_k = w_kᵀ R w_k}
-  \item \code{Z_k = stat_k / sqrt(denom_k)}, \code{p_k = 2 * (1 - Phi(|Z_k|))}
+  \item \code{stat_k = w_k^T z}
+  \item \code{denom_k = w_k^T R w_k}
+  \item \code{Z_k = stat_k / sqrt(denom_k)}, \code{p_k = 2 * (1 -
+  Phi(|Z_k|))}
 }
 When \code{combineMethods} is non-NULL and K >= 2, the cross-tuple
 correlation matrix \code{rho_{i,j} = covY_{i,j} / sqrt(covY_{i,i} *
@@ -67,12 +67,17 @@ covY_{j,j})} is constructed once and forwarded to
 \code{combinePValues} as the \code{R} argument. When K == 1, the
 combined p-value trivially equals the per-tuple p-value.
 
-The SVD path (\code{V}, \code{D}, \code{nSketch}) lets the caller
-avoid materializing the full LD matrix: \code{covY = (VᵀW · sqrt(Lambda))ᵀ
-(VᵀW · sqrt(Lambda))} with \code{Lambda_i = D_i^2 / (nSketch - 1)}.
-Use the \code{R} path when an LD correlation matrix is already
-available; use the \code{X} path to compute \code{R} from a genotype
-matrix.
+The SVD path (\code{V}, \code{D}, \code{nSketch}) lets the caller avoid
+materializing the full LD matrix: \code{covY = (V^TW * sqrt(Lambda))^T (V^TW
+* sqrt(Lambda))} with \code{Lambda_i = D_i^2 / (nSketch - 1)}. Use the
+\code{R} path when an LD correlation matrix is already available; use the
+\code{X} path to compute \code{R} from a genotype matrix.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:20]
+w <- setNames(rnorm(20) * 0.1, colnames(X))
+twasZ(weights = w, z = rnorm(20), R = cor(X))
 }
 \seealso{
 \code{\link{combinePValues}} for the combination method menu.

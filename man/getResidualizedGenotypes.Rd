@@ -32,13 +32,56 @@ getResidualizedGenotypes(x, ...)
 \code{genotypeCovariatesToRemove}, and \code{covariateNaAction}
 (\code{"impute"}, the default, mean-imputes missing covariate cells;
 \code{"drop"} removes samples with any missing covariate).}
+
+\item{contexts}{Character vector. Context(s) whose data to extract.}
+
+\item{traitId}{Character or \code{NULL}. Molecular trait / feature identifier
+to select; \code{NULL} matches all traits in the dataset.}
+
+\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
+Restrict variants to this region; \code{NULL} uses the full cis window /
+all regions.}
+
+\item{cisWindow}{Integer or \code{NULL}. Half-width (bp) of the cis window
+around the trait; \code{NULL} uses the dataset default.}
+
+\item{samples}{Character vector or \code{NULL}. Restrict to these sample IDs;
+\code{NULL} uses all samples.}
+
+\item{phenotypeCovariatesToResidualize}{Character vector or \code{NULL}.
+Phenotype covariate names to residualize; \code{NULL} uses the dataset
+default set.}
+
+\item{genotypeCovariatesToResidualize}{Character vector or \code{NULL}.
+Genotype covariate names to residualize; \code{NULL} uses the dataset
+default set.}
+
+\item{residualizePhenotypeCovariates}{Logical. Whether to residualize the
+phenotype covariates. Default \code{TRUE}.}
+
+\item{residualizeGenotypeCovariates}{Logical. Whether to residualize the
+genotype covariates. Default \code{TRUE}.}
+
+\item{residualizePhenotypeCovariatesFromGenotypes}{Logical or \code{NULL}.
+Whether to residualize phenotype covariates out of the genotype design;
+\code{NULL} uses the default.}
+
+\item{residualizeGenotypeCovariatesFromGenotypes}{Logical or \code{NULL}.
+Whether to residualize genotype covariates out of the genotype design;
+\code{NULL} uses the default.}
+
+\item{covariateNaAction}{Character. How to handle missing covariate values.}
 }
 \value{
 A numeric matrix (samples x variants).
 }
 \description{
 Residualize the genotype matrix against the per-context
-  phenotype covariates and the genotype covariates, optionally
-  subsetting variants to those falling within a trait's cis-window or
-  an explicit region.
+  phenotype covariates and the genotype covariates, optionally subsetting
+  variants to those falling within a trait's cis-window or an explicit
+  region.
+}
+\examples{
+data(qtlDatasetExample)
+getResidualizedGenotypes(qtlDatasetExample, contexts = "brain")
 }

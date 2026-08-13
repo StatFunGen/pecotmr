@@ -23,3 +23,7 @@ Reads the per-chromosome polyfun `.annot.gz` files in a
   (\code{\link{computeSldscAnnotSd}}, \code{\link{isBinarySldscAnnot}}) then
   runs on the loaded table, not on paths.
 }
+\examples{
+sldsc <- system.file("extdata", "sldsc", package = "pecotmr")
+readSldscAnnot(sldsc)
+}

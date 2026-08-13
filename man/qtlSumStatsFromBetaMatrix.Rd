@@ -32,8 +32,9 @@ conditions.}
 \code{NULL} (default) -- mash operates across conditions per variant and
 needs no LD reference.}
 
-\item{context, trait}{Condition labels; see \code{\link{qtlSumStatsFromZMatrix}}.
-Defaults \code{context = colnames(bhat)}, \code{trait = "mash"}.}
+\item{context, trait}{Condition labels; see
+\code{\link{qtlSumStatsFromZMatrix}}. Defaults \code{context =
+colnames(bhat)}, \code{trait = "mash"}.}
 
 \item{genome}{Genome build. Default \code{"GRCh38"}.}
 
@@ -47,14 +48,25 @@ Defaults \code{context = colnames(bhat)}, \code{trait = "mash"}.}
 A \code{\link{QtlSumStats}} with one entry per condition (column).
 }
 \description{
-Assemble a per-condition \code{\link{QtlSumStats}} from an aligned
-  pair of \code{variants x conditions} effect-size (\code{Bhat}) and
+Assemble a per-condition \code{\link{QtlSumStats}} from an
+  aligned pair of \code{variants x conditions} effect-size (\code{Bhat}) and
   standard-error (\code{Shat}) matrices -- the beta-scale (EE) counterpart of
   \code{\link{qtlSumStatsFromZMatrix}}. Each entry carries \code{BETA},
   \code{SE}, and (derived) \code{Z = BETA / SE} mcols, so the result feeds
   \code{\link{mashPipeline}} / \code{\link{mashModelFit}} on either scale
-  (\code{inputScale = "beta"} or \code{"z"}). Chromosome / position are decoded
-  from the row (variant) ids exactly as in \code{\link{qtlSumStatsFromZMatrix}}.
+  (\code{inputScale = "beta"} or \code{"z"}). Chromosome / position are
+  decoded from the row (variant) ids exactly as in
+  \code{\link{qtlSumStatsFromZMatrix}}.
+}
+\examples{
+gh <- readGenotypes(
+  system.file("extdata", "toy_ref.bed", package = "pecotmr"))
+bhat <- matrix(rnorm(6), 2, 3, dimnames = list(
+  c("chr22:1:A:G", "chr22:2:A:G"), c("brain", "blood", "muscle")))
+shat <- matrix(0.1, 2, 3, dimnames = dimnames(bhat))
+qtlSumStatsFromBetaMatrix(bhat = bhat, shat = shat, study = "s1",
+  ldSketch = gh, context = colnames(bhat), trait = "g1",
+    genome = "hg38", n = 100)
 }
 \seealso{
 \code{\link{qtlSumStatsFromZMatrix}}, \code{\link{mashModelFit}}

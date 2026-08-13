@@ -2,7 +2,7 @@
 % Please edit documentation in R/genotypeIo.R
 \name{invertMinmaxScaling}
 \alias{invertMinmaxScaling}
-\title{Invert min-max [0,2] scaling to recover the original U matrix.}
+\title{Invert min-max [0,2] scaling to recover the original U matrix}
 \usage{
 invertMinmaxScaling(X, uMin, uMax)
 }
@@ -17,13 +17,16 @@ invertMinmaxScaling(X, uMin, uMax)
 Matrix of original U values with same dimensions.
 }
 \description{
-Stochastic genotype data is stored after min-max scaling:
-U_scaled = 2 * (U - u_min) / (u_max - u_min).
-This function exactly inverts that transform using the stored per-variant
-u_min and u_max values from a companion sidecar file (.afreq or
-.stochastic_meta.tsv).
+Stochastic genotype data is stored after min-max scaling: U_scaled = 2 * (U -
+u_min) / (u_max - u_min). This function exactly inverts that transform using
+the stored per-variant u_min and u_max values from a companion sidecar file
+(.afreq or .stochastic_meta.tsv).
 }
 \details{
 The recovered U satisfies U'U/B ~ Wishart(B, R)/B, the correct distributional
 property for LD-based fine-mapping with dynamic variance tracking.
+}
+\examples{
+X <- matrix(runif(12), 4, 3)
+invertMinmaxScaling(X, uMin = rep(0, 3), uMax = rep(1, 3))
 }

@@ -7,34 +7,46 @@
 autoDecision(df, highCorrCols)
 }
 \arguments{
-\item{df}{Data frame. Contains information about Credible Sets for a specific study and block.}
+\item{df}{Data frame. Contains information about Credible Sets for a specific
+study and block.}
 
-\item{highCorrCols}{Character vector. Names of columns in df that represent high correlations.}
+\item{highCorrCols}{Character vector. Names of columns in df that represent
+high correlations.}
 }
 \value{
-A modified data frame with additional columns attached to the diagnostic table:
+A modified data frame with additional columns attached to the
+diagnostic table:
   \item{top_cs}{Logical. TRUE for the CS with the highest absolute Z-score.}
-  \item{tagged_cs}{Logical. TRUE for CS that are considered "tagged" based on p-value and correlation criteria.}
-  \item{method}{Character. The determined updating strategy ("BVSR", "SER", or "BCR").}
+  \item{tagged_cs}{Logical. TRUE for CS that are considered "tagged" based
+  on p-value and correlation criteria.}
+  \item{method}{Character. The determined updating strategy ("BVSR", "SER",
+  or "BCR").}
 }
 \description{
-This function categorizes Credible Sets (CS) within a study block into different 
-updating strategies based on their statistical properties and correlations.
+This function categorizes Credible Sets (CS) within a study block into
+different updating strategies based on their statistical properties and
+correlations.
 }
 \details{
-This function performs the following steps:
-1. Identifies the top CS based on the highest absolute Z-score.
-2. Identifies tagged CS based on high p-value and high correlations.
-3. Counts total, tagged, and remaining CS.
-4. Determines the appropriate updating method based on these counts.
+This function performs the following steps: 1. Identifies the top CS
+  based on the highest absolute Z-score. 2. Identifies tagged CS based on
+  high p-value and high correlations. 3. Counts total, tagged, and remaining
+  CS. 4. Determines the appropriate updating method based on these counts.
 
-The updating methods are:
-- BVSR (Bayesian Variable Selection Regression): Used when there's only one CS or all CS are accounted for.
-- SER (Single Effect Regression): Used when there are tagged CS but no remaining untagged CS.
-- BCR (Bayesian Conditional Regression): Used when there are remaining untagged CS.
+The updating methods are: - BVSR (Bayesian Variable Selection Regression):
+Used when there's only one CS or all CS are accounted for. - SER (Single
+Effect Regression): Used when there are tagged CS but no remaining untagged
+CS. - BCR (Bayesian Conditional Regression): Used when there are remaining
+untagged CS.
 }
 \note{
-This function is part of a developing methodology for automatically handling 
-finemapping results. The thresholds and criteria used (e.g., p-value > 1e-4 for tagging) 
-are subject to refinement and may change in future versions.
+This function is part of a developing methodology for automatically
+  handling finemapping results. The thresholds and criteria used (e.g.,
+  p-value > 1e-4 for tagging) are subject to refinement and may change in
+  future versions.
+}
+\examples{
+df <- data.frame(cs_name = c("L1", "L2"), top_z = c(5, 3.5),
+  p_value = c(1e-10, 1e-6))
+autoDecision(df, highCorrCols = character(0))
 }

@@ -21,12 +21,16 @@ A \code{\link{CtwasResult}}.
 Decompose the raw list returned by
   \code{\link{finemapCtwasRegions}} (optionally after
   \code{\link{mergeCtwasBoundaryRegions}}) into the structured, per-(study,
-  context) \code{\link{CtwasResult}} — the same decomposition
+  context) \code{\link{CtwasResult}} -- the same decomposition
   \code{\link{ctwasPipeline}} applies to its one-shot output, exposed for the
-  granular \code{assembleCtwasInputs} \eqn{\to} \code{estCtwasParam} \eqn{\to}
-  \code{screenCtwasRegions} \eqn{\to} \code{finemapCtwasRegions} path. The
-  GWAS study is read from \code{z_snp$study} and the (single) weight method
-  from the gene ids.
+  granular \code{assembleCtwasInputs} \eqn{\to} \code{estCtwasParam}
+  \eqn{\to} \code{screenCtwasRegions} \eqn{\to} \code{finemapCtwasRegions}
+  path. The GWAS study is read from \code{z_snp$study} and the (single)
+  weight method from the gene ids.
+}
+\examples{
+data(ctwasFinemapExample)
+asCtwasResult(ctwasFinemapExample)
 }
 \seealso{
 \code{\link{ctwasPipeline}}, \code{\link{finemapCtwasRegions}}

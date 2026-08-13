@@ -7,9 +7,8 @@
 MashPrior(fullFit = NULL, cvFits = NULL)
 }
 \arguments{
-\item{fullFit}{Full-data data-driven prior payload (the
-\code{mashPipeline()} \code{list(U, w)} output), or \code{NULL} for a
-CV-only bundle.}
+\item{fullFit}{Full-data data-driven prior payload (the \code{mashPipeline()}
+\code{list(U, w)} output), or \code{NULL} for a CV-only bundle.}
 
 \item{cvFits}{\code{NULL}, or a list with \code{perFoldFits} (a non-empty
 list of per-fold prior payloads) and optionally \code{samplePartition}
@@ -21,4 +20,9 @@ A \code{MashPrior} object.
 \description{
 Construct a \code{\link{MashPrior}} bundling a full-data
   data-driven prior with optional per-fold (cross-validated) priors.
+}
+\examples{
+U <- list(shared = diag(3), singleton = matrix(0.3, 3, 3) + diag(0.7, 3))
+mp <- MashPrior(fullFit = list(U = U, w = c(0.5, 0.5)))
+mp
 }

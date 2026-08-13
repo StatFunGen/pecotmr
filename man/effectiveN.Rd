@@ -16,17 +16,21 @@ Numeric vector of effective sample sizes (\code{NA_real_} where a
   count is missing or non-positive).
 }
 \description{
-Computes the effective sample size
-\code{N_eff = 4 / (1/nCase + 1/nControl) = 4 * nCase * nControl /
-(nCase + nControl)} for case/control GWAS. Balanced studies
-(\code{nCase == nControl}) recover the total \code{nCase + nControl};
-imbalanced studies give a smaller value, which is the statistically
-correct sample size for the RSS likelihood, residual-variance estimation,
-kriging, and the N-cutoff filter. Vectorized over \code{nCase} /
-\code{nControl}; entries where either count is \code{NA} or \code{<= 0}
-return \code{NA_real_}.
+Computes the effective sample size \code{N_eff = 4 / (1/nCase + 1/nControl) =
+4 * nCase * nControl / (nCase + nControl)} for case/control GWAS. Balanced
+studies (\code{nCase == nControl}) recover the total \code{nCase + nControl};
+imbalanced studies give a smaller value, which is the statistically correct
+sample size for the RSS likelihood, residual-variance estimation, kriging,
+and the N-cutoff filter. Vectorized over \code{nCase} / \code{nControl};
+entries where either count is \code{NA} or \code{<= 0} return
+\code{NA_real_}.
+}
+\examples{
+nCase <- 1000
+nControl <- 2000
+effectiveN(nCase = nCase, nControl = nControl)
 }
 \references{
-Privé et al., "Identifying and correcting for misspecifications
+Prive et al., "Identifying and correcting for misspecifications
   in GWAS summary statistics and polygenic scores", HGG Advances 2022.
 }

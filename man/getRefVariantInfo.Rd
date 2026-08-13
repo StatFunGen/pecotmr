@@ -2,7 +2,7 @@
 % Please edit documentation in R/genotypeIo.R
 \name{getRefVariantInfo}
 \alias{getRefVariantInfo}
-\title{Get variant information from any LD reference source.}
+\title{Get variant information from any LD reference source}
 \usage{
 getRefVariantInfo(source, region = NULL)
 }
@@ -13,12 +13,17 @@ getRefVariantInfo(source, region = NULL)
 chrom/start/end. If NULL, returns all variants.}
 }
 \value{
-A data.frame with columns: chrom, id, pos, A2, A1.
-  May also include allele_freq, variance, n_nomiss depending on source.
+A data.frame with columns: chrom, id, pos, A2, A1. May also include
+  allele_freq, variance, n_nomiss depending on source.
 }
 \description{
-Auto-detects the source type (PLINK2, PLINK1, VCF, GDS, or pre-computed
-LD metadata) and returns variant metadata. For PLINK2, opens only the
-.pvar file. For PLINK1, reads only the .bim file. For VCF and GDS,
-loads the full file and extracts variant info.
+Auto-detects the source type (PLINK2, PLINK1, VCF, GDS, or pre-computed LD
+metadata) and returns variant metadata. For PLINK2, opens only the .pvar
+file. For PLINK1, reads only the .bim file. For VCF and GDS, loads the full
+file and extracts variant info.
+}
+\examples{
+meta <- system.file("extdata", "ld_reference", "ld_meta_file.tsv",
+  package = "pecotmr")
+getRefVariantInfo(meta, region = "chr22:10000000-19000000")
 }

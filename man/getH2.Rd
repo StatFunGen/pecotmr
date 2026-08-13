@@ -16,6 +16,10 @@ getH2(x)
 Numeric (length 1).
 }
 \description{
-Return the global SNP heritability estimate carried by
-  an \code{H2Estimate}.
+Return the global SNP heritability estimate carried by an
+  \code{H2Estimate}.
+}
+\examples{
+data(h2EstimateExample)
+getH2(h2EstimateExample)
 }

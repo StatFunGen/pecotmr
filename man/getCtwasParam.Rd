@@ -21,3 +21,9 @@ The stored parameter object (typically a list), or \code{NULL}.
 Return the estimated \code{group_prior} / \code{group_prior_var}
   of a \code{\link{CtwasResultEntry}}.
 }
+\examples{
+cre <- CtwasResultEntry(
+  finemap = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
+  susieAlpha = data.frame(id = c("g1", "g2"), alpha = c(0.9, 0.1)))
+getCtwasParam(cre)
+}

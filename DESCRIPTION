@@ -3,7 +3,7 @@ Type: Package
 Package: pecotmr
 Version: 0.6.11
 Date: 2026-02-28
-Title: Post-GWAS enrichment, colocalization, TWAS and Mendelian Randomization to integrate molecular QTL and GWAS.
+Title: Post-GWAS enrichment, colocalization, TWAS and Mendelian Randomization to integrate molecular QTL and GWAS
 Description: The majority of the statistical models in pecotmr are based on fine-mapped single effects described in Wang G et al (2020) JRSS-B. It also incorporates wrappers to a series of useful TWAS methods as well as utility functions for QTL and GWAS integration.
 URL: https://statfungen.github.io/pecotmr, https://github.com/StatFunGen/pecotmr
 BugReports: https://github.com/StatFunGen/pecotmr/issues
@@ -39,8 +39,10 @@ Imports:
     tibble,
     tictoc,
     tidyr,
+    tidyselect,
     vctrs,
     vroom,
+    withr,
     yaml
 Suggests:
     aSPU,
@@ -51,6 +53,7 @@ Suggests:
     coda,
     CorShrink,
     ctwas,
+    ebnm,
     flashier,
     fsusieR,
     GBJ,
@@ -79,7 +82,8 @@ Suggests:
     snpStats,
     testthat,
     udr,
-    VariantAnnotation
+    VariantAnnotation,
+    wavethresh
 Remotes:
     kkdey/CorShrink,
     stephenslab/fsusieR,
@@ -92,7 +96,7 @@ LinkingTo:
     cpp11armadillo
 NeedsCompilation: yes
 VignetteBuilder: knitr
-Config/roxygen2/version: 8.0.0
+Config/roxygen2/version: 8.1.0
 Collate:
     'AllGenerics.R'
     'GenotypeHandle.R'
@@ -124,7 +128,6 @@ Collate:
     'credibleSetSummary.R'
     'crossValidation.R'
     'ctwasPipeline.R'
-    'deprecated.R'
     'exampleData.R'
     'gwasSumStats.R'
     'fineMappingPipeline.R'
@@ -132,6 +135,7 @@ Collate:
     'fsusieAccessors.R'
     'genotypeIo.R'
     'getLbf.R'
+    'globals.R'
     'h2Annotations.R'
     'h2EstimationWrappers.R'
     'jointEngine.R'
@@ -154,5 +158,5 @@ Collate:
     'twasWeightsPipeline.R'
     'vcfWriter.R'
 Depends: 
-    R (>= 3.5)
-LazyData: true
+    R (>= 4.4)
+LazyData: false

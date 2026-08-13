@@ -28,8 +28,8 @@ estCtwasParam(
 
 \item{fallbackToPrefit}{Logical (length 1). When \code{TRUE} (default
 \code{FALSE}), if \code{ctwas::est_param}'s accurate EM fails for ANY
-reason on a degenerate input, re-run only the prefit step via
-ctwas's internal \code{fit_EM} and return those (typically finite) priors as the
+reason on a degenerate input, re-run only the prefit step via ctwas's
+internal \code{fit_EM} and return those (typically finite) priors as the
 param. The accurate-EM failure mode is version-dependent (ctwas <= 0.4.x:
 \code{"contains NAs"}; ctwas >= 0.6.0: \code{"No regions selected!"} or a
 NaN-loglik \code{"missing value where TRUE/FALSE needed"}), so the catch is
@@ -37,18 +37,23 @@ deliberately broad; a genuinely broken input still surfaces because the
 prefit re-run will itself error. Mirrors the legacy ctwas_2 workaround on
 toy data where the accurate EM cannot be estimated.}
 
-\item{...}{Additional arguments forwarded to \code{ctwas::est_param}
-(e.g. \code{min_p_single_effect}, \code{min_group_size}).}
+\item{...}{Additional arguments forwarded to \code{ctwas::est_param} (e.g.
+\code{min_p_single_effect}, \code{min_group_size}).}
 }
 \value{
 The \code{inputs} list augmented with \code{region_data},
   \code{boundary_genes}, \code{z_gene}, and \code{param}.
 }
 \description{
-Step 2 of the three-step \code{\link{ctwasPipeline}}:
-  assembles \code{region_data} from the inputs and runs
-  \code{ctwas::est_param} (prefit EM + accurate EM) to estimate the
-  group prior probabilities and prior variances. Returns the input
-  state plus \code{region_data}, \code{boundary_genes},
-  \code{z_gene}, and \code{param}.
+Step 2 of the three-step \code{\link{ctwasPipeline}}: assembles
+  \code{region_data} from the inputs and runs \code{ctwas::est_param} (prefit
+  EM + accurate EM) to estimate the group prior probabilities and prior
+  variances. Returns the input state plus \code{region_data},
+  \code{boundary_genes}, \code{z_gene}, and \code{param}.
+}
+\examples{
+data(ctwasInputsExample)
+estCtwasParam(ctwasInputsExample, thin = 1, niterPrefit = 3,
+  niter = 10, min_group_size = 1, min_p_single_effect = 0,
+  fallbackToPrefit = TRUE)
 }

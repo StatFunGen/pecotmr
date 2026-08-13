@@ -11,7 +11,8 @@ l0learnWeights(X, y, penalty = "L0", nFolds = 5, ...)
 
 \item{y}{A numeric response vector.}
 
-\item{penalty}{Type of regularization: "L0", "L0L1", or "L0L2". Default is "L0".}
+\item{penalty}{Type of regularization: "L0", "L0L1", or "L0L2". Default is
+"L0".}
 
 \item{nFolds}{Number of cross-validation folds. Default is 5.}
 
@@ -23,8 +24,14 @@ A numeric vector of length `ncol(X)` of variant weights.
 }
 \description{
 Fits an L0-regularized linear regression model via `L0Learn::L0Learn.cvfit`
-and returns the coefficient vector at the (lambda, gamma) pair minimizing
-the cross-validation error. Default penalty is "L0"; the user can switch to
+and returns the coefficient vector at the (lambda, gamma) pair minimizing the
+cross-validation error. Default penalty is "L0"; the user can switch to
 "L0L1" or "L0L2" (and tune the corresponding gamma grid) by passing the
 relevant arguments through `...`.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+l0learnWeights(X, y)
 }

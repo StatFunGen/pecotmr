@@ -10,17 +10,19 @@
 #' @include AllGenerics.R
 NULL
 
-setClass("LdBlocks",
-  representation(
-    blocks = "GRanges",
-    genome = "character"
-  ),
-  validity = function(object) {
-    errors <- character()
-    if (length(object@genome) != 1L)
-      errors <- c(errors, "'genome' must be a single character string")
-    if (length(errors) == 0) TRUE else errors
-  }
+setClass(
+    "LdBlocks",
+    representation(
+        blocks = "GRanges",
+        genome = "character"
+    ),
+    validity = function(object) {
+        errors <- character()
+        if (length(object@genome) != 1L) {
+            errors <- c(errors, "'genome' must be a single character string")
+        }
+        if (length(errors) == 0) TRUE else errors
+    }
 )
 
 # =============================================================================
@@ -40,7 +42,6 @@ setClass("LdBlocks",
 #' @slot pgenPtr An external pointer for plink2 pgen handle, or NULL.
 #' @export
 
-
 #' @rdname getBlocks
 #' @export
 setMethod("getBlocks", "LdBlocks", function(x) x@blocks)
@@ -50,8 +51,12 @@ setMethod("getBlocks", "LdBlocks", function(x) x@blocks)
 setMethod("getGenome", "LdBlocks", function(x, ...) x@genome)
 
 
+#' @rdname show-methods
 #' @export
 setMethod("show", "LdBlocks", function(object) {
-  cat(sprintf("LdBlocks: %d blocks, genome build: %s\n",
-              length(object@blocks), object@genome))
+    cat(sprintf(
+        "LdBlocks: %d blocks, genome build: %s\n",
+        length(object@blocks),
+        object@genome
+    ))
 })

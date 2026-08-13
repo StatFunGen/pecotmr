@@ -13,8 +13,7 @@ checkGenomeBuild(...)
 TRUE if all match, error otherwise.
 }
 \description{
-Check that genome builds match between objects. Each
-  object contributes a single genome build (from its \code{genome}
-  slot).
+Check that genome builds match between objects. Each object
+  contributes a single genome build (from its \code{genome} slot).
 }
 \keyword{internal}

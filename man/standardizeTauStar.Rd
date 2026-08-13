@@ -9,11 +9,11 @@ standardizeTauStar(tau, tauBlocks, sdAnnot, MRef, h2g)
 \arguments{
 \item{tau}{Numeric vector of per-annotation regression coefficients.}
 
-\item{tauBlocks}{Numeric matrix (nBlocks x nAnnotations) of
-block-level tau estimates from delete-one jackknife.}
+\item{tauBlocks}{Numeric matrix (nBlocks x nAnnotations) of block-level tau
+estimates from delete-one jackknife.}
 
-\item{sdAnnot}{Numeric vector of per-annotation standard deviations,
-same length as \code{tau}.}
+\item{sdAnnot}{Numeric vector of per-annotation standard deviations, same
+length as \code{tau}.}
 
 \item{MRef}{Scalar integer, total number of reference-panel SNPs.}
 
@@ -28,7 +28,7 @@ A list with:
 }
 \description{
 Compute the Gazal-standardized per-annotation effect
-  \eqn{\tau^*_C = \tau_C \cdot sd_C \cdot M_{ref} / h^2_g}, with
-  jackknife SE from block-level tau values.
+  \eqn{\tau^*_C = \tau_C \cdot sd_C \cdot M_{ref} / h^2_g}, with jackknife SE
+  from block-level tau values.
 }
 \keyword{internal}

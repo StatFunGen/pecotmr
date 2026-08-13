@@ -6,42 +6,51 @@ context("GenotypeHandle constructor")
 # ===========================================================================
 
 test_data_dir <- test_path("test_data")
-plink_prefix  <- file.path(test_data_dir, "test_variants")
-gds_path      <- file.path(test_data_dir, "test_variants.gds")
-vcf_path      <- file.path(test_data_dir, "test_variants.vcf.gz")
+plink_prefix <- file.path(test_data_dir, "test_variants")
+gds_path <- file.path(test_data_dir, "test_variants.gds")
+vcf_path <- file.path(test_data_dir, "test_variants.vcf.gz")
 
 # ===========================================================================
 # Source-counting & input-validation branches (no file reads)
 # ===========================================================================
 
 test_that("GenotypeHandle: zero sources errors", {
-  expect_error(GenotypeHandle(),
-               "Exactly one of `path`")
+    expect_error(GenotypeHandle(), "Exactly one of `path`")
 })
 
 test_that("GenotypeHandle: two simultaneous sources errors", {
-  expect_error(GenotypeHandle(path = gds_path, plink2Prefix = plink_prefix),
-               "Exactly one of `path`")
+    expect_error(
+        GenotypeHandle(path = gds_path, plink2Prefix = plink_prefix),
+        "Exactly one of `path`"
+    )
 })
 
 test_that("GenotypeHandle: partial bed/bim/fam triplet errors", {
-  expect_error(GenotypeHandle(bed = "x.bed", bim = "x.bim"),
-               "all three must be provided")
+    expect_error(
+        GenotypeHandle(bed = "x.bed", bim = "x.bim"),
+        "all three must be provided"
+    )
 })
 
 test_that("GenotypeHandle: partial pgen/pvar/psam triplet errors", {
-  expect_error(GenotypeHandle(pgen = "x.pgen", pvar = "x.pvar"),
-               "all three must be provided")
+    expect_error(
+        GenotypeHandle(pgen = "x.pgen", pvar = "x.pvar"),
+        "all three must be provided"
+    )
 })
 
 test_that("GenotypeHandle: ldMeta without region errors", {
-  expect_error(GenotypeHandle(ldMeta = "x.tsv"),
-               "`ldMeta` requires a `region`")
+    expect_error(
+        GenotypeHandle(ldMeta = "x.tsv"),
+        "`ldMeta` requires a `region`"
+    )
 })
 
 test_that("GenotypeHandle: region without ldMeta errors", {
-  expect_error(GenotypeHandle(path = gds_path, region = "chr1:1-100"),
-               "`region` is only meaningful when `ldMeta`")
+    expect_error(
+        GenotypeHandle(path = gds_path, region = "chr1:1-100"),
+        "`region` is only meaningful when `ldMeta`"
+    )
 })
 
 # ===========================================================================
@@ -49,37 +58,37 @@ test_that("GenotypeHandle: region without ldMeta errors", {
 # ===========================================================================
 
 test_that("GenotypeHandle: path = .gds uses readGenotypes (gds backend)", {
-  skip_if_not_installed("SNPRelate")
-  h <- GenotypeHandle(path = gds_path)
-  expect_s4_class(h, "GenotypeHandle")
-  expect_equal(h@format, "gds")
-  expect_equal(h@nSamples, 100L)
-  expect_equal(nrow(h@snpInfo), 349L)
+    skip_if_not_installed("SNPRelate")
+    h <- GenotypeHandle(path = gds_path)
+    expect_s4_class(h, "GenotypeHandle")
+    expect_equal(h@format, "gds")
+    expect_equal(h@nSamples, 100L)
+    expect_equal(nrow(h@snpInfo), 349L)
 })
 
 test_that("GenotypeHandle: path = .vcf.gz uses readGenotypes (vcf backend)", {
-  skip_if_not_installed("VariantAnnotation")
-  h <- GenotypeHandle(path = vcf_path)
-  expect_s4_class(h, "GenotypeHandle")
-  expect_equal(h@format, "vcf")
-  expect_equal(h@nSamples, 100L)
+    skip_if_not_installed("VariantAnnotation")
+    h <- GenotypeHandle(path = vcf_path)
+    expect_s4_class(h, "GenotypeHandle")
+    expect_equal(h@format, "vcf")
+    expect_equal(h@nSamples, 100L)
 })
 
 test_that("GenotypeHandle: plink1Prefix builds a plink1 handle", {
-  skip_if_not_installed("snpStats")
-  h <- GenotypeHandle(plink1Prefix = plink_prefix)
-  expect_s4_class(h, "GenotypeHandle")
-  expect_equal(h@format, "plink1")
-  expect_equal(h@nSamples, 100L)
-  expect_equal(nrow(h@snpInfo), 349L)
+    skip_if_not_installed("snpStats")
+    h <- GenotypeHandle(plink1Prefix = plink_prefix)
+    expect_s4_class(h, "GenotypeHandle")
+    expect_equal(h@format, "plink1")
+    expect_equal(h@nSamples, 100L)
+    expect_equal(nrow(h@snpInfo), 349L)
 })
 
 test_that("GenotypeHandle: plink2Prefix builds a plink2 handle", {
-  skip_if_not_installed("pgenlibr")
-  h <- GenotypeHandle(plink2Prefix = plink_prefix)
-  expect_s4_class(h, "GenotypeHandle")
-  expect_equal(h@format, "plink2")
-  expect_equal(h@nSamples, 100L)
+    skip_if_not_installed("pgenlibr")
+    h <- GenotypeHandle(plink2Prefix = plink_prefix)
+    expect_s4_class(h, "GenotypeHandle")
+    expect_equal(h@format, "plink2")
+    expect_equal(h@nSamples, 100L)
 })
 
 # ===========================================================================
@@ -87,70 +96,94 @@ test_that("GenotypeHandle: plink2Prefix builds a plink2 handle", {
 # ===========================================================================
 
 test_that("GenotypeHandle: bed/bim/fam triplet with matching stems builds plink1 handle", {
-  skip_if_not_installed("snpStats")
-  h <- GenotypeHandle(
-    bed = paste0(plink_prefix, ".bed"),
-    bim = paste0(plink_prefix, ".bim"),
-    fam = paste0(plink_prefix, ".fam"))
-  expect_s4_class(h, "GenotypeHandle")
-  expect_equal(h@format, "plink1")
-  expect_equal(h@nSamples, 100L)
+    skip_if_not_installed("snpStats")
+    h <- GenotypeHandle(
+        bed = paste0(plink_prefix, ".bed"),
+        bim = paste0(plink_prefix, ".bim"),
+        fam = paste0(plink_prefix, ".fam")
+    )
+    expect_s4_class(h, "GenotypeHandle")
+    expect_equal(h@format, "plink1")
+    expect_equal(h@nSamples, 100L)
 })
 
 test_that(".genotypeHandleFromPlink1Triplet: errors when stems disagree", {
-  expect_error(
-    pecotmr:::.genotypeHandleFromPlink1Triplet(
-      bed = "a/x.bed", bim = "b/y.bim", fam = "c/z.fam"),
-    "must share a common path stem"
-  )
+    expect_error(
+        pecotmr:::.genotypeHandleFromPlink1Triplet(
+            bed = "a/x.bed",
+            bim = "b/y.bim",
+            fam = "c/z.fam"
+        ),
+        "must share a common path stem"
+    )
 })
 
 test_that(".genotypeHandleFromPlink1Triplet: errors on non-character input", {
-  expect_error(
-    pecotmr:::.genotypeHandleFromPlink1Triplet(bed = 1L, bim = "x.bim", fam = "x.fam"),
-    "must be a single file path"
-  )
+    expect_error(
+        pecotmr:::.genotypeHandleFromPlink1Triplet(
+            bed = 1L,
+            bim = "x.bim",
+            fam = "x.fam"
+        ),
+        "must be a single file path"
+    )
 })
 
 test_that("GenotypeHandle: pgen/pvar/psam triplet with matching stems builds plink2 handle", {
-  skip_if_not_installed("pgenlibr")
-  h <- GenotypeHandle(
-    pgen = paste0(plink_prefix, ".pgen"),
-    pvar = paste0(plink_prefix, ".pvar"),
-    psam = paste0(plink_prefix, ".psam"))
-  expect_s4_class(h, "GenotypeHandle")
-  expect_equal(h@format, "plink2")
+    skip_if_not_installed("pgenlibr")
+    h <- GenotypeHandle(
+        pgen = paste0(plink_prefix, ".pgen"),
+        pvar = paste0(plink_prefix, ".pvar"),
+        psam = paste0(plink_prefix, ".psam")
+    )
+    expect_s4_class(h, "GenotypeHandle")
+    expect_equal(h@format, "plink2")
 })
 
 test_that(".genotypeHandleFromPlink2Triplet: accepts .pvar.zst by stripping the .zst", {
-  skip_if_not_installed("pgenlibr")
-  # We only check that the stem-validation accepts the zst-suffixed pvar;
-  # the actual file does not exist, so the downstream reader will error.
-  expect_error(
-    pecotmr:::.genotypeHandleFromPlink2Triplet(
-      pgen = "/tmp/x.pgen", pvar = "/tmp/x.pvar.zst", psam = "/tmp/x.psam"),
-    NA  # stems agree, so the stem-check should not fire
-  ) |> suppressWarnings() |> tryCatch(error = function(e) {
-    # The downstream reader will fail because /tmp/x.pgen doesn't exist —
-    # but the failure mode is what we want to confirm is *not* the stem
-    # mismatch error.
-    expect_false(grepl("must share a common path stem", conditionMessage(e)))
-  })
+    skip_if_not_installed("pgenlibr")
+    # We only check that the stem-validation accepts the zst-suffixed pvar;
+    # the actual file does not exist, so the downstream reader will error.
+    expect_error(
+        pecotmr:::.genotypeHandleFromPlink2Triplet(
+            pgen = "/tmp/x.pgen",
+            pvar = "/tmp/x.pvar.zst",
+            psam = "/tmp/x.psam"
+        ),
+        NA # stems agree, so the stem-check should not fire
+    ) |>
+        suppressWarnings() |>
+        tryCatch(error = function(e) {
+            # The downstream reader will fail because /tmp/x.pgen doesn't exist —
+            # but the failure mode is what we want to confirm is *not* the stem
+            # mismatch error.
+            expect_false(grepl(
+                "must share a common path stem",
+                conditionMessage(e)
+            ))
+        })
 })
 
 test_that(".genotypeHandleFromPlink2Triplet: errors when stems disagree", {
-  expect_error(
-    pecotmr:::.genotypeHandleFromPlink2Triplet(
-      pgen = "a/x.pgen", pvar = "b/y.pvar", psam = "c/z.psam"),
-    "must share a common path stem"
-  )
+    expect_error(
+        pecotmr:::.genotypeHandleFromPlink2Triplet(
+            pgen = "a/x.pgen",
+            pvar = "b/y.pvar",
+            psam = "c/z.psam"
+        ),
+        "must share a common path stem"
+    )
 })
 
 test_that(".genotypeHandleFromPlink2Triplet: errors on non-character input", {
-  expect_error(
-    pecotmr:::.genotypeHandleFromPlink2Triplet(pgen = 1L, pvar = "x.pvar", psam = "x.psam"),
-    "must be a single file path"
-  )
+    expect_error(
+        pecotmr:::.genotypeHandleFromPlink2Triplet(
+            pgen = 1L,
+            pvar = "x.pvar",
+            psam = "x.psam"
+        ),
+        "must be a single file path"
+    )
 })
 
 # ===========================================================================
@@ -158,174 +191,182 @@ test_that(".genotypeHandleFromPlink2Triplet: errors on non-character input", {
 # ===========================================================================
 
 .gh_makeLdMetaForGds <- function() {
-  meta <- data.frame(
-    chrom = "chr21",
-    start = 17000000L,
-    end   = 18000000L,
-    path  = gds_path,
-    stringsAsFactors = FALSE)
-  f <- tempfile(fileext = ".tsv")
-  write.table(meta, f, sep = "\t", quote = FALSE, row.names = FALSE)
-  f
+    meta <- data.frame(
+        chrom = "chr21",
+        start = 17000000L,
+        end = 18000000L,
+        path = gds_path,
+        stringsAsFactors = FALSE
+    )
+    f <- tempfile(fileext = ".tsv")
+    write.table(meta, f, sep = "\t", quote = FALSE, row.names = FALSE)
+    f
 }
 
 .gh_makeLdMetaForVcf <- function() {
-  meta <- data.frame(
-    chrom = "chr21",
-    start = 17000000L,
-    end   = 18000000L,
-    path  = vcf_path,
-    stringsAsFactors = FALSE)
-  f <- tempfile(fileext = ".tsv")
-  write.table(meta, f, sep = "\t", quote = FALSE, row.names = FALSE)
-  f
+    meta <- data.frame(
+        chrom = "chr21",
+        start = 17000000L,
+        end = 18000000L,
+        path = vcf_path,
+        stringsAsFactors = FALSE
+    )
+    f <- tempfile(fileext = ".tsv")
+    write.table(meta, f, sep = "\t", quote = FALSE, row.names = FALSE)
+    f
 }
 
 .gh_makeLdMetaForBed <- function() {
-  meta <- data.frame(
-    chrom = "chr21",
-    start = 17000000L,
-    end   = 18000000L,
-    path  = paste0(plink_prefix, ".bed"),
-    stringsAsFactors = FALSE)
-  f <- tempfile(fileext = ".tsv")
-  write.table(meta, f, sep = "\t", quote = FALSE, row.names = FALSE)
-  f
+    meta <- data.frame(
+        chrom = "chr21",
+        start = 17000000L,
+        end = 18000000L,
+        path = paste0(plink_prefix, ".bed"),
+        stringsAsFactors = FALSE
+    )
+    f <- tempfile(fileext = ".tsv")
+    write.table(meta, f, sep = "\t", quote = FALSE, row.names = FALSE)
+    f
 }
 
 .gh_makeLdMetaForPgen <- function() {
-  meta <- data.frame(
-    chrom = "chr21",
-    start = 17000000L,
-    end   = 18000000L,
-    path  = paste0(plink_prefix, ".pgen"),
-    stringsAsFactors = FALSE)
-  f <- tempfile(fileext = ".tsv")
-  write.table(meta, f, sep = "\t", quote = FALSE, row.names = FALSE)
-  f
+    meta <- data.frame(
+        chrom = "chr21",
+        start = 17000000L,
+        end = 18000000L,
+        path = paste0(plink_prefix, ".pgen"),
+        stringsAsFactors = FALSE
+    )
+    f <- tempfile(fileext = ".tsv")
+    write.table(meta, f, sep = "\t", quote = FALSE, row.names = FALSE)
+    f
 }
 
 .gh_makeLdMetaForCor <- function() {
-  # findValidFilePath needs the target file to exist (otherwise it falls
-  # back to returning the meta-TSV path itself, which would dead-end the
-  # downstream format dispatch elsewhere). Materialize an empty .cor.xz so
-  # we exercise the proper "cor.xz payload" rejection branch.
-  corPath <- tempfile(fileext = ".cor.xz")
-  file.create(corPath)
-  meta <- data.frame(
-    chrom = "chr21",
-    start = 17000000L,
-    end   = 18000000L,
-    path  = corPath,
-    stringsAsFactors = FALSE)
-  f <- tempfile(fileext = ".tsv")
-  write.table(meta, f, sep = "\t", quote = FALSE, row.names = FALSE)
-  list(meta = f, cor = corPath)
+    # findValidFilePath needs the target file to exist (otherwise it falls
+    # back to returning the meta-TSV path itself, which would dead-end the
+    # downstream format dispatch elsewhere). Materialize an empty .cor.xz so
+    # we exercise the proper "cor.xz payload" rejection branch.
+    corPath <- tempfile(fileext = ".cor.xz")
+    file.create(corPath)
+    meta <- data.frame(
+        chrom = "chr21",
+        start = 17000000L,
+        end = 18000000L,
+        path = corPath,
+        stringsAsFactors = FALSE
+    )
+    f <- tempfile(fileext = ".tsv")
+    write.table(meta, f, sep = "\t", quote = FALSE, row.names = FALSE)
+    list(meta = f, cor = corPath)
 }
 
 test_that("GenotypeHandle ldMeta: dispatches to gds reader for .gds path", {
-  skip_if_not_installed("SNPRelate")
-  f <- .gh_makeLdMetaForGds()
-  on.exit(unlink(f), add = TRUE)
-  h <- GenotypeHandle(ldMeta = f, region = "chr21:17513228-17592874")
-  expect_s4_class(h, "GenotypeHandle")
-  expect_equal(h@format, "gds")
+    skip_if_not_installed("SNPRelate")
+    f <- .gh_makeLdMetaForGds()
+    on.exit(unlink(f), add = TRUE)
+    h <- GenotypeHandle(ldMeta = f, region = "chr21:17513228-17592874")
+    expect_s4_class(h, "GenotypeHandle")
+    expect_equal(h@format, "gds")
 })
 
 test_that("GenotypeHandle ldMeta: dispatches to vcf reader for .vcf.gz path", {
-  skip_if_not_installed("VariantAnnotation")
-  f <- .gh_makeLdMetaForVcf()
-  on.exit(unlink(f), add = TRUE)
-  h <- GenotypeHandle(ldMeta = f, region = "chr21:17513228-17592874")
-  expect_s4_class(h, "GenotypeHandle")
-  expect_equal(h@format, "vcf")
+    skip_if_not_installed("VariantAnnotation")
+    f <- .gh_makeLdMetaForVcf()
+    on.exit(unlink(f), add = TRUE)
+    h <- GenotypeHandle(ldMeta = f, region = "chr21:17513228-17592874")
+    expect_s4_class(h, "GenotypeHandle")
+    expect_equal(h@format, "vcf")
 })
 
 test_that("GenotypeHandle ldMeta: dispatches to plink1 reader for .bed path", {
-  skip_if_not_installed("snpStats")
-  f <- .gh_makeLdMetaForBed()
-  on.exit(unlink(f), add = TRUE)
-  h <- GenotypeHandle(ldMeta = f, region = "chr21:17513228-17592874")
-  expect_s4_class(h, "GenotypeHandle")
-  expect_equal(h@format, "plink1")
+    skip_if_not_installed("snpStats")
+    f <- .gh_makeLdMetaForBed()
+    on.exit(unlink(f), add = TRUE)
+    h <- GenotypeHandle(ldMeta = f, region = "chr21:17513228-17592874")
+    expect_s4_class(h, "GenotypeHandle")
+    expect_equal(h@format, "plink1")
 })
 
 test_that("GenotypeHandle ldMeta: dispatches to plink2 reader for .pgen path", {
-  skip_if_not_installed("pgenlibr")
-  f <- .gh_makeLdMetaForPgen()
-  on.exit(unlink(f), add = TRUE)
-  h <- GenotypeHandle(ldMeta = f, region = "chr21:17513228-17592874")
-  expect_s4_class(h, "GenotypeHandle")
-  expect_equal(h@format, "plink2")
+    skip_if_not_installed("pgenlibr")
+    f <- .gh_makeLdMetaForPgen()
+    on.exit(unlink(f), add = TRUE)
+    h <- GenotypeHandle(ldMeta = f, region = "chr21:17513228-17592874")
+    expect_s4_class(h, "GenotypeHandle")
+    expect_equal(h@format, "plink2")
 })
 
 test_that("GenotypeHandle ldMeta: .cor.xz payload is rejected (out of scope)", {
-  paths <- .gh_makeLdMetaForCor()
-  on.exit(unlink(c(paths$meta, paths$cor)), add = TRUE)
-  expect_error(
-    GenotypeHandle(ldMeta = paths$meta, region = "chr21:17513228-17592874"),
-    "points at a pre-computed correlation matrix"
-  )
+    paths <- .gh_makeLdMetaForCor()
+    on.exit(unlink(c(paths$meta, paths$cor)), add = TRUE)
+    expect_error(
+        GenotypeHandle(ldMeta = paths$meta, region = "chr21:17513228-17592874"),
+        "points at a pre-computed correlation matrix"
+    )
 })
 
 test_that("GenotypeHandle ldMeta: region with no covering row errors", {
-  f <- .gh_makeLdMetaForGds()
-  on.exit(unlink(f), add = TRUE)
-  # The upstream helper emits "No data for chromosome ..." when nothing on
-  # the region's chromosome exists in the meta TSV; either phrasing
-  # indicates the same "region uncovered" failure mode.
-  expect_error(
-    GenotypeHandle(ldMeta = f, region = "chr22:1-1000"),
-    "No data for chromosome|no LD-meta row covers"
-  )
+    f <- .gh_makeLdMetaForGds()
+    on.exit(unlink(f), add = TRUE)
+    # The upstream helper emits "No data for chromosome ..." when nothing on
+    # the region's chromosome exists in the meta TSV; either phrasing
+    # indicates the same "region uncovered" failure mode.
+    expect_error(
+        GenotypeHandle(ldMeta = f, region = "chr22:1-1000"),
+        "No data for chromosome|no LD-meta row covers"
+    )
 })
 
 # === Tests migrated from test_h2ClassesSumstats.R (GenotypeHandle) ===
 
 test_that("GenotypeHandle constructs and validates correctly", {
-  obj <- new("GenotypeHandle",
-    path = "/tmp/test.gds",
-    format = "gds",
-    snpInfo = make_test_snp_info(),
-    nSamples = 100L,
-    sampleIds = paste0("sample_", 1:100),
-    pgenPtr = NULL
-  )
-  expect_s4_class(obj, "GenotypeHandle")
-  expect_equal(obj@format, "gds")
-  expect_true(methods::validObject(obj))
+    obj <- new(
+        "GenotypeHandle",
+        path = "/tmp/test.gds",
+        format = "gds",
+        snpInfo = make_test_snp_info(),
+        nSamples = 100L,
+        sampleIds = paste0("sample_", 1:100),
+        pgenPtr = NULL
+    )
+    expect_s4_class(obj, "GenotypeHandle")
+    expect_equal(obj@format, "gds")
+    expect_true(methods::validObject(obj))
 })
 
 
 test_that("GenotypeHandle accepts all valid formats", {
-  for (fmt in c("gds", "vcf", "plink1", "plink2")) {
-    obj <- new("GenotypeHandle",
-      path = "/tmp/test",
-      format = fmt,
-      snpInfo = data.frame(),
-      nSamples = 0L,
-      sampleIds = character(),
-      pgenPtr = NULL
-    )
-    expect_true(methods::validObject(obj))
-  }
+    for (fmt in c("gds", "vcf", "plink1", "plink2")) {
+        obj <- new(
+            "GenotypeHandle",
+            path = "/tmp/test",
+            format = fmt,
+            snpInfo = data.frame(),
+            nSamples = 0L,
+            sampleIds = character(),
+            pgenPtr = NULL
+        )
+        expect_true(methods::validObject(obj))
+    }
 })
 
 
 test_that("GenotypeHandle rejects invalid format", {
-  expect_error(
-    methods::validObject(
-      new("GenotypeHandle",
-        path = "/tmp/test",
-        format = "bgen",
-        snpInfo = data.frame(),
-        nSamples = 0L,
-        sampleIds = character(),
-        pgenPtr = NULL
-      )
-    ),
-    "format.*must be one of"
-  )
+    expect_error(
+        methods::validObject(
+            new(
+                "GenotypeHandle",
+                path = "/tmp/test",
+                format = "bgen",
+                snpInfo = data.frame(),
+                nSamples = 0L,
+                sampleIds = character(),
+                pgenPtr = NULL
+            )
+        ),
+        "format.*must be one of"
+    )
 })
 
 # ===========================================================================
@@ -334,154 +375,209 @@ test_that("GenotypeHandle rejects invalid format", {
 # Extraction routing for sharded handles is covered in test_genotypeIo.R.
 # ===========================================================================
 test_that("genoMeta (named vector) builds a sharded handle", {
-  skip_if_not_installed("snpStats")
-  h <- GenotypeHandle(genoMeta = c(
-    "21" = file.path(test_data_dir, "test_variants"),
-    "22" = file.path(test_data_dir, "test_variants_chr22")))
-  expect_s4_class(h, "GenotypeHandle")
-  expect_equal(h@format, "plink1")
-  expect_equal(sort(names(h@chromPaths)), c("21", "22"))
-  expect_equal(nrow(h@snpInfo), 2L * 349L)
+    skip_if_not_installed("snpStats")
+    h <- GenotypeHandle(
+        genoMeta = c(
+            "21" = file.path(test_data_dir, "test_variants"),
+            "22" = file.path(test_data_dir, "test_variants_chr22")
+        )
+    )
+    expect_s4_class(h, "GenotypeHandle")
+    expect_equal(h@format, "plink1")
+    expect_equal(sort(names(h@chromPaths)), c("21", "22"))
+    expect_equal(nrow(h@snpInfo), 2L * 349L)
 })
 
 test_that("genoMeta meta-file resolves payloads relative to its own directory", {
-  skip_if_not_installed("snpStats")
-  # A meta file living in test_data referencing payloads by basename only.
-  metafile <- file.path(test_data_dir, "tmp_chrom_meta_relative.tsv")
-  on.exit(unlink(metafile), add = TRUE)
-  writeLines(c("#chr\tpath", "21\ttest_variants", "22\ttest_variants_chr22"),
-             metafile)
-  h <- GenotypeHandle(genoMeta = metafile)
-  expect_equal(sort(names(h@chromPaths)), c("21", "22"))
-  expect_equal(nrow(h@snpInfo), 2L * 349L)
+    skip_if_not_installed("snpStats")
+    # A meta file living in test_data referencing payloads by basename only.
+    metafile <- file.path(test_data_dir, "tmp_chrom_meta_relative.tsv")
+    on.exit(unlink(metafile), add = TRUE)
+    writeLines(
+        c("#chr\tpath", "21\ttest_variants", "22\ttest_variants_chr22"),
+        metafile
+    )
+    h <- GenotypeHandle(genoMeta = metafile)
+    expect_equal(sort(names(h@chromPaths)), c("21", "22"))
+    expect_equal(nrow(h@snpInfo), 2L * 349L)
 })
 
 test_that(".parseChromMeta matches chrom/path columns by name (order- and extra-column-tolerant)", {
-  mk <- function(lines) { f <- tempfile(fileext = ".tsv"); writeLines(lines, f); f }
-  # extra legacy start/end columns + path not in position 2
-  m1 <- pecotmr:::.parseChromMeta(
-    mk(c("#chrom\tstart\tend\tpath", "21\t1\t9\t/abs/a.bed", "22\t1\t9\t/abs/b.bed")))
-  expect_equal(m1$chrom, c("21", "22"))
-  expect_equal(m1$path,  c("/abs/a.bed", "/abs/b.bed"))
-  # reordered header (path first) + alias column names
-  m2 <- pecotmr:::.parseChromMeta(
-    mk(c("genotype\tchr", "/abs/a.bed\t21", "/abs/b.bed\t22")))
-  expect_equal(m2$chrom, c("21", "22"))
-  expect_equal(m2$path,  c("/abs/a.bed", "/abs/b.bed"))
+    mk <- function(lines) {
+        f <- tempfile(fileext = ".tsv")
+        writeLines(lines, f)
+        f
+    }
+    # extra legacy start/end columns + path not in position 2
+    m1 <- pecotmr:::.parseChromMeta(
+        mk(c(
+            "#chrom\tstart\tend\tpath",
+            "21\t1\t9\t/abs/a.bed",
+            "22\t1\t9\t/abs/b.bed"
+        ))
+    )
+    expect_equal(m1$chrom, c("21", "22"))
+    expect_equal(m1$path, c("/abs/a.bed", "/abs/b.bed"))
+    # reordered header (path first) + alias column names
+    m2 <- pecotmr:::.parseChromMeta(
+        mk(c("genotype\tchr", "/abs/a.bed\t21", "/abs/b.bed\t22"))
+    )
+    expect_equal(m2$chrom, c("21", "22"))
+    expect_equal(m2$path, c("/abs/a.bed", "/abs/b.bed"))
 })
 
 test_that(".parseChromMeta falls back to the first two columns when no alias header matches", {
-  mk <- function(lines) { f <- tempfile(fileext = ".tsv"); writeLines(lines, f); f }
-  m <- pecotmr:::.parseChromMeta(
-    mk(c("foo\tbar", "21\t/abs/a.bed", "22\t/abs/b.bed")))
-  expect_equal(m$chrom, c("21", "22"))
-  expect_equal(m$path,  c("/abs/a.bed", "/abs/b.bed"))
+    mk <- function(lines) {
+        f <- tempfile(fileext = ".tsv")
+        writeLines(lines, f)
+        f
+    }
+    m <- pecotmr:::.parseChromMeta(
+        mk(c("foo\tbar", "21\t/abs/a.bed", "22\t/abs/b.bed"))
+    )
+    expect_equal(m$chrom, c("21", "22"))
+    expect_equal(m$path, c("/abs/a.bed", "/abs/b.bed"))
 })
 
 test_that(".parseChromMeta errors when a chromosome maps to multiple payloads", {
-  mk <- function(lines) { f <- tempfile(fileext = ".tsv"); writeLines(lines, f); f }
-  expect_error(
-    pecotmr:::.parseChromMeta(
-      mk(c("#chr\tpath", "21\t/abs/a.bed", "21\t/abs/b.bed"))),
-    "map to multiple genotype payloads")
-  # same guard on the named-vector path
-  expect_error(
-    pecotmr:::.parseChromMeta(c("21" = "/abs/a.bed", "21" = "/abs/b.bed")),
-    "map to multiple genotype payloads")
+    mk <- function(lines) {
+        f <- tempfile(fileext = ".tsv")
+        writeLines(lines, f)
+        f
+    }
+    expect_error(
+        pecotmr:::.parseChromMeta(
+            mk(c("#chr\tpath", "21\t/abs/a.bed", "21\t/abs/b.bed"))
+        ),
+        "map to multiple genotype payloads"
+    )
+    # same guard on the named-vector path
+    expect_error(
+        pecotmr:::.parseChromMeta(c("21" = "/abs/a.bed", "21" = "/abs/b.bed")),
+        "map to multiple genotype payloads"
+    )
 })
 
 test_that("genoMeta errors on mismatched samples across shards", {
-  skip_if_not_installed("snpStats")
-  # protocol_example.genotype is a different sample panel.
-  expect_error(
-    GenotypeHandle(genoMeta = c(
-      "21" = file.path(test_data_dir, "test_variants"),
-      "22" = file.path(test_data_dir, "protocol_example.genotype"))),
-    "identical sample IDs")
+    skip_if_not_installed("snpStats")
+    # protocol_example.genotype is a different sample panel.
+    expect_error(
+        GenotypeHandle(
+            genoMeta = c(
+                "21" = file.path(test_data_dir, "test_variants"),
+                "22" = file.path(test_data_dir, "protocol_example.genotype")
+            )
+        ),
+        "identical sample IDs"
+    )
 })
 
 test_that("genoMeta errors on mixed formats across shards", {
-  skip_if_not_installed("snpStats")
-  skip_if_not_installed("SNPRelate")
-  expect_error(
-    GenotypeHandle(genoMeta = c(
-      "21" = file.path(test_data_dir, "test_variants"),
-      "22" = file.path(test_data_dir, "test_variants_chr22.gds"))),
-    "share one")
+    skip_if_not_installed("snpStats")
+    skip_if_not_installed("SNPRelate")
+    expect_error(
+        GenotypeHandle(
+            genoMeta = c(
+                "21" = file.path(test_data_dir, "test_variants"),
+                "22" = file.path(test_data_dir, "test_variants_chr22.gds")
+            )
+        ),
+        "share one"
+    )
 })
 
 test_that("genoMeta errors when a chromosome appears in two files", {
-  skip_if_not_installed("snpStats")
-  expect_error(
-    GenotypeHandle(genoMeta = c(
-      "a" = file.path(test_data_dir, "test_variants"),
-      "b" = file.path(test_data_dir, "test_variants"))),
-    "more than one")
+    skip_if_not_installed("snpStats")
+    expect_error(
+        GenotypeHandle(
+            genoMeta = c(
+                "a" = file.path(test_data_dir, "test_variants"),
+                "b" = file.path(test_data_dir, "test_variants")
+            )
+        ),
+        "more than one"
+    )
 })
 
 test_that("genoMeta sharded handle show() reports the layout", {
-  skip_if_not_installed("snpStats")
-  sh <- GenotypeHandle(genoMeta = c(
-    "21" = file.path(test_data_dir, "test_variants"),
-    "22" = file.path(test_data_dir, "test_variants_chr22")))
-  out <- paste(capture.output(show(sh)), collapse = "\n")
-  expect_match(out, "per-chromosome files")
+    skip_if_not_installed("snpStats")
+    sh <- GenotypeHandle(
+        genoMeta = c(
+            "21" = file.path(test_data_dir, "test_variants"),
+            "22" = file.path(test_data_dir, "test_variants_chr22")
+        )
+    )
+    out <- paste(capture.output(show(sh)), collapse = "\n")
+    expect_match(out, "per-chromosome files")
 })
 
 # ===========================================================================
 # genoMeta `chroms`: read only the requested per-chromosome shards (I/O win).
 # ===========================================================================
 test_that("genoMeta chroms reads only the requested shard", {
-  skip_if_not_installed("snpStats")
-  meta <- c("21" = file.path(test_data_dir, "test_variants"),
-            "22" = file.path(test_data_dir, "test_variants_chr22"))
-  full   <- GenotypeHandle(genoMeta = meta)
-  only21 <- GenotypeHandle(genoMeta = meta, chroms = "21")
-  expect_equal(names(only21@chromPaths), "21")
-  expect_equal(nrow(only21@snpInfo), 349L)
-  # chr21 is the first shard, so the kept rows/fileIdx match the full handle's.
-  expect_equal(only21@snpInfo$SNP,     full@snpInfo$SNP[1:349])
-  expect_equal(only21@snpInfo$fileIdx, full@snpInfo$fileIdx[1:349])
+    skip_if_not_installed("snpStats")
+    meta <- c(
+        "21" = file.path(test_data_dir, "test_variants"),
+        "22" = file.path(test_data_dir, "test_variants_chr22")
+    )
+    full <- GenotypeHandle(genoMeta = meta)
+    only21 <- GenotypeHandle(genoMeta = meta, chroms = "21")
+    expect_equal(names(only21@chromPaths), "21")
+    expect_equal(nrow(only21@snpInfo), 349L)
+    # chr21 is the first shard, so the kept rows/fileIdx match the full handle's.
+    expect_equal(only21@snpInfo$SNP, full@snpInfo$SNP[1:349])
+    expect_equal(only21@snpInfo$fileIdx, full@snpInfo$fileIdx[1:349])
 })
 
 test_that("genoMeta chroms canonicalises chromosome labels", {
-  skip_if_not_installed("snpStats")
-  # "chr21" canonicalises to the panel's declared "21" shard.
-  h <- GenotypeHandle(
-    genoMeta = c("21" = file.path(test_data_dir, "test_variants"),
-                 "22" = file.path(test_data_dir, "test_variants_chr22")),
-    chroms = "chr21")
-  expect_equal(names(h@chromPaths), "21")
+    skip_if_not_installed("snpStats")
+    # "chr21" canonicalises to the panel's declared "21" shard.
+    h <- GenotypeHandle(
+        genoMeta = c(
+            "21" = file.path(test_data_dir, "test_variants"),
+            "22" = file.path(test_data_dir, "test_variants_chr22")
+        ),
+        chroms = "chr21"
+    )
+    expect_equal(names(h@chromPaths), "21")
 })
 
 test_that("genoMeta chroms falls back to all shards when none match", {
-  skip_if_not_installed("snpStats")
-  # chr9 is absent from the panel: rather than build an empty handle, read all
-  # so the caller's own absence check can report the mismatch.
-  h <- GenotypeHandle(
-    genoMeta = c("21" = file.path(test_data_dir, "test_variants"),
-                 "22" = file.path(test_data_dir, "test_variants_chr22")),
-    chroms = "9")
-  expect_equal(sort(names(h@chromPaths)), c("21", "22"))
+    skip_if_not_installed("snpStats")
+    # chr9 is absent from the panel: rather than build an empty handle, read all
+    # so the caller's own absence check can report the mismatch.
+    h <- GenotypeHandle(
+        genoMeta = c(
+            "21" = file.path(test_data_dir, "test_variants"),
+            "22" = file.path(test_data_dir, "test_variants_chr22")
+        ),
+        chroms = "9"
+    )
+    expect_equal(sort(names(h@chromPaths)), c("21", "22"))
 })
 
 test_that("genoMeta chroms skips a shard whose file does not exist", {
-  skip_if_not_installed("snpStats")
-  # A bogus chr21 payload proves the skip: restricting to chr22 must never open
-  # it, while requesting chr21 too fails on the missing files.
-  meta <- c("22" = file.path(test_data_dir, "test_variants_chr22"),
-            "21" = "/no/such/chr21/prefix")
-  h <- GenotypeHandle(genoMeta = meta, chroms = "22")
-  expect_equal(names(h@chromPaths), "22")
-  expect_error(GenotypeHandle(genoMeta = meta, chroms = c("22", "21")))
+    skip_if_not_installed("snpStats")
+    # A bogus chr21 payload proves the skip: restricting to chr22 must never open
+    # it, while requesting chr21 too fails on the missing files.
+    meta <- c(
+        "22" = file.path(test_data_dir, "test_variants_chr22"),
+        "21" = "/no/such/chr21/prefix"
+    )
+    h <- GenotypeHandle(genoMeta = meta, chroms = "22")
+    expect_equal(names(h@chromPaths), "22")
+    expect_error(GenotypeHandle(genoMeta = meta, chroms = c("22", "21")))
 })
 
 test_that("chroms is rejected for a non-genoMeta source", {
-  skip_if_not_installed("snpStats")
-  expect_error(
-    GenotypeHandle(plink1Prefix = file.path(test_data_dir, "test_variants"),
-                   chroms = "21"),
-    "only supported with .genoMeta")
+    skip_if_not_installed("snpStats")
+    expect_error(
+        GenotypeHandle(
+            plink1Prefix = file.path(test_data_dir, "test_variants"),
+            chroms = "21"
+        ),
+        "only supported with .genoMeta"
+    )
 })
 
 # ===========================================================================
@@ -493,34 +589,57 @@ test_that("chroms is rejected for a non-genoMeta source", {
 # ===========================================================================
 
 test_that(".genotypeHandleFromLdMeta errors when no LD-meta row covers the region", {
-  local_mocked_bindings(
-    getRegionalLdMeta = function(...) list(
-      intersections = list(LD_file_paths = character(0), bimFilePaths = NULL)),
-    .package = "pecotmr")
-  expect_error(
-    pecotmr:::.genotypeHandleFromLdMeta("dummy.tsv", "chr1:1-100"),
-    "no LD-meta row covers")
+    local_mocked_bindings(
+        getRegionalLdMeta = function(...) {
+            list(
+                intersections = list(
+                    LD_file_paths = character(0),
+                    bimFilePaths = NULL
+                )
+            )
+        },
+        .package = "pecotmr"
+    )
+    expect_error(
+        pecotmr:::.genotypeHandleFromLdMeta("dummy.tsv", "chr1:1-100"),
+        "no LD-meta row covers"
+    )
 })
 
 test_that(".genotypeHandleFromLdMeta errors when the region spans multiple rows", {
-  local_mocked_bindings(
-    getRegionalLdMeta = function(...) list(
-      intersections = list(
-        LD_file_paths = c("/tmp/a.bed", "/tmp/b.bed"), bimFilePaths = NULL)),
-    .package = "pecotmr")
-  expect_error(
-    pecotmr:::.genotypeHandleFromLdMeta("dummy.tsv", "chr1:1-100"),
-    "spans multiple LD-meta")
+    local_mocked_bindings(
+        getRegionalLdMeta = function(...) {
+            list(
+                intersections = list(
+                    LD_file_paths = c("/tmp/a.bed", "/tmp/b.bed"),
+                    bimFilePaths = NULL
+                )
+            )
+        },
+        .package = "pecotmr"
+    )
+    expect_error(
+        pecotmr:::.genotypeHandleFromLdMeta("dummy.tsv", "chr1:1-100"),
+        "spans multiple LD-meta"
+    )
 })
 
 test_that(".genotypeHandleFromLdMeta errors on an unsupported payload extension", {
-  local_mocked_bindings(
-    getRegionalLdMeta = function(...) list(
-      intersections = list(LD_file_paths = "/tmp/foo.txt", bimFilePaths = NULL)),
-    .package = "pecotmr")
-  expect_error(
-    pecotmr:::.genotypeHandleFromLdMeta("dummy.tsv", "chr1:1-100"),
-    "unsupported LD-meta file extension")
+    local_mocked_bindings(
+        getRegionalLdMeta = function(...) {
+            list(
+                intersections = list(
+                    LD_file_paths = "/tmp/foo.txt",
+                    bimFilePaths = NULL
+                )
+            )
+        },
+        .package = "pecotmr"
+    )
+    expect_error(
+        pecotmr:::.genotypeHandleFromLdMeta("dummy.tsv", "chr1:1-100"),
+        "unsupported LD-meta file extension"
+    )
 })
 
 # ===========================================================================
@@ -528,17 +647,19 @@ test_that(".genotypeHandleFromLdMeta errors on an unsupported payload extension"
 # ===========================================================================
 
 test_that(".parseChromMeta errors on a meta file with fewer than 2 columns", {
-  f <- tempfile(fileext = ".tsv")
-  on.exit(unlink(f), add = TRUE)
-  writeLines(c("chr", "21", "22"), f)
-  expect_error(pecotmr:::.parseChromMeta(f), "must have at least 2 columns")
+    f <- tempfile(fileext = ".tsv")
+    on.exit(unlink(f), add = TRUE)
+    writeLines(c("chr", "21", "22"), f)
+    expect_error(pecotmr:::.parseChromMeta(f), "must have at least 2 columns")
 })
 
 test_that(".parseChromMeta errors on an unrecognized genoMeta shape", {
-  # An unnamed multi-element character vector (names forgotten) is neither a
-  # meta-file path nor a chrom->path map.
-  expect_error(pecotmr:::.parseChromMeta(c("21", "22")),
-               "expected a path to a")
+    # An unnamed multi-element character vector (names forgotten) is neither a
+    # meta-file path nor a chrom->path map.
+    expect_error(
+        pecotmr:::.parseChromMeta(c("21", "22")),
+        "expected a path to a"
+    )
 })
 
 # ===========================================================================
@@ -546,11 +667,13 @@ test_that(".parseChromMeta errors on an unrecognized genoMeta shape", {
 # ===========================================================================
 
 test_that(".genotypeHandleFromChromMeta errors when the meta has no rows", {
-  f <- tempfile(fileext = ".tsv")
-  on.exit(unlink(f), add = TRUE)
-  writeLines("#chr\tpath", f)  # header only -> zero data rows
-  expect_error(pecotmr:::.genotypeHandleFromChromMeta(f),
-               "no chromosomes found")
+    f <- tempfile(fileext = ".tsv")
+    on.exit(unlink(f), add = TRUE)
+    writeLines("#chr\tpath", f) # header only -> zero data rows
+    expect_error(
+        pecotmr:::.genotypeHandleFromChromMeta(f),
+        "no chromosomes found"
+    )
 })
 
 # ===========================================================================
@@ -559,52 +682,54 @@ test_that(".genotypeHandleFromChromMeta errors when the meta has no rows", {
 # ===========================================================================
 
 test_that(".resolveGenotypeShard honours explicit plink1 format and .bed extension", {
-  skip_if_not_installed("snpStats")
-  h1 <- pecotmr:::.resolveGenotypeShard(plink_prefix, format = "plink1")
-  expect_s4_class(h1, "GenotypeHandle")
-  expect_equal(h1@format, "plink1")
-  h2 <- pecotmr:::.resolveGenotypeShard(paste0(plink_prefix, ".bed"))
-  expect_equal(h2@format, "plink1")
+    skip_if_not_installed("snpStats")
+    h1 <- pecotmr:::.resolveGenotypeShard(plink_prefix, format = "plink1")
+    expect_s4_class(h1, "GenotypeHandle")
+    expect_equal(h1@format, "plink1")
+    h2 <- pecotmr:::.resolveGenotypeShard(paste0(plink_prefix, ".bed"))
+    expect_equal(h2@format, "plink1")
 })
 
 test_that(".resolveGenotypeShard honours explicit plink2 format and .pgen extension", {
-  skip_if_not_installed("pgenlibr")
-  h1 <- pecotmr:::.resolveGenotypeShard(plink_prefix, format = "plink2")
-  expect_s4_class(h1, "GenotypeHandle")
-  expect_equal(h1@format, "plink2")
-  h2 <- pecotmr:::.resolveGenotypeShard(paste0(plink_prefix, ".pgen"))
-  expect_equal(h2@format, "plink2")
+    skip_if_not_installed("pgenlibr")
+    h1 <- pecotmr:::.resolveGenotypeShard(plink_prefix, format = "plink2")
+    expect_s4_class(h1, "GenotypeHandle")
+    expect_equal(h1@format, "plink2")
+    h2 <- pecotmr:::.resolveGenotypeShard(paste0(plink_prefix, ".pgen"))
+    expect_equal(h2@format, "plink2")
 })
 
 test_that(".resolveGenotypeShard dispatches gds via explicit format and .gds extension", {
-  skip_if_not_installed("SNPRelate")
-  h1 <- pecotmr:::.resolveGenotypeShard(gds_path, format = "gds")
-  expect_equal(h1@format, "gds")
-  h2 <- pecotmr:::.resolveGenotypeShard(gds_path)
-  expect_equal(h2@format, "gds")
+    skip_if_not_installed("SNPRelate")
+    h1 <- pecotmr:::.resolveGenotypeShard(gds_path, format = "gds")
+    expect_equal(h1@format, "gds")
+    h2 <- pecotmr:::.resolveGenotypeShard(gds_path)
+    expect_equal(h2@format, "gds")
 })
 
 test_that(".resolveGenotypeShard dispatches vcf by extension", {
-  skip_if_not_installed("VariantAnnotation")
-  h <- pecotmr:::.resolveGenotypeShard(vcf_path)
-  expect_equal(h@format, "vcf")
+    skip_if_not_installed("VariantAnnotation")
+    h <- pecotmr:::.resolveGenotypeShard(vcf_path)
+    expect_equal(h@format, "vcf")
 })
 
 test_that(".resolveGenotypeShard probes the .pgen sidecar for an extension-less prefix", {
-  # Only a .pgen sidecar exists (no .bed) so the prefix-probe routes to
-  # plink2; mock the reader so we exercise the dispatch, not real IO.
-  p <- tempfile()
-  on.exit(unlink(paste0(p, ".pgen")), add = TRUE)
-  file.create(paste0(p, ".pgen"))
-  local_mocked_bindings(.makePlink2Handle = function(...) "STUB_PLINK2",
-                        .package = "pecotmr")
-  expect_identical(pecotmr:::.resolveGenotypeShard(p), "STUB_PLINK2")
+    # Only a .pgen sidecar exists (no .bed) so the prefix-probe routes to
+    # plink2; mock the reader so we exercise the dispatch, not real IO.
+    p <- tempfile()
+    on.exit(unlink(paste0(p, ".pgen")), add = TRUE)
+    file.create(paste0(p, ".pgen"))
+    local_mocked_bindings(
+        .makePlink2Handle = function(...) "STUB_PLINK2",
+        .package = "pecotmr"
+    )
+    expect_identical(pecotmr:::.resolveGenotypeShard(p), "STUB_PLINK2")
 })
 
 test_that(".resolveGenotypeShard errors when the format cannot be determined", {
-  # No recognized extension and no .bed/.pgen sidecar to probe.
-  expect_error(pecotmr:::.resolveGenotypeShard(tempfile()),
-               "cannot determine genotype format")
+    # No recognized extension and no .bed/.pgen sidecar to probe.
+    expect_error(
+        pecotmr:::.resolveGenotypeShard(tempfile()),
+        "cannot determine genotype format"
+    )
 })
-
-
