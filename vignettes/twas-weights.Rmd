@@ -250,3 +250,9 @@ Each entry exposes:
 -  Combine the learned weights with a GWAS via
     [`causalInferencePipeline`](twas-zscore.html) to compute per-gene TWAS
     Z-scores.
+
+# Session info
+
+```{r session-info}
+sessionInfo()
+```

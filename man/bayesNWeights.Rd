@@ -16,6 +16,10 @@ bayesNWeights(X, y, Z = NULL, ...)
 \item{...}{Additional arguments forwarded to \code{bayesAlphabetWeights} /
 \code{qgg}.}
 }
+\value{
+A numeric vector of effect-size weights, one per variant (column of
+  \code{X}); columns dropped for zero variance receive weight 0.
+}
 \description{
 Use Gaussian distribution as prior. Posterior means will be
   BLUP, equivalent to Ridge Regression.

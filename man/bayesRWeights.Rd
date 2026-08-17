@@ -16,6 +16,10 @@ bayesRWeights(X, y, Z = NULL, ...)
 \item{...}{Additional arguments forwarded to \code{bayesAlphabetWeights} /
 \code{qgg}.}
 }
+\value{
+A numeric vector of effect-size weights, one per variant (column of
+  \code{X}); columns dropped for zero variance receive weight 0.
+}
 \description{
 Use a hierarchical Bayesian mixture model with four Gaussian
   components. Variances are scaled by 0, 0.0001, 0.001, and 0.01.

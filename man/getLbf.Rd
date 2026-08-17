@@ -18,7 +18,7 @@ getLbf(x, ...)
 \item{...}{Ignored.}
 }
 \value{
-A \code{data.frame}: \code{variant_id} + \code{lbf_L1..lbf_LL} (the
+A \code{tibble}: \code{variant_id} + \code{lbf_L1..lbf_LL} (the
   collection method also carries the entry identity columns).
 }
 \description{

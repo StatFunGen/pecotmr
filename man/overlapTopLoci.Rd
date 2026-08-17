@@ -28,7 +28,7 @@ inputs. Default 0.025.}
 \item{type}{\code{"data.frame"} (default) or \code{"GRanges"}.}
 }
 \value{
-A \code{data.frame} (or \code{GRanges}) keyed on the QTL variant
+A \code{tibble} (or \code{GRanges}) keyed on the QTL variant
   (\code{variant_id, chrom, pos, A1, A2}) with all other columns prefixed
   \code{qtl_} / \code{gwas_}. Zero rows when there is no allele-aware
   overlap.

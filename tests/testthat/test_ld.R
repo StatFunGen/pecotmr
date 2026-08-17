@@ -1108,13 +1108,16 @@ test_that("mergeBlocks returns single block unchanged", {
 # ---- canMerge ----
 
 test_that("canMerge checks chromosome and size", {
-    b1 <- data.frame(chrom = "1", size = 100)
-    b2 <- data.frame(chrom = "1", size = 200)
-    expect_true(pecotmr:::canMerge(b1, b2, maxSize = 500))
-    expect_false(pecotmr:::canMerge(b1, b2, maxSize = 200))
-
-    b3 <- data.frame(chrom = "2", size = 100)
-    expect_false(pecotmr:::canMerge(b1, b3, maxSize = 500))
+    bm <- data.frame(
+        chrom = c("1", "1", "2"),
+        size = c(100, 200, 100),
+        stringsAsFactors = FALSE
+    )
+    # rows 1 and 2: same chrom, combined size 300
+    expect_true(pecotmr:::canMerge(bm, 1, 2, maxSize = 500))
+    expect_false(pecotmr:::canMerge(bm, 1, 2, maxSize = 200))
+    # rows 1 and 3: different chromosome
+    expect_false(pecotmr:::canMerge(bm, 1, 3, maxSize = 500))
 })
 
 # ===========================================================================
@@ -2556,7 +2559,7 @@ test_that("dropCollinearColumns errors on invalid strategy", {
             problematicCols = c("v1", "v2"),
             strategy = "invalid_strategy"
         ),
-        "arg"
+        "must be one of"
     )
 })
 
@@ -2874,7 +2877,10 @@ test_that("findValidFilePath returns target when it exists directly", {
         file.exists(target) && file.exists(ref),
         "Package root files not found"
     )
-    result <- pecotmr:::.findValidFilePath(ref, target)
+    result <- pecotmr:::.findValidFilePath(
+        referenceFilePath = ref,
+        targetFilePath = target
+    )
     expect_equal(result, target)
 })
 
@@ -2886,7 +2892,10 @@ test_that("findValidFilePath constructs path from reference directory", {
     )
     ref <- file.path(pkg_root, "NAMESPACE")
     skip_if_not(file.exists(ref), "NAMESPACE not found")
-    result <- pecotmr:::.findValidFilePath(ref, "DESCRIPTION")
+    result <- pecotmr:::.findValidFilePath(
+        referenceFilePath = ref,
+        targetFilePath = "DESCRIPTION"
+    )
     expect_true(file.exists(result))
     expect_true(grepl("DESCRIPTION$", result))
 })
@@ -2895,8 +2904,8 @@ test_that("findValidFilePath constructs path from reference directory", {
 test_that("findValidFilePath errors when both paths are invalid", {
     expect_error(
         pecotmr:::.findValidFilePath(
-            "/nonexistent/dir/ref.txt",
-            "/nonexistent/target.txt"
+            referenceFilePath = "/nonexistent/dir/ref.txt",
+            targetFilePath = "/nonexistent/target.txt"
         ),
         "Both reference and target file paths do not work"
     )
@@ -2910,7 +2919,10 @@ test_that("findValidFilePath returns reference when target is invalid but refere
     )
     ref <- file.path(pkg_root, "DESCRIPTION")
     skip_if_not(file.exists(ref), "DESCRIPTION not found")
-    result <- pecotmr:::.findValidFilePath(ref, "/totally/bogus/path.txt")
+    result <- pecotmr:::.findValidFilePath(
+        referenceFilePath = ref,
+        targetFilePath = "/totally/bogus/path.txt"
+    )
     expect_equal(result, ref)
 })
 

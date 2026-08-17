@@ -18,7 +18,7 @@ fsusieCredibleBand(x, ...)
 \item{...}{Ignored.}
 }
 \value{
-A long \code{data.frame}: \code{cs, chrom, pos, effect, lower, upper}
+A long \code{tibble}: \code{cs, chrom, pos, effect, lower, upper}
   (the collection method additionally carries the entry identity columns).
 }
 \description{

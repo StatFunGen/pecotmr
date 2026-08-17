@@ -22,23 +22,22 @@
 .cvSamplePartition <- function(sampleNames, fold) {
     idx <- sample(length(sampleNames))
     folds <- cut(seq_along(sampleNames), breaks = fold, labels = FALSE)
-    data.frame(
+    tibble(
         Sample = sampleNames[idx],
-        Fold = folds,
-        stringsAsFactors = FALSE
+        Fold = folds
     )
 }
 
 # Canonical CV output key: "<methodKey>_predicted" / "<methodKey>_performance".
 # @noRd
-.cvOutputKey <- function(methodKey, suffix) paste0(methodKey, "_", suffix)
+.cvOutputKey <- function(methodKey, suffix) str_c(methodKey, "_", suffix)
 
 # One CV metric row (corr, rsq, adj_rsq, pval, RMSE, MAE) for a single outcome.
 # Drops NA in either vector; needs >= 3 valid points and non-constant
 # predictions.
 # @noRd
 .cvMetricRow <- function(pred, actual) {
-    out <- setNames(
+    out <- set_names(
         rep(NA_real_, 6L),
         c("corr", "rsq", "adj_rsq", "pval", "RMSE", "MAE")
     )
@@ -78,10 +77,11 @@
     retainFits <- cv$retainFits
     verbose <- cv$verbose
     if (verbose >= 1) {
-        message(sprintf("  CV fold %s/%s ...", j, length(foldIds)))
+        msg <- glue("  CV fold {j}/{length(foldIds)} ...")
+        inform(msg)
     }
-    testIds <- samplePartition$Sample[samplePartition$Fold == j]
-    isTest <- rownames(X) %in% testIds
+    testIds <- samplePartition |> filter(.data$Fold == j) |> pull("Sample")
+    isTest <- is_in(rownames(X), testIds)
     if (all(isTest) || !any(isTest)) {
         return(list(preds = list(), fits = list()))
     }
@@ -91,19 +91,7 @@
     keep <- .nonzeroVarColumns(Xtr)
     Xtr <- Xtr[, keep, drop = FALSE]
     ff <- fitFold(Xtr, Ytr, j, fitFoldCtx)
-    preds <- lapply(ff$weights, function(W) {
-        if (is.null(W)) {
-            return(NULL)
-        }
-        W[is.na(W)] <- 0
-        common <- intersect(colnames(Xte), rownames(W))
-        if (length(common) == 0L) {
-            return(NULL)
-        }
-        yhat <- Xte[, common, drop = FALSE] %*% W[common, , drop = FALSE]
-        rownames(yhat) <- rownames(Xte)
-        yhat
-    })
+    preds <- map(ff$weights, .cvFoldPrediction, Xte = Xte)
     list(preds = preds, fits = if (isTRUE(retainFits)) ff$fits else list())
 }
 
@@ -128,6 +116,7 @@
 # fold loop (-1 = all cores, 0/1 = serial).
 #' @importFrom BiocParallel bplapply bpworkers MulticoreParam
 #' @importFrom stats sd lm cor
+#' @importFrom dplyr n_distinct
 #' @noRd
 .crossValidateWeights <- function(
     X,
@@ -180,23 +169,23 @@
 # @noRd
 .cvPrepareData <- function(X, Y, fold, verbose) {
     if (!is.null(fold) && (!is.numeric(fold) || fold <= 0)) {
-        stop("Invalid value for 'fold'. It must be a positive integer.")
+        abort("Invalid value for 'fold'. It must be a positive integer.")
     }
     if (!is.matrix(X) || (!is.matrix(Y) && !is.vector(Y))) {
-        stop("X must be a matrix and Y must be a matrix or a vector.")
+        abort("X must be a matrix and Y must be a matrix or a vector.")
     }
     if (is.vector(Y)) {
         Y <- matrix(Y, ncol = 1)
         if (verbose >= 1) {
-            message(sprintf(
-                "Y converted to matrix of %d rows and %d columns.",
-                nrow(Y),
-                ncol(Y)
-            ))
+            msg <- glue(
+                "Y converted to matrix of {nrow(Y)} rows and {ncol(Y)} ",
+                "columns."
+            )
+            inform(msg)
         }
     }
     if (nrow(X) != nrow(Y)) {
-        stop("The number of rows in X and Y must be the same.")
+        abort("The number of rows in X and Y must be the same.")
     }
     .cvSetDimnames(X, Y)
 }
@@ -208,7 +197,7 @@
     } else if (!is.null(rownames(X))) {
         rownames(X)
     } else {
-        paste0("sample_", seq_len(nrow(X)))
+        str_c("sample_", seq_len(nrow(X)))
     }
     if (is.null(rownames(X))) {
         rownames(X) <- sampleNames
@@ -217,10 +206,10 @@
         rownames(Y) <- sampleNames
     }
     if (is.null(colnames(X))) {
-        colnames(X) <- paste0("variable_", seq_len(ncol(X)))
+        colnames(X) <- str_c("variable_", seq_len(ncol(X)))
     }
     if (is.null(colnames(Y))) {
-        colnames(Y) <- paste0("context_", seq_len(ncol(Y)))
+        colnames(Y) <- str_c("context_", seq_len(ncol(Y)))
     }
     list(X = X, Y = Y)
 }
@@ -266,45 +255,34 @@
 # @noRd
 .cvMsgRandom <- function(verbose, nSelected, nTotal) {
     if (verbose >= 1) {
-        message(sprintf(
-            paste0(
-                "Randomly selecting %d out of %d variants for cross ",
-                "validation purpose."
-            ),
-            nSelected,
-            nTotal
-        ))
+        msg <- glue(
+            "Randomly selecting {nSelected} out of {nTotal} variants for ",
+            "cross validation purpose."
+        )
+        inform(msg)
     }
 }
 
 # @noRd
 .cvMsgRandomKept <- function(verbose, nSelected, nKept) {
     if (verbose >= 1) {
-        message(sprintf(
-            paste0(
-                "Randomly selecting %d out of %d input variants for cross ",
-                "validation purpose."
-            ),
-            nSelected,
-            nKept
-        ))
+        msg <- glue(
+            "Randomly selecting {nSelected} out of {nKept} input variants ",
+            "for cross validation purpose."
+        )
+        inform(msg)
     }
 }
 
 # @noRd
 .cvMsgKeptPlus <- function(verbose, nKept, nAdditional, nSelected, nTotal) {
     if (verbose >= 1) {
-        message(sprintf(
-            paste0(
-                "Including %d specified variants and randomly selecting %d ",
-                "additional variants, for a total of %d variants out of %d ",
-                "for cross-validation purpose."
-            ),
-            nKept,
-            nAdditional,
-            nSelected,
-            nTotal
-        ))
+        msg <- glue(
+            "Including {nKept} specified variants and randomly selecting ",
+            "{nAdditional} additional variants, for a total of {nSelected} ",
+            "variants out of {nTotal} for cross-validation purpose."
+        )
+        inform(msg)
     }
 }
 
@@ -322,24 +300,22 @@
     if (!is.null(fold)) {
         return(.cvSamplePartition(sampleNames, fold))
     }
-    stop("Either 'fold' or 'samplePartitions' must be provided.")
+    abort("Either 'fold' or 'samplePartitions' must be provided.")
 }
 
 # @noRd
 .cvValidatePartition <- function(samplePartitions, fold, sampleNames, verbose) {
-    if (!all(samplePartitions$Sample %in% sampleNames)) {
-        stop("Some samples in 'samplePartitions' do not match 'X' and 'Y'.")
+    if (!all(is_in(samplePartitions$Sample, sampleNames))) {
+        abort("Some samples in 'samplePartitions' do not match 'X' and 'Y'.")
     }
-    nF <- length(unique(samplePartitions$Fold))
+    nF <- n_distinct(samplePartitions$Fold)
     if (!is.null(fold) && verbose >= 1 && fold != nF) {
-        message(sprintf(
-            paste0(
-                "fold number provided does not match with sample partition, ",
-                "performing %d fold cross validation based on provided sample ",
-                "partition. "
-            ),
-            nF
-        ))
+        msg <- glue(
+            "fold number provided does not match with sample partition, ",
+            "performing {nF} fold cross validation based on provided sample ",
+            "partition. "
+        )
+        inform(msg)
     }
     samplePartitions
 }
@@ -412,17 +388,15 @@
 # Per-condition performance metrics (conditions x metrics).
 # @noRd
 .cvPerformance <- function(predMat, Y, mk, verbose, metricNames) {
-    perf <- do.call(
-        rbind,
-        map(
-            seq_len(ncol(Y)),
-            .cvConditionMetrics,
-            predMat = predMat,
-            Y = Y,
-            mk = mk,
-            verbose = verbose
-        )
+    metricRows <- map(
+        seq_len(ncol(Y)),
+        .cvConditionMetrics,
+        predMat = predMat,
+        Y = Y,
+        mk = mk,
+        verbose = verbose
     )
+    perf <- exec(rbind, !!!metricRows)
     colnames(perf) <- metricNames
     rownames(perf) <- colnames(Y)
     perf
@@ -441,14 +415,11 @@
     }
     s <- suppressWarnings(stats::sd(pred, na.rm = TRUE))
     if (is.na(s) || s == 0) {
-        message(sprintf(
-            paste0(
-                "Predicted values for condition %d using %s have zero ",
-                "variance. Filling performance metric with NAs"
-            ),
-            r,
-            mk
-        ))
+        msg <- glue(
+            "Predicted values for condition {r} using {mk} have zero ",
+            "variance. Filling performance metric with NAs"
+        )
+        inform(msg)
     }
     invisible(NULL)
 }
@@ -456,11 +427,27 @@
 # Non-NULL per-fold fits keyed by fold id.
 # @noRd
 .cvCollectFoldFits <- function(foldResults, foldIds) {
-    set_names(map(foldResults, .cvCompactFits), paste0("fold_", foldIds))
+    set_names(map(foldResults, .cvCompactFits), str_c("fold_", foldIds))
 }
 
 # @noRd
 .cvCompactFits <- function(fr) {
-    ff <- fr$fits
-    ff[!map_lgl(ff, is.null)]
+    compact(fr$fits)
+}
+
+# Test-fold prediction from one method's weight matrix W: align to the test
+# genotype columns, then Xte %*% W. NULL for a missing/non-overlapping W.
+# @noRd
+.cvFoldPrediction <- function(W, Xte) {
+    if (is.null(W)) {
+        return(NULL)
+    }
+    W[is.na(W)] <- 0
+    common <- intersect(colnames(Xte), rownames(W))
+    if (length(common) == 0L) {
+        return(NULL)
+    }
+    yhat <- Xte[, common, drop = FALSE] %*% W[common, , drop = FALSE]
+    rownames(yhat) <- rownames(Xte)
+    yhat
 }

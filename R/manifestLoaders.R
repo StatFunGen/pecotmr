@@ -28,28 +28,24 @@ NULL
 # Manifest ingestion + column canonicalisation
 # =============================================================================
 
-# Read a manifest into a base data.frame. A data.frame is passed through; a
+# Read a manifest into a tibble. A data.frame/tibble is passed through; a
 # single path is read by extension (.csv -> read_csv, else read_tsv).
 .readManifest <- function(manifest) {
     if (is.data.frame(manifest)) {
-        return(as.data.frame(
-            manifest,
-            stringsAsFactors = FALSE,
-            check.names = FALSE
-        ))
+        return(as_tibble(manifest, .name_repair = "minimal"))
     }
     if (!is.character(manifest) || length(manifest) != 1L) {
-        stop("`manifest` must be a data.frame or a single file path.")
+        abort("`manifest` must be a data.frame or a single file path.")
     }
     if (!file.exists(manifest)) {
-        stop("manifest file not found: ", manifest)
+        msg <- glue("manifest file not found: {manifest}")
+        abort(msg)
     }
-    parsed <- if (grepl("\\.csv$", manifest, ignore.case = TRUE)) {
+    if (str_detect(manifest, regex("\\.csv$", ignore_case = TRUE))) {
         readr::read_csv(manifest, show_col_types = FALSE, progress = FALSE)
     } else {
         readr::read_tsv(manifest, show_col_types = FALSE, progress = FALSE)
     }
-    as.data.frame(parsed, stringsAsFactors = FALSE, check.names = FALSE)
 }
 
 # Directory a manifest's relative paths resolve against: the file's own
@@ -68,10 +64,10 @@ NULL
 
 # Resolve a possibly-relative path against a manifest base directory.
 .resolveRel <- function(p, base) {
-    if (is.null(p) || length(p) != 1L || is.na(p) || !nzchar(p)) {
+    if (is.null(p) || length(p) != 1L || is.na(p) || str_length(p) == 0L) {
         return(p)
     }
-    if (grepl("^(/|[A-Za-z]:|~)", p) || is.null(base) || file.exists(p)) {
+    if (str_detect(p, "^(/|[A-Za-z]:|~)") || is.null(base) || file.exists(p)) {
         return(p)
     }
     file.path(base, p)
@@ -83,7 +79,7 @@ NULL
 # (including the canonical name itself). The first alias present wins.
 .canonManifestCols <- function(df, aliases, required, label) {
     for (canon in names(aliases)) {
-        if (canon %in% names(df)) {
+        if (is_in(canon, names(df))) {
             next
         }
         hit <- intersect(aliases[[canon]], names(df))
@@ -93,11 +89,11 @@ NULL
     }
     missingCols <- setdiff(required, names(df))
     if (length(missingCols) > 0L) {
-        stop(
-            label,
-            " manifest is missing required column(s): ",
-            paste(missingCols, collapse = ", ")
+        msg <- glue(
+            "{label} manifest is missing required column(s): ",
+            "{str_flatten(missingCols, ', ')}"
         )
+        abort(msg)
     }
     df
 }
@@ -110,30 +106,24 @@ NULL
     if (!is.null(colValues)) {
         v <- unique(as.character(colValues[
             !is.na(colValues) &
-                nzchar(as.character(colValues))
+                str_length(as.character(colValues)) > 0L
         ]))
         if (length(v) > 1L) {
-            stop(
-                "`",
-                name,
-                "` column must be constant across the manifest; got: ",
-                paste(v, collapse = ", ")
+            msg <- glue(
+                "`{name}` column must be constant across the manifest; ",
+                "got: {str_flatten(v, ', ')}"
             )
+            abort(msg)
         }
         if (length(v) == 1L) colVal <- v
     }
     if (!is.null(arg) && !is.null(colVal)) {
         if (!identical(as.character(arg), colVal)) {
-            stop(
-                "`",
-                name,
-                "` argument ('",
-                arg,
-                "') disagrees with the manifest ",
-                "column value ('",
-                colVal,
-                "')."
+            msg <- glue(
+                "`{name}` argument ('{arg}') disagrees with the manifest ",
+                "column value ('{colVal}')."
             )
+            abort(msg)
         }
         return(arg)
     }
@@ -144,11 +134,10 @@ NULL
         return(colVal)
     }
     if (required) {
-        stop(
-            "`",
-            name,
-            "` must be provided as an argument or a manifest column."
+        msg <- glue(
+            "`{name}` must be provided as an argument or a manifest column."
         )
+        abort(msg)
     }
     NULL
 }
@@ -161,35 +150,41 @@ NULL
 # path. Recognised: .vcf[.gz|.bgz]/.bcf/.gds single files, .bed/.pgen single
 # files, and bare PLINK1/PLINK2 prefixes (probed by sidecar existence).
 .detectGenotypeFormat <- function(path) {
-    lower <- tolower(path)
+    lower <- str_to_lower(path)
     if (
-        grepl("\\.vcf(\\.b?gz)?$", lower) ||
-            endsWith(lower, ".bcf") ||
-            endsWith(lower, ".gds")
+        str_detect(lower, "\\.vcf(\\.b?gz)?$") ||
+            str_ends(lower, "\\.bcf") ||
+            str_ends(lower, "\\.gds")
     ) {
         return(GenotypeHandle(path = path))
     }
-    if (endsWith(lower, ".bed")) {
+    if (str_ends(lower, "\\.bed")) {
         return(GenotypeHandle(
-            plink1Prefix = sub("\\.bed$", "", path, ignore.case = TRUE)
+            plink1Prefix = str_remove(
+                path,
+                regex("\\.bed$", ignore_case = TRUE)
+            )
         ))
     }
-    if (endsWith(lower, ".pgen")) {
+    if (str_ends(lower, "\\.pgen")) {
         return(GenotypeHandle(
-            plink2Prefix = sub("\\.pgen$", "", path, ignore.case = TRUE)
+            plink2Prefix = str_remove(
+                path,
+                regex("\\.pgen$", ignore_case = TRUE)
+            )
         ))
     }
-    if (file.exists(paste0(path, ".bed"))) {
+    if (file.exists(str_c(path, ".bed"))) {
         return(GenotypeHandle(plink1Prefix = path))
     }
-    if (file.exists(paste0(path, ".pgen"))) {
+    if (file.exists(str_c(path, ".pgen"))) {
         return(GenotypeHandle(plink2Prefix = path))
     }
-    stop(
-        "Could not determine genotype format for '",
-        path,
-        "' (expected .bed/.pgen/.vcf[.gz]/.bcf/.gds or a PLINK prefix)."
+    msg <- glue(
+        "Could not determine genotype format for '{path}' ",
+        "(expected .bed/.pgen/.vcf[.gz]/.bcf/.gds or a PLINK prefix)."
     )
+    abort(msg)
 }
 
 # Turn an ldSketch specification into a GenotypeHandle. Accepts a prebuilt
@@ -209,24 +204,25 @@ NULL
         return(GenotypeHandle(genoMeta = spec, chroms = chroms))
     }
     if (is.character(spec) && length(spec) == 1L) {
-        lower <- tolower(spec)
-        looksLikeGenotype <- grepl("\\.vcf(\\.b?gz)?$", lower) ||
-            endsWith(lower, ".bcf") ||
-            endsWith(lower, ".gds") ||
-            endsWith(lower, ".bed") ||
-            endsWith(lower, ".pgen") ||
-            file.exists(paste0(spec, ".bed")) ||
-            file.exists(paste0(spec, ".pgen"))
+        lower <- str_to_lower(spec)
+        looksLikeGenotype <- str_detect(lower, "\\.vcf(\\.b?gz)?$") ||
+            str_ends(lower, "\\.bcf") ||
+            str_ends(lower, "\\.gds") ||
+            str_ends(lower, "\\.bed") ||
+            str_ends(lower, "\\.pgen") ||
+            file.exists(str_c(spec, ".bed")) ||
+            file.exists(str_c(spec, ".pgen"))
         if (looksLikeGenotype) {
             return(.detectGenotypeFormat(spec))
         }
         # Otherwise treat it as a chrom-sharded genoMeta meta file.
         return(GenotypeHandle(genoMeta = spec, chroms = chroms))
     }
-    stop(
+    msg <- glue(
         "`ldSketch` must be a GenotypeHandle, a genotype path/prefix, or a ",
         "genoMeta spec (named chrom->path vector or meta-file path)."
     )
+    abort(msg)
 }
 
 # Resolve the LD sketch SPEC from the (argument, ldSketchPath column) pair,
@@ -240,13 +236,17 @@ NULL
         return(ldSketch)
     }
     colSpec <- NULL
-    if (!is.null(df$ldSketchPath)) {
+    # is_in guard, not `!is.null(df$ldSketchPath)`: on a tibble `$` for an
+    # absent column NULLs but WARNS ("Unknown or uninitialised column"), where a
+    # data.frame was silent. ldSketchPath is optional (LD may come via
+    # `ldSketch`).
+    if (is_in("ldSketchPath", names(df))) {
         v <- unique(as.character(df$ldSketchPath[
             !is.na(df$ldSketchPath) &
-                nzchar(as.character(df$ldSketchPath))
+                str_length(as.character(df$ldSketchPath)) > 0L
         ]))
         if (length(v) > 1L) {
-            stop("`ldSketchPath` column must be constant across the manifest.")
+            abort("`ldSketchPath` column must be constant across the manifest.")
         }
         if (length(v) == 1L) colSpec <- .resolveRel(v, base)
     }
@@ -256,17 +256,19 @@ NULL
             !is.null(colSpec) &&
             !identical(as.character(spec), as.character(colSpec))
     ) {
-        stop(
+        msg <- glue(
             "`ldSketch` argument disagrees with the manifest ",
             "`ldSketchPath` column."
         )
+        abort(msg)
     }
     spec <- spec %||% colSpec
     if (is.null(spec)) {
-        stop(
+        msg <- glue(
             "`ldSketch` must be provided as an argument or an ",
             "`ldSketchPath` column."
         )
+        abort(msg)
     }
     spec
 }
@@ -290,12 +292,7 @@ NULL
 # character vector (character(0) when nothing is present, never NULL).
 .entriesChroms <- function(entries) {
     ch <- as.character(unlist(
-        lapply(entries, function(gr) {
-            if (is.null(gr) || length(gr) == 0L) {
-                return(character(0))
-            }
-            canonChrom(as.character(GenomicRanges::seqnames(gr)))
-        }),
+        map(entries, .mlEntryChroms),
         use.names = FALSE
     ))
     unique(ch[!is.na(ch)])
@@ -327,11 +324,11 @@ NULL
     reqChrom <- .ldContainmentCheckChroms(entryGr, ldSketch, label)
     snpInfo <- ldSketch@snpInfo
     if (is.null(snpInfo) || nrow(snpInfo) == 0L) {
-        warning(
-            label,
-            ": LD sketch carries no variant metadata; ",
+        msg <- glue(
+            "{label}: LD sketch carries no variant metadata; ",
             "skipping the variant-overlap check."
         )
+        warn(msg)
         return(invisible(NULL))
     }
     .ldContainmentCheckOverlap(
@@ -352,14 +349,12 @@ NULL
     availChrom <- .ldSketchChroms(ldSketch)
     missingChrom <- setdiff(reqChrom, availChrom)
     if (length(missingChrom) > 0L) {
-        stop(
-            label,
-            ": chromosome(s) ",
-            paste(missingChrom, collapse = ", "),
-            " are absent from the LD sketch (available: ",
-            paste(availChrom, collapse = ", "),
-            ")."
+        msg <- glue(
+            "{label}: chromosome(s) {str_flatten(missingChrom, ', ')} ",
+            "are absent from the LD sketch ",
+            "(available: {str_flatten(availChrom, ', ')})."
         )
+        abort(msg)
     }
     reqChrom
 }
@@ -373,7 +368,7 @@ NULL
     minLdOverlapWarn,
     label
 ) {
-    keep <- canonChrom(as.character(snpInfo$CHR)) %in% reqChrom
+    keep <- is_in(canonChrom(as.character(snpInfo$CHR)), reqChrom)
     snpInfo <- snpInfo[keep, , drop = FALSE]
     entryVid <- formatVariantId(
         chrom = canonChrom(as.character(GenomicRanges::seqnames(entryGr))),
@@ -389,26 +384,20 @@ NULL
     )
     nOverlap <- length(matchVariants(entryVid, sketchVid)$idxA)
     if (nOverlap == 0L) {
-        stop(
-            label,
-            ": none of the ",
-            length(entryGr),
-            " summary-statistic ",
+        msg <- glue(
+            "{label}: none of the {length(entryGr)} summary-statistic ",
             "variants are present in the LD sketch."
         )
+        abort(msg)
     }
     frac <- nOverlap / length(entryGr)
     if (frac < minLdOverlapWarn) {
-        warning(sprintf(
-            paste0(
-                "%s: only %.1f%% of summary-statistic variants (%d/%d) are ",
-                "present in the LD sketch."
-            ),
-            label,
-            100 * frac,
-            nOverlap,
-            length(entryGr)
-        ))
+        pct <- sprintf("%.1f", 100 * frac)
+        msg <- glue(
+            "{label}: only {pct}% of summary-statistic variants ",
+            "({nOverlap}/{length(entryGr)}) are present in the LD sketch."
+        )
+        warn(msg)
     }
     invisible(NULL)
 }
@@ -433,42 +422,34 @@ NULL
         ))
     }
     if (is.character(region) && length(region) == 1L) {
-        m <- regmatches(
-            region,
-            regexec("^([^:]+):([0-9,]+)-([0-9,]+)$", region)
-        )[[1L]]
-        if (length(m) != 4L) {
-            stop(
+        m <- str_match(region, "^([^:]+):([0-9,]+)-([0-9,]+)$")[1L, ]
+        if (is.na(m[[1L]])) {
+            msg <- glue(
                 "`region` must be a 'chr:start-end' string, a GRanges, or a ",
                 "one-row data.frame with chrom/start/end."
             )
+            abort(msg)
         }
         return(GenomicRanges::GRanges(
             seqnames = m[[2L]],
             ranges = IRanges::IRanges(
-                start = as.integer(gsub(",", "", m[[3L]])),
-                end = as.integer(gsub(",", "", m[[4L]]))
+                start = as.integer(str_remove_all(m[[3L]], ",")),
+                end = as.integer(str_remove_all(m[[4L]], ","))
             )
         ))
     }
-    stop(
+    msg <- glue(
         "`region` must be a 'chr:start-end' string, a GRanges, or a ",
         "one-row data.frame with chrom/start/end."
     )
+    abort(msg)
 }
 
 # Remap a region's seqnames to the seqnames actually present in a tabix file
 # (tolerant of chr-prefix differences). Returns NULL when no seqname matches.
 .matchRegionSeqnames <- function(gr, available) {
     want <- as.character(GenomicRanges::seqnames(gr))
-    mapped <- vapply(
-        want,
-        function(w) {
-            hit <- available[canonChrom(available) == canonChrom(w)]
-            if (length(hit) >= 1L) hit[[1L]] else NA_character_
-        },
-        character(1)
-    )
+    mapped <- map_chr(want, .mlMatchSeqname, available = available)
     if (anyNA(mapped)) {
         return(NULL)
     }
@@ -487,22 +468,16 @@ NULL
     tf <- Rsamtools::TabixFile(path)
     hdr <- Rsamtools::headerTabix(tf)$header
     colLine <- if (length(hdr) > 0L) {
-        sub("^#", "", hdr[[length(hdr)]])
+        str_remove(hdr[[length(hdr)]], "^#")
     } else {
         NULL
     }
     gr <- .matchRegionSeqnames(.asGRegion(region), Rsamtools::seqnamesTabix(tf))
     emptyDf <- if (!is.null(colLine)) {
-        as.data.frame(
-            readr::read_tsv(
-                I(colLine),
-                show_col_types = FALSE,
-                progress = FALSE
-            ),
-            check.names = FALSE
-        )[0, , drop = FALSE]
+        # A header-only read yields a 0-row tibble with the right columns.
+        readr::read_tsv(I(colLine), show_col_types = FALSE, progress = FALSE)
     } else {
-        data.frame()
+        tibble()
     }
     if (is.null(gr)) {
         return(emptyDf)
@@ -511,21 +486,18 @@ NULL
     if (length(lines) == 0L) {
         return(emptyDf)
     }
-    txt <- paste(c(colLine, lines), collapse = "\n")
+    txt <- str_flatten(c(colLine, lines), "\n")
     # Read every column as character; .resolveSumstatCols() coerces each field
     # to its target type. This prevents readr from type-guessing an allele/ID
     # column
     # that is uniformly T/F within the region as logical (the allele "T" ->
     # TRUE),
     # which would corrupt the variant id and break LD-containment matching.
-    as.data.frame(
-        readr::read_tsv(
-            I(txt),
-            show_col_types = FALSE,
-            progress = FALSE,
-            col_types = readr::cols(.default = readr::col_character())
-        ),
-        check.names = FALSE
+    readr::read_tsv(
+        I(txt),
+        show_col_types = FALSE,
+        progress = FALSE,
+        col_types = readr::cols(.default = readr::col_character())
     )
 }
 
@@ -581,30 +553,32 @@ NULL
             (is.character(columnMapping) &&
                 !is.null(names(columnMapping)))
     ) {
-        return(vapply(columnMapping, as.character, character(1)))
+        return(map_chr(columnMapping, as.character))
     }
     if (is.character(columnMapping) && length(columnMapping) == 1L) {
         if (!file.exists(columnMapping)) {
-            stop("columnMapping file not found: ", columnMapping)
+            msg <- glue("columnMapping file not found: {columnMapping}")
+            abort(msg)
         }
         mapping <- yaml::read_yaml(columnMapping)
         if (
             !is.list(mapping) ||
                 is.null(names(mapping)) ||
-                any(!nzchar(names(mapping)))
+                any(str_length(names(mapping)) == 0L)
         ) {
-            stop(
-                "columnMapping file '",
-                columnMapping,
-                "' must be a YAML mapping of standardName: sourceName."
+            msg <- glue(
+                "columnMapping file '{columnMapping}' must be a YAML ",
+                "mapping of standardName: sourceName."
             )
+            abort(msg)
         }
-        vapply(mapping, as.character, character(1))
+        map_chr(mapping, as.character)
     } else {
-        stop(
+        msg <- glue(
             "`columnMapping` must be a named list/vector or a path to a YAML ",
             "mapping file."
         )
+        abort(msg)
     }
 }
 
@@ -621,15 +595,12 @@ NULL
         cand <- intersect(.sumstatMappingKeys[[key]], names(mapping))
         if (length(cand) >= 1L) {
             src <- mapping[[cand[[1L]]]]
-            if (!(src %in% names(df))) {
-                stop(
-                    label,
-                    ": columnMapping['",
-                    cand[[1L]],
-                    "'] = '",
-                    src,
-                    "' is not a column in the sumstats file."
+            if (!is_in(src, names(df))) {
+                msg <- glue(
+                    "{label}: columnMapping['{cand[[1L]]}'] = '{src}' is ",
+                    "not a column in the sumstats file."
                 )
+                abort(msg)
             }
             return(src)
         }
@@ -650,7 +621,7 @@ NULL
     # Strip a leading '#' from the first column name so a '#CHR'-style header
     # (common in GWAS TSVs) resolves the same on plain-text and tabix reads.
     if (ncol(df) > 0L) {
-        names(df)[1L] <- sub("^#", "", names(df)[1L])
+        names(df)[1L] <- str_remove(names(df)[1L], "^#")
     }
     mapping <- .readColumnMapping(columnMapping)
     resolved <- .resolveSumstatRequired(df, mapping, label)
@@ -667,17 +638,14 @@ NULL
         map(required, .resolveSumstatKey, df, mapping, label),
         required
     )
-    missingKeys <- required[map_lgl(
-        resolved,
-        function(x) is.na(x) || is.null(x)
-    )]
+    missingKeys <- required[map_lgl(resolved, .mlIsNaOrNull)]
     if (length(missingKeys) > 0L) {
-        stop(
-            label,
-            ": sumstats file is missing required field(s): ",
-            paste(missingKeys, collapse = ", "),
-            " (supply a columnMapping if the source names differ)."
+        msg <- glue(
+            "{label}: sumstats file is missing required field(s): ",
+            "{str_flatten(missingKeys, ', ')} ",
+            "(supply a columnMapping if the source names differ)."
         )
+        abort(msg)
     }
     resolved
 }
@@ -695,13 +663,12 @@ NULL
         !is.na(seSrc) &&
         !is.null(seSrc)
     if (!hasZ && !hasBetaSe) {
-        stop(
-            label,
-            ": sumstats file needs a z field (z/Z), or beta + se to derive ",
-            "the Wald z-score beta/se (supply a columnMapping if the ",
-            "source names ",
-            "differ)."
+        msg <- glue(
+            "{label}: sumstats file needs a z field (z/Z), or beta + se to ",
+            "derive the Wald z-score beta/se (supply a columnMapping if the ",
+            "source names differ)."
         )
+        abort(msg)
     }
     list(hasZ = hasZ, zSrc = zSrc, betaSrc = betaSrc, seSrc = seSrc)
 }
@@ -719,13 +686,13 @@ NULL
         !is.na(ncontrolSrc) &&
         !is.null(ncontrolSrc)
     if (!hasN && !hasCounts && !allowNoN) {
-        stop(
-            label,
-            ": sumstats file needs an N field (n_sample/N/n), or ",
+        msg <- glue(
+            "{label}: sumstats file needs an N field (n_sample/N/n), or ",
             "N_CASE + N_CONTROL columns for the effective sample size, or a ",
             "study-level scalar (nCase/nControl or nSample) in the manifest ",
             "(supply a columnMapping if the source names differ)."
         )
+        abort(msg)
     }
     list(
         hasN = hasN,
@@ -740,13 +707,12 @@ NULL
 # N / N_CASE / N_CONTROL, and any present BETA/SE/P/MAF/INFO).
 # @noRd
 .buildSumstatOut <- function(df, resolved, z, n, mapping, label) {
-    out <- data.frame(
+    out <- tibble(
         chrom = as.character(df[[resolved$chrom]]),
         pos = as.integer(df[[resolved$pos]]),
         SNP = as.character(df[[resolved$variant_id]]),
         A1 = as.character(df[[resolved$A1]]),
-        A2 = as.character(df[[resolved$A2]]),
-        stringsAsFactors = FALSE
+        A2 = as.character(df[[resolved$A2]])
     )
     out$Z <- if (z$hasZ) {
         as.numeric(df[[z$zSrc]])
@@ -782,37 +748,34 @@ NULL
 # sample when there is exactly one; otherwise `sampleSelect` must name it.
 .pickVcfSample <- function(samples, sampleSelect, label) {
     if (!is.null(sampleSelect)) {
-        if (!(sampleSelect %in% samples)) {
-            stop(
-                label,
-                ": sampleSelect '",
-                sampleSelect,
-                "' is not a sample in the VCF (have: ",
-                paste(samples, collapse = ", "),
-                ")."
+        if (!is_in(sampleSelect, samples)) {
+            msg <- glue(
+                "{label}: sampleSelect '{sampleSelect}' is not a sample in ",
+                "the VCF (have: {str_flatten(samples, ', ')})."
             )
+            abort(msg)
         }
         return(sampleSelect)
     }
     if (length(samples) == 1L) {
         return(samples[[1L]])
     }
-    stop(
-        label,
-        ": the VCF has ",
-        length(samples),
-        " samples (",
-        paste(samples, collapse = ", "),
-        "); pass `sampleSelect` to choose the study column."
+    msg <- glue(
+        "{label}: the VCF has {length(samples)} samples ",
+        "({str_flatten(samples, ', ')}); pass `sampleSelect` to ",
+        "choose the study column."
     )
+    abort(msg)
 }
 
 # Read column `tag` from the GWAS-VCF geno matrix for one sample as numeric, or
 # NULL when the tag is absent/unmapped.
 # @noRd
 .vcfGetField <- function(tag, geno, sample) {
-    if (!is.null(tag) && tag %in% names(geno)) {
-        as.numeric(geno[[tag]][, sample])
+    if (!is.null(tag) && is_in(tag, names(geno))) {
+        # unname: geno matrix columns carry variant-id element names that the
+        # canonical sumstat tibble must not keep (data.frame stripped them).
+        unname(as.numeric(geno[[tag]][, sample]))
     } else {
         NULL
     }
@@ -828,12 +791,8 @@ NULL
     )
     rr <- SummarizedExperiment::rowRanges(vcf)
     altList <- VariantAnnotation::alt(vcf)
-    alt <- vapply(
-        as.list(altList),
-        function(a) as.character(a)[[1L]],
-        character(1)
-    )
-    ref <- as.character(VariantAnnotation::ref(vcf))
+    alt <- unname(map_chr(as.list(altList), .mlFirstAlt))
+    ref <- unname(as.character(VariantAnnotation::ref(vcf)))
     geno <- VariantAnnotation::geno(vcf)
     sample <- .pickVcfSample(colnames(vcf), sampleSelect, label)
     es <- .vcfGetField(fmap$BETA, geno, sample)
@@ -842,26 +801,28 @@ NULL
     ss <- .vcfGetField(fmap$N, geno, sample)
     eaf <- .vcfGetField(fmap$MAF, geno, sample)
     if (is.null(es) || is.null(se)) {
-        stop(
-            label,
-            ": GWAS-VCF must carry ES and SE FORMAT fields to derive Z ",
-            "(configure via `formatMapping`)."
+        msg <- glue(
+            "{label}: GWAS-VCF must carry ES and SE FORMAT fields to derive ",
+            "Z (configure via `formatMapping`)."
         )
+        abort(msg)
     }
     if (is.null(ss)) {
-        stop(label, ": GWAS-VCF must carry an SS (sample size) FORMAT field.")
+        msg <- glue(
+            "{label}: GWAS-VCF must carry an SS (sample size) FORMAT field."
+        )
+        abort(msg)
     }
-    out <- data.frame(
+    out <- tibble(
         chrom = as.character(GenomicRanges::seqnames(rr)),
-        pos = as.integer(GenomicRanges::start(rr)),
+        pos = unname(as.integer(GenomicRanges::start(rr))),
         SNP = names(rr),
         A1 = alt,
         A2 = ref,
         Z = es / se,
         N = ss,
         BETA = es,
-        SE = se,
-        stringsAsFactors = FALSE
+        SE = se
     )
     if (!is.null(lp)) {
         out$P <- 10^(-lp)
@@ -876,13 +837,13 @@ NULL
 # tabix-indexed) into the canonical sumstats data.frame.
 .readSumStatsVcf <- function(path, region, sampleSelect, formatMapping, label) {
     if (!requireNamespace("VariantAnnotation", quietly = TRUE)) {
-        stop(
-            label,
-            ": reading VCF sumstats requires the 'VariantAnnotation' ",
+        msg <- glue(
+            "{label}: reading VCF sumstats requires the 'VariantAnnotation' ",
             "package; please install it."
         )
+        abort(msg)
     }
-    hasTbi <- file.exists(paste0(path, ".tbi"))
+    hasTbi <- file.exists(str_c(path, ".tbi"))
     if (!is.null(region) && hasTbi) {
         tf <- Rsamtools::TabixFile(path)
         gr <- .matchRegionSeqnames(
@@ -896,13 +857,11 @@ NULL
         }
     } else {
         if (!is.null(region) && !hasTbi) {
-            warning(
-                label,
-                ": VCF '",
-                path,
-                "' is not bgzipped + tabix-indexed; ",
+            msg <- glue(
+                "{label}: VCF '{path}' is not bgzipped + tabix-indexed; ",
                 "region ignored, reading the whole file."
             )
+            warn(msg)
         }
         vcf <- VariantAnnotation::readVcf(path)
     }
@@ -918,31 +877,26 @@ NULL
     label,
     allowNoN = FALSE
 ) {
-    hasTbi <- file.exists(paste0(path, ".tbi"))
+    hasTbi <- file.exists(str_c(path, ".tbi"))
     raw <- if (!is.null(region) && hasTbi) {
         .readTabixRegion(path, region)
     } else {
         if (!is.null(region) && !hasTbi) {
-            warning(
-                label,
-                ": '",
-                path,
-                "' is not tabix-indexed; ",
+            msg <- glue(
+                "{label}: '{path}' is not tabix-indexed; ",
                 "region ignored, reading the whole file."
             )
+            warn(msg)
         }
         # Read every column as character; .resolveSumstatCols() coerces each
         # field to its target type. This prevents readr from type-guessing an
         # allele/ID column that is uniformly T/F as logical (the allele "T" ->
         # TRUE).
-        as.data.frame(
-            readr::read_tsv(
-                path,
-                show_col_types = FALSE,
-                progress = FALSE,
-                col_types = readr::cols(.default = readr::col_character())
-            ),
-            check.names = FALSE
+        readr::read_tsv(
+            path,
+            show_col_types = FALSE,
+            progress = FALSE,
+            col_types = readr::cols(.default = readr::col_character())
         )
     }
     .resolveSumstatCols(raw, columnMapping, label, allowNoN = allowNoN)
@@ -958,16 +912,15 @@ NULL
     label,
     allowNoN = FALSE
 ) {
-    lower <- tolower(path)
-    if (endsWith(lower, ".bcf")) {
-        stop(
-            label,
-            ": BCF sumstats are not supported; convert '",
-            path,
-            "' to a bgzipped, tabix-indexed VCF."
+    lower <- str_to_lower(path)
+    if (str_ends(lower, "\\.bcf")) {
+        msg <- glue(
+            "{label}: BCF sumstats are not supported; convert '{path}' to a ",
+            "bgzipped, tabix-indexed VCF."
         )
+        abort(msg)
     }
-    if (grepl("\\.vcf(\\.b?gz)?$", lower)) {
+    if (str_detect(lower, "\\.vcf(\\.b?gz)?$")) {
         # GWAS-VCF always carries an SS (sample-size) FORMAT field, so the study
         # scalar never has to stand in for a per-variant N here.
         .readSumStatsVcf(path, region, sampleSelect, formatMapping, label)
@@ -1041,6 +994,27 @@ NULL
 
 # Read a phenotype BED into an expression matrix (genes x samples) + rowRanges.
 # @noRd
+# Column names (and their case/alias variants) that are metadata, not
+# expression samples, in a phenotype BED.
+# @noRd
+.bedReservedCols <- function() {
+    c(
+        "#chr",
+        "#chrom",
+        "chrom",
+        "chr",
+        "start",
+        "Start",
+        "end",
+        "End",
+        "gene_id",
+        "ID",
+        "phenotype_id",
+        "strand",
+        "Strand"
+    )
+}
+
 .readPhenotypeBed <- function(bedPath) {
     bed <- as.data.frame(
         readr::read_tsv(
@@ -1056,31 +1030,15 @@ NULL
     endCol <- intersect(c("end", "End"), names(bed))[1L]
     geneCol <- intersect(c("gene_id", "ID", "phenotype_id"), names(bed))[1L]
     if (any(is.na(c(chrCol, startCol, endCol, geneCol)))) {
-        stop(
-            "phenotype BED is missing one of chrom/start/end/gene_id columns: ",
-            bedPath
+        msg <- glue(
+            "phenotype BED is missing one of chrom/start/end/gene_id ",
+            "columns: {bedPath}"
         )
+        abort(msg)
     }
     meta <- bed[, c(chrCol, startCol, endCol, geneCol)]
     names(meta) <- c("chrom", "start", "end", "gene_id")
-    sampleCols <- setdiff(
-        names(bed),
-        c(
-            "#chr",
-            "#chrom",
-            "chrom",
-            "chr",
-            "start",
-            "Start",
-            "end",
-            "End",
-            "gene_id",
-            "ID",
-            "phenotype_id",
-            "strand",
-            "Strand"
-        )
-    )
+    sampleCols <- setdiff(names(bed), .bedReservedCols())
     expr <- as.matrix(bed[, sampleCols, drop = FALSE])
     storage.mode(expr) <- "double"
     rownames(expr) <- meta$gene_id
@@ -1097,7 +1055,7 @@ NULL
 # cd).
 # @noRd
 .buildContextColData <- function(covPath, transposeCov, expr, bedPath) {
-    if (is.null(covPath) || !nzchar(covPath)) {
+    if (is.null(covPath) || str_length(covPath) == 0L) {
         return(list(
             expr = expr,
             cd = S4Vectors::DataFrame(row.names = colnames(expr))
@@ -1106,10 +1064,10 @@ NULL
     pcov <- .readCovariateMatrix(covPath, transposeCov)
     common <- intersect(rownames(pcov), colnames(expr))
     if (length(common) == 0L) {
-        stop(
-            "No shared samples between phenotype and covariate file: ",
-            bedPath
+        msg <- glue(
+            "No shared samples between phenotype and covariate file: {bedPath}"
         )
+        abort(msg)
     }
     list(
         expr = expr[, common, drop = FALSE],
@@ -1161,9 +1119,14 @@ NULL
 ) {
     contexts <- unique(as.character(rows$context))
     phenotypes <- set_names(
-        map(contexts, function(cx) {
-            .buildOneContextSe(cx, rows, study, base, transposeCov)
-        }),
+        map(
+            contexts,
+            .buildOneContextSe,
+            rows = rows,
+            study = study,
+            base = base,
+            transposeCov = transposeCov
+        ),
         contexts
     )
     genoHandle <- .resolveGenoHandle(rows, study, base, genotypesOverride)
@@ -1174,18 +1137,16 @@ NULL
         transposeCov,
         genoCovOverride
     )
-    do.call(
-        QtlDataset,
-        c(
-            list(
-                study = study,
-                genotypes = genoHandle,
-                phenotypes = phenotypes,
-                genotypeCovariates = genoCov
-            ),
-            qc
-        )
+    qtlArgs <- c(
+        list(
+            study = study,
+            genotypes = genoHandle,
+            phenotypes = phenotypes,
+            genotypeCovariates = genoCov
+        ),
+        qc
     )
+    exec(QtlDataset, !!!qtlArgs)
 }
 
 # The SummarizedExperiment for one context: exactly one phenotypePath (+ at most
@@ -1195,29 +1156,24 @@ NULL
     sub <- rows[as.character(rows$context) == cx, , drop = FALSE]
     pths <- unique(sub$phenotypePath[!is.na(sub$phenotypePath)])
     if (length(pths) != 1L) {
-        stop(
-            "Context '",
-            cx,
-            "' (study '",
-            study,
-            "') must reference exactly one phenotypePath; got: ",
-            paste(pths, collapse = ", ")
+        msg <- glue(
+            "Context '{cx}' (study '{study}') must reference exactly one ",
+            "phenotypePath; got: {str_flatten(pths, ', ')}"
         )
+        abort(msg)
     }
     covPath <- NULL
-    if ("covariatePath" %in% names(sub)) {
+    if (is_in("covariatePath", names(sub))) {
         covs <- unique(sub$covariatePath[
-            !is.na(sub$covariatePath) & nzchar(as.character(sub$covariatePath))
+            !is.na(sub$covariatePath) &
+                str_length(as.character(sub$covariatePath)) > 0L
         ])
         if (length(covs) > 1L) {
-            stop(
-                "Context '",
-                cx,
-                "' (study '",
-                study,
-                "') references multiple covariatePath values: ",
-                paste(covs, collapse = ", ")
+            msg <- glue(
+                "Context '{cx}' (study '{study}') references multiple ",
+                "covariatePath values: {str_flatten(covs, ', ')}"
             )
+            abort(msg)
         }
         if (length(covs) == 1L) {
             covPath <- .resolveRel(covs[[1L]], base)
@@ -1238,12 +1194,11 @@ NULL
     } else {
         v <- unique(as.character(rows$genotypePath[!is.na(rows$genotypePath)]))
         if (length(v) != 1L) {
-            stop(
-                "study '",
-                study,
-                "' must reference exactly one genotypePath; got: ",
-                paste(v, collapse = ", ")
+            msg <- glue(
+                "study '{study}' must reference exactly one genotypePath; ",
+                "got: {str_flatten(v, ', ')}"
             )
+            abort(msg)
         }
         v[[1L]]
     }
@@ -1259,17 +1214,17 @@ NULL
     }
     spec <- if (is.character(genoCovOverride)) {
         genoCovOverride
-    } else if ("genotypeCovariatePath" %in% names(rows)) {
+    } else if (is_in("genotypeCovariatePath", names(rows))) {
         v <- unique(as.character(rows$genotypeCovariatePath[
             !is.na(rows$genotypeCovariatePath) &
-                nzchar(as.character(rows$genotypeCovariatePath))
+                str_length(as.character(rows$genotypeCovariatePath)) > 0L
         ]))
         if (length(v) > 1L) {
-            stop(
-                "study '",
-                study,
-                "' references multiple genotypeCovariatePath values."
+            msg <- glue(
+                "study '{study}' references multiple genotypeCovariatePath ",
+                "values."
             )
+            abort(msg)
         }
         if (length(v) == 1L) v[[1L]] else NULL
     } else {
@@ -1314,6 +1269,7 @@ NULL
 #'   phenotypePath = file.path(d, "example_geneexpr.bed.gz"),
 #'   study = "s1", genotypePath = file.path(d, "example.chr22"))
 #' loadQtlDatasetFromManifest(manifest = manifest, study = "s1")
+#' @importFrom stringr str_ends
 #' @export
 loadQtlDatasetFromManifest <- function(
     manifest,
@@ -1337,7 +1293,9 @@ loadQtlDatasetFromManifest <- function(
         required = c("context", "phenotypePath"),
         label = "QtlDataset"
     )
-    study <- .reconcileScalar(df$study, study, "study")
+    # df[["study"]] (not df$study): study is optional here (it may be passed as
+    # the `study` arg instead), and a tibble `$` on an absent column warns.
+    study <- .reconcileScalar(df[["study"]], study, "study")
     qc <- list(
         scaleResiduals = scaleResiduals,
         mafCutoff = mafCutoff,
@@ -1475,29 +1433,29 @@ loadGwasSumStatsFromManifest <- function(
         label = "GwasSumStats"
     )
     if (anyDuplicated(as.character(df$study))) {
-        stop("GwasSumStats manifest `study` values must be unique.")
+        abort("GwasSumStats manifest `study` values must be unique.")
     }
-    genome <- .reconcileScalar(df$genome, genome, "genome")
+    genome <- .reconcileScalar(df[["genome"]], genome, "genome")
     ldSketchSpec <- .resolveLdSketchInput(df, ldSketch, base)
     ns <- .gwasStudyScalars(df)
-    entries <- map(seq_len(nrow(df)), function(i) {
-        .loadGwasEntry(
-            i,
-            df,
-            base,
-            region,
-            columnMapping,
-            sampleSelect,
-            formatMapping,
-            ns
-        )
-    })
+    entries <- map(
+        seq_len(nrow(df)),
+        .loadGwasEntry,
+        df = df,
+        base = base,
+        region = region,
+        columnMapping = columnMapping,
+        sampleSelect = sampleSelect,
+        formatMapping = formatMapping,
+        ns = ns
+    )
     # Materialise the LD sketch reading only the chromosomes the sumstats cover,
     # then run the deferred per-study containment checks and trim to range.
     ldSketch <- .materializeLdSketch(ldSketchSpec, .entriesChroms(entries))
     .checkGwasLdContainment(ldSketch, entries, df, minLdOverlapWarn)
     ldSketch <- .subsetSketchToRange(ldSketch, entries)
-    do.call(GwasSumStats, .gwasSumStatsArgs(df, entries, genome, ldSketch, ns))
+    gwasArgs <- .gwasSumStatsArgs(df, entries, genome, ldSketch, ns)
+    exec(GwasSumStats, !!!gwasArgs)
 }
 
 # Study-level sample-size scalars from the manifest (n_case + n_control, or
@@ -1505,13 +1463,17 @@ loadGwasSumStatsFromManifest <- function(
 # @noRd
 .gwasStudyScalars <- function(df) {
     list(
-        nCase = if ("nCase" %in% names(df)) as.numeric(df$nCase) else NULL,
-        nControl = if ("nControl" %in% names(df)) {
+        nCase = if (is_in("nCase", names(df))) as.numeric(df$nCase) else NULL,
+        nControl = if (is_in("nControl", names(df))) {
             as.numeric(df$nControl)
         } else {
             NULL
         },
-        nSample = if ("nSample" %in% names(df)) as.numeric(df$nSample) else NULL
+        nSample = if (is_in("nSample", names(df))) {
+            as.numeric(df$nSample)
+        } else {
+            NULL
+        }
     )
 }
 
@@ -1528,12 +1490,11 @@ loadGwasSumStatsFromManifest <- function(
     formatMapping,
     ns
 ) {
-    label <- paste0("GwasSumStats[study=", df$study[[i]], "]")
+    label <- str_c("GwasSumStats[study=", df$study[[i]], "]")
     mapping <- if (
-        "columnMapping" %in%
-            names(df) &&
+        is_in("columnMapping", names(df)) &&
             !is.na(df$columnMapping[[i]]) &&
-            nzchar(as.character(df$columnMapping[[i]]))
+            str_length(as.character(df$columnMapping[[i]])) > 0L
     ) {
         .resolveRel(as.character(df$columnMapping[[i]]), base)
     } else {
@@ -1563,7 +1524,7 @@ loadGwasSumStatsFromManifest <- function(
             ldSketch,
             entries[[i]],
             minLdOverlapWarn,
-            paste0("GwasSumStats[study=", df$study[[i]], "]")
+            str_c("GwasSumStats[study=", df$study[[i]], "]")
         )
     }
 }
@@ -1586,7 +1547,7 @@ loadGwasSumStatsFromManifest <- function(
     if (!is.null(ns$nSample)) {
         args$nSample <- ns$nSample
     }
-    if ("varY" %in% names(df)) {
+    if (is_in("varY", names(df))) {
         args$varY <- as.numeric(df$varY)
     }
     args
@@ -1607,36 +1568,17 @@ loadGwasSumStatsFromManifest <- function(
     formatMapping,
     allowNoN = NULL
 ) {
-    lapply(seq_len(nrow(df)), function(i) {
-        label <- paste0(
-            "QtlSumStats[",
-            df$study[[i]],
-            "/",
-            df$context[[i]],
-            "/",
-            df$trait[[i]],
-            "]"
-        )
-        mapping <- if (
-            "columnMapping" %in%
-                names(df) &&
-                !is.na(df$columnMapping[[i]]) &&
-                nzchar(as.character(df$columnMapping[[i]]))
-        ) {
-            .resolveRel(as.character(df$columnMapping[[i]]), base)
-        } else {
-            columnMapping
-        }
-        .loadSumStatsEntry(
-            .resolveRel(as.character(df$sumStatsPath[[i]]), base),
-            region,
-            mapping,
-            sampleSelect,
-            formatMapping,
-            label,
-            allowNoN = !is.null(allowNoN) && isTRUE(allowNoN[[i]])
-        )
-    })
+    map(
+        seq_len(nrow(df)),
+        .loadQtlSumStatsEntry,
+        df = df,
+        base = base,
+        region = region,
+        columnMapping = columnMapping,
+        sampleSelect = sampleSelect,
+        formatMapping = formatMapping,
+        allowNoN = allowNoN
+    )
 }
 
 #' @title Load a QtlSumStats collection from a manifest
@@ -1687,14 +1629,17 @@ loadQtlSumStatsFromManifest <- function(
         required = c("study", "context", "trait", "sumStatsPath"),
         label = "QtlSumStats"
     )
-    genome <- .reconcileScalar(df$genome, genome, "genome")
+    genome <- .reconcileScalar(df[["genome"]], genome, "genome")
     ldSketchSpec <- .resolveLdSketchInput(df, ldSketch, base)
 
     # Tuple-level total-N scalar (from the manifest). When a row carries a
-    # usable nSample the sumstats file need not supply a per-variant N:
-    # summaryStatsQc fills N from the scalar. Gate the entry reader's N check
-    # per row on it.
-    nSampleCol <- if ("nSample" %in% names(df)) as.numeric(df$nSample) else NULL
+    # usable nSample, summaryStatsQc fills N from it so the sumstats file need
+    # not supply a per-variant N; gate the entry reader's N check per row on it.
+    nSampleCol <- if (is_in("nSample", names(df))) {
+        as.numeric(df$nSample)
+    } else {
+        NULL
+    }
     allowNoN <- if (!is.null(nSampleCol)) is.finite(nSampleCol) else NULL
 
     entries <- .loadQtlSumStatsEntries(
@@ -1714,10 +1659,8 @@ loadQtlSumStatsFromManifest <- function(
     .qtlSumStatsCheckContainment(ldSketch, entries, df, minLdOverlapWarn)
     ldSketch <- .subsetSketchToRange(ldSketch, entries)
 
-    do.call(
-        QtlSumStats,
-        .qtlSumStatsArgs(df, entries, genome, ldSketch, nSampleCol)
-    )
+    qtlArgs <- .qtlSumStatsArgs(df, entries, genome, ldSketch, nSampleCol)
+    exec(QtlSumStats, !!!qtlArgs)
 }
 
 # Per-row LD-containment check (no-op when the sketch is NULL).
@@ -1736,7 +1679,7 @@ loadQtlSumStatsFromManifest <- function(
             ldSketch,
             entries[[i]],
             minLdOverlapWarn,
-            paste0(
+            str_c(
                 "QtlSumStats[",
                 df$study[[i]],
                 "/",
@@ -1764,7 +1707,7 @@ loadQtlSumStatsFromManifest <- function(
     if (!is.null(nSampleCol)) {
         args$nSample <- nSampleCol
     }
-    if ("varY" %in% names(df)) {
+    if (is_in("varY", names(df))) {
         args$varY <- as.numeric(df$varY)
     }
     args
@@ -1879,16 +1822,15 @@ loadMultiStudyQtlDatasetFromManifest <- function(
         label = "MultiStudyQtlDataset (qtlDatasetsManifest)"
     )
     studies <- unique(as.character(df$study))
-    setNames(
-        lapply(studies, function(s) {
-            .buildQtlDatasetFromRows(
-                df[as.character(df$study) == s, , drop = FALSE],
-                s,
-                base,
-                transposeCovariates,
-                qc
-            )
-        }),
+    set_names(
+        map(
+            studies,
+            .msqDatasetForStudy,
+            df = df,
+            base = base,
+            transposeCovariates = transposeCovariates,
+            qc = qc
+        ),
         studies
     )
 }
@@ -1917,5 +1859,89 @@ loadMultiStudyQtlDatasetFromManifest <- function(
         columnMapping = columnMapping,
         sampleSelect = sampleSelect,
         formatMapping = formatMapping
+    )
+}
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# One sumstats entry's canonical chromosomes (empty for NULL / 0-length gr).
+# @noRd
+.mlEntryChroms <- function(gr) {
+    if (is.null(gr) || length(gr) == 0L) {
+        return(character(0))
+    }
+    canonChrom(as.character(GenomicRanges::seqnames(gr)))
+}
+
+# The tabix seqname matching query seqname `w` (chr-prefix tolerant); NA if
+# none.
+# @noRd
+.mlMatchSeqname <- function(w, available) {
+    hit <- available[canonChrom(available) == canonChrom(w)]
+    if (length(hit) >= 1L) hit[[1L]] else NA_character_
+}
+
+# TRUE when a resolved field value is NA or NULL (missing-key check).
+# @noRd
+.mlIsNaOrNull <- function(x) {
+    is.na(x) || is.null(x)
+}
+
+# The first ALT allele (as character) of one VCF row's alt set.
+# @noRd
+.mlFirstAlt <- function(a) {
+    as.character(a)[[1L]]
+}
+
+# One QtlSumStats entry for manifest row `i` (per-row columnMapping override).
+# @noRd
+.loadQtlSumStatsEntry <- function(
+    i,
+    df,
+    base,
+    region,
+    columnMapping,
+    sampleSelect,
+    formatMapping,
+    allowNoN
+) {
+    label <- str_c(
+        "QtlSumStats[",
+        df$study[[i]],
+        "/",
+        df$context[[i]],
+        "/",
+        df$trait[[i]],
+        "]"
+    )
+    mapping <- if (
+        is_in("columnMapping", names(df)) &&
+            !is.na(df$columnMapping[[i]]) &&
+            str_length(as.character(df$columnMapping[[i]])) > 0L
+    ) {
+        .resolveRel(as.character(df$columnMapping[[i]]), base)
+    } else {
+        columnMapping
+    }
+    .loadSumStatsEntry(
+        .resolveRel(as.character(df$sumStatsPath[[i]]), base),
+        region,
+        mapping,
+        sampleSelect,
+        formatMapping,
+        label,
+        allowNoN = !is.null(allowNoN) && isTRUE(allowNoN[[i]])
+    )
+}
+
+# One study's QtlDataset from its manifest rows.
+# @noRd
+.msqDatasetForStudy <- function(s, df, base, transposeCovariates, qc) {
+    .buildQtlDatasetFromRows(
+        df[as.character(df$study) == s, , drop = FALSE],
+        s,
+        base,
+        transposeCovariates,
+        qc
     )
 }

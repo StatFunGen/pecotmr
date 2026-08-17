@@ -71,7 +71,9 @@ sldscPostprocessingPipeline <- function(
         tgt$isBinaryFull,
         tgt$targetCategories
     )
-    message(sprintf("[sldsc] Standardizing %d traits...", length(traitNames)))
+    nTraits <- length(traitNames)
+    msg <- glue("[sldsc] Standardizing {nTraits} traits...")
+    inform(msg)
     ctx <- list(
         sldscData = sldscData,
         MRef = ref$MRef,
@@ -100,14 +102,15 @@ sldscPostprocessingPipeline <- function(
 # @noRd
 .sldscValidate <- function(sldscData) {
     if (!is(sldscData, "SldscData")) {
-        stop(
+        msg <- glue(
             "sldscPostprocessingPipeline: `sldscData` must be an ",
             "SldscData object."
         )
+        abort(msg)
     }
     traitNames <- getTraitNames(sldscData)
     if (length(traitNames) == 0L) {
-        stop("sldscPostprocessingPipeline: SldscData has no traits.")
+        abort("sldscPostprocessingPipeline: SldscData has no traits.")
     }
     traitNames
 }
@@ -117,25 +120,26 @@ sldscPostprocessingPipeline <- function(
 # matches. Returns list(MRef, sdAnnotFull, isBinaryFull).
 # @noRd
 .sldscComputeRefStats <- function(sldscData, mafCutoff) {
-    message("[sldsc] Computing M_ref...")
+    inform("[sldsc] Computing M_ref...")
     MRef <- computeSldscMRef(sldscData, mafCutoff = mafCutoff)
-    message(sprintf("[sldsc]   M_ref = %d (MAF cutoff %g)", MRef, mafCutoff))
-    message("[sldsc] Computing per-annotation sd...")
+    msg <- glue("[sldsc]   M_ref = {MRef} (MAF cutoff {mafCutoff})")
+    inform(msg)
+    inform("[sldsc] Computing per-annotation sd...")
     sdAnnotFull <- computeSldscAnnotSd(sldscData, mafCutoff = mafCutoff)
-    message(sprintf(
-        "[sldsc]   sd computed for %d annotation columns",
-        length(sdAnnotFull)
-    ))
-    message("[sldsc] Detecting binary vs continuous annotations...")
+    nSd <- length(sdAnnotFull)
+    msg <- glue("[sldsc]   sd computed for {nSd} annotation columns")
+    inform(msg)
+    inform("[sldsc] Detecting binary vs continuous annotations...")
     isBinaryFull <- isBinarySldscAnnot(sldscData)
-    names(sdAnnotFull) <- paste0(names(sdAnnotFull), "_0")
-    names(isBinaryFull) <- paste0(names(isBinaryFull), "_0")
+    names(sdAnnotFull) <- str_c(names(sdAnnotFull), "_0")
+    names(isBinaryFull) <- str_c(names(isBinaryFull), "_0")
     list(MRef = MRef, sdAnnotFull = sdAnnotFull, isBinaryFull = isBinaryFull)
 }
 
 # Resolve the target categories: keep the user's set, else auto-detect from a
 # pivot run (falling back to a positional rename when the `_0` names don't match
-# polyfun's .results). Returns list(targetCategories, sdAnnotFull, isBinaryFull).
+# polyfun's .results). Returns list(targetCategories, sdAnnotFull,
+# isBinaryFull).
 # @noRd
 .sldscResolveTargets <- function(sldscData, traitNames, targetCategories, ref) {
     if (!is.null(targetCategories)) {
@@ -147,7 +151,7 @@ sldscPostprocessingPipeline <- function(
     }
     pivotRun <- .sldscPivotRun(sldscData, traitNames[1])
     if (is.null(pivotRun)) {
-        stop(
+        abort(
             "sldscPostprocessingPipeline: cannot auto-detect targetCategories."
         )
     }
@@ -161,10 +165,9 @@ sldscPostprocessingPipeline <- function(
             isBinaryFull = ref$isBinaryFull
         )
     }
-    message(sprintf(
-        "[sldsc] Auto-detected %d target categories",
-        length(out$targetCategories)
-    ))
+    nDetected <- length(out$targetCategories)
+    msg <- glue("[sldsc] Auto-detected {nDetected} target categories")
+    inform(msg)
     out
 }
 
@@ -215,27 +218,23 @@ sldscPostprocessingPipeline <- function(
     nBaseline
 ) {
     baselinePreview <- if (nBaseline > 0L) {
-        paste(head(pivotRun$categories[-seq_len(nTarget)], 3), collapse = ", ")
+        str_flatten(head(pivotRun$categories[-seq_len(nTarget)], 3), ", ")
     } else {
         "(none)"
     }
-    message(sprintf(
-        paste0(
-            "[sldsc] sdAnnot/isBinary names did not match polyfun .results ",
-            "categories;\n",
-            "        falling back to positional rename (target = first ",
-            "%d rows of .results)\n",
-            "        target  (%d): %s -> %s\n",
-            "        baseline (%d): %s%s"
-        ),
-        nTarget,
-        nTarget,
-        paste(oldNames, collapse = ", "),
-        paste(targetCategories, collapse = ", "),
-        nBaseline,
-        baselinePreview,
-        if (nBaseline > 3L) ", ..." else ""
-    ))
+    oldStr <- str_flatten(oldNames, ", ")
+    targetStr <- str_flatten(targetCategories, ", ")
+    baselineMore <- if (nBaseline > 3L) ", ..." else ""
+    msg <- glue(
+        "[sldsc] sdAnnot/isBinary names did not match polyfun .results ",
+        "categories;\n",
+        "        falling back to positional rename (target = first ",
+        "{nTarget} rows of .results)\n",
+        "        target  ({nTarget}): {oldStr} -> {targetStr}\n",
+        "        baseline ({nBaseline}): {baselinePreview}{baselineMore}",
+        .trim = FALSE
+    )
+    inform(msg)
 }
 
 # Baseline categories = the first trait's joint categories minus the targets.
@@ -254,19 +253,20 @@ sldscPostprocessingPipeline <- function(
 # @noRd
 .sldscBaselineMessage <- function(baselineCategories) {
     if (length(baselineCategories) == 0L) {
-        message(
+        msg <- glue(
             "[sldsc] No baseline annotations detected (no joint run on ",
             "the first trait)."
         )
+        inform(msg)
         return(invisible(NULL))
     }
     msgTail <- if (length(baselineCategories) > 5) ", ..." else ""
-    message(sprintf(
-        "[sldsc] Detected %d baseline annotations: %s%s",
-        length(baselineCategories),
-        paste(head(baselineCategories, 5), collapse = ", "),
-        msgTail
-    ))
+    nBase <- length(baselineCategories)
+    baseStr <- str_flatten(head(baselineCategories, 5), ", ")
+    msg <- glue(
+        "[sldsc] Detected {nBase} baseline annotations: {baseStr}{msgTail}"
+    )
+    inform(msg)
 }
 
 # Subset the per-annotation sd + binary flags to the target categories.
@@ -275,7 +275,7 @@ sldscPostprocessingPipeline <- function(
     isBinary <- if (length(isBinaryFull) > 0L) {
         isBinaryFull[targetCategories]
     } else {
-        setNames(rep(FALSE, length(targetCategories)), targetCategories)
+        set_names(rep(FALSE, length(targetCategories)), targetCategories)
     }
     list(sdAnnot = sdAnnotFull[targetCategories], isBinary = isBinary)
 }
@@ -346,12 +346,12 @@ sldscPostprocessingPipeline <- function(
             targetCategories = catName
         ),
         error = function(e) {
-            warning(sprintf(
-                "[sldsc] Failed to standardize single %s for %s: %s",
-                catName,
-                trait,
-                e$message
-            ))
+            eMsg <- e$message
+            msg <- glue(
+                "[sldsc] Failed to standardize single {catName} for ",
+                "{trait}: {eMsg}"
+            )
+            warn(msg)
             NULL
         }
     )
@@ -378,11 +378,11 @@ sldscPostprocessingPipeline <- function(
         ))
     }
     catNames <- map_chr(stds, "catName")
-    singleDf <- do.call(rbind, set_names(map(stds, "summary"), catNames))
-    rownames(singleDf) <- NULL
+    singleDf <- bind_rows(map(stds, "summary"))
+    blocksList <- set_names(map(stds, "blocks"), catNames)
     list(
         singleDf = singleDf,
-        blocksSingle = do.call(cbind, set_names(map(stds, "blocks"), catNames)),
+        blocksSingle = exec(cbind, !!!blocksList),
         singleH2gs = map_dbl(stds, "h2g")
     )
 }
@@ -410,11 +410,11 @@ sldscPostprocessingPipeline <- function(
             targetCategories = ctx$targetCategories
         ),
         error = function(e) {
-            warning(sprintf(
-                "[sldsc] Failed to standardize joint for %s: %s",
-                trait,
-                e$message
-            ))
+            eMsg <- e$message
+            msg <- glue(
+                "[sldsc] Failed to standardize joint for {trait}: {eMsg}"
+            )
+            warn(msg)
             NULL
         }
     )
@@ -432,7 +432,7 @@ sldscPostprocessingPipeline <- function(
 # Random-effects meta across traits -> list(tauStar, enrichment, enrichstat).
 # @noRd
 .sldscMetaTables <- function(perTrait, isBinary, targetCategories) {
-    message("[sldsc] Running random-effects meta across traits...")
+    inform("[sldsc] Running random-effects meta across traits...")
     ptViewSingle <- .sldscViewForMeta(perTrait, "single")
     ptViewJoint <- .sldscViewForMeta(perTrait, "joint")
     metaTauStarSingle <- .sldscBuildTable(
@@ -526,17 +526,17 @@ sldscPostprocessingPipeline <- function(
     }
     targetLabels <- as.character(targetLabels)
     if (length(targetLabels) != length(targetCategories)) {
-        stop(sprintf(
-            paste0(
-                "sldscPostprocessingPipeline: targetLabels has length %d ",
-                "but there are %d target categories (%s)."
-            ),
-            length(targetLabels),
-            length(targetCategories),
-            paste(targetCategories, collapse = ", ")
-        ))
+        nLabels <- length(targetLabels)
+        nTargets <- length(targetCategories)
+        targetStr <- str_flatten(targetCategories, ", ")
+        msg <- glue(
+            "sldscPostprocessingPipeline: targetLabels has length ",
+            "{nLabels} but there are {nTargets} target categories ",
+            "({targetStr})."
+        )
+        abort(msg)
     }
-    relab <- setNames(targetLabels, targetCategories)
+    relab <- set_names(targetLabels, targetCategories)
     res$per_trait <- .sldscRelabelPerTrait(res$per_trait, relab)
     res$meta <- .sldscRelabelMeta(res$meta, relab)
     res$params$target_categories_orig <- res$params$target_categories
@@ -555,7 +555,7 @@ sldscPostprocessingPipeline <- function(
 
 # @noRd
 .sldscRelabelOneTrait <- function(pt, relab) {
-    if (!is.null(pt$summary) && "target" %in% names(pt$summary)) {
+    if (!is.null(pt$summary) && is_in("target", names(pt$summary))) {
         pt$summary$target <- .sldscRelabVec(pt$summary$target, relab)
     }
     for (bn in c("tau_star_blocks_single", "tau_star_blocks_joint")) {
@@ -570,7 +570,7 @@ sldscPostprocessingPipeline <- function(
 # @noRd
 .sldscRelabelMeta <- function(meta, relab) {
     for (mn in names(meta)) {
-        if (!is.null(meta[[mn]]) && "target" %in% names(meta[[mn]])) {
+        if (!is.null(meta[[mn]]) && is_in("target", names(meta[[mn]]))) {
             meta[[mn]]$target <- .sldscRelabVec(meta[[mn]]$target, relab)
         }
     }
@@ -579,17 +579,11 @@ sldscPostprocessingPipeline <- function(
 
 # @noRd
 .sldscRelabelMessage <- function(targetCategories, relab) {
-    message(sprintf(
-        "[sldsc] Relabeled target categories: %s",
-        paste(
-            sprintf(
-                "%s -> %s",
-                targetCategories,
-                unname(relab[targetCategories])
-            ),
-            collapse = ", "
-        )
-    ))
+    labels <- unname(relab[targetCategories])
+    pairs <- glue("{targetCategories} -> {labels}")
+    pairsStr <- str_flatten(pairs, ", ")
+    msg <- glue("[sldsc] Relabeled target categories: {pairsStr}")
+    inform(msg)
 }
 
 # Build a per-category meta table for one quantity/view, with `label`-prefixed
@@ -603,23 +597,21 @@ sldscPostprocessingPipeline <- function(
     targetCategories
 ) {
     rows <- list()
-    for (cat in targetCategories) {
-        m <- metaSldscRandom(view, cat, quantity)
-        rows[[cat]] <- data.frame(
-            target = cat,
-            isBinary = unname(isBinary[cat]),
+    for (category in targetCategories) {
+        m <- metaSldscRandom(view, category, quantity)
+        rows[[category]] <- tibble(
+            target = category,
+            isBinary = unname(isBinary[category]),
             mean = m$mean,
             se = m$se,
             p = m$p,
-            nTraits = m$nTraits,
-            stringsAsFactors = FALSE
+            nTraits = m$nTraits
         )
     }
-    df <- do.call(rbind, rows)
-    rownames(df) <- NULL
+    df <- bind_rows(rows)
     nmOld <- c("mean", "se", "p")
-    nmNew <- paste0(label, toupper(substring(nmOld, 1, 1)), substring(nmOld, 2))
-    names(df)[names(df) %in% nmOld] <- nmNew
+    nmNew <- str_c(label, str_to_upper(str_sub(nmOld, 1, 1)), str_sub(nmOld, 2))
+    names(df)[is_in(names(df), nmOld)] <- nmNew
     df
 }
 

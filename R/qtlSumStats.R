@@ -57,7 +57,7 @@ setClass(
         names(object)
     )
     if (length(missingCols) > 0L) {
-        return(paste("missing columns:", paste(missingCols, collapse = ", ")))
+        return(str_c("missing columns: ", str_flatten(missingCols, ", ")))
     }
     NULL
 }
@@ -65,7 +65,7 @@ setClass(
 # genome slot: a single non-empty string.
 # @noRd
 .qssCheckGenome <- function(object) {
-    if (length(object@genome) != 1L || !nzchar(object@genome)) {
+    if (length(object@genome) != 1L || str_length(object@genome) == 0L) {
         return("'genome' slot must be a single non-empty character string")
     }
     NULL
@@ -103,7 +103,7 @@ setClass(
 # Every `entry` element must be a GRanges.
 # @noRd
 .qssCheckEntryTypes <- function(object) {
-    allGr <- all(map_lgl(object$entry, function(e) methods::is(e, "GRanges")))
+    allGr <- all(map_lgl(object$entry, methods::is, "GRanges"))
     if (!allGr) {
         return("every element of the `entry` column must be a GRanges")
     }
@@ -118,12 +118,11 @@ setClass(
     # `entry` column, and older S4Vectors revalidates that intermediate,
     # spuriously failing with "missing columns: entry".
     keyCols <- c("study", "context", "trait")
-    keyDf <- as.data.frame(
-        map(keyCols, function(cn) object[[cn]]),
-        col.names = keyCols,
-        stringsAsFactors = FALSE
-    )
-    if (anyDuplicated(keyDf)) {
+    keyTbl <- as_tibble(set_names(
+        map(keyCols, .qssColumn, object = object),
+        keyCols
+    ))
+    if (nrow(distinct(keyTbl)) < nrow(keyTbl)) {
         return("(study, context, trait) tuple uniqueness violated")
     }
     NULL
@@ -207,10 +206,11 @@ QtlSumStats <- function(
             missing(entry) ||
             missing(genome)
     ) {
-        stop(
+        msg <- glue(
             "`study`, `context`, `trait`, `entry`, and `genome` ",
             "are all required."
         )
+        abort(msg)
     }
     n <- length(study)
     varY <- .qssValidateArgs(context, trait, entry, genome, varY, n)
@@ -218,7 +218,8 @@ QtlSumStats <- function(
     cols <- .qssAppendNSample(cols, nSample, n)
     cols <- .appendTraitPosCol(cols, traitPos, n)
     cols <- .qssAppendExtras(cols, list(...))
-    df <- do.call(S4Vectors::DataFrame, c(cols, list(check.names = FALSE)))
+    dfArgs <- c(cols, list(check.names = FALSE))
+    df <- exec(S4Vectors::DataFrame, !!!dfArgs)
     obj <- methods::new(
         "QtlSumStats",
         df,
@@ -235,21 +236,23 @@ QtlSumStats <- function(
 # @noRd
 .qssValidateArgs <- function(context, trait, entry, genome, varY, n) {
     if (length(genome) != 1L) {
-        stop(
+        msg <- glue(
             "`genome` must be a single character string (one build per ",
             "collection, because all entries share the LD sketch)."
         )
+        abort(msg)
     }
     if (!is.list(entry)) {
-        stop(
+        abort(
             "`entry` must be a list (or SimpleList) of GRanges, one per tuple."
         )
     }
     if (length(context) != n || length(trait) != n || length(entry) != n) {
-        stop(
+        msg <- glue(
             "`study`, `context`, `trait`, and `entry` must all have the ",
             "same length."
         )
+        abort(msg)
     }
     .qssRecycleTo(varY, n, "varY")
 }
@@ -261,7 +264,8 @@ QtlSumStats <- function(
         x <- rep(x, n)
     }
     if (length(x) != n) {
-        stop("`", name, "` must have length 1 or length(study).")
+        msg <- glue("`{name}` must have length 1 or length(study).")
+        abort(msg)
     }
     x
 }
@@ -287,7 +291,8 @@ QtlSumStats <- function(
     )
 }
 
-# Attach the OPTIONAL per-tuple total-sample-size column (default NULL leaves the
+# Attach the OPTIONAL per-tuple total-sample-size column (default NULL leaves
+# the
 # original schema; summaryStatsQc() fills a missing per-variant N from it).
 # @noRd
 .qssAppendNSample <- function(cols, nSample, n) {
@@ -317,31 +322,12 @@ QtlSumStats <- function(
     if (is.null(traitPos)) {
         return(entry)
     }
-    lapply(seq_along(entry), function(i) {
-        gr <- entry[[i]]
-        if (length(gr) == 0L) {
-            return(gr)
-        }
-        tp <- traitPos[i]
-        tssPos <- suppressWarnings(GenomicRanges::start(tp))
-        tesPos <- suppressWarnings(GenomicRanges::end(tp))
-        if (length(tssPos) == 0L || is.na(tssPos)) {
-            return(gr)
-        }
-        pos <- GenomicRanges::start(gr)
-        mc <- S4Vectors::mcols(gr)
-        if (is.null(mc) || ncol(mc) == 0L) {
-            mc <- S4Vectors::DataFrame(row.names = NULL)
-        }
-        if (is.null(mc[["tss_distance"]])) {
-            mc[["tss_distance"]] <- pos - tssPos
-        }
-        if (is.null(mc[["tes_distance"]])) {
-            mc[["tes_distance"]] <- pos - tesPos
-        }
-        S4Vectors::mcols(gr) <- mc
-        gr
-    })
+    map(
+        seq_along(entry),
+        .qssAppendTraitDist,
+        entry = entry,
+        traitPos = traitPos
+    )
 }
 
 # =============================================================================
@@ -351,7 +337,7 @@ QtlSumStats <- function(
 # Internal: resolve a (study, context, trait) tuple to a single row index.
 .qtlSumStatsSelectRow <- function(x, study, context, trait) {
     if (nrow(x) == 0L) {
-        stop("QtlSumStats has no rows.")
+        abort("QtlSumStats has no rows.")
     }
     anyUnset <- missing(study) ||
         is.null(study) ||
@@ -363,14 +349,14 @@ QtlSumStats <- function(
         if (nrow(x) == 1L) {
             return(1L)
         }
-        stop(
-            "This QtlSumStats has ",
-            nrow(x),
-            " entries. Pass `study`, `context`, and `trait` to select one."
+        msg <- glue(
+            "This QtlSumStats has {nrow(x)} entries. Pass `study`, ",
+            "`context`, and `trait` to select one."
         )
+        abort(msg)
     }
     if (length(study) != 1L || length(context) != 1L || length(trait) != 1L) {
-        stop("`study`, `context`, and `trait` must each be length 1.")
+        abort("`study`, `context`, and `trait` must each be length 1.")
     }
     .qssMatchTuple(x, study, context, trait)
 }
@@ -383,25 +369,20 @@ QtlSumStats <- function(
         list(study = study, context = context, trait = trait)
     )
     if (length(idx) == 0L) {
-        stop(sprintf(
-            "No entry for (study='%s', context='%s', trait='%s').",
-            study,
-            context,
-            trait
-        ))
+        msg <- glue(
+            "No entry for (study='{study}', context='{context}', ",
+            "trait='{trait}')."
+        )
+        abort(msg)
     }
     if (length(idx) > 1L) {
         # Unreachable: the class validity enforces (study, context, trait)
         # uniqueness. nocov start
-        stop(sprintf(
-            paste0(
-                "Multiple entries match (study='%s', context='%s', ",
-                "trait='%s'); tuple uniqueness violation."
-            ),
-            study,
-            context,
-            trait
-        ))
+        msg <- glue(
+            "Multiple entries match (study='{study}', context='{context}', ",
+            "trait='{trait}'); tuple uniqueness violation."
+        )
+        abort(msg)
         # nocov end
     }
     idx
@@ -431,7 +412,7 @@ setMethod(
         idx <- .qtlSumStatsSelectRow(x, study, context, trait)
         gr <- x$entry[[idx]]
         if (!is.null(annotateSignificance)) {
-            m <- match.arg(
+            m <- arg_match(
                 annotateSignificance,
                 c(
                     "permutation",
@@ -466,18 +447,17 @@ setMethod(
         derive = c("none", "zFromBetaSe"),
         keepChrPrefix = TRUE
     ) {
-        derive <- match.arg(derive)
+        derive <- arg_match(derive)
         gr <- getSumStats(x, study = study, context = context, trait = trait)
         .entryToSumstatDf(
             gr,
             require = require,
             derive = derive,
             keepChrPrefix = keepChrPrefix,
-            label = sprintf(
-                "QtlSumStats[%s/%s/%s]",
-                if (is.null(study)) "<auto>" else study,
-                if (is.null(context)) "<auto>" else context,
-                if (is.null(trait)) "<auto>" else trait
+            label = glue(
+                "QtlSumStats[{if (is.null(study)) '<auto>' else study}/",
+                "{if (is.null(context)) '<auto>' else context}/",
+                "{if (is.null(trait)) '<auto>' else trait}]"
             )
         )
     }
@@ -487,11 +467,12 @@ setMethod(
 #' @export
 setMethod("subsetChr", "QtlSumStats", function(x, chr) {
     chrName <- withChrPrefix(chr)
-    newEntries <- lapply(seq_len(nrow(x)), function(i) {
-        gr <- x$entry[[i]]
-        idx <- as.character(seqnames(gr)) == chrName
-        gr[idx]
-    })
+    newEntries <- map(
+        seq_len(nrow(x)),
+        .ssSubsetChrEntry,
+        x = x,
+        chrName = chrName
+    )
     QtlSumStats(
         study = as.character(x$study),
         context = as.character(x$context),
@@ -500,7 +481,11 @@ setMethod("subsetChr", "QtlSumStats", function(x, chr) {
         genome = x@genome,
         ldSketch = x@ldSketch,
         varY = as.numeric(x$varY),
-        nSample = if ("nSample" %in% names(x)) as.numeric(x$nSample) else NULL,
+        nSample = if (is_in("nSample", names(x))) {
+            as.numeric(x$nSample)
+        } else {
+            NULL
+        },
         qcInfo = x@qcInfo
     )
 })
@@ -538,7 +523,7 @@ setMethod("getTraitPosition", "QtlSumStats", function(x, traitId = NULL, ...) {
     if (!methods::is(tp, "GRanges") || is.null(traitId)) {
         return(tp)
     }
-    idx <- which(as.character(x$trait) %in% as.character(traitId))
+    idx <- which(is_in(as.character(x$trait), as.character(traitId)))
     if (length(idx) == 0L) {
         return(NA)
     }
@@ -552,26 +537,72 @@ setMethod("getTraitPosition", "QtlSumStats", function(x, traitId = NULL, ...) {
 #' @rdname show-methods
 #' @export
 setMethod("show", "QtlSumStats", function(object) {
-    cat(sprintf(
-        "QtlSumStats: %d entries, genome build %s\n",
-        nrow(object),
-        getGenome(object)
+    cat(glue(
+        "QtlSumStats: {nrow(object)} entries, ",
+        "genome build {getGenome(object)}\n",
+        .trim = FALSE
     ))
     if (nrow(object) > 0L) {
-        cat(sprintf(
-            "  %d studies, %d contexts, %d traits\n",
-            length(unique(object$study)),
-            length(unique(object$context)),
-            length(unique(object$trait))
+        cat(glue(
+            "  {n_distinct(object$study)} studies, ",
+            "{n_distinct(object$context)} contexts, ",
+            "{n_distinct(object$trait)} traits\n",
+            .trim = FALSE
         ))
     }
     ld <- getLdSketch(object)
-    cat(sprintf(
-        "  LD sketch: %s\n",
-        if (is.null(ld)) {
-            "none (LD-free)"
-        } else {
-            sprintf("%s @ %s", getFormat(ld), getPath(ld))
-        }
-    ))
+    ldSrc <- if (is.null(ld)) {
+        "none (LD-free)"
+    } else {
+        glue("{getFormat(ld)} @ {getPath(ld)}")
+    }
+    cat(glue("  LD sketch: {ldSrc}\n", .trim = FALSE))
 })
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# Column `cn` of `object`, via `[[` (preserves the required `entry` column that
+# `object[, cn]` would drop).
+# @noRd
+.qssColumn <- function(cn, object) {
+    object[[cn]]
+}
+
+# Append tss_distance / tes_distance mcols to entry `i` from traitPos[i] (no-op
+# when the entry is empty or the trait position is unset). Existing distance
+# mcols are preserved.
+# @noRd
+.qssAppendTraitDist <- function(i, entry, traitPos) {
+    gr <- entry[[i]]
+    if (length(gr) == 0L) {
+        return(gr)
+    }
+    tp <- traitPos[i]
+    tssPos <- suppressWarnings(GenomicRanges::start(tp))
+    tesPos <- suppressWarnings(GenomicRanges::end(tp))
+    if (length(tssPos) == 0L || is.na(tssPos)) {
+        return(gr)
+    }
+    pos <- GenomicRanges::start(gr)
+    mc <- S4Vectors::mcols(gr)
+    if (is.null(mc) || ncol(mc) == 0L) {
+        mc <- S4Vectors::DataFrame(row.names = NULL)
+    }
+    if (is.null(mc[["tss_distance"]])) {
+        mc[["tss_distance"]] <- pos - tssPos
+    }
+    if (is.null(mc[["tes_distance"]])) {
+        mc[["tes_distance"]] <- pos - tesPos
+    }
+    S4Vectors::mcols(gr) <- mc
+    gr
+}
+
+# Entry `i` of a SumStats collection restricted to chromosome `chrName`. Shared
+# by the QtlSumStats and GwasSumStats subsetChr methods.
+# @noRd
+.ssSubsetChrEntry <- function(i, x, chrName) {
+    gr <- x$entry[[i]]
+    idx <- as.character(seqnames(gr)) == chrName
+    gr[idx]
+}

@@ -6,6 +6,7 @@
 \alias{fineMappingPipeline,MultiStudyQtlDataset-method}
 \alias{fineMappingPipeline,QtlSumStats-method}
 \alias{.fmResolveRFinite}
+\alias{fineMappingPipeline,GwasSumStats-method}
 \alias{fineMappingPipeline,ANY-method}
 \title{Fine-Mapping Pipeline}
 \usage{
@@ -129,6 +130,31 @@ fineMappingPipeline(data, ...)
 )
 
 .fmResolveRFinite(rFinite, serFallback, rMismatch, ldSketch)
+
+\S4method{fineMappingPipeline}{GwasSumStats}(
+  data,
+  methods,
+  addSusieInf = TRUE,
+  L = 20L,
+  Lgreedy = 5L,
+  coverage = 0.95,
+  secondaryCoverage = c(0.7, 0.5),
+  signalCutoff = 0.025,
+  minAbsCorr = 0.8,
+  medianAbsCorr = NULL,
+  fineMappingResult = NULL,
+  verbose = 1,
+  trim = TRUE,
+  fullFit = FALSE,
+  fullFitAlphaOnly = TRUE,
+  includeAllCs = FALSE,
+  serFallback = FALSE,
+  rFinite = NULL,
+  rMismatch = "none",
+  rssControl = NULL,
+  keepFullFit = "fallback",
+  ...
+)
 
 \S4method{fineMappingPipeline}{ANY}(data, ...)
 }
@@ -400,6 +426,10 @@ regions that fell back to SER; \code{"all"} keeps it for every region;
 the entry's SuSiE fit and read via \code{getSusieFit(res)$multiEffectFit},
 \code{getSusieFit(res)$R_reliability_flag}, and
 \code{getSusieFit(res)$serFallbackUsed}.}
+
+\item{ldSketch}{Optional \code{\link{GenotypeHandle}} providing the LD
+reference (an LD sketch); attached to the fine-mapping result and used
+for downstream LD-dependent computations. Default \code{NULL}.}
 }
 \value{
 A \code{FineMappingResult} collection keyed by \code{(study, context,

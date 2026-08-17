@@ -1310,13 +1310,13 @@ test_that("overlapping CS across methods produces one row per method", {
     )
     tl <- post$top_loci
     if (nrow(tl) > 0L) {
-        cnt_per_method <- table(tl$variant, tl$method)
+        cnt_per_method <- table(tl$variant_id, tl$method)
         shared <- rownames(cnt_per_method)[
             apply(cnt_per_method > 0, 1, sum) >= 2L
         ]
         if (length(shared) > 0L) {
             v <- shared[[1]]
-            rows_for_v <- tl[tl$variant == v, , drop = FALSE]
+            rows_for_v <- tl[tl$variant_id == v, , drop = FALSE]
             expect_gte(length(unique(rows_for_v$method)), 2L)
         } else {
             succeed(
@@ -1629,7 +1629,7 @@ test_that("fsusieWrapper low-purity branch sets cs to list(NULL) and cs_corr to 
     expect_null(out$cs_corr)
 })
 
-test_that("fsusieWrapper high-purity branch builds sets and computes cs_corr", {
+test_that("fsusieWrapper high-purity branch builds sets", {
     skip_if_not_installed("fsusieR")
     set.seed(2)
     p <- 5
@@ -1670,7 +1670,9 @@ test_that("fsusieWrapper high-purity branch builds sets and computes cs_corr", {
     )
     expect_length(out$sets$cs, 2)
     expect_equal(names(out$sets$cs), c("L1", "L2"))
-    expect_equal(dim(out$cs_corr), c(2, 2))
+    # cs_corr is no longer stored on the fit (computed on demand later by
+    # computeCsCorrelation()).
+    expect_null(out$cs_corr)
     expect_equal(out$sets$requested_coverage, 0.95)
 })
 
@@ -1697,9 +1699,14 @@ test_that("fsusieGetCs creates susie-like sets", {
     expect_equal(result$requested_coverage, 0.95)
     expect_equal(length(result$cs), 2)
     expect_equal(names(result$cs), c("L1", "L2"))
-    # Purity should be a data.frame with min/mean/median columns
+    # Purity: a `cs` label column + min/mean/median columns (cs was rownames)
     expect_true(is.data.frame(result$purity))
     expect_equal(nrow(result$purity), 2)
+    expect_equal(result$purity$cs, c("L1", "L2"))
+    expect_true(all(
+        c("cs", "minAbsCorr", "meanAbsCorr", "medianAbsCorr") %in%
+            names(result$purity)
+    ))
     # Coverage should be numeric and positive, one per CS
     expect_length(result$coverage, 2)
     expect_true(all(result$coverage > 0 & result$coverage <= 1))
@@ -1926,7 +1933,7 @@ test_that("selectEffects returns integer(0) for empty alpha, V-filtered or all e
 })
 
 # ---- .csPurityVec ----
-test_that(".csPurityVec uses purity, falls back to cs_corr, else NA", {
+test_that(".csPurityVec uses sets$purity, else NA", {
     expect_equal(
         pecotmr:::.csPurityVec(list(
             sets = list(
@@ -1935,15 +1942,6 @@ test_that(".csPurityVec uses purity, falls back to cs_corr, else NA", {
             )
         )),
         c(0.8, 0.9)
-    )
-    m1 <- matrix(c(1, 0.7, 0.7, 1), 2)
-    m2 <- matrix(1, 1, 1)
-    expect_equal(
-        pecotmr:::.csPurityVec(list(
-            sets = list(cs = list(1, 2, 3)),
-            cs_corr = list(m1, m2, NULL)
-        )),
-        c(0.7, 1, NA)
     )
     expect_equal(
         pecotmr:::.csPurityVec(list(sets = list(cs = list(1, 2)))),
@@ -2074,31 +2072,31 @@ test_that("extractSumstats runs univariate regression and applies x/y scalars", 
 })
 
 # ---- computeCsTable / computeCsTables ----
-test_that("computeCsTable fsusie branch returns empty sets and NULL cs_corr when no CS", {
+test_that("computeCsTable fsusie branch returns empty sets when no CS", {
     ct <- pecotmr:::computeCsTable(
         list(cs = list(), pip = setNames(c(0.1, 0.2), c("a", "b"))),
         matrix(0, 5, 2),
         coverage = 0.95,
         csInput = "fsusie"
     )
-    expect_equal(names(ct), c("sets", "cs_corr", "pip"))
-    expect_null(ct$cs_corr)
+    # cs_corr is no longer stored -- it is derived on demand later.
+    expect_equal(names(ct), c("sets", "pip"))
     expect_length(ct$sets$cs, 0)
 })
 
-test_that("computeCsTable X and Xcorr branches return sets/pip/cs_corr", {
+test_that("computeCsTable X and Xcorr branches return sets/pip", {
     skip_if_not_installed("susieR")
     d <- .make_univariate_data(seed = 7, n = 200, p = 8, effect_idx = c(2))
     fit <- susieR::susie(d$X, d$y, L = 4)
     ctx <- pecotmr:::computeCsTable(fit, d$X, coverage = 0.95, csInput = "X")
-    expect_true(all(c("sets", "pip", "cs_corr") %in% names(ctx)))
+    expect_true(all(c("sets", "pip") %in% names(ctx)))
     ctc <- pecotmr:::computeCsTable(
         fit,
         cor(d$X),
         coverage = 0.95,
         csInput = "Xcorr"
     )
-    expect_true(all(c("sets", "pip", "cs_corr") %in% names(ctc)))
+    expect_true(all(c("sets", "pip") %in% names(ctc)))
 })
 
 test_that("computeCsTables names tables, sets coverage attr, defaults coverage from fit", {
@@ -2898,4 +2896,94 @@ test_that("mergeSusieCs: single condition with one credible set", {
 
 test_that("mergeSusieCs: non-FineMappingResult input errors", {
     expect_error(mergeSusieCs(list(1, 2)), "QtlFineMappingResult")
+})
+
+# ===========================================================================
+# computeCsCorrelation (on-demand between-CS correlation from an LD source)
+# ===========================================================================
+
+# The example fine-mapping fixtures (chr22:32.1Mb) and the LD-source fixtures
+# (chr22:14.5Mb) cover disjoint regions, so we build a self-consistent case: a
+# hand-made multi-CS fit over the SumStats sketch's own 200 variants.
+.ccMakeEntry <- function(vids, cs) {
+    FineMappingEntry(
+        variantIds = vids,
+        susieFit = list(
+            sets = list(cs = cs),
+            pip = stats::runif(length(vids))
+        ),
+        topLoci = data.frame(variant_id = character(0), pip = numeric(0))
+    )
+}
+
+test_that("computeCsCorrelation (SumStats) matches get_cs_correlation", {
+    data(qtlSumStatsExample)
+    ss <- qtlSumStatsExample
+    vids <- as.character(getSnpInfo(getLdSketch(ss))$SNP)
+    set.seed(1)
+    fe <- .ccMakeEntry(vids, list(L1 = c(1L, 2L, 3L), L2 = c(90L, 91L)))
+    cc <- computeCsCorrelation(fe, ss)
+    # Reference: the same LD (from the sketch, aligned to the fit variables)
+    # fed to the same fit. Equality proves the on-demand path + alignment.
+    xcorr <- pecotmr:::.ldFromSketch(getLdSketch(ss), vids, onMissing = "error")
+    ref <- susieR::get_cs_correlation(
+        list(sets = getSusieFit(fe)$sets, pip = getSusieFit(fe)$pip),
+        Xcorr = xcorr
+    )
+    expect_equal(dim(cc), c(2L, 2L))
+    expect_equal(unname(cc), unname(ref))
+})
+
+test_that("computeCsCorrelation is NULL for fewer than two credible sets", {
+    data(qtlSumStatsExample)
+    ss <- qtlSumStatsExample
+    vids <- as.character(getSnpInfo(getLdSketch(ss))$SNP)
+    set.seed(1)
+    expect_null(computeCsCorrelation(.ccMakeEntry(vids, list()), ss))
+    expect_null(
+        computeCsCorrelation(.ccMakeEntry(vids, list(L1 = c(1L, 2L))), ss)
+    )
+})
+
+test_that("computeCsCorrelation requires a QtlDataset / SumStats ldSource", {
+    data(qtlSumStatsExample)
+    vids <- as.character(getSnpInfo(getLdSketch(qtlSumStatsExample))$SNP)
+    set.seed(1)
+    fe <- .ccMakeEntry(vids, list(L1 = c(1L, 2L, 3L), L2 = c(90L, 91L)))
+    expect_error(computeCsCorrelation(fe, 42), "requires a QtlDataset")
+    expect_error(computeCsCorrelation(fe, data.frame()), "requires a QtlDataset")
+})
+
+test_that("computeCsCorrelation errors when a fit variant is off-panel", {
+    data(qtlSumStatsExample)
+    ss <- qtlSumStatsExample
+    vids <- as.character(getSnpInfo(getLdSketch(ss))$SNP)
+    vids[1] <- "chr22:99999999:A:G"
+    set.seed(1)
+    fe <- .ccMakeEntry(vids, list(L1 = c(1L, 2L, 3L), L2 = c(90L, 91L)))
+    expect_error(computeCsCorrelation(fe, ss), "not present in the LD sketch")
+})
+
+test_that("computeCsCorrelation resolves on the paired fixture", {
+    data(qtlFineMappingPairedExample)
+    data(qtlSumStatsExample)
+    fe <- getFineMappingResult(qtlFineMappingPairedExample)
+    cc <- computeCsCorrelation(fe, qtlSumStatsExample)
+    expect_true(is.matrix(cc))
+    expect_equal(nrow(cc), length(getSusieFit(fe)$sets$cs))
+    expect_equal(unname(diag(cc)), rep(1, nrow(cc)))
+    expect_equal(cc, t(cc))
+})
+
+test_that("computeCsCorrelation (QtlDataset) matches the sumstat path", {
+    data(qtlFineMappingPairedExample)
+    data(qtlDatasetExample)
+    data(qtlSumStatsExample)
+    fe <- getFineMappingResult(qtlFineMappingPairedExample)
+    ccGeno <- computeCsCorrelation(fe, qtlDatasetExample)
+    ccSketch <- computeCsCorrelation(fe, qtlSumStatsExample)
+    # qtlDatasetExample genotypes are the same panel as qtlSumStatsExample's
+    # sketch, so the individual-level (X) and summary (Xcorr) paths must agree.
+    expect_equal(dim(ccGeno), c(2L, 2L))
+    expect_equal(unname(ccGeno), unname(ccSketch), tolerance = 1e-6)
 })

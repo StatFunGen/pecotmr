@@ -69,10 +69,11 @@ setClass(
 
 # @noRd
 .msqdCheckDatasetNames <- function(nm) {
-    if (is.null(nm) || any(!nzchar(nm)) || any(is.na(nm))) {
+    isEmpty <- any(str_length(nm) == 0L, na.rm = TRUE)
+    if (is.null(nm) || isEmpty || any(is.na(nm))) {
         return("'qtlDatasets' must be a named list with non-empty names")
     }
-    if (anyDuplicated(nm)) {
+    if (n_distinct(nm) < length(nm)) {
         return("names of 'qtlDatasets' must be unique")
     }
     NULL
@@ -106,17 +107,13 @@ setClass(
     nSumstats <- if (is.null(object@sumStats)) {
         0L
     } else {
-        length(unique(as.character(object@sumStats$study)))
+        n_distinct(as.character(object@sumStats$study))
     }
     if ((nQtl + nSumstats) < 2L) {
-        return(sprintf(
-            paste0(
-                "MultiStudyQtlDataset requires at least 2 studies in total ",
-                "(got %d individual-level + %d summary-statistic = %d)."
-            ),
-            nQtl,
-            nSumstats,
-            nQtl + nSumstats
+        return(glue(
+            "MultiStudyQtlDataset requires at least 2 studies in total ",
+            "(got {nQtl} individual-level + {nSumstats} summary-statistic ",
+            "= {nQtl + nSumstats})."
         ))
     }
     NULL
@@ -190,14 +187,9 @@ setClass(
 
 # @noRd
 .msqdTraitError <- function(tid, ni, nj) {
-    sprintf(
-        paste0(
-            "trait '%s' has inconsistent rowRanges between studies '%s' ",
-            "and '%s'"
-        ),
-        tid,
-        ni,
-        nj
+    glue(
+        "trait '{tid}' has inconsistent rowRanges between studies '{ni}' ",
+        "and '{nj}'"
     )
 }
 
@@ -253,11 +245,12 @@ setMethod("getQtlDatasets", "MultiStudyQtlDataset", function(x) x@qtlDatasets)
 #' @export
 setMethod("getSumStats", "MultiStudyQtlDataset", function(x, ...) {
     if (length(list(...)) > 0L) {
-        stop(
+        msg <- glue(
             "getSumStats(MultiStudyQtlDataset) does not accept selection ",
             "arguments; it returns the embedded QtlSumStats collection ",
             "(use getSumStats() on that result to fetch one entry)."
         )
+        abort(msg)
     }
     x@sumStats
 })
@@ -282,23 +275,26 @@ setMethod("show", "MultiStudyQtlDataset", function(object) {
     ssEntries <- if (is.null(object@sumStats)) {
         0L
     } else {
-        length(unique(as.character(object@sumStats$study)))
+        n_distinct(as.character(object@sumStats$study))
     }
-    cat(sprintf(
-        "MultiStudyQtlDataset: %d individual-level + %d sumstats studies\n",
-        nQtl,
-        ssEntries
+    cat(glue(
+        "MultiStudyQtlDataset: {nQtl} individual-level + ",
+        "{ssEntries} sumstats studies\n",
+        .trim = FALSE
     ))
     if (nQtl > 0L) {
-        cat(sprintf(
-            "  Individual-level studies: %s\n",
-            paste(names(object@qtlDatasets), collapse = ", ")
+        cat(glue(
+            "  Individual-level studies: ",
+            "{str_flatten(names(object@qtlDatasets), ', ')}\n",
+            .trim = FALSE
         ))
     }
     if (!is.null(object@sumStats)) {
-        cat(sprintf(
-            "  Sumstats studies: %s\n",
-            paste(unique(as.character(object@sumStats$study)), collapse = ", ")
+        cat(glue(
+            "  Sumstats studies: ",
+            "{str_flatten(unique(as.character(object@sumStats$study)), ', ')}",
+            "\n",
+            .trim = FALSE
         ))
     }
 })

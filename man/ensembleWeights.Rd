@@ -102,6 +102,9 @@ data(multiTraitData)
 X <- multiTraitData$X[, 1:30]
 y <- matrix(multiTraitData$Y[, 1], ncol = 1,
   dimnames = list(rownames(X), "outcome_1"))
+# lasso/enet on this small toy panel only capture signal for some CV
+# splits; a fixed seed keeps the example deterministic.
+set.seed(42)
 cv <- twasWeightsCv(X, y, fold = 3,
   weightMethods = list(lasso_weights = list(), enet_weights = list()))
 ens <- ensembleWeights(cvResults = cv, Y = y)

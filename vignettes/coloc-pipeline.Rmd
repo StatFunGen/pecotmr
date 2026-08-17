@@ -200,3 +200,9 @@ Each row is one CS-pair combination; in particular the `idx1` /
 `idx2` columns identify the QTL / GWAS effect indices within the
 respective LBF matrices, and `PP.H4.abf` is the standard coloc
 shared-signal posterior.
+
+# Session info
+
+```{r session-info}
+sessionInfo()
+```

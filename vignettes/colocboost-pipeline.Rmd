@@ -184,3 +184,9 @@ are the per-call refinements.
     filters, panel harmonization, LD-mismatch detection, and RAISS imputation
     live in [`summaryStatsQc()`](rss-qc.html). The pipeline rejects inputs
     whose `getQcInfo()` is empty.
+
+# Session info
+
+```{r session-info}
+sessionInfo()
+```

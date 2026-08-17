@@ -40,7 +40,7 @@ setClass(
     required <- c("study", "method", "region_id", "entry")
     missingCols <- setdiff(required, names(object))
     if (length(missingCols) > 0L) {
-        return(paste("missing columns:", paste(missingCols, collapse = ", ")))
+        return(str_c("missing columns: ", str_flatten(missingCols, ", ")))
     }
     NULL
 }
@@ -83,12 +83,11 @@ setClass(
     # subsetting preserves the class while dropping the required `entry` column,
     # and older S4Vectors revalidates that intermediate, spuriously failing.
     keyCols <- c("study", "method", "region_id")
-    keyDf <- as.data.frame(
+    keyTbl <- as_tibble(set_names(
         map(keyCols, .gfmrColOf, object = object),
-        col.names = keyCols,
-        stringsAsFactors = FALSE
-    )
-    if (anyDuplicated(keyDf)) {
+        keyCols
+    ))
+    if (nrow(distinct(keyTbl)) < nrow(keyTbl)) {
         return("(study, method, region_id) tuple uniqueness violated")
     }
     NULL
@@ -182,18 +181,16 @@ GwasFineMappingResult <- function(
 ) {
     n <- length(study)
     if (length(method) != n || length(entry) != n) {
-        stop("`study`, `method`, and `entry` must all have the same length.")
+        abort("`study`, `method`, and `entry` must all have the same length.")
     }
     if (is.null(region_id)) {
-        region_id <- paste0("region_", seq_len(n))
+        region_id <- str_c("region_", seq_len(n))
     } else if (length(region_id) != n) {
-        stop(
-            "`region_id` must have the same length as `study` (got ",
-            length(region_id),
-            " vs ",
-            n,
-            ")."
+        msg <- glue(
+            "`region_id` must have the same length as `study` ",
+            "(got {length(region_id)} vs {n})."
         )
+        abort(msg)
     }
     cols <- list(
         study = as.character(study),
@@ -206,7 +203,8 @@ GwasFineMappingResult <- function(
     }
     cols <- .appendRegionCol(cols, region, n)
     cols <- .appendTraitPosCol(cols, traitPos, n)
-    df <- do.call(S4Vectors::DataFrame, c(cols, list(check.names = FALSE)))
+    dfArgs <- c(cols, list(check.names = FALSE))
+    df <- exec(S4Vectors::DataFrame, !!!dfArgs)
     obj <- new("GwasFineMappingResult", df, ldSketch = ldSketch)
     validObject(obj)
     obj
@@ -223,10 +221,10 @@ GwasFineMappingResult <- function(
     end <- integer(n)
     for (i in seq_len(n)) {
         g <- tryCatch(
-            asGranges(sub(
+            asGranges(str_replace(
+                as.character(ids[[i]]),
                 "_([0-9]+)_([0-9]+)$",
-                ":\\1-\\2",
-                as.character(ids[[i]])
+                ":\\1-\\2"
             )),
             error = function(e) NULL
         )
@@ -317,18 +315,18 @@ setMethod(
 #' @rdname show-methods
 #' @export
 setMethod("show", "GwasFineMappingResult", function(object) {
-    cat(sprintf("GwasFineMappingResult: %d entries\n", nrow(object)))
+    cat(glue("GwasFineMappingResult: {nrow(object)} entries\n", .trim = FALSE))
     if (nrow(object) > 0L) {
-        cat(sprintf(
-            "  %d studies, %d methods\n",
-            length(unique(object$study)),
-            length(unique(object$method))
+        cat(glue(
+            "  {n_distinct(object$study)} studies, ",
+            "{n_distinct(object$method)} methods\n",
+            .trim = FALSE
         ))
     }
     ldSrc <- if (is.null(object@ldSketch)) {
         "NULL"
     } else {
-        sprintf("%s @ %s", object@ldSketch@format, object@ldSketch@path)
+        glue("{object@ldSketch@format} @ {object@ldSketch@path}")
     }
-    cat(sprintf("  LD sketch: %s\n", ldSrc))
+    cat(glue("  LD sketch: {ldSrc}\n", .trim = FALSE))
 })

@@ -12,6 +12,10 @@ regionToDf(ldRegionId, colnames = c("chrom", "start", "end"))
 \item{colnames}{Character vector of length 3 giving output column names for
 chromosome, start and end. Default \code{c("chrom", "start", "end")}.}
 }
+\value{
+A tibble with one row per input region and columns named by
+  \code{colnames}: a normalized character chromosome plus integer start/end.
+}
 \description{
 The first field is treated as the chromosome and kept as a normalized string
 (via \code{canonChrom}) so X/Y/MT survive; the remaining fields are genomic

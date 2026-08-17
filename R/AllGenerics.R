@@ -712,6 +712,34 @@ setGeneric("getPip", function(x, ...) standardGeneric("getPip"))
 #' @export
 setGeneric("getSusieFit", function(x, ...) standardGeneric("getSusieFit"))
 
+#' @title Compute Between-Credible-Set Correlation On Demand
+#' @description Compute the between-credible-set correlation matrix for a
+#'   \code{\link{FineMappingEntry}} on demand from an LD source. The correlation
+#'   is a view over the fit-time LD, which lives on the data object --- a
+#'   \code{QtlDataset}'s genotypes or a \code{QtlSumStats} / \code{GwasSumStats}
+#'   LD sketch --- and is deliberately never stored on the fit. An
+#'   \code{ldSource} is therefore always required.
+#' @param x A \code{\link{FineMappingEntry}} carrying the fit (credible-set
+#'   membership and PIP) and its variant ids.
+#' @param ldSource The object supplying the LD: a \code{QtlDataset}
+#'   (individual-level; genotypes via \code{\link{getGenotypes}}) or a
+#'   \code{QtlSumStats} / \code{GwasSumStats} (summary statistics; LD via
+#'   \code{\link{getLdSketch}}). Any other type is an error.
+#' @param ... Passed to methods.
+#' @return A numeric \code{m x m} between-credible-set correlation matrix
+#'   (\code{m} = number of credible sets), or \code{NULL} when the fit has
+#'   fewer than two credible sets.
+#' @examples
+#' data(qtlFineMappingPairedExample)
+#' data(qtlSumStatsExample)
+#' fe <- getFineMappingResult(qtlFineMappingPairedExample)
+#' computeCsCorrelation(fe, qtlSumStatsExample)
+#' @export
+setGeneric(
+    "computeCsCorrelation",
+    function(x, ldSource, ...) standardGeneric("computeCsCorrelation")
+)
+
 #' @title Get Cross-Validation Result
 #' @description Extract the cross-validation payload stored on a
 #'   \code{FineMappingEntry} (or the matching entry of a

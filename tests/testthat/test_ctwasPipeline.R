@@ -369,7 +369,7 @@ test_that("ctwasPipeline: rejects unknown groupPriorVarStructure value", {
             twasWeights = inp$twasWeights,
             groupPriorVarStructure = "bogus"
         ),
-        "'arg'"
+        "groupPriorVarStructure"
     )
 })
 

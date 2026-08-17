@@ -29,7 +29,9 @@
         }
         return(unique(c(indStudies, ssStudies)))
     }
-    stop(".spListStudies: unsupported class: ", class(data)[[1L]])
+    cls <- class(data)[[1L]]
+    msg <- glue(".spListStudies: unsupported class: {cls}")
+    abort(msg)
 }
 
 # Return "individual" or "sumstats" for a single study in `data`. Errors if
@@ -38,37 +40,38 @@
 .spStudyDataForm <- function(data, study) {
     if (is(data, "QtlDataset")) {
         if (!identical(study, data@study)) {
-            stop(
-                ".spStudyDataForm: study '",
-                study,
-                "' not in QtlDataset (study='",
-                data@study,
-                "')"
+            dataStudy <- data@study
+            msg <- glue(
+                ".spStudyDataForm: study '{study}' not in QtlDataset ",
+                "(study='{dataStudy}')"
             )
+            abort(msg)
         }
         return("individual")
     }
     if (is(data, "QtlSumStats")) {
-        if (!(study %in% unique(as.character(data$study)))) {
-            stop(".spStudyDataForm: study '", study, "' not in QtlSumStats")
+        if (!is_in(study, unique(as.character(data$study)))) {
+            msg <- glue(".spStudyDataForm: study '{study}' not in QtlSumStats")
+            abort(msg)
         }
         return("sumstats")
     }
     if (is(data, "MultiStudyQtlDataset")) {
-        if (study %in% names(getQtlDatasets(data))) {
+        if (is_in(study, names(getQtlDatasets(data)))) {
             return("individual")
         }
         ss <- getSumStats(data)
-        if (!is.null(ss) && study %in% unique(as.character(ss$study))) {
+        if (!is.null(ss) && is_in(study, unique(as.character(ss$study)))) {
             return("sumstats")
         }
-        stop(
-            ".spStudyDataForm: study '",
-            study,
-            "' not in MultiStudyQtlDataset"
+        msg <- glue(
+            ".spStudyDataForm: study '{study}' not in MultiStudyQtlDataset"
         )
+        abort(msg)
     }
-    stop(".spStudyDataForm: unsupported class: ", class(data)[[1L]])
+    cls <- class(data)[[1L]]
+    msg <- glue(".spStudyDataForm: unsupported class: {cls}")
+    abort(msg)
 }
 
 # Return character vector of contexts in `data` (across all studies when
@@ -102,17 +105,19 @@
             }
             return(unique(out))
         }
-        if (study %in% names(indDatasets)) {
+        if (is_in(study, names(indDatasets))) {
             return(names(indDatasets[[study]]@phenotypes))
         }
-        if (!is.null(ss) && study %in% unique(as.character(ss$study))) {
+        if (!is.null(ss) && is_in(study, unique(as.character(ss$study)))) {
             return(unique(as.character(
                 ss$context[as.character(ss$study) == study]
             )))
         }
         return(character(0))
     }
-    stop(".spListContexts: unsupported class: ", class(data)[[1L]])
+    cls <- class(data)[[1L]]
+    msg <- glue(".spListContexts: unsupported class: {cls}")
+    abort(msg)
 }
 
 # Return character vector of traits in `data` (filtered by study and/or
@@ -125,7 +130,7 @@
     }
     if (is.null(context)) {
         return(unique(unlist(
-            lapply(data@phenotypes, rownames),
+            map(data@phenotypes, rownames),
             use.names = FALSE
         )))
     }
@@ -153,10 +158,10 @@
         }
         return(unique(out))
     }
-    if (study %in% names(indDatasets)) {
+    if (is_in(study, names(indDatasets))) {
         return(.spListTraits(indDatasets[[study]], context = context))
     }
-    if (!is.null(ss) && study %in% unique(as.character(ss$study))) {
+    if (!is.null(ss) && is_in(study, unique(as.character(ss$study)))) {
         return(.spListTraits(ss, study = study, context = context))
     }
     character(0)
@@ -179,7 +184,9 @@
     if (is(data, "MultiStudyQtlDataset")) {
         return(.spListTraitsMultiStudy(data, study, context))
     }
-    stop(".spListTraits: unsupported class: ", class(data)[[1L]])
+    cls <- class(data)[[1L]]
+    msg <- glue(".spListTraits: unsupported class: {cls}")
+    abort(msg)
 }
 
 
@@ -202,50 +209,53 @@
         return(list(axes = spec, scope = NULL))
     }
     if (is.list(spec)) {
-        if (!"axes" %in% names(spec)) {
-            stop(label, ": missing `axes` element")
+        if (!is_in("axes", names(spec))) {
+            msg <- glue("{label}: missing `axes` element")
+            abort(msg)
         }
         extras <- setdiff(names(spec), c("axes", "scope"))
         if (length(extras) > 0L) {
-            stop(
-                label,
-                ": unknown element(s): ",
-                paste(extras, collapse = ", ")
-            )
+            extraStr <- str_flatten(extras, ", ")
+            msg <- glue("{label}: unknown element(s): {extraStr}")
+            abort(msg)
         }
         return(list(axes = spec$axes, scope = spec$scope))
     }
-    stop(
-        label,
-        ": each spec must be a character vector or a named list ",
+    msg <- glue(
+        "{label}: each spec must be a character vector or a named list ",
         "with `axes` (and optional `scope`)"
     )
+    abort(msg)
 }
 
 # Axes must be a non-empty, duplicate-free vector drawn from the valid axes.
 .parseJointSpecCheckAxes <- function(axes, label) {
     if (!is.character(axes) || length(axes) == 0L) {
-        stop(label, ": `axes` must be a non-empty character vector")
+        msg <- glue("{label}: `axes` must be a non-empty character vector")
+        abort(msg)
     }
     badAxes <- setdiff(axes, .spValidJointAxes)
     if (length(badAxes) > 0L) {
-        stop(
-            label,
-            ": unknown axes: ",
-            paste(badAxes, collapse = ", "),
-            ". Valid axes: ",
-            paste(.spValidJointAxes, collapse = ", ")
+        badStr <- str_flatten(badAxes, ", ")
+        validStr <- str_flatten(.spValidJointAxes, ", ")
+        msg <- glue(
+            "{label}: unknown axes: {badStr}. Valid axes: {validStr}"
         )
+        abort(msg)
     }
-    if (anyDuplicated(axes)) {
-        stop(label, ": duplicate axes in `axes`")
+    if (n_distinct(axes) < length(axes)) {
+        msg <- glue("{label}: duplicate axes in `axes`")
+        abort(msg)
     }
 }
 
 # One scope entry must be a non-empty vector of values present in the data.
 .parseJointSpecCheckScopeKey <- function(k, v, label, data) {
     if (!is.character(v) || length(v) == 0L) {
-        stop(label, ": scope$", k, " must be a non-empty character vector")
+        msg <- glue(
+            "{label}: scope${k} must be a non-empty character vector"
+        )
+        abort(msg)
     }
     available <- switch(
         k,
@@ -255,13 +265,11 @@
     )
     missing <- setdiff(v, available)
     if (length(missing) > 0L) {
-        stop(
-            label,
-            ": scope$",
-            k,
-            " contains values not in data: ",
-            paste(missing, collapse = ", ")
+        missingStr <- str_flatten(missing, ", ")
+        msg <- glue(
+            "{label}: scope${k} contains values not in data: {missingStr}"
         )
+        abort(msg)
     }
 }
 
@@ -271,20 +279,21 @@
         return(invisible(NULL))
     }
     if (
-        !is.list(scope) || is.null(names(scope)) || any(!nzchar(names(scope)))
+        !is.list(scope) ||
+            is.null(names(scope)) ||
+            any(str_length(names(scope)) == 0L, na.rm = TRUE)
     ) {
-        stop(
-            label,
-            ": `scope` must be a named list keyed by study / context / trait"
+        msg <- glue(
+            "{label}: `scope` must be a named list keyed by ",
+            "study / context / trait"
         )
+        abort(msg)
     }
     badKeys <- setdiff(names(scope), .spValidJointAxes)
     if (length(badKeys) > 0L) {
-        stop(
-            label,
-            ": unknown scope key(s): ",
-            paste(badKeys, collapse = ", ")
-        )
+        keyStr <- str_flatten(badKeys, ", ")
+        msg <- glue("{label}: unknown scope key(s): {keyStr}")
+        abort(msg)
     }
     for (k in names(scope)) {
         .parseJointSpecCheckScopeKey(k, scope[[k]], label, data)
@@ -293,7 +302,7 @@
 
 # Validate one joint specification entry.
 .parseOneJointSpec <- function(spec, i, data) {
-    label <- sprintf("jointSpecification[[%d]]", i)
+    label <- glue("jointSpecification[[{i}]]")
     extracted <- .parseJointSpecExtract(spec, label)
     axes <- extracted$axes
     scope <- extracted$scope
@@ -311,14 +320,18 @@ parseJointSpecification <- function(jointSpecification, data) {
         jointSpecification <- list(jointSpecification)
     }
     if (!is.list(jointSpecification)) {
-        stop(
+        msg <- glue(
             "`jointSpecification` must be NULL, a character vector of axes, ",
             "or a list of joint specs."
         )
+        abort(msg)
     }
-    lapply(seq_along(jointSpecification), function(i) {
-        .parseOneJointSpec(jointSpecification[[i]], i, data)
-    })
+    map(
+        seq_along(jointSpecification),
+        .parseJointSpecAt,
+        jointSpecification = jointSpecification,
+        data = data
+    )
 }
 
 
@@ -334,24 +347,23 @@ parseJointSpecification <- function(jointSpecification, data) {
 # Vector form: apply uniformly to every study, filtering to availability.
 .parseContextsVec <- function(contexts, studies, data) {
     if (length(contexts) == 0L) {
-        stop(
+        msg <- glue(
             "`contexts` must be NULL or a non-empty character vector ",
             "(or named list)."
         )
+        abort(msg)
     }
     out <- list()
     for (s in studies) {
         avail <- .spListContexts(data, s)
         missing <- setdiff(contexts, avail)
         if (length(missing) > 0L) {
-            warning(sprintf(
-                paste0(
-                    "parseContexts: study '%s' is missing requested ",
-                    "context(s): %s"
-                ),
-                s,
-                paste(missing, collapse = ", ")
-            ))
+            missingStr <- str_flatten(missing, ", ")
+            msg <- glue(
+                "parseContexts: study '{s}' is missing requested ",
+                "context(s): {missingStr}"
+            )
+            warn(msg)
         }
         out[[s]] <- intersect(contexts, avail)
     }
@@ -361,41 +373,38 @@ parseJointSpecification <- function(jointSpecification, data) {
 # Validate one study's explicitly-requested contexts against availability.
 .parseContextsStudy <- function(requested, s, avail) {
     if (length(requested) == 0L) {
-        stop(sprintf(
-            "contexts[['%s']] must be a non-empty character vector",
-            s
-        ))
+        msg <- glue("contexts[['{s}']] must be a non-empty character vector")
+        abort(msg)
     }
     missing <- setdiff(requested, avail)
     if (length(missing) > 0L) {
-        stop(sprintf(
-            "contexts[['%s']] contains unknown contexts: %s",
-            s,
-            paste(missing, collapse = ", ")
-        ))
+        missingStr <- str_flatten(missing, ", ")
+        msg <- glue("contexts[['{s}']] contains unknown contexts: {missingStr}")
+        abort(msg)
     }
     requested
 }
 
 # Named-list form: explicit per-study selection; unlisted studies get all.
 .parseContextsList <- function(contexts, studies, data) {
-    if (is.null(names(contexts)) || any(!nzchar(names(contexts)))) {
-        stop(
+    ctxNm <- names(contexts)
+    if (is.null(ctxNm) || any(str_length(ctxNm) == 0L, na.rm = TRUE)) {
+        msg <- glue(
             "`contexts` must be NULL, a character vector, or a named list ",
             "keyed by study."
         )
+        abort(msg)
     }
     badStudies <- setdiff(names(contexts), studies)
     if (length(badStudies) > 0L) {
-        stop(
-            "`contexts` references unknown studies: ",
-            paste(badStudies, collapse = ", ")
-        )
+        badStr <- str_flatten(badStudies, ", ")
+        msg <- glue("`contexts` references unknown studies: {badStr}")
+        abort(msg)
     }
     out <- list()
     for (s in studies) {
         avail <- .spListContexts(data, s)
-        out[[s]] <- if (s %in% names(contexts)) {
+        out[[s]] <- if (is_in(s, names(contexts))) {
             .parseContextsStudy(as.character(contexts[[s]]), s, avail)
         } else {
             avail
@@ -417,10 +426,11 @@ parseContexts <- function(contexts, data) {
     if (is.list(contexts)) {
         return(.parseContextsList(contexts, studies, data))
     }
-    stop(
+    msg <- glue(
         "`contexts` must be NULL, a character vector, or a named list ",
         "keyed by study."
     )
+    abort(msg)
 }
 
 
@@ -437,23 +447,20 @@ parseContexts <- function(contexts, data) {
 # Validate a per-(study, context) trait vector against the data.
 .parseTraitIdContext <- function(v2, s, cx, data) {
     if (!is.character(v2) || length(v2) == 0L) {
-        stop(sprintf(
-            paste0(
-                "traitId[['%s']][['%s']] must be a non-empty ",
-                "character vector"
-            ),
-            s,
-            cx
-        ))
+        msg <- glue(
+            "traitId[['{s}']][['{cx}']] must be a non-empty ",
+            "character vector"
+        )
+        abort(msg)
     }
     missing <- setdiff(v2, .spListTraits(data, study = s, context = cx))
     if (length(missing) > 0L) {
-        stop(sprintf(
-            "traitId[['%s']][['%s']] contains unknown traits: %s",
-            s,
-            cx,
-            paste(missing, collapse = ", ")
-        ))
+        missingStr <- str_flatten(missing, ", ")
+        msg <- glue(
+            "traitId[['{s}']][['{cx}']] contains unknown traits: ",
+            "{missingStr}"
+        )
+        abort(msg)
     }
     as.character(v2)
 }
@@ -461,37 +468,30 @@ parseContexts <- function(contexts, data) {
 # Validate a per-study character vector of traits.
 .parseTraitIdStudyChar <- function(val, s, data) {
     if (length(val) == 0L) {
-        stop(sprintf(
-            "traitId[['%s']] must be a non-empty character vector",
-            s
-        ))
+        msg <- glue("traitId[['{s}']] must be a non-empty character vector")
+        abort(msg)
     }
     missing <- setdiff(val, .spListTraits(data, study = s))
     if (length(missing) > 0L) {
-        stop(sprintf(
-            "traitId[['%s']] contains unknown traits: %s",
-            s,
-            paste(missing, collapse = ", ")
-        ))
+        missingStr <- str_flatten(missing, ", ")
+        msg <- glue("traitId[['{s}']] contains unknown traits: {missingStr}")
+        abort(msg)
     }
     as.character(val)
 }
 
 # Validate a per-study context-keyed list of trait vectors.
 .parseTraitIdStudyList <- function(val, s, data) {
-    if (is.null(names(val)) || any(!nzchar(names(val)))) {
-        stop(sprintf(
-            "traitId[['%s']] (list form) must be named by context",
-            s
-        ))
+    valNm <- names(val)
+    if (is.null(valNm) || any(str_length(valNm) == 0L, na.rm = TRUE)) {
+        msg <- glue("traitId[['{s}']] (list form) must be named by context")
+        abort(msg)
     }
     badContexts <- setdiff(names(val), .spListContexts(data, s))
     if (length(badContexts) > 0L) {
-        stop(sprintf(
-            "traitId[['%s']] references unknown contexts: %s",
-            s,
-            paste(badContexts, collapse = ", ")
-        ))
+        badStr <- str_flatten(badContexts, ", ")
+        msg <- glue("traitId[['{s}']] references unknown contexts: {badStr}")
+        abort(msg)
     }
     sub <- list()
     for (cx in names(val)) {
@@ -508,13 +508,11 @@ parseContexts <- function(contexts, data) {
     if (is.list(val)) {
         return(.parseTraitIdStudyList(val, s, data))
     }
-    stop(sprintf(
-        paste0(
-            "traitId[['%s']] must be a character vector or a named ",
-            "list keyed by context"
-        ),
-        s
-    ))
+    msg <- glue(
+        "traitId[['{s}']] must be a character vector or a named ",
+        "list keyed by context"
+    )
+    abort(msg)
 }
 
 parseTraitIds <- function(traitId, data) {
@@ -526,28 +524,30 @@ parseTraitIds <- function(traitId, data) {
         (is.null(names(traitId)) || all(names(traitId) == ""))
     if (isPlainCharVec) {
         if (length(traitId) == 0L) {
-            stop(
+            msg <- glue(
                 "`traitId` must be NULL or a non-empty character vector ",
                 "(or named list)."
             )
+            abort(msg)
         }
         return(as.character(traitId))
     }
     if (!is.list(traitId)) {
-        stop(
+        msg <- glue(
             "`traitId` must be NULL, a character vector, or a named list ",
             "keyed by study (optionally nested by context)."
         )
+        abort(msg)
     }
-    if (is.null(names(traitId)) || any(!nzchar(names(traitId)))) {
-        stop("`traitId` (list form) must be named by study.")
+    trNm <- names(traitId)
+    if (is.null(trNm) || any(str_length(trNm) == 0L, na.rm = TRUE)) {
+        abort("`traitId` (list form) must be named by study.")
     }
     badStudies <- setdiff(names(traitId), studies)
     if (length(badStudies) > 0L) {
-        stop(
-            "`traitId` references unknown studies: ",
-            paste(badStudies, collapse = ", ")
-        )
+        badStr <- str_flatten(badStudies, ", ")
+        msg <- glue("`traitId` references unknown studies: {badStr}")
+        abort(msg)
     }
     out <- list()
     for (s in names(traitId)) {
@@ -589,31 +589,33 @@ parseTraitIds <- function(traitId, data) {
 # Validate a named-list method node before recursing into it.
 .spWalkValidate <- function(spec, label, depth, maxDepth) {
     if (!is.list(spec)) {
-        stop(
-            label,
-            ": every node must be a character vector or a named list ",
-            "(got class '",
-            class(spec)[[1L]],
-            "')"
+        cls <- class(spec)[[1L]]
+        msg <- glue(
+            "{label}: every node must be a character vector or a named ",
+            "list (got class '{cls}')"
         )
+        abort(msg)
     }
     if (depth >= maxDepth) {
-        stop(
-            label,
-            ": cannot nest below the trait level (depth ",
-            maxDepth,
-            " is the deepest a vector may appear at)."
+        msg <- glue(
+            "{label}: cannot nest below the trait level (depth ",
+            "{maxDepth} is the deepest a vector may appear at)."
         )
+        abort(msg)
     }
-    if (is.null(names(spec)) || any(!nzchar(names(spec)))) {
-        stop(
-            label,
-            ": named-list nodes must have non-empty names at depth ",
-            depth + 1L
+    specNm <- names(spec)
+    if (is.null(specNm) || any(str_length(specNm) == 0L, na.rm = TRUE)) {
+        d <- depth + 1L
+        msg <- glue(
+            "{label}: named-list nodes must have non-empty names at ",
+            "depth {d}"
         )
+        abort(msg)
     }
     if (length(spec) == 0L) {
-        stop(label, ": empty named list at depth ", depth + 1L)
+        d <- depth + 1L
+        msg <- glue("{label}: empty named list at depth {d}")
+        abort(msg)
     }
 }
 
@@ -649,25 +651,29 @@ parseTraitIds <- function(traitId, data) {
 # @noRd
 .jointValidateLeafVec <- function(vec, label, caps, rejectedAtUser) {
     if (!is.character(vec) || length(vec) == 0L) {
-        stop(label, ": method vector must be a non-empty character vector")
+        msg <- glue(
+            "{label}: method vector must be a non-empty character vector"
+        )
+        abort(msg)
     }
     bad <- setdiff(vec, names(caps))
     if (length(bad) > 0L) {
-        stop(
-            label,
-            ": unknown method token(s): ",
-            paste(bad, collapse = ", "),
-            ". Known tokens: ",
-            paste(names(caps), collapse = ", ")
+        badStr <- str_flatten(bad, ", ")
+        knownStr <- str_flatten(names(caps), ", ")
+        msg <- glue(
+            "{label}: unknown method token(s): {badStr}. ",
+            "Known tokens: {knownStr}"
         )
+        abort(msg)
     }
     rejected <- intersect(vec, rejectedAtUser)
     if (length(rejected) > 0L) {
-        stop(
-            label,
-            ": method(s) cannot be user-requested on this pipeline: ",
-            paste(rejected, collapse = ", ")
+        rejectedStr <- str_flatten(rejected, ", ")
+        msg <- glue(
+            "{label}: method(s) cannot be user-requested on this ",
+            "pipeline: {rejectedStr}"
         )
+        abort(msg)
     }
     invisible(NULL)
 }
@@ -683,31 +689,34 @@ parseTraitIds <- function(traitId, data) {
     qtlDatasetMethods
 ) {
     if (primaryGiven && splitGiven) {
-        stop(
+        msg <- glue(
             "Use either `methods` or (`sumStatsMethods` + ",
             "`qtlDatasetMethods`), not both."
         )
+        abort(msg)
     }
     if (!primaryGiven && !splitGiven) {
-        stop(
+        msg <- glue(
             "Specify `methods`, or both `sumStatsMethods` and ",
             "`qtlDatasetMethods`."
         )
+        abort(msg)
     }
     if (splitGiven) {
         if (is.null(sumStatsMethods) || is.null(qtlDatasetMethods)) {
-            stop(
+            msg <- glue(
                 "`sumStatsMethods` and `qtlDatasetMethods` must be given ",
                 "together."
             )
+            abort(msg)
         }
         if (!is.character(sumStatsMethods) || length(sumStatsMethods) == 0L) {
-            stop("`sumStatsMethods` must be a non-empty character vector.")
+            abort("`sumStatsMethods` must be a non-empty character vector.")
         }
         if (
             !is.character(qtlDatasetMethods) || length(qtlDatasetMethods) == 0L
         ) {
-            stop("`qtlDatasetMethods` must be a non-empty character vector.")
+            abort("`qtlDatasetMethods` must be a non-empty character vector.")
         }
     }
 }
@@ -719,14 +728,14 @@ parseTraitIds <- function(traitId, data) {
     }
     bad <- intersect(leaf$methods, multivariateMethods)
     if (length(bad) > 0L) {
-        stop(
-            lab,
-            ": multi-axis method(s) ",
-            paste(bad, collapse = ", "),
-            " cannot be assigned at the ",
-            c("per-study", "per-context", "per-trait")[[leaf$depth]],
-            " level (multi-axis methods operate across axes)."
+        badStr <- str_flatten(bad, ", ")
+        levelName <- c("per-study", "per-context", "per-trait")[[leaf$depth]]
+        msg <- glue(
+            "{lab}: multi-axis method(s) {badStr} cannot be assigned at ",
+            "the {levelName} level (multi-axis methods operate across ",
+            "axes)."
         )
+        abort(msg)
     }
 }
 
@@ -734,32 +743,29 @@ parseTraitIds <- function(traitId, data) {
 .parseMethodsCheckPath <- function(leaf, lab, data, studyNames) {
     if (leaf$depth >= 1L) {
         s <- leaf$path[[1L]]
-        if (!(s %in% studyNames)) {
-            stop(lab, ": unknown study '", s, "'")
+        if (!is_in(s, studyNames)) {
+            msg <- glue("{lab}: unknown study '{s}'")
+            abort(msg)
         }
     }
     if (leaf$depth >= 2L) {
         s <- leaf$path[[1L]]
         cx <- leaf$path[[2L]]
-        if (!(cx %in% .spListContexts(data, s))) {
-            stop(lab, ": unknown context '", cx, "' for study '", s, "'")
+        if (!is_in(cx, .spListContexts(data, s))) {
+            msg <- glue("{lab}: unknown context '{cx}' for study '{s}'")
+            abort(msg)
         }
     }
     if (leaf$depth >= 3L) {
         s <- leaf$path[[1L]]
         cx <- leaf$path[[2L]]
         tr <- leaf$path[[3L]]
-        if (!(tr %in% .spListTraits(data, study = s, context = cx))) {
-            stop(
-                lab,
-                ": unknown trait '",
-                tr,
-                "' for (study '",
-                s,
-                "', context '",
-                cx,
-                "')"
+        if (!is_in(tr, .spListTraits(data, study = s, context = cx))) {
+            msg <- glue(
+                "{lab}: unknown trait '{tr}' for (study '{s}', ",
+                "context '{cx}')"
             )
+            abort(msg)
         }
     }
 }
@@ -776,7 +782,8 @@ parseTraitIds <- function(traitId, data) {
     lab <- if (length(leaf$path) == 0L) {
         "methods"
     } else {
-        sprintf("methods[[%s]]", paste0("'", leaf$path, "'", collapse = "$"))
+        pathStr <- str_flatten(str_c("'", leaf$path, "'"), "$")
+        glue("methods[[{pathStr}]]")
     }
     .jointValidateLeafVec(leaf$methods, lab, caps, rejectedAtUser)
     .parseMethodsCheckMultiAxis(leaf, lab, multivariateMethods)
@@ -887,32 +894,34 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 
     walked <- .spWalkMethods(methods, label = "methods", maxDepth = 3L)
     # depth observed at leaves; max depth in the spec reflects nesting level.
-    maxDepth <- max(vapply(walked, function(L) L$depth, integer(1)))
+    maxDepth <- max(map_int(walked, "depth"))
 
     for (i in seq_along(jointSpecParsed)) {
         axes <- jointSpecParsed[[i]]$axes
-        lab <- sprintf("jointSpecification[[%d]]", i)
-        if ("study" %in% axes && maxDepth >= 1L) {
-            stop(
-                lab,
-                ": `axes` includes 'study' but `methods` nests per-study; ",
-                "remove per-study method assignment when joining over studies."
+        lab <- glue("jointSpecification[[{i}]]")
+        if (is_in("study", axes) && maxDepth >= 1L) {
+            msg <- glue(
+                "{lab}: `axes` includes 'study' but `methods` nests ",
+                "per-study; remove per-study method assignment when ",
+                "joining over studies."
             )
+            abort(msg)
         }
-        if ("context" %in% axes && maxDepth >= 2L) {
-            stop(
-                lab,
-                ": `axes` includes 'context' but `methods` nests per-context; ",
-                "remove per-context method assignment when joining over ",
-                "contexts."
+        if (is_in("context", axes) && maxDepth >= 2L) {
+            msg <- glue(
+                "{lab}: `axes` includes 'context' but `methods` nests ",
+                "per-context; remove per-context method assignment when ",
+                "joining over contexts."
             )
+            abort(msg)
         }
-        if ("trait" %in% axes && maxDepth >= 3L) {
-            stop(
-                lab,
-                ": `axes` includes 'trait' but `methods` nests per-trait; ",
-                "remove per-trait method assignment when joining over traits."
+        if (is_in("trait", axes) && maxDepth >= 3L) {
+            msg <- glue(
+                "{lab}: `axes` includes 'trait' but `methods` nests ",
+                "per-trait; remove per-trait method assignment when ",
+                "joining over traits."
             )
+            abort(msg)
         }
     }
     invisible(NULL)
@@ -947,7 +956,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
             ctxAvail <- intersect(ctxAvail, scope$context)
         }
         if (!is.null(contexts)) {
-            if (is.list(contexts) && s %in% names(contexts)) {
+            if (is.list(contexts) && is_in(s, names(contexts))) {
                 ctxAvail <- intersect(ctxAvail, contexts[[s]])
             } else if (is.character(contexts)) {
                 ctxAvail <- intersect(ctxAvail, contexts)
@@ -962,7 +971,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         if (!is.null(traitIds)) {
             if (is.character(traitIds)) {
                 trAvail <- intersect(trAvail, traitIds)
-            } else if (is.list(traitIds) && s %in% names(traitIds)) {
+            } else if (is.list(traitIds) && is_in(s, names(traitIds))) {
                 tv <- traitIds[[s]]
                 if (is.character(tv)) trAvail <- intersect(trAvail, tv)
             }
@@ -1007,13 +1016,11 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
             require = c("SNP", "Z", "N")
         )
         if (!identical(d$variant_id, variantIds)) {
-            stop(sprintf(
-                paste0(
-                    "%s: every entry in a joint group must share an identical ",
-                    "SNP order after summaryStatsQc()."
-                ),
-                errorLabel
-            ))
+            msg <- glue(
+                "{errorLabel}: every entry in a joint group must share an ",
+                "identical SNP order after summaryStatsQc()."
+            )
+            abort(msg)
         }
         Z[, kk] <- d$z
         nVec[kk] <- stats::median(d$N, na.rm = TRUE)
@@ -1034,18 +1041,18 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     perTraitContexts <- character(0)
     for (cx in scopedContexts) {
         se <- getPhenotypes(data, contexts = cx)
-        if (tid %in% rownames(se)) {
+        if (is_in(tid, rownames(se))) {
             perTraitContexts <- c(perTraitContexts, cx)
         }
     }
     if (length(perTraitContexts) < 2L) {
         if (verbose >= 1) {
-            message(sprintf(
-                "%s: trait '%s' present in %d scoped context(s); skipping.",
-                label,
-                tid,
-                length(perTraitContexts)
-            ))
+            nCtx <- length(perTraitContexts)
+            msg <- glue(
+                "{label}: trait '{tid}' present in {nCtx} scoped ",
+                "context(s); skipping."
+            )
+            inform(msg)
         }
         return(NULL)
     }
@@ -1054,14 +1061,13 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 
 # Cross-context response matrix (one column per context) on the shared samples.
 .crossContextY <- function(Yres, perTraitContexts, commonSamples) {
-    do.call(
-        cbind,
-        lapply(perTraitContexts, function(cx) {
-            ym <- Yres[[cx]][commonSamples, , drop = FALSE]
-            colnames(ym) <- cx
-            ym
-        })
+    yCols <- map(
+        perTraitContexts,
+        .crossContextYCol,
+        Yres = Yres,
+        commonSamples = commonSamples
     )
+    exec(cbind, !!!yCols)
 }
 
 # Intersect samples, build the response matrix, and drop incomplete rows.
@@ -1073,20 +1079,17 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     label,
     tid
 ) {
-    commonSamples <- Reduce(
-        intersect,
-        c(list(rownames(X)), lapply(Yres, rownames))
+    commonSamples <- reduce(
+        c(list(rownames(X)), map(Yres, rownames)),
+        intersect
     )
     if (length(commonSamples) < 2L) {
         if (verbose >= 1) {
-            message(sprintf(
-                paste0(
-                    "%s: trait '%s' has too few shared samples across ",
-                    "contexts; skipping."
-                ),
-                label,
-                tid
-            ))
+            msg <- glue(
+                "{label}: trait '{tid}' has too few shared samples across ",
+                "contexts; skipping."
+            )
+            inform(msg)
         }
         return(NULL)
     }
@@ -1095,11 +1098,11 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     keep <- stats::complete.cases(Y)
     if (sum(keep) < 2L) {
         if (verbose >= 1) {
-            message(sprintf(
-                "%s: trait '%s' has too few complete-Y subjects; skipping.",
-                label,
-                tid
-            ))
+            msg <- glue(
+                "{label}: trait '{tid}' has too few complete-Y subjects; ",
+                "skipping."
+            )
+            inform(msg)
         }
         return(NULL)
     }
@@ -1160,16 +1163,12 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         return(FALSE)
     }
     if (verbose >= 1) {
-        message(sprintf(
-            paste0(
-                "%s: context '%s' (study '%s') has %d scoped trait(s); ",
-                "skipping."
-            ),
-            label,
-            cx,
-            study,
-            length(traitsHere)
-        ))
+        nTraits <- length(traitsHere)
+        msg <- glue(
+            "{label}: context '{cx}' (study '{study}') has {nTraits} ",
+            "scoped trait(s); skipping."
+        )
+        inform(msg)
     }
     TRUE
 }
@@ -1246,15 +1245,12 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     }
     if (length(tuples) < 2L) {
         if (verbose >= 1) {
-            message(sprintf(
-                paste0(
-                    "%s: study '%s' has %d (context, trait) tuple(s) ",
-                    "in scope; skipping."
-                ),
-                label,
-                study,
-                length(tuples)
-            ))
+            nTuples <- length(tuples)
+            msg <- glue(
+                "{label}: study '{study}' has {nTuples} (context, trait) ",
+                "tuple(s) in scope; skipping."
+            )
+            inform(msg)
         }
         return(NULL)
     }
@@ -1266,17 +1262,17 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     yCols <- list()
     for (t in tuples) {
         ym <- YresList[[t$context]]
-        if (!(t$trait %in% colnames(ym))) {
+        if (!is_in(t$trait, colnames(ym))) {
             next
         }
         col <- ym[commonSamples, t$trait, drop = FALSE]
-        colnames(col) <- paste(t$context, t$trait, sep = ":")
+        colnames(col) <- str_c(t$context, t$trait, sep = ":")
         yCols[[length(yCols) + 1L]] <- col
     }
     if (length(yCols) < 2L) {
         return(NULL)
     }
-    do.call(cbind, yCols)
+    exec(cbind, !!!yCols)
 }
 
 .buildComposedIndividualXy <- function(
@@ -1292,16 +1288,16 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     if (is.null(tuples)) {
         return(NULL)
     }
-    allContexts <- unique(vapply(tuples, function(t) t$context, character(1L)))
-    allTraits <- unique(vapply(tuples, function(t) t$trait, character(1L)))
+    allContexts <- unique(map_chr(tuples, "context"))
+    allTraits <- unique(map_chr(tuples, "trait"))
     X <- .buildResidGeno(data, allContexts, allTraits, cisWindow, region)
     YresList <- .fmResidPheno(data, contexts = allContexts, traitId = allTraits)
     if (length(allContexts) == 1L) {
-        YresList <- setNames(list(YresList), allContexts)
+        YresList <- set_names(list(YresList), allContexts)
     }
-    commonSamples <- Reduce(
-        intersect,
-        c(list(rownames(X)), lapply(YresList, rownames))
+    commonSamples <- reduce(
+        c(list(rownames(X)), map(YresList, rownames)),
+        intersect
     )
     if (length(commonSamples) < 2L) {
         return(NULL)
@@ -1334,17 +1330,13 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     studyCol <- as.character(data$study)
     contextCol <- as.character(data$context)
     traitCol <- as.character(data$trait)
-    inScope <- vapply(
+    inScope <- map_lgl(
         seq_len(nrow(data)),
-        function(i) {
-            s <- studyCol[i]
-            cx <- contextCol[i]
-            tr <- traitCol[i]
-            (s %in% scope$studies) &&
-                (cx %in% scope$contexts[[s]]) &&
-                (tr %in% scope$traits[[s]])
-        },
-        logical(1L)
+        .composedRowInScope,
+        studyCol = studyCol,
+        contextCol = contextCol,
+        traitCol = traitCol,
+        scope = scope
     )
     rowIdx <- which(inScope)
     if (length(rowIdx) == 0L) {
@@ -1353,20 +1345,18 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     groupKey <- if (length(complement) == 0L) {
         rep("__all__", length(rowIdx))
     } else {
-        do.call(
-            paste,
-            c(
-                lapply(complement, function(a) {
-                    switch(
-                        a,
-                        study = studyCol[rowIdx],
-                        context = contextCol[rowIdx],
-                        trait = traitCol[rowIdx]
-                    )
-                }),
-                sep = "||"
-            )
+        pasteArgs <- c(
+            map(
+                complement,
+                .composedAxisCol,
+                studyCol = studyCol,
+                contextCol = contextCol,
+                traitCol = traitCol,
+                rowIdx = rowIdx
+            ),
+            list(sep = "||")
         )
+        exec(paste, !!!pasteArgs)
     }
     groups <- split(rowIdx, groupKey)
     list(
@@ -1387,7 +1377,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # per-region result entries when merging. Shared by the fm/twas mergers.
 # @noRd
 .mergeResultKeyOf <- function(r) {
-    paste(
+    str_c(
         as.character(r$study),
         as.character(r$context),
         as.character(r$trait),
@@ -1409,40 +1399,37 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         return(base)
     }
     baseKeys <- .mergeResultKeyOf(base)
-    mergedEntries <- lapply(seq_len(n), function(i) {
-        perRegion <- lapply(results, function(r) {
-            hit <- which(.mergeResultKeyOf(r) == baseKeys[[i]])
-            if (length(hit)) r$entry[[hit[[1L]]]] else NULL
-        })
-        .fmMergeEntries(Filter(Negate(is.null), perRegion))
-    })
-    do.call(
-        QtlFineMappingResult,
-        c(
-            list(
-                study = as.character(base$study),
-                context = as.character(base$context),
-                trait = as.character(base$trait),
-                method = as.character(base$method),
-                entry = mergedEntries
-            ),
-            .jointCols(base),
-            list(ldSketch = NULL)
-        )
+    mergedEntries <- map(
+        seq_len(n),
+        .fmMergedEntryAt,
+        results = results,
+        baseKeys = baseKeys
     )
+    qfmrArgs <- c(
+        list(
+            study = as.character(base$study),
+            context = as.character(base$context),
+            trait = as.character(base$trait),
+            method = as.character(base$method),
+            entry = mergedEntries
+        ),
+        .jointCols(base),
+        list(ldSketch = NULL)
+    )
+    exec(QtlFineMappingResult, !!!qfmrArgs)
 }
 
 # One passthrough column of a joint result row as a character vector (the joint-
 # key columns), or NULL when absent.
 # @noRd
 .jointStrCol <- function(nm, df) {
-    if (nm %in% names(df)) as.character(df[[nm]]) else NULL
+    if (is_in(nm, names(df))) as.character(df[[nm]]) else NULL
 }
 
 # One passthrough column carried through UNCOERCED (GRanges provenance columns
 # region / traitPos), or NULL when absent.
 # @noRd
-.jointRawCol <- function(nm, df) if (nm %in% names(df)) df[[nm]] else NULL
+.jointRawCol <- function(nm, df) if (is_in(nm, names(df))) df[[nm]] else NULL
 
 # The optional passthrough columns of a per-tuple result row, as a named list
 # (NULL for any absent column): the three joint-key columns (jointStudies /
@@ -1508,20 +1495,18 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 .msDriverPerTuple <- function(out, resultCtor, embeddedLd) {
     # ldSketch: NULL if all studies were individual-level; the embedded
     # sumStats's ldSketch otherwise.
-    do.call(
-        resultCtor,
-        c(
-            list(
-                study = as.character(out$study),
-                context = as.character(out$context),
-                trait = as.character(out$trait),
-                method = as.character(out$method),
-                entry = as.list(out$entry)
-            ),
-            .jointCols(out),
-            list(ldSketch = embeddedLd)
-        )
+    ctorArgs <- c(
+        list(
+            study = as.character(out$study),
+            context = as.character(out$context),
+            trait = as.character(out$trait),
+            method = as.character(out$method),
+            entry = as.list(out$entry)
+        ),
+        .jointCols(out),
+        list(ldSketch = embeddedLd)
     )
+    exec(resultCtor, !!!ctorArgs)
 }
 
 .multiStudyPipelineDriver <- function(
@@ -1552,11 +1537,11 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     }
     if (is.null(jointResult)) {
         if (is.null(perTupleResult)) {
-            stop(sprintf(
-                "%s(MultiStudyQtlDataset): no entries produced %s.",
-                pipelineName,
-                noun
-            ))
+            msg <- glue(
+                "{pipelineName}(MultiStudyQtlDataset): no entries produced ",
+                "{noun}."
+            )
+            abort(msg)
         }
         return(perTupleResult)
     }
@@ -1617,13 +1602,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     # jointRegions=TRUE concatenated) returns its result directly.
     args <- as.list(environment())
     args$xRegions <- NULL
-    perRegion <- lapply(xRegions, function(rg) {
-        do.call(
-            .fmDispatchJointSpecsQtlDatasetOneRegion,
-            c(args, list(region = rg))
-        )
-    })
-    perRegion <- Filter(Negate(is.null), perRegion)
+    perRegion <- map(xRegions, .fmDispatchJointSpecRegion, args = args)
+    perRegion <- compact(perRegion)
     if (length(perRegion) == 0L) {
         return(NULL)
     }
@@ -1783,11 +1763,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 
 # Partition joint specs into those with a `study` axis and the rest.
 .fmSplitStudyAxisSpecs <- function(parsedJointSpec) {
-    hasStudy <- vapply(
-        parsedJointSpec,
-        function(s) "study" %in% s$axes,
-        logical(1L)
-    )
+    hasStudy <- map_lgl(parsedJointSpec, .jsHasStudyAxis)
     list(
         study = parsedJointSpec[hasStudy],
         nonStudy = parsedJointSpec[!hasStudy]
@@ -1799,14 +1775,13 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     if (
         length(studyAxisSpecs) > 0L && length(qtlDatasets) > 0L && verbose >= 1
     ) {
-        message(sprintf(
-            paste0(
-                "jointCrossStudy: excluding individual-level studies (%s) ",
-                "from cross-study fits (no LD sketch available); sumstats ",
-                "studies participate."
-            ),
-            paste(names(qtlDatasets), collapse = ", ")
-        ))
+        qdNames <- str_flatten(names(qtlDatasets), ", ")
+        msg <- glue(
+            "jointCrossStudy: excluding individual-level studies ",
+            "({qdNames}) from cross-study fits (no LD sketch available); ",
+            "sumstats studies participate."
+        )
+        inform(msg)
     }
 }
 
@@ -1832,13 +1807,11 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         "dataDrivenPriorWeightsCutoff"
     )]
     for (qdName in names(qtlDatasets)) {
-        qdRes <- do.call(
-            .fmDispatchJointSpecsQtlDataset,
-            c(
-                list(nonStudyAxisSpecs, qtlDatasets[[qdName]]),
-                fwd
-            )
+        qdArgs <- c(
+            list(nonStudyAxisSpecs, qtlDatasets[[qdName]]),
+            fwd
         )
+        qdRes <- exec(.fmDispatchJointSpecsQtlDataset, !!!qdArgs)
         if (!is.null(qdRes)) {
             out <- if (is.null(out)) {
                 qdRes
@@ -1861,10 +1834,11 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 ) {
     if (is.null(sumStats)) {
         if (length(studyAxisSpecs) > 0L && verbose >= 1) {
-            message(
+            msg <- glue(
                 "jointCrossStudy: no sumStats slot present on this ",
                 "MultiStudyQtlDataset; cross-study specs produce no result."
             )
+            inform(msg)
         }
         return(out)
     }
@@ -1881,13 +1855,11 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         "twasWeights",
         "dataDrivenPriorWeightsCutoff"
     )]
-    ssRes <- do.call(
-        .fmDispatchJointSpecsQtlSumStats,
-        c(
-            list(parsedJointSpec, sumStats),
-            fwd
-        )
+    ssArgs <- c(
+        list(parsedJointSpec, sumStats),
+        fwd
     )
+    ssRes <- exec(.fmDispatchJointSpecsQtlSumStats, !!!ssArgs)
     if (is.null(ssRes)) {
         return(out)
     }
@@ -1950,30 +1922,27 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         return(base)
     }
     baseKeys <- .mergeResultKeyOf(base)
-    mergedEntries <- lapply(seq_len(n), function(i) {
-        perRegion <- lapply(results, function(r) {
-            hit <- which(.mergeResultKeyOf(r) == baseKeys[[i]])
-            if (length(hit)) r$entry[[hit[[1L]]]] else NULL
-        })
-        keep <- !vapply(perRegion, is.null, logical(1))
-        .twasMergeRegionEntries(perRegion[keep], regionLabels[keep])
-    })
+    mergedEntries <- map(
+        seq_len(n),
+        .twasMergedEntryAt,
+        results = results,
+        baseKeys = baseKeys,
+        regionLabels = regionLabels
+    )
     # Passthrough columns (joint keys + region + traitPos) are per-row
     # properties of `base`, which aligns row-for-row with mergedEntries; splice
     # them so a multi-region merge preserves provenance instead of dropping it.
-    do.call(
-        TwasWeights,
-        c(
-            list(
-                study = as.character(base$study),
-                context = as.character(base$context),
-                trait = as.character(base$trait),
-                method = as.character(base$method),
-                entry = mergedEntries
-            ),
-            .jointCols(base)
-        )
+    twArgs <- c(
+        list(
+            study = as.character(base$study),
+            context = as.character(base$context),
+            trait = as.character(base$trait),
+            method = as.character(base$method),
+            entry = mergedEntries
+        ),
+        .jointCols(base)
     )
+    exec(TwasWeights, !!!twArgs)
 }
 
 .twasDispatchJointSpecsQtlDataset <- function(
@@ -1992,23 +1961,22 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     # Run the joint dispatch once per region block, then merge per
     # (study, context, trait, method) across regions. A single block (cis or
     # jointRegions=TRUE concatenated) returns its result directly.
-    perRegion <- lapply(xRegions, function(rg) {
-        .twasDispatchJointSpecsQtlDatasetOneRegion(
-            parsedJointSpec,
-            data,
-            methods,
-            contexts,
-            traitIds,
-            cisWindow,
-            dataType,
-            verbose,
-            region = rg,
-            retainFit = retainFit,
-            retainFitDetail = retainFitDetail
-        )
-    })
-    labs <- vapply(xRegions, .twasRegionLabel, character(1))
-    keep <- !vapply(perRegion, is.null, logical(1))
+    perRegion <- map(
+        xRegions,
+        .twasDispatchJointSpecRegion,
+        parsedJointSpec = parsedJointSpec,
+        data = data,
+        methods = methods,
+        contexts = contexts,
+        traitIds = traitIds,
+        cisWindow = cisWindow,
+        dataType = dataType,
+        verbose = verbose,
+        retainFit = retainFit,
+        retainFitDetail = retainFitDetail
+    )
+    labs <- map_chr(xRegions, .twasRegionLabel)
+    keep <- !map_lgl(perRegion, is.null)
     perRegion <- perRegion[keep]
     labs <- labs[keep]
     if (length(perRegion) == 0L) {
@@ -2112,14 +2080,13 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     if (
         length(studyAxisSpecs) > 0L && length(qtlDatasets) > 0L && verbose >= 1
     ) {
-        message(sprintf(
-            paste0(
-                "jointCrossStudy (twas): excluding individual-level ",
-                "studies (%s) from cross-study fits; sumstats studies ",
-                "participate."
-            ),
-            paste(names(qtlDatasets), collapse = ", ")
-        ))
+        qdNames <- str_flatten(names(qtlDatasets), ", ")
+        msg <- glue(
+            "jointCrossStudy (twas): excluding individual-level ",
+            "studies ({qdNames}) from cross-study fits; sumstats studies ",
+            "participate."
+        )
+        inform(msg)
     }
 }
 
@@ -2141,13 +2108,11 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         "retainFitDetail"
     )]
     for (qdName in names(qtlDatasets)) {
-        qdRes <- do.call(
-            .twasDispatchJointSpecsQtlDataset,
-            c(
-                list(nonStudyAxisSpecs, qtlDatasets[[qdName]]),
-                fwd
-            )
+        qdArgs <- c(
+            list(nonStudyAxisSpecs, qtlDatasets[[qdName]]),
+            fwd
         )
+        qdRes <- exec(.twasDispatchJointSpecsQtlDataset, !!!qdArgs)
         if (!is.null(qdRes)) {
             out <- if (is.null(out)) {
                 qdRes
@@ -2170,10 +2135,11 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 ) {
     if (is.null(sumStats)) {
         if (length(studyAxisSpecs) > 0L && verbose >= 1) {
-            message(
+            msg <- glue(
                 "jointCrossStudy (twas): no sumStats slot present on this ",
                 "MultiStudyQtlDataset; cross-study specs produce no result."
             )
+            inform(msg)
         }
         return(out)
     }
@@ -2186,13 +2152,11 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         "retainFit",
         "retainFitDetail"
     )]
-    ssRes <- do.call(
-        .twasDispatchJointSpecsQtlSumStats,
-        c(
-            list(parsedJointSpec, sumStats),
-            fwd
-        )
+    ssArgs <- c(
+        list(parsedJointSpec, sumStats),
+        fwd
     )
+    ssRes <- exec(.twasDispatchJointSpecsQtlSumStats, !!!ssArgs)
     if (is.null(ssRes)) {
         return(out)
     }
@@ -2230,5 +2194,113 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         out,
         args,
         verbose
+    )
+}
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# Parse the joint spec at position `i` (element + its index carry to the
+# parser).
+# @noRd
+.parseJointSpecAt <- function(i, jointSpecification, data) {
+    .parseOneJointSpec(jointSpecification[[i]], i, data)
+}
+
+# One context's response column on the shared samples, named by the context.
+# @noRd
+.crossContextYCol <- function(cx, Yres, commonSamples) {
+    ym <- Yres[[cx]][commonSamples, , drop = FALSE]
+    colnames(ym) <- cx
+    ym
+}
+
+# TRUE when sumstats row `i`'s (study, context, trait) is entirely in scope.
+# @noRd
+.composedRowInScope <- function(i, studyCol, contextCol, traitCol, scope) {
+    s <- studyCol[i]
+    cx <- contextCol[i]
+    tr <- traitCol[i]
+    is_in(s, scope$studies) &&
+        is_in(cx, scope$contexts[[s]]) &&
+        is_in(tr, scope$traits[[s]])
+}
+
+# The scoped-row identity column for complement axis `a` (study/context/trait).
+# @noRd
+.composedAxisCol <- function(a, studyCol, contextCol, traitCol, rowIdx) {
+    switch(
+        a,
+        study = studyCol[rowIdx],
+        context = contextCol[rowIdx],
+        trait = traitCol[rowIdx]
+    )
+}
+
+# The entry in result `r` matching merge key `key`, or NULL when absent. Shared
+# by the FM and TWAS cross-region merges.
+# @noRd
+.mergeEntryForKey <- function(r, key) {
+    hit <- which(.mergeResultKeyOf(r) == key)
+    if (length(hit)) r$entry[[hit[[1L]]]] else NULL
+}
+
+# The merged FM entry for base row `i`: gather that key's entry from every
+# region
+# and fold them together.
+# @noRd
+.fmMergedEntryAt <- function(i, results, baseKeys) {
+    perRegion <- map(results, .mergeEntryForKey, key = baseKeys[[i]])
+    .fmMergeEntries(compact(perRegion))
+}
+
+# The merged TWAS entry for base row `i`: gather + concatenate that key's entry
+# across regions, keeping region labels aligned to the surviving entries.
+# @noRd
+.twasMergedEntryAt <- function(i, results, baseKeys, regionLabels) {
+    perRegion <- map(results, .mergeEntryForKey, key = baseKeys[[i]])
+    keep <- !map_lgl(perRegion, is.null)
+    .twasMergeRegionEntries(perRegion[keep], regionLabels[keep])
+}
+
+# TRUE when a parsed joint spec includes the `study` axis.
+# @noRd
+.jsHasStudyAxis <- function(s) {
+    is_in("study", s$axes)
+}
+
+# One region's FM joint-spec dispatch; `args` bundles the shared call arguments.
+# @noRd
+.fmDispatchJointSpecRegion <- function(rg, args) {
+    regionArgs <- c(args, list(region = rg))
+    exec(.fmDispatchJointSpecsQtlDatasetOneRegion, !!!regionArgs)
+}
+
+# One region's TWAS joint-spec dispatch over a QtlDataset.
+# @noRd
+.twasDispatchJointSpecRegion <- function(
+    rg,
+    parsedJointSpec,
+    data,
+    methods,
+    contexts,
+    traitIds,
+    cisWindow,
+    dataType,
+    verbose,
+    retainFit,
+    retainFitDetail
+) {
+    .twasDispatchJointSpecsQtlDatasetOneRegion(
+        parsedJointSpec,
+        data,
+        methods,
+        contexts,
+        traitIds,
+        cisWindow,
+        dataType,
+        verbose,
+        region = rg,
+        retainFit = retainFit,
+        retainFitDetail = retainFitDetail
     )
 }

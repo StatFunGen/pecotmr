@@ -96,5 +96,5 @@ y <- eqtlRegionExample$yRes
 fit <- susieR::susie(X, y, L = 5)
 csTables <- computeCsTables(fit, dataX = X, method = "susie")
 buildTopLoci(fit = fit, csTables = csTables, variantNames = colnames(X),
-  method = "susie", dataX = X, dataY = y)
+  method = "susie", dataY = y)
 }

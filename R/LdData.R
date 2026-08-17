@@ -51,7 +51,7 @@ setClass(
         if (is.null(object@correlation) && is.null(object@genotypeHandle)) {
             errors <- c(
                 errors,
-                paste0(
+                str_c(
                     "At least one of 'correlation' or ",
                     "'genotypeHandle' must be non-NULL"
                 )
@@ -64,7 +64,7 @@ setClass(
             if (!is.list(object@genotypeHandle)) {
                 errors <- c(
                     errors,
-                    paste0(
+                    str_c(
                         "'mixtureWeights' may only be set when ",
                         "'genotypeHandle' is a list of GenotypeHandles"
                     )
@@ -76,7 +76,7 @@ setClass(
                 ) {
                     errors <- c(
                         errors,
-                        paste0(
+                        str_c(
                             "'mixtureWeights' must be numeric of length ",
                             "equal to the genotypeHandle list"
                         )
@@ -104,13 +104,13 @@ setMethod("show", "LdData", function(object) {
     } else {
         "single"
     }
-    cat(sprintf("LdData: %d variants\n", n_var))
-    cat(sprintf(
-        "  Correlation: %s, Genotype handle: %s\n",
-        if (has_R) r_type else "NULL",
-        if (has_geno) "available" else "NULL"
+    cat(glue("LdData: {n_var} variants\n", .trim = FALSE))
+    cat(glue(
+        "  Correlation: {if (has_R) r_type else 'NULL'}, ",
+        "Genotype handle: {if (has_geno) 'available' else 'NULL'}\n",
+        .trim = FALSE
     ))
-    cat(sprintf("  Reference N: %d\n", object@nRef))
+    cat(glue("  Reference N: {object@nRef}\n", .trim = FALSE))
 })
 
 #' @title Create an LdData Object
@@ -165,9 +165,7 @@ LdData <- function(
 # optional allele_freq/variance/n_nomiss) into the GRanges form used by the
 # LdData `variants` slot.
 .refPanelToGranges <- function(refPanel) {
-    chr <- as.character(refPanel$chrom)
-    chr <- sub("^chr", "", chr, ignore.case = TRUE)
-    chr <- paste0("chr", chr)
+    chr <- withChrPrefix(refPanel$chrom)
     pos <- as.integer(refPanel$pos)
 
     gr <- GRanges(
@@ -183,7 +181,7 @@ LdData <- function(
 
     optional <- c("allele_freq", "variance", "n_nomiss")
     for (col in optional) {
-        if (col %in% names(refPanel)) {
+        if (is_in(col, names(refPanel))) {
             mcolsData[[col]] <- refPanel[[col]]
         }
     }
@@ -198,26 +196,26 @@ setMethod("getCorrelation", "LdData", function(x) {
         return(x@correlation)
     }
     if (is.null(x@genotypeHandle)) {
-        stop("No correlation matrix or genotype handle available")
+        abort("No correlation matrix or genotype handle available")
     }
     if (is.list(x@genotypeHandle)) {
         if (is.null(x@mixtureWeights)) {
-            stop(
+            msg <- glue(
                 "Cannot compute mixture LD: `mixtureWeights` is NULL. ",
                 "Construct LdData with mixtureWeights = <numeric vector> ",
                 "when supplying a list of GenotypeHandles."
             )
+            abort(msg)
         }
-        perPanel <- lapply(x@genotypeHandle, function(h) {
-            computeLd(.dosageMatrix(h, x@snpIdx), method = "sample")
-        })
-        dims <- vapply(perPanel, function(R) nrow(R), integer(1))
+        perPanel <- map(x@genotypeHandle, .ldPanelLd, snpIdx = x@snpIdx)
+        dims <- map_int(perPanel, nrow)
         if (length(unique(dims)) != 1L) {
-            stop(
-                "Mixture panels yielded LD matrices of differing dimensions: ",
-                paste(dims, collapse = ", "),
-                ". All panels must be aligned on the same variant subset."
+            msg <- glue(
+                "Mixture panels yielded LD matrices of differing ",
+                "dimensions: {str_flatten(dims, ', ')}. All panels ",
+                "must be aligned on the same variant subset."
             )
+            abort(msg)
         }
         w <- x@mixtureWeights
         R <- matrix(0, nrow = dims[[1L]], ncol = dims[[1L]])
@@ -240,7 +238,7 @@ setMethod("getGenotypes", "LdData", function(x, ...) {
         return(x@genotypeHandle)
     }
     if (is.list(x@genotypeHandle)) {
-        lapply(x@genotypeHandle, function(h) .dosageMatrix(h, x@snpIdx))
+        map(x@genotypeHandle, .dosageMatrix, x@snpIdx)
     } else {
         .dosageMatrix(x@genotypeHandle, x@snpIdx)
     }
@@ -273,7 +271,7 @@ setMethod("getBlockMetadata", "LdData", function(x) {
 #' @rdname getRefPanel
 #' @export
 setMethod("getRefPanel", "LdData", function(x) {
-    mc <- as.data.frame(mcols(x@variants))
+    mc <- as_tibble(as.data.frame(mcols(x@variants)))
     mc$chrom <- as.character(seqnames(x@variants))
     mc$pos <- start(x@variants)
     mc
@@ -294,3 +292,11 @@ setMethod("getSnpIdx", "LdData", function(x) x@snpIdx)
 #' @rdname getNRef
 #' @export
 setMethod("getNRef", "LdData", function(x) x@nRef)
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# Sample-LD matrix for one mixture panel's genotype handle (over `snpIdx`).
+# @noRd
+.ldPanelLd <- function(h, snpIdx) {
+    computeLd(.dosageMatrix(h, snpIdx), method = "sample")
+}

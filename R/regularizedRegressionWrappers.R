@@ -139,7 +139,7 @@ prsCs <- function(
     # Shared LD-matrix validation, then the prsCs-specific maf length check.
     .rssValidateInputs(bhat, R, n)
     if (!is.null(maf) && length(bhat) != length(maf)) {
-        stop("The length of 'bhat' must be the same as 'maf'.")
+        abort("The length of 'bhat' must be the same as 'maf'.")
     }
 
     # Run PRS-CS
@@ -327,16 +327,17 @@ sdpr <- function(
 .sdprValidate <- function(bhat, R, n, M, perVariantSampleSize, array) {
     .rssValidateInputs(bhat, R, n)
     if (M < 4) {
-        stop("'M' must be at least 4.")
+        abort("'M' must be at least 4.")
     }
     if (!is.null(perVariantSampleSize) && any(perVariantSampleSize <= 0)) {
-        stop(
+        msg <- glue(
             "The 'perVariantSampleSize' vector must contain only ",
             "positive values."
         )
+        abort(msg)
     }
-    if (!is.null(array) && any(!array %in% c(0, 1, 2))) {
-        stop("The 'array' vector must contain only 0, 1, or 2.")
+    if (!is.null(array) && any(!is_in(array, c(0, 1, 2)))) {
+        abort("The 'array' vector must contain only 0, 1, or 2.")
     }
     invisible(NULL)
 }
@@ -409,17 +410,18 @@ mrmashWeights <- function(
 ) {
     if (!requireNamespace("mr.mashr", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "Package 'mr.mashr' is required. Install with: ",
             "devtools::install_github('stephenslab/mr.mashr')"
         )
+        abort(msg)
         # nocov end
     }
     dotArgs <- list(...)
     if (is.null(mrmashFit)) {
-        message("mrmashFit is not provided; fitting mr.mash now ...")
+        inform("mrmashFit is not provided; fitting mr.mash now ...")
         if (is.null(X) || is.null(Y)) {
-            stop("Both X and Y must be provided if mrmashFit is NULL.")
+            abort("Both X and Y must be provided if mrmashFit is NULL.")
         }
         mrmashFit <- mrmashWrapper(X, Y, ...)
     }
@@ -453,7 +455,7 @@ mrmashWeights <- function(
     if (!isTRUE(retainFit)) {
         return(weights)
     }
-    fitDetail <- match.arg(fitDetail)
+    fitDetail <- arg_match(fitDetail)
     fitList <- list(
         dataDrivenPriorMatrices = dataDrivenPriorMatrices,
         w0 = fit$w0,
@@ -574,11 +576,12 @@ mrmashRssWeights <- function(
 .mrmashRssRequirePackage <- function() {
     if (!requireNamespace("mr.mashr", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "Package 'mr.mashr' is required. ",
             "Install with: ",
             "devtools::install_github('stephenslab/mr.mash.alpha')"
         )
+        abort(msg)
         # nocov end
     }
 }
@@ -588,10 +591,11 @@ mrmashRssWeights <- function(
 .mrmashRssStats <- function(stat) {
     Z <- if (is.matrix(stat$z)) stat$z else as.matrix(stat$z)
     if (ncol(Z) < 2) {
-        stop(
+        msg <- glue(
             "mrmashRssWeights expects stat$z to have >= 2 columns ",
             "(one per context). For single-context use mrAshRssWeights()."
         )
+        abort(msg)
     }
     K <- ncol(Z)
     nVec <- if (length(stat$n) > 1) stat$n else rep(stat$n, K)
@@ -638,22 +642,20 @@ mrmashRssWeights <- function(
     }
     # mr.mash.rss expects either Z or (Bhat, Shat) but not both; prefer
     # Bhat/Shat. n must be a scalar (mr.mash.rss contract); use the median.
-    do.call(
-        mr.mashr::mr.mash.rss,
-        c(
-            list(
-                Bhat = ss$Bhat,
-                Shat = ss$Shat,
-                R = LD,
-                n = as.numeric(stats::median(ss$nVec)),
-                covY = covY,
-                V = V,
-                S0 = S0,
-                w0 = w0
-            ),
-            dots
-        )
+    rssArgs <- c(
+        list(
+            Bhat = ss$Bhat,
+            Shat = ss$Shat,
+            R = LD,
+            n = as.numeric(stats::median(ss$nVec)),
+            covY = covY,
+            V = V,
+            S0 = S0,
+            w0 = w0
+        ),
+        dots
     )
+    exec(mr.mashr::mr.mash.rss, !!!rssArgs)
 }
 
 
@@ -680,15 +682,13 @@ initPriorSd <- function(X, y, n = 30) {
     sds <- colSds(X)
     keep <- !is.na(sds) & sds != 0
     if (!all(keep)) {
-        warning(
-            sprintf(
-                "%s: dropping %d zero-variance column(s) from X (indices: %s)",
-                fnName,
-                sum(!keep),
-                paste(which(!keep), collapse = ", ")
-            ),
-            call. = FALSE
+        nDrop <- sum(!keep)
+        idxStr <- str_flatten(which(!keep), ", ")
+        msg <- glue(
+            "{fnName}: dropping {nDrop} zero-variance column(s) from X ",
+            "(indices: {idxStr})"
         )
+        warn(msg)
     }
     keep
 }
@@ -714,10 +714,11 @@ glmnetWeights <- function(X, y, alpha) {
     # Check if glmnet is installed
     if (!requireNamespace("glmnet", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "To use this function, please install glmnet: ",
             "https://cran.r-project.org/web/packages/glmnet/index.html"
         )
+        abort(msg)
         # nocov end
     }
     eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
@@ -781,28 +782,29 @@ lassoWeights <- function(X, y) glmnetWeights(X, y, 1)
 #' @param retainFit Logical. Attach the full fitted-model object to the result.
 #' Default \code{FALSE}.
 #' @param ... Additional arguments forwarded to \code{mr.ash}.
+#' @return A numeric vector of weights, one per variant (column of \code{X});
+#'   zero-variance columns receive weight 0. When \code{retainFit = TRUE} the
+#'   fitted \code{mr.ash} object is attached as attribute \code{"fit"}.
 #' @export
 mrashWeights <- function(X, y, initPriorSd = TRUE, retainFit = FALSE, ...) {
     eff.wgt <- rep(0, ncol(X))
     keep <- .dropZeroVariance(X, "mrashWeights")
     XKeep <- X[, keep, drop = FALSE]
     argsList <- list(...)
-    if (!"beta.init" %in% names(argsList)) {
+    if (!is_in("beta.init", names(argsList))) {
         argsList$beta.init <- lassoWeights(XKeep, y)
     } else if (length(argsList$beta.init) == ncol(X)) {
         argsList$beta.init <- argsList$beta.init[keep]
     }
-    fit.mr.ash <- do.call(
-        mr.ash,
-        c(
-            list(
-                X = XKeep,
-                y = y,
-                sa2 = if (initPriorSd) initPriorSd(XKeep, y)^2 else NULL
-            ),
-            argsList
-        )
+    mrAshArgs <- c(
+        list(
+            X = XKeep,
+            y = y,
+            sa2 = if (initPriorSd) initPriorSd(XKeep, y)^2 else NULL
+        ),
+        argsList
     )
+    fit.mr.ash <- exec(mr.ash, !!!mrAshArgs)
     eff.wgt[keep] <- predict(fit.mr.ash, type = "coefficients")[-1]
     if (retainFit) {
         attr(eff.wgt, "fit") <- fit.mr.ash
@@ -834,8 +836,8 @@ mrashWeights <- function(X, y, initPriorSd = TRUE, retainFit = FALSE, ...) {
 #' @examples
 #' X <- matrix(rnorm(100000), nrow = 1000)
 #' Z <- matrix(round(runif(3000, 0, 0.8), 0), nrow = 1000)
-#' set1 <- sample(1:ncol(X), 5)
-#' set2 <- sample(1:ncol(X), 5)
+#' set1 <- sample(seq_len(ncol(X)), 5)
+#' set2 <- sample(seq_len(ncol(X)), 5)
 #' sets <- list(set1, set2)
 #' g <- rowSums(X[, c(set1, set2)])
 #' e <- rnorm(nrow(X), mean = 0, sd = 1)
@@ -854,27 +856,7 @@ bayesAlphabetWeights <- function(
     nthin = 5,
     ...
 ) {
-    # Make sure qgg is installed
-    if (!requireNamespace("qgg", quietly = TRUE)) {
-        # nocov start
-        stop(
-            "To use this function, please install qgg: ",
-            "https://cran.r-project.org/web/packages/qgg/index.html"
-        )
-        # nocov end
-    }
-    # check for identical row lengths of response and genotype
-    if (!(length(y) == nrow(X))) {
-        stop("All objects must have the same number of rows")
-    }
-    # check for identical row lengths of genotype and covariates
-    if (!is.null(Z)) {
-        if (nrow(X) != nrow(Z)) {
-            stop(
-                "Genotype and covariate matrices must have same number of rows"
-            )
-        }
-    }
+    .bayesAlphabetValidate(X, y, Z)
 
     eff.wgt <- rep(0, ncol(X))
     keep <- .dropZeroVariance(X, "bayesAlphabetWeights")
@@ -893,6 +875,29 @@ bayesAlphabetWeights <- function(
     eff.wgt[keep] <- model$bm
     return(eff.wgt)
 }
+
+# Shared input validation for the gbayes-backed weight fitters: qgg present,
+# and matching row counts for response / genotype / covariates.
+# @noRd
+.bayesAlphabetValidate <- function(X, y, Z) {
+    if (!requireNamespace("qgg", quietly = TRUE)) {
+        # nocov start
+        msg <- glue(
+            "To use this function, please install qgg: ",
+            "https://cran.r-project.org/web/packages/qgg/index.html"
+        )
+        abort(msg)
+        # nocov end
+    }
+    if (!(length(y) == nrow(X))) {
+        abort("All objects must have the same number of rows")
+    }
+    if (!is.null(Z) && nrow(X) != nrow(Z)) {
+        abort(
+            "Genotype and covariate matrices must have same number of rows"
+        )
+    }
+}
 #' @title BayesN TWAS weights (Gaussian prior, ridge-equivalent)
 #' @description Use Gaussian distribution as prior. Posterior means will be
 #'   BLUP, equivalent to Ridge Regression.
@@ -901,6 +906,8 @@ bayesAlphabetWeights <- function(
 #' @param Z Optional numeric matrix of fixed-effect covariates, or \code{NULL}.
 #' @param ... Additional arguments forwarded to \code{bayesAlphabetWeights} /
 #'   \code{qgg}.
+#' @return A numeric vector of effect-size weights, one per variant (column of
+#'   \code{X}); columns dropped for zero variance receive weight 0.
 #' @examples
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:30]
@@ -918,6 +925,8 @@ bayesNWeights <- function(X, y, Z = NULL, ...) {
 #' @param Z Optional numeric matrix of fixed-effect covariates, or \code{NULL}.
 #' @param ... Additional arguments forwarded to \code{bayesAlphabetWeights} /
 #'   \code{qgg}.
+#' @return A numeric vector of effect-size weights, one per variant (column of
+#'   \code{X}); columns dropped for zero variance receive weight 0.
 #' @examples
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:30]
@@ -934,6 +943,8 @@ bayesLWeights <- function(X, y, Z = NULL, ...) {
 #' @param Z Optional numeric matrix of fixed-effect covariates, or \code{NULL}.
 #' @param ... Additional arguments forwarded to \code{bayesAlphabetWeights} /
 #'   \code{qgg}.
+#' @return A numeric vector of effect-size weights, one per variant (column of
+#'   \code{X}); columns dropped for zero variance receive weight 0.
 #' @examples
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:30]
@@ -952,6 +963,8 @@ bayesAWeights <- function(X, y, Z = NULL, ...) {
 #'   BayesC mixture. Default \code{0.1}.
 #' @param ... Additional arguments forwarded to \code{bayesAlphabetWeights} /
 #'   \code{qgg}.
+#' @return A numeric vector of effect-size weights, one per variant (column of
+#'   \code{X}); columns dropped for zero variance receive weight 0.
 #' @examples
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:30]
@@ -969,6 +982,8 @@ bayesCWeights <- function(X, y, Z = NULL, pi = 0.1, ...) {
 #' @param Z Optional numeric matrix of fixed-effect covariates, or \code{NULL}.
 #' @param ... Additional arguments forwarded to \code{bayesAlphabetWeights} /
 #'   \code{qgg}.
+#' @return A numeric vector of effect-size weights, one per variant (column of
+#'   \code{X}); columns dropped for zero variance receive weight 0.
 #' @examples
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:30]
@@ -1445,15 +1460,15 @@ lassosumRss <- function(
 ) {
     # cpp11 requires exact integer types; the C++ backend takes a block list, so
     # the single-window matrix R is wrapped as one block here.
-    .rssSolvePath(bhat, R, n, lambda, function(z, lam) {
-        lassosumRssRcpp(
-            zR = z,
-            LD = list(blk1 = R),
-            lambdaR = lam,
-            thr = thr,
-            maxiter = as.integer(maxiter)
-        )
-    })
+    .rssSolvePath(
+        bhat,
+        R,
+        n,
+        lambda,
+        .rssLassosumSolve,
+        thr = thr,
+        maxiter = maxiter
+    )
 }
 
 .lassosumCorFromStat <- function(stat, n, p) {
@@ -1464,19 +1479,19 @@ lassosumRss <- function(
     } else if (!is.null(stat$b)) {
         as.numeric(stat$b)
     } else {
-        stop(
+        msg <- glue(
             "stat must contain one of 'cor', 'z', or 'b' for lassosum ",
             "selection."
         )
+        abort(msg)
     }
     if (length(corInput) != p) {
-        stop(
-            "The length of lassosum input statistics (",
-            length(corInput),
-            ") must equal nrow(LD) (",
-            p,
-            ")."
+        nInput <- length(corInput)
+        msg <- glue(
+            "The length of lassosum input statistics ({nInput}) must ",
+            "equal nrow(LD) ({p})."
         )
+        abort(msg)
     }
     corInput
 }
@@ -1526,13 +1541,13 @@ lassosumRss <- function(
 # sdpr's M / perVariantSampleSize / array -- stay in the caller.
 .rssValidateInputs <- function(bhat, R, n) {
     if (missing(R) || !is.matrix(R)) {
-        stop("Please provide the LD correlation matrix 'R' as a matrix.")
+        abort("Please provide the LD correlation matrix 'R' as a matrix.")
     }
     if (missing(n) || n <= 0) {
-        stop("Please provide a valid sample size using 'n'.")
+        abort("Please provide a valid sample size using 'n'.")
     }
     if (length(bhat) != nrow(R)) {
-        stop("The length of 'bhat' must equal the number of rows of 'R'.")
+        abort("The length of 'bhat' must equal the number of rows of 'R'.")
     }
     invisible(NULL)
 }
@@ -1542,11 +1557,11 @@ lassosumRss <- function(
 # lambda order via the inverse permutation and assemble the standard result
 # list. Shared by lassosumRss and penalizedRss, which differ only in which Rcpp
 # solver they pass as `solveFn` (and penalizedRss's per-penalty gamma default).
-.rssSolvePath <- function(bhat, R, n, lambda, solveFn) {
+.rssSolvePath <- function(bhat, R, n, lambda, solveFn, ...) {
     .rssValidateInputs(bhat, R, n)
     z <- bhat / sqrt(n)
     order <- order(lambda, decreasing = TRUE)
-    result <- solveFn(z, lambda[order])
+    result <- solveFn(z, lambda[order], R, ...)
     # Reorder back to original lambda order via the inverse permutation.
     invOrder <- order(order)
     result$beta <- result$beta[, invOrder, drop = FALSE]
@@ -1575,80 +1590,58 @@ lassosumRss <- function(
 # Shared (s, lambda, fbeta) path-metadata frame for a single-path model.
 # @noRd
 .rssPathMeta <- function(sVal, model) {
-    data.frame(
+    tibble(
         s = rep(sVal, length(model$lambda)),
         lambda = model$lambda,
-        fbeta = model$fbeta,
-        stringsAsFactors = FALSE
+        fbeta = model$fbeta
     )
 }
 
 # lassosum shrinkage path for one s.
 # @noRd
 .rssFitLassosum <- function(solverInput, LDs, n, sVal, config) {
-    model <- do.call(
-        lassosumRss,
-        c(list(bhat = solverInput, R = LDs, n = n), config$dotArgs)
-    )
+    lsArgs <- c(list(bhat = solverInput, R = LDs, n = n), config$dotArgs)
+    model <- exec(lassosumRss, !!!lsArgs)
     list(beta = model$beta, meta = .rssPathMeta(sVal, model))
 }
 
 # ncvreg-penalized shrinkage path for one s.
 # @noRd
 .rssFitPenalized <- function(solverInput, LDs, n, sVal, config) {
-    model <- do.call(
-        penalizedRss,
-        c(
-            list(
-                bhat = solverInput,
-                R = LDs,
-                n = n,
-                penalty = config$penalty,
-                gamma = config$gamma,
-                alpha = config$alpha,
-                lambda0 = config$lambda0,
-                lambda2 = config$lambda2
-            ),
-            config$dotArgs
-        )
+    penArgs <- c(
+        list(
+            bhat = solverInput,
+            R = LDs,
+            n = n,
+            penalty = config$penalty,
+            gamma = config$gamma,
+            alpha = config$alpha,
+            lambda0 = config$lambda0,
+            lambda2 = config$lambda2
+        ),
+        config$dotArgs
     )
+    model <- exec(penalizedRss, !!!penArgs)
     list(beta = model$beta, meta = .rssPathMeta(sVal, model))
 }
 
 # L0Learn path for one s: one penalizedRss fit per lambda0, column-bound.
 # @noRd
 .rssFitL0learn <- function(solverInput, LDs, n, sVal, config) {
-    fits <- map(config$lambda0, function(l0Val) {
-        model <- do.call(
-            penalizedRss,
-            c(
-                list(
-                    bhat = solverInput,
-                    R = LDs,
-                    n = n,
-                    penalty = config$penalty,
-                    lambda = config$lambda,
-                    lambda0 = l0Val,
-                    lambda2 = config$lambda2,
-                    maxSwaps = config$maxSwaps
-                ),
-                config$dotArgs
-            )
-        )
-        list(
-            beta = model$beta,
-            meta = data.frame(
-                s = rep(sVal, length(model$lambda)),
-                lambda0 = rep(l0Val, length(model$lambda)),
-                lambda = model$lambda,
-                fbeta = model$fbeta,
-                stringsAsFactors = FALSE
-            )
-        )
-    })
+    fits <- map(
+        config$lambda0,
+        .rssL0LambdaFit,
+        solverInput = solverInput,
+        LDs = LDs,
+        n = n,
+        sVal = sVal,
+        config = config
+    )
+    betaList <- map(fits, "beta")
+    metaList <- map(fits, "meta")
     list(
-        beta = do.call(cbind, map(fits, "beta")),
-        meta = do.call(rbind, map(fits, "meta"))
+        beta = exec(cbind, !!!betaList),
+        meta = bind_rows(metaList)
     )
 }
 
@@ -1702,7 +1695,7 @@ lassosumRss <- function(
     config,
     selection = c("ld_quadratic", "min_fbeta")
 ) {
-    selection <- match.arg(selection)
+    selection <- arg_match(selection)
     n <- median(stat$n)
     p <- nrow(LD)
     corInput <- .lassosumClampCor(.lassosumCorFromStat(stat, n = n, p = p))
@@ -1715,7 +1708,7 @@ lassosumRss <- function(
         candidateBeta <- cbind(candidateBeta, one$beta)
         candidateMeta[[length(candidateMeta) + 1L]] <- one$meta
     }
-    candidateMeta <- do.call(rbind, candidateMeta)
+    candidateMeta <- bind_rows(candidateMeta)
     selectorResult <- if (selection == "ld_quadratic") {
         .lassosumSelectLdQuadratic(candidateBeta, corInput, LD)
     } else {
@@ -1778,7 +1771,7 @@ lassosumRssWeights <- function(
     selection = c("ld_quadratic", "min_fbeta"),
     ...
 ) {
-    selection <- match.arg(selection)
+    selection <- arg_match(selection)
     .rssShrinkGridWeights(
         stat,
         LD,
@@ -1858,28 +1851,28 @@ penalizedRss <- function(
     maxiter = 10000,
     maxSwaps = 100
 ) {
-    penalty <- match.arg(penalty)
+    penalty <- arg_match(penalty)
     # Default gamma per penalty
     if (is.null(gamma)) {
         gamma <- switch(penalty, SCAD = 3.7, MCP = 3.0, 0.0)
     }
     # C++ backend takes a block list; wrap the single-window matrix R as one
     # block.
-    .rssSolvePath(bhat, R, n, lambda, function(z, lam) {
-        penalizedRssRcpp(
-            zR = z,
-            LD = list(blk1 = R),
-            lambdaR = lam,
-            penaltyStr = penalty,
-            gamma = gamma,
-            alpha = alpha,
-            lambda0 = lambda0,
-            lambda2 = lambda2,
-            thr = thr,
-            maxiter = as.integer(maxiter),
-            maxSwaps = as.integer(maxSwaps)
-        )
-    })
+    .rssSolvePath(
+        bhat,
+        R,
+        n,
+        lambda,
+        .rssPenalizedSolve,
+        penalty = penalty,
+        gamma = gamma,
+        alpha = alpha,
+        lambda0 = lambda0,
+        lambda2 = lambda2,
+        thr = thr,
+        maxiter = maxiter,
+        maxSwaps = maxSwaps
+    )
 }
 
 #' RSS Weights Helper for Penalized Methods
@@ -1907,7 +1900,7 @@ penalizedRss <- function(
     selection = c("ld_quadratic", "min_fbeta"),
     ...
 ) {
-    selection <- match.arg(selection)
+    selection <- arg_match(selection)
     .rssShrinkGridWeights(
         stat,
         LD,
@@ -2082,8 +2075,8 @@ l0learnRssWeights <- function(
     maxSwaps = 100,
     ...
 ) {
-    penalty <- match.arg(penalty)
-    selection <- match.arg(selection)
+    penalty <- arg_match(penalty)
+    selection <- arg_match(selection)
 
     # Default lambda (L1 component) depends on variant
     if (is.null(lambda)) {
@@ -2131,10 +2124,11 @@ l0learnRssWeights <- function(
 ncvregWeights <- function(X, y, penalty, nfolds = 5, ...) {
     if (!requireNamespace("ncvreg", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "To use this function, please install ncvreg: ",
             "https://cran.r-project.org/package=ncvreg"
         )
+        abort(msg)
         # nocov end
     }
     eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
@@ -2215,10 +2209,11 @@ mcpWeights <- function(X, y, nfolds = 5, ...) {
 l0learnWeights <- function(X, y, penalty = "L0", nFolds = 5, ...) {
     if (!requireNamespace("L0Learn", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "To use this function, please install L0Learn: ",
             "https://cran.r-project.org/package=L0Learn"
         )
+        abort(msg)
         # nocov end
     }
     eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
@@ -2231,7 +2226,7 @@ l0learnWeights <- function(X, y, penalty = "L0", nFolds = 5, ...) {
         ...
     )
     # Find (gamma, lambda) minimizing CV error across the entire path.
-    cvMins <- vapply(fit$cvMeans, function(v) min(as.numeric(v)), numeric(1))
+    cvMins <- map_dbl(fit$cvMeans, .rssMinNumeric)
     gammaIdx <- which.min(cvMins)
     lambdaIdx <- which.min(as.numeric(fit$cvMeans[[gammaIdx]]))
     bestGamma <- fit$fit$gamma[gammaIdx]
@@ -2276,10 +2271,11 @@ bglrWeights <- function(
 ) {
     if (!requireNamespace("BGLR", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "To use this function, please install BGLR: ",
             "https://cran.r-project.org/package=BGLR"
         )
+        abort(msg)
         # nocov end
     }
     eff.wgt <- rep(0, ncol(X))
@@ -2288,7 +2284,7 @@ bglrWeights <- function(
     tmpdir <- tempfile("bglr_")
     dir.create(tmpdir, recursive = TRUE, showWarnings = FALSE)
     on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
-    saveAt <- paste0(tmpdir, .Platform$file.sep)
+    saveAt <- str_c(tmpdir, .Platform$file.sep)
 
     eta <- list(c(list(X = X[, keep, drop = FALSE], model = model), etaArgs))
     fit <- BGLR::BGLR(
@@ -2423,10 +2419,11 @@ bLassoWeights <- function(X, y, nIter = 10000, burnIn = 2000, thin = 5, ...) {
 dprWeights <- function(X, y, fittingMethod = "VB", retainFit = FALSE, ...) {
     if (!requireNamespace("RcppDPR", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "To use this function, please install RcppDPR: ",
             "https://cran.r-project.org/package=RcppDPR"
         )
+        abort(msg)
         # nocov end
     }
     eff.wgt <- rep(0, ncol(X))
@@ -2625,18 +2622,20 @@ mrmashWrapper <- function(
 .mrmashRequirePackages <- function() {
     if (!requireNamespace("glmnet", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "To use this function, please install glmnet: ",
             "https://cran.r-project.org/web/packages/glmnet/index.html"
         )
+        abort(msg)
         # nocov end
     }
     if (!requireNamespace("mr.mashr", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "To use this function, please install mr.mashr: ",
             "https://github.com/stephenslab/mr.mashr"
         )
+        abort(msg)
         # nocov end
     }
 }
@@ -2645,26 +2644,27 @@ mrmashWrapper <- function(
 # @noRd
 .mrmashValidateWrapper <- function(p) {
     if (!exists(".Random.seed")) {
-        message(
+        inform(
             "! No seed has been set. Please set seed for reproducable result. "
         )
     }
     if (!is.matrix(p$X) || !is.matrix(p$Y)) {
-        stop("X and Y must be matrices.")
+        abort("X and Y must be matrices.")
     }
     if (nrow(p$X) != nrow(p$Y)) {
-        stop("X and Y must have the same number of rows.")
+        abort("X and Y must have the same number of rows.")
     }
     if (!is.null(p$priorGrid) && !is.vector(p$priorGrid)) {
-        stop("priorGrid must be a vector.")
+        abort("priorGrid must be a vector.")
     }
     if (
         is.null(p$dataDrivenPriorMatrices) && !isTRUE(p$canonicalPriorMatrices)
     ) {
-        stop(
+        msg <- glue(
             "Please provide dataDrivenPriorMatrices or set ",
             "canonicalPriorMatrices = TRUE."
         )
+        abort(msg)
     }
     invisible(NULL)
 }
@@ -2673,10 +2673,11 @@ mrmashWrapper <- function(
 # @noRd
 .mrmashResolveBInit <- function(Y, bInitMethod) {
     if (any(is.na(Y)) && bInitMethod == "glasso") {
-        warning(
+        msg <- glue(
             "bInitMethod = 'glasso' can only be used without missing ",
             "values in Y. Setting it to 'enet' instead"
         )
+        warn(msg)
         return("enet")
     }
     bInitMethod
@@ -2887,12 +2888,14 @@ computeCoefficientsUnivGlmnet <- function(
 ) {
     r <- ncol(Y)
 
-    out <- lapply(1:r, .linreg, X, Y, alpha, standardize, nthreads, Xnew)
+    out <- map(seq_len(r), .linreg, X, Y, alpha, standardize, nthreads, Xnew)
 
-    Bhat <- do.call(cbind, map(out, "bhat"))
+    bhatList <- map(out, "bhat")
+    Bhat <- exec(cbind, !!!bhatList)
 
     if (!is.null(Xnew)) {
-        YhatNew <- do.call(cbind, map(out, "yhat_new"))
+        yhatList <- map(out, "yhat_new")
+        YhatNew <- exec(cbind, !!!yhatList)
         colnames(YhatNew) <- colnames(Y)
         results <- list(
             Bhat = Bhat[-1, ],
@@ -2931,16 +2934,18 @@ compute_w0 <- computeW0
 #' Re-normalize mrmash weight w0 to have total weight sum to 1
 #' @param w0 is the weight of mr.mash prior matrices that was generated from
 #'   mr.mash() function.
+#' @return A named numeric vector of prior-matrix weights with the \code{null}
+#'   component removed and the remaining weights renormalized to sum to 1.
 rescaleCovW0 <- function(w0) {
     # remove null component
     w0 <- w0[names(w0) != "null"]
 
     # split by prior group
-    groups <- sub("_[^_]+$", "", names(w0))
+    groups <- str_remove(names(w0), "_[^_]+$")
     groupList <- split(w0, groups)
 
     # get per group sum
-    groupWeight <- lapply(groupList, sum)
+    groupWeight <- map(groupList, sum)
 
     # Renormalize values within each group
     weightsList <- unlist(groupWeight)
@@ -2949,7 +2954,7 @@ rescaleCovW0 <- function(w0) {
         weightsList <- weightsList / sumWeights
     } else {
         # Use equal weights if all non null weights are zeros
-        weightsList <- setNames(
+        weightsList <- set_names(
             rep(1 / length(weightsList), length(weightsList)),
             names(weightsList)
         )
@@ -3046,15 +3051,11 @@ computeCovFlash <- function(Y) {
     } else {
         # For each factor's right-side prior, marginal variance for a
         # mean-zero scale-mixture-of-normals is sum(pi * sd^2).
-        fsd <- vapply(
-            fl$F_ghat,
-            function(g) sqrt(sum(g$pi * g$sd^2)),
-            numeric(1)
-        )
+        fsd <- map_dbl(fl$F_ghat, .flashFactorSd)
         covar <- diag(fl$residuals_sd^2) + crossprod(t(fl$F_pm) * fsd)
     }
     if (nrow(covar) == 0) {
-        stop("computeCovFlash: FLASH produced an empty covariance matrix.")
+        abort("computeCovFlash: FLASH produced an empty covariance matrix.")
     }
     s <- apply(Y, 2, sd, na.rm = TRUE)
     if (length(s) > 1) {
@@ -3128,14 +3129,15 @@ buildMrmashPriorMatrices <- function(
 ) {
     if (!requireNamespace("mr.mashr", quietly = TRUE)) {
         # nocov start
-        stop("Package 'mr.mashr' is required.")
+        abort("Package 'mr.mashr' is required.")
         # nocov end
     }
     if (is.null(dataDrivenPriorMatrices) && !isTRUE(canonicalPriorMatrices)) {
-        stop(
+        msg <- glue(
             "Supply dataDrivenPriorMatrices or set ",
             "canonicalPriorMatrices = TRUE."
         )
+        abort(msg)
     }
     if (is.null(K)) {
         K <- ncol(Bhat)
@@ -3161,4 +3163,88 @@ buildMrmashPriorMatrices <- function(
 
     S0 <- mr.mashr::expand_covs(S0_raw, priorGrid, zeromat = TRUE)
     list(S0 = S0, priorGrid = priorGrid)
+}
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# `.rssSolvePath` solver for lassosum: RSS lasso over the ordered lambda path.
+# @noRd
+.rssLassosumSolve <- function(z, lam, R, thr, maxiter) {
+    lassosumRssRcpp(
+        zR = z,
+        LD = list(blk1 = R),
+        lambdaR = lam,
+        thr = thr,
+        maxiter = as.integer(maxiter)
+    )
+}
+
+# `.rssSolvePath` solver for the penalized (MCP/SCAD/L0...) RSS path.
+# @noRd
+.rssPenalizedSolve <- function(
+    z,
+    lam,
+    R,
+    penalty,
+    gamma,
+    alpha,
+    lambda0,
+    lambda2,
+    thr,
+    maxiter,
+    maxSwaps
+) {
+    penalizedRssRcpp(
+        zR = z,
+        LD = list(blk1 = R),
+        lambdaR = lam,
+        penaltyStr = penalty,
+        gamma = gamma,
+        alpha = alpha,
+        lambda0 = lambda0,
+        lambda2 = lambda2,
+        thr = thr,
+        maxiter = as.integer(maxiter),
+        maxSwaps = as.integer(maxSwaps)
+    )
+}
+
+# One L0Learn fit at lambda0 = `l0Val`: penalizedRss over the lambda path.
+# @noRd
+.rssL0LambdaFit <- function(l0Val, solverInput, LDs, n, sVal, config) {
+    penArgs <- c(
+        list(
+            bhat = solverInput,
+            R = LDs,
+            n = n,
+            penalty = config$penalty,
+            lambda = config$lambda,
+            lambda0 = l0Val,
+            lambda2 = config$lambda2,
+            maxSwaps = config$maxSwaps
+        ),
+        config$dotArgs
+    )
+    model <- exec(penalizedRss, !!!penArgs)
+    list(
+        beta = model$beta,
+        meta = tibble(
+            s = rep(sVal, length(model$lambda)),
+            lambda0 = rep(l0Val, length(model$lambda)),
+            lambda = model$lambda,
+            fbeta = model$fbeta
+        )
+    )
+}
+
+# The minimum of one CV-mean path vector (coerced numeric).
+# @noRd
+.rssMinNumeric <- function(v) {
+    min(as.numeric(v))
+}
+
+# The marginal SD sqrt(sum(pi * sd^2)) of one FLASH factor's right prior.
+# @noRd
+.flashFactorSd <- function(g) {
+    sqrt(sum(g$pi * g$sd^2))
 }

@@ -39,7 +39,7 @@ if the input PIP vector is not genome-wide.}
 \item{...}{Additional arguments forwarded to \code{\link{qtlEnrichment}}.}
 }
 \value{
-A data frame with one row per (gwasStudy, qtlStudy, qtlContext)
+A tibble with one row per (gwasStudy, qtlStudy, qtlContext)
   triple and columns \code{gwasStudy}, \code{qtlStudy}, \code{qtlContext},
   \code{enrichment}, \code{enrichmentSe}, \code{enrichmentLogOdds}, plus any
   extras the underlying estimator emits. Suitable as the \code{enrichment}

@@ -1619,7 +1619,10 @@ for (slv in c("quadprog", "nnls", "lbfgsb", "glmnet")) {
 
 test_that("ensembleWeights: invalid solver errors", {
     cv <- make_cv_result(n = 50, K = 3, seed = 1)
-    expect_error(ensembleWeights(cv, Y = cv$.y, solver = "bogus"), "arg")
+    expect_error(
+        ensembleWeights(cv, Y = cv$.y, solver = "bogus"),
+        "must be one of"
+    )
 })
 
 

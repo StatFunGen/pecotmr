@@ -54,8 +54,8 @@ This function fits a Bayesian linear regression model with a range
 \examples{
 X <- matrix(rnorm(100000), nrow = 1000)
 Z <- matrix(round(runif(3000, 0, 0.8), 0), nrow = 1000)
-set1 <- sample(1:ncol(X), 5)
-set2 <- sample(1:ncol(X), 5)
+set1 <- sample(seq_len(ncol(X)), 5)
+set2 <- sample(seq_len(ncol(X)), 5)
 sets <- list(set1, set2)
 g <- rowSums(X[, c(set1, set2)])
 e <- rnorm(nrow(X), mean = 0, sd = 1)

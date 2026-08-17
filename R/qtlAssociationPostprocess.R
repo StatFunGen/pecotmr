@@ -26,18 +26,19 @@
 .qapSafeQvalue <- function(p) {
     if (!requireNamespace("qvalue", quietly = TRUE)) {
         # nocov start  (optional-package guard; qvalue is Suggests-only)
-        stop(
+        msg <- glue(
             "qtlAssociationPostprocess: the 'qvalue' package is required for ",
             "Storey q-values. Install Bioconductor 'qvalue'."
         )
+        abort(msg)
         # nocov end
     }
     tryCatch(
         qvalue::qvalue(p)$qvalues,
         error = function(e) {
-            if (grepl("missing or infinite", conditionMessage(e))) {
+            if (str_detect(conditionMessage(e), "missing or infinite")) {
                 qvalue::qvalue(p, lambda = 0)$qvalues
-            } else if (grepl("pi0 <= 0", conditionMessage(e))) {
+            } else if (str_detect(conditionMessage(e), "pi0 <= 0")) {
                 maxP <- max(p, na.rm = TRUE)
                 lambdaSeq <- seq(0, min(0.9, maxP * 0.95), length.out = 10)
                 qvalue::qvalue(
@@ -46,11 +47,12 @@
                     pi0.method = "bootstrap"
                 )$qvalues
             } else {
-                stop(
-                    "qtlAssociationPostprocess: qvalue::qvalue failed (",
-                    conditionMessage(e),
-                    "). Not substituting a hand-rolled q-value."
+                msg <- glue(
+                    "qtlAssociationPostprocess: qvalue::qvalue failed ",
+                    "({conditionMessage(e)}). Not substituting a ",
+                    "hand-rolled q-value."
                 )
+                abort(msg)
             }
         }
     )
@@ -115,23 +117,22 @@
 .qapSignificanceMask <- function(x, method, threshold = NULL) {
     recipe <- x@qcInfo$associationPostprocess
     if (is.null(recipe)) {
-        stop(
+        msg <- glue(
             "This QtlSumStats was not produced by ",
             "qtlAssociationPostprocess(); ",
             "no significance recipe to derive from."
         )
+        abort(msg)
     }
     if (is.null(threshold)) {
         threshold <- recipe$fdrThreshold
     }
     pcol <- recipe$pvalueCol
-    masks <- map(seq_len(nrow(x)), function(i) {
-        rep(FALSE, length(S4Vectors::mcols(x$entry[[i]])[[pcol]]))
-    })
+    masks <- map(seq_len(nrow(x)), .qapEmptyMask, x = x, pcol = pcol)
     if (method == "permutation") {
         return(.qapMaskPermutation(x, masks, pcol))
     }
-    if (method %in% c("bonferroni_original", "bonferroni_filtered")) {
+    if (is_in(method, c("bonferroni_original", "bonferroni_filtered"))) {
         return(.qapMaskBonferroni(x, masks, method, threshold, recipe))
     }
     if (method == "qvalue") {
@@ -145,10 +146,11 @@
 # @noRd
 .qapMaskPermutation <- function(x, masks, pcol) {
     if (is.null(x$p_nominal_threshold)) {
-        stop(
+        msg <- glue(
             "getSignificantQtls: no p_nominal_threshold (run the ",
             "permutation method)."
         )
+        abort(msg)
     }
     thr <- as.numeric(x$p_nominal_threshold)
     for (i in seq_len(nrow(x))) {
@@ -165,19 +167,18 @@
 # p threshold derived from the FDR-significant genes, applied per entry.
 # @noRd
 .qapMaskBonferroni <- function(x, masks, method, threshold, recipe) {
-    flav <- sub("bonferroni_", "", method)
-    fdrCol <- paste0("fdr_bonferroni_min_", flav)
-    pMinCol <- paste0("p_bonferroni_min_", flav)
+    flav <- str_remove(method, "bonferroni_")
+    fdrCol <- str_c("fdr_bonferroni_min_", flav)
+    pMinCol <- str_c("p_bonferroni_min_", flav)
     nCol <- if (flav == "filtered") "n_variants_filtered" else "n_variants"
     if (is.null(x[[fdrCol]])) {
-        stop(
-            "getSignificantQtls: '",
-            method,
-            "' columns absent; recompute with the matching flavour."
+        msg <- glue(
+            "getSignificantQtls: '{method}' columns absent; recompute with ",
+            "the matching flavour."
         )
+        abort(msg)
     }
-    sig <- as.numeric(x[[fdrCol]]) < threshold
-    sig[is.na(sig)] <- FALSE
+    sig <- replace_na(as.numeric(x[[fdrCol]]) < threshold, FALSE)
     if (!any(sig)) {
         return(masks)
     }
@@ -221,13 +222,13 @@
 .qapMaskQvalue <- function(x, masks, threshold) {
     qCol <- if (!is.null(x$q_beta)) "q_beta" else "q_bonferroni_min_original"
     if (is.null(x[[qCol]])) {
-        stop(
+        msg <- glue(
             "getSignificantQtls: no event q-value column (q_beta / ",
             "q_bonferroni_min_original)."
         )
+        abort(msg)
     }
-    sig <- as.numeric(x[[qCol]]) < threshold
-    sig[is.na(sig)] <- FALSE
+    sig <- replace_na(as.numeric(x[[qCol]]) < threshold, FALSE)
     for (i in seq_len(nrow(x))) {
         mc <- S4Vectors::mcols(x$entry[[i]])
         if (isTRUE(sig[i]) && !is.null(mc$qvalue)) {
@@ -257,23 +258,14 @@ setMethod(
         ),
         threshold = NULL
     ) {
-        method <- match.arg(method)
+        method <- arg_match(method)
         masks <- .qapSignificanceMask(x, method, threshold)
-        pieces <- lapply(seq_len(nrow(x)), function(i) {
-            gr <- x$entry[[i]][masks[[i]]]
-            if (length(gr) == 0L) {
-                return(NULL)
-            }
-            gr$study <- as.character(x$study)[i]
-            gr$context <- as.character(x$context)[i]
-            gr$trait <- as.character(x$trait)[i]
-            gr
-        })
-        pieces <- pieces[!vapply(pieces, is.null, logical(1))]
+        pieces <- map(seq_len(nrow(x)), .qapMaskedEntry, x = x, masks = masks)
+        pieces <- pieces[!map_lgl(pieces, is.null)]
         if (length(pieces) == 0L) {
             return(x$entry[[1L]][0L])
         }
-        do.call(c, pieces)
+        exec(c, !!!pieces)
     }
 )
 
@@ -327,10 +319,14 @@ setMethod(
         pvalueCol = "P",
         afCol = "af"
     ) {
-        methods <- match.arg(methods, several.ok = TRUE)
+        methods <- arg_match(
+            methods,
+            c("permutation", "bonferroni"),
+            multiple = TRUE
+        )
         filtering <- (mafCutoff > 0 || cisWindow > 0)
         newCols <- list()
-        if ("bonferroni" %in% methods) {
+        if (is_in("bonferroni", methods)) {
             newCols <- c(
                 newCols,
                 .qapBonferroniCols(
@@ -343,7 +339,7 @@ setMethod(
                 )
             )
         }
-        if ("permutation" %in% methods && !is.null(x$p_beta)) {
+        if (is_in("permutation", methods) && !is.null(x$p_beta)) {
             newCols <- c(newCols, .qapPermutationCols(x, fdrThreshold))
         }
         # Stash the correction recipe so getSignificantQtls /
@@ -380,10 +376,11 @@ setMethod(
         NULL
     }
     if (filtering && is.null(nVarFilt)) {
-        stop(
+        msg <- glue(
             "qtlAssociationPostprocess: `n_variants_filtered` row column is ",
             "required when mafCutoff/cisWindow > 0."
         )
+        abort(msg)
     }
     perGene <- .qapBonferroniPerGene(
         x,
@@ -412,10 +409,11 @@ setMethod(
 # @noRd
 .qapBonferroniNVar <- function(x) {
     if (is.null(x$n_variants)) {
-        stop(
+        msg <- glue(
             "qtlAssociationPostprocess: `n_variants` row column is required ",
             "for the Bonferroni correction."
         )
+        abort(msg)
     }
     as.numeric(x$n_variants)
 }
@@ -507,4 +505,26 @@ setMethod(
         pvalueCol = pvalueCol,
         afCol = afCol
     )
+}
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# An all-FALSE significance mask sized to entry `i`'s p-value column.
+# @noRd
+.qapEmptyMask <- function(i, x, pcol) {
+    rep(FALSE, length(S4Vectors::mcols(x$entry[[i]])[[pcol]]))
+}
+
+# Entry `i`'s significant variants (masks[[i]]), stamped with identity mcols;
+# NULL when nothing is significant.
+# @noRd
+.qapMaskedEntry <- function(i, x, masks) {
+    gr <- x$entry[[i]][masks[[i]]]
+    if (length(gr) == 0L) {
+        return(NULL)
+    }
+    gr$study <- as.character(x$study)[i]
+    gr$context <- as.character(x$context)[i]
+    gr$trait <- as.character(x$trait)[i]
+    gr
 }

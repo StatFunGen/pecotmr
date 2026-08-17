@@ -42,14 +42,14 @@ setClass(
         if (nrow(object@annotations) != n_snp) {
             errors <- c(
                 errors,
-                paste0(
+                str_c(
                     "Number of rows in 'annotations' must match ",
                     "length of 'snpRanges'"
                 )
             )
         }
         required_meta_cols <- c("name", "tier", "type")
-        if (!all(required_meta_cols %in% colnames(object@annotationMeta))) {
+        if (!all(is_in(required_meta_cols, colnames(object@annotationMeta)))) {
             errors <- c(
                 errors,
                 "annotationMeta must have columns: name, tier, type"
@@ -62,14 +62,14 @@ setClass(
             )
         }
         valid_tiers <- c("baseline", "candidate")
-        if (!all(object@annotationMeta$tier %in% valid_tiers)) {
+        if (!all(is_in(object@annotationMeta$tier, valid_tiers))) {
             errors <- c(
                 errors,
                 "annotationMeta$tier must be 'baseline' or 'candidate'"
             )
         }
         valid_types <- c("binary", "continuous")
-        if (!all(object@annotationMeta$type %in% valid_types)) {
+        if (!all(is_in(object@annotationMeta$type, valid_types))) {
             errors <- c(
                 errors,
                 "annotationMeta$type must be 'binary' or 'continuous'"
@@ -87,14 +87,14 @@ setMethod("show", "AnnotationMatrix", function(object) {
     n_cand <- sum(object@annotationMeta$tier == "candidate")
     n_bin <- sum(object@annotationMeta$type == "binary")
     n_cont <- sum(object@annotationMeta$type == "continuous")
-    cat(sprintf(
-        "AnnotationMatrix: %d SNPs x %d annotations\n",
-        nrow(object@annotations),
-        ncol(object@annotations)
+    cat(glue(
+        "AnnotationMatrix: {nrow(object@annotations)} SNPs x ",
+        "{ncol(object@annotations)} annotations\n",
+        .trim = FALSE
     ))
-    cat(sprintf("  Baseline: %d, Candidate: %d\n", n_base, n_cand))
-    cat(sprintf("  Binary: %d, Continuous: %d\n", n_bin, n_cont))
-    cat(sprintf("  Genome build: %s\n", object@genome))
+    cat(glue("  Baseline: {n_base}, Candidate: {n_cand}\n", .trim = FALSE))
+    cat(glue("  Binary: {n_bin}, Continuous: {n_cont}\n", .trim = FALSE))
+    cat(glue("  Genome build: {object@genome}\n", .trim = FALSE))
 })
 
 #' @rdname getAnnotations
@@ -142,12 +142,12 @@ AnnotationMatrix <- function(
 ) {
     # Validate annotationMeta
     if (!is.data.frame(annotationMeta)) {
-        stop("annotationMeta must be a data.frame")
+        abort("annotationMeta must be a data.frame")
     }
 
     requiredCols <- c("name", "tier", "type")
-    if (!all(requiredCols %in% colnames(annotationMeta))) {
-        stop("annotationMeta must have columns: name, tier, type")
+    if (!all(is_in(requiredCols, colnames(annotationMeta)))) {
+        abort("annotationMeta must have columns: name, tier, type")
     }
 
     # Set column names on matrix
@@ -189,7 +189,7 @@ getBaseline <- function(annot) {
     AnnotationMatrix(
         annotations = getAnnotations(annot)[, idx, drop = FALSE],
         snpRanges = getSnpRanges(annot),
-        annotationMeta = meta[idx, , drop = FALSE],
+        annotationMeta = filter(meta, idx),
         genome = getGenome(annot)
     )
 }
@@ -215,7 +215,7 @@ getCandidates <- function(annot) {
     AnnotationMatrix(
         annotations = getAnnotations(annot)[, idx, drop = FALSE],
         snpRanges = getSnpRanges(annot),
-        annotationMeta = meta[idx, , drop = FALSE],
+        annotationMeta = filter(meta, idx),
         genome = getGenome(annot)
     )
 }

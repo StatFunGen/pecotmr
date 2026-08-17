@@ -128,15 +128,17 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 .cbRun <- function(label, args) {
     if (!requireNamespace("colocboost", quietly = TRUE)) {
         # nocov start
-        stop("The colocboost package is required for colocboostPipeline().")
+        abort("The colocboost package is required for colocboostPipeline().")
         # nocov end
     }
     t1 <- Sys.time()
-    args <- Filter(Negate(is.null), args)
+    args <- compact(args)
     res <- tryCatch(
-        do.call(colocboost::colocboost, args),
+        exec(colocboost::colocboost, !!!args),
         error = function(e) {
-            message(label, " failed: ", conditionMessage(e))
+            eMsg <- conditionMessage(e)
+            msg <- glue("{label} failed: {eMsg}")
+            inform(msg)
             NULL
         }
     )
@@ -147,11 +149,11 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # matrices. When any matrix is non-square it is treated as a samples x
 # variants genotype reference and routed to X_ref; otherwise routed to LD.
 .cbBuildLdArgs <- function(ldList) {
-    ldList <- Filter(Negate(is.null), ldList)
+    ldList <- compact(ldList)
     if (length(ldList) == 0L) {
         return(list())
     }
-    isGeno <- any(vapply(ldList, function(m) nrow(m) != ncol(m), logical(1)))
+    isGeno <- any(map_lgl(ldList, .cbIsNonSquare))
     if (isGeno) list(X_ref = ldList) else list(LD = ldList)
 }
 
@@ -163,14 +165,12 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         return(invisible(NULL))
     }
     if (length(getQcInfo(x)) == 0L) {
-        stop(
-            sprintf(
-                "%s must be passed through summaryStatsQc() before reaching ",
-                what
-            ),
-            "colocboostPipeline (getQcInfo() returned an empty list). ",
-            "Call summaryStatsQc(x, ...) and pass the result."
+        msg <- glue(
+            "{what} must be passed through summaryStatsQc() before ",
+            "reaching colocboostPipeline (getQcInfo() returned an empty ",
+            "list). Call summaryStatsQc(x, ...) and pass the result."
         )
+        abort(msg)
     }
     invisible(NULL)
 }
@@ -187,7 +187,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         return(pipCutoffToSkip)
     } # uniform screen object
     if (!is.null(names(pipCutoffToSkip))) {
-        if (ctx %in% names(pipCutoffToSkip)) {
+        if (is_in(ctx, names(pipCutoffToSkip))) {
             return(pipCutoffToSkip[[ctx]])
         }
         return(0)
@@ -215,12 +215,12 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         length(pipCutoffToSkip) > 0L &&
         any(as.numeric(pipCutoffToSkip) != 0, na.rm = TRUE)
     if (!is.null(newScreen) && pipOn) {
-        stop(
+        msg <- glue(
             "colocboostPipeline: only one signal screen may be enabled ",
-            "at a time; ",
-            "unset pipCutoffToSkip to use absZCutoffToSkip / bfCutoffToSkip / ",
-            "logBfCutoffToSkip."
+            "at a time; unset pipCutoffToSkip to use absZCutoffToSkip / ",
+            "bfCutoffToSkip / logBfCutoffToSkip."
         )
+        abort(msg)
     }
     if (!is.null(newScreen)) newScreen else pipCutoffToSkip
 }
@@ -238,10 +238,12 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     # (.fmSerScreen) with the fine-mapping pipeline. fallback = FALSE: an
     # outcome that cannot be screened (too few samples / fit failure) is
     # dropped.
-    keep <- vapply(
+    keep <- map_lgl(
         seq_len(ncol(Y)),
-        function(j) .fmSerScreen(X, Y[, j], spec, fallback = FALSE),
-        logical(1L)
+        .cbScreenOutcome,
+        X = X,
+        Y = Y,
+        spec = spec
     )
     if (!any(keep)) {
         return(NULL)
@@ -273,7 +275,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         samples = samples,
         pipCutoffToSkip = pipCutoffToSkip
     )
-    built <- compact(map(contexts, function(ctx) .cbBuildContextXY(ctx, p)))
+    built <- compact(map(contexts, .cbBuildContextXY, p = p))
     if (length(built) == 0L) {
         return(NULL)
     }
@@ -299,14 +301,14 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     available <- getContexts(qd)
     bad <- setdiff(contexts, available)
     if (length(bad) > 0L) {
-        stop(
-            "Unknown context(s) for QtlDataset '",
-            getStudy(qd),
-            "': ",
-            paste(bad, collapse = ", "),
-            ". Available: ",
-            paste(available, collapse = ", ")
+        qdStudy <- getStudy(qd)
+        badStr <- str_flatten(bad, ", ")
+        availStr <- str_flatten(available, ", ")
+        msg <- glue(
+            "Unknown context(s) for QtlDataset '{qdStudy}': {badStr}. ",
+            "Available: {availStr}"
         )
+        abort(msg)
     }
     contexts
 }
@@ -331,17 +333,18 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         return(NULL)
     }
     # Canonicalize variant colnames (chr-prefix + separator, allele order
-    # preserved; rsIDs passed through) so colocboost's name-based matching aligns
+    # preserved; rsIDs passed through) so colocboost's name-based matching
+    # aligns
     # them with the sumstat / LD ids and across studies. A genuine ref/alt swap
     # stays a distinct id -- names are aligned here, allele *coding* is not.
     colnames(X) <- normalizeVariantId(colnames(X))
     common <- intersect(rownames(X), rownames(Y))
     if (length(common) == 0L) {
-        message(
-            "colocboostPipeline: skipping context '",
-            ctx,
-            "' (no samples shared between residualized X and Y)."
+        msg <- glue(
+            "colocboostPipeline: skipping context '{ctx}' ",
+            "(no samples shared between residualized X and Y)."
         )
+        inform(msg)
         return(NULL)
     }
     X <- X[common, , drop = FALSE]
@@ -364,13 +367,12 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
             region = region
         ),
         error = function(e) {
-            message(
-                "colocboostPipeline: skipping context '",
-                ctx,
-                "' (residualized phenotypes unavailable: ",
-                conditionMessage(e),
-                ")."
+            eMsg <- conditionMessage(e)
+            msg <- glue(
+                "colocboostPipeline: skipping context '{ctx}' ",
+                "(residualized phenotypes unavailable: {eMsg})."
             )
+            inform(msg)
             NULL
         }
     )
@@ -389,13 +391,12 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
             samples = samples
         ),
         error = function(e) {
-            message(
-                "colocboostPipeline: skipping context '",
-                ctx,
-                "' (residualized genotypes unavailable: ",
-                conditionMessage(e),
-                ")."
+            eMsg <- conditionMessage(e)
+            msg <- glue(
+                "colocboostPipeline: skipping context '{ctx}' ",
+                "(residualized genotypes unavailable: {eMsg})."
             )
+            inform(msg)
             NULL
         }
     )
@@ -411,11 +412,11 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     }
     Y <- .cbPipSkipOutcomes(X, Y, cutoffCtx)
     if (is.null(Y) || ncol(Y) == 0L) {
-        message(
-            "colocboostPipeline: skipping context '",
-            ctx,
-            "' (no outcome cleared the signal screen)."
+        msg <- glue(
+            "colocboostPipeline: skipping context '{ctx}' ",
+            "(no outcome cleared the signal screen)."
         )
+        inform(msg)
         return(NULL)
     }
     Y
@@ -448,7 +449,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # list(YSplit, dict). (Sequential make.unique naming -- kept as a loop.)
 # @noRd
 .cbSplitY <- function(YperCtx, xMatch) {
-    allTraitNames <- unlist(lapply(YperCtx, colnames), use.names = FALSE)
+    allTraitNames <- unlist(map(YperCtx, colnames), use.names = FALSE)
     dupTraits <- unique(allTraitNames[
         duplicated(allTraitNames) | duplicated(allTraitNames, fromLast = TRUE)
     ])
@@ -477,12 +478,12 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # @noRd
 .cbTraitName <- function(tname, ctx, dupTraits, existing) {
     if (is.null(tname) || is.na(tname) || tname == "") {
-        tname <- paste0("outcome", length(existing) + 1L)
+        tname <- str_c("outcome", length(existing) + 1L)
     }
-    if (tname %in% dupTraits) {
-        tname <- paste0(ctx, "_", tname)
+    if (is_in(tname, dupTraits)) {
+        tname <- str_c(ctx, "_", tname)
     }
-    if (tname %in% existing) {
+    if (is_in(tname, existing)) {
         tname <- make.unique(c(existing, tname))[length(existing) + 1L]
     }
     tname
@@ -520,7 +521,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     }
     keptIds <- attr(R, "keptVariantIds")
     attr(R, "keptVariantIds") <- NULL
-    df <- df[variantIds %in% keptIds, , drop = FALSE]
+    df <- filter(df, is_in(variantIds, keptIds))
     ss <- data.frame(
         z = df$z,
         n = .cbEffectiveN(df, nCase, nControl),
@@ -573,10 +574,10 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     ldSketch <- getLdSketch(ss)
     keepRow <- rep(TRUE, nrow(ss))
     if (!is.null(contexts) && length(contexts) > 0L) {
-        keepRow <- keepRow & as.character(ss$context) %in% contexts
+        keepRow <- keepRow & is_in(as.character(ss$context), contexts)
     }
     if (!is.null(traitId) && length(traitId) > 0L) {
-        keepRow <- keepRow & as.character(ss$trait) %in% traitId
+        keepRow <- keepRow & is_in(as.character(ss$trait), traitId)
     }
     if (!any(keepRow)) {
         return(list())
@@ -588,7 +589,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         st <- as.character(ss$study)[[i]]
         ctx <- as.character(ss$context)[[i]]
         tr <- as.character(ss$trait)[[i]]
-        label <- paste(st, ctx, tr, sep = ":")
+        label <- str_c(st, ctx, tr, sep = ":")
         pair <- .cbSumstatPair(
             df = getSumstatDf(
                 ss,
@@ -598,7 +599,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
                 require = "Z"
             ),
             ldSketch = ldSketch,
-            varY = if ("varY" %in% names(ss)) ss$varY[[i]] else NA_real_
+            varY = if (is_in("varY", names(ss))) ss$varY[[i]] else NA_real_
         )
         if (!is.null(pair)) bundle[[label]] <- pair
     }
@@ -618,9 +619,13 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         pair <- .cbSumstatPair(
             df = getSumstatDf(gws, study = st, require = "Z"),
             ldSketch = ldSketch,
-            varY = if ("varY" %in% names(gws)) gws$varY[[i]] else NA_real_,
-            nCase = if ("nCase" %in% names(gws)) gws$nCase[[i]] else NA_real_,
-            nControl = if ("nControl" %in% names(gws)) {
+            varY = if (is_in("varY", names(gws))) gws$varY[[i]] else NA_real_,
+            nCase = if (is_in("nCase", names(gws))) {
+                gws$nCase[[i]]
+            } else {
+                NA_real_
+            },
+            nControl = if (is_in("nControl", names(gws))) {
                 gws$nControl[[i]]
             } else {
                 NA_real_
@@ -660,7 +665,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     ldMatch <- integer(length(bundles))
     for (i in seq_along(bundles)) {
         ld <- bundles[[i]]$LD
-        matched <- which(vapply(ldUnique, identical, logical(1), ld))
+        matched <- which(map_lgl(ldUnique, identical, ld))
         if (length(matched) > 0L) {
             ldMatch[[i]] <- matched[[1L]]
         } else {
@@ -668,8 +673,8 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
             ldMatch[[i]] <- length(ldUnique)
         }
     }
-    names(ldUnique) <- paste0("LD", seq_along(ldUnique))
-    sumstat <- lapply(bundles, `[[`, "sumstat")
+    names(ldUnique) <- str_c("LD", seq_along(ldUnique))
+    sumstat <- map(bundles, "sumstat")
     names(sumstat) <- names(bundles)
     dict <- cbind(seq_along(bundles), ldMatch)
     colnames(dict) <- c("sumstat", "LD")
@@ -709,10 +714,11 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     hasInd <- !is.null(individualBundle)
     hasSs <- length(sumstatBundle$sumstat) > 0L
     if (!hasInd && !hasSs) {
-        message(
+        msg <- glue(
             "colocboostPipeline: no QTL inputs remain after selection. ",
             "Nothing to run."
         )
+        inform(msg)
         return(results)
     }
     if (isTRUE(xqtlColoc) && hasInd) {
@@ -742,16 +748,16 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # @noRd
 .cbRunXqtlOnly <- function(individualBundle, focalTrait, dotArgs) {
     traits <- individualBundle$outcomeNames
-    focalIdx <- if (!is.null(focalTrait) && focalTrait %in% traits) {
+    focalIdx <- if (!is.null(focalTrait) && is_in(focalTrait, traits)) {
         which(traits == focalTrait)
     } else {
         NULL
     }
-    message(
-        "====== Performing xQTL-only ColocBoost on ",
-        length(individualBundle$Y),
-        " contexts. ====="
+    nCtx <- length(individualBundle$Y)
+    msg <- glue(
+        "====== Performing xQTL-only ColocBoost on {nCtx} contexts. ====="
     )
+    inform(msg)
     args <- c(
         list(
             X = individualBundle$X,
@@ -776,13 +782,12 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     )
     ldArgs <- .cbBuildLdArgs(sumstatBundle$LD)
     nContexts <- if (hasInd) length(individualBundle$Y) else 0L
-    message(
+    nGwas <- length(sumstatBundle$sumstat)
+    msg <- glue(
         "====== Performing non-focal GWAS-xQTL ColocBoost on ",
-        nContexts,
-        " contexts and ",
-        length(sumstatBundle$sumstat),
-        " GWAS. ====="
+        "{nContexts} contexts and {nGwas} GWAS. ====="
     )
+    inform(msg)
     args <- c(
         list(
             X = if (hasInd) individualBundle$X else NULL,
@@ -812,16 +817,15 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     ssNames <- names(sumstatBundle$sumstat)
     t1 <- Sys.time()
     separate <- set_names(
-        map(seq_along(ssNames), function(i) {
-            .cbRunOneSeparateGwas(
-                i,
-                ssNames[[i]],
-                individualBundle,
-                sumstatBundle,
-                hasInd,
-                dotArgs
-            )
-        }),
+        map(
+            seq_along(ssNames),
+            .cbSeparateGwasAt,
+            ssNames = ssNames,
+            individualBundle = individualBundle,
+            sumstatBundle = sumstatBundle,
+            hasInd = hasInd,
+            dotArgs = dotArgs
+        ),
         ssNames
     )
     t2 <- Sys.time()
@@ -856,13 +860,11 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         study
     )
     nContexts <- if (hasInd) length(individualBundle$Y) else 0L
-    message(
-        "====== Performing focal GWAS-xQTL ColocBoost on ",
-        nContexts,
-        " contexts and ",
-        study,
-        " GWAS. ====="
+    msg <- glue(
+        "====== Performing focal GWAS-xQTL ColocBoost on {nContexts} ",
+        "contexts and {study} GWAS. ====="
     )
+    inform(msg)
     args <- c(
         list(
             X = if (hasInd) individualBundle$X else NULL,
@@ -876,7 +878,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         ldArgs,
         dotArgs
     )
-    .cbRun(paste("Separate GWAS ColocBoost for", study), args)$result
+    .cbRun(str_c("Separate GWAS ColocBoost for ", study), args)$result
 }
 
 # =============================================================================
@@ -943,12 +945,12 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     if (!is.null(individualBundle)) {
         ids <- c(
             ids,
-            unlist(lapply(individualBundle$X, colnames), use.names = FALSE)
+            unlist(map(individualBundle$X, colnames), use.names = FALSE)
         )
     }
     ids <- c(
         ids,
-        unlist(lapply(pairs, function(p) p$sumstat$variant), use.names = FALSE)
+        unlist(map(pairs, list("sumstat", "variant")), use.names = FALSE)
     )
     ids <- unique(ids[!is.na(ids)])
     if (length(ids) == 0L) {
@@ -956,17 +958,17 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     }
     parsed <- parseVariantId(ids)
     ok <- !is.na(parsed$chrom) & !is.na(parsed$pos)
-    locus <- ifelse(ok, paste(parsed$chrom, parsed$pos, sep = ":"), ids)
+    locus <- if_else(ok, str_c(parsed$chrom, parsed$pos, sep = ":"), ids)
     canonical <- ids[!duplicated(locus)]
     if (!is.null(individualBundle)) {
-        individualBundle$X <- lapply(
+        individualBundle$X <- map(
             individualBundle$X,
             .cbFlipMatrixToCanonical,
             canonical = canonical
         )
     }
-    pairs <- lapply(pairs, .cbFlipPairToCanonical, canonical = canonical)
-    pairs <- pairs[!vapply(pairs, is.null, logical(1))]
+    pairs <- map(pairs, .cbFlipPairToCanonical, canonical = canonical)
+    pairs <- pairs[!map_lgl(pairs, is.null)]
     list(individualBundle = individualBundle, pairs = pairs)
 }
 
@@ -987,7 +989,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     alleleFlip = TRUE
 ) {
     if (!isTRUE(xqtlColoc) && !isTRUE(jointGwas) && !isTRUE(separateGwas)) {
-        message("colocboostPipeline: no analysis flag is TRUE; nothing to do.")
+        inform("colocboostPipeline: no analysis flag is TRUE; nothing to do.")
         return(.cbEmptyResult())
     }
     combinedPairs <- .cbAppendGwasPairs(qtlPairs, gwasSumStats, qtlLdSketch)
@@ -1028,7 +1030,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     combinedPairs <- qtlPairs
     for (label in names(gwasPairs)) {
         key <- label
-        if (key %in% names(combinedPairs)) {
+        if (is_in(key, names(combinedPairs))) {
             key <- make.unique(
                 c(names(combinedPairs), key)
             )[length(combinedPairs) + 1L]
@@ -1066,7 +1068,6 @@ setMethod(
         alleleFlip = TRUE,
         ...
     ) {
-        dotArgs <- list(...)
         screenSpec <- .cbScreenSpec(
             pipCutoffToSkip,
             absZCutoffToSkip,
@@ -1090,7 +1091,7 @@ setMethod(
             jointGwas,
             separateGwas,
             focalTrait,
-            dotArgs,
+            list(...),
             alleleFlip = alleleFlip
         )
     }
@@ -1244,8 +1245,8 @@ setMethod(
 # outcome names).
 # @noRd
 .cbPrefixStudyNames <- function(sub, study) {
-    names(sub$X) <- paste(study, names(sub$X), sep = ":")
-    sub$outcomeNames <- paste(study, sub$outcomeNames, sep = ":")
+    names(sub$X) <- str_c(study, names(sub$X), sep = ":")
+    sub$outcomeNames <- str_c(study, sub$outcomeNames, sep = ":")
     names(sub$Y) <- sub$outcomeNames
     sub
 }
@@ -1275,11 +1276,46 @@ setMethod(
     "colocboostPipeline",
     "ANY",
     function(qtlData, gwasSumStats = NULL, ...) {
-        stop(
-            "colocboostPipeline does not accept inputs of class '",
-            class(qtlData)[[1L]],
-            "'. Pass a QtlDataset, QtlSumStats, or ",
+        cls <- class(qtlData)[[1L]]
+        msg <- glue(
+            "colocboostPipeline does not accept inputs of class ",
+            "'{cls}'. Pass a QtlDataset, QtlSumStats, or ",
             "MultiStudyQtlDataset for QTL data."
         )
+        abort(msg)
     }
 )
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# TRUE when a matrix is non-square (a samples x variants genotype reference).
+# @noRd
+.cbIsNonSquare <- function(m) {
+    nrow(m) != ncol(m)
+}
+
+# Single-effect screen decision for outcome column `j` (drop on failure).
+# @noRd
+.cbScreenOutcome <- function(j, X, Y, spec) {
+    .fmSerScreen(X, Y[, j], spec, fallback = FALSE)
+}
+
+# Run one separate-GWAS colocboost fit for sumstat index `i`.
+# @noRd
+.cbSeparateGwasAt <- function(
+    i,
+    ssNames,
+    individualBundle,
+    sumstatBundle,
+    hasInd,
+    dotArgs
+) {
+    .cbRunOneSeparateGwas(
+        i,
+        ssNames[[i]],
+        individualBundle,
+        sumstatBundle,
+        hasInd,
+        dotArgs
+    )
+}

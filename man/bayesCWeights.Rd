@@ -19,6 +19,10 @@ BayesC mixture. Default \code{0.1}.}
 \item{...}{Additional arguments forwarded to \code{bayesAlphabetWeights} /
 \code{qgg}.}
 }
+\value{
+A numeric vector of effect-size weights, one per variant (column of
+  \code{X}); columns dropped for zero variance receive weight 0.
+}
 \description{
 Use a rounded spike prior (low-variance Gaussian).
 }

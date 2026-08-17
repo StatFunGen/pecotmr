@@ -72,7 +72,7 @@ pvalAcat <- function(pvals, naRm = TRUE) {
         return(pvals[[1]])
     }
     pvals <- pmin(pvals, 0.99)
-    cauchyVals <- ifelse(
+    cauchyVals <- if_else(
         pvals < 1e-15,
         1 / (pvals * pi),
         tan(pi * (0.5 - pvals))
@@ -91,10 +91,11 @@ pvalHmp <- function(pvals) {
     # Make sure harmonicmeanp is installed
     if (!requireNamespace("harmonicmeanp", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "To use this function, please install harmonicmeanp: ",
             "https://cran.r-project.org/web/packages/harmonicmeanp/index.html"
         )
+        abort(msg)
         # nocov end
     }
     # https://search.r-project.org/CRAN/refmans/harmonicmeanp/html/pLandau.html
@@ -112,13 +113,22 @@ pvalHmp <- function(pvals) {
     ))
 }
 
+# Raise the "unknown method" error from a switch() default slot (which cannot
+# host the two-statement glue + abort form).
+# @noRd
+.abortUnknownMethod <- function(kind, method) {
+    msg <- glue("Unknown {kind} method: '{method}'")
+    abort(msg)
+}
+
 pvalPoolr <- function(pvals, method, R) {
     if (!requireNamespace("poolr", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "To use this method, please install poolr: ",
             "install.packages('poolr')"
         )
+        abort(msg)
         # nocov end
     }
     fn <- switch(
@@ -126,7 +136,7 @@ pvalPoolr <- function(pvals, method, R) {
         fisher = poolr::fisher,
         stouffer = poolr::stouffer,
         invchisq = poolr::invchisq,
-        stop(sprintf("Unknown poolr method: '%s'", method))
+        .abortUnknownMethod("poolr", method)
     )
     fn(pvals, adjust = "generalized", R = R)$p
 }
@@ -134,7 +144,7 @@ pvalPoolr <- function(pvals, method, R) {
 pvalGbj <- function(zScores, R, method) {
     if (!requireNamespace("GBJ", quietly = TRUE)) {
         # nocov start
-        stop("To use this method, please install GBJ: install.packages('GBJ')")
+        abort("To use this method, please install GBJ: install.packages('GBJ')")
         # nocov end
     }
     result <- switch(
@@ -145,7 +155,7 @@ pvalGbj <- function(zScores, R, method) {
         ghc = GBJ::GHC(test_stats = zScores, cor_mat = R),
         minp = GBJ::minP(test_stats = zScores, cor_mat = R),
         gbj_omni = GBJ::OMNI_ss(test_stats = zScores, cor_mat = R),
-        stop(sprintf("Unknown GBJ method: '%s'", method))
+        .abortUnknownMethod("GBJ", method)
     )
     pvalName <- switch(
         method,
@@ -162,7 +172,7 @@ pvalGbj <- function(zScores, R, method) {
 pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
     if (!requireNamespace("aSPU", quietly = TRUE)) {
         # nocov start
-        stop(
+        abort(
             "To use this method, please install aSPU: install.packages('aSPU')"
         )
         # nocov end
@@ -177,7 +187,7 @@ pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
             result <- aSPU::GATES2(ldmatrix = R, p = pvals)
             result[["Pg"]]
         },
-        stop(sprintf("Unknown aSPU method: '%s'", method))
+        .abortUnknownMethod("aSPU", method)
     )
 }
 
@@ -237,40 +247,40 @@ pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
         return(NULL)
     }
     if (!is.matrix(R)) {
-        stop("`R` must be a matrix.")
+        abort("`R` must be a matrix.")
     }
     if (nrow(R) != ncol(R)) {
-        stop("`R` must be square.")
+        abort("`R` must be square.")
     }
     rNames <- rownames(R)
     cNames <- colnames(R)
     hasNames <- !is.null(rNames) && !is.null(cNames)
     if (hasNames) {
         if (!identical(rNames, cNames)) {
-            stop("`R` rownames and colnames must be identical.")
+            abort("`R` rownames and colnames must be identical.")
         }
         missing <- setdiff(targetNames, rNames)
         if (length(missing) > 0L) {
-            stop(
-                "`R` is missing entries for: ",
-                paste(utils::head(missing, 5), collapse = ", "),
-                if (length(missing) > 5L) {
-                    sprintf(" (and %d more)", length(missing) - 5L)
-                } else {
-                    ""
-                }
-            )
+            shown <- str_flatten(utils::head(missing, 5), ", ")
+            moreSuffix <- if (length(missing) > 5L) {
+                nMore <- length(missing) - 5L
+                glue(" (and {nMore} more)")
+            } else {
+                ""
+            }
+            msg <- glue("`R` is missing entries for: {shown}{moreSuffix}")
+            abort(msg)
         }
         R <- R[targetNames, targetNames, drop = FALSE]
     } else {
         if (nrow(R) != length(targetNames)) {
-            stop(
-                "Unnamed `R` must have nrow = length(pvals); got nrow(R) = ",
-                nrow(R),
-                ", length(pvals) = ",
-                length(targetNames),
-                "."
+            nR <- nrow(R)
+            nTarget <- length(targetNames)
+            msg <- glue(
+                "Unnamed `R` must have nrow = length(pvals); got ",
+                "nrow(R) = {nR}, length(pvals) = {nTarget}."
             )
+            abort(msg)
         }
     }
     R
@@ -295,7 +305,7 @@ pvalAspu <- function(zScores = NULL, pvals = NULL, R, method) {
         gbj_omni = pvalGbj(zScores, R = R, method = method),
         aspu = pvalAspu(zScores = zScores, R = R, method = "aspu"),
         gates = pvalAspu(pvals = pvals, R = R, method = "gates"),
-        stop(sprintf("Unknown combination method: '%s'", method))
+        .abortUnknownMethod("combination", method)
     )
 }
 
@@ -384,21 +394,17 @@ combinePValues <- function(
 # @noRd
 .combinePvalCheckMethods <- function(methods) {
     if (missing(methods) || length(methods) == 0L) {
-        stop(
-            "`methods` is required (one or more of: ",
-            paste(.combinePvalKnownMethods, collapse = ", "),
-            ")."
-        )
+        known <- str_flatten(.combinePvalKnownMethods, ", ")
+        msg <- glue("`methods` is required (one or more of: {known}).")
+        abort(msg)
     }
     methods <- as.character(methods)
     unknown <- setdiff(methods, .combinePvalKnownMethods)
     if (length(unknown) > 0L) {
-        stop(
-            "Unknown method(s): ",
-            paste(unknown, collapse = ", "),
-            ". Known: ",
-            paste(.combinePvalKnownMethods, collapse = ", ")
-        )
+        unknownStr <- str_flatten(unknown, ", ")
+        known <- str_flatten(.combinePvalKnownMethods, ", ")
+        msg <- glue("Unknown method(s): {unknownStr}. Known: {known}")
+        abort(msg)
     }
     methods
 }
@@ -408,20 +414,22 @@ combinePValues <- function(
 .combinePvalCheckPrereqs <- function(methods, zScores, R) {
     needZ <- intersect(methods, .combinePvalMethodsNeedingZ)
     if (length(needZ) > 0L && is.null(zScores)) {
-        stop(
-            "Method(s) ",
-            paste(needZ, collapse = ", "),
-            " require `zScores`; supplied input only has pvals. Signed ",
-            "z-scores cannot be recovered from p-values alone."
+        needZStr <- str_flatten(needZ, ", ")
+        msg <- glue(
+            "Method(s) {needZStr} require `zScores`; supplied input only ",
+            "has pvals. Signed z-scores cannot be recovered from p-values ",
+            "alone."
         )
+        abort(msg)
     }
     needR <- intersect(methods, .combinePvalMethodsNeedingR)
     if (length(needR) > 0L && is.null(R)) {
-        stop(
-            "Method(s) ",
-            paste(needR, collapse = ", "),
-            " require an `R` correlation matrix; got NULL."
+        needRStr <- str_flatten(needR, ", ")
+        msg <- glue(
+            "Method(s) {needRStr} require an `R` correlation matrix; ",
+            "got NULL."
         )
+        abort(msg)
     }
     invisible(NULL)
 }
@@ -433,7 +441,7 @@ combinePValues <- function(
         pvals <- 2 * stats::pnorm(-abs(as.numeric(zScores)))
     }
     if (is.null(pvals)) {
-        stop("Either `pvals` or `zScores` must be supplied.")
+        abort("Either `pvals` or `zScores` must be supplied.")
     }
     pvals
 }
@@ -441,10 +449,11 @@ combinePValues <- function(
 # @noRd
 .combinePvalCheckLengths <- function(pvals, zScores) {
     if (!is.null(zScores) && length(zScores) != length(pvals)) {
-        stop(
+        msg <- glue(
             "`pvals` and `zScores` must have the same length when both ",
             "supplied."
         )
+        abort(msg)
     }
     invisible(NULL)
 }
@@ -457,12 +466,14 @@ combinePValues <- function(
     invalidMask <- !naMask & (!is.finite(pvals) | pvals <= 0 | pvals >= 1)
     dropMask <- (naRm & naMask) | invalidMask
     if (any(dropMask)) {
-        warning(sprintf(
-            "combinePValues: dropped %d entry/entries (%d NA, %d invalid).",
-            sum(dropMask),
-            sum(naMask & dropMask),
-            sum(invalidMask)
-        ))
+        nDrop <- sum(dropMask)
+        nNa <- sum(naMask & dropMask)
+        nInvalid <- sum(invalidMask)
+        msg <- glue(
+            "combinePValues: dropped {nDrop} entry/entries ",
+            "({nNa} NA, {nInvalid} invalid)."
+        )
+        warn(msg)
     }
     keep <- !dropMask
     list(
@@ -519,11 +530,9 @@ combinePValues <- function(
     p <- tryCatch(
         .combinePvalSingle(m, pvals = pvalsK, zScores = zScoresK, R = Raligned),
         error = function(e) {
-            warning(sprintf(
-                "combinePValues: method '%s' failed: %s",
-                m,
-                conditionMessage(e)
-            ))
+            eMsg <- conditionMessage(e)
+            msg <- glue("combinePValues: method '{m}' failed: {eMsg}")
+            warn(msg)
             NA_real_
         }
     )

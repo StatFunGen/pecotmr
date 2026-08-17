@@ -54,9 +54,9 @@ setMethod("getGenome", "LdBlocks", function(x, ...) x@genome)
 #' @rdname show-methods
 #' @export
 setMethod("show", "LdBlocks", function(object) {
-    cat(sprintf(
-        "LdBlocks: %d blocks, genome build: %s\n",
-        length(object@blocks),
-        object@genome
+    cat(glue(
+        "LdBlocks: {length(object@blocks)} blocks, ",
+        "genome build: {object@genome}\n",
+        .trim = FALSE
     ))
 })

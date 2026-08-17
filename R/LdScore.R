@@ -51,16 +51,18 @@ setClass(
 setMethod("show", "LdScore", function(object) {
     n_scores <- ncol(object@ldScores)
     has_matrix <- length(object@ldMatrixList) > 0
-    cat(sprintf(
-        "LdScore: %d SNPs, %d LD score columns\n",
-        nrow(object@snpInfo),
-        n_scores
+    cat(glue(
+        "LdScore: {nrow(object@snpInfo)} SNPs, ",
+        "{n_scores} LD score columns\n",
+        .trim = FALSE
     ))
-    cat(sprintf("  Full LD matrices: %s (needed for g-LDSC)\n", has_matrix))
-    cat(sprintf(
-        "  Reference N: %d, In-sample: %s\n",
-        object@nRef,
-        object@inSample
+    cat(glue(
+        "  Full LD matrices: {has_matrix} (needed for g-LDSC)\n",
+        .trim = FALSE
+    ))
+    cat(glue(
+        "  Reference N: {object@nRef}, In-sample: {object@inSample}\n",
+        .trim = FALSE
     ))
 })
 

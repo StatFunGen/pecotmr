@@ -51,22 +51,26 @@ setClass(
             errors <- c(errors, "'path' must be a single character string")
         }
         valid_formats <- c("gds", "vcf", "plink1", "plink2")
-        if (!object@format %in% valid_formats) {
+        if (!is_in(object@format, valid_formats)) {
             errors <- c(
                 errors,
-                paste(
-                    "'format' must be one of:",
-                    paste(valid_formats, collapse = ", ")
+                str_c(
+                    "'format' must be one of: ",
+                    str_flatten(valid_formats, ", ")
                 )
             )
         }
         if (length(object@chromPaths) > 0L) {
             nm <- names(object@chromPaths)
-            if (is.null(nm) || any(!nzchar(nm)) || anyDuplicated(nm)) {
+            if (
+                is.null(nm) ||
+                    any(str_length(nm) == 0L) ||
+                    anyDuplicated(nm)
+            ) {
                 errors <- c(
                     errors,
-                    paste(
-                        "'chromPaths' must be a uniquely-named",
+                    str_c(
+                        "'chromPaths' must be a uniquely-named ",
                         "character vector (names = chromosomes)"
                     )
                 )
@@ -79,22 +83,21 @@ setClass(
 #' @rdname show-methods
 #' @export
 setMethod("show", "GenotypeHandle", function(object) {
-    cat(sprintf("GenotypeHandle [%s]\n", object@format))
+    cat(glue("GenotypeHandle [{object@format}]\n", .trim = FALSE))
     chromPaths <- .genotypeChromPaths(object)
     if (length(chromPaths) > 0L) {
-        cat(sprintf("  Chrom-meta: %s\n", object@path))
-        cat(sprintf(
-            "  %d per-chromosome files: %s\n",
-            length(chromPaths),
-            paste(names(chromPaths), collapse = ", ")
+        cat(glue("  Chrom-meta: {object@path}\n", .trim = FALSE))
+        cat(glue(
+            "  {length(chromPaths)} per-chromosome files: ",
+            "{str_flatten(names(chromPaths), ', ')}\n",
+            .trim = FALSE
         ))
     } else {
-        cat(sprintf("  Path: %s\n", object@path))
+        cat(glue("  Path: {object@path}\n", .trim = FALSE))
     }
-    cat(sprintf(
-        "  %d samples, %d SNPs\n",
-        object@nSamples,
-        nrow(object@snpInfo)
+    cat(glue(
+        "  {object@nSamples} samples, {nrow(object@snpInfo)} SNPs\n",
+        .trim = FALSE
     ))
 })
 
@@ -215,13 +218,14 @@ GenotypeHandle <- function(
     bedComplete <- .ghTrioComplete(p$bed, p$bim, p$fam, "bed/bim/fam")
     pgenComplete <- .ghTrioComplete(p$pgen, p$pvar, p$psam, "pgen/pvar/psam")
     if (!is.null(p$ldMeta) && is.null(p$region)) {
-        stop(
+        msg <- glue(
             "`ldMeta` requires a `region` (a 'chr:start-end' string or a ",
             "one-row data.frame with chrom/start/end)."
         )
+        abort(msg)
     }
     if (is.null(p$ldMeta) && !is.null(p$region)) {
-        stop("`region` is only meaningful when `ldMeta` is supplied.")
+        abort("`region` is only meaningful when `ldMeta` is supplied.")
     }
     list(bedComplete = bedComplete, pgenComplete = pgenComplete)
 }
@@ -232,11 +236,10 @@ GenotypeHandle <- function(
     given <- !is.null(a) || !is.null(b) || !is.null(c)
     complete <- !is.null(a) && !is.null(b) && !is.null(c)
     if (given && !complete) {
-        stop(
-            "If specifying the ",
-            label,
-            " triplet, all three must be provided."
+        msg <- glue(
+            "If specifying the {label} triplet, all three must be provided."
         )
+        abort(msg)
     }
     complete
 }
@@ -255,20 +258,21 @@ GenotypeHandle <- function(
         genoMeta = !is.null(p$genoMeta)
     )
     if (sum(sources) != 1L) {
-        stop(
+        nSrc <- sum(sources)
+        msg <- glue(
             "Exactly one of `path`, `plink1Prefix`, `plink2Prefix`, the ",
             "bed/bim/fam triplet, the pgen/pvar/psam triplet, `ldMeta`, or ",
-            "`genoMeta` must be specified (got ",
-            sum(sources),
-            ")."
+            "`genoMeta` must be specified (got {nSrc})."
         )
+        abort(msg)
     }
     if (!is.null(p$chroms) && !sources[["genoMeta"]]) {
-        stop(
+        msg <- glue(
             "`chroms` restricts which per-chromosome shards are read and is ",
             "only supported with `genoMeta` (a single-file panel has no ",
             "shards to skip)."
         )
+        abort(msg)
     }
     sources
 }
@@ -284,33 +288,33 @@ GenotypeHandle <- function(
 .ghResolveLdPath <- function(ldMeta, region) {
     ldPaths <- getRegionalLdMeta(ldMeta, region)$intersections$LD_file_paths
     if (length(ldPaths) == 0L) {
-        stop(
-            "GenotypeHandle: no LD-meta row covers region ",
-            deparse(region),
-            " in ",
-            ldMeta,
-            "."
+        regionStr <- deparse(region)
+        msg <- glue(
+            "GenotypeHandle: no LD-meta row covers region {regionStr} ",
+            "in {ldMeta}."
         )
+        abort(msg)
     }
     if (length(ldPaths) > 1L) {
-        stop(
-            "GenotypeHandle: region ",
-            deparse(region),
-            " spans multiple LD-meta rows; the GenotypeHandle constructor ",
-            "only resolves single-row regions. Use loadLdMatrix() for ",
-            "multi-row regions, or restrict the region to a single LD block."
+        regionStr <- deparse(region)
+        msg <- glue(
+            "GenotypeHandle: region {regionStr} spans multiple LD-meta ",
+            "rows; the GenotypeHandle constructor only resolves single-row ",
+            "regions. Use loadLdMatrix() for multi-row regions, or restrict ",
+            "the region to a single LD block."
         )
+        abort(msg)
     }
     ldPath <- ldPaths[[1L]]
-    if (grepl("\\.cor(\\.xz)?$", ldPath, ignore.case = TRUE)) {
-        stop(
-            "GenotypeHandle: the LD-meta row for region ",
-            deparse(region),
-            " points at a pre-computed correlation matrix (",
-            ldPath,
-            "). Use loadLdMatrix() / loadLdSketch() for .cor.xz inputs; ",
+    if (str_detect(ldPath, regex("\\.cor(\\.xz)?$", ignore_case = TRUE))) {
+        regionStr <- deparse(region)
+        msg <- glue(
+            "GenotypeHandle: the LD-meta row for region {regionStr} points ",
+            "at a pre-computed correlation matrix ({ldPath}). Use ",
+            "loadLdMatrix() / loadLdSketch() for .cor.xz inputs; ",
             "GenotypeHandle accepts only genotype payloads (VCF/GDS/PLINK)."
         )
+        abort(msg)
     }
     ldPath
 }
@@ -318,36 +322,37 @@ GenotypeHandle <- function(
 # Dispatch a resolved genotype path to the format-specific reader by extension.
 # @noRd
 .ghLdPathToHandle <- function(ldPath, ...) {
-    lower <- tolower(ldPath)
-    if (grepl("\\.vcf(\\.b?gz)?$", lower) || endsWith(lower, ".bcf")) {
+    lower <- str_to_lower(ldPath)
+    if (str_detect(lower, "\\.vcf(\\.b?gz)?$") || str_ends(lower, "\\.bcf")) {
         return(readGenotypes(ldPath, format = "vcf", ...))
     }
-    if (endsWith(lower, ".gds")) {
+    if (str_ends(lower, "\\.gds")) {
         return(readGenotypes(ldPath, format = "gds", ...))
     }
-    if (endsWith(lower, ".bed")) {
+    if (str_ends(lower, "\\.bed")) {
         return(.makePlink1Handle(
-            sub("\\.bed$", "", ldPath, ignore.case = TRUE),
+            str_remove(ldPath, regex("\\.bed$", ignore_case = TRUE)),
             ...
         ))
     }
-    if (endsWith(lower, ".pgen")) {
+    if (str_ends(lower, "\\.pgen")) {
         return(.makePlink2Handle(
-            sub("\\.pgen$", "", ldPath, ignore.case = TRUE),
+            str_remove(ldPath, regex("\\.pgen$", ignore_case = TRUE)),
             ...
         ))
     }
-    stop(
-        "GenotypeHandle: unsupported LD-meta file extension on '",
-        ldPath,
-        "'. Expected one of .vcf/.vcf.gz/.vcf.bgz/.bcf/.gds/.bed/.pgen."
+    msg <- glue(
+        "GenotypeHandle: unsupported LD-meta file extension on ",
+        "'{ldPath}'. Expected one of ",
+        ".vcf/.vcf.gz/.vcf.bgz/.bcf/.gds/.bed/.pgen."
     )
+    abort(msg)
 }
 
 .genotypeHandleFromPlink1Triplet <- function(bed, bim, fam, ...) {
     for (f in list(bed = bed, bim = bim, fam = fam)) {
         if (!is.character(f) || length(f) != 1L) {
-            stop("Each of `bed`, `bim`, `fam` must be a single file path.")
+            abort("Each of `bed`, `bim`, `fam` must be a single file path.")
         }
     }
     stems <- c(
@@ -355,16 +360,17 @@ GenotypeHandle <- function(
         bim = file_path_sans_ext(bim),
         fam = file_path_sans_ext(fam)
     )
-    if (length(unique(stems)) != 1L) {
-        stop(
-            "`bed`, `bim`, and `fam` must share a common path stem. Got:\n",
-            paste0("  ", names(stems), ": ", stems, collapse = "\n"),
-            "\n",
-            "If your files are at different paths, either rename them ",
-            "to share ",
-            "a stem or arrange symlinks at a common prefix and pass ",
-            "`plink1Prefix` instead."
+    if (n_distinct(stems) != 1L) {
+        stemList <- str_c("  ", names(stems), ": ", stems, collapse = "\n")
+        msg <- glue(
+            "`bed`, `bim`, and `fam` must share a common path stem. ",
+            "Got:\n{stemList}\n",
+            "If your files are at different paths, either rename them to ",
+            "share a stem or arrange symlinks at a common prefix and pass ",
+            "`plink1Prefix` instead.",
+            .trim = FALSE
         )
+        abort(msg)
     }
     .makePlink1Handle(unname(stems[1L]), ...)
 }
@@ -372,25 +378,26 @@ GenotypeHandle <- function(
 .genotypeHandleFromPlink2Triplet <- function(pgen, pvar, psam, ...) {
     for (f in list(pgen = pgen, pvar = pvar, psam = psam)) {
         if (!is.character(f) || length(f) != 1L) {
-            stop("Each of `pgen`, `pvar`, `psam` must be a single file path.")
+            abort("Each of `pgen`, `pvar`, `psam` must be a single file path.")
         }
     }
-    pvarStem <- sub("\\.zst$", "", pvar, ignore.case = TRUE)
+    pvarStem <- str_remove(pvar, regex("\\.zst$", ignore_case = TRUE))
     stems <- c(
         pgen = file_path_sans_ext(pgen),
         pvar = file_path_sans_ext(pvarStem),
         psam = file_path_sans_ext(psam)
     )
-    if (length(unique(stems)) != 1L) {
-        stop(
-            "`pgen`, `pvar`, and `psam` must share a common path stem. Got:\n",
-            paste0("  ", names(stems), ": ", stems, collapse = "\n"),
-            "\n",
-            "If your files are at different paths, either rename them ",
-            "to share ",
-            "a stem or arrange symlinks at a common prefix and pass ",
-            "`plink2Prefix` instead."
+    if (n_distinct(stems) != 1L) {
+        stemList <- str_c("  ", names(stems), ": ", stems, collapse = "\n")
+        msg <- glue(
+            "`pgen`, `pvar`, and `psam` must share a common path stem. ",
+            "Got:\n{stemList}\n",
+            "If your files are at different paths, either rename them to ",
+            "share a stem or arrange symlinks at a common prefix and pass ",
+            "`plink2Prefix` instead.",
+            .trim = FALSE
         )
+        abort(msg)
     }
     .makePlink2Handle(unname(stems[1L]), ...)
 }
@@ -415,7 +422,7 @@ GenotypeHandle <- function(
 # Case-insensitive match of the first of `aliases` present in `cols`; falls
 # back to the `default` column position when none of the aliases are present.
 .metaMatchCol <- function(cols, aliases, default) {
-    hit <- which(tolower(cols) %in% tolower(aliases))
+    hit <- which(is_in(str_to_lower(cols), str_to_lower(aliases)))
     if (length(hit) > 0L) hit[[1L]] else default
 }
 
@@ -424,18 +431,15 @@ GenotypeHandle <- function(
 # to two distinct payloads is an error. Returns the data.frame unchanged.
 .metaCheckUniqueChrom <- function(df) {
     byChr <- split(df$path, df$chrom)
-    multi <- names(byChr)[vapply(
-        byChr,
-        function(p) length(unique(p)) > 1L,
-        logical(1L)
-    )]
+    multi <- names(byChr)[map_lgl(byChr, .ghMultiplePayloads)]
     if (length(multi) > 0L) {
-        stop(
-            "GenotypeHandle(genoMeta): chromosome(s) ",
-            paste(multi, collapse = ", "),
-            " map to multiple genotype payloads; each chromosome must map to ",
+        multiStr <- str_flatten(multi, ", ")
+        msg <- glue(
+            "GenotypeHandle(genoMeta): chromosome(s) {multiStr} map to ",
+            "multiple genotype payloads; each chromosome must map to ",
             "exactly one payload (no sub-chromosomal blocks)."
         )
+        abort(msg)
     }
     df
 }
@@ -458,16 +462,17 @@ GenotypeHandle <- function(
             length(genoMeta) >= 1L &&
             !is.null(names(genoMeta))
     ) {
-        return(.metaCheckUniqueChrom(data.frame(
+        return(.metaCheckUniqueChrom(tibble(
             chrom = names(genoMeta),
-            path = unname(genoMeta),
-            stringsAsFactors = FALSE
+            path = unname(genoMeta)
         )))
     }
-    stop(
-        "GenotypeHandle(genoMeta): expected a path to a `#chr,path` meta file ",
-        "or a named character vector (names = chromosomes, values = paths)."
+    msg <- glue(
+        "GenotypeHandle(genoMeta): expected a path to a `#chr,path` meta ",
+        "file or a named character vector (names = chromosomes, ",
+        "values = paths)."
     )
+    abort(msg)
 }
 
 # TRUE when `genoMeta` is a single existing-file path (vs a named vector).
@@ -483,20 +488,18 @@ GenotypeHandle <- function(
 # relative payload paths against the meta file's directory.
 # @noRd
 .parseChromMetaFile <- function(genoMeta) {
-    meta <- utils::read.table(
+    meta <- read_table(
         genoMeta,
-        header = TRUE,
-        sep = "",
-        comment.char = "",
-        stringsAsFactors = FALSE,
-        check.names = FALSE
+        col_names = TRUE,
+        col_types = cols(.default = col_character()),
+        comment = ""
     )
     if (ncol(meta) < 2L) {
-        stop(
-            "GenotypeHandle(genoMeta): meta file '",
-            genoMeta,
-            "' must have at least 2 columns (chromosome, path)."
+        msg <- glue(
+            "GenotypeHandle(genoMeta): meta file '{genoMeta}' must have ",
+            "at least 2 columns (chromosome, path)."
         )
+        abort(msg)
     }
     chromCol <- .metaMatchCol(
         names(meta),
@@ -509,23 +512,16 @@ GenotypeHandle <- function(
         default = 2L
     )
     base <- dirname(normalizePath(genoMeta))
-    .metaCheckUniqueChrom(data.frame(
+    .metaCheckUniqueChrom(tibble(
         chrom = as.character(meta[[chromCol]]),
-        path = .metaResolvePaths(as.character(meta[[pathCol]]), base),
-        stringsAsFactors = FALSE
+        path = .metaResolvePaths(as.character(meta[[pathCol]]), base)
     ))
 }
 
-# Resolve relative payload paths against `base` (absolute / existing kept as-is).
+# Resolve relative payload paths against `base` (absolute/existing kept as-is).
 # @noRd
 .metaResolvePaths <- function(pth, base) {
-    map_chr(pth, function(p) {
-        if (grepl("^(/|[A-Za-z]:)", p) || file.exists(p)) {
-            p
-        } else {
-            file.path(base, p)
-        }
-    })
+    map_chr(pth, .ghResolvePath, base = base)
 }
 
 # Build a single-file GenotypeHandle for one shard payload, dispatching to the
@@ -533,7 +529,7 @@ GenotypeHandle <- function(
 # from the file extension, falling back to PLINK prefix probing.
 #' @keywords internal
 .resolveGenotypeShard <- function(p, format = NULL) {
-    lower <- tolower(p)
+    lower <- str_to_lower(p)
     if (!is.null(format)) {
         if (format == "plink1") {
             return(.makePlink1Handle(p))
@@ -543,31 +539,36 @@ GenotypeHandle <- function(
         }
         return(readGenotypes(p, format = format))
     }
-    if (grepl("\\.vcf(\\.b?gz)?$", lower) || endsWith(lower, ".bcf")) {
+    if (str_detect(lower, "\\.vcf(\\.b?gz)?$") || str_ends(lower, "\\.bcf")) {
         return(readGenotypes(p, format = "vcf"))
     }
-    if (endsWith(lower, ".gds")) {
+    if (str_ends(lower, "\\.gds")) {
         return(readGenotypes(p, format = "gds"))
     }
-    if (endsWith(lower, ".bed")) {
-        return(.makePlink1Handle(sub("\\.bed$", "", p, ignore.case = TRUE)))
+    if (str_ends(lower, "\\.bed")) {
+        return(.makePlink1Handle(
+            str_remove(p, regex("\\.bed$", ignore_case = TRUE))
+        ))
     }
-    if (endsWith(lower, ".pgen")) {
-        return(.makePlink2Handle(sub("\\.pgen$", "", p, ignore.case = TRUE)))
+    if (str_ends(lower, "\\.pgen")) {
+        return(.makePlink2Handle(
+            str_remove(p, regex("\\.pgen$", ignore_case = TRUE))
+        ))
     }
     # No recognized extension: treat as a PLINK prefix, probe for the sidecar.
-    if (file.exists(paste0(p, ".bed"))) {
+    if (file.exists(str_c(p, ".bed"))) {
         return(.makePlink1Handle(p))
     }
-    if (file.exists(paste0(p, ".pgen"))) {
+    if (file.exists(str_c(p, ".pgen"))) {
         return(.makePlink2Handle(p))
     }
-    stop(
-        "GenotypeHandle(genoMeta): cannot determine genotype format for '",
-        p,
-        "'. Use a recognized extension (.bed/.pgen/.vcf[.gz]/.bcf/.gds), a ",
-        "PLINK prefix, or pass `format=`."
+    msg <- glue(
+        "GenotypeHandle(genoMeta): cannot determine genotype format for ",
+        "'{p}'. Use a recognized extension ",
+        "(.bed/.pgen/.vcf[.gz]/.bcf/.gds), a PLINK prefix, or pass ",
+        "`format=`."
     )
+    abort(msg)
 }
 
 # Assemble a sharded handle from a per-chromosome meta. Reads each shard's
@@ -582,7 +583,7 @@ GenotypeHandle <- function(
     format <- list(...)$format
     parsed <- .parseChromMeta(genoMeta)
     if (nrow(parsed) == 0L) {
-        stop(
+        abort(
             "GenotypeHandle(genoMeta): no chromosomes found in the meta input."
         )
     }
@@ -590,8 +591,7 @@ GenotypeHandle <- function(
     shards <- map(parsed$path, .resolveGenotypeShard, format = format)
     sharedFormat <- .chromMetaCheckFormats(shards)
     .chromMetaCheckSamples(shards, parsed)
-    unifiedSnpInfo <- do.call(rbind, map(shards, function(h) h@snpInfo))
-    rownames(unifiedSnpInfo) <- NULL
+    unifiedSnpInfo <- bind_rows(map(shards, .ghSnpInfo))
     new(
         "GenotypeHandle",
         path = .chromMetaPath(genoMeta),
@@ -613,22 +613,24 @@ GenotypeHandle <- function(
     if (is.null(chroms)) {
         return(parsed)
     }
-    keep <- canonChrom(as.character(parsed$chrom)) %in%
+    keep <- is_in(
+        canonChrom(as.character(parsed$chrom)),
         canonChrom(as.character(chroms))
-    if (any(keep)) parsed[keep, , drop = FALSE] else parsed
+    )
+    if (any(keep)) filter(parsed, keep) else parsed
 }
 
 # Require a single shared format across shards; returns it.
 # @noRd
 .chromMetaCheckFormats <- function(shards) {
-    formats <- map_chr(shards, function(h) h@format)
-    if (length(unique(formats)) != 1L) {
-        stop(
+    formats <- map_chr(shards, .ghFormat)
+    if (n_distinct(formats) != 1L) {
+        formatStr <- str_flatten(unique(formats), ", ")
+        msg <- glue(
             "GenotypeHandle(genoMeta): all per-chromosome files must share ",
-            "one format; got: ",
-            paste(unique(formats), collapse = ", "),
-            "."
+            "one format; got: {formatStr}."
         )
+        abort(msg)
     }
     formats[[1L]]
 }
@@ -639,12 +641,13 @@ GenotypeHandle <- function(
     sample0 <- shards[[1L]]@sampleIds
     for (i in seq_along(shards)[-1L]) {
         if (!identical(shards[[i]]@sampleIds, sample0)) {
-            stop(
-                "GenotypeHandle(genoMeta): all per-chromosome files must have ",
-                "identical sample IDs in the same order (mismatch at '",
-                parsed$path[[i]],
-                "')."
+            mismatchPath <- parsed$path[[i]]
+            msg <- glue(
+                "GenotypeHandle(genoMeta): all per-chromosome files must ",
+                "have identical sample IDs in the same order (mismatch ",
+                "at '{mismatchPath}')."
             )
+            abort(msg)
         }
     }
     invisible(NULL)
@@ -657,12 +660,12 @@ GenotypeHandle <- function(
     chromPaths <- character(0)
     for (i in seq_along(shards)) {
         for (ch in unique(canonChrom(shards[[i]]@snpInfo$CHR))) {
-            if (ch %in% names(chromPaths)) {
-                stop(
-                    "GenotypeHandle(genoMeta): chromosome '",
-                    ch,
-                    "' appears in more than one per-chromosome file."
+            if (is_in(ch, names(chromPaths))) {
+                msg <- glue(
+                    "GenotypeHandle(genoMeta): chromosome '{ch}' appears ",
+                    "in more than one per-chromosome file."
                 )
+                abort(msg)
             }
             chromPaths[[ch]] <- shards[[i]]@path
         }
@@ -699,22 +702,22 @@ setMethod("getPath", "GenotypeHandle", function(x) x@path)
     if (length(path) != 1L || is.na(path)) {
         return(path)
     }
-    m <- regmatches(path, regexec("^pecotmr://extdata/(.+)$", path))[[1L]]
-    if (length(m) != 2L) {
+    m <- str_match(path, "^pecotmr://extdata/(.+)$")[1L, ]
+    if (is.na(m[[1L]])) {
         return(path)
     }
     stem <- m[[2L]]
-    bed <- system.file("extdata", paste0(stem, ".bed"), package = "pecotmr")
-    if (nzchar(bed)) {
-        return(sub("\\.bed$", "", bed))
+    bed <- system.file("extdata", str_c(stem, ".bed"), package = "pecotmr")
+    if (str_length(bed) > 0L) {
+        return(str_remove(bed, "\\.bed$"))
     }
     resolved <- system.file("extdata", stem, package = "pecotmr")
-    if (!nzchar(resolved)) {
-        stop(
-            "cannot resolve bundled genotype resource '",
-            stem,
-            "' under inst/extdata/ (package 'pecotmr')."
+    if (str_length(resolved) == 0L) {
+        msg <- glue(
+            "cannot resolve bundled genotype resource '{stem}' under ",
+            "inst/extdata/ (package 'pecotmr')."
         )
+        abort(msg)
     }
     resolved
 }
@@ -738,3 +741,33 @@ setMethod("getPgenPtr", "GenotypeHandle", function(x) x@pgenPtr)
 #' @rdname getNSamples
 #' @export
 setMethod("getNSamples", "GenotypeHandle", function(x) x@nSamples)
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# TRUE when one chromosome's payload set has more than one distinct path.
+# @noRd
+.ghMultiplePayloads <- function(p) {
+    n_distinct(p) > 1L
+}
+
+# Resolve a payload path against `base` (absolute/existing paths pass through).
+# @noRd
+.ghResolvePath <- function(p, base) {
+    if (str_detect(p, "^(/|[A-Za-z]:)") || file.exists(p)) {
+        p
+    } else {
+        file.path(base, p)
+    }
+}
+
+# The snpInfo slot of one genotype shard.
+# @noRd
+.ghSnpInfo <- function(h) {
+    h@snpInfo
+}
+
+# The format slot of one genotype shard.
+# @noRd
+.ghFormat <- function(h) {
+    h@format
+}

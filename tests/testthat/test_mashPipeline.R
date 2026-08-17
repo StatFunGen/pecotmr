@@ -285,11 +285,16 @@ test_that("fitMashContrast: 2-tested-conditions fast path yields one pairwise co
     out <- fitMashContrast(1L, origMean, pm, pv)
     expect_s3_class(out, "data.frame")
     expect_equal(nrow(out), 1L)
-    # 2 tested -> 1 pairwise contrast -> 3 columns (mean, se, p)
-    expect_equal(ncol(out), 3L)
+    # feature_id + 2 tested -> 1 pairwise contrast (mean, se, p) = 4 columns
+    expect_equal(ncol(out), 4L)
     expect_setequal(
         names(out),
-        c("mean_contrast_a_vs_b", "se_contrast_a_vs_b", "p_contrast_a_vs_b")
+        c(
+            "feature_id",
+            "mean_contrast_a_vs_b",
+            "se_contrast_a_vs_b",
+            "p_contrast_a_vs_b"
+        )
     )
     expect_equal(out[["mean_contrast_a_vs_b"]], 0.5 - 0.3)
 })
@@ -309,8 +314,8 @@ test_that("fitMashContrast: 3-tested-conditions yields deviation + pairwise cont
     dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
     out <- fitMashContrast(1L, origMean, pm, pv)
     expect_s3_class(out, "data.frame")
-    # 3 deviation + choose(3,2)=3 pairwise = 6 contrasts -> 18 cols
-    expect_equal(ncol(out), 18L)
+    # feature_id + 3 deviation + choose(3,2)=3 pairwise = 6 contrasts -> 19 cols
+    expect_equal(ncol(out), 19L)
     contrastSuffix <- sub("^(mean|se|p)_contrast_", "", names(out))
     expect_true(any(grepl("_deviation$", contrastSuffix)))
     expect_true(any(grepl("_vs_", contrastSuffix)))
@@ -368,12 +373,13 @@ test_that("fitMashContrast applies deviation + pairwise group adjustments", {
     out <- fitMashContrast(1L, origMean, pm, pv, grouping = grouping)
     expect_s3_class(out, "data.frame")
     expect_equal(nrow(out), 1L)
-    # 4 deviation + choose(4,2)=6 pairwise = 10 contrasts -> 30 columns.
-    expect_equal(ncol(out), 30L)
+    # feature_id + 4 deviation + choose(4,2)=6 pairwise = 10 contrasts -> 31 cols.
+    expect_equal(ncol(out), 31L)
     contrastSuffix <- sub("^(mean|se|p)_contrast_", "", names(out))
     expect_true(any(grepl("_deviation$", contrastSuffix)))
     expect_true(any(grepl("_vs_", contrastSuffix)))
-    expect_true(all(is.finite(unlist(out))))
+    contrastVals <- unlist(out[grepl("_contrast_", names(out))])
+    expect_true(all(is.finite(contrastVals)))
 })
 
 # ---------------------------------------------------------------------------
@@ -1262,7 +1268,7 @@ test_that("mashPosteriorContrast: deviation + pairwise columns, rownames preserv
     f <- .mpc_fixture()
     res <- mashPosteriorContrast(f$pm, f$pv, f$orig)
     expect_equal(nrow(res), 5L)
-    expect_identical(rownames(res), rownames(f$pm))
+    expect_identical(res$feature_id, rownames(f$pm))
     # 3 conditions -> 3 deviation + 3 pairwise = 6 contrasts x (mean/se/p)
     expect_equal(sum(grepl("^mean_contrast", names(res))), 6L)
     expect_equal(sum(grepl("^se_contrast", names(res))), 6L)
@@ -1271,7 +1277,8 @@ test_that("mashPosteriorContrast: deviation + pairwise columns, rownames preserv
         any(grepl("deviation", names(res))) && any(grepl("_vs_", names(res)))
     )
     # column order: all mean_* precede se_*, which precede p_*
-    kinds <- sub("_contrast_.*", "", names(res))
+    contrastCols <- names(res)[grepl("_contrast_", names(res))]
+    kinds <- sub("_contrast_.*", "", contrastCols)
     expect_false(is.unsorted(match(kinds, c("mean", "se", "p"))))
 })
 
@@ -1281,7 +1288,7 @@ test_that("mashPosteriorContrast: features with < 2 tested conditions are droppe
     f$orig[4, c(2, 3)] <- 0 # feature 4 has only 1 tested condition
     res <- mashPosteriorContrast(f$pm, f$pv, f$orig)
     expect_equal(nrow(res), 3L)
-    expect_false(any(rownames(res) %in% rownames(f$pm)[c(2, 4)]))
+    expect_false(any(res$feature_id %in% rownames(f$pm)[c(2, 4)]))
 })
 
 test_that("mashPosteriorContrast: grouping is forwarded to fitMashContrast", {
@@ -1328,7 +1335,7 @@ test_that("nSignificantScore: fraction of significant deviation contrasts in [0,
 test_that("scoreFromCs: CS lead intersection score; NA on empty / no-overlap", {
     cr <- .fs_contrast()
     fm <- data.frame(
-        variants = rownames(cr),
+        variants = cr$feature_id,
         cs_order = c(1, 1, 1, 2, 2, 0, 0, 0),
         pip = c(0.6, 0.3, 0.1, 0.7, 0.3, 0.02, 0.02, 0.02),
         stringsAsFactors = FALSE
@@ -1360,10 +1367,7 @@ test_that("scoreFromCs: CS lead intersection score; NA on empty / no-overlap", {
 # ---------------------------------------------------------------------------
 
 test_that("calculateFeatureScores: NA when a condition's se column is absent", {
-    cr <- data.frame(
-        mean_contrast_Ast_deviation = c(1, 2),
-        row.names = c("v1", "v2")
-    )
+    cr <- data.frame(mean_contrast_Ast_deviation = c(1, 2))
     out <- calculateFeatureScores(cr)
     expect_equal(out$condition, "Ast")
     expect_true(is.na(out$zScore))
@@ -1394,7 +1398,8 @@ test_that("scoreFromCs: falls back to the single pairwise contrast when no devia
         p_contrast_Ast_vs_Mic = c(0.5, 0.2),
         mean_contrast_Ast_vs_Mic = c(1.0, 0.5),
         se_contrast_Ast_vs_Mic = c(0.2, 0.1),
-        row.names = c("v1", "v2")
+        feature_id = c("v1", "v2"),
+        stringsAsFactors = FALSE
     )
     # condition "Xyz" has no deviation column; exactly one pairwise contrast exists.
     expect_true(is.finite(scoreFromCs(fm, cr, condition = "Xyz")))
@@ -1409,7 +1414,7 @@ test_that("scoreFromCs: NA when neither a deviation nor a single pairwise column
     )
     # Lead variant overlaps, but cr carries no p_contrast_*_deviation for the
     # condition and no pairwise p_contrast_*_vs_* column -> NA.
-    cr <- data.frame(some_other_col = 1, row.names = "v1")
+    cr <- data.frame(some_other_col = 1, feature_id = "v1")
     expect_true(is.na(scoreFromCs(fm, cr, condition = "Xyz")))
 })
 

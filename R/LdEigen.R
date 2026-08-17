@@ -56,16 +56,15 @@ setClass(
 #' @rdname show-methods
 #' @export
 setMethod("show", "LdEigen", function(object) {
-    cat(sprintf(
-        "LdEigen: %d SNPs across %d blocks\n",
-        nrow(object@snpInfo),
-        length(object@eigenList)
+    cat(glue(
+        "LdEigen: {nrow(object@snpInfo)} SNPs across ",
+        "{length(object@eigenList)} blocks\n",
+        .trim = FALSE
     ))
     cat(sprintf("  Eigenvalue truncation: %.2f\n", object@eigenvalueTruncation))
-    cat(sprintf(
-        "  Reference N: %d, In-sample: %s\n",
-        object@nRef,
-        object@inSample
+    cat(glue(
+        "  Reference N: {object@nRef}, In-sample: {object@inSample}\n",
+        .trim = FALSE
     ))
 })
 

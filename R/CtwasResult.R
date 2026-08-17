@@ -36,7 +36,7 @@ setClass("CtwasResult", contains = "DFrame", validity = function(object) {
     required <- c("gwasStudy", "study", "context", "method", "entry")
     missingCols <- setdiff(required, names(object))
     if (length(missingCols) > 0L) {
-        return(paste("missing columns:", paste(missingCols, collapse = ", ")))
+        return(str_c("missing columns: ", str_flatten(missingCols, ", ")))
     }
     NULL
 }
@@ -81,10 +81,8 @@ setClass("CtwasResult", contains = "DFrame", validity = function(object) {
 # @noRd
 .ctwasResJointColError <- function(jc, object) {
     if (!is.character(object[[jc]])) {
-        return(sprintf(
-            "'%s' column must be character (got %s)",
-            jc,
-            class(object[[jc]])[[1L]]
+        return(glue(
+            "'{jc}' column must be character (got {class(object[[jc]])[[1L]]})"
         ))
     }
     NULL
@@ -93,13 +91,12 @@ setClass("CtwasResult", contains = "DFrame", validity = function(object) {
 # @noRd
 .ctwasResCheckTupleUniqueness <- function(object, jointCols) {
     keyCols <- c("gwasStudy", "study", "context", "method", jointCols)
-    keyDf <- as.data.frame(
+    keyTbl <- as_tibble(set_names(
         map(keyCols, .ctwasResColOf, object = object),
-        col.names = keyCols,
-        stringsAsFactors = FALSE
-    )
-    if (anyDuplicated(keyDf)) {
-        return(paste0(
+        keyCols
+    ))
+    if (nrow(distinct(keyTbl)) < nrow(keyTbl)) {
+        return(str_c(
             "(gwasStudy, study, context, method[, joint*]) ",
             "tuple uniqueness violated"
         ))
@@ -153,10 +150,11 @@ CtwasResult <- function(
             length(method) != n ||
             length(entry) != n
     ) {
-        stop(
+        msg <- glue(
             "`gwasStudy`, `study`, `context`, `method`, and `entry` must all ",
             "have the same length."
         )
+        abort(msg)
     }
     cols <- list(
         gwasStudy = as.character(gwasStudy),
@@ -171,11 +169,13 @@ CtwasResult <- function(
             next
         }
         if (length(val) != n) {
-            stop("`", nm, "` must have the same length as `gwasStudy`.")
+            msg <- glue("`{nm}` must have the same length as `gwasStudy`.")
+            abort(msg)
         }
         cols[[nm]] <- as.character(val)
     }
-    df <- do.call(S4Vectors::DataFrame, c(cols, list(check.names = FALSE)))
+    dfArgs <- c(cols, list(check.names = FALSE))
+    df <- exec(S4Vectors::DataFrame, !!!dfArgs)
     obj <- new("CtwasResult", df)
     validObject(obj)
     obj
@@ -205,22 +205,8 @@ setMethod("getContexts", "CtwasResult", function(x) {
     if (n == 0L) {
         return(NULL)
     }
-    parts <- lapply(seq_len(n), function(i) {
-        tb <- getter(x$entry[[i]])
-        if (is.null(tb) || nrow(tb) == 0L) {
-            return(NULL)
-        }
-        tb <- as.data.frame(tb)
-        id <- data.frame(
-            gwasStudy = as.character(x$gwasStudy)[[i]],
-            study = as.character(x$study)[[i]],
-            context = as.character(x$context)[[i]],
-            method = as.character(x$method)[[i]],
-            stringsAsFactors = FALSE
-        )
-        cbind(id[rep(1L, nrow(tb)), , drop = FALSE], tb, row.names = NULL)
-    })
-    parts <- parts[!vapply(parts, is.null, logical(1L))]
+    parts <- map(seq_len(n), .ctwasAggregateRow, x = x, getter = getter)
+    parts <- compact(parts)
     if (length(parts) == 0L) {
         return(NULL)
     }
@@ -242,13 +228,33 @@ setMethod("getSusieAlpha", "CtwasResult", function(x, ...) {
 #' @rdname show-methods
 #' @export
 setMethod("show", "CtwasResult", function(object) {
-    cat(sprintf("CtwasResult: %d run(s)\n", nrow(object)))
+    cat(glue("CtwasResult: {nrow(object)} run(s)\n", .trim = FALSE))
     if (nrow(object) > 0L) {
-        cat(sprintf(
-            "  %d GWAS stud(y/ies), %d method(s): %s\n",
-            length(unique(object$gwasStudy)),
-            length(unique(object$method)),
-            paste(unique(as.character(object$method)), collapse = ", ")
+        cat(glue(
+            "  {n_distinct(object$gwasStudy)} GWAS stud(y/ies), ",
+            "{n_distinct(object$method)} method(s): ",
+            "{str_flatten(unique(as.character(object$method)), ', ')}\n",
+            .trim = FALSE
         ))
     }
 })
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# One aggregated ctwas row block for entry `i`: `getter`'s per-entry table
+# prefixed with the row identity columns; NULL when the entry is empty.
+# @noRd
+.ctwasAggregateRow <- function(i, x, getter) {
+    tb <- getter(x$entry[[i]])
+    if (is.null(tb) || nrow(tb) == 0L) {
+        return(NULL)
+    }
+    as_tibble(tb) |>
+        mutate(
+            gwasStudy = as.character(x$gwasStudy)[[i]],
+            study = as.character(x$study)[[i]],
+            context = as.character(x$context)[[i]],
+            method = as.character(x$method)[[i]],
+            .before = 1
+        )
+}

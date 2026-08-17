@@ -36,6 +36,7 @@ mkRun <- function(cats) {
     propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
     tauBlocks = matrix(1e-7, 10, n, dimnames = list(NULL, cats)),
     nBlocks = 10L)
+}
 annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
   annot_A = c(1, 0, 1, 0, 1, 0), annot_B = c(2.1, 1.8, 2.5, 1.9, 2.3, 2))
 frq <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
@@ -48,5 +49,4 @@ mkTrait <- function() {
 traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
 sd <- SldscData(annot = annot, frq = frq, traits = traits)
 computeSldscAnnotSd(sldscData = sd)
-}
 }

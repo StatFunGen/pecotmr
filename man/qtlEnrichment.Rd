@@ -101,7 +101,7 @@ nSusieFits <- 2
 susieFits <- replicate(
   nSusieFits, simulateSusiefit(nGwasPip, 10), simplify = FALSE)
 # Add these fits to a list, providing names to each element
-names(susieFits) <- paste0("fit", 1:length(susieFits))
+names(susieFits) <- paste0("fit", seq_along(susieFits))
 # Set other parameters
 impN <- 10
 lambda <- 1

@@ -72,7 +72,7 @@ setClass(
 # @noRd
 .fmeCheckCvResult <- function(object) {
     if (!is.null(object@cvResult) && !is.list(object@cvResult)) {
-        return(paste0(
+        return(str_c(
             "cvResult must be NULL or a list ",
             "(samplePartition/predictions/performance)"
         ))
@@ -101,9 +101,9 @@ setClass(
 .fmeCheckTopLociCols <- function(object) {
     missingCols <- setdiff(c("variant_id", "pip"), colnames(object@topLoci))
     if (length(missingCols) > 0L) {
-        return(paste(
-            "topLoci missing required columns:",
-            paste(missingCols, collapse = ", ")
+        return(str_c(
+            "topLoci missing required columns: ",
+            str_flatten(missingCols, ", ")
         ))
     }
     NULL
@@ -114,10 +114,9 @@ setClass(
 .fmeCheckTopLociRows <- function(object) {
     n <- length(object@variantIds)
     if (n > 0L && nrow(object@topLoci) != n) {
-        return(sprintf(
-            "topLoci has %d rows but variantIds has %d entries; ",
-            nrow(object@topLoci),
-            n
+        return(glue(
+            "topLoci has {nrow(object@topLoci)} rows but variantIds has ",
+            "{n} entries; "
         ))
     }
     NULL
@@ -150,7 +149,7 @@ setClass(
         is.list(sf) &&
         !is.null(sf$pip) &&
         length(sf$pip) == n &&
-        "pip" %in% colnames(object@topLoci)
+        is_in("pip", colnames(object@topLoci))
     if (!carriesPip) {
         return(NULL)
     }
@@ -193,7 +192,7 @@ FineMappingEntry <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         "FineMappingEntry",
         variantIds = as.character(variantIds),
         susieFit = susieFit,
-        topLoci = as.data.frame(topLoci),
+        topLoci = as_tibble(topLoci),
         cvResult = cvResult
     )
     validObject(obj)
@@ -240,7 +239,7 @@ setMethod("resolveWeights", "FineMappingEntry", function(x, ...) {
     if (
         is.null(tl) ||
             nrow(tl) == 0L ||
-            !all(c("variant_id", "beta") %in% names(tl))
+            !all(is_in(c("variant_id", "beta"), names(tl)))
     ) {
         return(empty)
     }
@@ -273,7 +272,7 @@ setMethod(
         minPurity = NULL,
         ...
     ) {
-        type <- match.arg(type)
+        type <- arg_match(type)
         out <- .fmeFilterTopLoci(x@topLoci, signalCutoff, minPurity)
         if (type == "data.frame") {
             return(out)
@@ -305,19 +304,18 @@ setMethod(
 # are unaffected. All-TRUE when the entry carries no purity columns.
 # @noRd
 .fmePurityKeep <- function(tl, minPurity) {
-    purCols <- grep("^cs_[0-9.]+_purity$", names(tl), value = TRUE)
+    purCols <- names(tl)[str_detect(names(tl), "^cs_[0-9.]+_purity$")]
     if (length(purCols) == 0L) {
         return(rep(TRUE, nrow(tl)))
     }
-    covs <- suppressWarnings(as.numeric(sub(
-        "_purity$",
-        "",
-        sub("^cs_", "", purCols)
+    covs <- suppressWarnings(as.numeric(str_remove(
+        str_remove(purCols, "^cs_"),
+        "_purity$"
     )))
     primaryPur <- purCols[which.max(covs)]
-    csCol <- sub("_purity$", "", primaryPur)
-    inCs <- if (csCol %in% names(tl)) {
-        !grepl("_0$", tl[[csCol]])
+    csCol <- str_remove(primaryPur, "_purity$")
+    inCs <- if (is_in(csCol, names(tl))) {
+        !str_detect(tl[[csCol]], "_0$")
     } else {
         rep(FALSE, nrow(tl))
     }
@@ -333,7 +331,7 @@ setMethod(
     }
     parsed <- parseVariantId(out$variant_id)
     gr <- GenomicRanges::GRanges(
-        seqnames = paste0("chr", parsed$chrom),
+        seqnames = str_c("chr", parsed$chrom),
         ranges = IRanges::IRanges(start = parsed$pos, width = 1L)
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(out)
@@ -353,7 +351,7 @@ setMethod(
         out <- .projectMarginalView(tl)
         if (!is.null(maxPval) && nrow(out) > 0L) {
             keep <- !is.na(out$p) & out$p <= maxPval
-            out <- out[keep, , drop = FALSE]
+            out <- filter(out, keep)
         }
         out
     }
@@ -363,10 +361,10 @@ setMethod(
 #' @export
 setMethod("getPip", "FineMappingEntry", function(x, ...) {
     tl <- x@topLoci
-    if (nrow(tl) == 0L || !"pip" %in% names(tl)) {
+    if (nrow(tl) == 0L || !is_in("pip", names(tl))) {
         return(numeric(0))
     }
-    setNames(tl$pip, tl$variant_id)
+    set_names(tl$pip, tl$variant_id)
 })
 
 #' @rdname getCs
@@ -379,33 +377,30 @@ setMethod(
         if (nrow(tl) == 0L) {
             return(.projectPosteriorView(tl))
         }
-        csCol <- grep(
-            paste0("^cs_", coverage * 100, "$"),
+        csCol <- names(tl)[str_detect(
             names(tl),
-            value = TRUE
-        )
+            str_c("^cs_", coverage * 100, "$")
+        )]
         if (length(csCol) == 0L) {
-            return(.projectPosteriorView(tl[FALSE, , drop = FALSE]))
+            return(.projectPosteriorView(slice(tl, 0)))
         }
         keep <- !is.na(tl[[csCol[1L]]]) &
-            nzchar(tl[[csCol[1L]]]) &
-            !grepl("_0$", tl[[csCol[1L]]])
+            str_length(tl[[csCol[1L]]]) > 0L &
+            !str_detect(tl[[csCol[1L]]], "_0$")
         # Independent purity filter (min.abs.corr), orthogonal to `coverage`:
         # drop CS members whose credible set at THIS coverage is below
         # `minPurity`.
         if (!is.null(minPurity)) {
-            purCol <- paste0(csCol[1L], "_purity")
-            if (purCol %in% names(tl)) {
+            purCol <- str_c(csCol[1L], "_purity")
+            if (is_in(purCol, names(tl))) {
                 pur <- as.numeric(tl[[purCol]])
                 keep <- keep & !is.na(pur) & pur >= minPurity
             } else {
-                warning(
-                    "getCs: no purity column '",
-                    purCol,
-                    "' for coverage ",
-                    coverage,
-                    "; minPurity filter skipped."
+                msg <- glue(
+                    "getCs: no purity column '{purCol}' for coverage ",
+                    "{coverage}; minPurity filter skipped."
                 )
+                warn(msg)
             }
         }
         .projectPosteriorView(tl[keep, , drop = FALSE])
@@ -438,10 +433,11 @@ setMethod("adjustPips", "FineMappingEntry", function(x, keepVariants, ...) {
 .adjustPipsKeepIdx <- function(variantIds, keepVariants) {
     m <- matchVariants(variantIds, as.character(keepVariants))
     if (!length(m$idxA)) {
-        stop(
+        msg <- glue(
             "adjustPips: intersection of entry variants with `keepVariants` ",
             "is empty."
         )
+        abort(msg)
     }
     sort(m$idxA)
 }
@@ -451,11 +447,12 @@ setMethod("adjustPips", "FineMappingEntry", function(x, keepVariants, ...) {
 # @noRd
 .adjustPipsSubsetFit <- function(fit, keepIdx) {
     if (is.null(fit$lbf_variable)) {
-        stop(
+        msg <- glue(
             "adjustPips: entry's susieFit has no `lbf_variable` matrix; ",
             "PIP renormalization requires lbf_variable. Re-run the ",
             "pipeline with trim = FALSE to retain it."
         )
+        abort(msg)
     }
     lbfSub <- fit$lbf_variable[, keepIdx, drop = FALSE]
     fit$lbf_variable <- lbfSub
@@ -488,7 +485,7 @@ setMethod("adjustPips", "FineMappingEntry", function(x, keepVariants, ...) {
     if (nrow(topLoci) == 0L) {
         return(topLoci)
     }
-    newTopLoci <- topLoci[topLoci$variant_id %in% common, , drop = FALSE]
+    newTopLoci <- filter(topLoci, is_in(variant_id, common))
     newTopLoci$pip <- as.numeric(fit$pip)
     .adjustPipsPosterior(newTopLoci, fit)
 }
@@ -522,13 +519,9 @@ setMethod("adjustPips", "FineMappingEntry", function(x, keepVariants, ...) {
 setMethod("show", "FineMappingEntry", function(object) {
     tl <- object@topLoci
     nCs <- if (nrow(tl) > 0L) {
-        csCols <- grep("^cs_[0-9]+$", names(tl), value = TRUE)
+        csCols <- names(tl)[str_detect(names(tl), "^cs_[0-9]+$")]
         if (length(csCols) > 0L) {
-            vals <- unique(unlist(lapply(csCols, function(cc) {
-                v <- tl[[cc]]
-                v <- v[!grepl("_0$", v)]
-                v
-            })))
+            vals <- unique(unlist(map(csCols, .fmeNonNullCsLabels, tl = tl)))
             length(vals)
         } else {
             0L
@@ -536,10 +529,10 @@ setMethod("show", "FineMappingEntry", function(object) {
     } else {
         0L
     }
-    cat(sprintf(
-        "FineMappingEntry: %d variants, %d credible sets\n",
-        length(object@variantIds),
-        nCs
+    cat(glue(
+        "FineMappingEntry: {length(object@variantIds)} variants, ",
+        "{nCs} credible sets\n",
+        .trim = FALSE
     ))
 })
 
@@ -552,8 +545,8 @@ setMethod("show", "FineMappingEntry", function(object) {
 # skeletal entries that lack optional columns.
 # @noRd
 .tlCol <- function(tl, name, type = c("character", "integer", "numeric")) {
-    type <- match.arg(type)
-    if (name %in% colnames(tl)) {
+    type <- arg_match(type)
+    if (is_in(name, colnames(tl))) {
         return(switch(
             type,
             character = as.character(tl[[name]]),
@@ -579,7 +572,7 @@ setMethod("show", "FineMappingEntry", function(object) {
     if (nrow(tl) == 0L) {
         return(.projectPosteriorEmpty())
     }
-    out <- data.frame(
+    out <- tibble(
         variant_id = .tlCol(tl, "variant_id", "character"),
         chrom = .tlCol(tl, "chrom", "character"),
         pos = .tlCol(tl, "pos", "integer"),
@@ -590,20 +583,18 @@ setMethod("show", "FineMappingEntry", function(object) {
         beta = .tlCol(tl, "posterior_mean", "numeric"),
         se = .tlCol(tl, "posterior_sd", "numeric"),
         pip = .tlCol(tl, "pip", "numeric"),
-        logBF = .tlCol(tl, "logBF", "numeric"),
-        stringsAsFactors = FALSE
+        logBF = .tlCol(tl, "logBF", "numeric")
     )
     for (cc in .projectPosteriorExtraCols(tl)) {
         out[[cc]] <- tl[[cc]]
     }
-    rownames(out) <- NULL
     out
 }
 
 # Empty posterior-view frame (canonical columns, zero rows).
 # @noRd
 .projectPosteriorEmpty <- function() {
-    data.frame(
+    tibble(
         variant_id = character(0),
         chrom = character(0),
         pos = integer(0),
@@ -614,8 +605,7 @@ setMethod("show", "FineMappingEntry", function(object) {
         beta = numeric(0),
         se = numeric(0),
         pip = numeric(0),
-        logBF = numeric(0),
-        stringsAsFactors = FALSE
+        logBF = numeric(0)
     )
 }
 
@@ -626,12 +616,11 @@ setMethod("show", "FineMappingEntry", function(object) {
 # (conditional_effect, lfsr), and pipeline stamps -- whichever are present.
 # @noRd
 .projectPosteriorExtraCols <- function(tl) {
-    csCols <- grep("^cs_[0-9.]+(_purity)?$", colnames(tl), value = TRUE)
-    fullFitCols <- grep(
-        "^(within_cs_pip|cs_logbf_|cs_effect_)",
+    csCols <- colnames(tl)[str_detect(colnames(tl), "^cs_[0-9.]+(_purity)?$")]
+    fullFitCols <- colnames(tl)[str_detect(
         colnames(tl),
-        value = TRUE
-    )
+        "^(within_cs_pip|cs_logbf_|cs_effect_)"
+    )]
     intersect(
         c(
             csCols,
@@ -655,7 +644,7 @@ setMethod("show", "FineMappingEntry", function(object) {
 # @noRd
 .projectMarginalView <- function(tl) {
     if (nrow(tl) == 0L) {
-        return(data.frame(
+        return(tibble(
             variant_id = character(0),
             chrom = character(0),
             pos = integer(0),
@@ -666,11 +655,10 @@ setMethod("show", "FineMappingEntry", function(object) {
             beta = numeric(0),
             se = numeric(0),
             z = numeric(0),
-            p = numeric(0),
-            stringsAsFactors = FALSE
+            p = numeric(0)
         ))
     }
-    data.frame(
+    tibble(
         variant_id = .tlCol(tl, "variant_id", "character"),
         chrom = .tlCol(tl, "chrom", "character"),
         pos = .tlCol(tl, "pos", "integer"),
@@ -681,7 +669,14 @@ setMethod("show", "FineMappingEntry", function(object) {
         beta = .tlCol(tl, "marginal_beta", "numeric"),
         se = .tlCol(tl, "marginal_se", "numeric"),
         z = .tlCol(tl, "marginal_z", "numeric"),
-        p = .tlCol(tl, "marginal_p", "numeric"),
-        stringsAsFactors = FALSE
+        p = .tlCol(tl, "marginal_p", "numeric")
     )
+}
+
+# The non-null credible-set labels in one cs_<coverage> column (dropping the
+# "_0" not-captured sentinel).
+# @noRd
+.fmeNonNullCsLabels <- function(cc, tl) {
+    v <- tl[[cc]]
+    v[!str_detect(v, "_0$")]
 }

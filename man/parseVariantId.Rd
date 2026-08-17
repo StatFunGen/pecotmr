@@ -12,7 +12,7 @@ parseVariantId(ids)
 layout).}
 }
 \value{
-A data.frame with columns "chrom" (character, normalized), "pos"
+A tibble with columns "chrom" (character, normalized), "pos"
   (integer), "A2" (character), "A1" (character). The detected convention is
   stored as \code{attr(result, "convention")}.
 }

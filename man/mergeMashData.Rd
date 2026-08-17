@@ -19,7 +19,11 @@ Row-bind the components of two mash data lists, returning the non-empty one
 when the other is empty.
 }
 \examples{
-a <- list(strong = list(z = matrix(rnorm(9), 3, 3)))
-b <- list(strong = list(z = matrix(rnorm(9), 3, 3)))
+# Each object's variants must be uniquely keyed (row names); the two
+# objects share the same conditions (columns), which are aligned by name.
+a <- list(strong = list(z = matrix(rnorm(9), 3, 3,
+  dimnames = list(c("v1", "v2", "v3"), c("t1", "t2", "t3")))))
+b <- list(strong = list(z = matrix(rnorm(9), 3, 3,
+  dimnames = list(c("v4", "v5", "v6"), c("t1", "t2", "t3")))))
 mergeMashData(a, b)
 }

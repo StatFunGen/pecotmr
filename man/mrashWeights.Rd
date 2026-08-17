@@ -19,6 +19,11 @@ Default \code{FALSE}.}
 
 \item{...}{Additional arguments forwarded to \code{mr.ash}.}
 }
+\value{
+A numeric vector of weights, one per variant (column of \code{X});
+  zero-variance columns receive weight 0. When \code{retainFit = TRUE} the
+  fitted \code{mr.ash} object is attached as attribute \code{"fit"}.
+}
 \description{
 This function fits the `mr.ash` model (adaptive shrinkage regression) to
 estimate weights for a given set of predictors and response. It uses optional

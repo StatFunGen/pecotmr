@@ -411,8 +411,12 @@ test_that("filterMixtureComponents handles NULL weights gracefully", {
 # ===========================================================================
 
 test_that("mergeMashData combines two datasets with identical columns", {
-    d1 <- list(random = data.frame(a = 1:3, b = 4:6))
-    d2 <- list(random = data.frame(a = 7:8, b = 9:10))
+    d1 <- list(random = data.frame(
+        a = 1:3, b = 4:6, row.names = c("v1", "v2", "v3")
+    ))
+    d2 <- list(random = data.frame(
+        a = 7:8, b = 9:10, row.names = c("v4", "v5")
+    ))
     result <- mergeMashData(d1, d2)
     expect_equal(nrow(result$random), 5)
     expect_equal(ncol(result$random), 2)
@@ -428,8 +432,12 @@ test_that("mergeMashData handles NULL input", {
 })
 
 test_that("mergeMashData aligns different column names correctly", {
-    d1 <- list(random = data.frame(a = 1:2, b = 3:4))
-    d2 <- list(random = data.frame(a = 5:6, c = 7:8))
+    d1 <- list(random = data.frame(
+        a = 1:2, b = 3:4, row.names = c("v1", "v2")
+    ))
+    d2 <- list(random = data.frame(
+        a = 5:6, c = 7:8, row.names = c("v3", "v4")
+    ))
     result <- mergeMashData(d1, d2)
     expect_equal(nrow(result$random), 4)
     expect_true(all(c("a", "b", "c") %in% colnames(result$random)))
@@ -453,16 +461,22 @@ test_that("mergeMashData preserves data when one side is NULL element", {
 
 test_that("mergeMashData handles multiple named elements", {
     d1 <- list(
-        random = data.frame(a = 1:2, b = 3:4),
-        null = data.frame(x = 10:11)
+        random = data.frame(a = 1:2, b = 3:4, row.names = c("v1", "v2")),
+        null = data.frame(x = 10:11, row.names = c("n1", "n2"))
     )
     d2 <- list(
-        random = data.frame(a = 5:6, b = 7:8),
-        null = data.frame(x = 12:13)
+        random = data.frame(a = 5:6, b = 7:8, row.names = c("v3", "v4")),
+        null = data.frame(x = 12:13, row.names = c("n3", "n4"))
     )
     result <- mergeMashData(d1, d2)
     expect_equal(nrow(result$random), 4)
     expect_equal(nrow(result$null), 4)
+})
+
+test_that("mergeMashData errors on duplicate variant ids across sides", {
+    d1 <- list(random = data.frame(a = 1:2, row.names = c("v1", "v2")))
+    d2 <- list(random = data.frame(a = 3:4, row.names = c("v2", "v9")))
+    expect_error(mergeMashData(d1, d2), "duplicate variant ids")
 })
 
 test_that("mergeMashData uses one_data when res_data element has zero rows", {

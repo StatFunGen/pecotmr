@@ -94,10 +94,10 @@ setMethod("getScoreStats", "H2Estimate", function(object) {
 #' @rdname show-methods
 #' @export
 setMethod("show", "H2Estimate", function(object) {
-    cat(sprintf(
-        "H2Estimate for '%s' (method: %s)\n",
-        object@traitName,
-        object@method
+    cat(glue(
+        "H2Estimate for '{object@traitName}' ",
+        "(method: {object@method})\n",
+        .trim = FALSE
     ))
     cat(sprintf("  h2 = %.4f (SE = %.4f)\n", object@h2, object@h2Se))
     if (!is.na(object@intercept)) {
@@ -110,11 +110,10 @@ setMethod("show", "H2Estimate", function(object) {
     has_local <- !is.null(object@local)
     has_enrich <- !is.null(object@enrichment)
     has_tau_blocks <- !is.null(object@tauBlocks)
-    cat(sprintf(
-        "  Local: %s, Enrichment: %s, tauBlocks: %s\n",
-        has_local,
-        has_enrich,
-        has_tau_blocks
+    cat(glue(
+        "  Local: {has_local}, Enrichment: {has_enrich}, ",
+        "tauBlocks: {has_tau_blocks}\n",
+        .trim = FALSE
     ))
-    cat(sprintf("  N SNPs: %d\n", object@nSnps))
+    cat(glue("  N SNPs: {object@nSnps}\n", .trim = FALSE))
 })

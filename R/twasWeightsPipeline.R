@@ -8,7 +8,7 @@
 # @noRd
 .rbindTwasWeights <- function(a, b, ldSketch = NULL) {
     if (!is(a, "TwasWeights") || !is(b, "TwasWeights")) {
-        stop(".rbindTwasWeights expects two TwasWeights inputs.")
+        abort(".rbindTwasWeights expects two TwasWeights inputs.")
     }
     # Carry forward every column (joint*, region, ...) via the generic combine.
     .rbindCollections(list(a, b), ldSketch = ldSketch)
@@ -24,12 +24,14 @@
     ) {
         parts <- parts[[1L]]
     }
-    parts <- parts[!vapply(parts, is.null, logical(1L))]
+    parts <- compact(parts)
     if (length(parts) == 0L) {
-        stop(fn, ": nothing to combine (need at least one ", cls, ").")
+        msg <- glue("{fn}: nothing to combine (need at least one {cls}).")
+        abort(msg)
     }
-    if (!all(vapply(parts, function(p) methods::is(p, cls), logical(1L)))) {
-        stop(fn, ": every input must be a ", cls, ".")
+    if (!all(map_lgl(parts, methods::is, cls))) {
+        msg <- glue("{fn}: every input must be a {cls}.")
+        abort(msg)
     }
     parts
 }
@@ -55,10 +57,11 @@
 #' tw2 <- TwasWeights(study = "s2", context = "brain", trait = "g1",
 #'   method = "susie", entry = list(twe))
 #' combineTwasWeights(tw1, tw2)
+#' @importFrom stringr str_starts
 #' @export
 combineTwasWeights <- function(..., ldSketch = NULL) {
     parts <- .asCombineList(list(...), "TwasWeights", "combineTwasWeights")
-    Reduce(function(a, b) .rbindTwasWeights(a, b, ldSketch = ldSketch), parts)
+    reduce(parts, .rbindTwasWeights, ldSketch = ldSketch)
 }
 
 # --- Multi-region (jointRegions) helpers for the QtlDataset method ----------
@@ -69,7 +72,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
     if (is.null(rg)) {
         return("cis")
     }
-    paste0(
+    str_c(
         as.character(GenomicRanges::seqnames(rg))[[1L]],
         ":",
         GenomicRanges::start(rg)[[1L]],
@@ -87,45 +90,18 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
     if (length(fits) == 0L || nBlocks == 1L) {
         return(fits)
     }
-    out <- lapply(fits, function(f) {
-        if (
-            is.list(f) &&
-                !is.null(names(f)) &&
-                length(f) > 0L &&
-                all(nzchar(names(f))) &&
-                all(startsWith(names(f), "region"))
-        ) {
-            if (i <= length(f)) f[[i]] else NULL
-        } else {
-            NULL
-        }
-    })
-    out[!vapply(out, is.null, logical(1))]
+    compact(map(fits, .twasRegionFitOf, i = i))
 }
 
 # Flat per-region cvResult reporting table: one row per region carrying the
 # region label plus that region's CV metric columns. Per-sample predictions are
 # intentionally omitted -- this is a summary-reporting structure.
 .twasRegionCvDf <- function(entries, regionLabels) {
-    rows <- Map(
-        function(e, lab) {
-            cv <- getCvResult(e)
-            if (is.null(cv) || is.null(cv$metrics)) {
-                return(NULL)
-            }
-            cbind(
-                data.frame(region = lab, stringsAsFactors = FALSE),
-                as.data.frame(as.list(cv$metrics), check.names = FALSE)
-            )
-        },
-        entries,
-        regionLabels
-    )
-    rows <- rows[!vapply(rows, is.null, logical(1))]
+    rows <- compact(map2(entries, regionLabels, .twasCvRow))
     if (length(rows) == 0L) {
         return(NULL)
     }
-    do.call(rbind, rows)
+    bind_rows(rows)
 }
 
 # Concatenate one method's per-region TwasWeightsEntry payloads into a single
@@ -133,7 +109,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 # fits are kept as a named list, and cvResult becomes the flat per-region
 # reporting data.frame.
 .twasMergeRegionEntries <- function(entries, regionLabels) {
-    keep <- !vapply(entries, is.null, logical(1))
+    keep <- !map_lgl(entries, is.null)
     entries <- entries[keep]
     regionLabels <- regionLabels[keep]
     if (length(entries) == 0L) {
@@ -142,16 +118,16 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
     if (length(entries) == 1L) {
         return(entries[[1L]])
     }
-    wList <- lapply(entries, getWeights)
+    wList <- map(entries, getWeights)
     weights <- if (is.matrix(wList[[1L]])) {
-        do.call(rbind, wList)
+        exec(rbind, !!!wList)
     } else {
         unlist(wList, use.names = FALSE)
     }
     TwasWeightsEntry(
-        variantIds = unlist(lapply(entries, getVariantIds), use.names = FALSE),
+        variantIds = unlist(map(entries, getVariantIds), use.names = FALSE),
         weights = weights,
-        fits = setNames(lapply(entries, getFits), regionLabels),
+        fits = set_names(map(entries, getFits), regionLabels),
         cvResult = .twasRegionCvDf(entries, regionLabels),
         standardized = getStandardized(entries[[1L]]),
         dataType = getDataType(entries[[1L]])
@@ -161,7 +137,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 # Merge per-region TwasWeights collections (same study/context/trait, same
 # methods) into one collection by concatenating each method's entry.
 .twasMergeRegions <- function(twList, regionLabels) {
-    keep <- !vapply(twList, is.null, logical(1))
+    keep <- !map_lgl(twList, is.null)
     twList <- twList[keep]
     regionLabels <- regionLabels[keep]
     if (length(twList) == 0L) {
@@ -171,24 +147,13 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
         return(twList[[1L]])
     }
     base <- twList[[1L]]
-    mergedEntries <- lapply(seq_along(base$method), function(r) {
-        key <- c(
-            as.character(base$study[[r]]),
-            as.character(base$context[[r]]),
-            as.character(base$trait[[r]]),
-            as.character(base$method[[r]])
-        )
-        perRegion <- lapply(twList, function(tw) {
-            hit <- which(
-                as.character(tw$study) == key[[1L]] &
-                    as.character(tw$context) == key[[2L]] &
-                    as.character(tw$trait) == key[[3L]] &
-                    as.character(tw$method) == key[[4L]]
-            )
-            if (length(hit)) tw$entry[[hit[[1L]]]] else NULL
-        })
-        .twasMergeRegionEntries(perRegion, regionLabels)
-    })
+    mergedEntries <- map(
+        seq_along(base$method),
+        .twasMergedEntryForRow,
+        base = base,
+        twList = twList,
+        regionLabels = regionLabels
+    )
     TwasWeights(
         study = as.character(base$study),
         context = as.character(base$context),
@@ -214,7 +179,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
         ))
     }
     if (!is(mashPrior, "MashPrior")) {
-        stop("`mashPrior` must be a MashPrior object (see ?MashPrior).")
+        abort("`mashPrior` must be a MashPrior object (see ?MashPrior).")
     }
     cvFits <- getCvFits(mashPrior)
     perFold <- if (!is.null(cvFits)) cvFits$perFoldFits else NULL
@@ -384,10 +349,11 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
     if (is.list(methods)) {
         return(.twasNormalizeListMethods(methods))
     }
-    stop(
+    msg <- glue(
         "`methods` must be a character vector, preset string, or ",
         "named list."
     )
+    abort(msg)
 }
 
 # Character `methods`: resolve regular tokens via .twasMethodLookup and append
@@ -407,7 +373,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
         list()
     }
     for (tk in fmExtra) {
-        methodList[[paste0(tk, "_weights")]] <- list()
+        methodList[[str_c(tk, "_weights")]] <- list()
     }
     # Tokens come from the user input (canonical camelCase) -- the snake keys in
     # methodList are an internal detail of learnTwasWeights.
@@ -475,7 +441,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 # unknown keys.
 # @noRd
 .twasTokensFromMethodList <- function(methodList) {
-    snake <- sub("(_weights|Weights)$", "", names(methodList))
+    snake <- str_remove(names(methodList), "(_weights|Weights)$")
     snakeToCanonical <- c(
         susie = "susie",
         susie_ash = "susieAsh",
@@ -502,14 +468,11 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
         prsCs = "prsCs",
         fsusie = "fsusie"
     )
-    vapply(
+    unname(map_chr(
         snake,
-        function(s) {
-            if (!is.na(snakeToCanonical[s])) snakeToCanonical[[s]] else s
-        },
-        character(1),
-        USE.NAMES = FALSE
-    )
+        .twasCanonicalMethod,
+        snakeToCanonical = snakeToCanonical
+    ))
 }
 
 # Enforce input-class / method compatibility against the TWAS
@@ -533,7 +496,9 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
     .twasCheckUnknownTokens(tokens, caps)
     violations <- compact(map(
         tokens,
-        function(tk) .twasCapabilityViolation(caps[[tk]], tk, inputKind)
+        .twasTokenViolation,
+        caps = caps,
+        inputKind = inputKind
     ))
     if (length(violations) > 0L) {
         .twasStopCapability(violations, inputKind)
@@ -548,14 +513,13 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
     if (length(unknown) == 0L) {
         return(invisible(NULL))
     }
-    stop(sprintf(
-        paste0(
-            "twasWeightsPipeline: unknown method token(s): %s. Known ",
-            "tokens: %s."
-        ),
-        paste(unknown, collapse = ", "),
-        paste(c(names(caps), .twasFineMappingTokens()), collapse = ", ")
-    ))
+    unknownStr <- str_flatten(unknown, ", ")
+    knownStr <- str_flatten(c(names(caps), .twasFineMappingTokens()), ", ")
+    msg <- glue(
+        "twasWeightsPipeline: unknown method token(s): {unknownStr}. ",
+        "Known tokens: {knownStr}."
+    )
+    abort(msg)
 }
 
 # Return a list(token, reason) record when `tk` is incompatible with the input
@@ -563,7 +527,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 # @noRd
 .twasCapabilityViolation <- function(info, tk, inputKind) {
     individualKinds <- c("QtlDataset", "MultiStudyQtlDataset")
-    if (inputKind %in% individualKinds && is.null(info$individualImpl)) {
+    if (is_in(inputKind, individualKinds) && is.null(info$individualImpl)) {
         return(list(
             token = tk,
             reason = "is sumstat-only (use a QtlSumStats input)"
@@ -584,15 +548,13 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 .twasStopCapability <- function(violations, inputKind) {
     bad <- map_chr(violations, "token")
     reason <- map_chr(violations, "reason")
-    stop(sprintf(
-        paste0(
-            "twasWeightsPipeline: the following method(s) are not ",
-            "available for input class '%s': %s. %s."
-        ),
-        inputKind,
-        paste(unique(bad), collapse = ", "),
-        paste(sprintf("%s %s", bad, reason), collapse = "; ")
-    ))
+    badStr <- str_flatten(unique(bad), ", ")
+    detailStr <- str_flatten(glue("{bad} {reason}"), "; ")
+    msg <- glue(
+        "twasWeightsPipeline: the following method(s) are not available ",
+        "for input class '{inputKind}': {badStr}. {detailStr}."
+    )
+    abort(msg)
 }
 
 # Adapter registry mapping each fine-mapping method (whose existence is
@@ -656,18 +618,18 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
     if (is.null(fineMappingResult)) {
         return(character(0))
     }
-    methods <- tolower(as.character(fineMappingResult$method))
+    methods <- str_to_lower(as.character(fineMappingResult$method))
     present <- character(0)
     for (canonical in .twasFineMappingTokens()) {
-        candidates <- tolower(c(
+        candidates <- str_to_lower(c(
             canonical,
-            paste0(
-                tolower(substring(canonical, 1L, 1L)),
-                substring(canonical, 2L)
+            str_c(
+                str_to_lower(str_sub(canonical, 1L, 1L)),
+                str_sub(canonical, 2L)
             ),
-            gsub("([A-Z])", "_\\1", canonical)
+            str_replace_all(canonical, "([A-Z])", "_\\1")
         ))
-        if (any(methods %in% candidates)) present <- c(present, canonical)
+        if (any(is_in(methods, candidates))) present <- c(present, canonical)
     }
     present
 }
@@ -702,14 +664,13 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
     if (length(noAdapter) == 0L) {
         return(invisible(NULL))
     }
-    stop(sprintf(
-        paste0(
-            "twasWeightsPipeline: method(s) %s have no TWAS-weight ",
-            "extractor. For multi-trait fine-mapping use mvsusie via ",
-            "fineMappingResult."
-        ),
-        paste(noAdapter, collapse = ", ")
-    ))
+    noAdapterStr <- str_flatten(noAdapter, ", ")
+    msg <- glue(
+        "twasWeightsPipeline: method(s) {noAdapterStr} have no ",
+        "TWAS-weight extractor. For multi-trait fine-mapping use mvsusie ",
+        "via fineMappingResult."
+    )
+    abort(msg)
 }
 
 # A supplied fineMappingResult is mandatory (fine-mapping is never re-fit) and
@@ -717,18 +678,17 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 # @noRd
 .twasRequireFmResult <- function(fineMappingResult, fmTokens) {
     if (is.null(fineMappingResult)) {
-        stop(sprintf(
-            paste0(
-                "twasWeightsPipeline: method(s) %s are fine-mapping ",
-                "methods and may not be re-fit by twasWeightsPipeline. Run ",
-                "fineMappingPipeline() first and pass the result via ",
-                "`fineMappingResult = <FineMappingResult>`."
-            ),
-            paste(unique(fmTokens), collapse = ", ")
-        ))
+        fmStr <- str_flatten(unique(fmTokens), ", ")
+        msg <- glue(
+            "twasWeightsPipeline: method(s) {fmStr} are fine-mapping ",
+            "methods and may not be re-fit by twasWeightsPipeline. Run ",
+            "fineMappingPipeline() first and pass the result via ",
+            "`fineMappingResult = <FineMappingResult>`."
+        )
+        abort(msg)
     }
     if (!is(fineMappingResult, "FineMappingResultBase")) {
-        stop("`fineMappingResult` must be a FineMappingResult or NULL.")
+        abort("`fineMappingResult` must be a FineMappingResult or NULL.")
     }
     invisible(NULL)
 }
@@ -744,17 +704,14 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
     if (length(missingMethods) == 0L) {
         return(invisible(NULL))
     }
-    stop(sprintf(
-        paste0(
-            "twasWeightsPipeline: method(s) %s were requested but the ",
-            "supplied fineMappingResult contains no such fine-mapping ",
-            "fit. Run fineMappingPipeline() with method(s) %s first ",
-            "and pass the result via `fineMappingResult = ",
-            "<FineMappingResult>`."
-        ),
-        paste(unique(missingMethods), collapse = ", "),
-        paste(unique(missingMethods), collapse = ", ")
-    ))
+    missingStr <- str_flatten(unique(missingMethods), ", ")
+    msg <- glue(
+        "twasWeightsPipeline: method(s) {missingStr} were requested but ",
+        "the supplied fineMappingResult contains no such fine-mapping ",
+        "fit. Run fineMappingPipeline() with method(s) {missingStr} first ",
+        "and pass the result via `fineMappingResult = <FineMappingResult>`."
+    )
+    abort(msg)
 }
 
 # Look up the multivariate flag for a token. Checks the TWAS-regression
@@ -780,24 +737,18 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 # contexts in the Y matrix passed to learnTwasWeights.
 # @noRd
 .twasCheckMultivariateY <- function(tokens, nTraits, nContexts) {
-    multivariateTokens <- tokens[vapply(
-        tokens,
-        .twasIsMultivariateToken,
-        logical(1)
-    )]
+    multivariateTokens <- tokens[map_lgl(tokens, .twasIsMultivariateToken)]
     if (length(multivariateTokens) == 0L) {
         return(invisible(NULL))
     }
     if (nTraits < 2L && nContexts < 2L) {
-        stop(sprintf(
-            paste0(
-                "twasWeightsPipeline: method(s) %s require multi-trait or ",
-                "multi-context input (got %d trait(s) x %d context(s))."
-            ),
-            paste(multivariateTokens, collapse = ", "),
-            nTraits,
-            nContexts
-        ))
+        mvStr <- str_flatten(multivariateTokens, ", ")
+        msg <- glue(
+            "twasWeightsPipeline: method(s) {mvStr} require multi-trait or ",
+            "multi-context input (got {nTraits} trait(s) x ",
+            "{nContexts} context(s))."
+        )
+        abort(msg)
     }
 }
 
@@ -805,12 +756,13 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 # @noRd
 .twasAssertQcd <- function(sumstats) {
     if (length(getQcInfo(sumstats)) == 0L) {
-        stop(
-            "twasWeightsPipeline: the supplied ",
-            class(sumstats)[[1L]],
-            " has no QC record (qcInfo is empty). Call summaryStatsQc() ",
-            "first and pass the QC-applied result."
+        cls <- class(sumstats)[[1L]]
+        msg <- glue(
+            "twasWeightsPipeline: the supplied {cls} has no QC record ",
+            "(qcInfo is empty). Call summaryStatsQc() first and pass the ",
+            "QC-applied result."
         )
+        abort(msg)
     }
 }
 
@@ -879,23 +831,22 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
         return(list())
     }
     if (!is(fineMappingResult, "FineMappingResultBase")) {
-        stop("`fineMappingResult` must be a FineMappingResult or NULL.")
+        abort("`fineMappingResult` must be a FineMappingResult or NULL.")
     }
     out <- list()
     methods <- as.character(fineMappingResult$method)
     for (canonical in c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")) {
         candidates <- c(
             canonical,
-            paste0(
-                tolower(substring(canonical, 1L, 1L)),
-                substring(canonical, 2L)
+            str_c(
+                str_to_lower(str_sub(canonical, 1L, 1L)),
+                str_sub(canonical, 2L)
             ),
-            gsub("([A-Z])", "_\\1", canonical)
+            str_replace_all(canonical, "([A-Z])", "_\\1")
         )
-        candidates <- tolower(candidates)
+        candidates <- str_to_lower(candidates)
         idx <- which(
-            tolower(methods) %in%
-                candidates &
+            is_in(str_to_lower(methods), candidates) &
                 as.character(fineMappingResult$study) == study &
                 as.character(fineMappingResult$context) == context &
                 as.character(fineMappingResult$trait) == trait
@@ -970,10 +921,7 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
         # Multi-region entries store cvResult as a named per-region list; pick
         # the first region that carries a partition.
         if (is.null(cv$samplePartition)) {
-            hit <- Filter(
-                function(z) is.list(z) && !is.null(z$samplePartition),
-                cv
-            )
+            hit <- keep(cv, .twasCvHasPartition)
             if (length(hit) == 0L) {
                 next
             }
@@ -1167,29 +1115,16 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
 # @noRd
 .twasRunMultivariateGrid <- function(traits, marker, ctx) {
     synthSpec <- list(list(axes = c("context", "trait"), scope = NULL))
-    labs <- vapply(ctx$xRegions, .twasRegionLabel, character(1))
-    perRegion <- lapply(seq_along(ctx$xRegions), function(bi) {
-        .runJointSpecs(
-            synthSpec,
-            ctx$data,
-            dataForm = "individual",
-            pipeline = marker,
-            jointMethods = ctx$norm$tokens,
-            contexts = ctx$useCtx,
-            traitIds = traits,
-            args = list(
-                methodList = ctx$norm$methodList,
-                fineMappingResult = ctx$fineMappingResult,
-                dataDrivenPriorMatricesCv = ctx$dataDrivenPriorMatricesCv,
-                cisWindow = ctx$cisWindow,
-                region = ctx$xRegions[[bi]],
-                regionIndex = bi,
-                nRegions = length(ctx$xRegions),
-                verbose = ctx$verbose
-            )
-        )
-    })
-    keep <- !vapply(perRegion, is.null, logical(1))
+    labs <- map_chr(ctx$xRegions, .twasRegionLabel)
+    perRegion <- map(
+        seq_along(ctx$xRegions),
+        .twasMvGridRegion,
+        synthSpec = synthSpec,
+        marker = marker,
+        ctx = ctx,
+        traits = traits
+    )
+    keep <- !map_lgl(perRegion, is.null)
     perRegion <- perRegion[keep]
     labs <- labs[keep]
     if (length(perRegion) == 0L) {
@@ -1247,8 +1182,8 @@ setMethod(
         verbose = 1,
         ...
     ) {
-        naAction <- match.arg(naAction)
-        retainFitDetail <- match.arg(retainFitDetail)
+        naAction <- arg_match(naAction)
+        retainFitDetail <- arg_match(retainFitDetail)
         p <- as.list(environment())
         p$dots <- list(...)
         .twasPipelineQtlDataset(p)
@@ -1298,11 +1233,12 @@ setMethod(
 # @noRd
 .twasQdsCheckRegionCisWindow <- function(p) {
     if (!is.null(p$region) && !is.null(p$cisWindow)) {
-        stop(
+        msg <- glue(
             "twasWeightsPipeline(QtlDataset): specify either `region` or ",
             "`cisWindow`, not both. `cisWindow` expands each trait's own ",
             "coordinates, whereas `region` is the literal variant window."
         )
+        abort(msg)
     }
     invisible(NULL)
 }
@@ -1311,10 +1247,11 @@ setMethod(
 # @noRd
 .twasQdsCheckFitFull <- function(p) {
     if (!isTRUE(p$fitFullData) && p$cvFolds <= 1L) {
-        stop(
+        msg <- glue(
             "twasWeightsPipeline: fitFullData = FALSE requires ",
             "cross-validation (cvFolds > 1)."
         )
+        abort(msg)
     }
     invisible(NULL)
 }
@@ -1327,15 +1264,16 @@ setMethod(
     mp <- .unpackMashPrior(p$mashPrior, p$samplePartition)
     p$samplePartition <- mp$samplePartition
     p$dataDrivenPriorMatricesCv <- mp$dataDrivenPriorMatricesCv
-    if (!is.null(p$mashPrior) && !"mrmash" %in% p$norm$tokens) {
-        warning(
+    if (!is.null(p$mashPrior) && !is_in("mrmash", p$norm$tokens)) {
+        msg <- glue(
             "`mashPrior` was supplied but 'mrmash' is not among `methods`; ",
             "the data-driven prior is ignored."
         )
+        warn(msg)
     }
     if (
         !is.null(mp$fullPrior) &&
-            "mrmash_weights" %in% names(p$norm$methodList)
+            is_in("mrmash_weights", names(p$norm$methodList))
     ) {
         p$norm$methodList$mrmash_weights$dataDrivenPriorMatrices <- mp$fullPrior
     }
@@ -1367,18 +1305,19 @@ setMethod(
     keep <- setdiff(p$norm$tokens, intersect(p$norm$tokens, "mrmash"))
     if (length(keep) == 0L) {
         if (is.null(jointResult)) {
-            stop(
+            msg <- glue(
                 "twasWeightsPipeline(QtlDataset): no joint fits produced. ",
                 "Check that the jointSpecification scope intersects the ",
                 "available studies / contexts / traits."
             )
+            abort(msg)
         }
         return(list(done = TRUE, result = jointResult))
     }
     norm <- p$norm
     norm$tokens <- keep
     keepKeys <- which(
-        sub("(_weights|Weights)$", "", names(norm$methodList)) %in% keep
+        is_in(str_remove(names(norm$methodList), "(_weights|Weights)$"), keep)
     )
     norm$methodList <- norm$methodList[keepKeys]
     list(done = FALSE, result = jointResult, norm = norm)
@@ -1413,10 +1352,11 @@ setMethod(
     }
     bad <- setdiff(contexts, allCtx)
     if (length(bad) > 0L) {
-        stop(
-            "twasWeightsPipeline(QtlDataset): unknown context(s): ",
-            paste(bad, collapse = ", ")
+        badStr <- str_flatten(bad, ", ")
+        msg <- glue(
+            "twasWeightsPipeline(QtlDataset): unknown context(s): {badStr}"
         )
+        abort(msg)
     }
     contexts
 }
@@ -1425,21 +1365,16 @@ setMethod(
 # else every trait in every selected context.
 # @noRd
 .twasQdsResolveTraits <- function(data, useCtx, traitId, region) {
-    perCtxTraits <- map(useCtx, function(ctx) {
-        se <- getPhenotypes(data, contexts = ctx)
-        ids <- rownames(se)
-        if (!is.null(traitId)) {
-            intersect(ids, traitId)
-        } else if (!is.null(region)) {
-            rr <- SummarizedExperiment::rowRanges(se)
-            ids[IRanges::overlapsAny(rr, region)]
-        } else {
-            ids
-        }
-    })
+    perCtxTraits <- map(
+        useCtx,
+        .twasQdsCtxTraits,
+        data = data,
+        traitId = traitId,
+        region = region
+    )
     allTraits <- unique(unlist(perCtxTraits))
     if (length(allTraits) == 0L) {
-        stop("twasWeightsPipeline(QtlDataset): no traits selected.")
+        abort("twasWeightsPipeline(QtlDataset): no traits selected.")
     }
     allTraits
 }
@@ -1501,20 +1436,17 @@ setMethod(
     univCell <- .lookupJointCell("univariate", "individual")
     scope <- list(
         studies = p$study,
-        contexts = setNames(list(p$useCtx), p$study),
-        traits = setNames(list(p$allTraits), p$study)
+        contexts = set_names(list(p$useCtx), p$study),
+        traits = set_names(list(p$allTraits), p$study)
     )
     labs <- map_chr(p$xRegions, .twasRegionLabel)
-    perRegion <- map(seq_along(p$xRegions), function(bi) {
-        .runJointCell(
-            univCell,
-            p$marker,
-            p$data,
-            scope,
-            p$norm$tokens,
-            args = .twasQdsUnivArgs(p, bi)
-        )
-    })
+    perRegion <- map(
+        seq_along(p$xRegions),
+        .twasQdsUnivRegion,
+        univCell = univCell,
+        p = p,
+        scope = scope
+    )
     keep <- !map_lgl(perRegion, is.null)
     .twasMergeRegionResults(perRegion[keep], labs[keep])
 }
@@ -1552,10 +1484,11 @@ setMethod(
 # @noRd
 .twasQdsAssemble <- function(tw, jointResult) {
     if (is.null(tw) && is.null(jointResult)) {
-        stop(
+        msg <- glue(
             "twasWeightsPipeline(QtlDataset): no (context, trait) pair ",
             "produced any weights."
         )
+        abort(msg)
     }
     if (is.null(tw)) {
         return(jointResult)
@@ -1585,7 +1518,7 @@ setMethod(
         verbose = 1L,
         ...
     ) {
-        retainFitDetail <- match.arg(retainFitDetail)
+        retainFitDetail <- arg_match(retainFitDetail)
         p <- as.list(environment())
         p$dots <- list(...)
         .twasPipelineQtlSumStats(p)
@@ -1634,16 +1567,17 @@ setMethod(
     if (is.list(methods)) {
         return(list(tokens = names(methods), methodArgs = methods))
     }
-    stop(
+    msg <- glue(
         "`methods` must be NULL, a character vector, or a named list ",
         "of <token> = <args> entries."
     )
+    abort(msg)
 }
 
 # Empty-args map keyed by method token.
 # @noRd
 .twasEmptyMethodArgs <- function(tokens) {
-    setNames(rep(list(list()), length(tokens)), tokens)
+    set_names(rep(list(list()), length(tokens)), tokens)
 }
 
 # Joint-specification dispatch for mrmash. Returns list(done, result, tokens,
@@ -1673,7 +1607,7 @@ setMethod(
     keep <- setdiff(p$tokens, "mrmash")
     if (length(keep) == 0L) {
         if (is.null(jointResult)) {
-            stop("twasWeightsPipeline(QtlSumStats): no joint fits produced.")
+            abort("twasWeightsPipeline(QtlSumStats): no joint fits produced.")
         }
         return(list(done = TRUE, result = jointResult))
     }
@@ -1707,16 +1641,17 @@ setMethod(
 .twasQssSelectRows <- function(p) {
     selRows <- seq_len(nrow(p$data))
     if (!is.null(p$contexts)) {
-        selRows <- selRows[p$contextCol[selRows] %in% p$contexts]
+        selRows <- selRows[is_in(p$contextCol[selRows], p$contexts)]
     }
     if (!is.null(p$traitId)) {
-        selRows <- selRows[p$traitCol[selRows] %in% p$traitId]
+        selRows <- selRows[is_in(p$traitCol[selRows], p$traitId)]
     }
     if (length(selRows) == 0L) {
-        stop(
+        msg <- glue(
             "twasWeightsPipeline(QtlSumStats): no entries matched the ",
             "supplied contexts / traitId filters."
         )
+        abort(msg)
     }
     selRows
 }
@@ -1727,21 +1662,20 @@ setMethod(
     if (length(p$multivariateTokens) == 0L) {
         return(invisible(NULL))
     }
-    groupKey <- paste(
+    groupKey <- str_c(
         p$studyCol[p$selRows],
         p$traitCol[p$selRows],
         sep = "||"
     )
     perGroupNCtx <- map_int(split(p$contextCol[p$selRows], groupKey), length)
     if (all(perGroupNCtx < 2L)) {
-        stop(sprintf(
-            paste0(
-                "twasWeightsPipeline(QtlSumStats): multivariate method(s) ",
-                "%s require at least two contexts per (study, trait); the ",
-                "supplied collection has only one context per trait."
-            ),
-            paste(p$multivariateTokens, collapse = ", ")
-        ))
+        mvStr <- str_flatten(p$multivariateTokens, ", ")
+        msg <- glue(
+            "twasWeightsPipeline(QtlSumStats): multivariate method(s) ",
+            "{mvStr} require at least two contexts per (study, trait); the ",
+            "supplied collection has only one context per trait."
+        )
+        abort(msg)
     }
     invisible(NULL)
 }
@@ -1815,12 +1749,15 @@ setMethod(
 # @noRd
 .twasTryWeights <- function(fn, stat, ldMat, userArgs, errPrefix) {
     tryCatch(
-        do.call(
-            get(fn, mode = "function"),
-            c(list(stat = stat, LD = ldMat), userArgs)
-        ),
+        {
+            wfn <- get(fn, mode = "function")
+            wArgs <- c(list(stat = stat, LD = ldMat), userArgs)
+            exec(wfn, !!!wArgs)
+        },
         error = function(e) {
-            warning(errPrefix, conditionMessage(e))
+            eMsg <- conditionMessage(e)
+            msg <- glue("{errPrefix}{eMsg}")
+            warn(msg)
             NULL
         }
     )
@@ -1832,10 +1769,7 @@ setMethod(
     if (length(p$univariateTokens) == 0L) {
         return(list())
     }
-    list_flatten(map(
-        p$selRows,
-        function(i) .twasQssUnivariateRowsForEntry(i, p)
-    ))
+    list_flatten(map(p$selRows, .twasQssUnivariateRowsForEntry, p = p))
 }
 
 # Cached + freshly-fitted rows for one sumstats entry. Resume cache: pull cached
@@ -1854,7 +1788,10 @@ setMethod(
     )
     cachedRows <- imap(
         cacheHits,
-        function(entry, tk) .twasRowRecord(st, ctx, tr, tk, entry)
+        .twasCachedRowRecord,
+        st = st,
+        ctx = ctx,
+        tr = tr
     )
     toFit <- setdiff(p$univariateTokens, names(cacheHits))
     if (length(toFit) == 0L) {
@@ -1863,7 +1800,12 @@ setMethod(
     fitCtx <- .twasQssUnivariateFitCtx(p$data, st, ctx, tr, p$ldSketch)
     fitted <- compact(map(
         toFit,
-        function(tk) .twasQssUnivariateFitOne(tk, st, ctx, tr, fitCtx, p)
+        .twasQssUnivariateFitOne,
+        st = st,
+        ctx = ctx,
+        tr = tr,
+        fitCtx = fitCtx,
+        p = p
     ))
     c(unname(cachedRows), fitted)
 }
@@ -1872,9 +1814,14 @@ setMethod(
 # @noRd
 .twasResolveCacheHits <- function(twasWeights, st, ctx, tr, tokens) {
     hits <- set_names(
-        map(tokens, function(tk) {
-            .twasCacheLookup(twasWeights, st, ctx, tr, tk)
-        }),
+        map(
+            tokens,
+            .twasCacheLookupTok,
+            twasWeights = twasWeights,
+            st = st,
+            ctx = ctx,
+            tr = tr
+        ),
         tokens
     )
     compact(hits)
@@ -1962,30 +1909,20 @@ setMethod(
 # Warning for a missing univariate fine-mapping fit.
 # @noRd
 .twasWarnNoFitUniv <- function(tk, st, ctx, tr) {
-    warning(sprintf(
-        paste0(
-            "twasWeightsPipeline: no '%s' fit found in fineMappingResult ",
-            "for (study=%s, context=%s, trait=%s); skipping."
-        ),
-        tk,
-        st,
-        ctx,
-        tr
-    ))
+    msg <- glue(
+        "twasWeightsPipeline: no '{tk}' fit found in fineMappingResult ",
+        "for (study={st}, context={ctx}, trait={tr}); skipping."
+    )
+    warn(msg)
 }
 
 # Error-message prefix for a failed univariate weight fit.
 # @noRd
 .twasFitErrUniv <- function(tk, st, ctx, tr) {
-    sprintf(
-        paste0(
-            "twasWeightsPipeline: method '%s' failed for (study=%s, ",
-            "context=%s, trait=%s): "
-        ),
-        tk,
-        st,
-        ctx,
-        tr
+    glue(
+        "twasWeightsPipeline: method '{tk}' failed for (study={st}, ",
+        "context={ctx}, trait={tr}): ",
+        .trim = FALSE
     )
 }
 
@@ -1995,16 +1932,13 @@ setMethod(
     if (length(p$multivariateTokens) == 0L) {
         return(list())
     }
-    groupKey <- paste(
+    groupKey <- str_c(
         p$studyCol[p$selRows],
         p$traitCol[p$selRows],
         sep = "||"
     )
     groups <- split(p$selRows, groupKey)
-    list_flatten(map(
-        groups,
-        function(gIdx) .twasQssMultivariateGroupRows(gIdx, p)
-    ))
+    list_flatten(map(groups, .twasQssMultivariateGroupRows, p = p))
 }
 
 # Multivariate rows for one (study, trait) group across its contexts.
@@ -2020,9 +1954,13 @@ setMethod(
     ldMat <- .twasLdFromSketch(p$ldSketch, mvStat$variantIds)
     list_flatten(map(
         p$multivariateTokens,
-        function(tk) {
-            .twasQssMultivariateFitOne(tk, st, tr, ctxNames, mvStat, ldMat, p)
-        }
+        .twasQssMultivariateFitOne,
+        st = st,
+        tr = tr,
+        ctxNames = ctxNames,
+        mvStat = mvStat,
+        ldMat = ldMat,
+        p = p
     ))
 }
 
@@ -2057,15 +1995,13 @@ setMethod(
             derive = "zFromBetaSe"
         )
         if (!identical(d$variant_id, variantIds)) {
-            stop(
-                "twasWeightsPipeline(QtlSumStats, multivariate): every entry ",
-                "for (study='",
-                st,
-                "', trait='",
-                tr,
-                "') must share an identical SNP order after ",
-                "summaryStatsQc(). Use the same ldSketch on every entry."
+            msg <- glue(
+                "twasWeightsPipeline(QtlSumStats, multivariate): every ",
+                "entry for (study='{st}', trait='{tr}') must share an ",
+                "identical SNP order after summaryStatsQc(). Use the same ",
+                "ldSketch on every entry."
             )
+            abort(msg)
         }
         Z[, kk] <- d$z
         nVec[kk] <- stats::median(d$N, na.rm = TRUE)
@@ -2144,28 +2080,20 @@ setMethod(
 # Warning for a missing multivariate fine-mapping fit.
 # @noRd
 .twasWarnNoFitMv <- function(tk, st, tr) {
-    warning(sprintf(
-        paste0(
-            "twasWeightsPipeline: no '%s' fit found in fineMappingResult ",
-            "for (study=%s, trait=%s); skipping."
-        ),
-        tk,
-        st,
-        tr
-    ))
+    msg <- glue(
+        "twasWeightsPipeline: no '{tk}' fit found in fineMappingResult ",
+        "for (study={st}, trait={tr}); skipping."
+    )
+    warn(msg)
 }
 
 # Error-message prefix for a failed multivariate weight fit.
 # @noRd
 .twasFitErrMv <- function(tk, st, tr) {
-    sprintf(
-        paste0(
-            "twasWeightsPipeline: multivariate method '%s' failed for ",
-            "(study=%s, trait=%s): "
-        ),
-        tk,
-        st,
-        tr
+    glue(
+        "twasWeightsPipeline: multivariate method '{tk}' failed for ",
+        "(study={st}, trait={tr}): ",
+        .trim = FALSE
     )
 }
 
@@ -2183,22 +2111,18 @@ setMethod(
     tk,
     dataType
 ) {
-    map(seq_along(ctxNames), function(kk) {
-        .twasRowRecord(
-            st,
-            ctxNames[[kk]],
-            tr,
-            tk,
-            TwasWeightsEntry(
-                variantIds = mvStat$variantIds,
-                weights = as.numeric(weights[, kk]),
-                fits = if (kk == 1L) fitAttr else NULL,
-                cvResult = NULL,
-                standardized = TRUE,
-                dataType = dataType
-            )
-        )
-    })
+    map(
+        seq_along(ctxNames),
+        .twasMvContextRow,
+        weights = weights,
+        fitAttr = fitAttr,
+        ctxNames = ctxNames,
+        mvStat = mvStat,
+        st = st,
+        tr = tr,
+        tk = tk,
+        dataType = dataType
+    )
 }
 
 # Combine the per-tuple result with any joint result (error if both empty).
@@ -2207,10 +2131,11 @@ setMethod(
     perTupleResult <- .twasRowsToWeights(rows, p$ldSketch)
     if (is.null(jointResult)) {
         if (is.null(perTupleResult)) {
-            stop(
+            msg <- glue(
                 "twasWeightsPipeline(QtlSumStats): no entries produced ",
                 "weights."
             )
+            abort(msg)
         }
         return(perTupleResult)
     }
@@ -2235,47 +2160,43 @@ setMethod(
 # args.
 # @noRd
 .twasPerStudy <- function(qd, cfg) {
-    do.call(
-        twasWeightsPipeline,
-        c(
-            list(
-                data = qd,
-                methods = cfg$methods,
-                contexts = cfg$contexts,
-                traitId = cfg$traitId,
-                region = cfg$region,
-                cisWindow = cfg$cisWindow,
-                jointRegions = cfg$jointRegions,
-                jointSpecification = NULL,
-                fineMappingResult = cfg$fineMappingResult,
-                twasWeights = cfg$twasWeights,
-                naAction = cfg$naAction,
-                verbose = cfg$verbose
-            ),
-            cfg$dotArgs
-        )
+    twArgs <- c(
+        list(
+            data = qd,
+            methods = cfg$methods,
+            contexts = cfg$contexts,
+            traitId = cfg$traitId,
+            region = cfg$region,
+            cisWindow = cfg$cisWindow,
+            jointRegions = cfg$jointRegions,
+            jointSpecification = NULL,
+            fineMappingResult = cfg$fineMappingResult,
+            twasWeights = cfg$twasWeights,
+            naAction = cfg$naAction,
+            verbose = cfg$verbose
+        ),
+        cfg$dotArgs
     )
+    exec(twasWeightsPipeline, !!!twArgs)
 }
 
 # Embedded-sumstats TWAS-weights worker for .multiStudyPipelineDriver.
 # @noRd
 .twasSumStats <- function(ss, cfg) {
-    do.call(
-        twasWeightsPipeline,
-        c(
-            list(
-                data = ss,
-                methods = cfg$methods,
-                contexts = cfg$contexts,
-                traitId = cfg$traitId,
-                jointSpecification = NULL,
-                fineMappingResult = cfg$fineMappingResult,
-                twasWeights = cfg$twasWeights,
-                verbose = cfg$verbose
-            ),
-            cfg$dotArgs
-        )
+    twArgs <- c(
+        list(
+            data = ss,
+            methods = cfg$methods,
+            contexts = cfg$contexts,
+            traitId = cfg$traitId,
+            jointSpecification = NULL,
+            fineMappingResult = cfg$fineMappingResult,
+            twasWeights = cfg$twasWeights,
+            verbose = cfg$verbose
+        ),
+        cfg$dotArgs
     )
+    exec(twasWeightsPipeline, !!!twArgs)
 }
 
 #' @rdname twasWeightsPipeline
@@ -2304,8 +2225,8 @@ setMethod(
         residualizeGenotypeCovariates = TRUE,
         ...
     ) {
-        naAction <- match.arg(naAction)
-        retainFitDetail <- match.arg(retainFitDetail)
+        naAction <- arg_match(naAction)
+        retainFitDetail <- arg_match(retainFitDetail)
         p <- as.list(environment())
         p$dots <- list(...)
         .twasPipelineMultiStudy(p)
@@ -2321,7 +2242,7 @@ setMethod(
     if (is.character(methods)) {
         methods
     } else if (is.list(methods)) {
-        sub("(_weights|Weights)$", "", names(methods))
+        str_remove(names(methods), "(_weights|Weights)$")
     } else {
         character(0)
     }
@@ -2347,10 +2268,11 @@ setMethod(
 
 .twasPipelineMultiStudy <- function(p) {
     if (!is.null(p$region) && !is.null(p$cisWindow)) {
-        stop(
+        msg <- glue(
             "twasWeightsPipeline(MultiStudyQtlDataset): specify either ",
             "`region` or `cisWindow`, not both."
         )
+        abort(msg)
     }
     xRegions <- .makeXRegions(p$region, p$jointRegions)
     parsedJointSpec <- parseJointSpecification(p$jointSpecification, p$data)
@@ -2393,10 +2315,11 @@ setMethod(
     methods <- .twasMsStripMrmash(p$methods)
     if (.twasMethodsEmpty(methods)) {
         if (is.null(jointResult)) {
-            stop(
+            msg <- glue(
                 "twasWeightsPipeline(MultiStudyQtlDataset): no joint fits ",
                 "produced."
             )
+            abort(msg)
         }
         return(list(done = TRUE, result = jointResult))
     }
@@ -2436,14 +2359,15 @@ setMethod(
 #' @rdname twasWeightsPipeline
 #' @export
 setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
-    stop(
-        "twasWeightsPipeline does not accept inputs of class '",
-        class(data)[[1L]],
-        "'. Pass a QtlDataset, MultiStudyQtlDataset, ",
-        "or QtlSumStats. (GwasSumStats inputs are not supported; ",
-        "GWAS-side per-LD-block weights are produced inside the new ",
-        "ctwasPipeline / qtlEnrichmentPipeline.)"
+    cls <- class(data)[[1L]]
+    msg <- glue(
+        "twasWeightsPipeline does not accept inputs of class '{cls}'. ",
+        "Pass a QtlDataset, MultiStudyQtlDataset, or QtlSumStats. ",
+        "(GwasSumStats inputs are not supported; GWAS-side per-LD-block ",
+        "weights are produced inside the new ctwasPipeline / ",
+        "qtlEnrichmentPipeline.)"
     )
+    abort(msg)
 })
 
 # =============================================================================
@@ -2461,10 +2385,11 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
 .solveEnsembleQuadprog <- function(Pvalid, yObs, Kvalid) {
     if (!requireNamespace("quadprog", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "Package 'quadprog' is required for solver='quadprog'. ",
             "Install with: install.packages('quadprog')"
         )
+        abort(msg)
         # nocov end
     }
 
@@ -2481,11 +2406,12 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
     qpSol <- tryCatch(
         solve.QP(Dmat = Dmat, dvec = dvec, Amat = Amat, bvec = bvec, meq = 1),
         error = function(e) {
-            warning(
-                "QP solver failed: ",
-                conditionMessage(e),
-                ". Falling back to equal weights among valid methods."
+            eMsg <- conditionMessage(e)
+            msg <- glue(
+                "QP solver failed: {eMsg}. Falling back to equal weights ",
+                "among valid methods."
             )
+            warn(msg)
             NULL
         }
     )
@@ -2498,7 +2424,7 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
     zetaValid <- pmax(qpSol$solution, 0)
     zetaSum <- sum(zetaValid)
     if (zetaSum <= 0) {
-        warning("QP returned all-zero solution. Falling back to equal weights.")
+        warn("QP returned all-zero solution. Falling back to equal weights.")
         return(rep(1 / Kvalid, Kvalid))
     }
     zetaValid / zetaSum
@@ -2514,21 +2440,22 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
 .solveEnsembleNnls <- function(Pvalid, yObs, Kvalid) {
     if (!requireNamespace("nnls", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "Package 'nnls' is required for solver='nnls'. ",
             "Install with: install.packages('nnls')"
         )
+        abort(msg)
         # nocov end
     }
 
     fit <- tryCatch(
         nnls::nnls(Pvalid, yObs),
         error = function(e) {
-            warning(
-                "NNLS solver failed: ",
-                conditionMessage(e),
-                ". Falling back to equal weights."
+            eMsg <- conditionMessage(e)
+            msg <- glue(
+                "NNLS solver failed: {eMsg}. Falling back to equal weights."
             )
+            warn(msg)
             NULL
         }
     )
@@ -2540,7 +2467,7 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
     zetaValid <- fit$x
     zetaSum <- sum(zetaValid)
     if (zetaSum <= 0) {
-        warning(
+        warn(
             "NNLS returned all-zero solution. Falling back to equal weights."
         )
         return(rep(1 / Kvalid, Kvalid))
@@ -2583,11 +2510,12 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
             lower = rep(0, Kvalid)
         ),
         error = function(e) {
-            warning(
-                "L-BFGS-B solver failed: ",
-                conditionMessage(e),
-                ". Falling back to equal weights."
+            eMsg <- conditionMessage(e)
+            msg <- glue(
+                "L-BFGS-B solver failed: {eMsg}. Falling back to equal ",
+                "weights."
             )
+            warn(msg)
             NULL
         }
     )
@@ -2599,10 +2527,11 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
     zetaValid <- pmax(fit$par, 0)
     zetaSum <- sum(zetaValid)
     if (zetaSum <= 0) {
-        warning(
+        msg <- glue(
             "L-BFGS-B returned all-zero solution. Falling back to ",
             "equal weights."
         )
+        warn(msg)
         return(rep(1 / Kvalid, Kvalid))
     }
     zetaValid / zetaSum
@@ -2620,10 +2549,11 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
 .solveEnsembleGlmnet <- function(Pvalid, yObs, Kvalid, alpha = 1) {
     if (!requireNamespace("glmnet", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "Package 'glmnet' is required for solver='glmnet'. ",
             "Install with: install.packages('glmnet')"
         )
+        abort(msg)
         # nocov end
     }
 
@@ -2636,11 +2566,12 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
             intercept = FALSE
         ),
         error = function(e) {
-            warning(
-                "glmnet solver failed: ",
-                conditionMessage(e),
-                ". Falling back to equal weights."
+            eMsg <- conditionMessage(e)
+            msg <- glue(
+                "glmnet solver failed: {eMsg}. Falling back to equal ",
+                "weights."
             )
+            warn(msg)
             NULL
         }
     )
@@ -2653,7 +2584,7 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
     zetaValid <- pmax(zetaValid, 0)
     zetaSum <- sum(zetaValid)
     if (zetaSum <= 0) {
-        warning(
+        warn(
             "glmnet returned all-zero solution. Falling back to equal weights."
         )
         return(rep(1 / Kvalid, Kvalid))
@@ -2747,6 +2678,9 @@ setMethod("twasWeightsPipeline", "ANY", function(data, ...) {
 #' X <- multiTraitData$X[, 1:30]
 #' y <- matrix(multiTraitData$Y[, 1], ncol = 1,
 #'   dimnames = list(rownames(X), "outcome_1"))
+#' # lasso/enet on this small toy panel only capture signal for some CV
+#' # splits; a fixed seed keeps the example deterministic.
+#' set.seed(42)
 #' cv <- twasWeightsCv(X, y, fold = 3,
 #'   weightMethods = list(lasso_weights = list(), enet_weights = list()))
 #' ens <- ensembleWeights(cvResults = cv, Y = y)
@@ -2762,7 +2696,7 @@ ensembleWeights <- function(
     solver = c("quadprog", "nnls", "lbfgsb", "glmnet"),
     alpha = 1
 ) {
-    solver <- match.arg(solver)
+    solver <- arg_match(solver)
     .ensembleValidateArgs(cvResults, Y, contextIndex)
     norm <- .ensembleNormalizeInput(cvResults, Y, twasWeightList)
     nm <- .ensembleMethodNames(norm$cvResults)
@@ -2803,17 +2737,17 @@ ensembleWeights <- function(
 # @noRd
 .ensembleValidateArgs <- function(cvResults, Y, contextIndex) {
     if (is.null(cvResults)) {
-        stop("'cvResults' is required.")
+        abort("'cvResults' is required.")
     }
     if (is.null(Y)) {
-        stop("'Y' is required.")
+        abort("'Y' is required.")
     }
     if (
         !is.numeric(contextIndex) ||
             length(contextIndex) != 1 ||
             contextIndex < 1
     ) {
-        stop("'contextIndex' must be a positive integer scalar.")
+        abort("'contextIndex' must be a positive integer scalar.")
     }
     invisible(NULL)
 }
@@ -2842,35 +2776,37 @@ ensembleWeights <- function(
 # @noRd
 .ensembleValidateMultiInput <- function(cvResults, Y, twasWeightList) {
     if (!is.list(cvResults) || length(cvResults) == 0) {
-        stop(
+        msg <- glue(
             "For multi-dataset ensemble, 'cvResults' must be a non-empty ",
             "list of twasWeightsCv() outputs."
         )
+        abort(msg)
     }
     if (!is.list(Y) || length(Y) != length(cvResults)) {
-        stop(
+        msg <- glue(
             "'Y' must be a list of the same length as 'cvResults' for ",
             "multi-dataset ensemble."
         )
+        abort(msg)
     }
     if (
         !is.null(twasWeightList) &&
             (!is.list(twasWeightList) ||
                 length(twasWeightList) != length(cvResults))
     ) {
-        stop(
+        msg <- glue(
             "'twasWeightList' must be a list of the same length as ",
             "'cvResults'."
         )
+        abort(msg)
     }
     for (d in seq_along(cvResults)) {
         if (is.null(cvResults[[d]]$prediction)) {
-            stop(
-                "cvResults[[",
-                d,
-                "]] does not contain '$prediction'. ",
+            msg <- glue(
+                "cvResults[[{d}]] does not contain '$prediction'. ",
                 "Expected a twasWeightsCv() output."
             )
+            abort(msg)
         }
     }
     invisible(NULL)
@@ -2882,27 +2818,30 @@ ensembleWeights <- function(
 .ensembleMethodNames <- function(cvResults) {
     predNames <- names(cvResults[[1]]$prediction)
     if (is.null(predNames) || any(predNames == "")) {
-        stop(
+        msg <- glue(
             "cvResults$prediction must be a named list (output of ",
             "twasWeightsCv)."
         )
+        abort(msg)
     }
-    baseNames <- sub("(_predicted|Predicted)$", "", predNames)
+    baseNames <- str_remove(predNames, "(_predicted|Predicted)$")
     K <- length(baseNames)
     if (K < 2) {
-        stop("Ensemble learning requires at least 2 methods. Found: ", K, ".")
+        msg <- glue(
+            "Ensemble learning requires at least 2 methods. Found: {K}."
+        )
+        abort(msg)
     }
     for (d in seq_along(cvResults)) {
         if (!identical(names(cvResults[[d]]$prediction), predNames)) {
-            stop(
+            pred1 <- str_flatten(predNames, ", ")
+            predD <- str_flatten(names(cvResults[[d]]$prediction), ", ")
+            msg <- glue(
                 "All cvResults must have the same method names (in ",
-                "$prediction) in the same order. Dataset 1 has: ",
-                paste(predNames, collapse = ", "),
-                "; dataset ",
-                d,
-                " has: ",
-                paste(names(cvResults[[d]]$prediction), collapse = ", ")
+                "$prediction) in the same order. Dataset 1 has: {pred1}; ",
+                "dataset {d} has: {predD}"
             )
+            abort(msg)
         }
     }
     list(predNames = predNames, baseNames = baseNames, K = K)
@@ -2912,16 +2851,16 @@ ensembleWeights <- function(
 # with any NA. Returns list(P, yObs).
 # @noRd
 .ensembleStackPredictions <- function(cvResults, Y, nm, contextIndex) {
-    perDataset <- map(seq_along(cvResults), function(d) {
-        .ensembleDatasetMatrix(
-            cvResults[[d]]$prediction,
-            Y[[d]],
-            nm,
-            contextIndex,
-            d
-        )
-    })
-    P <- do.call(rbind, map(perDataset, "P"))
+    perDataset <- map(
+        seq_along(cvResults),
+        .ensembleDatasetRow,
+        cvResults = cvResults,
+        Y = Y,
+        nm = nm,
+        contextIndex = contextIndex
+    )
+    pMats <- map(perDataset, "P")
+    P <- exec(rbind, !!!pMats)
     yObs <- list_c(map(perDataset, "y"))
     .ensembleDropIncomplete(P, yObs, nm$K)
 }
@@ -2954,27 +2893,24 @@ ensembleWeights <- function(
 .ensembleAlignByName <- function(predSamples, yNames, yRaw, contextIndex, d) {
     common <- intersect(predSamples, yNames)
     if (length(common) == 0) {
-        stop(
-            "No common sample names between predictions and Y in dataset ",
-            d,
-            "."
+        msg <- glue(
+            "No common sample names between predictions and Y in ",
+            "dataset {d}."
         )
+        abort(msg)
     }
     if (
         length(common) < length(predSamples) ||
             length(common) < length(yNames)
     ) {
-        message(
-            "Dataset ",
-            d,
-            ": using ",
-            length(common),
-            " common samples (predictions: ",
-            length(predSamples),
-            ", Y: ",
-            length(yNames),
-            ")."
+        nCommon <- length(common)
+        nPred <- length(predSamples)
+        nY <- length(yNames)
+        msg <- glue(
+            "Dataset {d}: using {nCommon} common samples ",
+            "(predictions: {nPred}, Y: {nY})."
         )
+        inform(msg)
     }
     yD <- if (is.matrix(yRaw) || is.data.frame(yRaw)) {
         .ensembleCheckContextIndex(contextIndex, ncol(yRaw), d)
@@ -3001,15 +2937,11 @@ ensembleWeights <- function(
 # @noRd
 .ensembleCheckContextIndex <- function(contextIndex, ncolY, d) {
     if (contextIndex > ncolY) {
-        stop(
-            "contextIndex (",
-            contextIndex,
-            ") exceeds number of columns in Y[[",
-            d,
-            "]] (",
-            ncolY,
-            ")."
+        msg <- glue(
+            "contextIndex ({contextIndex}) exceeds number of columns in ",
+            "Y[[{d}]] ({ncolY})."
         )
+        abort(msg)
     }
     invisible(NULL)
 }
@@ -3027,17 +2959,15 @@ ensembleWeights <- function(
             as.numeric(predMat)[aln$predOrder]
         }
         if (length(pCol) != aln$nD) {
-            stop(
-                "Prediction length for method '",
-                nm$predNames[k],
-                "' in dataset ",
-                d,
-                " (",
-                length(pCol),
-                ") does not match number of aligned samples (",
-                aln$nD,
-                ")."
+            methodName <- nm$predNames[k]
+            nCol <- length(pCol)
+            nAligned <- aln$nD
+            msg <- glue(
+                "Prediction length for method '{methodName}' in dataset ",
+                "{d} ({nCol}) does not match number of aligned samples ",
+                "({nAligned})."
             )
+            abort(msg)
         }
         Pd[, k] <- pCol
     }
@@ -3050,22 +2980,20 @@ ensembleWeights <- function(
     complete <- complete.cases(P, yObs)
     nDropped <- sum(!complete)
     if (nDropped > 0) {
-        message(
-            "Dropping ",
-            nDropped,
-            " observation(s) with NA predictions or outcomes."
+        msg <- glue(
+            "Dropping {nDropped} observation(s) with NA predictions or ",
+            "outcomes."
         )
+        inform(msg)
     }
     if (sum(complete) < K + 1) {
-        stop(
-            "Too few complete observations (",
-            sum(complete),
-            ") for ",
-            K,
-            " methods. Need at least ",
-            K + 1,
-            "."
+        nComplete <- sum(complete)
+        nNeed <- K + 1
+        msg <- glue(
+            "Too few complete observations ({nComplete}) for {K} methods. ",
+            "Need at least {nNeed}."
         )
+        abort(msg)
     }
     list(P = P[complete, , drop = FALSE], yObs = yObs[complete])
 }
@@ -3077,11 +3005,12 @@ ensembleWeights <- function(
     validMethods <- methodSds > .Machine$double.eps
     nValid <- sum(validMethods)
     if (nValid < 1) {
-        stop(
+        msg <- glue(
             "All methods have zero-variance predictions. Cannot compute ",
             "ensemble. This typically means all methods returned zero ",
             "weights - check that the input data has sufficient signal."
         )
+        abort(msg)
     }
     if (nValid == 1) {
         return(.ensembleSingleMethodZeta(validMethods, nm$baseNames, nm$K))
@@ -3104,11 +3033,12 @@ ensembleWeights <- function(
     zeta <- rep(0, K)
     zeta[validMethods] <- 1
     names(zeta) <- baseNames
-    message(
-        "Only one method ('",
-        baseNames[validMethods],
-        "') has non-zero variance predictions. Assigning it full weight."
+    methodName <- baseNames[validMethods]
+    msg <- glue(
+        "Only one method ('{methodName}') has non-zero variance ",
+        "predictions. Assigning it full weight."
     )
+    inform(msg)
     zeta
 }
 
@@ -3128,10 +3058,14 @@ ensembleWeights <- function(
 # Per-method out-of-sample R^2 (NA for zero-variance methods).
 # @noRd
 .ensembleMethodRsq <- function(P, yObs, methodSds, baseNames, K) {
-    setNames(
-        map_dbl(seq_len(K), function(k) {
-            if (methodSds[k] > 0) cor(yObs, P[, k])^2 else NA_real_
-        }),
+    set_names(
+        map_dbl(
+            seq_len(K),
+            .ensembleMethodR2,
+            methodSds = methodSds,
+            yObs = yObs,
+            P = P
+        ),
         baseNames
     )
 }
@@ -3145,20 +3079,22 @@ ensembleWeights <- function(
     }
     wtList <- twasWeightList[[1]]
     if (!is.list(wtList) || length(wtList) == 0) {
-        warning(
+        msg <- glue(
             "twasWeightList[[1]] is empty or not a list; skipping weight ",
             "combination."
         )
+        warn(msg)
         return(NULL)
     }
-    wtKeys <- paste0(baseNames, "_weights")
-    matched <- wtKeys %in% names(wtList)
+    wtKeys <- str_c(baseNames, "_weights")
+    matched <- is_in(wtKeys, names(wtList))
     if (!any(matched)) {
-        warning(
+        keyExamples <- str_flatten(wtKeys[seq_len(min(3, K))], ", ")
+        msg <- glue(
             "No matching weight keys found in twasWeightList. Expected keys ",
-            "like: ",
-            paste(wtKeys[seq_len(min(3, K))], collapse = ", ")
+            "like: {keyExamples}"
         )
+        warn(msg)
         return(NULL)
     }
     .ensembleAccumulateWeights(wtList, wtKeys, matched, zeta)
@@ -3180,18 +3116,206 @@ ensembleWeights <- function(
     for (i in which(matched)) {
         wMat <- .ensembleAsMatrix(wtList[[wtKeys[i]]])
         if (!identical(dim(wMat), dim(ensembleTwasWt))) {
-            warning(
-                "Weight matrix for '",
-                wtKeys[i],
-                "' has inconsistent dimensions; skipping."
+            wtKey <- wtKeys[i]
+            msg <- glue(
+                "Weight matrix for '{wtKey}' has inconsistent dimensions; ",
+                "skipping."
             )
+            warn(msg)
             next
         }
         ensembleTwasWt <- ensembleTwasWt + zeta[i] * wMat
     }
     # For the univariate case, return as a named vector.
     if (ncol(ensembleTwasWt) == 1) {
-        return(setNames(as.numeric(ensembleTwasWt), rownames(ensembleTwasWt)))
+        return(set_names(as.numeric(ensembleTwasWt), rownames(ensembleTwasWt)))
     }
     ensembleTwasWt
+}
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# One method's per-region fit for region `i`: pass region-list fits through by
+# position, drop non-region-list fits (they can't be aligned across blocks).
+# @noRd
+.twasRegionFitOf <- function(f, i) {
+    isRegionList <- is.list(f) &&
+        !is.null(names(f)) &&
+        length(f) > 0L &&
+        all(str_length(names(f)) > 0L) &&
+        all(str_starts(names(f), "region"))
+    if (isRegionList && i <= length(f)) f[[i]] else NULL
+}
+
+# One per-region cvResult reporting row (region label + metric columns), or NULL
+# when the entry carries no CV metrics.
+# @noRd
+.twasCvRow <- function(e, lab) {
+    cv <- getCvResult(e)
+    if (is.null(cv) || is.null(cv$metrics)) {
+        return(NULL)
+    }
+    bind_cols(
+        tibble(region = lab),
+        as_tibble(as.list(cv$metrics), .name_repair = "minimal")
+    )
+}
+
+# The entry in one region's collection matching a (study, context, trait,
+# method) key, or NULL when that region lacks it.
+# @noRd
+.twasEntryMatchingKey <- function(tw, key) {
+    hit <- which(
+        as.character(tw$study) == key[[1L]] &
+            as.character(tw$context) == key[[2L]] &
+            as.character(tw$trait) == key[[3L]] &
+            as.character(tw$method) == key[[4L]]
+    )
+    if (length(hit)) tw$entry[[hit[[1L]]]] else NULL
+}
+
+# The merged entry for base row `r`: gather that key's entry from every region
+# and concatenate them.
+# @noRd
+.twasMergedEntryForRow <- function(r, base, twList, regionLabels) {
+    key <- c(
+        as.character(base$study[[r]]),
+        as.character(base$context[[r]]),
+        as.character(base$trait[[r]]),
+        as.character(base$method[[r]])
+    )
+    perRegion <- map(twList, .twasEntryMatchingKey, key = key)
+    .twasMergeRegionEntries(perRegion, regionLabels)
+}
+
+# Canonical method name for a snake_case token (identity when not in the table).
+# @noRd
+.twasCanonicalMethod <- function(s, snakeToCanonical) {
+    if (!is.na(snakeToCanonical[s])) snakeToCanonical[[s]] else s
+}
+
+# Capability violation (if any) for one method token against the input kind.
+# @noRd
+.twasTokenViolation <- function(tk, caps, inputKind) {
+    .twasCapabilityViolation(caps[[tk]], tk, inputKind)
+}
+
+# One region's multivariate-grid joint fit (region `bi` of ctx$xRegions).
+# @noRd
+.twasMvGridRegion <- function(bi, synthSpec, marker, ctx, traits) {
+    .runJointSpecs(
+        synthSpec,
+        ctx$data,
+        dataForm = "individual",
+        pipeline = marker,
+        jointMethods = ctx$norm$tokens,
+        contexts = ctx$useCtx,
+        traitIds = traits,
+        args = list(
+            methodList = ctx$norm$methodList,
+            fineMappingResult = ctx$fineMappingResult,
+            dataDrivenPriorMatricesCv = ctx$dataDrivenPriorMatricesCv,
+            cisWindow = ctx$cisWindow,
+            region = ctx$xRegions[[bi]],
+            regionIndex = bi,
+            nRegions = length(ctx$xRegions),
+            verbose = ctx$verbose
+        )
+    )
+}
+
+# The traits of one context: traitId when supplied, else region overlap, else
+# every trait in the context.
+# @noRd
+.twasQdsCtxTraits <- function(ctx, data, traitId, region) {
+    se <- getPhenotypes(data, contexts = ctx)
+    ids <- rownames(se)
+    if (!is.null(traitId)) {
+        intersect(ids, traitId)
+    } else if (!is.null(region)) {
+        rr <- SummarizedExperiment::rowRanges(se)
+        ids[IRanges::overlapsAny(rr, region)]
+    } else {
+        ids
+    }
+}
+
+# One region's univariate joint-cell fit (region `bi` of p$xRegions).
+# @noRd
+.twasQdsUnivRegion <- function(bi, univCell, p, scope) {
+    .runJointCell(
+        univCell,
+        p$marker,
+        p$data,
+        scope,
+        p$norm$tokens,
+        args = .twasQdsUnivArgs(p, bi)
+    )
+}
+
+# One cached row record from an imap over (entry, token) cache hits.
+# @noRd
+.twasCachedRowRecord <- function(entry, tk, st, ctx, tr) {
+    .twasRowRecord(st, ctx, tr, tk, entry)
+}
+
+# Cache lookup for one token in a (study, context, trait).
+# @noRd
+.twasCacheLookupTok <- function(tk, twasWeights, st, ctx, tr) {
+    .twasCacheLookup(twasWeights, st, ctx, tr, tk)
+}
+
+# One context row (`kk`) of a fitted multivariate weight matrix. The shared
+# joint
+# fit rides on the first row only; later rows leave fits NULL.
+# @noRd
+.twasMvContextRow <- function(
+    kk,
+    weights,
+    fitAttr,
+    ctxNames,
+    mvStat,
+    st,
+    tr,
+    tk,
+    dataType
+) {
+    .twasRowRecord(
+        st,
+        ctxNames[[kk]],
+        tr,
+        tk,
+        TwasWeightsEntry(
+            variantIds = mvStat$variantIds,
+            weights = as.numeric(weights[, kk]),
+            fits = if (kk == 1L) fitAttr else NULL,
+            cvResult = NULL,
+            standardized = TRUE,
+            dataType = dataType
+        )
+    )
+}
+
+# The stacked prediction/observed matrix for ensemble dataset `d`.
+# @noRd
+.ensembleDatasetRow <- function(d, cvResults, Y, nm, contextIndex) {
+    .ensembleDatasetMatrix(
+        cvResults[[d]]$prediction,
+        Y[[d]],
+        nm,
+        contextIndex,
+        d
+    )
+}
+
+# Out-of-sample R^2 for ensemble method `k` (NA for a zero-variance method).
+# @noRd
+.ensembleMethodR2 <- function(k, methodSds, yObs, P) {
+    if (methodSds[k] > 0) cor(yObs, P[, k])^2 else NA_real_
+}
+
+# TRUE when a per-region cvResult element carries a sample partition.
+# @noRd
+.twasCvHasPartition <- function(z) {
+    is.list(z) && !is.null(z$samplePartition)
 }

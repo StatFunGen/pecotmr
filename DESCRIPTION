@@ -13,6 +13,16 @@ Authors@R: c(person("Gao Wang",role = c("cre","aut"),
                   email = "dnachun@stanford.edu"),
                   person("StatFunGen Lab", role = "ctb"))
 License: MIT + file LICENSE
+biocViews:
+    StatisticalMethod,
+    GenomeWideAssociation,
+    SNP,
+    Regression,
+    Bayesian,
+    Genetics,
+    FunctionalGenomics,
+    GeneExpression,
+    LinkageDisequilibrium
 Imports:
     BiocParallel,
     Biostrings,
@@ -23,9 +33,11 @@ Imports:
     Rsamtools,
     S4Vectors,
     SummarizedExperiment,
+    archive,
     coloc,
     colocboost,
     dplyr,
+    glue,
     magrittr,
     matrixStats,
     metafor,

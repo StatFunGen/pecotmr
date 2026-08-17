@@ -51,6 +51,7 @@ export(computeBlockLdCor)
 export(computeCoefficientsGlasso)
 export(computeCovDiag)
 export(computeCovFlash)
+export(computeCsCorrelation)
 export(computeCsTables)
 export(computeLdScores)
 export(computeSldscAnnotSd)
@@ -232,7 +233,6 @@ export(nSignificantScore)
 export(nSnps)
 export(normalizeVariantId)
 export(overlapTopLoci)
-export(parseCsCorr)
 export(parseRegion)
 export(parseVariantId)
 export(penalizedRss)
@@ -440,22 +440,28 @@ importFrom(SummarizedExperiment,
   assay,
   rowRanges
 )
+importFrom(archive,archive_read)
 importFrom(dplyr,
   across,
+  add_count,
   all_of,
   any_of,
   arrange,
+  bind_cols,
   bind_rows,
   case_when,
   desc,
   distinct,
   everything,
   filter,
+  full_join,
   group_by,
   if_else,
   inner_join,
+  left_join,
   matches,
   mutate,
+  n_distinct,
   pull,
   rename,
   row_number,
@@ -463,7 +469,11 @@ importFrom(dplyr,
   slice,
   summarise
 )
-importFrom(magrittr,"%>%")
+importFrom(glue,glue)
+importFrom(magrittr,
+  "%>%",
+  is_in
+)
 importFrom(matrixStats,colSds)
 importFrom(metafor,rma)
 importFrom(methods,
@@ -496,8 +506,21 @@ importFrom(purrr,
   set_names
 )
 importFrom(quadprog,solve.QP)
-importFrom(readr,read_lines)
-importFrom(rlang,"!!!")
+importFrom(readr,
+  col_character,
+  cols,
+  read_lines,
+  read_table
+)
+importFrom(rlang,
+  "!!!",
+  .data,
+  abort,
+  arg_match,
+  cnd_signal,
+  inform,
+  warn
+)
 importFrom(stats,
   as.dist,
   coef,
@@ -524,9 +547,23 @@ importFrom(stats,
   var
 )
 importFrom(stringr,
+  regex,
+  str_c,
+  str_detect,
+  str_ends,
+  str_flatten,
+  str_length,
+  str_match,
+  str_remove,
   str_remove_all,
   str_replace,
-  str_split
+  str_replace_all,
+  str_split,
+  str_split_1,
+  str_starts,
+  str_sub,
+  str_to_lower,
+  str_to_upper
 )
 importFrom(susieR,
   coef.susie,
@@ -538,12 +575,18 @@ importFrom(susieR,
   susie_rss,
   univariate_regression
 )
-importFrom(tibble,tibble)
+importFrom(tibble,
+  as_tibble,
+  tibble
+)
 importFrom(tictoc,
   tic,
   toc
 )
-importFrom(tidyr,separate)
+importFrom(tidyr,
+  replace_na,
+  separate
+)
 importFrom(tidyselect,all_of)
 importFrom(tools,
   file_ext,
@@ -554,7 +597,6 @@ importFrom(utils,
   head,
   modifyList,
   read.table,
-  strcapture,
   tail
 )
 importFrom(vctrs,vec_duplicate_detect)

@@ -20,7 +20,7 @@ getCredibleSetSummary(x, ...)
 \item{coverage}{Credible-set coverage to summarise. Default 0.95.}
 }
 \value{
-A \code{data.frame}: \code{cs, effect_id, coverage, n_variants,
+A \code{tibble}: \code{cs, effect_id, coverage, n_variants,
   purity_min, purity_mean, V, cs_log10bf} (strongest member logBF),
   \code{cs_log_bf} (true per-effect single-effect log Bayes factor),
   \code{cs_pip} (summed member PIP = inclusion mass captured),

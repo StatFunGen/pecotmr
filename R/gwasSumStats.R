@@ -27,10 +27,10 @@ setClass(
         if (length(missingCols) > 0L) {
             errors <- c(
                 errors,
-                paste("missing columns:", paste(missingCols, collapse = ", "))
+                str_c("missing columns: ", str_flatten(missingCols, ", "))
             )
         }
-        if (length(object@genome) != 1L || !nzchar(object@genome)) {
+        if (length(object@genome) != 1L || str_length(object@genome) == 0L) {
             errors <- c(
                 errors,
                 "'genome' slot must be a single non-empty character string"
@@ -46,18 +46,14 @@ setClass(
                     "length(entry) must equal nrow(.) for GwasSumStats"
                 )
             }
-            entryTypes <- vapply(
-                object$entry,
-                function(e) methods::is(e, "GRanges"),
-                logical(1)
-            )
+            entryTypes <- map_lgl(object$entry, methods::is, "GRanges")
             if (!all(entryTypes)) {
                 errors <- c(
                     errors,
                     "every element of the `entry` column must be a GRanges"
                 )
             }
-            if (anyDuplicated(as.character(object$study))) {
+            if (n_distinct(as.character(object$study)) < nrow(object)) {
                 errors <- c(errors, "`study` must be unique")
             }
         }
@@ -68,20 +64,18 @@ setClass(
 
 #' @rdname show-methods
 setMethod("show", "GwasSumStats", function(object) {
-    cat(sprintf(
-        "GwasSumStats: %d studies, genome build %s\n",
-        nrow(object),
-        object@genome
+    cat(glue(
+        "GwasSumStats: {nrow(object)} studies, ",
+        "genome build {object@genome}\n",
+        .trim = FALSE
     ))
     ld <- object@ldSketch
-    cat(sprintf(
-        "  LD sketch: %s\n",
-        if (is.null(ld)) {
-            "none (LD-free)"
-        } else {
-            sprintf("%s @ %s", ld@format, ld@path)
-        }
-    ))
+    ldSrc <- if (is.null(ld)) {
+        "none (LD-free)"
+    } else {
+        glue("{ld@format} @ {ld@path}")
+    }
+    cat(glue("  LD sketch: {ldSrc}\n", .trim = FALSE))
 })
 
 
@@ -108,7 +102,8 @@ NULL
         v <- rep(v, length(study))
     }
     if (length(v) != length(study)) {
-        stop("`", nm, "` must have length 1 or length(study).")
+        msg <- glue("`{nm}` must have length 1 or length(study).")
+        abort(msg)
     }
     as.numeric(v)
 }
@@ -172,7 +167,7 @@ GwasSumStats <- function(
     ...
 ) {
     if (missing(study) || missing(entry) || missing(genome)) {
-        stop("`study`, `entry`, and `genome` are all required.")
+        abort("`study`, `entry`, and `genome` are all required.")
     }
     varY <- .gwasValidateArgs(study, entry, genome, varY)
     cols <- list(
@@ -182,7 +177,8 @@ GwasSumStats <- function(
     )
     cols <- .gwasAppendOptional(cols, nCase, nControl, nSample, study)
     cols <- .gwasAppendExtras(cols, list(...))
-    df <- do.call(S4Vectors::DataFrame, c(cols, list(check.names = FALSE)))
+    dfArgs <- c(cols, list(check.names = FALSE))
+    df <- exec(S4Vectors::DataFrame, !!!dfArgs)
     obj <- methods::new(
         "GwasSumStats",
         df,
@@ -198,24 +194,23 @@ GwasSumStats <- function(
 # @noRd
 .gwasValidateArgs <- function(study, entry, genome, varY) {
     if (length(genome) != 1L) {
-        stop(
+        msg <- glue(
             "`genome` must be a single character string (one build per ",
             "collection, because all entries share the LD sketch)."
         )
+        abort(msg)
     }
     if (!is.list(entry)) {
-        stop(
+        abort(
             "`entry` must be a list (or SimpleList) of GRanges, one per study."
         )
     }
     if (length(entry) != length(study)) {
-        stop(
-            "length(entry) (",
-            length(entry),
-            ") must equal length(study) (",
-            length(study),
-            ")."
+        msg <- glue(
+            "length(entry) ({length(entry)}) must equal ",
+            "length(study) ({length(study)})."
         )
+        abort(msg)
     }
     .recyclePerStudy(varY, "varY", study)
 }
@@ -254,28 +249,26 @@ GwasSumStats <- function(
 # `study` is missing on a multi-study collection.
 .gwasSelectStudy <- function(x, study) {
     if (nrow(x) == 0L) {
-        stop("GwasSumStats has no rows.")
+        abort("GwasSumStats has no rows.")
     }
     if (missing(study) || is.null(study)) {
         if (nrow(x) == 1L) {
             return(1L)
         }
-        stop(
-            "This GwasSumStats has ",
-            nrow(x),
-            " studies. Pass `study = <name>` to select one. ",
-            "Available: ",
-            paste(as.character(x$study), collapse = ", ")
+        msg <- glue(
+            "This GwasSumStats has {nrow(x)} studies. ",
+            "Pass `study = <name>` to select one. ",
+            "Available: {str_flatten(as.character(x$study), ', ')}"
         )
+        abort(msg)
     }
     idx <- match(study, as.character(x$study))
     if (is.na(idx)) {
-        stop(
-            "Unknown study: '",
-            study,
-            "'. Available: ",
-            paste(as.character(x$study), collapse = ", ")
+        msg <- glue(
+            "Unknown study: '{study}'. ",
+            "Available: {str_flatten(as.character(x$study), ', ')}"
         )
+        abort(msg)
     }
     idx
 }
@@ -312,20 +305,15 @@ setMethod(
         derive = c("none", "zFromBetaSe"),
         keepChrPrefix = TRUE
     ) {
-        derive <- match.arg(derive)
+        derive <- arg_match(derive)
         gr <- getSumStats(x, study = study)
         .entryToSumstatDf(
             gr,
             require = require,
             derive = derive,
             keepChrPrefix = keepChrPrefix,
-            label = sprintf(
-                "GwasSumStats[%s]",
-                if (is.null(study)) {
-                    "<auto>"
-                } else {
-                    study
-                }
+            label = glue(
+                "GwasSumStats[{if (is.null(study)) '<auto>' else study}]"
             )
         )
     }
@@ -335,11 +323,12 @@ setMethod(
 #' @export
 setMethod("subsetChr", "GwasSumStats", function(x, chr) {
     chrName <- withChrPrefix(chr)
-    newEntries <- lapply(seq_len(nrow(x)), function(i) {
-        gr <- x$entry[[i]]
-        idx <- as.character(seqnames(gr)) == chrName
-        gr[idx]
-    })
+    newEntries <- map(
+        seq_len(nrow(x)),
+        .ssSubsetChrEntry,
+        x = x,
+        chrName = chrName
+    )
     GwasSumStats(
         study = as.character(x$study),
         entry = newEntries,
@@ -348,13 +337,17 @@ setMethod("subsetChr", "GwasSumStats", function(x, chr) {
         varY = as.numeric(x$varY),
         # Preserve the optional per-study case/control counts + total N through
         # the chromosome subset (they are study-level scalars, not per-variant).
-        nCase = if ("nCase" %in% names(x)) as.numeric(x$nCase) else NULL,
-        nControl = if ("nControl" %in% names(x)) {
+        nCase = if (is_in("nCase", names(x))) as.numeric(x$nCase) else NULL,
+        nControl = if (is_in("nControl", names(x))) {
             as.numeric(x$nControl)
         } else {
             NULL
         },
-        nSample = if ("nSample" %in% names(x)) as.numeric(x$nSample) else NULL,
+        nSample = if (is_in("nSample", names(x))) {
+            as.numeric(x$nSample)
+        } else {
+            NULL
+        },
         qcInfo = x@qcInfo
     )
 })
@@ -397,5 +390,5 @@ as.data.frame.GwasSumStats <- function(
     mc$BP <- start(gr)
     firstCols <- c("SNP", "CHR", "BP")
     restCols <- setdiff(names(mc), firstCols)
-    mc[, c(firstCols, restCols), drop = FALSE]
+    select(mc, all_of(c(firstCols, restCols)))
 }

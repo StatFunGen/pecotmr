@@ -39,7 +39,7 @@
 #' @param numThreads Number of threads used by \code{qtlEnrichment}. Default
 #'   \code{1}.
 #' @param ... Additional arguments forwarded to \code{\link{qtlEnrichment}}.
-#' @return A data frame with one row per (gwasStudy, qtlStudy, qtlContext)
+#' @return A tibble with one row per (gwasStudy, qtlStudy, qtlContext)
 #'   triple and columns \code{gwasStudy}, \code{qtlStudy}, \code{qtlContext},
 #'   \code{enrichment}, \code{enrichmentSe}, \code{enrichmentLogOdds}, plus any
 #'   extras the underlying estimator emits. Suitable as the \code{enrichment}
@@ -74,17 +74,18 @@ qtlEnrichmentPipeline <- function(
 # @noRd
 .enrValidateInputs <- function(gwasFineMappingResult, qtlFineMappingResult) {
     if (!methods::is(gwasFineMappingResult, "GwasFineMappingResult")) {
-        stop("`gwasFineMappingResult` must be a GwasFineMappingResult.")
+        abort("`gwasFineMappingResult` must be a GwasFineMappingResult.")
     }
     if (!methods::is(qtlFineMappingResult, "QtlFineMappingResult")) {
-        stop("`qtlFineMappingResult` must be a QtlFineMappingResult.")
+        abort("`qtlFineMappingResult` must be a QtlFineMappingResult.")
     }
     gwasLd <- getLdSketch(gwasFineMappingResult)
     if (is.null(gwasLd)) {
-        stop(
+        msg <- glue(
             "qtlEnrichmentPipeline: the GWAS FineMappingResult must have a ",
             "non-NULL ldSketch (it should be RSS-derived)."
         )
+        abort(msg)
     }
     .colocRequireMatchingLdSketches(getLdSketch(qtlFineMappingResult), gwasLd)
     invisible(NULL)
@@ -98,16 +99,16 @@ qtlEnrichmentPipeline <- function(
     p$gwasStudies <- unique(as.character(p$gwasFineMappingResult$study))
     # Iterate the joint (study, context) key: context alone would silently merge
     # two studies sharing a context label, giving wrong enrichment estimates.
-    p$qtlTuples <- unique(data.frame(
+    p$qtlTuples <- distinct(tibble(
         qtlStudy = as.character(p$qtlFineMappingResult$study),
-        qtlContext = as.character(p$qtlFineMappingResult$context),
-        stringsAsFactors = FALSE
+        qtlContext = as.character(p$qtlFineMappingResult$context)
     ))
     if (length(p$gwasStudies) == 0L || nrow(p$qtlTuples) == 0L) {
-        stop(
+        msg <- glue(
             "qtlEnrichmentPipeline: no (gwasStudy, qtlStudy, qtlContext) ",
             "triples to compute (one of the inputs has zero rows)."
         )
+        abort(msg)
     }
     p$gwasPipByStudy <- .enrGwasPipByStudy(
         p$gwasFineMappingResult,
@@ -171,10 +172,11 @@ qtlEnrichmentPipeline <- function(
 .enrScoreGwasStudy <- function(gStudy, p) {
     gwasPip <- p$gwasPipByStudy[[gStudy]]
     if (length(gwasPip) == 0L) {
-        warning(sprintf(
-            "qtlEnrichmentPipeline: no usable PIPs for gwasStudy='%s'; skipping.",
-            gStudy
-        ))
+        msg <- glue(
+            "qtlEnrichmentPipeline: no usable PIPs for ",
+            "gwasStudy='{gStudy}'; skipping."
+        )
+        warn(msg)
         return(list())
     }
     compact(map(
@@ -193,14 +195,11 @@ qtlEnrichmentPipeline <- function(
     qStudy <- p$qtlTuples$qtlStudy[[k]]
     qContext <- p$qtlTuples$qtlContext[[k]]
     if (length(p$qtlRegionsByTuple[[k]]) == 0L) {
-        warning(sprintf(
-            paste0(
-                "qtlEnrichmentPipeline: no usable QTL regions for (qtlStudy=",
-                "'%s', qtlContext='%s'); skipping."
-            ),
-            qStudy,
-            qContext
-        ))
+        msg <- glue(
+            "qtlEnrichmentPipeline: no usable QTL regions for ",
+            "(qtlStudy='{qStudy}', qtlContext='{qContext}'); skipping."
+        )
+        warn(msg)
         return(NULL)
     }
     enr <- .enrRunEnrichment(gStudy, gwasPip, k, qStudy, qContext, p)
@@ -222,36 +221,31 @@ qtlEnrichmentPipeline <- function(
     tryCatch(
         {
             if (inherits(aligned, "condition")) {
-                stop(aligned)
+                cnd_signal(aligned)
             }
-            do.call(
-                qtlEnrichment,
-                c(
-                    list(
-                        gwasPip = gwasPip,
-                        susieQtlRegions = aligned,
-                        numGwas = p$numGwas,
-                        piQtl = p$piQtl,
-                        lambda = p$lambda,
-                        impN = p$impN,
-                        numThreads = p$numThreads,
-                        alignNames = FALSE
-                    ),
-                    p$dots
-                )
+            enrichArgs <- c(
+                list(
+                    gwasPip = gwasPip,
+                    susieQtlRegions = aligned,
+                    numGwas = p$numGwas,
+                    piQtl = p$piQtl,
+                    lambda = p$lambda,
+                    impN = p$impN,
+                    numThreads = p$numThreads,
+                    alignNames = FALSE
+                ),
+                p$dots
             )
+            exec(qtlEnrichment, !!!enrichArgs)
         },
         error = function(e) {
-            warning(sprintf(
-                paste0(
-                    "qtlEnrichmentPipeline: qtlEnrichment failed for ",
-                    "(gwasStudy='%s', qtlStudy='%s', qtlContext='%s'): %s"
-                ),
-                gStudy,
-                qStudy,
-                qContext,
-                conditionMessage(e)
-            ))
+            eMsg <- conditionMessage(e)
+            msg <- glue(
+                "qtlEnrichmentPipeline: qtlEnrichment failed for ",
+                "(gwasStudy='{gStudy}', qtlStudy='{qStudy}', ",
+                "qtlContext='{qContext}'): {eMsg}"
+            )
+            warn(msg)
             NULL
         }
     )
@@ -263,23 +257,21 @@ qtlEnrichmentPipeline <- function(
     if (length(results) == 0L) {
         return(.enrEmptyResult())
     }
-    out <- do.call(rbind, map(results, as.data.frame, stringsAsFactors = FALSE))
-    rownames(out) <- NULL
+    out <- bind_rows(results)
     idCols <- c("gwasStudy", "qtlStudy", "qtlContext")
-    out[, c(idCols, setdiff(colnames(out), idCols)), drop = FALSE]
+    select(out, all_of(idCols), everything())
 }
 
 # The empty enrichment result table.
 # @noRd
 .enrEmptyResult <- function() {
-    data.frame(
+    tibble(
         gwasStudy = character(0),
         qtlStudy = character(0),
         qtlContext = character(0),
         enrichment = numeric(0),
         enrichmentSe = numeric(0),
-        enrichmentLogOdds = numeric(0),
-        stringsAsFactors = FALSE
+        enrichmentLogOdds = numeric(0)
     )
 }
 
@@ -293,15 +285,7 @@ qtlEnrichmentPipeline <- function(
 # it across the outer GWAS loop.
 # @noRd
 .enrAlignRegions <- function(regions, unionGwasNames) {
-    map(regions, function(x) {
-        if (!is.null(names(x$pip)) && length(unionGwasNames) > 0L) {
-            mm <- matchVariants(names(x$pip), unionGwasNames)
-            nm <- names(x$pip)
-            nm[mm$idxA] <- unionGwasNames[mm$idxB]
-            names(x$pip) <- nm
-        }
-        x
-    })
+    map(regions, .enrAlignRegion, unionGwasNames = unionGwasNames)
 }
 
 # Build a named GWAS PIP vector for one study. Walks every row of the
@@ -309,7 +293,8 @@ qtlEnrichmentPipeline <- function(
 # pip from each FineMappingEntry, and concatenates with variant-id
 # names. Errors if any single variant appears with conflicting PIP
 # values across rows.
-# @noRd
+#' @importFrom dplyr add_count
+#' @noRd
 .enrBuildGwasPipVector <- function(gwasFmr, gStudy) {
     idx <- which(as.character(gwasFmr$study) == gStudy)
     if (length(idx) == 0L) {
@@ -332,33 +317,39 @@ qtlEnrichmentPipeline <- function(
             next
         }
         pieces[[length(pieces) + 1L]] <-
-            stats::setNames(pip, as.character(ids))
+            set_names(pip, as.character(ids))
     }
     if (length(pieces) == 0L) {
         return(numeric(0))
     }
     all <- unlist(pieces)
-    uniqIds <- unique(names(all))
-    if (length(uniqIds) != length(all)) {
-        # Same variant id in multiple blocks. Verify the values agree.
-        dedup <- tapply(all, names(all), function(v) {
-            if (length(unique(round(v, 12))) > 1L) {
-                stop(
-                    "qtlEnrichmentPipeline: variant '",
-                    names(v)[[1L]],
-                    "' appears with conflicting PIPs across GWAS blocks for ",
-                    "study '",
-                    "?",
-                    "'; the GWAS fine-mapping must produce a ",
-                    "consistent PIP per variant."
-                )
-            }
-            v[[1L]]
-        })
-        all <- as.numeric(dedup)
-        names(all) <- names(dedup)
+    if (n_distinct(names(all)) < length(all)) {
+        all <- .enrCollapseDuplicatePips(all)
     }
     all
+}
+
+# Collapse duplicate variant ids across GWAS blocks: agreeing PIPs (rounded to
+# 12 digits) merge; a variant with conflicting PIPs aborts. distinct() keeps one
+# row per (id, rounded-pip), so a conflicting variant survives with >1 row for
+# add_count() to flag.
+# @noRd
+.enrCollapseDuplicatePips <- function(all) {
+    byId <- tibble(id = names(all), pip = as.numeric(all)) |>
+        mutate(pipR = round(.data$pip, 12)) |>
+        distinct(.data$id, .data$pipR, .keep_all = TRUE) |>
+        add_count(.data$id)
+    conflict <- filter(byId, .data$n > 1L)
+    if (nrow(conflict) > 0L) {
+        vName <- conflict$id[[1L]]
+        msg <- glue(
+            "qtlEnrichmentPipeline: variant '{vName}' appears with ",
+            "conflicting PIPs across GWAS blocks; the GWAS fine-mapping ",
+            "must produce a consistent PIP per variant."
+        )
+        abort(msg)
+    }
+    set_names(byId$pip, byId$id)
 }
 
 # Build the per-(qtlStudy, qtlContext) list of region fits in the shape
@@ -430,7 +421,7 @@ qtlEnrichmentPipeline <- function(
             enrichmentLogOdds = .enrPickScalar("enrichmentLogOdds", enr)
         )
     } else if (is.matrix(enr) || is.data.frame(enr)) {
-        df <- as.data.frame(enr, stringsAsFactors = FALSE)
+        df <- as_tibble(enr, .name_repair = "minimal")
         if (nrow(df) == 0L) {
             list(
                 enrichment = NA_real_,
@@ -545,7 +536,7 @@ qtlEnrichmentPipeline <- function(
 #' susieFits <- replicate(
 #'   nSusieFits, simulateSusiefit(nGwasPip, 10), simplify = FALSE)
 #' # Add these fits to a list, providing names to each element
-#' names(susieFits) <- paste0("fit", 1:length(susieFits))
+#' names(susieFits) <- paste0("fit", seq_along(susieFits))
 #' # Set other parameters
 #' impN <- 10
 #' lambda <- 1
@@ -603,14 +594,17 @@ qtlEnrichment <- function(
     if (!is.null(numGwas)) {
         return(sum(gwasPip) / numGwas)
     }
-    warning(
-        "numGwas is not provided. Estimating piGwas from the data. ",
-        "Note that this estimate may be biased if the input gwasPip does not ",
+    msg <- glue(
+        "numGwas is not provided. Estimating piGwas from the data. Note ",
+        "that this estimate may be biased if the input gwasPip does not ",
         "contain genome-wide variants."
     )
+    warn(msg)
     piGwas <- sum(gwasPip) / length(gwasPip)
     if (verbose) {
-        message("Estimated piGwas: ", round(piGwas, 5), "\n")
+        piGwasR <- round(piGwas, 5)
+        msg <- glue("Estimated piGwas: {piGwasR}\n", .trim = FALSE)
+        inform(msg)
     }
     piGwas
 }
@@ -622,16 +616,19 @@ qtlEnrichment <- function(
     if (!is.null(piQtl)) {
         return(piQtl)
     }
-    warning(
+    msg <- glue(
         "piQtl is not provided. Estimating piQtl from the data. Note that ",
         "this estimate may be biased if either 1) the input susieQtlRegions ",
         "does not have enough data, or 2) the single effects only include ",
         "variables inside of credible sets or signal clusters."
     )
+    warn(msg)
     allPips <- unlist(map(susieQtlRegions, "pip"))
     piQtl <- sum(allPips) / length(allPips)
     if (verbose) {
-        message("Estimated piQtl: ", round(piQtl, 5), "\n")
+        piQtlR <- round(piQtl, 5)
+        msg <- glue("Estimated piQtl: {piQtlR}\n", .trim = FALSE)
+        inform(msg)
     }
     piQtl
 }
@@ -640,16 +637,18 @@ qtlEnrichment <- function(
 # @noRd
 .enrValidatePi <- function(piGwas, piQtl) {
     if (piGwas == 0) {
-        stop(
+        msg <- glue(
             "Cannot perform enrichment analysis. No association signal found ",
             "in GWAS data."
         )
+        abort(msg)
     }
     if (piQtl == 0) {
-        stop(
+        msg <- glue(
             "Cannot perform enrichment analysis. No QTL associated with the ",
             "molecular phenotype."
         )
+        abort(msg)
     }
     invisible(NULL)
 }
@@ -658,16 +657,18 @@ qtlEnrichment <- function(
 # @noRd
 .enrValidateNames <- function(gwasPip, susieQtlRegions) {
     if (is.null(names(gwasPip))) {
-        stop(
+        msg <- glue(
             "Variant names are missing in gwasPip. Please provide named ",
             "gwasPip data."
         )
+        abort(msg)
     }
     if (!all(map_lgl(susieQtlRegions, .enrHasPipNames))) {
-        stop(
+        msg <- glue(
             "Variant names are missing in susieQtlRegions$pip. Please provide ",
             "susieQtlRegions with named pip data."
         )
+        abort(msg)
     }
     invisible(NULL)
 }
@@ -708,7 +709,7 @@ qtlEnrichment <- function(
 # test; names already aligned by the caller).
 # @noRd
 .enrMarkUnmatched <- function(x, gwasNameSet) {
-    unmatchedIdx <- which(!(names(x$pip) %in% gwasNameSet))
+    unmatchedIdx <- which(!is_in(names(x$pip), gwasNameSet))
     if (length(unmatchedIdx) > 0) {
         x$unmatched_variants <- names(x$pip)[unmatchedIdx]
     }
@@ -719,5 +720,18 @@ qtlEnrichment <- function(
 # @noRd
 .enrStripUnmatched <- function(x) {
     x$unmatched_variants <- NULL
+    x
+}
+
+# Relabel one region's matched pip names to the union GWAS panel (unmatched
+# names kept as-is).
+# @noRd
+.enrAlignRegion <- function(x, unionGwasNames) {
+    if (!is.null(names(x$pip)) && length(unionGwasNames) > 0L) {
+        mm <- matchVariants(names(x$pip), unionGwasNames)
+        nm <- names(x$pip)
+        nm[mm$idxA] <- unionGwasNames[mm$idxB]
+        names(x$pip) <- nm
+    }
     x
 }

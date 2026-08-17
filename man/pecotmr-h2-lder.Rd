@@ -9,10 +9,13 @@ Estimate heritability using LD eigenvalue regression (Song et
   annotation stratification.
 
 Estimate SNP heritability by LD eigenvalue regression (Song et
-  al. 2022). Within each LD block the z-scores are whitened in the eigenbasis,
+  al. 2022). Within each LD block the z-scores are whitened in the
+  eigenbasis,
   \eqn{x_i = (u_i'z)/\sqrt{\lambda_i}}, and the whitened \eqn{\chi^2 = x_i^2}
-  is regressed on \eqn{\lambda_i} via IRWLS: \eqn{E[x_i^2] = (N h2/M)\lambda_i
-  + (1 + N a)}, so \eqn{Cov(z) = (N h2/M) R^2 + (1 + N a) R}. The IRWLS weight
+  is regressed on \eqn{\lambda_i} via IRWLS:
+  \eqn{E[x_i^2] = (N h2/M)\lambda_i
+  + (1 + N a)}, so \eqn{Cov(z) = (N h2/M) R^2 + (1 + N a) R}. The IRWLS
+  weight
   uses an in-sample (\eqn{\min(1,\lambda)}) or out-of-sample (logistic) form
   selected by \code{getInSample}, and a two-stage step estimates the
   confounding inflation \eqn{a} on a \eqn{\chi^2}-filtered subset. The

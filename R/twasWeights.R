@@ -39,7 +39,7 @@ setClass(
     required <- c("study", "context", "trait", "method", "entry")
     missingCols <- setdiff(required, names(object))
     if (length(missingCols) > 0L) {
-        paste("missing columns:", paste(missingCols, collapse = ", "))
+        str_c("missing columns: ", str_flatten(missingCols, ", "))
     } else {
         character()
     }
@@ -68,13 +68,11 @@ setClass(
     if (length(object$entry) != nrow(object)) {
         errors <- c(errors, "length(entry) must equal nrow(.) for TwasWeights")
     }
-    entryOk <- map_lgl(object$entry, function(e) {
-        methods::is(e, "TwasWeightsEntry")
-    })
+    entryOk <- map_lgl(object$entry, methods::is, "TwasWeightsEntry")
     if (!all(entryOk)) {
         errors <- c(
             errors,
-            paste0(
+            str_c(
                 "every element of the `entry` column must be a ",
                 "TwasWeightsEntry"
             )
@@ -86,14 +84,8 @@ setClass(
 # Any present joint* provenance columns must be character.
 # @noRd
 .twasValidateJointCols <- function(object, jointCols) {
-    bad <- keep(jointCols, function(jc) !is.character(object[[jc]]))
-    map_chr(bad, function(jc) {
-        sprintf(
-            "'%s' column must be character (got %s)",
-            jc,
-            class(object[[jc]])[[1L]]
-        )
-    })
+    bad <- keep(jointCols, .twasColNotCharacter, object = object)
+    map_chr(bad, .twasBadColMsg, object = object)
 }
 
 # (study, context, trait, method[, joint*]) tuple uniqueness.
@@ -104,13 +96,12 @@ setClass(
     # column-subsetting preserves the TwasWeights class while dropping the
     # required `entry` column, and older S4Vectors revalidates that
     # intermediate, spuriously failing with "missing columns: entry".
-    keyDf <- as.data.frame(
-        lapply(keyCols, function(cn) object[[cn]]),
-        col.names = keyCols,
-        stringsAsFactors = FALSE
-    )
-    if (anyDuplicated(keyDf)) {
-        paste0(
+    keyTbl <- as_tibble(set_names(
+        map(keyCols, .twasColumn, object = object),
+        keyCols
+    ))
+    if (nrow(distinct(keyTbl)) < nrow(keyTbl)) {
+        str_c(
             "(study, context, trait, method[, joint*]) tuple uniqueness ",
             "violated"
         )
@@ -204,7 +195,8 @@ TwasWeights <- function(
     )
     cols <- .appendRegionCol(cols, region, n)
     cols <- .appendTraitPosCol(cols, traitPos, n)
-    df <- do.call(S4Vectors::DataFrame, c(cols, list(check.names = FALSE)))
+    dfArgs <- c(cols, list(check.names = FALSE))
+    df <- exec(S4Vectors::DataFrame, !!!dfArgs)
     obj <- new("TwasWeights", df, ldSketch = ldSketch)
     validObject(obj)
     obj
@@ -220,10 +212,11 @@ TwasWeights <- function(
             length(method) != n ||
             length(entry) != n
     ) {
-        stop(
+        msg <- glue(
             "`study`, `context`, `trait`, `method`, and `entry` must all ",
             "have the same length."
         )
+        abort(msg)
     }
     n
 }
@@ -248,7 +241,8 @@ TwasWeights <- function(
             next
         }
         if (length(val) != n) {
-            stop("`", nm, "` must have the same length as `study`.")
+            msg <- glue("`{nm}` must have the same length as `study`.")
+            abort(msg)
         }
         cols[[nm]] <- as.character(val)
     }
@@ -428,22 +422,22 @@ setMethod("getMethodNames", "TwasWeights", function(x) {
 #' @rdname show-methods
 #' @export
 setMethod("show", "TwasWeights", function(object) {
-    cat(sprintf("TwasWeights: %d entries\n", nrow(object)))
+    cat(glue("TwasWeights: {nrow(object)} entries\n", .trim = FALSE))
     if (nrow(object) > 0L) {
-        cat(sprintf(
-            "  %d studies, %d contexts, %d traits, %d methods\n",
-            length(unique(object$study)),
-            length(unique(object$context)),
-            length(unique(object$trait)),
-            length(unique(object$method))
+        cat(glue(
+            "  {n_distinct(object$study)} studies, ",
+            "{n_distinct(object$context)} contexts, ",
+            "{n_distinct(object$trait)} traits, ",
+            "{n_distinct(object$method)} methods\n",
+            .trim = FALSE
         ))
     }
     ldSrc <- if (is.null(object@ldSketch)) {
         "NULL (individual-level fit)"
     } else {
-        sprintf("%s @ %s", object@ldSketch@format, object@ldSketch@path)
+        glue("{object@ldSketch@format} @ {object@ldSketch@path}")
     }
-    cat(sprintf("  LD sketch: %s\n", ldSrc))
+    cat(glue("  LD sketch: {ldSrc}\n", .trim = FALSE))
 })
 
 
@@ -476,12 +470,12 @@ setMethod("show", "TwasWeights", function(object) {
 # @return Character vector with suffixes rewritten.
 # @noRd
 .renameSuffix <- function(x, target) {
-    cap <- paste0(
-        toupper(substr(target, 1, 1)),
-        substr(target, 2, nchar(target))
+    cap <- str_c(
+        str_to_upper(str_sub(target, 1, 1)),
+        str_sub(target, 2)
     )
-    x <- sub("_weights$", paste0("_", target), x)
-    x <- sub("Weights$", cap, x)
+    x <- str_replace(x, "_weights$", str_c("_", target))
+    x <- str_replace(x, "Weights$", cap)
     x
 }
 
@@ -623,26 +617,19 @@ setMethod("show", "TwasWeights", function(object) {
 .twasMethodLookup <- function(methods) {
     methods <- .twasExpandPresets(methods)
     # Accept full function names too by mapping them back to short names.
-    fnToShort <- setNames(names(.twasMethodMap), map_chr(.twasMethodMap, "fn"))
-    methods <- map_chr(methods, function(m) {
-        if (m %in% names(fnToShort)) fnToShort[[m]] else m
-    })
+    fnToShort <- set_names(names(.twasMethodMap), map_chr(.twasMethodMap, "fn"))
+    methods <- map_chr(methods, .twasCanonicalShortName, fnToShort = fnToShort)
     unknown <- setdiff(methods, names(.twasMethodMap))
     if (length(unknown) > 0) {
-        stop(
-            "Unknown TWAS method(s): ",
-            paste(unknown, collapse = ", "),
-            ". Available methods: ",
-            paste(names(.twasMethodMap), collapse = ", ")
+        msg <- glue(
+            "Unknown TWAS method(s): {str_flatten(unknown, ', ')}. ",
+            "Available methods: {str_flatten(names(.twasMethodMap), ', ')}"
         )
+        abort(msg)
     }
     # Track the impl name as an attr so dispatchers resolve snake_case -> impl.
-    entries <- map(methods, function(m) {
-        args <- .twasMethodMap[[m]]$args
-        attr(args, "impl") <- .twasMethodMap[[m]]$impl
-        args
-    })
-    set_names(entries, map_chr(methods, function(m) .twasMethodMap[[m]]$fn))
+    entries <- map(methods, .twasMethodArgsWithImpl)
+    set_names(entries, map_chr(methods, .twasMethodFn))
 }
 
 # TRUE if `name` is a function visible in the search path or in namespace `ns`.
@@ -661,7 +648,9 @@ setMethod("show", "TwasWeights", function(object) {
     # function is called either from inside the package or from a user session.
     ns <- asNamespace("pecotmr")
     impl <- if (!is.null(methodArgs)) attr(methodArgs, "impl") else NULL
-    if (!is.null(impl) && nzchar(impl) && .functionExistsInNs(impl, ns)) {
+    if (
+        !is.null(impl) && str_length(impl) > 0L && .functionExistsInNs(impl, ns)
+    ) {
         return(impl)
     }
     # Direct match (e.g. caller already passed camelCase)
@@ -669,12 +658,12 @@ setMethod("show", "TwasWeights", function(object) {
         return(methodKey)
     }
     # snake_case_weights -> camelCaseWeights
-    parts <- strsplit(methodKey, "_", fixed = TRUE)[[1]]
-    capRest <- paste0(
-        toupper(substring(parts[-1], 1, 1)),
-        substring(parts[-1], 2)
+    parts <- str_split(methodKey, "_")[[1]]
+    capRest <- str_c(
+        str_to_upper(str_sub(parts[-1], 1, 1)),
+        str_sub(parts[-1], 2)
     )
-    candidate <- paste0(parts[1], paste0(capRest, collapse = ""))
+    candidate <- str_c(parts[1], str_flatten(capRest))
     if (.functionExistsInNs(candidate, ns)) {
         return(candidate)
     }
@@ -685,33 +674,35 @@ setMethod("show", "TwasWeights", function(object) {
 # two folds, and (when `sampleNames` given) exact coverage of all samples.
 # @noRd
 .validateFoldPartition <- function(df, sampleNames) {
-    if (!all(c("Sample", "Fold") %in% names(df))) {
-        stop("samplePartition must have columns `Sample` and `Fold`.")
+    if (!all(is_in(c("Sample", "Fold"), names(df)))) {
+        abort("samplePartition must have columns `Sample` and `Fold`.")
     }
     df$Sample <- as.character(df$Sample)
     dup <- unique(df$Sample[duplicated(df$Sample)])
     if (length(dup) > 0L) {
-        stop(
+        msg <- glue(
             "Fold partition assigns sample(s) to more than one fold: ",
-            paste(dup, collapse = ", ")
+            "{str_flatten(dup, ', ')}"
         )
+        abort(msg)
     }
     if (!is.null(sampleNames)) {
         unknown <- setdiff(df$Sample, sampleNames)
         if (length(unknown) > 0L) {
-            stop(
+            msg <- glue(
                 "Fold partition references unknown sample(s): ",
-                paste(unknown, collapse = ", ")
+                "{str_flatten(unknown, ', ')}"
             )
+            abort(msg)
         }
         uncovered <- setdiff(sampleNames, df$Sample)
         if (length(uncovered) > 0L) {
-            stop(
-                "Fold partition does not cover ",
-                length(uncovered),
-                " sample(s) (folds must partition all samples), e.g. ",
-                paste(utils::head(uncovered, 5L), collapse = ", ")
+            msg <- glue(
+                "Fold partition does not cover {length(uncovered)} ",
+                "sample(s) (folds must partition all samples), e.g. ",
+                "{str_flatten(utils::head(uncovered, 5L), ', ')}"
             )
+            abort(msg)
         }
     }
     df
@@ -736,27 +727,29 @@ setMethod("show", "TwasWeights", function(object) {
 ) {
     isListFolds <- is.list(cvFolds) && !is.data.frame(cvFolds)
     if (isListFolds && !is.null(samplePartition)) {
-        stop(
+        msg <- glue(
             "Provide either a list-form `cvFolds` or an explicit ",
             "`samplePartition`, not both."
         )
+        abort(msg)
     }
     if (!is.null(samplePartition)) {
         df <- .validateFoldPartition(
-            as.data.frame(samplePartition, stringsAsFactors = FALSE),
+            as_tibble(samplePartition),
             sampleNames
         )
-        return(list(samplePartition = df, nFolds = length(unique(df$Fold))))
+        return(list(samplePartition = df, nFolds = n_distinct(df$Fold)))
     }
     if (isListFolds) {
         return(.twasListFoldsToPartition(cvFolds, sampleNames))
     }
     k <- suppressWarnings(as.integer(cvFolds))
     if (length(k) != 1L || is.na(k)) {
-        stop(
+        msg <- glue(
             "`cvFolds` must be a single integer, a list of fold vectors, or ",
             "paired with `samplePartition`."
         )
+        abort(msg)
     }
     list(samplePartition = NULL, nFolds = k)
 }
@@ -766,12 +759,15 @@ setMethod("show", "TwasWeights", function(object) {
 # @noRd
 .twasListFoldsToPartition <- function(cvFolds, sampleNames) {
     if (length(cvFolds) < 2L) {
-        stop("A list-form `cvFolds` must define at least 2 folds.")
+        abort("A list-form `cvFolds` must define at least 2 folds.")
     }
-    rows <- map(seq_along(cvFolds), function(k) {
-        .twasFoldRow(k, cvFolds[[k]], sampleNames)
-    })
-    df <- .validateFoldPartition(list_rbind(rows), sampleNames)
+    rows <- map(
+        seq_along(cvFolds),
+        .twasFoldRowAt,
+        cvFolds = cvFolds,
+        sampleNames = sampleNames
+    )
+    df <- .validateFoldPartition(bind_rows(rows), sampleNames)
     list(samplePartition = df, nFolds = length(cvFolds))
 }
 
@@ -781,23 +777,23 @@ setMethod("show", "TwasWeights", function(object) {
 .twasFoldRow <- function(k, ids, sampleNames) {
     if (is.numeric(ids)) {
         if (is.null(sampleNames)) {
-            stop(
+            msg <- glue(
                 "Numeric fold vectors require `sampleNames` to resolve ",
                 "column indices."
             )
+            abort(msg)
         }
         if (any(ids < 1L | ids > length(sampleNames))) {
-            stop(
-                "Fold ",
-                k,
-                " has out-of-range sample column index/indices."
+            msg <- glue(
+                "Fold {k} has out-of-range sample column index/indices."
             )
+            abort(msg)
         }
         ids <- sampleNames[as.integer(ids)]
     } else {
         ids <- as.character(ids)
     }
-    data.frame(Sample = ids, Fold = k, stringsAsFactors = FALSE)
+    tibble(Sample = ids, Fold = k)
 }
 
 # Identify non-zero-variance columns of X. Returns a logical vector.
@@ -979,13 +975,13 @@ setMethod("show", "TwasWeights", function(object) {
 .twasFoldPriors <- function(args, method, j, cvArgs) {
     if (
         !is.null(cvArgs$data_driven_priorMatricesCv) &&
-            method %in% c("mrmash_weights", "mrmashWeights")
+            is_in(method, c("mrmash_weights", "mrmashWeights"))
     ) {
         args$dataDrivenPriorMatrices <- cvArgs$data_driven_priorMatricesCv[[j]]
     }
     if (
         !is.null(cvArgs$reweightedMixturePriorCv) &&
-            method %in% c("mvsusie_weights", "mvsusieWeights")
+            is_in(method, c("mvsusie_weights", "mvsusieWeights"))
     ) {
         args$prior_variance <- cvArgs$reweightedMixturePriorCv[[j]]
     }
@@ -996,13 +992,14 @@ setMethod("show", "TwasWeights", function(object) {
 # @noRd
 .twasFoldMultivariate <- function(method, fnName, args, Xtr, Ytr, j, ctx) {
     args <- .twasFoldPriors(args, method, j, ctx$cvArgs)
-    if (isTRUE(ctx$retainFits) && "retainFit" %in% names(formals(fnName))) {
+    if (isTRUE(ctx$retainFits) && is_in("retainFit", names(formals(fnName)))) {
         args$retainFit <- TRUE
     }
+    callArgs <- c(list(X = Xtr, Y = Ytr), args)
     W <- if (ctx$verbose < 2) {
-        .quietEval(do.call(fnName, c(list(X = Xtr, Y = Ytr), args)))
+        .quietEval(exec(fnName, !!!callArgs))
     } else {
-        do.call(fnName, c(list(X = Xtr, Y = Ytr), args))
+        exec(fnName, !!!callArgs)
     }
     capturedFit <- attr(W, "fit")
     attr(W, "fit") <- NULL
@@ -1013,15 +1010,16 @@ setMethod("show", "TwasWeights", function(object) {
 # One fold's univariate weight fit (per Y column, column-bound); no fit kept.
 # @noRd
 .twasFoldUnivariate <- function(fnName, args, Xtr, Ytr, ctx) {
-    Wcols <- map(seq_len(ncol(Ytr)), function(k) {
-        w <- if (ctx$verbose < 2) {
-            .quietEval(do.call(fnName, c(list(X = Xtr, y = Ytr[, k]), args)))
-        } else {
-            do.call(fnName, c(list(X = Xtr, y = Ytr[, k]), args))
-        }
-        as.numeric(w)
-    })
-    W <- do.call(cbind, Wcols)
+    Wcols <- map(
+        seq_len(ncol(Ytr)),
+        .twasFitColWeight,
+        ctx = ctx,
+        fnName = fnName,
+        Xtr = Xtr,
+        Ytr = Ytr,
+        args = args
+    )
+    W <- exec(cbind, !!!Wcols)
     rownames(W) <- colnames(Xtr)
     list(W = W, fit = NULL)
 }
@@ -1031,8 +1029,8 @@ setMethod("show", "TwasWeights", function(object) {
 # @noRd
 .twasFoldMethodWeights <- function(method, args, Xtr, Ytr, j, ctx) {
     fnName <- .resolveMethodFunction(method, args)
-    mk <- sub("_weights$|Weights$", "", method)
-    fit <- if (method %in% ctx$multivariateWeightMethods) {
+    mk <- str_remove(method, "_weights$|Weights$")
+    fit <- if (is_in(method, ctx$multivariateWeightMethods)) {
         .twasFoldMultivariate(method, fnName, args, Xtr, Ytr, j, ctx)
     } else {
         .twasFoldUnivariate(fnName, args, Xtr, Ytr, ctx)
@@ -1151,7 +1149,7 @@ twasWeightsCv <- function(
         p$weightMethods
     }
     if (!exists(".Random.seed") && p$verbose >= 1) {
-        message(
+        inform(
             "! No seed has been set. Please set seed for reproducable result. "
         )
     }
@@ -1198,9 +1196,10 @@ twasWeightsCv <- function(
 # retainFitDetail, verbose).
 # @noRd
 .computeMethodWeights <- function(methodName, weightMethods, ctx) {
-    shortName <- sub("_weights$", "", methodName)
+    shortName <- str_remove(methodName, "_weights$")
     if (ctx$verbose >= 1) {
-        message(sprintf("  Fitting %s ...", shortName))
+        msg <- glue("  Fitting {shortName} ...")
+        inform(msg)
         tic()
     }
     args <- weightMethods[[methodName]]
@@ -1225,11 +1224,9 @@ twasWeightsCv <- function(
     }
     if (ctx$verbose >= 1) {
         elapsed <- toc(quiet = TRUE)
-        message(sprintf(
-            "  Fitting %s done in %.1fs",
-            shortName,
-            elapsed$toc - elapsed$tic
-        ))
+        secs <- sprintf("%.1f", elapsed$toc - elapsed$tic)
+        msg <- glue("  Fitting {shortName} done in {secs}s")
+        inform(msg)
     }
     result
 }
@@ -1255,12 +1252,12 @@ twasWeightsCv <- function(
         return(args)
     }
     fnFormals <- names(formals(fnName))
-    if ("retainFit" %in% fnFormals) {
+    if (is_in("retainFit", fnFormals)) {
         args$retainFit <- TRUE
-    } else if ("retain_fit" %in% fnFormals) {
+    } else if (is_in("retain_fit", fnFormals)) {
         args$retain_fit <- TRUE
     }
-    if ("fitDetail" %in% fnFormals && is.null(args$fitDetail)) {
+    if (is_in("fitDetail", fnFormals) && is.null(args$fitDetail)) {
         args$fitDetail <- retainFitDetail
     }
     args
@@ -1270,7 +1267,7 @@ twasWeightsCv <- function(
 # returns list(weights, methodFit).
 # @noRd
 .twasFitWeightsMatrix <- function(fnName, args, ctx, methodName) {
-    if (methodName %in% .twasMultivariateWeightMethods) {
+    if (is_in(methodName, .twasMultivariateWeightMethods)) {
         .twasFitMultivariate(fnName, args, ctx)
     } else {
         .twasFitUnivariate(fnName, args, ctx)
@@ -1282,9 +1279,9 @@ twasWeightsCv <- function(
 .twasFitMultivariate <- function(fnName, args, ctx) {
     call <- c(list(X = ctx$Xfiltered, Y = ctx$Y), args)
     weightsMatrix <- if (ctx$verbose < 2) {
-        .quietEval(do.call(fnName, call))
+        .quietEval(exec(fnName, !!!call))
     } else {
-        do.call(fnName, call)
+        exec(fnName, !!!call)
     }
     methodFit <- if (ctx$retainFits) attr(weightsMatrix, "fit") else NULL
     if (nrow(weightsMatrix) != length(ctx$validColumns)) {
@@ -1302,9 +1299,9 @@ twasWeightsCv <- function(
     for (k in seq_len(ncol(ctx$Y))) {
         call <- c(list(X = ctx$Xfiltered, y = ctx$Y[, k]), args)
         weightsVector <- if (ctx$verbose < 2) {
-            .quietEval(do.call(fnName, call))
+            .quietEval(exec(fnName, !!!call))
         } else {
-            do.call(fnName, call)
+            exec(fnName, !!!call)
         }
         if (ctx$retainFits && is.null(methodFit)) {
             methodFit <- attr(weightsVector, "fit")
@@ -1323,9 +1320,13 @@ twasWeightsCv <- function(
 # dataType).
 # @noRd
 .buildTwasWeightEntries <- function(weightsList, variantIds, ctx) {
-    rows <- list_flatten(map(names(weightsList), function(m) {
-        .twasMethodRows(m, weightsList[[m]], variantIds, ctx)
-    }))
+    rows <- list_flatten(map(
+        names(weightsList),
+        .twasMethodRowsFor,
+        weightsList = weightsList,
+        variantIds = variantIds,
+        ctx = ctx
+    ))
     list(
         study = map_chr(rows, "study"),
         context = map_chr(rows, "context"),
@@ -1356,10 +1357,10 @@ twasWeightsCv <- function(
     fitVal <- attr(wMat, "fit")
     attr(wMat, "fit") <- NULL
     fits <- if (ctx$retainFits) fitVal else NULL
-    shortMethod <- sub("(_weights|Weights)$", "", m)
+    shortMethod <- str_remove(m, "(_weights|Weights)$")
     nY <- ncol(ctx$Y)
     perOutcome <- length(ctx$trait) == nY &&
-        length(ctx$context) %in% c(1L, nY)
+        is_in(length(ctx$context), c(1L, nY))
     if (!perOutcome) {
         wPayload <- if (ncol(wMat) == 1L) drop(wMat) else wMat
         return(list(list(
@@ -1376,15 +1377,17 @@ twasWeightsCv <- function(
         ctx$context
     }
     studyV <- if (length(ctx$study) == 1L) rep(ctx$study, nY) else ctx$study
-    map(seq_len(nY), function(k) {
-        list(
-            study = studyV[k],
-            context = contextV[k],
-            trait = ctx$trait[k],
-            method = shortMethod,
-            entry = .twasEntry(variantIds, wMat[, k], fits, ctx)
-        )
-    })
+    map(
+        seq_len(nY),
+        .twasMethodRowAt,
+        studyV = studyV,
+        contextV = contextV,
+        ctx = ctx,
+        shortMethod = shortMethod,
+        variantIds = variantIds,
+        wMat = wMat,
+        fits = fits
+    )
 }
 
 #' Run multiple TWAS weight methods
@@ -1439,7 +1442,8 @@ twasWeightsCv <- function(
 #'   weightMethods = list(susie_weights = list()))
 #' @export
 #' @importFrom purrr map exec
-#' @importFrom rlang !!!
+#' @importFrom rlang !!! abort warn inform arg_match cnd_signal .data
+#' @importFrom glue glue
 #' @importFrom tictoc tic toc
 learnTwasWeights <- function(
     X,
@@ -1464,13 +1468,13 @@ learnTwasWeights <- function(
 # @noRd
 .twasValidateXY <- function(X, Y) {
     if (!is.matrix(X) || (!is.matrix(Y) && !is.vector(Y))) {
-        stop("X must be a matrix and Y must be a matrix or a vector.")
+        abort("X must be a matrix and Y must be a matrix or a vector.")
     }
     if (is.vector(Y)) {
         Y <- matrix(Y, ncol = 1)
     }
     if (nrow(X) != nrow(Y)) {
-        stop("The number of rows in X and Y must be the same.")
+        abort("The number of rows in X and Y must be the same.")
     }
     Y
 }
@@ -1489,7 +1493,7 @@ learnTwasWeights <- function(
     if (!is.null(colnames(X))) {
         colnames(X)
     } else {
-        paste0("variant_", seq_len(ncol(X)))
+        str_c("variant_", seq_len(ncol(X)))
     }
 }
 
@@ -1519,21 +1523,15 @@ learnTwasWeights <- function(
     if (is.null(colnames(X))) {
         return(weightsList)
     }
-    map(weightsList, function(x) {
-        fit <- attr(x, "fit")
-        rownames(x) <- colnames(X)
-        if (!is.null(fit)) {
-            attr(x, "fit") <- fit
-        }
-        x
-    })
+    map(weightsList, .twasSetRownames, X = X)
 }
 
 # learnTwasWeights worker: validate, resolve methods, fit each, and assemble the
 # TwasWeights collection. `p` is the captured public arguments.
 # @noRd
 .learnTwasWeightsImpl <- function(p) {
-    retainFitDetail <- match.arg(p$retainFitDetail, c("slim", "full"))
+    retainFitDetail <- p$retainFitDetail
+    retainFitDetail <- arg_match(retainFitDetail, c("slim", "full"))
     Y <- .twasValidateXY(p$X, p$Y)
     weightMethods <- if (is.character(p$weightMethods)) {
         .twasMethodLookup(p$weightMethods)
@@ -1616,22 +1614,15 @@ twasPredict <- function(X, weightsList) {
         # for compatibility with the legacy snake_case "<method>_predicted"
         # convention; ensembleWeights() rebinds the suffix.
         methodNames <- as.character(weightsList$method)
-        wl <- setNames(
-            lapply(seq_len(nrow(weightsList)), function(i) {
-                getWeights(weightsList$entry[[i]])
-            }),
-            paste0(methodNames, "_weights")
+        wl <- set_names(
+            map(weightsList$entry, getWeights),
+            str_c(methodNames, "_weights")
         )
     } else {
         wl <- weightsList
     }
-    setNames(
-        lapply(wl, function(w) {
-            if (!is.matrix(w)) {
-                w <- matrix(w, ncol = 1)
-            }
-            X %*% w
-        }),
+    set_names(
+        map(wl, .twasPredictOne, X = X),
         .renameSuffix(names(wl), "predicted")
     )
 }
@@ -1663,37 +1654,150 @@ estimateSparsity <- function(weightResults) {
         methods <- as.character(weightResults$method)
         idx <- which(methods == "mrash")
         if (length(idx) == 0L) {
-            stop(
+            msg <- glue(
                 "mr.ash entry not found in TwasWeights. Run ",
                 "learnTwasWeights() ",
                 "with retainFits = TRUE and ensure 'mrash' is in the ",
                 "method list."
             )
+            abort(msg)
         }
         fit <- getFits(weightResults$entry[[idx[[1L]]]])
         if (is.null(fit) || is.null(fit$pi)) {
-            stop(
+            msg <- glue(
                 "mr.ash fit object not found. Run learnTwasWeights() with ",
                 "retainFits = TRUE ",
                 "and ensure mrash_weights is included."
             )
+            abort(msg)
         }
     } else {
         w <- weightResults[["mrash_weights"]]
         if (is.null(w)) {
-            stop("mr.ash weights ('mrash_weights') not found in weightResults.")
+            abort(
+                "mr.ash weights ('mrash_weights') not found in weightResults."
+            )
         }
         fit <- attr(w, "fit")
         if (is.null(fit) || is.null(fit$pi)) {
-            stop(
+            msg <- glue(
                 "mr.ash fit object not found. Run learnTwasWeights() with ",
                 "retainFits = TRUE ",
                 "and ensure mrash_weights is included."
             )
+            abort(msg)
         }
     }
 
     # fit$pi[1] is the weight on the spike (sa2[1] = 0); 1 - pi[1] = non-null
     # proportion
     return(1 - fit$pi[1])
+}
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# TRUE when joint column `jc` of `object` is not a character vector.
+# @noRd
+.twasColNotCharacter <- function(jc, object) {
+    !is.character(object[[jc]])
+}
+
+# Validation message for a non-character joint column `jc`.
+# @noRd
+.twasBadColMsg <- function(jc, object) {
+    glue(
+        "'{jc}' column must be character (got {class(object[[jc]])[[1L]]})"
+    )
+}
+
+# Column `cn` of `object`, extracted via `[[` (preserves the required `entry`
+# column that `object[, cn]` would drop).
+# @noRd
+.twasColumn <- function(cn, object) {
+    object[[cn]]
+}
+
+# Canonical short method name: map a full function name back to its short name.
+# @noRd
+.twasCanonicalShortName <- function(m, fnToShort) {
+    if (is_in(m, names(fnToShort))) fnToShort[[m]] else m
+}
+
+# The per-method args list for short name `m`, tagged with its `impl` attribute.
+# @noRd
+.twasMethodArgsWithImpl <- function(m) {
+    args <- .twasMethodMap[[m]]$args
+    attr(args, "impl") <- .twasMethodMap[[m]]$impl
+    args
+}
+
+# The implementation function name for short method name `m`.
+# @noRd
+.twasMethodFn <- function(m) {
+    .twasMethodMap[[m]]$fn
+}
+
+# The Sample/Fold rows for fold `k` of a list-form `cvFolds`.
+# @noRd
+.twasFoldRowAt <- function(k, cvFolds, sampleNames) {
+    .twasFoldRow(k, cvFolds[[k]], sampleNames)
+}
+
+# One univariate fold's weight column for outcome `k` (quiet unless verbose).
+# @noRd
+.twasFitColWeight <- function(k, ctx, fnName, Xtr, Ytr, args) {
+    callArgs <- c(list(X = Xtr, y = Ytr[, k]), args)
+    w <- if (ctx$verbose < 2) {
+        .quietEval(exec(fnName, !!!callArgs))
+    } else {
+        exec(fnName, !!!callArgs)
+    }
+    as.numeric(w)
+}
+
+# The row-records for method `m` in `weightsList` (keyed lookup + build).
+# @noRd
+.twasMethodRowsFor <- function(m, weightsList, variantIds, ctx) {
+    .twasMethodRows(m, weightsList[[m]], variantIds, ctx)
+}
+
+# One (method, outcome) row-record for Y column `k`.
+# @noRd
+.twasMethodRowAt <- function(
+    k,
+    studyV,
+    contextV,
+    ctx,
+    shortMethod,
+    variantIds,
+    wMat,
+    fits
+) {
+    list(
+        study = studyV[k],
+        context = contextV[k],
+        trait = ctx$trait[k],
+        method = shortMethod,
+        entry = .twasEntry(variantIds, wMat[, k], fits, ctx)
+    )
+}
+
+# Set one weight matrix's rownames to colnames(X), preserving any `fit` attr.
+# @noRd
+.twasSetRownames <- function(x, X) {
+    fit <- attr(x, "fit")
+    rownames(x) <- colnames(X)
+    if (!is.null(fit)) {
+        attr(x, "fit") <- fit
+    }
+    x
+}
+
+# X %*% w for one weight vector/matrix (coerced to a 1-column matrix if needed).
+# @noRd
+.twasPredictOne <- function(w, X) {
+    if (!is.matrix(w)) {
+        w <- matrix(w, ncol = 1)
+    }
+    X %*% w
 }

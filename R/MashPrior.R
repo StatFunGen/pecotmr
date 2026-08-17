@@ -94,8 +94,8 @@ setClass(
     if (is.null(sp)) {
         return(NULL)
     }
-    if (!is.data.frame(sp) || !all(c("Sample", "Fold") %in% names(sp))) {
-        return(paste0(
+    if (!is.data.frame(sp) || !all(is_in(c("Sample", "Fold"), names(sp)))) {
+        return(str_c(
             "`cvFits$samplePartition` must be a data.frame ",
             "with `Sample` and `Fold` columns"
         ))
@@ -103,15 +103,11 @@ setClass(
     if (!is.list(cv$perFoldFits)) {
         return(NULL)
     }
-    nF <- length(unique(sp$Fold))
+    nF <- n_distinct(sp$Fold)
     if (length(cv$perFoldFits) != nF) {
-        return(sprintf(
-            paste0(
-                "`cvFits$perFoldFits` has %d element(s) but the ",
-                "partition defines %d fold(s)"
-            ),
-            length(cv$perFoldFits),
-            nF
+        return(glue(
+            "`cvFits$perFoldFits` has {length(cv$perFoldFits)} element(s) ",
+            "but the partition defines {nF} fold(s)"
         ))
     }
     NULL
@@ -149,19 +145,20 @@ setMethod("getCvFits", "MashPrior", function(x, ...) x@cvFits)
 #' @export
 setMethod("show", "MashPrior", function(object) {
     cat("MashPrior\n")
-    cat(sprintf(
-        "  fullFit: %s\n",
-        if (is.null(object@fullFit)) "none" else "present"
+    cat(glue(
+        "  fullFit: {if (is.null(object@fullFit)) 'none' else 'present'}\n",
+        .trim = FALSE
     ))
     cv <- object@cvFits
     if (is.null(cv)) {
         cat("  cvFits: none\n")
     } else {
         nF <- if (!is.null(cv$perFoldFits)) length(cv$perFoldFits) else 0L
-        cat(sprintf(
-            "  cvFits: %d per-fold prior(s)%s\n",
-            nF,
-            if (!is.null(cv$samplePartition)) " + samplePartition" else ""
+        cat(glue(
+            "  cvFits: {nF} per-fold prior(s)",
+            "{if (!is.null(cv$samplePartition)) ' + samplePartition' else ''}",
+            "\n",
+            .trim = FALSE
         ))
     }
 })

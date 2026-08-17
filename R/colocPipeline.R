@@ -155,7 +155,8 @@ colocPipeline <- function(
     }
     results <- list_flatten(map(
         seq_len(nrow(p$qtlFineMappingResult)),
-        function(qi) .colocScoreQtlTuple(qi, p)
+        .colocScoreQtlTuple,
+        p = p
     ))
     .colocFinalize(results, p)
 }
@@ -169,30 +170,29 @@ colocPipeline <- function(
     }
     if (!requireNamespace("coloc", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "Package 'coloc' is required for colocPipeline. ",
             "Install with: install.packages('coloc')."
         )
+        abort(msg)
         # nocov end
     }
     if (!methods::is(p$qtlFineMappingResult, "QtlFineMappingResult")) {
-        stop(
-            "`qtlFineMappingResult` must be a QtlFineMappingResult (got ",
-            "class '",
-            class(p$qtlFineMappingResult)[[1L]],
-            "')."
+        msg <- glue(
+            "`qtlFineMappingResult` must be a QtlFineMappingResult ",
+            "(got class '{class(p$qtlFineMappingResult)[[1L]]}')."
         )
+        abort(msg)
     }
     if (
         !methods::is(p$gwasInput, "GwasSumStats") &&
             !methods::is(p$gwasInput, "GwasFineMappingResult")
     ) {
-        stop(
+        msg <- glue(
             "`gwasInput` must be a GwasSumStats or a GwasFineMappingResult ",
-            "(got class '",
-            class(p$gwasInput)[[1L]],
-            "')."
+            "(got class '{class(p$gwasInput)[[1L]]}')."
         )
+        abort(msg)
     }
     invisible(NULL)
 }
@@ -202,19 +202,21 @@ colocPipeline <- function(
 # @noRd
 .colocValidateEnrichment <- function(enrichment) {
     if (!is.data.frame(enrichment)) {
-        stop(
+        msg <- glue(
             "`enrichment` must be a data.frame with at least gwasStudy, ",
             "qtlStudy, qtlContext, enrichment columns (output of ",
             "qtlEnrichmentPipeline)."
         )
+        abort(msg)
     }
     required <- c("gwasStudy", "qtlStudy", "qtlContext", "enrichment")
     missingCols <- setdiff(required, colnames(enrichment))
     if (length(missingCols) > 0L) {
-        stop(
+        msg <- glue(
             "`enrichment` is missing column(s): ",
-            paste(missingCols, collapse = ", ")
+            "{str_flatten(missingCols, ', ')}"
         )
+        abort(msg)
     }
     invisible(NULL)
 }
@@ -227,10 +229,11 @@ colocPipeline <- function(
         return(gwasInput)
     }
     if (length(getQcInfo(gwasInput)) == 0L) {
-        stop(
+        msg <- glue(
             "colocPipeline: gwasInput (GwasSumStats) has no QC record. ",
             "Call summaryStatsQc() first."
         )
+        abort(msg)
     }
     fineMappingPipeline(gwasInput, methods = finemappingMethods)
 }
@@ -244,9 +247,9 @@ colocPipeline <- function(
     }
     qtlVids <- unique(unlist(map(
         p$qtlFineMappingResult$entry,
-        function(e) e@variantIds
+        .colocEntryVariantIds
     )))
-    gwasVids <- unique(unlist(map(p$gwasFmr$entry, function(e) e@variantIds)))
+    gwasVids <- unique(unlist(map(p$gwasFmr$entry, .colocEntryVariantIds)))
     if (length(qtlVids) > 0L && length(gwasVids) > 0L) {
         p$qtlFineMappingResult <- adjustPips(p$qtlFineMappingResult, gwasVids)
         p$gwasFmr <- adjustPips(p$gwasFmr, qtlVids)
@@ -279,9 +282,13 @@ colocPipeline <- function(
     if (is.null(qLbfInfo)) {
         return(list())
     }
-    compact(map(names(p$gwasLbfByPair), function(gKey) {
-        .colocScorePair(qLbfInfo$lbf, p$gwasLbfByPair[[gKey]], q, p)
-    }))
+    compact(map(
+        names(p$gwasLbfByPair),
+        .colocScorePairAt,
+        qLbfInfo = qLbfInfo,
+        p = p,
+        q = q
+    ))
 }
 
 # Identity + entry + log label for a QTL tuple.
@@ -298,12 +305,9 @@ colocPipeline <- function(
         trait = trait,
         method = method,
         entry = fmr$entry[[qi]],
-        label = sprintf(
-            "QTL (study='%s', context='%s', trait='%s', method='%s')",
-            study,
-            context,
-            trait,
-            method
+        label = glue(
+            "QTL (study='{study}', context='{context}', ",
+            "trait='{trait}', method='{method}')"
         )
     )
 }
@@ -335,15 +339,12 @@ colocPipeline <- function(
     }
     enRow <- .colocLookupEnrichment(p$enrichment, gwasStudy, qStudy, qContext)
     if (is.na(enRow)) {
-        warning(sprintf(
-            paste0(
-                "colocPipeline: no enrichment entry for (gwasStudy='%s', ",
-                "qtlStudy='%s', qtlContext='%s'); using baseline p12."
-            ),
-            gwasStudy,
-            qStudy,
-            qContext
-        ))
+        msg <- glue(
+            "colocPipeline: no enrichment entry for ",
+            "(gwasStudy='{gwasStudy}', qtlStudy='{qStudy}', ",
+            "qtlContext='{qContext}'); using baseline p12."
+        )
+        warn(msg)
         enRow <- 0
     }
     list(enRow = enRow, p12Used = min(p$p12 * (1 + enRow), p$p12Max))
@@ -352,35 +353,27 @@ colocPipeline <- function(
 # Run coloc.bf_bf for an aligned pair, warning + NULL on failure.
 # @noRd
 .colocRunPair <- function(aligned, p, p12Used, q, gInfo) {
-    tryCatch(
-        do.call(
-            coloc::coloc.bf_bf,
-            c(
-                list(
-                    aligned$qtl,
-                    aligned$gwas,
-                    p1 = p$p1,
-                    p2 = p$p2,
-                    p12 = p12Used
-                ),
-                p$dots
-            )
+    colocArgs <- c(
+        list(
+            aligned$qtl,
+            aligned$gwas,
+            p1 = p$p1,
+            p2 = p$p2,
+            p12 = p12Used
         ),
+        p$dots
+    )
+    tryCatch(
+        exec(coloc::coloc.bf_bf, !!!colocArgs),
         error = function(e) {
-            warning(sprintf(
-                paste0(
-                    "colocPipeline: coloc.bf_bf failed for QTL (study='%s', ",
-                    "context='%s', trait='%s', method='%s') x GWAS ",
-                    "(study='%s', method='%s'): %s"
-                ),
-                q$study,
-                q$context,
-                q$trait,
-                q$method,
-                gInfo$study,
-                gInfo$method,
-                conditionMessage(e)
-            ))
+            msg <- glue(
+                "colocPipeline: coloc.bf_bf failed for QTL ",
+                "(study='{q$study}', context='{q$context}', ",
+                "trait='{q$trait}', method='{q$method}') x GWAS ",
+                "(study='{gInfo$study}', method='{gInfo$method}'): ",
+                "{conditionMessage(e)}"
+            )
+            warn(msg)
             NULL
         }
     )
@@ -419,8 +412,7 @@ colocPipeline <- function(
     if (length(results) == 0L) {
         return(.colocEmptyResult(enriched = useEnrichment))
     }
-    out <- do.call(rbind, map(results, .colocStandardiseRow))
-    rownames(out) <- NULL
+    out <- bind_rows(map(results, .colocStandardiseRow))
     idCols <- c(
         "study",
         "context",
@@ -432,7 +424,7 @@ colocPipeline <- function(
     if (useEnrichment) {
         idCols <- c(idCols, "enrichment", "p12Used")
     }
-    out[, c(idCols, setdiff(colnames(out), idCols)), drop = FALSE]
+    select(out, all_of(idCols), everything())
 }
 
 # =============================================================================
@@ -468,8 +460,8 @@ colocPipeline <- function(
     csList <- susie_get_cs(fit, coverage = coverage, dedup = FALSE)
     totalVariants <- ncol(fit$alpha)
     maxSize <- totalVariants * coverage * concentration
-    keep <- map_lgl(csList$cs, ~ length(.x) < maxSize)
-    as.numeric(gsub("L", "", names(which(keep))))
+    keep <- map_lgl(csList$cs, .colocCsUnderMax, maxSize = maxSize)
+    as.numeric(str_remove_all(names(which(keep)), "L"))
 }
 
 # Extract an LBF matrix (effects x variants) from a FineMappingEntry,
@@ -491,10 +483,8 @@ colocPipeline <- function(
 ) {
     fit <- getSusieFit(entry)
     if (is.null(fit)) {
-        warning(sprintf(
-            "colocPipeline: %s has no trimmedFit; skipping.",
-            label
-        ))
+        msg <- glue("colocPipeline: {label} has no trimmedFit; skipping.")
+        warn(msg)
         return(NULL)
     }
     lbfMatrix <- .colocLbfMatrix(fit, label)
@@ -531,25 +521,26 @@ colocPipeline <- function(
             is.list(fit$fsusie_result$lBF)
     ) {
         # fSuSiE path: stack per-trait lBF lists into a single matrix.
-        do.call(rbind, fit$fsusie_result$lBF)
+        lbfList <- fit$fsusie_result$lBF
+        exec(rbind, !!!lbfList)
     } else if (
         is.list(fit) &&
             length(fit) >= 1L &&
             !is.null(fit[[1L]]$fsusie_result$lBF)
     ) {
-        do.call(rbind, fit[[1L]]$fsusie_result$lBF)
+        lbfList <- fit[[1L]]$fsusie_result$lBF
+        exec(rbind, !!!lbfList)
     } else {
-        warning(sprintf(
-            paste0(
-                "colocPipeline: %s trimmedFit has no lbf_variable / fsusie ",
-                "lBF; skipping."
-            ),
-            label
-        ))
+        msg <- glue(
+            "colocPipeline: {label} trimmedFit has no lbf_variable / fsusie ",
+            "lBF; skipping."
+        )
+        warn(msg)
         return(NULL)
     }
     if (is.null(lbfMatrix) || nrow(lbfMatrix) == 0L) {
-        warning(sprintf("colocPipeline: %s LBF matrix is empty.", label))
+        msg <- glue("colocPipeline: {label} LBF matrix is empty.")
+        warn(msg)
         return(NULL)
     }
     lbfMatrix
@@ -614,7 +605,7 @@ colocPipeline <- function(
     filterLbfCsConcentration,
     priorTol
 ) {
-    groupKey <- paste(
+    groupKey <- str_c(
         as.character(gwasFmr$study),
         as.character(gwasFmr$method),
         sep = "||"
@@ -631,11 +622,9 @@ colocPipeline <- function(
                 filterLbfCsSecondary,
                 filterLbfCsConcentration,
                 priorTol,
-                label = sprintf(
-                    "GWAS (study='%s', method='%s', row=%d)",
-                    as.character(gwasFmr$study)[[ri]],
-                    as.character(gwasFmr$method)[[ri]],
-                    ri
+                label = glue(
+                    "GWAS (study='{as.character(gwasFmr$study)[[ri]]}', ",
+                    "method='{as.character(gwasFmr$method)[[ri]]}', row={ri})"
                 )
             )
             if (!is.null(info)) pieces[[length(pieces) + 1L]] <- info$lbf
@@ -644,7 +633,7 @@ colocPipeline <- function(
             next
         }
         combined <- .colocRbindLbf(pieces)
-        parts <- strsplit(gkey, "\\|\\|")[[1L]]
+        parts <- str_split(gkey, "\\|\\|")[[1L]]
         out[[gkey]] <- list(
             lbf = combined,
             study = parts[[1L]],
@@ -663,21 +652,9 @@ colocPipeline <- function(
 # the legacy `replace_na(., 0)` step inside colocWrapper).
 # @noRd
 .colocRbindLbf <- function(mats) {
-    allCols <- unique(unlist(lapply(mats, colnames)))
-    padded <- lapply(mats, function(m) {
-        miss <- setdiff(allCols, colnames(m))
-        if (length(miss) > 0L) {
-            pad <- matrix(
-                0,
-                nrow = nrow(m),
-                ncol = length(miss),
-                dimnames = list(NULL, miss)
-            )
-            m <- cbind(m, pad)
-        }
-        m[, allCols, drop = FALSE]
-    })
-    do.call(rbind, padded)
+    allCols <- unique(unlist(map(mats, colnames)))
+    padded <- map(mats, .colocPadCols, allCols = allCols)
+    exec(rbind, !!!padded)
 }
 
 # Align column names between a QTL and a (combined) GWAS LBF matrix by
@@ -711,7 +688,7 @@ colocPipeline <- function(
 # enrichment + p12Used columns are appended (the enloc-mode schema).
 # @noRd
 .colocEmptyResult <- function(enriched = FALSE) {
-    base <- data.frame(
+    base <- tibble(
         study = character(0),
         context = character(0),
         trait = character(0),
@@ -725,8 +702,7 @@ colocPipeline <- function(
         PP.H1.abf = numeric(0),
         PP.H2.abf = numeric(0),
         PP.H3.abf = numeric(0),
-        PP.H4.abf = numeric(0),
-        stringsAsFactors = FALSE
+        PP.H4.abf = numeric(0)
     )
     if (enriched) {
         base$enrichment <- numeric(0)
@@ -772,7 +748,43 @@ colocPipeline <- function(
         "PP.H3.abf",
         "PP.H4.abf"
     )) {
-        if (!col %in% colnames(sm)) sm[[col]] <- NA
+        if (!is_in(col, colnames(sm))) sm[[col]] <- NA
     }
     sm
+}
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# The variant ids of one fine-mapping entry (S4 slot; not pluckable by name).
+# @noRd
+.colocEntryVariantIds <- function(e) {
+    e@variantIds
+}
+
+# Score the QTL LBF against GWAS pair `gKey` -> a summary row (or NULL).
+# @noRd
+.colocScorePairAt <- function(gKey, qLbfInfo, p, q) {
+    .colocScorePair(qLbfInfo$lbf, p$gwasLbfByPair[[gKey]], q, p)
+}
+
+# TRUE when a credible set has fewer than `maxSize` variants.
+# @noRd
+.colocCsUnderMax <- function(x, maxSize) {
+    length(x) < maxSize
+}
+
+# Pad one LBF matrix to the union column set `allCols` (missing cells -> 0).
+# @noRd
+.colocPadCols <- function(m, allCols) {
+    miss <- setdiff(allCols, colnames(m))
+    if (length(miss) > 0L) {
+        pad <- matrix(
+            0,
+            nrow = nrow(m),
+            ncol = length(miss),
+            dimnames = list(NULL, miss)
+        )
+        m <- cbind(m, pad)
+    }
+    m[, allCols, drop = FALSE]
 }

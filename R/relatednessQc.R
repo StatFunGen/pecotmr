@@ -66,11 +66,11 @@ filterRelatedness <- function(
     verbose = FALSE
 ) {
     .relatednessRequirePackages()
-    analysisType <- match.arg(analysisType)
+    analysisType <- arg_match(analysisType)
     p <- as.list(environment())
-    p$relatedness <- as.data.frame(relatedness)
+    p$relatedness <- as_tibble(relatedness)
     if (analysisType == "maximize_cases" && is.null(phenoData)) {
-        stop("Must provide phenoData when analysisType is 'maximize_cases'")
+        abort("Must provide phenoData when analysisType is 'maximize_cases'")
     }
     # Phase 1: graph-based pre-pruning of large components.
     highRelatedIndiv <- .relatednessPrune(p)
@@ -107,10 +107,10 @@ filterRelatedness <- function(
 .relatednessRequirePackages <- function() {
     # nocov start
     if (!requireNamespace("igraph", quietly = TRUE)) {
-        stop("Package 'igraph' is required for filterRelatedness")
+        abort("Package 'igraph' is required for filterRelatedness")
     }
     if (!requireNamespace("plinkQC", quietly = TRUE)) {
-        stop("Package 'plinkQC' is required for filterRelatedness")
+        abort("Package 'plinkQC' is required for filterRelatedness")
     }
     # nocov end
 }
@@ -119,11 +119,19 @@ filterRelatedness <- function(
 # component larger than maxComponentSize. Returns the pruned individuals.
 # @noRd
 .relatednessPrune <- function(p) {
-    relatedPairs <- p$relatedness[
-        p$relatedness[[p$relatednessValue]] >= p$relatednessThreshold,
-    ]
-    edges <- relatedPairs[, c(p$relatednessIid1, p$relatednessIid2)]
-    workingGraph <- igraph::graph_from_data_frame(edges, directed = FALSE)
+    relatedPairs <- filter(
+        p$relatedness,
+        .data[[p$relatednessValue]] >= p$relatednessThreshold
+    )
+    edges <- select(
+        relatedPairs,
+        all_of(c(p$relatednessIid1, p$relatednessIid2))
+    )
+    # igraph requires a base data.frame (it sets row names on the input).
+    workingGraph <- igraph::graph_from_data_frame(
+        as.data.frame(edges),
+        directed = FALSE
+    )
     workingComp <- igraph::components(workingGraph)
     highRelatedIndiv <- character(0)
     while (max(workingComp$csize) > p$maxComponentSize) {
@@ -139,13 +147,12 @@ filterRelatedness <- function(
 # @noRd
 .relatednessPruneMessage <- function(workingComp, p) {
     if (p$verbose) {
-        message(
-            "Largest component has ",
-            max(workingComp$csize),
-            " individuals. Removing top ",
-            round(p$reduceFraction * 100),
-            "% highest-degree nodes."
+        msg <- glue(
+            "Largest component has {max(workingComp$csize)} individuals. ",
+            "Removing top {round(p$reduceFraction * 100)}% ",
+            "highest-degree nodes."
         )
+        inform(msg)
     }
     invisible(NULL)
 }
@@ -179,10 +186,11 @@ filterRelatedness <- function(
 # Drop the pre-pruned individuals from the relatedness data.
 # @noRd
 .relatednessRemovePruned <- function(relatedness, highRelatedIndiv, p) {
-    relatedness[
-        !(relatedness[[p$relatednessIid1]] %in% highRelatedIndiv) &
-            !(relatedness[[p$relatednessIid2]] %in% highRelatedIndiv),
-    ]
+    filter(
+        relatedness,
+        !is_in(.data[[p$relatednessIid1]], highRelatedIndiv) &
+            !is_in(.data[[p$relatednessIid2]], highRelatedIndiv)
+    )
 }
 
 # @noRd
@@ -207,26 +215,30 @@ filterRelatedness <- function(
 # list(allExclude, kin) (kin is restricted to phenotyped individuals).
 # @noRd
 .relatednessMaximizeCases <- function(kin, plinkqcArgs, p) {
-    phenoData <- as.data.frame(p$phenoData)
-    phenoData <- phenoData[!is.na(phenoData[[p$phenoCol]]), ]
+    phenoData <- as_tibble(p$phenoData)
+    phenoData <- filter(phenoData, !is.na(.data[[p$phenoCol]]))
     relatedIndividuals <- unique(c(
         kin[[p$relatednessIid1]],
         kin[[p$relatednessIid2]]
     ))
-    phenoData <- phenoData[phenoData$IID %in% relatedIndividuals, ]
-    relatedCases <- phenoData$IID[phenoData[[p$phenoCol]] == 1]
-    relatedControls <- phenoData$IID[phenoData[[p$phenoCol]] == 0]
-    kin <- kin[
-        kin[[p$relatednessIid1]] %in%
-            phenoData$IID &
-            kin[[p$relatednessIid2]] %in% phenoData$IID,
-    ]
+    phenoData <- filter(phenoData, is_in(.data$IID, relatedIndividuals))
+    relatedCases <- phenoData |>
+        filter(.data[[p$phenoCol]] == 1) |>
+        pull("IID")
+    relatedControls <- phenoData |>
+        filter(.data[[p$phenoCol]] == 0) |>
+        pull("IID")
+    kin <- filter(
+        kin,
+        is_in(.data[[p$relatednessIid1]], phenoData$IID) &
+            is_in(.data[[p$relatednessIid2]], phenoData$IID)
+    )
     # Step 1: filter among cases.
-    caseKin <- kin[
-        kin[[p$relatednessIid1]] %in%
-            relatedCases &
-            kin[[p$relatednessIid2]] %in% relatedCases,
-    ]
+    caseKin <- filter(
+        kin,
+        is_in(.data[[p$relatednessIid1]], relatedCases) &
+            is_in(.data[[p$relatednessIid2]], relatedCases)
+    )
     relCases <- .relatednessRunPlinkqc(caseKin, plinkqcArgs)
     casesKeep <- setdiff(relatedCases, relCases$IID)
     # Step 2: remove controls related to retained cases.
@@ -238,11 +250,11 @@ filterRelatedness <- function(
     )
     # Step 3: filter among the remaining controls.
     controlsKeep <- setdiff(relatedControls, controlsExclude)
-    controlKin <- kin[
-        kin[[p$relatednessIid1]] %in%
-            controlsKeep &
-            kin[[p$relatednessIid2]] %in% controlsKeep,
-    ]
+    controlKin <- filter(
+        kin,
+        is_in(.data[[p$relatednessIid1]], controlsKeep) &
+            is_in(.data[[p$relatednessIid2]], controlsKeep)
+    )
     relControls <- .relatednessRunPlinkqc(controlKin, plinkqcArgs)
     list(
         allExclude = c(relCases$IID, controlsExclude, relControls$IID),
@@ -256,9 +268,13 @@ filterRelatedness <- function(
 .relatednessControlsToExclude <- function(kin, casesKeep, relatedControls, p) {
     iid1 <- kin[[p$relatednessIid1]]
     iid2 <- kin[[p$relatednessIid2]]
-    mask1 <- iid1 %in% casesKeep & iid2 %in% relatedControls
-    mask2 <- iid2 %in% casesKeep & iid1 %in% relatedControls
-    contrib <- ifelse(mask1, iid2, ifelse(mask2, iid1, NA_character_))
+    mask1 <- is_in(iid1, casesKeep) & is_in(iid2, relatedControls)
+    mask2 <- is_in(iid2, casesKeep) & is_in(iid1, relatedControls)
+    contrib <- case_when(
+        mask1 ~ iid2,
+        mask2 ~ iid1,
+        .default = NA_character_
+    )
     contrib[!is.na(contrib)]
 }
 
@@ -270,13 +286,11 @@ filterRelatedness <- function(
     iter <- 0L
     while (nrow(remaining) > 0 && iter < p$maxIterations) {
         if (p$verbose) {
-            message(
-                "Iteration ",
-                iter + 1L,
-                ": ",
-                nrow(remaining),
-                " related pairs remaining."
+            msg <- glue(
+                "Iteration {iter + 1L}: {nrow(remaining)} related pairs ",
+                "remaining."
             )
+            inform(msg)
         }
         additional <- .relatednessRunPlinkqc(remaining, plinkqcArgs)
         allExclude <- c(allExclude, additional$IID)
@@ -284,13 +298,11 @@ filterRelatedness <- function(
         iter <- iter + 1L
     }
     if (nrow(remaining) > 0) {
-        warning(
-            "After ",
-            p$maxIterations,
-            " iterations, ",
-            nrow(remaining),
-            " related pairs remain."
+        msg <- glue(
+            "After {p$maxIterations} iterations, {nrow(remaining)} related ",
+            "pairs remain."
         )
+        warn(msg)
     }
     allExclude
 }
@@ -298,21 +310,22 @@ filterRelatedness <- function(
 # The still-related pairs above threshold after excluding `allExclude`.
 # @noRd
 .relatednessRemaining <- function(kin, allExclude, p) {
-    remaining <- kin[
-        !(kin[[p$relatednessIid1]] %in% allExclude) &
-            !(kin[[p$relatednessIid2]] %in% allExclude),
-    ]
-    remaining[remaining[[p$relatednessValue]] > p$relatednessThreshold, ]
+    remaining <- filter(
+        kin,
+        !is_in(.data[[p$relatednessIid1]], allExclude) &
+            !is_in(.data[[p$relatednessIid2]], allExclude)
+    )
+    filter(remaining, .data[[p$relatednessValue]] > p$relatednessThreshold)
 }
 
 # @noRd
 .relatednessReport <- function(allExclude, p) {
     if (p$verbose) {
-        message(
-            length(allExclude),
-            " individuals excluded at kinship threshold ",
-            p$relatednessThreshold
+        msg <- glue(
+            "{length(allExclude)} individuals excluded at kinship ",
+            "threshold {p$relatednessThreshold}"
         )
+        inform(msg)
     }
     invisible(NULL)
 }
@@ -321,8 +334,7 @@ filterRelatedness <- function(
 # (`args`), returning its $failIDs.
 # @noRd
 .relatednessRunPlinkqc <- function(relDf, args) {
-    do.call(
-        plinkQC::relatednessFilter,
-        c(list(relatedness = relDf), args)
-    )$failIDs
+    # plinkQC requires a base data.frame (it sets row names on the input).
+    rfArgs <- c(list(relatedness = as.data.frame(relDf)), args)
+    exec(plinkQC::relatednessFilter, !!!rfArgs)$failIDs
 }

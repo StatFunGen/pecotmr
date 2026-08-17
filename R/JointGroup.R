@@ -41,7 +41,10 @@ setClass(
     validity = function(object) {
         errors <- character()
         if (
-            !all(c("study", "context", "trait") %in% names(object@conditions))
+            !all(is_in(
+                c("study", "context", "trait"),
+                names(object@conditions)
+            ))
         ) {
             errors <- c(
                 errors,
@@ -118,7 +121,7 @@ setClass(
         errors <- character()
         if (
             length(object@dataForm) != 1L ||
-                !object@dataForm %in% c("individual", "sumstats")
+                !is_in(object@dataForm, c("individual", "sumstats"))
         ) {
             errors <- c(errors, "'dataForm' must be 'individual' or 'sumstats'")
         }

@@ -22,7 +22,7 @@ lbfToAlphaVector <- function(lbf, priorWeights = NULL) {
 
     # If maxlbf is 0, return a vector of zeros
     if (maxlbf == 0) {
-        return(setNames(rep(0, length(lbf)), names(lbf)))
+        return(set_names(rep(0, length(lbf)), names(lbf)))
     }
 
     # w is proportional to BF, subtract max for numerical stability
@@ -61,7 +61,7 @@ lbfToAlpha <- function(lbf) {
 }
 
 formatPipColumn <- function(method) {
-    paste0("pip_", method)
+    str_c("pip_", method)
 }
 
 resolvePipColumn <- function(topLoci, method = NULL) {
@@ -70,9 +70,9 @@ resolvePipColumn <- function(topLoci, method = NULL) {
     }
     if (!is.null(method)) {
         pipCol <- formatPipColumn(method)
-        if (pipCol %in% names(topLoci)) return(pipCol)
+        if (is_in(pipCol, names(topLoci))) return(pipCol)
     }
-    if ("pip" %in% names(topLoci)) {
+    if (is_in("pip", names(topLoci))) {
         return("pip")
     }
     pipCols <- grep("^pip_", names(topLoci), value = TRUE)
@@ -85,38 +85,25 @@ resolvePipColumn <- function(topLoci, method = NULL) {
 formatCsColumn <- function(coverage, method) {
     pct <- as.numeric(coverage) * 100
     if (is.na(pct)) {
-        stop("coverage must be numeric.")
+        abort("coverage must be numeric.")
     }
     label <- if (abs(pct - round(pct)) < 1e-8) {
         as.character(as.integer(round(pct)))
     } else {
-        gsub("\\.", "_", format(pct, scientific = FALSE, trim = TRUE))
+        str_replace_all(
+            format(pct, scientific = FALSE, trim = TRUE),
+            "\\.",
+            "_"
+        )
     }
-    paste0("CS_", label, "_", method)
+    str_c("CS_", label, "_", method)
 }
 
 .translateLegacyCsColumnName <- function(coverage) {
     if (is.null(coverage)) {
         return(NULL)
     }
-    vapply(
-        coverage,
-        function(x) {
-            x <- as.character(x)
-            oldMatch <- regexec(
-                "^cs_coverage_([0-9.]+)$",
-                x,
-                ignore.case = TRUE
-            )
-            oldParts <- regmatches(x, oldMatch)[[1]]
-            if (length(oldParts) == 2) {
-                return(formatCsColumn(as.numeric(oldParts[[2]]), "susie"))
-            }
-            x
-        },
-        character(1),
-        USE.NAMES = FALSE
-    )
+    map_chr(coverage, .translateOneLegacyCsColumn)
 }
 
 .translateLegacyTopLociCsColumns <- function(topLoci) {
@@ -124,7 +111,7 @@ formatCsColumn <- function(coverage, method) {
         return(topLoci)
     }
     names(topLoci) <- .translateLegacyCsColumnName(names(topLoci))
-    if ("pip_susie" %in% names(topLoci) && !"pip" %in% names(topLoci)) {
+    if (is_in("pip_susie", names(topLoci)) && !is_in("pip", names(topLoci))) {
         names(topLoci)[names(topLoci) == "pip_susie"] <- "pip"
     }
     topLoci
@@ -146,14 +133,7 @@ formatCsColumn <- function(coverage, method) {
         singleEffect = "single_effect",
         bayesianConditionalRegression = "bayesian_conditional_regression"
     )
-    vapply(
-        method,
-        function(m) {
-            if (m %in% names(lookup)) lookup[[m]] else m
-        },
-        character(1),
-        USE.NAMES = FALSE
-    )
+    map_chr(method, .camelToSnakeOne, lookup = lookup)
 }
 
 .setFinemappingFitClass <- function(fit, method) {
@@ -187,7 +167,7 @@ prepareSusieFromInfArgs <- function(
     refineDefault = NULL,
     unmappableEffects = c("none", "ash")
 ) {
-    unmappableEffects <- match.arg(unmappableEffects)
+    unmappableEffects <- arg_match(unmappableEffects)
     L <- args[["L"]]
     if (is.null(L)) {
         L <- length(susieInfFit$V)
@@ -396,10 +376,10 @@ postprocessFinemappingFits <- function(
     p <- as.list(environment())
     fits <- fits[!map_lgl(fits, is.null)]
     if (length(fits) == 0) {
-        stop("At least one fine-mapping fit must be supplied.")
+        abort("At least one fine-mapping fit must be supplied.")
     }
     if (is.null(names(fits)) || any(names(fits) == "")) {
-        stop("fits must be a named list; names define method identity.")
+        abort("fits must be a named list; names define method identity.")
     }
     .ppFitsCombine(.ppFitsPerMethod(fits, p))
 }
@@ -407,32 +387,7 @@ postprocessFinemappingFits <- function(
 # Post-process each method's fit once (buildTopLoci per fit); the per-method
 # 22-column contributions are row-bound later into the single top_loci table.
 .ppFitsPerMethod <- function(fits, p) {
-    posts <- lapply(names(fits), function(method) {
-        fit <- .setFinemappingFitClass(fits[[method]], method)
-        postprocessFinemappingFit(
-            fit,
-            method = method,
-            dataX = p$dataX,
-            dataY = p$dataY,
-            xScalar = p$xScalar,
-            yScalar = p$yScalar,
-            af = p$af,
-            coverage = p$coverage,
-            secondaryCoverage = p$secondaryCoverage,
-            signalCutoff = p$signalCutoff,
-            otherQuantities = p$otherQuantities,
-            region = p$region,
-            priorEffTol = p$priorEffTol,
-            minAbsCorr = p$minAbsCorr,
-            medianAbsCorr = p$medianAbsCorr,
-            csInput = p$csInput,
-            conditionIdx = p$conditionIdx,
-            trim = p$trim,
-            fullFit = p$fullFit,
-            fullFitAlphaOnly = p$fullFitAlphaOnly,
-            includeAllCs = p$includeAllCs
-        )
-    })
+    posts <- map(names(fits), .ppOneFit, fits = fits, p = p)
     names(posts) <- names(fits)
     posts
 }
@@ -440,18 +395,14 @@ postprocessFinemappingFits <- function(
 # Row-bind the per-method top_loci tables and drop them from the per-method
 # entries; returns the final finemappingResults + combined top_loci.
 .ppFitsCombine <- function(posts) {
-    perMethod <- lapply(posts, function(x) x$top_loci)
+    perMethod <- map(posts, "top_loci")
     perMethod <- perMethod[!map_lgl(perMethod, is.null)]
     topLoci <- if (length(perMethod) == 0L) {
         .emptyTopLoci()
     } else {
-        do.call(rbind, perMethod)
+        bind_rows(perMethod)
     }
-    rownames(topLoci) <- NULL
-    posts <- lapply(posts, function(x) {
-        x$top_loci <- NULL
-        x
-    })
+    posts <- map(posts, .ppDropTopLoci)
     list(finemappingResults = posts, top_loci = topLoci)
 }
 
@@ -572,7 +523,7 @@ postprocessFinemappingFit.susiF <- function(
     includeAllCs = FALSE,
     csInput = c("X", "Xcorr", "fsusie")
 ) {
-    csInput <- match.arg(csInput)
+    csInput <- arg_match(csInput)
     p <- as.list(environment())
     variantNames <- extractVariantNames(fit)
     sumstats <- extractSumstats(fit, dataX, dataY, xScalar, yScalar, method)
@@ -580,7 +531,7 @@ postprocessFinemappingFit.susiF <- function(
     # Always build the canonical unfiltered table; the FineMappingEntry stores
     # it as-is so accessors can filter by PIP at query time.
     topLociFull <- .ppTopLoci(p, csTables, variantNames, sumstats)
-    # trim = TRUE stores a minimal subset of the fit; trim = FALSE keeps the full
+    # trim = TRUE stores a minimal subset of the fit; FALSE keeps the full
     # untrimmed susie return (mu / mu2 / lbf_variable / V / ...).
     storedFit <- if (isTRUE(trim)) {
         trimFinemappingFit(
@@ -674,7 +625,7 @@ extractVariantNames <- function(fit) {
         variantNames <- colnames(fit$alpha)
     }
     if (is.null(variantNames)) {
-        variantNames <- paste0("variant_", seq_along(fit$pip))
+        variantNames <- str_c("variant_", seq_along(fit$pip))
     }
     tryCatch(normalizeVariantId(variantNames), error = function(e) variantNames)
 }
@@ -696,7 +647,7 @@ extractSumstats <- function(
     if (
         is.list(dataY) &&
             !is.data.frame(dataY) &&
-            any(c("betahat", "sebetahat", "z") %in% names(dataY))
+            any(is_in(c("betahat", "sebetahat", "z"), names(dataY)))
     ) {
         return(dataY)
     }
@@ -739,7 +690,7 @@ selectEffects <- function(fit, priorEffTol = 1e-9) {
         return(matrix(numeric(0), nrow = 0))
     }
     if (is.list(x) && !is.data.frame(x)) {
-        return(do.call(rbind, x))
+        return(exec(rbind, !!!x))
     }
     as.matrix(x)
 }
@@ -791,7 +742,7 @@ computeCsTables <- function(
     minAbsCorr = 0.8,
     medianAbsCorr = NULL
 ) {
-    csInput <- match.arg(csInput)
+    csInput <- arg_match(csInput)
     primaryCoverage <- coverage
     if (is.null(primaryCoverage)) {
         primaryCoverage <- fit$sets$requested_coverage
@@ -802,20 +753,18 @@ computeCsTables <- function(
     coverages <- unique(c(primaryCoverage, secondaryCoverage))
     coverages <- coverages[!is.na(coverages)]
 
-    tables <- lapply(coverages, function(cov) {
-        computeCsTable(
-            fit,
-            dataX,
-            coverage = cov,
-            csInput = csInput,
-            minAbsCorr = minAbsCorr,
-            medianAbsCorr = medianAbsCorr
-        )
-    })
-    names(tables) <- vapply(
+    tables <- map(
+        coverages,
+        .computeCsTableForCov,
+        fit = fit,
+        dataX = dataX,
+        csInput = csInput,
+        minAbsCorr = minAbsCorr,
+        medianAbsCorr = medianAbsCorr
+    )
+    names(tables) <- map_chr(
         coverages,
         formatCsColumn,
-        character(1),
         method = method
     )
     attr(tables, "coverage") <- coverages
@@ -830,7 +779,7 @@ computeCsTable <- function(
     minAbsCorr = 0.8,
     medianAbsCorr = NULL
 ) {
-    csInput <- match.arg(csInput)
+    csInput <- arg_match(csInput)
     if (csInput == "fsusie") {
         return(.csTableFsusie(fit, dataX, coverage))
     }
@@ -851,25 +800,18 @@ computeCsTable <- function(
             all(map_lgl(sets$cs, is.null))
     ) {
         sets$cs <- list()
-        return(list(sets = sets, cs_corr = NULL, pip = fit$pip))
+        return(list(sets = sets, pip = fit$pip))
     }
-    tmp <- fit
-    tmp$sets <- sets
-    csCorr <- NULL
     if (requireNamespace("fsusieR", quietly = TRUE)) {
         purity <- tryCatch(
             as.numeric(unlist(fsusieR::cal_purity(sets$cs, dataX))),
             error = function(e) NULL
         )
         if (!is.null(purity) && length(purity) == length(sets$cs)) {
-            sets$purity <- data.frame(min.abs.corr = purity)
+            sets$purity <- tibble(min.abs.corr = purity)
         }
-        csCorr <- tryCatch(
-            fsusieR::cal_cor_cs(tmp, dataX)$cs_cor,
-            error = function(e) NULL
-        )
     }
-    list(sets = sets, cs_corr = csCorr, pip = fit$pip)
+    list(sets = sets, pip = fit$pip)
 }
 
 # susieR credible sets from X (correlation computed on genotypes) or Xcorr
@@ -889,20 +831,123 @@ computeCsTable <- function(
     if (!is.null(medianAbsCorr)) {
         csArgs$median_abs_corr <- medianAbsCorr
     }
-    if (csInput == "X") {
-        sets <- do.call(susie_get_cs, c(list(fit), csArgs, list(X = dataX)))
-        out <- list(sets = sets, pip = fit$pip)
-        out$cs_corr <- get_cs_correlation(out, X = dataX)
-    } else {
-        sets <- do.call(
-            susie_get_cs,
-            c(list(fit), csArgs, list(Xcorr = dataX))
-        )
-        out <- list(sets = sets, pip = fit$pip)
-        out$cs_corr <- get_cs_correlation(out, Xcorr = dataX)
-    }
-    out
+    # X vs Xcorr only changes how susie_get_cs computes purity; the between-CS
+    # correlation is derived on demand later by computeCsCorrelation(), so it is
+    # no longer stored on the fit.
+    ldArg <- if (csInput == "X") list(X = dataX) else list(Xcorr = dataX)
+    sets <- exec(susie_get_cs, !!!c(list(fit), csArgs, ldArg))
+    list(sets = sets, pip = fit$pip)
 }
+
+# --- computeCsCorrelation: between-CS correlation, derived on demand ----------
+# The between-CS correlation is a view over the fit-time LD, which lives on the
+# QtlDataset (genotypes) / SumStats (LD sketch) -- it is NEVER stored on the
+# fit. get_cs_correlation() needs only the CS membership + PIP + the LD, with
+# the LD columns/rows ALIGNED to the fit's variable order (getVariantIds).
+
+# TRUE when the fit has fewer than two credible sets (no between-CS corr).
+.csCountBelowTwo <- function(fit) {
+    is.null(fit$sets) || is.null(fit$sets$cs) || length(fit$sets$cs) < 2L
+}
+
+# GRanges spanning the fit's variants (parsed from chrom:pos in the ids).
+.csVariantRegion <- function(variantIds) {
+    parts <- str_split(variantIds, ":", simplify = TRUE)
+    chrom <- unique(parts[, 1L])
+    if (length(chrom) != 1L) {
+        abort(glue(
+            "computeCsCorrelation(): the fit variants span multiple ",
+            "chromosomes ({str_flatten(chrom, ', ')})."
+        ))
+    }
+    pos <- as.integer(parts[, 2L])
+    GenomicRanges::GRanges(
+        seqnames = chrom,
+        ranges = IRanges::IRanges(start = min(pos), end = max(pos))
+    )
+}
+
+# QtlDataset genotypes for the fit's region, aligned to the fit's variable
+# order; errors if any fit variant is absent (a missing one would misalign the
+# 1..p credible-set indices with a shrunken genotype matrix).
+.csGenotypesForFit <- function(qtlDataset, variantIds) {
+    geno <- getGenotypes(qtlDataset, region = .csVariantRegion(variantIds))
+    absent <- setdiff(variantIds, colnames(geno))
+    if (length(absent) > 0L) {
+        abort(glue(
+            "computeCsCorrelation(): {length(absent)} fit variant(s) absent ",
+            "from the QtlDataset genotypes."
+        ))
+    }
+    geno[, variantIds, drop = FALSE]
+}
+
+#' @rdname computeCsCorrelation
+setMethod(
+    "computeCsCorrelation",
+    signature(x = "FineMappingEntry", ldSource = "SumStatsBase"),
+    function(x, ldSource, ...) {
+        fit <- getSusieFit(x)
+        if (.csCountBelowTwo(fit)) {
+            return(NULL)
+        }
+        ldSketch <- getLdSketch(ldSource)
+        if (is.null(ldSketch)) {
+            abort(glue(
+                "computeCsCorrelation(): the summary-statistics ldSource ",
+                "carries no LD sketch to derive the correlation from."
+            ))
+        }
+        # onMissing = "error": every fit variant must be in the panel, else the
+        # 1..p sets$cs indices would misalign with a shrunken LD matrix.
+        xcorr <- .ldFromSketch(
+            ldSketch,
+            getVariantIds(x),
+            label = "computeCsCorrelation",
+            onMissing = "error"
+        )
+        get_cs_correlation(list(sets = fit$sets, pip = fit$pip), Xcorr = xcorr)
+    }
+)
+
+# Individual-level LD source: genotypes -> aligned X. susie fits derive the LD
+# via get_cs_correlation(X = ); fSuSiE fits (class "susiF") via cal_cor_cs().
+#' @rdname computeCsCorrelation
+setMethod(
+    "computeCsCorrelation",
+    signature(x = "FineMappingEntry", ldSource = "QtlDataset"),
+    function(x, ldSource, ...) {
+        fit <- getSusieFit(x)
+        if (.csCountBelowTwo(fit)) {
+            return(NULL)
+        }
+        geno <- .csGenotypesForFit(ldSource, getVariantIds(x))
+        if (inherits(fit, "susiF")) {
+            if (!requireNamespace("fsusieR", quietly = TRUE)) {
+                abort(glue(
+                    "computeCsCorrelation(): the fit is an fSuSiE object but ",
+                    "fsusieR is not installed."
+                ))
+            }
+            fsusieR::cal_cor_cs(fit, geno)$cs_cor
+        } else {
+            get_cs_correlation(list(sets = fit$sets, pip = fit$pip), X = geno)
+        }
+    }
+)
+
+#' @rdname computeCsCorrelation
+setMethod(
+    "computeCsCorrelation",
+    signature(x = "FineMappingEntry", ldSource = "ANY"),
+    function(x, ldSource, ...) {
+        abort(glue(
+            "computeCsCorrelation() requires a QtlDataset, QtlSumStats, or ",
+            "GwasSumStats as `ldSource`: the between-credible-set correlation ",
+            "is derived from that object's LD and is never stored on the fit."
+        ))
+    }
+)
 
 # Per-effect (per credible set) variant-level columns from the susie fit. Always
 # returns `within_cs_pip` (the variant's alpha in the single effect of its
@@ -937,7 +982,7 @@ computeCsTable <- function(
     }
     hasAlpha <- !is.null(alpha) && length(dim(alpha)) == 2L && nrow(alpha) > 0L
     withinPip <- .ffcWithinPip(alpha, primaryCsPos, effectOf, nV, hasAlpha)
-    cols <- data.frame(within_cs_pip = withinPip, stringsAsFactors = FALSE)
+    cols <- tibble(within_cs_pip = withinPip)
     if (!isTRUE(fullFit) || !hasAlpha) {
         return(cols)
     }
@@ -990,13 +1035,13 @@ computeCsTable <- function(
 ) {
     if (isTRUE(includeAllCs)) {
         effs <- seq_len(nrow(alpha))
-        labs <- paste0("L", effs)
+        labs <- str_c("L", effs)
     } else {
         keep <- which(
             !is.na(effectOf) & effectOf >= 1L & effectOf <= nrow(alpha)
         )
         effs <- effectOf[keep]
-        labs <- paste0("cs", keep)
+        labs <- str_c("cs", keep)
     }
     if (is.null(scale) || length(scale) != nV) {
         scale <- rep(1, nV)
@@ -1004,17 +1049,17 @@ computeCsTable <- function(
     for (i in seq_along(effs)) {
         L <- effs[[i]]
         lab <- labs[[i]]
-        cols[[paste0("within_cs_pip_", lab)]] <- alpha[L, ]
+        cols[[str_c("within_cs_pip_", lab)]] <- unname(alpha[L, ])
         if (!isTRUE(fullFitAlphaOnly)) {
             if (!is.null(lbfMat) && L <= nrow(lbfMat)) {
-                cols[[paste0("cs_logbf_", lab)]] <- lbfMat[L, ]
+                cols[[str_c("cs_logbf_", lab)]] <- unname(lbfMat[L, ])
             }
             if (!is.null(mu) && L <= nrow(mu)) {
-                cols[[paste0("cs_effect_", lab)]] <- mu[L, ] / scale
+                cols[[str_c("cs_effect_", lab)]] <- unname(mu[L, ] / scale)
             }
             if (!is.null(mu) && !is.null(mu2) && L <= nrow(mu2)) {
-                cols[[paste0("cs_effect_var_", lab)]] <-
-                    (mu2[L, ] - mu[L, ]^2) / scale^2
+                cols[[str_c("cs_effect_var_", lab)]] <-
+                    unname((mu2[L, ] - mu[L, ]^2) / scale^2)
             }
         }
     }
@@ -1064,17 +1109,7 @@ computeCsTable <- function(
 .fmPurityAtCoverage <- function(targetCov, idxVec, coverageValues, csTables) {
     h <- which(abs(coverageValues - targetCov) < 1e-12)
     pv <- if (length(h) > 0L) .csPurityVec(csTables[[h[1L]]]) else numeric()
-    vapply(
-        idxVec,
-        function(i) {
-            if (i <= 0L || i > length(pv)) {
-                return(0)
-            }
-            v <- pv[i]
-            if (is.na(v)) 0 else as.numeric(v)
-        },
-        numeric(1)
-    )
+    map_dbl(idxVec, .csPurityAt, pv = pv)
 }
 
 #' Build the unified top-loci table for one fit and one method
@@ -1135,7 +1170,7 @@ computeCsTable <- function(
 #' fit <- susieR::susie(X, y, L = 5)
 #' csTables <- computeCsTables(fit, dataX = X, method = "susie")
 #' buildTopLoci(fit = fit, csTables = csTables, variantNames = colnames(X),
-#'   method = "susie", dataX = X, dataY = y)
+#'   method = "susie", dataY = y)
 #' @export
 buildTopLoci <- function(
     fit,
@@ -1213,9 +1248,8 @@ buildTopLoci <- function(
         out$lfsr <- cond$condLfsr
     }
     if (!is.null(signalCutoff) && signalCutoff > 0) {
-        out <- out[!is.na(out$pip) & out$pip > signalCutoff, , drop = FALSE]
+        out <- filter(out, !is.na(.data$pip) & .data$pip > signalCutoff)
     }
-    rownames(out) <- NULL
     out
 }
 
@@ -1227,9 +1261,9 @@ buildTopLoci <- function(
         is.null(method) ||
             length(method) != 1L ||
             is.na(method) ||
-            !nzchar(method)
+            str_length(method) == 0L
     ) {
-        stop(
+        abort(
             "buildTopLoci: `method` is required (e.g. \"susie\", \"susieInf\")."
         )
     }
@@ -1254,9 +1288,9 @@ buildTopLoci <- function(
     fitEvent <- if (
         !is.null(otherQuantities$condition_id) &&
             !is.na(fitGene) &&
-            nzchar(fitGene)
+            str_length(fitGene) > 0L
     ) {
-        paste(otherQuantities$condition_id, fitGene, sep = "_")
+        str_c(otherQuantities$condition_id, fitGene, sep = "_")
     } else {
         NA_character_
     }
@@ -1286,10 +1320,7 @@ buildTopLoci <- function(
     }
     lbfMat <- .asLbfMatrix(fit)
     logBF <- if (!is.null(lbfMat) && ncol(lbfMat) == nV) {
-        apply(lbfMat, 2, function(x) {
-            x <- x[is.finite(x)]
-            if (length(x) == 0L) NA_real_ else max(x)
-        })
+        apply(lbfMat, 2, .finiteMax)
     } else {
         rep(NA_real_, nV)
     }
@@ -1308,24 +1339,29 @@ buildTopLoci <- function(
     parsed <- tryCatch(
         suppressWarnings(parseVariantId(variantNames)),
         error = function(e) {
-            stop("buildTopLoci: parseVariantId failed: ", conditionMessage(e))
+            eMsg <- conditionMessage(e)
+            msg <- glue("buildTopLoci: parseVariantId failed: {eMsg}")
+            abort(msg)
         }
     )
     if (is.null(parsed) || nrow(parsed) != length(variantNames)) {
-        stop("buildTopLoci: parseVariantId did not return one row per variant.")
+        abort(
+            "buildTopLoci: parseVariantId did not return one row per variant."
+        )
     }
     invalid <- is.na(parsed$chrom) |
         is.na(parsed$pos) |
         is.na(parsed$A1) |
-        !nzchar(parsed$A1) |
+        str_length(parsed$A1) == 0L |
         is.na(parsed$A2) |
-        !nzchar(parsed$A2)
+        str_length(parsed$A2) == 0L
     if (any(invalid)) {
-        stop(
+        badVar <- variantNames[which(invalid)[[1]]]
+        msg <- glue(
             "buildTopLoci: parseVariantId produced invalid coordinates ",
-            "for variant_id: ",
-            variantNames[which(invalid)[[1]]]
+            "for variant_id: {badVar}"
         )
+        abort(msg)
     }
     parsed
 }
@@ -1367,25 +1403,25 @@ buildTopLoci <- function(
         unique(coverageValues[is.finite(coverageValues)]),
         decreasing = TRUE
     )
-    csIdxByCov <- lapply(
+    csIdxByCov <- map(
         covSorted,
         .fmCsIdxAtCoverage,
         coverageValues,
         csTables,
         nV
     )
-    csPurityByCov <- mapply(
-        .fmPurityAtCoverage,
+    csPurityByCov <- map2(
         covSorted,
         csIdxByCov,
-        MoreArgs = list(coverageValues = coverageValues, csTables = csTables),
-        SIMPLIFY = FALSE
+        .fmPurityAtCoverage,
+        coverageValues = coverageValues,
+        csTables = csTables
     )
     list(
         covSorted = covSorted,
         csIdxByCov = csIdxByCov,
         csPurityByCov = csPurityByCov,
-        csColNames = paste0("cs_", covSorted * 100)
+        csColNames = str_c("cs_", covSorted * 100)
     )
 }
 
@@ -1409,7 +1445,7 @@ buildTopLoci <- function(
         return(rep(NA_real_, nV))
     }
     pipVec <- as.numeric(fit$pip)
-    ifelse(pipVec > 0, coefMat[, conditionIdx] / pipVec, NA_real_)
+    if_else(pipVec > 0, coefMat[, conditionIdx] / pipVec, NA_real_)
 }
 
 # Per-condition conditional lfsr: map each variant to its effect (L) via the
@@ -1440,7 +1476,7 @@ buildTopLoci <- function(
     if (is.null(setsPrim) || length(setsPrim) == 0L) {
         return(condLfsr)
     }
-    effectOf <- suppressWarnings(as.integer(sub("^L", "", names(setsPrim))))
+    effectOf <- suppressWarnings(as.integer(str_remove(names(setsPrim), "^L")))
     for (csPos in seq_along(setsPrim)) {
         L <- effectOf[csPos]
         if (is.na(L) || L < 1L || L > dim(clf)[1L]) {
@@ -1484,20 +1520,21 @@ buildTopLoci <- function(
     )
 }
 
-# Dynamic CS block: cs_<C> memberships then cs_<C>_purity, one pair per coverage.
+# Dynamic CS block: cs_<C> memberships then cs_<C>_purity, one pair per
+# coverage.
 .btlCsBlock <- function(method, cs, nV) {
     methodTag <- .camelToSnakeMethod(method)
     csList <- c(
-        setNames(
-            lapply(cs$csIdxByCov, function(ix) paste0(methodTag, "_", ix)),
+        set_names(
+            map(cs$csIdxByCov, .btlCsLabel, methodTag = methodTag),
             cs$csColNames
         ),
-        setNames(cs$csPurityByCov, paste0(cs$csColNames, "_purity"))
+        set_names(cs$csPurityByCov, str_c(cs$csColNames, "_purity"))
     )
     if (length(csList) == 0L) {
-        return(data.frame(matrix(nrow = nV, ncol = 0)))
+        return(tibble(.rows = nV))
     }
-    as.data.frame(csList, stringsAsFactors = FALSE, check.names = FALSE)
+    as_tibble(csList, .name_repair = "minimal")
 }
 
 # within_cs_pip (+ optional fullFit-wide) columns, mapping each variant to its
@@ -1523,7 +1560,7 @@ buildTopLoci <- function(
             spP <- csTables[[hP[1L]]]$sets$cs
             if (!is.null(spP) && length(spP) > 0L) {
                 effectOfPrim <- suppressWarnings(
-                    as.integer(sub("^L", "", names(spP)))
+                    as.integer(str_remove(names(spP), "^L"))
                 )
             }
         }
@@ -1557,33 +1594,31 @@ buildTopLoci <- function(
     fullFitBlock,
     nV
 ) {
-    core <- data.frame(
+    core <- tibble(
         variant_id = as.character(variantNames),
-        chrom = parsed$chrom,
+        chrom = unname(parsed$chrom),
         pos = as.integer(parsed$pos),
-        A1 = parsed$A1,
-        A2 = parsed$A2,
+        A1 = unname(parsed$A1),
+        A2 = unname(parsed$A2),
         N = rep(fc$fitN, nV),
         af = if (is.null(af)) rep(NA_real_, nV) else as.numeric(af),
-        marginal_beta = marg$beta,
-        marginal_se = marg$se,
-        marginal_z = marg$z,
-        marginal_p = marg$p,
+        marginal_beta = unname(marg$beta),
+        marginal_se = unname(marg$se),
+        marginal_z = unname(marg$z),
+        marginal_p = unname(marg$p),
         pip = as.numeric(fit$pip),
-        posterior_mean = post$postMean,
-        posterior_sd = post$postSd,
-        logBF = post$logBF,
-        stringsAsFactors = FALSE
+        posterior_mean = unname(post$postMean),
+        posterior_sd = unname(post$postSd),
+        logBF = unname(post$logBF)
     )
-    meta <- data.frame(
+    meta <- tibble(
         method = rep(method, nV),
         gene = rep(fc$fitGene, nV),
         event = rep(fc$fitEvent, nV),
         grange_start = rep(fc$grange[["start"]], nV),
-        grange_end = rep(fc$grange[["end"]], nV),
-        stringsAsFactors = FALSE
+        grange_end = rep(fc$grange[["end"]], nV)
     )
-    cbind(core, csBlock, fullFitBlock, meta)
+    bind_cols(core, csBlock, fullFitBlock, meta)
 }
 
 # Translate susieR's snake-case `sets$purity` columns into pecotmr camelCase.
@@ -1599,43 +1634,32 @@ buildTopLoci <- function(
     )
     if (is.data.frame(p)) {
         nm <- names(p)
-        names(p) <- ifelse(nm %in% names(lookup), lookup[nm], nm)
+        names(p) <- if_else(is_in(nm, names(lookup)), unname(lookup[nm]), nm)
     } else if (is.matrix(p)) {
         cn <- colnames(p)
         if (!is.null(cn)) {
-            colnames(p) <- ifelse(cn %in% names(lookup), lookup[cn], cn)
+            colnames(p) <- if_else(
+                is_in(cn, names(lookup)),
+                unname(lookup[cn]),
+                cn
+            )
         }
     }
     p
 }
 
-# Per-CS purity from one cs_table: prefer susieR's sets$purity$min.abs.corr;
-# fall back to cs_corr when purity is unavailable.
+# Per-CS purity from one cs_table: susieR's sets$purity$min.abs.corr, or NA
+# when the fit carries no purity.
 .csPurityVec <- function(ct) {
     sp <- ct$sets$purity
-    if (!is.null(sp) && "min.abs.corr" %in% names(sp)) {
+    if (!is.null(sp) && is_in("min.abs.corr", names(sp))) {
         return(as.numeric(sp$min.abs.corr))
-    }
-    if (!is.null(ct$cs_corr)) {
-        return(vapply(
-            ct$cs_corr,
-            function(m) {
-                if (is.null(m)) {
-                    return(NA_real_)
-                }
-                if (!is.matrix(m) || nrow(m) <= 1) {
-                    return(1)
-                }
-                min(abs(m[upper.tri(m)]))
-            },
-            numeric(1)
-        ))
     }
     rep(NA_real_, length(ct$sets$cs))
 }
 
 .emptyTopLoci <- function() {
-    data.frame(
+    tibble(
         variant_id = character(),
         chrom = character(),
         pos = integer(),
@@ -1662,8 +1686,7 @@ buildTopLoci <- function(
         gene = character(),
         event = character(),
         grange_start = integer(),
-        grange_end = integer(),
-        stringsAsFactors = FALSE
+        grange_end = integer()
     )
 }
 
@@ -1672,7 +1695,7 @@ buildTopLoci <- function(
         is.null(regionStr) ||
             length(regionStr) == 0L ||
             is.na(regionStr) ||
-            !nzchar(as.character(regionStr))
+            str_length(as.character(regionStr)) == 0L
     ) {
         return(c(start = NA_integer_, end = NA_integer_))
     }
@@ -1698,28 +1721,17 @@ buildTopLoci <- function(
 # allMethods.R, and vcfWriter.R do not have to change.
 .topLociForS4Slot <- function(topLoci) {
     if (is.null(topLoci) || nrow(topLoci) == 0) {
-        return(data.frame(
+        return(tibble(
             variant_id = character(0),
-            method = character(0),
-            stringsAsFactors = FALSE
+            method = character(0)
         ))
     }
     out <- topLoci
-    if ("variant" %in% names(out) && !"variant_id" %in% names(out)) {
+    if (is_in("variant", names(out)) && !is_in("variant_id", names(out))) {
         out$variant_id <- out$variant
     }
-    if ("cs_95" %in% names(out) && !"cs" %in% names(out)) {
-        out$cs <- vapply(
-            out$cs_95,
-            function(s) {
-                if (is.na(s) || !nzchar(s)) {
-                    return(0L)
-                }
-                tailStr <- sub("^.*_", "", s)
-                suppressWarnings(as.integer(tailStr))
-            },
-            integer(1)
-        )
+    if (is_in("cs_95", names(out)) && !is_in("cs", names(out))) {
+        out$cs <- map_int(out$cs_95, .cs95ToIndex)
         out$cs[is.na(out$cs)] <- 0L
     }
     out
@@ -1748,14 +1760,13 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
     lbfVariable <- .asLbfMatrix(fit)
     primary <- csTables[[1]]
     secondary <- if (length(csTables) > 1) {
-        lapply(csTables[-1], function(x) x[names(x) != "pip"])
+        map(csTables[-1], .dropPipCol)
     } else {
         NULL
     }
     list(
         pip = as.numeric(fit$pip),
         sets = primary$sets,
-        cs_corr = primary$cs_corr,
         sets_secondary = secondary,
         alpha = alpha[effectIdx, , drop = FALSE],
         lbf_variable = if (!is.null(lbfVariable)) {
@@ -1838,10 +1849,11 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
 formatFinemappingOutput <- function(post, primaryMethod) {
     methodPost <- post$finemappingResults[[primaryMethod]]
     if (is.null(methodPost)) {
-        stop(
+        msg <- glue(
             "primaryMethod was not found in finemappingResults: ",
-            primaryMethod
+            "{primaryMethod}"
         )
+        abort(msg)
     }
     c(
         methodPost,
@@ -1854,7 +1866,7 @@ formatFinemappingOutput <- function(post, primaryMethod) {
 #' @noRd
 getCsIndex <- function(snpsIdx, susieCs) {
     # Return ALL CS indices that contain this variant (not just one)
-    idx <- which(vapply(susieCs, function(x) snpsIdx %in% x, logical(1)))
+    idx <- which(map_lgl(susieCs, .csContains, snpsIdx = snpsIdx))
     if (length(idx) == 0) {
         return(NA_integer_)
     }
@@ -1862,8 +1874,8 @@ getCsIndex <- function(snpsIdx, susieCs) {
 }
 #' @noRd
 getTopVariantsIdx <- function(susieOutput, signalCutoff) {
-    c(which(susieOutput$pip >= signalCutoff), unlist(susieOutput$sets$cs)) %>%
-        unique() %>%
+    c(which(susieOutput$pip >= signalCutoff), unlist(susieOutput$sets$cs)) |>
+        unique() |>
         sort()
 }
 # Returns a data.frame(variant_idx, cs_idx) with one row per (variant, CS) pair.
@@ -1872,20 +1884,13 @@ getTopVariantsIdx <- function(susieOutput, signalCutoff) {
 #' @noRd
 getCsInfo <- function(susieOutputSetsCs, topVariantsIdx) {
     csNames <- names(susieOutputSetsCs)
-    rows <- lapply(topVariantsIdx, function(vi) {
-        idx <- getCsIndex(vi, susieOutputSetsCs)
-        if (length(idx) == 1 && is.na(idx)) {
-            data.frame(variant_idx = vi, cs_idx = 0L, stringsAsFactors = FALSE)
-        } else {
-            csNums <- as.integer(str_replace(csNames[idx], "L", ""))
-            data.frame(
-                variant_idx = rep(vi, length(csNums)),
-                cs_idx = csNums,
-                stringsAsFactors = FALSE
-            )
-        }
-    })
-    do.call(rbind, rows)
+    rows <- map(
+        topVariantsIdx,
+        .csInfoRow,
+        susieOutputSetsCs = susieOutputSetsCs,
+        csNames = csNames
+    )
+    bind_rows(rows)
 }
 #' @title Calculate Purity Measures for Credible Sets
 #'
@@ -1963,30 +1968,29 @@ calPurity <- function(lCs, X, method = "min") {
 #'   Defaults to 0.95.
 #' @param X Numeric genotype matrix used to compute credible-set purity.
 #' @return A list containing named credible sets (cs), a dataframe of purity
-#'   metrics (minAbsCorr, meanAbsCorr, medianAbsCorr), an index of credible sets
+#'   metrics (a \code{cs} label column plus minAbsCorr, meanAbsCorr,
+#'   medianAbsCorr), an index of credible sets
 #'   (cs_index), coverage values for each set, and the requested coverage level.
 #'   Similar to the SuSiE set output
 #' @examples
 #' data(fsusieFineMappingExample)
-#' fit <- fsusieFineMappingExample@listData$entry[[1]]@susieFit
+#' fit <- getSusieFit(fsusieFineMappingExample$entry[[1]])
 #' fsusieGetCs(fit)
 #' @export
 fsusieGetCs <- function(fsusieObj, X, requestedCoverage = 0.95) {
     # Create 'cs' set with names
-    csNamed <- setNames(
-        object = fsusieObj$cs,
-        nm = paste0("L", seq_along(fsusieObj$cs))
+    csNamed <- set_names(
+        fsusieObj$cs,
+        str_c("L", seq_along(fsusieObj$cs))
     )
 
     # Create 'purity' data frame
-    purityDf <- do.call(
-        rbind,
-        lapply(calPurity(fsusieObj$cs, X = X, method = "susie"), function(x) {
-            as.data.frame(t(x))
-        })
+    purityDf <- bind_rows(
+        map(calPurity(fsusieObj$cs, X = X, method = "susie"), .asDataFrameT)
     )
-    rownames(purityDf) <- names(csNamed)
     colnames(purityDf) <- c("minAbsCorr", "meanAbsCorr", "medianAbsCorr")
+    # Credible-set label as a `cs` column (was rownames; tibbles carry none).
+    purityDf <- bind_cols(tibble(cs = names(csNamed)), purityDf)
 
     # Create 'coverage' without
     coverageVector <- numeric(length(fsusieObj$alpha))
@@ -2058,10 +2062,11 @@ fsusieWrapper <- function(
 ) {
     if (!requireNamespace("fsusieR", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "To use this function, please install fsusieR: ",
             "https://github.com/stephenslab/fsusieR"
         )
+        abort(msg)
         # nocov end
     }
     fsusieObj <- fsusieR::susiF(
@@ -2072,7 +2077,7 @@ fsusieWrapper <- function(
         prior = prior,
         max_SNP_EM = maxSnpEm,
         cov_lev = covLev,
-        min.purity = minPurity,
+        min_purity = minPurity,
         max_scale = maxScale,
         ...
     )
@@ -2085,15 +2090,10 @@ fsusieWrapper <- function(
     if (all(abs(as.numeric(fsusieObj$purity)) < minPurity)) {
         fsusieObj$cs <- list(NULL)
         fsusieObj$sets <- list(cs = list(NULL), requested_coverage = covLev)
-        fsusieObj$cs_corr <- NULL
     } else {
         fsusieObj$sets <- fsusieGetCs(fsusieObj, X, requestedCoverage = covLev)
-        fsusieObj$cs_corr <- fsusieR::cal_cor_cs(fsusieObj, X)
     }
-    fsusieObj$alpha <- do.call(
-        rbind,
-        lapply(fsusieObj$alpha, function(x) as.data.frame(t(x)))
-    )
+    fsusieObj$alpha <- bind_rows(map(fsusieObj$alpha, .asDataFrameT))
     fsusieObj
 }
 
@@ -2246,15 +2246,15 @@ fitFsusie <- function(X, Y, pos, ...) {
         fit <- .fmFitSusieIndiv(X, y, token, userArgs = userArgs)
     }
     if (!is.null(X) && length(fit$pip) != ncol(X)) {
-        stop(
+        nPip <- length(fit$pip)
+        nX <- ncol(X)
+        msg <- glue(
             "Dimension mismatch on number of variant in susie fit ",
-            length(fit$pip),
-            " and TWAS weights ",
-            ncol(X),
-            ". "
+            "{nPip} and TWAS weights {nX}. "
         )
+        abort(msg)
     }
-    if (all(requiredFields %in% names(fit))) {
+    if (all(is_in(requiredFields, names(fit)))) {
         weights <- .susieCoefWeights(fit)
     } else {
         weights <- rep(0, length(fit$pip))
@@ -2401,15 +2401,15 @@ susieInfWeights <- function(
         fit <- .fmFitSusieRss(z, R, n, token, userArgs = userArgs)
     }
     if (length(fit$pip) != nrow(R)) {
-        stop(
-            "Dimension mismatch: susieRss fit has ",
-            length(fit$pip),
-            " variants but R has ",
-            nrow(R),
-            " rows."
+        nPip <- length(fit$pip)
+        nR <- nrow(R)
+        msg <- glue(
+            "Dimension mismatch: susieRss fit has {nPip} variants but R ",
+            "has {nR} rows."
         )
+        abort(msg)
     }
-    if (all(requiredFields %in% names(fit))) {
+    if (all(is_in(requiredFields, names(fit)))) {
         weights <- .susieCoefWeights(fit)
     } else {
         weights <- rep(0, length(fit$pip))
@@ -2590,16 +2590,17 @@ mvsusieWeights <- function(
 ) {
     if (!requireNamespace("mvsusieR", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "Package 'mvsusieR' is required. Install with: ",
             "devtools::install_github('stephenslab/mvsusieR')"
         )
+        abort(msg)
         # nocov end
     }
     if (is.null(mvsusieFit)) {
-        message("mvsusieFit is not provided; fitting mvSuSiE now ...")
+        inform("mvsusieFit is not provided; fitting mvSuSiE now ...")
         if (is.null(X) || is.null(Y)) {
-            stop("Both X and Y must be provided if mvsusieFit is NULL.")
+            abort("Both X and Y must be provided if mvsusieFit is NULL.")
         }
         if (is.null(priorVariance)) {
             priorVariance <- mvsusieR::create_mixture_prior(R = ncol(Y))
@@ -2647,10 +2648,8 @@ mvsusieWeights <- function(
 # @noRd
 .fsusieSynthesisMatrix <- function(nWac, scaleCols) {
     template <- wavethresh::wd(rep(0, nWac))
-    do.call(
-        rbind,
-        lapply(seq_len(nWac), .fmReconstructUnit, nWac, scaleCols, template)
-    )
+    rows <- map(seq_len(nWac), .fmReconstructUnit, nWac, scaleCols, template)
+    exec(rbind, !!!rows)
 }
 
 #' Compute fSuSiE feature-level TWAS weights
@@ -2717,12 +2716,13 @@ fsusieWeights <- function(
     retainFit = FALSE
 ) {
     if (is.null(fsusieFit)) {
-        stop(
-            "fsusieWeights: `fsusieFit` is required. fSuSiE is functional and ",
-            "cannot be refit from a bare (X, Y); fit it via ",
-            "fineMappingPipeline() ",
-            "and pass the fitted fsusieR::susiF object."
+        msg <- glue(
+            "fsusieWeights: `fsusieFit` is required. fSuSiE is functional ",
+            "and cannot be refit from a bare (X, Y); fit it via ",
+            "fineMappingPipeline() and pass the fitted fsusieR::susiF ",
+            "object."
         )
+        abort(msg)
     }
     fast <- .fsusieWeightsFastPath(fsusieFit, variantIds, retainFit)
     if (!is.null(fast)) {
@@ -2770,10 +2770,10 @@ fsusieWeights <- function(
 .fsusieWeightsRequire <- function() {
     # nocov start
     if (!requireNamespace("fsusieR", quietly = TRUE)) {
-        stop("Package 'fsusieR' is required for fsusieWeights().")
+        abort("Package 'fsusieR' is required for fsusieWeights().")
     }
     if (!requireNamespace("wavethresh", quietly = TRUE)) {
-        stop("Package 'wavethresh' is required for fsusieWeights().")
+        abort("Package 'wavethresh' is required for fsusieWeights().")
     }
     # nocov end
 }
@@ -2785,11 +2785,13 @@ fsusieWeights <- function(
         names(fit)
     )
     if (length(missingSlots) > 0L) {
-        stop(
+        slotStr <- str_flatten(missingSlots, ", ")
+        msg <- glue(
             "fsusieWeights: the fSuSiE fit is missing required slot(s): ",
-            paste(missingSlots, collapse = ", "),
-            ". Pass an untrimmed fit (these are dropped when trimmed)."
+            "{slotStr}. Pass an untrimmed fit (these are dropped when ",
+            "trimmed)."
         )
+        abort(msg)
     }
 }
 
@@ -2797,17 +2799,19 @@ fsusieWeights <- function(
 # list; fsusieWrapper reshaping yields an L x nSNP matrix/data.frame.
 .fsusieAlphaList <- function(alpha) {
     if (is.list(alpha) && !is.data.frame(alpha)) {
-        return(lapply(alpha, as.numeric))
+        return(map(alpha, as.numeric))
     }
     am <- as.matrix(alpha)
-    lapply(seq_len(nrow(am)), function(l) as.numeric(am[l, ]))
+    map(seq_len(nrow(am)), .amRow, am = am)
 }
 
 # Scaling-coefficient column(s): coarsest level for a per-scale prior, else the
 # last column (mirrors the two branches of out_prep.susiF).
 .fsusieScaleCols <- function(fit) {
-    perScale <- "mixture_normal_per_scale" %in%
+    perScale <- is_in(
+        "mixture_normal_per_scale",
         class(fsusieR::get_G_prior(fit))
+    )
     indxLst <- fsusieR::gen_wavelet_indx(log2(length(fit$outing_grid)))
     if (perScale) {
         indxLst[[length(indxLst)]]
@@ -2908,34 +2912,21 @@ mvsusieRssWeights <- function(
 ) {
     if (!requireNamespace("mvsusieR", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "Package 'mvsusieR' is required. ",
             "Install with: devtools::install_github('stephenslab/mvsusieR')"
         )
+        abort(msg)
         # nocov end
     }
     if (is.null(mvsusieRssFit)) {
-        Z <- if (is.matrix(stat$z)) stat$z else as.matrix(stat$z)
-        if (ncol(Z) < 2) {
-            stop(
-                "mvsusieRssWeights expects stat$z to have >= 2 columns ",
-                "(one per context). For single-context use susieRssWeights()."
-            )
-        }
-        # mvsusieR::mvsusie_rss expects N to be a single scalar
-        nScalar <- as.numeric(stats::median(stat$n))
-        if (is.null(priorVariance)) {
-            priorVariance <- mvsusieR::create_mixture_prior(R = ncol(Z))
-        }
-        if (!is.null(LGreedy)) {
-            LGreedy <- min(LGreedy, L)
-        }
-        mvsusieRssFit <- fitMvsusieRss(
-            Z = Z,
-            R = LD,
-            N = nScalar,
-            prior_variance = priorVariance,
-            residual_variance = residualVariance,
+        mvsusieRssFit <- .mvsusieRssBuildFit(
+            stat,
+            LD,
+            priorVariance,
+            residualVariance,
+            L,
+            LGreedy,
             ...
         )
     }
@@ -2944,6 +2935,44 @@ mvsusieRssWeights <- function(
         attr(weights, "fit") <- mvsusieRssFit
     }
     weights
+}
+
+# Build the mvsusie-RSS fit from summary stats when the caller supplied none.
+# @noRd
+.mvsusieRssBuildFit <- function(
+    stat,
+    LD,
+    priorVariance,
+    residualVariance,
+    L,
+    LGreedy,
+    ...
+) {
+    Z <- if (is.matrix(stat$z)) stat$z else as.matrix(stat$z)
+    if (ncol(Z) < 2) {
+        msg <- glue(
+            "mvsusieRssWeights expects stat$z to have >= 2 columns ",
+            "(one per context). For single-context use ",
+            "susieRssWeights()."
+        )
+        abort(msg)
+    }
+    # mvsusieR::mvsusie_rss expects N to be a single scalar
+    nScalar <- as.numeric(stats::median(stat$n))
+    if (is.null(priorVariance)) {
+        priorVariance <- mvsusieR::create_mixture_prior(R = ncol(Z))
+    }
+    if (!is.null(LGreedy)) {
+        LGreedy <- min(LGreedy, L)
+    }
+    fitMvsusieRss(
+        Z = Z,
+        R = LD,
+        N = nScalar,
+        prior_variance = priorVariance,
+        residual_variance = residualVariance,
+        ...
+    )
 }
 
 # =============================================================================
@@ -2991,7 +3020,7 @@ mvsusieRssWeights <- function(
         return(list())
     }
 
-    parent <- setNames(allSets, allSets)
+    parent <- set_names(allSets, allSets)
     for (sets in overlapSets) {
         if (length(sets) > 1) {
             for (s in sets[-1]) {
@@ -3002,31 +3031,25 @@ mvsusieRssWeights <- function(
 
     components <- split(
         names(parent),
-        vapply(names(parent), .ufFindRoot, character(1), parent)
+        map_chr(names(parent), .ufFindRoot, parent)
     )
     setNameMap <- list()
     for (members in components) {
-        label <- paste(sort(members), collapse = ",")
+        label <- str_flatten(sort(members), ",")
         for (s in members) {
             setNameMap[[s]] <- label
         }
     }
 
     # Update each variant's credible set names
-    updatedCredibleSets <- lapply(
-        setNames(
+    updatedCredibleSets <- map(
+        set_names(
             names(variantsSetsAndPipsList),
             names(variantsSetsAndPipsList)
         ),
-        function(variantId) {
-            currentSets <- variantsSetsAndPipsList[[variantId]][["sets"]]
-            mapped <- intersect(currentSets, names(setNameMap))
-            if (length(mapped) > 0) {
-                setNameMap[[mapped[1]]]
-            } else {
-                paste(sort(unique(currentSets)), collapse = ",")
-            }
-        }
+        .updateCredibleSet,
+        variantsSetsAndPipsList = variantsSetsAndPipsList,
+        setNameMap = setNameMap
     )
     return(updatedCredibleSets)
 }
@@ -3048,28 +3071,13 @@ mvsusieRssWeights <- function(
         NULL
     }
 
-    topLociDf <- do.call(
-        rbind,
-        lapply(names(extractedResult), function(variantId) {
-            maxPip <- max(unlist(extractedResult[[variantId]]$pips))
-            medianPip <- median(unlist(extractedResult[[variantId]]$pips))
-            credibleSetNames <- if (hasOverlaps) {
-                mergedSets[[variantId]]
-            } else {
-                paste(
-                    sort(unique(unlist(extractedResult[[variantId]]$sets))),
-                    collapse = ","
-                )
-            }
-            data.frame(
-                variant_id = variantId,
-                credibleSetNames = credibleSetNames,
-                maxPip = maxPip,
-                medianPip = medianPip,
-                stringsAsFactors = FALSE
-            )
-        })
-    )
+    topLociDf <- bind_rows(map(
+        names(extractedResult),
+        .csMergedVariantRow,
+        extractedResult = extractedResult,
+        hasOverlaps = hasOverlaps,
+        mergedSets = mergedSets
+    ))
     return(topLociDf)
 }
 
@@ -3079,34 +3087,12 @@ mvsusieRssWeights <- function(
 # @noRd
 .fmExtractTopLoci <- function(fineMappingResult, csCol) {
     entries <- fineMappingResult$entry
-    rows <- map_dfr(seq_along(entries), function(i) {
-        topLoci <- .translateLegacyTopLociCsColumns(getTopLoci(entries[[i]]))
-        if (
-            is.null(topLoci) ||
-                nrow(topLoci) == 0 ||
-                !(csCol %in% names(topLoci))
-        ) {
-            return(NULL)
-        }
-        pipCol <- resolvePipColumn(topLoci)
-        if (is.null(pipCol)) {
-            return(NULL)
-        }
-        csIdx <- .fmCsIdx(topLoci[[csCol]])
-        setNum <- unique(csIdx)
-        setNum <- setNum[!is.na(setNum) & setNum != 0]
-        if (length(setNum) == 0) {
-            return(NULL)
-        }
-
-        map_dfr(setNum, function(sn) {
-            keep <- !is.na(csIdx) & csIdx == sn
-            df <- topLoci[keep, c("variant_id", pipCol), drop = FALSE]
-            names(df)[names(df) == pipCol] <- "pip"
-            df$set_name <- paste0("cs_", i, "_", sn)
-            df
-        })
-    })
+    rows <- map_dfr(
+        seq_along(entries),
+        .extractCsEntryRows,
+        entries = entries,
+        csCol = csCol
+    )
 
     if (is.null(rows) || nrow(rows) == 0) {
         return(list())
@@ -3115,9 +3101,7 @@ mvsusieRssWeights <- function(
     # Aggregate by variant_id preserving first-seen order.
     seenOrder <- unique(rows$variant_id)
     splitRows <- split(rows, factor(rows$variant_id, levels = seenOrder))
-    lapply(splitRows, function(df) {
-        list(sets = df$set_name, pips = df$pip)
-    })
+    map(splitRows, .csSplitToList)
 }
 
 #' Merge SuSiE credible sets across conditions
@@ -3152,12 +3136,13 @@ mvsusieRssWeights <- function(
 #' @export
 mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
     if (!is(fineMappingResult, "FineMappingResultBase")) {
-        stop(
+        msg <- glue(
             "`fineMappingResult` must be a QtlFineMappingResult (or ",
             "FineMappingResult)."
         )
+        abort(msg)
     }
-    csCol <- paste0("cs_", as.integer(round(coverage * 100)))
+    csCol <- str_c("cs_", as.integer(round(coverage * 100)))
 
     # Each row (entry) of the fine-mapping result is one condition. Build a flat
     # data frame of (variant_id, pip, set_name) across conditions, giving each
@@ -3170,10 +3155,11 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
     if (is.null(combinedTopLociDf) || nrow(combinedTopLociDf) == 0) {
         return(NULL)
     }
-    combinedTopLociDf <- combinedTopLociDf[
-        !duplicated(combinedTopLociDf$variant_id),
-    ]
-    rownames(combinedTopLociDf) <- NULL
+    combinedTopLociDf <- distinct(
+        combinedTopLociDf,
+        variant_id,
+        .keep_all = TRUE
+    )
     return(combinedTopLociDf)
 }
 
@@ -3208,11 +3194,10 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
 ) {
     info <- .fineMappingMethodCapabilities[[token]]
     if (is.null(info) || identical(info$unmappableEffects, NA_character_)) {
-        stop(
-            ".fmFitSusieIndiv: token '",
-            token,
-            "' is not a SuSiE-family method."
+        msg <- glue(
+            ".fmFitSusieIndiv: token '{token}' is not a SuSiE-family method."
         )
+        abort(msg)
     }
     baseArgs <- list(
         X = X,
@@ -3245,7 +3230,7 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
         }
         baseArgs <- .fmMergeUserArgs(baseArgs, token, userArgs)
     }
-    fit <- do.call(susieR::susie, baseArgs)
+    fit <- exec(susieR::susie, !!!baseArgs)
     .setFinemappingFitClass(fit, token)
 }
 
@@ -3295,18 +3280,17 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
     }
     # All susie_rss fits get the "susieRss" S3 class for post-processing (drives
     # the Xcorr cs-input mode); token distinction stays in the `method` column.
-    .setFinemappingFitClass(do.call(susieR::susie_rss, baseArgs), "susieRss")
+    .setFinemappingFitClass(exec(susieR::susie_rss, !!!baseArgs), "susieRss")
 }
 
 # Validate the method token and return its capability record.
 .fmRssValidateToken <- function(token) {
     info <- .fineMappingMethodCapabilities[[token]]
     if (is.null(info) || identical(info$unmappableEffects, NA_character_)) {
-        stop(
-            ".fmFitSusieRss: token '",
-            token,
-            "' is not a SuSiE-family method."
+        msg <- glue(
+            ".fmFitSusieRss: token '{token}' is not a SuSiE-family method."
         )
+        abort(msg)
     }
     info
 }
@@ -3320,14 +3304,15 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
     if (
         !is.list(rssControl) ||
             is.null(names(rssControl)) ||
-            any(!nzchar(names(rssControl)))
+            any(str_length(names(rssControl)) == 0L)
     ) {
-        stop(
+        msg <- glue(
             ".fmFitSusieRss: `rssControl` must be a named list of ",
             "susieR::susie_rss_control() settings."
         )
+        abort(msg)
     }
-    baseArgs$control <- do.call(susieR::susie_rss_control, rssControl)
+    baseArgs$control <- exec(susieR::susie_rss_control, !!!rssControl)
     baseArgs
 }
 
@@ -3380,7 +3365,7 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
         "ser",
         userArgs
     )
-    .setFinemappingFitClass(do.call(susieR::susie_ser, baseArgs), "susieRss")
+    .setFinemappingFitClass(exec(susieR::susie_ser, !!!baseArgs), "susieRss")
 }
 
 # Fit every requested univariate token on one residualized (X, y) block,
@@ -3429,11 +3414,10 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
         return(NULL)
     }
     if (p$verbose >= 1) {
-        message(sprintf(
-            "Fitting susieInf for (context='%s', trait='%s') ...",
-            p$ctx,
-            p$tid
-        ))
+        msg <- glue(
+            "Fitting susieInf for (context='{p$ctx}', trait='{p$tid}') ..."
+        )
+        inform(msg)
     }
     .fmFitSusieIndiv(
         p$X,
@@ -3461,12 +3445,10 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
         NULL
     }
     if (p$verbose >= 1) {
-        message(sprintf(
-            "Fitting %s for (context='%s', trait='%s') ...",
-            tk,
-            p$ctx,
-            p$tid
-        ))
+        msg <- glue(
+            "Fitting {tk} for (context='{p$ctx}', trait='{p$tid}') ..."
+        )
+        inform(msg)
     }
     .fmFitSusieIndiv(
         p$X,
@@ -3504,15 +3486,11 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
         return(out)
     }
     if (p$verbose >= 1) {
-        message(sprintf(
-            paste0(
-                "Cross-validating (%d folds) for (context='%s', ",
-                "trait='%s') ..."
-            ),
-            p$cvFolds,
-            p$ctx,
-            p$tid
-        ))
+        msg <- glue(
+            "Cross-validating ({p$cvFolds} folds) for ",
+            "(context='{p$ctx}', trait='{p$tid}') ..."
+        )
+        inform(msg)
     }
     cv <- .fmWeightsCv(
         p$X,
@@ -3582,7 +3560,8 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
         return(NULL)
     }
     if (p$verbose >= 1) {
-        message(sprintf("Fitting susieInf (RSS) for %s ...", p$label))
+        msg <- glue("Fitting susieInf (RSS) for {p$label} ...")
+        inform(msg)
     }
     .fmFitSusieRss(
         p$z,
@@ -3609,7 +3588,8 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
         NULL
     }
     if (p$verbose >= 1) {
-        message(sprintf("Fitting %s (RSS) for %s ...", tk, p$label))
+        msg <- glue("Fitting {tk} (RSS) for {p$label} ...")
+        inform(msg)
     }
     fit <- .fmFitSusieRss(
         p$z,
@@ -3647,10 +3627,8 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
     }
     if (tk == "ser") {
         if (p$verbose >= 1) {
-            message(sprintf(
-                "Fitting ser (RSS single-effect) for %s ...",
-                p$label
-            ))
+            msg <- glue("Fitting ser (RSS single-effect) for {p$label} ...")
+            inform(msg)
         }
         fit <- .fmFitSusieSer(
             p$z,
@@ -3690,11 +3668,238 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
     sf <- ent@susieFit
     sf$R_reliability_flag <- f$flag
     sf$serFallbackUsed <- isTRUE(f$flag)
-    if (!is.null(f$multiFit) && keepFullFit %in% c("fallback", "all")) {
+    if (!is.null(f$multiFit) && is_in(keepFullFit, c("fallback", "all"))) {
         sf$multiEffectFit <- f$multiFit
     } else if (identical(keepFullFit, "all")) {
         sf$multiEffectFit <- f$fit
     }
     ent@susieFit <- sf
     ent
+}
+
+# =============================================================================
+# Named helpers for map/apply call sites (no inline lambdas)
+# =============================================================================
+
+# Translate one legacy cs_coverage_<C> column name to the canonical form.
+# @noRd
+.translateOneLegacyCsColumn <- function(x) {
+    x <- as.character(x)
+    oldParts <- str_match(
+        x,
+        regex("^cs_coverage_([0-9.]+)$", ignore_case = TRUE)
+    )[1L, ]
+    if (!is.na(oldParts[[1L]])) {
+        return(formatCsColumn(as.numeric(oldParts[[2L]]), "susie"))
+    }
+    x
+}
+
+# @noRd
+.camelToSnakeOne <- function(m, lookup) {
+    if (is_in(m, names(lookup))) lookup[[m]] else m
+}
+
+# Post-process one method's fit (buildTopLoci per fit).
+# @noRd
+.ppOneFit <- function(method, fits, p) {
+    fit <- .setFinemappingFitClass(fits[[method]], method)
+    postprocessFinemappingFit(
+        fit,
+        method = method,
+        dataX = p$dataX,
+        dataY = p$dataY,
+        xScalar = p$xScalar,
+        yScalar = p$yScalar,
+        af = p$af,
+        coverage = p$coverage,
+        secondaryCoverage = p$secondaryCoverage,
+        signalCutoff = p$signalCutoff,
+        otherQuantities = p$otherQuantities,
+        region = p$region,
+        priorEffTol = p$priorEffTol,
+        minAbsCorr = p$minAbsCorr,
+        medianAbsCorr = p$medianAbsCorr,
+        csInput = p$csInput,
+        conditionIdx = p$conditionIdx,
+        trim = p$trim,
+        fullFit = p$fullFit,
+        fullFitAlphaOnly = p$fullFitAlphaOnly,
+        includeAllCs = p$includeAllCs
+    )
+}
+
+# @noRd
+.ppDropTopLoci <- function(x) {
+    x$top_loci <- NULL
+    x
+}
+
+# @noRd
+.computeCsTableForCov <- function(
+    cov,
+    fit,
+    dataX,
+    csInput,
+    minAbsCorr,
+    medianAbsCorr
+) {
+    computeCsTable(
+        fit,
+        dataX,
+        coverage = cov,
+        csInput = csInput,
+        minAbsCorr = minAbsCorr,
+        medianAbsCorr = medianAbsCorr
+    )
+}
+
+# Purity value for the i-th index (0 out of range / NA).
+# @noRd
+.csPurityAt <- function(i, pv) {
+    if (i <= 0L || i > length(pv)) {
+        return(0)
+    }
+    v <- pv[i]
+    if (is.na(v)) 0 else as.numeric(v)
+}
+
+# Max of the finite entries of x (NA when none).
+# @noRd
+.finiteMax <- function(x) {
+    x <- x[is.finite(x)]
+    if (length(x) == 0L) NA_real_ else max(x)
+}
+
+# @noRd
+.btlCsLabel <- function(ix, methodTag) {
+    str_c(methodTag, "_", ix)
+}
+
+# Trailing integer of a "<method>_<idx>" cs string (0 when empty / NA).
+# @noRd
+.cs95ToIndex <- function(s) {
+    if (is.na(s) || str_length(s) == 0L) {
+        return(0L)
+    }
+    suppressWarnings(as.integer(str_remove(s, "^.*_")))
+}
+
+# @noRd
+.dropPipCol <- function(x) {
+    x[names(x) != "pip"]
+}
+
+# @noRd
+.csContains <- function(x, snpsIdx) {
+    is_in(snpsIdx, x)
+}
+
+# One (variant, CS) block of rows for variant `vi`.
+# @noRd
+.csInfoRow <- function(vi, susieOutputSetsCs, csNames) {
+    idx <- getCsIndex(vi, susieOutputSetsCs)
+    if (length(idx) == 1 && is.na(idx)) {
+        return(tibble(
+            variant_idx = vi,
+            cs_idx = 0L
+        ))
+    }
+    csNums <- as.integer(str_replace(csNames[idx], "L", ""))
+    tibble(
+        variant_idx = rep(vi, length(csNums)),
+        cs_idx = csNums
+    )
+}
+
+# @noRd
+.asDataFrameT <- function(x) {
+    as.data.frame(t(x))
+}
+
+# @noRd
+.amRow <- function(l, am) {
+    as.numeric(am[l, ])
+}
+
+# Merged credible-set label for one variant (mapped set name, else joined set
+# ids).
+# @noRd
+.updateCredibleSet <- function(variantId, variantsSetsAndPipsList, setNameMap) {
+    currentSets <- variantsSetsAndPipsList[[variantId]][["sets"]]
+    mapped <- intersect(currentSets, names(setNameMap))
+    if (length(mapped) > 0) {
+        setNameMap[[mapped[1]]]
+    } else {
+        str_flatten(sort(unique(currentSets)), ",")
+    }
+}
+
+# One merged-CS summary row (variant id + set label + max/median PIP).
+# @noRd
+.csMergedVariantRow <- function(
+    variantId,
+    extractedResult,
+    hasOverlaps,
+    mergedSets
+) {
+    credibleSetNames <- if (hasOverlaps) {
+        mergedSets[[variantId]]
+    } else {
+        str_flatten(
+            sort(unique(unlist(extractedResult[[variantId]]$sets))),
+            ","
+        )
+    }
+    tibble(
+        variant_id = variantId,
+        credibleSetNames = credibleSetNames,
+        maxPip = max(unlist(extractedResult[[variantId]]$pips)),
+        medianPip = median(unlist(extractedResult[[variantId]]$pips))
+    )
+}
+
+# (variant, CS) rows for the i-th entry, labelled cs_<entry>_<set>.
+# @noRd
+.extractCsEntryRows <- function(i, entries, csCol) {
+    topLoci <- .translateLegacyTopLociCsColumns(getTopLoci(entries[[i]]))
+    if (
+        is.null(topLoci) ||
+            nrow(topLoci) == 0 ||
+            !is_in(csCol, names(topLoci))
+    ) {
+        return(NULL)
+    }
+    pipCol <- resolvePipColumn(topLoci)
+    if (is.null(pipCol)) {
+        return(NULL)
+    }
+    csIdx <- .fmCsIdx(topLoci[[csCol]])
+    setNum <- unique(csIdx)
+    setNum <- setNum[!is.na(setNum) & setNum != 0]
+    if (length(setNum) == 0) {
+        return(NULL)
+    }
+    map_dfr(
+        setNum,
+        .extractCsSetRows,
+        csIdx = csIdx,
+        topLoci = topLoci,
+        pipCol = pipCol,
+        i = i
+    )
+}
+
+# @noRd
+.extractCsSetRows <- function(sn, csIdx, topLoci, pipCol, i) {
+    keep <- !is.na(csIdx) & csIdx == sn
+    topLoci |>
+        filter(keep) |>
+        select(variant_id, pip = all_of(pipCol)) |>
+        mutate(set_name = str_c("cs_", i, "_", sn))
+}
+
+# @noRd
+.csSplitToList <- function(df) {
+    list(sets = df$set_name, pips = df$pip)
 }

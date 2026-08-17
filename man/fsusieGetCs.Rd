@@ -19,7 +19,8 @@ Defaults to 0.95.}
 }
 \value{
 A list containing named credible sets (cs), a dataframe of purity
-  metrics (minAbsCorr, meanAbsCorr, medianAbsCorr), an index of credible sets
+  metrics (a \code{cs} label column plus minAbsCorr, meanAbsCorr,
+  medianAbsCorr), an index of credible sets
   (cs_index), coverage values for each set, and the requested coverage level.
   Similar to the SuSiE set output
 }
@@ -31,6 +32,6 @@ This function constructs a list that mimics the structure of
 }
 \examples{
 data(fsusieFineMappingExample)
-fit <- fsusieFineMappingExample@listData$entry[[1]]@susieFit
+fit <- getSusieFit(fsusieFineMappingExample$entry[[1]])
 fsusieGetCs(fit)
 }

@@ -37,7 +37,8 @@
     cls = "QtlFineMappingResult"
 ) {
     if (nrow(x) == 0L) {
-        stop(cls, " has no rows.")
+        msg <- glue("{cls} has no rows.")
+        abort(msg)
     }
     anyUnset <- missing(study) ||
         is.null(study) ||
@@ -51,13 +52,11 @@
         if (nrow(x) == 1L) {
             return(1L)
         }
-        stop(
-            cls,
-            " has ",
-            nrow(x),
-            " entries. Pass `study`, `context`, ",
+        msg <- glue(
+            "{cls} has {nrow(x)} entries. Pass `study`, `context`, ",
             "`trait`, and `method` to select one."
         )
+        abort(msg)
     }
     if (
         length(study) != 1L ||
@@ -65,7 +64,9 @@
             length(trait) != 1L ||
             length(method) != 1L
     ) {
-        stop("`study`, `context`, `trait`, and `method` must each be length 1.")
+        abort(
+            "`study`, `context`, `trait`, and `method` must each be length 1."
+        )
     }
     .tupleMatchQtl(x, study, context, trait, method)
 }
@@ -78,13 +79,11 @@
         list(study = study, context = context, trait = trait, method = method)
     )
     if (length(idx) == 0L) {
-        stop(sprintf(
-            "No entry for (study='%s', context='%s', trait='%s', method='%s').",
-            study,
-            context,
-            trait,
-            method
-        ))
+        msg <- glue(
+            "No entry for (study='{study}', context='{context}', ",
+            "trait='{trait}', method='{method}')."
+        )
+        abort(msg)
     }
     idx[[1L]]
 }
@@ -95,7 +94,7 @@
 # among per-block rows of a genome-wide collection.
 .tupleSelectRowGwasFmr <- function(x, study, method, region = NULL) {
     if (nrow(x) == 0L) {
-        stop("GwasFineMappingResult has no rows.")
+        abort("GwasFineMappingResult has no rows.")
     }
     anyUnset <- missing(study) ||
         is.null(study) ||
@@ -105,18 +104,17 @@
         if (nrow(x) == 1L) {
             return(1L)
         }
-        stop(
-            "GwasFineMappingResult has ",
-            nrow(x),
-            " entries. Pass `study` ",
+        msg <- glue(
+            "GwasFineMappingResult has {nrow(x)} entries. Pass `study` ",
             "and `method` to select one."
         )
+        abort(msg)
     }
     if (length(study) != 1L || length(method) != 1L) {
-        stop("`study` and `method` must each be length 1.")
+        abort("`study` and `method` must each be length 1.")
     }
     if (!is.null(region) && length(region) != 1L) {
-        stop("`region` must be length 1 when supplied.")
+        abort("`region` must be length 1 when supplied.")
     }
     .tupleMatchGwas(x, study, method, region)
 }
@@ -130,12 +128,15 @@
     }
     idx <- .matchTupleRows(x, keys)
     if (length(idx) == 0L) {
-        stop(sprintf(
-            "No entry for (study='%s', method='%s'%s).",
-            study,
-            method,
-            if (is.null(region)) "" else sprintf(", region='%s'", region)
-        ))
+        regionPart <- if (is.null(region)) {
+            ""
+        } else {
+            glue(", region='{region}'")
+        }
+        msg <- glue(
+            "No entry for (study='{study}', method='{method}'{regionPart})."
+        )
+        abort(msg)
     }
     if (length(idx) > 1L) {
         .tupleGwasAmbiguous(x, study, method, idx)
@@ -146,20 +147,16 @@
 # Multiple (study, method) rows matched: report the disambiguating regions.
 # @noRd
 .tupleGwasAmbiguous <- function(x, study, method, idx) {
-    stop(
-        sprintf(
-            paste0(
-                "GwasFineMappingResult has %d rows matching (study='%s', ",
-                "method='%s'); "
-            ),
-            length(idx),
-            study,
-            method
-        ),
-        "pass `region` to disambiguate (available: ",
-        paste(shQuote(as.character(x$region_id[idx])), collapse = ", "),
-        ")."
+    regions <- str_flatten(
+        shQuote(as.character(x$region_id[idx])),
+        ", "
     )
+    msg <- glue(
+        "GwasFineMappingResult has {length(idx)} rows matching ",
+        "(study='{study}', method='{method}'); pass `region` to ",
+        "disambiguate (available: {regions})."
+    )
+    abort(msg)
 }
 
 # Internal: row indices of a FineMappingResultBase collection matching the
@@ -184,14 +181,14 @@
         method = method,
         region_id = region
     )
-    keys <- keys[!vapply(keys, is.null, logical(1L))]
-    keys <- keys[names(keys) %in% names(x)]
+    keys <- keys[!map_lgl(keys, is.null)]
+    keys <- keys[is_in(names(keys), names(x))]
     if (length(keys) == 0L) {
         return(seq_len(nrow(x)))
     }
     ok <- rep(TRUE, nrow(x))
     for (k in names(keys)) {
-        ok <- ok & as.character(x[[k]]) %in% as.character(keys[[k]])
+        ok <- ok & is_in(as.character(x[[k]]), as.character(keys[[k]]))
     }
     which(ok)
 }
@@ -203,28 +200,19 @@
 .fmrRowMetadata <- function(x) {
     cols <- c("study", "context", "trait", "region_id", "method")
     n <- nrow(x)
-    vals <- lapply(cols, function(cc) {
-        if (cc %in% names(x)) as.character(x[[cc]]) else rep(NA_character_, n)
-    })
+    vals <- map(cols, .fmrMetadataCol, x = x, n = n)
     names(vals) <- cols
-    as.data.frame(vals, stringsAsFactors = FALSE)
+    as_tibble(vals)
 }
 
-# Internal: rbind data.frames whose column sets may differ, aligning on the
-# union of columns (missing cells become NA). When every input already shares
-# the same columns -- the common case -- column types are preserved.
+# Internal: row-bind view tibbles whose column sets may differ; bind_rows
+# unions the columns (missing cells become NA) and preserves column types
+# when every input already shares the same columns (the common case).
 .rbindAligned <- function(parts) {
     if (length(parts) == 1L) {
         return(parts[[1L]])
     }
-    cols <- Reduce(union, lapply(parts, names))
-    aligned <- lapply(parts, function(p) {
-        for (m in setdiff(cols, names(p))) {
-            p[[m]] <- NA
-        }
-        p[cols]
-    })
-    do.call(rbind, aligned)
+    bind_rows(parts)
 }
 
 # Internal: read the per-row `region` GRanges column of a collection, or an
@@ -232,7 +220,7 @@
 # TwasWeights and FineMappingResultBase (region is a uniform column across the
 # family; no derivation from topLoci / region_id).
 .getRegionColumn <- function(x) {
-    if ("region" %in% names(x)) x[["region"]] else GenomicRanges::GRanges()
+    if (is_in("region", names(x))) x[["region"]] else GenomicRanges::GRanges()
 }
 
 # Internal: append a validated `region` GRanges to a constructor's column list
@@ -243,10 +231,10 @@
         return(cols)
     }
     if (!methods::is(region, "GRanges")) {
-        stop("`region` must be a GRanges (one range per row) or NULL.")
+        abort("`region` must be a GRanges (one range per row) or NULL.")
     }
     if (length(region) != n) {
-        stop("`region` must have the same length as `study`.")
+        abort("`region` must have the same length as `study`.")
     }
     cols[["region"]] <- region
     cols
@@ -256,7 +244,7 @@
 # shared by the TwasWeights / FineMappingResult validity methods. Returns a
 # character vector of errors (empty when valid or the column is absent).
 .validateRegionColumn <- function(object) {
-    if (!("region" %in% names(object))) {
+    if (!is_in("region", names(object))) {
         return(character(0))
     }
     if (!methods::is(object[["region"]], "GRanges")) {
@@ -280,7 +268,7 @@
 # than an empty GRanges, so getTraitPosition() reports "no trait position"
 # honestly instead of a zero-length range.
 .getTraitPosColumn <- function(x) {
-    if ("traitPos" %in% names(x)) x[["traitPos"]] else NA
+    if (is_in("traitPos", names(x))) x[["traitPos"]] else NA
 }
 
 .appendTraitPosCol <- function(cols, traitPos, n) {
@@ -288,17 +276,17 @@
         return(cols)
     }
     if (!methods::is(traitPos, "GRanges")) {
-        stop("`traitPos` must be a GRanges (one range per row) or NULL.")
+        abort("`traitPos` must be a GRanges (one range per row) or NULL.")
     }
     if (length(traitPos) != n) {
-        stop("`traitPos` must have the same length as `study`.")
+        abort("`traitPos` must have the same length as `study`.")
     }
     cols[["traitPos"]] <- traitPos
     cols
 }
 
 .validateTraitPosColumn <- function(object) {
-    if (!("traitPos" %in% names(object))) {
+    if (!is_in("traitPos", names(object))) {
         return(character(0))
     }
     if (!methods::is(object[["traitPos"]], "GRanges")) {
@@ -331,7 +319,7 @@
 # @noRd
 .exemplarColumn <- function(cn, parts) {
     for (p in parts) {
-        if (cn %in% names(p)) return(p[[cn]])
+        if (is_in(cn, names(p))) return(p[[cn]])
     }
     # unreachable: cn is always drawn from allCols, so some part has it
     NULL # nocov
@@ -345,25 +333,16 @@
 # Preserves the concrete class and sets the `ldSketch` slot explicitly (rbind
 # does not reliably carry it). Returns NULL when given no inputs.
 .rbindCollections <- function(parts, ldSketch = NULL) {
-    parts <- parts[!vapply(parts, is.null, logical(1L))]
+    parts <- compact(parts)
     if (length(parts) == 0L) {
         return(NULL)
     }
     cls <- class(parts[[1L]])[[1L]]
-    allCols <- Reduce(union, lapply(parts, names))
-    combined <- lapply(allCols, function(cn) {
-        pieces <- lapply(parts, function(p) {
-            if (cn %in% names(p)) {
-                p[[cn]]
-            } else {
-                .naLikeColumn(.exemplarColumn(cn, parts), nrow(p))
-            }
-        })
-        # GRanges concat may warn on seqinfo
-        suppressWarnings(do.call(c, pieces))
-    })
+    allCols <- reduce(map(parts, names), union)
+    combined <- map(allCols, .rbindColumn, parts = parts)
     names(combined) <- allCols
-    df <- do.call(S4Vectors::DataFrame, c(combined, list(check.names = FALSE)))
+    dfArgs <- c(combined, list(check.names = FALSE))
+    df <- exec(S4Vectors::DataFrame, !!!dfArgs)
     out <- new(cls, df, ldSketch = ldSketch)
     validObject(out)
     out
@@ -394,9 +373,19 @@
     method = NULL,
     region = NULL,
     perEntry,
-    onSingle = perEntry
+    onSingle = perEntry,
+    ...
 ) {
-    single <- .fmrTrySingle(x, study, context, trait, method, region, onSingle)
+    single <- .fmrTrySingle(
+        x,
+        study,
+        context,
+        trait,
+        method,
+        region,
+        onSingle,
+        ...
+    )
     if (single$done) {
         return(single$result)
     }
@@ -410,25 +399,47 @@
     )
     meta <- .fmrRowMetadata(x)
     if (length(idx) == 0L) {
-        # An explicit selector that matched nothing re-raises the informative
-        # selection error; otherwise return an empty identity-only frame.
-        if (inherits(single$sel, "error")) {
-            stop(conditionMessage(single$sel))
-        }
-        return(meta[integer(0), , drop = FALSE])
+        return(.fmrEmptyOrError(single, meta))
     }
-    parts <- compact(map(idx, function(i) .fmrEntryPart(i, x, perEntry, meta)))
+    parts <- compact(map(
+        idx,
+        .fmrEntryPart,
+        x = x,
+        perEntry = perEntry,
+        meta = meta,
+        ...
+    ))
     if (length(parts) == 0L) {
-        return(meta[integer(0), , drop = FALSE])
+        return(slice(meta, integer(0)))
     }
     .rbindAligned(parts)
+}
+
+# Empty-match handling for an aggregate view: an explicit selector that matched
+# nothing re-raises its informative selection error; otherwise return an empty
+# identity-only frame.
+# @noRd
+.fmrEmptyOrError <- function(single, meta) {
+    if (inherits(single$sel, "error")) {
+        cnd_signal(single$sel)
+    }
+    slice(meta, integer(0))
 }
 
 # Attempt the single-entry fast path when any selector is supplied. Returns
 # list(done, result) on a successful single-select, else list(done = FALSE, sel)
 # carrying the selection error (or NULL when no selector was given).
 # @noRd
-.fmrTrySingle <- function(x, study, context, trait, method, region, onSingle) {
+.fmrTrySingle <- function(
+    x,
+    study,
+    context,
+    trait,
+    method,
+    region,
+    onSingle,
+    ...
+) {
     anySelector <- !is.null(study) ||
         !is.null(context) ||
         !is.null(trait) ||
@@ -449,7 +460,7 @@
         error = function(e) e
     )
     if (!inherits(sel, "error")) {
-        return(list(done = TRUE, result = onSingle(sel)))
+        return(list(done = TRUE, result = onSingle(sel, ...)))
     }
     list(done = FALSE, sel = sel)
 }
@@ -457,11 +468,37 @@
 # Project one entry to its per-entry view with the row's identity metadata
 # prepended; NULL when the entry yields no rows.
 # @noRd
-.fmrEntryPart <- function(i, x, perEntry, meta) {
-    v <- perEntry(x$entry[[i]])
+.fmrEntryPart <- function(i, x, perEntry, meta, ...) {
+    v <- perEntry(x$entry[[i]], ...)
     if (is.null(v) || nrow(v) == 0L) {
         return(NULL)
     }
-    v <- v[, setdiff(names(v), names(meta)), drop = FALSE]
-    cbind(meta[rep(i, nrow(v)), , drop = FALSE], v, row.names = NULL)
+    v <- select(v, all_of(setdiff(names(v), names(meta))))
+    bind_cols(slice(meta, rep(i, nrow(v))), v)
+}
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# One identity-metadata column `cc` of a collection (NA-filled when absent).
+# @noRd
+.fmrMetadataCol <- function(cc, x, n) {
+    if (is_in(cc, names(x))) as.character(x[[cc]]) else rep(NA_character_, n)
+}
+
+# Column `cn` of part `p`, or a NA-like column of an exemplar type when absent.
+# @noRd
+.rbindColPiece <- function(p, cn, parts) {
+    if (is_in(cn, names(p))) {
+        p[[cn]]
+    } else {
+        .naLikeColumn(.exemplarColumn(cn, parts), nrow(p))
+    }
+}
+
+# Concatenate column `cn` across all parts (NA-filling parts that lack it).
+# @noRd
+.rbindColumn <- function(cn, parts) {
+    pieces <- map(parts, .rbindColPiece, cn = cn, parts = parts)
+    # GRanges concat may warn on seqinfo.
+    suppressWarnings(exec(c, !!!pieces))
 }

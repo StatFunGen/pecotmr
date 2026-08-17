@@ -30,14 +30,15 @@ NULL
 # frame.
 # @noRd
 .variantsToDf <- function(x) {
-    if (is(x, "GRanges")) {
+    df <- if (is(x, "GRanges")) {
         mc <- as.data.frame(mcols(x))
         mc$chrom <- as.character(seqnames(x))
         mc$pos <- start(x)
-        mc[, c("chrom", "pos", "alt", "ref")]
+        as_tibble(mc)
     } else {
-        as.data.frame(x)[, c("chrom", "pos", "alt", "ref")]
+        as_tibble(x)
     }
+    select(df, all_of(c("chrom", "pos", "alt", "ref")))
 }
 
 # Canonical per-variant key from sorted alleles, so strand/allele flips collide.
@@ -45,7 +46,7 @@ NULL
 .canonicalAlleleKey <- function(df) {
     aMin <- pmin(df$alt, df$ref)
     aMax <- pmax(df$alt, df$ref)
-    paste(df$chrom, df$pos, aMin, aMax)
+    str_c(df$chrom, df$pos, aMin, aMax, sep = " ")
 }
 
 #' Merge variant info from two sources with allele-flip-aware matching
@@ -93,20 +94,9 @@ mergeVariantInfo <- function(variants1, variants2, all = TRUE) {
     }
 
     if (all) {
-        combined <- rbind(
-            df1[, c("chrom", "pos", "alt", "ref")],
-            df2[, c("chrom", "pos", "alt", "ref")]
-        )
-        combined[
-            !duplicated(paste(
-                combined$chrom,
-                combined$pos,
-                combined$alt,
-                combined$ref
-            )),
-        ]
+        distinct(bind_rows(df1, df2))
     } else {
-        df2[, c("chrom", "pos", "alt", "ref")]
+        df2
     }
 }
 
@@ -142,10 +132,10 @@ resolveLdInput <- function(
     ldMethod = "sample"
 ) {
     if (is.null(R) && is.null(X)) {
-        stop("Either R (LD matrix) or X (genotype matrix) must be provided.")
+        abort("Either R (LD matrix) or X (genotype matrix) must be provided.")
     }
     if (!is.null(R) && !is.null(X)) {
-        stop("Provide either R or X, not both.")
+        abort("Provide either R or X, not both.")
     }
     if (!is.null(X)) {
         if (!is.matrix(X)) {
@@ -157,7 +147,7 @@ resolveLdInput <- function(
         R <- computeLd(X, method = ldMethod)
     }
     if (needNSample && is.null(nSample)) {
-        stop("nSample is required when providing an LD matrix R.")
+        abort("nSample is required when providing an LD matrix R.")
     }
     list(R = R, nSample = nSample)
 }
@@ -166,26 +156,24 @@ resolveLdInput <- function(
 
 # Validate/rename the pos and z columns (accepting position/zscore) + sort.
 .dentistResolveColumns <- function(sumStat) {
+    lc <- str_to_lower(colnames(sumStat))
     if (
-        !any(tolower(c("pos", "position")) %in% tolower(colnames(sumStat))) ||
-            !any(tolower(c("z", "zscore")) %in% tolower(colnames(sumStat)))
+        !any(is_in(c("pos", "position"), lc)) ||
+            !any(is_in(c("z", "zscore"), lc))
     ) {
-        stop(
+        msg <- glue(
             "Input sumStat is missing either 'pos'/'position' or ",
             "'z'/'zscore' column."
         )
+        abort(msg)
     }
-    if (!tolower("pos") %in% tolower(colnames(sumStat))) {
-        colnames(sumStat)[which(
-            tolower(colnames(sumStat)) %in% tolower(c("position"))
-        )] <- "pos"
+    if (!is_in("pos", lc)) {
+        colnames(sumStat)[which(is_in(lc, "position"))] <- "pos"
     }
-    if (!tolower("z") %in% tolower(colnames(sumStat))) {
-        colnames(sumStat)[which(
-            tolower(colnames(sumStat)) %in% tolower(c("zscore"))
-        )] <- "z"
+    if (!is_in("z", lc)) {
+        colnames(sumStat)[which(is_in(lc, "zscore"))] <- "z"
     }
-    sumStat %>% arrange(pos)
+    arrange(sumStat, pos)
 }
 
 # Run DENTIST on a single window, unpacking the shared tuning parameters.
@@ -374,7 +362,7 @@ dentist <- function(
     ldMat <- resolved$R
     nSample <- resolved$nSample
     sumStat <- .dentistResolveColumns(sumStat)
-    windowMode <- match.arg(windowMode)
+    windowMode <- arg_match(windowMode)
     p <- as.list(environment())
     if (nrow(sumStat) < minDim) {
         return(.dentistCallSingle(sumStat$z, ldMat, nSample, p))
@@ -395,26 +383,26 @@ dentist <- function(
 # Warn on small windows; validate the LD matrix shape against zScore.
 .dentistValidateInput <- function(zScore, ldMat) {
     if (length(zScore) < 2000) {
-        warning(sprintf(
-            paste0(
-                "The number of variants (%d) is below 2000. The algorithm ",
-                "may not work as expected, as suggested by the original ",
-                "DENTIST. Consider using windowMode = 'count' with an ",
-                "appropriate minDim to control window sizes by variant ",
-                "count."
-            ),
-            length(zScore)
-        ))
+        nZ <- length(zScore)
+        msg <- glue(
+            "The number of variants ({nZ}) is below 2000. The algorithm ",
+            "may not work as expected, as suggested by the original ",
+            "DENTIST. Consider using windowMode = 'count' with an ",
+            "appropriate minDim to control window sizes by variant ",
+            "count."
+        )
+        warn(msg)
     }
     if (
         !is.matrix(ldMat) ||
             nrow(ldMat) != ncol(ldMat) ||
             nrow(ldMat) != length(zScore)
     ) {
-        stop(
+        msg <- glue(
             "ldMat must be a square matrix with dimensions equal to ",
             "the length of zScore."
         )
+        abort(msg)
     }
 }
 
@@ -426,13 +414,12 @@ dentist <- function(
         dedupRes <- .findDuplicateVariants(zScore, ldMat, rThreshold)
         numDup <- sum(dedupRes$dupBearer != -1)
         if (numDup > 0) {
-            message(
-                numDup,
-                " duplicated variants out of a total of ",
-                length(zScore),
-                " were found at r threshold of ",
-                rThreshold
+            nZ <- length(zScore)
+            msg <- glue(
+                "{numDup} duplicated variants out of a total of {nZ} ",
+                "were found at r threshold of {rThreshold}"
             )
+            inform(msg)
         }
         zScore <- dedupRes$filteredZ
         ldMat <- dedupRes$filteredLD
@@ -462,30 +449,38 @@ dentist <- function(
     rsqExceed <- res$rsqExceed
     res$rsqExceed <- NULL
     if (length(rsqExceed) > 0) {
-        warning(sprintf(
-            "%d rsq values exceeded 1 (capped at 1.0). Max reported: %g",
-            length(rsqExceed),
-            max(rsqExceed)
-        ))
+        nExceed <- length(rsqExceed)
+        maxExceed <- max(rsqExceed)
+        msg <- glue(
+            "{nExceed} rsq values exceeded 1 (capped at 1.0). ",
+            "Max reported: {maxExceed}"
+        )
+        warn(msg)
     }
-    res <- as.data.frame(res)
     # cpp11 wrapper returns camelCase keys; convert to snake_case columns
-    names(res)[names(res) == "originalZ"] <- "original_z"
-    names(res)[names(res) == "imputedZ"] <- "imputed_z"
-    names(res)[names(res) == "zDiff"] <- "z_diff"
-    names(res)[names(res) == "iterToCorrect"] <- "iter_to_correct"
-    res
+    as_tibble(res) |>
+        rename(
+            original_z = "originalZ",
+            imputed_z = "imputedZ",
+            z_diff = "zDiff",
+            iter_to_correct = "iterToCorrect"
+        )
 }
 
 # Outlier statistic: (z - imputed)^2 / (1 - rsq), thresholded on the p-value.
 .dentistOutlierStat <- function(res, pValueThreshold) {
-    res %>%
+    res |>
         mutate(
-            outlier_stat = (original_z - imputed_z)^2 / pmax(1 - rsq, 1e-8),
-            outlier = -log10(pchisq(outlier_stat, df = 1, lower.tail = FALSE)) >
+            outlier_stat = (.data$original_z - .data$imputed_z)^2 /
+                pmax(1 - .data$rsq, 1e-8),
+            outlier = -log10(pchisq(
+                .data$outlier_stat,
+                df = 1,
+                lower.tail = FALSE
+            )) >
                 -log10(pValueThreshold)
-        ) %>%
-        select(-z_diff)
+        ) |>
+        select(-any_of("z_diff"))
 }
 
 #' Perform DENTIST on a single window
@@ -589,13 +584,14 @@ dentistSingleWindow <- function(
 # Validate DENTIST output vs the duplicate-bearer bookkeeping.
 .dentistValidateDups <- function(zScore, dentistOutput, dupBearer, nrowsDup) {
     if (nrow(dentistOutput) != sum(dupBearer == -1)) {
-        stop(
+        msg <- glue(
             "The number of rows in the input data does not match the ",
             "occurrences of -1 in dupBearer."
         )
+        abort(msg)
     }
     if (length(zScore) != nrowsDup) {
-        stop("Input zScore and findDupOutput have inconsistent dimension")
+        abort("Input zScore and findDupOutput have inconsistent dimension")
     }
 }
 
@@ -623,7 +619,7 @@ dentistSingleWindow <- function(
     iterToCorrect <- dentistOutput$iter_to_correct
     rsq <- dentistOutput$rsq
     zDiff <- dentistOutput$z_diff
-    updatedData <- data.frame(
+    updatedData <- tibble(
         original_z = numeric(nrowsDup),
         imputed_z = numeric(nrowsDup),
         iter_to_correct = numeric(nrowsDup),
@@ -691,14 +687,15 @@ detectGaps <- function(pos, gapThreshold, verbose = FALSE) {
     allGaps <- c(allGaps, n + 1L)
 
     if (verbose && length(allGaps) - 2 > 0) {
-        message(sprintf("No. of gaps found: %d", length(allGaps) - 2))
+        nGaps <- length(allGaps) - 2
+        msg <- glue("No. of gaps found: {nGaps}")
+        inform(msg)
         for (i in 2:(length(allGaps) - 1)) {
-            message(sprintf(
-                "  Gap %d: %d - %d",
-                i - 1,
-                pos[allGaps[i] - 1],
-                pos[allGaps[i]]
-            ))
+            gapNo <- i - 1
+            startPos <- pos[allGaps[i] - 1]
+            endPos <- pos[allGaps[i]]
+            msg <- glue("  Gap {gapNo}: {startPos} - {endPos}", .trim = FALSE)
+            inform(msg)
         }
     }
     allGaps
@@ -729,7 +726,7 @@ buildSegmentResult <- function(
     verbose = FALSE
 ) {
     if (length(startList) == 0) {
-        stop("No intervals created by segmentation")
+        abort("No intervals created by segmentation")
     }
 
     # Cap end indices at n+1 (one past the last valid 1-based index)
@@ -737,20 +734,18 @@ buildSegmentResult <- function(
     fillEndList <- pmin(fillEndList, n + 1L)
 
     if (verbose) {
-        message("Intervals:")
+        inform("Intervals:")
         for (i in seq_along(startList)) {
-            message(sprintf(
-                "  %d: SNPs %d-%d (fill %d-%d)",
-                i,
-                startList[i],
-                endList[i],
-                fillStartList[i],
-                fillEndList[i]
-            ))
+            s <- startList[i]
+            e <- endList[i]
+            fs <- fillStartList[i]
+            fe <- fillEndList[i]
+            msg <- glue("  {i}: SNPs {s}-{e} (fill {fs}-{fe})", .trim = FALSE)
+            inform(msg)
         }
     }
 
-    data.frame(
+    tibble(
         windowIdx = seq_along(startList),
         windowStartIdx = startList,
         windowEndIdx = endList,
@@ -769,18 +764,21 @@ buildSegmentResult <- function(
 #' @param allGaps Integer vector of 1-based block boundaries from
 #'   \code{\link{detectGaps}}.
 #' @param n Total number of positions.
-#' @param minBlockFn Function(blockSize) -> logical; returns TRUE if the block
-#'   is large enough to process.
-#' @param initEndFn Function(startIdx, blockEnd) -> integer; computes the
+#' @param ctx Named list bundling the caller's mode-specific segmentation state;
+#'   passed as the final argument to every callback below (so they can be
+#'   top-level functions rather than closures).
+#' @param minBlockFn Function(blockSize, ctx) -> logical; returns TRUE if the
+#'   block is large enough to process.
+#' @param initEndFn Function(startIdx, blockEnd, ctx) -> integer; computes the
 #'   initial window end index for the first window in a block.
-#' @param fillFn Function(startIdx, endIdx, notStartInterval, notLastInterval)
-#'   -> list(start, end); computes fill boundaries for each window.
-#' @param stepFn Function(startIdx, blockEnd) -> list(startIdx, endIdx);
+#' @param fillFn Function(startIdx, endIdx, notStartInterval, notLastInterval,
+#'   ctx) -> list(start, end); computes fill boundaries for each window.
+#' @param stepFn Function(startIdx, blockEnd, ctx) -> list(startIdx, endIdx);
 #'   advances to the next window.
 #' @param adjustLastFn Optional function(startIdx, oldStartIdx, endIdx,
-#'   blockEnd) -> integer; adjusts startIdx when the last interval is detected.
-#'   Used by distance mode for small-last-interval correction. Default is NULL
-#'   (no adjustment).
+#'   blockEnd, ctx) -> integer; adjusts startIdx when the last interval is
+#'   detected. Used by distance mode for small-last-interval correction. Default
+#'   is NULL (no adjustment).
 #' @param verbose Logical; print interval info. Default is FALSE.
 #'
 #' @return A data frame with columns: windowIdx, windowStartIdx, windowEndIdx,
@@ -797,18 +795,55 @@ buildSegmentResult <- function(
     oldStartIdx,
     endIdx,
     blockEnd,
-    adjustLastFn
+    adjustLastFn,
+    ctx
 ) {
     isLast <- blockEnd <= endIdx
     if (isLast && !is.null(adjustLastFn)) {
-        startIdx <- adjustLastFn(startIdx, oldStartIdx, endIdx, blockEnd)
+        startIdx <- adjustLastFn(startIdx, oldStartIdx, endIdx, blockEnd, ctx)
     }
     list(startIdx = startIdx, notLastInterval = !isLast)
 }
 
-.swlBlockWindows <- function(blockStart, blockEnd, fns) {
+# One window's last-interval adjustment + fill boundaries. `fillFn` uses the
+# PRE-adjustment startIdx (C++ parity: non-overlapping); the returned startIdx
+# is
+# the POST-adjustment value recorded for the window.
+# @noRd
+.swlWindow <- function(
+    startIdx,
+    oldStartIdx,
+    endIdx,
+    blockEnd,
+    notStartInterval,
+    fns,
+    ctx
+) {
+    lc <- .swlLastCheck(
+        startIdx,
+        oldStartIdx,
+        endIdx,
+        blockEnd,
+        fns$adjustLastFn,
+        ctx
+    )
+    fills <- fns$fillFn(
+        startIdx,
+        endIdx,
+        notStartInterval,
+        lc$notLastInterval,
+        ctx
+    )
+    list(
+        startIdx = lc$startIdx,
+        notLastInterval = lc$notLastInterval,
+        fills = fills
+    )
+}
+
+.swlBlockWindows <- function(blockStart, blockEnd, fns, ctx) {
     startIdx <- blockStart
-    endIdx <- fns$initEndFn(startIdx, blockEnd)
+    endIdx <- fns$initEndFn(startIdx, blockEnd, ctx)
     oldStartIdx <- startIdx
     notStartInterval <- FALSE
     notLastInterval <- TRUE
@@ -817,34 +852,28 @@ buildSegmentResult <- function(
     repeat {
         times <- times + 1
         if (times > 400) {
-            stop("Windowing iteration limit exceeded")
+            abort("Windowing iteration limit exceeded")
         }
-        # Fill uses pre-adjustment startIdx (C++ parity): non-overlapping.
-        fillStartIdx <- startIdx
-        lc <- .swlLastCheck(
+        win <- .swlWindow(
             startIdx,
             oldStartIdx,
             endIdx,
             blockEnd,
-            fns$adjustLastFn
-        )
-        startIdx <- lc$startIdx
-        notLastInterval <- lc$notLastInterval
-        fills <- fns$fillFn(
-            fillStartIdx,
-            endIdx,
             notStartInterval,
-            notLastInterval
+            fns,
+            ctx
         )
+        startIdx <- win$startIdx
+        notLastInterval <- win$notLastInterval
         starts <- c(starts, startIdx)
         ends <- c(ends, min(endIdx, blockEnd))
-        fillStarts <- c(fillStarts, fills$start)
-        fillEnds <- c(fillEnds, fills$end)
+        fillStarts <- c(fillStarts, win$fills$start)
+        fillEnds <- c(fillEnds, win$fills$end)
         if (!notLastInterval) {
             break
         }
         oldStartIdx <- startIdx
-        stepped <- fns$stepFn(startIdx, blockEnd)
+        stepped <- fns$stepFn(startIdx, blockEnd, ctx)
         startIdx <- stepped$startIdx
         endIdx <- stepped$endIdx
         notStartInterval <- TRUE
@@ -860,6 +889,7 @@ buildSegmentResult <- function(
 slidingWindowLoop <- function(
     allGaps,
     n,
+    ctx,
     minBlockFn,
     initEndFn,
     fillFn,
@@ -881,10 +911,10 @@ slidingWindowLoop <- function(
     for (k in seq_len(length(allGaps) - 1)) {
         blockStart <- allGaps[k]
         blockEnd <- allGaps[k + 1]
-        if (!minBlockFn(blockEnd - blockStart)) {
+        if (!minBlockFn(blockEnd - blockStart, ctx)) {
             next
         }
-        w <- .swlBlockWindows(blockStart, blockEnd, fns)
+        w <- .swlBlockWindows(blockStart, blockEnd, fns, ctx)
         # First window's fill starts at the window start; last window's fill
         # ends at the window end.
         w$fillStarts[1] <- w$starts[1]
@@ -994,38 +1024,23 @@ slidingWindowLoop <- function(
     quaterIdx,
     verbose
 ) {
+    ctx <- list(
+        minBlockSize = minBlockSize,
+        minDim = minDim,
+        quaterIdx = quaterIdx,
+        pos = pos,
+        cutoff = cutoff,
+        n = n
+    )
     slidingWindowLoop(
         allGaps,
         n,
-        minBlockFn = function(blockSize) {
-            blockSize >= minBlockSize / 2 && (blockSize - minDim) >= 0
-        },
-        initEndFn = function(startIdx, blockEnd) {
-            min(.nthQuaterIdx(startIdx, 4, quaterIdx) + 1, blockEnd)
-        },
-        fillFn = function(startIdx, endIdx, notStartInterval, notLastInterval) {
-            # Distance mode: fill is always q1 to q3 (inner 50% by distance);
-            # first/last corrections are handled by fix_block_fills in the loop
-            list(
-                start = .nthQuaterIdx(startIdx, 1, quaterIdx),
-                end = .nthQuaterIdx(startIdx, 3, quaterIdx)
-            )
-        },
-        stepFn = function(startIdx, blockEnd) {
-            .segByDistStep(startIdx, blockEnd, quaterIdx)
-        },
-        adjustLastFn = function(startIdx, oldStartIdx, endIdx, blockEnd) {
-            # If last interval is small, go back one step
-            if (
-                as.numeric(pos[min(endIdx - 1, n)]) -
-                    as.numeric(pos[.nthQuaterIdx(oldStartIdx, 1, quaterIdx)]) <
-                    cutoff
-            ) {
-                .nthQuaterIdx(oldStartIdx, 1, quaterIdx)
-            } else {
-                startIdx
-            }
-        },
+        ctx = ctx,
+        minBlockFn = .segDistMinBlock,
+        initEndFn = .segDistInitEnd,
+        fillFn = .segDistFill,
+        stepFn = .segDistStep,
+        adjustLastFn = .segDistAdjustLast,
         verbose = verbose
     )
 }
@@ -1038,7 +1053,7 @@ segmentByDist <- function(
 ) {
     n <- length(pos)
     if (n == 0) {
-        stop("No positions provided")
+        abort("No positions provided")
     }
     cutoff <- maxDist
     minBlockSize <- minDim
@@ -1091,7 +1106,7 @@ segmentByDist <- function(
 segmentByCount <- function(pos, maxCount, gapDist = 1e6, verbose = FALSE) {
     n <- length(pos)
     if (n == 0) {
-        stop("No positions provided")
+        abort("No positions provided")
     }
 
     cutoff <- as.integer(maxCount)
@@ -1101,33 +1116,15 @@ segmentByCount <- function(pos, maxCount, gapDist = 1e6, verbose = FALSE) {
     # Detect centromeric gaps (C++ line 784: diff > 1e6)
     allGaps <- detectGaps(pos, gapThreshold = gapDist, verbose = verbose)
 
+    ctx <- list(half = half, cutoff = cutoff, quarter = quarter)
     slidingWindowLoop(
         allGaps,
         n,
-        minBlockFn = function(blockSize) blockSize >= half,
-        initEndFn = function(startIdx, blockEnd) {
-            if (blockEnd - half > startIdx + cutoff) {
-                startIdx + cutoff
-            } else {
-                blockEnd
-            }
-        },
-        fillFn = function(startIdx, endIdx, notStartInterval, notLastInterval) {
-            # Count mode: fill based on index arithmetic (inner 50%)
-            list(
-                start = if (notStartInterval) startIdx + quarter else startIdx,
-                end = if (notLastInterval) endIdx - quarter else endIdx
-            )
-        },
-        stepFn = function(startIdx, blockEnd) {
-            nextStart <- startIdx + half
-            endIdx <- if (blockEnd - half > nextStart + cutoff) {
-                nextStart + cutoff
-            } else {
-                blockEnd
-            }
-            list(startIdx = nextStart, endIdx = endIdx)
-        },
+        ctx = ctx,
+        minBlockFn = .segCountMinBlock,
+        initEndFn = .segCountInitEnd,
+        fillFn = .segCountFill,
+        stepFn = .segCountStep,
         verbose = verbose
     )
 }
@@ -1151,24 +1148,24 @@ segmentByCount <- function(pos, maxCount, gapDist = 1e6, verbose = FALSE) {
 #' @noRd
 mergeWindows <- function(dentistResultByWindow, windowDividedRes) {
     if (length(dentistResultByWindow) != nrow(windowDividedRes)) {
-        stop("Different number of windows and imputed results!")
+        abort("Different number of windows and imputed results!")
     }
     mergedResults <- c()
-    for (k in 1:nrow(windowDividedRes)) {
+    for (k in seq_len(nrow(windowDividedRes))) {
         imputedK <- dentistResultByWindow[[k]]
         imputedK$index_within_window <- seq_len(nrow(imputedK))
-        imputedK <- imputedK %>%
+        imputedK <- imputedK |>
             mutate(
                 index_global = index_within_window +
                     windowDividedRes$windowStartIdx[k] -
                     1
             )
-        extractedResults <- imputedK %>%
+        extractedResults <- imputedK |>
             filter(
                 index_global >= windowDividedRes$fillStartIdx[k] &
                     index_global < windowDividedRes$fillEndIdx[k]
             )
-        mergedResults <- rbind(mergedResults, extractedResults)
+        mergedResults <- bind_rows(mergedResults, extractedResults)
     }
     return(mergedResults)
 }
@@ -1210,7 +1207,7 @@ mergeWindows <- function(dentistResultByWindow, windowDividedRes) {
     ordering <- order(prob, decreasing = TRUE)
     cumprob <- cumsum(prob[ordering])
     idx <- which(cumprob > coverage)[1]
-    cs <- ordering[1:idx]
+    cs <- ordering[seq_len(idx)]
     return(cs)
 }
 
@@ -1219,10 +1216,10 @@ mergeWindows <- function(dentistResultByWindow, windowDividedRes) {
 # Require exactly one of R (LD matrix) or X (genotype matrix).
 .slalomValidate <- function(R, X) {
     if (is.null(R) && is.null(X)) {
-        stop("Either R (LD matrix) or X (genotype matrix) must be provided.")
+        abort("Either R (LD matrix) or X (genotype matrix) must be provided.")
     }
     if (!is.null(R) && !is.null(X)) {
-        stop("Provide either R or X, not both.")
+        abort("Provide either R or X, not both.")
     }
 }
 
@@ -1235,7 +1232,7 @@ mergeWindows <- function(dentistResultByWindow, windowDividedRes) {
         return(as.numeric(cor(X, X[, leadIdx])))
     }
     if (!is.matrix(R) || nrow(R) != ncol(R) || nrow(R) != length(zScore)) {
-        stop("R must be a square matrix matching the length of zScore.")
+        abort("R must be a square matrix matching the length of zScore.")
     }
     R[, leadIdx]
 }
@@ -1279,18 +1276,18 @@ mergeWindows <- function(dentistResultByWindow, windowDividedRes) {
         nTotal = length(zScore),
         nR2 = nR2,
         nDentistSOutlier = nDentistSOutlier,
-        fraction = ifelse(nR2 > 0, nDentistSOutlier / nR2, 0),
+        fraction = if_else(nR2 > 0, nDentistSOutlier / nR2, 0),
         maxPip = max(prob),
         cs95 = cs,
         cs99 = cs99
     )
-    result <- as.data.frame(list(
+    result <- tibble(
         original_z = zScore,
         prob = prob,
         pvalue = pvalue,
         outliers = ds$outliers,
         nlog10p_dentist_s = ds$nlog10pDentistS
-    ))
+    )
     list(data = result, summary = summary)
 }
 
@@ -1422,6 +1419,10 @@ getSusieResult <- function(conData) {
 #' @param topLociTable Data frame. The top-loci table (e.g. from
 #'   \code{\link{getTopLoci}}) carrying \code{variant_id}, \code{pip}, and
 #'   \code{z} columns.
+#' @param ldSource The LD source from which the between-credible-set correlation
+#'   is derived on demand: a \code{QtlDataset} (individual-level) or a
+#'   \code{QtlSumStats} / \code{GwasSumStats} (summary statistics). See
+#'   \code{\link{computeCsCorrelation}}.
 #'
 #' @return A data frame with one row per CS, containing the following columns:
 #'   \item{cs_name}{Name of the Credible Set}
@@ -1431,10 +1432,14 @@ getSusieResult <- function(conData) {
 #'   \item{top_pip}{Highest Posterior Inclusion Probability (PIP) in the CS}
 #'   \item{top_z}{Z-score of the top variant}
 #'   \item{p_value}{P-value calculated from the top Z-score}
-#'   \item{cs_corr}{Pairwise correlations of other CSs in this RDS with the CS
-#'   of
-#'     the current row, delimited by '|', if there is more than one CS in this
-#'     RDS file}
+#'   \item{cs_corr_1, cs_corr_2, ...}{Each CS's pairwise correlation with every
+#'     CS (its row of the between-CS matrix, self-correlation on the diagonal),
+#'     computed on demand from \code{ldSource}. Absent when there are fewer than
+#'     two credible sets.}
+#'   \item{cs_corr_max}{Maximum absolute between-CS correlation (excluding the
+#'     self == 1); \code{NA} for a single CS.}
+#'   \item{cs_corr_min}{Minimum absolute between-CS correlation; \code{NA} for a
+#'     single CS.}
 #'
 #' @details This function is designed to be used only when there is at least one
 #'   Credible Set in the finemapping results usually for a given study and
@@ -1446,59 +1451,32 @@ getSusieResult <- function(conData) {
 #' @importFrom dplyr bind_rows
 #'
 #' @examples
+#' data(qtlSumStatsExample)
 #' vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
-#' fit <- list(pip = c(0.1, 0.7, 0.2),
-#'   sets = list(cs = list(L_1 = c(1, 2))), cs_corr = NULL)
+#' fit <- list(pip = c(0.1, 0.7, 0.2), sets = list(cs = list(L_1 = c(1, 2))))
 #' tl <- data.frame(variant_id = vids, pip = c(0.1, 0.7, 0.2),
 #'   z = c(1.0, 3.5, -0.5))
 #' fe <- FineMappingEntry(variantIds = vids, susieFit = fit, topLoci = tl)
-#' extractCsInfo(fe, csNames = "L_1", topLociTable = tl)
+#' # A single credible set has no between-CS correlation (cs_corr_* are NA), so
+#' # the ldSource is not consulted here.
+#' extractCsInfo(fe, csNames = "L_1", topLociTable = tl,
+#'   ldSource = qtlSumStatsExample)
 #'
 #' @export
-extractCsInfo <- function(finemappingEntry, csNames, topLociTable) {
+extractCsInfo <- function(finemappingEntry, csNames, topLociTable, ldSource) {
     fm <- finemappingEntry
     trimmed <- getSusieFit(fm)
     variantNames <- getVariantIds(fm)
-    results <- map(seq_along(csNames), function(i) {
-        csName <- csNames[i]
-        indices <- trimmed$sets$cs[[csName]]
-
-        # Get variants for this CS using the full variant names list
-        csVariants <- variantNames[indices]
-        csData <- topLociTable[topLociTable$variant_id %in% csVariants, ]
-        topRow <- which.max(csData$pip)
-
-        topVariant <- csData$variant_id[topRow]
-        # Find the global index of the top variant
-        topVariantGlobalIndex <- which(variantNames == topVariant)
-        topPip <- csData$pip[topRow]
-        topZ <- csData$z[topRow]
-        pValue <- .zToPvalue(topZ)
-
-        # Extract cs_corr
-        csCorr <- if (length(csNames) > 1) {
-            trimmed$cs_corr[i, ]
-        } else {
-            NA # Use NA for the second CS or when there's only one CS
-        }
-
-        # Return results for this CS as a one-row data.frame
-        result <- tibble(
-            cs_name = csName,
-            variants_per_cs = length(csVariants),
-            top_variant = topVariant,
-            top_variant_index = topVariantGlobalIndex,
-            top_pip = topPip,
-            top_z = topZ,
-            p_value = pValue,
-            # list column if csCorr is a vector
-            cs_corr = list(paste(csCorr, collapse = ","))
-        )
-        return(result)
-    })
-    # Combine all tibbles into one data frame
-    finalResult <- bind_rows(results)
-    return(finalResult)
+    csCorr <- computeCsCorrelation(fm, ldSource)
+    rows <- map(
+        seq_along(csNames),
+        .extractCsInfoRow,
+        csNames = csNames,
+        trimmed = trimmed,
+        variantNames = variantNames,
+        topLociTable = topLociTable
+    )
+    .csAppendCorrelationCols(bind_rows(rows), csCorr)
 }
 
 #' Extract Information for Top Variant from Finemapping Results
@@ -1520,7 +1498,8 @@ extractCsInfo <- function(finemappingEntry, csNames, topLociTable) {
 #'   \item{top_pip}{Highest Posterior Inclusion Probability (PIP)}
 #'   \item{top_z}{Z-score of the top variant}
 #'   \item{p_value}{P-value calculated from the top Z-score}
-#'   \item{cs_corr}{NA (as no CS correlation is available)}
+#'   \item{cs_corr_max}{NA (no between-CS correlation without a CS)}
+#'   \item{cs_corr_min}{NA (no between-CS correlation without a CS)}
 #'
 #' @details This function is designed to be used when no Credible Sets are
 #'   identified in the finemapping results, but information about the most
@@ -1563,106 +1542,47 @@ extractTopPipInfo <- function(finemappingEntry, sumstats) {
         top_pip = topPip,
         top_z = topZ,
         p_value = pValue,
-        cs_corr = NA # or NULL
+        cs_corr_max = NA_real_,
+        cs_corr_min = NA_real_
     )
 }
 
-# Parse one comma-joined cs_corr string into its values + max/min |corr| (self-
-# correlations equal to 1 excluded); invalid/empty input yields empties + NA.
+# Reduce one credible set's correlation vector (a row of the between-CS matrix,
+# the self-correlation == 1 on the diagonal) to its |corr| max/min, excluding
+# every self / perfect correlation (== 1). An empty result yields NA.
 # @noRd
 .extractCorrelations <- function(x) {
-    # Early return if x is invalid
-    if (is.na(x) || x == "" || is.null(x) || !grepl(",", as.character(x))) {
-        return(list(
-            values = numeric(0),
-            max_corr = NA_real_,
-            min_corr = NA_real_
-        ))
+    filtered <- abs(x[x != 1])
+    if (length(filtered) == 0L) {
+        return(list(max_corr = NA_real_, min_corr = NA_real_))
     }
-
-    # Convert and filter values
-    values <- as.numeric(unlist(strsplit(x, ",")))
-    valuesFiltered <- abs(values[values != 1])
-
-    # Return list with NA if no valid correlations
     list(
-        values = values,
-        max_corr = if (length(valuesFiltered) > 0) {
-            max(abs(valuesFiltered), na.rm = TRUE)
-        } else {
-            NA_real_
-        },
-        min_corr = if (length(valuesFiltered) > 0) {
-            min(abs(valuesFiltered), na.rm = TRUE)
-        } else {
-            NA_real_
-        }
+        max_corr = max(filtered, na.rm = TRUE),
+        min_corr = min(filtered, na.rm = TRUE)
     )
 }
 
-#' Parse Credible Set Correlations from extractCsInfo() Output
-#'
-#' This function takes the output from `extractCsInfo()` and expands the
-#' `cs_corr` column into multiple columns, preserving the original order of
-#' correlations. It also calculates maximum and minimum correlation values for
-#' each Credible Set.
-#'
-#' @param df Data frame. The output from `extractCsInfo()` function, containing
-#'   a `cs_corr` column with correlation information.
-#'
-#' @return A data frame with the original columns from the input, plus:
-#'   \item{cs_corr_1, cs_corr_2, ...}{Individual correlation values, with
-#'   column names
-#'         based on their position in the original string}
-#'   \item{cs_corr_max}{Maximum absolute correlation value (excluding 1)}
-#'   \item{cs_corr_min}{Minimum absolute correlation value}
-#'
-#' @details The function splits the `cs_corr` column, which typically contains
-#'   correlation values separated by '|', into individual columns. It preserves
-#'   the order of these correlations, allowing for easy interpretation in a
-#'   matrix-like format.
-#'
-#' @note - This function converts the input to a data frame if it isn't already
-#'   one. - It handles cases where correlation values might be missing or not in
-#'   the expected format. - The function assumes that correlation values of 1
-#'   represent self-correlations and excludes these when calculating max and min
-#'   correlations.
-#'
-#' @examples
-#' parseCsCorr(data.frame(
-#'   cs_name = c("L1", "L2"), cs_corr = c("1,0.3", "0.3,1")
-#' ))
-#' @export
-parseCsCorr <- function(df) {
-    # Ensure we work with a data frame
-    df <- as.data.frame(df)
-
-    # Process correlations
-    processedResults <- lapply(df$cs_corr, .extractCorrelations)
-    # If no valid results, add NA columns and return
-    if (all(map_lgl(processedResults, function(x) length(x$values) == 0))) {
-        df$cs_corr_max <- NA_real_
-        df$cs_corr_min <- NA_real_
-        return(df)
+# Append the between-CS correlation columns to the per-CS summary `base` from
+# the m x m matrix `csCorr` (whose rows are aligned to `base`): the expanded
+# cs_corr_1..m (each CS's row, self-correlation on the diagonal) plus
+# cs_corr_max / cs_corr_min (|corr| excluding the self == 1). A NULL matrix
+# (fewer than two credible sets) yields NA max/min and no expanded columns.
+# @noRd
+.csAppendCorrelationCols <- function(base, csCorr) {
+    if (is.null(csCorr)) {
+        return(mutate(base, cs_corr_max = NA_real_, cs_corr_min = NA_real_))
     }
-
-    # Determine max number of correlations
-    maxCorrCount <- max(map_int(processedResults, function(x) length(x$values)))
-
-    # Create and add correlation columns
-    colNames <- paste0("cs_corr_", 1:maxCorrCount)
-
-    for (i in seq_along(colNames)) {
-        df[[colNames[i]]] <- map_dbl(processedResults, function(x) {
-            if (length(x$values) >= i) x$values[i] else NA_real_
-        })
-    }
-
-    # Add max and min correlation columns
-    df$cs_corr_max <- map_dbl(processedResults, "max_corr")
-    df$cs_corr_min <- map_dbl(processedResults, "min_corr")
-
-    return(df)
+    perRow <- apply(csCorr, 1L, .extractCorrelations, simplify = FALSE)
+    expanded <- as_tibble(csCorr, .name_repair = "minimal")
+    names(expanded) <- str_c("cs_corr_", seq_len(ncol(csCorr)))
+    # unname(): apply() names its result by the matrix rownames, which map_dbl
+    # then carries into the column (tibbles preserve element names).
+    base |>
+        bind_cols(expanded) |>
+        mutate(
+            cs_corr_max = unname(map_dbl(perRow, "max_corr")),
+            cs_corr_min = unname(map_dbl(perRow, "min_corr"))
+        )
 }
 
 #' Process Credible Set Information and Determine Updating Strategy
@@ -1714,21 +1634,12 @@ autoDecision <- function(df, highCorrCols) {
     df$top_cs[topCsIndex] <- TRUE
 
     # Identify tagged_cs
-    df$tagged_cs <- map_lgl(seq_len(nrow(df)), function(i) {
-        if (df$top_cs[i]) {
-            return(FALSE)
-        }
-        if (df$p_value[i] > 1e-4) {
-            return(TRUE)
-        }
-        if (length(highCorrCols) == 0) {
-            return(FALSE)
-        }
-        rowVals <- df %>%
-            filter(row_number() == i) %>%
-            select(all_of(highCorrCols))
-        any(rowVals == 1)
-    })
+    df$tagged_cs <- map_lgl(
+        seq_len(nrow(df)),
+        .autoDecisionTagged,
+        df = df,
+        highCorrCols = highCorrCols
+    )
 
     # Count total and remaining CS
     totalCs <- nrow(df)
@@ -1797,14 +1708,14 @@ raissSingleMatrix <- function(
     verbose = TRUE
 ) {
     if (is.unsorted(refPanel$pos) || is.unsorted(knownZscores$pos)) {
-        stop("refPanel and knownZscores must be in increasing order of pos.")
+        abort("refPanel and knownZscores must be in increasing order of pos.")
     }
     if (is.data.frame(ldMatrix)) {
         ldMatrix <- as.matrix(ldMatrix)
     }
     knownsId <- intersect(knownZscores$variant_id, refPanel$variant_id)
-    knowns <- which(refPanel$variant_id %in% knownsId)
-    unknowns <- which(!refPanel$variant_id %in% knownsId)
+    knowns <- which(is_in(refPanel$variant_id, knownsId))
+    unknowns <- which(!is_in(refPanel$variant_id, knownsId))
     edge <- .raissEdgeCase(knowns, unknowns, knownZscores, verbose, ldMatrix)
     if (!is.null(edge)) {
         return(edge$value)
@@ -1815,9 +1726,9 @@ raissSingleMatrix <- function(
     results <- raissModel(zt, sigT, sigIT, lamb, rcond)
     results <- formatRaissDf(results, refPanel, unknowns)
     results <- filterRaissOutput(results, r2Threshold, minimumLd, verbose)
-    resultNofilter <- mergeRaissDf(results$zscoresNofilter, knownZscores) %>%
+    resultNofilter <- mergeRaissDf(results$zscoresNofilter, knownZscores) |>
         arrange(pos)
-    resultFilter <- mergeRaissDf(results$zscores, knownZscores) %>%
+    resultFilter <- mergeRaissDf(results$zscores, knownZscores) |>
         arrange(pos)
     list(
         resultNofilter = resultNofilter,
@@ -1866,13 +1777,13 @@ raissSingleMatrix <- function(
 ) {
     if (length(knowns) == 0) {
         if (verbose) {
-            message("No known variants found, cannot perform imputation.")
+            inform("No known variants found, cannot perform imputation.")
         }
         return(list(value = NULL))
     }
     if (length(unknowns) == 0) {
         if (verbose) {
-            message("No unknown variants to impute, returning known variants.")
+            inform("No unknown variants to impute, returning known variants.")
         }
         return(list(
             value = list(
@@ -1942,11 +1853,11 @@ raissSingleMatrixFromX <- function(
     verbose = TRUE
 ) {
     if (is.unsorted(refPanel$pos) || is.unsorted(knownZscores$pos)) {
-        stop("refPanel and knownZscores must be in increasing order of pos.")
+        abort("refPanel and knownZscores must be in increasing order of pos.")
     }
     knownsId <- intersect(knownZscores$variant_id, refPanel$variant_id)
-    knowns <- which(refPanel$variant_id %in% knownsId)
-    unknowns <- which(!refPanel$variant_id %in% knownsId)
+    knowns <- which(is_in(refPanel$variant_id, knownsId))
+    unknowns <- which(!is_in(refPanel$variant_id, knownsId))
     edge <- .raissEdgeCase(knowns, unknowns, knownZscores, verbose)
     if (!is.null(edge)) {
         return(edge$value)
@@ -1962,9 +1873,9 @@ raissSingleMatrixFromX <- function(
     )
     results <- formatRaissDf(imp, refPanel, unknowns)
     results <- filterRaissOutput(results, r2Threshold, minimumLd, verbose)
-    resultNofilter <- mergeRaissDf(results$zscoresNofilter, knownZscores) %>%
+    resultNofilter <- mergeRaissDf(results$zscoresNofilter, knownZscores) |>
         arrange(pos)
-    resultFilter <- mergeRaissDf(results$zscores, knownZscores) %>%
+    resultFilter <- mergeRaissDf(results$zscores, knownZscores) |>
         arrange(pos)
     list(
         resultNofilter = resultNofilter,
@@ -2021,15 +1932,18 @@ raissSingleMatrixFromX <- function(
 # List of genotype-matrix blocks: impute each via SVD, then row-bind.
 .raissGenotypeBlocks <- function(refPanel, knownZscores, genotypeMatrix, p) {
     if (p$verbose) {
-        message(
+        msg <- glue(
             "Processing multiple genotype matrix blocks via SVD-based ",
             "imputation..."
         )
+        inform(msg)
     }
     resultsList <- list()
     for (i in seq_along(genotypeMatrix)) {
         if (p$verbose) {
-            message("Processing block ", i, " of ", length(genotypeMatrix))
+            nBlocks <- length(genotypeMatrix)
+            msg <- glue("Processing block {i} of {nBlocks}")
+            inform(msg)
         }
         blockResult <- raissSingleMatrixFromX(
             refPanel,
@@ -2047,21 +1961,15 @@ raissSingleMatrixFromX <- function(
     }
     if (length(resultsList) == 0) {
         if (p$verbose) {
-            message("No blocks could be processed.")
+            inform("No blocks could be processed.")
         }
         return(NULL)
     }
-    combinedNofilter <- do.call(
-        bind_rows,
-        lapply(resultsList, `[[`, "resultNofilter")
-    )
-    combinedFilter <- do.call(
-        bind_rows,
-        lapply(resultsList, `[[`, "resultFilter")
-    )
+    combinedNofilter <- bind_rows(map(resultsList, "resultNofilter"))
+    combinedFilter <- bind_rows(map(resultsList, "resultFilter"))
     list(
-        resultNofilter = combinedNofilter %>% arrange(pos),
-        resultFilter = combinedFilter %>% arrange(pos),
+        resultNofilter = combinedNofilter |> arrange(pos),
+        resultFilter = combinedFilter |> arrange(pos),
         ldMat = NULL
     )
 }
@@ -2070,7 +1978,7 @@ raissSingleMatrixFromX <- function(
 .raissGenotypePath <- function(refPanel, knownZscores, genotypeMatrix, p) {
     if (is.matrix(genotypeMatrix)) {
         if (p$verbose) {
-            message("Processing genotype matrix via SVD-based imputation...")
+            inform("Processing genotype matrix via SVD-based imputation...")
         }
         return(raissSingleMatrixFromX(
             refPanel,
@@ -2086,7 +1994,7 @@ raissSingleMatrixFromX <- function(
     if (is.list(genotypeMatrix)) {
         return(.raissGenotypeBlocks(refPanel, knownZscores, genotypeMatrix, p))
     }
-    stop("genotypeMatrix must be a matrix or a list of matrices.")
+    abort("genotypeMatrix must be a matrix or a list of matrices.")
 }
 
 # Impute one LD block against its reference-panel subset.
@@ -2104,15 +2012,14 @@ raissSingleMatrixFromX <- function(
     blockIndices <- match(blockVariantIds, refPanel$variant_id)
     blockRefPanel <- refPanel[blockIndices, ]
     blockLdMatrix <- ldMatrix$ldMatrices[[blockId]]
-    blockKnownZscores <- knownZscores %>%
-        filter(variant_id %in% blockVariantIds)
+    blockKnownZscores <- knownZscores |>
+        filter(is_in(variant_id, blockVariantIds))
     if (nrow(blockLdMatrix) != nrow(blockRefPanel)) {
-        stop(
-            "Block ",
-            blockId,
-            " : LD matrix dimension does not match number of ",
-            "variants in reference panel"
+        msg <- glue(
+            "Block {blockId} : LD matrix dimension does not match number ",
+            "of variants in reference panel"
         )
+        abort(msg)
     }
     raissSingleMatrix(
         blockRefPanel,
@@ -2142,10 +2049,8 @@ raissSingleMatrixFromX <- function(
             )
         }
     }
-    ldFilteredList <- lapply(resultsList, function(x) x$ldMat)
-    variantList <- lapply(ldFilteredList, function(ld) {
-        data.frame(variants = colnames(ld))
-    })
+    ldFilteredList <- map(resultsList, "ldMat")
+    variantList <- map(ldFilteredList, .ldVariantsDf)
     ldMatrix <- createLdMatrix(
         ldMatrices = ldFilteredList,
         variants = variantList
@@ -2160,14 +2065,16 @@ raissSingleMatrixFromX <- function(
 # LD-block imputation path: impute each block then combine.
 .raissLdBlocksPath <- function(refPanel, knownZscores, ldMatrix, p) {
     if (p$verbose) {
-        message("Processing multiple LD blocks...")
+        inform("Processing multiple LD blocks...")
     }
     variantIndices <- ldMatrix$variantIndices
     blockIds <- unique(variantIndices$blockId)
     resultsList <- list()
     for (blockId in blockIds) {
         if (p$verbose) {
-            message("Processing block ", blockId, " of ", length(blockIds))
+            nBlocks <- length(blockIds)
+            msg <- glue("Processing block {blockId} of {nBlocks}")
+            inform(msg)
         }
         blockResult <- .raissLdBlockOne(
             refPanel,
@@ -2181,10 +2088,11 @@ raissSingleMatrixFromX <- function(
     }
     if (length(resultsList) == 0) {
         if (p$verbose) {
-            message(
+            msg <- glue(
                 "No blocks could be processed. Check that knownZscores ",
                 "overlap with variants in the blocks."
             )
+            inform(msg)
         }
         return(NULL)
     }
@@ -2194,11 +2102,9 @@ raissSingleMatrixFromX <- function(
 # Single LD-matrix imputation path (extracts matrix from a 1-block list).
 .raissSingleLdPath <- function(refPanel, knownZscores, ldMatrix, p) {
     if (p$verbose) {
-        message(
-            "Processing single LD matrix",
-            if (!is.matrix(ldMatrix)) " from list",
-            "..."
-        )
+        fromList <- if (!is.matrix(ldMatrix)) " from list" else ""
+        msg <- glue("Processing single LD matrix{fromList}...")
+        inform(msg)
     }
     if (!is.matrix(ldMatrix)) {
         ldMatrix <- ldMatrix$ldMatrices[[1]]
@@ -2286,12 +2192,12 @@ raiss <- function(
     )
     if (!is.null(genotypeMatrix)) {
         if (!is.null(ldMatrix)) {
-            stop("Provide either ldMatrix or genotypeMatrix, not both.")
+            abort("Provide either ldMatrix or genotypeMatrix, not both.")
         }
         return(.raissGenotypePath(refPanel, knownZscores, genotypeMatrix, p))
     }
     if (is.null(ldMatrix)) {
-        stop("Provide either ldMatrix or genotypeMatrix.")
+        abort("Provide either ldMatrix or genotypeMatrix.")
     }
     isSingleMatrixCase <- is.matrix(ldMatrix) ||
         (is.list(ldMatrix) &&
@@ -2327,7 +2233,7 @@ raissModel <- function(
 ) {
     sigTInv <- invertMatRecursive(sigT, lamb, rcond)
     if (!is.numeric(zt) || !is.numeric(sigT) || !is.numeric(sigIT)) {
-        stop("zt, sigT, and sigIT must be numeric.")
+        abort("zt, sigT, and sigIT must be numeric.")
     }
     if (batch) {
         conditionNumber <- if (reportConditionNumber) {
@@ -2369,15 +2275,22 @@ raissModel <- function(
 #'   'ref', and 'alt'.
 #' @noRd
 formatRaissDf <- function(imp, refPanel, unknowns) {
-    resultDf <- data.frame(
-        chrom = refPanel[unknowns, "chrom"],
-        pos = refPanel[unknowns, "pos"],
-        variant_id = refPanel[unknowns, "variant_id"],
-        A1 = refPanel[unknowns, "A1"],
-        A2 = refPanel[unknowns, "A2"],
-        z = imp$mu,
-        Var = imp$var,
-        raissLdScore = imp$raissLdScore,
+    # z / Var / raissLdScore come back from the RAISS matrix algebra as
+    # 1-column matrices (e.g. imp$mu <- sigIT %*% ...). Flatten them to plain
+    # numeric vectors EXPLICITLY with as.numeric() rather than leaning on
+    # data.frame()'s implicit matrix-to-vector coercion (tibble would keep them
+    # as matrix columns and break the downstream mergeRaissDf if_else). Extract
+    # refPanel columns via [[ ]] + row index so we get a vector whatever class
+    # refPanel is, instead of relying on the [, "col"] single-column drop.
+    resultDf <- tibble(
+        chrom = refPanel[["chrom"]][unknowns],
+        pos = refPanel[["pos"]][unknowns],
+        variant_id = refPanel[["variant_id"]][unknowns],
+        A1 = refPanel[["A1"]][unknowns],
+        A2 = refPanel[["A2"]][unknowns],
+        z = as.numeric(imp$mu),
+        Var = as.numeric(imp$var),
+        raissLdScore = as.numeric(imp$raissLdScore),
         conditionNumber = imp$conditionNumber,
         correctInversion = imp$correctInversion
     )
@@ -2397,17 +2310,18 @@ formatRaissDf <- function(imp, refPanel, unknowns) {
     )
 
     # Reorder the columns
-    resultDf <- resultDf[, columnOrder]
+    resultDf <- select(resultDf, all_of(columnOrder))
     return(resultDf)
 }
 
+#' @importFrom dplyr full_join
+#' @noRd
 mergeRaissDf <- function(raissDf, knownZscores) {
-    # Merge the data frames
-    mergedDf <- merge(
+    # Full outer join keeps every variant from both frames (imputed + known).
+    mergedDf <- full_join(
         raissDf,
         knownZscores,
-        by = c("chrom", "pos", "variant_id", "A1", "A2"),
-        all = TRUE
+        by = c("chrom", "pos", "variant_id", "A1", "A2")
     )
 
     # Identify rows that came from knownZscores
@@ -2420,15 +2334,21 @@ mergeRaissDf <- function(raissDf, knownZscores) {
     # If there are overlapping columns (e.g., z.x and z.y), resolve them For
     # example, use z from knownZscores where available, otherwise use z from
     # raissDf
-    mergedDf$z <- ifelse(fromKnown, mergedDf$z.y, mergedDf$z.x)
+    mergedDf$z <- if_else(fromKnown, mergedDf$z.y, mergedDf$z.x)
 
-    # Remove the extra columns resulted from the merge (e.g., z.x, z.y)
-    mergedDf <- mergedDf[, !colnames(mergedDf) %in% c("z.x", "z.y")]
+    # Remove the extra columns produced by the join (z.x, z.y).
+    mergedDf <- select(mergedDf, -all_of(c("z.x", "z.y")))
     mergedDf <- arrange(mergedDf, pos)
     # assign imputed variants beta, se as NA to avoid confusion, since they are
-    # not imputed
-    mergedDf$beta[mergedDf$Var == -1] <- NA
-    mergedDf$se[mergedDf$Var == -1] <- NA
+    # not imputed. beta/se are optional (knownZscores may omit them), so guard
+    # on column presence explicitly rather than relying on a data.frame
+    # silently creating an all-NA column on `$col[mask] <- NA`.
+    if (is_in("beta", colnames(mergedDf))) {
+        mergedDf$beta[mergedDf$Var == -1] <- NA
+    }
+    if (is_in("se", colnames(mergedDf))) {
+        mergedDf$se[mergedDf$Var == -1] <- NA
+    }
     return(mergedDf)
 }
 
@@ -2436,7 +2356,7 @@ mergeRaissDf <- function(raissDf, knownZscores) {
 # maxLabelLength).
 # @noRd
 .formatRaissLine <- function(label, value, maxLabelLength) {
-    sprintf("%-*s %d", maxLabelLength, paste0(label, ":"), value)
+    sprintf("%-*s %d", maxLabelLength, str_c(label, ":"), value)
 }
 
 # Print the RAISS imputation filter report (counts from pre/post frames).
@@ -2463,10 +2383,10 @@ mergeRaissDf <- function(raissDf, knownZscores) {
         "Variants filtered because of low R2",
         "Remaining variants after filter"
     )
-    maxLabelLength <- max(nchar(paste0(labels, ":")))
-    message("IMPUTATION REPORT\n")
+    maxLabelLength <- max(str_length(str_c(labels, ":")))
+    inform("IMPUTATION REPORT\n")
     for (i in seq_along(labels)) {
-        message(.formatRaissLine(labels[i], counts[i], maxLabelLength))
+        inform(.formatRaissLine(labels[i], counts[i], maxLabelLength))
     }
 }
 
@@ -2476,21 +2396,25 @@ filterRaissOutput <- function(
     minimumLd = 5,
     verbose = TRUE
 ) {
-    zscores <- zscores[, c(
-        "chrom",
-        "pos",
-        "variant_id",
-        "A1",
-        "A2",
-        "z",
-        "Var",
-        "raissLdScore"
-    )]
+    zscores <- select(
+        zscores,
+        all_of(c(
+            "chrom",
+            "pos",
+            "variant_id",
+            "A1",
+            "A2",
+            "z",
+            "Var",
+            "raissLdScore"
+        ))
+    )
     zscores$raissR2 <- 1 - zscores$Var
     zscoresNofilter <- zscores
-    zscores <- zscores[
-        zscores$raissR2 > r2Threshold & zscores$raissLdScore >= minimumLd,
-    ]
+    zscores <- filter(
+        zscores,
+        .data$raissR2 > r2Threshold & .data$raissLdScore >= minimumLd
+    )
     if (verbose) {
         .filterRaissReport(zscoresNofilter, zscores, r2Threshold, minimumLd)
     }
@@ -2561,14 +2485,15 @@ invertMatEigen <- function(mat, tol = 1e-3) {
     L <- which(cumsum(eigenMat$values) / sum(eigenMat$values) > 1 - tol)[1]
     if (is.na(L)) {
         # all eigen values are extremely small
-        stop(
+        msg <- glue(
             "Cannot invert the input matrix because all its eigen ",
             "values are negative or close to zero"
         )
+        abort(msg)
     }
-    matInv <- eigenMat$vectors[, 1:L] %*%
-        diag(1 / eigenMat$values[1:L]) %*%
-        t(eigenMat$vectors[, 1:L])
+    matInv <- eigenMat$vectors[, seq_len(L)] %*%
+        diag(1 / eigenMat$values[seq_len(L)]) %*%
+        t(eigenMat$vectors[, seq_len(L)])
 
     return(matInv)
 }
@@ -2621,7 +2546,7 @@ ldMismatchQc <- function(
     ldMethod = "sample",
     ...
 ) {
-    method <- match.arg(method)
+    method <- arg_match(method)
     if (method == "dentist") {
         qcResults <- dentistSingleWindow(
             zScore,
@@ -2638,9 +2563,10 @@ ldMismatchQc <- function(
         # consistency
         result <- qcResults$data
         if (
-            "outliers" %in% colnames(result) && !"outlier" %in% colnames(result)
+            is_in("outliers", colnames(result)) &&
+                !is_in("outlier", colnames(result))
         ) {
-            colnames(result)[colnames(result) == "outliers"] <- "outlier"
+            result <- rename(result, outlier = "outliers")
         }
         return(result)
     }
@@ -2650,7 +2576,7 @@ ldMismatchQc <- function(
     if (is.null(zMismatchQc)) {
         return("none")
     }
-    match.arg(zMismatchQc, c("none", "slalom", "dentist"))
+    arg_match(zMismatchQc, c("none", "slalom", "dentist"))
 }
 
 #' Effective sample size for a case/control study
@@ -2688,17 +2614,20 @@ effectiveN <- function(nCase, nControl) {
     if (
         !requireNamespace("susieR", quietly = TRUE) ||
             !all(
-                c("estimate_s_rss", "kriging_rss") %in%
+                is_in(
+                    c("estimate_s_rss", "kriging_rss"),
                     getNamespaceExports("susieR")
+                )
             )
     ) {
         # nocov start
-        stop(
+        msg <- glue(
             "krigingOutlierQc requires a susieR that provides ",
             "estimate_s_rss() and kriging_rss(); the installed susieR does ",
             "not. Install a susieR with the kriging RSS diagnostic, or ",
             "disable alleleFlipKriging."
         )
+        abort(msg)
         # nocov end
     }
 }
@@ -2750,10 +2679,10 @@ krigingOutlierQc <- function(
     zScore <- as.numeric(zScore)
     m <- length(zScore)
     if (is.null(R) || !is.matrix(R) || nrow(R) != m || ncol(R) != m) {
-        stop("krigingOutlierQc requires a square LD matrix aligned to zScore.")
+        abort("krigingOutlierQc requires a square LD matrix aligned to zScore.")
     }
     if (missing(n) || length(n) != 1L || is.na(n) || !is.finite(n) || n <= 0) {
-        stop("krigingOutlierQc requires a single positive sample size 'n'.")
+        abort("krigingOutlierQc requires a single positive sample size 'n'.")
     }
     .krigingCheckSusie()
     if (is.null(variantIds)) {
@@ -2772,14 +2701,13 @@ krigingOutlierQc <- function(
         abs(zScore) > zThreshold
     list(
         flip = flip,
-        diagnostics = data.frame(
+        diagnostics = tibble(
             variant_id = if (is.null(variantIds)) seq_len(m) else variantIds,
             z = zScore,
             condmean = condMean,
             z_std_diff = zStdDiff,
             logLR = logLR,
-            flipped = flip,
-            stringsAsFactors = FALSE
+            flipped = flip
         )
     )
 }
@@ -2789,21 +2717,18 @@ krigingOutlierQc <- function(
 # data.frame/LdData/QcResult-based summaryStatsQc and rssBasicQc).
 # =============================================================================
 
-# Convert one entry's GRanges into a flat data.frame with the column shape
+# Convert one entry's GRanges into a flat tibble with the column shape
 # harmonizeAlleles expects (lower-case chrom/pos plus the CapsCase mcols).
 .entryGrangesToDf <- function(gr) {
     mc <- as.data.frame(S4Vectors::mcols(gr), stringsAsFactors = FALSE)
-    out <- data.frame(
-        chrom = sub(
-            "^chr",
-            "",
+    out <- tibble(
+        chrom = str_remove(
             as.character(GenomicRanges::seqnames(gr)),
-            ignore.case = TRUE
+            regex("^chr", ignore_case = TRUE)
         ),
-        pos = GenomicRanges::start(gr),
-        stringsAsFactors = FALSE
+        pos = GenomicRanges::start(gr)
     )
-    cbind(out, mc)
+    bind_cols(out, mc)
 }
 
 # Build a refVariants data.frame (chrom, pos, A1, A2, variant_id) from the
@@ -2811,7 +2736,7 @@ krigingOutlierQc <- function(
 # pos).
 .refVariantsFromSketch <- function(handle) {
     si <- getSnpInfo(handle)
-    chr <- sub("^chr", "", as.character(si$CHR), ignore.case = TRUE)
+    chr <- str_remove(as.character(si$CHR), regex("^chr", ignore_case = TRUE))
     data.frame(
         chrom = chr,
         pos = as.integer(si$BP),
@@ -2838,13 +2763,13 @@ krigingOutlierQc <- function(
         seqnames = chr,
         ranges = IRanges::IRanges(start = as.integer(df$pos), width = 1L)
     )
-    if (!is.null(df$variant_id) && is.null(df$SNP)) {
+    if (is_in("variant_id", colnames(df)) && !is_in("SNP", colnames(df))) {
         df$SNP <- df$variant_id
     }
     baseCols <- c("SNP", "A1", "A2", "Z", "N")
     optCols <- c("MAF", "INFO", "BETA", "SE", "P", "N_CASE", "N_CONTROL")
     use <- intersect(c(baseCols, optCols), colnames(df))
-    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(df[, use, drop = FALSE])
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(select(df, all_of(use)))
     gr
 }
 
@@ -2870,19 +2795,18 @@ krigingOutlierQc <- function(
 # Base (variant_id/chrom/pos/A1/A2) frame for one sumstat-entry GRanges.
 .entryDfBase <- function(gr, mc, chr) {
     colOr <- function(name) {
-        if (name %in% colnames(mc)) {
+        if (is_in(name, colnames(mc))) {
             as.character(mc[[name]])
         } else {
             rep(NA_character_, length(gr))
         }
     }
-    data.frame(
+    tibble(
         variant_id = colOr("SNP"),
         chrom = chr,
-        pos = as.integer(GenomicRanges::start(gr)),
+        pos = unname(as.integer(GenomicRanges::start(gr))),
         A1 = colOr("A1"),
-        A2 = colOr("A2"),
-        stringsAsFactors = FALSE
+        A2 = colOr("A2")
     )
 }
 
@@ -2891,7 +2815,7 @@ krigingOutlierQc <- function(
     statMap <- c(z = "Z", beta = "BETA", se = "SE", N = "N", maf = "MAF")
     for (out in names(statMap)) {
         src <- statMap[[out]]
-        if (src %in% colnames(mc)) {
+        if (is_in(src, colnames(mc))) {
             df[[out]] <- as.numeric(mc[[src]])
         }
     }
@@ -2905,26 +2829,27 @@ krigingOutlierQc <- function(
     label = "entry",
     keepChrPrefix = TRUE
 ) {
-    derive <- match.arg(derive)
+    derive <- arg_match(derive)
     mc <- S4Vectors::mcols(gr)
     for (col in require) {
-        if (!(col %in% colnames(mc))) {
-            stop(sprintf("%s: entry has no %s mcol.", label, col))
+        if (!is_in(col, colnames(mc))) {
+            msg <- glue("{label}: entry has no {col} mcol.")
+            abort(msg)
         }
     }
     chr <- as.character(GenomicRanges::seqnames(gr))
     if (!keepChrPrefix) {
-        chr <- sub("^chr", "", chr, ignore.case = TRUE)
+        chr <- str_remove(chr, regex("^chr", ignore_case = TRUE))
     }
     df <- .entryDfBase(gr, mc, chr)
     df <- .entryDfAddStats(df, mc)
     if (
         derive == "zFromBetaSe" &&
-            is.null(df$z) &&
-            !is.null(df$beta) &&
-            !is.null(df$se)
+            is.null(df[["z"]]) &&
+            !is.null(df[["beta"]]) &&
+            !is.null(df[["se"]])
     ) {
-        df$z <- df$beta / df$se
+        df[["z"]] <- df[["beta"]] / df[["se"]]
     }
     df
 }
@@ -2945,14 +2870,14 @@ krigingOutlierQc <- function(
 # genotype matrix safely under rank deficiency.
 .safeSvd <- function(mat, tol = 1e-8, maxRank = NULL) {
     if (max(abs(mat)) == 0) {
-        stop("Cannot compute SVD of an all-zero matrix.")
+        abort("Cannot compute SVD of an all-zero matrix.")
     }
     s <- svd(mat)
     d <- s$d
     keep <- if (tol > 0 && length(d) > 0) {
         out <- d / d[1] > tol
         if (!any(out)) {
-            stop("All singular values are below the tolerance threshold.")
+            abort("All singular values are below the tolerance threshold.")
         }
         out
     } else {
@@ -2994,7 +2919,7 @@ krigingOutlierQc <- function(
         dupIdx <- which(dupBearer[idx] == -1 & corVec > rThreshold)
         if (length(dupIdx) > 0) {
             j <- idx[dupIdx]
-            sign[j] <- ifelse(ld[i, j] < 0, -1, sign[j])
+            sign[j] <- if_else(ld[i, j] < 0, -1, sign[j])
             corABS[j] <- corVec[dupIdx]
             dupBearer[j] <- count
         }
@@ -3014,14 +2939,14 @@ krigingOutlierQc <- function(
 }
 
 .deriveBetaSeFromZ <- function(df) {
-    hasBeta <- "BETA" %in% colnames(df)
-    hasSe <- "SE" %in% colnames(df)
+    hasBeta <- is_in("BETA", colnames(df))
+    hasSe <- is_in("SE", colnames(df))
     if (hasBeta && hasSe) {
         return(list(df = df, audit = NULL))
     }
-    hasZ <- "Z" %in% colnames(df)
-    hasMaf <- "MAF" %in% colnames(df)
-    hasN <- "N" %in% colnames(df)
+    hasZ <- is_in("Z", colnames(df))
+    hasMaf <- is_in("MAF", colnames(df))
+    hasN <- is_in("N", colnames(df))
     if (!(hasZ && hasMaf && hasN)) {
         return(list(df = df, audit = NULL))
     }
@@ -3044,40 +2969,38 @@ krigingOutlierQc <- function(
 # skipRegion may be a character vector of "chr:start-end" strings or a GRanges.
 # Parse one 'chr:start-end' skip-region string into a 1-row data.frame.
 .parseSkipRegionEntry <- function(s) {
-    m <- regmatches(s, regexec("^([^:]+):([0-9]+)-([0-9]+)$", s))[[1]]
-    if (length(m) != 4L) {
-        stop("skipRegion entry must be 'chr:start-end'; got '", s, "'")
+    m <- str_match(s, "^([^:]+):([0-9]+)-([0-9]+)$")[1L, ]
+    if (is.na(m[[1L]])) {
+        msg <- glue("skipRegion entry must be 'chr:start-end'; got '{s}'")
+        abort(msg)
     }
-    data.frame(
-        chrom = sub("^chr", "", m[2], ignore.case = TRUE),
-        start = as.integer(m[3]),
-        end = as.integer(m[4]),
-        stringsAsFactors = FALSE
+    tibble(
+        chrom = str_remove(m[[2L]], regex("^chr", ignore_case = TRUE)),
+        start = as.integer(m[[3L]]),
+        end = as.integer(m[[4L]])
     )
 }
 
 # Normalise skipRegion (character vector or GRanges) to a chrom/start/end frame.
 .parseSkipRegion <- function(skipRegion) {
     if (is.character(skipRegion)) {
-        return(do.call(rbind, lapply(skipRegion, .parseSkipRegionEntry)))
+        return(bind_rows(map(skipRegion, .parseSkipRegionEntry)))
     }
     if (methods::is(skipRegion, "GRanges")) {
-        return(data.frame(
-            chrom = sub(
-                "^chr",
-                "",
+        return(tibble(
+            chrom = str_remove(
                 as.character(GenomicRanges::seqnames(skipRegion)),
-                ignore.case = TRUE
+                regex("^chr", ignore_case = TRUE)
             ),
             start = GenomicRanges::start(skipRegion),
-            end = GenomicRanges::end(skipRegion),
-            stringsAsFactors = FALSE
+            end = GenomicRanges::end(skipRegion)
         ))
     }
-    stop(
+    msg <- glue(
         "skipRegion must be a character vector of 'chr:start-end' ",
         "strings or a GRanges."
     )
+    abort(msg)
 }
 
 .applySkipRegion <- function(df, skipRegion) {
@@ -3086,14 +3009,17 @@ krigingOutlierQc <- function(
     }
     parsed <- .parseSkipRegion(skipRegion)
     dropMask <- rep(FALSE, nrow(df))
-    dfChr <- sub("^chr", "", as.character(df$chrom), ignore.case = TRUE)
+    dfChr <- str_remove(
+        as.character(df$chrom),
+        regex("^chr", ignore_case = TRUE)
+    )
     for (i in seq_len(nrow(parsed))) {
         dropMask <- dropMask |
             (dfChr == parsed$chrom[i] &
                 df$pos >= parsed$start[i] &
                 df$pos <= parsed$end[i])
     }
-    df[!dropMask, , drop = FALSE]
+    filter(df, !dropMask)
 }
 
 # Apply the panel-vs-sumstats allele harmonization using the slim
@@ -3112,15 +3038,15 @@ krigingOutlierQc <- function(
     flipCandidates <- c("Z", "BETA")
     colToFlip <- intersect(flipCandidates, colnames(df))
     if (length(colToFlip) == 0L) {
-        stop(
+        msg <- glue(
             "summaryStatsQc: input entry must contain at least one of ",
-            "Z or BETA ",
-            "before panel harmonization."
+            "Z or BETA before panel harmonization."
         )
+        abort(msg)
     }
     colToComplement <- intersect("MAF", colnames(df))
-    if (!"A1" %in% colnames(df) || !"A2" %in% colnames(df)) {
-        stop("summaryStatsQc: input entry must contain A1 and A2 columns.")
+    if (!is_in("A1", colnames(df)) || !is_in("A2", colnames(df))) {
+        abort("summaryStatsQc: input entry must contain A1 and A2 columns.")
     }
     res <- harmonizeAlleles(
         targetData = df,
@@ -3134,7 +3060,7 @@ krigingOutlierQc <- function(
         removeDups = removeDups
     )
     out <- res$harmonizedData
-    if (!"chrom" %in% colnames(out) && "chr" %in% colnames(out)) {
+    if (!is_in("chrom", colnames(out)) && is_in("chr", colnames(out))) {
         colnames(out)[colnames(out) == "chr"] <- "chrom"
     }
     attr(out, "qcCounts") <- attr(res, "qcCounts")
@@ -3159,16 +3085,17 @@ krigingOutlierQc <- function(
     }
     mafCol <- intersect(c("MAF", "FRQ"), colnames(df))[1L]
     if (is.na(mafCol)) {
-        stop(
+        msg <- glue(
             ".applyContentFilters: mafCutoff > 0 requires a MAF or FRQ ",
             "column."
         )
+        abort(msg)
     }
     before <- nrow(df)
     mafVals <- as.numeric(df[[mafCol]])
     # Normalise effect-allele frequency to MAF: take min(af, 1-af).
     mafVals <- pmin(mafVals, 1 - mafVals, na.rm = FALSE)
-    df <- df[!is.na(mafVals) & mafVals >= mafCutoff, , drop = FALSE]
+    df <- filter(df, !is.na(mafVals) & mafVals >= mafCutoff)
     list(df = df, dropped = before - nrow(df))
 }
 
@@ -3177,24 +3104,24 @@ krigingOutlierQc <- function(
     if (infoCutoff <= 0) {
         return(list(df = df, dropped = NULL))
     }
-    if (!"INFO" %in% colnames(df)) {
-        stop(".applyContentFilters: infoCutoff > 0 requires an INFO column.")
+    if (!is_in("INFO", colnames(df))) {
+        abort(".applyContentFilters: infoCutoff > 0 requires an INFO column.")
     }
     before <- nrow(df)
     infoVals <- as.numeric(df$INFO)
-    df <- df[!is.na(infoVals) & infoVals >= infoCutoff, , drop = FALSE]
+    df <- filter(df, !is.na(infoVals) & infoVals >= infoCutoff)
     list(df = df, dropped = before - nrow(df))
 }
 
 # Per-variant N outlier filter (MAD-z on the sample-size column).
 .cfN <- function(df, nCutoff) {
-    if (!(nCutoff > 0 && "N" %in% colnames(df) && nrow(df) > 0L)) {
+    if (!(nCutoff > 0 && is_in("N", colnames(df)) && nrow(df) > 0L)) {
         return(list(df = df, dropped = NULL))
     }
     nVals <- as.numeric(df$N)
     before <- nrow(df)
     if (any(is.na(nVals))) {
-        df <- df[!is.na(nVals), , drop = FALSE]
+        df <- filter(df, !is.na(nVals))
         nVals <- nVals[!is.na(nVals)]
     }
     if (length(nVals) > 0L) {
@@ -3202,7 +3129,7 @@ krigingOutlierQc <- function(
         madN <- stats::mad(nVals, constant = 1)
         if (madN > 0) {
             zN <- abs(nVals - medN) / madN
-            df <- df[zN <= nCutoff, , drop = FALSE]
+            df <- filter(df, zN <= nCutoff)
         }
     }
     list(df = df, dropped = before - nrow(df))
@@ -3296,13 +3223,13 @@ krigingOutlierQc <- function(
 
 # Normalize chromosome labels; optionally drop non-standard chromosomes.
 .scNormalizeChr <- function(df, normalizeChr, dropNonstandardChr) {
-    if (!normalizeChr || !"chrom" %in% colnames(df)) {
+    if (!normalizeChr || !is_in("chrom", colnames(df))) {
         return(list(df = df, audit = list()))
     }
     chr <- as.character(df$chrom)
-    chr <- sub("^chr", "", chr, ignore.case = TRUE)
-    chr <- sub("^ch", "", chr, ignore.case = TRUE)
-    chr <- toupper(chr)
+    chr <- str_remove(chr, regex("^chr", ignore_case = TRUE))
+    chr <- str_remove(chr, regex("^ch", ignore_case = TRUE))
+    chr <- str_to_upper(chr)
     chr[chr == "23"] <- "X"
     chr[chr == "24"] <- "Y"
     chr[chr == "M"] <- "MT"
@@ -3310,8 +3237,8 @@ krigingOutlierQc <- function(
     audit <- list()
     if (dropNonstandardChr) {
         before <- nrow(df)
-        standardChrs <- c(as.character(1:22), "X", "Y", "MT")
-        df <- df[chr %in% standardChrs, , drop = FALSE]
+        standardChrs <- c(as.character(seq_len(22)), "X", "Y", "MT")
+        df <- filter(df, is_in(chr, standardChrs))
         dropped <- before - nrow(df)
         if (dropped > 0L) audit$nonstandardChrDropped <- dropped
     }
@@ -3331,9 +3258,9 @@ krigingOutlierQc <- function(
     audit <- list()
     if (length(vital) > 0L) {
         before <- nrow(df)
-        bad <- Reduce(`|`, lapply(vital, function(c) is.na(df[[c]])))
+        bad <- reduce(map(vital, .scColIsNa, df = df), `|`)
         if (any(bad)) {
-            df <- df[!bad, , drop = FALSE]
+            df <- filter(df, !bad)
         }
         dropped <- before - nrow(df)
         if (dropped > 0L) audit$missDataDropped <- dropped
@@ -3343,14 +3270,14 @@ krigingOutlierQc <- function(
 
 # Drop rows whose P is outside [0, 1].
 .scDropPOutOfRange <- function(df, dropPOutOfRange) {
-    if (!dropPOutOfRange || !"P" %in% colnames(df) || nrow(df) == 0L) {
+    if (!dropPOutOfRange || !is_in("P", colnames(df)) || nrow(df) == 0L) {
         return(list(df = df, audit = list()))
     }
     before <- nrow(df)
     p <- as.numeric(df$P)
     bad <- !is.na(p) & (p < 0 | p > 1)
     if (any(bad)) {
-        df <- df[!bad, , drop = FALSE]
+        df <- filter(df, !bad)
     }
     dropped <- before - nrow(df)
     audit <- list()
@@ -3362,7 +3289,7 @@ krigingOutlierQc <- function(
 
 # Clamp tiny P-values up to the floor.
 .scClampSmallP <- function(df, clampSmallP, smallPFloor) {
-    if (!clampSmallP || !"P" %in% colnames(df) || nrow(df) == 0L) {
+    if (!clampSmallP || !is_in("P", colnames(df)) || nrow(df) == 0L) {
         return(list(df = df, audit = list()))
     }
     p <- as.numeric(df$P)
@@ -3395,7 +3322,7 @@ krigingOutlierQc <- function(
             badMask <- badMask | (!is.na(vals) & vals == sentinel)
         }
         if (any(badMask)) {
-            df <- df[!badMask, , drop = FALSE]
+            df <- filter(df, !badMask)
         }
         dropped <- before - nrow(df)
         if (dropped > 0L) audit$zeroEffectDropped <- dropped
@@ -3405,14 +3332,14 @@ krigingOutlierQc <- function(
 
 # Drop rows with non-positive standard error.
 .scDropNonpositiveSe <- function(df, dropNonpositiveSe) {
-    if (!dropNonpositiveSe || !"SE" %in% colnames(df) || nrow(df) == 0L) {
+    if (!dropNonpositiveSe || !is_in("SE", colnames(df)) || nrow(df) == 0L) {
         return(list(df = df, audit = list()))
     }
     before <- nrow(df)
     se <- as.numeric(df$SE)
     bad <- !is.na(se) & se <= 0
     if (any(bad)) {
-        df <- df[!bad, , drop = FALSE]
+        df <- filter(df, !bad)
     }
     dropped <- before - nrow(df)
     audit <- list()
@@ -3472,7 +3399,7 @@ krigingOutlierQc <- function(
 .applyLdMismatchQcToEntry <- function(df, ldSketch, method) {
     variantIds <- df$SNP
     if (is.null(variantIds) || any(is.na(variantIds))) {
-        stop("summaryStatsQc: ldMismatchQc requires SNP column on the entry.")
+        abort("summaryStatsQc: ldMismatchQc requires SNP column on the entry.")
     }
     # Panel LD for the entry variants via the shared LD-from-sketch helper
     # (tuple match with chr-prefix tolerance, strand-ambiguous variants kept;
@@ -3507,7 +3434,7 @@ krigingOutlierQc <- function(
         NULL
     }
     list(
-        df = df[!outlierFlags, , drop = FALSE],
+        df = filter(df, !outlierFlags),
         outliers = sum(outlierFlags),
         diagnostics = diagnostics
     )
@@ -3576,21 +3503,21 @@ krigingOutlierQc <- function(
         return(NULL)
     }
     if (length(on) > 1L) {
-        stop(
-            "Only one signal screen may be enabled at a time, but these are ",
-            "non-zero: ",
-            paste(sprintf("%s=%g", names(on), on), collapse = ", "),
-            ". Set all but one of pipCutoffToSkip / absZCutoffToSkip / ",
-            "bfCutoffToSkip / logBfCutoffToSkip to 0."
+        nonZero <- str_flatten(sprintf("%s=%g", names(on), on), collapse = ", ")
+        msg <- glue(
+            "Only one signal screen may be enabled at a time, but these ",
+            "are non-zero: {nonZero}. Set all but one of pipCutoffToSkip / ",
+            "absZCutoffToSkip / bfCutoffToSkip / logBfCutoffToSkip to 0."
         )
+        abort(msg)
     }
     metric <- names(on)
     cutoff <- unname(on[[1L]])
     if (metric == "absZ" && cutoff < 0) {
-        stop("absZCutoffToSkip must be > 0 (it screens on max|Z|).")
+        abort("absZCutoffToSkip must be > 0 (it screens on max|Z|).")
     }
     if (metric == "bf" && cutoff < 0) {
-        stop("bfCutoffToSkip must be > 0 (Bayes factors are positive).")
+        abort("bfCutoffToSkip must be > 0 (Bayes factors are positive).")
     }
     list(metric = metric, cutoff = cutoff)
 }
@@ -3652,7 +3579,7 @@ krigingOutlierQc <- function(
     res <- .entryScreenPass(df$Z, n = n, nVar = nrow(df), scr = scr)
     if (!res$ok) {
         return(list(
-            df = df[FALSE, , drop = FALSE],
+            df = slice(df, 0L),
             skipped = TRUE,
             reason = res$reason
         ))
@@ -3670,7 +3597,13 @@ krigingOutlierQc <- function(
 # them bare when `lbl` is NA.
 # @noRd
 .qcEmit <- function(lbl, ...) {
-    if (is.na(lbl)) message(...) else message("[", lbl, "] ", ...)
+    body <- str_c(...)
+    if (is.na(lbl)) {
+        inform(body)
+    } else {
+        msg <- glue("[{lbl}] {body}")
+        inform(msg)
+    }
 }
 
 # Internal: canonicalize the working per-variant `N`. The N source is resolved
@@ -3699,10 +3632,10 @@ krigingOutlierQc <- function(
         is.finite(opts$nSample) &&
         opts$nSample > 0
     list(
-        hasCols = all(c("N_CASE", "N_CONTROL") %in% colnames(df)),
+        hasCols = all(is_in(c("N_CASE", "N_CONTROL"), colnames(df))),
         hasScalar = hasScalar,
         hasNSample = hasNSample,
-        hasN = "N" %in% colnames(df),
+        hasN = is_in("N", colnames(df)),
         nRow = nrow(df)
     )
 }
@@ -3774,23 +3707,33 @@ krigingOutlierQc <- function(
 
 # Panel/dosage window indices for the entry, scoped per chromosome.
 .qcRaissWindowIdx <- function(df, sketchSnpInfo, flank) {
-    dfChrom <- sub("^chr", "", as.character(df$chrom), ignore.case = TRUE)
-    dfPos <- as.integer(df$pos)
-    loByChr <- tapply(dfPos, dfChrom, min, na.rm = TRUE) - flank
-    hiByChr <- tapply(dfPos, dfChrom, max, na.rm = TRUE) + flank
-    skChrom <- sub(
-        "^chr",
-        "",
-        as.character(sketchSnpInfo$CHR),
-        ignore.case = TRUE
-    )
-    skBp <- as.integer(sketchSnpInfo$BP)
-    which(
-        skChrom %in%
-            names(loByChr) &
-            skBp >= loByChr[skChrom] &
-            skBp <= hiByChr[skChrom]
-    )
+    bounds <- tibble(
+        chrom = str_remove(
+            as.character(df$chrom),
+            regex("^chr", ignore_case = TRUE)
+        ),
+        pos = as.integer(df$pos)
+    ) |>
+        group_by(chrom) |>
+        summarise(
+            lo = min(pos, na.rm = TRUE) - flank,
+            hi = max(pos, na.rm = TRUE) + flank,
+            .groups = "drop"
+        )
+    # inner_join keeps only sketch SNPs whose chromosome appears in df (the
+    # old is_in(skChrom, names(loByChr)) guard); filter keeps those inside the
+    # [lo, hi] window. idx carries the original sketch row positions.
+    tibble(
+        chrom = str_remove(
+            as.character(sketchSnpInfo$CHR),
+            regex("^chr", ignore_case = TRUE)
+        ),
+        bp = as.integer(sketchSnpInfo$BP),
+        idx = seq_along(sketchSnpInfo$CHR)
+    ) |>
+        inner_join(bounds, by = "chrom") |>
+        filter(.data$bp >= .data$lo & .data$bp <= .data$hi) |>
+        pull("idx")
 }
 
 # Assemble refPanel, knownZ table, and scaled dosage for the window.
@@ -3812,13 +3755,13 @@ krigingOutlierQc <- function(
         z = as.numeric(df$Z),
         stringsAsFactors = FALSE
     )
-    if ("N" %in% colnames(df)) {
+    if (is_in("N", colnames(df))) {
         knownZ$n <- as.numeric(df$N)
     }
-    if ("BETA" %in% colnames(df)) {
+    if (is_in("BETA", colnames(df))) {
         knownZ$beta <- as.numeric(df$BETA)
     }
-    if ("SE" %in% colnames(df)) {
+    if (is_in("SE", colnames(df))) {
         knownZ$se <- as.numeric(df$SE)
     }
     knownZ <- knownZ[order(knownZ$pos), , drop = FALSE]
@@ -3846,31 +3789,30 @@ krigingOutlierQc <- function(
     )
 }
 
-# Convert the imputer output back into a QC data.frame.
+# Convert the imputer output back into a QC tibble.
 .qcRaissMerge <- function(imputed, knownZ, df) {
     if (is.null(imputed) || is.null(imputed$resultFilter)) {
         return(list(df = df, total = NA_integer_, imputed = 0L))
     }
     impDf <- imputed$resultFilter
-    out <- data.frame(
+    out <- tibble(
         chrom = impDf$chrom,
         pos = impDf$pos,
         SNP = impDf$variant_id,
         A1 = impDf$A1,
         A2 = impDf$A2,
-        Z = impDf$z,
-        stringsAsFactors = FALSE
+        Z = impDf$z
     )
-    if ("n" %in% colnames(impDf)) {
+    if (is_in("n", colnames(impDf))) {
         out$N <- impDf$n
     }
-    if ("beta" %in% colnames(impDf)) {
+    if (is_in("beta", colnames(impDf))) {
         out$BETA <- impDf$beta
     }
-    if ("se" %in% colnames(impDf)) {
+    if (is_in("se", colnames(impDf))) {
         out$SE <- impDf$se
     }
-    if ("N" %in% colnames(out) && any(is.na(out$N))) {
+    if (is_in("N", colnames(out)) && any(is.na(out$N))) {
         out$N[is.na(out$N)] <- stats::median(out$N, na.rm = TRUE)
     }
     list(df = out, total = nrow(out), imputed = nrow(out) - nrow(knownZ))
@@ -3893,7 +3835,7 @@ krigingOutlierQc <- function(
 # Emit the harmonization QC track line (optional corrected/dropped detail).
 .qcHarmonizeReport <- function(nOut, nHarmIn, counts, hasCounts, lbl) {
     detail <- if (hasCounts) {
-        paste0(
+        str_c(
             " (corrected: sign-flipped ",
             counts$harmCorrSign,
             ", strand-flipped ",
@@ -3966,7 +3908,7 @@ krigingOutlierQc <- function(
 
 # One "label N" removed-count segment, or NULL when nothing was removed.
 .qcSeg <- function(val, label) {
-    if (!is.null(val) && val > 0L) paste0(label, " ", val) else NULL
+    if (!is.null(val) && val > 0L) str_c(label, " ", val) else NULL
 }
 
 # Collect the per-step "removed" segments for the QC summary line.
@@ -3985,7 +3927,7 @@ krigingOutlierQc <- function(
         .qcSeg(qcCount$harmDropped, "harmonization")
     )
     if (!identical(opts$zMismatchQc, "none")) {
-        segs <- c(segs, paste0("mismatch ", qcCount$mismatchRemoved))
+        segs <- c(segs, str_c("mismatch ", qcCount$mismatchRemoved))
     }
     segs
 }
@@ -3993,21 +3935,21 @@ krigingOutlierQc <- function(
 # Emit the per-entry QC rollup: corrected (retained), removed, imputed.
 .qcEmitRollup <- function(entryAudit, qcCount, opts, nStudyIn, nOut, lbl) {
     removedSegs <- .qcRemovedSegments(entryAudit, qcCount, opts)
-    correctedSeg <- paste0(
+    correctedSeg <- str_c(
         "sign-flip ",
         qcCount$harmCorrSign,
         ", strand-flip ",
         qcCount$harmCorrStrand
     )
     if (isTRUE(opts$alleleFlipKriging)) {
-        correctedSeg <- paste0(
+        correctedSeg <- str_c(
             correctedSeg,
             ", kriging-flip ",
             qcCount$krigingFlipped
         )
     }
     impSeg <- if (isTRUE(opts$impute) && !is.na(qcCount$imputeAfter)) {
-        paste0(
+        str_c(
             " | imputed ",
             sprintf("%+d", qcCount$imputeAfter - qcCount$imputeBefore)
         )
@@ -4024,7 +3966,7 @@ krigingOutlierQc <- function(
         " | corrected: ",
         correctedSeg,
         if (length(removedSegs) > 0L) {
-            paste0(" | removed: ", paste(removedSegs, collapse = ", "))
+            str_c(" | removed: ", str_flatten(removedSegs, collapse = ", "))
         } else {
             ""
         },
@@ -4091,7 +4033,9 @@ krigingOutlierQc <- function(
     nKr <- sum(kr$flip)
     if (nKr > 0L) {
         df$Z[kr$flip] <- -df$Z[kr$flip]
-        if ("BETA" %in% colnames(df)) df$BETA[kr$flip] <- -df$BETA[kr$flip]
+        if (is_in("BETA", colnames(df))) {
+            df$BETA[kr$flip] <- -df$BETA[kr$flip]
+        }
     }
     .qcEmit(
         lbl,
@@ -4141,7 +4085,7 @@ krigingOutlierQc <- function(
 # Initialize per-entry QC state (df, audit, step counters, label).
 .qcInitEntry <- function(gr, entryLabel) {
     df <- .entryGrangesToDf(gr)
-    lbl <- if (!is.null(entryLabel) && nzchar(entryLabel)) {
+    lbl <- if (!is.null(entryLabel) && isTRUE(str_length(entryLabel) > 0L)) {
         entryLabel
     } else {
         NA_character_
@@ -4203,8 +4147,8 @@ krigingOutlierQc <- function(
     nRes <- .resolveEffectiveN(df, opts, lbl)
     df <- nRes$df
     if (
-        isTRUE(nRes$nSource %in% c("effective", "total")) &&
-            "N" %in% colnames(df)
+        isTRUE(is_in(nRes$nSource, c("effective", "total"))) &&
+            is_in("N", colnames(df))
     ) {
         opts$nForPip <- stats::median(as.numeric(df$N), na.rm = TRUE)
     }
@@ -4245,7 +4189,7 @@ krigingOutlierQc <- function(
     if (!is.null(derived$audit)) {
         entryAudit$betaSeFromZ <- derived$audit
     }
-    if ("Z" %in% colnames(df) && !"P" %in% colnames(df)) {
+    if (is_in("Z", colnames(df)) && !is_in("P", colnames(df))) {
         df$P <- .zToPvalue(df$Z)
         entryAudit$pValueFromZ <- sum(!is.na(df$P))
         if (isTRUE(opts$clampSmallP) && nrow(df) > 0L) {
@@ -4269,7 +4213,7 @@ krigingOutlierQc <- function(
     audit <- list()
     if (length(opts$keepVariants) > 0L) {
         before <- nrow(df)
-        df <- df[df$SNP %in% opts$keepVariants, , drop = FALSE]
+        df <- filter(df, is_in(.data$SNP, opts$keepVariants))
         audit$keepVariantsDropped <- before - nrow(df)
     }
     if (!is.null(opts$skipRegion) && length(opts$skipRegion) > 0L) {
@@ -4397,31 +4341,34 @@ krigingOutlierQc <- function(
     if (is.null(ldSketch)) {
         return(NULL)
     }
-    chrom <- unlist(
-        lapply(entries, function(gr) {
-            canonChrom(as.character(GenomicRanges::seqnames(gr)))
-        }),
-        use.names = FALSE
-    )
-    pos <- unlist(
-        lapply(entries, function(gr) {
-            as.integer(GenomicRanges::start(gr))
-        }),
-        use.names = FALSE
-    )
+    chrom <- unlist(map(entries, .entryChrom), use.names = FALSE)
+    pos <- unlist(map(entries, .entryPos), use.names = FALSE)
     ok <- !is.na(chrom) & !is.na(pos)
     chrom <- chrom[ok]
     pos <- pos[ok]
     if (length(pos) == 0L) {
         return(ldSketch)
     }
-    lo <- tapply(pos, chrom, min)
-    hi <- tapply(pos, chrom, max)
+    bounds <- tibble(chrom = chrom, pos = pos) |>
+        group_by(chrom) |>
+        summarise(lo = min(pos), hi = max(pos), .groups = "drop")
     si <- getSnpInfo(ldSketch)
-    siChrom <- canonChrom(as.character(si$CHR))
-    siBp <- as.integer(si$BP)
-    keep <- siChrom %in% names(lo) & siBp >= lo[siChrom] & siBp <= hi[siChrom]
-    keep[is.na(keep)] <- FALSE
+    # left_join keeps every sketch SNP; one on a chromosome absent from the
+    # entries gets lo/hi = NA -> inWindow FALSE (the old is_in guard). The
+    # explicit is.na() guards force FALSE (never NA) for an absent chrom or an
+    # NA bp, replacing the base keep[is.na(keep)] <- FALSE.
+    keep <- tibble(
+        chrom = canonChrom(as.character(si$CHR)),
+        bp = as.integer(si$BP)
+    ) |>
+        left_join(bounds, by = "chrom") |>
+        mutate(
+            inWindow = !is.na(.data$lo) &
+                !is.na(.data$bp) &
+                .data$bp >= .data$lo &
+                .data$bp <= .data$hi
+        ) |>
+        pull("inWindow")
     .subsetGenotypeHandle(ldSketch, keep)
 }
 
@@ -4434,22 +4381,15 @@ krigingOutlierQc <- function(
     if (is.null(ldSketch)) {
         return(NULL)
     }
-    ids <- unlist(
-        lapply(entries, function(gr) {
-            if (is.null(gr)) {
-                return(character(0))
-            }
-            snp <- S4Vectors::mcols(gr)$SNP
-            if (is.null(snp)) character(0) else as.character(snp)
-        }),
-        use.names = FALSE
-    )
+    ids <- unlist(map(entries, .entrySnpIds), use.names = FALSE)
     if (length(ids) == 0L) {
         return(ldSketch)
     }
     si <- getSnpInfo(ldSketch)
-    keep <- normalizeVariantId(as.character(si$SNP)) %in%
+    keep <- is_in(
+        normalizeVariantId(as.character(si$SNP)),
         normalizeVariantId(unique(ids))
+    )
     .subsetGenotypeHandle(ldSketch, keep)
 }
 
@@ -4461,25 +4401,23 @@ krigingOutlierQc <- function(
         !methods::is(sumstats, "QtlSumStats") &&
             !methods::is(sumstats, "GwasSumStats")
     ) {
-        stop("summaryStatsQc requires a QtlSumStats or GwasSumStats input.")
+        abort("summaryStatsQc requires a QtlSumStats or GwasSumStats input.")
     }
     for (i in seq_len(nrow(sumstats))) {
         cols <- colnames(S4Vectors::mcols(sumstats$entry[[i]]))
-        if (mafCutoff > 0 && !any(c("MAF", "FRQ") %in% cols)) {
-            stop(
+        if (mafCutoff > 0 && !any(is_in(c("MAF", "FRQ"), cols))) {
+            msg <- glue(
                 "summaryStatsQc: mafCutoff > 0 requires every entry to ",
-                "carry a MAF or FRQ column; entry ",
-                i,
-                " does not."
+                "carry a MAF or FRQ column; entry {i} does not."
             )
+            abort(msg)
         }
-        if (infoCutoff > 0 && !"INFO" %in% cols) {
-            stop(
+        if (infoCutoff > 0 && !is_in("INFO", cols)) {
+            msg <- glue(
                 "summaryStatsQc: infoCutoff > 0 requires every entry to ",
-                "carry an INFO column; entry ",
-                i,
-                " does not."
+                "carry an INFO column; entry {i} does not."
             )
+            abort(msg)
         }
     }
 }
@@ -4526,22 +4464,22 @@ krigingOutlierQc <- function(
 # Per-entry sample-size options: median N for PIP, study case/control/total N.
 .ssqcEntryOpts <- function(opts, sumstats, i) {
     mc <- S4Vectors::mcols(sumstats$entry[[i]])
-    opts$nForPip <- if ("N" %in% colnames(mc)) {
+    opts$nForPip <- if (is_in("N", colnames(mc))) {
         stats::median(mc$N, na.rm = TRUE)
     } else {
         NULL
     }
-    opts$nCase <- if ("nCase" %in% names(sumstats)) {
+    opts$nCase <- if (is_in("nCase", names(sumstats))) {
         as.numeric(sumstats$nCase)[[i]]
     } else {
         NULL
     }
-    opts$nControl <- if ("nControl" %in% names(sumstats)) {
+    opts$nControl <- if (is_in("nControl", names(sumstats))) {
         as.numeric(sumstats$nControl)[[i]]
     } else {
         NULL
     }
-    opts$nSample <- if ("nSample" %in% names(sumstats)) {
+    opts$nSample <- if (is_in("nSample", names(sumstats))) {
         as.numeric(sumstats$nSample)[[i]]
     } else {
         NULL
@@ -4552,7 +4490,7 @@ krigingOutlierQc <- function(
 # Per-entry log label: study/context/trait (QTL) or study (GWAS).
 .ssqcEntryLabel <- function(sumstats, i, isQtl) {
     if (isQtl) {
-        paste(
+        str_c(
             as.character(sumstats$study)[[i]],
             as.character(sumstats$context)[[i]],
             as.character(sumstats$trait)[[i]],
@@ -4620,7 +4558,7 @@ krigingOutlierQc <- function(
 
 # Rebuild the SumStats object with QC'd entries, trimmed sketch, and qcInfo.
 .ssqcRebuild <- function(sumstats, newEntries, newLdSketch, qcInfo) {
-    has <- function(nm) nm %in% names(sumstats)
+    has <- function(nm) is_in(nm, names(sumstats))
     nSample <- if (has("nSample")) as.numeric(sumstats$nSample) else NULL
     if (methods::is(sumstats, "GwasSumStats")) {
         GwasSumStats(
@@ -4799,7 +4737,7 @@ summaryStatsQc <- function(
     dropZeroEffect = TRUE,
     dropNonpositiveSe = TRUE
 ) {
-    zMismatchQc <- match.arg(zMismatchQc)
+    zMismatchQc <- arg_match(zMismatchQc)
     .ssqcCheckEntries(sumstats, mafCutoff, infoCutoff)
     p <- as.list(environment())
     opts <- .ssqcBuildOpts(p)
@@ -4807,4 +4745,176 @@ summaryStatsQc <- function(
     qcInfo <- .ssqcBuildQcInfo(p, res$entryAudits)
     newLdSketch <- .subsetSketchToIds(getLdSketch(sumstats), res$newEntries)
     .ssqcRebuild(sumstats, res$newEntries, newLdSketch, qcInfo)
+}
+
+# ---- slidingWindowLoop callbacks (distance mode) ------------------------
+# `ctx` bundles the caller's segmentation state; see .segByDistRun.
+
+# @noRd
+.segDistMinBlock <- function(blockSize, ctx) {
+    blockSize >= ctx$minBlockSize / 2 && (blockSize - ctx$minDim) >= 0
+}
+
+# @noRd
+.segDistInitEnd <- function(startIdx, blockEnd, ctx) {
+    min(.nthQuaterIdx(startIdx, 4, ctx$quaterIdx) + 1, blockEnd)
+}
+
+# Distance mode: fill is always q1 to q3 (inner 50% by distance); first/last
+# corrections are handled by fix_block_fills in the loop.
+# @noRd
+.segDistFill <- function(
+    startIdx,
+    endIdx,
+    notStartInterval,
+    notLastInterval,
+    ctx
+) {
+    list(
+        start = .nthQuaterIdx(startIdx, 1, ctx$quaterIdx),
+        end = .nthQuaterIdx(startIdx, 3, ctx$quaterIdx)
+    )
+}
+
+# @noRd
+.segDistStep <- function(startIdx, blockEnd, ctx) {
+    .segByDistStep(startIdx, blockEnd, ctx$quaterIdx)
+}
+
+# If the last interval is small, go back one step.
+# @noRd
+.segDistAdjustLast <- function(startIdx, oldStartIdx, endIdx, blockEnd, ctx) {
+    q1Old <- .nthQuaterIdx(oldStartIdx, 1, ctx$quaterIdx)
+    small <- as.numeric(ctx$pos[min(endIdx - 1, ctx$n)]) -
+        as.numeric(ctx$pos[q1Old]) <
+        ctx$cutoff
+    if (small) q1Old else startIdx
+}
+
+# ---- slidingWindowLoop callbacks (count mode) ---------------------------
+# `ctx` bundles the caller's segmentation state; see segmentByCount.
+
+# @noRd
+.segCountMinBlock <- function(blockSize, ctx) {
+    blockSize >= ctx$half
+}
+
+# @noRd
+.segCountInitEnd <- function(startIdx, blockEnd, ctx) {
+    if (blockEnd - ctx$half > startIdx + ctx$cutoff) {
+        startIdx + ctx$cutoff
+    } else {
+        blockEnd
+    }
+}
+
+# Count mode: fill based on index arithmetic (inner 50%).
+# @noRd
+.segCountFill <- function(
+    startIdx,
+    endIdx,
+    notStartInterval,
+    notLastInterval,
+    ctx
+) {
+    list(
+        start = if (notStartInterval) startIdx + ctx$quarter else startIdx,
+        end = if (notLastInterval) endIdx - ctx$quarter else endIdx
+    )
+}
+
+# @noRd
+.segCountStep <- function(startIdx, blockEnd, ctx) {
+    nextStart <- startIdx + ctx$half
+    endIdx <- if (blockEnd - ctx$half > nextStart + ctx$cutoff) {
+        nextStart + ctx$cutoff
+    } else {
+        blockEnd
+    }
+    list(startIdx = nextStart, endIdx = endIdx)
+}
+
+# ---- other map/apply helpers (lambda-free callbacks) --------------------
+
+# One credible set's scalar summary row (top variant / PIP / z / p). The
+# between-CS correlation columns are appended once by .csAppendCorrelationCols.
+# @noRd
+.extractCsInfoRow <- function(i, csNames, trimmed, variantNames, topLociTable) {
+    csName <- csNames[i]
+    indices <- trimmed$sets$cs[[csName]]
+    csVariants <- variantNames[indices]
+    csData <- filter(topLociTable, is_in(variant_id, csVariants))
+    topRow <- which.max(csData$pip)
+    topVariant <- csData$variant_id[topRow]
+    topZ <- csData$z[topRow]
+    tibble(
+        cs_name = csName,
+        variants_per_cs = length(csVariants),
+        top_variant = topVariant,
+        top_variant_index = which(variantNames == topVariant),
+        top_pip = csData$pip[topRow],
+        top_z = topZ,
+        p_value = .zToPvalue(topZ)
+    )
+}
+
+# TRUE when credible set row `i` is a tagged (redundant) set.
+# @noRd
+.autoDecisionTagged <- function(i, df, highCorrCols) {
+    if (df$top_cs[i]) {
+        return(FALSE)
+    }
+    if (df$p_value[i] > 1e-4) {
+        return(TRUE)
+    }
+    if (length(highCorrCols) == 0) {
+        return(FALSE)
+    }
+    rowVals <- df |>
+        filter(row_number() == i) |>
+        select(all_of(highCorrCols))
+    any(rowVals == 1)
+}
+
+# One block's variant-name data.frame from its LD matrix columns.
+# @noRd
+.ldVariantsDf <- function(ld) {
+    # colnames(ld) is NULL for an empty / no-dimnames block. Make that explicit
+    # as an empty character vector so the returned tibble ALWAYS carries a
+    # `variants` column: .ldMergeVariants then reads $variants as character(0)
+    # (length 0 -> the block is skipped) instead of hitting an absent column
+    # (which a data.frame returned silently as NULL and a tibble warns on).
+    variants <- colnames(ld)
+    if (is.null(variants)) {
+        variants <- character(0)
+    }
+    tibble(variants = variants)
+}
+
+# The is-NA mask of column `col` in `df` (for the vital-column drop reduce).
+# @noRd
+.scColIsNa <- function(col, df) {
+    is.na(df[[col]])
+}
+
+# One GRanges entry's canonical chromosome vector.
+# @noRd
+.entryChrom <- function(gr) {
+    canonChrom(as.character(GenomicRanges::seqnames(gr)))
+}
+
+# One GRanges entry's integer start positions.
+# @noRd
+.entryPos <- function(gr) {
+    as.integer(GenomicRanges::start(gr))
+}
+
+# One GRanges entry's SNP ids (empty for NULL / no SNP mcol).
+# @noRd
+.entrySnpIds <- function(gr) {
+    if (is.null(gr)) {
+        return(character(0))
+    }
+    snp <- S4Vectors::mcols(gr)$SNP
+    if (is.null(snp)) character(0) else as.character(snp)
 }

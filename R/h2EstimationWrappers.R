@@ -175,22 +175,9 @@ weightedLsRidge <- function(y, X, w, lambda = 0, penalizeIntercept = FALSE) {
 # Baseline enrichment computation
 # =============================================================================
 
-#' @title Compute Baseline Annotation Enrichment Quantities
-#' @description Given tau coefficients and a baseline annotation matrix, compute
-#'   the full set of enrichment quantities: propH2, propSnps, enrichment ratio,
-#'   enrichment SE (from jackknife or delta method), and p-value.
-#' @param tau Numeric vector of per-annotation regression coefficients.
-#' @param tauSe Numeric vector of SE for tau.
-#' @param tauBlocks Numeric matrix (nBlocks x nAnnotations) of jackknife
-#'   block-level tau values, or NULL.
-#' @param baselineMat Numeric matrix (nSnps x nAnnotations).
-#' @param annotNames Character vector of annotation names.
-#' @param h2 Numeric scalar, total estimated h2.
-#' @return A data.frame with columns: annotation, tau, tauSe, enrichment,
-#'   enrichmentSe, enrichmentP, propH2, propSnps.
-#' @keywords internal
 # Enrichment SE: jackknife over per-block enrichment (preferred) or the
 # delta-method fallback tauSe * M / |h2| when no blocks are available.
+# @noRd
 .baselineEnrichmentSe <- function(tauBlocks, tauSe, M_a, M, h2) {
     if (is.null(tauBlocks)) {
         return(tauSe * M / abs(h2))
@@ -206,6 +193,20 @@ weightedLsRidge <- function(y, X, w, lambda = 0, penalizeIntercept = FALSE) {
     sqrt(enrichmentVar)
 }
 
+#' @title Compute Baseline Annotation Enrichment Quantities
+#' @description Given tau coefficients and a baseline annotation matrix, compute
+#'   the full set of enrichment quantities: propH2, propSnps, enrichment ratio,
+#'   enrichment SE (from jackknife or delta method), and p-value.
+#' @param tau Numeric vector of per-annotation regression coefficients.
+#' @param tauSe Numeric vector of SE for tau.
+#' @param tauBlocks Numeric matrix (nBlocks x nAnnotations) of jackknife
+#'   block-level tau values, or NULL.
+#' @param baselineMat Numeric matrix (nSnps x nAnnotations).
+#' @param annotNames Character vector of annotation names.
+#' @param h2 Numeric scalar, total estimated h2.
+#' @return A tibble with columns: annotation, tau, tauSe, enrichment,
+#'   enrichmentSe, enrichmentP, propH2, propSnps.
+#' @keywords internal
 computeBaselineEnrichment <- function(
     tau,
     tauSe,
@@ -222,16 +223,15 @@ computeBaselineEnrichment <- function(
     enrichment <- tau * M / h2
     enrichmentSe <- .baselineEnrichmentSe(tauBlocks, tauSe, M_a, M, h2)
     enrichmentP <- .zToPvalue(enrichment / enrichmentSe)
-    data.frame(
+    tibble(
         annotation = annotNames,
-        tau = tau,
-        tauSe = tauSe,
-        enrichment = enrichment,
-        enrichmentSe = enrichmentSe,
-        enrichmentP = enrichmentP,
-        propH2 = propH2,
-        propSnps = propSnps,
-        stringsAsFactors = FALSE
+        tau = unname(tau),
+        tauSe = unname(tauSe),
+        enrichment = unname(enrichment),
+        enrichmentSe = unname(enrichmentSe),
+        enrichmentP = unname(enrichmentP),
+        propH2 = unname(propH2),
+        propSnps = unname(propSnps)
     )
 }
 
@@ -282,25 +282,12 @@ shrinkLd <- function(
 #' @keywords internal
 checkGenomeBuild <- function(...) {
     objects <- list(...)
-    genomes <- vapply(
-        objects,
-        function(x) {
-            if (
-                is(x, "GwasSumStats") ||
-                    is(x, "QtlSumStats") ||
-                    is(x, "LdStatistic") ||
-                    is(x, "AnnotationMatrix") ||
-                    is(x, "LdBlocks")
-            ) {
-                getGenome(x)
-            } else {
-                stop("Unknown object type for genome build check")
-            }
-        },
-        character(1)
-    )
-    if (length(unique(genomes)) > 1L) {
-        stop("Genome build mismatch: ", paste(genomes, collapse = ", "))
+    genomes <- map_chr(objects, .h2GenomeOfObject)
+    if (n_distinct(genomes) > 1L) {
+        msg <- glue(
+            "Genome build mismatch: {str_flatten(genomes, ', ')}"
+        )
+        abort(msg)
     }
     invisible(TRUE)
 }
@@ -328,10 +315,10 @@ checkGenomeBuild <- function(...) {
 #' @keywords internal
 standardizeTauStar <- function(tau, tauBlocks, sdAnnot, MRef, h2g) {
     if (length(tau) != length(sdAnnot)) {
-        stop("standardizeTauStar: tau and sdAnnot must have the same length.")
+        abort("standardizeTauStar: tau and sdAnnot must have the same length.")
     }
     if (h2g == 0) {
-        stop("standardizeTauStar: h2g must be non-zero.")
+        abort("standardizeTauStar: h2g must be non-zero.")
     }
 
     # Gazal standardization: tau* = tau * sdAnnot * MRef / h2g
@@ -341,7 +328,7 @@ standardizeTauStar <- function(tau, tauBlocks, sdAnnot, MRef, h2g) {
     # Jackknife SE from block-level tau
     tauStarBlocks <- sweep(tauBlocks, 2L, coef, FUN = "*")
     nBlocks <- nrow(tauStarBlocks)
-    jkVar <- apply(tauStarBlocks, 2L, function(x) var(x, na.rm = TRUE))
+    jkVar <- apply(tauStarBlocks, 2L, var, na.rm = TRUE)
     tauStarSe <- sqrt((nBlocks - 1)^2 / nBlocks * jkVar)
 
     list(tauStar = tauStar, tauStarSe = tauStarSe)
@@ -383,42 +370,45 @@ standardizeTauStar <- function(tau, tauBlocks, sdAnnot, MRef, h2g) {
         return(list(mean = means[1], se = ses[1], tau2 = 0, I2 = 0, Q = 0))
     }
     if (any(!is.finite(ses) | ses <= 0)) {
-        stop(".rmaMeta: all ses must be positive and finite.")
+        abort(".rmaMeta: all ses must be positive and finite.")
     }
     NULL
 }
 
-# tryCatch handler: iterative estimators can fail on small/near-homogeneous
-# inputs; fall back to closed-form DerSimonian-Laird (never iterates).
-.rmaMetaFallback <- function(e, means, ses, method) {
-    if (identical(method, "DL")) {
-        stop(e)
-    }
-    warning(
-        ".rmaMeta: metafor::rma(method = '",
-        method,
-        "') failed (",
-        conditionMessage(e),
-        "); falling back to DL.",
-        call. = FALSE
+# tryCatch handler for the iterative estimators (only reached when method !=
+# "DL", so DL is always a real fallback here): they can fail on small /
+# near-homogeneous inputs, so fall back to closed-form DerSimonian-Laird, which
+# never iterates.
+.rmaMetaFallbackToDL <- function(e, means, ses, method) {
+    msg <- glue(
+        ".rmaMeta: metafor::rma(method = '{method}') failed ",
+        "({conditionMessage(e)}); falling back to DL."
     )
+    warn(msg)
     metafor::rma(yi = means, sei = ses, method = "DL")
 }
 
 .rmaMeta <- function(means, ses, method = "DL") {
     k <- length(means)
     if (k != length(ses)) {
-        stop(".rmaMeta: means and ses must have the same length.")
+        abort(".rmaMeta: means and ses must have the same length.")
     }
     early <- .rmaMetaEarly(means, ses, k)
     if (!is.null(early)) {
         return(early)
     }
     # metafor is a hard dependency; it reports I-squared as a percentage.
-    fit <- tryCatch(
-        metafor::rma(yi = means, sei = ses, method = method),
-        error = function(e) .rmaMetaFallback(e, means, ses, method)
-    )
+    # DL (closed-form DerSimonian-Laird) is the last-resort estimator: run it
+    # directly and let any error propagate. Only the iterative estimators get a
+    # tryCatch fallback to DL.
+    fit <- if (identical(method, "DL")) {
+        metafor::rma(yi = means, sei = ses, method = "DL")
+    } else {
+        tryCatch(
+            metafor::rma(yi = means, sei = ses, method = method),
+            error = function(e) .rmaMetaFallbackToDL(e, means, ses, method)
+        )
+    }
     list(
         mean = as.numeric(fit$b),
         se = as.numeric(fit$se),
@@ -447,10 +437,13 @@ NULL
 
 #' @title Univariate LDER
 #' @description Estimate SNP heritability by LD eigenvalue regression (Song et
-#'   al. 2022). Within each LD block the z-scores are whitened in the eigenbasis,
+#'   al. 2022). Within each LD block the z-scores are whitened in the
+#'   eigenbasis,
 #'   \eqn{x_i = (u_i'z)/\sqrt{\lambda_i}}, and the whitened \eqn{\chi^2 = x_i^2}
-#'   is regressed on \eqn{\lambda_i} via IRWLS: \eqn{E[x_i^2] = (N h2/M)\lambda_i
-#'   + (1 + N a)}, so \eqn{Cov(z) = (N h2/M) R^2 + (1 + N a) R}. The IRWLS weight
+#'   is regressed on \eqn{\lambda_i} via IRWLS:
+#'   \eqn{E[x_i^2] = (N h2/M)\lambda_i
+#'   + (1 + N a)}, so \eqn{Cov(z) = (N h2/M) R^2 + (1 + N a) R}. The IRWLS
+#'   weight
 #'   uses an in-sample (\eqn{\min(1,\lambda)}) or out-of-sample (logistic) form
 #'   selected by \code{getInSample}, and a two-stage step estimates the
 #'   confounding inflation \eqn{a} on a \eqn{\chi^2}-filtered subset. The
@@ -498,14 +491,15 @@ NULL
 # Concatenate per-block stats into the genome-wide regression design. M_a is
 # the annotation SNP counts (univariate: total number of directions).
 .lderDesign <- function(blockStats, baselineMat) {
-    x <- unlist(lapply(blockStats, `[[`, "x"))
+    x <- unlist(map(blockStats, "x"))
+    ldAnnotList <- map(blockStats, "ldAnnot")
     list(
         x = x,
-        lam = unlist(lapply(blockStats, `[[`, "lam")),
-        ldAnnot = do.call(rbind, lapply(blockStats, `[[`, "ldAnnot")),
+        lam = unlist(map(blockStats, "lam")),
+        ldAnnot = exec(rbind, !!!ldAnnotList),
         blockId = rep(
             seq_along(blockStats),
-            lengths(lapply(blockStats, `[[`, "lam"))
+            lengths(map(blockStats, "lam"))
         ),
         M_a = if (is.null(baselineMat)) length(x) else colSums(baselineMat)
     )
@@ -596,13 +590,21 @@ NULL
     twostage
 ) {
     nB <- length(blockStats)
-    loo <- lapply(seq_len(nB), function(b) {
-        d <- .lderDesign(blockStats[-b], baselineMat)
-        .lderGetRes(d$x, d$lam, d$ldAnnot, N, M, M_aFull, rough, twostage)
-    })
-    h2Loo <- unlist(lapply(loo, `[[`, "h2"))
-    aLoo <- unlist(lapply(loo, `[[`, "a"))
-    tauBlocks <- do.call(rbind, lapply(loo, `[[`, "tau"))
+    loo <- map(
+        seq_len(nB),
+        .lderLooBlockFit,
+        blockStats = blockStats,
+        baselineMat = baselineMat,
+        N = N,
+        M = M,
+        M_aFull = M_aFull,
+        rough = rough,
+        twostage = twostage
+    )
+    h2Loo <- unlist(map(loo, "h2"))
+    aLoo <- unlist(map(loo, "a"))
+    tauList <- map(loo, "tau")
+    tauBlocks <- exec(rbind, !!!tauList)
     jkSe <- function(v) sqrt((nB - 1) / nB * sum((v - mean(v))^2))
     list(
         h2Se = jkSe(h2Loo),
@@ -625,13 +627,17 @@ NULL
 .lderLocalBlock <- function(bs, b, N, a) {
     d <- bs$lam
     if (length(d) < 3) {
-        return(data.frame(blockId = b, h2Local = NA, h2LocalSe = NA))
+        return(tibble(
+            blockId = b,
+            h2Local = NA_real_,
+            h2LocalSe = NA_real_
+        ))
     }
     chi2 <- bs$x^2
     w <- 1 / (2 * pmax(chi2, 1)^2)
     slope <- sum(w * d * (chi2 - (N * a + 1))) / sum(w * d^2)
     info <- sum(w * (N * d)^2)
-    data.frame(
+    tibble(
         blockId = b,
         h2Local = slope / N * length(d),
         h2LocalSe = length(d) / sqrt(max(info, 1e-10))
@@ -640,11 +646,14 @@ NULL
 
 # Per-block local heritability (NULL unless requested).
 .lderLocal <- function(blockStats, N, a) {
-    do.call(
-        rbind,
-        lapply(seq_along(blockStats), function(b) {
-            .lderLocalBlock(blockStats[[b]], b, N, a)
-        })
+    bind_rows(
+        map(
+            seq_along(blockStats),
+            .lderLocalRow,
+            blockStats = blockStats,
+            N = N,
+            a = a
+        )
     )
 }
 
@@ -660,15 +669,18 @@ NULL
     if (nCand == 1) {
         return(matrix(1, 1, 1))
     }
-    looZ <- do.call(
-        rbind,
-        lapply(sort(unique(blockId)), function(b) {
-            keep <- blockId != b
-            map_dbl(seq_len(nCand), function(c) {
-                .lderCandidateScore(ldCand[, c], lam, w, resid, N, keep)
-            })
-        })
+    looRows <- map(
+        sort(unique(blockId)),
+        .lderLooBlockScores,
+        blockId = blockId,
+        ldCand = ldCand,
+        lam = lam,
+        w = w,
+        resid = resid,
+        N = N,
+        nCand = nCand
     )
+    looZ <- exec(rbind, !!!looRows)
     R <- cor(looZ)
     R[is.na(R)] <- 0
     R
@@ -689,16 +701,23 @@ NULL
     )
     w <- 1 / (2 * mu^2)
     resid <- design$x^2 - mu
-    ldCand <- do.call(
-        rbind,
-        lapply(getEigenList(eigenRef), function(bk) {
-            crossprod(bk$vectors^2, candMat[bk$snpIdx, , drop = FALSE])
-        })
+    candCross <- map(
+        getEigenList(eigenRef),
+        .h2EigenCandCrossprod,
+        candMat = candMat
     )
+    ldCand <- exec(rbind, !!!candCross)
     keepAll <- rep(TRUE, length(lam))
-    scoreZ <- map_dbl(seq_len(nCand), function(c) {
-        .lderCandidateScore(ldCand[, c], lam, w, resid, N, keepAll)
-    })
+    scoreZ <- map_dbl(
+        seq_len(nCand),
+        .lderScoreForCand,
+        ldCand = ldCand,
+        lam = lam,
+        w = w,
+        resid = resid,
+        N = N,
+        keep = keepAll
+    )
     R <- .lderScoreCor(ldCand, lam, w, resid, N, design$blockId, nCand)
     .buildEnrichmentResult(getAnnotationMeta(candidate), scoreZ, R)
 }
@@ -713,7 +732,7 @@ lderUnivariate <- function(
 ) {
     rough <- !getInSample(eigenRef)
     baselineMat <- .h2BaselineMat(annotations)
-    blockStats <- lapply(
+    blockStats <- map(
         getEigenList(eigenRef),
         .lderBlockStats,
         z = z,
@@ -760,11 +779,10 @@ lderUnivariate <- function(
 # (z, R, annotation names) consumed downstream.
 .buildEnrichmentResult <- function(candMeta, scoreZ, R) {
     list(
-        enrichment = data.frame(
+        enrichment = tibble(
             annotation = candMeta$name,
-            scoreZ = scoreZ,
-            scoreP = .zToPvalue(scoreZ),
-            stringsAsFactors = FALSE
+            scoreZ = unname(scoreZ),
+            scoreP = unname(.zToPvalue(scoreZ))
         ),
         scoreStats = list(z = scoreZ, R = R, annotationNames = candMeta$name)
     )
@@ -805,7 +823,7 @@ lderUnivariate <- function(
     annotNames <- if (!is.null(colnames(baselineMat))) {
         colnames(baselineMat)
     } else {
-        paste0("annot_", seq_len(ncol(baselineMat)))
+        str_c("annot_", seq_len(ncol(baselineMat)))
     }
     computeBaselineEnrichment(
         tau,
@@ -825,10 +843,12 @@ lderUnivariate <- function(
 #'   using the full residual covariance
 #'   \eqn{\Omega = (\hat{N\tau}\, R D_a R + R)^2} (elementwise), inverted per LD
 #'   block via a 99\%-eigenvalue-mass truncation. \eqn{\hat{N\tau} = \sum(Z^2-1)
-#'   / \sum \ell} is a method-of-moments plug-in; \eqn{D_a = diag(\sum_a A_{ja})}.
+#'   / \sum \ell} is a method-of-moments plug-in;
+#'   \eqn{D_a = diag(\sum_a A_{ja})}.
 #'   Coefficients are \eqn{\tau = (X'\Omega^{-1}X)^{-1} X'\Omega^{-1} y / N} and
 #'   partitioned heritabilities \eqn{A'A\,\tau}. Standard errors come from a
-#'   delete-one-block jackknife that subtracts each block's already-\eqn{\Omega}-
+#'   delete-one-block jackknife that subtracts each block's
+#'   already-\eqn{\Omega}-
 #'   weighted contribution from the accumulated normal equations.
 #' @name pecotmr-h2-gldsc
 #' @keywords internal
@@ -896,12 +916,19 @@ NULL
 # variance = var * (nB-1)^2 / nB (Xiong et al.).
 .gldscJackknife <- function(contrib, left, right, A, N) {
     nB <- length(contrib)
-    loo <- lapply(contrib, function(cb) {
-        .gldscEstimate(left - cb$L, right - cb$R, A, N)
-    })
-    estHBlocks <- do.call(rbind, lapply(loo, `[[`, "estH"))
-    tauBlocks <- do.call(rbind, lapply(loo, `[[`, "tau"))
-    intLoo <- unlist(lapply(loo, `[[`, "intercept"))
+    loo <- map(
+        contrib,
+        .gldscLooEstimate,
+        left = left,
+        right = right,
+        A = A,
+        N = N
+    )
+    estHList <- map(loo, "estH")
+    estHBlocks <- exec(rbind, !!!estHList)
+    tauList <- map(loo, "tau")
+    tauBlocks <- exec(rbind, !!!tauList)
+    intLoo <- unlist(map(loo, "intercept"))
     jkSe <- function(v) sqrt(var(v) * (nB - 1)^2 / nB)
     list(
         h2Se = jkSe(estHBlocks[, 1]),
@@ -928,16 +955,17 @@ NULL
     )
     nB <- nrow(eBlocks)
     eSe <- sqrt(apply(eBlocks, 2, var) * (nB - 1)^2 / nB)
-    data.frame(
+    tibble(
         annotation = annotNames,
-        tau = fit$tau[-1],
-        tauSe = jk$tauSe[-1],
-        enrichment = enrichment,
-        enrichmentSe = eSe,
-        enrichmentP = pnorm(abs(enrichment - 1) / eSe, lower.tail = FALSE) * 2,
-        propH2 = propH2,
-        propSnps = propSnps,
-        stringsAsFactors = FALSE
+        tau = unname(fit$tau[-1]),
+        tauSe = unname(jk$tauSe[-1]),
+        enrichment = unname(enrichment),
+        enrichmentSe = unname(eSe),
+        enrichmentP = unname(
+            pnorm(abs(enrichment - 1) / eSe, lower.tail = FALSE) * 2
+        ),
+        propH2 = unname(propH2),
+        propSnps = unname(propSnps)
     )
 }
 
@@ -951,7 +979,7 @@ NULL
     coef <- solve(L, as.vector(XtOi %*% prep$y))
     p <- nrow(prep$R)
     covTau <- (solve(L) / N^2)[2, 2]
-    data.frame(
+    tibble(
         blockId = b,
         h2Local = coef[2] / N * p,
         h2LocalSe = sqrt(max(covTau, 0)) * p
@@ -960,11 +988,14 @@ NULL
 
 # Per-block local heritability (NULL unless requested).
 .gldscLocal <- function(preps, rawNtau, N) {
-    do.call(
-        rbind,
-        lapply(seq_along(preps), function(b) {
-            .gldscLocalBlock(preps[[b]], b, rawNtau, N)
-        })
+    bind_rows(
+        map(
+            seq_along(preps),
+            .gldscLocalRow,
+            preps = preps,
+            rawNtau = rawNtau,
+            N = N
+        )
     )
 }
 
@@ -985,25 +1016,27 @@ NULL
     if (nCand == 0) {
         return(NULL)
     }
-    per <- lapply(
+    per <- map(
         preps,
         .gldscCandidateBlock,
         candMat = candMat,
         rawNtau = rawNtau,
         coef = coef
     )
-    U <- Reduce(`+`, lapply(per, `[[`, "U"))
-    I <- Reduce(`+`, lapply(per, `[[`, "I"))
+    U <- reduce(map(per, "U"), `+`)
+    I <- reduce(map(per, "I"), `+`)
     scoreZ <- U / sqrt(pmax(I, 1e-10))
     R <- if (nCand == 1) {
         matrix(1, 1, 1)
     } else {
-        looZ <- do.call(
-            rbind,
-            lapply(seq_along(per), function(b) {
-                (U - per[[b]]$U) / sqrt(pmax(I - per[[b]]$I, 1e-10))
-            })
+        looRows <- map(
+            seq_along(per),
+            .gldscScoreLooRow,
+            per = per,
+            U = U,
+            I = I
         )
+        looZ <- exec(rbind, !!!looRows)
         Rc <- cor(looZ)
         Rc[is.na(Rc)] <- 0
         Rc
@@ -1021,19 +1054,20 @@ gldscUnivariate <- function(
 ) {
     ldMatrixList <- getLdMatrixList(ldRef)
     if (length(ldMatrixList) == 0L) {
-        stop(
+        msg <- glue(
             "g-LDSC requires full per-block LD matrices (ldMatrixList). ",
             "Read the LD reference with the LD matrices retained."
         )
+        abort(msg)
     }
     M <- nrow(getSnpInfo(ldRef))
     A <- .gldscAnnotMatrix(annotations, M)
-    preps <- lapply(ldMatrixList, .gldscBlockPrep, z = z, A = A)
-    rawNtau <- sum(unlist(lapply(preps, function(p) sum(p$y)))) /
-        sum(unlist(lapply(preps, function(p) sum(p$ldsc))))
-    contrib <- lapply(preps, .gldscBlockGls, rawNtau = rawNtau)
-    left <- Reduce(`+`, lapply(contrib, `[[`, "L"))
-    right <- Reduce(`+`, lapply(contrib, `[[`, "R"))
+    preps <- map(ldMatrixList, .gldscBlockPrep, z = z, A = A)
+    rawNtau <- sum(unlist(map(preps, "y"))) /
+        sum(unlist(map(preps, "ldsc")))
+    contrib <- map(preps, .gldscBlockGls, rawNtau = rawNtau)
+    left <- reduce(map(contrib, "L"), `+`)
+    right <- reduce(map(contrib, "R"), `+`)
     fit <- .gldscEstimate(left, right, A, n)
     jk <- .gldscJackknife(contrib, left, right, A, n)
     .gldscResult(fit, jk, annotations, preps, rawNtau, local, n, M)
@@ -1146,11 +1180,11 @@ NULL
 # eigenvalue-score matrix, and M_a. Univariate uses a single all-ones score
 # column (l_{i,base} = 1) scaled by total M.
 .hdlDesign <- function(blockData, M, baselineMat) {
-    lam <- unlist(lapply(blockData, `[[`, "lam"))
-    bstar <- unlist(lapply(blockData, `[[`, "bstar"))
+    lam <- unlist(map(blockData, "lam"))
+    bstar <- unlist(map(blockData, "bstar"))
     blockId <- rep(
         seq_along(blockData),
-        lengths(lapply(blockData, `[[`, "lam"))
+        lengths(map(blockData, "lam"))
     )
     if (is.null(baselineMat)) {
         return(list(
@@ -1162,7 +1196,8 @@ NULL
         ))
     }
     M_a <- colSums(baselineMat)
-    ldAnnot <- do.call(rbind, lapply(blockData, `[[`, "ldAnnot"))
+    ldAnnotList <- map(blockData, "ldAnnot")
+    ldAnnot <- exec(rbind, !!!ldAnnotList)
     list(
         lam = lam,
         bstar = bstar,
@@ -1212,11 +1247,18 @@ NULL
 # total-h2 SEs, the intercept SE, and the LOO per-annotation blocks.
 .hdlJackknife <- function(blockData, M, baselineMat, n, nRef) {
     nBlocks <- length(blockData)
-    loo <- lapply(seq_len(nBlocks), function(b) {
-        .hdlFit(.hdlDesign(blockData[-b], M, baselineMat), n, nRef)
-    })
-    h2aBlocks <- do.call(rbind, lapply(loo, `[[`, "h2a"))
-    intLoo <- unlist(lapply(loo, `[[`, "int"))
+    loo <- map(
+        seq_len(nBlocks),
+        .hdlLooFit,
+        blockData = blockData,
+        M = M,
+        baselineMat = baselineMat,
+        n = n,
+        nRef = nRef
+    )
+    h2aList <- map(loo, "h2a")
+    h2aBlocks <- exec(rbind, !!!h2aList)
+    intLoo <- unlist(map(loo, "int"))
     jkSe <- function(x) sqrt(mean((x - mean(x))^2) * (nBlocks - 1))
     list(
         h2aSe = apply(h2aBlocks, 2, jkSe),
@@ -1255,7 +1297,7 @@ NULL
     lamh2 <- varOf(h2)
     g <- bd$lam^2 / M - bd$lam / nRef
     info <- sum(g^2 / (2 * lamh2^2))
-    data.frame(
+    tibble(
         blockId = b,
         h2Local = h2,
         h2LocalSe = 1 / sqrt(max(info, 1e-10))
@@ -1264,11 +1306,16 @@ NULL
 
 # Per-block local heritability (NULL unless requested).
 .hdlLocal <- function(blockData, n, nRef, int, M) {
-    do.call(
-        rbind,
-        lapply(seq_along(blockData), function(b) {
-            .hdlLocalBlock(blockData[[b]], b, n, nRef, int, M)
-        })
+    bind_rows(
+        map(
+            seq_along(blockData),
+            .hdlLocalRow,
+            blockData = blockData,
+            n = n,
+            nRef = nRef,
+            int = int,
+            M = M
+        )
     )
 }
 
@@ -1299,25 +1346,25 @@ NULL
     }
     nRef <- getNRef(eigenRef)
     M_c <- colSums(candMat)
-    ldCand <- do.call(
-        rbind,
-        lapply(getEigenList(eigenRef), function(bk) {
-            crossprod(bk$vectors^2, candMat[bk$snpIdx, , drop = FALSE])
-        })
+    candCross <- map(
+        getEigenList(eigenRef),
+        .h2EigenCandCrossprod,
+        candMat = candMat
     )
+    ldCand <- exec(rbind, !!!candCross)
     scoreResid <- design$bstar^2 / lamh2^2 - 1 / lamh2
     keepAll <- rep(TRUE, length(lamh2))
-    scoreZ <- map_dbl(seq_len(nCand), function(c) {
-        .shdlCandidateScore(
-            ldCand[, c],
-            M_c[c],
-            design$lam,
-            lamh2,
-            scoreResid,
-            nRef,
-            keepAll
-        )
-    })
+    scoreZ <- map_dbl(
+        seq_len(nCand),
+        .shdlScoreForCand,
+        ldCand = ldCand,
+        M_c = M_c,
+        lam = design$lam,
+        lamh2 = lamh2,
+        scoreResid = scoreResid,
+        nRef = nRef,
+        keep = keepAll
+    )
     R <- .shdlScoreCor(ldCand, M_c, design, lamh2, scoreResid, nRef, nCand)
     .buildEnrichmentResult(getAnnotationMeta(candidate), scoreZ, R)
 }
@@ -1328,23 +1375,19 @@ NULL
         return(matrix(1, 1, 1))
     }
     blocks <- sort(unique(design$blockId))
-    looZ <- do.call(
-        rbind,
-        lapply(blocks, function(b) {
-            keep <- design$blockId != b
-            map_dbl(seq_len(nCand), function(c) {
-                .shdlCandidateScore(
-                    ldCand[, c],
-                    M_c[c],
-                    design$lam,
-                    lamh2,
-                    scoreResid,
-                    nRef,
-                    keep
-                )
-            })
-        })
+    looRows <- map(
+        blocks,
+        .shdlLooBlockScores,
+        blockId = design$blockId,
+        ldCand = ldCand,
+        M_c = M_c,
+        lam = design$lam,
+        lamh2 = lamh2,
+        scoreResid = scoreResid,
+        nRef = nRef,
+        nCand = nCand
     )
+    looZ <- exec(rbind, !!!looRows)
     R <- cor(looZ)
     R[is.na(R)] <- 0
     R
@@ -1366,7 +1409,7 @@ hdlUnivariate <- function(
     M <- nrow(getSnpInfo(eigenRef))
     nRef <- getNRef(eigenRef)
     baselineMat <- .h2BaselineMat(annotations)
-    blockData <- lapply(
+    blockData <- map(
         eigenList,
         .hdlBlockData,
         z = z,
@@ -1420,11 +1463,11 @@ NULL
         return(study)
     }
     if (nrow(sumstats) != 1L) {
-        stop(
+        msg <- glue(
             "`study` is required when the GwasSumStats has ",
-            nrow(sumstats),
-            " entries."
+            "{nrow(sumstats)} entries."
         )
+        abort(msg)
     }
     as.character(sumstats$study[[1L]])
 }
@@ -1479,7 +1522,7 @@ setMethod(
         study = NULL,
         ...
     ) {
-        method <- match.arg(method, c("lder", "gldsc", "hdl"))
+        method <- arg_match(method, c("lder", "gldsc", "hdl"))
         .validateMethodRef(method, ldRef)
         study <- .estimateH2ResolveStudy(sumstats, study)
         z <- getZ(sumstats, study = study)
@@ -1506,21 +1549,18 @@ setMethod(
 
 #' @keywords internal
 .validateMethodRef <- function(method, ldRef) {
-    if (method %in% c("lder", "hdl") && !is(ldRef, "LdEigen")) {
-        stop(
-            "Method '",
-            method,
-            "' requires an LdEigen object, ",
-            "got ",
-            class(ldRef)
+    if (is_in(method, c("lder", "hdl")) && !is(ldRef, "LdEigen")) {
+        msg <- glue(
+            "Method '{method}' requires an LdEigen object, ",
+            "got {class(ldRef)}"
         )
+        abort(msg)
     }
     if (method == "gldsc" && !is(ldRef, "LdScore")) {
-        stop(
-            "Method 'gldsc' requires an LdScore object, ",
-            "got ",
-            class(ldRef)
+        msg <- glue(
+            "Method 'gldsc' requires an LdScore object, got {class(ldRef)}"
         )
+        abort(msg)
     }
     invisible(TRUE)
 }
@@ -1591,11 +1631,12 @@ setMethod(
         # Compute annotation-stratified LD scores using LD matrices
         ldMatrixList <- getLdMatrixList(ldRef)
         if (length(ldMatrixList) == 0) {
-            stop(
+            msg <- glue(
                 "Annotation-stratified LD scores require ldMatrixList in ",
                 "LdScore. ",
                 "Recompute the LD reference with full LD matrices."
             )
+            abort(msg)
         }
 
         nSnps <- nrow(getSnpInfo(ldRef))
@@ -1656,15 +1697,16 @@ setMethod(
 #' @export
 h2EstimateToSldscTrait <- function(h2Est) {
     if (!is(h2Est, "H2Estimate")) {
-        stop("h2Est must be an H2Estimate object")
+        abort("h2Est must be an H2Estimate object")
     }
 
     enrichDf <- getEnrichment(h2Est)
     if (is.null(enrichDf)) {
-        stop(
+        msg <- glue(
             "H2Estimate has no enrichment results. ",
             "Run estimateH2 with annotations to get enrichment estimates."
         )
+        abort(msg)
     }
 
     cats <- as.character(enrichDf$annotation)
@@ -1685,15 +1727,167 @@ h2EstimateToSldscTrait <- function(h2Est) {
 
     list(
         categories = cats,
-        tau = setNames(enrichDf$tau, cats),
-        tauSe = setNames(enrichDf$tauSe, cats),
-        enrichment = setNames(enrichDf$enrichment, cats),
-        enrichmentSe = setNames(enrichDf$enrichmentSe, cats),
-        enrichmentP = setNames(enrichDf$enrichmentP, cats),
-        propH2 = setNames(enrichDf$propH2, cats),
-        propSnps = setNames(enrichDf$propSnps, cats),
+        tau = set_names(enrichDf$tau, cats),
+        tauSe = set_names(enrichDf$tauSe, cats),
+        enrichment = set_names(enrichDf$enrichment, cats),
+        enrichmentSe = set_names(enrichDf$enrichmentSe, cats),
+        enrichmentP = set_names(enrichDf$enrichmentP, cats),
+        propH2 = set_names(enrichDf$propH2, cats),
+        propSnps = set_names(enrichDf$propSnps, cats),
         h2g = getH2(h2Est),
         tauBlocks = tauBlocks,
         nBlocks = nBlocks
+    )
+}
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# The genome build of one supported h2 input object; errors on an unknown type.
+# @noRd
+.h2GenomeOfObject <- function(x) {
+    if (
+        is(x, "GwasSumStats") ||
+            is(x, "QtlSumStats") ||
+            is(x, "LdStatistic") ||
+            is(x, "AnnotationMatrix") ||
+            is(x, "LdBlocks")
+    ) {
+        getGenome(x)
+    } else {
+        abort("Unknown object type for genome build check")
+    }
+}
+
+# crossprod of one eigen block's squared vectors against its
+# candidate-annotation
+# rows. Shared by the LDER and sHDL candidate-score assemblies.
+# @noRd
+.h2EigenCandCrossprod <- function(bk, candMat) {
+    crossprod(bk$vectors^2, candMat[bk$snpIdx, , drop = FALSE])
+}
+
+# One LDER delete-one-block jackknife fold: design and fit with block `b` left
+# out.
+# @noRd
+.lderLooBlockFit <- function(
+    b,
+    blockStats,
+    baselineMat,
+    N,
+    M,
+    M_aFull,
+    rough,
+    twostage
+) {
+    d <- .lderDesign(blockStats[-b], baselineMat)
+    .lderGetRes(d$x, d$lam, d$ldAnnot, N, M, M_aFull, rough, twostage)
+}
+
+# One LDER local-heritability row for block `b`.
+# @noRd
+.lderLocalRow <- function(b, blockStats, N, a) {
+    .lderLocalBlock(blockStats[[b]], b, N, a)
+}
+
+# LDER weighted score z for candidate column `c` under the `keep` block mask.
+# @noRd
+.lderScoreForCand <- function(c, ldCand, lam, w, resid, N, keep) {
+    .lderCandidateScore(ldCand[, c], lam, w, resid, N, keep)
+}
+
+# LDER leave-one-block-out candidate score z's for block `b`.
+# @noRd
+.lderLooBlockScores <- function(b, blockId, ldCand, lam, w, resid, N, nCand) {
+    keep <- blockId != b
+    map_dbl(
+        seq_len(nCand),
+        .lderScoreForCand,
+        ldCand = ldCand,
+        lam = lam,
+        w = w,
+        resid = resid,
+        N = N,
+        keep = keep
+    )
+}
+
+# One g-LDSC delete-one-block jackknife fold: re-solve the normal equations with
+# block `cb`'s Omega-weighted contribution removed.
+# @noRd
+.gldscLooEstimate <- function(cb, left, right, A, N) {
+    .gldscEstimate(left - cb$L, right - cb$R, A, N)
+}
+
+# One g-LDSC local-heritability row for block `b`.
+# @noRd
+.gldscLocalRow <- function(b, preps, rawNtau, N) {
+    .gldscLocalBlock(preps[[b]], b, rawNtau, N)
+}
+
+# g-LDSC leave-one-block-out standardized candidate score vector for block `b`.
+# @noRd
+.gldscScoreLooRow <- function(b, per, U, I) {
+    (U - per[[b]]$U) / sqrt(pmax(I - per[[b]]$I, 1e-10))
+}
+
+# One HDL delete-one-block jackknife fold: refit leaving block `b` out.
+# @noRd
+.hdlLooFit <- function(b, blockData, M, baselineMat, n, nRef) {
+    .hdlFit(.hdlDesign(blockData[-b], M, baselineMat), n, nRef)
+}
+
+# One HDL local-heritability row for block `b`.
+# @noRd
+.hdlLocalRow <- function(b, blockData, n, nRef, int, M) {
+    .hdlLocalBlock(blockData[[b]], b, n, nRef, int, M)
+}
+
+# sHDL score z for candidate column `c` under the `keep` block mask.
+# @noRd
+.shdlScoreForCand <- function(
+    c,
+    ldCand,
+    M_c,
+    lam,
+    lamh2,
+    scoreResid,
+    nRef,
+    keep
+) {
+    .shdlCandidateScore(
+        ldCand[, c],
+        M_c[c],
+        lam,
+        lamh2,
+        scoreResid,
+        nRef,
+        keep
+    )
+}
+
+# sHDL leave-one-block-out candidate score z's for block `b`.
+# @noRd
+.shdlLooBlockScores <- function(
+    b,
+    blockId,
+    ldCand,
+    M_c,
+    lam,
+    lamh2,
+    scoreResid,
+    nRef,
+    nCand
+) {
+    keep <- blockId != b
+    map_dbl(
+        seq_len(nCand),
+        .shdlScoreForCand,
+        ldCand = ldCand,
+        M_c = M_c,
+        lam = lam,
+        lamh2 = lamh2,
+        scoreResid = scoreResid,
+        nRef = nRef,
+        keep = keep
     )
 }

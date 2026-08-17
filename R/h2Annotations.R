@@ -4,6 +4,7 @@
 #' @name pecotmr-h2-annotations
 #' @keywords internal
 #' @importFrom tools file_ext
+#' @importFrom stringr str_detect str_to_lower
 #' @importFrom GenomicRanges GRanges
 #' @importFrom IRanges findOverlaps
 #' @importFrom S4Vectors queryHits subjectHits
@@ -21,10 +22,11 @@ setMethod(
     signature(paths = "character"),
     function(paths, snpRanges, annotationMeta = NULL, genome = "hg19", ...) {
         if (is.null(names(paths))) {
-            stop(
+            msg <- glue(
                 "'paths' must be a named character vector (names = ",
                 "annotation names)"
             )
+            abort(msg)
         }
         annotNames <- names(paths)
         nAnnots <- length(paths)
@@ -36,21 +38,22 @@ setMethod(
             nAnnots
         )
         if (is.null(annotationMeta)) {
-            annotationMeta <- data.frame(
+            annotationMeta <- tibble(
                 name = annotNames,
                 tier = rep("candidate", nAnnots),
-                type = .readAnnotTypes(paths),
-                stringsAsFactors = FALSE
+                type = .readAnnotTypes(paths)
             )
         }
         AnnotationMatrix(annotMat, snpRanges, annotationMeta, genome)
     }
 )
 
-# Auto-detected annotation types (continuous for BigWig, else binary).
+# Auto-detected annotation types (continuous for BigWig, else binary). Unnamed
+# so the tibble column carries no element names (tibble, unlike data.frame,
+# would otherwise keep the paths' names on the column).
 # @noRd
 .readAnnotTypes <- function(paths) {
-    map_chr(paths, .annotType)
+    unname(map_chr(paths, .annotType))
 }
 
 # @noRd
@@ -98,12 +101,12 @@ setMethod(
 #' @return Character, one of "bigwig", "ldsc_annot", or "bed".
 #' @keywords internal
 .annotDetectFormat <- function(path) {
-    lpath <- tolower(path)
-    if (grepl("\\.annot\\.gz$", lpath)) {
+    lpath <- str_to_lower(path)
+    if (str_detect(lpath, "\\.annot\\.gz$")) {
         return("ldsc_annot")
     }
 
-    ext <- tolower(file_ext(path))
+    ext <- str_to_lower(file_ext(path))
     switch(
         ext,
         "bw" = ,
@@ -124,7 +127,7 @@ setMethod(
     bw <- rtracklayer::BigWigFile(bwPath)
     scores <- rtracklayer::import(bw, which = snpRanges, as = "NumericList")
     # Take mean score at each SNP position
-    vapply(scores, function(x) if (length(x) > 0) mean(x) else 0, numeric(1))
+    map_dbl(scores, .bwMeanScore)
 }
 
 #' @title Read BED Annotation
@@ -151,14 +154,15 @@ setMethod(
 #' @keywords internal
 .readLdscAnnot <- function(annotPath, snpRanges, annotName) {
     # S-LDSC .annot files are tab-separated with columns: CHR, BP, SNP, CM, ...
-    dt <- as.data.frame(vroom(annotPath, show_col_types = FALSE))
+    dt <- vroom(annotPath, show_col_types = FALSE)
 
-    if (!annotName %in% colnames(dt)) {
-        stop("Annotation column '", annotName, "' not found in ", annotPath)
+    if (!is_in(annotName, colnames(dt))) {
+        msg <- glue("Annotation column '{annotName}' not found in {annotPath}")
+        abort(msg)
     }
 
-    if (!all(c("CHR", "BP") %in% colnames(dt))) {
-        stop("LDSC annot file must contain CHR and BP columns")
+    if (!all(is_in(c("CHR", "BP"), colnames(dt)))) {
+        abort("LDSC annot file must contain CHR and BP columns")
     }
 
     # Build GRanges from the annot file positions
@@ -180,3 +184,10 @@ setMethod(
 
 # (The AnnotationMatrix() constructor and the getBaseline / getCandidates tier
 # accessors now live in R/AnnotationMatrix.R alongside the class definition.)
+
+# The mean BigWig score at one SNP (0 when the SNP has no overlapping
+# intervals).
+# @noRd
+.bwMeanScore <- function(x) {
+    if (length(x) > 0) mean(x) else 0
+}

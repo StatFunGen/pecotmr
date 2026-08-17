@@ -158,11 +158,11 @@ setMethod("getDataType", "TwasWeightsEntry", function(x, ...) x@dataType)
 #' @rdname show-methods
 #' @export
 setMethod("show", "TwasWeightsEntry", function(object) {
-    cat(sprintf(
-        "TwasWeightsEntry: %d variants, standardized=%s\n",
-        length(object@variantIds),
-        object@standardized
+    cat(glue(
+        "TwasWeightsEntry: {length(object@variantIds)} variants, ",
+        "standardized={object@standardized}\n",
+        .trim = FALSE
     ))
     hasCv <- !is.null(object@cvResult)
-    cat(sprintf("  CV performance: %s\n", hasCv))
+    cat(glue("  CV performance: {hasCv}\n", .trim = FALSE))
 })

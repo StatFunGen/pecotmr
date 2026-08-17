@@ -82,12 +82,12 @@ setMethod("getQcDiagnostics", "SumStatsBase", function(x, entry = 1L, ...) {
         return(NULL)
     }
     if (is.null(entry)) {
-        out <- lapply(audits, function(a) a$ldMismatchDiagnostics)
-        keep <- !vapply(out, is.null, logical(1L))
+        out <- map(audits, "ldMismatchDiagnostics")
+        keep <- !map_lgl(out, is.null)
         if (!any(keep)) {
             return(NULL)
         }
-        setNames(out[keep], seq_along(audits)[keep])
+        set_names(out[keep], seq_along(audits)[keep])
     } else {
         if (
             !is.numeric(entry) ||
@@ -95,7 +95,10 @@ setMethod("getQcDiagnostics", "SumStatsBase", function(x, entry = 1L, ...) {
                 entry < 1L ||
                 entry > length(audits)
         ) {
-            stop("`entry` must be a single integer in 1:", length(audits), ".")
+            msg <- glue(
+                "`entry` must be a single integer in 1:{length(audits)}."
+            )
+            abort(msg)
         }
         audits[[as.integer(entry)]]$ldMismatchDiagnostics
     }
@@ -168,7 +171,7 @@ setMethod("getSe", "SumStatsBase", function(x, ...) {
 #' @export
 setMethod("getMaf", "SumStatsBase", function(x, ...) {
     mc <- mcols(getSumStats(x, ...))
-    if ("MAF" %in% colnames(mc)) mc$MAF else NULL
+    if (is_in("MAF", colnames(mc))) mc$MAF else NULL
 })
 
 #' @rdname nSnps
@@ -284,9 +287,9 @@ setMethod(
             trait = trait,
             method = method,
             region = region,
-            perEntry = function(e) {
-                getCs(e, coverage = coverage, minPurity = minPurity)
-            }
+            perEntry = getCs,
+            coverage = coverage,
+            minPurity = minPurity
         )
     }
 )
@@ -308,7 +311,7 @@ setMethod(
         minPurity = NULL,
         ...
     ) {
-        type <- match.arg(type)
+        type <- arg_match(type)
         # type = "GRanges" is honored only for a single pinned entry; the
         # aggregate (identity-prefixed) form is data.frame-only.
         if (type == "GRanges") {
@@ -332,14 +335,10 @@ setMethod(
             trait = trait,
             method = method,
             region = region,
-            perEntry = function(e) {
-                getTopLoci(
-                    e,
-                    type = "data.frame",
-                    signalCutoff = signalCutoff,
-                    minPurity = minPurity
-                )
-            }
+            perEntry = getTopLoci,
+            type = "data.frame",
+            signalCutoff = signalCutoff,
+            minPurity = minPurity
         )
     }
 )
@@ -369,10 +368,11 @@ setMethod(
         error = function(e) e
     )
     if (inherits(sel, "error")) {
-        stop(
+        msg <- glue(
             "getTopLoci: aggregating across multiple entries requires ",
             "type = 'data.frame'."
         )
+        abort(msg)
     }
     getTopLoci(
         sel,
@@ -407,7 +407,8 @@ setMethod(
             trait = trait,
             method = method,
             region = region,
-            perEntry = function(e) getMarginalEffects(e, maxPval = maxPval)
+            perEntry = getMarginalEffects,
+            maxPval = maxPval
         )
     }
 )

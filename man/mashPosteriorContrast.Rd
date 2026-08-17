@@ -23,9 +23,9 @@ is treated as 0 (untested).}
 populations of one cell type share weight. Names are condition labels.}
 }
 \value{
-A \code{data.frame} (features x contrasts) with
-  \code{mean_contrast_*}, \code{se_contrast_*}, \code{p_contrast_*} columns
-  and feature ids as row names. Empty when nothing is testable.
+A \code{tibble} (features x contrasts) with a \code{feature_id}
+  column followed by \code{mean_contrast_*}, \code{se_contrast_*},
+  \code{p_contrast_*} columns. Empty when nothing is testable.
 }
 \description{
 Orchestrates \code{\link{fitMashContrast}} across every feature (variant) of

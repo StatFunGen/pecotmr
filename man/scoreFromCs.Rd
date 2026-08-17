@@ -12,7 +12,7 @@ scoreFromCs(fineMapping, contrastResults, condition)
 CS).}
 
 \item{contrastResults}{A contrast table from
-\code{\link{mashPosteriorContrast}} with variant row names.}
+\code{\link{mashPosteriorContrast}} with a \code{feature_id} column.}
 
 \item{condition}{Condition label whose deviation p-value column is used; if
 that column is absent and exactly one pairwise contrast exists, the

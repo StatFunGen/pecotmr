@@ -2,7 +2,7 @@
 NULL
 
 .emptyCsSummary <- function() {
-    data.frame(
+    tibble(
         cs = character(),
         effect_id = character(),
         coverage = numeric(),
@@ -15,8 +15,7 @@ NULL
         cs_pip = numeric(),
         cs_mean_effect = numeric(),
         lead_variant = character(),
-        lead_pip = numeric(),
-        stringsAsFactors = FALSE
+        lead_pip = numeric()
     )
 }
 
@@ -49,21 +48,30 @@ NULL
 # index for susie-family fits (unfiltered CS are ordered by effect).
 # @noRd
 .csSummaryFit <- function(tl, fit, coverage) {
-    csCol <- paste0("cs_", coverage * 100)
-    purCol <- paste0(csCol, "_purity")
-    if (is.null(tl) || nrow(tl) == 0L || !(csCol %in% names(tl))) {
+    csCol <- str_c("cs_", coverage * 100)
+    purCol <- str_c(csCol, "_purity")
+    if (is.null(tl) || nrow(tl) == 0L || !is_in(csCol, names(tl))) {
         return(.emptyCsSummary())
     }
-    labels <- unique(tl[[csCol]][
-        !is.na(tl[[csCol]]) & nzchar(tl[[csCol]]) & !grepl("_0$", tl[[csCol]])
+    csValues <- tl[[csCol]]
+    labels <- unique(csValues[
+        !is.na(csValues) &
+            str_length(csValues) > 0L &
+            !str_detect(csValues, "_0$")
     ])
     if (length(labels) == 0L) {
         return(.emptyCsSummary())
     }
     ctx <- .csSummaryContext(tl, fit, coverage, csCol, purCol)
-    out <- do.call(rbind, map(labels, function(lab) .csSummaryRow(lab, ctx)))
-    out$cs_log10bf[!is.finite(out$cs_log10bf)] <- NA_real_
-    out
+    map(labels, .csSummaryRow, ctx = ctx) |>
+        bind_rows() |>
+        mutate(
+            cs_log10bf = if_else(
+                is.finite(.data$cs_log10bf),
+                .data$cs_log10bf,
+                NA_real_
+            )
+        )
 }
 
 # Per-fit context for the CS summary rows: prior variances (V) and per-effect
@@ -76,7 +84,7 @@ NULL
     if (!is.null(sp)) {
         mc <- intersect(c("meanAbsCorr", "mean.abs.corr"), names(sp))
         if (length(mc) > 0L) {
-            meanPur <- stats::setNames(as.numeric(sp[[mc[1L]]]), rownames(sp))
+            meanPur <- set_names(as.numeric(sp[[mc[1L]]]), rownames(sp))
         }
     }
     list(
@@ -93,11 +101,11 @@ NULL
 # One credible-set summary row for label `lab`.
 # @noRd
 .csSummaryRow <- function(lab, ctx) {
-    m <- ctx$tl[ctx$tl[[ctx$csCol]] == lab, , drop = FALSE]
-    Lidx <- suppressWarnings(as.integer(sub("^.*_", "", lab)))
-    Lname <- if (!is.na(Lidx)) paste0("L", Lidx) else NA_character_
+    m <- filter(ctx$tl, .data[[ctx$csCol]] == lab)
+    Lidx <- suppressWarnings(as.integer(str_remove(lab, "^.*_")))
+    Lname <- if (!is.na(Lidx)) str_c("L", Lidx) else NA_character_
     lead <- which.max(m$pip)
-    data.frame(
+    tibble(
         cs = lab,
         effect_id = Lname,
         coverage = ctx$coverage,
@@ -115,21 +123,20 @@ NULL
         # the entry has no conditional_effect column, e.g. univariate susie).
         cs_mean_effect = .csMeanEffect(m),
         lead_variant = as.character(m$variant_id[lead]),
-        lead_pip = as.numeric(m$pip[lead]),
-        stringsAsFactors = FALSE
+        lead_pip = as.numeric(m$pip[lead])
     )
 }
 
 # purity_min: first per-CS purity value (NA when the column is absent).
 # @noRd
 .csPurityMin <- function(m, purCol) {
-    if (purCol %in% names(m)) as.numeric(m[[purCol]][1]) else NA_real_
+    if (is_in(purCol, names(m))) as.numeric(m[[purCol]][1]) else NA_real_
 }
 
 # purity_mean: per-effect mean absolute correlation (NA when unavailable).
 # @noRd
 .csPurityMean <- function(meanPur, Lname) {
-    if (!is.null(meanPur) && !is.na(Lname) && Lname %in% names(meanPur)) {
+    if (!is.null(meanPur) && !is.na(Lname) && is_in(Lname, names(meanPur))) {
         as.numeric(meanPur[[Lname]])
     } else {
         NA_real_
@@ -149,7 +156,7 @@ NULL
 # cs_log10bf: strongest member logBF (NA when the column is absent).
 # @noRd
 .csLog10Bf <- function(m) {
-    if ("logBF" %in% names(m)) {
+    if (is_in("logBF", names(m))) {
         suppressWarnings(max(m$logBF, na.rm = TRUE))
     } else {
         NA_real_
@@ -159,7 +166,7 @@ NULL
 # cs_mean_effect: mean conditional effect over the CS (NA when absent).
 # @noRd
 .csMeanEffect <- function(m) {
-    if ("conditional_effect" %in% names(m)) {
+    if (is_in("conditional_effect", names(m))) {
         suppressWarnings(mean(as.numeric(m$conditional_effect), na.rm = TRUE))
     } else {
         NA_real_
@@ -175,7 +182,7 @@ NULL
 #' @param x A \code{FineMappingEntry} or \code{FineMappingResultBase}.
 #' @param coverage Credible-set coverage to summarise. Default 0.95.
 #' @param ... Ignored.
-#' @return A \code{data.frame}: \code{cs, effect_id, coverage, n_variants,
+#' @return A \code{tibble}: \code{cs, effect_id, coverage, n_variants,
 #'   purity_min, purity_mean, V, cs_log10bf} (strongest member logBF),
 #'   \code{cs_log_bf} (true per-effect single-effect log Bayes factor),
 #'   \code{cs_pip} (summed member PIP = inclusion mass captured),
@@ -207,8 +214,10 @@ setMethod(
     "getCredibleSetSummary",
     "FineMappingResultBase",
     function(x, coverage = 0.95, ...) {
-        .fmrAggregateView(x, perEntry = function(e) {
-            getCredibleSetSummary(e, coverage = coverage)
-        })
+        .fmrAggregateView(
+            x,
+            perEntry = getCredibleSetSummary,
+            coverage = coverage
+        )
     }
 )

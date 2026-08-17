@@ -27,11 +27,12 @@ NULL
     if (is.null(fn)) {
         # nocov start  (defensive guard against an upstream fsusieR rename; only
         # reachable if fsusieR drops this unexported S3 method)
-        stop(
-            "fsusieR's internal update_cal_credible_band.susiF not ",
-            "found; cannot compute the ",
-            "fSuSiE credible band (upstream fsusieR API changed)."
+        msg <- glue(
+            "fsusieR's internal update_cal_credible_band.susiF not found; ",
+            "cannot compute the fSuSiE credible band (upstream fsusieR API ",
+            "changed)."
         )
+        abort(msg)
         # nocov end
     }
     indxLst <- fsusieR::gen_wavelet_indx(log2(length(fit$outing_grid)))
@@ -49,14 +50,13 @@ NULL
 }
 
 .emptyCredibleBand <- function() {
-    data.frame(
+    tibble(
         cs = character(),
         chrom = character(),
         pos = numeric(),
         effect = numeric(),
         lower = numeric(),
-        upper = numeric(),
-        stringsAsFactors = FALSE
+        upper = numeric()
     )
 }
 
@@ -68,27 +68,18 @@ NULL
     fit <- .fsusiePopulateCredibleBand(fit)
     grid <- as.numeric(fit$outing_grid)
     chrom <- .fsusieChrom(fit)
-    parts <- lapply(seq_along(fit$cred_band), function(l) {
-        band <- fit$cred_band[[l]]
-        eff <- fit$fitted_func[[l]]
-        if (is.null(band) || is.null(eff)) {
-            return(NULL)
-        }
-        data.frame(
-            cs = paste0("fsusie_", l),
-            chrom = chrom,
-            pos = grid,
-            effect = as.numeric(eff),
-            lower = as.numeric(band[2, ]),
-            upper = as.numeric(band[1, ]),
-            stringsAsFactors = FALSE
-        )
-    })
-    parts <- parts[!vapply(parts, is.null, logical(1))]
+    parts <- map(
+        seq_along(fit$cred_band),
+        .fsusieBandRow,
+        fit = fit,
+        chrom = chrom,
+        grid = grid
+    )
+    parts <- compact(parts)
     if (length(parts) == 0L) {
         return(.emptyCredibleBand())
     }
-    do.call(rbind, parts)
+    bind_rows(parts)
 }
 
 # Map each fit-effect index (1..L, as affected_reg's `CS`) to pecotmr's
@@ -101,17 +92,20 @@ NULL
 # @noRd
 .fsusieCsMapFromTopLoci <- function(fit, topLoci) {
     L <- length(fit$cs)
-    label <- stats::setNames(paste0("fsusie_", seq_len(L)), seq_len(L))
-    purity <- stats::setNames(rep(NA_real_, L), seq_len(L))
+    label <- set_names(str_c("fsusie_", seq_len(L)), seq_len(L))
+    purity <- set_names(rep(NA_real_, L), seq_len(L))
     vids <- names(fit$csd_X)
     if (
         is.null(topLoci) ||
             is.null(vids) ||
-            !all(c("cs_95", "cs_95_purity", "variant_id") %in% names(topLoci))
+            !all(is_in(
+                c("cs_95", "cs_95_purity", "variant_id"),
+                names(topLoci)
+            ))
     ) {
         return(list(label = label, purity = purity))
     }
-    retained <- unique(topLoci$cs_95[!grepl("_0$", topLoci$cs_95)])
+    retained <- unique(topLoci$cs_95[!str_detect(topLoci$cs_95, "_0$")])
     for (lab in retained) {
         inLab <- topLoci$cs_95 == lab
         kVars <- as.character(topLoci$variant_id[inLab])
@@ -142,34 +136,22 @@ NULL
     if (is.null(reg) || nrow(reg) == 0L) {
         return(GenomicRanges::GRanges())
     }
-    reg <- as.data.frame(reg)
+    reg <- as_tibble(reg)
     chrom <- .fsusieChrom(fit)
     grid <- as.numeric(fit$outing_grid)
     csMap <- .fsusieCsMapFromTopLoci(fit, topLoci)
     csKey <- as.character(reg$CS)
     # Effect direction over each region (sign of the fitted effect curve), which
     # upstream affected_reg() collapses away.
-    direction <- vapply(
+    direction <- map_chr(
         seq_len(nrow(reg)),
-        function(i) {
-            inRange <- which(grid >= reg$Start[i] & grid <= reg$End[i])
-            eff <- fit$fitted_func[[reg$CS[i]]]
-            if (length(inRange) == 0L || is.null(eff)) {
-                return(NA_character_)
-            }
-            s <- sign(mean(as.numeric(eff)[inRange], na.rm = TRUE))
-            if (is.na(s) || s == 0) {
-                NA_character_
-            } else if (s > 0) {
-                "pos"
-            } else {
-                "neg"
-            }
-        },
-        character(1)
+        .fsusieRegionDirection,
+        grid = grid,
+        reg = reg,
+        fit = fit
     )
     GenomicRanges::GRanges(
-        seqnames = paste0("chr", sub("^chr", "", chrom)),
+        seqnames = str_c("chr", str_remove(chrom, "^chr")),
         ranges = IRanges::IRanges(
             start = as.integer(reg$Start),
             end = as.integer(reg$End)
@@ -191,7 +173,7 @@ NULL
 #'
 #' @param x A \code{FineMappingEntry} or \code{FineMappingResultBase}.
 #' @param ... Ignored.
-#' @return A long \code{data.frame}: \code{cs, chrom, pos, effect, lower, upper}
+#' @return A long \code{tibble}: \code{cs, chrom, pos, effect, lower, upper}
 #'   (the collection method additionally carries the entry identity columns).
 #' @seealso \code{\link{fsusieAffectedRegions}}
 #' @examples
@@ -211,7 +193,7 @@ setMethod("fsusieCredibleBand", "FineMappingEntry", function(x, ...) {
 #' @rdname fsusieCredibleBand
 #' @export
 setMethod("fsusieCredibleBand", "FineMappingResultBase", function(x, ...) {
-    .fmrAggregateView(x, perEntry = function(e) fsusieCredibleBand(e))
+    .fmrAggregateView(x, perEntry = fsusieCredibleBand)
 })
 
 #' fSuSiE affected genomic regions
@@ -245,22 +227,67 @@ setMethod("fsusieAffectedRegions", "FineMappingEntry", function(x, ...) {
 #' @rdname fsusieAffectedRegions
 #' @export
 setMethod("fsusieAffectedRegions", "FineMappingResultBase", function(x, ...) {
-    grs <- lapply(seq_len(nrow(x)), function(i) {
-        gr <- fsusieAffectedRegions(x$entry[[i]])
-        if (length(gr) > 0L) {
-            S4Vectors::mcols(gr)$study <- as.character(x$study[[i]])
-            if ("context" %in% names(x)) {
-                S4Vectors::mcols(gr)$context <- as.character(x$context[[i]])
-            }
-            if ("trait" %in% names(x)) {
-                S4Vectors::mcols(gr)$trait <- as.character(x$trait[[i]])
-            }
-        }
-        gr
-    })
-    grs <- grs[vapply(grs, length, integer(1)) > 0L]
+    grs <- map(seq_len(nrow(x)), .fsusieEntryAffectedRegions, x = x)
+    grs <- grs[lengths(grs) > 0L]
     if (length(grs) == 0L) {
         return(GenomicRanges::GRanges())
     }
-    do.call(c, grs)
+    exec(c, !!!grs)
 })
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# One credible band's variant-level data.frame (effect + lower/upper), or NULL
+# when band `l` has no fitted band/effect.
+# @noRd
+.fsusieBandRow <- function(l, fit, chrom, grid) {
+    band <- fit$cred_band[[l]]
+    eff <- fit$fitted_func[[l]]
+    if (is.null(band) || is.null(eff)) {
+        return(NULL)
+    }
+    tibble(
+        cs = str_c("fsusie_", l),
+        chrom = chrom,
+        pos = grid,
+        effect = as.numeric(eff),
+        lower = as.numeric(band[2, ]),
+        upper = as.numeric(band[1, ])
+    )
+}
+
+# The effect direction ("pos"/"neg"/NA) of affected region `i` (sign of the
+# fitted effect curve over the region's grid range).
+# @noRd
+.fsusieRegionDirection <- function(i, grid, reg, fit) {
+    inRange <- which(grid >= reg$Start[i] & grid <= reg$End[i])
+    eff <- fit$fitted_func[[reg$CS[i]]]
+    if (length(inRange) == 0L || is.null(eff)) {
+        return(NA_character_)
+    }
+    s <- sign(mean(as.numeric(eff)[inRange], na.rm = TRUE))
+    if (is.na(s) || s == 0) {
+        NA_character_
+    } else if (s > 0) {
+        "pos"
+    } else {
+        "neg"
+    }
+}
+
+# One entry's affected regions, stamped with the row's study/context/trait
+# mcols.
+# @noRd
+.fsusieEntryAffectedRegions <- function(i, x) {
+    gr <- fsusieAffectedRegions(x$entry[[i]])
+    if (length(gr) > 0L) {
+        S4Vectors::mcols(gr)$study <- as.character(x$study[[i]])
+        if (is_in("context", names(x))) {
+            S4Vectors::mcols(gr)$context <- as.character(x$context[[i]])
+        }
+        if (is_in("trait", names(x))) {
+            S4Vectors::mcols(gr)$trait <- as.character(x$trait[[i]])
+        }
+    }
+    gr
+}

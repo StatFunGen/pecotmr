@@ -25,8 +25,8 @@
 
 .sldscChromFromFilename <- function(f) {
     bn <- basename(f)
-    m <- regmatches(bn, regexec("\\.([0-9]+)\\.annot\\.gz$", bn))[[1]]
-    if (length(m) >= 2) as.integer(m[2]) else NA_integer_
+    m <- str_match(bn, "\\.([0-9]+)\\.annot\\.gz$")[1L, ]
+    if (is.na(m[[1L]])) NA_integer_ else as.integer(m[[2L]])
 }
 
 .sldscDetectAnnotCols <- function(filePath) {
@@ -58,11 +58,15 @@
 #' @importFrom stats setNames var na.omit
 #' @importFrom utils head
 #' @importFrom vroom vroom
+#' @importFrom readr read_lines
 #' @export
 readSldscTrait <- function(prefix) {
-    files <- paste0(prefix, c(".results", ".log", ".part_delete"))
+    files <- str_c(prefix, c(".results", ".log", ".part_delete"))
     for (f in files) {
-        if (!file.exists(f)) stop("readSldscTrait: missing file: ", f)
+        if (!file.exists(f)) {
+            msg <- glue("readSldscTrait: missing file: {f}")
+            abort(msg)
+        }
     }
     results <- vroom(files[1], show_col_types = FALSE)
     cats <- as.character(results$Category)
@@ -70,16 +74,16 @@ readSldscTrait <- function(prefix) {
     deleteValues <- .readSldscBlocks(files[3], cats)
     list(
         categories = cats,
-        tau = setNames(as.numeric(results$Coefficient), cats),
-        tauSe = setNames(as.numeric(results[["Coefficient_std_error"]]), cats),
-        enrichment = setNames(as.numeric(results$Enrichment), cats),
-        enrichmentSe = setNames(
+        tau = set_names(as.numeric(results$Coefficient), cats),
+        tauSe = set_names(as.numeric(results[["Coefficient_std_error"]]), cats),
+        enrichment = set_names(as.numeric(results$Enrichment), cats),
+        enrichmentSe = set_names(
             as.numeric(results[["Enrichment_std_error"]]),
             cats
         ),
-        enrichmentP = setNames(as.numeric(results[["Enrichment_p"]]), cats),
-        propH2 = setNames(as.numeric(results[["Prop._h2"]]), cats),
-        propSnps = setNames(as.numeric(results[["Prop._SNPs"]]), cats),
+        enrichmentP = set_names(as.numeric(results[["Enrichment_p"]]), cats),
+        propH2 = set_names(as.numeric(results[["Prop._h2"]]), cats),
+        propSnps = set_names(as.numeric(results[["Prop._SNPs"]]), cats),
         h2g = h2g,
         tauBlocks = deleteValues,
         nBlocks = nrow(deleteValues)
@@ -89,24 +93,26 @@ readSldscTrait <- function(prefix) {
 # Parse the total observed-scale h2g from an S-LDSC .log file.
 # @noRd
 .readSldscH2g <- function(logFile) {
-    logLines <- readLines(logFile, warn = FALSE)
-    h2Line <- grep("Total Observed scale h2:", logLines, value = TRUE)
+    logLines <- read_lines(logFile)
+    h2Line <- logLines[str_detect(logLines, "Total Observed scale h2:")]
     if (length(h2Line) == 0L) {
-        stop(
+        msg <- glue(
             "readSldscTrait: could not find 'Total Observed scale h2:' in ",
-            logFile
+            "{logFile}"
         )
+        abort(msg)
     }
-    h2g <- suppressWarnings(as.numeric(gsub(
+    h2g <- suppressWarnings(as.numeric(str_replace_all(
+        h2Line[1],
         ".*h2: (-?[0-9.eE+-]+).*",
-        "\\1",
-        h2Line[1]
+        "\\1"
     )))
     if (is.na(h2g)) {
-        stop(
+        msg <- glue(
             "readSldscTrait: failed to parse h2g numeric from log line: ",
-            h2Line[1]
+            "{h2Line[1]}"
         )
+        abort(msg)
     }
     h2g
 }
@@ -117,13 +123,11 @@ readSldscTrait <- function(prefix) {
 .readSldscBlocks <- function(deleteFile, cats) {
     deleteValues <- as.matrix(vroom(deleteFile, show_col_types = FALSE))
     if (ncol(deleteValues) != length(cats)) {
-        stop(
-            "readSldscTrait: .part_delete has ",
-            ncol(deleteValues),
-            " columns but .results has ",
-            length(cats),
-            " categories."
+        msg <- glue(
+            "readSldscTrait: .part_delete has {ncol(deleteValues)} columns ",
+            "but .results has {length(cats)} categories."
         )
+        abort(msg)
     }
     colnames(deleteValues) <- cats
     deleteValues
@@ -151,7 +155,10 @@ readSldscTrait <- function(prefix) {
 #' @export
 readSldscAnnot <- function(targetAnnoDir, annotCols = NULL) {
     if (!dir.exists(targetAnnoDir)) {
-        stop("readSldscAnnot: targetAnnoDir does not exist: ", targetAnnoDir)
+        msg <- glue(
+            "readSldscAnnot: targetAnnoDir does not exist: {targetAnnoDir}"
+        )
+        abort(msg)
     }
     annoFiles <- list.files(
         targetAnnoDir,
@@ -159,7 +166,8 @@ readSldscAnnot <- function(targetAnnoDir, annotCols = NULL) {
         full.names = TRUE
     )
     if (length(annoFiles) == 0L) {
-        stop("readSldscAnnot: no .annot.gz files in: ", targetAnnoDir)
+        msg <- glue("readSldscAnnot: no .annot.gz files in: {targetAnnoDir}")
+        abort(msg)
     }
 
     detected <- .sldscDetectAnnotCols(annoFiles[1])
@@ -171,17 +179,11 @@ readSldscAnnot <- function(targetAnnoDir, annotCols = NULL) {
         annotCols
     }
     if (length(colsUse) == 0L) {
-        stop("readSldscAnnot: no annotation columns to read.")
+        abort("readSldscAnnot: no annotation columns to read.")
     }
 
-    parts <- lapply(annoFiles, function(f) {
-        as.data.frame(vroom(
-            f,
-            col_select = all_of(c("CHR", "SNP", colsUse)),
-            show_col_types = FALSE
-        ))
-    })
-    do.call(rbind, parts)
+    parts <- map(annoFiles, .sldscReadAnnotFile, colsUse = colsUse)
+    bind_rows(parts)
 }
 
 
@@ -205,9 +207,14 @@ readSldscAnnot <- function(targetAnnoDir, annotCols = NULL) {
 #' @export
 readSldscFrq <- function(frqfileDir, plinkName = "ADSP_chr") {
     if (!dir.exists(frqfileDir)) {
-        stop("readSldscFrq: frqfileDir does not exist: ", frqfileDir)
+        msg <- glue("readSldscFrq: frqfileDir does not exist: {frqfileDir}")
+        abort(msg)
     }
-    pat <- paste0("^", gsub("([.])", "\\\\\\1", plinkName), "[0-9]+\\.frq$")
+    pat <- str_c(
+        "^",
+        str_replace_all(plinkName, "([.])", "\\\\\\1"),
+        "[0-9]+\\.frq$"
+    )
     frqFiles <- list.files(frqfileDir, pattern = pat, full.names = TRUE)
     if (length(frqFiles) == 0L) {
         frqFiles <- list.files(
@@ -217,17 +224,12 @@ readSldscFrq <- function(frqfileDir, plinkName = "ADSP_chr") {
         )
     }
     if (length(frqFiles) == 0L) {
-        stop("readSldscFrq: no .frq files in: ", frqfileDir)
+        msg <- glue("readSldscFrq: no .frq files in: {frqfileDir}")
+        abort(msg)
     }
 
-    parts <- lapply(frqFiles, function(f) {
-        as.data.frame(vroom(
-            f,
-            col_select = all_of(c("CHR", "SNP", "MAF")),
-            show_col_types = FALSE
-        ))
-    })
-    do.call(rbind, parts)
+    parts <- map(frqFiles, .sldscReadFrqFile)
+    bind_rows(parts)
 }
 
 
@@ -260,6 +262,7 @@ readSldscFrq <- function(frqfileDir, plinkName = "ADSP_chr") {
 #'     propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
 #'     tauBlocks = matrix(1e-7, 10, n, dimnames = list(NULL, cats)),
 #'     nBlocks = 10L)
+#' }
 #' annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
 #'   annot_A = c(1, 0, 1, 0, 1, 0), annot_B = c(2.1, 1.8, 2.5, 1.9, 2.3, 2))
 #' frq <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
@@ -272,37 +275,41 @@ readSldscFrq <- function(frqfileDir, plinkName = "ADSP_chr") {
 #' traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
 #' sd <- SldscData(annot = annot, frq = frq, traits = traits)
 #' computeSldscAnnotSd(sldscData = sd)
-#' }
 #' @importFrom purrr map map_dbl compact reduce
 #' @export
 computeSldscAnnotSd <- function(sldscData, mafCutoff = 0.05, annotCols = NULL) {
     if (!is(sldscData, "SldscData")) {
-        stop("computeSldscAnnotSd: `sldscData` must be an SldscData object.")
+        abort("computeSldscAnnotSd: `sldscData` must be an SldscData object.")
     }
     annot <- getAnnotData(sldscData)
     frq <- getFrqData(sldscData)
     if (mafCutoff > 0 && nrow(frq) == 0L) {
-        stop(
-            "computeSldscAnnotSd: mafCutoff = ",
-            mafCutoff,
-            " requires frq data (read via readSldscFrq); none present."
+        msg <- glue(
+            "computeSldscAnnotSd: mafCutoff = {mafCutoff} requires frq ",
+            "data (read via readSldscFrq); none present."
         )
+        abort(msg)
     }
     colsUse <- .sldscColsUse(sldscData, annotCols)
     # Pool within-chromosome variance (matches polyfun's per-file accumulation).
-    contribs <- compact(map(unique(annot$CHR), function(chrom) {
-        .sldscChromVar(chrom, annot, frq, mafCutoff, colsUse)
-    }))
+    contribs <- compact(map(
+        unique(annot$CHR),
+        .sldscChromVar,
+        annot = annot,
+        frq = frq,
+        mafCutoff = mafCutoff,
+        colsUse = colsUse
+    ))
     den <- sum(map_dbl(contribs, "den"))
     if (den <= 0) {
-        stop(
+        abort(
             "computeSldscAnnotSd: zero degrees of freedom after MAF filtering."
         )
     }
     num <- reduce(
         map(contribs, "num"),
         `+`,
-        .init = setNames(numeric(length(colsUse)), colsUse)
+        .init = set_names(numeric(length(colsUse)), colsUse)
     )
     sqrt(num / den)
 }
@@ -318,7 +325,7 @@ computeSldscAnnotSd <- function(sldscData, mafCutoff = 0.05, annotCols = NULL) {
         annotCols
     }
     if (length(colsUse) == 0L) {
-        stop("computeSldscAnnotSd: no annotation columns to process.")
+        abort("computeSldscAnnotSd: no annotation columns to process.")
     }
     colsUse
 }
@@ -328,26 +335,21 @@ computeSldscAnnotSd <- function(sldscData, mafCutoff = 0.05, annotCols = NULL) {
 # the chromosome has <= 1 usable variant after MAF filtering.
 # @noRd
 .sldscChromVar <- function(chrom, annot, frq, mafCutoff, colsUse) {
-    dat <- annot[annot$CHR == chrom, , drop = FALSE]
+    dat <- filter(annot, .data$CHR == chrom)
     if (mafCutoff > 0) {
-        dat <- merge(
+        dat <- inner_join(
             dat,
-            frq[, c("SNP", "MAF")],
-            by = "SNP",
-            all.x = FALSE,
-            all.y = FALSE
+            select(frq, all_of(c("SNP", "MAF"))),
+            by = "SNP"
         )
-        dat <- dat[!is.na(dat$MAF) & dat$MAF > mafCutoff, ]
+        dat <- filter(dat, !is.na(.data$MAF) & .data$MAF > mafCutoff)
     }
     if (nrow(dat) <= 1L) {
         return(NULL)
     }
     nMinus1 <- nrow(dat) - 1L
-    num <- map_dbl(colsUse, function(col) {
-        v <- var(as.numeric(dat[[col]]), na.rm = TRUE)
-        if (is.na(v)) 0 else nMinus1 * v
-    })
-    list(num = setNames(num, colsUse), den = nMinus1)
+    num <- map_dbl(colsUse, .sldscColVarContrib, dat = dat, nMinus1 = nMinus1)
+    list(num = set_names(num, colsUse), den = nMinus1)
 }
 
 
@@ -387,6 +389,7 @@ computeSldscAnnotSd <- function(sldscData, mafCutoff = 0.05, annotCols = NULL) {
 #'     propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
 #'     tauBlocks = matrix(1e-7, 10, n, dimnames = list(NULL, cats)),
 #'     nBlocks = 10L)
+#' }
 #' annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
 #'   annot_A = c(1, 0, 1, 0, 1, 0), annot_B = c(2.1, 1.8, 2.5, 1.9, 2.3, 2))
 #' frq <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
@@ -399,11 +402,10 @@ computeSldscAnnotSd <- function(sldscData, mafCutoff = 0.05, annotCols = NULL) {
 #' traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
 #' sd <- SldscData(annot = annot, frq = frq, traits = traits)
 #' computeSldscMRef(sldscData = sd)
-#' }
 #' @export
 computeSldscMRef <- function(sldscData, mafCutoff = 0.05) {
     if (!is(sldscData, "SldscData")) {
-        stop("computeSldscMRef: `sldscData` must be an SldscData object.")
+        abort("computeSldscMRef: `sldscData` must be an SldscData object.")
     }
     frq <- getFrqData(sldscData)
     if (nrow(frq) > 0L) {
@@ -416,11 +418,11 @@ computeSldscMRef <- function(sldscData, mafCutoff = 0.05) {
         ))
     }
     if (mafCutoff > 0) {
-        stop(
-            "computeSldscMRef: mafCutoff = ",
-            mafCutoff,
-            " requires frq data (read via readSldscFrq); none present."
+        msg <- glue(
+            "computeSldscMRef: mafCutoff = {mafCutoff} requires frq ",
+            "data (read via readSldscFrq); none present."
         )
+        abort(msg)
     }
     as.integer(nrow(getAnnotData(sldscData)))
 }
@@ -466,7 +468,7 @@ computeSldscMRef <- function(sldscData, mafCutoff = 0.05) {
 #' @export
 isBinarySldscAnnot <- function(sldscData, annotCols = NULL) {
     if (!is(sldscData, "SldscData")) {
-        stop("isBinarySldscAnnot: `sldscData` must be an SldscData object.")
+        abort("isBinarySldscAnnot: `sldscData` must be an SldscData object.")
     }
     annot <- getAnnotData(sldscData)
     colsUse <- if (is.null(annotCols)) {
@@ -477,10 +479,10 @@ isBinarySldscAnnot <- function(sldscData, annotCols = NULL) {
         annotCols
     }
 
-    isBinary <- setNames(rep(TRUE, length(colsUse)), colsUse)
+    isBinary <- set_names(rep(TRUE, length(colsUse)), colsUse)
     for (col in colsUse) {
         vals <- unique(na.omit(as.numeric(annot[[col]])))
-        if (any(!(vals %in% c(0, 1)))) isBinary[[col]] <- FALSE
+        if (any(!is_in(vals, c(0, 1)))) isBinary[[col]] <- FALSE
     }
     isBinary
 }
@@ -549,9 +551,9 @@ standardizeSldscTrait <- function(
     targetCategories = NULL
 ) {
     if (!is(sldscData, "SldscData")) {
-        stop("standardizeSldscTrait: `sldscData` must be an SldscData object.")
+        abort("standardizeSldscTrait: `sldscData` must be an SldscData object.")
     }
-    mode <- match.arg(mode)
+    mode <- arg_match(mode)
     traitData <- .stdTraitRun(sldscData, trait, mode, idx)
     targetCategories <- .stdTargetCategories(
         traitData,
@@ -588,13 +590,12 @@ standardizeSldscTrait <- function(
 # Base per-target summary frame (tau + tau* columns).
 # @noRd
 .stdSummaryDf <- function(targetCategories, tau, tauSe, ts) {
-    data.frame(
+    tibble(
         target = targetCategories,
-        tau = tau,
-        tauSe = tauSe,
-        tauStar = ts$tauStar,
-        tauStarSe = ts$tauStarSe,
-        stringsAsFactors = FALSE
+        tau = unname(tau),
+        tauSe = unname(tauSe),
+        tauStar = unname(ts$tauStar),
+        tauStarSe = unname(ts$tauStarSe)
     )
 }
 
@@ -603,15 +604,12 @@ standardizeSldscTrait <- function(
 .stdTraitRun <- function(sldscData, trait, mode, idx) {
     traitData <- getTraitRun(sldscData, trait, mode, idx)
     if (is.null(traitData)) {
-        stop(
-            "standardizeSldscTrait: no ",
-            mode,
-            " run for trait '",
-            trait,
-            "'",
-            if (!is.null(idx)) paste0(" (idx=", idx, ")") else "",
-            "."
+        idxNote <- if (!is.null(idx)) glue(" (idx={idx})") else ""
+        msg <- glue(
+            "standardizeSldscTrait: no {mode} run for trait ",
+            "'{trait}'{idxNote}."
         )
+        abort(msg)
     }
     traitData
 }
@@ -624,7 +622,7 @@ standardizeSldscTrait <- function(
         targetCategories <- intersect(traitData$categories, names(sdAnnot))
     }
     if (length(targetCategories) == 0L) {
-        stop("standardizeSldscTrait: no target categories.")
+        abort("standardizeSldscTrait: no target categories.")
     }
     targetCategories
 }
@@ -634,10 +632,11 @@ standardizeSldscTrait <- function(
 .stdTargetIdx <- function(traitData, targetCategories) {
     targetIdx <- match(targetCategories, traitData$categories)
     if (any(is.na(targetIdx))) {
-        stop(
+        msg <- glue(
             "standardizeSldscTrait: missing categories: ",
-            paste(targetCategories[is.na(targetIdx)], collapse = ", ")
+            "{str_flatten(targetCategories[is.na(targetIdx)], ', ')}"
         )
+        abort(msg)
     }
     targetIdx
 }
@@ -647,10 +646,11 @@ standardizeSldscTrait <- function(
 .stdSdTarget <- function(sdAnnot, targetCategories) {
     sdTarget <- as.numeric(sdAnnot[targetCategories])
     if (any(is.na(sdTarget) | sdTarget == 0)) {
-        warning(
+        msg <- glue(
             "standardizeSldscTrait: zero/NA sd for some targets; tau* ",
             "will be NA/0."
         )
+        warn(msg)
     }
     sdTarget
 }
@@ -735,13 +735,18 @@ metaSldscRandom <- function(
     category,
     quantity = c("tauStar", "enrichment", "enrichstat")
 ) {
-    quantity <- match.arg(quantity)
+    quantity <- arg_match(quantity)
     cols <- .metaColPair(quantity)
     traitNames <- names(perTraitEstimates) %||%
         as.character(seq_along(perTraitEstimates))
-    collected <- compact(map(seq_along(perTraitEstimates), function(i) {
-        .metaExtractTrait(perTraitEstimates[[i]], category, cols, traitNames[i])
-    }))
+    collected <- compact(map(
+        seq_along(perTraitEstimates),
+        .metaTraitContrib,
+        perTraitEstimates = perTraitEstimates,
+        category = category,
+        cols = cols,
+        traitNames = traitNames
+    ))
     means <- map_dbl(collected, "mean")
     ses <- map_dbl(collected, "se")
     used <- map_chr(collected, "trait")
@@ -777,7 +782,7 @@ metaSldscRandom <- function(
         return(NULL)
     }
     row <- pt$summary[pt$summary$target == category, , drop = FALSE]
-    if (nrow(row) == 0L || !all(cols %in% names(row))) {
+    if (nrow(row) == 0L || !all(is_in(cols, names(row)))) {
         return(NULL)
     }
     m <- as.numeric(row[[cols[1]]])[1]
@@ -817,10 +822,10 @@ metaSldscRandom <- function(
         "enrichstat",
         "enrichstatSe"
     )
-    suffixCap <- paste0(toupper(substring(suffix, 1, 1)), substring(suffix, 2))
+    suffixCap <- str_c(str_to_upper(str_sub(suffix, 1, 1)), str_sub(suffix, 2))
     for (c in colsToAdd) {
-        newcol <- paste0(c, suffixCap)
-        if (!is.null(src) && c %in% names(src)) {
+        newcol <- str_c(c, suffixCap)
+        if (!is.null(src) && is_in(c, names(src))) {
             out[[newcol]] <- src[[c]][match(out$target, src$target)]
         } else {
             out[[newcol]] <- NA_real_
@@ -844,10 +849,9 @@ metaSldscRandom <- function(
     } else {
         targetCategories
     }
-    out <- data.frame(
+    out <- tibble(
         target = rows,
-        isBinary = unname(isBinaryVec[rows]),
-        stringsAsFactors = FALSE
+        isBinary = unname(isBinaryVec[rows])
     )
 
     out <- .sldscAddCols(out, singleDf, "single")
@@ -860,45 +864,20 @@ metaSldscRandom <- function(
 # Each list element has a $summary frame with the requested mode's columns
 # renamed to the canonical names (tauStar, tauStarSe, enrichment, ...).
 .sldscViewForMeta <- function(perTrait, suffix) {
-    lapply(perTrait, function(pt) {
-        if (is.null(pt$summary)) {
-            return(NULL)
-        }
-        df <- pt$summary
-        colsHave <- c(
-            "tauStar",
-            "tauStarSe",
-            "enrichment",
-            "enrichmentSe",
-            "enrichmentP",
-            "enrichstat",
-            "enrichstatSe"
-        )
-        suffixCap <- paste0(
-            toupper(substring(suffix, 1, 1)),
-            substring(suffix, 2)
-        )
-        srcCols <- paste0(colsHave, suffixCap)
-        avail <- srcCols %in% names(df)
-        if (!any(avail)) {
-            return(NULL)
-        }
-        newDf <- data.frame(target = df$target, stringsAsFactors = FALSE)
-        for (k in seq_along(colsHave)) {
-            if (avail[k]) newDf[[colsHave[k]]] <- df[[srcCols[k]]]
-        }
-        list(summary = newDf)
-    })
+    map(perTrait, .sldscTraitMetaView, suffix = suffix)
 }
 
 # Meta-analyze `quantity` across all target categories for one view, returning a
 # per-category named list of metaSldscRandom results.
 # @noRd
 .sldscPerCategory <- function(view, quantity, targetCategories) {
-    setNames(
-        lapply(targetCategories, function(cat) {
-            metaSldscRandom(view, cat, quantity)
-        }),
+    set_names(
+        map(
+            targetCategories,
+            .sldscMetaForCategory,
+            view = view,
+            quantity = quantity
+        ),
         targetCategories
     )
 }
@@ -960,15 +939,18 @@ sldscSubsetMeta <- function(
 ) {
     perTrait <- postprocessResult$per_trait
     if (is.null(perTrait)) {
-        stop("sldscSubsetMeta: `postprocessResult` has no `per_trait` element.")
+        abort(
+            "sldscSubsetMeta: `postprocessResult` has no `per_trait` element."
+        )
     }
     targetCategories <- .sldscSubsetTargets(postprocessResult, targetCategories)
     missingTraits <- setdiff(subsetTraits, names(perTrait))
     if (length(missingTraits) > 0L) {
-        stop(
+        msg <- glue(
             "sldscSubsetMeta: trait(s) absent from `per_trait`: ",
-            paste(missingTraits, collapse = ", ")
+            "{str_flatten(missingTraits, ', ')}"
         )
+        abort(msg)
     }
     sub <- perTrait[subsetTraits]
     viewSingle <- .sldscViewForMeta(sub, "single")
@@ -1004,10 +986,90 @@ sldscSubsetMeta <- function(
         targetCategories <- postprocessResult$params$target_categories
     }
     if (is.null(targetCategories) || length(targetCategories) == 0L) {
-        stop(
+        msg <- glue(
             "sldscSubsetMeta: no `targetCategories` supplied and none found ",
             "in `postprocessResult$params$target_categories`."
         )
+        abort(msg)
     }
     targetCategories
+}
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# Read one annotation file's CHR/SNP + requested annotation columns.
+# @noRd
+.sldscReadAnnotFile <- function(f, colsUse) {
+    vroom(
+        f,
+        col_select = all_of(c("CHR", "SNP", colsUse)),
+        show_col_types = FALSE
+    )
+}
+
+# Read one .frq file's CHR/SNP/MAF columns.
+# @noRd
+.sldscReadFrqFile <- function(f) {
+    vroom(
+        f,
+        col_select = all_of(c("CHR", "SNP", "MAF")),
+        show_col_types = FALSE
+    )
+}
+
+# (n-1)*Var contribution of annotation column `col` (0 for a constant column).
+# @noRd
+.sldscColVarContrib <- function(col, dat, nMinus1) {
+    v <- var(as.numeric(dat[[col]]), na.rm = TRUE)
+    if (is.na(v)) 0 else nMinus1 * v
+}
+
+# The (mean, se, trait) contribution of per-trait estimate `i`, or NULL.
+# @noRd
+.metaTraitContrib <- function(
+    i,
+    perTraitEstimates,
+    category,
+    cols,
+    traitNames
+) {
+    .metaExtractTrait(perTraitEstimates[[i]], category, cols, traitNames[i])
+}
+
+# One trait's meta view: rename the `suffix`-mode columns to canonical names.
+# @noRd
+.sldscTraitMetaView <- function(pt, suffix) {
+    if (is.null(pt$summary)) {
+        return(NULL)
+    }
+    df <- pt$summary
+    colsHave <- c(
+        "tauStar",
+        "tauStarSe",
+        "enrichment",
+        "enrichmentSe",
+        "enrichmentP",
+        "enrichstat",
+        "enrichstatSe"
+    )
+    suffixCap <- str_c(
+        str_to_upper(str_sub(suffix, 1, 1)),
+        str_sub(suffix, 2)
+    )
+    srcCols <- str_c(colsHave, suffixCap)
+    avail <- is_in(srcCols, names(df))
+    if (!any(avail)) {
+        return(NULL)
+    }
+    newDf <- tibble(target = df$target)
+    for (k in seq_along(colsHave)) {
+        if (avail[k]) newDf[[colsHave[k]]] <- df[[srcCols[k]]]
+    }
+    list(summary = newDf)
+}
+
+# The random-effects meta result for one target category of a view.
+# @noRd
+.sldscMetaForCategory <- function(category, view, quantity) {
+    metaSldscRandom(view, category, quantity)
 }

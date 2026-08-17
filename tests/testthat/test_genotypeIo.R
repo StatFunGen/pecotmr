@@ -33,23 +33,29 @@ test_that("findValidFilePath works", {
     ref_path <- "test_data/protocol_example.genotype.bed"
     expect_error(
         pecotmr:::.findValidFilePath(
-            paste0(ref_path, "s"),
-            "protocol_example.genotype.bamf"
+            referenceFilePath = paste0(ref_path, "s"),
+            targetFilePath = "protocol_example.genotype.bamf"
         ),
         "Both reference and target file paths do not work. Tried paths: 'test_data/protocol_example.genotype.beds' and 'test_data/protocol_example.genotype.bamf'"
     )
     expect_equal(
-        pecotmr:::.findValidFilePath(ref_path, "abc"),
+        pecotmr:::.findValidFilePath(
+            referenceFilePath = ref_path,
+            targetFilePath = "abc"
+        ),
         ref_path
     )
     expect_equal(
-        pecotmr:::.findValidFilePath(ref_path, "protocol_example.genotype.bim"),
+        pecotmr:::.findValidFilePath(
+            referenceFilePath = ref_path,
+            targetFilePath = "protocol_example.genotype.bim"
+        ),
         "test_data/protocol_example.genotype.bim"
     )
     expect_equal(
         pecotmr:::.findValidFilePath(
-            ref_path,
-            "test_data/protocol_example.genotype.bim"
+            referenceFilePath = ref_path,
+            targetFilePath = "test_data/protocol_example.genotype.bim"
         ),
         "test_data/protocol_example.genotype.bim"
     )
@@ -503,19 +509,6 @@ test_that("readBim returns correct columns and types", {
 # ===========================================================================
 # tabixRegion
 # ===========================================================================
-
-# ===========================================================================
-# NoSnpsError / NoPhenotypeError custom conditions
-# ===========================================================================
-
-test_that("NoSnpsError creates proper error condition", {
-    err <- NoSnpsError("test message")
-    expect_true(inherits(err, "NoSnpsError"))
-    expect_true(inherits(err, "error"))
-    expect_true(inherits(err, "condition"))
-    expect_equal(err$message, "test message")
-})
-
 
 # ===========================================================================
 # extractPhenotypeCoordinates
@@ -1091,7 +1084,8 @@ test_that("loadGenotypeRegion errors on empty region for plink2", {
             file.path(td, "test_variants"),
             region = "chr21:1-2"
         ),
-        "No SNPs found"
+        "No SNPs found",
+        class = "NoSnpsError"
     )
 })
 
@@ -2075,9 +2069,9 @@ test_that("resolvePlink2Paths errors when .psam is missing", {
     )
 })
 
-# --- readAfreq: zstd CLI guard (line 655) ------------------------------------
+# --- readAfreq: .afreq.zst is read via archive, no external CLI --------------
 
-test_that("readAfreq errors for .afreq.zst when zstd CLI is unavailable", {
+test_that("readAfreq reads .afreq.zst without any external CLI", {
     skip_if_not_installed("withr")
     td <- test_path("test_data")
     zdir <- tempfile("gioZst_")
@@ -2086,13 +2080,13 @@ test_that("readAfreq errors for .afreq.zst when zstd CLI is unavailable", {
         file.path(td, "test_harmonize_regions.afreq.zst"),
         file.path(zdir, "g.afreq.zst")
     )
-    # Empty PATH makes Sys.which("zstd") return "" so the guard fires before any
-    # subprocess is launched.
+    # Empty PATH: no zstd (or any) CLI is reachable. archive decompresses the
+    # .zst in-process via libarchive, so the read must still succeed.
     withr::local_envvar(PATH = "")
-    expect_error(
-        readAfreq(file.path(zdir, "g")),
-        "zstd CLI is required"
-    )
+    af <- readAfreq(file.path(zdir, "g"))
+    expect_true(is.data.frame(af))
+    expect_equal(nrow(af), 8L)
+    expect_true(all(c("chrom", "id", "alt_freq") %in% colnames(af)))
 })
 
 # --- readStochasticMeta: generic format missing required columns -------------

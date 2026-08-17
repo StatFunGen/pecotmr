@@ -227,3 +227,9 @@ Each entry carries:
     model alongside regularized regression methods.
 -  Run the full [`causalInferencePipeline`](twas-zscore.html) (TWAS + MR) with
     a `FineMappingResult` and `GwasSumStats`.
+
+# Session info
+
+```{r session-info}
+sessionInfo()
+```

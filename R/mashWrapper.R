@@ -3,28 +3,29 @@
 # @noRd
 filterBySignificance <- function(zMatrix, sigPCutoff) {
     zThreshold <- sqrt(stats::qchisq(sigPCutoff, df = 1, lower.tail = FALSE))
-    which(apply(zMatrix, 1, function(row) any(abs(row) >= zThreshold)))
+    which(apply(zMatrix, 1, .mashRowExceeds, zThreshold = zThreshold))
 }
 
-# Coerce every column to numeric, then replace NaN/Inf/NA with `replaceWith`.
+# Coerce to a numeric matrix and replace every NaN / Inf / NA cell with
+# `replaceWith`. Accepts a data.frame or a matrix and always returns a matrix:
+# mash operates on matrices, so the cleaning is a direct matrix op rather than a
+# data.frame round-trip.
 # @noRd
-.mashReplaceValues <- function(df, replaceWith) {
-    df <- df %>%
-        mutate(across(everything(), as.numeric)) %>%
-        mutate(across(
-            everything(),
-            ~ replace(., is.nan(.) | is.infinite(.) | is.na(.), replaceWith)
-        ))
+.mashReplaceValues <- function(x, replaceWith) {
+    m <- as.matrix(x)
+    storage.mode(m) <- "double"
+    m[is.nan(m) | is.infinite(m) | is.na(m)] <- replaceWith
+    m
 }
 
 # Coerce z-scores to a matrix (NaN/Inf/NA -> 0) and, when a missing-rate
 # threshold is given, drop rows falling below it.
 # @noRd
 .mashProcessZ <- function(zData, filterByMissingRate) {
-    zData <- as.matrix(.mashReplaceValues(zData, 0))
+    zData <- .mashReplaceValues(zData, 0)
 
     if (!is.null(filterByMissingRate)) {
-        proportionNonzero <- apply(zData, 1, function(row) mean(row != 0))
+        proportionNonzero <- apply(zData, 1, .mashRowNonzeroRate)
         zData <- zData[proportionNonzero >= filterByMissingRate, , drop = FALSE]
     }
 
@@ -65,7 +66,7 @@ filterInvalidSummaryStat <- function(
     if (
         !is.null(bhat) &&
             !is.null(sbhat) &&
-            all(c(bhat, sbhat) %in% names(datList))
+            all(is_in(c(bhat, sbhat), names(datList)))
     ) {
         datList <- .mashFilterBhatSbhat(
             datList,
@@ -91,14 +92,14 @@ filterInvalidSummaryStat <- function(
     if (is.null(datList[[bhat]]) || is.null(datList[[sbhat]])) {
         return(datList)
     }
-    datList[[bhat]] <- as.matrix(.mashReplaceValues(datList[[bhat]], 0))
-    datList[[sbhat]] <- as.matrix(.mashReplaceValues(datList[[sbhat]], 1000))
-    hasNullOrRandom <- ("null.b" %in% names(datList)) ||
-        ("random.b" %in% names(datList))
+    datList[[bhat]] <- .mashReplaceValues(datList[[bhat]], 0)
+    datList[[sbhat]] <- .mashReplaceValues(datList[[sbhat]], 1000)
+    hasNullOrRandom <- is_in("null.b", names(datList)) ||
+        is_in("random.b", names(datList))
     if (!hasNullOrRandom || is.null(filterByMissingRate)) {
         return(datList)
     }
-    proportionNonzero <- apply(datList[[bhat]], 1, function(row) mean(row != 0))
+    proportionNonzero <- apply(datList[[bhat]], 1, .mashRowNonzeroRate)
     keep <- proportionNonzero >= filterByMissingRate
     datList[[bhat]] <- datList[[bhat]][keep, ]
     datList[[sbhat]] <- datList[[sbhat]][keep, ]
@@ -109,8 +110,8 @@ filterInvalidSummaryStat <- function(
 # significance cutoff to strong signals.
 # @noRd
 .mashFilterBtoz <- function(datList, bhat, sbhat, sigPCutoff) {
-    if (any(grepl("\\.b$", bhat)) || any(grepl("\\.s$", sbhat))) {
-        zName <- paste0(sub("\\.b$", "", bhat), ".z")
+    if (any(str_detect(bhat, "\\.b$")) || any(str_detect(sbhat, "\\.s$"))) {
+        zName <- str_c(str_remove(bhat, "\\.b$"), ".z")
         if (!is.null(datList[[bhat]]) && !is.null(datList[[sbhat]])) {
             datList[[zName]] <- as.matrix(datList[[bhat]] / datList[[sbhat]])
         } else {
@@ -121,7 +122,7 @@ filterInvalidSummaryStat <- function(
     } else {
         datList["z"] <- list(NULL)
     }
-    if ("strong.z" %in% names(datList) && !is.null(sigPCutoff)) {
+    if (is_in("strong.z", names(datList)) && !is.null(sigPCutoff)) {
         keepIndex <- filterBySignificance(datList$strong.z, sigPCutoff)
         datList[["strong.z"]] <- datList$strong.z[keepIndex, ]
         datList[["strong.b"]] <- datList$strong.b[keepIndex, ]
@@ -186,7 +187,7 @@ filterMixtureComponents <- function(
     sumW <- sum(w)
     U <- .mashSubsetU(U, conditionsToKeep)
     # Drop all-zero matrices, then those below the weight cutoff.
-    keepNames <- names(keep(U, function(mat) !all(mat == 0)))
+    keepNames <- names(keep(U, .mashMatrixNonzero))
     if (!is.null(w)) {
         keepNames <- intersect(keepNames, names(w[w >= wCutoff]))
     }
@@ -198,27 +199,18 @@ filterMixtureComponents <- function(
     # can leave tiny non-zero diagonals, so all-zero removal alone won't drop
     # them, yet real diagonal signal must be kept.
     U[conditionsToFilter] <- NULL
-    w <- w[!names(w) %in% conditionsToFilter]
+    w <- w[!is_in(names(w), conditionsToFilter)]
     # Rescale the surviving weights back to the original total.
     w <- (w / sum(w)) * sumW
-    message(length(U), " components of matrices remained after filtering.")
+    msg <- glue("{length(U)} components of matrices remained after filtering.")
+    inform(msg)
     list(U = U, w = w)
 }
 
 # Subset every U matrix to the kept conditions (erroring if a matrix lacks one).
 # @noRd
 .mashSubsetU <- function(U, conditionsToKeep) {
-    map(U, function(mat) {
-        missingConditions <- setdiff(conditionsToKeep, colnames(mat))
-        if (length(missingConditions) > 0) {
-            stop(
-                "Condition(s) ",
-                paste(missingConditions, collapse = ", "),
-                " not found in matrix"
-            )
-        }
-        mat[conditionsToKeep, conditionsToKeep]
-    })
+    map(U, .mashSubsetMatrix, conditionsToKeep = conditionsToKeep)
 }
 
 
@@ -228,7 +220,7 @@ filterMixtureComponents <- function(
     if (is.null(dat)) {
         return(NULL)
     }
-    if ("z" %in% names(dat)) {
+    if (is_in("z", names(dat))) {
         absZ <- abs(dat$z)
         zData <- dat$z
     } else {
@@ -261,18 +253,19 @@ filterMixtureComponents <- function(
 .mashSampleNull <- function(dat, zData, absZ, nNull) {
     nullId <- which(apply(absZ, 1, max) < 2)
     if (length(nullId) == 0) {
-        warning(
+        msg <- glue(
             "no variants are included in the null dataset because absZ > 2 ",
-            "for all variants in ",
-            dat$region
+            "for all variants in {dat$region %||% ''}"
         )
+        warn(msg)
         return(list())
     }
     if (length(nullId) < ncol(absZ)) {
-        warning(
+        msg <- glue(
             "not enough null data to estimate null correlation in ",
-            dat$region
+            "{dat$region %||% ''}"
         )
+        warn(msg)
         return(list())
     }
     .mashSampleSubset(dat, zData, nullId, nNull)
@@ -314,12 +307,13 @@ mashRandNullSample <- function(
     }
 
     if (length(excludeCondition) > 0) {
-        colsToCheck <- if ("z" %in% names(dat)) "z" else "bhat"
-        if (!all(excludeCondition %in% colnames(dat[[colsToCheck]]))) {
-            stop(
+        colsToCheck <- if (is_in("z", names(dat))) "z" else "bhat"
+        if (!all(is_in(excludeCondition, colnames(dat[[colsToCheck]])))) {
+            msg <- glue(
                 "Error: excludeCondition are not present in ",
-                dat$region
+                "{dat$region %||% ''}"
             )
+            abort(msg)
         }
         for (key in intersect(names(dat), c("z", "bhat", "sbhat"))) {
             keep <- setdiff(colnames(dat[[key]]), excludeCondition)
@@ -340,8 +334,12 @@ mashRandNullSample <- function(
 #' @param oneData The mash data list to merge in.
 #' @return The merged mash data list.
 #' @examples
-#' a <- list(strong = list(z = matrix(rnorm(9), 3, 3)))
-#' b <- list(strong = list(z = matrix(rnorm(9), 3, 3)))
+#' # Each object's variants must be uniquely keyed (row names); the two
+#' # objects share the same conditions (columns), which are aligned by name.
+#' a <- list(strong = list(z = matrix(rnorm(9), 3, 3,
+#'   dimnames = list(c("v1", "v2", "v3"), c("t1", "t2", "t3")))))
+#' b <- list(strong = list(z = matrix(rnorm(9), 3, 3,
+#'   dimnames = list(c("v4", "v5", "v6"), c("t1", "t2", "t3")))))
 #' mergeMashData(a, b)
 #' @export
 mergeMashData <- function(resData, oneData) {
@@ -352,26 +350,12 @@ mergeMashData <- function(resData, oneData) {
         return(resData)
     }
 
-    combinedData <- lapply(names(oneData), function(d) {
-        od <- oneData[[d]]
-        rd <- resData[[d]]
-        if (length(od) == 0 || is.null(od)) {
-            return(rd)
-        }
-        if (is.null(rd) || length(rd) == 0) {
-            return(od)
-        }
-
-        # bind_rows auto-aligns columns, filling missing with NA; replace with
-        # NaN
-        rnRes <- rownames(as.data.frame(rd))
-        rnOne <- rownames(as.data.frame(od))
-        combined <- bind_rows(as.data.frame(rd), as.data.frame(od))
-        combined[is.na(combined)] <- NaN
-        rnAll <- make.names(c(rnRes, rnOne), unique = TRUE)
-        rownames(combined) <- rnAll
-        combined
-    })
+    combinedData <- map(
+        names(oneData),
+        .mashCombineDatum,
+        oneData = oneData,
+        resData = resData
+    )
     names(combinedData) <- names(oneData)
     return(combinedData)
 }
@@ -394,12 +378,12 @@ mergeMashData <- function(resData, oneData) {
     if (methods::is(obj, "FineMappingResultBase")) {
         return(.mashFmrMatrices(obj, coverage))
     }
-    stop(
+    msg <- glue(
         "mashInput: each element of `objects` must be a QtlSumStats, ",
         "GwasSumStats, or FineMappingResult; got ",
-        paste(class(obj), collapse = "/"),
-        "."
+        "{str_flatten(class(obj), '/')}."
     )
+    abort(msg)
 }
 
 # (Bhat, Shat, strongRows) from a SumStats object; strong = the max|z| variant
@@ -419,12 +403,13 @@ mergeMashData <- function(resData, oneData) {
 .mashFmrMatrices <- function(obj, coverage) {
     me <- getMarginalEffects(obj)
     cs <- getCs(obj, coverage = coverage)
-    if (!all(c("variant_id", "context", "beta", "se") %in% names(me))) {
-        stop(
+    if (!all(is_in(c("variant_id", "context", "beta", "se"), names(me)))) {
+        msg <- glue(
             "mashInput: getMarginalEffects() must return variant_id/context/",
             "beta/se columns; a FineMappingResult with >= 2 contexts is ",
             "required."
         )
+        abort(msg)
     }
     pinned <- .mashFmrMethodPin(me, cs)
     me <- pinned$me
@@ -448,18 +433,18 @@ mergeMashData <- function(resData, oneData) {
 # pin the first method so the pivot is unambiguous.
 # @noRd
 .mashFmrMethodPin <- function(me, cs) {
-    if (!("method" %in% names(me)) || length(unique(me$method)) <= 1L) {
+    if (!is_in("method", names(me)) || n_distinct(me$method) <= 1L) {
         return(list(me = me, cs = cs))
     }
     m1 <- me$method[[1L]]
-    warning(
-        "mashInput: FineMappingResult carries multiple methods; using '",
-        m1,
-        "'."
+    msg <- glue(
+        "mashInput: FineMappingResult carries multiple methods; using ",
+        "'{m1}'."
     )
-    me <- me[me$method == m1, , drop = FALSE]
-    if ("method" %in% names(cs)) {
-        cs <- cs[cs$method == m1, , drop = FALSE]
+    warn(msg)
+    me <- filter(me, .data$method == m1)
+    if (is_in("method", names(cs))) {
+        cs <- filter(cs, .data$method == m1)
     }
     list(me = me, cs = cs)
 }
@@ -468,8 +453,8 @@ mergeMashData <- function(resData, oneData) {
 # @noRd
 .mashFmrStrongRows <- function(cs, variants) {
     strongVar <- character(0)
-    csCol <- grep("^cs_", names(cs), value = TRUE)
-    if (nrow(cs) > 0L && length(csCol) > 0L && "pip" %in% names(cs)) {
+    csCol <- names(cs)[str_detect(names(cs), "^cs_")]
+    if (nrow(cs) > 0L && length(csCol) > 0L && is_in("pip", names(cs))) {
         grp <- interaction(cs$context, cs[[csCol[[1L]]]], drop = TRUE)
         for (rows in split(seq_len(nrow(cs)), grp)) {
             strongVar <- c(
@@ -505,10 +490,11 @@ mergeMashData <- function(resData, oneData) {
     )
     keepCols <- setdiff(colnames(mats$b), excludeCondition)
     if (length(keepCols) < 2L) {
-        stop(
+        msg <- glue(
             "mashInput: fewer than 2 conditions remain for an object (after ",
             "excludeCondition); mash operates across conditions and needs >= 2."
         )
+        abort(msg)
     }
     pool <- .mashIndependentPool(mats, independentVariants)
     rn <- mashRandNullSample(
@@ -531,7 +517,7 @@ mergeMashData <- function(resData, oneData) {
     }
     # Rownames carry a "study::trait::" block prefix; strip to the bare variant
     # id before matching (proper chrom/pos/allele via matchVariants).
-    rawIds <- sub(".*::", "", rownames(mats$b))
+    rawIds <- str_remove(rownames(mats$b), ".*::")
     keepIdx <- matchVariants(
         rawIds,
         independentVariants,
@@ -539,10 +525,11 @@ mergeMashData <- function(resData, oneData) {
         removeStrandAmbiguous = FALSE
     )$idxA
     if (length(keepIdx) == 0L) {
-        warning(
+        msg <- glue(
             "mashInput: no variants matched the independent-variant list; ",
             "the random/null background is empty for this object."
         )
+        warn(msg)
     }
     list(
         poolB = mats$b[keepIdx, , drop = FALSE],
@@ -647,7 +634,7 @@ mashInput <- function(
     independentVariants = NULL,
     seed = 999L
 ) {
-    inputScale <- match.arg(inputScale)
+    inputScale <- arg_match(inputScale)
     if (!is.null(independentVariants)) {
         independentVariants <- as.character(independentVariants)
     }
@@ -669,13 +656,14 @@ mashInput <- function(
 # @noRd
 .mashPrepObjects <- function(objects) {
     if (!is.list(objects) || length(objects) == 0L) {
-        stop(
+        msg <- glue(
             "mashInput: `objects` must be a non-empty list of QtlSumStats ",
             "and/or FineMappingResult objects."
         )
+        abort(msg)
     }
-    if (is.null(names(objects)) || any(!nzchar(names(objects)))) {
-        names(objects) <- paste0("region", seq_along(objects))
+    if (is.null(names(objects)) || any(str_length(names(objects)) == 0L)) {
+        names(objects) <- str_c("region", seq_along(objects))
     }
     objects
 }
@@ -696,12 +684,7 @@ mashInput <- function(
             seed = cfg$seed,
             independentVariants = cfg$independentVariants
         )
-        part <- map(part, function(m) {
-            if (!is.null(m) && nrow(m) > 0L) {
-                rownames(m) <- paste(rownames(m), nm, sep = "_")
-            }
-            m
-        })
+        part <- map(part, .mashPrefixRownames, nm = nm)
         combined <- mergeMashData(combined, part)
     }
     combined
@@ -712,15 +695,10 @@ mashInput <- function(
 # 1-row matrix shape, add the strong XtX, and optionally drop b/s slots.
 # @noRd
 .mashFinalizeCombined <- function(combined, sigPCutoff, zOnly) {
-    combined <- map(combined, function(m) {
-        if (is.null(m)) {
-            return(NULL)
-        } # nocov  (partitions are always matrices here, never NULL)
-        as.data.frame(m)
-    })
+    combined <- map(combined, .mashAsDataFrameOrNull)
     for (cond in c("random", "null", "strong")) {
-        bKey <- paste0(cond, ".b")
-        sKey <- paste0(cond, ".s")
+        bKey <- str_c(cond, ".b")
+        sKey <- str_c(cond, ".s")
         if (!is.null(combined[[bKey]]) && !is.null(combined[[sKey]])) {
             combined <- filterInvalidSummaryStat(
                 combined,
@@ -734,7 +712,7 @@ mashInput <- function(
     combined <- .mashRestoreStrongShape(combined)
     combined <- .mashAddXtX(combined)
     if (zOnly) {
-        combined[grep("\\.(b|s)$", names(combined), value = TRUE)] <- NULL
+        combined[str_detect(names(combined), "\\.(b|s)$")] <- NULL
     }
     combined
 }
@@ -823,14 +801,15 @@ qtlSumStatsFromZMatrix <- function(
     role = "mash"
 ) {
     if (!is.matrix(z) || !is.numeric(z)) {
-        stop(
+        msg <- glue(
             "qtlSumStatsFromZMatrix: `z` must be a numeric variants x ",
             "conditions matrix."
         )
+        abort(msg)
     }
     vids <- rownames(z)
     if (is.null(vids)) {
-        vids <- paste0("var", seq_len(nrow(z)))
+        vids <- str_c("var", seq_len(nrow(z)))
     }
     .qtlSumStatsFromMatrix(
         vids = vids,
@@ -841,15 +820,11 @@ qtlSumStatsFromZMatrix <- function(
         trait = trait,
         genome = genome,
         role = role,
-        mcolFn = function(j) {
-            S4Vectors::DataFrame(
-                SNP = vids,
-                A1 = rep(a1, length(vids)),
-                A2 = rep(a2, length(vids)),
-                Z = as.numeric(z[, j]),
-                N = rep(as.integer(n), length(vids))
-            )
-        }
+        mcolFn = .mashZMcolFn,
+        a1 = a1,
+        a2 = a2,
+        z = z,
+        n = n
     )
 }
 
@@ -909,7 +884,7 @@ qtlSumStatsFromBetaMatrix <- function(
     .mashValidateBetaMatrix(bhat, shat)
     vids <- rownames(bhat)
     if (is.null(vids)) {
-        vids <- paste0("var", seq_len(nrow(bhat)))
+        vids <- str_c("var", seq_len(nrow(bhat)))
     }
     .qtlSumStatsFromMatrix(
         vids = vids,
@@ -920,17 +895,12 @@ qtlSumStatsFromBetaMatrix <- function(
         trait = trait,
         genome = genome,
         role = role,
-        mcolFn = function(j) {
-            S4Vectors::DataFrame(
-                SNP = vids,
-                A1 = rep(a1, length(vids)),
-                A2 = rep(a2, length(vids)),
-                BETA = as.numeric(bhat[, j]),
-                SE = as.numeric(shat[, j]),
-                Z = as.numeric(bhat[, j] / shat[, j]),
-                N = rep(as.integer(n), length(vids))
-            )
-        }
+        mcolFn = .mashBetaMcolFn,
+        a1 = a1,
+        a2 = a2,
+        bhat = bhat,
+        shat = shat,
+        n = n
     )
 }
 
@@ -939,26 +909,27 @@ qtlSumStatsFromBetaMatrix <- function(
 # @noRd
 .mashValidateBetaMatrix <- function(bhat, shat) {
     if (!is.matrix(bhat) || !is.numeric(bhat)) {
-        stop(
+        msg <- glue(
             "qtlSumStatsFromBetaMatrix: `bhat` must be a numeric ",
             "variants x conditions matrix."
         )
+        abort(msg)
     }
     if (!is.matrix(shat) || !is.numeric(shat)) {
-        stop(
+        msg <- glue(
             "qtlSumStatsFromBetaMatrix: `shat` must be a numeric ",
             "variants x conditions matrix."
         )
+        abort(msg)
     }
     if (!identical(dim(bhat), dim(shat))) {
-        stop(sprintf(
-            paste0(
-                "qtlSumStatsFromBetaMatrix: `bhat` (%s) and `shat` (%s) ",
-                "must have identical dimensions."
-            ),
-            paste(dim(bhat), collapse = "x"),
-            paste(dim(shat), collapse = "x")
-        ))
+        msg <- glue(
+            "qtlSumStatsFromBetaMatrix: ",
+            "`bhat` ({str_flatten(dim(bhat), 'x')}) and ",
+            "`shat` ({str_flatten(dim(shat), 'x')}) ",
+            "must have identical dimensions."
+        )
+        abort(msg)
     }
 }
 
@@ -976,7 +947,8 @@ qtlSumStatsFromBetaMatrix <- function(
     trait,
     genome,
     role,
-    mcolFn
+    mcolFn,
+    ...
 ) {
     context <- .qszmRecycle(context, nCond, "context")
     trait <- .qszmRecycle(trait, nCond, "trait")
@@ -995,16 +967,17 @@ qtlSumStatsFromBetaMatrix <- function(
     } else {
         rep(NA_integer_, length(vids))
     }
-    chrom[is.na(chrom) | !nzchar(chrom)] <- "chr1"
+    chrom[is.na(chrom) | str_length(chrom) == 0L] <- "chr1"
     pos[is.na(pos)] <- seq_along(pos)[is.na(pos)]
-    entries <- lapply(seq_len(nCond), function(j) {
-        gr <- GenomicRanges::GRanges(
-            seqnames = chrom,
-            ranges = IRanges::IRanges(start = pos, width = 1L)
-        )
-        S4Vectors::mcols(gr) <- mcolFn(j)
-        gr
-    })
+    entries <- map(
+        seq_len(nCond),
+        .qszmEntry,
+        chrom = chrom,
+        pos = pos,
+        vids = vids,
+        mcolFn = mcolFn,
+        mcolArgs = list(...)
+    )
     QtlSumStats(
         study = rep(as.character(study), nCond),
         context = context,
@@ -1022,15 +995,12 @@ qtlSumStatsFromBetaMatrix <- function(
 # `context = colnames(x)` arrives when the matrix has no column names.
 .qszmRecycle <- function(v, n, what) {
     if (is.null(v)) {
-        stop(sprintf(
-            paste0(
-                "qtlSumStats matrix constructor: `%s` is NULL; pass a ",
-                "length-1 or length-%d value (or give the matrix column ",
-                "names)."
-            ),
-            what,
-            n
-        ))
+        msg <- glue(
+            "qtlSumStats matrix constructor: `{what}` is NULL; pass a ",
+            "length-1 or length-{n} value (or give the matrix column ",
+            "names)."
+        )
+        abort(msg)
     }
     v <- as.character(v)
     if (length(v) == 1L) {
@@ -1039,15 +1009,11 @@ qtlSumStatsFromBetaMatrix <- function(
     if (length(v) == n) {
         return(v)
     }
-    stop(sprintf(
-        paste0(
-            "qtlSumStats matrix constructor: `%s` must be length 1 or ",
-            "ncol=%d, got %d."
-        ),
-        what,
-        n,
-        length(v)
-    ))
+    msg <- glue(
+        "qtlSumStats matrix constructor: `{what}` must be length 1 or ",
+        "ncol={n}, got {length(v)}."
+    )
+    abort(msg)
 }
 
 # Internal: convert a single SumStats object (post-QC) into a (Bhat, Shat)
@@ -1078,13 +1044,15 @@ qtlSumStatsFromBetaMatrix <- function(
     role,
     inputScale = c("auto", "beta", "z")
 ) {
-    inputScale <- match.arg(inputScale)
+    inputScale <- arg_match(inputScale)
     .mashValidateInput(x, role)
     setup <- .mashBlockSetup(x)
     resolvedScale <- .mashResolveScale(x, role, inputScale)
     blocks <- .mashBuildBlockMatrices(x, setup, resolvedScale)
-    bhat <- do.call(rbind, blocks$bhat)
-    shat <- do.call(rbind, blocks$shat)
+    bhatBlocks <- blocks$bhat
+    shatBlocks <- blocks$shat
+    bhat <- exec(rbind, !!!bhatBlocks)
+    shat <- exec(rbind, !!!shatBlocks)
     # bhat NA -> 0, shat NA / <= 0 -> 1000 (the mash_set_data
     # zero_Bhat_Shat_reset convention; missing-cell variants do not drive the
     # fit).
@@ -1097,33 +1065,26 @@ qtlSumStatsFromBetaMatrix <- function(
 # @noRd
 .mashValidateInput <- function(x, role) {
     if (!methods::is(x, "QtlSumStats") && !methods::is(x, "GwasSumStats")) {
-        stop(sprintf(
-            paste0(
-                "mashPipeline: '%s' input must be a QtlSumStats or ",
-                "GwasSumStats; got %s."
-            ),
-            role,
-            paste(class(x), collapse = "/")
-        ))
+        msg <- glue(
+            "mashPipeline: '{role}' input must be a QtlSumStats or ",
+            "GwasSumStats; got {str_flatten(class(x), '/')}."
+        )
+        abort(msg)
     }
     if (length(getQcInfo(x)) == 0L) {
-        stop(
-            sprintf(
-                paste0(
-                    "mashPipeline: '%s' SumStats has no QC info ",
-                    "(length(getQcInfo(x)) == 0L). "
-                ),
-                role
-            ),
+        msg <- glue(
+            "mashPipeline: '{role}' SumStats has no QC info ",
+            "(length(getQcInfo(x)) == 0L). ",
             "Run summaryStatsQc() on the SumStats before passing it to ",
             "mashPipeline()."
         )
+        abort(msg)
     }
     if (nrow(x) == 0L) {
-        stop(sprintf(
-            "mashPipeline: '%s' SumStats has no entries (nrow == 0).",
-            role
-        ))
+        msg <- glue(
+            "mashPipeline: '{role}' SumStats has no entries (nrow == 0)."
+        )
+        abort(msg)
     }
 }
 
@@ -1136,7 +1097,7 @@ qtlSumStatsFromBetaMatrix <- function(
     if (isQtl) {
         traitCol <- as.character(x$trait)
         contextCol <- as.character(x$context)
-        blockKeys <- paste(studyCol, traitCol, sep = "::")
+        blockKeys <- str_c(studyCol, traitCol, sep = "::")
         columnLabels <- unique(contextCol)
     } else {
         traitCol <- NULL
@@ -1154,18 +1115,13 @@ qtlSumStatsFromBetaMatrix <- function(
     )
 }
 
-# Resolve which (Bhat, Shat) source to pull: "beta" (BETA/SE) or "z" (Z, Shat=1).
+# Resolve which (Bhat, Shat) source to pull: "beta" (BETA/SE) or "z"
+# (Z, Shat=1).
 # "auto" picks beta when every entry has BETA+SE, else z; mixed inputs error.
 # @noRd
 .mashResolveScale <- function(x, role, inputScale) {
     entries <- x$entry
-    caps <- map(seq_len(nrow(x)), function(i) {
-        mc <- S4Vectors::mcols(entries[[i]])
-        list(
-            hasBetaSe = all(c("BETA", "SE") %in% colnames(mc)),
-            hasZ = "Z" %in% colnames(mc)
-        )
-    })
+    caps <- map(entries, .mashEntryCaps)
     allHaveBetaSe <- all(map_lgl(caps, "hasBetaSe"))
     allHaveZ <- all(map_lgl(caps, "hasZ"))
     switch(
@@ -1179,16 +1135,11 @@ qtlSumStatsFromBetaMatrix <- function(
 # @noRd
 .mashScaleBeta <- function(allHaveBetaSe, role) {
     if (!allHaveBetaSe) {
-        stop(
-            sprintf(
-                paste0(
-                    "mashPipeline: inputScale = 'beta' requires every '%s' ",
-                    "entry to "
-                ),
-                role
-            ),
-            "carry both BETA and SE mcols."
+        msg <- glue(
+            "mashPipeline: inputScale = 'beta' requires every '{role}' ",
+            "entry to carry both BETA and SE mcols."
         )
+        abort(msg)
     }
     "beta"
 }
@@ -1196,16 +1147,11 @@ qtlSumStatsFromBetaMatrix <- function(
 # @noRd
 .mashScaleZ <- function(allHaveZ, role) {
     if (!allHaveZ) {
-        stop(
-            sprintf(
-                paste0(
-                    "mashPipeline: inputScale = 'z' requires every '%s' entry ",
-                    "to "
-                ),
-                role
-            ),
-            "carry a Z mcol."
+        msg <- glue(
+            "mashPipeline: inputScale = 'z' requires every '{role}' entry ",
+            "to carry a Z mcol."
         )
+        abort(msg)
     }
     "z"
 }
@@ -1218,24 +1164,23 @@ qtlSumStatsFromBetaMatrix <- function(
     if (allHaveZ) {
         return("z")
     }
-    stop(
-        sprintf(
-            paste0(
-                "mashPipeline: '%s' SumStats has no usable scale - every ",
-                "entry "
-            ),
-            role
-        ),
-        "must carry (BETA, SE) or Z mcols."
+    msg <- glue(
+        "mashPipeline: '{role}' SumStats has no usable scale - every ",
+        "entry must carry (BETA, SE) or Z mcols."
     )
+    abort(msg)
 }
 
 # Per (study, trait) block, a variant x context Bhat / Shat matrix pair.
 # @noRd
 .mashBuildBlockMatrices <- function(x, setup, resolvedScale) {
-    blocks <- map(unique(setup$blockKeys), function(bkey) {
-        .mashBlockMatrix(x, bkey, setup, resolvedScale)
-    })
+    blocks <- map(
+        unique(setup$blockKeys),
+        .mashBlockMatrix,
+        x = x,
+        setup = setup,
+        resolvedScale = resolvedScale
+    )
     list(bhat = map(blocks, "b"), shat = map(blocks, "s"))
 }
 
@@ -1257,11 +1202,11 @@ qtlSumStatsFromBetaMatrix <- function(
         variantOrder <- c(variantOrder, setdiff(snps, variantOrder))
         ctx <- setup$contextCol[[rIdx]]
         if (resolvedScale == "beta") {
-            perContextB[[ctx]] <- setNames(df$beta, snps)
-            perContextSe[[ctx]] <- setNames(df$se, snps)
+            perContextB[[ctx]] <- set_names(df$beta, snps)
+            perContextSe[[ctx]] <- set_names(df$se, snps)
         } else {
-            perContextB[[ctx]] <- setNames(df$z, snps)
-            perContextSe[[ctx]] <- setNames(rep(1, length(snps)), snps)
+            perContextB[[ctx]] <- set_names(df$z, snps)
+            perContextSe[[ctx]] <- set_names(rep(1, length(snps)), snps)
         }
     }
     list(
@@ -1291,7 +1236,7 @@ qtlSumStatsFromBetaMatrix <- function(
 # Assemble one block's (variant x context) Bhat / Shat matrices, disambiguating
 # rownames by block key to avoid silent cross-block dedup.
 # @noRd
-.mashBlockMatrix <- function(x, bkey, setup, resolvedScale) {
+.mashBlockMatrix <- function(bkey, x, setup, resolvedScale) {
     rowsInBlock <- which(setup$blockKeys == bkey)
     pc <- .mashBlockPerContext(x, rowsInBlock, setup, resolvedScale)
     dims <- list(pc$variantOrder, setup$columnLabels)
@@ -1303,8 +1248,147 @@ qtlSumStatsFromBetaMatrix <- function(
         bMat[names(pc$perContextB[[ctx]]), ctx] <- pc$perContextB[[ctx]]
         sMat[names(pc$perContextSe[[ctx]]), ctx] <- pc$perContextSe[[ctx]]
     }
-    rn <- paste(bkey, pc$variantOrder, sep = "::")
+    rn <- str_c(bkey, pc$variantOrder, sep = "::")
     rownames(bMat) <- rn
     rownames(sMat) <- rn
     list(b = bMat, s = sMat)
+}
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# TRUE when any |z| in a matrix row reaches the significance threshold.
+# @noRd
+.mashRowExceeds <- function(row, zThreshold) {
+    any(abs(row) >= zThreshold)
+}
+
+# The fraction of non-zero entries in a matrix row.
+# @noRd
+.mashRowNonzeroRate <- function(row) {
+    mean(row != 0)
+}
+
+# TRUE when a covariance matrix is not identically zero.
+# @noRd
+.mashMatrixNonzero <- function(mat) {
+    !all(mat == 0)
+}
+
+# Subset one U matrix to the kept conditions (erroring if any is absent).
+# @noRd
+.mashSubsetMatrix <- function(mat, conditionsToKeep) {
+    missingConditions <- setdiff(conditionsToKeep, colnames(mat))
+    if (length(missingConditions) > 0) {
+        msg <- glue(
+            "Condition(s) {str_flatten(missingConditions, ', ')} ",
+            "not found in matrix"
+        )
+        abort(msg)
+    }
+    mat[conditionsToKeep, conditionsToKeep]
+}
+
+# Merge partition `d` of two mash data lists: a column-aligned row-bind (the two
+# objects may measure different condition sets). bind_rows unions the columns,
+# filling gaps with NA -> NaN. Returns a base data.frame because this backs the
+# exported mergeMashData(), whose result is column-accessed (`$cond`); the
+# mashInput pipeline then coerces these frames back to matrices. The variant-id
+# rownames are load-bearing -- they survive (via as.matrix) as the output
+# matrices' dimnames (tested, e.g. rownames(mashInput(...)$strong.z)), which a
+# tibble (no rownames) would drop. Rows are APPENDED (each object's variants are
+# distinct, disambiguated by the region prefix), so the row keys must be unique
+# across the two sides -- a collision means the prefix invariant broke, and we
+# error loudly rather than silently stack.
+# @noRd
+.mashCombineDatum <- function(d, oneData, resData) {
+    od <- oneData[[d]]
+    rd <- resData[[d]]
+    if (length(od) == 0 || is.null(od)) {
+        return(rd)
+    }
+    if (is.null(rd) || length(rd) == 0) {
+        return(od)
+    }
+    rnRes <- rownames(as.data.frame(rd))
+    rnOne <- rownames(as.data.frame(od))
+    if (anyDuplicated(c(rnRes, rnOne)) > 0L) {
+        abort(glue(
+            "mergeMashData: duplicate variant ids across the merged ",
+            "partitions -- each object's variants must be uniquely keyed ",
+            "(the mashInput region prefix guarantees this). A collision ",
+            "means two objects share a name or the prefix invariant broke."
+        ))
+    }
+    combined <- bind_rows(as.data.frame(rd), as.data.frame(od))
+    combined[is.na(combined)] <- NaN
+    rownames(combined) <- c(rnRes, rnOne)
+    combined
+}
+
+# Region-prefix one partition matrix's rownames (no-op for empty/NULL).
+# @noRd
+.mashPrefixRownames <- function(m, nm) {
+    if (!is.null(m) && nrow(m) > 0L) {
+        rownames(m) <- str_c(rownames(m), nm, sep = "_")
+    }
+    m
+}
+
+# Coerce one partition to a data.frame (NULL passes through). Kept as a base
+# data.frame (not a tibble) so the variant-id rownames survive to the output
+# matrices -- see .mashCombineDatum.
+# @noRd
+.mashAsDataFrameOrNull <- function(m) {
+    if (is.null(m)) {
+        return(NULL)
+    } # nocov  (partitions are always matrices here, never NULL)
+    as.data.frame(m)
+}
+
+# One condition's GRanges entry, mcols from `mcolFn(j, vids, <mcolArgs>)`.
+# @noRd
+.qszmEntry <- function(j, chrom, pos, vids, mcolFn, mcolArgs) {
+    gr <- GenomicRanges::GRanges(
+        seqnames = chrom,
+        ranges = IRanges::IRanges(start = pos, width = 1L)
+    )
+    mcolCallArgs <- c(list(j, vids), mcolArgs)
+    S4Vectors::mcols(gr) <- exec(mcolFn, !!!mcolCallArgs)
+    gr
+}
+
+# mcols for condition `j` of a z-scale matrix (Z + placeholder N/alleles).
+# @noRd
+.mashZMcolFn <- function(j, vids, a1, a2, z, n) {
+    S4Vectors::DataFrame(
+        SNP = vids,
+        A1 = rep(a1, length(vids)),
+        A2 = rep(a2, length(vids)),
+        Z = as.numeric(z[, j]),
+        N = rep(as.integer(n), length(vids))
+    )
+}
+
+# mcols for condition `j` of a beta-scale pair (BETA/SE + derived Z).
+# @noRd
+.mashBetaMcolFn <- function(j, vids, a1, a2, bhat, shat, n) {
+    S4Vectors::DataFrame(
+        SNP = vids,
+        A1 = rep(a1, length(vids)),
+        A2 = rep(a2, length(vids)),
+        BETA = as.numeric(bhat[, j]),
+        SE = as.numeric(shat[, j]),
+        Z = as.numeric(bhat[, j] / shat[, j]),
+        N = rep(as.integer(n), length(vids))
+    )
+}
+
+# The (hasBetaSe, hasZ) scale capabilities of one sumstats entry.
+# @noRd
+.mashEntryCaps <- function(e) {
+    mc <- S4Vectors::mcols(e)
+    list(
+        hasBetaSe = all(is_in(c("BETA", "SE"), colnames(mc))),
+        hasZ = is_in("Z", colnames(mc))
+    )
 }

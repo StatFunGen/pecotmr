@@ -11,10 +11,12 @@ Estimate heritability and functional enrichment by feasible
   using the full residual covariance
   \eqn{\Omega = (\hat{N\tau}\, R D_a R + R)^2} (elementwise), inverted per LD
   block via a 99\%-eigenvalue-mass truncation. \eqn{\hat{N\tau} = \sum(Z^2-1)
-  / \sum \ell} is a method-of-moments plug-in; \eqn{D_a = diag(\sum_a A_{ja})}.
+  / \sum \ell} is a method-of-moments plug-in;
+  \eqn{D_a = diag(\sum_a A_{ja})}.
   Coefficients are \eqn{\tau = (X'\Omega^{-1}X)^{-1} X'\Omega^{-1} y / N} and
   partitioned heritabilities \eqn{A'A\,\tau}. Standard errors come from a
-  delete-one-block jackknife that subtracts each block's already-\eqn{\Omega}-
+  delete-one-block jackknife that subtracts each block's
+  already-\eqn{\Omega}-
   weighted contribution from the accumulated normal equations.
 }
 \references{

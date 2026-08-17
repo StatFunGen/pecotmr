@@ -4,8 +4,8 @@
 #' @noRd
 orderDedupRegions <- function(df) {
     df$chrom <- canonChrom(df$chrom)
-    df <- distinct(df, chrom, start, .keep_all = TRUE) %>%
-        arrange(chromOrder(chrom), start)
+    df <- distinct(df, .data$chrom, .data$start, .keep_all = TRUE) |>
+        arrange(chromOrder(.data$chrom), .data$start)
     df
 }
 
@@ -19,37 +19,38 @@ findIntersectionRows <- function(
     regionStart,
     regionEnd
 ) {
-    chromData <- genomicData %>% filter(chrom == regionChrom)
+    chromData <- genomicData |> filter(.data$chrom == regionChrom)
     if (nrow(chromData) == 0) {
-        stop("No data for chromosome ", regionChrom)
+        msg <- glue("No data for chromosome {regionChrom}")
+        abort(msg)
     }
 
     # Clamp query to available range
     regionStart <- max(regionStart, min(chromData$start))
     regionEnd <- min(regionEnd, max(chromData$end))
 
-    startRow <- genomicData %>%
+    startRow <- genomicData |>
         filter(
-            chrom == regionChrom,
-            start <= regionStart,
-            end > regionStart
-        ) %>%
+            .data$chrom == regionChrom,
+            .data$start <= regionStart,
+            .data$end > regionStart
+        ) |>
         slice(1)
-    endRow <- genomicData %>%
-        filter(chrom == regionChrom, start < regionEnd, end >= regionEnd) %>%
-        arrange(desc(end)) %>%
+    endRow <- genomicData |>
+        filter(
+            .data$chrom == regionChrom,
+            .data$start < regionEnd,
+            .data$end >= regionEnd
+        ) |>
+        arrange(desc(.data$end)) |>
         slice(1)
 
     if (nrow(startRow) == 0 || nrow(endRow) == 0) {
-        stop(
-            "Region ",
-            regionChrom,
-            ":",
-            regionStart,
-            "-",
-            regionEnd,
-            " is not covered by any rows in the LD metadata."
+        msg <- glue(
+            "Region {regionChrom}:{regionStart}-{regionEnd} is not ",
+            "covered by any rows in the LD metadata."
         )
+        abort(msg)
     }
     list(startRow = startRow, endRow = endRow)
 }
@@ -58,26 +59,22 @@ findIntersectionRows <- function(
 #' @noRd
 validateSelectedRegion <- function(startRow, endRow, regionStart, regionEnd) {
     if (startRow$start > regionStart || endRow$end < regionEnd) {
-        stop(
-            "Region ",
-            regionStart,
-            "-",
-            regionEnd,
-            " is not fully covered by the LD metadata ",
-            "(available: ",
-            startRow$start,
-            "-",
-            endRow$end,
-            ")."
+        availStart <- startRow$start
+        availEnd <- endRow$end
+        msg <- glue(
+            "Region {regionStart}-{regionEnd} is not fully covered by ",
+            "the LD metadata (available: {availStart}-{availEnd})."
         )
+        abort(msg)
     }
 }
 
 #' Extract values of a column for rows spanning the intersection range.
 #' @noRd
 extractFilePaths <- function(genomicData, intersectionRows, columnToExtract) {
-    if (!columnToExtract %in% names(genomicData)) {
-        stop("Column '", columnToExtract, "' not found in genomic data.")
+    if (!is_in(columnToExtract, names(genomicData))) {
+        msg <- glue("Column '{columnToExtract}' not found in genomic data.")
+        abort(msg)
     }
     idx <- which(
         genomicData$chrom == intersectionRows$startRow$chrom &
@@ -93,7 +90,7 @@ extractFilePaths <- function(genomicData, intersectionRows, columnToExtract) {
 # given first, then `dirname(ldReferenceMetaFile)/<path>`, then the
 # manifest itself as a fallback.
 # @noRd
-.findValidFilePath <- function(referenceFilePath, targetFilePath) {
+.findValidFilePath <- function(targetFilePath, referenceFilePath) {
     if (file.exists(targetFilePath)) {
         return(targetFilePath)
     }
@@ -104,22 +101,21 @@ extractFilePaths <- function(genomicData, intersectionRows, columnToExtract) {
     if (file.exists(referenceFilePath)) {
         return(referenceFilePath)
     }
-    stop(sprintf(
-        paste0(
-            "Both reference and target file paths do not work. Tried ",
-            "paths: '%s' and '%s'"
-        ),
-        referenceFilePath,
-        targetFullPath
-    ))
+    msg <- glue(
+        "Both reference and target file paths do not work. Tried ",
+        "paths: '{referenceFilePath}' and '{targetFullPath}'"
+    )
+    abort(msg)
 }
 
 # Vectorised .findValidFilePath over a vector of target paths.
 # @noRd
 .findValidFilePaths <- function(referenceFilePath, targetFilePaths) {
-    map_chr(targetFilePaths, function(x) {
-        .findValidFilePath(referenceFilePath, x)
-    })
+    map_chr(
+        targetFilePaths,
+        .findValidFilePath,
+        referenceFilePath = referenceFilePath
+    )
 }
 
 #' Find LD blocks overlapping a query region from a metadata TSV file.
@@ -137,17 +133,15 @@ extractFilePaths <- function(genomicData, intersectionRows, columnToExtract) {
 #' @noRd
 # Split the comma-joined path column into LD (+ optional bim) path columns.
 .regionalLdParsePaths <- function(genomicData) {
-    filePath <- genomicData$path %>%
-        str_split(",", simplify = TRUE) %>%
-        data.frame() %>%
-        `colnames<-`(
-            if (ncol(.) == 2) {
-                c("LD_file_path", "bim_file_path")
-            } else {
-                c("LD_file_path")
-            }
-        )
-    cbind(genomicData, filePath) %>% select(-path)
+    parts <- str_split(genomicData$path, ",", simplify = TRUE)
+    filePath <- as_tibble(parts, .name_repair = "minimal")
+    names(filePath) <- if (ncol(parts) == 2) {
+        c("LD_file_path", "bim_file_path")
+    } else {
+        "LD_file_path"
+    }
+    bind_cols(genomicData, filePath) |>
+        select(-any_of("path"))
 }
 
 # Resolve the LD (and optional bim) file paths for the intersected rows.
@@ -160,7 +154,7 @@ extractFilePaths <- function(genomicData, intersectionRows, columnToExtract) {
         ldReferenceMetaFile,
         extractFilePaths(genomicData, intersectionRows, "LD_file_path")
     )
-    bimPaths <- if ("bim_file_path" %in% names(genomicData)) {
+    bimPaths <- if (is_in("bim_file_path", names(genomicData))) {
         .findValidFilePaths(
             ldReferenceMetaFile,
             extractFilePaths(genomicData, intersectionRows, "bim_file_path")
@@ -230,14 +224,14 @@ getRegionalLdMeta <- function(
     if (!is.null(snpFilePath)) {
         return(snpFilePath)
     }
-    candidates <- paste0(ldFilePath, c(".bim", ".pvar", ".pvar.zst"))
+    candidates <- str_c(ldFilePath, c(".bim", ".pvar", ".pvar.zst"))
     found <- candidates[file.exists(candidates)]
     if (length(found) == 0) {
-        stop(
-            "No variant file found for: ",
-            ldFilePath,
-            " (tried .bim, .pvar, .pvar.zst)"
+        msg <- glue(
+            "No variant file found for: {ldFilePath} ",
+            "(tried .bim, .pvar, .pvar.zst)"
         )
+        abort(msg)
     }
     found[1]
 }
@@ -245,16 +239,20 @@ getRegionalLdMeta <- function(
 # Read + normalise the LD variant metadata (canonical chrom / variant id / GD).
 .processLdVariants <- function(snpFilePath) {
     ldVariants <- readVariantMetadata(snpFilePath)
-    isPvar <- !("gpos" %in% names(ldVariants))
-    ldVariants <- ldVariants %>%
-        mutate(chrom = canonChrom(chrom), variants = normalizeVariantId(id))
+    isPvar <- !is_in("gpos", names(ldVariants))
+    ldVariants <- ldVariants |>
+        mutate(
+            chrom = canonChrom(.data$chrom),
+            variants = normalizeVariantId(.data$id)
+        )
     if (isPvar) {
-        ldVariants <- rename(ldVariants, GD = pos)
-        ldVariants$GD <- ldVariants$pos <- as.integer(
-            map_chr(ldVariants$variants, function(v) strsplit(v, ":")[[1]][2])
+        ldVariants <- rename(ldVariants, GD = "pos")
+        ldVariants$GD <- ldVariants$pos <- map_int(
+            ldVariants$variants,
+            .ldVariantPos
         )
     } else {
-        ldVariants <- rename(ldVariants, GD = gpos)
+        ldVariants <- rename(ldVariants, GD = "gpos")
     }
     ldVariants
 }
@@ -274,32 +272,32 @@ processLdMatrix <- function(ldFilePath, snpFilePath = NULL) {
         ldMatrix[upper.tri(ldMatrix)] <- t(ldMatrix)[upper.tri(ldMatrix)]
     }
     # Order variants by genomic position.
-    posOrder <- order(map_int(ldVariants$variants, function(v) {
-        as.integer(strsplit(v, ":")[[1]][2])
-    }))
-    ldVariants <- ldVariants[posOrder, ]
+    posOrder <- order(map_int(ldVariants$variants, .ldVariantPos))
+    ldVariants <- slice(ldVariants, posOrder)
     ldMatrix <- ldMatrix[ldVariants$variants, ldVariants$variants]
     list(ldMatrix = ldMatrix, ldVariants = ldVariants)
 }
 
 #' Subset an LD matrix and variant info to a genomic region, optionally further
 #' restricted to specific coordinates.
-#' @importFrom dplyr mutate select
+#' @importFrom dplyr mutate select inner_join
 #' @importFrom magrittr %>%
 #' @noRd
 extractLdForRegion <- function(ldMatrix, variants, region, extractCoordinates) {
-    extracted <- subset(
+    extracted <- filter(
         variants,
-        chrom == region$chrom & pos >= region$start & pos <= region$end
+        .data$chrom == region$chrom &
+            .data$pos >= region$start &
+            .data$pos <= region$end
     )
 
     if (!is.null(extractCoordinates)) {
-        extractCoordinates <- extractCoordinates %>%
-            mutate(chrom = canonChrom(chrom)) %>%
-            select(chrom, pos)
-        extracted <- extracted %>%
-            mutate(chrom = canonChrom(chrom)) %>%
-            merge(extractCoordinates, by = c("chrom", "pos"))
+        extractCoordinates <- extractCoordinates |>
+            mutate(chrom = canonChrom(.data$chrom)) |>
+            select("chrom", "pos")
+        extracted <- extracted |>
+            mutate(chrom = canonChrom(.data$chrom)) |>
+            inner_join(extractCoordinates, by = c("chrom", "pos"))
         keepCols <- intersect(
             c(
                 "chrom",
@@ -380,10 +378,11 @@ createLdMatrix <- function(ldMatrices, variants) {
         ))
     }
     if (returnGenotype) {
-        stop(
+        msg <- glue(
             "returnGenotype=TRUE requires genotype files, not ",
             "pre-computed LD matrices."
         )
+        abort(msg)
     }
     loadLdFromBlocks(
         source$metaPath,
@@ -474,7 +473,7 @@ loadLdMatrix <- function(
     nSample = NULL
 ) {
     source <- resolveLdSource(ldMetaFilePath)
-    isGeno <- source$type %in% c("plink2", "plink1", "vcf", "gds")
+    isGeno <- is_in(source$type, c("plink2", "plink1", "vcf", "gds"))
     # "auto": return X for genotype sources, R for pre-computed.
     if (identical(returnGenotype, "auto")) {
         returnGenotype <- isGeno
@@ -494,27 +493,27 @@ loadLdMatrix <- function(
 
 #' @noRd
 hasPlink2Files <- function(prefix) {
-    file.exists(paste0(prefix, ".pgen")) &&
-        (file.exists(paste0(prefix, ".pvar")) ||
-            file.exists(paste0(prefix, ".pvar.zst"))) &&
-        file.exists(paste0(prefix, ".psam"))
+    file.exists(str_c(prefix, ".pgen")) &&
+        (file.exists(str_c(prefix, ".pvar")) ||
+            file.exists(str_c(prefix, ".pvar.zst"))) &&
+        file.exists(str_c(prefix, ".psam"))
 }
 
 #' @noRd
 hasPlink1Files <- function(prefix) {
-    file.exists(paste0(prefix, ".bed")) &&
-        file.exists(paste0(prefix, ".bim")) &&
-        file.exists(paste0(prefix, ".fam"))
+    file.exists(str_c(prefix, ".bed")) &&
+        file.exists(str_c(prefix, ".bim")) &&
+        file.exists(str_c(prefix, ".fam"))
 }
 
 #' @noRd
 isVcfPath <- function(path) {
-    grepl("\\.(vcf|vcf\\.gz|bcf)$", path) && file.exists(path)
+    str_detect(path, "\\.(vcf|vcf\\.gz|bcf)$") && file.exists(path)
 }
 
 #' @noRd
 isGdsPath <- function(path) {
-    grepl("\\.gds$", path) && file.exists(path)
+    str_detect(path, "\\.gds$") && file.exists(path)
 }
 
 #' Check whether a path points to a genotype source (PLINK, VCF, or GDS).
@@ -554,21 +553,22 @@ isGenotypeSource <- function(path) {
 # Read + validate the first row of an LD metadata TSV (>=4 columns).
 .resolveLdReadMeta <- function(path) {
     if (!file.exists(path)) {
-        stop(
-            "LD metadata file not found: ",
-            path,
-            "\n  Expected: a TSV file with columns chrom, start, end, path."
+        msg <- glue(
+            "LD metadata file not found: {path}",
+            "\n  Expected: a TSV file with columns chrom, start, end, path.",
+            .trim = FALSE
         )
+        abort(msg)
     }
     meta <- as.data.frame(vroom(path, show_col_types = FALSE, n_max = 1))
     if (ncol(meta) < 4) {
-        stop(
+        msg <- glue(
             "LD metadata file must have at least 4 columns (chrom, ",
-            "start, end, path): ",
-            path
+            "start, end, path): {path}"
         )
+        abort(msg)
     }
-    colnames(meta)[1:4] <- c("chrom", "start", "end", "path")
+    colnames(meta)[seq_len(4)] <- c("chrom", "start", "end", "path")
     meta
 }
 
@@ -592,7 +592,7 @@ isGenotypeSource <- function(path) {
 resolveLdSource <- function(path) {
     meta <- .resolveLdReadMeta(path)
     # Strip the comma-separated bim path, then resolve relative to the meta dir.
-    rawPath <- gsub(",.*$", "", meta$path[1])
+    rawPath <- str_remove(meta$path[1], ",.*$")
     resolved <- file.path(dirname(path), rawPath)
     genoType <- .resolveLdGenotypeType(resolved, path)
     if (!is.null(genoType)) {
@@ -604,13 +604,14 @@ resolveLdSource <- function(path) {
             meta$start == 0 &&
             meta$end == 0
     ) {
-        stop(
+        msg <- glue(
             "Metadata has start=0, end=0 but path does not resolve to ",
-            "genotype files: ",
-            resolved,
+            "genotype files: {resolved}",
             "\n  The 0:0 sentinel is only valid for whole-chromosome ",
-            "genotype files."
+            "genotype files.",
+            .trim = FALSE
         )
+        abort(msg)
     }
     list(type = "precomputed", metaPath = path)
 }
@@ -629,14 +630,13 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 
     matching <- meta[meta$chrom == queryChrom, , drop = FALSE]
     if (nrow(matching) == 0) {
-        stop(
-            "No entry for chromosome ",
-            queryChrom,
-            " in metadata file: ",
-            metaPath
+        msg <- glue(
+            "No entry for chromosome {queryChrom} in metadata file: ",
+            "{metaPath}"
         )
+        abort(msg)
     }
-    rawPath <- gsub(",.*$", "", matching$path[1])
+    rawPath <- str_remove(matching$path[1], ",.*$")
     file.path(dirname(metaPath), rawPath)
 }
 
@@ -662,12 +662,12 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
         freqMatch <- match(variantInfo$id, afreq$id)
         nUnmatched <- sum(is.na(freqMatch))
         if (nUnmatched > 0) {
-            warning(
-                nUnmatched,
-                " out of ",
-                length(freqMatch),
-                " variants have no allele frequency in .afreq file."
+            nFreq <- length(freqMatch)
+            msg <- glue(
+                "{nUnmatched} out of {nFreq} variants have no allele ",
+                "frequency in .afreq file."
             )
+            warn(msg)
         }
         refPanel$allele_freq <- afreq$alt_freq[freqMatch]
     } else {
@@ -684,15 +684,14 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # Single-block metadata spanning the loaded region.
 .loadLdGtBlockMeta <- function(variantInfo, variantIds) {
     positions <- variantInfo$pos
-    data.frame(
+    tibble(
         blockId = 1L,
         chrom = as.character(variantInfo$chrom[1]),
         blockStart = min(positions),
         blockEnd = max(positions),
         size = length(variantIds),
         startIdx = 1L,
-        endIdx = length(variantIds),
-        stringsAsFactors = FALSE
+        endIdx = length(variantIds)
     )
 }
 
@@ -790,16 +789,15 @@ loadLdFromGenotype <- function(
 # Require a non-NULL GenotypeHandle ldSketch.
 .ldFromSketchValidate <- function(ldSketch, label) {
     if (is.null(ldSketch)) {
-        stop(sprintf(
-            paste0(
-                "%s: the SumStats/collection carries no ldSketch ",
-                "(ldSketch = NULL); this step needs an LD reference."
-            ),
-            label
-        ))
+        msg <- glue(
+            "{label}: the SumStats/collection carries no ldSketch ",
+            "(ldSketch = NULL); this step needs an LD reference."
+        )
+        abort(msg)
     }
     if (!methods::is(ldSketch, "GenotypeHandle")) {
-        stop(sprintf("%s: ldSketch must be a GenotypeHandle.", label))
+        msg <- glue("{label}: ldSketch must be a GenotypeHandle.")
+        abort(msg)
     }
 }
 
@@ -815,11 +813,11 @@ loadLdFromGenotype <- function(
     )
     nMissing <- length(variantIds) - length(m$idxA)
     if (nMissing > 0L && onMissing == "error") {
-        stop(sprintf(
-            "%s: %d variant id(s) not present in the LD sketch panel.",
-            label,
-            nMissing
-        ))
+        msg <- glue(
+            "{label}: {nMissing} variant id(s) not present in the LD ",
+            "sketch panel."
+        )
+        abort(msg)
     }
     if (length(m$idxA) == 0L) {
         return(NULL)
@@ -835,7 +833,7 @@ loadLdFromGenotype <- function(
     onMissing = c("error", "drop")
 ) {
     .ldFromSketchValidate(ldSketch, label)
-    onMissing <- match.arg(onMissing)
+    onMissing <- arg_match(onMissing)
     matched <- .ldFromSketchMatch(ldSketch, variantIds, label, onMissing)
     if (is.null(matched)) {
         return(NULL)
@@ -884,16 +882,15 @@ loadLdFromGenotype <- function(
         if (nullPolicy == "lenient") {
             return(TRUE)
         }
-        stop(
-            pipelineName,
-            ": ",
-            if (!is.null(label)) {
-                sprintf("ldSketch on `%s` is non-NULL ", label)
-            } else {
-                "qtl ldSketch is non-NULL "
-            },
-            "but the GWAS ldSketch is NULL."
+        labelPart <- if (!is.null(label)) {
+            glue("ldSketch on `{label}` is non-NULL ")
+        } else {
+            "qtl ldSketch is non-NULL "
+        }
+        msg <- glue(
+            "{pipelineName}: {labelPart}but the GWAS ldSketch is NULL."
         )
+        abort(msg)
     }
     FALSE
 }
@@ -904,27 +901,24 @@ loadLdFromGenotype <- function(
         !methods::is(qtlLd, "GenotypeHandle") ||
             !methods::is(gwasLd, "GenotypeHandle")
     ) {
-        stop(
-            pipelineName,
-            ": ldSketch slots",
-            between,
-            " must both be GenotypeHandle objects ",
-            "for the cross-pipeline LD reference check."
+        msg <- glue(
+            "{pipelineName}: ldSketch slots{between} must both be ",
+            "GenotypeHandle objects for the cross-pipeline LD reference ",
+            "check."
         )
+        abort(msg)
     }
     qSnp <- getSnpInfo(qtlLd)
     gSnp <- getSnpInfo(gwasLd)
     if (nrow(qSnp) != nrow(gSnp)) {
-        stop(
-            pipelineName,
-            ": ldSketch panels differ in size (",
-            nrow(qSnp),
-            " vs ",
-            nrow(gSnp),
-            " variants)",
-            between,
-            "; the two ldSketch GenotypeHandles must match exactly."
+        nQ <- nrow(qSnp)
+        nG <- nrow(gSnp)
+        msg <- glue(
+            "{pipelineName}: ldSketch panels differ in size ({nQ} vs ",
+            "{nG} variants){between}; the two ldSketch GenotypeHandles ",
+            "must match exactly."
         )
+        abort(msg)
     }
 }
 
@@ -933,31 +927,27 @@ loadLdFromGenotype <- function(
     qSnp <- getSnpInfo(qtlLd)
     gSnp <- getSnpInfo(gwasLd)
     if (!identical(canonChrom(qSnp$CHR), canonChrom(gSnp$CHR))) {
-        stop(
-            pipelineName,
-            ": ldSketch panels differ in column CHR",
-            between,
-            "; use the same ldSketch on both."
+        msg <- glue(
+            "{pipelineName}: ldSketch panels differ in column CHR",
+            "{between}; use the same ldSketch on both."
         )
+        abort(msg)
     }
     for (col in c("BP", "A1", "A2")) {
         if (!identical(as.character(qSnp[[col]]), as.character(gSnp[[col]]))) {
-            stop(
-                pipelineName,
-                ": ldSketch panels differ in column ",
-                col,
-                between,
-                "; use the same ldSketch on both."
+            msg <- glue(
+                "{pipelineName}: ldSketch panels differ in column ",
+                "{col}{between}; use the same ldSketch on both."
             )
+            abort(msg)
         }
     }
     if (!identical(getSampleIds(qtlLd), getSampleIds(gwasLd))) {
-        stop(
-            pipelineName,
-            ": ldSketch panels have different sample sets",
-            between,
-            "; use the same ldSketch on both."
+        msg <- glue(
+            "{pipelineName}: ldSketch panels have different sample sets",
+            "{between}; use the same ldSketch on both."
         )
+        abort(msg)
     }
 }
 
@@ -968,12 +958,12 @@ loadLdFromGenotype <- function(
     label = NULL,
     nullPolicy = c("qtl-required", "lenient")
 ) {
-    nullPolicy <- match.arg(nullPolicy)
+    nullPolicy <- arg_match(nullPolicy)
     if (.ldSketchNullGuard(qtlLd, gwasLd, pipelineName, label, nullPolicy)) {
         return(invisible(NULL))
     }
     between <- if (!is.null(label)) {
-        sprintf(" between `%s` and gwas inputs", label)
+        glue(" between `{label}` and gwas inputs", .trim = FALSE)
     } else {
         ""
     }
@@ -1029,7 +1019,7 @@ loadLdSketch <- function(ldMetaFilePath, region, nSample = NULL) {
         nSample = nSample
     )
     if (!is(result, "LdData")) {
-        stop("loadLdMatrix must return an LdData object")
+        abort("loadLdMatrix must return an LdData object")
     }
     X <- getGenotypes(result)
     refPanel <- getRefPanel(result)
@@ -1094,16 +1084,17 @@ loadLdSketch <- function(ldMetaFilePath, region, nSample = NULL) {
 
 # Drop blocks with no variants in the region (error if none remain).
 .loadLdFilterEmpty <- function(blocks, ldFilePaths) {
-    nonEmpty <- map_lgl(blocks$variants, function(v) nrow(v) > 0)
+    nonEmpty <- map_lgl(blocks$variants, .ldBlockHasVariants)
     if (!any(nonEmpty)) {
-        stop("No variants found in any LD block for the specified region.")
+        abort("No variants found in any LD block for the specified region.")
     }
     if (any(!nonEmpty)) {
-        message(
-            "Removing ",
-            sum(!nonEmpty),
-            " empty LD block(s) with no variants in the region."
+        nEmpty <- sum(!nonEmpty)
+        msg <- glue(
+            "Removing {nEmpty} empty LD block(s) with no variants in ",
+            "the region."
         )
+        inform(msg)
     }
     list(
         matrices = blocks$matrices[nonEmpty],
@@ -1120,19 +1111,24 @@ loadLdSketch <- function(ldMetaFilePath, region, nSample = NULL) {
     blockChroms,
     ldVariants
 ) {
-    blockVariants <- lapply(variants, function(v) v$variants)
-    blockPositions <- lapply(variants, function(v) v$pos)
-    data.frame(
+    blockVariants <- map(variants, "variants")
+    blockPositions <- map(variants, "pos")
+    tibble(
         blockId = seq_along(ldFilePaths),
         chrom = blockChroms,
         blockStart = map_dbl(blockPositions, min),
         blockEnd = map_dbl(blockPositions, max),
         size = map_int(blockVariants, length),
-        startIdx = map_int(blockVariants, function(v) {
-            min(match(v, ldVariants))
-        }),
-        endIdx = map_int(blockVariants, function(v) max(match(v, ldVariants))),
-        stringsAsFactors = FALSE
+        startIdx = map_int(
+            blockVariants,
+            .ldBlockStartIdx,
+            ldVariants = ldVariants
+        ),
+        endIdx = map_int(
+            blockVariants,
+            .ldBlockEndIdx,
+            ldVariants = ldVariants
+        )
     )
 }
 
@@ -1140,19 +1136,23 @@ loadLdSketch <- function(ldMetaFilePath, region, nSample = NULL) {
 # deriving variance from nSample + allele_freq when it is otherwise absent.
 .loadLdRefPanel <- function(ldMatrix, extractedLdVariantsList, nSample) {
     refPanel <- parseVariantId(rownames(ldMatrix))
-    mergedVariantList <- do.call(rbind, extractedLdVariantsList)
+    mergedVariantList <- bind_rows(extractedLdVariantsList)
     ids <- rownames(ldMatrix)
     refPanel$variant_id <- ids
     for (col in c("allele_freq", "variance", "n_nomiss")) {
-        if (col %in% colnames(mergedVariantList)) {
+        if (is_in(col, colnames(mergedVariantList))) {
             refPanel[[col]] <- mergedVariantList[[col]][
                 match(ids, mergedVariantList$variants)
             ]
         }
     }
-    needVar <- !"variance" %in% colnames(refPanel) ||
+    needVar <- !is_in("variance", colnames(refPanel)) ||
         all(is.na(refPanel$variance))
-    if (!is.null(nSample) && needVar && "allele_freq" %in% colnames(refPanel)) {
+    if (
+        !is.null(nSample) &&
+            needVar &&
+            is_in("allele_freq", colnames(refPanel))
+    ) {
         p <- refPanel$allele_freq
         refPanel$variance <- 2 * p * (1 - p) * nSample / (nSample - 1)
         refPanel$n_nomiss <- nSample
@@ -1229,17 +1229,17 @@ filterVariantsByLdReference <- function(
     variantsDf <- parseVariantId(variantIds)
 
     # Derive region to scope the reference lookup
-    regionDf <- variantsDf %>%
-        group_by(chrom) %>%
-        summarise(start = min(pos), end = max(pos))
+    regionDf <- variantsDf |>
+        group_by(.data$chrom) |>
+        summarise(start = min(.data$pos), end = max(.data$pos))
 
     # Use shared helper -- no genotype loading
     refInfo <- getRefVariantInfo(ldReferenceMetaFile, regionDf)
     refChrom <- canonChrom(refInfo$chrom)
-    refKey <- paste0(refChrom, ":", refInfo$pos)
+    refKey <- str_c(refChrom, ":", refInfo$pos)
 
-    variantKey <- paste0(variantsDf$chrom, ":", variantsDf$pos)
-    keepIndices <- which(variantKey %in% refKey)
+    variantKey <- str_c(variantsDf$chrom, ":", variantsDf$pos)
+    keepIndices <- which(is_in(variantKey, refKey))
 
     if (!keepIndel) {
         snpIdx <- which(isSnpAlleles(variantsDf$A1, variantsDf$A2))
@@ -1248,12 +1248,12 @@ filterVariantsByLdReference <- function(
 
     nDropped <- length(variantIds) - length(keepIndices)
     if (nDropped > 0) {
-        message(
-            nDropped,
-            " out of ",
-            length(variantIds),
-            " total variants dropped due to absence on the reference LD panel."
+        nTotal <- length(variantIds)
+        msg <- glue(
+            "{nDropped} out of {nTotal} total variants dropped due to ",
+            "absence on the reference LD panel."
         )
+        inform(msg)
     }
 
     list(data = variantIds[keepIndices], idx = keepIndices)
@@ -1293,7 +1293,7 @@ filterVariantsByLdReference <- function(
             nrow(combinedMatrix) == 0 ||
             ncol(combinedMatrix) == 0
     ) {
-        stop("Empty or NULL LD matrix provided.")
+        abort("Empty or NULL LD matrix provided.")
     }
     if (
         is.null(rownames(combinedMatrix)) ||
@@ -1309,32 +1309,27 @@ filterVariantsByLdReference <- function(
 
 # Drop blocks with invalid/out-of-range indices; renumber the survivors.
 .partitionFilterBlocks <- function(blockMetadata, nVariants) {
-    validBlocks <- map_lgl(seq_len(nrow(blockMetadata)), function(i) {
-        s <- blockMetadata$startIdx[i]
-        e <- blockMetadata$endIdx[i]
-        sz <- blockMetadata$size[i]
-        !is.na(s) &&
-            !is.na(e) &&
-            is.finite(s) &&
-            is.finite(e) &&
-            sz > 0 &&
-            s >= 1 &&
-            e >= s &&
-            e <= nVariants
-    })
+    validBlocks <- map_lgl(
+        seq_len(nrow(blockMetadata)),
+        .ldBlockValid,
+        blockMetadata = blockMetadata,
+        nVariants = nVariants
+    )
     if (!any(validBlocks)) {
-        stop(
+        msg <- glue(
             "No valid LD blocks found. All block indices are out of ",
             "range or empty."
         )
+        abort(msg)
     }
     if (any(!validBlocks)) {
-        message(
-            "Removing ",
-            sum(!validBlocks),
-            " LD block(s) with invalid or out-of-range indices."
+        nInvalid <- sum(!validBlocks)
+        msg <- glue(
+            "Removing {nInvalid} LD block(s) with invalid or ",
+            "out-of-range indices."
         )
-        blockMetadata <- blockMetadata[validBlocks, , drop = FALSE]
+        inform(msg)
+        blockMetadata <- filter(blockMetadata, validBlocks)
         blockMetadata$blockId <- seq_len(nrow(blockMetadata))
     }
     blockMetadata
@@ -1347,12 +1342,12 @@ partitionLdMatrix <- function(
     maxMergedBlockSize = 10000
 ) {
     if (!is(ldData, "LdData")) {
-        stop("ldData must be an LdData object")
+        abort("ldData must be an LdData object")
     }
     combinedMatrix <- getCorrelation(ldData)
     blockMetadata <- getBlockMetadata(ldData)
     if (is(blockMetadata, "LdBlocks")) {
-        blockMetadata <- as.data.frame(getBlocks(blockMetadata))
+        blockMetadata <- as_tibble(getBlocks(blockMetadata))
     }
     variantIds <- getVariantIds(ldData)
     combinedMatrix <- .partitionValidateMatrix(combinedMatrix, variantIds)
@@ -1380,52 +1375,69 @@ partitionLdMatrix <- function(
 validateBlockStructure <- function(matrix, blockMetadata, variantIds) {
     msgs <- character(0)
     n <- length(variantIds)
-
-    for (i in 1:(nrow(blockMetadata) - 1)) {
+    for (i in seq_len(nrow(blockMetadata) - 1)) {
         for (j in (i + 1):nrow(blockMetadata)) {
-            si <- blockMetadata$startIdx[i]
-            ei <- blockMetadata$endIdx[i]
-            sj <- blockMetadata$startIdx[j]
-            ej <- blockMetadata$endIdx[j]
-            if (si > n || ei > n || sj > n || ej > n) {
-                msgs <- c(
-                    msgs,
-                    paste("Block indices out of range for blocks", i, "and", j)
-                )
-                next
-            }
-            # Exclude boundary variants (potential overlaps)
-            vi <- variantIds[si:(ei - 1)]
-            vj <- variantIds[(sj + 1):ej]
-            if (length(vi) > 0 && length(vj) > 0) {
-                maxVal <- max(abs(matrix[vi, vj, drop = FALSE]))
-                if (maxVal > 1e-10) {
-                    msgs <- c(
-                        msgs,
-                        paste(
-                            "Non-zero correlation between blocks",
-                            i,
-                            "and",
-                            j,
-                            "- max:",
-                            maxVal
-                        )
-                    )
-                }
-            }
+            msgs <- c(
+                msgs,
+                .blockPairMessages(i, j, blockMetadata, matrix, variantIds, n)
+            )
         }
     }
     if (length(msgs) > 0) {
-        stop(
-            "Matrix lacks expected block structure:\n",
-            paste(msgs, collapse = "\n")
+        msgList <- str_flatten(msgs, collapse = "\n")
+        msg <- glue(
+            "Matrix lacks expected block structure:\n{msgList}",
+            .trim = FALSE
         )
+        abort(msg)
     }
 }
 
+# Overlap-consistency messages for one block pair (i, j): out-of-range indices,
+# or non-zero cross-block correlation with boundary variants excluded. Returns a
+# (possibly empty) character vector.
+# @noRd
+.blockPairMessages <- function(i, j, blockMetadata, matrix, variantIds, n) {
+    si <- blockMetadata$startIdx[i]
+    ei <- blockMetadata$endIdx[i]
+    sj <- blockMetadata$startIdx[j]
+    ej <- blockMetadata$endIdx[j]
+    if (si > n || ei > n || sj > n || ej > n) {
+        return(str_c(
+            "Block indices out of range for blocks",
+            i,
+            "and",
+            j,
+            sep = " "
+        ))
+    }
+    # Exclude boundary variants (potential overlaps)
+    vi <- variantIds[si:(ei - 1)]
+    vj <- variantIds[(sj + 1):ej]
+    if (length(vi) == 0 || length(vj) == 0) {
+        return(character(0))
+    }
+    maxVal <- max(abs(matrix[vi, vj, drop = FALSE]))
+    if (maxVal <= 1e-10) {
+        return(character(0))
+    }
+    str_c(
+        "Non-zero correlation between blocks",
+        i,
+        "and",
+        j,
+        "- max:",
+        maxVal,
+        sep = " "
+    )
+}
+
+#' Can blocks `i` and `j` of `blockMetadata` merge (same chrom, combined size
+#' within `maxSize`)? Indexes the columns directly rather than slicing rows.
 #' @noRd
-canMerge <- function(block1, block2, maxSize) {
-    block1$chrom == block2$chrom && (block1$size + block2$size) <= maxSize
+canMerge <- function(blockMetadata, i, j, maxSize) {
+    blockMetadata$chrom[i] == blockMetadata$chrom[j] &&
+        (blockMetadata$size[i] + blockMetadata$size[j]) <= maxSize
 }
 
 #' @noRd
@@ -1438,7 +1450,7 @@ mergeTwoBlocks <- function(blockMetadata, idx1, idx2) {
     result <- blockMetadata
     result$endIdx[idx1] <- blockMetadata$endIdx[idx2]
     result$size[idx1] <- blockMetadata$size[idx1] + blockMetadata$size[idx2]
-    result <- result[-idx2, ]
+    result <- slice(result, -idx2)
     result$blockId <- seq_len(nrow(result))
     result
 }
@@ -1446,19 +1458,17 @@ mergeTwoBlocks <- function(blockMetadata, idx1, idx2) {
 #' Find blocks below minSize and identify the best neighbor to merge with.
 #' @noRd
 findMergeCandidates <- function(blockMetadata, minSize, maxSize) {
-    candidates <- data.frame(
+    candidates <- tibble(
         block_idx = integer(),
-        merge_with = integer(),
-        stringsAsFactors = FALSE
+        merge_with = integer()
     )
     for (i in seq_len(nrow(blockMetadata))) {
         if (blockMetadata$size[i] >= minSize) {
             next
         }
-        prevOk <- i > 1 &&
-            canMerge(blockMetadata[i, ], blockMetadata[i - 1, ], maxSize)
+        prevOk <- i > 1 && canMerge(blockMetadata, i, i - 1, maxSize)
         nextOk <- i < nrow(blockMetadata) &&
-            canMerge(blockMetadata[i, ], blockMetadata[i + 1, ], maxSize)
+            canMerge(blockMetadata, i, i + 1, maxSize)
         mergeWith <- if (prevOk && nextOk) {
             if (blockMetadata$size[i - 1] <= blockMetadata$size[i + 1]) {
                 i - 1
@@ -1472,9 +1482,9 @@ findMergeCandidates <- function(blockMetadata, minSize, maxSize) {
         } else {
             next
         }
-        candidates <- rbind(
+        candidates <- bind_rows(
             candidates,
-            data.frame(block_idx = i, merge_with = mergeWith)
+            tibble(block_idx = i, merge_with = mergeWith)
         )
     }
     candidates
@@ -1507,30 +1517,28 @@ mergeBlocks <- function(blockMetadata, minSize, maxSize) {
         return(NULL)
     }
     if (startIdx > length(variantIds) || endIdx > length(variantIds)) {
-        warning(
-            "Block ",
-            i,
-            " has indices outside the range of variantIds. Skipping."
+        msg <- glue(
+            "Block {i} has indices outside the range of variantIds. ",
+            "Skipping."
         )
+        warn(msg)
         return(NULL)
     }
     blockVariants <- variantIds[startIdx:endIdx]
     list(
         matrix = matrix[blockVariants, blockVariants, drop = FALSE],
-        mapping = data.frame(
+        mapping = tibble(
             variant_id = blockVariants,
-            blockId = i,
-            stringsAsFactors = FALSE
+            blockId = i
         )
     )
 }
 
 extractBlockMatrices <- function(matrix, blockMetadata, variantIds) {
     ldMatrices <- list()
-    variantMapping <- data.frame(
+    variantMapping <- tibble(
         variant_id = character(),
-        blockId = integer(),
-        stringsAsFactors = FALSE
+        blockId = integer()
     )
     for (i in seq_len(nrow(blockMetadata))) {
         block <- .extractOneBlock(
@@ -1544,7 +1552,7 @@ extractBlockMatrices <- function(matrix, blockMetadata, variantIds) {
             next
         }
         ldMatrices[[i]] <- block$matrix
-        variantMapping <- rbind(variantMapping, block$mapping)
+        variantMapping <- bind_rows(variantMapping, block$mapping)
     }
     list(
         ldMatrices = ldMatrices,
@@ -1614,7 +1622,7 @@ checkLd <- function(
     rTol = 1e-8,
     shrinkage = 0.01
 ) {
-    method <- match.arg(method)
+    method <- arg_match(method)
     p <- nrow(R)
 
     # Eigen decomposition (symmetric)
@@ -1684,20 +1692,18 @@ checkLd <- function(
         X.new <- as.matrix(X[, -ind.delete])
         filter.id <- filter.id[-ind.delete]
         if (verbose) {
-            message(
-                "ldPruneByCorrelation: pruned ",
-                length(ind.delete),
-                " of ",
-                p,
-                " columns at |cor| > ",
-                corThres
+            nDel <- length(ind.delete)
+            msg <- glue(
+                "ldPruneByCorrelation: pruned {nDel} of {p} columns at ",
+                "|cor| > {corThres}"
             )
+            inform(msg)
         }
     } else if (verbose) {
-        message(
-            "ldPruneByCorrelation: no columns pruned at |cor| > ",
-            corThres
+        msg <- glue(
+            "ldPruneByCorrelation: no columns pruned at |cor| > {corThres}"
         )
+        inform(msg)
     }
     if (ncol(X.new) == 1) {
         colnames(X.new) <- colnames(X)[-ind.delete]
@@ -1752,7 +1758,7 @@ ldPruneByCorrelation <- function(
     backend = c("hclust", "snprelate"),
     verbose = FALSE
 ) {
-    backend <- match.arg(backend)
+    backend <- arg_match(backend)
     if (backend == "snprelate") {
         return(.ldPruneSnprelate(X, corThres = corThres, verbose = verbose))
     }
@@ -1769,10 +1775,11 @@ ldPruneByCorrelation <- function(
             !requireNamespace("gdsfmt", quietly = TRUE)
     ) {
         # nocov start
-        stop(
+        msg <- glue(
             "Packages 'SNPRelate' and 'gdsfmt' are required for ",
             "backend='snprelate'."
         )
+        abort(msg)
         # nocov end
     }
 }
@@ -1796,7 +1803,7 @@ ldPruneByCorrelation <- function(
 .ldPruneSnprelate <- function(X, corThres, verbose) {
     .ldPruneSnprelateDeps()
     p <- ncol(X)
-    snpNames <- colnames(X) %||% paste0("snp", seq_len(p))
+    snpNames <- colnames(X) %||% str_c("snp", seq_len(p))
     tmpGds <- tempfile(fileext = ".gds")
     on.exit(unlink(tmpGds), add = TRUE)
     .ldPruneSnprelateCreateGds(tmpGds, X, snpNames, p)
@@ -1811,14 +1818,12 @@ ldPruneByCorrelation <- function(
     keepIds <- sort(unlist(keepList, use.names = FALSE))
     X.new <- X[, keepIds, drop = FALSE]
     if (verbose) {
-        message(
-            "ldPruneByCorrelation (snprelate): kept ",
-            length(keepIds),
-            " of ",
-            p,
-            " columns at |cor| > ",
-            corThres
+        nKept <- length(keepIds)
+        msg <- glue(
+            "ldPruneByCorrelation (snprelate): kept {nKept} of {p} ",
+            "columns at |cor| > {corThres}"
         )
+        inform(msg)
     }
     list(X.new = X.new, filter.id = keepIds)
 }
@@ -1866,19 +1871,21 @@ ldPruneByCorrelation <- function(
     if (length(problematicCols) == 2) {
         colToRemove <- sample(problematicCols, 1)
         if (verbose) {
-            message(
+            msg <- glue(
                 "dropCollinearColumns: two candidates, randomly removing ",
-                colToRemove
+                "{colToRemove}"
             )
+            inform(msg)
         }
         return(colToRemove)
     }
     colToRemove <- problematicCols[which.max(colSums(corMatrix))]
     if (verbose) {
-        message(
+        msg <- glue(
             "dropCollinearColumns: highest sum |cor| -> removing ",
-            colToRemove
+            "{colToRemove}"
         )
+        inform(msg)
     }
     colToRemove
 }
@@ -1895,10 +1902,11 @@ ldPruneByCorrelation <- function(
         variances <- apply(X[, problematicCols, drop = FALSE], 2, var)
         colToRemove <- problematicCols[which.min(variances)]
         if (verbose) {
-            message(
+            msg <- glue(
                 "dropCollinearColumns: smallest variance -> removing ",
-                colToRemove
+                "{colToRemove}"
             )
+            inform(msg)
         }
         return(colToRemove)
     }
@@ -1906,22 +1914,25 @@ ldPruneByCorrelation <- function(
         return(.dropCollinearPickCor(X, problematicCols, verbose))
     }
     if (is.null(response)) {
-        stop(
+        msg <- glue(
             "response must be supplied for strategy = ",
             "'response_correlation'"
         )
+        abort(msg)
     }
     corWithResponse <- apply(
         X[, problematicCols, drop = FALSE],
         2,
-        function(col) cor(col, response)
+        cor,
+        y = response
     )
     colToRemove <- problematicCols[which.min(abs(corWithResponse))]
     if (verbose) {
-        message(
-            "dropCollinearColumns: smallest |cor| with response -> removing ",
-            colToRemove
+        msg <- glue(
+            "dropCollinearColumns: smallest |cor| with response -> ",
+            "removing {colToRemove}"
         )
+        inform(msg)
     }
     colToRemove
 }
@@ -1933,19 +1944,19 @@ dropCollinearColumns <- function(
     response = NULL,
     verbose = FALSE
 ) {
-    strategy <- match.arg(strategy)
+    strategy <- arg_match(strategy)
     if (length(problematicCols) == 0) {
         return(X)
     }
     if (length(problematicCols) == 1) {
         colToRemove <- problematicCols[1]
         if (verbose) {
-            message(
-                "dropCollinearColumns: removing single column ",
-                colToRemove
+            msg <- glue(
+                "dropCollinearColumns: removing single column {colToRemove}"
             )
+            inform(msg)
         }
-        return(X[, !(colnames(X) %in% colToRemove), drop = FALSE])
+        return(X[, !is_in(colnames(X), colToRemove), drop = FALSE])
     }
     colToRemove <- .dropCollinearPick(
         X,
@@ -1954,7 +1965,7 @@ dropCollinearColumns <- function(
         response,
         verbose
     )
-    X[, !(colnames(X) %in% colToRemove), drop = FALSE]
+    X[, !is_in(colnames(X), colToRemove), drop = FALSE]
 }
 
 # Design matrix [1 | X | C] with the intercept + X columns named.
@@ -1975,7 +1986,7 @@ dropCollinearColumns <- function(
     }
     cols <- qrd$pivot[(qrd$rank + 1L):ncol(Xdesign)]
     nms <- colnames(Xdesign)[cols]
-    nms[nms %in% colnames(X)]
+    nms[is_in(nms, colnames(X))]
 }
 
 # Fast pre-check: would batch-removing the flagged columns restore full rank?
@@ -1988,23 +1999,25 @@ dropCollinearColumns <- function(
     if (length(problematicColnames) == 0) {
         return(FALSE)
     }
-    Xtemp <- X[, !(colnames(X) %in% problematicColnames), drop = FALSE]
+    Xtemp <- X[, !is_in(colnames(X), problematicColnames), drop = FALSE]
     tempDesign <- .ldBuildDesign(Xtemp, C)
     if (qr(tempDesign)$rank == ncol(tempDesign)) {
         if (verbose) {
-            message(
+            nCol <- length(problematicColnames)
+            msg <- glue(
                 "enforceDesignFullRank: full rank after batch-removing ",
-                length(problematicColnames),
-                " column(s)"
+                "{nCol} column(s)"
             )
+            inform(msg)
         }
         return(FALSE)
     }
     if (verbose) {
-        message(
+        msg <- glue(
             "enforceDesignFullRank: batch removal insufficient, ",
             "skipping to correlation-pruning fallback"
         )
+        inform(msg)
     }
     TRUE
 }
@@ -2030,21 +2043,20 @@ dropCollinearColumns <- function(
         matrixRank <- qr(Xdesign)$rank
         iteration <- iteration + 1L
         if (verbose) {
-            message(
-                "enforceDesignFullRank: iter ",
-                iteration,
-                " rank ",
-                matrixRank,
-                " / ",
-                ncol(Xdesign)
+            nCol <- ncol(Xdesign)
+            msg <- glue(
+                "enforceDesignFullRank: iter {iteration} rank ",
+                "{matrixRank} / {nCol}"
             )
+            inform(msg)
         }
     }
     if (iteration == maxIterations) {
-        warning(
+        msg <- glue(
             "enforceDesignFullRank: maxIterations reached; design may ",
             "still be rank-deficient"
         )
+        warn(msg)
     }
     X
 }
@@ -2057,7 +2069,7 @@ dropCollinearColumns <- function(
         return(X)
     }
     if (verbose) {
-        message("enforceDesignFullRank: applying ldPruneByCorrelation fallback")
+        inform("enforceDesignFullRank: applying ldPruneByCorrelation fallback")
     }
     for (threshold in corrThresholds) {
         filterResult <- ldPruneByCorrelation(
@@ -2069,14 +2081,12 @@ dropCollinearColumns <- function(
         Xdesign <- .ldBuildDesign(X, C)
         matrixRank <- qr(Xdesign)$rank
         if (verbose) {
-            message(
-                "enforceDesignFullRank: threshold ",
-                threshold,
-                " -> rank ",
-                matrixRank,
-                " / ",
-                ncol(Xdesign)
+            nCol <- ncol(Xdesign)
+            msg <- glue(
+                "enforceDesignFullRank: threshold {threshold} -> rank ",
+                "{matrixRank} / {nCol}"
             )
+            inform(msg)
         }
         if (matrixRank == ncol(Xdesign)) break
     }
@@ -2130,18 +2140,17 @@ enforceDesignFullRank <- function(
     corrThresholds = seq(0.75, 0.5, by = -0.05),
     verbose = FALSE
 ) {
-    strategy <- match.arg(strategy)
+    strategy <- arg_match(strategy)
     originalColnames <- colnames(X)
     initialNcol <- ncol(X)
     Xdesign <- .ldBuildDesign(X, C)
     matrixRank <- qr(Xdesign)$rank
     if (verbose) {
-        message(
-            "enforceDesignFullRank: initial rank ",
-            matrixRank,
-            " / ",
-            ncol(Xdesign)
+        nCol <- ncol(Xdesign)
+        msg <- glue(
+            "enforceDesignFullRank: initial rank {matrixRank} / {nCol}"
         )
+        inform(msg)
     }
     skipIterative <- .edfrCheckBatch(X, C, Xdesign, matrixRank, verbose)
     if (!skipIterative) {
@@ -2158,18 +2167,20 @@ enforceDesignFullRank <- function(
 .ldClumpCheckDeps <- function() {
     if (!requireNamespace("bigsnpr", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "Package 'bigsnpr' is required. Install from CRAN: ",
             "install.packages('bigsnpr')"
         )
+        abort(msg)
         # nocov end
     }
     if (!requireNamespace("bigstatsr", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "Package 'bigstatsr' is required. Install from CRAN: ",
             "install.packages('bigstatsr')"
         )
+        abort(msg)
         # nocov end
     }
 }
@@ -2177,13 +2188,13 @@ enforceDesignFullRank <- function(
 # Validate the clumping inputs (dimensions of score/chr/pos vs X).
 .ldClumpValidate <- function(X, score, chr, pos) {
     if (ncol(X) < 1L) {
-        stop("ldClumpByScore: X must have at least one column")
+        abort("ldClumpByScore: X must have at least one column")
     }
     if (!is.null(score) && length(score) != ncol(X)) {
-        stop("ldClumpByScore: length(score) must equal ncol(X)")
+        abort("ldClumpByScore: length(score) must equal ncol(X)")
     }
     if (length(chr) != ncol(X) || length(pos) != ncol(X)) {
-        stop("ldClumpByScore: chr and pos must have length equal to ncol(X)")
+        abort("ldClumpByScore: chr and pos must have length equal to ncol(X)")
     }
 }
 
@@ -2252,7 +2263,7 @@ ldClumpByScore <- function(
     .ldClumpValidate(X, score, chr, pos)
     if (ncol(X) == 1L) {
         if (verbose) {
-            message("ldClumpByScore: single variant, skipping clumping")
+            inform("ldClumpByScore: single variant, skipping clumping")
         }
         return(1L)
     }
@@ -2266,14 +2277,13 @@ ldClumpByScore <- function(
         size = windowKb
     )
     if (verbose) {
-        message(
-            "ldClumpByScore: ",
-            length(keep),
-            " / ",
-            ncol(X),
-            " variants retained at r2 <= ",
-            r2
+        nKeep <- length(keep)
+        nCol <- ncol(X)
+        msg <- glue(
+            "ldClumpByScore: {nKeep} / {nCol} variants retained at ",
+            "r2 <= {r2}"
         )
+        inform(msg)
     }
     keep
 }
@@ -2296,7 +2306,7 @@ ldClumpByScore <- function(
 #' @noRd
 extractLdMatrix <- function(ld, wantGenotype = FALSE) {
     if (!is(ld, "LdData")) {
-        stop("ld must be an LdData object")
+        abort("ld must be an LdData object")
     }
     if (wantGenotype && hasGenotypes(ld)) {
         return(getGenotypes(ld))
@@ -2313,16 +2323,16 @@ extractLdMatrix <- function(ld, wantGenotype = FALSE) {
         !is.null(ldInfo)
     )
     if (nSources != 1) {
-        stop("Provide exactly one of rList, xList, ldMetaPath, or ldInfo.")
+        abort("Provide exactly one of rList, xList, ldMetaPath, or ldInfo.")
     }
     if (!is.null(ldMetaPath) && is.null(regions)) {
-        stop("'regions' is required when using ldMetaPath.")
+        abort("'regions' is required when using ldMetaPath.")
     }
     if (
         !is.null(ldInfo) &&
-            (!is.data.frame(ldInfo) || !"LD_file" %in% colnames(ldInfo))
+            (!is.data.frame(ldInfo) || !is_in("LD_file", colnames(ldInfo)))
     ) {
-        stop("ldInfo must be a data.frame with column 'LD_file'.")
+        abort("ldInfo must be a data.frame with column 'LD_file'.")
     }
 }
 
@@ -2476,7 +2486,7 @@ ldLoader <- function(
         mat <- computeLd(geno)
     } else {
         # Pre-computed .cor.xz block
-        snpFile <- if ("SNP_file" %in% colnames(ldInfo)) {
+        snpFile <- if (is_in("SNP_file", colnames(ldInfo))) {
             ldInfo$SNP_file[g]
         } else {
             NULL # let processLdMatrix auto-detect .bim/.pvar/.pvar.zst
@@ -2526,7 +2536,7 @@ ldLoader <- function(
 #' @export
 loadLdBlock <- function(spec, g) {
     if (!inherits(spec, "ldLoaderSpec")) {
-        stop("`spec` must be an ldLoaderSpec (from ldLoader()).")
+        abort("`spec` must be an ldLoaderSpec (from ldLoader()).")
     }
     .ldLoadBlock(spec, g)
 }
@@ -2547,11 +2557,10 @@ loadLdBlock <- function(spec, g) {
 # Non-sample methods only support the internal backend.
 .computeLdRequireInternal <- function(backend) {
     if (backend != "internal") {
-        stop(
-            "backend '",
-            backend,
-            "' is only supported with method='sample'."
+        msg <- glue(
+            "backend '{backend}' is only supported with method='sample'."
         )
+        abort(msg)
     }
 }
 
@@ -2593,15 +2602,15 @@ loadLdBlock <- function(spec, g) {
     if (anyNA(X)) {
         naRates <- colMeans(is.na(X))
         if (max(naRates) - min(naRates) > 0.1) {
-            warning(
+            maxNa <- round(max(naRates), 3)
+            minNa <- round(min(naRates), 3)
+            msg <- glue(
                 "Population LD method with heterogeneous missingness ",
-                "(max NA rate ",
-                round(max(naRates), 3),
-                ", min ",
-                round(min(naRates), 3),
-                "): correlations may be biased. Consider using ",
-                "method='sample' which handles missingness via mean imputation."
+                "(max NA rate {maxNa}, min {minNa}): correlations may be ",
+                "biased. Consider using method='sample' which handles ",
+                "missingness via mean imputation."
             )
+            warn(msg)
         }
     }
     X_c <- sweep(X, 2, colMeansX)
@@ -2658,10 +2667,10 @@ computeLd <- function(
     shrinkage = 0
 ) {
     if (is.null(X)) {
-        stop("X must be provided.")
+        abort("X must be provided.")
     }
-    method <- match.arg(method)
-    backend <- match.arg(backend)
+    method <- arg_match(method)
+    backend <- arg_match(backend)
     nms <- colnames(X)
     if (method == "sample") {
         R <- .computeLdSample(X, backend)
@@ -2690,10 +2699,10 @@ computeLd <- function(
 .computeLdSnprelate <- function(X) {
     # nocov start
     if (!requireNamespace("SNPRelate", quietly = TRUE)) {
-        stop("Package 'SNPRelate' is required for backend='snprelate'")
+        abort("Package 'SNPRelate' is required for backend='snprelate'")
     }
     if (!requireNamespace("gdsfmt", quietly = TRUE)) {
-        stop("Package 'gdsfmt' is required for backend='snprelate'")
+        abort("Package 'gdsfmt' is required for backend='snprelate'")
     }
     # nocov end
 
@@ -2737,7 +2746,7 @@ computeLd <- function(
 .computeLdSnpstats <- function(X) {
     # nocov start
     if (!requireNamespace("snpStats", quietly = TRUE)) {
-        stop("Package 'snpStats' is required for backend='snpstats'")
+        abort("Package 'snpStats' is required for backend='snpstats'")
     }
     # nocov end
 
@@ -2754,4 +2763,47 @@ computeLd <- function(
     R[is.na(R)] <- 0
     diag(R) <- 1
     R
+}
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# The integer BP position parsed from a "chrom:pos:a1:a2" variant id.
+# @noRd
+.ldVariantPos <- function(v) {
+    as.integer(str_split(v, ":")[[1L]][2])
+}
+
+# TRUE when a per-block variant table has at least one row.
+# @noRd
+.ldBlockHasVariants <- function(v) {
+    nrow(v) > 0
+}
+
+# The first index of a block's variants in the merged variant order.
+# @noRd
+.ldBlockStartIdx <- function(v, ldVariants) {
+    min(match(v, ldVariants))
+}
+
+# The last index of a block's variants in the merged variant order.
+# @noRd
+.ldBlockEndIdx <- function(v, ldVariants) {
+    max(match(v, ldVariants))
+}
+
+# TRUE when block `i`'s index range is present, finite, and within
+# [1, nVariants].
+# @noRd
+.ldBlockValid <- function(i, blockMetadata, nVariants) {
+    s <- blockMetadata$startIdx[i]
+    e <- blockMetadata$endIdx[i]
+    sz <- blockMetadata$size[i]
+    !is.na(s) &&
+        !is.na(e) &&
+        is.finite(s) &&
+        is.finite(e) &&
+        sz > 0 &&
+        s >= 1 &&
+        e >= s &&
+        e <= nVariants
 }

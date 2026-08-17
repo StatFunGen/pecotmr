@@ -58,8 +58,8 @@ test_that(".resolveZMismatchQc resolves none/slalom/dentist and defaults to none
 })
 
 test_that(".resolveZMismatchQc rejects stale rss_qc and other invalid tokens", {
-    expect_error(pecotmr:::.resolveZMismatchQc("rss_qc"), "should be one of")
-    expect_error(pecotmr:::.resolveZMismatchQc("bad"), "should be one of")
+    expect_error(pecotmr:::.resolveZMismatchQc("rss_qc"), "must be one of")
+    expect_error(pecotmr:::.resolveZMismatchQc("bad"), "must be one of")
 })
 
 # ===========================================================================
@@ -5477,12 +5477,13 @@ test_that("sliding_window_loop errors on infinite loop", {
         pecotmr:::slidingWindowLoop(
             allGaps,
             n = 1000,
-            minBlockFn = function(blockSize) TRUE,
-            initEndFn = function(startIdx, blockEnd) startIdx + 10,
-            fillFn = function(startIdx, endIdx, notStart, notLast) {
+            ctx = list(),
+            minBlockFn = function(blockSize, ctx) TRUE,
+            initEndFn = function(startIdx, blockEnd, ctx) startIdx + 10,
+            fillFn = function(startIdx, endIdx, notStart, notLast, ctx) {
                 list(start = startIdx, end = endIdx)
             },
-            stepFn = function(startIdx, blockEnd) {
+            stepFn = function(startIdx, blockEnd, ctx) {
                 list(startIdx = startIdx, endIdx = startIdx + 10)
             },
             verbose = FALSE
@@ -5588,14 +5589,10 @@ test_that("extractTopPipInfo handles ties by taking first max", {
 # ===========================================================================
 
 test_that("extractCsInfo extracts single CS correctly", {
-    con_data <- list(
-        finemappingEntry = .testFineMappingEntry(
-            variantIds = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
-            susieFit = list(
-                sets = list(cs = list(L_1 = c(1, 2))),
-                cs_corr = NULL
-            )
-        )
+    data(qtlSumStatsExample)
+    fe <- .testFineMappingEntry(
+        variantIds = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
+        susieFit = list(sets = list(cs = list(L_1 = c(1, 2))))
     )
     top_loci_table <- data.frame(
         variant_id = c("1:100:A:G", "1:200:C:T"),
@@ -5603,59 +5600,65 @@ test_that("extractCsInfo extracts single CS correctly", {
         z = c(2.0, 4.5),
         stringsAsFactors = FALSE
     )
+    # A single CS short-circuits (no between-CS correlation), so the unrelated
+    # ldSource is not consulted.
     result <- extractCsInfo(
-        con_data$finemappingEntry,
+        fe,
         csNames = "L_1",
-        topLociTable = top_loci_table
+        topLociTable = top_loci_table,
+        ldSource = qtlSumStatsExample
     )
     expect_equal(nrow(result), 1)
     expect_equal(result$cs_name, "L_1")
     expect_equal(result$top_variant, "1:200:C:T")
     expect_equal(result$top_pip, 0.8)
     expect_equal(result$variants_per_cs, 2)
-    expect_true(grepl("NA", result$cs_corr[[1]]))
+    expect_true(is.na(result$cs_corr_max))
+    expect_true(is.na(result$cs_corr_min))
+    expect_false("cs_corr_1" %in% colnames(result))
 })
 
-test_that("extractCsInfo extracts multiple CSs with cs_corr", {
-    con_data <- list(
-        finemappingEntry = .testFineMappingEntry(
-            variantIds = c("1:100:A:G", "1:200:C:T", "1:300:G:A", "1:400:T:C"),
-            susieFit = list(
-                sets = list(
-                    cs = list(L_1 = c(1, 2), L_2 = c(3, 4))
-                ),
-                cs_corr = matrix(c(1, 0.3, 0.3, 1), nrow = 2)
-            )
-        )
+test_that("extractCsInfo builds correlation columns from the ldSource", {
+    data(qtlSumStatsExample)
+    ss <- qtlSumStatsExample
+    vids <- as.character(getSnpInfo(getLdSketch(ss))$SNP)
+    set.seed(1)
+    fit <- list(
+        sets = list(cs = list(L_1 = c(1L, 2L, 3L), L_2 = c(90L, 91L))),
+        pip = runif(length(vids))
     )
-    top_loci_table <- data.frame(
-        variant_id = c("1:100:A:G", "1:200:C:T", "1:300:G:A", "1:400:T:C"),
-        pip = c(0.3, 0.8, 0.6, 0.1),
-        z = c(2.0, 4.5, 3.0, 0.5),
+    tl <- data.frame(
+        variant_id = vids,
+        pip = fit$pip,
+        z = rnorm(length(vids)),
         stringsAsFactors = FALSE
     )
+    fe <- FineMappingEntry(variantIds = vids, susieFit = fit, topLoci = tl)
     result <- extractCsInfo(
-        con_data$finemappingEntry,
+        fe,
         csNames = c("L_1", "L_2"),
-        topLociTable = top_loci_table
+        topLociTable = tl,
+        ldSource = ss
     )
     expect_equal(nrow(result), 2)
-    expect_equal(result$cs_name[1], "L_1")
-    expect_equal(result$cs_name[2], "L_2")
-    expect_equal(result$top_variant[1], "1:200:C:T")
-    expect_equal(result$top_variant[2], "1:300:G:A")
-    expect_true(is.character(result$cs_corr[[1]]))
+    expect_true(all(
+        c("cs_corr_1", "cs_corr_2", "cs_corr_max", "cs_corr_min") %in%
+            colnames(result)
+    ))
+    # The cs_corr_j columns are the columns of the computed between-CS matrix
+    # (symmetric; diagonal == 1), reduced on demand from the ldSource.
+    cc <- computeCsCorrelation(fe, ss)
+    expect_equal(result$cs_corr_1, unname(cc[, 1]))
+    expect_equal(result$cs_corr_2, unname(cc[, 2]))
+    expect_equal(result$cs_corr_max, rep(abs(cc[1, 2]), 2))
+    expect_equal(result$cs_corr_min, rep(abs(cc[1, 2]), 2))
 })
 
 test_that("extractCsInfo computes p_value from z-score", {
-    con_data <- list(
-        finemappingEntry = .testFineMappingEntry(
-            variantIds = c("1:100:A:G", "1:200:C:T"),
-            susieFit = list(
-                sets = list(cs = list(L_1 = c(1, 2))),
-                cs_corr = NULL
-            )
-        )
+    data(qtlSumStatsExample)
+    fe <- .testFineMappingEntry(
+        variantIds = c("1:100:A:G", "1:200:C:T"),
+        susieFit = list(sets = list(cs = list(L_1 = c(1, 2))))
     )
     top_loci_table <- data.frame(
         variant_id = c("1:100:A:G", "1:200:C:T"),
@@ -5664,125 +5667,13 @@ test_that("extractCsInfo computes p_value from z-score", {
         stringsAsFactors = FALSE
     )
     result <- extractCsInfo(
-        con_data$finemappingEntry,
+        fe,
         csNames = "L_1",
-        topLociTable = top_loci_table
+        topLociTable = top_loci_table,
+        ldSource = qtlSumStatsExample
     )
     expected_pval <- pecotmr:::.zToPvalue(5.0)
     expect_equal(result$p_value, expected_pval, tolerance = 1e-10)
-})
-
-# ===========================================================================
-# parseCsCorr
-# ===========================================================================
-
-test_that("parseCsCorr handles NA correlations", {
-    df <- data.frame(
-        cs_name = "L1",
-        top_pip = 0.9,
-        cs_corr = NA_character_,
-        stringsAsFactors = FALSE
-    )
-    result <- parseCsCorr(df)
-    expect_true("cs_corr_max" %in% colnames(result))
-    expect_true("cs_corr_min" %in% colnames(result))
-    expect_true(is.na(result$cs_corr_max))
-    expect_true(is.na(result$cs_corr_min))
-})
-
-test_that("parseCsCorr splits comma-separated correlations", {
-    df <- data.frame(
-        cs_name = c("L1", "L2"),
-        top_pip = c(0.9, 0.3),
-        cs_corr = c("1,0.3", "0.3,1"),
-        stringsAsFactors = FALSE
-    )
-    result <- parseCsCorr(df)
-    expect_true("cs_corr_1" %in% colnames(result))
-    expect_true("cs_corr_2" %in% colnames(result))
-    expect_equal(result$cs_corr_max[1], 0.3)
-    expect_equal(result$cs_corr_min[1], 0.3)
-})
-
-test_that("parseCsCorr handles empty string", {
-    df <- data.frame(
-        cs_name = "L1",
-        cs_corr = "",
-        stringsAsFactors = FALSE
-    )
-    result <- parseCsCorr(df)
-    expect_true(is.na(result$cs_corr_max))
-})
-
-test_that("parseCsCorr handles multiple correlations", {
-    df <- data.frame(
-        cs_name = "L1",
-        cs_corr = "1,0.5,0.2",
-        stringsAsFactors = FALSE
-    )
-    result <- parseCsCorr(df)
-    expect_equal(result$cs_corr_max, 0.5)
-    expect_equal(result$cs_corr_min, 0.2)
-    expect_equal(result$cs_corr_1, 1)
-    expect_equal(result$cs_corr_2, 0.5)
-    expect_equal(result$cs_corr_3, 0.2)
-})
-
-test_that("parseCsCorr handles NULL value", {
-    df <- data.frame(
-        cs_name = "L1",
-        cs_corr = NA,
-        stringsAsFactors = FALSE
-    )
-    result <- parseCsCorr(df)
-    expect_true(is.na(result$cs_corr_max))
-    expect_true(is.na(result$cs_corr_min))
-})
-
-test_that("parseCsCorr handles single value without comma", {
-    df <- data.frame(
-        cs_name = "L1",
-        cs_corr = "0.5",
-        stringsAsFactors = FALSE
-    )
-    result <- parseCsCorr(df)
-    expect_true(is.na(result$cs_corr_max))
-    expect_true(is.na(result$cs_corr_min))
-})
-
-test_that("parseCsCorr handles all-1 correlations (self-corr only)", {
-    df <- data.frame(
-        cs_name = c("L1", "L2"),
-        cs_corr = c("1,1", "1,1"),
-        stringsAsFactors = FALSE
-    )
-    result <- parseCsCorr(df)
-    expect_true(is.na(result$cs_corr_max[1]))
-    expect_true(is.na(result$cs_corr_min[1]))
-})
-
-test_that("parseCsCorr handles mixed valid and NA rows", {
-    df <- data.frame(
-        cs_name = c("L1", "L2"),
-        cs_corr = c("1,0.3,0.7", NA_character_),
-        stringsAsFactors = FALSE
-    )
-    result <- parseCsCorr(df)
-    expect_equal(result$cs_corr_max[1], 0.7)
-    expect_equal(result$cs_corr_min[1], 0.3)
-    expect_true(is.na(result$cs_corr_max[2]))
-})
-
-test_that("parseCsCorr expands columns for different lengths", {
-    df <- data.frame(
-        cs_name = c("L1", "L2", "L3"),
-        cs_corr = c("1,0.3,0.5", "1,0.2", "1,0.8,0.4,0.1"),
-        stringsAsFactors = FALSE
-    )
-    result <- parseCsCorr(df)
-    expect_true("cs_corr_4" %in% colnames(result))
-    expect_true(is.na(result$cs_corr_4[1]))
-    expect_equal(result$cs_corr_4[3], 0.1)
 })
 
 # ===========================================================================

@@ -41,7 +41,7 @@ setClass(
     required <- c("study", "context", "trait", "method", "entry")
     missingCols <- setdiff(required, names(object))
     if (length(missingCols) > 0L) {
-        return(paste("missing columns:", paste(missingCols, collapse = ", ")))
+        return(str_c("missing columns: ", str_flatten(missingCols, ", ")))
     }
     NULL
 }
@@ -96,10 +96,8 @@ setClass(
 .qfmrJointColError <- function(jc, object) {
     vals <- object[[jc]]
     if (!is.character(vals)) {
-        return(sprintf(
-            "'%s' column must be character (got %s)",
-            jc,
-            class(vals)[[1L]]
+        return(glue(
+            "'{jc}' column must be character (got {class(vals)[[1L]]})"
         ))
     }
     NULL
@@ -112,13 +110,12 @@ setClass(
     # Extract key columns directly rather than via `object[, keyCols]`: column-
     # subsetting preserves the class while dropping the required `entry` column,
     # and older S4Vectors revalidates that intermediate, spuriously failing.
-    keyDf <- as.data.frame(
+    keyTbl <- as_tibble(set_names(
         map(keyCols, .qfmrColOf, object = object),
-        col.names = keyCols,
-        stringsAsFactors = FALSE
-    )
-    if (anyDuplicated(keyDf)) {
-        return(paste0(
+        keyCols
+    ))
+    if (nrow(distinct(keyTbl)) < nrow(keyTbl)) {
+        return(str_c(
             "(study, context, trait, method[, joint*]) tuple uniqueness ",
             "violated"
         ))
@@ -213,10 +210,11 @@ QtlFineMappingResult <- function(
             length(method) != n ||
             length(entry) != n
     ) {
-        stop(
+        msg <- glue(
             "`study`, `context`, `trait`, `method`, and `entry` must all ",
             "have the same length."
         )
+        abort(msg)
     }
     cols <- list(
         study = as.character(study),
@@ -234,7 +232,8 @@ QtlFineMappingResult <- function(
     )
     cols <- .appendRegionCol(cols, region, n)
     cols <- .appendTraitPosCol(cols, traitPos, n)
-    df <- do.call(S4Vectors::DataFrame, c(cols, list(check.names = FALSE)))
+    dfArgs <- c(cols, list(check.names = FALSE))
+    df <- exec(S4Vectors::DataFrame, !!!dfArgs)
     obj <- new("QtlFineMappingResult", df, ldSketch = ldSketch)
     validObject(obj)
     obj
@@ -260,7 +259,8 @@ QtlFineMappingResult <- function(
             next
         }
         if (length(val) != n) {
-            stop("`", nm, "` must have the same length as `study`.")
+            msg <- glue("`{nm}` must have the same length as `study`.")
+            abort(msg)
         }
         cols[[nm]] <- as.character(val)
     }
@@ -303,12 +303,9 @@ setMethod(
         entry <- getFineMappingResult(x, study, context, trait, method)
         pip <- getPip(entry)
         if (isTRUE(returnList)) {
-            nm <- sprintf(
-                "%s|%s|%s|%s",
-                as.character(x$study)[1L],
-                as.character(x$context)[1L],
-                as.character(x$trait)[1L],
-                as.character(x$method)[1L]
+            nm <- glue(
+                "{as.character(x$study)[1L]}|{as.character(x$context)[1L]}|",
+                "{as.character(x$trait)[1L]}|{as.character(x$method)[1L]}"
             )
             out <- list()
             out[[nm]] <- pip
@@ -371,20 +368,20 @@ setMethod("getTraits", "QtlFineMappingResult", function(x) {
 #' @rdname show-methods
 #' @export
 setMethod("show", "QtlFineMappingResult", function(object) {
-    cat(sprintf("QtlFineMappingResult: %d entries\n", nrow(object)))
+    cat(glue("QtlFineMappingResult: {nrow(object)} entries\n", .trim = FALSE))
     if (nrow(object) > 0L) {
-        cat(sprintf(
-            "  %d studies, %d contexts, %d traits, %d methods\n",
-            length(unique(object$study)),
-            length(unique(object$context)),
-            length(unique(object$trait)),
-            length(unique(object$method))
+        cat(glue(
+            "  {n_distinct(object$study)} studies, ",
+            "{n_distinct(object$context)} contexts, ",
+            "{n_distinct(object$trait)} traits, ",
+            "{n_distinct(object$method)} methods\n",
+            .trim = FALSE
         ))
     }
     ldSrc <- if (is.null(object@ldSketch)) {
         "NULL (individual-level fit)"
     } else {
-        sprintf("%s @ %s", object@ldSketch@format, object@ldSketch@path)
+        glue("{object@ldSketch@format} @ {object@ldSketch@path}")
     }
-    cat(sprintf("  LD sketch: %s\n", ldSrc))
+    cat(glue("  LD sketch: {ldSrc}\n", .trim = FALSE))
 })

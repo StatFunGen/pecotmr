@@ -40,7 +40,7 @@ setClass(
         if (length(object@inSample) != 1L) {
             errors <- c(errors, "'inSample' must be a single logical value")
         }
-        if (length(object@genome) != 1L || !nzchar(object@genome)) {
+        if (length(object@genome) != 1L || str_length(object@genome) == 0L) {
             errors <- c(
                 errors,
                 "'genome' must be a single non-empty character string"

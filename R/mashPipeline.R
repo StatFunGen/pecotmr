@@ -62,7 +62,7 @@ mashPipeline <- function(
     inputScale = c("auto", "beta", "z"),
     setSeed = 999
 ) {
-    inputScale <- match.arg(inputScale)
+    inputScale <- arg_match(inputScale)
     .mashRequirePriorPackages()
     # Accept either a base list or a S4Vectors::SimpleList.
     if (methods::is(sumStatsList, "SimpleList")) {
@@ -96,11 +96,12 @@ mashPipeline <- function(
 # @noRd
 .mashValidateSumStatsList <- function(sumStatsList, residualCorrelation) {
     if (!is.list(sumStatsList) || is.null(names(sumStatsList))) {
-        stop(
+        msg <- glue(
             "mashPipeline: `sumStatsList` must be a named list (or ",
             "SimpleList) of QtlSumStats / GwasSumStats objects, named with at ",
             "least 'strong' and 'random' (optionally 'null')."
         )
+        abort(msg)
     }
     required <- if (is.null(residualCorrelation)) {
         c("strong", "random")
@@ -109,20 +110,21 @@ mashPipeline <- function(
     }
     missingNames <- setdiff(required, names(sumStatsList))
     if (length(missingNames) > 0L) {
-        stop(
-            "mashPipeline: `sumStatsList` is missing required entr",
-            if (length(missingNames) == 1L) "y: " else "ies: ",
-            paste(shQuote(missingNames), collapse = ", "),
-            "."
+        entrWord <- if (length(missingNames) == 1L) "entry" else "entries"
+        msg <- glue(
+            "mashPipeline: `sumStatsList` is missing required {entrWord}: ",
+            "{str_flatten(shQuote(missingNames), ', ')}."
         )
+        abort(msg)
     }
     extraNames <- setdiff(names(sumStatsList), c("strong", "random", "null"))
     if (length(extraNames) > 0L) {
-        stop(
+        msg <- glue(
             "mashPipeline: `sumStatsList` has unrecognised entries: ",
-            paste(shQuote(extraNames), collapse = ", "),
-            ". Only 'strong', 'random', and 'null' are accepted."
+            "{str_flatten(shQuote(extraNames), ', ')}. ",
+            "Only 'strong', 'random', and 'null' are accepted."
         )
+        abort(msg)
     }
 }
 
@@ -140,7 +142,7 @@ mashPipeline <- function(
     if (!is.null(residualCorrelation)) {
         return(residualCorrelation)
     }
-    hasNull <- "null" %in% names(sumStatsList) && !is.null(sumStatsList$null)
+    hasNull <- is_in("null", names(sumStatsList)) && !is.null(sumStatsList$null)
     mashResidualCorrelation(
         sumStatsList,
         alpha,
@@ -196,14 +198,15 @@ mashResidualCorrelation <- function(
     inputScale = c("auto", "beta", "z"),
     setSeed = 999
 ) {
-    method <- match.arg(method)
-    inputScale <- match.arg(inputScale)
+    method <- arg_match(method)
+    inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "To use this function, please install mashr: ",
             "https://cran.r-project.org/web/packages/mashr/index.html"
         )
+        abort(msg)
         # nocov end
     }
     if (methods::is(sumStatsList, "SimpleList")) {
@@ -240,10 +243,11 @@ mashResidualCorrelation <- function(
 # @noRd
 .mashResidCorSimple <- function(sumStatsList, alpha, inputScale) {
     if (is.null(sumStatsList$null)) {
-        stop(
+        msg <- glue(
             "mashResidualCorrelation: method 'simple' requires a 'null' entry ",
             "in `sumStatsList`."
         )
+        abort(msg)
     }
     nullMats <- .mashSumStatsToMatrices(
         sumStatsList$null,
@@ -271,16 +275,19 @@ mashResidualCorrelation <- function(
     maxIter
 ) {
     if (is.null(sumStatsList$random)) {
-        stop(
+        msg <- glue(
             "mashResidualCorrelation: method 'mle' requires a 'random' entry ",
             "in `sumStatsList`."
         )
+        abort(msg)
     }
     if (is.null(priorCovariances)) {
-        stop(
-            "mashResidualCorrelation: method 'mle' requires `priorCovariances` ",
+        msg <- glue(
+            "mashResidualCorrelation: method 'mle' requires ",
+            "`priorCovariances` ",
             "(the prior U the EM refines V against)."
         )
+        abort(msg)
     }
     randomMats <- .mashSumStatsToMatrices(
         sumStatsList$random,
@@ -310,12 +317,11 @@ mashResidualCorrelation <- function(
 # @noRd
 .mashResidCorNullBased <- function(sumStatsList, alpha, inputScale, method) {
     if (is.null(sumStatsList$null)) {
-        stop(
-            "mashResidualCorrelation: method '",
-            method,
-            "' requires a 'null' entry in `sumStatsList` (the null variants V ",
-            "is estimated on)."
+        msg <- glue(
+            "mashResidualCorrelation: method '{method}' requires a 'null' ",
+            "entry in `sumStatsList` (the null variants V is estimated on)."
         )
+        abort(msg)
     }
     nullMats <- .mashSumStatsToMatrices(
         sumStatsList$null,
@@ -335,10 +341,11 @@ mashResidualCorrelation <- function(
     }
     if (!requireNamespace("CorShrink", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "mashResidualCorrelation: method 'corshrink' needs the CorShrink ",
             "package. Install it, or use 'simple' / 'simple_specific'."
         )
+        abort(msg)
         # nocov end
     }
     as.matrix(
@@ -358,19 +365,19 @@ mashResidualCorrelation <- function(
 # @noRd
 .mashBuildComponents <- function(mashData, components, nPcs = NULL) {
     comps <- list()
-    if ("canonical" %in% components) {
+    if (is_in("canonical", components)) {
         comps <- c(comps, mashr::cov_canonical(mashData))
     }
-    if ("pca" %in% components) {
+    if (is_in("pca", components)) {
         if (is.null(nPcs)) {
             nPcs <- ncol(mashData$Bhat) - 1
         }
         comps <- c(comps, mashr::cov_pca(mashData, npc = nPcs))
     }
-    if ("flash" %in% components) {
+    if (is_in("flash", components)) {
         comps <- c(comps, mashr::cov_flash(mashData))
     }
-    if ("flash_nonneg" %in% components) {
+    if (is_in("flash_nonneg", components)) {
         comps <- c(comps, mashr::cov_flash(mashData, factors = "nonneg"))
     }
     comps
@@ -411,7 +418,7 @@ mashCovarianceComponents <- function(
     inputScale = c("auto", "beta", "z"),
     setSeed = 999
 ) {
-    inputScale <- match.arg(inputScale)
+    inputScale <- arg_match(inputScale)
     .mashValidateComponents(components, "mashCovarianceComponents")
     .mashRequirePriorPackages()
     if (methods::is(sumStatsList, "SimpleList")) {
@@ -496,8 +503,8 @@ mashPriorCovariances <- function(
     inputScale = c("auto", "beta", "z"),
     setSeed = 999
 ) {
-    engine <- match.arg(engine)
-    inputScale <- match.arg(inputScale)
+    engine <- arg_match(engine)
+    inputScale <- arg_match(inputScale)
     .mashValidateComponents(components)
     .mashRequirePriorPackages()
     if (methods::is(sumStatsList, "SimpleList")) {
@@ -541,14 +548,12 @@ mashPriorCovariances <- function(
     valid <- c("canonical", "pca", "flash", "flash_nonneg")
     bad <- setdiff(as.character(components), valid)
     if (length(bad) > 0L) {
-        stop(
-            caller,
-            ": unknown component(s): ",
-            paste(bad, collapse = ", "),
-            ". Valid: ",
-            paste(valid, collapse = ", "),
-            "."
+        msg <- glue(
+            "{caller}: unknown component(s): ",
+            "{str_flatten(bad, ', ')}. ",
+            "Valid: {str_flatten(valid, ', ')}."
         )
+        abort(msg)
     }
 }
 
@@ -557,18 +562,20 @@ mashPriorCovariances <- function(
 .mashRequirePriorPackages <- function() {
     if (!requireNamespace("mashr", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "To use this function, please install mashr: ",
             "https://cran.r-project.org/web/packages/mashr/index.html"
         )
+        abort(msg)
         # nocov end
     }
     if (!requireNamespace("flashier", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "To use this function, please install flashier: ",
             "https://github.com/willwerscheid/flashier"
         )
+        abort(msg)
         # nocov end
     }
 }
@@ -600,25 +607,21 @@ mashPriorCovariances <- function(
             is.null(names(priorCovariances)) ||
             any(names(priorCovariances) == "")
     ) {
-        stop(
+        msg <- glue(
             "mashPriorCovariances: `priorCovariances` must be a non-empty ",
             "named list of square covariance matrices."
         )
+        abort(msg)
     }
     nCond <- ncol(mashData$Bhat)
-    bad <- !map_lgl(priorCovariances, function(M) {
-        is.matrix(M) && nrow(M) == nCond && ncol(M) == nCond
-    })
+    bad <- !map_lgl(priorCovariances, .mashCovIsSquareN, nCond = nCond)
     if (any(bad)) {
-        stop(sprintf(
-            paste0(
-                "mashPriorCovariances: every `priorCovariances` entry must ",
-                "be a %d x %d matrix; offenders: %s."
-            ),
-            nCond,
-            nCond,
-            paste(names(priorCovariances)[bad], collapse = ", ")
-        ))
+        msg <- glue(
+            "mashPriorCovariances: every `priorCovariances` entry must ",
+            "be a {nCond} x {nCond} matrix; offenders: ",
+            "{str_flatten(names(priorCovariances)[bad], ', ')}."
+        )
+        abort(msg)
     }
     list(U = priorCovariances, w = NULL, loglik = NULL)
 }
@@ -669,11 +672,12 @@ mashPriorCovariances <- function(
             is.null(names(priorComponents)) ||
             any(names(priorComponents) == "")
     ) {
-        stop(
+        msg <- glue(
             "mashPriorCovariances: `priorComponents` must be a non-empty ",
             "named list of covariance matrices (e.g. ",
             "mashCovarianceComponents() output)."
         )
+        abort(msg)
     }
     priorComponents
 }
@@ -710,16 +714,21 @@ mashPriorCovariances <- function(
     tryCatch(
         udr::ud_fit(fit0, control = control, verbose = FALSE),
         error = function(e) {
-            if (engine == "ud_ted" && grepl("i.i.d", conditionMessage(e))) {
-                stop(
+            if (
+                engine == "ud_ted" && str_detect(conditionMessage(e), "i.i.d")
+            ) {
+                msg <- glue(
                     "mashPriorCovariances: engine 'ud_ted' (udr TED update) ",
                     "needs i.i.d. data (a single shared V), which the beta ",
                     "scale does not provide (per-variant SE). Use engine 'ud' ",
-                    "(ED update), or a z-scale input.",
-                    call. = FALSE
+                    "(ED update), or a z-scale input."
                 )
+                abort(msg)
             }
-            stop(e)
+            # Not the ud_ted i.i.d. case rewrapped above -- re-raise the
+            # original condition unchanged so unrelated udr failures surface
+            # (and aren't swallowed as a NULL fit).
+            cnd_signal(e)
         }
     )
 }
@@ -731,12 +740,11 @@ mashPriorCovariances <- function(
 .mashEngineUd <- function(mashData, engine, udControl) {
     if (!requireNamespace("udr", quietly = TRUE)) {
         # nocov start
-        stop(
-            "mashPriorCovariances: engine '",
-            engine,
-            "' needs the udr package. Install it, or use the default ",
-            "'cov_ed'."
+        msg <- glue(
+            "mashPriorCovariances: engine '{engine}' needs the udr package. ",
+            "Install it, or use the default 'cov_ed'."
         )
+        abort(msg)
         # nocov end
     }
     udControl <- utils::modifyList(
@@ -813,14 +821,15 @@ mashModelFit <- function(
     inputScale = c("auto", "beta", "z"),
     setSeed = 999
 ) {
-    fitOn <- match.arg(fitOn)
-    inputScale <- match.arg(inputScale)
+    fitOn <- arg_match(fitOn)
+    inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "To use this function, please install mashr: ",
             "https://cran.r-project.org/web/packages/mashr/index.html"
         )
+        abort(msg)
         # nocov end
     }
     if (methods::is(sumStatsList, "SimpleList")) {
@@ -828,11 +837,10 @@ mashModelFit <- function(
     }
     .mashValidatePriorCovList(priorCovariances)
     if (is.null(sumStatsList[[fitOn]])) {
-        stop(
-            "mashModelFit: `sumStatsList` has no '",
-            fitOn,
-            "' entry to fit on."
+        msg <- glue(
+            "mashModelFit: `sumStatsList` has no '{fitOn}' entry to fit on."
         )
+        abort(msg)
     }
     if (!is.null(setSeed)) {
         withr::local_seed(setSeed)
@@ -856,10 +864,11 @@ mashModelFit <- function(
             length(priorCovariances) == 0L ||
             is.null(names(priorCovariances))
     ) {
-        stop(
+        msg <- glue(
             "mashModelFit: `priorCovariances` must be a non-empty named list ",
             "of covariance matrices (e.g. mashPriorCovariances()$U)."
         )
+        abort(msg)
     }
 }
 
@@ -915,13 +924,14 @@ mashPosterior <- function(
     outputPosteriorCov = TRUE,
     inputScale = c("auto", "beta", "z")
 ) {
-    inputScale <- match.arg(inputScale)
+    inputScale <- arg_match(inputScale)
     if (!requireNamespace("mashr", quietly = TRUE)) {
         # nocov start
-        stop(
+        msg <- glue(
             "To use this function, please install mashr: ",
             "https://cran.r-project.org/web/packages/mashr/index.html"
         )
+        abort(msg)
         # nocov end
     }
     mats <- .mashSumStatsToMatrices(sumStats, "target", inputScale = inputScale)
@@ -958,15 +968,15 @@ mashPosterior <- function(
     }
     bad <- setdiff(excludeCondition, allConditions)
     if (length(bad) > 0L) {
-        stop(
+        msg <- glue(
             "mashPosterior: excludeCondition not found in the target: ",
-            paste(bad, collapse = ", "),
-            "."
+            "{str_flatten(bad, ', ')}."
         )
+        abort(msg)
     }
     keep <- setdiff(allConditions, excludeCondition)
     if (length(keep) == 0L) {
-        stop("mashPosterior: excludeCondition drops every condition.")
+        abort("mashPosterior: excludeCondition drops every condition.")
     }
     keepIdx <- match(keep, allConditions)
     if (!is.null(vhat)) {
@@ -1052,7 +1062,7 @@ fitMashContrast <- function(
     }
     nPop <- length(tested)
     grouping <- if (is.null(grouping)) {
-        setNames(rep(0L, nPop), tested)
+        set_names(rep(0L, nPop), tested)
     } else {
         grouping[tested]
     }
@@ -1077,14 +1087,14 @@ fitMashContrast <- function(
 # for two conditions, else deviation + grouped pairwise contrasts.
 # @noRd
 .mashContrastDesign <- function(tested, nPop, grouping) {
-    pairwiseVector <- setNames(rep(0, nPop), tested)
+    pairwiseVector <- set_names(rep(0, nPop), tested)
     if (nPop <= 2) {
         pairwiseVector[tested[1]] <- 1
         pairwiseVector[tested[2]] <- -1
         return(matrix(
             pairwiseVector,
             ncol = 1,
-            dimnames = list(tested, paste0(tested[1], "_vs_", tested[2]))
+            dimnames = list(tested, str_c(tested[1], "_vs_", tested[2]))
         ))
     }
     dev <- .mashDeviationContrast(tested, nPop, grouping)
@@ -1105,7 +1115,7 @@ fitMashContrast <- function(
         diag(dev)[grpMask] <- (nPop - 1) / grpSize
         dev[grpMask, grpMask] <- (nPop - 1) / grpSize
     }
-    colnames(dev) <- paste0(tested, "_deviation")
+    colnames(dev) <- str_c(tested, "_deviation")
     dev
 }
 
@@ -1114,18 +1124,18 @@ fitMashContrast <- function(
 # @noRd
 .mashPairwiseContrast <- function(tested, grouping, pairwiseVector) {
     twoCombn <- combn(tested, 2)
-    pwNames <- apply(twoCombn, 2, paste, collapse = "_vs_")
+    pwNames <- apply(twoCombn, 2, str_flatten, collapse = "_vs_")
     pw <- apply(twoCombn, 2, makePairwiseContrastCol, pairwiseVector)
     colnames(pw) <- pwNames
     pwAdj <- pw
     for (col in colnames(pw)) {
-        groups <- strsplit(col, "_vs_")[[1]]
-        groupValues <- grouping[names(grouping) %in% groups]
+        groups <- str_split(col, "_vs_")[[1]]
+        groupValues <- grouping[is_in(names(grouping), groups)]
         relevant <- names(groupValues[groupValues > 0])
-        if (length(unique(groupValues)) > 1 && length(relevant) > 0) {
+        if (n_distinct(groupValues) > 1 && length(relevant) > 0) {
             for (dg in unique(groupValues[groupValues > 0])) {
                 rowsInGroup <- names(grouping[grouping == dg])
-                matchedRow <- rowsInGroup[rowsInGroup %in% groups]
+                matchedRow <- rowsInGroup[is_in(rowsInGroup, groups)]
                 if (length(matchedRow) > 0) {
                     pwAdj[rowsInGroup, col] <- pw[matchedRow, col] /
                         length(rowsInGroup)
@@ -1146,14 +1156,17 @@ fitMashContrast <- function(
     contrastSe,
     contrastP
 ) {
-    df <- data.frame(
-        row.names = rownames(posteriorMean)[index],
-        stringsAsFactors = FALSE
-    )
+    fid <- rownames(posteriorMean)[index]
+    if (is.null(fid)) {
+        fid <- as.character(index)
+    }
+    df <- tibble(feature_id = fid)
+    # unname: contrast* carry contrastDesign colnames; tibble (unlike
+    # data.frame) preserves a named scalar's name on the column.
     for (i in seq_along(cnames)) {
-        df[[paste0("mean_contrast_", cnames[i])]] <- contrastDiff[i]
-        df[[paste0("se_contrast_", cnames[i])]] <- contrastSe[i]
-        df[[paste0("p_contrast_", cnames[i])]] <- contrastP[i]
+        df[[str_c("mean_contrast_", cnames[i])]] <- unname(contrastDiff[i])
+        df[[str_c("se_contrast_", cnames[i])]] <- unname(contrastSe[i])
+        df[[str_c("p_contrast_", cnames[i])]] <- unname(contrastP[i])
     }
     df
 }
@@ -1178,9 +1191,9 @@ fitMashContrast <- function(
 #' @param grouping Optional named integer vector assigning conditions to groups
 #'   (0 = independent); forwarded to \code{\link{fitMashContrast}} so replicate
 #'   populations of one cell type share weight. Names are condition labels.
-#' @return A \code{data.frame} (features x contrasts) with
-#'   \code{mean_contrast_*}, \code{se_contrast_*}, \code{p_contrast_*} columns
-#'   and feature ids as row names. Empty when nothing is testable.
+#' @return A \code{tibble} (features x contrasts) with a \code{feature_id}
+#'   column followed by \code{mean_contrast_*}, \code{se_contrast_*},
+#'   \code{p_contrast_*} columns. Empty when nothing is testable.
 #' @seealso \code{\link{fitMashContrast}},
 #'   \code{\link{metaAnalysisPerCondition}}
 #' @importFrom dplyr bind_rows select matches
@@ -1201,26 +1214,25 @@ mashPosteriorContrast <- function(
     origMean <- origMean[, colnames(posteriorMean), drop = FALSE]
     origMean[is.nan(origMean)] <- 0
 
-    parts <- lapply(seq_len(nrow(posteriorMean)), function(i) {
-        fitMashContrast(
-            i,
-            origMean,
-            posteriorMean,
-            posteriorVcov,
-            grouping = grouping
-        )
-    })
-    parts <- parts[!vapply(parts, is.null, logical(1))]
+    parts <- map(
+        seq_len(nrow(posteriorMean)),
+        fitMashContrast,
+        origMean = origMean,
+        posteriorMean = posteriorMean,
+        posteriorVcov = posteriorVcov,
+        grouping = grouping
+    )
+    parts <- compact(parts)
     if (length(parts) == 0L) {
-        return(data.frame())
+        return(tibble())
     }
 
-    # fitMashContrast sets each 1-row frame's rowname to the feature id, but
-    # bind_rows drops row names -- capture them first, restore after.
-    featureIds <- unlist(lapply(parts, rownames), use.names = FALSE)
-    res <- as.data.frame(dplyr::bind_rows(parts))
-    res <- dplyr::select(
+    # Each part carries a feature_id column; bind_rows aligns the union of
+    # contrast columns across features and preserves feature_id.
+    res <- bind_rows(parts)
+    dplyr::select(
         res,
+        "feature_id",
         dplyr::matches("mean_contrast.*deviation"),
         dplyr::matches("mean_contrast.*_vs_"),
         dplyr::matches("se_contrast.*deviation"),
@@ -1228,8 +1240,6 @@ mashPosteriorContrast <- function(
         dplyr::matches("p_contrast.*deviation"),
         dplyr::matches("p_contrast.*_vs_")
     )
-    rownames(res) <- featureIds
-    res
 }
 
 # =============================================================================
@@ -1272,14 +1282,14 @@ updateMashModelCov <- function(mashModel, allSamples, samples) {
     # Remove matrices for dropped conditions
     unwanted <- setdiff(allSamples, samples)
     for (d in names(cov)) {
-        if (d %in% unwanted || d %in% paste0("ED_", unwanted)) {
+        if (is_in(d, unwanted) || is_in(d, str_c("ED_", unwanted))) {
             cov[[d]] <- NULL
         }
     }
 
     # Resize remaining matrices to match retained conditions
     for (d in names(cov)) {
-        if (d %in% samples) {
+        if (is_in(d, samples)) {
             # Condition-specific: single 1 on diagonal
             m <- matrix(0, length(samples), length(samples))
             m[which(samples == d), which(samples == d)] <- 1
@@ -1343,7 +1353,7 @@ sliceMashData <- function(data, vhat, snps, samples) {
     data$sbhat <- as.matrix(data$sbhat[snps, samples])
     data$Z <- as.matrix(data$Z[snps, samples])
     vhat <- as.matrix(vhat[samples, samples])
-    data$snp <- data$snp[data$snp %in% snps]
+    data$snp <- data$snp[is_in(data$snp, snps)]
     colnames(data$bhat) <- colnames(data$sbhat) <- colnames(data$Z) <- colnames(
         vhat
     ) <- samples
@@ -1413,21 +1423,20 @@ metaAnalysisPerCondition <- function(
 ) {
     stopifnot(identical(dim(effectSizes), dim(seValues)))
     stopifnot(identical(colnames(effectSizes), colnames(seValues)))
-    contrasts <- sub("^mean_contrast_", "", colnames(effectSizes))
+    contrasts <- str_remove(colnames(effectSizes), "^mean_contrast_")
     conditions <- unique(c(
-        sub("_vs_.*", "", contrasts),
-        sub(".*_vs_", "", contrasts)
+        str_remove(contrasts, "_vs_.*"),
+        str_remove(contrasts, ".*_vs_")
     ))
-    rows <- list_flatten(map(conditions, function(condition) {
-        .metaConditionRows(
-            condition,
-            effectSizes,
-            seValues,
-            contrasts,
-            seCutoff,
-            metaMethod
-        )
-    }))
+    rows <- list_flatten(map(
+        conditions,
+        .metaConditionRows,
+        effectSizes = effectSizes,
+        seValues = seValues,
+        contrasts = contrasts,
+        seCutoff = seCutoff,
+        metaMethod = metaMethod
+    ))
     bind_rows(rows)
 }
 
@@ -1441,23 +1450,23 @@ metaAnalysisPerCondition <- function(
     seCutoff,
     metaMethod
 ) {
-    idx <- grep(condition, colnames(effectSizes))
+    idx <- which(str_detect(colnames(effectSizes), condition))
     if (length(idx) == 0) {
         return(list())
     }
     condEffects <- effectSizes[, idx, drop = FALSE]
     condSes <- seValues[, idx, drop = FALSE]
     condContrasts <- contrasts[idx]
-    map(seq_along(condContrasts), function(i) {
-        .metaOneContrast(
-            condition,
-            condContrasts[i],
-            abs(as.numeric(condEffects[, i])),
-            as.numeric(condSes[, i]),
-            seCutoff,
-            metaMethod
-        )
-    })
+    map(
+        seq_along(condContrasts),
+        .metaContrastRow,
+        condition = condition,
+        condContrasts = condContrasts,
+        condEffects = condEffects,
+        condSes = condSes,
+        seCutoff = seCutoff,
+        metaMethod = metaMethod
+    )
 }
 
 # One contrast's random-effects meta-analysis row. Fewer than two finite,
@@ -1527,39 +1536,23 @@ metaAnalysisPerCondition <- function(
 #' calculateFeatureScores(cr, metaMethod = "mean")
 #' @export
 calculateFeatureScores <- function(contrastResult, metaMethod = "REML") {
-    cr <- as.data.frame(contrastResult, stringsAsFactors = FALSE)
-    effCols <- grep("mean_contrast_.*deviation", names(cr), value = TRUE)
+    cr <- as_tibble(contrastResult)
+    effCols <- names(cr)[str_detect(names(cr), "mean_contrast_.*deviation")]
     if (length(effCols) == 0L) {
-        return(data.frame(
-            condition = character(0),
-            zScore = numeric(0),
-            stringsAsFactors = FALSE
-        ))
+        return(tibble(condition = character(0), zScore = numeric(0)))
     }
-    scores <- vapply(
+    scores <- map_dbl(
         effCols,
-        function(ec) {
-            seCol <- sub("^mean_contrast", "se_contrast", ec)
-            if (!seCol %in% names(cr)) {
-                return(NA_real_)
-            }
-            es <- abs(as.numeric(cr[[ec]]))
-            se <- as.numeric(cr[[seCol]])
-            keep <- is.finite(es) & is.finite(se) & se > 0
-            es <- es[keep]
-            se <- se[keep]
-            if (length(es) < 1L) {
-                return(NA_real_)
-            }
-            ma <- .rmaMeta(es, se, method = metaMethod)
-            ma$mean / ma$se
-        },
-        numeric(1)
+        .metaContrastZScore,
+        cr = cr,
+        metaMethod = metaMethod
     )
-    data.frame(
-        condition = sub("_deviation$", "", sub("^mean_contrast_", "", effCols)),
-        zScore = as.numeric(scores),
-        stringsAsFactors = FALSE
+    tibble(
+        condition = str_remove(
+            str_remove(effCols, "^mean_contrast_"),
+            "_deviation$"
+        ),
+        zScore = as.numeric(scores)
     )
 }
 
@@ -1585,28 +1578,18 @@ calculateFeatureScores <- function(contrastResult, metaMethod = "REML") {
 #' nSignificantScore(cr, pCutoff = 0.05)
 #' @export
 nSignificantScore <- function(contrastResult, pCutoff = 1e-5) {
-    cr <- as.data.frame(contrastResult, stringsAsFactors = FALSE)
-    pCols <- grep("p_contrast_.*deviation", names(cr), value = TRUE)
+    cr <- as_tibble(contrastResult)
+    pCols <- names(cr)[str_detect(names(cr), "p_contrast_.*deviation")]
     if (length(pCols) == 0L) {
-        return(data.frame(
-            condition = character(0),
-            ratio = numeric(0),
-            stringsAsFactors = FALSE
-        ))
+        return(tibble(condition = character(0), ratio = numeric(0)))
     }
-    ratios <- vapply(
-        pCols,
-        function(pc) {
-            p <- as.numeric(cr[[pc]])
-            nTot <- sum(!is.na(p))
-            if (nTot == 0L) NA_real_ else sum(p < pCutoff, na.rm = TRUE) / nTot
-        },
-        numeric(1)
-    )
-    data.frame(
-        condition = sub("_deviation$", "", sub("^p_contrast_", "", pCols)),
-        ratio = as.numeric(ratios),
-        stringsAsFactors = FALSE
+    ratios <- map_dbl(pCols, .metaContrastSigRatio, cr = cr, pCutoff = pCutoff)
+    tibble(
+        condition = str_remove(
+            str_remove(pCols, "^p_contrast_"),
+            "_deviation$"
+        ),
+        ratio = as.numeric(ratios)
     )
 }
 
@@ -1622,7 +1605,7 @@ nSignificantScore <- function(contrastResult, pCutoff = 1e-5) {
 #'   \code{pip} and \code{variants} columns (credible-set index 0 = not in a
 #'   CS).
 #' @param contrastResults A contrast table from
-#'   \code{\link{mashPosteriorContrast}} with variant row names.
+#'   \code{\link{mashPosteriorContrast}} with a \code{feature_id} column.
 #' @param condition Condition label whose deviation p-value column is used; if
 #'   that column is absent and exactly one pairwise contrast exists, the
 #'   pairwise p-value is used instead.
@@ -1643,45 +1626,93 @@ scoreFromCs <- function(fineMapping, contrastResults, condition) {
     if (length(css) == 0L) {
         return(NA_real_)
     }
-    leadRows <- do.call(
-        rbind,
-        lapply(css, function(cs) {
-            tmp <- fineMapping[fineMapping$cs_order == cs, , drop = FALSE]
-            tmp[tmp$pip == max(tmp$pip), , drop = FALSE]
-        })
-    )
-    cr <- as.data.frame(contrastResults, stringsAsFactors = FALSE)
-    snps <- intersect(rownames(cr), leadRows$variants)
-    if (length(snps) == 0L) {
+    leadRows <- bind_rows(map(css, .csLeadRow, fineMapping = fineMapping))
+    cr <- as_tibble(contrastResults)
+    cr <- filter(cr, is_in(.data$feature_id, leadRows$variants))
+    if (nrow(cr) == 0L) {
         return(NA_real_)
     }
 
-    pDevCol <- grep(
-        paste0("p_contrast_", condition, "_deviation"),
+    pDevCol <- names(cr)[str_detect(
         names(cr),
-        value = TRUE
-    )
+        str_c("p_contrast_", condition, "_deviation")
+    )]
     if (length(pDevCol) > 0L) {
-        contrastP <- cr[snps, pDevCol[1L], drop = FALSE]
+        pCol <- pDevCol[1L]
     } else {
-        pvCols <- grep("p_contrast.*_vs_", names(cr), value = TRUE)
+        pvCols <- names(cr)[str_detect(names(cr), "p_contrast.*_vs_")]
         if (length(pvCols) != 1L) {
             return(NA_real_)
         }
-        contrastP <- cr[snps, pvCols, drop = FALSE]
+        pCol <- pvCols
     }
-    maxSnp <- rownames(contrastP)[which(
-        contrastP[, 1L] == max(contrastP[, 1L], na.rm = TRUE)
-    )]
-    meanVs <- as.numeric(as.matrix(cr[
-        maxSnp,
-        grep("mean_contrast.*_vs_", names(cr)),
-        drop = FALSE
-    ]))
-    seVs <- as.numeric(as.matrix(cr[
-        maxSnp,
-        grep("se_contrast.*_vs_", names(cr)),
-        drop = FALSE
-    ]))
+    maxRow <- filter(cr, .data[[pCol]] == max(.data[[pCol]], na.rm = TRUE))
+    meanCols <- names(cr)[str_detect(names(cr), "mean_contrast.*_vs_")]
+    seCols <- names(cr)[str_detect(names(cr), "se_contrast.*_vs_")]
+    meanVs <- as.numeric(as.matrix(select(maxRow, all_of(meanCols))))
+    seVs <- as.numeric(as.matrix(select(maxRow, all_of(seCols))))
     max(abs(meanVs / seVs), na.rm = TRUE)
+}
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# TRUE when a prior covariance is a square matrix of dimension nCond.
+# @noRd
+.mashCovIsSquareN <- function(M, nCond) {
+    is.matrix(M) && nrow(M) == nCond && ncol(M) == nCond
+}
+
+# One meta-analysis tibble for contrast `i` of a condition's contrast columns.
+# @noRd
+.metaContrastRow <- function(
+    i,
+    condition,
+    condContrasts,
+    condEffects,
+    condSes,
+    seCutoff,
+    metaMethod
+) {
+    .metaOneContrast(
+        condition,
+        condContrasts[i],
+        abs(as.numeric(condEffects[, i])),
+        as.numeric(condSes[, i]),
+        seCutoff,
+        metaMethod
+    )
+}
+
+# Meta-analysis z-score (mean/se) for one mean-contrast column, NA when empty.
+# @noRd
+.metaContrastZScore <- function(ec, cr, metaMethod) {
+    seCol <- str_replace(ec, "^mean_contrast", "se_contrast")
+    if (!is_in(seCol, names(cr))) {
+        return(NA_real_)
+    }
+    es <- abs(as.numeric(cr[[ec]]))
+    se <- as.numeric(cr[[seCol]])
+    keep <- is.finite(es) & is.finite(se) & se > 0
+    es <- es[keep]
+    se <- se[keep]
+    if (length(es) < 1L) {
+        return(NA_real_)
+    }
+    ma <- .rmaMeta(es, se, method = metaMethod)
+    ma$mean / ma$se
+}
+
+# Fraction of a p-contrast column below `pCutoff` (NA when no observations).
+# @noRd
+.metaContrastSigRatio <- function(pc, cr, pCutoff) {
+    p <- as.numeric(cr[[pc]])
+    nTot <- sum(!is.na(p))
+    if (nTot == 0L) NA_real_ else sum(p < pCutoff, na.rm = TRUE) / nTot
+}
+
+# The lead (max-PIP) variant row(s) of credible set `cs`.
+# @noRd
+.csLeadRow <- function(cs, fineMapping) {
+    tmp <- filter(fineMapping, .data$cs_order == cs)
+    filter(tmp, .data$pip == max(.data$pip))
 }

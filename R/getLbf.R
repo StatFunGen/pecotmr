@@ -13,7 +13,7 @@ NULL
 #'
 #' @param x A \code{FineMappingEntry} or \code{FineMappingResultBase}.
 #' @param ... Ignored.
-#' @return A \code{data.frame}: \code{variant_id} + \code{lbf_L1..lbf_LL} (the
+#' @return A \code{tibble}: \code{variant_id} + \code{lbf_L1..lbf_LL} (the
 #'   collection method also carries the entry identity columns).
 #' @seealso \code{\link{getTopLoci}} (the scalar \code{logBF} column)
 #' @examples
@@ -28,18 +28,15 @@ setMethod("getLbf", "FineMappingEntry", function(x, ...) {
     lbf <- .asLbfMatrix(getSusieFit(x))
     vids <- x@variantIds
     if (is.null(lbf) || ncol(lbf) != length(vids)) {
-        return(data.frame(variant_id = character(0), stringsAsFactors = FALSE))
+        return(tibble(variant_id = character(0)))
     }
-    w <- as.data.frame(t(as.matrix(lbf)), stringsAsFactors = FALSE)
-    names(w) <- paste0("lbf_L", seq_len(ncol(w)))
-    cbind(
-        data.frame(variant_id = as.character(vids), stringsAsFactors = FALSE),
-        w
-    )
+    w <- as_tibble(t(as.matrix(lbf)), .name_repair = "minimal")
+    names(w) <- str_c("lbf_L", seq_len(ncol(w)))
+    bind_cols(tibble(variant_id = as.character(vids)), w)
 })
 
 #' @rdname getLbf
 #' @export
 setMethod("getLbf", "FineMappingResultBase", function(x, ...) {
-    .fmrAggregateView(x, perEntry = function(e) getLbf(e))
+    .fmrAggregateView(x, perEntry = getLbf)
 })

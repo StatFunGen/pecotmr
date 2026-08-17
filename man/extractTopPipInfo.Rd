@@ -22,7 +22,8 @@ A data frame with one row containing the following columns:
   \item{top_pip}{Highest Posterior Inclusion Probability (PIP)}
   \item{top_z}{Z-score of the top variant}
   \item{p_value}{P-value calculated from the top Z-score}
-  \item{cs_corr}{NA (as no CS correlation is available)}
+  \item{cs_corr_max}{NA (no between-CS correlation without a CS)}
+  \item{cs_corr_min}{NA (no between-CS correlation without a CS)}
 }
 \description{
 This function extracts information about the variant with the highest

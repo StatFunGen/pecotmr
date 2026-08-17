@@ -175,3 +175,9 @@ mc <- as.data.frame(S4Vectors::mcols(res2))
 # Significant TWAS hits at Bonferroni alpha = 0.05 across rows
 mc[mc$twasPval < 0.05 / nrow(mc), ]
 ```
+
+# Session info
+
+```{r session-info}
+sessionInfo()
+```
