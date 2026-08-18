@@ -11,7 +11,8 @@ enforceDesignFullRank(
   response = NULL,
   maxIterations = 300L,
   corrThresholds = seq(0.75, 0.5, by = -0.05),
-  verbose = FALSE
+  verbose = FALSE,
+  seed = NULL
 )
 }
 \arguments{
@@ -34,6 +35,13 @@ Pass \code{NULL} or a zero-column matrix when there are no covariates.}
 \code{seq(0.75, 0.5, by = -0.05)}.}
 
 \item{verbose}{Logical. If TRUE, print per-iteration progress. Default FALSE.}
+
+\item{seed}{Integer or \code{NULL}. Seeds the tie-break draw on the rare
+occasion that exactly two equally-collinear columns are candidates for
+removal (\code{strategy = "correlation"}), via a scoped
+\code{withr::local_seed}, so the session RNG is left untouched. \code{NULL}
+(default) leaves the draw under the session RNG, so an outer
+\code{set.seed()} still governs it.}
 }
 \value{
 The pruned predictor matrix \code{X} (covariates \code{C} are not

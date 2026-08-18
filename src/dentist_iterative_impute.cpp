@@ -224,7 +224,7 @@ void oneIteration(const mat& LD_mat, const std::vector<size_t>& idx, const std::
 cpp11::writable::list dentistIterativeImpute(const doubles_matrix<>& ldMatR, int nSample, const doubles& zScoreR,
                               double pValueThreshold, double propSVD, bool gcControl, int nIter,
                               double gPvalueThreshold, int ncpus, bool correctChenEtAlBug,
-                              bool verbose) {
+                              bool verbose, cpp11::sexp seed = R_NilValue) {
 	mat LD_mat = as_Mat(ldMatR);
 	vec zScore = as_Col(zScoreR);
 
@@ -247,8 +247,13 @@ cpp11::writable::list dentistIterativeImpute(const doubles_matrix<>& ldMatR, int
 	omp_set_num_threads(nProcessors);
 
 	size_t markerSize = zScore.size();
-	// Original DENTIST hardcodes seed=10 for initial partitioning
-	std::vector<size_t> randOrder = generateSetOfNumbers(markerSize, 10);
+	// Resolve the RNG seed. NULL preserves the original DENTIST hard-coded seeds
+	// (10 for the initial partition, 20000 + t*20000 per iteration) for exact
+	// fidelity with the reference binary; a provided seed overrides both.
+	bool userSeed = (seed != R_NilValue);
+	unsigned int base_seed = userSeed ? cpp11::as_cpp<unsigned int>(seed) : 0u;
+	unsigned int initSeed = userSeed ? base_seed : 10u;
+	std::vector<size_t> randOrder = generateSetOfNumbers(markerSize, initSeed);
 	std::vector<size_t> idx, idx2;
 	idx.reserve(markerSize / 2);
 	idx2.reserve(markerSize / 2);
@@ -482,8 +487,12 @@ cpp11::writable::list dentistIterativeImpute(const doubles_matrix<>& ldMatR, int
 			}
 			break;
 		}
-		// Original DENTIST uses seed = 20000 + t*20000 for subsequent iterations
-		randOrder = generateSetOfNumbers(fullIdx.size(), 20000 + t * 20000);
+		// NULL seed keeps the original per-iteration seed 20000 + t*20000; a
+		// user seed derives a distinct per-iteration seed from base_seed.
+		unsigned int iterSeed = userSeed
+			? base_seed + static_cast<unsigned int>(t + 1) * 20000u
+			: static_cast<unsigned int>(20000 + t * 20000);
+		randOrder = generateSetOfNumbers(fullIdx.size(), iterSeed);
 		idx.clear();
 		idx2.clear();
 		for (size_t i = 0; i < fullIdx.size(); ++i) {

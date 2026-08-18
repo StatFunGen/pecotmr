@@ -3392,7 +3392,8 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
     af = NULL,
     fullFit = FALSE,
     fullFitAlphaOnly = TRUE,
-    includeAllCs = FALSE
+    includeAllCs = FALSE,
+    seed = NULL
 ) {
     p <- as.list(environment())
     chainLocal <- .fmResolveSusieChain(toRun, addSusieInf)
@@ -3501,7 +3502,8 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
         samplePartition = p$samplePartition,
         coverage = p$coverage,
         verbose = p$verbose,
-        numThreads = p$cvThreads
+        numThreads = p$cvThreads,
+        seed = p$seed
     )
     for (tk in names(out)) {
         out[[tk]] <- .fmAttachCv(out[[tk]], .fmSliceCv(cv, tk))

@@ -1074,6 +1074,12 @@ setMethod("show", "TwasWeights", function(object) {
 #'   messages including those from external packages.
 #' @param retainFits Logical. Retain the per-fold / per-method fitted-model
 #'   objects on the result. Default \code{FALSE}.
+#' @param seed Integer or \code{NULL}. When supplied, seeds both the
+#'   main-process RNG (fold partitioning, variant sub-sampling) via
+#'   \code{set.seed} and the parallel fold-fitting RNG via the
+#'   \code{BiocParallel} \code{RNGseed}, so results are reproducible even under
+#'   multi-threading. \code{NULL} (default) leaves the session RNG untouched and
+#'   uses the historical parallel default.
 #' @param ... Additional arguments forwarded to the per-method weight learners.
 #' @return A list with the following components:
 #' \itemize{
@@ -1120,6 +1126,7 @@ twasWeightsCv <- function(
     numThreads = 1,
     verbose = 1,
     retainFits = FALSE,
+    seed = NULL,
     ...
 ) {
     p <- as.list(environment())
@@ -1148,9 +1155,9 @@ twasWeightsCv <- function(
     } else {
         p$weightMethods
     }
-    if (!exists(".Random.seed") && p$verbose >= 1) {
+    if (is.null(p$seed) && !exists(".Random.seed") && p$verbose >= 1) {
         inform(
-            "! No seed has been set. Please set seed for reproducable result. "
+            "! No seed set. Pass `seed=` or call set.seed() for reproducibility."
         )
     }
     if (is.null(weightMethods)) {
@@ -1164,7 +1171,8 @@ twasWeightsCv <- function(
             maxNumVariants = p$maxNumVariants,
             variantsToKeep = p$variantsToKeep,
             retainFits = p$retainFits,
-            verbose = p$verbose
+            verbose = p$verbose,
+            seed = p$seed
         )
         return(list(samplePartition = res$samplePartition))
     }
@@ -1186,7 +1194,8 @@ twasWeightsCv <- function(
         maxNumVariants = p$maxNumVariants,
         variantsToKeep = p$variantsToKeep,
         retainFits = p$retainFits,
-        verbose = p$verbose
+        verbose = p$verbose,
+        seed = p$seed
     )
 }
 
@@ -1431,6 +1440,10 @@ twasWeightsCv <- function(
 #'   weights (e.g. \code{"individual"}).
 #' @param ldSketch A \code{GenotypeHandle} LD sketch to record on the weights,
 #'   or \code{NULL}.
+#' @param seed Integer or \code{NULL}. When supplied, seeds the main-process RNG
+#'   via \code{set.seed} and the parallel method-fitting RNG via the
+#'   \code{BiocParallel} \code{RNGseed}, for reproducibility under
+#'   multi-threading. \code{NULL} (default) leaves the session RNG untouched.
 #' @return A list where each element is named after a method and contains the
 #'   weight matrix produced by that method.
 #'
@@ -1459,7 +1472,8 @@ learnTwasWeights <- function(
     standardized = FALSE,
     dataType = NULL,
     ldSketch = NULL,
-    verbose = 1
+    verbose = 1,
+    seed = NULL
 ) {
     .learnTwasWeightsImpl(as.list(environment()))
 }
@@ -1502,7 +1516,7 @@ learnTwasWeights <- function(
 # @noRd
 .twasFitAllMethods <- function(weightMethods, ctx, numCores) {
     weightsList <- if (numCores >= 2) {
-        bpParam <- MulticoreParam(workers = numCores, RNGseed = 1L)
+        bpParam <- .bpSeedParam(numCores, ctx$rngSeed)
         bplapply(
             names(weightMethods),
             .computeMethodWeights,
@@ -1530,6 +1544,11 @@ learnTwasWeights <- function(
 # TwasWeights collection. `p` is the captured public arguments.
 # @noRd
 .learnTwasWeightsImpl <- function(p) {
+    # Seed the main-process RNG (used by serial method fitting); the parallel
+    # path is seeded via ctx$rngSeed in .twasFitAllMethods.
+    if (!is.null(p$seed)) {
+        set.seed(p$seed)
+    }
     retainFitDetail <- p$retainFitDetail
     retainFitDetail <- arg_match(retainFitDetail, c("slim", "full"))
     Y <- .twasValidateXY(p$X, p$Y)
@@ -1558,7 +1577,8 @@ learnTwasWeights <- function(
         retainFitDetail = retainFitDetail,
         standardized = p$standardized,
         dataType = p$dataType,
-        verbose = p$verbose
+        verbose = p$verbose,
+        rngSeed = p$seed
     )
     weightsList <- .twasFitAllMethods(
         weightMethods,

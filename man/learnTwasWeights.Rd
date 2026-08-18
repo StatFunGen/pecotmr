@@ -18,7 +18,8 @@ learnTwasWeights(
   standardized = FALSE,
   dataType = NULL,
   ldSketch = NULL,
-  verbose = 1
+  verbose = 1,
+  seed = NULL
 )
 }
 \arguments{
@@ -69,6 +70,11 @@ or \code{NULL}.}
 \item{verbose}{Integer controlling verbosity level: 0 = suppress all
 messages, 1 = suppress external package messages (default), 2 = show all
 messages including those from external packages.}
+
+\item{seed}{Integer or \code{NULL}. When supplied, seeds the main-process RNG
+via \code{set.seed} and the parallel method-fitting RNG via the
+\code{BiocParallel} \code{RNGseed}, for reproducibility under
+multi-threading. \code{NULL} (default) leaves the session RNG untouched.}
 }
 \value{
 A list where each element is named after a method and contains the

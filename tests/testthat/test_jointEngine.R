@@ -231,7 +231,8 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", 
             verbose = 1,
             mvPrior = NULL,
             mvPriorCv = NULL,
-            numThreads = 1
+            numThreads = 1,
+            seed = NULL
         ) {
             captured <<- list(
                 mvPriorCv = mvPriorCv,
@@ -523,6 +524,50 @@ test_that(".runJointCell: cross-context twas sumstats (mr.mash.rss) -> per-conte
     expect_equal(as.character(res$jointContexts), c("c1;c2", "c1;c2"))
     expect_false(is.matrix(getWeights(res$entry[[1L]])))
     expect_false(is.null(getFits(res$entry[[1L]])))
+})
+
+test_that("fitJointGroup(SumStats, Twas): real mr.mash-rss keys stat$n (regression)", {
+    skip_if_not_installed("mr.mashr")
+    # The sibling tests above mock mrmashRssWeights, so the real reader
+    # (.mrmashRssStats, which keys on stat$n) was never exercised. The method
+    # passed stat$N; `list(N = )$n` is NULL in R (no case-fold), so the fit
+    # errored in sqrt(nVec) on genuine summary-statistic input. This drives the
+    # unmocked fitter end to end.
+    set.seed(1)
+    p <- 30L
+    K <- 2L
+    nObs <- 400L
+    X <- matrix(rnorm(nObs * p), nObs, p)
+    colnames(X) <- paste0("v", seq_len(p))
+    R <- cor(X)
+    Z <- matrix(
+        rnorm(p * K),
+        nrow = p,
+        dimnames = list(colnames(X), c("c1", "c2"))
+    )
+    group <- new(
+        "SumStatsJointGroup",
+        conditions = data.frame(
+            study = "s1",
+            context = c("c1", "c2"),
+            trait = "t1",
+            stringsAsFactors = FALSE
+        ),
+        Z = Z,
+        R = R,
+        N = rep(nObs, K)
+    )
+    pipe <- new(
+        "TwasJointPipeline",
+        config = list(retainFitDetail = "slim", cvFolds = 0L)
+    )
+    entries <- suppressWarnings(suppressMessages(
+        fitJointGroup(group, pipe, "mrmash", list())
+    ))
+    expect_length(entries, K)
+    w <- getWeights(entries[[1L]])
+    expect_length(w, p)
+    expect_true(all(is.finite(w)))
 })
 
 test_that(".lookupJointCell: present cells resolve, absent cells error", {

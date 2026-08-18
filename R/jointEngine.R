@@ -306,7 +306,8 @@ setMethod(
         coverage = cfg$coverage,
         pos = group@pos,
         verbose = verbose,
-        numThreads = if (is.null(cfg$cvThreads)) 1L else cfg$cvThreads
+        numThreads = if (is.null(cfg$cvThreads)) 1L else cfg$cvThreads,
+        seed = cfg$seed
     )
     .fmSliceCv(cv, "fsusie")
 }
@@ -480,7 +481,8 @@ setMethod(
         verbose = verbose,
         mvPrior = mvPrior,
         mvPriorCv = mvPriorCv,
-        numThreads = if (is.null(cfg$cvThreads)) 1L else cfg$cvThreads
+        numThreads = if (is.null(cfg$cvThreads)) 1L else cfg$cvThreads,
+        seed = cfg$seed
     )
     .fmSliceCv(cv, "mvsusie")
 }
@@ -798,7 +800,8 @@ setMethod(
         retainFits = TRUE,
         standardized = stdz,
         dataType = cfg$dataType,
-        verbose = 0
+        verbose = 0,
+        seed = cfg$seed
     )
     piHat <- as.numeric(estimateSparsity(mrA))
     if (token == "bayes_c" && is.null(ma$pi)) {
@@ -845,7 +848,8 @@ setMethod(
         retainFitDetail = rfd,
         standardized = stdz,
         dataType = cfg$dataType,
-        verbose = verbose
+        verbose = verbose,
+        seed = cfg$seed
     )
     base <- tw$entry[[1L]]
     W <- getWeights(base)
@@ -913,7 +917,8 @@ setMethod(
         maxNumVariants = mcv,
         numThreads = if (is.null(cfg$cvThreads)) 1 else cfg$cvThreads,
         data_driven_priorMatricesCv = args$dataDrivenPriorMatricesCv,
-        verbose = verbose
+        verbose = verbose,
+        seed = cfg$seed
     )
     .jointTwasCvResult(cv, token)
 }
@@ -955,7 +960,7 @@ setMethod(
         cfg <- pipeline@config
         rfd <- if (is.null(cfg$retainFitDetail)) "slim" else cfg$retainFitDetail
         weights <- mrmashRssWeights(
-            stat = list(z = group@Z, N = group@N),
+            stat = list(z = group@Z, n = group@N),
             LD = group@R,
             retainFit = TRUE,
             fitDetail = rfd

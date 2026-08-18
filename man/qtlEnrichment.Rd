@@ -16,7 +16,8 @@ qtlEnrichment(
   besselCorrection = TRUE,
   numThreads = 1,
   verbose = TRUE,
-  alignNames = TRUE
+  alignNames = TRUE,
+  seed = NULL
 )
 }
 \arguments{
@@ -58,6 +59,11 @@ the caller has already aligned them (e.g. \code{qtlEnrichmentPipeline}
 aligns each QTL tuple once against the union GWAS panel rather than
 re-aligning per GWAS study); only the cheap per-study unmatched set is then
 recomputed, skipping the costly \code{harmonizeAlleles} pass.}
+
+\item{seed}{Integer or \code{NULL}. Base random seed for the multiple-
+imputation sampler; each imputation round derives its own seed from it, so
+a fixed \code{seed} gives reproducible results. \code{NULL} (default) draws
+a nondeterministic seed.}
 }
 \value{
 A list of enrichment parameter estimates

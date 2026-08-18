@@ -189,7 +189,8 @@ resolveLdInput <- function(
         gPvalueThreshold = p$gPvalueThreshold,
         duprThreshold = p$duprThreshold,
         ncpus = p$ncpus,
-        correctChenEtAlBug = p$correctChenEtAlBug
+        correctChenEtAlBug = p$correctChenEtAlBug,
+        seed = p$seed
     )
 }
 
@@ -278,6 +279,12 @@ resolveLdInput <- function(
 #'   \code{X} is provided. Passed to \code{computeLd}. One of \code{"sample"}
 #'   (default), \code{"population"}, or \code{"gcta"}. Ignored when \code{R} is
 #'   provided directly.
+#' @param seed Integer or \code{NULL}. Random seed for the iterative
+#'   variant-partitioning RNG. \code{NULL} (default) preserves the original
+#'   DENTIST hard-coded seeds (\code{10} for the initial partition,
+#'   \code{20000 + t * 20000} per iteration) for exact fidelity with the
+#'   reference binary; a provided seed makes the partitioning reproducible under
+#'   a value of your choosing.
 #'
 #' @return A data frame containing the imputed result and detected outliers.
 #'
@@ -350,7 +357,8 @@ dentist <- function(
     ncpus = 1,
     correctChenEtAlBug = TRUE,
     minDim = 2000,
-    ldMethod = "sample"
+    ldMethod = "sample",
+    seed = NULL
 ) {
     resolved <- resolveLdInput(
         R = R,
@@ -444,7 +452,8 @@ dentist <- function(
         p$gPvalueThreshold,
         as.integer(p$ncpus),
         p$correctChenEtAlBug,
-        verboseIter
+        verboseIter,
+        if (is.null(p$seed)) NULL else as.integer(p$seed)
     )
     rsqExceed <- res$rsqExceed
     res$rsqExceed <- NULL
@@ -510,6 +519,10 @@ dentist <- function(
 #'   \code{X} is provided. Passed to \code{computeLd}. One of \code{"sample"}
 #'   (default), \code{"population"}, or \code{"gcta"}. Ignored when \code{R} is
 #'   provided directly.
+#' @param seed Integer or \code{NULL}. Random seed for the iterative
+#'   variant-partitioning RNG. \code{NULL} (default) preserves the original
+#'   DENTIST hard-coded seeds (\code{10} for the initial partition,
+#'   \code{20000 + t * 20000} per iteration); a provided seed overrides them.
 #'
 #' @return Data frame with columns: original_z, imputed_z, iter_to_correct, rsq,
 #'   is_duplicate, outlier_stat, outlier.
@@ -534,7 +547,8 @@ dentistSingleWindow <- function(
     duprThreshold = 0.99,
     ncpus = 1,
     correctChenEtAlBug = TRUE,
-    ldMethod = "sample"
+    ldMethod = "sample",
+    seed = NULL
 ) {
     ld <- resolveLdInput(
         R = R,
@@ -553,7 +567,8 @@ dentistSingleWindow <- function(
         nIter = nIter,
         gPvalueThreshold = gPvalueThreshold,
         ncpus = ncpus,
-        correctChenEtAlBug = correctChenEtAlBug
+        correctChenEtAlBug = correctChenEtAlBug,
+        seed = seed
     )
     orgZscore <- zScore
     dedup <- .dentistDedup(zScore, ldMat, duprThreshold)

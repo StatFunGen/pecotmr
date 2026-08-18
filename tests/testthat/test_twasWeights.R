@@ -1358,7 +1358,7 @@ test_that("twasWeightsCv: warns when no random seed has been set", {
     }
     expect_message(
         twasWeightsCv(d$X, d$Y, fold = 2, weightMethods = NULL),
-        "No seed has been set"
+        "No seed set"
     )
 })
 

@@ -1595,7 +1595,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     fineMappingResult = NULL,
     fullFit = FALSE,
     fullFitAlphaOnly = TRUE,
-    includeAllCs = FALSE
+    includeAllCs = FALSE,
+    seed = NULL
 ) {
     # Run the joint dispatch once per region block, then merge per
     # (study, context, trait, method) across regions. A single block (cis or
@@ -1630,7 +1631,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
                 "verbose",
                 "fullFit",
                 "fullFitAlphaOnly",
-                "includeAllCs"
+                "includeAllCs",
+                "seed"
             )],
             list(ldSketch = NULL)
         )
@@ -1660,7 +1662,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     fineMappingResult = NULL,
     fullFit = FALSE,
     fullFitAlphaOnly = TRUE,
-    includeAllCs = FALSE
+    includeAllCs = FALSE,
+    seed = NULL
 ) {
     # Engine routing (jointEngine.R); one region block (the caller loops
     # regions).
@@ -1956,7 +1959,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     verbose,
     xRegions = list(NULL),
     retainFit = TRUE,
-    retainFitDetail = "slim"
+    retainFitDetail = "slim",
+    seed = NULL
 ) {
     # Run the joint dispatch once per region block, then merge per
     # (study, context, trait, method) across regions. A single block (cis or
@@ -1973,7 +1977,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         dataType = dataType,
         verbose = verbose,
         retainFit = retainFit,
-        retainFitDetail = retainFitDetail
+        retainFitDetail = retainFitDetail,
+        seed = seed
     )
     labs <- map_chr(xRegions, .twasRegionLabel)
     keep <- !map_lgl(perRegion, is.null)
@@ -1999,7 +2004,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     verbose,
     region = NULL,
     retainFit = TRUE,
-    retainFitDetail = "slim"
+    retainFitDetail = "slim",
+    seed = NULL
 ) {
     # Engine routing (jointEngine.R); one region block (the caller loops
     # regions).
@@ -2012,6 +2018,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
             cvFolds = 0L,
             fitFullData = TRUE,
             standardized = FALSE,
+            seed = seed,
             ldSketch = NULL
         )
     )
@@ -2105,7 +2112,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         "verbose",
         "xRegions",
         "retainFit",
-        "retainFitDetail"
+        "retainFitDetail",
+        "seed"
     )]
     for (qdName in names(qtlDatasets)) {
         qdArgs <- c(
@@ -2179,7 +2187,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     verbose,
     xRegions = list(NULL),
     retainFit = TRUE,
-    retainFitDetail = "slim"
+    retainFitDetail = "slim",
+    seed = NULL
 ) {
     args <- as.list(environment())
     qtlDatasets <- getQtlDatasets(data)
@@ -2288,7 +2297,8 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     dataType,
     verbose,
     retainFit,
-    retainFitDetail
+    retainFitDetail,
+    seed = NULL
 ) {
     .twasDispatchJointSpecsQtlDatasetOneRegion(
         parsedJointSpec,
@@ -2301,6 +2311,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         verbose,
         region = rg,
         retainFit = retainFit,
-        retainFitDetail = retainFitDetail
+        retainFitDetail = retainFitDetail,
+        seed = seed
     )
 }

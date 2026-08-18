@@ -12,6 +12,7 @@ qtlEnrichmentPipeline(
   lambda = 1,
   impN = 25,
   numThreads = 1L,
+  seed = NULL,
   ...
 )
 }
@@ -35,6 +36,10 @@ if the input PIP vector is not genome-wide.}
 
 \item{numThreads}{Number of threads used by \code{qtlEnrichment}. Default
 \code{1}.}
+
+\item{seed}{Integer or \code{NULL}. Base random seed forwarded to
+\code{\link{qtlEnrichment}} for reproducible multiple imputation.
+\code{NULL} (default) draws a nondeterministic seed.}
 
 \item{...}{Additional arguments forwarded to \code{\link{qtlEnrichment}}.}
 }

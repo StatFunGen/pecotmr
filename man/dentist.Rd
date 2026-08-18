@@ -20,7 +20,8 @@ dentist(
   ncpus = 1,
   correctChenEtAlBug = TRUE,
   minDim = 2000,
-  ldMethod = "sample"
+  ldMethod = "sample",
+  seed = NULL
 )
 }
 \arguments{
@@ -78,6 +79,13 @@ size).}
 \code{X} is provided. Passed to \code{computeLd}. One of \code{"sample"}
 (default), \code{"population"}, or \code{"gcta"}. Ignored when \code{R} is
 provided directly.}
+
+\item{seed}{Integer or \code{NULL}. Random seed for the iterative
+variant-partitioning RNG. \code{NULL} (default) preserves the original
+DENTIST hard-coded seeds (\code{10} for the initial partition,
+\code{20000 + t * 20000} per iteration) for exact fidelity with the
+reference binary; a provided seed makes the partitioning reproducible under
+a value of your choosing.}
 }
 \value{
 A data frame containing the imputed result and detected outliers.

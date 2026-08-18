@@ -16,6 +16,7 @@ twasWeightsCv(
   numThreads = 1,
   verbose = 1,
   retainFits = FALSE,
+  seed = NULL,
   ...
 )
 }
@@ -57,6 +58,13 @@ messages including those from external packages.}
 
 \item{retainFits}{Logical. Retain the per-fold / per-method fitted-model
 objects on the result. Default \code{FALSE}.}
+
+\item{seed}{Integer or \code{NULL}. When supplied, seeds both the
+main-process RNG (fold partitioning, variant sub-sampling) via
+\code{set.seed} and the parallel fold-fitting RNG via the
+\code{BiocParallel} \code{RNGseed}, so results are reproducible even under
+multi-threading. \code{NULL} (default) leaves the session RNG untouched and
+uses the historical parallel default.}
 
 \item{...}{Additional arguments forwarded to the per-method weight learners.}
 }

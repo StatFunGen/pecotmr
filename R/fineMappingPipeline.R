@@ -1954,7 +1954,8 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     verbose = 1,
     mvPrior = NULL,
     mvPriorCv = NULL,
-    numThreads = 1
+    numThreads = 1,
+    seed = NULL
 ) {
     if (length(tokens) == 0L) {
         return(NULL)
@@ -1980,7 +1981,8 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         fitFold = .fmFitFold,
         fitFoldCtx = cvFitCtx,
         numThreads = numThreads,
-        verbose = verbose
+        verbose = verbose,
+        seed = seed
     )
     list(
         samplePartition = res$samplePartition,
@@ -2083,7 +2085,8 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         af = afVec,
         fullFit = p$fullFit,
         fullFitAlphaOnly = p$fullFitAlphaOnly,
-        includeAllCs = p$includeAllCs
+        includeAllCs = p$includeAllCs,
+        seed = p$seed
     )
 }
 
@@ -2279,7 +2282,8 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         fineMappingResult = p$fineMappingResult,
         fullFit = p$fullFit,
         fullFitAlphaOnly = p$fullFitAlphaOnly,
-        includeAllCs = p$includeAllCs
+        includeAllCs = p$includeAllCs,
+        seed = p$seed
     )
 }
 

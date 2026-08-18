@@ -1865,10 +1865,13 @@ ldPruneByCorrelation <- function(
 #' @keywords internal
 #' @noRd
 # Correlation strategy: drop the most-connected column (random tie-break at 2).
-.dropCollinearPickCor <- function(X, problematicCols, verbose) {
+.dropCollinearPickCor <- function(X, problematicCols, verbose, seed = NULL) {
     corMatrix <- abs(cor(X[, problematicCols, drop = FALSE]))
     diag(corMatrix) <- 0
     if (length(problematicCols) == 2) {
+        if (!is.null(seed)) {
+            withr::local_seed(seed)
+        }
         colToRemove <- sample(problematicCols, 1)
         if (verbose) {
             msg <- glue(
@@ -1896,7 +1899,8 @@ ldPruneByCorrelation <- function(
     problematicCols,
     strategy,
     response,
-    verbose
+    verbose,
+    seed = NULL
 ) {
     if (strategy == "variance") {
         variances <- apply(X[, problematicCols, drop = FALSE], 2, var)
@@ -1911,7 +1915,7 @@ ldPruneByCorrelation <- function(
         return(colToRemove)
     }
     if (strategy == "correlation") {
-        return(.dropCollinearPickCor(X, problematicCols, verbose))
+        return(.dropCollinearPickCor(X, problematicCols, verbose, seed = seed))
     }
     if (is.null(response)) {
         msg <- glue(
@@ -1942,7 +1946,8 @@ dropCollinearColumns <- function(
     problematicCols,
     strategy = c("correlation", "variance", "response_correlation"),
     response = NULL,
-    verbose = FALSE
+    verbose = FALSE,
+    seed = NULL
 ) {
     strategy <- arg_match(strategy)
     if (length(problematicCols) == 0) {
@@ -1963,7 +1968,8 @@ dropCollinearColumns <- function(
         problematicCols,
         strategy,
         response,
-        verbose
+        verbose,
+        seed = seed
     )
     X[, !is_in(colnames(X), colToRemove), drop = FALSE]
 }
@@ -2023,7 +2029,15 @@ dropCollinearColumns <- function(
 }
 
 # Iteratively drop collinear columns until the design is full rank.
-.edfrIterate <- function(X, C, strategy, response, maxIterations, verbose) {
+.edfrIterate <- function(
+    X,
+    C,
+    strategy,
+    response,
+    maxIterations,
+    verbose,
+    seed = NULL
+) {
     iteration <- 0L
     Xdesign <- .ldBuildDesign(X, C)
     matrixRank <- qr(Xdesign)$rank
@@ -2037,7 +2051,8 @@ dropCollinearColumns <- function(
             problematicColnames,
             strategy = strategy,
             response = response,
-            verbose = verbose
+            verbose = verbose,
+            seed = seed
         )
         Xdesign <- .ldBuildDesign(X, C)
         matrixRank <- qr(Xdesign)$rank
@@ -2117,6 +2132,12 @@ dropCollinearColumns <- function(
 #'   \code{\link{ldPruneByCorrelation}} fallback, tried in order. Default
 #'   \code{seq(0.75, 0.5, by = -0.05)}.
 #' @param verbose Logical. If TRUE, print per-iteration progress. Default FALSE.
+#' @param seed Integer or \code{NULL}. Seeds the tie-break draw on the rare
+#'   occasion that exactly two equally-collinear columns are candidates for
+#'   removal (\code{strategy = "correlation"}), via a scoped
+#'   \code{withr::local_seed}, so the session RNG is left untouched. \code{NULL}
+#'   (default) leaves the draw under the session RNG, so an outer
+#'   \code{set.seed()} still governs it.
 #'
 #' @return The pruned predictor matrix \code{X} (covariates \code{C} are not
 #'   modified).
@@ -2138,7 +2159,8 @@ enforceDesignFullRank <- function(
     response = NULL,
     maxIterations = 300L,
     corrThresholds = seq(0.75, 0.5, by = -0.05),
-    verbose = FALSE
+    verbose = FALSE,
+    seed = NULL
 ) {
     strategy <- arg_match(strategy)
     originalColnames <- colnames(X)
@@ -2154,7 +2176,15 @@ enforceDesignFullRank <- function(
     }
     skipIterative <- .edfrCheckBatch(X, C, Xdesign, matrixRank, verbose)
     if (!skipIterative) {
-        X <- .edfrIterate(X, C, strategy, response, maxIterations, verbose)
+        X <- .edfrIterate(
+            X,
+            C,
+            strategy,
+            response,
+            maxIterations,
+            verbose,
+            seed = seed
+        )
     }
     X <- .edfrCorrelationFallback(X, C, corrThresholds, verbose)
     if (ncol(X) == 1L && initialNcol == 1L) {
@@ -2373,6 +2403,11 @@ extractLdMatrix <- function(ld, wantGenotype = FALSE) {
 #'   matrix X (\code{TRUE}) or LD correlation R (\code{FALSE}, default).
 #' @param maxVariants Integer or \code{NULL}. If set, randomly subsample blocks
 #'   larger than this to control memory usage.
+#' @param seed Integer or \code{NULL}. When \code{maxVariants} triggers
+#'   subsampling, seeds the draw (offset by the block index so each block is
+#'   independent yet reproducible) via a scoped \code{withr::local_seed}, so the
+#'   session RNG is left untouched. \code{NULL} (default) leaves the draw under
+#'   the session RNG, so an outer \code{set.seed()} still governs it.
 #'
 #' @return An \code{ldLoaderSpec} object (an opaque list describing the source).
 #'   Pass it with a block index to \code{\link{loadLdBlock}} to load one block.
@@ -2394,7 +2429,8 @@ ldLoader <- function(
     regions = NULL,
     ldInfo = NULL,
     returnGenotype = FALSE,
-    maxVariants = NULL
+    maxVariants = NULL,
+    seed = NULL
 ) {
     .ldLoaderValidate(rList, xList, ldMetaPath, regions, ldInfo)
     mode <- if (!is.null(rList)) {
@@ -2415,7 +2451,8 @@ ldLoader <- function(
             regions = regions,
             ldInfo = ldInfo,
             returnGenotype = returnGenotype,
-            maxVariants = maxVariants
+            maxVariants = maxVariants,
+            seed = seed
         ),
         class = "ldLoaderSpec"
     )
@@ -2505,6 +2542,9 @@ ldLoader <- function(
 # Dispatch a single block load by the spec's source mode.
 # @noRd
 .ldLoadBlock <- function(spec, g) {
+    if (!is.null(spec$seed)) {
+        withr::local_seed(as.integer(spec$seed) + as.integer(g))
+    }
     switch(
         spec$mode,
         rList = .ldLoadRList(g, spec$rList, spec$maxVariants),

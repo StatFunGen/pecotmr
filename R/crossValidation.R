@@ -129,8 +129,15 @@
     maxNumVariants = NULL,
     variantsToKeep = NULL,
     retainFits = FALSE,
-    verbose = 1
+    verbose = 1,
+    seed = NULL
 ) {
+    # Seed the main-process RNG (fold partitioning + variant sub-sampling). The
+    # parallel fold-fitting RNG is seeded separately via cvState$rngSeed below,
+    # since set.seed() does not reach BiocParallel workers.
+    if (!is.null(seed)) {
+        set.seed(seed)
+    }
     prep <- .cvPrepareData(X, Y, fold, verbose)
     X <- .cvSubsampleVariants(prep$X, maxNumVariants, variantsToKeep, verbose)
     Y <- prep$Y
@@ -151,7 +158,8 @@
         fitFold = fitFold,
         fitFoldCtx = fitFoldCtx,
         retainFits = retainFits,
-        verbose = verbose
+        verbose = verbose,
+        rngSeed = seed
     )
     foldResults <- .cvRunFolds(foldIds, cvState, numCores)
     agg <- .cvAggregate(foldResults, Y, verbose)
@@ -332,13 +340,23 @@
 
 # Run each fold (parallel via BiocParallel when >= 2 cores).
 # @noRd
+# MulticoreParam for CV / weight-fitting parallelism. A NULL seed keeps the
+# historical default RNGseed = 1L (reproducible); a caller-supplied seed
+# overrides it so the parallel L'Ecuyer streams are reproducible under it. This
+# is the one place a user seed reaches BiocParallel workers, which set.seed()
+# in the main process cannot.
+# @noRd
+.bpSeedParam <- function(numCores, seed = NULL) {
+    MulticoreParam(workers = numCores, RNGseed = as.integer(seed %||% 1L))
+}
+
 .cvRunFolds <- function(foldIds, cvState, numCores) {
     if (numCores >= 2) {
         return(bplapply(
             foldIds,
             .cvRunFold,
             cv = cvState,
-            BPPARAM = MulticoreParam(workers = numCores, RNGseed = 1L)
+            BPPARAM = .bpSeedParam(numCores, cvState$rngSeed)
         ))
     }
     map(foldIds, .cvRunFold, cv = cvState)

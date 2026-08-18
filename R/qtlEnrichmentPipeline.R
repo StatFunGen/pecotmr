@@ -38,6 +38,9 @@
 #'   \code{25}.
 #' @param numThreads Number of threads used by \code{qtlEnrichment}. Default
 #'   \code{1}.
+#' @param seed Integer or \code{NULL}. Base random seed forwarded to
+#'   \code{\link{qtlEnrichment}} for reproducible multiple imputation.
+#'   \code{NULL} (default) draws a nondeterministic seed.
 #' @param ... Additional arguments forwarded to \code{\link{qtlEnrichment}}.
 #' @return A tibble with one row per (gwasStudy, qtlStudy, qtlContext)
 #'   triple and columns \code{gwasStudy}, \code{qtlStudy}, \code{qtlContext},
@@ -60,6 +63,7 @@ qtlEnrichmentPipeline <- function(
     lambda = 1.0,
     impN = 25,
     numThreads = 1L,
+    seed = NULL,
     ...
 ) {
     .enrValidateInputs(gwasFineMappingResult, qtlFineMappingResult)
@@ -232,6 +236,7 @@ qtlEnrichmentPipeline <- function(
                     lambda = p$lambda,
                     impN = p$impN,
                     numThreads = p$numThreads,
+                    seed = p$seed,
                     alignNames = FALSE
                 ),
                 p$dots
@@ -511,6 +516,10 @@ qtlEnrichmentPipeline <- function(
 #' @param besselCorrection Logical. Apply Bessel's correction when estimating
 #'   the sampling variance. Default \code{TRUE}.
 #' @param verbose Logical. Print progress messages. Default \code{TRUE}.
+#' @param seed Integer or \code{NULL}. Base random seed for the multiple-
+#'   imputation sampler; each imputation round derives its own seed from it, so
+#'   a fixed \code{seed} gives reproducible results. \code{NULL} (default) draws
+#'   a nondeterministic seed.
 #' @return A list of enrichment parameter estimates
 #'
 #' @examples
@@ -561,7 +570,8 @@ qtlEnrichment <- function(
     besselCorrection = TRUE,
     numThreads = 1,
     verbose = TRUE,
-    alignNames = TRUE
+    alignNames = TRUE,
+    seed = NULL
 ) {
     piGwas <- .enrEstimatePiGwas(gwasPip, numGwas, verbose)
     piQtl <- .enrEstimatePiQtl(susieQtlRegions, piQtl, verbose)
@@ -581,7 +591,8 @@ qtlEnrichment <- function(
         shrinkageLambda = lambda,
         doubleShrinkage = doubleShrinkage,
         besselCorrection = besselCorrection,
-        numThreads = as.integer(numThreads)
+        numThreads = as.integer(numThreads),
+        seed = if (is.null(seed)) NULL else as.integer(seed)
     ))
     en$unused_xqtl_variants <- unmatchedVariants
     en

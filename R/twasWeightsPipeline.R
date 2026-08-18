@@ -1090,6 +1090,12 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 #'   \code{TwasWeightsEntry$dataType} (e.g. \code{"expression"}).
 #' @param verbose Verbosity (0 silent, 1 default, 2 includes external package
 #'   messages).
+#' @param seed Integer or \code{NULL}. When supplied (\code{QtlDataset} path),
+#'   seeds both the main-process RNG (\code{set.seed}) and the parallel
+#'   method-fitting / cross-validation RNG (\code{BiocParallel} \code{RNGseed})
+#'   for reproducibility under multi-threading. \code{NULL} (default) leaves the
+#'   session RNG untouched, so an outer \code{set.seed()} still governs the
+#'   main-process draws.
 #' @param ... Reserved for method-specific arguments.
 #'
 #' @return A \code{\link{TwasWeights}} collection keyed by \code{(study,
@@ -1180,6 +1186,7 @@ setMethod(
         dataType = NULL,
         naAction = c("drop", "impute"),
         verbose = 1,
+        seed = NULL,
         ...
     ) {
         naAction <- arg_match(naAction)
@@ -1300,7 +1307,8 @@ setMethod(
         p$verbose,
         xRegions = p$xRegions,
         retainFit = p$retainFit,
-        retainFitDetail = p$retainFitDetail
+        retainFitDetail = p$retainFitDetail,
+        seed = p$seed
     )
     keep <- setdiff(p$norm$tokens, intersect(p$norm$tokens, "mrmash"))
     if (length(keep) == 0L) {
@@ -1399,6 +1407,7 @@ setMethod(
             cvThreads = p$cvThreads,
             estimatePi = p$estimatePi,
             verbose = p$verbose,
+            seed = p$seed,
             ldSketch = NULL
         )
     )
@@ -2173,7 +2182,8 @@ setMethod(
             fineMappingResult = cfg$fineMappingResult,
             twasWeights = cfg$twasWeights,
             naAction = cfg$naAction,
-            verbose = cfg$verbose
+            verbose = cfg$verbose,
+            seed = cfg$seed
         ),
         cfg$dotArgs
     )
@@ -2223,6 +2233,7 @@ setMethod(
         genotypeCovariatesToResidualize = NULL,
         residualizePhenotypeCovariates = TRUE,
         residualizeGenotypeCovariates = TRUE,
+        seed = NULL,
         ...
     ) {
         naAction <- arg_match(naAction)
@@ -2310,7 +2321,8 @@ setMethod(
         p$verbose,
         xRegions = xRegions,
         retainFit = p$retainFit,
-        retainFitDetail = p$retainFitDetail
+        retainFitDetail = p$retainFitDetail,
+        seed = p$seed
     )
     methods <- .twasMsStripMrmash(p$methods)
     if (.twasMethodsEmpty(methods)) {
@@ -2340,6 +2352,7 @@ setMethod(
         twasWeights = p$twasWeights,
         naAction = p$naAction,
         verbose = p$verbose,
+        seed = p$seed,
         dotArgs = p$dots
     )
     .multiStudyPipelineDriver(

@@ -49,6 +49,7 @@ twasWeightsPipeline(data, ...)
   dataType = NULL,
   naAction = c("drop", "impute"),
   verbose = 1,
+  seed = NULL,
   ...
 )
 
@@ -86,6 +87,7 @@ twasWeightsPipeline(data, ...)
   genotypeCovariatesToResidualize = NULL,
   residualizePhenotypeCovariates = TRUE,
   residualizeGenotypeCovariates = TRUE,
+  seed = NULL,
   ...
 )
 
@@ -225,6 +227,13 @@ data.}
 
 \item{verbose}{Verbosity (0 silent, 1 default, 2 includes external package
 messages).}
+
+\item{seed}{Integer or \code{NULL}. When supplied (\code{QtlDataset} path),
+seeds both the main-process RNG (\code{set.seed}) and the parallel
+method-fitting / cross-validation RNG (\code{BiocParallel} \code{RNGseed})
+for reproducibility under multi-threading. \code{NULL} (default) leaves the
+session RNG untouched, so an outer \code{set.seed()} still governs the
+main-process draws.}
 }
 \value{
 A \code{\link{TwasWeights}} collection keyed by \code{(study,

@@ -214,7 +214,8 @@ std::map<std::string, double> qtl_enrichment_workhorse(
 	double                          shrinkage_lambda,
 	bool                            double_shrinkage = false,
 	bool                            bessel_correction = true,
-	int                             num_threads = 4)
+	int                             num_threads = 4,
+	unsigned int                    base_seed = 0)
 {
 
 	std::vector<double> a0_vec(ImpN, 0.0);
@@ -235,9 +236,10 @@ std::map<std::string, double> qtl_enrichment_workhorse(
 
 	#pragma omp parallel for num_threads(num_threads)
 	for (int k = 0; k < ImpN; k++) {
-		// Initialize the RNG for this thread
-		std::random_device rd;
-		std::mt19937 gen(rd());
+		// Per-round RNG seeded deterministically from the base seed plus the
+		// round index, so results are reproducible for a given base_seed
+		// regardless of which thread runs this round.
+		std::mt19937 gen(base_seed + static_cast<unsigned int>(k));
 
 		// Use QTL to annotate GWAS variants
 		std::vector<int> annotation_vector(gwas_pip.size(), 0);

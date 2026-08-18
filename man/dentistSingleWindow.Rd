@@ -17,7 +17,8 @@ dentistSingleWindow(
   duprThreshold = 0.99,
   ncpus = 1,
   correctChenEtAlBug = TRUE,
-  ldMethod = "sample"
+  ldMethod = "sample",
+  seed = NULL
 )
 }
 \arguments{
@@ -54,6 +55,11 @@ is TRUE.}
 \code{X} is provided. Passed to \code{computeLd}. One of \code{"sample"}
 (default), \code{"population"}, or \code{"gcta"}. Ignored when \code{R} is
 provided directly.}
+
+\item{seed}{Integer or \code{NULL}. Random seed for the iterative
+variant-partitioning RNG. \code{NULL} (default) preserves the original
+DENTIST hard-coded seeds (\code{10} for the initial partition,
+\code{20000 + t * 20000} per iteration); a provided seed overrides them.}
 }
 \value{
 Data frame with columns: original_z, imputed_z, iter_to_correct, rsq,

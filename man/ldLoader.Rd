@@ -11,7 +11,8 @@ ldLoader(
   regions = NULL,
   ldInfo = NULL,
   returnGenotype = FALSE,
-  maxVariants = NULL
+  maxVariants = NULL,
+  seed = NULL
 )
 }
 \arguments{
@@ -37,6 +38,12 @@ matrix X (\code{TRUE}) or LD correlation R (\code{FALSE}, default).}
 
 \item{maxVariants}{Integer or \code{NULL}. If set, randomly subsample blocks
 larger than this to control memory usage.}
+
+\item{seed}{Integer or \code{NULL}. When \code{maxVariants} triggers
+subsampling, seeds the draw (offset by the block index so each block is
+independent yet reproducible) via a scoped \code{withr::local_seed}, so the
+session RNG is left untouched. \code{NULL} (default) leaves the draw under
+the session RNG, so an outer \code{set.seed()} still governs it.}
 }
 \value{
 An \code{ldLoaderSpec} object (an opaque list describing the source).
