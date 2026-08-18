@@ -23,9 +23,14 @@ A \code{list} with \code{variantIds} (character) and \code{weights}
   (numeric) of equal length; both empty when no usable weights are present.
 }
 \description{
-Return an aligned \code{(variantIds, weights)} pair from a single
-  weight-source entry, so cTWAS and \code{\link{causalInferencePipeline}}
-  extract weights identically whether the source is a
-  \code{TwasWeightsEntry} (its learned weight vector) or a
+Return an aligned \code{(variantIds, weights)} pair from a
+  single weight-source entry, so cTWAS and
+  \code{\link{causalInferencePipeline}} extract weights identically whether
+  the source is a \code{TwasWeightsEntry} (its learned weight vector) or a
   \code{FineMappingEntry} (its topLoci posterior effect).
+}
+\examples{
+twe <- TwasWeightsEntry(variantIds = paste0("v", 1:4),
+  weights = rep(0.1, 4), cvResult = list(rsq = 0.5), standardized = FALSE)
+resolveWeights(twe)
 }

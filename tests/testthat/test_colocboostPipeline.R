@@ -73,8 +73,8 @@ context("colocboostPipeline")
 
 # Sentinel test so the testthat context is non-empty.
 test_that("colocboostPipeline is exported as an S4 generic", {
-  expect_true("colocboostPipeline" %in% getNamespaceExports("pecotmr"))
-  expect_true(methods::isGeneric("colocboostPipeline"))
+    expect_true("colocboostPipeline" %in% getNamespaceExports("pecotmr"))
+    expect_true(methods::isGeneric("colocboostPipeline"))
 })
 
 
@@ -89,114 +89,155 @@ context("colocboostPipeline (S4 dispatch)")
 # .cbRequireMatchingLdSketches, .cbEmptyResult) are exercised directly.
 # ===========================================================================
 
-.cbp_makeHandle <- function(snp_n = 6L, n_samples = 30L,
-                            sample_prefix = "s") {
-  new("GenotypeHandle",
-    path = "/tmp/cb.gds",
-    format = "gds",
-    snpInfo = data.frame(
-      SNP = paste0("v", seq_len(snp_n)),
-      CHR = rep("1", snp_n),
-      BP  = seq(100L, by = 100L, length.out = snp_n),
-      A1  = rep("A", snp_n),
-      A2  = rep("G", snp_n),
-      stringsAsFactors = FALSE),
-    nSamples = n_samples,
-    sampleIds = paste0(sample_prefix, seq_len(n_samples)),
-    pgenPtr = NULL)
+.cbp_makeHandle <- function(snp_n = 6L, n_samples = 30L, sample_prefix = "s") {
+    new(
+        "GenotypeHandle",
+        path = "/tmp/cb.gds",
+        format = "gds",
+        snpInfo = data.frame(
+            SNP = paste0("v", seq_len(snp_n)),
+            CHR = rep("1", snp_n),
+            BP = seq(100L, by = 100L, length.out = snp_n),
+            A1 = rep("A", snp_n),
+            A2 = rep("G", snp_n),
+            stringsAsFactors = FALSE
+        ),
+        nSamples = n_samples,
+        sampleIds = paste0(sample_prefix, seq_len(n_samples)),
+        pgenPtr = NULL
+    )
 }
 
 .cbp_mockExtractor <- function(seed = 11, n_samples = 30L) {
-  function(handle, snpIdx, meanImpute = TRUE) {
-    set.seed(seed)
-    panel <- matrix(rbinom(n_samples * nrow(handle@snpInfo), 2, 0.3),
-                    nrow = n_samples, ncol = nrow(handle@snpInfo),
-                    dimnames = list(handle@sampleIds, handle@snpInfo$SNP))
-    sub <- panel[, snpIdx, drop = FALSE]
-    rr <- GenomicRanges::GRanges(
-      seqnames = paste0("chr", handle@snpInfo$CHR[snpIdx]),
-      ranges   = IRanges::IRanges(start = handle@snpInfo$BP[snpIdx], width = 1L))
-    S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-      SNP = handle@snpInfo$SNP[snpIdx],
-      A1  = handle@snpInfo$A1[snpIdx],
-      A2  = handle@snpInfo$A2[snpIdx])
-    cd <- S4Vectors::DataFrame(sampleId = handle@sampleIds,
-                               row.names = handle@sampleIds)
-    dosage <- t(sub)
-    rownames(dosage) <- handle@snpInfo$SNP[snpIdx]
-    colnames(dosage) <- handle@sampleIds
-    SummarizedExperiment::SummarizedExperiment(
-      assays    = list(dosage = dosage),
-      rowRanges = rr,
-      colData   = cd)
-  }
+    function(handle, snpIdx, meanImpute = TRUE) {
+        set.seed(seed)
+        panel <- matrix(
+            rbinom(n_samples * nrow(handle@snpInfo), 2, 0.3),
+            nrow = n_samples,
+            ncol = nrow(handle@snpInfo),
+            dimnames = list(handle@sampleIds, handle@snpInfo$SNP)
+        )
+        sub <- panel[, snpIdx, drop = FALSE]
+        rr <- GenomicRanges::GRanges(
+            seqnames = paste0("chr", handle@snpInfo$CHR[snpIdx]),
+            ranges = IRanges::IRanges(
+                start = handle@snpInfo$BP[snpIdx],
+                width = 1L
+            )
+        )
+        S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
+            SNP = handle@snpInfo$SNP[snpIdx],
+            A1 = handle@snpInfo$A1[snpIdx],
+            A2 = handle@snpInfo$A2[snpIdx]
+        )
+        cd <- S4Vectors::DataFrame(
+            sampleId = handle@sampleIds,
+            row.names = handle@sampleIds
+        )
+        dosage <- t(sub)
+        rownames(dosage) <- handle@snpInfo$SNP[snpIdx]
+        colnames(dosage) <- handle@sampleIds
+        SummarizedExperiment::SummarizedExperiment(
+            assays = list(dosage = dosage),
+            rowRanges = rr,
+            colData = cd
+        )
+    }
 }
 
 .cbp_makeSe <- function(traits = c("ENSG_A", "ENSG_B"), n_samples = 30L) {
-  rng <- GenomicRanges::GRanges(
-    seqnames = rep("chr1", length(traits)),
-    ranges = IRanges::IRanges(start = seq(1000L, by = 1000L,
-                                          length.out = length(traits)),
-                              width = 500L))
-  names(rng) <- traits
-  set.seed(0)
-  expr <- matrix(rnorm(length(traits) * n_samples),
-                 nrow = length(traits), ncol = n_samples,
-                 dimnames = list(traits, paste0("s", seq_len(n_samples))))
-  cd <- S4Vectors::DataFrame(
-    sex = rep(c(0, 1), length.out = n_samples),
-    age = seq_len(n_samples),
-    row.names = paste0("s", seq_len(n_samples)))
-  SummarizedExperiment::SummarizedExperiment(
-    assays    = list(expression = expr),
-    rowRanges = rng,
-    colData   = cd)
+    rng <- GenomicRanges::GRanges(
+        seqnames = rep("chr1", length(traits)),
+        ranges = IRanges::IRanges(
+            start = seq(1000L, by = 1000L, length.out = length(traits)),
+            width = 500L
+        )
+    )
+    names(rng) <- traits
+    set.seed(0)
+    expr <- matrix(
+        rnorm(length(traits) * n_samples),
+        nrow = length(traits),
+        ncol = n_samples,
+        dimnames = list(traits, paste0("s", seq_len(n_samples)))
+    )
+    cd <- S4Vectors::DataFrame(
+        sex = rep(c(0, 1), length.out = n_samples),
+        age = seq_len(n_samples),
+        row.names = paste0("s", seq_len(n_samples))
+    )
+    SummarizedExperiment::SummarizedExperiment(
+        assays = list(expression = expr),
+        rowRanges = rng,
+        colData = cd
+    )
 }
 
-.cbp_makeQtlDataset <- function(contexts = "brain",
-                                traits = c("ENSG_A", "ENSG_B")) {
-  gh <- .cbp_makeHandle()
-  phen <- setNames(lapply(contexts, function(.) .cbp_makeSe(traits = traits)),
-                   contexts)
-  QtlDataset(
-    study              = "study1",
-    genotypes          = gh,
-    phenotypes         = phen,
-    genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0))
+.cbp_makeQtlDataset <- function(
+    contexts = "brain",
+    traits = c("ENSG_A", "ENSG_B")
+) {
+    gh <- .cbp_makeHandle()
+    phen <- setNames(
+        lapply(contexts, function(.) .cbp_makeSe(traits = traits)),
+        contexts
+    )
+    QtlDataset(
+        study = "study1",
+        genotypes = gh,
+        phenotypes = phen,
+        genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
+    )
 }
 
 .cbp_makeQtlSumStats <- function(qc = TRUE) {
-  gr <- GenomicRanges::GRanges(
-    seqnames = "chr1",
-    ranges = IRanges::IRanges(start = seq(100L, by = 100L, length.out = 5L),
-                              width = 1L))
-  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-    SNP = paste0("v", 1:5),
-    A1  = rep("A", 5), A2  = rep("G", 5),
-    Z   = rnorm(5), N = rep(1000L, 5))
-  QtlSumStats(
-    study    = "Q1", context = "c1", trait = "t1",
-    entry    = list(gr),
-    genome   = "hg19",
-    ldSketch = .cbp_makeHandle(),
-    qcInfo   = if (qc) list(step1 = "ok") else list())
+    gr <- GenomicRanges::GRanges(
+        seqnames = "chr1",
+        ranges = IRanges::IRanges(
+            start = seq(100L, by = 100L, length.out = 5L),
+            width = 1L
+        )
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = paste0("v", 1:5),
+        A1 = rep("A", 5),
+        A2 = rep("G", 5),
+        Z = rnorm(5),
+        N = rep(1000L, 5)
+    )
+    QtlSumStats(
+        study = "Q1",
+        context = "c1",
+        trait = "t1",
+        entry = list(gr),
+        genome = "hg19",
+        ldSketch = .cbp_makeHandle(),
+        qcInfo = if (qc) list(step1 = "ok") else list()
+    )
 }
 
 .cbp_makeGwasSumStats <- function(qc = TRUE) {
-  gr <- GenomicRanges::GRanges(
-    seqnames = "chr1",
-    ranges = IRanges::IRanges(start = seq(100L, by = 100L, length.out = 5L),
-                              width = 1L))
-  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-    SNP = paste0("v", 1:5),
-    A1  = rep("A", 5), A2  = rep("G", 5),
-    Z   = rnorm(5), N = rep(1000L, 5))
-  GwasSumStats(
-    study    = "G1",
-    entry    = list(gr),
-    genome   = "hg19",
-    ldSketch = .cbp_makeHandle(),
-    qcInfo   = if (qc) list(step1 = "ok") else list())
+    gr <- GenomicRanges::GRanges(
+        seqnames = "chr1",
+        ranges = IRanges::IRanges(
+            start = seq(100L, by = 100L, length.out = 5L),
+            width = 1L
+        )
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = paste0("v", 1:5),
+        A1 = rep("A", 5),
+        A2 = rep("G", 5),
+        Z = rnorm(5),
+        N = rep(1000L, 5)
+    )
+    GwasSumStats(
+        study = "G1",
+        entry = list(gr),
+        genome = "hg19",
+        ldSketch = .cbp_makeHandle(),
+        qcInfo = if (qc) list(step1 = "ok") else list()
+    )
 }
 
 # ===========================================================================
@@ -204,103 +245,121 @@ context("colocboostPipeline (S4 dispatch)")
 # ===========================================================================
 
 test_that(".cbBuildLdArgs: square matrices route to LD", {
-  R1 <- diag(4); R2 <- diag(4)
-  res <- pecotmr:::.cbBuildLdArgs(list(R1, R2))
-  expect_true("LD" %in% names(res))
-  expect_false("X_ref" %in% names(res))
+    R1 <- diag(4)
+    R2 <- diag(4)
+    res <- pecotmr:::.cbBuildLdArgs(list(R1, R2))
+    expect_true("LD" %in% names(res))
+    expect_false("X_ref" %in% names(res))
 })
 
 test_that(".cbBuildLdArgs: non-square matrices route to X_ref", {
-  X1 <- matrix(0, 10, 4)
-  res <- pecotmr:::.cbBuildLdArgs(list(X1))
-  expect_true("X_ref" %in% names(res))
+    X1 <- matrix(0, 10, 4)
+    res <- pecotmr:::.cbBuildLdArgs(list(X1))
+    expect_true("X_ref" %in% names(res))
 })
 
 test_that(".cbBuildLdArgs: empty list returns empty list", {
-  expect_equal(pecotmr:::.cbBuildLdArgs(list()), list())
+    expect_equal(pecotmr:::.cbBuildLdArgs(list()), list())
 })
 
 test_that(".cbScreenSpec enforces one metric and threads the right spec", {
-  expect_error(pecotmr:::.cbScreenSpec(0.5, 5, 0, 0), "one signal screen")
-  expect_equal(pecotmr:::.cbScreenSpec(0, 5, 0, 0), list(metric = "absZ", cutoff = 5))
-  expect_equal(pecotmr:::.cbScreenSpec(0, 0, 100, 0), list(metric = "bf", cutoff = 100))
-  expect_equal(pecotmr:::.cbScreenSpec(0.3, 0, 0, 0), 0.3)          # legacy pip scalar
-  expect_equal(pecotmr:::.cbScreenSpec(c(brain = 0.3), 0, 0, 0),
-               c(brain = 0.3))                                       # context-named pass-through
+    expect_error(pecotmr:::.cbScreenSpec(0.5, 5, 0, 0), "one signal screen")
+    expect_equal(
+        pecotmr:::.cbScreenSpec(0, 5, 0, 0),
+        list(metric = "absZ", cutoff = 5)
+    )
+    expect_equal(
+        pecotmr:::.cbScreenSpec(0, 0, 100, 0),
+        list(metric = "bf", cutoff = 100)
+    )
+    expect_equal(pecotmr:::.cbScreenSpec(0.3, 0, 0, 0), 0.3) # legacy pip scalar
+    expect_equal(
+        pecotmr:::.cbScreenSpec(c(brain = 0.3), 0, 0, 0),
+        c(brain = 0.3)
+    ) # context-named pass-through
 })
 
 test_that(".cbResolveCutoff passes a screen object through uniformly", {
-  sc <- list(metric = "absZ", cutoff = 5)
-  expect_identical(pecotmr:::.cbResolveCutoff(sc, "brain"), sc)
-  expect_identical(pecotmr:::.cbResolveCutoff(sc, "blood"), sc)
-  expect_equal(pecotmr:::.cbResolveCutoff(c(brain = 0.3), "brain"), 0.3)
-  expect_equal(pecotmr:::.cbResolveCutoff(c(brain = 0.3), "blood"), 0)  # unlisted ctx
-  expect_equal(pecotmr:::.cbResolveCutoff(0.5, "any"), 0.5)
+    sc <- list(metric = "absZ", cutoff = 5)
+    expect_identical(pecotmr:::.cbResolveCutoff(sc, "brain"), sc)
+    expect_identical(pecotmr:::.cbResolveCutoff(sc, "blood"), sc)
+    expect_equal(pecotmr:::.cbResolveCutoff(c(brain = 0.3), "brain"), 0.3)
+    expect_equal(pecotmr:::.cbResolveCutoff(c(brain = 0.3), "blood"), 0) # unlisted ctx
+    expect_equal(pecotmr:::.cbResolveCutoff(0.5, "any"), 0.5)
 })
 
 test_that("colocboostPipeline(QtlDataset): enabling two screen metrics errors", {
-  qd <- .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
-  # .cbScreenSpec runs before the bundle/engine, so this fails fast.
-  expect_error(
-    colocboostPipeline(qd, pipCutoffToSkip = 0.5, bfCutoffToSkip = 100),
-    "one signal screen")
+    qd <- .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    # .cbScreenSpec runs before the bundle/engine, so this fails fast.
+    expect_error(
+        colocboostPipeline(qd, pipCutoffToSkip = 0.5, bfCutoffToSkip = 100),
+        "one signal screen"
+    )
 })
 
 test_that(".cbRequireSumStatsQc: un-QCd input errors", {
-  ss <- .cbp_makeQtlSumStats(qc = FALSE)
-  expect_error(
-    pecotmr:::.cbRequireSumStatsQc(ss, "qtlData"),
-    "summaryStatsQc"
-  )
+    ss <- .cbp_makeQtlSumStats(qc = FALSE)
+    expect_error(
+        pecotmr:::.cbRequireSumStatsQc(ss, "qtlData"),
+        "summaryStatsQc"
+    )
 })
 
 test_that(".cbRequireSumStatsQc: NULL input is a no-op", {
-  expect_silent(pecotmr:::.cbRequireSumStatsQc(NULL, "x"))
+    expect_silent(pecotmr:::.cbRequireSumStatsQc(NULL, "x"))
 })
 
 test_that(".cbRequireSumStatsQc: QCd input passes", {
-  ss <- .cbp_makeQtlSumStats(qc = TRUE)
-  expect_silent(pecotmr:::.cbRequireSumStatsQc(ss, "x"))
+    ss <- .cbp_makeQtlSumStats(qc = TRUE)
+    expect_silent(pecotmr:::.cbRequireSumStatsQc(ss, "x"))
 })
 
 
 test_that(".cbRequireMatchingLdSketches: NULL sides are allowed", {
-  expect_silent(pecotmr:::.cbRequireMatchingLdSketches(
-    NULL, .cbp_makeHandle()))
-  expect_silent(pecotmr:::.cbRequireMatchingLdSketches(
-    .cbp_makeHandle(), NULL))
+    expect_silent(pecotmr:::.cbRequireMatchingLdSketches(
+        NULL,
+        .cbp_makeHandle()
+    ))
+    expect_silent(pecotmr:::.cbRequireMatchingLdSketches(
+        .cbp_makeHandle(),
+        NULL
+    ))
 })
 
 test_that(".cbRequireMatchingLdSketches: variant-count mismatch errors", {
-  expect_error(
-    pecotmr:::.cbRequireMatchingLdSketches(
-      .cbp_makeHandle(snp_n = 4L),
-      .cbp_makeHandle(snp_n = 5L)),
-    "differ in size"
-  )
+    expect_error(
+        pecotmr:::.cbRequireMatchingLdSketches(
+            .cbp_makeHandle(snp_n = 4L),
+            .cbp_makeHandle(snp_n = 5L)
+        ),
+        "differ in size"
+    )
 })
 
 test_that(".cbMergeSumstatBundles: empty input gives empty dict", {
-  res <- pecotmr:::.cbMergeSumstatBundles(list())
-  expect_equal(length(res$sumstat), 0L)
-  expect_equal(length(res$LD), 0L)
-  expect_equal(nrow(res$dict_sumstatLD), 0L)
+    res <- pecotmr:::.cbMergeSumstatBundles(list())
+    expect_equal(length(res$sumstat), 0L)
+    expect_equal(length(res$LD), 0L)
+    expect_equal(nrow(res$dict_sumstatLD), 0L)
 })
 
 test_that(".cbMergeSumstatBundles: identical LD matrices are deduplicated", {
-  R <- diag(3)
-  bundles <- list(
-    a = list(sumstat = data.frame(z = 1:3), LD = R),
-    b = list(sumstat = data.frame(z = 4:6), LD = R))
-  res <- pecotmr:::.cbMergeSumstatBundles(bundles)
-  expect_equal(length(res$LD), 1L)
-  expect_equal(unique(res$dict_sumstatLD[, 2L]), 1L)
+    R <- diag(3)
+    bundles <- list(
+        a = list(sumstat = data.frame(z = 1:3), LD = R),
+        b = list(sumstat = data.frame(z = 4:6), LD = R)
+    )
+    res <- pecotmr:::.cbMergeSumstatBundles(bundles)
+    expect_equal(length(res$LD), 1L)
+    expect_equal(unique(res$dict_sumstatLD[, 2L]), 1L)
 })
 
 test_that(".cbEmptyResult: matches the documented schema", {
-  res <- pecotmr:::.cbEmptyResult()
-  expect_true(all(c("xqtl_coloc", "joint_gwas", "separate_gwas",
-                    "computing_time") %in% names(res)))
+    res <- pecotmr:::.cbEmptyResult()
+    expect_true(all(
+        c("xqtl_coloc", "joint_gwas", "separate_gwas", "computing_time") %in%
+            names(res)
+    ))
 })
 
 # ===========================================================================
@@ -308,36 +367,49 @@ test_that(".cbEmptyResult: matches the documented schema", {
 # ===========================================================================
 
 test_that("colocboostPipeline(QtlDataset): runs xqtl-only ColocBoost with mocked engine", {
-  qd <- .cbp_makeQtlDataset()
-  capturedArgs <- NULL
-  local_mocked_bindings(
-    extractBlockGenotypes = .cbp_mockExtractor(),
-    .package = "pecotmr")
-  local_mocked_bindings(
-    colocboost = function(...) {
-      capturedArgs <<- list(...)
-      list(stub = TRUE)
-    },
-    .package = "colocboost")
-  out <- suppressMessages(
-    colocboostPipeline(qd, xqtlColoc = TRUE, jointGwas = FALSE,
-                       separateGwas = FALSE))
-  expect_true(!is.null(out$xqtl_coloc))
-  expect_equal(out$xqtl_coloc$stub, TRUE)
-  expect_true("X" %in% names(capturedArgs))
+    qd <- .cbp_makeQtlDataset()
+    capturedArgs <- NULL
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        colocboost = function(...) {
+            capturedArgs <<- list(...)
+            list(stub = TRUE)
+        },
+        .package = "colocboost"
+    )
+    out <- suppressMessages(
+        colocboostPipeline(
+            qd,
+            xqtlColoc = TRUE,
+            jointGwas = FALSE,
+            separateGwas = FALSE
+        )
+    )
+    expect_true(!is.null(out$xqtl_coloc))
+    expect_equal(out$xqtl_coloc$stub, TRUE)
+    expect_true("X" %in% names(capturedArgs))
 })
 
 test_that("colocboostPipeline(QtlDataset): no QTL bundle and no GWAS returns empty result", {
-  qd <- .cbp_makeQtlDataset()
-  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
-                        .package = "pecotmr")
-  # An impossible traitId narrows the phenotype matrix to zero columns;
-  # the bundle ends up NULL and the driver short-circuits.
-  out <- suppressMessages(suppressWarnings(
-    colocboostPipeline(qd, contexts = "brain",
-                       traitId = "ENSG_DOES_NOT_EXIST",
-                       xqtlColoc = TRUE)))
-  expect_null(out$xqtl_coloc)
+    qd <- .cbp_makeQtlDataset()
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    # An impossible traitId narrows the phenotype matrix to zero columns;
+    # the bundle ends up NULL and the driver short-circuits.
+    out <- suppressMessages(suppressWarnings(
+        colocboostPipeline(
+            qd,
+            contexts = "brain",
+            traitId = "ENSG_DOES_NOT_EXIST",
+            xqtlColoc = TRUE
+        )
+    ))
+    expect_null(out$xqtl_coloc)
 })
 
 # ===========================================================================
@@ -345,11 +417,11 @@ test_that("colocboostPipeline(QtlDataset): no QTL bundle and no GWAS returns emp
 # ===========================================================================
 
 test_that("colocboostPipeline(QtlSumStats): un-QCd input rejected", {
-  ss <- .cbp_makeQtlSumStats(qc = FALSE)
-  expect_error(
-    colocboostPipeline(ss, xqtlColoc = TRUE),
-    "summaryStatsQc"
-  )
+    ss <- .cbp_makeQtlSumStats(qc = FALSE)
+    expect_error(
+        colocboostPipeline(ss, xqtlColoc = TRUE),
+        "summaryStatsQc"
+    )
 })
 
 
@@ -358,10 +430,10 @@ test_that("colocboostPipeline(QtlSumStats): un-QCd input rejected", {
 # ===========================================================================
 
 test_that("colocboostPipeline(ANY): unsupported input class errors", {
-  expect_error(
-    colocboostPipeline(matrix(0, 3, 3)),
-    "does not accept inputs of class"
-  )
+    expect_error(
+        colocboostPipeline(matrix(0, 3, 3)),
+        "does not accept inputs of class"
+    )
 })
 
 # ===========================================================================
@@ -369,84 +441,124 @@ test_that("colocboostPipeline(ANY): unsupported input class errors", {
 # ===========================================================================
 
 test_that("colocboostPipeline: jointGwas merges qtl + gwas sumstats and runs once", {
-  ss <- .cbp_makeQtlSumStats()
-  gs <- .cbp_makeGwasSumStats()
-  capturedArgs <- NULL
-  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
-                        .package = "pecotmr")
-  local_mocked_bindings(
-    colocboost = function(...) {
-      capturedArgs <<- list(...)
-      list(jointly_run = TRUE)
-    },
-    .package = "colocboost")
-  out <- suppressMessages(
-    colocboostPipeline(ss, gwasSumStats = gs,
-                       xqtlColoc = FALSE, jointGwas = TRUE,
-                       separateGwas = FALSE))
-  expect_true(!is.null(out$joint_gwas))
+    ss <- .cbp_makeQtlSumStats()
+    gs <- .cbp_makeGwasSumStats()
+    capturedArgs <- NULL
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        colocboost = function(...) {
+            capturedArgs <<- list(...)
+            list(jointly_run = TRUE)
+        },
+        .package = "colocboost"
+    )
+    out <- suppressMessages(
+        colocboostPipeline(
+            ss,
+            gwasSumStats = gs,
+            xqtlColoc = FALSE,
+            jointGwas = TRUE,
+            separateGwas = FALSE
+        )
+    )
+    expect_true(!is.null(out$joint_gwas))
 })
 
 test_that("colocboostPipeline: separateGwas runs once per merged sumstat study", {
-  ss <- .cbp_makeQtlSumStats()
-  gs <- .cbp_makeGwasSumStats()
-  callCount <- 0
-  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
-                        .package = "pecotmr")
-  local_mocked_bindings(
-    colocboost = function(...) {
-      callCount <<- callCount + 1L
-      list(round = callCount)
-    },
-    .package = "colocboost")
-  out <- suppressMessages(
-    colocboostPipeline(ss, gwasSumStats = gs,
-                       xqtlColoc = FALSE, jointGwas = FALSE,
-                       separateGwas = TRUE))
-  # Driver merges QTL + GWAS sumstats into a single bundle and the
-  # separate-loop iterates over every merged study label (Q1:c1:t1 + G1).
-  expect_equal(callCount, 2L)
-  expect_true(!is.null(out$separate_gwas))
+    ss <- .cbp_makeQtlSumStats()
+    gs <- .cbp_makeGwasSumStats()
+    callCount <- 0
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        colocboost = function(...) {
+            callCount <<- callCount + 1L
+            list(round = callCount)
+        },
+        .package = "colocboost"
+    )
+    out <- suppressMessages(
+        colocboostPipeline(
+            ss,
+            gwasSumStats = gs,
+            xqtlColoc = FALSE,
+            jointGwas = FALSE,
+            separateGwas = TRUE
+        )
+    )
+    # Driver merges QTL + GWAS sumstats into a single bundle and the
+    # separate-loop iterates over every merged study label (Q1:c1:t1 + G1).
+    expect_equal(callCount, 2L)
+    expect_true(!is.null(out$separate_gwas))
 })
 
 test_that("colocboostPipeline: no analysis flag set emits a message and returns empty", {
-  ss <- .cbp_makeQtlSumStats()
-  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
-                        .package = "pecotmr")
-  out <- suppressMessages(
-    colocboostPipeline(ss, xqtlColoc = FALSE, jointGwas = FALSE,
-                       separateGwas = FALSE))
-  expect_null(out$xqtl_coloc)
-  expect_null(out$joint_gwas)
-  expect_null(out$separate_gwas)
+    ss <- .cbp_makeQtlSumStats()
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    out <- suppressMessages(
+        colocboostPipeline(
+            ss,
+            xqtlColoc = FALSE,
+            jointGwas = FALSE,
+            separateGwas = FALSE
+        )
+    )
+    expect_null(out$xqtl_coloc)
+    expect_null(out$joint_gwas)
+    expect_null(out$separate_gwas)
 })
 
 test_that("colocboostPipeline: GWAS ldSketch mismatch errors during the driver", {
-  ss <- .cbp_makeQtlSumStats()
-  # Build a GwasSumStats whose ldSketch has a different sample set.
-  gh_diff <- .cbp_makeHandle(sample_prefix = "z")
-  gr <- GenomicRanges::GRanges(
-    seqnames = "chr1",
-    ranges = IRanges::IRanges(start = seq(100L, by = 100L, length.out = 5L),
-                              width = 1L))
-  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-    SNP = paste0("v", 1:5),
-    A1  = rep("A", 5), A2  = rep("G", 5),
-    Z   = rnorm(5), N = rep(1000L, 5))
-  gs <- GwasSumStats(
-    study = "G1", entry = list(gr), genome = "hg19",
-    ldSketch = gh_diff, qcInfo = list(step1 = "ok"))
-  # .cbQtlSumStatsBundle reads the qtl sketch via extractBlockGenotypes
-  # before the LD-sketch mismatch check fires further down the driver, so
-  # mock the extractor here too.
-  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
-                        .package = "pecotmr")
-  expect_error(
-    suppressMessages(
-      colocboostPipeline(ss, gwasSumStats = gs,
-                         xqtlColoc = FALSE, jointGwas = TRUE)),
-    "different sample sets"
-  )
+    ss <- .cbp_makeQtlSumStats()
+    # Build a GwasSumStats whose ldSketch has a different sample set.
+    gh_diff <- .cbp_makeHandle(sample_prefix = "z")
+    gr <- GenomicRanges::GRanges(
+        seqnames = "chr1",
+        ranges = IRanges::IRanges(
+            start = seq(100L, by = 100L, length.out = 5L),
+            width = 1L
+        )
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = paste0("v", 1:5),
+        A1 = rep("A", 5),
+        A2 = rep("G", 5),
+        Z = rnorm(5),
+        N = rep(1000L, 5)
+    )
+    gs <- GwasSumStats(
+        study = "G1",
+        entry = list(gr),
+        genome = "hg19",
+        ldSketch = gh_diff,
+        qcInfo = list(step1 = "ok")
+    )
+    # .cbQtlSumStatsBundle reads the qtl sketch via extractBlockGenotypes
+    # before the LD-sketch mismatch check fires further down the driver, so
+    # mock the extractor here too.
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    expect_error(
+        suppressMessages(
+            colocboostPipeline(
+                ss,
+                gwasSumStats = gs,
+                xqtlColoc = FALSE,
+                jointGwas = TRUE
+            )
+        ),
+        "different sample sets"
+    )
 })
 
 # ===========================================================================
@@ -454,40 +566,68 @@ test_that("colocboostPipeline: GWAS ldSketch mismatch errors during the driver",
 # ===========================================================================
 
 test_that("GwasSumStats: nCase/nControl are optional columns (absent by default)", {
-  gr <- GenomicRanges::GRanges(
-    seqnames = "chr1",
-    ranges = IRanges::IRanges(start = seq(100L, by = 100L, length.out = 5L),
-                              width = 1L))
-  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-    SNP = paste0("v", 1:5), A1 = "A", A2 = "G", Z = rnorm(5), N = rep(1000L, 5))
-  base <- list(study = "G1", entry = list(gr), genome = "hg19",
-               ldSketch = .cbp_makeHandle(), qcInfo = list(ok = 1))
-  g0 <- do.call(GwasSumStats, base)
-  expect_false(any(c("nCase", "nControl") %in% names(g0)))
-  g1 <- do.call(GwasSumStats, c(base, list(nCase = 500, nControl = 1500)))
-  expect_true(all(c("nCase", "nControl") %in% names(g1)))
-  expect_equal(g1$nCase, 500)
-  expect_equal(g1$nControl, 1500)
+    gr <- GenomicRanges::GRanges(
+        seqnames = "chr1",
+        ranges = IRanges::IRanges(
+            start = seq(100L, by = 100L, length.out = 5L),
+            width = 1L
+        )
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = paste0("v", 1:5),
+        A1 = "A",
+        A2 = "G",
+        Z = rnorm(5),
+        N = rep(1000L, 5)
+    )
+    base <- list(
+        study = "G1",
+        entry = list(gr),
+        genome = "hg19",
+        ldSketch = .cbp_makeHandle(),
+        qcInfo = list(ok = 1)
+    )
+    g0 <- do.call(GwasSumStats, base)
+    expect_false(any(c("nCase", "nControl") %in% names(g0)))
+    g1 <- do.call(GwasSumStats, c(base, list(nCase = 500, nControl = 1500)))
+    expect_true(all(c("nCase", "nControl") %in% names(g1)))
+    expect_equal(g1$nCase, 500)
+    expect_equal(g1$nControl, 1500)
 })
 
 test_that("colocboost GWAS bundle: effective N for case/control, per-variant N otherwise", {
-  gr <- GenomicRanges::GRanges(
-    seqnames = "chr1",
-    ranges = IRanges::IRanges(start = seq(100L, by = 100L, length.out = 5L),
-                              width = 1L))
-  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-    SNP = paste0("v", 1:5), A1 = "A", A2 = "G", Z = rnorm(5), N = rep(1000L, 5))
-  base <- list(study = "G1", entry = list(gr), genome = "hg19",
-               ldSketch = .cbp_makeHandle(), qcInfo = list(ok = 1))
-  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
-                        .package = "pecotmr")
-  # case/control -> effective N = 4 / (1/500 + 1/1500) = 1500
-  gcc <- do.call(GwasSumStats, c(base, list(nCase = 500, nControl = 1500)))
-  bcc <- pecotmr:::.cbGwasSumStatsBundle(gcc)
-  expect_true(all(bcc[["G1"]]$sumstat$n == 4 / (1/500 + 1/1500)))
-  # quantitative (no nCase/nControl) -> per-variant N (1000)
-  bq <- pecotmr:::.cbGwasSumStatsBundle(do.call(GwasSumStats, base))
-  expect_true(all(bq[["G1"]]$sumstat$n == 1000L))
+    gr <- GenomicRanges::GRanges(
+        seqnames = "chr1",
+        ranges = IRanges::IRanges(
+            start = seq(100L, by = 100L, length.out = 5L),
+            width = 1L
+        )
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = paste0("v", 1:5),
+        A1 = "A",
+        A2 = "G",
+        Z = rnorm(5),
+        N = rep(1000L, 5)
+    )
+    base <- list(
+        study = "G1",
+        entry = list(gr),
+        genome = "hg19",
+        ldSketch = .cbp_makeHandle(),
+        qcInfo = list(ok = 1)
+    )
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    # case/control -> effective N = 4 / (1/500 + 1/1500) = 1500
+    gcc <- do.call(GwasSumStats, c(base, list(nCase = 500, nControl = 1500)))
+    bcc <- pecotmr:::.cbGwasSumStatsBundle(gcc)
+    expect_true(all(bcc[["G1"]]$sumstat$n == 4 / (1 / 500 + 1 / 1500)))
+    # quantitative (no nCase/nControl) -> per-variant N (1000)
+    bq <- pecotmr:::.cbGwasSumStatsBundle(do.call(GwasSumStats, base))
+    expect_true(all(bq[["G1"]]$sumstat$n == 1000L))
 })
 
 # ===========================================================================
@@ -495,28 +635,38 @@ test_that("colocboost GWAS bundle: effective N for case/control, per-variant N o
 # ===========================================================================
 
 test_that(".cbPipSkipOutcomes: keeps signal outcomes, drops noise, honours cutoff", {
-  skip_if_not_installed("susieR")
-  set.seed(1)
-  n <- 200L; p <- 20L
-  X <- matrix(rbinom(n * p, 2, 0.3), n, p,
-              dimnames = list(paste0("s", 1:n), paste0("v", 1:p)))
-  Y <- cbind(sig   = X[, 1] * 1.5 + rnorm(n, sd = 0.3),  # strong signal at v1
-             noise = rnorm(n))                            # null
-  # cutoff 0 -> no-op
-  expect_identical(pecotmr:::.cbPipSkipOutcomes(X, Y, 0), Y)
-  # cutoff 0.5 -> keep the signal outcome, drop the noise outcome
-  kept <- pecotmr:::.cbPipSkipOutcomes(X, Y, 0.5)
-  expect_equal(colnames(kept), "sig")
-  # all-noise -> NULL (whole context would be skipped)
-  Yn <- cbind(n1 = rnorm(n), n2 = rnorm(n))
-  expect_null(pecotmr:::.cbPipSkipOutcomes(X, Yn, 0.5))
+    skip_if_not_installed("susieR")
+    set.seed(1)
+    n <- 200L
+    p <- 20L
+    X <- matrix(
+        rbinom(n * p, 2, 0.3),
+        n,
+        p,
+        dimnames = list(paste0("s", 1:n), paste0("v", 1:p))
+    )
+    Y <- cbind(
+        sig = X[, 1] * 1.5 + rnorm(n, sd = 0.3), # strong signal at v1
+        noise = rnorm(n)
+    ) # null
+    # cutoff 0 -> no-op
+    expect_identical(pecotmr:::.cbPipSkipOutcomes(X, Y, 0), Y)
+    # cutoff 0.5 -> keep the signal outcome, drop the noise outcome
+    kept <- pecotmr:::.cbPipSkipOutcomes(X, Y, 0.5)
+    expect_equal(colnames(kept), "sig")
+    # all-noise -> NULL (whole context would be skipped)
+    Yn <- cbind(n1 = rnorm(n), n2 = rnorm(n))
+    expect_null(pecotmr:::.cbPipSkipOutcomes(X, Yn, 0.5))
 })
 
 test_that(".cbResolveCutoff: scalar applies to all; named vector is per-context", {
-  expect_equal(pecotmr:::.cbResolveCutoff(0.5, "brain"), 0.5)
-  expect_equal(pecotmr:::.cbResolveCutoff(c(brain = 0.3, blood = 0.7), "blood"), 0.7)
-  expect_equal(pecotmr:::.cbResolveCutoff(c(brain = 0.3), "missing"), 0)
-  expect_equal(pecotmr:::.cbResolveCutoff(NULL, "brain"), 0)
+    expect_equal(pecotmr:::.cbResolveCutoff(0.5, "brain"), 0.5)
+    expect_equal(
+        pecotmr:::.cbResolveCutoff(c(brain = 0.3, blood = 0.7), "blood"),
+        0.7
+    )
+    expect_equal(pecotmr:::.cbResolveCutoff(c(brain = 0.3), "missing"), 0)
+    expect_equal(pecotmr:::.cbResolveCutoff(NULL, "brain"), 0)
 })
 
 # ===========================================================================
@@ -524,174 +674,248 @@ test_that(".cbResolveCutoff: scalar applies to all; named vector is per-context"
 # bundle building, and sumstat-bundle helper early returns.
 # ===========================================================================
 
-.cbp_makeMultiStudy <- function() MultiStudyQtlDataset(
-  qtlDatasets = list(study1 = .cbp_makeQtlDataset(contexts = "brain",
-                                                  traits = "ENSG_A")),
-  sumStats = .cbp_makeQtlSumStats())
+.cbp_makeMultiStudy <- function() {
+    MultiStudyQtlDataset(
+        qtlDatasets = list(
+            study1 = .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+        ),
+        sumStats = .cbp_makeQtlSumStats()
+    )
+}
 
 test_that("colocboostPipeline(MultiStudyQtlDataset): combines per-study bundles + embedded sumstats", {
-  mt <- .cbp_makeMultiStudy()
-  capturedArgs <- NULL
-  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
-                        .package = "pecotmr")
-  local_mocked_bindings(
-    colocboost = function(...) { capturedArgs <<- list(...); list(stub = TRUE) },
-    .package = "colocboost")
-  out <- suppressMessages(colocboostPipeline(mt, xqtlColoc = TRUE,
-                                             jointGwas = FALSE, separateGwas = FALSE))
-  expect_type(out, "list")
-  expect_true(!is.null(out$xqtl_coloc))
-  # The individual study's outcome is prefixed "study1:" in the combined bundle.
-  expect_true(any(grepl("study1:", names(capturedArgs$Y))))
+    mt <- .cbp_makeMultiStudy()
+    capturedArgs <- NULL
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        colocboost = function(...) {
+            capturedArgs <<- list(...)
+            list(stub = TRUE)
+        },
+        .package = "colocboost"
+    )
+    out <- suppressMessages(colocboostPipeline(
+        mt,
+        xqtlColoc = TRUE,
+        jointGwas = FALSE,
+        separateGwas = FALSE
+    ))
+    expect_type(out, "list")
+    expect_true(!is.null(out$xqtl_coloc))
+    # The individual study's outcome is prefixed "study1:" in the combined bundle.
+    expect_true(any(grepl("study1:", names(capturedArgs$Y))))
 })
 
 test_that(".cbRun: an engine failure is caught -> message + NULL", {
-  qd <- .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
-  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
-                        .package = "pecotmr")
-  local_mocked_bindings(colocboost = function(...) stop("engine boom"),
-                        .package = "colocboost")
-  out <- suppressMessages(colocboostPipeline(qd, xqtlColoc = TRUE))
-  expect_null(out$xqtl_coloc)                                # .cbRun caught (123-124)
+    qd <- .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        colocboost = function(...) stop("engine boom"),
+        .package = "colocboost"
+    )
+    out <- suppressMessages(colocboostPipeline(qd, xqtlColoc = TRUE))
+    expect_null(out$xqtl_coloc) # .cbRun caught (123-124)
 })
 
 test_that(".cbIndividualBundle: multi-context bundle names + prefixes outcomes", {
-  qd <- .cbp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
-  capturedArgs <- NULL
-  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
-                        .package = "pecotmr")
-  local_mocked_bindings(
-    colocboost = function(...) { capturedArgs <<- list(...); list(stub = TRUE) },
-    .package = "colocboost")
-  out <- suppressMessages(colocboostPipeline(qd, xqtlColoc = TRUE))
-  expect_true(!is.null(out$xqtl_coloc))
-  # Two contexts -> two context-prefixed outcomes (covers the xMatch + naming).
-  expect_gte(length(capturedArgs$Y), 2L)
+    qd <- .cbp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
+    capturedArgs <- NULL
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        colocboost = function(...) {
+            capturedArgs <<- list(...)
+            list(stub = TRUE)
+        },
+        .package = "colocboost"
+    )
+    out <- suppressMessages(colocboostPipeline(qd, xqtlColoc = TRUE))
+    expect_true(!is.null(out$xqtl_coloc))
+    # Two contexts -> two context-prefixed outcomes (covers the xMatch + naming).
+    expect_gte(length(capturedArgs$Y), 2L)
 })
 
 test_that("colocboostPipeline(QtlDataset): unknown context errors", {
-  qd <- .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
-  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
-                        .package = "pecotmr")
-  expect_error(colocboostPipeline(qd, contexts = "ghost", xqtlColoc = TRUE),
-               "Unknown context")                            # 209
+    qd <- .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    expect_error(
+        colocboostPipeline(qd, contexts = "ghost", xqtlColoc = TRUE),
+        "Unknown context"
+    ) # 209
 })
 
 test_that("colocboostPipeline(QtlDataset): pipCutoffToSkip dropping every outcome -> empty", {
-  qd <- .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
-  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
-                        .package = "pecotmr")
-  out <- suppressMessages(suppressWarnings(
-    colocboostPipeline(qd, xqtlColoc = TRUE, pipCutoffToSkip = 0.9999)))
-  expect_null(out$xqtl_coloc)                                # 249-253 skip -> empty
+    qd <- .cbp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    out <- suppressMessages(suppressWarnings(
+        colocboostPipeline(qd, xqtlColoc = TRUE, pipCutoffToSkip = 0.9999)
+    ))
+    expect_null(out$xqtl_coloc) # 249-253 skip -> empty
 })
 
 test_that(".cbPipSkipOutcomes: an outcome with < 2 observations is skipped", {
-  set.seed(4)
-  X <- matrix(rnorm(60), 30, 2, dimnames = list(paste0("s", 1:30), c("v1", "v2")))
-  Y <- cbind(a = c(1, rep(NA, 29)), b = rnorm(30))          # col a: 1 obs (< 2)
-  res <- pecotmr:::.cbPipSkipOutcomes(X, Y, 0.5)
-  expect_true(is.null(res) || is.matrix(res))               # col a -> next (180)
+    set.seed(4)
+    X <- matrix(
+        rnorm(60),
+        30,
+        2,
+        dimnames = list(paste0("s", 1:30), c("v1", "v2"))
+    )
+    Y <- cbind(a = c(1, rep(NA, 29)), b = rnorm(30)) # col a: 1 obs (< 2)
+    res <- pecotmr:::.cbPipSkipOutcomes(X, Y, 0.5)
+    expect_true(is.null(res) || is.matrix(res)) # col a -> next (180)
 })
 
 test_that(".cbSumstatPair: NULL / empty df -> NULL", {
-  expect_null(pecotmr:::.cbSumstatPair(NULL, .cbp_makeHandle()))     # 317
-  expect_null(pecotmr:::.cbSumstatPair(data.frame(), .cbp_makeHandle()))
+    expect_null(pecotmr:::.cbSumstatPair(NULL, .cbp_makeHandle())) # 317
+    expect_null(pecotmr:::.cbSumstatPair(data.frame(), .cbp_makeHandle()))
 })
 
 test_that(".cbQtlSumStatsBundle: NULL / context / trait filters and empty result", {
-  ss <- .cbp_makeQtlSumStats()
-  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
-                        .package = "pecotmr")
-  expect_equal(pecotmr:::.cbQtlSumStatsBundle(NULL), list())         # 359
-  expect_length(pecotmr:::.cbQtlSumStatsBundle(ss, contexts = "c1"), 1L)  # 363
-  expect_length(pecotmr:::.cbQtlSumStatsBundle(ss, traitId = "t1"), 1L)   # 366
-  expect_equal(pecotmr:::.cbQtlSumStatsBundle(ss, contexts = "ghost"), list())  # 368
+    ss <- .cbp_makeQtlSumStats()
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    expect_equal(pecotmr:::.cbQtlSumStatsBundle(NULL), list()) # 359
+    expect_length(pecotmr:::.cbQtlSumStatsBundle(ss, contexts = "c1"), 1L) # 363
+    expect_length(pecotmr:::.cbQtlSumStatsBundle(ss, traitId = "t1"), 1L) # 366
+    expect_equal(pecotmr:::.cbQtlSumStatsBundle(ss, contexts = "ghost"), list()) # 368
 })
 
 test_that(".cbGwasSumStatsBundle: NULL -> empty list", {
-  expect_equal(pecotmr:::.cbGwasSumStatsBundle(NULL), list())         # 390
+    expect_equal(pecotmr:::.cbGwasSumStatsBundle(NULL), list()) # 390
 })
 
 test_that(".cbSumstatPair: varY attaches var_y; NA variant ids fall back to chr:pos", {
-  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
-                        .package = "pecotmr")
-  h <- .cbp_makeHandle()                                    # panel SNPs v1..v6
-  df <- data.frame(variant_id = c("v1", "v2", "v3"), z = c(1, -1, 0.5),
-                   N = rep(1000, 3), stringsAsFactors = FALSE)
-  pair <- pecotmr:::.cbSumstatPair(df, h, varY = 0.7)
-  expect_true("var_y" %in% names(pair$sumstat))             # 350
-  expect_equal(unique(pair$sumstat$var_y), 0.7)
-  # NA variant_id -> formatVariantId fallback (322-323); no panel overlap -> NULL (330)
-  dfNA <- data.frame(variant_id = NA_character_, chrom = "chr1", pos = 999999L,
-                     A2 = "G", A1 = "A", z = 1, N = 1000, stringsAsFactors = FALSE)
-  expect_null(pecotmr:::.cbSumstatPair(dfNA, h))
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    h <- .cbp_makeHandle() # panel SNPs v1..v6
+    df <- data.frame(
+        variant_id = c("v1", "v2", "v3"),
+        z = c(1, -1, 0.5),
+        N = rep(1000, 3),
+        stringsAsFactors = FALSE
+    )
+    pair <- pecotmr:::.cbSumstatPair(df, h, varY = 0.7)
+    expect_true("var_y" %in% names(pair$sumstat)) # 350
+    expect_equal(unique(pair$sumstat$var_y), 0.7)
+    # NA variant_id -> formatVariantId fallback (322-323); no panel overlap -> NULL (330)
+    dfNA <- data.frame(
+        variant_id = NA_character_,
+        chrom = "chr1",
+        pos = 999999L,
+        A2 = "G",
+        A1 = "A",
+        z = 1,
+        N = 1000,
+        stringsAsFactors = FALSE
+    )
+    expect_null(pecotmr:::.cbSumstatPair(dfNA, h))
 })
 
 test_that(".cbSumstatPair canonicalizes variant ids to chr-prefixed for name alignment", {
-  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
-                        .package = "pecotmr")
-  h <- .cbp_makeHandle(snp_n = 3L)
-  h@snpInfo$SNP <- c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G")   # chr-prefixed panel
-  # sumstat carries the same variants without the "chr" prefix; the pipeline
-  # should canonicalize them so the sumstat / LD ids align by name with other
-  # sources (previously the returned ids kept the caller's convention).
-  df <- data.frame(variant_id = c("1:100:A:G", "1:200:A:G", "1:300:A:G"),
-                   z = c(1, -1, 0.5), N = rep(1000, 3), stringsAsFactors = FALSE)
-  pair <- pecotmr:::.cbSumstatPair(df, h)
-  expect_equal(pair$sumstat$variant,
-               c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"))
-  expect_identical(colnames(pair$LD), pair$sumstat$variant)
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    h <- .cbp_makeHandle(snp_n = 3L)
+    h@snpInfo$SNP <- c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G") # chr-prefixed panel
+    # sumstat carries the same variants without the "chr" prefix; the pipeline
+    # should canonicalize them so the sumstat / LD ids align by name with other
+    # sources (previously the returned ids kept the caller's convention).
+    df <- data.frame(
+        variant_id = c("1:100:A:G", "1:200:A:G", "1:300:A:G"),
+        z = c(1, -1, 0.5),
+        N = rep(1000, 3),
+        stringsAsFactors = FALSE
+    )
+    pair <- pecotmr:::.cbSumstatPair(df, h)
+    expect_equal(
+        pair$sumstat$variant,
+        c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G")
+    )
+    expect_identical(colnames(pair$LD), pair$sumstat$variant)
 })
 
 test_that(".cbFlipPairToCanonical flips z + LD for swapped variants, relabels to canonical", {
-  ss <- data.frame(z = c(2, -1), n = c(1000, 1000),
-                   variant = c("chr1:100:A:G", "chr1:200:C:T"),
-                   stringsAsFactors = FALSE)
-  LD <- matrix(c(1, 0.5, 0.5, 1), 2, dimnames = list(ss$variant, ss$variant))
-  p <- list(sumstat = ss, LD = LD, variantIds = ss$variant)
-  canonical <- c("chr1:100:G:A", "chr1:200:C:T")   # variant 1 swapped, 2 identical
-  out <- pecotmr:::.cbFlipPairToCanonical(p, canonical)
-  expect_equal(out$sumstat$variant, c("chr1:100:G:A", "chr1:200:C:T"))
-  expect_equal(out$sumstat$z, c(-2, -1))            # v1 z flipped; v2 unchanged
-  expect_equal(out$LD["chr1:100:G:A", "chr1:200:C:T"], -0.5)   # one endpoint flipped
-  expect_equal(unname(diag(out$LD)), c(1, 1))       # diagonal preserved
+    ss <- data.frame(
+        z = c(2, -1),
+        n = c(1000, 1000),
+        variant = c("chr1:100:A:G", "chr1:200:C:T"),
+        stringsAsFactors = FALSE
+    )
+    LD <- matrix(c(1, 0.5, 0.5, 1), 2, dimnames = list(ss$variant, ss$variant))
+    p <- list(sumstat = ss, LD = LD, variantIds = ss$variant)
+    canonical <- c("chr1:100:G:A", "chr1:200:C:T") # variant 1 swapped, 2 identical
+    out <- pecotmr:::.cbFlipPairToCanonical(p, canonical)
+    expect_equal(out$sumstat$variant, c("chr1:100:G:A", "chr1:200:C:T"))
+    expect_equal(out$sumstat$z, c(-2, -1)) # v1 z flipped; v2 unchanged
+    expect_equal(out$LD["chr1:100:G:A", "chr1:200:C:T"], -0.5) # one endpoint flipped
+    expect_equal(unname(diag(out$LD)), c(1, 1)) # diagonal preserved
 })
 
 test_that(".cbFlipMatrixToCanonical negates residualized dosage for swapped columns", {
-  X <- matrix(c(1, -1, 2, 0.5, -0.5, 1), nrow = 3,
-              dimnames = list(paste0("s", 1:3),
-                              c("chr1:100:A:G", "chr1:200:C:T")))
-  canonical <- c("chr1:100:G:A", "chr1:200:C:T")   # col 1 swapped, col 2 identical
-  out <- pecotmr:::.cbFlipMatrixToCanonical(X, canonical)
-  expect_equal(colnames(out), c("chr1:100:G:A", "chr1:200:C:T"))
-  expect_equal(unname(out[, "chr1:100:G:A"]), -c(1, -1, 2))   # negated
-  expect_equal(unname(out[, "chr1:200:C:T"]), c(0.5, -0.5, 1))
+    X <- matrix(
+        c(1, -1, 2, 0.5, -0.5, 1),
+        nrow = 3,
+        dimnames = list(paste0("s", 1:3), c("chr1:100:A:G", "chr1:200:C:T"))
+    )
+    canonical <- c("chr1:100:G:A", "chr1:200:C:T") # col 1 swapped, col 2 identical
+    out <- pecotmr:::.cbFlipMatrixToCanonical(X, canonical)
+    expect_equal(colnames(out), c("chr1:100:G:A", "chr1:200:C:T"))
+    expect_equal(unname(out[, "chr1:100:G:A"]), -c(1, -1, 2)) # negated
+    expect_equal(unname(out[, "chr1:200:C:T"]), c(0.5, -0.5, 1))
 })
 
 test_that(".cbHarmonizeAlleles aligns opposite-coded sumstats to one canonical (invariance)", {
-  mkPair <- function(v, z) {
-    ss <- data.frame(z = z, n = 1000, variant = v, stringsAsFactors = FALSE)
-    list(sumstat = ss, LD = matrix(1, 1, 1, dimnames = list(v, v)), variantIds = v)
-  }
-  # Same locus, opposite ref/alt coding across two sumstats, same underlying z.
-  pairs <- list(A = mkPair("chr1:100:A:G", 3), B = mkPair("chr1:100:G:A", 3))
-  h <- pecotmr:::.cbHarmonizeAlleles(NULL, pairs)
-  expect_equal(h$pairs$A$sumstat$variant, "chr1:100:A:G")   # first-seen = canonical
-  expect_equal(h$pairs$B$sumstat$variant, "chr1:100:A:G")   # B relabeled to it
-  expect_equal(h$pairs$A$sumstat$z, 3)                       # A already canonical
-  expect_equal(h$pairs$B$sumstat$z, -3)                      # B flipped to match
+    mkPair <- function(v, z) {
+        ss <- data.frame(z = z, n = 1000, variant = v, stringsAsFactors = FALSE)
+        list(
+            sumstat = ss,
+            LD = matrix(1, 1, 1, dimnames = list(v, v)),
+            variantIds = v
+        )
+    }
+    # Same locus, opposite ref/alt coding across two sumstats, same underlying z.
+    pairs <- list(A = mkPair("chr1:100:A:G", 3), B = mkPair("chr1:100:G:A", 3))
+    h <- pecotmr:::.cbHarmonizeAlleles(NULL, pairs)
+    expect_equal(h$pairs$A$sumstat$variant, "chr1:100:A:G") # first-seen = canonical
+    expect_equal(h$pairs$B$sumstat$variant, "chr1:100:A:G") # B relabeled to it
+    expect_equal(h$pairs$A$sumstat$z, 3) # A already canonical
+    expect_equal(h$pairs$B$sumstat$z, -3) # B flipped to match
 })
 
 test_that("colocboostPipeline(MultiStudyQtlDataset): a study with no usable bundle is skipped", {
-  mt <- .cbp_makeMultiStudy()              # qd (study1, ENSG_A) + ss (Q1, t1)
-  local_mocked_bindings(extractBlockGenotypes = .cbp_mockExtractor(),
-                        .package = "pecotmr")
-  local_mocked_bindings(colocboost = function(...) list(stub = TRUE),
-                        .package = "colocboost")
-  # traitId="t1" matches the embedded sumstats but not the QtlDataset -> its
-  # per-study bundle is NULL and skipped (684); the sumstat side still runs.
-  out <- suppressMessages(suppressWarnings(
-    colocboostPipeline(mt, traitId = "t1", xqtlColoc = TRUE)))
-  expect_type(out, "list")
+    mt <- .cbp_makeMultiStudy() # qd (study1, ENSG_A) + ss (Q1, t1)
+    local_mocked_bindings(
+        extractBlockGenotypes = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        colocboost = function(...) list(stub = TRUE),
+        .package = "colocboost"
+    )
+    # traitId="t1" matches the embedded sumstats but not the QtlDataset -> its
+    # per-study bundle is NULL and skipped (684); the sumstat side still runs.
+    out <- suppressMessages(suppressWarnings(
+        colocboostPipeline(mt, traitId = "t1", xqtlColoc = TRUE)
+    ))
+    expect_type(out, "list")
 })

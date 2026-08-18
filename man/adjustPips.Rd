@@ -16,22 +16,20 @@ adjustPips(x, keepVariants, ...)
 \arguments{
 \item{x}{A \code{FineMappingEntry} or \code{FineMappingResultBase}.}
 
-\item{keepVariants}{Character vector of variant IDs to keep. Intersected
-with the entry's own \code{variantIds}; an empty intersection raises
-an error.}
+\item{keepVariants}{Character vector of variant IDs to keep. Intersected with
+the entry's own \code{variantIds}; an empty intersection raises an error.}
 
 \item{...}{Future expansion.}
 }
 \value{
-The same flavour of object with PIPs renormalized on the kept
-  subset.
+The same flavour of object with PIPs renormalized on the kept subset.
 }
 \description{
 Re-derive a \code{FineMappingEntry}'s PIPs (and the
-  \code{topLoci} table) after restricting to a kept variant subset.
-  For each effect the \code{lbf_variable} row is subset to the kept
-  variants, renormalized via \code{lbfToAlpha()}, and the per-variant
-  PIPs are recomputed as \code{1 - prod_l(1 - alpha[l, p])}.
+  \code{topLoci} table) after restricting to a kept variant subset. For each
+  effect the \code{lbf_variable} row is subset to the kept variants,
+  renormalized via \code{lbfToAlpha()}, and the per-variant PIPs are
+  recomputed as \code{1 - prod_l(1 - alpha[l, p])}.
 
   The two scenarios this supports:
   \itemize{
@@ -40,7 +38,12 @@ Re-derive a \code{FineMappingEntry}'s PIPs (and the
           PIPs restricted to the GWAS-covered intersection.
     \item Colocalization between a GWAS \code{FineMappingResult} and a
           QTL \code{FineMappingResult} computed on different variant
-          sets — the GWAS PIPs (or QTL PIPs) get renormalized to the
+          sets -- the GWAS PIPs (or QTL PIPs) get renormalized to the
           common variant set.
   }
+}
+\examples{
+data(qtlFineMappingExample)
+keep <- getVariantIds(qtlFineMappingExample)[1:5]
+adjustPips(qtlFineMappingExample, keepVariants = keep)
 }

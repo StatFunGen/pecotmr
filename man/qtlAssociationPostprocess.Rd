@@ -30,13 +30,15 @@ flavour (fold of the per-variant \code{af} mcol). \code{0} disables it.}
 \item{cisWindow}{cis-window (bp) for the FILTERED Bonferroni flavour, applied
 to the per-variant \code{tss_distance}/\code{tes_distance} mcols. \code{0}
 disables it. When either \code{mafCutoff} or \code{cisWindow} is > 0 the
-\code{*_filtered} columns are produced (requires the \code{n_variants_filtered}
+\code{*_filtered} columns are produced (requires the
+\code{n_variants_filtered}
 row column).}
 
 \item{methods}{Correction families to compute: any of \code{"permutation"}
 (needs \code{p_beta}/\code{beta_shape1}/\code{beta_shape2}) and
 \code{"bonferroni"} (needs \code{n_variants}). The q-value SNP method adds
-no stored column -- it is a significance query (see \code{getSignificantQtls}).}
+no stored column -- it is a significance query (see
+\code{getSignificantQtls}).}
 
 \item{pvalueCol, afCol}{Entry mcol names for the per-variant p-value / allele
 frequency (defaults \code{"P"} / \code{"af"}).}
@@ -50,4 +52,24 @@ Apply hierarchical (local per-gene + global across-gene)
   association statistics (one row per gene/trait), returning the same object
   enriched with the corrected-statistic columns. See
   \code{\link{qtlAssociationPostprocess}}.
+}
+\examples{
+pBeta <- c(10^(-c(8, 7, 6, 5, 4, 3)), stats::ppoints(54))
+G <- length(pBeta)
+entries <- lapply(seq_len(G), function(i) {
+  gr <- GenomicRanges::GRanges("chr1",
+    IRanges::IRanges(seq(1000L, by = 50L, length.out = 4L), width = 1L))
+  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+    SNP = paste0("g", i, "_v", 1:4), A1 = "A", A2 = "G",
+    P = c(pBeta[i] / 5, 0.2, 0.5, 0.8),
+    af = c(0.3, 0.2, 0.005, 0.4),
+    tss_distance = c(0L, 500L, 900000L, 2000000L),
+    tes_distance = c(0L, 500L, 900000L, 2000000L))
+  gr
+})
+qss <- QtlSumStats(study = rep("s", G), context = rep("brain", G),
+  trait = paste0("g", seq_len(G)), entry = entries, genome = "hg19",
+  n_variants = rep(50L, G), n_variants_filtered = rep(30L, G),
+  p_beta = pBeta, beta_shape1 = rep(1, G), beta_shape2 = rep(200, G))
+qtlAssociationPostprocess(qss)
 }

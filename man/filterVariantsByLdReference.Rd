@@ -20,5 +20,13 @@ A list with:
 }
 \description{
 Filters a vector of variant IDs to those present in the LD reference panel.
-Auto-detects the reference type (PLINK2, PLINK1, or pre-computed LD metadata).
+Auto-detects the reference type (PLINK2, PLINK1, or pre-computed LD
+metadata).
+}
+\examples{
+meta <- system.file("extdata", "ld_reference", "ld_meta_file.tsv",
+  package = "pecotmr")
+filterVariantsByLdReference(
+  variantIds = c("chr22:16050000:A:G", "chr22:17000000:C:T"),
+  ldReferenceMetaFile = meta)
 }

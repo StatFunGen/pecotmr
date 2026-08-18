@@ -34,8 +34,23 @@ fitSusieInfThenSusieRss(
 A list with \code{susie} and \code{susieInf} fit objects.
 }
 \description{
-RSS analog of \code{fitSusieInfThenSusie}. Fits SuSiE-inf via
-\code{susieRss} first, then initialises standard SuSiE-RSS from
-the SuSiE-inf result. The single pair of fits can be used both for
-fine-mapping post-processing and TWAS weight extraction.
+RSS analog of \code{fitSusieInfThenSusie}. Fits SuSiE-inf via \code{susieRss}
+first, then initialises standard SuSiE-RSS from the SuSiE-inf result. The
+single pair of fits can be used both for fine-mapping post-processing and
+TWAS weight extraction.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+ss <- lapply(seq_len(ncol(X)), function(j) {
+  coef(summary(lm(y ~ X[, j])))[2, 1:2]
+})
+stat <- list(
+  bhat = vapply(ss, `[`, numeric(1), 1L),
+  shat = vapply(ss, `[`, numeric(1), 2L),
+  z = vapply(ss, function(s) s[1] / s[2], numeric(1)),
+  n = rep(nrow(X), ncol(X)))
+LD <- cor(X)
+fitSusieInfThenSusieRss(z = stat$z, R = LD, n = nrow(X))
 }

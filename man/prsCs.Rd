@@ -2,7 +2,8 @@
 % Please edit documentation in R/regularizedRegressionWrappers.R
 \name{prsCs}
 \alias{prsCs}
-\title{PRS-CS: a polygenic prediction method that infers posterior SNP effect sizes under continuous shrinkage (CS) priors}
+\title{PRS-CS: a polygenic prediction method that infers posterior SNP effect sizes
+under continuous shrinkage (CS) priors}
 \usage{
 prsCs(
   bhat,
@@ -22,7 +23,8 @@ prsCs(
 \arguments{
 \item{bhat}{A vector of marginal effect sizes.}
 
-\item{R}{The LD correlation matrix (a single matrix over the analysed window), as in \code{susieR::susie_rss()}.}
+\item{R}{The LD correlation matrix (a single matrix over the analysed
+window), as in \code{susieR::susie_rss()}.}
 
 \item{n}{Sample size of the GWAS.}
 
@@ -30,9 +32,11 @@ prsCs(
 
 \item{b}{Scale parameter for the prior distribution of psi. Default is 0.5.}
 
-\item{phi}{Global shrinkage parameter. If NULL, it will be estimated automatically. Default is NULL.}
+\item{phi}{Global shrinkage parameter. If NULL, it will be estimated
+automatically. Default is NULL.}
 
-\item{maf}{A vector of minor allele frequencies, if available, will standardize the effect sizes by MAF. Default is NULL.}
+\item{maf}{A vector of minor allele frequencies, if available, will
+standardize the effect sizes by MAF. Default is NULL.}
 
 \item{nIter}{Number of MCMC iterations. Default is 1000.}
 
@@ -45,15 +49,16 @@ prsCs(
 \item{seed}{Random seed for reproducibility. Default is NULL.}
 }
 \value{
-A list containing the posterior estimates:
-  - betaEst: Posterior estimates of SNP effect sizes.
-  - psiEst: Posterior estimates of psi (shrinkage parameters).
-  - sigmaEst: Posterior estimate of the residual variance.
-  - phiEst: Posterior estimate of the global shrinkage parameter.
+A list containing the posterior estimates: - betaEst: Posterior
+  estimates of SNP effect sizes. - psiEst: Posterior estimates of psi
+  (shrinkage parameters). - sigmaEst: Posterior estimate of the residual
+  variance. - phiEst: Posterior estimate of the global shrinkage parameter.
 }
 \description{
-This function is a wrapper for the PRS-CS method implemented in C++. It takes marginal effect size estimates from regression and an external LD reference panel
-and infers posterior SNP effect sizes using Bayesian regression with continuous shrinkage priors.
+This function is a wrapper for the PRS-CS method implemented in C++. It takes
+marginal effect size estimates from regression and an external LD reference
+panel and infers posterior SNP effect sizes using Bayesian regression with
+continuous shrinkage priors.
 }
 \examples{
 # Generate example data

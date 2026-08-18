@@ -10,25 +10,29 @@
 #' @include AllGenerics.R
 NULL
 
-setClass("TwasWeightsEntry",
-  representation(
-    variantIds    = "character",
-    weights       = "ANY",
-    fits          = "ANY",
-    cvResult      = "ANY",
-    standardized  = "logical",
-    dataType      = "ANY"
-  ),
-  validity = function(object) {
-    errors <- character()
-    if (length(object@standardized) != 1L)
-      errors <- c(errors, "'standardized' must be a single logical")
-    if (is.matrix(object@weights) &&
-        nrow(object@weights) != length(object@variantIds))
-      errors <- c(errors,
-        "nrow(weights) must equal length(variantIds)")
-    if (length(errors) == 0L) TRUE else errors
-  }
+setClass(
+    "TwasWeightsEntry",
+    representation(
+        variantIds = "character",
+        weights = "ANY",
+        fits = "ANY",
+        cvResult = "ANY",
+        standardized = "logical",
+        dataType = "ANY"
+    ),
+    validity = function(object) {
+        errors <- character()
+        if (length(object@standardized) != 1L) {
+            errors <- c(errors, "'standardized' must be a single logical")
+        }
+        if (
+            is.matrix(object@weights) &&
+                nrow(object@weights) != length(object@variantIds)
+        ) {
+            errors <- c(errors, "nrow(weights) must equal length(variantIds)")
+        }
+        if (length(errors) == 0L) TRUE else errors
+    }
 )
 
 # =============================================================================
@@ -38,41 +42,38 @@ setClass("TwasWeightsEntry",
 # =============================================================================
 
 #' @title QTL Summary Statistics Collection
-#' @description S4 collection of QTL summary statistics keyed by the
-#'   identity tuple \code{(study, context, trait)}. Each entry holds a
-#'   \code{GRanges} of summary statistics for that tuple. Class-level
-#'   slots \code{ldSketch} (the LD reference \code{GenotypeHandle}) and
-#'   \code{genome} (the genome build, a single character string) apply
-#'   to every entry; the genome build must be uniform because all
-#'   entries necessarily share the LD reference.
+#' @description S4 collection of QTL summary statistics keyed by the identity
+#'   tuple \code{(study, context, trait)}. Each entry holds a \code{GRanges} of
+#'   summary statistics for that tuple. Class-level slots \code{ldSketch} (the
+#'   LD reference \code{GenotypeHandle}) and \code{genome} (the genome build, a
+#'   single character string) apply to every entry; the genome build must be
+#'   uniform because all entries necessarily share the LD reference.
 #'
-#'   Required columns: \code{study}, \code{context}, \code{trait},
-#'   \code{entry}. Optional columns include \code{varY} (numeric,
-#'   per-tuple phenotype variance; \code{NA_real_} when unused). The
-#'   3-tuple \code{(study, context, trait)} is unique. Each \code{entry}
-#'   is a \code{GRanges} whose mcols carry the per-variant statistics
-#'   (\code{SNP}, \code{A1}, \code{A2}, \code{Z}, \code{N}; plus
-#'   optional \code{MAF}, \code{INFO}, \code{BETA}, \code{SE}, \code{P}).
+#' Required columns: \code{study}, \code{context}, \code{trait}, \code{entry}.
+#' Optional columns include \code{varY} (numeric, per-tuple phenotype variance;
+#' \code{NA_real_} when unused). The 3-tuple \code{(study, context, trait)} is
+#' unique. Each \code{entry} is a \code{GRanges} whose mcols carry the
+#' per-variant statistics (\code{SNP}, \code{A1}, \code{A2}, \code{Z}, \code{N};
+#' plus optional \code{MAF}, \code{INFO}, \code{BETA}, \code{SE}, \code{P}).
 #' @slot ldSketch A \code{GenotypeHandle} carrying the LD reference for
 #'   downstream QC and RSS analysis.
-#' @slot genome A single character string giving the genome build that
-#'   the LD sketch and every entry are aligned to.
+#' @slot genome A single character string giving the genome build that the LD
+#'   sketch and every entry are aligned to.
 #' @title Summary Statistics Base Class
-#' @description Virtual base class for summary-statistic collections.
-#'   Concrete subclasses (\code{QtlSumStats}, \code{GwasSumStats}) carry
-#'   a \code{DFrame} of per-entry rows plus shared slots \code{ldSketch},
-#'   \code{genome}, and \code{qcInfo}. Downstream pipelines should
-#'   dispatch on \code{SumStatsBase} for behaviors that apply to either
-#'   flavour and on the concrete subclass when the tuple shape matters.
+#' @description Virtual base class for summary-statistic collections. Concrete
+#'   subclasses (\code{QtlSumStats}, \code{GwasSumStats}) carry a \code{DFrame}
+#'   of per-entry rows plus shared slots \code{ldSketch}, \code{genome}, and
+#'   \code{qcInfo}. Downstream pipelines should dispatch on \code{SumStatsBase}
+#'   for behaviors that apply to either flavour and on the concrete subclass
+#'   when the tuple shape matters.
 #' @slot ldSketch A \code{GenotypeHandle} carrying the LD reference for
 #'   downstream QC and RSS analysis.
-#' @slot genome A single character string giving the genome build that
-#'   the LD sketch and every entry are aligned to.
-#' @slot qcInfo A \code{list} recording which QC steps ran. Empty
-#'   \code{list()} on construction; populated by \code{summaryStatsQc()}.
-#'   Fine-mapping and TWAS-weights pipelines reject inputs where
-#'   \code{length(getQcInfo(x)) == 0L} — the slot serves as both the
-#'   gating flag and the audit trail.
+#' @slot genome A single character string giving the genome build that the LD
+#'   sketch and every entry are aligned to.
+#' @slot qcInfo A \code{list} recording which QC steps ran. Empty \code{list()}
+#'   on construction; populated by \code{summaryStatsQc()}. Fine-mapping and
+#'   TWAS-weights pipelines reject inputs where \code{length(getQcInfo(x)) ==
+#'   0L} -- the slot serves as both the gating flag and the audit trail.
 #' @export
 
 #' @title Create a TwasWeightsEntry Object
@@ -86,70 +87,82 @@ setClass("TwasWeightsEntry",
 #' @param cvResult Optional cross-validation payload: a list mirroring
 #'   \code{FineMappingEntry@cvResult} with \code{samplePartition},
 #'   \code{predictions}, \code{performance}, and (mr.mash only) \code{foldFits}
-#'   — the per-fold fits that \code{fineMappingPipeline}'s mvSuSiE path consumes
-#'   as per-fold priors.
+#'   -- the per-fold fits that \code{fineMappingPipeline}'s mvSuSiE path
+#'   consumes as per-fold priors.
 #' @param standardized Logical (length 1).
 #' @param dataType Optional data-type tag.
 #' @return A \code{TwasWeightsEntry} object.
+#' @examples
+#' twe <- TwasWeightsEntry(variantIds = paste0("v", 1:4),
+#'   weights = rep(0.1, 4), cvResult = list(rsq = 0.5), standardized = FALSE)
+#' twe
 #' @export
-TwasWeightsEntry <- function(variantIds, weights, fits = NULL,
-                             cvResult = NULL, standardized = FALSE,
-                             dataType = NULL) {
-  obj <- new("TwasWeightsEntry",
-             variantIds    = as.character(variantIds),
-             weights       = weights,
-             fits          = fits,
-             cvResult      = cvResult,
-             standardized  = isTRUE(standardized),
-             dataType      = dataType)
-  validObject(obj)
-  obj
+TwasWeightsEntry <- function(
+    variantIds,
+    weights,
+    fits = NULL,
+    cvResult = NULL,
+    standardized = FALSE,
+    dataType = NULL
+) {
+    obj <- new(
+        "TwasWeightsEntry",
+        variantIds = as.character(variantIds),
+        weights = weights,
+        fits = fits,
+        cvResult = cvResult,
+        standardized = isTRUE(standardized),
+        dataType = dataType
+    )
+    validObject(obj)
+    obj
 }
 
 #' @rdname getWeights
 #' @export
-setMethod("getWeights", "TwasWeightsEntry",
-          function(x, ...) x@weights)
+setMethod("getWeights", "TwasWeightsEntry", function(x, ...) x@weights)
 
 #' @rdname getVariantIds
 #' @export
-setMethod("getVariantIds", "TwasWeightsEntry",
-          function(x, ...) x@variantIds)
+setMethod("getVariantIds", "TwasWeightsEntry", function(x, ...) x@variantIds)
 
 #' @rdname resolveWeights
 #' @export
 setMethod("resolveWeights", "TwasWeightsEntry", function(x, ...) {
-  vids <- as.character(getVariantIds(x))
-  w    <- as.numeric(getWeights(x))
-  if (length(vids) == 0L || length(vids) != length(w))
-    return(list(variantIds = character(0), weights = numeric(0)))
-  list(variantIds = vids, weights = w)
+    vids <- as.character(getVariantIds(x))
+    w <- as.numeric(getWeights(x))
+    if (length(vids) == 0L || length(vids) != length(w)) {
+        return(list(variantIds = character(0), weights = numeric(0)))
+    }
+    list(variantIds = vids, weights = w)
 })
 
 #' @rdname getFits
 #' @export
-setMethod("getFits", "TwasWeightsEntry",
-          function(x, ...) x@fits)
+setMethod("getFits", "TwasWeightsEntry", function(x, ...) x@fits)
 
 #' @rdname getCvResult
 #' @export
-setMethod("getCvResult", "TwasWeightsEntry",
-          function(x, ...) x@cvResult)
+setMethod("getCvResult", "TwasWeightsEntry", function(x, ...) x@cvResult)
 
 #' @rdname getStandardized
 #' @export
-setMethod("getStandardized", "TwasWeightsEntry",
-          function(x, ...) x@standardized)
+setMethod("getStandardized", "TwasWeightsEntry", function(x, ...) {
+    x@standardized
+})
 
 #' @rdname getDataType
 #' @export
-setMethod("getDataType", "TwasWeightsEntry",
-          function(x, ...) x@dataType)
+setMethod("getDataType", "TwasWeightsEntry", function(x, ...) x@dataType)
 
+#' @rdname show-methods
 #' @export
 setMethod("show", "TwasWeightsEntry", function(object) {
-  cat(sprintf("TwasWeightsEntry: %d variants, standardized=%s\n",
-              length(object@variantIds), object@standardized))
-  hasCv <- !is.null(object@cvResult)
-  cat(sprintf("  CV performance: %s\n", hasCv))
+    cat(glue(
+        "TwasWeightsEntry: {length(object@variantIds)} variants, ",
+        "standardized={object@standardized}\n",
+        .trim = FALSE
+    ))
+    hasCv <- !is.null(object@cvResult)
+    cat(glue("  CV performance: {hasCv}\n", .trim = FALSE))
 })

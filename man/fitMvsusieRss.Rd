@@ -17,14 +17,28 @@ fitMvsusieRss(Z, R, N, prior_variance, coverage = 0.95, ...)
 
 \item{coverage}{Credible set coverage (default 0.95).}
 
-\item{...}{Additional arguments forwarded to
-\code{mvsusieR::mvsusie_rss}.}
+\item{...}{Additional arguments forwarded to \code{mvsusieR::mvsusie_rss}.}
 }
 \value{
 The fit object returned by \code{mvsusieR::mvsusie_rss}.
 }
 \description{
-Wrapper around \code{mvsusieR::mvsusie_rss}. The underlying function
-was renamed from \code{mvsusieRss} to \code{mvsusie_rss} upstream;
-this wrapper insulates pecotmr from that naming.
+Wrapper around \code{mvsusieR::mvsusie_rss}. The underlying function was
+renamed from \code{mvsusieRss} to \code{mvsusie_rss} upstream; this wrapper
+insulates pecotmr from that naming.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+ss <- lapply(seq_len(ncol(X)), function(j) {
+  coef(summary(lm(y ~ X[, j])))[2, 1:2]
+})
+stat <- list(
+  bhat = vapply(ss, `[`, numeric(1), 1L),
+  shat = vapply(ss, `[`, numeric(1), 2L),
+  z = vapply(ss, function(s) s[1] / s[2], numeric(1)),
+  n = rep(nrow(X), ncol(X)))
+LD <- cor(X)
+fitMvsusieRss(Z = stat$z, R = LD, N = nrow(X), prior_variance = 1)
 }

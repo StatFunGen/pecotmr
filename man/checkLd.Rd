@@ -19,8 +19,8 @@ checkLd(
 \item{rTol}{Eigenvalue tolerance. Eigenvalues with absolute value below
 \code{rTol} are treated as zero. Default: \code{1e-8}.}
 
-\item{shrinkage}{Shrinkage parameter for \code{method = "shrink"}.
-Default: \code{0.01}.}
+\item{shrinkage}{Shrinkage parameter for \code{method = "shrink"}. Default:
+\code{0.01}.}
 }
 \value{
 A list with components:
@@ -63,7 +63,8 @@ R_good <- diag(5)
 checkLd(R_good)$isPd  # TRUE
 
 # A matrix with negative eigenvalues
-R_bad <- matrix(0.9, 3, 3); diag(R_bad) <- 1; R_bad[1,3] <- R_bad[3,1] <- -0.5
+R_bad <- matrix(0.9, 3, 3); diag(R_bad) <- 1
+R_bad[1, 3] <- R_bad[3, 1] <- -0.5
 checkLd(R_bad)$isPsd  # FALSE
 R_fixed <- checkLd(R_bad, method = "eigenfix")$R
 checkLd(R_fixed)$isPsd  # TRUE

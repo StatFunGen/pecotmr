@@ -16,6 +16,10 @@ getLdMatrixList(x)
 List of matrices (empty list for S-LDSC).
 }
 \description{
-Return the list of per-block LD (R^2) matrices used for
-  the FGLS residual covariance in g-LDSC.
+Return the list of per-block LD (R^2) matrices used for the FGLS
+  residual covariance in g-LDSC.
+}
+\examples{
+data(ldScoreExample)
+getLdMatrixList(ldScoreExample)
 }

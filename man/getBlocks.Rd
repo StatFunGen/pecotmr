@@ -40,3 +40,9 @@ Lightweight handle to genotype data in any supported format.
 \item{\code{pgenPtr}}{An external pointer for plink2 pgen handle, or NULL.}
 }}
 
+\examples{
+lb <- new("LdBlocks", genome = "hg19",
+  blocks = GenomicRanges::GRanges("chr1",
+    IRanges::IRanges(c(1, 1001), c(1000, 2000))))
+getBlocks(lb)
+}

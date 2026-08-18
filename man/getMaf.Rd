@@ -17,10 +17,24 @@ getMaf(x, ...)
 
 \item{...}{Class-specific selection arguments (e.g., \code{region},
 \code{cisWindow} for \code{QtlDataset}).}
+
+\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
+Restrict variants to this region; \code{NULL} uses the full cis window /
+all regions.}
+
+\item{cisWindow}{Integer or \code{NULL}. Half-width (bp) of the cis window
+around the trait; \code{NULL} uses the dataset default.}
+
+\item{samples}{Character vector or \code{NULL}. Restrict to these sample IDs;
+\code{NULL} uses all samples.}
 }
 \value{
 Numeric vector of MAFs, or NULL if not available.
 }
 \description{
 Extract MAF vector from a GwasSumStats object.
+}
+\examples{
+data(qtlDatasetExample)
+getMaf(qtlDatasetExample)
 }

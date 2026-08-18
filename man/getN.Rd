@@ -21,3 +21,7 @@ Numeric vector of sample sizes.
 Extract sample size vector from a \code{GwasSumStats} or
   \code{QtlSumStats} entry, selected by its identity tuple.
 }
+\examples{
+data(qtlSumStatsExample)
+getN(qtlSumStatsExample)
+}

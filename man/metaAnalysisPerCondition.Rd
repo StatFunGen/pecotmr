@@ -12,16 +12,16 @@ metaAnalysisPerCondition(
 )
 }
 \arguments{
-\item{effectSizes}{Numeric matrix (features x contrasts) of contrast
-effect sizes. Column names must follow the pattern
+\item{effectSizes}{Numeric matrix (features x contrasts) of contrast effect
+sizes. Column names must follow the pattern
 \code{mean_contrast_<conditionA>_vs_<conditionB>}.}
 
-\item{seValues}{Numeric matrix (features x contrasts) of contrast
-standard errors. Must have the same dimensions and column names as
+\item{seValues}{Numeric matrix (features x contrasts) of contrast standard
+errors. Must have the same dimensions and column names as
 \code{effectSizes}.}
 
-\item{seCutoff}{Numeric; minimum SE below which a contrast is excluded
-from the meta-analysis for a given feature (default 0).}
+\item{seCutoff}{Numeric; minimum SE below which a contrast is excluded from
+the meta-analysis for a given feature (default 0).}
 
 \item{metaMethod}{Between-study variance estimator for the random-effects
 meta-analysis, forwarded to \code{metafor::rma(method = )}. Default
@@ -48,4 +48,9 @@ standard errors involving that condition, then runs a random-effects
 meta-analysis (via \code{metafor::rma}; pecotmr does not implement its own
 meta-analysis). Intended to be run on the output of
 \code{\link{fitMashContrast}} / \code{\link{mashPosteriorContrast}}.
+}
+\examples{
+effectSizes <- matrix(rnorm(12), 4, 3)
+seValues <- matrix(abs(rnorm(12)) + 0.1, 4, 3)
+metaAnalysisPerCondition(effectSizes, seValues)
 }

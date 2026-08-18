@@ -16,44 +16,42 @@ mashPipeline(
 }
 \arguments{
 \item{sumStatsList}{Named list (or \code{SimpleList}) of
-\code{\link{QtlSumStats}} or \code{\link{GwasSumStats}} objects.
-Required names: \code{"strong"} (discovery variants), \code{"random"}
-(random background). Optional: \code{"null"} (for residual
-correlation estimation).}
+\code{\link{QtlSumStats}} or \code{\link{GwasSumStats}} objects. Required
+names: \code{"strong"} (discovery variants), \code{"random"} (random
+background). Optional: \code{"null"} (for residual correlation estimation).}
 
-\item{alpha}{Numeric (length 1). Variance-stabilising-transform
-exponent forwarded to \code{mashr::mash_set_data()}. Use
-\code{alpha = 0} on the BETA scale, \code{alpha = 1} on the Z scale.}
+\item{alpha}{Numeric (length 1). Variance-stabilising-transform exponent
+forwarded to \code{mashr::mash_set_data()}. Use \code{alpha = 0} on the
+BETA scale, \code{alpha = 1} on the Z scale.}
 
-\item{residualCorrelation}{Optional pre-computed residual correlation
-matrix (\code{Vhat}). When supplied, replaces the inline
-\code{mashr::estimate_null_correlation_simple()} call entirely and
-the \code{"random"} slot of \code{sumStatsList} becomes optional
-(the function does not need it for anything else). Useful when
-\code{Vhat} was estimated previously on a larger reference and
-shipped as a static artefact (the legacy MWE pattern).}
+\item{residualCorrelation}{Optional pre-computed residual correlation matrix
+(\code{Vhat}). When supplied, replaces the inline
+\code{mashr::estimate_null_correlation_simple()} call entirely and the
+\code{"random"} slot of \code{sumStatsList} becomes optional (the function
+does not need it for anything else). Useful when \code{Vhat} was estimated
+previously on a larger reference and shipped as a static artefact (the
+legacy MWE pattern).}
 
-\item{priorCovariances}{Optional named list of square covariance
-matrices (the \code{Ulist} \code{mashr::mash()} consumes). When
-supplied, replaces the canonical + PCA + flash + ED chain
-(\code{cov_canonical} / \code{cov_pca} / \code{cov_flash} /
-\code{cov_ed}) entirely; mash sees only the supplied matrices.
-Every entry must be a \code{ncol(Bhat) x ncol(Bhat)} matrix.
-Useful when \code{U} was learnt on a larger reference and shipped
+\item{priorCovariances}{Optional named list of square covariance matrices
+(the \code{Ulist} \code{mashr::mash()} consumes). When supplied, replaces
+the canonical + PCA + flash + ED chain (\code{cov_canonical} /
+\code{cov_pca} / \code{cov_flash} / \code{cov_ed}) entirely; mash sees only
+the supplied matrices. Every entry must be a \code{ncol(Bhat) x ncol(Bhat)}
+matrix. Useful when \code{U} was learnt on a larger reference and shipped
 as a static artefact (the legacy MWE pattern).}
 
-\item{nPcs}{Optional integer; number of principal components seeded
-into \code{mashr::cov_pca()}. Defaults to \code{ncol(Bhat) - 1}.
-Ignored when \code{priorCovariances} is supplied.}
+\item{nPcs}{Optional integer; number of principal components seeded into
+\code{mashr::cov_pca()}. Defaults to \code{ncol(Bhat) - 1}. Ignored when
+\code{priorCovariances} is supplied.}
 
 \item{inputScale}{One of \code{"auto"} (default), \code{"beta"},
 \code{"z"}. Controls which (Bhat, Shat) pair is extracted from each
 sumstats entry:
 \describe{
-  \item{\code{"beta"}}{Bhat = BETA, Shat = SE — the standard
+  \item{\code{"beta"}}{Bhat = BETA, Shat = SE -- the standard
     effect-size scale mashr was designed around. Requires every
     entry to carry BETA + SE mcols.}
-  \item{\code{"z"}}{Bhat = Z, Shat = 1 — z-score scale. Requires Z.}
+  \item{\code{"z"}}{Bhat = Z, Shat = 1 -- z-score scale. Requires Z.}
   \item{\code{"auto"}}{Use BETA + SE when every entry carries both;
     otherwise fall back to (Z, 1) when every entry carries Z. Mixed
     inputs (some entries missing BETA, others missing Z) are a
@@ -67,14 +65,18 @@ typically \code{alpha = 0} for beta, \code{alpha = 1} for z.}
 }
 \value{
 A list with elements \code{U} (the combined covariance list:
-  canonical + PCA + flash + ED) and \code{w} (the estimated mixture
-  weights).
+  canonical + PCA + flash + ED) and \code{w} (the estimated mixture weights).
 }
 \description{
-End-to-end driver: from `{strong, random, null}` sumstats
-  collections, builds the variant × context Bhat / Shat matrices,
-  estimates the residual correlation (\code{Vhat}), and fits the mash
-  model with canonical + PCA + flash + ED covariance components,
-  returning the fitted covariance list and the estimated mixture
-  weights.
+End-to-end driver: from `(strong, random, null)` sumstats
+  collections, builds the variant x context Bhat / Shat matrices, estimates
+  the residual correlation (\code{Vhat}), and fits the mash model with
+  canonical + PCA + flash + ED covariance components, returning the fitted
+  covariance list and the estimated mixture weights.
+}
+\examples{
+data(qtlSumStatsMulticontextExample)
+ss <- qtlSumStatsMulticontextExample
+sumStatsList <- list(strong = ss, random = ss)
+mashPipeline(sumStatsList, alpha = 0, nPcs = 2L)
 }

@@ -22,17 +22,17 @@ causalInferencePipeline(
 )
 }
 \arguments{
-\item{gwasSumStats}{A \code{\link{GwasSumStats}} object. Must be
-QC'd (\code{length(getQcInfo(x)) > 0L}).}
+\item{gwasSumStats}{A \code{\link{GwasSumStats}} object. Must be QC'd
+(\code{length(getQcInfo(x)) > 0L}).}
 
-\item{twasWeights}{Optional \code{\link{TwasWeights}} carrying
-per-(study, context, trait, method) weights. When supplied, drives
-the TWAS-Z computation.}
+\item{twasWeights}{Optional \code{\link{TwasWeights}} carrying per-(study,
+context, trait, method) weights. When supplied, drives the TWAS-Z
+computation.}
 
-\item{fineMappingResult}{Optional \code{\link{QtlFineMappingResult}}.
-When supplied, drives the MR computation and (when
-\code{twasWeights = NULL}) the TWAS-Z weights via the SuSiE-style
-coefficients on each entry's \code{topLoci}.}
+\item{fineMappingResult}{Optional \code{\link{QtlFineMappingResult}}. When
+supplied, drives the MR computation and (when \code{twasWeights = NULL})
+the TWAS-Z weights via the SuSiE-style coefficients on each entry's
+\code{topLoci}.}
 
 \item{rsqCutoff}{Numeric (length 1). When \code{> 0}, performs CV weight
 selection (ports the legacy \code{twas_pipeline} \code{pick_best_model} +
@@ -41,43 +41,41 @@ keep only the method whose \code{cvResult} \code{rsqOption} metric is
 highest among methods that clear both \code{rsqCutoff} and the
 \code{rsqPvalCutoff} gate AND that produced a finite TWAS Z (the NA/Inf
 re-selection); groups where no method clears the cutoffs are dropped. A
-group whose methods carry no usable \code{cvResult} (the SS-TWAS
-path) keeps all methods. Needs the \code{twasWeights} \code{cvResult},
-so selection is a no-op on the fineMappingResult-only path. Default
-\code{0} (no selection; score every method).}
+group whose methods carry no usable \code{cvResult} (the SS-TWAS path)
+keeps all methods. Needs the \code{twasWeights} \code{cvResult}, so
+selection is a no-op on the fineMappingResult-only path. Default \code{0}
+(no selection; score every method).}
 
-\item{rsqPvalCutoff}{Numeric (length 1). CV-p-value gate for weight
-selection (ports legacy \code{rsq_pval_cutoff}): a method is eligible only
-when its \code{cvResult} \code{rsqPvalOption} metric is
-\code{< rsqPvalCutoff}. Default \code{Inf} (no p-value gate). A finite
-value activates selection even when \code{rsqCutoff = 0}.}
+\item{rsqPvalCutoff}{Numeric (length 1). CV-p-value gate for weight selection
+(ports legacy \code{rsq_pval_cutoff}): a method is eligible only when its
+\code{cvResult} \code{rsqPvalOption} metric is \code{< rsqPvalCutoff}.
+Default \code{Inf} (no p-value gate). A finite value activates selection
+even when \code{rsqCutoff = 0}.}
 
-\item{rsqOption}{Character. Which \code{cvResult} metric is the
-"r-squared" used for the cutoff and ranking (ports legacy
-\code{rsq_option}); typically \code{"rsq"} or \code{"adj_rsq"}.
-Default \code{"rsq"}.}
+\item{rsqOption}{Character. Which \code{cvResult} metric is the "r-squared"
+used for the cutoff and ranking (ports legacy \code{rsq_option}); typically
+\code{"rsq"} or \code{"adj_rsq"}. Default \code{"rsq"}.}
 
-\item{rsqPvalOption}{Character vector of candidate \code{cvResult}
-metric names for the p-value gate (ports legacy \code{rsq_pval_option});
-the first one present in a tuple's metrics is used. Default
-\code{c("adj_rsq_pval", "pval")}.}
+\item{rsqPvalOption}{Character vector of candidate \code{cvResult} metric
+names for the p-value gate (ports legacy \code{rsq_pval_option}); the first
+one present in a tuple's metrics is used. Default \code{c("adj_rsq_pval",
+"pval")}.}
 
 \item{mrPipCutoff}{Numeric (length 1). PIP threshold for a \code{topLoci}
 variant to be used as an instrumental variable. Used only when
 \code{mrMethod = "ivwPerVariant"}. Default \code{0.5}.}
 
-\item{mrMethod}{One of \code{"ivwPerVariant"} (default) or
-\code{"csAware"}. The IVW-per-variant method filters topLoci
-variants by \code{pip > mrPipCutoff} and IVW-pools Wald ratios
-across variants. The CS-aware method groups variants by credible
-set (column \code{cs} in topLoci), computes a PIP-weighted
-composite Wald ratio per CS using \code{mrCpipCutoff} on the
-per-CS cumulative PIP, then IVW-pools across CSs and reports
-Cochran's Q + I-squared in the output columns \code{Q}, \code{I2}.}
+\item{mrMethod}{One of \code{"ivwPerVariant"} (default) or \code{"csAware"}.
+The IVW-per-variant method filters topLoci variants by \code{pip >
+mrPipCutoff} and IVW-pools Wald ratios across variants. The CS-aware method
+groups variants by credible set (column \code{cs} in topLoci), computes a
+PIP-weighted composite Wald ratio per CS using \code{mrCpipCutoff} on the
+per-CS cumulative PIP, then IVW-pools across CSs and reports Cochran's Q +
+I-squared in the output columns \code{Q}, \code{I2}.}
 
-\item{mrCpipCutoff}{Numeric (length 1). Cumulative-PIP cutoff for
-retaining a credible set. Used only when
-\code{mrMethod = "csAware"}. Default \code{0.5}.}
+\item{mrCpipCutoff}{Numeric (length 1). Cumulative-PIP cutoff for retaining a
+credible set. Used only when \code{mrMethod = "csAware"}. Default
+\code{0.5}.}
 
 \item{mrPvalCutoff}{Numeric (length 1). TWAS-p-value gate for running MR
 (ports the legacy \code{twas_pipeline} \code{mr_pval_cutoff}): MR is
@@ -88,8 +86,8 @@ exists).}
 
 \item{combineMethods}{Optional character vector forwarded to
 \code{\link{combinePValues}} for cross-method combination per
-\code{(qtlStudy, context, trait, gwasStudy)} group. \code{NULL}
-(default) skips combination.}
+\code{(qtlStudy, context, trait, gwasStudy)} group. \code{NULL} (default)
+skips combination.}
 
 \item{alleleFlip}{Logical, default \code{TRUE}. When TRUE, match QTL variants
 to the GWAS by (chrom, pos) with ref/alt swaps recognized and the exposure
@@ -103,11 +101,10 @@ A \code{GRanges} as described above.
 }
 \description{
 Per-region pipeline that pairs QTL-derived weight vectors
-  (\code{\link{TwasWeights}} and/or a QTL
-  \code{\link{QtlFineMappingResult}}) with one or more GWAS studies
-  (\code{\link{GwasSumStats}}) to produce per-tuple TWAS Z-scores and,
-  when fine-mapping is supplied, Wald-ratio Mendelian Randomization
-  estimates over the QTL credible sets.
+  (\code{\link{TwasWeights}} and/or a QTL \code{\link{QtlFineMappingResult}})
+  with one or more GWAS studies (\code{\link{GwasSumStats}}) to produce
+  per-tuple TWAS Z-scores and, when fine-mapping is supplied, Wald-ratio
+  Mendelian Randomization estimates over the QTL credible sets.
 
   Input combinations:
   \itemize{
@@ -121,12 +118,11 @@ Per-region pipeline that pairs QTL-derived weight vectors
   }
 }
 \section{LD-sketch identity check}{
-
-If a QTL input (TwasWeights or QtlFineMappingResult) carries a
-non-\code{NULL} \code{ldSketch}, it must match the \code{ldSketch} on
-\code{gwasSumStats}. Mismatch is a hard error. A QTL input with
-\code{ldSketch = NULL} (the fit was learned from individual-level
-data) skips the validation for that input.
+ If a QTL input (TwasWeights or
+  QtlFineMappingResult) carries a non-\code{NULL} \code{ldSketch}, it must
+  match the \code{ldSketch} on \code{gwasSumStats}. Mismatch is a hard error.
+  A QTL input with \code{ldSketch = NULL} (the fit was learned from
+  individual-level data) skips the validation for that input.
 }
 
 \section{Output shape}{
@@ -147,3 +143,11 @@ positioned at the variant span of the QTL weight set, with mcols:
 }
 }
 
+\examples{
+data(qtlDatasetExample)
+data(gwasSumStatsS4Example)
+tw <- twasWeightsPipeline(qtlDatasetExample,
+  methods = "lasso", cisWindow = 1e6)
+causalInferencePipeline(
+  gwasSumStats = gwasSumStatsS4Example, twasWeights = tw)
+}

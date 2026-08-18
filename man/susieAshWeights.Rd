@@ -13,7 +13,8 @@ susieAshWeights(X = NULL, y = NULL, susieAshFit = NULL, retainFit = FALSE, ...)
 
 \item{susieAshFit}{Optional fitted SuSiE-ASH object.}
 
-\item{retainFit}{If TRUE, stores the fitted object as an attribute on the returned weights.}
+\item{retainFit}{If TRUE, stores the fitted object as an attribute on the
+returned weights.}
 
 \item{...}{Additional arguments passed to `susieR::susie()` when fitting.}
 }
@@ -21,6 +22,12 @@ susieAshWeights(X = NULL, y = NULL, susieAshFit = NULL, retainFit = FALSE, ...)
 Numeric vector of variant weights.
 }
 \description{
-Extracts coefficients from an existing SuSiE-ASH fit or fits `susieR::susie()`
-with `unmappable_effects = "ash"`.
+Extracts coefficients from an existing SuSiE-ASH fit or fits
+`susieR::susie()` with `unmappable_effects = "ash"`.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+susieAshWeights(X, y)
 }

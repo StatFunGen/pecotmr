@@ -39,5 +39,15 @@ larger payload.}
 Matrix of variant weights.
 }
 \description{
-Extracts coefficients from an existing mr.mash fit or fits mr.mash from `X` and `Y`.
+Extracts coefficients from an existing mr.mash fit or fits mr.mash from `X`
+and `Y`.
+}
+\examples{
+data(multiTraitData)
+X <- multiTraitData$X[, 1:60]
+Y <- multiTraitData$Y
+ddpm <- multiTraitData$priorMatrices
+fit <- mrmashWrapper(X = X, Y = Y, dataDrivenPriorMatrices = ddpm,
+  canonicalPriorMatrices = TRUE)
+mrmashWeights(mrmashFit = fit, X = X, Y = Y)
 }

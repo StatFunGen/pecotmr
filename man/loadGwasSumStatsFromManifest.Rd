@@ -18,12 +18,12 @@ loadGwasSumStatsFromManifest(
 \arguments{
 \item{manifest}{A data.frame or path. Columns (snake_case aliases accepted):
 \code{study} (required, unique), \code{sumStatsPath} (required),
-\code{columnMapping} (optional), \code{nCase} / \code{nControl}
-(optional), \code{nSample} (optional study-level total N), \code{varY}
-(optional), and the single-valued \code{genome} / \code{ldSketchPath}.
-When a row supplies a study-level scalar (\code{nCase} + \code{nControl},
-or \code{nSample}), its sumstats file need not carry a per-variant \code{N}
-column; \code{\link{summaryStatsQc}} fills \code{N} from the scalar.}
+\code{columnMapping} (optional), \code{nCase} / \code{nControl} (optional),
+\code{nSample} (optional study-level total N), \code{varY} (optional), and
+the single-valued \code{genome} / \code{ldSketchPath}. When a row supplies
+a study-level scalar (\code{nCase} + \code{nControl}, or \code{nSample}),
+its sumstats file need not carry a per-variant \code{N} column;
+\code{\link{summaryStatsQc}} fills \code{N} from the scalar.}
 
 \item{genome}{Genome build; reconciled with a \code{genome} column.}
 
@@ -37,9 +37,9 @@ text and bgzipped+tabixed VCF; ignored with a warning otherwise).}
 \item{minLdOverlapWarn}{Warn when the fraction of sumstats variants present
 in the LD sketch falls below this (default 0.5).}
 
-\item{columnMapping}{Optional default column mapping (a named list/vector,
-or a path to a YAML file of \code{standardName: sourceName} entries)
-applied when a row has no \code{columnMapping}.}
+\item{columnMapping}{Optional default column mapping (a named list/vector, or
+a path to a YAML file of \code{standardName: sourceName} entries) applied
+when a row has no \code{columnMapping}.}
 
 \item{sampleSelect}{Optional GWAS-VCF FORMAT sample (study) column to read.}
 
@@ -55,4 +55,13 @@ Build a \code{\link{GwasSumStats}} from a manifest with one row
   sumstats file needs a \code{z} column, or \code{beta}+\code{se} from which
   the Wald z (\code{z = beta/se}) is derived when \code{z} is absent (a
   supplied \code{z} takes precedence).
+}
+\examples{
+gwasTsv <- system.file("extdata", "manifests",
+  "protocol_example.twas.gwas_sumstats.chr22.tsv.gz", package = "pecotmr")
+ldStem <- file.path(system.file("extdata", "ld_reference", "chr22",
+  package = "pecotmr"), "protocol_example.LD.chr22")
+manifest <- data.frame(study = "g1", sumStatsPath = gwasTsv)
+loadGwasSumStatsFromManifest(manifest = manifest, genome = "hg38",
+  ldSketch = ldStem, region = "chr22:10000000-19000000")
 }

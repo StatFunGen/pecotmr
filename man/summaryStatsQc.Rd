@@ -35,81 +35,76 @@ summaryStatsQc(
 )
 }
 \arguments{
-\item{sumstats}{A \code{QtlSumStats} or \code{GwasSumStats}
-collection.}
+\item{sumstats}{A \code{QtlSumStats} or \code{GwasSumStats} collection.}
 
-\item{removeIndels}{Logical (length 1). When \code{TRUE}, drop
-indels during panel harmonization. Default \code{FALSE}.}
+\item{removeIndels}{Logical (length 1). When \code{TRUE}, drop indels during
+panel harmonization. Default \code{FALSE}.}
 
-\item{removeStrandAmbiguous}{Logical (length 1). When \code{TRUE},
-drop A/T and C/G strand-ambiguous variants. Default \code{TRUE}.}
+\item{removeStrandAmbiguous}{Logical (length 1). When \code{TRUE}, drop A/T
+and C/G strand-ambiguous variants. Default \code{TRUE}.}
 
-\item{mafCutoff}{Numeric (length 1). MAF threshold (variants with
-\code{MAF < mafCutoff} are dropped). Default 0. Requires \code{MAF}
-or \code{FRQ} column when non-zero.}
+\item{mafCutoff}{Numeric (length 1). MAF threshold (variants with \code{MAF <
+mafCutoff} are dropped). Default 0. Requires \code{MAF} or \code{FRQ}
+column when non-zero.}
 
-\item{infoCutoff}{Numeric (length 1). INFO score threshold. Default
-0. Requires \code{INFO} column when non-zero.}
+\item{infoCutoff}{Numeric (length 1). INFO score threshold. Default 0.
+Requires \code{INFO} column when non-zero.}
 
-\item{nCutoff}{Numeric (length 1). Sample-size deviation threshold:
-drop variants whose \code{N} is more than \code{nCutoff}
-median-absolute-deviations from the median. Set to 0 to disable.
-Default 5.}
+\item{nCutoff}{Numeric (length 1). Sample-size deviation threshold: drop
+variants whose \code{N} is more than \code{nCutoff}
+median-absolute-deviations from the median. Set to 0 to disable. Default 5.}
 
-\item{keepVariants}{Optional character vector of variant IDs (SNP
-column) to retain prior to harmonization.}
+\item{keepVariants}{Optional character vector of variant IDs (SNP column) to
+retain prior to harmonization.}
 
 \item{skipRegion}{Optional character vector of \code{"chr:start-end"}
 strings, or a \code{GRanges}, of regions to drop.}
 
 \item{pipCutoffToSkip}{Numeric (length 1). When \code{!= 0}, run an
-LD-independent single-effect SER screen and skip the entry if no
-PIP exceeds the cutoff. \code{< 0} resolves to \code{3 / nVariants}.
-Default 0 (no screen).}
+LD-independent single-effect SER screen and skip the entry if no PIP
+exceeds the cutoff. \code{< 0} resolves to \code{3 / nVariants}. Default 0
+(no screen).}
 
-\item{absZCutoffToSkip}{Numeric (length 1). Alternative signal screen:
-skip the entry when \code{max(abs(Z))} does not exceed the cutoff. No
-model fit. Default 0 (off).}
+\item{absZCutoffToSkip}{Numeric (length 1). Alternative signal screen: skip
+the entry when \code{max(abs(Z))} does not exceed the cutoff. No model fit.
+Default 0 (off).}
 
-\item{bfCutoffToSkip}{Numeric (length 1). Alternative signal screen: skip
-the entry when the largest per-variant single-effect Bayes factor (from
-the same \code{susie_ser} fit as the PIP screen) does not exceed the
-cutoff. Compared in log space (\code{maxlogBF > log(cutoff)}). Must be
-\code{> 0}. Default 0 (off).}
+\item{bfCutoffToSkip}{Numeric (length 1). Alternative signal screen: skip the
+entry when the largest per-variant single-effect Bayes factor (from the
+same \code{susie_ser} fit as the PIP screen) does not exceed the cutoff.
+Compared in log space (\code{maxlogBF > log(cutoff)}). Must be \code{> 0}.
+Default 0 (off).}
 
-\item{logBfCutoffToSkip}{Numeric (length 1). As \code{bfCutoffToSkip} but
-the cutoff is on the log Bayes factor scale (\code{maxlogBF > cutoff}).
-Default 0 (off).
-Exactly one of \code{pipCutoffToSkip} / \code{absZCutoffToSkip} /
+\item{logBfCutoffToSkip}{Numeric (length 1). As \code{bfCutoffToSkip} but the
+cutoff is on the log Bayes factor scale (\code{maxlogBF > cutoff}). Default
+0 (off). Exactly one of \code{pipCutoffToSkip} / \code{absZCutoffToSkip} /
 \code{bfCutoffToSkip} / \code{logBfCutoffToSkip} may be non-zero (one
 screening metric at a time); enabling more than one is an error.}
 
 \item{zMismatchQc}{One of \code{"none"} (default), \code{"slalom"},
 \code{"dentist"}.}
 
-\item{alleleFlipKriging}{Logical (length 1). Opt-in kriging
-LD-consistency prefilter run before SLALOM/DENTIST. Default
-\code{FALSE}.}
+\item{alleleFlipKriging}{Logical (length 1). Opt-in kriging LD-consistency
+prefilter run before SLALOM/DENTIST. Default \code{FALSE}.}
 
 \item{effectiveN}{Logical (length 1). When \code{TRUE} (default) and the
 input carries case/control counts --- per-variant \code{N_CASE} /
-\code{N_CONTROL} mcols, else the study-level \code{nCase} /
-\code{nControl} scalars --- the working per-variant \code{N} is set to
-the effective sample size \code{effectiveN(nCase, nControl)} BEFORE the
-N-cutoff filter, so the filter, kriging, and the downstream fit all use
-\code{N_eff}. When both counts and an \code{N} column are present the
-counts win: \code{N} is overridden and the override is logged. Inputs
-with no counts (quantitative traits) are unchanged. The escape hatch
-\code{effectiveN = FALSE} restores the raw \code{N} column (or, when
-there is no \code{N}, the raw total \code{nCase + nControl}) with no
-override. \code{qcInfo$options$effectiveN} records the setting and each
-entry's \code{nSource} is one of \code{"effective"}, \code{"column"},
-\code{"total"}, or \code{NA}.}
+\code{N_CONTROL} mcols, else the study-level \code{nCase} / \code{nControl}
+scalars --- the working per-variant \code{N} is set to the effective sample
+size \code{effectiveN(nCase, nControl)} BEFORE the N-cutoff filter, so the
+filter, kriging, and the downstream fit all use \code{N_eff}. When both
+counts and an \code{N} column are present the counts win: \code{N} is
+overridden and the override is logged. Inputs with no counts (quantitative
+traits) are unchanged. The escape hatch \code{effectiveN = FALSE} restores
+the raw \code{N} column (or, when there is no \code{N}, the raw total
+\code{nCase + nControl}) with no override. \code{qcInfo$options$effectiveN}
+records the setting and each entry's \code{nSource} is one of
+\code{"effective"}, \code{"column"}, \code{"total"}, or \code{NA}.}
 
 \item{impute}{Logical (length 1). Run RAISS imputation against the
-\code{ldSketch}. Default \code{FALSE}. (Note: RAISS against the
-sketch is not yet fully wired for the new path; the option is
-accepted but currently emits a warning and is skipped.)}
+\code{ldSketch}. Default \code{FALSE}. (Note: RAISS against the sketch is
+not yet fully wired for the new path; the option is accepted but currently
+emits a warning and is skipped.)}
 
 \item{imputeOpts}{Named list of RAISS parameters. RAISS imputation scopes its
 reference panel to the analysis-region window (so a per-chromosome /
@@ -117,12 +112,12 @@ genome-wide \code{ldSketch} does not materialize its full dosage);
 \code{flank} (default 0) widens that window by the given number of base
 pairs on each side to retain LD context for edge variants.}
 
-\item{matchMinProp}{Minimum proportion of LD panel variants that must
-be matched by the sumstats; default 0.}
+\item{matchMinProp}{Minimum proportion of LD panel variants that must be
+matched by the sumstats; default 0.}
 
 \item{coerceNumeric}{Logical. Coerce signed columns
-(Z/BETA/SE/OR/LOG_ODDS/SIGNED_SUMSTAT/P/MAF/FRQ/INFO/N) to numeric.
-Default \code{TRUE}.}
+(Z/BETA/SE/OR/LOG_ODDS/SIGNED_SUMSTAT/P/MAF/FRQ/INFO/N) to numeric. Default
+\code{TRUE}.}
 
 \item{normalizeChr}{Logical. Strip \code{"chr"} prefix, uppercase the
 chromosome label, and map 23->X, 24->Y, M->MT. Default \code{TRUE}.}
@@ -130,54 +125,54 @@ chromosome label, and map 23->X, 24->Y, M->MT. Default \code{TRUE}.}
 \item{dropNonstandardChr}{Logical. Drop variants whose CHR (after
 normalization) is outside 1..22, X, Y, MT. Default \code{TRUE}.}
 
-\item{dropMissData}{Logical. Drop rows with NA in any vital column
-(chrom, pos, A1, A2, and at least one of Z / BETA). Default
-\code{TRUE}.}
+\item{dropMissData}{Logical. Drop rows with NA in any vital column (chrom,
+pos, A1, A2, and at least one of Z / BETA). Default \code{TRUE}.}
 
-\item{dropPOutOfRange}{Logical. Drop rows where \code{P < 0} or
-\code{P > 1}. Default \code{TRUE}.}
+\item{dropPOutOfRange}{Logical. Drop rows where \code{P < 0} or \code{P > 1}.
+Default \code{TRUE}.}
 
 \item{clampSmallP}{Logical. Floor non-negative P values below
-\code{smallPFloor} to \code{smallPFloor} so \code{-log10(P)} stays
-finite. Applied to both input and Z-derived P values. Default
+\code{smallPFloor} to \code{smallPFloor} so \code{-log10(P)} stays finite.
+Applied to both input and Z-derived P values. Default \code{TRUE}.}
+
+\item{smallPFloor}{Numeric (length 1). Floor for \code{clampSmallP}. Default
+\code{5e-324} (R's smallest positive double).}
+
+\item{dropZeroEffect}{Logical. Drop rows where any effect column is exactly 0
+(\code{BETA}, \code{LOG_ODDS}, \code{SIGNED_SUMSTAT}) or \code{OR} is
+exactly 1. Default \code{TRUE}.}
+
+\item{dropNonpositiveSe}{Logical. Drop rows where \code{SE <= 0}. Default
 \code{TRUE}.}
-
-\item{smallPFloor}{Numeric (length 1). Floor for \code{clampSmallP}.
-Default \code{5e-324} (R's smallest positive double).}
-
-\item{dropZeroEffect}{Logical. Drop rows where any effect column is
-exactly 0 (\code{BETA}, \code{LOG_ODDS}, \code{SIGNED_SUMSTAT}) or
-\code{OR} is exactly 1. Default \code{TRUE}.}
-
-\item{dropNonpositiveSe}{Logical. Drop rows where \code{SE <= 0}.
-Default \code{TRUE}.}
 }
 \value{
-A new \code{QtlSumStats} / \code{GwasSumStats} with cleaned
-  entries and \code{qcInfo} populated.
+A new \code{QtlSumStats} / \code{GwasSumStats} with cleaned entries
+  and \code{qcInfo} populated.
 }
 \description{
 Applies a single QC pass to a \code{QtlSumStats} or \code{GwasSumStats}
-collection: per-row sanity checks via \code{.applySanityChecks} (drop
-rows with out-of-range / zero P, BETA == 0, SE <= 0, NA in vital
-columns; clamp tiny P; normalize CHR; coerce signed columns to
-numeric), variant-content filters (MAF / INFO / N) via
-\code{.applyContentFilters}, optional \code{skipRegion} drop, optional
-PIP screen, panel-vs-sumstats allele harmonization against the
-\code{ldSketch} via \code{harmonizeAlleles} (which handles indels,
-strand-ambiguous variants, sign / strand flips, and duplicate drops in
-a single sweep), optional SLALOM/DENTIST LD-mismatch QC, and optional
-RAISS imputation. No Bioconductor genome / dbSNP packages required.
+collection: per-row sanity checks via \code{.applySanityChecks} (drop rows
+with out-of-range / zero P, BETA == 0, SE <= 0, NA in vital columns; clamp
+tiny P; normalize CHR; coerce signed columns to numeric), variant-content
+filters (MAF / INFO / N) via \code{.applyContentFilters}, optional
+\code{skipRegion} drop, optional PIP screen, panel-vs-sumstats allele
+harmonization against the \code{ldSketch} via \code{harmonizeAlleles} (which
+handles indels, strand-ambiguous variants, sign / strand flips, and duplicate
+drops in a single sweep), optional SLALOM/DENTIST LD-mismatch QC, and
+optional RAISS imputation. No Bioconductor genome / dbSNP packages required.
 }
 \details{
-The returned collection has its \code{qcInfo} slot populated with a
-per-entry audit record (variant counts, drop counts at each step,
-which filters fired, etc.). Fine-mapping and TWAS-weights pipelines
-reject SumStats inputs where \code{length(getQcInfo(x)) == 0L}.
+The returned collection has its \code{qcInfo} slot populated with a per-entry
+audit record (variant counts, drop counts at each step, which filters fired,
+etc.). Fine-mapping and TWAS-weights pipelines reject SumStats inputs where
+\code{length(getQcInfo(x)) == 0L}.
 
-Column-availability error contract: a non-zero \code{mafCutoff}
-requires every entry to carry a \code{MAF} column; non-zero
-\code{infoCutoff} requires \code{INFO}; non-zero \code{nCutoff}
-requires \code{N}. Missing column with a non-zero cutoff is a hard
-error.
+Column-availability error contract: a non-zero \code{mafCutoff} requires
+every entry to carry a \code{MAF} column; non-zero \code{infoCutoff} requires
+\code{INFO}; non-zero \code{nCutoff} requires \code{N}. Missing column with a
+non-zero cutoff is a hard error.
+}
+\examples{
+data(gwasSumStatsS4Example)
+summaryStatsQc(gwasSumStatsS4Example)
 }

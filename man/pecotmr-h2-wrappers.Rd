@@ -4,8 +4,8 @@
 \alias{pecotmr-h2-wrappers}
 \title{Heritability Estimation Entry Points and Converters}
 \description{
-Top-level entry point for heritability estimation,
-  LD score computation methods, H2Estimate accessors, and a converter
-  to bridge H2Estimate into the sldscWrapper.R postprocessing pipeline.
+Top-level entry point for heritability estimation, LD score
+  computation methods, H2Estimate accessors, and a converter to bridge
+  H2Estimate into the sldscWrapper.R postprocessing pipeline.
 }
 \keyword{internal}

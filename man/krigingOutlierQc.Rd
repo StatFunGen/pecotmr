@@ -23,8 +23,8 @@ default \code{s} is \code{susieR::estimate_s_rss()}).}
 
 \item{variantIds}{Optional variant IDs for the diagnostics table.}
 
-\item{zThreshold}{Absolute-z cutoff for the allele-switch rule
-(default \code{2}, matching susieR).}
+\item{zThreshold}{Absolute-z cutoff for the allele-switch rule (default
+\code{2}, matching susieR).}
 
 \item{logLRThreshold}{Log-likelihood-ratio cutoff for the allele-switch rule
 (default \code{2}, matching susieR).}
@@ -42,10 +42,17 @@ predicted from its LD neighbours, using susieR's kriging diagnostic.
 distribution of each \code{z_i} given the rest (with the LD-mismatch scale
 \code{s} defaulting to \code{susieR::estimate_s_rss()}) and a per-variant
 \code{logLR} for the allele-switch hypothesis. This helper reuses susieR's
-own allele-switch rule --- \code{logLR > logLRThreshold & abs(z) > zThreshold}
-(the same \code{logLR > 2 & |z| > 2} used in \code{susie_rss_utils}) --- to
-flag variants whose sign should be flipped. RSS-only helper, opt-in via
-\code{alleleFlipKriging}; never wired into \code{alleleQc()} /
-\code{matchRefPanel()}. Requires a susieR that provides \code{kriging_rss()}
-and \code{estimate_s_rss()}.
+own allele-switch rule --- \code{logLR > logLRThreshold & abs(z) >
+zThreshold} (the same \code{logLR > 2 & |z| > 2} used in
+\code{susie_rss_utils}) --- to flag variants whose sign should be flipped.
+RSS-only helper, opt-in via \code{alleleFlipKriging}; never wired into
+\code{alleleQc()} / \code{matchRefPanel()}. Requires a susieR that provides
+\code{kriging_rss()} and \code{estimate_s_rss()}.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:20]
+R <- cor(X)
+krigingOutlierQc(
+  zScore = rnorm(20), R = R, n = 415, variantIds = colnames(X))
 }

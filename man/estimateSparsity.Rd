@@ -7,21 +7,24 @@
 estimateSparsity(weightResults)
 }
 \arguments{
-\item{weightResults}{Named list of weight vectors or matrices as
-returned by \code{\link{learnTwasWeights}}. The mr.ash element should
-have a \code{"fit"} attribute containing the model fit object
-(set \code{retainFits = TRUE} in \code{learnTwasWeights} to obtain this).}
+\item{weightResults}{Named list of weight vectors or matrices as returned by
+\code{\link{learnTwasWeights}}. The mr.ash element should have a
+\code{"fit"} attribute containing the model fit object (set
+\code{retainFits = TRUE} in \code{learnTwasWeights} to obtain this).}
 }
 \value{
 A scalar sparsity estimate (proportion of non-zero effects).
 }
 \description{
 Computes an empirical estimate of the proportion of non-zero effects
-(sparsity) from the mr.ash fit. mr.ash fits a mixture model with a
-point mass at zero (spike) plus continuous components (slab), and
-learns the mixture proportions via variational EM. The sparsity
-estimate \code{1 - pi[1]} is the empirical Bayes estimate of the
-non-null proportion, which can be used as a data-driven prior for
-the inclusion probability parameters (\code{pi} for bayesC,
-\code{probIn} for BayesB) of spike-and-slab Bayesian methods.
+(sparsity) from the mr.ash fit. mr.ash fits a mixture model with a point mass
+at zero (spike) plus continuous components (slab), and learns the mixture
+proportions via variational EM. The sparsity estimate \code{1 - pi[1]} is the
+empirical Bayes estimate of the non-null proportion, which can be used as a
+data-driven prior for the inclusion probability parameters (\code{pi} for
+bayesC, \code{probIn} for BayesB) of spike-and-slab Bayesian methods.
+}
+\examples{
+estimateSparsity(list(mrash_weights = structure(c(0.1, 0, 0.3),
+  fit = list(pi = c(0.6, 0.2, 0.2)))))
 }

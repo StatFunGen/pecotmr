@@ -26,3 +26,9 @@ Return the per-gene (and per-SNP) fine-mapping posterior table
   from a \code{\link{CtwasResultEntry}} or a \code{\link{CtwasResult}}
   collection (aggregated across rows, tagged with run identity).
 }
+\examples{
+cre <- CtwasResultEntry(
+  finemap = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
+  susieAlpha = data.frame(id = c("g1", "g2"), alpha = c(0.9, 0.1)))
+getFinemap(cre)
+}

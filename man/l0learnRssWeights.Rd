@@ -18,28 +18,29 @@ l0learnRssWeights(
 )
 }
 \arguments{
-\item{stat}{A list with \code{$b} (effect sizes) and \code{$n} (per-variant sample sizes).}
+\item{stat}{A list with \code{$b} (effect sizes) and \code{$n} (per-variant
+sample sizes).}
 
 \item{LD}{LD correlation matrix R (single matrix, NOT pre-shrunk).}
 
 \item{penalty}{L0 variant: \code{"L0"}, \code{"L0L1"}, or \code{"L0L2"}.
 Default \code{"L0"}.}
 
-\item{s}{Numeric vector of LD shrinkage parameters.  Default:
-\code{c(0.2, 0.5, 0.9, 1.0)}.}
+\item{s}{Numeric vector of LD shrinkage parameters. Default: \code{c(0.2,
+0.5, 0.9, 1.0)}.}
 
-\item{lambda0}{Numeric vector of L0 penalty values to search over.
-Default: \code{exp(seq(log(0.001), log(1), length.out = 10))}.}
+\item{lambda0}{Numeric vector of L0 penalty values to search over. Default:
+\code{exp(seq(log(0.001), log(1), length.out = 10))}.}
 
-\item{lambda}{Numeric vector of L1 penalty values (for L0L1).  Default:
+\item{lambda}{Numeric vector of L1 penalty values (for L0L1). Default:
 \code{c(0)} (no L1 unless L0L1 is used).}
 
-\item{lambda2}{L2 penalty weight (for L0L2).  Default 0.}
+\item{lambda2}{L2 penalty weight (for L0L2). Default 0.}
 
 \item{selection}{Selection strategy: \code{"ld_quadratic"} (default) or
 \code{"min_fbeta"}.}
 
-\item{maxSwaps}{Maximum swap rounds per lambda.  Default 100.}
+\item{maxSwaps}{Maximum swap rounds per lambda. Default 100.}
 
 \item{...}{Additional arguments passed to \code{penalizedRss()}.}
 }
@@ -48,11 +49,25 @@ A numeric vector of SNP coefficient weights.
 }
 \description{
 Fits L0-penalized regression (with optional L1/L2 components) on the RSS
-objective, searching over a shrinkage grid \code{s} and lambda0 path.
-Model selection uses LD-quadratic pseudovalidation by default.
+objective, searching over a shrinkage grid \code{s} and lambda0 path. Model
+selection uses LD-quadratic pseudovalidation by default.
 }
 \details{
 The swap optimization from L0Learn is included: after coordinate descent
 converges, non-zero coefficients are tested for swaps with zero ones to
 escape local optima.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+ss <- lapply(
+  seq_len(ncol(X)), function(j) coef(summary(lm(y ~ X[, j])))[2, 1:2])
+stat <- list(
+  b = vapply(ss, `[`, numeric(1), 1L),
+  seb = vapply(ss, `[`, numeric(1), 2L),
+  n = rep(nrow(X), ncol(X))
+)
+LD <- cor(X)
+l0learnRssWeights(stat, LD)
 }

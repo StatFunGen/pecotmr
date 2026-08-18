@@ -2,25 +2,36 @@
 % Please edit documentation in R/fineMappingWrappers.R
 \name{fsusieGetCs}
 \alias{fsusieGetCs}
-\title{@title Create Sets Similar to SuSiE Output from fSuSiE Object}
+\title{Create Sets Similar to SuSiE Output from fSuSiE Object}
 \usage{
 fsusieGetCs(fsusieObj, X, requestedCoverage = 0.95)
 }
 \arguments{
-\item{fsusieObj}{A fSuSiE object containing the results from a fSuSiE analysis.
-expected to at least have 'cs' and 'alpha' components.}
+\item{fsusieObj}{A fSuSiE object containing the results from a fSuSiE
+analysis. expected to at least have 'cs' and 'alpha' components.}
 
-\item{requestedCoverage}{A numeric value specifying the desired coverage level for the
-credible sets. This is purely for record purpose so should be
-manually ensured that it correctly reflect the actual coverage used. Defaults to 0.95.}
+\item{X}{Numeric genotype matrix used to compute credible-set purity.}
+
+\item{requestedCoverage}{A numeric value specifying the desired coverage
+level for the credible sets. This is purely for record purpose so should be
+manually ensured that it correctly reflect the actual coverage used.
+Defaults to 0.95.}
 }
 \value{
-A list containing named credible sets (cs), a dataframe of purity metrics
-        (minAbsCorr, meanAbsCorr, medianAbsCorr), an index of credible sets (cs_index),
-        coverage values for each set, and the requested coverage level. Similar to the SuSiE set output
+A list containing named credible sets (cs), a dataframe of purity
+  metrics (a \code{cs} label column plus minAbsCorr, meanAbsCorr,
+  medianAbsCorr), an index of credible sets
+  (cs_index), coverage values for each set, and the requested coverage level.
+  Similar to the SuSiE set output
 }
 \description{
-This function constructs a list that mimics the structure of SuSiE output sets
-from a fSuSiE object. It includes credible sets (cs) with their names, a purity
-dataframe, coverage information, and the requested coverage level.
+This function constructs a list that mimics the structure of
+  SuSiE output sets from a fSuSiE object. It includes credible sets (cs) with
+  their names, a purity dataframe, coverage information, and the requested
+  coverage level.
+}
+\examples{
+data(fsusieFineMappingExample)
+fit <- getSusieFit(fsusieFineMappingExample$entry[[1]])
+fsusieGetCs(fit)
 }

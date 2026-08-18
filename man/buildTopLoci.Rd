@@ -2,7 +2,7 @@
 % Please edit documentation in R/fineMappingWrappers.R
 \name{buildTopLoci}
 \alias{buildTopLoci}
-\title{Build the unified top-loci table for one fit and one method.}
+\title{Build the unified top-loci table for one fit and one method}
 \usage{
 buildTopLoci(
   fit,
@@ -12,7 +12,6 @@ buildTopLoci(
   af = NULL,
   method,
   signalCutoff = 0,
-  dataX = NULL,
   dataY = NULL,
   otherQuantities = NULL,
   region = NULL,
@@ -23,14 +22,13 @@ buildTopLoci(
 )
 }
 \arguments{
-\item{fit}{Fitted SuSiE-family object (must expose \code{alpha},
-\code{mu}, \code{mu2}, \code{pip}).}
+\item{fit}{Fitted SuSiE-family object (must expose \code{alpha}, \code{mu},
+\code{mu2}, \code{pip}).}
 
 \item{csTables}{List of CS tables (one per coverage) from
 \code{computeCsTables()}.}
 
-\item{variantNames}{Character vector of variant IDs
-(\code{chr:pos:A2:A1}).}
+\item{variantNames}{Character vector of variant IDs (\code{chr:pos:A2:A1}).}
 
 \item{sumstats}{Optional marginal-association summary (\code{betahat},
 \code{sebetahat}) filling \code{beta} / \code{se}.}
@@ -45,24 +43,34 @@ never exported; derive it from \code{af} at filter time. Default NULL ->
 
 \item{signalCutoff}{PIP cutoff for retaining PIP-only (non-CS) variants.}
 
-\item{dataX}{Optional regional genotype matrix.}
-
 \item{dataY}{Optional regional phenotype matrix; \code{nrow(dataY)} fills
 \code{n}, \code{colnames(dataY)[1]} fills \code{gene}.}
 
 \item{otherQuantities}{Optional list. Default is NULL.}
 
 \item{region}{Optional \code{"chr:start-end"} string. Default is NULL.}
+
+\item{conditionIdx}{Integer or \code{NULL}. Index of the conditioned effect
+(per-condition output); \code{NULL} for the unconditioned fit.}
+
+\item{fullFit}{Logical. Retain the full fit object on each entry. Default
+\code{FALSE}.}
+
+\item{fullFitAlphaOnly}{Logical. When retaining the full fit, keep only the
+per-effect alpha matrix. Default \code{TRUE}.}
+
+\item{includeAllCs}{Logical. Include all credible sets rather than only the
+top one. Default \code{FALSE}.}
 }
 \value{
-A data frame in the fixed 22-column shape for this fit and method,
-  or an empty data frame if nothing is retained.
+A data frame in the fixed 22-column shape for this fit and method, or
+  an empty data frame if nothing is retained.
 }
 \description{
 Returns the per-fit, per-method contribution to the unified \code{top_loci}
-table in the fixed 22-column shape. \code{postprocessFinemappingFits()}
-calls this once per method per fit and row-binds the results into the
-single \code{top_loci} returned by \code{formatFinemappingOutput()}.
+table in the fixed 22-column shape. \code{postprocessFinemappingFits()} calls
+this once per method per fit and row-binds the results into the single
+\code{top_loci} returned by \code{formatFinemappingOutput()}.
 }
 \details{
 Output columns, in order: \code{#chr}, \code{start}, \code{end}, \code{a1},
@@ -71,14 +79,22 @@ Output columns, in order: \code{#chr}, \code{start}, \code{end}, \code{a1},
 \code{posterior_effect_se}, \code{cs_95}, \code{cs_70}, \code{cs_50},
 \code{cs_95_purity}, \code{method}, \code{grange_start}, \code{grange_end}.
 
-\code{cs_95} / \code{cs_70} / \code{cs_50} are character strings of the
-form \code{"<method>_<cs_index>"} where each method numbers credible sets
+\code{cs_95} / \code{cs_70} / \code{cs_50} are character strings of the form
+\code{"<method>_<cs_index>"} where each method numbers credible sets
 independently from 1. Variants retained by the PIP cutoff but not in any
-credible set at a coverage carry \code{"<method>_0"}. \code{cs_95_purity}
-is the 0.95-coverage purity for the row's \code{(method, cs_95)}; rows
-whose \code{cs_95} is \code{"<method>_0"} carry \code{0}.
+credible set at a coverage carry \code{"<method>_0"}. \code{cs_95_purity} is
+the 0.95-coverage purity for the row's \code{(method, cs_95)}; rows whose
+\code{cs_95} is \code{"<method>_0"} carry \code{0}.
 
 Row uniqueness is \code{(variant, gene, cs_membership)} at the given
-\code{method}; overlapping CS within the same method produces one row per
-CS.
+\code{method}; overlapping CS within the same method produces one row per CS.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:40]
+y <- eqtlRegionExample$yRes
+fit <- susieR::susie(X, y, L = 5)
+csTables <- computeCsTables(fit, dataX = X, method = "susie")
+buildTopLoci(fit = fit, csTables = csTables, variantNames = colnames(X),
+  method = "susie", dataY = y)
 }

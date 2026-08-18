@@ -10,8 +10,13 @@ vignette: >
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
-                      fig.width = 7, fig.height = 4.5)
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    fig.width = 7,
+    fig.height = 4.5
+)
 ```
 
 ## Overview
@@ -24,8 +29,8 @@ across many QTL outcomes in one model, use
 
 Inputs:
 
-- **QTL input** — a `QtlFineMappingResult` produced by
-  [`fineMappingPipeline`](fine-mapping.html).
+-  **QTL input** — a `QtlFineMappingResult` produced by
+    [`fineMappingPipeline`](fine-mapping.html).
 - **GWAS input** — either a `GwasSumStats` (fine-mapping run internally) or a
 `GwasFineMappingResult` (used directly).
 
@@ -40,25 +45,29 @@ library(pecotmr)
 ## Bundled inputs
 
 ```{r bundled}
-data(qtl_dataset_example, gwas_sumstats_s4_example)
+data(qtlDatasetExample, gwasSumStatsS4Example)
 
 # Build a QtlFineMappingResult from the bundled QtlDataset.
-qtlFmr <- fineMappingPipeline(qtl_dataset_example, methods = "susie",
-                               cisWindow = 1e6)
+qtlFmr <- fineMappingPipeline(
+    qtlDatasetExample,
+    methods = "susie",
+    cisWindow = 1e6
+)
 ```
 
 ## QTL FMR + GWAS sumstats (inline GWAS fine-mapping)
 
 The recommend approach is to provide `colocPipeline()` a `QtlFineMappingResult`
-and a `GwasSumStats`. The pipeline runs `fineMappingPipeline()`
-internally on the GWAS sumstats (with `finemappingMethods`) over the exact window used in the `QtlFineMappingResult`, then runs
-`coloc.bf_bf` per (QTL, GWAS) pair.
+and a `GwasSumStats`. The pipeline runs `fineMappingPipeline()` internally on
+the GWAS sumstats (with `finemappingMethods`) over the exact window used in the
+`QtlFineMappingResult`, then runs `coloc.bf_bf` per (QTL, GWAS) pair.
 
 ```{r coloc-quickstart}
 res <- colocPipeline(
-  qtlFineMappingResult = qtlFmr,
-  gwasInput            = gwas_sumstats_s4_example,
-  finemappingMethods   = "susie")
+    qtlFineMappingResult = qtlFmr,
+    gwasInput = gwasSumStatsS4Example,
+    finemappingMethods = "susie"
+)
 head(res)
 ```
 
@@ -67,33 +76,36 @@ attribute on the result:
 
 ```{r coloc-return-fmr, eval=FALSE}
 res2 <- colocPipeline(
-  qtlFineMappingResult  = qtlFmr,
-  gwasInput             = gwas_sumstats_s4_example,
-  returnGwasFineMapping = TRUE)
+    qtlFineMappingResult = qtlFmr,
+    gwasInput = gwasSumStatsS4Example,
+    returnGwasFineMapping = TRUE
+)
 attr(res2, "gwasFineMapping")
 ```
 
-If the QTL `FineMappingResult` has an LD sketch because it was run on summary statistics it must match the LD sketch for the `GWASSumStats`.
+If the QTL `FineMappingResult` has an LD sketch because it was run on summary
+statistics it must match the LD sketch for the `GWASSumStats`.
 
 ## QTL FMR + pre-computed GWAS FMR
 
-If you already have a `GwasFineMappingResult` (typically computed over LD blocks), you can use that fine-mapping result directly:
+If you already have a `GwasFineMappingResult` (typically computed over LD
+blocks), you can use that fine-mapping result directly:
 
 ```{r coloc-precomputed-fmr, eval=FALSE}
-gwasFmr <- fineMappingPipeline(gwas_sumstats_s4_example, methods = "susie")
-colocPipeline(qtlFineMappingResult = qtlFmr,
-              gwasInput            = gwasFmr)
+gwasFmr <- fineMappingPipeline(gwasSumStatsS4Example, methods = "susie")
+colocPipeline(qtlFineMappingResult = qtlFmr, gwasInput = gwasFmr)
 ```
 
-The disadvantage of this approach is that LD blocks will not align with cis-QTL windows.  Ultimately this means that the variable
-selection in the QTL and GWAS fine-mapping will have been done over different variant sets, which may reduce the sensitivity for
-colocalizations, particuarly in areas with complex LD.
+The disadvantage of this approach is that LD blocks will not align with cis-QTL
+windows.  Ultimately this means that the variable selection in the QTL and GWAS
+fine-mapping will have been done over different variant sets, which may reduce
+the sensitivity for colocalizations, particuarly in areas with complex LD.
 
 ## Filtering effects fed into coloc
 
-`coloc::coloc.bf_bf` accepts one LBF matrix for the QTL and one for hte GWAS. By default, every
-effect with non-trivial prior variance (`V > priorTol`) gets included.
-Two opt-in filters can adjust this:
+`coloc::coloc.bf_bf` accepts one LBF matrix for the QTL and one for hte GWAS.
+By default, every effect with non-trivial prior variance (`V > priorTol`) gets
+included. Two opt-in filters can adjust this:
 
 | Filter | Description | Default |
 |---|---|---|
@@ -104,10 +116,11 @@ Two opt-in filters can adjust this:
 
 ```{r coloc-filter-example, eval=FALSE}
 colocPipeline(
-  qtlFineMappingResult     = qtlFmr,
-  gwasInput                = gwas_sumstats_s4_example,
-  filterLbfCsSecondary     = 0.5,   # 50% CS concentration filter
-  filterLbfCsConcentration = 0.5)   # span < 25% of locus variants
+    qtlFineMappingResult = qtlFmr,
+    gwasInput = gwasSumStatsS4Example,
+    filterLbfCsSecondary = 0.5, # 50% CS concentration filter
+    filterLbfCsConcentration = 0.5
+) # span < 25% of locus variants
 ```
 
 ## Enrichment-aware coloc (enloc mode)
@@ -115,9 +128,8 @@ colocPipeline(
 Pass a per-`(gwasStudy, qtlContext)` enrichment table (the output of
 `qtlEnrichmentPipeline()`) to scale the shared-signal prior:
 
-\[
-p_{12}^{\text{used}} = \min\bigl(p_{12}\,(1 + \text{enrichment}),\, p_{12,\max}\bigr)
-\]
+\[ p_{12}^{\text{used}} = \min\bigl(p_{12}\,(1 + \text{enrichment}),\,
+p_{12,\max}\bigr) \]
 
 Pairs without a matching enrichment row fall back to the baseline
 `p12` with a warning. Two extra columns are added to the output:
@@ -126,15 +138,17 @@ Pairs without a matching enrichment row fall back to the baseline
 
 ```{r coloc-enloc, eval=FALSE}
 enrichmentTable <- data.frame(
-  gwasStudy  = "trait1",
-  qtlContext = "brain",
-  enrichment = 2.5,
-  stringsAsFactors = FALSE)
+    gwasStudy = "trait1",
+    qtlContext = "brain",
+    enrichment = 2.5,
+    stringsAsFactors = FALSE
+)
 colocPipeline(
-  qtlFineMappingResult = qtlFmr,
-  gwasInput            = gwas_sumstats_s4_example,
-  enrichment           = enrichmentTable,
-  p12Max               = 1e-3)
+    qtlFineMappingResult = qtlFmr,
+    gwasInput = gwasSumStatsS4Example,
+    enrichment = enrichmentTable,
+    p12Max = 1e-3
+)
 ```
 
 ## PIP renormalization on variant intersection
@@ -148,29 +162,31 @@ FMRs as supplied.
 
 ```{r coloc-adjustpips, eval=FALSE}
 colocPipeline(
-  qtlFineMappingResult = qtlFmr,
-  gwasInput            = gwas_sumstats_s4_example,
-  adjustPips           = TRUE)   # default
+    qtlFineMappingResult = qtlFmr,
+    gwasInput = gwasSumStatsS4Example,
+    adjustPips = TRUE
+) # default
 ```
 
 ## Common parameters
 
 ```{r coloc-params, eval=FALSE}
 colocPipeline(
-  qtlFineMappingResult     = qtlFmr,
-  gwasInput                = gwas_sumstats_s4_example,
-  filterLbfCs              = FALSE,
-  filterLbfCsSecondary     = NULL,    # e.g. 0.5
-  filterLbfCsConcentration = 0.5,
-  priorTol                 = 1e-9,
-  p1                       = 1e-4,
-  p2                       = 1e-4,
-  p12                      = 5e-6,
-  finemappingMethods       = "susie", # inline GWAS FM when needed
-  returnGwasFineMapping    = FALSE,
-  enrichment               = NULL,    # data.frame for enloc mode
-  p12Max                   = 1e-3,
-  adjustPips               = TRUE)
+    qtlFineMappingResult = qtlFmr,
+    gwasInput = gwasSumStatsS4Example,
+    filterLbfCs = FALSE,
+    filterLbfCsSecondary = NULL, # e.g. 0.5
+    filterLbfCsConcentration = 0.5,
+    priorTol = 1e-9,
+    p1 = 1e-4,
+    p2 = 1e-4,
+    p12 = 5e-6,
+    finemappingMethods = "susie", # inline GWAS FM when needed
+    returnGwasFineMapping = FALSE,
+    enrichment = NULL, # data.frame for enloc mode
+    p12Max = 1e-3,
+    adjustPips = TRUE
+)
 ```
 
 ## Reading the result
@@ -184,3 +200,9 @@ Each row is one CS-pair combination; in particular the `idx1` /
 `idx2` columns identify the QTL / GWAS effect indices within the
 respective LBF matrices, and `PP.H4.abf` is the standard coloc
 shared-signal posterior.
+
+# Session info
+
+```{r session-info}
+sessionInfo()
+```

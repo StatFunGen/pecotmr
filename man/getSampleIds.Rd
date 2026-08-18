@@ -18,3 +18,9 @@ Character vector.
 \description{
 Return the sample-id vector.
 }
+\examples{
+gh <- readGenotypes(
+  system.file("extdata", "toy_ref.bed", package = "pecotmr")
+)
+getSampleIds(gh)
+}

@@ -10,3 +10,9 @@ vignette: >
 ---
 
 Here we list some publicly available QTL and GWAS summary statistics resources
+
+# Session info
+
+```{r session-info}
+sessionInfo()
+```

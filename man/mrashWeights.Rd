@@ -6,11 +6,33 @@
 \usage{
 mrashWeights(X, y, initPriorSd = TRUE, retainFit = FALSE, ...)
 }
+\arguments{
+\item{X}{Numeric genotype / design matrix (samples x variants).}
+
+\item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}.}
+
+\item{initPriorSd}{Logical. Initialize the prior standard-deviation grid
+from the data. Default \code{TRUE}.}
+
+\item{retainFit}{Logical. Attach the full fitted-model object to the result.
+Default \code{FALSE}.}
+
+\item{...}{Additional arguments forwarded to \code{mr.ash}.}
+}
+\value{
+A numeric vector of weights, one per variant (column of \code{X});
+  zero-variance columns receive weight 0. When \code{retainFit = TRUE} the
+  fitted \code{mr.ash} object is attached as attribute \code{"fit"}.
+}
 \description{
-This function fits the `mr.ash` model (adaptive shrinkage regression) to estimate weights
-for a given set of predictors and response. It uses optional prior standard deviation initialization
-and can accept custom initial beta values.
+This function fits the `mr.ash` model (adaptive shrinkage regression) to
+estimate weights for a given set of predictors and response. It uses optional
+prior standard deviation initialization and can accept custom initial beta
+values.
 }
 \examples{
-wgt.mr.ash <- mrashWeights(eqtl$X, eqtl$y_res, beta.init = lassoWeights(X, y))
+set.seed(1)
+X <- matrix(rnorm(200 * 10), nrow = 200)
+y <- as.numeric(X \%*\% rnorm(10) + rnorm(200))
+weights <- mrashWeights(X, y)
 }

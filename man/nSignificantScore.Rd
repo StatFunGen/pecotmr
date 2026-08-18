@@ -7,8 +7,9 @@
 nSignificantScore(contrastResult, pCutoff = 1e-05)
 }
 \arguments{
-\item{contrastResult}{A contrast table from \code{\link{mashPosteriorContrast}}
-carrying \code{p_contrast_*_deviation} columns.}
+\item{contrastResult}{A contrast table from
+\code{\link{mashPosteriorContrast}} carrying \code{p_contrast_*_deviation}
+columns.}
 
 \item{pCutoff}{Significance threshold (default 1e-5).}
 }
@@ -20,4 +21,13 @@ A \code{data.frame} with \code{condition} and \code{ratio}
 For each condition's deviation contrast, the proportion of variants whose
 contrast p-value falls below \code{pCutoff} -- the "n-significant" feature
 score of \code{mash_posterior.ipynb}. No meta-analysis is involved.
+}
+\examples{
+om <- matrix(c(0.1, 0.2, 0.3), 1, 3, dimnames = list("v1", c("a", "b", "c")))
+pm <- matrix(c(0.5, 0.3, -0.2), 1, 3,
+  dimnames = list("v1", c("a", "b", "c")))
+pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
+dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
+cr <- fitMashContrast(1L, om, pm, pv)
+nSignificantScore(cr, pCutoff = 0.05)
 }

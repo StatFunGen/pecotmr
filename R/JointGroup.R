@@ -33,79 +33,111 @@
 NULL
 
 # ---- JointGroup virtual base ------------------------------------------------
-setClass("JointGroup",
-  contains = "VIRTUAL",
-  representation(conditions = "data.frame"),  # one row per condition (Y/Z column)
-  validity = function(object) {
-    errors <- character()
-    if (!all(c("study", "context", "trait") %in% names(object@conditions))) {
-      errors <- c(errors,
-        "'conditions' must have columns 'study', 'context', 'trait'")
-    } else if (nrow(object@conditions) < 1L) {
-      errors <- c(errors, "a group needs >= 1 condition (Y/Z column)")
+setClass(
+    "JointGroup",
+    contains = "VIRTUAL",
+    # one row per condition (Y/Z column)
+    representation(conditions = "data.frame"),
+    validity = function(object) {
+        errors <- character()
+        if (
+            !all(is_in(
+                c("study", "context", "trait"),
+                names(object@conditions)
+            ))
+        ) {
+            errors <- c(
+                errors,
+                "'conditions' must have columns 'study', 'context', 'trait'"
+            )
+        } else if (nrow(object@conditions) < 1L) {
+            errors <- c(errors, "a group needs >= 1 condition (Y/Z column)")
+        }
+        if (length(errors) == 0L) TRUE else errors
     }
-    if (length(errors) == 0L) TRUE else errors
-  })
+)
 
 # ---- IndividualJointGroup ---------------------------------------------------
 # `pos` is the per-condition functional position (one per Y column), set only by
-# the cross-trait enumerator for fsusie (functional SuSiE over the trait domain);
+# the cross-trait enumerator for fsusie (functional SuSiE over the trait
+# domain);
 # empty for every other pattern/method.
-setClass("IndividualJointGroup",
-  contains = "JointGroup",
-  representation(X = "matrix", Y = "matrix", pos = "numeric"),
-  validity = function(object) {
-    errors <- character()
-    if (nrow(object@X) != nrow(object@Y))
-      errors <- c(errors, "X and Y must share the sample (row) dimension")
-    if (ncol(object@Y) != nrow(object@conditions))
-      errors <- c(errors, "ncol(Y) must equal nrow(conditions)")
-    if (length(object@pos) > 0L && length(object@pos) != ncol(object@Y))
-      errors <- c(errors, "when set, 'pos' must have one entry per Y column")
-    if (length(errors) == 0L) TRUE else errors
-  })
+setClass(
+    "IndividualJointGroup",
+    contains = "JointGroup",
+    representation(X = "matrix", Y = "matrix", pos = "numeric"),
+    validity = function(object) {
+        errors <- character()
+        if (nrow(object@X) != nrow(object@Y)) {
+            errors <- c(errors, "X and Y must share the sample (row) dimension")
+        }
+        if (ncol(object@Y) != nrow(object@conditions)) {
+            errors <- c(errors, "ncol(Y) must equal nrow(conditions)")
+        }
+        if (length(object@pos) > 0L && length(object@pos) != ncol(object@Y)) {
+            errors <- c(
+                errors,
+                "when set, 'pos' must have one entry per Y column"
+            )
+        }
+        if (length(errors) == 0L) TRUE else errors
+    }
+)
 
 # ---- SumStatsJointGroup -----------------------------------------------------
-setClass("SumStatsJointGroup",
-  contains = "JointGroup",
-  representation(Z = "matrix", R = "matrix", N = "numeric"),
-  validity = function(object) {
-    errors <- character()
-    if (nrow(object@R) != ncol(object@R))
-      errors <- c(errors, "'R' (LD) must be square")
-    if (nrow(object@Z) != nrow(object@R))
-      errors <- c(errors, "'Z' rows (variants) must match the 'R' dimension")
-    if (ncol(object@Z) != nrow(object@conditions))
-      errors <- c(errors, "ncol(Z) must equal nrow(conditions)")
-    if (length(errors) == 0L) TRUE else errors
-  })
+setClass(
+    "SumStatsJointGroup",
+    contains = "JointGroup",
+    representation(Z = "matrix", R = "matrix", N = "numeric"),
+    validity = function(object) {
+        errors <- character()
+        if (nrow(object@R) != ncol(object@R)) {
+            errors <- c(errors, "'R' (LD) must be square")
+        }
+        if (nrow(object@Z) != nrow(object@R)) {
+            errors <- c(
+                errors,
+                "'Z' rows (variants) must match the 'R' dimension"
+            )
+        }
+        if (ncol(object@Z) != nrow(object@conditions)) {
+            errors <- c(errors, "ncol(Z) must equal nrow(conditions)")
+        }
+        if (length(errors) == 0L) TRUE else errors
+    }
+)
 
 # ---- JointDispatchCell ------------------------------------------------------
-setClass("JointDispatchCell",
-  representation(
-    pattern   = "character",   # context / trait / study / composed (a label)
-    dataForm  = "character",   # individual / sumstats
-    enumerate = "function",    # (data, scope, args) -> list<JointGroup>
-    minGroup  = "integer"),    # smallest fittable condition count (joint cells
-                               # use >= 2; the univariate cell uses 1)
-  validity = function(object) {
-    errors <- character()
-    if (length(object@dataForm) != 1L ||
-        !object@dataForm %in% c("individual", "sumstats"))
-      errors <- c(errors, "'dataForm' must be 'individual' or 'sumstats'")
-    if (length(object@minGroup) != 1L || object@minGroup < 1L)
-      errors <- c(errors, "'minGroup' must be a single integer >= 1")
-    if (length(errors) == 0L) TRUE else errors
-  })
+setClass(
+    "JointDispatchCell",
+    representation(
+        pattern = "character", # context / trait / study / composed (a label)
+        dataForm = "character", # individual / sumstats
+        enumerate = "function", # (data, scope, args) -> list<JointGroup>
+        minGroup = "integer"
+    ), # smallest fittable condition count (joint cells
+    # use >= 2; the univariate cell uses 1)
+    validity = function(object) {
+        errors <- character()
+        if (
+            length(object@dataForm) != 1L ||
+                !is_in(object@dataForm, c("individual", "sumstats"))
+        ) {
+            errors <- c(errors, "'dataForm' must be 'individual' or 'sumstats'")
+        }
+        if (length(object@minGroup) != 1L || object@minGroup < 1L) {
+            errors <- c(errors, "'minGroup' must be a single integer >= 1")
+        }
+        if (length(errors) == 0L) TRUE else errors
+    }
+)
 
 # ---- Pipeline markers -------------------------------------------------------
 # Not empty: the `config` list carries the per-pipeline parameter tail
 # (coverage/cvFolds/samplePartition/fitFullData/retainFit/... for fm;
 # retainFit/retainFitDetail/cvFolds/... for twas), and dispatch on the concrete
 # class selects the result type via `construct()`.
-setClass("JointPipeline",
-  contains = "VIRTUAL",
-  representation(config = "list"))
+setClass("JointPipeline", contains = "VIRTUAL", representation(config = "list"))
 
-setClass("FmJointPipeline",   contains = "JointPipeline")
+setClass("FmJointPipeline", contains = "JointPipeline")
 setClass("TwasJointPipeline", contains = "JointPipeline")

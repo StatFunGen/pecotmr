@@ -16,6 +16,10 @@ getEigenList(x)
 List of per-block eigen decompositions.
 }
 \description{
-Return the per-block eigendecomposition list carried by
-  an \code{LdEigen} object.
+Return the per-block eigendecomposition list carried by an
+  \code{LdEigen} object.
+}
+\examples{
+data(ldEigenExample)
+getEigenList(ldEigenExample)
 }

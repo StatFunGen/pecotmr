@@ -25,9 +25,9 @@ CtwasResult(
 
 \item{entry}{List / \code{SimpleList} of \code{CtwasResultEntry} objects.}
 
-\item{jointStudies}{Optional character vector (length \code{length(gwasStudy)})
-listing the joined studies for a multi-study run, \code{NA_character_}
-otherwise. \code{NULL} (default) omits the column.}
+\item{jointStudies}{Optional character vector (length
+\code{length(gwasStudy)}) listing the joined studies for a multi-study run,
+\code{NA_character_} otherwise. \code{NULL} (default) omits the column.}
 
 \item{jointContexts}{Optional character vector for multi-context runs. Same
 shape as \code{jointStudies}.}
@@ -41,4 +41,12 @@ Construct a \code{CtwasResult} DFrame-subclass collection of
   \code{\link{CtwasResultEntry}} payloads (one per run). A single-context run
   is one row; a multi-context run emits per-context rows sharing the same
   \code{jointContexts} set and jointly-estimated group priors.
+}
+\examples{
+cre <- CtwasResultEntry(
+  finemap = data.frame(id = c("g1", "g2"), susie_pip = c(0.9, 0.1)),
+  susieAlpha = data.frame(id = c("g1", "g2"), alpha = c(0.9, 0.1)))
+cr <- CtwasResult(gwasStudy = "gwas1", study = "s1", context = "brain",
+  method = "susie", entry = list(cre))
+cr
 }

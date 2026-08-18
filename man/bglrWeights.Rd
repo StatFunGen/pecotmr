@@ -30,8 +30,8 @@ A numeric vector of length `ncol(X)` of variant weights.
 \description{
 Internal helper that fits a `BGLR::BGLR` linear regression with a single
 linear term whose `model` is one of BGLR's marker-effect priors (e.g.
-"BayesB", "BL"), then returns the posterior mean of the marker effects.
-BGLR writes per-call temporary files to disk; this helper sandboxes them in
-a fresh `tempdir()` that is cleaned up on exit.
+"BayesB", "BL"), then returns the posterior mean of the marker effects. BGLR
+writes per-call temporary files to disk; this helper sandboxes them in a
+fresh `tempdir()` that is cleaned up on exit.
 }
 \keyword{internal}

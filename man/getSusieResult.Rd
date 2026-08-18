@@ -15,7 +15,11 @@ result, expected to carry \code{$finemappingEntry} as a
 The trimmed fit (a list with \code{pip}, \code{sets}, etc.) or NULL.
 }
 \description{
-Returns the trimmed model fit underlying \code{con_data$finemappingEntry}
-(a \code{FineMappingEntry} S4 object), or NULL if no fine-mapping entry
-is attached.
+Returns the trimmed model fit underlying \code{con_data$finemappingEntry} (a
+\code{FineMappingEntry} S4 object), or NULL if no fine-mapping entry is
+attached.
+}
+\examples{
+data(qtlSumStatsExample)
+getSusieResult(qtlSumStatsExample)
 }

@@ -36,32 +36,31 @@ GenotypeHandle(
 
 \item{ldMeta}{Path to an LD-meta TSV file (columns \code{chrom},
 \code{start}, \code{end}, \code{path}; the \code{path} column may be
-comma-separated as \code{ld_file,bim_file}). Requires \code{region}.
-The constructor resolves the row covering \code{region}, then
-delegates to the appropriate file-based handler. When the resolved
-row points at PLINK1 / PLINK2 / VCF / GDS files, the corresponding
-reader is used; \code{.cor.xz} (pre-computed LD-matrix) rows are not
-supported here — use \code{\link{loadLdMatrix}} for that case.}
+comma-separated as \code{ld_file,bim_file}). Requires \code{region}. The
+constructor resolves the row covering \code{region}, then delegates to the
+appropriate file-based handler. When the resolved row points at PLINK1 /
+PLINK2 / VCF / GDS files, the corresponding reader is used; \code{.cor.xz}
+(pre-computed LD-matrix) rows are not supported here -- use
+\code{\link{loadLdMatrix}} for that case.}
 
 \item{region}{Region specification for \code{ldMeta} lookup:
-\code{"chr:start-end"} string or a one-row data.frame with
-\code{chrom}, \code{start}, \code{end}.}
+\code{"chr:start-end"} string or a one-row data.frame with \code{chrom},
+\code{start}, \code{end}.}
 
 \item{genoMeta}{One-file-per-chromosome specification: a path to a
-\code{#chr,path} meta file or a named character vector
-(names = chromosomes, values = payload paths/prefixes). Optionally pass
+\code{#chr,path} meta file or a named character vector (names =
+chromosomes, values = payload paths/prefixes). Optionally pass
 \code{format} via \code{...} to force a single backend for every shard.}
 
 \item{chroms}{Optional character vector of chromosomes. With \code{genoMeta}
-(a sharded, one-file-per-chromosome panel) only the shards whose
-chromosome is listed are read, skipping the rest -- an I/O optimisation
-when the panel is genome-wide but only a few chromosomes are needed.
-Chromosome labels are compared canonically (\code{"chr1"}/\code{"1"} match,
-\code{23}/\code{X} etc.). If none of the requested chromosomes are present
-in the panel, every shard is read (so the caller's own absence check can
-report the mismatch). Only meaningful with \code{genoMeta}; supplying it
-with any other source is an error (a single-file panel has no per-chromosome
-shards to skip).}
+(a sharded, one-file-per-chromosome panel) only the shards whose chromosome
+is listed are read, skipping the rest -- an I/O optimisation when the panel
+is genome-wide but only a few chromosomes are needed. Chromosome labels are
+compared canonically (\code{"chr1"}/\code{"1"} match, \code{23}/\code{X}
+etc.). If none of the requested chromosomes are present in the panel, every
+shard is read (so the caller's own absence check can report the mismatch).
+Only meaningful with \code{genoMeta}; supplying it with any other source is
+an error (a single-file panel has no per-chromosome shards to skip).}
 
 \item{...}{Additional arguments forwarded to the format-specific reader.}
 }
@@ -98,4 +97,9 @@ Construct a \code{GenotypeHandle} from one of several input
   The constructor opens the file for metadata only (sample IDs and SNP
   info); dosage extraction is deferred until \code{extractBlockGenotypes()}
   is called.
+}
+\examples{
+ex <- function(f) system.file("extdata", f, package = "pecotmr")
+GenotypeHandle(bed = ex("toy_ref.bed"), bim = ex("toy_ref.bim"),
+  fam = ex("toy_ref.fam"))
 }

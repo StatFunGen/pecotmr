@@ -13,8 +13,8 @@ columns.}
 
 \item{variants2}{A data.frame or \code{GRanges} with the same columns.}
 
-\item{all}{Logical. If TRUE (default), returns the union of both sets.
-If FALSE, returns only variants from \code{variants2} (flipped to match
+\item{all}{Logical. If TRUE (default), returns the union of both sets. If
+FALSE, returns only variants from \code{variants2} (flipped to match
 \code{variants1}'s allele orientation).}
 }
 \value{
@@ -23,6 +23,11 @@ A data.frame with columns \code{chrom}, \code{pos}, \code{alt},
 }
 \description{
 Merges variant metadata (chromosome, position, ref, alt) from two sources,
-detecting and correcting allele flips (where alt/ref are swapped). Creates
-a canonical key from sorted alleles to match across datasets.
+detecting and correcting allele flips (where alt/ref are swapped). Creates a
+canonical key from sorted alleles to match across datasets.
+}
+\examples{
+v1 <- data.frame(chrom = "1", pos = 1:3, alt = "A", ref = "G")
+v2 <- data.frame(chrom = "1", pos = 2:4, alt = "A", ref = "G")
+mergeVariantInfo(v1, v2, all = TRUE)
 }

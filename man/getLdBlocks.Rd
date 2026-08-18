@@ -19,3 +19,7 @@ An \code{LdBlocks} object.
 Return the \code{LdBlocks} object carried by an
   \code{LdStatistic}.
 }
+\examples{
+data(ldEigenExample)
+getLdBlocks(ldEigenExample)
+}

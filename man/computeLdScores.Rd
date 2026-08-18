@@ -23,6 +23,10 @@ computeLdScores(ldRef, annotations = NULL, ...)
 A numeric matrix of LD scores (SNPs x annotations+1).
 }
 \description{
-Compute LD scores from an LD reference, optionally
-  stratified by annotations.
+Compute LD scores from an LD reference, optionally stratified by
+  annotations.
+}
+\examples{
+data(ldEigenExample)
+computeLdScores(ldEigenExample)
 }

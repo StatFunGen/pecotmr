@@ -6,25 +6,25 @@
 \title{Summary Statistics Base Class}
 \description{
 Virtual base class for QTL and GWAS summary statistics
-  collections. Concrete subclasses (\code{QtlSumStats},
-  \code{GwasSumStats}) inherit from \code{DFrame} and share the
-  \code{ldSketch} / \code{genome} / \code{qcInfo} slots.
+  collections. Concrete subclasses (\code{QtlSumStats}, \code{GwasSumStats})
+  inherit from \code{DFrame} and share the \code{ldSketch} / \code{genome} /
+  \code{qcInfo} slots.
 }
 \section{Slots}{
 
 \describe{
-\item{\code{ldSketch}}{The \code{GenotypeHandle} the QC pipeline harmonized
-against, or \code{NULL}. Optional: LD-free workflows (e.g. mash, which
-operates across conditions per variant) carry \code{NULL}; pipelines that
-need LD validate its presence when they consume the collection.}
+\item{\code{ldSketch}}{The \code{GenotypeHandle} the QC pipeline harmonized against,
+or \code{NULL}. Optional: LD-free workflows (e.g. mash, which operates
+across conditions per variant) carry \code{NULL}; pipelines that need LD
+validate its presence when they consume the collection.}
 
 \item{\code{genome}}{Character, genome build label.}
 
-\item{\code{qcInfo}}{A \code{list} recording which QC steps ran. Empty
-\code{list()} on construction; populated by \code{summaryStatsQc()}
-with a per-step audit record (filter names, drop counts, liftover
-target, RAISS settings, etc.). Fine-mapping and TWAS-weights
-pipelines reject inputs where \code{length(getQcInfo(x)) == 0L} — the
-slot serves as both the gating flag and the audit trail.}
+\item{\code{qcInfo}}{A \code{list} recording which QC steps ran. Empty \code{list()}
+on construction; populated by \code{summaryStatsQc()} with a per-step audit
+record (filter names, drop counts, liftover target, RAISS settings, etc.).
+Fine-mapping and TWAS-weights pipelines reject inputs where
+\code{length(getQcInfo(x)) == 0L} -- the slot serves as both the gating
+flag and the audit trail.}
 }}
 

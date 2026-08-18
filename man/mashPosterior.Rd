@@ -18,8 +18,9 @@ mashPosterior(
 \item{model}{A fitted \pkg{mashr} model (the \code{\link{mashModelFit}}
 output).}
 
-\item{sumStats}{A single \code{\link{QtlSumStats}} / \code{\link{GwasSumStats}}
--- the target (e.g. strong) set to compute posteriors on.}
+\item{sumStats}{A single \code{\link{QtlSumStats}} /
+\code{\link{GwasSumStats}} -- the target (e.g. strong) set to compute
+posteriors on.}
 
 \item{alpha}{mash \code{alpha} (match the fit).}
 
@@ -27,7 +28,8 @@ output).}
 
 \item{excludeCondition}{Character vector of condition (column) names to drop
 from the target AND the model before computing posteriors (the model's
-covariances are resized via \code{\link{updateMashModelCov}}). Default none.}
+covariances are resized via \code{\link{updateMashModelCov}}). Default
+none.}
 
 \item{outputPosteriorCov}{Return the full posterior covariance array (needed
 by \code{\link{fitMashContrast}}). Default \code{TRUE}.}
@@ -36,15 +38,34 @@ by \code{\link{fitMashContrast}}). Default \code{TRUE}.}
 }
 \value{
 The \code{mashr::mash_compute_posterior_matrices()} result: a list of
-  \code{PosteriorMean} / \code{PosteriorSD} / \code{lfsr} / \code{NegativeProb}
-  (+ \code{PosteriorCov} when \code{outputPosteriorCov = TRUE}).
+  \code{PosteriorMean} / \code{PosteriorSD} / \code{lfsr} /
+  \code{NegativeProb} (+ \code{PosteriorCov} when \code{outputPosteriorCov =
+  TRUE}).
 }
 \description{
-Apply a fitted \pkg{mashr} model (from \code{\link{mashModelFit}})
-  to a target SumStats set, returning the posterior matrices
-  (\code{PosteriorMean}, \code{PosteriorSD}, \code{lfsr}, ...). This is the
-  posterior step of the mash workflow -- \code{mash_fit}'s second step and
-  \code{mash_posterior}'s per-analysis-unit computation.
+Apply a fitted \pkg{mashr} model (from
+  \code{\link{mashModelFit}}) to a target SumStats set, returning the
+  posterior matrices (\code{PosteriorMean}, \code{PosteriorSD}, \code{lfsr},
+  ...). This is the posterior step of the mash workflow -- \code{mash_fit}'s
+  second step and \code{mash_posterior}'s per-analysis-unit computation.
+}
+\examples{
+data(mashInputExample)
+mi <- mashInputExample
+mk <- function(b, s) {
+  qtlSumStatsFromBetaMatrix(as.matrix(mi[[b]]), as.matrix(mi[[s]]),
+    study = "mash")
+}
+ssl <- list(strong = mk("strong.b", "strong.s"),
+  random = mk("random.b", "random.s"), null = mk("null.b", "null.s"))
+conds <- colnames(mi$strong.b)
+vhat <- diag(length(conds))
+dimnames(vhat) <- list(conds, conds)
+prior <- mashPriorCovariances(ssl, alpha = 0, vhat = vhat,
+  components = "canonical")
+model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior$U,
+  vhat = vhat)
+mashPosterior(model, mk("strong.b", "strong.s"), alpha = 0, vhat = vhat)
 }
 \seealso{
 \code{\link{mashModelFit}}, \code{\link{fitMashContrast}}

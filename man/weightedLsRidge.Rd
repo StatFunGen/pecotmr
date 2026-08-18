@@ -16,8 +16,8 @@ weightedLsRidge(y, X, w, lambda = 0, penalizeIntercept = FALSE)
 \item{lambda}{Numeric, ridge penalty. 0 = no penalty (delegates to
 \code{weightedLs}).}
 
-\item{penalizeIntercept}{Logical. If FALSE (default), the last column
-of X (assumed to be the intercept) is not penalized.}
+\item{penalizeIntercept}{Logical. If FALSE (default), the last column of X
+(assumed to be the intercept) is not penalized.}
 }
 \value{
 Same structure as \code{weightedLs}: coef, se, residuals, fitted,

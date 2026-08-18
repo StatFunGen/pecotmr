@@ -7,8 +7,8 @@
 MultiStudyQtlDataset(qtlDatasets, sumStats = NULL)
 }
 \arguments{
-\item{qtlDatasets}{A named list of \code{QtlDataset} objects, keyed
-by study identifier.}
+\item{qtlDatasets}{A named list of \code{QtlDataset} objects, keyed by study
+identifier.}
 
 \item{sumStats}{An optional \code{QtlSumStats} collection. Default
 \code{NULL}.}
@@ -17,10 +17,28 @@ by study identifier.}
 A \code{MultiStudyQtlDataset} object.
 }
 \description{
-Construct a \code{MultiStudyQtlDataset} S4 object from a
-  named list of \code{QtlDataset} objects (individual-level studies)
-  and an optional \code{QtlSumStats} of summary-statistic-only
-  studies. The total study count must be at least two, satisfied by
-  either (a) at least two \code{qtlDatasets} entries, or (b) at least
-  one \code{qtlDatasets} entry plus a non-empty \code{sumStats}.
+Construct a \code{MultiStudyQtlDataset} S4 object from a named
+  list of \code{QtlDataset} objects (individual-level studies) and an
+  optional \code{QtlSumStats} of summary-statistic-only studies. The total
+  study count must be at least two, satisfied by either (a) at least two
+  \code{qtlDatasets} entries, or (b) at least one \code{qtlDatasets} entry
+  plus a non-empty \code{sumStats}.
+}
+\examples{
+gh <- new("GenotypeHandle", path = "toy.gds", format = "gds",
+  snpInfo = data.frame(SNP = paste0("rs", 1:3), CHR = "1",
+    BP = c(100L, 200L, 300L), A1 = "A", A2 = "G"),
+  nSamples = 6L, sampleIds = paste0("s", 1:6), pgenPtr = NULL)
+rng <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1000L, width = 500L))
+names(rng) <- "ENSG1"
+se <- SummarizedExperiment::SummarizedExperiment(
+  assays = list(expression = matrix(rnorm(6), 1, 6,
+    dimnames = list("ENSG1", paste0("s", 1:6)))), rowRanges = rng)
+qd1 <- QtlDataset(study = "s1", genotypes = gh,
+  phenotypes = list(brain = se),
+  genotypeCovariates = matrix(0, 6, 0))
+qd2 <- QtlDataset(study = "s2", genotypes = gh,
+  phenotypes = list(brain = se),
+  genotypeCovariates = matrix(0, 6, 0))
+MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1, s2 = qd2))
 }

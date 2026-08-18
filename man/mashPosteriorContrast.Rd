@@ -13,28 +13,37 @@ means (\code{PosteriorMean} from \code{\link{mashPosterior}}).}
 \item{posteriorVcov}{Numeric array (conditions x conditions x features) of
 posterior covariances (\code{PosteriorCov}).}
 
-\item{origMean}{Numeric matrix (features x conditions) of the original
-effect estimates (e.g. \code{bhat}); used to decide which conditions were
-tested per feature. Aligned to \code{posteriorMean}'s columns by name;
-\code{NaN} is treated as 0 (untested).}
+\item{origMean}{Numeric matrix (features x conditions) of the original effect
+estimates (e.g. \code{bhat}); used to decide which conditions were tested
+per feature. Aligned to \code{posteriorMean}'s columns by name; \code{NaN}
+is treated as 0 (untested).}
 
 \item{grouping}{Optional named integer vector assigning conditions to groups
 (0 = independent); forwarded to \code{\link{fitMashContrast}} so replicate
 populations of one cell type share weight. Names are condition labels.}
 }
 \value{
-A \code{data.frame} (features x contrasts) with
-  \code{mean_contrast_*}, \code{se_contrast_*}, \code{p_contrast_*} columns
-  and feature ids as row names. Empty when nothing is testable.
+A \code{tibble} (features x contrasts) with a \code{feature_id}
+  column followed by \code{mean_contrast_*}, \code{se_contrast_*},
+  \code{p_contrast_*} columns. Empty when nothing is testable.
 }
 \description{
-Orchestrates \code{\link{fitMashContrast}} across every feature (variant)
-of a mash posterior: aligns the original effect matrix to the posterior
-columns, runs the per-feature deviation + pairwise contrast, row-binds the
-results (aligning the union of contrast columns), and orders them
+Orchestrates \code{\link{fitMashContrast}} across every feature (variant) of
+a mash posterior: aligns the original effect matrix to the posterior columns,
+runs the per-feature deviation + pairwise contrast, row-binds the results
+(aligning the union of contrast columns), and orders them
 (\code{mean}/\code{se}/\code{p}, deviation before pairwise). Features with
 fewer than two tested conditions are dropped.
 }
+\examples{
+pm <- matrix(c(0.5, 0.3, -0.2), 1, 3,
+  dimnames = list("v1", c("a", "b", "c")))
+om <- matrix(c(0.1, 0.2, 0.3), 1, 3, dimnames = list("v1", c("a", "b", "c")))
+pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
+dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
+mashPosteriorContrast(pm, pv, om)
+}
 \seealso{
-\code{\link{fitMashContrast}}, \code{\link{metaAnalysisPerCondition}}
+\code{\link{fitMashContrast}},
+  \code{\link{metaAnalysisPerCondition}}
 }

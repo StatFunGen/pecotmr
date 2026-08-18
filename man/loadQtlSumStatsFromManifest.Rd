@@ -44,3 +44,13 @@ Build a \code{\link{QtlSumStats}} from a manifest with one row
   (\code{z = beta/se}) is derived when \code{z} is absent (a supplied
   \code{z} takes precedence).
 }
+\examples{
+tsv <- system.file("extdata", "manifests",
+  "protocol_example.twas.gwas_sumstats.chr22.tsv.gz", package = "pecotmr")
+ldStem <- file.path(system.file("extdata", "ld_reference", "chr22",
+  package = "pecotmr"), "protocol_example.LD.chr22")
+manifest <- data.frame(study = "s1", context = "brain",
+  trait = "ENSG1", sumStatsPath = tsv)
+loadQtlSumStatsFromManifest(manifest = manifest, genome = "hg38",
+  ldSketch = ldStem, region = "chr22:10000000-19000000")
+}

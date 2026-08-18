@@ -24,42 +24,35 @@ colocPipeline(
 )
 }
 \arguments{
-\item{qtlFineMappingResult}{A \code{\link{QtlFineMappingResult}}
-(required).}
+\item{qtlFineMappingResult}{A \code{\link{QtlFineMappingResult}} (required).}
 
 \item{gwasInput}{Either a \code{\link{GwasSumStats}} or a
 \code{\link{GwasFineMappingResult}}.}
 
-\item{filterLbfCs}{Logical. When \code{TRUE} (and
-\code{filterLbfCsSecondary} is \code{NULL}), keep only effects
-that produced a credible set (\code{trimmedFit$sets$cs_index}).
-Default \code{FALSE}.}
+\item{filterLbfCs}{Logical. When \code{TRUE} (and \code{filterLbfCsSecondary}
+is \code{NULL}), keep only effects that produced a credible set
+(\code{trimmedFit$sets$cs_index}). Default \code{FALSE}.}
 
-\item{filterLbfCsSecondary}{Optional secondary coverage (numeric in
-\eqn{(0, 1)}). When supplied, run a credible-set concentration
-filter at this coverage level instead of \code{filterLbfCs}: each
-L-effect's credible set must span fewer than \code{nVariants *
-filterLbfCsSecondary * filterLbfCsConcentration} variants to be
-kept. Effects with diffuse credible sets are dropped before the
-LBF matrix is passed to \code{coloc::coloc.bf_bf}. Overrides
-\code{filterLbfCs} when set.}
+\item{filterLbfCsSecondary}{Optional secondary coverage (numeric in \eqn{(0,
+1)}). When supplied, run a credible-set concentration filter at this
+coverage level instead of \code{filterLbfCs}: each L-effect's credible set
+must span fewer than \code{nVariants * filterLbfCsSecondary *
+filterLbfCsConcentration} variants to be kept. Effects with diffuse
+credible sets are dropped before the LBF matrix is passed to
+\code{coloc::coloc.bf_bf}. Overrides \code{filterLbfCs} when set.}
 
-\item{filterLbfCsConcentration}{Numeric in \eqn{(0, 1)}; the
-concentration factor in the cutoff above. With the default
-\code{0.5} a 50\% credible set is kept only if it spans fewer
-than 25\% of the locus's variants. Only consulted when
-\code{filterLbfCsSecondary} is non-NULL. Default \code{0.5}.}
+\item{filterLbfCsConcentration}{Numeric in \eqn{(0, 1)}; the concentration
+factor in the cutoff above. With the default \code{0.5} a 50\% credible set
+is kept only if it spans fewer than 25\% of the locus's variants. Only
+consulted when \code{filterLbfCsSecondary} is non-NULL. Default \code{0.5}.}
 
-\item{priorTol}{Prior-variance cutoff for the default filter:
-effects with \code{V <= priorTol} are dropped. Ignored when
-either \code{filterLbfCs} or \code{filterLbfCsSecondary} is in
-use. Default \code{1e-9}.}
+\item{priorTol}{Prior-variance cutoff for the default filter: effects with
+\code{V <= priorTol} are dropped. Ignored when either \code{filterLbfCs} or
+\code{filterLbfCsSecondary} is in use. Default \code{1e-9}.}
 
-\item{p1}{Prior probability of QTL signal per variant. Default
-\code{1e-4}.}
+\item{p1}{Prior probability of QTL signal per variant. Default \code{1e-4}.}
 
-\item{p2}{Prior probability of GWAS signal per variant. Default
-\code{1e-4}.}
+\item{p2}{Prior probability of GWAS signal per variant. Default \code{1e-4}.}
 
 \item{p12}{Prior probability of shared signal per variant. Default
 \code{5e-6}.}
@@ -68,61 +61,57 @@ use. Default \code{1e-9}.}
 \code{\link{fineMappingPipeline}} when \code{gwasInput} is a
 \code{GwasSumStats}. Default \code{"susie"}.}
 
-\item{returnGwasFineMapping}{Logical. When \code{TRUE}, attach the
-computed \code{GwasFineMappingResult} on the returned data frame
-as attribute \code{"gwasFineMapping"}. Default \code{FALSE}.}
+\item{returnGwasFineMapping}{Logical. When \code{TRUE}, attach the computed
+\code{GwasFineMappingResult} on the returned data frame as attribute
+\code{"gwasFineMapping"}. Default \code{FALSE}.}
 
 \item{enrichment}{Optional data.frame of per-(gwasStudy, qtlStudy,
 qtlContext) enrichment factors with columns \code{gwasStudy},
 \code{qtlStudy}, \code{qtlContext}, \code{enrichment}. Output of
-\code{\link{qtlEnrichmentPipeline}}.
-When non-\code{NULL}, each pair's \code{p12} prior is scaled to
-\code{min(p12 * (1 + enrichment), p12Max)} (the enrichment-informed
-colocalization variant, "enloc"). Pairs without a matching
-enrichment row fall back to the baseline \code{p12} with a warning.
-Default \code{NULL} (baseline coloc).}
+\code{\link{qtlEnrichmentPipeline}}. When non-\code{NULL}, each pair's
+\code{p12} prior is scaled to \code{min(p12 * (1 + enrichment), p12Max)}
+(the enrichment-informed colocalization variant, "enloc"). Pairs without a
+matching enrichment row fall back to the baseline \code{p12} with a
+warning. Default \code{NULL} (baseline coloc).}
 
 \item{p12Max}{Numeric scalar. Maximum value for the enrichment-adjusted
-\code{p12} prior. Default \code{1e-3}. Ignored when
-\code{enrichment = NULL}.}
+\code{p12} prior. Default \code{1e-3}. Ignored when \code{enrichment =
+NULL}.}
 
 \item{adjustPips}{Logical, default \code{TRUE}. When TRUE, before any
-per-pair inference the QTL and GWAS fine-mapping result collections
-are passed through \code{\link{adjustPips}} so each entry's PIPs are
-renormalized to the intersection of its variants with the union of
-the other side's variant IDs. This matters in two scenarios: (1) the
-user declined to impute missing variants in the GWAS \code{SumStats}
-and the QTL fine-mapping input has additional variants; (2) the GWAS
-fine-mapping result contains variants not present in the QTL
-fine-mapping result. Pass \code{FALSE} to use the FMRs as supplied.}
+per-pair inference the QTL and GWAS fine-mapping result collections are
+passed through \code{\link{adjustPips}} so each entry's PIPs are
+renormalized to the intersection of its variants with the union of the
+other side's variant IDs. This matters in two scenarios: (1) the user
+declined to impute missing variants in the GWAS \code{SumStats} and the QTL
+fine-mapping input has additional variants; (2) the GWAS fine-mapping
+result contains variants not present in the QTL fine-mapping result. Pass
+\code{FALSE} to use the FMRs as supplied.}
 
 \item{alleleFlip}{Logical, default \code{TRUE}. When TRUE, align LBF columns
-between the QTL and GWAS by (chrom, pos) with ref/alt swaps recognized
-(LBF is coding-invariant, so no sign change is needed); when FALSE, match
-on exact alleles only, so a ref/alt swap is treated as a distinct variant.}
+between the QTL and GWAS by (chrom, pos) with ref/alt swaps recognized (LBF
+is coding-invariant, so no sign change is needed); when FALSE, match on
+exact alleles only, so a ref/alt swap is treated as a distinct variant.}
 
-\item{...}{Additional arguments forwarded to
-\code{coloc::coloc.bf_bf}.}
+\item{...}{Additional arguments forwarded to \code{coloc::coloc.bf_bf}.}
 }
 \value{
-A data frame with one row per (QTL tuple, GWAS tuple,
-  credible-set pair) combination. Identity columns: \code{study},
-  \code{context}, \code{trait}, \code{method}, \code{gwasStudy},
-  \code{gwasMethod}, plus the standard coloc fields
-  (\code{idx1}, \code{idx2}, \code{nSnps},
-  \code{PP.H0.abf} \ldots \code{PP.H4.abf}). When \code{enrichment}
-  is supplied, two additional columns \code{enrichment} and
-  \code{p12Used} report the per-pair factor and the prior actually
-  passed to \code{coloc::coloc.bf_bf}.
+A data frame with one row per (QTL tuple, GWAS tuple, credible-set
+  pair) combination. Identity columns: \code{study}, \code{context},
+  \code{trait}, \code{method}, \code{gwasStudy}, \code{gwasMethod}, plus the
+  standard coloc fields (\code{idx1}, \code{idx2}, \code{nSnps},
+  \code{PP.H0.abf} \ldots \code{PP.H4.abf}). When \code{enrichment} is
+  supplied, two additional columns \code{enrichment} and \code{p12Used}
+  report the per-pair factor and the prior actually passed to
+  \code{coloc::coloc.bf_bf}.
 }
 \description{
 Per-region pipeline that pairs a QTL
-  \code{\link{QtlFineMappingResult}} with a GWAS fine-mapping result
-  (either supplied directly as a \code{\link{GwasFineMappingResult}}
-  or computed inline from a \code{\link{GwasSumStats}}) and runs
-  \code{coloc::coloc.bf_bf} per (QTL tuple, GWAS tuple) pair to
-  produce per-pair colocalization posterior probabilities
-  PP.H0-PP.H4.
+  \code{\link{QtlFineMappingResult}} with a GWAS fine-mapping result (either
+  supplied directly as a \code{\link{GwasFineMappingResult}} or computed
+  inline from a \code{\link{GwasSumStats}}) and runs
+  \code{coloc::coloc.bf_bf} per (QTL tuple, GWAS tuple) pair to produce
+  per-pair colocalization posterior probabilities PP.H0-PP.H4.
 }
 \section{Why \code{coloc.bf_bf} and not \code{coloc.susie}}{
 
@@ -158,10 +147,16 @@ This pipeline preserves all three.
 }
 
 \section{LD-sketch identity check}{
-
-If \code{getLdSketch(qtlFineMappingResult)} is non-\code{NULL}, it
-must match the LD sketch on \code{gwasInput}. Mismatch is a hard
-error. When the QTL FMR's \code{ldSketch} is \code{NULL}
-(individual-level fit), the validation is skipped on the QTL side.
+ If
+  \code{getLdSketch(qtlFineMappingResult)} is non-\code{NULL}, it must match
+  the LD sketch on \code{gwasInput}. Mismatch is a hard error. When the QTL
+  FMR's \code{ldSketch} is \code{NULL} (individual-level fit), the validation
+  is skipped on the QTL side.
 }
 
+\examples{
+data(qtlFineMappingLbfExample)
+data(gwasFineMappingLbfExample)
+colocPipeline(qtlFineMappingLbfExample,
+  gwasInput = gwasFineMappingLbfExample)
+}

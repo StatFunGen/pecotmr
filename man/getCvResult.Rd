@@ -23,6 +23,18 @@ getCvResult(x, ...)
 \item{x}{A \code{FineMappingEntry} or \code{FineMappingResult}.}
 
 \item{...}{Class-specific selection arguments.}
+
+\item{study}{Character (length 1) or \code{NULL}. Restrict the selection to
+this study; \code{NULL} matches all studies.}
+
+\item{context}{Character (length 1) or \code{NULL}. Restrict the selection to
+this context; \code{NULL} matches all contexts.}
+
+\item{trait}{Character (length 1) or \code{NULL}. Restrict the selection to
+this trait; \code{NULL} matches all traits.}
+
+\item{method}{Character (length 1) or \code{NULL}. Restrict the selection to
+this fine-mapping / weight method; \code{NULL} matches all methods.}
 }
 \value{
 A list (the CV payload) or \code{NULL}.
@@ -36,4 +48,8 @@ Extract the cross-validation payload stored on a
   prediction matrices), and \code{performance} (a named list of per-method
   metric matrices). \code{NULL} when fine-mapping was run without
   cross-validation (\code{cvFolds <= 1}).
+}
+\examples{
+data(qtlFineMappingExample)
+getCvResult(qtlFineMappingExample)
 }

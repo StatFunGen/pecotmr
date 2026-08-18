@@ -22,3 +22,9 @@ A numeric vector of length `ncol(X)` of variant weights.
 Fits an MCP-penalized linear regression model via `ncvreg::cv.ncvreg` and
 returns the coefficient vector at `lambda.min`.
 }
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+mcpWeights(X, y)
+}

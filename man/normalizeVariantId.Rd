@@ -13,12 +13,12 @@ normalizeVariantId(ids, chrPrefix = TRUE, convention = NULL)
 Ignored if \code{convention} is provided.}
 
 \item{convention}{Optional list from \code{detectVariantConvention} or
-\code{attr(parseVariantId(ids), "convention")}. When provided, the
-output format is driven automatically by the detected convention.}
+\code{attr(parseVariantId(ids), "convention")}. When provided, the output
+format is driven automatically by the detected convention.}
 }
 \value{
-A character vector of re-formatted variant IDs. Unparseable ids
-  (e.g. rsIDs) are returned unchanged.
+A character vector of re-formatted variant IDs. Unparseable ids (e.g.
+  rsIDs) are returned unchanged.
 }
 \description{
 Output-only convenience: parses variant IDs and re-emits them in a single
@@ -33,4 +33,7 @@ operation -- two records that differ by a ref/alt swap remain distinct
 strings. For identity, match on the (chrom, pos, ref, alt) tuple via the
 variant matcher; use this only for display, file output, or relabeling for
 name-based downstream consumers.
+}
+\examples{
+normalizeVariantId(c("1:100:A:G", "2:200:T:C"))
 }

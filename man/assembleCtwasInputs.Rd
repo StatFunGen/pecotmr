@@ -17,85 +17,99 @@ assembleCtwasInputs(
 )
 }
 \arguments{
-\item{gwasSumStats}{NAMED LIST of \code{\link{GwasSumStats}} keyed
-by \code{region_id} (at least two entries). Each must have
-\code{getQcInfo()} non-empty.}
+\item{gwasSumStats}{NAMED LIST of \code{\link{GwasSumStats}} keyed by
+\code{region_id} (at least two entries). Each must have \code{getQcInfo()}
+non-empty.}
 
 \item{twasWeights}{The per-gene weight source. Either (a) a FLAT
-\code{\link{TwasWeights}} / \code{QtlFineMappingResult} (or a
-homogeneous list of them) carrying \code{region} provenance — each
-gene is placed into its home LD block internally by
-\code{start(region)} (matching cTWAS's \code{p0} assignment rule);
-or (b) a pre-bucketed NAMED LIST keyed by \code{region_id} (keys a
-SUBSET of \code{gwasSumStats}'s), used as-is. Blocks without any
-TWAS weights still contribute their SNP-level signal to ctwas's
-joint group prior estimate (the legacy whole-chromosome pattern
-where only a few of many LD blocks carry gene weights). A gene whose
-cis span straddles a block boundary is homed by its single anchor;
-the cross-block signal is cTWAS's boundary-gene concern
+\code{\link{TwasWeights}} / \code{QtlFineMappingResult} (or a homogeneous
+list of them) carrying \code{region} provenance -- each gene is placed into
+its home LD block internally by \code{start(region)} (matching cTWAS's
+\code{p0} assignment rule); or (b) a pre-bucketed NAMED LIST keyed by
+\code{region_id} (keys a SUBSET of \code{gwasSumStats}'s), used as-is.
+Blocks without any TWAS weights still contribute their SNP-level signal to
+ctwas's joint group prior estimate (the legacy whole-chromosome pattern
+where only a few of many LD blocks carry gene weights). A gene whose cis
+span straddles a block boundary is homed by its single anchor; the
+cross-block signal is cTWAS's boundary-gene concern
 (\code{\link{mergeCtwasBoundaryRegions}}), not placement.}
 
 \item{twasZ}{Optional \code{GRanges} of TWAS Z-scores (output of
-\code{\link{causalInferencePipeline}}). When supplied, the
-per-(trait, context) Z is used as the \code{z_gene} input to
-\code{ctwas_sumstats} so it is not recomputed.}
+\code{\link{causalInferencePipeline}}). When supplied, the per-(trait,
+context) Z is used as the \code{z_gene} input to \code{ctwas_sumstats} so
+it is not recomputed.}
 
 \item{fineMappingResult}{Optional \code{QtlFineMappingResult} or
-\code{GwasFineMappingResult} carrying the per-variant PIP and
-credible-set membership data used by the CS / PIP rescue filters
-(\code{csMinCor} and \code{minPipCutoff}). When \code{NULL}
-(default) the smart filters are no-ops; only the magnitude filter
-(\code{twasWeightCutoff}) and the per-gene cap
-(\code{maxNumVariants}, ordered by \code{|weight|}) apply.}
+\code{GwasFineMappingResult} carrying the per-variant PIP and credible-set
+membership data used by the CS / PIP rescue filters (\code{csMinCor} and
+\code{minPipCutoff}). When \code{NULL} (default) the smart filters are
+no-ops; only the magnitude filter (\code{twasWeightCutoff}) and the
+per-gene cap (\code{maxNumVariants}, ordered by \code{|weight|}) apply.}
 
-\item{method}{Optional character (length 1). Picks which TWAS
-method's weights to feed into ctwas for each (study, context,
-trait) gene. When \code{NULL} (default): use \code{"ensemble"} if
-that method is present across the weight sources; otherwise use the
-sole method when only one is present; otherwise run \strong{every}
-method as an independent cTWAS run (one \code{CtwasResult} row-set
-per method). Passing the name explicitly (e.g. \code{"mrash"})
-restricts the run to that single method.}
+\item{method}{Optional character (length 1). Picks which TWAS method's
+weights to feed into ctwas for each (study, context, trait) gene. When
+\code{NULL} (default): use \code{"ensemble"} if that method is present
+across the weight sources; otherwise use the sole method when only one is
+present; otherwise run \strong{every} method as an independent cTWAS run
+(one \code{CtwasResult} row-set per method). Passing the name explicitly
+(e.g. \code{"mrash"}) restricts the run to that single method.}
 
-\item{twasWeightCutoff}{Numeric (length 1). Drop variants with
-\code{|weight| < twasWeightCutoff} from each gene's weight matrix
-before ctwas sees it. Default \code{0} (no filter).}
+\item{twasWeightCutoff}{Numeric (length 1). Drop variants with \code{|weight|
+< twasWeightCutoff} from each gene's weight matrix before ctwas sees it.
+Default \code{0} (no filter).}
 
 \item{csMinCor}{Numeric (length 1). When \code{fineMappingResult} is
 provided, variants belonging to any 95\% credible set with purity
-(\code{min_abs_corr}) \code{>= csMinCor} are marked as must-keep
-and survive the per-gene cap. Default \code{0.8}. Ignored without
-a \code{fineMappingResult}.}
-
-\item{minPipCutoff}{Numeric (length 1). When
-\code{fineMappingResult} is provided, variants with PIP greater
-than \code{minPipCutoff} are marked as must-keep and survive the
-per-gene cap. Default \code{0} (no PIP rescue). Ignored without a
+(\code{min_abs_corr}) \code{>= csMinCor} are marked as must-keep and
+survive the per-gene cap. Default \code{0.8}. Ignored without a
 \code{fineMappingResult}.}
 
-\item{maxNumVariants}{Numeric (length 1). Cap on per-gene variant
-count. When the gene has more variants than this, keep all
-must-keep variants and fill remaining slots by descending PIP
-(when available) or descending \code{|weight|}. Default
-\code{Inf} (no cap).}
+\item{minPipCutoff}{Numeric (length 1). When \code{fineMappingResult} is
+provided, variants with PIP greater than \code{minPipCutoff} are marked as
+must-keep and survive the per-gene cap. Default \code{0} (no PIP rescue).
+Ignored without a \code{fineMappingResult}.}
+
+\item{maxNumVariants}{Numeric (length 1). Cap on per-gene variant count. When
+the gene has more variants than this, keep all must-keep variants and fill
+remaining slots by descending PIP (when available) or descending
+\code{|weight|}. Default \code{Inf} (no cap).}
 }
 \value{
-A list with elements \code{z_snp}, \code{z_gene} (NULL when
-  no \code{twasZ}), \code{weights}, \code{region_info},
-  \code{snp_map}, \code{LD_map}, \code{LD_loader_fun},
-  \code{snpinfo_loader_fun}, and \code{resolvedMethod}.
+A list with elements \code{z_snp}, \code{z_gene} (NULL when no
+  \code{twasZ}), \code{weights}, \code{region_info}, \code{snp_map},
+  \code{LD_map}, \code{LD_loader_fun}, \code{snpinfo_loader_fun}, and
+  \code{resolvedMethod}.
 }
 \description{
-Builds the per-block ctwas-shape input set
-  (\code{z_snp}, \code{weights}, \code{region_info}, \code{snp_map},
-  \code{LD_map}, the LD- and SNP-info loader closures, plus optional
-  \code{z_gene}) that the downstream ctwas steps consume.
-  This is step 1 of the three-step \code{\link{ctwasPipeline}} split.
+Builds the per-block ctwas-shape input set (\code{z_snp},
+  \code{weights}, \code{region_info}, \code{snp_map}, \code{LD_map}, the LD-
+  and SNP-info loader closures, plus optional \code{z_gene}) that the
+  downstream ctwas steps consume. This is step 1 of the three-step
+  \code{\link{ctwasPipeline}} split.
 }
 \details{
 The returned list is the SHARED STATE threaded through
-  \code{\link{estCtwasParam}} → \code{\link{screenCtwasRegions}} →
-  \code{\link{finemapCtwasRegions}}. Callers can short-circuit at any
-  step (e.g. override the estimated priors before fine-mapping) or
-  call \code{ctwasPipeline()} for the one-shot path.
+  \code{\link{estCtwasParam}} -> \code{\link{screenCtwasRegions}} ->
+  \code{\link{finemapCtwasRegions}}. Callers can short-circuit at any step
+  (e.g. override the estimated priors before fine-mapping) or call
+  \code{ctwasPipeline()} for the one-shot path.
+}
+\examples{
+data(ctwasWeightsExample)
+ldDir <- system.file("extdata", "ld_reference", "chr22",
+  package = "pecotmr")
+ldStem <- file.path(ldDir, "protocol_example.LD.chr22")
+gwasTsv <- system.file("extdata", "manifests",
+  "protocol_example.twas.gwas_sumstats.chr22.tsv.gz", package = "pecotmr")
+mani <- data.frame(study = "gwas1", sumStatsPath = gwasTsv)
+blocks <- list(c(10000000, 15000000), c(15000000, 19000000))
+gwasByRegion <- list()
+for (b in blocks) {
+  rid <- sprintf("chr22_\%d_\%d", b[1], b[2])
+  gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
+    ldSketch = ldStem, region = sprintf("chr22:\%d-\%d", b[1], b[2]))
+  gwasByRegion[[rid]] <- summaryStatsQc(gss, mafCutoff = 0.0025)
+}
+assembleCtwasInputs(gwasSumStats = gwasByRegion,
+  twasWeights = list(ctwasWeightsExample))
 }

@@ -95,6 +95,7 @@ reference:
       section) documents the user-facing factory function.
     contents:
       - AnnotationMatrix-class
+      - FineMappingEntry-class
       - FineMappingResultBase-class
       - GenotypeHandle-class
       - H2Estimate-class
@@ -104,6 +105,7 @@ reference:
       - LdStatistic-class
       - MashPrior-class
       - MultiStudyQtlDataset-class
+      - QtlDataset-class
       - SldscData-class
       - SumStatsBase-class
 
@@ -152,6 +154,8 @@ reference:
       (`fineMappingPipeline`, `colocboostPipeline`,
       `twasWeightsPipeline`) are listed under "Pipelines" further
       down rather than repeated per class.
+    contents:
+      - show-methods
 
   - subtitle: "AnnotationMatrix"
     contents:
@@ -165,6 +169,7 @@ reference:
   - subtitle: "FineMappingEntry"
     contents:
       - adjustPips
+      - computeCsCorrelation
       - fsusieAffectedRegions
       - fsusieCredibleBand
       - getCredibleSetSummary
@@ -355,6 +360,7 @@ reference:
       - estCtwasParam
       - screenCtwasRegions
       - finemapCtwasRegions
+      - mergeCtwasBoundaryRegions
       - asCtwasResult
 
   - title: "Quality control"
@@ -365,7 +371,6 @@ reference:
     contents:
       - summaryStatsQc
       - effectiveN
-      - alignVariantNames
       - ldMismatchQc
       - krigingOutlierQc
       - slalom
@@ -375,7 +380,6 @@ reference:
       - raiss
       - mergeVariantInfo
       - mergeSusieCs
-      - parseCsCorr
       - filterRelatedness
 
   - title: "LD infrastructure"
@@ -411,8 +415,10 @@ reference:
       (`chr:pos:A2:A1`) and genomic regions (`chr:start-end`).
     contents:
       - parseVariantId
+      - variantIdToDf
       - normalizeVariantId
       - classifyVariantType
+      - parseRegion
       - regionToDf
       - regionsOverlap
       - findOverlappingRegions
@@ -442,6 +448,7 @@ reference:
       - fsusieGetCs
       - fsusieWrapper
       - getSusieResult
+      - computeCsTables
       - extractCsInfo
       - extractTopPipInfo
       - formatFinemappingOutput
@@ -461,6 +468,9 @@ reference:
 
   - subtitle: "Penalized regression"
     contents:
+      - glmnetWeights
+      - lassoWeights
+      - enetWeights
       - lassosumRss
       - lassosumRssWeights
       - mcpWeights
@@ -495,6 +505,7 @@ reference:
       - mrmashRssWeights
       - mrmashWrapper
       - buildMrmashPriorMatrices
+      - computeCoefficientsGlasso
       - computeCovDiag
       - computeCovFlash
 
@@ -511,6 +522,7 @@ reference:
   - subtitle: "Multi-method p-value combination"
     contents:
       - combinePValues
+      - waldTestPval
 
   - title: "mash"
     desc: >
@@ -534,6 +546,10 @@ reference:
       - makePairwiseContrastCol
       - fitMashContrast
       - metaAnalysisPerCondition
+      - filterInvalidSummaryStat
+      - filterMixtureComponents
+      - mashRandNullSample
+      - mergeMashData
       - sanitizeMashData
       - sliceMashData
       - updateMashModelCov
@@ -566,59 +582,44 @@ reference:
       tests. Their bundled GenotypeHandle paths resolve to the installed
       `inst/extdata/` location automatically at extraction time.
     contents:
-      - qtl_dataset_example
-      - qtl_sumstats_example
-      - qtl_sumstats_multicontext_example
-      - gwas_sumstats_s4_example
-      - multi_study_qtl_dataset_example
-      - eqtl_region_example
-      - gwas_sumstats_example
-      - gwas_finemapping_example
-      - qtl_finemapping_example
-      - multitrait_data
+      # S4 input containers
+      - qtlDatasetExample
+      - multiStudyQtlDatasetExample
+      - qtlSumStatsExample
+      - qtlSumStatsMulticontextExample
+      - gwasSumStatsS4Example
+      # List-form regional data
+      - eqtlRegionExample
+      - gwasSumStatsExample
+      - multiTraitData
+      # Fine-mapping results
+      - qtlFineMappingExample
+      - qtlFineMappingLbfExample
+      - qtlFineMappingPairedExample
+      - gwasFineMappingExample
+      - gwasFineMappingLbfExample
+      - mvsusieFineMappingExample
+      - fsusieFineMappingExample
+      # TWAS and cTWAS
+      - twasWeightsExample
+      - ctwasWeightsExample
+      - ctwasInputsExample
+      - ctwasEstExample
+      - ctwasFinemapExample
+      # mash
+      - mashInputExample
+      - mashPosteriorExample
+      # LD references and heritability
+      - ldEigenExample
+      - ldScoreExample
+      - h2EstimateExample
 
   - title: internal
     desc: >
-      Deprecated entry points retained for backward compatibility.
-      Each emits a `.Deprecated()` warning and forwards to the
-      canonical replacement. Hidden from the reference index but
-      still searchable and rendered.
+      Implementation details that have `.Rd` topics but no front-facing
+      role. Hidden from the reference index but still searchable and
+      rendered.
     contents:
-      - alleleQc
-      - matchRefPanel
-      - xqtlEnrichmentWrapper
-      - computeQtlEnrichment
-      - colocWrapper
-      - colocPostProcessor
-      - enlocPipeline
-      - ctwasBimfileLoader
-      - getCtwasMetaData
-      - mergeCtwasBoundaryRegions
-      - loadRegionalAssociationData
-      - loadRegionalUnivariateData
-      - loadRegionalRegressionData
-      - loadRegionalMultivariateData
-      - loadRegionalFunctionalData
-      - loadTwasWeights
-      - loadRssData
-      - loadMultitaskRegionalData
-      - regionDataToIndInput
-      - regionDataToRssInput
-      - harmonizeTwas
-      - harmonizeGwas
-      - loadStudyLd
-      - univariateAnalysisPipeline
-      - rssAnalysisPipeline
-      - multivariateAnalysisPipeline
-      - susieRssPipeline
-      - twasPipeline
-      - twasMultivariateWeightsPipeline
-      - standardiseSumstatsColumns
-      - loadTsvRegion
-      - batchLoadTwasWeights
-      - loadMultitraitTensorqtlSumstat
-      - loadMultitraitRSumstat
-      # Implementation details with .Rd topics but no front-facing role.
       - as.data.frame.GwasSumStats
       - rescaleCovW0
       - buildTopLoci

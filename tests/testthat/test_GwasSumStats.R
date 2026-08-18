@@ -3,175 +3,194 @@
 # === Tests migrated from test_h2ClassesSumstats.R (GwasSumStats) ===
 
 test_that("GwasSumStats(df) errors when required mcols are missing", {
-  df <- data.frame(SNP = "rs1", CHR = "1", BP = 100,
-                   A1 = "A",
-                   stringsAsFactors = FALSE)
-  expect_error(
-    makeGwasSumStatsFromDf(df),
-    "Missing required columns"
-  )
+    df <- data.frame(
+        SNP = "rs1",
+        CHR = "1",
+        BP = 100,
+        A1 = "A",
+        stringsAsFactors = FALSE
+    )
+    expect_error(
+        makeGwasSumStatsFromDf(df),
+        "Missing required columns"
+    )
 })
 
 
 test_that("GwasSumStats valid object passes with all required mcols", {
-  set.seed(1)
-  df <- data.frame(
-    SNP = paste0("rs", 1:5),
-    CHR = rep("1", 5),
-    BP = 1:5,
-    A1 = rep("A", 5),
-    A2 = rep("G", 5),
-    Z = rnorm(5),
-    N = rep(1000, 5),
-    stringsAsFactors = FALSE
-  )
-  obj <- makeGwasSumStatsFromDf(df)
-  expect_true(methods::validObject(obj))
+    set.seed(1)
+    df <- data.frame(
+        SNP = paste0("rs", 1:5),
+        CHR = rep("1", 5),
+        BP = 1:5,
+        A1 = rep("A", 5),
+        A2 = rep("G", 5),
+        Z = rnorm(5),
+        N = rep(1000, 5),
+        stringsAsFactors = FALSE
+    )
+    obj <- makeGwasSumStatsFromDf(df)
+    expect_true(methods::validObject(obj))
 })
 
 
 test_that("makeGwasSumStatsFromDf() constructor creates object from data.frame", {
-  df <- make_test_sumstats_df(20)
-  obj <- makeGwasSumStatsFromDf(df, traitName = "height", genome = "hg38")
+    df <- make_test_sumstats_df(20)
+    obj <- makeGwasSumStatsFromDf(df, traitName = "height", genome = "hg38")
 
-  expect_s4_class(obj, "GwasSumStats")
-  expect_equal(as.character(obj$study)[[1L]], "height")
-  expect_equal(getGenome(obj), "hg38")
-  expect_equal(length(getSumStats(obj)), 20)
+    expect_s4_class(obj, "GwasSumStats")
+    expect_equal(as.character(obj$study)[[1L]], "height")
+    expect_equal(getGenome(obj), "hg38")
+    expect_equal(length(getSumStats(obj)), 20)
 })
 
 
 test_that("makeGwasSumStatsFromDf() normalizes chr prefix", {
-  df <- make_test_sumstats_df(5)
-  # Input has CHR = "1" (no prefix)
-  obj <- makeGwasSumStatsFromDf(df)
-  chrs <- as.character(GenomicRanges::seqnames(getSumStats(obj)))
-  expect_true(all(startsWith(chrs, "chr")))
+    df <- make_test_sumstats_df(5)
+    # Input has CHR = "1" (no prefix)
+    obj <- makeGwasSumStatsFromDf(df)
+    chrs <- as.character(GenomicRanges::seqnames(getSumStats(obj)))
+    expect_true(all(startsWith(chrs, "chr")))
 
-  # Input already has "chr" prefix
-  df2 <- df
-  df2$CHR <- "chr1"
-  obj2 <- makeGwasSumStatsFromDf(df2)
-  chrs2 <- as.character(GenomicRanges::seqnames(getSumStats(obj2)))
-  # Should not double-prefix
-  expect_true(all(chrs2 == "chr1"))
-  expect_false(any(grepl("^chrchr", chrs2)))
+    # Input already has "chr" prefix
+    df2 <- df
+    df2$CHR <- "chr1"
+    obj2 <- makeGwasSumStatsFromDf(df2)
+    chrs2 <- as.character(GenomicRanges::seqnames(getSumStats(obj2)))
+    # Should not double-prefix
+    expect_true(all(chrs2 == "chr1"))
+    expect_false(any(grepl("^chrchr", chrs2)))
 })
 
 
 test_that("makeGwasSumStatsFromDf() errors on missing columns", {
-  df <- data.frame(SNP = "rs1", CHR = "1", BP = 100)
-  expect_error(makeGwasSumStatsFromDf(df), "Missing required columns")
+    df <- data.frame(SNP = "rs1", CHR = "1", BP = 100)
+    expect_error(makeGwasSumStatsFromDf(df), "Missing required columns")
 })
 
 
 test_that("makeGwasSumStatsFromDf() removes rows with NA in required columns", {
-  df <- make_test_sumstats_df(10)
-  df$Z[1] <- NA
-  df$N[3] <- NA
-  expect_message(obj <- makeGwasSumStatsFromDf(df), "Removed.*SNPs with missing")
-  expect_equal(length(getSumStats(obj)), 8)
+    df <- make_test_sumstats_df(10)
+    df$Z[1] <- NA
+    df$N[3] <- NA
+    expect_message(
+        obj <- makeGwasSumStatsFromDf(df),
+        "Removed.*SNPs with missing"
+    )
+    expect_equal(length(getSumStats(obj)), 8)
 })
 
 
 test_that("getz() returns correct Z vector", {
-  set.seed(99)
-  df <- make_test_sumstats_df(5)
-  obj <- makeGwasSumStatsFromDf(df)
-  z <- getZ(obj)
-  expect_type(z, "double")
-  expect_equal(length(z), 5)
+    set.seed(99)
+    df <- make_test_sumstats_df(5)
+    obj <- makeGwasSumStatsFromDf(df)
+    z <- getZ(obj)
+    expect_type(z, "double")
+    expect_equal(length(z), 5)
 })
 
 
 test_that("getn() returns correct N vector", {
-  df <- make_test_sumstats_df(5)
-  obj <- makeGwasSumStatsFromDf(df)
-  n <- getN(obj)
-  expect_equal(length(n), 5)
-  expect_true(all(n == 10000))
+    df <- make_test_sumstats_df(5)
+    obj <- makeGwasSumStatsFromDf(df)
+    n <- getN(obj)
+    expect_equal(length(n), 5)
+    expect_true(all(n == 10000))
 })
 
 
 test_that("getmaf() returns MAF when present, NULL when absent", {
-  df <- make_test_sumstats_df(5)
-  obj_no_maf <- makeGwasSumStatsFromDf(df)
-  expect_null(getMaf(obj_no_maf))
+    df <- make_test_sumstats_df(5)
+    obj_no_maf <- makeGwasSumStatsFromDf(df)
+    expect_null(getMaf(obj_no_maf))
 
-  df$MAF <- runif(5, 0.01, 0.5)
-  obj_with_maf <- makeGwasSumStatsFromDf(df)
-  maf <- getMaf(obj_with_maf)
-  expect_type(maf, "double")
-  expect_equal(length(maf), 5)
+    df$MAF <- runif(5, 0.01, 0.5)
+    obj_with_maf <- makeGwasSumStatsFromDf(df)
+    maf <- getMaf(obj_with_maf)
+    expect_type(maf, "double")
+    expect_equal(length(maf), 5)
 })
 
 
 test_that("nSnps() returns correct count", {
-  df <- make_test_sumstats_df(30)
-  obj <- makeGwasSumStatsFromDf(df)
-  expect_equal(nSnps(obj), 30)
+    df <- make_test_sumstats_df(30)
+    obj <- makeGwasSumStatsFromDf(df)
+    expect_equal(nSnps(obj), 30)
 })
 
 
 test_that("subsetchr() filters correctly", {
-  df <- make_test_sumstats_df(10)
-  df$CHR <- c(rep("1", 6), rep("2", 4))
-  obj <- makeGwasSumStatsFromDf(df)
+    df <- make_test_sumstats_df(10)
+    df$CHR <- c(rep("1", 6), rep("2", 4))
+    obj <- makeGwasSumStatsFromDf(df)
 
-  chr1 <- subsetChr(obj, "1")
-  expect_equal(nSnps(chr1), 6)
+    chr1 <- subsetChr(obj, "1")
+    expect_equal(nSnps(chr1), 6)
 
-  # Also works with "chr" prefix
-  chr2 <- subsetChr(obj, "chr2")
-  expect_equal(nSnps(chr2), 4)
+    # Also works with "chr" prefix
+    chr2 <- subsetChr(obj, "chr2")
+    expect_equal(nSnps(chr2), 4)
 })
 
 
 test_that("subsetChr() preserves study-level nCase/nControl/nSample scalars", {
-  # Regression: the chromosome subset rebuilds the GwasSumStats and previously
-  # dropped the optional per-study case/control counts + total N.
-  gr <- GenomicRanges::GRanges(
-    c("chr1", "chr1", "chr2"),
-    IRanges::IRanges(start = c(100L, 200L, 300L), width = 1L))
-  S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-    SNP = paste0("rs", 1:3), A1 = rep("A", 3), A2 = rep("G", 3),
-    Z = c(1.0, -0.5, 2.0), N = rep(100L, 3))
-  obj <- GwasSumStats(
-    study = "g1", entry = list(gr), genome = "hg19",
-    ldSketch = .sh_makeGenotypeHandle(),
-    nCase = 5000, nControl = 15000, nSample = 20000)
+    # Regression: the chromosome subset rebuilds the GwasSumStats and previously
+    # dropped the optional per-study case/control counts + total N.
+    gr <- GenomicRanges::GRanges(
+        c("chr1", "chr1", "chr2"),
+        IRanges::IRanges(start = c(100L, 200L, 300L), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = paste0("rs", 1:3),
+        A1 = rep("A", 3),
+        A2 = rep("G", 3),
+        Z = c(1.0, -0.5, 2.0),
+        N = rep(100L, 3)
+    )
+    obj <- GwasSumStats(
+        study = "g1",
+        entry = list(gr),
+        genome = "hg19",
+        ldSketch = .sh_makeGenotypeHandle(),
+        nCase = 5000,
+        nControl = 15000,
+        nSample = 20000
+    )
 
-  sub <- subsetChr(obj, "chr1")
-  expect_equal(nSnps(sub), 2)
-  expect_equal(as.numeric(sub$nCase), 5000)
-  expect_equal(as.numeric(sub$nControl), 15000)
-  expect_equal(as.numeric(sub$nSample), 20000)
+    sub <- subsetChr(obj, "chr1")
+    expect_equal(nSnps(sub), 2)
+    expect_equal(as.numeric(sub$nCase), 5000)
+    expect_equal(as.numeric(sub$nControl), 15000)
+    expect_equal(as.numeric(sub$nSample), 20000)
 })
 
 
 test_that("getvary() returns var_y and NULL cases", {
-  df <- make_test_sumstats_df(5)
+    df <- make_test_sumstats_df(5)
 
-  obj_null <- makeGwasSumStatsFromDf(df, varY = NULL)
-  expect_null(getVarY(obj_null))
+    obj_null <- makeGwasSumStatsFromDf(df, varY = NULL)
+    expect_null(getVarY(obj_null))
 
-  obj_vy <- makeGwasSumStatsFromDf(df, varY = 4.5)
-  expect_equal(getVarY(obj_vy), 4.5)
+    obj_vy <- makeGwasSumStatsFromDf(df, varY = 4.5)
+    expect_equal(getVarY(obj_vy), 4.5)
 })
 
 
 test_that("as.data.frame.makeGwasSumStatsFromDf() round-trips", {
-  df_in <- make_test_sumstats_df(15)
-  obj <- makeGwasSumStatsFromDf(df_in)
-  df_out <- as.data.frame(obj)
+    df_in <- make_test_sumstats_df(15)
+    obj <- makeGwasSumStatsFromDf(df_in)
+    df_out <- as.data.frame(obj)
 
-  expect_true(is.data.frame(df_out))
-  expect_true(all(c("SNP", "CHR", "BP", "A1", "A2", "Z", "N") %in%
-                    names(df_out)))
-  expect_equal(nrow(df_out), 15)
-  expect_equal(df_out$SNP, df_in$SNP)
-  # BP should round-trip
-  expect_equal(df_out$BP, as.integer(df_in$BP))
+    expect_true(is.data.frame(df_out))
+    expect_true(all(
+        c("SNP", "CHR", "BP", "A1", "A2", "Z", "N") %in%
+            names(df_out)
+    ))
+    expect_equal(nrow(df_out), 15)
+    expect_equal(df_out$SNP, df_in$SNP)
+    # BP should round-trip
+    expect_equal(df_out$BP, as.integer(df_in$BP))
 })
 
 
@@ -179,23 +198,21 @@ test_that("as.data.frame.makeGwasSumStatsFromDf() round-trips", {
 # AnnotationMatrix (h2Annotations.R)
 # =============================================================================
 
-
-
 # === Tests migrated from test_showMethods.R (GwasSumStats) ===
 
 test_that("show.GwasSumStats prints nrow and genome build", {
-  ss <- GwasSumStats(
-    study = c("g1", "g2"),
-    entry = list(.sh_makeQtlSumstatsGr(), .sh_makeQtlSumstatsGr()),
-    genome = "hg19",
-    ldSketch = .sh_makeGenotypeHandle())
-  out <- capture.output(show(ss))
-  expect_true(any(grepl("GwasSumStats: 2 studies, genome build hg19", out)))
-  expect_true(any(grepl("LD sketch: gds @ /tmp/test.gds", out)))
+    ss <- GwasSumStats(
+        study = c("g1", "g2"),
+        entry = list(.sh_makeQtlSumstatsGr(), .sh_makeQtlSumstatsGr()),
+        genome = "hg19",
+        ldSketch = .sh_makeGenotypeHandle()
+    )
+    out <- capture.output(show(ss))
+    expect_true(any(grepl("GwasSumStats: 2 studies, genome build hg19", out)))
+    expect_true(any(grepl("LD sketch: gds @ /tmp/test.gds", out)))
 })
 
 # === Tests migrated from test_h2ClassesSumstats.R (showMethods) ===
-
 
 # =============================================================================
 # GwasSumStats() constructor validation + accessor error branches
@@ -204,80 +221,110 @@ test_that("show.GwasSumStats prints nrow and genome build", {
 # =============================================================================
 
 test_that("GwasSumStats() errors when required args are missing", {
-  expect_error(GwasSumStats(study = "g1"), "are all required")
+    expect_error(GwasSumStats(study = "g1"), "are all required")
 })
 
 test_that("GwasSumStats() errors when genome is not a single string", {
-  expect_error(
-    GwasSumStats(study = "g1", entry = list(.sh_makeQtlSumstatsGr()),
-                 genome = c("hg19", "hg38"),
-                 ldSketch = .sh_makeGenotypeHandle()),
-    "single character string")
+    expect_error(
+        GwasSumStats(
+            study = "g1",
+            entry = list(.sh_makeQtlSumstatsGr()),
+            genome = c("hg19", "hg38"),
+            ldSketch = .sh_makeGenotypeHandle()
+        ),
+        "single character string"
+    )
 })
 
 test_that("GwasSumStats() errors when entry is not a list", {
-  expect_error(
-    GwasSumStats(study = "g1", entry = "not_a_list",
-                 genome = "hg19", ldSketch = .sh_makeGenotypeHandle()),
-    "must be a list")
+    expect_error(
+        GwasSumStats(
+            study = "g1",
+            entry = "not_a_list",
+            genome = "hg19",
+            ldSketch = .sh_makeGenotypeHandle()
+        ),
+        "must be a list"
+    )
 })
 
 test_that("GwasSumStats() errors when length(entry) != length(study)", {
-  expect_error(
-    GwasSumStats(study = c("g1", "g2"),
-                 entry = list(.sh_makeQtlSumstatsGr()),
-                 genome = "hg19", ldSketch = .sh_makeGenotypeHandle()),
-    "must equal length")
+    expect_error(
+        GwasSumStats(
+            study = c("g1", "g2"),
+            entry = list(.sh_makeQtlSumstatsGr()),
+            genome = "hg19",
+            ldSketch = .sh_makeGenotypeHandle()
+        ),
+        "must equal length"
+    )
 })
 
 test_that("GwasSumStats() errors when a per-study column has a bad length", {
-  expect_error(
-    GwasSumStats(study = c("g1", "g2"),
-                 entry = list(.sh_makeQtlSumstatsGr(),
-                              .sh_makeQtlSumstatsGr()),
-                 genome = "hg19", ldSketch = .sh_makeGenotypeHandle(),
-                 nCase = c(1, 2, 3)),
-    "must have length 1 or length")
+    expect_error(
+        GwasSumStats(
+            study = c("g1", "g2"),
+            entry = list(.sh_makeQtlSumstatsGr(), .sh_makeQtlSumstatsGr()),
+            genome = "hg19",
+            ldSketch = .sh_makeGenotypeHandle(),
+            nCase = c(1, 2, 3)
+        ),
+        "must have length 1 or length"
+    )
 })
 
 test_that("GwasSumStats() attaches extra per-study columns via ...", {
-  obj <- GwasSumStats(
-    study = c("g1", "g2"),
-    entry = list(.sh_makeQtlSumstatsGr(), .sh_makeQtlSumstatsGr()),
-    genome = "hg19", ldSketch = .sh_makeGenotypeHandle(),
-    cohort = c("UKB", "FinnGen"))
-  expect_equal(as.character(obj$cohort), c("UKB", "FinnGen"))
+    obj <- GwasSumStats(
+        study = c("g1", "g2"),
+        entry = list(.sh_makeQtlSumstatsGr(), .sh_makeQtlSumstatsGr()),
+        genome = "hg19",
+        ldSketch = .sh_makeGenotypeHandle(),
+        cohort = c("UKB", "FinnGen")
+    )
+    expect_equal(as.character(obj$cohort), c("UKB", "FinnGen"))
 })
 
 test_that("getSumStats() errors on an empty GwasSumStats", {
-  empty <- GwasSumStats(
-    study = character(0), entry = list(),
-    genome = "hg19", ldSketch = .sh_makeGenotypeHandle(),
-    varY = numeric(0))
-  expect_equal(nrow(empty), 0L)
-  expect_error(getSumStats(empty), "has no rows")
+    empty <- GwasSumStats(
+        study = character(0),
+        entry = list(),
+        genome = "hg19",
+        ldSketch = .sh_makeGenotypeHandle(),
+        varY = numeric(0)
+    )
+    expect_equal(nrow(empty), 0L)
+    expect_error(getSumStats(empty), "has no rows")
 })
 
 test_that("getSumStats() on a multi-study GwasSumStats needs a study selector", {
-  two <- GwasSumStats(
-    study = c("g1", "g2"),
-    entry = list(.sh_makeQtlSumstatsGr(), .sh_makeQtlSumstatsGr()),
-    genome = "hg19", ldSketch = .sh_makeGenotypeHandle())
-  expect_error(getSumStats(two), "studies. Pass")
-  expect_error(getSumStats(two, study = "ghost"), "Unknown study")
+    two <- GwasSumStats(
+        study = c("g1", "g2"),
+        entry = list(.sh_makeQtlSumstatsGr(), .sh_makeQtlSumstatsGr()),
+        genome = "hg19",
+        ldSketch = .sh_makeGenotypeHandle()
+    )
+    expect_error(getSumStats(two), "studies. Pass")
+    expect_error(getSumStats(two, study = "ghost"), "Unknown study")
 })
 
 test_that("GwasSumStats: ldSketch is optional (NULL for LD-free workflows)", {
-  ss <- GwasSumStats(study = "g1", entry = list(.sh_makeQtlSumstatsGr()),
-                     genome = "hg19")   # ldSketch omitted -> NULL
-  expect_null(getLdSketch(ss))
-  expect_output(show(ss), "none \\(LD-free\\)")
+    ss <- GwasSumStats(
+        study = "g1",
+        entry = list(.sh_makeQtlSumstatsGr()),
+        genome = "hg19"
+    ) # ldSketch omitted -> NULL
+    expect_null(getLdSketch(ss))
+    expect_output(show(ss), "none \\(LD-free\\)")
 })
 
 test_that("GwasSumStats: a non-GenotypeHandle ldSketch is rejected", {
-  expect_error(
-    GwasSumStats(study = "g1", entry = list(.sh_makeQtlSumstatsGr()),
-                 genome = "hg19", ldSketch = "not_a_handle"),
-    "GenotypeHandle or NULL")
+    expect_error(
+        GwasSumStats(
+            study = "g1",
+            entry = list(.sh_makeQtlSumstatsGr()),
+            genome = "hg19",
+            ldSketch = "not_a_handle"
+        ),
+        "GenotypeHandle or NULL"
+    )
 })
-

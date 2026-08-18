@@ -7,9 +7,9 @@
 readSldscTrait(prefix)
 }
 \arguments{
-\item{prefix}{Character. Path prefix to the polyfun outputs for one trait/run.
-The function appends `.results`, `.log`, and `.part_delete` to this prefix.
-Example: `"/path/to/cwd/CAD_META.filtered.sumstats.gz"`.}
+\item{prefix}{Character. Path prefix to the polyfun outputs for one
+trait/run. The function appends `.results`, `.log`, and `.part_delete` to
+this prefix. Example: `"/path/to/cwd/CAD_META.filtered.sumstats.gz"`.}
 }
 \value{
 A named list. See `sldscPostprocessingPipeline` for components.
@@ -21,9 +21,10 @@ Reads the regression outputs produced by `polyfun/ldsc.py` for a
   formats; downstream code consumes only modeling quantities.
 }
 \examples{
-\dontrun{
-run <- readSldscTrait("/output/CAD_META.filtered.sumstats.gz")
-run$tau["my_target_annotation"]
-}
+prefix <- file.path(
+  system.file("extdata", "sldsc_trait", package = "pecotmr"),
+  "sumstats.parquet")
+run <- readSldscTrait(prefix)
+names(run)
 
 }

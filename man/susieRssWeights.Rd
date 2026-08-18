@@ -13,7 +13,8 @@ susieRssWeights(
 )
 }
 \arguments{
-\item{stat}{List with components \code{z} (z-scores), \code{n} (sample sizes).}
+\item{stat}{List with components \code{z} (z-scores), \code{n} (sample
+sizes).}
 
 \item{LD}{LD correlation matrix.}
 
@@ -22,9 +23,9 @@ susieRssWeights(
 \item{retainFit}{If TRUE, stores the fitted object as an attribute.}
 
 \item{methodArgs}{Named list of additional arguments passed to
-\code{susieR::susie_rss()}. Use this instead of \code{...} to avoid
-partial matching of short argument names (e.g. \code{L}) to the
-\code{LD} parameter.}
+\code{susieR::susie_rss()}. Use this instead of \code{...} to avoid partial
+matching of short argument names (e.g. \code{L}) to the \code{LD}
+parameter.}
 }
 \value{
 Numeric vector of variant weights.
@@ -32,4 +33,19 @@ Numeric vector of variant weights.
 \description{
 Extracts coefficients from an existing SuSiE-RSS fit or fits
 \code{susieR::susie_rss()} from summary statistics and LD.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+ss <- lapply(seq_len(ncol(X)), function(j) {
+  coef(summary(lm(y ~ X[, j])))[2, 1:2]
+})
+stat <- list(
+  bhat = vapply(ss, `[`, numeric(1), 1L),
+  shat = vapply(ss, `[`, numeric(1), 2L),
+  z = vapply(ss, function(s) s[1] / s[2], numeric(1)),
+  n = rep(nrow(X), ncol(X)))
+LD <- cor(X)
+susieRssWeights(stat, LD)
 }

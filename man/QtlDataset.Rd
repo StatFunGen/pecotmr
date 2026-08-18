@@ -2,7 +2,7 @@
 % Please edit documentation in R/QtlDataset.R
 \name{QtlDataset}
 \alias{QtlDataset}
-\title{Fine-Mapping Entry (per-tuple payload)}
+\title{Create a QtlDataset Object}
 \usage{
 QtlDataset(
   study,
@@ -24,14 +24,40 @@ QtlDataset(
 
 \item{genotypes}{A \code{GenotypeHandle}.}
 
-\item{phenotypes}{Named list of \code{SummarizedExperiment} objects,
-keyed by context. Each SE must have \code{rowRanges} carrying trait
-positions and \code{colData} carrying per-context phenotype covariates.}
+\item{phenotypes}{Named list of \code{SummarizedExperiment} objects, keyed by
+context. Each SE must have \code{rowRanges} carrying trait positions and
+\code{colData} carrying per-context phenotype covariates.}
 
 \item{genotypeCovariates}{Numeric matrix of genotype-derived covariates
 (e.g., ancestry PCs); rows are samples.}
 
 \item{scaleResiduals}{Logical (length 1). Default \code{TRUE}.}
+
+\item{mafCutoff}{Numeric (length 1). Minor allele frequency threshold;
+variants with \code{MAF < mafCutoff} are dropped at extraction time inside
+\code{getGenotypes()} / \code{getResidualizedGenotypes()}. Default 0 (no
+filter).}
+
+\item{macCutoff}{Numeric (length 1). Minor allele count threshold; converted
+to a MAF threshold using \code{max(mafCutoff, macCutoff / (2 * n))} where
+\code{n} is the post-narrowing sample count of the extracted block. Default
+0 (no filter).}
+
+\item{xvarCutoff}{Numeric (length 1). Per-variant genotype variance
+threshold; variants with column variance below this are dropped at
+extraction time. Default 0 (no filter).}
+
+\item{imissCutoff}{Numeric (length 1). Per-sample genotype-missingness
+threshold; samples with a missing-genotype rate above this are dropped at
+extraction time. Default 0 (no filter).}
+
+\item{keepSamples}{Character vector of sample identifiers to retain prior to
+per-block QC; intersected with the genotype handle's \code{sampleIds} and
+the \code{samples} argument of \code{getGenotypes()}. Length 0 means no
+restriction.}
+
+\item{keepVariants}{Character vector of variant identifiers to retain prior
+to per-block QC. Length 0 means no restriction.}
 
 \item{keepIndel}{Logical (length 1). When \code{FALSE}, variants whose
 alleles are not single nucleotides (indels) are dropped at extraction.
@@ -41,35 +67,21 @@ Default \code{TRUE} (keep all variants).}
 A \code{QtlDataset} object.
 }
 \description{
-S4 container for a single fine-mapping fit attached to a
-  \code{FineMappingResult} row. One entry corresponds to one
-  \code{(study, context, trait, method)} tuple.
-
-  For joint fits (e.g., multi-trait mvSuSiE or fSuSiE), multiple
-  \code{FineMappingEntry} objects in the same \code{FineMappingResult}
-  collection may carry references to the same underlying R fit object
-  (R's copy-on-modify semantics keep this memory-efficient).
-
-Construct a \code{QtlDataset} S4 object containing one
-  study's individual-level QTL data: a genotype handle and a named list
-  of \code{SummarizedExperiment} objects (one per QTL context), plus
+Construct a \code{QtlDataset} S4 object containing one study's
+  individual-level QTL data: a genotype handle and a named list of
+  \code{SummarizedExperiment} objects (one per QTL context), plus
   genotype-derived covariates and a residual-scaling flag.
 }
-\section{Slots}{
-
-\describe{
-\item{\code{variantIds}}{Character vector of variant IDs in the fit.}
-
-\item{\code{trimmedFit}}{The method-specific fit object (SuSiE list, mvSuSiE
-object, fSuSiE object, etc.). May be shared by reference across
-joint-fit entries.}
-
-\item{\code{topLoci}}{A long-format \code{data.frame} with at minimum
-\code{variant_id} and \code{pip} columns; optional \code{cs},
-\code{coverage}, \code{betahat}, \code{sd}, \code{csLog10bf},
-\code{z}.}
-
-\item{\code{sumstats}}{A list of summary statistics used in the fit, or
-\code{NULL}.}
-}}
-
+\examples{
+gh <- new("GenotypeHandle", path = "toy.gds", format = "gds",
+  snpInfo = data.frame(SNP = paste0("rs", 1:3), CHR = "1",
+    BP = c(100L, 200L, 300L), A1 = "A", A2 = "G"),
+  nSamples = 6L, sampleIds = paste0("s", 1:6), pgenPtr = NULL)
+rng <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1000L, width = 500L))
+names(rng) <- "ENSG1"
+se <- SummarizedExperiment::SummarizedExperiment(
+  assays = list(expression = matrix(rnorm(6), 1, 6,
+    dimnames = list("ENSG1", paste0("s", 1:6)))), rowRanges = rng)
+QtlDataset(study = "s1", genotypes = gh, phenotypes = list(brain = se),
+  genotypeCovariates = matrix(0, 6, 0))
+}

@@ -1,4 +1,4 @@
-#include "qtl_enrichment.hpp"
+#include "qtl_enrichment.h"
 
 [[cpp11::register]]
 cpp11::writable::list qtlEnrichmentRcpp(
@@ -7,7 +7,8 @@ cpp11::writable::list qtlEnrichmentRcpp(
 	int ImpN = 25, double shrinkageLambda = 1.0,
 	bool doubleShrinkage = false,
 	bool besselCorrection = true,
-	int numThreads = 1)
+	int numThreads = 1,
+	cpp11::sexp seed = R_NilValue)
 {
 	// Convert rGwasPip to C++ type
 	doubles gwas_pip_vec(rGwasPip);
@@ -28,7 +29,16 @@ cpp11::writable::list qtlEnrichmentRcpp(
 		susie_fits.push_back(susie_fit);
 	}
 
-	std::map<std::string, double> output = qtl_enrichment_workhorse(susie_fits, gwas_pip, gwas_pip_names, piGwas, piQtl, ImpN, shrinkageLambda, doubleShrinkage, besselCorrection, numThreads);
+	// Resolve the base seed: use the user-provided value, otherwise a
+	// nondeterministic seed from std::random_device.
+	unsigned int base_seed = 0;
+	if (seed != R_NilValue) {
+		base_seed = cpp11::as_cpp<unsigned int>(seed);
+	} else {
+		base_seed = std::random_device{}();
+	}
+
+	std::map<std::string, double> output = qtl_enrichment_workhorse(susie_fits, gwas_pip, gwas_pip_names, piGwas, piQtl, ImpN, shrinkageLambda, doubleShrinkage, besselCorrection, numThreads, base_seed);
 
 	// Convert std::map to list
 	using namespace cpp11::literals;

@@ -15,9 +15,9 @@ ldPruneByCorrelation(
 \item{X}{Numeric matrix. Columns are the variables to prune (typically SNP
 genotype dosages); rows are observations.}
 
-\item{corThres}{Numeric in (0, 1). Absolute correlation threshold.
-Columns whose pairwise |cor| exceeds this are grouped; one survivor is
-kept per group. Default 0.8.}
+\item{corThres}{Numeric in (0, 1). Absolute correlation threshold. Columns
+whose pairwise |cor| exceeds this are grouped; one survivor is kept per
+group. Default 0.8.}
 
 \item{backend}{Character, one of \code{"hclust"} (default) or
 \code{"snprelate"}. Controls the pruning algorithm:
@@ -44,8 +44,8 @@ Performs LD pruning using one of two backends. The default \code{"hclust"}
 backend computes the full correlation matrix, builds a single-linkage
 hierarchical clustering on the distance (1 - |cor|), and keeps one
 representative column per cluster. The \code{"snprelate"} backend delegates
-to \code{SNPRelate::snpgdsLDpruning}, which performs a sliding-window
-greedy prune directly on a temporary GDS file.
+to \code{SNPRelate::snpgdsLDpruning}, which performs a sliding-window greedy
+prune directly on a temporary GDS file.
 }
 \examples{
 set.seed(1)

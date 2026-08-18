@@ -24,8 +24,8 @@ mr.mash fit's \code{{dataDrivenPriorMatrices, w0, V}}).}
 \item{cvResult}{Optional cross-validation payload: a list mirroring
 \code{FineMappingEntry@cvResult} with \code{samplePartition},
 \code{predictions}, \code{performance}, and (mr.mash only) \code{foldFits}
-— the per-fold fits that \code{fineMappingPipeline}'s mvSuSiE path consumes
-as per-fold priors.}
+-- the per-fold fits that \code{fineMappingPipeline}'s mvSuSiE path
+consumes as per-fold priors.}
 
 \item{standardized}{Logical (length 1).}
 
@@ -35,28 +35,26 @@ as per-fold priors.}
 A \code{TwasWeightsEntry} object.
 }
 \description{
-S4 collection of QTL summary statistics keyed by the
-  identity tuple \code{(study, context, trait)}. Each entry holds a
-  \code{GRanges} of summary statistics for that tuple. Class-level
-  slots \code{ldSketch} (the LD reference \code{GenotypeHandle}) and
-  \code{genome} (the genome build, a single character string) apply
-  to every entry; the genome build must be uniform because all
-  entries necessarily share the LD reference.
+S4 collection of QTL summary statistics keyed by the identity
+  tuple \code{(study, context, trait)}. Each entry holds a \code{GRanges} of
+  summary statistics for that tuple. Class-level slots \code{ldSketch} (the
+  LD reference \code{GenotypeHandle}) and \code{genome} (the genome build, a
+  single character string) apply to every entry; the genome build must be
+  uniform because all entries necessarily share the LD reference.
 
-  Required columns: \code{study}, \code{context}, \code{trait},
-  \code{entry}. Optional columns include \code{varY} (numeric,
-  per-tuple phenotype variance; \code{NA_real_} when unused). The
-  3-tuple \code{(study, context, trait)} is unique. Each \code{entry}
-  is a \code{GRanges} whose mcols carry the per-variant statistics
-  (\code{SNP}, \code{A1}, \code{A2}, \code{Z}, \code{N}; plus
-  optional \code{MAF}, \code{INFO}, \code{BETA}, \code{SE}, \code{P}).
+Required columns: \code{study}, \code{context}, \code{trait}, \code{entry}.
+Optional columns include \code{varY} (numeric, per-tuple phenotype variance;
+\code{NA_real_} when unused). The 3-tuple \code{(study, context, trait)} is
+unique. Each \code{entry} is a \code{GRanges} whose mcols carry the
+per-variant statistics (\code{SNP}, \code{A1}, \code{A2}, \code{Z}, \code{N};
+plus optional \code{MAF}, \code{INFO}, \code{BETA}, \code{SE}, \code{P}).
 
-Virtual base class for summary-statistic collections.
-  Concrete subclasses (\code{QtlSumStats}, \code{GwasSumStats}) carry
-  a \code{DFrame} of per-entry rows plus shared slots \code{ldSketch},
-  \code{genome}, and \code{qcInfo}. Downstream pipelines should
-  dispatch on \code{SumStatsBase} for behaviors that apply to either
-  flavour and on the concrete subclass when the tuple shape matters.
+Virtual base class for summary-statistic collections. Concrete
+  subclasses (\code{QtlSumStats}, \code{GwasSumStats}) carry a \code{DFrame}
+  of per-entry rows plus shared slots \code{ldSketch}, \code{genome}, and
+  \code{qcInfo}. Downstream pipelines should dispatch on \code{SumStatsBase}
+  for behaviors that apply to either flavour and on the concrete subclass
+  when the tuple shape matters.
 
 Construct a \code{TwasWeightsEntry} payload for one
   \code{(study, context, trait, method)} row of a \code{TwasWeights}
@@ -68,19 +66,23 @@ Construct a \code{TwasWeightsEntry} payload for one
 \item{\code{ldSketch}}{A \code{GenotypeHandle} carrying the LD reference for
 downstream QC and RSS analysis.}
 
-\item{\code{genome}}{A single character string giving the genome build that
-the LD sketch and every entry are aligned to.}
+\item{\code{genome}}{A single character string giving the genome build that the LD
+sketch and every entry are aligned to.}
 
 \item{\code{ldSketch}}{A \code{GenotypeHandle} carrying the LD reference for
 downstream QC and RSS analysis.}
 
-\item{\code{genome}}{A single character string giving the genome build that
-the LD sketch and every entry are aligned to.}
+\item{\code{genome}}{A single character string giving the genome build that the LD
+sketch and every entry are aligned to.}
 
-\item{\code{qcInfo}}{A \code{list} recording which QC steps ran. Empty
-\code{list()} on construction; populated by \code{summaryStatsQc()}.
-Fine-mapping and TWAS-weights pipelines reject inputs where
-\code{length(getQcInfo(x)) == 0L} — the slot serves as both the
-gating flag and the audit trail.}
+\item{\code{qcInfo}}{A \code{list} recording which QC steps ran. Empty \code{list()}
+on construction; populated by \code{summaryStatsQc()}. Fine-mapping and
+TWAS-weights pipelines reject inputs where \code{length(getQcInfo(x)) ==
+0L} -- the slot serves as both the gating flag and the audit trail.}
 }}
 
+\examples{
+twe <- TwasWeightsEntry(variantIds = paste0("v", 1:4),
+  weights = rep(0.1, 4), cvResult = list(rsq = 0.5), standardized = FALSE)
+twe
+}

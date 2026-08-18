@@ -2,7 +2,7 @@
 % Please edit documentation in R/twasWeights.R
 \name{TwasWeights}
 \alias{TwasWeights}
-\title{QTL Dataset (individual-level data for one study)}
+\title{Create a TwasWeights Collection Object}
 \usage{
 TwasWeights(
   study,
@@ -22,11 +22,11 @@ TwasWeights(
 \item{study}{Character vector of study identifiers. Use the sentinel
 \code{"joint"} for rows produced by a cross-study joint fit.}
 
-\item{context}{Character vector of context labels. Use \code{"joint"}
-for rows produced by a cross-context joint fit.}
+\item{context}{Character vector of context labels. Use \code{"joint"} for
+rows produced by a cross-context joint fit.}
 
-\item{trait}{Character vector of trait identifiers. Use \code{"joint"}
-for rows produced by a cross-trait joint fit.}
+\item{trait}{Character vector of trait identifiers. Use \code{"joint"} for
+rows produced by a cross-trait joint fit.}
 
 \item{method}{Character vector of TWAS weight method names.}
 
@@ -34,14 +34,14 @@ for rows produced by a cross-trait joint fit.}
 
 \item{jointStudies}{Optional character vector (length \code{length(study)})
 listing the semicolon-joined studies participating in each row's
-cross-study joint fit, or \code{NA_character_} for non-joint rows.
-When \code{NULL} (default) the column is omitted.}
+cross-study joint fit, or \code{NA_character_} for non-joint rows. When
+\code{NULL} (default) the column is omitted.}
 
-\item{jointContexts}{Optional character vector for cross-context joints.
-Same shape as \code{jointStudies}.}
+\item{jointContexts}{Optional character vector for cross-context joints. Same
+shape as \code{jointStudies}.}
 
-\item{jointTraits}{Optional character vector for cross-trait joints.
-Same shape as \code{jointStudies}.}
+\item{jointTraits}{Optional character vector for cross-trait joints. Same
+shape as \code{jointStudies}.}
 
 \item{region}{Optional \code{GRanges} (length \code{length(study)}) giving
 the genomic anchor of each row's trait -- the trait's own coordinates when
@@ -50,6 +50,10 @@ when built from a \code{QtlSumStats}. Carried forward as provenance (e.g.
 for cTWAS LD-block placement); not part of the identity key. \code{NULL}
 (default) omits the column.}
 
+\item{traitPos}{Optional per-row trait genomic anchor (a \code{GRanges} or
+\code{NULL}), carried forward as provenance; not part of the identity key.
+\code{NULL} (default) omits the column.}
+
 \item{ldSketch}{An optional \code{GenotypeHandle}, or \code{NULL} for
 individual-level fits.}
 }
@@ -57,67 +61,14 @@ individual-level fits.}
 A \code{TwasWeights} object.
 }
 \description{
-S4 container for a single QTL study's regional data. Holds
-  a genotype handle plus per-context \code{SummarizedExperiment} objects
-  carrying molecular-trait measurements. Each context's SE has
-  \code{rowRanges} describing per-trait genomic positions and
-  \code{colData} carrying per-context phenotype covariates. A single
-  matrix of genotype-derived covariates (e.g., ancestry PCs) applies
-  across contexts.
-
-Construct a \code{TwasWeights} DFrame-subclass collection
-  from per-tuple vectors and a list of \code{TwasWeightsEntry}
-  payloads (one per tuple).
+Construct a \code{TwasWeights} DFrame-subclass collection from
+  per-tuple vectors and a list of \code{TwasWeightsEntry} payloads (one per
+  tuple).
 }
-\section{Slots}{
-
-\describe{
-\item{\code{study}}{Character (length 1). Study identifier; used in collection
-classes to tag downstream \code{FineMappingResult} / \code{TwasWeights}
-entries.}
-
-\item{\code{genotypes}}{A \code{GenotypeHandle} for lazy access to genotype
-dosages.}
-
-\item{\code{phenotypes}}{Named list of \code{SummarizedExperiment} objects, one
-per QTL context. Each SE has rows = molecular traits with positions
-in \code{rowRanges(se)}, columns = samples, and per-context covariates
-in \code{colData(se)}. Different contexts may carry different subsets
-of traits (rows); traits shared across contexts must have identical
-\code{rowRanges} entries (enforced by validity).}
-
-\item{\code{genotypeCovariates}}{Numeric matrix (samples x covariates) of
-genotype-derived covariates applied uniformly across all contexts
-(e.g., ancestry PCs).}
-
-\item{\code{scaleResiduals}}{Logical (length 1). Whether residualization
-accessors scale residuals to unit variance.}
-
-\item{\code{mafCutoff}}{Numeric (length 1). Minor allele frequency threshold;
-variants with \code{MAF < mafCutoff} are dropped at extraction time
-inside \code{getGenotypes()} / \code{getResidualizedGenotypes()}.
-Default 0 (no filter).}
-
-\item{\code{macCutoff}}{Numeric (length 1). Minor allele count threshold;
-converted to a MAF threshold using
-\code{max(mafCutoff, macCutoff / (2 * n))} where \code{n} is the
-post-narrowing sample count of the extracted block. Default 0
-(no filter).}
-
-\item{\code{xvarCutoff}}{Numeric (length 1). Per-variant genotype variance
-threshold; variants with column variance below this are dropped at
-extraction time. Default 0 (no filter).}
-
-\item{\code{imissCutoff}}{Numeric (length 1). Per-sample genotype-missingness
-threshold; samples with a missing-genotype rate above this are
-dropped at extraction time. Default 0 (no filter).}
-
-\item{\code{keepSamples}}{Character vector of sample identifiers to retain
-prior to per-block QC; intersected with the genotype handle's
-\code{sampleIds} and the \code{samples} argument of
-\code{getGenotypes()}. Length 0 means no restriction.}
-
-\item{\code{keepVariants}}{Character vector of variant identifiers to retain
-prior to per-block QC. Length 0 means no restriction.}
-}}
-
+\examples{
+twe <- TwasWeightsEntry(variantIds = paste0("v", 1:4),
+  weights = rep(0.1, 4), cvResult = list(rsq = 0.5), standardized = FALSE)
+tw <- TwasWeights(study = "s1", context = "brain", trait = "gene1",
+  method = "susie", entry = list(twe))
+tw
+}

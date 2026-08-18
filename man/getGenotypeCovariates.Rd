@@ -16,6 +16,10 @@ getGenotypeCovariates(x)
 Numeric matrix (samples x covariates).
 }
 \description{
-Return the single genotype-derived covariate matrix
-  carried by a \code{QtlDataset} (e.g., ancestry PCs).
+Return the single genotype-derived covariate matrix carried by a
+  \code{QtlDataset} (e.g., ancestry PCs).
+}
+\examples{
+data(qtlDatasetExample)
+getGenotypeCovariates(qtlDatasetExample)
 }

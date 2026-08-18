@@ -26,6 +26,10 @@ getTraits(x)
 Character vector of unique trait names.
 }
 \description{
-Return the unique trait identifiers carried by a
-  collection class (e.g., \code{QtlSumStats}).
+Return the unique trait identifiers carried by a collection
+  class (e.g., \code{QtlSumStats}).
+}
+\examples{
+data(qtlSumStatsExample)
+getTraits(qtlSumStatsExample)
 }

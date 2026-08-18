@@ -19,29 +19,37 @@ loadGenotypeRegion(
 
 \item{region}{The target region in the format "chr:start-end".}
 
-\item{keep_indel}{Whether to keep indel SNPs.}
+\item{keepIndel}{Whether to keep indel SNPs.}
 
-\item{keep_variants_path}{Path to a file listing variants to keep.}
+\item{keepVariantsPath}{Path to a file listing variants to keep.}
 
-\item{return_variant_info}{If TRUE, return a list with X (dosage matrix) and
-variant_info (data.frame). If FALSE (default), return only the dosage matrix.}
+\item{returnVariantInfo}{If TRUE, return a list with X (dosage matrix) and
+variant_info (data.frame). If FALSE (default), return only the dosage
+matrix.}
 
-\item{stochastic_meta_path}{Optional explicit path to a stochastic genotype
-sidecar file. If NULL (default), auto-detected via \code{findStochasticMeta}.}
+\item{stochasticMetaPath}{Optional explicit path to a stochastic genotype
+sidecar file. If NULL (default), auto-detected via
+\code{findStochasticMeta}.}
 
-\item{stochastic_meta_format}{Optional format override for the sidecar file:
+\item{stochasticMetaFormat}{Optional format override for the sidecar file:
 \code{"afreq"} or \code{"generic"}. If NULL (default), auto-detected from
 file extension.}
 }
 \value{
-If return_variant_info is FALSE, a numeric dosage matrix (rows=samples,
-  cols=variants). If TRUE, a list with elements X and variant_info.
+If return_variant_info is FALSE, a numeric dosage matrix
+  (rows=samples, cols=variants). If TRUE, a list with elements X and
+  variant_info.
 }
 \description{
-Auto-detects PLINK2 (.pgen/.pvar[.zst]/.psam), PLINK1 (.bed/.bim/.fam),
-VCF (.vcf/.vcf.gz/.bcf), or GDS (.gds) format and loads genotype data
-via \code{\link{readGenotypes}} and \code{\link{extractBlockGenotypes}}.
-If a stochastic genotype sidecar file (.afreq or
-.stochastic_meta.tsv) is found alongside the genotype file, non-integer
-dosages are automatically rescaled using the stored U_MIN/U_MAX values.
+Auto-detects PLINK2 (.pgen/.pvar[.zst]/.psam), PLINK1 (.bed/.bim/.fam), VCF
+(.vcf/.vcf.gz/.bcf), or GDS (.gds) format and loads genotype data via
+\code{\link{readGenotypes}} and \code{\link{extractBlockGenotypes}}. If a
+stochastic genotype sidecar file (.afreq or .stochastic_meta.tsv) is found
+alongside the genotype file, non-integer dosages are automatically rescaled
+using the stored U_MIN/U_MAX values.
+}
+\examples{
+stem <- sub("[.]bed$", "",
+  system.file("extdata", "toy_ref.bed", package = "pecotmr"))
+loadGenotypeRegion(genotype = stem, region = "chr22:1-100000000")
 }

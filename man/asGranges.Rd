@@ -18,3 +18,7 @@ Accepts region strings ("chr1:100-200", "1_100_200"), character vectors of
 such strings, or data.frames with chrom/start/end columns. Returns a
 \code{\link[GenomicRanges]{GRanges}} object.
 }
+\examples{
+regions <- c("chr1:100-200", "chr1:300-400")
+asGranges(regions = regions)
+}

@@ -12,8 +12,8 @@ extractBlockGenotypes(handle, snpIdx, meanImpute = TRUE)
 \item{snpIdx}{Integer vector of 1-based SNP indices into
 \code{handle@snpInfo}.}
 
-\item{meanImpute}{Logical, whether to mean-impute missing values.
-Default TRUE.}
+\item{meanImpute}{Logical, whether to mean-impute missing values. Default
+TRUE.}
 }
 \value{
 A \code{RangedSummarizedExperiment} with:
@@ -25,8 +25,13 @@ A \code{RangedSummarizedExperiment} with:
 }
 \description{
 Extract a genotype matrix for a subset of SNPs from a
-  \code{GenotypeHandle}. Returns a \code{RangedSummarizedExperiment}
-  with dosage assay in Bioconductor convention (variants x samples),
-  variant metadata as \code{rowRanges} (GRanges), and sample IDs as
-  \code{colData}.
+  \code{GenotypeHandle}. Returns a \code{RangedSummarizedExperiment} with
+  dosage assay in Bioconductor convention (variants x samples), variant
+  metadata as \code{rowRanges} (GRanges), and sample IDs as \code{colData}.
+}
+\examples{
+handle <- readGenotypes(
+  system.file("extdata", "toy_ref.bed", package = "pecotmr"))
+snpIdx <- 1:8
+extractBlockGenotypes(handle = handle, snpIdx = snpIdx)
 }

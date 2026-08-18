@@ -9,8 +9,9 @@ readSldscFrq(frqfileDir, plinkName = "ADSP_chr")
 \arguments{
 \item{frqfileDir}{Character. Directory of `.frq` files.}
 
-\item{plinkName}{Character. Filename prefix (files at `{plinkName}{chr}.frq`).
-Falls back to all `*.frq` in the directory when the prefix matches nothing.}
+\item{plinkName}{Character. Filename prefix (files at
+`<plinkName><chr>.frq`). Falls back to all `*.frq` in the directory when
+the prefix matches nothing.}
 }
 \value{
 A \code{data.frame}: \code{CHR}, \code{SNP}, \code{MAF}.
@@ -18,5 +19,10 @@ A \code{data.frame}: \code{CHR}, \code{SNP}, \code{MAF}.
 \description{
 Reads the per-chromosome PLINK `.frq` files for the reference
   panel and stacks them into a single \code{data.frame} of \code{CHR},
-  \code{SNP}, \code{MAF}. Feeds the \code{frq} slot of \code{\link{SldscData}}.
+  \code{SNP}, \code{MAF}. Feeds the \code{frq} slot of
+  \code{\link{SldscData}}.
+}
+\examples{
+sldsc <- system.file("extdata", "sldsc", package = "pecotmr")
+readSldscFrq(sldsc, plinkName = "reference.")
 }

@@ -11,7 +11,8 @@ fsusieWrapper(X, Y, pos, L, prior, maxSnpEm, covLev, minPurity, maxScale, ...)
 
 \item{Y}{Response phenotype matrix.}
 
-\item{pos}{Genomics position of phenotypes, used for specifying the wavelet model.}
+\item{pos}{Genomics position of phenotypes, used for specifying the wavelet
+model.}
 
 \item{L}{The maximum number of the credible set.}
 
@@ -23,18 +24,33 @@ fsusieWrapper(X, Y, pos, L, prior, maxSnpEm, covLev, minPurity, maxScale, ...)
 
 \item{minPurity}{Minimum purity threshold for credible sets to be retained.}
 
-\item{maxScale}{numeric, define the maximum of wavelet coefficients used in the analysis (2^maxScale).
-Set 10 true by default.}
+\item{maxScale}{numeric, define the maximum of wavelet coefficients used in
+the analysis (2^maxScale). Set 10 true by default.}
 
 \item{...}{Additional arguments passed to the fsusie function.}
 }
 \value{
-A modified fsusie object with the susie sets list, correlations for cs, alpha as df like susie,
-        and without the dummy cs that do not meet the minimum purity requirement.
+A modified fsusie object with the susie sets list, correlations for
+  cs, alpha as df like susie, and without the dummy cs that do not meet the
+  minimum purity requirement.
 }
 \description{
-This function serves as a wrapper for the fsusie function, facilitating
-automatic post-processing such as removing dummy credible sets (cs) that don't meet
-the minimum purity threshold and calculating correlations for the remaining cs.
-The function parameters are identical to those of the fSuSiE function.
+This function serves as a wrapper for the fsusie function,
+  facilitating automatic post-processing such as removing dummy credible sets
+  (cs) that don't meet the minimum purity threshold and calculating
+  correlations for the remaining cs. The function parameters are identical to
+  those of the fSuSiE function.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:50]
+n <- nrow(X)
+nPos <- 16
+base <- sin(seq(0, 2 * pi, length.out = nPos))
+Y <- matrix(rep(base, each = n), n, nPos) +
+  X[, 1] \%o\% (0.5 * cos(seq(0, pi, length.out = nPos)))
+pos <- seq_len(nPos)
+fsusieWrapper(X, Y, pos = pos, L = 2,
+  prior = "mixture_normal_per_scale", maxSnpEm = 10,
+  covLev = 0.95, minPurity = 0.5, maxScale = 6)
 }

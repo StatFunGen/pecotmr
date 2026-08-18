@@ -15,3 +15,9 @@ A diagonal covariance matrix of dimension ncol(Y) x ncol(Y).
 \description{
 Returns a diagonal covariance matrix from the column-wise variances of Y.
 }
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+Y <- matrix(rnorm(nrow(X) * 3), nrow(X), 3)
+computeCovDiag(Y = Y)
+}

@@ -5,8 +5,8 @@
 \alias{H2Estimate-class}
 \title{Heritability Estimate}
 \description{
-Container for univariate heritability estimation results.
-  Holds global, local, and annotation-stratified estimates.
+Container for univariate heritability estimation results. Holds
+  global, local, and annotation-stratified estimates.
 }
 \section{Slots}{
 
@@ -15,19 +15,19 @@ Container for univariate heritability estimation results.
 
 \item{\code{h2Se}}{Numeric, standard error of global h2.}
 
-\item{\code{intercept}}{Numeric, confounding intercept estimate (NA if method
-does not estimate one).}
+\item{\code{intercept}}{Numeric, confounding intercept estimate (NA if method does
+not estimate one).}
 
 \item{\code{interceptSe}}{Numeric, SE of intercept.}
 
-\item{\code{local}}{A \code{data.frame} with per-block local heritability
-estimates (columns: \code{blockId}, \code{h2Local}, \code{h2LocalSe}).
-NULL if \code{local = FALSE}.}
+\item{\code{local}}{A \code{data.frame} with per-block local heritability estimates
+(columns: \code{blockId}, \code{h2Local}, \code{h2LocalSe}). NULL if
+\code{local = FALSE}.}
 
 \item{\code{enrichment}}{A \code{data.frame} with baseline annotation enrichment
 estimates (columns: \code{annotation}, \code{tau}, \code{tauSe},
-\code{enrichment}, \code{enrichmentSe}, \code{enrichmentP},
-\code{propH2}, \code{propSnps}). NULL if unstratified.}
+\code{enrichment}, \code{enrichmentSe}, \code{enrichmentP}, \code{propH2},
+\code{propSnps}). NULL if unstratified.}
 
 \item{\code{tauBlocks}}{A numeric matrix (nBlocks x n_annotations) of per-block
 jackknife tau values. Required for Gazal tauStar standardization

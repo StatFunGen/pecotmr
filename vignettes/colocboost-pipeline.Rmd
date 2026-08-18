@@ -10,16 +10,21 @@ vignette: >
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
-                      fig.width = 7, fig.height = 4.5)
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    fig.width = 7,
+    fig.height = 4.5
+)
 ```
 
 ## Overview
 
-`colocboostPipeline()` runs the [colocboost](https://github.com/StatFunGen/colocboost)
-multi-trait variable-selection model on QTL data — optionally with one
-or more GWAS studies layered on top. It accepts inputs from the QTL input
-classes:
+`colocboostPipeline()` runs the
+[colocboost](https://github.com/StatFunGen/colocboost) multi-trait
+variable-selection model on QTL data — optionally with one or more GWAS studies
+layered on top. It accepts inputs from the QTL input classes:
 
 | QTL input | What it is |
 |---|---|
@@ -39,10 +44,12 @@ library(pecotmr)
 ## Bundled inputs
 
 ```{r bundled}
-data(qtl_dataset_example,
-     qtl_sumstats_example,
-     gwas_sumstats_s4_example,
-     multi_study_qtl_dataset_example)
+data(
+    qtlDatasetExample,
+    qtlSumStatsExample,
+    gwasSumStatsS4Example,
+    multiStudyQtlDatasetExample
+)
 ```
 
 ## Three analysis variants
@@ -61,25 +68,28 @@ The default call runs colocboost over the contexts in the QTL data with no
 GWAS layer.
 
 ```{r xqtl-only}
-res <- colocboostPipeline(qtl_dataset_example, xqtlColoc = TRUE)
+res <- colocboostPipeline(qtlDatasetExample, xqtlColoc = TRUE)
 str(res, max.level = 1L)
 ```
 
 The result is a named list with four entries:
 
 - `xqtl_coloc` — output of the QTL-only run (NULL when `xqtlColoc = FALSE`)
-- `joint_gwas` — output of the joint QTL+GWAS run (NULL when `jointGwas = FALSE`)
-- `separate_gwas` — list of per-GWAS focal runs (empty when `separateGwas = FALSE`)
+-  `joint_gwas` — output of the joint QTL+GWAS run (NULL when `jointGwas =
+    FALSE`)
+-  `separate_gwas` — list of per-GWAS focal runs (empty when `separateGwas =
+    FALSE`)
 - `computing_time` — per-variant timing record
 
 ## QTL + GWAS (joint model)
 
 ```{r joint-gwas}
 res2 <- colocboostPipeline(
-  qtl_dataset_example,
-  gwasSumStats = gwas_sumstats_s4_example,
-  xqtlColoc    = FALSE,
-  jointGwas    = TRUE)
+    qtlDatasetExample,
+    gwasSumStats = gwasSumStatsS4Example,
+    xqtlColoc = FALSE,
+    jointGwas = TRUE
+)
 names(res2)
 ```
 
@@ -90,10 +100,11 @@ focal outcome:
 
 ```{r separate-gwas}
 res3 <- colocboostPipeline(
-  qtl_dataset_example,
-  gwasSumStats = gwas_sumstats_s4_example,
-  xqtlColoc    = FALSE,
-  separateGwas = TRUE)
+    qtlDatasetExample,
+    gwasSumStats = gwasSumStatsS4Example,
+    xqtlColoc = FALSE,
+    separateGwas = TRUE
+)
 names(res3$separate_gwas)
 ```
 
@@ -105,20 +116,22 @@ individual-level data needed; the LD comes from the `ldSketch`
 
 ```{r sumstats}
 resSs <- colocboostPipeline(
-  qtl_sumstats_example,
-  gwasSumStats = gwas_sumstats_s4_example,
-  xqtlColoc    = FALSE,
-  jointGwas    = TRUE)
+    qtlSumStatsExample,
+    gwasSumStats = gwasSumStatsS4Example,
+    xqtlColoc = FALSE,
+    jointGwas = TRUE
+)
 ```
 
 ## Multi-study individual-level
 
 ```{r multistudy}
 resMs <- colocboostPipeline(
-  multi_study_qtl_dataset_example,
-  gwasSumStats = gwas_sumstats_s4_example,
-  xqtlColoc    = TRUE,
-  jointGwas    = TRUE)
+    multiStudyQtlDatasetExample,
+    gwasSumStats = gwasSumStatsS4Example,
+    xqtlColoc = TRUE,
+    jointGwas = TRUE
+)
 ```
 
 ## Focal trait
@@ -128,29 +141,31 @@ focal outcome:
 
 ```{r focal, eval=FALSE}
 colocboostPipeline(
-  qtl_dataset_example,
-  xqtlColoc  = TRUE,
-  focalTrait = "ENSG_example")
+    qtlDatasetExample,
+    xqtlColoc = TRUE,
+    focalTrait = "ENSG_example"
+)
 ```
 
 ## Common parameters
 
 ```{r cb-params, eval=FALSE}
 colocboostPipeline(
-  qtlData      = qtl_dataset_example,
-  gwasSumStats = gwas_sumstats_s4_example,
-  contexts     = "brain",
-  traitId      = "ENSG_example",
-  region       = NULL,            # alternative to traitId+cisWindow
-  cisWindow    = 5e5,             # required with traitId
-  focalTrait   = NULL,
-  xqtlColoc    = TRUE,
-  jointGwas    = FALSE,
-  separateGwas = FALSE,
-  # Forward to colocboost::colocboost
-  M            = 10,
-  L            = 5,
-  output_level = 1L)
+    qtlData = qtlDatasetExample,
+    gwasSumStats = gwasSumStatsS4Example,
+    contexts = "brain",
+    traitId = "ENSG_example",
+    region = NULL, # alternative to traitId+cisWindow
+    cisWindow = 5e5, # required with traitId
+    focalTrait = NULL,
+    xqtlColoc = TRUE,
+    jointGwas = FALSE,
+    separateGwas = FALSE,
+    # Forward to colocboost::colocboost
+    M = 10,
+    L = 5,
+    output_level = 1L
+)
 ```
 
 Trait / context / region restrictions are pre-construction concerns on
@@ -160,12 +175,18 @@ are the per-call refinements.
 
 ## QC requirements
 
-- **Individual-level (`QtlDataset` / `MultiStudyQtlDataset`)**: QC
-  (MAF / MAC / X-variance / per-sample missingness, sample / variant
-  restrictions) lives on the `QtlDataset` constructor and is applied
-  lazily inside `getGenotypes()` / `getResidualizedGenotypes()`. The
-  pipeline does not run a separate pass.
-- **Summary statistics (`QtlSumStats` / `GwasSumStats`)**: all
-  variant filters, panel harmonization, LD-mismatch detection, and
-  RAISS imputation live in [`summaryStatsQc()`](rss-qc.html). The
-  pipeline rejects inputs whose `getQcInfo()` is empty.
+-  **Individual-level (`QtlDataset` / `MultiStudyQtlDataset`)**: QC (MAF / MAC
+    / X-variance / per-sample missingness, sample / variant restrictions) lives
+    on the `QtlDataset` constructor and is applied lazily inside
+    `getGenotypes()` / `getResidualizedGenotypes()`. The pipeline does not run
+    a separate pass.
+-  **Summary statistics (`QtlSumStats` / `GwasSumStats`)**: all variant
+    filters, panel harmonization, LD-mismatch detection, and RAISS imputation
+    live in [`summaryStatsQc()`](rss-qc.html). The pipeline rejects inputs
+    whose `getQcInfo()` is empty.
+
+# Session info
+
+```{r session-info}
+sessionInfo()
+```

@@ -19,3 +19,7 @@ Logical (length 1).
 Whether residualization accessors scale residuals to unit
   variance.
 }
+\examples{
+data(qtlDatasetExample)
+getScaleResiduals(qtlDatasetExample)
+}

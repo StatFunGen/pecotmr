@@ -10,26 +10,36 @@ vignette: >
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
-                      fig.width = 7, fig.height = 4.5)
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    fig.width = 7,
+    fig.height = 4.5
+)
 ```
 
 ## Overview
 
-Regression-with-summary-statistics (RSS) methods — both fine-mapping and regularized regression — all require matching variants in a summary-statistics table to an LD reference panel. Two are frequently encountered in practice:
+Regression-with-summary-statistics (RSS) methods — both fine-mapping and
+regularized regression — all require matching variants in a summary-statistics
+table to an LD reference panel. Two are frequently encountered in practice:
 
-1. **Allele alignment.** The sumary statisticss and LD panel may flip the reference and alternate allele, encode
-   strand-ambiguous variants inconsistently, or contain indels and
-   duplicates that need filtering.
-2. **LD-summary-statistic mismatch.** Even when alleles align, individual
-   z-scores can be inconsistent with the LD pattern around them because
-   of imputation errors, ancestry differences between the GWAS and LD
-   panel, or per-variant sample-size differences.
+1.  **Allele alignment.** The sumary statisticss and LD panel may flip the
+    reference and alternate allele, encode strand-ambiguous variants
+    inconsistently, or contain indels and duplicates that need filtering.
+2.  **LD-summary-statistic mismatch.** Even when alleles align, individual
+    z-scores can be inconsistent with the LD pattern around them because of
+    imputation errors, ancestry differences between the GWAS and LD panel, or
+    per-variant sample-size differences.
 
-The `summaryStatsQc()` function provides a convenient interface to performing many QC tasks to address these issues. It takes a
-`GwasSumStats` or `QtlSumStats` object (see the *Building QtlSumStats and GwasSumStats objects* vignette), and returns a new collection of the same class with updated entries and
-a populated `qcInfo` slot. Downstream pipelines require the `qcInfo` to be populated, so QC is mandatory before
-fine-mapping, TWAS-weight learning, colocalization, etc.
+The `summaryStatsQc()` function provides a convenient interface to performing
+many QC tasks to address these issues. It takes a `GwasSumStats` or
+`QtlSumStats` object (see the *Building QtlSumStats and GwasSumStats objects*
+vignette), and returns a new collection of the same class with updated entries
+and a populated `qcInfo` slot. Downstream pipelines require the `qcInfo` to be
+populated, so QC is mandatory before fine-mapping, TWAS-weight learning,
+colocalization, etc.
 
 ```{r load-packages}
 library(pecotmr)
@@ -37,26 +47,28 @@ library(pecotmr)
 
 ## Running QC
 
-`summaryStatsQc()` operates on a `GwasSumStats` or `QtlSumStats` object
-See the *Building QtlSumStats and GwasSumStats objects* vignette for details on how to make these objects.
-In this example the object is `GwasSumStats` object called `gws`, but the interface is the same for `QtlSumStats`.
+`summaryStatsQc()` operates on a `GwasSumStats` or `QtlSumStats` object See the
+*Building QtlSumStats and GwasSumStats objects* vignette for details on how to
+make these objects. In this example the object is `GwasSumStats` object called
+`gws`, but the interface is the same for `QtlSumStats`.
 
 `summaryStatsQc()` provides many options for the user to tweak:
 
 ```{r run-qc, eval=FALSE}
 gws_qcd <- summaryStatsQc(
-  gws,
-  useDbsnpRefCheck      = FALSE,   # opt-in to MungeSumstats dbSNP checks
-  removeIndels          = FALSE,
-  removeStrandAmbiguous = TRUE,
-  mafCutoff             = 0,       # 0 = off; > 0 requires MAF column
-  infoCutoff            = 0,       # 0 = off; > 0 requires INFO column
-  nCutoff               = 5,
-  skipRegion            = NULL,    # e.g. MHC "chr6:25000000-35000000"
-  zMismatchQc           = "slalom", # "none", "slalom", "dentist"
-  alleleFlipKriging     = FALSE,    # opt-in pre-SLALOM LD-consistency check
-  impute                = FALSE,    # RAISS imputation against ldSketch
-  matchMinProp          = 0)
+    gws,
+    useDbsnpRefCheck = FALSE, # opt-in to MungeSumstats dbSNP checks
+    removeIndels = FALSE,
+    removeStrandAmbiguous = TRUE,
+    mafCutoff = 0, # 0 = off; > 0 requires MAF column
+    infoCutoff = 0, # 0 = off; > 0 requires INFO column
+    nCutoff = 5,
+    skipRegion = NULL, # e.g. MHC "chr6:25000000-35000000"
+    zMismatchQc = "slalom", # "none", "slalom", "dentist"
+    alleleFlipKriging = FALSE, # opt-in pre-SLALOM LD-consistency check
+    impute = FALSE, # RAISS imputation against ldSketch
+    matchMinProp = 0
+)
 ```
 
 `gws_qc` is a new `GwasSumStats` of the same class, with cleaned
@@ -65,16 +77,16 @@ accessible via `getQcInfo()`:
 
 ```{r inspect-qcinfo, eval=FALSE}
 qc <- getQcInfo(gws_qcd)
-str(qc$entryAudit[[1]])    # per-entry counts: variantsIn, mungeSumstatsDropped,
-                           # keepVariantsDropped, skipRegionDropped, matchedAgainstSketch,
-                           # krigingOutliersDropped, ldMismatchOutliersDropped, ...
-qc$options                 # the curated knobs you passed (frozen for provenance)
+str(qc$entryAudit[[1]]) # per-entry counts: variantsIn, mungeSumstatsDropped,
+# keepVariantsDropped, skipRegionDropped, matchedAgainstSketch,
+# krigingOutliersDropped, ldMismatchOutliersDropped, ...
+qc$options # the curated knobs you passed (frozen for provenance)
 ```
 
-A non-zero `mafCutoff` requires every entry to carry a `MAF` mcol;
-non-zero `infoCutoff` requires `INFO`; non-zero `nCutoff` requires `N`.
-A missing column with a non-zero cutoff will produce an error - if you don't want a filter to run, leave its
-cutoff at the default value of 0.
+A non-zero `mafCutoff` requires every entry to carry a `MAF` mcol; non-zero
+`infoCutoff` requires `INFO`; non-zero `nCutoff` requires `N`. A missing column
+with a non-zero cutoff will produce an error - if you don't want a filter to
+run, leave its cutoff at the default value of 0.
 
 ## Allele-flip QC: the SuSiE kriging prefilter
 
@@ -87,17 +99,17 @@ variants whose observed z-score disagrees with the value the LD structure
 
 It uses `susieR`'s kriging RSS diagnostic:
 
-1. `susieR::estimate_s_rss()` estimates the overall LD-mismatch scale `s`
-   between the harmonized z-scores and the reference LD matrix `R`.
-2. `susieR::kriging_rss(z, R, n, s)` computes, for each variant, the
-   leave-one-out **conditional distribution** of `z_i` given all the other
-   z-scores under the LD model — i.e. the z-score the LD panel predicts for
-   that variant.
-3. The standardized residual between observed and predicted (`z_std_diff`) is
-   ~`N(0, 1)` when the z-scores and LD panel agree. A large residual flags an
-   allele-flip / LD-mismatch outlier; variants below a two-sided p-value
-   threshold (default `5e-8`) are dropped. The number removed is recorded in
-   the `qcInfo` audit as `krigingOutliersDropped`.
+1.  `susieR::estimate_s_rss()` estimates the overall LD-mismatch scale `s`
+    between the harmonized z-scores and the reference LD matrix `R`.
+2.  `susieR::kriging_rss(z, R, n, s)` computes, for each variant, the
+    leave-one-out **conditional distribution** of `z_i` given all the other
+    z-scores under the LD model — i.e. the z-score the LD panel predicts for
+    that variant.
+3.  The standardized residual between observed and predicted (`z_std_diff`) is
+    ~`N(0, 1)` when the z-scores and LD panel agree. A large residual flags an
+    allele-flip / LD-mismatch outlier; variants below a two-sided p-value
+    threshold (default `5e-8`) are dropped. The number removed is recorded in
+    the `qcInfo` audit as `krigingOutliersDropped`.
 
 Because it needs a per-region LD matrix and the kriging diagnostic, this is an
 **RSS-only** check: it draws `R` from the collection's `ldSketch` and requires
@@ -110,9 +122,9 @@ directly:
 
 ```{r kriging, eval=FALSE}
 kr <- krigingOutlierQc(zScore = z, R = ld, n = 10000)
-kr$outlier              # logical vector: TRUE = flagged as an outlier
-head(kr$diagnostics)    # variant_id, z, predicted, residual, statistic,
-                        # p_value, outlier
+kr$outlier # logical vector: TRUE = flagged as an outlier
+head(kr$diagnostics) # variant_id, z, predicted, residual, statistic,
+# p_value, outlier
 ```
 
 Kriging and SLALOM/DENTIST are complementary and can be combined: the kriging
@@ -128,19 +140,19 @@ variant's z-score is inconsistent with the LD pattern around it.
 **SLALOM** (Kanai et al. 2022, the recommended default once you turn
 zMismatchQc on):
 
-- For each variant, compares its z-score against the *lead* variant's
-  z-score scaled by their LD: a large `(z_i − r_{i,lead} · z_lead)`
-  flags the variant as inconsistent.
+-  For each variant, compares its z-score against the *lead* variant's z-score
+    scaled by their LD: a large `(z_i − r_{i,lead} · z_lead)` flags the variant
+    as inconsistent.
 - Restricted to variants in high LD with the lead (`r2Threshold`).
 - Stable: results do not depend on window-size parameters.
 
 **DENTIST** (Chen et al. 2021):
 
-- Iteratively imputes each z-score from all other z-scores via SVD-
-  truncated LD regression, then flags large
-  `(z_obs − z_imp)^2 / (1 − r²)` values as outliers.
-- Operates on windows of the chromosome; the window size noticeably
-  affects how many outliers it reports.
+-  Iteratively imputes each z-score from all other z-scores via SVD- truncated
+    LD regression, then flags large `(z_obs − z_imp)^2 / (1 − r²)` values as
+    outliers.
+-  Operates on windows of the chromosome; the window size noticeably affects
+    how many outliers it reports.
 
 Both methods are available directly as `slalom()` / `dentist()` /
 `dentistSingleWindow()` if you want to run them outside the
@@ -174,18 +186,25 @@ full set of RAISS knobs lives under the `imputeOpts` argument to
 
 ```{r raiss-args, eval=FALSE}
 gws_qcd <- summaryStatsQc(
-  gws,
-  zMismatchQc = "slalom",
-  impute      = TRUE,
-  imputeOpts  = list(rcond = 0.01, r2Threshold = 0.6,
-                     minimumLd = 5, lamb = 0.01))
+    gws,
+    zMismatchQc = "slalom",
+    impute = TRUE,
+    imputeOpts = list(
+        rcond = 0.01,
+        r2Threshold = 0.6,
+        minimumLd = 5,
+        lamb = 0.01
+    )
+)
 ```
 
 
 ## Next steps
 
-`QtlSumStats` and `GwasSumStats` are direct inputs to
-`fineMappingPipeline()`, `twasWeightsPipeline()` (`QtlSumStats` only) and `colocBoostPipeline()`— see the *Fine-mapping with pecotmr*, *Learning TWAS weights with pecotmr* and *Multi-trait colocalization with ColocBoost* vignettes.
+`QtlSumStats` and `GwasSumStats` are direct inputs to `fineMappingPipeline()`,
+`twasWeightsPipeline()` (`QtlSumStats` only) and `colocBoostPipeline()`— see
+the *Fine-mapping with pecotmr*, *Learning TWAS weights with pecotmr* and
+*Multi-trait colocalization with ColocBoost* vignettes.
 
 ```{r session-info}
 sessionInfo()

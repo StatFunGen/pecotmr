@@ -19,7 +19,7 @@ shrinkLd(R, nRef, shrinkageType = "wen_stephens", geneticMap = NULL)
 Shrunk LD correlation matrix.
 }
 \description{
-Apply shrinkage to sample LD matrix to reduce noise from
-  finite reference panel size, following Wen & Stephens (2010).
+Apply shrinkage to sample LD matrix to reduce noise from finite
+  reference panel size, following Wen & Stephens (2010).
 }
 \keyword{internal}

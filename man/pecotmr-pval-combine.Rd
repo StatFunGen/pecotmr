@@ -5,8 +5,8 @@
 \title{P-value Combination Methods}
 \description{
 Functions for combining p-values across multiple tests or
-  methods: Cauchy combination (ACAT), harmonic mean p-value (HMP),
-  poolr, GBJ, and aSPU methods. Also includes the null correlation
-  matrix for TWAS z-scores used by correlation-adjusted methods.
+  methods: Cauchy combination (ACAT), harmonic mean p-value (HMP), poolr,
+  GBJ, and aSPU methods. Also includes the null correlation matrix for TWAS
+  z-scores used by correlation-adjusted methods.
 }
 \keyword{internal}

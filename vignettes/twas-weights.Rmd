@@ -10,8 +10,13 @@ vignette: >
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
-                      fig.width = 7, fig.height = 4.5)
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    fig.width = 7,
+    fig.height = 4.5
+)
 ```
 
 ## Overview
@@ -22,9 +27,9 @@ Once learned, the weights are combined with GWAS summary statistics to
 compute per-gene TWAS Z-scores (covered in the
 [TWAS Z-score + causal inference vignette](twas-zscore.html)).
 
-`twasWeightsPipeline()` is a single that accepts multiple input types. The output is always a `TwasWeights` collection (DFrame
-subclass keyed by `(study, context, trait, method)` with per-tuple
-`TwasWeightsEntry` payloads).
+`twasWeightsPipeline()` is a single that accepts multiple input types. The
+output is always a `TwasWeights` collection (DFrame subclass keyed by `(study,
+context, trait, method)` with per-tuple `TwasWeightsEntry` payloads).
 
 | Input class | Methods supported |
 |---|---|
@@ -39,34 +44,36 @@ library(pecotmr)
 ## Bundled inputs
 
 ```{r bundled}
-data(qtl_dataset_example,
-     qtl_sumstats_example,
-     multi_study_qtl_dataset_example)
+data(qtlDatasetExample, qtlSumStatsExample, multiStudyQtlDatasetExample)
 ```
 
 ## Individual-level weights
 
-The simplest individual-level call learns a single regression-based weight set from a
-`QtlDataset`. Cross-validation is enabled by default (`cvFolds = 5`). Like
-`fineMappingPipeline()`, you need to tell it which genotype window to
+The simplest individual-level call learns a single regression-based weight set
+from a `QtlDataset`. Cross-validation is enabled by default (`cvFolds = 5`).
+Like `fineMappingPipeline()`, you need to tell it which genotype window to
 extract — `cisWindow` (per trait) is the most common choice.
 
-Fine-mapping methods (`susie`, `susieInf`, `susieAsh`, `mvsusie`,
-`fsusie`) are not re-fit by `twasWeightsPipeline()` - instead run fine-mapping models with `fineMappingPipeline()` first and pass the result via
-`fineMappingResult = …` (see the next section).
+Fine-mapping methods (`susie`, `susieInf`, `susieAsh`, `mvsusie`, `fsusie`) are
+not re-fit by `twasWeightsPipeline()` - instead run fine-mapping models with
+`fineMappingPipeline()` first and pass the result via `fineMappingResult = …`
+(see the next section).
 
 ```{r individual-quickstart}
-tw <- twasWeightsPipeline(qtl_dataset_example,
-                           methods   = "lasso",
-                           cisWindow = 1e6)
+tw <- twasWeightsPipeline(qtlDatasetExample, methods = "lasso", cisWindow = 1e6)
 tw
 ```
 
 Extract the per-variant weights for one tuple:
 
 ```{r individual-weights}
-entry <- getTwasWeights(tw, study = "study1", context = "brain",
-                         trait = "ENSG_example", method = "lasso")
+entry <- getTwasWeights(
+    tw,
+    study = "study1",
+    context = "brain",
+    trait = "ENSG_example",
+    method = "lasso"
+)
 head(getWeights(entry))
 ```
 
@@ -85,59 +92,72 @@ length(getVariantIds(entry))
 
 ## Including a fine-mapping susie fit in the TWAS ensemble
 
-The posterior effect estimates of SuSiE fine-mapping models are themselves a set of per-variant
-weight estimates. When you pass an existing `FineMappingResult` to
-`twasWeightsPipeline()`, the trimmed susie fit for each matching
-`(study, context, trait)` tuple is added to the ensemble as an additional
-weights row instead of being re-fit.
+The posterior effect estimates of SuSiE fine-mapping models are themselves a
+set of per-variant weight estimates. When you pass an existing
+`FineMappingResult` to `twasWeightsPipeline()`, the trimmed susie fit for each
+matching `(study, context, trait)` tuple is added to the ensemble as an
+additional weights row instead of being re-fit.
 
 ```{r individual-with-fmr}
-fmr <- fineMappingPipeline(qtl_dataset_example, methods = "susie",
-                            cisWindow = 1e6)
-tw2 <- twasWeightsPipeline(qtl_dataset_example,
-                            methods            = c("susie", "lasso"),
-                            cisWindow          = 1e6,
-                            fineMappingResult  = fmr)
+fmr <- fineMappingPipeline(
+    qtlDatasetExample,
+    methods = "susie",
+    cisWindow = 1e6
+)
+tw2 <- twasWeightsPipeline(
+    qtlDatasetExample,
+    methods = c("susie", "lasso"),
+    cisWindow = 1e6,
+    fineMappingResult = fmr
+)
 ```
 
 ## Multi-study weights
 
 ```{r multistudy}
-msTw <- twasWeightsPipeline(multi_study_qtl_dataset_example,
-                             methods   = "lasso",
-                             cisWindow = 1e6)
+msTw <- twasWeightsPipeline(
+    multiStudyQtlDatasetExample,
+    methods = "lasso",
+    cisWindow = 1e6
+)
 table(msTw$study)
 ```
 
-The call for iterating over the studies of a MultiStudyQtlDataset is identical to the call for a single QtlDataset.
+The call for iterating over the studies of a MultiStudyQtlDataset is identical
+to the call for a single QtlDataset.
 
 ## Multiple weight methods at once
 
-Pass a character vector to fit several methods on the same fold split
-and return them as separate `(method)` rows in the collection.
-Fine-mapping methods (`susie`, `susieInf`, `susieAsh`, `mvsusie`) can
-only be included if their results are present in the object passed to the `fineMappingResult` argument:
+Pass a character vector to fit several methods on the same fold split and
+return them as separate `(method)` rows in the collection. Fine-mapping methods
+(`susie`, `susieInf`, `susieAsh`, `mvsusie`) can only be included if their
+results are present in the object passed to the `fineMappingResult` argument:
 
 ```{r multimethod, eval=FALSE}
 # TWAS-regression only — no fineMappingResult needed.
 twasWeightsPipeline(
-  qtl_dataset_example,
-  methods = c("lasso", "enet", "ridge", "mrash"))
+    qtlDatasetExample,
+    methods = c("lasso", "enet", "ridge", "mrash")
+)
 
 # Add a fine-mapping susie row by providing the FineMappingResult.
-fmr <- fineMappingPipeline(qtl_dataset_example, methods = "susie",
-                            cisWindow = 1e6)
+fmr <- fineMappingPipeline(
+    qtlDatasetExample,
+    methods = "susie",
+    cisWindow = 1e6
+)
 twasWeightsPipeline(
-  qtl_dataset_example,
-  methods           = c("susie", "lasso", "enet", "ridge", "mrash"),
-  cisWindow         = 1e6,
-  fineMappingResult = fmr)
+    qtlDatasetExample,
+    methods = c("susie", "lasso", "enet", "ridge", "mrash"),
+    cisWindow = 1e6,
+    fineMappingResult = fmr
+)
 ```
 
 ## RSS / sumstats weights
 
 ```{r sumstats}
-twSs <- twasWeightsPipeline(qtl_sumstats_example, methods = "lasso")
+twSs <- twasWeightsPipeline(qtlSumStatsExample, methods = "lasso")
 twSs
 ```
 
@@ -151,9 +171,10 @@ expression), pass `methods = "mrmash"` to do a joint multivariate fit:
 
 ```{r multivariate, eval=FALSE}
 twasWeightsPipeline(
-  qtl_dataset_example,
-  methods  = "mrmash",
-  contexts = c("brain", "liver"))
+    qtlDatasetExample,
+    methods = "mrmash",
+    contexts = c("brain", "liver")
+)
 ```
 
 For an explicit cross-context joint fit driven by a
@@ -161,42 +182,43 @@ For an explicit cross-context joint fit driven by a
 
 ```{r joint, eval=FALSE}
 twasWeightsPipeline(
-  multi_study_qtl_dataset_example,
-  methods            = "mrmash",
-  jointSpecification = list(axis = "context",
-                             contexts = c("brain", "liver")))
+    multiStudyQtlDatasetExample,
+    methods = "mrmash",
+    jointSpecification = list(axis = "context", contexts = c("brain", "liver"))
+)
 ```
 
 ## Common parameters
 
 ```{r tw-params, eval=FALSE}
 twasWeightsPipeline(
-  qtl_dataset_example,
-  methods             = "susie",
-  contexts            = "brain",
-  traitId             = "ENSG_example",
-  region              = "chr22:25000000-26000000",
-  cisWindow           = 5e5,
-  cvFolds             = 5,
-  samplePartition     = NULL,
-  maxCvVariants       = -1,
-  cvThreads           = 1,
-  ensemble            = TRUE,
-  ensembleR2Threshold = 0.01,
-  ensembleSolver      = "quadprog",
-  estimatePi          = TRUE,
-  phenotypeCovariatesToResidualize = NULL,
-  genotypeCovariatesToResidualize  = NULL,
-  dataType            = NULL,
-  naAction            = "drop")
+    qtlDatasetExample,
+    methods = "susie",
+    contexts = "brain",
+    traitId = "ENSG_example",
+    region = "chr22:25000000-26000000",
+    cisWindow = 5e5,
+    cvFolds = 5,
+    samplePartition = NULL,
+    maxCvVariants = -1,
+    cvThreads = 1,
+    ensemble = TRUE,
+    ensembleR2Threshold = 0.01,
+    ensembleSolver = "quadprog",
+    estimatePi = TRUE,
+    phenotypeCovariatesToResidualize = NULL,
+    genotypeCovariatesToResidualize = NULL,
+    dataType = NULL,
+    naAction = "drop"
+)
 ```
 
-- `ensemble = TRUE` adds an additional `ensembleWeights` row to the
-  collection — a weighted combination of the individual
-  methods' CV predictions filterd by `ensembleR2Threshold`.
-- `naAction` is forwarded to `getResidualizedPhenotypes()` (see the
-  [fine-mapping vignette](fine-mapping.html#common-parameters) for
-  semantics).
+-  `ensemble = TRUE` adds an additional `ensembleWeights` row to the collection
+    — a weighted combination of the individual methods' CV predictions filterd
+    by `ensembleR2Threshold`.
+-  `naAction` is forwarded to `getResidualizedPhenotypes()` (see the
+    [fine-mapping vignette](fine-mapping.html#common-parameters) for
+    semantics).
 
 ## Reading the result
 
@@ -212,19 +234,25 @@ slotNames(entry)
 
 Each entry exposes:
 
-- `weights` — per-variant coefficients (named numeric vector or matrix
-  for multivariate methods)
+-  `weights` — per-variant coefficients (named numeric vector or matrix for
+    multivariate methods)
 - `variantIds` — variant IDs the weights are aligned to
-- `cvResult` — list with `rsq`, `r`, predicted values, etc. (access
-  with `getCvResult()`)
-- `standardized` — whether weights are on the standardized
-  (`y ~ scale(X)`) or original scale
-- `dataType` — string tag carried through for reporting (e.g.
-  `"expression"`, `"splicing"`)
+-  `cvResult` — list with `rsq`, `r`, predicted values, etc. (access with
+    `getCvResult()`)
+-  `standardized` — whether weights are on the standardized (`y ~ scale(X)`) or
+    original scale
+-  `dataType` — string tag carried through for reporting (e.g. `"expression"`,
+    `"splicing"`)
 - `fit` — the full fit object when the user requested `retainFit = TRUE`
 
 ## Next steps
 
-- Combine the learned weights with a GWAS via
-  [`causalInferencePipeline`](twas-zscore.html) to compute per-gene
-  TWAS Z-scores.
+-  Combine the learned weights with a GWAS via
+    [`causalInferencePipeline`](twas-zscore.html) to compute per-gene TWAS
+    Z-scores.
+
+# Session info
+
+```{r session-info}
+sessionInfo()
+```

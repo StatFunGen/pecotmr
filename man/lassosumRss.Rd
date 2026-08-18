@@ -16,12 +16,14 @@ lassosumRss(
 \arguments{
 \item{bhat}{A vector of marginal effect sizes.}
 
-\item{R}{The LD correlation matrix (a single matrix over the analysed window), as in \code{susieR::susie_rss()}.
-If shrinkage is desired, apply it before passing (e.g., \code{(1-s)*R + s*I}).}
+\item{R}{The LD correlation matrix (a single matrix over the analysed
+window), as in \code{susieR::susie_rss()}. If shrinkage is desired, apply
+it before passing (e.g., \code{(1-s)*R + s*I}).}
 
 \item{n}{Sample size of the GWAS.}
 
-\item{lambda}{A vector of L1 penalty values. Default: 20 values from 0.001 to 0.1 on log scale.}
+\item{lambda}{A vector of L1 penalty values. Default: 20 values from 0.001 to
+0.1 on log scale.}
 
 \item{thr}{Convergence threshold. Default: 1e-4.}
 
@@ -40,11 +42,12 @@ A list containing:
 \description{
 Coordinate descent to solve the penalized regression on summary statistics:
 \deqn{f(\beta) = \beta' R \beta - 2\beta' r + 2\lambda ||\beta||_1}
-where \eqn{R} is the LD matrix (pre-shrunk if desired) and \eqn{r = \hat\beta / \sqrt{n}}.
+where \eqn{R} is the LD matrix (pre-shrunk if desired) and \eqn{r =
+\hat\beta / \sqrt{n}}.
 }
 \details{
-Based on Mak et al (2017) "Polygenic scores via penalized regression on summary statistics",
-Genetic Epidemiology 41(6):469-480.
+Based on Mak et al (2017) "Polygenic scores via penalized regression on
+summary statistics", Genetic Epidemiology 41(6):469-480.
 }
 \examples{
 set.seed(42)

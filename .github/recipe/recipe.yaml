@@ -34,6 +34,7 @@ requirements:
     - bioconductor-rsamtools
     - bioconductor-rtracklayer
     - bioconductor-summarizedexperiment
+    - r-archive
     - r-arrow
     - r-aspu
     - r-base
@@ -52,6 +53,7 @@ requirements:
     - r-fsusier
     - r-gbj
     - r-glmnet
+    - r-glue
     - r-harmonicmeanp
     - r-igraph
     - r-l0learn
@@ -99,6 +101,7 @@ requirements:
     - bioconductor-rsamtools
     - bioconductor-rtracklayer
     - bioconductor-summarizedexperiment
+    - r-archive
     - r-arrow
     - r-aspu
     - r-base
@@ -117,6 +120,7 @@ requirements:
     - r-fsusier
     - r-gbj
     - r-glmnet
+    - r-glue
     - r-harmonicmeanp
     - r-igraph
     - r-l0learn

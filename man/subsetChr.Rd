@@ -24,3 +24,7 @@ A \code{GwasSumStats} object.
 \description{
 Extract a chromosome-specific subset of a GwasSumStats object.
 }
+\examples{
+data(gwasSumStatsS4Example)
+subsetChr(gwasSumStatsS4Example, "chr22")
+}

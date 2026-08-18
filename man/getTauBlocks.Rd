@@ -19,3 +19,7 @@ A numeric matrix or NULL.
 Return the per-block jackknife tau matrix carried by an
   \code{H2Estimate}.
 }
+\examples{
+data(h2EstimateExample)
+getTauBlocks(h2EstimateExample)
+}

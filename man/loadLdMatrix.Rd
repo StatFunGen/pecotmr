@@ -15,29 +15,34 @@ loadLdMatrix(
 \arguments{
 \item{ldMetaFilePath}{Path to the LD metadata TSV file.}
 
-\item{region}{Region of interest: "chr:start-end" string or data.frame with chrom/start/end.}
+\item{region}{Region of interest: "chr:start-end" string or data.frame with
+chrom/start/end.}
 
-\item{extractCoordinates}{Optional data.frame with columns "chrom" and "pos" for
-specific coordinates extraction (only for pre-computed LD blocks).}
+\item{extractCoordinates}{Optional data.frame with columns "chrom" and "pos"
+for specific coordinates extraction (only for pre-computed LD blocks).}
 
 \item{returnGenotype}{Controls what ldMatrix contains in the return value.
-FALSE (default): always return correlation matrix R.
-TRUE: return genotype matrix X (only valid for PLINK sources).
-"auto": return X for PLINK sources, R for pre-computed sources.}
+FALSE (default): always return correlation matrix R. TRUE: return genotype
+matrix X (only valid for PLINK sources). "auto": return X for PLINK
+sources, R for pre-computed sources.}
 
-\item{nSample}{Optional sample size for computing variance (= 2*p*(1-p)*n/(n-1)).
-If NULL, ref_panel will not include variance or n_nomiss columns.
-Only used for PLINK genotype sources.}
+\item{nSample}{Optional sample size for computing variance (=
+2*p*(1-p)*n/(n-1)). If NULL, ref_panel will not include variance or
+n_nomiss columns. Only used for PLINK genotype sources.}
 }
 \value{
 A list with:
 \describe{
   \item{ldVariants}{Character vector of variant IDs (canonical format).}
-  \item{ldMatrix}{LD correlation matrix R (or genotype matrix X when returnGenotype is TRUE or "auto" with PLINK source).}
-  \item{ref_panel}{Data.frame with variant metadata (chrom, pos, A2, A1, variant_id,
+  \item{ldMatrix}{LD correlation matrix R (or genotype matrix X when
+  returnGenotype is TRUE or "auto" with PLINK source).}
+  \item{ref_panel}{Data.frame with variant metadata (chrom, pos, A2, A1,
+  variant_id,
     and optionally allele_freq, variance, n_nomiss).}
-  \item{is_genotype}{Logical: TRUE if ldMatrix contains genotype X, FALSE if correlation R.}
-  \item{blockMetadata}{Data.frame with region/block info. For pre-computed LD: one row per block.
+  \item{is_genotype}{Logical: TRUE if ldMatrix contains genotype X, FALSE if
+  correlation R.}
+  \item{blockMetadata}{Data.frame with region/block info. For pre-computed
+  LD: one row per block.
     For PLINK: a single row spanning the loaded region.}
 }
 }
@@ -47,11 +52,19 @@ Unified entry point for loading LD data from a metadata TSV file.
 \details{
 The metadata TSV must have columns: chrom, start, end, path. Two formats:
 \itemize{
-  \item Pre-computed LD blocks: many rows per chromosome with block boundaries
-    in start/end and path pointing to .cor.xz files (optionally comma-separated
+  \item Pre-computed LD blocks: many rows per chromosome with block
+  boundaries
+    in start/end and path pointing to .cor.xz files (optionally
+    comma-separated
     with a .bim path).
   \item PLINK genotype files: one row per chromosome with start=0, end=0, and
-    path pointing to a per-chromosome PLINK prefix (.pgen/.pvar[.zst]/.psam or
+    path pointing to a per-chromosome PLINK prefix (.pgen/.pvar[.zst]/.psam
+    or
     .bed/.bim/.fam). LD is computed on the fly via \code{computeLd()}.
 }
+}
+\examples{
+meta <- system.file("extdata", "ld_reference", "ld_meta_file.tsv",
+  package = "pecotmr")
+loadLdMatrix(ldMetaFilePath = meta, region = "chr22:16000000-18000000")
 }

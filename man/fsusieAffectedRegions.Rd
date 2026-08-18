@@ -25,8 +25,13 @@ A \code{GRanges} of affected intervals with mcols \code{cs},
 The sub-intervals of the functional grid where a credible set's band excludes
 zero (the genomic footprint of each fSuSiE effect), from the upstream
 \code{fsusieR::affected_reg}. Returns a \code{GRanges} with the credible-set
-label, its purity, and the effect \code{direction} (\code{"pos"}/\code{"neg"};
-upstream discards it). Requires an UNtrimmed fit; empty otherwise.
+label, its purity, and the effect \code{direction}
+(\code{"pos"}/\code{"neg"}; upstream discards it). Requires an UNtrimmed fit;
+empty otherwise.
+}
+\examples{
+data(fsusieFineMappingExample)
+fsusieAffectedRegions(fsusieFineMappingExample)
 }
 \seealso{
 \code{\link{fsusieCredibleBand}}

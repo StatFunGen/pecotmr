@@ -20,9 +20,19 @@ dprAdaptiveGibbsWeights(X, y, retainFit = FALSE, ...)
 
 \item{y}{A numeric response vector.}
 
-\item{fittingMethod}{One of "VB", "Gibbs", or "Adaptive_Gibbs". Default is "VB".}
+\item{fittingMethod}{One of "VB", "Gibbs", or "Adaptive_Gibbs". Default is
+"VB".}
+
+\item{retainFit}{Logical. Attach the full fitted-model object to the result.
+Default \code{FALSE}.}
 
 \item{...}{Additional arguments passed through to `RcppDPR::fit_model`.}
+
+\item{nK}{Integer. Number of variational mixture components for the VB fit
+(\code{dprVbWeights}). Default \code{8}.}
+
+\item{sStep}{Integer. Number of Gibbs sampling steps for the Gibbs fit
+(\code{dprGibbsWeights}). Default \code{5000}.}
 }
 \value{
 A numeric vector of length `ncol(X)` of variant weights.
@@ -30,12 +40,37 @@ A numeric vector of length `ncol(X)` of variant weights.
 \description{
 Fits a Dirichlet Process Regression model via `RcppDPR::fit_model` and
 returns the per-variant weights, computed as `beta + alpha` (matching
-RcppDPR's internal `predict.DPR_Model`, which uses `(beta + alpha) %*% x_new + pheno_mean`).
+RcppDPR's internal `predict.DPR_Model`, which uses `(beta + alpha) %*% x_new
++ pheno_mean`).
 }
 \details{
-By default the variational Bayes (`VB`) fitting method is used, which is
-fast and deterministic. The user may switch to `Gibbs` or `Adaptive_Gibbs`
-for full Bayesian MCMC inference. `rotate_variables` is held to `FALSE`
-under the assumption that any covariates have already been regressed out
-upstream; an intercept-only covariate matrix is supplied to `fit_model`.
+By default the variational Bayes (`VB`) fitting method is used, which is fast
+and deterministic. The user may switch to `Gibbs` or `Adaptive_Gibbs` for
+full Bayesian MCMC inference. `rotate_variables` is held to `FALSE` under the
+assumption that any covariates have already been regressed out upstream; an
+intercept-only covariate matrix is supplied to `fit_model`.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+dprWeights(X, y)
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+dprVbWeights(X, y)
+set.seed(1)
+n <- 50
+p <- 8
+X <- matrix(rnorm(n * p), n, p)
+colnames(X) <- paste0("v", 1:p)
+y <- X[, 1] * 0.5 + rnorm(n)
+dprGibbsWeights(X, y, sStep = 500)
+set.seed(1)
+n <- 50
+p <- 8
+X <- matrix(rnorm(n * p), n, p)
+colnames(X) <- paste0("v", 1:p)
+y <- X[, 1] * 0.5 + rnorm(n)
+dprAdaptiveGibbsWeights(X, y)
 }

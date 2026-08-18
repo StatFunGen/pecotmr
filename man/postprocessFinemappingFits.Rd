@@ -29,8 +29,8 @@ postprocessFinemappingFits(
 }
 \arguments{
 \item{fits}{Named list of fine-mapping fits. Names define method identity,
-for example \code{susie}, \code{susieInf}, \code{susieRss},
-\code{mvsusie}, or \code{fsusie}.}
+for example \code{susie}, \code{susieInf}, \code{susieRss}, \code{mvsusie},
+or \code{fsusie}.}
 
 \item{dataX}{Genotype matrix, LD/correlation matrix, or other method-specific
 input used for credible-set purity and correlations.}
@@ -52,18 +52,49 @@ MAF). Default NULL.}
 
 \item{otherQuantities}{Optional list carried into each method result.}
 
+\item{region}{Optional genomic anchor (\code{"chr:start-end"} or
+\code{GRanges}) recorded on the result; \code{NULL} to omit.}
+
 \item{priorEffTol}{Tolerance for retaining effects by prior variance.}
 
 \item{minAbsCorr}{Minimum absolute correlation for credible-set purity.}
+
+\item{medianAbsCorr}{Numeric or \code{NULL}. Median absolute within-CS
+correlation threshold for purity; \code{NULL} uses only \code{minAbsCorr}.}
+
+\item{csInput}{Optional precomputed credible-set specification, or
+\code{NULL} to derive it from the fits.}
+
+\item{conditionIdx}{Integer or \code{NULL}. Index of the conditioned effect
+(per-condition output); \code{NULL} for the unconditioned fit.}
+
+\item{trim}{Logical. Trim the retained fit to the fields needed downstream.
+Default \code{TRUE}.}
+
+\item{fullFit}{Logical. Retain the full fit object on each entry. Default
+\code{FALSE}.}
+
+\item{fullFitAlphaOnly}{Logical. When retaining the full fit, keep only the
+per-effect alpha matrix. Default \code{TRUE}.}
+
+\item{includeAllCs}{Logical. Include all credible sets rather than only the
+top one. Default \code{FALSE}.}
 }
 \value{
 A list with \code{finemappingResults} (per-method post-processed
-  objects, each carrying a trimmed fit and method-specific intermediates)
-  and a single unified \code{top_loci} table in the fixed 22-column shape
-  (see the internal \code{buildTopLoci}). Per-method contributions are
-  row-bound into \code{top_loci} by an outer method for-loop.
+  objects, each carrying a trimmed fit and method-specific intermediates) and
+  a single unified \code{top_loci} table in the fixed 22-column shape (see
+  the internal \code{buildTopLoci}). Per-method contributions are row-bound
+  into \code{top_loci} by an outer method for-loop.
 }
 \description{
 Applies method-aware post-processing to one or more SuSiE-family fits and
 builds both a method-specific result list and shared top-loci tables.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:40]
+y <- eqtlRegionExample$yRes
+fit <- susieR::susie(X, y, L = 5)
+postprocessFinemappingFits(fits = list(susie = fit), dataX = X, dataY = y)
 }

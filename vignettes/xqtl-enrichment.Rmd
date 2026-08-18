@@ -9,77 +9,106 @@ vignette: >
   %\VignetteEncoding{UTF-8}
 ---
 
-This vignette demonstrates the enrichment analysis part of the `pecotmr` package, which largely follows from `fastENLOC` (https://github.com/xqwen/fastenloc) but uses `susieR` fitted objects as input to estimate priors for use with the `coloc` package (coloc v5, aka SuSiE-coloc). The main differences are:
-1) now enrichment is based on all QTL variants whether or not they are inside signal clusters;
-2) Causal QTL are sampled from SuSiE single effects, not signal clusters;
-3) Allow a variant to be QTL for not only multiple conditions (eg cell types) but also multiple regions (eg genes).
+This vignette demonstrates the enrichment analysis part of the `pecotmr`
+package, which largely follows from `fastENLOC`
+(https://github.com/xqwen/fastenloc) but uses `susieR` fitted objects as input
+to estimate priors for use with the `coloc` package (coloc v5, aka
+SuSiE-coloc). The main differences are:
+
+1)  enrichment is based on all QTL variants whether or not they are inside
+    signal clusters;
+2) causal QTL are sampled from SuSiE single effects, not signal clusters;
+3)  a variant may be a QTL for not only multiple conditions (e.g. cell types)
+    but also multiple regions (e.g. genes).
 
 The example uses de-identified data shipped with the package. All sample names,
 variant positions, and identifiers are synthetic.
 
-## Set up environment and Load data
+## Set up environment and load data
 
-Load the `pecotmr` package for this enrichment analysis.
 ```{r load-pkgs}
 library(pecotmr)
 ```
 
-Load fine-mapping results from the package example data and write them to
-temporary RDS files, since `xqtlEnrichmentWrapper` expects file paths.
-```{r}
-data(gwas_finemapping_example)
-data(qtl_finemapping_example)
-gwas_path <- tempfile(fileext = ".rds")
-qtl_path <- tempfile(fileext = ".rds")
-saveRDS(gwas_finemapping_example, gwas_path)
-saveRDS(qtl_finemapping_example, qtl_path)
-gwas <- gwas_finemapping_example
-qtl <- qtl_finemapping_example
+The enrichment pipeline consumes fine-mapping results as `pecotmr` S4 objects:
+a `GwasFineMappingResult` for the GWAS and a `QtlFineMappingResult` for the
+molecular QTLs. Both are shipped as example datasets.
+
+```{r load-data}
+data(gwasFineMappingExample)
+data(qtlFineMappingExample)
+gwasFineMappingExample
+qtlFineMappingExample
 ```
 
-## Input data requirements
+## Input data
 
-### GWAS data requirements
-In the GWAS data, the file is stored as a list, with the fine mapping results already stored under the first layer.
-```{r}
-names(gwas[[1]])
-```
-Posterior inclusion probabilities of GWAS data:
-```{r}
-plot(gwas[[1]]$pip, ylab = "PIP", xlab = "Variant index", main = "GWAS PIPs", pch = 16, cex = 0.6)
+Each object is a `DFrame`-backed collection of per-tuple fine-mapping entries;
+use the accessors rather than reaching into slots. `getTopLoci()` returns the
+per-variant posterior table (identity columns, `pip`, and credible-set
+membership):
+
+```{r toploci}
+head(getTopLoci(gwasFineMappingExample))
+head(getTopLoci(qtlFineMappingExample))
 ```
 
-### QTL data requirements
-In the QTL data, the file is stored as a list and is more complicated. The first layer is named as the molecular trait region ID, followed by different contexts as the second layer. The variant names and fine mapping results can be found under these contexts (`variant_names` and `susie_result_trimmed`).
-```{r}
-names(qtl)
-names(qtl[["region_1"]])
-names(qtl[["region_1"]][["context_1"]])
-names(qtl[["region_1"]][["context_1"]][["susie_result_trimmed"]])
-```
-Posterior inclusion probabilities of QTL data:
-```{r}
-plot(qtl[["region_1"]][["context_1"]][["susie_result_trimmed"]]$pip,
-     ylab = "PIP", xlab = "Variant index", main = "QTL PIPs", pch = 16, cex = 0.6)
+Posterior inclusion probabilities across all variants in each region, taken
+from the underlying SuSiE fit:
+
+```{r pip-plots, fig.width = 7, fig.height = 3.2}
+gwas_pip <- getSusieFit(gwasFineMappingExample)$pip
+qtl_pip <- getSusieFit(qtlFineMappingExample)$pip
+op <- par(mfrow = c(1, 2))
+plot(
+    gwas_pip,
+    ylab = "PIP",
+    xlab = "Variant index",
+    main = "GWAS PIPs",
+    pch = 16,
+    cex = 0.6
+)
+plot(
+    qtl_pip,
+    ylab = "PIP",
+    xlab = "Variant index",
+    main = "QTL PIPs",
+    pch = 16,
+    cex = 0.6
+)
+par(op)
 ```
 
 ## Perform enrichment analysis
-The input for `xqtlEnrichmentWrapper` requires the paths for GWAS and QTL fine mapping data. You need to specify the list name of SuSiE results in each dataset as `xqtl_finemapping_obj` and the list name of variant names as `xqtl_varname_obj`. For example, if SuSiE results for QTL data are under `qtl[["region_1"]][["context_1"]][["susie_result_trimmed"]]`, then `xqtl_finemapping_obj` would be `c("context_1", "susie_result_trimmed")`, and `xqtl_varname_obj` would be `c("context_1", "variant_names")` since the variant names are stored directly under `context_1`.
-For GWAS data, the fine mapping results and variant names are stored under the first layer directly, so you do not need to specify `gwas_finemapping_obj` and `gwas_varname_obj`. However, if your data does not follow this structure, you may need to specify these parameters accordingly.
 
-```{r}
-enrich_res <- xqtlEnrichmentWrapper(
-  gwas_files = gwas_path, xqtl_files = qtl_path,
-  xqtl_finemapping_obj = c("context_1", "susie_result_trimmed"),
-  xqtl_varname_obj = c("context_1", "variant_names")
+`qtlEnrichmentPipeline()` takes the two fine-mapping collections directly and
+estimates, for every `(gwasStudy, qtlStudy, qtlContext)` combination, how
+enriched the molecular QTLs are among the GWAS causal variants. The GWAS
+collection must be RSS-derived (it carries an `ldSketch`);
+`gwasFineMappingExample` already does.
+
+```{r enrichment}
+enrich_res <- qtlEnrichmentPipeline(
+    gwasFineMappingResult = gwasFineMappingExample,
+    qtlFineMappingResult = qtlFineMappingExample,
+    verbose = FALSE
 )
-print(enrich_res[[1]])
-print(head(enrich_res[["unused_xqtl_variants"]][[1]]))
+enrich_res
 ```
-The enrichment analysis output is stored as a 2-layer list. The first layer contains the enrichment results, which will be used as priors in coloc analysis. The second layer stores the QTL variants that were not detected in the GWAS dataset.
+
+The result is a data frame with one row per
+`(gwasStudy, qtlStudy, qtlContext)` combination, giving the enrichment estimate
+(`enrichment`), its standard error (`enrichmentSe`), and the log-odds
+(`enrichmentLogOdds`). These enrichment priors can then be supplied to a
+colocalization analysis. This synthetic single-region example is for
+illustration only; stable enrichment estimates require many fine-mapped
+regions.
 
 ## Session information
-Here are some details about the computing environment, including the versions of R, and the R packages, used to generate these results.
-```{R}
+
+Here are some details about the computing environment, including the versions
+of R and the R packages used to generate these results.
+
+```{r session-info}
 sessionInfo()
 ```

@@ -19,7 +19,7 @@ mashInput(
 }
 \arguments{
 \item{objects}{A named \code{list} of \code{\link{QtlSumStats}} and/or
-\code{\link{FineMappingResult}} objects, one per region. Names disambiguate
+\code{FineMappingResult} objects, one per region. Names disambiguate
 rownames across regions (defaults to \code{region1}, \code{region2}, ...).
 For \code{QtlSumStats} inputs \code{\link{summaryStatsQc}} must have been
 run (the matrix builder rejects un-QC'd SumStats).}
@@ -38,8 +38,8 @@ selection (default 0.95).}
 (default 1e-6).}
 
 \item{inputScale}{Matrix scale for \code{QtlSumStats} inputs
-(\code{"auto"}/\code{"beta"}/\code{"z"}); ignored for \code{FineMappingResult}
-(always effect-size scale).}
+(\code{"auto"}/\code{"beta"}/\code{"z"}); ignored for
+\code{FineMappingResult} (always effect-size scale).}
 
 \item{independentVariants}{Optional character vector of variant ids (e.g. an
 LD-pruned independent SNP list). When supplied, the \emph{random} and
@@ -53,10 +53,11 @@ difference still matches. The \emph{strong} partition is never filtered.}
 \item{seed}{RNG seed for the random / null sampling (default 999).}
 }
 \value{
-A flat \code{list}: \code{strong.b}, \code{strong.s}, \code{strong.z},
-  \code{random.*}, \code{null.*} (each a \code{variants x conditions} matrix)
-  and \code{XtX} (a \code{conditions x conditions} matrix). The \code{.b} /
-  \code{.s} matrices are omitted when \code{zOnly = TRUE}.
+A flat \code{list}: \code{strong.b}, \code{strong.s},
+  \code{strong.z}, \code{random.*}, \code{null.*} (each a \code{variants x
+  conditions} matrix) and \code{XtX} (a \code{conditions x conditions}
+  matrix). The \code{.b} / \code{.s} matrices are omitted when \code{zOnly =
+  TRUE}.
 }
 \description{
 Unified, S4-native replacement for the legacy
@@ -84,6 +85,11 @@ Random and null are selected identically for both classes
 Partitions are merged across objects (rownames disambiguated by region name),
 cleaned + z-derived by \code{\link{filterInvalidSummaryStat}} (\code{btoz}),
 and the strong \code{XtX} cross-product appended.
+}
+\examples{
+data(qtlSumStatsMulticontextExample)
+ss <- qtlSumStatsMulticontextExample
+mashInput(objects = list(strong = ss, random = ss))
 }
 \seealso{
 \code{\link{mashRandNullSample}}, \code{\link{mergeMashData}},

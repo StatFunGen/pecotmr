@@ -49,6 +49,7 @@ twasWeightsPipeline(data, ...)
   dataType = NULL,
   naAction = c("drop", "impute"),
   verbose = 1,
+  seed = NULL,
   ...
 )
 
@@ -86,6 +87,7 @@ twasWeightsPipeline(data, ...)
   genotypeCovariatesToResidualize = NULL,
   residualizePhenotypeCovariates = TRUE,
   residualizeGenotypeCovariates = TRUE,
+  seed = NULL,
   ...
 )
 
@@ -93,83 +95,90 @@ twasWeightsPipeline(data, ...)
 }
 \arguments{
 \item{data}{A \code{QtlDataset}, \code{MultiStudyQtlDataset}, or
-\code{QtlSumStats}. The \code{MultiStudyQtlDataset} method iterates
-the embedded individual-level \code{QtlDataset} entries and the
-optional embedded \code{QtlSumStats}, then rbinds the results.}
+\code{QtlSumStats}. The \code{MultiStudyQtlDataset} method iterates the
+embedded individual-level \code{QtlDataset} entries and the optional
+embedded \code{QtlSumStats}, then rbinds the results.}
 
 \item{...}{Reserved for method-specific arguments.}
 
-\item{methods}{A character vector of short method names, a preset
-string (\code{"default"} or \code{"fast_default"}), or a named list
-of \code{<method>_weights = args} entries. For QtlSumStats / GwasSumStats
-inputs the default switches to the RSS preset
-(\code{c("susieRss", "susieInfRss", "lassosumRss", "prsCs", "sdpr")}).}
+\item{methods}{A character vector of short method names, a preset string
+(\code{"default"} or \code{"fast_default"}), or a named list of
+\code{<method>_weights = args} entries. For QtlSumStats / GwasSumStats
+inputs the default switches to the RSS preset (\code{c("susieRss",
+"susieInfRss", "lassosumRss", "prsCs", "sdpr")}).}
 
-\item{contexts}{Optional character vector of contexts to restrict
-processing to (QtlDataset / QtlSumStats inputs). Default \code{NULL}
-(use all contexts).}
+\item{contexts}{Optional character vector of contexts to restrict processing
+to (QtlDataset / QtlSumStats inputs). Default \code{NULL} (use all
+contexts).}
 
-\item{traitId}{Optional character vector of trait identifiers to
-restrict processing to (QtlDataset / QtlSumStats inputs). Default
-\code{NULL}.}
+\item{traitId}{Optional character vector of trait identifiers to restrict
+processing to (QtlDataset / QtlSumStats inputs). Default \code{NULL}.}
 
 \item{region}{Optional variant window for QtlDataset trait selection: a
 \code{GRanges}, a \code{"chr:start-end"} string, or a one-row data.frame
 with \code{chrom}/\code{start}/\code{end}. Mutually exclusive with
 \code{traitId}.}
 
-\item{cisWindow}{For QtlDataset: cis-window (bp) around each trait's
-genomic position when extracting variants. Required when
-\code{traitId} is supplied. Mutually exclusive with \code{region}.}
+\item{cisWindow}{For QtlDataset: cis-window (bp) around each trait's genomic
+position when extracting variants. Required when \code{traitId} is
+supplied. Mutually exclusive with \code{region}.}
 
-\item{mafCutoff, macCutoff, xvarCutoff, imissCutoff, keepIndel, keepSamples, keepVariants}{For QtlDataset: optional per-call genotype-filter overrides. Each replaces
-the corresponding construct-time \code{\link{QtlDataset}} slot for this
-call only (applied to a validated copy); \code{NULL} (default) leaves the
-stored value in place. Variant QC is a property of the data, so these are
-applied identically here and in \code{\link{fineMappingPipeline}} -- there
-is deliberately no TWAS-specific variant filter.}
+\item{mafCutoff, macCutoff, xvarCutoff, imissCutoff}{For QtlDataset: optional
+per-call genotype-filter overrides. Each replaces the corresponding
+construct-time \code{\link{QtlDataset}} slot for this call only (applied to
+a validated copy); \code{NULL} (default) leaves the stored value in place.
+Variant QC is a property of the data, so these are applied identically here
+and in \code{\link{fineMappingPipeline}} -- there is deliberately no
+TWAS-specific variant filter.}
+
+\item{keepIndel, keepSamples, keepVariants}{As above: per-call
+\code{\link{QtlDataset}} genotype-filter overrides.}
 
 \item{jointRegions}{For QtlDataset with a multi-range \code{region}:
 \code{FALSE} (default) learns weights for each range independently and
-concatenates them into one entry per (study, context, trait, method);
-the per-region fits are kept as a named list and per-region CV is
-recorded as a flat \code{cvResult} data frame (one row per region).
-\code{TRUE} concatenates the ranges' genotypes into one joint fit.
-Ignored for a single-range / cis request.}
+concatenates them into one entry per (study, context, trait, method); the
+per-region fits are kept as a named list and per-region CV is recorded as a
+flat \code{cvResult} data frame (one row per region). \code{TRUE}
+concatenates the ranges' genotypes into one joint fit. Ignored for a
+single-range / cis request.}
 
-\item{jointSpecification}{Optional joint-fit specification (NULL by
-default). When NULL, the pipeline runs the implicit multi-trait /
-multi-context mr.mash branches as before. When non-NULL, the
-argument is parsed and validated via the joint-spec grammar
-documented under \code{parseJointSpecification}; the per-spec axis
-dispatcher implementation is in progress and a non-NULL value
-currently errors with an informative message.}
+\item{jointSpecification}{Optional joint-fit specification (NULL by default).
+When NULL, the pipeline runs the implicit multi-trait / multi-context
+mr.mash branches as before. When non-NULL, the argument is parsed and
+validated via the joint-spec grammar documented under
+\code{parseJointSpecification}; the per-spec axis dispatcher implementation
+is in progress and a non-NULL value currently errors with an informative
+message.}
 
-\item{fineMappingResult}{Optional \code{\link{FineMappingResult}}.
-When supplied, its SuSiE / SuSiE-inf / SuSiE-ash trimmed fits for
-the matching (study, context, trait) tuples are injected into
-\code{learnTwasWeights} via \code{fittedModels} so SuSiE-family
-weight methods reuse the prior fit instead of refitting.}
+\item{fineMappingResult}{Optional \code{FineMappingResult}. When supplied,
+its SuSiE / SuSiE-inf / SuSiE-ash trimmed fits for the matching (study,
+context, trait) tuples are injected into \code{learnTwasWeights} via
+\code{fittedModels} so SuSiE-family weight methods reuse the prior fit
+instead of refitting.}
 
-\item{twasWeights}{Optional \code{\link{TwasWeights}} resume cache.
-For each requested \code{(study, context, trait, method)} tuple
-already present in this collection, the cached
-\code{TwasWeightsEntry} is copied through and the corresponding
-weight fit is skipped. Only the un-cached method subset is fit;
-the cached and fresh entries are concatenated in the returned
-collection. Per-tuple matching mirrors the \code{fineMappingResult}
-cache in \code{\link{fineMappingPipeline}}. Multivariate dispatch
-(\code{mvsusie}, \code{mr.mash}) is unaffected because those
-methods produce one fit jointly across multiple
-\code{(context, trait)} columns.}
+\item{twasWeights}{Optional \code{\link{TwasWeights}} resume cache. For each
+requested \code{(study, context, trait, method)} tuple already present in
+this collection, the cached \code{TwasWeightsEntry} is copied through and
+the corresponding weight fit is skipped. Only the un-cached method subset
+is fit; the cached and fresh entries are concatenated in the returned
+collection. Per-tuple matching mirrors the \code{fineMappingResult} cache
+in \code{\link{fineMappingPipeline}}. Multivariate dispatch
+(\code{mvsusie}, \code{mr.mash}) is unaffected because those methods
+produce one fit jointly across multiple \code{(context, trait)} columns.}
 
-\item{cvFolds}{Integer. Cross-validation folds. Default 5. Set to 0
-to skip CV (and ensemble).}
+\item{mashPrior}{Optional \code{\link{MashPrior}} (or coercible) supplying
+data-driven prior matrices for mr.mash weight methods; \code{NULL} to skip.}
+
+\item{cvFolds}{Integer. Cross-validation folds. Default 5. Set to 0 to skip
+CV (and ensemble).}
 
 \item{samplePartition}{Optional pre-defined CV partition data.frame.}
 
-\item{maxCvVariants}{Maximum number of variants for CV. Default -1
-(no limit).}
+\item{fitFullData}{Logical. If \code{TRUE}, fit final weights on the full
+data after cross-validation. Default \code{TRUE}.}
+
+\item{maxCvVariants}{Maximum number of variants for CV. Default -1 (no
+limit).}
 
 \item{cvThreads}{Threads for CV parallelism. Default 1.}
 
@@ -178,8 +187,8 @@ to skip CV (and ensemble).}
 \item{ensemble}{Logical. Compute SR-TWAS ensemble weights. Default
 \code{TRUE}.}
 
-\item{ensembleR2Threshold}{Minimum CV R-squared for ensemble
-inclusion. Default 0.01.}
+\item{ensembleR2Threshold}{Minimum CV R-squared for ensemble inclusion.
+Default 0.01.}
 
 \item{ensembleSolver}{Solver for ensemble stacking. Default
 \code{"quadprog"}.}
@@ -187,37 +196,50 @@ inclusion. Default 0.01.}
 \item{ensembleAlpha}{Elastic-net mixing parameter (only when
 \code{ensembleSolver = "glmnet"}). Default 1.}
 
-\item{estimatePi}{If TRUE, estimate spike-and-slab sparsity from
-mr.ash before BGLR / qgg spike-and-slab methods that consume it.}
+\item{estimatePi}{If TRUE, estimate spike-and-slab sparsity from mr.ash
+before BGLR / qgg spike-and-slab methods that consume it.}
 
-\item{phenotypeCovariatesToResidualize, genotypeCovariatesToResidualize}{Character vector (or \code{NULL}) of covariate column names to
-residualize against. Forwarded to
-\code{\link{getResidualizedPhenotypes}} /
+\item{retainFit}{Logical. Retain the fitted-model object on each entry.
+Default \code{FALSE}.}
+
+\item{retainFitDetail}{Character. Level of fit detail to retain:
+\code{"slim"} (default) or \code{"full"}.}
+
+\item{phenotypeCovariatesToResidualize, genotypeCovariatesToResidualize}{Character vector (or \code{NULL}) of covariate column names to residualize
+against. Forwarded to \code{\link{getResidualizedPhenotypes}} /
 \code{\link{getResidualizedGenotypes}} for \code{QtlDataset} /
-\code{MultiStudyQtlDataset} input. Default \code{NULL} (use all
-available covariates). Ignored for sumstat inputs.}
+\code{MultiStudyQtlDataset} input. Default \code{NULL} (use all available
+covariates). Ignored for sumstat inputs.}
 
-\item{residualizePhenotypeCovariates}{Logical (length 1). When
-\code{TRUE} (default) residualize against the phenotype-side
-covariates listed in \code{phenotypeCovariatesToResidualize}; set
-\code{FALSE} to disable.}
+\item{residualizePhenotypeCovariates}{Logical (length 1). When \code{TRUE}
+(default) residualize against the phenotype-side covariates listed in
+\code{phenotypeCovariatesToResidualize}; set \code{FALSE} to disable.}
 
-\item{residualizeGenotypeCovariates}{Logical (length 1). When
-\code{TRUE} (default) residualize against the genotype-side
-covariates listed in \code{genotypeCovariatesToResidualize}; set
-\code{FALSE} to disable.}
+\item{residualizeGenotypeCovariates}{Logical (length 1). When \code{TRUE}
+(default) residualize against the genotype-side covariates listed in
+\code{genotypeCovariatesToResidualize}; set \code{FALSE} to disable.}
 
 \item{dataType}{Optional data-type tag stamped into every
 \code{TwasWeightsEntry$dataType} (e.g. \code{"expression"}).}
 
-\item{verbose}{Verbosity (0 silent, 1 default, 2 includes external
-package messages).}
+\item{naAction}{Character. How to handle missing values in the extracted
+data.}
+
+\item{verbose}{Verbosity (0 silent, 1 default, 2 includes external package
+messages).}
+
+\item{seed}{Integer or \code{NULL}. When supplied (\code{QtlDataset} path),
+seeds both the main-process RNG (\code{set.seed}) and the parallel
+method-fitting / cross-validation RNG (\code{BiocParallel} \code{RNGseed})
+for reproducibility under multi-threading. \code{NULL} (default) leaves the
+session RNG untouched, so an outer \code{set.seed()} still governs the
+main-process draws.}
 }
 \value{
-A \code{\link{TwasWeights}} collection keyed by
-  \code{(study, context, trait, method)}. The \code{ldSketch} slot is
-  \code{NULL} for individual-level fits and equals the input's
-  \code{ldSketch} for RSS-derived fits.
+A \code{\link{TwasWeights}} collection keyed by \code{(study,
+  context, trait, method)}. The \code{ldSketch} slot is \code{NULL} for
+  individual-level fits and equals the input's \code{ldSketch} for
+  RSS-derived fits.
 }
 \description{
 S4-dispatched per-region pipeline for learning TWAS prediction weights.
@@ -243,27 +265,29 @@ Method-restriction rules (enforced):
         rejected on \code{QtlSumStats} / \code{GwasSumStats} input.
 }
 
-Both \code{QtlSumStats} and \code{GwasSumStats} inputs must have been
-QC'd via \code{\link{summaryStatsQc}} first; otherwise an error is
-raised pointing at that function.
+Both \code{QtlSumStats} and \code{GwasSumStats} inputs must have been QC'd
+via \code{\link{summaryStatsQc}} first; otherwise an error is raised pointing
+at that function.
 
-The returned \code{\link{TwasWeights}} collection's \code{ldSketch}
-slot is set automatically: \code{NULL} for individual-level fits,
-the input's \code{ldSketch} for RSS-derived fits.
+The returned \code{\link{TwasWeights}} collection's \code{ldSketch} slot is
+set automatically: \code{NULL} for individual-level fits, the input's
+\code{ldSketch} for RSS-derived fits.
 
-Optionally a \code{\link{FineMappingResult}} may be supplied as a
-source of pre-fit SuSiE / SuSiE-inf / SuSiE-ash objects; their
-\code{trimmedFit} payloads are passed through to \code{learnTwasWeights}
-/ the RSS sub-pipelines via the \code{fittedModels} slot, avoiding
-a re-fit.
+Optionally a \code{FineMappingResult} may be supplied as a source of pre-fit
+SuSiE / SuSiE-inf / SuSiE-ash objects; their \code{trimmedFit} payloads are
+passed through to \code{learnTwasWeights} / the RSS sub-pipelines via the
+\code{fittedModels} slot, avoiding a re-fit.
 
-When the supplied \code{FineMappingResult} was produced with
-cross-validation (\code{fineMappingPipeline(..., cvFolds > 1)}), each
-matching \code{(study, context, trait)} entry's \code{cvResult} is
-reused: its fold partition becomes the CV partition (unless
-\code{samplePartition} is given explicitly) and its per-fold out-of-fold
-predictions/metrics are fed directly into the SR-TWAS ensemble in place
-of re-fitting those fine-mapping methods here. Non-fine-mapping methods
-(lasso, enet, ...) are still cross-validated on the same shared
-partition.
+When the supplied \code{FineMappingResult} was produced with cross-validation
+(\code{fineMappingPipeline(..., cvFolds > 1)}), each matching \code{(study,
+context, trait)} entry's \code{cvResult} is reused: its fold partition
+becomes the CV partition (unless \code{samplePartition} is given explicitly)
+and its per-fold out-of-fold predictions/metrics are fed directly into the
+SR-TWAS ensemble in place of re-fitting those fine-mapping methods here.
+Non-fine-mapping methods (lasso, enet, ...) are still cross-validated on the
+same shared partition.
+}
+\examples{
+data(qtlDatasetExample)
+twasWeightsPipeline(qtlDatasetExample, methods = "lasso", cisWindow = 1e6)
 }

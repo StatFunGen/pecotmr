@@ -24,6 +24,10 @@ class (all \code{\link{QtlFineMappingResult}} or all
 into a genome-wide collection for cTWAS. Mixing the two concrete classes is
 an error.
 }
+\examples{
+data(qtlFineMappingExample)
+combineFineMappingResults(qtlFineMappingExample)
+}
 \seealso{
 \code{\link{combineTwasWeights}}
 }

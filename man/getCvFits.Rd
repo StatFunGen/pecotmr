@@ -21,3 +21,8 @@ The \code{cvFits} list, or \code{NULL}.
 Accessor for the \code{cvFits} slot (per-fold priors +
   \code{samplePartition}).
 }
+\examples{
+U <- list(shared = diag(3), singleton = matrix(0.3, 3, 3) + diag(0.7, 3))
+mp <- MashPrior(fullFit = list(U = U, w = c(0.5, 0.5)))
+getCvFits(mp)
+}

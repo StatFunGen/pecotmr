@@ -25,13 +25,14 @@ slalom(
 \code{computeLd(X)}.}
 
 \item{standardError}{Optional numeric vector of standard errors corresponding
-to each z-score. If not provided, a default value of 1 is assumed for all variants.}
+to each z-score. If not provided, a default value of 1 is assumed for all
+variants.}
 
-\item{abfPriorVariance}{Numeric, the prior effect size variance for ABF calculations.
-Default is 0.04.}
+\item{abfPriorVariance}{Numeric, the prior effect size variance for ABF
+calculations. Default is 0.04.}
 
-\item{nlog10pDentistSThreshold}{Numeric, the -log10 DENTIST-S P value threshold
-for identifying outlier variants for prediction. Default is 4.0.}
+\item{nlog10pDentistSThreshold}{Numeric, the -log10 DENTIST-S P value
+threshold for identifying outlier variants for prediction. Default is 4.0.}
 
 \item{r2Threshold}{Numeric, the r2 threshold for DENTIST-S outlier variants
 for prediction. Default is 0.6.}
@@ -40,26 +41,33 @@ for prediction. Default is 0.6.}
 "pvalue" or "abf", with default "pvalue".}
 
 \item{ldMethod}{Character string specifying the LD computation method when
-\code{X} is provided. Passed to \code{\link{computeLd}}. One of
-\code{"sample"} (default), \code{"population"}, or \code{"gcta"}.
-Ignored when \code{R} is provided directly.}
+\code{X} is provided. Passed to \code{computeLd}. One of \code{"sample"}
+(default), \code{"population"}, or \code{"gcta"}. Ignored when \code{R} is
+provided directly.}
 }
 \value{
-A list containing the annotated LD matrix with ABF results, credible sets,
-  lead variant, and DENTIST-S statistics; and a summary dataframe with aggregate statistics.
+A list containing the annotated LD matrix with ABF results, credible
+  sets, lead variant, and DENTIST-S statistics; and a summary dataframe with
+  aggregate statistics.
 }
 \description{
-Performs Approximate Bayesian Factor (ABF) analysis, identifies credible sets,
-and annotates lead variants based on fine-mapping results. It computes p-values
-from z-scores assuming a two-sided standard normal distribution.
+Performs Approximate Bayesian Factor (ABF) analysis, identifies credible
+sets, and annotates lead variants based on fine-mapping results. It computes
+p-values from z-scores assuming a two-sided standard normal distribution.
 }
 \details{
-Provide either an LD correlation matrix \code{R} or a genotype matrix \code{X}
-(from which LD is derived automatically via \code{computeLd}).
+Provide either an LD correlation matrix \code{R} or a genotype matrix
+\code{X} (from which LD is derived automatically via \code{computeLd}).
 }
 \examples{
-results <- slalom(zScore, R = R, standardError = standardError)
+# Simulate z-scores and an LD matrix from a reference panel, then screen
+# for LD-outlier variants.
+set.seed(1)
+geno <- matrix(rbinom(500 * 100, 2, 0.3), nrow = 500, ncol = 100)
+ldMat <- cor(geno)
+zScore <- rnorm(100)
+result <- slalom(zScore, R = ldMat)
 }
 \seealso{
-\code{\link{dentistSingleWindow}}, \code{\link{resolveLdInput}}
+\code{\link{dentistSingleWindow}}, \code{resolveLdInput}
 }

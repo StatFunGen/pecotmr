@@ -28,18 +28,63 @@ getResidualizedPhenotypes(x, ...)
 \arguments{
 \item{x}{A \code{QtlDataset} object.}
 
-\item{...}{Selection arguments: \code{contexts} (required),
-\code{traitId}, \code{region},
-\code{phenotypeCovariatesToRemove},
+\item{...}{Selection arguments: \code{contexts} (required), \code{traitId},
+\code{region}, \code{phenotypeCovariatesToRemove},
 \code{genotypeCovariatesToRemove}, and \code{covariateNaAction}
 (\code{"impute"}, the default, mean-imputes missing covariate cells;
 \code{"drop"} removes samples with any missing covariate).}
+
+\item{contexts}{Character vector. Context(s) whose data to extract.}
+
+\item{traitId}{Character or \code{NULL}. Molecular trait / feature identifier
+to select; \code{NULL} matches all traits in the dataset.}
+
+\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
+Restrict variants to this region; \code{NULL} uses the full cis window /
+all regions.}
+
+\item{phenotypeCovariatesToResidualize}{Character vector or \code{NULL}.
+Phenotype covariate names to residualize; \code{NULL} uses the dataset
+default set.}
+
+\item{genotypeCovariatesToResidualize}{Character vector or \code{NULL}.
+Genotype covariate names to residualize; \code{NULL} uses the dataset
+default set.}
+
+\item{residualizePhenotypeCovariates}{Logical. Whether to residualize the
+phenotype covariates. Default \code{TRUE}.}
+
+\item{residualizeGenotypeCovariates}{Logical. Whether to residualize the
+genotype covariates. Default \code{TRUE}.}
+
+\item{residualizePhenotypeCovariatesFromPhenotypes}{Logical or \code{NULL}.
+Whether to residualize phenotype covariates out of the phenotype;
+\code{NULL} uses the default.}
+
+\item{residualizeGenotypeCovariatesFromPhenotypes}{Logical or \code{NULL}.
+Whether to residualize genotype covariates out of the phenotype;
+\code{NULL} uses the default.}
+
+\item{naAction}{Character. How to handle missing phenotype values: one of
+\code{"keep"}, \code{"drop"}, or \code{"impute"}.}
+
+\item{covariateNaAction}{Character. How to handle missing covariate values.}
+
+\item{outlierAction}{Character. How to handle phenotype outliers: one of
+\code{"keep"} or \code{"drop"}.}
+
+\item{outlierPvalThreshold}{Numeric. Two-sided p-value threshold for flagging
+phenotype outliers. Default \code{1e-3}.}
 }
 \value{
 A named list of numeric matrices keyed by context.
 }
 \description{
-Residualize the per-context phenotype matrices against
-  the per-context phenotype covariates and the genotype covariates,
-  for one or more requested contexts.
+Residualize the per-context phenotype matrices against the
+  per-context phenotype covariates and the genotype covariates, for one or
+  more requested contexts.
+}
+\examples{
+data(qtlDatasetExample)
+getResidualizedPhenotypes(qtlDatasetExample, contexts = "brain")
 }

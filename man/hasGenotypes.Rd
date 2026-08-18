@@ -16,6 +16,16 @@ hasGenotypes(x)
 Logical.
 }
 \description{
-Check whether an \code{LdData} object has a genotype
-  handle for extracting raw genotypes.
+Check whether an \code{LdData} object has a genotype handle for
+  extracting raw genotypes.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:8]
+gr <- GenomicRanges::GRanges("22",
+  IRanges::IRanges(seq(1L, by = 100L, length.out = 8), width = 1L))
+ld <- LdData(correlation = cor(X), variants = gr,
+  blockMetadata = S4Vectors::DataFrame(
+    chrom = "22", start = 1L, end = 1000L))
+hasGenotypes(ld)
 }

@@ -31,7 +31,7 @@ window), as in \code{lassosumRss()}.}
 \code{"L0"}, \code{"L0L1"}, or \code{"L0L2"}.}
 
 \item{lambda}{Numeric vector of regularization parameter values along which
-to trace a solution path (warm-started, largest-first).  For LASSO/MCP/SCAD
+to trace a solution path (warm-started, largest-first). For LASSO/MCP/SCAD
 this is the primary penalty strength; for L0 variants it controls the L1
 component.}
 
@@ -39,19 +39,20 @@ component.}
 Ignored for LASSO and L0 variants.}
 
 \item{alpha}{Elastic-net mixing for MCP/SCAD: \eqn{l_1 = \lambda \alpha},
-\eqn{l_2 = \lambda (1-\alpha)}.  Default 1 (pure L1, no ridge).}
+\eqn{l_2 = \lambda (1-\alpha)}. Default 1 (pure L1, no ridge).}
 
-\item{lambda0}{L0 penalty weight (number of non-zeros).  Required for L0
-variants; ignored otherwise.  Default 0.}
+\item{lambda0}{L0 penalty weight (number of non-zeros). Required for L0
+variants; ignored otherwise. Default 0.}
 
-\item{lambda2}{L2 penalty weight for L0L2 variant.  Default 0.}
+\item{lambda2}{L2 penalty weight for L0L2 variant. Default 0.}
 
-\item{thr}{Convergence threshold.  Default 1e-4.}
+\item{thr}{Convergence threshold. Default 1e-4.}
 
-\item{maxiter}{Maximum coordinate descent iterations per lambda.  Default 10000.}
+\item{maxiter}{Maximum coordinate descent iterations per lambda. Default
+10000.}
 
-\item{max_swaps}{Maximum swap rounds for L0 variants.  Default 100.
-Set to 0 to disable swaps.}
+\item{maxSwaps}{Maximum swap rounds for L0 variants. Default 100. Set to 0 to
+disable swaps.}
 }
 \value{
 A list with components:
@@ -69,10 +70,10 @@ A list with components:
 Generalizes \code{lassosumRss()} to support LASSO, MCP, SCAD, L0, L0L1,
 and L0L2 penalties.  Uses coordinate descent on the objective
 \deqn{\beta^T R \beta - 2 \beta^T z + \mathrm{penalty}(\beta)}
-where \eqn{R} is a (possibly pre-shrunk) LD matrix and \eqn{z = \hat\beta / \sqrt{n}}.
+where \eqn{R} is a (possibly pre-shrunk) LD matrix and \eqn{z = \hat\beta /
+\sqrt{n}}.
 }
 \examples{
-\dontrun{
 set.seed(42)
 p <- 10; n <- 100
 bhat <- rnorm(p, sd = 0.1)
@@ -84,5 +85,4 @@ penalizedRss(bhat, R, n, penalty = "SCAD")
 # L0
 penalizedRss(bhat, R, n, penalty = "L0", lambda0 = 0.01,
               lambda = c(0))
-}
 }

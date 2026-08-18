@@ -10,14 +10,20 @@ computeCovFlash(Y)
 \item{Y}{Numeric matrix (samples x conditions).}
 }
 \value{
-A covariance matrix of dimension ncol(Y) x ncol(Y), rescaled by
-  the column standard deviations of Y.
+A covariance matrix of dimension ncol(Y) x ncol(Y), rescaled by the
+  column standard deviations of Y.
 }
 \description{
 Estimates a covariance matrix from a data matrix Y using empirical Bayes
-matrix factorization (\code{flashier::flash}). When the FLASH fit finds
-no shared factors, the returned covariance is diagonal with entries
-\code{residuals_sd^2}; otherwise the factor contribution is added.
-FLASH errors are not caught; callers should handle them explicitly or
-supply a pre-computed prior covariance instead.
+matrix factorization (\code{flashier::flash}). When the FLASH fit finds no
+shared factors, the returned covariance is diagonal with entries
+\code{residuals_sd^2}; otherwise the factor contribution is added. FLASH
+errors are not caught; callers should handle them explicitly or supply a
+pre-computed prior covariance instead.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+Y <- matrix(rnorm(nrow(X) * 3), nrow(X), 3)
+computeCovFlash(Y = Y)
 }

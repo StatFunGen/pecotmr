@@ -15,8 +15,8 @@ mashCovarianceComponents(
 )
 }
 \arguments{
-\item{sumStatsList}{Named list (or \code{S4Vectors::SimpleList}) with at least
-\code{"strong"} (the discovery set the covariances are learned on).}
+\item{sumStatsList}{Named list (or \code{S4Vectors::SimpleList}) with at
+least \code{"strong"} (the discovery set the covariances are learned on).}
 
 \item{alpha}{mash \code{alpha}.}
 
@@ -43,6 +43,12 @@ Build the raw per-method data-driven covariance components
   with an ED / udr engine. Exposed on its own so a workflow can build or
   inspect a single component (the mixture-prior notebook's per-method steps)
   without running the full prior.
+}
+\examples{
+data(qtlSumStatsMulticontextExample)
+ss <- qtlSumStatsMulticontextExample
+sumStatsList <- list(strong = ss, random = ss)
+mashCovarianceComponents(sumStatsList, alpha = 0)
 }
 \seealso{
 \code{\link{mashPriorCovariances}}

@@ -18,16 +18,20 @@ fsusieCredibleBand(x, ...)
 \item{...}{Ignored.}
 }
 \value{
-A long \code{data.frame}: \code{cs, chrom, pos, effect, lower, upper}
+A long \code{tibble}: \code{cs, chrom, pos, effect, lower, upper}
   (the collection method additionally carries the entry identity columns).
 }
 \description{
-For a functional-SuSiE (\code{fsusieR::susiF}) fine-mapping entry, returns the
-fitted effect curve and its credible band over the functional grid, one row
-per (credible set, grid position). Wraps the upstream fSuSiE band computation
-(fsusieR's internal \code{update_cal_credible_band.susiF} + \code{get_fitted_effect}).
-Requires an UNtrimmed fit (the wavelet slots are dropped by trimming);
-degrades to zero rows for non-fSuSiE or trimmed fits.
+For a functional-SuSiE (\code{fsusieR::susiF}) fine-mapping entry, returns
+the fitted effect curve and its credible band over the functional grid, one
+row per (credible set, grid position). Wraps the upstream fSuSiE band
+computation (fsusieR's internal \code{update_cal_credible_band.susiF} +
+\code{get_fitted_effect}). Requires an UNtrimmed fit (the wavelet slots are
+dropped by trimming); degrades to zero rows for non-fSuSiE or trimmed fits.
+}
+\examples{
+data(fsusieFineMappingExample)
+fsusieCredibleBand(fsusieFineMappingExample)
 }
 \seealso{
 \code{\link{fsusieAffectedRegions}}

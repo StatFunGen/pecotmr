@@ -20,17 +20,22 @@ getCredibleSetSummary(x, ...)
 \item{coverage}{Credible-set coverage to summarise. Default 0.95.}
 }
 \value{
-A \code{data.frame}: \code{cs, effect_id, coverage, n_variants,
+A \code{tibble}: \code{cs, effect_id, coverage, n_variants,
   purity_min, purity_mean, V, cs_log10bf} (strongest member logBF),
   \code{cs_log_bf} (true per-effect single-effect log Bayes factor),
-  \code{cs_pip} (summed member PIP = inclusion mass captured), \code{cs_mean_effect}
-  (mean posterior conditional effect), \code{lead_variant, lead_pip} (the
-  collection method also carries the entry identity columns).
+  \code{cs_pip} (summed member PIP = inclusion mass captured),
+  \code{cs_mean_effect} (mean posterior conditional effect),
+  \code{lead_variant, lead_pip} (the collection method also carries the entry
+  identity columns).
 }
 \description{
 One row per credible set (at a given coverage) with its size, purity, prior
-variance, log Bayes factor, and lead variant — the per-CS complement to the
+variance, log Bayes factor, and lead variant -- the per-CS complement to the
 per-variant \code{\link{getCs}}. Replaces the legacy per-effect `effect.tsv`.
+}
+\examples{
+data(qtlFineMappingExample)
+getCredibleSetSummary(qtlFineMappingExample)
 }
 \seealso{
 \code{\link{getCs}}, \code{\link{getTopLoci}}

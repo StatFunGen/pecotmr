@@ -24,22 +24,38 @@ gwas_orig <- readRDS("/tmp/CLU_gwas.rds")
 eqtl_orig <- readRDS("/tmp/pseudo_bulk_CLU.rds")
 
 cat(sprintf("GWAS: %d variants\n", nrow(gwas_orig)))
-cat(sprintf("eQTL: %d samples x %d variants\n", nrow(eqtl_orig$X), ncol(eqtl_orig$X)))
+cat(sprintf(
+    "eQTL: %d samples x %d variants\n",
+    nrow(eqtl_orig$X),
+    ncol(eqtl_orig$X)
+))
 
 # ---------------------------------------------------------------------------
 # De-identification parameters
 # ---------------------------------------------------------------------------
 new_chrom <- "chr22"
-pos_offset <- 5000000L  # shift all positions
+pos_offset <- 5000000L # shift all positions
 
 # ---------------------------------------------------------------------------
 # 1. De-identify variant information
 # ---------------------------------------------------------------------------
 cat("\n=== De-identifying variants ===\n")
 new_pos <- gwas_orig$POS + pos_offset
-new_variant_ids <- paste0(new_chrom, ":", new_pos, ":", gwas_orig$A1, ":", gwas_orig$A2)
+new_variant_ids <- paste0(
+    new_chrom,
+    ":",
+    new_pos,
+    ":",
+    gwas_orig$A1,
+    ":",
+    gwas_orig$A2
+)
 
-cat(sprintf("Original position range: %d - %d\n", min(gwas_orig$POS), max(gwas_orig$POS)))
+cat(sprintf(
+    "Original position range: %d - %d\n",
+    min(gwas_orig$POS),
+    max(gwas_orig$POS)
+))
 cat(sprintf("New position range: %d - %d\n", min(new_pos), max(new_pos)))
 
 # ---------------------------------------------------------------------------
@@ -50,106 +66,119 @@ n_samples <- nrow(eqtl_orig$X)
 new_sample_names <- sprintf("sample_%03d", seq_len(n_samples))
 
 # ---------------------------------------------------------------------------
-# 3. Create gwas_sumstats_example
+# 3. Create gwasSumStatsExample
 # ---------------------------------------------------------------------------
-cat("\n=== Creating gwas_sumstats_example ===\n")
-gwas_sumstats_example <- data.frame(
-  variant_id = new_variant_ids,
-  chrom = new_chrom,
-  pos = new_pos,
-  A1 = gwas_orig$A1,
-  A2 = gwas_orig$A2,
-  beta = gwas_orig$beta,
-  se = gwas_orig$standard_error,
-  z = gwas_orig$Z,
-  stringsAsFactors = FALSE
+cat("\n=== Creating gwasSumStatsExample ===\n")
+gwasSumStatsExample <- data.frame(
+    variant_id = new_variant_ids,
+    chrom = new_chrom,
+    pos = new_pos,
+    A1 = gwas_orig$A1,
+    A2 = gwas_orig$A2,
+    beta = gwas_orig$beta,
+    se = gwas_orig$standard_error,
+    z = gwas_orig$Z,
+    stringsAsFactors = FALSE
 )
-cat(sprintf("  %d variants, %d columns\n", nrow(gwas_sumstats_example), ncol(gwas_sumstats_example)))
+cat(sprintf(
+    "  %d variants, %d columns\n",
+    nrow(gwasSumStatsExample),
+    ncol(gwasSumStatsExample)
+))
 
 # ---------------------------------------------------------------------------
-# 4. Create eqtl_region_example
+# 4. Create eqtlRegionExample
 # ---------------------------------------------------------------------------
-cat("\n=== Creating eqtl_region_example ===\n")
+cat("\n=== Creating eqtlRegionExample ===\n")
 X_new <- eqtl_orig$X
-colnames(X_new) <- gsub("_", ":", gsub("^chr8:", paste0(new_chrom, ":"), colnames(X_new)))
+colnames(X_new) <- gsub(
+    "_",
+    ":",
+    gsub("^chr8:", paste0(new_chrom, ":"), colnames(X_new))
+)
 # Now shift positions in column names to match new_variant_ids
 # Column names are like chr8:27119788:A:G -> chr22:32119788:A:G
 colnames(X_new) <- new_variant_ids
 rownames(X_new) <- new_sample_names
 
-y_new <- eqtl_orig$y_res
+y_new <- eqtl_orig$yRes
 names(y_new) <- new_sample_names
 
-eqtl_region_example <- list(X = X_new, y_res = y_new)
-cat(sprintf("  X: %d x %d, y_res: %d\n",
-            nrow(eqtl_region_example$X),
-            ncol(eqtl_region_example$X),
-            length(eqtl_region_example$y_res)))
+eqtlRegionExample <- list(X = X_new, yRes = y_new)
+cat(sprintf(
+    "  X: %d x %d, yRes: %d\n",
+    nrow(eqtlRegionExample$X),
+    ncol(eqtlRegionExample$X),
+    length(eqtlRegionExample$yRes)
+))
 
 # ---------------------------------------------------------------------------
-# 5. Create gwas_finemapping_example (SuSiE RSS on GWAS z-scores)
+# 5. Create gwasFineMappingExample (SuSiE RSS on GWAS z-scores)
 # ---------------------------------------------------------------------------
 cat("\n=== Running SuSiE RSS for GWAS fine-mapping ===\n")
-R <- cor(eqtl_region_example$X)
-z_gwas <- gwas_sumstats_example$z
+R <- cor(eqtlRegionExample$X)
+z_gwas <- gwasSumStatsExample$z
 names(z_gwas) <- new_variant_ids
 
 # Use a realistic GWAS sample size; the exact value is not critical for the
 # example but is needed for susie_rss to calibrate effect sizes.
 gwas_n <- 400000L
 gwas_susie <- susie_rss(
-  z = z_gwas,
-  R = R,
-  n = gwas_n,
-  L = 10,
-  max_iter = 500,
-  estimate_prior_variance = TRUE,
-  verbose = FALSE
+    z = z_gwas,
+    R = R,
+    n = gwas_n,
+    L = 10,
+    max_iter = 500,
+    estimate_prior_variance = TRUE,
+    verbose = FALSE
 )
 names(gwas_susie$pip) <- new_variant_ids
 
 # Trim to essential fields to reduce file size
 gwas_susie_trimmed <- list(
-  alpha = gwas_susie$alpha,
-  pip = gwas_susie$pip,
-  V = gwas_susie$V,
-  sets = gwas_susie$sets
+    alpha = gwas_susie$alpha,
+    pip = gwas_susie$pip,
+    V = gwas_susie$V,
+    sets = gwas_susie$sets
 )
 # Store as list where [[1]] is the SuSiE object (matching xqtl_enrichment_wrapper format)
-gwas_finemapping_example <- list(gwas_susie_trimmed)
-cat(sprintf("  SuSiE converged, %d credible sets\n", length(gwas_susie$sets$cs)))
+gwasFineMappingExample <- list(gwas_susie_trimmed)
+cat(sprintf(
+    "  SuSiE converged, %d credible sets\n",
+    length(gwas_susie$sets$cs)
+))
 
 # ---------------------------------------------------------------------------
-# 6. Create qtl_finemapping_example (SuSiE on eQTL individual-level data)
+# 6. Create qtlFineMappingExample (SuSiE on eQTL individual-level data)
 # ---------------------------------------------------------------------------
 cat("\n=== Running SuSiE for QTL fine-mapping ===\n")
 qtl_susie <- susie(
-  X = eqtl_region_example$X,
-  y = eqtl_region_example$y_res,
-  L = 10,
-  max_iter = 500,
-  estimate_residual_variance = TRUE,
-  estimate_prior_variance = TRUE,
-  verbose = FALSE
+    X = eqtlRegionExample$X,
+    y = eqtlRegionExample$yRes,
+    L = 10,
+    max_iter = 500,
+    estimate_residual_variance = TRUE,
+    estimate_prior_variance = TRUE,
+    verbose = FALSE
 )
 names(qtl_susie$pip) <- new_variant_ids
 
 # Trim to just the fields needed for enrichment analysis
 qtl_susie_trimmed <- list(
-  alpha = qtl_susie$alpha,
-  pip = qtl_susie$pip,
-  V = qtl_susie$V,
-  sets = qtl_susie$sets
+    alpha = qtl_susie$alpha,
+    pip = qtl_susie$pip,
+    V = qtl_susie$V,
+    sets = qtl_susie$sets
 )
 
 # Store as nested list: [[region]][[context]]$susie_result_trimmed + $variant_names
-qtl_finemapping_example <- list(
-  region_1 = list(
-    context_1 = list(
-      susie_result_trimmed = qtl_susie_trimmed,
-      variant_names = new_variant_ids
+qtlFineMappingExample <- list(
+    region_1 = list(
+        context_1 = list(
+            susie_result_trimmed = qtl_susie_trimmed,
+            variant_names = new_variant_ids
+        )
     )
-  )
 )
 cat(sprintf("  SuSiE converged, %d credible sets\n", length(qtl_susie$sets$cs)))
 
@@ -159,22 +188,34 @@ cat(sprintf("  SuSiE converged, %d credible sets\n", length(qtl_susie$sets$cs)))
 cat("\n=== Saving data objects ===\n")
 data_dir <- "data"
 
-save(gwas_sumstats_example,
-     file = file.path(data_dir, "gwas_sumstats_example.rda"),
-     compress = "xz")
-save(eqtl_region_example,
-     file = file.path(data_dir, "eqtl_region_example.rda"),
-     compress = "xz")
-save(gwas_finemapping_example,
-     file = file.path(data_dir, "gwas_finemapping_example.rda"),
-     compress = "xz")
-save(qtl_finemapping_example,
-     file = file.path(data_dir, "qtl_finemapping_example.rda"),
-     compress = "xz")
+save(
+    gwasSumStatsExample,
+    file = file.path(data_dir, "gwasSumStatsExample.rda"),
+    compress = "xz"
+)
+save(
+    eqtlRegionExample,
+    file = file.path(data_dir, "eqtlRegionExample.rda"),
+    compress = "xz"
+)
+save(
+    gwasFineMappingExample,
+    file = file.path(data_dir, "gwasFineMappingExample.rda"),
+    compress = "xz"
+)
+save(
+    qtlFineMappingExample,
+    file = file.path(data_dir, "qtlFineMappingExample.rda"),
+    compress = "xz"
+)
 
 # Print file sizes
 for (f in list.files(data_dir, pattern = "example", full.names = TRUE)) {
-  cat(sprintf("  %s: %s\n", basename(f), format(file.size(f), big.mark = ",")))
+    cat(sprintf(
+        "  %s: %s\n",
+        basename(f),
+        format(file.size(f), big.mark = ",")
+    ))
 }
 
 cat("\nDone! All example data objects created.\n")

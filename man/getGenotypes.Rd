@@ -24,15 +24,31 @@ getGenotypes(x, ...)
 
 \item{...}{Class-specific selection arguments (e.g., \code{traitId},
 \code{region}, \code{cisWindow} for \code{QtlDataset}).}
+
+\item{traitId}{Character or \code{NULL}. Molecular trait / feature identifier
+to select; \code{NULL} matches all traits in the dataset.}
+
+\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
+Restrict variants to this region; \code{NULL} uses the full cis window /
+all regions.}
+
+\item{cisWindow}{Integer or \code{NULL}. Half-width (bp) of the cis window
+around the trait; \code{NULL} uses the dataset default.}
+
+\item{samples}{Character vector or \code{NULL}. Restrict to these sample IDs;
+\code{NULL} uses all samples.}
 }
 \value{
 A numeric matrix, a list of matrices, or \code{NULL}.
 }
 \description{
-Extract a genotype matrix from an object that carries
-  genotype data. For an \code{LdData}, returns the underlying genotype
-  matrix via its handle (or \code{NULL} if no handle is available).
-  For a \code{QtlDataset}, returns the genotype matrix for a selected
-  set of traits or region (see method documentation for the
-  per-class selection arguments).
+Extract a genotype matrix from an object that carries genotype
+  data. For an \code{LdData}, returns the underlying genotype matrix via its
+  handle (or \code{NULL} if no handle is available). For a \code{QtlDataset},
+  returns the genotype matrix for a selected set of traits or region (see
+  method documentation for the per-class selection arguments).
+}
+\examples{
+data(qtlDatasetExample)
+getGenotypes(qtlDatasetExample)
 }

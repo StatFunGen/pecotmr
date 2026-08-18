@@ -13,7 +13,7 @@
 data.frame with chrom, id, pos, A2, A1 columns.
 }
 \description{
-Convert GenotypeHandle snpInfo (uppercase columns) to
-  pecotmr variant_info format (lowercase columns).
+Convert GenotypeHandle snpInfo (uppercase columns) to pecotmr
+  variant_info format (lowercase columns).
 }
 \keyword{internal}

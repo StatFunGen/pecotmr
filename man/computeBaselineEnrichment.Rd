@@ -21,13 +21,12 @@ block-level tau values, or NULL.}
 \item{h2}{Numeric scalar, total estimated h2.}
 }
 \value{
-A data.frame with columns: annotation, tau, tauSe, enrichment,
+A tibble with columns: annotation, tau, tauSe, enrichment,
   enrichmentSe, enrichmentP, propH2, propSnps.
 }
 \description{
-Given tau coefficients and a baseline annotation matrix,
-  compute the full set of enrichment quantities: propH2, propSnps,
-  enrichment ratio, enrichment SE (from jackknife or delta method),
-  and p-value.
+Given tau coefficients and a baseline annotation matrix, compute
+  the full set of enrichment quantities: propH2, propSnps, enrichment ratio,
+  enrichment SE (from jackknife or delta method), and p-value.
 }
 \keyword{internal}

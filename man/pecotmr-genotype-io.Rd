@@ -4,8 +4,8 @@
 \alias{pecotmr-genotype-io}
 \title{Genotype I/O via GenotypeHandle}
 \description{
-Read genotype data from various formats (VCF, plink1,
-  plink2, GDS) and provide block-level genotype extraction without
-  requiring format conversion.
+Read genotype data from various formats (VCF, plink1, plink2,
+  GDS) and provide block-level genotype extraction without requiring format
+  conversion.
 }
 \keyword{internal}

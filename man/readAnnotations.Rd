@@ -10,13 +10,13 @@ readAnnotations(paths, snpRanges, annotationMeta = NULL, genome = "hg19", ...)
 \S4method{readAnnotations}{character}(paths, snpRanges, annotationMeta = NULL, genome = "hg19", ...)
 }
 \arguments{
-\item{paths}{Named character vector of file paths, or a named list
-of GRanges objects. Names become annotation names.}
+\item{paths}{Named character vector of file paths, or a named list of GRanges
+objects. Names become annotation names.}
 
 \item{snpRanges}{A \code{GRanges} object defining SNP positions.}
 
-\item{annotationMeta}{A \code{data.frame} with annotation metadata
-(name, tier, type). If NULL, auto-detected from file format.}
+\item{annotationMeta}{A \code{data.frame} with annotation metadata (name,
+tier, type). If NULL, auto-detected from file format.}
 
 \item{genome}{Character, genome build.}
 
@@ -26,7 +26,13 @@ of GRanges objects. Names become annotation names.}
 An \code{AnnotationMatrix} object.
 }
 \description{
-Read genomic annotations from files (BED, BigWig,
-  S-LDSC .annot format, or GRanges objects) and create an
-  AnnotationMatrix.
+Read genomic annotations from files (BED, BigWig, S-LDSC .annot
+  format, or GRanges objects) and create an AnnotationMatrix.
+}
+\examples{
+bedFile <- tempfile(fileext = ".bed")
+writeLines("chr1\t100\t500\tregion1", bedFile)
+snpRanges <- GenomicRanges::GRanges(
+  rep("chr1", 3), IRanges::IRanges(c(50, 200, 600), width = 1))
+readAnnotations(c(enhancer = bedFile), snpRanges, genome = "hg38")
 }

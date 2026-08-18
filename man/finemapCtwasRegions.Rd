@@ -7,27 +7,47 @@
 finemapCtwasRegions(screenResult, L = 5L, ncore = 1L, ...)
 }
 \arguments{
-\item{screenResult}{A list returned by
-\code{\link{screenCtwasRegions}}.}
+\item{screenResult}{A list returned by \code{\link{screenCtwasRegions}}.}
 
 \item{L}{Pass-through.}
 
 \item{ncore}{Number of cores.}
 
-\item{...}{Additional arguments forwarded to
-\code{ctwas::finemap_regions}.}
+\item{...}{Additional arguments forwarded to \code{ctwas::finemap_regions}.}
 }
 \value{
 A list mirroring \code{ctwas::ctwas_sumstats}'s output:
-  \code{z_gene}, \code{param}, \code{finemap_res},
-  \code{susie_alpha_res}, \code{region_data}, \code{boundary_genes},
-  \code{screen_res}.
+  \code{z_gene}, \code{param}, \code{finemap_res}, \code{susie_alpha_res},
+  \code{region_data}, \code{boundary_genes}, \code{screen_res}.
 }
 \description{
-Step 4 (final) of the three-step
-  \code{\link{ctwasPipeline}}: runs \code{ctwas::finemap_regions} on
-  the screened-region set from \code{\link{screenCtwasRegions}} and
-  assembles the documented top-level ctwas output (\code{z_gene},
-  \code{param}, \code{finemap_res}, \code{susie_alpha_res},
-  \code{region_data}, \code{boundary_genes}, \code{screen_res}).
+Step 4 (final) of the three-step \code{\link{ctwasPipeline}}:
+  runs \code{ctwas::finemap_regions} on the screened-region set from
+  \code{\link{screenCtwasRegions}} and assembles the documented top-level
+  ctwas output (\code{z_gene}, \code{param}, \code{finemap_res},
+  \code{susie_alpha_res}, \code{region_data}, \code{boundary_genes},
+  \code{screen_res}).
+}
+\examples{
+data(ctwasWeightsExample)
+ldDir <- system.file("extdata", "ld_reference", "chr22",
+  package = "pecotmr")
+ldStem <- file.path(ldDir, "protocol_example.LD.chr22")
+gwasTsv <- system.file("extdata", "manifests",
+  "protocol_example.twas.gwas_sumstats.chr22.tsv.gz", package = "pecotmr")
+mani <- data.frame(study = "gwas1", sumStatsPath = gwasTsv)
+blocks <- list(c(10000000, 15000000), c(15000000, 19000000))
+gwasByRegion <- list()
+for (b in blocks) {
+  rid <- sprintf("chr22_\%d_\%d", b[1], b[2])
+  gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
+    ldSketch = ldStem, region = sprintf("chr22:\%d-\%d", b[1], b[2]))
+  gwasByRegion[[rid]] <- summaryStatsQc(gss, mafCutoff = 0.0025)
+}
+inp <- assembleCtwasInputs(gwasSumStats = gwasByRegion,
+  twasWeights = list(ctwasWeightsExample))
+est <- estCtwasParam(inp, thin = 1, niterPrefit = 3, niter = 10,
+  min_group_size = 1, min_p_single_effect = 0, fallbackToPrefit = TRUE)
+screened <- screenCtwasRegions(est, L = 5L)
+finemapCtwasRegions(screened, L = 5L)
 }

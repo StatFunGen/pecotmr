@@ -22,3 +22,7 @@ Extract the marginal effect-size (beta) vector from a
   \code{GwasSumStats} or \code{QtlSumStats} entry, selected by its identity
   tuple.
 }
+\examples{
+data(qtlSumStatsExample)
+getBeta(qtlSumStatsExample)
+}

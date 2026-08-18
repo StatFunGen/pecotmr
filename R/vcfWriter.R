@@ -5,143 +5,381 @@
 #' @importFrom Biostrings DNAStringSet DNAStringSetList
 #' @importFrom Rsamtools asBcf
 #' @importFrom tools file_ext
+#' @importFrom stringr str_sub
+#' @importFrom purrr map map_chr keep set_names list_flatten
 NULL
 
 #' @rdname writeSumstatsVcf
 #' @export
-setMethod("writeSumstatsVcf", signature("GwasSumStats"),
-  function(x, outputPath, sampleName = NULL, study = NULL, ...) {
-    # nocov start
-    if (!requireNamespace("VariantAnnotation", quietly = TRUE))
-      stop("Package 'VariantAnnotation' is required for writeSumstatsVcf")
-    # nocov end
-
-    # Select which study to write (the new GwasSumStats can hold many).
-    if (is.null(study)) {
-      if (nrow(x) != 1L) {
-        stop("This GwasSumStats has ", nrow(x),
-             " studies. Pass `study = <name>` to select one.")
-      }
-      study <- as.character(x$study[[1L]])
+setMethod(
+    "writeSumstatsVcf",
+    signature("GwasSumStats"),
+    function(x, outputPath, sampleName = NULL, study = NULL, ...) {
+        # nocov start
+        if (!requireNamespace("VariantAnnotation", quietly = TRUE)) {
+            abort(
+                "Package 'VariantAnnotation' is required for writeSumstatsVcf"
+            )
+        }
+        # nocov end
+        study <- .vcfResolveStudy(x, study)
+        ss <- getSumStats(x, study = study)
+        mc <- mcols(ss)
+        .writeVcfImpl(
+            chrom = as.character(seqnames(ss)),
+            pos = start(ss),
+            ref = mc$A2,
+            alt = mc$A1,
+            snpIds = mc$SNP,
+            geno = .vcfSumstatsGeno(mc, length(ss)),
+            genoHeader = .vcfSumstatsGenoHeader(),
+            sampleName = sampleName %||% study,
+            outputPath = outputPath
+        )
     }
-    ss <- getSumStats(x, study = study)
-    mc <- mcols(ss)
-    sampleName <- sampleName %||% study
+)
 
-    nSnps <- length(ss)
+# Select which study to write (a GwasSumStats can hold many); a single-study
+# collection defaults to its one study.
+# @noRd
+.vcfResolveStudy <- function(x, study) {
+    if (!is.null(study)) {
+        return(study)
+    }
+    if (nrow(x) != 1L) {
+        msg <- glue(
+            "This GwasSumStats has {nrow(x)} studies. ",
+            "Pass `study = <name>` to select one."
+        )
+        abort(msg)
+    }
+    as.character(x$study[[1L]])
+}
+
+# Per-sample geno matrices (ES / SS / AF) for the fields present in the mcols.
+# @noRd
+.vcfSumstatsGeno <- function(mc, nSnps) {
     geno <- list()
-    if ("Z" %in% colnames(mc))
-      geno[["ES"]] <- matrix(mc$Z, nSnps)
-    if ("N" %in% colnames(mc))
-      geno[["SS"]] <- matrix(as.integer(mc$N), nSnps)
-    if ("MAF" %in% colnames(mc))
-      geno[["AF"]] <- matrix(mc$MAF, nSnps)
+    if (is_in("Z", colnames(mc))) {
+        geno[["ES"]] <- matrix(mc$Z, nSnps)
+    }
+    if (is_in("N", colnames(mc))) {
+        geno[["SS"]] <- matrix(as.integer(mc$N), nSnps)
+    }
+    if (is_in("MAF", colnames(mc))) {
+        geno[["AF"]] <- matrix(mc$MAF, nSnps)
+    }
+    geno
+}
 
-    genoHeader <- DataFrame(
-      Number = c("A", "A", "A"),
-      Type = c("Float", "Integer", "Float"),
-      Description = c(
-        "Z-score of effect size estimate",
-        "Sample size",
-        "Minor allele frequency"),
-      row.names = c("ES", "SS", "AF"))
-
-    .writeVcfImpl(
-      chrom = as.character(seqnames(ss)),
-      pos = start(ss),
-      ref = mc$A2,
-      alt = mc$A1,
-      snpIds = mc$SNP,
-      geno = geno,
-      genoHeader = genoHeader,
-      sampleName = sampleName,
-      outputPath = outputPath)
-  })
+# The fixed FORMAT header for the sumstats geno fields (ES / SS / AF).
+# @noRd
+.vcfSumstatsGenoHeader <- function() {
+    DataFrame(
+        Number = c("A", "A", "A"),
+        Type = c("Float", "Integer", "Float"),
+        Description = c(
+            "Z-score of effect size estimate",
+            "Sample size",
+            "Minor allele frequency"
+        ),
+        row.names = c("ES", "SS", "AF")
+    )
+}
 
 #' @rdname writeSumstatsVcf
 #' @export
-setMethod("writeSumstatsVcf", signature("FineMappingResultBase"),
-  function(x, outputPath, sampleName = NULL,
-           study = NULL, context = NULL, trait = NULL, method = NULL,
-           splitByContext = FALSE, splitByTrait = FALSE,
-           ...) {
-  # nocov start
-  if (!requireNamespace("VariantAnnotation", quietly = TRUE))
-    stop("Package 'VariantAnnotation' is required for writeSumstatsVcf")
-  # nocov end
+setMethod(
+    "writeSumstatsVcf",
+    signature("FineMappingResultBase"),
+    function(
+        x,
+        outputPath,
+        sampleName = NULL,
+        study = NULL,
+        context = NULL,
+        trait = NULL,
+        method = NULL,
+        splitByContext = FALSE,
+        splitByTrait = FALSE,
+        ...
+    ) {
+        # nocov start
+        if (!requireNamespace("VariantAnnotation", quietly = TRUE)) {
+            abort(
+                "Package 'VariantAnnotation' is required for writeSumstatsVcf"
+            )
+        }
+        # nocov end
 
-  # Resolve the set of rows to write. With both selectors NULL and no
-  # split flags, the collection must have exactly one row. Splitting
-  # iterates over the unique values of the requested axis.
-  rowSpecs <- .resolveFineMappingRows(
-    x, study = study, context = context, trait = trait, method = method,
-    splitByContext = splitByContext, splitByTrait = splitByTrait)
-  out <- character(length(rowSpecs))
-  for (i in seq_along(rowSpecs)) {
-    spec <- rowSpecs[[i]]
-    out[[i]] <- .writeFineMappingVcf(x, spec,
-                                     outputPath = outputPath,
-                                     sampleName = sampleName,
-                                     splitByContext = splitByContext,
-                                     splitByTrait   = splitByTrait)
-  }
-  invisible(out)
-})
+        # Resolve the set of rows to write. With both selectors NULL and no
+        # split flags, the collection must have exactly one row. Splitting
+        # iterates over the unique values of the requested axis.
+        rowSpecs <- .resolveFineMappingRows(
+            x,
+            study = study,
+            context = context,
+            trait = trait,
+            method = method,
+            splitByContext = splitByContext,
+            splitByTrait = splitByTrait
+        )
+        out <- character(length(rowSpecs))
+        for (i in seq_along(rowSpecs)) {
+            spec <- rowSpecs[[i]]
+            out[[i]] <- .writeFineMappingVcf(
+                x,
+                spec,
+                outputPath = outputPath,
+                sampleName = sampleName,
+                splitByContext = splitByContext,
+                splitByTrait = splitByTrait
+            )
+        }
+        invisible(out)
+    }
+)
 
 # Resolve which (study, context, trait, method) rows to write. Without
 # the split flags this returns a single spec; with `splitByContext` or
 # `splitByTrait` the collection's rows are walked and one spec is emitted
 # per row (after applying any explicit selector filters).
 # @noRd
-.resolveFineMappingRows <- function(x, study, context, trait, method,
-                                    splitByContext, splitByTrait) {
-  hasContextSlot <- "context" %in% names(x)
-  hasTraitSlot   <- "trait"   %in% names(x)
-  rows <- seq_len(nrow(x))
-  if (!is.null(study))   rows <- rows[as.character(x$study)[rows]   == study]
-  if (hasContextSlot && !is.null(context))
-    rows <- rows[as.character(x$context)[rows] == context]
-  if (hasTraitSlot && !is.null(trait))
-    rows <- rows[as.character(x$trait)[rows]   == trait]
-  if (!is.null(method))  rows <- rows[as.character(x$method)[rows]  == method]
-  if (length(rows) == 0L)
-    stop("writeSumstatsVcf: no rows match the supplied selectors.")
-  if (!isTRUE(splitByContext) && !isTRUE(splitByTrait)) {
-    if (length(rows) != 1L)
-      stop("This FineMappingResult has ", length(rows), " matching rows. ",
-           "Pass `study`/`context`/`trait`/`method` to select one, or ",
-           "set `splitByContext = TRUE` / `splitByTrait = TRUE` to emit ",
-           "one file per row.")
-    return(list(.rowSpec(x, rows[[1L]])))
-  }
-  lapply(rows, function(r) .rowSpec(x, r))
+.resolveFineMappingRows <- function(
+    x,
+    study,
+    context,
+    trait,
+    method,
+    splitByContext,
+    splitByTrait
+) {
+    hasContextSlot <- is_in("context", names(x))
+    hasTraitSlot <- is_in("trait", names(x))
+    rows <- seq_len(nrow(x))
+    if (!is.null(study)) {
+        rows <- rows[as.character(x$study)[rows] == study]
+    }
+    if (hasContextSlot && !is.null(context)) {
+        rows <- rows[as.character(x$context)[rows] == context]
+    }
+    if (hasTraitSlot && !is.null(trait)) {
+        rows <- rows[as.character(x$trait)[rows] == trait]
+    }
+    if (!is.null(method)) {
+        rows <- rows[as.character(x$method)[rows] == method]
+    }
+    if (length(rows) == 0L) {
+        abort("writeSumstatsVcf: no rows match the supplied selectors.")
+    }
+    if (!isTRUE(splitByContext) && !isTRUE(splitByTrait)) {
+        if (length(rows) != 1L) {
+            msg <- glue(
+                "This FineMappingResult has {length(rows)} matching rows. ",
+                "Pass `study`/`context`/`trait`/`method` to select one, or ",
+                "set `splitByContext = TRUE` / `splitByTrait = TRUE` to emit ",
+                "one file per row."
+            )
+            abort(msg)
+        }
+        return(list(.rowSpec(rows[[1L]], x)))
+    }
+    map(rows, .rowSpec, x = x)
 }
 
 # Build a (study, context, trait, method) spec list for one row index.
 # @noRd
-.rowSpec <- function(x, r) {
-  list(
-    study   = as.character(x$study)[r],
-    context = if ("context" %in% names(x)) as.character(x$context)[r]
-              else NA_character_,
-    trait   = if ("trait"   %in% names(x)) as.character(x$trait)[r]
-              else NA_character_,
-    method  = as.character(x$method)[r])
+.rowSpec <- function(r, x) {
+    list(
+        study = as.character(x$study)[r],
+        context = if (is_in("context", names(x))) {
+            as.character(x$context)[r]
+        } else {
+            NA_character_
+        },
+        trait = if (is_in("trait", names(x))) {
+            as.character(x$trait)[r]
+        } else {
+            NA_character_
+        },
+        method = as.character(x$method)[r]
+    )
 }
 
-# Extract column `nm` from `df`, or an all-NA vector of length nSnps when absent.
+# Extract column `nm` from `df`, or an all-NA vector of length nSnps when
+# absent.
 # @noRd
 .vcfCol <- function(df, nm, nSnps) {
-  if (!is.null(df) && nm %in% names(df)) df[[nm]] else rep(NA, nSnps)
+    if (!is.null(df) && is_in(nm, names(df))) df[[nm]] else rep(NA, nSnps)
 }
 
-# Append one FORMAT field to the VCF geno accumulator `acc` (an environment
-# holding geno + the header columns, plus nSnps for the matrix reshape).
+# One VCF FORMAT field spec: name, per-variant `values`, VCF `type`
+# (Float/Integer), and header `desc`. Number is always "A" (per-allele).
 # @noRd
-.vcfAddGeno <- function(acc, name, vec, type, desc) {
-  acc$geno[[name]] <- matrix(vec, acc$nSnps)
-  acc$hdrRows <- c(acc$hdrRows, name); acc$hdrNum <- c(acc$hdrNum, "A")
-  acc$hdrType <- c(acc$hdrType, type); acc$hdrDesc <- c(acc$hdrDesc, desc)
+.vcfSpec <- function(name, values, type, desc) {
+    list(name = name, values = values, type = type, desc = desc)
+}
+
+# Core FORMAT fields shared by univariate + posterior VCFs: effect size
+# (posterior conditional effect, else marginal beta), standard error, -log10
+# p-value, sample size, and effect-allele frequency. Returns a list of specs;
+# empty (all-NA) ones are dropped downstream.
+# @noRd
+.vcfCoreSpecs <- function(base, m, nSnps) {
+    es <- .vcfCol(base, "conditional_effect", nSnps)
+    if (all(is.na(es))) {
+        es <- .vcfCol(m, "beta", nSnps)
+    }
+    af <- .vcfCol(base, "af", nSnps)
+    if (all(is.na(af))) {
+        af <- .vcfCol(m, "af", nSnps)
+    }
+    p <- .vcfCol(m, "p", nSnps)
+    lp <- if_else(is.na(p) | p <= 0, NA_real_, -log10(p))
+    list(
+        .vcfSpec(
+            "ES",
+            es,
+            "Float",
+            str_c(
+                "Effect size (posterior conditional effect, ",
+                "else marginal beta), effect allele"
+            )
+        ),
+        .vcfSpec(
+            "SE",
+            .vcfCol(m, "se", nSnps),
+            "Float",
+            "Standard error of the marginal effect-size estimate"
+        ),
+        .vcfSpec(
+            "LP",
+            lp,
+            "Float",
+            "-log10 p-value of the marginal univariate effect"
+        ),
+        .vcfSpec(
+            "SS",
+            as.integer(.vcfCol(m, "N", nSnps)),
+            "Integer",
+            "Sample size"
+        ),
+        .vcfSpec("AF", af, "Float", "Allele frequency (effect allele)")
+    )
+}
+
+# Credible-set FORMAT fields. pecotmr emits CS<coverage> (+ PUR<coverage> when
+# a purity column exists) for EVERY cs_<coverage> column present, so coverage
+# levels are data-driven rather than the 50/70/95 xqtl-protocol default.
+# @noRd
+.vcfCsSpecs <- function(base) {
+    csCols <- names(base)[str_detect(names(base), "^cs_[0-9.]+$")]
+    perCol <- map(csCols, .vcfCsColSpecs, base = base)
+    list_flatten(perCol)
+}
+
+# Per-CS variant-level fullFit FORMAT fields (within_cs_pip scalar plus the
+# wide within_cs_pip_<lab> / cs_logbf_<lab> / cs_effect_<lab> sets emitted when
+# the topLoci was built with fullFit = TRUE). Each column becomes an uppercase
+# field.
+# @noRd
+.vcfFullFitSpecs <- function(base) {
+    cols <- names(base)[str_detect(
+        names(base),
+        "^(within_cs_pip|cs_logbf_|cs_effect_)"
+    )]
+    map(cols, .vcfFullFitColSpec, base = base)
+}
+
+# Posterior FORMAT fields, only when a fine-mapping posterior table exists:
+# PIP, per-variant log Bayes factor, local false sign rate, plus the dynamic
+# credible-set and fullFit column sets.
+# @noRd
+.vcfPosteriorSpecs <- function(base, nSnps) {
+    fixed <- list(
+        .vcfSpec(
+            "PIP",
+            .vcfCol(base, "pip", nSnps),
+            "Float",
+            "Posterior inclusion probability"
+        ),
+        .vcfSpec(
+            "LBF",
+            .vcfCol(base, "logBF", nSnps),
+            "Float",
+            "Per-variant log Bayes factor (max single effect)"
+        ),
+        .vcfSpec(
+            "LFSR",
+            .vcfCol(base, "lfsr", nSnps),
+            "Float",
+            "Local false sign rate (per-condition posterior)"
+        )
+    )
+    c(fixed, .vcfCsSpecs(base), .vcfFullFitSpecs(base))
+}
+
+# Resolve the per-variant body: the fine-mapping POSTERIOR (getTopLoci at
+# signalCutoff 0 = every fitted variant, carrying pip / CS membership /
+# conditional effect) joined to the MARGINAL univariate sumstats
+# (getMarginalEffects) where those exist. mvSuSiE / fSuSiE have no marginal
+# sumstats, so the posterior drives the variant set; univariate susie adds
+# marginal ES=beta / SE / LP / AF on top. Returns list(base, m, hasPost).
+# @noRd
+.vcfResolveBody <- function(entry, sn) {
+    post <- tryCatch(
+        as_tibble(getTopLoci(entry, signalCutoff = 0)),
+        error = function(e) NULL
+    )
+    marg <- tryCatch(
+        as_tibble(getMarginalEffects(entry)),
+        error = function(e) NULL
+    )
+    hasPost <- !is.null(post) && nrow(post) > 0L
+    hasMarg <- !is.null(marg) && nrow(marg) > 0L
+    if (hasPost) {
+        base <- post
+        m <- if (hasMarg) {
+            slice(marg, match(base$variant_id, marg$variant_id))
+        } else {
+            NULL
+        }
+    } else if (hasMarg) {
+        base <- marg
+        m <- marg
+    } else {
+        msg <- glue("writeSumstatsVcf: entry [{sn}] has no variants to write")
+        abort(msg)
+    }
+    list(base = base, m = m, hasPost = hasPost)
+}
+
+# Materialise the collected FORMAT specs into the geno matrix list + header
+# DataFrame (dropping all-NA specs) and write the VCF via .writeVcfImpl.
+# @noRd
+.vcfWriteSpecs <- function(base, specs, sn, finalPath, nSnps) {
+    specs <- keep(specs, .vcfSpecHasValues)
+    geno <- set_names(
+        map(specs, .vcfSpecMatrix, nSnps = nSnps),
+        map_chr(specs, "name")
+    )
+    genoHeader <- DataFrame(
+        Number = rep("A", length(specs)),
+        Type = map_chr(specs, "type"),
+        Description = map_chr(specs, "desc"),
+        row.names = map_chr(specs, "name")
+    )
+    .writeVcfImpl(
+        chrom = .vcfCol(base, "chrom", nSnps),
+        pos = .vcfCol(base, "pos", nSnps),
+        ref = .vcfCol(base, "A2", nSnps),
+        alt = .vcfCol(base, "A1", nSnps),
+        snpIds = .vcfCol(base, "variant_id", nSnps),
+        geno = geno,
+        genoHeader = genoHeader,
+        sampleName = sn,
+        outputPath = finalPath
+    )
 }
 
 # Internal worker: write one (study, context, trait, method) tuple to a
@@ -149,226 +387,263 @@ setMethod("writeSumstatsVcf", signature("FineMappingResultBase"),
 # output path is decorated with the corresponding tag(s) so multiple
 # files don't collide.
 # @noRd
-.writeFineMappingVcf <- function(x, spec, outputPath, sampleName,
-                                 splitByContext, splitByTrait) {
-  entry <- getFineMappingResult(x, spec$study, spec$context, spec$trait,
-                                spec$method)
-  finalPath <- .decorateOutputPath(outputPath, spec, splitByContext,
-                                   splitByTrait)
-  sn <- sampleName %||% sprintf("%s|%s|%s|%s",
-                                 spec$study, spec$context %||% "_",
-                                 spec$trait %||% "_", spec$method)
-
-  # Per-variant body: the fine-mapping POSTERIOR (getTopLoci at signalCutoff 0 =
-  # every fitted variant, carrying pip / CS membership / conditional effect),
-  # joined to the MARGINAL univariate sumstats (getMarginalEffects) where those
-  # exist. mvSuSiE / fSuSiE have no marginal sumstats, so the posterior drives
-  # the variant set and supplies ES=conditional_effect + PIP + CS; univariate
-  # susie adds marginal ES=beta / SE / LP / AF on top. This restores the legacy
-  # create_vcf fields (ES / CS / PIP) the mv_susie cell wrote.
-  post <- tryCatch(as.data.frame(getTopLoci(entry, signalCutoff = 0)),
-                   error = function(e) NULL)
-  marg <- tryCatch(as.data.frame(getMarginalEffects(entry)),
-                   error = function(e) NULL)
-  hasPost <- !is.null(post) && nrow(post) > 0L
-  hasMarg <- !is.null(marg) && nrow(marg) > 0L
-  if (hasPost) {
-    base <- post
-    m <- if (hasMarg) marg[match(base$variant_id, marg$variant_id), , drop = FALSE]
-         else NULL
-  } else if (hasMarg) {
-    base <- marg; m <- marg
-  } else {
-    stop("writeSumstatsVcf: entry [", sn, "] has no variants to write")
-  }
-  nSnps <- nrow(base)
-
-  acc <- new.env(parent = emptyenv())
-  acc$nSnps <- nSnps
-  acc$geno <- list()
-  acc$hdrRows <- character(0); acc$hdrNum <- character(0)
-  acc$hdrType <- character(0); acc$hdrDesc <- character(0)
-  # ES: posterior conditional effect (mvSuSiE/fSuSiE) when present, else the
-  # marginal univariate beta (univariate susie).
-  es <- .vcfCol(base, "conditional_effect", nSnps)
-  if (all(is.na(es))) es <- .vcfCol(m, "beta", nSnps)
-  if (any(!is.na(es)))
-    .vcfAddGeno(acc, "ES", es, "Float",
-            "Effect size (posterior conditional effect, else marginal beta), effect allele")
-  se <- .vcfCol(m, "se", nSnps)
-  if (any(!is.na(se)))
-    .vcfAddGeno(acc, "SE", se, "Float", "Standard error of the marginal effect-size estimate")
-  p <- .vcfCol(m, "p", nSnps)
-  if (any(!is.na(p))) {
-    lp <- ifelse(is.na(p) | p <= 0, NA_real_, -log10(p))
-    .vcfAddGeno(acc, "LP", lp, "Float", "-log10 p-value of the marginal univariate effect")
-  }
-  if (any(!is.na(.vcfCol(m, "N", nSnps))))
-    .vcfAddGeno(acc, "SS", as.integer(.vcfCol(m, "N", nSnps)), "Integer", "Sample size")
-  af <- .vcfCol(base, "af", nSnps); if (all(is.na(af))) af <- .vcfCol(m, "af", nSnps)
-  if (any(!is.na(af)))
-    .vcfAddGeno(acc, "AF", af, "Float", "Allele frequency (effect allele)")
-  # Posterior fields, only when a posterior table is available.
-  if (hasPost) {
-    pip <- .vcfCol(base, "pip", nSnps)
-    if (any(!is.na(pip)))
-      .vcfAddGeno(acc, "PIP", pip, "Float", "Posterior inclusion probability")
-    lbf <- .vcfCol(base, "logBF", nSnps)
-    if (any(!is.na(lbf)))
-      .vcfAddGeno(acc, "LBF", lbf, "Float", "Per-variant log Bayes factor (max single effect)")
-    lfsr <- .vcfCol(base, "lfsr", nSnps)
-    if (any(!is.na(lfsr)))
-      .vcfAddGeno(acc, "LFSR", lfsr, "Float", "Local false sign rate (per-condition posterior)")
-    # Credible sets are DYNAMIC: pecotmr does not assume any fixed coverage, so
-    # we emit a CS<coverage> (+ PUR<coverage>) field for every cs_<coverage>
-    # column the pipeline actually produced (e.g. cs_95 -> CS95 / PUR95). The
-    # 50/70/95 defaults are an xqtl-protocol pipeline choice, not baked in here.
-    csCols <- grep("^cs_[0-9.]+$", names(base), value = TRUE)
-    for (cc in csCols) {
-      cov <- sub("^cs_", "", cc)
-      idx <- suppressWarnings(as.integer(sub(".*_", "", as.character(base[[cc]]))))
-      idx[is.na(idx)] <- 0L
-      .vcfAddGeno(acc, paste0("CS", cov), idx, "Integer",
-              sprintf("Credible-set index at %s%% coverage (0 = not captured)", cov))
-      pc <- paste0(cc, "_purity")
-      if (pc %in% names(base)) {
-        pur <- suppressWarnings(as.numeric(base[[pc]]))
-        if (any(!is.na(pur)))
-          .vcfAddGeno(acc, paste0("PUR", cov), pur, "Float",
-                  sprintf("Purity (min abs corr) of the %s%% credible set", cov))
-      }
-    }
-    # Per-CS variant-level fullFit columns (within_cs_pip default scalar, and the
-    # wide within_cs_pip_<lab> / cs_logbf_<lab> / cs_effect_<lab> / cs_effect_var_<lab>
-    # sets when the topLoci was built with fullFit=TRUE). Emit each as an
-    # uppercase FORMAT field.
-    for (cc in grep("^(within_cs_pip|cs_logbf_|cs_effect_)", names(base), value = TRUE)) {
-      v <- suppressWarnings(as.numeric(base[[cc]]))
-      if (any(!is.na(v)))
-        .vcfAddGeno(acc, toupper(cc), v, "Float",
-                sprintf("Per-credible-set variant statistic (%s)", cc))
-    }
-  }
-
-  genoHeader <- DataFrame(
-    Number = acc$hdrNum, Type = acc$hdrType, Description = acc$hdrDesc,
-    row.names = acc$hdrRows)
-
-  .writeVcfImpl(
-    chrom = .vcfCol(base, "chrom", nSnps),
-    pos = .vcfCol(base, "pos", nSnps),
-    ref = .vcfCol(base, "A2", nSnps),
-    alt = .vcfCol(base, "A1", nSnps),
-    snpIds = .vcfCol(base, "variant_id", nSnps),
-    geno = acc$geno,
-    genoHeader = genoHeader,
-    sampleName = sn,
-    outputPath = finalPath)
-  finalPath
+.writeFineMappingVcf <- function(
+    x,
+    spec,
+    outputPath,
+    sampleName,
+    splitByContext,
+    splitByTrait
+) {
+    entry <- getFineMappingResult(
+        x,
+        spec$study,
+        spec$context,
+        spec$trait,
+        spec$method
+    )
+    finalPath <- .decorateOutputPath(
+        outputPath,
+        spec,
+        splitByContext,
+        splitByTrait
+    )
+    sn <- sampleName %||%
+        glue(
+            "{spec$study}|{spec$context %||% '_'}|",
+            "{spec$trait %||% '_'}|{spec$method}"
+        )
+    body <- .vcfResolveBody(entry, sn)
+    nSnps <- nrow(body$base)
+    specs <- c(
+        .vcfCoreSpecs(body$base, body$m, nSnps),
+        if (body$hasPost) .vcfPosteriorSpecs(body$base, nSnps) else list()
+    )
+    .vcfWriteSpecs(body$base, specs, sn, finalPath, nSnps)
+    finalPath
 }
 
-# Decorate `outputPath` with the spec's context / trait tags when split
-# flags are set. Preserves the file extension. Examples:
-#   "out.vcf" + (context="brain") -> "out.brain.vcf"
-#   "out.vcf.bgz" + (context="brain", trait="ENSG1") -> "out.brain.ENSG1.vcf.bgz"
+# Decorate `outputPath` with the spec's context / trait tags when split flags
+# are set. Preserves the file extension. Examples: "out.vcf" + (context="brain")
+# -> "out.brain.vcf" "out.vcf.bgz" + (context="brain", trait="ENSG1") ->
+# "out.brain.ENSG1.vcf.bgz"
 # @noRd
-.decorateOutputPath <- function(outputPath, spec, splitByContext,
-                                splitByTrait) {
-  if (!isTRUE(splitByContext) && !isTRUE(splitByTrait)) return(outputPath)
-  ext <- tolower(tools::file_ext(outputPath))
-  composite <- ext == "bgz" || ext == "gz"
-  base <- if (composite) {
-    sub("\\.[^.]+\\.(bgz|gz)$", "", outputPath, ignore.case = TRUE)
-  } else {
-    tools::file_path_sans_ext(outputPath)
-  }
-  ext_keep <- substr(outputPath, nchar(base) + 1L, nchar(outputPath))
-  tags <- character(0)
-  if (isTRUE(splitByContext) &&
-      !is.null(spec$context) && !is.na(spec$context) && nzchar(spec$context))
-    tags <- c(tags, spec$context)
-  if (isTRUE(splitByTrait) &&
-      !is.null(spec$trait) && !is.na(spec$trait) && nzchar(spec$trait))
-    tags <- c(tags, spec$trait)
-  if (length(tags) == 0L) return(outputPath)
-  paste0(base, ".", paste(tags, collapse = "."), ext_keep)
+.decorateOutputPath <- function(
+    outputPath,
+    spec,
+    splitByContext,
+    splitByTrait
+) {
+    if (!isTRUE(splitByContext) && !isTRUE(splitByTrait)) {
+        return(outputPath)
+    }
+    ext <- str_to_lower(tools::file_ext(outputPath))
+    composite <- ext == "bgz" || ext == "gz"
+    base <- if (composite) {
+        str_remove(
+            outputPath,
+            regex("\\.[^.]+\\.(bgz|gz)$", ignore_case = TRUE)
+        )
+    } else {
+        tools::file_path_sans_ext(outputPath)
+    }
+    ext_keep <- str_sub(
+        outputPath,
+        str_length(base) + 1L,
+        str_length(outputPath)
+    )
+    tags <- character(0)
+    if (
+        isTRUE(splitByContext) &&
+            !is.null(spec$context) &&
+            !is.na(spec$context) &&
+            str_length(spec$context) > 0L
+    ) {
+        tags <- c(tags, spec$context)
+    }
+    if (
+        isTRUE(splitByTrait) &&
+            !is.null(spec$trait) &&
+            !is.na(spec$trait) &&
+            str_length(spec$trait) > 0L
+    ) {
+        tags <- c(tags, spec$trait)
+    }
+    if (length(tags) == 0L) {
+        return(outputPath)
+    }
+    str_c(base, ".", str_flatten(tags, "."), ext_keep)
 }
 
 # Internal implementation shared by all methods
 # @noRd
-.writeVcfImpl <- function(chrom, pos, ref, alt, snpIds, geno, genoHeader,
-                          sampleName, outputPath) {
-  nSnps <- length(chrom)
-
-  # Ensure chromosome names have "chr" prefix
-  if (!all(grepl("^chr", chrom)))
-    chrom <- paste0("chr", chrom)
-
-  # Build GRanges for row ranges
-  gr <- GRanges(
+.writeVcfImpl <- function(
     chrom,
-    IRanges(
-      start = as.integer(pos),
-      end = as.integer(pos) + pmax(nchar(ref), nchar(alt)) - 1L,
-      names = snpIds))
-
-  # Build VCF header
-  coldata <- DataFrame(Samples = sampleName, row.names = sampleName)
-
-  hdr <- VariantAnnotation::VCFHeader(
-    header = DataFrameList(
-      fileformat = DataFrame(
-        Value = "VCFv4.2", row.names = "fileformat")),
-    sample = sampleName)
-
-  # Subset geno header to only fields present in geno
-  genoHeader <- genoHeader[rownames(genoHeader) %in% names(geno), , drop = FALSE]
-  VariantAnnotation::geno(hdr) <- genoHeader
-
-  # Build VCF object
-  genoSl <- SimpleList(geno)
-  vcf <- VariantAnnotation::VCF(
-    rowRanges = gr,
-    colData = coldata,
-    exptData = list(header = hdr),
-    geno = genoSl)
-
-  VariantAnnotation::ref(vcf) <- DNAStringSet(ref)
-  VariantAnnotation::alt(vcf) <- DNAStringSetList(as.list(alt))
-  VariantAnnotation::fixed(vcf)$FILTER <- "PASS"
-  vcf <- sort(vcf)
-
-  # Write based on output format
-  # Note: VariantAnnotation::writeVcf appends ".bgz" to the path when
-  # index = TRUE, so we must pass the path *without* the .bgz/.gz suffix.
-  ext <- file_ext(outputPath)
-  if (ext == "bcf") {
-    # Write temporary bgzipped VCF, then convert to BCF
-    tmpVcfStem <- tempfile(fileext = ".vcf")
-    tmpVcfBgz <- paste0(tmpVcfStem, ".bgz")
-    on.exit(unlink(c(tmpVcfBgz, paste0(tmpVcfBgz, ".tbi")),
-                   force = TRUE), add = TRUE)
-    VariantAnnotation::writeVcf(vcf, tmpVcfStem, index = TRUE)
-    # asBcf appends ".bcf" to destination, so strip the extension
-    bcfStem <- sub("\\.bcf$", "", outputPath)
-    dict <- unique(chrom)
-    asBcf(tmpVcfBgz, dictionary = dict,
-                     destination = bcfStem)
-  } else if (ext == "gz" || ext == "bgz") {
-    # writeVcf will append .bgz, so strip it from the path
-    vcfStem <- sub("\\.(bgz|gz)$", "", outputPath)
-    VariantAnnotation::writeVcf(vcf, vcfStem, index = TRUE)
-    # writeVcf always creates .bgz; rename if the user requested .gz
-    actualPath <- paste0(vcfStem, ".bgz")
-    if (actualPath != outputPath && file.exists(actualPath)) {
-      file.rename(actualPath, outputPath)
-      tbiActual <- paste0(actualPath, ".tbi")
-      if (file.exists(tbiActual))
-        file.rename(tbiActual, paste0(outputPath, ".tbi"))
+    pos,
+    ref,
+    alt,
+    snpIds,
+    geno,
+    genoHeader,
+    sampleName,
+    outputPath
+) {
+    # Ensure chromosome names have the "chr" prefix.
+    if (!all(str_detect(chrom, "^chr"))) {
+        chrom <- str_c("chr", chrom)
     }
-  } else {
-    VariantAnnotation::writeVcf(vcf, outputPath)
-  }
+    gr <- .vcfBuildRanges(chrom, pos, ref, alt, snpIds)
+    hdr <- .vcfBuildHeader(sampleName, genoHeader, geno)
+    vcf <- .vcfBuildObject(gr, sampleName, hdr, geno, ref, alt)
+    .vcfWriteByFormat(vcf, outputPath, chrom)
+    invisible(outputPath)
+}
 
-  invisible(outputPath)
+# Per-variant rowRanges (end extended to the wider of ref / alt for indels).
+# @noRd
+.vcfBuildRanges <- function(chrom, pos, ref, alt, snpIds) {
+    GRanges(
+        chrom,
+        IRanges(
+            start = as.integer(pos),
+            end = as.integer(pos) + pmax(str_length(ref), str_length(alt)) - 1L,
+            names = snpIds
+        )
+    )
+}
+
+# VCF header (VCFv4.2 + the geno header subset to the fields actually present).
+# @noRd
+.vcfBuildHeader <- function(sampleName, genoHeader, geno) {
+    hdr <- VariantAnnotation::VCFHeader(
+        header = DataFrameList(
+            fileformat = DataFrame(Value = "VCFv4.2", row.names = "fileformat")
+        ),
+        sample = sampleName
+    )
+    VariantAnnotation::geno(hdr) <- genoHeader[
+        is_in(rownames(genoHeader), names(geno)),
+        ,
+        drop = FALSE
+    ]
+    hdr
+}
+
+# Assemble + finalize the VCF object (ref / alt / FILTER, sorted).
+# @noRd
+.vcfBuildObject <- function(gr, sampleName, hdr, geno, ref, alt) {
+    vcf <- VariantAnnotation::VCF(
+        rowRanges = gr,
+        colData = DataFrame(Samples = sampleName, row.names = sampleName),
+        exptData = list(header = hdr),
+        geno = SimpleList(geno)
+    )
+    VariantAnnotation::ref(vcf) <- DNAStringSet(ref)
+    VariantAnnotation::alt(vcf) <- DNAStringSetList(as.list(alt))
+    VariantAnnotation::fixed(vcf)$FILTER <- "PASS"
+    sort(vcf)
+}
+
+# Write the VCF in the format implied by the output extension. writeVcf appends
+# ".bgz" when index = TRUE, so paths are passed WITHOUT the .bgz/.gz suffix.
+# @noRd
+.vcfWriteByFormat <- function(vcf, outputPath, chrom) {
+    ext <- file_ext(outputPath)
+    if (ext == "bcf") {
+        .vcfWriteBcf(vcf, outputPath, chrom)
+    } else if (ext == "gz" || ext == "bgz") {
+        .vcfWriteBgz(vcf, outputPath)
+    } else {
+        VariantAnnotation::writeVcf(vcf, outputPath)
+    }
+    invisible(NULL)
+}
+
+# BCF path: write a temporary bgzipped VCF, then convert to BCF via asBcf.
+# @noRd
+.vcfWriteBcf <- function(vcf, outputPath, chrom) {
+    tmpVcfStem <- tempfile(fileext = ".vcf")
+    tmpVcfBgz <- str_c(tmpVcfStem, ".bgz")
+    on.exit(
+        unlink(c(tmpVcfBgz, str_c(tmpVcfBgz, ".tbi")), force = TRUE),
+        add = TRUE
+    )
+    VariantAnnotation::writeVcf(vcf, tmpVcfStem, index = TRUE)
+    # asBcf appends ".bcf" to destination, so strip the extension.
+    asBcf(
+        tmpVcfBgz,
+        dictionary = unique(chrom),
+        destination = str_remove(outputPath, "\\.bcf$")
+    )
+}
+
+# bgzip / gzip path: writeVcf always creates .bgz; rename to .gz on request.
+# @noRd
+.vcfWriteBgz <- function(vcf, outputPath) {
+    vcfStem <- str_remove(outputPath, "\\.(bgz|gz)$")
+    VariantAnnotation::writeVcf(vcf, vcfStem, index = TRUE)
+    actualPath <- str_c(vcfStem, ".bgz")
+    if (actualPath != outputPath && file.exists(actualPath)) {
+        file.rename(actualPath, outputPath)
+        tbiActual <- str_c(actualPath, ".tbi")
+        if (file.exists(tbiActual)) {
+            file.rename(tbiActual, str_c(outputPath, ".tbi"))
+        }
+    }
+}
+
+# ---- map/apply helpers (lambda-free callbacks) ---------------------------
+
+# FORMAT specs for one cs_<coverage> column: a CS index field plus a PUR purity
+# field when a matching *_purity column exists.
+# @noRd
+.vcfCsColSpecs <- function(cc, base) {
+    cov <- str_remove(cc, "^cs_")
+    idx <- suppressWarnings(as.integer(str_remove(
+        as.character(base[[cc]]),
+        ".*_"
+    )))
+    idx[is.na(idx)] <- 0L
+    csSpec <- .vcfSpec(
+        str_c("CS", cov),
+        idx,
+        "Integer",
+        glue("Credible-set index at {cov}% coverage (0 = not captured)")
+    )
+    pc <- str_c(cc, "_purity")
+    if (!is_in(pc, names(base))) {
+        return(list(csSpec))
+    }
+    pur <- suppressWarnings(as.numeric(base[[pc]]))
+    purSpec <- .vcfSpec(
+        str_c("PUR", cov),
+        pur,
+        "Float",
+        glue("Purity (min abs corr) of the {cov}% credible set")
+    )
+    list(csSpec, purSpec)
+}
+
+# The FORMAT spec for one fullFit posterior column (uppercased Float field).
+# @noRd
+.vcfFullFitColSpec <- function(cc, base) {
+    v <- suppressWarnings(as.numeric(base[[cc]]))
+    .vcfSpec(
+        str_to_upper(cc),
+        v,
+        "Float",
+        glue("Per-credible-set variant statistic ({cc})")
+    )
+}
+
+# TRUE when a FORMAT spec has at least one non-NA value (drop all-NA specs).
+# @noRd
+.vcfSpecHasValues <- function(s) {
+    any(!is.na(s$values))
+}
+
+# One FORMAT spec's values reshaped to the nSnps x nSamples geno matrix.
+# @noRd
+.vcfSpecMatrix <- function(s, nSnps) {
+    matrix(s$values, nSnps)
 }

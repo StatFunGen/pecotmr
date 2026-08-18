@@ -16,6 +16,12 @@ getPgenPtr(x)
 An external pointer or NULL.
 }
 \description{
-Return the cached external pointer to the plink2 pgen
-  handle (NULL when the handle is not pgen-backed).
+Return the cached external pointer to the plink2 pgen handle
+  (NULL when the handle is not pgen-backed).
+}
+\examples{
+gh <- readGenotypes(
+  system.file("extdata", "toy_ref.bed", package = "pecotmr")
+)
+getPgenPtr(gh)
 }

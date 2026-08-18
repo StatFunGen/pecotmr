@@ -34,7 +34,8 @@ filterRelatedness(
 considered related (default 0.0625, i.e. 2nd degree).}
 
 \item{analysisType}{One of \code{"maximize_unrelated"} (default) or
-\code{"maximize_cases"}. The latter preserves cases in case-control studies.}
+\code{"maximize_cases"}. The latter preserves cases in case-control
+studies.}
 
 \item{relatednessIid1}{Column name for first individual ID (default "IID1").}
 
@@ -44,30 +45,30 @@ considered related (default 0.0625, i.e. 2nd degree).}
 
 \item{relatednessFid2}{Column name for second family ID (default NULL).}
 
-\item{relatednessValue}{Column name for the relatedness measure
-(default "PI_HAT").}
+\item{relatednessValue}{Column name for the relatedness measure (default
+"PI_HAT").}
 
-\item{phenoData}{A data.frame with columns \code{IID} and the column named
-by \code{phenoCol}. Required when \code{analysisType = "maximize_cases"}.}
+\item{phenoData}{A data.frame with columns \code{IID} and the column named by
+\code{phenoCol}. Required when \code{analysisType = "maximize_cases"}.}
 
-\item{phenoCol}{Column name for the phenotype (default "pheno"). Expected
-to be binary (1 = case, 0 = control).}
+\item{phenoCol}{Column name for the phenotype (default "pheno"). Expected to
+be binary (1 = case, 0 = control).}
 
 \item{otherCriterion}{Optional data.frame with additional filtering criteria
 (passed to \code{plinkQC::relatednessFilter}).}
 
 \item{otherCriterionThreshold}{Threshold for additional criterion.}
 
-\item{otherCriterionDirection}{Direction for threshold comparison
-(default "ge").}
+\item{otherCriterionDirection}{Direction for threshold comparison (default
+"ge").}
 
 \item{otherCriterionIid}{Column name for individual ID in criterion data
 (default "IID").}
 
 \item{otherCriterionMeasure}{Column name for the criterion measure.}
 
-\item{maxComponentSize}{Maximum component size before graph-based
-pre-pruning (default 20).}
+\item{maxComponentSize}{Maximum component size before graph-based pre-pruning
+(default 20).}
 
 \item{reduceFraction}{Fraction of highest-degree nodes to remove per
 iteration during pre-pruning (default 0.05).}
@@ -85,4 +86,10 @@ Iterative greedy algorithm that removes related individuals exceeding a
 kinship threshold. First reduces large connected components via graph-based
 pruning (removing highest-degree nodes), then applies
 \code{plinkQC::relatednessFilter} iteratively until no related pairs remain.
+}
+\examples{
+rel <- data.frame(IID1 = c("s1", "s2"), IID2 = c("s2", "s3"),
+  value = c(0.5, 0.1))
+filterRelatedness(rel, relatednessIid1 = "IID1", relatednessIid2 = "IID2",
+  relatednessValue = "value", relatednessThreshold = 0.2)
 }

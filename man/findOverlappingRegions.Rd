@@ -20,3 +20,8 @@ Integer vector of 1-based indices into \code{targets} that overlap
 \description{
 Find which target regions overlap a query region
 }
+\examples{
+query <- "chr1:100-200"
+targets <- c("chr1:150-250", "chr1:300-400")
+findOverlappingRegions(query = query, targets = targets)
+}

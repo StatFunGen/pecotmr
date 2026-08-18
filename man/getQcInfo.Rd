@@ -18,10 +18,14 @@ getQcInfo(x, ...)
 A \code{list} (possibly empty).
 }
 \description{
-Return the audit record of QC steps applied to this
-  collection. An empty \code{list()} (default on construction) means
-  \code{\link{summaryStatsQc}} has not yet been run. Pipelines that
-  require harmonized sumstats (\code{fineMappingPipeline},
-  \code{twasWeightsPipeline}, and downstream consumers) reject inputs
-  where \code{length(getQcInfo(x)) == 0L}.
+Return the audit record of QC steps applied to this collection.
+  An empty \code{list()} (default on construction) means
+  \code{\link{summaryStatsQc}} has not yet been run. Pipelines that require
+  harmonized sumstats (\code{fineMappingPipeline},
+  \code{twasWeightsPipeline}, and downstream consumers) reject inputs where
+  \code{length(getQcInfo(x)) == 0L}.
+}
+\examples{
+data(qtlSumStatsExample)
+getQcInfo(qtlSumStatsExample)
 }

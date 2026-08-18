@@ -2,10 +2,31 @@
 % Please edit documentation in R/regularizedRegressionWrappers.R
 \name{bayesNWeights}
 \alias{bayesNWeights}
-\title{Use Gaussian distribution as prior. Posterior means will be BLUP, equivalent to Ridge Regression.}
+\title{BayesN TWAS weights (Gaussian prior, ridge-equivalent)}
 \usage{
 bayesNWeights(X, y, Z = NULL, ...)
 }
+\arguments{
+\item{X}{Numeric genotype / design matrix (samples x variants).}
+
+\item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}.}
+
+\item{Z}{Optional numeric matrix of fixed-effect covariates, or \code{NULL}.}
+
+\item{...}{Additional arguments forwarded to \code{bayesAlphabetWeights} /
+\code{qgg}.}
+}
+\value{
+A numeric vector of effect-size weights, one per variant (column of
+  \code{X}); columns dropped for zero variance receive weight 0.
+}
 \description{
-Use Gaussian distribution as prior. Posterior means will be BLUP, equivalent to Ridge Regression.
+Use Gaussian distribution as prior. Posterior means will be
+  BLUP, equivalent to Ridge Regression.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+bayesNWeights(X, y)
 }

@@ -14,12 +14,30 @@ updateMashModelCov(mashModel, allSamples, samples)
 \item{samples}{Character vector of the conditions to retain.}
 }
 \value{
-The updated mash model with resized covariance matrices and
-  pruned mixture weights.
+The updated mash model with resized covariance matrices and pruned
+  mixture weights.
 }
 \description{
 Updates the prior covariance matrices (\code{Ulist}) and mixture weights
 (\code{pi}) in a fitted \code{mashr} model to match a reduced set of
-conditions. Handles condition-specific, identity, and data-driven
-covariance components.
+conditions. Handles condition-specific, identity, and data-driven covariance
+components.
+}
+\examples{
+data(mashInputExample)
+mi <- mashInputExample
+mk <- function(b, s) {
+  qtlSumStatsFromBetaMatrix(as.matrix(mi[[b]]), as.matrix(mi[[s]]),
+    study = "mash")
+}
+ssl <- list(strong = mk("strong.b", "strong.s"),
+  random = mk("random.b", "random.s"), null = mk("null.b", "null.s"))
+conds <- colnames(mi$strong.b)
+vhat <- diag(length(conds))
+dimnames(vhat) <- list(conds, conds)
+prior <- mashPriorCovariances(ssl, alpha = 0, vhat = vhat,
+  components = "canonical")
+model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior$U,
+  vhat = vhat)
+updateMashModelCov(model, allSamples = conds, samples = conds[1:3])
 }

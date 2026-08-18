@@ -18,15 +18,42 @@ Scalar integer.
 \description{
 `M_ref` is the number of SNPs in the REFERENCE PANEL over which
   heritability is partitioned in the sLDSC model
-  (`h2(C) = sum_{j in M_ref} a_C(j) sum_{C'} tau_{C'} a_{C'}(j)`). It is
+  (`h2(C) = sum_(j in M_ref) a_C(j) sum_(C') tau_(C') a_(C')(j)`). It is
   panel-defined and is **not** the regression SNP set (HapMap3 ~1M) nor any
   HM3-subsetted target output:
   \itemize{
     \item `mafCutoff > 0` (Gazal/Finucane convention): count MAF > cutoff
-      SNPs across all `.frq` files (the same set polyfun's `.l2.M_5_50` sums).
+      SNPs across all `.frq` files (the same set polyfun's `.l2.M_5_50`
+      sums).
     \item `mafCutoff == 0` (all-M variant): count ALL SNPs across all
       `.frq` files (the same set polyfun's `.l2.M` sums).
   }
   When no frq data is present, `mafCutoff == 0` falls back to the number of
   annotation rows; `mafCutoff > 0` errors (a MAF-restricted count needs frq).
+}
+\examples{
+mkRun <- function(cats) {
+  n <- length(cats)
+  list(categories = cats, tau = setNames(rep(1e-7, n), cats),
+    tauSe = setNames(rep(3e-8, n), cats),
+    enrichment = setNames(rep(2, n), cats),
+    enrichmentSe = setNames(rep(0.4, n), cats),
+    enrichmentP = setNames(rep(0.01, n), cats),
+    propH2 = setNames(rep(0.2, n), cats),
+    propSnps = setNames(rep(0.1, n), cats), h2g = 0.3,
+    tauBlocks = matrix(1e-7, 10, n, dimnames = list(NULL, cats)),
+    nBlocks = 10L)
+}
+annot <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
+  annot_A = c(1, 0, 1, 0, 1, 0), annot_B = c(2.1, 1.8, 2.5, 1.9, 2.3, 2))
+frq <- data.frame(CHR = c(1, 1, 1, 2, 2, 2), SNP = paste0("rs", 1:6),
+  MAF = rep(0.2, 6))
+mkTrait <- function() {
+  list(single = list(mkRun(c("annot_A_0", "baselineLD_0")),
+    mkRun(c("annot_B_0", "baselineLD_0"))),
+    joint = mkRun(c("annot_A_0", "annot_B_0", "baselineLD_0")))
+}
+traits <- setNames(list(mkTrait(), mkTrait()), c("traitX", "traitY"))
+sd <- SldscData(annot = annot, frq = frq, traits = traits)
+computeSldscMRef(sldscData = sd)
 }

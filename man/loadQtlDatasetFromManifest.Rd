@@ -21,9 +21,9 @@ loadQtlDatasetFromManifest(
 )
 }
 \arguments{
-\item{manifest}{A data.frame or a path to a manifest file. Recognised
-columns (canonical camelCase; snake_case aliases accepted):
-\code{context} (required), \code{phenotypePath} (required, bgzipped BED),
+\item{manifest}{A data.frame or a path to a manifest file. Recognised columns
+(canonical camelCase; snake_case aliases accepted): \code{context}
+(required), \code{phenotypePath} (required, bgzipped BED),
 \code{covariatePath} (optional, per-context covariates), and the
 single-valued \code{study} / \code{genotypePath} /
 \code{genotypeCovariatePath}.}
@@ -36,7 +36,11 @@ reconciled with a \code{genotypePath} column.}
 \item{genotypeCovariates}{A numeric matrix (samples x covariates) or a path
 to a covariate TSV; reconciled with a \code{genotypeCovariatePath} column.}
 
-\item{scaleResiduals, mafCutoff, macCutoff, xvarCutoff, imissCutoff, keepSamples, keepVariants, keepIndel}{Pass-through \code{\link{QtlDataset}} arguments (stored as lazy QC slots).}
+\item{scaleResiduals, mafCutoff, macCutoff, xvarCutoff}{Pass-through
+\code{\link{QtlDataset}} arguments (stored as lazy QC slots).}
+
+\item{imissCutoff, keepSamples, keepVariants, keepIndel}{Pass-through
+\code{\link{QtlDataset}} arguments (stored as lazy QC slots).}
 
 \item{transposeCovariates}{Transpose covariate TSVs (QTLtools layout) before
 treating them as samples-as-rows.}
@@ -49,4 +53,11 @@ Build a single-study \code{\link{QtlDataset}} from a manifest
   describing one row per QTL context (or per trait x context). The manifest
   is a data.frame or a path to a delimited file (\code{.csv} -> CSV, else
   TSV). Column names may be snake_case or camelCase.
+}
+\examples{
+d <- system.file("extdata", "qtl_mini", package = "pecotmr")
+manifest <- data.frame(context = "brain",
+  phenotypePath = file.path(d, "example_geneexpr.bed.gz"),
+  study = "s1", genotypePath = file.path(d, "example.chr22"))
+loadQtlDatasetFromManifest(manifest = manifest, study = "s1")
 }

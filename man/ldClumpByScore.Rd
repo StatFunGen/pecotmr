@@ -15,12 +15,12 @@ ldClumpByScore(
 )
 }
 \arguments{
-\item{X}{Numeric matrix of 0/1/2 allele dosages, n rows by p variants.
-Column names are expected to be variant IDs but are not required.}
+\item{X}{Numeric matrix of 0/1/2 allele dosages, n rows by p variants. Column
+names are expected to be variant IDs but are not required.}
 
 \item{score}{Numeric vector of length \code{ncol(X)}. Higher values favour
-retention during clumping (e.g. -log10 p, |Z|, MAF). May be \code{NULL},
-in which case bigsnpr falls back to minor allele frequency computed from
+retention during clumping (e.g. -log10 p, |Z|, MAF). May be \code{NULL}, in
+which case bigsnpr falls back to minor allele frequency computed from
 \code{X}.}
 
 \item{chr}{Integer or character vector of length \code{ncol(X)} giving the
@@ -33,9 +33,9 @@ position for each variant.}
 within \code{windowKb} whose r2 exceeds \code{r2} and have lower
 \code{score} are removed). Default 0.2.}
 
-\item{windowKb}{Numeric. Window size in kilobases. Default is
-\code{100 / r2}, matching the common "ld-clump size = 100/r2" heuristic
-used in many GWAS pipelines.}
+\item{windowKb}{Numeric. Window size in kilobases. Default is \code{100 /
+r2}, matching the common "ld-clump size = 100/r2" heuristic used in many
+GWAS pipelines.}
 
 \item{verbose}{Logical. If TRUE, print the number of retained variants.
 Default FALSE.}
@@ -45,12 +45,11 @@ An integer vector of indices (into \code{X} columns) kept after
   clumping. For a single-column \code{X}, returns \code{1L}.
 }
 \description{
-Wraps \code{bigsnpr::snp_clumping} with the boilerplate of wrapping a
-numeric dosage matrix into a \code{bigstatsr::FBM.code256} object and of
-handling the common pitfall of a single-variant input.
+Wraps \code{bigsnpr::snp_clumping} with the boilerplate of wrapping a numeric
+dosage matrix into a \code{bigstatsr::FBM.code256} object and of handling the
+common pitfall of a single-variant input.
 }
 \examples{
-\dontrun{
   set.seed(1)
   n <- 500; p <- 20
   X <- matrix(rbinom(n * p, 2, 0.3), n, p)
@@ -58,6 +57,5 @@ handling the common pitfall of a single-variant input.
   s <- runif(p)
   chr <- rep(1L, p); pos <- seq_len(p) * 1000L
   keep <- ldClumpByScore(X, score = s, chr = chr, pos = pos, r2 = 0.2)
-}
 
 }

@@ -16,20 +16,22 @@ single-effect (SER) model and ignores L. \code{L} is applied by
 
 \item{ncore}{Number of cores.}
 
-\item{...}{Additional arguments forwarded to
-\code{ctwas::screen_regions} (e.g. \code{min_nonSNP_PIP},
-\code{min_snp_pval}, \code{min_var}, \code{min_gene}).}
+\item{...}{Additional arguments forwarded to \code{ctwas::screen_regions}
+(e.g. \code{min_nonSNP_PIP}, \code{min_snp_pval}, \code{min_var},
+\code{min_gene}).}
 }
 \value{
-The \code{estResult} list augmented with
-  \code{screen_res} (the full ctwas output) and
-  \code{screened_region_data}.
+The \code{estResult} list augmented with \code{screen_res} (the full
+  ctwas output) and \code{screened_region_data}.
 }
 \description{
-Step 3 of the three-step \code{\link{ctwasPipeline}}:
-  runs \code{ctwas::screen_regions} on the
-  \code{\link{estCtwasParam}} result and returns the screened-region
-  set. Use this entry point to substitute hand-tuned priors for the
-  ones estimated in step 2 (e.g. when the accurate EM diverges to
-  NaN and you want to recover the prefit values).
+Step 3 of the three-step \code{\link{ctwasPipeline}}: runs
+  \code{ctwas::screen_regions} on the \code{\link{estCtwasParam}} result and
+  returns the screened-region set. Use this entry point to substitute
+  hand-tuned priors for the ones estimated in step 2 (e.g. when the accurate
+  EM diverges to NaN and you want to recover the prefit values).
+}
+\examples{
+data(ctwasEstExample)
+screenCtwasRegions(ctwasEstExample, L = 5L)
 }

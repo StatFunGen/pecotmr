@@ -10,18 +10,24 @@ vignette: >
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
-                      fig.width = 7, fig.height = 4.5)
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    fig.width = 7,
+    fig.height = 4.5
+)
 ```
 
 ## Overview
 
-`causalInferencePipeline()` pairs QTL fine-mapping and/or regularized regression weights one or more GWAS studies to produce, per
-`(qtlStudy, context, trait, method, gwasStudy)` tuple:
+`causalInferencePipeline()` pairs QTL fine-mapping and/or regularized
+regression weights one or more GWAS studies to produce, per `(qtlStudy,
+context, trait, method, gwasStudy)` tuple:
 
 - a **TWAS Z-score** (and p-value), and
-- when `fineMappingResult` is supplied, a **Mendelian
-  Randomization Wald-ratio** estimate over the QTL credible sets.
+-  when `fineMappingResult` is supplied, a **Mendelian Randomization
+    Wald-ratio** estimate over the QTL credible sets.
 
 Three valid input combinations:
 
@@ -38,23 +44,29 @@ library(pecotmr)
 ## Bundled inputs
 
 ```{r bundled}
-data(qtl_dataset_example, gwas_sumstats_s4_example)
+data(qtlDatasetExample, gwasSumStatsS4Example)
 
 # Pre-compute the QTL-side products from the bundled QtlDataset.
-fmr <- fineMappingPipeline(qtl_dataset_example, methods = "susie",
-                            cisWindow = 1e6)
-tw  <- twasWeightsPipeline(qtl_dataset_example,
-                            methods           = "susie",
-                            cisWindow         = 1e6,
-                            fineMappingResult = fmr)
+fmr <- fineMappingPipeline(
+    qtlDatasetExample,
+    methods = "susie",
+    cisWindow = 1e6
+)
+tw <- twasWeightsPipeline(
+    qtlDatasetExample,
+    methods = "susie",
+    cisWindow = 1e6,
+    fineMappingResult = fmr
+)
 ```
 
 ## TWAS Z only (weights alone)
 
 ```{r ci-tw-only}
 res <- causalInferencePipeline(
-  gwasSumStats = gwas_sumstats_s4_example,
-  twasWeights  = tw)
+    gwasSumStats = gwasSumStatsS4Example,
+    twasWeights = tw
+)
 head(S4Vectors::mcols(res))
 ```
 
@@ -71,13 +83,20 @@ on top of the TWAS computation. The MR uses each fine-mapping entry's
 
 ```{r ci-both}
 res2 <- causalInferencePipeline(
-  gwasSumStats      = gwas_sumstats_s4_example,
-  twasWeights       = tw,
-  fineMappingResult = fmr,
-  mrMethod          = "ivwPerVariant",
-  mrPipCutoff       = 0.5)
-S4Vectors::mcols(res2)[, c("twasZ", "twasPval", "waldRatio",
-                            "waldRatioSe", "mrPval", "nIV")]
+    gwasSumStats = gwasSumStatsS4Example,
+    twasWeights = tw,
+    fineMappingResult = fmr,
+    mrMethod = "ivwPerVariant",
+    mrPipCutoff = 0.5
+)
+S4Vectors::mcols(res2)[, c(
+    "twasZ",
+    "twasPval",
+    "waldRatio",
+    "waldRatioSe",
+    "mrPval",
+    "nIV"
+)]
 ```
 
 ## MR variants: per-variant vs CS-aware IVW
@@ -89,11 +108,12 @@ S4Vectors::mcols(res2)[, c("twasZ", "twasPval", "waldRatio",
 
 ```{r ci-csaware, eval=FALSE}
 causalInferencePipeline(
-  gwasSumStats      = gwas_sumstats_s4_example,
-  twasWeights       = tw,
-  fineMappingResult = fmr,
-  mrMethod          = "csAware",
-  mrCpipCutoff      = 0.5)
+    gwasSumStats = gwasSumStatsS4Example,
+    twasWeights = tw,
+    fineMappingResult = fmr,
+    mrMethod = "csAware",
+    mrCpipCutoff = 0.5
+)
 ```
 
 ## Cross-method p-value combination
@@ -104,12 +124,15 @@ from multiple weight methods, `combineMethods` runs
 
 ```{r ci-combine, eval=FALSE}
 # Multi-method weights so combination is meaningful
-tw_multi <- twasWeightsPipeline(qtl_dataset_example,
-                                 methods = c("susie", "lasso"))
+tw_multi <- twasWeightsPipeline(
+    qtlDatasetExample,
+    methods = c("susie", "lasso")
+)
 causalInferencePipeline(
-  gwasSumStats   = gwas_sumstats_s4_example,
-  twasWeights    = tw_multi,
-  combineMethods = c("acat", "hmp"))
+    gwasSumStats = gwasSumStatsS4Example,
+    twasWeights = tw_multi,
+    combineMethods = c("acat", "hmp")
+)
 ```
 
 Accepted values for `combineMethods`: `acat`, `hmp`,
@@ -131,13 +154,14 @@ with sumstats GWAS.
 
 ```{r ci-params, eval=FALSE}
 causalInferencePipeline(
-  gwasSumStats      = gwas_sumstats_s4_example,
-  twasWeights       = tw,
-  fineMappingResult = fmr,
-  mrPipCutoff       = 0.5,            # ivwPerVariant
-  mrMethod          = "ivwPerVariant",
-  mrCpipCutoff      = 0.5,            # csAware
-  combineMethods    = NULL)           # e.g. c("acat", "hmp")
+    gwasSumStats = gwasSumStatsS4Example,
+    twasWeights = tw,
+    fineMappingResult = fmr,
+    mrPipCutoff = 0.5, # ivwPerVariant
+    mrMethod = "ivwPerVariant",
+    mrCpipCutoff = 0.5, # csAware
+    combineMethods = NULL
+) # e.g. c("acat", "hmp")
 ```
 
 ## Reading the result
@@ -150,4 +174,10 @@ values with `S4Vectors::mcols()`:
 mc <- as.data.frame(S4Vectors::mcols(res2))
 # Significant TWAS hits at Bonferroni alpha = 0.05 across rows
 mc[mc$twasPval < 0.05 / nrow(mc), ]
+```
+
+# Session info
+
+```{r session-info}
+sessionInfo()
 ```

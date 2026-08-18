@@ -4,14 +4,23 @@
 \alias{extractCsInfo}
 \title{Process Credible Sets (CS) from Finemapping Results}
 \usage{
-extractCsInfo(conData, csNames, topLociTable)
+extractCsInfo(finemappingEntry, csNames, topLociTable, ldSource)
 }
 \arguments{
-\item{conData}{List. The method layer data from a finemapping RDS file that is not empty.}
+\item{finemappingEntry}{A \code{\link{FineMappingEntry}} carrying the SuSiE
+fit and variant ids (e.g. from \code{\link{getFineMappingResult}}).}
 
-\item{csNames}{Character vector. Names of the Credible Sets, usually in the format "L_<number>".}
+\item{csNames}{Character vector. Names of the Credible Sets, usually in the
+format "L_<number>".}
 
-\item{topLociTable}{Data frame. The $top_loci layer data from the finemapping results.}
+\item{topLociTable}{Data frame. The top-loci table (e.g. from
+\code{\link{getTopLoci}}) carrying \code{variant_id}, \code{pip}, and
+\code{z} columns.}
+
+\item{ldSource}{The LD source from which the between-credible-set correlation
+is derived on demand: a \code{QtlDataset} (individual-level) or a
+\code{QtlSumStats} / \code{GwasSumStats} (summary statistics). See
+\code{\link{computeCsCorrelation}}.}
 }
 \value{
 A data frame with one row per CS, containing the following columns:
@@ -22,16 +31,36 @@ A data frame with one row per CS, containing the following columns:
   \item{top_pip}{Highest Posterior Inclusion Probability (PIP) in the CS}
   \item{top_z}{Z-score of the top variant}
   \item{p_value}{P-value calculated from the top Z-score}
-  \item{cs_corr}{Pairwise correlations of other CSs in this RDS with the CS of 
-    the current row, delimited by '|', if there is more than one CS in this RDS file}
+  \item{cs_corr_1, cs_corr_2, ...}{Each CS's pairwise correlation with every
+    CS (its row of the between-CS matrix, self-correlation on the diagonal),
+    computed on demand from \code{ldSource}. Absent when there are fewer than
+    two credible sets.}
+  \item{cs_corr_max}{Maximum absolute between-CS correlation (excluding the
+    self == 1); \code{NA} for a single CS.}
+  \item{cs_corr_min}{Minimum absolute between-CS correlation; \code{NA} for a
+    single CS.}
 }
 \description{
-This function extracts and processes information for each Credible Set (CS) 
+This function extracts and processes information for each Credible Set (CS)
 from finemapping results, typically obtained from a finemapping RDS file.
 }
 \details{
-This function is designed to be used only when there is at least one Credible Set 
-in the finemapping results usually for a given study and block. It processes each CS, 
-extracting key information such as the top variant, its statistics, and 
-correlation information between multiple CS if available.
+This function is designed to be used only when there is at least one
+  Credible Set in the finemapping results usually for a given study and
+  block. It processes each CS, extracting key information such as the top
+  variant, its statistics, and correlation information between multiple CS if
+  available.
+}
+\examples{
+data(qtlSumStatsExample)
+vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
+fit <- list(pip = c(0.1, 0.7, 0.2), sets = list(cs = list(L_1 = c(1, 2))))
+tl <- data.frame(variant_id = vids, pip = c(0.1, 0.7, 0.2),
+  z = c(1.0, 3.5, -0.5))
+fe <- FineMappingEntry(variantIds = vids, susieFit = fit, topLoci = tl)
+# A single credible set has no between-CS correlation (cs_corr_* are NA), so
+# the ldSource is not consulted here.
+extractCsInfo(fe, csNames = "L_1", topLociTable = tl,
+  ldSource = qtlSumStatsExample)
+
 }

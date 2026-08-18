@@ -5,8 +5,8 @@
 \alias{LdEigen-class}
 \title{Eigendecomposition-Based LD Statistic}
 \description{
-Pre-computed per-block eigendecompositions of the LD
-  correlation matrix. Used by LDER, HDL, and sHDL.
+Pre-computed per-block eigendecompositions of the LD correlation
+  matrix. Used by LDER, HDL, and sHDL.
 }
 \section{Slots}{
 
@@ -15,11 +15,12 @@ Pre-computed per-block eigendecompositions of the LD
 with components:
 \describe{
   \item{values}{Numeric vector of eigenvalues}
-  \item{vectors}{Numeric matrix of eigenvectors (SNPs x retained components)}
+  \item{vectors}{Numeric matrix of eigenvectors (SNPs x retained
+  components)}
   \item{snpIdx}{Integer vector of SNP indices in \code{snpInfo}}
 }}
 
-\item{\code{eigenvalueTruncation}}{Numeric, proportion of variance retained
-(e.g., 0.9 for HDL's default). If 1.0, no truncation.}
+\item{\code{eigenvalueTruncation}}{Numeric, proportion of variance retained (e.g.,
+0.9 for HDL's default). If 1.0, no truncation.}
 }}
 

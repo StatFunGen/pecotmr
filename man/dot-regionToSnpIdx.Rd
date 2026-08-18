@@ -15,7 +15,7 @@
 Integer vector of matching SNP indices.
 }
 \description{
-Return 1-based indices into snpInfo for SNPs within a
-  genomic region string.
+Return 1-based indices into snpInfo for SNPs within a genomic
+  region string.
 }
 \keyword{internal}

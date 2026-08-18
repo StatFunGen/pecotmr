@@ -42,3 +42,13 @@ Matrix of variant weights.
 Extracts coefficients from an existing mvSuSiE fit or fits `fitMvsusie()`
 from `X` and `Y`.
 }
+\examples{
+\donttest{
+# Requires susieR attached (mvsusieR 0.3.0 packaging limitation).
+library(susieR)
+data(multiTraitData)
+X <- multiTraitData$X[, 1:60]
+Y <- multiTraitData$Y
+mvsusieWeights(X = X, Y = Y, L = 5, LGreedy = 2)
+}
+}

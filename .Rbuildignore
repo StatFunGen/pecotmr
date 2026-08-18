@@ -9,3 +9,6 @@
 ^.covrignore
 ^.claude
 ^data-raw$
+^docs$
+^air.toml
+^inst/prototype

@@ -6,9 +6,32 @@
 \usage{
 sdprWeights(stat, LD, ...)
 }
+\arguments{
+\item{stat}{A list of summary statistics with elements \code{b} (effect
+sizes) and \code{n} (per-variant sample sizes).}
+
+\item{LD}{Numeric LD (correlation) matrix aligned to the variants in
+\code{stat}.}
+
+\item{...}{Additional arguments forwarded to \code{sdpr}.}
+}
 \value{
 A numeric vector of the posterior SNP coefficients.
 }
 \description{
 Extract weights from sdpr function
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+ss <- lapply(
+  seq_len(ncol(X)), function(j) coef(summary(lm(y ~ X[, j])))[2, 1:2])
+stat <- list(
+  b = vapply(ss, `[`, numeric(1), 1L),
+  seb = vapply(ss, `[`, numeric(1), 2L),
+  n = rep(nrow(X), ncol(X))
+)
+LD <- cor(X)
+sdprWeights(stat, LD)
 }

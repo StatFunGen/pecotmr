@@ -12,6 +12,7 @@ qtlEnrichmentPipeline(
   lambda = 1,
   impN = 25,
   numThreads = 1L,
+  seed = NULL,
   ...
 )
 }
@@ -20,43 +21,43 @@ qtlEnrichmentPipeline(
 
 \item{qtlFineMappingResult}{See above.}
 
-\item{numGwas}{Number of GWAS variants used to estimate \code{piGwas}.
-When \code{NULL} (default) it is estimated from the data — bias
-warning applies if the input PIP vector is not genome-wide.}
+\item{numGwas}{Number of GWAS variants used to estimate \code{piGwas}. When
+\code{NULL} (default) it is estimated from the data -- bias warning applies
+if the input PIP vector is not genome-wide.}
 
-\item{piQtl}{Per-variant prior of being a QTL causal variant.
-\code{NULL} (default) estimates from the data.}
+\item{piQtl}{Per-variant prior of being a QTL causal variant. \code{NULL}
+(default) estimates from the data.}
 
-\item{lambda}{Shrinkage parameter for the enrichment estimator.
-Default \code{1.0}.}
+\item{lambda}{Shrinkage parameter for the enrichment estimator. Default
+\code{1.0}.}
 
 \item{impN}{Number of imputed samples used by the estimator. Default
 \code{25}.}
 
-\item{numThreads}{Number of threads used by
-\code{qtlEnrichment}. Default \code{1}.}
+\item{numThreads}{Number of threads used by \code{qtlEnrichment}. Default
+\code{1}.}
 
-\item{...}{Additional arguments forwarded to
-\code{\link{qtlEnrichment}}.}
+\item{seed}{Integer or \code{NULL}. Base random seed forwarded to
+\code{\link{qtlEnrichment}} for reproducible multiple imputation.
+\code{NULL} (default) draws a nondeterministic seed.}
+
+\item{...}{Additional arguments forwarded to \code{\link{qtlEnrichment}}.}
 }
 \value{
-A data frame with one row per (gwasStudy, qtlStudy,
-  qtlContext) triple and columns \code{gwasStudy}, \code{qtlStudy},
-  \code{qtlContext}, \code{enrichment}, \code{enrichmentSe},
-  \code{enrichmentLogOdds}, plus any extras the underlying estimator
-  emits. Suitable as the \code{enrichment} argument to
-  \code{\link{colocPipeline}} (which joins on the same triple).
+A tibble with one row per (gwasStudy, qtlStudy, qtlContext)
+  triple and columns \code{gwasStudy}, \code{qtlStudy}, \code{qtlContext},
+  \code{enrichment}, \code{enrichmentSe}, \code{enrichmentLogOdds}, plus any
+  extras the underlying estimator emits. Suitable as the \code{enrichment}
+  argument to \code{\link{colocPipeline}} (which joins on the same triple).
 }
 \description{
-Genome-wide pipeline that computes per-pair (GWAS study,
-  QTL context) enrichment estimates by passing the GWAS PIP vector
-  and the QTL credible-set posteriors to
-  \code{\link{qtlEnrichment}}. The returned table feeds
-  \code{\link{colocPipeline}} via its \code{enrichment} argument.
+Genome-wide pipeline that computes per-pair (GWAS study, QTL
+  context) enrichment estimates by passing the GWAS PIP vector and the QTL
+  credible-set posteriors to \code{\link{qtlEnrichment}}. The returned table
+  feeds \code{\link{colocPipeline}} via its \code{enrichment} argument.
 
-  \strong{Not gene-parallelisable}: the enrichment estimator runs
-  over the full genome of GWAS PIPs and the full collection of QTL
-  fits at once.
+\strong{Not gene-parallelisable}: the enrichment estimator runs over the full
+genome of GWAS PIPs and the full collection of QTL fits at once.
 }
 \section{Inputs}{
 
@@ -73,11 +74,18 @@ Genome-wide pipeline that computes per-pair (GWAS study,
 }
 
 \section{LD-sketch identity check}{
-
-The GWAS \code{\link{FineMappingResultBase}} must have a non-NULL
-\code{ldSketch} (RSS-derived). If the QTL FMR also has a non-NULL
-\code{ldSketch}, the two must match exactly. When the QTL FMR's
-\code{ldSketch} is NULL (individual-level QTL fit), validation is
-skipped on the QTL side.
+ The GWAS \code{FineMappingResultBase} must
+  have a non-NULL \code{ldSketch} (RSS-derived). If the QTL FMR also has a
+  non-NULL \code{ldSketch}, the two must match exactly. When the QTL FMR's
+  \code{ldSketch} is NULL (individual-level QTL fit), validation is skipped
+  on the QTL side.
 }
 
+\examples{
+data(gwasFineMappingExample)
+data(qtlFineMappingExample)
+qtlEnrichmentPipeline(
+  gwasFineMappingResult = gwasFineMappingExample,
+  qtlFineMappingResult = qtlFineMappingExample
+)
+}

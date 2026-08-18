@@ -14,37 +14,36 @@ ensembleWeights(
 )
 }
 \arguments{
-\item{cvResults}{Output of \code{\link{twasWeightsCv}}, with \code{$prediction}
-(named list of method -> out-of-fold prediction matrix, keys like
-\code{"susie_predicted"}). For multi-dataset: a list of such objects.}
+\item{cvResults}{Output of \code{\link{twasWeightsCv}}, with
+\code{$prediction} (named list of method -> out-of-fold prediction matrix,
+keys like \code{"susie_predicted"}). For multi-dataset: a list of such
+objects.}
 
 \item{Y}{Observed outcome vector or matrix (samples x contexts). For
 multi-dataset: a list of vectors/matrices, one per dataset.}
 
 \item{twasWeightList}{Optional named list of weight matrices from
-\code{\link{learnTwasWeights}}, with keys like \code{"susie_weights"}. Used to
-construct the final combined TWAS weight vector. For multi-dataset: a list
-of such lists (the first is used as the weight template).}
+\code{\link{learnTwasWeights}}, with keys like \code{"susie_weights"}. Used
+to construct the final combined TWAS weight vector. For multi-dataset: a
+list of such lists (the first is used as the weight template).}
 
 \item{contextIndex}{Integer indicating which column of Y to use when Y is a
 matrix. Default is 1 (univariate).}
 
-\item{solver}{Character string specifying the optimization backend.
-One of \code{"quadprog"} (default), \code{"nnls"}, \code{"lbfgsb"}, or
-\code{"glmnet"}.
-\code{"quadprog"} solves a constrained QP with sum-to-1 and non-negativity
-constraints. \code{"nnls"} uses non-negative least squares (Lawson-Hanson
-algorithm, as in SuperLearner) and normalizes post-hoc. \code{"lbfgsb"}
-uses \code{optim(method = "L-BFGS-B")} with non-negativity bounds and
-normalizes post-hoc. \code{"glmnet"} uses \code{cv.glmnet} with
-\code{lower.limits = 0} for penalized non-negative regression, providing
-automatic method selection via regularization. All solvers fall back to
-equal weights on failure.}
+\item{solver}{Character string specifying the optimization backend. One of
+\code{"quadprog"} (default), \code{"nnls"}, \code{"lbfgsb"}, or
+\code{"glmnet"}. \code{"quadprog"} solves a constrained QP with sum-to-1
+and non-negativity constraints. \code{"nnls"} uses non-negative least
+squares (Lawson-Hanson algorithm, as in SuperLearner) and normalizes
+post-hoc. \code{"lbfgsb"} uses \code{optim(method = "L-BFGS-B")} with
+non-negativity bounds and normalizes post-hoc. \code{"glmnet"} uses
+\code{cv.glmnet} with \code{lower.limits = 0} for penalized non-negative
+regression, providing automatic method selection via regularization. All
+solvers fall back to equal weights on failure.}
 
-\item{alpha}{Elastic net mixing parameter, used only when
-\code{solver = "glmnet"}. \code{alpha = 1} (default) is lasso (sparse
-method selection), \code{alpha = 0} is ridge, and intermediate values
-give elastic net.}
+\item{alpha}{Elastic net mixing parameter, used only when \code{solver =
+"glmnet"}. \code{alpha = 1} (default) is lasso (sparse method selection),
+\code{alpha = 0} is ridge, and intermediate values give elastic net.}
 }
 \value{
 A list with components:
@@ -54,7 +53,8 @@ A list with components:
     base names (e.g., \code{"susie"}, \code{"enet"}).}
   \item{ensembleTwasWeights}{Final combined weight vector
     \eqn{w = \sum_k \zeta_k w_k}, or NULL if \code{twasWeightList}
-    is not provided. Returned as a vector for univariate Y, matrix otherwise.}
+    is not provided. Returned as a vector for univariate Y, matrix
+    otherwise.}
   \item{methodPerformance}{Named numeric vector of per-method R-squared
     computed from out-of-fold CV predictions. Preserved so users can still
     report individual method performance.}
@@ -80,7 +80,8 @@ coefficients.
 
 
 The stacked regression solves:
-\deqn{\min_{\zeta} \|y - P\zeta\|^2 \quad \text{s.t.} \quad \zeta_k \geq 0,\ \sum_k \zeta_k = 1}
+\deqn{\min_{\zeta} \|y - P\zeta\|^2 \quad \text{s.t.} \quad
+  \zeta_k \geq 0,\ \sum_k \zeta_k = 1}
 where P is the \eqn{n \times K} matrix of out-of-fold predictions from K
 methods. Four solver backends are available: \code{"quadprog"} enforces
 both constraints during optimization; \code{"nnls"}, \code{"lbfgsb"}, and
@@ -97,24 +98,17 @@ Predictions and Y are aligned by sample names (rownames) when available,
 rather than assuming positional order.
 }
 \examples{
-\dontrun{
-# After running twasWeightsPipeline with CV:
-res <- twasWeightsPipeline(X, y, cvFolds = 5, weightMethods = methods)
-
-ens <- ensembleWeights(
-  cvResults = res$twasCvResult,
-  Y = y,
-  twasWeightList = res$twasWeights
-)
-ens$methodCoef           # combination weights, sum to 1
-
-# Multi-dataset ensemble (e.g., CUMC1 + MIT cell types):
-ens_multi <- ensembleWeights(
-  cvResults = list(res_cumc$twasCvResult, res_mit$twasCvResult),
-  Y = list(y_cumc, y_mit),
-  twasWeightList = list(res_cumc$twasWeights, res_mit$twasWeights)
-)
-}
+data(multiTraitData)
+X <- multiTraitData$X[, 1:30]
+y <- matrix(multiTraitData$Y[, 1], ncol = 1,
+  dimnames = list(rownames(X), "outcome_1"))
+# lasso/enet on this small toy panel only capture signal for some CV
+# splits; a fixed seed keeps the example deterministic.
+set.seed(42)
+cv <- twasWeightsCv(X, y, fold = 3,
+  weightMethods = list(lasso_weights = list(), enet_weights = list()))
+ens <- ensembleWeights(cvResults = cv, Y = y)
+ens$methodCoef # combination weights, sum to 1
 
 }
 \seealso{

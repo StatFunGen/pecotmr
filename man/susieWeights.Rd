@@ -13,7 +13,8 @@ susieWeights(X = NULL, y = NULL, susieFit = NULL, retainFit = FALSE, ...)
 
 \item{susieFit}{Optional fitted SuSiE object.}
 
-\item{retainFit}{If TRUE, stores the fitted object as an attribute on the returned weights.}
+\item{retainFit}{If TRUE, stores the fitted object as an attribute on the
+returned weights.}
 
 \item{...}{Additional arguments passed to `susieR::susie()` when fitting.}
 }
@@ -23,4 +24,10 @@ Numeric vector of variant weights.
 \description{
 Extracts coefficients from an existing SuSiE fit or fits `susieR::susie()`
 from `X` and `y` before extracting weights.
+}
+\examples{
+data(eqtlRegionExample)
+X <- eqtlRegionExample$X[, 1:30]
+y <- eqtlRegionExample$yRes
+susieWeights(X, y)
 }

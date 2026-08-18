@@ -4,13 +4,32 @@
 \alias{pecotmr-h2-lder}
 \title{LDER: LD Eigenvalue Regression}
 \description{
-Estimate heritability using LD eigenvalue regression
-  (Song et al. 2022). Supports univariate global and local estimation,
-  with optional annotation stratification.
+Estimate heritability using LD eigenvalue regression (Song et
+  al. 2022). Supports univariate global and local estimation, with optional
+  annotation stratification.
+
+Estimate SNP heritability by LD eigenvalue regression (Song et
+  al. 2022). Within each LD block the z-scores are whitened in the
+  eigenbasis,
+  \eqn{x_i = (u_i'z)/\sqrt{\lambda_i}}, and the whitened \eqn{\chi^2 = x_i^2}
+  is regressed on \eqn{\lambda_i} via IRWLS:
+  \eqn{E[x_i^2] = (N h2/M)\lambda_i
+  + (1 + N a)}, so \eqn{Cov(z) = (N h2/M) R^2 + (1 + N a) R}. The IRWLS
+  weight
+  uses an in-sample (\eqn{\min(1,\lambda)}) or out-of-sample (logistic) form
+  selected by \code{getInSample}, and a two-stage step estimates the
+  confounding inflation \eqn{a} on a \eqn{\chi^2}-filtered subset. The
+  stratified extension regresses on \eqn{\lambda_i \ell_{ia}}
+  (\eqn{\ell_{ia} = \sum_j A_{ja} V_{ji}^2}) and reduces to the univariate
+  model when there is a single genome-wide annotation.
 }
 \references{
 Song S, Jiang W, Zhang Y, Hou L, Zhao H (2022). Leveraging LD
   eigenvalue regression to improve the estimation of SNP heritability
   and confounding inflation. Am J Hum Genet, 109(5):802-811.
+
+Song S, Jiang W, Zhang Y, et al. (2022). Leveraging LD eigenvalue
+  regression to improve the estimation of SNP heritability and confounding
+  inflation. Am J Hum Genet, 109:802-811.
 }
 \keyword{internal}

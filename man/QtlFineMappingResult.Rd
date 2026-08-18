@@ -19,9 +19,8 @@ QtlFineMappingResult(
 )
 }
 \arguments{
-\item{study}{Character vector of study identifiers (per tuple). Use
-the sentinel \code{"joint"} for rows produced by a cross-study
-joint fit.}
+\item{study}{Character vector of study identifiers (per tuple). Use the
+sentinel \code{"joint"} for rows produced by a cross-study joint fit.}
 
 \item{context}{Character vector of context labels (per tuple). Use
 \code{"joint"} for rows produced by a cross-context joint fit.}
@@ -35,19 +34,23 @@ joint fit.}
 
 \item{jointStudies}{Optional character vector (length \code{length(study)})
 listing the semicolon-joined studies participating in each row's
-cross-study joint fit, or \code{NA_character_} for non-joint rows.
-When \code{NULL} (default) the column is omitted.}
+cross-study joint fit, or \code{NA_character_} for non-joint rows. When
+\code{NULL} (default) the column is omitted.}
 
-\item{jointContexts}{Optional character vector for cross-context joints.
-Same shape as \code{jointStudies}.}
+\item{jointContexts}{Optional character vector for cross-context joints. Same
+shape as \code{jointStudies}.}
 
-\item{jointTraits}{Optional character vector for cross-trait joints.
-Same shape as \code{jointStudies}.}
+\item{jointTraits}{Optional character vector for cross-trait joints. Same
+shape as \code{jointStudies}.}
 
 \item{region}{Optional \code{GRanges} (length \code{length(study)}) giving
 the genomic anchor of each row's trait (its own coordinates). Carried
 forward as provenance (e.g. for cTWAS LD-block placement); not part of the
 identity key. \code{NULL} (default) omits the column.}
+
+\item{traitPos}{Optional per-row trait genomic anchor (a \code{GRanges} or
+\code{NULL}), carried forward as provenance; not part of the identity key.
+\code{NULL} (default) omits the column.}
 
 \item{ldSketch}{An optional \code{GenotypeHandle} (the LD reference for
 RSS-derived fits), or \code{NULL} for individual-level fits.}
@@ -56,18 +59,25 @@ RSS-derived fits), or \code{NULL} for individual-level fits.}
 A \code{QtlFineMappingResult} object.
 }
 \description{
-S4 collection of fine-mapping fits for one or more GWAS
-  studies on a single LD block. Keyed by the identity tuple
-  \code{(study, method)}; each entry is a \code{FineMappingEntry}.
+S4 collection of fine-mapping fits for one or more GWAS studies
+  on a single LD block. Keyed by the identity tuple \code{(study, method)};
+  each entry is a \code{FineMappingEntry}.
 
-  Required columns: \code{study}, \code{method}, \code{entry}. The
-  2-tuple is unique. The caller is expected to construct one
-  \code{GwasFineMappingResult} per LD block (no in-class block
-  indexing).
+Required columns: \code{study}, \code{method}, \code{entry}. The 2-tuple is
+unique. The caller is expected to construct one \code{GwasFineMappingResult}
+per LD block (no in-class block indexing).
 
 Construct a \code{QtlFineMappingResult} DFrame-subclass
-  collection from per-tuple vectors and a list of
-  \code{FineMappingEntry} payloads (one per tuple). The optional
-  \code{ldSketch} slot records the LD reference used for RSS-derived
-  fits; pass \code{NULL} (the default) for individual-level fits.
+  collection from per-tuple vectors and a list of \code{FineMappingEntry}
+  payloads (one per tuple). The optional \code{ldSketch} slot records the LD
+  reference used for RSS-derived fits; pass \code{NULL} (the default) for
+  individual-level fits.
+}
+\examples{
+tl <- data.frame(variant_id = paste0("chr1:", 100 * 1:3, ":A:G"),
+  pip = c(0.9, 0.5, 0.1), cs = c(1L, 1L, NA))
+fe <- FineMappingEntry(
+  variantIds = tl$variant_id, susieFit = list(), topLoci = tl)
+QtlFineMappingResult(study = "s1", context = "brain", trait = "g1",
+  method = "susie", entry = list(fe))
 }

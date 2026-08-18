@@ -7,127 +7,135 @@ context("AnnotationMatrix")
 # test_h2Annotations.R. Fixtures come from helper-h2Classes.R.
 
 test_that("AnnotationMatrix validates dimensions and meta", {
-  gr <- make_test_granges(10)
-  meta <- make_test_annotation_meta()
-  mat <- matrix(0, nrow = 10, ncol = 3)
+    gr <- make_test_granges(10)
+    meta <- make_test_annotation_meta()
+    mat <- matrix(0, nrow = 10, ncol = 3)
 
-  obj <- AnnotationMatrix(mat, gr, meta)
-  expect_s4_class(obj, "AnnotationMatrix")
-  expect_true(methods::validObject(obj))
+    obj <- AnnotationMatrix(mat, gr, meta)
+    expect_s4_class(obj, "AnnotationMatrix")
+    expect_true(methods::validObject(obj))
 })
 
 test_that("AnnotationMatrix rejects row mismatch", {
-  gr <- make_test_granges(10)
-  meta <- make_test_annotation_meta()
-  mat <- matrix(0, nrow = 5, ncol = 3)  # wrong number of rows
+    gr <- make_test_granges(10)
+    meta <- make_test_annotation_meta()
+    mat <- matrix(0, nrow = 5, ncol = 3) # wrong number of rows
 
-  expect_error(AnnotationMatrix(mat, gr, meta), "rows.*must match")
+    expect_error(AnnotationMatrix(mat, gr, meta), "rows.*must match")
 })
 
 test_that("AnnotationMatrix rejects column mismatch with meta", {
-  gr <- make_test_granges(10)
-  meta <- make_test_annotation_meta()  # 3 annotations
-  mat <- matrix(0, nrow = 10, ncol = 2)  # only 2 columns
+    gr <- make_test_granges(10)
+    meta <- make_test_annotation_meta() # 3 annotations
+    mat <- matrix(0, nrow = 10, ncol = 2) # only 2 columns
 
-  # Constructor errors when colnames assignment fails (dimnames mismatch)
-  expect_error(AnnotationMatrix(mat, gr, meta))
+    # Constructor errors when colnames assignment fails (dimnames mismatch)
+    expect_error(AnnotationMatrix(mat, gr, meta))
 })
 
 test_that("AnnotationMatrix rejects invalid tier values", {
-  gr <- make_test_granges(10)
-  meta <- data.frame(
-    name = "x", tier = "invalid_tier", type = "binary",
-    stringsAsFactors = FALSE)
-  mat <- matrix(0, nrow = 10, ncol = 1)
+    gr <- make_test_granges(10)
+    meta <- data.frame(
+        name = "x",
+        tier = "invalid_tier",
+        type = "binary",
+        stringsAsFactors = FALSE
+    )
+    mat <- matrix(0, nrow = 10, ncol = 1)
 
-  expect_error(AnnotationMatrix(mat, gr, meta), "tier.*baseline.*candidate")
+    expect_error(AnnotationMatrix(mat, gr, meta), "tier.*baseline.*candidate")
 })
 
 test_that("AnnotationMatrix rejects invalid type values", {
-  gr <- make_test_granges(10)
-  meta <- data.frame(
-    name = "x", tier = "baseline", type = "ordinal",
-    stringsAsFactors = FALSE)
-  mat <- matrix(0, nrow = 10, ncol = 1)
+    gr <- make_test_granges(10)
+    meta <- data.frame(
+        name = "x",
+        tier = "baseline",
+        type = "ordinal",
+        stringsAsFactors = FALSE
+    )
+    mat <- matrix(0, nrow = 10, ncol = 1)
 
-  expect_error(AnnotationMatrix(mat, gr, meta), "type.*binary.*continuous")
+    expect_error(AnnotationMatrix(mat, gr, meta), "type.*binary.*continuous")
 })
 
 test_that("AnnotationMatrix() constructor creates object from matrix", {
-  n <- 10
-  gr <- make_test_granges(n)
-  meta <- make_test_annotation_meta()
-  mat <- matrix(runif(n * 3), nrow = n, ncol = 3)
+    n <- 10
+    gr <- make_test_granges(n)
+    meta <- make_test_annotation_meta()
+    mat <- matrix(runif(n * 3), nrow = n, ncol = 3)
 
-  obj <- AnnotationMatrix(mat, gr, meta, genome = "hg38")
-  expect_s4_class(obj, "AnnotationMatrix")
-  expect_equal(nrow(obj@annotations), n)
-  expect_equal(ncol(obj@annotations), 3)
-  expect_equal(obj@genome, "hg38")
+    obj <- AnnotationMatrix(mat, gr, meta, genome = "hg38")
+    expect_s4_class(obj, "AnnotationMatrix")
+    expect_equal(nrow(obj@annotations), n)
+    expect_equal(ncol(obj@annotations), 3)
+    expect_equal(obj@genome, "hg38")
 })
 
 test_that("AnnotationMatrix() sets column names from annotation_meta", {
-  n <- 10
-  gr <- make_test_granges(n)
-  meta <- make_test_annotation_meta()
-  mat <- matrix(0, nrow = n, ncol = 3)  # No colnames set on mat
+    n <- 10
+    gr <- make_test_granges(n)
+    meta <- make_test_annotation_meta()
+    mat <- matrix(0, nrow = n, ncol = 3) # No colnames set on mat
 
-  obj <- AnnotationMatrix(mat, gr, meta)
-  expect_equal(colnames(obj@annotations), c("base", "enhancer", "promoter"))
+    obj <- AnnotationMatrix(mat, gr, meta)
+    expect_equal(colnames(obj@annotations), c("base", "enhancer", "promoter"))
 })
 
 test_that("AnnotationMatrix rejects a non-data.frame annotationMeta", {
-  gr <- make_test_granges(10)
-  expect_error(
-    AnnotationMatrix(matrix(0, 10, 3), gr, annotationMeta = list(a = 1)),
-    "annotationMeta must be a data.frame")
+    gr <- make_test_granges(10)
+    expect_error(
+        AnnotationMatrix(matrix(0, 10, 3), gr, annotationMeta = list(a = 1)),
+        "annotationMeta must be a data.frame"
+    )
 })
 
 test_that("AnnotationMatrix rejects annotationMeta missing required columns", {
-  gr <- make_test_granges(10)
-  bad_meta <- data.frame(foo = c("a", "b", "c"), stringsAsFactors = FALSE)
-  expect_error(
-    AnnotationMatrix(matrix(0, 10, 3), gr, annotationMeta = bad_meta),
-    "must have columns: name, tier, type")
+    gr <- make_test_granges(10)
+    bad_meta <- data.frame(foo = c("a", "b", "c"), stringsAsFactors = FALSE)
+    expect_error(
+        AnnotationMatrix(matrix(0, 10, 3), gr, annotationMeta = bad_meta),
+        "must have columns: name, tier, type"
+    )
 })
 
 test_that("AnnotationMatrix accessors round-trip the stored slots", {
-  n <- 10
-  gr <- make_test_granges(n)
-  meta <- make_test_annotation_meta()
-  mat <- matrix(runif(n * 3), nrow = n, ncol = 3)
-  obj <- AnnotationMatrix(mat, gr, meta, genome = "hg38")
+    n <- 10
+    gr <- make_test_granges(n)
+    meta <- make_test_annotation_meta()
+    mat <- matrix(runif(n * 3), nrow = n, ncol = 3)
+    obj <- AnnotationMatrix(mat, gr, meta, genome = "hg38")
 
-  expect_equal(dim(getAnnotations(obj)), c(n, 3L))
-  expect_equal(getAnnotationMeta(obj), meta)
-  expect_equal(getSnpRanges(obj), gr)
-  expect_equal(getGenome(obj), "hg38")
+    expect_equal(dim(getAnnotations(obj)), c(n, 3L))
+    expect_equal(getAnnotationMeta(obj), meta)
+    expect_equal(getSnpRanges(obj), gr)
+    expect_equal(getGenome(obj), "hg38")
 })
 
 test_that("getBaseline() subsets to baseline-tier only", {
-  n <- 10
-  gr <- make_test_granges(n)
-  meta <- make_test_annotation_meta()  # 1 baseline, 2 candidate
-  mat <- matrix(0, nrow = n, ncol = 3)
+    n <- 10
+    gr <- make_test_granges(n)
+    meta <- make_test_annotation_meta() # 1 baseline, 2 candidate
+    mat <- matrix(0, nrow = n, ncol = 3)
 
-  obj <- AnnotationMatrix(mat, gr, meta)
-  baseline <- getBaseline(obj)
+    obj <- AnnotationMatrix(mat, gr, meta)
+    baseline <- getBaseline(obj)
 
-  expect_s4_class(baseline, "AnnotationMatrix")
-  expect_equal(ncol(baseline@annotations), 1)
-  expect_true(all(baseline@annotationMeta$tier == "baseline"))
+    expect_s4_class(baseline, "AnnotationMatrix")
+    expect_equal(ncol(baseline@annotations), 1)
+    expect_true(all(baseline@annotationMeta$tier == "baseline"))
 })
 
 test_that("getCandidates() subsets to candidate-tier only", {
-  n <- 10
-  gr <- make_test_granges(n)
-  meta <- make_test_annotation_meta()  # 1 baseline, 2 candidate
-  mat <- matrix(0, nrow = n, ncol = 3)
+    n <- 10
+    gr <- make_test_granges(n)
+    meta <- make_test_annotation_meta() # 1 baseline, 2 candidate
+    mat <- matrix(0, nrow = n, ncol = 3)
 
-  obj <- AnnotationMatrix(mat, gr, meta)
-  cand <- getCandidates(obj)
+    obj <- AnnotationMatrix(mat, gr, meta)
+    cand <- getCandidates(obj)
 
-  expect_s4_class(cand, "AnnotationMatrix")
-  expect_equal(ncol(cand@annotations), 2)
-  expect_true(all(cand@annotationMeta$tier == "candidate"))
+    expect_s4_class(cand, "AnnotationMatrix")
+    expect_equal(ncol(cand@annotations), 2)
+    expect_true(all(cand@annotationMeta$tier == "candidate"))
 })

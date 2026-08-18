@@ -7,18 +7,18 @@
 \description{
 Container for SNP-level annotations used in stratified
   heritability analysis. Supports binary (0/1) and continuous annotations.
-  Annotations are classified as baseline (always jointly fitted) or
-  candidate (evaluated via score statistics).
+  Annotations are classified as baseline (always jointly fitted) or candidate
+  (evaluated via score statistics).
 }
 \section{Slots}{
 
 \describe{
-\item{\code{snpRanges}}{A \code{GRanges} object with one range per SNP,
-defining genomic positions.}
+\item{\code{snpRanges}}{A \code{GRanges} object with one range per SNP, defining
+genomic positions.}
 
-\item{\code{annotations}}{A numeric matrix (SNPs x annotations). Dense for
-small annotation counts, can be sparse (\code{dgCMatrix}) for large
-binary annotation sets.}
+\item{\code{annotations}}{A numeric matrix (SNPs x annotations). Dense for small
+annotation counts, can be sparse (\code{dgCMatrix}) for large binary
+annotation sets.}
 
 \item{\code{annotationMeta}}{A \code{data.frame} with columns:
 \describe{

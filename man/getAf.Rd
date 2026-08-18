@@ -14,15 +14,32 @@ getAf(x, ...)
 
 \item{...}{Class-specific selection arguments (e.g., \code{traitId},
 \code{region}, \code{cisWindow}, \code{samples} for \code{QtlDataset}).}
+
+\item{traitId}{Character or \code{NULL}. Molecular trait / feature identifier
+to select; \code{NULL} matches all traits in the dataset.}
+
+\item{region}{Character (length 1, \code{"chr:start-end"}) or \code{NULL}.
+Restrict variants to this region; \code{NULL} uses the full cis window /
+all regions.}
+
+\item{cisWindow}{Integer or \code{NULL}. Half-width (bp) of the cis window
+around the trait; \code{NULL} uses the dataset default.}
+
+\item{samples}{Character vector or \code{NULL}. Restrict to these sample IDs;
+\code{NULL} uses all samples.}
 }
 \value{
-Named numeric vector of effect-allele frequencies (names are
-  variant IDs), or an empty vector when no variants are selected.
+Named numeric vector of effect-allele frequencies (names are variant
+  IDs), or an empty vector when no variants are selected.
 }
 \description{
-Extract the directional effect-allele (A1) frequency vector
-  for a \code{QtlDataset}. Unlike \code{\link{getMaf}}, the value is
-  \emph{not} folded to the minor allele: it is the frequency of the
-  dosage-counted allele (A1, the effect allele), matching the allele the
-  marginal effect sizes and the fine-mapping \code{af} column report.
+Extract the directional effect-allele (A1) frequency vector for
+  a \code{QtlDataset}. Unlike \code{\link{getMaf}}, the value is \emph{not}
+  folded to the minor allele: it is the frequency of the dosage-counted
+  allele (A1, the effect allele), matching the allele the marginal effect
+  sizes and the fine-mapping \code{af} column report.
+}
+\examples{
+data(qtlDatasetExample)
+getAf(qtlDatasetExample)
 }
