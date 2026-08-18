@@ -1033,7 +1033,7 @@ makePairwiseContrastCol <- function(pair, template) {
 #' @return A single-row data.frame with columns \code{mean_contrast_*},
 #'   \code{se_contrast_*}, \code{p_contrast_*} for both deviation and pairwise
 #'   contrasts. Returns NULL if fewer than 2 tested conditions.
-#' @importFrom stringr str_remove_all
+#' @importFrom stringr str_remove_all fixed
 #' @importFrom utils combn
 #' @examples
 #' om <- matrix(c(0.1, 0.2, 0.3), 1, 3, dimnames = list("v1", c("a", "b", "c")))
@@ -1313,7 +1313,7 @@ updateMashModelCov <- function(mashModel, allSamples, samples) {
 
     # Prune mixture weights for removed conditions
     for (s in unwanted) {
-        dropIdx <- grep(s, names(mashModel$fitted_g$pi), fixed = TRUE)
+        dropIdx <- which(str_detect(names(mashModel$fitted_g$pi), fixed(s)))
         if (length(dropIdx) > 0) {
             mashModel$fitted_g$pi <- mashModel$fitted_g$pi[-dropIdx]
         }

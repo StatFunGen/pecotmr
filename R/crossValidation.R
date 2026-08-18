@@ -132,12 +132,7 @@
     verbose = 1,
     seed = NULL
 ) {
-    # Seed the main-process RNG (fold partitioning + variant sub-sampling). The
-    # parallel fold-fitting RNG is seeded separately via cvState$rngSeed below,
-    # since set.seed() does not reach BiocParallel workers.
-    if (!is.null(seed)) {
-        set.seed(seed)
-    }
+    .applySeed(seed)
     prep <- .cvPrepareData(X, Y, fold, verbose)
     X <- .cvSubsampleVariants(prep$X, maxNumVariants, variantsToKeep, verbose)
     Y <- prep$Y
@@ -348,6 +343,17 @@
 # @noRd
 .bpSeedParam <- function(numCores, seed = NULL) {
     MulticoreParam(workers = numCores, RNGseed = as.integer(seed %||% 1L))
+}
+
+# Seed the main-process RNG when a seed is supplied. This covers only the serial
+# draws (fold partitioning, variant sub-sampling, single-threaded fitting);
+# BiocParallel workers seed their own L'Ecuyer streams via .bpSeedParam. A NULL
+# seed leaves the session RNG untouched so an outer set.seed() still governs it.
+# @noRd
+.applySeed <- function(seed) {
+    if (!is.null(seed)) {
+        set.seed(seed)
+    }
 }
 
 .cvRunFolds <- function(foldIds, cvState, numCores) {

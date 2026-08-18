@@ -75,7 +75,7 @@ resolvePipColumn <- function(topLoci, method = NULL) {
     if (is_in("pip", names(topLoci))) {
         return("pip")
     }
-    pipCols <- grep("^pip_", names(topLoci), value = TRUE)
+    pipCols <- names(topLoci)[str_detect(names(topLoci), "^pip_")]
     if (length(pipCols) == 1) {
         return(pipCols)
     }

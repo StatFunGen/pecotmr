@@ -547,6 +547,7 @@ importFrom(stats,
   var
 )
 importFrom(stringr,
+  fixed,
   regex,
   str_c,
   str_detect,

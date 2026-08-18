@@ -1156,9 +1156,10 @@ twasWeightsCv <- function(
         p$weightMethods
     }
     if (is.null(p$seed) && !exists(".Random.seed") && p$verbose >= 1) {
-        inform(
-            "! No seed set. Pass `seed=` or call set.seed() for reproducibility."
-        )
+        inform(str_c(
+            "! No seed set. Pass `seed=` or call ",
+            "set.seed() for reproducibility."
+        ))
     }
     if (is.null(weightMethods)) {
         res <- .crossValidateWeights(
@@ -1544,11 +1545,7 @@ learnTwasWeights <- function(
 # TwasWeights collection. `p` is the captured public arguments.
 # @noRd
 .learnTwasWeightsImpl <- function(p) {
-    # Seed the main-process RNG (used by serial method fitting); the parallel
-    # path is seeded via ctx$rngSeed in .twasFitAllMethods.
-    if (!is.null(p$seed)) {
-        set.seed(p$seed)
-    }
+    .applySeed(p$seed)
     retainFitDetail <- p$retainFitDetail
     retainFitDetail <- arg_match(retainFitDetail, c("slim", "full"))
     Y <- .twasValidateXY(p$X, p$Y)
