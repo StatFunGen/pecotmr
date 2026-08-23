@@ -2987,3 +2987,39 @@ test_that("computeCsCorrelation (QtlDataset) matches the sumstat path", {
     expect_equal(dim(ccGeno), c(2L, 2L))
     expect_equal(unname(ccGeno), unname(ccSketch), tolerance = 1e-6)
 })
+
+test_that(".fmCsIdxAtCoverage: multi-CS variant takes the smallest set and warns", {
+    # v2 is in L1 (size 5) and L4 (size 1); L2 = {6,7}. Gapped index (no L3).
+    sets <- list(L1 = 1:5, L2 = 6:7, L4 = 2L)
+    csTables <- list(list(sets = list(cs = sets)))
+    cov <- 0.95
+    nV <- 10L
+    vn <- paste0("v", seq_len(nV))
+    expect_warning(
+        pos <- .fmCsIdxAtCoverage(cov, cov, csTables, nV, vn),
+        "multiple credible sets"
+    )
+    eff <- .fmEffectIdxAtCoverage(cov, pos, cov, csTables)
+    # smallest-set tie-break: v2 kept L4 (size 1), whose position is 3
+    expect_equal(pos[2], 3L)
+    # label is the TRUE effect index (4, gapped), not the renumbered position 3
+    expect_equal(eff[2], 4L)
+    # single-membership + non-CS variants unchanged
+    expect_equal(eff[1], 1L) # only in L1
+    expect_equal(eff[6], 2L) # only in L2
+    expect_equal(eff[8], 0L) # in no set
+})
+
+test_that(".fmCsIdxAtCoverage: no warning and no relabelling when sets are disjoint", {
+    sets <- list(L1 = 1:3, L2 = 4:5)
+    csTables <- list(list(sets = list(cs = sets)))
+    vn <- paste0("v", 1:6)
+    expect_silent(pos <- .fmCsIdxAtCoverage(0.95, 0.95, csTables, 6L, vn))
+    eff <- .fmEffectIdxAtCoverage(0.95, pos, 0.95, csTables)
+    expect_equal(eff, c(1L, 1L, 1L, 2L, 2L, 0L))
+})
+
+test_that(".fmEffectIndices: parses L-names, falls back to position when absent", {
+    expect_equal(.fmEffectIndices(list(L1 = 1, L2 = 2, L7 = 3)), c(1L, 2L, 7L))
+    expect_equal(.fmEffectIndices(list(1, 2, 3)), c(1L, 2L, 3L)) # unnamed -> position
+})

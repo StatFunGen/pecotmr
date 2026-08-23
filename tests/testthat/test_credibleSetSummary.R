@@ -168,3 +168,87 @@ test_that("getCredibleSetSummary aggregates across a collection with entry ident
     expect_equal(nrow(s), 2L) # one CS per entry
     expect_setequal(unique(s$context), c("brain", "blood"))
 })
+
+test_that("getCredibleSetSummary lists every fit CS, even one dropped from the per-variant column", {
+    # When the fit carries sets$cs the summary is built from it, so a set whose
+    # members were all relabelled to a smaller overlapping set in the
+    # per-variant column still gets a row -- with its true full size.
+    vn <- paste0("chr1:", (1:5) * 100, ":A:G")
+    alpha <- matrix(0, 2, 5, dimnames = list(c("L1", "L2"), vn))
+    alpha[1, 1:3] <- 0.3
+    alpha[2, 2] <- 0.9
+    fit <- list(
+        pip = c(0.3, 0.9, 0.3, 0.01, 0.01),
+        alpha = alpha,
+        V = c(0.1, 0.2),
+        lbf_variable = matrix(
+            c(1, 1, 1, 0, 0, 0, 2, 0, 0, 0),
+            2, 5,
+            byrow = TRUE, dimnames = list(c("L1", "L2"), vn)
+        ),
+        sets = list(
+            # L2 = {2} is contained in L1 = {1,2,3}: v2 tags to the smaller L2
+            # in the per-variant column, so L1 loses it there.
+            cs = list(L1 = c(1L, 2L, 3L), L2 = c(2L)),
+            purity = data.frame(
+                min.abs.corr = c(0.8, 1.0),
+                mean.abs.corr = c(0.85, 1.0),
+                row.names = c("L1", "L2")
+            ),
+            requested_coverage = 0.95
+        )
+    )
+    class(fit) <- "susie"
+    tl <- data.frame(
+        variant_id = vn,
+        pip = fit$pip,
+        logBF = c(1, 2, 1, 0, 0),
+        cs_95 = c("susie_1", "susie_2", "susie_1", "susie_0", "susie_0"),
+        cs_95_purity = c(0.8, 1.0, 0.8, 0, 0),
+        stringsAsFactors = FALSE
+    )
+    e <- FineMappingEntry(variantIds = vn, susieFit = fit, topLoci = tl)
+    s <- getCredibleSetSummary(e, coverage = 0.95)
+    s <- s[order(s$effect_id), , drop = FALSE]
+    expect_equal(nrow(s), 2L) # == length(fit$sets$cs), no set dropped
+    expect_equal(s$cs, c("susie_1", "susie_2"))
+    expect_equal(s$effect_id, c("L1", "L2"))
+    # L1 keeps its full size 3 even though only v1/v3 carry its per-variant tag
+    expect_equal(s$n_variants, c(3L, 1L))
+    expect_equal(s$purity_min, c(0.8, 1.0))
+    # cs_pip summed over the TRUE membership (includes v2 for L1)
+    expect_equal(s$cs_pip, c(1.5, 0.9), tolerance = 1e-9)
+    expect_equal(s$lead_variant, c("chr1:200:A:G", "chr1:200:A:G"))
+})
+
+test_that("getCredibleSetSummary labels by the fit's true (gapped) effect index", {
+    # sets$cs is ordered L2, L1 (e.g. by purity): the row for the size-3 set
+    # must be effect_id L2 / susie_2, not renumbered to position 1.
+    vn <- paste0("chr1:", (1:4) * 100, ":A:G")
+    alpha <- matrix(0, 2, 4, dimnames = list(c("L2", "L1"), vn))
+    fit <- list(
+        pip = c(0.3, 0.3, 0.3, 0.6),
+        alpha = alpha,
+        V = c(0.1, 0.2),
+        sets = list(
+            cs = list(L2 = c(1L, 2L, 3L), L1 = c(4L)),
+            purity = data.frame(
+                min.abs.corr = c(0.9, 0.5),
+                row.names = c("L2", "L1")
+            ),
+            requested_coverage = 0.95
+        )
+    )
+    class(fit) <- "susie"
+    tl <- data.frame(
+        variant_id = vn, pip = fit$pip, logBF = c(1, 1, 1, 2),
+        cs_95 = c("susie_2", "susie_2", "susie_2", "susie_1"),
+        stringsAsFactors = FALSE
+    )
+    e <- FineMappingEntry(variantIds = vn, susieFit = fit, topLoci = tl)
+    s <- getCredibleSetSummary(e, coverage = 0.95)
+    big <- s[s$n_variants == 3L, , drop = FALSE]
+    expect_equal(big$effect_id, "L2") # the size-3 set is L2, not L1
+    expect_equal(big$cs, "susie_2")
+    expect_equal(big$purity_min, 0.9)
+})

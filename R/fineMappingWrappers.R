@@ -1085,7 +1085,8 @@ setMethod(
 # Per-variant CS index at coverage `targetCov` (0 = not in any CS; on overlap
 # the smallest cs_idx wins).
 # @noRd
-.fmCsIdxAtCoverage <- function(targetCov, coverageValues, csTables, nV) {
+.fmCsIdxAtCoverage <- function(targetCov, coverageValues, csTables, nV,
+                               variantNames = NULL) {
     out <- integer(nV)
     hit <- which(abs(coverageValues - targetCov) < 1e-12)
     if (length(hit) == 0L) {
@@ -1095,11 +1096,82 @@ setMethod(
     if (is.null(sets) || length(sets) == 0L) {
         return(out)
     }
+    setSizes <- lengths(sets)
+    effIdx <- .fmEffectIndices(sets)
+    # For each variant keep the SMALLEST containing set (ties -> lowest
+    # position, deterministic); record every membership so multi-CS variants
+    # can be warned about. `out` holds set POSITIONS (the purity vector and the
+    # full-fit block index by position); .fmEffectIdxAtCoverage maps these to
+    # the fit's true effect index for the cs_<cov> labels.
+    bestSize <- rep(Inf, nV)
+    memb <- vector("list", nV)
     for (csIdx in seq_along(sets)) {
         vi <- as.integer(sets[[csIdx]])
-        vi <- vi[vi >= 1L & vi <= nV & out[vi] == 0L]
-        out[vi] <- csIdx
+        vi <- vi[vi >= 1L & vi <= nV]
+        for (v in vi) {
+            memb[[v]] <- c(memb[[v]], csIdx)
+            if (setSizes[csIdx] < bestSize[v]) {
+                out[v] <- csIdx
+                bestSize[v] <- setSizes[csIdx]
+            }
+        }
     }
+    for (v in which(lengths(memb) > 1L)) {
+        ps <- memb[[v]]
+        vname <- if (!is.null(variantNames) && v <= length(variantNames)) {
+            variantNames[v]
+        } else {
+            str_c("#", v)
+        }
+        warning(sprintf(
+            paste0(
+                "Variant %s is in multiple credible sets: %s. ",
+                "Keeping the smallest: CS L%d (size %d)."
+            ),
+            vname,
+            str_c("L", effIdx[ps], collapse = ", "),
+            effIdx[out[v]],
+            bestSize[v]
+        ), call. = FALSE)
+    }
+    out
+}
+
+# The fit's true credible-set effect index (the k behind "L<k>") for each set
+# POSITION in `sets$cs`; falls back to the position when the names are absent
+# or unparseable. This is what the cs_<cov> label and the per-set summary carry
+# so a gapped effect index (e.g. L1, L2, L4) is preserved instead of being
+# renumbered 1..n.
+# @noRd
+.fmEffectIndices <- function(sets) {
+    nm <- names(sets)
+    if (is.null(nm)) {
+        return(seq_along(sets))
+    }
+    e <- suppressWarnings(as.integer(str_remove(nm, "^L")))
+    bad <- is.na(e)
+    if (any(bad)) {
+        e[bad] <- seq_along(sets)[bad]
+    }
+    e
+}
+
+# Map a per-variant set-POSITION vector (from .fmCsIdxAtCoverage) to the fit's
+# true effect indices; non-CS entries (0) stay 0.
+# @noRd
+.fmEffectIdxAtCoverage <- function(targetCov, posVec, coverageValues, csTables) {
+    hit <- which(abs(coverageValues - targetCov) < 1e-12)
+    if (length(hit) == 0L) {
+        return(posVec)
+    }
+    sets <- csTables[[hit[1L]]]$sets$cs
+    if (is.null(sets) || length(sets) == 0L) {
+        return(posVec)
+    }
+    effIdx <- .fmEffectIndices(sets)
+    out <- integer(length(posVec))
+    nz <- posVec > 0L
+    out[nz] <- effIdx[posVec[nz]]
     out
 }
 
@@ -1206,7 +1278,7 @@ buildTopLoci <- function(
     fc <- .btlFitConstants(p$dataY, p$otherQuantities, p$region)
     post <- .btlPosterior(p$fit, p$conditionIdx, nV)
     marg <- .btlMarginal(p$sumstats, nV)
-    cs <- .btlCsMembership(cov, p$csTables, nV)
+    cs <- .btlCsMembership(cov, p$csTables, nV, p$variantNames)
     fullFitBlock <- .btlFullFitBlock(
         p$fit,
         post,
@@ -1398,7 +1470,7 @@ buildTopLoci <- function(
 
 # CS membership index + purity for every coverage present (high -> low), with
 # the matching `cs_<coverage*100>` column names.
-.btlCsMembership <- function(coverageValues, csTables, nV) {
+.btlCsMembership <- function(coverageValues, csTables, nV, variantNames = NULL) {
     covSorted <- sort(
         unique(coverageValues[is.finite(coverageValues)]),
         decreasing = TRUE
@@ -1408,7 +1480,18 @@ buildTopLoci <- function(
         .fmCsIdxAtCoverage,
         coverageValues,
         csTables,
-        nV
+        nV,
+        variantNames
+    )
+    # Effect-index view of the same assignment: the cs_<cov> LABEL uses the
+    # fit's true (possibly gapped) effect index, while purity / full-fit keep
+    # indexing by set position via csIdxByCov.
+    csEffectByCov <- map2(
+        covSorted,
+        csIdxByCov,
+        .fmEffectIdxAtCoverage,
+        coverageValues = coverageValues,
+        csTables = csTables
     )
     csPurityByCov <- map2(
         covSorted,
@@ -1420,6 +1503,7 @@ buildTopLoci <- function(
     list(
         covSorted = covSorted,
         csIdxByCov = csIdxByCov,
+        csEffectByCov = csEffectByCov,
         csPurityByCov = csPurityByCov,
         csColNames = str_c("cs_", covSorted * 100)
     )
@@ -1526,7 +1610,7 @@ buildTopLoci <- function(
     methodTag <- .camelToSnakeMethod(method)
     csList <- c(
         set_names(
-            map(cs$csIdxByCov, .btlCsLabel, methodTag = methodTag),
+            map(cs$csEffectByCov, .btlCsLabel, methodTag = methodTag),
             cs$csColNames
         ),
         set_names(cs$csPurityByCov, str_c(cs$csColNames, "_purity"))
