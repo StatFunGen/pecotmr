@@ -35,6 +35,8 @@ r45 = {features = ["r45"]}
 [dependencies]
 "air" = "*"
 "bioconductor-bioccheck" = "*"
+"bioconductor-plyranges" = "*"
+"bioconductor-tidysummarizedexperiment" = "*"
 "r-covr" = "*"
 "r-devtools" = "*"
 "r-knitr" = "*"

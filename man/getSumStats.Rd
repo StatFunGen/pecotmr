@@ -17,6 +17,7 @@ getSumStats(x, ...)
   context = NULL,
   trait = NULL,
   annotateSignificance = NULL,
+  ranges = NULL,
   ...
 )
 }
@@ -43,6 +44,12 @@ enriched by \code{\link{qtlAssociationPostprocess}}, a logical
 significance is derived on the fly, not stored). Flat export flattens this
 full entry GRanges (all mcols) directly; note \code{\link{getSumstatDf}} is
 a fixed GWAS-schema view and does not carry the association columns.}
+
+\item{ranges}{A \code{GRanges} or \code{NULL} (default). A selected tuple can
+own several elements -- one per chromosome, since a multi-seqname entry is
+split at construction -- and they are stitched back into a single
+\code{GRanges}. Pass \code{ranges} to pull only the variants overlapping a
+region instead of the whole span; \code{NULL} returns everything.}
 }
 \value{
 A \code{GRanges}, a \code{QtlSumStats}, or \code{NULL}.

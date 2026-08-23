@@ -247,7 +247,7 @@ setMethod("getGenotypes", "LdData", function(x, ...) {
 #' @rdname hasGenotypes
 #' @export
 setMethod("hasGenotypes", "LdData", function(x) {
-    !is.null(x@genotypeHandle)
+    !is.null(getGenotypeHandle(x))
 })
 
 #' @rdname getVariantIds

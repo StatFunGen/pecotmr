@@ -51,7 +51,7 @@ NULL
 # Slice a fine-mapping per-method CV payload (.fmSliceCv output:
 # list(samplePartition, prediction = list(<m>_predicted = sample x condition),
 # performance = list(<m>_performance = condition x 6))) down to one condition r,
-# so each per-context FineMappingEntry carries that context's CV.
+# so each per-context FineMappingRow carries that context's CV.
 .fmSliceCvCondition <- function(cv, r) {
     if (is.null(cv)) {
         return(NULL)
@@ -167,7 +167,7 @@ NULL
         if (length(idx) == 0L) {
             return(NULL)
         }
-        gr <- data$entry[[idx[[1L]]]]
+        gr <- .collectionEntry(data, idx[[1L]])
         if (length(gr) == 0L) {
             return(NULL)
         }
@@ -233,9 +233,9 @@ setMethod(
     "fitJointGroup",
     signature("IndividualJointGroup", "FmJointPipeline"),
     function(group, pipeline, token, args) {
-        cfg <- pipeline@config
-        Xc <- group@X
-        Yc <- group@Y
+        cfg <- .jpConfig(pipeline)
+        Xc <- .jgX(group)
+        Yc <- .jgY(group)
         nCond <- ncol(Yc)
         if (identical(token, "fsusie")) {
             return(.jointFitFsusie(group, Xc, Yc, nCond, cfg, args))
@@ -256,7 +256,7 @@ setMethod(
 # cross-trait). One per-condition entry per trait, with an optional CV slice.
 # @noRd
 .jointFitFsusie <- function(group, Xc, Yc, nCond, cfg, args) {
-    if (length(group@pos) != nCond) {
+    if (length(.jgPos(group)) != nCond) {
         msg <- glue(
             "fitJointGroup: fsusie requires per-trait positions ('pos'); ",
             "it is cross-trait individual-level only."
@@ -265,7 +265,7 @@ setMethod(
     }
     verbose <- if (is.null(cfg$verbose)) 1 else cfg$verbose
     fitArgs <- .fmMergeUserArgs(
-        list(X = Xc, Y = Yc, pos = group@pos),
+        list(X = Xc, Y = Yc, pos = .jgPos(group)),
         "fsusie",
         args$methodArgs[["fsusie"]]
     )
@@ -304,7 +304,7 @@ setMethod(
         cvFolds,
         samplePartition = cfg$samplePartition,
         coverage = cfg$coverage,
-        pos = group@pos,
+        pos = .jgPos(group),
         verbose = verbose,
         numThreads = if (is.null(cfg$cvThreads)) 1L else cfg$cvThreads,
         seed = cfg$seed
@@ -312,7 +312,7 @@ setMethod(
     .fmSliceCv(cv, "fsusie")
 }
 
-# One fsusie per-condition (trait) FineMappingEntry, with its CV slice attached.
+# One fsusie per-condition (trait) FineMappingRow, with its CV slice attached.
 # @noRd
 .jointFsusieEntry <- function(r, fit, cvM, Xc, cfg) {
     e <- .fmPostprocessOne(
@@ -404,7 +404,7 @@ setMethod(
 # prior, returning list(fit, cvM).
 # @noRd
 .jointMvFit <- function(group, Xc, Ys, cfg, args, ddCut, verbose) {
-    key <- .jointPriorKey(group@conditions)
+    key <- .jointPriorKey(.jgConditions(group))
     mvFitParts <- .fmLookupMrmashFit(
         args$twasWeights,
         key$study,
@@ -534,11 +534,11 @@ setMethod(
             )
             abort(msg)
         }
-        cfg <- pipeline@config
+        cfg <- .jpConfig(pipeline)
         fit <- .jointFitMvsusieRss(group, cfg, args)
         # One per-condition entry (RSS has no sample folds).
         map(
-            seq_len(ncol(group@Z)),
+            seq_len(ncol(.jgZ(group))),
             .jointRssEntry,
             fit = fit,
             group = group,
@@ -556,7 +556,7 @@ setMethod(
     } else {
         cfg$dataDrivenPriorWeightsCutoff
     }
-    key <- .jointPriorKey(group@conditions)
+    key <- .jointPriorKey(.jgConditions(group))
     mvFitParts <- .fmLookupMrmashFit(
         args$twasWeights,
         key$study,
@@ -565,13 +565,13 @@ setMethod(
     )
     mvPrior <- .buildMvsusieReweightedPrior(
         mvFitParts,
-        colnames(group@Z),
+        colnames(.jgZ(group)),
         ddCut
     )
     mvBaseArgs <- list(
-        Z = group@Z,
-        R = group@R,
-        N = as.numeric(stats::median(group@N)),
+        Z = .jgZ(group),
+        R = .jgR(group),
+        N = as.numeric(stats::median(.jgN(group))),
         prior_variance = mvPrior$priorVariance,
         coverage = cfg$coverage
     )
@@ -587,13 +587,13 @@ setMethod(
     .setFinemappingFitClass(fit, "mvsusie")
 }
 
-# One RSS per-condition FineMappingEntry (csInput = "Xcorr").
+# One RSS per-condition FineMappingRow (csInput = "Xcorr").
 # @noRd
 .jointRssEntry <- function(r, fit, group, cfg) {
     .fmPostprocessOne(
         fit = fit,
         method = "mvsusie",
-        dataX = group@R,
+        dataX = .jgR(group),
         dataY = NULL,
         conditionIdx = r,
         coverage = cfg$coverage,
@@ -700,13 +700,13 @@ setMethod(
     "fitJointGroup",
     signature("IndividualJointGroup", "TwasJointPipeline"),
     function(group, pipeline, token, args) {
-        cfg <- pipeline@config
-        Xc <- group@X
-        Yc <- group@Y
+        cfg <- .jpConfig(pipeline)
+        Xc <- .jgX(group)
+        Yc <- .jgY(group)
         nCond <- ncol(Yc)
-        cond <- group@conditions
+        cond <- .jgConditions(group)
         methodKey <- .twasMethodKey(token)
-        stdz <- isTRUE(cfg$standardized)
+        stdz <- cfg$standardized
         fittedModels <- args$fittedModels %||% list()
         ma <- .jointTwasMethodArgs(
             args,
@@ -851,16 +851,13 @@ setMethod(
         verbose = verbose,
         seed = cfg$seed
     )
-    base <- tw$entry[[1L]]
+    base <- .twrRowParts(tw, 1L)
+    vids <- .twrPartsVariantIds(base)
     W <- getWeights(base)
     if (!is.matrix(W)) {
-        W <- matrix(
-            W,
-            ncol = nCond,
-            dimnames = list(getVariantIds(base), NULL)
-        )
+        W <- matrix(W, ncol = nCond, dimnames = list(vids, NULL))
     }
-    list(W = W, fitParts = getFits(base), vids = getVariantIds(base))
+    list(W = W, fitParts = getFits(base), vids = vids)
 }
 
 # Warn when cross-validating mr.mash with a single full-data data-driven prior
@@ -923,7 +920,7 @@ setMethod(
     .jointTwasCvResult(cv, token)
 }
 
-# One per-condition TwasWeightsEntry (empty when there are no full-data weights,
+# One per-condition TwasWeightsRow (empty when there are no full-data weights,
 # else that condition's weight column + shared fit + CV slice).
 # @noRd
 .jointTwasEntry <- function(r, full, cvRes, stdz, cfg) {
@@ -933,7 +930,7 @@ setMethod(
         NULL
     }
     if (is.null(full$W)) {
-        return(TwasWeightsEntry(
+        return(twasWeightsRow(
             variantIds = character(0),
             weights = NULL,
             cvResult = cvR,
@@ -941,7 +938,7 @@ setMethod(
             dataType = cfg$dataType
         ))
     }
-    TwasWeightsEntry(
+    twasWeightsRow(
         variantIds = full$vids,
         weights = full$W[, r],
         fits = full$fitParts,
@@ -957,23 +954,23 @@ setMethod(
     "fitJointGroup",
     signature("SumStatsJointGroup", "TwasJointPipeline"),
     function(group, pipeline, token, args) {
-        cfg <- pipeline@config
+        cfg <- .jpConfig(pipeline)
         rfd <- if (is.null(cfg$retainFitDetail)) "slim" else cfg$retainFitDetail
         weights <- mrmashRssWeights(
-            stat = list(z = group@Z, n = group@N),
-            LD = group@R,
+            stat = list(z = .jgZ(group), n = .jgN(group)),
+            LD = .jgR(group),
             retainFit = TRUE,
             fitDetail = rfd
         )
         vids <- rownames(weights)
         if (is.null(vids)) {
-            vids <- rownames(group@Z)
+            vids <- rownames(.jgZ(group))
         }
         fitParts <- attr(weights, "fit")
         if (!is.matrix(weights)) {
             weights <- matrix(
                 weights,
-                ncol = ncol(group@Z),
+                ncol = ncol(.jgZ(group)),
                 dimnames = list(vids, NULL)
             )
         }
@@ -1011,11 +1008,15 @@ setMethod(
 }
 
 setMethod("construct", "FmJointPipeline", function(pipeline, records, ...) {
-    .buildJointResult(QtlFineMappingResult, records, pipeline@config$ldSketch)
+    .buildJointResult(
+        QtlFineMappingResult,
+        records,
+        .jpConfig(pipeline)$ldSketch
+    )
 })
 
 setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
-    .buildJointResult(TwasWeights, records, pipeline@config$ldSketch)
+    .buildJointResult(TwasWeights, records, .jpConfig(pipeline)$ldSketch)
 })
 
 # ---- enumerators (pattern x dataForm -> list<JointGroup>) --------------------
@@ -1088,7 +1089,9 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
                 data,
                 tupleRows,
                 ctxNames,
-                errorLabel = "jointCrossContext (QtlSumStats)"
+                errorLabel = "jointCrossContext (QtlSumStats)",
+                ldSketch = ldSketch,
+                cutoffs = args$cutoffs
             )
             ldMat <- .fmLdFromSketch(ldSketch, jz$variantIds)
             groups[[length(groups) + 1L]] <- new(
@@ -1174,7 +1177,9 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
                 data,
                 tupleRows,
                 trNames,
-                errorLabel = "jointCrossTrait (QtlSumStats)"
+                errorLabel = "jointCrossTrait (QtlSumStats)",
+                ldSketch = ldSketch,
+                cutoffs = args$cutoffs
             )
             ldMat <- .fmLdFromSketch(ldSketch, jz$variantIds)
             groups[[length(groups) + 1L]] <- new(
@@ -1228,7 +1233,9 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
                 data,
                 tupleRows,
                 stNames,
-                errorLabel = "jointCrossStudy"
+                errorLabel = "jointCrossStudy",
+                ldSketch = ldSketch,
+                cutoffs = args$cutoffs
             )
             ldMat <- .fmLdFromSketch(ldSketch, jz$variantIds)
             groups[[length(groups) + 1L]] <- new(
@@ -1353,7 +1360,9 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
             data,
             gIdx,
             colLabels,
-            errorLabel = "composed (QtlSumStats)"
+            errorLabel = "composed (QtlSumStats)",
+            ldSketch = ldSketch,
+            cutoffs = args$cutoffs
         )
         ldMat <- .fmLdFromSketch(ldSketch, jz$variantIds)
         groups[[length(groups) + 1L]] <- new(
@@ -1381,8 +1390,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
     if (!is(pipeline, "TwasJointPipeline")) {
         return(args)
     }
-    cfg <- pipeline@config
-    cond <- g@conditions
+    cfg <- .jpConfig(pipeline)
+    cond <- .jgConditions(g)
     out <- args
     fmRes <- args$fineMappingResult
     if (!is.null(fmRes)) {
@@ -1409,7 +1418,11 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
             sp <- out$fineMappingCv$samplePartition
         }
         if (is.null(sp)) {
-            sp <- .normalizeCvFolds(cvF, NULL, rownames(g@X))$samplePartition
+            sp <- .normalizeCvFolds(
+                cvF,
+                NULL,
+                rownames(.jgX(g))
+            )$samplePartition
         }
         out$samplePartition <- sp
     }
@@ -1444,13 +1457,13 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
 # -- one method -> per-condition entries; the SR-TWAS ensemble is a layer ON TOP
 # of that.
 .runJointCell <- function(cell, pipeline, data, scope, tokens, args = list()) {
-    groups <- cell@enumerate(data, scope, args)
-    groups <- keep(groups, .jointGroupMeetsMin, minGroup = cell@minGroup)
+    groups <- .jcEnumerate(cell)(data, scope, args)
+    groups <- keep(groups, .jointGroupMeetsMin, minGroup = .jcMinGroup(cell))
     if (length(groups) == 0L) {
         return(NULL)
     }
     doEnsemble <- is(pipeline, "TwasJointPipeline") &&
-        isTRUE(pipeline@config$ensemble)
+        isTRUE(.jpConfig(pipeline)$ensemble)
     records <- list_flatten(map(
         groups,
         .jointCellGroup,
@@ -1468,7 +1481,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
 # produced entries).
 # @noRd
 .jointCellGroup <- function(g, pipeline, data, tokens, args, doEnsemble) {
-    cond <- g@conditions
+    cond <- .jgConditions(g)
     # Provenance: the ";"-joined members of each varying axis (identical on
     # every per-context row of this group).
     grp <- list(
@@ -1502,7 +1515,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
         records <- c(
             records,
             .jointEntryRecords(
-                .twasEnsembleLayer(g, perTokenEntries, pipeline@config),
+                .twasEnsembleLayer(g, perTokenEntries, .jpConfig(pipeline)),
                 "ensemble",
                 grp,
                 data,
@@ -1554,12 +1567,12 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
 # retained out-of-fold CV predictions + weights + R^2, drop methods below the
 # R^2 cutoff (stacking needs >= 2), and combine via the `ensembleWeights`
 # primitive PER CONTEXT (the sliced single-condition inputs -> contextIndex =
-# 1). Returns a length-nCond list of ensemble TwasWeightsEntry (NULL where < 2
+# 1). Returns a length-nCond list of ensemble TwasWeightsRow (NULL where < 2
 # methods qualify). All methods share the group's fold partition (the runner
 # fixes it before fitting), so their out-of-fold predictions are comparable.
 .twasEnsembleLayer <- function(group, perTokenEntries, cfg) {
     tokens <- names(perTokenEntries)
-    Y <- group@Y
+    Y <- .jgY(group)
     r2Cut <- if (is.null(cfg$ensembleR2Threshold)) {
         0.01
     } else {
@@ -1571,9 +1584,9 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
         cfg$ensembleSolver
     }
     alpha <- if (is.null(cfg$ensembleAlpha)) 1 else cfg$ensembleAlpha
-    stdz <- isTRUE(cfg$standardized)
+    stdz <- cfg$standardized
     map(
-        seq_len(nrow(group@conditions)),
+        seq_len(nrow(.jgConditions(group))),
         .twasEnsembleCondition,
         perTokenEntries = perTokenEntries,
         tokens = tokens,
@@ -1598,8 +1611,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
         if (is.null(e)) {
             next
         }
-        cv <- getCvResult(e)
-        w <- getWeights(e)
+        cv <- .rowCvResult(e)
+        w <- .rowWeights(e)
         if (is.null(cv) || is.null(cv$predictions) || is.null(w)) {
             next
         }
@@ -1612,7 +1625,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
         wts[[str_c(tk, "_weights")]] <- matrix(
             as.numeric(w),
             ncol = 1L,
-            dimnames = list(getVariantIds(e), NULL)
+            dimnames = list(.rowVariantIds(e), NULL)
         )
         mt <- cv$metrics
         rsq[tk] <- if (!is.null(mt) && is_in("rsq", names(mt))) {
@@ -1664,7 +1677,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
     if (is.null(vids)) {
         vids <- getVariantIds(perTokenEntries[[passing[1L]]][[r]])
     }
-    TwasWeightsEntry(
+    twasWeightsRow(
         variantIds = vids,
         weights = as.numeric(ew),
         cvResult = list(
@@ -1743,7 +1756,9 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
 
 .lookupJointCell <- function(pattern, dataForm) {
     for (cell in .jointDispatchTable) {
-        if (cell@pattern == pattern && cell@dataForm == dataForm) return(cell)
+        if (.jcPattern(cell) == pattern && .jcDataForm(cell) == dataForm) {
+            return(cell)
+        }
     }
     msg <- glue(
         "No joint dispatch cell for pattern='{pattern}', dataForm='{dataForm}'."
@@ -1770,7 +1785,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
     if (length(jointMethods) == 0L || length(parsedJointSpec) == 0L) {
         return(NULL)
     }
-    ldSketch <- pipeline@config$ldSketch
+    ldSketch <- .jpConfig(pipeline)$ldSketch
     isFm <- is(pipeline, "FmJointPipeline")
     out <- NULL
     for (spec in parsedJointSpec) {
@@ -1888,10 +1903,10 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
     m[r, , drop = FALSE]
 }
 
-# One per-condition TwasWeightsEntry from column `r` of a joint weight matrix.
+# One per-condition TwasWeightsRow from column `r` of a joint weight matrix.
 # @noRd
 .jointColEntry <- function(r, vids, weights, fitParts, cfg) {
-    TwasWeightsEntry(
+    twasWeightsRow(
         variantIds = vids,
         weights = weights[, r],
         fits = fitParts,
@@ -1931,11 +1946,10 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
 }
 
 # One joint output record for condition `i`, or NULL when that entry is absent.
-# region = the fine-mapping window (cis-window-expanded for a QtlDataset,
-# variant
-# span for a QtlSumStats); traitPos = the bare trait position (NULL when a
-# QtlSumStats caller supplied none -> the column is omitted and
-# getTraitPosition() reports NA).
+# traitPos = the bare trait position (NULL when a QtlSumStats caller supplied
+# none -> the column is omitted and getTraitPosition() reports NA). The
+# fine-mapping window is NOT recorded: the element's own span is the region
+# (section 4.4), and a stored window would go stale under subsetRegion().
 # @noRd
 .jointEntryRecordAt <- function(
     i,
@@ -1952,7 +1966,6 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
     }
     ctx <- as.character(cond$context[[i]])
     tid <- as.character(cond$trait[[i]])
-    reg <- .fitRegionFor(data, ctx, tid, cisWindow)
     tpos <- .traitPosFor(data, ctx, tid)
     list(
         study = as.character(cond$study[[i]]),
@@ -1963,7 +1976,6 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
         jointStudies = grp$js,
         jointContexts = grp$jc,
         jointTraits = grp$jt,
-        region = reg,
         traitPos = tpos
     )
 }
@@ -1983,5 +1995,5 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
 # TRUE when a joint group has at least `minGroup` conditions.
 # @noRd
 .jointGroupMeetsMin <- function(g, minGroup) {
-    nrow(g@conditions) >= minGroup
+    nrow(.jgConditions(g)) >= minGroup
 }

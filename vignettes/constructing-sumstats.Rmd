@@ -127,7 +127,7 @@ gws <- loadGwasSumStatsFromManifest(
     ldSketch = ldSketch
 )
 gws
-S4Vectors::mcols(gws$entry[[1]])
+S4Vectors::mcols(gws[[1]])
 ```
 
 The `ldSketch` argument also accepts a path/prefix or a chromosome-sharded
@@ -253,7 +253,7 @@ gwsMapped <- loadGwasSumStatsFromManifest(
     genome = "GRCh38",
     ldSketch = ldSketch
 )
-length(gwsMapped$entry[[1]])
+length(gwsMapped[[1]])
 ```
 
 ### Region-restricted reads (tabix)
@@ -282,7 +282,7 @@ gwsRegion <- loadGwasSumStatsFromManifest(
     ldSketch = ldSketch,
     region = "22:14560000-14565000"
 )
-length(gwsRegion$entry[[1]]) # only the two variants in the region
+length(gwsRegion[[1]]) # only the two variants in the region
 ```
 
 ### GWAS-VCF
@@ -343,7 +343,7 @@ gwsVcf <- loadGwasSumStatsFromManifest(
     genome = "GRCh38",
     ldSketch = ldSketch
 )
-S4Vectors::mcols(gwsVcf$entry[[1]])[, c("SNP", "A1", "A2", "Z", "N")]
+S4Vectors::mcols(gwsVcf[[1]])[, c("SNP", "A1", "A2", "Z", "N")]
 ```
 
 For a multi-sample GWAS-VCF, pass `sampleSelect = "<column>"` to pick the

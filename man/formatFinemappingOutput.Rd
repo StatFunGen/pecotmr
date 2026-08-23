@@ -13,12 +13,12 @@ formatFinemappingOutput(post, primaryMethod)
 }
 \value{
 A list with root-level fields including \code{finemappingEntry} (a
-  bare \code{FineMappingEntry} S4 payload) and \code{top_loci}.
+  bare \code{FineMappingRow} S4 payload) and \code{top_loci}.
 }
 \description{
 Promotes the primary method's per-method post-processing payload to the root
 level and attaches the unified \code{top_loci} table. The primary method's
-bare \code{FineMappingEntry} appears at \code{$finemappingEntry}; wrap it
+bare \code{FineMappingRow} appears at \code{$finemappingEntry}; wrap it
 into a \code{FineMappingResult} collection at the pipeline level once (study,
 context, trait, method) identity tags are known.
 }

@@ -173,7 +173,7 @@ resolveLdInput <- function(
     if (!is_in("z", lc)) {
         colnames(sumStat)[which(is_in(lc, "zscore"))] <- "z"
     }
-    arrange(sumStat, pos)
+    arrange(sumStat, .data$pos)
 }
 
 # Run DENTIST on a single window, unpacking the shared tuning parameters.
@@ -1171,14 +1171,14 @@ mergeWindows <- function(dentistResultByWindow, windowDividedRes) {
         imputedK$index_within_window <- seq_len(nrow(imputedK))
         imputedK <- imputedK |>
             mutate(
-                index_global = index_within_window +
+                index_global = .data$index_within_window +
                     windowDividedRes$windowStartIdx[k] -
                     1
             )
         extractedResults <- imputedK |>
             filter(
-                index_global >= windowDividedRes$fillStartIdx[k] &
-                    index_global < windowDividedRes$fillEndIdx[k]
+                .data$index_global >= windowDividedRes$fillStartIdx[k] &
+                    .data$index_global < windowDividedRes$fillEndIdx[k]
             )
         mergedResults <- bind_rows(mergedResults, extractedResults)
     }
@@ -1396,12 +1396,12 @@ slalom <- function(
 #' Extract the trimmed SuSiE fit from a finemapping pipeline result
 #'
 #' Returns the trimmed model fit underlying \code{con_data$finemappingEntry} (a
-#' \code{FineMappingEntry} S4 object), or NULL if no fine-mapping entry is
+#' \code{FineMappingRow} S4 object), or NULL if no fine-mapping entry is
 #' attached.
 #'
 #' @param conData List. The method-layer entry from a finemapping pipeline
 #'   result, expected to carry \code{$finemappingEntry} as a
-#'   \code{FineMappingEntry} object.
+#'   \code{FineMappingRow} object.
 #' @return The trimmed fit (a list with \code{pip}, \code{sets}, etc.) or NULL.
 #' @examples
 #' data(qtlSumStatsExample)
@@ -1412,10 +1412,10 @@ getSusieResult <- function(conData) {
         return(NULL)
     }
     fm <- conData$finemappingEntry
-    if (is.null(fm) || !is(fm, "FineMappingEntry")) {
+    if (is.null(fm) || !is(fm, "FineMappingResultBase")) {
         return(NULL)
     }
-    trimmed <- getSusieFit(fm)
+    trimmed <- .fmrPartsSusieFit(fm)
     if (length(trimmed) == 0) {
         return(NULL)
     }
@@ -1427,7 +1427,7 @@ getSusieResult <- function(conData) {
 #' This function extracts and processes information for each Credible Set (CS)
 #' from finemapping results, typically obtained from a finemapping RDS file.
 #'
-#' @param finemappingEntry A \code{\link{FineMappingEntry}} carrying the SuSiE
+#' @param fmRow A \code{\link{fineMappingRow}} carrying the SuSiE
 #'   fit and variant ids (e.g. from \code{\link{getFineMappingResult}}).
 #' @param csNames Character vector. Names of the Credible Sets, usually in the
 #'   format "L_<number>".
@@ -1471,18 +1471,18 @@ getSusieResult <- function(conData) {
 #' fit <- list(pip = c(0.1, 0.7, 0.2), sets = list(cs = list(L_1 = c(1, 2))))
 #' tl <- data.frame(variant_id = vids, pip = c(0.1, 0.7, 0.2),
 #'   z = c(1.0, 3.5, -0.5))
-#' fe <- FineMappingEntry(variantIds = vids, susieFit = fit, topLoci = tl)
+#' fe <- fineMappingRow(variantIds = vids, susieFit = fit, topLoci = tl)
 #' # A single credible set has no between-CS correlation (cs_corr_* are NA), so
 #' # the ldSource is not consulted here.
 #' extractCsInfo(fe, csNames = "L_1", topLociTable = tl,
 #'   ldSource = qtlSumStatsExample)
 #'
 #' @export
-extractCsInfo <- function(finemappingEntry, csNames, topLociTable, ldSource) {
-    fm <- finemappingEntry
-    trimmed <- getSusieFit(fm)
-    variantNames <- getVariantIds(fm)
-    csCorr <- computeCsCorrelation(fm, ldSource)
+extractCsInfo <- function(fmRow, csNames, topLociTable, ldSource) {
+    fm <- fmRow
+    trimmed <- .fmrPartsSusieFit(fm)
+    variantNames <- .fmrPartsVariantIds(fm)
+    csCorr <- .rowCsCorrelation(fm, ldSource)
     rows <- map(
         seq_along(csNames),
         .extractCsInfoRow,
@@ -1500,7 +1500,7 @@ extractCsInfo <- function(finemappingEntry, csNames, topLociTable, ldSource) {
 #' Posterior Inclusion Probability (PIP) from finemapping results, typically
 #' used when no Credible Sets (CS) are identified in the analysis.
 #'
-#' @param finemappingEntry A \code{\link{FineMappingEntry}} carrying the SuSiE
+#' @param fmRow A \code{\link{fineMappingRow}} carrying the SuSiE
 #'   fit and variant ids (e.g. from \code{\link{getFineMappingResult}}).
 #' @param sumstats A list or data frame carrying a \code{z} element aligned to
 #'   the fit's variants (\code{sumstats$z}).
@@ -1534,14 +1534,14 @@ extractCsInfo <- function(finemappingEntry, csNames, topLociTable, ldSource) {
 #' vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
 #' fit <- list(pip = c(0.1, 0.7, 0.2))
 #' tl <- data.frame(variant_id = vids, pip = c(0.1, 0.7, 0.2))
-#' fe <- FineMappingEntry(variantIds = vids, susieFit = fit, topLoci = tl)
+#' fe <- fineMappingRow(variantIds = vids, susieFit = fit, topLoci = tl)
 #' extractTopPipInfo(fe, sumstats = list(z = c(1.0, 3.5, -0.5)))
 #'
 #' @export
-extractTopPipInfo <- function(finemappingEntry, sumstats) {
-    fm <- finemappingEntry
-    trimmed <- getSusieFit(fm)
-    variantNames <- getVariantIds(fm)
+extractTopPipInfo <- function(fmRow, sumstats) {
+    fm <- fmRow
+    trimmed <- .fmrPartsSusieFit(fm)
+    variantNames <- .fmrPartsVariantIds(fm)
     # Find the variant with the highest PIP
     topPipIndex <- which.max(trimmed$pip)
     topPip <- trimmed$pip[topPipIndex]
@@ -1742,9 +1742,9 @@ raissSingleMatrix <- function(
     results <- formatRaissDf(results, refPanel, unknowns)
     results <- filterRaissOutput(results, r2Threshold, minimumLd, verbose)
     resultNofilter <- mergeRaissDf(results$zscoresNofilter, knownZscores) |>
-        arrange(pos)
+        arrange(.data$pos)
     resultFilter <- mergeRaissDf(results$zscores, knownZscores) |>
-        arrange(pos)
+        arrange(.data$pos)
     list(
         resultNofilter = resultNofilter,
         resultFilter = resultFilter,
@@ -1889,9 +1889,9 @@ raissSingleMatrixFromX <- function(
     results <- formatRaissDf(imp, refPanel, unknowns)
     results <- filterRaissOutput(results, r2Threshold, minimumLd, verbose)
     resultNofilter <- mergeRaissDf(results$zscoresNofilter, knownZscores) |>
-        arrange(pos)
+        arrange(.data$pos)
     resultFilter <- mergeRaissDf(results$zscores, knownZscores) |>
-        arrange(pos)
+        arrange(.data$pos)
     list(
         resultNofilter = resultNofilter,
         resultFilter = resultFilter,
@@ -1983,8 +1983,8 @@ raissSingleMatrixFromX <- function(
     combinedNofilter <- bind_rows(map(resultsList, "resultNofilter"))
     combinedFilter <- bind_rows(map(resultsList, "resultFilter"))
     list(
-        resultNofilter = combinedNofilter |> arrange(pos),
-        resultFilter = combinedFilter |> arrange(pos),
+        resultNofilter = combinedNofilter |> arrange(.data$pos),
+        resultFilter = combinedFilter |> arrange(.data$pos),
         ldMat = NULL
     )
 }
@@ -2028,7 +2028,7 @@ raissSingleMatrixFromX <- function(
     blockRefPanel <- refPanel[blockIndices, ]
     blockLdMatrix <- ldMatrix$ldMatrices[[blockId]]
     blockKnownZscores <- knownZscores |>
-        filter(is_in(variant_id, blockVariantIds))
+        filter(is_in(.data$variant_id, blockVariantIds))
     if (nrow(blockLdMatrix) != nrow(blockRefPanel)) {
         msg <- glue(
             "Block {blockId} : LD matrix dimension does not match number ",
@@ -2353,7 +2353,7 @@ mergeRaissDf <- function(raissDf, knownZscores) {
 
     # Remove the extra columns produced by the join (z.x, z.y).
     mergedDf <- select(mergedDf, -all_of(c("z.x", "z.y")))
-    mergedDf <- arrange(mergedDf, pos)
+    mergedDf <- arrange(mergedDf, .data$pos)
     # assign imputed variants beta, se as NA to avoid confusion, since they are
     # not imputed. beta/se are optional (knownZscores may omit them), so guard
     # on column presence explicitly rather than relying on a data.frame
@@ -3408,8 +3408,8 @@ krigingOutlierQc <- function(
 # Apply ldMismatchQc (SLALOM/DENTIST) against the LD sketch. Returns the
 # filtered df, outlier count, and the full per-variant diagnostics table
 # (the data.frame returned by ldMismatchQc(), prepended with a
-# variant_id column for downstream joins). Callers stamp `diagnostics`
-# into the entry's qcInfo audit so the per-variant detail is available
+# variant_id column for downstream joins). Callers record `diagnostics`
+# in the entry's qcInfo audit so the per-variant detail is available
 # for plotting / postprocessing instead of just the outlier count.
 .applyLdMismatchQcToEntry <- function(df, ldSketch, method) {
     variantIds <- df$SNP
@@ -3729,10 +3729,10 @@ krigingOutlierQc <- function(
         ),
         pos = as.integer(df$pos)
     ) |>
-        group_by(chrom) |>
+        group_by(.data$chrom) |>
         summarise(
-            lo = min(pos, na.rm = TRUE) - flank,
-            hi = max(pos, na.rm = TRUE) + flank,
+            lo = min(.data$pos, na.rm = TRUE) - flank,
+            hi = max(.data$pos, na.rm = TRUE) + flank,
             .groups = "drop"
         )
     # inner_join keeps only sketch SNPs whose chromosome appears in df (the
@@ -3752,7 +3752,7 @@ krigingOutlierQc <- function(
 }
 
 # Assemble refPanel, knownZ table, and scaled dosage for the window.
-.qcRaissBuildInputs <- function(df, ldSketch, windowIdx, sketchSnpInfo) {
+.qcRaissBuildInputs <- function(df, ldSketch, windowIdx, sketchSnpInfo, opts) {
     refPanel <- .refVariantsFromSketch(ldSketch)[windowIdx, , drop = FALSE]
     refPanel$variant_id <- normalizeVariantId(refPanel$variant_id)
     refPanel <- refPanel[order(refPanel$pos), , drop = FALSE]
@@ -3780,14 +3780,75 @@ krigingOutlierQc <- function(
         knownZ$se <- as.numeric(df$SE)
     }
     knownZ <- knownZ[order(knownZ$pos), , drop = FALSE]
-    dosage <- .dosageMatrix(ldSketch, windowIdx, meanImpute = TRUE)
+    # meanImpute = FALSE so per-variant missingness is still visible; the
+    # surviving columns are mean-imputed below, which is what meanImpute =
+    # TRUE did.
+    dosage <- .dosageMatrix(ldSketch, windowIdx, meanImpute = FALSE)
     colnames(dosage) <- normalizeVariantId(
         as.character(sketchSnpInfo$SNP[windowIdx])
     )
     dosage <- dosage[, refPanel$variant_id, drop = FALSE]
-    scaledDosage <- scale(dosage)
+    keep <- .qcRaissTargetMask(refPanel, knownZ, dosage, opts)
+    nDropped <- sum(!keep)
+    refPanel <- refPanel[keep, , drop = FALSE]
+    dosage <- dosage[, keep, drop = FALSE]
+    scaledDosage <- scale(.qtlMeanImpute(dosage))
     scaledDosage[is.na(scaledDosage)] <- 0
-    list(refPanel = refPanel, knownZ = knownZ, scaledDosage = scaledDosage)
+    list(
+        refPanel = refPanel,
+        knownZ = knownZ,
+        scaledDosage = scaledDosage,
+        nDroppedTargets = nDropped
+    )
+}
+
+# Which reference-panel variants to keep, given the MAF / MAC / missingness
+# cutoffs in `imputeOpts`.
+#
+# The cutoffs govern what RAISS is willing to IMPUTE, not what it is willing to
+# keep, so an observed variant survives whatever its frequency in the LD panel.
+# That is not a convenience: `.raissSvdImpute` reaches `crossprod(V, zt)` with
+# V from the panel's known columns and zt from `knownZscores$z`, so dropping an
+# observed variant from the panel would leave those two out of step and pair
+# z-scores with the wrong variants.
+#
+# Without this, every rare variant in the window of a large LD sketch becomes
+# an imputation target, which is both slow and statistically pointless when the
+# study is much smaller than the panel.
+# @noRd
+.qcRaissTargetMask <- function(refPanel, knownZ, dosage, opts) {
+    mafCutoff <- opts$imputeOpts$mafCutoff %||% 0
+    macCutoff <- opts$imputeOpts$macCutoff %||% 0
+    imissCutoff <- opts$imputeOpts$imissCutoff %||% 1
+    keep <- rep(TRUE, nrow(refPanel))
+    if (mafCutoff <= 0 && macCutoff <= 0 && imissCutoff >= 1) {
+        return(keep)
+    }
+    # Identified exactly as raissSingleMatrixFromX() does, so this mask cannot
+    # disagree with the knowns/unknowns split it derives moments later.
+    knownIds <- intersect(knownZ$variant_id, refPanel$variant_id)
+    isTarget <- !is_in(refPanel$variant_id, knownIds)
+    stats <- .qcRaissVariantStats(dosage)
+    # A MAC cutoff is a MAF cutoff once expressed per panel sample; taking the
+    # stricter of the two matches .qtlVariantFilters().
+    nSamp <- nrow(dosage)
+    effectiveMaf <- max(
+        mafCutoff,
+        if (nSamp > 0L) macCutoff / (2 * nSamp) else 0
+    )
+    fails <- (!is.na(stats$maf) & stats$maf < effectiveMaf) |
+        stats$missRate > imissCutoff |
+        is.na(stats$maf)
+    keep & !(isTarget & fails)
+}
+
+# Per-variant MAF and missingness for the RAISS path. A thin alias over the
+# shared `.panelVariantStats` (R/ld.R), so the analysis-time panel filter and
+# the imputation-target filter cannot drift apart in how they measure a
+# variant.
+# @noRd
+.qcRaissVariantStats <- function(dosage) {
+    .panelVariantStats(dosage)
 }
 
 # Run RAISS with per-call option defaults.
@@ -3901,7 +3962,15 @@ krigingOutlierQc <- function(
             imputeAfter = nrow(df)
         ))
     }
-    inp <- .qcRaissBuildInputs(df, ldSketch, windowIdx, sketchSnpInfo)
+    inp <- .qcRaissBuildInputs(df, ldSketch, windowIdx, sketchSnpInfo, opts)
+    if (inp$nDroppedTargets > 0L) {
+        .qcEmit(
+            lbl,
+            "QC track: RAISS excluded ",
+            as.character(inp$nDroppedTargets),
+            " imputation target(s) below the MAF / missingness cutoffs."
+        )
+    }
     imputed <- .qcRaissRun(inp, opts)
     merged <- .qcRaissMerge(imputed, inp$knownZ, df)
     df <- merged$df
@@ -4265,9 +4334,13 @@ krigingOutlierQc <- function(
 }
 
 # Early return when too few variants survive pre-harmonization QC.
-.qcEarlyExit <- function(df, entryAudit) {
+.qcEarlyExit <- function(df, entryAudit, qcCount, opts, nIn, lbl) {
     entryAudit$earlyExit <-
         "fewer than two variants after pre-harmonization QC"
+    # Still emit the rollup. An entry that QC empties is precisely the case a
+    # user needs told about, and returning early used to make those drops
+    # invisible in the log -- the audit recorded them, nothing said so.
+    .qcEmitRollup(entryAudit, qcCount, opts, nIn, nrow(df), lbl)
     list(gr = .dfToEntryGranges(df), audit = entryAudit)
 }
 
@@ -4318,7 +4391,7 @@ krigingOutlierQc <- function(
     qcCount <- pre$qcCount
     lbl <- pre$lbl
     if (nrow(df) < 2L) {
-        return(.qcEarlyExit(df, entryAudit))
+        return(.qcEarlyExit(df, entryAudit, qcCount, opts, length(gr), lbl))
     }
     harm <- .qcHarmonizeEntry(df, ldSketch, opts, lbl)
     df <- harm$df
@@ -4419,7 +4492,7 @@ krigingOutlierQc <- function(
         abort("summaryStatsQc requires a QtlSumStats or GwasSumStats input.")
     }
     for (i in seq_len(nrow(sumstats))) {
-        cols <- colnames(S4Vectors::mcols(sumstats$entry[[i]]))
+        cols <- colnames(S4Vectors::mcols(.collectionEntry(sumstats, i)))
         if (mafCutoff > 0 && !any(is_in(c("MAF", "FRQ"), cols))) {
             msg <- glue(
                 "summaryStatsQc: mafCutoff > 0 requires every entry to ",
@@ -4478,23 +4551,23 @@ krigingOutlierQc <- function(
 
 # Per-entry sample-size options: median N for PIP, study case/control/total N.
 .ssqcEntryOpts <- function(opts, sumstats, i) {
-    mc <- S4Vectors::mcols(sumstats$entry[[i]])
+    mc <- S4Vectors::mcols(.collectionEntry(sumstats, i))
     opts$nForPip <- if (is_in("N", colnames(mc))) {
         stats::median(mc$N, na.rm = TRUE)
     } else {
         NULL
     }
-    opts$nCase <- if (is_in("nCase", names(sumstats))) {
+    opts$nCase <- if (is_in("nCase", .tupleColumnNames(sumstats))) {
         as.numeric(sumstats$nCase)[[i]]
     } else {
         NULL
     }
-    opts$nControl <- if (is_in("nControl", names(sumstats))) {
+    opts$nControl <- if (is_in("nControl", .tupleColumnNames(sumstats))) {
         as.numeric(sumstats$nControl)[[i]]
     } else {
         NULL
     }
-    opts$nSample <- if (is_in("nSample", names(sumstats))) {
+    opts$nSample <- if (is_in("nSample", .tupleColumnNames(sumstats))) {
         as.numeric(sumstats$nSample)[[i]]
     } else {
         NULL
@@ -4526,7 +4599,7 @@ krigingOutlierQc <- function(
     for (i in seq_len(nrow(sumstats))) {
         opts <- .ssqcEntryOpts(opts, sumstats, i)
         result <- .runEntrySummaryStatsQc(
-            gr = sumstats$entry[[i]],
+            gr = .collectionEntry(sumstats, i),
             ldSketch = ldSketch,
             refGenome = refGenome,
             opts = opts,
@@ -4573,7 +4646,7 @@ krigingOutlierQc <- function(
 
 # Rebuild the SumStats object with QC'd entries, trimmed sketch, and qcInfo.
 .ssqcRebuild <- function(sumstats, newEntries, newLdSketch, qcInfo) {
-    has <- function(nm) is_in(nm, names(sumstats))
+    has <- function(nm) is_in(nm, .tupleColumnNames(sumstats))
     nSample <- if (has("nSample")) as.numeric(sumstats$nSample) else NULL
     if (methods::is(sumstats, "GwasSumStats")) {
         GwasSumStats(
@@ -4589,7 +4662,15 @@ krigingOutlierQc <- function(
                 NULL
             },
             nSample = nSample,
-            qcInfo = qcInfo
+            qcInfo = qcInfo,
+            # Carry the existing block keys through: the entries are already
+            # split, so without this the constructor re-derives them from
+            # seqname and every block on one chromosome collapses to one key.
+            blockId = if (has("blockId")) {
+                as.character(sumstats$blockId)
+            } else {
+                NULL
+            }
         )
     } else {
         QtlSumStats(
@@ -4689,6 +4770,19 @@ krigingOutlierQc <- function(
 #'   genome-wide \code{ldSketch} does not materialize its full dosage);
 #'   \code{flank} (default 0) widens that window by the given number of base
 #'   pairs on each side to retain LD context for edge variants.
+#'
+#'   \code{mafCutoff} (default 0), \code{macCutoff} (default 0) and
+#'   \code{imissCutoff} (default 1) bound which panel variants RAISS will
+#'   attempt to impute. Without them every rare variant in the window of a
+#'   large LD sketch becomes an imputation target, which is slow and of little
+#'   value when the study is far smaller than the panel. The stricter of
+#'   \code{mafCutoff} and \code{macCutoff / (2 * nSamples)} applies, matching
+#'   \code{\link{QtlDataset}}.
+#'
+#'   These bound what is \strong{imputed}, not what is kept: a variant present
+#'   in the sumstats survives whatever its frequency in the panel, both because
+#'   it is observed data and because RAISS derives its LD basis from those same
+#'   panel rows.
 #' @param matchMinProp Minimum proportion of LD panel variants that must be
 #'   matched by the sumstats; default 0.
 #' @param coerceNumeric Logical. Coerce signed columns
@@ -4858,7 +4952,7 @@ summaryStatsQc <- function(
     csName <- csNames[i]
     indices <- trimmed$sets$cs[[csName]]
     csVariants <- variantNames[indices]
-    csData <- filter(topLociTable, is_in(variant_id, csVariants))
+    csData <- filter(topLociTable, is_in(.data$variant_id, csVariants))
     topRow <- which.max(csData$pip)
     topVariant <- csData$variant_id[topRow]
     topZ <- csData$z[topRow]

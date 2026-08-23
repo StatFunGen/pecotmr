@@ -15,14 +15,24 @@
 #' print(alpha)
 #' @noRd
 lbfToAlphaVector <- function(lbf, priorWeights = NULL) {
+    if (length(lbf) == 0L) {
+        return(set_names(numeric(0), names(lbf)))
+    }
     if (is.null(priorWeights)) {
         priorWeights <- rep(1 / length(lbf), length(lbf))
     }
     maxlbf <- max(lbf)
 
-    # If maxlbf is 0, return a vector of zeros
-    if (maxlbf == 0) {
-        return(set_names(rep(0, length(lbf)), names(lbf)))
+    # A non-finite maximum means every variant's Bayes factor underflowed, so
+    # nothing updates the prior and the posterior IS the normalized prior.
+    #
+    # This deliberately does NOT trigger on `maxlbf == 0`, which the previous
+    # guard did: an all-zero LBF vector is BF = 1 everywhere and falls out of
+    # the softmax below as the normalized prior on its own, while a vector
+    # whose best variant merely happens to sit at exactly 0 is perfectly
+    # informative. Both used to be flattened to alpha = 0 (PIP 0).
+    if (!is.finite(maxlbf)) {
+        return(set_names(priorWeights / sum(priorWeights), names(lbf)))
     }
 
     # w is proportional to BF, subtract max for numerical stability
@@ -33,7 +43,7 @@ lbfToAlphaVector <- function(lbf, priorWeights = NULL) {
     weightedSumW <- sum(wWeighted)
     alpha <- wWeighted / weightedSumW
 
-    return(alpha)
+    set_names(alpha, names(lbf))
 }
 
 #' @title Convert a log-Bayes-factor matrix to Single Effect PIPs
@@ -528,7 +538,7 @@ postprocessFinemappingFit.susiF <- function(
     variantNames <- extractVariantNames(fit)
     sumstats <- extractSumstats(fit, dataX, dataY, xScalar, yScalar, method)
     csTables <- .ppCsTables(p, csInput)
-    # Always build the canonical unfiltered table; the FineMappingEntry stores
+    # Always build the canonical unfiltered table; the FineMappingRow stores
     # it as-is so accessors can filter by PIP at query time.
     topLociFull <- .ppTopLoci(p, csTables, variantNames, sumstats)
     # trim = TRUE stores a minimal subset of the fit; FALSE keeps the full
@@ -543,7 +553,7 @@ postprocessFinemappingFit.susiF <- function(
     } else {
         fit
     }
-    fmEntry <- FineMappingEntry(
+    fmEntry <- fineMappingRow(
         variantIds = variantNames,
         susieFit = storedFit,
         topLoci = topLociFull
@@ -787,7 +797,7 @@ computeCsTable <- function(
 }
 
 # fSuSiE credible sets: purity is the min |correlation| WITHIN each CS
-# (fsusieR::cal_purity), stamped as sets$purity$min.abs.corr for the canonical
+# (fsusieR::cal_purity), recorded as sets$purity$min.abs.corr for the canonical
 # .csPurityVec() reader; cs_corr keeps the BETWEEN-CS correlation matrix.
 .csTableFsusie <- function(fit, dataX, coverage) {
     sets <- tryCatch(
@@ -885,9 +895,16 @@ computeCsTable <- function(
 #' @rdname computeCsCorrelation
 setMethod(
     "computeCsCorrelation",
-    signature(x = "FineMappingEntry", ldSource = "SumStatsBase"),
+    signature(x = "FineMappingResultBase", ldSource = "SumStatsBase"),
     function(x, ldSource, ...) {
-        fit <- getSusieFit(x)
+        .rowCsCorrelationSumstats(.asFmRowPayload(x), ldSource)
+    }
+)
+
+# @noRd
+.rowCsCorrelationSumstats <- function(parts, ldSource) {
+    {
+        fit <- .fmrPartsSusieFit(parts)
         if (.csCountBelowTwo(fit)) {
             return(NULL)
         }
@@ -902,26 +919,33 @@ setMethod(
         # 1..p sets$cs indices would misalign with a shrunken LD matrix.
         xcorr <- .ldFromSketch(
             ldSketch,
-            getVariantIds(x),
+            .fmrPartsVariantIds(parts),
             label = "computeCsCorrelation",
             onMissing = "error"
         )
         get_cs_correlation(list(sets = fit$sets, pip = fit$pip), Xcorr = xcorr)
     }
-)
+}
 
 # Individual-level LD source: genotypes -> aligned X. susie fits derive the LD
 # via get_cs_correlation(X = ); fSuSiE fits (class "susiF") via cal_cor_cs().
 #' @rdname computeCsCorrelation
 setMethod(
     "computeCsCorrelation",
-    signature(x = "FineMappingEntry", ldSource = "QtlDataset"),
+    signature(x = "FineMappingResultBase", ldSource = "QtlDataset"),
     function(x, ldSource, ...) {
-        fit <- getSusieFit(x)
+        .rowCsCorrelationGeno(.asFmRowPayload(x), ldSource)
+    }
+)
+
+# @noRd
+.rowCsCorrelationGeno <- function(parts, ldSource) {
+    {
+        fit <- .fmrPartsSusieFit(parts)
         if (.csCountBelowTwo(fit)) {
             return(NULL)
         }
-        geno <- .csGenotypesForFit(ldSource, getVariantIds(x))
+        geno <- .csGenotypesForFit(ldSource, .fmrPartsVariantIds(parts))
         if (inherits(fit, "susiF")) {
             if (!requireNamespace("fsusieR", quietly = TRUE)) {
                 abort(glue(
@@ -934,12 +958,12 @@ setMethod(
             get_cs_correlation(list(sets = fit$sets, pip = fit$pip), X = geno)
         }
     }
-)
+}
 
 #' @rdname computeCsCorrelation
 setMethod(
     "computeCsCorrelation",
-    signature(x = "FineMappingEntry", ldSource = "ANY"),
+    signature(x = "FineMappingResultBase", ldSource = "ANY"),
     function(x, ldSource, ...) {
         abort(glue(
             "computeCsCorrelation() requires a QtlDataset, QtlSumStats, or ",
@@ -1807,6 +1831,40 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
     if (!is.null(fit$omega_weights)) {
         trimmed$omega_weights <- fit$omega_weights
     }
+    .trimAddScalars(trimmed, fit)
+}
+
+# Cheap fields that are not effect-indexed, kept so a trimmed fit is sufficient
+# for variant-subset reconciliation:
+#
+#   sigma2      the moment recovery (post_var = mu2 - mu^2; pw = sigma2 *
+#               (1/post_var - 1/V)) that makes an optional refit possible
+#   null_index  detects a null_weight fit, whose alpha has p + 1 columns while
+#               pip stays length p -- invisible to any pip-length check
+#   converged   otherwise a non-converged fit is indistinguishable downstream
+#   pi          the fit's true prior weights, for prior-aware refits
+#   XtXr        quantifies what the dropped variants contributed
+#
+# Together ~2p + 3 numbers (~0.8 MB at p = 50k), against the ~10x blow-up of
+# storing the fit untrimmed. Read with [[ so `pi` cannot prefix-match `pip`.
+# @noRd
+.trimAddScalars <- function(trimmed, fit) {
+    reduce(
+        c("sigma2", "null_index", "converged", "pi", "XtXr"),
+        .trimCopyField,
+        fit = fit,
+        .init = trimmed
+    )
+}
+
+# Copy one non-effect-indexed field from `fit` onto `trimmed`, when present.
+# @noRd
+.trimCopyField <- function(trimmed, nm, fit) {
+    value <- fit[[nm]]
+    if (is.null(value)) {
+        return(trimmed)
+    }
+    trimmed[[nm]] <- value
     trimmed
 }
 
@@ -1829,14 +1887,14 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
 #'
 #' Promotes the primary method's per-method post-processing payload to the root
 #' level and attaches the unified \code{top_loci} table. The primary method's
-#' bare \code{FineMappingEntry} appears at \code{$finemappingEntry}; wrap it
+#' bare \code{FineMappingRow} appears at \code{$finemappingEntry}; wrap it
 #' into a \code{FineMappingResult} collection at the pipeline level once (study,
 #' context, trait, method) identity tags are known.
 #'
 #' @param post Output from \code{\link{postprocessFinemappingFits}}.
 #' @param primaryMethod Method whose result should populate root-level fields.
 #' @return A list with root-level fields including \code{finemappingEntry} (a
-#'   bare \code{FineMappingEntry} S4 payload) and \code{top_loci}.
+#'   bare \code{FineMappingRow} S4 payload) and \code{top_loci}.
 #' @examples
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:40]
@@ -1974,7 +2032,7 @@ calPurity <- function(lCs, X, method = "min") {
 #'   Similar to the SuSiE set output
 #' @examples
 #' data(fsusieFineMappingExample)
-#' fit <- getSusieFit(fsusieFineMappingExample$entry[[1]])
+#' fit <- getSusieFit(fsusieFineMappingExample)
 #' fsusieGetCs(fit)
 #' @export
 fsusieGetCs <- function(fsusieObj, X, requestedCoverage = 0.95) {
@@ -3086,7 +3144,7 @@ mvsusieRssWeights <- function(
 # aggregated by variant preserving first-seen order.
 # @noRd
 .fmExtractTopLoci <- function(fineMappingResult, csCol) {
-    entries <- fineMappingResult$entry
+    entries <- .collectionEntries(fineMappingResult)
     rows <- map_dfr(
         seq_along(entries),
         .extractCsEntryRows,
@@ -3157,7 +3215,7 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
     }
     combinedTopLociDf <- distinct(
         combinedTopLociDf,
-        variant_id,
+        .data$variant_id,
         .keep_all = TRUE
     )
     return(combinedTopLociDf)
@@ -3369,7 +3427,7 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
 }
 
 # Fit every requested univariate token on one residualized (X, y) block,
-# returning a named list (token -> FineMappingEntry). Extracted from the
+# returning a named list (token -> FineMappingRow). Extracted from the
 # univariate dispatch so the same logic serves the cis path (one block), the
 # jointRegions=TRUE path (one concatenated block) and the jointRegions=FALSE
 # path (one block per region, merged afterwards via .fmMergeEntries).
@@ -3512,7 +3570,7 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
 }
 
 # Fit every requested RSS token on one (z, R, n) sumstat block, returning a
-# named list (token -> FineMappingEntry). The sumstat analog of .fmFitXBlock:
+# named list (token -> FineMappingRow). The sumstat analog of .fmFitXBlock:
 # the QtlSumStats and GwasSumStats methods both call it and differ only in how
 # they push the returned entries (tuple shape) and the progress `label`.
 .fmFitRssBlock <- function(
@@ -3667,7 +3725,7 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
 # on the entry's susieFit list. Gated on serFallback so the default path is
 # byte-identical.
 .fmRssRecordFallback <- function(ent, f, keepFullFit) {
-    sf <- ent@susieFit
+    sf <- .fmrPartsSusieFit(ent)
     sf$R_reliability_flag <- f$flag
     sf$serFallbackUsed <- isTRUE(f$flag)
     if (!is.null(f$multiFit) && is_in(keepFullFit, c("fallback", "all"))) {
@@ -3675,8 +3733,15 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
     } else if (identical(keepFullFit, "all")) {
         sf$multiEffectFit <- f$fit
     }
-    ent@susieFit <- sf
-    ent
+    # A row is immutable: rebuild it with the amended fit rather than
+    # assigning into it. The variants and topLoci are unchanged, so this
+    # round-trips them through the same builder the caller used.
+    fineMappingRow(
+        variantIds = getVariantIds(ent),
+        susieFit = sf,
+        topLoci = .fmrPartsTopLoci(ent),
+        cvResult = getCvResult(ent)
+    )
 }
 
 # =============================================================================
@@ -3864,7 +3929,9 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
 # (variant, CS) rows for the i-th entry, labelled cs_<entry>_<set>.
 # @noRd
 .extractCsEntryRows <- function(i, entries, csCol) {
-    topLoci <- .translateLegacyTopLociCsColumns(getTopLoci(entries[[i]]))
+    topLoci <- .translateLegacyTopLociCsColumns(
+        .fmrRowTopLoci(entries[[i]])
+    )
     if (
         is.null(topLoci) ||
             nrow(topLoci) == 0 ||
@@ -3897,11 +3964,29 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
     keep <- !is.na(csIdx) & csIdx == sn
     topLoci |>
         filter(keep) |>
-        select(variant_id, pip = all_of(pipCol)) |>
+        select("variant_id", pip = all_of(pipCol)) |>
         mutate(set_name = str_c("cs_", i, "_", sn))
 }
 
 # @noRd
 .csSplitToList <- function(df) {
     list(sets = df$set_name, pips = df$pip)
+}
+
+# Between-credible-set correlation for one row, dispatched on the ldSource
+# kind. The public computeCsCorrelation() generic wraps this; the pipeline
+# calls it directly because it carries row payloads rather than collections.
+# @noRd
+.rowCsCorrelation <- function(parts, ldSource) {
+    if (methods::is(ldSource, "SumStatsBase")) {
+        return(.rowCsCorrelationSumstats(parts, ldSource))
+    }
+    if (methods::is(ldSource, "QtlDataset")) {
+        return(.rowCsCorrelationGeno(parts, ldSource))
+    }
+    abort(glue(
+        "computeCsCorrelation() requires a QtlDataset, QtlSumStats, or ",
+        "GwasSumStats as `ldSource`: the between-credible-set correlation ",
+        "is derived from that object's LD and is never stored on the fit."
+    ))
 }

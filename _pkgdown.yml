@@ -95,8 +95,11 @@ reference:
       section) documents the user-facing factory function.
     contents:
       - AnnotationMatrix-class
-      - FineMappingEntry-class
+      - ColocBoostResult-class
+      - ColocResult-class
+      - ColocResultBase-class
       - FineMappingResultBase-class
+      - FineMappingRow-class
       - GenotypeHandle-class
       - H2Estimate-class
       - LdData-class
@@ -106,8 +109,10 @@ reference:
       - MashPrior-class
       - MultiStudyQtlDataset-class
       - QtlDataset-class
+      - RangedTupleList-class
       - SldscData-class
       - SumStatsBase-class
+      - TwasWeightsRow-class
 
   - title: "Class constructors"
     desc: >
@@ -118,8 +123,10 @@ reference:
     contents:
       - AnnotationMatrix
       - CtwasResult
+      - ColocBoostResult
+      - ColocResult
       - CtwasResultEntry
-      - FineMappingEntry
+      - fineMappingRow
       - GenotypeHandle
       - GwasFineMappingResult
       - GwasSumStats
@@ -133,7 +140,7 @@ reference:
       - qtlSumStatsFromZMatrix
       - SldscData
       - TwasWeights
-      - TwasWeightsEntry
+      - twasWeightsRow
 
   - title: "Manifest loaders"
     desc: >
@@ -166,9 +173,15 @@ reference:
       - getGenome
       - getSnpRanges
 
-  - subtitle: "FineMappingEntry"
+  - subtitle: "RangedTupleList"
     contents:
-      - adjustPips
+      # The virtual base every collection inherits: container and metadata
+      # methods, plus the region/variant verbs and the plyranges bridge.
+      - RangedTupleList-methods
+      - subsetRegion
+      - intersectVariants
+      - flattenTupleRanges
+      - nestTupleRanges
       - computeCsCorrelation
       - fsusieAffectedRegions
       - fsusieCredibleBand
@@ -214,6 +227,7 @@ reference:
 
   - subtitle: "GwasSumStats"
     contents:
+      - "getSumStats,GwasSumStats-method"
       - getBeta
       - getMaf
       - getN
@@ -225,6 +239,16 @@ reference:
       - getZ
       - nSnps
       - subsetChr
+
+  - subtitle: "ColocResult / ColocBoostResult"
+    contents:
+      - colocViews
+      - getColocBoostOutcomes
+      - getComputingTime
+      - getRegionVcp
+      - getRetainedMass
+      - "as.data.frame,ColocResult-method"
+      - "as.data.frame,ColocBoostResult-method"
 
   - subtitle: "H2Estimate"
     contents:
@@ -281,6 +305,7 @@ reference:
       - getResidualizedPhenotypes
       - getScaleResiduals
       - getTraitPosition
+      - qtlDatasetFilters
 
   - subtitle: "QtlFineMappingResult"
     contents:
@@ -403,6 +428,8 @@ reference:
       GenotypeHandle accessor surface.
     contents:
       - extractBlockGenotypes
+      - genotypeDelayedArray
+      - getChromPaths
       - computeBlockLdCor
       - loadGenotypeRegion
       - readAfreq
@@ -593,6 +620,7 @@ reference:
       - gwasSumStatsExample
       - multiTraitData
       # Fine-mapping results
+      - colocboostResultExample
       - qtlFineMappingExample
       - qtlFineMappingLbfExample
       - qtlFineMappingPairedExample

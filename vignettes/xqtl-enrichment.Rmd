@@ -43,7 +43,7 @@ qtlFineMappingExample
 
 ## Input data
 
-Each object is a `DFrame`-backed collection of per-tuple fine-mapping entries;
+Each object is a `GRangesList`-backed collection, one element per tuple;
 use the accessors rather than reaching into slots. `getTopLoci()` returns the
 per-variant posterior table (identity columns, `pip`, and credible-set
 membership):

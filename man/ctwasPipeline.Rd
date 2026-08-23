@@ -31,9 +31,11 @@ ctwasPipeline(
 )
 }
 \arguments{
-\item{gwasSumStats}{NAMED LIST of \code{\link{GwasSumStats}} keyed by
-\code{region_id} (at least two entries). Each must have \code{getQcInfo()}
-non-empty.}
+\item{gwasSumStats}{A \code{\link{GwasSumStats}} whose elements are LD
+blocks (at least two), keyed by its \code{blockId} column, with
+\code{getQcInfo()} non-empty. Build it with
+\code{loadGwasSumStatsFromManifest(..., ldBlocks = <blocks>)} and pass it
+through \code{\link{summaryStatsQc}}.}
 
 \item{twasWeights}{The per-gene weight source. Either (a) a FLAT
 \code{\link{TwasWeights}} / \code{QtlFineMappingResult} (or a homogeneous
@@ -151,13 +153,15 @@ Pipeline that hands a per-block set of
   \code{z_gene} input so the per-gene Z is not recomputed inside ctwas.
 }
 \section{LD block convention}{
- Inputs are NAMED LISTS keyed by
-  \code{region_id} (\code{list(block1 = gss1, block2 = gss2, ...)}).
-  Per-block \code{region_info}, \code{LD_map}, and \code{snp_map} entries are
-  built automatically from each block's LD sketch and concatenated before the
-  call to \code{ctwas::ctwas_sumstats}. A single-block input is rejected:
-  cTWAS's EM cannot converge on a single region, so callers must supply at
-  least two blocks.
+ \code{gwasSumStats} is ONE
+  \code{\link{GwasSumStats}} whose elements are LD blocks, keyed by its
+  \code{blockId} column -- build it with
+  \code{loadGwasSumStatsFromManifest(..., ldBlocks = <blocks>)}. Per-block
+  \code{region_info}, \code{LD_map}, and \code{snp_map} entries are built
+  automatically from the LD sketch and concatenated before the call to
+  \code{ctwas::ctwas_sumstats}. A single-block input is rejected: cTWAS's EM
+  cannot converge on a single region, so callers must supply at least two
+  blocks.
 }
 
 \section{LD-sketch identity check}{
@@ -174,14 +178,12 @@ ldStem <- file.path(ldDir, "protocol_example.LD.chr22")
 gwasTsv <- system.file("extdata", "manifests",
   "protocol_example.twas.gwas_sumstats.chr22.tsv.gz", package = "pecotmr")
 mani <- data.frame(study = "gwas1", sumStatsPath = gwasTsv)
-blocks <- list(c(10000000, 15000000), c(15000000, 19000000))
-gwasByRegion <- list()
-for (b in blocks) {
-  rid <- sprintf("chr22_\%d_\%d", b[1], b[2])
-  gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
-    ldSketch = ldStem, region = sprintf("chr22:\%d-\%d", b[1], b[2]))
-  gwasByRegion[[rid]] <- summaryStatsQc(gss, mafCutoff = 0.0025)
-}
+blocks <- GenomicRanges::GRanges("chr22",
+  IRanges::IRanges(c(10000000, 15000001), c(15000000, 19000000)),
+  blockId = c("chr22_1", "chr22_2"))
+gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
+  ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
+gwasByRegion <- summaryStatsQc(gss, mafCutoff = 0.0025)
 ctwasPipeline(gwasSumStats = gwasByRegion,
   twasWeights = list(ctwasWeightsExample), thin = 1, niterPrefit = 3,
   niter = 10, min_group_size = 1, min_p_single_effect = 0,

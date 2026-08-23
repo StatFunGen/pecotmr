@@ -23,11 +23,15 @@ context("s4Constructors")
     )
 }
 
-.sc_makeTopLoci <- function(n = 3) {
+# `offset` shifts the variant positions so two fixtures can occupy DISTINCT
+# genomic ranges. Row identity is now (study, method, range), so two entries
+# built at the same positions are the same block by definition -- tests that
+# need two blocks have to say where each one sits.
+.sc_makeTopLoci <- function(n = 3, offset = 0L) {
     data.frame(
-        variant_id = paste0("chr1:", 100 * seq_len(n), ":A:G"),
+        variant_id = paste0("chr1:", offset + 100 * seq_len(n), ":A:G"),
         chrom = rep("1", n),
-        pos = as.integer(100 * seq_len(n)),
+        pos = as.integer(offset + 100 * seq_len(n)),
         A1 = rep("G", n),
         A2 = rep("A", n),
         N = rep(1000, n),
@@ -44,21 +48,21 @@ context("s4Constructors")
     )
 }
 
-.sc_makeFineMappingEntry <- function(n = 3) {
-    FineMappingEntry(
-        variantIds = paste0("chr1:", 100 * seq_len(n), ":A:G"),
+.sc_makeFineMappingRow <- function(n = 3, offset = 0L) {
+    fineMappingRow(
+        variantIds = paste0("chr1:", offset + 100 * seq_len(n), ":A:G"),
         susieFit = list(fake = TRUE),
-        topLoci = .sc_makeTopLoci(n)
+        topLoci = .sc_makeTopLoci(n, offset = offset)
     )
 }
 
-.sc_makeTwasWeightsEntry <- function(
+.sc_makeTwasWeightsRow <- function(
     p = 5L,
     standardized = FALSE,
     dataType = "expression"
 ) {
-    TwasWeightsEntry(
-        variantIds = paste0("v", seq_len(p)),
+    twasWeightsRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (seq_len(p))),
         weights = rnorm(p),
         standardized = standardized,
         dataType = dataType
@@ -66,7 +70,7 @@ context("s4Constructors")
 }
 
 # ===========================================================================
-# FineMappingEntry
+# FineMappingRow
 # ===========================================================================
 .sc_makeSe <- function(traits = c("ENSG1", "ENSG2"), n_samples = 10) {
     rng <- GenomicRanges::GRanges(

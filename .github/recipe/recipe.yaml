@@ -31,6 +31,7 @@ requirements:
     - bioconductor-snprelate
     - bioconductor-snpstats
     - bioconductor-mungesumstats
+    - bioconductor-multiassayexperiment
     - bioconductor-rsamtools
     - bioconductor-rtracklayer
     - bioconductor-summarizedexperiment
@@ -97,6 +98,7 @@ requirements:
     - bioconductor-s4vectors
     - bioconductor-snprelate
     - bioconductor-snpstats
+    - bioconductor-multiassayexperiment
     - bioconductor-mungesumstats
     - bioconductor-rsamtools
     - bioconductor-rtracklayer

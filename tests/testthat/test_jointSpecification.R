@@ -718,7 +718,7 @@ context("joint dispatchers (fineMappingDispatcher / twasDispatcher)")
         path = "/tmp/jd.gds",
         format = "gds",
         snpInfo = data.frame(
-            SNP = paste0("v", seq_len(snp_n)),
+            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -791,7 +791,7 @@ context("joint dispatchers (fineMappingDispatcher / twasDispatcher)")
             )
         )
         S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-            SNP = paste0("v", 1:5),
+            SNP = sprintf("chr1:%d:A:G", 100L * (1:5)),
             A1 = rep("A", 5),
             A2 = rep("G", 5),
             Z = rnorm(5),
@@ -830,7 +830,7 @@ context("joint dispatchers (fineMappingDispatcher / twasDispatcher)")
     function(R, ...) list(R = R)
 }
 
-# A stub postprocessor that returns a tiny FineMappingEntry. Mirrors the
+# A stub postprocessor that returns a tiny FineMappingRow. Mirrors the
 # `.fmp_mockPostprocess` shape from test_fineMappingPipeline.R.
 .jd_mockPostprocess <- function() {
     function(
@@ -853,12 +853,12 @@ context("joint dispatchers (fineMappingDispatcher / twasDispatcher)")
         } else if (is.list(dataY) && !is.null(dataY$z)) {
             vids <- names(dataY$z)
         } else {
-            vids <- "v_unknown"
+            vids <- "chr1:1200:A:G"
         }
         if (is.null(vids)) {
-            vids <- "v_unknown"
+            vids <- "chr1:1200:A:G"
         }
-        FineMappingEntry(
+        fineMappingRow(
             variantIds = vids,
             susieFit = list(method = method, payload = fit),
             topLoci = data.frame(
@@ -1052,8 +1052,8 @@ test_that("fineMappingPipeline(QtlSumStats): composed jointSpec axes={'study','c
         )
     )
     expect_s4_class(res, "QtlFineMappingResult")
-    expect_true("jointStudies" %in% names(res))
-    expect_true("jointContexts" %in% names(res))
+    expect_true("jointStudies" %in% pecotmr:::.tupleColumnNames(res))
+    expect_true("jointContexts" %in% pecotmr:::.tupleColumnNames(res))
     expect_equal(nrow(res), 4L) # study x context
     expect_setequal(as.character(res$study), c("Q1", "Q2")) # both vary -> real
     expect_setequal(as.character(res$context), c("c1", "c2"))
@@ -1146,7 +1146,7 @@ test_that("twasWeightsPipeline(QtlDataset): jointSpec='context' fits mr.mash per
     expect_s4_class(res, "TwasWeights")
     expect_equal(nrow(res), 2L) # per-context rows
     expect_setequal(as.character(res$context), c("c1", "c2"))
-    expect_true("jointContexts" %in% names(res))
+    expect_true("jointContexts" %in% pecotmr:::.tupleColumnNames(res))
 })
 
 test_that("twasWeightsPipeline(QtlDataset): jointSpec='context' with only one context skips", {
@@ -1195,7 +1195,7 @@ test_that("twasWeightsPipeline(QtlDataset): jointSpec='trait' fits mr.mash per c
     expect_s4_class(res, "TwasWeights")
     expect_equal(nrow(res), 2L) # per-trait rows
     expect_setequal(as.character(res$trait), c("t1", "t2"))
-    expect_true("jointTraits" %in% names(res))
+    expect_true("jointTraits" %in% pecotmr:::.tupleColumnNames(res))
 })
 
 test_that("twasWeightsPipeline(QtlDataset): study-axis fails on individual data", {
@@ -1282,7 +1282,7 @@ test_that("twasWeightsPipeline(QtlSumStats): jointSpec='context' fits mr.mash.rs
     expect_s4_class(res, "TwasWeights")
     expect_equal(nrow(res), 2L) # per-context rows
     expect_setequal(as.character(res$context), c("c1", "c2"))
-    expect_true("jointContexts" %in% names(res))
+    expect_true("jointContexts" %in% pecotmr:::.tupleColumnNames(res))
 })
 
 test_that("twasWeightsPipeline(QtlSumStats): jointSpec='trait' fits mr.mash.rss per (study, context)", {
@@ -1350,8 +1350,8 @@ test_that("twasWeightsPipeline(QtlSumStats): composed jointSpec axes=c('study','
         )
     )
     expect_s4_class(res, "TwasWeights")
-    expect_true("jointStudies" %in% names(res))
-    expect_true("jointContexts" %in% names(res))
+    expect_true("jointStudies" %in% pecotmr:::.tupleColumnNames(res))
+    expect_true("jointContexts" %in% pecotmr:::.tupleColumnNames(res))
     expect_equal(nrow(res), 4L) # study x context
     expect_setequal(as.character(res$study), c("Q1", "Q2"))
     expect_setequal(as.character(res$context), c("c1", "c2"))
@@ -1672,7 +1672,11 @@ test_that(".buildJointSumstatZMatrix: a mismatched SNP order across entries erro
     local_mocked_bindings(
         getSumstatDf = function(x, study, context, trait, require, ...) {
             calls <<- calls + 1L
-            vid <- if (calls == 1L) c("v1", "v2") else c("v2", "v1") # reordered
+            vid <- if (calls == 1L) {
+                c("chr1:100:A:G", "chr1:200:A:G")
+            } else {
+                c("chr1:200:A:G", "chr1:100:A:G")
+            } # reordered
             data.frame(
                 variant_id = vid,
                 z = c(1, 2),
@@ -1729,7 +1733,12 @@ test_that(".buildIndividualCrossContextXy: region path + complete-case skip", {
             cisWindow = NULL,
             region = NULL
         ) {
-            matrix(0, 6, 2, dimnames = list(samp, c("v1", "v2")))
+            matrix(
+                0,
+                6,
+                2,
+                dimnames = list(samp, c("chr1:100:A:G", "chr1:200:A:G"))
+            )
         },
         .fmResidPheno = function(x, contexts, traitId = NULL, ...) {
             ym <- function(v) matrix(v, 6, 1, dimnames = list(samp, "g1"))
@@ -1762,7 +1771,12 @@ test_that(".buildIndividualCrossContextXy: too few shared samples skips", {
             cisWindow = NULL,
             region = NULL
         ) {
-            matrix(0, 1, 2, dimnames = list("zz", c("v1", "v2")))
+            matrix(
+                0,
+                1,
+                2,
+                dimnames = list("zz", c("chr1:100:A:G", "chr1:200:A:G"))
+            )
         }, # disjoint sample
         .fmResidPheno = function(x, contexts, traitId = NULL, ...) {
             list(
@@ -1819,7 +1833,12 @@ test_that(".buildIndividualCrossTraitXy: skip branches (< 2 traits, region, comp
             cisWindow = NULL,
             region = NULL
         ) {
-            matrix(0, 6, 2, dimnames = list(samp, c("v1", "v2")))
+            matrix(
+                0,
+                6,
+                2,
+                dimnames = list(samp, c("chr1:100:A:G", "chr1:200:A:G"))
+            )
         },
         .fmResidPheno = function(x, contexts, traitId = NULL, ...) {
             cbind(g1 = c(NA, NA, NA, NA, NA, 1), g2 = rnorm(6)) |>
@@ -1853,7 +1872,12 @@ test_that(".buildComposedIndividualXy: skip branches and single-context wrap", {
             cisWindow = NULL,
             region = NULL
         ) {
-            matrix(0, 6, 2, dimnames = list(samp, c("v1", "v2")))
+            matrix(
+                0,
+                6,
+                2,
+                dimnames = list(samp, c("chr1:100:A:G", "chr1:200:A:G"))
+            )
         },
         .fmResidPheno = function(x, contexts, traitId = NULL, ...) {
             matrix(rnorm(12), 6, 2, dimnames = list(samp, c("g1", "g2")))
@@ -1933,8 +1957,8 @@ test_that(".fmSynthesizeJointSpec: trait wins over context; single/single -> emp
 # Multi-region merges: .fmMergeResultsByKey / .twasMergeResultsByKey
 # -----------------------------------------------------------------------------
 
-.js_fmEntry <- function(vid = "v1") {
-    FineMappingEntry(
+.js_fmEntry <- function(vid = "chr1:100:A:G") {
+    fineMappingRow(
         variantIds = vid,
         susieFit = list(),
         topLoci = data.frame(
@@ -1980,7 +2004,10 @@ test_that(".twasMergeResultsByKey: merges per-region TwasWeights entries", {
             context = "c1",
             trait = "t1",
             method = "lasso",
-            entry = list(TwasWeightsEntry(variantIds = "v1", weights = 0.5))
+            entry = list(twasWeightsRow(
+                variantIds = "chr1:100:A:G",
+                weights = 0.5
+            ))
         )
     }
     out <- pecotmr:::.twasMergeResultsByKey(list(mk(), mk()), c("r1", "r2"))
@@ -2019,8 +2046,8 @@ test_that(".twasDispatchJointSpecsQtlDataset: two region blocks are merged by ke
             trait = c("t1", "t1"),
             method = c("mrmash", "mrmash"),
             entry = list(
-                TwasWeightsEntry(variantIds = "v1", weights = 0.5),
-                TwasWeightsEntry(variantIds = "v1", weights = 0.5)
+                twasWeightsRow(variantIds = "chr1:100:A:G", weights = 0.5),
+                twasWeightsRow(variantIds = "chr1:100:A:G", weights = 0.5)
             )
         )
     }
@@ -2148,14 +2175,20 @@ test_that(".twasDispatchJointSpecsMultiStudy: routes components + sumstats and r
         context = "c1",
         trait = "t1",
         method = "mrmash",
-        entry = list(TwasWeightsEntry(variantIds = "v1", weights = 0.5))
+        entry = list(twasWeightsRow(
+            variantIds = "chr1:100:A:G",
+            weights = 0.5
+        ))
     )
     ssRes <- TwasWeights(
         study = "ssC",
         context = "c1",
         trait = "t1",
         method = "mrmash",
-        entry = list(TwasWeightsEntry(variantIds = "v1", weights = 0.5)),
+        entry = list(twasWeightsRow(
+            variantIds = "chr1:100:A:G",
+            weights = 0.5
+        )),
         ldSketch = .jd_makeHandle()
     )
     local_mocked_bindings(
@@ -2241,7 +2274,12 @@ test_that(".buildIndividualCrossTraitXy: disjoint X/Y samples skip the context",
             cisWindow = NULL,
             region = NULL
         ) {
-            matrix(0, 1, 2, dimnames = list("zz", c("v1", "v2")))
+            matrix(
+                0,
+                1,
+                2,
+                dimnames = list("zz", c("chr1:100:A:G", "chr1:200:A:G"))
+            )
         }, # disjoint sample
         .fmResidPheno = function(x, contexts, traitId = NULL, ...) {
             matrix(0, 6, 2, dimnames = list(paste0("s", 1:6), c("g1", "g2")))
@@ -2276,7 +2314,12 @@ test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA
             cisWindow = NULL,
             region = NULL
         ) {
-            matrix(0, 1, 2, dimnames = list("zz", c("v1", "v2")))
+            matrix(
+                0,
+                1,
+                2,
+                dimnames = list("zz", c("chr1:100:A:G", "chr1:200:A:G"))
+            )
         },
         .fmResidPheno = function(x, contexts, traitId = NULL, ...) {
             setNames(
@@ -2311,7 +2354,12 @@ test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA
             cisWindow = NULL,
             region = NULL
         ) {
-            matrix(0, 6, 2, dimnames = list(samp, c("v1", "v2")))
+            matrix(
+                0,
+                6,
+                2,
+                dimnames = list(samp, c("chr1:100:A:G", "chr1:200:A:G"))
+            )
         },
         .fmResidPheno = function(x, contexts, traitId = NULL, ...) {
             list(
@@ -2339,7 +2387,12 @@ test_that(".buildComposedIndividualXy: disjoint samples / missing trait col / NA
             cisWindow = NULL,
             region = NULL
         ) {
-            matrix(0, 6, 2, dimnames = list(samp, c("v1", "v2")))
+            matrix(
+                0,
+                6,
+                2,
+                dimnames = list(samp, c("chr1:100:A:G", "chr1:200:A:G"))
+            )
         },
         .fmResidPheno = function(x, contexts, traitId = NULL, ...) {
             list(
@@ -2375,14 +2428,14 @@ test_that(".fmMergeResultsByKey: a key missing from a later region contributes n
         context = c("c1", "c2"),
         trait = c("t1", "t1"),
         method = c("mvsusie", "mvsusie"),
-        entry = list(.js_fmEntry("v1"), .js_fmEntry("v2"))
+        entry = list(.js_fmEntry("chr1:100:A:G"), .js_fmEntry("chr1:200:A:G"))
     )
     oneRow <- QtlFineMappingResult(
         study = "S",
         context = "c1",
         trait = "t1",
         method = "mvsusie",
-        entry = list(.js_fmEntry("v1"))
+        entry = list(.js_fmEntry("chr1:100:A:G"))
     ) # missing the c2 key
     seen <- 0L
     local_mocked_bindings(
@@ -2411,7 +2464,10 @@ test_that(".fmDispatchJointSpecsQtlDataset: two region blocks are merged", {
             context = c("c1", "c2"),
             trait = c("t1", "t1"),
             method = c("mvsusie", "mvsusie"),
-            entry = list(.js_fmEntry("v1"), .js_fmEntry("v1"))
+            entry = list(
+                .js_fmEntry("chr1:100:A:G"),
+                .js_fmEntry("chr1:100:A:G")
+            )
         )
     }
     local_mocked_bindings(
@@ -2448,7 +2504,7 @@ test_that(".fmDispatchJointSpecsQtlDataset: a single region returns directly; al
         context = "c1",
         trait = "t1",
         method = "mvsusie",
-        entry = list(.js_fmEntry("v1"))
+        entry = list(.js_fmEntry("chr1:100:A:G"))
     )
     local_mocked_bindings(
         .fmDispatchJointSpecsQtlDatasetOneRegion = function(...) res1,
@@ -2494,8 +2550,8 @@ test_that(".twasMergeResultsByKey: a key absent from a later region contributes 
         trait = c("t1", "t1"),
         method = c("lasso", "lasso"),
         entry = list(
-            TwasWeightsEntry(variantIds = "v1", weights = 0.1),
-            TwasWeightsEntry(variantIds = "v2", weights = 0.2)
+            twasWeightsRow(variantIds = "chr1:100:A:G", weights = 0.1),
+            twasWeightsRow(variantIds = "chr1:200:A:G", weights = 0.2)
         )
     )
     oneRow <- TwasWeights(
@@ -2503,8 +2559,95 @@ test_that(".twasMergeResultsByKey: a key absent from a later region contributes 
         context = "c1",
         trait = "t1",
         method = "lasso",
-        entry = list(TwasWeightsEntry(variantIds = "v1", weights = 0.1))
+        entry = list(twasWeightsRow(
+            variantIds = "chr1:100:A:G",
+            weights = 0.1
+        ))
     )
     out <- pecotmr:::.twasMergeResultsByKey(list(twoRow, oneRow), c("rA", "rB"))
     expect_equal(nrow(out), 2L) # 1063 else-branch
+})
+
+
+# ---------------------------------------------------------------------------
+# .buildJointSumstatZMatrix: LD-panel cutoffs on the joint RSS path.
+#
+# Without these, mafCutoff would filter univariate RSS fits but silently not
+# joint ones -- an inconsistency that is hard to spot in results, since both
+# return a well-formed fit either way.
+# ---------------------------------------------------------------------------
+
+# @noRd
+.bjz_qcd <- function() {
+    data(qtlSumStatsMulticontextExample, envir = environment())
+    suppressWarnings(suppressMessages(
+        summaryStatsQc(qtlSumStatsMulticontextExample)
+    ))
+}
+
+# @noRd
+.bjz_build <- function(ss, ...) {
+    suppressMessages(.buildJointSumstatZMatrix(
+        ss,
+        seq_len(nrow(ss)),
+        as.character(ss$context),
+        "probe",
+        ldSketch = getLdSketch(ss),
+        cutoffs = .panelCutoffs(list(...))
+    ))
+}
+
+test_that(".buildJointSumstatZMatrix filters nothing by default", {
+    ss <- .bjz_qcd()
+    jz <- .bjz_build(ss)
+    expect_equal(length(jz$variantIds), sum(lengths(ss)) / nrow(ss))
+    expect_equal(ncol(jz$Z), nrow(ss))
+})
+
+test_that(".buildJointSumstatZMatrix drops panel-rare variants", {
+    ss <- .bjz_qcd()
+    full <- .bjz_build(ss)
+    tight <- .bjz_build(ss, mafCutoff = 0.2)
+    expect_lt(length(tight$variantIds), length(full$variantIds))
+    # Variants are rows; every context survives as a column.
+    expect_equal(nrow(tight$Z), length(tight$variantIds))
+    expect_equal(ncol(tight$Z), ncol(full$Z))
+    expect_equal(colnames(tight$Z), colnames(full$Z))
+})
+
+test_that(".buildJointSumstatZMatrix agrees with .panelVariantFilter", {
+    ss <- .bjz_qcd()
+    ids <- .bjz_build(ss)$variantIds
+    for (cut in c(0.05, 0.2)) {
+        expect_equal(
+            length(.bjz_build(ss, mafCutoff = cut)$variantIds),
+            length(.panelVariantFilter(
+                getLdSketch(ss),
+                ids,
+                mafCutoff = cut
+            )),
+            label = str_c("mafCutoff ", cut)
+        )
+    }
+})
+
+test_that(".buildJointSumstatZMatrix keeps Z aligned to its ids", {
+    # Each context's own frame is narrowed to the filtered set before the
+    # shared-SNP-order check; otherwise that check fires on a length mismatch
+    # the filter itself created.
+    ss <- .bjz_qcd()
+    full <- .bjz_build(ss)
+    tight <- .bjz_build(ss, mafCutoff = 0.2)
+    expect_equal(rownames(tight$Z), tight$variantIds)
+    keep <- is_in(full$variantIds, tight$variantIds)
+    expect_equal(tight$Z[, 1L], full$Z[keep, 1L])
+    expect_equal(tight$nVec, full$nVec)
+})
+
+test_that(".buildJointSumstatZMatrix honours a missingness cutoff", {
+    ss <- .bjz_qcd()
+    expect_lt(
+        length(.bjz_build(ss, imissCutoff = 0)$variantIds),
+        length(.bjz_build(ss)$variantIds)
+    )
 })

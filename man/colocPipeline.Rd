@@ -79,14 +79,21 @@ warning. Default \code{NULL} (baseline coloc).}
 NULL}.}
 
 \item{adjustPips}{Logical, default \code{TRUE}. When TRUE, before any
-per-pair inference the QTL and GWAS fine-mapping result collections are
-passed through \code{\link{adjustPips}} so each entry's PIPs are
-renormalized to the intersection of its variants with the union of the
-other side's variant IDs. This matters in two scenarios: (1) the user
-declined to impute missing variants in the GWAS \code{SumStats} and the QTL
-fine-mapping input has additional variants; (2) the GWAS fine-mapping
-result contains variants not present in the QTL fine-mapping result. Pass
-\code{FALSE} to use the FMRs as supplied.}
+  per-pair inference the QTL and GWAS fine-mapping result collections are
+  reconciled with \code{\link{intersectVariants}}, so both sides are scored
+  on the variants they share and their PIPs are renormalized to that shared
+  set. This matters in two scenarios: (1) the user declined to impute
+  missing variants in the GWAS \code{SumStats} and the QTL fine-mapping
+  input has additional variants; (2) the GWAS fine-mapping result contains
+  variants not present in the QTL fine-mapping result. Pass \code{FALSE} to
+  use the FMRs as supplied.
+
+  How much of each effect's posterior survived that restriction is reported
+  per result row as \code{qtlRetainedMass} / \code{gwasRetainedMass}; a low
+  value means the effect was largely built on variants the other side does
+  not carry, so its colocalization evidence rests on little retained signal.
+  Both are \code{NA} when \code{adjustPips = FALSE}, since nothing was
+  measured.}
 
 \item{alleleFlip}{Logical, default \code{TRUE}. When TRUE, align LBF columns
 between the QTL and GWAS by (chrom, pos) with ref/alt swaps recognized (LBF
@@ -96,14 +103,24 @@ exact alleles only, so a ref/alt swap is treated as a distinct variant.}
 \item{...}{Additional arguments forwarded to \code{coloc::coloc.bf_bf}.}
 }
 \value{
-A data frame with one row per (QTL tuple, GWAS tuple, credible-set
-  pair) combination. Identity columns: \code{study}, \code{context},
-  \code{trait}, \code{method}, \code{gwasStudy}, \code{gwasMethod}, plus the
+A \code{\linkS4class{ColocResult}}: one element per tested (QTL
+  credible set, GWAS credible set, block) pair, holding that pair's aligned
+  variants with their \code{SNP.PP.H4}. Pair-level metadata carries the
+  identity columns (\code{study}, \code{context}, \code{trait},
+  \code{method}, \code{gwasStudy}, \code{gwasMethod}), the block and stable
+  credible-set ids (\code{blockId}, \code{qtlCs}, \code{gwasCs}), the
   standard coloc fields (\code{idx1}, \code{idx2}, \code{nSnps},
-  \code{PP.H0.abf} \ldots \code{PP.H4.abf}). When \code{enrichment} is
-  supplied, two additional columns \code{enrichment} and \code{p12Used}
-  report the per-pair factor and the prior actually passed to
+  \code{hit1}, \code{hit2}, \code{PP.H0.abf} \ldots \code{PP.H4.abf}) and
+  the reconciliation diagnostics \code{qtlRetainedMass} /
+  \code{gwasRetainedMass}. When \code{enrichment} is supplied, two
+  additional columns \code{enrichment} and \code{p12Used} report the
+  per-pair factor and the prior actually passed to
   \code{coloc::coloc.bf_bf}.
+
+  Project it with \code{\link{getColocPairs}} (the flat table this
+  pipeline used to return, also available as \code{as.data.frame}),
+  \code{\link{getColocVariants}}, \code{\link{getColocCredibleSets}} or
+  \code{\link{getColocGenes}}.
 }
 \description{
 Per-region pipeline that pairs a QTL

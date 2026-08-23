@@ -733,3 +733,130 @@ test_that(".resolveGenotypeShard errors when the format cannot be determined", {
         "cannot determine genotype format"
     )
 })
+
+# show() smoke test, moved here from test_showMethods.R so the test
+# tree mirrors R/.
+test_that("show(GenotypeHandle) does not error", {
+    gh <- new(
+        "GenotypeHandle",
+        path = "/tmp/test.gds",
+        format = "gds",
+        snpInfo = make_test_snp_info(),
+        nSamples = 100L,
+        sampleIds = paste0("s", 1:100),
+        pgenPtr = NULL
+    )
+    expect_output(show(gh), "GenotypeHandle")
+})
+
+
+# ---------------------------------------------------------------------------
+# GhSeed / genotypeDelayedArray -- lazy dosages behind a Bioconductor assay.
+#
+# extractBlockGenotypes() already reads only the requested variants, so the
+# seed is an adapter rather than a new reader. What needs pinning is the three
+# ways an adapter like this goes quietly wrong: orientation, the meaning of a
+# NULL index, and whether anything is read before it is asked for.
+# ---------------------------------------------------------------------------
+
+test_that("extractBlockGenotypes answers an empty index without a reader", {
+    # Regression: snpStats::read.plink(select.snps = character(0)) SEGFAULTS,
+    # taking the session down rather than raising a catchable condition. The
+    # sharded branch always returned early; the single-file branch did not.
+    data(qtlDatasetExample, envir = environment())
+    gh <- getGenotypeHandle(qtlDatasetExample)
+    se <- extractBlockGenotypes(gh, snpIdx = integer(0))
+    expect_s4_class(se, "SummarizedExperiment")
+    expect_equal(nrow(se), 0L)
+    expect_equal(ncol(se), getNSamples(gh))
+})
+
+test_that("genotypeDelayedArray reports variants x samples", {
+    # The Bioconductor assay orientation, which is the TRANSPOSE of
+    # getGenotypes(). Backwards, this returns a plausible matrix and a
+    # silently transposed LD matrix.
+    data(qtlDatasetExample, envir = environment())
+    qd <- qtlDatasetExample
+    da <- genotypeDelayedArray(getGenotypeHandle(qd))
+    expect_s4_class(da, "DelayedMatrix")
+    expect_equal(dim(da), rev(dim(getGenotypes(qd))))
+})
+
+test_that("genotypeDelayedArray values match getGenotypes transposed", {
+    data(qtlDatasetExample, envir = environment())
+    qd <- qtlDatasetExample
+    da <- genotypeDelayedArray(getGenotypeHandle(qd))
+    truth <- t(getGenotypes(qd))
+    got <- as.matrix(da[1:5, 1:4])
+    expect_equal(unname(got), unname(truth[1:5, 1:4]))
+    expect_identical(rownames(got), rownames(truth)[1:5])
+    expect_identical(colnames(got), colnames(truth)[1:4])
+})
+
+test_that("a NULL index means every row or column, not none", {
+    data(qtlDatasetExample, envir = environment())
+    gh <- getGenotypeHandle(qtlDatasetExample)
+    seed <- genotypeDelayedArray(gh)@seed
+    full <- S4Arrays::extract_array(seed, list(NULL, NULL))
+    expect_equal(dim(full), c(nrow(getSnpInfo(gh)), getNSamples(gh)))
+})
+
+test_that("the seed answers an empty extraction on either axis", {
+    data(qtlDatasetExample, envir = environment())
+    seed <- genotypeDelayedArray(getGenotypeHandle(qtlDatasetExample))@seed
+    expect_equal(
+        dim(S4Arrays::extract_array(seed, list(integer(0), NULL))),
+        c(0L, 165L)
+    )
+    expect_equal(
+        dim(S4Arrays::extract_array(seed, list(NULL, integer(0)))),
+        c(200L, 0L)
+    )
+})
+
+test_that("nothing is read until a block is actually touched", {
+    # The point of the seed: a panel can be described without being read.
+    data(qtlDatasetExample, envir = environment())
+    gh <- getGenotypeHandle(qtlDatasetExample)
+    reads <- 0L
+    # Captured before mocking: calling extractBlockGenotypes by name inside
+    # the mock would re-enter the mock, not the reader.
+    realExtract <- extractBlockGenotypes
+    local_mocked_bindings(
+        extractBlockGenotypes = function(handle, snpIdx, meanImpute = TRUE) {
+            reads <<- reads + 1L
+            realExtract(handle, snpIdx = snpIdx, meanImpute = meanImpute)
+        },
+        .package = "pecotmr"
+    )
+    da <- genotypeDelayedArray(gh)
+    expect_equal(reads, 0L)
+    se <- SummarizedExperiment::SummarizedExperiment(
+        assays = list(dosage = da)
+    )
+    expect_equal(reads, 0L)
+    invisible(as.matrix(da[1:3, 1:2]))
+    expect_gt(reads, 0L)
+})
+
+test_that("only the requested variants are read", {
+    data(qtlDatasetExample, envir = environment())
+    gh <- getGenotypeHandle(qtlDatasetExample)
+    seen <- integer(0)
+    realExtract <- extractBlockGenotypes
+    local_mocked_bindings(
+        extractBlockGenotypes = function(handle, snpIdx, meanImpute = TRUE) {
+            seen <<- c(seen, length(snpIdx))
+            realExtract(handle, snpIdx = snpIdx, meanImpute = meanImpute)
+        },
+        .package = "pecotmr"
+    )
+    da <- genotypeDelayedArray(gh)
+    invisible(as.matrix(da[1:5, 1:4]))
+    expect_true(all(seen <= 5L))
+    expect_lt(sum(seen), nrow(getSnpInfo(gh)))
+})
+
+test_that("genotypeDelayedArray rejects a non-handle", {
+    expect_error(genotypeDelayedArray("not a handle"), "GenotypeHandle")
+})

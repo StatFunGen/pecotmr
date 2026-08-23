@@ -1159,7 +1159,7 @@ test_that("readGenotypes plink2 sample names match psam IIDs", {
 #   * loadMultitaskRegionalData      -> use MultiStudyQtlDataset()
 #   * loadRssData                    -> use GwasSumStats() / QtlSumStats() +
 #                                       summaryStatsQc()
-#   * loadTwasWeights                -> use TwasWeights() / TwasWeightsEntry()
+#   * loadTwasWeights                -> use TwasWeights() / twasWeightsRow()
 #   * regionDataToIndInput           -> use QtlDataset()
 #   * regionDataToRssInput           -> use QtlSumStats() / GwasSumStats()
 #   * phenoListToMat                 -> function removed (no replacement)
@@ -1181,7 +1181,7 @@ test_that("readGenotypes plink2 sample names match psam IIDs", {
 # No surgical renames were applied: the previous test file contained no
 # references to `finemappingResult` / `FineMappingResult(variantNames=...)` or
 # related identifiers, so no `$finemappingEntry` /
-# `FineMappingEntry(variantIds=...)` substitutions were necessary here.
+# `fineMappingRow(variantIds=...)` substitutions were necessary here.
 # =============================================================================
 
 # Tests for genotype loading via readGenotypes + extractBlockGenotypes,
@@ -1527,7 +1527,7 @@ test_that("extractBlockGenotypes returns SummarizedExperiment", {
 # adjustPips
 # =============================================================================
 
-# Build a minimal FineMappingEntry with a known lbf_variable so PIP
+# Build a minimal FineMappingRow with a known lbf_variable so PIP
 # renormalization can be checked end-to-end.
 .makeAdjustEntry <- function(vids, L = 2L) {
     p <- length(vids)
@@ -1536,7 +1536,7 @@ test_that("extractBlockGenotypes returns SummarizedExperiment", {
     colnames(lbf) <- vids
     alpha <- lbfToAlpha(lbf)
     pip <- as.numeric(1 - apply(1 - alpha, 2, prod))
-    FineMappingEntry(
+    fineMappingRow(
         variantIds = vids,
         susieFit = list(
             pip = pip,
@@ -1863,7 +1863,7 @@ test_that(".extractBlockGds returns NULL when snpgdsGetGeno yields NULL", {
             paste(
                 "21",
                 "1000",
-                "v1",
+                "chr1:100:A:G",
                 "A",
                 "G",
                 ".",
@@ -1878,7 +1878,7 @@ test_that(".extractBlockGds returns NULL when snpgdsGetGeno yields NULL", {
             paste(
                 "21",
                 "2000",
-                "v2",
+                "chr1:200:A:G",
                 "C",
                 "T",
                 ".",

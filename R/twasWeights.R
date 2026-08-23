@@ -2,7 +2,7 @@
 # TwasWeights S4 class
 # -----------------------------------------------------------------------------
 # DFrame-subclass collection keyed by the identity tuple (study, context,
-# trait, method). Each row holds a TwasWeightsEntry payload (variant ids
+# trait, method). Each row holds a TwasWeightsRow payload (variant ids
 # + per-variant weight vector/matrix). Class-level slots:
 #   * ldSketch   GenotypeHandle (NULL for individual-level fits, the
 #                LD-sketch handle for RSS-derived weights).
@@ -15,7 +15,7 @@ NULL
 
 setClass(
     "TwasWeights",
-    contains = "DFrame",
+    contains = "RangedTupleList",
     representation(ldSketch = "ANY"),
     validity = function(object) .validateTwasWeights(object)
 )
@@ -36,8 +36,8 @@ setClass(
 # Required key/entry columns must all be present.
 # @noRd
 .twasValidateRequiredCols <- function(object) {
-    required <- c("study", "context", "trait", "method", "entry")
-    missingCols <- setdiff(required, names(object))
+    required <- c("study", "context", "trait", "method")
+    missingCols <- setdiff(required, .tupleColumnNames(object))
     if (length(missingCols) > 0L) {
         str_c("missing columns: ", str_flatten(missingCols, ", "))
     } else {
@@ -50,35 +50,30 @@ setClass(
 .twasValidateColumns <- function(object) {
     jointCols <- intersect(
         c("jointStudies", "jointContexts", "jointTraits"),
-        names(object)
+        .tupleColumnNames(object)
     )
     c(
         .twasValidateEntries(object),
-        .validateRegionColumn(object),
         .validateTraitPosColumn(object),
         .twasValidateJointCols(object, jointCols),
         .twasValidateKeyUniqueness(object, jointCols)
     )
 }
 
-# `entry` column: one TwasWeightsEntry per row.
+# The per-entry payload columns. The variants and their weights are the
+# elements now, so what is left to check is that the payload columns are
+# present and parallel to them.
 # @noRd
 .twasValidateEntries <- function(object) {
-    errors <- character()
-    if (length(object$entry) != nrow(object)) {
-        errors <- c(errors, "length(entry) must equal nrow(.) for TwasWeights")
+    payload <- c("fits", "cvResult", "standardized", "dataType")
+    missingCols <- setdiff(payload, .tupleColumnNames(object))
+    if (length(missingCols) > 0L) {
+        return(str_c(
+            "missing entry payload columns: ",
+            str_flatten(missingCols, ", ")
+        ))
     }
-    entryOk <- map_lgl(object$entry, methods::is, "TwasWeightsEntry")
-    if (!all(entryOk)) {
-        errors <- c(
-            errors,
-            str_c(
-                "every element of the `entry` column must be a ",
-                "TwasWeightsEntry"
-            )
-        )
-    }
-    errors
+    character()
 }
 
 # Any present joint* provenance columns must be character.
@@ -128,7 +123,7 @@ setClass(
 
 #' @title Create a TwasWeights Collection Object
 #' @description Construct a \code{TwasWeights} DFrame-subclass collection from
-#'   per-tuple vectors and a list of \code{TwasWeightsEntry} payloads (one per
+#'   per-tuple vectors and a list of \code{TwasWeightsRow} payloads (one per
 #'   tuple).
 #' @param study Character vector of study identifiers. Use the sentinel
 #'   \code{"joint"} for rows produced by a cross-study joint fit.
@@ -137,7 +132,7 @@ setClass(
 #' @param trait Character vector of trait identifiers. Use \code{"joint"} for
 #'   rows produced by a cross-trait joint fit.
 #' @param method Character vector of TWAS weight method names.
-#' @param entry List / \code{SimpleList} of \code{TwasWeightsEntry} objects.
+#' @param entry List / \code{SimpleList} of \code{TwasWeightsRow} objects.
 #' @param jointStudies Optional character vector (length \code{length(study)})
 #'   listing the semicolon-joined studies participating in each row's
 #'   cross-study joint fit, or \code{NA_character_} for non-joint rows. When
@@ -146,12 +141,6 @@ setClass(
 #'   shape as \code{jointStudies}.
 #' @param jointTraits Optional character vector for cross-trait joints. Same
 #'   shape as \code{jointStudies}.
-#' @param region Optional \code{GRanges} (length \code{length(study)}) giving
-#'   the genomic anchor of each row's trait -- the trait's own coordinates when
-#'   built from a \code{QtlDataset}, or the summary-stat variant-span window
-#'   when built from a \code{QtlSumStats}. Carried forward as provenance (e.g.
-#'   for cTWAS LD-block placement); not part of the identity key. \code{NULL}
-#'   (default) omits the column.
 #' @param ldSketch An optional \code{GenotypeHandle}, or \code{NULL} for
 #'   individual-level fits.
 #' @param traitPos Optional per-row trait genomic anchor (a \code{GRanges} or
@@ -159,7 +148,7 @@ setClass(
 #'   \code{NULL} (default) omits the column.
 #' @return A \code{TwasWeights} object.
 #' @examples
-#' twe <- TwasWeightsEntry(variantIds = paste0("v", 1:4),
+#' twe <- twasWeightsRow(variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
 #'   weights = rep(0.1, 4), cvResult = list(rsq = 0.5), standardized = FALSE)
 #' tw <- TwasWeights(study = "s1", context = "brain", trait = "gene1",
 #'   method = "susie", entry = list(twe))
@@ -174,17 +163,20 @@ TwasWeights <- function(
     jointStudies = NULL,
     jointContexts = NULL,
     jointTraits = NULL,
-    region = NULL,
     traitPos = NULL,
     ldSketch = NULL
 ) {
     n <- .twasCheckRowLengths(study, context, trait, method, entry)
-    cols <- list(
-        study = as.character(study),
-        context = as.character(context),
-        trait = as.character(trait),
-        method = as.character(method),
-        entry = S4Vectors::SimpleList(entry)
+    entry <- map(entry, .asTwRowPayload)
+    .checkRowPayloads(entry, "TwasWeightsRow", "TWAS-weight")
+    cols <- c(
+        list(
+            study = as.character(study),
+            context = as.character(context),
+            trait = as.character(trait),
+            method = as.character(method)
+        ),
+        .twRowPayloadCols(entry)
     )
     cols <- .twasAppendJointCols(
         cols,
@@ -193,14 +185,38 @@ TwasWeights <- function(
         jointTraits,
         n
     )
-    cols <- .appendRegionCol(cols, region, n)
     cols <- .appendTraitPosCol(cols, traitPos, n)
     dfArgs <- c(cols, list(check.names = FALSE))
-    df <- exec(S4Vectors::DataFrame, !!!dfArgs)
-    obj <- new("TwasWeights", df, ldSketch = ldSketch)
+    # Each entry's variants become one ELEMENT; its weights become that
+    # element's inner mcols and the rest of its payload becomes outer mcols.
+    # A multi-seqname entry is split into one element per chromosome, with its
+    # metadata row replicated alongside.
+    split <- .rtlSplitBySeqname(map(entry, rowVariants))
+    grl <- GenomicRanges::GRangesList(split$entry)
+    md <- exec(S4Vectors::DataFrame, !!!dfArgs)
+    mcols(grl) <- md[split$fromIdx, , drop = FALSE]
+    obj <- new("TwasWeights", grl, ldSketch = ldSketch)
     validObject(obj)
     obj
 }
+
+# One entry -> its element: the variants as a GRanges, with the per-variant
+# weights carried in the element's own mcols alongside the alleles.
+# @noRd
+
+# The non-variant half of each entry, as outer mcols columns. Objects of
+# arbitrary shape (fits, cvResult, dataType) ride in SimpleLists.
+# @noRd
+
+# @noRd
+.twPayloadStandardized <- function(p) {
+    getStandardized(p)
+}
+
+# Every `entry` must be a TwasWeightsRow. Checked before the payload is
+# unpacked, so a wrong type reports itself rather than surfacing as a missing
+# method on whatever was passed instead.
+# @noRd
 
 # Require study/context/trait/method/entry to share one length; returns it.
 # @noRd
@@ -260,15 +276,16 @@ setMethod("getTraitPosition", "TwasWeights", function(x, ...) {
 })
 
 #' @title Get a Single TWAS Weights Entry
-#' @description Return the \code{TwasWeightsEntry} for one \code{(study,
+#' @description Return the \code{TwasWeightsRow} for one \code{(study,
 #'   context, trait, method)} row of a \code{TwasWeights} collection.
 #' @param x A \code{TwasWeights} object.
 #' @param study,context,trait,method Single character identifiers. All required
 #'   when the collection has more than one row; optional when the collection has
 #'   a single row.
-#' @return A \code{TwasWeightsEntry} object.
+#' @return A \code{TwasWeightsRow} object.
 #' @examples
-#' twe <- TwasWeightsEntry(variantIds = paste0("v", 1:4), weights = rep(0.1, 4),
+#' twe <- twasWeightsRow(
+#'   variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)), weights = rep(0.1, 4),
 #'   cvResult = list(rsq = 0.5), standardized = FALSE)
 #' tw <- TwasWeights(study = "s1", context = "brain", trait = "g1",
 #'   method = "susie", entry = list(twe))
@@ -296,7 +313,59 @@ setMethod(
             method,
             cls = "TwasWeights"
         )
-        x$entry[[idx]]
+        x[idx]
+    }
+)
+
+# The weights of one row, read straight off that element's mcols.
+# @noRd
+.twasRowWeights <- function(i, x) {
+    mcols(x[[i]])$weight
+}
+
+# Rebuild the TwasWeightsRow for a tuple from its stored element(s).
+#
+# The entry is a DERIVED VIEW, not stored state: the variants live in the
+# element, the weights in that element's mcols, and the rest of the payload in
+# the collection's mcols. A tuple split across chromosomes owns several
+# elements, so they are stitched back into the single entry callers expect --
+# the same contract getSumStats() keeps.
+# @noRd
+
+# The row payload a (study, context, trait, method) selector pins.
+#
+# Read directly rather than via getTwasWeights(): that accessor returns a
+# single-row collection, so routing the per-field accessors through it would
+# dispatch straight back into them.
+# @noRd
+.twrSelectRowParts <- function(x, study, context, trait, method) {
+    idx <- .tupleSelectRow(
+        x,
+        study,
+        context,
+        trait,
+        method,
+        cls = "TwasWeights"
+    )
+    .twrRowParts(x, idx)
+}
+
+#' @rdname resolveWeights
+#' @export
+setMethod(
+    "resolveWeights",
+    "TwasWeights",
+    function(
+        x,
+        study = NULL,
+        context = NULL,
+        trait = NULL,
+        method = NULL,
+        ...
+    ) {
+        .twrRowResolveWeights(
+            .twrSelectRowParts(x, study, context, trait, method)
+        )
     }
 )
 
@@ -313,8 +382,7 @@ setMethod(
         method = NULL,
         ...
     ) {
-        entry <- getTwasWeights(x, study, context, trait, method)
-        getWeights(entry)
+        getWeights(.twrSelectRowParts(x, study, context, trait, method))
     }
 )
 
@@ -331,8 +399,7 @@ setMethod(
         method = NULL,
         ...
     ) {
-        entry <- getTwasWeights(x, study, context, trait, method)
-        getCvResult(entry)
+        getCvResult(.twrSelectRowParts(x, study, context, trait, method))
     }
 )
 
@@ -349,8 +416,7 @@ setMethod(
         method = NULL,
         ...
     ) {
-        entry <- getTwasWeights(x, study, context, trait, method)
-        getFits(entry)
+        getFits(.twrSelectRowParts(x, study, context, trait, method))
     }
 )
 
@@ -360,8 +426,15 @@ setMethod(
     "getStandardized",
     "TwasWeights",
     function(x, study = NULL, context = NULL, trait = NULL, method = NULL) {
-        entry <- getTwasWeights(x, study, context, trait, method)
-        getStandardized(entry)
+        isTRUE(
+            getStandardized(.twrSelectRowParts(
+                x,
+                study,
+                context,
+                trait,
+                method
+            ))
+        )
     }
 )
 
@@ -371,8 +444,7 @@ setMethod(
     "getDataType",
     "TwasWeights",
     function(x, study = NULL, context = NULL, trait = NULL, method = NULL) {
-        entry <- getTwasWeights(x, study, context, trait, method)
-        getDataType(entry)
+        getDataType(.twrSelectRowParts(x, study, context, trait, method))
     }
 )
 
@@ -389,8 +461,9 @@ setMethod(
         method = NULL,
         ...
     ) {
-        entry <- getTwasWeights(x, study, context, trait, method)
-        getVariantIds(entry)
+        .twrPartsVariantIds(
+            .twrSelectRowParts(x, study, context, trait, method)
+        )
     }
 )
 
@@ -1346,15 +1419,15 @@ twasWeightsCv <- function(
     )
 }
 
-# One TwasWeightsEntry for a (variantIds, weights) pair with the shared flags.
+# One TwasWeightsRow for a (variantIds, weights) pair with the shared flags.
 # @noRd
 .twasEntry <- function(variantIds, weights, fits, ctx) {
-    TwasWeightsEntry(
+    twasWeightsRow(
         variantIds = variantIds,
         weights = weights,
         fits = fits,
         cvResult = NULL,
-        standardized = isTRUE(ctx$standardized),
+        standardized = ctx$standardized,
         dataType = ctx$dataType
     )
 }
@@ -1505,11 +1578,19 @@ learnTwasWeights <- function(
 # Variant ids for the weight rows: colnames(X), or synthetic variant_i labels.
 # @noRd
 .twasVariantIds <- function(X) {
-    if (!is.null(colnames(X))) {
-        colnames(X)
-    } else {
-        str_c("variant_", seq_len(ncol(X)))
+    # An unnamed genotype matrix carries no variant identity, and a synthetic
+    # "variant_<i>" label does not create one -- it just defers the failure to
+    # wherever the range is needed. A variant id renders (chrom, pos, ref, alt),
+    # so the caller has to supply real ids as colnames.
+    if (is.null(colnames(X))) {
+        msg <- glue(
+            "twasWeights: the genotype matrix has no colnames, so its ",
+            "{ncol(X)} variants have no identity. Set colnames(X) to variant ",
+            "ids of the form chrom:pos:ref:alt."
+        )
+        abort(msg)
     }
+    colnames(X)
 }
 
 # Fit every weight method (parallel when >= 2 cores, else serial map), keyed by
@@ -1619,8 +1700,8 @@ learnTwasWeights <- function(
 #' @examples
 #' data(multiTraitData)
 #' X <- multiTraitData$X[, 1:4]
-#' colnames(X) <- paste0("v", 1:4)
-#' twe <- TwasWeightsEntry(variantIds = paste0("v", 1:4),
+#' colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:4))
+#' twe <- twasWeightsRow(variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
 #'   weights = rep(0.1, 4), cvResult = list(rsq = 0.5), standardized = FALSE)
 #' tw <- TwasWeights(study = "s1", context = "brain", trait = "g1",
 #'   method = "susie", entry = list(twe))
@@ -1631,8 +1712,10 @@ twasPredict <- function(X, weightsList) {
         # for compatibility with the legacy snake_case "<method>_predicted"
         # convention; ensembleWeights() rebinds the suffix.
         methodNames <- as.character(weightsList$method)
+        # The per-row weights live in each element's mcols now, so read them
+        # off the elements rather than a stored `entry` column.
         wl <- set_names(
-            map(weightsList$entry, getWeights),
+            map(seq_len(nrow(weightsList)), .twasRowWeights, x = weightsList),
             str_c(methodNames, "_weights")
         )
     } else {
@@ -1679,7 +1762,7 @@ estimateSparsity <- function(weightResults) {
             )
             abort(msg)
         }
-        fit <- getFits(weightResults$entry[[idx[[1L]]]])
+        fit <- getFits(.twrRowParts(weightResults, idx[[1L]]))
         if (is.null(fit) || is.null(fit$pi)) {
             msg <- glue(
                 "mr.ash fit object not found. Run learnTwasWeights() with ",
@@ -1716,7 +1799,7 @@ estimateSparsity <- function(weightResults) {
 # TRUE when joint column `jc` of `object` is not a character vector.
 # @noRd
 .twasColNotCharacter <- function(jc, object) {
-    !is.character(object[[jc]])
+    !is.character(.tupleColumn(object, jc))
 }
 
 # Validation message for a non-character joint column `jc`.
@@ -1731,7 +1814,7 @@ estimateSparsity <- function(weightResults) {
 # column that `object[, cn]` would drop).
 # @noRd
 .twasColumn <- function(cn, object) {
-    object[[cn]]
+    .tupleColumn(object, cn)
 }
 
 # Canonical short method name: map a full function name back to its short name.

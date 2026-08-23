@@ -76,7 +76,7 @@ setMethod(
     if (is.null(handle)) {
         return(NULL)
     }
-    si <- handle@snpInfo
+    si <- getSnpInfo(handle)
     keepIdx <- if (is.logical(keep)) which(keep) else as.integer(keep)
     if (length(keepIdx) >= nrow(si)) {
         return(handle)
@@ -310,6 +310,14 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     if (length(.genotypeChromPaths(handle)) > 0L) {
         return(.extractBlockSharded(handle, snpIdx, meanImpute = meanImpute))
     }
+    # An empty request is answered without reaching a reader. This is not
+    # defensive tidiness: snpStats::read.plink(select.snps = character(0))
+    # SEGFAULTS, taking the R session with it rather than raising a condition
+    # tryCatch could see. The sharded branch above already returns early for
+    # the same reason; this is the single-file path catching up.
+    if (length(snpIdx) == 0L) {
+        return(.emptyBlockSe(getSampleIds(handle)))
+    }
     geno <- .extractBlockByFormat(handle, snpIdx)
     if (is.null(geno)) {
         return(NULL)
@@ -371,7 +379,7 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     unifiedChr,
     meanImpute
 ) {
-    if (!is_in(chrom, names(handle@chromPaths))) {
+    if (!is_in(chrom, names(getChromPaths(handle)))) {
         msg <- glue(
             "extractBlockGenotypes: no per-chromosome file for chromosome ",
             "'{chrom}' (have: ",
@@ -398,11 +406,11 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # case -- returns its one SE directly.
 #' @keywords internal
 .extractBlockSharded <- function(handle, snpIdx, meanImpute = TRUE) {
-    sampleIds <- handle@sampleIds
+    sampleIds <- getSampleIds(handle)
     if (length(snpIdx) == 0L) {
         return(.emptyBlockSe(sampleIds))
     }
-    unifiedChr <- canonChrom(handle@snpInfo$CHR)
+    unifiedChr <- canonChrom(getSnpInfo(handle)$CHR)
     groups <- split(seq_along(snpIdx), unifiedChr[snpIdx])
     ses <- set_names(
         map2(
@@ -696,11 +704,6 @@ computeBlockLdCor <- function(
     .withGds(gdsPath, .gdsReadSnpInfo)
 }
 
-#' @title Detect File Format from Extension
-#' @description Infer file format from the file extension.
-#' @param path Character, file path.
-#' @return Character, detected format.
-#' @keywords internal
 # Map a lowercase file extension to a genotype format, or NULL if unrecognized.
 # @noRd
 .h2FormatFromExt <- function(ext) {

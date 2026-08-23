@@ -305,10 +305,10 @@ NULL
 # Canonical chromosomes present in an LD sketch: for a sharded handle these are
 # the chromPaths names; for a single-file handle the unique snpInfo chromosomes.
 .ldSketchChroms <- function(ldSketch) {
-    if (length(ldSketch@chromPaths) > 0L) {
-        canonChrom(names(ldSketch@chromPaths))
+    if (length(getChromPaths(ldSketch)) > 0L) {
+        canonChrom(names(getChromPaths(ldSketch)))
     } else {
-        unique(canonChrom(as.character(ldSketch@snpInfo$CHR)))
+        unique(canonChrom(as.character(getSnpInfo(ldSketch)$CHR)))
     }
 }
 
@@ -1405,6 +1405,11 @@ loadQtlDatasetFromManifest <- function(
 #' @param sampleSelect Optional GWAS-VCF FORMAT sample (study) column to read.
 #' @param formatMapping Optional GWAS-VCF FORMAT tag mapping (canonical stat ->
 #'   FORMAT field), overriding ES/SE/LP/SS/EAF defaults.
+#' @param ldBlocks Optional LD-block specification (an \code{LdBlocks}, a
+#'   \code{GRanges}, a data.frame with \code{chrom}/\code{start}/\code{end},
+#'   or a path to such a table). Without it a genome-wide file splits into one
+#'   element per chromosome; with it, into one element per LD block, which is
+#'   the granularity \code{\link{assembleCtwasInputs}} needs.
 #' @return A \code{GwasSumStats} object.
 #' @examples
 #' gwasTsv <- system.file("extdata", "manifests",
@@ -1423,7 +1428,8 @@ loadGwasSumStatsFromManifest <- function(
     minLdOverlapWarn = 0.5,
     columnMapping = NULL,
     sampleSelect = NULL,
-    formatMapping = NULL
+    formatMapping = NULL,
+    ldBlocks = NULL
 ) {
     base <- .manifestBase(manifest)
     df <- .canonManifestCols(
@@ -1455,6 +1461,10 @@ loadGwasSumStatsFromManifest <- function(
     .checkGwasLdContainment(ldSketch, entries, df, minLdOverlapWarn)
     ldSketch <- .subsetSketchToRange(ldSketch, entries)
     gwasArgs <- .gwasSumStatsArgs(df, entries, genome, ldSketch, ns)
+    # Without a block manifest a genome-wide file splits by chromosome, which
+    # is too coarse for cTWAS; with one, each study becomes one element per LD
+    # block. The constructor does the splitting either way.
+    gwasArgs$ldBlocks <- ldBlocks
     exec(GwasSumStats, !!!gwasArgs)
 }
 

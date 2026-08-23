@@ -13,7 +13,6 @@ QtlFineMappingResult(
   jointStudies = NULL,
   jointContexts = NULL,
   jointTraits = NULL,
-  region = NULL,
   traitPos = NULL,
   ldSketch = NULL
 )
@@ -30,7 +29,7 @@ sentinel \code{"joint"} for rows produced by a cross-study joint fit.}
 
 \item{method}{Character vector of fine-mapping method names (per tuple).}
 
-\item{entry}{List / \code{SimpleList} of \code{FineMappingEntry} objects.}
+\item{entry}{List / \code{SimpleList} of \code{FineMappingRow} objects.}
 
 \item{jointStudies}{Optional character vector (length \code{length(study)})
 listing the semicolon-joined studies participating in each row's
@@ -42,11 +41,6 @@ shape as \code{jointStudies}.}
 
 \item{jointTraits}{Optional character vector for cross-trait joints. Same
 shape as \code{jointStudies}.}
-
-\item{region}{Optional \code{GRanges} (length \code{length(study)}) giving
-the genomic anchor of each row's trait (its own coordinates). Carried
-forward as provenance (e.g. for cTWAS LD-block placement); not part of the
-identity key. \code{NULL} (default) omits the column.}
 
 \item{traitPos}{Optional per-row trait genomic anchor (a \code{GRanges} or
 \code{NULL}), carried forward as provenance; not part of the identity key.
@@ -61,14 +55,14 @@ A \code{QtlFineMappingResult} object.
 \description{
 S4 collection of fine-mapping fits for one or more GWAS studies
   on a single LD block. Keyed by the identity tuple \code{(study, method)};
-  each entry is a \code{FineMappingEntry}.
+  each entry is a \code{FineMappingRow}.
 
 Required columns: \code{study}, \code{method}, \code{entry}. The 2-tuple is
 unique. The caller is expected to construct one \code{GwasFineMappingResult}
 per LD block (no in-class block indexing).
 
 Construct a \code{QtlFineMappingResult} DFrame-subclass
-  collection from per-tuple vectors and a list of \code{FineMappingEntry}
+  collection from per-tuple vectors and a list of \code{FineMappingRow}
   payloads (one per tuple). The optional \code{ldSketch} slot records the LD
   reference used for RSS-derived fits; pass \code{NULL} (the default) for
   individual-level fits.
@@ -76,7 +70,7 @@ Construct a \code{QtlFineMappingResult} DFrame-subclass
 \examples{
 tl <- data.frame(variant_id = paste0("chr1:", 100 * 1:3, ":A:G"),
   pip = c(0.9, 0.5, 0.1), cs = c(1L, 1L, NA))
-fe <- FineMappingEntry(
+fe <- fineMappingRow(
   variantIds = tl$variant_id, susieFit = list(), topLoci = tl)
 QtlFineMappingResult(study = "s1", context = "brain", trait = "g1",
   method = "susie", entry = list(fe))

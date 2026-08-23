@@ -10,7 +10,7 @@ context("LdData accessors")
         path = path,
         format = "gds",
         snpInfo = data.frame(
-            SNP = paste0("v", seq_len(snp_n)),
+            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -34,7 +34,7 @@ context("LdData accessors")
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
         A1 = rep("A", snp_n),
         A2 = rep("G", snp_n),
-        variant_id = paste0("v", seq_len(snp_n))
+        variant_id = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n)))
     )
     gr
 }
@@ -235,7 +235,7 @@ test_that("getGenotypes: matrix handle is returned unchanged", {
         0,
         nrow = 10,
         ncol = 4,
-        dimnames = list(paste0("s", 1:10), paste0("v", 1:4))
+        dimnames = list(paste0("s", 1:10), sprintf("chr1:%d:A:G", 100L * (1:4)))
     )
     ld <- new(
         "LdData",
@@ -264,7 +264,7 @@ test_that("getGenotypes: single handle returns samples x variants dosage", {
     )
     G <- getGenotypes(ld)
     expect_equal(dim(G), c(30L, 4L))
-    expect_equal(colnames(G), paste0("v", 1:4))
+    expect_equal(colnames(G), sprintf("chr1:%d:A:G", 100L * (1:4)))
 })
 
 test_that("getGenotypes: list of handles returns a list of dosage matrices", {
@@ -324,7 +324,7 @@ test_that("getVariantIds returns the variant_id mcol", {
         variants = .ld_makeVariants(),
         blockMetadata = S4Vectors::DataFrame(x = 1)
     )
-    expect_equal(getVariantIds(ld), paste0("v", 1:4))
+    expect_equal(getVariantIds(ld), sprintf("chr1:%d:A:G", 100L * (1:4)))
 })
 
 test_that("getVariantInfo / getBlockMetadata return slots verbatim", {
@@ -344,7 +344,7 @@ test_that("getRefPanel: assembles the chrom/pos/A1/A2/variant_id data.frame", {
     rp <- getRefPanel(ld)
     expect_s3_class(rp, "data.frame")
     expect_setequal(colnames(rp), c("A1", "A2", "variant_id", "chrom", "pos"))
-    expect_equal(rp$variant_id, paste0("v", 1:4))
+    expect_equal(rp$variant_id, sprintf("chr1:%d:A:G", 100L * (1:4)))
     expect_equal(rp$pos, c(100L, 200L, 300L, 400L))
 })
 
@@ -423,7 +423,7 @@ test_that("LdData show method works", {
         ranges = IRanges::IRanges(start = c(100L, 200L, 300L), width = 1L)
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        variant_id = paste0("v", 1:3),
+        variant_id = sprintf("chr1:%d:A:G", 100L * (1:3)),
         A1 = rep("A", 3),
         A2 = rep("G", 3)
     )
@@ -440,7 +440,7 @@ test_that("LdData supports block-diagonal correlation", {
         ranges = IRanges::IRanges(start = seq(100L, 500L, 100L), width = 1L)
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        variant_id = paste0("v", 1:5),
+        variant_id = sprintf("chr1:%d:A:G", 100L * (1:5)),
         A1 = rep("A", 5),
         A2 = rep("G", 5)
     )
@@ -462,7 +462,7 @@ test_that("LdData S4 accessors return correct data", {
         ranges = IRanges::IRanges(start = c(100L, 200L), width = 1L)
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        variant_id = c("v1", "v2"),
+        variant_id = c("chr1:100:A:G", "chr1:200:A:G"),
         A1 = c("A", "C"),
         A2 = c("G", "T")
     )
@@ -472,12 +472,12 @@ test_that("LdData S4 accessors return correct data", {
         blockMetadata = data.frame(blockId = 1L)
     )
     expect_equal(getCorrelation(ld), R)
-    expect_equal(getVariantIds(ld), c("v1", "v2"))
+    expect_equal(getVariantIds(ld), c("chr1:100:A:G", "chr1:200:A:G"))
     expect_false(hasGenotypes(ld))
     rp <- getRefPanel(ld)
     expect_true(is.data.frame(rp))
     expect_true("variant_id" %in% names(rp))
-    expect_equal(rp$variant_id, c("v1", "v2"))
+    expect_equal(rp$variant_id, c("chr1:100:A:G", "chr1:200:A:G"))
 })
 
 
@@ -487,14 +487,17 @@ test_that(".refPanelToGranges builds GRanges from data.frame", {
         pos = c(100L, 200L),
         A1 = c("G", "T"),
         A2 = c("A", "C"),
-        variant_id = c("v1", "v2"),
+        variant_id = c("chr1:100:A:G", "chr1:200:A:G"),
         allele_freq = c(0.3, 0.7),
         stringsAsFactors = FALSE
     )
     gr <- pecotmr:::.refPanelToGranges(rp)
     expect_s4_class(gr, "GRanges")
     expect_equal(length(gr), 2)
-    expect_equal(S4Vectors::mcols(gr)$variant_id, c("v1", "v2"))
+    expect_equal(
+        S4Vectors::mcols(gr)$variant_id,
+        c("chr1:100:A:G", "chr1:200:A:G")
+    )
     expect_equal(S4Vectors::mcols(gr)$allele_freq, c(0.3, 0.7))
 })
 # =============================================================================

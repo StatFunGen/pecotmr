@@ -88,7 +88,7 @@ test_that("qtlAssociationPostprocess enriches with package-computed columns", {
         seq_len(nrow(x)),
         function(i) {
             min(stats::p.adjust(
-                S4Vectors::mcols(x$entry[[i]])$P,
+                S4Vectors::mcols(x[[i]])$P,
                 "bonferroni",
                 n = 50
             ))
@@ -112,7 +112,7 @@ test_that("qtlAssociationPostprocess enriches with package-computed columns", {
             "fdr_bonferroni_min_filtered",
             "q_bonferroni_min_filtered"
         ) %in%
-            names(r)
+            colnames(S4Vectors::mcols(r))
     ))
 })
 
@@ -164,7 +164,7 @@ test_that("getSignificantQtls (bonferroni) matches the derived threshold rule", 
     expN <- sum(vapply(
         seq_len(nrow(r)),
         function(i) {
-            sum(pmin(1, S4Vectors::mcols(r$entry[[i]])$P * 50) <= varThr)
+            sum(pmin(1, S4Vectors::mcols(r[[i]])$P * 50) <= varThr)
         },
         integer(1)
     ))
@@ -279,7 +279,7 @@ test_that("getSignificantQtls (permutation) uses each gene's nominal threshold",
             if (is.na(thr[i])) {
                 return(0L)
             }
-            sum(S4Vectors::mcols(r$entry[[i]])$P < thr[i])
+            sum(S4Vectors::mcols(r[[i]])$P < thr[i])
         },
         integer(1)
     ))
@@ -307,7 +307,7 @@ test_that("getSignificantQtls (permutation) skips genes with an NA threshold", {
             if (is.na(thr[i])) {
                 return(0L)
             }
-            sum(S4Vectors::mcols(r$entry[[i]])$P < thr[i])
+            sum(S4Vectors::mcols(r[[i]])$P < thr[i])
         },
         integer(1)
     ))
@@ -363,7 +363,7 @@ test_that("getSignificantQtls (qvalue) selects variants by their qvalue mcol", {
     expN <- sum(vapply(
         sigGenes,
         function(i) {
-            sum(S4Vectors::mcols(r$entry[[i]])$qvalue < 0.1)
+            sum(S4Vectors::mcols(r[[i]])$qvalue < 0.1)
         },
         integer(1)
     ))
@@ -438,7 +438,7 @@ test_that("FILTERED Bonferroni drops MAF/cis-failing variants + uses n_variants_
         cisWindow = 1e6,
         methods = "bonferroni"
     )
-    P <- lapply(seq_len(nrow(x)), function(i) S4Vectors::mcols(x$entry[[i]])$P)
+    P <- lapply(seq_len(nrow(x)), function(i) S4Vectors::mcols(x[[i]])$P)
     expFilt <- vapply(P, function(p) min(pmin(1, p[1:2] * 30)), numeric(1)) # v1,v2 @ n=30
     expOrig <- vapply(P, function(p) min(pmin(1, p * 50)), numeric(1)) # all @ n=50
     expect_equal(as.numeric(r$p_bonferroni_min_filtered), expFilt)
@@ -467,7 +467,7 @@ test_that("getSignificantQtls(bonferroni_filtered) applies the derived rule on t
     expN <- sum(vapply(
         seq_len(nrow(r)),
         function(i) {
-            p <- S4Vectors::mcols(r$entry[[i]])$P[1:2]
+            p <- S4Vectors::mcols(r[[i]])$P[1:2]
             sum(pmin(1, p * 30) <= varThr)
         },
         integer(1)

@@ -142,8 +142,8 @@ setClass(
 # @noRd
 .msqdTraitRanges <- function(qd) {
     out <- list()
-    for (ctx in seq_along(qd@phenotypes)) {
-        se <- qd@phenotypes[[ctx]]
+    for (ctx in getContexts(qd)) {
+        se <- getPhenotypes(qd, ctx)
         rr <- SummarizedExperiment::rowRanges(se)
         ids <- rownames(se)
         for (i in seq_along(ids)) {

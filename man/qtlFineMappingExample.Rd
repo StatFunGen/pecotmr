@@ -5,11 +5,18 @@
 \alias{qtlFineMappingExample}
 \title{Example QTL Fine-Mapping Results (SuSiE)}
 \format{
-A \code{\link{QtlFineMappingResult}} object: a \code{DFrame}-backed
-collection with one row carrying a \code{\link{FineMappingEntry}} payload
-(the
-variant ids, the SuSiE fit, and a per-variant \code{topLoci} table with
-\code{variant_id}, \code{pip}, and \code{cs} columns for 2,828 variants).
+A \code{\link{QtlFineMappingResult}} object: a
+\code{GRangesList}-backed collection with one element (2,828 variants on
+chr22) keyed by \code{study_1} / \code{context_1} / \code{gene_1} /
+\code{susie}, carrying the SuSiE fit and a per-variant table with the
+standard post-processing columns (\code{pip}, \code{logBF}, \code{cs_95} /
+\code{cs_70} / \code{cs_50} and their purities, marginal statistics).
+
+One credible set of 42 variants. Its \code{min.abs.corr} is 0.626, below the
+pipeline default of 0.8, so the fixture was built at \code{minAbsCorr = 0.5}
+to keep the set labelled; \code{cs_95_purity} records the true value, so
+\code{getCs(x, minPurity = 0.8)} still filters it out. Built by
+\code{inst/scripts/prepare_example_data.R}.
 }
 \description{
 A \code{\link{QtlFineMappingResult}} S4 collection holding SuSiE

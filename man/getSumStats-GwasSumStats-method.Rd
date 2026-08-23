@@ -4,13 +4,16 @@
 \alias{getSumStats,GwasSumStats-method}
 \title{Get a GWAS Study's Summary-Statistic GRanges}
 \usage{
-\S4method{getSumStats}{GwasSumStats}(x, study = NULL, ...)
+\S4method{getSumStats}{GwasSumStats}(x, study = NULL, ranges = NULL, ...)
 }
 \arguments{
 \item{x}{A \code{GwasSumStats} object.}
 
 \item{study}{Character (length 1) study identifier. Optional when the
 collection has a single row.}
+
+\item{ranges}{Optional \code{GRanges} restricting the returned variants to
+those it overlaps. \code{NULL} (default) returns the study's full set.}
 
 \item{...}{Additional arguments (currently unused).}
 }

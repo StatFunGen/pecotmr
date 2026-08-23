@@ -68,3 +68,19 @@ test_that("LdEigen rejects invalid eigenvalue_truncation", {
         "eigenvalueTruncation"
     )
 })
+
+# show() smoke test, moved here from test_showMethods.R so the test
+# tree mirrors R/.
+test_that("show(LdEigen) does not error", {
+    eig <- new(
+        "LdEigen",
+        ldBlocks = make_test_ldblocks(),
+        snpInfo = make_test_snp_info(),
+        nRef = 500L,
+        inSample = FALSE,
+        genome = "hg19",
+        eigenList = list(list(), list()),
+        eigenvalueTruncation = 0.9
+    )
+    expect_output(show(eig), "LdEigen")
+})

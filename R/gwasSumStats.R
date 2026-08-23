@@ -22,8 +22,8 @@ setClass(
         ) {
             errors <- c(errors, "'ldSketch' must be a GenotypeHandle or NULL")
         }
-        required <- c("study", "entry")
-        missingCols <- setdiff(required, names(object))
+        required <- "study"
+        missingCols <- setdiff(required, colnames(mcols(object)))
         if (length(missingCols) > 0L) {
             errors <- c(
                 errors,
@@ -40,21 +40,18 @@ setClass(
             errors <- c(errors, "'qcInfo' slot must be a list")
         }
         if (length(errors) == 0L) {
-            if (length(object$entry) != nrow(object)) {
+            # The elements ARE GRanges by construction now -- the container is
+            # a GRangesList -- so the old per-element type and length checks
+            # are gone. The one-seqname/one-strand invariant is enforced by
+            # RangedTupleList's own validity.
+            # Keyed on (study, range), not study alone: a study split across
+            # chromosomes contributes one element per seqname, so the study
+            # label legitimately repeats.
+            if (.ssHasDuplicateKeys(object, "study")) {
                 errors <- c(
                     errors,
-                    "length(entry) must equal nrow(.) for GwasSumStats"
+                    "(study, range) must be unique"
                 )
-            }
-            entryTypes <- map_lgl(object$entry, methods::is, "GRanges")
-            if (!all(entryTypes)) {
-                errors <- c(
-                    errors,
-                    "every element of the `entry` column must be a GRanges"
-                )
-            }
-            if (n_distinct(as.character(object$study)) < nrow(object)) {
-                errors <- c(errors, "`study` must be unique")
             }
         }
         if (length(errors) == 0L) TRUE else errors
@@ -140,6 +137,22 @@ NULL
 #'   no per-variant \code{N} column and no case/control counts. Named
 #'   \code{nSample} to avoid clashing with \code{getNSamples()} (the LD-panel
 #'   sample size).
+#' @param ldBlocks Optional LD-block specification: an \code{LdBlocks}, a
+#'   \code{GRanges}, a data.frame with \code{chrom}/\code{start}/\code{end}
+#'   (plus an optional \code{blockId}), or a path to such a table. When
+#'   supplied, each
+#'   study's variants are split into one element per block rather than one per
+#'   chromosome, and \code{blockId} takes the block's key (its \code{names},
+#'   else a \code{blockId} metadata column, else its coordinates). cTWAS needs
+#'   this granularity: its EM estimates parameters across blocks, so a
+#'   per-chromosome split is too coarse. Variants overlapping no block are
+#'   dropped with a warning, because a variant outside every block has no
+#'   block-local LD to be fine-mapped against.
+#' @param blockId Optional character vector of block keys, one per
+#'   \code{entry}, for entries that are \strong{already} split by block. Use
+#'   it to carry existing keys through a rebuild; without it a rebuild would
+#'   re-derive them as seqnames and collapse distinct blocks onto one key.
+#'   Mutually exclusive with \code{ldBlocks}.
 #' @param ... Additional per-study columns to attach to the collection.
 #' @param qcInfo A \code{list} recording which QC steps ran. Empty \code{list()}
 #'   on construction; populated by \code{summaryStatsQc()} with a per-step audit
@@ -164,6 +177,8 @@ GwasSumStats <- function(
     nControl = NULL,
     nSample = NULL,
     qcInfo = list(),
+    ldBlocks = NULL,
+    blockId = NULL,
     ...
 ) {
     if (missing(study) || missing(entry) || missing(genome)) {
@@ -172,22 +187,90 @@ GwasSumStats <- function(
     varY <- .gwasValidateArgs(study, entry, genome, varY)
     cols <- list(
         study = as.character(study),
-        entry = S4Vectors::SimpleList(entry),
         varY = varY
     )
     cols <- .gwasAppendOptional(cols, nCase, nControl, nSample, study)
     cols <- .gwasAppendExtras(cols, list(...))
     dfArgs <- c(cols, list(check.names = FALSE))
-    df <- exec(S4Vectors::DataFrame, !!!dfArgs)
+    # The per-study GRanges become the collection's ELEMENTS; everything else
+    # is per-study metadata and goes in mcols. There is no `entry` column.
+    # mcols are attached to the GRangesList BEFORE new(), because new()
+    # validates during initialize() and the validity method needs the identity
+    # columns to already be there.
+    # A multi-seqname entry (e.g. a genome-wide GWAS) is split into one
+    # element per block (or per chromosome when no block manifest is given),
+    # with its metadata row replicated alongside. Splitting is unconditional:
+    # a stored element always spans exactly one seqname.
+    split <- .gwasSplitEntry(entry, ldBlocks, blockId, length(entry))
+    grl <- GenomicRanges::GRangesList(split$entry)
+    md <- exec(S4Vectors::DataFrame, !!!dfArgs)
+    md <- md[split$fromIdx, , drop = FALSE]
+    # `blockId` is always present, so downstream code (cTWAS in particular) can
+    # key regions without first asking how the collection was built.
+    md$blockId <- split$blockId
+    mcols(grl) <- md
     obj <- methods::new(
         "GwasSumStats",
-        df,
+        grl,
         ldSketch = ldSketch,
         genome = as.character(genome),
         qcInfo = as.list(qcInfo)
     )
     methods::validObject(obj)
     obj
+}
+
+# Split by LD block when a manifest is supplied, else by seqname. Both return
+# (entry, fromIdx); this adds the blockId the seqname path does not carry,
+# which for that path is just the seqname each piece sits on.
+# @noRd
+.gwasSplitEntry <- function(entry, ldBlocks, blockId, n) {
+    if (!is.null(ldBlocks) && !is.null(blockId)) {
+        msg <- glue(
+            "pass `ldBlocks` (derive the keys) or `blockId` (supply them), ",
+            "not both."
+        )
+        abort(msg)
+    }
+    if (!is.null(ldBlocks)) {
+        return(.rtlSplitByBlocks(entry, .asLdBlockRanges(ldBlocks)))
+    }
+    split <- .rtlSplitBySeqname(entry)
+    # Supplied ids are indexed by fromIdx, exactly like the other metadata
+    # columns, so an entry that still splits further replicates its id rather
+    # than falling out of alignment. This is what lets a rebuild (QC) carry
+    # block keys through instead of silently re-deriving them as seqnames.
+    split$blockId <- if (!is.null(blockId)) {
+        .gwasCheckBlockId(blockId, n)[split$fromIdx]
+    } else {
+        # unname(): the seqname splitter names its pieces, and those names
+        # would otherwise ride into the mcols column and make it inconsistent
+        # with the block path, which produces a bare character vector.
+        unname(map_chr(split$entry, .gwasElementSeqname))
+    }
+    split
+}
+
+# @noRd
+.gwasCheckBlockId <- function(blockId, n) {
+    if (length(blockId) != n) {
+        msg <- glue(
+            "`blockId` must have one value per `entry` ",
+            "(got {length(blockId)} vs {n})."
+        )
+        abort(msg)
+    }
+    as.character(blockId)
+}
+
+# The one seqname an already-split element sits on. NA for an empty element,
+# which carries no coordinate to name.
+# @noRd
+.gwasElementSeqname <- function(g) {
+    if (length(g) == 0L) {
+        return(NA_character_)
+    }
+    as.character(seqnames(g))[[1L]]
 }
 
 # Validate genome / entry / length consistency; returns the recycled varY.
@@ -247,26 +330,31 @@ GwasSumStats <- function(
 
 # Internal: resolve a study selection to a single row index. Errors when
 # `study` is missing on a multi-study collection.
+# Element indices for one study. Returns a VECTOR, not a scalar: the seqname
+# split means one study can own several elements (one per chromosome), and
+# getSumStats() stitches them back into the single GRanges callers expect.
+# @noRd
 .gwasSelectStudy <- function(x, study) {
     if (nrow(x) == 0L) {
         abort("GwasSumStats has no rows.")
     }
+    studies <- as.character(x$study)
     if (missing(study) || is.null(study)) {
-        if (nrow(x) == 1L) {
-            return(1L)
+        if (n_distinct(studies) == 1L) {
+            return(seq_len(nrow(x)))
         }
         msg <- glue(
-            "This GwasSumStats has {nrow(x)} studies. ",
+            "This GwasSumStats has {n_distinct(studies)} studies. ",
             "Pass `study = <name>` to select one. ",
-            "Available: {str_flatten(as.character(x$study), ', ')}"
+            "Available: {str_flatten(unique(studies), ', ')}"
         )
         abort(msg)
     }
-    idx <- match(study, as.character(x$study))
-    if (is.na(idx)) {
+    idx <- which(studies == as.character(study))
+    if (length(idx) == 0L) {
         msg <- glue(
             "Unknown study: '{study}'. ",
-            "Available: {str_flatten(as.character(x$study), ', ')}"
+            "Available: {str_flatten(unique(studies), ', ')}"
         )
         abort(msg)
     }
@@ -279,15 +367,16 @@ GwasSumStats <- function(
 #' @param x A \code{GwasSumStats} object.
 #' @param study Character (length 1) study identifier. Optional when the
 #'   collection has a single row.
+#' @param ranges Optional \code{GRanges} restricting the returned variants to
+#'   those it overlaps. \code{NULL} (default) returns the study's full set.
 #' @param ... Additional arguments (currently unused).
 #' @return A \code{GRanges} object.
 #' @export
 setMethod(
     "getSumStats",
     signature(x = "GwasSumStats"),
-    function(x, study = NULL, ...) {
-        idx <- .gwasSelectStudy(x, study)
-        x$entry[[idx]]
+    function(x, study = NULL, ranges = NULL, ...) {
+        .ssStitchElements(x, .gwasSelectStudy(x, study), ranges)
     }
 )
 
@@ -319,38 +408,6 @@ setMethod(
     }
 )
 
-#' @rdname subsetChr
-#' @export
-setMethod("subsetChr", "GwasSumStats", function(x, chr) {
-    chrName <- withChrPrefix(chr)
-    newEntries <- map(
-        seq_len(nrow(x)),
-        .ssSubsetChrEntry,
-        x = x,
-        chrName = chrName
-    )
-    GwasSumStats(
-        study = as.character(x$study),
-        entry = newEntries,
-        genome = x@genome,
-        ldSketch = x@ldSketch,
-        varY = as.numeric(x$varY),
-        # Preserve the optional per-study case/control counts + total N through
-        # the chromosome subset (they are study-level scalars, not per-variant).
-        nCase = if (is_in("nCase", names(x))) as.numeric(x$nCase) else NULL,
-        nControl = if (is_in("nControl", names(x))) {
-            as.numeric(x$nControl)
-        } else {
-            NULL
-        },
-        nSample = if (is_in("nSample", names(x))) {
-            as.numeric(x$nSample)
-        } else {
-            NULL
-        },
-        qcInfo = x@qcInfo
-    )
-})
 
 #' @rdname getVarY
 #' @export

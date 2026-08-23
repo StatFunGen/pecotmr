@@ -18,9 +18,66 @@
     }
     ok <- rep(TRUE, nrow(x))
     for (k in names(keys)) {
-        ok <- ok & as.character(x[[k]]) == keys[[k]]
+        ok <- ok & as.character(.tupleColumn(x, k)) == keys[[k]]
     }
     which(ok)
+}
+
+# Read an identity column by name, whichever collection shape `x` has.
+# `x[[k]]` is a column on the DFrame-backed collections but an ELEMENT on a
+# RangedTupleList, where the identity columns live in mcols. The two shapes
+# coexist until every collection has migrated.
+# @noRd
+.tupleColumn <- function(x, k) {
+    if (methods::is(x, "RangedTupleList")) {
+        return(mcols(x)[[k]])
+    }
+    x[[k]]
+}
+
+# One collection ELEMENT, whichever shape `x` has. On a RangedTupleList the
+# elements are the container itself; the DFrame-backed collections still keep
+# them in an `entry` column. Both shapes coexist until every collection has
+# migrated, so polymorphic call sites go through here.
+# @noRd
+.collectionEntry <- function(x, i) {
+    if (methods::is(x, "TwasWeights")) {
+        return(.twrRowParts(x, i))
+    }
+    if (methods::is(x, "FineMappingResultBase")) {
+        return(.fmrRowParts(x, i))
+    }
+    if (methods::is(x, "RangedTupleList")) {
+        return(x[[i]])
+    }
+    x$entry[[i]]
+}
+
+# ALL elements as a plain list, whichever shape `x` has.
+# @noRd
+.collectionEntries <- function(x) {
+    # TwasWeights entries are derived views, so they have to be rebuilt one by
+    # one rather than read off as elements (which are bare GRanges).
+    if (
+        methods::is(x, "TwasWeights") ||
+            methods::is(x, "FineMappingResultBase")
+    ) {
+        return(map(seq_len(nrow(x)), .collectionEntry, x = x))
+    }
+    if (methods::is(x, "RangedTupleList")) {
+        return(as.list(x))
+    }
+    as.list(x$entry)
+}
+
+# The identity column NAMES, whichever shape `x` has. `names(x)` is element
+# names on a RangedTupleList, not columns.
+# @noRd
+.tupleColumnNames <- function(x) {
+    if (methods::is(x, "RangedTupleList")) {
+        return(colnames(mcols(x)))
+    }
+    names(x)
 }
 
 # Internal: resolve a tuple-keyed selection (study, context, trait,
@@ -88,7 +145,7 @@
     idx[[1L]]
 }
 
-# Internal: resolve a (study, method, region_id) tuple to a single row
+# Internal: resolve a (study, method, blockId) tuple to a single row
 # index of a GwasFineMappingResult collection. `region` may be NULL when
 # the (study, method) pair maps to a single row; otherwise it disambiguates
 # among per-block rows of a genome-wide collection.
@@ -119,12 +176,12 @@
     .tupleMatchGwas(x, study, method, region)
 }
 
-# Resolve a (study, method[, region_id]) tuple to a single row index.
+# Resolve a (study, method[, blockId]) tuple to a single row index.
 # @noRd
 .tupleMatchGwas <- function(x, study, method, region) {
     keys <- list(study = study, method = method)
     if (!is.null(region)) {
-        keys$region_id <- region
+        keys$blockId <- region
     }
     idx <- .matchTupleRows(x, keys)
     if (length(idx) == 0L) {
@@ -148,7 +205,7 @@
 # @noRd
 .tupleGwasAmbiguous <- function(x, study, method, idx) {
     regions <- str_flatten(
-        shQuote(as.character(x$region_id[idx])),
+        shQuote(as.character(x$blockId[idx])),
         ", "
     )
     msg <- glue(
@@ -162,8 +219,8 @@
 # Internal: row indices of a FineMappingResultBase collection matching the
 # given selectors. NULL selectors, and selectors naming a column the
 # collection lacks, are ignored -- QTL rows carry study/context/trait/method,
-# GWAS rows carry study/method/region_id -- so the same call works on either.
-# `region` matches the `region_id` column. Returns all rows when nothing
+# GWAS rows carry study/method/blockId -- so the same call works on either.
+# `region` matches the `blockId` column. Returns all rows when nothing
 # constrains. Unlike the single-row selectors above this never errors on
 # ambiguity; it is the aggregate counterpart used by getTopLoci.
 .fmrRowsMatching <- function(
@@ -179,26 +236,27 @@
         context = context,
         trait = trait,
         method = method,
-        region_id = region
+        blockId = region
     )
     keys <- keys[!map_lgl(keys, is.null)]
-    keys <- keys[is_in(names(keys), names(x))]
+    keys <- keys[is_in(names(keys), .tupleColumnNames(x))]
     if (length(keys) == 0L) {
         return(seq_len(nrow(x)))
     }
     ok <- rep(TRUE, nrow(x))
     for (k in names(keys)) {
-        ok <- ok & is_in(as.character(x[[k]]), as.character(keys[[k]]))
+        ok <- ok &
+            is_in(as.character(.tupleColumn(x, k)), as.character(keys[[k]]))
     }
     which(ok)
 }
 
 # Internal: per-row identity metadata for a FineMappingResultBase collection,
-# as a data.frame with a stable column set (study, context, trait, region_id,
+# as a data.frame with a stable column set (study, context, trait, blockId,
 # method). Columns the collection lacks are NA-filled so QTL and GWAS results
 # yield the same metadata shape. Safe for zero-row collections.
 .fmrRowMetadata <- function(x) {
-    cols <- c("study", "context", "trait", "region_id", "method")
+    cols <- c("study", "context", "trait", "blockId", "method")
     n <- nrow(x)
     vals <- map(cols, .fmrMetadataCol, x = x, n = n)
     names(vals) <- cols
@@ -218,43 +276,53 @@
 # Internal: read the per-row `region` GRanges column of a collection, or an
 # empty GRanges when the collection carries none. Shared by getRegion on
 # TwasWeights and FineMappingResultBase (region is a uniform column across the
-# family; no derivation from topLoci / region_id).
+# family; no derivation from topLoci / blockId).
+# The per-element span, DERIVED from the ranges rather than read from a stored
+# `region` column (spec 4.4). range() is always in sync by construction, where
+# a stored window had no correct update rule under subsetRegion() and would
+# quietly go stale. `blockId` carries the nominal block identity instead.
+# @noRd
 .getRegionColumn <- function(x) {
-    if (is_in("region", names(x))) x[["region"]] else GenomicRanges::GRanges()
+    if (nrow(x) == 0L) {
+        return(GenomicRanges::GRanges())
+    }
+    if (methods::is(x, "RangedTupleList")) {
+        return(unlist(range(x), use.names = FALSE))
+    }
+    # No fallback to a stored column: nothing carries one any more. A DFrame
+    # collection (CtwasResult) has no region column either, so an empty
+    # GRanges is the honest answer rather than a fabricated span.
+    GenomicRanges::GRanges()
+}
+
+# Internal: append the optional `blockId` provenance column (no-op when NULL).
+#
+# blockId keys the EXTERNAL LD block manifest. It exists because block
+# BOUNDARIES are the one thing not recoverable from the variants -- adjacent
+# blocks' spans leave gaps, so the realized span of the variants present is
+# narrower than the block. Everything else positional comes from range().
+.appendBlockIdCol <- function(cols, blockId, n) {
+    if (is.null(blockId)) {
+        return(cols)
+    }
+    if (length(blockId) != n) {
+        msg <- glue(
+            "`blockId` must have the same length as `study` ",
+            "(got {length(blockId)} vs {n})."
+        )
+        abort(msg)
+    }
+    cols[["blockId"]] <- as.character(blockId)
+    cols
 }
 
 # Internal: append a validated `region` GRanges to a constructor's column list
 # (no-op when region is NULL). Shared by the TwasWeights / FineMappingResult
 # constructors so the provenance column is added identically everywhere.
-.appendRegionCol <- function(cols, region, n) {
-    if (is.null(region)) {
-        return(cols)
-    }
-    if (!methods::is(region, "GRanges")) {
-        abort("`region` must be a GRanges (one range per row) or NULL.")
-    }
-    if (length(region) != n) {
-        abort("`region` must have the same length as `study`.")
-    }
-    cols[["region"]] <- region
-    cols
-}
 
 # Internal: validate the optional `region` GRanges column (one range per row),
 # shared by the TwasWeights / FineMappingResult validity methods. Returns a
 # character vector of errors (empty when valid or the column is absent).
-.validateRegionColumn <- function(object) {
-    if (!is_in("region", names(object))) {
-        return(character(0))
-    }
-    if (!methods::is(object[["region"]], "GRanges")) {
-        return("'region' column must be a GRanges")
-    }
-    if (length(object[["region"]]) != nrow(object)) {
-        return("'region' column must have one range per row")
-    }
-    character(0)
-}
 
 # Internal: trait-position provenance. One GRanges per trait carrying the
 # molecular feature's OWN genomic coordinates (gene/peak range; TSS = start()),
@@ -268,7 +336,11 @@
 # than an empty GRanges, so getTraitPosition() reports "no trait position"
 # honestly instead of a zero-length range.
 .getTraitPosColumn <- function(x) {
-    if (is_in("traitPos", names(x))) x[["traitPos"]] else NA
+    if (is_in("traitPos", .tupleColumnNames(x))) {
+        .tupleColumn(x, "traitPos")
+    } else {
+        NA
+    }
 }
 
 .appendTraitPosCol <- function(cols, traitPos, n) {
@@ -286,13 +358,14 @@
 }
 
 .validateTraitPosColumn <- function(object) {
-    if (!is_in("traitPos", names(object))) {
+    if (!is_in("traitPos", .tupleColumnNames(object))) {
         return(character(0))
     }
-    if (!methods::is(object[["traitPos"]], "GRanges")) {
+    traitPos <- .tupleColumn(object, "traitPos")
+    if (!methods::is(traitPos, "GRanges")) {
         return("'traitPos' column must be a GRanges")
     }
-    if (length(object[["traitPos"]]) != nrow(object)) {
+    if (length(traitPos) != nrow(object)) {
         return("'traitPos' column must have one range per row")
     }
     character(0)
@@ -319,7 +392,9 @@
 # @noRd
 .exemplarColumn <- function(cn, parts) {
     for (p in parts) {
-        if (is_in(cn, names(p))) return(p[[cn]])
+        if (is_in(cn, .tupleColumnNames(p))) {
+            return(.tupleColumn(p, cn))
+        }
     }
     # unreachable: cn is always drawn from allCols, so some part has it
     NULL # nocov
@@ -337,6 +412,9 @@
     if (length(parts) == 0L) {
         return(NULL)
     }
+    if (methods::is(parts[[1L]], "RangedTupleList")) {
+        return(.rbindRangedCollections(parts, ldSketch))
+    }
     cls <- class(parts[[1L]])[[1L]]
     allCols <- reduce(map(parts, names), union)
     combined <- map(allCols, .rbindColumn, parts = parts)
@@ -350,7 +428,7 @@
 
 # Internal: aggregate a per-entry accessor across every row of a
 # FineMappingResultBase collection that matches the given selectors, prefixing
-# each entry's rows with the row identity (study/context/trait/region_id/method)
+# each entry's rows with the row identity (study/context/trait/blockId/method)
 # so rows stay attributable to their source entry. Shared by getTopLoci / getCs
 # / getMarginalEffects on FineMappingResultBase.
 #
@@ -362,7 +440,7 @@
 #
 #   perEntry(entry) -> data.frame : per-entry view used when aggregating. Any
 #     column whose name collides with an identity column is dropped before the
-#     metadata prefix is attached (so a stamped `method` never duplicates).
+#     metadata prefix is attached (so an added `method` never duplicates).
 #   onSingle(entry) -> any        : returned verbatim when selectors pin one
 #     entry (defaults to perEntry).
 .fmrAggregateView <- function(
@@ -469,7 +547,10 @@
 # prepended; NULL when the entry yields no rows.
 # @noRd
 .fmrEntryPart <- function(i, x, perEntry, meta, ...) {
-    v <- perEntry(x$entry[[i]], ...)
+    # `perEntry` is an internal per-row function taking the stored payload, not
+    # an S4 generic dispatching on a rebuilt entry. That indirection is what
+    # the FineMappingRow class existed for.
+    v <- perEntry(.fmrRowParts(x, i), ...)
     if (is.null(v) || nrow(v) == 0L) {
         return(NULL)
     }
@@ -482,14 +563,18 @@
 # One identity-metadata column `cc` of a collection (NA-filled when absent).
 # @noRd
 .fmrMetadataCol <- function(cc, x, n) {
-    if (is_in(cc, names(x))) as.character(x[[cc]]) else rep(NA_character_, n)
+    if (is_in(cc, .tupleColumnNames(x))) {
+        as.character(.tupleColumn(x, cc))
+    } else {
+        rep(NA_character_, n)
+    }
 }
 
 # Column `cn` of part `p`, or a NA-like column of an exemplar type when absent.
 # @noRd
 .rbindColPiece <- function(p, cn, parts) {
-    if (is_in(cn, names(p))) {
-        p[[cn]]
+    if (is_in(cn, .tupleColumnNames(p))) {
+        .tupleColumn(p, cn)
     } else {
         .naLikeColumn(.exemplarColumn(cn, parts), nrow(p))
     }
@@ -497,8 +582,394 @@
 
 # Concatenate column `cn` across all parts (NA-filling parts that lack it).
 # @noRd
+# Row-binding a RANGED collection: the elements append and the mcols rbind.
+# The DFrame path cannot be reused because there is no column holding the
+# payload any more -- the payload is the container.
+# @noRd
+.rbindRangedCollections <- function(parts, ldSketch) {
+    cls <- class(parts[[1L]])[[1L]]
+    allCols <- reduce(map(parts, .tupleColumnNames), union)
+    combined <- set_names(map(allCols, .rbindColumn, parts = parts), allCols)
+    md <- exec(
+        S4Vectors::DataFrame,
+        !!!c(combined, list(check.names = FALSE))
+    )
+    elements <- list_flatten(map(parts, as.list))
+    grl <- GenomicRanges::GRangesList(elements)
+    mcols(grl) <- md
+    out <- new(cls, grl, ldSketch = ldSketch)
+    validObject(out)
+    out
+}
+
 .rbindColumn <- function(cn, parts) {
     pieces <- map(parts, .rbindColPiece, cn = cn, parts = parts)
     # GRanges concat may warn on seqinfo.
     suppressWarnings(exec(c, !!!pieces))
+}
+
+# =============================================================================
+# Per-row primitives
+# -----------------------------------------------------------------------------
+# The per-row views a collection projects. These replace the FineMappingRow
+# S4 class, which existed only to be the DISPATCH TARGET for exactly this work:
+# a collection method would rebuild an entry for each row and call the exported
+# generic on it. That indirection cost a whole class, a validity method and a
+# hand-written alignment check (.fmeCheckTopLociOrder) whose only reason to
+# exist was that the rebuild re-split the element into `variantIds` and
+# `topLoci` slots and could get them out of step.
+#
+# Reading the stored form directly removes all of it. `parts` is a plain list,
+# not a class: it adds no public surface, no dispatch and nothing to validate.
+# =============================================================================
+
+# The stored payload of one row: the element (variants, with topLoci as its
+# inner mcols) plus the outer-mcols fit payload.
+# @noRd
+.fmrRowParts <- function(x, idx) {
+    md <- mcols(x, use.names = FALSE)
+    # `idx` may name a group of rows that form one logical entry (a
+    # multi-block sweep). Their elements concatenate; the fit payload comes
+    # from the first, matching what the entry rebuild did.
+    first <- idx[[1L]]
+    new(
+        "FineMappingRow",
+        variants = .rtlGatherElements(x, idx),
+        susieFit = md$susieFit[[first]],
+        cvResult = md$cvResult[[first]]
+    )
+}
+
+# The same, for a set of rows collapsed into one logical entry (a multi-block
+# row group). The fit payload comes from the first row, matching the previous
+# .fmeEntryFromRows behaviour.
+# @noRd
+
+# @noRd
+.fmrPartsVariantIds <- function(parts) {
+    getVariantIds(.asFmRowPayload(parts))
+}
+
+# @noRd
+.fmrPartsSusieFit <- function(parts) {
+    getSusieFit(.asFmRowPayload(parts))
+}
+
+# @noRd
+.fmrPartsCvResult <- function(parts) {
+    getCvResult(.asFmRowPayload(parts))
+}
+
+# @noRd
+.fmrPartsTopLoci <- function(parts) {
+    .fmeTopLociFromElement(rowVariants(.asFmRowPayload(parts)))
+}
+
+# ---- per-row views ----------------------------------------------------------
+# Each of these is the body of what used to be a FineMappingRow method,
+# reading the stored form through `parts` instead of through S4 slots. They are
+# what .fmrAggregateView() maps over.
+
+# @noRd
+.fmrRowTopLoci <- function(
+    parts,
+    type = c("data.frame", "GRanges"),
+    signalCutoff = 0.025,
+    minPurity = NULL,
+    raw = FALSE,
+    ...
+) {
+    tl <- .fmrPartsTopLoci(parts)
+    # raw = TRUE returns the stored canonical table verbatim: every variant,
+    # every column, no posterior-view projection.
+    if (isTRUE(raw)) {
+        return(tl)
+    }
+    type <- arg_match(type)
+    out <- .fmeFilterTopLoci(tl, signalCutoff, minPurity)
+    if (type == "data.frame") {
+        return(out)
+    }
+    .fmeTopLociGRanges(out)
+}
+
+# @noRd
+.fmrRowPip <- function(parts, ...) {
+    tl <- .fmrPartsTopLoci(parts)
+    if (nrow(tl) == 0L || !is_in("pip", names(tl))) {
+        return(numeric(0))
+    }
+    set_names(tl$pip, tl$variant_id)
+}
+
+# @noRd
+.fmrRowMarginalEffects <- function(parts, maxPval = NULL, ...) {
+    tl <- .fmrPartsTopLoci(parts)
+    if (nrow(tl) == 0L) {
+        return(.projectMarginalView(tl))
+    }
+    out <- .projectMarginalView(tl)
+    if (!is.null(maxPval) && nrow(out) > 0L) {
+        keep <- !is.na(out$p) & out$p <= maxPval
+        out <- filter(out, keep)
+    }
+    out
+}
+
+# @noRd
+.fmrRowCs <- function(parts, coverage = 0.95, minPurity = NULL, ...) {
+    tl <- .fmrPartsTopLoci(parts)
+    if (nrow(tl) == 0L) {
+        return(.projectPosteriorView(tl))
+    }
+    csCol <- names(tl)[str_detect(
+        names(tl),
+        str_c("^cs_", coverage * 100, "$")
+    )]
+    if (length(csCol) == 0L) {
+        return(.projectPosteriorView(slice(tl, 0)))
+    }
+    keep <- !is.na(tl[[csCol[1L]]]) &
+        str_length(tl[[csCol[1L]]]) > 0L &
+        !str_detect(tl[[csCol[1L]]], "_0$")
+    # Independent purity filter (min.abs.corr), orthogonal to `coverage`: drop
+    # CS members whose credible set at THIS coverage is below `minPurity`.
+    if (!is.null(minPurity)) {
+        purCol <- str_c(csCol[1L], "_purity")
+        if (is_in(purCol, names(tl))) {
+            pur <- as.numeric(tl[[purCol]])
+            keep <- keep & !is.na(pur) & pur >= minPurity
+        } else {
+            msg <- glue(
+                "getCs: no purity column '{purCol}' for coverage ",
+                "{coverage}; minPurity filter skipped."
+            )
+            warn(msg)
+        }
+    }
+    .projectPosteriorView(tl[keep, , drop = FALSE])
+}
+
+# @noRd
+.fmrRowLbf <- function(parts, ...) {
+    lbf <- .asLbfMatrix(getSusieFit(parts))
+    vids <- .fmrPartsVariantIds(parts)
+    if (is.null(lbf) || ncol(lbf) != length(vids)) {
+        return(tibble(variant_id = character(0)))
+    }
+    w <- as_tibble(t(as.matrix(lbf)), .name_repair = "minimal")
+    names(w) <- str_c("lbf_L", seq_len(ncol(w)))
+    bind_cols(tibble(variant_id = as.character(vids)), w)
+}
+
+# @noRd
+.fmrRowCredibleSetSummary <- function(parts, coverage = 0.95, ...) {
+    .csSummaryFit(.fmrPartsTopLoci(parts), getSusieFit(parts), coverage)
+}
+
+# @noRd
+.fmrRowFsusieCredibleBand <- function(parts, ...) {
+    .fsusieCredibleBandFit(getSusieFit(parts))
+}
+
+# @noRd
+.fmrRowFsusieAffectedRegions <- function(parts, ...) {
+    .fsusieAffectedRegionsFit(
+        getSusieFit(parts),
+        topLoci = .fmrPartsTopLoci(parts)
+    )
+}
+
+# @noRd
+.fmrRowResolveWeights <- function(parts, ...) {
+    empty <- list(variantIds = character(0), weights = numeric(0))
+    # The topLoci posterior view projects the effect to `beta`; use it as the
+    # per-variant weight, aligned with variant_id.
+    tl <- .fmrRowTopLoci(parts)
+    if (
+        is.null(tl) ||
+            nrow(tl) == 0L ||
+            !all(is_in(c("variant_id", "beta"), names(tl)))
+    ) {
+        return(empty)
+    }
+    vids <- as.character(tl$variant_id)
+    w <- as.numeric(tl$beta)
+    ok <- !is.na(vids) & !is.na(w)
+    if (!any(ok)) {
+        return(empty)
+    }
+    list(variantIds = vids[ok], weights = w[ok])
+}
+
+# The stored payload of one TwasWeights row. Mirrors .fmrRowParts: weights are
+# the element's inner mcols, the rest is outer mcols.
+# @noRd
+.twrRowParts <- function(x, idx) {
+    md <- mcols(x, use.names = FALSE)
+    first <- idx[[1L]]
+    gr <- .rtlGatherElements(x, idx)
+    new(
+        "TwasWeightsRow",
+        variants = gr,
+        weights = mcols(gr, use.names = FALSE)$weight,
+        fits = md$fits[[first]],
+        cvResult = md$cvResult[[first]],
+        standardized = isTRUE(md$standardized[[first]]),
+        dataType = md$dataType[[first]]
+    )
+}
+
+# @noRd
+.twrPartsVariantIds <- function(parts) {
+    getVariantIds(parts)
+}
+
+# The weight vector aligned to the row's variant ids -- what resolveWeights
+# produced from a TwasWeightsRow.
+# @noRd
+.twrRowResolveWeights <- function(parts, ...) {
+    empty <- list(variantIds = character(0), weights = numeric(0))
+    vids <- .twrPartsVariantIds(parts)
+    w <- getWeights(parts)
+    if (length(vids) == 0L || is.null(w)) {
+        return(empty)
+    }
+    w <- as.numeric(w)
+    if (length(w) != length(vids)) {
+        return(empty)
+    }
+    ok <- !is.na(vids) & !is.na(w)
+    if (!any(ok)) {
+        return(empty)
+    }
+    list(variantIds = vids[ok], weights = w[ok])
+}
+
+# Class-aware row payload: the TwasWeights and FineMappingResult shapes differ
+# (weights vs a susie fit), so callers that accept either weight source route
+# through here. Replaces the old .collectionEntry bridge.
+# @noRd
+.rowParts <- function(x, i) {
+    if (methods::is(x, "TwasWeights")) {
+        return(.twrRowParts(x, i))
+    }
+    .fmrRowParts(x, i)
+}
+
+# The per-variant weight vector of one row, whichever weight source it came
+# from.
+# @noRd
+.rowResolveWeights <- function(parts, ...) {
+    if (methods::is(parts, "TwasWeightsRow")) {
+        return(.twrRowResolveWeights(parts, ...))
+    }
+    .fmrRowResolveWeights(parts, ...)
+}
+
+# The cross-validated / per-method fits of one row, or NULL for a
+# fine-mapping row.
+#
+# A fine-mapping row deliberately reports NULL: cTWAS would otherwise
+# renormalize alpha into an UNstandardized weight, which is inconsistent with
+# the standardized posterior effect the topLoci view already carries. Preserved
+# verbatim from the FineMappingRow getFits method.
+# @noRd
+.rowFits <- function(parts) {
+    if (methods::is(parts, "TwasWeightsRow")) getFits(parts) else NULL
+}
+
+# Whether the row's weights are already on the standardized scale.
+#
+# TRUE for a fine-mapping row: its posterior effect is colSums(alpha * mu),
+# which does not divide by the column scale factors, so cTWAS's per-variant
+# variance scaling would double-standardize it.
+# @noRd
+.rowStandardized <- function(parts) {
+    if (methods::is(parts, "TwasWeightsRow")) {
+        return(getStandardized(parts))
+    }
+    TRUE
+}
+
+# ---- row-payload builders ---------------------------------------------------
+# What callers use in place of the retired FineMappingRow / TwasWeightsRow
+# constructors. Same arguments, but they return the STORED form directly -- a
+# plain list holding one GRanges plus the fit payload -- so nothing has to be
+# converted on the way into a collection.
+
+# Accept either a row payload (the stored form) or a legacy entry object, so
+# the constructors can be flipped independently of their ~300 call sites.
+# Delete the entry branch once nothing constructs entries.
+# @noRd
+.asFmRowPayload <- function(e) {
+    # A single-row collection is the other shape callers hand over -- it is
+    # what getFineMappingResult() returns, so anything accepting "one row's
+    # worth of fine-mapping" has to take it too.
+    if (methods::is(e, "FineMappingResultBase")) {
+        if (length(e) == 0L) {
+            return(e)
+        }
+        return(.fmrRowParts(e, seq_len(length(e))))
+    }
+    e
+}
+
+# @noRd
+.asTwRowPayload <- function(e) {
+    if (methods::is(e, "TwasWeights")) {
+        if (length(e) == 0L) {
+            return(e)
+        }
+        return(.twrRowParts(e, seq_len(length(e))))
+    }
+    e
+}
+
+# Every element must be a row payload once normalization has run. Checked
+# before the payload is unpacked, so a wrong type reports itself rather than
+# surfacing later as `$ operator is invalid for atomic vectors`.
+# @noRd
+.checkRowPayloads <- function(entry, cls, what) {
+    bad <- which(!map_lgl(entry, methods::is, cls))
+    if (length(bad) == 0L) {
+        return(invisible(NULL))
+    }
+    msg <- glue(
+        "every element of `entry` must be a {what} row ({cls}); element(s) ",
+        "{str_flatten(utils::head(bad, 5L), ', ')} are not."
+    )
+    abort(msg)
+}
+
+# @noRd
+
+# Shape-tolerant readers for values that may still be a legacy entry object
+# while the flip is in progress. Delete the entry branch (and these) once
+# nothing produces entries.
+# @noRd
+.rowCvResult <- function(e) {
+    getCvResult(e)
+}
+
+# @noRd
+.rowWeights <- function(e) {
+    getWeights(e)
+}
+
+# @noRd
+.rowVariantIds <- function(e) {
+    getVariantIds(e)
+}
+
+# The non-variant half of each TWAS row payload, as outer mcols columns.
+# Objects of arbitrary shape (fits, cvResult, dataType) ride in SimpleLists.
+# @noRd
+.twRowPayloadCols <- function(entry) {
+    list(
+        fits = S4Vectors::SimpleList(map(entry, getFits)),
+        cvResult = S4Vectors::SimpleList(map(entry, getCvResult)),
+        standardized = map_lgl(entry, .twPayloadStandardized),
+        dataType = S4Vectors::SimpleList(map(entry, getDataType))
+    )
 }

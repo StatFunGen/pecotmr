@@ -170,7 +170,7 @@
 #'   (no CV). When \code{> 1}, each method is refit on the training samples of
 #'   every fold and used to predict the held-out samples; the fold partition
 #'   plus per-fold out-of-fold predictions and metrics are stored on each
-#'   \code{FineMappingEntry}'s \code{cvResult} slot (see
+#'   \code{FineMappingRow}'s \code{cvResult} slot (see
 #'   \code{\link{getCvResult}}). \code{twasWeightsPipeline} reuses this
 #'   partition and feeds these predictions into the SR-TWAS ensemble.
 #'   Individual-level (\code{QtlDataset} / \code{MultiStudyQtlDataset}) input
@@ -222,6 +222,21 @@
 #'   implementation is in progress and a non-NULL value currently errors with an
 #'   informative message. See the design notes in \code{R/jointSpecification.R}
 #'   for the accepted grammar.
+#' @section Panel filters on the RSS path: On \code{QtlSumStats} /
+#'   \code{GwasSumStats} input there is no genotype matrix to filter, so
+#'   \code{mafCutoff} / \code{macCutoff} / \code{imissCutoff} are measured
+#'   against the \strong{LD reference panel} instead: a variant whose panel
+#'   genotypes fall below the cutoffs is dropped before the z-scores and LD
+#'   matrix are built. The thresholds mean the same thing as on the
+#'   \code{QtlDataset} path (MAC is converted to a MAF equivalent and the
+#'   stricter of the two applies), so one number carries across input types.
+#'   Defaults (\code{0}, \code{0}, \code{1}) filter nothing.
+#'
+#'   This discards \emph{observed} variants, unlike
+#'   \code{summaryStatsQc(imputeOpts = ...)}, which only bounds which variants
+#'   RAISS will impute. Use it when the panel cannot support the LD estimate a
+#'   rare variant would need.
+#'
 #' @param mafCutoff Numeric or \code{NULL}. Per-call override of the
 #'   \code{QtlDataset} minor-allele-frequency filter; \code{NULL} uses the
 #'   dataset's stored value.
@@ -266,14 +281,14 @@
 #'   (default) residualize against the phenotype-side covariates listed in
 #'   \code{phenotypeCovariatesToResidualize}. Set \code{FALSE} to disable
 #'   phenotype-covariate residualization entirely. The marginal univariate
-#'   effects stored on each \code{FineMappingEntry} obey the same
+#'   effects stored on each \code{FineMappingRow} obey the same
 #'   residualization choice as the SuSiE fit itself -- they are computed against
 #'   the same residualized \code{X} / \code{Y}.
 #' @param residualizeGenotypeCovariates Logical (length 1). When \code{TRUE}
 #'   (default) residualize against the genotype-side covariates listed in
 #'   \code{genotypeCovariatesToResidualize}. Set \code{FALSE} to disable.
 #' @param trim Logical (length 1). When \code{TRUE} (default) the
-#'   \code{susieFit} slot on each output \code{FineMappingEntry} carries a
+#'   \code{susieFit} slot on each output \code{FineMappingRow} carries a
 #'   trimmed view of the SuSiE fit (the minimal subset needed by downstream
 #'   pipelines). When \code{FALSE} the full untrimmed \code{susie()} return is
 #'   retained so accessors like \code{getSusieFit()} and non-default-coverage
@@ -655,7 +670,7 @@ setGeneric("fineMappingPipeline", function(data, ...) {
 }
 
 
-# Optional resume-cache lookup. Returns the matching FineMappingEntry from
+# Optional resume-cache lookup. Returns the matching FineMappingRow from
 # `fineMappingResult` for the tuple (study, context, trait, method), or
 # NULL when there is no hit. Returns NULL silently when fineMappingResult
 # is NULL or not a QtlFineMappingResult.
@@ -674,15 +689,16 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     if (length(idx) == 0L) {
         return(NULL)
     }
-    fineMappingResult$entry[[idx[[1L]]]]
+    .fmrRowParts(fineMappingResult, idx[[1L]])
 }
 
-# GwasFineMappingResult cache lookup using the (study, method,
-# region_id) 3-tuple. Multi-block FMRs can carry one entry per
-# (study, method, region_id) triple, so the cache key must include
-# region_id to correctly retrieve the cached fit for a specific block.
+# GwasFineMappingResult cache lookup using the (study, method, range) identity.
+# Multi-block FMRs carry one entry per block, so the key has to include the
+# block -- but the block is now the element's own RANGE rather than a stored
+# label, which means the cache cannot miss because a label was absent or
+# spelled differently.
 # @noRd
-.fmCacheLookupGwas <- function(fineMappingResult, study, method, region_id) {
+.fmCacheLookupGwas <- function(fineMappingResult, study, method, blockId) {
     if (is.null(fineMappingResult)) {
         return(NULL)
     }
@@ -691,12 +707,19 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     }
     idx <- .matchTupleRows(
         fineMappingResult,
-        list(study = study, method = method, region_id = region_id)
+        list(study = study, method = method)
     )
     if (length(idx) == 0L) {
         return(NULL)
     }
-    fineMappingResult$entry[[idx[[1L]]]]
+    if (length(idx) > 1L) {
+        keys <- .rtlRangeKeys(fineMappingResult)[idx]
+        idx <- idx[keys == blockId]
+        if (length(idx) == 0L) {
+            return(NULL)
+        }
+    }
+    .fmrRowParts(fineMappingResult, idx[[1L]])
 }
 
 
@@ -715,7 +738,6 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     jointStudies = NULL,
     jointContexts = NULL,
     jointTraits = NULL,
-    region = NULL,
     traitPos = NULL,
     ldSketch = NULL,
     allowEmpty = FALSE
@@ -736,44 +758,41 @@ setGeneric("fineMappingPipeline", function(data, ...) {
         jointStudies = jointStudies,
         jointContexts = jointContexts,
         jointTraits = jointTraits,
-        region = region,
         traitPos = traitPos,
         ldSketch = ldSketch
     )
 }
 
-# Build a GwasFineMappingResult collection from per-row vectors. When
-# `region_ids` is NULL, falls through to the constructor's synthetic
-# defaults (region_1, region_2, ...). For callers that have meaningful
-# block labels (e.g. derived from a GwasSumStats entry's GRanges),
-# pass them explicitly so downstream consumers can join on region.
+# Build a GwasFineMappingResult collection from per-row vectors. `blockIds` is
+# optional provenance keying the external LD block manifest; row identity comes
+# from (study, method) plus the element's own range either way.
 # @noRd
 .fmBuildGwasResult <- function(
     studies,
     methods,
     entries,
-    region_ids = NULL,
+    blockIds = NULL,
     ldSketch = NULL,
     allowEmpty = FALSE
 ) {
     if (length(entries) == 0L && !allowEmpty) {
         msg <- glue(
-            "fineMappingPipeline: no (study, method, region_id) tuples ",
-            "produced a fine-mapping result."
+            "fineMappingPipeline: no (study, method) tuples produced a ",
+            "fine-mapping result."
         )
         abort(msg)
     }
     GwasFineMappingResult(
         study = studies,
         method = methods,
-        region_id = region_ids,
+        blockId = blockIds,
         entry = entries,
         ldSketch = ldSketch
     )
 }
 
 # One QTL-side result row as an immutable record (study/context/trait/method
-# + the FineMappingEntry). Dispatch helpers RETURN these; the orchestrator
+# + the FineMappingRow). Dispatch helpers RETURN these; the orchestrator
 # flattens them and extracts the parallel vectors -- no mutable accumulator.
 # @noRd
 .fmQtlRow <- function(study, context, trait, method, entry) {
@@ -786,11 +805,12 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     )
 }
 
-# One GWAS-side result row as an immutable record (study/method/region + the
-# FineMappingEntry).
+# One GWAS-side result row as an immutable record (study/method/blockId + the
+# FineMappingRow). blockId is provenance for the external block manifest;
+# row identity comes from (study, method) plus the element's own range.
 # @noRd
-.fmGwasRow <- function(study, method, region, entry) {
-    list(study = study, method = method, region = region, entry = entry)
+.fmGwasRow <- function(study, method, blockId, entry) {
+    list(study = study, method = method, blockId = blockId, entry = entry)
 }
 
 # Effect-allele frequency vector aligned to `variantIds` from an entry's MAF
@@ -804,26 +824,24 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     set_names(as.numeric(mc$MAF), as.character(mc$SNP))[variantIds]
 }
 
-# Region label derived from a GwasSumStats entry's GRanges, so multi-block
-# genome-wide sweeps carry one row per block without tripping (study, method,
-# region_id) uniqueness. Format: "{seqname}_{minPos}_{maxPos}".
+# Block label derived from a GwasSumStats entry's GRanges. Built through the
+# same helper the collection uses for its range key, so a label minted here and
+# the identity of the row it ends up on agree by construction rather than by
+# two formatters happening to match.
 # @noRd
-.fmGwasRegionId <- function(gr) {
-    seqname <- as.character(GenomicRanges::seqnames(gr))[[1L]]
-    minPos <- min(GenomicRanges::start(gr))
-    maxPos <- max(GenomicRanges::start(gr))
-    as.character(glue("{seqname}_{minPos}_{maxPos}"))
+.fmGwasBlockId <- function(gr) {
+    .rtlOneRangeKey(range(gr))
 }
 
-# GWAS resume lookup using the GwasFineMappingResult 3-tuple (study, method,
-# region_id) shape; NULL when no compatible cache was supplied.
+# GWAS resume lookup using the GwasFineMappingResult (study, method, range)
+# identity; NULL when no compatible cache was supplied.
 # @noRd
-.fmCacheLookupGwasResume <- function(p, st, tk, regionId) {
+.fmCacheLookupGwasResume <- function(p, st, tk, blockId) {
     if (
         !is.null(p$fineMappingResult) &&
             is(p$fineMappingResult, "GwasFineMappingResult")
     ) {
-        .fmCacheLookupGwas(p$fineMappingResult, st, tk, regionId)
+        .fmCacheLookupGwas(p$fineMappingResult, st, tk, blockId)
     } else {
         NULL
     }
@@ -832,7 +850,7 @@ setGeneric("fineMappingPipeline", function(data, ...) {
 # Fit the still-to-run RSS tokens for one GWAS region and return one row-record
 # per fitted token.
 # @noRd
-.fmGwasFitRows <- function(p, gr, zn, st, regionId, toRun) {
+.fmGwasFitRows <- function(p, gr, zn, st, blockId, toRun) {
     z <- zn$z
     names(z) <- zn$variantIds
     ldMat <- .fmLdFromSketch(p$ldSketch, zn$variantIds)
@@ -848,7 +866,7 @@ setGeneric("fineMappingPipeline", function(data, ...) {
         p$minAbsCorr,
         p$methodArgs,
         p$verbose,
-        label = glue("GWAS (study='{st}', region='{regionId}')"),
+        label = glue("GWAS (study='{st}', region='{blockId}')"),
         af = .fmAfByVar(gr, zn$variantIds),
         fullFit = p$fullFit,
         fullFitAlphaOnly = p$fullFitAlphaOnly,
@@ -859,7 +877,7 @@ setGeneric("fineMappingPipeline", function(data, ...) {
         rssControl = p$rssControl,
         keepFullFit = p$keepFullFit
     )
-    map(names(ents), .fmGwasRowFor, st = st, regionId = regionId, ents = ents)
+    map(names(ents), .fmGwasRowFor, st = st, blockId = blockId, ents = ents)
 }
 
 # All result rows for one GwasSumStats entry: cache hits + freshly-fitted
@@ -868,7 +886,7 @@ setGeneric("fineMappingPipeline", function(data, ...) {
 # @noRd
 .fmGwasEntryRows <- function(i, p) {
     st <- p$studyCol[[i]]
-    gr <- p$data$entry[[i]]
+    gr <- .collectionEntry(p$data, i)
     skip <- .fmEntrySkipInfo(p$data, i)
     if (isTRUE(skip$skipped)) {
         if (p$verbose >= 1) {
@@ -883,21 +901,23 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     }
     zn <- .fmExtractZn(
         gr,
-        glue("fineMappingPipeline(GwasSumStats): study='{st}'")
+        glue("fineMappingPipeline(GwasSumStats): study='{st}'"),
+        ldSketch = p$ldSketch,
+        cutoffs = .panelCutoffs(p)
     )
-    regionId <- .fmGwasRegionId(gr)
-    lookups <- map(p$tokens, .fmGwasLookup, p = p, st = st, regionId = regionId)
+    blockId <- .fmGwasBlockId(gr)
+    lookups <- map(p$tokens, .fmGwasLookup, p = p, st = st, blockId = blockId)
     cachedRows <- map(
         keep(lookups, .fmHasCached),
         .fmGwasRowFromLookup,
         st = st,
-        regionId = regionId
+        blockId = blockId
     )
     toRun <- map_chr(keep(lookups, .fmNotCached), "tk")
     if (length(toRun) == 0L) {
         return(list(rows = cachedRows, skipped = FALSE))
     }
-    computed <- .fmGwasFitRows(p, gr, zn, st, regionId, toRun)
+    computed <- .fmGwasFitRows(p, gr, zn, st, blockId, toRun)
     list(rows = c(cachedRows, computed), skipped = FALSE)
 }
 
@@ -905,13 +925,15 @@ setGeneric("fineMappingPipeline", function(data, ...) {
 # row-record per fitted token.
 # @noRd
 .fmRssFitRows <- function(p, i, st, ctx, tr, toRun) {
-    entry <- p$data$entry[[i]]
+    entry <- .collectionEntry(p$data, i)
     zn <- .fmExtractZn(
         entry,
         glue(
             "fineMappingPipeline(QtlSumStats): entry {i} (study='{st}', ",
             "context='{ctx}', trait='{tr}')"
-        )
+        ),
+        ldSketch = p$ldSketch,
+        cutoffs = .panelCutoffs(p)
     )
     z <- zn$z
     names(z) <- zn$variantIds
@@ -1004,7 +1026,7 @@ setGeneric("fineMappingPipeline", function(data, ...) {
         )
         abort(msg)
     }
-    # Carry forward every column (region_id / joint* / ...) via the generic
+    # Carry forward every column (blockId / joint* / ...) via the generic
     # combine; the concrete class (QTL vs GWAS) is preserved automatically.
     .rbindCollections(list(a, b), ldSketch = ldSketch)
 }
@@ -1047,9 +1069,9 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 }
 
 
-# Wrap one finemapping fit into a FineMappingEntry via the surviving
+# Wrap one finemapping fit into a FineMappingRow via the surviving
 # post-processing helpers (postprocessFinemappingFits +
-# formatFinemappingOutput). Returns a bare FineMappingEntry payload, ready
+# formatFinemappingOutput). Returns a bare FineMappingRow payload, ready
 # to be inserted into a FineMappingResult.
 # @noRd
 # Look up residualization flags from the enclosing setMethod frame
@@ -1180,7 +1202,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 }
 
 # Run postprocessFinemappingFits for a single (method -> fit) mapping with the
-# resolved defaults `d`, then format + validate the FineMappingEntry payload.
+# resolved defaults `d`, then format + validate the FineMappingRow payload.
 # @noRd
 .fmRunPostprocess <- function(
     fit,
@@ -1216,12 +1238,12 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         includeAllCs = d$includeAllCs
     )
     out <- formatFinemappingOutput(post, primaryMethod = method)
-    # `formatFinemappingOutput` returns $finemappingEntry as a bare
-    # FineMappingEntry per the helper's contract.
-    if (!is(out$finemappingEntry, "FineMappingEntry")) {
+    # `formatFinemappingOutput` returns $finemappingEntry as a bare row
+    # payload (variants + susieFit + cvResult) per the helper's contract.
+    if (!methods::is(out$finemappingEntry, "FineMappingRow")) {
         msg <- glue(
             ".fmPostprocessOne: postprocess output did not carry a ",
-            "FineMappingEntry payload - check pecotmr internal contract."
+            "fine-mapping row - check pecotmr internal contract."
         )
         abort(msg)
     }
@@ -1291,7 +1313,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 # Rebuild the mvSuSiE data-driven *reweighted* mixture prior + residual variance
 # from a stored mr.mash fit -- the lean payload
 # (list(dataDrivenPriorMatrices, w0, V)) that mrmashWeights(retainFit = TRUE)
-# attaches and twasWeightsPipeline keeps on the mrmash TwasWeightsEntry. Shared
+# attaches and twasWeightsPipeline keeps on the mrmash TwasWeightsRow. Shared
 # by the fine-mapping mvsusie consumer and the twas mvsusie_weights consumer.
 #
 # Reproduces the deleted multivariate_pipeline.R reweighting bit-identically:
@@ -1382,7 +1404,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         sel <- sel & as.character(twasWeights$context) == context
     }
     for (i in which(sel)) {
-        f <- getFits(twasWeights$entry[[i]])
+        f <- getFits(.twrRowParts(twasWeights, i))
         if (!is.null(f)) return(f)
     }
     NULL
@@ -1415,7 +1437,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         sel <- sel & as.character(twasWeights$context) == context
     }
     for (i in which(sel)) {
-        cv <- getCvResult(twasWeights$entry[[i]])
+        cv <- getCvResult(.twrRowParts(twasWeights, i))
         if (!is.null(cv) && !is.null(cv$foldFits)) return(cv)
     }
     NULL
@@ -1615,7 +1637,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     )
 }
 
-# Merge per-region FineMappingEntry payloads (same study/context/trait/method,
+# Merge per-region FineMappingRow payloads (same study/context/trait/method,
 # independent fits) into one entry: concatenate variants and topLoci rows,
 # renumber credible sets so per-region indices do not collide, and keep the
 # per-region SuSiE fits as a named list in `susieFit` (consumers needing a
@@ -1644,7 +1666,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         str_c("region", seq_along(entries))
     )
     cvResult <- if (all(map_lgl(cvList, is.null))) NULL else cvList
-    FineMappingEntry(
+    fineMappingRow(
         variantIds = variantIds,
         susieFit = susieFit,
         topLoci = topLoci,
@@ -1675,7 +1697,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 }
 
 # Run a joint-method fit (mvsusie / fsusie) once per region block via the
-# method-specific `fitOneRegion(rg)` closure (returns one FineMappingEntry per
+# method-specific `fitOneRegion(rg)` closure (returns one FineMappingRow per
 # region), then merge across regions into a single shared entry. A single block
 # (cis or jointRegions=TRUE) returns its entry unchanged.
 .fmJointBlocks <- function(xRegions, fitOneRegion) {
@@ -1722,8 +1744,14 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 # GwasSumStats entry GRanges. Errors when Z or N is missing. Wraps the
 # shared `.entryToSumstatDf` helper (R/sumstatsQc.R).
 # @noRd
-.fmExtractZn <- function(gr, label) {
+.fmExtractZn <- function(gr, label, ldSketch = NULL, cutoffs = NULL) {
     df <- .entryToSumstatDf(gr, require = c("SNP", "Z", "N"), label = label)
+    # Filtered HERE rather than at the LD build: z, the LD matrix and the
+    # allele frequencies are all keyed off `variantIds`, so narrowing the id
+    # set at its source keeps them aligned by construction instead of by three
+    # subsetting steps staying in step with one another.
+    keep <- .panelKeepMask(df$variant_id, ldSketch, cutoffs, label)
+    df <- df[keep, , drop = FALSE]
     list(
         variantIds = df$variant_id,
         z = df$z,
@@ -1740,7 +1768,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 .fmEntrySkipInfo <- function(data, i) {
     ea <- tryCatch(getQcInfo(data)$entryAudit[[i]], error = function(e) NULL)
     screened <- isTRUE(ea$pipScreenSkipped)
-    entry <- data$entry[[i]]
+    entry <- .collectionEntry(data, i)
     empty <- is.null(entry) || length(entry) == 0L
     reason <-
         if (
@@ -1766,7 +1794,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 # cvFolds > 1, each fine-mapping method is refit on the training samples of
 # every fold, its weights extracted and used to predict the held-out samples,
 # yielding out-of-fold predictions + per-outcome metrics. The partition and
-# predictions are stored on each FineMappingEntry's cvResult slot so
+# predictions are stored on each FineMappingRow's cvResult slot so
 # twasWeightsPipeline can (a) reuse the identical fold partition and (b) feed
 # fine-mapping's own cross-validated predictions straight into the SR-TWAS
 # ensemble instead of recomputing them. Output shape mirrors twasWeightsCv()
@@ -1992,7 +2020,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
 }
 
 # Slice a full .fmWeightsCv() result down to one method's payload, keeping
-# the shared samplePartition. Stored on that method's FineMappingEntry.
+# the shared samplePartition. Stored on that method's FineMappingRow.
 # @noRd
 .fmSliceCv <- function(cv, token) {
     if (is.null(cv)) {
@@ -2011,16 +2039,16 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     )
 }
 
-# Rebuild a FineMappingEntry with a cvResult attached (the class is immutable).
+# Rebuild a FineMappingRow with a cvResult attached (the class is immutable).
 # @noRd
 .fmAttachCv <- function(entry, cvResult) {
     if (is.null(entry) || is.null(cvResult)) {
         return(entry)
     }
-    FineMappingEntry(
-        variantIds = entry@variantIds,
-        susieFit = entry@susieFit,
-        topLoci = entry@topLoci,
+    fineMappingRow(
+        variantIds = .fmrPartsVariantIds(entry),
+        susieFit = .fmrPartsSusieFit(entry),
+        topLoci = .fmrPartsTopLoci(entry),
         cvResult = cvResult
     )
 }
@@ -2491,16 +2519,6 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
             rowTrait,
             map_chr(rows, "method"),
             map(rows, "entry"),
-            region = tryCatch(
-                .anchorVector(
-                    p$data,
-                    rowContext,
-                    rowTrait,
-                    "region",
-                    p$cisWindow
-                ),
-                error = function(e) NULL
-            ),
             traitPos = tryCatch(
                 .anchorVector(p$data, rowContext, rowTrait, "traitPos"),
                 error = function(e) NULL
@@ -2904,7 +2922,10 @@ setMethod(
             fineMappingResult = p$fineMappingResult,
             fullFit = p$fullFit,
             fullFitAlphaOnly = p$fullFitAlphaOnly,
-            includeAllCs = p$includeAllCs
+            includeAllCs = p$includeAllCs,
+            mafCutoff = p$mafCutoff %||% 0,
+            macCutoff = p$macCutoff %||% 0,
+            imissCutoff = p$imissCutoff %||% 1
         )
         tokens <- setdiff(tokens, c("mvsusie", "fsusie"))
         methodArgs <- methodArgs[tokens]
@@ -3000,7 +3021,10 @@ setMethod(
         fineMappingResult = p$fineMappingResult,
         fullFit = p$fullFit,
         fullFitAlphaOnly = p$fullFitAlphaOnly,
-        includeAllCs = p$includeAllCs
+        includeAllCs = p$includeAllCs,
+        mafCutoff = p$mafCutoff %||% 0,
+        macCutoff = p$macCutoff %||% 0,
+        imissCutoff = p$imissCutoff %||% 1
     )
     if (is.null(p$jointResult)) {
         autoJoint
@@ -3026,10 +3050,6 @@ setMethod(
             rowTrait,
             map_chr(rows, "method"),
             map(rows, "entry"),
-            region = tryCatch(
-                .anchorVector(p$data, rowContext, rowTrait, "region"),
-                error = function(e) NULL
-            ),
             traitPos = tryCatch(
                 .anchorVector(p$data, rowContext, rowTrait, "traitPos"),
                 error = function(e) NULL
@@ -3144,6 +3164,9 @@ setMethod(
         rMismatch = "none",
         rssControl = NULL,
         keepFullFit = "fallback",
+        mafCutoff = 0,
+        macCutoff = 0,
+        imissCutoff = 1,
         ...
     ) {
         .fmPipelineQtlSumStats(as.list(environment()))
@@ -3208,7 +3231,7 @@ setMethod(
         map_chr(rows, "study"),
         map_chr(rows, "method"),
         map(rows, "entry"),
-        region_ids = map_chr(rows, "region"),
+        blockIds = map_chr(rows, "blockId"),
         ldSketch = ldSketch,
         allowEmpty = (nSkipped > 0L || nrow(p$data) == 0L)
     )
@@ -3240,6 +3263,9 @@ setMethod(
         rMismatch = "none",
         rssControl = NULL,
         keepFullFit = "fallback",
+        mafCutoff = 0,
+        macCutoff = 0,
+        imissCutoff = 1,
         ...
     ) {
         .fmPipelineGwas(as.list(environment()))
@@ -3283,18 +3309,18 @@ setMethod("fineMappingPipeline", "ANY", function(data, ...) {
 }
 
 # @noRd
-.fmGwasLookup <- function(tk, p, st, regionId) {
-    list(tk = tk, cached = .fmCacheLookupGwasResume(p, st, tk, regionId))
+.fmGwasLookup <- function(tk, p, st, blockId) {
+    list(tk = tk, cached = .fmCacheLookupGwasResume(p, st, tk, blockId))
 }
 
 # @noRd
-.fmGwasRowFor <- function(tk, st, regionId, ents) {
-    .fmGwasRow(st, tk, regionId, ents[[tk]])
+.fmGwasRowFor <- function(tk, st, blockId, ents) {
+    .fmGwasRow(st, tk, blockId, ents[[tk]])
 }
 
 # @noRd
-.fmGwasRowFromLookup <- function(l, st, regionId) {
-    .fmGwasRow(st, l$tk, regionId, l$cached)
+.fmGwasRowFromLookup <- function(l, st, blockId) {
+    .fmGwasRow(st, l$tk, blockId, l$cached)
 }
 
 # @noRd
@@ -3334,25 +3360,25 @@ setMethod("fineMappingPipeline", "ANY", function(data, ...) {
     if (idx == 0L) csVec[[j]] else str_c(parts[j, 2L], "_", idx + offset)
 }
 
-# FineMappingEntry slot accessors (S4 slots can't be plucked by name).
+# FineMappingRow slot accessors (S4 slots can't be plucked by name).
 # @noRd
 .fmEntryVariantIds <- function(e) {
-    e@variantIds
+    .fmrPartsVariantIds(e)
 }
 
 # @noRd
 .fmEntryTopLoci <- function(e) {
-    e@topLoci
+    .fmrPartsTopLoci(e)
 }
 
 # @noRd
 .fmEntrySusieFit <- function(e) {
-    e@susieFit
+    .fmrPartsSusieFit(e)
 }
 
 # @noRd
 .fmEntryCvResult <- function(e) {
-    e@cvResult
+    .fmrPartsCvResult(e)
 }
 
 # One merged row-record for token `tk` across window block entries (NULL when

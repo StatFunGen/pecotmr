@@ -2,21 +2,21 @@
 % Please edit documentation in R/AllGenerics.R, R/fineMappingWrappers.R
 \name{computeCsCorrelation}
 \alias{computeCsCorrelation}
-\alias{computeCsCorrelation,FineMappingEntry,SumStatsBase-method}
-\alias{computeCsCorrelation,FineMappingEntry,QtlDataset-method}
-\alias{computeCsCorrelation,FineMappingEntry,ANY-method}
+\alias{computeCsCorrelation,FineMappingResultBase,SumStatsBase-method}
+\alias{computeCsCorrelation,FineMappingResultBase,QtlDataset-method}
+\alias{computeCsCorrelation,FineMappingResultBase,ANY-method}
 \title{Compute Between-Credible-Set Correlation On Demand}
 \usage{
 computeCsCorrelation(x, ldSource, ...)
 
-\S4method{computeCsCorrelation}{FineMappingEntry,SumStatsBase}(x, ldSource, ...)
+\S4method{computeCsCorrelation}{FineMappingResultBase,SumStatsBase}(x, ldSource, ...)
 
-\S4method{computeCsCorrelation}{FineMappingEntry,QtlDataset}(x, ldSource, ...)
+\S4method{computeCsCorrelation}{FineMappingResultBase,QtlDataset}(x, ldSource, ...)
 
-\S4method{computeCsCorrelation}{FineMappingEntry,ANY}(x, ldSource, ...)
+\S4method{computeCsCorrelation}{FineMappingResultBase,ANY}(x, ldSource, ...)
 }
 \arguments{
-\item{x}{A \code{\link{FineMappingEntry}} carrying the fit (credible-set
+\item{x}{A \code{\link{fineMappingRow}} carrying the fit (credible-set
 membership and PIP) and its variant ids.}
 
 \item{ldSource}{The object supplying the LD: a \code{QtlDataset}
@@ -33,7 +33,7 @@ A numeric \code{m x m} between-credible-set correlation matrix
 }
 \description{
 Compute the between-credible-set correlation matrix for a
-  \code{\link{FineMappingEntry}} on demand from an LD source. The correlation
+  \code{\link{fineMappingRow}} on demand from an LD source. The correlation
   is a view over the fit-time LD, which lives on the data object --- a
   \code{QtlDataset}'s genotypes or a \code{QtlSumStats} / \code{GwasSumStats}
   LD sketch --- and is deliberately never stored on the fit. An

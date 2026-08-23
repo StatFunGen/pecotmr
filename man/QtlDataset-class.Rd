@@ -3,15 +3,80 @@
 \docType{class}
 \name{QtlDataset-class}
 \alias{QtlDataset-class}
+\alias{[,QtlDataset,ANY,ANY,ANY-method}
+\alias{longForm,QtlDataset-method}
 \title{QTL Dataset (individual-level data for one study)}
-\description{
-S4 container for a single QTL study's regional data. Holds a
-  genotype handle plus per-context \code{SummarizedExperiment} objects
-  carrying molecular-trait measurements. Each context's SE has
-  \code{rowRanges} describing per-trait genomic positions and \code{colData}
-  carrying per-context phenotype covariates. A single matrix of
-  genotype-derived covariates (e.g., ancestry PCs) applies across contexts.
+\usage{
+\S4method{[}{QtlDataset,ANY,ANY,ANY}(x, i, j, k, ..., drop = FALSE)
+
+\S4method{longForm}{QtlDataset}(object, ..., genotype = FALSE)
 }
+\arguments{
+\item{x}{A \code{QtlDataset}.}
+
+\item{i, j, k}{Feature, sample and experiment subscripts, as for
+\code{\link[MultiAssayExperiment]{MultiAssayExperiment}}.}
+
+\item{...}{Passed on to row subsetting.}
+
+\item{drop}{Passed through to \code{MultiAssayExperiment}: when
+\code{TRUE}, experiments the subset leaves empty are removed.}
+
+\item{object}{A \code{QtlDataset}.}
+
+\item{genotype}{Logical (length 1), default \code{FALSE}. Include the
+genotype experiment, reading its dosages into memory to do so.}
+}
+\description{
+S4 container for a single QTL study's regional data,
+  extending \code{MultiAssayExperiment}. Every QTL context is one
+  \code{RangedSummarizedExperiment}: rows are molecular traits positioned
+  by \code{rowRanges}, columns are samples, and per-context phenotype
+  covariates sit in that experiment's \code{colData}. Alongside them a
+  \code{genotype} experiment carries variants in its \code{rowRanges},
+  dosages in a lazily-read \code{DelayedArray} assay, and
+  genotype-derived covariates (e.g., ancestry PCs) in its own
+  \code{colData}. The \code{sampleMap} records which samples each
+  experiment observes, so contexts need not share a sample set.
+
+  Extending \code{MultiAssayExperiment} means the multi-assay surface
+  applies directly: \code{experiments()}, \code{colData()},
+  \code{sampleMap()}, and two-dimensional subsetting
+  (\code{x[, samples, contexts]}), all of which preserve the class and its
+  own slots. The genotype assay stays unread until an operation touches it.
+
+  One caveat comes with that laziness: \code{longForm()} and
+  \code{wideFormat()} fail on a delayed assay, with
+  \code{MultiAssayExperiment} reshaping it to zero rows and reporting
+  "replacement has 0 rows". Subsetting does \emph{not} sidestep it,
+  because selecting contexts keeps the genotype experiment. Reshape a
+  context experiment on its own, or drop the genotype one by coercing
+  first: \code{longForm(as(x, "MultiAssayExperiment")[, , "brain"])}.
+  Reshaping genotypes is variants x samples and enormous on real data, so
+  it is rarely what you want regardless; anything that materialises a tidy
+  view of that experiment reads its dosages.
+}
+\section{Functions}{
+\itemize{
+\item \code{x = QtlDataset[i = ANY, j = ANY, drop = ANY]}: Subset by feature, sample and experiment.
+Selecting experiments selects among \emph{contexts}: the genotype
+experiment is the substrate every context is interpreted against rather
+than one of the things being chosen between, so it is always retained.
+
+\item \code{longForm(QtlDataset)}: Reshape the measurements into one long
+  \code{DataFrame}. Only the QTL contexts are reshaped: the genotype
+  experiment is the substrate they are interpreted against rather than a
+  measurement, and being variants x samples it would dwarf them. Pass
+  \code{genotype = TRUE} to include it, which reads the dosages into
+  memory -- \code{MultiAssayExperiment} cannot reshape a delayed assay,
+  and fails with "replacement has 0 rows" if asked to.
+
+  \code{wideFormat()} has no such method: it is a plain function rather
+  than a generic, and it reshapes the \code{ExperimentList} directly, so
+  there is nothing to dispatch on. Coerce first --
+  \code{wideFormat(as(x, "MultiAssayExperiment")[, , contexts])}.
+
+}}
 \section{Slots}{
 
 \describe{
@@ -19,18 +84,10 @@ S4 container for a single QTL study's regional data. Holds a
 classes to tag downstream \code{FineMappingResult} / \code{TwasWeights}
 entries.}
 
-\item{\code{genotypes}}{A \code{GenotypeHandle} for lazy access to genotype dosages.}
-
-\item{\code{phenotypes}}{Named list of \code{SummarizedExperiment} objects, one per
-QTL context. Each SE has rows = molecular traits with positions in
-\code{rowRanges(se)}, columns = samples, and per-context covariates in
-\code{colData(se)}. Different contexts may carry different subsets of
-traits (rows); traits shared across contexts must have identical
-\code{rowRanges} entries (enforced by validity).}
-
-\item{\code{genotypeCovariates}}{Numeric matrix (samples x covariates) of
-genotype-derived covariates applied uniformly across all contexts (e.g.,
-ancestry PCs).}
+\item{\code{genotypes}}{A \code{GenotypeHandle} for lazy access to genotype dosages.
+The \code{genotype} experiment's assay reads through this handle; the
+extraction accessors read it directly, so that QC can be applied per
+block.}
 
 \item{\code{scaleResiduals}}{Logical (length 1). Whether residualization accessors
 scale residuals to unit variance.}
@@ -52,11 +109,6 @@ Default 0 (no filter).}
 \item{\code{imissCutoff}}{Numeric (length 1). Per-sample genotype-missingness
 threshold; samples with a missing-genotype rate above this are dropped at
 extraction time. Default 0 (no filter).}
-
-\item{\code{keepSamples}}{Character vector of sample identifiers to retain prior to
-per-block QC; intersected with the genotype handle's \code{sampleIds} and
-the \code{samples} argument of \code{getGenotypes()}. Length 0 means no
-restriction.}
 
 \item{\code{keepVariants}}{Character vector of variant identifiers to retain prior to
 per-block QC. Length 0 means no restriction.}

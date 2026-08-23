@@ -1036,9 +1036,10 @@ makePairwiseContrastCol <- function(pair, template) {
 #' @importFrom stringr str_remove_all fixed
 #' @importFrom utils combn
 #' @examples
-#' om <- matrix(c(0.1, 0.2, 0.3), 1, 3, dimnames = list("v1", c("a", "b", "c")))
+#' om <- matrix(c(0.1, 0.2, 0.3), 1, 3,
+#'   dimnames = list("chr1:100:A:G", c("a", "b", "c")))
 #' pm <- matrix(c(0.5, 0.3, -0.2), 1, 3,
-#'   dimnames = list("v1", c("a", "b", "c")))
+#'   dimnames = list("chr1:100:A:G", c("a", "b", "c")))
 #' pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
 #' dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 #' fitMashContrast(1L, om, pm, pv)
@@ -1199,8 +1200,9 @@ fitMashContrast <- function(
 #' @importFrom dplyr bind_rows select matches
 #' @examples
 #' pm <- matrix(c(0.5, 0.3, -0.2), 1, 3,
-#'   dimnames = list("v1", c("a", "b", "c")))
-#' om <- matrix(c(0.1, 0.2, 0.3), 1, 3, dimnames = list("v1", c("a", "b", "c")))
+#'   dimnames = list("chr1:100:A:G", c("a", "b", "c")))
+#' om <- matrix(c(0.1, 0.2, 0.3), 1, 3,
+#'   dimnames = list("chr1:100:A:G", c("a", "b", "c")))
 #' pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
 #' dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 #' mashPosteriorContrast(pm, pv, om)
@@ -1339,11 +1341,11 @@ updateMashModelCov <- function(mashModel, allSamples, samples) {
 #' cond <- c("brain", "blood", "muscle")
 #' p <- 8
 #' bhat <- matrix(rnorm(p * 3), p, 3,
-#'   dimnames = list(paste0("v", 1:p), cond))
+#'   dimnames = list(sprintf("chr1:%d:A:G", 100L * (1:p)), cond))
 #' sbhat <- matrix(abs(rnorm(p * 3)) + 0.1, p, 3,
-#'   dimnames = list(paste0("v", 1:p), cond))
+#'   dimnames = list(sprintf("chr1:%d:A:G", 100L * (1:p)), cond))
 #' dat <- list(bhat = bhat, sbhat = sbhat, Z = bhat / sbhat,
-#'   snp = paste0("v", 1:p))
+#'   snp = sprintf("chr1:%d:A:G", 100L * (1:p)))
 #' vhat <- diag(3)
 #' dimnames(vhat) <- list(cond, cond)
 #' sliceMashData(dat, vhat = vhat, snps = 1:4, samples = NULL)
@@ -1527,9 +1529,10 @@ metaAnalysisPerCondition <- function(
 #' @return A \code{data.frame} with \code{condition} and \code{zScore}.
 #' @seealso \code{\link{nSignificantScore}}, \code{\link{scoreFromCs}}
 #' @examples
-#' om <- matrix(c(0.1, 0.2, 0.3), 1, 3, dimnames = list("v1", c("a", "b", "c")))
+#' om <- matrix(c(0.1, 0.2, 0.3), 1, 3,
+#'   dimnames = list("chr1:100:A:G", c("a", "b", "c")))
 #' pm <- matrix(c(0.5, 0.3, -0.2), 1, 3,
-#'   dimnames = list("v1", c("a", "b", "c")))
+#'   dimnames = list("chr1:100:A:G", c("a", "b", "c")))
 #' pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
 #' dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 #' cr <- fitMashContrast(1L, om, pm, pv)
@@ -1569,9 +1572,10 @@ calculateFeatureScores <- function(contrastResult, metaMethod = "REML") {
 #' @return A \code{data.frame} with \code{condition} and \code{ratio}
 #'   (\eqn{n_{sig} / n}).
 #' @examples
-#' om <- matrix(c(0.1, 0.2, 0.3), 1, 3, dimnames = list("v1", c("a", "b", "c")))
+#' om <- matrix(c(0.1, 0.2, 0.3), 1, 3,
+#'   dimnames = list("chr1:100:A:G", c("a", "b", "c")))
 #' pm <- matrix(c(0.5, 0.3, -0.2), 1, 3,
-#'   dimnames = list("v1", c("a", "b", "c")))
+#'   dimnames = list("chr1:100:A:G", c("a", "b", "c")))
 #' pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
 #' dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 #' cr <- fitMashContrast(1L, om, pm, pv)
@@ -1612,9 +1616,10 @@ nSignificantScore <- function(contrastResult, pCutoff = 1e-5) {
 #' @return A single numeric score, or \code{NA} when nothing overlaps.
 #' @examples
 #' data(mashPosteriorExample)
-#' om <- matrix(c(0.1, 0.2, 0.3), 1, 3, dimnames = list("v1", c("a", "b", "c")))
+#' om <- matrix(c(0.1, 0.2, 0.3), 1, 3,
+#'   dimnames = list("chr1:100:A:G", c("a", "b", "c")))
 #' pm <- matrix(c(0.5, 0.3, -0.2), 1, 3,
-#'   dimnames = list("v1", c("a", "b", "c")))
+#'   dimnames = list("chr1:100:A:G", c("a", "b", "c")))
 #' pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
 #' dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 #' cr <- fitMashContrast(1L, om, pm, pv)

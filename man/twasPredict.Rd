@@ -32,8 +32,8 @@ are derived from the names in \code{weightsList}, with "_weights" replaced by
 \examples{
 data(multiTraitData)
 X <- multiTraitData$X[, 1:4]
-colnames(X) <- paste0("v", 1:4)
-twe <- TwasWeightsEntry(variantIds = paste0("v", 1:4),
+colnames(X) <- sprintf("chr1:\%d:A:G", 100L * (1:4))
+twe <- twasWeightsRow(variantIds = sprintf("chr1:\%d:A:G", 100L * (1:4)),
   weights = rep(0.1, 4), cvResult = list(rsq = 0.5), standardized = FALSE)
 tw <- TwasWeights(study = "s1", context = "brain", trait = "g1",
   method = "susie", entry = list(twe))

@@ -6,7 +6,7 @@ context("twasWeights")
 make_data <- function(n = 50, p = 10, seed = 42, add_zero_var_col = FALSE) {
     set.seed(seed)
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-    colnames(X) <- paste0("var_", seq_len(p))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
     rownames(X) <- paste0("sample_", seq_len(n))
 
     beta <- rep(0, p)
@@ -20,7 +20,7 @@ make_data <- function(n = 50, p = 10, seed = 42, add_zero_var_col = FALSE) {
     if (add_zero_var_col) {
         # Append a constant column (zero variance)
         X <- cbind(X, zero_var = rep(7, n))
-        colnames(X)[p + 1] <- "zero_var"
+        colnames(X)[p + 1] <- "chr1:9900:A:G"
     }
 
     list(X = X, Y = Y, beta = beta)
@@ -64,12 +64,21 @@ mock_susie <- function(...) {
     if (length(idx) == 0L) {
         return(NULL)
     }
-    entry <- tw$entry[[idx[[1L]]]]
-    w <- entry@weights
+    # The entry is a derived view now: ask the collection for it rather than
+    # reaching into a stored `entry` column that no longer exists.
+    entry <- getTwasWeights(
+        tw,
+        study = as.character(tw$study)[[idx[[1L]]]],
+        context = as.character(tw$context)[[idx[[1L]]]],
+        trait = as.character(tw$trait)[[idx[[1L]]]],
+        method = shortName
+    )
+    w <- getWeights(entry)
+    vids <- getVariantIds(entry)
     if (is.numeric(w) && is.null(dim(w))) {
         nm <- names(w)
-        if (is.null(nm) && length(entry@variantIds) == length(w)) {
-            nm <- entry@variantIds
+        if (is.null(nm) && length(vids) == length(w)) {
+            nm <- vids
         }
         w <- matrix(w, ncol = 1L, dimnames = list(nm, NULL))
     }
@@ -336,7 +345,7 @@ test_that("twasWeights: zero variance columns are filtered and padded back with 
     expect_equal(nrow(.weightsByMethod(result, "lassoWeights")), p_with_extra)
     # The zero-var column weight should be 0 (padded back)
     expect_equal(
-        unname(.weightsByMethod(result, "lassoWeights")["zero_var", 1]),
+        unname(.weightsByMethod(result, "lassoWeights")["chr1:9900:A:G", 1]),
         0
     )
 })
@@ -635,7 +644,7 @@ test_that("twasWeightsCv: NA values in Y trigger NA-removal branch in metrics", 
     n <- 30
     p <- 5
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-    colnames(X) <- paste0("v", seq_len(p))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
     rownames(X) <- paste0("s", seq_len(n))
     Y <- matrix(rnorm(n), ncol = 1)
     rownames(Y) <- rownames(X)
@@ -667,7 +676,7 @@ test_that("twasWeightsCv: multivariate cv_args data_driven_priorMatricesCv is pl
     n <- 20
     p <- 4
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- paste0("v", seq_len(p))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
     rownames(X) <- paste0("s", seq_len(n))
     Y <- matrix(rnorm(n * 2), nrow = n)
     colnames(Y) <- c("y1", "y2")
@@ -720,7 +729,8 @@ test_that("twasWeights: multivariate weights_matrix is reduced to valid_columns 
     n <- 20
     p <- 5
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-    colnames(X) <- paste0("v", seq_len(p)) # all columns valid (no zero variance)
+    # all columns valid (no zero variance)
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
     Y <- matrix(rnorm(n * 2), nrow = n, ncol = 2)
     colnames(Y) <- c("y1", "y2")
 
@@ -734,7 +744,11 @@ test_that("twasWeights: multivariate weights_matrix is reduced to valid_columns 
                 nrow = extra_rows,
                 ncol = ncol(Y)
             )
-            rownames(m) <- c(paste0("v", seq_len(p)), "extra1", "extra2")
+            rownames(m) <- c(
+                sprintf("chr1:%d:A:G", 100L * (seq_len(p))),
+                "extra1",
+                "extra2"
+            )
             colnames(m) <- colnames(Y)
             m
         }
@@ -749,7 +763,7 @@ test_that("twasWeights: multivariate weights_matrix is reduced to valid_columns 
     expect_equal(ncol(.weightsByMethod(result, "mrmashWeights")), 2)
     expect_equal(
         rownames(.weightsByMethod(result, "mrmashWeights")),
-        paste0("v", seq_len(p))
+        sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
     )
 })
 
@@ -882,8 +896,8 @@ test_that("twasPredict with single variant", {
 # === Tests migrated from test_s4Constructors.R (TwasWeights) ===
 
 test_that("TwasWeights: builds a collection keyed by 4-tuple", {
-    e1 <- .sc_makeTwasWeightsEntry()
-    e2 <- .sc_makeTwasWeightsEntry()
+    e1 <- .sc_makeTwasWeightsRow()
+    e2 <- .sc_makeTwasWeightsRow()
     tw <- TwasWeights(
         study = c("s1", "s1"),
         context = c("c1", "c1"),
@@ -898,7 +912,7 @@ test_that("TwasWeights: builds a collection keyed by 4-tuple", {
 
 
 test_that("TwasWeights: getStudy / getContexts / getTraits / getMethodNames", {
-    e <- .sc_makeTwasWeightsEntry()
+    e <- .sc_makeTwasWeightsRow()
     tw <- TwasWeights(
         study = c("s1", "s2"),
         context = c("c1", "c2"),
@@ -913,7 +927,7 @@ test_that("TwasWeights: getStudy / getContexts / getTraits / getMethodNames", {
 
 
 test_that("TwasWeights: rejects duplicate 4-tuples", {
-    e <- .sc_makeTwasWeightsEntry()
+    e <- .sc_makeTwasWeightsRow()
     expect_error(
         TwasWeights(
             study = c("s1", "s1"),
@@ -928,7 +942,7 @@ test_that("TwasWeights: rejects duplicate 4-tuples", {
 
 
 test_that("TwasWeights: joint columns work the same as on the FMR class", {
-    e <- .sc_makeTwasWeightsEntry()
+    e <- .sc_makeTwasWeightsRow()
     # Univariate lasso at c1 + the c1 slice of an mr.mash joint over (c1, c2).
     tw <- TwasWeights(
         study = c("s1", "s1"),
@@ -938,7 +952,7 @@ test_that("TwasWeights: joint columns work the same as on the FMR class", {
         entry = list(e, e),
         jointContexts = c(NA_character_, "c1;c2")
     )
-    expect_true("jointContexts" %in% names(tw))
+    expect_true("jointContexts" %in% pecotmr:::.tupleColumnNames(tw))
     expect_identical(tw$jointContexts, c(NA_character_, "c1;c2"))
     # uniqueness: same (s1, c1, t1, mrmash) tuple from two joint fits over
     # (c1, c2) and (c1, c3) -> distinct rows via jointContexts.
@@ -955,8 +969,8 @@ test_that("TwasWeights: joint columns work the same as on the FMR class", {
 
 
 test_that("TwasWeights: getTwasWeights extracts the entry for a tuple", {
-    e1 <- .sc_makeTwasWeightsEntry()
-    e2 <- .sc_makeTwasWeightsEntry()
+    e1 <- .sc_makeTwasWeightsRow()
+    e2 <- .sc_makeTwasWeightsRow()
     tw <- TwasWeights(
         study = c("s1", "s1"),
         context = c("c1", "c1"),
@@ -964,16 +978,20 @@ test_that("TwasWeights: getTwasWeights extracts the entry for a tuple", {
         method = c("lasso", "enet"),
         entry = list(e1, e2)
     )
-    expect_identical(
-        getTwasWeights(
-            tw,
-            study = "s1",
-            context = "c1",
-            trait = "t1",
-            method = "enet"
-        ),
-        e2
+    # getTwasWeights() returns the single-row COLLECTION for that tuple, not a
+    # detached entry object, so compare what the row carries.
+    picked <- getTwasWeights(
+        tw,
+        study = "s1",
+        context = "c1",
+        trait = "t1",
+        method = "enet"
     )
+    expect_s4_class(picked, "TwasWeights")
+    expect_equal(nrow(picked), 1L)
+    expect_equal(as.character(picked$method), "enet")
+    expect_identical(getVariantIds(picked), .twrPartsVariantIds(e2))
+    expect_equal(unname(getWeights(picked)), unname(getWeights(e2)))
 })
 
 # ===========================================================================
@@ -1153,7 +1171,7 @@ test_that(".normalizeCvFolds: a non-integer scalar cvFolds errors", {
 # ===========================================================================
 
 test_that("TwasWeights: mismatched core-vector lengths error", {
-    e <- .sc_makeTwasWeightsEntry()
+    e <- .sc_makeTwasWeightsRow()
     expect_error(
         TwasWeights(
             study = c("s1", "s2"),
@@ -1167,7 +1185,7 @@ test_that("TwasWeights: mismatched core-vector lengths error", {
 })
 
 test_that("TwasWeights: joint* column length must match study", {
-    e <- .sc_makeTwasWeightsEntry()
+    e <- .sc_makeTwasWeightsRow()
     expect_error(
         TwasWeights(
             study = "s1",
@@ -1182,14 +1200,14 @@ test_that("TwasWeights: joint* column length must match study", {
 })
 
 test_that("TwasWeights: getStandardized/getDataType/getVariantIds delegate to the entry", {
-    e1 <- TwasWeightsEntry(
-        variantIds = paste0("v", 1:4),
+    e1 <- twasWeightsRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         weights = rnorm(4),
         standardized = TRUE,
         dataType = "expression"
     )
-    e2 <- TwasWeightsEntry(
-        variantIds = paste0("v", 1:4),
+    e2 <- twasWeightsRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         weights = rnorm(4),
         standardized = FALSE,
         dataType = "splicing"
@@ -1234,12 +1252,12 @@ test_that("TwasWeights: getStandardized/getDataType/getVariantIds delegate to th
             trait = "t1",
             method = "lasso"
         ),
-        paste0("v", 1:4)
+        sprintf("chr1:%d:A:G", 100L * (1:4))
     )
 })
 
 test_that("TwasWeights: getStudy returns unique study labels", {
-    e <- .sc_makeTwasWeightsEntry()
+    e <- .sc_makeTwasWeightsRow()
     tw <- TwasWeights(
         study = c("s1", "s2"),
         context = c("c1", "c2"),
@@ -1252,13 +1270,16 @@ test_that("TwasWeights: getStudy returns unique study labels", {
 
 test_that("TwasWeights: getWeights/getCvResult/getFits/getLdSketch delegate per tuple", {
     w1 <- rnorm(4)
-    e1 <- TwasWeightsEntry(
-        variantIds = paste0("v", 1:4),
+    e1 <- twasWeightsRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         weights = w1,
         fits = list(tag = "fitA"),
         cvResult = list(rsq = 0.42)
     )
-    e2 <- TwasWeightsEntry(variantIds = paste0("v", 1:4), weights = rnorm(4))
+    e2 <- twasWeightsRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
+        weights = rnorm(4)
+    )
     tw <- TwasWeights(
         study = c("s1", "s1"),
         context = c("c1", "c1"),
@@ -1367,7 +1388,7 @@ test_that("twasWeightsCv: mvsusie per-fold reweighted prior is plumbed (verbose=
     n <- 24
     p <- 4
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- paste0("v", seq_len(p))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
     rownames(X) <- paste0("s", seq_len(n))
     Y <- matrix(rnorm(n * 2), nrow = n)
     colnames(Y) <- c("y1", "y2")
@@ -1411,7 +1432,7 @@ test_that("twasWeightsCv: retainFits forwards retainFit to a multivariate fitter
     n <- 24
     p <- 4
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- paste0("v", seq_len(p))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
     rownames(X) <- paste0("s", seq_len(n))
     Y <- matrix(rnorm(n * 2), nrow = n)
     colnames(Y) <- c("y1", "y2")
@@ -1477,7 +1498,7 @@ test_that("learnTwasWeights: multivariate fitter with retainFits + verbose=2 (fi
     n <- 24
     p <- 5
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- paste0("v", seq_len(p))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
     rownames(X) <- paste0("s", seq_len(n))
     Y <- matrix(rnorm(n * 2), nrow = n)
     colnames(Y) <- c("y1", "y2")
@@ -1574,8 +1595,14 @@ test_that("twasPredict: accepts a TwasWeights S4 collection", {
     p <- 5
     w1 <- rnorm(p)
     w2 <- rnorm(p)
-    e1 <- TwasWeightsEntry(variantIds = paste0("v", seq_len(p)), weights = w1)
-    e2 <- TwasWeightsEntry(variantIds = paste0("v", seq_len(p)), weights = w2)
+    e1 <- twasWeightsRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (seq_len(p))),
+        weights = w1
+    )
+    e2 <- twasWeightsRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (seq_len(p))),
+        weights = w2
+    )
     tw <- TwasWeights(
         study = c("s1", "s1"),
         context = c("c1", "c1"),

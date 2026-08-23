@@ -5,19 +5,25 @@
 \alias{gwasFineMappingExample}
 \title{Example GWAS Fine-Mapping Results (SuSiE)}
 \format{
-A \code{\link{GwasFineMappingResult}} object: a \code{DFrame}-backed
-collection with one row carrying a \code{\link{FineMappingEntry}} payload
-(the
-variant ids, the SuSiE-RSS fit, and a per-variant \code{topLoci} table with
-\code{variant_id}, \code{pip}, and \code{cs} columns for 2,828 variants) plus
-a non-\code{NULL} \code{ldSketch} \code{\link{GenotypeHandle}}.
+A \code{\link{GwasFineMappingResult}} object: a
+\code{GRangesList}-backed collection with one element (2,828 variants on
+chr22) keyed by \code{study_1} / \code{susie}, carrying the SuSiE-RSS fit
+and a per-variant table with the standard post-processing columns
+(\code{pip}, \code{logBF}, \code{cs_95} / \code{cs_70} / \code{cs_50} and
+their purities, marginal statistics). Four credible sets. \code{ldSketch} is
+the bundled \code{toy_canonical} \code{\link{GenotypeHandle}}, present
+because \code{\link{qtlEnrichmentPipeline}} requires the GWAS collection to
+carry one as its RSS-derived marker; the LD actually used for the fit is an
+in-memory correlation matrix computed from \code{\link{eqtlRegionExample}}.
 }
 \description{
 A \code{\link{GwasFineMappingResult}} S4 collection holding
 SuSiE-RSS fine-mapping output for de-identified GWAS summary statistics (one
-study), carrying the LD-reference \code{ldSketch}. Suitable as the GWAS input
-to \code{\link{qtlEnrichmentPipeline}}. All variant identifiers are
-synthetic.
+study), fit over the same 2,828 variants as
+\code{\link{qtlFineMappingExample}} so the two can be paired. Suitable as
+the GWAS input to \code{\link{qtlEnrichmentPipeline}}. All variant
+identifiers are synthetic. Built by
+\code{inst/scripts/prepare_example_data.R}.
 }
 \examples{
 data(gwasFineMappingExample)

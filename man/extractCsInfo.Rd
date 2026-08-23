@@ -4,10 +4,10 @@
 \alias{extractCsInfo}
 \title{Process Credible Sets (CS) from Finemapping Results}
 \usage{
-extractCsInfo(finemappingEntry, csNames, topLociTable, ldSource)
+extractCsInfo(fmRow, csNames, topLociTable, ldSource)
 }
 \arguments{
-\item{finemappingEntry}{A \code{\link{FineMappingEntry}} carrying the SuSiE
+\item{fmRow}{A \code{\link{fineMappingRow}} carrying the SuSiE
 fit and variant ids (e.g. from \code{\link{getFineMappingResult}}).}
 
 \item{csNames}{Character vector. Names of the Credible Sets, usually in the
@@ -57,7 +57,7 @@ vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
 fit <- list(pip = c(0.1, 0.7, 0.2), sets = list(cs = list(L_1 = c(1, 2))))
 tl <- data.frame(variant_id = vids, pip = c(0.1, 0.7, 0.2),
   z = c(1.0, 3.5, -0.5))
-fe <- FineMappingEntry(variantIds = vids, susieFit = fit, topLoci = tl)
+fe <- fineMappingRow(variantIds = vids, susieFit = fit, topLoci = tl)
 # A single credible set has no between-CS correlation (cs_corr_* are NA), so
 # the ldSource is not consulted here.
 extractCsInfo(fe, csNames = "L_1", topLociTable = tl,

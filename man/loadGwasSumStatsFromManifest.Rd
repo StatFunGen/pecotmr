@@ -12,7 +12,8 @@ loadGwasSumStatsFromManifest(
   minLdOverlapWarn = 0.5,
   columnMapping = NULL,
   sampleSelect = NULL,
-  formatMapping = NULL
+  formatMapping = NULL,
+  ldBlocks = NULL
 )
 }
 \arguments{
@@ -45,6 +46,12 @@ when a row has no \code{columnMapping}.}
 
 \item{formatMapping}{Optional GWAS-VCF FORMAT tag mapping (canonical stat ->
 FORMAT field), overriding ES/SE/LP/SS/EAF defaults.}
+
+\item{ldBlocks}{Optional LD-block specification (an \code{LdBlocks}, a
+\code{GRanges}, a data.frame with \code{chrom}/\code{start}/\code{end},
+or a path to such a table). Without it a genome-wide file splits into one
+element per chromosome; with it, into one element per LD block, which is
+the granularity \code{\link{assembleCtwasInputs}} needs.}
 }
 \value{
 A \code{GwasSumStats} object.

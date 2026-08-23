@@ -44,3 +44,21 @@ test_that("LdScore rejects ld_scores row mismatch with snp_info", {
         "ldScores.*must match"
     )
 })
+
+# show() smoke test, moved here from test_showMethods.R so the test
+# tree mirrors R/.
+test_that("show(LdScore) does not error", {
+    n <- 10
+    lsr <- new(
+        "LdScore",
+        ldBlocks = make_test_ldblocks(),
+        snpInfo = make_test_snp_info(n),
+        nRef = 500L,
+        inSample = FALSE,
+        genome = "hg19",
+        ldScores = matrix(1, nrow = n, ncol = 1),
+        ldScoreWeights = rep(1, n),
+        ldMatrixList = list()
+    )
+    expect_output(show(lsr), "LdScore")
+})

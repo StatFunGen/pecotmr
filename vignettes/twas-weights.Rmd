@@ -28,8 +28,8 @@ compute per-gene TWAS Z-scores (covered in the
 [TWAS Z-score + causal inference vignette](twas-zscore.html)).
 
 `twasWeightsPipeline()` is a single that accepts multiple input types. The
-output is always a `TwasWeights` collection (DFrame subclass keyed by `(study,
-context, trait, method)` with per-tuple `TwasWeightsEntry` payloads).
+output is always a `TwasWeights` collection (a `GRangesList` subclass keyed
+by `(study, context, trait, method)`, one element per tuple).
 
 | Input class | Methods supported |
 |---|---|
@@ -222,28 +222,46 @@ twasWeightsPipeline(
 
 ## Reading the result
 
-`TwasWeights` is a DFrame subclass keyed by the 4-tuple
-`(study, context, trait, method)`. The per-tuple payload is a
-`TwasWeightsEntry`:
+`TwasWeights` is a `GRangesList` subclass keyed by the 4-tuple
+`(study, context, trait, method)` — one element per tuple, holding the
+variants its weights are aligned to. The tuple and the per-tuple payloads are
+`mcols()` columns, reached with `$`:
 
-```{r tw-entry}
-entry <- tw$entry[[1L]]
-class(entry)
-slotNames(entry)
+```{r tw-shape}
+tw
+colnames(tw)
+tw$method
 ```
 
-Each entry exposes:
+`as.data.frame()` gives the long per-variant view across every method at once,
+which is usually what you want for inspection:
 
--  `weights` — per-variant coefficients (named numeric vector or matrix for
-    multivariate methods)
-- `variantIds` — variant IDs the weights are aligned to
--  `cvResult` — list with `rsq`, `r`, predicted values, etc. (access with
-    `getCvResult()`)
--  `standardized` — whether weights are on the standardized (`y ~ scale(X)`) or
-    original scale
--  `dataType` — string tag carried through for reporting (e.g. `"expression"`,
-    `"splicing"`)
-- `fit` — the full fit object when the user requested `retainFit = TRUE`
+```{r tw-table}
+head(as.data.frame(tw), 3)
+```
+
+To pull one method's weights, pass the tuple to the accessor:
+
+```{r tw-one-tuple}
+key <- list(
+    study = tw$study[[1L]],
+    context = tw$context[[1L]],
+    trait = tw$trait[[1L]],
+    method = tw$method[[1L]]
+)
+w <- do.call(getWeights, c(list(tw), key))
+length(w)
+do.call(getStandardized, c(list(tw), key)) # standardized or original scale
+do.call(getDataType, c(list(tw), key)) # tag carried through for reporting
+```
+
+`getWeights()` returns a named numeric vector for univariate methods and a
+matrix for multivariate ones. The remaining payloads are keyed the same way:
+`getVariantIds()` for the aligned variant set, `getCvResult()` for the
+cross-validation record (`rsq`, `r`, predicted values), and `getFits()` for
+the full fit object when the pipeline was run with `retainFit = TRUE`.
+`resolveWeights()` returns the weights and their variant IDs together, which
+is the form the downstream TWAS and MR steps consume.
 
 ## Next steps
 

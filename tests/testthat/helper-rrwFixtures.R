@@ -10,7 +10,7 @@
         rnorm(n * p),
         n,
         p,
-        dimnames = list(NULL, paste0("v", seq_len(p)))
+        dimnames = list(NULL, sprintf("chr1:%d:A:G", 100L * (seq_len(p))))
     )
     b <- rnorm(p)
     b[-(1:2)] <- 0
@@ -52,7 +52,7 @@
         rnorm(n * p),
         n,
         p,
-        dimnames = list(NULL, paste0("v", seq_len(p)))
+        dimnames = list(NULL, sprintf("chr1:%d:A:G", 100L * (seq_len(p))))
     )
     B <- matrix(0, p, K)
     B[1, ] <- rnorm(K, sd = 2)

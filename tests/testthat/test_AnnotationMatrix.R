@@ -139,3 +139,19 @@ test_that("getCandidates() subsets to candidate-tier only", {
     expect_equal(ncol(cand@annotations), 2)
     expect_true(all(cand@annotationMeta$tier == "candidate"))
 })
+
+# show() smoke test, moved here from test_showMethods.R so the test
+# tree mirrors R/.
+test_that("show(AnnotationMatrix) does not error", {
+    am <- AnnotationMatrix(
+        matrix(0, nrow = 10, ncol = 1),
+        make_test_granges(10),
+        data.frame(
+            name = "base",
+            tier = "baseline",
+            type = "binary",
+            stringsAsFactors = FALSE
+        )
+    )
+    expect_output(show(am), "AnnotationMatrix")
+})

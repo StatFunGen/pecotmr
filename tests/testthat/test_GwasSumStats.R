@@ -328,3 +328,114 @@ test_that("GwasSumStats: a non-GenotypeHandle ldSketch is rejected", {
         "GenotypeHandle or NULL"
     )
 })
+
+# show() smoke test, moved here from test_showMethods.R so the test
+# tree mirrors R/.
+test_that("show(GwasSumStats) does not error", {
+    ss <- makeGwasSumStatsFromDf(make_test_sumstats_df(10))
+    expect_output(show(ss), "GwasSumStats")
+})
+
+
+# blockId + ldBlocks (§4.2). A genome-wide GWAS split by seqname gives one
+# element per chromosome, which is too coarse for cTWAS: its EM estimates
+# parameters across LD blocks. `blockId` is always present so downstream code
+# can key regions without asking how the collection was built.
+
+# @noRd
+.gss_variants <- function(chrom, pos) {
+    g <- GenomicRanges::GRanges(chrom, IRanges::IRanges(pos, width = 1L))
+    mcols(g) <- S4Vectors::DataFrame(
+        SNP = str_c("rs", seq_along(pos)),
+        A1 = "A",
+        A2 = "G",
+        Z = seq_along(pos) / 10,
+        N = 100L
+    )
+    g
+}
+
+# @noRd
+.gss_ldBlocks <- function() {
+    b <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(c(1L, 800L), c(500L, 1200L))
+    )
+    names(b) <- c("b1", "b2")
+    b
+}
+
+test_that("GwasSumStats records blockId as the seqname without a manifest", {
+    g <- .gss_variants(c("chr1", "chr1", "chr2"), c(100L, 900L, 300L))
+    x <- GwasSumStats(study = "t1", entry = list(g), genome = "hg38")
+    expect_equal(length(x), 2L)
+    expect_equal(x$blockId, c("chr1", "chr2"))
+    expect_true(is_in("blockId", colnames(x)))
+})
+
+test_that("GwasSumStats splits by LD block when a manifest is supplied", {
+    g <- .gss_variants("chr1", c(100L, 250L, 900L))
+    x <- GwasSumStats(
+        study = "t1",
+        entry = list(g),
+        genome = "hg38",
+        ldBlocks = .gss_ldBlocks()
+    )
+    # Same chromosome, so the seqname split would have left ONE element; the
+    # manifest is what produces per-block granularity.
+    expect_equal(length(x), 2L)
+    expect_equal(x$blockId, c("b1", "b2"))
+    expect_equal(unname(lengths(x)), c(2L, 1L))
+    expect_true(validObject(x, test = TRUE) == TRUE)
+})
+
+test_that("GwasSumStats replicates the study row against each block", {
+    g <- .gss_variants("chr1", c(100L, 900L))
+    x <- GwasSumStats(
+        study = "t1",
+        entry = list(g),
+        genome = "hg38",
+        varY = 2,
+        ldBlocks = .gss_ldBlocks()
+    )
+    expect_equal(x$study, c("t1", "t1"))
+    expect_equal(x$varY, c(2, 2))
+})
+
+test_that("GwasSumStats warns about variants outside every LD block", {
+    g <- .gss_variants("chr1", c(100L, 5000L))
+    expect_warning(
+        x <- GwasSumStats(
+            study = "t1",
+            entry = list(g),
+            genome = "hg38",
+            ldBlocks = .gss_ldBlocks()
+        ),
+        "1 variant"
+    )
+    expect_equal(sum(lengths(x)), 1L)
+})
+
+test_that("GwasSumStats keeps blockId aligned across two studies", {
+    x <- GwasSumStats(
+        study = c("t1", "t2"),
+        entry = list(
+            .gss_variants("chr1", c(100L, 900L)),
+            .gss_variants("chr1", 900L)
+        ),
+        genome = "hg38",
+        ldBlocks = .gss_ldBlocks()
+    )
+    expect_equal(x$study, c("t1", "t1", "t2"))
+    expect_equal(x$blockId, c("b1", "b2", "b2"))
+})
+
+test_that("GwasSumStats blockId survives subsetting", {
+    x <- GwasSumStats(
+        study = "t1",
+        entry = list(.gss_variants("chr1", c(100L, 900L))),
+        genome = "hg38",
+        ldBlocks = .gss_ldBlocks()
+    )
+    expect_equal(x[2L]$blockId, "b2")
+})

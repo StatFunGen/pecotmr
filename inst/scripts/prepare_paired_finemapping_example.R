@@ -54,26 +54,17 @@ if (length(fit$sets$cs) < 2L) {
     stop("expected at least two credible sets for a paired-correlation example")
 }
 
-# Trim the fit to the fields the package uses (matches the other fixtures).
-trimmed <- list(
-    alpha = fit$alpha,
-    pip = fit$pip,
-    V = fit$V,
-    sets = fit$sets
+# Post-process through the same entry point fineMappingPipeline() uses, rather
+# than hand-assembling a topLoci table. A hand-built table carries only
+# variant_id and pip, with no cs_95 / cs_70 / cs_50 (+ _purity) columns, and a
+# fixture like that makes getCs() and getCredibleSetSummary() return nothing
+# even though the fit has credible sets.
+post <- postprocessFinemappingFits(
+    fits = list(susie = fit),
+    dataX = X,
+    dataY = y
 )
-
-# Per-variant top-loci table (one row per fit variant, PIP aligned to the fit).
-topLoci <- data.frame(
-    variant_id = variantIds,
-    pip = fit$pip,
-    stringsAsFactors = FALSE
-)
-
-entry <- FineMappingEntry(
-    variantIds = variantIds,
-    susieFit = trimmed,
-    topLoci = topLoci
-)
+entry <- post$finemappingResults$susie$finemappingEntry
 
 qtlFineMappingPairedExample <- QtlFineMappingResult(
     study = "study1",
@@ -101,4 +92,14 @@ cat(sprintf(
     nrow(cc),
     ncol(cc)
 ))
+
+nCs <- nrow(getCredibleSetSummary(qtlFineMappingPairedExample))
+cat(sprintf(
+    "getCs() -> %d rows across %d credible sets\n",
+    nrow(getCs(qtlFineMappingPairedExample)),
+    nCs
+))
+if (nCs < 2L) {
+    stop("expected at least two credible sets to survive post-processing")
+}
 cat("Done.\n")

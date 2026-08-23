@@ -23,7 +23,8 @@ assembling per-gene weight sets into a single per-region collection for
 cTWAS. Joint-specification metadata columns are carried through.
 }
 \examples{
-twe <- TwasWeightsEntry(variantIds = paste0("v", 1:4), weights = rep(0.1, 4),
+twe <- twasWeightsRow(
+  variantIds = sprintf("chr1:\%d:A:G", 100L * (1:4)), weights = rep(0.1, 4),
   cvResult = list(rsq = 0.5), standardized = FALSE)
 tw1 <- TwasWeights(study = "s1", context = "brain", trait = "g1",
   method = "susie", entry = list(twe))

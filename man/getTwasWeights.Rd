@@ -17,14 +17,15 @@ when the collection has more than one row; optional when the collection has
 a single row.}
 }
 \value{
-A \code{TwasWeightsEntry} object.
+A \code{TwasWeightsRow} object.
 }
 \description{
-Return the \code{TwasWeightsEntry} for one \code{(study,
+Return the \code{TwasWeightsRow} for one \code{(study,
   context, trait, method)} row of a \code{TwasWeights} collection.
 }
 \examples{
-twe <- TwasWeightsEntry(variantIds = paste0("v", 1:4), weights = rep(0.1, 4),
+twe <- twasWeightsRow(
+  variantIds = sprintf("chr1:\%d:A:G", 100L * (1:4)), weights = rep(0.1, 4),
   cvResult = list(rsq = 0.5), standardized = FALSE)
 tw <- TwasWeights(study = "s1", context = "brain", trait = "g1",
   method = "susie", entry = list(twe))

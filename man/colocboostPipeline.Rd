@@ -22,6 +22,9 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   jointGwas = FALSE,
   separateGwas = FALSE,
   samples = NULL,
+  mafCutoff = 0,
+  macCutoff = 0,
+  imissCutoff = 1,
   pipCutoffToSkip = 0,
   absZCutoffToSkip = 0,
   bfCutoffToSkip = 0,
@@ -42,6 +45,9 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   jointGwas = FALSE,
   separateGwas = FALSE,
   alleleFlip = TRUE,
+  mafCutoff = 0,
+  macCutoff = 0,
+  imissCutoff = 1,
   ...
 )
 
@@ -57,6 +63,9 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   jointGwas = FALSE,
   separateGwas = FALSE,
   samples = NULL,
+  mafCutoff = 0,
+  macCutoff = 0,
+  imissCutoff = 1,
   pipCutoffToSkip = 0,
   absZCutoffToSkip = 0,
   bfCutoffToSkip = 0,
@@ -105,6 +114,13 @@ colocboost variants to run.}
 \item{samples}{Optional character vector of sample IDs to restrict the
 analysis to; \code{NULL} (default) uses all samples.}
 
+\item{mafCutoff, macCutoff, imissCutoff}{Analysis-time filters applied to the
+summary-statistic sides against the LD reference panel: a variant whose
+panel genotypes fall below the cutoffs is dropped before the LD matrix is
+built. Defaults (\code{0}, \code{0}, \code{1}) filter nothing. See the
+Details section for how these relate to the individual-level cutoffs
+recorded on a \code{QtlDataset}.}
+
 \item{pipCutoffToSkip}{Individual-level pre-filter (ports the legacy
 \code{pip_cutoff_to_skip_ind}). Scalar (applied to every context) or a
 context-named numeric vector. For each context, every outcome is fit with a
@@ -130,8 +146,19 @@ coding); when FALSE, match on exact alleles only (names-only), so a ref/alt
 swap is treated as a distinct variant.}
 }
 \value{
-A list with elements \code{xqtl_coloc}, \code{joint_gwas},
-  \code{separate_gwas}, and \code{computing_time}.
+A \code{\linkS4class{ColocBoostResult}}: one element per
+  confidence set (CoS) across every analysis that ran, holding that set's
+  member variants with their \code{vcp}. The \code{analysis} column marks
+  which run each set came from (\code{xqtl_coloc}, \code{joint_gwas} or
+  \code{separate_gwas}), and \code{gwasStudy} distinguishes the per-study
+  \code{separate_gwas} runs. Outcome-specific (uncolocalized) sets are
+  included with \code{isColocalized = FALSE}.
+
+  Project it with \code{\link{getColocPairs}} (also available as
+  \code{as.data.frame}), \code{\link{getColocVariants}} or
+  \code{\link{getColocBoostOutcomes}}; timings are on
+  \code{\link{getComputingTime}} and the region-wide marginal
+  probabilities on \code{\link{getRegionVcp}}.
 }
 \description{
 Protocol-level multi-trait colocalization analysis using
@@ -164,6 +191,16 @@ for either side; colocboost has its own variable-selection algorithm.
           \code{getGenotypes()} / \code{getResidualizedGenotypes()}.
           The pipeline does \emph{not} run a separate
           individual-level QC pass.
+    \item \code{mafCutoff} / \code{macCutoff} / \code{imissCutoff} act
+          at ANALYSIS time on the sumstat sides, measured against the
+          \strong{LD reference panel}: a variant whose panel genotypes fall
+          below the cutoffs is dropped before the LD matrix is built. They
+          apply to a \code{QtlSumStats} QTL side and to a
+          \code{GwasSumStats} GWAS side (so they still bite when the QTL
+          side is individual-level). Defaults (\code{0}, \code{0},
+          \code{1}) filter nothing. Unlike
+          \code{summaryStatsQc(imputeOpts = ...)}, which only bounds what
+          RAISS will impute, these discard \emph{observed} variants.
     \item All summary-statistic QC (variant filters, harmonization
           against the \code{ldSketch}, LD-mismatch detection, RAISS
           imputation, etc.) lives in

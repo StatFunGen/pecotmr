@@ -3,8 +3,8 @@
 # === Tests migrated from test_s4Constructors.R (QtlFineMappingResult) ===
 
 test_that("QtlFineMappingResult: builds a collection keyed by 4-tuple", {
-    e1 <- .sc_makeFineMappingEntry(3)
-    e2 <- .sc_makeFineMappingEntry(3)
+    e1 <- .sc_makeFineMappingRow(3)
+    e2 <- .sc_makeFineMappingRow(3)
     res <- QtlFineMappingResult(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
@@ -24,7 +24,7 @@ test_that("QtlFineMappingResult: validity does not recurse on key subset (#546)"
     # QtlFineMappingResult class while dropping the required `entry` column;
     # older S4Vectors revalidates that intermediate and fails with
     # "missing columns: entry". Guard the reporter's exact scenario.
-    e <- .sc_makeFineMappingEntry(3)
+    e <- .sc_makeFineMappingRow(3)
     res <- QtlFineMappingResult(
         study = "s",
         context = "c",
@@ -38,13 +38,16 @@ test_that("QtlFineMappingResult: validity does not recurse on key subset (#546)"
 
     # A bare key-column subset is itself an invalid QtlFineMappingResult;
     # validity must never re-run over it.
-    sub <- res[, c("study", "context", "trait", "method"), drop = FALSE]
+    sub <- S4Vectors::mcols(res)[,
+        c("study", "context", "trait", "method"),
+        drop = FALSE
+    ]
     expect_false("entry" %in% names(sub))
 })
 
 
 test_that("QtlFineMappingResult: stores an LD sketch when supplied", {
-    e <- .sc_makeFineMappingEntry(3)
+    e <- .sc_makeFineMappingRow(3)
     gh <- .sc_makeGenotypeHandle()
     res <- QtlFineMappingResult(
         study = "s1",
@@ -59,7 +62,7 @@ test_that("QtlFineMappingResult: stores an LD sketch when supplied", {
 
 
 test_that("QtlFineMappingResult: errors on length mismatch", {
-    e <- .sc_makeFineMappingEntry(3)
+    e <- .sc_makeFineMappingRow(3)
     expect_error(
         QtlFineMappingResult(
             study = c("s1", "s2"),
@@ -74,8 +77,8 @@ test_that("QtlFineMappingResult: errors on length mismatch", {
 
 
 test_that("QtlFineMappingResult: validity rejects duplicate 4-tuples", {
-    e1 <- .sc_makeFineMappingEntry(3)
-    e2 <- .sc_makeFineMappingEntry(3)
+    e1 <- .sc_makeFineMappingRow(3)
+    e2 <- .sc_makeFineMappingRow(3)
     expect_error(
         QtlFineMappingResult(
             study = c("s1", "s1"),
@@ -90,8 +93,8 @@ test_that("QtlFineMappingResult: validity rejects duplicate 4-tuples", {
 
 
 test_that("QtlFineMappingResult: getFineMappingResult returns selected entry", {
-    e1 <- .sc_makeFineMappingEntry(3)
-    e2 <- .sc_makeFineMappingEntry(3)
+    e1 <- .sc_makeFineMappingRow(3)
+    e2 <- .sc_makeFineMappingRow(3)
     res <- QtlFineMappingResult(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
@@ -106,12 +109,18 @@ test_that("QtlFineMappingResult: getFineMappingResult returns selected entry", {
         trait = "t1",
         method = "susie"
     )
-    expect_identical(picked, e2)
+    # getFineMappingResult() returns the single-row COLLECTION for that tuple
+    # -- there is no detached entry object -- so compare what the row carries.
+    expect_s4_class(picked, "QtlFineMappingResult")
+    expect_equal(nrow(picked), 1L)
+    expect_identical(getVariantIds(picked), getVariantIds(e2))
+    expect_identical(getSusieFit(picked), getSusieFit(e2))
+    expect_equal(getPip(picked), .fmrRowPip(e2))
 })
 
 
 test_that("QtlFineMappingResult: getFineMappingResult errors on missing tuple", {
-    e <- .sc_makeFineMappingEntry(3)
+    e <- .sc_makeFineMappingRow(3)
     res <- QtlFineMappingResult(
         study = "s1",
         context = "c1",
@@ -133,7 +142,7 @@ test_that("QtlFineMappingResult: getFineMappingResult errors on missing tuple", 
 
 
 test_that("QtlFineMappingResult: single-row collection allows omitting selectors", {
-    e <- .sc_makeFineMappingEntry(3)
+    e <- .sc_makeFineMappingRow(3)
     res <- QtlFineMappingResult(
         study = "s1",
         context = "c1",
@@ -141,12 +150,16 @@ test_that("QtlFineMappingResult: single-row collection allows omitting selectors
         method = "susie",
         entry = list(e)
     )
-    expect_identical(getFineMappingResult(res), e)
+    picked <- getFineMappingResult(res)
+    expect_s4_class(picked, "QtlFineMappingResult")
+    expect_equal(nrow(picked), 1L)
+    expect_identical(getVariantIds(picked), .fmrPartsVariantIds(e))
+    expect_identical(getSusieFit(picked), .fmrPartsSusieFit(e))
 })
 
 
 test_that("QtlFineMappingResult: show prints summary", {
-    e <- .sc_makeFineMappingEntry(3)
+    e <- .sc_makeFineMappingRow(3)
     res <- QtlFineMappingResult(
         study = "s1",
         context = "c1",
@@ -159,7 +172,7 @@ test_that("QtlFineMappingResult: show prints summary", {
 
 
 test_that("QtlFineMappingResult: joint columns absent by default", {
-    e <- .sc_makeFineMappingEntry(3)
+    e <- .sc_makeFineMappingRow(3)
     res <- QtlFineMappingResult(
         study = "s1",
         context = "c1",
@@ -167,14 +180,14 @@ test_that("QtlFineMappingResult: joint columns absent by default", {
         method = "susie",
         entry = list(e)
     )
-    expect_false("jointStudies" %in% names(res))
-    expect_false("jointContexts" %in% names(res))
-    expect_false("jointTraits" %in% names(res))
+    expect_false("jointStudies" %in% pecotmr:::.tupleColumnNames(res))
+    expect_false("jointContexts" %in% pecotmr:::.tupleColumnNames(res))
+    expect_false("jointTraits" %in% pecotmr:::.tupleColumnNames(res))
 })
 
 
 test_that("QtlFineMappingResult: accepts jointContexts column", {
-    e <- .sc_makeFineMappingEntry(3)
+    e <- .sc_makeFineMappingRow(3)
     # Univariate susie at c1 + the c1 slice of an mvsusie joint over (c1, c2):
     # both real context c1, distinguished by method and the jointContexts tag.
     res <- QtlFineMappingResult(
@@ -185,13 +198,13 @@ test_that("QtlFineMappingResult: accepts jointContexts column", {
         entry = list(e, e),
         jointContexts = c(NA_character_, "c1;c2")
     )
-    expect_true("jointContexts" %in% names(res))
+    expect_true("jointContexts" %in% pecotmr:::.tupleColumnNames(res))
     expect_identical(res$jointContexts, c(NA_character_, "c1;c2"))
 })
 
 
 test_that("QtlFineMappingResult: jointStudies + jointTraits combine cleanly", {
-    e <- .sc_makeFineMappingEntry(3)
+    e <- .sc_makeFineMappingRow(3)
     # Three per-context rows sharing the real (s1, c1, t1) tuple, each a slice of
     # a different joint fit: univariate; a cross-study+trait mvsusieRss; a
     # cross-context mvsusie. The joint* tags carry each fit's co-fit membership.
@@ -212,7 +225,7 @@ test_that("QtlFineMappingResult: jointStudies + jointTraits combine cleanly", {
 
 
 test_that("QtlFineMappingResult: uniqueness distinguishes joint members", {
-    e <- .sc_makeFineMappingEntry(3)
+    e <- .sc_makeFineMappingRow(3)
     # Real scenario: context c1 participates in two different mvsusie joint fits
     # -- one over (c1, c2), one over (c1, c3) -- producing two c1 rows with the
     # same 4-tuple, kept distinct only by their jointContexts membership.
@@ -241,7 +254,7 @@ test_that("QtlFineMappingResult: uniqueness distinguishes joint members", {
 
 
 test_that("QtlFineMappingResult: length-mismatched joint vector errors", {
-    e <- .sc_makeFineMappingEntry(3)
+    e <- .sc_makeFineMappingRow(3)
     expect_error(
         QtlFineMappingResult(
             study = "s1",
@@ -361,8 +374,8 @@ test_that("QtlFineMappingResult: getTopLoci aggregates entries when selectors do
     # Two entries, no selectors: the old behaviour errored ("2 entries; pass
     # study/context/trait/method"). Now it stacks the per-variant tables,
     # prefixed with the row identity so variants stay attributable.
-    e1 <- .sc_makeFineMappingEntry(3)
-    e2 <- .sc_makeFineMappingEntry(2)
+    e1 <- .sc_makeFineMappingRow(3)
+    e2 <- .sc_makeFineMappingRow(2)
     res <- QtlFineMappingResult(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
@@ -373,20 +386,20 @@ test_that("QtlFineMappingResult: getTopLoci aggregates entries when selectors do
     agg <- getTopLoci(res, signalCutoff = 0)
     expect_equal(nrow(agg), 5L)
     expect_true(all(
-        c("study", "context", "trait", "region_id", "method") %in%
+        c("study", "context", "trait", "blockId", "method") %in%
             names(agg)
     ))
     expect_equal(agg$context, c("c1", "c1", "c1", "c2", "c2"))
     expect_true("variant_id" %in% names(agg))
-    # QTL results key on context/trait, so region_id is NA-filled.
-    expect_true(all(is.na(agg$region_id)))
-    # the stamped per-variant `method` must not duplicate the identity column
+    # QTL results key on context/trait, so blockId is NA-filled.
+    expect_true(all(is.na(agg$blockId)))
+    # the added per-variant `method` must not duplicate the identity column
     expect_equal(sum(names(agg) == "method"), 1L)
 })
 
 test_that("QtlFineMappingResult: getTopLoci with a full tuple keeps the bare (id-free) table", {
-    e1 <- .sc_makeFineMappingEntry(3)
-    e2 <- .sc_makeFineMappingEntry(2)
+    e1 <- .sc_makeFineMappingRow(3)
+    e2 <- .sc_makeFineMappingRow(2)
     res <- QtlFineMappingResult(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
@@ -407,8 +420,8 @@ test_that("QtlFineMappingResult: getTopLoci with a full tuple keeps the bare (id
 })
 
 test_that("QtlFineMappingResult: getTopLoci aggregates only the matching subset", {
-    e1 <- .sc_makeFineMappingEntry(3)
-    e2 <- .sc_makeFineMappingEntry(2)
+    e1 <- .sc_makeFineMappingRow(3)
+    e2 <- .sc_makeFineMappingRow(2)
     res <- QtlFineMappingResult(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
@@ -430,7 +443,7 @@ test_that("QtlFineMappingResult: getTopLoci on a single-row collection still car
         context = "c1",
         trait = "t1",
         method = "susie",
-        entry = list(.sc_makeFineMappingEntry(4))
+        entry = list(.sc_makeFineMappingRow(4))
     )
     tl <- getTopLoci(res, signalCutoff = 0)
     expect_equal(nrow(tl), 4L)
@@ -443,8 +456,8 @@ test_that("QtlFineMappingResult: getTopLoci on a single-row collection still car
 
 test_that("QtlFineMappingResult: getCs aggregates every entry's credible sets with identity columns", {
     # e1 (n=3) has cs_95 = susie_1/susie_1/susie_0 -> 2 CS members; e2 (n=2) -> 2.
-    e1 <- .sc_makeFineMappingEntry(3)
-    e2 <- .sc_makeFineMappingEntry(2)
+    e1 <- .sc_makeFineMappingRow(3)
+    e2 <- .sc_makeFineMappingRow(2)
     res <- QtlFineMappingResult(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
@@ -455,7 +468,7 @@ test_that("QtlFineMappingResult: getCs aggregates every entry's credible sets wi
     cs <- getCs(res)
     expect_equal(nrow(cs), 4L)
     expect_true(all(
-        c("study", "context", "trait", "region_id", "method", "variant_id") %in%
+        c("study", "context", "trait", "blockId", "method", "variant_id") %in%
             names(cs)
     ))
     expect_equal(cs$context, c("c1", "c1", "c2", "c2"))
@@ -472,8 +485,8 @@ test_that("QtlFineMappingResult: getCs aggregates every entry's credible sets wi
 })
 
 test_that("QtlFineMappingResult: getMarginalEffects aggregates every entry with identity columns", {
-    e1 <- .sc_makeFineMappingEntry(3)
-    e2 <- .sc_makeFineMappingEntry(2)
+    e1 <- .sc_makeFineMappingRow(3)
+    e2 <- .sc_makeFineMappingRow(2)
     res <- QtlFineMappingResult(
         study = c("s1", "s1"),
         context = c("c1", "c2"),
@@ -531,13 +544,17 @@ test_that("QtlFineMappingResult: getStudy/getContexts/getTraits/getMethodNames a
 
 
 test_that("getCvResult works at the QtlFineMappingResult collection level", {
-    tl <- data.frame(variant_id = "v1", pip = 0.5, stringsAsFactors = FALSE)
+    tl <- data.frame(
+        variant_id = "chr1:100:A:G",
+        pip = 0.5,
+        stringsAsFactors = FALSE
+    )
     cv <- list(
         samplePartition = data.frame(Sample = "s1", Fold = 1L),
         prediction = list(susie_predicted = matrix(0, 1, 1)),
         performance = list(susie_performance = matrix(0, 1, 6))
     )
-    e <- FineMappingEntry("v1", list(), tl, cvResult = cv)
+    e <- fineMappingRow("chr1:100:A:G", list(), tl, cvResult = cv)
     fmr <- QtlFineMappingResult(
         study = "S",
         context = "C",

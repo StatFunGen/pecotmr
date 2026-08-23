@@ -287,11 +287,11 @@ filterMixtureComponents <- function(
 #' cond <- c("brain", "blood", "muscle")
 #' p <- 8
 #' bhat <- matrix(rnorm(p * 3), p, 3,
-#'   dimnames = list(paste0("v", 1:p), cond))
+#'   dimnames = list(sprintf("chr1:%d:A:G", 100L * (1:p)), cond))
 #' sbhat <- matrix(abs(rnorm(p * 3)) + 0.1, p, 3,
-#'   dimnames = list(paste0("v", 1:p), cond))
+#'   dimnames = list(sprintf("chr1:%d:A:G", 100L * (1:p)), cond))
 #' dat <- list(bhat = bhat, sbhat = sbhat, Z = bhat / sbhat,
-#'   snp = paste0("v", 1:p))
+#'   snp = sprintf("chr1:%d:A:G", 100L * (1:p)))
 #' mashRandNullSample(dat, nRandom = 2L, nNull = 2L,
 #'   excludeCondition = character())
 #' @export
@@ -337,9 +337,13 @@ mashRandNullSample <- function(
 #' # Each object's variants must be uniquely keyed (row names); the two
 #' # objects share the same conditions (columns), which are aligned by name.
 #' a <- list(strong = list(z = matrix(rnorm(9), 3, 3,
-#'   dimnames = list(c("v1", "v2", "v3"), c("t1", "t2", "t3")))))
+#'   dimnames = list(
+#'     c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
+#'     c("t1", "t2", "t3")))))
 #' b <- list(strong = list(z = matrix(rnorm(9), 3, 3,
-#'   dimnames = list(c("v4", "v5", "v6"), c("t1", "t2", "t3")))))
+#'   dimnames = list(
+#'     c("chr1:400:A:G", "chr1:500:A:G", "chr1:600:A:G"),
+#'     c("t1", "t2", "t3")))))
 #' mergeMashData(a, b)
 #' @export
 mergeMashData <- function(resData, oneData) {
@@ -1120,7 +1124,7 @@ qtlSumStatsFromBetaMatrix <- function(
 # "auto" picks beta when every entry has BETA+SE, else z; mixed inputs error.
 # @noRd
 .mashResolveScale <- function(x, role, inputScale) {
-    entries <- x$entry
+    entries <- .collectionEntries(x)
     caps <- map(entries, .mashEntryCaps)
     allHaveBetaSe <- all(map_lgl(caps, "hasBetaSe"))
     allHaveZ <- all(map_lgl(caps, "hasZ"))

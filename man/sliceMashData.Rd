@@ -29,11 +29,11 @@ covariance matrix.
 cond <- c("brain", "blood", "muscle")
 p <- 8
 bhat <- matrix(rnorm(p * 3), p, 3,
-  dimnames = list(paste0("v", 1:p), cond))
+  dimnames = list(sprintf("chr1:\%d:A:G", 100L * (1:p)), cond))
 sbhat <- matrix(abs(rnorm(p * 3)) + 0.1, p, 3,
-  dimnames = list(paste0("v", 1:p), cond))
+  dimnames = list(sprintf("chr1:\%d:A:G", 100L * (1:p)), cond))
 dat <- list(bhat = bhat, sbhat = sbhat, Z = bhat / sbhat,
-  snp = paste0("v", 1:p))
+  snp = sprintf("chr1:\%d:A:G", 100L * (1:p)))
 vhat <- diag(3)
 dimnames(vhat) <- list(cond, cond)
 sliceMashData(dat, vhat = vhat, snps = 1:4, samples = NULL)

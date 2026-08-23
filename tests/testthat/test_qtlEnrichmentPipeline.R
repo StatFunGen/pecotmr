@@ -15,7 +15,7 @@ context("qtlEnrichmentPipeline")
         path = path,
         format = "gds",
         snpInfo = data.frame(
-            SNP = paste0("v", seq_len(snp_n)),
+            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -29,7 +29,7 @@ context("qtlEnrichmentPipeline")
 }
 
 .qep_makeFmEntry <- function(
-    variant_ids = paste0("v", 1:5),
+    variant_ids = sprintf("chr1:%d:A:G", 100L * (1:5)),
     pip = seq(0.9, by = -0.15, length.out = 5L),
     alpha = NULL
 ) {
@@ -46,7 +46,7 @@ context("qtlEnrichmentPipeline")
         stringsAsFactors = FALSE
     )
     fit <- list(alpha = alpha, pip = setNames(pip, variant_ids), V = 0.1)
-    FineMappingEntry(variantIds = variant_ids, susieFit = fit, topLoci = tl)
+    fineMappingRow(variantIds = variant_ids, susieFit = fit, topLoci = tl)
 }
 
 .qep_makeGwasFmr <- function(
@@ -59,7 +59,7 @@ context("qtlEnrichmentPipeline")
     methodVec <- character(0)
     for (k in seq_len(n_blocks)) {
         # Different variants per block to avoid duplication.
-        ids <- paste0("v", (k - 1L) * 3L + (1:3))
+        ids <- sprintf("chr1:%d:A:G", 100L * ((k - 1L) * 3L + (1:3)))
         entries[[k]] <- .qep_makeFmEntry(
             variant_ids = ids,
             pip = c(0.5, 0.2, 0.1)
@@ -87,7 +87,7 @@ context("qtlEnrichmentPipeline")
     methods <- rep("susie", n)
     entries <- replicate(
         n,
-        .qep_makeFmEntry(variant_ids = paste0("v", 1:5)),
+        .qep_makeFmEntry(variant_ids = sprintf("chr1:%d:A:G", 100L * (1:5))),
         simplify = FALSE
     )
     QtlFineMappingResult(
@@ -199,8 +199,8 @@ test_that("qtlEnrichmentPipeline: distinguishes two QTL studies that share a con
     # tagging the same context "shared_ctx". Per-study filtering must
     # keep them separate (a context-only filter would merge them and
     # produce a single enrichment row instead of two).
-    e1 <- .qep_makeFmEntry(variant_ids = paste0("v", 1:5))
-    e2 <- .qep_makeFmEntry(variant_ids = paste0("v", 1:5))
+    e1 <- .qep_makeFmEntry(variant_ids = sprintf("chr1:%d:A:G", 100L * (1:5)))
+    e2 <- .qep_makeFmEntry(variant_ids = sprintf("chr1:%d:A:G", 100L * (1:5)))
     qfmr <- QtlFineMappingResult(
         study = c("Q1", "Q2"),
         context = c("shared_ctx", "shared_ctx"),
@@ -253,11 +253,11 @@ test_that("qtlEnrichmentPipeline: qtlEnrichment failure produces a warning + ski
 test_that("qtlEnrichmentPipeline: empty input collections yield the empty schema", {
     # Build a GwasFineMappingResult whose entries have empty fits so the PIP
     # vector is empty.
-    emptyEntry <- FineMappingEntry(
-        variantIds = "v1",
+    emptyEntry <- fineMappingRow(
+        variantIds = "chr1:100:A:G",
         susieFit = list(), # no pip -> .enrBuildGwasPipVector returns numeric(0)
         topLoci = data.frame(
-            variant_id = "v1",
+            variant_id = "chr1:100:A:G",
             pip = 0.1,
             stringsAsFactors = FALSE
         )
@@ -299,16 +299,22 @@ test_that(".enrBuildGwasPipVector: extracts pip per study", {
     gfmr <- .qep_makeGwasFmr()
     out <- pecotmr:::.enrBuildGwasPipVector(gfmr, "G1")
     expect_equal(length(out), 3L)
-    expect_setequal(names(out), paste0("v", 1:3))
+    expect_setequal(names(out), sprintf("chr1:%d:A:G", 100L * (1:3)))
 })
 
 test_that(".enrBuildGwasPipVector: deduplicates identical PIPs across blocks", {
     # Two rows under the same study, same method, different LD blocks
-    # (distinct region_ids auto-supplied by the constructor) — the
+    # (distinct blockIds auto-supplied by the constructor) — the
     # genome-wide multi-block shape. Both rows share v1 with the same
     # PIP, so dedup must collapse it.
-    e1 <- .qep_makeFmEntry(variant_ids = c("v1", "v2"), pip = c(0.5, 0.2))
-    e2 <- .qep_makeFmEntry(variant_ids = c("v1", "v3"), pip = c(0.5, 0.4))
+    e1 <- .qep_makeFmEntry(
+        variant_ids = c("chr1:100:A:G", "chr1:200:A:G"),
+        pip = c(0.5, 0.2)
+    )
+    e2 <- .qep_makeFmEntry(
+        variant_ids = c("chr1:100:A:G", "chr1:300:A:G"),
+        pip = c(0.5, 0.4)
+    )
     g <- GwasFineMappingResult(
         study = c("G1", "G1"),
         method = c("susie", "susie"),
@@ -316,21 +322,27 @@ test_that(".enrBuildGwasPipVector: deduplicates identical PIPs across blocks", {
         ldSketch = .qep_makeHandle()
     )
     out <- pecotmr:::.enrBuildGwasPipVector(g, "G1")
-    expect_setequal(names(out), c("v1", "v2", "v3"))
+    expect_setequal(
+        names(out),
+        c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G")
+    )
 })
 
 test_that(".enrBuildGwasPipVector: conflicting PIPs across blocks errors", {
-    # Same variant 'v1' appears in two LD blocks with different PIPs —
-    # .enrBuildGwasPipVector must refuse to merge them silently.
+    # The shared variant chr1:100 appears in two OVERLAPPING blocks with
+    # different PIPs — .enrBuildGwasPipVector must refuse to merge them
+    # silently. The two rows must span different ranges, because row identity
+    # is (study, method, range): two rows over the same span are the same
+    # block by definition, not two blocks.
     e1 <- .qep_makeFmEntry(
-        variant_ids = c("v1"),
-        pip = 0.5,
-        alpha = matrix(0.5, 1, 1)
+        variant_ids = c("chr1:100:A:G", "chr1:200:A:G"),
+        pip = c(0.5, 0.1),
+        alpha = matrix(c(0.5, 0.1), nrow = 1)
     )
     e2 <- .qep_makeFmEntry(
-        variant_ids = c("v1"),
-        pip = 0.8,
-        alpha = matrix(0.8, 1, 1)
+        variant_ids = c("chr1:100:A:G", "chr1:300:A:G"),
+        pip = c(0.8, 0.1),
+        alpha = matrix(c(0.8, 0.1), nrow = 1)
     )
     g <- GwasFineMappingResult(
         study = c("G1", "G1"),
@@ -701,11 +713,11 @@ test_that(".enrBuildGwasPipVector: skips a block whose pip length disagrees with
     # Unnamed pip of length 2 against 3 variant ids -> ids come from
     # getVariantIds and length(ids) != length(pip) -> the block is skipped,
     # leaving no pieces -> numeric(0).
-    badEntry <- FineMappingEntry(
-        variantIds = c("v1", "v2", "v3"),
+    badEntry <- fineMappingRow(
+        variantIds = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
         susieFit = list(pip = c(0.1, 0.2)),
         topLoci = data.frame(
-            variant_id = c("v1", "v2", "v3"),
+            variant_id = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
             pip = c(0.5, 0.3, 0.2),
             stringsAsFactors = FALSE
         )
@@ -725,11 +737,11 @@ test_that(".enrBuildGwasPipVector: skips a block whose pip length disagrees with
 # ===========================================================================
 
 test_that(".enrBuildQtlRegionsList: skips an entry whose fit lacks alpha/pip", {
-    badEntry <- FineMappingEntry(
-        variantIds = "v1",
+    badEntry <- fineMappingRow(
+        variantIds = "chr1:100:A:G",
         susieFit = list(),
         topLoci = data.frame(
-            variant_id = "v1",
+            variant_id = "chr1:100:A:G",
             pip = 0.1,
             stringsAsFactors = FALSE
         )
@@ -751,13 +763,13 @@ test_that(".enrBuildQtlRegionsList: skips an entry whose fit lacks alpha/pip", {
 test_that(".enrBuildQtlRegionsList: skips a fit with no V and no prior_variance", {
     noVfit <- list(
         alpha = matrix(c(0.6, 0.4), nrow = 1),
-        pip = setNames(c(0.6, 0.4), c("v1", "v2"))
+        pip = setNames(c(0.6, 0.4), c("chr1:100:A:G", "chr1:200:A:G"))
     )
-    entry <- FineMappingEntry(
-        variantIds = c("v1", "v2"),
+    entry <- fineMappingRow(
+        variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
         susieFit = noVfit,
         topLoci = data.frame(
-            variant_id = c("v1", "v2"),
+            variant_id = c("chr1:100:A:G", "chr1:200:A:G"),
             pip = c(0.6, 0.4),
             stringsAsFactors = FALSE
         )
@@ -782,11 +794,11 @@ test_that(".enrBuildQtlRegionsList: names an unnamed pip from the entry's varian
         pip = c(0.6, 0.4), # unnamed -> names assigned from getVariantIds
         V = 0.1
     )
-    entry <- FineMappingEntry(
-        variantIds = c("v1", "v2"),
+    entry <- fineMappingRow(
+        variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
         susieFit = unnamedPipFit,
         topLoci = data.frame(
-            variant_id = c("v1", "v2"),
+            variant_id = c("chr1:100:A:G", "chr1:200:A:G"),
             pip = c(0.6, 0.4),
             stringsAsFactors = FALSE
         )
@@ -801,7 +813,7 @@ test_that(".enrBuildQtlRegionsList: names an unnamed pip from the entry's varian
     )
     out <- pecotmr:::.enrBuildQtlRegionsList(qfmr, "Q1", "c1")
     expect_equal(length(out), 1L)
-    expect_equal(names(out[[1L]]$pip), c("v1", "v2"))
+    expect_equal(names(out[[1L]]$pip), c("chr1:100:A:G", "chr1:200:A:G"))
     expect_equal(out[[1L]]$prior_variance, 0.1)
 })
 
@@ -835,11 +847,11 @@ test_that("qtlEnrichmentPipeline: alignTuple cache is reused across GWAS studies
     # first study (cache miss) and served from cache for the second
     # (alignTuple early-return branch, line 119).
     e1 <- .qep_makeFmEntry(
-        variant_ids = paste0("v", 1:3),
+        variant_ids = sprintf("chr1:%d:A:G", 100L * (1:3)),
         pip = c(0.5, 0.2, 0.1)
     )
     e2 <- .qep_makeFmEntry(
-        variant_ids = paste0("v", 1:3),
+        variant_ids = sprintf("chr1:%d:A:G", 100L * (1:3)),
         pip = c(0.4, 0.3, 0.2)
     )
     gfmr <- GwasFineMappingResult(
@@ -863,11 +875,11 @@ test_that("qtlEnrichmentPipeline: alignTuple cache is reused across GWAS studies
 
 test_that("qtlEnrichmentPipeline: a tuple with no usable QTL regions warns and is skipped", {
     gfmr <- .qep_makeGwasFmr()
-    emptyQtlEntry <- FineMappingEntry(
-        variantIds = "v1",
+    emptyQtlEntry <- fineMappingRow(
+        variantIds = "chr1:100:A:G",
         susieFit = list(),
         topLoci = data.frame(
-            variant_id = "v1",
+            variant_id = "chr1:100:A:G",
             pip = 0.1,
             stringsAsFactors = FALSE
         )

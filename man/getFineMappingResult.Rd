@@ -39,10 +39,10 @@ when the collection has more than one row; optional when the collection has
 a single row.}
 }
 \value{
-A \code{FineMappingEntry} object.
+A \code{FineMappingRow} object.
 }
 \description{
-Return the \code{FineMappingEntry} for one \code{(study,
+Return the \code{FineMappingRow} for one \code{(study,
   context, trait, method)} row of a \code{FineMappingResult} collection.
 }
 \examples{

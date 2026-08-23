@@ -1,40 +1,55 @@
 # =============================================================================
 # QtlDataset S4 class
 # -----------------------------------------------------------------------------
-# Single-study individual-level QTL container: a GenotypeHandle, a named
-# list of per-context phenotype SummarizedExperiments, optional genotype
-# covariates, and constructor-level QC knobs (mafCutoff, macCutoff,
-# xvarCutoff, imissCutoff, keepSamples, keepVariants). Backed by lazy
-# getGenotypes / getResidualizedGenotypes accessors that apply QC at
-# extraction time. The entry point for individual-level fine-mapping
-# (fineMappingPipeline), TWAS weight learning (twasWeightsPipeline), and
-# multi-study composition (MultiStudyQtlDataset).
+# Single-study individual-level QTL container, built on MultiAssayExperiment:
+# one RangedSummarizedExperiment per QTL context, plus a `genotype` experiment
+# whose assay reads lazily through a GenotypeHandle. Adds the handle itself and
+# constructor-level QC knobs (mafCutoff, macCutoff, xvarCutoff, imissCutoff,
+# keepVariants, keepIndel), which the getGenotypes / getResidualizedGenotypes
+# accessors apply at extraction time. The entry point for individual-level
+# fine-mapping (fineMappingPipeline), TWAS weight learning
+# (twasWeightsPipeline), and multi-study composition (MultiStudyQtlDataset).
 # =============================================================================
 
 #' @include AllGenerics.R
 NULL
 
 #' @title QTL Dataset (individual-level data for one study)
-#' @description S4 container for a single QTL study's regional data. Holds a
-#'   genotype handle plus per-context \code{SummarizedExperiment} objects
-#'   carrying molecular-trait measurements. Each context's SE has
-#'   \code{rowRanges} describing per-trait genomic positions and \code{colData}
-#'   carrying per-context phenotype covariates. A single matrix of
-#'   genotype-derived covariates (e.g., ancestry PCs) applies across contexts.
+#' @description S4 container for a single QTL study's regional data,
+#'   extending \code{MultiAssayExperiment}. Every QTL context is one
+#'   \code{RangedSummarizedExperiment}: rows are molecular traits positioned
+#'   by \code{rowRanges}, columns are samples, and per-context phenotype
+#'   covariates sit in that experiment's \code{colData}. Alongside them a
+#'   \code{genotype} experiment carries variants in its \code{rowRanges},
+#'   dosages in a lazily-read \code{DelayedArray} assay, and
+#'   genotype-derived covariates (e.g., ancestry PCs) in its own
+#'   \code{colData}. The \code{sampleMap} records which samples each
+#'   experiment observes, so contexts need not share a sample set.
+#'
+#'   Extending \code{MultiAssayExperiment} means the multi-assay surface
+#'   applies directly: \code{experiments()}, \code{colData()},
+#'   \code{sampleMap()}, and two-dimensional subsetting
+#'   (\code{x[, samples, contexts]}), all of which preserve the class and its
+#'   own slots. The genotype assay stays unread until an operation touches it.
+#'
+#'   One caveat comes with that laziness: \code{longForm()} and
+#'   \code{wideFormat()} fail on a delayed assay, with
+#'   \code{MultiAssayExperiment} reshaping it to zero rows and reporting
+#'   "replacement has 0 rows". Subsetting does \emph{not} sidestep it,
+#'   because selecting contexts keeps the genotype experiment. Reshape a
+#'   context experiment on its own, or drop the genotype one by coercing
+#'   first: \code{longForm(as(x, "MultiAssayExperiment")[, , "brain"])}.
+#'   Reshaping genotypes is variants x samples and enormous on real data, so
+#'   it is rarely what you want regardless; anything that materialises a tidy
+#'   view of that experiment reads its dosages.
 #'
 #' @slot study Character (length 1). Study identifier; used in collection
 #'   classes to tag downstream \code{FineMappingResult} / \code{TwasWeights}
 #'   entries.
 #' @slot genotypes A \code{GenotypeHandle} for lazy access to genotype dosages.
-#' @slot phenotypes Named list of \code{SummarizedExperiment} objects, one per
-#'   QTL context. Each SE has rows = molecular traits with positions in
-#'   \code{rowRanges(se)}, columns = samples, and per-context covariates in
-#'   \code{colData(se)}. Different contexts may carry different subsets of
-#'   traits (rows); traits shared across contexts must have identical
-#'   \code{rowRanges} entries (enforced by validity).
-#' @slot genotypeCovariates Numeric matrix (samples x covariates) of
-#'   genotype-derived covariates applied uniformly across all contexts (e.g.,
-#'   ancestry PCs).
+#'   The \code{genotype} experiment's assay reads through this handle; the
+#'   extraction accessors read it directly, so that QC can be applied per
+#'   block.
 #' @slot scaleResiduals Logical (length 1). Whether residualization accessors
 #'   scale residuals to unit variance.
 #' @slot mafCutoff Numeric (length 1). Minor allele frequency threshold;
@@ -51,35 +66,45 @@ NULL
 #' @slot imissCutoff Numeric (length 1). Per-sample genotype-missingness
 #'   threshold; samples with a missing-genotype rate above this are dropped at
 #'   extraction time. Default 0 (no filter).
-#' @slot keepSamples Character vector of sample identifiers to retain prior to
-#'   per-block QC; intersected with the genotype handle's \code{sampleIds} and
-#'   the \code{samples} argument of \code{getGenotypes()}. Length 0 means no
-#'   restriction.
 #' @slot keepVariants Character vector of variant identifiers to retain prior to
 #'   per-block QC. Length 0 means no restriction.
 #' @slot keepIndel Logical (length 1). When \code{FALSE}, indel variants
 #'   (alleles that are not single nucleotides) are dropped at extraction time.
 #'   Default \code{TRUE}.
+#' @importClassesFrom MultiAssayExperiment MultiAssayExperiment
 #' @export
 setClass(
     "QtlDataset",
+    contains = "MultiAssayExperiment",
     representation(
         study = "character",
         genotypes = "GenotypeHandle",
-        phenotypes = "list",
-        genotypeCovariates = "matrix",
         scaleResiduals = "logical",
         mafCutoff = "numeric",
         macCutoff = "numeric",
         xvarCutoff = "numeric",
         imissCutoff = "numeric",
-        keepSamples = "character",
         keepVariants = "character",
         keepIndel = "logical"
     ),
     prototype = prototype(keepIndel = TRUE),
     validity = function(object) .validateQtlDataset(object)
 )
+
+# The reserved experiment name holding genotype dosages; every other
+# experiment in the MAE is a QTL context.
+# @noRd
+.QTL_GENO_EXPERIMENT <- "genotype"
+
+# The per-context phenotype experiments as a plain named list, in
+# experiment order. The genotype experiment is not a context.
+# @noRd
+.qtlPhenotypeList <- function(object) {
+    exps <- MultiAssayExperiment::experiments(object)
+    nms <- setdiff(names(exps), .QTL_GENO_EXPERIMENT)
+    out <- as.list(exps)
+    out[nms]
+}
 
 # Validity for QtlDataset: scalar/cutoff slots, the phenotypes list, and
 # cross-context trait-position consistency. Returns TRUE or an error vector.
@@ -121,15 +146,17 @@ setClass(
     errors
 }
 
-# phenotypes must be a non-empty, uniquely + non-empty-named list of
-# SummarizedExperiments.
+# Shape checks on the phenotype list handed to the constructor. Run before
+# the MultiAssayExperiment is assembled, because a malformed list makes
+# ExperimentList fail first with a message about experiments rather than
+# about contexts. Returns an error vector.
 # @noRd
-.qtlValidatePhenotypes <- function(object) {
+.qtlCheckPhenotypeList <- function(phenotypes) {
     errors <- character()
-    if (length(object@phenotypes) == 0L) {
+    if (length(phenotypes) == 0L) {
         errors <- c(errors, "'phenotypes' must not be empty")
     }
-    contextNames <- names(object@phenotypes)
+    contextNames <- names(phenotypes)
     if (
         is.null(contextNames) ||
             any(str_length(contextNames) == 0L, na.rm = TRUE) ||
@@ -141,9 +168,17 @@ setClass(
         )
     } else if (n_distinct(contextNames) < length(contextNames)) {
         errors <- c(errors, "context names in 'phenotypes' must be unique")
+    } else if (is_in(.QTL_GENO_EXPERIMENT, contextNames)) {
+        errors <- c(
+            errors,
+            glue(
+                "'{.QTL_GENO_EXPERIMENT}' is reserved for the genotype ",
+                "experiment and cannot name a context"
+            )
+        )
     }
-    for (ctx in seq_along(object@phenotypes)) {
-        se <- object@phenotypes[[ctx]]
+    for (ctx in seq_along(phenotypes)) {
+        se <- phenotypes[[ctx]]
         if (!methods::is(se, "SummarizedExperiment")) {
             errors <- c(
                 errors,
@@ -152,7 +187,33 @@ setClass(
                     "(got {class(se)[[1L]]})"
                 )
             )
+        } else if (is.null(colnames(se))) {
+            errors <- c(
+                errors,
+                glue(
+                    "phenotypes[[{ctx}]] has no column names. Which samples ",
+                    "a context observes is recorded in the sampleMap, so ",
+                    "every context must name its samples"
+                )
+            )
         }
+    }
+    errors
+}
+
+# The MAE must carry the genotype experiment plus at least one context.
+# @noRd
+.qtlValidatePhenotypes <- function(object) {
+    exps <- MultiAssayExperiment::experiments(object)
+    errors <- character()
+    if (!is_in(.QTL_GENO_EXPERIMENT, names(exps))) {
+        errors <- c(
+            errors,
+            glue("experiment '{.QTL_GENO_EXPERIMENT}' is missing")
+        )
+    }
+    if (length(.qtlPhenotypeList(object)) == 0L) {
+        errors <- c(errors, "'phenotypes' must not be empty")
     }
     errors
 }
@@ -171,15 +232,16 @@ setClass(
 # A trait shared across contexts must have consistent rowRanges everywhere.
 # @noRd
 .qtlValidateTraitPositions <- function(object) {
-    allSe <- length(object@phenotypes) > 1L &&
-        all(map_lgl(object@phenotypes, methods::is, "SummarizedExperiment"))
+    pheno <- .qtlPhenotypeList(object)
+    allSe <- length(pheno) > 1L &&
+        all(map_lgl(pheno, methods::is, "SummarizedExperiment"))
     if (!allSe) {
         return(character())
     }
     errors <- character()
     traitToRange <- list()
-    for (ctx in seq_along(object@phenotypes)) {
-        se <- object@phenotypes[[ctx]]
+    for (ctx in seq_along(pheno)) {
+        se <- pheno[[ctx]]
         rr <- SummarizedExperiment::rowRanges(se)
         ids <- rownames(se)
         if (length(rr) != length(ids)) {
@@ -209,17 +271,22 @@ setClass(
 # =============================================================================
 
 #' @title Create a QtlDataset Object
-#' @description Construct a \code{QtlDataset} S4 object containing one study's
-#'   individual-level QTL data: a genotype handle and a named list of
-#'   \code{SummarizedExperiment} objects (one per QTL context), plus
-#'   genotype-derived covariates and a residual-scaling flag.
+#' @description Construct a \code{QtlDataset}: one study's individual-level
+#'   QTL data as a \code{MultiAssayExperiment}. The genotype handle becomes a
+#'   \code{genotype} experiment whose dosage assay reads lazily through it,
+#'   and each named phenotype \code{SummarizedExperiment} becomes one
+#'   context experiment. The \code{sampleMap} is derived from the column
+#'   names actually present in each, so contexts observing different sample
+#'   subsets are recorded rather than assumed away.
 #' @param study Character (length 1). Study identifier.
 #' @param genotypes A \code{GenotypeHandle}.
 #' @param phenotypes Named list of \code{SummarizedExperiment} objects, keyed by
 #'   context. Each SE must have \code{rowRanges} carrying trait positions and
-#'   \code{colData} carrying per-context phenotype covariates.
+#'   \code{colData} carrying per-context phenotype covariates. The name
+#'   \code{"genotype"} is reserved.
 #' @param genotypeCovariates Numeric matrix of genotype-derived covariates
-#'   (e.g., ancestry PCs); rows are samples.
+#'   (e.g., ancestry PCs); rows are samples. Becomes the \code{colData} of the
+#'   genotype experiment.
 #' @param scaleResiduals Logical (length 1). Default \code{TRUE}.
 #' @param mafCutoff Numeric (length 1). Minor allele frequency threshold;
 #'   variants with \code{MAF < mafCutoff} are dropped at extraction time inside
@@ -235,10 +302,10 @@ setClass(
 #' @param imissCutoff Numeric (length 1). Per-sample genotype-missingness
 #'   threshold; samples with a missing-genotype rate above this are dropped at
 #'   extraction time. Default 0 (no filter).
-#' @param keepSamples Character vector of sample identifiers to retain prior to
-#'   per-block QC; intersected with the genotype handle's \code{sampleIds} and
-#'   the \code{samples} argument of \code{getGenotypes()}. Length 0 means no
-#'   restriction.
+#' @param keepSamples Character vector of sample identifiers to retain. The
+#'   dataset is subset to them, narrowing \code{colData} and
+#'   \code{sampleMap} together, so the sample set has one home rather than
+#'   two. Length 0 means no restriction.
 #' @param keepVariants Character vector of variant identifiers to retain prior
 #'   to per-block QC. Length 0 means no restriction.
 #' @param keepIndel Logical (length 1). When \code{FALSE}, variants whose
@@ -272,23 +339,304 @@ QtlDataset <- function(
     keepVariants = character(0),
     keepIndel = TRUE
 ) {
-    obj <- new(
+    errors <- .qtlCheckPhenotypeList(phenotypes)
+    if (length(errors) > 0L) {
+        abort(str_flatten(errors, "\n"))
+    }
+    if (!methods::is(genotypes, "GenotypeHandle")) {
+        abort(glue(
+            "'genotypes' must be a GenotypeHandle ",
+            "(got {class(genotypes)[[1L]]})"
+        ))
+    }
+    experiments <- c(
+        set_names(
+            list(.qtlGenotypeExperiment(genotypes, genotypeCovariates)),
+            .QTL_GENO_EXPERIMENT
+        ),
+        as.list(phenotypes)
+    )
+    mae <- MultiAssayExperiment::MultiAssayExperiment(
+        experiments = experiments,
+        colData = .qtlPrimaryColData(experiments),
+        sampleMap = .qtlSampleMap(experiments)
+    )
+    obj <- methods::new(
         "QtlDataset",
+        .qtlRestrictSamples(mae, keepSamples),
         study = as.character(study),
         genotypes = genotypes,
-        phenotypes = phenotypes,
-        genotypeCovariates = as.matrix(genotypeCovariates),
         scaleResiduals = isTRUE(scaleResiduals),
         mafCutoff = as.numeric(mafCutoff),
         macCutoff = as.numeric(macCutoff),
         xvarCutoff = as.numeric(xvarCutoff),
         imissCutoff = as.numeric(imissCutoff),
-        keepSamples = as.character(keepSamples),
         keepVariants = as.character(keepVariants),
         keepIndel = isTRUE(keepIndel)
     )
     validObject(obj)
     obj
+}
+
+#' @describeIn QtlDataset-class Subset by feature, sample and experiment.
+#'   Selecting experiments selects among \emph{contexts}: the genotype
+#'   experiment is the substrate every context is interpreted against rather
+#'   than one of the things being chosen between, so it is always retained.
+#' @param x A \code{QtlDataset}.
+#' @param i,j,k Feature, sample and experiment subscripts, as for
+#'   \code{\link[MultiAssayExperiment]{MultiAssayExperiment}}.
+#' @param ... Passed on to row subsetting.
+#' @param drop Passed through to \code{MultiAssayExperiment}: when
+#'   \code{TRUE}, experiments the subset leaves empty are removed.
+#' @export
+setMethod("[", "QtlDataset", function(x, i, j, k, ..., drop = FALSE) {
+    if (missing(k)) {
+        return(methods::callNextMethod())
+    }
+    # The experiment axis is applied here rather than by rewriting `k` and
+    # deferring: setMethod() moves a method with extra formals into a
+    # generated .local(), and callNextMethod() from inside it re-dispatches
+    # on the ORIGINAL arguments, so a reassigned `k` never arrives. The
+    # remaining axes then go back through this method with no experiment
+    # subscript, which does reach the inherited one.
+    nms <- names(MultiAssayExperiment::experiments(x))
+    out <- MultiAssayExperiment::subsetByAssay(
+        x,
+        .qtlSelectExperiments(k, nms)
+    )
+    if (missing(i) && missing(j)) {
+        return(out)
+    }
+    if (missing(i)) {
+        return(out[, j, ])
+    }
+    if (missing(j)) {
+        return(out[i, , ])
+    }
+    out[i, j, ]
+})
+
+#' @describeIn QtlDataset-class Reshape the measurements into one long
+#'   \code{DataFrame}. Only the QTL contexts are reshaped: the genotype
+#'   experiment is the substrate they are interpreted against rather than a
+#'   measurement, and being variants x samples it would dwarf them. Pass
+#'   \code{genotype = TRUE} to include it, which reads the dosages into
+#'   memory -- \code{MultiAssayExperiment} cannot reshape a delayed assay,
+#'   and fails with "replacement has 0 rows" if asked to.
+#'
+#'   \code{wideFormat()} has no such method: it is a plain function rather
+#'   than a generic, and it reshapes the \code{ExperimentList} directly, so
+#'   there is nothing to dispatch on. Coerce first --
+#'   \code{wideFormat(as(x, "MultiAssayExperiment")[, , contexts])}.
+#' @param object A \code{QtlDataset}.
+#' @param genotype Logical (length 1), default \code{FALSE}. Include the
+#'   genotype experiment, reading its dosages into memory to do so.
+#' @importFrom MultiAssayExperiment longForm
+#' @export
+setMethod("longForm", "QtlDataset", function(object, ..., genotype = FALSE) {
+    MultiAssayExperiment::longForm(
+        .qtlReshapeSource(object, genotype),
+        ...
+    )
+})
+
+# The object a reshape runs over. Dropping the genotype experiment is both
+# the useful default -- a caller asking for the measurements does not mean
+# every dosage -- and the working one, since a delayed assay cannot be
+# reshaped at all.
+# @noRd
+.qtlReshapeSource <- function(x, genotype) {
+    mae <- methods::as(x, "MultiAssayExperiment")
+    if (isTRUE(genotype)) {
+        return(.qtlRealizeDosages(mae))
+    }
+    .qtlMuffleDrop(MultiAssayExperiment::subsetByAssay(mae, getContexts(x)))
+}
+
+# Silence the warning and the message the drop is guaranteed to raise --
+# MultiAssayExperiment announces the same non-news twice. Omitting the
+# genotype experiment is this method's documented behaviour, so saying so on
+# every call is noise. Anything else still gets through.
+# @noRd
+.qtlMuffleDrop <- function(expr) {
+    withCallingHandlers(
+        expr,
+        warning = function(w) {
+            if (str_detect(conditionMessage(w), "'experiments' dropped")) {
+                invokeRestart("muffleWarning")
+            }
+        },
+        message = function(m) {
+            if (str_detect(conditionMessage(m), "harmonizing input")) {
+                invokeRestart("muffleMessage")
+            }
+        }
+    )
+}
+
+# Read the dosages into memory so the reshape can see them.
+# @noRd
+.qtlRealizeDosages <- function(mae) {
+    exps <- MultiAssayExperiment::experiments(mae)
+    se <- exps[[.QTL_GENO_EXPERIMENT]]
+    SummarizedExperiment::assay(se, "dosage") <- as.matrix(
+        SummarizedExperiment::assay(se, "dosage")
+    )
+    exps[[.QTL_GENO_EXPERIMENT]] <- se
+    MultiAssayExperiment::experiments(mae) <- exps
+    mae
+}
+
+# Resolve an experiment subscript to names, always keeping the genotype
+# experiment. Dropping it would leave an object that fails its own validity
+# and has silently lost the genotype covariates, since those live in that
+# experiment's colData.
+# @noRd
+.qtlSelectExperiments <- function(k, nms) {
+    sel <- nms[.qtlExperimentIndex(k, nms)]
+    contexts <- setdiff(sel, .QTL_GENO_EXPERIMENT)
+    if (length(contexts) == 0L) {
+        known <- setdiff(nms, .QTL_GENO_EXPERIMENT)
+        abort(glue(
+            "subscript selects no QTL context; a QtlDataset must keep at ",
+            "least one of: {str_flatten(known, ', ')}"
+        ))
+    }
+    unique(c(.QTL_GENO_EXPERIMENT, contexts))
+}
+
+# Normalize a character / logical / numeric experiment subscript to indices.
+# @noRd
+.qtlExperimentIndex <- function(k, nms) {
+    if (is.character(k)) {
+        return(match(k, nms))
+    }
+    if (is.logical(k)) {
+        return(which(rep(k, length.out = length(nms))))
+    }
+    as.integer(k)
+}
+
+# Narrow a dataset (or a bare MAE) to a sample set, keeping colData and
+# sampleMap in step. Samples the object does not have are ignored rather
+# than an error, matching how the retired keepSamples slot was intersected.
+# @noRd
+.qtlRestrictSamples <- function(x, keepSamples) {
+    if (length(keepSamples) == 0L) {
+        return(x)
+    }
+    ids <- rownames(MultiAssayExperiment::colData(x))
+    # Index positionally. A character subscript matching nothing is an error
+    # in MultiAssayExperiment, while an empty positional one is simply an
+    # empty result -- and a keep set disjoint from the panel is a legitimate
+    # request for no samples, not a mistake.
+    x[, which(is_in(ids, as.character(keepSamples))), ]
+}
+
+# Replace the genotype handle, rebuilding the genotype experiment along with
+# it. The handle is deliberately held twice -- once as a slot, once inside
+# the assay's seed -- because that is what lets the assay read lazily. Moving
+# one without the other would leave the dosages describing a different panel
+# from the one the extraction accessors read, so nothing may set the slot
+# directly.
+# @noRd
+.qtlWithGenotypeHandle <- function(x, handle) {
+    exps <- MultiAssayExperiment::experiments(x)
+    gCov <- .qtlColDataMatrix(exps[[.QTL_GENO_EXPERIMENT]])
+    exps[[.QTL_GENO_EXPERIMENT]] <- .qtlGenotypeExperiment(handle, gCov)
+    MultiAssayExperiment::experiments(x) <- exps
+    x@genotypes <- handle
+    validObject(x)
+    x
+}
+
+# The genotype experiment: variants x samples, dosages read lazily through
+# the handle, genotype-derived covariates as colData. Nothing is read here --
+# `genotypeDelayedArray()` only describes the panel.
+# @noRd
+.qtlGenotypeExperiment <- function(genotypes, genotypeCovariates) {
+    dosage <- genotypeDelayedArray(genotypes)
+    gCov <- as.matrix(genotypeCovariates)
+    cd <- .qtlGenotypeColData(gCov, colnames(dosage))
+    SummarizedExperiment::SummarizedExperiment(
+        assays = list(dosage = dosage),
+        rowRanges = .qtlSnpRanges(genotypes, rownames(dosage)),
+        colData = cd
+    )
+}
+
+# Genotype covariates as a colData aligned to the panel's sample order.
+# Samples the covariate matrix does not name get NA rather than being
+# dropped: the assay still has a column for them.
+# @noRd
+.qtlGenotypeColData <- function(gCov, sampleIds) {
+    empty <- S4Vectors::DataFrame(row.names = sampleIds)
+    if (ncol(gCov) == 0L || nrow(gCov) == 0L) {
+        return(empty)
+    }
+    if (is.null(rownames(gCov))) {
+        if (nrow(gCov) != length(sampleIds)) {
+            abort(glue(
+                "'genotypeCovariates' has {nrow(gCov)} rows but the panel ",
+                "has {length(sampleIds)} samples; name its rows to align ",
+                "them explicitly"
+            ))
+        }
+        rownames(gCov) <- sampleIds
+    }
+    aligned <- gCov[match(sampleIds, rownames(gCov)), , drop = FALSE]
+    rownames(aligned) <- sampleIds
+    S4Vectors::DataFrame(aligned, row.names = sampleIds)
+}
+
+# snpInfo as rowRanges for the genotype experiment: width-1 ranges at each
+# variant's position, alleles carried as mcols so plyranges predicates can
+# reach them. Deliberately the same shape as the SummarizedExperiment
+# `extractBlockGenotypes()` returns -- chr-prefixed seqnames, SNP / A1 / A2 --
+# so a block read from this experiment and a block read through the handle
+# describe variants the same way, and overlaps between the two actually hit.
+# @noRd
+.qtlSnpRanges <- function(genotypes, variantIds) {
+    si <- getSnpInfo(genotypes)
+    gr <- GenomicRanges::GRanges(
+        seqnames = withChrPrefix(as.character(si$CHR)),
+        ranges = IRanges::IRanges(as.integer(si$BP), width = 1L)
+    )
+    names(gr) <- variantIds
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = as.character(si$SNP),
+        A1 = as.character(si$A1),
+        A2 = as.character(si$A2)
+    )
+    gr
+}
+
+# The primary sample table: every sample any experiment observes, in
+# genotype-panel order first so the common case reads naturally.
+# @noRd
+.qtlPrimaryColData <- function(experiments) {
+    ids <- reduce(map(experiments, colnames), union)
+    S4Vectors::DataFrame(row.names = as.character(ids))
+}
+
+# The sampleMap: one row per (experiment, sample) pair actually present.
+# Built from the column names rather than assumed, since contexts need not
+# share a sample set.
+# @noRd
+.qtlSampleMap <- function(experiments) {
+    parts <- imap(experiments, .qtlSampleMapPart)
+    exec(rbind, !!!unname(parts))
+}
+
+# One experiment's slice of the sampleMap.
+# @noRd
+.qtlSampleMapPart <- function(se, name) {
+    ids <- as.character(colnames(se))
+    S4Vectors::DataFrame(
+        assay = factor(rep(name, length(ids)), levels = name),
+        primary = ids,
+        colname = ids
+    )
 }
 
 #' @rdname getStudy
@@ -297,17 +645,78 @@ setMethod("getStudy", "QtlDataset", function(x) x@study)
 
 #' @rdname getContexts
 #' @export
-setMethod("getContexts", "QtlDataset", function(x) names(x@phenotypes))
+setMethod("getContexts", "QtlDataset", function(x) {
+    names(.qtlPhenotypeList(x))
+})
 
 #' @rdname getGenotypeCovariates
 #' @export
 setMethod("getGenotypeCovariates", "QtlDataset", function(x) {
-    x@genotypeCovariates
+    .qtlSuppliedCovariates(.qtlColDataMatrix(.qtlGenotypeSe(x)))
 })
+
+# The genotype experiment's colData has one row per panel sample, because a
+# SummarizedExperiment cannot have fewer. A covariate matrix covering only
+# some samples therefore leaves the rest NA throughout, and those rows mean
+# "not supplied" rather than "supplied as missing". Dropping them keeps the
+# residualization design over the samples that actually have covariates,
+# which is what the alignment step intersects on.
+# @noRd
+.qtlSuppliedCovariates <- function(m) {
+    if (ncol(m) == 0L || nrow(m) == 0L) {
+        return(m)
+    }
+    m[rowSums(!is.na(m)) > 0L, , drop = FALSE]
+}
+
+# The genotype experiment.
+# @noRd
+.qtlGenotypeSe <- function(x) {
+    MultiAssayExperiment::experiments(x)[[.QTL_GENO_EXPERIMENT]]
+}
+
+# An experiment's colData as the numeric samples x covariates matrix the
+# residualization design expects. A colData with no columns still has to
+# carry its sample names, so the design can align on them.
+# @noRd
+.qtlColDataMatrix <- function(se) {
+    cd <- SummarizedExperiment::colData(se)
+    out <- as.matrix(as.data.frame(cd))
+    rownames(out) <- rownames(cd)
+    out
+}
 
 #' @rdname getScaleResiduals
 #' @export
 setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
+
+#' @rdname getGenotypeHandle
+#' @export
+setMethod("getGenotypeHandle", "QtlDataset", function(x) x@genotypes)
+
+#' @rdname qtlDatasetFilters
+#' @export
+setMethod("getMafCutoff", "QtlDataset", function(x, ...) x@mafCutoff)
+
+#' @rdname qtlDatasetFilters
+#' @export
+setMethod("getMacCutoff", "QtlDataset", function(x, ...) x@macCutoff)
+
+#' @rdname qtlDatasetFilters
+#' @export
+setMethod("getXvarCutoff", "QtlDataset", function(x, ...) x@xvarCutoff)
+
+#' @rdname qtlDatasetFilters
+#' @export
+setMethod("getImissCutoff", "QtlDataset", function(x, ...) x@imissCutoff)
+
+#' @rdname qtlDatasetFilters
+#' @export
+setMethod("getKeepVariants", "QtlDataset", function(x, ...) x@keepVariants)
+
+#' @rdname qtlDatasetFilters
+#' @export
+setMethod("getKeepIndel", "QtlDataset", function(x, ...) x@keepIndel)
 
 # --- Internal: resolve the variant-selection region for the genotype handle.
 # Returns a GRanges (one or more ranges). When `traitId` is supplied, expand
@@ -347,8 +756,8 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
         abort(msg)
     }
     perTraitRanges <- list()
-    for (ctxIdx in seq_along(x@phenotypes)) {
-        se <- x@phenotypes[[ctxIdx]]
+    for (ctx in getContexts(x)) {
+        se <- getPhenotypes(x, ctx)
         hits <- match(traitId, rownames(se))
         hits <- hits[!is.na(hits)]
         if (length(hits) > 0) {
@@ -420,7 +829,8 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
         st <- Inf
         en <- -Inf
         ch <- NA_character_
-        for (se in x@phenotypes) {
+        for (ctx in getContexts(x)) {
+            se <- getPhenotypes(x, ctx)
             h <- match(tid, rownames(se))
             h <- h[!is.na(h)]
             if (length(h) == 0L) {
@@ -449,7 +859,7 @@ setMethod("getScaleResiduals", "QtlDataset", function(x) x@scaleResiduals)
 #' @export
 setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
     tids <- if (is.null(traitId)) {
-        unique(unlist(map(x@phenotypes, rownames)))
+        unique(unlist(map(.qtlPhenotypeList(x), rownames)))
     } else {
         as.character(traitId)
     }
@@ -460,11 +870,11 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
 # handle@snpInfo. Indices are unioned across ranges in range order (first
 # occurrence wins), so overlapping ranges contribute each variant once.
 .qtlVariantIndices <- function(x, region = NULL) {
-    handle <- x@genotypes
+    handle <- getGenotypeHandle(x)
     if (is.null(region)) {
-        return(seq_len(nrow(handle@snpInfo)))
+        return(seq_len(nrow(getSnpInfo(handle))))
     }
-    snpInfo <- handle@snpInfo
+    snpInfo <- getSnpInfo(handle)
     siChr <- canonChrom(snpInfo$CHR)
     bp <- as.integer(snpInfo$BP)
     rChr <- canonChrom(GenomicRanges::seqnames(region))
@@ -480,7 +890,7 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
 # Internal: keepIndel slot read, tolerant of QtlDataset objects serialized
 # before the slot existed (treat a missing slot as TRUE = keep indels).
 .qtlKeepIndel <- function(x) {
-    isTRUE(tryCatch(x@keepIndel, error = function(e) TRUE))
+    isTRUE(tryCatch(getKeepIndel(x), error = function(e) TRUE))
 }
 
 # Internal: return a copy of a QtlDataset with the supplied filter cutoffs /
@@ -514,7 +924,7 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
         data@keepIndel <- as.logical(keepIndel)
     }
     if (!is.null(keepSamples)) {
-        data@keepSamples <- as.character(keepSamples)
+        data <- .qtlRestrictSamples(data, keepSamples)
     }
     if (!is.null(keepVariants)) {
         data@keepVariants <- as.character(keepVariants)
@@ -563,16 +973,17 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
     if (length(snpIdx) == 0L) {
         return(.qtlEmptyBlock())
     }
-    dosage <- .dosageMatrix(x@genotypes, snpIdx, meanImpute = FALSE)
+    handle <- getGenotypeHandle(x)
+    dosage <- .dosageMatrix(handle, snpIdx, meanImpute = FALSE)
     keep <- .qtlResolveSamples(dosage, x, samples)
     if (length(keep) == 0L) {
         return(.qtlEmptyBlockNoSamples(dosage))
     }
     dosage <- dosage[keep, , drop = FALSE]
     # Per-sample missingness filter.
-    if (x@imissCutoff > 0 && nrow(dosage) > 0L && ncol(dosage) > 0L) {
+    if (getImissCutoff(x) > 0 && nrow(dosage) > 0L && ncol(dosage) > 0L) {
         dosage <- dosage[
-            rowMeans(is.na(dosage)) <= x@imissCutoff,
+            rowMeans(is.na(dosage)) <= getImissCutoff(x),
             ,
             drop = FALSE
         ]
@@ -591,15 +1002,16 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
 # Empty block preserving the full panel sample set (no variants selected).
 # @noRd
 .qtlEmptyBlockAllSamples <- function(x) {
+    handle <- getGenotypeHandle(x)
     list(
         geno = matrix(
             numeric(0),
-            nrow = x@genotypes@nSamples,
+            nrow = getNSamples(handle),
             ncol = 0L,
-            dimnames = list(x@genotypes@sampleIds, character(0))
+            dimnames = list(getSampleIds(handle), character(0))
         ),
         variantIds = character(0),
-        sampleIds = x@genotypes@sampleIds,
+        sampleIds = getSampleIds(handle),
         maf = numeric(0),
         af = numeric(0)
     )
@@ -638,15 +1050,16 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
 # allele) and, unless kept, by dropping indels. Done before materialization.
 # @noRd
 .qtlNarrowSnpIdx <- function(x, snpIdx) {
-    if (length(x@keepVariants) > 0L) {
-        snpAll <- as.character(x@genotypes@snpInfo$SNP[snpIdx])
-        km <- matchVariants(snpAll, as.character(x@keepVariants))
+    handle <- getGenotypeHandle(x)
+    if (length(getKeepVariants(x)) > 0L) {
+        snpAll <- as.character(getSnpInfo(handle)$SNP[snpIdx])
+        km <- matchVariants(snpAll, as.character(getKeepVariants(x)))
         keepMask <- logical(length(snpAll))
         keepMask[km$idxA] <- TRUE
         snpIdx <- snpIdx[keepMask]
     }
     if (length(snpIdx) > 0L && !.qtlKeepIndel(x)) {
-        si <- x@genotypes@snpInfo
+        si <- getSnpInfo(handle)
         # which() (not the mask) so an NA mask drops the variant rather than
         # injecting an NA index.
         snpMask <- str_length(as.character(si$A1[snpIdx])) == 1L &
@@ -656,14 +1069,15 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
     snpIdx
 }
 
-# Resolve the sample set: panel samples intersected with keepSamples and the
+# Resolve the sample set: panel samples intersected with the dataset's
+# primary colData -- which is what narrows a subset dataset -- and with the
 # per-call `samples` arg.
 # @noRd
 .qtlResolveSamples <- function(dosage, x, samples) {
-    keep <- rownames(dosage)
-    if (length(x@keepSamples) > 0L) {
-        keep <- intersect(keep, x@keepSamples)
-    }
+    keep <- intersect(
+        rownames(dosage),
+        rownames(MultiAssayExperiment::colData(x))
+    )
     if (!is.null(samples)) {
         keep <- intersect(keep, as.character(samples))
     }
@@ -688,16 +1102,16 @@ setMethod("getTraitPosition", "QtlDataset", function(x, traitId = NULL, ...) {
     afVec <- p
     mafVec <- pmin(p, 1 - p)
     effectiveMaf <- max(
-        x@mafCutoff,
-        if (nSamp > 0L) x@macCutoff / (2 * nSamp) else 0
+        getMafCutoff(x),
+        if (nSamp > 0L) getMacCutoff(x) / (2 * nSamp) else 0
     )
     keepVarMask <- !is.na(mafVec) & mafVec >= effectiveMaf
-    if (x@xvarCutoff > 0 && nSamp > 1L) {
+    if (getXvarCutoff(x) > 0 && nSamp > 1L) {
         mu <- if_else(nObs > 0L, sumD / nObs, 0)
         centered <- sweep(dosage, 2L, mu, FUN = "-")
         centered[is.na(centered)] <- 0
         varVec <- colSums(centered * centered) / (nSamp - 1L)
-        keepVarMask <- keepVarMask & varVec >= x@xvarCutoff
+        keepVarMask <- keepVarMask & varVec >= getXvarCutoff(x)
     }
     list(
         dosage = dosage[, keepVarMask, drop = FALSE],
@@ -810,7 +1224,7 @@ setMethod(
         naAction <- arg_match(naAction)
         outlierAction <- arg_match(outlierAction)
         .qtlValidateContexts(x, contexts)
-        out <- x@phenotypes[contexts]
+        out <- .qtlPhenotypeList(x)[contexts]
         out <- .qtlFilterPhenotypes(
             out,
             contexts,
@@ -835,7 +1249,7 @@ setMethod(
         )
         abort(msg)
     }
-    available <- names(x@phenotypes)
+    available <- getContexts(x)
     bad <- setdiff(contexts, available)
     if (length(bad) > 0L) {
         msg <- glue(
@@ -1014,7 +1428,7 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
     if (missing(contexts) || is.null(contexts) || length(contexts) == 0L) {
         abort("`contexts` is required.")
     }
-    available <- names(x@phenotypes)
+    available <- getContexts(x)
     bad <- setdiff(contexts, available)
     if (length(bad) > 0L) {
         msg <- glue("Unknown context(s): {str_flatten(bad, ', ')}")
@@ -1069,7 +1483,7 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
 # all available covariates; otherwise validate the requested names are present.
 # @noRd
 .qtlResolveOne <- function(ctx, requested, x) {
-    se <- x@phenotypes[[ctx]]
+    se <- getPhenotypes(x, ctx)
     avail <- colnames(SummarizedExperiment::colData(se))
     if (is.null(requested)) {
         return(avail)
@@ -1160,7 +1574,7 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
 # Internal: validate the genotype-covariate selection vector. Returns
 # character(0) when nothing selected, the resolved set otherwise.
 .qtlResolveGenoSelection <- function(x, toResidualize) {
-    avail <- colnames(x@genotypeCovariates)
+    avail <- colnames(getGenotypeCovariates(x))
     if (is.null(avail)) {
         avail <- character(0)
     }
@@ -1203,7 +1617,7 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
         list()
     }
     gCov <- if (includeGeno && length(genoSelection) > 0L) {
-        x@genotypeCovariates[, genoSelection, drop = FALSE]
+        getGenotypeCovariates(x)[, genoSelection, drop = FALSE]
     } else {
         matrix(numeric(0), nrow = 0, ncol = 0)
     }
@@ -1211,11 +1625,25 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
     if (!haveAny) {
         return(NULL)
     }
-    .qtlAlignCovariates(perContext, gCov)
+    design <- .qtlAlignCovariates(perContext, gCov)
+    # NULL here means covariates were asked for but no sample carries them
+    # all. Returning it would residualize against nothing and hand back the
+    # raw values, so the caller hears about it instead.
+    if (is.null(design)) {
+        abort(glue(
+            "No samples in common among the covariate blocks requested ",
+            "for contexts: {str_flatten(contexts, ', ')}"
+        ))
+    }
+    design
 }
 
 # Per-context phenotype covariate matrices (colData columns from
 # phenoSelection), column names prefixed with the context.
+# @noRd
+# Sample names survive the coercion because the constructor requires every
+# context to name its samples, which SummarizedExperiment carries into
+# rownames(colData(se)).
 # @noRd
 .qtlPhenoCovBlocks <- function(x, contexts, phenoSelection) {
     perContext <- list()
@@ -1224,15 +1652,10 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
         if (length(keep) == 0L) {
             next
         }
-        se <- x@phenotypes[[ctx]]
+        se <- getPhenotypes(x, ctx)
         cd <- as.matrix(as.data.frame(SummarizedExperiment::colData(se)))
         cdMat <- cd[, keep, drop = FALSE]
         colnames(cdMat) <- str_c(ctx, ".", colnames(cdMat))
-        if (is.null(rownames(cdMat))) {
-            rownames(cdMat) <- as.character(
-                rownames(SummarizedExperiment::colData(se))
-            )
-        }
         perContext[[ctx]] <- cdMat
     }
     perContext
@@ -1242,14 +1665,9 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
 # into one design matrix; NULL when no samples are shared.
 # @noRd
 .qtlAlignCovariates <- function(perContext, gCov) {
-    sampleSets <- list()
-    for (mat in perContext) {
-        if (!is.null(rownames(mat))) {
-            sampleSets[[length(sampleSets) + 1L]] <- rownames(mat)
-        }
-    }
-    if (!is.null(gCov) && ncol(gCov) > 0L && !is.null(rownames(gCov))) {
-        sampleSets[[length(sampleSets) + 1L]] <- rownames(gCov)
+    sampleSets <- map(perContext, .qtlBlockSamples)
+    if (!is.null(gCov) && ncol(gCov) > 0L) {
+        sampleSets <- c(sampleSets, list(.qtlBlockSamples(gCov)))
     }
     common <- if (length(sampleSets) == 0L) {
         character(0)
@@ -1267,6 +1685,19 @@ setMethod("getPhenotypeCovariates", "QtlDataset", function(x, contexts) {
         blocks[[length(blocks) + 1L]] <- gCov[common, , drop = FALSE]
     }
     exec(cbind, !!!blocks)
+}
+
+# The samples a covariate block covers, or NULL when it does not say. A block
+# with no rows covers none of them, which base R reports as NULL rownames
+# rather than an empty character vector; reading that as "unconstrained"
+# would let a covariate matrix sharing no samples with the panel fall through
+# to an out-of-bounds subscript instead of resolving to no design.
+# @noRd
+.qtlBlockSamples <- function(mat) {
+    if (nrow(mat) == 0L) {
+        return(character(0))
+    }
+    rownames(mat)
 }
 
 # Internal: resolve missing values in the residualization covariate matrix
@@ -1411,7 +1842,7 @@ setMethod(
 # booleans.
 # @noRd
 .qtlResidualizedGenotypesImpl <- function(p) {
-    bad <- setdiff(p$contexts, names(p$x@phenotypes))
+    bad <- setdiff(p$contexts, getContexts(p$x))
     if (length(bad) > 0L) {
         msg <- glue("Unknown context(s): {str_flatten(bad, ', ')}")
         abort(msg)
@@ -1458,7 +1889,11 @@ setMethod(
     )
     C <- .qtlHandleCovariateNa(C, p$covariateNaAction)
     aligned <- .qtlAlignGC(G, C, p$contexts)
-    .qtlResidualizeQr(aligned$G, aligned$C, scaleResiduals = p$x@scaleResiduals)
+    .qtlResidualizeQr(
+        aligned$G,
+        aligned$C,
+        scaleResiduals = getScaleResiduals(p$x)
+    )
 }
 
 #' @rdname getResidualizedPhenotypes
@@ -1587,7 +2022,7 @@ setMethod(
 # outlier-filter. `p` holds the setMethod args + precomputed missing() flags.
 # @noRd
 .qtlResidualizedPhenotypesImpl <- function(p) {
-    bad <- setdiff(p$contexts, names(p$x@phenotypes))
+    bad <- setdiff(p$contexts, getContexts(p$x))
     if (length(bad) > 0L) {
         msg <- glue("Unknown context(s): {str_flatten(bad, ', ')}")
         abort(msg)
@@ -1628,10 +2063,11 @@ setMethod(
 #' @rdname show-methods
 #' @export
 setMethod("show", "QtlDataset", function(object) {
-    nCtx <- length(object@phenotypes)
-    ctxNames <- names(object@phenotypes)
+    pheno <- .qtlPhenotypeList(object)
+    nCtx <- length(pheno)
+    ctxNames <- names(pheno)
     totalTraits <- length(unique(unlist(
-        map(object@phenotypes, rownames),
+        map(pheno, rownames),
         use.names = FALSE
     )))
     cat(glue("QtlDataset for study '{object@study}'\n", .trim = FALSE))
@@ -1645,7 +2081,12 @@ setMethod("show", "QtlDataset", function(object) {
         .trim = FALSE
     ))
     cat(glue(
-        "  Genotype covariates: {ncol(object@genotypeCovariates)} cols\n",
+        "  Genotype covariates: ",
+        "{ncol(getGenotypeCovariates(object))} cols\n",
+        .trim = FALSE
+    ))
+    cat(glue(
+        "  Samples: {nrow(MultiAssayExperiment::colData(object))}\n",
         .trim = FALSE
     ))
     cat(glue("  Scale residuals: {object@scaleResiduals}\n", .trim = FALSE))
@@ -1680,7 +2121,7 @@ setMethod("show", "QtlDataset", function(object) {
 # One context's covariate matrix (colData of its phenotype SE).
 # @noRd
 .qtlContextColData <- function(ctx, x) {
-    se <- x@phenotypes[[ctx]]
+    se <- getPhenotypes(x, ctx)
     cd <- SummarizedExperiment::colData(se)
     as.matrix(as.data.frame(cd))
 }
@@ -1700,6 +2141,6 @@ setMethod("show", "QtlDataset", function(object) {
         ctx,
         p$outlierAction,
         p$outlierPvalThreshold,
-        p$x@scaleResiduals
+        getScaleResiduals(p$x)
     )
 }

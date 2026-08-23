@@ -1,6 +1,5 @@
 #' Deduplicate and sort genomic regions by chromosome and start position.
 #' @importFrom dplyr distinct arrange
-#' @importFrom magrittr %>%
 #' @noRd
 orderDedupRegions <- function(df) {
     df$chrom <- canonChrom(df$chrom)
@@ -281,7 +280,6 @@ processLdMatrix <- function(ldFilePath, snpFilePath = NULL) {
 #' Subset an LD matrix and variant info to a genomic region, optionally further
 #' restricted to specific coordinates.
 #' @importFrom dplyr mutate select inner_join
-#' @importFrom magrittr %>%
 #' @noRd
 extractLdForRegion <- function(ldMatrix, variants, region, extractCoordinates) {
     extracted <- filter(
@@ -848,6 +846,117 @@ loadLdFromGenotype <- function(
     ldMat
 }
 
+# ---------- LD sketch: per-variant panel statistics and filtering ----------
+
+# Per-variant minor allele frequency and missingness rate from panel dosage.
+#
+# The dosage must NOT be mean-imputed: imputation fills every hole, so the
+# missingness rate would come back zero everywhere.
+# @noRd
+.panelVariantStats <- function(dosage) {
+    nSamp <- nrow(dosage)
+    nObs <- colSums(!is.na(dosage))
+    af <- if_else(
+        nObs > 0L,
+        colSums(dosage, na.rm = TRUE) / (2 * nObs),
+        NA_real_
+    )
+    list(
+        af = af,
+        maf = pmin(af, 1 - af),
+        missRate = if (nSamp > 0L) {
+            1 - nObs / nSamp
+        } else {
+            rep(0, ncol(dosage))
+        }
+    )
+}
+
+# The subset of `variantIds` whose LD-panel genotypes clear the cutoffs,
+# returned in the caller's order.
+#
+# A MAC cutoff is a MAF cutoff once expressed per panel sample, so the stricter
+# of the two applies -- the same rule .qtlVariantFilters() uses on individual
+# level data, so one number means the same thing on both paths.
+#
+# Variants absent from the panel are passed through untouched. Whether a
+# missing variant is an error or is silently dropped belongs to `.ldFromSketch`
+# (its `onMissing`), and deciding it a second time here would let the two
+# disagree about the same variant.
+# @noRd
+.panelVariantFilter <- function(
+    ldSketch,
+    variantIds,
+    mafCutoff = 0,
+    macCutoff = 0,
+    imissCutoff = 1,
+    label = ".panelVariantFilter"
+) {
+    mafCutoff <- mafCutoff %||% 0
+    macCutoff <- macCutoff %||% 0
+    imissCutoff <- imissCutoff %||% 1
+    if (mafCutoff <= 0 && macCutoff <= 0 && imissCutoff >= 1) {
+        return(variantIds)
+    }
+    if (is.null(ldSketch) || length(variantIds) == 0L) {
+        return(variantIds)
+    }
+    matched <- .ldFromSketchMatch(ldSketch, variantIds, label, "drop")
+    if (is.null(matched)) {
+        return(variantIds)
+    }
+    dosage <- .dosageMatrix(ldSketch, matched$idx, meanImpute = FALSE)
+    stats <- .panelVariantStats(dosage)
+    nSamp <- nrow(dosage)
+    effectiveMaf <- max(
+        mafCutoff,
+        if (nSamp > 0L) macCutoff / (2 * nSamp) else 0
+    )
+    drop <- is.na(stats$maf) |
+        stats$maf < effectiveMaf |
+        stats$missRate > imissCutoff
+    variantIds[!is_in(variantIds, matched$keptIds[drop])]
+}
+
+# Row mask for the variants clearing the LD-panel cutoffs, reporting how many
+# were dropped. A no-op when no cutoff is set.
+# @noRd
+.panelKeepMask <- function(variantIds, ldSketch, cutoffs, label) {
+    if (is.null(ldSketch) || is.null(cutoffs)) {
+        return(rep(TRUE, length(variantIds)))
+    }
+    kept <- .panelVariantFilter(
+        ldSketch,
+        variantIds,
+        mafCutoff = cutoffs$mafCutoff,
+        macCutoff = cutoffs$macCutoff,
+        imissCutoff = cutoffs$imissCutoff,
+        label = label
+    )
+    keep <- is_in(variantIds, kept)
+    nDropped <- sum(!keep)
+    if (nDropped > 0L) {
+        msg <- glue(
+            "{label}: dropped {nDropped} of {length(variantIds)} variant(s) ",
+            "below the LD-panel MAF / MAC / missingness cutoffs."
+        )
+        inform(msg)
+    }
+    keep
+}
+
+# The panel-filter cutoffs a pipeline call carries, or NULL when none is set
+# (so the filter short-circuits without touching the panel).
+# @noRd
+.panelCutoffs <- function(p) {
+    maf <- p$mafCutoff %||% 0
+    mac <- p$macCutoff %||% 0
+    imiss <- p$imissCutoff %||% 1
+    if (maf <= 0 && mac <= 0 && imiss >= 1) {
+        return(NULL)
+    }
+    list(mafCutoff = maf, macCutoff = mac, imissCutoff = imiss)
+}
 # ---------- LD sketch: cross-pipeline LD-panel equality check ----------
 
 # Internal: assert that two `GenotypeHandle` LD sketches describe the same
@@ -1213,7 +1322,6 @@ loadLdFromBlocks <- function(
 #'   \item{idx}{Integer vector of indices into the original variantIds.}
 #' @importFrom dplyr group_by summarise
 #' @importFrom vroom vroom
-#' @importFrom magrittr %>%
 #' @examples
 #' meta <- system.file("extdata", "ld_reference", "ld_meta_file.tsv",
 #'   package = "pecotmr")
@@ -1765,8 +1873,6 @@ ldPruneByCorrelation <- function(
     .ldPruneHclust(X, corThres, verbose)
 }
 
-#' SNPRelate-based LD pruning helper
-#' @noRd
 #' SNPRelate-based LD pruning helper
 #' @noRd
 .ldPruneSnprelateDeps <- function() {

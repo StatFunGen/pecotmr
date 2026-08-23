@@ -34,7 +34,7 @@ Three valid input combinations:
 | What you supply | TWAS-Z source | MR? |
 |---|---|---|
 | `twasWeights` only | per-tuple weights from `TwasWeights` | no |
-| `fineMappingResult` only | SuSiE coefficients from each `FineMappingEntry`'s `topLoci` | yes |
+| `fineMappingResult` only | SuSiE coefficients from `getTopLoci()` | yes |
 | both | weights from `TwasWeights` | yes (MR uses the FMR) |
 
 ```{r load-packages}

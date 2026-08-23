@@ -20,10 +20,33 @@ test_that("lbf_to_alpha_vector with prior weights", {
     expect_equal(sum(alpha), 1, tolerance = 1e-10)
 })
 
-test_that("lbf_to_alpha_vector returns zeros for all-zero lbf", {
+test_that("lbf_to_alpha_vector renormalizes an all-zero lbf to the prior", {
+    # BF = 1 everywhere means nothing updates the prior, so the posterior IS
+    # the prior. The old guard flattened this to alpha = 0 (PIP 0).
     lbf <- c(a = 0, b = 0, c = 0)
     alpha <- pecotmr:::lbfToAlphaVector(lbf)
-    expect_true(all(alpha == 0))
+    expect_equal(unname(alpha), rep(1 / 3, 3))
+    expect_equal(sum(alpha), 1, tolerance = 1e-10)
+    prior <- c(0.5, 0.3, 0.2)
+    weighted <- pecotmr:::lbfToAlphaVector(lbf, priorWeights = prior)
+    expect_equal(unname(weighted), prior)
+})
+
+test_that("lbf_to_alpha_vector keeps an informative lbf with max exactly 0", {
+    # Regression: the old `maxlbf == 0` guard fired on ANY vector whose best
+    # variant sat at 0, zeroing a perfectly informative posterior.
+    lbf <- c(a = -5, b = 0, c = -3)
+    alpha <- pecotmr:::lbfToAlphaVector(lbf)
+    expect_equal(sum(alpha), 1, tolerance = 1e-10)
+    expect_equal(names(which.max(alpha)), "b")
+    expect_gt(alpha[["b"]], 0.9)
+})
+
+test_that("lbf_to_alpha_vector returns the prior when every BF underflows", {
+    lbf <- c(a = -Inf, b = -Inf)
+    alpha <- pecotmr:::lbfToAlphaVector(lbf)
+    expect_equal(unname(alpha), c(0.5, 0.5))
+    expect_length(pecotmr:::lbfToAlphaVector(numeric(0)), 0L)
 })
 
 test_that("lbf_to_alpha_vector handles single element", {
@@ -78,7 +101,7 @@ test_that("lbfToAlpha handles uniform lbf", {
 
 test_that("lbfToAlpha handles single-row matrix", {
     lbf <- matrix(c(1.0, 2.0, 0.5), nrow = 1)
-    colnames(lbf) <- paste0("v", 1:3)
+    colnames(lbf) <- sprintf("chr1:%d:A:G", 100L * (1:3))
     result <- lbfToAlpha(lbf)
     expect_equal(nrow(result), 1)
     expect_equal(ncol(result), 3)
@@ -88,7 +111,7 @@ test_that("lbfToAlpha handles single-row matrix", {
 test_that("lbfToAlpha handles large matrix", {
     set.seed(42)
     lbf <- matrix(rnorm(100), nrow = 10, ncol = 10)
-    colnames(lbf) <- paste0("v", 1:10)
+    colnames(lbf) <- sprintf("chr1:%d:A:G", 100L * (1:10))
     result <- lbfToAlpha(lbf)
     expect_equal(dim(result), c(10, 10))
     expect_equal(rowSums(result), rep(1, 10), tolerance = 1e-10)
@@ -96,10 +119,12 @@ test_that("lbfToAlpha handles large matrix", {
 
 test_that("lbfToAlpha with mixed zero and nonzero rows", {
     lbf <- matrix(c(0, 0, 0, 1, 2, 3), nrow = 2, byrow = TRUE)
-    colnames(lbf) <- paste0("v", 1:3)
+    colnames(lbf) <- sprintf("chr1:%d:A:G", 100L * (1:3))
     result <- lbfToAlpha(lbf)
-    expect_true(all(result[1, ] == 0))
-    expect_equal(sum(result[2, ]), 1, tolerance = 1e-10)
+    # The all-zero row is uninformative, not zero-probability: it renormalizes
+    # to the (uniform) prior and still sums to 1, like every other row.
+    expect_equal(unname(result[1, ]), rep(1 / 3, 3))
+    expect_equal(rowSums(result), rep(1, 2), tolerance = 1e-10)
 })
 
 # =============================================================================
@@ -357,7 +382,7 @@ test_that("postprocessFinemappingFits keeps all effects when V is NULL", {
         coverage = 0.95
     )
     result <- formatFinemappingOutput(post, primaryMethod = "susieRss")
-    trimmed <- getSusieFit(result$finemappingEntry)
+    trimmed <- pecotmr:::.fmrPartsSusieFit(result$finemappingEntry)
     # With V=NULL, eff_idx = 1:L, so trimmed alpha should keep all L rows
     expect_equal(nrow(trimmed$alpha), L)
     # V should be NULL in trimmed output
@@ -412,7 +437,7 @@ test_that("postprocessFinemappingFits stores outcome_names, coef, and clfsr for 
 
     # outcome_names should be stored as contextNames
     expect_equal(result$contextNames, cnames)
-    trimmed <- getSusieFit(result$finemappingEntry)
+    trimmed <- pecotmr:::.fmrPartsSusieFit(result$finemappingEntry)
     # coef should come from mvsusieR::coef.mvsusie
     expect_equal(trimmed$coef, fake_coef[-1, , drop = FALSE])
     # conditional_lfsr should be trimmed to eff_idx
@@ -421,15 +446,20 @@ test_that("postprocessFinemappingFits stores outcome_names, coef, and clfsr for 
 
 test_that("formatFinemappingOutput does not duplicate top loci variants", {
     top_loci <- data.frame(
-        variant_id = paste0("v", 1:4),
+        variant_id = sprintf("chr1:%d:A:G", 100L * (1:4)),
         CS_95_susie = c(0L, 1L, NA_integer_, 0L),
         pip_susie = c(0.2, 0.005, 0.001, 0),
         stringsAsFactors = FALSE
     )
-    fm <- FineMappingEntry(
-        variantIds = paste0("v", 1:4),
+    vids <- sprintf("chr1:%d:A:G", 100L * (1:4))
+    fm <- fineMappingRow(
+        variantIds = vids,
         susieFit = list(pip = 1:4),
-        topLoci = data.frame(variant_id = character(0), pip = numeric(0))
+        topLoci = data.frame(
+            variant_id = vids,
+            pip = rep(0, 4L),
+            stringsAsFactors = FALSE
+        )
     )
     post <- list(
         finemappingResults = list(
@@ -441,7 +471,10 @@ test_that("formatFinemappingOutput does not duplicate top loci variants", {
     )
     out <- formatFinemappingOutput(post, "susie")
     expect_false("top_loci_variants" %in% names(out))
-    expect_equal(unique(out$top_loci$variant_id), paste0("v", 1:4))
+    expect_equal(
+        unique(out$top_loci$variant_id),
+        sprintf("chr1:%d:A:G", 100L * (1:4))
+    )
 })
 
 .make_univariate_data <- function(
@@ -467,7 +500,7 @@ test_that("formatFinemappingOutput does not duplicate top loci variants", {
 
 test_that(".translate_legacy_top_loci_cs_columns renames pip_susie -> pip for legacy callers", {
     new_format <- data.frame(
-        variant_id = c("v1", "v2"),
+        variant_id = c("chr1:100:A:G", "chr1:200:A:G"),
         pip_susie = c(0.9, 0.1),
         CS_95_susie = c(1, 0),
         pip_susie_inf = c(0.8, 0.2),
@@ -485,7 +518,7 @@ test_that(".translate_legacy_top_loci_cs_columns renames pip_susie -> pip for le
 
 test_that(".translate_legacy_top_loci_cs_columns leaves existing pip column alone", {
     legacy <- data.frame(
-        variant_id = c("v1", "v2"),
+        variant_id = c("chr1:100:A:G", "chr1:200:A:G"),
         pip = c(0.9, 0.1),
         cs_coverage_0.95 = c(1, 0),
         stringsAsFactors = FALSE,
@@ -770,7 +803,7 @@ test_that("buildTopLoci: conditionIdx slices the 3-D mvsusie posterior per condi
     expect_true(all(is.na(tl0$posterior_mean)))
 })
 
-test_that("buildTopLoci stamps per-condition lfsr + conditional_effect for mvsusie (long + numeric)", {
+test_that("buildTopLoci: mvsusie per-condition lfsr + effect (long)", {
     L <- 2L
     p <- 4L
     R <- 2L
@@ -858,12 +891,12 @@ test_that("getTopLoci surfaces mvsusie conditional_effect + lfsr through the pro
         lfsr = c(0.001, 0.02),
         stringsAsFactors = FALSE
     )
-    e <- FineMappingEntry(
+    e <- fineMappingRow(
         variantIds = tl$variant_id,
         susieFit = list(pip = tl$pip),
         topLoci = tl
     )
-    out <- getTopLoci(e, signalCutoff = 0)
+    out <- .fmrRowTopLoci(e, signalCutoff = 0)
     expect_true(all(c("conditional_effect", "lfsr") %in% names(out)))
     expect_equal(out$lfsr, c(0.001, 0.02))
     expect_equal(out$conditional_effect, c(0.3, -0.2))
@@ -912,7 +945,7 @@ test_that("buildTopLoci derives CS columns from the ACTUAL coverages (no hardcod
     ))
 })
 
-test_that("buildTopLoci stamps per-variant logBF (max single-effect lbf; replaces log10_base_factor)", {
+test_that("buildTopLoci: per-variant logBF is the max single-effect lbf", {
     vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
     lbf <- matrix(c(2.0, 0.1, -1.0, 0.5, 3.0, 0.2), nrow = 2, byrow = TRUE) # L=2 effects x p=3
     fit <- list(
@@ -933,8 +966,8 @@ test_that("buildTopLoci stamps per-variant logBF (max single-effect lbf; replace
     expect_true("logBF" %in% names(tl))
     expect_equal(tl$logBF, apply(lbf, 2, max)) # c(2.0, 3.0, 0.2)
     # surfaced through getTopLoci's projection too
-    e <- FineMappingEntry(variantIds = vids, susieFit = fit, topLoci = tl)
-    expect_true("logBF" %in% names(getTopLoci(e, signalCutoff = 0)))
+    e <- fineMappingRow(variantIds = vids, susieFit = fit, topLoci = tl)
+    expect_true("logBF" %in% names(.fmrRowTopLoci(e, signalCutoff = 0)))
 })
 
 test_that("buildTopLoci emits 22 columns in the fixed order on a non-empty fit", {
@@ -1052,9 +1085,7 @@ test_that("buildTopLoci fullFit on the committed qtlFineMappingExample (real CS)
     # A genuine chr22 SuSiE fit shipped as a package dataset: region_1/context_1
     # carries a real 42-variant credible set. Exercises within_cs_pip + the
     # alpha-wide column on REAL data (the synthetic case above pins the exact
-    # arithmetic; this pins that it flows on a real fit). The dataset fit is
-    # trimmed to alpha/pip/V/sets, so requesting the full matrices must degrade
-    # gracefully rather than error.
+    # arithmetic; this pins that it flows on a real fit).
     data("qtlFineMappingExample", package = "pecotmr")
     fit <- getSusieFit(qtlFineMappingExample)
     vn <- colnames(fit$alpha)
@@ -1087,10 +1118,27 @@ test_that("buildTopLoci fullFit on the committed qtlFineMappingExample (real CS)
     # alpha-wide column carries the full effect-1 posterior inclusion vector.
     expect_equal(tl$within_cs_pip_cs1, as.numeric(fit$alpha[1, ]))
 
-    # Trimmed fit (no mu / mu2 / lbf_variable): full-matrix request is a no-op for
-    # the effect columns, not an error.
-    tlF <- as.data.frame(buildTopLoci(
+    # The shipped fit carries the post-processor's full retained set, so asking
+    # for the full matrices does produce the per-effect columns.
+    tlFull <- as.data.frame(buildTopLoci(
         fit,
+        csTables,
+        variantNames = vn,
+        method = "susie",
+        signalCutoff = 0,
+        fullFit = TRUE,
+        fullFitAlphaOnly = FALSE
+    ))
+    expect_true(any(grepl("^cs_logbf_|^cs_effect_", names(tlFull))))
+
+    # Same request against a fit trimmed to alpha/pip/V/sets is a no-op for the
+    # effect columns rather than an error. Trimmed explicitly here: relying on
+    # the shipped fixture to be trimmed made this assertion silently change
+    # meaning when the fixture was rebuilt through the real post-processor.
+    trimmed <- fit[c("alpha", "pip", "V", "sets")]
+    class(trimmed) <- class(fit)
+    tlF <- as.data.frame(buildTopLoci(
+        trimmed,
         csTables,
         variantNames = vn,
         method = "susie",
@@ -1453,10 +1501,11 @@ test_that("formatFinemappingOutput exposes finemappingEntry with S4 accessors", 
     expect_true("finemappingEntry" %in% names(out))
     fm <- out$finemappingEntry
     expect_true(
-        is.character(getVariantIds(fm)) &&
-            length(getVariantIds(fm)) == ncol(d$X)
+        is.character(pecotmr:::.fmrPartsVariantIds(fm)) &&
+            length(pecotmr:::.fmrPartsVariantIds(fm)) == ncol(d$X)
     )
-    expect_true(is.list(getSusieFit(fm)) && !is.null(getSusieFit(fm)$pip))
+    fit <- pecotmr:::.fmrPartsSusieFit(fm)
+    expect_true(is.list(fit) && !is.null(fit$pip))
 })
 
 test_that("missing region produces NA grange columns rather than silent omission", {
@@ -1985,18 +2034,26 @@ test_that(".topLociForS4Slot returns an empty frame for NULL/0-row input", {
 
 test_that(".topLociForS4Slot derives variant_id from variant and integer cs from cs_95", {
     tl <- data.frame(
-        variant = c("v1", "v2", "v3", "v4"),
+        variant = c(
+            "chr1:100:A:G",
+            "chr1:200:A:G",
+            "chr1:300:A:G",
+            "chr1:400:A:G"
+        ),
         cs_95 = c("susie_1", "susie_0", "susie_2", NA),
         stringsAsFactors = FALSE
     )
     r <- pecotmr:::.topLociForS4Slot(tl)
-    expect_equal(r$variant_id, c("v1", "v2", "v3", "v4"))
+    expect_equal(
+        r$variant_id,
+        c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G", "chr1:400:A:G")
+    )
     expect_equal(r$cs, c(1L, 0L, 2L, 0L))
     # a non-numeric cs_95 tail collapses to 0L
     expect_equal(
         pecotmr:::.topLociForS4Slot(
             data.frame(
-                variant_id = "v1",
+                variant_id = "chr1:100:A:G",
                 cs_95 = "susie_x",
                 stringsAsFactors = FALSE
             )
@@ -2171,6 +2228,53 @@ test_that("trimFinemappingFit (susie) trims to selected effects and keeps scalar
     expect_false("pip" %in% names(tr$sets_secondary[[1]]))
 })
 
+test_that("trimFinemappingFit keeps non-effect-indexed reconciliation fields", {
+    # sigma2 / null_index / converged / pi / XtXr are what make a TRIMMED fit
+    # sufficient for variant-subset reconciliation, so they must survive the
+    # whitelist. Absent fields are simply skipped.
+    fit <- list(
+        pip = c(0.5, 0.3),
+        alpha = matrix(c(0.5, 0.5, 0.3, 0.7), nrow = 2, byrow = TRUE),
+        lbf_variable = matrix(0, 2, 2),
+        V = c(1, 1),
+        sigma2 = 0.75,
+        null_index = 0,
+        converged = TRUE,
+        pi = c(0.4, 0.6),
+        XtXr = c(1.5, 2.5)
+    )
+    csTables <- list(
+        list(sets = list(cs = list(L1 = c(1, 2))), pip = fit$pip),
+        list(sets = list(cs = list()), pip = fit$pip)
+    )
+    tr <- pecotmr:::trimFinemappingFit(
+        fit,
+        pecotmr:::selectEffects(fit),
+        "susie",
+        csTables
+    )
+    expect_equal(tr[["sigma2"]], 0.75)
+    expect_equal(tr[["null_index"]], 0)
+    expect_true(tr[["converged"]])
+    expect_equal(tr[["pi"]], c(0.4, 0.6))
+    expect_equal(tr[["XtXr"]], c(1.5, 2.5))
+
+    # A fit missing them trims cleanly rather than storing NULLs.
+    bare <- fit[setdiff(
+        names(fit),
+        c("sigma2", "null_index", "converged", "pi", "XtXr")
+    )]
+    trBare <- pecotmr:::trimFinemappingFit(
+        bare,
+        pecotmr:::selectEffects(bare),
+        "susie",
+        csTables
+    )
+    expect_false(any(
+        c("sigma2", "null_index", "converged", "pi", "XtXr") %in% names(trBare)
+    ))
+})
+
 test_that("trimFinemappingFit (fsusie) retains coef and sets the fsusie/susie class", {
     fit <- list(
         pip = setNames(c(0.4, 0.6), c("chr1:100:A:G", "chr1:200:C:T")),
@@ -2255,7 +2359,10 @@ test_that("postprocessFinemappingFit.susiF post-processes an fsusie fit (empty-C
     expect_equal(res$method, "fsusie")
     expect_equal(unique(res$top_loci$method), "fsusie")
     expect_equal(res$otherQuantities, list(condition_id = "ctx"))
-    expect_equal(class(getSusieFit(res$finemappingEntry)), c("fsusie", "susie"))
+    expect_equal(
+        class(pecotmr:::.fmrPartsSusieFit(res$finemappingEntry)),
+        c("fsusie", "susie")
+    )
 })
 
 test_that("postprocessFinemappingFit.susieInf labels credible sets with the susie_inf_ prefix", {
@@ -2300,7 +2407,10 @@ test_that(".postprocessFinemappingFitCommon trim=FALSE stores the untrimmed fit"
         dataY = NULL,
         coverage = 0.95
     )
-    expect_equal(getSusieFit(res$finemappingEntry)$extra_slot, "kept")
+    expect_equal(
+        pecotmr:::.fmrPartsSusieFit(res$finemappingEntry)$extra_slot,
+        "kept"
+    )
 })
 
 # ---- postprocessFinemappingFits / formatFinemappingOutput error branches ----
@@ -2357,7 +2467,7 @@ test_that("buildTopLoci passes through marginal z and p supplied in sumstats", {
 # ---- lbfToAlpha single-column matrix branch ----
 test_that("lbfToAlpha handles a single-column matrix", {
     lbf <- matrix(c(1, 2, 3), ncol = 1)
-    colnames(lbf) <- "v1"
+    colnames(lbf) <- "chr1:100:A:G"
     res <- pecotmr:::lbfToAlpha(lbf)
     expect_equal(dim(res), c(3L, 1L))
     expect_true(all(res == 1)) # single column -> the only entry carries all weight
@@ -2690,7 +2800,10 @@ test_that("mvsusieWeights returns coefficients from provided fit", {
         rnorm(n * p),
         n,
         p,
-        dimnames = list(paste0("s", seq_len(n)), paste0("v", seq_len(p)))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+        )
     )
     b1 <- sin(seq(0, 2 * pi, length.out = J))
     b2 <- cos(seq(0, pi, length.out = J))
@@ -2721,12 +2834,13 @@ test_that("fsusieWeights returns a variants x features matrix with variant rowna
     expect_equal(rownames(W), colnames(obj$X))
 })
 
-test_that("computeCsTable (fsusie) stamps WITHIN-CS purity via cal_purity, not cal_cor_cs (regression)", {
+test_that("computeCsTable (fsusie): within-CS purity, not cal_cor_cs", {
     skip_if_not_installed("fsusieR")
     skip_if_not_installed("wavethresh")
     obj <- .fw_makeFsusieFit()
     ct <- computeCsTable(obj$fit, obj$X, coverage = 0.95, csInput = "fsusie")
-    # purity is stamped as min.abs.corr (the susieR-path shape .csPurityVec reads)
+    # purity is recorded as min.abs.corr, the susieR-path shape that
+    # .csPurityVec reads
     expect_true(
         !is.null(ct$sets$purity) && "min.abs.corr" %in% names(ct$sets$purity)
     )
@@ -2776,7 +2890,7 @@ test_that("fsusieWeights concentrates weight on the causal SNPs", {
     W <- fsusieWeights(fsusieFit = obj$fit, variantIds = colnames(obj$X))
     rowNorm <- sqrt(rowSums(W^2))
     top2 <- names(sort(rowNorm, decreasing = TRUE))[1:2]
-    expect_setequal(top2, c("v3", "v10"))
+    expect_setequal(top2, c("chr1:300:A:G", "chr1:1000:A:G"))
 })
 
 test_that("fsusieWeights fast path returns precomputed $coef for a trimmed fit", {
@@ -2785,7 +2899,10 @@ test_that("fsusieWeights fast path returns precomputed $coef for a trimmed fit",
     W0 <- matrix(
         c(1, 0, 2, 0, 0, 3),
         nrow = 3,
-        dimnames = list(c("v1", "v2", "v3"), c("f1", "f2"))
+        dimnames = list(
+            c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
+            c("f1", "f2")
+        )
     )
     trimmed <- list(coef = W0, pip = c(0.1, 0.2, 0.7))
     class(trimmed) <- c("fsusie", "susie")
@@ -2808,7 +2925,7 @@ test_that("fsusieWeights errors without a fit and on an unusable (trimmed, no co
 .msc_entry <- function(vid, pip, cs, csName = "cs_95") {
     tl <- data.frame(variant_id = vid, pip = pip, stringsAsFactors = FALSE)
     tl[[csName]] <- cs
-    FineMappingEntry(variantIds = vid, susieFit = list(), topLoci = tl)
+    fineMappingRow(variantIds = vid, susieFit = list(), topLoci = tl)
 }
 .msc_fmr <- function(entries, method = "susie") {
     n <- length(entries)
@@ -2823,11 +2940,22 @@ test_that("fsusieWeights errors without a fit and on an unusable (trimmed, no co
 
 test_that("mergeSusieCs: non-overlapping CSs keep distinct per-condition labels", {
     fmr <- .msc_fmr(list(
-        .msc_entry(c("v1", "v2"), c(0.8, 0.6), c("susie_1", "susie_1")),
-        .msc_entry(c("v3", "v4"), c(0.9, 0.7), c("susie_1", "susie_2"))
+        .msc_entry(
+            c("chr1:100:A:G", "chr1:200:A:G"),
+            c(0.8, 0.6),
+            c("susie_1", "susie_1")
+        ),
+        .msc_entry(
+            c("chr1:300:A:G", "chr1:400:A:G"),
+            c(0.9, 0.7),
+            c("susie_1", "susie_2")
+        )
     ))
     res <- mergeSusieCs(fmr)
-    expect_equal(res$variant_id, c("v1", "v2", "v3", "v4"))
+    expect_equal(
+        res$variant_id,
+        c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G", "chr1:400:A:G")
+    )
     expect_equal(
         res$credibleSetNames,
         c("cs_1_1", "cs_1_1", "cs_2_1", "cs_2_2")
@@ -2838,58 +2966,82 @@ test_that("mergeSusieCs: non-overlapping CSs keep distinct per-condition labels"
 test_that("mergeSusieCs: a variant shared across conditions merges their credible sets", {
     fmr <- .msc_fmr(list(
         .msc_entry(
-            c("v1", "v2", "v3"),
+            c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
             c(0.9, 0.5, 0.8),
             c("susie_1", "susie_0", "susie_2")
         ),
-        .msc_entry(c("v3", "v4"), c(0.7, 0.6), c("susie_1", "susie_1"))
+        .msc_entry(
+            c("chr1:300:A:G", "chr1:400:A:G"),
+            c(0.7, 0.6),
+            c("susie_1", "susie_1")
+        )
     ))
     res <- mergeSusieCs(fmr)
-    expect_false("v2" %in% res$variant_id) # susie_0 -> not in a CS
-    expect_equal(res$credibleSetNames[res$variant_id == "v3"], "cs_1_2,cs_2_1")
-    expect_equal(res$credibleSetNames[res$variant_id == "v4"], "cs_1_2,cs_2_1") # via shared v3
-    expect_equal(res$maxPip[res$variant_id == "v3"], 0.8)
-    expect_equal(res$medianPip[res$variant_id == "v3"], 0.75) # median(0.8, 0.7)
+    expect_false("chr1:200:A:G" %in% res$variant_id) # susie_0 -> not in a CS
+    expect_equal(
+        res$credibleSetNames[res$variant_id == "chr1:300:A:G"],
+        "cs_1_2,cs_2_1"
+    )
+    expect_equal(
+        res$credibleSetNames[res$variant_id == "chr1:400:A:G"],
+        "cs_1_2,cs_2_1"
+    ) # via shared v3
+    expect_equal(res$maxPip[res$variant_id == "chr1:300:A:G"], 0.8)
+    # median(0.8, 0.7)
+    expect_equal(res$medianPip[res$variant_id == "chr1:300:A:G"], 0.75)
 })
 
 test_that("mergeSusieCs: coverage selects the cs_<coverage*100> column", {
     fmr <- .msc_fmr(list(
         .msc_entry(
-            c("v1", "v2"),
+            c("chr1:100:A:G", "chr1:200:A:G"),
             c(0.8, 0.6),
             c("susie_1", "susie_1"),
             csName = "cs_70"
         )
     ))
     res <- mergeSusieCs(fmr, coverage = 0.70)
-    expect_equal(res$variant_id, c("v1", "v2"))
+    expect_equal(res$variant_id, c("chr1:100:A:G", "chr1:200:A:G"))
     expect_equal(res$credibleSetNames, c("cs_1_1", "cs_1_1"))
 })
 
 test_that("mergeSusieCs: a condition with no usable CS is skipped, valid ones kept", {
-    valid <- .msc_entry(c("v1", "v2"), c(0.9, 0.8), c("susie_1", "susie_1"))
-    noCs <- FineMappingEntry(
-        variantIds = "v3",
+    valid <- .msc_entry(
+        c("chr1:100:A:G", "chr1:200:A:G"),
+        c(0.9, 0.8),
+        c("susie_1", "susie_1")
+    )
+    noCs <- fineMappingRow(
+        variantIds = "chr1:300:A:G",
         susieFit = list(),
-        topLoci = data.frame(variant_id = "v3", pip = 0.9)
+        topLoci = data.frame(variant_id = "chr1:300:A:G", pip = 0.9)
     )
     res <- mergeSusieCs(.msc_fmr(list(valid, noCs)))
-    expect_setequal(res$variant_id, c("v1", "v2")) # noCs condition skipped
+    # noCs condition skipped
+    expect_setequal(res$variant_id, c("chr1:100:A:G", "chr1:200:A:G"))
 })
 
 test_that("mergeSusieCs: NULL when no condition contributes a credible set", {
-    expect_null(mergeSusieCs(.msc_fmr(list(.msc_entry("v1", 0.9, "susie_0"))))) # all _0
-    noCs <- FineMappingEntry(
-        variantIds = "v1",
+    expect_null(mergeSusieCs(.msc_fmr(list(.msc_entry(
+        "chr1:100:A:G",
+        0.9,
+        "susie_0"
+    ))))) # all _0
+    noCs <- fineMappingRow(
+        variantIds = "chr1:100:A:G",
         susieFit = list(),
-        topLoci = data.frame(variant_id = "v1", pip = 0.9)
+        topLoci = data.frame(variant_id = "chr1:100:A:G", pip = 0.9)
     )
     expect_null(mergeSusieCs(.msc_fmr(list(noCs)))) # no cs col
 })
 
 test_that("mergeSusieCs: single condition with one credible set", {
     res <- mergeSusieCs(.msc_fmr(list(
-        .msc_entry(c("v1", "v2"), c(0.9, 0.8), c("susie_1", "susie_1"))
+        .msc_entry(
+            c("chr1:100:A:G", "chr1:200:A:G"),
+            c(0.9, 0.8),
+            c("susie_1", "susie_1")
+        )
     )))
     expect_equal(res$credibleSetNames, c("cs_1_1", "cs_1_1"))
 })
@@ -2905,14 +3057,26 @@ test_that("mergeSusieCs: non-FineMappingResult input errors", {
 # The example fine-mapping fixtures (chr22:32.1Mb) and the LD-source fixtures
 # (chr22:14.5Mb) cover disjoint regions, so we build a self-consistent case: a
 # hand-made multi-CS fit over the SumStats sketch's own 200 variants.
+# A single-row QtlFineMappingResult, which is what getFineMappingResult() now
+# returns and what computeCsCorrelation() dispatches on. topLoci carries one
+# row per variant: the old fixture paired a non-empty variant list with an
+# EMPTY topLoci, which the row-payload builder rejects as misaligned.
 .ccMakeEntry <- function(vids, cs) {
-    FineMappingEntry(
-        variantIds = vids,
-        susieFit = list(
-            sets = list(cs = cs),
-            pip = stats::runif(length(vids))
-        ),
-        topLoci = data.frame(variant_id = character(0), pip = numeric(0))
+    pip <- stats::runif(length(vids))
+    QtlFineMappingResult(
+        study = "s1",
+        context = "c1",
+        trait = "t1",
+        method = "susie",
+        entry = list(fineMappingRow(
+            variantIds = vids,
+            susieFit = list(sets = list(cs = cs), pip = pip),
+            topLoci = data.frame(
+                variant_id = vids,
+                pip = pip,
+                stringsAsFactors = FALSE
+            )
+        ))
     )
 }
 
@@ -2951,7 +3115,10 @@ test_that("computeCsCorrelation requires a QtlDataset / SumStats ldSource", {
     set.seed(1)
     fe <- .ccMakeEntry(vids, list(L1 = c(1L, 2L, 3L), L2 = c(90L, 91L)))
     expect_error(computeCsCorrelation(fe, 42), "requires a QtlDataset")
-    expect_error(computeCsCorrelation(fe, data.frame()), "requires a QtlDataset")
+    expect_error(
+        computeCsCorrelation(fe, data.frame()),
+        "requires a QtlDataset"
+    )
 })
 
 test_that("computeCsCorrelation errors when a fit variant is off-panel", {

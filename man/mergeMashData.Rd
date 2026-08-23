@@ -22,8 +22,12 @@ when the other is empty.
 # Each object's variants must be uniquely keyed (row names); the two
 # objects share the same conditions (columns), which are aligned by name.
 a <- list(strong = list(z = matrix(rnorm(9), 3, 3,
-  dimnames = list(c("v1", "v2", "v3"), c("t1", "t2", "t3")))))
+  dimnames = list(
+    c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
+    c("t1", "t2", "t3")))))
 b <- list(strong = list(z = matrix(rnorm(9), 3, 3,
-  dimnames = list(c("v4", "v5", "v6"), c("t1", "t2", "t3")))))
+  dimnames = list(
+    c("chr1:400:A:G", "chr1:500:A:G", "chr1:600:A:G"),
+    c("t1", "t2", "t3")))))
 mergeMashData(a, b)
 }

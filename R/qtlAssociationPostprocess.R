@@ -115,7 +115,7 @@
 # fdrThreshold stashed by qtlAssociationPostprocess. Uses the SAME package math
 # as the correction (p.adjust for the Bonferroni-adjusted per-variant p).
 .qapSignificanceMask <- function(x, method, threshold = NULL) {
-    recipe <- x@qcInfo$associationPostprocess
+    recipe <- getQcInfo(x)$associationPostprocess
     if (is.null(recipe)) {
         msg <- glue(
             "This QtlSumStats was not produced by ",
@@ -157,7 +157,7 @@
         if (is.na(thr[i])) {
             next
         }
-        pv <- S4Vectors::mcols(x$entry[[i]])[[pcol]]
+        pv <- S4Vectors::mcols(x[[i]])[[pcol]]
         masks[[i]] <- !is.na(pv) & pv < thr[i]
     }
     masks
@@ -171,22 +171,23 @@
     fdrCol <- str_c("fdr_bonferroni_min_", flav)
     pMinCol <- str_c("p_bonferroni_min_", flav)
     nCol <- if (flav == "filtered") "n_variants_filtered" else "n_variants"
-    if (is.null(x[[fdrCol]])) {
+    if (is.null(.tupleColumn(x, fdrCol))) {
         msg <- glue(
             "getSignificantQtls: '{method}' columns absent; recompute with ",
             "the matching flavour."
         )
         abort(msg)
     }
-    sig <- replace_na(as.numeric(x[[fdrCol]]) < threshold, FALSE)
+    sig <- replace_na(as.numeric(.tupleColumn(x, fdrCol)) < threshold, FALSE)
     if (!any(sig)) {
         return(masks)
     }
-    varThr <- max(as.numeric(x[[pMinCol]])[sig], na.rm = TRUE) # global scalar
-    nVar <- as.numeric(x[[nCol]])
+    # global scalar
+    varThr <- max(as.numeric(.tupleColumn(x, pMinCol))[sig], na.rm = TRUE)
+    nVar <- as.numeric(.tupleColumn(x, nCol))
     for (i in seq_len(nrow(x))) {
         masks[[i]] <- .qapBonferroniRowMask(
-            x$entry[[i]],
+            x[[i]],
             recipe,
             flav,
             nVar[i],
@@ -221,16 +222,16 @@
 # @noRd
 .qapMaskQvalue <- function(x, masks, threshold) {
     qCol <- if (!is.null(x$q_beta)) "q_beta" else "q_bonferroni_min_original"
-    if (is.null(x[[qCol]])) {
+    if (is.null(.tupleColumn(x, qCol))) {
         msg <- glue(
             "getSignificantQtls: no event q-value column (q_beta / ",
             "q_bonferroni_min_original)."
         )
         abort(msg)
     }
-    sig <- replace_na(as.numeric(x[[qCol]]) < threshold, FALSE)
+    sig <- replace_na(as.numeric(.tupleColumn(x, qCol)) < threshold, FALSE)
     for (i in seq_len(nrow(x))) {
-        mc <- S4Vectors::mcols(x$entry[[i]])
+        mc <- S4Vectors::mcols(x[[i]])
         if (isTRUE(sig[i]) && !is.null(mc$qvalue)) {
             masks[[i]] <- !is.na(mc$qvalue) & mc$qvalue < threshold
         }
@@ -263,7 +264,7 @@ setMethod(
         pieces <- map(seq_len(nrow(x)), .qapMaskedEntry, x = x, masks = masks)
         pieces <- pieces[!map_lgl(pieces, is.null)]
         if (length(pieces) == 0L) {
-            return(x$entry[[1L]][0L])
+            return(x[[1L]][0L])
         }
         exec(c, !!!pieces)
     }
@@ -274,19 +275,22 @@ setMethod(
 # plain DFrame, add the columns, and re-wrap (the same rebuild idiom as
 # subsetChr).
 .qapRebuild <- function(x, newCols, qcInfo) {
-    df <- methods::as(x, "DFrame")
+    # The collection is a GRangesList now, not a DFrame: the per-variant
+    # GRanges are the elements and `newCols` are per-tuple metadata, so the
+    # rebuild keeps the elements as-is and only rewrites mcols.
+    md <- mcols(x, use.names = FALSE)
     for (nm in names(newCols)) {
-        df[[nm]] <- newCols[[nm]]
+        md[[nm]] <- newCols[[nm]]
     }
-    obj <- methods::new(
+    grl <- GenomicRanges::GRangesList(as.list(x))
+    mcols(grl) <- md
+    methods::new(
         "QtlSumStats",
-        df,
-        ldSketch = x@ldSketch,
-        genome = x@genome,
+        grl,
+        ldSketch = getLdSketch(x),
+        genome = getGenome(x),
         qcInfo = qcInfo
     )
-    methods::validObject(obj)
-    obj
 }
 
 #' @rdname qtlAssociationPostprocess
@@ -345,7 +349,7 @@ setMethod(
         # Stash the correction recipe so getSignificantQtls /
         # annotateSignificance can reproduce significance cheaply (thresholds,
         # not flags).
-        qc <- x@qcInfo
+        qc <- getQcInfo(x)
         qc$associationPostprocess <- .qapRecipe(
             fdrThreshold,
             mafCutoff,
@@ -436,7 +440,7 @@ setMethod(
     pBonfOrig <- rep(NA_real_, n)
     pBonfFilt <- rep(NA_real_, n)
     for (i in seq_len(n)) {
-        mc <- S4Vectors::mcols(x$entry[[i]])
+        mc <- S4Vectors::mcols(x[[i]])
         pv <- mc[[pvalueCol]]
         if (is.null(pv) || length(pv) == 0L) {
             next
@@ -512,14 +516,14 @@ setMethod(
 # An all-FALSE significance mask sized to entry `i`'s p-value column.
 # @noRd
 .qapEmptyMask <- function(i, x, pcol) {
-    rep(FALSE, length(S4Vectors::mcols(x$entry[[i]])[[pcol]]))
+    rep(FALSE, length(S4Vectors::mcols(x[[i]])[[pcol]]))
 }
 
-# Entry `i`'s significant variants (masks[[i]]), stamped with identity mcols;
+# Entry `i`'s significant variants (masks[[i]]), labelled with identity mcols;
 # NULL when nothing is significant.
 # @noRd
 .qapMaskedEntry <- function(i, x, masks) {
-    gr <- x$entry[[i]][masks[[i]]]
+    gr <- x[[i]][masks[[i]]]
     if (length(gr) == 0L) {
         return(NULL)
     }

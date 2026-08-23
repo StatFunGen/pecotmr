@@ -5,7 +5,6 @@
 #'   z-scores used by correlation-adjusted methods.
 #' @name pecotmr-pval-combine
 #' @keywords internal
-#' @importFrom magrittr %>%
 #' @importFrom stats pt pcauchy
 NULL
 

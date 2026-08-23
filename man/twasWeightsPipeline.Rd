@@ -65,6 +65,9 @@ twasWeightsPipeline(data, ...)
   retainFitDetail = c("slim", "full"),
   dataType = NULL,
   verbose = 1L,
+  mafCutoff = 0,
+  macCutoff = 0,
+  imissCutoff = 1,
   ...
 )
 
@@ -158,7 +161,7 @@ instead of refitting.}
 
 \item{twasWeights}{Optional \code{\link{TwasWeights}} resume cache. For each
 requested \code{(study, context, trait, method)} tuple already present in
-this collection, the cached \code{TwasWeightsEntry} is copied through and
+this collection, the cached \code{TwasWeightsRow} is copied through and
 the corresponding weight fit is skipped. Only the un-cached method subset
 is fit; the cached and fresh entries are concatenated in the returned
 collection. Per-tuple matching mirrors the \code{fineMappingResult} cache
@@ -219,8 +222,8 @@ covariates). Ignored for sumstat inputs.}
 (default) residualize against the genotype-side covariates listed in
 \code{genotypeCovariatesToResidualize}; set \code{FALSE} to disable.}
 
-\item{dataType}{Optional data-type tag stamped into every
-\code{TwasWeightsEntry$dataType} (e.g. \code{"expression"}).}
+\item{dataType}{Optional data-type label recorded on every
+\code{TwasWeightsRow$dataType} (e.g. \code{"expression"}).}
 
 \item{naAction}{Character. How to handle missing values in the extracted
 data.}
@@ -287,6 +290,22 @@ SR-TWAS ensemble in place of re-fitting those fine-mapping methods here.
 Non-fine-mapping methods (lasso, enet, ...) are still cross-validated on the
 same shared partition.
 }
+\section{Panel filters on the RSS path}{
+ On \code{QtlSumStats} input there
+  is no genotype matrix to filter, so \code{mafCutoff} / \code{macCutoff} /
+  \code{imissCutoff} are measured against the \strong{LD reference panel}
+  instead: a variant whose panel genotypes fall below the cutoffs is dropped
+  before the z-scores and LD matrix are built. The thresholds mean the same
+  thing as on the \code{QtlDataset} path (MAC is converted to a MAF
+  equivalent and the stricter of the two applies), so one number carries
+  across input types. Defaults (\code{0}, \code{0}, \code{1}) filter
+  nothing.
+
+  This discards \emph{observed} variants, unlike
+  \code{summaryStatsQc(imputeOpts = ...)}, which only bounds which variants
+  RAISS will impute.
+}
+
 \examples{
 data(qtlDatasetExample)
 twasWeightsPipeline(qtlDatasetExample, methods = "lasso", cisWindow = 1e6)

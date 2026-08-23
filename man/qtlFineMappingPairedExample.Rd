@@ -5,11 +5,13 @@
 \alias{qtlFineMappingPairedExample}
 \title{Example QTL Fine-Mapping Result Paired With the LD-Source Fixtures}
 \format{
-A \code{\link{QtlFineMappingResult}} object: a \code{DFrame}-backed
-collection with one row (\code{study1}, \code{context1}, \code{gene1},
-\code{susie}) carrying a \code{\link{FineMappingEntry}} payload (200 variant
-ids, the SuSiE fit with two credible sets, and a per-variant \code{topLoci}
-table with \code{variant_id} and \code{pip}).
+A \code{\link{QtlFineMappingResult}} object: a
+\code{GRangesList}-backed collection with one element (200 variants on
+chr22) keyed by \code{study1} / \code{context1} / \code{gene1} /
+\code{susie}, carrying the SuSiE fit with two credible sets and a
+per-variant table with the standard post-processing columns (\code{pip},
+\code{logBF}, \code{cs_95} / \code{cs_70} / \code{cs_50} and their
+purities, marginal statistics).
 }
 \description{
 A multi-credible-set \code{\link{QtlFineMappingResult}} whose

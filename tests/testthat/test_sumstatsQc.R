@@ -3169,9 +3169,10 @@ test_that("summaryStatsQc: PIP screen runs AFTER allele harmonization", {
         ldSketch = .ssQ_makeHandle()
     )
     out <- summaryStatsQc(ss, pipCutoffToSkip = 0.5, nCutoff = 0)
-    snps <- as.character(S4Vectors::mcols(out$entry[[1L]])$SNP)
+    snps <- as.character(S4Vectors::mcols(out[[1L]])$SNP)
     expect_false("rsX" %in% snps) # dropped by harmonization
-    expect_equal(length(out$entry[[1L]]), 0L) # screen (post-harmonization) skips the region
+    # screen (post-harmonization) skips the region
+    expect_equal(length(out[[1L]]), 0L)
 })
 
 test_that("summaryStatsQc: PIP screen off leaves the harmonized set intact", {
@@ -3191,7 +3192,7 @@ test_that("summaryStatsQc: PIP screen off leaves the harmonized set intact", {
         ldSketch = .ssQ_makeHandle()
     )
     out <- summaryStatsQc(ss, pipCutoffToSkip = 0, nCutoff = 0)
-    snps <- as.character(S4Vectors::mcols(out$entry[[1L]])$SNP)
+    snps <- as.character(S4Vectors::mcols(out[[1L]])$SNP)
     # SNP is re-keyed to the panel-harmonized id (chr:pos:A2:A1) after
     # harmonization; the panel is A1=A / A2=G, so the surviving three become
     # chr1:<pos>:G:A.
@@ -3234,7 +3235,7 @@ test_that("summaryStatsQc: harmonization re-keys SNP to the panel id and sign-fl
         ldSketch = .ssQ_makeHandle()
     )
     out <- summaryStatsQc(ss, pipCutoffToSkip = 0, nCutoff = 0)
-    e <- out$entry[[1L]]
+    e <- out[[1L]]
     o <- order(GenomicRanges::start(e))
     snp <- as.character(S4Vectors::mcols(e)$SNP)[o]
     z <- S4Vectors::mcols(e)$Z[o]
@@ -3280,9 +3281,9 @@ test_that("summaryStatsQc: slalom z-mismatch resolves sign-flipped variants agai
             nCutoff = 0
         )
     )
-    snp <- as.character(S4Vectors::mcols(out$entry[[1L]])$SNP)
+    snp <- as.character(S4Vectors::mcols(out[[1L]])$SNP)
     expect_true("chr1:200:G:A" %in% snp) # the sign-flipped variant survived
-    expect_equal(length(out$entry[[1L]]), 3L)
+    expect_equal(length(out[[1L]]), 3L)
 })
 
 test_that("summaryStatsQc: zMismatchQc reconciles a chr-prefix difference vs the panel", {
@@ -3324,7 +3325,7 @@ test_that("summaryStatsQc: zMismatchQc reconciles a chr-prefix difference vs the
             nCutoff = 0
         )
     )
-    expect_gte(length(out$entry[[1L]]), 1L)
+    expect_gte(length(out[[1L]]), 1L)
 })
 
 test_that(".deriveBetaSeFromZ: derives BETA+SE when entry has Z+MAF+N only", {
@@ -3420,7 +3421,7 @@ test_that("summaryStatsQc: PIP screen triggers when no variant has signal", {
     ea <- getQcInfo(res)$entryAudit[[1L]]
     expect_true(isTRUE(ea$pipScreenSkipped))
     expect_match(ea$pipScreenReason, "no signals above PIP threshold")
-    expect_equal(length(res$entry[[1L]]), 0L)
+    expect_equal(length(res[[1L]]), 0L)
 })
 
 test_that("summaryStatsQc: harmonized variants count is recorded", {
@@ -3530,7 +3531,7 @@ test_that("summaryStatsQc(effectiveN=TRUE): per-variant counts, no N -> N == N_e
     )
     res <- summaryStatsQc(ss)
     # 4*case*control/(case+control) per variant.
-    expect_equal(.ssQ_entryNByPos(res$entry[[1L]]), c(360, 640, 510, 750))
+    expect_equal(.ssQ_entryNByPos(res[[1L]]), c(360, 640, 510, 750))
     expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "effective")
 })
 
@@ -3549,14 +3550,14 @@ test_that("summaryStatsQc(effectiveN=TRUE): counts + N -> counts win, override l
     expect_message(summaryStatsQc(ss), "overridden by effective N")
     res <- summaryStatsQc(ss)
     # N (was 1000) is replaced by the per-variant N_eff.
-    expect_equal(.ssQ_entryNByPos(res$entry[[1L]]), c(360, 640, 510, 750))
+    expect_equal(.ssQ_entryNByPos(res[[1L]]), c(360, 640, 510, 750))
     expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "effective")
 })
 
 test_that("summaryStatsQc(effectiveN=TRUE): N only, no counts -> used as-is", {
     ss <- .ssQ_makeGwasSumStats() # entry carries N = 1000, no counts
     res <- summaryStatsQc(ss)
-    expect_true(all(.ssQ_entryNByPos(res$entry[[1L]]) == 1000))
+    expect_true(all(.ssQ_entryNByPos(res[[1L]]) == 1000))
     expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "column")
 })
 
@@ -3573,7 +3574,7 @@ test_that("summaryStatsQc(effectiveN=FALSE): counts + N -> raw N, no override", 
         ldSketch = .ssQ_makeHandle()
     )
     res <- summaryStatsQc(ss, effectiveN = FALSE)
-    expect_true(all(.ssQ_entryNByPos(res$entry[[1L]]) == 1000))
+    expect_true(all(.ssQ_entryNByPos(res[[1L]]) == 1000))
     expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "column")
 })
 
@@ -3590,7 +3591,7 @@ test_that("summaryStatsQc(effectiveN=FALSE): counts only -> raw total, nSource='
     )
     res <- summaryStatsQc(ss, effectiveN = FALSE)
     # Raw total n_case + n_control per variant.
-    expect_equal(.ssQ_entryNByPos(res$entry[[1L]]), c(1000, 1000, 1000, 1000))
+    expect_equal(.ssQ_entryNByPos(res[[1L]]), c(1000, 1000, 1000, 1000))
     expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "total")
 })
 
@@ -3608,7 +3609,7 @@ test_that("summaryStatsQc(effectiveN=TRUE): study-level scalars applied to all v
     expect_message(summaryStatsQc(ss), "from study")
     res <- summaryStatsQc(ss)
     # 4*100*900/1000 = 360 for every variant.
-    expect_true(all(.ssQ_entryNByPos(res$entry[[1L]]) == 360))
+    expect_true(all(.ssQ_entryNByPos(res[[1L]]) == 360))
     expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "effective")
 })
 
@@ -3626,7 +3627,7 @@ test_that("summaryStatsQc: study nSample is the level-4 fallback (no counts, no 
         nSample = 4321
     )
     res <- summaryStatsQc(ss)
-    expect_true(all(.ssQ_entryNByPos(res$entry[[1L]]) == 4321))
+    expect_true(all(.ssQ_entryNByPos(res[[1L]]) == 4321))
     expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "study-n")
 })
 
@@ -3649,7 +3650,7 @@ test_that("summaryStatsQc: QtlSumStats tuple nSample is the level-4 fallback too
     )
     res <- summaryStatsQc(ss)
     expect_s4_class(res, "QtlSumStats")
-    expect_true(all(.ssQ_entryNByPos(res$entry[[1L]]) == 838))
+    expect_true(all(.ssQ_entryNByPos(res[[1L]]) == 838))
     expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "study-n")
     expect_equal(as.numeric(res$nSample), 838) # slot preserved through QC
 })
@@ -3668,7 +3669,7 @@ test_that("summaryStatsQc: level precedence -- per-variant counts beat nSample; 
         nSample = 4321
     )
     res1 <- summaryStatsQc(ss1)
-    expect_equal(.ssQ_entryNByPos(res1$entry[[1L]]), c(360, 640, 510, 750))
+    expect_equal(.ssQ_entryNByPos(res1[[1L]]), c(360, 640, 510, 750))
     expect_identical(getQcInfo(res1)$entryAudit[[1L]]$nSource, "effective")
     # per-variant N column present alongside nSample (no counts) -> N wins (column).
     ss2 <- GwasSumStats(
@@ -3679,7 +3680,7 @@ test_that("summaryStatsQc: level precedence -- per-variant counts beat nSample; 
         nSample = 4321
     )
     res2 <- summaryStatsQc(ss2) # .ssQ_makeEntryGr carries N = 1000
-    expect_true(all(.ssQ_entryNByPos(res2$entry[[1L]]) == 1000))
+    expect_true(all(.ssQ_entryNByPos(res2[[1L]]) == 1000))
     expect_identical(getQcInfo(res2)$entryAudit[[1L]]$nSource, "column")
 })
 
@@ -3704,7 +3705,7 @@ test_that("summaryStatsQc: quantitative QtlSumStats is a no-op for effective N",
         ldSketch = .ssQ_makeHandle()
     )
     res <- summaryStatsQc(ss)
-    expect_true(all(.ssQ_entryNByPos(res$entry[[1L]]) == 1000))
+    expect_true(all(.ssQ_entryNByPos(res[[1L]]) == 1000))
     expect_identical(getQcInfo(res)$entryAudit[[1L]]$nSource, "column")
 })
 
@@ -4440,7 +4441,8 @@ test_that(".applyLdMismatchQcToEntry: NA outlier flags from slalom are kept (not
     res <- pecotmr:::.applyLdMismatchQcToEntry(df, handle, method = "slalom")
     # Only the explicit TRUE row should be dropped; the two NA rows survive.
     expect_equal(nrow(res$df), 3L)
-    expect_false("v2" %in% as.character(res$df$SNP)) # v2 is the TRUE outlier
+    # v2 is the TRUE outlier
+    expect_false("chr1:200:A:G" %in% as.character(res$df$SNP))
     expect_equal(res$outliers, 1L)
     # Diagnostics should preserve every row + add a variant_id column.
     expect_equal(nrow(res$diagnostics), length(vids))
@@ -4600,7 +4602,7 @@ test_that("summaryStatsQc: absZ / bf / logBf screens skip a no-signal entry", {
         res <- do.call(summaryStatsQc, c(list(mk()), arg, list(nCutoff = 0)))
         ea <- getQcInfo(res)$entryAudit[[1L]]
         expect_true(isTRUE(ea$pipScreenSkipped))
-        expect_equal(length(res$entry[[1L]]), 0L)
+        expect_equal(length(res[[1L]]), 0L)
     }
 })
 
@@ -4618,7 +4620,7 @@ test_that("summaryStatsQc: absZ screen retains an entry with a strong marginal Z
     res <- summaryStatsQc(ss, absZCutoffToSkip = 5, nCutoff = 0)
     ea <- getQcInfo(res)$entryAudit[[1L]]
     expect_false(isTRUE(ea$pipScreenSkipped))
-    expect_gt(length(res$entry[[1L]]), 0L)
+    expect_gt(length(res[[1L]]), 0L)
 })
 
 test_that("summaryStatsQc: enabling two screens at once errors", {
@@ -5495,19 +5497,32 @@ test_that("sliding_window_loop errors on infinite loop", {
 
 context("univariate_rss_diagnostics")
 
-.testFineMappingEntry <- function(
+# A single-row QtlFineMappingResult standing in for the retired
+# FineMappingRow. topLoci defaults to one row per variant: the row-payload
+# builder requires the two to be aligned, where the entry tolerated an empty
+# table beside a non-empty variant list.
+.testFineMappingRow <- function(
     variantIds,
     susieFit = list(),
-    topLoci = data.frame(
-        variant_id = character(0),
-        pip = numeric(0),
-        stringsAsFactors = FALSE
-    )
+    topLoci = NULL
 ) {
-    FineMappingEntry(
-        variantIds = variantIds,
-        susieFit = susieFit,
-        topLoci = topLoci
+    if (is.null(topLoci)) {
+        topLoci <- data.frame(
+            variant_id = variantIds,
+            pip = rep(0, length(variantIds)),
+            stringsAsFactors = FALSE
+        )
+    }
+    QtlFineMappingResult(
+        study = "s1",
+        context = "c1",
+        trait = "t1",
+        method = "susie",
+        entry = list(fineMappingRow(
+            variantIds = variantIds,
+            susieFit = susieFit,
+            topLoci = topLoci
+        ))
     )
 }
 
@@ -5528,8 +5543,8 @@ test_that("getSusieResult returns NULL when finemappingEntry missing", {
 test_that("getSusieResult returns trimmed result when present", {
     mock_result <- list(pip = c(0.1, 0.5, 0.3), sets = list(cs = list()))
     con_data <- list(
-        finemappingEntry = .testFineMappingEntry(
-            variantIds = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
+        finemappingEntry = .testFineMappingRow(
+            variantIds = c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A"),
             susieFit = mock_result
         )
     )
@@ -5543,14 +5558,14 @@ test_that("getSusieResult returns trimmed result when present", {
 
 test_that("extractTopPipInfo finds top PIP variant", {
     con_data <- list(
-        finemappingEntry = .testFineMappingEntry(
-            variantIds = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
+        finemappingEntry = .testFineMappingRow(
+            variantIds = c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A"),
             susieFit = list(pip = c(0.1, 0.7, 0.2))
         ),
         sumstats = list(z = c(1.0, 3.5, -0.5))
     )
     result <- extractTopPipInfo(con_data$finemappingEntry, con_data$sumstats)
-    expect_equal(result$top_variant, "1:200:C:T")
+    expect_equal(result$top_variant, "chr1:200:C:T")
     expect_equal(result$top_pip, 0.7)
     expect_equal(result$top_z, 3.5)
     expect_equal(result$top_variant_index, 2)
@@ -5560,8 +5575,8 @@ test_that("extractTopPipInfo finds top PIP variant", {
 
 test_that("extractTopPipInfo computes p_value from z", {
     con_data <- list(
-        finemappingEntry = .testFineMappingEntry(
-            variantIds = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
+        finemappingEntry = .testFineMappingRow(
+            variantIds = c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A"),
             susieFit = list(pip = c(0.9, 0.05, 0.05))
         ),
         sumstats = list(z = c(5.0, 0.5, -0.3))
@@ -5573,8 +5588,8 @@ test_that("extractTopPipInfo computes p_value from z", {
 
 test_that("extractTopPipInfo handles ties by taking first max", {
     con_data <- list(
-        finemappingEntry = .testFineMappingEntry(
-            variantIds = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
+        finemappingEntry = .testFineMappingRow(
+            variantIds = c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A"),
             susieFit = list(pip = c(0.5, 0.5, 0.5))
         ),
         sumstats = list(z = c(1.0, 2.0, 3.0))
@@ -5590,12 +5605,12 @@ test_that("extractTopPipInfo handles ties by taking first max", {
 
 test_that("extractCsInfo extracts single CS correctly", {
     data(qtlSumStatsExample)
-    fe <- .testFineMappingEntry(
-        variantIds = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
+    fe <- .testFineMappingRow(
+        variantIds = c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A"),
         susieFit = list(sets = list(cs = list(L_1 = c(1, 2))))
     )
     top_loci_table <- data.frame(
-        variant_id = c("1:100:A:G", "1:200:C:T"),
+        variant_id = c("chr1:100:A:G", "chr1:200:C:T"),
         pip = c(0.3, 0.8),
         z = c(2.0, 4.5),
         stringsAsFactors = FALSE
@@ -5610,7 +5625,7 @@ test_that("extractCsInfo extracts single CS correctly", {
     )
     expect_equal(nrow(result), 1)
     expect_equal(result$cs_name, "L_1")
-    expect_equal(result$top_variant, "1:200:C:T")
+    expect_equal(result$top_variant, "chr1:200:C:T")
     expect_equal(result$top_pip, 0.8)
     expect_equal(result$variants_per_cs, 2)
     expect_true(is.na(result$cs_corr_max))
@@ -5633,7 +5648,11 @@ test_that("extractCsInfo builds correlation columns from the ldSource", {
         z = rnorm(length(vids)),
         stringsAsFactors = FALSE
     )
-    fe <- FineMappingEntry(variantIds = vids, susieFit = fit, topLoci = tl)
+    fe <- .testFineMappingRow(
+        variantIds = vids,
+        susieFit = fit,
+        topLoci = tl
+    )
     result <- extractCsInfo(
         fe,
         csNames = c("L_1", "L_2"),
@@ -5656,12 +5675,12 @@ test_that("extractCsInfo builds correlation columns from the ldSource", {
 
 test_that("extractCsInfo computes p_value from z-score", {
     data(qtlSumStatsExample)
-    fe <- .testFineMappingEntry(
-        variantIds = c("1:100:A:G", "1:200:C:T"),
+    fe <- .testFineMappingRow(
+        variantIds = c("chr1:100:A:G", "chr1:200:C:T"),
         susieFit = list(sets = list(cs = list(L_1 = c(1, 2))))
     )
     top_loci_table <- data.frame(
-        variant_id = c("1:100:A:G", "1:200:C:T"),
+        variant_id = c("chr1:100:A:G", "chr1:200:C:T"),
         pip = c(0.9, 0.1),
         z = c(5.0, 0.5),
         stringsAsFactors = FALSE
@@ -5742,9 +5761,11 @@ test_that("summaryStatsQc: preserves optional nCase/nControl columns through QC"
         nCase = 500,
         nControl = 1500
     )
-    expect_true(all(c("nCase", "nControl") %in% names(ss)))
+    expect_true(all(c("nCase", "nControl") %in% colnames(S4Vectors::mcols(ss))))
     out <- summaryStatsQc(ss, pipCutoffToSkip = 0, nCutoff = 0)
-    expect_true(all(c("nCase", "nControl") %in% names(out)))
+    expect_true(all(
+        c("nCase", "nControl") %in% colnames(S4Vectors::mcols(out))
+    ))
     expect_equal(out$nCase, 500)
     expect_equal(out$nControl, 1500)
 })
@@ -6117,12 +6138,14 @@ test_that("slalom coerces a non-matrix X (data.frame) to a matrix", {
 
 test_that("getSusieResult returns NULL when the trimmed susie fit is empty", {
     conData <- list(
-        finemappingEntry = FineMappingEntry(
-            variantIds = c("1:100:A:G", "1:200:C:T"),
+        # An empty fit with variants present: topLoci must still be aligned
+        # row-for-row, which the entry did not enforce.
+        finemappingEntry = fineMappingRow(
+            variantIds = c("chr1:100:A:G", "chr1:200:C:T"),
             susieFit = list(),
             topLoci = data.frame(
-                variant_id = character(0),
-                pip = numeric(0),
+                variant_id = c("chr1:100:A:G", "chr1:200:C:T"),
+                pip = c(0, 0),
                 stringsAsFactors = FALSE
             )
         )
@@ -6409,7 +6432,7 @@ test_that("raiss genotypeMatrix path: single-matrix, list, all-fail, and bad-typ
 # boundary-merge R2 comparison branches are exercised.
 ssqcOverlapImputedBlocks <- function(seed = 5) {
     set.seed(seed)
-    vid <- paste0("v", 1:8)
+    vid <- sprintf("chr1:%d:A:G", 100L * (1:8))
     pos <- seq(10, 80, by = 10)
     ref_panel <- data.frame(
         chrom = rep(1, 8),
@@ -6493,7 +6516,7 @@ test_that("raiss multi-LD-block: verbose messages and an imputed boundary merge"
     )
     expect_true(is.list(res))
     # Boundary variant v4 appears exactly once after the merge.
-    expect_equal(sum(res$resultNofilter$variant_id == "v4"), 1L)
+    expect_equal(sum(res$resultNofilter$variant_id == "chr1:400:A:G"), 1L)
 })
 
 test_that("raiss multi-LD-block: stops on a block dimension mismatch", {
@@ -6770,7 +6793,7 @@ test_that("summaryStatsQc: early-exits when fewer than two variants survive pre-
     res <- summaryStatsQc(ss, nCutoff = 0)
     ea <- getQcInfo(res)$entryAudit[[1L]]
     expect_match(ea$earlyExit, "fewer than two variants")
-    expect_equal(length(res$entry[[1L]]), 1L)
+    expect_equal(length(res[[1L]]), 1L)
 })
 
 test_that("summaryStatsQc: kriging QC runs, records the flip audit, and adds the rollup segment", {
@@ -6855,7 +6878,7 @@ test_that("summaryStatsQc: impute = TRUE assembles BETA/SE/N and median-fills mi
     ea <- getQcInfo(res)$entryAudit[[1L]]
     expect_equal(ea$raissTotalVariants, 6L)
     expect_equal(ea$raissImputedVariants, 2L)
-    mc <- S4Vectors::mcols(res$entry[[1L]])
+    mc <- S4Vectors::mcols(res[[1L]])
     expect_true(all(c("BETA", "SE", "N") %in% colnames(mc)))
     expect_false(any(is.na(mc$N))) # median-filled
 })
@@ -6987,15 +7010,21 @@ test_that("summaryStatsQc: per-entry rollup enumerates every removed-step segmen
         )
     )
     joined <- paste(msgs, collapse = "")
-    ea <- getQcInfo(res)$entryAudit[[1L]]
-    expect_equal(ea$sanityChecks$nonstandardChrDropped, 1L)
-    expect_equal(ea$sanityChecks$missDataDropped, 1L)
-    expect_equal(ea$sanityChecks$pOutOfRangeDropped, 1L)
-    expect_equal(ea$sanityChecks$zeroEffectDropped, 1L)
-    expect_equal(ea$sanityChecks$nonpositiveSeDropped, 1L)
-    expect_equal(ea$contentFilters$mafDropped, 1L)
-    expect_equal(ea$contentFilters$infoDropped, 1L)
-    expect_equal(ea$contentFilters$nDropped, 1L)
+    # The chr99 variant lands in its own ELEMENT (entries are split by seqname
+    # at construction), so the audit is now per (study, chromosome) and the
+    # drop counts are summed across entries rather than read off entry 1.
+    audits <- getQcInfo(res)$entryAudit
+    tally <- function(section, field) {
+        sum(unlist(map(map(audits, section), field)))
+    }
+    expect_equal(tally("sanityChecks", "nonstandardChrDropped"), 1L)
+    expect_equal(tally("sanityChecks", "missDataDropped"), 1L)
+    expect_equal(tally("sanityChecks", "pOutOfRangeDropped"), 1L)
+    expect_equal(tally("sanityChecks", "zeroEffectDropped"), 1L)
+    expect_equal(tally("sanityChecks", "nonpositiveSeDropped"), 1L)
+    expect_equal(tally("contentFilters", "mafDropped"), 1L)
+    expect_equal(tally("contentFilters", "infoDropped"), 1L)
+    expect_equal(tally("contentFilters", "nDropped"), 1L)
     # The rollup line names each removed step.
     for (seg in c(
         "nonstdChr",
@@ -7236,10 +7265,10 @@ test_that("summaryStatsQc kriging QC sign-flips an LD-inconsistent variant and r
     )
     ea <- getQcInfo(res)$entryAudit[[1L]]
     expect_gte(ea$krigingFlipped, 1L) # at least one flipped
-    expect_equal(length(res$entry[[1L]]), 8L) # retained, not dropped
+    expect_equal(length(res[[1L]]), 8L) # retained, not dropped
     # rs4's -15 flips to +15; its neighbours were +4, so every retained Z is now
     # positive.
-    zout <- S4Vectors::mcols(res$entry[[1L]])$Z
+    zout <- S4Vectors::mcols(res[[1L]])$Z
     expect_true(all(zout > 0))
     # the audit's flip count equals the diagnostics rows marked flipped.
     expect_identical(sum(ea$krigingDiagnostics$flipped), ea$krigingFlipped)
@@ -7289,4 +7318,170 @@ test_that(".subsetSketchToIds keeps exactly the entries' variants", {
 test_that(".subsetSketchToRange / .subsetSketchToIds are NULL-safe", {
     expect_null(pecotmr:::.subsetSketchToRange(NULL, list()))
     expect_null(pecotmr:::.subsetSketchToIds(NULL, list()))
+})
+
+
+# ---------------------------------------------------------------------------
+# RAISS imputation: MAF / MAC / missingness cutoffs
+#
+# Without these, every rare variant in the window of a large LD sketch becomes
+# an imputation target -- slow, and of little value when the study is far
+# smaller than the panel. The cutoffs bound what RAISS will IMPUTE, not what it
+# keeps: an observed variant survives whatever its panel frequency, because
+# .raissSvdImpute pairs the panel's known columns with knownZscores$z and
+# dropping one would put those two out of step.
+# ---------------------------------------------------------------------------
+
+# 20 common + 20 rare variants over 100 samples. Variant 3 is observed and
+# holed; variant 8 is a target and holed, so the two cases are separable.
+# @noRd
+.rmask_fixture <- function() {
+    set.seed(1)
+    nS <- 100L
+    af <- c(runif(20L, 0.2, 0.4), runif(20L, 0.002, 0.01))
+    dosage <- vapply(af, function(f) rbinom(nS, 2L, f), numeric(nS))
+    ids <- sprintf("chr1:%d:A:G", 1000L * seq_along(af))
+    colnames(dosage) <- ids
+    dosage[1:60, 3] <- NA
+    dosage[1:70, 8] <- NA
+    refPanel <- data.frame(
+        chrom = "1",
+        pos = 1000L * seq_along(af),
+        A1 = "G",
+        A2 = "A",
+        variant_id = ids,
+        stringsAsFactors = FALSE
+    )
+    obs <- c(1L, 2L, 3L, 21L)
+    knownZ <- data.frame(
+        chrom = "1",
+        pos = refPanel$pos[obs],
+        variant_id = ids[obs],
+        A1 = "G",
+        A2 = "A",
+        z = rnorm(length(obs)),
+        stringsAsFactors = FALSE
+    )
+    list(dosage = dosage, refPanel = refPanel, knownZ = knownZ, obs = obs)
+}
+
+# @noRd
+.rmask_run <- function(f, ...) {
+    .qcRaissTargetMask(
+        f$refPanel,
+        f$knownZ,
+        f$dosage,
+        list(imputeOpts = list(...))
+    )
+}
+
+test_that(".qcRaissVariantStats reads MAF and missingness pre-imputation", {
+    f <- .rmask_fixture()
+    st <- .qcRaissVariantStats(f$dosage)
+    expect_length(st$maf, ncol(f$dosage))
+    expect_true(all(st$maf <= 0.5, na.rm = TRUE))
+    # The rare half sits well below the common half.
+    expect_lt(max(st$maf[21:40]), min(st$maf[1:20]))
+    expect_equal(st$missRate[[3]], 0.6)
+    expect_equal(st$missRate[[8]], 0.7)
+    expect_equal(st$missRate[[1]], 0)
+})
+
+test_that(".qcRaissTargetMask keeps everything when no cutoff is set", {
+    f <- .rmask_fixture()
+    expect_true(all(.rmask_run(f)))
+})
+
+test_that(".qcRaissTargetMask drops rare imputation targets", {
+    f <- .rmask_fixture()
+    keep <- .rmask_run(f, mafCutoff = 0.05)
+    expect_false(all(keep))
+    st <- .qcRaissVariantStats(f$dosage)
+    # Every dropped variant is genuinely below the cutoff...
+    expect_true(all(st$maf[!keep] < 0.05, na.rm = TRUE))
+    # ...and every common one survives.
+    expect_true(all(keep[1:20]))
+})
+
+test_that(".qcRaissTargetMask never drops an observed variant", {
+    # Variant 21 is rare AND observed. Dropping it would misalign
+    # knownZscores$z against the panel's known columns inside the SVD.
+    f <- .rmask_fixture()
+    for (cut in c(0.05, 0.2, 0.45)) {
+        keep <- .rmask_run(f, mafCutoff = cut)
+        expect_true(
+            all(is_in(f$knownZ$variant_id, f$refPanel$variant_id[keep])),
+            label = str_c("observed variants kept at mafCutoff ", cut)
+        )
+    }
+})
+
+test_that(".qcRaissTargetMask applies a MAC cutoff as a MAF equivalent", {
+    f <- .rmask_fixture()
+    # 100 samples -> macCutoff 20 is MAF 0.1.
+    byMac <- .rmask_run(f, macCutoff = 20)
+    byMaf <- .rmask_run(f, mafCutoff = 0.1)
+    expect_equal(byMac, byMaf)
+})
+
+test_that(".qcRaissTargetMask takes the stricter of MAF and MAC", {
+    f <- .rmask_fixture()
+    strictMaf <- .rmask_run(f, mafCutoff = 0.3, macCutoff = 2)
+    expect_equal(strictMaf, .rmask_run(f, mafCutoff = 0.3))
+    strictMac <- .rmask_run(f, mafCutoff = 0.001, macCutoff = 60)
+    expect_equal(strictMac, .rmask_run(f, mafCutoff = 0.3))
+})
+
+test_that(".qcRaissTargetMask drops high-missingness targets only", {
+    f <- .rmask_fixture()
+    keep <- .rmask_run(f, imissCutoff = 0.5)
+    # Variant 8 is 70% missing and unobserved -> dropped.
+    expect_false(keep[[8]])
+    # Variant 3 is 60% missing but observed -> kept.
+    expect_true(keep[[3]])
+    expect_equal(sum(!keep), 1L)
+    # Above both rates, nothing is dropped.
+    expect_true(all(.rmask_run(f, imissCutoff = 0.8)))
+})
+
+test_that(".qcRaissTargetMask drops a target whose MAF is undefined", {
+    # An all-missing panel variant has no MAF; it must not slip through a
+    # numeric comparison against NA.
+    f <- .rmask_fixture()
+    f$dosage[, 12] <- NA_real_
+    keep <- .rmask_run(f, mafCutoff = 0.01)
+    expect_false(keep[[12]])
+})
+
+test_that("summaryStatsQc imputeOpts cutoffs bound what RAISS imputes", {
+    data(gwasSumStatsS4Example)
+    gss <- gwasSumStatsS4Example
+    variants <- unlist(gss)
+    thin <- GwasSumStats(
+        study = getStudy(gss),
+        entry = list(variants[seq(1L, length(variants), by = 4L)]),
+        genome = getGenome(gss),
+        ldSketch = getLdSketch(gss)
+    )
+    nObserved <- sum(lengths(thin))
+    # The bundled toy panel imputes poorly, so the R2 gate would otherwise
+    # reject every target and leave nothing to count.
+    base <- list(r2Threshold = 0, minimumLd = 0)
+    nOut <- function(...) {
+        out <- suppressWarnings(suppressMessages(summaryStatsQc(
+            thin,
+            impute = TRUE,
+            imputeOpts = utils::modifyList(base, list(...))
+        )))
+        sum(lengths(out))
+    }
+    loose <- nOut()
+    expect_gt(loose, nObserved)
+    # A stricter cutoff imputes strictly fewer variants...
+    mid <- nOut(mafCutoff = 0.2)
+    strict <- nOut(mafCutoff = 0.45)
+    expect_lt(mid, loose)
+    expect_lt(strict, mid)
+    # ...but never fewer than the observed set it started from.
+    expect_gte(strict, nObserved)
 })

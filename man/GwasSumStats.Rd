@@ -14,6 +14,8 @@ GwasSumStats(
   nControl = NULL,
   nSample = NULL,
   qcInfo = list(),
+  ldBlocks = NULL,
+  blockId = NULL,
   ...
 )
 }
@@ -52,6 +54,24 @@ sample size).}
 on construction; populated by \code{summaryStatsQc()} with a per-step audit
 record. Fine-mapping / TWAS pipelines reject inputs where
 \code{length(getQcInfo(x)) == 0}.}
+
+\item{ldBlocks}{Optional LD-block specification: an \code{LdBlocks}, a
+\code{GRanges}, a data.frame with \code{chrom}/\code{start}/\code{end}
+(plus an optional \code{blockId}), or a path to such a table. When
+supplied, each
+study's variants are split into one element per block rather than one per
+chromosome, and \code{blockId} takes the block's key (its \code{names},
+else a \code{blockId} metadata column, else its coordinates). cTWAS needs
+this granularity: its EM estimates parameters across blocks, so a
+per-chromosome split is too coarse. Variants overlapping no block are
+dropped with a warning, because a variant outside every block has no
+block-local LD to be fine-mapped against.}
+
+\item{blockId}{Optional character vector of block keys, one per
+\code{entry}, for entries that are \strong{already} split by block. Use
+it to carry existing keys through a rebuild; without it a rebuild would
+re-derive them as seqnames and collapse distinct blocks onto one key.
+Mutually exclusive with \code{ldBlocks}.}
 
 \item{...}{Additional per-study columns to attach to the collection.}
 }

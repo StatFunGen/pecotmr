@@ -27,13 +27,34 @@ genotype source plus a per-context set of molecular phenotypes.
 summary-statistics-only `QtlSumStats`) so a molecular trait measured across
 multiple studies can be analyzed with downstream pipelines together.
 
-| Slot | Holds |
-|---|---|
-| `study` | study identifier (length-1 character) |
-| `genotypes` | a `GenotypeHandle` (lazy PLINK1/PLINK2/VCF/GDS handle) |
-| `phenotypes` | a **named list of `SummarizedExperiment`s**, one per context; assay = traits x samples, `rowRanges` = trait positions, `colData` = per-context covariates |
-| `genotypeCovariates` | numeric matrix (samples x covariates), e.g. genotype PCs, applied to every context |
-| QC thresholds | `mafCutoff`, `macCutoff`, `xvarCutoff`, `imissCutoff`, `keepIndel`, `keepSamples`, `keepVariants`, `scaleResiduals` — stored as **lazy** filters, applied at genotype-extraction time |
+It **is** a [`MultiAssayExperiment`][mae], so the whole multi-assay surface
+works on it directly. Each QTL context is one experiment, and the genotypes
+are one more:
+
+[mae]: https://bioconductor.org/packages/MultiAssayExperiment/
+
+*  **`genotype`** — `rowRanges` is one range per variant (carrying `A1` /
+    `A2`); the `dosage` assay is variants x samples, read **lazily** through
+    the `GenotypeHandle`; `colData` holds genotype-derived covariates such as
+    ancestry PCs.
+*  **one per context** — `rowRanges` is trait positions, the assay is
+    traits x samples, and `colData` holds that context's phenotype
+    covariates.
+
+Alongside them the object keeps a `colData` naming every sample and a
+`sampleMap` recording which of them each experiment observes — so contexts
+need not share a sample set — plus its own slots:
+
+*  `study` — study identifier (length-1 character).
+*  `genotypes` — the `GenotypeHandle` (a lazy PLINK1/PLINK2/VCF/GDS handle)
+    that the dosage assay reads through.
+*  QC thresholds — `mafCutoff`, `macCutoff`, `xvarCutoff`, `imissCutoff`,
+    `keepIndel`, `keepVariants`, `scaleResiduals`. Stored as **lazy** filters,
+    applied at genotype-extraction time.
+
+To restrict a dataset to a set of samples, subset it: `x[, samples, ]` narrows
+`colData` and `sampleMap` together, and keeps the class and its slots. The
+`keepSamples` constructor argument is shorthand for the same thing.
 
 There are two ways to build a `QtlDataset`:
 

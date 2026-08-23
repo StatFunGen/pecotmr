@@ -29,7 +29,7 @@ context("Collection-level accessors")
 }
 
 .ca_makeFmEntry <- function(n = 3) {
-    FineMappingEntry(
+    fineMappingRow(
         variantIds = paste0("chr1:", 100 * seq_len(n), ":A:G"),
         susieFit = list(payload = sprintf("fit_n=%d", n)),
         topLoci = .ca_makeTopLoci(n)
