@@ -157,7 +157,7 @@ test_that("metaAnalysisPerCondition returns single-effect p-value when only one 
 })
 
 test_that("metaAnalysisPerCondition returns NA pvalue when SE cutoff drops everything", {
-    feat <- c("v1", "v2")
+    feat <- c("chr1:100:A:G", "chr1:200:A:G")
     cols <- "mean_contrast_brain_vs_blood"
     es <- matrix(c(0.1, 0.2), nrow = 2, ncol = 1, dimnames = list(feat, cols))
     se <- matrix(c(0.01, 0.02), nrow = 2, ncol = 1, dimnames = list(feat, cols))
@@ -168,7 +168,7 @@ test_that("metaAnalysisPerCondition returns NA pvalue when SE cutoff drops every
 })
 
 test_that("metaAnalysisPerCondition runs DerSimonian-Laird when >=2 effects survive", {
-    feat <- c("v1", "v2", "v3")
+    feat <- c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G")
     cols <- "mean_contrast_brain_vs_blood"
     es <- matrix(
         c(0.3, 0.5, 0.4),
@@ -194,7 +194,7 @@ test_that("metaAnalysisPerCondition runs DerSimonian-Laird when >=2 effects surv
 })
 
 test_that("metaAnalysisPerCondition unique-condition extraction handles >2 conditions", {
-    feat <- "v1"
+    feat <- "chr1:100:A:G"
     cols <- c(
         "mean_contrast_brain_vs_blood",
         "mean_contrast_brain_vs_muscle",
@@ -260,10 +260,15 @@ test_that("fitMashContrast returns NULL when fewer than 2 tested conditions", {
         0,
         nrow = 1,
         ncol = 3,
-        dimnames = list("v1", c("a", "b", "c"))
+        dimnames = list("chr1:100:A:G", c("a", "b", "c"))
     )
     origMean[1, "b"] <- 1
-    pm <- matrix(0, nrow = 1, ncol = 3, dimnames = list("v1", c("a", "b", "c")))
+    pm <- matrix(
+        0,
+        nrow = 1,
+        ncol = 3,
+        dimnames = list("chr1:100:A:G", c("a", "b", "c"))
+    )
     pv <- array(diag(3), dim = c(3, 3, 1))
     dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
     expect_null(fitMashContrast(1L, origMean, pm, pv))
@@ -273,12 +278,12 @@ test_that("fitMashContrast: 2-tested-conditions fast path yields one pairwise co
     origMean <- matrix(
         c(0.5, 0.3, 0),
         nrow = 1,
-        dimnames = list("v1", c("a", "b", "c"))
+        dimnames = list("chr1:100:A:G", c("a", "b", "c"))
     )
     pm <- matrix(
         c(0.5, 0.3, 0),
         nrow = 1,
-        dimnames = list("v1", c("a", "b", "c"))
+        dimnames = list("chr1:100:A:G", c("a", "b", "c"))
     )
     pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
     dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
@@ -303,12 +308,12 @@ test_that("fitMashContrast: 3-tested-conditions yields deviation + pairwise cont
     origMean <- matrix(
         c(0.5, 0.3, -0.2),
         nrow = 1,
-        dimnames = list("v1", c("a", "b", "c"))
+        dimnames = list("chr1:100:A:G", c("a", "b", "c"))
     )
     pm <- matrix(
         c(0.5, 0.3, -0.2),
         nrow = 1,
-        dimnames = list("v1", c("a", "b", "c"))
+        dimnames = list("chr1:100:A:G", c("a", "b", "c"))
     )
     pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
     dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
@@ -361,9 +366,13 @@ test_that("fitMashContrast applies deviation + pairwise group adjustments", {
     origMean <- matrix(
         c(0.5, 0.3, -0.2, 0.4),
         nrow = 1,
-        dimnames = list("v1", conds)
+        dimnames = list("chr1:100:A:G", conds)
     )
-    pm <- matrix(c(0.5, 0.3, -0.2, 0.4), nrow = 1, dimnames = list("v1", conds))
+    pm <- matrix(
+        c(0.5, 0.3, -0.2, 0.4),
+        nrow = 1,
+        dimnames = list("chr1:100:A:G", conds)
+    )
     pv <- array(0, dim = c(4, 4, 1), dimnames = list(conds, conds, NULL))
     pv[,, 1] <- diag(4) * 0.1
     # a,b share group 1 (replicates); c is its own group 2; d ungrouped (0).
@@ -418,8 +427,16 @@ test_that("metaAnalysisPerCondition skips conditions whose name matches no colum
     # the embedded `$` anchor matches nothing, exercising the
     # `if (length(idx) == 0) next` skip branch.
     cols <- "mean_contrast_x$y_vs_z"
-    es <- matrix(c(0.3, 0.5), nrow = 2, dimnames = list(c("v1", "v2"), cols))
-    se <- matrix(c(0.1, 0.1), nrow = 2, dimnames = list(c("v1", "v2"), cols))
+    es <- matrix(
+        c(0.3, 0.5),
+        nrow = 2,
+        dimnames = list(c("chr1:100:A:G", "chr1:200:A:G"), cols)
+    )
+    se <- matrix(
+        c(0.1, 0.1),
+        nrow = 2,
+        dimnames = list(c("chr1:100:A:G", "chr1:200:A:G"), cols)
+    )
     out <- metaAnalysisPerCondition(es, se)
     # "x$y" is skipped; only the "z" condition survives.
     expect_false("x$y" %in% out$condition)
@@ -1391,14 +1408,14 @@ test_that("scoreFromCs: falls back to the single pairwise contrast when no devia
     fm <- data.frame(
         cs_order = c(1, 1, 0),
         pip = c(0.9, 0.5, 0.1),
-        variants = c("v1", "v2", "v3"),
+        variants = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
         stringsAsFactors = FALSE
     )
     cr <- data.frame(
         p_contrast_Ast_vs_Mic = c(0.5, 0.2),
         mean_contrast_Ast_vs_Mic = c(1.0, 0.5),
         se_contrast_Ast_vs_Mic = c(0.2, 0.1),
-        feature_id = c("v1", "v2"),
+        feature_id = c("chr1:100:A:G", "chr1:200:A:G"),
         stringsAsFactors = FALSE
     )
     # condition "Xyz" has no deviation column; exactly one pairwise contrast exists.
@@ -1409,12 +1426,12 @@ test_that("scoreFromCs: NA when neither a deviation nor a single pairwise column
     fm <- data.frame(
         cs_order = c(1, 0),
         pip = c(0.9, 0.1),
-        variants = c("v1", "v2"),
+        variants = c("chr1:100:A:G", "chr1:200:A:G"),
         stringsAsFactors = FALSE
     )
     # Lead variant overlaps, but cr carries no p_contrast_*_deviation for the
     # condition and no pairwise p_contrast_*_vs_* column -> NA.
-    cr <- data.frame(some_other_col = 1, feature_id = "v1")
+    cr <- data.frame(some_other_col = 1, feature_id = "chr1:100:A:G")
     expect_true(is.na(scoreFromCs(fm, cr, condition = "Xyz")))
 })
 

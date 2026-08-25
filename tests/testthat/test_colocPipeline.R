@@ -13,7 +13,7 @@ context("colocPipeline")
         path = "/tmp/sketch.gds",
         format = "gds",
         snpInfo = data.frame(
-            SNP = paste0("v", seq_len(snp_n)),
+            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -68,7 +68,7 @@ context("colocPipeline")
             dimnames = list(NULL, variant_ids)
         )
     }
-    FineMappingEntry(variantIds = variant_ids, susieFit = fit, topLoci = tl)
+    fineMappingRow(variantIds = variant_ids, susieFit = fit, topLoci = tl)
 }
 
 .cp_makeQtlFmr <- function(
@@ -122,7 +122,7 @@ context("colocPipeline")
         )
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        SNP = paste0("v", 1:5),
+        SNP = sprintf("chr1:%d:A:G", 100L * (1:5)),
         A1 = rep("A", 5),
         A2 = rep("G", 5),
         Z = rnorm(5),
@@ -197,7 +197,7 @@ test_that(".colocRequireMatchingLdSketches: NULL qtl-side ldSketch is allowed", 
         qtlFineMappingResult = qfmr,
         gwasInput = gfmr
     ))
-    expect_s3_class(out, "data.frame")
+    expect_s4_class(out, "ColocResult")
 })
 
 test_that(".colocRequireMatchingLdSketches: non-NULL qtl + NULL gwas errors", {
@@ -259,7 +259,7 @@ test_that("colocPipeline: resolves GwasSumStats via fineMappingPipeline (mocked)
         qtlFineMappingResult = qfmr,
         gwasInput = gss
     ))
-    expect_s3_class(out, "data.frame")
+    expect_s4_class(out, "ColocResult")
     expect_gte(nrow(out), 1L)
 })
 
@@ -295,21 +295,41 @@ test_that("colocPipeline: coloc.bf_bf failure surfaces as warning and skip", {
     expect_equal(nrow(out), 0L)
 })
 
+test_that("colocPipeline: disjoint QTL and GWAS variant sets error", {
+    # Returning an empty table here is indistinguishable from "ran fine, no
+    # colocalization" -- a materially different scientific conclusion -- so
+    # fully disjoint inputs are refused rather than silently emptied.
+    qfmr <- .cp_makeQtlFmr()
+    gfmr <- .cp_makeGwasFmr(
+        entries = list(.cp_makeFmEntry(
+            variant_ids = paste0("chr9:", 100 * (1:5), ":A:G")
+        ))
+    )
+    expect_error(
+        colocPipeline(qtlFineMappingResult = qfmr, gwasInput = gfmr),
+        "share no variant|disjoint"
+    )
+})
+
 test_that("colocPipeline: empty result has the documented schema", {
     qfmr <- .cp_makeQtlFmr()
-    # Build a GWAS FMR whose entry has no usable LBF -> pre-extract returns empty.
+    # Build a GWAS FMR whose entry has no usable LBF -> pre-extract returns
+    # empty. The variant OVERLAPS the QTL fixture: a disjoint pair is now an
+    # error (see the disjoint test below), so it cannot be used to reach the
+    # empty-schema path.
+    shared <- "chr1:100:A:G"
     emptyFit <- list(
-        alpha = matrix(0, 1, 1),
-        pip = c(v1 = 0),
+        alpha = matrix(1, 1, 1),
+        pip = 1,
         V = 0,
         lbf_variable = matrix(NA_real_, 1, 1)
     )
-    e <- FineMappingEntry(
-        variantIds = "v1",
+    e <- fineMappingRow(
+        variantIds = shared,
         susieFit = emptyFit,
         topLoci = data.frame(
-            variant_id = "v1",
-            pip = 0,
+            variant_id = shared,
+            pip = 1,
             stringsAsFactors = FALSE
         )
     )
@@ -332,6 +352,9 @@ test_that("colocPipeline: empty result has the documented schema", {
             "method",
             "gwasStudy",
             "gwasMethod",
+            "blockId",
+            "qtlCs",
+            "gwasCs",
             "idx1",
             "idx2",
             "nSnps",
@@ -339,7 +362,9 @@ test_that("colocPipeline: empty result has the documented schema", {
             "PP.H1.abf",
             "PP.H2.abf",
             "PP.H3.abf",
-            "PP.H4.abf"
+            "PP.H4.abf",
+            "qtlRetainedMass",
+            "gwasRetainedMass"
         )
     )
 })
@@ -349,17 +374,22 @@ test_that("colocPipeline: empty result has the documented schema", {
 # ===========================================================================
 
 test_that(".colocExtractLbfFromEntry: entry without trimmedFit returns NULL with warning", {
-    e <- FineMappingEntry(
-        variantIds = "v1",
+    e <- fineMappingRow(
+        variantIds = "chr1:100:A:G",
         susieFit = NULL,
         topLoci = data.frame(
-            variant_id = "v1",
+            variant_id = "chr1:100:A:G",
             pip = 0.1,
             stringsAsFactors = FALSE
         )
     )
     expect_warning(
-        out <- pecotmr:::.colocExtractLbfFromEntry(e, FALSE, NULL, 1e-9),
+        out <- pecotmr:::.colocExtractLbfFromEntry(
+            e,
+            FALSE,
+            NULL,
+            1e-9
+        ),
         "has no trimmedFit"
     )
     expect_null(out)
@@ -367,22 +397,30 @@ test_that(".colocExtractLbfFromEntry: entry without trimmedFit returns NULL with
 
 test_that(".colocExtractLbfFromEntry: filterLbfCs subsets by cs_index", {
     fit <- list(
-        alpha = matrix(0, 3, 4, dimnames = list(NULL, paste0("v", 1:4))),
-        pip = setNames(c(0.9, 0.1, 0.5, 0.2), paste0("v", 1:4)),
+        alpha = matrix(
+            0,
+            3,
+            4,
+            dimnames = list(NULL, sprintf("chr1:%d:A:G", 100L * (1:4)))
+        ),
+        pip = setNames(
+            c(0.9, 0.1, 0.5, 0.2),
+            sprintf("chr1:%d:A:G", 100L * (1:4))
+        ),
         V = c(0.1, 0.1, 0.1),
         lbf_variable = matrix(
             1:12,
             3,
             4,
-            dimnames = list(NULL, paste0("v", 1:4))
+            dimnames = list(NULL, sprintf("chr1:%d:A:G", 100L * (1:4)))
         ),
         sets = list(cs_index = c(1L, 3L))
     ) # keep effects 1 and 3
-    e <- FineMappingEntry(
-        variantIds = paste0("v", 1:4),
+    e <- fineMappingRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         susieFit = fit,
         topLoci = data.frame(
-            variant_id = paste0("v", 1:4),
+            variant_id = sprintf("chr1:%d:A:G", 100L * (1:4)),
             pip = c(0.9, 0.1, 0.5, 0.2),
             stringsAsFactors = FALSE
         )
@@ -431,16 +469,6 @@ test_that(".colocAlignLbf aligns non-autosomal columns across a chr-prefix diffe
     expect_false(is.null(aligned))
     expect_equal(ncol(aligned$qtl), 2L)
     expect_identical(colnames(aligned$qtl), colnames(aligned$gwas))
-})
-
-test_that(".colocRbindLbf: rbinds matrices with union of columns, NAs filled with 0", {
-    a <- matrix(1, 2, 2, dimnames = list(NULL, c("v1", "v2")))
-    b <- matrix(2, 2, 2, dimnames = list(NULL, c("v2", "v3")))
-    out <- pecotmr:::.colocRbindLbf(list(a, b))
-    expect_equal(dim(out), c(4L, 3L))
-    expect_setequal(colnames(out), c("v1", "v2", "v3"))
-    # Column v3 padded with 0 for rows of `a`.
-    expect_true(all(out[1:2, "v3"] == 0))
 })
 
 test_that(".colocStandardiseRow: fills in missing PP columns with NA", {
@@ -508,7 +536,7 @@ test_that(".colocLookupEnrichment: returns NA when no row matches", {
 
 test_that(".colocEmptyResult(enriched=TRUE): includes enrichment + p12Used schema", {
     out <- pecotmr:::.colocEmptyResult(enriched = TRUE)
-    expect_s3_class(out, "data.frame")
+    expect_s4_class(out, "ColocResult")
     expect_equal(nrow(out), 0L)
     expect_true(all(c("enrichment", "p12Used") %in% colnames(out)))
 })
@@ -624,10 +652,10 @@ test_that("colocPipeline: attaches gwasFineMapping when no pairs survive", {
         V = 0,
         lbf_variable = matrix(NA_real_, 1, 1)
     )
-    e <- FineMappingEntry(
-        variantIds = "v1",
+    e <- fineMappingRow(
+        variantIds = "chr1:100:A:G",
         susieFit = emptyFit,
-        topLoci = .cp_tl("v1", pip = 0)
+        topLoci = .cp_tl("chr1:100:A:G", pip = 0)
     )
     resolved <- GwasFineMappingResult(
         study = "G1",
@@ -661,10 +689,10 @@ test_that("colocPipeline: skips a QTL entry with no usable LBF", {
         V = 0,
         lbf_variable = matrix(NA_real_, 1, 1)
     )
-    badEntry <- FineMappingEntry(
-        variantIds = "v1",
+    badEntry <- fineMappingRow(
+        variantIds = "chr1:100:A:G",
         susieFit = badFit,
-        topLoci = .cp_tl("v1", pip = 0)
+        topLoci = .cp_tl("chr1:100:A:G", pip = 0)
     )
     goodEntry <- .cp_makeFmEntry()
     qfmr <- .cp_makeQtlFmr(
@@ -736,13 +764,23 @@ test_that(".colocFilterCsByConcentration: keeps narrow CS, drops diffuse ones", 
 # --- .colocExtractLbfFromEntry branches -------------------------------------
 
 test_that(".colocExtractLbfFromEntry: stacks fSuSiE lBF list into a matrix", {
-    m1 <- matrix(rnorm(8), 2, 4, dimnames = list(NULL, paste0("v", 1:4)))
-    m2 <- matrix(rnorm(8), 2, 4, dimnames = list(NULL, paste0("v", 1:4)))
+    m1 <- matrix(
+        rnorm(8),
+        2,
+        4,
+        dimnames = list(NULL, sprintf("chr1:%d:A:G", 100L * (1:4)))
+    )
+    m2 <- matrix(
+        rnorm(8),
+        2,
+        4,
+        dimnames = list(NULL, sprintf("chr1:%d:A:G", 100L * (1:4)))
+    )
     fit <- list(fsusie_result = list(lBF = list(m1, m2)))
-    e <- FineMappingEntry(
-        variantIds = paste0("v", 1:4),
+    e <- fineMappingRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         susieFit = fit,
-        topLoci = .cp_tl(paste0("v", 1:4))
+        topLoci = .cp_tl(sprintf("chr1:%d:A:G", 100L * (1:4)))
     )
     out <- pecotmr:::.colocExtractLbfFromEntry(
         e,
@@ -752,16 +790,21 @@ test_that(".colocExtractLbfFromEntry: stacks fSuSiE lBF list into a matrix", {
         priorTol = 1e-9
     )
     expect_equal(nrow(out$lbf), 4L) # 2 + 2 stacked
-    expect_setequal(colnames(out$lbf), paste0("v", 1:4))
+    expect_setequal(colnames(out$lbf), sprintf("chr1:%d:A:G", 100L * (1:4)))
 })
 
 test_that(".colocExtractLbfFromEntry: stacks nested fSuSiE lBF (fit[[1]] path)", {
-    m1 <- matrix(rnorm(8), 2, 4, dimnames = list(NULL, paste0("v", 1:4)))
+    m1 <- matrix(
+        rnorm(8),
+        2,
+        4,
+        dimnames = list(NULL, sprintf("chr1:%d:A:G", 100L * (1:4)))
+    )
     fit <- list(list(fsusie_result = list(lBF = list(m1))))
-    e <- FineMappingEntry(
-        variantIds = paste0("v", 1:4),
+    e <- fineMappingRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         susieFit = fit,
-        topLoci = .cp_tl(paste0("v", 1:4))
+        topLoci = .cp_tl(sprintf("chr1:%d:A:G", 100L * (1:4)))
     )
     out <- pecotmr:::.colocExtractLbfFromEntry(
         e,
@@ -775,10 +818,10 @@ test_that(".colocExtractLbfFromEntry: stacks nested fSuSiE lBF (fit[[1]] path)",
 
 test_that(".colocExtractLbfFromEntry: warns + NULL when fit carries no LBF slot", {
     fit <- list(notLbf = list(a = 1)) # fit[[1]] is a list -> $ access is safe
-    e <- FineMappingEntry(
-        variantIds = "v1",
+    e <- fineMappingRow(
+        variantIds = "chr1:100:A:G",
         susieFit = fit,
-        topLoci = .cp_tl("v1")
+        topLoci = .cp_tl("chr1:100:A:G")
     )
     expect_warning(
         out <- pecotmr:::.colocExtractLbfFromEntry(
@@ -799,13 +842,13 @@ test_that(".colocExtractLbfFromEntry: warns + NULL on an empty LBF matrix", {
             numeric(0),
             nrow = 0,
             ncol = 3,
-            dimnames = list(NULL, paste0("v", 1:3))
+            dimnames = list(NULL, sprintf("chr1:%d:A:G", 100L * (1:3)))
         )
     )
-    e <- FineMappingEntry(
-        variantIds = paste0("v", 1:3),
+    e <- fineMappingRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
         susieFit = fit,
-        topLoci = .cp_tl(paste0("v", 1:3))
+        topLoci = .cp_tl(sprintf("chr1:%d:A:G", 100L * (1:3)))
     )
     expect_warning(
         out <- pecotmr:::.colocExtractLbfFromEntry(
@@ -826,14 +869,14 @@ test_that(".colocExtractLbfFromEntry: secondary CS filter subsets rows", {
             1:12,
             3,
             4,
-            dimnames = list(NULL, paste0("v", 1:4))
+            dimnames = list(NULL, sprintf("chr1:%d:A:G", 100L * (1:4)))
         ),
         alpha = matrix(0.25, 3, 4)
     )
-    e <- FineMappingEntry(
-        variantIds = paste0("v", 1:4),
+    e <- fineMappingRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         susieFit = fit,
-        topLoci = .cp_tl(paste0("v", 1:4))
+        topLoci = .cp_tl(sprintf("chr1:%d:A:G", 100L * (1:4)))
     )
     local_mocked_bindings(
         .colocFilterCsByConcentration = function(fit, coverage, concentration) {
@@ -854,10 +897,10 @@ test_that(".colocExtractLbfFromEntry: secondary CS filter subsets rows", {
 
 test_that(".colocExtractLbfFromEntry: assigns colnames from variantIds when fit lacks them", {
     fit <- list(lbf_variable = matrix(1:8, 2, 4)) # no dimnames
-    e <- FineMappingEntry(
-        variantIds = paste0("v", 1:4),
+    e <- fineMappingRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
         susieFit = fit,
-        topLoci = .cp_tl(paste0("v", 1:4))
+        topLoci = .cp_tl(sprintf("chr1:%d:A:G", 100L * (1:4)))
     )
     out <- pecotmr:::.colocExtractLbfFromEntry(
         e,
@@ -866,7 +909,7 @@ test_that(".colocExtractLbfFromEntry: assigns colnames from variantIds when fit 
         filterLbfCsConcentration = 0.5,
         priorTol = 1e-9
     )
-    expect_equal(colnames(out$lbf), paste0("v", 1:4))
+    expect_equal(colnames(out$lbf), sprintf("chr1:%d:A:G", 100L * (1:4)))
 })
 
 test_that(".colocExtractLbfFromEntry: NULL when every variant column is NA-named", {
@@ -880,10 +923,10 @@ test_that(".colocExtractLbfFromEntry: NULL when every variant column is NA-named
     )
     # variantIds length (1) != ncol (4) so colnames are NOT back-filled, and the
     # NA-named columns are dropped, leaving a 0-column matrix.
-    e <- FineMappingEntry(
-        variantIds = "v1",
+    e <- fineMappingRow(
+        variantIds = "chr1:100:A:G",
         susieFit = fit,
-        topLoci = .cp_tl("v1")
+        topLoci = .cp_tl("chr1:100:A:G")
     )
     out <- pecotmr:::.colocExtractLbfFromEntry(
         e,
@@ -911,4 +954,77 @@ test_that(".colocAlignLbf: returns NULL when there are no shared variants", {
         dimnames = list(NULL, paste0("chr2:", 100 * (1:3), ":A:G"))
     )
     expect_null(pecotmr:::.colocAlignLbf(q, g))
+})
+
+test_that(".colocEffectRetainedMass reports NA when no reconciliation ran", {
+    fit <- list(alpha = matrix(0.25, nrow = 2L, ncol = 4L))
+    expect_equal(.colocEffectRetainedMass(fit, 2L), c(NA_real_, NA_real_))
+    fit$retained_mass <- c(0.8, 0.3)
+    expect_equal(.colocEffectRetainedMass(fit, 2L), c(0.8, 0.3))
+    # A length mismatch is a broken parallel, not something to recycle.
+    expect_equal(.colocEffectRetainedMass(fit, 3L), rep(NA_real_, 3L))
+})
+
+test_that(".colocSelectLbfRows returns indices into the unfiltered rows", {
+    lbf <- matrix(0, nrow = 4L, ncol = 3L)
+    fit <- list(
+        sets = list(cs_index = c(2L, 4L)),
+        V = c(0.5, 0, 0.2, 0)
+    )
+    expect_equal(
+        .colocSelectLbfRows(lbf, fit, TRUE, NULL, NULL, 1e-9),
+        c(2L, 4L)
+    )
+    expect_equal(
+        .colocSelectLbfRows(lbf, fit, FALSE, NULL, NULL, 1e-9),
+        c(1L, 3L)
+    )
+})
+
+test_that(".colocSelectLbfRows does not prefix-match sets_secondary", {
+    # `$` would resolve fit$sets to sets_secondary here; `[[` must not.
+    lbf <- matrix(0, nrow = 3L, ncol = 2L)
+    fit <- list(sets_secondary = list(cs_index = 1L), V = c(1, 1, 0))
+    expect_equal(
+        .colocSelectLbfRows(lbf, fit, TRUE, NULL, NULL, 1e-9),
+        seq_len(3L)
+    )
+})
+
+test_that(".colocPickAt indexes per effect and tolerates a missing index", {
+    mass <- c(0.9, 0.4, 0.1)
+    expect_equal(.colocPickAt(mass, c(3L, 1L), 2L), c(0.1, 0.9))
+    expect_equal(.colocPickAt(mass, NULL, 2L), rep(NA_real_, 2L))
+    expect_equal(.colocPickAt(mass, c(1L, 99L), 2L), c(0.9, NA_real_))
+    expect_equal(.colocPickAt(NULL, 1L, 1L), NA_real_)
+})
+
+test_that("colocPipeline reports the retained mass of the scored effects", {
+    qfmr <- .cp_makeQtlFmr()
+    gfmr <- .cp_makeGwasFmr()
+    out <- suppressWarnings(colocPipeline(
+        qtlFineMappingResult = qfmr,
+        gwasInput = gfmr,
+        adjustPips = TRUE
+    ))
+    skip_if(nrow(out) == 0L, "fixture produced no coloc pairs")
+    expect_true(is_in("qtlRetainedMass", colnames(out)))
+    expect_true(all(
+        is.na(out$qtlRetainedMass) |
+            (out$qtlRetainedMass >= 0 & out$qtlRetainedMass <= 1)
+    ))
+    expect_true(all(
+        is.na(out$gwasRetainedMass) |
+            (out$gwasRetainedMass >= 0 & out$gwasRetainedMass <= 1)
+    ))
+})
+
+test_that("colocPipeline publishes coloc's variant count as nSnps", {
+    # coloc.bf_bf returns `nsnps`; without the rename .colocStandardiseRow()
+    # invents an all-NA `nSnps` beside it and the real count never surfaces.
+    sm <- data.frame(nsnps = 12L, PP.H4.abf = 0.5)
+    expect_equal(.colocRenameNsnps(sm)$nSnps, 12L)
+    expect_false(is_in("nsnps", colnames(.colocRenameNsnps(sm))))
+    already <- data.frame(nSnps = 7L)
+    expect_equal(.colocRenameNsnps(already)$nSnps, 7L)
 })

@@ -36,14 +36,12 @@ ldStem <- file.path(ldDir, "protocol_example.LD.chr22")
 gwasTsv <- system.file("extdata", "manifests",
   "protocol_example.twas.gwas_sumstats.chr22.tsv.gz", package = "pecotmr")
 mani <- data.frame(study = "gwas1", sumStatsPath = gwasTsv)
-blocks <- list(c(10000000, 15000000), c(15000000, 19000000))
-gwasByRegion <- list()
-for (b in blocks) {
-  rid <- sprintf("chr22_\%d_\%d", b[1], b[2])
-  gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
-    ldSketch = ldStem, region = sprintf("chr22:\%d-\%d", b[1], b[2]))
-  gwasByRegion[[rid]] <- summaryStatsQc(gss, mafCutoff = 0.0025)
-}
+blocks <- GenomicRanges::GRanges("chr22",
+  IRanges::IRanges(c(10000000, 15000001), c(15000000, 19000000)),
+  blockId = c("chr22_1", "chr22_2"))
+gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
+  ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
+gwasByRegion <- summaryStatsQc(gss, mafCutoff = 0.0025)
 inp <- assembleCtwasInputs(gwasSumStats = gwasByRegion,
   twasWeights = list(ctwasWeightsExample))
 est <- estCtwasParam(inp, thin = 1, niterPrefit = 3, niter = 10,

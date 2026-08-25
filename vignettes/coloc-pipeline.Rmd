@@ -34,9 +34,12 @@ Inputs:
 - **GWAS input** — either a `GwasSumStats` (fine-mapping run internally) or a
 `GwasFineMappingResult` (used directly).
 
-The output is a long-format data frame with one row per
-`(QTL tuple, GWAS tuple, credible-set pair)` combination and the
-standard coloc posterior columns `PP.H0.abf` … `PP.H4.abf`.
+The output is a `ColocResult`: one element per tested
+`(QTL credible set, GWAS credible set, block)` pair, holding that pair's
+aligned variants. Pair-level posteriors (`PP.H0.abf` … `PP.H4.abf`) and the
+per-variant `SNP.PP.H4` are both kept, and four accessors project the object
+to whichever granularity an analysis needs — see
+[Reading the result](#reading-the-result).
 
 ```{r load-packages}
 library(pecotmr)
@@ -68,7 +71,7 @@ res <- colocPipeline(
     gwasInput = gwasSumStatsS4Example,
     finemappingMethods = "susie"
 )
-head(res)
+res
 ```
 
 Use `returnGwasFineMapping = TRUE` to get the inline GWAS FMR back as an
@@ -191,15 +194,67 @@ colocPipeline(
 
 ## Reading the result
 
-```{r read-result}
-str(res, max.level = 1L)
-head(res[order(res$PP.H4.abf, decreasing = TRUE), ])
+Nothing is filtered when the result is written, so every narrowing below is a
+view decision the caller makes — and can revisit — rather than something baked
+in at run time.
+
+### Pairs
+
+The native `coloc.bf_bf` granularity: one row per tested pair. Every testable
+pair is reported verbatim, including both halves of a credible set that
+straddles a block boundary.
+
+```{r read-pairs}
+pairs <- getColocPairs(res)
+head(pairs[order(pairs$PP.H4.abf, decreasing = TRUE), ])
 ```
 
-Each row is one CS-pair combination; in particular the `idx1` /
-`idx2` columns identify the QTL / GWAS effect indices within the
-respective LBF matrices, and `PP.H4.abf` is the standard coloc
-shared-signal posterior.
+`qtlCs` / `gwasCs` are the fine-mapping effect indices, which are stable across
+blocks; coloc's own `idx1` / `idx2` number the rows of a single call and are
+not comparable between them. `qtlRetainedMass` / `gwasRetainedMass` report how
+much of each effect's posterior survived reconciliation to the shared variant
+set — a low value means the effect rested largely on variants the other side
+does not carry.
+
+### Variants
+
+The per-variant layer: `colocPp` is `PP.H4.abf * SNP.PP.H4`, the posterior that
+this particular variant is the shared causal one.
+
+```{r read-variants}
+variants <- getColocVariants(res)
+head(variants[order(variants$colocPp, decreasing = TRUE), ])
+```
+
+### Credible sets
+
+The coloc credible set is the smallest set of variants whose cumulative
+`SNP.PP.H4` reaches `coverage`. It is a *third* variant set — not guaranteed to
+be a subset of either input credible set — so its purity is recomputed from LD
+rather than inherited. Filtering happens before any LD extraction, so a
+stricter threshold costs strictly less.
+
+```{r read-cs}
+head(getColocCredibleSets(res, coverage = 0.95, minPp4 = 0.1))
+```
+
+### Genes
+
+Pooled to one row per gene. Within a QTL credible set the per-block and
+per-GWAS-credible-set results are mutually exclusive — the shared causal
+variant is in one block or the other — so they are summed; distinct QTL
+credible sets are independent signals and combine as `1 - prod(1 - p)`.
+
+```{r read-genes}
+getColocGenes(res)
+```
+
+The warning above is the diagnostic that rule produces: a within-credible-set
+sum above 1 means several GWAS credible sets are competing for one QTL signal.
+The value is clipped to 1, and the pair view shows which pairs were involved.
+
+If you need the flat table the pipeline used to return, `as.data.frame(res)`
+gives the pair view.
 
 # Session info
 

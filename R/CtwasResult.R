@@ -241,11 +241,36 @@ setMethod("show", "CtwasResult", function(object) {
 
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------
 
+# A finemap / susieAlpha payload as a flat table. The payloads are ranged now
+# (GRanges with the original columns as mcols), so the aggregate view unpacks
+# the coordinates back into columns rather than dropping them.
+# @noRd
+.ctwasPayloadAsDf <- function(tb) {
+    if (is.null(tb)) {
+        return(NULL)
+    }
+    if (!methods::is(tb, "GRanges")) {
+        return(tb)
+    }
+    if (length(tb) == 0L) {
+        return(NULL)
+    }
+    cbind(
+        data.frame(
+            chrom = as.character(seqnames(tb)),
+            start = as.integer(start(tb)),
+            end = as.integer(GenomicRanges::end(tb)),
+            stringsAsFactors = FALSE
+        ),
+        as.data.frame(mcols(tb))
+    )
+}
+
 # One aggregated ctwas row block for entry `i`: `getter`'s per-entry table
 # prefixed with the row identity columns; NULL when the entry is empty.
 # @noRd
 .ctwasAggregateRow <- function(i, x, getter) {
-    tb <- getter(x$entry[[i]])
+    tb <- .ctwasPayloadAsDf(getter(x$entry[[i]]))
     if (is.null(tb) || nrow(tb) == 0L) {
         return(NULL)
     }

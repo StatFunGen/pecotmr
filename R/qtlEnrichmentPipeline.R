@@ -11,7 +11,7 @@
 #' \itemize{
 #'   \item \code{gwasFineMappingResult}: a genome-wide
 #'     \code{\link{GwasFineMappingResult}} (one row per (study, LD
-#'     block) tuple). Each entry's \code{FineMappingEntry$trimmedFit}
+#'     block) tuple). Each entry's \code{FineMappingRow$trimmedFit}
 #'     must carry a \code{pip} vector.
 #'   \item \code{qtlFineMappingResult}: the genome-wide
 #'     \code{\link{QtlFineMappingResult}}. Each entry's
@@ -295,7 +295,7 @@ qtlEnrichmentPipeline <- function(
 
 # Build a named GWAS PIP vector for one study. Walks every row of the
 # GwasFineMappingResult tagged with that study, extracts the per-row
-# pip from each FineMappingEntry, and concatenates with variant-id
+# pip from each FineMappingRow, and concatenates with variant-id
 # names. Errors if any single variant appears with conflicting PIP
 # values across rows.
 #' @importFrom dplyr add_count
@@ -307,8 +307,8 @@ qtlEnrichmentPipeline <- function(
     }
     pieces <- list()
     for (i in idx) {
-        entry <- gwasFmr$entry[[i]]
-        fit <- getSusieFit(entry)
+        parts <- .fmrRowParts(gwasFmr, i)
+        fit <- getSusieFit(parts)
         if (is.null(fit) || is.null(fit$pip)) {
             next
         }
@@ -316,7 +316,7 @@ qtlEnrichmentPipeline <- function(
         ids <- if (!is.null(names(fit$pip))) {
             names(fit$pip)
         } else {
-            getVariantIds(entry)
+            .fmrPartsVariantIds(parts)
         }
         if (length(ids) != length(pip)) {
             next
@@ -373,8 +373,8 @@ qtlEnrichmentPipeline <- function(
     }
     out <- list()
     for (i in idx) {
-        entry <- qtlFmr$entry[[i]]
-        fit <- getSusieFit(entry)
+        parts <- .fmrRowParts(qtlFmr, i)
+        fit <- getSusieFit(parts)
         if (is.null(fit) || is.null(fit$alpha) || is.null(fit$pip)) {
             next
         }
@@ -389,7 +389,7 @@ qtlEnrichmentPipeline <- function(
             next
         }
         if (is.null(names(fit$pip))) {
-            names(fit$pip) <- getVariantIds(entry)
+            names(fit$pip) <- .fmrPartsVariantIds(parts)
         }
         out[[length(out) + 1L]] <- list(
             alpha = fit$alpha,

@@ -24,41 +24,47 @@ biocViews:
     GeneExpression,
     LinkageDisequilibrium
 Imports:
+    archive,
+    BiocGenerics,
     BiocParallel,
     Biostrings,
-    GenomicRanges,
-    IRanges,
-    MASS,
-    Matrix,
-    Rsamtools,
-    S4Vectors,
-    SummarizedExperiment,
-    archive,
     coloc,
     colocboost,
+    DelayedArray,
     dplyr,
+    GenomeInfoDb,
+    GenomicRanges,
     glue,
+    IRanges,
     magrittr,
+    MASS,
+    Matrix,
     matrixStats,
     metafor,
     methods,
+    MultiAssayExperiment,
     purrr,
     quadprog,
     readr,
     rlang,
+    Rsamtools,
+    S4Arrays,
+    S4Vectors,
     stringr,
+    SummarizedExperiment,
     susieR (>= 0.16.4),
     tibble,
     tictoc,
     tidyr,
     tidyselect,
+    utils,
     vctrs,
     vroom,
     withr,
     yaml
 Suggests:
-    aSPU,
     arrow,
+    aSPU,
     BGLR,
     bigsnpr,
     bigstatsr,
@@ -82,11 +88,12 @@ Suggests:
     nnls,
     pgenlibr,
     plinkQC,
+    plyranges,
     poolr,
     qgg,
     qvalue,
-    Rfast,
     RcppDPR,
+    Rfast,
     rmarkdown,
     robustbase,
     rtracklayer,
@@ -111,13 +118,15 @@ VignetteBuilder: knitr
 Config/roxygen2/version: 8.1.0
 Collate:
     'AllGenerics.R'
+    'RangedTupleList.R'
     'GenotypeHandle.R'
     'AllClasses.R'
     'AnnotationMatrix.R'
+    'ColocResult.R'
+    'ColocBoostResult.R'
     'tupleSelectors.R'
     'CtwasResult.R'
     'CtwasResultEntry.R'
-    'FineMappingEntry.R'
     'GwasFineMappingResult.R'
     'H2Estimate.R'
     'JointGroup.R'
@@ -131,23 +140,20 @@ Collate:
     'MultiStudyQtlDataset.R'
     'QtlFineMappingResult.R'
     'SldscData.R'
-    'TwasWeightsEntry.R'
+    'TupleRangesView.R'
     'causalInferencePipeline.R'
     'colocPipeline.R'
     'qtlSumStats.R'
     'colocboostPipeline.R'
     'cpp11.R'
-    'credibleSetSummary.R'
     'crossValidation.R'
     'ctwasPipeline.R'
     'exampleData.R'
     'gwasSumStats.R'
     'fineMappingPipeline.R'
+    'fineMappingRow.R'
     'fineMappingWrappers.R'
-    'fsusieAccessors.R'
     'genotypeIo.R'
-    'getLbf.R'
-    'globals.R'
     'h2Annotations.R'
     'h2EstimationWrappers.R'
     'jointEngine.R'
@@ -168,7 +174,8 @@ Collate:
     'sldscWrapper.R'
     'twasWeights.R'
     'twasWeightsPipeline.R'
+    'twasWeightsRow.R'
     'vcfWriter.R'
 Depends: 
-    R (>= 4.4)
+    R (>= 4.5)
 LazyData: false

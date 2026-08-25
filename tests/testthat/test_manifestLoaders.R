@@ -192,10 +192,10 @@ test_that("loadGwasSumStatsFromManifest builds from a data.frame manifest", {
     expect_true(methods::validObject(obj))
     expect_equal(as.character(obj$study), "study1")
     expect_equal(getGenome(obj), "hg38")
-    expect_equal(length(obj$entry[[1L]]), 5L)
+    expect_equal(length(obj[[1L]]), 5L)
     expect_true(all(
         c("SNP", "A1", "A2", "Z", "N") %in%
-            colnames(S4Vectors::mcols(obj$entry[[1L]]))
+            colnames(S4Vectors::mcols(obj[[1L]]))
     ))
     expect_equal(length(obj@qcInfo), 0L) # loaders run no QC
 })
@@ -314,9 +314,9 @@ test_that("loadGwasSumStatsFromManifest resolves a YAML column mapping", {
         ldSketch = .toyLdSketch()
     )
     expect_s4_class(obj, "GwasSumStats")
-    expect_equal(length(obj$entry[[1L]]), 5L)
+    expect_equal(length(obj[[1L]]), 5L)
     expect_equal(
-        as.character(S4Vectors::mcols(obj$entry[[1L]])$A1),
+        as.character(S4Vectors::mcols(obj[[1L]])$A1),
         c("G", "C", "G", "C", "A")
     )
 })
@@ -343,7 +343,7 @@ test_that("loadGwasSumStatsFromManifest reads per-variant N_CASE/N_CONTROL (no N
         ldSketch = .toyLdSketch()
     )
     expect_s4_class(obj, "GwasSumStats")
-    mc <- S4Vectors::mcols(obj$entry[[1L]])
+    mc <- S4Vectors::mcols(obj[[1L]])
     expect_true(all(c("N_CASE", "N_CONTROL") %in% colnames(mc)))
     expect_false("N" %in% colnames(mc)) # effective N is derived later by summaryStatsQc
     expect_equal(as.integer(mc$N_CASE), rep(1000L, 5))
@@ -406,7 +406,7 @@ test_that("loadGwasSumStatsFromManifest builds from beta/se with no z column", {
         ldSketch = .toyLdSketch()
     )
     expect_s4_class(obj, "GwasSumStats")
-    mc <- S4Vectors::mcols(obj$entry[[1L]])
+    mc <- S4Vectors::mcols(obj[[1L]])
     expect_true("Z" %in% colnames(mc))
     expect_equal(as.numeric(mc$Z), z_expected) # derived Wald z
 })
@@ -436,7 +436,7 @@ test_that("loadGwasSumStatsFromManifest builds from a study nSample scalar (no p
         ldSketch = .toyLdSketch()
     )
     expect_s4_class(obj, "GwasSumStats")
-    expect_false("N" %in% colnames(S4Vectors::mcols(obj$entry[[1L]])))
+    expect_false("N" %in% colnames(S4Vectors::mcols(obj[[1L]])))
     expect_equal(as.numeric(obj$nSample), 487511) # forwarded to the slot
 })
 
@@ -458,7 +458,7 @@ test_that("loadGwasSumStatsFromManifest builds from study case/control scalars (
         ldSketch = .toyLdSketch()
     )
     expect_s4_class(obj, "GwasSumStats")
-    expect_false("N" %in% colnames(S4Vectors::mcols(obj$entry[[1L]])))
+    expect_false("N" %in% colnames(S4Vectors::mcols(obj[[1L]])))
     expect_equal(as.numeric(obj$nCase), 5000)
     expect_equal(as.numeric(obj$nControl), 15000)
 })
@@ -540,7 +540,7 @@ test_that("loadQtlSumStatsFromManifest derives the Wald z from beta/se (no z col
         ldSketch = .toyLdSketch()
     )
     expect_s4_class(obj, "QtlSumStats")
-    mc <- S4Vectors::mcols(obj$entry[[1L]])
+    mc <- S4Vectors::mcols(obj[[1L]])
     expect_equal(as.numeric(mc$Z), z_expected) # derived Wald z
     expect_true(all(c("BETA", "SE") %in% colnames(mc))) # beta/se still attached
 })
@@ -564,7 +564,7 @@ test_that("loadQtlSumStatsFromManifest builds from a tuple nSample scalar (no pe
         ldSketch = .toyLdSketch()
     )
     expect_s4_class(obj, "QtlSumStats")
-    expect_false("N" %in% colnames(S4Vectors::mcols(obj$entry[[1L]])))
+    expect_false("N" %in% colnames(S4Vectors::mcols(obj[[1L]])))
     expect_equal(as.numeric(obj$nSample), 838) # forwarded to the slot
 })
 
@@ -733,7 +733,7 @@ test_that("loadGwasSumStatsFromManifest resolves manifest-relative paths", {
         genome = "hg38",
         ldSketch = .toyLdSketch()
     )
-    expect_equal(length(obj$entry[[1L]]), 5L)
+    expect_equal(length(obj[[1L]]), 5L)
 })
 
 test_that(".reconcileScalar returns NULL for an optional unset scalar", {
@@ -764,7 +764,28 @@ test_that(".resolveLdSketch accepts a genoMeta vector, a path, and rejects bad i
         "GenotypeHandle"
     )
     expect_error(pecotmr:::.resolveLdSketch("nonexistent_meta.tsv"))
-    expect_error(pecotmr:::.resolveLdSketch(42L), "must be a GenotypeHandle")
+    expect_error(pecotmr:::.resolveLdSketch(42L), "must be a genotype panel")
+})
+
+test_that(".resolveLdSketch takes the panel readGenotypes returns", {
+    # readGenotypes() is the only public way to open genotypes now, so the
+    # loaders have to accept its return value wherever they accepted a handle.
+    panel <- readGenotypes(plink1Prefix = .toyRefPrefix())
+    resolved <- pecotmr:::.resolveLdSketch(panel)
+    expect_s4_class(resolved, "GenotypeHandle")
+    expect_identical(resolved, pecotmr:::.resolveLdSketch(.toyRefPrefix()))
+})
+
+test_that(".materializeLdSketch and .resolveGenoHandle take a panel too", {
+    panel <- readGenotypes(plink1Prefix = .toyRefPrefix())
+    expect_s4_class(
+        pecotmr:::.materializeLdSketch(panel, "22"),
+        "GenotypeHandle"
+    )
+    expect_s4_class(
+        pecotmr:::.resolveGenoHandle(NULL, "s1", NULL, panel),
+        "GenotypeHandle"
+    )
 })
 
 test_that(".entriesChroms collects canonical chromosomes across entries", {
@@ -1167,7 +1188,7 @@ test_that("loadGwasSumStatsFromManifest reads a GWAS-VCF (A1=ALT, Z=ES/SE)", {
         genome = "hg38",
         ldSketch = .toyLdSketch()
     ))
-    mc <- S4Vectors::mcols(obj$entry[[1L]])
+    mc <- S4Vectors::mcols(obj[[1L]])
     expect_equal(as.character(mc$A1), c("G", "C", "G", "C", "A")) # ALT
     expect_equal(as.character(mc$A2), c("A", "T", "T", "T", "G")) # REF
     expect_equal(
@@ -1204,7 +1225,7 @@ test_that("GWAS-VCF sample selection is enforced for multi-sample files", {
         ldSketch = .toyLdSketch(),
         sampleSelect = "study2"
     ))
-    expect_equal(length(obj$entry[[1L]]), 5L)
+    expect_equal(length(obj[[1L]]), 5L)
     expect_error(
         suppressWarnings(loadGwasSumStatsFromManifest(
             manifest,
@@ -1314,7 +1335,7 @@ test_that("optional sumstats columns (BETA/SE/P/MAF) are attached", {
         genome = "hg38",
         ldSketch = .toyLdSketch()
     )
-    mc <- S4Vectors::mcols(obj$entry[[1L]])
+    mc <- S4Vectors::mcols(obj[[1L]])
     expect_true(all(c("BETA", "SE", "P", "MAF") %in% colnames(mc)))
 })
 
@@ -1437,7 +1458,7 @@ test_that("QtlSumStats manifest resolves a per-row columnMapping", {
         genome = "hg38",
         ldSketch = .toyLdSketch()
     )
-    expect_equal(length(obj$entry[[1L]]), 5L)
+    expect_equal(length(obj[[1L]]), 5L)
 })
 
 test_that("QtlDataset builder errors on conflicting per-context/study paths", {
@@ -1486,4 +1507,50 @@ test_that("MultiStudy builder errors on conflicting per-study genotypePath", {
         loadMultiStudyQtlDatasetFromManifest(man),
         "exactly one genotypePath"
     )
+})
+
+
+test_that("loadGwasSumStatsFromManifest splits by LD block when asked", {
+    # Without a block manifest a single-chromosome file is ONE element; the
+    # manifest is what gives cTWAS the per-block granularity its EM needs.
+    gwasTsv <- system.file(
+        "extdata",
+        "manifests",
+        "protocol_example.twas.gwas_sumstats.chr22.tsv.gz",
+        package = "pecotmr"
+    )
+    skip_if(gwasTsv == "", "bundled GWAS manifest not available")
+    ldStem <- file.path(
+        system.file("extdata", "ld_reference", "chr22", package = "pecotmr"),
+        "protocol_example.LD.chr22"
+    )
+    mf <- data.frame(study = "g1", sumStatsPath = gwasTsv)
+    region <- "chr22:10000000-19000000"
+
+    plain <- suppressWarnings(loadGwasSumStatsFromManifest(
+        manifest = mf,
+        genome = "hg38",
+        ldSketch = ldStem,
+        region = region
+    ))
+    expect_equal(length(plain), 1L)
+    expect_equal(plain$blockId, "chr22")
+
+    blocks <- GenomicRanges::GRanges(
+        "chr22",
+        IRanges::IRanges(c(10000000L, 15000000L), c(14999999L, 19000000L))
+    )
+    names(blocks) <- c("blk1", "blk2")
+    split <- suppressWarnings(loadGwasSumStatsFromManifest(
+        manifest = mf,
+        genome = "hg38",
+        ldSketch = ldStem,
+        region = region,
+        ldBlocks = blocks
+    ))
+    expect_equal(length(split), 2L)
+    expect_equal(split$blockId, c("blk1", "blk2"))
+    expect_equal(split$study, c("g1", "g1"))
+    # Same variants either way, just distributed across the blocks.
+    expect_equal(sum(lengths(split)), sum(lengths(plain)))
 })

@@ -29,9 +29,4 @@ Extract a genotype matrix for a subset of SNPs from a
   dosage assay in Bioconductor convention (variants x samples), variant
   metadata as \code{rowRanges} (GRanges), and sample IDs as \code{colData}.
 }
-\examples{
-handle <- readGenotypes(
-  system.file("extdata", "toy_ref.bed", package = "pecotmr"))
-snpIdx <- 1:8
-extractBlockGenotypes(handle = handle, snpIdx = snpIdx)
-}
+\keyword{internal}

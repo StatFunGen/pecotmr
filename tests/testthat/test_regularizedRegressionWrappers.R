@@ -4,7 +4,7 @@ context("SS-TWAS: weights, pipeline, and omnibus combination")
 # `TwasWeights(weights = list(...), variantIds = ..., standardized = ...)`.
 # The new `TwasWeights` is a DFrame collection class with (study,
 # context, trait, method, entry) columns where each entry is a
-# `TwasWeightsEntry` S4 object carrying weights / fits / cvResult.
+# `TwasWeightsRow` S4 object carrying weights / fits / cvResult.
 # Class-shape tests for the new collection should live alongside the
 # pipeline tests and assert via accessors (`getWeights`, `getStudy`,
 # `getCvResult`, etc.) — not against legacy slot shapes.

@@ -13,10 +13,10 @@ getLdBlocks(x)
 \item{x}{An \code{LdStatistic}.}
 }
 \value{
-An \code{LdBlocks} object.
+A \code{GRanges} of LD block intervals.
 }
 \description{
-Return the \code{LdBlocks} object carried by an
+Return the \code{GRanges} of LD blocks carried by an
   \code{LdStatistic}.
 }
 \examples{

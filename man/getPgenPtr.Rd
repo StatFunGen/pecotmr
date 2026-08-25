@@ -19,9 +19,9 @@ An external pointer or NULL.
 Return the cached external pointer to the plink2 pgen handle
   (NULL when the handle is not pgen-backed).
 }
-\examples{
-gh <- readGenotypes(
-  system.file("extdata", "toy_ref.bed", package = "pecotmr")
-)
-getPgenPtr(gh)
+\details{
+The genotype handle is the seed layer behind a panel and
+  is not part of the public interface; obtain a panel from
+  \code{readGenotypes()} and ask it directly.
 }
+\keyword{internal}

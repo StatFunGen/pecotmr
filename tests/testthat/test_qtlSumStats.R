@@ -408,10 +408,18 @@ test_that("subsetChr keeps only variants on the requested chromosome", {
     expect_equal(nSnps(chr2_only), 2L)
 })
 
-test_that("subsetChr returns empty entry when no variants on chromosome", {
+test_that("subsetChr drops the element when no variants on that chromosome", {
+    # subsetChr is now the whole-seqname case of subsetRegion, which DROPS
+    # elements that trim to nothing rather than keeping an empty one. After
+    # the seqname split an element belongs to exactly one chromosome, so
+    # "kept but empty" no longer describes anything real.
     obj <- .qtlMakeOne(n = 4)
     empty <- subsetChr(obj, "22")
-    expect_equal(nSnps(empty), 0L)
+    expect_equal(nrow(empty), 0L)
+    expect_equal(length(empty), 0L)
+    # The collection-level state survives even when nothing is left.
+    expect_equal(getGenome(empty), getGenome(obj))
+    expect_identical(getLdSketch(empty), getLdSketch(obj))
 })
 
 test_that("subsetChr preserves class-level slots (genome, ldSketch, qcInfo)", {
@@ -471,7 +479,7 @@ test_that("QtlSumStats: a non-GenotypeHandle ldSketch is rejected", {
             genome = "hg19",
             ldSketch = "not_a_handle"
         ),
-        "GenotypeHandle or NULL"
+        "must be a genotype panel"
     )
 })
 

@@ -18,9 +18,9 @@ Integer (length 1).
 \description{
 Return the number of samples carried by a \code{GenotypeHandle}.
 }
-\examples{
-gh <- readGenotypes(
-  system.file("extdata", "toy_ref.bed", package = "pecotmr")
-)
-getNSamples(gh)
+\details{
+The genotype handle is the seed layer behind a panel and
+  is not part of the public interface; obtain a panel from
+  \code{readGenotypes()} and ask it directly.
 }
+\keyword{internal}

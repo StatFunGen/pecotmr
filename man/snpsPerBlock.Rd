@@ -9,7 +9,7 @@ snpsPerBlock(snpInfo, ldBlocks)
 \arguments{
 \item{snpInfo}{A data.frame with columns CHR, BP.}
 
-\item{ldBlocks}{An \code{LdBlocks} object.}
+\item{ldBlocks}{A \code{GRanges} of LD block intervals.}
 }
 \value{
 A list of integer vectors, one per block.

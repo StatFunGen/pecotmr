@@ -148,7 +148,7 @@ test_that(".tupleSelectRowGwasFmr: zero-row input errors", {
     empty <- data.frame(
         study = character(0),
         method = character(0),
-        region_id = character(0),
+        blockId = character(0),
         stringsAsFactors = FALSE
     )
     expect_error(
@@ -161,7 +161,7 @@ test_that(".tupleSelectRowGwasFmr: single-row collection returns 1L", {
     one <- data.frame(
         study = "g1",
         method = "susie",
-        region_id = "region_1",
+        blockId = "region_1",
         stringsAsFactors = FALSE
     )
     expect_equal(pecotmr:::.tupleSelectRowGwasFmr(one), 1L)
@@ -171,7 +171,7 @@ test_that(".tupleSelectRowGwasFmr: missing selectors on multi-row errors", {
     multi <- data.frame(
         study = c("g1", "g2"),
         method = c("susie", "susie"),
-        region_id = c("region_1", "region_1"),
+        blockId = c("region_1", "region_1"),
         stringsAsFactors = FALSE
     )
     expect_error(
@@ -184,7 +184,7 @@ test_that(".tupleSelectRowGwasFmr: non-scalar region errors", {
     multi <- data.frame(
         study = c("g1", "g1"),
         method = c("susie", "susie"),
-        region_id = c("r1", "r2"),
+        blockId = c("r1", "r2"),
         stringsAsFactors = FALSE
     )
     expect_error(
@@ -203,7 +203,7 @@ test_that(".tupleSelectRowGwasFmr: region disambiguates per-block rows", {
     multi <- data.frame(
         study = c("g1", "g1"),
         method = c("susie", "susie"),
-        region_id = c("chr22_1_100", "chr22_500_600"),
+        blockId = c("chr22_1_100", "chr22_500_600"),
         stringsAsFactors = FALSE
     )
     expect_equal(
@@ -221,7 +221,7 @@ test_that(".tupleSelectRowGwasFmr: missing tuple errors and includes region in m
     one <- data.frame(
         study = "g1",
         method = "susie",
-        region_id = "r1",
+        blockId = "r1",
         stringsAsFactors = FALSE
     )
     expect_error(
@@ -237,11 +237,11 @@ test_that(".tupleSelectRowGwasFmr: missing tuple errors and includes region in m
 
 test_that(".tupleSelectRowGwasFmr: ambiguous multi-match (no region) lists candidates", {
     # Two rows share (study, method); .tupleSelectRowGwasFmr should error
-    # listing the available region_ids since the caller didn't disambiguate.
+    # listing the available blockIds since the caller didn't disambiguate.
     multi <- data.frame(
         study = c("g1", "g1"),
         method = c("susie", "susie"),
-        region_id = c("region_A", "region_B"),
+        blockId = c("region_A", "region_B"),
         stringsAsFactors = FALSE
     )
     expect_error(
@@ -283,17 +283,17 @@ test_that(".fmrRowsMatching: selectors on absent columns are ignored", {
     gwas <- data.frame(
         study = c("g1", "g1"),
         method = c("susie", "susie"),
-        region_id = c("r1", "r2"),
+        blockId = c("r1", "r2"),
         stringsAsFactors = FALSE
     )
     expect_equal(pecotmr:::.fmrRowsMatching(gwas, context = "c1"), c(1L, 2L))
 })
 
-test_that(".fmrRowsMatching: `region` matches the region_id column", {
+test_that(".fmrRowsMatching: `region` matches the blockId column", {
     gwas <- data.frame(
         study = c("g1", "g1"),
         method = c("susie", "susie"),
-        region_id = c("r1", "r2"),
+        blockId = c("r1", "r2"),
         stringsAsFactors = FALSE
     )
     expect_equal(pecotmr:::.fmrRowsMatching(gwas, region = "r2"), 2L)
@@ -328,21 +328,21 @@ test_that(".fmrRowMetadata: emits all five identity columns, NA-filling absent o
     m <- pecotmr:::.fmrRowMetadata(qtl)
     expect_equal(
         names(m),
-        c("study", "context", "trait", "region_id", "method")
+        c("study", "context", "trait", "blockId", "method")
     )
     expect_equal(m$context, c("c1", "c2"))
-    expect_true(all(is.na(m$region_id))) # QTL frame has no region_id
+    expect_true(all(is.na(m$blockId))) # QTL frame has no blockId
 })
 
-test_that(".fmrRowMetadata: GWAS frame NA-fills context/trait, keeps region_id", {
+test_that(".fmrRowMetadata: GWAS frame NA-fills context/trait, keeps blockId", {
     gwas <- data.frame(
         study = c("g1", "g1"),
         method = c("susie", "susie"),
-        region_id = c("r1", "r2"),
+        blockId = c("r1", "r2"),
         stringsAsFactors = FALSE
     )
     m <- pecotmr:::.fmrRowMetadata(gwas)
-    expect_equal(m$region_id, c("r1", "r2"))
+    expect_equal(m$blockId, c("r1", "r2"))
     expect_true(all(is.na(m$context)))
     expect_true(all(is.na(m$trait)))
 })
@@ -351,14 +351,14 @@ test_that(".fmrRowMetadata: zero-row input yields a zero-row 5-column frame", {
     empty <- data.frame(
         study = character(0),
         method = character(0),
-        region_id = character(0),
+        blockId = character(0),
         stringsAsFactors = FALSE
     )
     m <- pecotmr:::.fmrRowMetadata(empty)
     expect_equal(nrow(m), 0L)
     expect_equal(
         names(m),
-        c("study", "context", "trait", "region_id", "method")
+        c("study", "context", "trait", "blockId", "method")
     )
 })
 
@@ -407,49 +407,30 @@ test_that(".getRegionColumn: an absent region column yields an empty GRanges", {
     expect_length(gr, 0L)
 })
 
-test_that(".appendRegionCol: region must be a GRanges of matching length", {
-    expect_error(
-        pecotmr:::.appendRegionCol(list(), "notgranges", 1L),
-        "must be a GRanges"
+test_that(".appendBlockIdCol: blockId must match the row count", {
+    # Replaces the old .appendRegionCol / .validateRegionColumn pair. The
+    # stored `region` GRanges column retired because it had no correct update
+    # rule under subsetRegion() -- it would simply go stale. blockId is a
+    # label keying the external block manifest, so subsetting cannot
+    # invalidate it.
+    expect_equal(pecotmr:::.appendBlockIdCol(list(), NULL, 2L), list())
+    expect_equal(
+        pecotmr:::.appendBlockIdCol(list(), c("b1", "b2"), 2L)$blockId,
+        c("b1", "b2")
     )
     expect_error(
-        pecotmr:::.appendRegionCol(
-            list(),
-            GenomicRanges::GRanges(
-                c("chr1", "chr1"),
-                IRanges::IRanges(1:2, 1:2)
-            ),
-            1L
-        ),
+        pecotmr:::.appendBlockIdCol(list(), "only_one", 2L),
         "same length as"
     )
 })
 
-test_that(".validateRegionColumn: reports a non-GRanges region column", {
-    expect_equal(
-        pecotmr:::.validateRegionColumn(S4Vectors::DataFrame(
-            region = c("x", "y")
-        )),
-        "'region' column must be a GRanges"
-    )
-    expect_length(
-        pecotmr:::.validateRegionColumn(S4Vectors::DataFrame(a = 1L)),
-        0L
-    )
-})
-
-test_that(".validateRegionColumn: reports a region column of the wrong length", {
-    # DataFrame [[<- enforces column length, so mutate @listData directly to build
-    # the malformed object the defensive validity check guards against.
-    bad <- S4Vectors::DataFrame(a = 1:2) # nrow 2
-    bad@listData$region <- GenomicRanges::GRanges(
-        "chr1",
-        IRanges::IRanges(1, 1)
-    ) # length 1
-    expect_equal(
-        pecotmr:::.validateRegionColumn(bad),
-        "'region' column must have one range per row"
-    )
+test_that(".getRegionColumn derives the span rather than reading a column", {
+    # The one range concept is the intrinsic element range; there is no stored
+    # window to fall back to any more.
+    data(gwasFineMappingExample, envir = environment())
+    gr <- pecotmr:::.getRegionColumn(gwasFineMappingExample)
+    expect_s4_class(gr, "GRanges")
+    expect_length(gr, nrow(gwasFineMappingExample))
 })
 
 test_that(".appendTraitPosCol: traitPos must be a GRanges of matching length", {

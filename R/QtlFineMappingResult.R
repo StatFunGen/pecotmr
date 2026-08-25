@@ -2,7 +2,7 @@
 # QtlFineMappingResult S4 class
 # -----------------------------------------------------------------------------
 # DFrame-subclass collection keyed by the identity tuple (study, context,
-# trait, method). Each row holds a FineMappingEntry payload. Class-level
+# trait, method). Each row holds a FineMappingRow payload. Class-level
 # slots:
 #   * ldSketch   GenotypeHandle (NULL for individual-level fits, the
 #                LD-sketch handle for RSS-derived fits).
@@ -14,6 +14,22 @@
 #' @include AllClasses.R tupleSelectors.R
 NULL
 
+#' @title QTL Fine-Mapping Result Collection
+#' @description S4 collection of fine-mapping fits for one or more QTL
+#'   studies on a single LD block. Keyed by the identity tuple
+#'   \code{(study, context, trait, method)}; each entry is a
+#'   \code{FineMappingRow}.
+#'
+#' Required columns: \code{study}, \code{context}, \code{trait},
+#' \code{method}, \code{entry}. The 4-tuple is unique. The caller is
+#' expected to construct one \code{QtlFineMappingResult} per LD block (no
+#' in-class block indexing).
+#'
+#' Optional columns \code{jointStudies}, \code{jointContexts},
+#' \code{jointTraits} appear when the collection contains rows produced by a
+#' \code{jointSpecification}-driven joint fit, carrying the semicolon-joined
+#' member identities of the joined axis.
+#' @export
 setClass(
     "QtlFineMappingResult",
     contains = "FineMappingResultBase",
@@ -38,8 +54,8 @@ setClass(
 # The study/context/trait/method/entry columns must be present.
 # @noRd
 .qfmrCheckRequiredCols <- function(object) {
-    required <- c("study", "context", "trait", "method", "entry")
-    missingCols <- setdiff(required, names(object))
+    required <- c("study", "context", "trait", "method")
+    missingCols <- setdiff(required, .tupleColumnNames(object))
     if (length(missingCols) > 0L) {
         return(str_c("missing columns: ", str_flatten(missingCols, ", ")))
     }
@@ -51,40 +67,36 @@ setClass(
 .qfmrCheckEntries <- function(object) {
     jointCols <- intersect(
         c("jointStudies", "jointContexts", "jointTraits"),
-        names(object)
+        .tupleColumnNames(object)
     )
     c(
         .qfmrCheckEntryLength(object),
-        .qfmrCheckEntryTypes(object),
-        .validateRegionColumn(object),
         .validateTraitPosColumn(object),
         .qfmrCheckJointCols(object, jointCols),
         .qfmrCheckTupleUniqueness(object, jointCols)
     )
 }
 
-# length(entry) must equal nrow.
+# The variants and their topLoci ARE the elements now, so what is left
+# to check is that the fit payload columns are present and parallel.
 # @noRd
 .qfmrCheckEntryLength <- function(object) {
-    if (length(object$entry) != nrow(object)) {
-        return("length(entry) must equal nrow(.) for QtlFineMappingResult")
-    }
-    NULL
-}
-
-# Every `entry` element must be a FineMappingEntry.
-# @noRd
-.qfmrCheckEntryTypes <- function(object) {
-    if (!all(map_lgl(object$entry, .qfmrIsEntry))) {
-        return("every element of the `entry` column must be a FineMappingEntry")
+    missingCols <- setdiff(
+        c("susieFit", "cvResult"),
+        .tupleColumnNames(object)
+    )
+    if (length(missingCols) > 0L) {
+        return(str_c(
+            "missing entry payload columns: ",
+            str_flatten(missingCols, ", ")
+        ))
     }
     NULL
 }
 
 # @noRd
-.qfmrIsEntry <- function(e) {
-    methods::is(e, "FineMappingEntry")
-}
+
+# @noRd
 
 # Each present joint* column must be character.
 # @noRd
@@ -94,7 +106,7 @@ setClass(
 
 # @noRd
 .qfmrJointColError <- function(jc, object) {
-    vals <- object[[jc]]
+    vals <- .tupleColumn(object, jc)
     if (!is.character(vals)) {
         return(glue(
             "'{jc}' column must be character (got {class(vals)[[1L]]})"
@@ -125,34 +137,40 @@ setClass(
 
 # @noRd
 .qfmrColOf <- function(cn, object) {
-    object[[cn]]
+    .tupleColumn(object, cn)
 }
 
 # ldSketch must be a GenotypeHandle or NULL.
 # @noRd
 .qfmrCheckLdSketch <- function(object) {
-    if (
-        !is.null(object@ldSketch) &&
-            !methods::is(object@ldSketch, "GenotypeHandle")
-    ) {
-        return("'ldSketch' must be a GenotypeHandle or NULL")
-    }
+    # The slot's class union enforces the type; nothing to check.
     NULL
 }
 
-#' @title GWAS Fine-Mapping Result Collection
-#' @description S4 collection of fine-mapping fits for one or more GWAS studies
-#'   on a single LD block. Keyed by the identity tuple \code{(study, method)};
-#'   each entry is a \code{FineMappingEntry}.
-#'
-#' Required columns: \code{study}, \code{method}, \code{entry}. The 2-tuple is
-#' unique. The caller is expected to construct one \code{GwasFineMappingResult}
-#' per LD block (no in-class block indexing).
-#' @export
+
+# The identity-tuple vectors and the payload list are parallel: one entry per
+# (study, context, trait, method). A length mismatch would otherwise surface as
+# a recycling artefact deep inside the DataFrame assembly.
+# @noRd
+.qfmrCheckTupleLengths <- function(study, context, trait, method, entry) {
+    n <- length(study)
+    ok <- length(context) == n &&
+        length(trait) == n &&
+        length(method) == n &&
+        length(entry) == n
+    if (ok) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "`study`, `context`, `trait`, `method`, and `entry` must all ",
+        "have the same length."
+    ))
+}
+
 
 #' @title Create a QtlFineMappingResult Collection
 #' @description Construct a \code{QtlFineMappingResult} DFrame-subclass
-#'   collection from per-tuple vectors and a list of \code{FineMappingEntry}
+#'   collection from per-tuple vectors and a list of \code{FineMappingRow}
 #'   payloads (one per tuple). The optional \code{ldSketch} slot records the LD
 #'   reference used for RSS-derived fits; pass \code{NULL} (the default) for
 #'   individual-level fits.
@@ -163,7 +181,7 @@ setClass(
 #' @param trait Character vector of trait identifiers (per tuple). Use
 #'   \code{"joint"} for rows produced by a cross-trait joint fit.
 #' @param method Character vector of fine-mapping method names (per tuple).
-#' @param entry List / \code{SimpleList} of \code{FineMappingEntry} objects.
+#' @param entry List / \code{SimpleList} of \code{FineMappingRow} objects.
 #' @param jointStudies Optional character vector (length \code{length(study)})
 #'   listing the semicolon-joined studies participating in each row's
 #'   cross-study joint fit, or \code{NA_character_} for non-joint rows. When
@@ -172,12 +190,9 @@ setClass(
 #'   shape as \code{jointStudies}.
 #' @param jointTraits Optional character vector for cross-trait joints. Same
 #'   shape as \code{jointStudies}.
-#' @param region Optional \code{GRanges} (length \code{length(study)}) giving
-#'   the genomic anchor of each row's trait (its own coordinates). Carried
-#'   forward as provenance (e.g. for cTWAS LD-block placement); not part of the
-#'   identity key. \code{NULL} (default) omits the column.
-#' @param ldSketch An optional \code{GenotypeHandle} (the LD reference for
-#'   RSS-derived fits), or \code{NULL} for individual-level fits.
+#' @param ldSketch An optional genotype panel (see \code{\link{readGenotypes}})
+#'   (the LD reference for RSS-derived fits), or \code{NULL} for
+#'   individual-level fits.
 #' @param traitPos Optional per-row trait genomic anchor (a \code{GRanges} or
 #'   \code{NULL}), carried forward as provenance; not part of the identity key.
 #'   \code{NULL} (default) omits the column.
@@ -185,7 +200,7 @@ setClass(
 #' @examples
 #' tl <- data.frame(variant_id = paste0("chr1:", 100 * 1:3, ":A:G"),
 #'   pip = c(0.9, 0.5, 0.1), cs = c(1L, 1L, NA))
-#' fe <- FineMappingEntry(
+#' fe <- fineMappingRow(
 #'   variantIds = tl$variant_id, susieFit = list(), topLoci = tl)
 #' QtlFineMappingResult(study = "s1", context = "brain", trait = "g1",
 #'   method = "susie", entry = list(fe))
@@ -199,29 +214,20 @@ QtlFineMappingResult <- function(
     jointStudies = NULL,
     jointContexts = NULL,
     jointTraits = NULL,
-    region = NULL,
     traitPos = NULL,
     ldSketch = NULL
 ) {
     n <- length(study)
-    if (
-        length(context) != n ||
-            length(trait) != n ||
-            length(method) != n ||
-            length(entry) != n
-    ) {
-        msg <- glue(
-            "`study`, `context`, `trait`, `method`, and `entry` must all ",
-            "have the same length."
-        )
-        abort(msg)
-    }
+    .qfmrCheckTupleLengths(study, context, trait, method, entry)
+    entry <- map(entry, .asFmRowPayload)
+    .checkRowPayloads(entry, "FineMappingRow", "fine-mapping")
     cols <- list(
         study = as.character(study),
         context = as.character(context),
         trait = as.character(trait),
         method = as.character(method),
-        entry = S4Vectors::SimpleList(entry)
+        susieFit = S4Vectors::SimpleList(map(entry, getSusieFit)),
+        cvResult = S4Vectors::SimpleList(map(entry, getCvResult))
     )
     cols <- .qfmrAppendJointCols(
         cols,
@@ -230,11 +236,20 @@ QtlFineMappingResult <- function(
         jointTraits,
         n
     )
-    cols <- .appendRegionCol(cols, region, n)
     cols <- .appendTraitPosCol(cols, traitPos, n)
     dfArgs <- c(cols, list(check.names = FALSE))
-    df <- exec(S4Vectors::DataFrame, !!!dfArgs)
-    obj <- new("QtlFineMappingResult", df, ldSketch = ldSketch)
+    # Each entry's variants become one ELEMENT, its topLoci that element's
+    # inner mcols, and its fit/cv payload outer mcols. A multi-seqname entry
+    # splits by chromosome with its metadata row replicated.
+    split <- .rtlSplitBySeqname(map(entry, rowVariants))
+    grl <- GenomicRanges::GRangesList(split$entry)
+    md <- exec(S4Vectors::DataFrame, !!!dfArgs)
+    mcols(grl) <- md[split$fromIdx, , drop = FALSE]
+    obj <- new(
+        "QtlFineMappingResult",
+        grl,
+        ldSketch = .asLdSketch(ldSketch)
+    )
     validObject(obj)
     obj
 }
@@ -267,20 +282,25 @@ QtlFineMappingResult <- function(
     cols
 }
 
+# The single row a (study, context, trait, method) selector pins.
+# @noRd
+.qfmrSelectRowIndex <- function(x, study, context, trait, method) {
+    .tupleSelectRow(
+        x,
+        study,
+        context,
+        trait,
+        method,
+        cls = "QtlFineMappingResult"
+    )
+}
+
 #' @rdname getFineMappingResult
 setMethod(
     "getFineMappingResult",
     "QtlFineMappingResult",
     function(x, study = NULL, context = NULL, trait = NULL, method = NULL) {
-        idx <- .tupleSelectRow(
-            x,
-            study,
-            context,
-            trait,
-            method,
-            cls = "QtlFineMappingResult"
-        )
-        x$entry[[idx]]
+        x[.qfmrSelectRowIndex(x, study, context, trait, method)]
     }
 )
 
@@ -300,8 +320,12 @@ setMethod(
         returnList = FALSE,
         ...
     ) {
-        entry <- getFineMappingResult(x, study, context, trait, method)
-        pip <- getPip(entry)
+        pip <- .fmrRowPip(
+            .fmrRowParts(
+                x,
+                .qfmrSelectRowIndex(x, study, context, trait, method)
+            )
+        )
         if (isTRUE(returnList)) {
             nm <- glue(
                 "{as.character(x$study)[1L]}|{as.character(x$context)[1L]}|",
@@ -329,7 +353,10 @@ setMethod(
         method = NULL,
         ...
     ) {
-        getFineMappingResult(x, study, context, trait, method)
+        .fmrRowParts(
+            x,
+            .qfmrSelectRowIndex(x, study, context, trait, method)
+        )
     }
 )
 
@@ -346,8 +373,10 @@ setMethod(
         method = NULL,
         ...
     ) {
-        entry <- getFineMappingResult(x, study, context, trait, method)
-        getCvResult(entry)
+        getCvResult(.fmrRowParts(
+            x,
+            .qfmrSelectRowIndex(x, study, context, trait, method)
+        ))
     }
 )
 
@@ -381,7 +410,7 @@ setMethod("show", "QtlFineMappingResult", function(object) {
     ldSrc <- if (is.null(object@ldSketch)) {
         "NULL (individual-level fit)"
     } else {
-        glue("{object@ldSketch@format} @ {object@ldSketch@path}")
+        .ldSketchLabel(object@ldSketch)
     }
     cat(glue("  LD sketch: {ldSrc}\n", .trim = FALSE))
 })

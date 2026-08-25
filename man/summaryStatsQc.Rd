@@ -107,10 +107,23 @@ not yet fully wired for the new path; the option is accepted but currently
 emits a warning and is skipped.)}
 
 \item{imputeOpts}{Named list of RAISS parameters. RAISS imputation scopes its
-reference panel to the analysis-region window (so a per-chromosome /
-genome-wide \code{ldSketch} does not materialize its full dosage);
-\code{flank} (default 0) widens that window by the given number of base
-pairs on each side to retain LD context for edge variants.}
+  reference panel to the analysis-region window (so a per-chromosome /
+  genome-wide \code{ldSketch} does not materialize its full dosage);
+  \code{flank} (default 0) widens that window by the given number of base
+  pairs on each side to retain LD context for edge variants.
+
+  \code{mafCutoff} (default 0), \code{macCutoff} (default 0) and
+  \code{imissCutoff} (default 1) bound which panel variants RAISS will
+  attempt to impute. Without them every rare variant in the window of a
+  large LD sketch becomes an imputation target, which is slow and of little
+  value when the study is far smaller than the panel. The stricter of
+  \code{mafCutoff} and \code{macCutoff / (2 * nSamples)} applies, matching
+  \code{\link{QtlDataset}}.
+
+  These bound what is \strong{imputed}, not what is kept: a variant present
+  in the sumstats survives whatever its frequency in the panel, both because
+  it is observed data and because RAISS derives its LD basis from those same
+  panel rows.}
 
 \item{matchMinProp}{Minimum proportion of LD panel variants that must be
 matched by the sumstats; default 0.}

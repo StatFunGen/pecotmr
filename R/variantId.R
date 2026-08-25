@@ -410,7 +410,6 @@ variantIdToDf <- function(variantId) {
 #' @return An \code{AlleleQcResult} S4 object. Use \code{$harmonizedData} to
 #'   recover the post-QC variant data.frame and \code{$qcSummary} to inspect the
 #'   per-variant merge/flip/strand diagnostics.
-#' @importFrom magrittr %>%
 #' @importFrom dplyr mutate inner_join filter pull select everything row_number
 #' @importFrom dplyr if_else any_of all_of rename across
 #' @importFrom vctrs vec_duplicate_detect
@@ -994,12 +993,42 @@ matchVariants <- function(
     if (is.null(h) || nrow(h) == 0L) {
         return(.matchVariantsEmpty())
     }
+    h <- .matchDropSignConflicts(h)
+    if (nrow(h) == 0L) {
+        return(.matchVariantsEmpty())
+    }
     keep <- !duplicated(h$.mvTidx) # at most one ref per A id
     list(
         idxA = as.integer(h$.mvTidx[keep]),
         idxB = as.integer(h$.mvRidx[keep]),
         sign = as.numeric(h$.mvSign[keep])
     )
+}
+
+# Drop target variants whose reference matches disagree about the sign.
+#
+# A reference panel can legitimately carry a variant and its own allele flip as
+# two separate entries -- two distinct indels at one position that happen to be
+# each other's flip is rare but biologically real. A target variant then
+# matches BOTH: once exactly (sign +1) and once as an allele swap (sign -1),
+# and there is no way to tell which entry it is. The caller below keeps the
+# first match, so without this the answer would depend on the panel's row
+# order, silently flipping the effect direction for that variant.
+#
+# Only a sign DISAGREEMENT is ambiguous. Duplicate reference entries that agree
+# (the same variant listed twice) still resolve to the first match, so this
+# drops nothing it does not have to.
+# @noRd
+.matchDropSignConflicts <- function(h) {
+    ambiguous <- h |>
+        group_by(.data$.mvTidx) |>
+        summarise(nSigns = n_distinct(.data$.mvSign), .groups = "drop") |>
+        filter(.data$nSigns > 1L) |>
+        pull(".mvTidx")
+    if (length(ambiguous) == 0L) {
+        return(h)
+    }
+    filter(h, !is_in(.data$.mvTidx, ambiguous))
 }
 
 # Backwards-compat alias for external callers
@@ -1178,4 +1207,69 @@ classifyVariantType <- function(ids) {
         lenRef == lenAlt ~ "MNP",
         .default = ""
     )
+}
+
+# =============================================================================
+# Variant identity <-> ranges
+# -----------------------------------------------------------------------------
+# A variant id is a RENDERING of (seqname, position, REF, ALT), not stored
+# state: the identity lives in a one-width GRanges row plus its A2 (REF) / A1
+# (ALT) mcols. These two helpers are the boundary conversions -- render on the
+# way out, parse on the way in. See spec 4.1a.
+# =============================================================================
+
+# Render the variant ids of a GRanges from its coordinates and alleles.
+# @noRd
+.grVariantIds <- function(gr) {
+    if (length(gr) == 0L) {
+        return(character(0))
+    }
+    mc <- mcols(gr)
+    formatVariantId(
+        as.character(seqnames(gr)),
+        start(gr),
+        as.character(mc$A2),
+        as.character(mc$A1)
+    )
+}
+
+# Build the element GRanges for a set of variant ids.
+#
+# Ids that do not encode coordinates are a CONSTRUCTION ERROR. Substituting a
+# synthetic range would make range() lie, and range() is the block identity that
+# subsetRegion() and the (tuple, range) uniqueness key are both built on -- a
+# fabricated coordinate corrupts both silently.
+# @noRd
+.variantIdsToGRanges <- function(ids, what = "variant ids") {
+    ids <- as.character(ids)
+    if (length(ids) == 0L) {
+        gr <- GenomicRanges::GRanges()
+        mcols(gr) <- S4Vectors::DataFrame(
+            A1 = character(0),
+            A2 = character(0)
+        )
+        return(gr)
+    }
+    parsed <- parseVariantId(ids)
+    bad <- is.na(parsed$chrom) | is.na(parsed$pos)
+    if (any(bad)) {
+        msg <- glue(
+            "{what}: {sum(bad)} of {length(ids)} do not encode ",
+            "coordinates ",
+            "(expected chrom:pos:ref:alt), e.g. ",
+            "{str_flatten(ids[bad][seq_len(min(3L, sum(bad)))], ', ')}. ",
+            "A variant id renders its range and alleles, so an id without ",
+            "coordinates has no variant identity to store."
+        )
+        abort(msg)
+    }
+    gr <- GenomicRanges::GRanges(
+        withChrPrefix(parsed$chrom),
+        IRanges::IRanges(start = parsed$pos, width = 1L)
+    )
+    mcols(gr) <- S4Vectors::DataFrame(
+        A1 = as.character(parsed$A1),
+        A2 = as.character(parsed$A2)
+    )
+    gr
 }

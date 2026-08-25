@@ -64,7 +64,7 @@ context("colocboostPipeline")
 #
 #   - R/colocboostPipeline.R    (the new S4 generic + methods)
 #   - R/allClasses.R             (QtlDataset, QtlSumStats, GwasSumStats,
-#                                 MultiStudyQtlDataset, FineMappingEntry)
+#                                 MultiStudyQtlDataset, FineMappingRow)
 #   - R/allMethods.R             (constructors)
 #   - R/sumstatsQc.R            (summaryStatsQc, which is now the only
 #                                 summary-statistic QC entry point)
@@ -95,7 +95,7 @@ context("colocboostPipeline (S4 dispatch)")
         path = "/tmp/cb.gds",
         format = "gds",
         snpInfo = data.frame(
-            SNP = paste0("v", seq_len(snp_n)),
+            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -199,7 +199,7 @@ context("colocboostPipeline (S4 dispatch)")
         )
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        SNP = paste0("v", 1:5),
+        SNP = sprintf("chr1:%d:A:G", 100L * (1:5)),
         A1 = rep("A", 5),
         A2 = rep("G", 5),
         Z = rnorm(5),
@@ -225,7 +225,7 @@ context("colocboostPipeline (S4 dispatch)")
         )
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        SNP = paste0("v", 1:5),
+        SNP = sprintf("chr1:%d:A:G", 100L * (1:5)),
         A1 = rep("A", 5),
         A2 = rep("G", 5),
         Z = rnorm(5),
@@ -354,7 +354,11 @@ test_that(".cbMergeSumstatBundles: identical LD matrices are deduplicated", {
     expect_equal(unique(res$dict_sumstatLD[, 2L]), 1L)
 })
 
-test_that(".cbEmptyResult: matches the documented schema", {
+test_that(".cbEmptyResult: is the internal per-analysis accumulator", {
+    # NOT the pipeline's return schema any more -- colocboostPipeline returns a
+    # ColocBoostResult. This list is the accumulator .cbRunVariants fills in and
+    # .cbToResultObject then flattens, so the four slots still have to be there
+    # for the three analyses and their timings to have somewhere to land.
     res <- pecotmr:::.cbEmptyResult()
     expect_true(all(
         c("xqtl_coloc", "joint_gwas", "separate_gwas", "computing_time") %in%
@@ -388,8 +392,11 @@ test_that("colocboostPipeline(QtlDataset): runs xqtl-only ColocBoost with mocked
             separateGwas = FALSE
         )
     )
-    expect_true(!is.null(out$xqtl_coloc))
-    expect_equal(out$xqtl_coloc$stub, TRUE)
+    # The pipeline now returns a ColocBoostResult, so "the xQTL-only analysis
+    # ran" is read off the recorded timing rather than off a retained raw
+    # object -- the timing is written whether or not the run produced sets.
+    expect_s4_class(out, "ColocBoostResult")
+    expect_true(is_in("xqtl_coloc", names(getComputingTime(out)$Analysis)))
     expect_true("X" %in% names(capturedArgs))
 })
 
@@ -464,7 +471,7 @@ test_that("colocboostPipeline: jointGwas merges qtl + gwas sumstats and runs onc
             separateGwas = FALSE
         )
     )
-    expect_true(!is.null(out$joint_gwas))
+    expect_true(is_in("joint_gwas", names(getComputingTime(out)$Analysis)))
 })
 
 test_that("colocboostPipeline: separateGwas runs once per merged sumstat study", {
@@ -494,7 +501,9 @@ test_that("colocboostPipeline: separateGwas runs once per merged sumstat study",
     # Driver merges QTL + GWAS sumstats into a single bundle and the
     # separate-loop iterates over every merged study label (Q1:c1:t1 + G1).
     expect_equal(callCount, 2L)
-    expect_true(!is.null(out$separate_gwas))
+    expect_true(
+        is_in("separate_gwas", names(getComputingTime(out)$Analysis))
+    )
 })
 
 test_that("colocboostPipeline: no analysis flag set emits a message and returns empty", {
@@ -528,7 +537,7 @@ test_that("colocboostPipeline: GWAS ldSketch mismatch errors during the driver",
         )
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        SNP = paste0("v", 1:5),
+        SNP = sprintf("chr1:%d:A:G", 100L * (1:5)),
         A1 = rep("A", 5),
         A2 = rep("G", 5),
         Z = rnorm(5),
@@ -574,7 +583,7 @@ test_that("GwasSumStats: nCase/nControl are optional columns (absent by default)
         )
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        SNP = paste0("v", 1:5),
+        SNP = sprintf("chr1:%d:A:G", 100L * (1:5)),
         A1 = "A",
         A2 = "G",
         Z = rnorm(5),
@@ -588,9 +597,11 @@ test_that("GwasSumStats: nCase/nControl are optional columns (absent by default)
         qcInfo = list(ok = 1)
     )
     g0 <- do.call(GwasSumStats, base)
-    expect_false(any(c("nCase", "nControl") %in% names(g0)))
+    expect_false(any(
+        c("nCase", "nControl") %in% colnames(S4Vectors::mcols(g0))
+    ))
     g1 <- do.call(GwasSumStats, c(base, list(nCase = 500, nControl = 1500)))
-    expect_true(all(c("nCase", "nControl") %in% names(g1)))
+    expect_true(all(c("nCase", "nControl") %in% colnames(S4Vectors::mcols(g1))))
     expect_equal(g1$nCase, 500)
     expect_equal(g1$nControl, 1500)
 })
@@ -604,7 +615,7 @@ test_that("colocboost GWAS bundle: effective N for case/control, per-variant N o
         )
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        SNP = paste0("v", 1:5),
+        SNP = sprintf("chr1:%d:A:G", 100L * (1:5)),
         A1 = "A",
         A2 = "G",
         Z = rnorm(5),
@@ -643,7 +654,7 @@ test_that(".cbPipSkipOutcomes: keeps signal outcomes, drops noise, honours cutof
         rbinom(n * p, 2, 0.3),
         n,
         p,
-        dimnames = list(paste0("s", 1:n), paste0("v", 1:p))
+        dimnames = list(paste0("s", 1:n), sprintf("chr1:%d:A:G", 100L * (1:p)))
     )
     Y <- cbind(
         sig = X[, 1] * 1.5 + rnorm(n, sd = 0.3), # strong signal at v1
@@ -703,8 +714,8 @@ test_that("colocboostPipeline(MultiStudyQtlDataset): combines per-study bundles 
         jointGwas = FALSE,
         separateGwas = FALSE
     ))
-    expect_type(out, "list")
-    expect_true(!is.null(out$xqtl_coloc))
+    expect_s4_class(out, "ColocBoostResult")
+    expect_true(is_in("xqtl_coloc", names(getComputingTime(out)$Analysis)))
     # The individual study's outcome is prefixed "study1:" in the combined bundle.
     expect_true(any(grepl("study1:", names(capturedArgs$Y))))
 })
@@ -738,7 +749,7 @@ test_that(".cbIndividualBundle: multi-context bundle names + prefixes outcomes",
         .package = "colocboost"
     )
     out <- suppressMessages(colocboostPipeline(qd, xqtlColoc = TRUE))
-    expect_true(!is.null(out$xqtl_coloc))
+    expect_true(is_in("xqtl_coloc", names(getComputingTime(out)$Analysis)))
     # Two contexts -> two context-prefixed outcomes (covers the xMatch + naming).
     expect_gte(length(capturedArgs$Y), 2L)
 })
@@ -773,7 +784,7 @@ test_that(".cbPipSkipOutcomes: an outcome with < 2 observations is skipped", {
         rnorm(60),
         30,
         2,
-        dimnames = list(paste0("s", 1:30), c("v1", "v2"))
+        dimnames = list(paste0("s", 1:30), c("chr1:100:A:G", "chr1:200:A:G"))
     )
     Y <- cbind(a = c(1, rep(NA, 29)), b = rnorm(30)) # col a: 1 obs (< 2)
     res <- pecotmr:::.cbPipSkipOutcomes(X, Y, 0.5)
@@ -808,7 +819,7 @@ test_that(".cbSumstatPair: varY attaches var_y; NA variant ids fall back to chr:
     )
     h <- .cbp_makeHandle() # panel SNPs v1..v6
     df <- data.frame(
-        variant_id = c("v1", "v2", "v3"),
+        variant_id = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
         z = c(1, -1, 0.5),
         N = rep(1000, 3),
         stringsAsFactors = FALSE
@@ -917,5 +928,126 @@ test_that("colocboostPipeline(MultiStudyQtlDataset): a study with no usable bund
     out <- suppressMessages(suppressWarnings(
         colocboostPipeline(mt, traitId = "t1", xqtlColoc = TRUE)
     ))
-    expect_type(out, "list")
+    expect_s4_class(out, "ColocBoostResult")
+})
+
+
+# ---------------------------------------------------------------------------
+# RSS panel filters.
+#
+# colocboostPipeline never runs summary-statistic QC itself -- that lives in
+# summaryStatsQc() -- so these cutoffs act at analysis time, against the LD
+# reference panel, on both the QTL and the GWAS sumstat sides.
+# ---------------------------------------------------------------------------
+
+# @noRd
+.cbf_qcd <- function() {
+    data(qtlSumStatsExample, envir = environment())
+    suppressWarnings(suppressMessages(summaryStatsQc(qtlSumStatsExample)))
+}
+
+# @noRd
+.cbf_n <- function(ss, ...) {
+    b <- suppressWarnings(suppressMessages(.cbQtlSumStatsBundle(
+        ss,
+        cutoffs = .panelCutoffs(list(...))
+    )))
+    if (length(b) == 0L) 0L else length(b[[1L]]$variantIds)
+}
+
+test_that("colocboost sumstat bundle filters nothing by default", {
+    ss <- .cbf_qcd()
+    expect_equal(.cbf_n(ss), sum(lengths(ss)))
+})
+
+test_that("colocboost sumstat bundle drops panel-rare variants", {
+    ss <- .cbf_qcd()
+    full <- .cbf_n(ss)
+    loose <- .cbf_n(ss, mafCutoff = 0.05)
+    tight <- .cbf_n(ss, mafCutoff = 0.2)
+    expect_lt(loose, full)
+    expect_lt(tight, loose)
+})
+
+test_that("colocboost RSS cutoffs match .panelVariantFilter", {
+    ss <- .cbf_qcd()
+    ids <- normalizeVariantId(
+        getSumstatDf(
+            ss,
+            study = ss$study[[1L]],
+            context = ss$context[[1L]],
+            trait = ss$trait[[1L]],
+            require = "Z"
+        )$variant_id
+    )
+    for (cut in c(0.05, 0.2)) {
+        expect_equal(
+            .cbf_n(ss, mafCutoff = cut),
+            length(.panelVariantFilter(
+                getLdSketch(ss),
+                ids,
+                mafCutoff = cut
+            )),
+            label = str_c("mafCutoff ", cut)
+        )
+    }
+})
+
+test_that("colocboost RSS treats MAC as a MAF equivalent", {
+    ss <- .cbf_qcd()
+    nSamp <- ncol(getLdSketch(ss))
+    expect_equal(
+        .cbf_n(ss, macCutoff = 0.1 * 2 * nSamp),
+        .cbf_n(ss, mafCutoff = 0.1)
+    )
+})
+
+test_that("colocboost RSS honours a missingness cutoff", {
+    ss <- .cbf_qcd()
+    expect_lt(.cbf_n(ss, imissCutoff = 0), sum(lengths(ss)))
+    expect_equal(.cbf_n(ss, imissCutoff = 1), sum(lengths(ss)))
+})
+
+test_that(".cbSumstatPair keeps sumstat rows aligned to the LD matrix", {
+    # The row filter indexes df by the FULL-length variant id vector, so the
+    # filtered set has to be passed to the LD build separately rather than by
+    # shrinking that vector.
+    ss <- .cbf_qcd()
+    df <- getSumstatDf(
+        ss,
+        study = ss$study[[1L]],
+        context = ss$context[[1L]],
+        trait = ss$trait[[1L]],
+        require = "Z"
+    )
+    sketch <- getLdSketch(ss)
+    pair <- suppressMessages(.cbSumstatPair(
+        df = df,
+        ldSketch = sketch,
+        cutoffs = list(mafCutoff = 0.2, macCutoff = 0, imissCutoff = 1)
+    ))
+    expect_lt(length(pair$variantIds), nrow(df))
+    expect_equal(nrow(pair$sumstat), length(pair$variantIds))
+    expect_equal(pair$sumstat$variant, pair$variantIds)
+    expect_equal(nrow(pair$LD), length(pair$variantIds))
+    expect_equal(rownames(pair$LD), pair$variantIds)
+    # The surviving z values are the originals for those variants.
+    orig <- df$z[is_in(normalizeVariantId(df$variant_id), pair$variantIds)]
+    expect_equal(pair$sumstat$z, orig)
+})
+
+test_that(".cbSumstatPair returns NULL when a cutoff removes everything", {
+    ss <- .cbf_qcd()
+    df <- getSumstatDf(
+        ss,
+        study = ss$study[[1L]],
+        context = ss$context[[1L]],
+        trait = ss$trait[[1L]],
+        require = "Z"
+    )
+    expect_null(suppressMessages(.cbSumstatPair(
+        df = df,
+        ldSketch = getLdSketch(ss),
+        cutoffs = list(mafCutoff = 0.99, macCutoff = 0, imissCutoff = 1)
+    )))
 })

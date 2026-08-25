@@ -69,16 +69,22 @@ NULL
 #'
 #' @description A \code{\link{GwasFineMappingResult}} S4 collection holding
 #' SuSiE-RSS fine-mapping output for de-identified GWAS summary statistics (one
-#' study), carrying the LD-reference \code{ldSketch}. Suitable as the GWAS input
-#' to \code{\link{qtlEnrichmentPipeline}}. All variant identifiers are
-#' synthetic.
+#' study), fit over the same 2,828 variants as
+#' \code{\link{qtlFineMappingExample}} so the two can be paired. Suitable as
+#' the GWAS input to \code{\link{qtlEnrichmentPipeline}}. All variant
+#' identifiers are synthetic. Built by
+#' \code{inst/scripts/prepare_example_data.R}.
 #'
-#' @format A \code{\link{GwasFineMappingResult}} object: a \code{DFrame}-backed
-#' collection with one row carrying a \code{\link{FineMappingEntry}} payload
-#' (the
-#' variant ids, the SuSiE-RSS fit, and a per-variant \code{topLoci} table with
-#' \code{variant_id}, \code{pip}, and \code{cs} columns for 2,828 variants) plus
-#' a non-\code{NULL} \code{ldSketch} \code{\link{GenotypeHandle}}.
+#' @format A \code{\link{GwasFineMappingResult}} object: a
+#' \code{GRangesList}-backed collection with one element (2,828 variants on
+#' chr22) keyed by \code{study_1} / \code{susie}, carrying the SuSiE-RSS fit
+#' and a per-variant table with the standard post-processing columns
+#' (\code{pip}, \code{logBF}, \code{cs_95} / \code{cs_70} / \code{cs_50} and
+#' their purities, marginal statistics). Four credible sets. \code{ldSketch} is
+#' the bundled \code{toy_canonical} genotype panel, present
+#' because \code{\link{qtlEnrichmentPipeline}} requires the GWAS collection to
+#' carry one as its RSS-derived marker; the LD actually used for the fit is an
+#' in-memory correlation matrix computed from \code{\link{eqtlRegionExample}}.
 #'
 #' @keywords data
 #'
@@ -103,11 +109,18 @@ NULL
 #' \code{\link{qtlEnrichmentPipeline}}. All variant identifiers and
 #' region/context names are synthetic.
 #'
-#' @format A \code{\link{QtlFineMappingResult}} object: a \code{DFrame}-backed
-#' collection with one row carrying a \code{\link{FineMappingEntry}} payload
-#' (the
-#' variant ids, the SuSiE fit, and a per-variant \code{topLoci} table with
-#' \code{variant_id}, \code{pip}, and \code{cs} columns for 2,828 variants).
+#' @format A \code{\link{QtlFineMappingResult}} object: a
+#' \code{GRangesList}-backed collection with one element (2,828 variants on
+#' chr22) keyed by \code{study_1} / \code{context_1} / \code{gene_1} /
+#' \code{susie}, carrying the SuSiE fit and a per-variant table with the
+#' standard post-processing columns (\code{pip}, \code{logBF}, \code{cs_95} /
+#' \code{cs_70} / \code{cs_50} and their purities, marginal statistics).
+#'
+#' One credible set of 42 variants. Its \code{min.abs.corr} is 0.626, below the
+#' pipeline default of 0.8, so the fixture was built at \code{minAbsCorr = 0.5}
+#' to keep the set labelled; \code{cs_95_purity} records the true value, so
+#' \code{getCs(x, minPurity = 0.8)} still filters it out. Built by
+#' \code{inst/scripts/prepare_example_data.R}.
 #'
 #' @keywords data
 #'
@@ -135,11 +148,13 @@ NULL
 #' yields two credible sets. Built by
 #' \code{inst/scripts/prepare_paired_finemapping_example.R}.
 #'
-#' @format A \code{\link{QtlFineMappingResult}} object: a \code{DFrame}-backed
-#' collection with one row (\code{study1}, \code{context1}, \code{gene1},
-#' \code{susie}) carrying a \code{\link{FineMappingEntry}} payload (200 variant
-#' ids, the SuSiE fit with two credible sets, and a per-variant \code{topLoci}
-#' table with \code{variant_id} and \code{pip}).
+#' @format A \code{\link{QtlFineMappingResult}} object: a
+#' \code{GRangesList}-backed collection with one element (200 variants on
+#' chr22) keyed by \code{study1} / \code{context1} / \code{gene1} /
+#' \code{susie}, carrying the SuSiE fit with two credible sets and a
+#' per-variant table with the standard post-processing columns (\code{pip},
+#' \code{logBF}, \code{cs_95} / \code{cs_70} / \code{cs_50} and their
+#' purities, marginal statistics).
 #'
 #' @keywords data
 #'
@@ -439,6 +454,34 @@ NULL
 #' @examples
 #' data(twasWeightsExample)
 #' twasWeightsExample
+#'
+NULL
+
+
+#' @name colocboostResultExample
+#'
+#' @title Example ColocBoost Result (One Colocalized Set)
+#'
+#' @docType data
+#'
+#' @description A \code{\link{ColocBoostResult}} holding one confidence set
+#' in which two molecular outcomes colocalize -- the shape that distinguishes
+#' this class from the pairwise \code{\link{ColocResult}}, whose unit is a
+#' pair. Built from a simulated ColocBoost run over the de-identified
+#' \code{protocol_example} toy data (chr22); all identifiers are synthetic.
+#'
+#' @format A \code{ColocBoostResult} with one row: analysis
+#'   \code{xqtl_coloc}, outcomes \code{eQTL_GENESIM1} and
+#'   \code{psiQTL_GENESIM1}, one variant at \code{chr22:16496500:A:G} with
+#'   a variant colocalization probability of ~1.
+#'
+#' @keywords data
+#'
+#' @examples
+#' data(colocboostResultExample)
+#' colocboostResultExample
+#' # A set holds an arbitrary number of outcomes, not just two.
+#' colocboostResultExample$outcomes
 #'
 NULL
 

@@ -30,7 +30,10 @@ mk_xy <- function(n = 30, p = 6, k = 1, seed = 1) {
         rnorm(n * p),
         n,
         p,
-        dimnames = list(paste0("s", seq_len(n)), paste0("v", seq_len(p)))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+        )
     )
     Y <- matrix(
         rnorm(n * k),
@@ -168,7 +171,7 @@ test_that("maxNumVariants with variantsToKeep retains the specified variants", {
             fold = 2,
             fitFold = mock_fit_fold,
             maxNumVariants = 8,
-            variantsToKeep = c("v1", "v2", "v3"),
+            variantsToKeep = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
             verbose = 1
         ),
         "Including 3 specified variants"
@@ -280,7 +283,7 @@ test_that("maxNumVariants subsamples from variantsToKeep when it already exceeds
             fold = 2,
             fitFold = mock_fit_fold,
             maxNumVariants = 2,
-            variantsToKeep = c("v1", "v2", "v3"),
+            variantsToKeep = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
             verbose = 1
         ),
         "Randomly selecting 2 out of 3"

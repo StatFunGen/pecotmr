@@ -13,7 +13,6 @@ TwasWeights(
   jointStudies = NULL,
   jointContexts = NULL,
   jointTraits = NULL,
-  region = NULL,
   traitPos = NULL,
   ldSketch = NULL
 )
@@ -30,7 +29,7 @@ rows produced by a cross-trait joint fit.}
 
 \item{method}{Character vector of TWAS weight method names.}
 
-\item{entry}{List / \code{SimpleList} of \code{TwasWeightsEntry} objects.}
+\item{entry}{List / \code{SimpleList} of \code{TwasWeightsRow} objects.}
 
 \item{jointStudies}{Optional character vector (length \code{length(study)})
 listing the semicolon-joined studies participating in each row's
@@ -43,30 +42,23 @@ shape as \code{jointStudies}.}
 \item{jointTraits}{Optional character vector for cross-trait joints. Same
 shape as \code{jointStudies}.}
 
-\item{region}{Optional \code{GRanges} (length \code{length(study)}) giving
-the genomic anchor of each row's trait -- the trait's own coordinates when
-built from a \code{QtlDataset}, or the summary-stat variant-span window
-when built from a \code{QtlSumStats}. Carried forward as provenance (e.g.
-for cTWAS LD-block placement); not part of the identity key. \code{NULL}
-(default) omits the column.}
-
 \item{traitPos}{Optional per-row trait genomic anchor (a \code{GRanges} or
 \code{NULL}), carried forward as provenance; not part of the identity key.
 \code{NULL} (default) omits the column.}
 
-\item{ldSketch}{An optional \code{GenotypeHandle}, or \code{NULL} for
-individual-level fits.}
+\item{ldSketch}{An optional genotype panel (see
+\code{\link{readGenotypes}}), or \code{NULL} for individual-level fits.}
 }
 \value{
 A \code{TwasWeights} object.
 }
 \description{
 Construct a \code{TwasWeights} DFrame-subclass collection from
-  per-tuple vectors and a list of \code{TwasWeightsEntry} payloads (one per
+  per-tuple vectors and a list of \code{TwasWeightsRow} payloads (one per
   tuple).
 }
 \examples{
-twe <- TwasWeightsEntry(variantIds = paste0("v", 1:4),
+twe <- twasWeightsRow(variantIds = sprintf("chr1:\%d:A:G", 100L * (1:4)),
   weights = rep(0.1, 4), cvResult = list(rsq = 0.5), standardized = FALSE)
 tw <- TwasWeights(study = "s1", context = "brain", trait = "gene1",
   method = "susie", entry = list(twe))

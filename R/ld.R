@@ -1,6 +1,5 @@
 #' Deduplicate and sort genomic regions by chromosome and start position.
 #' @importFrom dplyr distinct arrange
-#' @importFrom magrittr %>%
 #' @noRd
 orderDedupRegions <- function(df) {
     df$chrom <- canonChrom(df$chrom)
@@ -281,7 +280,6 @@ processLdMatrix <- function(ldFilePath, snpFilePath = NULL) {
 #' Subset an LD matrix and variant info to a genomic region, optionally further
 #' restricted to specific coordinates.
 #' @importFrom dplyr mutate select inner_join
-#' @importFrom magrittr %>%
 #' @noRd
 extractLdForRegion <- function(ldMatrix, variants, region, extractCoordinates) {
     extracted <- filter(
@@ -703,7 +701,7 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     blockMetadata,
     X
 ) {
-    handle <- readGenotypes(genotypePath)
+    handle <- .readGenotypeHandle(genotypePath)
     snpIdx <- .regionToSnpIdx(getSnpInfo(handle), region)
     LdData(
         correlation = NULL,
@@ -787,6 +785,117 @@ loadLdFromGenotype <- function(
 #   With `onMissing = "drop"` the returned matrix carries an attribute
 #   `"keptVariantIds"` so callers can recover which ids survived.
 # Require a non-NULL GenotypeHandle ldSketch.
+# Normalise an LD-sketch input to the RangedSummarizedExperiment the slot
+# holds. Accepts a bare GenotypeHandle, which is what every caller has passed
+# until now, and wraps it -- so a sketch and QtlDataset's genotype experiment
+# end up being the same object with different provenance rather than two
+# spellings of one idea.
+# @noRd
+.asLdSketch <- function(x) {
+    if (is.null(x)) {
+        return(NULL)
+    }
+    if (methods::is(x, "RangedSummarizedExperiment")) {
+        return(x)
+    }
+    if (methods::is(x, "GenotypeHandle")) {
+        return(.genotypeExperiment(x))
+    }
+    abort(glue(
+        "`ldSketch` must be a genotype panel -- a ",
+        "RangedSummarizedExperiment or a GenotypeHandle (got ",
+        "{class(x)[[1L]]})."
+    ))
+}
+
+# The GenotypeHandle a sketch reads through. The handle is the DelayedArray
+# seed of the dosage assay, so it stays reachable after the sketch is subset.
+# Tolerates a bare handle, which is what objects serialised before the slot
+# became an RSE still carry.
+# @noRd
+.ldSketchHandle <- function(x) {
+    if (is.null(x)) {
+        return(NULL)
+    }
+    if (methods::is(x, "GenotypeHandle")) {
+        return(x)
+    }
+    .ghSeedHandle(
+        DelayedArray::seed(SummarizedExperiment::assay(x, "dosage"))
+    )
+}
+
+# Narrow a sketch to a variant subset. On an RSE this is ordinary subsetting,
+# which brings the DelayedArray's index bookkeeping with it; a legacy bare
+# handle falls back to the handle-level trim, which needs fileIdx to stay
+# read-safe.
+# @noRd
+.ldSketchSubset <- function(x, keep) {
+    if (is.null(x)) {
+        return(NULL)
+    }
+    if (methods::is(x, "GenotypeHandle")) {
+        return(.subsetGenotypeHandle(x, keep))
+    }
+    x[keep, ]
+}
+
+# A sketch trimmed to zero variants, every other property preserved. Used when
+# an entry set genuinely carries no variants: the object references no LD, so
+# the correct retained panel is empty rather than the full genome-wide sketch,
+# which on a real panel is ~135 MB of serialized dead weight per such entry.
+# NULL-safe and idempotent.
+# @noRd
+.emptySketch <- function(x) {
+    if (is.null(x)) {
+        return(NULL)
+    }
+    if (methods::is(x, "GenotypeHandle")) {
+        return(.emptyGenotypeHandle(x))
+    }
+    # A panel holds its handle TWICE -- as rowRanges and inside the dosage
+    # assay's DelayedArray seed. `x[integer(0), ]` drops the rows but leaves
+    # the seed carrying the whole panel's snpInfo, which is precisely the
+    # weight this exists to shed. Rebuild from an emptied handle so both go.
+    .genotypeExperiment(.emptyGenotypeHandle(.ldSketchHandle(x)))
+}
+
+# "format @ path" for show methods, which describe where a panel came from
+# rather than what is in it.
+# @noRd
+.ldSketchLabel <- function(x) {
+    handle <- .ldSketchHandle(x)
+    glue("{getFormat(handle)} @ {getPath(handle)}")
+}
+
+# TRUE for anything that can serve as an LD panel. A bare GenotypeHandle
+# still counts: that is what objects serialised before the slot became an RSE
+# carry.
+# @noRd
+.ldIsPanel <- function(x) {
+    methods::is(x, "RangedSummarizedExperiment") ||
+        methods::is(x, "GenotypeHandle")
+}
+
+# The handle behind an already-open genotype source, or NULL when the value is
+# not one. Callers that accept "a panel, a bare handle, or a spec to resolve"
+# use this to separate the first two -- which are ready to use -- from the
+# third. A panel is the public shape (readGenotypes()); a bare handle is what
+# internal callers and objects serialised before the change still carry.
+# @noRd
+.openGenotypeHandle <- function(x) {
+    if (!.ldIsPanel(x)) {
+        return(NULL)
+    }
+    .ldSketchHandle(x)
+}
+
+# The panel's variant table, however the sketch is carried.
+# @noRd
+.ldSketchSnpInfo <- function(x) {
+    getSnpInfo(.ldSketchHandle(x))
+}
+
 .ldFromSketchValidate <- function(ldSketch, label) {
     if (is.null(ldSketch)) {
         msg <- glue(
@@ -795,15 +904,20 @@ loadLdFromGenotype <- function(
         )
         abort(msg)
     }
-    if (!methods::is(ldSketch, "GenotypeHandle")) {
-        msg <- glue("{label}: ldSketch must be a GenotypeHandle.")
+    # A bare GenotypeHandle is still accepted: that is what objects
+    # serialised before the slot became an RSE carry.
+    if (!.ldIsPanel(ldSketch)) {
+        msg <- glue(
+            "{label}: ldSketch must be a genotype panel ",
+            "(RangedSummarizedExperiment or GenotypeHandle)."
+        )
         abort(msg)
     }
 }
 
 # Match requested ids to the panel; NULL if none match. Returns kept ids/order.
 .ldFromSketchMatch <- function(ldSketch, variantIds, label, onMissing) {
-    snpInfo <- getSnpInfo(ldSketch)
+    snpInfo <- .ldSketchSnpInfo(ldSketch)
     # Match by (chrom, pos, allele) tuple with an exact id-string fallback for
     # rsID panels; the caller's original ids and order are preserved.
     m <- matchVariants(
@@ -838,9 +952,11 @@ loadLdFromGenotype <- function(
     if (is.null(matched)) {
         return(NULL)
     }
-    geno <- .dosageMatrix(ldSketch, matched$idx, meanImpute = TRUE)
-    colnames(geno) <- matched$keptIds
-    ldMat <- computeLd(geno, method = "sample")
+    ldMat <- computeLd(
+        ldSketch,
+        method = "sample",
+        snpIdx = matched$idx
+    )
     dimnames(ldMat) <- list(matched$keptIds, matched$keptIds)
     if (onMissing == "drop") {
         attr(ldMat, "keptVariantIds") <- matched$keptIds
@@ -848,6 +964,121 @@ loadLdFromGenotype <- function(
     ldMat
 }
 
+# ---------- LD sketch: per-variant panel statistics and filtering ----------
+
+# Per-variant minor allele frequency and missingness rate from panel dosage.
+#
+# The dosage must NOT be mean-imputed: imputation fills every hole, so the
+# missingness rate would come back zero everywhere.
+# @noRd
+.panelVariantStats <- function(dosage) {
+    nSamp <- nrow(dosage)
+    nObs <- colSums(!is.na(dosage))
+    af <- if_else(
+        nObs > 0L,
+        colSums(dosage, na.rm = TRUE) / (2 * nObs),
+        NA_real_
+    )
+    list(
+        af = af,
+        maf = pmin(af, 1 - af),
+        missRate = if (nSamp > 0L) {
+            1 - nObs / nSamp
+        } else {
+            rep(0, ncol(dosage))
+        }
+    )
+}
+
+# The subset of `variantIds` whose LD-panel genotypes clear the cutoffs,
+# returned in the caller's order.
+#
+# A MAC cutoff is a MAF cutoff once expressed per panel sample, so the stricter
+# of the two applies -- the same rule .qtlVariantFilters() uses on individual
+# level data, so one number means the same thing on both paths.
+#
+# Variants absent from the panel are passed through untouched. Whether a
+# missing variant is an error or is silently dropped belongs to `.ldFromSketch`
+# (its `onMissing`), and deciding it a second time here would let the two
+# disagree about the same variant.
+# @noRd
+.panelVariantFilter <- function(
+    ldSketch,
+    variantIds,
+    mafCutoff = 0,
+    macCutoff = 0,
+    imissCutoff = 1,
+    label = ".panelVariantFilter"
+) {
+    mafCutoff <- mafCutoff %||% 0
+    macCutoff <- macCutoff %||% 0
+    imissCutoff <- imissCutoff %||% 1
+    if (mafCutoff <= 0 && macCutoff <= 0 && imissCutoff >= 1) {
+        return(variantIds)
+    }
+    if (is.null(ldSketch) || length(variantIds) == 0L) {
+        return(variantIds)
+    }
+    matched <- .ldFromSketchMatch(ldSketch, variantIds, label, "drop")
+    if (is.null(matched)) {
+        return(variantIds)
+    }
+    dosage <- .dosageMatrix(
+        .ldSketchHandle(ldSketch),
+        matched$idx,
+        meanImpute = FALSE
+    )
+    stats <- .panelVariantStats(dosage)
+    nSamp <- nrow(dosage)
+    effectiveMaf <- max(
+        mafCutoff,
+        if (nSamp > 0L) macCutoff / (2 * nSamp) else 0
+    )
+    drop <- is.na(stats$maf) |
+        stats$maf < effectiveMaf |
+        stats$missRate > imissCutoff
+    variantIds[!is_in(variantIds, matched$keptIds[drop])]
+}
+
+# Row mask for the variants clearing the LD-panel cutoffs, reporting how many
+# were dropped. A no-op when no cutoff is set.
+# @noRd
+.panelKeepMask <- function(variantIds, ldSketch, cutoffs, label) {
+    if (is.null(ldSketch) || is.null(cutoffs)) {
+        return(rep(TRUE, length(variantIds)))
+    }
+    kept <- .panelVariantFilter(
+        ldSketch,
+        variantIds,
+        mafCutoff = cutoffs$mafCutoff,
+        macCutoff = cutoffs$macCutoff,
+        imissCutoff = cutoffs$imissCutoff,
+        label = label
+    )
+    keep <- is_in(variantIds, kept)
+    nDropped <- sum(!keep)
+    if (nDropped > 0L) {
+        msg <- glue(
+            "{label}: dropped {nDropped} of {length(variantIds)} variant(s) ",
+            "below the LD-panel MAF / MAC / missingness cutoffs."
+        )
+        inform(msg)
+    }
+    keep
+}
+
+# The panel-filter cutoffs a pipeline call carries, or NULL when none is set
+# (so the filter short-circuits without touching the panel).
+# @noRd
+.panelCutoffs <- function(p) {
+    maf <- p$mafCutoff %||% 0
+    mac <- p$macCutoff %||% 0
+    imiss <- p$imissCutoff %||% 1
+    if (maf <= 0 && mac <= 0 && imiss >= 1) {
+        return(NULL)
+    }
+    list(mafCutoff = maf, macCutoff = mac, imissCutoff = imiss)
+}
 # ---------- LD sketch: cross-pipeline LD-panel equality check ----------
 
 # Internal: assert that two `GenotypeHandle` LD sketches describe the same
@@ -897,25 +1128,21 @@ loadLdFromGenotype <- function(
 
 # Both must be GenotypeHandles with matching panel size.
 .ldSketchCheckShape <- function(qtlLd, gwasLd, pipelineName, between) {
-    if (
-        !methods::is(qtlLd, "GenotypeHandle") ||
-            !methods::is(gwasLd, "GenotypeHandle")
-    ) {
+    if (!.ldIsPanel(qtlLd) || !.ldIsPanel(gwasLd)) {
         msg <- glue(
-            "{pipelineName}: ldSketch slots{between} must both be ",
-            "GenotypeHandle objects for the cross-pipeline LD reference ",
-            "check."
+            "{pipelineName}: ldSketch slots{between} must both be genotype ",
+            "panels for the cross-pipeline LD reference check."
         )
         abort(msg)
     }
-    qSnp <- getSnpInfo(qtlLd)
-    gSnp <- getSnpInfo(gwasLd)
+    qSnp <- .ldSketchSnpInfo(qtlLd)
+    gSnp <- .ldSketchSnpInfo(gwasLd)
     if (nrow(qSnp) != nrow(gSnp)) {
         nQ <- nrow(qSnp)
         nG <- nrow(gSnp)
         msg <- glue(
             "{pipelineName}: ldSketch panels differ in size ({nQ} vs ",
-            "{nG} variants){between}; the two ldSketch GenotypeHandles ",
+            "{nG} variants){between}; the two ldSketch panels ",
             "must match exactly."
         )
         abort(msg)
@@ -924,8 +1151,8 @@ loadLdFromGenotype <- function(
 
 # Panels must agree on CHR/BP/A1/A2 columns and on the sample set.
 .ldSketchCheckContent <- function(qtlLd, gwasLd, pipelineName, between) {
-    qSnp <- getSnpInfo(qtlLd)
-    gSnp <- getSnpInfo(gwasLd)
+    qSnp <- .ldSketchSnpInfo(qtlLd)
+    gSnp <- .ldSketchSnpInfo(gwasLd)
     if (!identical(canonChrom(qSnp$CHR), canonChrom(gSnp$CHR))) {
         msg <- glue(
             "{pipelineName}: ldSketch panels differ in column CHR",
@@ -942,7 +1169,9 @@ loadLdFromGenotype <- function(
             abort(msg)
         }
     }
-    if (!identical(getSampleIds(qtlLd), getSampleIds(gwasLd))) {
+    qIds <- getSampleIds(.ldSketchHandle(qtlLd))
+    gIds <- getSampleIds(.ldSketchHandle(gwasLd))
+    if (!identical(qIds, gIds)) {
         msg <- glue(
             "{pipelineName}: ldSketch panels have different sample sets",
             "{between}; use the same ldSketch on both."
@@ -1213,7 +1442,6 @@ loadLdFromBlocks <- function(
 #'   \item{idx}{Integer vector of indices into the original variantIds.}
 #' @importFrom dplyr group_by summarise
 #' @importFrom vroom vroom
-#' @importFrom magrittr %>%
 #' @examples
 #' meta <- system.file("extdata", "ld_reference", "ld_meta_file.tsv",
 #'   package = "pecotmr")
@@ -1346,8 +1574,8 @@ partitionLdMatrix <- function(
     }
     combinedMatrix <- getCorrelation(ldData)
     blockMetadata <- getBlockMetadata(ldData)
-    if (is(blockMetadata, "LdBlocks")) {
-        blockMetadata <- as_tibble(getBlocks(blockMetadata))
+    if (is(blockMetadata, "GRanges")) {
+        blockMetadata <- as_tibble(blockMetadata)
     }
     variantIds <- getVariantIds(ldData)
     combinedMatrix <- .partitionValidateMatrix(combinedMatrix, variantIds)
@@ -1765,8 +1993,6 @@ ldPruneByCorrelation <- function(
     .ldPruneHclust(X, corThres, verbose)
 }
 
-#' SNPRelate-based LD pruning helper
-#' @noRd
 #' SNPRelate-based LD pruning helper
 #' @noRd
 .ldPruneSnprelateDeps <- function() {
@@ -2592,6 +2818,103 @@ loadLdBlock <- function(spec, g) {
 # data handling.
 # =============================================================================
 
+# LD for a block of a genotype panel: read the dosages, then correlate them.
+#
+# The guards are the reason this is a function rather than two lines at the
+# call site. A backend that cannot read the block returns NULL, and a
+# single-variant block has no correlation structure; both mean "identity",
+# and open-coding that in every caller is how one of them ends up omitting it.
+# @noRd
+.computeLdFromPanel <- function(
+    panel,
+    snpIdx,
+    method,
+    backend,
+    trimSamples,
+    shrinkage
+) {
+    handle <- .ldSketchHandle(panel)
+    idx <- if (is.null(snpIdx)) {
+        seq_len(nrow(getSnpInfo(handle)))
+    } else {
+        snpIdx
+    }
+    block <- extractBlockGenotypes(handle, idx)
+    if (is.null(block)) {
+        return(diag(length(idx)))
+    }
+    geno <- t(SummarizedExperiment::assay(block, "dosage"))
+    if (ncol(geno) < 2L) {
+        return(diag(length(idx)))
+    }
+    computeLd(
+        geno,
+        method = method,
+        backend = backend,
+        trimSamples = trimSamples,
+        shrinkage = shrinkage
+    )
+}
+
+# Compute LD without ever materialising the dosage matrix.
+#
+# The dosage matrix scales with samples x variants while the LD matrix scales
+# with variants^2, so on a panel with many samples the input dwarfs the
+# output: 500k samples x 10k variants is ~40 GB in, ~800 MB out. Reading the
+# correlation straight off the GDS keeps the genotypes on disk, which is the
+# difference between "slow" and "impossible" on a large block.
+#
+# It is NOT a drop-in for the in-memory path. SNPRelate applies its own
+# missing-data policy, whereas the in-memory backends mean-impute before
+# correlating. On complete data the two agree to ~2e-15; with missing calls
+# they diverge, and the gap grows with the missing rate (max |difference|
+# ~0.04 at 2% missing, ~0.11 at 10% on a synthetic panel). That is a choice
+# of estimator, not a rounding difference, so it is opt-in rather than
+# automatic.
+# @noRd
+.computeLdOnDisk <- function(X, method, backend, shrinkage, snpIdx = NULL) {
+    if (backend != "snprelate") {
+        abort(glue(
+            "computeLd(onDisk = TRUE) is only available for ",
+            "backend = 'snprelate' (got '{backend}'); the other backends ",
+            "correlate a matrix that is already in memory."
+        ))
+    }
+    if (method != "sample") {
+        abort(glue(
+            "computeLd(onDisk = TRUE) computes the sample correlation; ",
+            "method = '{method}' has no on-disk implementation."
+        ))
+    }
+    if (!.ldIsPanel(X)) {
+        abort(glue(
+            "computeLd(onDisk = TRUE) reads through a genotype panel, so ",
+            "`X` must be one (got {class(X)[[1L]]}). A dosage matrix is ",
+            "already in memory, which is what onDisk exists to avoid."
+        ))
+    }
+    fmt <- getFormat(.ldSketchHandle(X))
+    if (fmt != "gds") {
+        abort(glue(
+            "computeLd(onDisk = TRUE) needs a GDS-backed panel; this one is ",
+            "'{fmt}'. Only GDS exposes an on-disk LD routine."
+        ))
+    }
+    handle <- .ldSketchHandle(X)
+    idx <- if (is.null(snpIdx)) {
+        seq_len(nrow(getSnpInfo(handle)))
+    } else {
+        snpIdx
+    }
+    R <- .computeBlockLdGds(handle, idx)
+    diag(R) <- 1.0
+    R[is.na(R) | is.nan(R)] <- 0
+    if (shrinkage > 0 && shrinkage <= 1) {
+        R <- (1 - shrinkage) * R + shrinkage * diag(nrow(R))
+    }
+    R
+}
+
 # --- computeLd method helpers -----------------------------------------------
 
 # Non-sample methods only support the internal backend.
@@ -2699,18 +3022,93 @@ loadLdBlock <- function(spec, g) {
     R
 }
 
+#' @title Compute an LD Correlation Matrix
+#' @description Correlation between variants, from either a dosage matrix
+#'   already in memory or a genotype panel read on demand.
+#'
+#'   Three backends compute the same sample correlation different ways.
+#'   \code{"internal"} is a single BLAS crossprod (\code{Rfast::cora}, or
+#'   \code{cor()} without it) and is both the fastest and the default;
+#'   \code{"snprelate"} and \code{"snpstats"} exist to cross-check it and do
+#'   strictly more work, since each converts the same matrix into its own
+#'   representation first.
+#' @param X A numeric dosage matrix (samples x variants), or a genotype panel
+#'   -- a \code{RangedSummarizedExperiment} whose dosage assay reads through
+#'   a genotype handle.
+#' @param method Estimator: \code{"sample"} (default), \code{"population"}
+#'   or \code{"gcta"}. The last two are \code{"internal"}-only.
+#' @param backend \code{"internal"} (default), \code{"snprelate"} or
+#'   \code{"snpstats"}.
+#' @param trimSamples Logical; drop samples to a multiple of four, matching
+#'   DENTIST's block handling. Ignored for \code{method = "sample"}.
+#' @param shrinkage Numeric in (0, 1]; shrink towards the identity
+#'   (lassosum, Mak et al. 2017). Zero (default) applies none.
+#' @param onDisk Logical, default \code{FALSE}. Read the correlation
+#'   straight off a GDS panel without materialising dosages. The dosage
+#'   matrix scales with samples x variants while the result scales with
+#'   variants^2, so on a wide panel the input dwarfs the output and keeping it
+#'   on disk is what makes a large block feasible at all.
+#'
+#'   Not a drop-in substitute: SNPRelate applies its own missing-data policy
+#'   where the in-memory backends mean-impute first. On complete data the two
+#'   agree to ~2e-15, but with missing calls they diverge and the gap widens
+#'   with the missing rate. Requires \code{backend = "snprelate"},
+#'   \code{method = "sample"} and a GDS-backed panel.
+#' @param snpIdx Optional variant selection when \code{X} is a panel; row
+#'   indices into it. \code{NULL} (default) uses every variant. Not
+#'   meaningful for a dosage matrix, which is already the block.
+#' @return A numeric correlation matrix (variants x variants), with
+#'   \code{dimnames} taken from the block where available.
+#' @examples
+#' data(qtlSumStatsExample)
+#' panel <- getLdSketch(qtlSumStatsExample)
+#' R <- computeLd(panel, snpIdx = 1:5)
+#' dim(R)
+#' # A dosage matrix already in memory is correlated directly.
+#' X <- matrix(rbinom(200, 2, 0.3), nrow = 50, ncol = 4)
+#' dim(computeLd(X))
+#' @export
 computeLd <- function(
     X,
     method = c("sample", "population", "gcta"),
     backend = c("internal", "snprelate", "snpstats"),
     trimSamples = FALSE,
-    shrinkage = 0
+    shrinkage = 0,
+    onDisk = FALSE,
+    snpIdx = NULL
 ) {
     if (is.null(X)) {
         abort("X must be provided.")
     }
     method <- arg_match(method)
     backend <- arg_match(backend)
+    if (isTRUE(onDisk)) {
+        return(.computeLdOnDisk(X, method, backend, shrinkage, snpIdx))
+    }
+    if (.ldIsPanel(X)) {
+        return(.computeLdFromPanel(
+            X,
+            snpIdx,
+            method,
+            backend,
+            trimSamples,
+            shrinkage
+        ))
+    }
+    if (!is.null(snpIdx)) {
+        abort(glue(
+            "`snpIdx` selects variants from a genotype panel; `X` is a ",
+            "{class(X)[[1L]]}, which is already the block to correlate."
+        ))
+    }
+    .computeLdMatrix(X, method, backend, trimSamples, shrinkage)
+}
+
+# Correlate a plain genotype block, once the panel and on-disk paths have been
+# ruled out. Dimnames are carried across by hand: the estimators return a bare
+# matrix, and callers key LD by variant name.
+# @noRd
+.computeLdMatrix <- function(X, method, backend, trimSamples, shrinkage) {
     nms <- colnames(X)
     if (method == "sample") {
         R <- .computeLdSample(X, backend)

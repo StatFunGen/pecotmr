@@ -9,18 +9,6 @@
 # (computeSldscMRef/computeSldscAnnotSd/isBinarySldscAnnot/standardizeSldscTrait)
 # operate on an in-memory SldscData and are tested with in-memory fixtures.
 
-# =============================================================================
-# .sldscChromFromFilename
-# =============================================================================
-
-test_that(".sldscChromFromFilename parses chromosome number", {
-    fn <- pecotmr:::.sldscChromFromFilename
-    expect_equal(fn("target.1.annot.gz"), 1L)
-    expect_equal(fn("target.22.annot.gz"), 22L)
-    expect_true(is.na(fn("no_chrom_here.txt")))
-    expect_true(is.na(fn("target.X.annot.gz")))
-})
-
 
 # =============================================================================
 # .sldscDetectAnnotCols

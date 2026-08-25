@@ -7,7 +7,7 @@
 # correlation computation.
 # =============================================================================
 
-#' @include GenotypeHandle.R
+#' @include GenotypeHandle.R AllClasses.R
 NULL
 
 #' @title LD Data Container
@@ -18,14 +18,17 @@ NULL
 #' @slot correlation A correlation matrix, a list of per-block matrices
 #'   (block-diagonal LD), or NULL if genotypes are available and R should be
 #'   computed on demand.
-#' @slot genotypeHandle A \code{GenotypeHandle}, a list of
-#'   \code{GenotypeHandle}s (for mixture panels), or NULL when only pre-computed
-#'   R is available.
+#' @slot genotypeHandle Where genotypes are read from: a genotype handle, a
+#'   list of them (for mixture panels), a matrix of dosages already extracted
+#'   and filtered, or NULL when only pre-computed R is available. Pass a
+#'   genotype panel (see \code{\link{readGenotypes}}) to the constructor and
+#'   it is unwrapped to its handle.
 #' @slot snpIdx Integer vector of 1-based SNP indices into the handle's
-#'   \code{snpInfo}. NULL when correlation is pre-computed.
+#'   \code{snpInfo}. NULL when correlation is pre-computed, or when the
+#'   source is a matrix (which is already the subset).
 #' @slot variants A \code{GRanges} object with variant metadata (A1, A2,
 #'   variant_id, and optionally allele_freq, variance, n_nomiss).
-#' @slot blockMetadata An \code{LdBlocks} object or a \code{data.frame} with
+#' @slot blockMetadata A \code{GRanges} of blocks or a \code{data.frame} with
 #'   block boundary information.
 #' @slot nRef Integer, reference panel sample size.
 #' @slot mixtureWeights NULL when \code{genotypeHandle} is a single
@@ -38,13 +41,13 @@ NULL
 setClass(
     "LdData",
     representation(
-        correlation = "ANY",
-        genotypeHandle = "ANY",
-        snpIdx = "ANY",
+        correlation = "LdCorrelation",
+        genotypeHandle = "LdGenotypeSource",
+        snpIdx = "LdSnpIndex",
         variants = "GRanges",
-        blockMetadata = "ANY",
+        blockMetadata = "LdBlockMetadata",
         nRef = "integer",
-        mixtureWeights = "ANY"
+        mixtureWeights = "LdMixtureWeights"
     ),
     validity = function(object) {
         errors <- character()
@@ -60,13 +63,15 @@ setClass(
         if (length(object@variants) == 0) {
             errors <- c(errors, "'variants' must not be empty")
         }
+        errors <- c(errors, .ldCheckGenotypeSource(object@genotypeHandle))
+        errors <- c(errors, .ldCheckCorrelation(object@correlation))
         if (!is.null(object@mixtureWeights)) {
             if (!is.list(object@genotypeHandle)) {
                 errors <- c(
                     errors,
                     str_c(
                         "'mixtureWeights' may only be set when ",
-                        "'genotypeHandle' is a list of GenotypeHandles"
+                        "'genotypeHandle' is a list of panels"
                     )
                 )
             } else {
@@ -113,15 +118,62 @@ setMethod("show", "LdData", function(object) {
     cat(glue("  Reference N: {object@nRef}\n", .trim = FALSE))
 })
 
+# One element of a mixture list: unwrap a panel, pass anything else through
+# for validity to judge.
+# @noRd
+.ldDataSourceElement <- function(x) {
+    open <- .openGenotypeHandle(x)
+    if (is.null(open)) x else open
+}
+
+# Normalise whatever the caller passed for `genotypeHandle` into one of the
+# shapes the slot admits. A panel is the public shape (readGenotypes()); the
+# slot stores the handle behind it, because `snpIdx` selects into the handle's
+# whole snpInfo and a panel adds nothing the handle does not already carry.
+# Anything else is passed through for the slot's class union to accept or
+# reject -- this is a normaliser, not a second type check.
+# @noRd
+.ldDataGenotypeSource <- function(x) {
+    if (is.null(x) || is.matrix(x)) {
+        return(x)
+    }
+    if (is.list(x)) {
+        # Unwrap the panels but do not reject here: validity reports a bad
+        # mixture element by its index, which a purrr-wrapped abort would bury.
+        return(map(x, .ldDataSourceElement))
+    }
+    open <- .openGenotypeHandle(x)
+    if (!is.null(open)) {
+        return(open)
+    }
+    # The slot's class union would reject this anyway, but its message names
+    # the union rather than what to pass instead.
+    hint <- if (methods::is(x, "DelayedArray")) {
+        str_c(
+            " -- pass the panel it came from rather than its assay, so the ",
+            "variant selection in `snpIdx` still means something"
+        )
+    } else {
+        ""
+    }
+    abort(glue(
+        "`genotypeHandle` must be a genotype panel from readGenotypes(), a ",
+        "list of them, a matrix of dosages, or NULL (got ",
+        "{class(x)[[1L]]}){hint}."
+    ))
+}
+
 #' @title Create an LdData Object
 #' @description Construct an \code{LdData} from a correlation matrix and/or
 #'   genotype handle, plus variant metadata as a GRanges.
 #' @param correlation A correlation matrix, list of matrices, or NULL.
-#' @param genotypeHandle A GenotypeHandle, list of GenotypeHandles, or NULL.
-#' @param snpIdx Integer vector of SNP indices, or NULL.
+#' @param genotypeHandle A genotype panel (see
+#'   \code{\link{readGenotypes}}), a list of panels for a mixture reference,
+#'   a matrix of already-extracted dosages, or NULL.
+#' @param snpIdx Vector of 1-based SNP indices, coerced to integer, or NULL.
 #' @param variants A GRanges with variant metadata (must have variant_id in
 #'   mcols, plus A1, A2).
-#' @param blockMetadata LdBlocks or data.frame with block info.
+#' @param blockMetadata GRanges of blocks, or data.frame with block info.
 #' @param nRef Integer, reference panel sample size.
 #' @param mixtureWeights Optional numeric vector of mixing proportions, one per
 #'   panel in \code{genotypeHandle} when it is a list. Must be non-negative and
@@ -150,8 +202,8 @@ LdData <- function(
     obj <- new(
         "LdData",
         correlation = correlation,
-        genotypeHandle = genotypeHandle,
-        snpIdx = snpIdx,
+        genotypeHandle = .ldDataGenotypeSource(genotypeHandle),
+        snpIdx = if (is.null(snpIdx)) NULL else as.integer(snpIdx),
         variants = variants,
         blockMetadata = blockMetadata,
         nRef = as.integer(nRef),
@@ -225,7 +277,7 @@ setMethod("getCorrelation", "LdData", function(x) {
         dimnames(R) <- dimnames(perPanel[[1L]])
         return(R)
     }
-    computeLd(.dosageMatrix(x@genotypeHandle, x@snpIdx), method = "sample")
+    computeLd(.ldSourceDosages(x@genotypeHandle, x@snpIdx), method = "sample")
 })
 
 #' @rdname getGenotypes
@@ -234,20 +286,18 @@ setMethod("getGenotypes", "LdData", function(x, ...) {
     if (is.null(x@genotypeHandle)) {
         return(NULL)
     }
-    if (is.matrix(x@genotypeHandle)) {
-        return(x@genotypeHandle)
-    }
     if (is.list(x@genotypeHandle)) {
-        map(x@genotypeHandle, .dosageMatrix, x@snpIdx)
+        # A mixture list may hold matrices as well as handles.
+        map(x@genotypeHandle, .ldSourceDosages, x@snpIdx)
     } else {
-        .dosageMatrix(x@genotypeHandle, x@snpIdx)
+        .ldSourceDosages(x@genotypeHandle, x@snpIdx)
     }
 })
 
 #' @rdname hasGenotypes
 #' @export
 setMethod("hasGenotypes", "LdData", function(x) {
-    !is.null(x@genotypeHandle)
+    !is.null(getGenotypeHandle(x))
 })
 
 #' @rdname getVariantIds
@@ -278,7 +328,7 @@ setMethod("getRefPanel", "LdData", function(x) {
 })
 
 #' @rdname getGenotypeHandle
-#' @export
+#' @keywords internal
 setMethod("getGenotypeHandle", "LdData", function(x) x@genotypeHandle)
 
 #' @rdname getMixtureWeights
@@ -298,5 +348,61 @@ setMethod("getNRef", "LdData", function(x) x@nRef)
 # Sample-LD matrix for one mixture panel's genotype handle (over `snpIdx`).
 # @noRd
 .ldPanelLd <- function(h, snpIdx) {
-    computeLd(.dosageMatrix(h, snpIdx), method = "sample")
+    computeLd(.ldSourceDosages(h, snpIdx), method = "sample")
+}
+
+# Dosages from a genotype source. A matrix IS the dosages already -- extracted
+# and filtered upstream, with `snpIdx` NULL because the matrix is the subset --
+# so it is returned as-is rather than fed to the file readers, which would
+# dispatch on it and fail.
+# @noRd
+.ldSourceDosages <- function(x, snpIdx) {
+    if (is.matrix(x)) {
+        return(x)
+    }
+    .dosageMatrix(x, snpIdx)
+}
+
+# Every element of a mixture list has to be something LD can be computed from.
+# The class union admits any list, so the elements are checked here.
+# @noRd
+.ldCheckGenotypeSource <- function(x) {
+    if (!is.list(x)) {
+        return(character())
+    }
+    ok <- map_lgl(x, .ldIsGenotypeSource)
+    if (all(ok)) {
+        return(character())
+    }
+    str_c(
+        "'genotypeHandle' list elements must each be a genotype panel or a ",
+        "dosage matrix; element(s) ",
+        str_flatten(which(!ok), ", "),
+        " are not."
+    )
+}
+
+# @noRd
+.ldIsGenotypeSource <- function(x) {
+    methods::is(x, "GenotypeHandle") || is.matrix(x)
+}
+
+# Block-diagonal LD is one matrix per block. The union admits any list, so the
+# elements are checked here -- a list of something else would otherwise sail
+# through and fail later inside the LD arithmetic.
+# @noRd
+.ldCheckCorrelation <- function(x) {
+    if (!is.list(x)) {
+        return(character())
+    }
+    ok <- map_lgl(x, is.matrix)
+    if (all(ok)) {
+        return(character())
+    }
+    str_c(
+        "'correlation' list elements must each be a matrix (block-diagonal ",
+        "LD is one matrix per block); element(s) ",
+        str_flatten(which(!ok), ", "),
+        " are not."
+    )
 }

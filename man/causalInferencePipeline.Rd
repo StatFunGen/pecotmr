@@ -112,7 +112,7 @@ Per-region pipeline that pairs QTL-derived weight vectors
           TWAS Z only, no MR.
     \item \code{fineMappingResult} alone (no \code{twasWeights}):
           TWAS Z derived from SuSiE-style coefficients carried on the
-          \code{topLoci} slot of each FineMappingEntry; plus MR.
+          \code{topLoci} slot of each FineMappingRow; plus MR.
     \item both: TWAS Z computed from \code{twasWeights};
           MR computed from \code{fineMappingResult}.
   }

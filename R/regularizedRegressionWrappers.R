@@ -1645,7 +1645,7 @@ lassosumRss <- function(
     )
 }
 
-# Stamp the method-specific selection attribute onto the chosen coefficient
+# Attach the method-specific selection attribute to the chosen coefficient
 # vector.
 # @noRd
 .rssFinalize <- function(method, bestBeta, sel, meta, config) {
@@ -2461,7 +2461,7 @@ dprVbWeights <- function(X, y, nK = 8, retainFit = FALSE, ...) {
 #' n <- 50
 #' p <- 8
 #' X <- matrix(rnorm(n * p), n, p)
-#' colnames(X) <- paste0("v", 1:p)
+#' colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:p))
 #' y <- X[, 1] * 0.5 + rnorm(n)
 #' dprGibbsWeights(X, y, sStep = 500)
 #' @export
@@ -2482,7 +2482,7 @@ dprGibbsWeights <- function(X, y, sStep = 5000, retainFit = FALSE, ...) {
 #' n <- 50
 #' p <- 8
 #' X <- matrix(rnorm(n * p), n, p)
-#' colnames(X) <- paste0("v", 1:p)
+#' colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:p))
 #' y <- X[, 1] * 0.5 + rnorm(n)
 #' dprAdaptiveGibbsWeights(X, y)
 #' @export

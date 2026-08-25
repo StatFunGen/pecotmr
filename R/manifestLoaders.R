@@ -197,8 +197,9 @@ NULL
     if (is.null(spec)) {
         return(NULL)
     }
-    if (methods::is(spec, "GenotypeHandle")) {
-        return(spec)
+    open <- .openGenotypeHandle(spec)
+    if (!is.null(open)) {
+        return(open)
     }
     if (is.character(spec) && !is.null(names(spec))) {
         return(GenotypeHandle(genoMeta = spec, chroms = chroms))
@@ -219,21 +220,23 @@ NULL
         return(GenotypeHandle(genoMeta = spec, chroms = chroms))
     }
     msg <- glue(
-        "`ldSketch` must be a GenotypeHandle, a genotype path/prefix, or a ",
+        "`ldSketch` must be a genotype panel, a genotype path/prefix, or a ",
         "genoMeta spec (named chrom->path vector or meta-file path)."
     )
     abort(msg)
 }
 
 # Resolve the LD sketch SPEC from the (argument, ldSketchPath column) pair,
-# without reading any genotype metadata yet. Returns a prebuilt GenotypeHandle
-# (when the caller passed one), or the reconciled spec (a path/prefix or a
+# without reading any genotype metadata yet. Returns the handle behind an
+# already-open panel (when the caller passed one), or the reconciled spec
+# (a path/prefix or a
 # genoMeta path/named-vector) for later materialisation. Deferring the read to
 # `.materializeLdSketch` lets the loader first learn which chromosomes the
 # summary statistics cover and skip the panel's other per-chromosome shards.
 .resolveLdSketchInput <- function(df, ldSketch, base) {
-    if (methods::is(ldSketch, "GenotypeHandle")) {
-        return(ldSketch)
+    open <- .openGenotypeHandle(ldSketch)
+    if (!is.null(open)) {
+        return(open)
     }
     colSpec <- NULL
     # is_in guard, not `!is.null(df$ldSketchPath)`: on a tibble `$` for an
@@ -281,8 +284,9 @@ NULL
     if (is.null(spec)) {
         return(NULL)
     }
-    if (methods::is(spec, "GenotypeHandle")) {
-        return(spec)
+    open <- .openGenotypeHandle(spec)
+    if (!is.null(open)) {
+        return(open)
     }
     .resolveLdSketch(spec, chroms = chroms)
 }
@@ -305,10 +309,11 @@ NULL
 # Canonical chromosomes present in an LD sketch: for a sharded handle these are
 # the chromPaths names; for a single-file handle the unique snpInfo chromosomes.
 .ldSketchChroms <- function(ldSketch) {
-    if (length(ldSketch@chromPaths) > 0L) {
-        canonChrom(names(ldSketch@chromPaths))
+    handle <- .ldSketchHandle(ldSketch)
+    if (length(getChromPaths(handle)) > 0L) {
+        canonChrom(names(getChromPaths(handle)))
     } else {
-        unique(canonChrom(as.character(ldSketch@snpInfo$CHR)))
+        unique(canonChrom(as.character(.ldSketchSnpInfo(ldSketch)$CHR)))
     }
 }
 
@@ -322,7 +327,7 @@ NULL
         return(invisible(NULL))
     }
     reqChrom <- .ldContainmentCheckChroms(entryGr, ldSketch, label)
-    snpInfo <- ldSketch@snpInfo
+    snpInfo <- .ldSketchSnpInfo(ldSketch)
     if (is.null(snpInfo) || nrow(snpInfo) == 0L) {
         msg <- glue(
             "{label}: LD sketch carries no variant metadata; ",
@@ -516,6 +521,14 @@ NULL
     BETA = c("beta", "BETA"),
     SE = c("se", "SE"),
     P = c("p", "P", "pvalue", "pval"),
+    # AF: the DIRECTIONAL effect-allele frequency, exported as top_loci$af.
+    # Declared only via an explicit `af`/`AF` mapping key, or a source column
+    # literally named `af`. A column named effect_allele_frequency is NOT
+    # auto-trusted as directional -- it must be mapped `af: <col>`.
+    AF = c("af"),
+    # MAF: a DIRECTIONLESS minor-allele frequency, QC only, never exported as
+    # af. effect_allele_frequency stays here so an unmapped such column is
+    # still used for filtering without being read as directional.
     MAF = c("maf", "MAF", "effect_allele_frequency"),
     INFO = c("info", "INFO")
 )
@@ -536,6 +549,9 @@ NULL
     BETA = c("beta", "BETA"),
     SE = c("se", "SE"),
     P = c("p", "P", "pvalue"),
+    # `af:` (directional effect-allele frequency) vs `maf:` (directionless,
+    # QC only). A study may declare either, both, or neither.
+    AF = c("af", "AF"),
     MAF = c("maf", "MAF", "effect_allele_frequency"),
     INFO = c("info", "INFO")
 )
@@ -587,7 +603,13 @@ NULL
 # column
 # aliases; NA when unresolved.
 # @noRd
-.resolveSumstatKey <- function(key, df, mapping, label) {
+.resolveSumstatKey <- function(
+    key,
+    df,
+    mapping,
+    label,
+    claimed = character()
+) {
     # Look the field up in the mapping under any accepted standard-key spelling
     # (`z`/`Z`, `n_sample`/`N`, ...). `intersect` avoids the "subscript out of
     # bounds" a named character vector throws for an absent `[[` key.
@@ -605,7 +627,12 @@ NULL
             return(src)
         }
     }
-    intersect(.sumstatColumnAliases[[key]], names(df))[1L]
+    # Auto-detect never steals a source column another key explicitly claimed,
+    # so `af: effect_allele_frequency` is not ALSO auto-read as MAF.
+    intersect(
+        .sumstatColumnAliases[[key]],
+        setdiff(names(df), claimed)
+    )[1L]
 }
 
 # Standardise the columns of a raw sumstats data.frame into the canonical
@@ -726,13 +753,44 @@ NULL
         out$N_CASE <- as.numeric(df[[n$ncaseSrc]])
         out$N_CONTROL <- as.numeric(df[[n$ncontrolSrc]])
     }
-    for (key in c("BETA", "SE", "P", "MAF", "INFO")) {
-        src <- .resolveSumstatKey(key, df, mapping, label)
+    # `claimed` = the source columns named by explicit mappings, so an
+    # auto-detected key never re-reads a column another key already claimed.
+    claimed <- if (is.null(mapping)) {
+        character()
+    } else {
+        unname(as.character(mapping))
+    }
+    afSrc <- .resolveSumstatKey("AF", df, mapping, label, claimed)
+    for (key in c("BETA", "SE", "P", "AF", "MAF", "INFO")) {
+        src <- .resolveSumstatKey(key, df, mapping, label, claimed)
         if (!is.na(src) && !is.null(src)) {
             out[[key]] <- as.numeric(df[[src]])
         }
     }
+    .warnAfProvenance(out, afSrc, label)
     out
+}
+
+# An exported af of NA must never be silent, and the two ways to get one are
+# different problems: the study never declared a directional frequency, or it
+# declared one whose values are unusable.
+# @noRd
+.warnAfProvenance <- function(out, afSrc, label) {
+    if (is.na(afSrc) || is.null(afSrc)) {
+        warn(glue(
+            "{label}: no effect-allele frequency declared (map ",
+            "`af: <col>` to export a directional af); top_loci$af will be ",
+            "NA. A directionless `maf`/`FRQ` is used for QC only, never as af."
+        ))
+        return(invisible(NULL))
+    }
+    if (all(is.na(out$AF))) {
+        warn(glue(
+            "{label}: effect-allele frequency `af` was declared but its ",
+            "values are all missing/unusable; top_loci$af will be NA."
+        ))
+    }
+    invisible(NULL)
 }
 
 # Default GWAS-VCF FORMAT tag mapping (canonical stat -> FORMAT field).
@@ -1182,12 +1240,13 @@ NULL
     .buildContextSe(.resolveRel(pths[[1L]], base), covPath, transposeCov)
 }
 
-# The genotype handle: an override handle/path, else the study's single
+# The genotype handle: an override panel/path, else the study's single
 # genotypePath (auto-detecting the format).
 # @noRd
 .resolveGenoHandle <- function(rows, study, base, genotypesOverride) {
-    if (methods::is(genotypesOverride, "GenotypeHandle")) {
-        return(genotypesOverride)
+    open <- .openGenotypeHandle(genotypesOverride)
+    if (!is.null(open)) {
+        return(open)
     }
     spec <- if (is.character(genotypesOverride)) {
         genotypesOverride
@@ -1252,8 +1311,8 @@ NULL
 #'   single-valued \code{study} / \code{genotypePath} /
 #'   \code{genotypeCovariatePath}.
 #' @param study Study identifier; reconciled with a \code{study} column.
-#' @param genotypes A \code{\link{GenotypeHandle}} or a genotype path/prefix;
-#'   reconciled with a \code{genotypePath} column.
+#' @param genotypes A genotype panel (see \code{\link{readGenotypes}}) or
+#'   a genotype path/prefix; reconciled with a \code{genotypePath} column.
 #' @param genotypeCovariates A numeric matrix (samples x covariates) or a path
 #'   to a covariate TSV; reconciled with a \code{genotypeCovariatePath} column.
 #' @param scaleResiduals,mafCutoff,macCutoff,xvarCutoff Pass-through
@@ -1392,7 +1451,7 @@ loadQtlDatasetFromManifest <- function(
 #'   its sumstats file need not carry a per-variant \code{N} column;
 #'   \code{\link{summaryStatsQc}} fills \code{N} from the scalar.
 #' @param genome Genome build; reconciled with a \code{genome} column.
-#' @param ldSketch A \code{\link{GenotypeHandle}} or a spec
+#' @param ldSketch A genotype panel (see \code{\link{readGenotypes}}) or a spec
 #'   (path/prefix/genoMeta); reconciled with an \code{ldSketchPath} column.
 #' @param region Optional \code{chr:start-end} string, GRanges, or one-row
 #'   data.frame restricting the variants read (honoured only for tabix-indexed
@@ -1405,6 +1464,11 @@ loadQtlDatasetFromManifest <- function(
 #' @param sampleSelect Optional GWAS-VCF FORMAT sample (study) column to read.
 #' @param formatMapping Optional GWAS-VCF FORMAT tag mapping (canonical stat ->
 #'   FORMAT field), overriding ES/SE/LP/SS/EAF defaults.
+#' @param ldBlocks Optional LD-block specification (an \code{LdBlocks}, a
+#'   \code{GRanges}, a data.frame with \code{chrom}/\code{start}/\code{end},
+#'   or a path to such a table). Without it a genome-wide file splits into one
+#'   element per chromosome; with it, into one element per LD block, which is
+#'   the granularity \code{\link{assembleCtwasInputs}} needs.
 #' @return A \code{GwasSumStats} object.
 #' @examples
 #' gwasTsv <- system.file("extdata", "manifests",
@@ -1423,7 +1487,8 @@ loadGwasSumStatsFromManifest <- function(
     minLdOverlapWarn = 0.5,
     columnMapping = NULL,
     sampleSelect = NULL,
-    formatMapping = NULL
+    formatMapping = NULL,
+    ldBlocks = NULL
 ) {
     base <- .manifestBase(manifest)
     df <- .canonManifestCols(
@@ -1455,6 +1520,10 @@ loadGwasSumStatsFromManifest <- function(
     .checkGwasLdContainment(ldSketch, entries, df, minLdOverlapWarn)
     ldSketch <- .subsetSketchToRange(ldSketch, entries)
     gwasArgs <- .gwasSumStatsArgs(df, entries, genome, ldSketch, ns)
+    # Without a block manifest a genome-wide file splits by chromosome, which
+    # is too coarse for cTWAS; with one, each study becomes one element per LD
+    # block. The constructor does the splitting either way.
+    gwasArgs$ldBlocks <- ldBlocks
     exec(GwasSumStats, !!!gwasArgs)
 }
 
@@ -1597,8 +1666,8 @@ loadGwasSumStatsFromManifest <- function(
 #'   GWAS loader, there are no \code{nCase}/\code{nControl} columns: molecular
 #'   QTL traits are quantitative.)
 #' @param genome Genome build; reconciled with a \code{genome} column.
-#' @param ldSketch A \code{\link{GenotypeHandle}} or spec; reconciled with an
-#'   \code{ldSketchPath} column.
+#' @param ldSketch A genotype panel (see \code{\link{readGenotypes}}) or spec;
+#'   reconciled with an \code{ldSketchPath} column.
 #' @param region,minLdOverlapWarn,columnMapping,sampleSelect,formatMapping As
 #'   for \code{\link{loadGwasSumStatsFromManifest}}.
 #' @return A \code{QtlSumStats} object.

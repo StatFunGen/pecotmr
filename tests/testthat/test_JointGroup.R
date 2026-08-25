@@ -13,7 +13,12 @@
 }
 
 test_that("JointGroup subclasses construct from a conditions table", {
-    X <- matrix(0, 10, 2, dimnames = list(paste0("s", 1:10), c("v1", "v2")))
+    X <- matrix(
+        0,
+        10,
+        2,
+        dimnames = list(paste0("s", 1:10), c("chr1:100:A:G", "chr1:200:A:G"))
+    )
     Y <- matrix(0, 10, 2, dimnames = list(paste0("s", 1:10), c("c1", "c2")))
     g <- new("IndividualJointGroup", conditions = .jg_cond(), X = X, Y = Y)
     expect_s4_class(g, "JointGroup")
@@ -34,7 +39,12 @@ test_that("JointGroup subclasses construct from a conditions table", {
 })
 
 test_that("JointGroup validity rejects malformed groups", {
-    X <- matrix(0, 10, 2, dimnames = list(paste0("s", 1:10), c("v1", "v2")))
+    X <- matrix(
+        0,
+        10,
+        2,
+        dimnames = list(paste0("s", 1:10), c("chr1:100:A:G", "chr1:200:A:G"))
+    )
     Y <- matrix(0, 10, 2, dimnames = list(paste0("s", 1:10), c("c1", "c2")))
     # 1 condition is valid (the univariate cell); 0 conditions is not.
     expect_s4_class(

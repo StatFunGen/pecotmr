@@ -63,7 +63,7 @@ make_test_finemapping_result <- function(n = 5) {
         method = rep("susie", n),
         stringsAsFactors = FALSE
     )
-    entry <- FineMappingEntry(
+    entry <- fineMappingRow(
         variantIds = tl$variant_id,
         susieFit = list(),
         topLoci = tl
@@ -167,7 +167,7 @@ test_that("writeSumstatsVcf writes FineMappingResult to BCF", {
             tmp_bgz <- paste0(tmp_stem, ".bgz")
             gr <- GenomicRanges::GRanges(
                 "chr1",
-                IRanges::IRanges(start = 100, width = 1, names = "v1")
+                IRanges::IRanges(start = 100, width = 1, names = "chr1:100:A:G")
             )
             hdr <- VariantAnnotation::VCFHeader(
                 header = IRanges::DataFrameList(
@@ -235,7 +235,7 @@ test_that("writeSumstatsVcf errors on empty FineMappingResult", {
         posterior_sd = numeric(0),
         stringsAsFactors = FALSE
     )
-    entry <- FineMappingEntry(
+    entry <- fineMappingRow(
         variantIds = character(0),
         susieFit = list(),
         topLoci = empty_tl
@@ -279,7 +279,7 @@ test_that("writeSumstatsVcf errors on empty FineMappingResult", {
             cs_95 = paste0("susie_", c(1L, 1L, 0L)),
             stringsAsFactors = FALSE
         )
-        FineMappingEntry(variantIds = ids, susieFit = list(), topLoci = tl)
+        fineMappingRow(variantIds = ids, susieFit = list(), topLoci = tl)
     })
     QtlFineMappingResult(
         study = rep("study1", 2),
@@ -556,7 +556,7 @@ test_that("writeSumstatsVcf(FineMappingResult): emits AF from the topLoci `af` c
         cs_95 = paste0("susie_", c(1L, 0L, 2L)),
         stringsAsFactors = FALSE
     )
-    entry <- FineMappingEntry(
+    entry <- fineMappingRow(
         variantIds = tl$variant_id,
         susieFit = list(),
         topLoci = tl
@@ -603,7 +603,7 @@ test_that("writeSumstatsVcf(FineMappingResult): emits LBF / LFSR / PUR / fullFit
         cs_effect_susie_1 = c(0.4, NA, NA),
         stringsAsFactors = FALSE
     )
-    entry <- FineMappingEntry(
+    entry <- fineMappingRow(
         variantIds = tl$variant_id,
         susieFit = list(),
         topLoci = tl

@@ -64,7 +64,7 @@ genome of GWAS PIPs and the full collection of QTL fits at once.
 \itemize{
   \item \code{gwasFineMappingResult}: a genome-wide
     \code{\link{GwasFineMappingResult}} (one row per (study, LD
-    block) tuple). Each entry's \code{FineMappingEntry$trimmedFit}
+    block) tuple). Each entry's \code{FineMappingRow$trimmedFit}
     must carry a \code{pip} vector.
   \item \code{qtlFineMappingResult}: the genome-wide
     \code{\link{QtlFineMappingResult}}. Each entry's

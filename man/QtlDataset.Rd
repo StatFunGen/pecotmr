@@ -22,14 +22,16 @@ QtlDataset(
 \arguments{
 \item{study}{Character (length 1). Study identifier.}
 
-\item{genotypes}{A \code{GenotypeHandle}.}
+\item{genotypes}{A genotype panel (see \code{\link{readGenotypes}}).}
 
 \item{phenotypes}{Named list of \code{SummarizedExperiment} objects, keyed by
 context. Each SE must have \code{rowRanges} carrying trait positions and
-\code{colData} carrying per-context phenotype covariates.}
+\code{colData} carrying per-context phenotype covariates. The name
+\code{"genotype"} is reserved.}
 
 \item{genotypeCovariates}{Numeric matrix of genotype-derived covariates
-(e.g., ancestry PCs); rows are samples.}
+(e.g., ancestry PCs); rows are samples. Becomes the \code{colData} of the
+genotype experiment.}
 
 \item{scaleResiduals}{Logical (length 1). Default \code{TRUE}.}
 
@@ -51,10 +53,10 @@ extraction time. Default 0 (no filter).}
 threshold; samples with a missing-genotype rate above this are dropped at
 extraction time. Default 0 (no filter).}
 
-\item{keepSamples}{Character vector of sample identifiers to retain prior to
-per-block QC; intersected with the genotype handle's \code{sampleIds} and
-the \code{samples} argument of \code{getGenotypes()}. Length 0 means no
-restriction.}
+\item{keepSamples}{Character vector of sample identifiers to retain. The
+dataset is subset to them, narrowing \code{colData} and
+\code{sampleMap} together, so the sample set has one home rather than
+two. Length 0 means no restriction.}
 
 \item{keepVariants}{Character vector of variant identifiers to retain prior
 to per-block QC. Length 0 means no restriction.}
@@ -67,21 +69,28 @@ Default \code{TRUE} (keep all variants).}
 A \code{QtlDataset} object.
 }
 \description{
-Construct a \code{QtlDataset} S4 object containing one study's
-  individual-level QTL data: a genotype handle and a named list of
-  \code{SummarizedExperiment} objects (one per QTL context), plus
-  genotype-derived covariates and a residual-scaling flag.
+Construct a \code{QtlDataset}: one study's individual-level
+  QTL data as a \code{MultiAssayExperiment}. The genotype handle becomes a
+  \code{genotype} experiment whose dosage assay reads lazily through it,
+  and each named phenotype \code{SummarizedExperiment} becomes one
+  context experiment. The \code{sampleMap} is derived from the column
+  names actually present in each, so contexts observing different sample
+  subsets are recorded rather than assumed away.
 }
 \examples{
-gh <- new("GenotypeHandle", path = "toy.gds", format = "gds",
-  snpInfo = data.frame(SNP = paste0("rs", 1:3), CHR = "1",
-    BP = c(100L, 200L, 300L), A1 = "A", A2 = "G"),
-  nSamples = 6L, sampleIds = paste0("s", 1:6), pgenPtr = NULL)
-rng <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1000L, width = 500L))
+panel <- readGenotypes(
+  system.file("extdata", "toy_ref.bed", package = "pecotmr")
+)
+rng <- GenomicRanges::GRanges(
+  "chr22", IRanges::IRanges(14600000L, width = 1000L)
+)
 names(rng) <- "ENSG1"
 se <- SummarizedExperiment::SummarizedExperiment(
-  assays = list(expression = matrix(rnorm(6), 1, 6,
-    dimnames = list("ENSG1", paste0("s", 1:6)))), rowRanges = rng)
-QtlDataset(study = "s1", genotypes = gh, phenotypes = list(brain = se),
-  genotypeCovariates = matrix(0, 6, 0))
+  assays = list(expression = matrix(
+    rnorm(ncol(panel)), 1,
+    dimnames = list("ENSG1", colnames(panel))
+  )),
+  rowRanges = rng
+)
+QtlDataset(study = "s1", genotypes = panel, phenotypes = list(brain = se))
 }

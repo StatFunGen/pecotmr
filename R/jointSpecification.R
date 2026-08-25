@@ -14,7 +14,7 @@
 # @noRd
 .spListStudies <- function(data) {
     if (is(data, "QtlDataset")) {
-        return(data@study)
+        return(getStudy(data))
     }
     if (is(data, "QtlSumStats")) {
         return(unique(as.character(data$study)))
@@ -39,8 +39,8 @@
 # @noRd
 .spStudyDataForm <- function(data, study) {
     if (is(data, "QtlDataset")) {
-        if (!identical(study, data@study)) {
-            dataStudy <- data@study
+        if (!identical(study, getStudy(data))) {
+            dataStudy <- getStudy(data)
             msg <- glue(
                 ".spStudyDataForm: study '{study}' not in QtlDataset ",
                 "(study='{dataStudy}')"
@@ -79,10 +79,10 @@
 # @noRd
 .spListContexts <- function(data, study = NULL) {
     if (is(data, "QtlDataset")) {
-        if (!is.null(study) && !identical(study, data@study)) {
+        if (!is.null(study) && !identical(study, getStudy(data))) {
             return(character(0))
         }
-        return(names(data@phenotypes))
+        return(getContexts(data))
     }
     if (is(data, "QtlSumStats")) {
         if (is.null(study)) {
@@ -98,7 +98,7 @@
         if (is.null(study)) {
             out <- character(0)
             for (qd in indDatasets) {
-                out <- c(out, names(qd@phenotypes))
+                out <- c(out, getContexts(qd))
             }
             if (!is.null(ss)) {
                 out <- c(out, unique(as.character(ss$context)))
@@ -106,7 +106,7 @@
             return(unique(out))
         }
         if (is_in(study, names(indDatasets))) {
-            return(names(indDatasets[[study]]@phenotypes))
+            return(getContexts(indDatasets[[study]]))
         }
         if (!is.null(ss) && is_in(study, unique(as.character(ss$study)))) {
             return(unique(as.character(
@@ -123,22 +123,32 @@
 # Return character vector of traits in `data` (filtered by study and/or
 # context when supplied).
 # @noRd
+# The trait ids present in one context of a QtlDataset.
+# @noRd
+.spTraitsInContext <- function(context, data) {
+    rownames(getPhenotypes(data, context))
+}
+
 # Traits available in a single individual-level QtlDataset (optionally scoped).
 .spListTraitsQtlDataset <- function(data, study, context) {
-    if (!is.null(study) && !identical(study, data@study)) {
+    if (!is.null(study) && !identical(study, getStudy(data))) {
         return(character(0))
     }
     if (is.null(context)) {
         return(unique(unlist(
-            map(data@phenotypes, rownames),
+            map(getContexts(data), .spTraitsInContext, data = data),
             use.names = FALSE
         )))
     }
-    se <- data@phenotypes[[context]]
-    if (is.null(se)) {
+    # Checked here rather than left to the accessor: `.spListTraits` answers
+    # "which traits are in this scope", and an absent context is an empty
+    # answer, not an error. The raw slot read this replaced returned NULL for
+    # an unknown context; getPhenotypes() rejects one, so the empty case has to
+    # be stated instead of falling out of a NULL.
+    if (!is_in(context, getContexts(data))) {
         return(character(0))
     }
-    rownames(se)
+    rownames(getPhenotypes(data, context))
 }
 
 # Traits across a MultiStudyQtlDataset (individual studies + sumstats).
@@ -987,17 +997,34 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # summaryStatsQc contract). Returns list(Z, nVec, variantIds).
 # `errorLabel` is woven into the SNP-order error to identify the caller.
 # @noRd
-.buildJointSumstatZMatrix <- function(data, tupleRows, colLabels, errorLabel) {
-    studyCol <- as.character(data$study)
-    contextCol <- as.character(data$context)
-    traitCol <- as.character(data$trait)
+.buildJointSumstatZMatrix <- function(
+    data,
+    tupleRows,
+    colLabels,
+    errorLabel,
+    ldSketch = NULL,
+    cutoffs = NULL
+) {
+    cols <- list(
+        study = as.character(data$study),
+        context = as.character(data$context),
+        trait = as.character(data$trait)
+    )
     firstDf <- getSumstatDf(
         data,
-        study = studyCol[[tupleRows[[1L]]]],
-        context = contextCol[[tupleRows[[1L]]]],
-        trait = traitCol[[tupleRows[[1L]]]],
+        study = cols$study[[tupleRows[[1L]]]],
+        context = cols$context[[tupleRows[[1L]]]],
+        trait = cols$trait[[tupleRows[[1L]]]],
         require = c("SNP", "Z", "N")
     )
+    # Every entry shares one SNP order (asserted below), so filtering the first
+    # entry's ids filters the group: Z is built against this vector and each
+    # entry is checked against it.
+    firstDf <- firstDf[
+        .panelKeepMask(firstDf$variant_id, ldSketch, cutoffs, errorLabel),
+        ,
+        drop = FALSE
+    ]
     variantIds <- firstDf$variant_id
     Z <- matrix(
         NA_real_,
@@ -1005,27 +1032,57 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         ncol = length(tupleRows),
         dimnames = list(variantIds, colLabels)
     )
+    filled <- .jointFillSumstatZ(
+        data,
+        tupleRows,
+        cols,
+        variantIds,
+        Z,
+        errorLabel
+    )
+    list(Z = filled$Z, nVec = filled$nVec, variantIds = variantIds)
+}
+
+# Read each tuple's z / N into the shared matrix. The fitters index z by
+# column position, so every entry must present the same SNPs in the same order.
+# @noRd
+.jointFillSumstatZ <- function(
+    data,
+    tupleRows,
+    cols,
+    variantIds,
+    Z,
+    errorLabel
+) {
     nVec <- numeric(length(tupleRows))
     for (kk in seq_along(tupleRows)) {
         i <- tupleRows[[kk]]
         d <- getSumstatDf(
             data,
-            study = studyCol[[i]],
-            context = contextCol[[i]],
-            trait = traitCol[[i]],
+            study = cols$study[[i]],
+            context = cols$context[[i]],
+            trait = cols$trait[[i]],
             require = c("SNP", "Z", "N")
         )
-        if (!identical(d$variant_id, variantIds)) {
-            msg <- glue(
-                "{errorLabel}: every entry in a joint group must share an ",
-                "identical SNP order after summaryStatsQc()."
-            )
-            abort(msg)
-        }
+        # Narrowed to the same set before the order check, or that check fires
+        # on a length mismatch the panel filter itself created.
+        d <- d[is_in(d$variant_id, variantIds), , drop = FALSE]
+        .jointCheckSnpOrder(d$variant_id, variantIds, errorLabel)
         Z[, kk] <- d$z
         nVec[kk] <- stats::median(d$N, na.rm = TRUE)
     }
-    list(Z = Z, nVec = nVec, variantIds = variantIds)
+    list(Z = Z, nVec = nVec)
+}
+
+# @noRd
+.jointCheckSnpOrder <- function(got, want, errorLabel) {
+    if (identical(got, want)) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "{errorLabel}: every entry in a joint group must share an ",
+        "identical SNP order after summaryStatsQc()."
+    ))
 }
 
 
@@ -1437,14 +1494,15 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # traitPos). Spliced into the QtlFineMappingResult / TwasWeights constructors so
 # by-key / cross-study rebuilds preserve them.
 .jointCols <- function(df) {
-    # region / traitPos are GRanges provenance columns: carry them through
-    # uncoerced so by-key / cross-study rebuilds keep the fine-mapping window
-    # and trait position instead of silently dropping them.
+    # traitPos is a GRanges provenance column: carry it through uncoerced so
+    # by-key / cross-study rebuilds keep the trait position instead of silently
+    # dropping it. There is no `region` counterpart -- the fine-mapping window
+    # retired (section 4.4) because the element's own span is the region and a
+    # stored window had no correct update rule under subsetRegion().
     list(
         jointStudies = .jointStrCol("jointStudies", df),
         jointContexts = .jointStrCol("jointContexts", df),
         jointTraits = .jointStrCol("jointTraits", df),
-        region = .jointRawCol("region", df),
         traitPos = .jointRawCol("traitPos", df)
     )
 }
@@ -1501,7 +1559,7 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
             context = as.character(out$context),
             trait = as.character(out$trait),
             method = as.character(out$method),
-            entry = as.list(out$entry)
+            entry = .collectionEntries(out)
         ),
         .jointCols(out),
         list(ldSketch = embeddedLd)
@@ -1732,7 +1790,10 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     fineMappingResult = NULL,
     fullFit = FALSE,
     fullFitAlphaOnly = TRUE,
-    includeAllCs = FALSE
+    includeAllCs = FALSE,
+    mafCutoff = 0,
+    macCutoff = 0,
+    imissCutoff = 1
 ) {
     # Engine routing (jointEngine.R): the dispatch table + .runJointCell replace
     # the per-axis switch + the cross-context/trait/study/composed leaf
@@ -1751,7 +1812,12 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
             dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
             methodArgs = methodArgs,
             verbose = verbose,
-            cache = fineMappingResult
+            cache = fineMappingResult,
+            cutoffs = .panelCutoffs(list(
+                mafCutoff = mafCutoff,
+                macCutoff = macCutoff,
+                imissCutoff = imissCutoff
+            ))
         )
     )
 }
@@ -2051,7 +2117,10 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     dataType,
     verbose,
     retainFit = TRUE,
-    retainFitDetail = "slim"
+    retainFitDetail = "slim",
+    mafCutoff = 0,
+    macCutoff = 0,
+    imissCutoff = 1
 ) {
     # Engine routing (jointEngine.R).
     pipeline <- new(
@@ -2073,7 +2142,15 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         jointMethods = intersect(methods, "mrmash"),
         contexts = contexts,
         traitIds = traitIds,
-        args = list(methodArgs = list(), verbose = verbose)
+        args = list(
+            methodArgs = list(),
+            verbose = verbose,
+            cutoffs = .panelCutoffs(list(
+                mafCutoff = mafCutoff,
+                macCutoff = macCutoff,
+                imissCutoff = imissCutoff
+            ))
+        )
     )
 }
 
@@ -2250,7 +2327,10 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
 # @noRd
 .mergeEntryForKey <- function(r, key) {
     hit <- which(.mergeResultKeyOf(r) == key)
-    if (length(hit)) r$entry[[hit[[1L]]]] else NULL
+    if (!length(hit)) {
+        return(NULL)
+    }
+    .rowParts(r, hit[[1L]])
 }
 
 # The merged FM entry for base row `i`: gather that key's entry from every

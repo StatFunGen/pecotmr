@@ -141,3 +141,47 @@ setClass("JointPipeline", contains = "VIRTUAL", representation(config = "list"))
 
 setClass("FmJointPipeline", contains = "JointPipeline")
 setClass("TwasJointPipeline", contains = "JointPipeline")
+
+# ---- Internal accessors -----------------------------------------------------
+# These classes are engine internals -- none of them appear in NAMESPACE, and
+# none is useful to a user on its own -- so they get INTERNAL accessors rather
+# than exported `get*` generics. The point of the no-`@` rule is encapsulation:
+# keeping every slot read in the file that defines the layout is what buys
+# that, and exporting a `getMinGroup()` for a dispatch cell nobody can reach
+# would only enlarge the public API.
+
+# @noRd
+.jgConditions <- function(g) g@conditions
+
+# @noRd
+.jgX <- function(g) g@X
+
+# @noRd
+.jgY <- function(g) g@Y
+
+# @noRd
+.jgPos <- function(g) g@pos
+
+# @noRd
+.jgZ <- function(g) g@Z
+
+# @noRd
+.jgR <- function(g) g@R
+
+# @noRd
+.jgN <- function(g) g@N
+
+# @noRd
+.jcPattern <- function(cell) cell@pattern
+
+# @noRd
+.jcDataForm <- function(cell) cell@dataForm
+
+# @noRd
+.jcEnumerate <- function(cell) cell@enumerate
+
+# @noRd
+.jcMinGroup <- function(cell) cell@minGroup
+
+# @noRd
+.jpConfig <- function(pipeline) pipeline@config

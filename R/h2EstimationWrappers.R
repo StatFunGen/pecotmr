@@ -35,11 +35,11 @@ NULL
 #' @description For each LD block, find the SNP indices from a reference that
 #'   fall within the block boundaries.
 #' @param snpInfo A data.frame with columns CHR, BP.
-#' @param ldBlocks An \code{LdBlocks} object.
+#' @param ldBlocks A \code{GRanges} of LD block intervals.
 #' @return A list of integer vectors, one per block.
 #' @keywords internal
 snpsPerBlock <- function(snpInfo, ldBlocks) {
-    blocksGr <- getBlocks(ldBlocks)
+    blocksGr <- .asLdBlockRanges(ldBlocks)
     snpGr <- GRanges(
         seqnames = snpInfo$CHR,
         ranges = IRanges(start = snpInfo$BP, width = 1L)
@@ -465,8 +465,8 @@ NULL
         return(NULL)
     }
     baseline <- getBaseline(annotations)
-    if (ncol(getAnnotations(baseline)) > 0) {
-        getAnnotations(baseline)
+    if (ncol(assay(baseline, "annotations")) > 0) {
+        assay(baseline, "annotations")
     } else {
         NULL
     }
@@ -689,7 +689,7 @@ NULL
 # LDER candidate-annotation score statistics against the fitted baseline.
 .lderScoreStats <- function(eigenRef, annotations, design, fit, N) {
     candidate <- getCandidates(annotations)
-    candMat <- getAnnotations(candidate)
+    candMat <- assay(candidate, "annotations")
     nCand <- ncol(candMat)
     if (nCand == 0) {
         return(list(enrichment = NULL, scoreStats = NULL))
@@ -719,7 +719,7 @@ NULL
         keep = keepAll
     )
     R <- .lderScoreCor(ldCand, lam, w, resid, N, design$blockId, nCand)
-    .buildEnrichmentResult(getAnnotationMeta(candidate), scoreZ, R)
+    .buildEnrichmentResult(SummarizedExperiment::colData(candidate), scoreZ, R)
 }
 
 lderUnivariate <- function(
@@ -1060,7 +1060,7 @@ gldscUnivariate <- function(
         )
         abort(msg)
     }
-    M <- nrow(getSnpInfo(ldRef))
+    M <- length(ldRef)
     A <- .gldscAnnotMatrix(annotations, M)
     preps <- map(ldMatrixList, .gldscBlockPrep, z = z, A = A)
     rawNtau <- sum(unlist(map(preps, "y"))) /
@@ -1080,14 +1080,14 @@ gldscUnivariate <- function(
     enrichmentDf <- NULL
     scoreStats <- NULL
     if (!is.null(baselineMat)) {
-        nm <- getAnnotationMeta(getBaseline(annotations))$name
+        nm <- SummarizedExperiment::colData(getBaseline(annotations))$name
         enrichmentDf <- .gldscEnrichmentDf(fit, jk, baselineMat, nm, M)
     }
     if (!is.null(annotations)) {
-        candMat <- getAnnotations(getCandidates(annotations))
+        candMat <- assay(getCandidates(annotations), "annotations")
         sc <- .gldscScoreStats(preps, candMat, rawNtau, fit$coef)
         if (!is.null(sc)) {
-            cn <- getAnnotationMeta(getCandidates(annotations))$name
+            cn <- SummarizedExperiment::colData(getCandidates(annotations))$name
             scoreStats <- list(z = sc$scoreZ, R = sc$R, annotationNames = cn)
         }
     }
@@ -1339,7 +1339,7 @@ NULL
 # sHDL candidate-annotation score statistics + jackknife score correlation.
 .shdlStratified <- function(eigenRef, annotations, design, lamh2) {
     candidate <- getCandidates(annotations)
-    candMat <- getAnnotations(candidate)
+    candMat <- assay(candidate, "annotations")
     nCand <- ncol(candMat)
     if (nCand == 0) {
         return(list(enrichment = NULL, scoreStats = NULL))
@@ -1366,7 +1366,7 @@ NULL
         keep = keepAll
     )
     R <- .shdlScoreCor(ldCand, M_c, design, lamh2, scoreResid, nRef, nCand)
-    .buildEnrichmentResult(getAnnotationMeta(candidate), scoreZ, R)
+    .buildEnrichmentResult(SummarizedExperiment::colData(candidate), scoreZ, R)
 }
 
 # Jackknife (leave-one-block-out) correlation of the candidate score z's.
@@ -1406,7 +1406,7 @@ hdlUnivariate <- function(
     lambda = 0
 ) {
     eigenList <- getEigenList(eigenRef)
-    M <- nrow(getSnpInfo(eigenRef))
+    M <- length(eigenRef)
     nRef <- getNRef(eigenRef)
     baselineMat <- .h2BaselineMat(annotations)
     blockData <- map(
@@ -1583,7 +1583,7 @@ setMethod(
 # Base + annotation-stratified LD scores. Stratified column a:
 # l2_a[j] = sum_i (V[j,i] d[i])^2 * (sum_k V[k,i]^2 annot[k,a]).
 .computeLdScoresStratified <- function(eigenList, annotations, nSnps) {
-    annotMat <- getAnnotations(annotations)
+    annotMat <- assay(annotations, "annotations")
     nAnnot <- ncol(annotMat)
     l2Strat <- matrix(0, nrow = nSnps, ncol = 1 + nAnnot)
     for (b in seq_along(eigenList)) {
@@ -1597,7 +1597,8 @@ setMethod(
             l2Strat[idx, 1 + a] <- as.vector(Vd2 %*% annotWeights)
         }
     }
-    colnames(l2Strat) <- c("base_l2", getAnnotationMeta(annotations)$name)
+    annotNames <- SummarizedExperiment::colData(annotations)$name
+    colnames(l2Strat) <- c("base_l2", annotNames)
     l2Strat
 }
 
@@ -1609,7 +1610,7 @@ setMethod(
     function(ldRef, annotations = NULL, ...) {
         # Reconstruct LD scores from eigendecompositions
         # l2[j] = sum_k r^2_{jk} = sum_b sum_{eigenvalues in b} V[j,.]^2 * d
-        nSnps <- nrow(getSnpInfo(ldRef))
+        nSnps <- length(ldRef)
         eigenList <- getEigenList(ldRef)
         if (is.null(annotations)) {
             return(.computeLdScoresBase(eigenList, nSnps))
@@ -1639,8 +1640,8 @@ setMethod(
             abort(msg)
         }
 
-        nSnps <- nrow(getSnpInfo(ldRef))
-        annotMat <- getAnnotations(annotations)
+        nSnps <- length(ldRef)
+        annotMat <- assay(annotations, "annotations")
         nAnnot <- ncol(annotMat)
 
         # Base L2 + annotation-stratified columns
@@ -1658,7 +1659,8 @@ setMethod(
             }
         }
 
-        colNames <- c("base_l2", getAnnotationMeta(annotations)$name)
+        annotNames <- SummarizedExperiment::colData(annotations)$name
+        colNames <- c("base_l2", annotNames)
         colnames(l2Strat) <- colNames
         l2Strat
     }
@@ -1743,19 +1745,40 @@ h2EstimateToSldscTrait <- function(h2Est) {
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------
 
 # The genome build of one supported h2 input object; errors on an unknown type.
+#
+# LD blocks are a plain GRanges, which carries the build in seqinfo() rather
+# than in a slot of its own -- that redundancy is why the LdBlocks wrapper
+# went away.
 # @noRd
 .h2GenomeOfObject <- function(x) {
+    if (methods::is(x, "GenomicRanges")) {
+        return(.h2GenomeOfRanges(x))
+    }
     if (
         is(x, "GwasSumStats") ||
             is(x, "QtlSumStats") ||
             is(x, "LdStatistic") ||
-            is(x, "AnnotationMatrix") ||
-            is(x, "LdBlocks")
+            is(x, "AnnotationMatrix")
     ) {
         getGenome(x)
     } else {
         abort("Unknown object type for genome build check")
     }
+}
+
+# The single build named by a GRanges' seqinfo, or an error saying it carries
+# none -- silently returning NA would make a mismatch check pass by accident.
+# @noRd
+.h2GenomeOfRanges <- function(x) {
+    g <- unique(GenomeInfoDb::genome(x))
+    g <- g[!is.na(g)]
+    if (length(g) != 1L) {
+        abort(glue(
+            "genome build check: the GRanges names {length(g)} genome ",
+            "build(s) in seqinfo(); set one with genome(x) <- \"hg38\"."
+        ))
+    }
+    g
 }
 
 # crossprod of one eigen block's squared vectors against its

@@ -14,8 +14,7 @@ test_that("LdEigen constructs and validates correctly", {
         list(values = c(0.8), vectors = matrix(rnorm(10), 10, 1), snpIdx = 1:10)
     )
 
-    obj <- new(
-        "LdEigen",
+    obj <- LdEigen(
         ldBlocks = ldblocks,
         snpInfo = snp_info,
         nRef = 500L,
@@ -34,8 +33,7 @@ test_that("LdEigen rejects eigen_list length mismatch", {
     # Only 1 element in eigen_list
     expect_error(
         methods::validObject(
-            new(
-                "LdEigen",
+            LdEigen(
                 ldBlocks = ldblocks,
                 snpInfo = make_test_snp_info(),
                 nRef = 500L,
@@ -54,8 +52,7 @@ test_that("LdEigen rejects invalid eigenvalue_truncation", {
     ldblocks <- make_test_ldblocks()
     expect_error(
         methods::validObject(
-            new(
-                "LdEigen",
+            LdEigen(
                 ldBlocks = ldblocks,
                 snpInfo = make_test_snp_info(),
                 nRef = 500L,
@@ -67,4 +64,47 @@ test_that("LdEigen rejects invalid eigenvalue_truncation", {
         ),
         "eigenvalueTruncation"
     )
+})
+
+# show() smoke test, moved here from test_showMethods.R so the test
+# tree mirrors R/.
+test_that("show(LdEigen) does not error", {
+    eig <- LdEigen(
+        ldBlocks = make_test_ldblocks(),
+        snpInfo = make_test_snp_info(),
+        nRef = 500L,
+        inSample = FALSE,
+        genome = "hg19",
+        eigenList = list(list(), list()),
+        eigenvalueTruncation = 0.9
+    )
+    expect_output(show(eig), "LdEigen")
+})
+
+test_that("subsetting an LdEigen is refused, not silently allowed", {
+    # The guard exists because eigenList is per LD BLOCK while the ranges are
+    # per variant: narrowing the ranges would leave decompositions describing
+    # variants the object no longer carries.
+    obj <- LdEigen(
+        ldBlocks = make_test_ldblocks(),
+        snpInfo = make_test_snp_info(),
+        nRef = 500L,
+        inSample = FALSE,
+        genome = "hg19",
+        eigenList = list(
+            list(
+                values = c(1, 0.5),
+                vectors = matrix(rnorm(20), 10, 2),
+                snpIdx = 1:10
+            ),
+            list(
+                values = c(0.8),
+                vectors = matrix(rnorm(10), 10, 1),
+                snpIdx = 1:10
+            )
+        ),
+        eigenvalueTruncation = 0.9
+    )
+    expect_error(obj[1:5], "cannot be subset")
+    expect_error(obj[1], "Recompute over the subset")
 })

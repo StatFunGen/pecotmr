@@ -37,8 +37,9 @@ fewer than two tested conditions are dropped.
 }
 \examples{
 pm <- matrix(c(0.5, 0.3, -0.2), 1, 3,
-  dimnames = list("v1", c("a", "b", "c")))
-om <- matrix(c(0.1, 0.2, 0.3), 1, 3, dimnames = list("v1", c("a", "b", "c")))
+  dimnames = list("chr1:100:A:G", c("a", "b", "c")))
+om <- matrix(c(0.1, 0.2, 0.3), 1, 3,
+  dimnames = list("chr1:100:A:G", c("a", "b", "c")))
 pv <- array(diag(3) * 0.1, dim = c(3, 3, 1))
 dimnames(pv) <- list(c("a", "b", "c"), c("a", "b", "c"), NULL)
 mashPosteriorContrast(pm, pv, om)

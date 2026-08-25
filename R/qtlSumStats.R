@@ -40,21 +40,17 @@ setClass(
 # ldSketch must be a GenotypeHandle or NULL.
 # @noRd
 .qssCheckLdSketch <- function(object) {
-    if (
-        !is.null(object@ldSketch) &&
-            !methods::is(object@ldSketch, "GenotypeHandle")
-    ) {
-        return("'ldSketch' must be a GenotypeHandle or NULL")
-    }
+    # The slot's class union enforces the type; nothing to check.
     NULL
 }
 
-# The study/context/trait/entry columns must be present.
+# The study/context/trait metadata columns must be present. `names(object)` is
+# element names on a RangedTupleList, so the check reads mcols directly.
 # @noRd
 .qssCheckRequiredCols <- function(object) {
     missingCols <- setdiff(
-        c("study", "context", "trait", "entry"),
-        names(object)
+        c("study", "context", "trait"),
+        colnames(mcols(object))
     )
     if (length(missingCols) > 0L) {
         return(str_c("missing columns: ", str_flatten(missingCols, ", ")))
@@ -80,50 +76,19 @@ setClass(
     NULL
 }
 
-# Entry-column contract: length matches nrow, every element is a GRanges, and
-# the (study, context, trait) tuples are unique.
+# Element contract. The elements ARE GRanges by construction now -- the
+# container is a GRangesList -- and RangedTupleList's validity enforces the
+# one-seqname/one-strand invariant, so only tuple uniqueness is left to check.
 # @noRd
 .qssCheckEntries <- function(object) {
-    c(
-        .qssCheckEntryLength(object),
-        .qssCheckEntryTypes(object),
-        .qssCheckTupleUniqueness(object)
-    )
-}
-
-# length(entry) must equal nrow.
-# @noRd
-.qssCheckEntryLength <- function(object) {
-    if (length(object$entry) != nrow(object)) {
-        return("length(entry) must equal nrow(.) for QtlSumStats")
-    }
-    NULL
-}
-
-# Every `entry` element must be a GRanges.
-# @noRd
-.qssCheckEntryTypes <- function(object) {
-    allGr <- all(map_lgl(object$entry, methods::is, "GRanges"))
-    if (!allGr) {
-        return("every element of the `entry` column must be a GRanges")
-    }
-    NULL
+    .qssCheckTupleUniqueness(object)
 }
 
 # (study, context, trait) tuple uniqueness.
 # @noRd
 .qssCheckTupleUniqueness <- function(object) {
-    # Extract key columns directly rather than via `object[, keyCols]`: column-
-    # subsetting preserves the QtlSumStats class while dropping the required
-    # `entry` column, and older S4Vectors revalidates that intermediate,
-    # spuriously failing with "missing columns: entry".
-    keyCols <- c("study", "context", "trait")
-    keyTbl <- as_tibble(set_names(
-        map(keyCols, .qssColumn, object = object),
-        keyCols
-    ))
-    if (nrow(distinct(keyTbl)) < nrow(keyTbl)) {
-        return("(study, context, trait) tuple uniqueness violated")
+    if (.ssHasDuplicateKeys(object, c("study", "context", "trait"))) {
+        return("(study, context, trait, range) uniqueness violated")
     }
     NULL
 }
@@ -158,7 +123,8 @@ NULL
 #' @param genome Single character string giving the genome build (e.g.,
 #'   \code{"hg19"}, \code{"hg38"}). Uniform across the collection because all
 #'   entries share the same LD sketch.
-#' @param ldSketch A \code{GenotypeHandle} carrying the LD reference.
+#' @param ldSketch A genotype panel (see \code{\link{readGenotypes}})
+#'   carrying the LD reference.
 #' @param varY Optional numeric vector of per-tuple phenotype variances
 #'   (\code{NA_real_} entries allowed).
 #' @param nSample Optional per-tuple total sample size (numeric; default
@@ -178,13 +144,13 @@ NULL
 #'   \code{NULL} (default) omits the column.
 #' @return A \code{QtlSumStats} object.
 #' @examples
-#' gh <- readGenotypes(
+#' panel <- readGenotypes(
 #'   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
 #' gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100 * 1:3, width = 1))
 #' S4Vectors::mcols(gr) <- S4Vectors::DataFrame(SNP = paste0("rs", 1:3),
 #'   A1 = "A", A2 = "G", Z = rnorm(3), N = 100L)
 #' QtlSumStats(study = "s1", context = "brain", trait = "g1", entry = list(gr),
-#'   genome = "hg38", ldSketch = gh)
+#'   genome = "hg38", ldSketch = panel)
 #' @export
 QtlSumStats <- function(
     study,
@@ -214,21 +180,24 @@ QtlSumStats <- function(
     }
     n <- length(study)
     varY <- .qssValidateArgs(context, trait, entry, genome, varY, n)
-    cols <- .qssBaseCols(study, context, trait, entry, varY, traitPos, n)
+    entry <- .qssAddTraitDistances(entry, traitPos, n)
+    cols <- .qssBaseCols(study, context, trait, varY)
     cols <- .qssAppendNSample(cols, nSample, n)
     cols <- .appendTraitPosCol(cols, traitPos, n)
     cols <- .qssAppendExtras(cols, list(...))
     dfArgs <- c(cols, list(check.names = FALSE))
-    df <- exec(S4Vectors::DataFrame, !!!dfArgs)
-    obj <- methods::new(
-        "QtlSumStats",
-        df,
-        ldSketch = ldSketch,
-        genome = as.character(genome),
-        qcInfo = as.list(qcInfo)
-    )
-    methods::validObject(obj)
-    obj
+    # The per-tuple GRanges become the collection's ELEMENTS; the tuple keys
+    # and per-tuple scalars go in mcols. There is no `entry` column.
+    # mcols are attached to the GRangesList BEFORE new(), because new()
+    # validates during initialize() and the validity method needs the identity
+    # columns to already be there.
+    # A multi-seqname entry (e.g. a genome-wide GWAS) is split into one
+    # element per chromosome, with its metadata row replicated alongside.
+    split <- .rtlSplitBySeqname(entry)
+    grl <- GenomicRanges::GRangesList(split$entry)
+    md <- exec(S4Vectors::DataFrame, !!!dfArgs)
+    mcols(grl) <- md[split$fromIdx, , drop = FALSE]
+    .sumStatsNewValidated("QtlSumStats", grl, ldSketch, genome, qcInfo)
 }
 
 # Validate genome / entry / length consistency and recycle varY. Returns the
@@ -274,21 +243,28 @@ QtlSumStats <- function(
 # trait position when supplied; the authoritative shape check is in
 # .appendTraitPosCol).
 # @noRd
-.qssBaseCols <- function(study, context, trait, entry, varY, traitPos, n) {
-    if (
-        !is.null(traitPos) &&
-            methods::is(traitPos, "GRanges") &&
-            length(traitPos) == n
-    ) {
-        entry <- .appendTraitDistances(entry, traitPos)
-    }
+.qssBaseCols <- function(study, context, trait, varY) {
     list(
         study = as.character(study),
         context = as.character(context),
         trait = as.character(trait),
-        entry = S4Vectors::SimpleList(entry),
         varY = as.numeric(varY)
     )
+}
+
+# Add the per-variant distance-to-trait-position column to each element before
+# it becomes a collection element. Split out of .qssBaseCols because the
+# elements are no longer one of the metadata columns -- they are the container
+# itself.
+# @noRd
+.qssAddTraitDistances <- function(entry, traitPos, n) {
+    computable <- !is.null(traitPos) &&
+        methods::is(traitPos, "GRanges") &&
+        length(traitPos) == n
+    if (!computable) {
+        return(entry)
+    }
+    .appendTraitDistances(entry, traitPos)
 }
 
 # Attach the OPTIONAL per-tuple total-sample-size column (default NULL leaves
@@ -334,7 +310,9 @@ QtlSumStats <- function(
 # Accessors
 # =============================================================================
 
-# Internal: resolve a (study, context, trait) tuple to a single row index.
+# Internal: resolve a (study, context, trait) tuple to its element indices.
+# Returns a VECTOR: a tuple whose entry spanned several chromosomes was split
+# into one element per seqname at construction.
 .qtlSumStatsSelectRow <- function(x, study, context, trait) {
     if (nrow(x) == 0L) {
         abort("QtlSumStats has no rows.")
@@ -346,8 +324,8 @@ QtlSumStats <- function(
         missing(trait) ||
         is.null(trait)
     if (anyUnset) {
-        if (nrow(x) == 1L) {
-            return(1L)
+        if (.qssSingleTuple(x)) {
+            return(seq_len(nrow(x)))
         }
         msg <- glue(
             "This QtlSumStats has {nrow(x)} entries. Pass `study`, ",
@@ -361,7 +339,21 @@ QtlSumStats <- function(
     .qssMatchTuple(x, study, context, trait)
 }
 
-# Resolve the single row index for a (study, context, trait) tuple.
+# TRUE when every element belongs to the same (study, context, trait) tuple,
+# so an unqualified accessor call is unambiguous even across a seqname split.
+# @noRd
+.qssSingleTuple <- function(x) {
+    md <- mcols(x)
+    keys <- str_c(
+        as.character(md$study),
+        as.character(md$context),
+        as.character(md$trait),
+        sep = "|"
+    )
+    n_distinct(keys) == 1L
+}
+
+# Resolve the element indices for a (study, context, trait) tuple.
 # @noRd
 .qssMatchTuple <- function(x, study, context, trait) {
     idx <- .matchTupleRows(
@@ -375,16 +367,9 @@ QtlSumStats <- function(
         )
         abort(msg)
     }
-    if (length(idx) > 1L) {
-        # Unreachable: the class validity enforces (study, context, trait)
-        # uniqueness. nocov start
-        msg <- glue(
-            "Multiple entries match (study='{study}', context='{context}', ",
-            "trait='{trait}'); tuple uniqueness violation."
-        )
-        abort(msg)
-        # nocov end
-    }
+    # More than one match is expected, not a violation: uniqueness is keyed on
+    # (tuple, range), so a tuple split across chromosomes owns several
+    # elements. The caller stitches them.
     idx
 }
 
@@ -407,10 +392,11 @@ setMethod(
         context = NULL,
         trait = NULL,
         annotateSignificance = NULL,
+        ranges = NULL,
         ...
     ) {
         idx <- .qtlSumStatsSelectRow(x, study, context, trait)
-        gr <- x$entry[[idx]]
+        gr <- .ssStitchElements(x, idx, ranges)
         if (!is.null(annotateSignificance)) {
             m <- arg_match(
                 annotateSignificance,
@@ -463,32 +449,6 @@ setMethod(
     }
 )
 
-#' @rdname subsetChr
-#' @export
-setMethod("subsetChr", "QtlSumStats", function(x, chr) {
-    chrName <- withChrPrefix(chr)
-    newEntries <- map(
-        seq_len(nrow(x)),
-        .ssSubsetChrEntry,
-        x = x,
-        chrName = chrName
-    )
-    QtlSumStats(
-        study = as.character(x$study),
-        context = as.character(x$context),
-        trait = as.character(x$trait),
-        entry = newEntries,
-        genome = x@genome,
-        ldSketch = x@ldSketch,
-        varY = as.numeric(x$varY),
-        nSample = if (is_in("nSample", names(x))) {
-            as.numeric(x$nSample)
-        } else {
-            NULL
-        },
-        qcInfo = x@qcInfo
-    )
-})
 
 #' @rdname getVarY
 #' @export
@@ -527,7 +487,10 @@ setMethod("getTraitPosition", "QtlSumStats", function(x, traitId = NULL, ...) {
     if (length(idx) == 0L) {
         return(NA)
     }
-    tp[idx]
+    # The trait position is per-TUPLE, but a tuple split across chromosomes
+    # owns several elements and the column is replicated across them, so the
+    # matches collapse back to the one position.
+    unique(tp[idx])
 })
 
 # =============================================================================
@@ -554,7 +517,7 @@ setMethod("show", "QtlSumStats", function(object) {
     ldSrc <- if (is.null(ld)) {
         "none (LD-free)"
     } else {
-        glue("{getFormat(ld)} @ {getPath(ld)}")
+        .ldSketchLabel(ld)
     }
     cat(glue("  LD sketch: {ldSrc}\n", .trim = FALSE))
 })
@@ -564,9 +527,6 @@ setMethod("show", "QtlSumStats", function(object) {
 # Column `cn` of `object`, via `[[` (preserves the required `entry` column that
 # `object[, cn]` would drop).
 # @noRd
-.qssColumn <- function(cn, object) {
-    object[[cn]]
-}
 
 # Append tss_distance / tes_distance mcols to entry `i` from traitPos[i] (no-op
 # when the entry is empty or the trait position is unset). Existing distance
@@ -601,8 +561,3 @@ setMethod("show", "QtlSumStats", function(object) {
 # Entry `i` of a SumStats collection restricted to chromosome `chrName`. Shared
 # by the QtlSumStats and GwasSumStats subsetChr methods.
 # @noRd
-.ssSubsetChrEntry <- function(i, x, chrName) {
-    gr <- x$entry[[i]]
-    idx <- as.character(seqnames(gr)) == chrName
-    gr[idx]
-}

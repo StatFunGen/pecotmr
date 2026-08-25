@@ -1,11 +1,11 @@
 # =============================================================================
 # GwasFineMappingResult S4 class
 # -----------------------------------------------------------------------------
-# DFrame-subclass collection keyed by the identity tuple
-# (study, method, region_id). Each row holds a FineMappingEntry payload
+# Collection keyed by the identity tuple (study, method) plus the element's
+# own genomic RANGE. Each row holds a FineMappingRow payload
 # for one GWAS study at one fine-mapping method over one LD block.
 # Multiple rows per (study, method) are allowed when they differ on
-# region_id -- the genome-wide-across-blocks shape that
+# range -- the genome-wide-across-blocks shape that
 # qtlEnrichmentPipeline / colocPipeline expect when sweeping a study
 # across LD blocks. Class-level slots:
 #   * ldSketch   GenotypeHandle for the LD reference; required for the
@@ -17,6 +17,15 @@
 #' @include AllClasses.R tupleSelectors.R
 NULL
 
+#' @title GWAS Fine-Mapping Result Collection
+#' @description S4 collection of fine-mapping fits for one or more GWAS studies
+#'   on a single LD block. Keyed by the identity tuple \code{(study, method)};
+#'   each entry is a \code{FineMappingRow}.
+#'
+#' Required columns: \code{study}, \code{method}, \code{entry}. The 2-tuple is
+#' unique. The caller is expected to construct one \code{GwasFineMappingResult}
+#' per LD block (no in-class block indexing).
+#' @export
 setClass(
     "GwasFineMappingResult",
     contains = "FineMappingResultBase",
@@ -37,8 +46,8 @@ setClass(
 
 # @noRd
 .gfmrCheckRequiredCols <- function(object) {
-    required <- c("study", "method", "region_id", "entry")
-    missingCols <- setdiff(required, names(object))
+    required <- c("study", "method")
+    missingCols <- setdiff(required, .tupleColumnNames(object))
     if (length(missingCols) > 0L) {
         return(str_c("missing columns: ", str_flatten(missingCols, ", ")))
     }
@@ -49,8 +58,6 @@ setClass(
 .gfmrCheckEntries <- function(object) {
     c(
         .gfmrCheckEntryLength(object),
-        .gfmrCheckEntryTypes(object),
-        .validateRegionColumn(object),
         .validateTraitPosColumn(object),
         .gfmrCheckTupleUniqueness(object)
     )
@@ -58,107 +65,81 @@ setClass(
 
 # @noRd
 .gfmrCheckEntryLength <- function(object) {
-    if (length(object$entry) != nrow(object)) {
-        return("length(entry) must equal nrow(.) for GwasFineMappingResult")
+    # The variants and their topLoci ARE the elements now, so what is left to
+    # check is that the fit payload columns are present and parallel.
+    missingCols <- setdiff(
+        c("susieFit", "cvResult"),
+        .tupleColumnNames(object)
+    )
+    if (length(missingCols) > 0L) {
+        return(str_c(
+            "missing entry payload columns: ",
+            str_flatten(missingCols, ", ")
+        ))
     }
     NULL
 }
 
 # @noRd
-.gfmrCheckEntryTypes <- function(object) {
-    if (!all(map_lgl(object$entry, .gfmrIsEntry))) {
-        return("every element of the `entry` column must be a FineMappingEntry")
-    }
-    NULL
-}
 
 # @noRd
-.gfmrIsEntry <- function(e) {
-    methods::is(e, "FineMappingEntry")
-}
 
 # @noRd
 .gfmrCheckTupleUniqueness <- function(object) {
-    # Extract key columns directly rather than via `object[, keyCols]`: column-
-    # subsetting preserves the class while dropping the required `entry` column,
-    # and older S4Vectors revalidates that intermediate, spuriously failing.
-    keyCols <- c("study", "method", "region_id")
+    # Keyed on the element's RANGE rather than on a region_id label. The range
+    # is intrinsic -- it cannot drift out of step with the variants the way a
+    # stored label can, and it stays correct after subsetRegion() narrows an
+    # element. Extract key columns directly rather than via `object[, keyCols]`:
+    # column-subsetting preserves the class, and older S4Vectors revalidates
+    # that intermediate, spuriously failing.
+    if (length(object) == 0L) {
+        return(NULL)
+    }
+    keyCols <- c("study", "method")
     keyTbl <- as_tibble(set_names(
         map(keyCols, .gfmrColOf, object = object),
         keyCols
     ))
+    keyTbl$range <- .rtlRangeKeys(object)
     if (nrow(distinct(keyTbl)) < nrow(keyTbl)) {
-        return("(study, method, region_id) tuple uniqueness violated")
+        return("(study, method, range) tuple uniqueness violated")
     }
     NULL
 }
 
 # @noRd
 .gfmrColOf <- function(cn, object) {
-    object[[cn]]
+    .tupleColumn(object, cn)
 }
 
 # @noRd
 .gfmrCheckLdSketch <- function(object) {
-    if (
-        !is.null(object@ldSketch) &&
-            !methods::is(object@ldSketch, "GenotypeHandle")
-    ) {
-        return("'ldSketch' must be a GenotypeHandle or NULL")
-    }
+    # The slot's class union enforces the type; nothing to check.
     NULL
 }
 
-# =============================================================================
-# TWAS Weights
-# =============================================================================
-
-#' @title TWAS Weights Collection
-#' @description S4 collection of TWAS weights keyed by the identity tuple
-#'   \code{(study, context, trait, method)}. Each entry is a
-#'   \code{TwasWeightsEntry} carrying one method's weights for one
-#'   trait/context/study. Implements the \code{DFrame}-subclass collection
-#'   pattern.
-#'
-#' Required columns: \code{study}, \code{context}, \code{trait}, \code{method},
-#' \code{entry}. Each \code{entry} is a \code{TwasWeightsEntry}.
-#'
-#' Optional columns \code{jointStudies}, \code{jointContexts},
-#' \code{jointTraits} appear when the collection contains rows produced by a
-#' \code{jointSpecification}-driven joint fit. For such a row, the corresponding
-#' identity-tuple column carries the sentinel \code{"joint"} and the joint
-#' column lists the semicolon-joined members of the joined axis. For non-joint
-#' rows the joint columns are \code{NA_character_}. Tuple uniqueness is enforced
-#' jointly across the identity-tuple columns and any present joint columns.
-#' @slot ldSketch The LD reference \code{GenotypeHandle} the weights were
-#'   derived against, or \code{NULL} when the weights were learned from
-#'   individual-level data. Used downstream for cross-pipeline LD-sketch
-#'   identity validation.
-#' @export
 
 #' @title Create a GwasFineMappingResult Collection
-#' @description Construct a \code{GwasFineMappingResult} DFrame-subclass
-#'   collection from per-(study, method, region_id) tuples and a list of
-#'   \code{FineMappingEntry} payloads. The collection can represent either a
-#'   single LD block (one row per (study, method)) or a genome-wide sweep across
-#'   blocks (multiple rows per (study, method), each tagged with its own
-#'   region_id).
+#' @description Construct a \code{GwasFineMappingResult} collection from
+#'   per-(study, method) tuples and a list of \code{FineMappingRow}
+#'   payloads. The collection can represent either a single LD block (one row
+#'   per (study, method)) or a genome-wide sweep across blocks (multiple rows
+#'   per (study, method), each covering its own genomic range).
+#'
+#'   Rows are identified by (\code{study}, \code{method}) plus the element's
+#'   own range, which is derived from the variants rather than stored, so it
+#'   cannot drift out of step with them and stays correct after
+#'   \code{\link{subsetRegion}}.
 #' @param study Character vector of study identifiers (per tuple).
 #' @param method Character vector of fine-mapping method names (per tuple).
-#' @param entry List / \code{SimpleList} of \code{FineMappingEntry} objects.
-#' @param region_id Character vector of LD-block identifiers (per tuple). When
-#'   omitted (\code{NULL}), defaults to a per-row synthetic id
-#'   (\code{"region_1"}, \code{"region_2"}, ...) so the (\code{study},
-#'   \code{method}, \code{region_id}) triple is unique. Supplying meaningful
-#'   labels (e.g. \code{"chr22_10516173_17414263"}) is preferred for downstream
-#'   consumers that join on region.
-#' @param region Optional \code{GRanges} (length \code{length(study)}) genomic
-#'   anchor per row. When \code{NULL} (default) it is derived from
-#'   \code{region_id} (parsing \code{chr_start_end} / \code{chr:start-end}; a
-#'   0-width \code{chrUn} sentinel for ids that do not encode coordinates).
-#'   Carried forward as provenance (e.g. for cTWAS LD-block placement); not part
-#'   of the identity key.
-#' @param ldSketch An optional \code{GenotypeHandle}.
+#' @param entry List / \code{SimpleList} of \code{FineMappingRow} objects.
+#' @param blockId Optional character vector (per tuple) keying the external LD
+#'   block manifest, e.g. \code{"chr22_10516173_17414263"}. Provenance only,
+#'   not part of the identity key. Supply it when the block BOUNDARIES matter:
+#'   those are the one thing not recoverable from the variants, since adjacent
+#'   blocks' spans leave gaps.
+#' @param ldSketch An optional genotype panel (see
+#'   \code{\link{readGenotypes}}).
 #' @param traitPos Optional per-row trait genomic anchor (a \code{GRanges} or
 #'   \code{NULL}), carried forward as provenance; not part of the identity key.
 #'   \code{NULL} (default) omits the column.
@@ -166,7 +147,7 @@ setClass(
 #' @examples
 #' tl <- data.frame(variant_id = paste0("chr1:", 100 * 1:3, ":A:G"),
 #'   pip = c(0.9, 0.5, 0.1), cs = c(1L, 1L, NA))
-#' fe <- FineMappingEntry(
+#' fe <- fineMappingRow(
 #'   variantIds = tl$variant_id, susieFit = list(), topLoci = tl)
 #' GwasFineMappingResult(study = "t1", method = "susie", entry = list(fe))
 #' @export
@@ -174,8 +155,7 @@ GwasFineMappingResult <- function(
     study,
     method,
     entry,
-    region_id = NULL,
-    region = NULL,
+    blockId = NULL,
     traitPos = NULL,
     ldSketch = NULL
 ) {
@@ -183,62 +163,31 @@ GwasFineMappingResult <- function(
     if (length(method) != n || length(entry) != n) {
         abort("`study`, `method`, and `entry` must all have the same length.")
     }
-    if (is.null(region_id)) {
-        region_id <- str_c("region_", seq_len(n))
-    } else if (length(region_id) != n) {
-        msg <- glue(
-            "`region_id` must have the same length as `study` ",
-            "(got {length(region_id)} vs {n})."
-        )
-        abort(msg)
-    }
+    entry <- map(entry, .asFmRowPayload)
+    .checkRowPayloads(entry, "FineMappingRow", "fine-mapping")
     cols <- list(
         study = as.character(study),
         method = as.character(method),
-        region_id = as.character(region_id),
-        entry = S4Vectors::SimpleList(entry)
+        susieFit = S4Vectors::SimpleList(map(entry, getSusieFit)),
+        cvResult = S4Vectors::SimpleList(map(entry, getCvResult))
     )
-    if (is.null(region)) {
-        region <- .regionFromIds(region_id)
-    }
-    cols <- .appendRegionCol(cols, region, n)
+    cols <- .appendBlockIdCol(cols, blockId, n)
     cols <- .appendTraitPosCol(cols, traitPos, n)
     dfArgs <- c(cols, list(check.names = FALSE))
-    df <- exec(S4Vectors::DataFrame, !!!dfArgs)
-    obj <- new("GwasFineMappingResult", df, ldSketch = ldSketch)
+    # Each entry's variants become one ELEMENT, its topLoci that element's
+    # inner mcols, and its fit/cv payload outer mcols. A multi-seqname entry
+    # splits by chromosome with its metadata row replicated.
+    split <- .rtlSplitBySeqname(map(entry, rowVariants))
+    grl <- GenomicRanges::GRangesList(split$entry)
+    md <- exec(S4Vectors::DataFrame, !!!dfArgs)
+    mcols(grl) <- md[split$fromIdx, , drop = FALSE]
+    obj <- new(
+        "GwasFineMappingResult",
+        grl,
+        ldSketch = .asLdSketch(ldSketch)
+    )
     validObject(obj)
     obj
-}
-
-# Internal: parse region_id strings (chr_start_end / chr:start-end) into a
-# per-row GRanges, using the canonical `asGranges` parser; a 0-width chrUn
-# sentinel for ids (e.g. synthetic "region_1") that carry no coordinates.
-# Built from vectors so mixed seqlevels do not emit a seqinfo-merge warning.
-.regionFromIds <- function(ids) {
-    n <- length(ids)
-    chrom <- character(n)
-    start <- integer(n)
-    end <- integer(n)
-    for (i in seq_len(n)) {
-        g <- tryCatch(
-            asGranges(str_replace(
-                as.character(ids[[i]]),
-                "_([0-9]+)_([0-9]+)$",
-                ":\\1-\\2"
-            )),
-            error = function(e) NULL
-        )
-        if (!is.null(g) && length(g) >= 1L) {
-            chrom[[i]] <- as.character(GenomicRanges::seqnames(g))[[1L]]
-            start[[i]] <- GenomicRanges::start(g)[[1L]]
-            end[[i]] <- GenomicRanges::end(g)[[1L]]
-        } else {
-            chrom[[i]] <- "chrUn"
-            start[[i]] <- 1L
-            end[[i]] <- 0L
-        }
-    }
-    GenomicRanges::GRanges(chrom, IRanges::IRanges(start = start, end = end))
 }
 
 # Internal: return integer row indices of `x` where every (column, value)
@@ -257,7 +206,7 @@ setMethod("getContexts", "GwasFineMappingResult", function(x) NULL)
 #' @export
 setMethod("getTraits", "GwasFineMappingResult", function(x) NULL)
 
-# Per-tuple lookup keyed by (study, method, region_id). The generic
+# Per-tuple lookup keyed by (study, method, blockId). The generic
 # accepts the full set of selectors; context/trait args are ignored for
 # GwasFineMappingResult. `region` (passed via `...`) is the per-block
 # disambiguator for multi-block genome-wide collections.
@@ -267,8 +216,7 @@ setMethod(
     "getFineMappingResult",
     "GwasFineMappingResult",
     function(x, study = NULL, context = NULL, trait = NULL, method = NULL) {
-        idx <- .tupleSelectRowGwasFmr(x, study, method)
-        x$entry[[idx]]
+        x[.tupleSelectRowGwasFmr(x, study, method)]
     }
 )
 
@@ -288,7 +236,7 @@ setMethod(
         ...
     ) {
         idx <- .tupleSelectRowGwasFmr(x, study, method, region)
-        getPip(x$entry[[idx]])
+        .fmrRowPip(.fmrRowParts(x, idx))
     }
 )
 
@@ -307,7 +255,7 @@ setMethod(
         region = NULL,
         ...
     ) {
-        x$entry[[.tupleSelectRowGwasFmr(x, study, method, region)]]
+        .fmrRowParts(x, .tupleSelectRowGwasFmr(x, study, method, region))
     }
 )
 
@@ -326,7 +274,7 @@ setMethod("show", "GwasFineMappingResult", function(object) {
     ldSrc <- if (is.null(object@ldSketch)) {
         "NULL"
     } else {
-        glue("{object@ldSketch@format} @ {object@ldSketch@path}")
+        .ldSketchLabel(object@ldSketch)
     }
     cat(glue("  LD sketch: {ldSrc}\n", .trim = FALSE))
 })

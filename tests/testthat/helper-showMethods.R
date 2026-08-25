@@ -44,7 +44,7 @@ context("show methods")
     if (with_cs) {
         tl$cs_95 <- paste0("susie_", c(1L, 1L, 0L)[seq_len(n)])
     }
-    FineMappingEntry(
+    fineMappingRow(
         variantIds = tl$variant_id,
         susieFit = list(),
         topLoci = tl
@@ -52,8 +52,8 @@ context("show methods")
 }
 
 .sh_makeTwEntry <- function(p = 4, standardized = FALSE) {
-    TwasWeightsEntry(
-        variantIds = paste0("v", seq_len(p)),
+    twasWeightsRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (seq_len(p))),
         weights = rep(0.1, p),
         cvResult = list(rsq = 0.5),
         standardized = standardized

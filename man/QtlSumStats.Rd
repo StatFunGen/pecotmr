@@ -32,7 +32,8 @@ Same length as \code{study}, \code{context}, and \code{trait}.}
 \code{"hg19"}, \code{"hg38"}). Uniform across the collection because all
 entries share the same LD sketch.}
 
-\item{ldSketch}{A \code{GenotypeHandle} carrying the LD reference.}
+\item{ldSketch}{A genotype panel (see \code{\link{readGenotypes}})
+carrying the LD reference.}
 
 \item{varY}{Optional numeric vector of per-tuple phenotype variances
 (\code{NA_real_} entries allowed).}
@@ -69,11 +70,11 @@ Construct a \code{QtlSumStats} S4 DFrame-subclass collection
   \code{P}).
 }
 \examples{
-gh <- readGenotypes(
+panel <- readGenotypes(
   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
 gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100 * 1:3, width = 1))
 S4Vectors::mcols(gr) <- S4Vectors::DataFrame(SNP = paste0("rs", 1:3),
   A1 = "A", A2 = "G", Z = rnorm(3), N = 100L)
 QtlSumStats(study = "s1", context = "brain", trait = "g1", entry = list(gr),
-  genome = "hg38", ldSketch = gh)
+  genome = "hg38", ldSketch = panel)
 }

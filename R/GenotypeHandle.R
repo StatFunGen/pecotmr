@@ -30,7 +30,10 @@ NULL
 #'   (\code{character(0)}) for a single-file handle; non-empty marks a
 #'   one-file-per-chromosome (sharded) handle whose extraction is routed by
 #'   chromosome.
-#' @export
+#' @details Internal: the handle is the seed layer behind a genotype
+#'   panel. Public code obtains a panel from \code{readGenotypes()},
+#'   which is a \code{RangedSummarizedExperiment}.
+#' @keywords internal
 setClass(
     "GenotypeHandle",
     representation(
@@ -165,11 +168,7 @@ setMethod("show", "GenotypeHandle", function(object) {
 #'   an error (a single-file panel has no per-chromosome shards to skip).
 #' @param ... Additional arguments forwarded to the format-specific reader.
 #' @return A \code{GenotypeHandle} object.
-#' @examples
-#' ex <- function(f) system.file("extdata", f, package = "pecotmr")
-#' GenotypeHandle(bed = ex("toy_ref.bed"), bim = ex("toy_ref.bim"),
-#'   fam = ex("toy_ref.fam"))
-#' @export
+#' @keywords internal
 GenotypeHandle <- function(
     path = NULL,
     plink1Prefix = NULL,
@@ -190,7 +189,7 @@ GenotypeHandle <- function(
     flags <- .ghValidateArgs(p)
     sources <- .ghResolveSources(p, flags)
     if (sources[["path"]]) {
-        return(readGenotypes(path, ...))
+        return(.readGenotypeHandle(path, ...))
     }
     if (sources[["plink1Prefix"]]) {
         return(.makePlink1Handle(plink1Prefix, ...))
@@ -324,10 +323,10 @@ GenotypeHandle <- function(
 .ghLdPathToHandle <- function(ldPath, ...) {
     lower <- str_to_lower(ldPath)
     if (str_detect(lower, "\\.vcf(\\.b?gz)?$") || str_ends(lower, "\\.bcf")) {
-        return(readGenotypes(ldPath, format = "vcf", ...))
+        return(.readGenotypeHandle(ldPath, format = "vcf", ...))
     }
     if (str_ends(lower, "\\.gds")) {
-        return(readGenotypes(ldPath, format = "gds", ...))
+        return(.readGenotypeHandle(ldPath, format = "gds", ...))
     }
     if (str_ends(lower, "\\.bed")) {
         return(.makePlink1Handle(
@@ -416,7 +415,7 @@ GenotypeHandle <- function(
 # errors; treat them as single-file handles.
 #' @keywords internal
 .genotypeChromPaths <- function(handle) {
-    tryCatch(handle@chromPaths, error = function(e) character(0))
+    tryCatch(getChromPaths(handle), error = function(e) character(0))
 }
 
 # Case-insensitive match of the first of `aliases` present in `cols`; falls
@@ -537,13 +536,13 @@ GenotypeHandle <- function(
         if (format == "plink2") {
             return(.makePlink2Handle(p))
         }
-        return(readGenotypes(p, format = format))
+        return(.readGenotypeHandle(p, format = format))
     }
     if (str_detect(lower, "\\.vcf(\\.b?gz)?$") || str_ends(lower, "\\.bcf")) {
-        return(readGenotypes(p, format = "vcf"))
+        return(.readGenotypeHandle(p, format = "vcf"))
     }
     if (str_ends(lower, "\\.gds")) {
-        return(readGenotypes(p, format = "gds"))
+        return(.readGenotypeHandle(p, format = "gds"))
     }
     if (str_ends(lower, "\\.bed")) {
         return(.makePlink1Handle(
@@ -597,8 +596,8 @@ GenotypeHandle <- function(
         path = .chromMetaPath(genoMeta),
         format = sharedFormat,
         snpInfo = unifiedSnpInfo,
-        nSamples = shards[[1L]]@nSamples,
-        sampleIds = shards[[1L]]@sampleIds,
+        nSamples = getNSamples(shards[[1L]]),
+        sampleIds = getSampleIds(shards[[1L]]),
         pgenPtr = NULL,
         chromPaths = .chromMetaPaths(shards)
     )
@@ -659,7 +658,7 @@ GenotypeHandle <- function(
 .chromMetaPaths <- function(shards) {
     chromPaths <- character(0)
     for (i in seq_along(shards)) {
-        for (ch in unique(canonChrom(shards[[i]]@snpInfo$CHR))) {
+        for (ch in unique(canonChrom(getSnpInfo(shards[[i]])$CHR))) {
             if (is_in(ch, names(chromPaths))) {
                 msg <- glue(
                     "GenotypeHandle(genoMeta): chromosome '{ch}' appears ",
@@ -667,7 +666,7 @@ GenotypeHandle <- function(
                 )
                 abort(msg)
             }
-            chromPaths[[ch]] <- shards[[i]]@path
+            chromPaths[[ch]] <- getPath(shards[[i]])
         }
     }
     chromPaths
@@ -685,12 +684,16 @@ GenotypeHandle <- function(
 setMethod("getSnpInfo", "GenotypeHandle", function(x) x@snpInfo)
 
 #' @rdname getFormat
-#' @export
+#' @keywords internal
 setMethod("getFormat", "GenotypeHandle", function(x) x@format)
 
 #' @rdname getPath
-#' @export
+#' @keywords internal
 setMethod("getPath", "GenotypeHandle", function(x) x@path)
+
+#' @rdname getChromPaths
+#' @keywords internal
+setMethod("getChromPaths", "GenotypeHandle", function(x, ...) x@chromPaths)
 
 # Resolve a portable bundled-resource reference of the form
 # "pecotmr://extdata/<stem>" to a concrete filesystem path via
@@ -731,15 +734,15 @@ setMethod("getPath", "GenotypeHandle", function(x) x@path)
 }
 
 #' @rdname getSampleIds
-#' @export
+#' @keywords internal
 setMethod("getSampleIds", "GenotypeHandle", function(x) x@sampleIds)
 
 #' @rdname getPgenPtr
-#' @export
+#' @keywords internal
 setMethod("getPgenPtr", "GenotypeHandle", function(x) x@pgenPtr)
 
 #' @rdname getNSamples
-#' @export
+#' @keywords internal
 setMethod("getNSamples", "GenotypeHandle", function(x) x@nSamples)
 
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------
@@ -763,11 +766,110 @@ setMethod("getNSamples", "GenotypeHandle", function(x) x@nSamples)
 # The snpInfo slot of one genotype shard.
 # @noRd
 .ghSnpInfo <- function(h) {
-    h@snpInfo
+    getSnpInfo(h)
 }
 
 # The format slot of one genotype shard.
 # @noRd
 .ghFormat <- function(h) {
-    h@format
+    getFormat(h)
+}
+
+
+# =============================================================================
+# GhSeed -- a DelayedArray backend over a GenotypeHandle
+#
+# `extractBlockGenotypes(handle, snpIdx)` already reads ONLY the requested
+# variants, so it is already the lazy interface a DelayedArray seed needs; this
+# is a thin adapter, not a new reader. Wrapping it means a genotype matrix can
+# sit in a SummarizedExperiment assay -- and so in a MultiAssayExperiment --
+# without materialising, which is what lets the whole panel be described
+# without being read.
+#
+# Orientation: pecotmr works in samples x variants, but Bioconductor assays are
+# features x samples, and `assay(se, "dosage")` is already variants x samples.
+# The seed therefore reports variants as rows. Getting this backwards returns a
+# plausible-looking matrix and a silently transposed LD matrix, so the tests
+# pin it against getGenotypes().
+# =============================================================================
+
+#' DelayedArray seed over a GenotypeHandle
+#'
+#' Lets genotype dosages back a \code{DelayedArray} that reads through the
+#' handle on demand, so an assay can describe a panel far larger than memory.
+#'
+#' @slot handle The \code{\link{GenotypeHandle}} to read through.
+#' @slot dm Integer length-2 dimensions (variants, samples).
+#' @slot dn List of dimnames (variant ids, sample ids).
+#' @name GhSeed-class
+#' @keywords internal
+setClass(
+    "GhSeed",
+    representation(handle = "GenotypeHandle", dm = "integer", dn = "list")
+)
+
+#' @rdname GhSeed-class
+setMethod("dim", "GhSeed", function(x) x@dm)
+
+#' @rdname GhSeed-class
+setMethod("dimnames", "GhSeed", function(x) x@dn)
+
+# The handle a seed reads through. Internal accessor: GhSeed is not exported,
+# so this adds no public surface, and it keeps the `@` next to the class.
+# @noRd
+.ghSeedHandle <- function(x) x@handle
+
+#' @rdname GhSeed-class
+#' @importFrom S4Arrays extract_array
+setMethod("extract_array", "GhSeed", function(x, index) {
+    # A NULL index means "everything along this dimension", not "nothing".
+    # Reading it as nothing yields an empty block that looks exactly like a
+    # legitimately empty region.
+    dm <- dim(x)
+    i <- if (is.null(index[[1L]])) seq_len(dm[[1L]]) else index[[1L]]
+    j <- if (is.null(index[[2L]])) seq_len(dm[[2L]]) else index[[2L]]
+    if (length(i) == 0L || length(j) == 0L) {
+        return(matrix(numeric(0), length(i), length(j)))
+    }
+    se <- extractBlockGenotypes(
+        .ghSeedHandle(x),
+        snpIdx = i,
+        meanImpute = FALSE
+    )
+    as.matrix(SummarizedExperiment::assay(se, "dosage"))[, j, drop = FALSE]
+})
+
+#' Genotype dosages as a lazily-read DelayedArray
+#'
+#' Wraps a \code{\link{GenotypeHandle}} so its dosages can back a
+#' \code{SummarizedExperiment} assay without being read. Nothing is read when
+#' the array is built, nor when it is placed in a
+#' \code{SummarizedExperiment} or \code{MultiAssayExperiment}: only the blocks
+#' an operation actually touches are fetched.
+#'
+#' The result is \strong{variants x samples}, the Bioconductor assay
+#' orientation, which is the transpose of what \code{\link{getGenotypes}}
+#' returns.
+#'
+#' @param handle A \code{\link{GenotypeHandle}}.
+#' @return A \code{DelayedMatrix} of dosages.
+#' @keywords internal
+genotypeDelayedArray <- function(handle) {
+    if (!methods::is(handle, "GenotypeHandle")) {
+        msg <- glue(
+            "`handle` must be a GenotypeHandle (got {class(handle)[[1L]]})."
+        )
+        abort(msg)
+    }
+    si <- getSnpInfo(handle)
+    seed <- methods::new(
+        "GhSeed",
+        handle = handle,
+        dm = c(nrow(si), as.integer(getNSamples(handle))),
+        dn = list(
+            normalizeVariantId(as.character(si$SNP)),
+            as.character(getSampleIds(handle))
+        )
+    )
+    DelayedArray::DelayedArray(seed)
 }

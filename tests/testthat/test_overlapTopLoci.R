@@ -1,6 +1,6 @@
 context("overlapTopLoci")
 
-# Minimal top-loci frame (the FineMappingEntry slot schema).
+# Minimal top-loci frame (the FineMappingRow slot schema).
 .ot_tl <- function(vids, A1, A2, pm, af, cs = "susie_1") {
     n <- length(vids)
     p <- pecotmr:::parseVariantId(vids)
@@ -25,7 +25,7 @@ context("overlapTopLoci")
     )
 }
 .ot_entry <- function(tl) {
-    FineMappingEntry(
+    fineMappingRow(
         variantIds = tl$variant_id,
         susieFit = list(fake = TRUE),
         topLoci = tl

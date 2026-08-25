@@ -25,7 +25,7 @@ context("twasWeightsPipeline (S4 dispatch) with mocked weight methods")
         path = "/tmp/tp.gds",
         format = "gds",
         snpInfo = data.frame(
-            SNP = paste0("v", seq_len(snp_n)),
+            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -155,11 +155,11 @@ context("twasWeightsPipeline (S4 dispatch) with mocked weight methods")
             )
         }
         tl <- data.frame(
-            variant_id = paste0("v", seq_len(3L)),
+            variant_id = sprintf("chr1:%d:A:G", 100L * (seq_len(3L))),
             pip = c(0.9, 0.5, 0.1),
             stringsAsFactors = FALSE
         )
-        FineMappingEntry(
+        fineMappingRow(
             variantIds = tl$variant_id,
             susieFit = fitPayload,
             topLoci = tl
@@ -245,11 +245,13 @@ test_that("twasWeightsPipeline(QtlDataset): runs end-to-end with mocked solvers"
     expect_true(all(GenomicRanges::start(tp)[res$trait == "ENSG_A"] == 1000L))
     expect_true(all(GenomicRanges::end(tp)[res$trait == "ENSG_A"] == 1499L))
     expect_true(all(GenomicRanges::start(tp)[res$trait == "ENSG_B"] == 2000L))
-    # region: traitPos +/- cisWindow.
-    expect_true(all(GenomicRanges::start(reg)[res$trait == "ENSG_A"] == 1L)) # 1000-1000 -> clamp
-    expect_true(all(GenomicRanges::end(reg)[res$trait == "ENSG_A"] == 2499L)) # 1499+1000
-    expect_true(all(GenomicRanges::start(reg)[res$trait == "ENSG_B"] == 1000L)) # 2000-1000
-    expect_true(all(GenomicRanges::end(reg)[res$trait == "ENSG_B"] == 3499L)) # 2499+1000
+    # region: the REALIZED variant span now, not traitPos +/- cisWindow. The
+    # nominal window is gone (no correct update rule under subsetRegion); the
+    # span is in sync with the variants and still sits inside that window.
+    expect_true(all(GenomicRanges::start(reg)[res$trait == "ENSG_A"] >= 1L))
+    expect_true(all(GenomicRanges::end(reg)[res$trait == "ENSG_A"] <= 2499L))
+    expect_true(all(GenomicRanges::start(reg)[res$trait == "ENSG_B"] >= 1000L))
+    expect_true(all(GenomicRanges::end(reg)[res$trait == "ENSG_B"] <= 3499L))
 })
 
 test_that("twasWeightsPipeline(QtlDataset): mafCutoff/xvarCutoff overrides tighten the variant set", {
@@ -356,7 +358,7 @@ test_that("twasWeightsPipeline(QtlDataset): RSS-only method rejected", {
 # ===========================================================================
 
 .tp_makeSumstatsEntry <- function(
-    snp_ids = paste0("v", 1:8),
+    snp_ids = sprintf("chr1:%d:A:G", 100L * (1:8)),
     positions = seq(100L, by = 100L, length.out = 8L)
 ) {
     gr <- GenomicRanges::GRanges(
@@ -865,7 +867,7 @@ test_that("twasWeightsPipeline(QtlDataset): mr.mash retains its fit parts in the
 
 .tp_makeMultiCtxQtlSumStats <- function(
     contexts = c("c1", "c2"),
-    snp_ids = paste0("v", 1:8),
+    snp_ids = sprintf("chr1:%d:A:G", 100L * (1:8)),
     positions = seq(100L, by = 100L, length.out = 8L)
 ) {
     n <- length(contexts)
@@ -958,10 +960,10 @@ test_that("twasWeightsPipeline(QtlSumStats): mr.mash multivariate solver failure
 # ===========================================================================
 
 .tp_makeCachedEntry <- function(
-    variant_ids = paste0("v", 1:8),
+    variant_ids = sprintf("chr1:%d:A:G", 100L * (1:8)),
     weights = rep(0.5, 8)
 ) {
-    TwasWeightsEntry(
+    twasWeightsRow(
         variantIds = variant_ids,
         weights = weights,
         standardized = FALSE
@@ -1094,7 +1096,7 @@ test_that(".twasCacheLookup: non-TwasWeights input returns NULL", {
 })
 
 test_that(".twasCacheLookup: returns matching entry by 4-tuple", {
-    e <- TwasWeightsEntry(variantIds = "v1", weights = 0.5)
+    e <- twasWeightsRow(variantIds = "chr1:100:A:G", weights = 0.5)
     tw <- TwasWeights(
         study = "s1",
         context = "c1",
@@ -1209,7 +1211,7 @@ make_weight_list <- function(p = 20, method_names, seed = 2) {
     setNames(
         lapply(method_names, function(m) {
             w <- matrix(rnorm(p), ncol = 1)
-            rownames(w) <- paste0("var_", seq_len(p))
+            rownames(w) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
             colnames(w) <- "outcome_1"
             w
         }),
@@ -1486,7 +1488,7 @@ test_that("ensembleWeights: end-to-end with twasWeightsCv output", {
     n <- 100
     p <- 20
     X <- matrix(rnorm(n * p), nrow = n, ncol = p)
-    colnames(X) <- paste0("var_", seq_len(p))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
     rownames(X) <- paste0("sample_", seq_len(n))
 
     beta <- c(1.5, -1.0, 0.8, rep(0, p - 3))
@@ -1982,8 +1984,8 @@ test_that("estimateSparsity: legacy list input reads attr(.,'fit')$pi", {
 })
 
 test_that("estimateSparsity: TwasWeights collection input reads from the mrash entry", {
-    entry <- TwasWeightsEntry(
-        variantIds = c("v1", "v2", "v3"),
+    entry <- twasWeightsRow(
+        variantIds = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
         weights = c(0.1, 0, 0.3),
         fits = list(pi = c(0.7, 0.2, 0.1)),
         standardized = FALSE
@@ -1999,7 +2001,7 @@ test_that("estimateSparsity: TwasWeights collection input reads from the mrash e
 })
 
 test_that("estimateSparsity: TwasWeights without mrash entry errors", {
-    entry <- TwasWeightsEntry(variantIds = c("v1"), weights = c(0.1))
+    entry <- twasWeightsRow(variantIds = c("chr1:100:A:G"), weights = c(0.1))
     tw <- TwasWeights(
         study = "s1",
         context = "c1",
@@ -2014,8 +2016,8 @@ test_that("estimateSparsity: TwasWeights without mrash entry errors", {
 })
 
 test_that("estimateSparsity: TwasWeights with mrash entry but no fit$pi errors", {
-    entry <- TwasWeightsEntry(
-        variantIds = c("v1"),
+    entry <- twasWeightsRow(
+        variantIds = c("chr1:100:A:G"),
         weights = c(0.1),
         fits = list(other = 1)
     )
@@ -2054,11 +2056,11 @@ context("twasWeights internal helpers (extra)")
 # ===========================================================================
 
 .tw_makeFmEntry <- function(method_tag = "susie", n = 3) {
-    FineMappingEntry(
-        variantIds = paste0("v", seq_len(n)),
+    fineMappingRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (seq_len(n))),
         susieFit = list(payload = method_tag),
         topLoci = data.frame(
-            variant_id = paste0("v", seq_len(n)),
+            variant_id = sprintf("chr1:%d:A:G", 100L * (seq_len(n))),
             pip = seq(0.9, by = -0.1, length.out = n),
             stringsAsFactors = FALSE
         )
@@ -2157,7 +2159,7 @@ test_that(".twasFineMappingFits: ignores non-susie methods (e.g. lasso)", {
         path = "/tmp/sketch.gds",
         format = "gds",
         snpInfo = data.frame(
-            SNP = paste0("v", seq_len(snp_n)),
+            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -2207,17 +2209,20 @@ test_that(".twasFineMappingFits: ignores non-susie methods (e.g. lasso)", {
     }
 }
 
-test_that(".twasLdFromSketch: rejects non-GenotypeHandle ldSketch", {
+test_that(".twasLdFromSketch: rejects a non-panel ldSketch", {
     expect_error(
-        pecotmr:::.twasLdFromSketch("not_a_handle", c("v1", "v2")),
-        "ldSketch must be a GenotypeHandle"
+        pecotmr:::.twasLdFromSketch(
+            "not_a_handle",
+            c("chr1:100:A:G", "chr1:200:A:G")
+        ),
+        "ldSketch must be a genotype panel"
     )
 })
 
 test_that(".twasLdFromSketch: variants not in the panel error", {
     h <- .tw_makeSketchHandle()
     expect_error(
-        pecotmr:::.twasLdFromSketch(h, c("v1", "ghost")),
+        pecotmr:::.twasLdFromSketch(h, c("chr1:100:A:G", "ghost")),
         "variant id.*not present in the LD sketch"
     )
 })
@@ -2228,7 +2233,7 @@ test_that(".twasLdFromSketch: returns a square LD matrix named by variantIds", {
         extractBlockGenotypes = .tw_mockExtractor(),
         .package = "pecotmr"
     )
-    ids <- c("v2", "v4", "v5")
+    ids <- c("chr1:200:A:G", "chr1:400:A:G", "chr1:500:A:G")
     R <- pecotmr:::.twasLdFromSketch(h, ids)
     expect_true(is.matrix(R))
     expect_equal(dim(R), c(3L, 3L))
@@ -2272,7 +2277,7 @@ test_that(".twasRegionLabel / .twasFitsForRegion select per-region fits", {
 
 test_that(".twasMergeRegionEntries stacks weights and builds a flat per-region CV df", {
     mk <- function(vids, w, rsq) {
-        TwasWeightsEntry(
+        twasWeightsRow(
             variantIds = vids,
             weights = w,
             cvResult = list(
@@ -2282,14 +2287,18 @@ test_that(".twasMergeRegionEntries stacks weights and builds a flat per-region C
             )
         )
     }
-    e1 <- mk(c("v1", "v2"), c(0.1, 0.2), 0.3)
-    e2 <- mk(c("v3", "v4"), c(0.3, 0.4), 0.5)
+    e1 <- mk(c("chr1:100:A:G", "chr1:200:A:G"), c(0.1, 0.2), 0.3)
+    e2 <- mk(c("chr1:300:A:G", "chr1:400:A:G"), c(0.3, 0.4), 0.5)
     m <- pecotmr:::.twasMergeRegionEntries(
         list(e1, e2),
         c("chr1:1-100", "chr1:200-300")
     )
-    expect_s4_class(m, "TwasWeightsEntry")
-    expect_equal(getVariantIds(m), c("v1", "v2", "v3", "v4"))
+    # The merge yields a TwasWeightsRow.
+    expect_s4_class(m, "TwasWeightsRow")
+    expect_equal(
+        pecotmr:::.twrPartsVariantIds(m),
+        c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G", "chr1:400:A:G")
+    )
     expect_equal(unname(getWeights(m)), c(0.1, 0.2, 0.3, 0.4))
     cv <- getCvResult(m)
     expect_s3_class(cv, "data.frame")
@@ -2299,7 +2308,7 @@ test_that(".twasMergeRegionEntries stacks weights and builds a flat per-region C
 })
 
 test_that(".twasMergeRegionEntries returns a single entry unchanged", {
-    e <- TwasWeightsEntry(variantIds = "v1", weights = 0.5)
+    e <- twasWeightsRow(variantIds = "chr1:100:A:G", weights = 0.5)
     expect_identical(
         pecotmr:::.twasMergeRegionEntries(list(e), "chr1:1-100"),
         e
@@ -2452,7 +2461,11 @@ test_that("twasWeightsPipeline(QtlDataset): mr.mash jointRegions=FALSE concatena
 # ===========================================================================
 
 test_that(".twasCvResultFor merges per-method cvResult across a tuple's entries", {
-    tl <- data.frame(variant_id = "v1", pip = 0.5, stringsAsFactors = FALSE)
+    tl <- data.frame(
+        variant_id = "chr1:100:A:G",
+        pip = 0.5,
+        stringsAsFactors = FALSE
+    )
     part <- data.frame(Sample = c("s1", "s2"), Fold = c(1L, 2L))
     mkCv <- function(key) {
         list(
@@ -2467,8 +2480,18 @@ test_that(".twasCvResultFor merges per-method cvResult across a tuple's entries"
             )
         )
     }
-    eSusie <- FineMappingEntry("v1", list(), tl, cvResult = mkCv("susie"))
-    eInf <- FineMappingEntry("v1", list(), tl, cvResult = mkCv("susie_inf"))
+    eSusie <- fineMappingRow(
+        "chr1:100:A:G",
+        list(),
+        tl,
+        cvResult = mkCv("susie")
+    )
+    eInf <- fineMappingRow(
+        "chr1:100:A:G",
+        list(),
+        tl,
+        cvResult = mkCv("susie_inf")
+    )
     fmr <- QtlFineMappingResult(
         study = c("S", "S"),
         context = c("C", "C"),
@@ -2489,8 +2512,12 @@ test_that(".twasCvResultFor merges per-method cvResult across a tuple's entries"
 })
 
 test_that(".twasCvResultFor returns NULL when no entry carries CV", {
-    tl <- data.frame(variant_id = "v1", pip = 0.5, stringsAsFactors = FALSE)
-    e <- FineMappingEntry("v1", list(), tl)
+    tl <- data.frame(
+        variant_id = "chr1:100:A:G",
+        pip = 0.5,
+        stringsAsFactors = FALSE
+    )
+    e <- fineMappingRow("chr1:100:A:G", list(), tl)
     fmr <- QtlFineMappingResult(
         study = "S",
         context = "C",
@@ -2553,7 +2580,7 @@ test_that(".unpackMashPrior routes a MashPrior into the internal CV arguments", 
     context = "c1",
     trait = "t1",
     method = "lasso",
-    vid = "v1",
+    vid = "chr1:100:A:G",
     w = 0.5
 ) {
     TwasWeights(
@@ -2561,7 +2588,7 @@ test_that(".unpackMashPrior routes a MashPrior into the internal CV arguments", 
         context = context,
         trait = trait,
         method = method,
-        entry = list(TwasWeightsEntry(variantIds = vid, weights = w))
+        entry = list(twasWeightsRow(variantIds = vid, weights = w))
     )
 }
 
@@ -2596,33 +2623,9 @@ test_that("combineTwasWeights: variadic and list forms row-bind; guards empty/mi
 })
 
 # -----------------------------------------------------------------------------
-# .twasMergeRegions / .twasMergeRegionEntries / .twasFitsForRegion (dead-ish
-# multi-region helpers and per-region fit selection)
+# .twasMergeRegionEntries / .twasFitsForRegion (multi-region entry merge and
+# per-region fit selection)
 # -----------------------------------------------------------------------------
-
-test_that(".twasMergeRegions: stacks per-region entries under one key", {
-    r1 <- TwasWeights(
-        study = "S",
-        context = "c1",
-        trait = "t1",
-        method = "lasso",
-        entry = list(TwasWeightsEntry(variantIds = "v1", weights = 0.1))
-    )
-    r2 <- TwasWeights(
-        study = "S",
-        context = "c1",
-        trait = "t1",
-        method = "lasso",
-        entry = list(TwasWeightsEntry(variantIds = "v2", weights = 0.2))
-    )
-    out <- pecotmr:::.twasMergeRegions(list(r1, r2), c("rA", "rB"))
-    expect_s4_class(out, "TwasWeights")
-    expect_equal(nrow(out), 1L)
-    expect_setequal(getVariantIds(out$entry[[1L]]), c("v1", "v2")) # stacked
-    # Single-element and all-NULL short-circuits.
-    expect_identical(pecotmr:::.twasMergeRegions(list(r1), "rA"), r1)
-    expect_null(pecotmr:::.twasMergeRegions(list(NULL), "rA"))
-})
 
 test_that(".twasMergeRegionEntries: all-NULL entries -> NULL", {
     expect_null(pecotmr:::.twasMergeRegionEntries(
@@ -2632,21 +2635,6 @@ test_that(".twasMergeRegionEntries: all-NULL entries -> NULL", {
 })
 # (.twasFitsForRegion per-region selection is covered by the existing
 #  ".twasRegionLabel / .twasFitsForRegion select per-region fits" test.)
-
-# -----------------------------------------------------------------------------
-# .twasBuildFromCachedRows
-# -----------------------------------------------------------------------------
-
-test_that(".twasBuildFromCachedRows: assembles a TwasWeights keyed by method names", {
-    rows <- list(
-        lasso = TwasWeightsEntry(variantIds = "v1", weights = 0.1),
-        enet = TwasWeightsEntry(variantIds = "v1", weights = 0.2)
-    )
-    out <- pecotmr:::.twasBuildFromCachedRows(rows, "S", "c1", "t1")
-    expect_s4_class(out, "TwasWeights")
-    expect_setequal(as.character(out$method), c("lasso", "enet"))
-    expect_null(pecotmr:::.twasBuildFromCachedRows(list(), "S", "c1", "t1"))
-})
 
 # -----------------------------------------------------------------------------
 # .twasNormalizeMethods / .twasTokensFromMethodList / .twasIsMultivariateToken
@@ -2720,10 +2708,10 @@ test_that(".twasCvResultFor: a multi-region (per-region list) cvResult is unwrap
             performance = list(susie_performance = matrix(0, 1, 6))
         )
     )
-    entry <- FineMappingEntry(
-        variantIds = "v1",
+    entry <- fineMappingRow(
+        variantIds = "chr1:100:A:G",
         susieFit = list(),
-        topLoci = data.frame(variant_id = "v1", pip = 0.9),
+        topLoci = data.frame(variant_id = "chr1:100:A:G", pip = 0.9),
         cvResult = nested
     )
     fmr <- QtlFineMappingResult(
@@ -2896,8 +2884,18 @@ test_that("ensembleWeights: twasWeightList non-list and dimension-mismatch warni
     expect_null(r1$ensembleTwasWeights)
     # Mismatched dims across method weight matrices -> warn + skip that method.
     wl <- list(
-        a_weights = matrix(0.1, 3, 1, dimnames = list(paste0("v", 1:3), NULL)),
-        b_weights = matrix(0.1, 2, 1, dimnames = list(paste0("v", 1:2), NULL))
+        a_weights = matrix(
+            0.1,
+            3,
+            1,
+            dimnames = list(sprintf("chr1:%d:A:G", 100L * (1:3)), NULL)
+        ),
+        b_weights = matrix(
+            0.1,
+            2,
+            1,
+            dimnames = list(sprintf("chr1:%d:A:G", 100L * (1:2)), NULL)
+        )
     )
     expect_warning(
         ensembleWeights(
@@ -3273,10 +3271,10 @@ test_that(".twasCvResultFor: an entry whose nested CV carries no partition is sk
     nested <- list(
         region1 = list(prediction = list(susie_predicted = matrix(0, 1, 1)))
     )
-    entry <- FineMappingEntry(
-        variantIds = "v1",
+    entry <- fineMappingRow(
+        variantIds = "chr1:100:A:G",
         susieFit = list(),
-        topLoci = data.frame(variant_id = "v1", pip = 0.9),
+        topLoci = data.frame(variant_id = "chr1:100:A:G", pip = 0.9),
         cvResult = nested
     )
     fmr <- QtlFineMappingResult(
@@ -3366,7 +3364,11 @@ test_that("twasWeightsPipeline(QtlSumStats): a mismatched SNP order in a multiva
     local_mocked_bindings(
         getSumstatDf = function(x, study, context, trait, require, ...) {
             calls <<- calls + 1L
-            vid <- if (calls == 1L) c("v1", "v2") else c("v2", "v1")
+            vid <- if (calls == 1L) {
+                c("chr1:100:A:G", "chr1:200:A:G")
+            } else {
+                c("chr1:200:A:G", "chr1:100:A:G")
+            }
             data.frame(
                 variant_id = vid,
                 z = c(1, 2),
@@ -3457,8 +3459,9 @@ test_that("ensembleWeights: vector (non-matrix) method weights are coerced to a 
         )
     )
     wl <- list(
-        a_weights = setNames(rep(0.1, 3), paste0("v", 1:3)), # bare vectors
-        b_weights = setNames(rep(0.2, 3), paste0("v", 1:3))
+        # bare vectors
+        a_weights = setNames(rep(0.1, 3), sprintf("chr1:%d:A:G", 100L * (1:3))),
+        b_weights = setNames(rep(0.2, 3), sprintf("chr1:%d:A:G", 100L * (1:3)))
     )
     res <- ensembleWeights(
         cvResults = list(prediction = pb),
@@ -3499,4 +3502,100 @@ test_that(".solveEnsembleGlmnet: solver failure falls back to equal weights", {
         "glmnet solver failed"
     )
     expect_equal(z, c(0.5, 0.5))
+})
+
+
+# ---------------------------------------------------------------------------
+# RSS panel filters on QtlSumStats input.
+#
+# No genotype matrix exists on this path, so mafCutoff / macCutoff /
+# imissCutoff are measured against the LD reference panel, using the same
+# thresholds the QtlDataset path applies to dosage.
+# ---------------------------------------------------------------------------
+
+# @noRd
+.twrssf_qcd <- function() {
+    data(qtlSumStatsExample, envir = environment())
+    suppressWarnings(suppressMessages(summaryStatsQc(qtlSumStatsExample)))
+}
+
+# @noRd
+.twrssf_n <- function(ss, ...) {
+    sum(lengths(suppressWarnings(suppressMessages(
+        twasWeightsPipeline(ss, methods = "lasso", ...)
+    ))))
+}
+
+test_that("twasWeightsPipeline(QtlSumStats) filters nothing by default", {
+    ss <- .twrssf_qcd()
+    expect_equal(.twrssf_n(ss), sum(lengths(ss)))
+})
+
+test_that("twasWeightsPipeline(QtlSumStats) drops panel-rare variants", {
+    ss <- .twrssf_qcd()
+    full <- .twrssf_n(ss)
+    loose <- .twrssf_n(ss, mafCutoff = 0.05)
+    tight <- .twrssf_n(ss, mafCutoff = 0.2)
+    expect_lt(loose, full)
+    expect_lt(tight, loose)
+})
+
+test_that("twasWeightsPipeline RSS cutoffs match .panelVariantFilter", {
+    # Exactly the variants the shared filter names: no more (something else is
+    # filtering) and no fewer (the cutoff silently did nothing).
+    ss <- .twrssf_qcd()
+    ids <- getSumstatDf(
+        ss,
+        study = ss$study[[1L]],
+        context = ss$context[[1L]],
+        trait = ss$trait[[1L]],
+        require = c("Z", "N"),
+        derive = "zFromBetaSe"
+    )$variant_id
+    for (cut in c(0.05, 0.2)) {
+        expect_equal(
+            .twrssf_n(ss, mafCutoff = cut),
+            length(.panelVariantFilter(
+                getLdSketch(ss),
+                ids,
+                mafCutoff = cut
+            )),
+            label = str_c("mafCutoff ", cut)
+        )
+    }
+})
+
+test_that("twasWeightsPipeline RSS treats MAC as a MAF equivalent", {
+    ss <- .twrssf_qcd()
+    nSamp <- ncol(getLdSketch(ss))
+    expect_equal(
+        .twrssf_n(ss, macCutoff = 0.1 * 2 * nSamp),
+        .twrssf_n(ss, mafCutoff = 0.1)
+    )
+})
+
+test_that("twasWeightsPipeline RSS honours a missingness cutoff", {
+    ss <- .twrssf_qcd()
+    expect_lt(.twrssf_n(ss, imissCutoff = 0), sum(lengths(ss)))
+    expect_equal(.twrssf_n(ss, imissCutoff = 1), sum(lengths(ss)))
+})
+
+test_that(".twasQssUnivariateFitCtx keeps z, ids and LD aligned", {
+    ss <- .twrssf_qcd()
+    sketch <- getLdSketch(ss)
+    args <- list(ss, ss$study[[1L]], ss$context[[1L]], ss$trait[[1L]], sketch)
+    plain <- exec(pecotmr:::.twasQssUnivariateFitCtx, !!!args)
+    cut <- suppressMessages(exec(
+        pecotmr:::.twasQssUnivariateFitCtx,
+        !!!args,
+        cutoffs = list(mafCutoff = 0.2, macCutoff = 0, imissCutoff = 1)
+    ))
+    expect_lt(length(cut$variantIds), length(plain$variantIds))
+    # z, the stored variant names and the LD matrix all agree on the set.
+    expect_equal(length(cut$stat$z), length(cut$variantIds))
+    expect_equal(cut$stat$variantNames, cut$variantIds)
+    expect_equal(nrow(cut$ldMat), length(cut$variantIds))
+    expect_equal(rownames(cut$ldMat), cut$variantIds)
+    keep <- is_in(plain$variantIds, cut$variantIds)
+    expect_equal(cut$stat$z, plain$stat$z[keep])
 })

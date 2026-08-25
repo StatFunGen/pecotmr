@@ -95,9 +95,12 @@ reference:
       section) documents the user-facing factory function.
     contents:
       - AnnotationMatrix-class
-      - FineMappingEntry-class
+      - ColocBoostResult-class
+      - ColocResult-class
+      - ColocResultBase-class
       - FineMappingResultBase-class
-      - GenotypeHandle-class
+      - FineMappingRow-class
+      - GwasFineMappingResult-class
       - H2Estimate-class
       - LdData-class
       - LdEigen-class
@@ -106,8 +109,12 @@ reference:
       - MashPrior-class
       - MultiStudyQtlDataset-class
       - QtlDataset-class
+      - QtlFineMappingResult-class
+      - RangedTupleList-class
       - SldscData-class
       - SumStatsBase-class
+      - TwasWeights-class
+      - TwasWeightsRow-class
 
   - title: "Class constructors"
     desc: >
@@ -118,12 +125,15 @@ reference:
     contents:
       - AnnotationMatrix
       - CtwasResult
+      - ColocBoostResult
+      - ColocResult
       - CtwasResultEntry
-      - FineMappingEntry
-      - GenotypeHandle
+      - fineMappingRow
       - GwasFineMappingResult
       - GwasSumStats
       - LdData
+      - LdEigen
+      - LdScore
       - MashPrior
       - MultiStudyQtlDataset
       - QtlDataset
@@ -133,7 +143,7 @@ reference:
       - qtlSumStatsFromZMatrix
       - SldscData
       - TwasWeights
-      - TwasWeightsEntry
+      - twasWeightsRow
 
   - title: "Manifest loaders"
     desc: >
@@ -159,16 +169,19 @@ reference:
 
   - subtitle: "AnnotationMatrix"
     contents:
-      - getAnnotationMeta
-      - getAnnotations
       - getBaseline
       - getCandidates
       - getGenome
-      - getSnpRanges
 
-  - subtitle: "FineMappingEntry"
+  - subtitle: "RangedTupleList"
     contents:
-      - adjustPips
+      # The virtual base every collection inherits: container and metadata
+      # methods, plus the region/variant verbs and the plyranges bridge.
+      - RangedTupleList-methods
+      - subsetRegion
+      - intersectVariants
+      - flattenTupleRanges
+      - nestTupleRanges
       - computeCsCorrelation
       - fsusieAffectedRegions
       - fsusieCredibleBand
@@ -196,16 +209,6 @@ reference:
       - getFinemap
       - getSusieAlpha
 
-  - subtitle: "GenotypeHandle"
-    contents:
-      - getFormat
-      - getNSamples
-      - getPath
-      - getPgenPtr
-      - getSampleIds
-      - getSnpInfo
-      - readGenotypes
-
   - subtitle: "GwasFineMappingResult"
     contents:
       - getContexts
@@ -214,6 +217,7 @@ reference:
 
   - subtitle: "GwasSumStats"
     contents:
+      - "getSumStats,GwasSumStats-method"
       - getBeta
       - getMaf
       - getN
@@ -226,6 +230,16 @@ reference:
       - nSnps
       - subsetChr
 
+  - subtitle: "ColocResult / ColocBoostResult"
+    contents:
+      - colocViews
+      - getColocBoostOutcomes
+      - getComputingTime
+      - getRegionVcp
+      - getRetainedMass
+      - "as.data.frame,ColocResult-method"
+      - "as.data.frame,ColocBoostResult-method"
+
   - subtitle: "H2Estimate"
     contents:
       - getEnrichment
@@ -234,15 +248,10 @@ reference:
       - getScoreStats
       - getTauBlocks
 
-  - subtitle: "LdBlocks"
-    contents:
-      - getBlocks
-
   - subtitle: "LdData"
     contents:
       - getBlockMetadata
       - getCorrelation
-      - getGenotypeHandle
       - getGenotypes
       - getMixtureWeights
       - getNRef
@@ -281,6 +290,7 @@ reference:
       - getResidualizedPhenotypes
       - getScaleResiduals
       - getTraitPosition
+      - qtlDatasetFilters
 
   - subtitle: "QtlFineMappingResult"
     contents:
@@ -399,11 +409,12 @@ reference:
 
   - title: "Genotype I/O"
     desc: >
-      Reading and manipulating per-region genotype data outside the
-      GenotypeHandle accessor surface.
+      Reading genotype panels and per-region genotype data. A panel is a
+      `RangedSummarizedExperiment` whose dosage assay reads from the file
+      lazily, so the Bioconductor accessors apply to it directly.
     contents:
-      - extractBlockGenotypes
-      - computeBlockLdCor
+      - readGenotypes
+      - computeLd
       - loadGenotypeRegion
       - readAfreq
       - getRefVariantInfo
@@ -579,7 +590,7 @@ reference:
   - title: "Bundled example datasets"
     desc: >
       Synthetic data shipped with the package for vignettes and
-      tests. Their bundled GenotypeHandle paths resolve to the installed
+      tests. Their bundled genotype-panel paths resolve to the installed
       `inst/extdata/` location automatically at extraction time.
     contents:
       # S4 input containers
@@ -593,6 +604,7 @@ reference:
       - gwasSumStatsExample
       - multiTraitData
       # Fine-mapping results
+      - colocboostResultExample
       - qtlFineMappingExample
       - qtlFineMappingLbfExample
       - qtlFineMappingPairedExample
@@ -620,6 +632,18 @@ reference:
       role. Hidden from the reference index but still searchable and
       rendered.
     contents:
+      - GenotypeHandle
+      - GenotypeHandle-class
+      - getSnpInfo
+      - getFormat
+      - getPath
+      - getSampleIds
+      - getPgenPtr
+      - getNSamples
+      - getChromPaths
+      - getGenotypeHandle
+      - extractBlockGenotypes
+      - genotypeDelayedArray
       - as.data.frame.GwasSumStats
       - rescaleCovW0
       - buildTopLoci

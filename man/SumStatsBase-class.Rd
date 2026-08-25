@@ -7,8 +7,13 @@
 \description{
 Virtual base class for QTL and GWAS summary statistics
   collections. Concrete subclasses (\code{QtlSumStats}, \code{GwasSumStats})
-  inherit from \code{DFrame} and share the \code{ldSketch} / \code{genome} /
-  \code{qcInfo} slots.
+  inherit from \code{\linkS4class{RangedTupleList}} and share the
+  \code{ldSketch} / \code{genome} / \code{qcInfo} slots.
+
+  Each element is the per-variant \code{GRanges} of one tuple, so
+  \code{x[[i]]} is that tuple's summary statistics and the identity columns
+  live in \code{mcols(x)}. There is no \code{entry} column: what used to be
+  \code{x$entry[[i]]} is now simply \code{x[[i]]}.
 }
 \section{Slots}{
 

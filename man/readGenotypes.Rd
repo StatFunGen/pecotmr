@@ -3,30 +3,66 @@
 \name{readGenotypes}
 \alias{readGenotypes}
 \alias{readGenotypes,character-method}
-\title{Read Genotype Data}
+\alias{readGenotypes,missing-method}
+\title{Read a Genotype Panel}
 \usage{
 readGenotypes(path, format = NULL, ...)
 
 \S4method{readGenotypes}{character}(path, format = NULL, ...)
+
+\S4method{readGenotypes}{missing}(path, format = NULL, ...)
 }
 \arguments{
-\item{path}{Character, path to the genotype file.}
+\item{path}{Character, path to a single self-describing genotype file
+(\code{.vcf}, \code{.vcf.gz}, \code{.vcf.bgz}, \code{.bcf} or
+\code{.gds}). Omit it when naming the panel by one of the keyword
+sources described above.}
 
 \item{format}{Character, one of "vcf", "plink1", "plink2", "gds". If NULL,
 inferred from file extension.}
 
-\item{...}{Additional arguments.}
+\item{...}{The keyword source arguments described above, plus any further
+arguments forwarded to the format-specific reader.}
 }
 \value{
-A \code{GenotypeHandle} object.
+A \code{RangedSummarizedExperiment} of variants x samples.
 }
 \description{
-Read genotype data from various formats (VCF, plink1, plink2,
-  GDS) and return a \code{GenotypeHandle} for deferred genotype loading.
+Read genotype data (VCF, plink1, plink2 or GDS) as a
+  \code{RangedSummarizedExperiment}: variants in \code{rowRanges},
+  samples in \code{colData}, and dosages in a \code{DelayedArray} assay
+  that reads from the file only when something touches it. Nothing is read
+  here beyond the variant and sample metadata.
+
+  The panel is the same shape a \code{QtlDataset} uses for its genotypes
+  and the same shape a collection carries as its \code{ldSketch}, so the
+  Bioconductor and tidy surfaces apply throughout: subset it with
+  \code{panel[i, j]}, ask \code{rowRanges()} for the variants,
+  \code{colnames()} for the samples, and hand it to
+  \code{\link{computeLd}}.
+
+  A panel that is not one self-describing file is named by keyword
+  instead of by \code{path}: pass \code{plink1Prefix} or
+  \code{plink2Prefix} for a triplet stem, \code{bed}/\code{bim}/\code{fam}
+  or \code{pgen}/\code{pvar}/\code{psam} for explicit triplet paths,
+  \code{genoMeta} for a one-file-per-chromosome panel (optionally narrowed
+  with \code{chroms}), or \code{ldMeta} plus \code{region} to resolve a
+  block out of an LD-meta table. Exactly one source may be given.
 }
 \examples{
-gh <- readGenotypes(
+panel <- readGenotypes(
   system.file("extdata", "toy_ref.bed", package = "pecotmr")
 )
-gh
+dim(panel)
+head(rownames(panel))
+
+# The same panel named by its PLINK1 stem rather than by a file.
+stem <- sub("\\\\.bed$", "", system.file(
+  "extdata", "toy_ref.bed",
+  package = "pecotmr"
+))
+dim(readGenotypes(plink1Prefix = stem))
+}
+\seealso{
+\code{\link{computeLd}}
 }

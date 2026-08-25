@@ -373,7 +373,10 @@ test_that(".qtlApplyFilterOverrides replaces every supplied slot on a validated 
     expect_equal(out@xvarCutoff, 0.01)
     expect_equal(out@imissCutoff, 0.1)
     expect_false(out@keepIndel)
-    expect_equal(out@keepSamples, c("s1", "s2"))
+    expect_setequal(
+        rownames(MultiAssayExperiment::colData(out)),
+        c("s1", "s2")
+    )
     expect_equal(out@keepVariants, c("rs1", "rs2"))
 })
 
@@ -725,7 +728,10 @@ test_that(".qtlExtractBlock: keepVariants restriction narrows the returned set",
 
 test_that(".qtlExtractBlock: keepSamples restriction narrows the returned set", {
     qd <- .qh_makeDataset()
-    qd@keepSamples <- paste0("s", 1:6)
+    qd <- pecotmr:::.qtlApplyFilterOverrides(
+        qd,
+        keepSamples = paste0("s", 1:6)
+    )
     local_mocked_bindings(
         extractBlockGenotypes = .qh_mockExtractor(),
         .package = "pecotmr"
@@ -736,7 +742,10 @@ test_that(".qtlExtractBlock: keepSamples restriction narrows the returned set", 
 
 test_that(".qtlExtractBlock: per-call samples arg further narrows the sample set", {
     qd <- .qh_makeDataset()
-    qd@keepSamples <- paste0("s", 1:6)
+    qd <- pecotmr:::.qtlApplyFilterOverrides(
+        qd,
+        keepSamples = paste0("s", 1:6)
+    )
     local_mocked_bindings(
         extractBlockGenotypes = .qh_mockExtractor(),
         .package = "pecotmr"
@@ -2322,7 +2331,10 @@ test_that("getGenotypeCovariates / getScaleResiduals return their slots", {
         geno_cov = gc,
         scaleResiduals = FALSE
     )
-    expect_identical(getGenotypeCovariates(qd), qd@genotypeCovariates)
+    expect_identical(
+        getGenotypeCovariates(qd),
+        pecotmr:::.qtlColDataMatrix(pecotmr:::.qtlGenotypeSe(qd))
+    )
     expect_equal(unname(getGenotypeCovariates(qd)), unname(gc))
     expect_false(getScaleResiduals(qd))
     qd2 <- .qr_makeDataset(contexts = "brain", scaleResiduals = TRUE)
@@ -2397,7 +2409,11 @@ test_that(".qtlExtractBlock: keepIndel = FALSE with an all-indel panel returns a
 
 test_that(".qtlExtractBlock: keepSamples disjoint from the panel returns a zero-sample block", {
     qd <- .qh_makeDataset()
-    qd@keepSamples <- c("zzz1", "zzz2") # none are panel samples
+    # none are panel samples
+    qd <- pecotmr:::.qtlApplyFilterOverrides(
+        qd,
+        keepSamples = c("zzz1", "zzz2")
+    )
     local_mocked_bindings(
         extractBlockGenotypes = .qh_mockExtractor(),
         .package = "pecotmr"
@@ -2658,11 +2674,11 @@ test_that(".qtlBuildResidualizationDesign: skips contexts with an empty selectio
     expect_setequal(colnames(D), "brain.age")
 })
 
-test_that(".qtlBuildResidualizationDesign: restores rownames when colData coercion drops them", {
-    # An SE whose assay has no colnames and whose colData carries no row.names:
-    # as.matrix(as.data.frame(colData)) then yields a rowname-less matrix, which
-    # drives the rowname-restore branch. colData rownames are also NULL, so the
-    # restore is a no-op and (with no other blocks) the design resolves to NULL.
+test_that("QtlDataset rejects a context that does not name its samples", {
+    # Which samples a context observes is recorded in the sampleMap, and an
+    # unnamed SE cannot say. MultiAssayExperiment would silently move such an
+    # experiment to `drops` rather than complain, so the constructor catches
+    # it first and says why.
     expr <- matrix(rnorm(2 * 6), nrow = 2)
     rng <- GenomicRanges::GRanges(
         "chr1",
@@ -2675,25 +2691,20 @@ test_that(".qtlBuildResidualizationDesign: restores rownames when colData coerci
         rowRanges = rng,
         colData = cd
     )
-    qd <- QtlDataset(
-        study = "s1",
-        genotypes = .qr_makeHandle(n_samples = 6L),
-        phenotypes = list(brain = se),
-        genotypeCovariates = matrix(numeric(0), 0L, 0L)
+    expect_error(
+        QtlDataset(
+            study = "s1",
+            genotypes = .qr_makeHandle(n_samples = 6L),
+            phenotypes = list(brain = se),
+            genotypeCovariates = matrix(numeric(0), 0L, 0L)
+        ),
+        "has no column names"
     )
-    D <- pecotmr:::.qtlBuildResidualizationDesign(
-        qd,
-        contexts = "brain",
-        phenoSelection = list(brain = "age"),
-        genoSelection = character(0),
-        includePheno = TRUE,
-        includeGeno = FALSE
-    )
-    expect_null(D)
 })
 
-test_that(".qtlBuildResidualizationDesign: disjoint sample sets across blocks return NULL", {
-    # Phenotype colData covers s1..s6; genotype covariates cover s7..s12.
+test_that(".qtlBuildResidualizationDesign: disjoint blocks error", {
+    # Phenotype colData covers s1..s6; genotype covariates cover s7..s12, so
+    # no sample carries both and residualizing would be a no-op in disguise.
     gh <- .qr_makeHandle(n_samples = 6L)
     se <- .qr_makeSe(n_samples = 6L)
     gc <- matrix(
@@ -2708,15 +2719,17 @@ test_that(".qtlBuildResidualizationDesign: disjoint sample sets across blocks re
         phenotypes = list(brain = se),
         genotypeCovariates = gc
     )
-    D <- pecotmr:::.qtlBuildResidualizationDesign(
-        qd,
-        contexts = "brain",
-        phenoSelection = list(brain = "age"),
-        genoSelection = "pc1",
-        includePheno = TRUE,
-        includeGeno = TRUE
+    expect_error(
+        pecotmr:::.qtlBuildResidualizationDesign(
+            qd,
+            contexts = "brain",
+            phenoSelection = list(brain = "age"),
+            genoSelection = "pc1",
+            includePheno = TRUE,
+            includeGeno = TRUE
+        ),
+        "No samples in common"
     )
-    expect_null(D)
 })
 
 # ===========================================================================
@@ -2761,6 +2774,309 @@ test_that("getResidualizedPhenotypes: errors when phenotypes and covariates shar
             residualizePhenotypeCovariates = FALSE,
             genotypeCovariatesToResidualize = c("pc1", "pc2")
         ),
-        "no samples shared"
+        "No samples in common"
+    )
+})
+
+test_that("QtlDataset filter accessors report the construction settings", {
+    data(qtlDatasetExample, envir = environment())
+    x <- qtlDatasetExample
+    expect_type(getMafCutoff(x), "double")
+    expect_length(getMafCutoff(x), 1L)
+    expect_length(getMacCutoff(x), 1L)
+    expect_length(getXvarCutoff(x), 1L)
+    expect_length(getImissCutoff(x), 1L)
+    expect_type(getKeepIndel(x), "logical")
+    expect_type(getKeepVariants(x), "character")
+})
+
+test_that("QtlDataset filter accessors round-trip what was passed in", {
+    data(qtlDatasetExample, envir = environment())
+    x <- .qtlApplyFilterOverrides(
+        qtlDatasetExample,
+        mafCutoff = 0.05,
+        macCutoff = 10,
+        xvarCutoff = 0.01,
+        imissCutoff = 0.1,
+        keepIndel = FALSE
+    )
+    expect_equal(getMafCutoff(x), 0.05)
+    expect_equal(getMacCutoff(x), 10)
+    expect_equal(getXvarCutoff(x), 0.01)
+    expect_equal(getImissCutoff(x), 0.1)
+    expect_false(getKeepIndel(x))
+})
+
+test_that("getGenotypeHandle returns the handle, getGenotypes a dosage block", {
+    # These are different accessors on purpose: getGenotypes() extracts
+    # dosages through the filter stack, getGenotypeHandle() hands back the
+    # GenotypeHandle the dataset was built on.
+    data(qtlDatasetExample, envir = environment())
+    x <- qtlDatasetExample
+    expect_s4_class(getGenotypeHandle(x), "GenotypeHandle")
+    expect_true(is.matrix(getGenotypes(x)))
+})
+
+
+# ===========================================================================
+# QtlDataset as a MultiAssayExperiment
+#
+# The class extends MAE so the multi-assay and tidy surfaces apply directly.
+# What needs pinning is the mapping between our concepts and theirs: contexts
+# are experiments, the genotype panel is one more experiment, and the sample
+# correspondence that used to be implicit is now a sampleMap.
+# ===========================================================================
+
+# A dataset whose two contexts observe overlapping but different samples --
+# the case a single shared sample list cannot express.
+# @noRd
+.qm_makeDataset <- function(n_samples = 12L) {
+    ids <- paste0("s", seq_len(n_samples))
+    brain <- .qr_makeSe(traits = "ENSG1", n_samples = n_samples)
+    liver <- .qr_makeSe(traits = "ENSG2", n_samples = n_samples)
+    brain <- brain[, seq_len(n_samples - 2L)]
+    liver <- liver[, 3:n_samples]
+    QtlDataset(
+        study = "study1",
+        genotypes = .qr_makeHandle(n_samples = n_samples),
+        phenotypes = list(brain = brain, liver = liver),
+        genotypeCovariates = matrix(
+            rnorm(n_samples * 2L),
+            nrow = n_samples,
+            ncol = 2L,
+            dimnames = list(ids, c("pc1", "pc2"))
+        )
+    )
+}
+
+test_that("a QtlDataset is a MultiAssayExperiment of contexts plus genotype", {
+    qd <- .qm_makeDataset()
+    expect_s4_class(qd, "MultiAssayExperiment")
+    expect_equal(
+        names(MultiAssayExperiment::experiments(qd)),
+        c("genotype", "brain", "liver")
+    )
+    # The genotype experiment is not a context.
+    expect_equal(getContexts(qd), c("brain", "liver"))
+})
+
+test_that("the sampleMap records which samples each context observes", {
+    qd <- .qm_makeDataset()
+    sm <- MultiAssayExperiment::sampleMap(qd)
+    counts <- table(as.character(sm$assay))
+    expect_equal(unname(counts[["genotype"]]), 12L)
+    expect_equal(unname(counts[["brain"]]), 10L)
+    expect_equal(unname(counts[["liver"]]), 10L)
+    # colData is the union, so a sample missing from one context still exists.
+    expect_equal(nrow(MultiAssayExperiment::colData(qd)), 12L)
+})
+
+test_that("the genotype experiment describes variants the way the readers do", {
+    qd <- .qm_makeDataset()
+    gr <- SummarizedExperiment::rowRanges(pecotmr:::.qtlGenotypeSe(qd))
+    si <- getSnpInfo(getGenotypeHandle(qd))
+    expect_equal(length(gr), nrow(si))
+    # Same shape as extractBlockGenotypes() returns, so ranges from the two
+    # actually overlap rather than silently missing on a chr prefix.
+    expect_true(all(str_detect(
+        as.character(GenomicRanges::seqnames(gr)),
+        "^chr"
+    )))
+    expect_equal(colnames(S4Vectors::mcols(gr)), c("SNP", "A1", "A2"))
+    expect_equal(GenomicRanges::start(gr), as.integer(si$BP))
+})
+
+test_that("the dosage assay is delayed and oriented variants x samples", {
+    qd <- .qm_makeDataset()
+    a <- SummarizedExperiment::assay(pecotmr:::.qtlGenotypeSe(qd), "dosage")
+    expect_s4_class(a, "DelayedMatrix")
+    handle <- getGenotypeHandle(qd)
+    expect_equal(nrow(a), nrow(getSnpInfo(handle)))
+    expect_equal(ncol(a), length(getSampleIds(handle)))
+})
+
+test_that("genotype covariates live on the genotype experiment's colData", {
+    qd <- .qm_makeDataset()
+    cd <- SummarizedExperiment::colData(pecotmr:::.qtlGenotypeSe(qd))
+    expect_equal(colnames(cd), c("pc1", "pc2"))
+    expect_equal(rownames(cd), getSampleIds(getGenotypeHandle(qd)))
+    expect_equal(getGenotypeCovariates(qd), pecotmr:::.qtlColDataMatrix(
+        pecotmr:::.qtlGenotypeSe(qd)
+    ))
+})
+
+test_that("subsetting by sample keeps the class and its own slots", {
+    qd <- .qm_makeDataset()
+    out <- qd[, paste0("s", 1:5), ]
+    expect_s4_class(out, "QtlDataset")
+    expect_equal(nrow(MultiAssayExperiment::colData(out)), 5L)
+    expect_equal(getStudy(out), getStudy(qd))
+    expect_identical(getGenotypeHandle(out), getGenotypeHandle(qd))
+    expect_equal(getMafCutoff(out), getMafCutoff(qd))
+})
+
+test_that("subsetting by context keeps the genotype experiment", {
+    # Selecting experiments selects among contexts. Dropping the genotype
+    # experiment would break validity and silently lose the covariates.
+    qd <- .qm_makeDataset()
+    # MultiAssayExperiment announces the experiment it drops; here that is
+    # `liver`, which is what was asked for.
+    expect_warning(out <- qd[, , "brain"], "dropped")
+    expect_equal(
+        names(MultiAssayExperiment::experiments(out)),
+        c("genotype", "brain")
+    )
+    expect_equal(getContexts(out), "brain")
+    expect_equal(ncol(getGenotypeCovariates(out)), 2L)
+    expect_true(validObject(out))
+})
+
+test_that("subsetting to no context at all is an error", {
+    qd <- .qm_makeDataset()
+    expect_error(qd[, , "genotype"], "selects no QTL context")
+})
+
+test_that("keepSamples narrows the dataset rather than recording a filter", {
+    qd <- .qm_makeDataset()
+    kept <- pecotmr:::.qtlRestrictSamples(qd, paste0("s", 1:4))
+    expect_equal(nrow(MultiAssayExperiment::colData(kept)), 4L)
+    # A keep set sharing nothing with the panel is an empty request, not an
+    # error -- MultiAssayExperiment rejects a character subscript that matches
+    # nothing, so the restriction indexes positionally.
+    none <- pecotmr:::.qtlRestrictSamples(qd, c("zzz1", "zzz2"))
+    expect_equal(nrow(MultiAssayExperiment::colData(none)), 0L)
+})
+
+test_that("a context may not be called 'genotype'", {
+    expect_error(
+        QtlDataset(
+            study = "study1",
+            genotypes = .qr_makeHandle(),
+            phenotypes = list(genotype = .qr_makeSe())
+        ),
+        "reserved"
+    )
+})
+
+test_that("replacing the handle moves the assay's seed with it", {
+    # The handle is held twice -- slot and seed -- which is what makes the
+    # assay lazy. Moving one without the other would have the dosages
+    # describing a different panel from the one the accessors read.
+    qd <- .qm_makeDataset()
+    handle <- getGenotypeHandle(qd)
+    handle@path <- "pecotmr://extdata/elsewhere"
+    out <- pecotmr:::.qtlWithGenotypeHandle(qd, handle)
+    seedPath <- DelayedArray::seed(SummarizedExperiment::assay(
+        pecotmr:::.qtlGenotypeSe(out),
+        "dosage"
+    ))@handle@path
+    expect_equal(getGenotypeHandle(out)@path, "pecotmr://extdata/elsewhere")
+    expect_equal(seedPath, "pecotmr://extdata/elsewhere")
+})
+
+
+# Cell counts of the context experiments, for the expected longForm size.
+# Defined before the tests that use it: testthat evaluates each test_that()
+# as the file is sourced, so a helper below them does not exist yet.
+# @noRd
+.qmContextCells <- function(qd) {
+    exps <- MultiAssayExperiment::experiments(qd)
+    total <- 0L
+    for (ctx in getContexts(qd)) {
+        se <- exps[[ctx]]
+        total <- total + nrow(se) * ncol(se)
+    }
+    total
+}
+
+test_that("longForm reshapes the contexts and leaves genotypes out", {
+    # Genotype dosages are the substrate the contexts are read against, not a
+    # measurement, and at variants x samples they would dwarf them.
+    qd <- .qm_makeDataset()
+    lf <- MultiAssayExperiment::longForm(qd)
+    expect_setequal(unique(as.character(lf$assay)), c("brain", "liver"))
+    expect_equal(nrow(lf), .qmContextCells(qd))
+})
+
+test_that("longForm says nothing about the drop it always makes", {
+    # MultiAssayExperiment warns AND messages that it dropped an experiment.
+    # Omitting genotypes is this method's documented job, so neither is news.
+    qd <- .qm_makeDataset()
+    expect_silent(MultiAssayExperiment::longForm(qd))
+})
+
+test_that("longForm(genotype = TRUE) reads the dosages in", {
+    # MultiAssayExperiment reshapes a delayed assay to zero rows and then
+    # errors, so including genotypes means materializing them -- which needs
+    # a handle with real data behind it, not the synthetic one.
+    data(qtlDatasetExample, envir = environment())
+    qd <- qtlDatasetExample
+    lf <- MultiAssayExperiment::longForm(qd, genotype = TRUE)
+    expect_true(is_in("genotype", unique(as.character(lf$assay))))
+    handle <- getGenotypeHandle(qd)
+    expect_equal(
+        sum(as.character(lf$assay) == "genotype"),
+        nrow(getSnpInfo(handle)) * length(getSampleIds(handle))
+    )
+})
+
+test_that("longForm leaves the dataset's assay delayed", {
+    # Realizing is local to the reshape; the object must not be mutated.
+    data(qtlDatasetExample, envir = environment())
+    qd <- qtlDatasetExample
+    invisible(MultiAssayExperiment::longForm(qd, genotype = TRUE))
+    expect_s4_class(
+        SummarizedExperiment::assay(pecotmr:::.qtlGenotypeSe(qd), "dosage"),
+        "DelayedMatrix"
+    )
+})
+
+# ===========================================================================
+# Genotype panels as the constructor's public input
+# ===========================================================================
+
+test_that("QtlDataset accepts the panel readGenotypes returns", {
+    # GenotypeHandle is internal, so a panel is the only genotype source a
+    # user can now build -- the constructor has to take it.
+    gh <- .qh_makeHandle()
+    panel <- .genotypeExperiment(gh)
+    qd <- QtlDataset(
+        study = "study1",
+        genotypes = panel,
+        phenotypes = list(brain = .qh_makeSe())
+    )
+    expect_s4_class(qd, "QtlDataset")
+    # The slot keeps the handle either way: it is the seed the dosage assay
+    # reads through, not a second copy of the panel.
+    expect_identical(getGenotypeHandle(qd), gh)
+    expect_equal(
+        dim(qd),
+        dim(.qh_makeDataset(contexts = "brain"))
+    )
+})
+
+test_that("QtlDataset refuses a panel that has already been subset", {
+    # Variant selection indexes the handle's whole snpInfo, so a narrowed
+    # panel would leave extraction reading the wrong rows.
+    gh <- .qh_makeHandle()
+    panel <- .genotypeExperiment(gh)
+    expect_error(
+        QtlDataset(
+            study = "study1",
+            genotypes = panel[1:3, ],
+            phenotypes = list(brain = .qh_makeSe())
+        ),
+        "subset panel"
+    )
+})
+
+test_that("QtlDataset still rejects a genotype source it cannot open", {
+    expect_error(
+        QtlDataset(
+            study = "study1",
+            genotypes = "not a panel",
+            phenotypes = list(brain = .qh_makeSe())
+        ),
+        "must be a genotype panel"
     )
 })

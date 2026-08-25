@@ -14,48 +14,71 @@ NULL
 #' @description Abstract container for pre-computed LD statistics. Subclasses
 #'   provide method-specific representations: eigendecompositions (for
 #'   LDER/HDL/sHDL) and LD score matrices (for S-LDSC/g-LDSC).
-#' @slot ldBlocks An \code{LdBlocks} object defining the block structure.
-#' @slot snpInfo A \code{data.frame} with columns \code{SNP}, \code{CHR},
-#'   \code{BP}, \code{A1}, \code{A2}, and optionally \code{MAF}.
+#'
+#'   An \code{LdStatistic} \strong{is} a \code{GRanges} of the reference
+#'   variants: one range per SNP, with \code{SNP} / \code{A1} / \code{A2}
+#'   (and optionally \code{MAF}) in \code{mcols}. Per-variant statistics
+#'   live in \code{mcols} too, so subsetting narrows the ranges and the
+#'   statistics together. The genome build comes from \code{seqinfo()} rather
+#'   than a slot of its own.
+#' @slot ldBlocks A \code{GRanges} of LD block intervals.
 #' @slot nRef Integer, sample size of the LD reference panel.
 #' @slot inSample Logical, whether the LD reference is from the same cohort as
 #'   the GWAS (affects bias correction).
-#' @slot genome Character string for genome build.
 #' @export
 setClass(
     "LdStatistic",
-    contains = "VIRTUAL",
+    contains = c("VIRTUAL", "GRanges"),
     representation(
-        ldBlocks = "LdBlocks",
-        snpInfo = "data.frame",
+        ldBlocks = "GRanges",
         nRef = "integer",
-        inSample = "logical",
-        genome = "character"
+        inSample = "logical"
     ),
-    validity = function(object) {
-        errors <- character()
-        if (length(object@nRef) != 1L || object@nRef <= 0L) {
-            errors <- c(errors, "'nRef' must be a single positive integer")
-        }
-        if (length(object@inSample) != 1L) {
-            errors <- c(errors, "'inSample' must be a single logical value")
-        }
-        if (length(object@genome) != 1L || str_length(object@genome) == 0L) {
-            errors <- c(
-                errors,
-                "'genome' must be a single non-empty character string"
-            )
-        }
-        if (nrow(object@snpInfo) == 0L) {
-            errors <- c(errors, "'snpInfo' must have at least one row")
-        }
-        if (length(errors) == 0) TRUE else errors
-    }
+    validity = function(object) .validateLdStatistic(object)
 )
 
-#' @rdname getSnpInfo
-#' @export
-setMethod("getSnpInfo", "LdStatistic", function(x) x@snpInfo)
+# @noRd
+.validateLdStatistic <- function(object) {
+    errors <- character()
+    if (length(object@nRef) != 1L || object@nRef <= 0L) {
+        errors <- c(errors, "'nRef' must be a single positive integer")
+    }
+    if (length(object@inSample) != 1L) {
+        errors <- c(errors, "'inSample' must be a single logical value")
+    }
+    if (length(object) == 0L) {
+        errors <- c(errors, "an LdStatistic must carry at least one variant")
+    }
+    if (length(errors) == 0) TRUE else errors
+}
+
+# The variants of an LD reference, as the GRanges every subclass is built on.
+# Shared by the LdScore() and LdEigen() constructors so the two agree on what
+# a reference panel's variant table looks like.
+# @noRd
+.ldStatRanges <- function(snpInfo, genome) {
+    required <- c("SNP", "CHR", "BP", "A1", "A2")
+    missingCols <- setdiff(required, colnames(snpInfo))
+    if (length(missingCols) > 0L) {
+        abort(glue(
+            "`snpInfo` is missing column(s): ",
+            "{str_flatten(missingCols, ', ')}."
+        ))
+    }
+    gr <- GenomicRanges::GRanges(
+        seqnames = withChrPrefix(as.character(snpInfo$CHR)),
+        ranges = IRanges::IRanges(as.integer(snpInfo$BP), width = 1L)
+    )
+    names(gr) <- as.character(snpInfo$SNP)
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        select(snpInfo, -any_of(c("CHR", "BP"))),
+        row.names = NULL
+    )
+    if (!is.null(genome) && length(genome) == 1L && nzchar(genome)) {
+        GenomeInfoDb::genome(gr) <- genome
+    }
+    gr
+}
 
 #' @rdname getNRef
 #' @export
@@ -71,4 +94,10 @@ setMethod("getLdBlocks", "LdStatistic", function(x) x@ldBlocks)
 
 #' @rdname getGenome
 #' @export
-setMethod("getGenome", "LdStatistic", function(x, ...) x@genome)
+setMethod("getGenome", "LdStatistic", function(x, ...) {
+    # The build lives in seqinfo, not a slot: a GRanges already has somewhere
+    # to keep it, and storing it twice is what the retired LdBlocks class did.
+    build <- unique(GenomeInfoDb::genome(x))
+    build <- build[!is.na(build)]
+    if (length(build) == 0L) NA_character_ else build[[1L]]
+})

@@ -23,12 +23,6 @@
 
 .sldscStdCols <- c("CHR", "SNP", "BP", "CM", "A1", "A2", "MAF")
 
-.sldscChromFromFilename <- function(f) {
-    bn <- basename(f)
-    m <- str_match(bn, "\\.([0-9]+)\\.annot\\.gz$")[1L, ]
-    if (is.na(m[[1L]])) NA_integer_ else as.integer(m[[2L]])
-}
-
 .sldscDetectAnnotCols <- function(filePath) {
     sample <- vroom(filePath, n_max = 5L, show_col_types = FALSE)
     setdiff(names(sample), .sldscStdCols)

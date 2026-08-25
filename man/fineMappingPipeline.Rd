@@ -5,7 +5,6 @@
 \alias{fineMappingPipeline,QtlDataset-method}
 \alias{fineMappingPipeline,MultiStudyQtlDataset-method}
 \alias{fineMappingPipeline,QtlSumStats-method}
-\alias{.fmResolveRFinite}
 \alias{fineMappingPipeline,GwasSumStats-method}
 \alias{fineMappingPipeline,ANY-method}
 \title{Fine-Mapping Pipeline}
@@ -126,10 +125,11 @@ fineMappingPipeline(data, ...)
   rMismatch = "none",
   rssControl = NULL,
   keepFullFit = "fallback",
+  mafCutoff = 0,
+  macCutoff = 0,
+  imissCutoff = 1,
   ...
 )
-
-.fmResolveRFinite(rFinite, serFallback, rMismatch, ldSketch)
 
 \S4method{fineMappingPipeline}{GwasSumStats}(
   data,
@@ -153,6 +153,9 @@ fineMappingPipeline(data, ...)
   rMismatch = "none",
   rssControl = NULL,
   keepFullFit = "fallback",
+  mafCutoff = 0,
+  macCutoff = 0,
+  imissCutoff = 1,
   ...
 )
 
@@ -276,7 +279,7 @@ a resume cache; tuples already present are not refit.}
 (no CV). When \code{> 1}, each method is refit on the training samples of
 every fold and used to predict the held-out samples; the fold partition
 plus per-fold out-of-fold predictions and metrics are stored on each
-\code{FineMappingEntry}'s \code{cvResult} slot (see
+\code{FineMappingRow}'s \code{cvResult} slot (see
 \code{\link{getCvResult}}). \code{twasWeightsPipeline} reuses this
 partition and feeds these predictions into the SR-TWAS ensemble.
 Individual-level (\code{QtlDataset} / \code{MultiStudyQtlDataset}) input
@@ -340,7 +343,7 @@ phenotype/genotype data.}
 \item{verbose}{Verbosity (0 silent, 1 default). Default \code{1}.}
 
 \item{trim}{Logical (length 1). When \code{TRUE} (default) the
-\code{susieFit} slot on each output \code{FineMappingEntry} carries a
+\code{susieFit} slot on each output \code{FineMappingRow} carries a
 trimmed view of the SuSiE fit (the minimal subset needed by downstream
 pipelines). When \code{FALSE} the full untrimmed \code{susie()} return is
 retained so accessors like \code{getSusieFit()} and non-default-coverage
@@ -382,7 +385,7 @@ every available genotype covariate.}
 (default) residualize against the phenotype-side covariates listed in
 \code{phenotypeCovariatesToResidualize}. Set \code{FALSE} to disable
 phenotype-covariate residualization entirely. The marginal univariate
-effects stored on each \code{FineMappingEntry} obey the same
+effects stored on each \code{FineMappingRow} obey the same
 residualization choice as the SuSiE fit itself -- they are computed against
 the same residualized \code{X} / \code{Y}.}
 
@@ -426,10 +429,6 @@ regions that fell back to SER; \code{"all"} keeps it for every region;
 the entry's SuSiE fit and read via \code{getSusieFit(res)$multiEffectFit},
 \code{getSusieFit(res)$R_reliability_flag}, and
 \code{getSusieFit(res)$serFallbackUsed}.}
-
-\item{ldSketch}{Optional \code{\link{GenotypeHandle}} providing the LD
-reference (an LD sketch); attached to the fine-mapping result and used
-for downstream LD-dependent computations. Default \code{NULL}.}
 }
 \value{
 A \code{FineMappingResult} collection keyed by \code{(study, context,
@@ -554,6 +553,23 @@ deliberately not ported here:
         row and a message with the screen reason. An all-screened collection
         yields a valid empty result rather than an error.
 }
+}
+
+\section{Panel filters on the RSS path}{
+ On \code{QtlSumStats} /
+  \code{GwasSumStats} input there is no genotype matrix to filter, so
+  \code{mafCutoff} / \code{macCutoff} / \code{imissCutoff} are measured
+  against the \strong{LD reference panel} instead: a variant whose panel
+  genotypes fall below the cutoffs is dropped before the z-scores and LD
+  matrix are built. The thresholds mean the same thing as on the
+  \code{QtlDataset} path (MAC is converted to a MAF equivalent and the
+  stricter of the two applies), so one number carries across input types.
+  Defaults (\code{0}, \code{0}, \code{1}) filter nothing.
+
+  This discards \emph{observed} variants, unlike
+  \code{summaryStatsQc(imputeOpts = ...)}, which only bounds which variants
+  RAISS will impute. Use it when the panel cannot support the LD estimate a
+  rare variant would need.
 }
 
 \examples{

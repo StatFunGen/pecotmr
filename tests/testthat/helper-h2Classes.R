@@ -34,7 +34,7 @@ make_test_ldblocks <- function() {
         seqnames = c("chr1", "chr1"),
         ranges = IRanges::IRanges(start = c(1, 5001), end = c(5000, 10000))
     )
-    new("LdBlocks", blocks = blocks_gr, genome = "hg19")
+    blocks_gr
 }
 
 make_test_snp_info <- function(n = 10) {

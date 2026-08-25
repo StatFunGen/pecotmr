@@ -54,10 +54,10 @@ gr <- GenomicRanges::GRanges("chr1",
   IRanges::IRanges(seq(50, by = 100, length.out = 20), width = 1))
 S4Vectors::mcols(gr) <- S4Vectors::DataFrame(SNP = paste0("rs", 1:20),
   A1 = "A", A2 = "G", Z = rnorm(20), N = 10000L)
-gh <- new("GenotypeHandle", path = "ref.gds", format = "gds",
-  snpInfo = data.frame(), nSamples = 0L, sampleIds = character(),
-  pgenPtr = NULL)
+panel <- readGenotypes(
+  system.file("extdata", "toy_ref.bed", package = "pecotmr")
+)
 ss <- GwasSumStats(study = "trait1", entry = list(gr),
-  genome = "hg19", ldSketch = gh)
+  genome = "hg19", ldSketch = panel)
 estimateH2(ss, ldEigenExample, method = "lder")
 }

@@ -30,8 +30,8 @@ single-valued \code{study} / \code{genotypePath} /
 
 \item{study}{Study identifier; reconciled with a \code{study} column.}
 
-\item{genotypes}{A \code{\link{GenotypeHandle}} or a genotype path/prefix;
-reconciled with a \code{genotypePath} column.}
+\item{genotypes}{A genotype panel (see \code{\link{readGenotypes}}) or
+a genotype path/prefix; reconciled with a \code{genotypePath} column.}
 
 \item{genotypeCovariates}{A numeric matrix (samples x covariates) or a path
 to a covariate TSV; reconciled with a \code{genotypeCovariatePath} column.}

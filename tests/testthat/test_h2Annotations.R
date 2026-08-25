@@ -228,15 +228,15 @@ test_that("readannotations with BED file creates AnnotationMatrix", {
     result <- readAnnotations(paths, snp_gr, genome = "hg38")
 
     expect_s4_class(result, "AnnotationMatrix")
-    expect_equal(nrow(result@annotations), 3)
-    expect_equal(ncol(result@annotations), 1)
-    expect_equal(colnames(result@annotations), "enhancer")
-    expect_equal(result@genome, "hg38")
+    expect_equal(nrow(assay(result, "annotations")), 3)
+    expect_equal(ncol(assay(result, "annotations")), 1)
+    expect_equal(colnames(assay(result, "annotations")), "enhancer")
+    expect_equal(getGenome(result), "hg38")
     # Auto-detected meta should be binary, candidate tier
-    expect_equal(result@annotationMeta$type, "binary")
-    expect_equal(result@annotationMeta$tier, "candidate")
+    expect_equal(SummarizedExperiment::colData(result)$type, "binary")
+    expect_equal(SummarizedExperiment::colData(result)$tier, "candidate")
     # Overlap check: only position 200 is inside [100,500)
-    expect_equal(as.numeric(result@annotations[, 1]), c(0, 1, 0))
+    expect_equal(as.numeric(assay(result, "annotations")[, 1]), c(0, 1, 0))
 })
 
 
@@ -268,8 +268,8 @@ test_that("readannotations with LDSC annot file creates AnnotationMatrix", {
     result <- readAnnotations(paths, snp_gr)
 
     expect_s4_class(result, "AnnotationMatrix")
-    expect_equal(as.numeric(result@annotations[, 1]), c(1, 0, 1))
-    expect_equal(colnames(result@annotations), "my_score")
+    expect_equal(as.numeric(assay(result, "annotations")[, 1]), c(1, 0, 1))
+    expect_equal(colnames(assay(result, "annotations")), "my_score")
 })
 
 
@@ -309,8 +309,8 @@ test_that("readannotations uses provided annotation_meta", {
 
     expect_s4_class(result, "AnnotationMatrix")
     # Should use the provided meta, not auto-detected
-    expect_equal(result@annotationMeta$tier, "baseline")
-    expect_equal(result@annotationMeta$type, "continuous")
+    expect_equal(SummarizedExperiment::colData(result)$tier, "baseline")
+    expect_equal(SummarizedExperiment::colData(result)$type, "continuous")
 })
 
 
@@ -348,10 +348,10 @@ test_that("readannotations with multiple files creates multi-column matrix", {
     result <- readAnnotations(paths, snp_gr)
 
     expect_s4_class(result, "AnnotationMatrix")
-    expect_equal(ncol(result@annotations), 2)
-    expect_equal(colnames(result@annotations), c("ann1", "ann2"))
-    expect_equal(as.numeric(result@annotations[, "ann1"]), c(1, 0))
-    expect_equal(as.numeric(result@annotations[, "ann2"]), c(0, 1))
+    expect_equal(ncol(assay(result, "annotations")), 2)
+    expect_equal(colnames(assay(result, "annotations")), c("ann1", "ann2"))
+    expect_equal(as.numeric(assay(result, "annotations")[, "ann1"]), c(1, 0))
+    expect_equal(as.numeric(assay(result, "annotations")[, "ann2"]), c(0, 1))
 })
 
 # =============================================================================
@@ -399,8 +399,8 @@ test_that("readAnnotations reads a BigWig file as a continuous annotation", {
     result <- readAnnotations(c(cons = bw), snp_gr)
     expect_s4_class(result, "AnnotationMatrix")
     # A .bw file is auto-detected as a continuous annotation.
-    expect_equal(result@annotationMeta$type, "continuous")
-    expect_equal(as.numeric(result@annotations[, 1]), c(1.5, 2.5, 0))
+    expect_equal(SummarizedExperiment::colData(result)$type, "continuous")
+    expect_equal(as.numeric(assay(result, "annotations")[, 1]), c(1.5, 2.5, 0))
 })
 
 test_that(".readLdscAnnot errors when CHR/BP columns are absent", {

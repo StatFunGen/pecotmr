@@ -17,14 +17,16 @@ LdData(
 \arguments{
 \item{correlation}{A correlation matrix, list of matrices, or NULL.}
 
-\item{genotypeHandle}{A GenotypeHandle, list of GenotypeHandles, or NULL.}
+\item{genotypeHandle}{A genotype panel (see
+\code{\link{readGenotypes}}), a list of panels for a mixture reference,
+a matrix of already-extracted dosages, or NULL.}
 
-\item{snpIdx}{Integer vector of SNP indices, or NULL.}
+\item{snpIdx}{Vector of 1-based SNP indices, coerced to integer, or NULL.}
 
 \item{variants}{A GRanges with variant metadata (must have variant_id in
 mcols, plus A1, A2).}
 
-\item{blockMetadata}{LdBlocks or data.frame with block info.}
+\item{blockMetadata}{GRanges of blocks, or data.frame with block info.}
 
 \item{nRef}{Integer, reference panel sample size.}
 

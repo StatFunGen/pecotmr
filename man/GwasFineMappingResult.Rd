@@ -2,14 +2,13 @@
 % Please edit documentation in R/GwasFineMappingResult.R
 \name{GwasFineMappingResult}
 \alias{GwasFineMappingResult}
-\title{TWAS Weights Collection}
+\title{Create a GwasFineMappingResult Collection}
 \usage{
 GwasFineMappingResult(
   study,
   method,
   entry,
-  region_id = NULL,
-  region = NULL,
+  blockId = NULL,
   traitPos = NULL,
   ldSketch = NULL
 )
@@ -19,69 +18,40 @@ GwasFineMappingResult(
 
 \item{method}{Character vector of fine-mapping method names (per tuple).}
 
-\item{entry}{List / \code{SimpleList} of \code{FineMappingEntry} objects.}
+\item{entry}{List / \code{SimpleList} of \code{FineMappingRow} objects.}
 
-\item{region_id}{Character vector of LD-block identifiers (per tuple). When
-omitted (\code{NULL}), defaults to a per-row synthetic id
-(\code{"region_1"}, \code{"region_2"}, ...) so the (\code{study},
-\code{method}, \code{region_id}) triple is unique. Supplying meaningful
-labels (e.g. \code{"chr22_10516173_17414263"}) is preferred for downstream
-consumers that join on region.}
-
-\item{region}{Optional \code{GRanges} (length \code{length(study)}) genomic
-anchor per row. When \code{NULL} (default) it is derived from
-\code{region_id} (parsing \code{chr_start_end} / \code{chr:start-end}; a
-0-width \code{chrUn} sentinel for ids that do not encode coordinates).
-Carried forward as provenance (e.g. for cTWAS LD-block placement); not part
-of the identity key.}
+\item{blockId}{Optional character vector (per tuple) keying the external LD
+block manifest, e.g. \code{"chr22_10516173_17414263"}. Provenance only,
+not part of the identity key. Supply it when the block BOUNDARIES matter:
+those are the one thing not recoverable from the variants, since adjacent
+blocks' spans leave gaps.}
 
 \item{traitPos}{Optional per-row trait genomic anchor (a \code{GRanges} or
 \code{NULL}), carried forward as provenance; not part of the identity key.
 \code{NULL} (default) omits the column.}
 
-\item{ldSketch}{An optional \code{GenotypeHandle}.}
+\item{ldSketch}{An optional genotype panel (see
+\code{\link{readGenotypes}}).}
 }
 \value{
 A \code{GwasFineMappingResult} object.
 }
 \description{
-S4 collection of TWAS weights keyed by the identity tuple
-  \code{(study, context, trait, method)}. Each entry is a
-  \code{TwasWeightsEntry} carrying one method's weights for one
-  trait/context/study. Implements the \code{DFrame}-subclass collection
-  pattern.
+Construct a \code{GwasFineMappingResult} collection from
+  per-(study, method) tuples and a list of \code{FineMappingRow}
+  payloads. The collection can represent either a single LD block (one row
+  per (study, method)) or a genome-wide sweep across blocks (multiple rows
+  per (study, method), each covering its own genomic range).
 
-Required columns: \code{study}, \code{context}, \code{trait}, \code{method},
-\code{entry}. Each \code{entry} is a \code{TwasWeightsEntry}.
-
-Optional columns \code{jointStudies}, \code{jointContexts},
-\code{jointTraits} appear when the collection contains rows produced by a
-\code{jointSpecification}-driven joint fit. For such a row, the corresponding
-identity-tuple column carries the sentinel \code{"joint"} and the joint
-column lists the semicolon-joined members of the joined axis. For non-joint
-rows the joint columns are \code{NA_character_}. Tuple uniqueness is enforced
-jointly across the identity-tuple columns and any present joint columns.
-
-Construct a \code{GwasFineMappingResult} DFrame-subclass
-  collection from per-(study, method, region_id) tuples and a list of
-  \code{FineMappingEntry} payloads. The collection can represent either a
-  single LD block (one row per (study, method)) or a genome-wide sweep across
-  blocks (multiple rows per (study, method), each tagged with its own
-  region_id).
+  Rows are identified by (\code{study}, \code{method}) plus the element's
+  own range, which is derived from the variants rather than stored, so it
+  cannot drift out of step with them and stays correct after
+  \code{\link{subsetRegion}}.
 }
-\section{Slots}{
-
-\describe{
-\item{\code{ldSketch}}{The LD reference \code{GenotypeHandle} the weights were
-derived against, or \code{NULL} when the weights were learned from
-individual-level data. Used downstream for cross-pipeline LD-sketch
-identity validation.}
-}}
-
 \examples{
 tl <- data.frame(variant_id = paste0("chr1:", 100 * 1:3, ":A:G"),
   pip = c(0.9, 0.5, 0.1), cs = c(1L, 1L, NA))
-fe <- FineMappingEntry(
+fe <- fineMappingRow(
   variantIds = tl$variant_id, susieFit = list(), topLoci = tl)
 GwasFineMappingResult(study = "t1", method = "susie", entry = list(fe))
 }

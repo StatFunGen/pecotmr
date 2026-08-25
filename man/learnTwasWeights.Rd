@@ -64,17 +64,18 @@ already standardized. Default \code{FALSE}.}
 \item{dataType}{Character or \code{NULL}. Data-type label recorded on the
 weights (e.g. \code{"individual"}).}
 
-\item{ldSketch}{A \code{GenotypeHandle} LD sketch to record on the weights,
-or \code{NULL}.}
+\item{ldSketch}{A genotype panel (see \code{\link{readGenotypes}}) to
+record on the weights as their LD sketch, or \code{NULL}.}
 
 \item{verbose}{Integer controlling verbosity level: 0 = suppress all
 messages, 1 = suppress external package messages (default), 2 = show all
 messages including those from external packages.}
 
-\item{seed}{Integer or \code{NULL}. When supplied, seeds the main-process RNG
-via \code{set.seed} and the parallel method-fitting RNG via the
-\code{BiocParallel} \code{RNGseed}, for reproducibility under
-multi-threading. \code{NULL} (default) leaves the session RNG untouched.}
+\item{seed}{Integer or \code{NULL}. When supplied, seeds the main-process
+RNG and the parallel method-fitting RNG via the \code{BiocParallel}
+\code{RNGseed}, for reproducibility under multi-threading. The
+main-process seed is scoped to the call, so the session RNG is left as it
+was found. \code{NULL} (default) does not seed at all.}
 }
 \value{
 A list where each element is named after a method and contains the

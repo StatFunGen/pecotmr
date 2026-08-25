@@ -4,10 +4,10 @@
 \alias{extractTopPipInfo}
 \title{Extract Information for Top Variant from Finemapping Results}
 \usage{
-extractTopPipInfo(finemappingEntry, sumstats)
+extractTopPipInfo(fmRow, sumstats)
 }
 \arguments{
-\item{finemappingEntry}{A \code{\link{FineMappingEntry}} carrying the SuSiE
+\item{fmRow}{A \code{\link{fineMappingRow}} carrying the SuSiE
 fit and variant ids (e.g. from \code{\link{getFineMappingResult}}).}
 
 \item{sumstats}{A list or data frame carrying a \code{z} element aligned to
@@ -47,7 +47,7 @@ This function is particularly useful for capturing information about
 vids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:G:A")
 fit <- list(pip = c(0.1, 0.7, 0.2))
 tl <- data.frame(variant_id = vids, pip = c(0.1, 0.7, 0.2))
-fe <- FineMappingEntry(variantIds = vids, susieFit = fit, topLoci = tl)
+fe <- fineMappingRow(variantIds = vids, susieFit = fit, topLoci = tl)
 extractTopPipInfo(fe, sumstats = list(z = c(1.0, 3.5, -0.5)))
 
 }

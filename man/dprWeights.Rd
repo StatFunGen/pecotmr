@@ -63,14 +63,14 @@ set.seed(1)
 n <- 50
 p <- 8
 X <- matrix(rnorm(n * p), n, p)
-colnames(X) <- paste0("v", 1:p)
+colnames(X) <- sprintf("chr1:\%d:A:G", 100L * (1:p))
 y <- X[, 1] * 0.5 + rnorm(n)
 dprGibbsWeights(X, y, sStep = 500)
 set.seed(1)
 n <- 50
 p <- 8
 X <- matrix(rnorm(n * p), n, p)
-colnames(X) <- paste0("v", 1:p)
+colnames(X) <- sprintf("chr1:\%d:A:G", 100L * (1:p))
 y <- X[, 1] * 0.5 + rnorm(n)
 dprAdaptiveGibbsWeights(X, y)
 }

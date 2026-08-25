@@ -14,6 +14,8 @@ GwasSumStats(
   nControl = NULL,
   nSample = NULL,
   qcInfo = list(),
+  ldBlocks = NULL,
+  blockId = NULL,
   ...
 )
 }
@@ -27,7 +29,8 @@ study.}
 \code{"hg19"}, \code{"hg38"}). Uniform across the collection because all
 entries share the same LD sketch.}
 
-\item{ldSketch}{A \code{GenotypeHandle} carrying the LD reference.}
+\item{ldSketch}{A genotype panel (see \code{\link{readGenotypes}})
+carrying the LD reference.}
 
 \item{varY}{Optional numeric vector of per-study phenotype variances
 (\code{NA_real_} entries allowed). Used by the sufficient-statistic
@@ -53,6 +56,24 @@ on construction; populated by \code{summaryStatsQc()} with a per-step audit
 record. Fine-mapping / TWAS pipelines reject inputs where
 \code{length(getQcInfo(x)) == 0}.}
 
+\item{ldBlocks}{Optional LD-block specification: an \code{LdBlocks}, a
+\code{GRanges}, a data.frame with \code{chrom}/\code{start}/\code{end}
+(plus an optional \code{blockId}), or a path to such a table. When
+supplied, each
+study's variants are split into one element per block rather than one per
+chromosome, and \code{blockId} takes the block's key (its \code{names},
+else a \code{blockId} metadata column, else its coordinates). cTWAS needs
+this granularity: its EM estimates parameters across blocks, so a
+per-chromosome split is too coarse. Variants overlapping no block are
+dropped with a warning, because a variant outside every block has no
+block-local LD to be fine-mapped against.}
+
+\item{blockId}{Optional character vector of block keys, one per
+\code{entry}, for entries that are \strong{already} split by block. Use
+it to carry existing keys through a rebuild; without it a rebuild would
+re-derive them as seqnames and collapse distinct blocks onto one key.
+Mutually exclusive with \code{ldBlocks}.}
+
 \item{...}{Additional per-study columns to attach to the collection.}
 }
 \value{
@@ -69,10 +90,11 @@ minimum \code{SNP}, \code{A1}, \code{A2}, \code{Z}, \code{N}; optionally
 \code{MAF}, \code{INFO}, \code{BETA}, \code{SE}, \code{P}).
 }
 \examples{
-gh <- readGenotypes(
+panel <- readGenotypes(
   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
 gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100 * 1:3, width = 1))
 S4Vectors::mcols(gr) <- S4Vectors::DataFrame(SNP = paste0("rs", 1:3),
   A1 = "A", A2 = "G", Z = rnorm(3), N = 100L)
-GwasSumStats(study = "t1", entry = list(gr), genome = "hg38", ldSketch = gh)
+GwasSumStats(study = "t1", entry = list(gr), genome = "hg38",
+  ldSketch = panel)
 }

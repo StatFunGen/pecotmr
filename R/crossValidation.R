@@ -349,10 +349,14 @@
 # draws (fold partitioning, variant sub-sampling, single-threaded fitting);
 # BiocParallel workers seed their own L'Ecuyer streams via .bpSeedParam. A NULL
 # seed leaves the session RNG untouched so an outer set.seed() still governs it.
+#
+# Scoped to the CALLER's frame rather than set.seed()'s permanent mutation, so
+# a seeded call does not leave the user's session RNG changed after it returns.
+# Bioconductor also asks packages not to call set.seed() directly.
 # @noRd
 .applySeed <- function(seed) {
     if (!is.null(seed)) {
-        set.seed(seed)
+        withr::local_seed(seed, .local_envir = parent.frame())
     }
 }
 

@@ -13,10 +13,10 @@ getBlockMetadata(x)
 \item{x}{An \code{LdData}.}
 }
 \value{
-An \code{LdBlocks} or \code{data.frame}.
+A \code{GRanges} or \code{data.frame}.
 }
 \description{
-Return the block metadata (\code{LdBlocks} or \code{data.frame})
+Return the block metadata (\code{GRanges} or \code{data.frame})
   carried by an \code{LdData}.
 }
 \examples{

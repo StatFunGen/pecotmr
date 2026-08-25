@@ -154,8 +154,9 @@ setMethod(
     splitByContext,
     splitByTrait
 ) {
-    hasContextSlot <- is_in("context", names(x))
-    hasTraitSlot <- is_in("trait", names(x))
+    cols <- .tupleColumnNames(x)
+    hasContextSlot <- is_in("context", cols)
+    hasTraitSlot <- is_in("trait", cols)
     rows <- seq_len(nrow(x))
     if (!is.null(study)) {
         rows <- rows[as.character(x$study)[rows] == study]
@@ -192,12 +193,12 @@ setMethod(
 .rowSpec <- function(r, x) {
     list(
         study = as.character(x$study)[r],
-        context = if (is_in("context", names(x))) {
+        context = if (is_in("context", .tupleColumnNames(x))) {
             as.character(x$context)[r]
         } else {
             NA_character_
         },
-        trait = if (is_in("trait", names(x))) {
+        trait = if (is_in("trait", .tupleColumnNames(x))) {
             as.character(x$trait)[r]
         } else {
             NA_character_

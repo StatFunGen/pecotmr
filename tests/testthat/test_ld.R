@@ -914,26 +914,33 @@ test_that("createLdMatrix merges non-overlapping blocks", {
         c(1, 0.5, 0.5, 1),
         2,
         2,
-        dimnames = list(c("v1", "v2"), c("v1", "v2"))
+        dimnames = list(
+            c("chr1:100:A:G", "chr1:200:A:G"),
+            c("chr1:100:A:G", "chr1:200:A:G")
+        )
     )
     m2 <- matrix(
         c(1, 0.3, 0.3, 1),
         2,
         2,
-        dimnames = list(c("v3", "v4"), c("v3", "v4"))
+        dimnames = list(
+            c("chr1:300:A:G", "chr1:400:A:G"),
+            c("chr1:300:A:G", "chr1:400:A:G")
+        )
     )
 
     variants <- list(
-        data.frame(variants = c("v1", "v2")),
-        data.frame(variants = c("v3", "v4"))
+        data.frame(variants = c("chr1:100:A:G", "chr1:200:A:G")),
+        data.frame(variants = c("chr1:300:A:G", "chr1:400:A:G"))
     )
     result <- pecotmr:::createLdMatrix(list(m1, m2), variants)
 
     expect_equal(nrow(result), 4)
     expect_equal(ncol(result), 4)
-    expect_equal(result["v1", "v2"], 0.5)
-    expect_equal(result["v3", "v4"], 0.3)
-    expect_equal(result["v1", "v3"], 0) # Cross-block should be 0
+    expect_equal(result["chr1:100:A:G", "chr1:200:A:G"], 0.5)
+    expect_equal(result["chr1:300:A:G", "chr1:400:A:G"], 0.3)
+    # Cross-block should be 0
+    expect_equal(result["chr1:100:A:G", "chr1:300:A:G"], 0)
 })
 
 test_that("createLdMatrix handles overlapping boundary variant", {
@@ -941,18 +948,24 @@ test_that("createLdMatrix handles overlapping boundary variant", {
         c(1, 0.5, 0.5, 1),
         2,
         2,
-        dimnames = list(c("v1", "v2"), c("v1", "v2"))
+        dimnames = list(
+            c("chr1:100:A:G", "chr1:200:A:G"),
+            c("chr1:100:A:G", "chr1:200:A:G")
+        )
     )
     m2 <- matrix(
         c(1, 0.3, 0.3, 1),
         2,
         2,
-        dimnames = list(c("v2", "v3"), c("v2", "v3"))
+        dimnames = list(
+            c("chr1:200:A:G", "chr1:300:A:G"),
+            c("chr1:200:A:G", "chr1:300:A:G")
+        )
     )
 
     variants <- list(
-        data.frame(variants = c("v1", "v2")),
-        data.frame(variants = c("v2", "v3"))
+        data.frame(variants = c("chr1:100:A:G", "chr1:200:A:G")),
+        data.frame(variants = c("chr1:200:A:G", "chr1:300:A:G"))
     )
     result <- pecotmr:::createLdMatrix(list(m1, m2), variants)
 
@@ -969,7 +982,7 @@ test_that("validateBlockStructure passes for proper block structure", {
     mat[4:6, 4:6] <- 0.5
     diag(mat) <- 1
 
-    variant_ids <- paste0("v", 1:6)
+    variant_ids <- sprintf("chr1:%d:A:G", 100L * (1:6))
     rownames(mat) <- colnames(mat) <- variant_ids
 
     block_meta <- data.frame(
@@ -991,7 +1004,7 @@ test_that("validateBlockStructure errors on non-block structure", {
     mat <- matrix(0.5, 4, 4)
     diag(mat) <- 1
 
-    variant_ids <- paste0("v", 1:4)
+    variant_ids <- sprintf("chr1:%d:A:G", 100L * (1:4))
     rownames(mat) <- colnames(mat) <- variant_ids
 
     block_meta <- data.frame(
@@ -1204,7 +1217,7 @@ test_that("checkLd eigenfix does nothing when matrix is already PD", {
 
 test_that("extractBlockMatrices warns and skips out-of-range blocks", {
     mat <- diag(4)
-    vnames <- paste0("v", 1:4)
+    vnames <- sprintf("chr1:%d:A:G", 100L * (1:4))
     rownames(mat) <- colnames(mat) <- vnames
     blockMetadata <- data.frame(
         blockId = c(1, 2),
@@ -1936,7 +1949,7 @@ test_that("enforceDesignFullRank fallback to correlation pruning works", {
         X[, 3] + rnorm(n, sd = 1e-10),
         X[, 1] + X[, 2] + rnorm(n, sd = 1e-10)
     )
-    colnames(X) <- paste0("v", seq_len(ncol(X)))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(ncol(X))))
     C <- matrix(rnorm(n), n, 1)
     result <- enforceDesignFullRank(
         X,
@@ -2010,7 +2023,7 @@ test_that("ldPruneByCorrelation verbose reports pruning", {
         rnorm(100),
         rnorm(100)
     )
-    colnames(X) <- paste0("v", 1:5)
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:5))
     expect_message(
         ldPruneByCorrelation(X, corThres = 0.5, verbose = TRUE),
         "pruned"
@@ -2021,7 +2034,7 @@ test_that("ldPruneByCorrelation verbose reports no pruning", {
     # Create a small matrix with no correlated columns
     set.seed(42)
     X <- matrix(rnorm(500), 100, 5)
-    colnames(X) <- paste0("v", 1:5)
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:5))
     expect_message(
         ldPruneByCorrelation(X, corThres = 0.999, verbose = TRUE),
         "no columns pruned"
@@ -2374,7 +2387,7 @@ test_that("ldPruneByCorrelation removes highly correlated columns", {
     n <- 50
     p <- 10
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- paste0("v", 1:p)
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:p))
     X[, 2] <- X[, 1] + rnorm(n, sd = 0.01)
     result <- ldPruneByCorrelation(X, corThres = 0.9)
     expect_true(ncol(result$X.new) < p)
@@ -2386,7 +2399,7 @@ test_that("ldPruneByCorrelation keeps all columns when uncorrelated", {
     n <- 100
     p <- 5
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- paste0("v", 1:p)
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:p))
     result <- ldPruneByCorrelation(X, corThres = 0.99)
     expect_equal(ncol(result$X.new), p)
     expect_equal(result$filter.id, 1:p)
@@ -2408,7 +2421,7 @@ test_that("ldPruneByCorrelation errors on single-column input", {
     set.seed(42)
     n <- 30
     X <- matrix(rnorm(n), nrow = n, ncol = 1)
-    colnames(X) <- "v1"
+    colnames(X) <- "chr1:100:A:G"
     expect_error(ldPruneByCorrelation(X, corThres = 0.8))
 })
 
@@ -2417,7 +2430,7 @@ test_that("ldPruneByCorrelation strict threshold removes at least as many as len
     n <- 100
     p <- 5
     X <- matrix(rnorm(n * p), nrow = n)
-    colnames(X) <- paste0("v", 1:p)
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:p))
     X[, 2] <- X[, 1] + rnorm(n, sd = 0.1)
     X[, 3] <- X[, 1] + rnorm(n, sd = 0.1)
     X[, 5] <- X[, 4] + rnorm(n, sd = 0.1)
@@ -2439,7 +2452,7 @@ test_that("ldPruneByCorrelation preserves colnames when no columns deleted", {
 test_that("ldPruneByCorrelation is silent by default, chatty with verbose", {
     set.seed(1)
     X <- matrix(rnorm(100), 20, 5)
-    colnames(X) <- paste0("v", 1:5)
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:5))
     X[, 2] <- X[, 1] + rnorm(20, sd = 1e-3)
     expect_silent(ldPruneByCorrelation(X, corThres = 0.9))
     expect_message(
@@ -2457,7 +2470,7 @@ test_that("ldPruneByCorrelation is silent by default, chatty with verbose", {
 
 test_that("dropCollinearColumns returns X unchanged when problematicCols is empty", {
     X <- matrix(rnorm(100), nrow = 20, ncol = 5)
-    colnames(X) <- paste0("v", 1:5)
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:5))
     result <- pecotmr:::dropCollinearColumns(
         X,
         problematicCols = character(0),
@@ -2468,14 +2481,14 @@ test_that("dropCollinearColumns returns X unchanged when problematicCols is empt
 
 test_that("dropCollinearColumns removes single problematic column", {
     X <- matrix(rnorm(100), nrow = 20, ncol = 5)
-    colnames(X) <- paste0("v", 1:5)
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:5))
     result <- pecotmr:::dropCollinearColumns(
         X,
-        problematicCols = "v3",
+        problematicCols = "chr1:300:A:G",
         strategy = "correlation"
     )
     expect_equal(ncol(result), 4)
-    expect_false("v3" %in% colnames(result))
+    expect_false("chr1:300:A:G" %in% colnames(result))
 })
 
 test_that("dropCollinearColumns variance strategy removes lowest variance column", {
@@ -2497,10 +2510,10 @@ test_that("dropCollinearColumns variance strategy removes lowest variance column
 test_that("dropCollinearColumns correlation strategy with two columns removes one", {
     set.seed(42)
     X <- matrix(rnorm(100), nrow = 20, ncol = 5)
-    colnames(X) <- paste0("v", 1:5)
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:5))
     result <- pecotmr:::dropCollinearColumns(
         X,
-        problematicCols = c("v1", "v2"),
+        problematicCols = c("chr1:100:A:G", "chr1:200:A:G"),
         strategy = "correlation"
     )
     expect_equal(ncol(result), 4)
@@ -2510,12 +2523,12 @@ test_that("dropCollinearColumns correlation strategy with 3+ cols removes highes
     set.seed(42)
     n <- 50
     X <- matrix(rnorm(n * 4), nrow = n, ncol = 4)
-    colnames(X) <- paste0("v", 1:4)
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:4))
     X[, 2] <- X[, 1] + rnorm(n, sd = 0.01)
     X[, 3] <- X[, 1] + rnorm(n, sd = 0.01)
     result <- pecotmr:::dropCollinearColumns(
         X,
-        problematicCols = c("v1", "v2", "v3"),
+        problematicCols = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
         strategy = "correlation"
     )
     expect_equal(ncol(result), 3)
@@ -2525,25 +2538,25 @@ test_that("dropCollinearColumns response_correlation strategy removes lowest |co
     set.seed(42)
     n <- 50
     X <- matrix(rnorm(n * 3), nrow = n, ncol = 3)
-    colnames(X) <- c("v1", "v2", "v3")
+    colnames(X) <- c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G")
     response <- X[, 1] * 2 + rnorm(n, sd = 0.1)
     result <- pecotmr:::dropCollinearColumns(
         X,
-        problematicCols = c("v1", "v2", "v3"),
+        problematicCols = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
         strategy = "response_correlation",
         response = response
     )
     expect_equal(ncol(result), 2)
-    expect_true("v1" %in% colnames(result))
+    expect_true("chr1:100:A:G" %in% colnames(result))
 })
 
 test_that("dropCollinearColumns errors on response_correlation without response", {
     X <- matrix(rnorm(60), 20, 3)
-    colnames(X) <- c("v1", "v2", "v3")
+    colnames(X) <- c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G")
     expect_error(
         pecotmr:::dropCollinearColumns(
             X,
-            problematicCols = c("v1", "v2"),
+            problematicCols = c("chr1:100:A:G", "chr1:200:A:G"),
             strategy = "response_correlation"
         ),
         "response"
@@ -2552,11 +2565,11 @@ test_that("dropCollinearColumns errors on response_correlation without response"
 
 test_that("dropCollinearColumns errors on invalid strategy", {
     X <- matrix(rnorm(100), nrow = 20, ncol = 5)
-    colnames(X) <- paste0("v", 1:5)
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:5))
     expect_error(
         pecotmr:::dropCollinearColumns(
             X,
-            problematicCols = c("v1", "v2"),
+            problematicCols = c("chr1:100:A:G", "chr1:200:A:G"),
             strategy = "invalid_strategy"
         ),
         "must be one of"
@@ -2594,7 +2607,7 @@ test_that("enforceDesignFullRank returns full-rank matrix when already full rank
     set.seed(42)
     n <- 50
     X <- matrix(rnorm(n * 3), nrow = n, ncol = 3)
-    colnames(X) <- paste0("v", 1:3)
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:3))
     C <- matrix(rnorm(n * 2), nrow = n, ncol = 2)
     result <- enforceDesignFullRank(X = X, C = C, strategy = "correlation")
     expect_true(is.matrix(result))
@@ -2605,7 +2618,7 @@ test_that("enforceDesignFullRank handles rank-deficient design via correlation f
     set.seed(42)
     n <- 50
     X <- matrix(rnorm(n * 4), nrow = n, ncol = 4)
-    colnames(X) <- paste0("v", 1:4)
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:4))
     X[, 4] <- X[, 1] + X[, 2]
     result <- enforceDesignFullRank(X = X, C = NULL, strategy = "correlation")
     design <- cbind(1, result)
@@ -2625,7 +2638,7 @@ test_that("enforceDesignFullRank is silent by default", {
     set.seed(42)
     n <- 50
     X <- matrix(rnorm(n * 3), n, 3)
-    colnames(X) <- paste0("v", 1:3)
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:3))
     expect_silent(enforceDesignFullRank(
         X = X,
         C = NULL,
@@ -3366,16 +3379,19 @@ test_that("createLdMatrix skips empty variant-list entries", {
         c(1, 0.5, 0.5, 1),
         2,
         2,
-        dimnames = list(c("v1", "v2"), c("v1", "v2"))
+        dimnames = list(
+            c("chr1:100:A:G", "chr1:200:A:G"),
+            c("chr1:100:A:G", "chr1:200:A:G")
+        )
     )
     variants <- list(
         data.frame(variants = character(0)), # empty -> next (line 229)
-        data.frame(variants = c("v1", "v2"))
+        data.frame(variants = c("chr1:100:A:G", "chr1:200:A:G"))
     )
     result <- pecotmr:::createLdMatrix(list(matrix(0, 0, 0), m1), variants)
     expect_equal(nrow(result), 2L)
-    expect_equal(rownames(result), c("v1", "v2"))
-    expect_equal(result["v1", "v2"], 0.5)
+    expect_equal(rownames(result), c("chr1:100:A:G", "chr1:200:A:G"))
+    expect_equal(result["chr1:100:A:G", "chr1:200:A:G"], 0.5)
 })
 
 test_that("loadLdMatrix removes duplicate variants from the backend result", {
@@ -3484,7 +3500,7 @@ test_that("loadLdFromGenotype warns when .afreq is missing some variants", {
 
 test_that(".ldFromSketch drops variants absent from the panel when onMissing='drop'", {
     skip_if_not_installed("pgenlibr")
-    h <- readGenotypes(
+    h <- readGenotypeHandle(
         file.path(geno_test_data_dir, "test_variants"),
         format = "plink2"
     )
@@ -3505,7 +3521,7 @@ test_that(".ldFromSketch drops variants absent from the panel when onMissing='dr
 
 test_that(".ldFromSketch resolves chr-prefixed request ids against a non-prefixed panel", {
     skip_if_not_installed("pgenlibr")
-    h <- readGenotypes(
+    h <- readGenotypeHandle(
         file.path(geno_test_data_dir, "test_variants"),
         format = "plink2"
     )
@@ -3519,7 +3535,7 @@ test_that(".ldFromSketch resolves chr-prefixed request ids against a non-prefixe
 
 test_that(".ldFromSketch resolves non-prefixed request ids against a chr-prefixed panel", {
     skip_if_not_installed("pgenlibr")
-    h <- readGenotypes(
+    h <- readGenotypeHandle(
         file.path(geno_test_data_dir, "test_variants"),
         format = "plink2"
     )
@@ -3532,7 +3548,7 @@ test_that(".ldFromSketch resolves non-prefixed request ids against a chr-prefixe
 
 test_that(".ldFromSketch is unchanged when request and panel share a convention", {
     skip_if_not_installed("pgenlibr")
-    h <- readGenotypes(
+    h <- readGenotypeHandle(
         file.path(geno_test_data_dir, "test_variants"),
         format = "plink2"
     )
@@ -3544,7 +3560,7 @@ test_that(".ldFromSketch is unchanged when request and panel share a convention"
 
 test_that(".ldFromSketch still errors on a genuinely-absent variant after reconciliation", {
     skip_if_not_installed("pgenlibr")
-    h <- readGenotypes(
+    h <- readGenotypeHandle(
         file.path(geno_test_data_dir, "test_variants"),
         format = "plink2"
     )
@@ -3568,13 +3584,13 @@ test_that(".requireMatchingLdSketches errors when slots are not GenotypeHandle",
             list(b = 2),
             "testPipeline"
         ),
-        "must both be GenotypeHandle"
+        "must both be genotype panels"
     )
 })
 
 test_that(".requireMatchingLdSketches errors when panels differ in a column", {
     skip_if_not_installed("pgenlibr")
-    h <- readGenotypes(
+    h <- readGenotypeHandle(
         file.path(geno_test_data_dir, "test_variants"),
         format = "plink2"
     )
@@ -3792,7 +3808,7 @@ test_that("partitionLdMatrix accepts LdBlocks blockMetadata", {
         blockStart = c(100L, 300L),
         blockEnd = c(200L, 400L)
     )
-    ldb <- new("LdBlocks", blocks = gr_blocks, genome = "hg38")
+    ldb <- gr_blocks
     ref <- pecotmr:::parseVariantId(variant_ids)
     ref$variant_id <- variant_ids
     gr_vars <- pecotmr:::.refPanelToGranges(ref)
@@ -3871,7 +3887,7 @@ test_that("partitionLdMatrix removes blocks with invalid indices and reindexes",
 
 test_that("validateBlockStructure flags out-of-range block indices", {
     mat <- diag(4)
-    vnames <- paste0("v", 1:4)
+    vnames <- sprintf("chr1:%d:A:G", 100L * (1:4))
     rownames(mat) <- colnames(mat) <- vnames
     bm <- data.frame(
         blockId = c(1L, 2L),
@@ -3888,7 +3904,7 @@ test_that("validateBlockStructure flags out-of-range block indices", {
 
 test_that("extractBlockMatrices skips blocks where endIdx < startIdx", {
     mat <- diag(4)
-    vnames <- paste0("v", 1:4)
+    vnames <- sprintf("chr1:%d:A:G", 100L * (1:4))
     rownames(mat) <- colnames(mat) <- vnames
     bm <- data.frame(
         blockId = c(1L, 2L),
@@ -4301,3 +4317,140 @@ test_that("ldPruneByCorrelation and computeLd fall back to base cor() when Rfast
 # =============================================================================
 # detectVariantConvention — uncovered line 586
 # =============================================================================
+
+# ---------------------------------------------------------------------------
+# .panelVariantStats / .panelVariantFilter
+#
+# The shared measurement of "how common and how well-genotyped is this variant
+# in the LD panel". Both the analysis-time RSS filter and the RAISS
+# imputation-target filter read it, so a variant is judged the same way
+# wherever it is judged.
+# ---------------------------------------------------------------------------
+
+# @noRd
+.pvf_dosage <- function() {
+    set.seed(11)
+    nS <- 100L
+    af <- c(rep(0.35, 5L), rep(0.004, 5L))
+    d <- vapply(af, function(f) rbinom(nS, 2L, f), numeric(nS))
+    colnames(d) <- sprintf("chr1:%d:A:G", 1000L * seq_along(af))
+    d[1:80, 2] <- NA
+    d
+}
+
+test_that(".panelVariantStats measures MAF, AF and missingness", {
+    d <- .pvf_dosage()
+    st <- .panelVariantStats(d)
+    expect_named(st, c("af", "maf", "missRate"))
+    expect_true(all(st$maf <= 0.5, na.rm = TRUE))
+    # The rare half sits far below the common half.
+    expect_lt(max(st$maf[6:10]), min(st$maf[1:5]))
+    expect_equal(st$missRate[[2]], 0.8)
+    expect_equal(st$missRate[[1]], 0)
+})
+
+test_that(".panelVariantStats needs un-imputed dosage to see missingness", {
+    # Mean-imputation fills every hole, so missingness would read as zero
+    # everywhere. This pins why the callers pass meanImpute = FALSE.
+    d <- .pvf_dosage()
+    filled <- d
+    filled[is.na(filled)] <- 0
+    expect_gt(.panelVariantStats(d)$missRate[[2]], 0)
+    expect_equal(.panelVariantStats(filled)$missRate[[2]], 0)
+})
+
+test_that(".panelVariantStats reports NA MAF for an all-missing variant", {
+    d <- .pvf_dosage()
+    d[, 3] <- NA_real_
+    st <- .panelVariantStats(d)
+    expect_true(is.na(st$maf[[3]]))
+    expect_equal(st$missRate[[3]], 1)
+})
+
+test_that(".panelVariantFilter is a no-op at its defaults", {
+    data(qtlDatasetExample)
+    gh <- getGenotypes(qtlDatasetExample)
+    handle <- qtlDatasetExample@genotypes
+    ids <- normalizeVariantId(getSnpInfo(handle)$SNP)
+    expect_identical(.panelVariantFilter(handle, ids), ids)
+})
+
+test_that(".panelVariantFilter drops panel-rare variants", {
+    data(qtlDatasetExample)
+    handle <- qtlDatasetExample@genotypes
+    ids <- normalizeVariantId(getSnpInfo(handle)$SNP)
+    loose <- .panelVariantFilter(handle, ids, mafCutoff = 0.05)
+    tight <- .panelVariantFilter(handle, ids, mafCutoff = 0.2)
+    expect_lt(length(loose), length(ids))
+    expect_lt(length(tight), length(loose))
+    # Kept sets are nested as the cutoff rises, and order is the caller's.
+    expect_true(all(is_in(tight, loose)))
+    expect_identical(loose, ids[is_in(ids, loose)])
+})
+
+test_that(".panelVariantFilter treats MAC as a MAF equivalent", {
+    data(qtlDatasetExample)
+    handle <- qtlDatasetExample@genotypes
+    ids <- normalizeVariantId(getSnpInfo(handle)$SNP)
+    nSamp <- getNSamples(handle)
+    # macCutoff / (2 * nSamples) is the same threshold as mafCutoff.
+    byMac <- .panelVariantFilter(handle, ids, macCutoff = 0.1 * 2 * nSamp)
+    byMaf <- .panelVariantFilter(handle, ids, mafCutoff = 0.1)
+    expect_identical(byMac, byMaf)
+    # The stricter of the two wins.
+    expect_identical(
+        .panelVariantFilter(handle, ids, mafCutoff = 0.2, macCutoff = 2),
+        .panelVariantFilter(handle, ids, mafCutoff = 0.2)
+    )
+})
+
+test_that(".panelVariantFilter drops high-missingness variants", {
+    data(qtlDatasetExample)
+    handle <- qtlDatasetExample@genotypes
+    ids <- normalizeVariantId(getSnpInfo(handle)$SNP)
+    strict <- .panelVariantFilter(handle, ids, imissCutoff = 0)
+    expect_lt(length(strict), length(ids))
+    # A cutoff above the panel's worst variant keeps everything.
+    expect_identical(.panelVariantFilter(handle, ids, imissCutoff = 1), ids)
+})
+
+test_that(".panelVariantFilter passes through ids absent from the panel", {
+    # Whether a missing variant is an error or is dropped belongs to
+    # .ldFromSketch's `onMissing`; deciding it here too would let the two
+    # disagree about the same variant.
+    data(qtlDatasetExample)
+    handle <- qtlDatasetExample@genotypes
+    ids <- normalizeVariantId(getSnpInfo(handle)$SNP)[1:3]
+    withGhost <- c("chr9:999:A:G", ids)
+    expect_true(is_in(
+        "chr9:999:A:G",
+        .panelVariantFilter(handle, withGhost, mafCutoff = 0.001)
+    ))
+})
+
+test_that(".panelVariantFilter handles empty and NULL input", {
+    data(qtlDatasetExample)
+    handle <- qtlDatasetExample@genotypes
+    expect_length(
+        .panelVariantFilter(handle, character(0), mafCutoff = 0.1),
+        0L
+    )
+    expect_identical(
+        .panelVariantFilter(NULL, "chr1:1:A:G", mafCutoff = 0.1),
+        "chr1:1:A:G"
+    )
+})
+
+
+test_that(".panelCutoffs short-circuits when no cutoff is set", {
+    # NULL means the panel is never touched, which is what keeps the default
+    # path free of an extra dosage read.
+    expect_null(.panelCutoffs(list()))
+    expect_null(.panelCutoffs(list(
+        mafCutoff = 0,
+        macCutoff = 0,
+        imissCutoff = 1
+    )))
+    expect_equal(.panelCutoffs(list(mafCutoff = 0.01))$mafCutoff, 0.01)
+    expect_equal(.panelCutoffs(list(imissCutoff = 0.5))$imissCutoff, 0.5)
+})

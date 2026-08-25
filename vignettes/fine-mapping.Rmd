@@ -35,8 +35,8 @@ Method arguments are the same across input classes; `fineMappingPipeline()`
 routes `methods = "susie"` to `susieR::susie` for individual-level data
 and to `susieR::susie_rss` for summary-statistics inputs automatically.
 
-The output is always a `FineMappingResult` (a DFrame-subclass collection
-of per-tuple `FineMappingEntry` payloads).
+The output is always a `FineMappingResult` (a `GRangesList`-subclass
+collection, one element per fine-mapped tuple).
 
 ```{r load-packages}
 library(pecotmr)
@@ -140,7 +140,7 @@ fmrSs <- fineMappingPipeline(qtlSumStatsExample, methods = "susie")
 fmrSs
 ```
 
-The `QtlSumStats` collection carries an `ldSketch` `GenotypeHandle`; the
+The `QtlSumStats` collection carries an `ldSketch` genotype panel; the
 pipeline pulls the per-region LD from there automatically.
 
 ## GWAS summary-statistics fine-mapping
@@ -199,25 +199,52 @@ See `?jointSpecification` for the specification grammar.
 
 ## Reading the result
 
-`FineMappingResult` is a DFrame subclass: subsetting with `[`,
-concatenating with `c()`, and column access via `$` all work as on a
-DataFrame. The per-tuple payload lives in the `entry` column as a
-`FineMappingEntry`:
+`FineMappingResult` is a `GRangesList` subclass, one element per
+`(study, context, trait, method)` tuple. The element is the fitted variant
+set as a `GRanges`, so the result is addressable by genomic range as well as
+by tuple; the tuple itself and the per-tuple payloads live in `mcols()`,
+reachable with `$`:
 
-```{r fm-entry}
-entry <- fmr$entry[[1L]]
-class(entry)
-slotNames(entry)
+```{r fm-shape}
+fmr
+colnames(fmr)
+lengths(fmr) # variants per tuple
 ```
 
-Each entry carries:
+Rather than reaching into the payload, use the view accessors. Each returns a
+tidy table over the whole collection, with the tuple columns carried along:
 
-- `variantIds` — the LD-aligned variant set the fit was computed on
--  `trimmedFit` — a slim list containing `alpha`, `lbf_variable`, `mu`, `mu2`,
-    `X_column_scale_factors`, `pip`, and credible-set metadata
--  `topLoci` — the long-format per-variant summary used by downstream pipelines
-    and `vcfWriter`
-- `sumstats` — optional sumstats passed through for reporting
+```{r fm-views}
+head(getTopLoci(fmr), 3) # per-variant posterior summary
+head(getCs(fmr), 3) # credible-set membership
+head(getCredibleSetSummary(fmr), 3) # one row per credible set
+```
+
+Passing a tuple selects a single fit and returns that tuple's values on their
+own — a bare vector rather than a table:
+
+```{r fm-one-tuple}
+key <- list(
+    study = fmr$study[[1L]],
+    context = fmr$context[[1L]],
+    trait = fmr$trait[[1L]],
+    method = fmr$method[[1L]]
+)
+pip <- do.call(getPip, c(list(fmr), key))
+length(pip)
+```
+
+The underlying SuSiE fit is available with `getSusieFit()` and the
+cross-validation record with `getCvResult()`, both keyed the same way.
+Range-based subsetting works directly:
+
+```{r fm-range}
+window <- GenomicRanges::GRanges(
+    "chr22",
+    IRanges::IRanges(20000000, 21000000)
+)
+sum(lengths(subsetRegion(fmr, window)))
+```
 
 ## Next steps
 

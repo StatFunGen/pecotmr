@@ -10,7 +10,10 @@
         rnorm(n * 2),
         n,
         2,
-        dimnames = list(paste0("s", seq_len(n)), c("v1", "v2"))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            c("chr1:100:A:G", "chr1:200:A:G")
+        )
     )
     Y <- matrix(
         rnorm(n * 2),
@@ -42,7 +45,7 @@
 }
 
 # Mock postprocess: called once per condition (the fitter passes conditionIdx);
-# returns one FineMappingEntry, so the fitter yields one entry per condition.
+# returns one FineMappingRow, so the fitter yields one entry per condition.
 .je_mockPostprocess <- function(
     fit,
     method,
@@ -59,7 +62,7 @@
     ...
 ) {
     vids <- colnames(dataX)
-    FineMappingEntry(
+    fineMappingRow(
         variantIds = vids,
         susieFit = list(method = method, cond = conditionIdx),
         topLoci = data.frame(
@@ -196,8 +199,8 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", 
         samplePartition = sp,
         foldFits = list(fold_1 = fp, fold_2 = fp)
     )
-    twEntry <- TwasWeightsEntry(
-        variantIds = c("v1", "v2"),
+    twEntry <- twasWeightsRow(
+        variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
         weights = c(0.1, 0.2),
         fits = fp,
         cvResult = cvPayload
@@ -294,7 +297,7 @@ test_that(".runJointCell: cross-context FM uses the per-fold mr.mash CV prior", 
         ncol(Y),
         dimnames = list(colnames(X), colnames(Y))
     )
-    e <- TwasWeightsEntry(
+    e <- twasWeightsRow(
         variantIds = colnames(X),
         weights = W,
         fits = .je_fakeMrmashFit()
@@ -371,10 +374,11 @@ test_that(".runJointCell: cross-context twas expands to per-context weight vecto
     expect_equal(as.character(res$trait), c("G1", "G1"))
     expect_equal(as.character(res$jointContexts), c("c1;c2", "c1;c2"))
     # Each row carries that context's weight VECTOR (the matrix column).
-    w1 <- getWeights(res$entry[[1L]])
+    w1 <- getWeights(pecotmr:::.collectionEntry(res, 1L))
     expect_false(is.matrix(w1))
     expect_length(w1, 2L)
-    expect_false(is.null(getFits(res$entry[[1L]]))) # shared joint fit on each
+    # shared joint fit on each
+    expect_false(is.null(getFits(pecotmr:::.collectionEntry(res, 1L))))
 })
 
 test_that(".runJointCell: cross-context twas attaches per-condition CV slices", {
@@ -396,11 +400,12 @@ test_that(".runJointCell: cross-context twas attaches per-condition CV slices", 
         args = list(dataDrivenPriorMatricesCv = list(1, 2))
     )
     expect_equal(nrow(res), 2L)
-    cv <- getCvResult(res$entry[[1L]])
+    cv <- getCvResult(pecotmr:::.collectionEntry(res, 1L))
     expect_equal(names(cv$foldFits), c("fold_1", "fold_2")) # shared per-fold fits
     expect_false(is.null(cv$predictions)) # this context's slice
     expect_false(is.null(cv$samplePartition))
-    expect_false(is.matrix(getWeights(res$entry[[1L]]))) # per-context vector
+    # per-context vector
+    expect_false(is.matrix(getWeights(pecotmr:::.collectionEntry(res, 1L))))
 })
 
 test_that(".runJointCell: cross-context twas CV-only rows (fitFullData=FALSE)", {
@@ -420,8 +425,8 @@ test_that(".runJointCell: cross-context twas CV-only rows (fitFullData=FALSE)", 
         tokens = "mrmash"
     )
     expect_equal(nrow(res), 2L)
-    e <- res$entry[[1L]]
-    expect_length(getVariantIds(e), 0L) # placeholder weights
+    e <- pecotmr:::.collectionEntry(res, 1L)
+    expect_length(.twrPartsVariantIds(e), 0L) # placeholder weights
     expect_null(getWeights(e))
     expect_equal(names(getCvResult(e)$foldFits), c("fold_1", "fold_2"))
 })
@@ -433,10 +438,16 @@ test_that(".runJointCell: cross-context twas CV-only rows (fitFullData=FALSE)", 
         rnorm(p * k),
         p,
         k,
-        dimnames = list(paste0("v", seq_len(p)), paste0("c", seq_len(k)))
+        dimnames = list(
+            sprintf("chr1:%d:A:G", 100L * (seq_len(p))),
+            paste0("c", seq_len(k))
+        )
     )
     R <- diag(p)
-    dimnames(R) <- list(paste0("v", seq_len(p)), paste0("v", seq_len(p)))
+    dimnames(R) <- list(
+        sprintf("chr1:%d:A:G", 100L * (seq_len(p))),
+        sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
+    )
     new(
         "SumStatsJointGroup",
         conditions = data.frame(
@@ -522,8 +533,8 @@ test_that(".runJointCell: cross-context twas sumstats (mr.mash.rss) -> per-conte
     expect_equal(nrow(res), 2L)
     expect_equal(as.character(res$context), c("c1", "c2"))
     expect_equal(as.character(res$jointContexts), c("c1;c2", "c1;c2"))
-    expect_false(is.matrix(getWeights(res$entry[[1L]])))
-    expect_false(is.null(getFits(res$entry[[1L]])))
+    expect_false(is.matrix(getWeights(pecotmr:::.collectionEntry(res, 1L))))
+    expect_false(is.null(getFits(pecotmr:::.collectionEntry(res, 1L))))
 })
 
 test_that("fitJointGroup(SumStats, Twas): real mr.mash-rss keys stat$n (regression)", {
@@ -538,7 +549,7 @@ test_that("fitJointGroup(SumStats, Twas): real mr.mash-rss keys stat$n (regressi
     K <- 2L
     nObs <- 400L
     X <- matrix(rnorm(nObs * p), nObs, p)
-    colnames(X) <- paste0("v", seq_len(p))
+    colnames(X) <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
     R <- cor(X)
     Z <- matrix(
         rnorm(p * K),
@@ -599,10 +610,13 @@ test_that(".runJointCell: cross-study (twas sumstats) -> per-study rows + jointS
         rnorm(6),
         3,
         2,
-        dimnames = list(paste0("v", 1:3), c("S1", "S2"))
+        dimnames = list(sprintf("chr1:%d:A:G", 100L * (1:3)), c("S1", "S2"))
     )
     R <- diag(3)
-    dimnames(R) <- list(paste0("v", 1:3), paste0("v", 1:3))
+    dimnames(R) <- list(
+        sprintf("chr1:%d:A:G", 100L * (1:3)),
+        sprintf("chr1:%d:A:G", 100L * (1:3))
+    )
     grp <- new(
         "SumStatsJointGroup",
         conditions = data.frame(
@@ -661,7 +675,10 @@ test_that(".runJointCell: composed (context + trait vary) -> per-tuple rows", {
         rnorm(n * 2),
         n,
         2,
-        dimnames = list(paste0("s", seq_len(n)), c("v1", "v2"))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            c("chr1:100:A:G", "chr1:200:A:G")
+        )
     )
     Y <- matrix(
         rnorm(n * 3),
@@ -718,7 +735,10 @@ test_that(".runJointCell: composed (context + trait vary) -> per-tuple rows", {
         rnorm(n * 2),
         n,
         2,
-        dimnames = list(paste0("s", seq_len(n)), c("v1", "v2"))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            c("chr1:100:A:G", "chr1:200:A:G")
+        )
     )
     Y <- matrix(
         rnorm(n * 2),
@@ -798,7 +818,7 @@ test_that(".runJointCell: cross-trait twas -> per-trait weight vectors", {
     expect_equal(as.character(res$context), c("brain", "brain"))
     expect_equal(as.character(res$trait), c("G1", "G2"))
     expect_equal(as.character(res$jointTraits), c("G1;G2", "G1;G2"))
-    expect_false(is.matrix(getWeights(res$entry[[1L]])))
+    expect_false(is.matrix(getWeights(pecotmr:::.collectionEntry(res, 1L))))
 })
 
 test_that("fitJointGroup(Individual, Fm): fsusie returns one entry per trait", {
@@ -808,7 +828,10 @@ test_that("fitJointGroup(Individual, Fm): fsusie returns one entry per trait", {
         rnorm(n * 2),
         n,
         2,
-        dimnames = list(paste0("s", seq_len(n)), c("v1", "v2"))
+        dimnames = list(
+            paste0("s", seq_len(n)),
+            c("chr1:100:A:G", "chr1:200:A:G")
+        )
     )
     Y <- matrix(
         rnorm(n * 2),
@@ -842,12 +865,17 @@ test_that("fitJointGroup(Individual, Fm): fsusie returns one entry per trait", {
     entries <- pecotmr:::fitJointGroup(grp, pipe, "fsusie", list())
     expect_type(entries, "list")
     expect_length(entries, 2L) # one per trait
-    expect_s4_class(entries[[1L]], "FineMappingEntry")
+    expect_s4_class(entries[[1L]], "FineMappingRow")
     expect_equal(captured$pos, c(100, 200)) # functional domain threaded
 })
 
 test_that("fitJointGroup(Individual, Fm): fsusie without pos errors; unknown token errors", {
-    X <- matrix(0, 6, 2, dimnames = list(paste0("s", 1:6), c("v1", "v2")))
+    X <- matrix(
+        0,
+        6,
+        2,
+        dimnames = list(paste0("s", 1:6), c("chr1:100:A:G", "chr1:200:A:G"))
+    )
     Y <- matrix(0, 6, 2, dimnames = list(paste0("s", 1:6), c("G1", "G2")))
     grp <- new(
         "IndividualJointGroup",
@@ -874,10 +902,16 @@ test_that(".runJointCell: composed/sumstats (context+trait vary) -> per-tuple ro
         rnorm(9),
         3,
         3,
-        dimnames = list(paste0("v", 1:3), c("c1:gA", "c1:gB", "c2:gA"))
+        dimnames = list(
+            sprintf("chr1:%d:A:G", 100L * (1:3)),
+            c("c1:gA", "c1:gB", "c2:gA")
+        )
     )
     R <- diag(3)
-    dimnames(R) <- list(paste0("v", 1:3), paste0("v", 1:3))
+    dimnames(R) <- list(
+        sprintf("chr1:%d:A:G", 100L * (1:3)),
+        sprintf("chr1:%d:A:G", 100L * (1:3))
+    )
     conds <- data.frame(
         study = "S",
         context = c("c1", "c1", "c2"),
@@ -925,7 +959,7 @@ test_that(".runJointCell: composed/sumstats (context+trait vary) -> per-tuple ro
     expect_equal(as.character(res$trait), c("gA", "gB", "gA"))
     expect_equal(as.character(res$jointContexts), rep("c1;c2", 3L))
     expect_equal(as.character(res$jointTraits), rep("gA;gB", 3L))
-    expect_false(is.matrix(getWeights(res$entry[[1L]])))
+    expect_false(is.matrix(getWeights(pecotmr:::.collectionEntry(res, 1L))))
 })
 
 # ---- SR-TWAS ensemble layer (.twasEnsembleLayer) ----------------------------
@@ -944,7 +978,12 @@ test_that(".runJointCell: composed/sumstats (context+trait vary) -> per-tuple ro
             trait = "g",
             stringsAsFactors = FALSE
         ),
-        X = matrix(0, n, 3, dimnames = list(samp, paste0("v", 1:3))),
+        X = matrix(
+            0,
+            n,
+            3,
+            dimnames = list(samp, sprintf("chr1:%d:A:G", 100L * (1:3)))
+        ),
         Y = matrix(
             rnorm(n * nCond),
             n,
@@ -962,7 +1001,7 @@ test_that(".runJointCell: composed/sumstats (context+trait vary) -> per-tuple ro
         pr <- predCor * Y[, r] + rnorm(nrow(Y), sd = 0.3)
         names(pr) <- rownames(Y)
         rsq <- stats::cor(Y[, r], pr)^2
-        TwasWeightsEntry(
+        twasWeightsRow(
             variantIds = vars,
             weights = rnorm(length(vars)),
             cvResult = list(
@@ -997,7 +1036,7 @@ test_that(".twasEnsembleLayer: >= 2 methods passing -> per-condition ensemble en
         )
     )
     expect_length(ens, 2L)
-    expect_s4_class(ens[[1L]], "TwasWeightsEntry")
+    expect_s4_class(ens[[1L]], "TwasWeightsRow")
     expect_length(getWeights(ens[[1L]]), 3L)
     coef <- getCvResult(ens[[1L]])$methodCoef
     expect_true(all(coef >= -1e-8))
@@ -1059,7 +1098,7 @@ test_that("fitJointGroup(twas): spike-and-slab pi is estimated from an internal 
         rnorm(n * 3),
         n,
         3,
-        dimnames = list(paste0("s", 1:n), paste0("v", 1:3))
+        dimnames = list(paste0("s", 1:n), sprintf("chr1:%d:A:G", 100L * (1:3)))
     )
     Y <- matrix(rnorm(n), n, 1, dimnames = list(paste0("s", 1:n), "c1"))
     g <- new(
@@ -1187,17 +1226,27 @@ test_that("fitJointGroup(twas): FM-derived method reuses fine-mapping's CV (hand
     )
 }
 # Mock .buildJointSumstatZMatrix: a (p x k) Z plus n vector, keyed by colLabels.
-.je_mockJointZ <- function(data, tupleRows, colLabels, errorLabel) {
+.je_mockJointZ <- function(
+    data,
+    tupleRows,
+    colLabels,
+    errorLabel,
+    ldSketch = NULL,
+    cutoffs = NULL
+) {
     p <- 3L
     list(
         Z = matrix(
             seq_len(p * length(colLabels)),
             p,
             length(colLabels),
-            dimnames = list(paste0("v", seq_len(p)), colLabels)
+            dimnames = list(
+                sprintf("chr1:%d:A:G", 100L * (seq_len(p))),
+                colLabels
+            )
         ),
         nVec = rep(100, length(colLabels)),
-        variantIds = paste0("v", seq_len(p))
+        variantIds = sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
     )
 }
 .je_mockLd <- function(sketch, vids) {
@@ -1251,7 +1300,10 @@ test_that(".enumCrossContextIndividual: one group per trait in >= 2 contexts", {
                 0,
                 4,
                 2,
-                dimnames = list(paste0("s", 1:4), c("v1", "v2"))
+                dimnames = list(
+                    paste0("s", 1:4),
+                    c("chr1:100:A:G", "chr1:200:A:G")
+                )
             )
             Y <- matrix(
                 0,
@@ -1360,7 +1412,10 @@ test_that(".enumCrossTraitIndividual: one group per context with >= 2 traits + p
                 0,
                 4,
                 2,
-                dimnames = list(paste0("s", 1:4), c("v1", "v2"))
+                dimnames = list(
+                    paste0("s", 1:4),
+                    c("chr1:100:A:G", "chr1:200:A:G")
+                )
             )
             Y <- matrix(
                 0,
@@ -1463,7 +1518,10 @@ test_that(".enumComposedIndividual: one group joining every (context, trait) tup
                 0,
                 4,
                 2,
-                dimnames = list(paste0("s", 1:4), c("v1", "v2"))
+                dimnames = list(
+                    paste0("s", 1:4),
+                    c("chr1:100:A:G", "chr1:200:A:G")
+                )
             )
             list(X = X, Y = Y, tuples = list())
         },
@@ -1521,7 +1579,12 @@ test_that(".enumUnivariateIndividual: one 1-condition group per (context, trait)
             cisWindow = NULL,
             region = NULL
         ) {
-            matrix(0, 5, 2, dimnames = list(samp, c("v1", "v2")))
+            matrix(
+                0,
+                5,
+                2,
+                dimnames = list(samp, c("chr1:100:A:G", "chr1:200:A:G"))
+            )
         },
         .package = "pecotmr"
     )
@@ -1551,7 +1614,12 @@ test_that(".enumUnivariateIndividual: too few shared samples skips the tuple", {
             cisWindow = NULL,
             region = NULL
         ) {
-            matrix(0, 1, 2, dimnames = list("s1", c("v1", "v2")))
+            matrix(
+                0,
+                1,
+                2,
+                dimnames = list("s1", c("chr1:100:A:G", "chr1:200:A:G"))
+            )
         },
         .package = "pecotmr"
     )
@@ -1647,7 +1715,7 @@ test_that("fitJointGroup(Individual, Fm): fsusie honest per-fold CV is attached"
         rnorm(n * 2),
         n,
         2,
-        dimnames = list(paste0("s", 1:n), c("v1", "v2"))
+        dimnames = list(paste0("s", 1:n), c("chr1:100:A:G", "chr1:200:A:G"))
     )
     Y <- matrix(
         rnorm(n * 2),
@@ -1708,7 +1776,7 @@ test_that("fitJointGroup(Individual, Fm): SER pre-screen keeps a subset of condi
         rnorm(n * 2),
         n,
         2,
-        dimnames = list(paste0("s", 1:n), c("v1", "v2"))
+        dimnames = list(paste0("s", 1:n), c("chr1:100:A:G", "chr1:200:A:G"))
     )
     Y <- matrix(
         rnorm(n * 3),
@@ -1744,8 +1812,8 @@ test_that("fitJointGroup(Individual, Fm): SER pre-screen keeps a subset of condi
     )
     expect_length(entries, 3L)
     expect_null(entries[[2L]]) # screened-out condition
-    expect_s4_class(entries[[1L]], "FineMappingEntry")
-    expect_s4_class(entries[[3L]], "FineMappingEntry")
+    expect_s4_class(entries[[1L]], "FineMappingRow")
+    expect_s4_class(entries[[3L]], "FineMappingRow")
 })
 
 test_that("fitJointGroup(SumStats, Fm): fsusie and unknown tokens error", {
@@ -1795,7 +1863,7 @@ test_that("fitJointGroup(twas): spike-and-slab pi feeds bayes_b probIn", {
         rnorm(n * 3),
         n,
         3,
-        dimnames = list(paste0("s", 1:n), paste0("v", 1:3))
+        dimnames = list(paste0("s", 1:n), sprintf("chr1:%d:A:G", 100L * (1:3)))
     )
     Y <- matrix(rnorm(n), n, 1, dimnames = list(paste0("s", 1:n), "c1"))
     g <- new(
@@ -1855,7 +1923,10 @@ test_that("fitJointGroup(SumStats, twas): a vector weight without rownames falls
         tokens = "mrmash"
     )
     expect_s4_class(res, "TwasWeights")
-    expect_equal(getVariantIds(res$entry[[1L]]), rownames(grp@Z)) # fallback vids
+    expect_equal(
+        getVariantIds(pecotmr:::.collectionEntry(res, 1L)),
+        rownames(grp@Z)
+    ) # fallback vids
 })
 
 # =============================================================================
@@ -1928,7 +1999,7 @@ test_that(".twasEnsembleLayer: entries lacking CV predictions are skipped", {
     g <- .je_ensGroup(nCond = 1L)
     good <- .je_ensEntries(g, 0.85)
     # A method whose entry carries no CV predictions -> contributes nothing.
-    noCv <- list(TwasWeightsEntry(
+    noCv <- list(twasWeightsRow(
         variantIds = colnames(g@X),
         weights = rnorm(ncol(g@X)),
         cvResult = NULL
@@ -1998,7 +2069,7 @@ test_that(".twasEnsembleLayer: unnamed ensemble weights fall back to a method's 
             standardized = FALSE
         )
     )
-    expect_s4_class(ens[[1L]], "TwasWeightsEntry")
+    expect_s4_class(ens[[1L]], "TwasWeightsRow")
     expect_equal(getVariantIds(ens[[1L]]), colnames(g@X)) # fallback ids
 })
 

@@ -12,7 +12,7 @@ context("causalInferencePipeline")
         path = "/tmp/sketch.gds",
         format = "gds",
         snpInfo = data.frame(
-            SNP = paste0("v", seq_len(snp_n)),
+            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -71,7 +71,7 @@ context("causalInferencePipeline")
         )
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        SNP = paste0("v", 1:5),
+        SNP = sprintf("chr1:%d:A:G", 100L * (1:5)),
         A1 = rep("A", 5),
         A2 = rep("G", 5),
         Z = c(2.0, -1.5, 0.5, 1.2, -0.8),
@@ -89,9 +89,9 @@ context("causalInferencePipeline")
 
 .cip_makeTwasWeights <- function(
     method = "susie",
-    variant_ids = paste0("v", 1:5)
+    variant_ids = sprintf("chr1:%d:A:G", 100L * (1:5))
 ) {
-    entry <- TwasWeightsEntry(
+    entry <- twasWeightsRow(
         variantIds = variant_ids,
         weights = c(0.1, 0.05, -0.2, 0.3, 0.0)
     )
@@ -105,7 +105,9 @@ context("causalInferencePipeline")
     )
 }
 
-.cip_makeQtlFmr <- function(variant_ids = paste0("v", 1:5)) {
+.cip_makeQtlFmr <- function(
+    variant_ids = sprintf("chr1:%d:A:G", 100L * (1:5))
+) {
     n <- length(variant_ids)
     tl <- data.frame(
         variant_id = variant_ids,
@@ -117,7 +119,7 @@ context("causalInferencePipeline")
         posterior_sd = rep(0.05, n),
         stringsAsFactors = FALSE
     )
-    e <- FineMappingEntry(
+    e <- fineMappingRow(
         variantIds = variant_ids,
         susieFit = list(),
         topLoci = tl
@@ -171,11 +173,11 @@ test_that("causalInferencePipeline: rejects non-TwasWeights twasWeights arg", {
 })
 
 test_that("causalInferencePipeline: rejects GwasFineMappingResult for the QTL slot", {
-    e <- FineMappingEntry(
-        variantIds = "v1",
+    e <- fineMappingRow(
+        variantIds = "chr1:100:A:G",
         susieFit = list(),
         topLoci = data.frame(
-            variant_id = "v1",
+            variant_id = "chr1:100:A:G",
             pip = 0.1,
             stringsAsFactors = FALSE
         )
@@ -205,8 +207,8 @@ test_that(".cipRequireMatchingLdSketches: NULL twas-side ldSketch is allowed", {
         context = "c1",
         trait = "t1",
         method = "lasso",
-        entry = list(TwasWeightsEntry(
-            variantIds = paste0("v", 1:5),
+        entry = list(twasWeightsRow(
+            variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
             weights = rep(0.1, 5)
         )),
         ldSketch = NULL
@@ -229,8 +231,8 @@ test_that(".cipRequireMatchingLdSketches: panel size mismatch errors", {
         context = "c1",
         trait = "t1",
         method = "lasso",
-        entry = list(TwasWeightsEntry(
-            variantIds = paste0("v", 1:5),
+        entry = list(twasWeightsRow(
+            variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
             weights = rep(0.1, 5)
         )),
         ldSketch = bigSketch
@@ -323,12 +325,12 @@ test_that("causalInferencePipeline: combineMethods appends combined rows", {
         trait = c("t1", "t1"),
         method = c("lasso", "enet"),
         entry = list(
-            TwasWeightsEntry(
-                variantIds = paste0("v", 1:5),
+            twasWeightsRow(
+                variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
                 weights = rep(0.1, 5)
             ),
-            TwasWeightsEntry(
-                variantIds = paste0("v", 1:5),
+            twasWeightsRow(
+                variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
                 weights = rep(0.05, 5)
             )
         ),
@@ -365,8 +367,8 @@ test_that(".cipZToSe: falls back to vector of 1 when maf/n are NA", {
 
 test_that(".cipFilterEligibleMethods: rsq+pval gating, drop sub-cutoff groups, SS-TWAS keeps all", {
     mkEntry <- function(rsq, pval = 0.01) {
-        TwasWeightsEntry(
-            variantIds = paste0("v", 1:3),
+        twasWeightsRow(
+            variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
             weights = rep(0.1, 3),
             cvResult = list(metrics = c(corr = 0.1, rsq = rsq, pval = pval))
         )
@@ -423,12 +425,12 @@ test_that(".cipFilterEligibleMethods: rsq+pval gating, drop sub-cutoff groups, S
         trait = rep("G", 2),
         method = c("susie", "lasso"),
         entry = list(
-            TwasWeightsEntry(
-                variantIds = paste0("v", 1:3),
+            twasWeightsRow(
+                variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
                 weights = rep(0.1, 3)
             ),
-            TwasWeightsEntry(
-                variantIds = paste0("v", 1:3),
+            twasWeightsRow(
+                variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
                 weights = rep(0.1, 3)
             )
         )
@@ -478,13 +480,13 @@ test_that("causalInferencePipeline: rsqCutoff selects the max-rsq method per gro
         trait = rep("t1", 2),
         method = c("susie", "lasso"),
         entry = list(
-            TwasWeightsEntry(
-                variantIds = paste0("v", 1:5),
+            twasWeightsRow(
+                variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
                 weights = c(0.1, 0.05, -0.2, 0.3, 0.0),
                 cvResult = list(metrics = c(rsq = 0.2, pval = 0.001))
             ),
-            TwasWeightsEntry(
-                variantIds = paste0("v", 1:5),
+            twasWeightsRow(
+                variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
                 weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
                 cvResult = list(metrics = c(rsq = 0.5, pval = 0.001))
             )
@@ -511,13 +513,13 @@ test_that("causalInferencePipeline: NA/Inf TWAS-Z triggers method re-selection",
         method = c("susie", "lasso"),
         entry = list(
             # top rsq but all-zero weights -> wᵀRw = 0 -> twasZ NaN
-            TwasWeightsEntry(
-                variantIds = paste0("v", 1:5),
+            twasWeightsRow(
+                variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
                 weights = rep(0, 5),
                 cvResult = list(metrics = c(rsq = 0.9, pval = 0.001))
             ),
-            TwasWeightsEntry(
-                variantIds = paste0("v", 1:5),
+            twasWeightsRow(
+                variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
                 weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
                 cvResult = list(metrics = c(rsq = 0.5, pval = 0.001))
             )
@@ -544,13 +546,13 @@ test_that("causalInferencePipeline: rsqPvalCutoff gates out high-CV-pval methods
         trait = rep("t1", 2),
         method = c("susie", "lasso"),
         entry = list(
-            TwasWeightsEntry(
-                variantIds = paste0("v", 1:5),
+            twasWeightsRow(
+                variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
                 weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
                 cvResult = list(metrics = c(rsq = 0.9, pval = 0.5))
             ),
-            TwasWeightsEntry(
-                variantIds = paste0("v", 1:5),
+            twasWeightsRow(
+                variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
                 weights = c(0.2, 0.1, -0.1, 0.2, 0.1),
                 cvResult = list(metrics = c(rsq = 0.5, pval = 0.001))
             )
@@ -580,7 +582,7 @@ context("twas: twasZ and harmonize deprecated wrappers")
 .tz_makeLd <- function(n = 100, p = 8, seed = 7) {
     set.seed(seed)
     X <- matrix(rbinom(n * p, 2, runif(p, 0.2, 0.8)), nrow = n, ncol = p)
-    vid <- paste0("v", seq_len(p))
+    vid <- sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
     colnames(X) <- vid
     af <- colMeans(X) / 2
     Xstd <- sweep(X, 2, 2 * af)
@@ -1154,7 +1156,7 @@ test_that("twasZ: error when weights and z have different lengths", {
 # ===========================================================================
 
 .cip_gwasDf <- function(
-    vids = paste0("v", 1:5),
+    vids = sprintf("chr1:%d:A:G", 100L * (1:5)),
     z = rep_len(c(2, -1.5, 1.8, 0.5, -2.2), length(vids))
 ) {
     data.frame(
@@ -1178,7 +1180,7 @@ test_that(".cipCalcI2: degenerate Q / single group -> 0; normal Q -> clamped", {
 
 test_that(".cipComputeMr: IVW Wald-ratio over PIP-passing instruments", {
     tl <- data.frame(
-        variant_id = paste0("v", 1:4),
+        variant_id = sprintf("chr1:%d:A:G", 100L * (1:4)),
         pip = c(0.9, 0.8, 0.1, 0.7),
         beta = c(0.3, -0.2, 0.5, 0.25),
         se = rep(0.05, 4),
@@ -1187,7 +1189,7 @@ test_that(".cipComputeMr: IVW Wald-ratio over PIP-passing instruments", {
     local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
     res <- pecotmr:::.cipComputeMr(
         NULL,
-        .cip_gwasDf(paste0("v", 1:4), c(2, -1.5, 1, 1.8)),
+        .cip_gwasDf(sprintf("chr1:%d:A:G", 100L * (1:4)), c(2, -1.5, 1, 1.8)),
         pipCutoff = 0.5
     )
     expect_true(is.finite(res$waldRatio))
@@ -1298,20 +1300,23 @@ test_that(".cipComputeTwasZ reconciles a chr-prefix mismatch (previously dropped
 })
 
 test_that(".cipComputeMr: NA on empty / missing-col / no-IV / no-overlap / zero-beta", {
-    g <- .cip_gwasDf(paste0("v", 1:4))
+    g <- .cip_gwasDf(sprintf("chr1:%d:A:G", 100L * (1:4)))
     isNa <- function(r) {
         expect_true(is.na(r$waldRatio))
         expect_equal(r$nIV, 0L)
     }
     local_mocked_bindings(
-        getTopLoci = function(x) data.frame(),
+        getTopLoci = function(x, ...) data.frame(),
         .package = "pecotmr"
     )
     isNa(pecotmr:::.cipComputeMr(NULL, g, 0.5)) # empty
     local_mocked_bindings(
         getTopLoci = function(x) {
             # no beta/se
-            data.frame(variant_id = paste0("v", 1:4), pip = rep(0.9, 4))
+            data.frame(
+                variant_id = sprintf("chr1:%d:A:G", 100L * (1:4)),
+                pip = rep(0.9, 4)
+            )
         },
         .package = "pecotmr"
     )
@@ -1320,7 +1325,7 @@ test_that(".cipComputeMr: NA on empty / missing-col / no-IV / no-overlap / zero-
         getTopLoci = function(x) {
             # none pass
             data.frame(
-                variant_id = paste0("v", 1:4),
+                variant_id = sprintf("chr1:%d:A:G", 100L * (1:4)),
                 pip = rep(0.1, 4),
                 beta = rep(0.2, 4),
                 se = rep(0.05, 4)
@@ -1346,7 +1351,7 @@ test_that(".cipComputeMr: NA on empty / missing-col / no-IV / no-overlap / zero-
         getTopLoci = function(x) {
             # zero beta
             data.frame(
-                variant_id = paste0("v", 1:4),
+                variant_id = sprintf("chr1:%d:A:G", 100L * (1:4)),
                 pip = rep(0.9, 4),
                 beta = rep(0, 4),
                 se = rep(0.05, 4)
@@ -1359,7 +1364,7 @@ test_that(".cipComputeMr: NA on empty / missing-col / no-IV / no-overlap / zero-
 
 test_that(".cipComputeMrCsAware: CS-aware composite Wald + heterogeneity", {
     tl <- data.frame(
-        variant_id = paste0("v", 1:4),
+        variant_id = sprintf("chr1:%d:A:G", 100L * (1:4)),
         cs = c(1L, 1L, 2L, 2L),
         pip = c(0.5, 0.4, 0.6, 0.3),
         beta = c(0.3, 0.2, -0.25, -0.15),
@@ -1369,7 +1374,10 @@ test_that(".cipComputeMrCsAware: CS-aware composite Wald + heterogeneity", {
     local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
     res <- pecotmr:::.cipComputeMrCsAware(
         NULL,
-        .cip_gwasDf(paste0("v", 1:4), c(2, -1.5, 1.8, -1.2)),
+        .cip_gwasDf(
+            sprintf("chr1:%d:A:G", 100L * (1:4)),
+            c(2, -1.5, 1.8, -1.2)
+        ),
         cpipCutoff = 0.5
     )
     expect_true(is.finite(res$waldRatio))
@@ -1379,7 +1387,7 @@ test_that(".cipComputeMrCsAware: CS-aware composite Wald + heterogeneity", {
 
 test_that(".cipComputeMrCsAware: credible-set column found via the ^cs fallback", {
     tl <- data.frame(
-        variant_id = paste0("v", 1:2),
+        variant_id = sprintf("chr1:%d:A:G", 100L * (1:2)),
         cs_0.95 = c(1L, 1L),
         pip = c(0.5, 0.4),
         beta = c(0.3, 0.2),
@@ -1389,17 +1397,17 @@ test_that(".cipComputeMrCsAware: credible-set column found via the ^cs fallback"
     local_mocked_bindings(getTopLoci = function(x) tl, .package = "pecotmr")
     res <- pecotmr:::.cipComputeMrCsAware(
         NULL,
-        .cip_gwasDf(paste0("v", 1:2), c(2, -1.5)),
+        .cip_gwasDf(sprintf("chr1:%d:A:G", 100L * (1:2)), c(2, -1.5)),
         cpipCutoff = 0.5
     )
     expect_true(is.finite(res$waldRatio)) # cs_0.95 via grep("^cs")
 })
 
 test_that(".cipComputeMrCsAware: naResult on empty / missing-col / no-CS / no-overlap / low-cpip", {
-    g <- .cip_gwasDf(paste0("v", 1:4))
+    g <- .cip_gwasDf(sprintf("chr1:%d:A:G", 100L * (1:4)))
     isNa <- function(r) expect_true(is.na(r$waldRatio))
     local_mocked_bindings(
-        getTopLoci = function(x) data.frame(),
+        getTopLoci = function(x, ...) data.frame(),
         .package = "pecotmr"
     )
     isNa(pecotmr:::.cipComputeMrCsAware(NULL, g, 0.5)) # empty
@@ -1407,7 +1415,7 @@ test_that(".cipComputeMrCsAware: naResult on empty / missing-col / no-CS / no-ov
         getTopLoci = function(x) {
             # no pip col
             data.frame(
-                variant_id = paste0("v", 1:4),
+                variant_id = sprintf("chr1:%d:A:G", 100L * (1:4)),
                 cs = rep(1L, 4),
                 beta = rep(0.2, 4),
                 se = rep(0.05, 4)
@@ -1420,7 +1428,7 @@ test_that(".cipComputeMrCsAware: naResult on empty / missing-col / no-CS / no-ov
         getTopLoci = function(x) {
             # cs all 0
             data.frame(
-                variant_id = paste0("v", 1:4),
+                variant_id = sprintf("chr1:%d:A:G", 100L * (1:4)),
                 cs = rep(0L, 4),
                 pip = rep(0.5, 4),
                 beta = rep(0.2, 4),
@@ -1448,7 +1456,7 @@ test_that(".cipComputeMrCsAware: naResult on empty / missing-col / no-CS / no-ov
         getTopLoci = function(x) {
             # cpip < cutoff
             data.frame(
-                variant_id = paste0("v", 1:4),
+                variant_id = sprintf("chr1:%d:A:G", 100L * (1:4)),
                 cs = 1:4,
                 pip = rep(0.1, 4),
                 beta = rep(0.2, 4),
@@ -1484,7 +1492,7 @@ test_that(".cipExtractWeights: NULL on missing tuples and bad topLoci", {
     ))
     # FMR path: tuple present but topLoci empty / no beta column / all-NA.
     local_mocked_bindings(
-        getTopLoci = function(x) data.frame(),
+        .fmrRowTopLoci = function(parts, ...) data.frame(),
         .package = "pecotmr"
     )
     expect_null(pecotmr:::.cipExtractWeights(
@@ -1497,7 +1505,9 @@ test_that(".cipExtractWeights: NULL on missing tuples and bad topLoci", {
         useFmr = TRUE
     ))
     local_mocked_bindings(
-        getTopLoci = function(x) data.frame(variant_id = "v1"),
+        .fmrRowTopLoci = function(parts, ...) {
+            data.frame(variant_id = "chr1:100:A:G")
+        },
         .package = "pecotmr"
     )
     expect_null(pecotmr:::.cipExtractWeights(
@@ -1510,7 +1520,7 @@ test_that(".cipExtractWeights: NULL on missing tuples and bad topLoci", {
         useFmr = TRUE
     ))
     local_mocked_bindings(
-        getTopLoci = function(x) {
+        .fmrRowTopLoci = function(parts, ...) {
             data.frame(variant_id = NA_character_, beta = NA_real_)
         },
         .package = "pecotmr"
@@ -1548,4 +1558,71 @@ test_that(".cipCombineAcrossMethods: a single-method group yields no combined ro
         stringsAsFactors = FALSE
     ))
     expect_identical(pecotmr:::.cipCombineAcrossMethods(gr, c("acat")), gr)
+})
+
+
+# ===========================================================================
+# TWAS variant-drop reporting (spec 6.8): the intersection is unbiased but
+# only loses power, so the caller has to be told how much it lost.
+# ===========================================================================
+
+.cip_gwasDf <- function(ids) {
+    data.frame(
+        variant_id = ids,
+        chrom = rep("chr1", length(ids)),
+        pos = seq(100L, by = 100L, length.out = length(ids)),
+        z = seq(2, by = -0.5, length.out = length(ids)),
+        stringsAsFactors = FALSE
+    )
+}
+
+test_that(".cipWarnVariantDrop: reports the drop count and the survivors", {
+    expect_warning(
+        pecotmr:::.cipWarnVariantDrop(5L, 3L, "test pair"),
+        "dropped 2 of 5"
+    )
+    expect_warning(
+        pecotmr:::.cipWarnVariantDrop(5L, 3L, "test pair"),
+        "remaining 3"
+    )
+    expect_warning(
+        pecotmr:::.cipWarnVariantDrop(5L, 3L, "QTL x GWAS pair"),
+        "QTL x GWAS pair"
+    )
+})
+
+test_that(".cipComputeTwasZ: below 2 matches warns instead of silent NULL", {
+    ids <- paste0("chr1:", 100 * (1:5), ":A:G")
+    gdf <- .cip_gwasDf(ids[1]) # a single shared variant
+    expect_warning(
+        out <- pecotmr:::.cipComputeTwasZ(
+            weights = rep(0.1, 5),
+            variantIds = ids,
+            gwasDf = gdf,
+            gwasLd = NULL,
+            label = "test pair"
+        ),
+        "matched only 1 of 5"
+    )
+    expect_null(out)
+})
+
+test_that(".cipComputeTwasZ: full overlap is silent", {
+    ids <- paste0("chr1:", 100 * (1:3), ":A:G")
+    expect_silent(
+        pecotmr:::.cipWarnVariantDrop(3L, 3L, "test pair")
+    )
+})
+
+test_that(".cipPairLabel: names both sides of the pair", {
+    tuple <- list(
+        qStudy = "Q1",
+        qContext = "c1",
+        qTrait = "t1",
+        qMethod = "susie"
+    )
+    label <- pecotmr:::.cipPairLabel(tuple, "G1")
+    expect_true(grepl("study='Q1'", label, fixed = TRUE))
+    expect_true(grepl("trait='t1'", label, fixed = TRUE))
+    expect_true(grepl("study='G1'", label, fixed = TRUE))
 })

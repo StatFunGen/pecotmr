@@ -287,11 +287,11 @@ filterMixtureComponents <- function(
 #' cond <- c("brain", "blood", "muscle")
 #' p <- 8
 #' bhat <- matrix(rnorm(p * 3), p, 3,
-#'   dimnames = list(paste0("v", 1:p), cond))
+#'   dimnames = list(sprintf("chr1:%d:A:G", 100L * (1:p)), cond))
 #' sbhat <- matrix(abs(rnorm(p * 3)) + 0.1, p, 3,
-#'   dimnames = list(paste0("v", 1:p), cond))
+#'   dimnames = list(sprintf("chr1:%d:A:G", 100L * (1:p)), cond))
 #' dat <- list(bhat = bhat, sbhat = sbhat, Z = bhat / sbhat,
-#'   snp = paste0("v", 1:p))
+#'   snp = sprintf("chr1:%d:A:G", 100L * (1:p)))
 #' mashRandNullSample(dat, nRandom = 2L, nNull = 2L,
 #'   excludeCondition = character())
 #' @export
@@ -337,9 +337,13 @@ mashRandNullSample <- function(
 #' # Each object's variants must be uniquely keyed (row names); the two
 #' # objects share the same conditions (columns), which are aligned by name.
 #' a <- list(strong = list(z = matrix(rnorm(9), 3, 3,
-#'   dimnames = list(c("v1", "v2", "v3"), c("t1", "t2", "t3")))))
+#'   dimnames = list(
+#'     c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
+#'     c("t1", "t2", "t3")))))
 #' b <- list(strong = list(z = matrix(rnorm(9), 3, 3,
-#'   dimnames = list(c("v4", "v5", "v6"), c("t1", "t2", "t3")))))
+#'   dimnames = list(
+#'     c("chr1:400:A:G", "chr1:500:A:G", "chr1:600:A:G"),
+#'     c("t1", "t2", "t3")))))
 #' mergeMashData(a, b)
 #' @export
 mergeMashData <- function(resData, oneData) {
@@ -763,9 +767,10 @@ mashInput <- function(
 #'   variant ids (ideally \code{chr:pos:A2:A1}); \code{colnames(z)} label the
 #'   conditions.
 #' @param study Study identifier (recycled across conditions).
-#' @param ldSketch A \code{\link{GenotypeHandle}} embedded in the collection, or
-#'   \code{NULL} (default) -- mash operates across conditions per variant and
-#'   needs no LD reference.
+#' @param ldSketch A genotype panel (see \code{\link{readGenotypes}})
+#'   embedded in the collection, or \code{NULL} (default) -- mash operates
+#'   across
+#'   conditions per variant and needs no LD reference.
 #' @param context Condition context label(s): a single value recycled across
 #'   every column, or a length-\code{ncol(z)} vector (one per condition).
 #'   Defaults to \code{colnames(z)} -- one context per column.
@@ -781,11 +786,11 @@ mashInput <- function(
 #' @importFrom GenomicRanges GRanges
 #' @importFrom IRanges IRanges
 #' @examples
-#' gh <- readGenotypes(
+#' panel <- readGenotypes(
 #'   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
 #' z <- matrix(rnorm(6), 2, 3, dimnames = list(
 #'   c("chr22:1:A:G", "chr22:2:A:G"), c("brain", "blood", "muscle")))
-#' qtlSumStatsFromZMatrix(z = z, study = "s1", ldSketch = gh,
+#' qtlSumStatsFromZMatrix(z = z, study = "s1", ldSketch = panel,
 #'   context = colnames(z), trait = "g1", genome = "hg38", n = 100)
 #' @export
 qtlSumStatsFromZMatrix <- function(
@@ -844,9 +849,10 @@ qtlSumStatsFromZMatrix <- function(
 #' @param shat Numeric matrix of standard errors, aligned with \code{bhat}
 #'   (identical dimensions and row/column order).
 #' @param study Study identifier (recycled across conditions).
-#' @param ldSketch A \code{\link{GenotypeHandle}} embedded in the collection, or
-#'   \code{NULL} (default) -- mash operates across conditions per variant and
-#'   needs no LD reference.
+#' @param ldSketch A genotype panel (see \code{\link{readGenotypes}})
+#'   embedded in the collection, or \code{NULL} (default) -- mash operates
+#'   across
+#'   conditions per variant and needs no LD reference.
 #' @param context,trait Condition labels; see
 #'   \code{\link{qtlSumStatsFromZMatrix}}. Defaults \code{context =
 #'   colnames(bhat)}, \code{trait = "mash"}.
@@ -859,13 +865,13 @@ qtlSumStatsFromZMatrix <- function(
 #' @importFrom GenomicRanges GRanges
 #' @importFrom IRanges IRanges
 #' @examples
-#' gh <- readGenotypes(
+#' panel <- readGenotypes(
 #'   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
 #' bhat <- matrix(rnorm(6), 2, 3, dimnames = list(
 #'   c("chr22:1:A:G", "chr22:2:A:G"), c("brain", "blood", "muscle")))
 #' shat <- matrix(0.1, 2, 3, dimnames = dimnames(bhat))
 #' qtlSumStatsFromBetaMatrix(bhat = bhat, shat = shat, study = "s1",
-#'   ldSketch = gh, context = colnames(bhat), trait = "g1",
+#'   ldSketch = panel, context = colnames(bhat), trait = "g1",
 #'     genome = "hg38", n = 100)
 #' @export
 qtlSumStatsFromBetaMatrix <- function(
@@ -1120,7 +1126,7 @@ qtlSumStatsFromBetaMatrix <- function(
 # "auto" picks beta when every entry has BETA+SE, else z; mixed inputs error.
 # @noRd
 .mashResolveScale <- function(x, role, inputScale) {
-    entries <- x$entry
+    entries <- .collectionEntries(x)
     caps <- map(entries, .mashEntryCaps)
     allHaveBetaSe <- all(map_lgl(caps, "hasBetaSe"))
     allHaveZ <- all(map_lgl(caps, "hasZ"))

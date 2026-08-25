@@ -1034,3 +1034,63 @@ test_that("matchVariants returns empty for unparseable data.frame input", {
     m <- pecotmr:::matchVariants(a, .vid_df("1", 100, "A", "G"))
     expect_length(m$idxA, 0)
 })
+
+# ===========================================================================
+# matchVariants: a reference carrying both orientations of one variant
+# ===========================================================================
+
+test_that("matchVariants drops a target matching both orientations", {
+    # Two distinct indels at one position that are each other's allele flip is
+    # rare but biologically real. A target then matches one exactly (+1) and
+    # the other as a swap (-1), and nothing can say which it is.
+    panel <- c("chr1:100:A:AT", "chr1:100:AT:A")
+    expect_length(matchVariants("chr1:100:A:AT", panel)$idxA, 0L)
+})
+
+test_that("the drop does not depend on the reference's row order", {
+    # The bug this replaces: `!duplicated()` kept whichever match came first,
+    # so the SIGN -- and with it the effect direction -- was decided by the
+    # panel's row order.
+    panel <- c("chr1:100:A:AT", "chr1:100:AT:A")
+    forward <- matchVariants("chr1:100:A:AT", panel)
+    reversed <- matchVariants("chr1:100:A:AT", rev(panel))
+    expect_equal(forward$sign, reversed$sign)
+    expect_length(forward$idxA, 0L)
+})
+
+test_that("a single orientation still matches, flipped or not", {
+    expect_equal(
+        matchVariants("chr1:100:A:AT", "chr1:100:A:AT")$sign, 1
+    )
+    # An unambiguous flip is a match, not an error: only disagreement is.
+    expect_equal(
+        matchVariants("chr1:100:A:AT", "chr1:100:AT:A")$sign, -1
+    )
+})
+
+test_that("duplicate reference entries that agree are still matched", {
+    # Same sign, so there is nothing to be ambiguous about -- dropping here
+    # would lose variants for no reason.
+    m <- matchVariants("chr1:300:A:G", c("chr1:300:A:G", "chr1:300:A:G"))
+    expect_length(m$idxA, 1L)
+    expect_equal(m$sign, 1)
+})
+
+test_that("only the ambiguous target is dropped from a mixed set", {
+    sumstats <- c("chr1:100:A:AT", "chr1:400:A:G", "chr1:500:C:T")
+    panel <- c(
+        "chr1:100:A:AT", "chr1:100:AT:A",
+        "chr1:400:A:G",
+        "chr1:500:T:C"
+    )
+    m <- matchVariants(sumstats, panel)
+    expect_equal(sumstats[m$idxA], c("chr1:400:A:G", "chr1:500:C:T"))
+    expect_equal(m$sign, c(1, -1))
+})
+
+test_that("the rule applies to SNP flip pairs, not just indels", {
+    # The ambiguity is in the reference carrying both orientations, which is
+    # not specific to indels.
+    panel <- c("chr1:200:A:G", "chr1:200:G:A")
+    expect_length(matchVariants("chr1:200:A:G", panel)$idxA, 0L)
+})

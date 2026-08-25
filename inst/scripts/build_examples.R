@@ -295,9 +295,17 @@ qtlSumStatsMulticontextExample <- QtlSumStats(
 #    extraction time, so no user-facing fixup step is required.
 # -----------------------------------------------------------------------------
 asResource <- function(p) paste0("pecotmr://extdata/", basename(p))
-qtlDatasetExample@genotypes@path <- asResource(
-    qtlDatasetExample@genotypes@path
-)
+
+# A QtlDataset holds its handle twice: as a slot and inside the lazy dosage
+# assay's seed. Repointing only the slot would leave the assay reading the
+# build machine's absolute path, so both move together.
+repointHandle <- function(x) {
+    handle <- getGenotypeHandle(x)
+    handle@path <- asResource(handle@path)
+    pecotmr:::.qtlWithGenotypeHandle(x, handle)
+}
+
+qtlDatasetExample <- repointHandle(qtlDatasetExample)
 qtlSumStatsExample@ldSketch@path <- asResource(
     qtlSumStatsExample@ldSketch@path
 )
@@ -307,12 +315,10 @@ qtlSumStatsMulticontextExample@ldSketch@path <- asResource(
 gwasSumStatsS4Example@ldSketch@path <- asResource(
     gwasSumStatsS4Example@ldSketch@path
 )
-for (nm in names(multiStudyQtlDatasetExample@qtlDatasets)) {
-    multiStudyQtlDatasetExample@qtlDatasets[[nm]]@genotypes@path <-
-        asResource(
-            multiStudyQtlDatasetExample@qtlDatasets[[nm]]@genotypes@path
-        )
-}
+multiStudyQtlDatasetExample@qtlDatasets <- map(
+    multiStudyQtlDatasetExample@qtlDatasets,
+    repointHandle
+)
 
 # -----------------------------------------------------------------------------
 # 8. Save.

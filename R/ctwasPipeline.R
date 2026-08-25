@@ -7,21 +7,25 @@
 #'   \code{GRanges} from \code{\link{causalInferencePipeline}} as the
 #'   \code{z_gene} input so the per-gene Z is not recomputed inside ctwas.
 #'
-#' @section LD block convention: Inputs are NAMED LISTS keyed by
-#'   \code{region_id} (\code{list(block1 = gss1, block2 = gss2, ...)}).
-#'   Per-block \code{region_info}, \code{LD_map}, and \code{snp_map} entries are
-#'   built automatically from each block's LD sketch and concatenated before the
-#'   call to \code{ctwas::ctwas_sumstats}. A single-block input is rejected:
-#'   cTWAS's EM cannot converge on a single region, so callers must supply at
-#'   least two blocks.
+#' @section LD block convention: \code{gwasSumStats} is ONE
+#'   \code{\link{GwasSumStats}} whose elements are LD blocks, keyed by its
+#'   \code{blockId} column -- build it with
+#'   \code{loadGwasSumStatsFromManifest(..., ldBlocks = <blocks>)}. Per-block
+#'   \code{region_info}, \code{LD_map}, and \code{snp_map} entries are built
+#'   automatically from the LD sketch and concatenated before the call to
+#'   \code{ctwas::ctwas_sumstats}. A single-block input is rejected: cTWAS's EM
+#'   cannot converge on a single region, so callers must supply at least two
+#'   blocks.
 #'
 #' @section LD-sketch identity check: Per block: \code{getLdSketch(twasWeights)}
 #'   (when non-NULL) must match \code{getLdSketch(gwasSumStats)}. Mismatch is a
 #'   hard error.
 #'
-#' @param gwasSumStats NAMED LIST of \code{\link{GwasSumStats}} keyed by
-#'   \code{region_id} (at least two entries). Each must have \code{getQcInfo()}
-#'   non-empty.
+#' @param gwasSumStats A \code{\link{GwasSumStats}} whose elements are LD
+#'   blocks (at least two), keyed by its \code{blockId} column, with
+#'   \code{getQcInfo()} non-empty. Build it with
+#'   \code{loadGwasSumStatsFromManifest(..., ldBlocks = <blocks>)} and pass it
+#'   through \code{\link{summaryStatsQc}}.
 #' @param twasWeights The per-gene weight source. Either (a) a FLAT
 #'   \code{\link{TwasWeights}} / \code{QtlFineMappingResult} (or a homogeneous
 #'   list of them) carrying \code{region} provenance -- each gene is placed into
@@ -116,14 +120,12 @@
 #' gwasTsv <- system.file("extdata", "manifests",
 #'   "protocol_example.twas.gwas_sumstats.chr22.tsv.gz", package = "pecotmr")
 #' mani <- data.frame(study = "gwas1", sumStatsPath = gwasTsv)
-#' blocks <- list(c(10000000, 15000000), c(15000000, 19000000))
-#' gwasByRegion <- list()
-#' for (b in blocks) {
-#'   rid <- sprintf("chr22_%d_%d", b[1], b[2])
-#'   gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
-#'     ldSketch = ldStem, region = sprintf("chr22:%d-%d", b[1], b[2]))
-#'   gwasByRegion[[rid]] <- summaryStatsQc(gss, mafCutoff = 0.0025)
-#' }
+#' blocks <- GenomicRanges::GRanges("chr22",
+#'   IRanges::IRanges(c(10000000, 15000001), c(15000000, 19000000)),
+#'   blockId = c("chr22_1", "chr22_2"))
+#' gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
+#'   ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
+#' gwasByRegion <- summaryStatsQc(gss, mafCutoff = 0.0025)
 #' ctwasPipeline(gwasSumStats = gwasByRegion,
 #'   twasWeights = list(ctwasWeightsExample), thin = 1, niterPrefit = 3,
 #'   niter = 10, min_group_size = 1, min_p_single_effect = 0,
@@ -266,14 +268,12 @@ ctwasPipeline <- function(
 #' gwasTsv <- system.file("extdata", "manifests",
 #'   "protocol_example.twas.gwas_sumstats.chr22.tsv.gz", package = "pecotmr")
 #' mani <- data.frame(study = "gwas1", sumStatsPath = gwasTsv)
-#' blocks <- list(c(10000000, 15000000), c(15000000, 19000000))
-#' gwasByRegion <- list()
-#' for (b in blocks) {
-#'   rid <- sprintf("chr22_%d_%d", b[1], b[2])
-#'   gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
-#'     ldSketch = ldStem, region = sprintf("chr22:%d-%d", b[1], b[2]))
-#'   gwasByRegion[[rid]] <- summaryStatsQc(gss, mafCutoff = 0.0025)
-#' }
+#' blocks <- GenomicRanges::GRanges("chr22",
+#'   IRanges::IRanges(c(10000000, 15000001), c(15000000, 19000000)),
+#'   blockId = c("chr22_1", "chr22_2"))
+#' gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
+#'   ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
+#' gwasByRegion <- summaryStatsQc(gss, mafCutoff = 0.0025)
 #' assembleCtwasInputs(gwasSumStats = gwasByRegion,
 #'   twasWeights = list(ctwasWeightsExample))
 #' @export
@@ -289,6 +289,9 @@ assembleCtwasInputs <- function(
     maxNumVariants = Inf
 ) {
     .ctwasValidateGwasList(gwasSumStats)
+    # One single-block GwasSumStats per element, keyed by blockId: the region
+    # grid the rest of the assembly walks.
+    gwasSumStats <- .ctwasGwasByBlock(gwasSumStats)
     twasWeights <- .ctwasResolveAndValidateWeights(twasWeights, gwasSumStats)
     .ctwasValidateOptional(twasZ, fineMappingResult)
     regionIds <- names(gwasSumStats)
@@ -313,8 +316,12 @@ assembleCtwasInputs <- function(
     .ctwasAssembleResult(regionIds, fp, weightsList, twasZ, resolvedMethod)
 }
 
-# Validate the gwasSumStats input: ctwas available, a non-empty NAMED LIST of
-# >= 2 GwasSumStats keyed by region_id, each QC'd.
+# Validate the gwasSumStats input: ctwas available, a QC'd GwasSumStats whose
+# elements are per-LD-block (>= 2 of them).
+#
+# This used to demand a named list of GwasSumStats keyed by region_id, which
+# existed only because the class could not hold multiple region-scoped blocks.
+# It can now (§4.2): one collection, one element per block, keyed by `blockId`.
 # @noRd
 .ctwasValidateGwasList <- function(gwasSumStats) {
     if (!requireNamespace("ctwas", quietly = TRUE)) {
@@ -326,26 +333,18 @@ assembleCtwasInputs <- function(
         abort(msg)
         # nocov end
     }
-    if (
-        missing(gwasSumStats) ||
-            !is.list(gwasSumStats) ||
-            methods::is(gwasSumStats, "GwasSumStats")
-    ) {
+    if (missing(gwasSumStats) || !methods::is(gwasSumStats, "GwasSumStats")) {
         msg <- glue(
-            "`gwasSumStats` must be a NAMED LIST of GwasSumStats keyed by ",
-            "region_id (got {class(gwasSumStats)[[1L]]}). cTWAS's EM ",
-            "requires multi-block context to converge; single-block calls ",
-            "are no longer supported."
+            "`gwasSumStats` must be a GwasSumStats whose elements are LD ",
+            "blocks (got {class(gwasSumStats)[[1L]]}). Build one with ",
+            "`loadGwasSumStatsFromManifest(..., ldBlocks = <blocks>)`."
         )
         abort(msg)
     }
-    if (
-        is.null(names(gwasSumStats)) ||
-            any(str_length(names(gwasSumStats)) == 0L)
-    ) {
+    if (!is_in("blockId", colnames(gwasSumStats))) {
         msg <- glue(
-            "`gwasSumStats` must be a named list keyed by region_id (got an ",
-            "unnamed or empty-named list)."
+            "`gwasSumStats` has no `blockId` column, so its elements cannot ",
+            "be keyed by LD block. Rebuild it with a current constructor."
         )
         abort(msg)
     }
@@ -360,22 +359,45 @@ assembleCtwasInputs <- function(
     .ctwasValidateGwasEntries(gwasSumStats)
 }
 
-# Each gwasSumStats entry must be a QC'd GwasSumStats.
+# The collection must be QC'd, and its block keys must be usable as region ids.
 # @noRd
 .ctwasValidateGwasEntries <- function(gwasSumStats) {
-    for (rid in names(gwasSumStats)) {
-        if (!methods::is(gwasSumStats[[rid]], "GwasSumStats")) {
-            msg <- glue("gwasSumStats[['{rid}']] is not a GwasSumStats.")
-            abort(msg)
-        }
-        if (length(getQcInfo(gwasSumStats[[rid]])) == 0L) {
-            msg <- glue(
-                "assembleCtwasInputs: gwasSumStats[['{rid}']] has no QC ",
-                "record. Call summaryStatsQc() first."
-            )
-            abort(msg)
-        }
+    if (length(getQcInfo(gwasSumStats)) == 0L) {
+        msg <- glue(
+            "assembleCtwasInputs: `gwasSumStats` has no QC record. ",
+            "Call summaryStatsQc() first."
+        )
+        abort(msg)
     }
+    keys <- as.character(gwasSumStats$blockId)
+    if (any(is.na(keys)) || any(str_length(keys) == 0L)) {
+        abort("`gwasSumStats` has empty or missing `blockId` value(s).")
+    }
+    if (anyDuplicated(keys) > 0L) {
+        dup <- unique(keys[duplicated(keys)])
+        msg <- glue(
+            "`gwasSumStats` block ids must be unique; repeated: ",
+            "{str_flatten(head(dup, 5L), ', ')}. Two elements sharing a ",
+            "block id would silently overwrite one another as region ids."
+        )
+        abort(msg)
+    }
+}
+
+# One single-element GwasSumStats per LD block, keyed by blockId -- the shape
+# the two-pass assembly consumes. The collection's own ldSketch rides along on
+# each subset, so per-region LD lookups are unchanged.
+# @noRd
+.ctwasGwasByBlock <- function(gwasSumStats) {
+    set_names(
+        map(seq_along(gwasSumStats), .ctwasPickBlock, x = gwasSumStats),
+        as.character(gwasSumStats$blockId)
+    )
+}
+
+# @noRd
+.ctwasPickBlock <- function(i, x) {
+    x[i]
 }
 
 # Resolve a flat weight source into per-region buckets (cTWAS's p0 start-of-
@@ -881,14 +903,12 @@ screenCtwasRegions <- function(estResult, L = 5L, ncore = 1L, ...) {
 #' gwasTsv <- system.file("extdata", "manifests",
 #'   "protocol_example.twas.gwas_sumstats.chr22.tsv.gz", package = "pecotmr")
 #' mani <- data.frame(study = "gwas1", sumStatsPath = gwasTsv)
-#' blocks <- list(c(10000000, 15000000), c(15000000, 19000000))
-#' gwasByRegion <- list()
-#' for (b in blocks) {
-#'   rid <- sprintf("chr22_%d_%d", b[1], b[2])
-#'   gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
-#'     ldSketch = ldStem, region = sprintf("chr22:%d-%d", b[1], b[2]))
-#'   gwasByRegion[[rid]] <- summaryStatsQc(gss, mafCutoff = 0.0025)
-#' }
+#' blocks <- GenomicRanges::GRanges("chr22",
+#'   IRanges::IRanges(c(10000000, 15000001), c(15000000, 19000000)),
+#'   blockId = c("chr22_1", "chr22_2"))
+#' gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
+#'   ldSketch = ldStem, region = "chr22:10000000-19000000", ldBlocks = blocks)
+#' gwasByRegion <- summaryStatsQc(gss, mafCutoff = 0.0025)
 #' inp <- assembleCtwasInputs(gwasSumStats = gwasByRegion,
 #'   twasWeights = list(ctwasWeightsExample))
 #' est <- estCtwasParam(inp, thin = 1, niterPrefit = 3, niter = 10,
@@ -1260,20 +1280,18 @@ mergeCtwasBoundaryRegions <- function(
     abort(msg)
 }
 
-# Fail fast on the two cTWAS inputs. `gwasSumStats` defines the LD-block grid,
-# so it must be a NAMED LIST keyed by region_id (a bare S4 collection is the
-# common mistake). `twasWeights` may be a FLAT weight source (a single
-# TwasWeights / QtlFineMappingResult, or a list of them) -- placed into blocks
-# internally by `assembleCtwasInputs` -- or a pre-bucketed per-region named
-# list.
+# Fail fast on the two cTWAS inputs. `gwasSumStats` defines the LD-block grid:
+# one GwasSumStats whose elements are blocks. `twasWeights` may be a FLAT
+# weight source (a single TwasWeights / QtlFineMappingResult, or a list of
+# them) -- placed into blocks internally by `assembleCtwasInputs` -- or a
+# pre-bucketed per-region named list.
 # @noRd
 .ctwasRequireNamedLists <- function(gwasSumStats, twasWeights) {
-    if (!is.list(gwasSumStats) || methods::is(gwasSumStats, "GwasSumStats")) {
+    if (!methods::is(gwasSumStats, "GwasSumStats")) {
         msg <- glue(
-            "`gwasSumStats` must be a NAMED LIST of GwasSumStats keyed by ",
-            "region_id (got {class(gwasSumStats)[[1L]]}). cTWAS's EM ",
-            "requires multi-block context to converge; single-block calls ",
-            "are no longer supported."
+            "`gwasSumStats` must be a GwasSumStats whose elements are LD ",
+            "blocks (got {class(gwasSumStats)[[1L]]}). Build one with ",
+            "`loadGwasSumStatsFromManifest(..., ldBlocks = <blocks>)`."
         )
         abort(msg)
     }
@@ -1347,6 +1365,43 @@ mergeCtwasBoundaryRegions <- function(
     abort(msg)
 }
 
+# Parse cTWAS block-manifest keys ("chr1_1000_2000" / "chr1:1000-2000") into a
+# per-key GRanges.
+#
+# This is cTWAS's OWN `region_id` concept, not pecotmr's: cTWAS keys its
+# region_info, snp_map and per-region data by these strings, so the package has
+# to be able to read them even though pecotmr's own collections now key on the
+# element range instead (section 4.4). A key that carries no coordinates
+# becomes a 0-width chrUn sentinel, which matches no anchor and so yields the
+# documented "NA when the anchor falls in no block".
+# @noRd
+.ctwasBlockGrFromIds <- function(ids) {
+    n <- length(ids)
+    chrom <- character(n)
+    start <- integer(n)
+    end <- integer(n)
+    for (i in seq_len(n)) {
+        g <- tryCatch(
+            asGranges(str_replace(
+                as.character(ids[[i]]),
+                "_([0-9]+)_([0-9]+)$",
+                ":\\1-\\2"
+            )),
+            error = function(e) NULL
+        )
+        if (!is.null(g) && length(g) >= 1L) {
+            chrom[[i]] <- as.character(GenomicRanges::seqnames(g))[[1L]]
+            start[[i]] <- GenomicRanges::start(g)[[1L]]
+            end[[i]] <- GenomicRanges::end(g)[[1L]]
+        } else {
+            chrom[[i]] <- "chrUn"
+            start[[i]] <- 1L
+            end[[i]] <- 0L
+        }
+    }
+    GenomicRanges::GRanges(chrom, IRanges::IRanges(start = start, end = end))
+}
+
 # Place each gene (row) of a flat weight source into its home LD block. The
 # anchor is start(region) -- matching cTWAS's own `assign_region_data` rule,
 # which homes a gene by its p0 (single point) into the block where
@@ -1357,7 +1412,7 @@ mergeCtwasBoundaryRegions <- function(
 # @noRd
 .ctwasPlaceByAnchor <- function(region, gwasSumStats) {
     ids <- names(gwasSumStats)
-    blockGr <- .regionFromIds(ids)
+    blockGr <- .ctwasBlockWindows(gwasSumStats, ids)
     aChr <- .ctwasChrKey(as.character(GenomicRanges::seqnames(region)))
     aPos <- GenomicRanges::start(region)
     bChr <- .ctwasChrKey(as.character(GenomicRanges::seqnames(blockGr)))
@@ -1375,6 +1430,44 @@ mergeCtwasBoundaryRegions <- function(
     )
 }
 
+# The window of each LD block, taken from that block's own GWAS variants.
+#
+# These used to be parsed out of the region-id strings, which forced ids to
+# encode coordinates ("chr1_100_200"). Each block is now an element of a
+# GwasSumStats and carries its range directly, so an opaque id ("blockA")
+# places just as well. A block with no variants yields an empty window and
+# hosts no gene, which is the right answer: there is no GWAS signal there for
+# a gene to be tested against.
+# @noRd
+.ctwasBlockWindows <- function(gwasSumStats, ids) {
+    spans <- map(gwasSumStats, .ctwasBlockSpan)
+    empty <- map_lgl(spans, .ctwasSpanIsEmpty)
+    if (all(empty)) {
+        # Nothing to place against; fall back to whatever the ids encode so a
+        # coordinate-keyed caller still behaves as before.
+        return(.ctwasBlockGrFromIds(ids))
+    }
+    # unname(): c() on a NAMED list of GRanges builds a list rather than
+    # concatenating, and the result then fails seqnames() further down.
+    exec(c, !!!unname(spans))
+}
+
+# @noRd
+.ctwasBlockSpan <- function(gss) {
+    variants <- unlist(gss, use.names = FALSE)
+    if (length(variants) == 0L) {
+        return(GenomicRanges::GRanges())
+    }
+    # A stored element spans exactly one seqname, so ignoring strand leaves a
+    # single range -- the block's window.
+    range(variants, ignore.strand = TRUE)
+}
+
+# @noRd
+.ctwasSpanIsEmpty <- function(g) {
+    length(g) == 0L
+}
+
 # Bucket a flat weight source into a per-region named list keyed to the block
 # grid, homing each gene by start(region). Each per-block sub-collection carries
 # that block's GWAS LD sketch (the panel its weights are harmonized against, and
@@ -1382,9 +1475,14 @@ mergeCtwasBoundaryRegions <- function(
 # @noRd
 .ctwasBucketWeights <- function(weights, gwasSumStats) {
     combined <- .ctwasCombineWeightSources(weights)
-    if (!is_in("region", names(combined))) {
+    # Placement anchors on the GENE's own position, not on a stored analysis
+    # window and not on the span of its weight variants. Two genes at
+    # different loci can legitimately share a weight variant set, so the
+    # variant span cannot tell them apart; traitPos can (spec 4.4, which keeps
+    # gene coordinates in mcols for exactly this).
+    if (!is_in("traitPos", .tupleColumnNames(combined))) {
         msg <- glue(
-            "assembleCtwasInputs: the weight source carries no `region` ",
+            "assembleCtwasInputs: the weight source carries no `traitPos` ",
             "provenance, which internal LD-block placement requires ",
             "(produced by twasWeightsPipeline / fineMappingPipeline). Supply ",
             "a pre-bucketed per-region named list if placement was done ",
@@ -1392,11 +1490,14 @@ mergeCtwasBoundaryRegions <- function(
         )
         abort(msg)
     }
-    home <- .ctwasPlaceByAnchor(getRegion(combined), gwasSumStats)
+    home <- .ctwasPlaceByAnchor(
+        getTraitPosition(combined),
+        gwasSumStats
+    )
     unplaced <- sum(is.na(home))
     if (unplaced > 0L) {
         msg <- glue(
-            "assembleCtwasInputs: {unplaced} gene(s) whose region anchor ",
+            "assembleCtwasInputs: {unplaced} gene(s) whose traitPos anchor ",
             "fell in no LD block were dropped."
         )
         warn(msg)
@@ -1483,7 +1584,10 @@ mergeCtwasBoundaryRegions <- function(
 # reference the same GWAS study.
 # @noRd
 .ctwasGwasStudy <- function(gwasSumStats) {
-    studies <- unique(unlist(map(gwasSumStats, .ctwasStudyChr)))
+    # Read the collection's own `study` column. map() over a GwasSumStats
+    # iterates its ELEMENTS (per-block GRanges), which carry no study, so it
+    # would silently yield NA for every block.
+    studies <- unique(.ctwasStudyChr(gwasSumStats))
     studies <- studies[!is.na(studies) & str_length(studies) > 0L]
     if (length(studies) == 0L) {
         return(NA_character_)
@@ -1604,16 +1708,152 @@ mergeCtwasBoundaryRegions <- function(
     if (nrow(sub) == 0L) NULL else `rownames<-`(sub, NULL)
 }
 
-# Build a CtwasResultEntry from a finemap + susieAlpha slice, stamping the run's
-# param + region_info.
+# =============================================================================
+# Ranging the cTWAS result payloads (spec 4.5)
+# -----------------------------------------------------------------------------
+# ctwas's finemap_res / susie_alpha_res carry no coordinates -- that is what
+# anno_finemap_res(add_position = TRUE) exists for, and pecotmr never calls it.
+# The coordinates are recoverable in-package without ctwas's mapping_table:
+#
+#   SNP rows   the `id` IS a variant id, so it renders its own range (4.1a)
+#   gene rows  the id is region|study|context|trait|method, and the run's
+#              weights carry that gene's trait_pos (falling back to the
+#              weight-variant span chrom/p0/p1)
+#
+# Without this a CtwasResult cannot answer "which genes did cTWAS implicate in
+# this window" without the caller redoing the join by hand.
+# =============================================================================
+
+# Coordinates for every gene in a run, keyed by gene id.
+# @noRd
+.ctwasGeneCoords <- function(weights) {
+    if (is.null(weights) || length(weights) == 0L) {
+        return(NULL)
+    }
+    map(weights, .ctwasOneGeneCoord)
+}
+
+# @noRd
+.ctwasOneGeneCoord <- function(w) {
+    # A weights element that is not a list carries no gene metadata (some
+    # callers pass a bare weight vector), so there is nothing to place it by.
+    if (!is.list(w)) {
+        return(NULL)
+    }
+    tp <- w$trait_pos
+    if (methods::is(tp, "GRanges") && length(tp) == 1L) {
+        return(list(
+            chrom = as.character(seqnames(tp)),
+            start = as.integer(start(tp)),
+            end = as.integer(GenomicRanges::end(tp))
+        ))
+    }
+    if (is.null(w$chrom) || is.null(w$p0)) {
+        return(NULL)
+    }
+    list(
+        chrom = withChrPrefix(as.character(w$chrom)),
+        start = as.integer(w$p0),
+        end = as.integer(w$p1)
+    )
+}
+
+# A finemap / susieAlpha table as a GRanges, its original columns preserved as
+# mcols. Returns the table unchanged when no row can be placed, so a payload
+# that genuinely has no coordinates is not silently fabricated onto chr1.
+# @noRd
+.ctwasRangePayload <- function(df, geneCoords) {
+    if (is.null(df) || nrow(df) == 0L) {
+        return(df)
+    }
+    ids <- as.character(df$id)
+    coord <- map(seq_along(ids), .ctwasRowCoord, ids = ids, gc = geneCoords)
+    placed <- !map_lgl(coord, is.null)
+    if (!any(placed)) {
+        return(df)
+    }
+    gr <- GenomicRanges::GRanges(
+        map_chr(coord, .ctwasCoordField, field = "chrom", placed = placed),
+        IRanges::IRanges(
+            start = map_int(
+                coord,
+                .ctwasCoordField2,
+                field = "start",
+                placed = placed
+            ),
+            end = map_int(
+                coord,
+                .ctwasCoordField2,
+                field = "end",
+                placed = placed
+            )
+        )
+    )
+    mcols(gr) <- S4Vectors::DataFrame(df, check.names = FALSE)
+    gr[placed]
+}
+
+# @noRd
+.ctwasRowCoord <- function(i, ids, gc) {
+    id <- ids[[i]]
+    if (!is.null(gc) && is_in(id, names(gc))) {
+        return(gc[[id]])
+    }
+    parsed <- tryCatch(parseVariantId(id), error = function(e) NULL)
+    if (is.null(parsed) || is.na(parsed$chrom[[1L]])) {
+        return(NULL)
+    }
+    list(
+        chrom = withChrPrefix(as.character(parsed$chrom[[1L]])),
+        start = as.integer(parsed$pos[[1L]]),
+        end = as.integer(parsed$pos[[1L]])
+    )
+}
+
+# @noRd
+.ctwasCoordField <- function(co, field, placed) {
+    if (is.null(co)) "chrUnplaced" else as.character(co[[field]])
+}
+
+# @noRd
+.ctwasCoordField2 <- function(co, field, placed) {
+    if (is.null(co)) 1L else as.integer(co[[field]])
+}
+
+# Build a CtwasResultEntry from a finemap + susieAlpha slice, recording the
+# run's param + region_info on it.
 # @noRd
 .ctwasMkEntry <- function(fm, sa, runResult) {
+    geneCoords <- .ctwasGeneCoords(runResult$weights)
     CtwasResultEntry(
-        finemap = fm,
-        susieAlpha = sa,
+        finemap = .ctwasRangePayload(fm, geneCoords),
+        susieAlpha = .ctwasRangePayload(sa, geneCoords),
         param = runResult$param,
-        regionInfo = runResult$region_info
+        regionInfo = .ctwasRangeRegionInfo(runResult$region_info)
     )
+}
+
+# region_info as a GRanges. pecotmr builds this table itself with `chr` and a
+# variant-derived [start, stop], so the ranges are already there -- this only
+# gives them their proper type.
+# @noRd
+.ctwasRangeRegionInfo <- function(ri) {
+    if (is.null(ri) || nrow(ri) == 0L) {
+        return(ri)
+    }
+    cols <- names(ri)
+    if (!all(c("chrom", "start", "stop") %in% cols)) {
+        return(ri)
+    }
+    gr <- GenomicRanges::GRanges(
+        withChrPrefix(as.character(ri$chrom)),
+        IRanges::IRanges(
+            start = as.integer(ri$start),
+            end = as.integer(ri$stop)
+        )
+    )
+    mcols(gr) <- S4Vectors::DataFrame(ri, check.names = FALSE)
+    gr
 }
 
 # Decompose one cTWAS run (a `finemapCtwasRegions` output) into per-context
@@ -1757,7 +1997,7 @@ mergeCtwasBoundaryRegions <- function(
 }
 
 # The single GWAS study a finemap result models, read from z_snp$study (which
-# `.ctwasBuildZSnp` stamps per row). Errors on multiple; NA when absent.
+# `.ctwasBuildZSnp` fills in per row). Errors on multiple; NA when absent.
 # @noRd
 .ctwasGwasStudyFromZSnp <- function(zSnp) {
     if (is.null(zSnp) || is.null(zSnp$study)) {
@@ -1859,7 +2099,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 .ctwasBuildZSnp <- function(gwasSumStats) {
     pieces <- list()
     for (i in seq_len(nrow(gwasSumStats))) {
-        df <- .entryToSumstatDf(gwasSumStats$entry[[i]], keepChrPrefix = FALSE)
+        df <- .entryToSumstatDf(gwasSumStats[[i]], keepChrPrefix = FALSE)
         pieces[[i]] <- tibble(
             id = df$variant_id,
             chrom = as.integer(df$chrom),
@@ -1888,7 +2128,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     pos <- integer(0)
     chrs <- character(0)
     for (i in seq_len(nrow(gss))) {
-        gr <- gss$entry[[i]]
+        gr <- gss[[i]]
         pos <- c(pos, as.integer(GenomicRanges::start(gr)))
         chrs <- c(chrs, as.character(GenomicRanges::seqnames(gr)))
     }
@@ -1925,7 +2165,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # supported by the downstream cTWAS model.
 # @noRd
 .ctwasSnpInfoForBlock <- function(gwasLd) {
-    snpInfo <- getSnpInfo(gwasLd)
+    snpInfo <- .ldSketchSnpInfo(gwasLd)
     chr <- as.integer(
         str_remove(as.character(snpInfo$CHR), regex("^chr", ignore_case = TRUE))
     )
@@ -1956,7 +2196,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 .ctwasComputeFullPanelLd <- function(gwasLd) {
     snpInfoCtwas <- .ctwasSnpInfoForBlock(gwasLd)
     geno <- .dosageMatrix(
-        gwasLd,
+        .ldSketchHandle(gwasLd),
         seq_len(nrow(snpInfoCtwas)),
         meanImpute = TRUE
     )
@@ -2015,7 +2255,9 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (is.null(fits)) {
         return(FALSE)
     }
-    needed <- c("lbf_variable", "mu", "X_column_scale_factors")
+    # `alpha`, not `lbf_variable`: renormalization restricts the stored
+    # per-effect alpha, which already carries the fit's prior.
+    needed <- c("alpha", "mu", "X_column_scale_factors")
     all(is_in(needed, names(fits)))
 }
 
@@ -2037,31 +2279,63 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     keptIdx,
     harmonizedW
 ) {
-    lbf <- fits$lbf_variable
-    mu <- fits$mu
-    xCol <- fits$X_column_scale_factors
-    if (is.null(lbf) || is.null(mu) || is.null(xCol)) {
+    # Fields are READ with `[[`: `$` on a list falls back to prefix matching,
+    # so `fits$mu` would silently return `mu2` on a fit that has no `mu`.
+    alpha <- fits[["alpha"]]
+    mu <- fits[["mu"]]
+    xCol <- fits[["X_column_scale_factors"]]
+    if (is.null(alpha) || is.null(mu) || is.null(xCol)) {
         return(NULL)
     }
+    # susieInf / susieAsh carry an infinitesimal term: coef.susie is
+    # colSums(alpha * mu) / scale + theta / scale. Recomputing the weight from
+    # alpha and mu alone would silently drop theta, changing what the weight
+    # means. Leave those fits to the plain subset-w-and-R path, which is
+    # unbiased and only loses power.
+    if (!is.null(fits[["theta"]]) || !is.null(fits[["omega_weights"]])) {
+        return(NULL)
+    }
+    alpha <- as.matrix(alpha)
     if (
-        ncol(lbf) != length(origVids) ||
+        ncol(alpha) != length(origVids) ||
             ncol(mu) != length(origVids) ||
             length(xCol) != length(origVids)
     ) {
-        # Fit-vs-entry dimension mismatch; skip rather than mis-slice.
+        # Fit-vs-entry dimension mismatch -- including a null_weight fit, whose
+        # alpha carries an extra column. Skip rather than mis-slice.
         return(NULL)
     }
     # Per-variant sign flip applied by allele harmonization. NaN signs
     # (origW == 0) default to +1.
     signFlip <- sign(harmonizedW / origW[keptIdx])
     signFlip[!is.finite(signFlip)] <- 1
-    lbfSub <- lbf[, keptIdx, drop = FALSE]
+    newAlpha <- .ctwasRenormAlpha(alpha, keptIdx)
+    if (is.null(newAlpha)) {
+        return(NULL)
+    }
     muSub <- sweep(mu[, keptIdx, drop = FALSE], 2L, signFlip, `*`)
     xColSub <- xCol[keptIdx]
     # Guard against zero scale factors (shouldn't happen in practice).
     xColSub[xColSub == 0] <- 1
-    newAlpha <- lbfToAlpha(lbfSub)
     as.numeric(colSums(newAlpha * muSub) / xColSub)
+}
+
+# Restrict each single-effect posterior to `keptIdx` and renormalize. The
+# stored alpha already carries the fit's prior (alpha is proportional to
+# pi * BF), so restricting and renormalizing is exact for any prior weights,
+# whereas rebuilding alpha from lbf_variable substitutes a uniform one. Log
+# space keeps an effect whose retained mass has underflowed from collapsing to
+# NaN; NULL when an effect has no retained mass at all, so the caller falls
+# back to the un-renormalized weights.
+# @noRd
+.ctwasRenormAlpha <- function(alpha, keptIdx) {
+    logSub <- log(alpha[, keptIdx, drop = FALSE])
+    rowMax <- apply(logSub, 1L, max)
+    if (any(!is.finite(rowMax))) {
+        return(NULL)
+    }
+    weights <- exp(sweep(logSub, 1L, rowMax, `-`))
+    weights / rowSums(weights)
 }
 
 # Build the weights list ctwas expects: keyed by per-tuple gene id,
@@ -2143,6 +2417,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         context = context,
         trait = trait,
         method = method,
+        traitPos = .ctwasTraitPosAt(twasWeights, i),
         key = as.character(glue("{study}|{context}|{trait}|{method}"))
     )
 }
@@ -2153,8 +2428,8 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # Returns list(vids, w, keptIdx, origVids, origW), or NULL when nothing
 # survives.
 # @noRd
-.ctwasAlignGeneWeights <- function(entry, refVariants, panelSnps) {
-    wr <- resolveWeights(entry)
+.ctwasAlignGeneWeights <- function(parts, refVariants, panelSnps) {
+    wr <- .rowResolveWeights(parts)
     if (length(wr$variantIds) == 0L) {
         return(NULL)
     }
@@ -2182,9 +2457,9 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # fit) and variance scaling for non-standardized weights (w * sqrt(per-variant
 # genotype variance from the LD panel)). Returns the adjusted weight vector.
 # @noRd
-.ctwasAdjustGeneWeights <- function(entry, aligned, ldPanel) {
+.ctwasAdjustGeneWeights <- function(parts, aligned, ldPanel) {
     w <- aligned$w
-    fits <- getFits(entry)
+    fits <- .rowFits(parts)
     shrank <- length(aligned$keptIdx) < length(aligned$origVids)
     if (.ctwasIsSusieFit(fits) && shrank) {
         renorm <- .ctwasRenormalizeSusieWeights(
@@ -2198,7 +2473,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
             w <- renorm
         }
     }
-    if (!isTRUE(getStandardized(entry))) {
+    if (!.rowStandardized(parts)) {
         varLookup <- ldPanel$variance[aligned$vids]
         if (anyNA(varLookup)) {
             msg <- glue(
@@ -2231,8 +2506,26 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         p0 = min(as.integer(panelInfo$pos[rowIdx])),
         p1 = max(as.integer(panelInfo$pos[rowIdx])),
         molecular_id = meta$trait,
-        weight_name = str_c(meta$context, meta$context, sep = "_")
+        weight_name = str_c(meta$context, meta$context, sep = "_"),
+        # The GENE's own coordinate, carried alongside the weight-variant span
+        # (chrom/p0/p1) so the result payloads can be ranged on the gene rather
+        # than on wherever its weight variants happen to fall.
+        trait_pos = meta$traitPos
     )
+}
+
+# The gene's own position for row i, or NULL when the weight source carries no
+# traitPos provenance.
+# @noRd
+.ctwasTraitPosAt <- function(twasWeights, i) {
+    if (!is_in("traitPos", .tupleColumnNames(twasWeights))) {
+        return(NULL)
+    }
+    tp <- getTraitPosition(twasWeights)
+    if (!methods::is(tp, "GRanges") || length(tp) < i) {
+        return(NULL)
+    }
+    tp[i]
 }
 
 # Build one gene's ctwas weight record: align -> adjust -> smart-filter
@@ -2240,12 +2533,14 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # the gene contributes no usable variants.
 # @noRd
 .ctwasGeneWeight <- function(i, twasWeights, ctx) {
-    entry <- twasWeights$entry[[i]]
-    aligned <- .ctwasAlignGeneWeights(entry, ctx$refVariants, ctx$panelSnps)
+    # Polymorphic: the weight source may be a TwasWeights or a
+    # FineMappingResult, so the payload comes from the class-aware bridge.
+    parts <- .rowParts(twasWeights, i)
+    aligned <- .ctwasAlignGeneWeights(parts, ctx$refVariants, ctx$panelSnps)
     if (is.null(aligned)) {
         return(NULL)
     }
-    w <- .ctwasAdjustGeneWeights(entry, aligned, ctx$ldPanel)
+    w <- .ctwasAdjustGeneWeights(parts, aligned, ctx$ldPanel)
     meta <- .ctwasGeneMeta(twasWeights, i)
     finemapAux <- .ctwasGetFinemapAux(
         ctx$fineMappingResult,
@@ -2291,10 +2586,10 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         return(NULL)
     }
     selectors <- list(study = study, method = method)
-    if (is_in("context", names(fineMappingResult))) {
+    if (is_in("context", .tupleColumnNames(fineMappingResult))) {
         selectors$context <- context
     }
-    if (is_in("trait", names(fineMappingResult))) {
+    if (is_in("trait", .tupleColumnNames(fineMappingResult))) {
         selectors$trait <- trait
     }
     selArgs <- c(list(fineMappingResult), selectors)
@@ -2305,7 +2600,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (is.null(entry)) {
         return(NULL)
     }
-    tl <- entry@topLoci
+    tl <- getTopLoci(entry, raw = TRUE)
     if (nrow(tl) == 0L) {
         return(NULL)
     }
@@ -2506,7 +2801,8 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # the dispatch key for the multi-block LD / snpInfo loaders, so two
 # blocks sharing the same on-disk LD payload share one cached panel.
 # @noRd
-.ctwasLdPanelKey <- function(handle) {
+.ctwasLdPanelKey <- function(sketch) {
+    handle <- .ldSketchHandle(sketch)
     fmt <- getFormat(handle)
     stem <- .genotypeReadPath(handle)
     candidates <- switch(
@@ -2537,7 +2833,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 .ctwasSnpInfoForGwasBlock <- function(gwasSumStats, panelSnpInfo) {
     blockIds <- character(0)
     for (i in seq_len(nrow(gwasSumStats))) {
-        mc <- S4Vectors::mcols(gwasSumStats$entry[[i]])
+        mc <- S4Vectors::mcols(gwasSumStats[[i]])
         if (is_in("SNP", colnames(mc))) {
             blockIds <- c(blockIds, as.character(mc$SNP))
         }

@@ -10,7 +10,7 @@ context("LdData accessors")
         path = path,
         format = "gds",
         snpInfo = data.frame(
-            SNP = paste0("v", seq_len(snp_n)),
+            SNP = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n))),
             CHR = rep("1", snp_n),
             BP = seq(100L, by = 100L, length.out = snp_n),
             A1 = rep("A", snp_n),
@@ -34,7 +34,7 @@ context("LdData accessors")
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
         A1 = rep("A", snp_n),
         A2 = rep("G", snp_n),
-        variant_id = paste0("v", seq_len(snp_n))
+        variant_id = sprintf("chr1:%d:A:G", 100L * (seq_len(snp_n)))
     )
     gr
 }
@@ -43,10 +43,10 @@ context("LdData accessors")
     function(handle, snpIdx, meanImpute = TRUE) {
         set.seed(seed)
         panel <- matrix(
-            rbinom(n_samples * nrow(handle@snpInfo), 2, 0.3),
+            rbinom(n_samples * nrow(getSnpInfo(handle)), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(handle@snpInfo),
-            dimnames = list(handle@sampleIds, handle@snpInfo$SNP)
+            ncol = nrow(getSnpInfo(handle)),
+            dimnames = list(handle@sampleIds, getSnpInfo(handle)$SNP)
         )
         sub <- panel[, snpIdx, drop = FALSE]
         rr <- GenomicRanges::GRanges(
@@ -57,7 +57,7 @@ context("LdData accessors")
             )
         )
         S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
-            SNP = handle@snpInfo$SNP[snpIdx],
+            SNP = getSnpInfo(handle)$SNP[snpIdx],
             A1 = handle@snpInfo$A1[snpIdx],
             A2 = handle@snpInfo$A2[snpIdx]
         )
@@ -66,7 +66,7 @@ context("LdData accessors")
             row.names = handle@sampleIds
         )
         dosage <- t(sub)
-        rownames(dosage) <- handle@snpInfo$SNP[snpIdx]
+        rownames(dosage) <- getSnpInfo(handle)$SNP[snpIdx]
         colnames(dosage) <- handle@sampleIds
         SummarizedExperiment::SummarizedExperiment(
             assays = list(dosage = dosage),
@@ -235,7 +235,7 @@ test_that("getGenotypes: matrix handle is returned unchanged", {
         0,
         nrow = 10,
         ncol = 4,
-        dimnames = list(paste0("s", 1:10), paste0("v", 1:4))
+        dimnames = list(paste0("s", 1:10), sprintf("chr1:%d:A:G", 100L * (1:4)))
     )
     ld <- new(
         "LdData",
@@ -264,7 +264,7 @@ test_that("getGenotypes: single handle returns samples x variants dosage", {
     )
     G <- getGenotypes(ld)
     expect_equal(dim(G), c(30L, 4L))
-    expect_equal(colnames(G), paste0("v", 1:4))
+    expect_equal(colnames(G), sprintf("chr1:%d:A:G", 100L * (1:4)))
 })
 
 test_that("getGenotypes: list of handles returns a list of dosage matrices", {
@@ -324,7 +324,7 @@ test_that("getVariantIds returns the variant_id mcol", {
         variants = .ld_makeVariants(),
         blockMetadata = S4Vectors::DataFrame(x = 1)
     )
-    expect_equal(getVariantIds(ld), paste0("v", 1:4))
+    expect_equal(getVariantIds(ld), sprintf("chr1:%d:A:G", 100L * (1:4)))
 })
 
 test_that("getVariantInfo / getBlockMetadata return slots verbatim", {
@@ -344,7 +344,7 @@ test_that("getRefPanel: assembles the chrom/pos/A1/A2/variant_id data.frame", {
     rp <- getRefPanel(ld)
     expect_s3_class(rp, "data.frame")
     expect_setequal(colnames(rp), c("A1", "A2", "variant_id", "chrom", "pos"))
-    expect_equal(rp$variant_id, paste0("v", 1:4))
+    expect_equal(rp$variant_id, sprintf("chr1:%d:A:G", 100L * (1:4)))
     expect_equal(rp$pos, c(100L, 200L, 300L, 400L))
 })
 
@@ -423,7 +423,7 @@ test_that("LdData show method works", {
         ranges = IRanges::IRanges(start = c(100L, 200L, 300L), width = 1L)
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        variant_id = paste0("v", 1:3),
+        variant_id = sprintf("chr1:%d:A:G", 100L * (1:3)),
         A1 = rep("A", 3),
         A2 = rep("G", 3)
     )
@@ -440,7 +440,7 @@ test_that("LdData supports block-diagonal correlation", {
         ranges = IRanges::IRanges(start = seq(100L, 500L, 100L), width = 1L)
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        variant_id = paste0("v", 1:5),
+        variant_id = sprintf("chr1:%d:A:G", 100L * (1:5)),
         A1 = rep("A", 5),
         A2 = rep("G", 5)
     )
@@ -462,7 +462,7 @@ test_that("LdData S4 accessors return correct data", {
         ranges = IRanges::IRanges(start = c(100L, 200L), width = 1L)
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        variant_id = c("v1", "v2"),
+        variant_id = c("chr1:100:A:G", "chr1:200:A:G"),
         A1 = c("A", "C"),
         A2 = c("G", "T")
     )
@@ -472,12 +472,12 @@ test_that("LdData S4 accessors return correct data", {
         blockMetadata = data.frame(blockId = 1L)
     )
     expect_equal(getCorrelation(ld), R)
-    expect_equal(getVariantIds(ld), c("v1", "v2"))
+    expect_equal(getVariantIds(ld), c("chr1:100:A:G", "chr1:200:A:G"))
     expect_false(hasGenotypes(ld))
     rp <- getRefPanel(ld)
     expect_true(is.data.frame(rp))
     expect_true("variant_id" %in% names(rp))
-    expect_equal(rp$variant_id, c("v1", "v2"))
+    expect_equal(rp$variant_id, c("chr1:100:A:G", "chr1:200:A:G"))
 })
 
 
@@ -487,14 +487,17 @@ test_that(".refPanelToGranges builds GRanges from data.frame", {
         pos = c(100L, 200L),
         A1 = c("G", "T"),
         A2 = c("A", "C"),
-        variant_id = c("v1", "v2"),
+        variant_id = c("chr1:100:A:G", "chr1:200:A:G"),
         allele_freq = c(0.3, 0.7),
         stringsAsFactors = FALSE
     )
     gr <- pecotmr:::.refPanelToGranges(rp)
     expect_s4_class(gr, "GRanges")
     expect_equal(length(gr), 2)
-    expect_equal(S4Vectors::mcols(gr)$variant_id, c("v1", "v2"))
+    expect_equal(
+        S4Vectors::mcols(gr)$variant_id,
+        c("chr1:100:A:G", "chr1:200:A:G")
+    )
     expect_equal(S4Vectors::mcols(gr)$allele_freq, c(0.3, 0.7))
 })
 # =============================================================================
@@ -660,4 +663,189 @@ test_that("getCorrelation: errors when neither correlation nor genotypeHandle is
         getCorrelation(ld),
         "No correlation matrix or genotype handle available"
     )
+})
+
+# ===========================================================================
+# genotypeHandle: what the slot admits
+# ===========================================================================
+
+test_that("getCorrelation works when the source is a dosage matrix", {
+    # .loadLdFromBlocks stores extracted, filtered dosages in genotypeHandle
+    # with snpIdx NULL (the matrix IS the subset). getGenotypes() always had a
+    # branch for that shape; getCorrelation() did not, and died inside the
+    # file readers with a dispatch error on getSampleIds().
+    set.seed(3)
+    X <- matrix(
+        rbinom(40, 2, 0.3),
+        nrow = 10,
+        ncol = 4,
+        dimnames = list(paste0("s", 1:10), sprintf("chr1:%d:A:G", 100L * 1:4))
+    )
+    ld <- LdData(
+        correlation = NULL,
+        genotypeHandle = X,
+        snpIdx = NULL,
+        variants = .ld_makeVariants(),
+        blockMetadata = S4Vectors::DataFrame(x = 1),
+        nRef = 10L
+    )
+    R <- getCorrelation(ld)
+    expect_equal(dim(R), c(4L, 4L))
+    expect_equal(unname(R), unname(cor(X)), tolerance = 1e-8)
+})
+
+test_that("the genotypeHandle slot refuses a source LD cannot be read from", {
+    args <- list(
+        correlation = NULL,
+        snpIdx = NULL,
+        variants = .ld_makeVariants(),
+        blockMetadata = S4Vectors::DataFrame(x = 1),
+        nRef = 0L
+    )
+    for (bad in list("a path", 42L, sum)) {
+        expect_error(
+            rlang::exec(LdData, !!!args, genotypeHandle = bad),
+            "genotypeHandle"
+        )
+    }
+})
+
+test_that("a mixture list must hold sources, not arbitrary values", {
+    expect_error(
+        LdData(
+            correlation = NULL,
+            genotypeHandle = list(.ld_makeHandle(), "not a panel"),
+            snpIdx = 1:4,
+            variants = .ld_makeVariants(),
+            blockMetadata = S4Vectors::DataFrame(x = 1),
+            nRef = 0L,
+            mixtureWeights = c(0.5, 0.5)
+        ),
+        "must each be a genotype panel or a dosage matrix"
+    )
+})
+
+test_that("the constructor unwraps a genotype panel to its handle", {
+    # readGenotypes() is the public way to open genotypes, so LdData has to
+    # take a panel; the slot keeps the handle, since snpIdx selects into the
+    # handle's snpInfo and the panel adds nothing on top of it.
+    panel <- readGenotypes(
+        test_path("test_data", "test_variants"),
+        format = "plink1"
+    )
+    ld <- LdData(
+        correlation = NULL,
+        genotypeHandle = panel,
+        snpIdx = 1:4,
+        variants = .ld_makeVariants(),
+        blockMetadata = S4Vectors::DataFrame(x = 1),
+        nRef = 0L
+    )
+    expect_s4_class(getGenotypeHandle(ld), "GenotypeHandle")
+    expect_equal(dim(getCorrelation(ld)), c(4L, 4L))
+})
+
+test_that("a DelayedMatrix is refused with the panel route named", {
+    # assay(panel, "dosage") is a plausible thing to reach for, but it drops
+    # the variant identity `snpIdx` indexes into. The slot's class union would
+    # reject it either way; this checks the caller is told what to pass.
+    h <- .readGenotypeHandle(
+        test_path("test_data", "test_variants"),
+        format = "plink1"
+    )
+    dm <- genotypeDelayedArray(h)[1:4, ]
+    expect_false(is.matrix(dm))
+    expect_error(
+        LdData(
+            genotypeHandle = dm,
+            variants = .ld_makeVariants(),
+            blockMetadata = S4Vectors::DataFrame(x = 1)
+        ),
+        "pass the panel it came from"
+    )
+})
+
+# ===========================================================================
+# The remaining payload slots: typed, not ANY
+# ===========================================================================
+
+.ld_baseArgs <- function() {
+    list(
+        variants = .ld_makeVariants(),
+        blockMetadata = S4Vectors::DataFrame(x = 1)
+    )
+}
+
+test_that("snpIdx accepts doubles and stores them as integer", {
+    # 1:5 is integer but c(1, 2, 3) is double, so the slot is typed integer
+    # and the constructor coerces rather than the union being widened.
+    ld <- rlang::exec(
+        LdData,
+        !!!.ld_baseArgs(),
+        genotypeHandle = .ld_makeHandle(),
+        snpIdx = c(1, 2, 3, 4)
+    )
+    expect_identical(getSnpIdx(ld), 1:4)
+})
+
+test_that("correlation takes a matrix, a per-block list, or NULL", {
+    R <- matrix(1, 2, 2)
+    for (v in list(R, list(R, R), NULL)) {
+        ld <- rlang::exec(
+            LdData,
+            !!!.ld_baseArgs(),
+            correlation = v,
+            genotypeHandle = if (is.null(v)) .ld_makeHandle() else NULL
+        )
+        expect_s4_class(ld, "LdData")
+    }
+})
+
+test_that("a block-diagonal correlation list must hold matrices", {
+    expect_error(
+        rlang::exec(
+            LdData,
+            !!!.ld_baseArgs(),
+            correlation = list(matrix(1, 2, 2), "not a matrix")
+        ),
+        "must each be a matrix"
+    )
+})
+
+test_that("the payload slots refuse values of the wrong shape", {
+    args <- .ld_baseArgs()
+    expect_error(
+        rlang::exec(LdData, !!!args, correlation = "a string"),
+        "correlation"
+    )
+    expect_error(
+        rlang::exec(
+            LdData,
+            !!!args,
+            correlation = matrix(1),
+            mixtureWeights = "half"
+        ),
+        "mixtureWeights"
+    )
+    expect_error(
+        LdData(
+            correlation = matrix(1),
+            variants = .ld_makeVariants(),
+            blockMetadata = "not a table"
+        ),
+        "blockMetadata"
+    )
+})
+
+test_that("blockMetadata takes ranges as well as tables", {
+    gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1L, 1000L))
+    for (v in list(gr, data.frame(chrom = "chr1"),
+                   S4Vectors::DataFrame(chrom = "chr1"))) {
+        ld <- LdData(
+            correlation = matrix(1),
+            variants = .ld_makeVariants(),
+            blockMetadata = v
+        )
+        expect_s4_class(ld, "LdData")
+    }
 })

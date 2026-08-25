@@ -11,7 +11,7 @@
 #'           TWAS Z only, no MR.
 #'     \item \code{fineMappingResult} alone (no \code{twasWeights}):
 #'           TWAS Z derived from SuSiE-style coefficients carried on the
-#'           \code{topLoci} slot of each FineMappingEntry; plus MR.
+#'           \code{topLoci} slot of each FineMappingRow; plus MR.
 #'     \item both: TWAS Z computed from \code{twasWeights};
 #'           MR computed from \code{fineMappingResult}.
 #'   }
@@ -321,7 +321,7 @@ causalInferencePipeline <- function(
     ))
 }
 
-# Resolve the FineMappingEntry for a tuple (NULL when the fmr lacks it).
+# Resolve the FineMappingRow for a tuple (NULL when the fmr lacks it).
 # @noRd
 .cipResolveFmrEntry <- function(
     fineMappingResult,
@@ -355,13 +355,24 @@ causalInferencePipeline <- function(
         variantIds = weightsInfo$variantIds,
         gwasDf = gdf,
         gwasLd = p$gwasLd,
-        alleleFlip = p$alleleFlip
+        alleleFlip = p$alleleFlip,
+        label = .cipPairLabel(tuple, gStudy)
     )
     if (is.null(twasOut)) {
         return(NULL)
     }
     mrOut <- .cipRunMr(fmrEntry, gdf, twasOut, p)
     .cipResultRow(tuple, gStudy, twasOut, mrOut)
+}
+
+# Identify a (QTL tuple, GWAS study) pair in diagnostics.
+# @noRd
+.cipPairLabel <- function(tuple, gStudy) {
+    glue(
+        "QTL (study='{tuple$qStudy}', context='{tuple$qContext}', ",
+        "trait='{tuple$qTrait}', method='{tuple$qMethod}') x GWAS ",
+        "(study='{gStudy}')"
+    )
 }
 
 # Run MR for a pair, gated on the TWAS p-value (mrPvalCutoff >= 1 disables the
@@ -623,8 +634,8 @@ causalInferencePipeline <- function(
         0L
 }
 
-# Fetch the per-tuple weight-source entry (a TwasWeightsEntry from
-# `twasWeights`, or a FineMappingEntry from `fineMappingResult`) and resolve it
+# Fetch the per-tuple weight-source entry (a TwasWeightsRow from
+# `twasWeights`, or a FineMappingRow from `fineMappingResult`) and resolve it
 # to an aligned (variantIds, weights) pair via the shared `resolveWeights` --
 # the SuSiE-style posterior effect for the FMR path. Returns NULL when the tuple
 # is absent or has no usable weights.
@@ -702,7 +713,8 @@ causalInferencePipeline <- function(
     variantIds,
     gwasDf,
     gwasLd,
-    alleleFlip = TRUE
+    alleleFlip = TRUE,
+    label = "this (QTL, GWAS) pair"
 ) {
     # Match QTL weights to the GWAS sumstats by (chrom, pos, allele) rather than
     # by raw id string, so chr-prefix / separator / allele-swap differences are
@@ -710,6 +722,10 @@ causalInferencePipeline <- function(
     # weights[idxA] * sign brings the weight into the GWAS allele coding, which
     # the GWAS z and the GWAS-panel LD already share.
     m <- matchVariants(variantIds, gwasDf$variant_id, allowFlip = alleleFlip)
+    # Reconciliation here is one-sided and unbiased -- subsetting both w and R
+    # keeps Z = w'z / sqrt(w'Rw) honest, it only costs power -- but the caller
+    # cannot see how much power was lost unless the drop is reported.
+    .cipWarnVariantDrop(length(variantIds), length(m$idxA), label)
     if (length(m$idxA) < 2L) {
         return(NULL)
     }
@@ -736,6 +752,31 @@ causalInferencePipeline <- function(
     )
 }
 
+# Report how many QTL weight variants failed to match the GWAS sumstats.
+# Dropping below two matches yields no TWAS Z at all, which used to be a silent
+# NULL, so that case is called out separately.
+# @noRd
+.cipWarnVariantDrop <- function(nWeights, nMatched, label) {
+    if (nMatched >= nWeights) {
+        return(invisible(NULL))
+    }
+    dropped <- nWeights - nMatched
+    if (nMatched < 2L) {
+        msg <- glue(
+            "causalInferencePipeline: {label} matched only {nMatched} of ",
+            "{nWeights} weight variant(s) to the GWAS sumstats; ",
+            "at least 2 are needed for a TWAS Z, so no result is reported."
+        )
+    } else {
+        msg <- glue(
+            "causalInferencePipeline: {label} dropped {dropped} of ",
+            "{nWeights} weight variant(s) absent from the GWAS sumstats; ",
+            "the TWAS Z uses the remaining {nMatched}."
+        )
+    }
+    warn(msg)
+}
+
 # Build an LD correlation matrix for a given variant subset from an
 # LD sketch. Thin wrapper over the shared `.ldFromSketch` helper
 # (R/ld.R).
@@ -744,7 +785,7 @@ causalInferencePipeline <- function(
 }
 
 # Compute the Wald-ratio IVW MR estimate for a single tuple. Uses the
-# FineMappingEntry's topLoci as the instrumental variable source: each
+# FineMappingRow's topLoci as the instrumental variable source: each
 # variant with PIP > pipCutoff contributes one ratio = beta_y / beta_x.
 # Returns list(waldRatio, waldRatioSe, mrPval, nIV) with NA fields when
 # no IVs survive.
@@ -794,7 +835,7 @@ causalInferencePipeline <- function(
     )
 }
 
-# Instrumental variables from a FineMappingEntry's topLoci: variants with PIP >
+# Instrumental variables from a FineMappingRow's topLoci: variants with PIP >
 # pipCutoff. Returns list(ivVars, betaX, seX) or NULL when none qualify.
 # @noRd
 .cipMrInstruments <- function(fmrEntry, pipCutoff) {
@@ -841,7 +882,7 @@ causalInferencePipeline <- function(
 }
 
 # CS-aware Wald-ratio MR estimate for a single tuple. Adapted from the
-# legacy mr.R::mrAnalysis but operating on a `FineMappingEntry`'s topLoci
+# legacy mr.R::mrAnalysis but operating on a `FineMappingRow`'s topLoci
 # data.frame + a GWAS `GRanges` instead of the old data.frame-only API.
 #
 # Logic:
