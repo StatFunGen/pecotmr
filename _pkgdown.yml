@@ -132,6 +132,8 @@ reference:
       - GwasFineMappingResult
       - GwasSumStats
       - LdData
+      - LdEigen
+      - LdScore
       - MashPrior
       - MultiStudyQtlDataset
       - QtlDataset
