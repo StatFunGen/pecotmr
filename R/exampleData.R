@@ -81,7 +81,7 @@ NULL
 #' and a per-variant table with the standard post-processing columns
 #' (\code{pip}, \code{logBF}, \code{cs_95} / \code{cs_70} / \code{cs_50} and
 #' their purities, marginal statistics). Four credible sets. \code{ldSketch} is
-#' the bundled \code{toy_canonical} \code{\link{GenotypeHandle}}, present
+#' the bundled \code{toy_canonical} genotype panel, present
 #' because \code{\link{qtlEnrichmentPipeline}} requires the GWAS collection to
 #' carry one as its RSS-derived marker; the LD actually used for the fit is an
 #' in-memory correlation matrix computed from \code{\link{eqtlRegionExample}}.

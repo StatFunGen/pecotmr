@@ -2209,13 +2209,13 @@ test_that(".twasFineMappingFits: ignores non-susie methods (e.g. lasso)", {
     }
 }
 
-test_that(".twasLdFromSketch: rejects non-GenotypeHandle ldSketch", {
+test_that(".twasLdFromSketch: rejects a non-panel ldSketch", {
     expect_error(
         pecotmr:::.twasLdFromSketch(
             "not_a_handle",
             c("chr1:100:A:G", "chr1:200:A:G")
         ),
-        "ldSketch must be a GenotypeHandle"
+        "ldSketch must be a genotype panel"
     )
 })
 
@@ -2623,42 +2623,9 @@ test_that("combineTwasWeights: variadic and list forms row-bind; guards empty/mi
 })
 
 # -----------------------------------------------------------------------------
-# .twasMergeRegions / .twasMergeRegionEntries / .twasFitsForRegion (dead-ish
-# multi-region helpers and per-region fit selection)
+# .twasMergeRegionEntries / .twasFitsForRegion (multi-region entry merge and
+# per-region fit selection)
 # -----------------------------------------------------------------------------
-
-test_that(".twasMergeRegions: stacks per-region entries under one key", {
-    r1 <- TwasWeights(
-        study = "S",
-        context = "c1",
-        trait = "t1",
-        method = "lasso",
-        entry = list(twasWeightsRow(
-            variantIds = "chr1:100:A:G",
-            weights = 0.1
-        ))
-    )
-    r2 <- TwasWeights(
-        study = "S",
-        context = "c1",
-        trait = "t1",
-        method = "lasso",
-        entry = list(twasWeightsRow(
-            variantIds = "chr1:200:A:G",
-            weights = 0.2
-        ))
-    )
-    out <- pecotmr:::.twasMergeRegions(list(r1, r2), c("rA", "rB"))
-    expect_s4_class(out, "TwasWeights")
-    expect_equal(nrow(out), 1L)
-    expect_setequal(
-        getVariantIds(pecotmr:::.collectionEntry(out, 1L)),
-        c("chr1:100:A:G", "chr1:200:A:G")
-    ) # stacked
-    # Single-element and all-NULL short-circuits.
-    expect_identical(pecotmr:::.twasMergeRegions(list(r1), "rA"), r1)
-    expect_null(pecotmr:::.twasMergeRegions(list(NULL), "rA"))
-})
 
 test_that(".twasMergeRegionEntries: all-NULL entries -> NULL", {
     expect_null(pecotmr:::.twasMergeRegionEntries(
@@ -2668,21 +2635,6 @@ test_that(".twasMergeRegionEntries: all-NULL entries -> NULL", {
 })
 # (.twasFitsForRegion per-region selection is covered by the existing
 #  ".twasRegionLabel / .twasFitsForRegion select per-region fits" test.)
-
-# -----------------------------------------------------------------------------
-# .twasBuildFromCachedRows
-# -----------------------------------------------------------------------------
-
-test_that(".twasBuildFromCachedRows: assembles a TwasWeights keyed by method names", {
-    rows <- list(
-        lasso = twasWeightsRow(variantIds = "chr1:100:A:G", weights = 0.1),
-        enet = twasWeightsRow(variantIds = "chr1:100:A:G", weights = 0.2)
-    )
-    out <- pecotmr:::.twasBuildFromCachedRows(rows, "S", "c1", "t1")
-    expect_s4_class(out, "TwasWeights")
-    expect_setequal(as.character(out$method), c("lasso", "enet"))
-    expect_null(pecotmr:::.twasBuildFromCachedRows(list(), "S", "c1", "t1"))
-})
 
 # -----------------------------------------------------------------------------
 # .twasNormalizeMethods / .twasTokensFromMethodList / .twasIsMultivariateToken
@@ -3615,7 +3567,7 @@ test_that("twasWeightsPipeline RSS cutoffs match .panelVariantFilter", {
 
 test_that("twasWeightsPipeline RSS treats MAC as a MAF equivalent", {
     ss <- .twrssf_qcd()
-    nSamp <- getNSamples(getLdSketch(ss))
+    nSamp <- ncol(getLdSketch(ss))
     expect_equal(
         .twrssf_n(ss, macCutoff = 0.1 * 2 * nSamp),
         .twrssf_n(ss, mafCutoff = 0.1)

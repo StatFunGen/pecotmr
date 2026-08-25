@@ -100,7 +100,7 @@ reference:
       - ColocResultBase-class
       - FineMappingResultBase-class
       - FineMappingRow-class
-      - GenotypeHandle-class
+      - GwasFineMappingResult-class
       - H2Estimate-class
       - LdData-class
       - LdEigen-class
@@ -109,9 +109,11 @@ reference:
       - MashPrior-class
       - MultiStudyQtlDataset-class
       - QtlDataset-class
+      - QtlFineMappingResult-class
       - RangedTupleList-class
       - SldscData-class
       - SumStatsBase-class
+      - TwasWeights-class
       - TwasWeightsRow-class
 
   - title: "Class constructors"
@@ -127,7 +129,6 @@ reference:
       - ColocResult
       - CtwasResultEntry
       - fineMappingRow
-      - GenotypeHandle
       - GwasFineMappingResult
       - GwasSumStats
       - LdData
@@ -166,12 +167,9 @@ reference:
 
   - subtitle: "AnnotationMatrix"
     contents:
-      - getAnnotationMeta
-      - getAnnotations
       - getBaseline
       - getCandidates
       - getGenome
-      - getSnpRanges
 
   - subtitle: "RangedTupleList"
     contents:
@@ -208,16 +206,6 @@ reference:
       - getCtwasParam
       - getFinemap
       - getSusieAlpha
-
-  - subtitle: "GenotypeHandle"
-    contents:
-      - getFormat
-      - getNSamples
-      - getPath
-      - getPgenPtr
-      - getSampleIds
-      - getSnpInfo
-      - readGenotypes
 
   - subtitle: "GwasFineMappingResult"
     contents:
@@ -258,15 +246,10 @@ reference:
       - getScoreStats
       - getTauBlocks
 
-  - subtitle: "LdBlocks"
-    contents:
-      - getBlocks
-
   - subtitle: "LdData"
     contents:
       - getBlockMetadata
       - getCorrelation
-      - getGenotypeHandle
       - getGenotypes
       - getMixtureWeights
       - getNRef
@@ -424,13 +407,12 @@ reference:
 
   - title: "Genotype I/O"
     desc: >
-      Reading and manipulating per-region genotype data outside the
-      GenotypeHandle accessor surface.
+      Reading genotype panels and per-region genotype data. A panel is a
+      `RangedSummarizedExperiment` whose dosage assay reads from the file
+      lazily, so the Bioconductor accessors apply to it directly.
     contents:
-      - extractBlockGenotypes
-      - genotypeDelayedArray
-      - getChromPaths
-      - computeBlockLdCor
+      - readGenotypes
+      - computeLd
       - loadGenotypeRegion
       - readAfreq
       - getRefVariantInfo
@@ -606,7 +588,7 @@ reference:
   - title: "Bundled example datasets"
     desc: >
       Synthetic data shipped with the package for vignettes and
-      tests. Their bundled GenotypeHandle paths resolve to the installed
+      tests. Their bundled genotype-panel paths resolve to the installed
       `inst/extdata/` location automatically at extraction time.
     contents:
       # S4 input containers
@@ -648,6 +630,18 @@ reference:
       role. Hidden from the reference index but still searchable and
       rendered.
     contents:
+      - GenotypeHandle
+      - GenotypeHandle-class
+      - getSnpInfo
+      - getFormat
+      - getPath
+      - getSampleIds
+      - getPgenPtr
+      - getNSamples
+      - getChromPaths
+      - getGenotypeHandle
+      - extractBlockGenotypes
+      - genotypeDelayedArray
       - as.data.frame.GwasSumStats
       - rescaleCovW0
       - buildTopLoci

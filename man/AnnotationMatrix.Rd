@@ -13,13 +13,14 @@ AnnotationMatrix(annotations, snpRanges, annotationMeta, genome = "hg19")
 
 \item{annotationMeta}{A data.frame with columns: name, tier, type.}
 
-\item{genome}{Character, genome build.}
+\item{genome}{Character, genome build; recorded in \code{seqinfo()}.}
 }
 \value{
 An \code{AnnotationMatrix} object.
 }
 \description{
-Construct an \code{AnnotationMatrix} from a matrix and metadata.
+Construct an \code{AnnotationMatrix} from a matrix and
+  metadata.
 }
 \examples{
 snpRanges <- GenomicRanges::GRanges(
@@ -30,4 +31,5 @@ meta <- data.frame(name = paste0("annot", 1:5), tier = "baseline",
   type = "binary")
 am <- AnnotationMatrix(annotations, snpRanges, annotationMeta = meta)
 am
+dim(am)
 }

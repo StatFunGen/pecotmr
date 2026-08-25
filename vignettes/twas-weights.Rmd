@@ -161,7 +161,7 @@ twSs <- twasWeightsPipeline(qtlSumStatsExample, methods = "lasso")
 twSs
 ```
 
-The RSS path uses the `ldSketch` `GenotypeHandle` inside the
+The RSS path uses the `ldSketch` genotype panel inside the
 `QtlSumStats` collection to compute LD as needed. The same 
 
 ## Multivariate (multi-context) weights

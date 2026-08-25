@@ -16,17 +16,20 @@ S4 container for LD information. Stores either a pre-computed
 (block-diagonal LD), or NULL if genotypes are available and R should be
 computed on demand.}
 
-\item{\code{genotypeHandle}}{A \code{GenotypeHandle}, a list of
-\code{GenotypeHandle}s (for mixture panels), or NULL when only pre-computed
-R is available.}
+\item{\code{genotypeHandle}}{Where genotypes are read from: a genotype handle, a
+list of them (for mixture panels), a matrix of dosages already extracted
+and filtered, or NULL when only pre-computed R is available. Pass a
+genotype panel (see \code{\link{readGenotypes}}) to the constructor and
+it is unwrapped to its handle.}
 
 \item{\code{snpIdx}}{Integer vector of 1-based SNP indices into the handle's
-\code{snpInfo}. NULL when correlation is pre-computed.}
+\code{snpInfo}. NULL when correlation is pre-computed, or when the
+source is a matrix (which is already the subset).}
 
 \item{\code{variants}}{A \code{GRanges} object with variant metadata (A1, A2,
 variant_id, and optionally allele_freq, variance, n_nomiss).}
 
-\item{\code{blockMetadata}}{An \code{LdBlocks} object or a \code{data.frame} with
+\item{\code{blockMetadata}}{A \code{GRanges} of blocks or a \code{data.frame} with
 block boundary information.}
 
 \item{\code{nRef}}{Integer, reference panel sample size.}

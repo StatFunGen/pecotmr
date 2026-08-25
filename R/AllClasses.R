@@ -15,6 +15,65 @@
 #' @importFrom methods setClass setMethod new is validObject
 NULL
 
+# The LD reference panel a collection was harmonized against, as the same
+# RangedSummarizedExperiment shape QtlDataset uses for its genotypes: variants
+# in rowRanges, dosages in a DelayedArray assay that reads lazily through a
+# GenotypeHandle. NULL when a collection carries no panel.
+#
+# A union rather than "ANY": the slot has always been documented as holding a
+# panel, and an untyped slot with a typed docstring is the kind of thing that
+# is only true until someone puts something else in it.
+#' @importClassesFrom SummarizedExperiment RangedSummarizedExperiment
+setClassUnion(
+    "LdSketchOrNULL",
+    c("RangedSummarizedExperiment", "NULL")
+)
+
+# What an LdData can read genotypes from. Four shapes, all real:
+#
+#   GenotypeHandle  a lazy file-backed panel; `snpIdx` selects into its whole
+#                   snpInfo, so the handle must not be pre-narrowed
+#   list            one handle per panel for a mixture reference, averaged by
+#                   `mixtureWeights`
+#   matrix          dosages already extracted and filtered, kept so
+#                   getGenotypes() answers without reopening the file (see
+#                   .loadLdFromBlocks); `snpIdx` is NULL in this case because
+#                   the matrix is already the subset
+#   NULL            no genotypes -- the object carries a pre-computed R
+#
+# A panel (RangedSummarizedExperiment) is what callers pass; the constructor
+# unwraps it to its handle, so the slot itself never holds one.
+#
+# A union rather than "ANY", for the same reason as above: the slot's
+# docstring named two of these four shapes and nothing enforced even that.
+setClassUnion(
+    "LdGenotypeSource",
+    c("GenotypeHandle", "matrix", "list", "NULL")
+)
+
+# The rest of LdData's payload, typed for the same reason. Each union is the
+# set of shapes the class is actually built with, confirmed by recording slot
+# classes at validity across the LD test files (validity runs for every
+# object, however it was constructed).
+#
+# `correlation` is a single matrix, or one matrix per block for
+# block-diagonal LD, or NULL when it has to be computed from genotypes.
+setClassUnion("LdCorrelation", c("matrix", "list", "NULL"))
+
+# `snpIdx` selects into the genotype source's snpInfo; NULL when the
+# correlation is pre-computed, or when the source is already the subset. The
+# constructor coerces to integer, so a caller may pass doubles.
+setClassUnion("LdSnpIndex", c("integer", "NULL"))
+
+# Block boundaries, as ranges or as a table. Not nullable: every LdData is
+# built for some block, and the constructor has always required it.
+#' @importClassesFrom GenomicRanges GRanges
+#' @importClassesFrom S4Vectors DataFrame
+setClassUnion("LdBlockMetadata", c("GRanges", "data.frame", "DataFrame"))
+
+# Mixing proportions, one per panel, when `genotypeHandle` is a list.
+setClassUnion("LdMixtureWeights", c("numeric", "NULL"))
+
 # =============================================================================
 # SumStatsBase
 # -----------------------------------------------------------------------------
@@ -55,7 +114,7 @@ setClass(
     "SumStatsBase",
     contains = c("VIRTUAL", "RangedTupleList"),
     representation(
-        ldSketch = "ANY",
+        ldSketch = "LdSketchOrNULL",
         genome = "character",
         qcInfo = "list"
     )
@@ -271,7 +330,7 @@ setMethod("nSnps", "SumStatsBase", function(x, ...) length(getSumStats(x, ...)))
 setClass(
     "FineMappingResultBase",
     contains = c("VIRTUAL", "RangedTupleList"),
-    representation(ldSketch = "ANY")
+    representation(ldSketch = "LdSketchOrNULL")
 )
 
 #' @rdname getStudy
@@ -350,7 +409,7 @@ setMethod(
     md$susieFit <- S4Vectors::SimpleList(map(entries, getSusieFit))
     md$cvResult <- S4Vectors::SimpleList(map(entries, getCvResult))
     mcols(grl) <- md
-    new(class(x), grl, ldSketch = getLdSketch(x))
+    new(class(x), grl, ldSketch = .asLdSketch(getLdSketch(x)))
 }
 
 # TRUE when an entry shares at least one variant with `keepVariants`, matched

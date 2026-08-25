@@ -34,19 +34,37 @@ setMethod(
     "readGenotypes",
     signature(path = "character"),
     function(path, format = NULL, ...) {
-        if (is.null(format)) {
-            format <- .h2DetectFormat(path)
-        }
-        switch(
-            format,
-            "gds" = .makeGdsHandle(path),
-            "vcf" = .makeVcfHandle(path, ...),
-            "plink1" = .makePlink1Handle(path, ...),
-            "plink2" = .makePlink2Handle(path, ...),
-            .abortUnsupportedFormat(format)
-        )
+        .genotypeExperiment(.readGenotypeHandle(path, format = format, ...))
     }
 )
+
+#' @rdname readGenotypes
+#' @export
+setMethod(
+    "readGenotypes",
+    signature(path = "missing"),
+    function(path, format = NULL, ...) {
+        .genotypeExperiment(GenotypeHandle(...))
+    }
+)
+
+# The handle behind a panel. Internal: the handle is the seed layer, and the
+# handle-construction machinery below calls this rather than readGenotypes()
+# so it does not wrap and immediately unwrap a panel on every hop.
+# @noRd
+.readGenotypeHandle <- function(path, format = NULL, ...) {
+    if (is.null(format)) {
+        format <- .h2DetectFormat(path)
+    }
+    switch(
+        format,
+        "gds" = .makeGdsHandle(path),
+        "vcf" = .makeVcfHandle(path, ...),
+        "plink1" = .makePlink1Handle(path, ...),
+        "plink2" = .makePlink2Handle(path, ...),
+        .abortUnsupportedFormat(format)
+    )
+}
 
 # =============================================================================
 # Handle constructors -- read metadata, defer genotype loading
@@ -72,6 +90,26 @@ setMethod(
 # dropped. Handles built before the fileIdx column existed are NOT subset (the
 # read path would be positional) -- return them unchanged.
 # @noRd
+# A handle trimmed to zero variants, every other property preserved.
+#
+# Separate from .subsetGenotypeHandle() because that declines to subset a
+# legacy handle with no fileIdx column -- the read path would be positional,
+# so it hands the full panel back rather than risk a wrong read. A
+# zero-variant handle is never read for extraction, so that guard has nothing
+# to protect here and the empty must win. NULL-safe and idempotent.
+# @noRd
+.emptyGenotypeHandle <- function(handle) {
+    if (is.null(handle)) {
+        return(NULL)
+    }
+    si <- getSnpInfo(handle)
+    if (nrow(si) == 0L) {
+        return(handle)
+    }
+    handle@snpInfo <- slice(si, integer(0))
+    handle
+}
+
 .subsetGenotypeHandle <- function(handle, keep) {
     if (is.null(handle)) {
         return(NULL)
@@ -296,13 +334,8 @@ setMethod(
 #'     \item{rowRanges}{GRanges with A1, A2 metadata}
 #'     \item{colData}{DataFrame with sampleId column}
 #'   }
-#' @examples
-#' handle <- readGenotypes(
-#'   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
-#' snpIdx <- 1:8
-#' extractBlockGenotypes(handle = handle, snpIdx = snpIdx)
 #' @importFrom purrr map2 map set_names
-#' @export
+#' @keywords internal
 extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     # One-file-per-chromosome handle: route by chromosome to the right file.
     # `.genotypeChromPaths` tolerates handles deserialized before the slot
@@ -318,14 +351,141 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
     if (length(snpIdx) == 0L) {
         return(.emptyBlockSe(getSampleIds(handle)))
     }
-    geno <- .extractBlockByFormat(handle, snpIdx)
+    # Read ascending, then put the columns back in the requested order. See
+    # .restoreRequestedOrder() for why this is not merely tidiness.
+    ord <- order(.genotypeFilePos(handle, snpIdx))
+    geno <- .extractBlockByFormat(handle, snpIdx[ord])
     if (is.null(geno)) {
         return(NULL)
     }
+    geno <- .restoreRequestedOrder(geno, ord)
     if (meanImpute) {
         geno <- .meanImputeGeno(geno)
     }
     .blockGenotypesToSe(geno, handle, snpIdx)
+}
+
+# Position of each requested variant in the underlying file. snpInfo rows are
+# not file positions once a handle has been row-subset; fileIdx carries the
+# mapping. Ordering by FILE position is what makes "read ascending" line up
+# with what the ID-selecting backends actually hand back.
+# @noRd
+.genotypeFilePos <- function(handle, snpIdx) {
+    fileIdx <- getSnpInfo(handle)$fileIdx
+    if (is.null(fileIdx)) snpIdx else fileIdx[snpIdx]
+}
+
+# Put a block's variant columns back into the order the caller asked for.
+#
+# snpStats (`select.snps=`) and SNPRelate (`snp.id=`) return variants in FILE
+# order however they were asked for, while .blockGenotypesToSe() labels the
+# block from snpInfo[snpIdx], i.e. the REQUESTED order. An unsorted request
+# therefore produced a block whose names and dosages described different
+# variants -- silently, since both are the right length. pgenlibr reads
+# positionally and was unaffected.
+#
+# Reading ascending and permuting back is correct for every backend, including
+# the ones that do honour the request: given a sorted request they return
+# sorted output either way, so the inverse permutation restores the caller's
+# order in both cases.
+# @noRd
+.restoreRequestedOrder <- function(geno, ord) {
+    if (ncol(geno) != length(ord)) {
+        abort(glue(
+            "extractBlockGenotypes: backend returned {ncol(geno)} variant(s) ",
+            "for a request of {length(ord)}; the block cannot be labelled."
+        ))
+    }
+    geno[, order(ord), drop = FALSE]
+}
+
+# A genotype panel as a RangedSummarizedExperiment: variants x samples,
+# dosages read lazily through the handle, optional per-sample covariates as
+# colData. Nothing is read here -- `genotypeDelayedArray()` only describes
+# the panel. Shared by QtlDataset's genotype experiment and the LD sketch,
+# which are the same object with different provenance.
+# @noRd
+.genotypeExperiment <- function(genotypes, genotypeCovariates = NULL) {
+    if (methods::is(genotypes, "RangedSummarizedExperiment")) {
+        return(.genotypeExperimentCovariates(genotypes, genotypeCovariates))
+    }
+    dosage <- genotypeDelayedArray(genotypes)
+    # An LD panel carries no per-sample covariates; a QTL dataset's genotype
+    # experiment does.
+    gCov <- if (is.null(genotypeCovariates)) {
+        matrix(numeric(0), nrow = 0L, ncol = 0L)
+    } else {
+        as.matrix(genotypeCovariates)
+    }
+    cd <- .genotypeColData(gCov, colnames(dosage))
+    SummarizedExperiment::SummarizedExperiment(
+        assays = list(dosage = dosage),
+        rowRanges = .genotypeSnpRanges(genotypes, rownames(dosage)),
+        colData = cd
+    )
+}
+
+# Attach covariates to a panel the caller already built. Used when a public
+# entry point is handed a panel rather than a handle: rebuilding the panel from
+# the handle would discard any subsetting the caller had applied, since the
+# DelayedArray's seed is the whole file either way.
+# @noRd
+.genotypeExperimentCovariates <- function(panel, genotypeCovariates) {
+    gCov <- if (is.null(genotypeCovariates)) {
+        matrix(numeric(0), nrow = 0L, ncol = 0L)
+    } else {
+        as.matrix(genotypeCovariates)
+    }
+    SummarizedExperiment::colData(panel) <- .genotypeColData(
+        gCov, colnames(panel)
+    )
+    panel
+}
+
+# Per-sample covariates as a colData aligned to the panel's sample order.
+# Samples the covariate matrix does not name get NA rather than being
+# dropped: the assay still has a column for them.
+# @noRd
+.genotypeColData <- function(gCov, sampleIds) {
+    empty <- S4Vectors::DataFrame(row.names = sampleIds)
+    if (ncol(gCov) == 0L || nrow(gCov) == 0L) {
+        return(empty)
+    }
+    if (is.null(rownames(gCov))) {
+        if (nrow(gCov) != length(sampleIds)) {
+            abort(glue(
+                "'genotypeCovariates' has {nrow(gCov)} rows but the panel ",
+                "has {length(sampleIds)} samples; name its rows to align ",
+                "them explicitly"
+            ))
+        }
+        rownames(gCov) <- sampleIds
+    }
+    aligned <- gCov[match(sampleIds, rownames(gCov)), , drop = FALSE]
+    rownames(aligned) <- sampleIds
+    S4Vectors::DataFrame(aligned, row.names = sampleIds)
+}
+
+# snpInfo as rowRanges for a genotype panel: width-1 ranges at each
+# variant's position, alleles carried as mcols so plyranges predicates can
+# reach them. Deliberately the same shape as the SummarizedExperiment
+# `extractBlockGenotypes()` returns -- chr-prefixed seqnames, SNP / A1 / A2 --
+# so a block read from this experiment and a block read through the handle
+# describe variants the same way, and overlaps between the two actually hit.
+# @noRd
+.genotypeSnpRanges <- function(genotypes, variantIds) {
+    si <- getSnpInfo(genotypes)
+    gr <- GenomicRanges::GRanges(
+        seqnames = withChrPrefix(as.character(si$CHR)),
+        ranges = IRanges::IRanges(as.integer(si$BP), width = 1L)
+    )
+    names(gr) <- variantIds
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = as.character(si$SNP),
+        A1 = as.character(si$A1),
+        A2 = as.character(si$A2)
+    )
+    gr
 }
 
 # Dispatch block extraction to the format-specific backend (samples x variants).
@@ -563,54 +723,6 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
 # =============================================================================
 # LD correlation computation
 # =============================================================================
-
-#' @title Compute Block LD Correlation
-#' @description Compute the LD correlation matrix for a block of SNPs. Delegates
-#'   to \code{computeLd} for the actual computation, with automatic backend
-#'   selection based on file format unless overridden.
-#' @param handle A \code{GenotypeHandle} object.
-#' @param snpIdx Integer vector of 1-based SNP indices.
-#' @param backend Character, one of \code{"internal"} (default),
-#'   \code{"snprelate"}, or \code{"snpstats"}. When \code{"internal"},
-#'   GDS-format handles automatically use \code{SNPRelate::snpgdsLDMat} via the
-#'   native GDS path; other formats use the internal correlator.
-#' @param method Character, LD computation method passed to \code{computeLd}.
-#'   Default \code{"sample"}.
-#' @param ... Additional arguments passed to \code{computeLd} (e.g.,
-#'   \code{shrinkage}, \code{trimSamples}).
-#' @return Numeric correlation matrix (p x p).
-#' @examples
-#' handle <- readGenotypes(
-#'   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
-#' snpIdx <- 1:8
-#' computeBlockLdCor(handle = handle, snpIdx = snpIdx)
-#' @export
-computeBlockLdCor <- function(
-    handle,
-    snpIdx,
-    backend = "internal",
-    method = "sample",
-    ...
-) {
-    # For GDS format with internal backend, use the native SNPRelate path
-    # which avoids extracting genotypes into memory
-    if (getFormat(handle) == "gds" && backend == "internal") {
-        return(.computeBlockLdGds(handle, snpIdx))
-    }
-
-    # Extract genotypes via the unified GenotypeHandle pipeline
-    rse <- extractBlockGenotypes(handle, snpIdx)
-    if (is.null(rse)) {
-        return(diag(length(snpIdx)))
-    }
-    geno <- t(SummarizedExperiment::assay(rse, "dosage"))
-    if (ncol(geno) < 2) {
-        return(diag(length(snpIdx)))
-    }
-
-    # Delegate to computeLd for all computation
-    computeLd(geno, method = method, backend = backend, ...)
-}
 
 # Samples x variants dosage matrix for a genotype block: extract via the
 # GenotypeHandle pipeline and transpose out of the Bioc variants x samples
@@ -1381,16 +1493,16 @@ loadGenotypeRegion <- function(
 # @noRd
 .loadGenoHandle <- function(genotype) {
     if (str_detect(genotype, "\\.(vcf|vcf\\.gz|bcf)$")) {
-        return(readGenotypes(genotype, format = "vcf"))
+        return(.readGenotypeHandle(genotype, format = "vcf"))
     }
     if (str_detect(genotype, "\\.gds$")) {
-        return(readGenotypes(genotype, format = "gds"))
+        return(.readGenotypeHandle(genotype, format = "gds"))
     }
     if (hasPlink2Files(genotype)) {
-        return(readGenotypes(genotype, format = "plink2"))
+        return(.readGenotypeHandle(genotype, format = "plink2"))
     }
     if (hasPlink1Files(genotype)) {
-        return(readGenotypes(genotype, format = "plink1"))
+        return(.readGenotypeHandle(genotype, format = "plink1"))
     }
     msg <- glue(
         "Genotype files not found at: {genotype}\n",
@@ -1585,7 +1697,11 @@ loadGenotypeRegion <- function(
 # The sample-LD matrix for `handle`'s `snpIdx` variants (NA correlations -> 0).
 # @noRd
 .gdsBlockLd <- function(gds, handle, snpIdx) {
-    snpIds <- getSnpInfo(handle)$SNP[snpIdx]
+    # snpgdsLDMat() returns variants in FILE order whatever order snp.id is
+    # given in, and labels nothing. Ask in ascending order and permute back,
+    # exactly as the block readers do, so the matrix agrees with its names.
+    ord <- order(.genotypeFilePos(handle, snpIdx))
+    snpIds <- getSnpInfo(handle)$SNP[snpIdx[ord]]
     ldMat <- SNPRelate::snpgdsLDMat(
         gds,
         snp.id = snpIds,
@@ -1595,6 +1711,10 @@ loadGenotypeRegion <- function(
     )
     R <- ldMat$LD
     R[is.na(R)] <- 0
+    inv <- order(ord)
+    R <- R[inv, inv, drop = FALSE]
+    ids <- getSnpInfo(handle)$SNP[snpIdx]
+    dimnames(R) <- list(ids, ids)
     R
 }
 

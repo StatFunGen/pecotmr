@@ -24,13 +24,9 @@ A \code{GenotypeHandle}, a list of them, or NULL. For a
 Return the \code{GenotypeHandle} (or list of handles for mixture
   panels) carried by an \code{LdData}.
 }
-\examples{
-data(eqtlRegionExample)
-X <- eqtlRegionExample$X[, 1:8]
-gr <- GenomicRanges::GRanges("22",
-  IRanges::IRanges(seq(1L, by = 100L, length.out = 8), width = 1L))
-ld <- LdData(correlation = cor(X), variants = gr,
-  blockMetadata = S4Vectors::DataFrame(
-    chrom = "22", start = 1L, end = 1000L))
-getGenotypeHandle(ld)
+\details{
+The genotype handle is the seed layer behind a panel and
+  is not part of the public interface; obtain a panel from
+  \code{readGenotypes()} and ask it directly.
 }
+\keyword{internal}

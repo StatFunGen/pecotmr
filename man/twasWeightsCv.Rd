@@ -60,11 +60,12 @@ messages including those from external packages.}
 objects on the result. Default \code{FALSE}.}
 
 \item{seed}{Integer or \code{NULL}. When supplied, seeds both the
-main-process RNG (fold partitioning, variant sub-sampling) via
-\code{set.seed} and the parallel fold-fitting RNG via the
-\code{BiocParallel} \code{RNGseed}, so results are reproducible even under
-multi-threading. \code{NULL} (default) leaves the session RNG untouched and
-uses the historical parallel default.}
+main-process RNG (fold partitioning, variant sub-sampling) and the
+parallel fold-fitting RNG via the \code{BiocParallel} \code{RNGseed}, so
+results are reproducible even under multi-threading. The main-process
+seed is scoped to the call, so the session RNG is left as it was found.
+\code{NULL} (default) does not seed at all and uses the historical
+parallel default.}
 
 \item{...}{Additional arguments forwarded to the per-method weight learners.}
 }

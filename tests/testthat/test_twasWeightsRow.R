@@ -126,3 +126,58 @@ test_that("show.TwasWeightsRow reports standardized flag and CV availability", {
     out2 <- capture.output(show(e_no_cv))
     expect_true(any(grepl("CV performance: FALSE", out2)))
 })
+
+# ===========================================================================
+# Variant-id identity check
+#
+# Every fixture above uses well-formed chrom:pos:ref:alt ids, so the branch
+# that rejects ids carrying no coordinates was never executed.
+# ===========================================================================
+
+test_that("variantIds that encode no coordinates are rejected", {
+    # An id is a rendering of the variant's range and alleles; "v1" names
+    # nothing, and the failure should bite here rather than later when the
+    # entry is turned into a ranged element.
+    expect_error(
+        twasWeightsRow(
+            variantIds = c("chr1:100:A:G", "v1", "v2"),
+            weights = c(0.1, -0.2, 0.05),
+            fits = list(model = "lasso"),
+            cvResult = list(rsq = 0.4),
+            standardized = TRUE,
+            dataType = "expression"
+        ),
+        "do not encode coordinates"
+    )
+})
+
+test_that("the identity message names the offenders", {
+    err <- tryCatch(
+        twasWeightsRow(
+            variantIds = c("rsX", "rsY"),
+            weights = c(0.1, -0.2),
+            fits = list(),
+            cvResult = list(),
+            standardized = TRUE,
+            dataType = "expression"
+        ),
+        error = function(e) conditionMessage(e)
+    )
+    expect_match(err, "2 of 2")
+    expect_match(err, "rsX, rsY")
+})
+
+test_that("an empty variant set is allowed", {
+    # Emptiness is a separate concern from malformedness: there is nothing to
+    # parse, so the coordinate rule has nothing to say.
+    e <- twasWeightsRow(
+        variantIds = character(0),
+        weights = numeric(0),
+        fits = list(),
+        cvResult = list(),
+        standardized = TRUE,
+        dataType = "expression"
+    )
+    expect_s4_class(e, "TwasWeightsRow")
+    expect_equal(length(.twrPartsVariantIds(e)), 0L)
+})

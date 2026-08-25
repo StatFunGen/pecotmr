@@ -136,9 +136,6 @@
 #'   \code{GRanges}, a \code{"chr:start-end"} string, or a one-row data.frame
 #'   with \code{chrom}/\code{start}/\code{end}. Mutually exclusive with
 #'   \code{traitId}.
-#' @param ldSketch Optional \code{\link{GenotypeHandle}} providing the LD
-#'   reference (an LD sketch); attached to the fine-mapping result and used
-#'   for downstream LD-dependent computations. Default \code{NULL}.
 #' @param cisWindow For QtlDataset: cis-window (bp) around each trait's genomic
 #'   position when extracting variants. Required when \code{traitId} is
 #'   supplied. Mutually exclusive with \code{region}.
@@ -813,15 +810,18 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     list(study = study, method = method, blockId = blockId, entry = entry)
 }
 
-# Effect-allele frequency vector aligned to `variantIds` from an entry's MAF
-# mcol (post-QC harmonized/complemented). NULL when the entry carries no MAF.
+# Effect-allele frequency vector aligned to `variantIds` from an entry's
+# DIRECTIONAL AF mcol (post-QC harmonized/complemented to the final effect
+# allele). NULL when the entry carries no declared af -- a directionless MAF
+# is NOT used here (it is QC-only), so an undeclared-af entry exports af = NA
+# rather than a silently mislabelled minor-allele frequency.
 # @noRd
 .fmAfByVar <- function(entry, variantIds) {
     mc <- S4Vectors::mcols(entry)
-    if (!is_in("MAF", colnames(mc))) {
+    if (!is_in("AF", colnames(mc))) {
         return(NULL)
     }
-    set_names(as.numeric(mc$MAF), as.character(mc$SNP))[variantIds]
+    set_names(as.numeric(mc$AF), as.character(mc$SNP))[variantIds]
 }
 
 # Block label derived from a GwasSumStats entry's GRanges. Built through the
@@ -1041,7 +1041,8 @@ setGeneric("fineMappingPipeline", function(data, ...) {
 #'
 #' @param ... Two or more \code{FineMappingResultBase} objects, or a single
 #'   \code{list} of them.
-#' @param ldSketch Optional \code{\link{GenotypeHandle}} to attach to the
+#' @param ldSketch Optional genotype panel (see
+#'   \code{\link{readGenotypes}}) to attach to the
 #'   combined collection. Default \code{NULL}. Applied when combining two or
 #'   more inputs; a single input is returned unchanged.
 #' @return A single combined fine-mapping result of the shared concrete class.
@@ -1694,19 +1695,6 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         tls[[i]] <- tl
     }
     tls
-}
-
-# Run a joint-method fit (mvsusie / fsusie) once per region block via the
-# method-specific `fitOneRegion(rg)` closure (returns one FineMappingRow per
-# region), then merge across regions into a single shared entry. A single block
-# (cis or jointRegions=TRUE) returns its entry unchanged.
-.fmJointBlocks <- function(xRegions, fitOneRegion) {
-    ents <- map(xRegions, fitOneRegion)
-    ents <- ents[!map_lgl(ents, is.null)]
-    if (length(ents) == 0L) {
-        return(NULL)
-    }
-    if (length(ents) == 1L) ents[[1L]] else .fmMergeEntries(ents)
 }
 
 
@@ -3178,8 +3166,6 @@ setMethod(
 # GwasSumStats method
 # =============================================================================
 
-#' @rdname fineMappingPipeline
-#' @export
 # Default the finite-sample LD reference size when an EB / SER-fallback LD-
 # mismatch mode is active (serFallback on, or rMismatch other than "none") and
 # rFinite is unset: use the LD-panel sample size (the notebook's `B`). Shared by
@@ -3190,7 +3176,7 @@ setMethod(
         is.null(rFinite) &&
             (isTRUE(serFallback) || !identical(rMismatch, "none"))
     ) {
-        getNSamples(ldSketch)
+        getNSamples(.ldSketchHandle(ldSketch))
     } else {
         rFinite
     }
@@ -3238,6 +3224,7 @@ setMethod(
 }
 
 #' @rdname fineMappingPipeline
+#' @export
 setMethod(
     "fineMappingPipeline",
     "GwasSumStats",

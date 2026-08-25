@@ -3500,7 +3500,7 @@ test_that("loadLdFromGenotype warns when .afreq is missing some variants", {
 
 test_that(".ldFromSketch drops variants absent from the panel when onMissing='drop'", {
     skip_if_not_installed("pgenlibr")
-    h <- readGenotypes(
+    h <- readGenotypeHandle(
         file.path(geno_test_data_dir, "test_variants"),
         format = "plink2"
     )
@@ -3521,7 +3521,7 @@ test_that(".ldFromSketch drops variants absent from the panel when onMissing='dr
 
 test_that(".ldFromSketch resolves chr-prefixed request ids against a non-prefixed panel", {
     skip_if_not_installed("pgenlibr")
-    h <- readGenotypes(
+    h <- readGenotypeHandle(
         file.path(geno_test_data_dir, "test_variants"),
         format = "plink2"
     )
@@ -3535,7 +3535,7 @@ test_that(".ldFromSketch resolves chr-prefixed request ids against a non-prefixe
 
 test_that(".ldFromSketch resolves non-prefixed request ids against a chr-prefixed panel", {
     skip_if_not_installed("pgenlibr")
-    h <- readGenotypes(
+    h <- readGenotypeHandle(
         file.path(geno_test_data_dir, "test_variants"),
         format = "plink2"
     )
@@ -3548,7 +3548,7 @@ test_that(".ldFromSketch resolves non-prefixed request ids against a chr-prefixe
 
 test_that(".ldFromSketch is unchanged when request and panel share a convention", {
     skip_if_not_installed("pgenlibr")
-    h <- readGenotypes(
+    h <- readGenotypeHandle(
         file.path(geno_test_data_dir, "test_variants"),
         format = "plink2"
     )
@@ -3560,7 +3560,7 @@ test_that(".ldFromSketch is unchanged when request and panel share a convention"
 
 test_that(".ldFromSketch still errors on a genuinely-absent variant after reconciliation", {
     skip_if_not_installed("pgenlibr")
-    h <- readGenotypes(
+    h <- readGenotypeHandle(
         file.path(geno_test_data_dir, "test_variants"),
         format = "plink2"
     )
@@ -3584,13 +3584,13 @@ test_that(".requireMatchingLdSketches errors when slots are not GenotypeHandle",
             list(b = 2),
             "testPipeline"
         ),
-        "must both be GenotypeHandle"
+        "must both be genotype panels"
     )
 })
 
 test_that(".requireMatchingLdSketches errors when panels differ in a column", {
     skip_if_not_installed("pgenlibr")
-    h <- readGenotypes(
+    h <- readGenotypeHandle(
         file.path(geno_test_data_dir, "test_variants"),
         format = "plink2"
     )
@@ -3808,7 +3808,7 @@ test_that("partitionLdMatrix accepts LdBlocks blockMetadata", {
         blockStart = c(100L, 300L),
         blockEnd = c(200L, 400L)
     )
-    ldb <- new("LdBlocks", blocks = gr_blocks, genome = "hg38")
+    ldb <- gr_blocks
     ref <- pecotmr:::parseVariantId(variant_ids)
     ref$variant_id <- variant_ids
     gr_vars <- pecotmr:::.refPanelToGranges(ref)

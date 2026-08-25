@@ -34,8 +34,8 @@ are one more:
 [mae]: https://bioconductor.org/packages/MultiAssayExperiment/
 
 *  **`genotype`** — `rowRanges` is one range per variant (carrying `A1` /
-    `A2`); the `dosage` assay is variants x samples, read **lazily** through
-    the `GenotypeHandle`; `colData` holds genotype-derived covariates such as
+    `A2`); the `dosage` assay is variants x samples, read **lazily** from the
+    genotype files; `colData` holds genotype-derived covariates such as
     ancestry PCs.
 *  **one per context** — `rowRanges` is trait positions, the assay is
     traits x samples, and `colData` holds that context's phenotype
@@ -46,8 +46,8 @@ Alongside them the object keeps a `colData` naming every sample and a
 need not share a sample set — plus its own slots:
 
 *  `study` — study identifier (length-1 character).
-*  `genotypes` — the `GenotypeHandle` (a lazy PLINK1/PLINK2/VCF/GDS handle)
-    that the dosage assay reads through.
+*  `genotypes` — the genotype panel (a lazy PLINK1/PLINK2/VCF/GDS source,
+    read with `readGenotypes()`) that the dosage assay reads through.
 *  QC thresholds — `mafCutoff`, `macCutoff`, `xvarCutoff`, `imissCutoff`,
     `keepIndel`, `keepVariants`, `scaleResiduals`. Stored as **lazy** filters,
     applied at genotype-extraction time.
@@ -63,7 +63,7 @@ There are two ways to build a `QtlDataset`:
     files and assembles the object for you. This is the recommended route for
     real data.
 *  **Manually** — build the per-context `SummarizedExperiment`s and the
-    `GenotypeHandle` yourself and call the `QtlDataset()` constructor. Useful
+    genotype panel yourself and call the `QtlDataset()` constructor. Useful
     when your data is already in memory.
 
 ```{r load-packages}
@@ -84,7 +84,7 @@ genoPrefix <- sub(
     "",
     system.file("extdata", "toy_ref.bed", package = "pecotmr")
 )
-samples <- head(getSampleIds(GenotypeHandle(plink1Prefix = genoPrefix)), 40)
+samples <- head(colnames(readGenotypes(plink1Prefix = genoPrefix)), 40)
 
 workdir <- file.path(tempdir(), "qtl-vignette")
 dir.create(workdir, showWarnings = FALSE)
@@ -191,7 +191,7 @@ qdFiltered <- loadQtlDatasetFromManifest(
 
 The manifest loader is a thin wrapper over the `QtlDataset()` constructor. Doing
 it by hand shows exactly what the object contains: a named list of
-`SummarizedExperiment`s and a `GenotypeHandle`.
+`SummarizedExperiment`s and a genotype panel.
 
 ```{r qtl-manual}
 # One SummarizedExperiment per context. Rows are traits, columns are samples;
@@ -226,7 +226,7 @@ buildSE <- function(bedPath) {
 }
 
 phenotypes <- list(Muscle = buildSE(muscleBed), Blood = buildSE(bloodBed))
-genotypes <- GenotypeHandle(plink1Prefix = genoPrefix)
+genotypes <- readGenotypes(plink1Prefix = genoPrefix)
 
 qdManual <- QtlDataset(
     study = "GTEx_toy",

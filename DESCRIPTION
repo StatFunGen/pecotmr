@@ -32,6 +32,7 @@ Imports:
     colocboost,
     DelayedArray,
     dplyr,
+    GenomeInfoDb,
     GenomicRanges,
     glue,
     IRanges,

@@ -767,9 +767,10 @@ mashInput <- function(
 #'   variant ids (ideally \code{chr:pos:A2:A1}); \code{colnames(z)} label the
 #'   conditions.
 #' @param study Study identifier (recycled across conditions).
-#' @param ldSketch A \code{\link{GenotypeHandle}} embedded in the collection, or
-#'   \code{NULL} (default) -- mash operates across conditions per variant and
-#'   needs no LD reference.
+#' @param ldSketch A genotype panel (see \code{\link{readGenotypes}})
+#'   embedded in the collection, or \code{NULL} (default) -- mash operates
+#'   across
+#'   conditions per variant and needs no LD reference.
 #' @param context Condition context label(s): a single value recycled across
 #'   every column, or a length-\code{ncol(z)} vector (one per condition).
 #'   Defaults to \code{colnames(z)} -- one context per column.
@@ -785,11 +786,11 @@ mashInput <- function(
 #' @importFrom GenomicRanges GRanges
 #' @importFrom IRanges IRanges
 #' @examples
-#' gh <- readGenotypes(
+#' panel <- readGenotypes(
 #'   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
 #' z <- matrix(rnorm(6), 2, 3, dimnames = list(
 #'   c("chr22:1:A:G", "chr22:2:A:G"), c("brain", "blood", "muscle")))
-#' qtlSumStatsFromZMatrix(z = z, study = "s1", ldSketch = gh,
+#' qtlSumStatsFromZMatrix(z = z, study = "s1", ldSketch = panel,
 #'   context = colnames(z), trait = "g1", genome = "hg38", n = 100)
 #' @export
 qtlSumStatsFromZMatrix <- function(
@@ -848,9 +849,10 @@ qtlSumStatsFromZMatrix <- function(
 #' @param shat Numeric matrix of standard errors, aligned with \code{bhat}
 #'   (identical dimensions and row/column order).
 #' @param study Study identifier (recycled across conditions).
-#' @param ldSketch A \code{\link{GenotypeHandle}} embedded in the collection, or
-#'   \code{NULL} (default) -- mash operates across conditions per variant and
-#'   needs no LD reference.
+#' @param ldSketch A genotype panel (see \code{\link{readGenotypes}})
+#'   embedded in the collection, or \code{NULL} (default) -- mash operates
+#'   across
+#'   conditions per variant and needs no LD reference.
 #' @param context,trait Condition labels; see
 #'   \code{\link{qtlSumStatsFromZMatrix}}. Defaults \code{context =
 #'   colnames(bhat)}, \code{trait = "mash"}.
@@ -863,13 +865,13 @@ qtlSumStatsFromZMatrix <- function(
 #' @importFrom GenomicRanges GRanges
 #' @importFrom IRanges IRanges
 #' @examples
-#' gh <- readGenotypes(
+#' panel <- readGenotypes(
 #'   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
 #' bhat <- matrix(rnorm(6), 2, 3, dimnames = list(
 #'   c("chr22:1:A:G", "chr22:2:A:G"), c("brain", "blood", "muscle")))
 #' shat <- matrix(0.1, 2, 3, dimnames = dimnames(bhat))
 #' qtlSumStatsFromBetaMatrix(bhat = bhat, shat = shat, study = "s1",
-#'   ldSketch = gh, context = colnames(bhat), trait = "g1",
+#'   ldSketch = panel, context = colnames(bhat), trait = "g1",
 #'     genome = "hg38", n = 100)
 #' @export
 qtlSumStatsFromBetaMatrix <- function(

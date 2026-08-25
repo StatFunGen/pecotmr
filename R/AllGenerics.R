@@ -41,11 +41,11 @@ NULL
 #'   IRanges::IRanges(seq(50, by = 100, length.out = 20), width = 1))
 #' S4Vectors::mcols(gr) <- S4Vectors::DataFrame(SNP = paste0("rs", 1:20),
 #'   A1 = "A", A2 = "G", Z = rnorm(20), N = 10000L)
-#' gh <- new("GenotypeHandle", path = "ref.gds", format = "gds",
-#'   snpInfo = data.frame(), nSamples = 0L, sampleIds = character(),
-#'   pgenPtr = NULL)
+#' panel <- readGenotypes(
+#'   system.file("extdata", "toy_ref.bed", package = "pecotmr")
+#' )
 #' ss <- GwasSumStats(study = "trait1", entry = list(gr),
-#'   genome = "hg19", ldSketch = gh)
+#'   genome = "hg19", ldSketch = panel)
 #' estimateH2(ss, ldEigenExample, method = "lder")
 #' @export
 setGeneric(
@@ -85,19 +85,50 @@ setGeneric("computeLdScores", function(ldRef, annotations = NULL, ...) {
 # I/O generics
 # =============================================================================
 
-#' @title Read Genotype Data
-#' @description Read genotype data from various formats (VCF, plink1, plink2,
-#'   GDS) and return a \code{GenotypeHandle} for deferred genotype loading.
-#' @param path Character, path to the genotype file.
+#' @title Read a Genotype Panel
+#' @description Read genotype data (VCF, plink1, plink2 or GDS) as a
+#'   \code{RangedSummarizedExperiment}: variants in \code{rowRanges},
+#'   samples in \code{colData}, and dosages in a \code{DelayedArray} assay
+#'   that reads from the file only when something touches it. Nothing is read
+#'   here beyond the variant and sample metadata.
+#'
+#'   The panel is the same shape a \code{QtlDataset} uses for its genotypes
+#'   and the same shape a collection carries as its \code{ldSketch}, so the
+#'   Bioconductor and tidy surfaces apply throughout: subset it with
+#'   \code{panel[i, j]}, ask \code{rowRanges()} for the variants,
+#'   \code{colnames()} for the samples, and hand it to
+#'   \code{\link{computeLd}}.
+#'
+#'   A panel that is not one self-describing file is named by keyword
+#'   instead of by \code{path}: pass \code{plink1Prefix} or
+#'   \code{plink2Prefix} for a triplet stem, \code{bed}/\code{bim}/\code{fam}
+#'   or \code{pgen}/\code{pvar}/\code{psam} for explicit triplet paths,
+#'   \code{genoMeta} for a one-file-per-chromosome panel (optionally narrowed
+#'   with \code{chroms}), or \code{ldMeta} plus \code{region} to resolve a
+#'   block out of an LD-meta table. Exactly one source may be given.
+#' @param path Character, path to a single self-describing genotype file
+#'   (\code{.vcf}, \code{.vcf.gz}, \code{.vcf.bgz}, \code{.bcf} or
+#'   \code{.gds}). Omit it when naming the panel by one of the keyword
+#'   sources described above.
 #' @param format Character, one of "vcf", "plink1", "plink2", "gds". If NULL,
 #'   inferred from file extension.
-#' @param ... Additional arguments.
-#' @return A \code{GenotypeHandle} object.
+#' @param ... The keyword source arguments described above, plus any further
+#'   arguments forwarded to the format-specific reader.
+#' @return A \code{RangedSummarizedExperiment} of variants x samples.
+#' @seealso \code{\link{computeLd}}
 #' @examples
-#' gh <- readGenotypes(
+#' panel <- readGenotypes(
 #'   system.file("extdata", "toy_ref.bed", package = "pecotmr")
 #' )
-#' gh
+#' dim(panel)
+#' head(rownames(panel))
+#'
+#' # The same panel named by its PLINK1 stem rather than by a file.
+#' stem <- sub("\\.bed$", "", system.file(
+#'   "extdata", "toy_ref.bed",
+#'   package = "pecotmr"
+#' ))
+#' dim(readGenotypes(plink1Prefix = stem))
 #' @export
 setGeneric("readGenotypes", function(path, format = NULL, ...) {
     standardGeneric("readGenotypes")
@@ -590,14 +621,15 @@ setGeneric("getQcDiagnostics", function(x, entry = 1L, ...) {
 })
 
 #' @title Get LD Sketch
-#' @description Return the \code{GenotypeHandle} carrying the LD reference for
+#' @description Return the genotype panel carrying the LD reference for
 #'   this collection. Defined on classes that embed an \code{ldSketch} slot:
 #'   \code{GwasSumStats}, \code{QtlSumStats}, \code{FineMappingResult},
 #'   \code{TwasWeights}. Returns \code{NULL} when the slot is unset (e.g. a
 #'   \code{TwasWeights} fit from individual-level data via \code{QtlDataset}).
 #' @param x An S4 object that carries an \code{ldSketch} slot.
 #' @param ... Unused.
-#' @return A \code{GenotypeHandle} or \code{NULL}.
+#' @return A \code{RangedSummarizedExperiment} genotype panel, or
+#'   \code{NULL}.
 #' @export
 setGeneric("getLdSketch", function(x, ...) standardGeneric("getLdSketch"))
 
@@ -1410,50 +1442,39 @@ setGeneric("getScaleResiduals", function(x) {
 #' @title Get SNP Info
 #' @description Return the cached SNP metadata data.frame (columns: SNP, CHR,
 #'   BP, A1, A2, optionally MAF).
-#' @param x A \code{GenotypeHandle} or \code{LdStatistic}.
+#' @param x An object carrying cached SNP metadata.
 #' @return A data.frame.
-#' @examples
-#' gh <- readGenotypes(
-#'   system.file("extdata", "toy_ref.bed", package = "pecotmr")
-#' )
-#' getSnpInfo(gh)
-#' @export
+#' @keywords internal
 setGeneric("getSnpInfo", function(x) standardGeneric("getSnpInfo"))
 
 #' @title Get Genotype Storage Format
 #' @description Return the detected genotype storage format.
 #' @param x A \code{GenotypeHandle}.
 #' @return Character (length 1): one of "gds", "vcf", "plink1", "plink2".
-#' @examples
-#' gh <- readGenotypes(
-#'   system.file("extdata", "toy_ref.bed", package = "pecotmr")
-#' )
-#' getFormat(gh)
-#' @export
+#' @details The genotype handle is the seed layer behind a panel and
+#'   is not part of the public interface; obtain a panel from
+#'   \code{readGenotypes()} and ask it directly.
+#' @keywords internal
 setGeneric("getFormat", function(x) standardGeneric("getFormat"))
 
 #' @title Get File Path
 #' @description Return the underlying genotype file path or stem.
 #' @param x A \code{GenotypeHandle}.
 #' @return Character (length 1).
-#' @examples
-#' gh <- readGenotypes(
-#'   system.file("extdata", "toy_ref.bed", package = "pecotmr")
-#' )
-#' getPath(gh)
-#' @export
+#' @details The genotype handle is the seed layer behind a panel and
+#'   is not part of the public interface; obtain a panel from
+#'   \code{readGenotypes()} and ask it directly.
+#' @keywords internal
 setGeneric("getPath", function(x) standardGeneric("getPath"))
 
 #' @title Get Sample Identifiers
 #' @description Return the sample-id vector.
 #' @param x A \code{GenotypeHandle}.
 #' @return Character vector.
-#' @examples
-#' gh <- readGenotypes(
-#'   system.file("extdata", "toy_ref.bed", package = "pecotmr")
-#' )
-#' getSampleIds(gh)
-#' @export
+#' @details The genotype handle is the seed layer behind a panel and
+#'   is not part of the public interface; obtain a panel from
+#'   \code{readGenotypes()} and ask it directly.
+#' @keywords internal
 setGeneric("getSampleIds", function(x) standardGeneric("getSampleIds"))
 
 #' @title Get plink2 pgen Pointer
@@ -1461,24 +1482,20 @@ setGeneric("getSampleIds", function(x) standardGeneric("getSampleIds"))
 #'   (NULL when the handle is not pgen-backed).
 #' @param x A \code{GenotypeHandle}.
 #' @return An external pointer or NULL.
-#' @examples
-#' gh <- readGenotypes(
-#'   system.file("extdata", "toy_ref.bed", package = "pecotmr")
-#' )
-#' getPgenPtr(gh)
-#' @export
+#' @details The genotype handle is the seed layer behind a panel and
+#'   is not part of the public interface; obtain a panel from
+#'   \code{readGenotypes()} and ask it directly.
+#' @keywords internal
 setGeneric("getPgenPtr", function(x) standardGeneric("getPgenPtr"))
 
 #' @title Get Sample Count
 #' @description Return the number of samples carried by a \code{GenotypeHandle}.
 #' @param x A \code{GenotypeHandle}.
 #' @return Integer (length 1).
-#' @examples
-#' gh <- readGenotypes(
-#'   system.file("extdata", "toy_ref.bed", package = "pecotmr")
-#' )
-#' getNSamples(gh)
-#' @export
+#' @details The genotype handle is the seed layer behind a panel and
+#'   is not part of the public interface; obtain a panel from
+#'   \code{readGenotypes()} and ask it directly.
+#' @keywords internal
 setGeneric("getNSamples", function(x) standardGeneric("getNSamples"))
 
 #' @title Get Per-Block Eigendecompositions
@@ -1556,80 +1573,16 @@ setGeneric("getLdScoreWeights", function(x) {
 setGeneric("getLdMatrixList", function(x) standardGeneric("getLdMatrixList"))
 
 #' @title Get LD Block Container
-#' @description Return the \code{LdBlocks} object carried by an
+#' @description Return the \code{GRanges} of LD blocks carried by an
 #'   \code{LdStatistic}.
 #' @param x An \code{LdStatistic}.
-#' @return An \code{LdBlocks} object.
+#' @return A \code{GRanges} of LD block intervals.
 #' @examples
 #' data(ldEigenExample)
 #' getLdBlocks(ldEigenExample)
 #' @export
 setGeneric("getLdBlocks", function(x) standardGeneric("getLdBlocks"))
 
-#' @title Get Annotation Matrix
-#' @description Return the (SNPs x annotations) annotation matrix.
-#' @param x An \code{AnnotationMatrix}.
-#' @return Numeric matrix or dgCMatrix.
-#' @examples
-#' snpRanges <- GenomicRanges::GRanges(
-#'   "22", IRanges::IRanges((1:10) * 100, width = 1))
-#' annotations <- matrix(rbinom(50, 1, 0.3), 10, 5,
-#'   dimnames = list(NULL, paste0("annot", 1:5)))
-#' meta <- data.frame(name = paste0("annot", 1:5), tier = "baseline",
-#'   type = "binary")
-#' am <- AnnotationMatrix(annotations, snpRanges, annotationMeta = meta)
-#' getAnnotations(am)
-#' @export
-setGeneric("getAnnotations", function(x) standardGeneric("getAnnotations"))
-
-#' @title Get Annotation Metadata
-#' @description Return the per-annotation metadata data.frame (columns
-#'   \code{name}, \code{tier}, \code{type}).
-#' @param x An \code{AnnotationMatrix}.
-#' @return A data.frame.
-#' @examples
-#' snpRanges <- GenomicRanges::GRanges(
-#'   "22", IRanges::IRanges((1:10) * 100, width = 1))
-#' annotations <- matrix(rbinom(50, 1, 0.3), 10, 5,
-#'   dimnames = list(NULL, paste0("annot", 1:5)))
-#' meta <- data.frame(name = paste0("annot", 1:5), tier = "baseline",
-#'   type = "binary")
-#' am <- AnnotationMatrix(annotations, snpRanges, annotationMeta = meta)
-#' getAnnotationMeta(am)
-#' @export
-setGeneric("getAnnotationMeta", function(x) {
-    standardGeneric("getAnnotationMeta")
-})
-
-#' @title Get SNP Ranges
-#' @description Return the per-SNP \code{GRanges} carried by an
-#'   \code{AnnotationMatrix}.
-#' @param x An \code{AnnotationMatrix}.
-#' @return A \code{GRanges} object.
-#' @examples
-#' snpRanges <- GenomicRanges::GRanges(
-#'   "22", IRanges::IRanges((1:10) * 100, width = 1))
-#' annotations <- matrix(rbinom(50, 1, 0.3), 10, 5,
-#'   dimnames = list(NULL, paste0("annot", 1:5)))
-#' meta <- data.frame(name = paste0("annot", 1:5), tier = "baseline",
-#'   type = "binary")
-#' am <- AnnotationMatrix(annotations, snpRanges, annotationMeta = meta)
-#' getSnpRanges(am)
-#' @export
-setGeneric("getSnpRanges", function(x) standardGeneric("getSnpRanges"))
-
-#' @title Get LD Block Ranges
-#' @description Return the per-block \code{GRanges} carried by an
-#'   \code{LdBlocks} object.
-#' @param x An \code{LdBlocks}.
-#' @return A \code{GRanges} object.
-#' @examples
-#' lb <- new("LdBlocks", genome = "hg19",
-#'   blocks = GenomicRanges::GRanges("chr1",
-#'     IRanges::IRanges(c(1, 1001), c(1000, 2000))))
-#' getBlocks(lb)
-#' @export
-setGeneric("getBlocks", function(x) standardGeneric("getBlocks"))
 
 #' @title Get GenotypeHandle from LdData
 #' @description Return the \code{GenotypeHandle} (or list of handles for mixture
@@ -1638,16 +1591,10 @@ setGeneric("getBlocks", function(x) standardGeneric("getBlocks"))
 #' @return A \code{GenotypeHandle}, a list of them, or NULL. For a
 #'   \code{QtlDataset} this is the handle itself; \code{getGenotypes()}
 #'   extracts a dosage block from it instead.
-#' @examples
-#' data(eqtlRegionExample)
-#' X <- eqtlRegionExample$X[, 1:8]
-#' gr <- GenomicRanges::GRanges("22",
-#'   IRanges::IRanges(seq(1L, by = 100L, length.out = 8), width = 1L))
-#' ld <- LdData(correlation = cor(X), variants = gr,
-#'   blockMetadata = S4Vectors::DataFrame(
-#'     chrom = "22", start = 1L, end = 1000L))
-#' getGenotypeHandle(ld)
-#' @export
+#' @details The genotype handle is the seed layer behind a panel and
+#'   is not part of the public interface; obtain a panel from
+#'   \code{readGenotypes()} and ask it directly.
+#' @keywords internal
 setGeneric("getGenotypeHandle", function(x) {
     standardGeneric("getGenotypeHandle")
 })
@@ -1706,10 +1653,10 @@ setGeneric("getSnpIdx", function(x) standardGeneric("getSnpIdx"))
 setGeneric("getVariantInfo", function(x) standardGeneric("getVariantInfo"))
 
 #' @title Get Block Metadata
-#' @description Return the block metadata (\code{LdBlocks} or \code{data.frame})
+#' @description Return the block metadata (\code{GRanges} or \code{data.frame})
 #'   carried by an \code{LdData}.
 #' @param x An \code{LdData}.
-#' @return An \code{LdBlocks} or \code{data.frame}.
+#' @return A \code{GRanges} or \code{data.frame}.
 #' @examples
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:8]
@@ -2128,10 +2075,10 @@ setGeneric("getKeepIndel", function(x, ...) standardGeneric("getKeepIndel"))
 #' @param ... Additional arguments passed on to methods.
 #' @return A named character vector mapping canonical chromosome to path or
 #'   prefix, possibly empty.
-#' @examples
-#' data(qtlDatasetExample)
-#' getChromPaths(getGenotypeHandle(qtlDatasetExample))
-#' @export
+#' @details The genotype handle is the seed layer behind a panel and
+#'   is not part of the public interface; obtain a panel from
+#'   \code{readGenotypes()} and ask it directly.
+#' @keywords internal
 setGeneric("getChromPaths", function(x, ...) standardGeneric("getChromPaths"))
 
 #' Per-variant per-effect log Bayes factors (wide)

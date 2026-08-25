@@ -140,7 +140,7 @@ fmrSs <- fineMappingPipeline(qtlSumStatsExample, methods = "susie")
 fmrSs
 ```
 
-The `QtlSumStats` collection carries an `ldSketch` `GenotypeHandle`; the
+The `QtlSumStats` collection carries an `ldSketch` genotype panel; the
 pipeline pulls the per-region LD from there automatically.
 
 ## GWAS summary-statistics fine-mapping

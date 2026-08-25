@@ -1998,70 +1998,6 @@ test_that(".csPurityVec uses sets$purity, else NA", {
     )
 })
 
-# ---- .translateSusiePurity ----
-test_that(".translateSusiePurity renames df and matrix columns, leaves others alone", {
-    expect_null(pecotmr:::.translateSusiePurity(NULL))
-    df <- data.frame(
-        min.abs.corr = 1,
-        mean.abs.corr = 2,
-        median.abs.corr = 3,
-        other = 4
-    )
-    expect_equal(
-        names(pecotmr:::.translateSusiePurity(df)),
-        c("minAbsCorr", "meanAbsCorr", "medianAbsCorr", "other")
-    )
-    mm <- matrix(1:6, 2, 3)
-    colnames(mm) <- c("min.abs.corr", "mean.abs.corr", "median.abs.corr")
-    expect_equal(
-        colnames(pecotmr:::.translateSusiePurity(mm)),
-        c("minAbsCorr", "meanAbsCorr", "medianAbsCorr")
-    )
-    mm2 <- matrix(1:6, 2, 3)
-    expect_null(colnames(pecotmr:::.translateSusiePurity(mm2)))
-})
-
-# ---- .topLociForS4Slot ----
-test_that(".topLociForS4Slot returns an empty frame for NULL/0-row input", {
-    e <- pecotmr:::.topLociForS4Slot(NULL)
-    expect_equal(names(e), c("variant_id", "method"))
-    expect_equal(nrow(e), 0L)
-    expect_equal(
-        nrow(pecotmr:::.topLociForS4Slot(data.frame(a = integer(0)))),
-        0L
-    )
-})
-
-test_that(".topLociForS4Slot derives variant_id from variant and integer cs from cs_95", {
-    tl <- data.frame(
-        variant = c(
-            "chr1:100:A:G",
-            "chr1:200:A:G",
-            "chr1:300:A:G",
-            "chr1:400:A:G"
-        ),
-        cs_95 = c("susie_1", "susie_0", "susie_2", NA),
-        stringsAsFactors = FALSE
-    )
-    r <- pecotmr:::.topLociForS4Slot(tl)
-    expect_equal(
-        r$variant_id,
-        c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G", "chr1:400:A:G")
-    )
-    expect_equal(r$cs, c(1L, 0L, 2L, 0L))
-    # a non-numeric cs_95 tail collapses to 0L
-    expect_equal(
-        pecotmr:::.topLociForS4Slot(
-            data.frame(
-                variant_id = "chr1:100:A:G",
-                cs_95 = "susie_x",
-                stringsAsFactors = FALSE
-            )
-        )$cs,
-        0L
-    )
-})
-
 # ---- extractVariantNames ----
 test_that("extractVariantNames reads pip names, then alpha colnames, then a fallback", {
     expect_equal(
@@ -3083,7 +3019,7 @@ test_that("mergeSusieCs: non-FineMappingResult input errors", {
 test_that("computeCsCorrelation (SumStats) matches get_cs_correlation", {
     data(qtlSumStatsExample)
     ss <- qtlSumStatsExample
-    vids <- as.character(getSnpInfo(getLdSketch(ss))$SNP)
+    vids <- rownames(getLdSketch(ss))
     set.seed(1)
     fe <- .ccMakeEntry(vids, list(L1 = c(1L, 2L, 3L), L2 = c(90L, 91L)))
     cc <- computeCsCorrelation(fe, ss)
@@ -3101,7 +3037,7 @@ test_that("computeCsCorrelation (SumStats) matches get_cs_correlation", {
 test_that("computeCsCorrelation is NULL for fewer than two credible sets", {
     data(qtlSumStatsExample)
     ss <- qtlSumStatsExample
-    vids <- as.character(getSnpInfo(getLdSketch(ss))$SNP)
+    vids <- rownames(getLdSketch(ss))
     set.seed(1)
     expect_null(computeCsCorrelation(.ccMakeEntry(vids, list()), ss))
     expect_null(
@@ -3111,7 +3047,7 @@ test_that("computeCsCorrelation is NULL for fewer than two credible sets", {
 
 test_that("computeCsCorrelation requires a QtlDataset / SumStats ldSource", {
     data(qtlSumStatsExample)
-    vids <- as.character(getSnpInfo(getLdSketch(qtlSumStatsExample))$SNP)
+    vids <- rownames(getLdSketch(qtlSumStatsExample))
     set.seed(1)
     fe <- .ccMakeEntry(vids, list(L1 = c(1L, 2L, 3L), L2 = c(90L, 91L)))
     expect_error(computeCsCorrelation(fe, 42), "requires a QtlDataset")
@@ -3124,7 +3060,7 @@ test_that("computeCsCorrelation requires a QtlDataset / SumStats ldSource", {
 test_that("computeCsCorrelation errors when a fit variant is off-panel", {
     data(qtlSumStatsExample)
     ss <- qtlSumStatsExample
-    vids <- as.character(getSnpInfo(getLdSketch(ss))$SNP)
+    vids <- rownames(getLdSketch(ss))
     vids[1] <- "chr22:99999999:A:G"
     set.seed(1)
     fe <- .ccMakeEntry(vids, list(L1 = c(1L, 2L, 3L), L2 = c(90L, 91L)))
@@ -3153,4 +3089,46 @@ test_that("computeCsCorrelation (QtlDataset) matches the sumstat path", {
     # sketch, so the individual-level (X) and summary (Xcorr) paths must agree.
     expect_equal(dim(ccGeno), c(2L, 2L))
     expect_equal(unname(ccGeno), unname(ccSketch), tolerance = 1e-6)
+})
+
+# ===========================================================================
+# Credible-set labelling (ported from PR #577)
+#
+# A variant in several sets goes to the SMALLEST containing set, and the
+# cs_<cov> label carries the fit's TRUE effect index rather than a position
+# renumbered from 1 -- so a gapped index (L1, L2, L4) survives.
+# ===========================================================================
+
+test_that("a multi-CS variant takes the smallest set and is warned about", {
+    # v2 is in L1 (size 5) and L4 (size 1); L2 = {6,7}. Gapped: no L3.
+    sets <- list(L1 = 1:5, L2 = 6:7, L4 = 2L)
+    csTables <- list(list(sets = list(cs = sets)))
+    nV <- 10L
+    vn <- str_c("v", seq_len(nV))
+    expect_warning(
+        pos <- .fmCsIdxAtCoverage(0.95, 0.95, csTables, nV, vn),
+        "multiple credible sets"
+    )
+    eff <- .fmEffectIdxAtCoverage(0.95, pos, 0.95, csTables)
+    # Smallest-set tie-break: v2 keeps L4 (size 1), whose POSITION is 3 ...
+    expect_equal(pos[2], 3L)
+    # ... but the label is the TRUE effect index 4, not the position 3.
+    expect_equal(eff[2], 4L)
+    expect_equal(eff[1], 1L)
+    expect_equal(eff[6], 2L)
+    expect_equal(eff[8], 0L)
+})
+
+test_that("disjoint sets neither warn nor relabel", {
+    sets <- list(L1 = 1:3, L2 = 4:5)
+    csTables <- list(list(sets = list(cs = sets)))
+    vn <- str_c("v", 1:6)
+    expect_silent(pos <- .fmCsIdxAtCoverage(0.95, 0.95, csTables, 6L, vn))
+    eff <- .fmEffectIdxAtCoverage(0.95, pos, 0.95, csTables)
+    expect_equal(eff, c(1L, 1L, 1L, 2L, 2L, 0L))
+})
+
+test_that(".fmEffectIndices parses L-names and falls back to position", {
+    expect_equal(.fmEffectIndices(list(L1 = 1, L2 = 2, L7 = 3)), c(1L, 2L, 7L))
+    expect_equal(.fmEffectIndices(list(1, 2, 3)), c(1L, 2L, 3L))
 })

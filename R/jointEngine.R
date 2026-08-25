@@ -1203,55 +1203,75 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
 # studies; the study axis varies -> "joint" + jointStudies.
 .enumCrossStudySumstats <- function(data, scope, args = list()) {
     ldSketch <- getLdSketch(data)
-    studyCol <- as.character(data$study)
-    contextCol <- as.character(data$context)
-    traitCol <- as.character(data$trait)
+    cols <- list(
+        study = as.character(data$study),
+        context = as.character(data$context),
+        trait = as.character(data$trait)
+    )
     allCtxs <- unique(unlist(scope$contexts, use.names = FALSE))
     allTrs <- unique(unlist(scope$traits, use.names = FALSE))
     groups <- list()
     for (cx in allCtxs) {
         for (tid in allTrs) {
-            tupleRows <- which(
-                contextCol == cx &
-                    traitCol == tid &
-                    is_in(studyCol, scope$studies)
-            )
-            keep <- map_lgl(
-                tupleRows,
-                .jointTupleRowInScope,
-                studyCol = studyCol,
-                cx = cx,
-                tid = tid,
-                scope = scope
-            )
-            tupleRows <- tupleRows[keep]
-            if (length(tupleRows) < 2L) {
-                next
-            }
-            stNames <- studyCol[tupleRows]
-            jz <- .buildJointSumstatZMatrix(
+            g <- .enumCrossStudyGroup(
                 data,
-                tupleRows,
-                stNames,
-                errorLabel = "jointCrossStudy",
-                ldSketch = ldSketch,
-                cutoffs = args$cutoffs
+                scope,
+                args,
+                cols,
+                cx,
+                tid,
+                ldSketch
             )
-            ldMat <- .fmLdFromSketch(ldSketch, jz$variantIds)
-            groups[[length(groups) + 1L]] <- new(
-                "SumStatsJointGroup",
-                conditions = tibble(
-                    study = stNames,
-                    context = cx,
-                    trait = tid
-                ),
-                Z = jz$Z,
-                R = ldMat,
-                N = jz$nVec
-            )
+            if (!is.null(g)) {
+                groups[[length(groups) + 1L]] <- g
+            }
         }
     }
     groups
+}
+
+# One cross-study joint group for a (context, trait) cell, or NULL when fewer
+# than two studies survive the scope filter -- a "joint" fit over one study is
+# just that study, so the cell contributes nothing.
+# @noRd
+.enumCrossStudyGroup <- function(data, scope, args, cols, cx, tid, ldSketch) {
+    tupleRows <- which(
+        cols$context == cx &
+            cols$trait == tid &
+            is_in(cols$study, scope$studies)
+    )
+    keep <- map_lgl(
+        tupleRows,
+        .jointTupleRowInScope,
+        studyCol = cols$study,
+        cx = cx,
+        tid = tid,
+        scope = scope
+    )
+    tupleRows <- tupleRows[keep]
+    if (length(tupleRows) < 2L) {
+        return(NULL)
+    }
+    stNames <- cols$study[tupleRows]
+    jz <- .buildJointSumstatZMatrix(
+        data,
+        tupleRows,
+        stNames,
+        errorLabel = "jointCrossStudy",
+        ldSketch = ldSketch,
+        cutoffs = args$cutoffs
+    )
+    new(
+        "SumStatsJointGroup",
+        conditions = tibble(
+            study = stNames,
+            context = cx,
+            trait = tid
+        ),
+        Z = jz$Z,
+        R = .fmLdFromSketch(ldSketch, jz$variantIds),
+        N = jz$nVec
+    )
 }
 
 # composed / individual: ONE group joining every scoped (context, trait) tuple

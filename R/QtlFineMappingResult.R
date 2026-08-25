@@ -14,6 +14,22 @@
 #' @include AllClasses.R tupleSelectors.R
 NULL
 
+#' @title QTL Fine-Mapping Result Collection
+#' @description S4 collection of fine-mapping fits for one or more QTL
+#'   studies on a single LD block. Keyed by the identity tuple
+#'   \code{(study, context, trait, method)}; each entry is a
+#'   \code{FineMappingRow}.
+#'
+#' Required columns: \code{study}, \code{context}, \code{trait},
+#' \code{method}, \code{entry}. The 4-tuple is unique. The caller is
+#' expected to construct one \code{QtlFineMappingResult} per LD block (no
+#' in-class block indexing).
+#'
+#' Optional columns \code{jointStudies}, \code{jointContexts},
+#' \code{jointTraits} appear when the collection contains rows produced by a
+#' \code{jointSpecification}-driven joint fit, carrying the semicolon-joined
+#' member identities of the joined axis.
+#' @export
 setClass(
     "QtlFineMappingResult",
     contains = "FineMappingResultBase",
@@ -127,24 +143,30 @@ setClass(
 # ldSketch must be a GenotypeHandle or NULL.
 # @noRd
 .qfmrCheckLdSketch <- function(object) {
-    if (
-        !is.null(object@ldSketch) &&
-            !methods::is(object@ldSketch, "GenotypeHandle")
-    ) {
-        return("'ldSketch' must be a GenotypeHandle or NULL")
-    }
+    # The slot's class union enforces the type; nothing to check.
     NULL
 }
 
-#' @title GWAS Fine-Mapping Result Collection
-#' @description S4 collection of fine-mapping fits for one or more GWAS studies
-#'   on a single LD block. Keyed by the identity tuple \code{(study, method)};
-#'   each entry is a \code{FineMappingRow}.
-#'
-#' Required columns: \code{study}, \code{method}, \code{entry}. The 2-tuple is
-#' unique. The caller is expected to construct one \code{GwasFineMappingResult}
-#' per LD block (no in-class block indexing).
-#' @export
+
+# The identity-tuple vectors and the payload list are parallel: one entry per
+# (study, context, trait, method). A length mismatch would otherwise surface as
+# a recycling artefact deep inside the DataFrame assembly.
+# @noRd
+.qfmrCheckTupleLengths <- function(study, context, trait, method, entry) {
+    n <- length(study)
+    ok <- length(context) == n &&
+        length(trait) == n &&
+        length(method) == n &&
+        length(entry) == n
+    if (ok) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "`study`, `context`, `trait`, `method`, and `entry` must all ",
+        "have the same length."
+    ))
+}
+
 
 #' @title Create a QtlFineMappingResult Collection
 #' @description Construct a \code{QtlFineMappingResult} DFrame-subclass
@@ -168,8 +190,9 @@ setClass(
 #'   shape as \code{jointStudies}.
 #' @param jointTraits Optional character vector for cross-trait joints. Same
 #'   shape as \code{jointStudies}.
-#' @param ldSketch An optional \code{GenotypeHandle} (the LD reference for
-#'   RSS-derived fits), or \code{NULL} for individual-level fits.
+#' @param ldSketch An optional genotype panel (see \code{\link{readGenotypes}})
+#'   (the LD reference for RSS-derived fits), or \code{NULL} for
+#'   individual-level fits.
 #' @param traitPos Optional per-row trait genomic anchor (a \code{GRanges} or
 #'   \code{NULL}), carried forward as provenance; not part of the identity key.
 #'   \code{NULL} (default) omits the column.
@@ -195,18 +218,7 @@ QtlFineMappingResult <- function(
     ldSketch = NULL
 ) {
     n <- length(study)
-    if (
-        length(context) != n ||
-            length(trait) != n ||
-            length(method) != n ||
-            length(entry) != n
-    ) {
-        msg <- glue(
-            "`study`, `context`, `trait`, `method`, and `entry` must all ",
-            "have the same length."
-        )
-        abort(msg)
-    }
+    .qfmrCheckTupleLengths(study, context, trait, method, entry)
     entry <- map(entry, .asFmRowPayload)
     .checkRowPayloads(entry, "FineMappingRow", "fine-mapping")
     cols <- list(
@@ -233,7 +245,11 @@ QtlFineMappingResult <- function(
     grl <- GenomicRanges::GRangesList(split$entry)
     md <- exec(S4Vectors::DataFrame, !!!dfArgs)
     mcols(grl) <- md[split$fromIdx, , drop = FALSE]
-    obj <- new("QtlFineMappingResult", grl, ldSketch = ldSketch)
+    obj <- new(
+        "QtlFineMappingResult",
+        grl,
+        ldSketch = .asLdSketch(ldSketch)
+    )
     validObject(obj)
     obj
 }
@@ -394,7 +410,7 @@ setMethod("show", "QtlFineMappingResult", function(object) {
     ldSrc <- if (is.null(object@ldSketch)) {
         "NULL (individual-level fit)"
     } else {
-        glue("{object@ldSketch@format} @ {object@ldSketch@path}")
+        .ldSketchLabel(object@ldSketch)
     }
     cat(glue("  LD sketch: {ldSrc}\n", .trim = FALSE))
 })

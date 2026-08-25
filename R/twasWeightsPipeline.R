@@ -44,7 +44,8 @@
 #'
 #' @param ... Two or more \code{TwasWeights} objects, or a single \code{list} of
 #'   them.
-#' @param ldSketch Optional \code{\link{GenotypeHandle}} to attach to the
+#' @param ldSketch Optional genotype panel (see \code{\link{readGenotypes}}) to
+#'   attach to the
 #'   combined collection. Default \code{NULL}. Applied when combining two or
 #'   more inputs; a single input is returned unchanged.
 #' @return A single combined \code{TwasWeights}.
@@ -136,35 +137,6 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
         cvResult = .twasRegionCvDf(entries, regionLabels),
         standardized = getStandardized(entries[[1L]]),
         dataType = getDataType(entries[[1L]])
-    )
-}
-
-# Merge per-region TwasWeights collections (same study/context/trait, same
-# methods) into one collection by concatenating each method's entry.
-.twasMergeRegions <- function(twList, regionLabels) {
-    keep <- !map_lgl(twList, is.null)
-    twList <- twList[keep]
-    regionLabels <- regionLabels[keep]
-    if (length(twList) == 0L) {
-        return(NULL)
-    }
-    if (length(twList) == 1L) {
-        return(twList[[1L]])
-    }
-    base <- twList[[1L]]
-    mergedEntries <- map(
-        seq_along(base$method),
-        .twasMergedEntryForRow,
-        base = base,
-        twList = twList,
-        regionLabels = regionLabels
-    )
-    TwasWeights(
-        study = as.character(base$study),
-        context = as.character(base$context),
-        trait = as.character(base$trait),
-        method = as.character(base$method),
-        entry = mergedEntries
     )
 }
 
@@ -802,30 +774,6 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
     .twrRowParts(twasWeights, idx[[1L]])
 }
 
-# Build a TwasWeights collection from a list of cached entries keyed by
-# short-method-name (the value of the `method` column). Helper for the
-# resume-cache short-circuit path in twasWeightsPipeline.
-# @noRd
-.twasBuildFromCachedRows <- function(
-    cachedRows,
-    study,
-    context,
-    trait,
-    ldSketch = NULL
-) {
-    if (length(cachedRows) == 0L) {
-        return(NULL)
-    }
-    TwasWeights(
-        study = rep(study, length(cachedRows)),
-        context = rep(context, length(cachedRows)),
-        trait = rep(trait, length(cachedRows)),
-        method = names(cachedRows),
-        entry = unname(cachedRows),
-        ldSketch = ldSketch
-    )
-}
-
 # Convert a FineMappingResult (single-method susie/susie_inf row matched
 # to the requested study/context/trait) into a `fittedModels` list
 # suitable for `learnTwasWeights`. Pulls the trimmedFit from the matching
@@ -1111,11 +1059,12 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
 #' @param verbose Verbosity (0 silent, 1 default, 2 includes external package
 #'   messages).
 #' @param seed Integer or \code{NULL}. When supplied (\code{QtlDataset} path),
-#'   seeds both the main-process RNG (\code{set.seed}) and the parallel
-#'   method-fitting / cross-validation RNG (\code{BiocParallel} \code{RNGseed})
-#'   for reproducibility under multi-threading. \code{NULL} (default) leaves the
-#'   session RNG untouched, so an outer \code{set.seed()} still governs the
-#'   main-process draws.
+#'   seeds both the main-process RNG and the parallel method-fitting /
+#'   cross-validation RNG (\code{BiocParallel} \code{RNGseed}) for
+#'   reproducibility under multi-threading. The main-process seed is scoped to
+#'   the call, so the session RNG is left as it was found. \code{NULL}
+#'   (default) does not seed at all, so an outer \code{set.seed()} still
+#'   governs the main-process draws.
 #' @param ... Reserved for method-specific arguments.
 #'
 #' @return A \code{\link{TwasWeights}} collection keyed by \code{(study,
@@ -2068,6 +2017,23 @@ setMethod(
         ncol = length(ctxNames),
         dimnames = list(variantIds, ctxNames)
     )
+    filled <- .twasQssFillContexts(data, st, tr, ctxNames, variantIds, Z)
+    list(
+        variantIds = variantIds,
+        stat = list(
+            z = filled$z,
+            n = filled$n,
+            variantNames = variantIds
+        )
+    )
+}
+
+# Read each context's z / N into the shared matrix. Every context must present
+# the same SNPs in the same order -- the multivariate fitters index z by
+# position, not by name, so a differing order would silently pair one context's
+# variant with another's.
+# @noRd
+.twasQssFillContexts <- function(data, st, tr, ctxNames, variantIds, Z) {
     nVec <- numeric(length(ctxNames))
     for (kk in seq_along(ctxNames)) {
         d <- getSumstatDf(
@@ -2079,23 +2045,25 @@ setMethod(
             derive = "zFromBetaSe"
         )
         d <- d[is_in(d$variant_id, variantIds), , drop = FALSE]
-        if (!identical(d$variant_id, variantIds)) {
-            msg <- glue(
-                "twasWeightsPipeline(QtlSumStats, multivariate): every ",
-                "entry for (study='{st}', trait='{tr}') must share an ",
-                "identical SNP order after summaryStatsQc(). Use the same ",
-                "ldSketch on every entry."
-            )
-            abort(msg)
-        }
+        .twasQssCheckSnpOrder(d$variant_id, variantIds, st, tr)
         Z[, kk] <- d$z
         nVec[kk] <- stats::median(d$N, na.rm = TRUE)
     }
     names(nVec) <- ctxNames
-    list(
-        variantIds = variantIds,
-        stat = list(z = Z, n = nVec, variantNames = variantIds)
-    )
+    list(z = Z, n = nVec)
+}
+
+# @noRd
+.twasQssCheckSnpOrder <- function(got, want, st, tr) {
+    if (identical(got, want)) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "twasWeightsPipeline(QtlSumStats, multivariate): every ",
+        "entry for (study='{st}', trait='{tr}') must share an ",
+        "identical SNP order after summaryStatsQc(). Use the same ",
+        "ldSketch on every entry."
+    ))
 }
 
 # Fit one multivariate method for a group -> one row record per context (empty

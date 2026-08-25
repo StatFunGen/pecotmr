@@ -443,20 +443,16 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 .csSummaryFit <- function(tl, fit, coverage) {
     csCol <- str_c("cs_", coverage * 100)
     purCol <- str_c(csCol, "_purity")
-    if (is.null(tl) || nrow(tl) == 0L || !is_in(csCol, names(tl))) {
+    if (is.null(tl) || nrow(tl) == 0L) {
         return(.emptyCsSummary())
     }
-    csValues <- tl[[csCol]]
-    labels <- unique(csValues[
-        !is.na(csValues) &
-            str_length(csValues) > 0L &
-            !str_detect(csValues, "_0$")
-    ])
-    if (length(labels) == 0L) {
+    specs <- .csSummarySpecs(tl, fit, coverage, csCol, purCol)
+    if (length(specs) == 0L) {
         return(.emptyCsSummary())
     }
     ctx <- .csSummaryContext(tl, fit, coverage, csCol, purCol)
-    map(labels, .csSummaryRow, ctx = ctx) |>
+    map(specs, .csSummaryRow, ctx = ctx) |>
+        compact() |>
         bind_rows() |>
         mutate(
             cs_log10bf = if_else(
@@ -465,6 +461,120 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
                 NA_real_
             )
         )
+}
+
+# One spec per credible set at `coverage`: its member variant ids and the
+# fit's true effect index.
+#
+# Sourced from the fit's own `sets$cs` when the stored fit carries them, which
+# makes the table COMPLETE -- a set whose members were all relabelled into a
+# smaller overlapping set still gets its row, with stats over its true full
+# membership. Falls back to enumerating the per-variant cs_<cov> column (the
+# labelled members only) for a minimal or hand-built fit with no sets.
+# @noRd
+.csSummarySpecs <- function(tl, fit, coverage, csCol, purCol) {
+    setsObj <- .csSetsForCoverage(fit, coverage)
+    hasSets <- !is.null(setsObj) &&
+        !is.null(setsObj$cs) &&
+        length(setsObj$cs) > 0L
+    if (hasSets) {
+        return(.csSpecsFromFit(setsObj, fit, tl, coverage, csCol))
+    }
+    .csSpecsFromColumn(tl, csCol)
+}
+
+# Complete per-CS specs from the fit's credible sets. Member POSITIONS map to
+# variant ids through the alpha column names; the effect index comes from the
+# sets$cs "L<k>" names.
+# @noRd
+.csSpecsFromFit <- function(setsObj, fit, tl, coverage, csCol) {
+    vn <- colnames(fit$alpha)
+    eff <- .fmEffectIndices(setsObj$cs)
+    tag <- .csMethodTag(tl, fit, csCol)
+    map(
+        seq_along(setsObj$cs),
+        .csSpecOne,
+        setsObj = setsObj,
+        vn = vn,
+        eff = eff,
+        tag = tag
+    )
+}
+
+# @noRd
+.csSpecOne <- function(k, setsObj, vn, eff, tag) {
+    members <- as.integer(setsObj$cs[[k]])
+    list(
+        ids = if (is.null(vn)) NA_character_ else vn[members],
+        eff = eff[k],
+        lab = str_c(tag, "_", eff[k])
+    )
+}
+
+# Fallback specs from the per-variant cs_<cov> column: one per distinct label.
+# @noRd
+.csSpecsFromColumn <- function(tl, csCol) {
+    if (!is_in(csCol, names(tl))) {
+        return(list())
+    }
+    vals <- tl[[csCol]]
+    labels <- unique(vals[
+        !is.na(vals) & str_length(vals) > 0L & !str_detect(vals, "_0$")
+    ])
+    map(labels, .csSpecFromLabel, tl = tl, csCol = csCol)
+}
+
+# @noRd
+.csSpecFromLabel <- function(lab, tl, csCol) {
+    m <- filter(tl, !is.na(.data[[csCol]]) & .data[[csCol]] == lab)
+    list(
+        ids = as.character(m$variant_id),
+        eff = suppressWarnings(as.integer(str_remove(lab, "^.*_"))),
+        lab = lab
+    )
+}
+
+# The credible-set object for `coverage`: the fit's primary `sets` when that is
+# the coverage it was computed at, else the stored secondary set for that
+# coverage. NULL when the coverage was never computed.
+# @noRd
+.csSetsForCoverage <- function(fit, coverage) {
+    pc <- fit$sets$requested_coverage
+    if (!is.null(pc) && isTRUE(all.equal(as.numeric(pc[1L]), coverage))) {
+        return(fit$sets)
+    }
+    sec <- fit[["sets_secondary"]]
+    if (!is.null(sec) && length(sec) > 0L) {
+        nums <- suppressWarnings(
+            as.integer(str_match(names(sec), "(?i)cs_(\\d+)_")[, 2L])
+        )
+        h <- which(nums == round(coverage * 100))
+        if (length(h) > 0L) {
+            return(sec[[h[1L]]]$sets)
+        }
+        return(NULL)
+    }
+    # Untrimmed fit with no secondary store and no recorded coverage: the
+    # primary sets are the only ones there are.
+    if (is.null(pc) && !is.null(fit$sets$cs)) {
+        return(fit$sets)
+    }
+    NULL
+}
+
+# The method tag for a cs label: prefer the tag already in the entry's
+# cs_<cov> column so the summary stays consistent with the per-variant labels;
+# fall back to the fit's class.
+# @noRd
+.csMethodTag <- function(tl, fit, csCol) {
+    if (!is.null(tl) && is_in(csCol, names(tl))) {
+        v <- tl[[csCol]]
+        v <- v[!is.na(v) & str_length(v) > 0L & !str_detect(v, "_0$")]
+        if (length(v) > 0L) {
+            return(str_remove(v[1L], "_[0-9]+$"))
+        }
+    }
+    .camelToSnakeMethod(class(fit)[1L])
 }
 
 # Per-fit context for the CS summary rows: prior variances (V) and per-effect
@@ -491,18 +601,28 @@ fineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     )
 }
 
-# One credible-set summary row for label `lab`.
+# One credible-set summary row for the set described by `spec`.
+#
+# Members are selected by VARIANT ID, not by the cs_<cov> label: when the spec
+# came from the fit, its membership is the set's true full membership, which
+# can include variants the per-variant column relabelled into a smaller
+# overlapping set.
 # @noRd
-.csSummaryRow <- function(lab, ctx) {
-    m <- filter(ctx$tl, .data[[ctx$csCol]] == lab)
-    Lidx <- suppressWarnings(as.integer(str_remove(lab, "^.*_")))
+.csSummaryRow <- function(spec, ctx) {
+    m <- filter(ctx$tl, is_in(as.character(.data$variant_id), spec$ids))
+    if (nrow(m) == 0L) {
+        return(NULL)
+    }
+    Lidx <- spec$eff
     Lname <- if (!is.na(Lidx)) str_c("L", Lidx) else NA_character_
     lead <- which.max(m$pip)
     tibble(
-        cs = lab,
+        cs = spec$lab,
         effect_id = Lname,
         coverage = ctx$coverage,
-        n_variants = nrow(m),
+        # The set's true membership, which may exceed the rows present in the
+        # entry's topLoci when the fit is the source.
+        n_variants = length(spec$ids),
         purity_min = .csPurityMin(m, ctx$purCol),
         purity_mean = .csPurityMean(ctx$meanPur, Lname),
         V = .csEffectV(ctx$Vvec, Lidx),

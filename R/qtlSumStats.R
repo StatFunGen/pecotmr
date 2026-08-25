@@ -40,12 +40,7 @@ setClass(
 # ldSketch must be a GenotypeHandle or NULL.
 # @noRd
 .qssCheckLdSketch <- function(object) {
-    if (
-        !is.null(object@ldSketch) &&
-            !methods::is(object@ldSketch, "GenotypeHandle")
-    ) {
-        return("'ldSketch' must be a GenotypeHandle or NULL")
-    }
+    # The slot's class union enforces the type; nothing to check.
     NULL
 }
 
@@ -128,7 +123,8 @@ NULL
 #' @param genome Single character string giving the genome build (e.g.,
 #'   \code{"hg19"}, \code{"hg38"}). Uniform across the collection because all
 #'   entries share the same LD sketch.
-#' @param ldSketch A \code{GenotypeHandle} carrying the LD reference.
+#' @param ldSketch A genotype panel (see \code{\link{readGenotypes}})
+#'   carrying the LD reference.
 #' @param varY Optional numeric vector of per-tuple phenotype variances
 #'   (\code{NA_real_} entries allowed).
 #' @param nSample Optional per-tuple total sample size (numeric; default
@@ -148,13 +144,13 @@ NULL
 #'   \code{NULL} (default) omits the column.
 #' @return A \code{QtlSumStats} object.
 #' @examples
-#' gh <- readGenotypes(
+#' panel <- readGenotypes(
 #'   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
 #' gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100 * 1:3, width = 1))
 #' S4Vectors::mcols(gr) <- S4Vectors::DataFrame(SNP = paste0("rs", 1:3),
 #'   A1 = "A", A2 = "G", Z = rnorm(3), N = 100L)
 #' QtlSumStats(study = "s1", context = "brain", trait = "g1", entry = list(gr),
-#'   genome = "hg38", ldSketch = gh)
+#'   genome = "hg38", ldSketch = panel)
 #' @export
 QtlSumStats <- function(
     study,
@@ -201,15 +197,7 @@ QtlSumStats <- function(
     grl <- GenomicRanges::GRangesList(split$entry)
     md <- exec(S4Vectors::DataFrame, !!!dfArgs)
     mcols(grl) <- md[split$fromIdx, , drop = FALSE]
-    obj <- methods::new(
-        "QtlSumStats",
-        grl,
-        ldSketch = ldSketch,
-        genome = as.character(genome),
-        qcInfo = as.list(qcInfo)
-    )
-    methods::validObject(obj)
-    obj
+    .sumStatsNewValidated("QtlSumStats", grl, ldSketch, genome, qcInfo)
 }
 
 # Validate genome / entry / length consistency and recycle varY. Returns the
@@ -529,7 +517,7 @@ setMethod("show", "QtlSumStats", function(object) {
     ldSrc <- if (is.null(ld)) {
         "none (LD-free)"
     } else {
-        glue("{getFormat(ld)} @ {getPath(ld)}")
+        .ldSketchLabel(ld)
     }
     cat(glue("  LD sketch: {ldSrc}\n", .trim = FALSE))
 })

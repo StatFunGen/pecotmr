@@ -995,7 +995,7 @@ test_that("colocboost RSS cutoffs match .panelVariantFilter", {
 
 test_that("colocboost RSS treats MAC as a MAF equivalent", {
     ss <- .cbf_qcd()
-    nSamp <- getNSamples(getLdSketch(ss))
+    nSamp <- ncol(getLdSketch(ss))
     expect_equal(
         .cbf_n(ss, macCutoff = 0.1 * 2 * nSamp),
         .cbf_n(ss, mafCutoff = 0.1)

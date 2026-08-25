@@ -21,8 +21,10 @@
 #     ("given these two colocalize, this is the shared causal variant"); vcp is
 #     a marginal per-variant colocalization probability over the region.
 #
-# What the two DO share is the projection surface, so both extend
-# ColocResultBase and answer getColocVariants().
+# What the two DO share is the LD panel they were computed against and the
+# projection surface, so both extend ColocResultBase -- which carries the
+# ldSketch slot and its accessor -- and both answer getColocPairs() and
+# getColocVariants().
 #
 #   element      the member variants of one CoS
 #   inner mcols  per-variant: vcp
@@ -44,7 +46,6 @@ NULL
 #' @description A collection of ColocBoost results, one element per confidence
 #'   set (CoS). Project it with \code{\link{getColocPairs}},
 #'   \code{\link{getColocVariants}} or \code{\link{getColocBoostOutcomes}}.
-#' @slot ldSketch The LD reference \code{GenotypeHandle}, or \code{NULL}.
 #' @slot outcomeInfo A data frame mapping each outcome \code{name} to its
 #'   \code{study}, \code{context}, \code{trait} and \code{dataForm}. ColocBoost
 #'   is given outcome names as bare labels, and those labels are lossy -- a
@@ -61,13 +62,11 @@ setClass(
     "ColocBoostResult",
     contains = "ColocResultBase",
     representation(
-        ldSketch = "ANY",
         outcomeInfo = "data.frame",
         regionVcp = "ANY",
         computingTime = "list"
     ),
     prototype(
-        ldSketch = NULL,
         regionVcp = NULL,
         computingTime = list()
     )
@@ -172,10 +171,6 @@ methods::setValidity("ColocBoostResult", function(object) {
 
 # ---- accessors --------------------------------------------------------------
 
-#' @rdname getLdSketch
-#' @export
-setMethod("getLdSketch", "ColocBoostResult", function(x, ...) x@ldSketch)
-
 #' @rdname show-methods
 #' @export
 setMethod("show", "ColocBoostResult", function(object) {
@@ -215,7 +210,8 @@ setMethod("show", "ColocBoostResult", function(object) {
 #'   naming the GWAS study for the per-study \code{separate_gwas} runs.
 #' @param outcomeInfo Data frame mapping outcome \code{name} to \code{study},
 #'   \code{context}, \code{trait} and \code{dataForm}.
-#' @param ldSketch Optional \code{GenotypeHandle}.
+#' @param ldSketch Optional genotype panel (see
+#'   \code{\link{readGenotypes}}).
 #' @param computingTime Optional list of per-analysis timings.
 #' @param includeUncolocalized Keep the outcome-specific (uncolocalized) sets
 #'   as elements flagged \code{isColocalized = FALSE}. Default \code{TRUE}:
@@ -266,7 +262,7 @@ ColocBoostResult <- function(
         rows,
         outcomeInfo = as.data.frame(outcomeInfo),
         regionVcp = .cbrRegionVcp(results),
-        ldSketch = ldSketch,
+        ldSketch = .asLdSketch(ldSketch),
         computingTime = computingTime
     )
 }
@@ -484,7 +480,7 @@ ColocBoostResult <- function(
     obj <- new(
         "ColocBoostResult",
         grl,
-        ldSketch = ldSketch,
+        ldSketch = .asLdSketch(ldSketch),
         outcomeInfo = outcomeInfo,
         regionVcp = regionVcp,
         computingTime = computingTime

@@ -17,6 +17,15 @@
 #' @include AllClasses.R tupleSelectors.R
 NULL
 
+#' @title GWAS Fine-Mapping Result Collection
+#' @description S4 collection of fine-mapping fits for one or more GWAS studies
+#'   on a single LD block. Keyed by the identity tuple \code{(study, method)};
+#'   each entry is a \code{FineMappingRow}.
+#'
+#' Required columns: \code{study}, \code{method}, \code{entry}. The 2-tuple is
+#' unique. The caller is expected to construct one \code{GwasFineMappingResult}
+#' per LD block (no in-class block indexing).
+#' @export
 setClass(
     "GwasFineMappingResult",
     contains = "FineMappingResultBase",
@@ -105,41 +114,10 @@ setClass(
 
 # @noRd
 .gfmrCheckLdSketch <- function(object) {
-    if (
-        !is.null(object@ldSketch) &&
-            !methods::is(object@ldSketch, "GenotypeHandle")
-    ) {
-        return("'ldSketch' must be a GenotypeHandle or NULL")
-    }
+    # The slot's class union enforces the type; nothing to check.
     NULL
 }
 
-# =============================================================================
-# TWAS Weights
-# =============================================================================
-
-#' @title TWAS Weights Collection
-#' @description S4 collection of TWAS weights keyed by the identity tuple
-#'   \code{(study, context, trait, method)}. Each entry is a
-#'   \code{TwasWeightsRow} carrying one method's weights for one
-#'   trait/context/study. Implements the \code{DFrame}-subclass collection
-#'   pattern.
-#'
-#' Required columns: \code{study}, \code{context}, \code{trait}, \code{method},
-#' \code{entry}. Each \code{entry} is a \code{TwasWeightsRow}.
-#'
-#' Optional columns \code{jointStudies}, \code{jointContexts},
-#' \code{jointTraits} appear when the collection contains rows produced by a
-#' \code{jointSpecification}-driven joint fit. For such a row, the corresponding
-#' identity-tuple column carries the sentinel \code{"joint"} and the joint
-#' column lists the semicolon-joined members of the joined axis. For non-joint
-#' rows the joint columns are \code{NA_character_}. Tuple uniqueness is enforced
-#' jointly across the identity-tuple columns and any present joint columns.
-#' @slot ldSketch The LD reference \code{GenotypeHandle} the weights were
-#'   derived against, or \code{NULL} when the weights were learned from
-#'   individual-level data. Used downstream for cross-pipeline LD-sketch
-#'   identity validation.
-#' @export
 
 #' @title Create a GwasFineMappingResult Collection
 #' @description Construct a \code{GwasFineMappingResult} collection from
@@ -160,7 +138,8 @@ setClass(
 #'   not part of the identity key. Supply it when the block BOUNDARIES matter:
 #'   those are the one thing not recoverable from the variants, since adjacent
 #'   blocks' spans leave gaps.
-#' @param ldSketch An optional \code{GenotypeHandle}.
+#' @param ldSketch An optional genotype panel (see
+#'   \code{\link{readGenotypes}}).
 #' @param traitPos Optional per-row trait genomic anchor (a \code{GRanges} or
 #'   \code{NULL}), carried forward as provenance; not part of the identity key.
 #'   \code{NULL} (default) omits the column.
@@ -202,7 +181,11 @@ GwasFineMappingResult <- function(
     grl <- GenomicRanges::GRangesList(split$entry)
     md <- exec(S4Vectors::DataFrame, !!!dfArgs)
     mcols(grl) <- md[split$fromIdx, , drop = FALSE]
-    obj <- new("GwasFineMappingResult", grl, ldSketch = ldSketch)
+    obj <- new(
+        "GwasFineMappingResult",
+        grl,
+        ldSketch = .asLdSketch(ldSketch)
+    )
     validObject(obj)
     obj
 }
@@ -291,7 +274,7 @@ setMethod("show", "GwasFineMappingResult", function(object) {
     ldSrc <- if (is.null(object@ldSketch)) {
         "NULL"
     } else {
-        glue("{object@ldSketch@format} @ {object@ldSketch@path}")
+        .ldSketchLabel(object@ldSketch)
     }
     cat(glue("  LD sketch: {ldSrc}\n", .trim = FALSE))
 })

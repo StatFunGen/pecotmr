@@ -57,7 +57,9 @@ test_that("QtlFineMappingResult: stores an LD sketch when supplied", {
         entry = list(e),
         ldSketch = gh
     )
-    expect_identical(getLdSketch(res), gh)
+    # The slot holds the panel; the handle it reads through is its seed.
+    expect_s4_class(getLdSketch(res), "RangedSummarizedExperiment")
+    expect_identical(pecotmr:::.ldSketchHandle(getLdSketch(res)), gh)
 })
 
 
@@ -602,3 +604,47 @@ test_that("QtlFineMappingResult: getMarginalEffects with tuple selectors", {
 # ===========================================================================
 # GwasFineMappingResult collection accessors
 # ===========================================================================
+
+# ===========================================================================
+# Validity: the branches that name what is wrong
+#
+# Every test above builds a valid collection, so validity's early returns
+# were never executed. They are reachable by editing mcols on a built object,
+# which is what a careless downstream edit would do.
+# ===========================================================================
+
+.qfmr_res <- function() {
+    QtlFineMappingResult(
+        study = "s1",
+        context = "c1",
+        trait = "t1",
+        method = "susie",
+        entry = list(.sc_makeFineMappingRow(3))
+    )
+}
+
+test_that("validity names a missing identity column", {
+    bad <- .qfmr_res()
+    mcols(bad)$trait <- NULL
+    expect_error(methods::validObject(bad), "missing columns: trait")
+})
+
+test_that("validity names a missing entry payload column", {
+    bad <- .qfmr_res()
+    mcols(bad)$susieFit <- NULL
+    expect_error(
+        methods::validObject(bad),
+        "missing entry payload columns: susieFit"
+    )
+})
+
+test_that("a joint column must be character, not a factor or number", {
+    # The joint columns hold semicolon-joined member identities; a factor
+    # would compare and paste differently and silently corrupt the tuple key.
+    bad <- .qfmr_res()
+    mcols(bad)$jointStudies <- 1L
+    expect_error(
+        methods::validObject(bad),
+        "'jointStudies' column must be character \\(got integer\\)"
+    )
+})

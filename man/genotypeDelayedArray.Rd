@@ -24,8 +24,4 @@ The result is \strong{variants x samples}, the Bioconductor assay
 orientation, which is the transpose of what \code{\link{getGenotypes}}
 returns.
 }
-\examples{
-data(qtlDatasetExample)
-da <- genotypeDelayedArray(getGenotypeHandle(qtlDatasetExample))
-dim(da)
-}
+\keyword{internal}

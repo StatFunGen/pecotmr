@@ -28,8 +28,8 @@ QTL traits are quantitative.)}
 
 \item{genome}{Genome build; reconciled with a \code{genome} column.}
 
-\item{ldSketch}{A \code{\link{GenotypeHandle}} or spec; reconciled with an
-\code{ldSketchPath} column.}
+\item{ldSketch}{A genotype panel (see \code{\link{readGenotypes}}) or spec;
+reconciled with an \code{ldSketchPath} column.}
 
 \item{region, minLdOverlapWarn, columnMapping, sampleSelect, formatMapping}{As
 for \code{\link{loadGwasSumStatsFromManifest}}.}

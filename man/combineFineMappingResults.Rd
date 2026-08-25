@@ -10,7 +10,8 @@ combineFineMappingResults(..., ldSketch = NULL)
 \item{...}{Two or more \code{FineMappingResultBase} objects, or a single
 \code{list} of them.}
 
-\item{ldSketch}{Optional \code{\link{GenotypeHandle}} to attach to the
+\item{ldSketch}{Optional genotype panel (see
+\code{\link{readGenotypes}}) to attach to the
 combined collection. Default \code{NULL}. Applied when combining two or
 more inputs; a single input is returned unchanged.}
 }

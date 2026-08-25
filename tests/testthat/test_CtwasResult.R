@@ -172,3 +172,48 @@ test_that("CtwasResult: show() prints a one-line-per-run summary", {
     expect_output(show(cr), "CtwasResult: 1 run")
     expect_output(show(cr), "susie")
 })
+
+# ===========================================================================
+# Validity: the branches that name what is wrong
+#
+# CtwasResult is a DFrame subclass, so its columns are ordinary DataFrame
+# columns and a downstream edit can drop or retype one. Validity guards that,
+# but every test above built a valid object.
+# ===========================================================================
+
+.ctr_res <- function() {
+    CtwasResult(
+        gwasStudy = "D1",
+        study = "Q1",
+        context = "brain",
+        method = "susie",
+        entry = list(.cr_entry())
+    )
+}
+
+test_that("validity names a missing required column", {
+    bad <- .ctr_res()
+    bad$context <- NULL
+    expect_error(methods::validObject(bad), "missing columns: context")
+})
+
+test_that("validity requires one entry payload per row", {
+    # Written straight into listData: `$<-` enforces the length itself, so
+    # the only way to reach this branch is the direct slot edit that a
+    # careless downstream mutation would perform.
+    bad <- .ctr_res()
+    bad@listData$entry <- list(.cr_entry(), .cr_entry())
+    expect_error(
+        methods::validObject(bad),
+        "length\\(entry\\) must equal nrow"
+    )
+})
+
+test_that("a joint column must be character", {
+    bad <- .ctr_res()
+    bad@listData$jointStudies <- 1L
+    expect_error(
+        methods::validObject(bad),
+        "'jointStudies' column must be character \\(got integer\\)"
+    )
+})

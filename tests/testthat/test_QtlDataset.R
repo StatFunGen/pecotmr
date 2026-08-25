@@ -3030,3 +3030,53 @@ test_that("longForm leaves the dataset's assay delayed", {
         "DelayedMatrix"
     )
 })
+
+# ===========================================================================
+# Genotype panels as the constructor's public input
+# ===========================================================================
+
+test_that("QtlDataset accepts the panel readGenotypes returns", {
+    # GenotypeHandle is internal, so a panel is the only genotype source a
+    # user can now build -- the constructor has to take it.
+    gh <- .qh_makeHandle()
+    panel <- .genotypeExperiment(gh)
+    qd <- QtlDataset(
+        study = "study1",
+        genotypes = panel,
+        phenotypes = list(brain = .qh_makeSe())
+    )
+    expect_s4_class(qd, "QtlDataset")
+    # The slot keeps the handle either way: it is the seed the dosage assay
+    # reads through, not a second copy of the panel.
+    expect_identical(getGenotypeHandle(qd), gh)
+    expect_equal(
+        dim(qd),
+        dim(.qh_makeDataset(contexts = "brain"))
+    )
+})
+
+test_that("QtlDataset refuses a panel that has already been subset", {
+    # Variant selection indexes the handle's whole snpInfo, so a narrowed
+    # panel would leave extraction reading the wrong rows.
+    gh <- .qh_makeHandle()
+    panel <- .genotypeExperiment(gh)
+    expect_error(
+        QtlDataset(
+            study = "study1",
+            genotypes = panel[1:3, ],
+            phenotypes = list(brain = .qh_makeSe())
+        ),
+        "subset panel"
+    )
+})
+
+test_that("QtlDataset still rejects a genotype source it cannot open", {
+    expect_error(
+        QtlDataset(
+            study = "study1",
+            genotypes = "not a panel",
+            phenotypes = list(brain = .qh_makeSe())
+        ),
+        "must be a genotype panel"
+    )
+})

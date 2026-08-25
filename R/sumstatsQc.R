@@ -1702,6 +1702,94 @@ autoDecision <- function(df, highCorrCols) {
 #' @importFrom dplyr arrange
 #' @noRd
 # Drop LD-matrix rows/cols for variants filtered out of the imputation result.
+# Panel rows that are unsafe to impute, over and above being already known.
+#
+# Both cases come from a reference panel that carries a variant and its own
+# allele flip as two separate entries -- two distinct indels at one position
+# that happen to be each other's flip is rare but biologically real.
+#
+#   * flip-of-known: the row is the allele flip of a variant the sumstats
+#     already carry. It is not missing data; imputing it would invent a second
+#     copy of a variant whose z-score is already in hand.
+#   * flip-pair: the panel carries BOTH orientations at that position. Which
+#     one an imputed value would refer to is undecidable -- the same ambiguity
+#     that makes matchVariants() drop the sumstats variant there. Imputing
+#     either would put the dropped variant straight back, which is what the
+#     drop exists to prevent.
+#
+# Returns a logical over `refPanelIds`. Callers apply it to imputation
+# CANDIDATES only, never to knowns: removing a known would break the
+# correspondence between `knownZscores$z` and the LD rows indexed by `knowns`.
+# @noRd
+.raissUnsafeToImpute <- function(refPanelIds, knownIds) {
+    .raissFlipPairMask(refPanelIds) |
+        .raissFlipOfKnownMask(refPanelIds, knownIds)
+}
+
+# Rows whose own allele flip is also present in the panel.
+# @noRd
+.raissFlipPairMask <- function(refPanelIds) {
+    n <- length(refPanelIds)
+    df <- parseVariantId(refPanelIds)
+    if (nrow(df) != n || anyNA(df$chrom) || anyNA(df$pos)) {
+        return(rep(FALSE, n))
+    }
+    key <- str_c(df$chrom, df$pos, df$A2, df$A1, sep = ":")
+    flipped <- str_c(df$chrom, df$pos, df$A1, df$A2, sep = ":")
+    # A1 != A2 guard: were they equal a row would be its own flip and every
+    # variant would look ambiguous.
+    is_in(flipped, key) & df$A1 != df$A2
+}
+
+# Rows that match a known sumstats variant in the opposite orientation.
+# @noRd
+.raissFlipOfKnownMask <- function(refPanelIds, knownIds) {
+    mask <- rep(FALSE, length(refPanelIds))
+    if (length(knownIds) == 0L) {
+        return(mask)
+    }
+    m <- matchVariants(refPanelIds, knownIds, removeStrandAmbiguous = FALSE)
+    mask[m$idxA[m$sign < 0]] <- TRUE
+    mask
+}
+
+# Positions the GWAS already typed.
+#
+# Imputation fills *un-observed* variants. A panel form at a site the GWAS
+# measured -- a second alternate allele, or the opposite orientation -- is a
+# redundant record at a measured position, not new information. On a large
+# reference this dominates: 43 observed multi-allelic positions produced 2969
+# imputed variants in one block before this guard.
+#
+# Keyed on canonical (chrom, pos) so a "chr1"/"1" difference does not read as
+# two different sites. A position with no GWAS observation still imputes every
+# panel form it has, multi-allelic included.
+# @noRd
+.raissObservedPosition <- function(refPanel, knownZ) {
+    n <- nrow(refPanel)
+    if (is.null(refPanel$chrom) || is.null(knownZ$chrom) || n == 0L) {
+        return(rep(FALSE, n))
+    }
+    key <- function(chrom, pos) {
+        str_c(canonChrom(as.character(chrom)), ":", as.character(pos))
+    }
+    is_in(
+        key(refPanel$chrom, refPanel$pos),
+        key(knownZ$chrom, knownZ$pos)
+    )
+}
+
+# Imputation targets: panel rows the sumstats do not carry, minus the rows no
+# imputed value could be trusted for and the rows sitting at a position the
+# GWAS already typed.
+# @noRd
+.raissUnknownIdx <- function(refPanel, knownZ, knownsId) {
+    candidate <- !is_in(refPanel$variant_id, knownsId)
+    unsafe <- .raissUnsafeToImpute(refPanel$variant_id, knownZ$variant_id)
+    observed <- .raissObservedPosition(refPanel, knownZ)
+    which(candidate & !unsafe & !observed)
+}
+
 .raissFilterLd <- function(ldMatrix, refPanel, resultFilter) {
     filteredOutVariant <- setdiff(refPanel$variant_id, resultFilter$variant_id)
     if (length(filteredOutVariant) > 0) {
@@ -1730,7 +1818,7 @@ raissSingleMatrix <- function(
     }
     knownsId <- intersect(knownZscores$variant_id, refPanel$variant_id)
     knowns <- which(is_in(refPanel$variant_id, knownsId))
-    unknowns <- which(!is_in(refPanel$variant_id, knownsId))
+    unknowns <- .raissUnknownIdx(refPanel, knownZscores, knownsId)
     edge <- .raissEdgeCase(knowns, unknowns, knownZscores, verbose, ldMatrix)
     if (!is.null(edge)) {
         return(edge$value)
@@ -1872,7 +1960,7 @@ raissSingleMatrixFromX <- function(
     }
     knownsId <- intersect(knownZscores$variant_id, refPanel$variant_id)
     knowns <- which(is_in(refPanel$variant_id, knownsId))
-    unknowns <- which(!is_in(refPanel$variant_id, knownsId))
+    unknowns <- .raissUnknownIdx(refPanel, knownZscores, knownsId)
     edge <- .raissEdgeCase(knowns, unknowns, knownZscores, verbose)
     if (!is.null(edge)) {
         return(edge$value)
@@ -2587,13 +2675,6 @@ ldMismatchQc <- function(
     }
 }
 
-.resolveZMismatchQc <- function(zMismatchQc) {
-    if (is.null(zMismatchQc)) {
-        return("none")
-    }
-    arg_match(zMismatchQc, c("none", "slalom", "dentist"))
-}
-
 #' Effective sample size for a case/control study
 #'
 #' Computes the effective sample size \code{N_eff = 4 / (1/nCase + 1/nControl) =
@@ -2782,7 +2863,11 @@ krigingOutlierQc <- function(
         df$SNP <- df$variant_id
     }
     baseCols <- c("SNP", "A1", "A2", "Z", "N")
-    optCols <- c("MAF", "INFO", "BETA", "SE", "P", "N_CASE", "N_CONTROL")
+    # AF = directional effect-allele frequency (exported as af); MAF =
+    # directionless QC frequency. Both carried when the loader resolved them.
+    optCols <- c(
+        "AF", "MAF", "INFO", "BETA", "SE", "P", "N_CASE", "N_CONTROL"
+    )
     use <- intersect(c(baseCols, optCols), colnames(df))
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(select(df, all_of(use)))
     gr
@@ -3049,7 +3134,7 @@ krigingOutlierQc <- function(
     removeStrandAmbiguous = TRUE,
     removeDups = TRUE
 ) {
-    refVariants <- .refVariantsFromSketch(ldSketch)
+    refVariants <- .refVariantsFromSketch(.ldSketchHandle(ldSketch))
     flipCandidates <- c("Z", "BETA")
     colToFlip <- intersect(flipCandidates, colnames(df))
     if (length(colToFlip) == 0L) {
@@ -3059,7 +3144,10 @@ krigingOutlierQc <- function(
         )
         abort(msg)
     }
-    colToComplement <- intersect("MAF", colnames(df))
+    # An allele swap sends af -> 1 - af, so the DIRECTIONAL AF is what must be
+    # complemented. MAF is min(af, 1 - af), which is swap-invariant:
+    # complementing it would corrupt it.
+    colToComplement <- intersect("AF", colnames(df))
     if (!is_in("A1", colnames(df)) || !is_in("A2", colnames(df))) {
         abort("summaryStatsQc: input entry must contain A1 and A2 columns.")
     }
@@ -3098,18 +3186,25 @@ krigingOutlierQc <- function(
     if (mafCutoff <= 0) {
         return(list(df = df, dropped = NULL))
     }
-    mafCol <- intersect(c("MAF", "FRQ"), colnames(df))[1L]
-    if (is.na(mafCol)) {
-        msg <- glue(
-            ".applyContentFilters: mafCutoff > 0 requires a MAF or FRQ ",
-            "column."
-        )
-        abort(msg)
+    # Single source of truth: the directional AF when present, a directionless
+    # MAF/FRQ only as fallback.
+    freqCol <- intersect(c("AF", "MAF", "FRQ"), colnames(df))[1L]
+    if (is.na(freqCol)) {
+        # Skipped, not fatal: a frequency-less study can still run under a
+        # default mafCutoff, and one warning says so.
+        warn(str_c(
+            "summaryStatsQc: mafCutoff > 0 but no af/MAF/FRQ frequency is ",
+            "available; skipping the MAF filter."
+        ))
+        return(list(df = df, dropped = NULL))
     }
     before <- nrow(df)
-    mafVals <- as.numeric(df[[mafCol]])
-    # Normalise effect-allele frequency to MAF: take min(af, 1-af).
-    mafVals <- pmin(mafVals, 1 - mafVals, na.rm = FALSE)
+    # Minor-allele frequency: min(af, 1 - af), direction-agnostic.
+    mafVals <- pmin(
+        as.numeric(df[[freqCol]]),
+        1 - as.numeric(df[[freqCol]]),
+        na.rm = FALSE
+    )
     df <- filter(df, !is.na(mafVals) & mafVals >= mafCutoff)
     list(df = df, dropped = before - nrow(df))
 }
@@ -3427,7 +3522,7 @@ krigingOutlierQc <- function(
     qc <- ldMismatchQc(
         zScore = df$Z,
         R = R,
-        nSample = getNSamples(ldSketch),
+        nSample = getNSamples(.ldSketchHandle(ldSketch)),
         method = method
     )
     # slalom / dentist can leave NA in the outlier column when their
@@ -3602,12 +3697,6 @@ krigingOutlierQc <- function(
     list(df = df, skipped = FALSE)
 }
 
-# Back-compat thin wrapper for the original PIP-only screen (a bare numeric
-# cutoff, 0 = off). Delegates to the generalized screen via .asScreen.
-.applyPipScreen <- function(df, n, cutoff) {
-    .applyEntryScreen(df, n = n, screen = cutoff)
-}
-
 # Prefix QC-track log lines with the entry label `lbl` (as `[lbl] ...`), or emit
 # them bare when `lbl` is NA.
 # @noRd
@@ -3752,10 +3841,11 @@ krigingOutlierQc <- function(
 }
 
 # Assemble refPanel, knownZ table, and scaled dosage for the window.
-.qcRaissBuildInputs <- function(df, ldSketch, windowIdx, sketchSnpInfo, opts) {
-    refPanel <- .refVariantsFromSketch(ldSketch)[windowIdx, , drop = FALSE]
-    refPanel$variant_id <- normalizeVariantId(refPanel$variant_id)
-    refPanel <- refPanel[order(refPanel$pos), , drop = FALSE]
+# The sumstats side of the RAISS inputs: the required columns as a plain
+# frame, plus whichever of N / BETA / SE the caller carries, sorted by position
+# to match the reference panel.
+# @noRd
+.qcRaissKnownZ <- function(df) {
     knownVariantIds <- if (!is.null(df$SNP)) {
         as.character(df$SNP)
     } else {
@@ -3770,20 +3860,33 @@ krigingOutlierQc <- function(
         z = as.numeric(df$Z),
         stringsAsFactors = FALSE
     )
-    if (is_in("N", colnames(df))) {
-        knownZ$n <- as.numeric(df$N)
+    # N / BETA / SE ride along when present: RAISS carries them through to the
+    # merged output so the imputed rows sit in the same frame as the known
+    # ones.
+    optional <- c(N = "n", BETA = "beta", SE = "se")
+    for (nm in names(optional)) {
+        if (is_in(nm, colnames(df))) {
+            knownZ[[optional[[nm]]]] <- as.numeric(df[[nm]])
+        }
     }
-    if (is_in("BETA", colnames(df))) {
-        knownZ$beta <- as.numeric(df$BETA)
-    }
-    if (is_in("SE", colnames(df))) {
-        knownZ$se <- as.numeric(df$SE)
-    }
-    knownZ <- knownZ[order(knownZ$pos), , drop = FALSE]
+    arrange(knownZ, .data$pos)
+}
+
+.qcRaissBuildInputs <- function(df, ldSketch, windowIdx, sketchSnpInfo, opts) {
+    refPanel <- .refVariantsFromSketch(
+        .ldSketchHandle(ldSketch)
+    )[windowIdx, , drop = FALSE]
+    refPanel$variant_id <- normalizeVariantId(refPanel$variant_id)
+    refPanel <- arrange(refPanel, .data$pos)
+    knownZ <- .qcRaissKnownZ(df)
     # meanImpute = FALSE so per-variant missingness is still visible; the
     # surviving columns are mean-imputed below, which is what meanImpute =
     # TRUE did.
-    dosage <- .dosageMatrix(ldSketch, windowIdx, meanImpute = FALSE)
+    dosage <- .dosageMatrix(
+        .ldSketchHandle(ldSketch),
+        windowIdx,
+        meanImpute = FALSE
+    )
     colnames(dosage) <- normalizeVariantId(
         as.character(sketchSnpInfo$SNP[windowIdx])
     )
@@ -3828,6 +3931,11 @@ krigingOutlierQc <- function(
     # disagree with the knowns/unknowns split it derives moments later.
     knownIds <- intersect(knownZ$variant_id, refPanel$variant_id)
     isTarget <- !is_in(refPanel$variant_id, knownIds)
+    # Candidates only: a known must never be dropped here, or `knownZscores$z`
+    # would stop lining up with the LD rows `knowns` indexes.
+    unsafe <- isTarget &
+        (.raissUnsafeToImpute(refPanel$variant_id, knownZ$variant_id) |
+            .raissObservedPosition(refPanel, knownZ))
     stats <- .qcRaissVariantStats(dosage)
     # A MAC cutoff is a MAF cutoff once expressed per panel sample; taking the
     # stricter of the two matches .qtlVariantFilters().
@@ -3839,7 +3947,7 @@ krigingOutlierQc <- function(
     fails <- (!is.na(stats$maf) & stats$maf < effectiveMaf) |
         stats$missRate > imissCutoff |
         is.na(stats$maf)
-    keep & !(isTarget & fails)
+    keep & !(isTarget & fails) & !unsafe
 }
 
 # Per-variant MAF and missingness for the RAISS path. A thin alias over the
@@ -3945,7 +4053,7 @@ krigingOutlierQc <- function(
     } else {
         as.integer(opts$imputeOpts$flank)
     }
-    sketchSnpInfo <- getSnpInfo(ldSketch)
+    sketchSnpInfo <- .ldSketchSnpInfo(ldSketch)
     windowIdx <- .qcRaissWindowIdx(df, sketchSnpInfo, flank)
     if (length(windowIdx) == 0L) {
         .qcEmit(
@@ -4425,6 +4533,12 @@ krigingOutlierQc <- function(
 # rest is dropped at load time. NULL-safe; a no-op when the span already covers
 # the panel. See [[.subsetGenotypeHandle]] for why this is read-safe.
 # @noRd
+# Number of ranges an entry contributes, NULL-safe.
+# @noRd
+.entryRangeCount <- function(gr) {
+    if (is.null(gr)) 0L else length(gr)
+}
+
 .subsetSketchToRange <- function(ldSketch, entries) {
     if (is.null(ldSketch)) {
         return(NULL)
@@ -4435,12 +4549,14 @@ krigingOutlierQc <- function(
     chrom <- chrom[ok]
     pos <- pos[ok]
     if (length(pos) == 0L) {
-        return(ldSketch)
+        # No span to keep: a zero-variant object references no LD, so the
+        # retained panel is empty rather than the full genome-wide sketch.
+        return(.emptySketch(ldSketch))
     }
     bounds <- tibble(chrom = chrom, pos = pos) |>
         group_by(chrom) |>
         summarise(lo = min(pos), hi = max(pos), .groups = "drop")
-    si <- getSnpInfo(ldSketch)
+    si <- .ldSketchSnpInfo(ldSketch)
     # left_join keeps every sketch SNP; one on a chromosome absent from the
     # entries gets lo/hi = NA -> inWindow FALSE (the old is_in guard). The
     # explicit is.na() guards force FALSE (never NA) for an absent chrom or an
@@ -4457,7 +4573,7 @@ krigingOutlierQc <- function(
                 .data$bp <= .data$hi
         ) |>
         pull("inWindow")
-    .subsetGenotypeHandle(ldSketch, keep)
+    .ldSketchSubset(ldSketch, keep)
 }
 
 # Shrink an LD-sketch GenotypeHandle to EXACTLY the variants present across the
@@ -4469,16 +4585,25 @@ krigingOutlierQc <- function(
     if (is.null(ldSketch)) {
         return(NULL)
     }
+    # Genuine variant count (ranges) across entries, read independently of the
+    # SNP mcol: zero ranges means the object references no LD, so the panel is
+    # emptied. That is distinct from the pathological "ranges present but SNP
+    # mcol absent" case below, which stays conservative and keeps the full
+    # sketch rather than blanking a panel it simply could not key.
+    nRanges <- sum(map_int(entries, .entryRangeCount))
+    if (nRanges == 0L) {
+        return(.emptySketch(ldSketch))
+    }
     ids <- unlist(map(entries, .entrySnpIds), use.names = FALSE)
     if (length(ids) == 0L) {
         return(ldSketch)
     }
-    si <- getSnpInfo(ldSketch)
+    si <- .ldSketchSnpInfo(ldSketch)
     keep <- is_in(
         normalizeVariantId(as.character(si$SNP)),
         normalizeVariantId(unique(ids))
     )
-    .subsetGenotypeHandle(ldSketch, keep)
+    .ldSketchSubset(ldSketch, keep)
 }
 
 # --- summaryStatsQc orchestration helpers ----------------------------------
@@ -4493,13 +4618,9 @@ krigingOutlierQc <- function(
     }
     for (i in seq_len(nrow(sumstats))) {
         cols <- colnames(S4Vectors::mcols(.collectionEntry(sumstats, i)))
-        if (mafCutoff > 0 && !any(is_in(c("MAF", "FRQ"), cols))) {
-            msg <- glue(
-                "summaryStatsQc: mafCutoff > 0 requires every entry to ",
-                "carry a MAF or FRQ column; entry {i} does not."
-            )
-            abort(msg)
-        }
+        # mafCutoff no longer pre-aborts on a missing frequency: .cfMaf
+        # derives the MAF from the directional AF (or a fallback MAF/FRQ) and
+        # skips with one warning when none is available.
         if (infoCutoff > 0 && !is_in("INFO", cols)) {
             msg <- glue(
                 "summaryStatsQc: infoCutoff > 0 requires every entry to ",

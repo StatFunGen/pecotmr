@@ -132,28 +132,6 @@ twasWeightsRow <- function(
 }
 
 
-# Variant ids must encode coordinates: the id is a rendering of the variant's
-# range and alleles, so an id that carries neither (e.g. "v1") names nothing.
-# Enforced here so the requirement bites before the entry becomes a ranged
-# element, rather than surfacing later as an unparseable-coordinate failure.
-# @noRd
-.tweCheckVariantIdentity <- function(object) {
-    ids <- object@variantIds
-    if (length(ids) == 0L) {
-        return(NULL)
-    }
-    parsed <- parseVariantId(ids)
-    bad <- is.na(parsed$chrom) | is.na(parsed$pos)
-    if (!any(bad)) {
-        return(NULL)
-    }
-    glue(
-        "variantIds: {sum(bad)} of {length(ids)} do not encode coordinates ",
-        "(expected chrom:pos:ref:alt), e.g. ",
-        "{str_flatten(ids[bad][seq_len(min(3L, sum(bad)))], ', ')}"
-    )
-}
-
 # ---- field accessors --------------------------------------------------------
 
 #' @rdname getVariantIds

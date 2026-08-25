@@ -25,20 +25,25 @@ Construct a \code{MultiStudyQtlDataset} S4 object from a named
   plus a non-empty \code{sumStats}.
 }
 \examples{
-gh <- new("GenotypeHandle", path = "toy.gds", format = "gds",
-  snpInfo = data.frame(SNP = paste0("rs", 1:3), CHR = "1",
-    BP = c(100L, 200L, 300L), A1 = "A", A2 = "G"),
-  nSamples = 6L, sampleIds = paste0("s", 1:6), pgenPtr = NULL)
-rng <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1000L, width = 500L))
+panel <- readGenotypes(
+  system.file("extdata", "toy_ref.bed", package = "pecotmr")
+)
+rng <- GenomicRanges::GRanges(
+  "chr22", IRanges::IRanges(14600000L, width = 1000L)
+)
 names(rng) <- "ENSG1"
 se <- SummarizedExperiment::SummarizedExperiment(
-  assays = list(expression = matrix(rnorm(6), 1, 6,
-    dimnames = list("ENSG1", paste0("s", 1:6)))), rowRanges = rng)
-qd1 <- QtlDataset(study = "s1", genotypes = gh,
-  phenotypes = list(brain = se),
-  genotypeCovariates = matrix(0, 6, 0))
-qd2 <- QtlDataset(study = "s2", genotypes = gh,
-  phenotypes = list(brain = se),
-  genotypeCovariates = matrix(0, 6, 0))
+  assays = list(expression = matrix(
+    rnorm(ncol(panel)), 1,
+    dimnames = list("ENSG1", colnames(panel))
+  )),
+  rowRanges = rng
+)
+qd1 <- QtlDataset(
+  study = "s1", genotypes = panel, phenotypes = list(brain = se)
+)
+qd2 <- QtlDataset(
+  study = "s2", genotypes = panel, phenotypes = list(brain = se)
+)
 MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1, s2 = qd2))
 }

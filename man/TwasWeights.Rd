@@ -46,8 +46,8 @@ shape as \code{jointStudies}.}
 \code{NULL}), carried forward as provenance; not part of the identity key.
 \code{NULL} (default) omits the column.}
 
-\item{ldSketch}{An optional \code{GenotypeHandle}, or \code{NULL} for
-individual-level fits.}
+\item{ldSketch}{An optional genotype panel (see
+\code{\link{readGenotypes}}), or \code{NULL} for individual-level fits.}
 }
 \value{
 A \code{TwasWeights} object.

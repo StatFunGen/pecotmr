@@ -9,6 +9,11 @@ S4 container holding a path + format + metadata for lazy
   genotype access. Supports PLINK1 (.bed/.bim/.fam), PLINK2
   (.pgen/.pvar/.psam), VCF/BCF, and GDS.
 }
+\details{
+Internal: the handle is the seed layer behind a genotype
+  panel. Public code obtains a panel from \code{readGenotypes()},
+  which is a \code{RangedSummarizedExperiment}.
+}
 \section{Slots}{
 
 \describe{
@@ -37,3 +42,4 @@ one-file-per-chromosome (sharded) handle whose extraction is routed by
 chromosome.}
 }}
 
+\keyword{internal}

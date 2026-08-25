@@ -325,7 +325,7 @@ test_that("GwasSumStats: a non-GenotypeHandle ldSketch is rejected", {
             genome = "hg19",
             ldSketch = "not_a_handle"
         ),
-        "GenotypeHandle or NULL"
+        "must be a genotype panel"
     )
 })
 
@@ -438,4 +438,66 @@ test_that("GwasSumStats blockId survives subsetting", {
         ldBlocks = .gss_ldBlocks()
     )
     expect_equal(x[2L]$blockId, "b2")
+})
+
+# ===========================================================================
+# Block-key resolution: ldBlocks vs blockId
+#
+# Both arguments answer "how is this entry split into elements", so supplying
+# both is ambiguous rather than redundant. Neither error branch had a test.
+# ===========================================================================
+
+.gss_entry <- function(n = 3L) {
+    gr <- GenomicRanges::GRanges(
+        seqnames = rep("chr1", n),
+        ranges = IRanges::IRanges(seq(100L, by = 100L, length.out = n),
+                                  width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        variant_id = str_c("chr1:", seq(100L, by = 100L, length.out = n),
+                           ":A:G"),
+        SNP = str_c("rs", seq_len(n)),
+        A1 = rep("A", n),
+        A2 = rep("G", n),
+        Z = seq_len(n) / 2,
+        N = rep(100L, n)
+    )
+    gr
+}
+
+test_that("supplying both ldBlocks and blockId is refused", {
+    expect_error(
+        GwasSumStats(
+            study = "g1",
+            entry = list(.gss_entry()),
+            genome = "hg19",
+            ldBlocks = GenomicRanges::GRanges(
+                "chr1", IRanges::IRanges(1L, 10000L)
+            ),
+            blockId = "b1"
+        ),
+        "not both"
+    )
+})
+
+test_that("blockId must carry one value per entry", {
+    expect_error(
+        GwasSumStats(
+            study = c("g1", "g2"),
+            entry = list(.gss_entry(), .gss_entry()),
+            genome = "hg19",
+            blockId = "only-one"
+        ),
+        "one value per `entry`"
+    )
+})
+
+test_that("a supplied blockId survives onto the elements", {
+    obj <- GwasSumStats(
+        study = "g1",
+        entry = list(.gss_entry()),
+        genome = "hg19",
+        blockId = "chr1:1-10000"
+    )
+    expect_equal(unique(as.character(mcols(obj)$blockId)), "chr1:1-10000")
 })

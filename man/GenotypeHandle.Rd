@@ -98,8 +98,4 @@ Construct a \code{GenotypeHandle} from one of several input
   info); dosage extraction is deferred until \code{extractBlockGenotypes()}
   is called.
 }
-\examples{
-ex <- function(f) system.file("extdata", f, package = "pecotmr")
-GenotypeHandle(bed = ex("toy_ref.bed"), bim = ex("toy_ref.bim"),
-  fam = ex("toy_ref.fam"))
-}
+\keyword{internal}

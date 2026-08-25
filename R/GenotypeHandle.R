@@ -30,7 +30,10 @@ NULL
 #'   (\code{character(0)}) for a single-file handle; non-empty marks a
 #'   one-file-per-chromosome (sharded) handle whose extraction is routed by
 #'   chromosome.
-#' @export
+#' @details Internal: the handle is the seed layer behind a genotype
+#'   panel. Public code obtains a panel from \code{readGenotypes()},
+#'   which is a \code{RangedSummarizedExperiment}.
+#' @keywords internal
 setClass(
     "GenotypeHandle",
     representation(
@@ -165,11 +168,7 @@ setMethod("show", "GenotypeHandle", function(object) {
 #'   an error (a single-file panel has no per-chromosome shards to skip).
 #' @param ... Additional arguments forwarded to the format-specific reader.
 #' @return A \code{GenotypeHandle} object.
-#' @examples
-#' ex <- function(f) system.file("extdata", f, package = "pecotmr")
-#' GenotypeHandle(bed = ex("toy_ref.bed"), bim = ex("toy_ref.bim"),
-#'   fam = ex("toy_ref.fam"))
-#' @export
+#' @keywords internal
 GenotypeHandle <- function(
     path = NULL,
     plink1Prefix = NULL,
@@ -190,7 +189,7 @@ GenotypeHandle <- function(
     flags <- .ghValidateArgs(p)
     sources <- .ghResolveSources(p, flags)
     if (sources[["path"]]) {
-        return(readGenotypes(path, ...))
+        return(.readGenotypeHandle(path, ...))
     }
     if (sources[["plink1Prefix"]]) {
         return(.makePlink1Handle(plink1Prefix, ...))
@@ -324,10 +323,10 @@ GenotypeHandle <- function(
 .ghLdPathToHandle <- function(ldPath, ...) {
     lower <- str_to_lower(ldPath)
     if (str_detect(lower, "\\.vcf(\\.b?gz)?$") || str_ends(lower, "\\.bcf")) {
-        return(readGenotypes(ldPath, format = "vcf", ...))
+        return(.readGenotypeHandle(ldPath, format = "vcf", ...))
     }
     if (str_ends(lower, "\\.gds")) {
-        return(readGenotypes(ldPath, format = "gds", ...))
+        return(.readGenotypeHandle(ldPath, format = "gds", ...))
     }
     if (str_ends(lower, "\\.bed")) {
         return(.makePlink1Handle(
@@ -537,13 +536,13 @@ GenotypeHandle <- function(
         if (format == "plink2") {
             return(.makePlink2Handle(p))
         }
-        return(readGenotypes(p, format = format))
+        return(.readGenotypeHandle(p, format = format))
     }
     if (str_detect(lower, "\\.vcf(\\.b?gz)?$") || str_ends(lower, "\\.bcf")) {
-        return(readGenotypes(p, format = "vcf"))
+        return(.readGenotypeHandle(p, format = "vcf"))
     }
     if (str_ends(lower, "\\.gds")) {
-        return(readGenotypes(p, format = "gds"))
+        return(.readGenotypeHandle(p, format = "gds"))
     }
     if (str_ends(lower, "\\.bed")) {
         return(.makePlink1Handle(
@@ -685,15 +684,15 @@ GenotypeHandle <- function(
 setMethod("getSnpInfo", "GenotypeHandle", function(x) x@snpInfo)
 
 #' @rdname getFormat
-#' @export
+#' @keywords internal
 setMethod("getFormat", "GenotypeHandle", function(x) x@format)
 
 #' @rdname getPath
-#' @export
+#' @keywords internal
 setMethod("getPath", "GenotypeHandle", function(x) x@path)
 
 #' @rdname getChromPaths
-#' @export
+#' @keywords internal
 setMethod("getChromPaths", "GenotypeHandle", function(x, ...) x@chromPaths)
 
 # Resolve a portable bundled-resource reference of the form
@@ -735,15 +734,15 @@ setMethod("getChromPaths", "GenotypeHandle", function(x, ...) x@chromPaths)
 }
 
 #' @rdname getSampleIds
-#' @export
+#' @keywords internal
 setMethod("getSampleIds", "GenotypeHandle", function(x) x@sampleIds)
 
 #' @rdname getPgenPtr
-#' @export
+#' @keywords internal
 setMethod("getPgenPtr", "GenotypeHandle", function(x) x@pgenPtr)
 
 #' @rdname getNSamples
-#' @export
+#' @keywords internal
 setMethod("getNSamples", "GenotypeHandle", function(x) x@nSamples)
 
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------
@@ -815,18 +814,28 @@ setMethod("dim", "GhSeed", function(x) x@dm)
 #' @rdname GhSeed-class
 setMethod("dimnames", "GhSeed", function(x) x@dn)
 
+# The handle a seed reads through. Internal accessor: GhSeed is not exported,
+# so this adds no public surface, and it keeps the `@` next to the class.
+# @noRd
+.ghSeedHandle <- function(x) x@handle
+
 #' @rdname GhSeed-class
 #' @importFrom S4Arrays extract_array
 setMethod("extract_array", "GhSeed", function(x, index) {
     # A NULL index means "everything along this dimension", not "nothing".
     # Reading it as nothing yields an empty block that looks exactly like a
     # legitimately empty region.
-    i <- if (is.null(index[[1L]])) seq_len(x@dm[[1L]]) else index[[1L]]
-    j <- if (is.null(index[[2L]])) seq_len(x@dm[[2L]]) else index[[2L]]
+    dm <- dim(x)
+    i <- if (is.null(index[[1L]])) seq_len(dm[[1L]]) else index[[1L]]
+    j <- if (is.null(index[[2L]])) seq_len(dm[[2L]]) else index[[2L]]
     if (length(i) == 0L || length(j) == 0L) {
         return(matrix(numeric(0), length(i), length(j)))
     }
-    se <- extractBlockGenotypes(x@handle, snpIdx = i, meanImpute = FALSE)
+    se <- extractBlockGenotypes(
+        .ghSeedHandle(x),
+        snpIdx = i,
+        meanImpute = FALSE
+    )
     as.matrix(SummarizedExperiment::assay(se, "dosage"))[, j, drop = FALSE]
 })
 
@@ -844,11 +853,7 @@ setMethod("extract_array", "GhSeed", function(x, index) {
 #'
 #' @param handle A \code{\link{GenotypeHandle}}.
 #' @return A \code{DelayedMatrix} of dosages.
-#' @examples
-#' data(qtlDatasetExample)
-#' da <- genotypeDelayedArray(getGenotypeHandle(qtlDatasetExample))
-#' dim(da)
-#' @export
+#' @keywords internal
 genotypeDelayedArray <- function(handle) {
     if (!methods::is(handle, "GenotypeHandle")) {
         msg <- glue(

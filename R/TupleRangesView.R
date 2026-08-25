@@ -48,6 +48,11 @@ setClass("TupleRangesView", contains = "DelegatingGenomicRanges")
     )
 }
 
+# The flat GRanges a view wraps. Internal accessor: TupleRangesView is not
+# exported, so this adds no public surface and keeps the `@` in the class file.
+# @noRd
+.trvDelegate <- function(x) x@delegate
+
 # The one hook a DelegatingGenomicRanges subclass has to supply. Without it,
 # plyranges' subsetting verbs (slice, filter_by_overlaps, join_overlap_*) fail
 # with "subscript is a NSBS object that is incompatible with the current
@@ -58,15 +63,15 @@ setMethod("[", "TupleRangesView", function(x, i, j, ..., drop = TRUE) {
     if (!missing(j)) {
         abort("two-argument `[` is not supported on a TupleRangesView.")
     }
-    .tupleRangesView(x@delegate[i])
+    .tupleRangesView(.trvDelegate(x)[i])
 })
 
 #' @rdname show-methods
 #' @export
 setMethod("show", "TupleRangesView", function(object) {
     cat(glue(
-        "TupleRangesView: {length(object@delegate)} ranges, ",
-        "{ncol(mcols(object@delegate))} metadata column(s)\n",
+        "TupleRangesView: {length(.trvDelegate(object))} ranges, ",
+        "{ncol(mcols(.trvDelegate(object)))} metadata column(s)\n",
         .trim = FALSE
     ))
     invisible(NULL)
@@ -233,7 +238,11 @@ nestTupleRanges <- function(flat, template) {
 
 #' @exportS3Method dplyr::select
 select.TupleRangesView <- function(.data, ..., .drop_ranges = FALSE) {
-    out <- dplyr::select(.data@delegate, ..., .drop_ranges = .drop_ranges)
+    out <- dplyr::select(
+        .trvDelegate(.data),
+        ...,
+        .drop_ranges = .drop_ranges
+    )
     if (isTRUE(.drop_ranges)) {
         return(out)
     }
@@ -244,7 +253,7 @@ select.TupleRangesView <- function(.data, ..., .drop_ranges = FALSE) {
 # a GroupedGenomicRanges rather than a view of a collection.
 #' @exportS3Method dplyr::group_by
 group_by.TupleRangesView <- function(.data, ..., .add = FALSE) {
-    dplyr::group_by(.data@delegate, ...)
+    dplyr::group_by(.trvDelegate(.data), ...)
 }
 
 # -----------------------------------------------------------------------------
@@ -279,7 +288,7 @@ group_by.TupleRangesView <- function(.data, ..., .add = FALSE) {
 # Unwrap a view back to its delegate; pass a plain GRanges through.
 # @noRd
 .rtlAsRanges <- function(out) {
-    if (methods::is(out, "TupleRangesView")) out@delegate else out
+    if (methods::is(out, "TupleRangesView")) .trvDelegate(out) else out
 }
 
 # `...` is forwarded directly rather than captured with enquos() and spliced:

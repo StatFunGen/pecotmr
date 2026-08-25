@@ -1005,14 +1005,16 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
     ldSketch = NULL,
     cutoffs = NULL
 ) {
-    studyCol <- as.character(data$study)
-    contextCol <- as.character(data$context)
-    traitCol <- as.character(data$trait)
+    cols <- list(
+        study = as.character(data$study),
+        context = as.character(data$context),
+        trait = as.character(data$trait)
+    )
     firstDf <- getSumstatDf(
         data,
-        study = studyCol[[tupleRows[[1L]]]],
-        context = contextCol[[tupleRows[[1L]]]],
-        trait = traitCol[[tupleRows[[1L]]]],
+        study = cols$study[[tupleRows[[1L]]]],
+        context = cols$context[[tupleRows[[1L]]]],
+        trait = cols$trait[[tupleRows[[1L]]]],
         require = c("SNP", "Z", "N")
     )
     # Every entry shares one SNP order (asserted below), so filtering the first
@@ -1030,30 +1032,57 @@ validateMethodsVsJointSpec <- function(methodsParsed, jointSpecParsed) {
         ncol = length(tupleRows),
         dimnames = list(variantIds, colLabels)
     )
+    filled <- .jointFillSumstatZ(
+        data,
+        tupleRows,
+        cols,
+        variantIds,
+        Z,
+        errorLabel
+    )
+    list(Z = filled$Z, nVec = filled$nVec, variantIds = variantIds)
+}
+
+# Read each tuple's z / N into the shared matrix. The fitters index z by
+# column position, so every entry must present the same SNPs in the same order.
+# @noRd
+.jointFillSumstatZ <- function(
+    data,
+    tupleRows,
+    cols,
+    variantIds,
+    Z,
+    errorLabel
+) {
     nVec <- numeric(length(tupleRows))
     for (kk in seq_along(tupleRows)) {
         i <- tupleRows[[kk]]
         d <- getSumstatDf(
             data,
-            study = studyCol[[i]],
-            context = contextCol[[i]],
-            trait = traitCol[[i]],
+            study = cols$study[[i]],
+            context = cols$context[[i]],
+            trait = cols$trait[[i]],
             require = c("SNP", "Z", "N")
         )
         # Narrowed to the same set before the order check, or that check fires
         # on a length mismatch the panel filter itself created.
         d <- d[is_in(d$variant_id, variantIds), , drop = FALSE]
-        if (!identical(d$variant_id, variantIds)) {
-            msg <- glue(
-                "{errorLabel}: every entry in a joint group must share an ",
-                "identical SNP order after summaryStatsQc()."
-            )
-            abort(msg)
-        }
+        .jointCheckSnpOrder(d$variant_id, variantIds, errorLabel)
         Z[, kk] <- d$z
         nVec[kk] <- stats::median(d$N, na.rm = TRUE)
     }
-    list(Z = Z, nVec = nVec, variantIds = variantIds)
+    list(Z = Z, nVec = nVec)
+}
+
+# @noRd
+.jointCheckSnpOrder <- function(got, want, errorLabel) {
+    if (identical(got, want)) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "{errorLabel}: every entry in a joint group must share an ",
+        "identical SNP order after summaryStatsQc()."
+    ))
 }
 
 

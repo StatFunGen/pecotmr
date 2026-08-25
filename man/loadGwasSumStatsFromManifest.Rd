@@ -28,7 +28,7 @@ its sumstats file need not carry a per-variant \code{N} column;
 
 \item{genome}{Genome build; reconciled with a \code{genome} column.}
 
-\item{ldSketch}{A \code{\link{GenotypeHandle}} or a spec
+\item{ldSketch}{A genotype panel (see \code{\link{readGenotypes}}) or a spec
 (path/prefix/genoMeta); reconciled with an \code{ldSketchPath} column.}
 
 \item{region}{Optional \code{chr:start-end} string, GRanges, or one-row

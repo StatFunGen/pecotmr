@@ -16,8 +16,9 @@ the identity columns (\code{study}, \code{context}, \code{trait},
 \item{variants}{A list, parallel to \code{pairs}' rows, of per-pair data
 frames with a \code{variant_id} column and a \code{SNP.PP.H4} column.}
 
-\item{ldSketch}{Optional \code{GenotypeHandle} for the LD reference, used by
-\code{\link{getColocCredibleSets}} to compute purity.}
+\item{ldSketch}{Optional genotype panel (see \code{\link{readGenotypes}})
+for the LD reference, used by \code{\link{getColocCredibleSets}} to
+compute purity.}
 }
 \value{
 A \code{ColocResult}.

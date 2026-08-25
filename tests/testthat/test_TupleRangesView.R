@@ -259,3 +259,56 @@ test_that("the verbs are reachable through the dplyr generics", {
     expect_s4_class(dplyr::filter(mc, Z > 2), "QtlSumStats")
     expect_s4_class(dplyr::slice(mc, 1:2), "QtlSumStats")
 })
+
+test_that("show reports the view's range and metadata-column counts", {
+    # The view is internal, but its show method is what a developer sees when
+    # one surfaces in a browser() or an error trace.
+    data(qtlSumStatsMulticontextExample, envir = environment())
+    flat <- flattenTupleRanges(qtlSumStatsMulticontextExample)
+    v <- .tupleRangesView(flat)
+    expect_output(show(v), "TupleRangesView:")
+    expect_output(show(v), str_c(length(flat), " ranges"))
+    expect_output(show(v), "metadata column\\(s\\)")
+})
+
+# ===========================================================================
+# Degenerate collections and the plyranges requirement
+# ===========================================================================
+
+test_that("flattening a collection with no identity columns keeps its ranges", {
+    # With nothing to key on, every range belongs to the single element --
+    # which is what a one-row collection means.
+    mc <- .trv_mc()
+    bare <- mc[1, ]
+    mcols(bare) <- mcols(bare)[, character(0), drop = FALSE]
+    flat <- flattenTupleRanges(bare)
+    expect_equal(length(flat), sum(lengths(bare)))
+})
+
+test_that(".rtlTupleKeys gives every row the same key with no key columns", {
+    md <- S4Vectors::DataFrame(entry = S4Vectors::SimpleList(1, 2))
+    expect_equal(.rtlTupleKeys(md, character(0), 3L), rep("", 3L))
+})
+
+test_that(".rtlTupleKeyCols is empty when there are no mcols", {
+    gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 2))
+    expect_equal(.rtlTupleKeyCols(gr), character(0))
+})
+
+test_that(".rtlAsRanges unwraps a view and passes a GRanges through", {
+    flat <- flattenTupleRanges(.trv_mc())
+    v <- .tupleRangesView(flat)
+    expect_s4_class(.rtlAsRanges(v), "GRanges")
+    expect_false(methods::is(.rtlAsRanges(v), "TupleRangesView"))
+    expect_identical(.rtlAsRanges(flat), flat)
+})
+
+test_that("select(.drop_ranges = TRUE) returns the bare table, not a view", {
+    # plyranges' own escape hatch: the caller asked for a data frame rather
+    # than ranges, so re-wrapping it as a view would undo the request.
+    flat <- flattenTupleRanges(.trv_mc())
+    v <- .tupleRangesView(flat)
+    out <- select.TupleRangesView(v, Z, .drop_ranges = TRUE)
+    expect_false(methods::is(out, "TupleRangesView"))
+    expect_false(methods::is(out, "GRanges"))
+})

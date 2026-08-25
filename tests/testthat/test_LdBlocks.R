@@ -1,40 +1,10 @@
-# Tests migrated from test_h2ClassesSumstats.R
-
-# === Tests migrated from test_h2ClassesSumstats.R (LdBlocks) ===
-
-test_that("LdBlocks constructs and validates correctly", {
-    obj <- make_test_ldblocks()
-    expect_s4_class(obj, "LdBlocks")
-    expect_equal(length(obj@blocks), 2)
-    expect_equal(obj@genome, "hg19")
-    expect_true(methods::validObject(obj))
-})
-
-
-test_that("LdBlocks rejects genome of length != 1", {
-    blocks_gr <- GenomicRanges::GRanges(
-        seqnames = "chr1",
-        ranges = IRanges::IRanges(start = 1, end = 5000)
-    )
-    expect_error(
-        methods::validObject(
-            new("LdBlocks", blocks = blocks_gr, genome = c("hg19", "hg38"))
-        ),
-        "genome.*single"
-    )
-})
-
-# show() smoke test, moved here from test_showMethods.R so the test
-# tree mirrors R/.
-test_that("show(LdBlocks) does not error", {
-    expect_output(show(make_test_ldblocks()), "LdBlocks")
-})
-
-
-# .asLdBlockRanges: the one place an LD-block specification becomes the GRanges
-# the splitters consume. `LdBlocks` is the canonical type the rest of the
-# package passes around; the looser forms exist so a caller holding a plain
-# block table does not have to construct one first.
+# Tests for LD-block coercion.
+#
+# There was once an LdBlocks class wrapping a GRanges beside a `genome`
+# string; it was retired because GRanges already carries the build in
+# seqinfo() and its only consumer, LdStatistic, has its own genome slot. What
+# remains is .asLdBlockRanges(), the one place an LD-block specification
+# becomes the GRanges the splitters consume.
 
 # @noRd
 .ldb_blocks <- function() {
@@ -45,11 +15,6 @@ test_that("show(LdBlocks) does not error", {
     names(b) <- c("b1", "b2")
     b
 }
-
-test_that(".asLdBlockRanges unwraps an LdBlocks", {
-    lb <- new("LdBlocks", blocks = .ldb_blocks(), genome = "hg38")
-    expect_identical(.asLdBlockRanges(lb), .ldb_blocks())
-})
 
 test_that(".asLdBlockRanges passes a GRanges through unchanged", {
     expect_identical(.asLdBlockRanges(.ldb_blocks()), .ldb_blocks())
@@ -101,5 +66,5 @@ test_that(".asLdBlockRanges names the columns a block table is missing", {
 })
 
 test_that(".asLdBlockRanges rejects a type it cannot interpret", {
-    expect_error(.asLdBlockRanges(1L), "must be an LdBlocks")
+    expect_error(.asLdBlockRanges(1L), "must be a GRanges")
 })

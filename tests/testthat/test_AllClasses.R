@@ -431,3 +431,45 @@ test_that("getVariantIds on an empty collection defers too", {
     data(qtlSumStatsExample, envir = environment())
     expect_error(getVariantIds(qtlSumStatsExample[0]), "no rows")
 })
+
+# ===========================================================================
+# adjustPips: entries that share no variant with `keepVariants`
+#
+# The zero-row short-circuit is covered above and the all-overlap path by
+# test_ColocResult; the two partial/disjoint branches were not.
+# ===========================================================================
+
+# Two entries built by .rc_makeFmr (which carries a real alpha matrix, as
+# renormalization requires): one on chr1, one on chr9 so it can be made to
+# miss `keepVariants` entirely.
+.ac_twoEntry <- function() {
+    a <- .rc_makeFmr(.rc_vids(1:10), study = "s1")
+    b <- .rc_makeFmr(sprintf("chr9:%d:A:G", 100L * 1:10), study = "s2")
+    QtlFineMappingResult(
+        study = c("s1", "s2"),
+        context = c("c1", "c1"),
+        trait = c("g1", "g1"),
+        method = c("susie", "susie"),
+        entry = list(.collectionEntries(a)[[1L]], .collectionEntries(b)[[1L]])
+    )
+}
+
+test_that("adjustPips refuses a keepVariants set disjoint from every entry", {
+    # Nothing to renormalize anywhere: silently returning the input would
+    # hand back unadjusted PIPs that look adjusted.
+    expect_error(
+        adjustPips(.ac_twoEntry(), "chr22:999999:A:G"),
+        "the two variant sets are disjoint"
+    )
+})
+
+test_that("adjustPips drops non-overlapping entries and says so", {
+    # Matches subsetRegion's rule: an element that trims to zero variants
+    # goes away rather than lingering unadjusted.
+    expect_message(
+        out <- adjustPips(.ac_twoEntry(), .rc_vids(1:5)),
+        "dropping 1 of 2 entries"
+    )
+    expect_equal(nrow(out), 1L)
+    expect_equal(as.character(mcols(out)$study), "s1")
+})

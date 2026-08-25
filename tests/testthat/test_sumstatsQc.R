@@ -13,7 +13,7 @@ context("sumstats_qc")
 # pipeline test files (test_colocboostPipeline.R, etc.).
 #
 # What remains here: tests of internal QC helpers
-# (`ldMismatchQc`, `.resolveZMismatchQc`, `krigingOutlierQc`) whose
+# (`ldMismatchQc`, `krigingOutlierQc`) whose
 # signatures and contracts are unchanged.
 
 # ===========================================================================
@@ -49,18 +49,6 @@ test_that("ldMismatchQc method argument is validated", {
 # ===========================================================================
 # zMismatchQc resolver
 # ===========================================================================
-
-test_that(".resolveZMismatchQc resolves none/slalom/dentist and defaults to none", {
-    expect_equal(pecotmr:::.resolveZMismatchQc(NULL), "none")
-    expect_equal(pecotmr:::.resolveZMismatchQc("none"), "none")
-    expect_equal(pecotmr:::.resolveZMismatchQc("slalom"), "slalom")
-    expect_equal(pecotmr:::.resolveZMismatchQc("dentist"), "dentist")
-})
-
-test_that(".resolveZMismatchQc rejects stale rss_qc and other invalid tokens", {
-    expect_error(pecotmr:::.resolveZMismatchQc("rss_qc"), "must be one of")
-    expect_error(pecotmr:::.resolveZMismatchQc("bad"), "must be one of")
-})
 
 # ===========================================================================
 # krigingOutlierQc
@@ -199,12 +187,17 @@ generate_dummy_data <- function(
     )
 
     n_known <- 50
+    # One sample of ROWS, not four independent samples of columns: a real
+    # observed variant's id encodes its own position, so drawing id and pos
+    # separately would place a known id at a foreign position -- which the
+    # observed-position guard correctly reads as a second, typed site.
+    known_idx <- sample(n_variants, n_known)
     known_zscores <- data.frame(
         chrom = rep(1, n_known),
-        pos = sample(ref_panel$pos, n_known),
-        variant_id = sample(ref_panel$variant_id, n_known),
-        A1 = sample(c("A", "T", "G", "C"), n_known, replace = TRUE),
-        A2 = sample(c("A", "T", "G", "C"), n_known, replace = TRUE),
+        pos = ref_panel$pos[known_idx],
+        variant_id = ref_panel$variant_id[known_idx],
+        A1 = ref_panel$A1[known_idx],
+        A2 = ref_panel$A2[known_idx],
         z = rnorm(n_known)
     )
 
@@ -3030,7 +3023,7 @@ context("summaryStatsQc")
 # The variant-content QC (MAF/INFO/N) is pure data.frame filtering via
 # .applyContentFilters; no external genome / dbSNP packages required.
 # All pecotmr-native steps (.applyContentFilters, .applySkipRegion,
-# .matchAgainstSketch, .applyPipScreen, .applyLdMismatchQcToEntry) run
+# .matchAgainstSketch, .applyLdMismatchQcToEntry) run
 # for real on the synthetic fixture.
 
 # ===========================================================================
@@ -3093,8 +3086,8 @@ context("summaryStatsQc")
         panel <- matrix(
             rbinom(n_samples * nrow(handle@snpInfo), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(handle@snpInfo),
-            dimnames = list(handle@sampleIds, handle@snpInfo$SNP)
+            ncol = nrow(getSnpInfo(handle)),
+            dimnames = list(handle@sampleIds, getSnpInfo(handle)$SNP)
         )
         sub <- panel[, snpIdx, drop = FALSE]
         rr <- GenomicRanges::GRanges(
@@ -3135,9 +3128,15 @@ test_that("summaryStatsQc: rejects non-SumStats input", {
     )
 })
 
-test_that("summaryStatsQc: mafCutoff > 0 with no MAF/FRQ column errors", {
+test_that("mafCutoff > 0 with no frequency skips the filter, not the run", {
+    # A frequency-less study can still run under a default mafCutoff: the
+    # filter is skipped with one warning rather than aborting the pipeline.
     ss <- .ssQ_makeGwasSumStats()
-    expect_error(summaryStatsQc(ss, mafCutoff = 0.05), "MAF or FRQ column")
+    expect_warning(
+        res <- summaryStatsQc(ss, mafCutoff = 0.05),
+        "skipping the MAF filter"
+    )
+    expect_s4_class(res, "GwasSumStats")
 })
 
 test_that("summaryStatsQc: infoCutoff > 0 with no INFO column errors", {
@@ -3990,8 +3989,8 @@ context("sumstatsQc internal helpers")
         panel <- matrix(
             rbinom(n_samples * nrow(handle@snpInfo), 2, 0.3),
             nrow = n_samples,
-            ncol = nrow(handle@snpInfo),
-            dimnames = list(handle@sampleIds, handle@snpInfo$SNP)
+            ncol = nrow(getSnpInfo(handle)),
+            dimnames = list(handle@sampleIds, getSnpInfo(handle)$SNP)
         )
         sub <- panel[, snpIdx, drop = FALSE]
         rr <- GenomicRanges::GRanges(
@@ -4447,34 +4446,6 @@ test_that(".applyLdMismatchQcToEntry: NA outlier flags from slalom are kept (not
     # Diagnostics should preserve every row + add a variant_id column.
     expect_equal(nrow(res$diagnostics), length(vids))
     expect_true("variant_id" %in% names(res$diagnostics))
-})
-
-# ===========================================================================
-# .applyPipScreen
-# ===========================================================================
-
-test_that(".applyPipScreen: cutoff = 0 is a no-op", {
-    df <- data.frame(Z = c(1, 2, 3), stringsAsFactors = FALSE)
-    out <- pecotmr:::.applyPipScreen(df, n = 1000, cutoff = 0)
-    expect_false(out$skipped)
-    expect_identical(out$df, df)
-})
-
-test_that(".applyPipScreen: skips when no variant exceeds the explicit cutoff", {
-    # Build a small set of z-scores with no strong signal.
-    df <- data.frame(Z = rep(0.1, 10), stringsAsFactors = FALSE)
-    out <- pecotmr:::.applyPipScreen(df, n = 1000, cutoff = 0.99)
-    expect_true(out$skipped)
-    expect_match(out$reason, "no signals above PIP threshold")
-    expect_equal(nrow(out$df), 0L)
-})
-
-test_that(".applyPipScreen: retains entry when signal clears the cutoff", {
-    # A very strong z-score should give PIP near 1.
-    df <- data.frame(Z = c(10, 0.1, 0.1, 0.1, 0.1), stringsAsFactors = FALSE)
-    out <- pecotmr:::.applyPipScreen(df, n = 1000, cutoff = 0.5)
-    expect_false(out$skipped)
-    expect_identical(out$df, df)
 })
 
 # ===========================================================================
@@ -5636,7 +5607,7 @@ test_that("extractCsInfo extracts single CS correctly", {
 test_that("extractCsInfo builds correlation columns from the ldSource", {
     data(qtlSumStatsExample)
     ss <- qtlSumStatsExample
-    vids <- as.character(getSnpInfo(getLdSketch(ss))$SNP)
+    vids <- rownames(getLdSketch(ss))
     set.seed(1)
     fit <- list(
         sets = list(cs = list(L_1 = c(1L, 2L, 3L), L_2 = c(90L, 91L))),
@@ -6657,12 +6628,13 @@ test_that(".applyContentFilters: FRQ is normalized to MAF via min(af, 1 - af)", 
     expect_equal(out$audit$mafDropped, 2L)
 })
 
-test_that(".applyContentFilters: mafCutoff > 0 without MAF/FRQ column errors", {
+test_that(".applyContentFilters: no frequency skips the MAF filter", {
     df <- data.frame(SNP = paste0("rs", 1:3), stringsAsFactors = FALSE)
-    expect_error(
-        pecotmr:::.applyContentFilters(df, mafCutoff = 0.01),
-        "requires a MAF or FRQ column"
+    expect_warning(
+        out <- .applyContentFilters(df, mafCutoff = 0.01),
+        "skipping the MAF filter"
     )
+    expect_equal(nrow(out$df), 3L)
 })
 
 test_that(".applyContentFilters: INFO filter drops low-INFO variants", {
@@ -7277,7 +7249,10 @@ test_that("summaryStatsQc kriging QC sign-flips an LD-inconsistent variant and r
 # ---- LD-sketch trimming to the summary-stats range / final variants ----------
 
 test_that(".subsetSketchToRange keeps only panel variants in the entries' per-chrom span", {
-    h <- readGenotypes(test_path("test_data/test_variants"), format = "plink2")
+    h <- readGenotypeHandle(
+        test_path("test_data/test_variants"),
+        format = "plink2"
+    )
     si <- getSnpInfo(h)
     ch <- names(sort(table(si$CHR), decreasing = TRUE))[1] # busiest chromosome
     chIdx <- which(si$CHR == ch)
@@ -7300,7 +7275,10 @@ test_that(".subsetSketchToRange keeps only panel variants in the entries' per-ch
 })
 
 test_that(".subsetSketchToIds keeps exactly the entries' variants", {
-    h <- readGenotypes(test_path("test_data/test_variants"), format = "plink2")
+    h <- readGenotypeHandle(
+        test_path("test_data/test_variants"),
+        format = "plink2"
+    )
     si <- getSnpInfo(h)
     sel <- c(3L, 10L, 40L, 200L)
     gr <- GenomicRanges::GRanges(
@@ -7484,4 +7462,356 @@ test_that("summaryStatsQc imputeOpts cutoffs bound what RAISS imputes", {
     expect_lt(strict, mid)
     # ...but never fewer than the observed set it started from.
     expect_gte(strict, nObserved)
+})
+
+# ===========================================================================
+# RAISS: what must never be imputed
+# ===========================================================================
+
+.raiss_panel <- function() {
+    normalizeVariantId(
+        c("chr1:100:A:AT", "chr1:100:AT:A", "chr1:400:A:G", "chr1:500:C:T")
+    )
+}
+
+.raiss_targets <- function(knownRaw) {
+    panelIds <- .raiss_panel()
+    knownIds <- normalizeVariantId(knownRaw)
+    # chrom/pos are derived from each id, so a flip pair shares one position
+    # and BOTH the allele-identity and observed-position guards can apply.
+    # The masks are exercised individually below where that distinction
+    # matters.
+    frame <- function(ids) {
+        p <- parseVariantId(ids)
+        data.frame(
+            chrom = as.character(p$chrom),
+            pos = as.integer(p$pos),
+            variant_id = ids,
+            stringsAsFactors = FALSE
+        )
+    }
+    refPanel <- frame(panelIds)
+    knownZ <- if (length(knownIds) == 0L) {
+        data.frame(
+            chrom = character(0), pos = integer(0),
+            variant_id = character(0), stringsAsFactors = FALSE
+        )
+    } else {
+        frame(knownIds)
+    }
+    panelIds[.raissUnknownIdx(
+        refPanel, knownZ, intersect(knownIds, panelIds)
+    )]
+}
+
+test_that("the allele flip of a known variant is not imputed", {
+    # chr1:100:AT:A is the flip of the known chr1:100:A:AT. It is not missing
+    # data -- its z-score is already in hand under the other orientation.
+    expect_false(is_in(
+        normalizeVariantId("chr1:100:AT:A"),
+        .raiss_targets("chr1:100:A:AT")
+    ))
+})
+
+test_that("a dropped ambiguous variant is not re-imputed, nor is its flip", {
+    # matchVariants() drops the sumstats variant when the panel carries both
+    # orientations. Imputation must not put it straight back.
+    got <- .raiss_targets("chr1:400:A:G")
+    expect_false(is_in(normalizeVariantId("chr1:100:A:AT"), got))
+    expect_false(is_in(normalizeVariantId("chr1:100:AT:A"), got))
+})
+
+test_that("a flip pair is excluded even when nothing is known there", {
+    # The ambiguity is a property of the panel, not of what the sumstats
+    # happen to carry.
+    got <- .raiss_targets(character(0))
+    expect_false(any(is_in(
+        normalizeVariantId(c("chr1:100:A:AT", "chr1:100:AT:A")), got
+    )))
+})
+
+test_that("unambiguous variants are still imputed", {
+    # The guard must not cost coverage where there is no ambiguity.
+    expect_setequal(
+        .raiss_targets(character(0)),
+        normalizeVariantId(c("chr1:400:A:G", "chr1:500:C:T"))
+    )
+})
+
+test_that("a flip-of-known is skipped with only one orientation present", {
+    # Reachable through the exported raiss() even though the QC pipeline
+    # harmonizes to the panel orientation first.
+    expect_equal(
+        .raiss_targets("chr1:500:T:C"),
+        normalizeVariantId("chr1:400:A:G")
+    )
+})
+
+test_that(".raissFlipPairMask needs both orientations, not just an indel", {
+    ids <- normalizeVariantId(
+        c("chr1:100:A:AT", "chr1:100:AT:A", "chr1:200:A:AT", "chr1:300:A:G")
+    )
+    expect_equal(.raissFlipPairMask(ids), c(TRUE, TRUE, FALSE, FALSE))
+})
+
+# ===========================================================================
+# RAISS: positions the GWAS already typed (ported from PR #573)
+#
+# Complementary to the allele-ambiguity guards above: those key on allele
+# IDENTITY (a flip, or a panel carrying both orientations), this keys on the
+# POSITION being measured at all. Neither subsumes the other.
+# ===========================================================================
+
+.raiss_pr573 <- function() {
+    list(
+        refPanel = data.frame(
+            chrom = rep("1", 5),
+            pos = c(100L, 100L, 200L, 300L, 300L),
+            variant_id = c(
+                "1:100:A:G", "1:100:A:T", "1:200:A:G",
+                "1:300:A:G", "1:300:A:T"
+            ),
+            A1 = c("G", "T", "G", "G", "T"),
+            A2 = rep("A", 5),
+            stringsAsFactors = FALSE
+        ),
+        knownZ = data.frame(
+            chrom = "1", pos = 100L, variant_id = "1:100:A:G",
+            A1 = "G", A2 = "A", z = 3.0, stringsAsFactors = FALSE
+        )
+    )
+}
+
+test_that(".raissFlipOfKnownMask flags a flip regardless of position", {
+    # Isolates the allele-identity guard from the observed-position guard:
+    # this mask sees only ids, so it cannot be satisfied by position alone.
+    panel <- normalizeVariantId(c("chr1:100:AT:A", "chr1:400:A:G"))
+    known <- normalizeVariantId("chr1:100:A:AT")
+    expect_equal(.raissFlipOfKnownMask(panel, known), c(TRUE, FALSE))
+    expect_equal(
+        .raissFlipOfKnownMask(panel, character(0)),
+        c(FALSE, FALSE)
+    )
+})
+
+test_that("a second allele at a typed position is not imputed", {
+    # Imputation fills UN-observed variants; another form of a site the GWAS
+    # measured is a redundant record, not new information.
+    d <- .raiss_pr573()
+    idx <- .raissUnknownIdx(
+        d$refPanel,
+        d$knownZ,
+        intersect(d$knownZ$variant_id, d$refPanel$variant_id)
+    )
+    expect_false(is_in("1:100:A:T", d$refPanel$variant_id[idx]))
+})
+
+test_that("un-observed positions still impute every panel form they have", {
+    # The guard is about MEASURED positions, not about multi-allelic sites:
+    # 1:300 is multi-allelic but untyped, so both its forms are targets.
+    d <- .raiss_pr573()
+    idx <- .raissUnknownIdx(
+        d$refPanel,
+        d$knownZ,
+        intersect(d$knownZ$variant_id, d$refPanel$variant_id)
+    )
+    expect_setequal(
+        d$refPanel$variant_id[idx],
+        c("1:200:A:G", "1:300:A:G", "1:300:A:T")
+    )
+})
+
+test_that("the position guard is chr-prefix tolerant", {
+    # "chr1" in the panel and "1" in the sumstats is one site, not two.
+    d <- .raiss_pr573()
+    d$refPanel$chrom <- str_c("chr", d$refPanel$chrom)
+    d$refPanel$variant_id <- str_c("chr", d$refPanel$variant_id)
+    idx <- .raissUnknownIdx(d$refPanel, d$knownZ, character(0))
+    expect_false(is_in("chr1:100:A:T", d$refPanel$variant_id[idx]))
+})
+
+test_that("raissSingleMatrix does not impute at a typed position", {
+    d <- .raiss_pr573()
+    ld <- diag(5)
+    ld[1, 2] <- ld[2, 1] <- 0.7
+    ld[1, 3] <- ld[3, 1] <- 0.6
+    ld[1, 4] <- ld[4, 1] <- 0.5
+    ld[1, 5] <- ld[5, 1] <- 0.45
+    r <- raissSingleMatrix(d$refPanel, d$knownZ, ld, verbose = FALSE)
+    imp <- setdiff(r$resultNofilter$variant_id, d$knownZ$variant_id)
+    expect_false(is_in("1:100:A:T", imp))
+    expect_true(all(is_in(
+        c("1:200:A:G", "1:300:A:G", "1:300:A:T"), imp
+    )))
+    expect_true(is_in("1:100:A:G", r$resultNofilter$variant_id))
+})
+
+# ===========================================================================
+# Zero-variant entries empty the sketch (ported from PR #571)
+#
+# An entry that early-exits QC carries no variants, so it references no LD --
+# but both trimmers used to hand back the FULL genome-wide panel, because
+# their keep-set is built from the entries' own positions/ids. On a real panel
+# that is ~135 MB of dead weight serialized per such entry.
+# ===========================================================================
+
+.sk_panel <- function() {
+    readGenotypes(
+        test_path("test_data", "test_variants"),
+        format = "plink1"
+    )
+}
+
+test_that("both trimmers empty the sketch for zero-variant entries", {
+    h <- .sk_panel()
+    expect_gt(nrow(h), 0L)
+    # An empty list and a zero-range GRanges both mean "no variants".
+    for (entries in list(list(), list(GenomicRanges::GRanges()))) {
+        expect_equal(nrow(.subsetSketchToRange(h, entries)), 0L)
+        expect_equal(nrow(.subsetSketchToIds(h, entries)), 0L)
+    }
+})
+
+test_that("emptying keeps every other property of the panel", {
+    h <- .sk_panel()
+    e <- .subsetSketchToRange(h, list())
+    expect_equal(ncol(e), ncol(h))
+    expect_equal(colnames(e), colnames(h))
+})
+
+test_that(".emptySketch drops the seed's variants, not just the rows", {
+    # A panel carries its handle twice: as rowRanges and inside the dosage
+    # assay's DelayedArray seed. Dropping rows alone leaves the seed holding
+    # the whole panel, which is the weight this exists to shed.
+    h <- .sk_panel()
+    e <- .emptySketch(h)
+    expect_equal(nrow(e), 0L)
+    expect_equal(nrow(getSnpInfo(.ldSketchHandle(e))), 0L)
+    expect_lt(
+        length(serialize(e, NULL)),
+        length(serialize(h, NULL)) / 2
+    )
+})
+
+test_that(".emptySketch is NULL-safe and idempotent", {
+    expect_null(.emptySketch(NULL))
+    e <- .emptySketch(.sk_panel())
+    expect_equal(nrow(.emptySketch(e)), 0L)
+})
+
+test_that(".subsetSketchToIds keeps the panel when ids are unextractable", {
+    # Ranges present but no SNP mcol is a different situation from zero
+    # variants: the panel cannot be keyed, so blanking it would discard LD the
+    # object may well reference. Stay conservative.
+    h <- .sk_panel()
+    gr <- GenomicRanges::GRanges(
+        "chr21",
+        IRanges::IRanges(c(17513228L, 17513580L), width = 1L)
+    )
+    expect_equal(nrow(.subsetSketchToIds(h, list(gr))), nrow(h))
+})
+
+# ===========================================================================
+# af / MAF semantics (ported from PR #578)
+#
+# `af` is the DIRECTIONAL effect-allele frequency, declared only via an `af:`
+# mapping key and exported as top_loci$af. A directionless `maf`/`FRQ` is
+# QC-only and is never exported as af, so an undeclared study gets an honest
+# NA instead of a silently mislabelled minor-allele frequency.
+# ===========================================================================
+
+.afm_df <- function(freqcol, val) {
+    d <- data.frame(
+        chrom = "chr1", pos = 100L, variant_id = "chr1:100:A:G",
+        A1 = "A", A2 = "G", z = 2.5, n_sample = 1000,
+        stringsAsFactors = FALSE
+    )
+    d[[freqcol]] <- val
+    d
+}
+
+.afm_cm <- function(...) {
+    c(
+        chrom = "chrom", pos = "pos", variant_id = "variant_id",
+        A1 = "A1", A2 = "A2", z = "z", n_sample = "n_sample", ...
+    )
+}
+
+test_that("an af: key is directional AF; a maf: key is directionless", {
+    # Same source column, different declaration -> different meaning.
+    a <- suppressWarnings(.resolveSumstatCols(
+        .afm_df("effect_allele_frequency", 0.8),
+        .afm_cm(af = "effect_allele_frequency"), "af"
+    ))
+    expect_equal(a$AF, 0.8)
+    expect_null(a$MAF)
+    b <- suppressWarnings(.resolveSumstatCols(
+        .afm_df("effect_allele_frequency", 0.8),
+        .afm_cm(maf = "effect_allele_frequency"), "maf"
+    ))
+    expect_null(b$AF)
+    expect_equal(b$MAF, 0.8)
+})
+
+test_that("an undeclared af warns distinctly and yields no AF column", {
+    expect_warning(
+        out <- .resolveSumstatCols(
+            .afm_df("maf", 0.2), .afm_cm(maf = "maf"), "undeclared"
+        ),
+        "no effect-allele frequency declared"
+    )
+    expect_null(out$AF)
+})
+
+test_that("a declared-but-unusable af warns with a different message", {
+    # Distinct from "undeclared": this is a data problem, not a mapping one.
+    expect_warning(
+        .resolveSumstatCols(
+            .afm_df("eaf", NA_real_), .afm_cm(af = "eaf"), "missing"
+        ),
+        "declared but its values are all missing"
+    )
+})
+
+test_that(".fmAfByVar reads AF, and is NULL when af was never declared", {
+    mk <- function(cm) {
+        .dfToEntryGranges(suppressWarnings(.resolveSumstatCols(
+            .afm_df("effect_allele_frequency", 0.8), cm, "lbl"
+        )))
+    }
+    gA <- mk(.afm_cm(af = "effect_allele_frequency"))
+    expect_equal(unname(.fmAfByVar(gA, "chr1:100:A:G")), 0.8)
+    gM <- mk(.afm_cm(maf = "effect_allele_frequency"))
+    expect_null(.fmAfByVar(gM, "chr1:100:A:G"))
+})
+
+test_that(".cfMaf prefers af, falls back to maf, and skips when neither", {
+    expect_equal(nrow(.cfMaf(data.frame(AF = c(0.8, 0.01)), 0.05)$df), 1L)
+    expect_equal(nrow(.cfMaf(data.frame(MAF = c(0.2, 0.01)), 0.05)$df), 1L)
+    expect_warning(
+        out <- .cfMaf(data.frame(SNP = c("a", "b")), 0.05),
+        "skipping the MAF filter"
+    )
+    expect_equal(nrow(out$df), 2L)
+})
+
+test_that("an allele swap complements af but leaves the directionless maf", {
+    # af -> 1 - af on a swap; maf = min(af, 1-af) is swap-invariant, so
+    # complementing it would corrupt it.
+    tgt <- data.frame(
+        chrom = "1", pos = 100L, A2 = "G", A1 = "A", SNP = "v1",
+        Z = 2.0, AF = 0.8, MAF = 0.2, stringsAsFactors = FALSE
+    )
+    ref <- data.frame(
+        chrom = "1", pos = 100L, A2 = "A", A1 = "G",
+        variant_id = "v1", stringsAsFactors = FALSE
+    )
+    h <- harmonizeAlleles(
+        tgt, ref,
+        colToFlip = "Z", colToComplement = "AF",
+        matchMinProp = 0, removeStrandAmbiguous = FALSE
+    )$harmonizedData
+    expect_equal(h$AF, 0.2)
+    expect_equal(h$Z, -2.0)
+    expect_equal(h$MAF, 0.2)
 })

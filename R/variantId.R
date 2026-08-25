@@ -993,12 +993,42 @@ matchVariants <- function(
     if (is.null(h) || nrow(h) == 0L) {
         return(.matchVariantsEmpty())
     }
+    h <- .matchDropSignConflicts(h)
+    if (nrow(h) == 0L) {
+        return(.matchVariantsEmpty())
+    }
     keep <- !duplicated(h$.mvTidx) # at most one ref per A id
     list(
         idxA = as.integer(h$.mvTidx[keep]),
         idxB = as.integer(h$.mvRidx[keep]),
         sign = as.numeric(h$.mvSign[keep])
     )
+}
+
+# Drop target variants whose reference matches disagree about the sign.
+#
+# A reference panel can legitimately carry a variant and its own allele flip as
+# two separate entries -- two distinct indels at one position that happen to be
+# each other's flip is rare but biologically real. A target variant then
+# matches BOTH: once exactly (sign +1) and once as an allele swap (sign -1),
+# and there is no way to tell which entry it is. The caller below keeps the
+# first match, so without this the answer would depend on the panel's row
+# order, silently flipping the effect direction for that variant.
+#
+# Only a sign DISAGREEMENT is ambiguous. Duplicate reference entries that agree
+# (the same variant listed twice) still resolve to the first match, so this
+# drops nothing it does not have to.
+# @noRd
+.matchDropSignConflicts <- function(h) {
+    ambiguous <- h |>
+        group_by(.data$.mvTidx) |>
+        summarise(nSigns = n_distinct(.data$.mvSign), .groups = "drop") |>
+        filter(.data$nSigns > 1L) |>
+        pull(".mvTidx")
+    if (length(ambiguous) == 0L) {
+        return(h)
+    }
+    filter(h, !is_in(.data$.mvTidx, ambiguous))
 }
 
 # Backwards-compat alias for external callers

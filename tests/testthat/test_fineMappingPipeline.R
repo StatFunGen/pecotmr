@@ -2159,7 +2159,7 @@ test_that("fineMappingPipeline(MSQD): embedded sumstats record ldSketch", {
     expect_s4_class(res, "QtlFineMappingResult")
     expect_true(nrow(res) >= 2L)
     # Embedded sumstats has an LD sketch -> the merged result carries it.
-    expect_s4_class(getLdSketch(res), "GenotypeHandle")
+    expect_s4_class(getLdSketch(res), "RangedSummarizedExperiment")
 })
 
 # ===========================================================================
@@ -3767,31 +3767,6 @@ test_that(".fmMergeEntries: empty -> NULL; merges per-region entries + relabels 
     )
 })
 
-test_that(".fmJointBlocks: all-NULL -> NULL; single -> unchanged; many -> merged", {
-    mkE <- function(v) {
-        fineMappingRow(
-            v,
-            list(),
-            data.frame(variant_id = v, pip = 0.9)
-        )
-    }
-    expect_null(pecotmr:::.fmJointBlocks(list(1, 2), function(rg) NULL))
-    expect_equal(
-        pecotmr:::.fmJointBlocks(list(1), function(rg) {
-            mkE("chr1:100:A:G")
-        }) |>
-            pecotmr:::.fmrPartsVariantIds(),
-        "chr1:100:A:G"
-    )
-    expect_equal(
-        pecotmr:::.fmJointBlocks(list(1, 2), function(rg) {
-            mkE(sprintf("chr1:%d:A:G", 100L * (rg)))
-        }) |>
-            pecotmr:::.fmrPartsVariantIds(),
-        c("chr1:100:A:G", "chr1:200:A:G")
-    )
-})
-
 test_that(".fmTwasMethodKey: bare token without adapter returned unchanged", {
     expect_equal(pecotmr:::.fmTwasMethodKey("lasso"), "lasso") # no adapter (1170)
     expect_equal(pecotmr:::.fmTwasMethodKey("susie"), "susie") # adapter -> stripped
@@ -4688,7 +4663,7 @@ test_that("fineMappingPipeline RSS cutoffs agree with .panelVariantFilter", {
 
 test_that("fineMappingPipeline RSS treats MAC as a MAF equivalent", {
     ss <- .rssf_qcd()
-    nSamp <- getNSamples(getLdSketch(ss))
+    nSamp <- ncol(getLdSketch(ss))
     expect_equal(
         .rssf_n(ss, macCutoff = 0.1 * 2 * nSamp),
         .rssf_n(ss, mafCutoff = 0.1)

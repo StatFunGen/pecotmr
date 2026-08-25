@@ -13,10 +13,32 @@
 #' @include AllGenerics.R tupleSelectors.R
 NULL
 
+#' @title TWAS Weights Collection
+#' @description S4 collection of TWAS weights keyed by the identity tuple
+#'   \code{(study, context, trait, method)}. Each entry is a
+#'   \code{TwasWeightsRow} carrying one method's weights for one
+#'   trait/context/study. Implements the \code{DFrame}-subclass collection
+#'   pattern.
+#'
+#' Required columns: \code{study}, \code{context}, \code{trait}, \code{method},
+#' \code{entry}. Each \code{entry} is a \code{TwasWeightsRow}.
+#'
+#' Optional columns \code{jointStudies}, \code{jointContexts},
+#' \code{jointTraits} appear when the collection contains rows produced by a
+#' \code{jointSpecification}-driven joint fit. For such a row, the corresponding
+#' identity-tuple column carries the sentinel \code{"joint"} and the joint
+#' column lists the semicolon-joined members of the joined axis. For non-joint
+#' rows the joint columns are \code{NA_character_}. Tuple uniqueness is enforced
+#' jointly across the identity-tuple columns and any present joint columns.
+#' @slot ldSketch The LD reference genotype panel the weights were
+#'   derived against, or \code{NULL} when the weights were learned from
+#'   individual-level data. Used downstream for cross-pipeline LD-sketch
+#'   identity validation.
+#' @export
 setClass(
     "TwasWeights",
     contains = "RangedTupleList",
-    representation(ldSketch = "ANY"),
+    representation(ldSketch = "LdSketchOrNULL"),
     validity = function(object) .validateTwasWeights(object)
 )
 
@@ -105,17 +127,11 @@ setClass(
     }
 }
 
-# Optional ldSketch slot must be a GenotypeHandle or NULL.
+# The ldSketch slot's class union enforces its type, so there is nothing left
+# for validity to check.
 # @noRd
 .twasValidateLdSketch <- function(object) {
-    if (
-        !is.null(object@ldSketch) &&
-            !methods::is(object@ldSketch, "GenotypeHandle")
-    ) {
-        "'ldSketch' must be a GenotypeHandle or NULL"
-    } else {
-        character()
-    }
+    character()
 }
 
 
@@ -141,8 +157,8 @@ setClass(
 #'   shape as \code{jointStudies}.
 #' @param jointTraits Optional character vector for cross-trait joints. Same
 #'   shape as \code{jointStudies}.
-#' @param ldSketch An optional \code{GenotypeHandle}, or \code{NULL} for
-#'   individual-level fits.
+#' @param ldSketch An optional genotype panel (see
+#'   \code{\link{readGenotypes}}), or \code{NULL} for individual-level fits.
 #' @param traitPos Optional per-row trait genomic anchor (a \code{GRanges} or
 #'   \code{NULL}), carried forward as provenance; not part of the identity key.
 #'   \code{NULL} (default) omits the column.
@@ -195,7 +211,7 @@ TwasWeights <- function(
     grl <- GenomicRanges::GRangesList(split$entry)
     md <- exec(S4Vectors::DataFrame, !!!dfArgs)
     mcols(grl) <- md[split$fromIdx, , drop = FALSE]
-    obj <- new("TwasWeights", grl, ldSketch = ldSketch)
+    obj <- new("TwasWeights", grl, ldSketch = .asLdSketch(ldSketch))
     validObject(obj)
     obj
 }
@@ -508,7 +524,7 @@ setMethod("show", "TwasWeights", function(object) {
     ldSrc <- if (is.null(object@ldSketch)) {
         "NULL (individual-level fit)"
     } else {
-        glue("{object@ldSketch@format} @ {object@ldSketch@path}")
+        .ldSketchLabel(object@ldSketch)
     }
     cat(glue("  LD sketch: {ldSrc}\n", .trim = FALSE))
 })
@@ -1148,11 +1164,12 @@ setMethod("show", "TwasWeights", function(object) {
 #' @param retainFits Logical. Retain the per-fold / per-method fitted-model
 #'   objects on the result. Default \code{FALSE}.
 #' @param seed Integer or \code{NULL}. When supplied, seeds both the
-#'   main-process RNG (fold partitioning, variant sub-sampling) via
-#'   \code{set.seed} and the parallel fold-fitting RNG via the
-#'   \code{BiocParallel} \code{RNGseed}, so results are reproducible even under
-#'   multi-threading. \code{NULL} (default) leaves the session RNG untouched and
-#'   uses the historical parallel default.
+#'   main-process RNG (fold partitioning, variant sub-sampling) and the
+#'   parallel fold-fitting RNG via the \code{BiocParallel} \code{RNGseed}, so
+#'   results are reproducible even under multi-threading. The main-process
+#'   seed is scoped to the call, so the session RNG is left as it was found.
+#'   \code{NULL} (default) does not seed at all and uses the historical
+#'   parallel default.
 #' @param ... Additional arguments forwarded to the per-method weight learners.
 #' @return A list with the following components:
 #' \itemize{
@@ -1512,12 +1529,13 @@ twasWeightsCv <- function(
 #'   already standardized. Default \code{FALSE}.
 #' @param dataType Character or \code{NULL}. Data-type label recorded on the
 #'   weights (e.g. \code{"individual"}).
-#' @param ldSketch A \code{GenotypeHandle} LD sketch to record on the weights,
-#'   or \code{NULL}.
-#' @param seed Integer or \code{NULL}. When supplied, seeds the main-process RNG
-#'   via \code{set.seed} and the parallel method-fitting RNG via the
-#'   \code{BiocParallel} \code{RNGseed}, for reproducibility under
-#'   multi-threading. \code{NULL} (default) leaves the session RNG untouched.
+#' @param ldSketch A genotype panel (see \code{\link{readGenotypes}}) to
+#'   record on the weights as their LD sketch, or \code{NULL}.
+#' @param seed Integer or \code{NULL}. When supplied, seeds the main-process
+#'   RNG and the parallel method-fitting RNG via the \code{BiocParallel}
+#'   \code{RNGseed}, for reproducibility under multi-threading. The
+#'   main-process seed is scoped to the call, so the session RNG is left as it
+#'   was found. \code{NULL} (default) does not seed at all.
 #' @return A list where each element is named after a method and contains the
 #'   weight matrix produced by that method.
 #'

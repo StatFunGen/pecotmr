@@ -582,6 +582,15 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     keptIds <- attr(R, "keptVariantIds")
     attr(R, "keptVariantIds") <- NULL
     df <- filter(df, is_in(variantIds, keptIds))
+    ss <- .cbSumstatFrame(df, keptIds, nCase, nControl, varY)
+    list(sumstat = ss, LD = R, variantIds = keptIds)
+}
+
+# The colocboost sumstat frame for one entry, over the variants the LD panel
+# kept. `var_y` is added only when supplied: colocboost treats its absence as
+# "z-scale", so writing NA would change the model rather than say nothing.
+# @noRd
+.cbSumstatFrame <- function(df, keptIds, nCase, nControl, varY) {
     ss <- data.frame(
         z = df$z,
         n = .cbEffectiveN(df, nCase, nControl),
@@ -591,7 +600,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     if (!is.null(varY) && !is.na(varY)) {
         ss$var_y <- varY
     }
-    list(sumstat = ss, LD = R, variantIds = keptIds)
+    ss
 }
 
 # Resolve a sumstat entry's variant ids, falling back to the canonical
@@ -1230,6 +1239,50 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 # Methods
 # =============================================================================
 
+# The QtlDataset colocboost run: screen spec, individual-level bundle, shared
+# driver. Split out so the method is only its signature -- twenty formals plus
+# a body is past the length a reviewer (or BiocCheck) will accept, and the
+# signature is the part that cannot be shortened.
+# `p` is the method's named arguments; `dots` is its `...`, which
+# as.list(environment()) does not capture.
+# @noRd
+.cbQtlDatasetDrive <- function(p, dots) {
+    screenSpec <- .cbScreenSpec(
+        p$pipCutoffToSkip,
+        p$absZCutoffToSkip,
+        p$bfCutoffToSkip,
+        p$logBfCutoffToSkip
+    )
+    indBundle <- .cbIndividualBundle(
+        p$qtlData,
+        contexts = p$contexts,
+        traitId = p$traitId,
+        region = p$region,
+        cisWindow = p$cisWindow,
+        samples = p$samples,
+        pipCutoffToSkip = screenSpec
+    )
+    .cbDriver(
+        indBundle,
+        qtlPairs = list(),
+        p$gwasSumStats,
+        p$xqtlColoc,
+        p$jointGwas,
+        p$separateGwas,
+        p$focalTrait,
+        dots,
+        alleleFlip = p$alleleFlip,
+        # The QTL side is individual-level here, but the GWAS side may still
+        # be sumstats, so the panel cutoffs still apply to it.
+        cutoffs = .panelCutoffs(list(
+            mafCutoff = p$mafCutoff,
+            macCutoff = p$macCutoff,
+            imissCutoff = p$imissCutoff
+        ))
+    )
+}
+
+
 #' @rdname colocboostPipeline
 #' @export
 setMethod(
@@ -1257,39 +1310,7 @@ setMethod(
         alleleFlip = TRUE,
         ...
     ) {
-        screenSpec <- .cbScreenSpec(
-            pipCutoffToSkip,
-            absZCutoffToSkip,
-            bfCutoffToSkip,
-            logBfCutoffToSkip
-        )
-        indBundle <- .cbIndividualBundle(
-            qtlData,
-            contexts = contexts,
-            traitId = traitId,
-            region = region,
-            cisWindow = cisWindow,
-            samples = samples,
-            pipCutoffToSkip = screenSpec
-        )
-        .cbDriver(
-            indBundle,
-            qtlPairs = list(),
-            gwasSumStats,
-            xqtlColoc,
-            jointGwas,
-            separateGwas,
-            focalTrait,
-            list(...),
-            alleleFlip = alleleFlip,
-            # The QTL side is individual-level here, but the GWAS side may
-            # still be sumstats, so the panel cutoffs still apply to it.
-            cutoffs = .panelCutoffs(list(
-                mafCutoff = mafCutoff,
-                macCutoff = macCutoff,
-                imissCutoff = imissCutoff
-            ))
-        )
+        .cbQtlDatasetDrive(as.list(environment()), list(...))
     }
 )
 

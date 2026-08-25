@@ -18,3 +18,12 @@ Virtual base shared by \code{\linkS4class{ColocResult}} (from
   \code{\link{getColocVariants}}, so code that only needs "which variants
   colocalized, and how strongly" works against either.
 }
+\section{Slots}{
+
+\describe{
+\item{\code{ldSketch}}{The LD reference panel the underlying fits were computed
+against, or \code{NULL}. Shared by both subclasses: coloc and ColocBoost
+report different statistics, but both are computed against a panel and
+both are asked for it the same way.}
+}}
+

@@ -232,11 +232,12 @@ data.}
 messages).}
 
 \item{seed}{Integer or \code{NULL}. When supplied (\code{QtlDataset} path),
-seeds both the main-process RNG (\code{set.seed}) and the parallel
-method-fitting / cross-validation RNG (\code{BiocParallel} \code{RNGseed})
-for reproducibility under multi-threading. \code{NULL} (default) leaves the
-session RNG untouched, so an outer \code{set.seed()} still governs the
-main-process draws.}
+seeds both the main-process RNG and the parallel method-fitting /
+cross-validation RNG (\code{BiocParallel} \code{RNGseed}) for
+reproducibility under multi-threading. The main-process seed is scoped to
+the call, so the session RNG is left as it was found. \code{NULL}
+(default) does not seed at all, so an outer \code{set.seed()} still
+governs the main-process draws.}
 }
 \value{
 A \code{\link{TwasWeights}} collection keyed by \code{(study,

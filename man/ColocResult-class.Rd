@@ -10,14 +10,10 @@ A collection of colocalization results, one element per tested
   with \code{\link{getColocPairs}}, \code{\link{getColocVariants}},
   \code{\link{getColocCredibleSets}} and \code{\link{getColocGenes}}.
 }
-\section{Slots}{
-
-\describe{
-\item{\code{ldSketch}}{The LD reference \code{GenotypeHandle} the underlying fits
-were computed against, or \code{NULL}. Used by
-\code{getColocCredibleSets()} to compute credible-set purity.}
-}}
-
+\details{
+The inherited \code{ldSketch} is what
+  \code{getColocCredibleSets()} uses to compute credible-set purity.
+}
 \seealso{
 \code{\link{colocPipeline}}
 }

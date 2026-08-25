@@ -112,7 +112,7 @@ names(res3$separate_gwas)
 
 A `QtlSumStats` input goes through the same dispatch with no
 individual-level data needed; the LD comes from the `ldSketch`
-`GenotypeHandle` carried on the collection.
+genotype panel carried on the collection.
 
 ```{r sumstats}
 resSs <- colocboostPipeline(

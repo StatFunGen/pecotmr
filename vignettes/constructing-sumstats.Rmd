@@ -37,8 +37,9 @@ dosage-counted allele), `A2` (other allele), `Z`, `N`; optionally `MAF`,
 stored in slots, not columns:
 
 * `genome` — the build label (e.g. `"GRCh38"`).
-*  `ldSketch` — a `GenotypeHandle` giving the LD reference used for QC and
-    downstream analyses.
+*  `ldSketch` — a genotype panel (a `RangedSummarizedExperiment`, as returned
+    by `readGenotypes()`) giving the LD reference used for QC and downstream
+    analyses.
 
 Optional per-row columns: `varY` (phenotype variance) and, for case/control
 GWAS, `nCase` / `nControl`.
@@ -73,7 +74,7 @@ genoPrefix <- sub(
     "",
     system.file("extdata", "toy_ref.bed", package = "pecotmr")
 )
-ldSketch <- GenotypeHandle(plink1Prefix = genoPrefix)
+ldSketch <- readGenotypes(plink1Prefix = genoPrefix)
 
 # Five real toy_ref chr22 sites (positions and alleles taken from the panel).
 sumstatsDf <- data.frame(
@@ -131,8 +132,8 @@ S4Vectors::mcols(gws[[1]])
 ```
 
 The `ldSketch` argument also accepts a path/prefix or a chromosome-sharded
-`genoMeta` specification (see `?GenotypeHandle`), so a genome-wide reference can
-be supplied as a `#chr,path` meta file rather than a single handle.
+`genoMeta` specification (see `?readGenotypes`), so a genome-wide reference can
+be supplied as a `#chr,path` meta file rather than a single panel.
 
 ## GwasSumStats manually
 

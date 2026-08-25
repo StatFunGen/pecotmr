@@ -764,7 +764,28 @@ test_that(".resolveLdSketch accepts a genoMeta vector, a path, and rejects bad i
         "GenotypeHandle"
     )
     expect_error(pecotmr:::.resolveLdSketch("nonexistent_meta.tsv"))
-    expect_error(pecotmr:::.resolveLdSketch(42L), "must be a GenotypeHandle")
+    expect_error(pecotmr:::.resolveLdSketch(42L), "must be a genotype panel")
+})
+
+test_that(".resolveLdSketch takes the panel readGenotypes returns", {
+    # readGenotypes() is the only public way to open genotypes now, so the
+    # loaders have to accept its return value wherever they accepted a handle.
+    panel <- readGenotypes(plink1Prefix = .toyRefPrefix())
+    resolved <- pecotmr:::.resolveLdSketch(panel)
+    expect_s4_class(resolved, "GenotypeHandle")
+    expect_identical(resolved, pecotmr:::.resolveLdSketch(.toyRefPrefix()))
+})
+
+test_that(".materializeLdSketch and .resolveGenoHandle take a panel too", {
+    panel <- readGenotypes(plink1Prefix = .toyRefPrefix())
+    expect_s4_class(
+        pecotmr:::.materializeLdSketch(panel, "22"),
+        "GenotypeHandle"
+    )
+    expect_s4_class(
+        pecotmr:::.resolveGenoHandle(NULL, "s1", NULL, panel),
+        "GenotypeHandle"
+    )
 })
 
 test_that(".entriesChroms collects canonical chromosomes across entries", {

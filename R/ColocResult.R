@@ -46,25 +46,32 @@ NULL
 #'   projection surface: both answer \code{\link{getColocPairs}} and
 #'   \code{\link{getColocVariants}}, so code that only needs "which variants
 #'   colocalized, and how strongly" works against either.
+#' @slot ldSketch The LD reference panel the underlying fits were computed
+#'   against, or \code{NULL}. Shared by both subclasses: coloc and ColocBoost
+#'   report different statistics, but both are computed against a panel and
+#'   both are asked for it the same way.
 #' @export
-setClass("ColocResultBase", contains = c("VIRTUAL", "RangedTupleList"))
+setClass(
+    "ColocResultBase",
+    contains = c("VIRTUAL", "RangedTupleList"),
+    representation(ldSketch = "LdSketchOrNULL"),
+    prototype(ldSketch = NULL)
+)
+
+#' @rdname getLdSketch
+#' @export
+setMethod("getLdSketch", "ColocResultBase", function(x, ...) x@ldSketch)
 
 #' @title Colocalization Result
 #' @description A collection of colocalization results, one element per tested
 #'   (QTL credible set, GWAS credible set, block) pair. Build the four views
 #'   with \code{\link{getColocPairs}}, \code{\link{getColocVariants}},
 #'   \code{\link{getColocCredibleSets}} and \code{\link{getColocGenes}}.
-#' @slot ldSketch The LD reference \code{GenotypeHandle} the underlying fits
-#'   were computed against, or \code{NULL}. Used by
-#'   \code{getColocCredibleSets()} to compute credible-set purity.
+#' @details The inherited \code{ldSketch} is what
+#'   \code{getColocCredibleSets()} uses to compute credible-set purity.
 #' @seealso \code{\link{colocPipeline}}
 #' @export
-setClass(
-    "ColocResult",
-    contains = "ColocResultBase",
-    representation(ldSketch = "ANY"),
-    prototype(ldSketch = NULL)
-)
+setClass("ColocResult", contains = "ColocResultBase")
 
 methods::setValidity("ColocResult", function(object) {
     .validateColocResult(object)
@@ -154,10 +161,6 @@ methods::setValidity("ColocResult", function(object) {
 
 # ---- accessors --------------------------------------------------------------
 
-#' @rdname getLdSketch
-#' @export
-setMethod("getLdSketch", "ColocResult", function(x, ...) x@ldSketch)
-
 #' @rdname show-methods
 #' @export
 setMethod("show", "ColocResult", function(object) {
@@ -190,8 +193,9 @@ setMethod("show", "ColocResult", function(object) {
 #'   \code{PP.H4.abf}.
 #' @param variants A list, parallel to \code{pairs}' rows, of per-pair data
 #'   frames with a \code{variant_id} column and a \code{SNP.PP.H4} column.
-#' @param ldSketch Optional \code{GenotypeHandle} for the LD reference, used by
-#'   \code{\link{getColocCredibleSets}} to compute purity.
+#' @param ldSketch Optional genotype panel (see \code{\link{readGenotypes}})
+#'   for the LD reference, used by \code{\link{getColocCredibleSets}} to
+#'   compute purity.
 #' @return A \code{ColocResult}.
 #' @examples
 #' pairs <- data.frame(
@@ -225,7 +229,7 @@ ColocResult <- function(pairs, variants, ldSketch = NULL) {
         S4Vectors::DataFrame,
         !!!c(as.list(pairs), list(check.names = FALSE))
     )
-    obj <- new("ColocResult", grl, ldSketch = ldSketch)
+    obj <- new("ColocResult", grl, ldSketch = .asLdSketch(ldSketch))
     validObject(obj)
     obj
 }

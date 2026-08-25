@@ -2,7 +2,7 @@
 % Please edit documentation in R/GwasFineMappingResult.R
 \name{GwasFineMappingResult}
 \alias{GwasFineMappingResult}
-\title{TWAS Weights Collection}
+\title{Create a GwasFineMappingResult Collection}
 \usage{
 GwasFineMappingResult(
   study,
@@ -30,29 +30,13 @@ blocks' spans leave gaps.}
 \code{NULL}), carried forward as provenance; not part of the identity key.
 \code{NULL} (default) omits the column.}
 
-\item{ldSketch}{An optional \code{GenotypeHandle}.}
+\item{ldSketch}{An optional genotype panel (see
+\code{\link{readGenotypes}}).}
 }
 \value{
 A \code{GwasFineMappingResult} object.
 }
 \description{
-S4 collection of TWAS weights keyed by the identity tuple
-  \code{(study, context, trait, method)}. Each entry is a
-  \code{TwasWeightsRow} carrying one method's weights for one
-  trait/context/study. Implements the \code{DFrame}-subclass collection
-  pattern.
-
-Required columns: \code{study}, \code{context}, \code{trait}, \code{method},
-\code{entry}. Each \code{entry} is a \code{TwasWeightsRow}.
-
-Optional columns \code{jointStudies}, \code{jointContexts},
-\code{jointTraits} appear when the collection contains rows produced by a
-\code{jointSpecification}-driven joint fit. For such a row, the corresponding
-identity-tuple column carries the sentinel \code{"joint"} and the joint
-column lists the semicolon-joined members of the joined axis. For non-joint
-rows the joint columns are \code{NA_character_}. Tuple uniqueness is enforced
-jointly across the identity-tuple columns and any present joint columns.
-
 Construct a \code{GwasFineMappingResult} collection from
   per-(study, method) tuples and a list of \code{FineMappingRow}
   payloads. The collection can represent either a single LD block (one row
@@ -64,15 +48,6 @@ Construct a \code{GwasFineMappingResult} collection from
   cannot drift out of step with them and stays correct after
   \code{\link{subsetRegion}}.
 }
-\section{Slots}{
-
-\describe{
-\item{\code{ldSketch}}{The LD reference \code{GenotypeHandle} the weights were
-derived against, or \code{NULL} when the weights were learned from
-individual-level data. Used downstream for cross-pipeline LD-sketch
-identity validation.}
-}}
-
 \examples{
 tl <- data.frame(variant_id = paste0("chr1:", 100 * 1:3, ":A:G"),
   pip = c(0.9, 0.5, 0.1), cs = c(1L, 1L, NA))

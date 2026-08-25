@@ -27,6 +27,13 @@
 \item{genotype}{Logical (length 1), default \code{FALSE}. Include the
 genotype experiment, reading its dosages into memory to do so.}
 }
+\value{
+A \code{QtlDataset} narrowed to the requested features, samples
+  and contexts.
+
+A long-format \code{DataFrame}, one row per
+  (assay, primary, rowname) observation.
+}
 \description{
 S4 container for a single QTL study's regional data,
   extending \code{MultiAssayExperiment}. Every QTL context is one
@@ -84,7 +91,7 @@ than one of the things being chosen between, so it is always retained.
 classes to tag downstream \code{FineMappingResult} / \code{TwasWeights}
 entries.}
 
-\item{\code{genotypes}}{A \code{GenotypeHandle} for lazy access to genotype dosages.
+\item{\code{genotypes}}{The genotype source for lazy access to dosages.
 The \code{genotype} experiment's assay reads through this handle; the
 extraction accessors read it directly, so that QC can be applied per
 block.}

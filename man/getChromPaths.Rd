@@ -25,7 +25,9 @@ The chromosome-to-path map of a sharded
   non-empty map marks a one-file-per-chromosome handle whose extraction is
   routed by chromosome.
 }
-\examples{
-data(qtlDatasetExample)
-getChromPaths(getGenotypeHandle(qtlDatasetExample))
+\details{
+The genotype handle is the seed layer behind a panel and
+  is not part of the public interface; obtain a panel from
+  \code{readGenotypes()} and ask it directly.
 }
+\keyword{internal}

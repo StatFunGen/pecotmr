@@ -911,7 +911,10 @@ test_that("readAfreq IDs match pvar IDs", {
 test_that("matchVariantsToKeep filters to specified variants", {
     skip_if_not_installed("pgenlibr")
     td <- test_path("test_data")
-    handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+    handle <- readGenotypeHandle(
+        file.path(td, "test_variants"),
+        format = "plink2"
+    )
     vi <- pecotmr:::.snpInfoToVariantInfo(handle@snpInfo)
 
     # Write a keep file as tab-delimited with chrom/pos columns
@@ -931,7 +934,10 @@ test_that("matchVariantsToKeep filters to specified variants", {
 test_that("matchVariantsToKeep returns all FALSE for non-matching variants", {
     skip_if_not_installed("pgenlibr")
     td <- test_path("test_data")
-    handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+    handle <- readGenotypeHandle(
+        file.path(td, "test_variants"),
+        format = "plink2"
+    )
     vi <- pecotmr:::.snpInfoToVariantInfo(handle@snpInfo)
 
     keep_file <- tempfile(fileext = ".tsv")
@@ -1027,7 +1033,10 @@ test_that("matchVariantsToKeep works with single-column variant ID file", {
 test_that("matchVariantsToKeep uses position-only matching when no alleles", {
     skip_if_not_installed("pgenlibr")
     td <- test_path("test_data")
-    handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+    handle <- readGenotypeHandle(
+        file.path(td, "test_variants"),
+        format = "plink2"
+    )
     vi <- pecotmr:::.snpInfoToVariantInfo(handle@snpInfo)
 
     keep_file <- tempfile(fileext = ".tsv")
@@ -1054,11 +1063,14 @@ test_that("matchVariantsToKeep uses position-only matching when no alleles", {
 test_that("readGenotypes loads plink2 handle with all variants", {
     skip_if_not_installed("pgenlibr")
     td <- test_path("test_data")
-    handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+    handle <- readGenotypeHandle(
+        file.path(td, "test_variants"),
+        format = "plink2"
+    )
     expect_s4_class(handle, "GenotypeHandle")
     expect_equal(handle@nSamples, 100L)
-    expect_equal(nrow(handle@snpInfo), 349L)
-    rse <- extractBlockGenotypes(handle, seq_len(nrow(handle@snpInfo)))
+    expect_equal(nrow(getSnpInfo(handle)), 349L)
+    rse <- extractBlockGenotypes(handle, seq_len(nrow(getSnpInfo(handle))))
     expect_s4_class(rse, "SummarizedExperiment")
     dosage <- SummarizedExperiment::assay(rse, "dosage")
     expect_equal(nrow(dosage), 349L)
@@ -1104,7 +1116,10 @@ test_that("loadGenotypeRegion removes indels for plink2", {
 test_that("loadGenotypeRegion filters by keep_variants_path for plink2", {
     skip_if_not_installed("pgenlibr")
     td <- test_path("test_data")
-    handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+    handle <- readGenotypeHandle(
+        file.path(td, "test_variants"),
+        format = "plink2"
+    )
     vi <- pecotmr:::.snpInfoToVariantInfo(handle@snpInfo)
 
     keep_file <- tempfile(fileext = ".tsv")
@@ -1135,7 +1150,10 @@ test_that("loadGenotypeRegion attaches afreq info for plink2", {
 test_that("readGenotypes plink2 sample names match psam IIDs", {
     skip_if_not_installed("pgenlibr")
     td <- test_path("test_data")
-    handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+    handle <- readGenotypeHandle(
+        file.path(td, "test_variants"),
+        format = "plink2"
+    )
     expect_true(all(grepl("^(HG|NA)\\d+", handle@sampleIds)))
     expect_equal(length(unique(handle@sampleIds)), 100L)
 })
@@ -1247,7 +1265,7 @@ check_genotype_result <- function(
 
 test_that("readGenotypes creates plink1 handle", {
     skip_if_not_installed("snpStats")
-    handle <- readGenotypes(plink_prefix, format = "plink1")
+    handle <- readGenotypeHandle(plink_prefix, format = "plink1")
     expect_s4_class(handle, "GenotypeHandle")
     expect_equal(handle@format, "plink1")
     expect_equal(handle@nSamples, n_samples)
@@ -1271,7 +1289,7 @@ test_that("loadGenotypeRegion loads plink1 via dispatch", {
 
 test_that("readGenotypes creates plink2 handle", {
     skip_if_not_installed("pgenlibr")
-    handle <- readGenotypes(plink_prefix, format = "plink2")
+    handle <- readGenotypeHandle(plink_prefix, format = "plink2")
     expect_s4_class(handle, "GenotypeHandle")
     expect_equal(handle@format, "plink2")
     expect_equal(handle@nSamples, n_samples)
@@ -1280,8 +1298,8 @@ test_that("readGenotypes creates plink2 handle", {
 
 test_that("extractBlockGenotypes works for plink2", {
     skip_if_not_installed("pgenlibr")
-    handle <- readGenotypes(plink_prefix, format = "plink2")
-    rse <- extractBlockGenotypes(handle, seq_len(nrow(handle@snpInfo)))
+    handle <- readGenotypeHandle(plink_prefix, format = "plink2")
+    rse <- extractBlockGenotypes(handle, seq_len(nrow(getSnpInfo(handle))))
     expect_s4_class(rse, "SummarizedExperiment")
     dosage <- SummarizedExperiment::assay(rse, "dosage")
     expect_equal(nrow(dosage), n_variants)
@@ -1323,7 +1341,7 @@ test_that("loadGenotypeRegion errors on empty region for plink2", {
 
 test_that("readGenotypes creates vcf handle", {
     skip_if_not_installed("VariantAnnotation")
-    handle <- readGenotypes(vcf_path, format = "vcf")
+    handle <- readGenotypeHandle(vcf_path, format = "vcf")
     expect_s4_class(handle, "GenotypeHandle")
     expect_equal(handle@format, "vcf")
     expect_equal(handle@nSamples, n_samples)
@@ -1371,7 +1389,7 @@ test_that("loadGenotypeRegion filters VCF indels", {
 test_that("readGenotypes creates gds handle", {
     skip_if_not_installed("SNPRelate")
     skip_if_not_installed("gdsfmt")
-    handle <- readGenotypes(gds_path, format = "gds")
+    handle <- readGenotypeHandle(gds_path, format = "gds")
     expect_s4_class(handle, "GenotypeHandle")
     expect_equal(handle@format, "gds")
     expect_equal(handle@nSamples, n_samples)
@@ -1446,8 +1464,8 @@ test_that("all formats return same dimensions and positions via loadGenotypeRegi
 test_that("PLINK1 and PLINK2 readGenotypes return consistent alleles", {
     skip_if_not_installed("snpStats")
     skip_if_not_installed("pgenlibr")
-    h1 <- readGenotypes(plink_prefix, format = "plink1")
-    h2 <- readGenotypes(plink_prefix, format = "plink2")
+    h1 <- readGenotypeHandle(plink_prefix, format = "plink1")
+    h2 <- readGenotypeHandle(plink_prefix, format = "plink2")
 
     expect_equal(h1@snpInfo$A1, h2@snpInfo$A1)
     expect_equal(h1@snpInfo$A2, h2@snpInfo$A2)
@@ -1506,8 +1524,8 @@ test_that("loadGenotypeRegion errors on unrecognized format", {
 test_that("extractBlockGenotypes returns SummarizedExperiment", {
     skip_if_not_installed("pgenlibr")
     stem <- test_path("test_data", "test_variants")
-    handle <- readGenotypes(stem, format = "plink2")
-    n_snps <- nrow(handle@snpInfo)
+    handle <- readGenotypeHandle(stem, format = "plink2")
+    n_snps <- nrow(getSnpInfo(handle))
     skip_if(n_snps == 0, "No SNPs in handle")
 
     rse <- extractBlockGenotypes(handle, seq_len(min(5L, n_snps)))
@@ -1637,9 +1655,9 @@ test_that("extractBlockGenotypes returns SummarizedExperiment", {
         expect_s4_class(shard, "GenotypeHandle")
         expect_equal(shard@format, ref21@format)
         expect_equal(sort(names(shard@chromPaths)), c("21", "22"))
-        n21 <- nrow(ref21@snpInfo)
-        n22 <- nrow(ref22@snpInfo)
-        expect_equal(nrow(shard@snpInfo), n21 + n22)
+        n21 <- nrow(getSnpInfo(ref21))
+        n22 <- nrow(getSnpInfo(ref22))
+        expect_equal(nrow(getSnpInfo(shard)), n21 + n22)
         # A chr21 request routes to the chr21 payload (== single-file chr21).
         expect_equal(.shardDose(shard, 1:5), .shardDose(ref21, 1:5))
         # A chr22 request routes to the chr22 payload, and the global->local index
@@ -1731,7 +1749,7 @@ test_that("genoMeta meta-file form matches the named-vector form", {
 
 test_that("readGenotypes errors on unsupported format", {
     expect_error(
-        readGenotypes("/whatever/path", format = "bogusFormat"),
+        readGenotypeHandle("/whatever/path", format = "bogusFormat"),
         "Unsupported genotype format: bogusFormat"
     )
 })
@@ -1769,7 +1787,7 @@ test_that(".makePlink1Handle errors when plink1 trio is absent", {
 test_that("extractBlockGenotypes returns NULL when extractor yields NULL", {
     skip_if_not_installed("VariantAnnotation")
     td <- test_path("test_data")
-    handle <- readGenotypes(
+    handle <- readGenotypeHandle(
         file.path(td, "test_variants.vcf.gz"),
         format = "vcf"
     )
@@ -1826,7 +1844,10 @@ test_that(".extractBlockGds returns NULL when snpgdsGetGeno yields NULL", {
     skip_if_not_installed("SNPRelate")
     skip_if_not_installed("gdsfmt")
     td <- test_path("test_data")
-    handle <- readGenotypes(file.path(td, "test_variants.gds"), format = "gds")
+    handle <- readGenotypeHandle(
+        file.path(td, "test_variants.gds"),
+        format = "gds"
+    )
     testthat::local_mocked_bindings(
         snpgdsGetGeno = function(...) NULL,
         .package = "SNPRelate"
@@ -1902,8 +1923,8 @@ test_that(".extractBlockVcf parses missing genotypes as NA", {
     skip_if_not_installed("VariantAnnotation")
     skip_if_not_installed("Rsamtools")
     bg <- .gioMakeMissingGtVcf()
-    handle <- readGenotypes(bg, format = "vcf")
-    expect_equal(nrow(handle@snpInfo), 2L)
+    handle <- readGenotypeHandle(bg, format = "vcf")
+    expect_equal(nrow(getSnpInfo(handle)), 2L)
     # meanImpute=FALSE keeps the "./." dosages as NA
     se <- extractBlockGenotypes(handle, 1:2, meanImpute = FALSE)
     dosage <- SummarizedExperiment::assay(se, "dosage")
@@ -1917,7 +1938,10 @@ test_that(".extractBlockVcf parses missing genotypes as NA", {
 test_that("plink2 extraction reopens a stale (deserialized) pgen pointer", {
     skip_if_not_installed("pgenlibr")
     td <- test_path("test_data")
-    handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+    handle <- readGenotypeHandle(
+        file.path(td, "test_variants"),
+        format = "plink2"
+    )
     ref <- SummarizedExperiment::assay(
         extractBlockGenotypes(handle, 1:5),
         "dosage"
@@ -1935,45 +1959,61 @@ test_that("plink2 extraction reopens a stale (deserialized) pgen pointer", {
     expect_equal(got, ref)
 })
 
-# --- computeBlockLdCor: GDS internal path, NULL guard, single-col, computeLd --
+# --- computeLd on a panel: NULL guard, single-variant, general path ----------
 
-test_that("computeBlockLdCor uses the native GDS path for internal backend", {
+test_that("computeLd on a GDS panel uses the in-memory path", {
+    # The native SNPRelate route is no longer chosen implicitly by format:
+    # it applies a different missing-data policy, so it is opt-in via
+    # onDisk = TRUE rather than a silent consequence of the panel's format.
     skip_if_not_installed("SNPRelate")
     skip_if_not_installed("gdsfmt")
     td <- test_path("test_data")
-    handle <- readGenotypes(file.path(td, "test_variants.gds"), format = "gds")
-    R <- computeBlockLdCor(handle, 1:6, backend = "internal")
+    handle <- readGenotypeHandle(
+        file.path(td, "test_variants.gds"),
+        format = "gds"
+    )
+    R <- computeLd(handle, snpIdx = 1:6, backend = "internal")
     expect_equal(dim(R), c(6L, 6L))
     expect_true(all(is.finite(R)))
     expect_false(anyNA(R))
-    expect_equal(diag(R), rep(1, 6), tolerance = 1e-6)
+    expect_equal(unname(diag(R)), rep(1, 6), tolerance = 1e-6)
+    expect_identical(rownames(R), getSnpInfo(handle)$SNP[1:6])
 })
 
-test_that("computeBlockLdCor returns identity when extraction is NULL", {
+test_that("computeLd returns identity when extraction is NULL", {
     skip_if_not_installed("pgenlibr")
     td <- test_path("test_data")
-    handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
+    handle <- readGenotypeHandle(
+        file.path(td, "test_variants"),
+        format = "plink2"
+    )
     testthat::local_mocked_bindings(
         extractBlockGenotypes = function(...) NULL,
         .package = "pecotmr"
     )
-    R <- computeBlockLdCor(handle, 1:4, backend = "internal")
+    R <- computeLd(handle, snpIdx = 1:4, backend = "internal")
     expect_equal(R, diag(4))
 })
 
-test_that("computeBlockLdCor returns identity for a single-variant block", {
+test_that("computeLd returns identity for a single-variant block", {
     skip_if_not_installed("pgenlibr")
     td <- test_path("test_data")
-    handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
-    R <- computeBlockLdCor(handle, 1L, backend = "internal")
+    handle <- readGenotypeHandle(
+        file.path(td, "test_variants"),
+        format = "plink2"
+    )
+    R <- computeLd(handle, snpIdx = 1L, backend = "internal")
     expect_equal(R, diag(1))
 })
 
-test_that("computeBlockLdCor computes a correlation matrix via the general path", {
+test_that("computeLd on a panel computes via the general path", {
     skip_if_not_installed("pgenlibr")
     td <- test_path("test_data")
-    handle <- readGenotypes(file.path(td, "test_variants"), format = "plink2")
-    R <- computeBlockLdCor(handle, 1:5, backend = "internal")
+    handle <- readGenotypeHandle(
+        file.path(td, "test_variants"),
+        format = "plink2"
+    )
+    R <- computeLd(handle, snpIdx = 1:5, backend = "internal")
     expect_equal(dim(R), c(5L, 5L))
     expect_equal(unname(diag(R)), rep(1, 5), tolerance = 1e-6)
 })
@@ -2169,14 +2209,20 @@ test_that("loadGenotypeRegion warns on non-integer dosages without a sidecar", {
 # ---- fileIdx + snpInfo subsetting (memory-safe LD-sketch trimming) -----------
 
 test_that(".withFileIdx + readers attach a sequential fileIdx to snpInfo", {
-    h <- readGenotypes(test_path("test_data/test_variants"), format = "plink2")
+    h <- readGenotypeHandle(
+        test_path("test_data/test_variants"),
+        format = "plink2"
+    )
     si <- getSnpInfo(h)
     expect_true("fileIdx" %in% names(si))
     expect_identical(si$fileIdx, seq_len(nrow(si)))
 })
 
 test_that(".subsetGenotypeHandle keeps PLINK2 reads correct for kept variants", {
-    h <- readGenotypes(test_path("test_data/test_variants"), format = "plink2")
+    h <- readGenotypeHandle(
+        test_path("test_data/test_variants"),
+        format = "plink2"
+    )
     si <- getSnpInfo(h)
     want <- c(2L, 4L, 5L, 9L)
     dosFull <- pecotmr:::.dosageMatrix(h, want, meanImpute = TRUE)
@@ -2193,9 +2239,263 @@ test_that(".subsetGenotypeHandle keeps PLINK2 reads correct for kept variants", 
 
 test_that(".subsetGenotypeHandle is NULL-safe and a no-op when nothing dropped", {
     expect_null(pecotmr:::.subsetGenotypeHandle(NULL, TRUE))
-    h <- readGenotypes(test_path("test_data/test_variants"), format = "plink2")
+    h <- readGenotypeHandle(
+        test_path("test_data/test_variants"),
+        format = "plink2"
+    )
     expect_identical(
         pecotmr:::.subsetGenotypeHandle(h, seq_len(nrow(getSnpInfo(h)))),
         h
     )
+})
+
+
+# ---------------------------------------------------------------------------
+# extractBlockGenotypes: an unsorted request must not mislabel the block.
+#
+# snpStats (select.snps=) and SNPRelate (snp.id=) return variants in FILE
+# order whatever order was asked for, while the block is labelled from
+# snpInfo[snpIdx] -- the REQUESTED order. Both are the right length, so the
+# mismatch was silent: names described one variant and dosages another.
+# ---------------------------------------------------------------------------
+
+# @noRd
+.gio_orderCheck <- function(fmt, path) {
+    handle <- readGenotypeHandle(path, format = fmt)
+    perm <- c(4L, 1L, 6L, 2L, 5L, 3L)
+    si <- getSnpInfo(handle)
+    seq6 <- extractBlockGenotypes(handle, 1:6, meanImpute = FALSE)
+    seP <- extractBlockGenotypes(handle, perm, meanImpute = FALSE)
+    a6 <- as.matrix(SummarizedExperiment::assay(seq6, "dosage"))
+    aP <- as.matrix(SummarizedExperiment::assay(seP, "dosage"))
+    # Names follow the request ...
+    expect_identical(rownames(seP), si$SNP[perm])
+    # ... and so do the dosages behind them.
+    expect_equal(unname(aP), unname(a6[perm, , drop = FALSE]))
+}
+
+test_that("extractBlockGenotypes honours request order (plink1)", {
+    .gio_orderCheck("plink1", test_path("test_data", "test_variants"))
+})
+
+test_that("extractBlockGenotypes honours request order (plink2)", {
+    skip_if_not_installed("pgenlibr")
+    .gio_orderCheck("plink2", test_path("test_data", "test_variants"))
+})
+
+test_that("extractBlockGenotypes honours request order (gds)", {
+    skip_if_not_installed("SNPRelate")
+    skip_if_not_installed("gdsfmt")
+    .gio_orderCheck("gds", test_path("test_data", "test_variants.gds"))
+})
+
+test_that("a delayed read honours request order too", {
+    # DelayedArray hands the index straight to extract_array(), so the seed
+    # inherits whatever the reader does.
+    handle <- readGenotypeHandle(
+        test_path("test_data", "test_variants"),
+        format = "plink1"
+    )
+    a <- genotypeDelayedArray(handle)
+    perm <- c(4L, 1L, 6L, 2L, 5L, 3L)
+    expect_equal(
+        unname(as.matrix(a[perm, 1:4])),
+        unname(as.matrix(a[1:6, 1:4])[perm, , drop = FALSE])
+    )
+})
+
+test_that("LD from a sketch does not depend on the request order", {
+    handle <- readGenotypeHandle(
+        test_path("test_data", "test_variants"),
+        format = "plink1"
+    )
+    ids <- getSnpInfo(handle)$SNP[1:6]
+    shuffled <- ids[c(4L, 1L, 6L, 2L, 5L, 3L)]
+    sorted <- pecotmr:::.ldFromSketch(handle, ids, label = "t")
+    mixed <- pecotmr:::.ldFromSketch(handle, shuffled, label = "t")
+    expect_identical(rownames(mixed), shuffled)
+    expect_equal(sorted[ids, ids], mixed[ids, ids])
+})
+
+test_that(".restoreRequestedOrder refuses a short block", {
+    # A backend returning fewer variants than asked for cannot be labelled
+    # from snpInfo[snpIdx]; that must be loud, not silently truncated.
+    expect_error(
+        pecotmr:::.restoreRequestedOrder(matrix(0, 3, 2), 1:3),
+        "cannot be labelled"
+    )
+})
+
+
+# ---------------------------------------------------------------------------
+# computeLd(onDisk = TRUE): read the correlation off the GDS without ever
+# materialising dosages. The dosage matrix scales with samples x variants
+# while the result scales with variants^2, so on a wide panel the input dwarfs
+# the output and keeping it on disk is what makes a big block feasible.
+# ---------------------------------------------------------------------------
+
+test_that("onDisk LD matches the in-memory path on complete data", {
+    skip_if_not_installed("SNPRelate")
+    handle <- readGenotypeHandle(
+        test_path("test_data", "test_variants.gds"),
+        format = "gds"
+    )
+    idx <- c(4L, 1L, 6L, 2L, 5L, 3L)
+    onDisk <- computeLd(handle, snpIdx = idx, backend = "snprelate",
+        onDisk = TRUE)
+    inMem <- computeLd(handle, snpIdx = idx)
+    # The fixture has no missing calls, which is the only regime where the
+    # two are meant to agree.
+    expect_equal(unname(onDisk), unname(inMem), tolerance = 1e-8)
+})
+
+test_that("onDisk LD labels and orders by the request", {
+    skip_if_not_installed("SNPRelate")
+    handle <- readGenotypeHandle(
+        test_path("test_data", "test_variants.gds"),
+        format = "gds"
+    )
+    idx <- c(4L, 1L, 6L, 2L, 5L, 3L)
+    R <- computeLd(handle, snpIdx = idx, backend = "snprelate",
+        onDisk = TRUE)
+    # snpgdsLDMat() returns file order and labels nothing; both are corrected.
+    expect_identical(rownames(R), getSnpInfo(handle)$SNP[idx])
+    expect_identical(colnames(R), rownames(R))
+})
+
+test_that("onDisk LD is refused where it cannot be honoured", {
+    skip_if_not_installed("SNPRelate")
+    gds <- readGenotypeHandle(
+        test_path("test_data", "test_variants.gds"),
+        format = "gds"
+    )
+    plink <- readGenotypeHandle(
+        test_path("test_data", "test_variants"),
+        format = "plink1"
+    )
+    expect_error(
+        computeLd(plink, backend = "snprelate", onDisk = TRUE),
+        "GDS-backed panel"
+    )
+    expect_error(
+        computeLd(gds, backend = "internal", onDisk = TRUE),
+        "only available for"
+    )
+    expect_error(
+        computeLd(matrix(1, 4, 3), backend = "snprelate", onDisk = TRUE),
+        "must be one"
+    )
+    expect_error(
+        computeLd(gds, method = "gcta", backend = "snprelate", onDisk = TRUE),
+        "sample correlation"
+    )
+})
+
+test_that("ordering uses FILE position, not the snpInfo row number", {
+    # A row-subset handle's snpInfo rows are no longer file positions, so
+    # sorting the request by row number would ask the backend for the wrong
+    # ascending order. fileIdx carries the real mapping.
+    handle <- readGenotypeHandle(
+        test_path("test_data", "test_variants"),
+        format = "plink1"
+    )
+    keep <- c(9L, 2L, 7L, 4L)
+    sub <- pecotmr:::.subsetGenotypeHandle(handle, keep)
+    expect_identical(getSnpInfo(sub)$fileIdx, keep)
+    got <- as.matrix(SummarizedExperiment::assay(
+        extractBlockGenotypes(sub, seq_along(keep), meanImpute = FALSE),
+        "dosage"
+    ))
+    want <- as.matrix(SummarizedExperiment::assay(
+        extractBlockGenotypes(handle, keep, meanImpute = FALSE),
+        "dosage"
+    ))
+    expect_equal(unname(got), unname(want))
+})
+
+
+# ---------------------------------------------------------------------------
+# readGenotypes(): the exported entry point returns a genotype PANEL.
+#
+# The handle is the seed layer beneath it and is no longer public. These pin
+# the panel contract; the tests above exercise the reader machinery through
+# readGenotypeHandle() and assert on the handle itself.
+# ---------------------------------------------------------------------------
+
+test_that("readGenotypes returns a panel, not a handle", {
+    panel <- readGenotypes(
+        test_path("test_data", "test_variants"),
+        format = "plink1"
+    )
+    expect_s4_class(panel, "RangedSummarizedExperiment")
+    handle <- readGenotypeHandle(
+        test_path("test_data", "test_variants"),
+        format = "plink1"
+    )
+    # variants x samples, the Bioconductor orientation.
+    expect_equal(nrow(panel), nrow(getSnpInfo(handle)))
+    expect_equal(ncol(panel), length(pecotmr:::.ghSeedHandle(
+        DelayedArray::seed(SummarizedExperiment::assay(panel, "dosage"))
+    )@sampleIds))
+})
+
+test_that("the panel's assay is delayed and its seed is the handle", {
+    panel <- readGenotypes(
+        test_path("test_data", "test_variants"),
+        format = "plink1"
+    )
+    a <- SummarizedExperiment::assay(panel, "dosage")
+    expect_s4_class(a, "DelayedMatrix")
+    handle <- readGenotypeHandle(
+        test_path("test_data", "test_variants"),
+        format = "plink1"
+    )
+    expect_identical(pecotmr:::.ldSketchHandle(panel), handle)
+})
+
+test_that("a panel answers panel questions without the handle", {
+    panel <- readGenotypes(
+        test_path("test_data", "test_variants"),
+        format = "plink1"
+    )
+    # The RSE spellings that replace the retired handle accessors.
+    expect_type(rownames(panel), "character")
+    expect_type(colnames(panel), "character")
+    gr <- SummarizedExperiment::rowRanges(panel)
+    expect_s4_class(gr, "GRanges")
+    cn <- colnames(S4Vectors::mcols(gr))
+    expect_true(all(is_in(c("SNP", "A1", "A2"), cn)))
+})
+
+test_that("computeLd accepts the panel readGenotypes returns", {
+    panel <- readGenotypes(
+        test_path("test_data", "test_variants"),
+        format = "plink1"
+    )
+    R <- computeLd(panel, snpIdx = 1:5)
+    expect_equal(dim(R), c(5L, 5L))
+    expect_equal(unname(diag(R)), rep(1, 5), tolerance = 1e-8)
+})
+
+test_that("readGenotypes names a panel by keyword when path is missing", {
+    # GenotypeHandle is internal now, so its source vocabulary (prefixes,
+    # explicit triplets, genoMeta) has to stay reachable from the public
+    # entry point or it is gone from the API entirely.
+    stem <- test_path("test_data", "test_variants")
+    byPath <- readGenotypes(stem, format = "plink1")
+    byPrefix <- readGenotypes(plink1Prefix = stem)
+    expect_equal(dim(byPrefix), dim(byPath))
+    expect_equal(rownames(byPrefix), rownames(byPath))
+    expect_equal(colnames(byPrefix), colnames(byPath))
+})
+
+test_that("readGenotypes reaches the explicit-triplet source too", {
+    stem <- test_path("test_data", "test_variants")
+    panel <- readGenotypes(
+        bed = str_c(stem, ".bed"),
+        bim = str_c(stem, ".bim"),
+        fam = str_c(stem, ".fam")
+    )
+    expect_s4_class(panel, "RangedSummarizedExperiment")
+    expect_equal(dim(panel), dim(readGenotypes(stem, format = "plink1")))
 })

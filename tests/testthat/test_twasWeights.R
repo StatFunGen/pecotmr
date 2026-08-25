@@ -1319,7 +1319,7 @@ test_that("TwasWeights: getWeights/getCvResult/getFits/getLdSketch delegate per 
         )$tag,
         "fitA"
     )
-    expect_s4_class(getLdSketch(tw), "GenotypeHandle")
+    expect_s4_class(getLdSketch(tw), "RangedSummarizedExperiment")
 })
 
 # ===========================================================================

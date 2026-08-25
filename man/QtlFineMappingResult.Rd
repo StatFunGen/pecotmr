@@ -2,7 +2,7 @@
 % Please edit documentation in R/QtlFineMappingResult.R
 \name{QtlFineMappingResult}
 \alias{QtlFineMappingResult}
-\title{GWAS Fine-Mapping Result Collection}
+\title{Create a QtlFineMappingResult Collection}
 \usage{
 QtlFineMappingResult(
   study,
@@ -46,21 +46,14 @@ shape as \code{jointStudies}.}
 \code{NULL}), carried forward as provenance; not part of the identity key.
 \code{NULL} (default) omits the column.}
 
-\item{ldSketch}{An optional \code{GenotypeHandle} (the LD reference for
-RSS-derived fits), or \code{NULL} for individual-level fits.}
+\item{ldSketch}{An optional genotype panel (see \code{\link{readGenotypes}})
+(the LD reference for RSS-derived fits), or \code{NULL} for
+individual-level fits.}
 }
 \value{
 A \code{QtlFineMappingResult} object.
 }
 \description{
-S4 collection of fine-mapping fits for one or more GWAS studies
-  on a single LD block. Keyed by the identity tuple \code{(study, method)};
-  each entry is a \code{FineMappingRow}.
-
-Required columns: \code{study}, \code{method}, \code{entry}. The 2-tuple is
-unique. The caller is expected to construct one \code{GwasFineMappingResult}
-per LD block (no in-class block indexing).
-
 Construct a \code{QtlFineMappingResult} DFrame-subclass
   collection from per-tuple vectors and a list of \code{FineMappingRow}
   payloads (one per tuple). The optional \code{ldSketch} slot records the LD

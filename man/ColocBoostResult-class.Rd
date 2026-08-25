@@ -12,8 +12,6 @@ A collection of ColocBoost results, one element per confidence
 \section{Slots}{
 
 \describe{
-\item{\code{ldSketch}}{The LD reference \code{GenotypeHandle}, or \code{NULL}.}
-
 \item{\code{outcomeInfo}}{A data frame mapping each outcome \code{name} to its
 \code{study}, \code{context}, \code{trait} and \code{dataForm}. ColocBoost
 is given outcome names as bare labels, and those labels are lossy -- a

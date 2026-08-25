@@ -8,20 +8,22 @@
 Abstract container for pre-computed LD statistics. Subclasses
   provide method-specific representations: eigendecompositions (for
   LDER/HDL/sHDL) and LD score matrices (for S-LDSC/g-LDSC).
+
+  An \code{LdStatistic} \strong{is} a \code{GRanges} of the reference
+  variants: one range per SNP, with \code{SNP} / \code{A1} / \code{A2}
+  (and optionally \code{MAF}) in \code{mcols}. Per-variant statistics
+  live in \code{mcols} too, so subsetting narrows the ranges and the
+  statistics together. The genome build comes from \code{seqinfo()} rather
+  than a slot of its own.
 }
 \section{Slots}{
 
 \describe{
-\item{\code{ldBlocks}}{An \code{LdBlocks} object defining the block structure.}
-
-\item{\code{snpInfo}}{A \code{data.frame} with columns \code{SNP}, \code{CHR},
-\code{BP}, \code{A1}, \code{A2}, and optionally \code{MAF}.}
+\item{\code{ldBlocks}}{A \code{GRanges} of LD block intervals.}
 
 \item{\code{nRef}}{Integer, sample size of the LD reference panel.}
 
 \item{\code{inSample}}{Logical, whether the LD reference is from the same cohort as
 the GWAS (affects bias correction).}
-
-\item{\code{genome}}{Character string for genome build.}
 }}
 

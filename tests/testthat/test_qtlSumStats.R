@@ -479,7 +479,7 @@ test_that("QtlSumStats: a non-GenotypeHandle ldSketch is rejected", {
             genome = "hg19",
             ldSketch = "not_a_handle"
         ),
-        "GenotypeHandle or NULL"
+        "must be a genotype panel"
     )
 })
 

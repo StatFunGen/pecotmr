@@ -282,3 +282,161 @@ test_that(".cbrPurity returns NA rather than guessing", {
     expect_equal(.cbrPurity(list(min_abs_cor = m), "s1"), 0.7)
     expect_true(is.na(.cbrPurity(list(min_abs_cor = m), "absent")))
 })
+
+# ===========================================================================
+# show
+# ===========================================================================
+
+test_that("show summarizes sets, analyses and the best cos_npc", {
+    x <- ColocBoostResult(
+        list(.cbr_fake()),
+        "xqtl_coloc",
+        outcomeInfo = .cbr_info()
+    )
+    expect_output(show(x), "ColocBoostResult with 1 confidence set\\(s\\)")
+    expect_output(show(x), "colocalized :")
+    expect_output(show(x), "outcome-only:")
+    expect_output(show(x), "analyses    :")
+    expect_output(show(x), "max cos_npc :")
+})
+
+test_that("show on an empty ColocBoostResult stops after the header", {
+    x <- ColocBoostResult(list(), character(0), outcomeInfo = .cbr_info())
+    expect_output(show(x), "with 0 confidence set\\(s\\)")
+    expect_false(any(grepl(
+        "max cos_npc", capture.output(show(x)), fixed = TRUE
+    )))
+})
+
+# ===========================================================================
+# Outcome-specific (uncolocalized) sets
+#
+# colocboost can report a credible set that belongs to ONE outcome -- "there
+# is signal here, but it does not colocalize". The class keeps those as
+# elements so that stays distinguishable from "no signal at all", but no
+# fixture built one, leaving the whole ucos_details path unexecuted.
+# ===========================================================================
+
+.cbr_with_ucos <- function(ucosIds = "ucos1:y1", outcome = "t1") {
+    res <- .cbr_fake()
+    vars <- list("chr1:300:C:T")
+    purity <- matrix(
+        1,
+        nrow = length(ucosIds),
+        ncol = length(ucosIds),
+        dimnames = list(ucosIds, ucosIds)
+    )
+    res$ucos_details <- list(
+        ucos = list(
+            ucos_index = set_names(list(3L), ucosIds),
+            ucos_variables = set_names(vars, ucosIds)
+        ),
+        ucos_outcomes = list(
+            outcome_name = set_names(list(outcome), ucosIds)
+        ),
+        ucos_purity = list(min_abs_cor = purity),
+        ucos_top_variables = data.frame(
+            top_index = 3L,
+            top_variables = unlist(vars),
+            row.names = ucosIds,
+            stringsAsFactors = FALSE
+        )
+    )
+    res
+}
+
+test_that("an outcome-specific set becomes its own uncolocalized element", {
+    x <- ColocBoostResult(
+        list(.cbr_with_ucos()),
+        "xqtl_coloc",
+        outcomeInfo = .cbr_info()
+    )
+    expect_equal(nrow(x), 2L)
+    expect_equal(sum(x$isColocalized), 1L)
+    expect_equal(sum(!x$isColocalized), 1L)
+})
+
+test_that("an uncolocalized set carries no colocalization statistics", {
+    # cosNpc / vcp describe agreement BETWEEN outcomes, so a single-outcome
+    # set has none to report -- NA rather than a misleading zero.
+    x <- ColocBoostResult(
+        list(.cbr_with_ucos()),
+        "xqtl_coloc",
+        outcomeInfo = .cbr_info()
+    )
+    md <- mcols(x, use.names = FALSE)
+    u <- which(!md$isColocalized)
+    expect_true(is.na(md$cosNpc[u]))
+    expect_true(is.na(md$minNpcOutcome[u]))
+    expect_true(all(is.na(mcols(x[[u]])$vcp)))
+    expect_equal(md$nVariables[u], 1L)
+})
+
+test_that("show counts colocalized and outcome-only sets separately", {
+    x <- ColocBoostResult(
+        list(.cbr_with_ucos()),
+        "xqtl_coloc",
+        outcomeInfo = .cbr_info()
+    )
+    expect_output(show(x), "colocalized : 1")
+    expect_output(show(x), "outcome-only: 1")
+})
+
+# ===========================================================================
+# Pooled variants, and the fallbacks for a result missing its summary tables
+# ===========================================================================
+
+test_that("getColocVariants(pooled = TRUE) collapses to one row per variant", {
+    # Noisy-OR only: ColocBoost's sets are not per-block slices of one signal,
+    # so there is no mutually-exclusive sum stage the way coloc has.
+    x <- ColocBoostResult(
+        list(.cbr_fake(), .cbr_fake()),
+        c("xqtl_coloc", "gwas_only"),
+        outcomeInfo = .cbr_info()
+    )
+    long <- getColocVariants(x)
+    pooled <- getColocVariants(x, pooled = TRUE)
+    expect_lte(nrow(pooled), nrow(long))
+    expect_equal(
+        anyDuplicated(pooled[, c("analysis", "variant_id")]),
+        0L
+    )
+    expect_true(all(pooled$vcp >= 0 & pooled$vcp <= 1))
+})
+
+test_that("a set with no cos_summary row falls back to NA descriptors", {
+    # colocboost need not report a summary row for every set; the class must
+    # still place the set rather than drop it.
+    res <- .cbr_fake()
+    res$cos_summary <- res$cos_summary[0, , drop = FALSE]
+    x <- ColocBoostResult(list(res), "xqtl_coloc", outcomeInfo = .cbr_info())
+    md <- mcols(x, use.names = FALSE)
+    expect_equal(nrow(x), 1L)
+    # topVariable comes from cos_top_variables, which is still present; the
+    # summary is what supplies the vcp and the focal-outcome flag.
+    expect_true(is.na(md$topVariableVcp))
+    expect_true(is.na(md$focalOutcome))
+})
+
+test_that(".cbrTopVariable is NA when the id is absent from the table", {
+    tv <- data.frame(
+        top_index = 1L,
+        top_variables = "chr1:100:C:T",
+        row.names = "cos1",
+        stringsAsFactors = FALSE
+    )
+    expect_equal(.cbrTopVariable(tv, "cos1"), "chr1:100:C:T")
+    expect_true(is.na(.cbrTopVariable(tv, "nope")))
+    expect_true(is.na(.cbrTopVariable(NULL, "cos1")))
+})
+
+test_that("validity names missing identity and outcomeInfo columns", {
+    x <- ColocBoostResult(
+        list(.cbr_fake()),
+        "xqtl_coloc",
+        outcomeInfo = .cbr_info()
+    )
+    bad <- x
+    mcols(bad)$analysis <- NULL
+    expect_error(methods::validObject(bad), "missing columns: analysis")
+})

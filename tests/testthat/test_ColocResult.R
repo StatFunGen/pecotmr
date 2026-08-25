@@ -233,3 +233,104 @@ test_that(".crFirstAtLeast: absorbs floating-point error, not real shortfall", {
     # Never reaching the target returns everything, not an error.
     expect_equal(.crFirstAtLeast(cumsum(c(0.3, 0.2)), 0.9), 2L)
 })
+
+# ===========================================================================
+# show
+#
+# Every other collection class has an expect_output(show(x), ...) test; these
+# two did not, which left both show methods entirely unexecuted.
+# ===========================================================================
+
+test_that("show summarizes the pairs, studies and best PP.H4", {
+    x <- ColocResult(.cr_pairs(), .cr_variants())
+    expect_output(show(x), "ColocResult with 1 colocalized pair\\(s\\)")
+    expect_output(show(x), "QTL studies")
+    expect_output(show(x), "GWAS studies")
+    expect_output(show(x), "variants")
+    expect_output(show(x), "max PP.H4")
+})
+
+test_that("show on an empty ColocResult stops after the header", {
+    x <- ColocResult(.cr_pairs()[0, , drop = FALSE], list())
+    expect_output(show(x), "with 0 colocalized pair\\(s\\)")
+    expect_false(any(grepl(
+        "max PP.H4", capture.output(show(x)), fixed = TRUE
+    )))
+})
+
+# ===========================================================================
+# Credible-set purity
+#
+# Purity is the minimum absolute correlation among a set's members, so it
+# needs an LD reference. Every test above builds a ColocResult without one,
+# which left the whole extraction path dark.
+# ===========================================================================
+
+.cr_panel <- function() {
+    readGenotypes(
+        test_path("test_data", "test_variants"),
+        format = "plink1"
+    )
+}
+
+.cr_panelIds <- function(n = 3L) {
+    panel <- .cr_panel()
+    normalizeVariantId(
+        .refVariantsFromSketch(.ldSketchHandle(panel))$variant_id
+    )[seq_len(n)]
+}
+
+test_that("a singleton credible set is pure by definition", {
+    # No pair to correlate; susie treats it as pure rather than unmeasurable.
+    expect_equal(.crPurityOne(.cr_panelIds(1L), .cr_panel()), 1)
+})
+
+test_that("purity is the minimum absolute correlation among members", {
+    ids <- .cr_panelIds(3L)
+    pur <- .crPurityOne(ids, .cr_panel())
+    R <- computeLd(.cr_panel(), snpIdx = 1:3)
+    expect_equal(pur, min(abs(R[upper.tri(R)])), tolerance = 1e-8)
+})
+
+test_that("purity is NA when the panel cannot supply the members", {
+    # Reported honestly rather than defaulted to a passing value: an
+    # unmeasurable purity must not look like a pure set.
+    expect_true(is.na(
+        .crPurityOne(c("chr9:1:A:G", "chr9:2:C:T"), .cr_panel())
+    ))
+})
+
+test_that("purity is NA for every set when there is no LD reference", {
+    out <- tibble(csVariants = list(c("a", "b"), c("c", "d")))
+    expect_equal(.crPuritiesFor(out, NULL), c(NA_real_, NA_real_))
+})
+
+# ===========================================================================
+# Validity
+# ===========================================================================
+
+test_that("validity names missing pair columns", {
+    bad <- ColocResult(.cr_pairs(), .cr_variants())
+    mcols(bad)$gwasStudy <- NULL
+    expect_error(methods::validObject(bad), "missing columns: gwasStudy")
+})
+
+test_that("validity names missing posterior columns", {
+    bad <- ColocResult(.cr_pairs(), .cr_variants())
+    mcols(bad)$PP.H4.abf <- NULL
+    expect_error(
+        methods::validObject(bad),
+        "missing posterior columns: PP.H4.abf"
+    )
+})
+
+test_that("validity names elements whose variants lack SNP.PP.H4", {
+    # The expectation wraps the ASSIGNMENT: `[[<-` on the GRangesList
+    # re-validates, so the object never survives long enough for a separate
+    # validObject() call to see it.
+    bad <- ColocResult(.cr_pairs(), .cr_variants())
+    expect_error(
+        mcols(bad[[1L]])$SNP.PP.H4 <- NULL,
+        "have no SNP.PP.H4 column in their variant metadata"
+    )
+})

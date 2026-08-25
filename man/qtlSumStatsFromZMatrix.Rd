@@ -24,9 +24,10 @@ conditions.}
 
 \item{study}{Study identifier (recycled across conditions).}
 
-\item{ldSketch}{A \code{\link{GenotypeHandle}} embedded in the collection, or
-\code{NULL} (default) -- mash operates across conditions per variant and
-needs no LD reference.}
+\item{ldSketch}{A genotype panel (see \code{\link{readGenotypes}})
+embedded in the collection, or \code{NULL} (default) -- mash operates
+across
+conditions per variant and needs no LD reference.}
 
 \item{context}{Condition context label(s): a single value recycled across
 every column, or a length-\code{ncol(z)} vector (one per condition).
@@ -63,10 +64,10 @@ Assemble a per-condition \code{\link{QtlSumStats}} from a
   result clears the mash QC gate.
 }
 \examples{
-gh <- readGenotypes(
+panel <- readGenotypes(
   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
 z <- matrix(rnorm(6), 2, 3, dimnames = list(
   c("chr22:1:A:G", "chr22:2:A:G"), c("brain", "blood", "muscle")))
-qtlSumStatsFromZMatrix(z = z, study = "s1", ldSketch = gh,
+qtlSumStatsFromZMatrix(z = z, study = "s1", ldSketch = panel,
   context = colnames(z), trait = "g1", genome = "hg38", n = 100)
 }

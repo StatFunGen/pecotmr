@@ -3,24 +3,53 @@
 \docType{class}
 \name{LdEigen-class}
 \alias{LdEigen-class}
+\alias{[,LdEigen,ANY,ANY,ANY-method}
 \title{Eigendecomposition-Based LD Statistic}
-\description{
-Pre-computed per-block eigendecompositions of the LD correlation
-  matrix. Used by LDER, HDL, and sHDL.
+\usage{
+\S4method{[}{LdEigen,ANY,ANY,ANY}(x, i, j, ..., drop = TRUE)
 }
+\arguments{
+\item{x}{An \code{LdEigen}.}
+
+\item{i, j, ...}{Subscripts; any use is an error.}
+
+\item{drop}{Ignored.}
+}
+\value{
+Nothing: this method always signals an error.
+}
+\description{
+Pre-computed per-block eigendecompositions of the LD
+  correlation matrix. Used by LDER, HDL and sHDL.
+
+  Unlike \code{\linkS4class{LdScore}}, whose statistics are per variant,
+  an eigendecomposition describes a whole LD \emph{block}. It therefore
+  stays in a slot rather than \code{mcols} -- and because a slot does not
+  narrow when the ranges do, subsetting an \code{LdEigen} is refused
+  rather than allowed to produce an object whose decompositions no longer
+  describe its variants.
+}
+\section{Functions}{
+\itemize{
+\item \code{x = LdEigen[i = ANY, j = ANY, drop = ANY]}: Refused. Subsetting would narrow the variants
+while \code{eigenList} -- a slot, because it is per block rather than
+per variant -- stayed as it was, leaving decompositions that describe
+variants the object no longer has. Recompute over the subset instead.
+
+}}
 \section{Slots}{
 
 \describe{
-\item{\code{eigenList}}{A list of length \code{nBlocks}, each element a list
-with components:
+\item{\code{eigenList}}{A list of length \code{nBlocks}, each element a list with
+components:
 \describe{
   \item{values}{Numeric vector of eigenvalues}
   \item{vectors}{Numeric matrix of eigenvectors (SNPs x retained
   components)}
-  \item{snpIdx}{Integer vector of SNP indices in \code{snpInfo}}
+  \item{snpIdx}{Integer vector of variant indices}
 }}
 
-\item{\code{eigenvalueTruncation}}{Numeric, proportion of variance retained (e.g.,
+\item{\code{eigenvalueTruncation}}{Numeric, proportion of variance retained (e.g.
 0.9 for HDL's default). If 1.0, no truncation.}
 }}
 

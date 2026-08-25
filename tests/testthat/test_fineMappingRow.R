@@ -1224,3 +1224,227 @@ test_that("fsusieAffectedRegions yields NA direction for a region outside the gr
     expect_equal(length(gr), 1L)
     expect_true(is.na(S4Vectors::mcols(gr)$direction))
 })
+
+test_that("getCs warns when the coverage has no purity column to filter on", {
+    # minPurity is orthogonal to coverage, so asking for it at a coverage that
+    # produced no credible sets leaves nothing to filter. Skipping silently
+    # would look like "the filter ran and kept everything".
+    vn <- str_c("chr1:", (1:5) * 100, ":A:G")
+    alpha <- matrix(0.1, 2L, 5L)
+    alpha[1, 1:2] <- c(0.5, 0.4)
+    alpha[2, 3:4] <- c(0.5, 0.4)
+    fit <- list(
+        alpha = alpha,
+        mu = matrix(0.3, 2L, 5L),
+        mu2 = matrix(1.2, 2L, 5L),
+        pip = c(0.6, 0.5, 0.4, 0.4, 0.02)
+    )
+    class(fit) <- "susie"
+    cst <- list(
+        list(
+            sets = list(
+                cs = list(L1 = c(1L, 2L), L2 = c(3L, 4L)),
+                purity = data.frame(min.abs.corr = c(0.9, 0.3))
+            )
+        ),
+        list(sets = list(cs = list())),
+        list(sets = list(cs = list()))
+    )
+    attr(cst, "coverage") <- c(0.95, 0.70, 0.50)
+    tl <- buildTopLoci(fit, cst, variantNames = vn, method = "susie")
+    # Dropped by hand: buildTopLoci ALWAYS emits cs_<cov>_purity, even when
+    # the fitter reported no purity table, so this branch is unreachable for
+    # anything the package builds itself. It guards a topLoci supplied from
+    # outside -- and a coverage with no sets returns earlier, so that route
+    # cannot reach it either.
+    tl$cs_95_purity <- NULL
+    e <- fineMappingRow(variantIds = vn, susieFit = fit, topLoci = tl)
+
+    expect_warning(
+        .fmrRowCs(e, coverage = 0.95, minPurity = 0.8),
+        "no purity column"
+    )
+})
+
+# ===========================================================================
+# Construction guards: topLoci must line up with the variants
+#
+# topLoci's columns are taken POSITIONALLY, so a table of the right length in
+# the wrong order silently mis-assigns every column. These guards catch that;
+# none had a test.
+# ===========================================================================
+
+.fmr_vids <- function(n = 3L) str_c("chr1:", 100L * seq_len(n), ":A:G")
+
+test_that("topLoci must have one row per supplied variant", {
+    vids <- .fmr_vids(3L)
+    expect_error(
+        fineMappingRow(
+            variantIds = vids,
+            susieFit = list(fake = TRUE),
+            topLoci = data.frame(
+                variant_id = vids[1:2],
+                pip = c(0.4, 0.3),
+                stringsAsFactors = FALSE
+            )
+        ),
+        "aligned row-for-row"
+    )
+})
+
+test_that("topLoci must list the variants in the same order", {
+    # Same set, different order: length checks pass, so only an explicit
+    # order check catches it.
+    vids <- .fmr_vids(3L)
+    expect_error(
+        fineMappingRow(
+            variantIds = vids,
+            susieFit = list(fake = TRUE),
+            topLoci = data.frame(
+                variant_id = rev(vids),
+                pip = c(0.4, 0.3, 0.2),
+                stringsAsFactors = FALSE
+            )
+        ),
+        "first differ at position 1"
+    )
+})
+
+# ===========================================================================
+# adjustPips: fits this code cannot slice safely
+# ===========================================================================
+
+.fmr_susieFit <- function(p = 5L, L = 2L, seed = 7L) {
+    set.seed(seed)
+    lbf <- matrix(rnorm(L * p, sd = 3), L, p)
+    alpha <- lbfToAlpha(lbf)
+    list(
+        alpha = alpha,
+        mu = matrix(0.3, L, p),
+        mu2 = matrix(1.2, L, p),
+        lbf_variable = lbf,
+        V = rep(1, L),
+        pip = as.numeric(1 - apply(1 - alpha, 2, prod))
+    )
+}
+
+test_that("adjustPips rejects a null_index that is not the last column", {
+    # The null column carries the "no signal here" mass; slicing assumes it
+    # sits last, so any other position is a layout this code cannot honour.
+    fit <- .fmr_susieFit()
+    expect_equal(.adjustPipsNullIdx(fit, 5L), 5L)
+    fit$null_index <- 2L
+    expect_error(
+        .adjustPipsNullIdx(fit, 5L),
+        "null column must be the last of 5 alpha columns"
+    )
+})
+
+test_that("adjustPips refuses effects with no mass on the retained variants", {
+    # Renormalizing zero mass is not "a small number" -- it is undefined, and
+    # returning it would mix adjusted and meaningless posteriors.
+    alpha <- matrix(c(1, 0, 0, 0, 0, 1), nrow = 2L, byrow = TRUE)
+    expect_error(
+        .adjustPipsRenormAlpha(alpha, cols = 2L),
+        "carry no .*posterior mass on the retained variants"
+    )
+})
+
+# ===========================================================================
+# Credible-set summary completeness (ported from PR #577)
+#
+# The summary is built from the fit's own sets$cs when it carries them, so
+# every set the fit found gets a row -- including one whose members were all
+# relabelled into a smaller overlapping set in the per-variant column.
+# ===========================================================================
+
+test_that("every fit credible set gets a row, with its true membership", {
+    vn <- str_c("chr1:", (1:5) * 100, ":A:G")
+    alpha <- matrix(0, 2, 5, dimnames = list(c("L1", "L2"), vn))
+    alpha[1, 1:3] <- 0.3
+    alpha[2, 2] <- 0.9
+    fit <- list(
+        pip = c(0.3, 0.9, 0.3, 0.01, 0.01),
+        alpha = alpha,
+        V = c(0.1, 0.2),
+        lbf_variable = matrix(
+            c(1, 1, 1, 0, 0, 0, 2, 0, 0, 0), 2, 5,
+            byrow = TRUE, dimnames = list(c("L1", "L2"), vn)
+        ),
+        sets = list(
+            # L2 = {2} sits inside L1 = {1,2,3}: v2 tags to the smaller L2 in
+            # the per-variant column, so L1 loses it there but not in the fit.
+            cs = list(L1 = c(1L, 2L, 3L), L2 = c(2L)),
+            purity = data.frame(
+                min.abs.corr = c(0.8, 1.0),
+                mean.abs.corr = c(0.85, 1.0),
+                row.names = c("L1", "L2")
+            ),
+            requested_coverage = 0.95
+        )
+    )
+    class(fit) <- "susie"
+    tl <- data.frame(
+        variant_id = vn,
+        pip = fit$pip,
+        logBF = c(1, 2, 1, 0, 0),
+        cs_95 = c("susie_1", "susie_2", "susie_1", "susie_0", "susie_0"),
+        cs_95_purity = c(0.8, 1.0, 0.8, 0, 0),
+        stringsAsFactors = FALSE
+    )
+    s <- .csSummaryFit(tl, fit, 0.95)
+    s <- s[order(s$effect_id), , drop = FALSE]
+    expect_equal(nrow(s), 2L)
+    expect_equal(s$cs, c("susie_1", "susie_2"))
+    expect_equal(s$effect_id, c("L1", "L2"))
+    # L1 keeps its full size 3 even though only v1/v3 carry its column tag.
+    expect_equal(s$n_variants, c(3L, 1L))
+    # cs_pip is summed over the TRUE membership, so v2 counts toward L1.
+    expect_equal(s$cs_pip, c(1.5, 0.9), tolerance = 1e-9)
+})
+
+test_that("the summary carries the fit's true (gapped) effect index", {
+    # sets$cs is ordered L2, L1 (e.g. by purity): the size-3 set must stay L2,
+    # not be renumbered to position 1.
+    vn <- str_c("chr1:", (1:4) * 100, ":A:G")
+    fit <- list(
+        pip = c(0.3, 0.3, 0.3, 0.6),
+        alpha = matrix(0, 2, 4, dimnames = list(c("L2", "L1"), vn)),
+        V = c(0.1, 0.2),
+        sets = list(
+            cs = list(L2 = c(1L, 2L, 3L), L1 = c(4L)),
+            purity = data.frame(
+                min.abs.corr = c(0.9, 0.5),
+                row.names = c("L2", "L1")
+            ),
+            requested_coverage = 0.95
+        )
+    )
+    class(fit) <- "susie"
+    tl <- data.frame(
+        variant_id = vn, pip = fit$pip, logBF = c(1, 1, 1, 2),
+        cs_95 = c("susie_2", "susie_2", "susie_2", "susie_1"),
+        stringsAsFactors = FALSE
+    )
+    s <- .csSummaryFit(tl, fit, 0.95)
+    big <- s[s$n_variants == 3L, , drop = FALSE]
+    expect_equal(big$effect_id, "L2")
+    expect_equal(big$cs, "susie_2")
+})
+
+test_that("a fit with no stored sets falls back to the per-variant column", {
+    # Minimal / hand-built fits carry no sets$cs; the column is then the only
+    # source of membership there is.
+    vn <- str_c("chr1:", (1:3) * 100, ":A:G")
+    fit <- list(pip = c(0.5, 0.4, 0.1))
+    class(fit) <- "susie"
+    tl <- data.frame(
+        variant_id = vn, pip = fit$pip, logBF = c(1, 1, 0),
+        cs_95 = c("susie_1", "susie_1", "susie_0"),
+        stringsAsFactors = FALSE
+    )
+    s <- .csSummaryFit(tl, fit, 0.95)
+    expect_equal(nrow(s), 1L)
+    expect_equal(s$n_variants, 2L)
+    expect_equal(s$cs, "susie_1")
+})

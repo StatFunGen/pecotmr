@@ -13,7 +13,7 @@ make_test_eigen_ref <- function(nSnps = 20, nBlocks = 2) {
             width = snps_per_block * 100 - 1
         )
     )
-    ld_blocks <- new("LdBlocks", blocks = blocks_gr, genome = "hg19")
+    ld_blocks <- blocks_gr
 
     snp_info <- data.frame(
         SNP = paste0("rs", seq_len(nSnps)),
@@ -34,8 +34,7 @@ make_test_eigen_ref <- function(nSnps = 20, nBlocks = 2) {
         list(values = e$values, vectors = e$vectors, snpIdx = as.integer(idx))
     })
 
-    new(
-        "LdEigen",
+    LdEigen(
         ldBlocks = ld_blocks,
         snpInfo = snp_info,
         nRef = 500000L,
@@ -59,7 +58,7 @@ make_test_score_ref <- function(
             width = snps_per_block * 100 - 1
         )
     )
-    ld_blocks <- new("LdBlocks", blocks = blocks_gr, genome = "hg19")
+    ld_blocks <- blocks_gr
 
     snp_info <- data.frame(
         SNP = paste0("rs", seq_len(nSnps)),
@@ -91,8 +90,7 @@ make_test_score_ref <- function(
         list()
     }
 
-    new(
-        "LdScore",
+    LdScore(
         ldBlocks = ld_blocks,
         snpInfo = snp_info,
         nRef = 500000L,
@@ -220,7 +218,7 @@ test_that("computeLdScores LdEigen returns matrix with base_l2 column", {
     expect_true(is.matrix(result))
     expect_equal(ncol(result), 1)
     expect_equal(colnames(result), "base_l2")
-    expect_equal(nrow(result), nrow(eigen_ref@snpInfo))
+    expect_equal(nrow(result), length(eigen_ref))
 })
 
 test_that("computeLdScores LdEigen base LD scores are non-negative", {
@@ -237,7 +235,7 @@ test_that("computeLdScores LdEigen with annotations returns base + annotation co
     # base_l2 + 2 annotation columns
 
     expect_equal(ncol(result), 3)
-    expect_equal(nrow(result), nrow(eigen_ref@snpInfo))
+    expect_equal(nrow(result), length(eigen_ref))
 })
 
 test_that("computeLdScores LdEigen annotation column names match", {
@@ -254,7 +252,7 @@ test_that("computeLdScores LdEigen annotation column names match", {
 test_that("computeLdScores LdScore without annotations returns stored ld_scores", {
     score_ref <- make_test_score_ref()
     result <- computeLdScores(score_ref)
-    expect_identical(result, score_ref@ldScores)
+    expect_identical(result, getLdScores(score_ref))
 })
 
 test_that("computeLdScores LdScore with annotations but no ld_matrix_list errors", {
@@ -436,14 +434,17 @@ make_test_sumstats_for_ref <- function(
     traitName = "test",
     varY = NA_real_
 ) {
-    n_snps <- nrow(ref@snpInfo)
+    n_snps <- length(ref)
     set.seed(123)
+    # An LdStatistic is a GRanges now: coordinates come from the ranges and
+    # the alleles from mcols, rather than from a parallel snpInfo frame.
+    md <- S4Vectors::mcols(ref, use.names = FALSE)
     df <- data.frame(
-        SNP = ref@snpInfo$SNP,
-        CHR = sub("^chr", "", ref@snpInfo$CHR),
-        BP = ref@snpInfo$BP,
-        A1 = ref@snpInfo$A1,
-        A2 = ref@snpInfo$A2,
+        SNP = names(ref),
+        CHR = sub("^chr", "", as.character(GenomicRanges::seqnames(ref))),
+        BP = GenomicRanges::start(ref),
+        A1 = as.character(md$A1),
+        A2 = as.character(md$A2),
         Z = rnorm(n_snps),
         N = rep(50000, n_snps),
         stringsAsFactors = FALSE
@@ -532,10 +533,10 @@ test_that("computeLdScores LdScore with annotations and ld_matrix_list returns c
     expect_true(is.matrix(result))
     # base_l2 + 2 annotation columns
     expect_equal(ncol(result), 3)
-    expect_equal(nrow(result), nrow(score_ref@snpInfo))
+    expect_equal(nrow(result), length(score_ref))
     expect_equal(colnames(result), c("base_l2", "annot_A", "annot_B"))
     # First column should be the stored base LD scores
-    expect_equal(result[, 1], score_ref@ldScores[, 1])
+    expect_equal(result[, 1], getLdScores(score_ref)[, 1])
 })
 
 
@@ -947,7 +948,7 @@ test_that("snpsPerBlock assigns SNPs to correct blocks", {
         seqnames = c("chr1", "chr1"),
         ranges = IRanges::IRanges(start = c(1, 5001), end = c(5000, 10000))
     )
-    ld_blocks <- new("LdBlocks", blocks = blocks_gr, genome = "hg19")
+    ld_blocks <- blocks_gr
     res <- pecotmr:::snpsPerBlock(snp_info, ld_blocks)
     # Block 1 covers 1-5000: SNPs at 100, 500, 1000, 3000, 4500
     expect_equal(sort(res[["1"]]), c(1L, 2L, 3L, 4L, 5L))
@@ -964,7 +965,7 @@ test_that("snpsPerBlock returns empty for blocks with no SNPs", {
         seqnames = c("chr1", "chr2"),
         ranges = IRanges::IRanges(start = c(1, 1), end = c(5000, 5000))
     )
-    ld_blocks <- new("LdBlocks", blocks = blocks_gr, genome = "hg19")
+    ld_blocks <- blocks_gr
     res <- pecotmr:::snpsPerBlock(snp_info, ld_blocks)
     # All SNPs on chr1, so block 2 (chr2) should have no entries
     expect_true("1" %in% names(res))
@@ -981,8 +982,9 @@ test_that("checkGenomeBuild returns TRUE when all objects match", {
         seqnames = "chr1",
         ranges = IRanges::IRanges(start = 1, end = 5000)
     )
-    ld_blocks_a <- new("LdBlocks", blocks = blocks_gr_a, genome = "hg19")
-    ld_blocks_b <- new("LdBlocks", blocks = blocks_gr_a, genome = "hg19")
+    ld_blocks_a <- blocks_gr_a
+    GenomeInfoDb::genome(ld_blocks_a) <- "hg19"
+    ld_blocks_b <- ld_blocks_a
 
     expect_true(pecotmr:::checkGenomeBuild(ld_blocks_a, ld_blocks_b))
 })
@@ -992,13 +994,15 @@ test_that("checkGenomeBuild errors when genome builds mismatch", {
         seqnames = "chr1",
         ranges = IRanges::IRanges(start = 1, end = 5000)
     )
-    ld_blocks_19 <- new("LdBlocks", blocks = blocks_gr_19, genome = "hg19")
+    ld_blocks_19 <- blocks_gr_19
+    GenomeInfoDb::genome(ld_blocks_19) <- "hg19"
 
     blocks_gr_38 <- GenomicRanges::GRanges(
         seqnames = "chr1",
         ranges = IRanges::IRanges(start = 1, end = 5000)
     )
-    ld_blocks_38 <- new("LdBlocks", blocks = blocks_gr_38, genome = "hg38")
+    ld_blocks_38 <- blocks_gr_38
+    GenomeInfoDb::genome(ld_blocks_38) <- "hg38"
 
     expect_error(
         pecotmr:::checkGenomeBuild(ld_blocks_19, ld_blocks_38),
@@ -1018,8 +1022,7 @@ test_that("checkGenomeBuild works with AnnotationMatrix", {
         type = "binary",
         stringsAsFactors = FALSE
     )
-    am <- new(
-        "AnnotationMatrix",
+    am <- AnnotationMatrix(
         snpRanges = snp_gr,
         annotations = annot_mat,
         annotationMeta = annot_meta,
@@ -1030,7 +1033,8 @@ test_that("checkGenomeBuild works with AnnotationMatrix", {
         seqnames = "chr1",
         ranges = IRanges::IRanges(start = 1, end = 5000)
     )
-    ld_blocks <- new("LdBlocks", blocks = blocks_gr, genome = "hg19")
+    ld_blocks <- blocks_gr
+    GenomeInfoDb::genome(ld_blocks) <- "hg19"
 
     expect_true(pecotmr:::checkGenomeBuild(am, ld_blocks))
 })
@@ -1127,7 +1131,7 @@ simulate_h2_data <- function(
             width = snps_per_block * 100 - 1
         )
     )
-    ld_blocks <- new("LdBlocks", blocks = blocks_gr, genome = "hg19")
+    ld_blocks <- blocks_gr
 
     # SNP info
     snp_info <- data.frame(
@@ -1168,8 +1172,7 @@ simulate_h2_data <- function(
     }
 
     # LdEigen
-    eigen_ref <- new(
-        "LdEigen",
+    eigen_ref <- LdEigen(
         ldBlocks = ld_blocks,
         snpInfo = snp_info,
         nRef = 500000L,
@@ -1187,8 +1190,7 @@ simulate_h2_data <- function(
         ld_scores_vec[idx] <- rowSums(R^2)
     }
 
-    ld_score_ref <- new(
-        "LdScore",
+    ld_score_ref <- LdScore(
         ldBlocks = ld_blocks,
         snpInfo = snp_info,
         nRef = 500000L,
@@ -1883,14 +1885,16 @@ test_that("h2EstimateToSldscTrait assigns category names to unnamed tauBlocks", 
 
 test_that("estimateH2 errors when study is omitted for a multi-study collection", {
     eigen_ref <- make_test_eigen_ref()
-    n_snps <- nrow(eigen_ref@snpInfo)
+    n_snps <- length(eigen_ref)
     set.seed(321)
     df <- data.frame(
-        SNP = eigen_ref@snpInfo$SNP,
-        CHR = sub("^chr", "", eigen_ref@snpInfo$CHR),
-        BP = eigen_ref@snpInfo$BP,
-        A1 = eigen_ref@snpInfo$A1,
-        A2 = eigen_ref@snpInfo$A2,
+        SNP = names(eigen_ref),
+        CHR = sub(
+            "^chr", "", as.character(GenomicRanges::seqnames(eigen_ref))
+        ),
+        BP = GenomicRanges::start(eigen_ref),
+        A1 = as.character(S4Vectors::mcols(eigen_ref)$A1),
+        A2 = as.character(S4Vectors::mcols(eigen_ref)$A2),
         Z = rnorm(n_snps),
         N = rep(50000, n_snps),
         stringsAsFactors = FALSE
@@ -1949,9 +1953,8 @@ test_that("estimateH2 errors when study is omitted for a multi-study collection"
         "chr1",
         IRanges::IRanges(start = starts, end = ends)
     )
-    lb <- new("LdBlocks", blocks = gr, genome = "hg19")
-    eigenRef <- new(
-        "LdEigen",
+    lb <- gr
+    eigenRef <- LdEigen(
         ldBlocks = lb,
         snpInfo = snpInfo,
         nRef = 500000L,
@@ -1970,8 +1973,7 @@ test_that("estimateH2 errors when study is omitted for a multi-study collection"
     for (b in blocks) {
         lsv[b$idx] <- rowSums(b$R^2)
     }
-    scoreRef <- new(
-        "LdScore",
+    scoreRef <- LdScore(
         ldBlocks = lb,
         snpInfo = snpInfo,
         nRef = 500000L,

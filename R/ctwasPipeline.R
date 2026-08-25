@@ -2165,7 +2165,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # supported by the downstream cTWAS model.
 # @noRd
 .ctwasSnpInfoForBlock <- function(gwasLd) {
-    snpInfo <- getSnpInfo(gwasLd)
+    snpInfo <- .ldSketchSnpInfo(gwasLd)
     chr <- as.integer(
         str_remove(as.character(snpInfo$CHR), regex("^chr", ignore_case = TRUE))
     )
@@ -2196,7 +2196,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 .ctwasComputeFullPanelLd <- function(gwasLd) {
     snpInfoCtwas <- .ctwasSnpInfoForBlock(gwasLd)
     geno <- .dosageMatrix(
-        gwasLd,
+        .ldSketchHandle(gwasLd),
         seq_len(nrow(snpInfoCtwas)),
         meanImpute = TRUE
     )
@@ -2801,7 +2801,8 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # the dispatch key for the multi-block LD / snpInfo loaders, so two
 # blocks sharing the same on-disk LD payload share one cached panel.
 # @noRd
-.ctwasLdPanelKey <- function(handle) {
+.ctwasLdPanelKey <- function(sketch) {
+    handle <- .ldSketchHandle(sketch)
     fmt <- getFormat(handle)
     stem <- .genotypeReadPath(handle)
     candidates <- switch(

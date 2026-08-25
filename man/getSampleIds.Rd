@@ -18,9 +18,9 @@ Character vector.
 \description{
 Return the sample-id vector.
 }
-\examples{
-gh <- readGenotypes(
-  system.file("extdata", "toy_ref.bed", package = "pecotmr")
-)
-getSampleIds(gh)
+\details{
+The genotype handle is the seed layer behind a panel and
+  is not part of the public interface; obtain a panel from
+  \code{readGenotypes()} and ask it directly.
 }
+\keyword{internal}

@@ -63,7 +63,7 @@ test_that("GenotypeHandle: path = .gds uses readGenotypes (gds backend)", {
     expect_s4_class(h, "GenotypeHandle")
     expect_equal(h@format, "gds")
     expect_equal(h@nSamples, 100L)
-    expect_equal(nrow(h@snpInfo), 349L)
+    expect_equal(nrow(getSnpInfo(h)), 349L)
 })
 
 test_that("GenotypeHandle: path = .vcf.gz uses readGenotypes (vcf backend)", {
@@ -80,7 +80,7 @@ test_that("GenotypeHandle: plink1Prefix builds a plink1 handle", {
     expect_s4_class(h, "GenotypeHandle")
     expect_equal(h@format, "plink1")
     expect_equal(h@nSamples, 100L)
-    expect_equal(nrow(h@snpInfo), 349L)
+    expect_equal(nrow(getSnpInfo(h)), 349L)
 })
 
 test_that("GenotypeHandle: plink2Prefix builds a plink2 handle", {
@@ -385,7 +385,7 @@ test_that("genoMeta (named vector) builds a sharded handle", {
     expect_s4_class(h, "GenotypeHandle")
     expect_equal(h@format, "plink1")
     expect_equal(sort(names(h@chromPaths)), c("21", "22"))
-    expect_equal(nrow(h@snpInfo), 2L * 349L)
+    expect_equal(nrow(getSnpInfo(h)), 2L * 349L)
 })
 
 test_that("genoMeta meta-file resolves payloads relative to its own directory", {
@@ -399,7 +399,7 @@ test_that("genoMeta meta-file resolves payloads relative to its own directory", 
     )
     h <- GenotypeHandle(genoMeta = metafile)
     expect_equal(sort(names(h@chromPaths)), c("21", "22"))
-    expect_equal(nrow(h@snpInfo), 2L * 349L)
+    expect_equal(nrow(getSnpInfo(h)), 2L * 349L)
 })
 
 test_that(".parseChromMeta matches chrom/path columns by name (order- and extra-column-tolerant)", {
@@ -523,9 +523,9 @@ test_that("genoMeta chroms reads only the requested shard", {
     full <- GenotypeHandle(genoMeta = meta)
     only21 <- GenotypeHandle(genoMeta = meta, chroms = "21")
     expect_equal(names(only21@chromPaths), "21")
-    expect_equal(nrow(only21@snpInfo), 349L)
+    expect_equal(nrow(getSnpInfo(only21)), 349L)
     # chr21 is the first shard, so the kept rows/fileIdx match the full handle's.
-    expect_equal(only21@snpInfo$SNP, full@snpInfo$SNP[1:349])
+    expect_equal(getSnpInfo(only21)$SNP, getSnpInfo(full)$SNP[1:349])
     expect_equal(only21@snpInfo$fileIdx, full@snpInfo$fileIdx[1:349])
 })
 

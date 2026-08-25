@@ -5,19 +5,18 @@
 \alias{LdScore-class}
 \title{LD Score-Based LD Statistic}
 \description{
-Pre-computed LD scores for each SNP. Used by S-LDSC and g-LDSC.
-  Supports both standard LD scores and annotation-stratified LD scores.
+Pre-computed LD scores for each SNP. Used by S-LDSC and
+  g-LDSC. Supports both standard LD scores and annotation-stratified ones.
+
+  The scores and their regression weights are \code{mcols} rather than
+  slots, because they are parallel to the variants: as slots they would
+  survive a subset unchanged while the ranges narrowed, leaving scores
+  describing variants that are no longer there.
 }
 \section{Slots}{
 
 \describe{
-\item{\code{ldScores}}{A numeric matrix (SNPs x annotations+1). The first column is
-the base LD score (sum of r^2). Additional columns are
-annotation-stratified LD scores if annotations are provided.}
-
-\item{\code{ldScoreWeights}}{A numeric vector of regression weights for each SNP.}
-
 \item{\code{ldMatrixList}}{For g-LDSC: a list of per-block LD (R^2) matrices used to
-compute the FGLS residual covariance. NULL for S-LDSC.}
+compute the FGLS residual covariance. Empty for S-LDSC.}
 }}
 

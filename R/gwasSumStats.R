@@ -15,13 +15,8 @@ setClass(
     "GwasSumStats",
     contains = "SumStatsBase",
     validity = function(object) {
+        # The ldSketch slot's class union enforces its type.
         errors <- character()
-        if (
-            !is.null(object@ldSketch) &&
-                !methods::is(object@ldSketch, "GenotypeHandle")
-        ) {
-            errors <- c(errors, "'ldSketch' must be a GenotypeHandle or NULL")
-        }
         required <- "study"
         missingCols <- setdiff(required, colnames(mcols(object)))
         if (length(missingCols) > 0L) {
@@ -70,7 +65,7 @@ setMethod("show", "GwasSumStats", function(object) {
     ldSrc <- if (is.null(ld)) {
         "none (LD-free)"
     } else {
-        glue("{ld@format} @ {ld@path}")
+        .ldSketchLabel(ld)
     }
     cat(glue("  LD sketch: {ldSrc}\n", .trim = FALSE))
 })
@@ -120,7 +115,8 @@ NULL
 #' @param genome Single character string giving the genome build (e.g.,
 #'   \code{"hg19"}, \code{"hg38"}). Uniform across the collection because all
 #'   entries share the same LD sketch.
-#' @param ldSketch A \code{GenotypeHandle} carrying the LD reference.
+#' @param ldSketch A genotype panel (see \code{\link{readGenotypes}})
+#'   carrying the LD reference.
 #' @param varY Optional numeric vector of per-study phenotype variances
 #'   (\code{NA_real_} entries allowed). Used by the sufficient-statistic
 #'   interface; z-score RSS analyses should leave entries as NA.
@@ -160,12 +156,13 @@ NULL
 #'   \code{length(getQcInfo(x)) == 0}.
 #' @return A \code{GwasSumStats} object.
 #' @examples
-#' gh <- readGenotypes(
+#' panel <- readGenotypes(
 #'   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
 #' gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100 * 1:3, width = 1))
 #' S4Vectors::mcols(gr) <- S4Vectors::DataFrame(SNP = paste0("rs", 1:3),
 #'   A1 = "A", A2 = "G", Z = rnorm(3), N = 100L)
-#' GwasSumStats(study = "t1", entry = list(gr), genome = "hg38", ldSketch = gh)
+#' GwasSumStats(study = "t1", entry = list(gr), genome = "hg38",
+#'   ldSketch = panel)
 #' @export
 GwasSumStats <- function(
     study,
@@ -209,10 +206,19 @@ GwasSumStats <- function(
     # key regions without first asking how the collection was built.
     md$blockId <- split$blockId
     mcols(grl) <- md
+    .sumStatsNewValidated("GwasSumStats", grl, ldSketch, genome, qcInfo)
+}
+
+# Build and validate a SumStatsBase subclass from its GRangesList plus the
+# three collection-level slots GwasSumStats and QtlSumStats share. Shared
+# rather than duplicated so the two constructors cannot drift in how they
+# coerce those slots. Used by qtlSumStats.R too.
+# @noRd
+.sumStatsNewValidated <- function(Class, grl, ldSketch, genome, qcInfo) {
     obj <- methods::new(
-        "GwasSumStats",
+        Class,
         grl,
-        ldSketch = ldSketch,
+        ldSketch = .asLdSketch(ldSketch),
         genome = as.character(genome),
         qcInfo = as.list(qcInfo)
     )

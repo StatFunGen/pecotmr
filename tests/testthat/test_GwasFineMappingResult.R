@@ -335,3 +335,36 @@ test_that("GwasFineMappingResult: getMarginalEffects with study/method selectors
     expect_equal(nrow(me), 4L)
     expect_true(all(c("variant_id", "beta", "se", "z", "p") %in% names(me)))
 })
+
+# ===========================================================================
+# Validity: the messages that name what is missing
+#
+# Every test above builds a valid collection, so the validity function's
+# early-return branches were never executed. They are reachable by dropping a
+# column from a built object, which is what a careless mcols edit would do.
+# ===========================================================================
+
+test_that("validity names a missing identity column", {
+    res <- GwasFineMappingResult(
+        study = c("g1", "g2"),
+        method = c("susie", "susie"),
+        entry = list(.sc_makeFineMappingRow(3), .sc_makeFineMappingRow(3))
+    )
+    bad <- res
+    mcols(bad)$method <- NULL
+    expect_error(methods::validObject(bad), "missing columns: method")
+})
+
+test_that("validity names a missing entry payload column", {
+    res <- GwasFineMappingResult(
+        study = "g1",
+        method = "susie",
+        entry = list(.sc_makeFineMappingRow(3))
+    )
+    bad <- res
+    mcols(bad)$cvResult <- NULL
+    expect_error(
+        methods::validObject(bad),
+        "missing entry payload columns: cvResult"
+    )
+})
