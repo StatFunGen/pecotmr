@@ -793,15 +793,17 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     list(study = study, method = method, region = region, entry = entry)
 }
 
-# Effect-allele frequency vector aligned to `variantIds` from an entry's MAF
-# mcol (post-QC harmonized/complemented). NULL when the entry carries no MAF.
+# Effect-allele frequency vector aligned to `variantIds` from an entry's
+# DIRECTIONAL AF mcol (post-QC harmonized/complemented to the final effect
+# allele). NULL when the entry carries no declared af -- a directionless MAF is
+# NOT used here (it is QC-only), so undeclared-af entries export af = NA.
 # @noRd
 .fmAfByVar <- function(entry, variantIds) {
     mc <- S4Vectors::mcols(entry)
-    if (!is_in("MAF", colnames(mc))) {
+    if (!is_in("AF", colnames(mc))) {
         return(NULL)
     }
-    set_names(as.numeric(mc$MAF), as.character(mc$SNP))[variantIds]
+    set_names(as.numeric(mc$AF), as.character(mc$SNP))[variantIds]
 }
 
 # Region label derived from a GwasSumStats entry's GRanges, so multi-block

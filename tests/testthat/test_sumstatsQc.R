@@ -3135,9 +3135,13 @@ test_that("summaryStatsQc: rejects non-SumStats input", {
     )
 })
 
-test_that("summaryStatsQc: mafCutoff > 0 with no MAF/FRQ column errors", {
+test_that("summaryStatsQc: mafCutoff > 0 with no frequency skips with a warning (no abort)", {
     ss <- .ssQ_makeGwasSumStats()
-    expect_error(summaryStatsQc(ss, mafCutoff = 0.05), "MAF or FRQ column")
+    expect_warning(
+        res <- summaryStatsQc(ss, mafCutoff = 0.05),
+        "skipping the MAF filter"
+    )
+    expect_s4_class(res, "GwasSumStats")
 })
 
 test_that("summaryStatsQc: infoCutoff > 0 with no INFO column errors", {
@@ -6634,12 +6638,13 @@ test_that(".applyContentFilters: FRQ is normalized to MAF via min(af, 1 - af)", 
     expect_equal(out$audit$mafDropped, 2L)
 })
 
-test_that(".applyContentFilters: mafCutoff > 0 without MAF/FRQ column errors", {
+test_that(".applyContentFilters: mafCutoff > 0 without a frequency skips with a warning", {
     df <- data.frame(SNP = paste0("rs", 1:3), stringsAsFactors = FALSE)
-    expect_error(
-        pecotmr:::.applyContentFilters(df, mafCutoff = 0.01),
-        "requires a MAF or FRQ column"
+    expect_warning(
+        out <- pecotmr:::.applyContentFilters(df, mafCutoff = 0.01),
+        "skipping the MAF filter"
     )
+    expect_equal(nrow(out$df), 3L)
 })
 
 test_that(".applyContentFilters: INFO filter drops low-INFO variants", {
@@ -7289,4 +7294,80 @@ test_that(".subsetSketchToIds keeps exactly the entries' variants", {
 test_that(".subsetSketchToRange / .subsetSketchToIds are NULL-safe", {
     expect_null(pecotmr:::.subsetSketchToRange(NULL, list()))
     expect_null(pecotmr:::.subsetSketchToIds(NULL, list()))
+})
+
+# ===========================================================================
+# af / MAF semantics (rss-af-maf-semantics): af is the DIRECTIONAL effect-allele
+# frequency (exported), declared only via an `af:` key; a directionless maf is
+# QC-only, never exported as af.
+# ===========================================================================
+.afm_df <- function(freqcol, val) {
+    d <- data.frame(chrom = "chr1", pos = 100L, variant_id = "chr1:100:A:G",
+                    A1 = "A", A2 = "G", z = 2.5, n_sample = 1000,
+                    stringsAsFactors = FALSE)
+    d[[freqcol]] <- val
+    d
+}
+.afm_cm <- function(...) c(chrom = "chrom", pos = "pos", variant_id = "variant_id",
+                           A1 = "A1", A2 = "A2", z = "z", n_sample = "n_sample", ...)
+
+test_that("resolver: af: key -> directional AF; maf: key -> directionless MAF", {
+    a <- suppressWarnings(pecotmr:::.resolveSumstatCols(
+        .afm_df("effect_allele_frequency", 0.8),
+        .afm_cm(af = "effect_allele_frequency"), "af"))
+    expect_equal(a$AF, 0.8)
+    expect_null(a$MAF)
+    b <- suppressWarnings(pecotmr:::.resolveSumstatCols(
+        .afm_df("effect_allele_frequency", 0.8),
+        .afm_cm(maf = "effect_allele_frequency"), "maf"))
+    expect_null(b$AF)
+    expect_equal(b$MAF, 0.8)
+})
+
+test_that("resolver: undeclared af warns distinctly and yields no AF", {
+    expect_warning(
+        out <- pecotmr:::.resolveSumstatCols(.afm_df("maf", 0.2),
+            .afm_cm(maf = "maf"), "undeclared"),
+        "no effect-allele frequency declared")
+    expect_null(out$AF)
+})
+
+test_that("resolver: declared-but-missing af warns with a distinct message", {
+    expect_warning(
+        pecotmr:::.resolveSumstatCols(.afm_df("eaf", NA_real_),
+            .afm_cm(af = "eaf"), "missing"),
+        "declared but its values are all missing")
+})
+
+test_that(".fmAfByVar reads the directional AF mcol; NULL when af is undeclared", {
+    gA <- pecotmr:::.dfToEntryGranges(suppressWarnings(pecotmr:::.resolveSumstatCols(
+        .afm_df("effect_allele_frequency", 0.8),
+        .afm_cm(af = "effect_allele_frequency"), "af")))
+    expect_equal(unname(pecotmr:::.fmAfByVar(gA, "chr1:100:A:G")), 0.8)
+    gM <- pecotmr:::.dfToEntryGranges(suppressWarnings(pecotmr:::.resolveSumstatCols(
+        .afm_df("effect_allele_frequency", 0.8),
+        .afm_cm(maf = "effect_allele_frequency"), "maf")))
+    expect_null(pecotmr:::.fmAfByVar(gM, "chr1:100:A:G"))
+})
+
+test_that(".cfMaf derives from af, falls back to maf, and skips-with-warning", {
+    expect_equal(nrow(pecotmr:::.cfMaf(data.frame(AF = c(0.8, 0.01)), 0.05)$df), 1L)
+    expect_equal(nrow(pecotmr:::.cfMaf(data.frame(MAF = c(0.2, 0.01)), 0.05)$df), 1L)
+    expect_warning(
+        out <- pecotmr:::.cfMaf(data.frame(SNP = c("a", "b")), 0.05),
+        "skipping the MAF filter")
+    expect_equal(nrow(out$df), 2L)
+})
+
+test_that("harmonization complements the directional af on a swap; leaves maf", {
+    tgt <- data.frame(chrom = "1", pos = 100L, A2 = "G", A1 = "A", SNP = "v1",
+                      Z = 2.0, AF = 0.8, MAF = 0.2, stringsAsFactors = FALSE)
+    ref <- data.frame(chrom = "1", pos = 100L, A2 = "A", A1 = "G",
+                      variant_id = "v1", stringsAsFactors = FALSE)
+    res <- pecotmr:::harmonizeAlleles(tgt, ref, colToFlip = "Z",
+        colToComplement = "AF", matchMinProp = 0, removeStrandAmbiguous = FALSE)
+    h <- res$harmonizedData
+    expect_equal(h$AF, 0.2)   # complemented to the final effect allele
+    expect_equal(h$Z, -2.0)   # sign-flipped on the same swap
+    expect_equal(h$MAF, 0.2)  # directionless -> NOT complemented
 })

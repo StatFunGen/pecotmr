@@ -2782,7 +2782,9 @@ krigingOutlierQc <- function(
         df$SNP <- df$variant_id
     }
     baseCols <- c("SNP", "A1", "A2", "Z", "N")
-    optCols <- c("MAF", "INFO", "BETA", "SE", "P", "N_CASE", "N_CONTROL")
+    # AF = directional effect-allele frequency (exported as af); MAF =
+    # directionless QC frequency. Both carried when the loader resolved them.
+    optCols <- c("AF", "MAF", "INFO", "BETA", "SE", "P", "N_CASE", "N_CONTROL")
     use <- intersect(c(baseCols, optCols), colnames(df))
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(select(df, all_of(use)))
     gr
@@ -3059,7 +3061,10 @@ krigingOutlierQc <- function(
         )
         abort(msg)
     }
-    colToComplement <- intersect("MAF", colnames(df))
+    # Complement the DIRECTIONAL af on an allele swap (af -> 1 - af). The
+    # directionless MAF (min(af, 1-af)) is swap-invariant and MUST NOT be
+    # complemented.
+    colToComplement <- intersect("AF", colnames(df))
     if (!is_in("A1", colnames(df)) || !is_in("A2", colnames(df))) {
         abort("summaryStatsQc: input entry must contain A1 and A2 columns.")
     }
@@ -3093,23 +3098,28 @@ krigingOutlierQc <- function(
 #             deviations from the median (a 5-MAD-from-median cap on
 #             per-variant N). Set nCutoff = 0 to disable. Rows with NA N
 #             are always dropped.
-# MAF/FRQ frequency filter (frequency normalised to minor-allele frequency).
+# MAF filter, on the minor-allele frequency min(af, 1-af). The filtering
+# frequency is derived from the directional AF when available (single source of
+# truth); a directionless MAF/FRQ is a fallback only. When no frequency is
+# available the filter is SKIPPED with one warning (it does not abort), so a
+# frequency-less study can still run under a default mafCutoff.
 .cfMaf <- function(df, mafCutoff) {
     if (mafCutoff <= 0) {
         return(list(df = df, dropped = NULL))
     }
-    mafCol <- intersect(c("MAF", "FRQ"), colnames(df))[1L]
-    if (is.na(mafCol)) {
-        msg <- glue(
-            ".applyContentFilters: mafCutoff > 0 requires a MAF or FRQ ",
-            "column."
+    freqCol <- intersect(c("AF", "MAF", "FRQ"), colnames(df))[1L]
+    if (is.na(freqCol)) {
+        warning(
+            "summaryStatsQc: mafCutoff > 0 but no af/MAF/FRQ frequency is ",
+            "available; skipping the MAF filter.",
+            call. = FALSE
         )
-        abort(msg)
+        return(list(df = df, dropped = NULL))
     }
     before <- nrow(df)
-    mafVals <- as.numeric(df[[mafCol]])
-    # Normalise effect-allele frequency to MAF: take min(af, 1-af).
-    mafVals <- pmin(mafVals, 1 - mafVals, na.rm = FALSE)
+    freqVals <- as.numeric(df[[freqCol]])
+    # Minor-allele frequency: min(af, 1-af), direction-agnostic.
+    mafVals <- pmin(freqVals, 1 - freqVals, na.rm = FALSE)
     df <- filter(df, !is.na(mafVals) & mafVals >= mafCutoff)
     list(df = df, dropped = before - nrow(df))
 }
@@ -4420,13 +4430,9 @@ krigingOutlierQc <- function(
     }
     for (i in seq_len(nrow(sumstats))) {
         cols <- colnames(S4Vectors::mcols(sumstats$entry[[i]]))
-        if (mafCutoff > 0 && !any(is_in(c("MAF", "FRQ"), cols))) {
-            msg <- glue(
-                "summaryStatsQc: mafCutoff > 0 requires every entry to ",
-                "carry a MAF or FRQ column; entry {i} does not."
-            )
-            abort(msg)
-        }
+        # mafCutoff no longer pre-aborts on a missing frequency: .cfMaf derives
+        # the MAF from the directional AF (or a fallback MAF/FRQ) and skips with
+        # one warning when none is available.
         if (infoCutoff > 0 && !is_in("INFO", cols)) {
             msg <- glue(
                 "summaryStatsQc: infoCutoff > 0 requires every entry to ",

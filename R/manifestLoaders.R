@@ -516,6 +516,14 @@ NULL
     BETA = c("beta", "BETA"),
     SE = c("se", "SE"),
     P = c("p", "P", "pvalue", "pval"),
+    # AF: the DIRECTIONAL effect-allele frequency, exported as top_loci$af.
+    # Declared only via an explicit `af`/`AF` mapping key (or a source column
+    # literally named `af`); a source named effect_allele_frequency is NOT
+    # auto-trusted as directional -- it must be mapped `af: <col>`.
+    AF = c("af"),
+    # MAF: a DIRECTIONLESS minor-allele frequency, internal QC only (never
+    # exported as af). effect_allele_frequency stays here so an unmapped such
+    # column is used for filtering but not treated as directional af.
     MAF = c("maf", "MAF", "effect_allele_frequency"),
     INFO = c("info", "INFO")
 )
@@ -536,6 +544,8 @@ NULL
     BETA = c("beta", "BETA"),
     SE = c("se", "SE"),
     P = c("p", "P", "pvalue"),
+    # `af:` (directional effect-allele freq) vs `maf:` (directionless, QC only).
+    AF = c("af", "AF"),
     MAF = c("maf", "MAF", "effect_allele_frequency"),
     INFO = c("info", "INFO")
 )
@@ -587,7 +597,7 @@ NULL
 # column
 # aliases; NA when unresolved.
 # @noRd
-.resolveSumstatKey <- function(key, df, mapping, label) {
+.resolveSumstatKey <- function(key, df, mapping, label, claimed = character()) {
     # Look the field up in the mapping under any accepted standard-key spelling
     # (`z`/`Z`, `n_sample`/`N`, ...). `intersect` avoids the "subscript out of
     # bounds" a named character vector throws for an absent `[[` key.
@@ -605,7 +615,11 @@ NULL
             return(src)
         }
     }
-    intersect(.sumstatColumnAliases[[key]], names(df))[1L]
+    # Auto-detect: never steal a source column another key explicitly claimed
+    # (so `af: effect_allele_frequency` is not also auto-read as MAF).
+    intersect(
+        .sumstatColumnAliases[[key]], setdiff(names(df), claimed)
+    )[1L]
 }
 
 # Standardise the columns of a raw sumstats data.frame into the canonical
@@ -726,11 +740,40 @@ NULL
         out$N_CASE <- as.numeric(df[[n$ncaseSrc]])
         out$N_CONTROL <- as.numeric(df[[n$ncontrolSrc]])
     }
-    for (key in c("BETA", "SE", "P", "MAF", "INFO")) {
-        src <- .resolveSumstatKey(key, df, mapping, label)
+    # AF is the directional effect-allele frequency (exported as top_loci$af);
+    # MAF is a directionless QC frequency. Both are optional; resolved here from
+    # their respective keys so a study can declare either, both, or neither.
+    # `claimed` = the source columns named by explicit mappings, so an
+    # auto-detected key never re-reads a column another key already claimed.
+    claimed <- if (!is.null(mapping)) unname(as.character(mapping)) else character()
+    afSrc <- .resolveSumstatKey("AF", df, mapping, label, claimed)
+    for (key in c("BETA", "SE", "P", "AF", "MAF", "INFO")) {
+        src <- .resolveSumstatKey(key, df, mapping, label, claimed)
         if (!is.na(src) && !is.null(src)) {
             out[[key]] <- as.numeric(df[[src]])
         }
+    }
+    # Effect-allele-frequency provenance warnings (distinct cases), so an
+    # exported af of NA is never silent:
+    #   - undeclared: no `af:`/`af` source -> af will be NA (the study must
+    #     declare `af:` to get a directional frequency; a directionless maf is
+    #     QC-only).
+    #   - declared-but-missing: an `af:` was declared but its values are all
+    #     unusable -> af will be NA (a data problem, distinct message).
+    afUndeclared <- is.na(afSrc) || is.null(afSrc)
+    if (afUndeclared) {
+        warning(
+            label, ": no effect-allele frequency declared (map `af: <col>` to ",
+            "export a directional af); top_loci$af will be NA. A directionless ",
+            "`maf`/`FRQ` is used for QC only, never as af.",
+            call. = FALSE
+        )
+    } else if (all(is.na(out$AF))) {
+        warning(
+            label, ": effect-allele frequency `af` was declared but its values ",
+            "are all missing/unusable; top_loci$af will be NA.",
+            call. = FALSE
+        )
     }
     out
 }
