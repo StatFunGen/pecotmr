@@ -561,3 +561,41 @@ setMethod("show", "QtlSumStats", function(object) {
 # Entry `i` of a SumStats collection restricted to chromosome `chrName`. Shared
 # by the QtlSumStats and GwasSumStats subsetChr methods.
 # @noRd
+
+#' Combine QtlSumStats collections
+#'
+#' Row-bind two or more \code{\link{QtlSumStats}} collections into one -- e.g.
+#' per-region or per-context association results written by separate pipeline
+#' steps. Per-element metadata columns are carried through; a collection
+#' lacking an optional column is NA-padded.
+#'
+#' The three collection-level slots are merged rather than taken from the first
+#' input, on the same rules as \code{\link{combineGwasSumStats}}: \code{genome}
+#' and the \code{\link{summaryStatsQc}} options must agree, the per-element
+#' \code{qcInfo$entryAudit} concatenates in element order, and the LD sketches
+#' union over the shared genotype handle (all-\code{NULL} stays \code{NULL},
+#' which is the usual case for individual-level QTL data).
+#'
+#' @param ... Two or more \code{QtlSumStats} objects, or a single \code{list}
+#'   of them.
+#' @param ldSketch Optional genotype panel (see \code{\link{readGenotypes}}) to
+#'   attach to the combined collection, overriding the unioned one. Default
+#'   \code{NULL}.
+#' @return A single combined \code{QtlSumStats}.
+#' @seealso \code{\link{combineGwasSumStats}},
+#'   \code{\link{combineFineMappingResults}}, \code{\link{combineTwasWeights}}
+#' @examples
+#' data(qtlSumStatsExample)
+#' combineQtlSumStats(qtlSumStatsExample)
+#' @export
+combineQtlSumStats <- function(..., ldSketch = NULL) {
+    parts <- .asCombineList(
+        list(...),
+        "QtlSumStats",
+        "combineQtlSumStats"
+    )
+    if (length(parts) == 1L) {
+        return(parts[[1L]])
+    }
+    .rbindSumStats(parts, ldSketch, "combineQtlSumStats")
+}

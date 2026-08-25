@@ -501,3 +501,108 @@ test_that("a supplied blockId survives onto the elements", {
     )
     expect_equal(unique(as.character(mcols(obj)$blockId)), "chr1:1-10000")
 })
+
+
+# === combineGwasSumStats() ===
+
+test_that("combineGwasSumStats() row-binds per-block pieces in order", {
+    a <- makeGwasBlock("chr1_1_1000", 100L, n = 5L)
+    b <- makeGwasBlock("chr1_1001_2000", 1100L, n = 3L)
+    out <- combineGwasSumStats(a, b)
+
+    expect_s4_class(out, "GwasSumStats")
+    expect_equal(nrow(out), nrow(a) + nrow(b))
+    expect_equal(as.character(out$blockId), c("chr1_1_1000", "chr1_1001_2000"))
+    expect_identical(as.list(out), c(as.list(a), as.list(b)))
+    expect_equal(getGenome(out), "hg19")
+})
+
+
+test_that("combineGwasSumStats() accepts a list and passes a lone input through", {
+    a <- makeGwasBlock("chr1_1_1000", 100L)
+    b <- makeGwasBlock("chr1_1001_2000", 1100L)
+    expect_identical(
+        combineGwasSumStats(list(a, b)),
+        combineGwasSumStats(a, b)
+    )
+    expect_identical(combineGwasSumStats(a), a)
+})
+
+
+test_that("combineGwasSumStats() concatenates the per-element QC audit", {
+    a <- makeGwasBlock("chr1_1_1000", 100L, n = 5L)
+    b <- makeGwasBlock("chr1_1001_2000", 1100L, n = 3L)
+    out <- combineGwasSumStats(a, b)
+
+    audit <- getQcInfo(out)$entryAudit
+    expect_length(audit, nrow(out))
+    # element i's audit still describes element i
+    expect_equal(audit[[1L]]$block, "chr1_1_1000")
+    expect_equal(audit[[2L]]$block, "chr1_1001_2000")
+    expect_equal(getQcInfo(out)$options, getQcInfo(a)$options)
+})
+
+
+test_that("combineGwasSumStats() unions the per-block LD panels", {
+    a <- makeGwasBlock("chr1_1_1000", 100L, n = 5L)
+    b <- makeGwasBlock("chr1_1001_2000", 1100L, n = 3L)
+    out <- combineGwasSumStats(a, b)
+
+    # Keeping only the first block's panel would leave a two-block collection
+    # whose LD reference covers one block.
+    expect_equal(nrow(getLdSketch(out)), 8L)
+    expect_equal(
+        rownames(getLdSketch(out)),
+        c(rownames(getLdSketch(a)), rownames(getLdSketch(b)))
+    )
+})
+
+
+test_that("combineGwasSumStats() honours an explicit ldSketch", {
+    a <- makeGwasBlock("chr1_1_1000", 100L)
+    b <- makeGwasBlock("chr1_1001_2000", 1100L)
+    out <- combineGwasSumStats(a, b, ldSketch = getLdSketch(a))
+    expect_identical(getLdSketch(out), getLdSketch(a))
+})
+
+
+test_that("combineGwasSumStats() rejects collection-level disagreement", {
+    a <- makeGwasBlock("chr1_1_1000", 100L)
+
+    expect_error(
+        combineGwasSumStats(a, makeGwasBlock("chr1_1001_2000", 1100L,
+            genome = "hg38")),
+        "share one genome build"
+    )
+    expect_error(
+        combineGwasSumStats(a, makeGwasBlock("chr1_1001_2000", 1100L,
+            qcOptions = list(mafCutoff = 0.05))),
+        "different summaryStatsQc\\(\\) options"
+    )
+    noQc <- makeGwasBlock("chr1_1001_2000", 1100L)
+    noQc@qcInfo <- list()
+    expect_error(combineGwasSumStats(a, noQc), "carry no QC record")
+
+    noLd <- makeGwasBlock("chr1_1001_2000", 1100L)
+    noLd@ldSketch <- NULL
+    expect_error(combineGwasSumStats(a, noLd), "carry no ldSketch")
+
+    other <- makeGwasBlock("chr1_1001_2000", 1100L)
+    other@ldSketch <- pecotmr:::.asLdSketch(
+        .blockGenotypeHandle(seq(1100L, by = 100L, length.out = 5L),
+            path = "/tmp/other.pgen")
+    )
+    expect_error(
+        combineGwasSumStats(a, other),
+        "different genotype panels"
+    )
+})
+
+
+test_that("combineGwasSumStats() validates its inputs", {
+    expect_error(combineGwasSumStats(list()), "nothing to combine")
+    expect_error(
+        combineGwasSumStats(makeGwasBlock("chr1_1_1000", 100L), 1L),
+        "every input must be a GwasSumStats"
+    )
+})

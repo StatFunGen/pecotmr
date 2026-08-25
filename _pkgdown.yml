@@ -218,6 +218,7 @@ reference:
   - subtitle: "GwasSumStats"
     contents:
       - "getSumStats,GwasSumStats-method"
+      - combineGwasSumStats
       - getBeta
       - getMaf
       - getN
@@ -298,6 +299,7 @@ reference:
 
   - subtitle: "QtlSumStats"
     contents:
+      - combineQtlSumStats
       - getContexts
       - getSignificantQtls
       - getTraits

@@ -570,3 +570,36 @@ test_that("no traitPos -> no distance columns; existing distance is preserved", 
     expect_equal(mc$tss_distance, c(-999L, -888L)) # not clobbered
     expect_equal(mc$tes_distance, c(100, 200) - 250) # absent -> filled
 })
+
+
+# === combineQtlSumStats() ===
+
+test_that("combineQtlSumStats() row-binds collections and keeps NULL sketches", {
+    data(qtlSumStatsExample)
+    a <- qtlSumStatsExample
+    b <- a
+    mcols(b)$study <- paste0(mcols(a)$study, "_b")
+
+    out <- combineQtlSumStats(a, b)
+    expect_s4_class(out, "QtlSumStats")
+    expect_equal(nrow(out), nrow(a) + nrow(b))
+    expect_identical(as.list(out), c(as.list(a), as.list(b)))
+    expect_equal(getGenome(out), getGenome(a))
+
+    a2 <- a
+    a2@ldSketch <- NULL
+    b2 <- b
+    b2@ldSketch <- NULL
+    expect_null(getLdSketch(combineQtlSumStats(a2, b2)))
+})
+
+
+test_that("combineQtlSumStats() passes a lone input through and validates", {
+    data(qtlSumStatsExample)
+    expect_identical(combineQtlSumStats(qtlSumStatsExample), qtlSumStatsExample)
+    expect_error(combineQtlSumStats(list()), "nothing to combine")
+    expect_error(
+        combineQtlSumStats(qtlSumStatsExample, 1L),
+        "every input must be a QtlSumStats"
+    )
+})

@@ -455,3 +455,45 @@ as.data.frame.GwasSumStats <- function(
     restCols <- setdiff(names(mc), firstCols)
     select(mc, all_of(c(firstCols, restCols)))
 }
+
+#' Combine GwasSumStats collections
+#'
+#' Row-bind two or more \code{\link{GwasSumStats}} collections into one -- e.g.
+#' the per-LD-block pieces a block-parallel pipeline writes, back into the
+#' single block-keyed collection \code{\link{assembleCtwasInputs}} requires.
+#' Per-element metadata (\code{blockId}, \code{varY}, \code{nCase} / ...)
+#' is carried through; a collection lacking an optional column is NA-padded.
+#'
+#' The three collection-level slots are merged rather than taken from the first
+#' input: \code{genome} and the \code{\link{summaryStatsQc}} options must agree
+#' across the inputs (a mismatch is an error, not a silent first-wins), the
+#' per-element \code{qcInfo$entryAudit} concatenates in element order so
+#' \code{\link{getQcDiagnostics}} keeps addressing the right element, and the
+#' LD sketches union into one panel over the shared genotype handle. That last
+#' one matters: block-parallel pipelines narrow each piece's panel to its own
+#' block, so keeping only the first would leave a multi-block collection whose
+#' LD reference covers one block.
+#'
+#' @param ... Two or more \code{GwasSumStats} objects, or a single \code{list}
+#'   of them.
+#' @param ldSketch Optional genotype panel (see \code{\link{readGenotypes}}) to
+#'   attach to the combined collection, overriding the unioned one. Default
+#'   \code{NULL}.
+#' @return A single combined \code{GwasSumStats}.
+#' @seealso \code{\link{combineQtlSumStats}},
+#'   \code{\link{combineFineMappingResults}}, \code{\link{combineTwasWeights}}
+#' @examples
+#' data(gwasSumStatsS4Example)
+#' combineGwasSumStats(gwasSumStatsS4Example)
+#' @export
+combineGwasSumStats <- function(..., ldSketch = NULL) {
+    parts <- .asCombineList(
+        list(...),
+        "GwasSumStats",
+        "combineGwasSumStats"
+    )
+    if (length(parts) == 1L) {
+        return(parts[[1L]])
+    }
+    .rbindSumStats(parts, ldSketch, "combineGwasSumStats")
+}
