@@ -407,13 +407,19 @@
 # through combines automatically rather than being hand-listed at each site.
 # Preserves the concrete class and sets the `ldSketch` slot explicitly (rbind
 # does not reliably carry it). Returns NULL when given no inputs.
-.rbindCollections <- function(parts, ldSketch = NULL) {
+#
+# `slots` carries the collection-level state a concrete subclass adds beyond
+# `ldSketch` (SumStatsBase's `genome` / `qcInfo`). It is passed in rather than
+# read off `parts[[1L]]` because those slots describe the WHOLE collection, so
+# merging them is the caller's decision -- first-wins would silently drop the
+# other parts' QC audit.
+.rbindCollections <- function(parts, ldSketch = NULL, slots = list()) {
     parts <- compact(parts)
     if (length(parts) == 0L) {
         return(NULL)
     }
     if (methods::is(parts[[1L]], "RangedTupleList")) {
-        return(.rbindRangedCollections(parts, ldSketch))
+        return(.rbindRangedCollections(parts, ldSketch, slots))
     }
     cls <- class(parts[[1L]])[[1L]]
     allCols <- reduce(map(parts, names), union)
@@ -586,7 +592,7 @@
 # The DFrame path cannot be reused because there is no column holding the
 # payload any more -- the payload is the container.
 # @noRd
-.rbindRangedCollections <- function(parts, ldSketch) {
+.rbindRangedCollections <- function(parts, ldSketch, slots = list()) {
     cls <- class(parts[[1L]])[[1L]]
     allCols <- reduce(map(parts, .tupleColumnNames), union)
     combined <- set_names(map(allCols, .rbindColumn, parts = parts), allCols)
@@ -597,7 +603,12 @@
     elements <- list_flatten(map(parts, as.list))
     grl <- GenomicRanges::GRangesList(elements)
     mcols(grl) <- md
-    out <- new(cls, grl, ldSketch = ldSketch)
+    out <- exec(
+        methods::new,
+        cls,
+        grl,
+        !!!c(list(ldSketch = ldSketch), slots)
+    )
     validObject(out)
     out
 }
@@ -973,3 +984,188 @@
         dataType = S4Vectors::SimpleList(map(entry, getDataType))
     )
 }
+
+# =============================================================================
+# Combining summary-statistics collections
+# -----------------------------------------------------------------------------
+# A SumStatsBase subclass carries three COLLECTION-level slots -- ldSketch,
+# genome and qcInfo -- on top of the elements and their mcols, so row-binding
+# per-block pieces back into one collection has to say what happens to each.
+# The rules live here once, shared by combineGwasSumStats() and
+# combineQtlSumStats(), so the two cannot drift:
+#
+#   genome    must agree; a mismatch is an error
+#   qcInfo    `entryAudit` concatenates in element order (it is indexed BY
+#             element); the rest is carried from the first part after checking
+#             the QC options agree
+#   ldSketch  the panels union, read through the parts' shared GenotypeHandle
+#
+# The ldSketch rule is the one that matters for correctness. A block-parallel
+# pipeline narrows each piece's panel to that block, so first-wins would hand
+# back a collection spanning every block whose LD reference covers only the
+# first -- and cTWAS computes its full-panel LD from exactly that slot.
+# =============================================================================
+
+# Row-bind summary-statistics parts, merging the three collection-level slots.
+# `ldSketch` (when non-NULL) overrides the unioned panel.
+# @noRd
+.rbindSumStats <- function(parts, ldSketch, fn) {
+    sketch <- ldSketch %||% .ssCombineSketch(parts, fn)
+    .rbindCollections(
+        parts,
+        ldSketch = sketch,
+        slots = list(
+            genome = .ssCombineGenome(parts, fn),
+            qcInfo = .ssCombineQcInfo(parts, fn)
+        )
+    )
+}
+
+# One genome build per collection (every entry shares the LD sketch), so the
+# parts must agree.
+# @noRd
+.ssCombineGenome <- function(parts, fn) {
+    genomes <- unique(map_chr(parts, getGenome))
+    if (length(genomes) > 1L) {
+        msg <- glue(
+            "{fn}: every input must share one genome build (got ",
+            "{str_flatten(genomes, ', ')})."
+        )
+        abort(msg)
+    }
+    genomes
+}
+
+# qcInfo is collection-level EXCEPT `entryAudit`, which getQcDiagnostics()
+# addresses BY element index -- so the audit concatenates in element order
+# while the rest is carried from the first part. Concatenation pads a part
+# whose audit is absent or short, because an audit that slipped out of step
+# with the elements would report another block's diagnostics.
+# @noRd
+.ssCombineQcInfo <- function(parts, fn) {
+    populated <- keep(parts, .ssHasQcInfo)
+    if (length(populated) == 0L) {
+        return(list())
+    }
+    if (length(populated) < length(parts)) {
+        msg <- glue(
+            "{fn}: {length(parts) - length(populated)} of {length(parts)} ",
+            "inputs carry no QC record. Run summaryStatsQc() on every input ",
+            "before combining, or the combined qcInfo would claim QC that ",
+            "only some elements went through."
+        )
+        abort(msg)
+    }
+    .ssCheckQcOptions(populated, fn)
+    out <- getQcInfo(populated[[1L]])
+    out$entryAudit <- list_flatten(map(parts, .ssEntryAudit))
+    out
+}
+
+# @noRd
+.ssHasQcInfo <- function(x) length(getQcInfo(x)) > 0L
+
+# One part's per-element audit, padded to its element count so positions stay
+# aligned with the elements they describe.
+# @noRd
+.ssEntryAudit <- function(x) {
+    audit <- getQcInfo(x)$entryAudit %||% list()
+    n <- nrow(x)
+    if (length(audit) >= n) {
+        return(as.list(audit)[seq_len(n)])
+    }
+    c(as.list(audit), vector("list", n - length(audit)))
+}
+
+# The QC options must match: a collection stitched from blocks filtered at
+# different MAF / INFO cutoffs has no single honest answer for "what QC ran",
+# and every downstream consumer reads that answer off one record.
+# @noRd
+.ssCheckQcOptions <- function(parts, fn) {
+    first <- getQcInfo(parts[[1L]])$options
+    same <- map_lgl(parts, .ssSameQcOptions, first = first)
+    if (all(same)) {
+        return(invisible(NULL))
+    }
+    msg <- glue(
+        "{fn}: inputs were QC'd with different summaryStatsQc() options ",
+        "(input {which(!same)[[1L]]} differs from the first). Re-run QC with ",
+        "one set of options before combining."
+    )
+    abort(msg)
+}
+
+# @noRd
+.ssSameQcOptions <- function(x, first) {
+    identical(getQcInfo(x)$options, first)
+}
+
+# The union of the parts' LD panels. All-NULL stays NULL (an individual-level
+# collection has no panel); a mix is an error, because silently keeping the
+# panels that exist would leave elements harmonized against nothing.
+# @noRd
+.ssCombineSketch <- function(parts, fn) {
+    sketches <- map(parts, getLdSketch)
+    present <- !map_lgl(sketches, is.null)
+    if (!any(present)) {
+        return(NULL)
+    }
+    if (!all(present)) {
+        msg <- glue(
+            "{fn}: {sum(!present)} of {length(parts)} inputs carry no ",
+            "ldSketch. Combine collections that all have an LD reference, or ",
+            "all have none."
+        )
+        abort(msg)
+    }
+    handles <- map(sketches, .ldSketchHandle)
+    .ssCheckSameSource(handles, fn)
+    handle <- handles[[1L]]
+    handle@snpInfo <- .ssUnionSnpInfo(handles)
+    .asLdSketch(handle)
+}
+
+# Every panel must read from the same file(s): the union keeps the first
+# handle and widens its snpInfo, and each row's `fileIdx` addresses a position
+# in THAT file, so rows from another panel would read the wrong variants.
+# @noRd
+.ssCheckSameSource <- function(handles, fn) {
+    same <- map_lgl(handles, .ssSameGenotypeSource, first = handles[[1L]])
+    if (all(same)) {
+        return(invisible(NULL))
+    }
+    msg <- glue(
+        "{fn}: inputs reference different genotype panels (input ",
+        "{which(!same)[[1L]]} differs from the first). Their LD sketches ",
+        "cannot be unioned."
+    )
+    abort(msg)
+}
+
+# @noRd
+.ssSameGenotypeSource <- function(h, first) {
+    identical(h@path, first@path) &&
+        identical(h@format, first@format) &&
+        identical(h@nSamples, first@nSamples) &&
+        identical(h@sampleIds, first@sampleIds) &&
+        identical(h@chromPaths, first@chromPaths)
+}
+
+# The parts' snpInfo rows, de-duplicated by variant id and returned in genomic
+# order so the unioned panel reads like one built over the whole span. The
+# first handle's data-frame class is preserved: a handle built with a base
+# data.frame keeps one, because some downstream readers index snpInfo
+# positionally and a tibble column is a one-column list there.
+# @noRd
+.ssUnionSnpInfo <- function(handles) {
+    first <- getSnpInfo(handles[[1L]])
+    si <- list_rbind(map(handles, .ssHandleSnpInfo))
+    if (nrow(si) > 0L && all(is_in(c("SNP", "CHR", "BP"), names(si)))) {
+        si <- si[!duplicated(si$SNP), , drop = FALSE]
+        si <- si[order(canonChrom(si$CHR), as.integer(si$BP)), , drop = FALSE]
+    }
+    if (inherits(first, "tbl_df")) si else as.data.frame(si)
+}
+
+# @noRd
+.ssHandleSnpInfo <- function(h) as_tibble(getSnpInfo(h))
