@@ -3130,8 +3130,15 @@ test_that("summaryStatsQc: rejects non-SumStats input", {
 
 test_that("mafCutoff > 0 with no frequency skips the filter, not the run", {
     # A frequency-less study can still run under a default mafCutoff: the
-    # filter is skipped with one warning rather than aborting the pipeline.
+    # STUDY-side filter is skipped with one warning rather than aborting the
+    # pipeline. The panel side still runs (mafCutoff is measured wherever it
+    # can be), so the mock extractor stands in for the sketch's dosage; every
+    # mocked variant sits near MAF 0.3, so nothing is dropped there.
     ss <- .ssQ_makeGwasSumStats()
+    local_mocked_bindings(
+        extractBlockGenotypes = .ssQ_mockExtractor(),
+        .package = "pecotmr"
+    )
     expect_warning(
         res <- summaryStatsQc(ss, mafCutoff = 0.05),
         "skipping the MAF filter"
@@ -6973,6 +6980,13 @@ test_that("summaryStatsQc: per-entry rollup enumerates every removed-step segmen
         genome = "hg19",
         ldSketch = .ssQ_makeHandle()
     )
+    # mafCutoff is measured against the panel too, so the fabricated sketch
+    # needs a dosage source; the mock puts every variant near MAF 0.3, well
+    # clear of the 0.01 cutoff, leaving the audited drop counts study-side.
+    local_mocked_bindings(
+        extractBlockGenotypes = .ssQ_mockExtractor(),
+        .package = "pecotmr"
+    )
     msgs <- capture_messages(
         res <- summaryStatsQc(
             ss,
@@ -7300,6 +7314,162 @@ test_that(".subsetSketchToRange / .subsetSketchToIds are NULL-safe", {
 
 
 # ---------------------------------------------------------------------------
+# summaryStatsQc panel filters: mafCutoff / macCutoff / imissCutoff measured
+# against the LD reference panel, applied before any entry is harmonized.
+# ---------------------------------------------------------------------------
+
+.ssqcPanelStem <- function() {
+    test_path("test_data/test_variants")
+}
+
+.ssqcPanelHandle <- function() {
+    readGenotypeHandle(.ssqcPanelStem(), format = "plink2")
+}
+
+# Panel MAF straight from the .afreq sidecar, aligned to the handle's snpInfo
+# order -- the ground truth the filter is checked against.
+.ssqcPanelMaf <- function(handle) {
+    afreq <- readAfreq(.ssqcPanelStem())
+    ids <- as.character(getSnpInfo(handle)$SNP)
+    altFreq <- afreq$alt_freq[match(ids, afreq$id)]
+    pmin(altFreq, 1 - altFreq)
+}
+
+# A GwasSumStats over every panel variant, each carrying a study AF of 0.30 --
+# common in the study whatever the panel says, so only a panel-side filter can
+# remove it.
+.ssqcPanelSumStats <- function(handle) {
+    si <- getSnpInfo(handle)
+    gr <- GenomicRanges::GRanges(
+        seqnames = paste0("chr", si$CHR),
+        ranges = IRanges::IRanges(start = as.integer(si$BP), width = 1L)
+    )
+    set.seed(11)
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = si$SNP,
+        A1 = si$A1,
+        A2 = si$A2,
+        Z = stats::rnorm(nrow(si)),
+        N = rep(10000, nrow(si)),
+        AF = rep(0.30, nrow(si))
+    )
+    GwasSumStats(
+        study = "g1",
+        entry = list(gr),
+        genome = "hg19",
+        ldSketch = handle
+    )
+}
+
+test_that(".ssqcPrunePanel drops exactly the sub-cutoff panel variants", {
+    skip_if_not_installed("pgenlibr")
+    h <- .ssqcPanelHandle()
+    ids <- as.character(getSnpInfo(h)$SNP)
+    maf <- .ssqcPanelMaf(h)
+    cutoff <- stats::median(maf, na.rm = TRUE)
+    pruned <- expect_message(
+        pecotmr:::.ssqcPrunePanel(
+            h,
+            list(mafCutoff = cutoff, macCutoff = 0, imissCutoff = 1),
+            "test"
+        ),
+        "below the LD-panel MAF / MAC / missingness cutoffs"
+    )
+    keptIds <- as.character(getSnpInfo(pruned)$SNP)
+    expect_lt(length(keptIds), length(ids))
+    expect_setequal(keptIds, ids[!is.na(maf) & maf >= cutoff])
+})
+
+test_that(".ssqcPrunePanel is a no-op with no cutoffs / a NULL sketch", {
+    h <- .ssqcPanelHandle()
+    expect_identical(pecotmr:::.ssqcPrunePanel(h, NULL, "test"), h)
+    cutoffs <- list(mafCutoff = 0, macCutoff = 0, imissCutoff = 1)
+    expect_identical(pecotmr:::.ssqcPrunePanel(h, cutoffs, "test"), h)
+    expect_null(pecotmr:::.ssqcPrunePanel(NULL, cutoffs, "test"))
+})
+
+test_that(".ssqcPrunePanel prunes the RSE sketch's seed handle, not the view", {
+    skip_if_not_installed("pgenlibr")
+    # A summaryStatsQc ldSketch is an RSE wrapping the GenotypeHandle;
+    # harmonization, kriging, mismatch-QC and RAISS all read the panel through
+    # .ldSketchHandle() (the dosage DelayedArray's seed). Subsetting the RSE
+    # rows leaves that seed carrying the full panel, so the prune must reach
+    # the seed -- the real-flow shape the bare-handle tests do not exercise.
+    h <- .ssqcPanelHandle()
+    maf <- .ssqcPanelMaf(h)
+    ids <- as.character(getSnpInfo(h)$SNP)
+    cutoff <- stats::median(maf, na.rm = TRUE)
+    rse <- pecotmr:::.genotypeExperiment(h)
+    expect_s4_class(rse, "RangedSummarizedExperiment")
+    pruned <- suppressMessages(pecotmr:::.ssqcPrunePanel(
+        rse,
+        list(mafCutoff = cutoff, macCutoff = 0, imissCutoff = 1),
+        "test"
+    ))
+    seed <- pecotmr:::.ldSketchHandle(pruned)
+    expect_setequal(
+        as.character(getSnpInfo(seed)$SNP),
+        ids[!is.na(maf) & maf >= cutoff]
+    )
+})
+
+test_that("summaryStatsQc: mafCutoff drops panel-rare observed variants", {
+    skip_if_not_installed("pgenlibr")
+    # Regression for the study-side-only filter: every variant here has study
+    # AF 0.30, so nothing the sumstats' own frequency column can say would
+    # remove it. The panel must be what decides.
+    h <- .ssqcPanelHandle()
+    maf <- .ssqcPanelMaf(h)
+    cutoff <- stats::median(maf, na.rm = TRUE)
+    ss <- .ssqcPanelSumStats(h)
+    out <- suppressMessages(summaryStatsQc(ss, mafCutoff = cutoff, nCutoff = 0))
+    entry <- pecotmr:::.collectionEntry(out, 1)
+    expect_equal(length(entry), sum(!is.na(maf) & maf >= cutoff))
+    # ... and the panel carried on the result -- the seed handle every LD
+    # read keys off, not just the row view -- holds no sub-cutoff variant.
+    seed <- pecotmr:::.ldSketchHandle(getLdSketch(out))
+    keptMaf <- maf[match(
+        as.character(getSnpInfo(seed)$SNP),
+        as.character(getSnpInfo(h)$SNP)
+    )]
+    expect_true(all(keptMaf >= cutoff))
+})
+
+test_that("summaryStatsQc: macCutoff is the stricter of MAF / MAC", {
+    skip_if_not_installed("pgenlibr")
+    h <- .ssqcPanelHandle()
+    maf <- .ssqcPanelMaf(h)
+    ss <- .ssqcPanelSumStats(h)
+    # MAC expressed per panel sample: 2 * nSamples * mafEquivalent.
+    cutoff <- stats::median(maf, na.rm = TRUE)
+    mac <- ceiling(cutoff * 2 * getNSamples(h))
+    out <- suppressMessages(summaryStatsQc(ss, macCutoff = mac, nCutoff = 0))
+    entry <- pecotmr:::.collectionEntry(out, 1)
+    expected <- sum(!is.na(maf) & maf >= mac / (2 * getNSamples(h)))
+    expect_equal(length(entry), expected)
+})
+
+test_that("summaryStatsQc: the panel filter is off by default", {
+    skip_if_not_installed("pgenlibr")
+    h <- .ssqcPanelHandle()
+    ss <- .ssqcPanelSumStats(h)
+    out <- suppressMessages(summaryStatsQc(ss, nCutoff = 0))
+    expect_equal(
+        length(pecotmr:::.collectionEntry(out, 1)),
+        nrow(getSnpInfo(h))
+    )
+})
+
+test_that("summaryStatsQc validates the panel cutoffs before any panel read", {
+    ss <- .ssQ_makeGwasSumStats()
+    expect_error(summaryStatsQc(ss, mafCutoff = -1), "mafCutoff")
+    expect_error(summaryStatsQc(ss, macCutoff = c(1, 2)), "macCutoff")
+    expect_error(summaryStatsQc(ss, imissCutoff = NA_real_), "imissCutoff")
+    expect_error(summaryStatsQc(ss, macCutoff = Inf), "macCutoff")
+})
+
+
+# ---------------------------------------------------------------------------
 # RAISS imputation: MAF / MAC / missingness cutoffs
 #
 # Without these, every rare variant in the window of a large LD sketch becomes
@@ -7493,14 +7663,18 @@ test_that("summaryStatsQc imputeOpts cutoffs bound what RAISS imputes", {
     refPanel <- frame(panelIds)
     knownZ <- if (length(knownIds) == 0L) {
         data.frame(
-            chrom = character(0), pos = integer(0),
-            variant_id = character(0), stringsAsFactors = FALSE
+            chrom = character(0),
+            pos = integer(0),
+            variant_id = character(0),
+            stringsAsFactors = FALSE
         )
     } else {
         frame(knownIds)
     }
     panelIds[.raissUnknownIdx(
-        refPanel, knownZ, intersect(knownIds, panelIds)
+        refPanel,
+        knownZ,
+        intersect(knownIds, panelIds)
     )]
 }
 
@@ -7526,7 +7700,8 @@ test_that("a flip pair is excluded even when nothing is known there", {
     # happen to carry.
     got <- .raiss_targets(character(0))
     expect_false(any(is_in(
-        normalizeVariantId(c("chr1:100:A:AT", "chr1:100:AT:A")), got
+        normalizeVariantId(c("chr1:100:A:AT", "chr1:100:AT:A")),
+        got
     )))
 })
 
@@ -7568,16 +7743,24 @@ test_that(".raissFlipPairMask needs both orientations, not just an indel", {
             chrom = rep("1", 5),
             pos = c(100L, 100L, 200L, 300L, 300L),
             variant_id = c(
-                "1:100:A:G", "1:100:A:T", "1:200:A:G",
-                "1:300:A:G", "1:300:A:T"
+                "1:100:A:G",
+                "1:100:A:T",
+                "1:200:A:G",
+                "1:300:A:G",
+                "1:300:A:T"
             ),
             A1 = c("G", "T", "G", "G", "T"),
             A2 = rep("A", 5),
             stringsAsFactors = FALSE
         ),
         knownZ = data.frame(
-            chrom = "1", pos = 100L, variant_id = "1:100:A:G",
-            A1 = "G", A2 = "A", z = 3.0, stringsAsFactors = FALSE
+            chrom = "1",
+            pos = 100L,
+            variant_id = "1:100:A:G",
+            A1 = "G",
+            A2 = "A",
+            z = 3.0,
+            stringsAsFactors = FALSE
         )
     )
 }
@@ -7641,7 +7824,8 @@ test_that("raissSingleMatrix does not impute at a typed position", {
     imp <- setdiff(r$resultNofilter$variant_id, d$knownZ$variant_id)
     expect_false(is_in("1:100:A:T", imp))
     expect_true(all(is_in(
-        c("1:200:A:G", "1:300:A:G", "1:300:A:T"), imp
+        c("1:200:A:G", "1:300:A:G", "1:300:A:T"),
+        imp
     )))
     expect_true(is_in("1:100:A:G", r$resultNofilter$variant_id))
 })
@@ -7722,8 +7906,13 @@ test_that(".subsetSketchToIds keeps the panel when ids are unextractable", {
 
 .afm_df <- function(freqcol, val) {
     d <- data.frame(
-        chrom = "chr1", pos = 100L, variant_id = "chr1:100:A:G",
-        A1 = "A", A2 = "G", z = 2.5, n_sample = 1000,
+        chrom = "chr1",
+        pos = 100L,
+        variant_id = "chr1:100:A:G",
+        A1 = "A",
+        A2 = "G",
+        z = 2.5,
+        n_sample = 1000,
         stringsAsFactors = FALSE
     )
     d[[freqcol]] <- val
@@ -7732,8 +7921,14 @@ test_that(".subsetSketchToIds keeps the panel when ids are unextractable", {
 
 .afm_cm <- function(...) {
     c(
-        chrom = "chrom", pos = "pos", variant_id = "variant_id",
-        A1 = "A1", A2 = "A2", z = "z", n_sample = "n_sample", ...
+        chrom = "chrom",
+        pos = "pos",
+        variant_id = "variant_id",
+        A1 = "A1",
+        A2 = "A2",
+        z = "z",
+        n_sample = "n_sample",
+        ...
     )
 }
 
@@ -7741,13 +7936,15 @@ test_that("an af: key is directional AF; a maf: key is directionless", {
     # Same source column, different declaration -> different meaning.
     a <- suppressWarnings(.resolveSumstatCols(
         .afm_df("effect_allele_frequency", 0.8),
-        .afm_cm(af = "effect_allele_frequency"), "af"
+        .afm_cm(af = "effect_allele_frequency"),
+        "af"
     ))
     expect_equal(a$AF, 0.8)
     expect_null(a$MAF)
     b <- suppressWarnings(.resolveSumstatCols(
         .afm_df("effect_allele_frequency", 0.8),
-        .afm_cm(maf = "effect_allele_frequency"), "maf"
+        .afm_cm(maf = "effect_allele_frequency"),
+        "maf"
     ))
     expect_null(b$AF)
     expect_equal(b$MAF, 0.8)
@@ -7756,7 +7953,9 @@ test_that("an af: key is directional AF; a maf: key is directionless", {
 test_that("an undeclared af warns distinctly and yields no AF column", {
     expect_warning(
         out <- .resolveSumstatCols(
-            .afm_df("maf", 0.2), .afm_cm(maf = "maf"), "undeclared"
+            .afm_df("maf", 0.2),
+            .afm_cm(maf = "maf"),
+            "undeclared"
         ),
         "no effect-allele frequency declared"
     )
@@ -7767,7 +7966,9 @@ test_that("a declared-but-unusable af warns with a different message", {
     # Distinct from "undeclared": this is a data problem, not a mapping one.
     expect_warning(
         .resolveSumstatCols(
-            .afm_df("eaf", NA_real_), .afm_cm(af = "eaf"), "missing"
+            .afm_df("eaf", NA_real_),
+            .afm_cm(af = "eaf"),
+            "missing"
         ),
         "declared but its values are all missing"
     )
@@ -7776,7 +7977,9 @@ test_that("a declared-but-unusable af warns with a different message", {
 test_that(".fmAfByVar reads AF, and is NULL when af was never declared", {
     mk <- function(cm) {
         .dfToEntryGranges(suppressWarnings(.resolveSumstatCols(
-            .afm_df("effect_allele_frequency", 0.8), cm, "lbl"
+            .afm_df("effect_allele_frequency", 0.8),
+            cm,
+            "lbl"
         )))
     }
     gA <- mk(.afm_cm(af = "effect_allele_frequency"))
@@ -7799,17 +8002,31 @@ test_that("an allele swap complements af but leaves the directionless maf", {
     # af -> 1 - af on a swap; maf = min(af, 1-af) is swap-invariant, so
     # complementing it would corrupt it.
     tgt <- data.frame(
-        chrom = "1", pos = 100L, A2 = "G", A1 = "A", SNP = "v1",
-        Z = 2.0, AF = 0.8, MAF = 0.2, stringsAsFactors = FALSE
+        chrom = "1",
+        pos = 100L,
+        A2 = "G",
+        A1 = "A",
+        SNP = "v1",
+        Z = 2.0,
+        AF = 0.8,
+        MAF = 0.2,
+        stringsAsFactors = FALSE
     )
     ref <- data.frame(
-        chrom = "1", pos = 100L, A2 = "A", A1 = "G",
-        variant_id = "v1", stringsAsFactors = FALSE
+        chrom = "1",
+        pos = 100L,
+        A2 = "A",
+        A1 = "G",
+        variant_id = "v1",
+        stringsAsFactors = FALSE
     )
     h <- harmonizeAlleles(
-        tgt, ref,
-        colToFlip = "Z", colToComplement = "AF",
-        matchMinProp = 0, removeStrandAmbiguous = FALSE
+        tgt,
+        ref,
+        colToFlip = "Z",
+        colToComplement = "AF",
+        matchMinProp = 0,
+        removeStrandAmbiguous = FALSE
     )$harmonizedData
     expect_equal(h$AF, 0.2)
     expect_equal(h$Z, -2.0)

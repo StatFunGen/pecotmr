@@ -2217,10 +2217,10 @@ test_that("fineMappingPipeline(GwasSumStats): runs end-to-end with mocked RSS fi
     expect_setequal(getMethodNames(res), "susie")
 })
 
-test_that("fineMappingPipeline(GwasSumStats): threads per-variant N into postprocess (not the median, not 1)", {
+test_that("fineMappingPipeline(GwasSumStats): threads per-variant N", {
     # Regression for top_loci$N == 1. The RSS path must forward the per-variant
-    # effective N (the entry's N column, aligned to the analysed variants) to the
-    # post-processor -- NOT the scalar median the SuSiE-RSS fit consumes, and
+    # effective N (the entry's N column, aligned to the analysed variants) to
+    # the post-processor -- NOT the scalar median the SuSiE-RSS fit consumes,
     # never a list-collapsed 1.
     snp_ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
     gr <- GenomicRanges::GRanges(
@@ -2230,7 +2230,8 @@ test_that("fineMappingPipeline(GwasSumStats): threads per-variant N into postpro
             width = 1L
         )
     )
-    perVarN <- c(1000L, 1100L, 1200L, 1300L, 1400L) # median = 1200, all distinct
+    # median = 1200, all distinct
+    perVarN <- c(1000L, 1100L, 1200L, 1300L, 1400L)
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
         SNP = snp_ids,
         A1 = rep("A", 5L),

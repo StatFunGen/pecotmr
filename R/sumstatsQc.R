@@ -2866,7 +2866,14 @@ krigingOutlierQc <- function(
     # AF = directional effect-allele frequency (exported as af); MAF =
     # directionless QC frequency. Both carried when the loader resolved them.
     optCols <- c(
-        "AF", "MAF", "INFO", "BETA", "SE", "P", "N_CASE", "N_CONTROL"
+        "AF",
+        "MAF",
+        "INFO",
+        "BETA",
+        "SE",
+        "P",
+        "N_CASE",
+        "N_CONTROL"
     )
     use <- intersect(c(baseCols, optCols), colnames(df))
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(select(df, all_of(use)))
@@ -3937,13 +3944,7 @@ krigingOutlierQc <- function(
         (.raissUnsafeToImpute(refPanel$variant_id, knownZ$variant_id) |
             .raissObservedPosition(refPanel, knownZ))
     stats <- .qcRaissVariantStats(dosage)
-    # A MAC cutoff is a MAF cutoff once expressed per panel sample; taking the
-    # stricter of the two matches .qtlVariantFilters().
-    nSamp <- nrow(dosage)
-    effectiveMaf <- max(
-        mafCutoff,
-        if (nSamp > 0L) macCutoff / (2 * nSamp) else 0
-    )
+    effectiveMaf <- .panelEffectiveMaf(mafCutoff, macCutoff, nrow(dosage))
     fails <- (!is.na(stats$maf) & stats$maf < effectiveMaf) |
         stats$missRate > imissCutoff |
         is.na(stats$maf)
@@ -4631,12 +4632,40 @@ krigingOutlierQc <- function(
     }
 }
 
+# TRUE for a single finite non-negative cutoff value.
+# @noRd
+.ssqcIsCutoff <- function(x) {
+    is.numeric(x) && length(x) == 1L && !is.na(x) && is.finite(x) && x >= 0
+}
+
+# Shape-check the panel-filter trio. Runs before the panel is opened, so a
+# malformed cutoff fails on the call rather than after a dosage read.
+# @noRd
+.ssqcCheckPanelCutoffs <- function(mafCutoff, macCutoff, imissCutoff) {
+    cutoffs <- list(
+        mafCutoff = mafCutoff,
+        macCutoff = macCutoff,
+        imissCutoff = imissCutoff
+    )
+    bad <- names(cutoffs)[!map_lgl(cutoffs, .ssqcIsCutoff)]
+    if (length(bad) > 0L) {
+        msg <- glue(
+            "summaryStatsQc: {str_flatten(bad, ', ')} must each be a single ",
+            "finite number >= 0."
+        )
+        abort(msg)
+    }
+    invisible(NULL)
+}
+
 # Build the per-entry QC options list from the captured call parameters.
 .ssqcBuildOpts <- function(p) {
     optNames <- c(
         "removeIndels",
         "removeStrandAmbiguous",
         "mafCutoff",
+        "macCutoff",
+        "imissCutoff",
         "infoCutoff",
         "nCutoff",
         "skipRegion",
@@ -4710,12 +4739,52 @@ krigingOutlierQc <- function(
     }
 }
 
+# Drop the reference-panel variants that fail the MAF / MAC / missingness
+# cutoffs, returning the pruned sketch. NULL cutoffs (the default) are a no-op.
+#
+# Pruning the PANEL rather than masking a variant list is what makes one
+# cutoff reach every reader: harmonization drops the study variants the
+# retained panel no longer covers, and kriging, SLALOM/DENTIST and the RAISS
+# known/unknown split then only ever see what survived.
+# @noRd
+.ssqcPrunePanel <- function(ldSketch, cutoffs, label) {
+    if (is.null(ldSketch) || is.null(cutoffs)) {
+        return(ldSketch)
+    }
+    handle <- .ldSketchHandle(ldSketch)
+    ids <- as.character(getSnpInfo(handle)$SNP)
+    if (length(ids) == 0L) {
+        return(ldSketch)
+    }
+    keep <- .panelKeepMask(ids, ldSketch, cutoffs, label)
+    if (all(keep)) {
+        return(ldSketch)
+    }
+    # Prune the underlying GenotypeHandle, not just an RSE row view. Every
+    # reader reaches the panel through `.ldSketchHandle()` -- the dosage
+    # DelayedArray's seed -- and `sketch[keep, ]` leaves that seed carrying
+    # the whole panel (the trap `.emptySketch()` documents). Rebuild the
+    # sketch from the pruned handle so the drop reaches all of them.
+    pruned <- .subsetGenotypeHandle(handle, keep)
+    if (methods::is(ldSketch, "GenotypeHandle")) {
+        return(pruned)
+    }
+    .genotypeExperiment(pruned)
+}
+
 # Run the per-entry QC pipeline across all entries.
 .ssqcRunEntries <- function(sumstats, opts) {
     newEntries <- vector("list", nrow(sumstats))
     entryAudits <- vector("list", nrow(sumstats))
     isQtl <- methods::is(sumstats, "QtlSumStats")
-    ldSketch <- getLdSketch(sumstats)
+    # Panel filter, once for the shared LD reference and BEFORE any entry is
+    # harmonized, so a variant the panel cannot support is gone from the LD
+    # and from the summary statistics alike.
+    ldSketch <- .ssqcPrunePanel(
+        getLdSketch(sumstats),
+        .panelCutoffs(opts),
+        "summaryStatsQc"
+    )
     refGenome <- getGenome(sumstats)
     for (i in seq_len(nrow(sumstats))) {
         opts <- .ssqcEntryOpts(opts, sumstats, i)
@@ -4729,7 +4798,11 @@ krigingOutlierQc <- function(
         newEntries[[i]] <- result$gr
         entryAudits[[i]] <- result$audit
     }
-    list(newEntries = newEntries, entryAudits = entryAudits)
+    list(
+        newEntries = newEntries,
+        entryAudits = entryAudits,
+        ldSketch = ldSketch
+    )
 }
 
 # Assemble the qcInfo record (echoed options + per-entry audits).
@@ -4738,6 +4811,8 @@ krigingOutlierQc <- function(
         "removeIndels",
         "removeStrandAmbiguous",
         "mafCutoff",
+        "macCutoff",
+        "imissCutoff",
         "infoCutoff",
         "nCutoff",
         "pipCutoffToSkip",
@@ -4826,19 +4901,48 @@ krigingOutlierQc <- function(
 #' etc.). Fine-mapping and TWAS-weights pipelines reject SumStats inputs where
 #' \code{length(getQcInfo(x)) == 0L}.
 #'
-#' Column-availability error contract: a non-zero \code{mafCutoff} requires
-#' every entry to carry a \code{MAF} column; non-zero \code{infoCutoff} requires
-#' \code{INFO}; non-zero \code{nCutoff} requires \code{N}. Missing column with a
-#' non-zero cutoff is a hard error.
+#' Column-availability error contract: a non-zero \code{infoCutoff} requires
+#' every entry to carry an \code{INFO} column, and a non-zero \code{nCutoff}
+#' requires \code{N}; a missing column with a non-zero cutoff is a hard error.
+#' \code{mafCutoff} is exempt --- a study with no frequency column is still
+#' filtered against the reference panel (see below).
+#'
+#' @section Panel filters: \code{mafCutoff} / \code{macCutoff} /
+#'   \code{imissCutoff} are measured against the \strong{LD reference panel},
+#'   the same way \code{\link{fineMappingPipeline}} and
+#'   \code{\link{twasWeightsPipeline}} measure them on the RSS path, so one
+#'   number means the same thing wherever it is set. MAC is converted to a MAF
+#'   equivalent and the stricter of the two applies, matching
+#'   \code{\link{QtlDataset}}. Defaults (\code{0}, \code{0}, \code{1}) filter
+#'   nothing.
+#'
+#'   The panel is filtered once, before any entry is harmonized, so a variant
+#'   the panel cannot support is absent from the LD used by kriging,
+#'   SLALOM/DENTIST and RAISS, and is never an imputation target. Because
+#'   harmonization drops summary-statistic variants the panel does not cover,
+#'   this also \strong{discards observed variants} --- the intended behaviour:
+#'   a variant whose LD cannot be estimated is not usable downstream.
+#'
+#'   \code{mafCutoff} additionally filters the summary statistics' own
+#'   \code{AF} / \code{MAF} / \code{FRQ} column when one is present, so a
+#'   variant common in the panel but rare in the study is dropped as well.
 #'
 #' @param sumstats A \code{QtlSumStats} or \code{GwasSumStats} collection.
 #' @param removeIndels Logical (length 1). When \code{TRUE}, drop indels during
 #'   panel harmonization. Default \code{FALSE}.
 #' @param removeStrandAmbiguous Logical (length 1). When \code{TRUE}, drop A/T
 #'   and C/G strand-ambiguous variants. Default \code{TRUE}.
-#' @param mafCutoff Numeric (length 1). MAF threshold (variants with \code{MAF <
-#'   mafCutoff} are dropped). Default 0. Requires \code{MAF} or \code{FRQ}
-#'   column when non-zero.
+#' @param mafCutoff Numeric (length 1). Minor-allele-frequency threshold,
+#'   measured wherever it can be: against the summary statistics' own
+#'   \code{AF} / \code{MAF} / \code{FRQ} column when one is present, and
+#'   against the LD reference panel. Default 0 (off). See the panel-filters
+#'   section below.
+#' @param macCutoff Numeric (length 1). Minor-allele-count threshold for the
+#'   LD reference panel, converted to a MAF equivalent using
+#'   \code{macCutoff / (2 * nSamples)}; the stricter of it and
+#'   \code{mafCutoff} applies. Default 0 (off).
+#' @param imissCutoff Numeric (length 1). Per-variant missingness-rate ceiling
+#'   for the LD reference panel. Default 1 (off).
 #' @param infoCutoff Numeric (length 1). INFO score threshold. Default 0.
 #'   Requires \code{INFO} column when non-zero.
 #' @param nCutoff Numeric (length 1). Sample-size deviation threshold: drop
@@ -4900,10 +5004,14 @@ krigingOutlierQc <- function(
 #'   \code{mafCutoff} and \code{macCutoff / (2 * nSamples)} applies, matching
 #'   \code{\link{QtlDataset}}.
 #'
-#'   These bound what is \strong{imputed}, not what is kept: a variant present
-#'   in the sumstats survives whatever its frequency in the panel, both because
-#'   it is observed data and because RAISS derives its LD basis from those same
-#'   panel rows.
+#'   These are a \strong{further} tightening applied to imputation targets
+#'   only, on top of the panel filter the top-level cutoffs already applied:
+#'   the panel handed to RAISS holds nothing below those. Use them to impute
+#'   only common variants from a panel deliberately kept wider than that ---
+#'   e.g. \code{mafCutoff = 0.001} with
+#'   \code{imputeOpts = list(mafCutoff = 0.01)}. A variant present in the
+#'   sumstats is never dropped here: RAISS derives its LD basis from those
+#'   same panel rows.
 #' @param matchMinProp Minimum proportion of LD panel variants that must be
 #'   matched by the sumstats; default 0.
 #' @param coerceNumeric Logical. Coerce signed columns
@@ -4938,6 +5046,8 @@ summaryStatsQc <- function(
     removeIndels = FALSE,
     removeStrandAmbiguous = TRUE,
     mafCutoff = 0,
+    macCutoff = 0,
+    imissCutoff = 1,
     infoCutoff = 0,
     nCutoff = 5,
     keepVariants = NULL,
@@ -4969,11 +5079,14 @@ summaryStatsQc <- function(
 ) {
     zMismatchQc <- arg_match(zMismatchQc)
     .ssqcCheckEntries(sumstats, mafCutoff, infoCutoff)
+    .ssqcCheckPanelCutoffs(mafCutoff, macCutoff, imissCutoff)
     p <- as.list(environment())
     opts <- .ssqcBuildOpts(p)
     res <- .ssqcRunEntries(sumstats, opts)
     qcInfo <- .ssqcBuildQcInfo(p, res$entryAudits)
-    newLdSketch <- .subsetSketchToIds(getLdSketch(sumstats), res$newEntries)
+    # From the PRUNED panel, not the input's: narrowing the original again
+    # would hand back a sketch the panel filter never reached.
+    newLdSketch <- .subsetSketchToIds(res$ldSketch, res$newEntries)
     .ssqcRebuild(sumstats, res$newEntries, newLdSketch, qcInfo)
 }
 

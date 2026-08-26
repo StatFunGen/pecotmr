@@ -1751,8 +1751,8 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         z = df$z,
         # Scalar block N the RSS fit consumes (susie_rss takes a single n) ...
         n = stats::median(df$N, na.rm = TRUE),
-        # ... and the per-variant effective N, aligned to `variantIds`, used only
-        # to populate the reporting-only top_loci$N column (never the fit).
+        # ... and the per-variant effective N, aligned to `variantIds`, used
+        # only for the reporting-only top_loci$N column (never the fit).
         nVar = df$N
     )
 }

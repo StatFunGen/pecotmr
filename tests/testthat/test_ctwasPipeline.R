@@ -296,7 +296,7 @@ test_that("assembleCtwasInputs: accepts a QtlFineMappingResult weight source (to
     expect_equal(ifmr$weights[[1L]], itw$weights[[1L]])
 })
 
-test_that("assembleCtwasInputs: fits a boundary gene per-region but spans all its blocks", {
+test_that("assembleCtwasInputs: boundary gene fits per-region, spans all", {
     # Build two blocks with NON-OVERLAPPING GWAS variants. Block 1 covers
     # v1..v3, block 2 covers v4..v6. The gene's weight spans v2..v5 — i.e.
     # crosses the block boundary. With a per-block filter the gene would

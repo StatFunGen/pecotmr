@@ -9,6 +9,8 @@ summaryStatsQc(
   removeIndels = FALSE,
   removeStrandAmbiguous = TRUE,
   mafCutoff = 0,
+  macCutoff = 0,
+  imissCutoff = 1,
   infoCutoff = 0,
   nCutoff = 5,
   keepVariants = NULL,
@@ -43,9 +45,19 @@ panel harmonization. Default \code{FALSE}.}
 \item{removeStrandAmbiguous}{Logical (length 1). When \code{TRUE}, drop A/T
 and C/G strand-ambiguous variants. Default \code{TRUE}.}
 
-\item{mafCutoff}{Numeric (length 1). MAF threshold (variants with \code{MAF <
-mafCutoff} are dropped). Default 0. Requires \code{MAF} or \code{FRQ}
-column when non-zero.}
+\item{mafCutoff}{Numeric (length 1). Minor-allele-frequency threshold,
+measured wherever it can be: against the summary statistics' own
+\code{AF} / \code{MAF} / \code{FRQ} column when one is present, and
+against the LD reference panel. Default 0 (off). See the panel-filters
+section below.}
+
+\item{macCutoff}{Numeric (length 1). Minor-allele-count threshold for the
+LD reference panel, converted to a MAF equivalent using
+\code{macCutoff / (2 * nSamples)}; the stricter of it and
+\code{mafCutoff} applies. Default 0 (off).}
+
+\item{imissCutoff}{Numeric (length 1). Per-variant missingness-rate ceiling
+for the LD reference panel. Default 1 (off).}
 
 \item{infoCutoff}{Numeric (length 1). INFO score threshold. Default 0.
 Requires \code{INFO} column when non-zero.}
@@ -120,10 +132,14 @@ emits a warning and is skipped.)}
   \code{mafCutoff} and \code{macCutoff / (2 * nSamples)} applies, matching
   \code{\link{QtlDataset}}.
 
-  These bound what is \strong{imputed}, not what is kept: a variant present
-  in the sumstats survives whatever its frequency in the panel, both because
-  it is observed data and because RAISS derives its LD basis from those same
-  panel rows.}
+  These are a \strong{further} tightening applied to imputation targets
+  only, on top of the panel filter the top-level cutoffs already applied:
+  the panel handed to RAISS holds nothing below those. Use them to impute
+  only common variants from a panel deliberately kept wider than that ---
+  e.g. \code{mafCutoff = 0.001} with
+  \code{imputeOpts = list(mafCutoff = 0.01)}. A variant present in the
+  sumstats is never dropped here: RAISS derives its LD basis from those
+  same panel rows.}
 
 \item{matchMinProp}{Minimum proportion of LD panel variants that must be
 matched by the sumstats; default 0.}
@@ -180,11 +196,34 @@ audit record (variant counts, drop counts at each step, which filters fired,
 etc.). Fine-mapping and TWAS-weights pipelines reject SumStats inputs where
 \code{length(getQcInfo(x)) == 0L}.
 
-Column-availability error contract: a non-zero \code{mafCutoff} requires
-every entry to carry a \code{MAF} column; non-zero \code{infoCutoff} requires
-\code{INFO}; non-zero \code{nCutoff} requires \code{N}. Missing column with a
-non-zero cutoff is a hard error.
+Column-availability error contract: a non-zero \code{infoCutoff} requires
+every entry to carry an \code{INFO} column, and a non-zero \code{nCutoff}
+requires \code{N}; a missing column with a non-zero cutoff is a hard error.
+\code{mafCutoff} is exempt --- a study with no frequency column is still
+filtered against the reference panel (see below).
 }
+\section{Panel filters}{
+ \code{mafCutoff} / \code{macCutoff} /
+  \code{imissCutoff} are measured against the \strong{LD reference panel},
+  the same way \code{\link{fineMappingPipeline}} and
+  \code{\link{twasWeightsPipeline}} measure them on the RSS path, so one
+  number means the same thing wherever it is set. MAC is converted to a MAF
+  equivalent and the stricter of the two applies, matching
+  \code{\link{QtlDataset}}. Defaults (\code{0}, \code{0}, \code{1}) filter
+  nothing.
+
+  The panel is filtered once, before any entry is harmonized, so a variant
+  the panel cannot support is absent from the LD used by kriging,
+  SLALOM/DENTIST and RAISS, and is never an imputation target. Because
+  harmonization drops summary-statistic variants the panel does not cover,
+  this also \strong{discards observed variants} --- the intended behaviour:
+  a variant whose LD cannot be estimated is not usable downstream.
+
+  \code{mafCutoff} additionally filters the summary statistics' own
+  \code{AF} / \code{MAF} / \code{FRQ} column when one is present, so a
+  variant common in the panel but rare in the study is dropped as well.
+}
+
 \examples{
 data(gwasSumStatsS4Example)
 summaryStatsQc(gwasSumStatsS4Example)
