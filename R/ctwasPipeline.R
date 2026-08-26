@@ -2579,11 +2579,12 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (length(kept) < 1L) {
         return(NULL)
     }
-    # The weight vector ctwas fits must live inside the region being fine-mapped:
-    # susie_rss gets that region's LD, and a gene reaching outside it yields a
-    # non-finite ELBO (and a non-finite fit_EM log-likelihood upstream). The
-    # SPAN stays the gene's full cis extent -- see .ctwasGeneEntry -- so a
-    # boundary gene is still detected and can be recovered by merge_regions.
+    # The weight vector ctwas fits must live inside the region being
+    # fine-mapped: susie_rss gets that region's LD, and a gene reaching
+    # outside it yields a non-finite ELBO (and a non-finite fit_EM
+    # log-likelihood upstream). The SPAN stays the gene's full cis extent --
+    # see .ctwasGeneEntry -- so a boundary gene is still detected and can be
+    # recovered by merge_regions.
     inRegion <- .ctwasInRegion(kept$vids, ctx$regionSnps)
     if (!any(inRegion)) {
         return(NULL)

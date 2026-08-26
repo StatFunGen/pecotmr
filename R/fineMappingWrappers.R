@@ -543,24 +543,27 @@ postprocessFinemappingFit.susiF <- function(
     # Always build the canonical unfiltered table; the FineMappingRow stores
     # it as-is so accessors can filter by PIP at query time.
     topLociFull <- .ppTopLoci(p, csTables, variantNames, sumstats)
-    # trim = TRUE stores a minimal subset of the fit; FALSE keeps the full
-    # untrimmed susie return (mu / mu2 / lbf_variable / V / ...).
-    storedFit <- if (isTRUE(trim)) {
-        trimFinemappingFit(
-            fit,
-            selectEffects(fit, priorEffTol),
-            method,
-            csTables
-        )
-    } else {
-        fit
-    }
     fmEntry <- fineMappingRow(
         variantIds = variantNames,
-        susieFit = storedFit,
+        susieFit = .ppStoredFit(p, csTables),
         topLoci = topLociFull
     )
     .ppAssembleRes(p, topLociFull, fmEntry, sumstats)
+}
+
+# The fit as stored: trim = TRUE keeps a minimal subset, FALSE the full
+# untrimmed susie return (mu / mu2 / lbf_variable / V / ...).
+# @noRd
+.ppStoredFit <- function(p, csTables) {
+    if (!isTRUE(p$trim)) {
+        return(p$fit)
+    }
+    trimFinemappingFit(
+        p$fit,
+        selectEffects(p$fit, p$priorEffTol),
+        p$method,
+        csTables
+    )
 }
 
 # Credible-set tables for the fit at the requested coverages.
@@ -1391,6 +1394,21 @@ buildTopLoci <- function(
     if (is.null(cov)) rep(NA_real_, length(csTables)) else cov
 }
 
+# The per-variant N column. Numeric, so a fractional *effective* N (e.g.
+# 4 / (1 / nCase + 1 / nControl)) matches getSumstatDf(entry)$N exactly rather
+# than being truncated. With no per-variant n this falls back to the fit's
+# scalar N (integer nrow on the QTL path, NA otherwise); a scalar n recycles.
+# @noRd
+.btlNColumn <- function(n, fitN, nV) {
+    if (is.null(n)) {
+        return(rep(fitN, nV))
+    }
+    if (length(n) == 1L) {
+        return(rep(as.numeric(n), nV))
+    }
+    as.numeric(n)
+}
+
 # Per-fit constants: sample size, gene (first phenotype column), event id, and
 # the parsed genomic range.
 .btlFitConstants <- function(dataY, otherQuantities, region) {
@@ -1399,11 +1417,9 @@ buildTopLoci <- function(
     # collapses it to a 1x1 cell, which used to make fitN (and every top_loci
     # N) 1. Treat non-matrix dataY as "no fit N" and let the per-variant `n`
     # (threaded from the RSS effective sample size) fill the N column instead.
-    dataYMat <- if (!is.null(dataY) && (is.matrix(dataY) || is.data.frame(dataY))) {
-        as.matrix(dataY)
-    } else {
-        NULL
-    }
+    hasOutcomeMatrix <- !is.null(dataY) &&
+        (is.matrix(dataY) || is.data.frame(dataY))
+    dataYMat <- if (hasOutcomeMatrix) as.matrix(dataY) else NULL
     fitN <- if (is.null(dataYMat)) NA_integer_ else as.integer(nrow(dataYMat))
     fitGene <- if (!is.null(dataYMat) && !is.null(colnames(dataYMat))) {
         colnames(dataYMat)[1]
@@ -1743,17 +1759,7 @@ buildTopLoci <- function(
         pos = as.integer(parsed$pos),
         A1 = unname(parsed$A1),
         A2 = unname(parsed$A2),
-        # Per-variant N (RSS): keep it numeric so a fractional *effective* N
-        # (e.g. 4 / (1/nCase + 1/nControl)) matches getSumstatDf(entry)$N exactly
-        # rather than being truncated. Fall back to the fit's scalar N (integer
-        # nrow on the QTL path, NA otherwise). A scalar n is recycled.
-        N = if (is.null(n)) {
-            rep(fc$fitN, nV)
-        } else if (length(n) == 1L) {
-            rep(as.numeric(n), nV)
-        } else {
-            as.numeric(n)
-        },
+        N = .btlNColumn(n, fc$fitN, nV),
         af = if (is.null(af)) rep(NA_real_, nV) else as.numeric(af),
         marginal_beta = unname(marg$beta),
         marginal_se = unname(marg$se),

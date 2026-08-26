@@ -1000,7 +1000,7 @@ test_that("buildTopLoci emits 22 columns in the fixed order on a non-empty fit",
     expect_equal(unique(out$method), "susie")
 })
 
-test_that("buildTopLoci: RSS per-variant N is threaded; list dataY never collapses to 1", {
+test_that("buildTopLoci: RSS per-variant N threads; list dataY isn't 1", {
     # Regression for top_loci$N == 1 on the RSS path: dataY = list(z = ...) made
     # as.matrix() collapse to a 1x1 cell, so nrow (and every N) was 1. The
     # per-variant effective N must instead be threaded into the N column.
@@ -1032,7 +1032,7 @@ test_that("buildTopLoci: RSS per-variant N is threaded; list dataY never collaps
     expect_equal(out$N[ord], perVarN)
     expect_false(any(out$N == 1L))
 
-    # (3b) list dataY + no n supplied -> N is NA (unknown), never the collapsed 1.
+    # (3b) list dataY + no n -> N is NA (unknown), never the collapsed 1.
     out_na <- buildTopLoci(
         fit = inp$fit,
         csTables = inp$cs_tables,
