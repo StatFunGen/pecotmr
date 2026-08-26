@@ -1000,6 +1000,52 @@ test_that("buildTopLoci emits 22 columns in the fixed order on a non-empty fit",
     expect_equal(unique(out$method), "susie")
 })
 
+test_that("buildTopLoci: RSS per-variant N is threaded; list dataY never collapses to 1", {
+    # Regression for top_loci$N == 1 on the RSS path: dataY = list(z = ...) made
+    # as.matrix() collapse to a 1x1 cell, so nrow (and every N) was 1. The
+    # per-variant effective N must instead be threaded into the N column.
+    variant_ids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:A:T")
+    inp <- .fake_fit_and_cs(
+        variant_ids,
+        cs_at_cov = list(
+            "0.95" = list(c(1L, 2L, 3L)),
+            "0.7" = list(c(1L, 2L, 3L)),
+            "0.5" = list(c(1L, 2L, 3L))
+        ),
+        nSamples = 5,
+        n_variants = length(variant_ids)
+    )
+    perVarN <- c(233257L, 250000L, 283145L)
+
+    # (3a) list dataY + a per-variant n -> N is exactly that per-variant vector.
+    out <- buildTopLoci(
+        fit = inp$fit,
+        csTables = inp$cs_tables,
+        variantNames = inp$variantNames,
+        af = NULL,
+        n = perVarN,
+        method = "susie",
+        signalCutoff = 0,
+        dataY = list(z = rnorm(length(variant_ids)))
+    )
+    ord <- match(variant_ids, out$variant_id)
+    expect_equal(out$N[ord], perVarN)
+    expect_false(any(out$N == 1L))
+
+    # (3b) list dataY + no n supplied -> N is NA (unknown), never the collapsed 1.
+    out_na <- buildTopLoci(
+        fit = inp$fit,
+        csTables = inp$cs_tables,
+        variantNames = inp$variantNames,
+        af = NULL,
+        method = "susie",
+        signalCutoff = 0,
+        dataY = list(z = rnorm(length(variant_ids)))
+    )
+    expect_true(is.numeric(out_na$N))
+    expect_true(all(is.na(out_na$N)))
+})
+
 test_that("buildTopLoci fullFit: within_cs_pip default + wide per-CS matrices", {
     vn <- paste0("chr1:", (1:5) * 100, ":A:G")
     L <- 2L

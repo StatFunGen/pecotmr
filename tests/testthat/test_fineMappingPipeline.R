@@ -2217,6 +2217,79 @@ test_that("fineMappingPipeline(GwasSumStats): runs end-to-end with mocked RSS fi
     expect_setequal(getMethodNames(res), "susie")
 })
 
+test_that("fineMappingPipeline(GwasSumStats): threads per-variant N into postprocess (not the median, not 1)", {
+    # Regression for top_loci$N == 1. The RSS path must forward the per-variant
+    # effective N (the entry's N column, aligned to the analysed variants) to the
+    # post-processor -- NOT the scalar median the SuSiE-RSS fit consumes, and
+    # never a list-collapsed 1.
+    snp_ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    gr <- GenomicRanges::GRanges(
+        seqnames = "chr1",
+        ranges = IRanges::IRanges(
+            start = seq(100L, by = 100L, length.out = 5L),
+            width = 1L
+        )
+    )
+    perVarN <- c(1000L, 1100L, 1200L, 1300L, 1400L) # median = 1200, all distinct
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = snp_ids,
+        A1 = rep("A", 5L),
+        A2 = rep("G", 5L),
+        Z = rnorm(5L),
+        N = perVarN
+    )
+    gss <- GwasSumStats(
+        study = "G1",
+        entry = list(gr),
+        genome = "hg19",
+        ldSketch = .fmp_makeHandle(),
+        qcInfo = list(step1 = "ok")
+    )
+    captured <- new.env(parent = emptyenv())
+    captured$n <- "UNSET"
+    recording <- function(
+        fit,
+        method,
+        dataX,
+        dataY,
+        coverage,
+        secondaryCoverage,
+        signalCutoff,
+        minAbsCorr,
+        csInput = NULL,
+        af = NULL,
+        n = NULL,
+        ...
+    ) {
+        captured$n <- n
+        vids <- names(dataY$z)
+        if (is.null(vids)) {
+            vids <- snp_ids
+        }
+        fineMappingRow(
+            variantIds = vids,
+            susieFit = list(method = method),
+            topLoci = data.frame(
+                variant_id = vids,
+                pip = 0.5,
+                stringsAsFactors = FALSE
+            )
+        )
+    }
+    local_mocked_bindings(
+        extractBlockGenotypes = .fmp_mockExtractor(),
+        .fmFitSusieRss = .fmp_mockFitRss(),
+        .fmPostprocessOne = recording,
+        .package = "pecotmr"
+    )
+    suppressMessages(
+        fineMappingPipeline(gss, methods = "susie", addSusieInf = FALSE)
+    )
+    # per-variant N forwarded (all 5 distinct), not the scalar median, not 1.
+    expect_false(identical(captured$n, "UNSET"))
+    expect_equal(as.integer(captured$n), perVarN)
+})
+
 # ---- PIP-screen graceful skip: a screened region -> empty result, not error ----
 
 # A GwasSumStats whose (single) entry was emptied by summaryStatsQc's PIP screen:

@@ -868,6 +868,7 @@ setGeneric("fineMappingPipeline", function(data, ...) {
         p$verbose,
         label = glue("GWAS (study='{st}', region='{blockId}')"),
         af = .fmAfByVar(gr, zn$variantIds),
+        nVar = zn$nVar,
         fullFit = p$fullFit,
         fullFitAlphaOnly = p$fullFitAlphaOnly,
         includeAllCs = p$includeAllCs,
@@ -952,6 +953,7 @@ setGeneric("fineMappingPipeline", function(data, ...) {
         p$verbose,
         label = glue("(study='{st}', context='{ctx}', trait='{tr}')"),
         af = .fmAfByVar(entry, zn$variantIds),
+        nVar = zn$nVar,
         fullFit = p$fullFit,
         fullFitAlphaOnly = p$fullFitAlphaOnly,
         includeAllCs = p$includeAllCs,
@@ -1170,6 +1172,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     minAbsCorr,
     csInput = NULL,
     af = NULL,
+    n = NULL,
     region = NULL,
     trim = NULL,
     medianAbsCorr = NULL,
@@ -1192,6 +1195,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         dataY,
         region,
         af,
+        n,
         csInput,
         conditionIdx,
         coverage,
@@ -1212,6 +1216,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     dataY,
     region,
     af,
+    n,
     csInput,
     conditionIdx,
     coverage,
@@ -1225,6 +1230,7 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         dataX = dataX,
         dataY = dataY,
         af = af,
+        n = n,
         coverage = coverage,
         secondaryCoverage = secondaryCoverage,
         signalCutoff = signalCutoff,
@@ -1743,7 +1749,11 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
     list(
         variantIds = df$variant_id,
         z = df$z,
-        n = stats::median(df$N, na.rm = TRUE)
+        # Scalar block N the RSS fit consumes (susie_rss takes a single n) ...
+        n = stats::median(df$N, na.rm = TRUE),
+        # ... and the per-variant effective N, aligned to `variantIds`, used only
+        # to populate the reporting-only top_loci$N column (never the fit).
+        nVar = df$N
     )
 }
 

@@ -10,6 +10,7 @@ buildTopLoci(
   variantNames,
   sumstats = NULL,
   af = NULL,
+  n = NULL,
   method,
   signalCutoff = 0,
   dataY = NULL,
@@ -38,6 +39,12 @@ the final effect allele / \code{a1} after allele harmonization against the
 LD/reference variants). Exported directly as the \code{af} column. MAF is
 never exported; derive it from \code{af} at filter time. Default NULL ->
 \code{af = NA_real_}.}
+
+\item{n}{Optional per-variant sample size, one entry per variant, exported as
+the \code{N} column. Used by RSS fine-mapping, where the effective sample
+size varies by variant. Default NULL -> \code{N} falls back to the fit's
+scalar sample size (the outcome-matrix \code{nrow} for individual-level
+fits, \code{NA} otherwise).}
 
 \item{method}{Method name (e.g. \code{"susie"}, \code{"susieInf"}). Required.}
 
