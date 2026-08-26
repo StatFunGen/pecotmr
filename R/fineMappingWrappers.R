@@ -368,6 +368,7 @@ postprocessFinemappingFits <- function(
     xScalar = 1,
     yScalar = 1,
     af = NULL,
+    n = NULL,
     coverage = NULL,
     secondaryCoverage = c(0.7, 0.5),
     signalCutoff = 0.1,
@@ -518,6 +519,7 @@ postprocessFinemappingFit.susiF <- function(
     xScalar = 1,
     yScalar = 1,
     af = NULL,
+    n = NULL,
     coverage = NULL,
     secondaryCoverage = c(0.7, 0.5),
     signalCutoff = 0.1,
@@ -583,6 +585,7 @@ postprocessFinemappingFit.susiF <- function(
         variantNames = variantNames,
         sumstats = sumstats,
         af = p$af,
+        n = p$n,
         method = p$method,
         signalCutoff = 0,
         dataY = p$dataY,
@@ -1253,6 +1256,11 @@ setMethod(
 #'   LD/reference variants). Exported directly as the \code{af} column. MAF is
 #'   never exported; derive it from \code{af} at filter time. Default NULL ->
 #'   \code{af = NA_real_}.
+#' @param n Optional per-variant sample size, one entry per variant, exported as
+#'   the \code{N} column. Used by RSS fine-mapping, where the effective sample
+#'   size varies by variant. Default NULL -> \code{N} falls back to the fit's
+#'   scalar sample size (the outcome-matrix \code{nrow} for individual-level
+#'   fits, \code{NA} otherwise).
 #' @param method Method name (e.g. \code{"susie"}, \code{"susieInf"}). Required.
 #' @param signalCutoff PIP cutoff for retaining PIP-only (non-CS) variants.
 #' @param dataY Optional regional phenotype matrix; \code{nrow(dataY)} fills
@@ -1284,6 +1292,7 @@ buildTopLoci <- function(
     variantNames,
     sumstats = NULL,
     af = NULL,
+    n = NULL,
     method,
     signalCutoff = 0,
     dataY = NULL,
@@ -1330,6 +1339,7 @@ buildTopLoci <- function(
         post,
         p$fit,
         p$af,
+        p$n,
         p$method,
         .btlCsBlock(p$method, cs, nV),
         fullFitBlock,
@@ -1384,7 +1394,16 @@ buildTopLoci <- function(
 # Per-fit constants: sample size, gene (first phenotype column), event id, and
 # the parsed genomic range.
 .btlFitConstants <- function(dataY, otherQuantities, region) {
-    dataYMat <- if (!is.null(dataY)) as.matrix(dataY) else NULL
+    # Only a genuine sample-by-outcome matrix carries a meaningful nrow. RSS
+    # passes dataY as a list (e.g. list(z = ...)); as.matrix() on a list
+    # collapses it to a 1x1 cell, which used to make fitN (and every top_loci
+    # N) 1. Treat non-matrix dataY as "no fit N" and let the per-variant `n`
+    # (threaded from the RSS effective sample size) fill the N column instead.
+    dataYMat <- if (!is.null(dataY) && (is.matrix(dataY) || is.data.frame(dataY))) {
+        as.matrix(dataY)
+    } else {
+        NULL
+    }
     fitN <- if (is.null(dataYMat)) NA_integer_ else as.integer(nrow(dataYMat))
     fitGene <- if (!is.null(dataYMat) && !is.null(colnames(dataYMat))) {
         colnames(dataYMat)[1]
@@ -1712,6 +1731,7 @@ buildTopLoci <- function(
     post,
     fit,
     af,
+    n,
     method,
     csBlock,
     fullFitBlock,
@@ -1723,7 +1743,17 @@ buildTopLoci <- function(
         pos = as.integer(parsed$pos),
         A1 = unname(parsed$A1),
         A2 = unname(parsed$A2),
-        N = rep(fc$fitN, nV),
+        # Per-variant N (RSS): keep it numeric so a fractional *effective* N
+        # (e.g. 4 / (1/nCase + 1/nControl)) matches getSumstatDf(entry)$N exactly
+        # rather than being truncated. Fall back to the fit's scalar N (integer
+        # nrow on the QTL path, NA otherwise). A scalar n is recycled.
+        N = if (is.null(n)) {
+            rep(fc$fitN, nV)
+        } else if (length(n) == 1L) {
+            rep(as.numeric(n), nV)
+        } else {
+            as.numeric(n)
+        },
         af = if (is.null(af)) rep(NA_real_, nV) else as.numeric(af),
         marginal_beta = unname(marg$beta),
         marginal_se = unname(marg$se),
@@ -3630,6 +3660,7 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
     verbose,
     label,
     af = NULL,
+    nVar = NULL,
     fullFit = FALSE,
     fullFitAlphaOnly = TRUE,
     includeAllCs = FALSE,
@@ -3757,6 +3788,10 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
         signalCutoff = p$signalCutoff,
         minAbsCorr = p$minAbsCorr,
         af = p$af,
+        # Per-variant effective N (reporting-only, top_loci$N). NULL on any path
+        # that has no per-variant N -> buildTopLoci leaves N as NA, never 1.
+        # This is NOT p$n (the scalar median the RSS fit consumes).
+        n = p$nVar,
         csInput = "Xcorr",
         fullFit = p$fullFit,
         fullFitAlphaOnly = p$fullFitAlphaOnly,
@@ -3822,6 +3857,7 @@ mergeSusieCs <- function(fineMappingResult, coverage = 0.95) {
         xScalar = p$xScalar,
         yScalar = p$yScalar,
         af = p$af,
+        n = p$n,
         coverage = p$coverage,
         secondaryCoverage = p$secondaryCoverage,
         signalCutoff = p$signalCutoff,
