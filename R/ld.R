@@ -990,12 +990,105 @@ loadLdFromGenotype <- function(
     )
 }
 
+# A MAC cutoff is a MAF cutoff once expressed per panel sample, so the
+# stricter of the two applies -- the same rule .qtlVariantFilters() uses on
+# individual level data, so one number means the same thing on both paths.
+# @noRd
+.panelEffectiveMaf <- function(mafCutoff, macCutoff, nSamples) {
+    macAsMaf <- if (nSamples > 0L) macCutoff / (2 * nSamples) else 0
+    max(mafCutoff, macAsMaf)
+}
+
+# The .afreq stems to read for a panel: the handle's own stem, or one per
+# chromosome the panel actually spans. A sharded handle lists every
+# chromosome in its manifest, and reading the shards the summary statistics
+# never touch is the cost per-chromosome sketch trimming exists to avoid.
+# @noRd
+.panelAfreqPrefixes <- function(handle) {
+    chromPaths <- .genotypeChromPaths(handle)
+    if (length(chromPaths) == 0L) {
+        return(.genotypeReadPath(handle))
+    }
+    spanned <- unique(canonChrom(as.character(getSnpInfo(handle)$CHR)))
+    paths <- unname(chromPaths[is_in(names(chromPaths), spanned)])
+    map_chr(paths, .resolveGenotypeResourcePath)
+}
+
+# One shard's id/alt_freq pairs, or NULL when the sidecar is missing or does
+# not carry them. A malformed sidecar must not take the whole filter down, so
+# it degrades to "no frequencies here" and the caller falls back to dosage.
+# @noRd
+.panelAfreqTable <- function(prefix) {
+    af <- tryCatch(readAfreq(prefix), error = function(e) NULL)
+    if (is.null(af) || !all(is_in(c("id", "alt_freq"), colnames(af)))) {
+        return(NULL)
+    }
+    select(af, all_of(c("id", "alt_freq")))
+}
+
+# Panel minor allele frequency for `variantIds` read from the PLINK2 .afreq
+# sidecar, or NULL when the sidecar cannot answer for every id.
+#
+# Refusing a PARTIAL sidecar is deliberate: the dosage path treats a variant
+# it cannot measure as a drop, so a fast path that quietly kept the ids
+# .afreq happens to omit would disagree with it about the same variant.
+# @noRd
+.panelAfreqMaf <- function(handle, variantIds) {
+    if (getFormat(handle) != "plink2") {
+        return(NULL)
+    }
+    tbls <- compact(map(.panelAfreqPrefixes(handle), .panelAfreqTable))
+    if (length(tbls) == 0L) {
+        return(NULL)
+    }
+    afTbl <- list_rbind(tbls)
+    idx <- match(variantIds, pull(afTbl, "id"))
+    if (anyNA(idx)) {
+        return(NULL)
+    }
+    altFreq <- as.numeric(pull(afTbl, "alt_freq"))[idx]
+    pmin(altFreq, 1 - altFreq)
+}
+
+# TRUE for each matched panel variant that fails the cutoffs.
+#
+# Allele frequency alone answers MAF and MAC, so with no missingness cutoff
+# set the .afreq sidecar decides the whole mask without materializing panel
+# dosage -- which is what makes the filter affordable on a panel far larger
+# than the analysed variant set. Missingness is not derivable from the
+# sidecar (its observation count is an ALLELE count, whose ploidy the mask
+# would have to guess), so an imissCutoff always takes the dosage path.
+# @noRd
+.panelDropMask <- function(
+    handle,
+    matched,
+    mafCutoff,
+    macCutoff,
+    imissCutoff
+) {
+    if (imissCutoff >= 1) {
+        # Keyed on the PANEL's own variant labels, not the caller's: .afreq
+        # carries the .pvar ids, while `keptIds` is whatever id form the
+        # caller asked in (normalized, most often).
+        panelIds <- as.character(getSnpInfo(handle)$SNP)[matched$idx]
+        maf <- .panelAfreqMaf(handle, panelIds)
+        if (!is.null(maf)) {
+            effMaf <- .panelEffectiveMaf(
+                mafCutoff,
+                macCutoff,
+                getNSamples(handle)
+            )
+            return(is.na(maf) | maf < effMaf)
+        }
+    }
+    dosage <- .dosageMatrix(handle, matched$idx, meanImpute = FALSE)
+    stats <- .panelVariantStats(dosage)
+    effMaf <- .panelEffectiveMaf(mafCutoff, macCutoff, nrow(dosage))
+    is.na(stats$maf) | stats$maf < effMaf | stats$missRate > imissCutoff
+}
+
 # The subset of `variantIds` whose LD-panel genotypes clear the cutoffs,
 # returned in the caller's order.
-#
-# A MAC cutoff is a MAF cutoff once expressed per panel sample, so the stricter
-# of the two applies -- the same rule .qtlVariantFilters() uses on individual
-# level data, so one number means the same thing on both paths.
 #
 # Variants absent from the panel are passed through untouched. Whether a
 # missing variant is an error or is silently dropped belongs to `.ldFromSketch`
@@ -1023,20 +1116,13 @@ loadLdFromGenotype <- function(
     if (is.null(matched)) {
         return(variantIds)
     }
-    dosage <- .dosageMatrix(
+    drop <- .panelDropMask(
         .ldSketchHandle(ldSketch),
-        matched$idx,
-        meanImpute = FALSE
-    )
-    stats <- .panelVariantStats(dosage)
-    nSamp <- nrow(dosage)
-    effectiveMaf <- max(
+        matched,
         mafCutoff,
-        if (nSamp > 0L) macCutoff / (2 * nSamp) else 0
+        macCutoff,
+        imissCutoff
     )
-    drop <- is.na(stats$maf) |
-        stats$maf < effectiveMaf |
-        stats$missRate > imissCutoff
     variantIds[!is_in(variantIds, matched$keptIds[drop])]
 }
 

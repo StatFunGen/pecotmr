@@ -4454,3 +4454,93 @@ test_that(".panelCutoffs short-circuits when no cutoff is set", {
     expect_equal(.panelCutoffs(list(mafCutoff = 0.01))$mafCutoff, 0.01)
     expect_equal(.panelCutoffs(list(imissCutoff = 0.5))$imissCutoff, 0.5)
 })
+
+
+# ---------------------------------------------------------------------------
+# .panelVariantFilter: the .afreq fast path
+#
+# Allele frequency alone answers MAF and MAC, so a panel that ships a PLINK2
+# .afreq sidecar is filtered without materializing its dosage. The sidecar and
+# the dosage must agree on every variant, or one pipeline would judge a
+# variant differently from the next.
+# ---------------------------------------------------------------------------
+
+# @noRd
+.pvfAfreqHandle <- function() {
+    readGenotypeHandle(test_path("test_data/test_variants"), format = "plink2")
+}
+
+test_that(".panelAfreqMaf reads panel MAF from the .afreq sidecar", {
+    skip_if_not_installed("pgenlibr")
+    handle <- .pvfAfreqHandle()
+    ids <- as.character(getSnpInfo(handle)$SNP)
+    maf <- .panelAfreqMaf(handle, ids)
+    afreq <- readAfreq(test_path("test_data/test_variants"))
+    altFreq <- afreq$alt_freq[match(ids, afreq$id)]
+    expect_equal(maf, pmin(altFreq, 1 - altFreq))
+})
+
+test_that(".panelAfreqMaf refuses a partial or non-plink2 sidecar", {
+    skip_if_not_installed("pgenlibr")
+    handle <- .pvfAfreqHandle()
+    ids <- as.character(getSnpInfo(handle)$SNP)
+    # One id the sidecar cannot answer for is enough: a partial answer would
+    # disagree with the dosage path about that variant, so NULL sends the
+    # caller down the dosage path for all of them.
+    expect_null(.panelAfreqMaf(handle, c(ids, "not-a-panel-variant")))
+    bed <- readGenotypeHandle(
+        test_path("test_data/test_variants"),
+        format = "plink1"
+    )
+    expect_null(.panelAfreqMaf(bed, as.character(getSnpInfo(bed)$SNP)))
+})
+
+test_that(".panelVariantFilter: .afreq and dosage agree on what to drop", {
+    skip_if_not_installed("pgenlibr")
+    handle <- .pvfAfreqHandle()
+    ids <- as.character(getSnpInfo(handle)$SNP)
+    viaAfreq <- .panelVariantFilter(handle, ids, mafCutoff = 0.2)
+    # Force the dosage path by hiding the sidecar from the fast path.
+    local_mocked_bindings(
+        .panelAfreqMaf = function(handle, variantIds) NULL,
+        .package = "pecotmr"
+    )
+    viaDosage <- .panelVariantFilter(handle, ids, mafCutoff = 0.2)
+    expect_lt(length(viaAfreq), length(ids))
+    expect_identical(viaAfreq, viaDosage)
+})
+
+test_that(".panelVariantFilter uses dosage whenever missingness is capped", {
+    skip_if_not_installed("pgenlibr")
+    # Missingness is not derivable from the sidecar, so an imissCutoff must
+    # never be silently answered by it.
+    handle <- .pvfAfreqHandle()
+    ids <- as.character(getSnpInfo(handle)$SNP)
+    local_mocked_bindings(
+        .panelAfreqMaf = function(handle, variantIds) {
+            abort("the .afreq fast path must not run here")
+        },
+        .package = "pecotmr"
+    )
+    expect_no_error(
+        .panelVariantFilter(handle, ids, mafCutoff = 0.2, imissCutoff = 0.5)
+    )
+})
+
+test_that(".panelAfreqPrefixes reads only the chromosomes the panel spans", {
+    handle <- .pvfAfreqHandle()
+    # Single-file panel: its own stem, resolved for file access.
+    expect_identical(
+        .panelAfreqPrefixes(handle),
+        pecotmr:::.genotypeReadPath(handle)
+    )
+    # Sharded panel: a manifest chromosome the snpInfo does not span is not
+    # read -- the cost per-chromosome sketch trimming exists to avoid.
+    sharded <- handle
+    sharded@chromPaths <- c(
+        "22" = getPath(handle),
+        "21" = "/nonexistent/chr21"
+    )
+    sharded@snpInfo$CHR <- rep("22", nrow(getSnpInfo(handle)))
+    expect_identical(.panelAfreqPrefixes(sharded), getPath(handle))
+})
