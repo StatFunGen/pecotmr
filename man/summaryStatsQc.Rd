@@ -9,6 +9,7 @@ summaryStatsQc(
   removeIndels = FALSE,
   removeStrandAmbiguous = TRUE,
   mafCutoff = 0,
+  ldMafCutoff = 0,
   infoCutoff = 0,
   nCutoff = 5,
   keepVariants = NULL,
@@ -45,7 +46,19 @@ and C/G strand-ambiguous variants. Default \code{TRUE}.}
 
 \item{mafCutoff}{Numeric (length 1). MAF threshold (variants with \code{MAF <
 mafCutoff} are dropped). Default 0. Requires \code{MAF} or \code{FRQ}
-column when non-zero.}
+column when non-zero. This is the \emph{study}-side filter, applied to the
+summary statistics' own MAF/FRQ; it is independent of \code{ldMafCutoff}.}
+
+\item{ldMafCutoff}{Numeric (length 1, >= 0). \emph{Reference-panel} MAF
+threshold. When \code{> 0}, panel variants whose panel MAF
+(\code{min(altFreq, 1 - altFreq)}) is below it are dropped from the LD
+reference \emph{before} the LD is materialized and before RAISS selects
+imputation targets, so a dropped variant is neither used in the LD nor
+imputed back. Panel frequencies are read from the panel's \code{.afreq}
+sidecar (no genotypes loaded); a panel without \code{.afreq} falls back to a
+single dosage pass. Default 0 (off), leaving existing callers
+byte-preserving. Independent of, and composes with, the study-side
+\code{mafCutoff}.}
 
 \item{infoCutoff}{Numeric (length 1). INFO score threshold. Default 0.
 Requires \code{INFO} column when non-zero.}

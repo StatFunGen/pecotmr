@@ -7300,6 +7300,111 @@ test_that(".subsetSketchToRange / .subsetSketchToIds are NULL-safe", {
 
 
 # ---------------------------------------------------------------------------
+# summaryStatsQc ldMafCutoff: reference-panel MAF filter (before LD / RAISS)
+# ---------------------------------------------------------------------------
+
+.ldmaf_handle <- function() {
+    readGenotypeHandle(
+        test_path("test_data/test_variants"),
+        format = "plink2"
+    )
+}
+
+test_that(".panelAltFreqFromAfreq reads panel AF from .afreq (no genotypes)", {
+    skip_if_not_installed("pgenlibr")
+    h <- .ldmaf_handle()
+    ids <- as.character(getSnpInfo(h)$SNP)
+    af <- pecotmr:::.panelAltFreqFromAfreq(h, ids)
+    expect_false(is.null(af))
+    expect_length(af, length(ids))
+    expect_true(all(af >= 0 & af <= 1, na.rm = TRUE))
+    # Exactly the .afreq file's alt_freq, aligned by id -- computed without any
+    # genotype read (readAfreq only touches the .afreq sidecar).
+    afreq <- readAfreq(test_path("test_data/test_variants"))
+    expect_equal(af, afreq$alt_freq[match(ids, afreq$id)])
+})
+
+test_that(".ssqcPanelMafPrune drops exactly the sub-cutoff panel variants (afreq path)", {
+    skip_if_not_installed("pgenlibr")
+    h <- .ldmaf_handle()
+    ids <- as.character(getSnpInfo(h)$SNP)
+    maf <- pmin(
+        pecotmr:::.panelAltFreqFromAfreq(h, ids),
+        1 - pecotmr:::.panelAltFreqFromAfreq(h, ids)
+    )
+    cutoff <- stats::median(maf, na.rm = TRUE)
+    pruned <- pecotmr:::.ssqcPanelMafPrune(h, cutoff, "test")
+    keptIds <- as.character(getSnpInfo(pruned)$SNP)
+    expect_lt(length(keptIds), length(ids)) # some dropped
+    # kept == exactly the variants at/above the cutoff; dropped == below.
+    expect_setequal(keptIds, ids[!is.na(maf) & maf >= cutoff])
+    expect_true(all(maf[match(keptIds, ids)] >= cutoff))
+})
+
+test_that(".ssqcPanelMafPrune is a byte-preserving no-op at cutoff 0 / NULL", {
+    h <- .ldmaf_handle()
+    expect_identical(pecotmr:::.ssqcPanelMafPrune(h, 0, "test"), h)
+    expect_identical(pecotmr:::.ssqcPanelMafPrune(h, NULL, "test"), h)
+    expect_null(pecotmr:::.ssqcPanelMafPrune(NULL, 0.01, "test"))
+})
+
+test_that(".ssqcPanelMafPrune falls back to a dosage pass when no .afreq exists", {
+    skip_if_not_installed("pgenlibr")
+    h <- .ldmaf_handle()
+    ids <- as.character(getSnpInfo(h)$SNP)
+    # A cutoff inside the panel's MAF range (0.055-0.5 on this fixture) so the
+    # dosage fallback actually drops variants.
+    maf <- pmin(
+        pecotmr:::.panelAltFreqFromAfreq(h, ids),
+        1 - pecotmr:::.panelAltFreqFromAfreq(h, ids)
+    )
+    cutoff <- stats::median(maf, na.rm = TRUE)
+    # Force the afreq path to report "no .afreq available" so the dosage-derived
+    # .panelVariantFilter path runs instead. The two must agree on what to drop.
+    local_mocked_bindings(
+        .panelAltFreqFromAfreq = function(handle, ids) NULL,
+        .package = "pecotmr"
+    )
+    pruned <- pecotmr:::.ssqcPanelMafPrune(h, cutoff, "test")
+    keptIds <- as.character(getSnpInfo(pruned)$SNP)
+    expect_lt(length(keptIds), length(ids))
+    expect_setequal(
+        keptIds,
+        pecotmr:::.panelVariantFilter(h, ids, mafCutoff = cutoff)
+    )
+})
+
+test_that(".ssqcPanelMafPrune prunes the RSE sketch's seed handle, not just the row view", {
+    skip_if_not_installed("pgenlibr")
+    # A summaryStatsQc ldSketch is an RSE wrapping the GenotypeHandle; harmonize,
+    # kriging, mismatch-QC and RAISS all read the panel through .ldSketchHandle()
+    # (the dosage DelayedArray's seed handle). Subsetting the RSE rows leaves that
+    # seed carrying the full panel, so the prune MUST reach the seed handle -- this
+    # is the real-flow shape the bare-handle tests above do not exercise.
+    h <- .ldmaf_handle()
+    ids <- as.character(getSnpInfo(h)$SNP)
+    maf <- pmin(
+        pecotmr:::.panelAltFreqFromAfreq(h, ids),
+        1 - pecotmr:::.panelAltFreqFromAfreq(h, ids)
+    )
+    cutoff <- stats::median(maf, na.rm = TRUE)
+    rse <- pecotmr:::.genotypeExperiment(h)
+    expect_s4_class(rse, "RangedSummarizedExperiment")
+    pruned <- pecotmr:::.ssqcPanelMafPrune(rse, cutoff, "test")
+    seedIds <- as.character(getSnpInfo(pecotmr:::.ldSketchHandle(pruned))$SNP)
+    expect_lt(length(seedIds), length(ids))
+    expect_setequal(seedIds, ids[!is.na(maf) & maf >= cutoff])
+})
+
+test_that("summaryStatsQc validates ldMafCutoff (before any panel read)", {
+    ss <- .ssQ_makeGwasSumStats()
+    expect_error(summaryStatsQc(ss, ldMafCutoff = -1), "ldMafCutoff")
+    expect_error(summaryStatsQc(ss, ldMafCutoff = c(0.01, 0.02)), "ldMafCutoff")
+    expect_error(summaryStatsQc(ss, ldMafCutoff = NA_real_), "ldMafCutoff")
+})
+
+
+# ---------------------------------------------------------------------------
 # RAISS imputation: MAF / MAC / missingness cutoffs
 #
 # Without these, every rare variant in the window of a large LD sketch becomes

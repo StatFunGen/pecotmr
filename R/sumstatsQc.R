@@ -4637,6 +4637,7 @@ krigingOutlierQc <- function(
         "removeIndels",
         "removeStrandAmbiguous",
         "mafCutoff",
+        "ldMafCutoff",
         "infoCutoff",
         "nCutoff",
         "skipRegion",
@@ -4711,11 +4712,106 @@ krigingOutlierQc <- function(
 }
 
 # Run the per-entry QC pipeline across all entries.
+# Per-variant ALT (A1 / effect-allele) frequency for the panel behind `handle`,
+# read from the .afreq sidecar(s) and aligned to `ids` (NA where a variant has
+# no .afreq row). Handles both a genome-wide handle (single prefix) and a
+# chrom-meta handle (one prefix per chromosome). Returns NULL when no .afreq is
+# available (or none of the ids match), so the caller falls back to genotypes.
+# @noRd
+.panelAltFreqFromAfreq <- function(handle, ids) {
+    chromPaths <- .genotypeChromPaths(handle)
+    prefixes <- if (length(chromPaths) > 0L) unname(chromPaths) else handle@path
+    tbls <- lapply(prefixes, function(pfx) {
+        a <- tryCatch(readAfreq(pfx), error = function(e) NULL)
+        if (is.null(a) || !all(is_in(c("id", "alt_freq"), colnames(a)))) {
+            return(NULL)
+        }
+        a[, c("id", "alt_freq"), drop = FALSE]
+    })
+    tbls <- Filter(Negate(is.null), tbls)
+    if (length(tbls) == 0L) {
+        return(NULL)
+    }
+    afTbl <- do.call(rbind, tbls)
+    m <- match(ids, afTbl$id)
+    if (all(is.na(m))) {
+        return(NULL)
+    }
+    as.numeric(afTbl$alt_freq)[m]
+}
+
+# Drop reference-panel variants whose panel MAF (min(altFreq, 1 - altFreq)) is
+# below `cutoff`, returning the pruned ldSketch. The prune happens BEFORE any LD
+# is materialized and before RAISS picks imputation targets, so a dropped
+# variant is neither used in the LD nor imputed back. Frequencies come from the
+# panel's .afreq sidecar (no genotypes read); a panel with no .afreq falls back
+# to a single dosage pass via .panelVariantFilter. A cutoff <= 0 (or a NULL
+# sketch) is a no-op, keeping the default path byte-preserving.
+# @noRd
+.ssqcPanelMafPrune <- function(ldSketch, cutoff, label) {
+    cutoff <- cutoff %||% 0
+    if (!is.finite(cutoff) || cutoff <= 0 || is.null(ldSketch)) {
+        return(ldSketch)
+    }
+    handle <- .ldSketchHandle(ldSketch)
+    ids <- as.character(getSnpInfo(handle)$SNP)
+    if (length(ids) == 0L) {
+        return(ldSketch)
+    }
+    af <- .panelAltFreqFromAfreq(handle, ids)
+    keep <- if (!is.null(af)) {
+        maf <- pmin(af, 1 - af)
+        # Keep variants with no .afreq row (unmeasurable) rather than dropping
+        # them on a metadata gap; drop only those measured below the cutoff.
+        is.na(maf) | maf >= cutoff
+    } else {
+        # No .afreq anywhere: derive the frequency from a single dosage pass and
+        # reuse the existing panel filter, then map its kept ids back to a mask.
+        kept <- .panelVariantFilter(
+            ldSketch,
+            ids,
+            mafCutoff = cutoff,
+            label = label
+        )
+        is_in(ids, kept)
+    }
+    nDropped <- sum(!keep)
+    if (nDropped > 0L) {
+        .qcEmit(
+            label,
+            glue(
+                "LD-panel MAF filter (ldMafCutoff = {cutoff}): dropped ",
+                "{nDropped} of {length(ids)} reference variant(s) before ",
+                "LD / imputation."
+            )
+        )
+    }
+    if (all(keep)) {
+        return(ldSketch)
+    }
+    # Prune the underlying GenotypeHandle, not just an RSE row-view. Harmonize,
+    # kriging, mismatch-QC and RAISS all read the panel through
+    # `.ldSketchHandle()` -- the dosage DelayedArray's seed handle -- and RSE
+    # row subsetting (`sketch[keep, ]`) leaves that seed carrying the whole
+    # panel (see the `.emptySketch` note). Rebuild the sketch from the pruned
+    # handle so the drop actually reaches every reader.
+    prunedHandle <- .subsetGenotypeHandle(handle, keep)
+    if (methods::is(ldSketch, "GenotypeHandle")) {
+        return(prunedHandle)
+    }
+    .genotypeExperiment(prunedHandle)
+}
+
 .ssqcRunEntries <- function(sumstats, opts) {
     newEntries <- vector("list", nrow(sumstats))
     entryAudits <- vector("list", nrow(sumstats))
     isQtl <- methods::is(sumstats, "QtlSumStats")
     ldSketch <- getLdSketch(sumstats)
+    # Panel-side MAF prune, once for the shared LD reference, BEFORE any entry is
+    # harmonized / mismatch-QC'd / imputed. Dropping variants from the sketch
+    # here means every downstream read (LD sketch, RAISS known/unknown split)
+    # only ever sees the retained panel. A cutoff <= 0 is a no-op.
+    ldSketch <- .ssqcPanelMafPrune(ldSketch, opts$ldMafCutoff, "summaryStatsQc")
     refGenome <- getGenome(sumstats)
     for (i in seq_len(nrow(sumstats))) {
         opts <- .ssqcEntryOpts(opts, sumstats, i)
@@ -4738,6 +4834,7 @@ krigingOutlierQc <- function(
         "removeIndels",
         "removeStrandAmbiguous",
         "mafCutoff",
+        "ldMafCutoff",
         "infoCutoff",
         "nCutoff",
         "pipCutoffToSkip",
@@ -4838,7 +4935,18 @@ krigingOutlierQc <- function(
 #'   and C/G strand-ambiguous variants. Default \code{TRUE}.
 #' @param mafCutoff Numeric (length 1). MAF threshold (variants with \code{MAF <
 #'   mafCutoff} are dropped). Default 0. Requires \code{MAF} or \code{FRQ}
-#'   column when non-zero.
+#'   column when non-zero. This is the \emph{study}-side filter, applied to the
+#'   summary statistics' own MAF/FRQ; it is independent of \code{ldMafCutoff}.
+#' @param ldMafCutoff Numeric (length 1, >= 0). \emph{Reference-panel} MAF
+#'   threshold. When \code{> 0}, panel variants whose panel MAF
+#'   (\code{min(altFreq, 1 - altFreq)}) is below it are dropped from the LD
+#'   reference \emph{before} the LD is materialized and before RAISS selects
+#'   imputation targets, so a dropped variant is neither used in the LD nor
+#'   imputed back. Panel frequencies are read from the panel's \code{.afreq}
+#'   sidecar (no genotypes loaded); a panel without \code{.afreq} falls back to a
+#'   single dosage pass. Default 0 (off), leaving existing callers
+#'   byte-preserving. Independent of, and composes with, the study-side
+#'   \code{mafCutoff}.
 #' @param infoCutoff Numeric (length 1). INFO score threshold. Default 0.
 #'   Requires \code{INFO} column when non-zero.
 #' @param nCutoff Numeric (length 1). Sample-size deviation threshold: drop
@@ -4938,6 +5046,7 @@ summaryStatsQc <- function(
     removeIndels = FALSE,
     removeStrandAmbiguous = TRUE,
     mafCutoff = 0,
+    ldMafCutoff = 0,
     infoCutoff = 0,
     nCutoff = 5,
     keepVariants = NULL,
@@ -4969,6 +5078,14 @@ summaryStatsQc <- function(
 ) {
     zMismatchQc <- arg_match(zMismatchQc)
     .ssqcCheckEntries(sumstats, mafCutoff, infoCutoff)
+    if (
+        !is.numeric(ldMafCutoff) ||
+            length(ldMafCutoff) != 1L ||
+            is.na(ldMafCutoff) ||
+            ldMafCutoff < 0
+    ) {
+        abort("summaryStatsQc: `ldMafCutoff` must be a single number >= 0.")
+    }
     p <- as.list(environment())
     opts <- .ssqcBuildOpts(p)
     res <- .ssqcRunEntries(sumstats, opts)
