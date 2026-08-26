@@ -288,7 +288,7 @@ test_that("assembleCtwasInputs: accepts a QtlFineMappingResult weight source (to
     expect_equal(ifmr$weights[[1L]], itw$weights[[1L]])
 })
 
-test_that("assembleCtwasInputs: filters TwasWeights against UNION of all blocks' GWAS variants", {
+test_that("assembleCtwasInputs: fits a boundary gene per-region but spans all its blocks", {
     # Build two blocks with NON-OVERLAPPING GWAS variants. Block 1 covers
     # v1..v3, block 2 covers v4..v6. The gene's weight spans v2..v5 — i.e.
     # crosses the block boundary. With a per-block filter the gene would
@@ -342,11 +342,19 @@ test_that("assembleCtwasInputs: filters TwasWeights against UNION of all blocks'
         gwasSumStats = both,
         twasWeights = list(block1 = tw)
     )
-    # All four cross-boundary variants should appear in the weights list
-    # (would be only 2 with a per-block filter).
-    wgt <- inputs$weights[[1L]]$wgt
-    expect_equal(nrow(wgt), 4L)
-    expect_setequal(rownames(wgt), vapply(2:5, .ctp_snpId, character(1)))
+    # ctwas fine-maps one region at a time, so the FITTED vector holds only the
+    # variants this block has LD for -- handing susie_rss the other two produces
+    # a non-finite ELBO. The gene's SPAN still covers all four, which is what
+    # ctwas::get_boundary_genes reads to route the gene to merge_regions; a span
+    # clipped to the block would hide the boundary gene entirely.
+    entry <- inputs$weights[[1L]]
+    wgt <- entry$wgt
+    expect_equal(nrow(wgt), 2L)
+    expect_setequal(rownames(wgt), vapply(2:3, .ctp_snpId, character(1)))
+    expect_equal(nrow(entry$R_wgt), 2L)
+    expect_equal(entry$n_wgt, 2L)
+    expect_equal(entry$p0, 200L)
+    expect_equal(entry$p1, 500L)
 })
 
 test_that("ctwasPipeline: a bare TwasWeights is a FLAT source, placed by region", {

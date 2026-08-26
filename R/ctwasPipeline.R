@@ -520,9 +520,11 @@ assembleCtwasInputs <- function(
     )
 }
 
-# Second pass: build per-block weight lists filtered by the GLOBAL gwasSnpIds,
-# so a gene whose cis-window straddles block boundaries keeps its full weight
-# vector. Weight names are prefixed with the region id.
+# Second pass: build per-block weight lists. The GLOBAL gwasSnpIds bounds each
+# gene's cis SPAN, so a gene whose cis-window straddles block boundaries is
+# still recognised as one; the per-region snpMap bounds the weight vector that
+# is actually fitted, so susie_rss never sees a variant the region has no LD
+# for. Weight names are prefixed with the region id.
 # @noRd
 .ctwasSecondPass <- function(
     regionIds,
@@ -552,7 +554,8 @@ assembleCtwasInputs <- function(
             csMinCor = cutoffs$csMinCor,
             minPipCutoff = cutoffs$minPipCutoff,
             maxNumVariants = cutoffs$maxNumVariants,
-            gwasSnpIds = globalGwasSnpIds
+            gwasSnpIds = globalGwasSnpIds,
+            regionSnpIds = fp$snpMap[[rid]]$id
         )
         if (length(blockWeights) > 0L) {
             names(blockWeights) <- str_c(rid, "|", names(blockWeights))
@@ -2357,19 +2360,27 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     csMinCor = 0.8,
     minPipCutoff = 0,
     maxNumVariants = Inf,
-    gwasSnpIds = NULL
+    gwasSnpIds = NULL,
+    regionSnpIds = NULL
 ) {
     panelSnps <- rownames(ldPanel$R)
     # ctwas's compute_gene_z asserts every weight variant exists in the block's
     # z_snp$id. An LD sketch covering more than the block (e.g. a whole-chrom
     # PLINK2) leaks variants outside it, so intersect with the caller's GWAS
     # sumstats variant set when provided.
+    #
+    # Two variant sets, because they answer different questions. `gwasSnpIds` is
+    # the GLOBAL set: it bounds the gene's cis SPAN, which has to cover every
+    # block the gene reaches for boundary detection to work. `regionSnpIds` is
+    # this block's own set: it bounds the weight vector actually FITTED, because
+    # ctwas fine-maps one region at a time.
     if (!is.null(gwasSnpIds)) {
         panelSnps <- intersect(panelSnps, as.character(gwasSnpIds))
     }
     ctx <- list(
         ldPanel = ldPanel,
         panelSnps = panelSnps,
+        regionSnps = regionSnpIds,
         refVariants = .ctwasRefVariants(ldPanel$snpInfo),
         fineMappingResult = fineMappingResult,
         cutoffs = list(
@@ -2487,12 +2498,19 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     w
 }
 
-# The ctwas per-gene weight entry (weight matrix, LD submatrix, chrom/BP span
-# over the RETAINED variants, plus identity metadata).
+# The ctwas per-gene weight entry (weight matrix, LD submatrix, chrom/BP span,
+# plus identity metadata).
+#
+# `spanVids` is the variant set the chrom/p0/p1 span is measured over, and it is
+# deliberately allowed to be WIDER than the fitted `vids`: ctwas fine-maps one
+# region at a time, so `wgt` / `R_wgt` must stay inside that region, while
+# `ctwas::get_boundary_genes` reads p0/p1 to decide which genes straddle a
+# region boundary. Measuring the span over the fitted subset would clip a
+# boundary gene down to its home region and hide it from merge_regions.
 # @noRd
-.ctwasGeneEntry <- function(vids, w, ldPanel, meta) {
+.ctwasGeneEntry <- function(vids, w, ldPanel, meta, spanVids = vids) {
     panelInfo <- ldPanel$snpInfo
-    rowIdx <- match(vids, panelInfo$id)
+    rowIdx <- match(spanVids, panelInfo$id)
     list(
         wgt = matrix(w, ncol = 1L, dimnames = list(vids, "wgt")),
         R_wgt = ldPanel$R[vids, vids, drop = FALSE],
@@ -2561,10 +2579,35 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (length(kept) < 1L) {
         return(NULL)
     }
+    # The weight vector ctwas fits must live inside the region being fine-mapped:
+    # susie_rss gets that region's LD, and a gene reaching outside it yields a
+    # non-finite ELBO (and a non-finite fit_EM log-likelihood upstream). The
+    # SPAN stays the gene's full cis extent -- see .ctwasGeneEntry -- so a
+    # boundary gene is still detected and can be recovered by merge_regions.
+    inRegion <- .ctwasInRegion(kept$vids, ctx$regionSnps)
+    if (!any(inRegion)) {
+        return(NULL)
+    }
     list(
         key = meta$key,
-        entry = .ctwasGeneEntry(kept$vids, kept$w, ctx$ldPanel, meta)
+        entry = .ctwasGeneEntry(
+            kept$vids[inRegion],
+            kept$w[inRegion],
+            ctx$ldPanel,
+            meta,
+            spanVids = kept$vids
+        )
     )
+}
+
+# Which of a gene's weight variants lie in the region being fine-mapped. A NULL
+# region set means the caller supplied none, so nothing is restricted.
+# @noRd
+.ctwasInRegion <- function(vids, regionSnps) {
+    if (is.null(regionSnps)) {
+        return(rep(TRUE, length(vids)))
+    }
+    is_in(vids, as.character(regionSnps))
 }
 
 # Look up the per-(study, context, trait, method) PIP vector and the
