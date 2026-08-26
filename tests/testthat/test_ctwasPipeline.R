@@ -114,9 +114,12 @@ context("ctwasPipeline")
     )
 }
 
-.ctp_makeTwasWeights <- function() {
+# `variantIdx` picks which of the fixture's 12 variants carry the gene's
+# weights; it has to name five of them, one per weight. The default sits
+# inside block 1 -- pass 7:11 for a gene that lives in block 2.
+.ctp_makeTwasWeights <- function(variantIdx = 1:5) {
     e <- twasWeightsRow(
-        variantIds = vapply(1:5, .ctp_snpId, character(1)),
+        variantIds = vapply(variantIdx, .ctp_snpId, character(1)),
         weights = c(0.1, 0.05, -0.2, 0.3, 0.0)
     )
     TwasWeights(
@@ -172,10 +175,15 @@ context("ctwasPipeline")
 # Helper: minimal two-block input set for the multi-block API tests.
 .ctp_makeMultiBlockInputs <- function(qc = TRUE) {
     ss <- .ctp_makeGwasSumstats(qc = qc)
-    tw <- .ctp_makeTwasWeights()
     list(
         gwasSumStats = ss,
-        twasWeights = list(block1 = tw, block2 = tw)
+        # ctwas fine-maps one region at a time, so each block's gene has to
+        # carry weights on variants that block actually has LD for: block 1
+        # holds variants 1..6, block 2 holds 7..12.
+        twasWeights = list(
+            block1 = .ctp_makeTwasWeights(),
+            block2 = .ctp_makeTwasWeights(7:11)
+        )
     )
 }
 
