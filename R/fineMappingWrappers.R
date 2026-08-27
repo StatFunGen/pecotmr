@@ -1266,8 +1266,11 @@ setMethod(
 #'   fits, \code{NA} otherwise).
 #' @param method Method name (e.g. \code{"susie"}, \code{"susieInf"}). Required.
 #' @param signalCutoff PIP cutoff for retaining PIP-only (non-CS) variants.
-#' @param dataY Optional regional phenotype matrix; \code{nrow(dataY)} fills
-#'   \code{n}, \code{colnames(dataY)[1]} fills \code{gene}.
+#' @param dataY Optional regional phenotype vector or matrix;
+#'   \code{nrow(as.matrix(dataY))} fills \code{n}, \code{colnames(dataY)[1]}
+#'   fills \code{gene}. A \code{list} (the RSS \code{list(z = ...)} form)
+#'   carries no sample count: \code{n} is left \code{NA} for the per-variant
+#'   \code{n} argument to fill.
 #' @param otherQuantities Optional list. Default is NULL.
 #' @param region Optional \code{"chr:start-end"} string. Default is NULL.
 #' @param conditionIdx Integer or \code{NULL}. Index of the conditioned effect
@@ -1412,13 +1415,18 @@ buildTopLoci <- function(
 # Per-fit constants: sample size, gene (first phenotype column), event id, and
 # the parsed genomic range.
 .btlFitConstants <- function(dataY, otherQuantities, region) {
-    # Only a genuine sample-by-outcome matrix carries a meaningful nrow. RSS
-    # passes dataY as a list (e.g. list(z = ...)); as.matrix() on a list
+    # Only a genuine sample-by-outcome vector/matrix carries a meaningful nrow.
+    # RSS passes dataY as a LIST (e.g. list(z = ...)); as.matrix() on a list
     # collapses it to a 1x1 cell, which used to make fitN (and every top_loci
-    # N) 1. Treat non-matrix dataY as "no fit N" and let the per-variant `n`
-    # (threaded from the RSS effective sample size) fill the N column instead.
+    # N) 1. Excluding lists is the whole rule -- same test .sampleNamesFromDataY
+    # applies. Requiring a matrix here is too strict: the individual-level path
+    # passes a bare numeric vector of one value per sample, which as.matrix()
+    # turns into the n x 1 column it already is, so demanding a matrix silently
+    # dropped its N to NA. For the list case fitN stays NA and the per-variant
+    # `n` (threaded from the RSS effective sample size) fills the N column.
     hasOutcomeMatrix <- !is.null(dataY) &&
-        (is.matrix(dataY) || is.data.frame(dataY))
+        (is.matrix(dataY) || is.data.frame(dataY) ||
+            (is.atomic(dataY) && is.numeric(dataY)))
     dataYMat <- if (hasOutcomeMatrix) as.matrix(dataY) else NULL
     fitN <- if (is.null(dataYMat)) NA_integer_ else as.integer(nrow(dataYMat))
     fitGene <- if (!is.null(dataYMat) && !is.null(colnames(dataYMat))) {
