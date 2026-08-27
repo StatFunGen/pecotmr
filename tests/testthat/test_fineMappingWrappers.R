@@ -1046,6 +1046,44 @@ test_that("buildTopLoci: RSS per-variant N threads; list dataY isn't 1", {
     expect_true(all(is.na(out_na$N)))
 })
 
+test_that("buildTopLoci: individual-level vector dataY fills N with nSamples", {
+    # Regression companion to the RSS case above. The guard that stopped a LIST
+    # dataY collapsing to 1 was written as "must be a matrix", which also
+    # excluded the individual-level path's bare numeric outcome vector -- so
+    # every top_loci N there silently became NA instead of the sample count.
+    variant_ids <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:A:T")
+    inp <- .fake_fit_and_cs(
+        variant_ids,
+        cs_at_cov = list(
+            "0.95" = list(c(1L, 2L, 3L)),
+            "0.7" = list(c(1L, 2L, 3L)),
+            "0.5" = list(c(1L, 2L, 3L))
+        ),
+        nSamples = 5,
+        n_variants = length(variant_ids)
+    )
+    tl <- function(y) {
+        buildTopLoci(
+            fit = inp$fit,
+            csTables = inp$cs_tables,
+            variantNames = inp$variantNames,
+            af = NULL,
+            method = "susie",
+            signalCutoff = 0,
+            dataY = y
+        )
+    }
+    nSamp <- 49L
+    y <- rnorm(nSamp)
+    # A bare numeric vector holds one value per SAMPLE: it IS the n x 1 column.
+    expect_equal(unique(tl(y)$N), nSamp)
+    expect_false(any(is.na(tl(y)$N)))
+    # ... and must agree with the equivalent explicit one-column matrix.
+    expect_equal(tl(y)$N, tl(matrix(y, ncol = 1))$N)
+    # The list form still carries no sample count, so N stays NA.
+    expect_true(all(is.na(tl(list(z = rnorm(length(variant_ids))))$N)))
+})
+
 test_that("buildTopLoci fullFit: within_cs_pip default + wide per-CS matrices", {
     vn <- paste0("chr1:", (1:5) * 100, ":A:G")
     L <- 2L
