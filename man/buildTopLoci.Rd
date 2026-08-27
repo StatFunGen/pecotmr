@@ -50,8 +50,11 @@ fits, \code{NA} otherwise).}
 
 \item{signalCutoff}{PIP cutoff for retaining PIP-only (non-CS) variants.}
 
-\item{dataY}{Optional regional phenotype matrix; \code{nrow(dataY)} fills
-\code{n}, \code{colnames(dataY)[1]} fills \code{gene}.}
+\item{dataY}{Optional regional phenotype vector or matrix;
+\code{nrow(as.matrix(dataY))} fills \code{n}, \code{colnames(dataY)[1]}
+fills \code{gene}. A \code{list} (the RSS \code{list(z = ...)} form)
+carries no sample count: \code{n} is left \code{NA} for the per-variant
+\code{n} argument to fill.}
 
 \item{otherQuantities}{Optional list. Default is NULL.}
 

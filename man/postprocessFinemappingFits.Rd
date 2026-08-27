@@ -11,6 +11,7 @@ postprocessFinemappingFits(
   xScalar = 1,
   yScalar = 1,
   af = NULL,
+  n = NULL,
   coverage = NULL,
   secondaryCoverage = c(0.7, 0.5),
   signalCutoff = 0.1,
