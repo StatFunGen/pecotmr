@@ -3997,6 +3997,15 @@ krigingOutlierQc <- function(
     if (is_in("se", colnames(impDf))) {
         out$SE <- impDf$se
     }
+    # RAISS reconstructs the z-score only, so it has no frequency for an imputed
+    # variant. But the OBSERVED variants came in with a (harmonized, directional)
+    # AF, which the rebuilt `out` above would otherwise discard -- leaving
+    # top_loci$af NA for the whole entry under --impute. Re-attach it by SNP so
+    # observed variants keep their AF and imputed variants (absent from `df`) get
+    # NA. No-op when the study declared no frequency.
+    if (is_in("AF", colnames(df))) {
+        out$AF <- as.numeric(df$AF)[match(out$SNP, df$SNP)]
+    }
     if (is_in("N", colnames(out)) && any(is.na(out$N))) {
         out$N[is.na(out$N)] <- stats::median(out$N, na.rm = TRUE)
     }

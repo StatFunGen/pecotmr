@@ -6402,6 +6402,57 @@ test_that("raiss genotypeMatrix path: single-matrix, list, all-fail, and bad-typ
 })
 
 # ===========================================================================
+# .qcRaissMerge: observed-variant AF is preserved through the RAISS merge
+# ===========================================================================
+
+# RAISS reconstructs z only; the merge rebuilds the entry from its output and
+# used to drop AF entirely, so --impute left top_loci$af NA for the whole entry.
+# The observed variants' (harmonized) AF must survive; imputed variants get NA.
+.raissMergeInputs <- function(withAf = TRUE) {
+    obs <- c("chr1:100:A:G", "chr1:200:C:T", "chr1:300:A:T")
+    imp <- c("chr1:150:A:G", "chr1:250:C:T")
+    df <- tibble(
+        SNP = obs,
+        A1 = c("G", "T", "T"),
+        A2 = c("A", "C", "A"),
+        Z = c(1.2, -0.8, 2.1),
+        N = c(1000L, 1000L, 1000L)
+    )
+    if (withAf) {
+        # A post-harmonization (directional) AF -- what the merge must re-attach.
+        df$AF <- c(0.10, 0.25, 0.40)
+    }
+    impDf <- data.frame(
+        chrom = rep("1", 5L),
+        pos = c(100L, 200L, 300L, 150L, 250L),
+        variant_id = c(obs, imp),
+        A1 = c("G", "T", "T", "G", "T"),
+        A2 = c("A", "C", "A", "A", "C"),
+        z = c(1.2, -0.8, 2.1, 0.5, -0.3),
+        n = rep(1000L, 5L),
+        stringsAsFactors = FALSE
+    )
+    list(imputed = list(resultFilter = impDf), knownZ = df["SNP"], df = df,
+         obs = obs, imp = imp)
+}
+
+test_that(".qcRaissMerge preserves observed AF and leaves imputed AF NA", {
+    f <- .raissMergeInputs(withAf = TRUE)
+    out <- pecotmr:::.qcRaissMerge(f$imputed, f$knownZ, f$df)$df
+    expect_true("AF" %in% colnames(out))
+    # observed variants keep exactly their pre-imputation (harmonized) AF
+    expect_equal(out$AF[match(f$obs, out$SNP)], c(0.10, 0.25, 0.40))
+    # imputed variants -- absent from df, no frequency from RAISS -- are NA
+    expect_true(all(is.na(out$AF[match(f$imp, out$SNP)])))
+})
+
+test_that(".qcRaissMerge adds no AF column when the study declared none", {
+    f <- .raissMergeInputs(withAf = FALSE)
+    out <- pecotmr:::.qcRaissMerge(f$imputed, f$knownZ, f$df)$df
+    expect_false("AF" %in% colnames(out))
+})
+
+# ===========================================================================
 # raiss: multi-LD-block verbose / merge / error branches
 # ===========================================================================
 
