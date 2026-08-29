@@ -3249,6 +3249,49 @@ test_that("summaryStatsQc: harmonization re-keys SNP to the panel id and sign-fl
     expect_equal(z, c(1.0, -2.0, 1.5)) # only the swapped variant's Z flips
 })
 
+# ---------------------------------------------------------------------------
+# Uninterpretable panel ids (e.g. ADSP R5 INS/DEL tags): drop, don't guess
+# ---------------------------------------------------------------------------
+
+test_that(".ldSketchIdUsable flags tag-allele ids but not SNPs, real indels, or rsIDs", {
+    ids <- c("chr21:13988031:T:C", "chr1:788757:T:TAATGG", "chr21:16298:C:T",
+             "chr21:13988152:INS:T", "chr21:13988153:DEL:T", "rs12345", NA)
+    expect_equal(
+        pecotmr:::.ldSketchIdUsable(ids),
+        c(TRUE, TRUE, TRUE, FALSE, FALSE, TRUE, TRUE)
+    )
+})
+
+test_that(".raissUnsafeToImpute now excludes tag-allele ids (third clause)", {
+    # A tag id has no flip twin, so it slipped through before; it must now be
+    # unsafe, while a normal SNP stays safe and the flip-pair behaviour is intact.
+    expect_true(pecotmr:::.raissUnsafeToImpute("chr21:13988152:INS:T", character(0)))
+    expect_false(pecotmr:::.raissUnsafeToImpute("chr21:16298:C:T", character(0)))
+    # flip-pair still flagged (both orientations present)
+    fp <- c("chr1:100:A:G", "chr1:100:G:A")
+    expect_true(all(pecotmr:::.raissUnsafeToImpute(fp, character(0))))
+})
+
+test_that("harmonization drops a variant on a tag-named panel position, keeps normal ones", {
+    skip_if_not_installed("pgenlibr")
+    h <- .ssQ_makeHandleVid() # ids chr1:100:G:A .. chr1:800:G:A, A1=A A2=G
+    df <- tibble(
+        chrom = c("1", "1"), pos = c(100L, 200L),
+        SNP = c("chr1:100:G:A", "chr1:200:G:A"),
+        A1 = c("A", "A"), A2 = c("G", "G"),
+        Z = c(1.0, 2.0), N = c(1000L, 1000L)
+    )
+    # control: both variants match the panel and survive
+    out0 <- pecotmr:::.matchAgainstSketch(df, h, matchMinProp = 0)
+    expect_setequal(pecotmr:::parseVariantId(out0$SNP)$pos, c(100L, 200L))
+    # tag the pos-200 panel id (A1/A2 columns stay the real alleles)
+    h@snpInfo$SNP[h@snpInfo$BP == 200L] <- "chr1:200:INS:A"
+    outT <- pecotmr:::.matchAgainstSketch(df, h, matchMinProp = 0)
+    # pos-200 is dropped (its only reference entry is uninterpretable); pos-100 kept
+    expect_true(100L %in% pecotmr:::parseVariantId(outT$SNP)$pos)
+    expect_false(200L %in% pecotmr:::parseVariantId(outT$SNP)$pos)
+})
+
 test_that("summaryStatsQc: slalom z-mismatch resolves sign-flipped variants against the panel", {
     # Pre-fix regression: a sign-flipped variant kept its input-orientation SNP,
     # which is absent from the panel, so .applyLdMismatchQcToEntry errored with
