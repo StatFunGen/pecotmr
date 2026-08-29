@@ -1727,18 +1727,37 @@ autoDecision <- function(df, highCorrCols) {
 }
 
 # Rows whose own allele flip is also present in the panel.
+#
+# "Flip" is the relation matchVariants() uses, not a literal A1/A2 reversal:
+# a panel that records the second orientation on the opposite strand (A:G and
+# C:T) carries exactly the ambiguity one that records it plainly (A:G and G:A)
+# does, and a string key sees only the second. Since the mask exists to stop
+# imputation putting back a variant matchVariants() dropped, the two have to
+# mean the same thing -- so the panel is matched against ITSELF and a row is
+# ambiguous precisely when a sumstats variant sitting on it would not survive.
+#
+# Self-matching also subsumes the degenerate A1 == A2 row (its own flip) that
+# the string key had to special-case: such a row matches itself exactly and
+# never as a swap, so no sign conflict arises. Unparseable ids fall back to
+# exact string identity, where every row matches itself and nothing is
+# ambiguous.
+#
+# The SECOND of two identical entries comes back TRUE, which the string key
+# missed. That is not ambiguity but it is still unsafe: imputing it would put
+# one id into the sumstats twice, and matchVariants answers a repeated id
+# once, so the next LD lookup would abort on the copy it could not place.
 # @noRd
 .raissFlipPairMask <- function(refPanelIds) {
     n <- length(refPanelIds)
-    df <- parseVariantId(refPanelIds)
-    if (nrow(df) != n || anyNA(df$chrom) || anyNA(df$pos)) {
-        return(rep(FALSE, n))
+    if (n == 0L) {
+        return(logical(0))
     }
-    key <- str_c(df$chrom, df$pos, df$A2, df$A1, sep = ":")
-    flipped <- str_c(df$chrom, df$pos, df$A1, df$A2, sep = ":")
-    # A1 != A2 guard: were they equal a row would be its own flip and every
-    # variant would look ambiguous.
-    is_in(flipped, key) & df$A1 != df$A2
+    m <- matchVariants(
+        refPanelIds,
+        refPanelIds,
+        removeStrandAmbiguous = FALSE
+    )
+    !is_in(seq_len(n), m$idxA)
 }
 
 # Rows that match a known sumstats variant in the opposite orientation.

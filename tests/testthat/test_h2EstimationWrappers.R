@@ -1890,7 +1890,9 @@ test_that("estimateH2 errors when study is omitted for a multi-study collection"
     df <- data.frame(
         SNP = names(eigen_ref),
         CHR = sub(
-            "^chr", "", as.character(GenomicRanges::seqnames(eigen_ref))
+            "^chr",
+            "",
+            as.character(GenomicRanges::seqnames(eigen_ref))
         ),
         BP = GenomicRanges::start(eigen_ref),
         A1 = as.character(S4Vectors::mcols(eigen_ref)$A1),

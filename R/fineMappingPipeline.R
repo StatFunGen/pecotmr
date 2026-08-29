@@ -853,7 +853,11 @@ setGeneric("fineMappingPipeline", function(data, ...) {
 .fmGwasFitRows <- function(p, gr, zn, st, blockId, toRun) {
     z <- zn$z
     names(z) <- zn$variantIds
-    ldMat <- .fmLdFromSketch(p$ldSketch, zn$variantIds)
+    ldMat <- .ldFromSketch(
+        p$ldSketch,
+        zn$variantIds,
+        label = "fineMappingPipeline"
+    )
     ents <- .fmFitRssBlock(
         z,
         ldMat,
@@ -938,7 +942,11 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     )
     z <- zn$z
     names(z) <- zn$variantIds
-    ldMat <- .fmLdFromSketch(p$ldSketch, zn$variantIds)
+    ldMat <- .ldFromSketch(
+        p$ldSketch,
+        zn$variantIds,
+        label = "fineMappingPipeline"
+    )
     ents <- .fmFitRssBlock(
         z,
         ldMat,
@@ -1060,15 +1068,6 @@ combineFineMappingResults <- function(..., ldSketch = NULL) {
         "combineFineMappingResults"
     )
     reduce(parts, .rbindFineMappingResult, ldSketch = ldSketch)
-}
-
-
-# Build an LD correlation matrix from an LD sketch genotype handle for a
-# specific variant subset. Thin wrapper over the shared `.ldFromSketch`
-# helper (R/ld.R).
-# @noRd
-.fmLdFromSketch <- function(ldSketch, variantIds) {
-    .ldFromSketch(ldSketch, variantIds, label = ".fmLdFromSketch")
 }
 
 

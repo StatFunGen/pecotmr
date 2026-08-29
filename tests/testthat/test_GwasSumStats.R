@@ -450,12 +450,17 @@ test_that("GwasSumStats blockId survives subsetting", {
 .gss_entry <- function(n = 3L) {
     gr <- GenomicRanges::GRanges(
         seqnames = rep("chr1", n),
-        ranges = IRanges::IRanges(seq(100L, by = 100L, length.out = n),
-                                  width = 1L)
+        ranges = IRanges::IRanges(
+            seq(100L, by = 100L, length.out = n),
+            width = 1L
+        )
     )
     S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        variant_id = str_c("chr1:", seq(100L, by = 100L, length.out = n),
-                           ":A:G"),
+        variant_id = str_c(
+            "chr1:",
+            seq(100L, by = 100L, length.out = n),
+            ":A:G"
+        ),
         SNP = str_c("rs", seq_len(n)),
         A1 = rep("A", n),
         A2 = rep("G", n),
@@ -472,7 +477,8 @@ test_that("supplying both ldBlocks and blockId is refused", {
             entry = list(.gss_entry()),
             genome = "hg19",
             ldBlocks = GenomicRanges::GRanges(
-                "chr1", IRanges::IRanges(1L, 10000L)
+                "chr1",
+                IRanges::IRanges(1L, 10000L)
             ),
             blockId = "b1"
         ),
@@ -570,13 +576,21 @@ test_that("combineGwasSumStats() rejects collection-level disagreement", {
     a <- makeGwasBlock("chr1_1_1000", 100L)
 
     expect_error(
-        combineGwasSumStats(a, makeGwasBlock("chr1_1001_2000", 1100L,
-            genome = "hg38")),
+        combineGwasSumStats(
+            a,
+            makeGwasBlock("chr1_1001_2000", 1100L, genome = "hg38")
+        ),
         "share one genome build"
     )
     expect_error(
-        combineGwasSumStats(a, makeGwasBlock("chr1_1001_2000", 1100L,
-            qcOptions = list(mafCutoff = 0.05))),
+        combineGwasSumStats(
+            a,
+            makeGwasBlock(
+                "chr1_1001_2000",
+                1100L,
+                qcOptions = list(mafCutoff = 0.05)
+            )
+        ),
         "different summaryStatsQc\\(\\) options"
     )
     noQc <- makeGwasBlock("chr1_1001_2000", 1100L)
@@ -589,8 +603,10 @@ test_that("combineGwasSumStats() rejects collection-level disagreement", {
 
     other <- makeGwasBlock("chr1_1001_2000", 1100L)
     other@ldSketch <- pecotmr:::.asLdSketch(
-        .blockGenotypeHandle(seq(1100L, by = 100L, length.out = 5L),
-            path = "/tmp/other.pgen")
+        .blockGenotypeHandle(
+            seq(1100L, by = 100L, length.out = 5L),
+            path = "/tmp/other.pgen"
+        )
     )
     expect_error(
         combineGwasSumStats(a, other),

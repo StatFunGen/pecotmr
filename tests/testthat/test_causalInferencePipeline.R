@@ -1,7 +1,7 @@
 context("causalInferencePipeline")
 
 # ===========================================================================
-# Strategy: mock extractBlockGenotypes so .cipLdFromSketch returns a real
+# Strategy: mock extractBlockGenotypes so .ldFromSketch returns a real
 # LD matrix on a small panel. Everything else (twasZ, MR, p-value combine)
 # runs for real on the tiny fixture.
 # ===========================================================================

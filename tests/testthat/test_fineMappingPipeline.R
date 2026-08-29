@@ -706,25 +706,6 @@ test_that(".fmExtractZn: errors on missing SNP / Z / N columns", {
 })
 
 # ===========================================================================
-# .fmLdFromSketch
-# ===========================================================================
-
-test_that(".fmLdFromSketch: returns named LD matrix; missing variants error", {
-    h <- .fmp_makeHandle()
-    local_mocked_bindings(
-        extractBlockGenotypes = .fmp_mockExtractor(),
-        .package = "pecotmr"
-    )
-    R <- pecotmr:::.fmLdFromSketch(h, c("chr1:100:A:G", "chr1:300:A:G"))
-    expect_equal(dim(R), c(2L, 2L))
-    expect_equal(rownames(R), c("chr1:100:A:G", "chr1:300:A:G"))
-    expect_error(
-        pecotmr:::.fmLdFromSketch(h, c("chr1:100:A:G", "ghost")),
-        "not present in the LD sketch"
-    )
-})
-
-# ===========================================================================
 # fineMappingPipeline(QtlDataset)
 # ===========================================================================
 

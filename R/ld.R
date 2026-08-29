@@ -765,15 +765,17 @@ loadLdFromGenotype <- function(
 # ---------- LD sketch: per-variant LD matrix ----------
 
 # Internal: build a sample-correlation LD matrix for a specified variant
-# subset of an `ldSketch` `GenotypeHandle`. Shared by twasWeightsPipeline,
-# fineMappingPipeline, causalInferencePipeline, and colocboostPipeline. The
-# four sites differed only in their error message prefix and in whether
-# variants absent from the panel raise an error or get silently dropped.
+# subset of an `ldSketch` `GenotypeHandle`. Called directly by
+# twasWeightsPipeline, fineMappingPipeline, jointEngine,
+# causalInferencePipeline, colocboostPipeline and the coloc / summaryStatsQc
+# paths, which differ only in their error message prefix and in whether
+# variants absent from the panel raise an error or get silently dropped --
+# both of which are arguments here rather than a per-pipeline wrapper.
 #
 # Arguments:
 #   ldSketch    A GenotypeHandle.
 #   variantIds  Character vector of SNP IDs to extract.
-#   label       Error-message prefix, e.g. ".twasLdFromSketch".
+#   label       Error-message prefix, e.g. "twasWeightsPipeline".
 #   onMissing   "error" (default) -> any unmatched id stops the call;
 #               "drop"           -> unmatched ids are silently filtered.
 #               When "drop" leaves no surviving variants the function

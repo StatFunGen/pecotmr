@@ -143,8 +143,13 @@ makeGwasSumStatsFromDf <- function(
 # One LD block's worth of GWAS summary statistics: `n` variants starting at
 # `start`, carrying a QC record and an LD panel narrowed to just those
 # variants (what a per-block pipeline step writes out).
-makeGwasBlock <- function(blockId, start, n = 5L, genome = "hg19",
-                          qcOptions = list(mafCutoff = 0.01)) {
+makeGwasBlock <- function(
+    blockId,
+    start,
+    n = 5L,
+    genome = "hg19",
+    qcOptions = list(mafCutoff = 0.01)
+) {
     bp <- seq(start, by = 100L, length.out = n)
     df <- data.frame(
         SNP = paste0("chr1:", bp, ":A:G"),

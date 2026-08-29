@@ -4406,6 +4406,119 @@ test_that(".applyLdMismatchQcToEntry: errors on variants absent from the sketch"
     )
 })
 
+# ===========================================================================
+# The RSS QC steps agree with the panel about which variants exist
+#
+# Harmonization decides the surviving variant set; kriging, LD-mismatch QC and
+# the fine-mapping LD build then assert that every survivor is in the panel.
+# A panel carrying a variant AND its own flip used to break that: harmonization
+# emitted the variant twice (opposite Z, one per orientation) and the lookups,
+# which go through matchVariants, refused both and aborted.
+# ===========================================================================
+
+# @noRd
+.ssTwin_makeHandle <- function(nSamples = 60L) {
+    new(
+        "GenotypeHandle",
+        path = "/tmp/sketch.gds",
+        format = "gds",
+        snpInfo = data.frame(
+            SNP = c(
+                "chr1:100:A:G",
+                "chr1:200:A:G",
+                "chr1:200:G:A",
+                "chr1:300:C:T"
+            ),
+            CHR = rep("1", 4L),
+            BP = c(100L, 200L, 200L, 300L),
+            A1 = c("G", "G", "A", "T"),
+            A2 = c("A", "A", "G", "C"),
+            stringsAsFactors = FALSE
+        ),
+        nSamples = nSamples,
+        sampleIds = paste0("s", seq_len(nSamples)),
+        pgenPtr = NULL
+    )
+}
+
+# @noRd
+.ssTwin_df <- function() {
+    data.frame(
+        chrom = rep("1", 3L),
+        pos = c(100L, 200L, 300L),
+        SNP = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:C:T"),
+        A1 = c("G", "G", "T"),
+        A2 = c("A", "A", "C"),
+        Z = c(1.1, 2.2, 3.3),
+        N = rep(1000, 3L),
+        stringsAsFactors = FALSE
+    )
+}
+
+# @noRd
+.ssTwin_opts <- function() {
+    list(
+        matchMinProp = 0,
+        removeIndels = FALSE,
+        removeStrandAmbiguous = TRUE,
+        alleleFlipKriging = TRUE,
+        nForPip = 1000,
+        zMismatchQc = "slalom"
+    )
+}
+
+test_that("harmonization drops a twin-pair variant instead of duplicating it", {
+    harm <- suppressMessages(suppressWarnings(pecotmr:::.qcHarmonizeEntry(
+        .ssTwin_df(),
+        .ssTwin_makeHandle(),
+        .ssTwin_opts(),
+        NA_character_
+    )))
+    # 3 in, 2 out -- never 4: the undecidable chr1:200 leaves, it does not
+    # come back twice with opposite signs.
+    expect_equal(nrow(harm$df), 2L)
+    expect_false(any(harm$df$pos == 200L))
+    expect_equal(harm$counts$harmDropped, 1L)
+})
+
+test_that("kriging and LD-mismatch QC accept every harmonized variant", {
+    handle <- .ssTwin_makeHandle()
+    opts <- .ssTwin_opts()
+    local_mocked_bindings(
+        extractBlockGenotypes = .ssQ_mockExtractor(n_samples = 60L),
+        .package = "pecotmr"
+    )
+    harm <- suppressMessages(suppressWarnings(
+        pecotmr:::.qcHarmonizeEntry(.ssTwin_df(), handle, opts, NA_character_)
+    ))
+    expect_no_error(suppressMessages(suppressWarnings(
+        pecotmr:::.qcKrigingFlip(harm$df, handle, opts, NA_character_)
+    )))
+    expect_no_error(suppressMessages(suppressWarnings(
+        pecotmr:::.qcMismatchQc(harm$df, handle, opts, NA_character_)
+    )))
+})
+
+test_that("the fine-mapping LD build accepts every harmonized variant", {
+    handle <- .ssTwin_makeHandle()
+    local_mocked_bindings(
+        extractBlockGenotypes = .ssQ_mockExtractor(n_samples = 60L),
+        .package = "pecotmr"
+    )
+    harm <- suppressMessages(suppressWarnings(pecotmr:::.qcHarmonizeEntry(
+        .ssTwin_df(),
+        handle,
+        .ssTwin_opts(),
+        NA_character_
+    )))
+    R <- pecotmr:::.ldFromSketch(
+        handle,
+        as.character(harm$df$SNP),
+        label = "fineMappingPipeline"
+    )
+    expect_equal(dim(R), c(2L, 2L))
+})
+
 test_that(".applyLdMismatchQcToEntry: NA outlier flags from slalom are kept (not dropped)", {
     # Regression test: slalom (and dentist on degenerate inputs) can leave
     # NA in the `outlier` column for variants whose per-variant statistic
@@ -7727,6 +7840,46 @@ test_that(".raissFlipPairMask needs both orientations, not just an indel", {
         c("chr1:100:A:AT", "chr1:100:AT:A", "chr1:200:A:AT", "chr1:300:A:G")
     )
     expect_equal(.raissFlipPairMask(ids), c(TRUE, TRUE, FALSE, FALSE))
+})
+
+test_that(".raissFlipPairMask sees a strand-recorded second orientation", {
+    # A:G and C:T are one variant written on opposite strands AND swapped, so
+    # matchVariants() refuses the position. A literal A1/A2 reversal key read
+    # this as two unrelated variants and let RAISS impute the pair back.
+    ids <- normalizeVariantId(c("chr1:100:A:G", "chr1:100:C:T"))
+    expect_equal(.raissFlipPairMask(ids), c(TRUE, TRUE))
+})
+
+test_that(".raissFlipPairMask agrees with matchVariants on what is ambiguous", {
+    # The mask exists to stop imputation putting back what matchVariants drops,
+    # so the two have to answer the same question the same way.
+    ids <- normalizeVariantId(c(
+        "chr1:100:A:G",
+        "chr1:100:C:T",
+        "chr1:200:A:G",
+        "chr1:200:G:A",
+        "chr1:300:A:G",
+        "chr1:400:A:T"
+    ))
+    m <- matchVariants(ids, ids, removeStrandAmbiguous = FALSE)
+    expect_equal(.raissFlipPairMask(ids), !is_in(seq_along(ids), m$idxA))
+    expect_equal(
+        .raissFlipPairMask(ids),
+        c(TRUE, TRUE, TRUE, TRUE, FALSE, FALSE)
+    )
+})
+
+test_that(".raissFlipPairMask spares the first of two identical entries", {
+    # Nothing is ambiguous about a variant listed twice -- the first copy is
+    # imputable. The second is not: imputing it would put one id into the
+    # sumstats twice, and matchVariants answers a repeated id once, so the
+    # next LD lookup would abort on the copy it could not place.
+    ids <- normalizeVariantId(c("chr1:100:A:G", "chr1:100:A:G"))
+    expect_equal(.raissFlipPairMask(ids), c(FALSE, TRUE))
+})
+
+test_that(".raissFlipPairMask handles an empty panel", {
+    expect_equal(.raissFlipPairMask(character(0)), logical(0))
 })
 
 # ===========================================================================

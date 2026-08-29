@@ -437,7 +437,8 @@ extractBlockGenotypes <- function(handle, snpIdx, meanImpute = TRUE) {
         as.matrix(genotypeCovariates)
     }
     SummarizedExperiment::colData(panel) <- .genotypeColData(
-        gCov, colnames(panel)
+        gCov,
+        colnames(panel)
     )
     panel
 }

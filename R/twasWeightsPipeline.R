@@ -743,14 +743,6 @@ combineTwasWeights <- function(..., ldSketch = NULL) {
     }
 }
 
-# Extract a correlation matrix from a GenotypeHandle (LD sketch) for the
-# variant subset given by `variantIds`. Thin wrapper over the shared
-# `.ldFromSketch` helper.
-# @noRd
-.twasLdFromSketch <- function(ldSketch, variantIds) {
-    .ldFromSketch(ldSketch, variantIds, label = ".twasLdFromSketch")
-}
-
 # Optional resume-cache lookup for twasWeightsPipeline. Returns the
 # matching TwasWeightsRow from `twasWeights` for the tuple (study,
 # context, trait, method), or NULL when there is no hit. Returns NULL
@@ -1862,7 +1854,11 @@ setMethod(
     list(
         variantIds = variantIds,
         stat = stat,
-        ldMat = .twasLdFromSketch(ldSketch, variantIds)
+        ldMat = .ldFromSketch(
+            ldSketch,
+            variantIds,
+            label = "twasWeightsPipeline"
+        )
     )
 }
 
@@ -1968,7 +1964,11 @@ setMethod(
         ldSketch = p$ldSketch,
         cutoffs = .panelCutoffs(p)
     )
-    ldMat <- .twasLdFromSketch(p$ldSketch, mvStat$variantIds)
+    ldMat <- .ldFromSketch(
+        p$ldSketch,
+        mvStat$variantIds,
+        label = "twasWeightsPipeline"
+    )
     list_flatten(map(
         p$multivariateTokens,
         .twasQssMultivariateFitOne,

@@ -304,7 +304,9 @@ test_that("show on an empty ColocBoostResult stops after the header", {
     x <- ColocBoostResult(list(), character(0), outcomeInfo = .cbr_info())
     expect_output(show(x), "with 0 confidence set\\(s\\)")
     expect_false(any(grepl(
-        "max cos_npc", capture.output(show(x)), fixed = TRUE
+        "max cos_npc",
+        capture.output(show(x)),
+        fixed = TRUE
     )))
 })
 

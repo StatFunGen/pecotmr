@@ -839,8 +839,11 @@ test_that("the payload slots refuse values of the wrong shape", {
 
 test_that("blockMetadata takes ranges as well as tables", {
     gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1L, 1000L))
-    for (v in list(gr, data.frame(chrom = "chr1"),
-                   S4Vectors::DataFrame(chrom = "chr1"))) {
+    for (v in list(
+        gr,
+        data.frame(chrom = "chr1"),
+        S4Vectors::DataFrame(chrom = "chr1")
+    )) {
         ld <- LdData(
             correlation = matrix(1),
             variants = .ld_makeVariants(),

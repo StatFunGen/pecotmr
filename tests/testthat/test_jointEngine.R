@@ -1249,7 +1249,7 @@ test_that("fitJointGroup(twas): FM-derived method reuses fine-mapping's CV (hand
         variantIds = sprintf("chr1:%d:A:G", 100L * (seq_len(p)))
     )
 }
-.je_mockLd <- function(sketch, vids) {
+.je_mockLd <- function(sketch, vids, ...) {
     matrix(0, length(vids), length(vids), dimnames = list(vids, vids))
 }
 
@@ -1354,7 +1354,7 @@ test_that(".enumCrossContextSumstats: groups per (study, trait) with >= 2 contex
     local_mocked_bindings(
         getLdSketch = function(x) "SKETCH",
         .buildJointSumstatZMatrix = .je_mockJointZ,
-        .fmLdFromSketch = .je_mockLd,
+        .ldFromSketch = .je_mockLd,
         .package = "pecotmr"
     )
     g <- pecotmr:::.enumCrossContextSumstats(df, scope)
@@ -1367,7 +1367,7 @@ test_that(".enumCrossContextSumstats: < 2 contexts and < 2 tuple rows skip", {
     local_mocked_bindings(
         getLdSketch = function(x) "SKETCH",
         .buildJointSumstatZMatrix = .je_mockJointZ,
-        .fmLdFromSketch = .je_mockLd,
+        .ldFromSketch = .je_mockLd,
         .package = "pecotmr"
     )
     # study scoped to two contexts but only one row present -> < 2 tupleRows skip
@@ -1455,7 +1455,7 @@ test_that(".enumCrossTraitSumstats: groups per (study, context) with >= 2 traits
     local_mocked_bindings(
         getLdSketch = function(x) "SKETCH",
         .buildJointSumstatZMatrix = .je_mockJointZ,
-        .fmLdFromSketch = .je_mockLd,
+        .ldFromSketch = .je_mockLd,
         .package = "pecotmr"
     )
     g <- pecotmr:::.enumCrossTraitSumstats(df, scope)
@@ -1476,7 +1476,7 @@ test_that(".enumCrossStudySumstats: group per (context, trait) in >= 2 studies",
     local_mocked_bindings(
         getLdSketch = function(x) "SKETCH",
         .buildJointSumstatZMatrix = .je_mockJointZ,
-        .fmLdFromSketch = .je_mockLd,
+        .ldFromSketch = .je_mockLd,
         .package = "pecotmr"
     )
     g <- pecotmr:::.enumCrossStudySumstats(df, scope)
@@ -1655,7 +1655,7 @@ test_that(".enumComposedSumstats: one group per fixed-axis row block", {
             )
         },
         .buildJointSumstatZMatrix = .je_mockJointZ,
-        .fmLdFromSketch = .je_mockLd,
+        .ldFromSketch = .je_mockLd,
         .package = "pecotmr"
     )
     g <- pecotmr:::.enumComposedSumstats(
@@ -1691,7 +1691,7 @@ test_that(".enumComposedSumstats: NULL group index and singleton blocks skip", {
             )
         },
         .buildJointSumstatZMatrix = .je_mockJointZ,
-        .fmLdFromSketch = .je_mockLd,
+        .ldFromSketch = .je_mockLd,
         .package = "pecotmr"
     )
     expect_length(

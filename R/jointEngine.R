@@ -1093,7 +1093,11 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
                 ldSketch = ldSketch,
                 cutoffs = args$cutoffs
             )
-            ldMat <- .fmLdFromSketch(ldSketch, jz$variantIds)
+            ldMat <- .ldFromSketch(
+                ldSketch,
+                jz$variantIds,
+                label = "jointEngine"
+            )
             groups[[length(groups) + 1L]] <- new(
                 "SumStatsJointGroup",
                 conditions = tibble(
@@ -1181,7 +1185,11 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
                 ldSketch = ldSketch,
                 cutoffs = args$cutoffs
             )
-            ldMat <- .fmLdFromSketch(ldSketch, jz$variantIds)
+            ldMat <- .ldFromSketch(
+                ldSketch,
+                jz$variantIds,
+                label = "jointEngine"
+            )
             groups[[length(groups) + 1L]] <- new(
                 "SumStatsJointGroup",
                 conditions = tibble(
@@ -1269,7 +1277,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
             trait = tid
         ),
         Z = jz$Z,
-        R = .fmLdFromSketch(ldSketch, jz$variantIds),
+        R = .ldFromSketch(ldSketch, jz$variantIds, label = "jointEngine"),
         N = jz$nVec
     )
 }
@@ -1384,7 +1392,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records, ...) {
             ldSketch = ldSketch,
             cutoffs = args$cutoffs
         )
-        ldMat <- .fmLdFromSketch(ldSketch, jz$variantIds)
+        ldMat <- .ldFromSketch(ldSketch, jz$variantIds, label = "jointEngine")
         groups[[length(groups) + 1L]] <- new(
             "SumStatsJointGroup",
             conditions = tibble(

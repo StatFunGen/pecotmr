@@ -3573,6 +3573,99 @@ test_that(".ldFromSketch still errors on a genuinely-absent variant after reconc
     )
 })
 
+test_that(".ldFromSketch rejects an ldSketch that is not a genotype panel", {
+    expect_error(
+        pecotmr:::.ldFromSketch(
+            "not_a_handle",
+            c("chr1:100:A:G", "chr1:200:A:G")
+        ),
+        "ldSketch must be a genotype panel"
+    )
+})
+
+# A synthetic panel + dosage extractor, so the shape of what .ldFromSketch
+# returns is checked without a plink2 fixture (and so without pgenlibr).
+# @noRd
+.lds_makeHandle <- function(snpN = 6L, nSamples = 30L) {
+    new(
+        "GenotypeHandle",
+        path = "/tmp/sketch.gds",
+        format = "gds",
+        snpInfo = data.frame(
+            SNP = sprintf("chr1:%d:A:G", 100L * seq_len(snpN)),
+            CHR = rep("1", snpN),
+            BP = seq(100L, by = 100L, length.out = snpN),
+            A1 = rep("A", snpN),
+            A2 = rep("G", snpN),
+            stringsAsFactors = FALSE
+        ),
+        nSamples = nSamples,
+        sampleIds = sprintf("s%d", seq_len(nSamples)),
+        pgenPtr = NULL
+    )
+}
+
+# @noRd
+.lds_mockExtractor <- function(seed = 7, nSamples = 30L) {
+    function(handle, snpIdx, meanImpute = TRUE) {
+        set.seed(seed)
+        nSnp <- nrow(handle@snpInfo)
+        panel <- matrix(
+            rbinom(nSamples * nSnp, 2, 0.3),
+            nrow = nSamples,
+            ncol = nSnp,
+            dimnames = list(handle@sampleIds, handle@snpInfo$SNP)
+        )
+        rr <- GenomicRanges::GRanges(
+            seqnames = str_c("chr", handle@snpInfo$CHR[snpIdx]),
+            ranges = IRanges::IRanges(
+                start = handle@snpInfo$BP[snpIdx],
+                width = 1L
+            )
+        )
+        S4Vectors::mcols(rr) <- S4Vectors::DataFrame(
+            SNP = handle@snpInfo$SNP[snpIdx],
+            A1 = handle@snpInfo$A1[snpIdx],
+            A2 = handle@snpInfo$A2[snpIdx]
+        )
+        dosage <- t(panel[, snpIdx, drop = FALSE])
+        dimnames(dosage) <- list(
+            handle@snpInfo$SNP[snpIdx],
+            handle@sampleIds
+        )
+        SummarizedExperiment::SummarizedExperiment(
+            assays = list(dosage = dosage),
+            rowRanges = rr,
+            colData = S4Vectors::DataFrame(
+                sampleId = handle@sampleIds,
+                row.names = handle@sampleIds
+            )
+        )
+    }
+}
+
+test_that(".ldFromSketch returns a symmetric unit-diagonal LD matrix", {
+    h <- .lds_makeHandle()
+    local_mocked_bindings(
+        extractBlockGenotypes = .lds_mockExtractor(),
+        .package = "pecotmr"
+    )
+    ids <- c("chr1:200:A:G", "chr1:400:A:G", "chr1:500:A:G")
+    R <- pecotmr:::.ldFromSketch(h, ids)
+    expect_true(is.matrix(R))
+    expect_equal(dimnames(R), list(ids, ids))
+    expect_equal(unname(diag(R)), rep(1, 3), tolerance = 1e-12)
+    expect_equal(R, t(R), tolerance = 1e-12)
+})
+
+test_that(".ldFromSketch errors on a variant the panel does not carry", {
+    h <- .lds_makeHandle()
+    expect_error(
+        pecotmr:::.ldFromSketch(h, c("chr1:100:A:G", "ghost")),
+        "variant id.*not present in the LD sketch"
+    )
+})
+
 # =============================================================================
 # Additional coverage: .requireMatchingLdSketches error paths
 # =============================================================================

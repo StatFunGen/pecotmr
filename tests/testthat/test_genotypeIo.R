@@ -2341,8 +2341,12 @@ test_that("onDisk LD matches the in-memory path on complete data", {
         format = "gds"
     )
     idx <- c(4L, 1L, 6L, 2L, 5L, 3L)
-    onDisk <- computeLd(handle, snpIdx = idx, backend = "snprelate",
-        onDisk = TRUE)
+    onDisk <- computeLd(
+        handle,
+        snpIdx = idx,
+        backend = "snprelate",
+        onDisk = TRUE
+    )
     inMem <- computeLd(handle, snpIdx = idx)
     # The fixture has no missing calls, which is the only regime where the
     # two are meant to agree.
@@ -2356,8 +2360,7 @@ test_that("onDisk LD labels and orders by the request", {
         format = "gds"
     )
     idx <- c(4L, 1L, 6L, 2L, 5L, 3L)
-    R <- computeLd(handle, snpIdx = idx, backend = "snprelate",
-        onDisk = TRUE)
+    R <- computeLd(handle, snpIdx = idx, backend = "snprelate", onDisk = TRUE)
     # snpgdsLDMat() returns file order and labels nothing; both are corrected.
     expect_identical(rownames(R), getSnpInfo(handle)$SNP[idx])
     expect_identical(colnames(R), rownames(R))
@@ -2434,9 +2437,14 @@ test_that("readGenotypes returns a panel, not a handle", {
     )
     # variants x samples, the Bioconductor orientation.
     expect_equal(nrow(panel), nrow(getSnpInfo(handle)))
-    expect_equal(ncol(panel), length(pecotmr:::.ghSeedHandle(
-        DelayedArray::seed(SummarizedExperiment::assay(panel, "dosage"))
-    )@sampleIds))
+    expect_equal(
+        ncol(panel),
+        length(
+            pecotmr:::.ghSeedHandle(
+                DelayedArray::seed(SummarizedExperiment::assay(panel, "dosage"))
+            )@sampleIds
+        )
+    )
 })
 
 test_that("the panel's assay is delayed and its seed is the handle", {

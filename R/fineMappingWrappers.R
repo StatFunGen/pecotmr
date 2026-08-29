@@ -1425,7 +1425,8 @@ buildTopLoci <- function(
     # dropped its N to NA. For the list case fitN stays NA and the per-variant
     # `n` (threaded from the RSS effective sample size) fills the N column.
     hasOutcomeMatrix <- !is.null(dataY) &&
-        (is.matrix(dataY) || is.data.frame(dataY) ||
+        (is.matrix(dataY) ||
+            is.data.frame(dataY) ||
             (is.atomic(dataY) && is.numeric(dataY)))
     dataYMat <- if (hasOutcomeMatrix) as.matrix(dataY) else NULL
     fitN <- if (is.null(dataYMat)) NA_integer_ else as.integer(nrow(dataYMat))

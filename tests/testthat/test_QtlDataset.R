@@ -2900,9 +2900,12 @@ test_that("genotype covariates live on the genotype experiment's colData", {
     cd <- SummarizedExperiment::colData(pecotmr:::.qtlGenotypeSe(qd))
     expect_equal(colnames(cd), c("pc1", "pc2"))
     expect_equal(rownames(cd), getSampleIds(getGenotypeHandle(qd)))
-    expect_equal(getGenotypeCovariates(qd), pecotmr:::.qtlColDataMatrix(
-        pecotmr:::.qtlGenotypeSe(qd)
-    ))
+    expect_equal(
+        getGenotypeCovariates(qd),
+        pecotmr:::.qtlColDataMatrix(
+            pecotmr:::.qtlGenotypeSe(qd)
+        )
+    )
 })
 
 test_that("subsetting by sample keeps the class and its own slots", {
@@ -2921,7 +2924,7 @@ test_that("subsetting by context keeps the genotype experiment", {
     qd <- .qm_makeDataset()
     # MultiAssayExperiment announces the experiment it drops; here that is
     # `liver`, which is what was asked for.
-    expect_warning(out <- qd[, , "brain"], "dropped")
+    expect_warning(out <- qd[,, "brain"], "dropped")
     expect_equal(
         names(MultiAssayExperiment::experiments(out)),
         c("genotype", "brain")
@@ -2933,7 +2936,7 @@ test_that("subsetting by context keeps the genotype experiment", {
 
 test_that("subsetting to no context at all is an error", {
     qd <- .qm_makeDataset()
-    expect_error(qd[, , "genotype"], "selects no QTL context")
+    expect_error(qd[,, "genotype"], "selects no QTL context")
 })
 
 test_that("keepSamples narrows the dataset rather than recording a filter", {
